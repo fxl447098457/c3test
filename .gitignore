@@ -71,3 +71,6 @@ node_modules/
 参考/AvaloniaVisualBasic6/AvaloniaVisualBasic6/
 参考/*/
 !参考/*.url
+
+
+.playwright-mcp
