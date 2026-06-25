@@ -392,6 +392,19 @@ void vb6_Exit(void) {
     // 清理运行时资源
 }
 
+// ============================================================
+// 类支持: 实例分配/释放
+// ============================================================
+
+void* vb6_Alloc(size_t size) {
+    void* p = calloc(1, size);  // calloc 自动清零 = VB6默认值初始化
+    return p;
+}
+
+void vb6_Free(void* ptr) {
+    free(ptr);
+}
+
 int32_t vb6_VariantToLong(VARIANT v) {
     switch (v.vt) {
         case vb6_vtBoolean: return v.boolVal ? -1 : 0;

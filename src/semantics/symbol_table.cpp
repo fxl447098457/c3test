@@ -138,7 +138,8 @@ std::vector<const Symbol*> SymbolTable::getPublicSymbols() const {
             if (sym->kind == SymbolKind::Sub ||
                 sym->kind == SymbolKind::Function ||
                 sym->kind == SymbolKind::Variable ||
-                sym->kind == SymbolKind::Constant) {
+                sym->kind == SymbolKind::Constant ||
+                sym->kind == SymbolKind::Class) {
                 result.push_back(sym.get());
             }
         }

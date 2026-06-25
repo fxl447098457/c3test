@@ -92,6 +92,43 @@ bool SemanticAnalyzer::analyze(Module& module) {
     // 注册内置对象、函数和常量
     registerBuiltins();
 
+    // 如果是类模块，注册类符号 (让其他模块可以通过类名引用)
+    if (module.isClassModule) {
+        auto classSym = std::make_unique<Symbol>(
+            SymbolKind::Class, module.moduleName, Vb6Type::Object,
+            SourceLocation{module.filename, 1, 1}, AccessLevel::Public
+        );
+        classSym->instancing = module.instancing;
+        // 收集类成员名称
+        for (auto& decl : module.declarations) {
+            switch (decl->kind) {
+                case ASTNodeKind::SubDecl: {
+                    auto& s = static_cast<SubDecl&>(*decl);
+                    classSym->memberNames.push_back(s.name);
+                    break;
+                }
+                case ASTNodeKind::FunctionDecl: {
+                    auto& f = static_cast<FunctionDecl&>(*decl);
+                    classSym->memberNames.push_back(f.name);
+                    break;
+                }
+                case ASTNodeKind::PropertyDecl: {
+                    auto& p = static_cast<PropertyDecl&>(*decl);
+                    classSym->memberNames.push_back(p.name);
+                    break;
+                }
+                case ASTNodeKind::EventDecl: {
+                    auto& e = static_cast<EventDecl&>(*decl);
+                    classSym->memberNames.push_back(e.name);
+                    break;
+                }
+                default:
+                    break;
+            }
+        }
+        symTab_.define(std::move(classSym));
+    }
+
     // --- Pass 1: 收集所有模块级声明 ---
     pass_ = 1;
     if (verbose_) {
@@ -1018,6 +1055,12 @@ void SemanticAnalyzer::visit(IndexOrCallExpr& node) {
 }
 
 void SemanticAnalyzer::visit(NewExpr& node) {
+    // 查找类名是否在符号表中注册(类符号或作为对象类型引用)
+    auto* sym = symTab_.lookup(node.className);
+    if (sym && sym->kind == SymbolKind::Class) {
+        node.className = sym->name;  // 规范化大小写
+    }
+    // 即使未找到类符号，也不报错(可能是COM对象或外部类，运行时解析)
     lastExprType_ = Vb6Type::Object;
 }
 
@@ -1032,7 +1075,14 @@ void SemanticAnalyzer::visit(AddressOfExpr& node) {
 }
 
 void SemanticAnalyzer::visit(MeExpr& node) {
-    lastExprType_ = Vb6Type::Object;
+    // 如果当前模块是类模块, Me代表类实例
+    if (currentModule_ && currentModule_->isClassModule) {
+        lastExprType_ = Vb6Type::Object;
+    } else {
+        diag_.warn(DiagnosticID::SemTypeMismatch, node.loc,
+            "'Me' can only be used in class modules");
+        lastExprType_ = Vb6Type::Object;
+    }
 }
 
 void SemanticAnalyzer::visit(WithMemberExpr& node) {

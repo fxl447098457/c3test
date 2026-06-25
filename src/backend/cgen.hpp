@@ -191,11 +191,17 @@ private:
     // 已知BSTR变量名集合 (小写) - 用于Debug.Print等场景判断表达式类型
     std::unordered_set<std::string> knownBstrVars_;
 
+    // 已知类实例变量名集合 (小写) - 用于方法调用翻译 c.Method → vb6_Method(c)
+    std::unordered_set<std::string> knownClassVars_;
+
     // 是否需要 setjmp.h (On Error GoTo label)
     bool needSetjmp_ = false;
 
     // 多模块项目标志 (影响Public函数命名: vb6_<Module>_<Proc> vs vb6_<Proc>)
     bool isMultiModule_ = false;
+
+    // 类模块标志
+    bool isClassModule_ = false;
 
     // ---- 类型映射 ----
 
@@ -240,6 +246,15 @@ private:
 
     // 生成参数列表
     std::string makeParamList(std::vector<std::unique_ptr<ParameterDecl>>& params);
+
+    // 生成Property签名 (不含函数体)
+    std::string makePropertySignature(PropertyDecl& node);
+
+    // 生成类工厂函数 (New/Destroy)
+    void emitClassFactory(Module& module);
+
+    // 生成类方法函数体中的Me引用名
+    std::string classMeParam() const;
 
     // ---- 二元运算符映射 ----
     std::string mapBinaryOp(BinaryOp op) const;

@@ -35,6 +35,7 @@ enum class SymbolKind : uint8_t {
     DeclareSub,     // Declare Sub (外部)
     DeclareFunc,    // Declare Function (外部)
     Event,          // Event 声明
+    Class,          // 类模块 (.cls)
     Label,          // 行标签
 };
 
@@ -88,6 +89,10 @@ struct Symbol {
     // 仅当 isExternal=true 时有效
     std::string sourceModule;
 
+    // --- 类相关 (仅SymbolKind::Class) ---
+    VBInstancing instancing = VBInstancing::Private;  // Instancing属性
+    std::vector<std::string> memberNames;              // 类成员名称列表(方法+属性+事件)
+
     Symbol() = default;
     Symbol(SymbolKind k, const std::string& n, Vb6Type t,
            SourceLocation loc, AccessLevel acc = AccessLevel::Public)
@@ -117,6 +122,7 @@ struct Symbol {
             case SymbolKind::DeclareSub:      return "Declare Sub";
             case SymbolKind::DeclareFunc:     return "Declare Function";
             case SymbolKind::Event:           return "Event";
+            case SymbolKind::Class:           return "Class";
             case SymbolKind::Label:           return "Label";
         }
         return "Unknown";

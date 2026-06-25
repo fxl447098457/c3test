@@ -392,8 +392,16 @@ bool Driver::runParser(const CompileOptions& options) {
             return false;
         }
 
+        // 根据文件扩展名判断模块类型
+        bool isClassModule = false;
+        if (filePath.size() >= 4) {
+            std::string ext = filePath.substr(filePath.size() - 4);
+            for (auto& c : ext) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            isClassModule = (ext == ".cls");
+        }
+
         Parser parser(std::move(buffer), *diag_, ppOpts);
-        auto module = parser.parseModule();
+        auto module = parser.parseModule(isClassModule);
 
         if (options.dumpAST && module) {
             ASTPrinter printer(std::cout);
@@ -401,6 +409,29 @@ bool Driver::runParser(const CompileOptions& options) {
         }
 
         if (module) {
+            // 从 Attribute VB_Name 提取模块名
+            // VB6 模块名来自 Attribute VB_Name = "ModuleName"
+            for (const auto& attr : module->attributes) {
+                if (attr->attrName == "VB_Name" && attr->value) {
+                    // 值应为字符串字面量
+                    if (attr->value->kind == ASTNodeKind::LiteralExpr) {
+                        auto& lit = static_cast<LiteralExpr&>(*attr->value);
+                        if (lit.literalKind == LiteralKind::String && !lit.rawText.empty()) {
+                            // rawText包含引号, 去掉首尾引号
+                            std::string name = lit.rawText;
+                            if (name.size() >= 2 && name.front() == '"' && name.back() == '"') {
+                                name = name.substr(1, name.size() - 2);
+                            }
+                            module->moduleName = name;
+                        }
+                    }
+                }
+            }
+            // 如果没有 VB_Name 属性，使用文件名（去掉扩展名）作为模块名
+            if (module->moduleName.empty()) {
+                std::filesystem::path p(filePath);
+                module->moduleName = p.stem().string();
+            }
             modules_.push_back(std::move(module));
         }
 
@@ -494,6 +525,11 @@ bool Driver::runCrossModuleResolution() {
             extSym->sourceModule = moduleBaseNames[srcIdx];
             extSym->params = srcSym->params;  // 复制参数列表（函数调用需要）
             extSym->isArray = srcSym->isArray;
+            // 类符号: 复制instancing和memberNames
+            if (srcSym->kind == SymbolKind::Class) {
+                extSym->instancing = srcSym->instancing;
+                extSym->memberNames = srcSym->memberNames;
+            }
 
             symTab.defineExternal(std::move(extSym));
         }

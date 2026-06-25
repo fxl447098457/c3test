@@ -32,7 +32,8 @@ public:
            const PreprocessOptions& ppOpts = PreprocessOptions());
 
     // 主入口: 解析整个模块
-    std::unique_ptr<Module> parseModule();
+    // isClassModule: true=.cls类模块, false=.bas标准模块/.frm窗体模块
+    std::unique_ptr<Module> parseModule(bool isClassModule = false);
 
     // 诊断查询
     bool hasErrors() const { return diag_.hasErrors(); }

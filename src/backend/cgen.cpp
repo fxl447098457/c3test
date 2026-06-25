@@ -42,6 +42,7 @@ bool CCodeGen::generate(Module& module, const std::string& baseName,
     baseName_ = baseName;
     moduleName_ = baseName;  // 模块名 = 输出基名（如 "MathUtils"）
     isMultiModule_ = !externalModules.empty();  // 有外部依赖 = 多模块项目
+    isClassModule_ = module.isClassModule;
     emittedSymbols_.clear();
     labelCounter_ = 0;
     tempCounter_ = 0;
@@ -70,6 +71,40 @@ bool CCodeGen::generate(Module& module, const std::string& baseName,
     c_.emitLine("#include \"" + baseName_ + ".h\"");
     c_.emitBlank();
 
+    // === 类模块: 生成结构体定义 ===
+    if (isClassModule_) {
+        std::string clsStruct = "vb6_cls_" + cIdent(baseName_);
+        h_.emitLine("// Class module: " + module.moduleName);
+        h_.emitLine("typedef struct " + clsStruct + " {");
+
+        // 收集模块级变量作为结构体字段
+        for (auto& decl : module.declarations) {
+            if (decl->kind == ASTNodeKind::VariableDecl) {
+                auto& var = static_cast<VariableDecl&>(*decl);
+                std::string cType = mapTypeRef(var.asType.get());
+                if (var.isDynamicArray || !var.dimensions.empty()) {
+                    // 数组: 存为SAFEARRAY指针
+                    Vb6Type elemType = resolveArrayElemType(var.asType.get());
+                    h_.emitLine("    SAFEARRAY* " + cIdent(var.name) + "; /* " +
+                                TypeSystem::typeToString(elemType) + " array */");
+                } else if (var.isNew) {
+                    // Dim x As New ClassName → 指针字段
+                    h_.emitLine("    void* " + cIdent(var.name) + "; /* As New " +
+                                (var.asType ? static_cast<SimpleTypeRef*>(var.asType.get())->name : "Object") + " */");
+                } else {
+                    h_.emitLine("    " + cType + " " + cIdent(var.name) + ";");
+                }
+            }
+        }
+        h_.emitLine("} " + clsStruct + ";");
+        h_.emitBlank();
+
+        // 类工厂函数声明
+        h_.emitLine(clsStruct + "* " + clsStruct + "_New(void);");
+        h_.emitLine("void " + clsStruct + "_Destroy(" + clsStruct + "* me);");
+        h_.emitBlank();
+    }
+
     // === 第一遍: 声明 (前向声明 → .h, 定义 → .c) ===
 
     // 模块级声明: 枚举、类型、常量、变量、过程
@@ -96,10 +131,13 @@ bool CCodeGen::generate(Module& module, const std::string& baseName,
         }
     }
 
-    // 4. 变量声明 (前向声明 → .h, 定义 → .c)
-    for (auto& decl : module.declarations) {
-        if (decl->kind == ASTNodeKind::VariableDecl) {
-            visit(static_cast<VariableDecl&>(*decl));
+    // 4. 类模块不生成模块级变量(变量已在结构体中)
+    //    标准模块: 生成变量声明
+    if (!isClassModule_) {
+        for (auto& decl : module.declarations) {
+            if (decl->kind == ASTNodeKind::VariableDecl) {
+                visit(static_cast<VariableDecl&>(*decl));
+            }
         }
     }
 
@@ -110,7 +148,16 @@ bool CCodeGen::generate(Module& module, const std::string& baseName,
         }
     }
 
-    // 6. 过程前向声明 → .h
+    // 6. Event声明 (类模块中)
+    if (isClassModule_) {
+        for (auto& decl : module.declarations) {
+            if (decl->kind == ASTNodeKind::EventDecl) {
+                visit(static_cast<EventDecl&>(*decl));
+            }
+        }
+    }
+
+    // 7. 过程前向声明 → .h
     for (auto& decl : module.declarations) {
         if (decl->kind == ASTNodeKind::SubDecl) {
             auto& sub = static_cast<SubDecl&>(*decl);
@@ -124,6 +171,14 @@ bool CCodeGen::generate(Module& module, const std::string& baseName,
             auto& func = static_cast<FunctionDecl&>(*decl);
             std::string sig = makeProcSignature(func);
             if (func.access == AccessLevel::Public) {
+                h_.emitLine(sig + ";");
+            } else {
+                h_.emitLine("static " + sig + ";");
+            }
+        } else if (decl->kind == ASTNodeKind::PropertyDecl) {
+            auto& prop = static_cast<PropertyDecl&>(*decl);
+            std::string sig = makePropertySignature(prop);
+            if (prop.access == AccessLevel::Public) {
                 h_.emitLine(sig + ";");
             } else {
                 h_.emitLine("static " + sig + ";");
@@ -144,45 +199,54 @@ bool CCodeGen::generate(Module& module, const std::string& baseName,
             visit(static_cast<SubDecl&>(*decl));
         } else if (decl->kind == ASTNodeKind::FunctionDecl) {
             visit(static_cast<FunctionDecl&>(*decl));
+        } else if (decl->kind == ASTNodeKind::PropertyDecl) {
+            visit(static_cast<PropertyDecl&>(*decl));
         }
     }
 
-    // 生成入口点
-    c_.emitBlank();
-    c_.emitLine("// === 入口点 ===");
-    bool hasMain = false;
-    std::string firstPublicSub;  // 备用入口：首个Public Sub
-    for (auto& decl : module.declarations) {
-        if (decl->kind == ASTNodeKind::SubDecl) {
-            auto& sub = static_cast<SubDecl&>(*decl);
-            if (sub.name == "Main" && sub.access == AccessLevel::Public) {
-                hasMain = true;
-            } else if (sub.access == AccessLevel::Public && firstPublicSub.empty()) {
-                firstPublicSub = sub.name;
+    // === 类模块: 生成工厂函数 ===
+    if (isClassModule_) {
+        emitClassFactory(module);
+    }
+
+    // 生成入口点 (类模块不生成main)
+    if (!isClassModule_) {
+        c_.emitBlank();
+        c_.emitLine("// === 入口点 ===");
+        bool hasMain = false;
+        std::string firstPublicSub;  // 备用入口：首个Public Sub
+        for (auto& decl : module.declarations) {
+            if (decl->kind == ASTNodeKind::SubDecl) {
+                auto& sub = static_cast<SubDecl&>(*decl);
+                if (sub.name == "Main" && sub.access == AccessLevel::Public) {
+                    hasMain = true;
+                } else if (sub.access == AccessLevel::Public && firstPublicSub.empty()) {
+                    firstPublicSub = sub.name;
+                }
             }
         }
-    }
-    if (hasMain) {
-        c_.emitLine("int main(int argc, char* argv[]) {");
-        c_.indent();
-        c_.emitLine("vb6_Init();");
-        c_.emitLine(cProcName("Main", AccessLevel::Public) + "();");
-        c_.emitLine("vb6_Exit();");
-        c_.emitLine("return 0;");
-        c_.dedent();
-        c_.emitLine("}");
-    } else if (!firstPublicSub.empty()) {
-        // 无 Sub Main 时自动调用首个 Public Sub
-        c_.emitLine("int main(int argc, char* argv[]) {");
-        c_.indent();
-        c_.emitLine("vb6_Init();");
-        c_.emitLine(cProcName(firstPublicSub, AccessLevel::Public) + "();");
-        c_.emitLine("vb6_Exit();");
-        c_.emitLine("return 0;");
-        c_.dedent();
-        c_.emitLine("}");
-    } else {
-        c_.emitLine("// No Public Sub found - no entry point generated");
+        if (hasMain) {
+            c_.emitLine("int main(int argc, char* argv[]) {");
+            c_.indent();
+            c_.emitLine("vb6_Init();");
+            c_.emitLine(cProcName("Main", AccessLevel::Public) + "();");
+            c_.emitLine("vb6_Exit();");
+            c_.emitLine("return 0;");
+            c_.dedent();
+            c_.emitLine("}");
+        } else if (!firstPublicSub.empty()) {
+            // 无 Sub Main 时自动调用首个 Public Sub
+            c_.emitLine("int main(int argc, char* argv[]) {");
+            c_.indent();
+            c_.emitLine("vb6_Init();");
+            c_.emitLine(cProcName(firstPublicSub, AccessLevel::Public) + "();");
+            c_.emitLine("vb6_Exit();");
+            c_.emitLine("return 0;");
+            c_.dedent();
+            c_.emitLine("}");
+        } else {
+            c_.emitLine("// No Public Sub found - no entry point generated");
+        }
     }
 
     // 保存生成结果
@@ -244,7 +308,12 @@ std::string CCodeGen::mapTypeRef(ASTNode* typeRef) const {
             if (t != Vb6Type::Unknown) {
                 return mapType(t);
             }
-            // 可能是用户定义类型
+            // 检查是否是类名 → 映射为类结构体指针
+            auto* clsSym = symTab_.lookupModule(simple.name);
+            if (clsSym && clsSym->kind == SymbolKind::Class) {
+                return "vb6_cls_" + cIdent(clsSym->name) + "*";
+            }
+            // 可能是用户定义类型 (UDT)
             return cIdent(simple.name);
         }
         case ASTNodeKind::ArrayTypeRef:
@@ -606,6 +675,23 @@ void CCodeGen::visit(IdentifierExpr& node) {
         return;
     }
 
+    // 类模块: 模块级变量通过 me-> 访问
+    if (isClassModule_ && currentProc_ && sym && sym->kind == SymbolKind::Variable) {
+        // 类模块变量 = 结构体字段, 通过me指针访问
+        // 但要排除过程参数(参数名可能和模块变量同名)
+        Symbol* paramSym = symTab_.lookupLocal(node.name);
+        if (!paramSym || paramSym->kind != SymbolKind::Parameter) {
+            lastExpr_ = "me->" + cName;
+            return;
+        }
+    }
+
+    // 类符号引用 (直接使用类名作为标识符, 如 Dim x As MyClass)
+    if (sym && sym->kind == SymbolKind::Class) {
+        lastExpr_ = cName;  // 类名本身就是一个类型标识符
+        return;
+    }
+
     lastExpr_ = cName;
 }
 
@@ -691,6 +777,26 @@ void CCodeGen::visit(MemberAccessExpr& node) {
             lastExpr_ = "vb6_DebugAssert";
             return;
         }
+
+        // 类实例成员访问: obj.Method → vb6_Method(obj)  或  vb6_Counter_Method(obj)
+
+        // 通过查找成员函数名来推断是否为类方法调用
+        // 查找名为 memberName 的符号, 如果是一个本模块/跨模块的过程
+        auto* memSym = symTab_.lookupModule(node.memberName);
+        if (memSym && (memSym->kind == SymbolKind::Sub || memSym->kind == SymbolKind::Function
+                    || memSym->kind == SymbolKind::PropertyGet
+                    || memSym->kind == SymbolKind::PropertyLet
+                    || memSym->kind == SymbolKind::PropertySet)) {
+            // 检查变量是否是类指针类型(通过knownClassVars_)
+            if (knownClassVars_.count(objLower)) {
+                std::string funcName = cProcName(node.memberName, memSym->access,
+                                                  memSym->isExternal ? memSym->sourceModule : "");
+                emitExpr(*node.object);
+                std::string objExpr = std::move(lastExpr_);
+                lastExpr_ = funcName + "(" + objExpr + ")";
+                return;
+            }
+        }
     }
 
     // 通用成员访问
@@ -755,6 +861,25 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
     emitExpr(*node.callee);
     std::string callee = std::move(lastExpr_);
 
+    // 如果callee已经是func(args)形式(如类方法调用 vb6_Counter_GetCount(c)),
+    // 且IndexOrCallExpr没有额外参数, 直接使用callee避免双重括号
+    if (callee.size() >= 2 && callee.back() == ')' && node.positional.empty() && node.named.empty()) {
+        // 检查是否是完整的函数调用（以右括号结尾且匹配左括号）
+        int depth = 0;
+        bool isCompleteCall = false;
+        for (int i = (int)callee.size() - 2; i >= 0; i--) {
+            if (callee[i] == ')') depth++;
+            else if (callee[i] == '(') {
+                if (depth == 0) { isCompleteCall = true; break; }
+                depth--;
+            }
+        }
+        if (isCompleteCall) {
+            lastExpr_ = callee;
+            return;
+        }
+    }
+
     // 如果callee已经是func()形式(无参内置函数调用如vb6_Now())，
     // 需要拆开重组为func(args)，因为IndexOrCallExpr表示带参数调用
     bool calleeIsZeroArgCall = false;
@@ -792,7 +917,20 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
 }
 
 void CCodeGen::visit(NewExpr& node) {
-    lastExpr_ = "vb6_NewObject(L\"" + node.className + "\")";
+    // 查找是否为本工程内的类模块
+    std::string clsLower = node.className;
+    std::transform(clsLower.begin(), clsLower.end(), clsLower.begin(), ::tolower);
+
+    // 尝试在符号表中查找类符号
+    auto* clsSym = symTab_.lookupModule(node.className);
+    if (clsSym && clsSym->kind == SymbolKind::Class) {
+        // 本工程类: 调用类工厂函数
+        std::string clsStruct = "vb6_cls_" + cIdent(clsSym->name);
+        lastExpr_ = "(" + clsStruct + "_New())";
+    } else {
+        // 外部/COM对象: 回退到运行时
+        lastExpr_ = "vb6_NewObject(L\"" + node.className + "\")";
+    }
 }
 
 void CCodeGen::visit(TypeOfExpr& node) {
@@ -806,7 +944,12 @@ void CCodeGen::visit(AddressOfExpr& node) {
 }
 
 void CCodeGen::visit(MeExpr& node) {
-    lastExpr_ = "vb6_Me";
+    // 类模块中: me 是方法参数
+    if (isClassModule_) {
+        lastExpr_ = "me";
+    } else {
+        lastExpr_ = "vb6_Me";
+    }
 }
 
 void CCodeGen::visit(WithMemberExpr& node) {
@@ -1686,13 +1829,27 @@ void CCodeGen::visit(LocalDeclStmt& node) {
                 knownBstrVars_.insert(lower);
             }
 
+            // 记录类类型变量名, 默认值用NULL
+            bool isLocalClassType = false;
+            if (var.asType && var.asType->kind == ASTNodeKind::SimpleTypeRef) {
+                auto& simple = static_cast<SimpleTypeRef&>(*var.asType);
+                auto* clsSym = symTab_.lookupModule(simple.name);
+                if (clsSym && clsSym->kind == SymbolKind::Class) {
+                    std::string lower = var.name;
+                    std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+                    knownClassVars_.insert(lower);
+                    isLocalClassType = true;
+                }
+            }
+
             if (var.initializer) {
                 emitExpr(*var.initializer);
                 c_.emitLine(cType + " " + cName + " = " + lastExpr_ + ";");
             } else {
-                c_.emitLine(cType + " " + cName + " = " + defaultValue(
+                std::string initVal = isLocalClassType ? "NULL" : defaultValue(
                     var.asType ? typeSys_.resolveTypeName(static_cast<SimpleTypeRef*>(var.asType.get())->name) : Vb6Type::Variant
-                ) + ";");
+                );
+                c_.emitLine(cType + " " + cName + " = " + initVal + ";");
             }
             break;
         }
@@ -1788,13 +1945,31 @@ void CCodeGen::visit(FunctionDecl& node) {
 
 std::string CCodeGen::makeProcSignature(SubDecl& node) {
     std::string name = cProcName(node.name, node.access);
-    std::string params = makeParamList(node.params);
+    std::string params;
+    if (isClassModule_) {
+        params = classMeParam();
+        std::string userParams = makeParamList(node.params);
+        if (userParams != "void") {
+            params += ", " + userParams;
+        }
+    } else {
+        params = makeParamList(node.params);
+    }
     return "void " + name + "(" + params + ")";
 }
 
 std::string CCodeGen::makeProcSignature(FunctionDecl& node) {
     std::string name = cProcName(node.name, node.access);
-    std::string params = makeParamList(node.params);
+    std::string params;
+    if (isClassModule_) {
+        params = classMeParam();
+        std::string userParams = makeParamList(node.params);
+        if (userParams != "void") {
+            params += ", " + userParams;
+        }
+    } else {
+        params = makeParamList(node.params);
+    }
     std::string retType = mapTypeRef(node.returnType.get());
     return retType + " " + name + "(" + params + ")";
 }
@@ -1951,12 +2126,31 @@ void CCodeGen::visit(VariableDecl& node) {
 
     std::string cType = mapTypeRef(node.asType.get());
 
+    // 检查是否是类类型变量 → 注册到 knownClassVars_
+    if (node.asType && node.asType->kind == ASTNodeKind::SimpleTypeRef) {
+        auto& simple = static_cast<SimpleTypeRef&>(*node.asType);
+        auto* clsSym = symTab_.lookupModule(simple.name);
+        if (clsSym && clsSym->kind == SymbolKind::Class) {
+            std::string lower = node.name;
+            std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+            knownClassVars_.insert(lower);
+        }
+    }
+
     // 前向声明 → .h, 定义 → .c
     if (node.access == AccessLevel::Public) {
         h_.emitLine("extern " + cType + " " + cName + ";");
     }
 
     // 变量定义 → .c
+    // 类类型变量的默认值是NULL
+    bool isClassType = false;
+    if (node.asType && node.asType->kind == ASTNodeKind::SimpleTypeRef) {
+        auto& simple = static_cast<SimpleTypeRef&>(*node.asType);
+        auto* clsSym = symTab_.lookupModule(simple.name);
+        isClassType = (clsSym && clsSym->kind == SymbolKind::Class);
+    }
+
     if (node.initializer) {
         emitExpr(*node.initializer);
         if (node.access == AccessLevel::Public) {
@@ -1965,14 +2159,13 @@ void CCodeGen::visit(VariableDecl& node) {
             c_.emitLine("static " + cType + " " + cName + " = " + lastExpr_ + ";");
         }
     } else {
+        std::string initVal = isClassType ? "NULL" : defaultValue(
+            node.asType ? typeSys_.resolveTypeName(static_cast<SimpleTypeRef*>(node.asType.get())->name) : Vb6Type::Variant
+        );
         if (node.access == AccessLevel::Public) {
-            c_.emitLine(cType + " " + cName + " = " + defaultValue(
-                node.asType ? typeSys_.resolveTypeName(static_cast<SimpleTypeRef*>(node.asType.get())->name) : Vb6Type::Variant
-            ) + ";");
+            c_.emitLine(cType + " " + cName + " = " + initVal + ";");
         } else {
-            c_.emitLine("static " + cType + " " + cName + " = " + defaultValue(
-                node.asType ? typeSys_.resolveTypeName(static_cast<SimpleTypeRef*>(node.asType.get())->name) : Vb6Type::Variant
-            ) + ";");
+            c_.emitLine("static " + cType + " " + cName + " = " + initVal + ";");
         }
     }
 }
@@ -2028,11 +2221,165 @@ void CCodeGen::visit(DeclareDecl& node) {
 }
 
 void CCodeGen::visit(PropertyDecl& node) {
-    c_.emitLine("/* TODO: Property " + node.name + " */");
+    // Property Get/Let/Set → C函数
+    // 类模块: 第一个参数为 me 指针
+    std::string sig = makePropertySignature(node);
+    c_.emitLine(sig + " {");
+
+    if (!node.body.empty()) {
+        c_.indent();
+        // 类模块: 设置当前me变量为第一个参数
+        if (isClassModule_) {
+            // 在类方法中, 模块级变量引用需通过 me-> 前缀
+            // 这通过 visit(IdentifierExpr) 和 visit(AssignmentStmt) 处理
+        }
+        emitStmtList(node.body);
+
+        // Property Get: 隐式返回 vb6_ret_<propName>
+        if (node.propKind == ProcKind::PropertyGet && node.returnType) {
+            c_.emitLine("return vb6_ret_" + cIdent(node.name) + ";");
+        }
+        c_.dedent();
+    }
+
+    c_.emitLine("}");
+    c_.emitBlank();
 }
 
 void CCodeGen::visit(EventDecl& node) {
-    c_.emitLine("/* TODO: Event " + node.name + " */");
+    // Event声明: 生成事件触发的辅助函数占位
+    std::string evtName = "vb6_event_" + cIdent(node.name);
+    c_.emitLine("/* Event " + node.name + " —.RaiseEvent handled at call site */");
+}
+
+// ============================================================
+// Property签名生成
+// ============================================================
+
+std::string CCodeGen::makePropertySignature(PropertyDecl& node) {
+    std::string propName = cProcName("prop_" + node.name, node.access);
+    std::string params;
+
+    // 类模块: 第一个参数为 me 指针
+    if (isClassModule_) {
+        params = classMeParam();
+        if (!node.params.empty()) params += ", ";
+    }
+
+    params += makeParamList(node.params);
+
+    switch (node.propKind) {
+        case ProcKind::PropertyGet: {
+            std::string retType = node.returnType ? mapTypeRef(node.returnType.get()) : "VARIANT";
+            return retType + " " + propName + "(" + params + ")";
+        }
+        case ProcKind::PropertyLet: {
+            // Property Let: 最后一个参数是赋值值
+            std::string valType = node.returnType ? mapTypeRef(node.returnType.get()) : "VARIANT";
+            if (node.params.empty()) {
+                return "void " + propName + "(" + params + (params == "void" ? "" : ", ") + valType + " vb6_let_value)";
+            }
+            return "void " + propName + "(" + params + ", " + valType + " vb6_let_value)";
+        }
+        case ProcKind::PropertySet: {
+            std::string valType = "void*";  // 对象引用
+            if (node.params.empty()) {
+                return "void " + propName + "(" + params + (params == "void" ? "" : ", ") + valType + " vb6_set_value)";
+            }
+            return "void " + propName + "(" + params + ", " + valType + " vb6_set_value)";
+        }
+        default:
+            return "void " + propName + "(" + params + ")";
+    }
+}
+
+// ============================================================
+// 类工厂函数生成
+// ============================================================
+
+std::string CCodeGen::classMeParam() const {
+    std::string clsStruct = "vb6_cls_" + cIdent(baseName_);
+    return clsStruct + "* me";
+}
+
+void CCodeGen::emitClassFactory(Module& module) {
+    std::string clsStruct = "vb6_cls_" + cIdent(baseName_);
+
+    c_.emitBlank();
+    c_.emitLine("// === 类工厂函数: " + module.moduleName + " ===");
+    c_.emitBlank();
+
+    // _New: 分配+初始化
+    c_.emitLine(clsStruct + "* " + clsStruct + "_New(void) {");
+    c_.indent();
+    c_.emitLine(clsStruct + "* me = (" + clsStruct + "*)vb6_Alloc(sizeof(" + clsStruct + "));");
+    c_.emitLine("if (!me) return NULL;");
+
+    // 初始化所有字段为默认值
+    for (auto& decl : module.declarations) {
+        if (decl->kind == ASTNodeKind::VariableDecl) {
+            auto& var = static_cast<VariableDecl&>(*decl);
+            std::string field = cIdent(var.name);
+            if (var.isDynamicArray || !var.dimensions.empty()) {
+                c_.emitLine("me->" + field + " = NULL;");
+            } else if (var.asType) {
+                c_.emitLine("me->" + field + " = " + defaultValue(resolveArrayElemType(var.asType.get())) + ";");
+            } else {
+                c_.emitLine("me->" + field + " = 0;");
+            }
+        }
+    }
+
+    // 检查是否有 Class_Initialize 方法
+    bool hasInit = false;
+    for (auto& decl : module.declarations) {
+        if (decl->kind == ASTNodeKind::SubDecl) {
+            auto& sub = static_cast<SubDecl&>(*decl);
+            if (sub.name == "Class_Initialize") {
+                hasInit = true;
+                c_.emitLine(cProcName("Class_Initialize", sub.access) + "(me);");
+                break;
+            }
+        }
+    }
+
+    c_.emitLine("return me;");
+    c_.dedent();
+    c_.emitLine("}");
+
+    // _Destroy: 终止+释放
+    c_.emitBlank();
+    c_.emitLine("void " + clsStruct + "_Destroy(" + clsStruct + "* me) {");
+    c_.indent();
+    c_.emitLine("if (!me) return;");
+
+    // 检查是否有 Class_Terminate 方法
+    for (auto& decl : module.declarations) {
+        if (decl->kind == ASTNodeKind::SubDecl) {
+            auto& sub = static_cast<SubDecl&>(*decl);
+            if (sub.name == "Class_Terminate") {
+                c_.emitLine(cProcName("Class_Terminate", sub.access) + "(me);");
+                break;
+            }
+        }
+    }
+
+    // 释放BSTR字段
+    for (auto& decl : module.declarations) {
+        if (decl->kind == ASTNodeKind::VariableDecl) {
+            auto& var = static_cast<VariableDecl&>(*decl);
+            Vb6Type varType = var.asType ? resolveArrayElemType(var.asType.get()) : Vb6Type::Variant;
+            if (varType == Vb6Type::String) {
+                c_.emitLine("vb6_BSTR_Free(me->" + cIdent(var.name) + ");");
+            } else if (var.isDynamicArray || !var.dimensions.empty()) {
+                c_.emitLine("if (me->" + cIdent(var.name) + ") vb6_SA_Destroy(me->" + cIdent(var.name) + ");");
+            }
+        }
+    }
+
+    c_.emitLine("vb6_Free(me);");
+    c_.dedent();
+    c_.emitLine("}");
 }
 
 void CCodeGen::visit(ParameterDecl& node) {

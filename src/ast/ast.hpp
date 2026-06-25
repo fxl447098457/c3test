@@ -1313,11 +1313,17 @@ public:
 // 第十节 模块节点
 // ============================================================
 
+// VBInstancing 已移至 common/types.hpp
+
 // Module: VB6编译单元 (.bas/.cls/.frm 的代码部分)
 class Module : public ASTNode {
 public:
     std::string filename;           // 源文件路径
     std::string moduleName;         // 模块名 (通常来自Attribute VB_Name)
+
+    // 模块类别
+    bool isClassModule = false;     // true = .cls类模块, false = .bas标准模块/.frm窗体模块
+    VBInstancing instancing = VBInstancing::Private;  // 类Instancing属性 (仅类模块)
 
     // Option 语句
     std::vector<std::unique_ptr<OptionStmt>> options;

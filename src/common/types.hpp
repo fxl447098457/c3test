@@ -66,4 +66,14 @@ enum class ProcKind : uint8_t {
     PropertySet,
 };
 
+// VB6类Instancing属性
+enum class VBInstancing : uint8_t {
+    Private = 1,              // 仅本工程内可见（VB6默认）
+    PublicNotCreatable = 2,   // 外部可用但不能New
+    SingleUse = 3,            // 外部可New，每个客户独立实例
+    GlobalSingleUse = 4,      // 同SingleUse，无需显式创建
+    MultiUse = 5,             // 外部可New，多客户共享进程
+    GlobalMultiUse = 6,       // 同MultiUse，无需显式创建
+};
+
 } // namespace vb6c3

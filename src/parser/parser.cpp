@@ -390,14 +390,52 @@ SourceLocation Parser::currentLoc() const {
 // 模块解析 (最高层)
 // ============================================================
 
-std::unique_ptr<Module> Parser::parseModule() {
+std::unique_ptr<Module> Parser::parseModule(bool isClassModule) {
     auto mod = std::make_unique<Module>(currentLoc(), buffer_->filePath());
+    mod->isClassModule = isClassModule;
     parseModuleBody(*mod);
     return mod;
 }
 
 void Parser::parseModuleBody(Module& mod) {
     skipNewLines();
+
+    // 类模块头部: 跳过 VERSION 1.0 CLASS ... BEGIN ... END 块
+    // VB6 .cls 文件格式:
+    //   VERSION 1.0 CLASS
+    //   BEGIN
+    //     MultiUse = -1  'True
+    //     ...
+    //   END
+    if (mod.isClassModule) {
+        // 检查是否有 VERSION 标记
+        if (cur_.kind == TokenKind::Identifier &&
+            toLower(cur_.text) == "version") {
+            // 跳过 VERSION 1.0 CLASS 行
+            skipToNextLine();
+            skipNewLines();
+
+            // 跳过 BEGIN ... END 块
+            if (cur_.kind == TokenKind::Begin) {
+                advance();  // consume BEGIN
+                // 跳过直到匹配的 END
+                int depth = 1;
+                while (cur_.kind != TokenKind::EndOfFile && depth > 0) {
+                    if (cur_.kind == TokenKind::Begin) {
+                        depth++;
+                    } else if (cur_.kind == TokenKind::End) {
+                        depth--;
+                        if (depth == 0) {
+                            advance();  // consume END
+                            break;
+                        }
+                    }
+                    advance();
+                }
+            }
+            skipNewLines();
+        }
+    }
 
     while (cur_.kind != TokenKind::EndOfFile) {
         skipNewLines();
