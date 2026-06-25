@@ -478,21 +478,38 @@ Token Lexer::scanNumber() {
     }
 
     // 类型后缀
+    bool isLong = false;
     if (offset_ < content_.size()) {
         char c = peek();
         switch (c) {
-            case '%': text += advance(); return makeToken(TokenKind::IntegerLiteral, text, startLine, startCol);
-            case '&': text += advance(); return makeToken(TokenKind::LongLiteral, text, startLine, startCol);
+            case '%': text += advance(); break;
+            case '&': text += advance(); isLong = true; break;
             case '!': text += advance(); isFloat = true; break;
             case '#': text += advance(); isFloat = true; break;
-            case '@': text += advance(); return makeToken(TokenKind::DecimalLiteral, text, startLine, startCol);
+            case '@': text += advance(); {
+                Token tok = makeToken(TokenKind::DecimalLiteral, text, startLine, startCol);
+                // 解析Decimal值 (暂用double)
+                try { tok.doubleValue = std::stod(text); } catch (...) {}
+                return tok;
+            }
         }
     }
 
     if (isFloat) {
-        return makeToken(TokenKind::FloatLiteral, text, startLine, startCol);
+        Token tok = makeToken(TokenKind::FloatLiteral, text, startLine, startCol);
+        try { tok.doubleValue = std::stod(text); } catch (...) {}
+        return tok;
     }
-    return makeToken(TokenKind::IntegerLiteral, text, startLine, startCol);
+
+    if (isLong) {
+        Token tok = makeToken(TokenKind::LongLiteral, text, startLine, startCol);
+        try { tok.longValue = std::stoll(text); } catch (...) {}
+        return tok;
+    }
+
+    Token tok = makeToken(TokenKind::IntegerLiteral, text, startLine, startCol);
+    try { tok.intValue = static_cast<int32_t>(std::stoll(text)); } catch (...) {}
+    return tok;
 }
 
 Token Lexer::scanHexNumber() {
@@ -512,10 +529,14 @@ Token Lexer::scanHexNumber() {
     // & 后缀表示 Long
     if (peek() == '&') {
         text += advance();
-        return makeToken(TokenKind::LongLiteral, text, startLine, startCol);
+        Token tok = makeToken(TokenKind::LongLiteral, text, startLine, startCol);
+        try { tok.longValue = std::stoll(text.substr(2), nullptr, 16); } catch (...) {}
+        return tok;
     }
 
-    return makeToken(TokenKind::IntegerLiteral, text, startLine, startCol);
+    Token tok = makeToken(TokenKind::IntegerLiteral, text, startLine, startCol);
+    try { tok.intValue = static_cast<int32_t>(std::stoll(text.substr(2), nullptr, 16)); } catch (...) {}
+    return tok;
 }
 
 Token Lexer::scanOctNumber() {
@@ -529,7 +550,9 @@ Token Lexer::scanOctNumber() {
     }
 
     if (peek() == '&') text += advance();
-    return makeToken(TokenKind::IntegerLiteral, text, startLine, startCol);
+    Token tok = makeToken(TokenKind::IntegerLiteral, text, startLine, startCol);
+    try { tok.intValue = static_cast<int32_t>(std::stoll(text.substr(2), nullptr, 8)); } catch (...) {}
+    return tok;
 }
 
 Token Lexer::scanBinNumber() {
@@ -543,7 +566,9 @@ Token Lexer::scanBinNumber() {
     }
 
     if (peek() == '&') text += advance();
-    return makeToken(TokenKind::IntegerLiteral, text, startLine, startCol);
+    Token tok = makeToken(TokenKind::IntegerLiteral, text, startLine, startCol);
+    try { tok.intValue = static_cast<int32_t>(std::stoll(text.substr(2), nullptr, 2)); } catch (...) {}
+    return tok;
 }
 
 // === 字符串扫描 ===

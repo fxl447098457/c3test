@@ -7,10 +7,14 @@
 #include "parser/parser.hpp"
 #include "ast/ast_printer.hpp"
 #include "semantics/semantic_analyzer.hpp"
+#include "backend/cgen.hpp"
+#include "backend/msvc_driver.hpp"
 
 #include <iostream>
 #include <fstream>
 #include <algorithm>
+#include <filesystem>
+#include <cstdlib>
 
 namespace vb6c3 {
 
@@ -60,6 +64,9 @@ std::pair<CompileOptions, int> Driver::parseArgs(int argc, char* argv[]) {
         }
         else if (arg == "--emit-llvm") {
             opts.emitLLVM = true;
+        }
+        else if (arg == "--emit-c") {
+            opts.emitC = true;
         }
         else if (arg == "--syntax-only") {
             opts.syntaxOnly = true;
@@ -349,27 +356,150 @@ bool Driver::runParser(const CompileOptions& options) {
 }
 
 bool Driver::runSemanticAnalysis(const CompileOptions& options) {
+    analyzers_.clear();
     for (auto& module : modules_) {
-        SemanticAnalyzer analyzer(*diag_, options.verbose);
-        bool ok = analyzer.analyze(*module);
+        auto analyzer = std::make_unique<SemanticAnalyzer>(*diag_, options.verbose);
+        bool ok = analyzer->analyze(*module);
 
         if (options.dumpSymbols) {
-            analyzer.dumpSymbols(std::cout);
+            analyzer->dumpSymbols(std::cout);
         }
 
         if (!ok) return false;
+        analyzers_.push_back(std::move(analyzer));
     }
     return !diag_->hasErrors();
 }
 
 bool Driver::runCodeGeneration(const CompileOptions& options) {
-    // TODO: P3阶段实现
-    return true;
+    if (modules_.size() != analyzers_.size()) {
+        std::cerr << "c3: 内部错误: 模块数与分析器数不匹配" << std::endl;
+        return false;
+    }
+
+    for (size_t i = 0; i < modules_.size(); i++) {
+        auto& module = modules_[i];
+        auto& analyzer = analyzers_[i];
+
+        // 确定输出基名
+        std::string baseName;
+        if (modules_.size() == 1 && !options.outputFile.empty()) {
+            // 单文件: 用输出文件名作为基名
+            std::filesystem::path p(options.outputFile);
+            baseName = p.stem().string();
+        } else {
+            // 多文件: 用源文件名作为基名
+            std::filesystem::path p(module->filename);
+            baseName = p.stem().string();
+        }
+
+        // 调用C代码生成器
+        CCodeGen cgen(*diag_, analyzer->symbolTable(), analyzer->typeSystem(),
+                      options.verbose);
+        bool ok = cgen.generate(*module, baseName);
+        if (!ok) return false;
+
+        // 写 .h 文件
+        std::string hPath = baseName + ".h";
+        {
+            std::ofstream ofs(hPath, std::ios::out | std::ios::trunc);
+            if (!ofs) {
+                std::cerr << "c3: 无法写入文件: " << hPath << std::endl;
+                return false;
+            }
+            ofs << cgen.headerCode();
+        }
+
+        // 写 .c 文件
+        std::string cPath = baseName + ".c";
+        {
+            std::ofstream ofs(cPath, std::ios::out | std::ios::trunc);
+            if (!ofs) {
+                std::cerr << "c3: 无法写入文件: " << cPath << std::endl;
+                return false;
+            }
+            ofs << cgen.sourceCode();
+        }
+
+        if (options.verbose) {
+            std::cout << "c3: 生成 " << hPath << " (" << cgen.headerCode().size() << " bytes)" << std::endl;
+            std::cout << "c3: 生成 " << cPath << " (" << cgen.sourceCode().size() << " bytes)" << std::endl;
+        }
+
+        // --emit-c 模式: 输出C代码后结束
+        if (options.emitC) {
+            std::cout << cgen.headerCode() << std::endl;
+            std::cout << cgen.sourceCode() << std::endl;
+        }
+    }
+
+    return !diag_->hasErrors();
 }
 
 bool Driver::runLinker(const CompileOptions& options) {
-    // TODO: P3阶段实现
-    return true;
+    // 如果是 --emit-c 模式, 不需要链接
+    if (options.emitC) {
+        return true;
+    }
+
+    // 检查 MSVC 是否可用
+    if (!MsvcDriver::isMsvcAvailable()) {
+        std::cerr << "c3: 错误: 未检测到MSVC环境 (请先运行vcvarsall.bat)" << std::endl;
+        std::cerr << "c3: 使用 --emit-c 选项可仅生成C代码" << std::endl;
+        return false;
+    }
+
+    // 收集生成的 .c 文件
+    MsvcDriverOptions msvcOpts;
+    for (auto& module : modules_) {
+        std::filesystem::path p(module->filename);
+        std::string baseName = p.stem().string();
+        std::string cPath = baseName + ".c";
+        msvcOpts.sourceFiles.push_back(cPath);
+    }
+
+    // 查找RTL目录: 优先VB6RTL_DIR环境变量, 其次尝试相对路径
+    std::string rtlDir;
+    const char* envRtl = std::getenv("VB6RTL_DIR");
+    if (envRtl && envRtl[0] != '\0') {
+        rtlDir = envRtl;
+    } else {
+        // 尝试从当前工作目录向上查找 src/rtl/core
+        std::filesystem::path search = std::filesystem::current_path();
+        for (int i = 0; i < 10; i++) {
+            std::filesystem::path candidate = search / "src" / "rtl" / "core";
+            if (std::filesystem::exists(candidate / "vb6rtl.h")) {
+                rtlDir = candidate.string();
+                break;
+            }
+            auto parent = search.parent_path();
+            if (parent == search) break;
+            search = parent;
+        }
+    }
+
+    if (rtlDir.empty()) {
+        std::cerr << "c3: 错误: 找不到VB6 RTL目录 (请设置VB6RTL_DIR环境变量)" << std::endl;
+        return false;
+    }
+    msvcOpts.rtlDir = rtlDir;
+
+    // 输出文件
+    if (!options.outputFile.empty()) {
+        msvcOpts.outputFile = options.outputFile;
+    } else if (modules_.size() == 1) {
+        std::filesystem::path p(modules_[0]->filename);
+        msvcOpts.outputFile = p.stem().string() + ".exe";
+    } else {
+        msvcOpts.outputFile = "a.exe";
+    }
+
+    msvcOpts.verbose = options.verbose;
+    msvcOpts.debugInfo = options.debugInfo;
+    msvcOpts.optimizationLevel = options.optimizationLevel;
+
+    MsvcDriver msvc;
+    return msvc.compileAndLink(msvcOpts);
 }
 
 // === 帮助/版本 ===
@@ -388,6 +518,7 @@ void Driver::printHelp() {
               << "  --dump-ast          输出AST\n"
               << "  --dump-symbols      输出符号表\n"
               << "  --dump-ir           输出IR\n"
+              << "  --emit-c           输出C代码 (.h/.c)\n"
               << "  --emit-llvm         输出LLVM IR (.ll)\n"
               << "  --syntax-only       只做语法检查\n"
               << "  -d, --define <N=V>  定义条件编译常量 (如 -d:DEBUG=-1)\n"

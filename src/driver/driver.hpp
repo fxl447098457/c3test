@@ -2,6 +2,8 @@
 // 编译器驱动 - 命令行解析 + 编译流程编排
 
 #include "preprocessor/preprocessor.hpp"
+#include "semantics/symbol_table.hpp"
+#include "semantics/type_system.hpp"
 #include <string>
 #include <vector>
 #include <memory>
@@ -11,6 +13,7 @@ namespace vb6c3 {
 class Diagnostics;
 class SourceBuffer;
 class Module;
+class SemanticAnalyzer;
 
 // 编译选项
 struct CompileOptions {
@@ -29,6 +32,7 @@ struct CompileOptions {
     bool dumpIR = false;
     bool dumpPreprocess = false;              // 输出预处理后的token列表
     bool dumpSymbols = false;                 // 输出符号表
+    bool emitC = false;                       // 输出C代码 (.h/.c)
     bool emitLLVM = false;                   // 输出.ll文件
     bool syntaxOnly = false;                 // 只做语法检查
     bool verbose = false;
@@ -76,6 +80,9 @@ public:
 private:
     std::unique_ptr<Diagnostics> diag_;
     std::vector<std::unique_ptr<Module>> modules_;  // 解析产出的AST
+
+    // 语义分析产出 (供代码生成使用)
+    std::vector<std::unique_ptr<SemanticAnalyzer>> analyzers_;
 
     // 编译流水线各阶段
     bool runLexer(const CompileOptions& options);
