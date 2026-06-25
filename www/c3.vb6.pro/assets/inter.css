@@ -1,0 +1,12 @@
+/*
+  Inter — static fonts for web browsers
+  Only includes weights with locally available font files:
+    400 Regular, 500 Medium, 600 SemiBold, 700 Bold
+
+  Usage:
+    :root { font-family: Inter, sans-serif; }
+*/
+@font-face { font-family: Inter; font-style: normal; font-weight: 400; font-display: swap; src: url("font-files/Inter-Regular.woff2?v=4.1") format("woff2"); }
+@font-face { font-family: Inter; font-style: normal; font-weight: 500; font-display: swap; src: url("font-files/Inter-Medium.woff2?v=4.1") format("woff2"); }
+@font-face { font-family: Inter; font-style: normal; font-weight: 600; font-display: swap; src: url("font-files/Inter-SemiBold.woff2?v=4.1") format("woff2"); }
+@font-face { font-family: Inter; font-style: normal; font-weight: 700; font-display: swap; src: url("font-files/Inter-Bold.woff2?v=4.1") format("woff2"); }
