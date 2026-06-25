@@ -299,27 +299,60 @@ Token Lexer::scanToken() {
     }
 
     // 条件编译: #If, #ElseIf, #Else, #End, #Const
+    // 文件号: #1, #2 等
+    // 日期字面量: #1/1/2026#
     if (c == '#') {
         advance(); // 消费 #
-        // 检查是否是日期字面量 #mm/dd/yyyy#
-        if (isDigit(peek()) || peek() == ' ') {
-            // 可能是日期字面量, 先回退, 由scanDateLiteral处理
-            offset_--;
-            column_--;
-            return scanDateLiteral();
+
+        // 检查 # 后是否跟纯数字 (文件号场景: As #1, Print #1, 等)
+        // 文件号是 # 后跟1-3位数字, 且不是日期模式 (#mm/...#)
+        if (isDigit(peek())) {
+            // 向前看: 如果数字后面跟 / 或 - 则是日期, 否则是文件号
+            size_t saveOff = offset_;
+            uint32_t saveCol = column_;
+            // 跳过数字
+            while (offset_ < content_.size() && isDigit(peek())) {
+                advance();
+            }
+            char afterDigits = peek();
+            // 恢复位置
+            offset_ = saveOff;
+            column_ = saveCol;
+
+            if (afterDigits == '/' || afterDigits == '-') {
+                // 日期字面量: 回退 # 由scanDateLiteral处理
+                offset_--;
+                column_--;
+                return scanDateLiteral();
+            } else {
+                // 文件号: 返回 Hash token, 数字由下次scanToken读取
+                return makeToken(TokenKind::Hash, "#", startLine, startCol);
+            }
         }
-        // 条件编译指令
-        std::string text = "#";
-        while (offset_ < content_.size() && isAlpha(peek())) {
-            text += advance();
+
+        // 非数字: 检查条件编译指令或返回Hash
+        if (isAlpha(peek())) {
+            size_t saveOff = offset_;
+            uint32_t saveCol = column_;
+            std::string text = "#";
+            while (offset_ < content_.size() && (isAlpha(peek()) || isDigit(peek()) || peek() == '_')) {
+                text += advance();
+            }
+            std::string lower = text;
+            std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+            auto it = keywords_.find(lower);
+            if (it != keywords_.end()) {
+                return makeToken(it->second, text, startLine, startCol);
+            }
+            // 不是条件编译指令 (#fnum 等文件号引用)
+            // 回退到 # 后, 只返回 Hash token, 后续标识符由下次 scanToken 读取
+            offset_ = saveOff;
+            column_ = saveCol;
+            return makeToken(TokenKind::Hash, "#", startLine, startCol);
         }
-        std::string lower = text;
-        std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
-        auto it = keywords_.find(lower);
-        if (it != keywords_.end()) {
-            return makeToken(it->second, text, startLine, startCol);
-        }
-        return errorToken("未识别的条件编译指令: " + text, startLine, startCol);
+
+        // 其他情况: 返回 Hash token (如 # 后跟空格)
+        return makeToken(TokenKind::Hash, "#", startLine, startCol);
     }
 
     // 标识符/关键字

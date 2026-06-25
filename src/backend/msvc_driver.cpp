@@ -70,8 +70,8 @@ bool MsvcDriver::compileAndLink(const MsvcDriverOptions& options) {
         cmd << " /Zi /DEBUG";
     }
 
-    // C11标准, Unicode, UTF-8源码编码
-    cmd << " /std:c11 /DUNICODE /D_UNICODE /utf-8";
+    // C11标准, Unicode, UTF-8源码编码, 禁用MSVC安全警告
+    cmd << " /std:c11 /DUNICODE /D_UNICODE /utf-8 /D_CRT_SECURE_NO_WARNINGS /D_CRT_NONSTDC_NO_WARNINGS";
 
     // 警告级别
     cmd << " /W3";

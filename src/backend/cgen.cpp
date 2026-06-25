@@ -208,7 +208,7 @@ std::string CCodeGen::mapType(Vb6Type type) const {
     }
 
     if (isArray) {
-        cType = "VARIANT";  // 数组暂用VARIANT, 后续改为SAFEARRAY
+        cType = "vb6_SafeArray1D*";  // 数组用SAFEARRAY
     }
     return cType;
 }
@@ -228,7 +228,7 @@ std::string CCodeGen::mapTypeRef(ASTNode* typeRef) const {
             return cIdent(simple.name);
         }
         case ASTNodeKind::ArrayTypeRef:
-            return "VARIANT";  // SAFEARRAY暂用VARIANT
+            return "vb6_SafeArray1D*";  // SAFEARRAY指针
         case ASTNodeKind::FixedStringTypeRef:
             return "BSTR";
         default:
@@ -490,11 +490,67 @@ void CCodeGen::visit(IdentifierExpr& node) {
         {"typename", "vb6_TypeName"},
         {"createobject","vb6_CreateObject"},
         {"getobject","vb6_GetObject"},
+        // 字符串函数 (P4新增)
+        {"replace",  "vb6_Replace"},
+        {"space",    "vb6_Space"},
+        {"string",   "vb6_String"},   // String$函数
+        {"strcomp",  "vb6_StrComp"},
+        {"strreverse","vb6_StrReverse"},
+        {"instrrev", "vb6_InStrRev"},
+        {"val",      "vb6_Val"},
+        {"str",      "vb6_Str"},
+        // 数学函数 (P4新增)
+        {"sin",      "vb6_Sin"},
+        {"cos",      "vb6_Cos"},
+        {"tan",      "vb6_Tan"},
+        {"atn",      "vb6_Atn"},
+        {"log",      "vb6_Log"},
+        {"exp",      "vb6_Exp"},
+        {"round",    "vb6_Round"},
+        {"rnd",      "vb6_Rnd"},
+        {"randomize","vb6_Randomize"},
+        // 日期时间 (P4新增)
+        {"now",      "vb6_Now"},
+        {"date",     "vb6_Date"},
+        {"time",     "vb6_Time"},
+        {"year",     "vb6_Year"},
+        {"month",    "vb6_Month"},
+        {"day",      "vb6_Day"},
+        {"hour",     "vb6_Hour"},
+        {"minute",   "vb6_Minute"},
+        {"second",   "vb6_Second"},
+        // 类型转换 (P4新增)
+        {"cbyte",    "vb6_CByte"},
+        {"cvar",     "vb6_CVar"},
+        {"hex",      "vb6_Hex"},
+        {"oct",      "vb6_Oct"},
+        // 类型检查 (P4新增)
+        {"isnull",   "vb6_IsNull"},
+        {"isempty",  "vb6_IsEmpty"},
+        {"isobject", "vb6_IsObject"},
+        {"isdate",   "vb6_IsDate"},
+        {"iserror",  "vb6_IsError"},
+        {"vartype",  "vb6_VarType"},
+        // 文件I/O (P4新增)
+        {"freefile", "vb6_FreeFile"},
+        {"eof",      "vb6_EOF"},
+        {"lof",      "vb6_LOF"},
+        {"loc",      "vb6_Loc"},
+        {"kill",     "vb6_Kill"},
     };
 
     auto it = builtinFuncs.find(lower);
     if (it != builtinFuncs.end()) {
-        lastExpr_ = it->second;
+        // 无参内置函数: VB6允许省略括号(如 Now, Date, Time)
+        // 当IdentifierExpr引用这些函数时，必须生成调用(带括号)
+        static const std::unordered_set<std::string> zeroArgBuiltinFuncs = {
+            "now", "date", "time", "freefile"
+        };
+        if (zeroArgBuiltinFuncs.count(lower)) {
+            lastExpr_ = it->second + "()";
+        } else {
+            lastExpr_ = it->second;
+        }
         return;
     }
 
@@ -608,8 +664,61 @@ void CCodeGen::visit(DictionaryAccessExpr& node) {
 }
 
 void CCodeGen::visit(IndexOrCallExpr& node) {
+    // 检测数组访问: arr(i) — callee 是 IdentifierExpr 且在已知数组集合中
+    // VB6 不区分数组索引和函数调用, 统一为 IndexOrCallExpr
+    bool isArrayAccess = false;
+    std::string arrName;
+    Vb6Type arrElemType = Vb6Type::Variant;
+
+    if (node.callee && node.callee->kind == ASTNodeKind::IdentifierExpr && node.named.empty()) {
+        auto& ident = static_cast<IdentifierExpr&>(*node.callee);
+        std::string lower = ident.name;
+        std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+
+        // 先查已知数组集合 (cgen过程中维护)
+        if (knownArrays_.count(lower)) {
+            isArrayAccess = true;
+            arrName = cIdent(ident.name);
+            arrElemType = arrayElemTypes_[lower];
+        } else {
+            // 再查符号表 (模块级数组)
+            Symbol* sym = symTab_.lookupModule(ident.name);
+            if (sym && sym->kind == SymbolKind::Variable && sym->isArray) {
+                isArrayAccess = true;
+                arrName = cIdent(ident.name);
+                arrElemType = sym->type;
+            }
+        }
+    }
+
+    if (isArrayAccess) {
+        // 数组元素访问: arr(i) → VB6_SA_AT(type, arr, i)
+        emitExpr(*node.callee);
+        std::string callee = std::move(lastExpr_);
+
+        // 参数: 只取第一个位置参数作为索引 (一维)
+        std::string index = "0";
+        if (!node.positional.empty()) {
+            emitExpr(*node.positional[0]);
+            index = std::move(lastExpr_);
+        }
+
+        std::string elemCType = mapSaElemCType(arrElemType);
+        lastExpr_ = "VB6_SA_AT(" + elemCType + ", " + arrName + ", " + index + ")";
+        return;
+    }
+
+    // 函数调用路径 (原有逻辑)
     emitExpr(*node.callee);
     std::string callee = std::move(lastExpr_);
+
+    // 如果callee已经是func()形式(无参内置函数调用如vb6_Now())，
+    // 需要拆开重组为func(args)，因为IndexOrCallExpr表示带参数调用
+    bool calleeIsZeroArgCall = false;
+    if (callee.size() >= 2 && callee.substr(callee.size() - 2) == "()") {
+        calleeIsZeroArgCall = true;
+        callee = callee.substr(0, callee.size() - 2);
+    }
 
     // 位置参数
     std::vector<std::string> args;
@@ -630,6 +739,12 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
         if (i > 0) argList += ", ";
         argList += args[i];
     }
+
+    // 特殊处理: UBound/LBound 缺省维度参数时补1
+    if ((callee == "vb6_UBound" || callee == "vb6_LBound") && args.size() == 1) {
+        argList += ", 1";
+    }
+
     lastExpr_ = callee + "(" + argList + ")";
 }
 
@@ -658,6 +773,56 @@ void CCodeGen::visit(WithMemberExpr& node) {
     } else {
         lastExpr_ = "/* .Member outside With */";
     }
+}
+
+// ============================================================
+// 数组辅助方法
+// ============================================================
+
+std::string CCodeGen::mapSaElemType(Vb6Type type) const {
+    switch (type) {
+        case Vb6Type::Boolean:  return "vb6_sa_bool";
+        case Vb6Type::Byte:     return "vb6_sa_byte";
+        case Vb6Type::Integer:  return "vb6_sa_int";
+        case Vb6Type::Long:     return "vb6_sa_long";
+        case Vb6Type::Single:   return "vb6_sa_single";
+        case Vb6Type::Double:   return "vb6_sa_double";
+        case Vb6Type::Date:     return "vb6_sa_double";
+        case Vb6Type::Currency: return "vb6_sa_long";  // 简化
+        case Vb6Type::String:   return "vb6_sa_bstr";
+        case Vb6Type::Variant:  return "vb6_sa_variant";
+        case Vb6Type::Object:   return "vb6_sa_ptr";
+        default:                return "vb6_sa_variant";
+    }
+}
+
+std::string CCodeGen::mapSaElemCType(Vb6Type type) const {
+    switch (type) {
+        case Vb6Type::Boolean:  return "int16_t";
+        case Vb6Type::Byte:     return "uint8_t";
+        case Vb6Type::Integer:  return "int16_t";
+        case Vb6Type::Long:     return "int32_t";
+        case Vb6Type::Single:   return "float";
+        case Vb6Type::Double:   return "double";
+        case Vb6Type::Date:     return "double";
+        case Vb6Type::String:   return "BSTR";
+        case Vb6Type::Variant:  return "VARIANT";
+        case Vb6Type::Object:   return "void*";
+        default:                return "VARIANT";
+    }
+}
+
+Vb6Type CCodeGen::resolveArrayElemType(ASTNode* typeRef) const {
+    if (!typeRef) return Vb6Type::Variant;
+    if (typeRef->kind == ASTNodeKind::ArrayTypeRef) {
+        auto& arrType = static_cast<ArrayTypeRef&>(*typeRef);
+        return resolveArrayElemType(arrType.elementType.get());
+    }
+    if (typeRef->kind == ASTNodeKind::SimpleTypeRef) {
+        auto& simple = static_cast<SimpleTypeRef&>(*typeRef);
+        return typeSys_.resolveTypeName(simple.name);
+    }
+    return Vb6Type::Variant;
 }
 
 // ============================================================
@@ -715,8 +880,29 @@ void CCodeGen::emitStmtList(StmtList& stmts) {
             case ASTNodeKind::ExitStmt:        visit(static_cast<ExitStmt&>(*stmt)); break;
             case ASTNodeKind::CallStmt:        visit(static_cast<CallStmt&>(*stmt)); break;
             case ASTNodeKind::ReDimStmt:       visit(static_cast<ReDimStmt&>(*stmt)); break;
+            case ASTNodeKind::EraseStmt:       visit(static_cast<EraseStmt&>(*stmt)); break;
             case ASTNodeKind::LabelStmt:       visit(static_cast<LabelStmt&>(*stmt)); break;
             case ASTNodeKind::LocalDeclStmt:   visit(static_cast<LocalDeclStmt&>(*stmt)); break;
+            // 文件 I/O
+            case ASTNodeKind::OpenStmt:        visit(static_cast<OpenStmt&>(*stmt)); break;
+            case ASTNodeKind::CloseStmt:       visit(static_cast<CloseStmt&>(*stmt)); break;
+            case ASTNodeKind::PrintStmt:       visit(static_cast<PrintStmt&>(*stmt)); break;
+            case ASTNodeKind::WriteStmt:       visit(static_cast<WriteStmt&>(*stmt)); break;
+            case ASTNodeKind::LineInputStmt:   visit(static_cast<LineInputStmt&>(*stmt)); break;
+            case ASTNodeKind::InputStmt:       visit(static_cast<InputStmt&>(*stmt)); break;
+            case ASTNodeKind::GetStmt:         visit(static_cast<GetStmt&>(*stmt)); break;
+            case ASTNodeKind::PutStmt:         visit(static_cast<PutStmt&>(*stmt)); break;
+            case ASTNodeKind::SeekStmt:        visit(static_cast<SeekStmt&>(*stmt)); break;
+            case ASTNodeKind::LockStmt:        visit(static_cast<LockStmt&>(*stmt)); break;
+            case ASTNodeKind::UnlockStmt:      visit(static_cast<UnlockStmt&>(*stmt)); break;
+            case ASTNodeKind::WidthStmt:       visit(static_cast<WidthStmt&>(*stmt)); break;
+            case ASTNodeKind::KillStmt:        visit(static_cast<KillStmt&>(*stmt)); break;
+            case ASTNodeKind::NameStmt:        visit(static_cast<NameStmt&>(*stmt)); break;
+            case ASTNodeKind::MkDirStmt:       visit(static_cast<MkDirStmt&>(*stmt)); break;
+            case ASTNodeKind::RmDirStmt:       visit(static_cast<RmDirStmt&>(*stmt)); break;
+            case ASTNodeKind::ChDirStmt:       visit(static_cast<ChDirStmt&>(*stmt)); break;
+            case ASTNodeKind::ChDriveStmt:     visit(static_cast<ChDriveStmt&>(*stmt)); break;
+            case ASTNodeKind::FileCopyStmt:    visit(static_cast<FileCopyStmt&>(*stmt)); break;
             case ASTNodeKind::EndStmt:
                 c_.emitLine("vb6_End();");
                 break;
@@ -1003,16 +1189,24 @@ void CCodeGen::visit(GoToStmt& node) {
 
 void CCodeGen::visit(OnErrorStmt& node) {
     switch (node.errorKind) {
-        case OnErrorKind::GoToLabel:
-            c_.emitLine("/* On Error GoTo " + node.labelName + " */");
-            // SEH: __try { ... } __except(...) { goto label; }
-            // 简化: 暂不生成SEH, 留P4阶段
+        case OnErrorKind::GoToLabel: {
+            // On Error GoTo label
+            // MVP: 使用全局错误标志 + 每条可出错语句后检查
+            // 生成: vb6_err_handler_label = "label"; vb6_err_jmp_active = 1;
+            // 注意: 完整实现需要每条语句后插入错误检查, 当前MVP只记录标签
+            c_.emitLine("vb6_err_handler_label = vb6_label_" + cIdent(node.labelName) + ";");
+            c_.emitLine("vb6_err_jmp_active = 1;");
             break;
-        case OnErrorKind::ResumeNext:
-            c_.emitLine("/* On Error Resume Next */");
+        }
+        case OnErrorKind::ResumeNext: {
+            // On Error Resume Next
+            c_.emitLine("vb6_err_resume_next = 1;");
             break;
+        }
         case OnErrorKind::GoToZero:
-            c_.emitLine("/* On Error GoTo 0 */");
+            // On Error GoTo 0: 禁用错误处理
+            c_.emitLine("vb6_err_resume_next = 0;");
+            c_.emitLine("vb6_err_jmp_active = 0;");
             break;
     }
 }
@@ -1052,26 +1246,51 @@ void CCodeGen::visit(CallStmt& node) {
                     std::transform(memLower.begin(), memLower.end(), memLower.begin(), ::tolower);
 
                     if (objLower == "debug" && memLower == "print") {
-                        // Debug.Print: 将所有参数转为BSTR后拼接输出
+                        // Debug.Print: 逐参数输出, 最后换行
+                        // 每个参数转为BSTR后用vb6_DebugWriteBSTR输出
                         if (call.positional.empty()) {
-                            c_.emitLine("vb6_Debug_Print(NULL);");
-                        } else if (call.positional.size() == 1) {
-                            emitExpr(*call.positional[0]);
-                            c_.emitLine("vb6_Debug_Print(" + lastExpr_ + ");");
+                            c_.emitLine("vb6_DebugWriteNewline();");
                         } else {
-                            // 多参数: 每个参数用vb6_Str包装(整数)或直接传(BSTR)
-                            emitExpr(*call.positional[0]);
-                            std::string result = lastExpr_;
-                            for (size_t j = 1; j < call.positional.size(); j++) {
+                            // 已知返回BSTR的内置函数前缀
+                            static const std::vector<std::string> bstrFuncs = {
+                                "vb6_BSTR_FromStr", "vb6_Left", "vb6_Right", "vb6_Mid",
+                                "vb6_UCase", "vb6_LCase", "vb6_UCase_str", "vb6_LCase_str",
+                                "vb6_Trim", "vb6_LTrim", "vb6_RTrim", "vb6_Chr",
+                                "vb6_Str", "vb6_CStr", "vb6_Format", "vb6_Hex", "vb6_Oct",
+                                "vb6_Replace", "vb6_Space", "vb6_String", "vb6_StrReverse",
+                                "vb6_BSTR_Concat", "vb6_BSTR_Empty"
+                            };
+                            auto isBstrExpr = [&](const std::string& expr) -> bool {
+                                for (auto& prefix : bstrFuncs) {
+                                    if (expr.compare(0, prefix.size(), prefix) == 0) return true;
+                                }
+                                // vb6_BSTR_ 开头的都是 BSTR
+                                if (expr.compare(0, 8, "vb6_BSTR") == 0) return true;
+                                // VB6_SA_AT(BSTR, ...) 也是 BSTR
+                                if (expr.find("VB6_SA_AT(BSTR,") != std::string::npos) return true;
+                                // 已知BSTR变量名 (小写匹配)
+                                std::string lower = expr;
+                                std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+                                if (knownBstrVars_.count(lower)) return true;
+                                return false;
+                            };
+
+                            for (size_t j = 0; j < call.positional.size(); j++) {
                                 emitExpr(*call.positional[j]);
-                                // 用vb6_BSTR_Concat拼接, 对非BSTR用vb6_Str()转换
-                                // 简化: 统一用vb6_Str包装第二个参数
-                                result = "vb6_BSTR_Concat(" + result + ", vb6_Str((int32_t)" + std::move(lastExpr_) + "))";
+                                std::string val = std::move(lastExpr_);
+                                if (isBstrExpr(val)) {
+                                    // 已经是BSTR, 直接输出
+                                    c_.emitLine("vb6_DebugWriteBSTR(" + val + ");");
+                                } else {
+                                    // 非BSTR, 用vb6_Str转BSTR后输出
+                                    // 对于整数/布尔值直接转, 浮点数用vb6_CStr
+                                    c_.emitLine("vb6_DebugWriteBSTR(vb6_Str((int32_t)(" + val + ")));");
+                                }
                             }
-                            c_.emitLine("vb6_Debug_Print(" + result + ");");
+                            c_.emitLine("vb6_DebugWriteNewline();");
                         }
                         return;
-                }
+                    }
             }
         }
     }
@@ -1083,7 +1302,270 @@ void CCodeGen::visit(CallStmt& node) {
 }
 
 void CCodeGen::visit(ReDimStmt& node) {
-    c_.emitLine("/* TODO: ReDim " + node.varName + " */");
+    std::string cName = cIdent(node.varName);
+    Vb6Type elemType = resolveArrayElemType(node.asType.get());
+    std::string saElemType = mapSaElemType(elemType);
+
+    if (node.dimensions.empty()) return;
+
+    auto& dim = node.dimensions[0];
+    std::string lBound = "0";
+    std::string uBound = "0";
+    if (dim.lower) {
+        emitExpr(*dim.lower);
+        lBound = std::move(lastExpr_);
+    }
+    if (dim.upper) {
+        emitExpr(*dim.upper);
+        uBound = std::move(lastExpr_);
+    }
+
+    if (node.preserve) {
+        c_.emitLine(cName + " = vb6_SafeArrayReDimPreserve1D(" + cName + ", " + lBound + ", " + uBound + ");");
+    } else {
+        c_.emitLine("vb6_SafeArrayDestroy1D(" + cName + ");");
+        c_.emitLine(cName + " = vb6_SafeArrayReDim1D(" + saElemType + ", " + lBound + ", " + uBound + ");");
+    }
+}
+
+void CCodeGen::visit(EraseStmt& node) {
+    for (auto& name : node.varNames) {
+        std::string cName = cIdent(name);
+        c_.emitLine("vb6_SafeArrayDestroy1D(" + cName + "); " + cName + " = NULL;");
+    }
+}
+
+void CCodeGen::visit(OpenStmt& node) {
+    // VB6: Open pathname For Mode [Access access] As #filenumber
+    // C:   vb6_Open(pathname, mode, access, filenumber)
+    emitExpr(*node.pathName);
+    std::string pathName = std::move(lastExpr_);
+
+    // OpenMode → 数值: Input=1, Output=2, Random=4, Append=8, Binary=16
+    int32_t modeVal = 1;
+    switch (node.mode) {
+        case OpenMode::Input:   modeVal = 1; break;
+        case OpenMode::Output:  modeVal = 2; break;
+        case OpenMode::Random:  modeVal = 4; break;
+        case OpenMode::Append:  modeVal = 8; break;
+        case OpenMode::Binary:  modeVal = 16; break;
+    }
+
+    // OpenAccess → 数值: Read=1, Write=2, ReadWrite=3, Default=0
+    int32_t accessVal = 0;
+    switch (node.access) {
+        case OpenAccess::Read:      accessVal = 1; break;
+        case OpenAccess::Write:     accessVal = 2; break;
+        case OpenAccess::ReadWrite: accessVal = 3; break;
+        case OpenAccess::Default:   accessVal = 0; break;
+    }
+
+    emitExpr(*node.fileNumber);
+    std::string fnum = std::move(lastExpr_);
+
+    c_.emitLine("vb6_Open(" + pathName + ", " + std::to_string(modeVal) + ", " +
+                std::to_string(accessVal) + ", " + fnum + ");");
+}
+
+void CCodeGen::visit(CloseStmt& node) {
+    if (node.fileNumbers.empty()) {
+        c_.emitLine("/* Close All: TODO close all open files */");
+    } else {
+        for (auto& fn : node.fileNumbers) {
+            emitExpr(*fn);
+            c_.emitLine("vb6_Close(" + lastExpr_ + ");");
+        }
+    }
+}
+
+void CCodeGen::visit(PrintStmt& node) {
+    // Print #fnum, expr1; expr2; ...
+    emitExpr(*node.fileNumber);
+    std::string fnum = std::move(lastExpr_);
+
+    // BSTR表达式检测 (复用Debug.Print相同逻辑)
+    static const std::vector<std::string> bstrFuncs = {
+        "vb6_BSTR_FromStr", "vb6_Left", "vb6_Right", "vb6_Mid",
+        "vb6_UCase", "vb6_LCase", "vb6_UCase_str", "vb6_LCase_str",
+        "vb6_Trim", "vb6_LTrim", "vb6_RTrim", "vb6_Chr",
+        "vb6_Str", "vb6_CStr", "vb6_Format", "vb6_Hex", "vb6_Oct",
+        "vb6_Replace", "vb6_Space", "vb6_String", "vb6_StrReverse",
+        "vb6_BSTR_Concat", "vb6_BSTR_Empty"
+    };
+    auto isBstrExpr = [&](const std::string& expr) -> bool {
+        for (auto& prefix : bstrFuncs) {
+            if (expr.compare(0, prefix.size(), prefix) == 0) return true;
+        }
+        if (expr.compare(0, 8, "vb6_BSTR") == 0) return true;
+        if (expr.find("VB6_SA_AT(BSTR,") != std::string::npos) return true;
+        std::string lower = expr;
+        std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+        if (knownBstrVars_.count(lower)) return true;
+        return false;
+    };
+
+    if (node.outputList.empty()) {
+        c_.emitLine("vb6_Print(" + fnum + ", NULL);");
+    } else {
+        for (auto& expr : node.outputList) {
+            emitExpr(*expr);
+            std::string val = lastExpr_;
+            if (isBstrExpr(val)) {
+                // 已经是BSTR, 直接传给vb6_Print
+                c_.emitLine("vb6_Print(" + fnum + ", " + val + ");");
+            } else {
+                // 非BSTR: 转换为BSTR后输出
+                c_.emitLine("vb6_Print(" + fnum + ", vb6_Str((int32_t)(" + val + ")));");
+            }
+        }
+    }
+}
+
+void CCodeGen::visit(WriteStmt& node) {
+    emitExpr(*node.fileNumber);
+    std::string fnum = std::move(lastExpr_);
+
+    static const std::vector<std::string> bstrFuncs = {
+        "vb6_BSTR_FromStr", "vb6_Left", "vb6_Right", "vb6_Mid",
+        "vb6_UCase", "vb6_LCase", "vb6_UCase_str", "vb6_LCase_str",
+        "vb6_Trim", "vb6_LTrim", "vb6_RTrim", "vb6_Chr",
+        "vb6_Str", "vb6_CStr", "vb6_Format", "vb6_Hex", "vb6_Oct",
+        "vb6_Replace", "vb6_Space", "vb6_String", "vb6_StrReverse",
+        "vb6_BSTR_Concat", "vb6_BSTR_Empty"
+    };
+    auto isBstrExpr = [&](const std::string& expr) -> bool {
+        for (auto& prefix : bstrFuncs) {
+            if (expr.compare(0, prefix.size(), prefix) == 0) return true;
+        }
+        if (expr.compare(0, 8, "vb6_BSTR") == 0) return true;
+        if (expr.find("VB6_SA_AT(BSTR,") != std::string::npos) return true;
+        std::string lower = expr;
+        std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+        if (knownBstrVars_.count(lower)) return true;
+        return false;
+    };
+
+    if (node.outputList.empty()) {
+        c_.emitLine("vb6_Write(" + fnum + ", NULL);");
+    } else {
+        for (auto& expr : node.outputList) {
+            emitExpr(*expr);
+            std::string val = lastExpr_;
+            if (isBstrExpr(val)) {
+                c_.emitLine("vb6_Write(" + fnum + ", " + val + ");");
+            } else {
+                c_.emitLine("vb6_Write(" + fnum + ", vb6_Str((int32_t)(" + val + ")));");
+            }
+        }
+    }
+}
+
+void CCodeGen::visit(LineInputStmt& node) {
+    // Line Input #fnum, varName
+    emitExpr(*node.fileNumber);
+    std::string fnum = std::move(lastExpr_);
+    emitExpr(*node.varName);
+    std::string varExpr = lastExpr_;
+    c_.emitLine(varExpr + " = vb6_LineInput(" + fnum + ");");
+}
+
+void CCodeGen::visit(InputStmt& node) {
+    // Input #fnum, var1, var2, ...
+    emitExpr(*node.fileNumber);
+    std::string fnum = std::move(lastExpr_);
+    for (auto& var : node.varList) {
+        emitExpr(*var);
+        std::string varExpr = lastExpr_;
+        c_.emitLine("vb6_Input(" + fnum + ", &" + varExpr + ");");
+    }
+}
+
+void CCodeGen::visit(GetStmt& node) {
+    // Get #fnum, [recnum], var
+    emitExpr(*node.fileNumber);
+    std::string fnum = std::move(lastExpr_);
+    if (node.recordNumber) {
+        emitExpr(*node.recordNumber);
+        std::string recnum = lastExpr_;
+        emitExpr(*node.varName);
+        c_.emitLine("/* TODO: vb6_Get(" + fnum + ", " + recnum + ", &" + lastExpr_ + ") */");
+    } else {
+        c_.emitLine("/* TODO: Get sequential */");
+    }
+}
+
+void CCodeGen::visit(PutStmt& node) {
+    // Put #fnum, [recnum], var
+    emitExpr(*node.fileNumber);
+    std::string fnum = std::move(lastExpr_);
+    if (node.recordNumber) {
+        emitExpr(*node.recordNumber);
+        std::string recnum = lastExpr_;
+        emitExpr(*node.varName);
+        c_.emitLine("/* TODO: vb6_Put(" + fnum + ", " + recnum + ", &" + lastExpr_ + ") */");
+    } else {
+        c_.emitLine("/* TODO: Put sequential */");
+    }
+}
+
+void CCodeGen::visit(SeekStmt& node) {
+    emitExpr(*node.fileNumber);
+    std::string fnum = std::move(lastExpr_);
+    emitExpr(*node.position);
+    c_.emitLine("fseek(vb6_file_table[" + fnum + "], (long)" + lastExpr_ + ", SEEK_SET);");
+}
+
+void CCodeGen::visit(LockStmt& node) {
+    // 简化: 文件锁在单进程场景不需要
+    c_.emitLine("/* Lock: no-op in single-process */");
+}
+
+void CCodeGen::visit(UnlockStmt& node) {
+    // 简化: 文件锁在单进程场景不需要
+    c_.emitLine("/* Unlock: no-op in single-process */");
+}
+
+void CCodeGen::visit(WidthStmt& node) {
+    c_.emitLine("/* Width: no-op */");
+}
+
+void CCodeGen::visit(KillStmt& node) {
+    emitExpr(*node.pathName);
+    c_.emitLine("vb6_Kill(" + lastExpr_ + ");");
+}
+
+void CCodeGen::visit(NameStmt& node) {
+    emitExpr(*node.oldPath);
+    std::string oldP = std::move(lastExpr_);
+    emitExpr(*node.newPath);
+    c_.emitLine("vb6_Name(" + oldP + ", " + lastExpr_ + ");");
+}
+
+void CCodeGen::visit(MkDirStmt& node) {
+    emitExpr(*node.pathName);
+    c_.emitLine("vb6_MkDir(" + lastExpr_ + ");");
+}
+
+void CCodeGen::visit(RmDirStmt& node) {
+    emitExpr(*node.pathName);
+    c_.emitLine("vb6_RmDir(" + lastExpr_ + ");");
+}
+
+void CCodeGen::visit(ChDirStmt& node) {
+    emitExpr(*node.pathName);
+    c_.emitLine("vb6_ChDir(" + lastExpr_ + ");");
+}
+
+void CCodeGen::visit(ChDriveStmt& node) {
+    emitExpr(*node.drive);
+    c_.emitLine("vb6_ChDrive(" + lastExpr_ + ");");
+}
+
+void CCodeGen::visit(FileCopyStmt& node) {
+    emitExpr(*node.source);
+    std::string src = std::move(lastExpr_);
+    emitExpr(*node.destination);
+    c_.emitLine("vb6_FileCopy(" + src + ", " + lastExpr_ + ");");
 }
 
 void CCodeGen::visit(LabelStmt& node) {
@@ -1100,8 +1582,44 @@ void CCodeGen::visit(LocalDeclStmt& node) {
     switch (node.decl->kind) {
         case ASTNodeKind::VariableDecl: {
             auto& var = static_cast<VariableDecl&>(*node.decl);
-            std::string cType = mapTypeRef(var.asType.get());
             std::string cName = cIdent(var.name);
+
+            // 局部数组声明
+            if (!var.dimensions.empty()) {
+                Vb6Type elemType = resolveArrayElemType(var.asType.get());
+                std::string saElemType = mapSaElemType(elemType);
+
+                auto& dim = var.dimensions[0];
+                std::string lBound = "0";
+                std::string uBound = "0";
+                if (dim.lower) {
+                    emitExpr(*dim.lower);
+                    lBound = std::move(lastExpr_);
+                }
+                if (dim.upper) {
+                    emitExpr(*dim.upper);
+                    uBound = std::move(lastExpr_);
+                }
+
+                std::string initCode = "vb6_SafeArrayCreate1D(" + saElemType + ", " + lBound + ", " + uBound + ")";
+                c_.emitLine("vb6_SafeArray1D* " + cName + " = " + initCode + ";");
+
+                // 注册到已知数组集合
+                std::string lower = var.name;
+                std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+                knownArrays_.insert(lower);
+                arrayElemTypes_[lower] = elemType;
+                break;
+            }
+
+            std::string cType = mapTypeRef(var.asType.get());
+
+            // 记录BSTR类型变量名
+            if (cType == "BSTR") {
+                std::string lower = var.name;
+                std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+                knownBstrVars_.insert(lower);
+            }
 
             if (var.initializer) {
                 emitExpr(*var.initializer);
@@ -1149,6 +1667,11 @@ void CCodeGen::visit(SubDecl& node) {
     currentProc_ = sym;
     currentReturnVar_ = "";
 
+    // 清空已知数组集合 (新过程)
+    knownArrays_.clear();
+    arrayElemTypes_.clear();
+    knownBstrVars_.clear();
+
     // 生成过程体
     emitStmtList(node.body);
 
@@ -1172,6 +1695,11 @@ void CCodeGen::visit(FunctionDecl& node) {
     // 查找符号获取参数信息
     auto* sym = symTab_.lookupModule(node.name);
     currentProc_ = sym;
+
+    // 清空已知数组集合 (新过程)
+    knownArrays_.clear();
+    arrayElemTypes_.clear();
+    knownBstrVars_.clear();
 
     // Function返回值变量
     std::string retType = mapTypeRef(node.returnType.get());
@@ -1294,8 +1822,49 @@ void CCodeGen::visit(ConstDecl& node) {
 }
 
 void CCodeGen::visit(VariableDecl& node) {
-    std::string cType = mapTypeRef(node.asType.get());
     std::string cName = cIdent(node.name);
+
+    // 数组声明
+    if (!node.dimensions.empty()) {
+        Vb6Type elemType = resolveArrayElemType(node.asType.get());
+        std::string saElemType = mapSaElemType(elemType);
+        std::string cType = "vb6_SafeArray1D*";
+
+        // 前向声明 → .h
+        if (node.access == AccessLevel::Public) {
+            h_.emitLine("extern " + cType + " " + cName + ";");
+        }
+
+        // 数组创建代码
+        // 目前只支持一维数组
+        auto& dim = node.dimensions[0];
+        std::string lBound = "0";
+        std::string uBound = "0";
+        if (dim.lower) {
+            emitExpr(*dim.lower);
+            lBound = std::move(lastExpr_);
+        }
+        if (dim.upper) {
+            emitExpr(*dim.upper);
+            uBound = std::move(lastExpr_);
+        }
+
+        std::string initCode = "vb6_SafeArrayCreate1D(" + saElemType + ", " + lBound + ", " + uBound + ")";
+        if (node.access == AccessLevel::Public) {
+            c_.emitLine(cType + " " + cName + " = " + initCode + ";");
+        } else {
+            c_.emitLine("static " + cType + " " + cName + " = " + initCode + ";");
+        }
+
+        // 注册到已知数组集合
+        std::string lower = node.name;
+        std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+        knownArrays_.insert(lower);
+        arrayElemTypes_[lower] = elemType;
+        return;
+    }
+
+    std::string cType = mapTypeRef(node.asType.get());
 
     // 前向声明 → .h, 定义 → .c
     if (node.access == AccessLevel::Public) {

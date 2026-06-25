@@ -8,8 +8,10 @@
 #include <wchar.h>
 #include <stdlib.h>
 #include <string.h>
+#include <setjmp.h>
 #include <stdio.h>
 #include <math.h>
+#include <limits.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -184,6 +186,11 @@ int32_t vb6_IsNumeric(VARIANT v);
 int32_t vb6_IsNull(VARIANT v);
 int32_t vb6_IsEmpty(VARIANT v);
 int32_t vb6_IsObject(VARIANT v);
+int32_t vb6_IsArray(VARIANT v);
+int32_t vb6_IsDate(VARIANT v);
+int32_t vb6_IsError(VARIANT v);
+BSTR vb6_TypeName(VARIANT v);
+int32_t vb6_VarType(VARIANT v);
 
 // 内置对象
 void vb6_Debug_Print(BSTR s);
@@ -197,6 +204,12 @@ void vb6_DebugOutputFmt(const char* fmt, ...);
 // 简化版: 单BSTR输出+换行
 void vb6_DebugPrintStr(BSTR s);
 
+// Debug.Print 分项输出: 逐参数输出不换行, 最后统一换行
+void vb6_DebugWriteBSTR(BSTR s);       // 输出BSTR片段(不换行)
+void vb6_DebugWriteLong(int32_t n);    // 输出整数片段(不换行)
+void vb6_DebugWriteDouble(double d);   // 输出浮点片段(不换行)
+void vb6_DebugWriteNewline(void);      // 输出换行
+
 // 整除
 int32_t vb6_IntDiv(int32_t a, int32_t b);
 
@@ -207,6 +220,134 @@ double vb6_Pow(double base, double exp);
 void* vb6_NewObject(const wchar_t* className);
 int32_t vb6_TypeOf(void* obj, const wchar_t* typeName);
 void* vb6_DictAccess(void* obj, const wchar_t* key);
+
+// 字符串函数 (补充)
+BSTR vb6_Replace(BSTR expr, BSTR find, BSTR rep, int32_t start, int32_t count, int32_t compare);
+BSTR vb6_Space(int32_t n);
+BSTR vb6_String(int32_t n, int32_t charCode);
+int32_t vb6_StrComp(BSTR s1, BSTR s2, int32_t compare);
+BSTR vb6_StrReverse(BSTR s);
+int32_t vb6_InStrRev(BSTR haystack, BSTR needle, int32_t start, int32_t compare);
+BSTR vb6_LCase_str(BSTR s);  // LCase$别名
+BSTR vb6_UCase_str(BSTR s);  // UCase$别名
+
+// 数学函数 (补充)
+double vb6_Sin(double x);
+double vb6_Cos(double x);
+double vb6_Tan(double x);
+double vb6_Atn(double x);
+double vb6_Log(double x);
+double vb6_Exp(double x);
+double vb6_Fix(double x);
+double vb6_Int(double x);
+void vb6_Randomize(double seed);
+float vb6_Rnd_Full(int32_t seed);
+
+// 日期时间函数
+double vb6_Now(void);
+double vb6_Date(void);
+double vb6_Time(void);
+int32_t vb6_Year(double date);
+int32_t vb6_Month(double date);
+int32_t vb6_Day(double date);
+int32_t vb6_Hour(double time);
+int32_t vb6_Minute(double time);
+int32_t vb6_Second(double time);
+
+// 类型转换 (补充)
+int16_t vb6_CBool(VARIANT v);
+uint8_t vb6_CByte(VARIANT v);
+float vb6_CSng(VARIANT v);
+double vb6_CDate(VARIANT v);
+BSTR vb6_Hex(int32_t n);
+BSTR vb6_Oct(int32_t n);
+
+// ============================================================
+// SAFEARRAY - VB6 动态/静态数组
+// ============================================================
+
+// 元素类型标识 (用于ReDim/Erase时正确清理)
+typedef enum vb6_safearray_elemtype {
+    vb6_sa_empty = 0,
+    vb6_sa_bool  = 1,   // int16_t
+    vb6_sa_byte  = 2,   // uint8_t
+    vb6_sa_int   = 3,   // int16_t
+    vb6_sa_long  = 4,   // int32_t
+    vb6_sa_single= 5,   // float
+    vb6_sa_double= 6,   // double
+    vb6_sa_bstr  = 7,   // BSTR (需要逐元素释放)
+    vb6_sa_variant=8,   // VARIANT (需要逐元素清理)
+    vb6_sa_ptr   = 9,   // void* (对象引用)
+} vb6_safearray_elemtype;
+
+// 一维数组描述符 (VB6绝大多数用例是一维)
+typedef struct vb6_SafeArray1D {
+    vb6_safearray_elemtype elemType;  // 元素类型
+    int32_t elemSize;                  // 单个元素字节数
+    int32_t lBound;                    // 下界 (VB6默认0, 可指定1)
+    int32_t uBound;                    // 上界
+    int32_t count;                     // 元素个数 = uBound - lBound + 1
+    void*   data;                      // 数据指针 (calloc分配, 零初始化)
+    int32_t isDynamic;                 // 是否动态数组 (ReDim创建)
+} vb6_SafeArray1D;
+
+// 创建一维静态数组
+vb6_SafeArray1D* vb6_SafeArrayCreate1D(vb6_safearray_elemtype elemType,
+    int32_t lBound, int32_t uBound);
+
+// 创建一维动态数组 (ReDim)
+vb6_SafeArray1D* vb6_SafeArrayReDim1D(vb6_safearray_elemtype elemType,
+    int32_t lBound, int32_t uBound);
+
+// ReDim Preserve: 保留原有数据, 调整大小
+vb6_SafeArray1D* vb6_SafeArrayReDimPreserve1D(vb6_SafeArray1D* arr,
+    int32_t newLBound, int32_t newUBound);
+
+// 销毁数组 (释放内存)
+void vb6_SafeArrayDestroy1D(vb6_SafeArray1D* arr);
+
+// 获取/设置元素 (void*通用版)
+void* vb6_SafeArrayGetPtr(vb6_SafeArray1D* arr, int32_t index);
+void  vb6_SafeArrayPutElem(vb6_SafeArray1D* arr, int32_t index, void* value);
+
+// 便捷宏: 按类型访问元素
+#define VB6_SA_AT(type, arr, idx) (((type*)((arr)->data))[(idx) - (arr)->lBound])
+
+// UBound/LBound (替换旧stub)
+int32_t vb6_UBound(vb6_SafeArray1D* safeArray, int32_t dimension);
+int32_t vb6_LBound(vb6_SafeArray1D* safeArray, int32_t dimension);
+
+// 文件 I/O
+int32_t vb6_FreeFile(void);
+int32_t vb6_Open(BSTR pathname, int32_t mode, int32_t access, int32_t filenumber);
+int32_t vb6_Close(int32_t filenumber);
+int32_t vb6_EOF(int32_t filenumber);
+int32_t vb6_LOF(int32_t filenumber);
+int32_t vb6_Loc(int32_t filenumber);
+void vb6_Print(int32_t filenumber, BSTR s);
+void vb6_Write(int32_t filenumber, BSTR s);
+BSTR vb6_LineInput(int32_t filenumber);
+int32_t vb6_Input(int32_t filenumber, BSTR* outVar);
+int32_t vb6_Kill(BSTR pathname);
+int32_t vb6_MkDir(BSTR pathname);
+int32_t vb6_RmDir(BSTR pathname);
+int32_t vb6_ChDir(BSTR pathname);
+int32_t vb6_ChDrive(BSTR drive);
+int32_t vb6_Name(BSTR oldPath, BSTR newPath);
+int32_t vb6_FileCopy(BSTR source, BSTR destination);
+
+// 错误处理
+int32_t vb6_ErrNumber(void);
+BSTR vb6_ErrDescription(void);
+void vb6_ErrClear(void);
+void vb6_RaiseError(int32_t errNum, BSTR description);
+
+// 全局错误处理状态 (由cgen生成的代码直接使用)
+extern int32_t vb6_err_resume_next;  // On Error Resume Next 标志
+extern int32_t vb6_err_jmp_active;    // On Error GoTo label 标志
+extern void* vb6_err_handler_label;   // 错误跳转标签 (MVP, 暂不用)
+extern jmp_buf vb6_error_jmp_buf;     // On Error GoTo label 的 setjmp 缓冲区
+extern int32_t vb6_error_jmp_set;     // setjmp 是否已设置
 
 // 字典访问
 BSTR vb6_BSTR_Concat(BSTR a, BSTR b);

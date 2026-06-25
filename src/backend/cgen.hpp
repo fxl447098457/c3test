@@ -104,6 +104,26 @@ public:
     void visit(ExitStmt& node) override;
     void visit(CallStmt& node) override;
     void visit(ReDimStmt& node) override;
+    void visit(EraseStmt& node) override;
+    void visit(OpenStmt& node) override;
+    void visit(CloseStmt& node) override;
+    void visit(PrintStmt& node) override;
+    void visit(WriteStmt& node) override;
+    void visit(LineInputStmt& node) override;
+    void visit(InputStmt& node) override;
+    void visit(GetStmt& node) override;
+    void visit(PutStmt& node) override;
+    void visit(SeekStmt& node) override;
+    void visit(LockStmt& node) override;
+    void visit(UnlockStmt& node) override;
+    void visit(WidthStmt& node) override;
+    void visit(KillStmt& node) override;
+    void visit(NameStmt& node) override;
+    void visit(MkDirStmt& node) override;
+    void visit(RmDirStmt& node) override;
+    void visit(ChDirStmt& node) override;
+    void visit(ChDriveStmt& node) override;
+    void visit(FileCopyStmt& node) override;
     void visit(LabelStmt& node) override;
     void visit(OptionStmt& node) override;
     void visit(LocalDeclStmt& node) override;
@@ -159,6 +179,15 @@ private:
     // With语句名称栈
     std::vector<std::string> withObjectVars_;
 
+    // 当前过程的已知数组变量名集合 (小写)
+    // 用于IndexOrCallExpr中区分数组访问(vs函数调用)
+    std::unordered_set<std::string> knownArrays_;
+    // 数组名 → 元素Vb6Type (小写key)
+    std::unordered_map<std::string, Vb6Type> arrayElemTypes_;
+
+    // 已知BSTR变量名集合 (小写) - 用于Debug.Print等场景判断表达式类型
+    std::unordered_set<std::string> knownBstrVars_;
+
     // ---- 类型映射 ----
 
     // Vb6Type → C类型字符串
@@ -202,6 +231,14 @@ private:
 
     // ---- 二元运算符映射 ----
     std::string mapBinaryOp(BinaryOp op) const;
+
+    // ---- 数组辅助 ----
+    // VB6类型 → SAFEARRAY元素类型C枚举名
+    std::string mapSaElemType(Vb6Type type) const;
+    // VB6类型 → SAFEARRAY元素C类型 (如int32_t)
+    std::string mapSaElemCType(Vb6Type type) const;
+    // 从ArrayTypeRef或asType获取元素Vb6Type
+    Vb6Type resolveArrayElemType(ASTNode* typeRef) const;
 };
 
 } // namespace vb6c3

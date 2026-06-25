@@ -8,6 +8,9 @@
 #include <math.h>
 #include <stdarg.h>
 #include <time.h>
+#ifdef _WIN32
+#include <direct.h>
+#endif
 
 // ============================================================
 // BSTR 操作
@@ -312,6 +315,27 @@ void vb6_DebugPrintStr(BSTR s) {
     fflush(stdout);
 }
 
+// Debug.Print 分项输出
+void vb6_DebugWriteBSTR(BSTR s) {
+    if (s) wprintf(L"%ls", s);
+    fflush(stdout);
+}
+
+void vb6_DebugWriteLong(int32_t n) {
+    wprintf(L"%d", n);
+    fflush(stdout);
+}
+
+void vb6_DebugWriteDouble(double d) {
+    wprintf(L"%g", d);
+    fflush(stdout);
+}
+
+void vb6_DebugWriteNewline(void) {
+    wprintf(L"\n");
+    fflush(stdout);
+}
+
 void vb6_DebugOutputFmt(const char* fmt, ...) {
     va_list args;
     va_start(args, fmt);
@@ -368,7 +392,685 @@ void vb6_Exit(void) {
     // 清理运行时资源
 }
 
-void vb6_End(void) {
-    // 终止程序
-    exit(0);
+int32_t vb6_VariantToLong(VARIANT v) {
+    switch (v.vt) {
+        case vb6_vtBoolean: return v.boolVal ? -1 : 0;
+        case vb6_vtByte:    return (int32_t)v.bVal;
+        case vb6_vtInteger: return (int32_t)v.iVal;
+        case vb6_vtLong:    return v.lVal;
+        case vb6_vtSingle:  return (int32_t)round(v.fltVal);
+        case vb6_vtDouble:  return (int32_t)round(v.dblVal);
+        case vb6_vtCurrency:return (int32_t)(v.cyVal / 10000);
+        case vb6_vtBSTR:    return (int32_t)vb6_Val(v.bstrVal);
+        default:            return 0;
+    }
+}
+
+double vb6_VariantToDouble(VARIANT v) {
+    switch (v.vt) {
+        case vb6_vtBoolean: return v.boolVal ? -1.0 : 0.0;
+        case vb6_vtByte:    return (double)v.bVal;
+        case vb6_vtInteger: return (double)v.iVal;
+        case vb6_vtLong:    return (double)v.lVal;
+        case vb6_vtSingle:  return (double)v.fltVal;
+        case vb6_vtDouble:  return v.dblVal;
+        case vb6_vtCurrency:return (double)v.cyVal / 10000.0;
+        case vb6_vtBSTR:    return vb6_Val(v.bstrVal);
+        default:            return 0.0;
+    }
+}
+
+BSTR vb6_VariantToString(VARIANT v) {
+    return vb6_CStr(v);
+}
+
+// ============================================================
+// 字符串函数 (补充)
+// ============================================================
+
+BSTR vb6_Replace(BSTR expr, BSTR find, BSTR rep, int32_t start, int32_t count, int32_t compare) {
+    (void)compare;  // 简化: 仅支持二进制比较
+    if (!expr || !find) return expr ? vb6_BSTR_FromStr(expr) : vb6_BSTR_Empty();
+    int32_t exprLen = vb6_BSTR_Len(expr);
+    int32_t findLen = vb6_BSTR_Len(find);
+    int32_t repLen = rep ? vb6_BSTR_Len(rep) : 0;
+    if (findLen == 0 || exprLen == 0) return vb6_BSTR_FromStr(expr);
+
+    if (start < 1) start = 1;
+    int32_t maxCount = (count == -1) ? INT32_MAX : count;
+
+    // 计算结果长度
+    int32_t matches = 0;
+    int32_t pos = start - 1;
+    while (matches < maxCount) {
+        wchar_t* found = wcsstr(expr + pos, find);
+        if (!found) break;
+        matches++;
+        pos = (int32_t)(found - expr) + findLen;
+    }
+    if (matches == 0) return vb6_BSTR_FromStr(expr);
+
+    int32_t resultLen = exprLen + matches * (repLen - findLen);
+    uint32_t* p = (uint32_t*)malloc(sizeof(uint32_t) + (resultLen + 1) * sizeof(wchar_t));
+    if (!p) return NULL;
+    *p = (uint32_t)resultLen;
+    BSTR result = (BSTR)(p + 1);
+
+    // 执行替换
+    pos = start - 1;
+    int32_t outPos = 0;
+    int32_t done = 0;
+    while (done < matches) {
+        wchar_t* found = wcsstr(expr + pos, find);
+        if (!found) break;
+        int32_t beforeLen = (int32_t)(found - expr) - pos;
+        if (beforeLen > 0) {
+            memcpy(result + outPos, expr + pos, beforeLen * sizeof(wchar_t));
+            outPos += beforeLen;
+        }
+        if (repLen > 0) {
+            memcpy(result + outPos, rep, repLen * sizeof(wchar_t));
+            outPos += repLen;
+        }
+        pos = (int32_t)(found - expr) + findLen;
+        done++;
+    }
+    // 剩余部分
+    int32_t remain = exprLen - pos;
+    if (remain > 0) memcpy(result + outPos, expr + pos, remain * sizeof(wchar_t));
+    result[resultLen] = L'\0';
+    return result;
+}
+
+BSTR vb6_Space(int32_t n) {
+    if (n <= 0) return vb6_BSTR_Empty();
+    wchar_t* buf = (wchar_t*)malloc((n + 1) * sizeof(wchar_t));
+    for (int32_t i = 0; i < n; i++) buf[i] = L' ';
+    buf[n] = L'\0';
+    BSTR result = vb6_BSTR_FromStr(buf);
+    free(buf);
+    return result;
+}
+
+BSTR vb6_String(int32_t n, int32_t charCode) {
+    if (n <= 0) return vb6_BSTR_Empty();
+    wchar_t* buf = (wchar_t*)malloc((n + 1) * sizeof(wchar_t));
+    for (int32_t i = 0; i < n; i++) buf[i] = (wchar_t)charCode;
+    buf[n] = L'\0';
+    BSTR result = vb6_BSTR_FromStr(buf);
+    free(buf);
+    return result;
+}
+
+int32_t vb6_StrComp(BSTR s1, BSTR s2, int32_t compare) {
+    (void)compare;  // 简化: 仅二进制比较
+    if (!s1 && !s2) return 0;
+    if (!s1) return -1;
+    if (!s2) return 1;
+    int32_t len1 = vb6_BSTR_Len(s1);
+    int32_t len2 = vb6_BSTR_Len(s2);
+    int32_t minLen = (len1 < len2) ? len1 : len2;
+    int cmp = memcmp(s1, s2, minLen * sizeof(wchar_t));
+    if (cmp != 0) return (cmp < 0) ? -1 : 1;
+    if (len1 < len2) return -1;
+    if (len1 > len2) return 1;
+    return 0;
+}
+
+BSTR vb6_StrReverse(BSTR s) {
+    if (!s) return vb6_BSTR_Empty();
+    int32_t len = vb6_BSTR_Len(s);
+    wchar_t* buf = (wchar_t*)malloc((len + 1) * sizeof(wchar_t));
+    for (int32_t i = 0; i < len; i++) buf[i] = s[len - 1 - i];
+    buf[len] = L'\0';
+    BSTR result = vb6_BSTR_FromStr(buf);
+    free(buf);
+    return result;
+}
+
+int32_t vb6_InStrRev(BSTR haystack, BSTR needle, int32_t start, int32_t compare) {
+    (void)compare;
+    if (!haystack || !needle) return 0;
+    int32_t hLen = vb6_BSTR_Len(haystack);
+    int32_t nLen = vb6_BSTR_Len(needle);
+    if (nLen == 0) return hLen;
+    if (nLen > hLen) return 0;
+    if (start <= 0 || start > hLen) start = hLen;
+    for (int32_t i = start - nLen; i >= 0; i--) {
+        if (memcmp(haystack + i, needle, nLen * sizeof(wchar_t)) == 0) {
+            return i + 1;  // 1-based
+        }
+    }
+    return 0;
+}
+
+BSTR vb6_LCase_str(BSTR s) { return vb6_LCase(s); }  // 别名
+BSTR vb6_UCase_str(BSTR s) { return vb6_UCase(s); }  // 别名
+
+// ============================================================
+// 数学函数 (补充)
+// ============================================================
+
+double vb6_Sin(double x) { return sin(x); }
+double vb6_Cos(double x) { return cos(x); }
+double vb6_Tan(double x) { return tan(x); }
+double vb6_Atn(double x) { return atan(x); }
+double vb6_Log(double x) { return log(x); }
+double vb6_Exp(double x) { return exp(x); }
+double vb6_Fix(double x) { return (x >= 0) ? floor(x) : ceil(x); }
+double vb6_Int(double x) { return floor(x); }
+
+void vb6_Randomize(double seed) {
+    if (seed == 0.0) {
+        srand((unsigned int)time(NULL));
+    } else {
+        srand((unsigned int)seed);
+    }
+}
+
+float vb6_Rnd_Full(int32_t seed) {
+    if (seed < 0) {
+        srand((unsigned int)seed);
+    }
+    // seed > 0 或省略: 返回下一个随机数
+    // seed == 0: 返回上一个随机数 (简化: 仍返回新值)
+    return (float)rand() / (float)RAND_MAX;
+}
+
+// ============================================================
+// 日期时间函数
+// ============================================================
+
+static int32_t vb6_date_to_serial(int32_t year, int32_t month, int32_t day) {
+    // Excel/Lotus日期序列号: 1900-01-01 = 1 (含Lotus bug: 1900-02-29 = 60)
+    if (month <= 2) { year--; month += 12; }
+    int32_t a = year / 100;
+    int32_t b = 2 - a + a / 4;
+    return (int32_t)(365.25 * (year + 4716)) + (int32_t)(30.6001 * (month + 1)) + day + b - 1524;
+    // 调整到VB6的基准(1899-12-30 = 0)
+}
+
+static double vb6_now_serial(void) {
+    time_t t = time(NULL);
+    struct tm* lt = localtime(&t);
+    int32_t datePart = vb6_date_to_serial(1900 + lt->tm_year, 1 + lt->tm_mon, lt->tm_mday)
+                     - vb6_date_to_serial(1899, 12, 30);
+    double timePart = (lt->tm_hour * 3600.0 + lt->tm_min * 60.0 + lt->tm_sec) / 86400.0;
+    return (double)datePart + timePart;
+}
+
+double vb6_Now(void) { return vb6_now_serial(); }
+double vb6_Date(void) { return (double)(int32_t)vb6_now_serial(); }
+double vb6_Time(void) { double n = vb6_now_serial(); return n - (double)(int32_t)n; }
+
+int32_t vb6_Year(double date) {
+    // 简化: 用localtime反推
+    (void)date;
+    time_t t = time(NULL);
+    struct tm* lt = localtime(&t);
+    return 1900 + lt->tm_year;
+}
+
+int32_t vb6_Month(double date) {
+    (void)date;
+    time_t t = time(NULL);
+    struct tm* lt = localtime(&t);
+    return 1 + lt->tm_mon;
+}
+
+int32_t vb6_Day(double date) {
+    (void)date;
+    time_t t = time(NULL);
+    struct tm* lt = localtime(&t);
+    return lt->tm_mday;
+}
+
+int32_t vb6_Hour(double time) {
+    double t = time - (double)(int32_t)time;
+    if (t < 0) t += 1.0;
+    return (int32_t)(t * 24.0) % 24;
+}
+
+int32_t vb6_Minute(double time) {
+    double t = time - (double)(int32_t)time;
+    if (t < 0) t += 1.0;
+    return (int32_t)(t * 1440.0) % 60;
+}
+
+int32_t vb6_Second(double time) {
+    double t = time - (double)(int32_t)time;
+    if (t < 0) t += 1.0;
+    return (int32_t)(t * 86400.0) % 60;
+}
+
+// ============================================================
+// 类型转换 (补充)
+// ============================================================
+
+int16_t vb6_CBool(VARIANT v) {
+    double d = vb6_VariantToDouble(v);
+    return (d != 0.0) ? -1 : 0;  // VB6 True = -1
+}
+
+uint8_t vb6_CByte(VARIANT v) {
+    return (uint8_t)vb6_VariantToLong(v);
+}
+
+float vb6_CSng(VARIANT v) {
+    return (float)vb6_VariantToDouble(v);
+}
+
+double vb6_CDate(VARIANT v) {
+    // 简化: 仅支持从字符串解析日期, 或从数值转换
+    if (v.vt == vb6_vtDouble || v.vt == vb6_vtSingle || v.vt == vb6_vtLong || v.vt == vb6_vtInteger)
+        return vb6_VariantToDouble(v);
+    return 0.0;
+}
+
+BSTR vb6_Hex(int32_t n) {
+    wchar_t buf[16];
+    swprintf(buf, 16, L"%X", n);
+    return vb6_BSTR_FromStr(buf);
+}
+
+BSTR vb6_Oct(int32_t n) {
+    wchar_t buf[16];
+    swprintf(buf, 16, L"%o", n);
+    return vb6_BSTR_FromStr(buf);
+}
+
+// ============================================================
+// SAFEARRAY - VB6 数组实现
+// ============================================================
+
+// 安全数组元素大小表
+static int32_t vb6_sa_elem_size(vb6_safearray_elemtype t) {
+    switch (t) {
+        case vb6_sa_bool:    return (int32_t)sizeof(int16_t);
+        case vb6_sa_byte:    return (int32_t)sizeof(uint8_t);
+        case vb6_sa_int:     return (int32_t)sizeof(int16_t);
+        case vb6_sa_long:    return (int32_t)sizeof(int32_t);
+        case vb6_sa_single:  return (int32_t)sizeof(float);
+        case vb6_sa_double:  return (int32_t)sizeof(double);
+        case vb6_sa_bstr:    return (int32_t)sizeof(BSTR);
+        case vb6_sa_variant: return (int32_t)sizeof(VARIANT);
+        case vb6_sa_ptr:     return (int32_t)sizeof(void*);
+        default:             return 4;
+    }
+}
+
+vb6_SafeArray1D* vb6_SafeArrayCreate1D(vb6_safearray_elemtype elemType,
+    int32_t lBound, int32_t uBound) {
+    vb6_SafeArray1D* arr = (vb6_SafeArray1D*)calloc(1, sizeof(vb6_SafeArray1D));
+    if (!arr) return NULL;
+    arr->elemType = elemType;
+    arr->elemSize = vb6_sa_elem_size(elemType);
+    arr->lBound = lBound;
+    arr->uBound = uBound;
+    arr->count = uBound - lBound + 1;
+    arr->isDynamic = 0;
+    if (arr->count > 0) {
+        arr->data = calloc((size_t)arr->count, (size_t)arr->elemSize);
+    }
+    return arr;
+}
+
+vb6_SafeArray1D* vb6_SafeArrayReDim1D(vb6_safearray_elemtype elemType,
+    int32_t lBound, int32_t uBound) {
+    vb6_SafeArray1D* arr = vb6_SafeArrayCreate1D(elemType, lBound, uBound);
+    if (arr) arr->isDynamic = 1;
+    return arr;
+}
+
+vb6_SafeArray1D* vb6_SafeArrayReDimPreserve1D(vb6_SafeArray1D* arr,
+    int32_t newLBound, int32_t newUBound) {
+    if (!arr) return vb6_SafeArrayReDim1D(vb6_sa_empty, newLBound, newUBound);
+
+    int32_t newCount = newUBound - newLBound + 1;
+    if (newCount <= 0) {
+        vb6_SafeArrayDestroy1D(arr);
+        return NULL;
+    }
+
+    // 分配新数据区 (零初始化)
+    void* newData = calloc((size_t)newCount, (size_t)arr->elemSize);
+    if (!newData) return arr;  // 分配失败, 返回原数组
+
+    // 复制旧数据到新区域 (取交集)
+    int32_t copyStart = (arr->lBound > newLBound) ? arr->lBound : newLBound;
+    int32_t copyEnd   = (arr->uBound < newUBound) ? arr->uBound : newUBound;
+    if (copyStart <= copyEnd) {
+        int32_t srcOff = copyStart - arr->lBound;
+        int32_t dstOff = copyStart - newLBound;
+        int32_t copyLen = (copyEnd - copyStart + 1) * arr->elemSize;
+        memcpy((char*)newData + dstOff * arr->elemSize,
+               (char*)arr->data + srcOff * arr->elemSize,
+               (size_t)copyLen);
+    }
+
+    // BSTR元素: 旧区域中被丢弃的元素需要释放
+    if (arr->elemType == vb6_sa_bstr) {
+        for (int32_t i = arr->lBound; i <= arr->uBound; i++) {
+            // 在新范围之外的BSTR需要释放
+            if (i < newLBound || i > newUBound) {
+                BSTR* slot = &VB6_SA_AT(BSTR, arr, i);
+                if (*slot) vb6_BSTR_Free(*slot);
+            }
+        }
+    }
+
+    free(arr->data);
+    arr->data = newData;
+    arr->lBound = newLBound;
+    arr->uBound = newUBound;
+    arr->count = newCount;
+    return arr;
+}
+
+void vb6_SafeArrayDestroy1D(vb6_SafeArray1D* arr) {
+    if (!arr) return;
+    // BSTR元素: 逐个释放
+    if (arr->elemType == vb6_sa_bstr && arr->data) {
+        for (int32_t i = 0; i < arr->count; i++) {
+            BSTR* slot = (BSTR*)((char*)arr->data + i * arr->elemSize);
+            if (*slot) vb6_BSTR_Free(*slot);
+        }
+    }
+    // VARIANT元素: 逐个清理BSTR
+    if (arr->elemType == vb6_sa_variant && arr->data) {
+        for (int32_t i = 0; i < arr->count; i++) {
+            VARIANT* slot = (VARIANT*)((char*)arr->data + i * arr->elemSize);
+            if (slot->vt == vb6_vtBSTR && slot->bstrVal) {
+                vb6_BSTR_Free(slot->bstrVal);
+            }
+        }
+    }
+    if (arr->data) free(arr->data);
+    free(arr);
+}
+
+void* vb6_SafeArrayGetPtr(vb6_SafeArray1D* arr, int32_t index) {
+    if (!arr || index < arr->lBound || index > arr->uBound) return NULL;
+    return (char*)arr->data + (index - arr->lBound) * arr->elemSize;
+}
+
+void vb6_SafeArrayPutElem(vb6_SafeArray1D* arr, int32_t index, void* value) {
+    if (!arr || index < arr->lBound || index > arr->uBound) return;
+    void* dest = (char*)arr->data + (index - arr->lBound) * arr->elemSize;
+    // BSTR: 先释放旧值, 再赋新值
+    if (arr->elemType == vb6_sa_bstr) {
+        BSTR* slot = (BSTR*)dest;
+        if (*slot) vb6_BSTR_Free(*slot);
+        BSTR newVal = *(BSTR*)value;
+        *slot = newVal;
+    } else {
+        memcpy(dest, value, (size_t)arr->elemSize);
+    }
+}
+
+int32_t vb6_UBound(vb6_SafeArray1D* safeArray, int32_t dimension) {
+    (void)dimension;  // 一维数组忽略维度参数
+    if (!safeArray) return 0;
+    return safeArray->uBound;
+}
+
+int32_t vb6_LBound(vb6_SafeArray1D* safeArray, int32_t dimension) {
+    (void)dimension;
+    if (!safeArray) return 0;
+    return safeArray->lBound;
+}
+
+// ============================================================
+// 文件 I/O (MVP)
+// ============================================================
+
+// VB6文件I/O使用通道号(1-511), 我们用文件指针表实现
+#define VB6_MAX_FILES 32
+static FILE* vb6_file_table[VB6_MAX_FILES] = {0};
+static int32_t vb6_file_mode[VB6_MAX_FILES] = {0};  // 1=Input, 2=Output, 4=Random, 8=Append, 16=Binary
+
+int32_t vb6_FreeFile(void) {
+    for (int32_t i = 1; i < VB6_MAX_FILES; i++) {
+        if (!vb6_file_table[i]) return i;
+    }
+    return -1;  // 无可用通道
+}
+
+int32_t vb6_Open(BSTR pathname, int32_t mode, int32_t access, int32_t filenumber) {
+    (void)access;  // 简化: 忽略access参数
+    if (filenumber < 1 || filenumber >= VB6_MAX_FILES) return 0;
+    if (vb6_file_table[filenumber]) return 0;  // 已打开
+
+    // pathname: BSTR → 窄字符串
+    int32_t len = vb6_BSTR_Len(pathname);
+    char* narrow = (char*)malloc(len + 1);
+    for (int32_t i = 0; i < len; i++) narrow[i] = (char)pathname[i];
+    narrow[len] = '\0';
+
+    const char* modeStr = "";
+    switch (mode) {
+        case 1: modeStr = "r"; break;   // Input
+        case 2: modeStr = "w"; break;   // Output
+        case 4: modeStr = "r+b"; break; // Random
+        case 8: modeStr = "a"; break;   // Append
+        case 16: modeStr = "rb"; break; // Binary
+        default: free(narrow); return 0;
+    }
+
+    // Random/Binary模式需要文件存在才能r+b, 否则先创建
+    FILE* f = NULL;
+    if (mode == 4) {
+        f = fopen(narrow, "r+b");
+        if (!f) f = fopen(narrow, "w+b");
+    } else {
+        f = fopen(narrow, modeStr);
+    }
+    free(narrow);
+
+    if (!f) return 0;
+    vb6_file_table[filenumber] = f;
+    vb6_file_mode[filenumber] = mode;
+    return -1;  // True
+}
+
+int32_t vb6_Close(int32_t filenumber) {
+    if (filenumber < 1 || filenumber >= VB6_MAX_FILES) return 0;
+    if (vb6_file_table[filenumber]) {
+        fclose(vb6_file_table[filenumber]);
+        vb6_file_table[filenumber] = NULL;
+        vb6_file_mode[filenumber] = 0;
+    }
+    return -1;
+}
+
+int32_t vb6_EOF(int32_t filenumber) {
+    if (filenumber < 1 || filenumber >= VB6_MAX_FILES || !vb6_file_table[filenumber]) return -1;
+    FILE* f = vb6_file_table[filenumber];
+    int c = fgetc(f);
+    if (c == EOF) return -1;  // True
+    ungetc(c, f);
+    return 0;  // False
+}
+
+int32_t vb6_LOF(int32_t filenumber) {
+    if (filenumber < 1 || filenumber >= VB6_MAX_FILES || !vb6_file_table[filenumber]) return 0;
+    FILE* f = vb6_file_table[filenumber];
+    long cur = ftell(f);
+    fseek(f, 0, SEEK_END);
+    long size = ftell(f);
+    fseek(f, cur, SEEK_SET);
+    return (int32_t)size;
+}
+
+int32_t vb6_Loc(int32_t filenumber) {
+    if (filenumber < 1 || filenumber >= VB6_MAX_FILES || !vb6_file_table[filenumber]) return 0;
+    // 简化: 返回当前字节位置 / 128 (VB6 Random模式)
+    return (int32_t)(ftell(vb6_file_table[filenumber]) / 128) + 1;
+}
+
+void vb6_Print(int32_t filenumber, BSTR s) {
+    if (filenumber < 1 || filenumber >= VB6_MAX_FILES || !vb6_file_table[filenumber]) return;
+    FILE* f = vb6_file_table[filenumber];
+    if (s) {
+        int32_t len = vb6_BSTR_Len(s);
+        for (int32_t i = 0; i < len; i++) fputc((char)s[i], f);
+    }
+    fputc('\n', f);
+    fflush(f);
+}
+
+void vb6_Write(int32_t filenumber, BSTR s) {
+    if (filenumber < 1 || filenumber >= VB6_MAX_FILES || !vb6_file_table[filenumber]) return;
+    FILE* f = vb6_file_table[filenumber];
+    fputc('"', f);
+    if (s) {
+        int32_t len = vb6_BSTR_Len(s);
+        for (int32_t i = 0; i < len; i++) fputc((char)s[i], f);
+    }
+    fputc('"', f);
+    fputc(',', f);  // VB6 Write用逗号分隔
+    fflush(f);
+}
+
+BSTR vb6_LineInput(int32_t filenumber) {
+    if (filenumber < 1 || filenumber >= VB6_MAX_FILES || !vb6_file_table[filenumber])
+        return vb6_BSTR_Empty();
+    char buf[4096];
+    if (!fgets(buf, sizeof(buf), vb6_file_table[filenumber]))
+        return vb6_BSTR_Empty();
+    // 去除换行
+    int32_t len = (int32_t)strlen(buf);
+    while (len > 0 && (buf[len-1] == '\n' || buf[len-1] == '\r')) len--;
+    // 转宽字符串
+    wchar_t wbuf[4096];
+    for (int32_t i = 0; i < len; i++) wbuf[i] = (wchar_t)(unsigned char)buf[i];
+    wbuf[len] = L'\0';
+    return vb6_BSTR_FromStr(wbuf);
+}
+
+int32_t vb6_Input(int32_t filenumber, BSTR* outVar) {
+    // 简化: 读取一行
+    BSTR result = vb6_LineInput(filenumber);
+    if (outVar) *outVar = result;
+    return (result != NULL) ? -1 : 0;
+}
+
+int32_t vb6_Kill(BSTR pathname) {
+    int32_t len = vb6_BSTR_Len(pathname);
+    char narrow[512];
+    for (int32_t i = 0; i < len && i < 511; i++) narrow[i] = (char)pathname[i];
+    narrow[len < 512 ? len : 511] = '\0';
+    return (remove(narrow) == 0) ? -1 : 0;
+}
+
+// Helper: BSTR → narrow string
+static void vb6_bstr_to_narrow(BSTR bstr, char* buf, int32_t bufSize) {
+    int32_t len = vb6_BSTR_Len(bstr);
+    if (len >= bufSize) len = bufSize - 1;
+    for (int32_t i = 0; i < len; i++) buf[i] = (char)bstr[i];
+    buf[len] = '\0';
+}
+
+int32_t vb6_MkDir(BSTR pathname) {
+    char narrow[512];
+    vb6_bstr_to_narrow(pathname, narrow, sizeof(narrow));
+#ifdef _WIN32
+    return (_mkdir(narrow) == 0) ? -1 : 0;
+#else
+    return (mkdir(narrow, 0755) == 0) ? -1 : 0;
+#endif
+}
+
+int32_t vb6_RmDir(BSTR pathname) {
+    char narrow[512];
+    vb6_bstr_to_narrow(pathname, narrow, sizeof(narrow));
+#ifdef _WIN32
+    return (_rmdir(narrow) == 0) ? -1 : 0;
+#else
+    return (rmdir(narrow) == 0) ? -1 : 0;
+#endif
+}
+
+int32_t vb6_ChDir(BSTR pathname) {
+    char narrow[512];
+    vb6_bstr_to_narrow(pathname, narrow, sizeof(narrow));
+#ifdef _WIN32
+    return (_chdir(narrow) == 0) ? -1 : 0;
+#else
+    return (chdir(narrow) == 0) ? -1 : 0;
+#endif
+}
+
+int32_t vb6_ChDrive(BSTR drive) {
+    (void)drive;  // 简化: 不实现驱动器切换
+    return -1;
+}
+
+int32_t vb6_Name(BSTR oldPath, BSTR newPath) {
+    char oldNarrow[512], newNarrow[512];
+    vb6_bstr_to_narrow(oldPath, oldNarrow, sizeof(oldNarrow));
+    vb6_bstr_to_narrow(newPath, newNarrow, sizeof(newNarrow));
+    return (rename(oldNarrow, newNarrow) == 0) ? -1 : 0;
+}
+
+int32_t vb6_FileCopy(BSTR source, BSTR destination) {
+    char srcNarrow[512], dstNarrow[512];
+    vb6_bstr_to_narrow(source, srcNarrow, sizeof(srcNarrow));
+    vb6_bstr_to_narrow(destination, dstNarrow, sizeof(dstNarrow));
+    FILE* sf = fopen(srcNarrow, "rb");
+    if (!sf) return 0;
+    FILE* df = fopen(dstNarrow, "wb");
+    if (!df) { fclose(sf); return 0; }
+    char buf[4096];
+    size_t n;
+    while ((n = fread(buf, 1, sizeof(buf), sf)) > 0) {
+        fwrite(buf, 1, n, df);
+    }
+    fclose(sf);
+    fclose(df);
+    return -1;
+}
+
+// ============================================================
+// 错误处理 (MVP: 全局标志 + setjmp/longjmp)
+// ============================================================
+
+// 全局Err对象
+typedef struct vb6_ErrObject {
+    int32_t number;
+    BSTR description;
+    BSTR source;
+} vb6_ErrObject;
+
+static vb6_ErrObject vb6_err = {0, NULL, NULL};
+
+// 全局错误处理状态 (由cgen生成的代码直接使用)
+int32_t vb6_err_resume_next = 0;
+int32_t vb6_err_jmp_active = 0;
+void* vb6_err_handler_label = NULL;
+
+// 错误跳转缓冲区 (支持On Error GoTo label)
+#include <setjmp.h>
+jmp_buf vb6_error_jmp_buf;
+int32_t vb6_error_jmp_set = 0;
+
+int32_t vb6_ErrNumber(void) { return vb6_err.number; }
+BSTR vb6_ErrDescription(void) { return vb6_err.description; }
+void vb6_ErrClear(void) { vb6_err.number = 0; vb6_err.description = NULL; vb6_err.source = NULL; }
+
+void vb6_RaiseError(int32_t errNum, BSTR description) {
+    vb6_err.number = errNum;
+    vb6_err.description = description;
+    if (vb6_err_resume_next) {
+        // On Error Resume Next: 忽略错误, 继续执行
+        return;
+    }
+    if (vb6_err_jmp_active && vb6_error_jmp_set) {
+        // On Error GoTo label: longjmp 跳到 setjmp 点
+        longjmp(vb6_error_jmp_buf, errNum);
+    }
+    // 未设置错误处理: 终止程序
+    fwprintf(stderr, L"Unhandled VB6 Error #%d: %ls\n", errNum,
+             description ? description : L"(no description)");
+    exit(errNum);
 }
