@@ -178,7 +178,7 @@ float vb6_Rnd(int32_t seed);
 // 转换函数
 int16_t vb6_CInt(double x);
 int32_t vb6_CLng(double x);
-double vb6_CDbl(VARIANT x);
+double vb6_CDbl(double x);
 BSTR vb6_CStr(VARIANT x);
 
 // 类型检查
@@ -255,9 +255,9 @@ int32_t vb6_Minute(double time);
 int32_t vb6_Second(double time);
 
 // 类型转换 (补充)
-int16_t vb6_CBool(VARIANT v);
-uint8_t vb6_CByte(VARIANT v);
-float vb6_CSng(VARIANT v);
+int16_t vb6_CBool(double v);
+uint8_t vb6_CByte(double v);
+float vb6_CSng(double v);
 double vb6_CDate(VARIANT v);
 BSTR vb6_Hex(int32_t n);
 BSTR vb6_Oct(int32_t n);

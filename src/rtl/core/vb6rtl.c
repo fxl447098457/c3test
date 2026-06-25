@@ -227,15 +227,8 @@ float vb6_Rnd(int32_t seed) {
 
 int16_t vb6_CInt(double x) { return (int16_t)round(x); }
 int32_t vb6_CLng(double x) { return (int32_t)round(x); }
-double vb6_CDbl(VARIANT x) {
-    switch (x.vt) {
-        case vb6_vtInteger: return (double)x.iVal;
-        case vb6_vtLong: return (double)x.lVal;
-        case vb6_vtSingle: return (double)x.fltVal;
-        case vb6_vtDouble: return x.dblVal;
-        case vb6_vtBoolean: return x.boolVal ? -1.0 : 0.0;
-        default: return 0.0;
-    }
+double vb6_CDbl(double x) {
+    return x;
 }
 
 BSTR vb6_CStr(VARIANT x) {
@@ -660,17 +653,16 @@ int32_t vb6_Second(double time) {
 // 类型转换 (补充)
 // ============================================================
 
-int16_t vb6_CBool(VARIANT v) {
-    double d = vb6_VariantToDouble(v);
-    return (d != 0.0) ? -1 : 0;  // VB6 True = -1
+int16_t vb6_CBool(double v) {
+    return (v != 0.0) ? -1 : 0;  // VB6 True = -1
 }
 
-uint8_t vb6_CByte(VARIANT v) {
-    return (uint8_t)vb6_VariantToLong(v);
+uint8_t vb6_CByte(double v) {
+    return (uint8_t)(int32_t)v;
 }
 
-float vb6_CSng(VARIANT v) {
-    return (float)vb6_VariantToDouble(v);
+float vb6_CSng(double v) {
+    return (float)v;
 }
 
 double vb6_CDate(VARIANT v) {

@@ -134,6 +134,74 @@ function Test-Run {
     }
 }
 
+# === VBP工程测试 (编译+运行+输出校验) ===
+function Test-Vbp {
+    param(
+        [string]$Name,
+        [string]$VbpFile,
+        [string[]]$ExpectedOutputs
+    )
+    $script:total++
+    Write-Host -NoNewline "  [VBP] $Name ... "
+
+    # 编译VBP工程
+    $compileResult = & $C3 $VbpFile --output-dir $OutDir 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        $script:fail++
+        Write-Host "FAIL (compile)" -ForegroundColor Red
+        if ($Verbose) { Write-Host ($compileResult | Out-String) }
+        return
+    }
+
+    # 从VBP文件名推导exe路径
+    $baseName = [System.IO.Path]::GetFileNameWithoutExtension($VbpFile)
+    $exePath = Join-Path $OutDir "$baseName.exe"
+    if (-not (Test-Path $exePath)) {
+        $script:fail++
+        Write-Host "FAIL (no exe)" -ForegroundColor Red
+        return
+    }
+
+    # 运行 (5秒超时)
+    try {
+        $proc = Start-Process -FilePath $exePath -NoNewWindow -Wait -PassThru `
+            -RedirectStandardOutput "$OutDir\$baseName.out" `
+            -RedirectStandardError "$OutDir\$baseName.err" `
+            -ErrorAction Stop
+        $runOutput = Get-Content "$OutDir\$baseName.out" -ErrorAction SilentlyContinue
+    } catch {
+        $script:fail++
+        Write-Host "FAIL (run error)" -ForegroundColor Red
+        return
+    }
+
+    # 校验输出
+    if ($ExpectedOutputs -and $ExpectedOutputs.Count -gt 0) {
+        $allMatch = $true
+        foreach ($expected in $ExpectedOutputs) {
+            $found = $runOutput | Where-Object { $_ -like "*$expected*" }
+            if (-not $found) {
+                $allMatch = $false
+                break
+            }
+        }
+        if ($allMatch) {
+            $script:pass++
+            Write-Host "PASS" -ForegroundColor Green
+        } else {
+            $script:fail++
+            Write-Host "FAIL (output mismatch)" -ForegroundColor Red
+            if ($Verbose) {
+                Write-Host "  Expected: $($ExpectedOutputs -join ', ')"
+                Write-Host "  Got: $($runOutput -join '`n')"
+            }
+        }
+    } else {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    }
+}
+
 # === 语法测试 ===
 function Test-Syntax {
     param([string]$Name, [string]$Source)
@@ -173,6 +241,22 @@ if ($Category -in @("all", "run")) {
     Test-Run "test_fileio" "$Tests\test_fileio.bas"
     Test-Run "test_error" "$Tests\test_error.bas"
     Test-Run "test_now" "$Tests\test_now.bas"
+    Write-Host ""
+    
+    # --- P5.5 兼容性测试 (新增) ---
+    Write-Host "--- Compat Tests (P5.5) ---" -ForegroundColor Yellow
+    
+    Test-Run "test_compat" "$Tests\test_compat.bas"
+    Test-Run "test_types" "$Tests\test_types.bas"
+    Test-Run "test_control" "$Tests\test_control.bas"
+    Test-Run "test_declare" "$Tests\test_declare.bas"
+    Write-Host ""
+    
+    # --- VBP工程测试 ---
+    Write-Host "--- VBP Project Tests ---" -ForegroundColor Yellow
+    
+    Test-Vbp "test_class" "$Tests\test_class.vbp" @("3", "0")
+    Test-Vbp "TestVBP" "$Tests\vbp_project\TestVBP2.vbp" @("Add(10, 20) =", "30", "Multiply(5, 6) =", "30")
     Write-Host ""
 }
 

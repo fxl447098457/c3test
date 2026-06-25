@@ -102,6 +102,7 @@ public:
     void visit(CaseClause& node) override;
     void visit(WithStmt& node) override;
     void visit(GoToStmt& node) override;
+    void visit(GoSubStmt& node) override;
     void visit(OnErrorStmt& node) override;
     void visit(ExitStmt& node) override;
     void visit(CallStmt& node) override;
@@ -191,6 +192,9 @@ private:
     // 已知BSTR变量名集合 (小写) - 用于Debug.Print等场景判断表达式类型
     std::unordered_set<std::string> knownBstrVars_;
 
+    // 已知double变量名集合 (小写) - 用于Debug.Print区分整数/浮点输出
+    std::unordered_set<std::string> knownDoubleVars_;
+
     // 已知类实例变量名集合 (小写) - 用于方法调用翻译 c.Method → vb6_Method(c)
     std::unordered_set<std::string> knownClassVars_;
 
@@ -202,6 +206,13 @@ private:
 
     // 类模块标志
     bool isClassModule_ = false;
+
+    // VB6 Static Sub/Function标志: 过程内所有局部变量都应生成C static
+    bool inStaticProc_ = false;
+
+    // GoSub返回地址计数器和标志 (每个过程独立)
+    bool hasGoSub_ = false;
+    int gosubReturnCounter_ = 0;
 
     // ---- 类型映射 ----
 
@@ -258,6 +269,14 @@ private:
 
     // ---- 二元运算符映射 ----
     std::string mapBinaryOp(BinaryOp op) const;
+
+    // ---- 表达式类型推断 ----
+    // 推断表达式的Vb6Type（简化版，用于Select Case等需要类型判断的场景）
+    Vb6Type inferExprType(Expr& expr) const;
+
+    // ---- AST辅助 ----
+    // 检测语句列表中是否包含GoSubStmt
+    bool hasGoSubInStmts(StmtList& stmts) const;
 
     // ---- 数组辅助 ----
     // VB6类型 → SAFEARRAY元素类型C枚举名

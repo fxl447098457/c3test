@@ -209,23 +209,45 @@ bool CCodeGen::generate(Module& module, const std::string& baseName,
         emitClassFactory(module);
     }
 
-    // 生成入口点 (类模块不生成main)
+    // 生成入口点 (类模块不生成main; 多模块工程中仅有Sub Main的模块生成main)
     if (!isClassModule_) {
         c_.emitBlank();
         c_.emitLine("// === 入口点 ===");
         bool hasMain = false;
-        std::string firstPublicSub;  // 备用入口：首个Public Sub
         for (auto& decl : module.declarations) {
             if (decl->kind == ASTNodeKind::SubDecl) {
                 auto& sub = static_cast<SubDecl&>(*decl);
                 if (sub.name == "Main" && sub.access == AccessLevel::Public) {
                     hasMain = true;
-                } else if (sub.access == AccessLevel::Public && firstPublicSub.empty()) {
-                    firstPublicSub = sub.name;
+                    break;
                 }
             }
         }
-        if (hasMain) {
+        // 单模块: 允许用第一个Public Sub作为入口
+        // 多模块: 只有Sub Main模块才生成main
+        bool shouldGenMain = hasMain;
+        if (!shouldGenMain && !isMultiModule_) {
+            // 单模块模式: 无Sub Main时自动找首个Public Sub
+            for (auto& decl : module.declarations) {
+                if (decl->kind == ASTNodeKind::SubDecl) {
+                    auto& sub = static_cast<SubDecl&>(*decl);
+                    if (sub.access == AccessLevel::Public) {
+                        shouldGenMain = true;
+                        // 使用第一个Public Sub作为入口
+                        c_.emitLine("int main(int argc, char* argv[]) {");
+                        c_.indent();
+                        c_.emitLine("vb6_Init();");
+                        c_.emitLine(cProcName(sub.name, sub.access) + "();");
+                        c_.emitLine("vb6_Exit();");
+                        c_.emitLine("return 0;");
+                        c_.dedent();
+                        c_.emitLine("}");
+                        break;
+                    }
+                }
+            }
+        }
+        if (shouldGenMain && hasMain) {
             c_.emitLine("int main(int argc, char* argv[]) {");
             c_.indent();
             c_.emitLine("vb6_Init();");
@@ -234,18 +256,8 @@ bool CCodeGen::generate(Module& module, const std::string& baseName,
             c_.emitLine("return 0;");
             c_.dedent();
             c_.emitLine("}");
-        } else if (!firstPublicSub.empty()) {
-            // 无 Sub Main 时自动调用首个 Public Sub
-            c_.emitLine("int main(int argc, char* argv[]) {");
-            c_.indent();
-            c_.emitLine("vb6_Init();");
-            c_.emitLine(cProcName(firstPublicSub, AccessLevel::Public) + "();");
-            c_.emitLine("vb6_Exit();");
-            c_.emitLine("return 0;");
-            c_.dedent();
-            c_.emitLine("}");
-        } else {
-            c_.emitLine("// No Public Sub found - no entry point generated");
+        } else if (!shouldGenMain) {
+            c_.emitLine("// No entry point (library module)");
         }
     }
 
@@ -313,7 +325,16 @@ std::string CCodeGen::mapTypeRef(ASTNode* typeRef) const {
             if (clsSym && clsSym->kind == SymbolKind::Class) {
                 return "vb6_cls_" + cIdent(clsSym->name) + "*";
             }
-            // 可能是用户定义类型 (UDT)
+            // 检查是否是用户定义类型 (UDT) → vb6_type_<Name>
+            auto* udtSym = symTab_.lookup(simple.name);
+            if (udtSym && udtSym->kind == SymbolKind::UserDefinedType) {
+                return "vb6_type_" + cIdent(simple.name);
+            }
+            // 检查是否是枚举类型 → 基础类型int32_t (VB6枚举底层是Long)
+            if (udtSym && udtSym->kind == SymbolKind::EnumType) {
+                return "int32_t";
+            }
+            // 兜底: 可能是未知类型
             return cIdent(simple.name);
         }
         case ASTNodeKind::ArrayTypeRef:
@@ -521,9 +542,11 @@ void CCodeGen::visit(IdentifierExpr& node) {
     }
 
     // 检查是否是当前函数名 (Function返回值赋值 = 设置返回变量)
+    // 关键: 区分赋值 vs 调用。赋值左侧用返回值变量, 其他场景用函数过程名
+    // AssignmentStmt::visit 会对赋值左侧做特殊替换
     if (currentProc_ && lower == Symbol::toLower(currentProc_->name)
         && currentProc_->kind == SymbolKind::Function) {
-        lastExpr_ = currentReturnVar_;
+        lastExpr_ = cProcName(currentProc_->name, currentProc_->access, currentProc_->sourceModule);
         return;
     }
 
@@ -549,7 +572,52 @@ void CCodeGen::visit(IdentifierExpr& node) {
     if (lower == "vbtrue")         { lastExpr_ = "(-1)"; return; }
     if (lower == "vbfalse")        { lastExpr_ = "0"; return; }
 
-    // 内置函数映射 (名称 → RTL函数名)
+    // 先查符号表: 如果有用户定义的同名符号(变量/过程/常量等), 优先使用
+    // 这避免了用户变量名与内置函数名冲突的问题 (如 Dim v As Long vs Val()函数)
+    // 同时使用currentProc_->params来判断ByRef参数(比符号表查找更可靠)
+    Symbol* foundSym = symTab_.lookup(node.name);
+    Symbol* modSym = symTab_.lookupModule(node.name);
+
+    // ByRef参数: 最优先检查 (通过currentProc_->params, 不依赖符号表作用域)
+    if (currentProc_) {
+        for (auto& param : currentProc_->params) {
+            if (Symbol::toLower(param.name) == lower) {
+                if (!param.isByVal) {
+                    lastExpr_ = "(*" + cName + ")";
+                } else {
+                    lastExpr_ = cName;
+                }
+                return;
+            }
+        }
+    }
+
+    // 枚举成员引用
+    if (foundSym && foundSym->kind == SymbolKind::EnumMember) {
+        if (foundSym->hasConstValue) {
+            lastExpr_ = std::to_string(foundSym->constIntValue);
+        } else {
+            lastExpr_ = cName;
+        }
+        return;
+    }
+
+    // 用户变量/常量 (非参数、非函数)
+    if (foundSym && (foundSym->kind == SymbolKind::Variable
+                  || foundSym->kind == SymbolKind::Constant)) {
+        // 类模块变量通过me->访问
+        if (isClassModule_ && currentProc_ && foundSym->kind == SymbolKind::Variable) {
+            Symbol* paramSym = symTab_.lookupLocal(node.name);
+            if (!paramSym || paramSym->kind != SymbolKind::Parameter) {
+                lastExpr_ = "me->" + cName;
+                return;
+            }
+        }
+        lastExpr_ = cName;
+        return;
+    }
+
+    // 内置函数映射 (名称 → RTL函数名) - 仅当符号表中没有用户定义的函数时使用
     static const std::unordered_map<std::string, std::string> builtinFuncs = {
         {"len",      "vb6_Len"},
         {"msgbox",   "vb6_MsgBox"},
@@ -675,17 +743,6 @@ void CCodeGen::visit(IdentifierExpr& node) {
         return;
     }
 
-    // 类模块: 模块级变量通过 me-> 访问
-    if (isClassModule_ && currentProc_ && sym && sym->kind == SymbolKind::Variable) {
-        // 类模块变量 = 结构体字段, 通过me指针访问
-        // 但要排除过程参数(参数名可能和模块变量同名)
-        Symbol* paramSym = symTab_.lookupLocal(node.name);
-        if (!paramSym || paramSym->kind != SymbolKind::Parameter) {
-            lastExpr_ = "me->" + cName;
-            return;
-        }
-    }
-
     // 类符号引用 (直接使用类名作为标识符, 如 Dim x As MyClass)
     if (sym && sym->kind == SymbolKind::Class) {
         lastExpr_ = cName;  // 类名本身就是一个类型标识符
@@ -778,16 +835,14 @@ void CCodeGen::visit(MemberAccessExpr& node) {
             return;
         }
 
-        // 类实例成员访问: obj.Method → vb6_Method(obj)  或  vb6_Counter_Method(obj)
-
-        // 通过查找成员函数名来推断是否为类方法调用
-        // 查找名为 memberName 的符号, 如果是一个本模块/跨模块的过程
+        // 查找成员名称的符号
         auto* memSym = symTab_.lookupModule(node.memberName);
         if (memSym && (memSym->kind == SymbolKind::Sub || memSym->kind == SymbolKind::Function
                     || memSym->kind == SymbolKind::PropertyGet
                     || memSym->kind == SymbolKind::PropertyLet
                     || memSym->kind == SymbolKind::PropertySet)) {
-            // 检查变量是否是类指针类型(通过knownClassVars_)
+
+            // 1) 类实例成员访问: obj.Method → vb6_Method(obj) 或 vb6_Counter_Method(obj)
             if (knownClassVars_.count(objLower)) {
                 std::string funcName = cProcName(node.memberName, memSym->access,
                                                   memSym->isExternal ? memSym->sourceModule : "");
@@ -796,10 +851,40 @@ void CCodeGen::visit(MemberAccessExpr& node) {
                 lastExpr_ = funcName + "(" + objExpr + ")";
                 return;
             }
+
+            // 2) 模块名.方法名: MathUtils.Add → vb6_MathUtils_Add
+            //    object名称不是已知变量, 但成员是函数 → 视为模块限定调用
+            bool isVarName = false;
+            auto* objSym = symTab_.lookup(objIdent.name);
+            if (!objSym) objSym = symTab_.lookupModule(objIdent.name);
+            if (objSym && (objSym->kind == SymbolKind::Variable || objSym->kind == SymbolKind::Parameter)) {
+                isVarName = true;
+            }
+
+            if (!isVarName) {
+                // 确定函数名的模块前缀
+                std::string sourceMod;
+                if (memSym->isExternal) {
+                    sourceMod = memSym->sourceModule;
+                } else {
+                    // 同模块调用也允许 Module.Method 语法
+                    // 检查object名是否匹配当前模块名
+                    std::string modLower = moduleName_;
+                    std::transform(modLower.begin(), modLower.end(), modLower.begin(), ::tolower);
+                    if (objLower == modLower) {
+                        sourceMod = "";  // 同模块, 不需要前缀
+                    } else {
+                        sourceMod = objIdent.name;  // 假设object名就是模块名
+                    }
+                }
+                std::string funcName = cProcName(node.memberName, memSym->access, sourceMod);
+                lastExpr_ = funcName;  // 仅输出函数名, 参数由IndexOrCallExpr添加
+                return;
+            }
         }
     }
 
-    // 通用成员访问
+    // 通用成员访问 (结构体字段)
     emitExpr(*node.object);
     std::string obj = std::move(lastExpr_);
     lastExpr_ = obj + "." + cIdent(node.memberName);
@@ -889,10 +974,74 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
     }
 
     // 位置参数
+    // 需要检查被调用函数的参数签名: ByRef参数在调用点需要传指针(&arg)
+    std::vector<ParameterInfo> calleeParams;
+    // 从IdentifierExpr或MemberAccessExpr获取被调用函数名, 在符号表中查找
+    if (node.callee && node.callee->kind == ASTNodeKind::IdentifierExpr) {
+        auto& idExpr = static_cast<IdentifierExpr&>(*node.callee);
+        // 尝试多种查找方式: 先lookupModule(过程符号), 再lookup(嵌套作用域)
+        Symbol* funcSym = symTab_.lookupModule(idExpr.name);
+        if (!funcSym || (funcSym->kind != SymbolKind::Sub && funcSym->kind != SymbolKind::Function
+            && funcSym->kind != SymbolKind::PropertyGet && funcSym->kind != SymbolKind::PropertyLet
+            && funcSym->kind != SymbolKind::PropertySet)) {
+            funcSym = symTab_.lookup(idExpr.name);
+        }
+        if (funcSym && (funcSym->kind == SymbolKind::Sub || funcSym->kind == SymbolKind::Function
+            || funcSym->kind == SymbolKind::PropertyGet || funcSym->kind == SymbolKind::PropertyLet
+            || funcSym->kind == SymbolKind::PropertySet)) {
+            calleeParams = funcSym->params;
+        }
+    } else if (node.callee && node.callee->kind == ASTNodeKind::MemberAccessExpr) {
+        // Module.Method 或 obj.Method 调用: 查找方法名的参数签名
+        auto& maExpr = static_cast<MemberAccessExpr&>(*node.callee);
+        Symbol* funcSym = symTab_.lookupModule(maExpr.memberName);
+        if (funcSym && (funcSym->kind == SymbolKind::Sub || funcSym->kind == SymbolKind::Function
+            || funcSym->kind == SymbolKind::PropertyGet || funcSym->kind == SymbolKind::PropertyLet
+            || funcSym->kind == SymbolKind::PropertySet)) {
+            calleeParams = funcSym->params;
+        }
+    }
+
     std::vector<std::string> args;
-    for (auto& arg : node.positional) {
-        emitExpr(*arg);
-        args.push_back(std::move(lastExpr_));
+    for (size_t i = 0; i < node.positional.size(); i++) {
+        emitExpr(*node.positional[i]);
+        std::string argVal = std::move(lastExpr_);
+        // ByRef参数: 调用点传指针. 如果实参已经是解引用形式(*x), 取地址还原为x;
+        // 如果是普通变量, 加&取地址
+        bool isByRef = (i < calleeParams.size() && !calleeParams[i].isByVal);
+        if (isByRef) {
+            if (argVal.size() > 3 && argVal.substr(0, 2) == "(*" && argVal.back() == ')') {
+                // (*x) → &x (ByRef参数传ByRef参数, 还原指针)
+                argVal = "&" + argVal.substr(2, argVal.size() - 3);
+            } else if (argVal.size() > 2 && argVal.substr(0, 2) == "me" && argVal[2] == '-') {
+                // me->field → &(me->field) (类成员字段取地址)
+                argVal = "&(" + argVal + ")";
+            } else {
+                // 晀量/非左值 → 复合字面量取地址; 变量 → &变量
+                // 检查是否是简单标识符 (变量名, 以字母/下划线开头)
+                bool isSimpleIdent = !argVal.empty() && (std::isalpha(static_cast<unsigned char>(argVal[0])) || argVal[0] == '_');
+                if (isSimpleIdent) {
+                    for (char c : argVal) {
+                        if (!std::isalnum(static_cast<unsigned char>(c)) && c != '_') {
+                            isSimpleIdent = false;
+                            break;
+                        }
+                    }
+                }
+                if (isSimpleIdent && !argVal.empty()) {
+                    argVal = "&" + argVal;
+                } else {
+                    // 字面量或复杂表达式: 使用C11复合字面量
+                    // &(int32_t){10} 或 &(double){3.14}
+                    std::string cType = "int32_t";
+                    if (i < calleeParams.size()) {
+                        cType = mapType(calleeParams[i].type);
+                    }
+                    argVal = "&(" + cType + "){" + argVal + "}";
+                }
+            }
+        }
+        args.push_back(std::move(argVal));
     }
 
     // 命名参数暂按位置展开(TODO: 按参数名映射)
@@ -911,6 +1060,26 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
     // 特殊处理: UBound/LBound 缺省维度参数时补1
     if ((callee == "vb6_UBound" || callee == "vb6_LBound") && args.size() == 1) {
         argList += ", 1";
+    }
+
+    // InStr: VB6允许2参数形式 InStr(string1, string2)
+    // RTL: vb6_InStr(start, haystack, needle) → 2参数时补start=1
+    if (callee == "vb6_InStr") {
+        if (args.size() == 2) {
+            argList = "1, " + argList;
+        }
+    }
+
+    // Replace: VB6允许3参数形式 Replace(string, find, replacement)
+    // RTL: Replace(string, find, replacement, start, count, compare)
+    if (callee == "vb6_Replace") {
+        if (args.size() == 3) {
+            argList += ", 1, -1, 0";
+        } else if (args.size() == 4) {
+            argList += ", -1, 0";
+        } else if (args.size() == 5) {
+            argList += ", 0";
+        }
     }
 
     lastExpr_ = callee + "(" + argList + ")";
@@ -1062,6 +1231,7 @@ void CCodeGen::emitStmtList(StmtList& stmts) {
             case ASTNodeKind::SelectCaseStmt:  visit(static_cast<SelectCaseStmt&>(*stmt)); break;
             case ASTNodeKind::WithStmt:        visit(static_cast<WithStmt&>(*stmt)); break;
             case ASTNodeKind::GoToStmt:        visit(static_cast<GoToStmt&>(*stmt)); break;
+            case ASTNodeKind::GoSubStmt:       visit(static_cast<GoSubStmt&>(*stmt)); break;
             case ASTNodeKind::OnErrorStmt:     visit(static_cast<OnErrorStmt&>(*stmt)); break;
             case ASTNodeKind::ExitStmt:        visit(static_cast<ExitStmt&>(*stmt)); break;
             case ASTNodeKind::CallStmt:        visit(static_cast<CallStmt&>(*stmt)); break;
@@ -1096,7 +1266,16 @@ void CCodeGen::emitStmtList(StmtList& stmts) {
                 c_.emitLine("__debugbreak();");  // MSVC intrinsic
                 break;
             case ASTNodeKind::ReturnStmt:
-                if (currentProc_ && currentProc_->kind == SymbolKind::Function) {
+                if (hasGoSub_) {
+                    // VB6 GoSub Return: 弹出返回地址并跳转
+                    c_.emitLine("switch(vb6_gosub_stack[--vb6_gosub_sp]) {");
+                    c_.indent();
+                    for (int i = 0; i < gosubReturnCounter_; i++) {
+                        c_.emitLine("case " + std::to_string(i) + ": goto vb6_gosub_ret_" + std::to_string(i) + ";");
+                    }
+                    c_.dedent();
+                    c_.emitLine("}");
+                } else if (currentProc_ && currentProc_->kind == SymbolKind::Function) {
                     c_.emitLine("return " + currentReturnVar_ + ";");
                 } else {
                     c_.emitLine("return;");
@@ -1121,6 +1300,14 @@ void CCodeGen::visit(AssignmentStmt& node) {
     std::string target = std::move(lastExpr_);
     emitExpr(*node.value);
     std::string value = std::move(lastExpr_);
+
+    // 如果赋值目标是当前Function名 (VB6语义: 设置返回值), 替换为返回值变量
+    if (currentProc_ && currentProc_->kind == SymbolKind::Function) {
+        std::string procCName = cProcName(currentProc_->name, currentProc_->access, currentProc_->sourceModule);
+        if (target == procCName) {
+            target = currentReturnVar_;
+        }
+    }
 
     c_.emitLine(target + " = " + value + ";");
 }
@@ -1295,47 +1482,98 @@ void CCodeGen::visit(WhileWendStmt& node) {
 }
 
 void CCodeGen::visit(SelectCaseStmt& node) {
+    // 推断测试表达式的类型
+    Vb6Type testType = inferExprType(*node.testExpr);
+    bool isStringSelect = TypeSystem::isString(testType);
+    bool isFloatSelect = TypeSystem::isFloat(testType);
+
     emitExpr(*node.testExpr);
     std::string testVar = lastExpr_;
+
     // 为test创建临时变量
     std::string tempVar = "_vb6_select_" + std::to_string(tempCounter_++);
     c_.emitLine("{");
     c_.indent();
+
+    // 根据测试表达式类型选择临时变量类型
+    std::string tempType;
+    if (isStringSelect) {
+        tempType = "BSTR";
+    } else if (isFloatSelect) {
+        tempType = "double";
+    } else {
+        tempType = "int32_t";
+    }
+
     // 声明并初始化临时变量, 保存测试表达式的值
-    c_.emitLine("int32_t " + tempVar + " = " + testVar + ";");
-    // 简化: 用if-else if链代替switch (VB6 Select Case支持范围比较)
+    c_.emitLine(tempType + " " + tempVar + " = " + testVar + ";");
+
+    // 用if-else if链代替switch (VB6 Select Case支持范围比较和字符串)
     bool first = true;
     for (auto& caseClause : node.cases) {
-        for (auto& cv : caseClause->values) {
+        // 构建条件: 同一Case子句的多个值用||连接 (Case 1, 2, 3 → val==1 || val==2 || val==3)
+        std::string combinedCond;
+
+        for (size_t vi = 0; vi < caseClause->values.size(); vi++) {
+            auto& cv = caseClause->values[vi];
             std::string cond;
+
             if (cv.isIsClause) {
-                // Case Is > 0 → _var > 0
-                if (cv.value) {
-                    emitExpr(*cv.value);
-                    cond = tempVar + " " + lastExpr_;  // 运算符在表达式内
+                // Case Is > 0 → tempVar > 0
+                // cv.value 是 BinaryExpr(IdentifierExpr("Is"), op, rightOperand)
+                if (cv.value && cv.value->kind == ASTNodeKind::BinaryExpr) {
+                    auto& binExpr = static_cast<BinaryExpr&>(*cv.value);
+                    emitExpr(*binExpr.right);
+                    std::string rightVal = std::move(lastExpr_);
+                    if (isStringSelect) {
+                        // 字符串比较: wcscmp(tempVar, rightVal) op 0
+                        cond = "wcscmp(" + tempVar + ", " + rightVal + ") " + mapBinaryOp(binExpr.op) + " 0";
+                    } else {
+                        cond = tempVar + " " + mapBinaryOp(binExpr.op) + " " + rightVal;
+                    }
+                } else {
+                    // Case Is (无比较符) → 非零/非空
+                    if (isStringSelect) {
+                        cond = tempVar + " != NULL && " + tempVar + "[0] != 0";
+                    } else {
+                        cond = tempVar + " != 0";
+                    }
                 }
             } else if (cv.toValue) {
-                // Case 1 To 10 → _var >= 1 && _var <= 10
+                // Case 1 To 10 → tempVar >= 1 && tempVar <= 10
                 emitExpr(*cv.value);
                 std::string lo = std::move(lastExpr_);
                 emitExpr(*cv.toValue);
                 std::string hi = std::move(lastExpr_);
-                cond = tempVar + " >= " + lo + " && " + tempVar + " <= " + hi;
+                if (isStringSelect) {
+                    // 字符串范围比较: wcscmp >= lo && wcscmp <= hi
+                    cond = "wcscmp(" + tempVar + ", " + lo + ") >= 0 && wcscmp(" + tempVar + ", " + hi + ") <= 0";
+                } else {
+                    cond = tempVar + " >= " + lo + " && " + tempVar + " <= " + hi;
+                }
             } else {
+                // 精确匹配
                 emitExpr(*cv.value);
-                cond = tempVar + " == " + lastExpr_;
+                if (isStringSelect) {
+                    cond = "wcscmp(" + tempVar + ", " + lastExpr_ + ") == 0";
+                } else {
+                    cond = tempVar + " == " + lastExpr_;
+                }
             }
 
-            if (first) {
-                c_.emitLine("if (" + cond + ") {");
-                first = false;
-            } else {
-                c_.emitLine("} else if (" + cond + ") {");
-            }
-            c_.indent();
-            emitStmtList(caseClause->body);
-            c_.dedent();
+            if (!combinedCond.empty()) combinedCond += " || ";
+            combinedCond += "(" + cond + ")";
         }
+
+        if (first) {
+            c_.emitLine("if (" + combinedCond + ") {");
+            first = false;
+        } else {
+            c_.emitLine("} else if (" + combinedCond + ") {");
+        }
+        c_.indent();
+        emitStmtList(caseClause->body);
+        c_.dedent();
     }
 
     if (!node.elseCase.empty()) {
@@ -1470,16 +1708,40 @@ void CCodeGen::visit(CallStmt& node) {
                                 return false;
                             };
 
+                            // 已知返回double的内置函数前缀
+                            static const std::vector<std::string> doubleFuncs = {
+                                "vb6_Sin", "vb6_Cos", "vb6_Tan", "vb6_Atn",
+                                "vb6_Log", "vb6_Exp", "vb6_Sqr", "vb6_Rnd",
+                                "vb6_Round", "vb6_Fix", "vb6_Int",
+                                "vb6_CDbl", "vb6_CSng", "vb6_Val",
+                                "vb6_Abs"
+                            };
+                            auto isDoubleExpr = [&](const std::string& expr) -> bool {
+                                for (auto& prefix : doubleFuncs) {
+                                    if (expr.compare(0, prefix.size(), prefix) == 0) return true;
+                                }
+                                // 已知double变量名 (小写匹配)
+                                std::string lower = expr;
+                                std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+                                if (knownDoubleVars_.count(lower)) return true;
+                                // 包含浮点字面量 (如 3.14)
+                                // 检查是否包含小数点且不是函数调用
+                                if (expr.find('.') != std::string::npos && expr.find('(') == std::string::npos) return true;
+                                return false;
+                            };
+
                             for (size_t j = 0; j < call.positional.size(); j++) {
                                 emitExpr(*call.positional[j]);
                                 std::string val = std::move(lastExpr_);
                                 if (isBstrExpr(val)) {
                                     // 已经是BSTR, 直接输出
                                     c_.emitLine("vb6_DebugWriteBSTR(" + val + ");");
+                                } else if (isDoubleExpr(val)) {
+                                    // 浮点数, 用DebugWriteDouble输出
+                                    c_.emitLine("vb6_DebugWriteDouble((double)(" + val + "));");
                                 } else {
-                                    // 非BSTR, 用vb6_Str转BSTR后输出
-                                    // 对于整数/布尔值直接转, 浮点数用vb6_CStr
-                                    c_.emitLine("vb6_DebugWriteBSTR(vb6_Str((int32_t)(" + val + ")));");
+                                    // 整数/布尔值, 用DebugWriteLong输出
+                                    c_.emitLine("vb6_DebugWriteLong((int32_t)(" + val + "));");
                                 }
                             }
                             c_.emitLine("vb6_DebugWriteNewline();");
@@ -1492,7 +1754,12 @@ void CCodeGen::visit(CallStmt& node) {
 
         emitExpr(*node.callee);
         // 语句级调用: 确保表达式被求值(即使是void调用)
-        c_.emitLine(lastExpr_ + ";");
+        // 如果结果是函数名(不含括号), 自动添加()调用
+        std::string callExpr = lastExpr_;
+        if (callExpr.find('(') == std::string::npos) {
+            callExpr += "()";
+        }
+        c_.emitLine(callExpr + ";");
     }
 }
 
@@ -1767,6 +2034,15 @@ void CCodeGen::visit(LabelStmt& node) {
     c_.emitLine("vb6_label_" + cIdent(node.labelName) + ":;");
 }
 
+void CCodeGen::visit(GoSubStmt& node) {
+    hasGoSub_ = true;
+    // GoSub label: 压入返回地址 → goto label
+    int retId = gosubReturnCounter_++;
+    c_.emitLine("vb6_gosub_stack[vb6_gosub_sp++] = " + std::to_string(retId) + ";");
+    c_.emitLine("goto vb6_label_" + cIdent(node.labelName) + ";");
+    c_.emitLine("vb6_gosub_ret_" + std::to_string(retId) + ":;");
+}
+
 void CCodeGen::visit(OptionStmt& node) {
     // Option语句不影响C代码生成
 }
@@ -1829,8 +2105,16 @@ void CCodeGen::visit(LocalDeclStmt& node) {
                 knownBstrVars_.insert(lower);
             }
 
+            // 记录double/single类型变量名 (用于Debug.Print浮点输出)
+            if (cType == "double" || cType == "float") {
+                std::string lower = var.name;
+                std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+                knownDoubleVars_.insert(lower);
+            }
+
             // 记录类类型变量名, 默认值用NULL
             bool isLocalClassType = false;
+            bool isLocalUdtType = false;
             if (var.asType && var.asType->kind == ASTNodeKind::SimpleTypeRef) {
                 auto& simple = static_cast<SimpleTypeRef&>(*var.asType);
                 auto* clsSym = symTab_.lookupModule(simple.name);
@@ -1840,16 +2124,32 @@ void CCodeGen::visit(LocalDeclStmt& node) {
                     knownClassVars_.insert(lower);
                     isLocalClassType = true;
                 }
+                // 检查是否是UDT类型
+                auto* udtSym = symTab_.lookup(simple.name);
+                if (udtSym && udtSym->kind == SymbolKind::UserDefinedType) {
+                    isLocalUdtType = true;
+                }
             }
+
+            // VB6 Static变量: 跨调用持久化 → C static局部变量
+            // 包括: 显式Static声明 或 Static Sub/Function内的所有局部变量
+            std::string storageClass = (var.isStatic || inStaticProc_) ? "static " : "";
 
             if (var.initializer) {
                 emitExpr(*var.initializer);
-                c_.emitLine(cType + " " + cName + " = " + lastExpr_ + ";");
+                c_.emitLine(storageClass + cType + " " + cName + " = " + lastExpr_ + ";");
             } else {
-                std::string initVal = isLocalClassType ? "NULL" : defaultValue(
-                    var.asType ? typeSys_.resolveTypeName(static_cast<SimpleTypeRef*>(var.asType.get())->name) : Vb6Type::Variant
-                );
-                c_.emitLine(cType + " " + cName + " = " + initVal + ";");
+                std::string initVal;
+                if (isLocalClassType) {
+                    initVal = "NULL";
+                } else if (isLocalUdtType) {
+                    initVal = "{0}";
+                } else {
+                    initVal = defaultValue(
+                        var.asType ? typeSys_.resolveTypeName(static_cast<SimpleTypeRef*>(var.asType.get())->name) : Vb6Type::Variant
+                    );
+                }
+                c_.emitLine(storageClass + cType + " " + cName + " = " + initVal + ";");
             }
             break;
         }
@@ -1893,11 +2193,25 @@ void CCodeGen::visit(SubDecl& node) {
     knownArrays_.clear();
     arrayElemTypes_.clear();
     knownBstrVars_.clear();
+    knownDoubleVars_.clear();
+
+    // VB6 Static Sub: 过程内所有局部变量都是static
+    inStaticProc_ = node.isStatic;
+
+    // 检测GoSub并声明返回地址栈
+    hasGoSub_ = hasGoSubInStmts(node.body);
+    gosubReturnCounter_ = 0;
+    if (hasGoSub_) {
+        c_.emitLine("int vb6_gosub_stack[32];");
+        c_.emitLine("int vb6_gosub_sp = 0;");
+    }
 
     // 生成过程体
     emitStmtList(node.body);
 
     currentProc_ = nullptr;
+    inStaticProc_ = false;
+    hasGoSub_ = false;
     c_.dedent();
     c_.emitLine("}");
     c_.emitBlank();
@@ -1922,6 +2236,14 @@ void CCodeGen::visit(FunctionDecl& node) {
     knownArrays_.clear();
     arrayElemTypes_.clear();
     knownBstrVars_.clear();
+    knownDoubleVars_.clear();
+
+    // VB6 Static Function: 过程内所有局部变量都是static
+    inStaticProc_ = node.isStatic;
+
+    // 检测GoSub并声明返回地址栈
+    hasGoSub_ = hasGoSubInStmts(node.body);
+    gosubReturnCounter_ = 0;
 
     // Function返回值变量
     std::string retType = mapTypeRef(node.returnType.get());
@@ -1929,6 +2251,11 @@ void CCodeGen::visit(FunctionDecl& node) {
     c_.emitLine(retType + " " + currentReturnVar_ + " = " + defaultValue(
         node.returnType ? typeSys_.resolveTypeName(static_cast<SimpleTypeRef*>(node.returnType.get())->name) : Vb6Type::Variant
     ) + ";");
+
+    if (hasGoSub_) {
+        c_.emitLine("int vb6_gosub_stack[32];");
+        c_.emitLine("int vb6_gosub_sp = 0;");
+    }
 
     // 生成过程体
     emitStmtList(node.body);
@@ -1938,6 +2265,8 @@ void CCodeGen::visit(FunctionDecl& node) {
 
     currentProc_ = nullptr;
     currentReturnVar_ = "";
+    inStaticProc_ = false;
+    hasGoSub_ = false;
     c_.dedent();
     c_.emitLine("}");
     c_.emitBlank();
@@ -2137,6 +2466,17 @@ void CCodeGen::visit(VariableDecl& node) {
         }
     }
 
+    // 记录double/single类型变量名 (用于Debug.Print浮点输出)
+    if (cType == "double" || cType == "float") {
+        std::string lower = node.name;
+        std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+        knownDoubleVars_.insert(lower);
+    } else if (cType == "BSTR") {
+        std::string lower = node.name;
+        std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+        knownBstrVars_.insert(lower);
+    }
+
     // 前向声明 → .h, 定义 → .c
     if (node.access == AccessLevel::Public) {
         h_.emitLine("extern " + cType + " " + cName + ";");
@@ -2159,9 +2499,23 @@ void CCodeGen::visit(VariableDecl& node) {
             c_.emitLine("static " + cType + " " + cName + " = " + lastExpr_ + ";");
         }
     } else {
-        std::string initVal = isClassType ? "NULL" : defaultValue(
-            node.asType ? typeSys_.resolveTypeName(static_cast<SimpleTypeRef*>(node.asType.get())->name) : Vb6Type::Variant
-        );
+        // 判断是否是UDT类型 → 用 {0} 初始化
+        bool isUdtType = false;
+        if (node.asType && node.asType->kind == ASTNodeKind::SimpleTypeRef) {
+            auto& simple = static_cast<SimpleTypeRef&>(*node.asType);
+            auto* sym = symTab_.lookup(simple.name);
+            isUdtType = (sym && sym->kind == SymbolKind::UserDefinedType);
+        }
+        std::string initVal;
+        if (isClassType) {
+            initVal = "NULL";
+        } else if (isUdtType) {
+            initVal = "{0}";
+        } else {
+            initVal = defaultValue(
+                node.asType ? typeSys_.resolveTypeName(static_cast<SimpleTypeRef*>(node.asType.get())->name) : Vb6Type::Variant
+            );
+        }
         if (node.access == AccessLevel::Public) {
             c_.emitLine(cType + " " + cName + " = " + initVal + ";");
         } else {
@@ -2399,5 +2753,116 @@ void CCodeGen::visit(FixedStringTypeRef& node) {}
 // ============================================================
 
 void CCodeGen::visit(Module& node) {}
+
+// ============================================================
+// 表达式类型推断 (简化版, 用于Select Case等场景)
+// ============================================================
+
+Vb6Type CCodeGen::inferExprType(Expr& expr) const {
+    switch (expr.kind) {
+        case ASTNodeKind::IdentifierExpr: {
+            auto& id = static_cast<IdentifierExpr&>(expr);
+            // 优先检查已知的变量类型集合 (局部变量在符号表中作用域可能不可达)
+            std::string lower = id.name;
+            std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+            if (knownBstrVars_.count(lower)) return Vb6Type::String;
+            if (knownDoubleVars_.count(lower)) return Vb6Type::Double;
+            // 检查符号表
+            auto* sym = symTab_.lookup(id.name);
+            if (!sym) sym = symTab_.lookupModule(id.name);
+            if (sym) return sym->type;
+            break;
+        }
+        case ASTNodeKind::LiteralExpr: {
+            auto& lit = static_cast<LiteralExpr&>(expr);
+            if (lit.literalKind == LiteralKind::String) return Vb6Type::String;
+            if (lit.literalKind == LiteralKind::Double || lit.literalKind == LiteralKind::Single
+                || lit.literalKind == LiteralKind::Currency || lit.literalKind == LiteralKind::Decimal)
+                return Vb6Type::Double;
+            if (lit.literalKind == LiteralKind::Boolean) return Vb6Type::Boolean;
+            if (lit.literalKind == LiteralKind::Date) return Vb6Type::Date;
+            return Vb6Type::Long;
+        }
+        case ASTNodeKind::BinaryExpr: {
+            auto& bin = static_cast<BinaryExpr&>(expr);
+            // 字符串连接运算符 → String
+            if (bin.op == BinaryOp::Concat) return Vb6Type::String;
+            // 比较运算符 → Boolean
+            if (bin.op == BinaryOp::Eq || bin.op == BinaryOp::Neq ||
+                bin.op == BinaryOp::Lt || bin.op == BinaryOp::Gt ||
+                bin.op == BinaryOp::Le || bin.op == BinaryOp::Ge ||
+                bin.op == BinaryOp::Like || bin.op == BinaryOp::Is)
+                return Vb6Type::Boolean;
+            // 逻辑运算符 → Boolean (VB6中)
+            if (bin.op == BinaryOp::And || bin.op == BinaryOp::Or || bin.op == BinaryOp::Xor)
+                return Vb6Type::Boolean;
+            // 算术运算符: 提升左右类型
+            {
+                Vb6Type lt = inferExprType(*bin.left);
+                Vb6Type rt = inferExprType(*bin.right);
+                return TypeSystem::promote(lt, rt);
+            }
+        }
+        case ASTNodeKind::UnaryExpr: {
+            auto& un = static_cast<UnaryExpr&>(expr);
+            if (un.op == UnaryOp::Not) return Vb6Type::Boolean;
+            return inferExprType(*un.operand);
+        }
+        case ASTNodeKind::IndexOrCallExpr: {
+            // 函数调用: 返回函数返回类型
+            auto& call = static_cast<IndexOrCallExpr&>(expr);
+            if (call.callee && call.callee->kind == ASTNodeKind::IdentifierExpr) {
+                auto& id = static_cast<IdentifierExpr&>(*call.callee);
+                auto* sym = symTab_.lookup(id.name);
+                if (!sym) sym = symTab_.lookupModule(id.name);
+                if (sym) return sym->type;
+            }
+            break;
+        }
+        case ASTNodeKind::MemberAccessExpr: {
+            auto& ma = static_cast<MemberAccessExpr&>(expr);
+            // 查找成员函数/属性的返回类型
+            auto* memSym = symTab_.lookupModule(ma.memberName);
+            if (memSym) return memSym->type;
+            break;
+        }
+        default:
+            break;
+    }
+    return Vb6Type::Variant;
+}
+
+// ============================================================
+// AST辅助: 检测语句列表中是否包含GoSubStmt
+// ============================================================
+
+bool CCodeGen::hasGoSubInStmts(StmtList& stmts) const {
+    for (auto& stmt : stmts) {
+        if (!stmt) continue;
+        if (stmt->kind == ASTNodeKind::GoSubStmt) return true;
+        // 递归检查复合语句
+        if (stmt->kind == ASTNodeKind::IfStmt) {
+            auto& ifStmt = static_cast<IfStmt&>(*stmt);
+            if (hasGoSubInStmts(ifStmt.thenBody)) return true;
+            if (hasGoSubInStmts(ifStmt.elseBody)) return true;
+            for (auto& elif : ifStmt.elseIfs) {
+                if (hasGoSubInStmts(elif->body)) return true;
+            }
+        } else if (stmt->kind == ASTNodeKind::ForStmt) {
+            if (hasGoSubInStmts(static_cast<ForStmt&>(*stmt).body)) return true;
+        } else if (stmt->kind == ASTNodeKind::DoLoopStmt) {
+            if (hasGoSubInStmts(static_cast<DoLoopStmt&>(*stmt).body)) return true;
+        } else if (stmt->kind == ASTNodeKind::WhileWendStmt) {
+            if (hasGoSubInStmts(static_cast<WhileWendStmt&>(*stmt).body)) return true;
+        } else if (stmt->kind == ASTNodeKind::SelectCaseStmt) {
+            auto& sel = static_cast<SelectCaseStmt&>(*stmt);
+            for (auto& c : sel.cases) {
+                if (hasGoSubInStmts(c->body)) return true;
+            }
+            if (hasGoSubInStmts(sel.elseCase)) return true;
+        }
+    }
+    return false;
+}
 
 } // namespace vb6c3
