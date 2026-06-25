@@ -211,7 +211,7 @@ void SemanticAnalyzer::registerVariable(VariableDecl& decl) {
         decl.loc, decl.access
     );
     sym->isStatic = decl.isStatic;
-    sym->isArray = !decl.dimensions.empty();
+    sym->isArray = !decl.dimensions.empty() || decl.isDynamicArray;
     symTab_.define(std::move(sym));
 }
 
@@ -804,7 +804,7 @@ void SemanticAnalyzer::visit(LocalDeclStmt& node) {
                     varDecl.loc, varDecl.access
                 );
                 sym->isStatic = varDecl.isStatic;
-                sym->isArray = !varDecl.dimensions.empty();
+                sym->isArray = !varDecl.dimensions.empty() || varDecl.isDynamicArray;
                 symTab_.define(std::move(sym));
                 break;
             }

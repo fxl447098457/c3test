@@ -267,7 +267,12 @@ std::unique_ptr<DeclareDecl> Parser::parseDeclareDecl(AccessLevel access) {
         aliasName = aliasTok.text;
     }
 
-    CallConv callingConv = CallConv::StdCall;  // VB6 Declare 默认 StdCall
+    // 调用约定: 默认 StdCall, 可选 CDecl
+    CallConv callingConv = CallConv::StdCall;
+    if (match(TokenKind::CDecl)) {
+        callingConv = CallConv::CDecl;
+    }
+
     auto params = parseParameterList();
 
     TypeRefPtr returnType;
@@ -340,6 +345,7 @@ std::unique_ptr<VariableDecl> Parser::parseVariableDecl(AccessLevel access, bool
     // 数组维度: dim a(1 To 10, 1 To 20) As Long
     // 或动态数组: dim a() As Long
     std::vector<VariableDecl::Dimension> dimensions;
+    bool isDynamicArray = false;
     if (match(TokenKind::LeftParen)) {
         // 空括号 = 动态数组 (Dim a() As Long)
         if (cur_.kind != TokenKind::RightParen) {
@@ -354,6 +360,9 @@ std::unique_ptr<VariableDecl> Parser::parseVariableDecl(AccessLevel access, bool
                 }
                 dimensions.push_back(std::move(dim));
             } while (match(TokenKind::Comma));
+        } else {
+            // 空括号 () = 动态数组
+            isDynamicArray = true;
         }
         expect(TokenKind::RightParen, DiagnosticID::ParseExpectedToken,
                "expected ')'");
@@ -375,7 +384,7 @@ std::unique_ptr<VariableDecl> Parser::parseVariableDecl(AccessLevel access, bool
 
     return std::make_unique<VariableDecl>(loc, access, nameTok.text,
         isWithEvents, isStatic, isNew, std::move(asType), std::move(initializer),
-        std::move(dimensions));
+        std::move(dimensions), isDynamicArray);
 }
 
 // ============================================================

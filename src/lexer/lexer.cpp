@@ -49,7 +49,7 @@ void Lexer::initKeywords() {
         {"get", TokenKind::Get}, {"let", TokenKind::Let}, {"set", TokenKind::Set},
         {"call", TokenKind::Call},
         {"declare", TokenKind::Declare}, {"lib", TokenKind::Lib},
-        {"alias", TokenKind::Alias},
+        {"alias", TokenKind::Alias}, {"cdecl", TokenKind::CDecl},
         {"byval", TokenKind::ByVal}, {"byref", TokenKind::ByRef},
         {"optional", TokenKind::Optional},
         {"paramarray", TokenKind::ParamArray},

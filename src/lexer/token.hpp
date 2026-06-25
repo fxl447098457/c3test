@@ -129,6 +129,7 @@ enum class TokenKind : uint16_t {
     Declare,
     Lib,
     Alias,
+    CDecl,       // Declare语句的CDecl调用约定
     ByVal,
     ByRef,
     Optional,

@@ -8,6 +8,7 @@
 #include <string>
 #include <vector>
 #include <unordered_map>
+#include <unordered_set>
 #include <memory>
 #include <optional>
 
@@ -80,6 +81,13 @@ struct Symbol {
     // 是否为内置符号 (由编译器预注册, 非用户代码)
     bool isBuiltin = false;
 
+    // --- 跨模块符号解析 ---
+    // isExternal=true 表示该符号定义在其他模块中（Public符号被当前模块引用）
+    bool isExternal = false;
+    // sourceModule 记录符号定义所在的模块基名（如 "MathUtils"）
+    // 仅当 isExternal=true 时有效
+    std::string sourceModule;
+
     Symbol() = default;
     Symbol(SymbolKind k, const std::string& n, Vb6Type t,
            SourceLocation loc, AccessLevel acc = AccessLevel::Public)
@@ -126,6 +134,7 @@ enum class ScopeKind : uint8_t {
 };
 
 class Scope {
+    friend class SymbolTable;  // SymbolTable需要直接访问symbols_
 public:
     Scope(ScopeKind kind, Scope* parent = nullptr)
         : kind_(kind), parent_(parent) {}
@@ -194,6 +203,20 @@ public:
 
     // 获取诊断系统
     Diagnostics& diagnostics() { return diag_; }
+
+    // --- 跨模块符号操作 ---
+
+    // 注入一个跨模块外部符号（由Driver在跨模块解析pass中调用）
+    // 在模块级作用域定义一个isExternal=true的符号
+    void defineExternal(std::unique_ptr<Symbol> sym);
+
+    // 获取所有模块级Public符号（供其他模块链接用）
+    // 返回 name → Symbol* 的映射（仅Sub/Function/Variable/Constant, Public访问级别）
+    std::vector<const Symbol*> getPublicSymbols() const;
+
+    // 获取当前模块引用的所有外部模块名集合
+    // 遍历模块级符号, 返回所有 isExternal=true 的 sourceModule
+    std::unordered_set<std::string> getExternalModuleNames() const;
 
 private:
     Diagnostics& diag_;

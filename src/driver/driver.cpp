@@ -9,6 +9,7 @@
 #include "semantics/semantic_analyzer.hpp"
 #include "backend/cgen.hpp"
 #include "backend/msvc_driver.hpp"
+#include "project/vbp_parser.hpp"
 
 #include <iostream>
 #include <fstream>
@@ -122,8 +123,43 @@ CompileResult Driver::compile(const CompileOptions& options) {
     CompileResult result;
     diag_->clear();
 
+    // === 阶段0: VBP工程文件解析 ===
+    // 如果输入是.vbp文件, 展开源文件列表
+    CompileOptions effectiveOpts = options;
+    if (options.sourceFiles.size() == 1) {
+        const auto& srcFile = options.sourceFiles[0];
+        if (srcFile.size() >= 4 &&
+            (srcFile.compare(srcFile.size()-4, 4, ".vbp") == 0 ||
+             srcFile.compare(srcFile.size()-4, 4, ".VBP") == 0)) {
+
+            VbpProject project = VbpParser::parse(srcFile);
+            if (project.sources.empty()) {
+                std::cerr << "c3: 错误: .vbp文件中没有源文件: " << srcFile << std::endl;
+                result.errorCount = 1;
+                return result;
+            }
+
+            if (options.verbose) {
+                std::cout << "c3: 加载工程: " << project.projectName
+                          << " (" << project.sources.size() << " 个源文件)" << std::endl;
+            }
+
+            // 展开源文件列表 (将相对路径转为绝对路径)
+            effectiveOpts.sourceFiles.clear();
+            for (const auto& entry : project.sources) {
+                auto absPath = project.resolvePath(entry.filePath);
+                effectiveOpts.sourceFiles.push_back(absPath.string());
+            }
+
+            // 如果没有指定输出文件, 使用工程名
+            if (effectiveOpts.outputFile.empty() && !project.exeName.empty()) {
+                effectiveOpts.outputFile = project.exeName;
+            }
+        }
+    }
+
     // === 阶段1: 词法分析 ===
-    if (!runLexer(options)) {
+    if (!runLexer(effectiveOpts)) {
         std::cerr << diag_->toString();
         result.errorCount = diag_->errorCount();
         result.warningCount = diag_->warningCount();
@@ -131,13 +167,13 @@ CompileResult Driver::compile(const CompileOptions& options) {
     }
 
     // dump-tokens模式: 输出完token就结束, 不继续流水线
-    if (options.dumpTokens) {
+    if (effectiveOpts.dumpTokens) {
         result.success = true;
         return result;
     }
 
     // === 阶段1.5: 预处理 (条件编译) ===
-    if (!runPreprocess(options)) {
+    if (!runPreprocess(effectiveOpts)) {
         std::cerr << diag_->toString();
         result.errorCount = diag_->errorCount();
         result.warningCount = diag_->warningCount();
@@ -145,13 +181,13 @@ CompileResult Driver::compile(const CompileOptions& options) {
     }
 
     // dump-preprocess模式: 输出完预处理token就结束
-    if (options.dumpPreprocess) {
+    if (effectiveOpts.dumpPreprocess) {
         result.success = true;
         return result;
     }
 
     // === 阶段2: 语法分析 ===
-    if (!runParser(options)) {
+    if (!runParser(effectiveOpts)) {
         std::cerr << diag_->toString();
         result.errorCount = diag_->errorCount();
         result.warningCount = diag_->warningCount();
@@ -159,21 +195,32 @@ CompileResult Driver::compile(const CompileOptions& options) {
     }
 
     // dump-ast模式: 已在runParser中输出, 结束
-    if (options.dumpAST) {
+    if (effectiveOpts.dumpAST) {
         result.success = true;
         return result;
     }
 
     // === 阶段3: 语义分析 ===
-    if (!runSemanticAnalysis(options)) {
+    if (!runSemanticAnalysis(effectiveOpts)) {
         std::cerr << diag_->toString();
         result.errorCount = diag_->errorCount();
         result.warningCount = diag_->warningCount();
         return result;
     }
 
+    // === 阶段3.5: 跨模块符号链接 ===
+    // 多模块项目: 解析跨模块Public符号引用
+    if (modules_.size() > 1) {
+        if (!runCrossModuleResolution()) {
+            std::cerr << diag_->toString();
+            result.errorCount = diag_->errorCount();
+            result.warningCount = diag_->warningCount();
+            return result;
+        }
+    }
+
     // 如果只做语法检查, 到此结束
-    if (options.syntaxOnly) {
+    if (effectiveOpts.syntaxOnly) {
         result.success = true;
         result.errorCount = diag_->errorCount();
         result.warningCount = diag_->warningCount();
@@ -182,12 +229,12 @@ CompileResult Driver::compile(const CompileOptions& options) {
 
     // === 阶段4: 代码生成 ===
     // 确定输出目录
-    std::string outputDir = options.outputDir.empty() ? "output" : options.outputDir;
+    std::string outputDir = effectiveOpts.outputDir.empty() ? "output" : effectiveOpts.outputDir;
     if (!std::filesystem::exists(outputDir)) {
         std::filesystem::create_directories(outputDir);
     }
 
-    if (!runCodeGeneration(options, outputDir)) {
+    if (!runCodeGeneration(effectiveOpts, outputDir)) {
         std::cerr << diag_->toString();
         result.errorCount = diag_->errorCount();
         result.warningCount = diag_->warningCount();
@@ -195,7 +242,7 @@ CompileResult Driver::compile(const CompileOptions& options) {
     }
 
     // === 阶段5: 链接 ===
-    if (!runLinker(options, outputDir)) {
+    if (!runLinker(effectiveOpts, outputDir)) {
         std::cerr << diag_->toString();
         result.errorCount = diag_->errorCount();
         result.warningCount = diag_->warningCount();
@@ -203,7 +250,7 @@ CompileResult Driver::compile(const CompileOptions& options) {
     }
 
     result.success = true;
-    result.outputFile = options.outputFile;
+    result.outputFile = effectiveOpts.outputFile;
     result.errorCount = diag_->errorCount();
     result.warningCount = diag_->warningCount();
     return result;
@@ -380,6 +427,82 @@ bool Driver::runSemanticAnalysis(const CompileOptions& options) {
     return !diag_->hasErrors();
 }
 
+// === 跨模块符号链接 ===
+// 遍历每个模块的符号表，查找未定义的标识符，在其他模块的Public符号中查找匹配
+// 为匹配到的符号注入 isExternal=true + sourceModule 的外部符号
+
+bool Driver::runCrossModuleResolution() {
+    if (modules_.size() != analyzers_.size()) return false;
+
+    // 为每个模块计算基名（用于sourceModule标识）
+    std::vector<std::string> moduleBaseNames;
+    for (const auto& module : modules_) {
+        std::filesystem::path p(module->filename);
+        moduleBaseNames.push_back(p.stem().string());
+    }
+
+    // 收集每个模块导出的Public符号: [模块索引] -> vector<Symbol*>
+    std::vector<std::vector<const Symbol*>> exportedSymbols(modules_.size());
+    for (size_t i = 0; i < analyzers_.size(); i++) {
+        exportedSymbols[i] = analyzers_[i]->symbolTable().getPublicSymbols();
+    }
+
+    // 构建 "小写符号名 -> (模块索引, Symbol*)" 的全局查找表
+    // VB6不区分大小写，所以用小写名做key
+    std::unordered_map<std::string, std::pair<size_t, const Symbol*>> globalPublicSyms;
+    for (size_t i = 0; i < exportedSymbols.size(); i++) {
+        for (const Symbol* sym : exportedSymbols[i]) {
+            std::string lowerName = Symbol::toLower(sym->name);
+            // 如果多个模块导出同名Public符号，第一个遇到的优先（VB6行为：先声明的优先）
+            if (globalPublicSyms.find(lowerName) == globalPublicSyms.end()) {
+                globalPublicSyms[lowerName] = {i, sym};
+            }
+        }
+    }
+
+    // 对每个模块，检查其模块级作用域中的所有符号
+    // 找到未定义引用（在visit(IdentifierExpr)中可能失败的标识符）
+    // 策略：遍历模块级作用域中尚未定义（但被引用的地方找不到）的标识符
+    // 实际上更简单的做法：扫描每个模块的AST，找到所有IdentifierExpr引用的名称，
+    // 如果在本地符号表中找不到，就在全局Public表中查找并注入外部符号
+
+    // 但为了避免修改AST遍历，采用更简洁的方式：
+    // 对每个模块，遍历全局Public表，如果该符号在本模块没有本地定义，且名称匹配
+    // 某些被引用但未在本模块定义的标识符，就注入外部符号
+    //
+    // 更精确的方案：只遍历在visit(IdentifierExpr)中可能需要跨模块的符号类型
+    // (Sub/Function/Variable/Constant)
+
+    for (size_t i = 0; i < analyzers_.size(); i++) {
+        SymbolTable& symTab = analyzers_[i]->symbolTable();
+
+        for (const auto& [lowerName, entry] : globalPublicSyms) {
+            auto [srcIdx, srcSym] = entry;
+            // 跳过本模块导出的符号
+            if (srcIdx == i) continue;
+
+            // 检查本模块是否已有此符号的本地定义
+            Symbol* localSym = symTab.lookupModule(lowerName);
+            if (localSym) continue;  // 已有本地定义，不需要外部符号
+
+            // 注入外部符号
+            auto extSym = std::make_unique<Symbol>(
+                srcSym->kind, srcSym->name, srcSym->type,
+                srcSym->location, srcSym->access
+            );
+            extSym->isExternal = true;
+            extSym->sourceModule = moduleBaseNames[srcIdx];
+            extSym->params = srcSym->params;  // 复制参数列表（函数调用需要）
+            extSym->isArray = srcSym->isArray;
+
+            symTab.defineExternal(std::move(extSym));
+        }
+    }
+
+    if (diag_->hasErrors()) return false;
+    return true;
+}
+
 bool Driver::runCodeGeneration(const CompileOptions& options, const std::string& outputDir) {
     if (modules_.size() != analyzers_.size()) {
         std::cerr << "c3: 内部错误: 模块数与分析器数不匹配" << std::endl;
@@ -402,10 +525,15 @@ bool Driver::runCodeGeneration(const CompileOptions& options, const std::string&
             baseName = p.stem().string();
         }
 
+        // 收集跨模块include需求（从符号表获取外部模块名）
+        auto externalModules = analyzer->symbolTable().getExternalModuleNames();
+
         // 调用C代码生成器
         CCodeGen cgen(*diag_, analyzer->symbolTable(), analyzer->typeSystem(),
                       options.verbose);
-        bool ok = cgen.generate(*module, baseName);
+
+        // 传入模块基名和外部模块列表
+        bool ok = cgen.generate(*module, baseName, externalModules);
         if (!ok) return false;
 
         // 写 .h 文件

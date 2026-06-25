@@ -1,0 +1,2 @@
+Hello from VB6!
+Line 2

@@ -65,7 +65,9 @@ public:
              const TypeSystem& typeSys, bool verbose = false);
 
     // 主入口: 生成C代码，返回是否成功
-    bool generate(Module& module, const std::string& baseName);
+    // externalModules: 当前模块引用的外部模块基名列表 (用于生成 #include)
+    bool generate(Module& module, const std::string& baseName,
+                  const std::unordered_set<std::string>& externalModules = {});
 
     // 获取生成的代码
     const std::string& headerCode() const { return header_; }
@@ -161,7 +163,8 @@ private:
     CodeEmitter c_;   // .c 文件内容
     std::string header_;
     std::string source_;
-    std::string baseName_;  // 输出文件基名 (如 "hello")
+    std::string baseName_;        // 输出文件基名 (如 "hello")
+    std::string moduleName_;      // 当前模块名 (用于跨模块函数名前缀)
 
     // 状态
     Module* currentModule_ = nullptr;
@@ -188,6 +191,12 @@ private:
     // 已知BSTR变量名集合 (小写) - 用于Debug.Print等场景判断表达式类型
     std::unordered_set<std::string> knownBstrVars_;
 
+    // 是否需要 setjmp.h (On Error GoTo label)
+    bool needSetjmp_ = false;
+
+    // 多模块项目标志 (影响Public函数命名: vb6_<Module>_<Proc> vs vb6_<Proc>)
+    bool isMultiModule_ = false;
+
     // ---- 类型映射 ----
 
     // Vb6Type → C类型字符串
@@ -204,8 +213,11 @@ private:
     // VB6标识符 → 安全C标识符 (处理关键字冲突、特殊字符)
     std::string cIdent(const std::string& vb6Name) const;
 
-    // VB6标识符 → C全局函数名 (模块名_过程名)
-    std::string cProcName(const std::string& procName, AccessLevel access) const;
+    // VB6标识符 → C全局函数名
+    // 本模块: vb6_<ProcName>
+    // 跨模块(外部): vb6_<ModuleName>_<ProcName>
+    std::string cProcName(const std::string& procName, AccessLevel access,
+                          const std::string& sourceModule = "") const;
 
     // ---- 表达式求值 ----
 

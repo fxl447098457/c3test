@@ -1295,16 +1295,18 @@ public:
         ExprPtr lower;  // 可为nullptr (Option Base决定)
         ExprPtr upper;  // 可为nullptr (ReDim时留空)
     };
-    std::vector<Dimension> dimensions;  // 非空=数组声明
+    std::vector<Dimension> dimensions;  // 非空=固定大小数组声明
+    bool isDynamicArray = false;         // Dim arr() 动态数组 (空括号)
 
     VariableDecl(SourceLocation loc, AccessLevel acc, std::string n,
                  bool withEvents, bool isStatic, bool isNew,
                  TypeRefPtr type, ExprPtr init,
-                 std::vector<Dimension> dims)
+                 std::vector<Dimension> dims, bool isDynArr = false)
         : Decl(ASTNodeKind::VariableDecl, loc),
           access(acc), name(std::move(n)), isWithEvents(withEvents),
           isStatic(isStatic), isNew(isNew), asType(std::move(type)),
-          initializer(std::move(init)), dimensions(std::move(dims)) {}
+          initializer(std::move(init)), dimensions(std::move(dims)),
+          isDynamicArray(isDynArr) {}
 };
 
 // ============================================================

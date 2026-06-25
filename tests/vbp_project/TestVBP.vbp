@@ -1,0 +1,8 @@
+Type=Exe
+Form=Form1.frm
+Module=MathUtils; MathUtils.bas
+Module=MainMod; MainMod.bas
+Startup="Sub Main"
+Name="TestVBP"
+ExeName32="TestVBP.exe"
+Title="VBP Test Project"

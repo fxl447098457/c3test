@@ -90,6 +90,7 @@ private:
     bool runPreprocess(const CompileOptions& options);
     bool runParser(const CompileOptions& options);
     bool runSemanticAnalysis(const CompileOptions& options);
+    bool runCrossModuleResolution();  // 跨模块符号链接
     bool runCodeGeneration(const CompileOptions& options, const std::string& outputDir);
     bool runLinker(const CompileOptions& options, const std::string& outputDir);
 };

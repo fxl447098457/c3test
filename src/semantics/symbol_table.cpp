@@ -115,4 +115,46 @@ bool SymbolTable::inProcedure() const {
     return false;
 }
 
+// --- 跨模块符号操作 ---
+
+void SymbolTable::defineExternal(std::unique_ptr<Symbol> sym) {
+    // 在模块级作用域定义外部符号
+    // 如果已存在同名符号（本地已有定义），跳过不覆盖
+    if (!moduleScope_) return;
+    auto it = moduleScope_->symbols_.find(sym->lowerName);
+    if (it != moduleScope_->symbols_.end()) {
+        // 本地已有定义，不注入外部符号
+        return;
+    }
+    moduleScope_->symbols_[sym->lowerName] = std::move(sym);
+}
+
+std::vector<const Symbol*> SymbolTable::getPublicSymbols() const {
+    std::vector<const Symbol*> result;
+    if (!moduleScope_) return result;
+    for (const auto& [key, sym] : moduleScope_->symbols()) {
+        if (sym->access == AccessLevel::Public && !sym->isBuiltin) {
+            // 仅导出可被其他模块引用的符号类型
+            if (sym->kind == SymbolKind::Sub ||
+                sym->kind == SymbolKind::Function ||
+                sym->kind == SymbolKind::Variable ||
+                sym->kind == SymbolKind::Constant) {
+                result.push_back(sym.get());
+            }
+        }
+    }
+    return result;
+}
+
+std::unordered_set<std::string> SymbolTable::getExternalModuleNames() const {
+    std::unordered_set<std::string> result;
+    if (!moduleScope_) return result;
+    for (const auto& [key, sym] : moduleScope_->symbols()) {
+        if (sym->isExternal && !sym->sourceModule.empty()) {
+            result.insert(sym->sourceModule);
+        }
+    }
+    return result;
+}
+
 } // namespace vb6c3

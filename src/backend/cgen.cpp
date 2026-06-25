@@ -36,9 +36,12 @@ CCodeGen::CCodeGen(Diagnostics& diag, const SymbolTable& symTab,
 // 主入口: 生成 .h + .c
 // ============================================================
 
-bool CCodeGen::generate(Module& module, const std::string& baseName) {
+bool CCodeGen::generate(Module& module, const std::string& baseName,
+                         const std::unordered_set<std::string>& externalModules) {
     currentModule_ = &module;
     baseName_ = baseName;
+    moduleName_ = baseName;  // 模块名 = 输出基名（如 "MathUtils"）
+    isMultiModule_ = !externalModules.empty();  // 有外部依赖 = 多模块项目
     emittedSymbols_.clear();
     labelCounter_ = 0;
     tempCounter_ = 0;
@@ -56,6 +59,10 @@ bool CCodeGen::generate(Module& module, const std::string& baseName) {
     h_.emitLine("#include <stdbool.h>");
     h_.emitLine("#include <wchar.h>");
     h_.emitLine("#include \"vb6rtl.h\"");
+    // 跨模块 #include: 引用外部模块的头文件
+    for (const auto& extMod : externalModules) {
+        h_.emitLine("#include \"" + extMod + ".h\"");
+    }
     h_.emitBlank();
 
     // 生成 .c 源文件头
@@ -144,11 +151,14 @@ bool CCodeGen::generate(Module& module, const std::string& baseName) {
     c_.emitBlank();
     c_.emitLine("// === 入口点 ===");
     bool hasMain = false;
+    std::string firstPublicSub;  // 备用入口：首个Public Sub
     for (auto& decl : module.declarations) {
         if (decl->kind == ASTNodeKind::SubDecl) {
             auto& sub = static_cast<SubDecl&>(*decl);
             if (sub.name == "Main" && sub.access == AccessLevel::Public) {
                 hasMain = true;
+            } else if (sub.access == AccessLevel::Public && firstPublicSub.empty()) {
+                firstPublicSub = sub.name;
             }
         }
     }
@@ -161,8 +171,18 @@ bool CCodeGen::generate(Module& module, const std::string& baseName) {
         c_.emitLine("return 0;");
         c_.dedent();
         c_.emitLine("}");
+    } else if (!firstPublicSub.empty()) {
+        // 无 Sub Main 时自动调用首个 Public Sub
+        c_.emitLine("int main(int argc, char* argv[]) {");
+        c_.indent();
+        c_.emitLine("vb6_Init();");
+        c_.emitLine(cProcName(firstPublicSub, AccessLevel::Public) + "();");
+        c_.emitLine("vb6_Exit();");
+        c_.emitLine("return 0;");
+        c_.dedent();
+        c_.emitLine("}");
     } else {
-        c_.emitLine("// No Public Sub Main found - no entry point generated");
+        c_.emitLine("// No Public Sub found - no entry point generated");
     }
 
     // 保存生成结果
@@ -298,9 +318,18 @@ std::string CCodeGen::cIdent(const std::string& vb6Name) const {
     return name;
 }
 
-std::string CCodeGen::cProcName(const std::string& procName, AccessLevel access) const {
-    // Private过程 → static + 模块前缀
-    // Public过程 → 模块前缀
+std::string CCodeGen::cProcName(const std::string& procName, AccessLevel access,
+                                 const std::string& sourceModule) const {
+    // 跨模块函数(外部符号): vb6_<ModuleName>_<ProcName>
+    if (!sourceModule.empty()) {
+        return "vb6_" + cIdent(sourceModule) + "_" + cIdent(procName);
+    }
+    // 多模块项目本模块 Public 函数: vb6_<ModuleName>_<ProcName>
+    // （Private 函数只在本模块内可见，不需要模块前缀）
+    // 单模块项目: vb6_<ProcName> (保持向后兼容)
+    if (isMultiModule_ && access == AccessLevel::Public && !moduleName_.empty()) {
+        return "vb6_" + cIdent(moduleName_) + "_" + cIdent(procName);
+    }
     return "vb6_" + cIdent(procName);
 }
 
@@ -559,7 +588,21 @@ void CCodeGen::visit(IdentifierExpr& node) {
     Symbol* sym = symTab_.lookupModule(node.name);
     if (sym && (sym->kind == SymbolKind::Sub || sym->kind == SymbolKind::Function
              || sym->kind == SymbolKind::DeclareSub || sym->kind == SymbolKind::DeclareFunc)) {
-        lastExpr_ = cProcName(node.name, sym->access);
+        // Declare函数: 使用VB6函数名的cIdent形式 (通过#define映射到导出名)
+        if (sym->kind == SymbolKind::DeclareSub || sym->kind == SymbolKind::DeclareFunc) {
+            lastExpr_ = cIdent(node.name);
+        } else if (sym->isExternal) {
+            // 跨模块函数: 使用 vb6_<ModuleName>_<ProcName> 格式
+            lastExpr_ = cProcName(node.name, sym->access, sym->sourceModule);
+        } else {
+            lastExpr_ = cProcName(node.name, sym->access);
+        }
+        return;
+    }
+
+    // 外部变量/常量: 使用 vb6_<ModuleName>_<Name> 格式
+    if (sym && sym->isExternal) {
+        lastExpr_ = "vb6_" + cIdent(sym->sourceModule) + "_" + cName;
         return;
     }
 
@@ -1191,11 +1234,20 @@ void CCodeGen::visit(OnErrorStmt& node) {
     switch (node.errorKind) {
         case OnErrorKind::GoToLabel: {
             // On Error GoTo label
-            // MVP: 使用全局错误标志 + 每条可出错语句后检查
-            // 生成: vb6_err_handler_label = "label"; vb6_err_jmp_active = 1;
-            // 注意: 完整实现需要每条语句后插入错误检查, 当前MVP只记录标签
-            c_.emitLine("vb6_err_handler_label = vb6_label_" + cIdent(node.labelName) + ";");
+            // 生成 setjmp 保护点，错误发生时 longjmp 回来后跳转到对应标签
+            // C代码:
+            //   if (setjmp(vb6_error_jmp_buf) != 0) {
+            //       goto vb6_label_ErrorHandler;
+            //   }
+            //   vb6_err_jmp_active = 1;
+            c_.emitLine("if (setjmp(vb6_error_jmp_buf) != 0) {");
+            c_.indent();
+            c_.emitLine("goto vb6_label_" + cIdent(node.labelName) + ";");
+            c_.dedent();
+            c_.emitLine("}");
             c_.emitLine("vb6_err_jmp_active = 1;");
+            // 需要setjmp头文件
+            needSetjmp_ = true;
             break;
         }
         case OnErrorKind::ResumeNext: {
@@ -1612,6 +1664,19 @@ void CCodeGen::visit(LocalDeclStmt& node) {
                 break;
             }
 
+            // 动态数组声明: Dim arr() As Long → vb6_SafeArray1D* arr = NULL;
+            if (var.isDynamicArray) {
+                Vb6Type elemType = resolveArrayElemType(var.asType.get());
+                c_.emitLine("vb6_SafeArray1D* " + cName + " = NULL;");
+
+                // 注册到已知数组集合
+                std::string lower = var.name;
+                std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+                knownArrays_.insert(lower);
+                arrayElemTypes_[lower] = elemType;
+                break;
+            }
+
             std::string cType = mapTypeRef(var.asType.get());
 
             // 记录BSTR类型变量名
@@ -1864,6 +1929,26 @@ void CCodeGen::visit(VariableDecl& node) {
         return;
     }
 
+    // 动态数组声明: Dim arr() As Long → vb6_SafeArray1D* arr = NULL;
+    if (node.isDynamicArray) {
+        Vb6Type elemType = resolveArrayElemType(node.asType.get());
+        std::string cType = "vb6_SafeArray1D*";
+
+        if (node.access == AccessLevel::Public) {
+            h_.emitLine("extern " + cType + " " + cName + ";");
+            c_.emitLine(cType + " " + cName + " = NULL;");
+        } else {
+            c_.emitLine("static " + cType + " " + cName + " = NULL;");
+        }
+
+        // 注册到已知数组集合
+        std::string lower = node.name;
+        std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+        knownArrays_.insert(lower);
+        arrayElemTypes_[lower] = elemType;
+        return;
+    }
+
     std::string cType = mapTypeRef(node.asType.get());
 
     // 前向声明 → .h, 定义 → .c
@@ -1893,19 +1978,53 @@ void CCodeGen::visit(VariableDecl& node) {
 }
 
 void CCodeGen::visit(DeclareDecl& node) {
-    // 外部函数声明
+    // 外部函数声明 (Declare Sub/Function ... Lib "xxx" [Alias "yyy"] [CDecl])
     std::string retType = (node.procKind == ProcKind::Function)
         ? mapTypeRef(node.returnType.get()) : "void";
 
     std::string params = makeParamList(node.params);
     if (params.empty()) params = "void";
 
-    // 使用lib名和alias
-    std::string cName = node.aliasName.empty() ? cIdent(node.name) : node.aliasName;
+    // 调用约定
+    std::string callConv = (node.callingConv == CallConv::CDecl) ? "__cdecl" : "__stdcall";
 
-    // __declspec(dllimport) 声明
-    c_.emitLine("#pragma comment(lib, \"" + node.libName + ".lib\")");
-    h_.emitLine("__declspec(dllimport) " + retType + " __stdcall " + cName + "(" + params + ");");
+    // 去除字符串两端引号 (词法器保留引号)
+    auto stripQuotes = [](const std::string& s) -> std::string {
+        if (s.size() >= 2 && s.front() == '"' && s.back() == '"')
+            return s.substr(1, s.size() - 2);
+        return s;
+    };
+
+    // Lib名: 去引号、去.dll后缀
+    std::string libName = stripQuotes(node.libName);
+    if (libName.size() > 4 &&
+        (libName.compare(libName.size()-4, 4, ".dll") == 0 ||
+         libName.compare(libName.size()-4, 4, ".DLL") == 0)) {
+        libName = libName.substr(0, libName.size()-4);
+    }
+
+    // Alias: 去引号, 保持原始导出名 (大小写敏感, 可能含#序号前缀)
+    std::string aliasName = stripQuotes(node.aliasName);
+
+    // VB6函数名→C标识符 (用于调用点)
+    std::string cFuncIdent = cIdent(node.name);
+
+    // 导出名: Alias优先, 否则用VB6函数名
+    // 注意: Windows API函数名是大小写敏感的, 需要保持原始大小写
+    std::string exportedName = aliasName.empty() ? node.name : aliasName;
+
+    // 生成: #pragma comment(lib, "xxx.lib")
+    c_.emitLine("#pragma comment(lib, \"" + libName + ".lib\")");
+
+    // 生成DLL导入声明 + 名称映射
+    if (exportedName != cFuncIdent) {
+        // 导出名≠VB6名: 声明导出名, 用#define映射
+        h_.emitLine("__declspec(dllimport) " + retType + " " + callConv + " " + exportedName + "(" + params + ");");
+        h_.emitLine("#define " + cFuncIdent + " " + exportedName);
+    } else {
+        // 导出名=VB6名: 直接声明
+        h_.emitLine("__declspec(dllimport) " + retType + " " + callConv + " " + exportedName + "(" + params + ");");
+    }
 }
 
 void CCodeGen::visit(PropertyDecl& node) {
