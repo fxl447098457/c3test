@@ -3,7 +3,7 @@
 // 递归下降解析器 + Pratt 表达式解析
 // 参考: FreeBASIC parser.bis, RustASP Pratt (l_bp, r_bp) 设计, VB6.g4 ANTLR
 
-#include "lexer/lexer.hpp"
+#include "preprocessor/preprocessor.hpp"
 #include "ast/ast.hpp"
 #include "common/diagnostics.hpp"
 #include <memory>
@@ -27,7 +27,9 @@ struct BindingPower {
 
 class Parser {
 public:
-    Parser(std::shared_ptr<SourceBuffer> buffer, Diagnostics& diag);
+    // 使用预处理器 (含条件编译支持)
+    Parser(std::shared_ptr<SourceBuffer> buffer, Diagnostics& diag,
+           const PreprocessOptions& ppOpts = PreprocessOptions());
 
     // 主入口: 解析整个模块
     std::unique_ptr<Module> parseModule();
@@ -239,7 +241,7 @@ private:
     bool isEndBlock() const;
 
 private:
-    Lexer lexer_;
+    Preprocessor preproc_;
     Diagnostics& diag_;
     std::shared_ptr<SourceBuffer> buffer_;
 
@@ -250,6 +252,10 @@ private:
 
     // With 嵌套深度 (>0 时 .member 为 WithMemberExpr)
     int withDepth_ = 0;
+
+    // 安全限制: advance调用计数
+    size_t advanceCount_ = 0;
+    static constexpr size_t MAX_ADVANCES = 10'000'000;
 
     // 优先级表 (初始化一次)
     std::unordered_map<int, BindingPower> bpTable_;

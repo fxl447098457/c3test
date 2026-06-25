@@ -8,8 +8,9 @@ namespace vb6c3 {
 // 构造函数 + 初始化
 // ============================================================
 
-Parser::Parser(std::shared_ptr<SourceBuffer> buffer, Diagnostics& diag)
-    : lexer_(buffer, diag)
+Parser::Parser(std::shared_ptr<SourceBuffer> buffer, Diagnostics& diag,
+               const PreprocessOptions& ppOpts)
+    : preproc_(buffer, diag, ppOpts)
     , diag_(diag)
     , buffer_(buffer)
 {
@@ -96,6 +97,14 @@ const Token& Parser::peek2() const {
 }
 
 Token Parser::advance() {
+    if (++advanceCount_ > MAX_ADVANCES) {
+        // 安全限制: 防止无限循环消耗内存
+        SourceLocation loc = currentLoc();
+        diag_.error(DiagnosticID::ParseUnexpectedToken, loc,
+            "解析器advance调用超过上限(" + std::to_string(MAX_ADVANCES) + "), 可能存在无限循环");
+        cur_.kind = TokenKind::EndOfFile;
+        return cur_;
+    }
     Token tok = std::move(cur_);
     cur_ = std::move(next_);
     next_ = fetchNextToken();
@@ -104,8 +113,14 @@ Token Parser::advance() {
 
 Token Parser::fetchNextToken() {
     Token tok;
+    int safetyCounter = 0;
     do {
-        tok = lexer_.nextToken();
+        tok = preproc_.nextToken();
+        if (++safetyCounter > 1000000) {
+            // 安全限制: 防止无限循环
+            tok.kind = TokenKind::EndOfFile;
+            break;
+        }
     } while (tok.kind == TokenKind::Comment);
     return tok;
 }
@@ -289,9 +304,10 @@ bool Parser::expectEndOfStatement() {
     if (cur_.kind == TokenKind::EndOfFile) {
         return true;
     }
-    // 报错但继续
+    // 报错并跳过当前token, 防止无限循环
     diag_.error(DiagnosticID::ParseExpectedEndOfStatement, currentLoc(),
         "expected end of statement (newline or :)");
+    advance();  // 必须前进, 否则调用方while循环可能死循环
     return false;
 }
 

@@ -1,6 +1,7 @@
 #pragma once
 // 编译器驱动 - 命令行解析 + 编译流程编排
 
+#include "preprocessor/preprocessor.hpp"
 #include <string>
 #include <vector>
 #include <memory>
@@ -25,9 +26,13 @@ struct CompileOptions {
     bool dumpTokens = false;
     bool dumpAST = false;
     bool dumpIR = false;
+    bool dumpPreprocess = false;              // 输出预处理后的token列表
     bool emitLLVM = false;                   // 输出.ll文件
     bool syntaxOnly = false;                 // 只做语法检查
     bool verbose = false;
+
+    // 条件编译
+    std::vector<std::string> defines;        // -d:NAME=VALUE 或 --define NAME=VALUE
 
     // 优化
     int optimizationLevel = 0;               // 0=无, 1/2/3
@@ -71,6 +76,7 @@ private:
 
     // 编译流水线各阶段
     bool runLexer(const CompileOptions& options);
+    bool runPreprocess(const CompileOptions& options);
     bool runParser(const CompileOptions& options);
     bool runSemanticAnalysis(const CompileOptions& options);
     bool runCodeGeneration(const CompileOptions& options);

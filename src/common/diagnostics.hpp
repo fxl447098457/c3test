@@ -80,6 +80,10 @@ enum class DiagnosticID : uint16_t {
     LinkUnresolvedExternal = 5001,
     LinkDuplicateSymbol = 5002,
     LinkMissingRTL = 5003,
+    // 预处理 (6xxx)
+    PreprocUndefinedConstant = 6001,
+    PreprocInvalidDirective = 6002,
+    PreprocConstRedefinition = 6003,
 };
 
 // 单条诊断信息

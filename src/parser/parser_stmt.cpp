@@ -232,12 +232,11 @@ std::unique_ptr<IfStmt> Parser::parseIfStmt() {
 
     // 多行 If...Then
     skipNewLines();
-    StmtList thenBody = parseBlock(TokenKind::ElseIf, TokenKind::Else);
-    // 注意: parseBlock 只接受一种 endKind, 需要手动处理
-
-    // 实际上改用 parseBlockUntil
-    thenBody = parseBlockUntil({TokenKind::ElseIf, TokenKind::Else,
-                                TokenKind::End});
+    // 使用 parseBlockUntil 包含 End 作为停止条件
+    // (不能只用 parseBlock(ElseIf, Else), 因为没有 Else 的 If 块
+    //  遇到 End If 时无法终止, 导致无限循环)
+    StmtList thenBody = parseBlockUntil({TokenKind::ElseIf, TokenKind::Else,
+                                         TokenKind::End});
 
     std::vector<std::unique_ptr<ElseIfClause>> elseIfs;
     while (cur_.kind == TokenKind::ElseIf) {
