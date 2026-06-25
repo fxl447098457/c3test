@@ -41,6 +41,9 @@ std::pair<CompileOptions, int> Driver::parseArgs(int argc, char* argv[]) {
         else if (arg == "-o" && i + 1 < argc) {
             opts.outputFile = argv[++i];
         }
+        else if (arg == "--output-dir" && i + 1 < argc) {
+            opts.outputDir = argv[++i];
+        }
         else if (arg == "--target" && i + 1 < argc) {
             opts.target = argv[++i];
         }
@@ -178,7 +181,13 @@ CompileResult Driver::compile(const CompileOptions& options) {
     }
 
     // === 阶段4: 代码生成 ===
-    if (!runCodeGeneration(options)) {
+    // 确定输出目录
+    std::string outputDir = options.outputDir.empty() ? "output" : options.outputDir;
+    if (!std::filesystem::exists(outputDir)) {
+        std::filesystem::create_directories(outputDir);
+    }
+
+    if (!runCodeGeneration(options, outputDir)) {
         std::cerr << diag_->toString();
         result.errorCount = diag_->errorCount();
         result.warningCount = diag_->warningCount();
@@ -186,7 +195,7 @@ CompileResult Driver::compile(const CompileOptions& options) {
     }
 
     // === 阶段5: 链接 ===
-    if (!runLinker(options)) {
+    if (!runLinker(options, outputDir)) {
         std::cerr << diag_->toString();
         result.errorCount = diag_->errorCount();
         result.warningCount = diag_->warningCount();
@@ -371,7 +380,7 @@ bool Driver::runSemanticAnalysis(const CompileOptions& options) {
     return !diag_->hasErrors();
 }
 
-bool Driver::runCodeGeneration(const CompileOptions& options) {
+bool Driver::runCodeGeneration(const CompileOptions& options, const std::string& outputDir) {
     if (modules_.size() != analyzers_.size()) {
         std::cerr << "c3: 内部错误: 模块数与分析器数不匹配" << std::endl;
         return false;
@@ -400,7 +409,7 @@ bool Driver::runCodeGeneration(const CompileOptions& options) {
         if (!ok) return false;
 
         // 写 .h 文件
-        std::string hPath = baseName + ".h";
+        std::string hPath = outputDir + "/" + baseName + ".h";
         {
             std::ofstream ofs(hPath, std::ios::out | std::ios::trunc);
             if (!ofs) {
@@ -411,7 +420,7 @@ bool Driver::runCodeGeneration(const CompileOptions& options) {
         }
 
         // 写 .c 文件
-        std::string cPath = baseName + ".c";
+        std::string cPath = outputDir + "/" + baseName + ".c";
         {
             std::ofstream ofs(cPath, std::ios::out | std::ios::trunc);
             if (!ofs) {
@@ -436,7 +445,7 @@ bool Driver::runCodeGeneration(const CompileOptions& options) {
     return !diag_->hasErrors();
 }
 
-bool Driver::runLinker(const CompileOptions& options) {
+bool Driver::runLinker(const CompileOptions& options, const std::string& outputDir) {
     // 如果是 --emit-c 模式, 不需要链接
     if (options.emitC) {
         return true;
@@ -454,7 +463,7 @@ bool Driver::runLinker(const CompileOptions& options) {
     for (auto& module : modules_) {
         std::filesystem::path p(module->filename);
         std::string baseName = p.stem().string();
-        std::string cPath = baseName + ".c";
+        std::string cPath = outputDir + "/" + baseName + ".c";
         msvcOpts.sourceFiles.push_back(cPath);
     }
 
@@ -484,14 +493,15 @@ bool Driver::runLinker(const CompileOptions& options) {
     }
     msvcOpts.rtlDir = rtlDir;
 
-    // 输出文件
+    // 输出文件 - 放入 outputDir
     if (!options.outputFile.empty()) {
+        // 用户指定了绝对/相对路径, 直接使用
         msvcOpts.outputFile = options.outputFile;
     } else if (modules_.size() == 1) {
         std::filesystem::path p(modules_[0]->filename);
-        msvcOpts.outputFile = p.stem().string() + ".exe";
+        msvcOpts.outputFile = outputDir + "/" + p.stem().string() + ".exe";
     } else {
-        msvcOpts.outputFile = "a.exe";
+        msvcOpts.outputFile = outputDir + "/a.exe";
     }
 
     msvcOpts.verbose = options.verbose;
@@ -511,6 +521,7 @@ void Driver::printHelp() {
               << "\n"
               << "选项:\n"
               << "  -o <文件>          输出文件路径\n"
+              << "  --output-dir <目录> 输出目录 (默认: output)\n"
               << "  --target <平台>     目标平台 (win-x86, win-x64, linux-x64, macos-arm64)\n"
               << "  --gui <模式>        GUI模式 (native, webview, none)\n"
               << "  --dump-tokens       输出token列表\n"

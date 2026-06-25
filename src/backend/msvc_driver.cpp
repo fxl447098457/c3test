@@ -4,6 +4,7 @@
 #include <fstream>
 #include <cstdlib>
 #include <sstream>
+#include <filesystem>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -78,6 +79,12 @@ bool MsvcDriver::compileAndLink(const MsvcDriverOptions& options) {
     // 输出对象文件名
     if (!options.outputFile.empty()) {
         cmd << " /Fe\"" << options.outputFile << "\"";
+        // .obj文件与.exe同目录
+        std::filesystem::path outPath(options.outputFile);
+        std::string objDir = outPath.parent_path().string();
+        if (!objDir.empty()) {
+            cmd << " /Fo\"" << objDir << "/\"";
+        }
     }
 
     // 源文件列表

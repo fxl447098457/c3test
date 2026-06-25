@@ -6,6 +6,7 @@
 .build/
 build/
 out/
+output/
 cmake-build-*/
 
 # ---------- CMake 生成物 ----------

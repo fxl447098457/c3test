@@ -19,6 +19,7 @@ class SemanticAnalyzer;
 struct CompileOptions {
     std::vector<std::string> sourceFiles;   // 源文件列表
     std::string outputFile;                  // 输出文件路径
+    std::string outputDir;                   // 输出目录 (默认: output)
 
     // 目标平台
     std::string target = "win-x86";          // win-x86, win-x64, linux-x64, etc.
@@ -89,8 +90,8 @@ private:
     bool runPreprocess(const CompileOptions& options);
     bool runParser(const CompileOptions& options);
     bool runSemanticAnalysis(const CompileOptions& options);
-    bool runCodeGeneration(const CompileOptions& options);
-    bool runLinker(const CompileOptions& options);
+    bool runCodeGeneration(const CompileOptions& options, const std::string& outputDir);
+    bool runLinker(const CompileOptions& options, const std::string& outputDir);
 };
 
 } // namespace vb6c3
