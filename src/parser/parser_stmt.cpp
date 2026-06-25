@@ -754,6 +754,10 @@ StmtPtr Parser::parseLabelOrAssignmentOrCall() {
     // 检查是否是赋值
     if (match(TokenKind::Equals)) {
         auto value = parseExpression();  // 右值: = 是比较, 完整解析
+        if (!value) {
+            diag_.error(DiagnosticID::ParseExpectedExpression, loc,
+                "赋值右值为空 (cur=" + std::string(Token::kindToString(cur_.kind)) + ")");
+        }
         return std::make_unique<AssignmentStmt>(loc, std::move(expr), std::move(value));
     }
 

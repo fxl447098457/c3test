@@ -6,6 +6,7 @@
 #include "preprocessor/preprocessor.hpp"
 #include "parser/parser.hpp"
 #include "ast/ast_printer.hpp"
+#include "semantics/semantic_analyzer.hpp"
 
 #include <iostream>
 #include <fstream>
@@ -47,6 +48,9 @@ std::pair<CompileOptions, int> Driver::parseArgs(int argc, char* argv[]) {
         }
         else if (arg == "--dump-ast") {
             opts.dumpAST = true;
+        }
+        else if (arg == "--dump-symbols") {
+            opts.dumpSymbols = true;
         }
         else if (arg == "--dump-preprocess") {
             opts.dumpPreprocess = true;
@@ -141,6 +145,12 @@ CompileResult Driver::compile(const CompileOptions& options) {
         std::cerr << diag_->toString();
         result.errorCount = diag_->errorCount();
         result.warningCount = diag_->warningCount();
+        return result;
+    }
+
+    // dump-ast模式: 已在runParser中输出, 结束
+    if (options.dumpAST) {
+        result.success = true;
         return result;
     }
 
@@ -327,6 +337,10 @@ bool Driver::runParser(const CompileOptions& options) {
             printer.print(*module);
         }
 
+        if (module) {
+            modules_.push_back(std::move(module));
+        }
+
         if (diag_->hasErrors()) {
             return false;
         }
@@ -335,8 +349,17 @@ bool Driver::runParser(const CompileOptions& options) {
 }
 
 bool Driver::runSemanticAnalysis(const CompileOptions& options) {
-    // TODO: P2阶段实现
-    return true;
+    for (auto& module : modules_) {
+        SemanticAnalyzer analyzer(*diag_, options.verbose);
+        bool ok = analyzer.analyze(*module);
+
+        if (options.dumpSymbols) {
+            analyzer.dumpSymbols(std::cout);
+        }
+
+        if (!ok) return false;
+    }
+    return !diag_->hasErrors();
 }
 
 bool Driver::runCodeGeneration(const CompileOptions& options) {
@@ -363,6 +386,7 @@ void Driver::printHelp() {
               << "  --dump-tokens       输出token列表\n"
               << "  --dump-preprocess   输出预处理后的token列表\n"
               << "  --dump-ast          输出AST\n"
+              << "  --dump-symbols      输出符号表\n"
               << "  --dump-ir           输出IR\n"
               << "  --emit-llvm         输出LLVM IR (.ll)\n"
               << "  --syntax-only       只做语法检查\n"

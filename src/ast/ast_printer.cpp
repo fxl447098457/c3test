@@ -137,7 +137,10 @@ public:
     void visit(AssignmentStmt& node) override {
         out() << "Assign: ";
         printExprBrief(*node.target);
-        os_ << " = ...\n";
+        os_ << " = ";
+        if (node.value) { printExprBrief(*node.value); }
+        else { os_ << "<null>"; }
+        os_ << "\n";
     }
 
     void visit(SetStmt& node) override {

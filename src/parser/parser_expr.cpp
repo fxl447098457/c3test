@@ -43,6 +43,17 @@ ExprPtr Parser::parseExpression(int minBp) {
             break;  // 运算符优先级不够, 退出循环
         }
 
+        // 非运算符 token (如 NewLine, EndOfFile, 标识符等):
+        // 绑定力为 {0,0}, 当 minBp=0 时 0 < 0 为 false 会误入循环.
+        // 若既非中缀也非后缀起始, 应直接退出, 避免 parseLeftDenotation
+        // 将 left move 走后返回 nullptr 导致有效表达式丢失.
+        if (bp.l_bp == 0 && bp.r_bp == 0 &&
+            cur_.kind != TokenKind::Dot &&
+            cur_.kind != TokenKind::LeftParen &&
+            cur_.kind != TokenKind::Exclamation) {
+            break;
+        }
+
         left = parseLeftDenotation(std::move(left), minBp);
         if (!left) {
             break;

@@ -10,6 +10,7 @@ namespace vb6c3 {
 
 class Diagnostics;
 class SourceBuffer;
+class Module;
 
 // 编译选项
 struct CompileOptions {
@@ -27,6 +28,7 @@ struct CompileOptions {
     bool dumpAST = false;
     bool dumpIR = false;
     bool dumpPreprocess = false;              // 输出预处理后的token列表
+    bool dumpSymbols = false;                 // 输出符号表
     bool emitLLVM = false;                   // 输出.ll文件
     bool syntaxOnly = false;                 // 只做语法检查
     bool verbose = false;
@@ -73,6 +75,7 @@ public:
 
 private:
     std::unique_ptr<Diagnostics> diag_;
+    std::vector<std::unique_ptr<Module>> modules_;  // 解析产出的AST
 
     // 编译流水线各阶段
     bool runLexer(const CompileOptions& options);
