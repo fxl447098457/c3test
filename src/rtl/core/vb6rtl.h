@@ -170,6 +170,10 @@ BSTR vb6_Format(vb6_VARIANT expr, BSTR fmt);
 
 // 消息框
 int32_t vb6_MsgBox(BSTR prompt, int32_t buttons, BSTR title);
+// P7.7: single-arg convenience (MsgBox "text" -> vb6_MsgBox1(text))
+static inline int32_t vb6_MsgBox1(BSTR prompt) {
+    return vb6_MsgBox(prompt, 0, NULL);
+}
 
 // 数值函数
 double vb6_Abs(double x);

@@ -451,7 +451,7 @@ bool CCodeGen::generate(Module& module, const std::string& baseName,
                             c_.emitLine("(void)hPrevInst; (void)lpCmdLine; (void)nCmdShow;");
                             c_.emitLine("vb6_Init();");
                             c_.emitLine("vb6_SetAppInstance((void*)hInst);");
-                            c_.emitLine("vb6_form_show_" + cIdent(formName) + "(0);  /* Show form modeless */");
+                            c_.emitLine("vb6_form_show_" + cIdent(formName) + "(NULL);  /* Show form modeless, NULL=hMDIClient */");
                             c_.emitLine("int ret = vb6_MessageLoop();");
                             c_.emitLine("vb6_Exit();");
                             c_.emitLine("return ret;");
@@ -505,7 +505,7 @@ bool CCodeGen::generate(Module& module, const std::string& baseName,
                 c_.emitLine("(void)hPrevInst; (void)lpCmdLine; (void)nCmdShow;");
                 c_.emitLine("vb6_Init();");
                 c_.emitLine("vb6_SetAppInstance((void*)hInst);");
-                c_.emitLine("vb6_form_show_" + cIdent(formName) + "(0);  /* Show form modeless */");
+                c_.emitLine("vb6_form_show_" + cIdent(formName) + "(NULL);  /* Show form modeless, NULL=hMDIClient */");
                 c_.emitLine("int ret = vb6_MessageLoop();");
                 c_.emitLine("vb6_Exit();");
                 c_.emitLine("return ret;");
@@ -4112,6 +4112,8 @@ void CCodeGen::emitFormFramework(const FrmFormDesc& frmDesc, Module& module) {
     std::string createFn = "vb6_form_create_" + cIdent(formName);  // 控件创建函数名
     std::string showFn = "vb6_form_show_" + cIdent(formName);      // Show函数名
     int ctrlId = 0;  // P7.6: 控件ID计数器(在WM_COMMAND和CreateControls中复用)
+    bool isMDIForm = (frmDesc.formControl.controlType == FrmControlType::MDIForm);  // P7.7
+    bool isMDIChild = frmDesc.isMDIChild;  // P7.7
 
     // --- 提取窗体属性 ---
     std::string caption = formName;  // 默认标题=窗体名
@@ -4203,7 +4205,7 @@ void CCodeGen::emitFormFramework(const FrmFormDesc& frmDesc, Module& module) {
     // 创建函数前向声明
     h_.emitLine("void " + createFn + "(void* hwnd, void* hInstance);");
     // Show函数前向声明
-    h_.emitLine("void " + showFn + "(int modal);");
+    h_.emitLine("void " + showFn + "(void* hMDIClient);");
     h_.emitBlank();
 
     // --- .c文件: 实现 ---
@@ -4315,10 +4317,16 @@ void CCodeGen::emitFormFramework(const FrmFormDesc& frmDesc, Module& module) {
     c_.dedent();
     c_.emitLine("}");
 
-    // default: DefWindowProc
+    // default: DefWindowProc (P7.7: MDI窗体使用DefFrameProc/DefMDIChildProc)
     c_.emitLine("default:");
     c_.indent();
-    c_.emitLine("return DefWindowProcA(hwnd, msg, wParam, lParam);");
+    if (isMDIForm) {
+        c_.emitLine("return DefFrameProcA(hwnd, (HWND)vb6_GetMDIClient(hwnd), msg, wParam, lParam);");
+    } else if (isMDIChild) {
+        c_.emitLine("return DefMDIChildProcA(hwnd, msg, wParam, lParam);");
+    } else {
+        c_.emitLine("return DefWindowProcA(hwnd, msg, wParam, lParam);");
+    }
     c_.dedent();
 
     c_.dedent();
@@ -4467,29 +4475,58 @@ void CCodeGen::emitFormFramework(const FrmFormDesc& frmDesc, Module& module) {
     c_.emitLine("}");  // CreateControls
     c_.emitBlank();
 
-    // --- Show函数 ---
+    // --- Show函数 (P7.7: 支持MDIForm/MDIChild) ---
     c_.emitLine("// === " + formName + " Show ===");
-    c_.emitLine("void " + showFn + "(int modal) {");
+    c_.emitLine("void " + showFn + "(void* hMDIClient) {");
     c_.indent();
+    c_.emitLine("(void)hMDIClient;");
     c_.emitLine("void* hInst = vb6_GetAppInstance();");
-    c_.emitLine("vb6_RegisterFormClass(\"" + clsName + "\", (void*)" + wndProc + ", hInst, 0);");
-    c_.emitLine("vb6_hwnd_" + cIdent(formName) + " = vb6_CreateFormWindow(");
-    c_.indent();
-    c_.emitLine("\"" + clsName + "\", \"" + caption + "\",");
-    // StartUpPosition: 3=CW_USEDEFAULT, 1=所有者中心, 2=屏幕中心
-    if (startupPos == 3) {
-        c_.emitLine("CW_USEDEFAULT, CW_USEDEFAULT,");
+    if (isMDIForm) {
+        c_.emitLine("vb6_RegisterMDIFormClass(\"" + clsName + "\", (void*)" + wndProc + ", hInst, 0);");
+        c_.emitLine("vb6_hwnd_" + cIdent(formName) + " = vb6_CreateMDIFormWindow(");
+        c_.indent();
+        c_.emitLine("\"" + clsName + "\", \"" + caption + "\",");
+        if (startupPos == 3) {
+            c_.emitLine("CW_USEDEFAULT, CW_USEDEFAULT,");
+        } else {
+            c_.emitLine("0, 0,");
+        }
+        c_.emitLine(std::to_string(clientWidth) + ", " + std::to_string(clientHeight) + ",");
+        c_.emitLine("hInst);");
+        c_.dedent();
+    } else if (isMDIChild) {
+        c_.emitLine("vb6_RegisterFormClass(\"" + clsName + "\", (void*)" + wndProc + ", hInst, 0);");
+        c_.emitLine("vb6_hwnd_" + cIdent(formName) + " = vb6_CreateMDIChildWindow(");
+        c_.indent();
+        c_.emitLine("\"" + clsName + "\", \"" + caption + "\",");
+        if (startupPos == 3) {
+            c_.emitLine("CW_USEDEFAULT, CW_USEDEFAULT,");
+        } else {
+            c_.emitLine("0, 0,");
+        }
+        c_.emitLine(std::to_string(clientWidth) + ", " + std::to_string(clientHeight) + ",");
+        c_.emitLine("hMDIClient, hInst);");
+        c_.dedent();
     } else {
-        c_.emitLine("0, 0,");  // 位置由后续计算
+        c_.emitLine("vb6_RegisterFormClass(\"" + clsName + "\", (void*)" + wndProc + ", hInst, 0);");
+        c_.emitLine("vb6_hwnd_" + cIdent(formName) + " = vb6_CreateFormWindow(");
+        c_.indent();
+        c_.emitLine("\"" + clsName + "\", \"" + caption + "\",");
+        if (startupPos == 3) {
+            c_.emitLine("CW_USEDEFAULT, CW_USEDEFAULT,");
+        } else {
+            c_.emitLine("0, 0,");
+        }
+        c_.emitLine(std::to_string(clientWidth) + ", " + std::to_string(clientHeight) + ",");
+        c_.emitLine("hInst, NULL);");
+        c_.dedent();
     }
-    c_.emitLine(std::to_string(clientWidth) + ", " + std::to_string(clientHeight) + ",");
-    c_.emitLine("hInst, NULL);");
-    c_.dedent();
-    c_.emitLine("vb6_ShowForm(vb6_hwnd_" + cIdent(formName) + ", modal);");
+    c_.emitLine("vb6_ShowForm(vb6_hwnd_" + cIdent(formName) + ", 0);");
     c_.dedent();
     c_.emitLine("}");  // Show
     c_.emitBlank();
 }
+
 
 // ============================================================
 

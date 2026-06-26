@@ -106,6 +106,7 @@ FrmControlType FrmParser::parseControlType(const std::string& typeName) {
     for (auto& c : lower) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
 
     // VB6标准控件 (VB.xxx)
+    if (lower.find("vb.mdiform") != std::string::npos) return FrmControlType::MDIForm;
     if (lower.find("vb.form") != std::string::npos) return FrmControlType::Form;
     if (lower.find("vb.commandbutton") != std::string::npos) return FrmControlType::CommandButton;
     if (lower.find("vb.textbox") != std::string::npos) return FrmControlType::TextBox;
@@ -139,6 +140,7 @@ FrmControlType FrmParser::parseControlType(const std::string& typeName) {
 
 const char* FrmParser::controlTypeToWin32Class(FrmControlType type) {
     switch (type) {
+        case FrmControlType::MDIForm:       return "#32770";     // MDI父窗体 (用RegisterClass+MDICLIENT)
         case FrmControlType::Form:         return "#32770";     // 对话框类 (实际用RegisterClass)
         case FrmControlType::CommandButton: return "BUTTON";
         case FrmControlType::TextBox:      return "EDIT";
@@ -160,6 +162,7 @@ const char* FrmParser::controlTypeToWin32Class(FrmControlType type) {
 
 const char* FrmParser::controlTypeToVb6Name(FrmControlType type) {
     switch (type) {
+        case FrmControlType::MDIForm:       return "MDIForm";
         case FrmControlType::Form:         return "Form";
         case FrmControlType::CommandButton: return "CommandButton";
         case FrmControlType::TextBox:      return "TextBox";
@@ -415,6 +418,13 @@ FrmFile FrmParser::parseString(const std::string& content, const std::string& fr
             }
 
             frmFile.form.formControl = std::move(formCtrl);
+
+            // P7.7: 检测MDIChild属性
+            auto mdiChildIt = frmFile.form.formControl.properties.find("MDIChild");
+            if (mdiChildIt != frmFile.form.formControl.properties.end() &&
+                mdiChildIt->second.type == FrmValueType::Integer && mdiChildIt->second.intValue != 0) {
+                frmFile.form.isMDIChild = true;
+            }
         }
     }
 

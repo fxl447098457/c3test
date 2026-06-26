@@ -69,6 +69,7 @@ struct FrmPropertyBlock {
 enum class FrmControlType {
     // VB6标准控件 (VB.xxx)
     Form,               // VB.Form — 窗体自身
+    MDIForm,             // VB.MDIForm — MDI父窗体
     CommandButton,      // VB.CommandButton
     TextBox,            // VB.TextBox
     Label,              // VB.Label
@@ -121,6 +122,7 @@ struct FrmControl {
 
 struct FrmFormDesc {
     std::string formName;              // 窗体名: "Form1"
+    bool isMDIChild = false;            // 是否为MDI子窗体 (MDIChild=-1属性)
     FrmControl formControl;            // 窗体自身的属性 (Caption, ClientHeight, 等)
                                        // formControl.controlType == FrmControlType::Form
 
