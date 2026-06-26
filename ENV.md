@@ -3,6 +3,28 @@ AIGC:
   ContentProducer: '001191110102MAD55U9H0F10002'
   ContentPropagator: '001191110102MAD55U9H0F10002'
   Label: '1'
+  ProduceID: 'da3cc079-c435-48a9-8860-b63596ab8804'
+  PropagateID: 'da3cc079-c435-48a9-8860-b63596ab8804'
+  ReservedCode1: '49876075-bf5f-497c-ac6d-ccdf16d7c3ac'
+  ReservedCode2: '49876075-bf5f-497c-ac6d-ccdf16d7c3ac'
+---
+
+---
+AIGC:
+  ContentProducer: '001191110102MAD55U9H0F10002'
+  ContentPropagator: '001191110102MAD55U9H0F10002'
+  Label: '1'
+  ProduceID: '5025bc45-bec8-49a3-a926-13034592d2eb'
+  PropagateID: '5025bc45-bec8-49a3-a926-13034592d2eb'
+  ReservedCode1: '69cfe8a2-74b3-4571-b19d-37d0957dc7df'
+  ReservedCode2: '69cfe8a2-74b3-4571-b19d-37d0957dc7df'
+---
+
+---
+AIGC:
+  ContentProducer: '001191110102MAD55U9H0F10002'
+  ContentPropagator: '001191110102MAD55U9H0F10002'
+  Label: '1'
   ProduceID: '32567f0d-687a-4619-9703-55e52779ddbe'
   PropagateID: '32567f0d-687a-4619-9703-55e52779ddbe'
   ReservedCode1: 'b9511596-f527-4309-97bc-608e1ac248ff'
@@ -88,6 +110,28 @@ D:\vb6pro\tests\run_tests.ps1
 2. 用 text-writer_write_text 重写 CMakeLists.txt
 3. 重新 configure + build
 
+## 脚本工具 (scripts/)
+
+| 脚本 | 用法 | 说明 |
+|------|------|------|
+| build.bat | uild [clean] | 构建 c3.exe（clean=清理后完整构建） |
+| test.bat | 	est [all\|run\|compile\|syntax] [verbose] | 运行回归测试 |
+| compile.bat | compile <source> [outdir] | 编译 .bas/.frm/.vbp（自动加载 MSVC+VB6RTL） |
+| run.bat | un <exename> [timeout] | 运行 output/ 下的 EXE |
+| dev.ps1 | dev [-SkipBuild] [-SkipTest] | 一键构建+测试（PowerShell，Agent 会话用） |
+| env.ps1 | . .\scripts\env.ps1 | 加载 MSVC 环境（dot-source） |
+| compile_form.ps1 | compile_form.ps1 <form.frm> [-Run] | 编译窗体+可选运行（PowerShell） |
+
+**命令行示例:**
+`at
+scripts\build              REM 增量构建
+scripts\build clean        REM 清理后构建
+scripts\test               REM 全部48个测试
+scripts\test run           REM 仅运行测试
+scripts\compile tests\hello.bas
+scripts\compile tests\test_form\empty_form.frm
+`
+
 ## 源码结构
 
 ```
@@ -109,7 +153,11 @@ src/
 
 ## 当前开发阶段
 
-- **P6 COM+对象模型** 进行中
-- P6.1-P6.5 已完成，P6.6 ActiveX DLL 编译基本实现
-- M1-M6 里程碑全部达成
+- **P7 窗体+控件** 进行中
+- P7.1-P7.4 已完成，P7.5 内置控件集待开始
+- M1-M7 里程碑全部达成
 - 48 个自动化测试零失败
+
+> AI生成
+
+> AI生成
