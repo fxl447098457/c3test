@@ -95,10 +95,11 @@ bool MsvcDriver::compileAndLink(const MsvcDriverOptions& options) {
     // RTL实现文件
     if (!options.rtlDir.empty()) {
         cmd << " \"" << options.rtlDir << "\\vb6rtl.c\"";
+        cmd << " \"" << options.rtlDir << "\\vb6com.c\"";
     }
 
-    // 链接: 控制台程序
-    cmd << " /link /SUBSYSTEM:CONSOLE";
+    // 链接: 控制台程序 + COM库 (ole32/oleaut32/uuid)
+    cmd << " /link /SUBSYSTEM:CONSOLE ole32.lib oleaut32.lib uuid.lib";
 
     if (options.verbose) {
         std::cout << "c3: 执行: " << cmd.str() << std::endl;

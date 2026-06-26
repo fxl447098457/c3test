@@ -289,8 +289,13 @@ ExprPtr Parser::parseTypeOfExpr() {
     auto loc = currentLoc();
     advance(); // consume 'TypeOf'
     auto obj = parseExpression(23);  // TypeOf 比 Is 优先级低
-    expect(TokenKind::Is, DiagnosticID::ParseExpectedToken,
-           "expected 'Is' after 'TypeOf'");
+    // 词法器将Is输出为IsKeyword，两者都接受
+    if (cur_.kind != TokenKind::Is && cur_.kind != TokenKind::IsKeyword) {
+        diag_.error(DiagnosticID::ParseExpectedToken, currentLoc(),
+                    "expected 'Is' after 'TypeOf'");
+    } else {
+        advance();
+    }
     auto typeTok = expectName("expected type name");
     return std::make_unique<TypeOfExpr>(loc, std::move(obj), typeTok.text);
 }

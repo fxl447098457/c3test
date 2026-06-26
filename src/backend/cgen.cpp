@@ -754,8 +754,12 @@ void CCodeGen::visit(IdentifierExpr& node) {
 
 void CCodeGen::visit(BinaryExpr& node) {
     emitExpr(*node.left);
+    // COM标记解析: 如果左操作数是COM属性, 解析为值
+    if (isComMarker_) resolveComValue();
     std::string left = std::move(lastExpr_);
     emitExpr(*node.right);
+    // COM标记解析: 如果右操作数是COM属性, 解析为值
+    if (isComMarker_) resolveComValue();
     std::string right = std::move(lastExpr_);
 
     // 字符串连接运算: VB6 & → vb6_BSTR_Concat
@@ -803,6 +807,7 @@ void CCodeGen::visit(BinaryExpr& node) {
 
 void CCodeGen::visit(UnaryExpr& node) {
     emitExpr(*node.operand);
+    if (isComMarker_) resolveComValue();
     std::string operand = std::move(lastExpr_);
 
     switch (node.op) {
@@ -835,6 +840,19 @@ void CCodeGen::visit(MemberAccessExpr& node) {
             return;
         }
 
+        // 优先级1: COM对象成员访问 (Object类型变量, 后期绑定)
+        // COM对象的成员名不在符号表中, 需通过IDispatch::Invoke调用
+        // 设置COM标记, 由IndexOrCallExpr/AssignmentStmt/SetStmt识别并处理
+        if (knownObjectVars_.count(objLower)) {
+            emitExpr(*node.object);
+            comObjExpr_ = lastExpr_;       // 保存对象表达式
+            comMemberName_ = node.memberName;  // 保存成员名
+            isComMarker_ = true;           // 标记为COM调用
+            // lastExpr_设为对象表达式(可用作值), 具体调度由上层决定
+            lastExpr_ = lastExpr_;         // 保持不变 (对象C表达式)
+            return;
+        }
+
         // 查找成员名称的符号
         auto* memSym = symTab_.lookupModule(node.memberName);
         if (memSym && (memSym->kind == SymbolKind::Sub || memSym->kind == SymbolKind::Function
@@ -842,7 +860,7 @@ void CCodeGen::visit(MemberAccessExpr& node) {
                     || memSym->kind == SymbolKind::PropertyLet
                     || memSym->kind == SymbolKind::PropertySet)) {
 
-            // 1) 类实例成员访问: obj.Method → vb6_Method(obj) 或 vb6_Counter_Method(obj)
+            // 优先级2: 类实例成员访问: obj.Method → vb6_Method(obj) 或 vb6_Counter_Method(obj)
             if (knownClassVars_.count(objLower)) {
                 std::string funcName = cProcName(node.memberName, memSym->access,
                                                   memSym->isExternal ? memSym->sourceModule : "");
@@ -852,7 +870,7 @@ void CCodeGen::visit(MemberAccessExpr& node) {
                 return;
             }
 
-            // 2) 模块名.方法名: MathUtils.Add → vb6_MathUtils_Add
+            // 优先级3: 模块名.方法名: MathUtils.Add → vb6_MathUtils_Add
             //    object名称不是已知变量, 但成员是函数 → 视为模块限定调用
             bool isVarName = false;
             auto* objSym = symTab_.lookup(objIdent.name);
@@ -884,9 +902,60 @@ void CCodeGen::visit(MemberAccessExpr& node) {
         }
     }
 
-    // 通用成员访问 (结构体字段)
+    // 通用成员访问 (结构体字段 / 链式COM访问)
     emitExpr(*node.object);
+
+    // 链式COM调用检测: 如果object求值产生COM标记, 先resolve为对象值
+    // (fso.GetFolder("x") → vb6_ComCallObject → 返回IDispatch*)
+    // 然后在新对象上访问成员 → 设置新的COM标记
+    if (isComMarker_) {
+        // object是COM属性访问, 解析为对象值
+        resolveComValue("Object");
+        // 检查resolveComValue后的结果是否是对象表达式 (ComCallObject/ComGetObjectProp)
+        // 如果是, 说明这是一个链式COM对象访问, 设置新的COM标记
+        std::string objExpr = lastExpr_;
+        // 检测是否是COM对象表达式 (由ComCallObject/ComGetObjectProp返回的void*)
+        // 这些都是void*类型, 可以作为COM对象继续访问成员
+        if (objExpr.find("vb6_ComCallObject(") == 0 ||
+            objExpr.find("vb6_ComGetObjectProp(") == 0 ||
+            objExpr.find("vb6_CreateObject(") == 0) {
+            // 链式COM: 设置COM标记, objExpr是中间对象表达式
+            comObjExpr_ = objExpr;
+            comMemberName_ = node.memberName;
+            isComMarker_ = true;
+            lastExpr_ = objExpr;  // 保持对象表达式
+            return;
+        }
+        // 非COM对象值, 按结构体字段处理
+        lastExpr_ = objExpr + "." + cIdent(node.memberName);
+        return;
+    }
+
     std::string obj = std::move(lastExpr_);
+
+    // 链式COM检测2: object求值结果是COM对象表达式
+    // (从IndexOrCallExpr产生的COM调用结果, 是void*类型的IDispatch*)
+    if (obj.find("vb6_ComCallObject(") == 0 ||
+        obj.find("vb6_ComGetObjectProp(") == 0 ||
+        obj.find("vb6_ComCall(") == 0 ||
+        obj.find("vb6_ComGetProp(") == 0) {
+        // 对于vb6_ComCall/vb6_ComGetProp, 需要先解封为对象
+        // 链式调用: ComCall返回VARIANT*, 需ComCallObject才能拿到IDispatch*
+        std::string resolvedObj = obj;
+        if (obj.find("vb6_ComCall(") == 0) {
+            // vb6_ComCall → vb6_ComCallObject (同一参数, 返回void*而非VARIANT*)
+            resolvedObj = "vb6_ComCallObject" + obj.substr(strlen("vb6_ComCall"));
+        } else if (obj.find("vb6_ComGetProp(") == 0) {
+            // vb6_ComGetProp → vb6_ComGetObjectProp
+            resolvedObj = "vb6_ComGetObjectProp" + obj.substr(strlen("vb6_ComGetProp"));
+        }
+        comObjExpr_ = resolvedObj;
+        comMemberName_ = node.memberName;
+        isComMarker_ = true;
+        lastExpr_ = resolvedObj;
+        return;
+    }
+
     lastExpr_ = obj + "." + cIdent(node.memberName);
 }
 
@@ -945,6 +1014,46 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
     // 函数调用路径 (原有逻辑)
     emitExpr(*node.callee);
     std::string callee = std::move(lastExpr_);
+
+    // --- COM后期绑定检测 (P6.2) ---
+    // MemberAccessExpr为COM对象设置isComMarker_标志 + comObjExpr_/comMemberName_
+    if (isComMarker_) {
+        isComMarker_ = false;  // 消费标记
+        std::string objExpr = std::move(comObjExpr_);
+        std::string memberName = std::move(comMemberName_);
+
+        if (!node.positional.empty() || !node.named.empty()) {
+            // 有参数: obj.Method(args) → vb6_ComCall(obj, L"Method", variantArgs, argc)
+            std::vector<std::string> packedArgs;
+            for (size_t i = 0; i < node.positional.size(); i++) {
+                std::string packFn = comPackExpr(*node.positional[i]);
+                emitExpr(*node.positional[i]);
+                packedArgs.push_back(packFn + "(" + lastExpr_ + ")");
+            }
+            for (auto& named : node.named) {
+                std::string packFn = comPackExpr(*named.value);
+                emitExpr(*named.value);
+                packedArgs.push_back(packFn + "(" + lastExpr_ + ")");
+            }
+
+            int32_t argc = (int32_t)packedArgs.size();
+            std::string argsArray;
+            argsArray = "(void*[]){";
+            for (int i = 0; i < argc; i++) {
+                if (i > 0) argsArray += ", ";
+                argsArray += packedArgs[i];
+            }
+            argsArray += "}";
+
+            lastExpr_ = "vb6_ComCall(" + objExpr + ", L\"" + memberName + "\", " +
+                        argsArray + ", " + std::to_string(argc) + ")";
+            return;
+        } else {
+            // 无参数: obj.Method() → vb6_ComCall(obj, L"Method", NULL, 0)
+            lastExpr_ = "vb6_ComCall(" + objExpr + ", L\"" + memberName + "\", NULL, 0)";
+            return;
+        }
+    }
 
     // 如果callee已经是func(args)形式(如类方法调用 vb6_Counter_GetCount(c)),
     // 且IndexOrCallExpr没有额外参数, 直接使用callee避免双重括号
@@ -1298,7 +1407,23 @@ void CCodeGen::visit(AssignmentStmt& node) {
 
     emitExpr(*node.target);
     std::string target = std::move(lastExpr_);
+
+    // COM属性赋值检测 (P6.2): obj.Property = value → vb6_ComSetProp(obj, L"Property", pack(value))
+    if (isComMarker_) {
+        isComMarker_ = false;
+        std::string objExpr = std::move(comObjExpr_);
+        std::string memberName = std::move(comMemberName_);
+        emitExpr(*node.value);
+        std::string valExpr = std::move(lastExpr_);
+        std::string packFn = comPackExpr(*node.value);
+        c_.emitLine("vb6_ComSetProp(" + objExpr + ", L\"" + memberName + "\", " +
+                     packFn + "(" + valExpr + "));  /* COM SetProp */");
+        return;
+    }
+
     emitExpr(*node.value);
+    // COM属性值: 如果右侧是COM属性, 解析为值
+    if (isComMarker_) resolveComValue();
     std::string value = std::move(lastExpr_);
 
     // 如果赋值目标是当前Function名 (VB6语义: 设置返回值), 替换为返回值变量
@@ -1315,10 +1440,57 @@ void CCodeGen::visit(AssignmentStmt& node) {
 void CCodeGen::visit(SetStmt& node) {
     if (!node.target || !node.value) return;
 
+    // 检测 Set obj = Nothing → vb6_ReleaseObject(&obj)
+    if (node.value->kind == ASTNodeKind::LiteralExpr) {
+        auto& lit = static_cast<LiteralExpr&>(*node.value);
+        if (lit.literalKind == LiteralKind::Nothing) {
+            emitExpr(*node.target);
+            std::string target = std::move(lastExpr_);
+
+            // COM属性SetRef Nothing: Set obj.Property = Nothing → vb6_ComSetRef(obj, L"Property", NULL)
+            if (isComMarker_) {
+                isComMarker_ = false;
+                c_.emitLine("vb6_ComSetRef(" + comObjExpr_ + ", L\"" + comMemberName_ + "\", NULL);  /* COM SetRef Nothing */");
+                comObjExpr_.clear();
+                comMemberName_.clear();
+                return;
+            }
+
+            c_.emitLine("vb6_ReleaseObject((void**)&" + target + ");  /* Set Nothing */");
+            return;
+        }
+    }
+
     emitExpr(*node.target);
     std::string target = std::move(lastExpr_);
+
+    // COM属性SetRef: Set obj.Property = objRef → vb6_ComSetRef(obj, L"Property", objRef)
+    if (isComMarker_) {
+        isComMarker_ = false;
+        std::string objExpr = std::move(comObjExpr_);
+        std::string memberName = std::move(comMemberName_);
     emitExpr(*node.value);
+    // COM属性值: 如果右侧是COM属性, 解析为值
+    if (isComMarker_) resolveComValue();
     std::string value = std::move(lastExpr_);
+        c_.emitLine("vb6_ComSetRef(" + objExpr + ", L\"" + memberName + "\", " + value + ");  /* COM SetRef */");
+        return;
+    }
+
+    emitExpr(*node.value);
+    // Set语句: 如果右侧是COM调用返回的VARIANT*, 需要解封为对象
+    if (isComMarker_) {
+        // COM属性值作为对象引用: vb6_ComUnpackObject(vb6_ComGetProp(...))
+        resolveComValue("Object");
+    }
+    std::string value = std::move(lastExpr_);
+
+    // 如果ComCall/ComGetProp返回VARIANT*含对象, 需要UnpackObject
+    // 使用一体化函数: vb6_ComCallObject 内部完成 UnpackObject+VarFree
+    if (value.find("vb6_ComCall(") == 0) {
+        // vb6_ComCall(obj, L"Method", args, argc) → vb6_ComCallObject(obj, L"Method", args, argc)
+        value = "vb6_ComCallObject" + value.substr(strlen("vb6_ComCall"));
+    }
 
     c_.emitLine(target + " = " + value + ";  /* Set */");
 }
@@ -1336,6 +1508,7 @@ void CCodeGen::visit(LetStmt& node) {
 
 void CCodeGen::visit(IfStmt& node) {
     emitExpr(*node.condition);
+    if (isComMarker_) resolveComValue("Int");  // If条件通常是Boolean/整数
     c_.emitLine("if (" + lastExpr_ + ") {");
     c_.indent();
     emitStmtList(node.thenBody);
@@ -1413,6 +1586,7 @@ void CCodeGen::visit(DoLoopStmt& node) {
         case DoLoopKind::DoWhileLoop:
             if (node.condition) {
                 emitExpr(*node.condition);
+                if (isComMarker_) resolveComValue("Int");
                 c_.emitLine("while (" + lastExpr_ + ") {");
             } else {
                 c_.emitLine("while (1) {");
@@ -1488,6 +1662,7 @@ void CCodeGen::visit(SelectCaseStmt& node) {
     bool isFloatSelect = TypeSystem::isFloat(testType);
 
     emitExpr(*node.testExpr);
+    if (isComMarker_) resolveComValue();
     std::string testVar = lastExpr_;
 
     // 为test创建临时变量
@@ -1733,6 +1908,24 @@ void CCodeGen::visit(CallStmt& node) {
                             for (size_t j = 0; j < call.positional.size(); j++) {
                                 emitExpr(*call.positional[j]);
                                 std::string val = std::move(lastExpr_);
+
+                                // COM属性读取 (P6.2): isComMarker_标志
+                                if (isComMarker_) {
+                                    isComMarker_ = false;
+                                    // 使用一体化函数, 内部处理VARIANT清理
+                                    std::string comPropCall = "vb6_ComGetStringProp(" + comObjExpr_ + ", L\"" + comMemberName_ + "\")";
+                                    c_.emitLine("{");
+                                    c_.indent();
+                                    c_.emitLine("wchar_t* _dbg_com_bstr = " + comPropCall + ";");
+                                    c_.emitLine("vb6_DebugWriteBSTR(_dbg_com_bstr);");
+                                    c_.emitLine("vb6_BSTR_Free(_dbg_com_bstr);");
+                                    c_.dedent();
+                                    c_.emitLine("}");
+                                    comObjExpr_.clear();
+                                    comMemberName_.clear();
+                                    continue;
+                                }
+
                                 if (isBstrExpr(val)) {
                                     // 已经是BSTR, 直接输出
                                     c_.emitLine("vb6_DebugWriteBSTR(" + val + ");");
@@ -1756,10 +1949,27 @@ void CCodeGen::visit(CallStmt& node) {
         // 语句级调用: 确保表达式被求值(即使是void调用)
         // 如果结果是函数名(不含括号), 自动添加()调用
         std::string callExpr = lastExpr_;
-        if (callExpr.find('(') == std::string::npos) {
+
+        // COM调用检测 (P6.2): isComMarker_标志
+        if (isComMarker_) {
+            isComMarker_ = false;
+            // 无括号的COM方法调用: obj.Method → vb6_ComCall(obj, L"Method", NULL, 0)
+            callExpr = "vb6_ComCall(" + comObjExpr_ + ", L\"" + comMemberName_ + "\", NULL, 0)";
+            comObjExpr_.clear();
+            comMemberName_.clear();
+        } else if (callExpr.find('(') == std::string::npos) {
             callExpr += "()";
         }
-        c_.emitLine(callExpr + ";");
+
+        // ComCall返回VARIANT*, 需要释放 (语句级调用丢弃返回值)
+        if (callExpr.find("vb6_ComCall(") == 0) {
+            // ComCall返回可能含对象的VARIANT*, 用VarFree避免Release对象
+            c_.emitLine("vb6_ComVarFree((void*)" + callExpr + ");  /* COM call, discard result */");
+        } else if (callExpr.find("vb6_ComGetProp(") == 0) {
+            c_.emitLine("vb6_ComVarClear((void*)" + callExpr + ");  /* COM prop get, discard result */");
+        } else {
+            c_.emitLine(callExpr + ";");
+        }
     }
 }
 
@@ -2103,6 +2313,13 @@ void CCodeGen::visit(LocalDeclStmt& node) {
                 std::string lower = var.name;
                 std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
                 knownBstrVars_.insert(lower);
+            }
+
+            // 记录Object类型变量名 (COM后期绑定)
+            if (cType == "void*") {
+                std::string lower = var.name;
+                std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+                knownObjectVars_.insert(lower);
             }
 
             // 记录double/single类型变量名 (用于Debug.Print浮点输出)
@@ -2464,6 +2681,13 @@ void CCodeGen::visit(VariableDecl& node) {
             std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
             knownClassVars_.insert(lower);
         }
+    }
+
+    // 检查是否是Object类型变量 → 注册到 knownObjectVars_ (COM后期绑定)
+    if (cType == "void*") {  // Object类型映射为void*
+        std::string lower = node.name;
+        std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+        knownObjectVars_.insert(lower);
     }
 
     // 记录double/single类型变量名 (用于Debug.Print浮点输出)
@@ -2863,6 +3087,66 @@ bool CCodeGen::hasGoSubInStmts(StmtList& stmts) const {
         }
     }
     return false;
+}
+
+// ============================================================
+// COM辅助 (P6.2)
+// ============================================================
+
+std::string CCodeGen::resolveComValue(const std::string& unpackType) {
+    // 将COM标记解析为C值表达式
+    // 使用一体化辅助函数 (内部处理VARIANT清理, 无内存泄露)
+    if (!isComMarker_) return lastExpr_;
+
+    std::string objExpr = std::move(comObjExpr_);
+    std::string memberName = std::move(comMemberName_);
+    isComMarker_ = false;
+
+    std::string getPropArgs = objExpr + ", L\"" + memberName + "\"";
+
+    if (unpackType == "BSTR") {
+        lastExpr_ = "vb6_ComGetStringProp(" + getPropArgs + ")";
+    } else if (unpackType == "Int" || unpackType == "Long" || unpackType == "Boolean") {
+        lastExpr_ = "vb6_ComGetIntProp(" + getPropArgs + ")";
+    } else if (unpackType == "Double" || unpackType == "Single") {
+        lastExpr_ = "vb6_ComGetDoubleProp(" + getPropArgs + ")";
+    } else if (unpackType == "Object") {
+        lastExpr_ = "vb6_ComGetObjectProp(" + getPropArgs + ")";
+    } else {
+        // 默认: BSTR解封 (最通用, COM VARIANT → BSTR自动转换)
+        lastExpr_ = "vb6_ComGetStringProp(" + getPropArgs + ")";
+    }
+    return lastExpr_;
+}
+
+std::string CCodeGen::comPackExpr(Expr& expr) {
+    // 根据表达式类型推断应该用的VARIANT封装函数
+    Vb6Type vt = inferExprType(expr);
+    switch (vt) {
+        case Vb6Type::String:
+            return "vb6_ComPackBSTR";  // BSTR → VARIANT
+        case Vb6Type::Integer:
+        case Vb6Type::Long:
+        case Vb6Type::Boolean:
+            return "vb6_ComPackInt";   // int32_t → VARIANT
+        case Vb6Type::Single:
+        case Vb6Type::Double:
+            return "vb6_ComPackDouble"; // double → VARIANT
+        case Vb6Type::Object:
+            return "vb6_ComPackObject"; // void* → VARIANT
+        default:
+            // Variant/未知: 尝试用BSTR封装 (运行时会处理转换)
+            // 更安全的做法: 检查已知变量类型
+            if (expr.kind == ASTNodeKind::IdentifierExpr) {
+                auto& id = static_cast<IdentifierExpr&>(expr);
+                std::string lower = id.name;
+                std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+                if (knownObjectVars_.count(lower)) return "vb6_ComPackObject";
+                if (knownBstrVars_.count(lower)) return "vb6_ComPackBSTR";
+                if (knownDoubleVars_.count(lower)) return "vb6_ComPackDouble";
+            }
+            return "vb6_ComPackInt";  // 默认整数封装
+    }
 }
 
 } // namespace vb6c3

@@ -360,6 +360,63 @@ void* vb6_Alloc(size_t size);
 void vb6_Free(void* ptr);
 
 // ============================================================
+// COM 互操作 (P6)
+// ============================================================
+
+// CreateObject(progId) — 通过ProgID创建COM对象，返回IDispatch*
+// VB6: Set obj = CreateObject("Scripting.FileSystemObject")
+void* vb6_CreateObject(const wchar_t* progId);
+
+// GetObject(pathName, progId) — 获取已运行的COM对象或从文件加载
+// VB6: Set obj = GetObject(, "Excel.Application")
+// pathName可为NULL，progId不可为NULL
+void* vb6_GetObject(const wchar_t* pathName, const wchar_t* progId);
+
+// IsNothing(obj) — 检查对象引用是否为Nothing(空)
+// VB6: If obj Is Nothing Then ...
+int32_t vb6_IsNothing(void* obj);
+
+// ReleaseObject(&ptr) — 释放COM对象引用(IUnknown::Release)并置NULL
+// VB6: Set obj = Nothing
+void vb6_ReleaseObject(void** objPtr);
+
+// COM对象方法/属性调用 — 后期绑定 (P6.2)
+// 通过IDispatch::Invoke调用方法/属性
+// args参数为Windows VARIANT数组指针(由vb6com.c定义), cgen通过void*传递
+void* vb6_ComCall(void* disp, const wchar_t* methodName,
+                  void* args, int32_t argc);
+void* vb6_ComGetProp(void* disp, const wchar_t* propName);
+void vb6_ComSetProp(void* disp, const wchar_t* propName, void* value);
+void vb6_ComSetRef(void* disp, const wchar_t* propName, void* objRef);
+
+// COM VARIANT封装/解封 — cgen生成的C代码使用 (P6.2)
+// 实际实现在vb6com.c, 此处用void*避免VARIANT类型冲突
+void* vb6_ComPackBSTR(const wchar_t* bstr);
+void* vb6_ComPackInt(int32_t val);
+void* vb6_ComPackDouble(double val);
+void* vb6_ComPackObject(void* obj);
+wchar_t* vb6_ComUnpackBSTR(void* variant);
+int32_t vb6_ComUnpackInt(void* variant);
+double vb6_ComUnpackDouble(void* variant);
+void* vb6_ComUnpackObject(void* variant);
+void vb6_ComVarClear(void* variant);
+void vb6_ComVarFree(void* variant);
+
+// 一体化COM辅助函数 (内部处理临时VARIANT清理)
+void* vb6_ComCallObject(void* disp, const wchar_t* methodName,
+                        void* args, int32_t argc);
+wchar_t* vb6_ComCallBSTR(void* disp, const wchar_t* methodName,
+                         void* args, int32_t argc);
+int32_t vb6_ComCallInt(void* disp, const wchar_t* methodName,
+                       void* args, int32_t argc);
+double vb6_ComCallDouble(void* disp, const wchar_t* methodName,
+                         void* args, int32_t argc);
+wchar_t* vb6_ComGetStringProp(void* disp, const wchar_t* propName);
+int32_t vb6_ComGetIntProp(void* disp, const wchar_t* propName);
+double vb6_ComGetDoubleProp(void* disp, const wchar_t* propName);
+void* vb6_ComGetObjectProp(void* disp, const wchar_t* propName);
+
+// ============================================================
 // 运行时初始化/退出
 // ============================================================
 

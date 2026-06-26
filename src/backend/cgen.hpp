@@ -198,6 +198,16 @@ private:
     // 已知类实例变量名集合 (小写) - 用于方法调用翻译 c.Method → vb6_Method(c)
     std::unordered_set<std::string> knownClassVars_;
 
+    // 已知COM对象变量名集合 (小写) - 用于后期绑定 obj.Method → vb6_ComCall(obj, L"Method", ...)
+    std::unordered_set<std::string> knownObjectVars_;
+
+    // COM后期绑定中间状态 (P6.2)
+    // MemberAccessExpr为COM对象设置此字段, IndexOrCallExpr/AssignmentStmt/SetStmt读取后清除
+    // 当此字段非空时, lastExpr_中的"值"是对象表达式, comMemberName_是成员名
+    std::string comObjExpr_;        // COM对象C表达式 (如 "fso")
+    std::string comMemberName_;     // COM成员名 (如 "CreateTextFile")
+    bool isComMarker_ = false;      // lastExpr_是否为COM标记
+
     // 是否需要 setjmp.h (On Error GoTo label)
     bool needSetjmp_ = false;
 
@@ -277,6 +287,15 @@ private:
     // ---- AST辅助 ----
     // 检测语句列表中是否包含GoSubStmt
     bool hasGoSubInStmts(StmtList& stmts) const;
+
+    // ---- COM辅助 (P6.2) ----
+    // 推断COM参数的封装函数: 根据表达式类型选择vb6_ComPackBSTR/Int/Double/Object
+    std::string comPackExpr(Expr& expr);
+
+    // 解析COM标记为C值表达式 (属性读取语义)
+    // 当isComMarker_为true时调用, 生成vb6_ComGetProp+Unpack, 并清除标记
+    // unresolvedType: 期望的解封类型, 默认为BSTR (最通用)
+    std::string resolveComValue(const std::string& unresolvedType = "BSTR");
 
     // ---- 数组辅助 ----
     // VB6类型 → SAFEARRAY元素类型C枚举名

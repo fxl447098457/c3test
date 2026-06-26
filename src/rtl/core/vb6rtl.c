@@ -13,6 +13,20 @@
 #endif
 
 // ============================================================
+// COM互操作前向声明 (实现在vb6com.c中，避免VARIANT类型冲突)
+// ============================================================
+extern void* vb6_CreateObject(const wchar_t* progId);
+extern void* vb6_GetObject(const wchar_t* pathName, const wchar_t* progId);
+extern int32_t vb6_IsNothing(void* obj);
+extern void vb6_ReleaseObject(void** objPtr);
+extern void* vb6_ComCall(void* disp, const wchar_t* methodName, void* args, int32_t argc);
+extern void* vb6_ComGetProp(void* disp, const wchar_t* propName);
+extern void vb6_ComSetProp(void* disp, const wchar_t* propName, void* value);
+extern void vb6_ComSetRef(void* disp, const wchar_t* propName, void* objRef);
+extern void vb6_ComInit(void);
+extern void vb6_ComExit(void);
+
+// ============================================================
 // BSTR 操作
 // ============================================================
 
@@ -281,13 +295,21 @@ void vb6_Debug_PrintDouble(double d) {
 // 对象操作 (占位)
 // ============================================================
 
+// ============================================================
+// 对象操作 (P6: COM互操作)
+// ============================================================
+
 void* vb6_NewObject(const wchar_t* className) {
-    (void)className;
-    return NULL;
+    // 对于未知类名，尝试通过COM创建 (Dim x As New ClassName，className不在已知类中)
+    // VB6中如果className不是项目内的类模块，则尝试COM创建
+    return vb6_CreateObject(className);
 }
 
 int32_t vb6_TypeOf(void* obj, const wchar_t* typeName) {
-    (void)obj; (void)typeName;
+    if (!obj) return 0;  // Nothing不匹配任何类型
+    // TypeOf的完整实现需要IDispatch/ITypeInfo，在vb6com.c中
+    // 简化版: 始终返回False (后续P6.2完善)
+    (void)typeName;
     return 0;
 }
 
@@ -379,10 +401,13 @@ double vb6_Pow(double base, double exp) {
 void vb6_Init(void) {
     // 初始化随机种子
     srand((unsigned int)time(NULL));
+    // 初始化COM库 (实现在vb6com.c中)
+    vb6_ComInit();
 }
 
 void vb6_Exit(void) {
-    // 清理运行时资源
+    // 清理COM库
+    vb6_ComExit();
 }
 
 // ============================================================

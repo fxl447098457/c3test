@@ -74,9 +74,10 @@ void Parser::initBindingPowers() {
         { TokenKind::Slash,  18, 19 },
         // 级11: 幂 (右结合: l_bp=21 > r_bp=20)
         { TokenKind::Caret,  21, 20 },
-        // 级13: Like, Is
-        { TokenKind::Like,   22, 23 },
-        { TokenKind::Is,     22, 23 },
+        // 级13: Like, Is (Is在词法器中输出为IsKeyword，两者都需要注册)
+        { TokenKind::Like,     22, 23 },
+        { TokenKind::Is,       22, 23 },
+        { TokenKind::IsKeyword,22, 23 },
     };
 
     for (auto& op : ops) {
@@ -636,6 +637,7 @@ BinaryOp Parser::tokenToBinaryOp(TokenKind kind) const {
         case TokenKind::Caret:       return BinaryOp::Pow;
         case TokenKind::Like:        return BinaryOp::Like;
         case TokenKind::Is:          return BinaryOp::Is;
+        case TokenKind::IsKeyword:   return BinaryOp::Is;
         default:
             return BinaryOp::Add;  // 不应到达
     }
