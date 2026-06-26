@@ -264,6 +264,13 @@ private:
     // Dim WithEvents obj As ClassName → knownWithEventsVars_["obj"] = "ClassName"
     std::unordered_map<std::string, std::string> knownWithEventsVars_;
 
+    // P7.5: 窗体控件名映射 (小写控件名 → FrmControlType)
+    // 由emitFormFramework从FrmFormDesc填充，用于识别 ctrl.Property 的控件属性访问
+    std::unordered_map<std::string, FrmControlType> knownFormControls_;
+
+    // P7.5: 窗体名 (小写)，用于识别 Form.Caption 等窗体自身属性
+    std::string knownFormName_;
+
     // P6.6: ActiveX DLL模式
     bool isDll_ = false;                    // 编译为ActiveX DLL
     std::string dllProgId_;                  // DLL的ProgID前缀
@@ -329,6 +336,13 @@ private:
 
     // P7: 生成Win32窗体框架代码 (WndProc + 控件创建 + 消息映射)
     void emitFormFramework(const FrmFormDesc& frmDesc, Module& module);
+
+    // P7.5: 判断控件属性访问 → 返回RTL读取函数名 (如"vb6_GetControlText")
+    // 空字符串表示不是已知控件属性
+    std::string getControlPropReadFn(FrmControlType ctrlType, const std::string& propName) const;
+
+    // P7.5: 判断控件属性写入 → 返回RTL写入函数名 (如"vb6_SetControlText")
+    std::string getControlPropWriteFn(FrmControlType ctrlType, const std::string& propName) const;
 
     // 生成类方法函数体中的Me引用名
     std::string classMeParam() const;

@@ -1143,6 +1143,23 @@ void CCodeGen::visit(MemberAccessExpr& node) {
             return;
         }
 
+        // P7.5: 窗体控件属性读取: ctrl.Property → vb6_GetControlXxx(vb6_hwnd_ctrl)
+        // 在COM前期绑定之前检测, 因为控件名不会是COM变量
+        {
+            auto itCtrl = knownFormControls_.find(objLower);
+            if (itCtrl != knownFormControls_.end()) {
+                std::string readFn = getControlPropReadFn(itCtrl->second, node.memberName);
+                if (!readFn.empty()) {
+                    lastExpr_ = readFn + "(vb6_hwnd_" + cIdent(objIdent.name) + ")";
+                    return;
+                }
+                // 未知属性: 警告并回退到结构体字段访问 (可能无法编译)
+                diag_.warn(DiagnosticID::CodeGenUnsupportedFeature, SourceLocation{},
+                    "P7.5: Unknown control property '" + objIdent.name + "." + node.memberName +
+                    "' for control type, generating struct field access (may not compile)");
+            }
+        }
+
         // 优先级0: COM前期绑定成员访问 (P6.3, Dim x As FileSystemObject)
         // 有具体类型信息的COM变量, 通过vtable直接调用而非IDispatch::Invoke
         if (knownTypedComVars_.count(objLower)) {
@@ -1908,6 +1925,30 @@ void CCodeGen::visit(Block& node) {
 void CCodeGen::visit(AssignmentStmt& node) {
     if (!node.target || !node.value) return;
 
+    // P7.5: 控件属性写入: ctrl.Property = value → vb6_SetControlXxx(vb6_hwnd_ctrl, value)
+    // 在Property Let检测之前, 因为控件属性优先于自定义Property
+    if (node.target->kind == ASTNodeKind::MemberAccessExpr) {
+        auto& maExpr = static_cast<MemberAccessExpr&>(*node.target);
+        if (maExpr.object && maExpr.object->kind == ASTNodeKind::IdentifierExpr) {
+            auto& objId = static_cast<IdentifierExpr&>(*maExpr.object);
+            std::string objLower = objId.name;
+            std::transform(objLower.begin(), objLower.end(), objLower.begin(), ::tolower);
+            auto itCtrl = knownFormControls_.find(objLower);
+            if (itCtrl != knownFormControls_.end()) {
+                std::string writeFn = getControlPropWriteFn(itCtrl->second, maExpr.memberName);
+                if (!writeFn.empty()) {
+                    emitExpr(*node.value);
+                    std::string valExpr = std::move(lastExpr_);
+                    c_.emitLine(writeFn + "(vb6_hwnd_" + cIdent(objId.name) + ", " + valExpr + ");  /* Control Property */");
+                    return;
+                }
+                // 未知属性: 警告并继续走普通赋值 (可能无法编译)
+                diag_.warn(DiagnosticID::CodeGenUnsupportedFeature, SourceLocation{}, "P7.5: Unknown control property write '" + objId.name + "." + maExpr.memberName +
+                    "' for control type, generating struct field access (may not compile)");
+            }
+        }
+    }
+
     // P6.7: 检测类Property Let赋值: obj.Prop = value → vb6_prop_let_Prop(obj, value)
     // 在emitExpr左侧前, 先检查target是否为MemberAccessExpr且成员是Property
     if (node.target->kind == ASTNodeKind::MemberAccessExpr) {
@@ -2166,6 +2207,26 @@ void CCodeGen::visit(SetStmt& node) {
 
 void CCodeGen::visit(LetStmt& node) {
     if (!node.target || !node.value) return;
+
+    // P7.5: 控件属性写入 (Let语句)
+    if (node.target->kind == ASTNodeKind::MemberAccessExpr) {
+        auto& maExpr = static_cast<MemberAccessExpr&>(*node.target);
+        if (maExpr.object && maExpr.object->kind == ASTNodeKind::IdentifierExpr) {
+            auto& objId = static_cast<IdentifierExpr&>(*maExpr.object);
+            std::string objLower = objId.name;
+            std::transform(objLower.begin(), objLower.end(), objLower.begin(), ::tolower);
+            auto itCtrl = knownFormControls_.find(objLower);
+            if (itCtrl != knownFormControls_.end()) {
+                std::string writeFn = getControlPropWriteFn(itCtrl->second, maExpr.memberName);
+                if (!writeFn.empty()) {
+                    emitExpr(*node.value);
+                    std::string valExpr = std::move(lastExpr_);
+                    c_.emitLine(writeFn + "(vb6_hwnd_" + cIdent(objId.name) + ", " + valExpr + ");  /* Let Control Property */");
+                    return;
+                }
+            }
+        }
+    }
 
     emitExpr(*node.target);
     std::string target = std::move(lastExpr_);
@@ -3981,6 +4042,20 @@ void CCodeGen::emitFormFramework(const FrmFormDesc& frmDesc, Module& module) {
     it = frmDesc.formControl.properties.find("StartUpPosition");
     if (it != frmDesc.formControl.properties.end()) startupPos = (int)it->second.intValue;
 
+    // --- P7.5: 填充已知控件名映射 (用于识别 ctrl.Property 属性访问) ---
+    {
+        std::string formNameLower = formName;
+        std::transform(formNameLower.begin(), formNameLower.end(), formNameLower.begin(), ::tolower);
+        knownFormName_ = formNameLower;
+        // 窗体自身也可以有属性访问: Form1.Caption → vb6_GetControlText(vb6_hwnd_Form1)
+        knownFormControls_[formNameLower] = FrmControlType::Form;
+        for (const auto& ctrl : frmDesc.formControl.children) {
+            std::string ctrlNameLower = ctrl.controlName;
+            std::transform(ctrlNameLower.begin(), ctrlNameLower.end(), ctrlNameLower.begin(), ::tolower);
+            knownFormControls_[ctrlNameLower] = ctrl.controlType;
+        }
+    }
+
     // --- .h文件: 声明 ---
     h_.emitLine("// P7: Win32 Form - " + formName);
     h_.emitBlank();
@@ -5082,6 +5157,91 @@ std::string CCodeGen::comPackExpr(Expr& expr) {
             }
             return "vb6_ComPackInt";  // 默认整数封装
     }
+}
+
+// ============================================================
+// P7.5: 控件属性 → RTL读取函数名映射
+// ============================================================
+
+std::string CCodeGen::getControlPropReadFn(FrmControlType ctrlType, const std::string& propName) const {
+    std::string propLower = propName;
+    std::transform(propLower.begin(), propLower.end(), propLower.begin(), ::tolower);
+
+    switch (ctrlType) {
+    case FrmControlType::TextBox:
+        if (propLower == "text") return "vb6_GetControlText";
+        if (propLower == "visible") return "vb6_GetControlVisible";
+        if (propLower == "enabled") return "vb6_GetControlEnabled";
+        break;
+    case FrmControlType::Label:
+        if (propLower == "caption") return "vb6_GetControlText";
+        if (propLower == "visible") return "vb6_GetControlVisible";
+        if (propLower == "enabled") return "vb6_GetControlEnabled";
+        break;
+    case FrmControlType::CommandButton:
+        if (propLower == "caption") return "vb6_GetControlText";
+        if (propLower == "visible") return "vb6_GetControlVisible";
+        if (propLower == "enabled") return "vb6_GetControlEnabled";
+        break;
+    case FrmControlType::CheckBox:
+    case FrmControlType::OptionButton:
+        if (propLower == "value") return "vb6_GetCheckValue";
+        if (propLower == "caption") return "vb6_GetControlText";
+        if (propLower == "visible") return "vb6_GetControlVisible";
+        if (propLower == "enabled") return "vb6_GetControlEnabled";
+        break;
+    case FrmControlType::Form:
+        if (propLower == "caption") return "vb6_GetControlText";
+        if (propLower == "visible") return "vb6_GetControlVisible";
+        if (propLower == "enabled") return "vb6_GetControlEnabled";
+        break;
+    default:
+        // 所有可见控件通用属性
+        if (propLower == "visible") return "vb6_GetControlVisible";
+        if (propLower == "enabled") return "vb6_GetControlEnabled";
+        break;
+    }
+    return "";  // 未知属性
+}
+
+std::string CCodeGen::getControlPropWriteFn(FrmControlType ctrlType, const std::string& propName) const {
+    std::string propLower = propName;
+    std::transform(propLower.begin(), propLower.end(), propLower.begin(), ::tolower);
+
+    switch (ctrlType) {
+    case FrmControlType::TextBox:
+        if (propLower == "text") return "vb6_SetControlText";
+        if (propLower == "visible") return "vb6_SetControlVisible";
+        if (propLower == "enabled") return "vb6_SetControlEnabled";
+        break;
+    case FrmControlType::Label:
+        if (propLower == "caption") return "vb6_SetControlText";
+        if (propLower == "visible") return "vb6_SetControlVisible";
+        if (propLower == "enabled") return "vb6_SetControlEnabled";
+        break;
+    case FrmControlType::CommandButton:
+        if (propLower == "caption") return "vb6_SetControlText";
+        if (propLower == "visible") return "vb6_SetControlVisible";
+        if (propLower == "enabled") return "vb6_SetControlEnabled";
+        break;
+    case FrmControlType::CheckBox:
+    case FrmControlType::OptionButton:
+        if (propLower == "value") return "vb6_SetCheckValue";
+        if (propLower == "caption") return "vb6_SetControlText";
+        if (propLower == "visible") return "vb6_SetControlVisible";
+        if (propLower == "enabled") return "vb6_SetControlEnabled";
+        break;
+    case FrmControlType::Form:
+        if (propLower == "caption") return "vb6_SetControlText";
+        if (propLower == "visible") return "vb6_SetControlVisible";
+        if (propLower == "enabled") return "vb6_SetControlEnabled";
+        break;
+    default:
+        if (propLower == "visible") return "vb6_SetControlVisible";
+        if (propLower == "enabled") return "vb6_SetControlEnabled";
+        break;
+    }
+    return "";  // 未知属性
 }
 
 } // namespace vb6c3

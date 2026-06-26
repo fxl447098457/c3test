@@ -725,6 +725,28 @@ bool Driver::runSemanticAnalysis(const CompileOptions& options) {
             }
         }
 
+
+        // P7.5: 注册窗体控件名为符号 (否则语义分析报"未声明的标识符")
+        auto frmIt = frmFiles_.find(module->moduleName);
+        if (frmIt != frmFiles_.end()) {
+            const auto& frmDesc = frmIt->second.form;
+            // 注册窗体名本身 (Form1.Caption 访问)
+            {
+                auto sym = std::make_unique<Symbol>(
+                    SymbolKind::Variable, module->moduleName, Vb6Type::Object,
+                    SourceLocation{}, AccessLevel::Public);
+                sym->isBuiltin = true;
+                analyzer->symbolTable().define(std::move(sym));
+            }
+            // 注册所有顶层控件名
+            for (const auto& ctrl : frmDesc.formControl.children) {
+                auto sym = std::make_unique<Symbol>(
+                    SymbolKind::Variable, ctrl.controlName, Vb6Type::Object,
+                    SourceLocation{}, AccessLevel::Public);
+                sym->isBuiltin = true;
+                analyzer->symbolTable().define(std::move(sym));
+            }
+        }
         bool ok = analyzer->analyze(*module);
 
         if (options.dumpSymbols) {

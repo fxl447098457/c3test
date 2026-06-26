@@ -9,6 +9,8 @@
 
 #include "vb6forms.h"
 #include <stdio.h>
+#include <stdlib.h>   /* malloc, free */
+#include <oleauto.h>  /* SysAllocString, BSTR */
 
 // 全局变量
 static HINSTANCE g_hInstance = NULL;
@@ -322,4 +324,66 @@ int vb6_QueryFormUnload(void) {
         return g_formUnloadCb();
     }
     return 0;  // 无回调=允许关闭
+}
+
+// ============================================================
+// 控件属性读写 (P7.5)
+// ============================================================
+
+void* vb6_GetControlText(void* hwnd) {
+    if (!hwnd) return NULL;
+    HWND h = (HWND)hwnd;
+    int len = GetWindowTextLengthW(h);
+    if (len <= 0) {
+        // 返回空BSTR
+        WCHAR empty[] = {0};
+        return SysAllocString(empty);
+    }
+    WCHAR* buf = (WCHAR*)malloc((len + 1) * sizeof(WCHAR));
+    if (!buf) return NULL;
+    GetWindowTextW(h, buf, len + 1);
+    BSTR bstr = SysAllocString(buf);
+    free(buf);
+    return (void*)bstr;
+}
+
+void vb6_SetControlText(void* hwnd, void* bstr) {
+    if (!hwnd) return;
+    // 支持BSTR和char*两种输入
+    if (bstr) {
+        // 尝试作为BSTR处理 (VB6字符串)
+        BSTR bs = (BSTR)bstr;
+        SetWindowTextW((HWND)hwnd, bs);
+    }
+}
+
+int vb6_GetCheckValue(void* hwnd) {
+    if (!hwnd) return 0;
+    LRESULT state = SendMessageA((HWND)hwnd, BM_GETCHECK, 0, 0);
+    return (int)state;  // BST_UNCHECKED=0, BST_CHECKED=1, BST_INDETERMINATE=2
+}
+
+void vb6_SetCheckValue(void* hwnd, int value) {
+    if (!hwnd) return;
+    SendMessageA((HWND)hwnd, BM_SETCHECK, (WPARAM)value, 0);
+}
+
+int vb6_GetControlVisible(void* hwnd) {
+    if (!hwnd) return 0;
+    return IsWindowVisible((HWND)hwnd) ? -1 : 0;  // VB6: True=-1
+}
+
+void vb6_SetControlVisible(void* hwnd, int visible) {
+    if (!hwnd) return;
+    ShowWindow((HWND)hwnd, visible ? SW_SHOW : SW_HIDE);
+}
+
+int vb6_GetControlEnabled(void* hwnd) {
+    if (!hwnd) return 0;
+    return IsWindowEnabled((HWND)hwnd) ? -1 : 0;  // VB6: True=-1
+}
+
+void vb6_SetControlEnabled(void* hwnd, int enabled) {
+    if (!hwnd) return;
+    EnableWindow((HWND)hwnd, enabled ? TRUE : FALSE);
 }

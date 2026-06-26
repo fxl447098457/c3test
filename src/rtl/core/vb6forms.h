@@ -130,6 +130,27 @@ void vb6_SetFormUnloadCallback(void* callback);
 // 返回: 0=允许关闭, 非0=取消关闭
 int vb6_QueryFormUnload(void);
 
+// ============================================================
+// 控件属性读写 (P7.5)
+// ============================================================
+
+// Text/Caption属性 (TextBox/Label/CommandButton/Form)
+// 返回BSTR (调用者负责vb6_SysFreeString释放, 或直接传给函数)
+void* vb6_GetControlText(void* hwnd);
+void vb6_SetControlText(void* hwnd, void* bstr);
+
+// Value属性 (CheckBox/OptionButton: 0=Unchecked, 1=Checked, 2=Grayed)
+int vb6_GetCheckValue(void* hwnd);
+void vb6_SetCheckValue(void* hwnd, int value);
+
+// Visible属性
+int vb6_GetControlVisible(void* hwnd);
+void vb6_SetControlVisible(void* hwnd, int visible);
+
+// Enabled属性
+int vb6_GetControlEnabled(void* hwnd);
+void vb6_SetControlEnabled(void* hwnd, int enabled);
+
 #ifdef __cplusplus
 }
 #endif
