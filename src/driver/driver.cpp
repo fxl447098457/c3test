@@ -532,8 +532,7 @@ bool Driver::runParser(const CompileOptions& options) {
         // P7: 设置窗体模块标志
         if (module && isFormModule) {
             module->isFormModule = true;
-            // 保存窗体描述供代码生成使用
-            frmFiles_[module->moduleName] = std::move(frmDesc);
+
         }
 
         if (options.dumpAST && module) {
@@ -565,6 +564,11 @@ bool Driver::runParser(const CompileOptions& options) {
                 std::filesystem::path p(filePath);
                 module->moduleName = p.stem().string();
             }
+            // P7: 保存窗体描述 (此时moduleName已从Attribute VB_Name或文件名确定)
+            if (isFormModule && module->isFormModule) {
+                frmFiles_[module->moduleName] = std::move(frmDesc);
+            }
+
             modules_.push_back(std::move(module));
         }
 

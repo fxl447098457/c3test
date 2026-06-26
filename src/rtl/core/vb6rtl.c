@@ -13,7 +13,7 @@
 #endif
 
 // ============================================================
-// COM互操作前向声明 (实现在vb6com.c中，避免VARIANT类型冲突)
+// COM互操作前向声明 (实现在vb6com.c中，避免vb6_VARIANT类型冲突)
 // ============================================================
 extern void* vb6_CreateObject(const wchar_t* progId);
 extern void* vb6_GetObject(const wchar_t* pathName, const wchar_t* progId);
@@ -190,7 +190,7 @@ BSTR vb6_Str(int32_t n) {
     return vb6_BSTR_FromStr(buf);
 }
 
-BSTR vb6_Format(VARIANT expr, BSTR fmt) {
+BSTR vb6_Format(vb6_VARIANT expr, BSTR fmt) {
     // 简化实现
     (void)fmt;
     switch (expr.vt) {
@@ -245,7 +245,7 @@ double vb6_CDbl(double x) {
     return x;
 }
 
-BSTR vb6_CStr(VARIANT x) {
+BSTR vb6_CStr(vb6_VARIANT x) {
     return vb6_Format(x, NULL);
 }
 
@@ -253,7 +253,7 @@ BSTR vb6_CStr(VARIANT x) {
 // 类型检查
 // ============================================================
 
-int32_t vb6_IsNumeric(VARIANT v) {
+int32_t vb6_IsNumeric(vb6_VARIANT v) {
     switch (v.vt) {
         case vb6_vtInteger: case vb6_vtLong: case vb6_vtSingle:
         case vb6_vtDouble: case vb6_vtCurrency: case vb6_vtByte:
@@ -264,9 +264,9 @@ int32_t vb6_IsNumeric(VARIANT v) {
     }
 }
 
-int32_t vb6_IsNull(VARIANT v) { return v.vt == vb6_vtNull ? -1 : 0; }
-int32_t vb6_IsEmpty(VARIANT v) { return v.vt == vb6_vtEmpty ? -1 : 0; }
-int32_t vb6_IsObject(VARIANT v) { return (v.vt == vb6_vtDispatch && v.pdispVal != NULL) ? -1 : 0; }
+int32_t vb6_IsNull(vb6_VARIANT v) { return v.vt == vb6_vtNull ? -1 : 0; }
+int32_t vb6_IsEmpty(vb6_VARIANT v) { return v.vt == vb6_vtEmpty ? -1 : 0; }
+int32_t vb6_IsObject(vb6_VARIANT v) { return (v.vt == vb6_vtDispatch && v.pdispVal != NULL) ? -1 : 0; }
 
 // ============================================================
 // Debug对象
@@ -423,7 +423,7 @@ void vb6_Free(void* ptr) {
     free(ptr);
 }
 
-int32_t vb6_VariantToLong(VARIANT v) {
+int32_t vb6_VariantToLong(vb6_VARIANT v) {
     switch (v.vt) {
         case vb6_vtBoolean: return v.boolVal ? -1 : 0;
         case vb6_vtByte:    return (int32_t)v.bVal;
@@ -437,7 +437,7 @@ int32_t vb6_VariantToLong(VARIANT v) {
     }
 }
 
-double vb6_VariantToDouble(VARIANT v) {
+double vb6_VariantToDouble(vb6_VARIANT v) {
     switch (v.vt) {
         case vb6_vtBoolean: return v.boolVal ? -1.0 : 0.0;
         case vb6_vtByte:    return (double)v.bVal;
@@ -451,7 +451,7 @@ double vb6_VariantToDouble(VARIANT v) {
     }
 }
 
-BSTR vb6_VariantToString(VARIANT v) {
+BSTR vb6_VariantToString(vb6_VARIANT v) {
     return vb6_CStr(v);
 }
 
@@ -690,7 +690,7 @@ float vb6_CSng(double v) {
     return (float)v;
 }
 
-double vb6_CDate(VARIANT v) {
+double vb6_CDate(vb6_VARIANT v) {
     // 简化: 仅支持从字符串解析日期, 或从数值转换
     if (v.vt == vb6_vtDouble || v.vt == vb6_vtSingle || v.vt == vb6_vtLong || v.vt == vb6_vtInteger)
         return vb6_VariantToDouble(v);
@@ -723,7 +723,7 @@ static int32_t vb6_sa_elem_size(vb6_safearray_elemtype t) {
         case vb6_sa_single:  return (int32_t)sizeof(float);
         case vb6_sa_double:  return (int32_t)sizeof(double);
         case vb6_sa_bstr:    return (int32_t)sizeof(BSTR);
-        case vb6_sa_variant: return (int32_t)sizeof(VARIANT);
+        case vb6_sa_variant: return (int32_t)sizeof(vb6_VARIANT);
         case vb6_sa_ptr:     return (int32_t)sizeof(void*);
         default:             return 4;
     }
@@ -806,10 +806,10 @@ void vb6_SafeArrayDestroy1D(vb6_SafeArray1D* arr) {
             if (*slot) vb6_BSTR_Free(*slot);
         }
     }
-    // VARIANT元素: 逐个清理BSTR
+    // vb6_VARIANT元素: 逐个清理BSTR
     if (arr->elemType == vb6_sa_variant && arr->data) {
         for (int32_t i = 0; i < arr->count; i++) {
-            VARIANT* slot = (VARIANT*)((char*)arr->data + i * arr->elemSize);
+            vb6_VARIANT* slot = (vb6_VARIANT*)((char*)arr->data + i * arr->elemSize);
             if (slot->vt == vb6_vtBSTR && slot->bstrVal) {
                 vb6_BSTR_Free(slot->bstrVal);
             }

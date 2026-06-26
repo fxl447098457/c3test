@@ -63,12 +63,12 @@ bool CCodeGen::generate(Module& module, const std::string& baseName,
     h_.emitLine("#include <stddef.h>");
     h_.emitLine("#include <stdbool.h>");
     h_.emitLine("#include <wchar.h>");
-    h_.emitLine("#include \"vb6rtl.h\"");
-    // P7: 窗体模块需要Win32头文件和窗体运行时
+    // P7: 窗体模式下windows.h必须在vb6rtl.h之前, 避免VARIANT重定义冲突
     if (module.isFormModule) {
         h_.emitLine("#include <windows.h>");
         h_.emitLine("#include \"vb6forms.h\"");
     }
+    h_.emitLine("#include \"vb6rtl.h\"");
     // 跨模块 #include: 引用外部模块的头文件
     // P6.5修复: 类模块只包含其他类模块的头文件，避免循环依赖
     // (标准模块包含类模块，但类模块不应包含标准模块)
@@ -497,8 +497,24 @@ bool CCodeGen::generate(Module& module, const std::string& baseName,
                 c_.emitLine("}");
             }
         } else if (!shouldGenMain) {
+            if (module.isFormModule && frmDesc) {
+                // P7: 空窗体也要生成WinMain, 自动显示窗体
+                std::string formName = frmDesc->formName;
+                c_.emitLine("int WINAPI WinMain(HINSTANCE hInst, HINSTANCE hPrevInst, LPSTR lpCmdLine, int nCmdShow) {");
+                c_.indent();
+                c_.emitLine("(void)hPrevInst; (void)lpCmdLine; (void)nCmdShow;");
+                c_.emitLine("vb6_Init();");
+                c_.emitLine("vb6_SetAppInstance((void*)hInst);");
+                c_.emitLine("vb6_form_show_" + cIdent(formName) + "(0);  /* Show form modeless */");
+                c_.emitLine("int ret = vb6_MessageLoop();");
+                c_.emitLine("vb6_Exit();");
+                c_.emitLine("return ret;");
+                c_.dedent();
+                c_.emitLine("}");
+            } else {
                 c_.emitLine("// No entry point (library module)");
             }
+        }
         }  // end else (EXE mode)
     }
 
@@ -563,13 +579,13 @@ std::string CCodeGen::mapType(Vb6Type type) const {
         case Vb6Type::Object:   cType = "void*"; break;     // IDispatch* → void* for now
         case Vb6Type::Error:    cType = "int32_t"; break;   // SCODE/HRESULT
         case Vb6Type::Boolean:  cType = "int16_t"; break;   // VB6: True=-1, False=0
-        case Vb6Type::Variant:  cType = "VARIANT"; break;   // tagged union
+        case Vb6Type::Variant:  cType = "vb6_VARIANT"; break;   // tagged union
         case Vb6Type::Byte:     cType = "uint8_t"; break;
         case Vb6Type::ULong:    cType = "uint32_t"; break;
         case Vb6Type::Void:     cType = "void"; break;
-        case Vb6Type::Decimal:  cType = "VARIANT"; break;   // 用VARIANT兜底
-        case Vb6Type::UserDefinedType: cType = "VARIANT"; break; // 占位, 后续改进
-        default:                cType = "VARIANT"; break;    // 未知/安全兜底
+        case Vb6Type::Decimal:  cType = "vb6_VARIANT"; break;   // 用VARIANT兜底
+        case Vb6Type::UserDefinedType: cType = "vb6_VARIANT"; break; // 占位, 后续改进
+        default:                cType = "vb6_VARIANT"; break;    // 未知/安全兜底
     }
 
     if (isArray) {
@@ -579,7 +595,7 @@ std::string CCodeGen::mapType(Vb6Type type) const {
 }
 
 std::string CCodeGen::mapTypeRef(ASTNode* typeRef) {
-    if (!typeRef) return "VARIANT";  // 未指定类型 = Variant
+    if (!typeRef) return "vb6_VARIANT";  // 未指定类型 = Variant
 
     switch (typeRef->kind) {
         case ASTNodeKind::SimpleTypeRef: {
@@ -628,7 +644,7 @@ std::string CCodeGen::mapTypeRef(ASTNode* typeRef) {
         case ASTNodeKind::FixedStringTypeRef:
             return "BSTR";
         default:
-            return "VARIANT";
+            return "vb6_VARIANT";
     }
 }
 
@@ -1754,9 +1770,9 @@ std::string CCodeGen::mapSaElemCType(Vb6Type type) const {
         case Vb6Type::Double:   return "double";
         case Vb6Type::Date:     return "double";
         case Vb6Type::String:   return "BSTR";
-        case Vb6Type::Variant:  return "VARIANT";
+        case Vb6Type::Variant:  return "vb6_VARIANT";
         case Vb6Type::Object:   return "void*";
-        default:                return "VARIANT";
+        default:                return "vb6_VARIANT";
     }
 }
 
@@ -3583,7 +3599,7 @@ std::string CCodeGen::makePropertySignature(PropertyDecl& node) {
 
     switch (node.propKind) {
         case ProcKind::PropertyGet: {
-            std::string retType = node.returnType ? mapTypeRef(node.returnType.get()) : "VARIANT";
+            std::string retType = node.returnType ? mapTypeRef(node.returnType.get()) : "vb6_VARIANT";
             return retType + " " + propName + "(" + params + ")";
         }
         case ProcKind::PropertyLet: {
@@ -3995,12 +4011,15 @@ void CCodeGen::emitFormFramework(const FrmFormDesc& frmDesc, Module& module) {
     c_.emitLine("CREATESTRUCTA* cs = (CREATESTRUCTA*)lParam;");
     c_.emitLine(createFn + "((void*)hwnd, (void*)cs->hInstance);");
 
-    // 调用VB6 Form_Load事件
+    // 调用VB6 Form_Load事件 (仅当存在时调用)
     std::string formLoadFn = cProcName("Form_Load", AccessLevel::Private);
-    c_.emitLine("{ /* Form_Load */ extern void " + formLoadFn + "(); " + formLoadFn + "(); }");
-    c_.dedent();
+    auto* formLoadSym = symTab_.lookup(formLoadFn);
+    if (formLoadSym) {
+        c_.emitLine("{ /* Form_Load */ extern void " + formLoadFn + "(); " + formLoadFn + "(); }");
+    }
     c_.emitLine("break;");
     c_.dedent();
+    c_.emitLine("}");
 
     // WM_COMMAND: 按钮点击等
     c_.emitLine("case WM_COMMAND: {");
@@ -4025,7 +4044,7 @@ void CCodeGen::emitFormFramework(const FrmFormDesc& frmDesc, Module& module) {
     }
     c_.emitLine("break;");
     c_.dedent();
-    c_.dedent();
+    c_.emitLine("}");
 
     // WM_CLOSE: 调用VB6 Form_Unload, 然后DestroyWindow
     c_.emitLine("case WM_CLOSE: {");
@@ -4034,7 +4053,7 @@ void CCodeGen::emitFormFramework(const FrmFormDesc& frmDesc, Module& module) {
     c_.emitLine("DestroyWindow(hwnd);");
     c_.emitLine("break;");
     c_.dedent();
-    c_.dedent();
+    c_.emitLine("}");
 
     // WM_DESTROY: PostQuitMessage (如果是主窗体)
     c_.emitLine("case WM_DESTROY: {");
@@ -4042,7 +4061,7 @@ void CCodeGen::emitFormFramework(const FrmFormDesc& frmDesc, Module& module) {
     c_.emitLine("PostQuitMessage(0);");
     c_.emitLine("break;");
     c_.dedent();
-    c_.dedent();
+    c_.emitLine("}");
 
     // default: DefWindowProc
     c_.emitLine("default:");
@@ -4104,36 +4123,52 @@ void CCodeGen::emitFormFramework(const FrmFormDesc& frmDesc, Module& module) {
             }
         }
 
-        // Win32样式
-        long style = WS_CHILD | WS_VISIBLE;
+        // Win32样式常量（不依赖windows.h，使用WinUser.h固定数值）
+        // WS_CHILD=0x40000000, WS_VISIBLE=0x10000000, WS_BORDER=0x00800000
+        // BS_PUSHBUTTON=0, BS_AUTOCHECKBOX=3, BS_AUTORADIOBUTTON=9
+        // BS_GROUPBOX=7, SS_LEFT=0, ES_AUTOHSCROLL=0x80
+        // LBS_NOTIFY=1, CBS_DROPDOWN=2
+        constexpr long kWsChild    = 0x40000000L;
+        constexpr long kWsVisible  = 0x10000000L;
+        constexpr long kWsBorder   = 0x00800000L;
+        constexpr long kBsPush     = 0x00000000L;
+        constexpr long kBsAutoChk  = 0x00000003L;
+        constexpr long kBsAutoRad  = 0x00000009L;
+        constexpr long kBsGroupBox = 0x00000007L;
+        constexpr long kSsLeft     = 0x00000000L;
+        constexpr long kEsAutoH    = 0x00000080L;
+        constexpr long kLbsNotify  = 0x00000001L;
+        constexpr long kCbsDrop    = 0x00000002L;
+
+        long style = kWsChild | kWsVisible;
         long exStyle = 0;
         std::string createCaption = ctrlCaption;
 
         switch (ctrl.controlType) {
             case FrmControlType::CommandButton:
-                style |= BS_PUSHBUTTON;
+                style |= kBsPush;
                 break;
             case FrmControlType::TextBox:
-                style |= WS_BORDER | ES_AUTOHSCROLL;
+                style |= kWsBorder | kEsAutoH;
                 createCaption = ctrlText;  // TextBox用Text而非Caption
                 break;
             case FrmControlType::Label:
-                style |= SS_LEFT;
+                style |= kSsLeft;
                 break;
             case FrmControlType::CheckBox:
-                style |= BS_AUTOCHECKBOX;
+                style |= kBsAutoChk;
                 break;
             case FrmControlType::OptionButton:
-                style |= BS_AUTORADIOBUTTON;
+                style |= kBsAutoRad;
                 break;
             case FrmControlType::Frame:
-                style |= BS_GROUPBOX;
+                style |= kBsGroupBox;
                 break;
             case FrmControlType::ListBox:
-                style |= LBS_NOTIFY | WS_BORDER;
+                style |= kLbsNotify | kWsBorder;
                 break;
             case FrmControlType::ComboBox:
-                style |= CBS_DROPDOWN | WS_BORDER;
+                style |= kCbsDrop | kWsBorder;
                 break;
             default:
                 break;
@@ -4286,23 +4321,23 @@ void CCodeGen::emitActiveXDll(Module& module) {
                     // 从VARIANT中提取ByVal值
                     if (pType == Vb6Type::Long || pType == Vb6Type::Integer ||
                         pType == Vb6Type::Boolean || pType == Vb6Type::Byte) {
-                        callArgs += "((VARIANT*)args[" + std::to_string(i) + "])->lVal";
+                        callArgs += "((vb6_VARIANT*)args[" + std::to_string(i) + "])->lVal";
                     } else if (pType == Vb6Type::Double || pType == Vb6Type::Single) {
-                        callArgs += "((VARIANT*)args[" + std::to_string(i) + "])->dblVal";
+                        callArgs += "((vb6_VARIANT*)args[" + std::to_string(i) + "])->dblVal";
                     } else if (pType == Vb6Type::String) {
-                        callArgs += "((VARIANT*)args[" + std::to_string(i) + "])->bstrVal";
+                        callArgs += "((vb6_VARIANT*)args[" + std::to_string(i) + "])->bstrVal";
                     } else {
-                        callArgs += "((VARIANT*)args[" + std::to_string(i) + "])->lVal";
+                        callArgs += "((vb6_VARIANT*)args[" + std::to_string(i) + "])->lVal";
                     }
                 } else {
                     // ByRef: 传递VARIANT中的值指针
                     if (pType == Vb6Type::Long || pType == Vb6Type::Integer ||
                         pType == Vb6Type::Boolean || pType == Vb6Type::Byte) {
-                        callArgs += "&((VARIANT*)args[" + std::to_string(i) + "])->lVal";
+                        callArgs += "&((vb6_VARIANT*)args[" + std::to_string(i) + "])->lVal";
                     } else if (pType == Vb6Type::Double || pType == Vb6Type::Single) {
-                        callArgs += "&((VARIANT*)args[" + std::to_string(i) + "])->dblVal";
+                        callArgs += "&((vb6_VARIANT*)args[" + std::to_string(i) + "])->dblVal";
                     } else {
-                        callArgs += "(void*)&((VARIANT*)args[" + std::to_string(i) + "])->lVal";
+                        callArgs += "(void*)&((vb6_VARIANT*)args[" + std::to_string(i) + "])->lVal";
                     }
                 }
             };
@@ -4329,13 +4364,13 @@ void CCodeGen::emitActiveXDll(Module& module) {
                 // 将返回值写入VARIANT result
                 if (methodSym->type == Vb6Type::Long || methodSym->type == Vb6Type::Integer ||
                     methodSym->type == Vb6Type::Boolean || methodSym->type == Vb6Type::Byte) {
-                    c_.emitLine("((VARIANT*)result)->vt = VT_I4; ((VARIANT*)result)->lVal = (int32_t)_r;");
+                    c_.emitLine("((vb6_VARIANT*)result)->vt = VT_I4; ((vb6_VARIANT*)result)->lVal = (int32_t)_r;");
                 } else if (methodSym->type == Vb6Type::Double || methodSym->type == Vb6Type::Single) {
-                    c_.emitLine("((VARIANT*)result)->vt = VT_R8; ((VARIANT*)result)->dblVal = (double)_r;");
+                    c_.emitLine("((vb6_VARIANT*)result)->vt = VT_R8; ((vb6_VARIANT*)result)->dblVal = (double)_r;");
                 } else if (methodSym->type == Vb6Type::String) {
-                    c_.emitLine("((VARIANT*)result)->vt = VT_BSTR; ((VARIANT*)result)->bstrVal = _r;");
+                    c_.emitLine("((vb6_VARIANT*)result)->vt = VT_BSTR; ((vb6_VARIANT*)result)->bstrVal = _r;");
                 } else {
-                    c_.emitLine("((VARIANT*)result)->vt = VT_I4; ((VARIANT*)result)->lVal = (int32_t)(intptr_t)_r;");
+                    c_.emitLine("((vb6_VARIANT*)result)->vt = VT_I4; ((vb6_VARIANT*)result)->lVal = (int32_t)(intptr_t)_r;");
                 }
                 c_.dedent();
                 c_.emitLine("}");
@@ -4633,23 +4668,23 @@ std::string CCodeGen::generateDllEntry(const std::string& progId) {
                     // 从VARIANT中提取ByVal值
                     if (pType == Vb6Type::Long || pType == Vb6Type::Integer ||
                         pType == Vb6Type::Boolean || pType == Vb6Type::Byte) {
-                        callArgs += "((VARIANT*)args[" + std::to_string(i) + "])->lVal";
+                        callArgs += "((vb6_VARIANT*)args[" + std::to_string(i) + "])->lVal";
                     } else if (pType == Vb6Type::Double || pType == Vb6Type::Single) {
-                        callArgs += "((VARIANT*)args[" + std::to_string(i) + "])->dblVal";
+                        callArgs += "((vb6_VARIANT*)args[" + std::to_string(i) + "])->dblVal";
                     } else if (pType == Vb6Type::String) {
-                        callArgs += "((VARIANT*)args[" + std::to_string(i) + "])->bstrVal";
+                        callArgs += "((vb6_VARIANT*)args[" + std::to_string(i) + "])->bstrVal";
                     } else {
-                        callArgs += "((VARIANT*)args[" + std::to_string(i) + "])->lVal";
+                        callArgs += "((vb6_VARIANT*)args[" + std::to_string(i) + "])->lVal";
                     }
                 } else {
                     // ByRef: 传递VARIANT中的值指针
                     if (pType == Vb6Type::Long || pType == Vb6Type::Integer ||
                         pType == Vb6Type::Boolean || pType == Vb6Type::Byte) {
-                        callArgs += "&((VARIANT*)args[" + std::to_string(i) + "])->lVal";
+                        callArgs += "&((vb6_VARIANT*)args[" + std::to_string(i) + "])->lVal";
                     } else if (pType == Vb6Type::Double || pType == Vb6Type::Single) {
-                        callArgs += "&((VARIANT*)args[" + std::to_string(i) + "])->dblVal";
+                        callArgs += "&((vb6_VARIANT*)args[" + std::to_string(i) + "])->dblVal";
                     } else {
-                        callArgs += "(void*)&((VARIANT*)args[" + std::to_string(i) + "])->lVal";
+                        callArgs += "(void*)&((vb6_VARIANT*)args[" + std::to_string(i) + "])->lVal";
                     }
                 }
             }
@@ -4672,13 +4707,13 @@ std::string CCodeGen::generateDllEntry(const std::string& progId) {
                 entry.emitLine(retType + " _r = " + procName + "(" + callArgs + ");");
                 if (methodSym->type == Vb6Type::Long || methodSym->type == Vb6Type::Integer ||
                     methodSym->type == Vb6Type::Boolean || methodSym->type == Vb6Type::Byte) {
-                    entry.emitLine("((VARIANT*)result)->vt = VT_I4; ((VARIANT*)result)->lVal = (int32_t)_r;");
+                    entry.emitLine("((vb6_VARIANT*)result)->vt = VT_I4; ((vb6_VARIANT*)result)->lVal = (int32_t)_r;");
                 } else if (methodSym->type == Vb6Type::Double || methodSym->type == Vb6Type::Single) {
-                    entry.emitLine("((VARIANT*)result)->vt = VT_R8; ((VARIANT*)result)->dblVal = (double)_r;");
+                    entry.emitLine("((vb6_VARIANT*)result)->vt = VT_R8; ((vb6_VARIANT*)result)->dblVal = (double)_r;");
                 } else if (methodSym->type == Vb6Type::String) {
-                    entry.emitLine("((VARIANT*)result)->vt = VT_BSTR; ((VARIANT*)result)->bstrVal = _r;");
+                    entry.emitLine("((vb6_VARIANT*)result)->vt = VT_BSTR; ((vb6_VARIANT*)result)->bstrVal = _r;");
                 } else {
-                    entry.emitLine("((VARIANT*)result)->vt = VT_I4; ((VARIANT*)result)->lVal = (int32_t)(intptr_t)_r;");
+                    entry.emitLine("((vb6_VARIANT*)result)->vt = VT_I4; ((vb6_VARIANT*)result)->lVal = (int32_t)(intptr_t)_r;");
                 }
                 entry.dedent();
                 entry.emitLine("}");

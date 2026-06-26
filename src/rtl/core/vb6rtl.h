@@ -84,7 +84,8 @@ typedef enum vb6_vartype {
     vb6_vtByte = 17,
 } vb6_vartype;
 
-typedef struct VARIANT {
+
+typedef struct vb6_VARIANT {
     vb6_vartype vt;
     union {
         int16_t iVal;
@@ -97,52 +98,54 @@ typedef struct VARIANT {
         uint8_t bVal;
         int64_t cyVal;
     };
-} VARIANT;
+} vb6_VARIANT;
+
+#undef vb6_VARIANT  /* 取消Windows vb6_VARIANT, 使用VB6简化版 */
 
 // Variant构造
-static inline VARIANT vb6_VariantEmpty(void) {
-    VARIANT v;
+static inline vb6_VARIANT vb6_VariantEmpty(void) {
+    vb6_VARIANT v;
     memset(&v, 0, sizeof(v));
     v.vt = vb6_vtEmpty;
     return v;
 }
 
-static inline VARIANT vb6_VariantNull(void) {
-    VARIANT v;
+static inline vb6_VARIANT vb6_VariantNull(void) {
+    vb6_VARIANT v;
     memset(&v, 0, sizeof(v));
     v.vt = vb6_vtNull;
     return v;
 }
 
-static inline VARIANT vb6_VariantInt(int16_t val) {
-    VARIANT v; memset(&v, 0, sizeof(v));
+static inline vb6_VARIANT vb6_VariantInt(int16_t val) {
+    vb6_VARIANT v; memset(&v, 0, sizeof(v));
     v.vt = vb6_vtInteger; v.iVal = val; return v;
 }
 
-static inline VARIANT vb6_VariantLong(int32_t val) {
-    VARIANT v; memset(&v, 0, sizeof(v));
+static inline vb6_VARIANT vb6_VariantLong(int32_t val) {
+    vb6_VARIANT v; memset(&v, 0, sizeof(v));
     v.vt = vb6_vtLong; v.lVal = val; return v;
 }
 
-static inline VARIANT vb6_VariantDouble(double val) {
-    VARIANT v; memset(&v, 0, sizeof(v));
+static inline vb6_VARIANT vb6_VariantDouble(double val) {
+    vb6_VARIANT v; memset(&v, 0, sizeof(v));
     v.vt = vb6_vtDouble; v.dblVal = val; return v;
 }
 
-static inline VARIANT vb6_VariantString(BSTR val) {
-    VARIANT v; memset(&v, 0, sizeof(v));
+static inline vb6_VARIANT vb6_VariantString(BSTR val) {
+    vb6_VARIANT v; memset(&v, 0, sizeof(v));
     v.vt = vb6_vtBSTR; v.bstrVal = val; return v;
 }
 
-static inline VARIANT vb6_VariantBool(int16_t val) {
-    VARIANT v; memset(&v, 0, sizeof(v));
+static inline vb6_VARIANT vb6_VariantBool(int16_t val) {
+    vb6_VARIANT v; memset(&v, 0, sizeof(v));
     v.vt = vb6_vtBoolean; v.boolVal = val; return v;
 }
 
 // Variant转基本类型
-int32_t vb6_VariantToLong(VARIANT v);
-double vb6_VariantToDouble(VARIANT v);
-BSTR vb6_VariantToString(VARIANT v);
+int32_t vb6_VariantToLong(vb6_VARIANT v);
+double vb6_VariantToDouble(vb6_VARIANT v);
+BSTR vb6_VariantToString(vb6_VARIANT v);
 
 // ============================================================
 // 内置函数 (最小子集)
@@ -163,7 +166,7 @@ BSTR vb6_Chr(int32_t code);
 int32_t vb6_Asc(BSTR s);
 double vb6_Val(BSTR s);
 BSTR vb6_Str(int32_t n);
-BSTR vb6_Format(VARIANT expr, BSTR fmt);
+BSTR vb6_Format(vb6_VARIANT expr, BSTR fmt);
 
 // 消息框
 int32_t vb6_MsgBox(BSTR prompt, int32_t buttons, BSTR title);
@@ -179,18 +182,18 @@ float vb6_Rnd(int32_t seed);
 int16_t vb6_CInt(double x);
 int32_t vb6_CLng(double x);
 double vb6_CDbl(double x);
-BSTR vb6_CStr(VARIANT x);
+BSTR vb6_CStr(vb6_VARIANT x);
 
 // 类型检查
-int32_t vb6_IsNumeric(VARIANT v);
-int32_t vb6_IsNull(VARIANT v);
-int32_t vb6_IsEmpty(VARIANT v);
-int32_t vb6_IsObject(VARIANT v);
-int32_t vb6_IsArray(VARIANT v);
-int32_t vb6_IsDate(VARIANT v);
-int32_t vb6_IsError(VARIANT v);
-BSTR vb6_TypeName(VARIANT v);
-int32_t vb6_VarType(VARIANT v);
+int32_t vb6_IsNumeric(vb6_VARIANT v);
+int32_t vb6_IsNull(vb6_VARIANT v);
+int32_t vb6_IsEmpty(vb6_VARIANT v);
+int32_t vb6_IsObject(vb6_VARIANT v);
+int32_t vb6_IsArray(vb6_VARIANT v);
+int32_t vb6_IsDate(vb6_VARIANT v);
+int32_t vb6_IsError(vb6_VARIANT v);
+BSTR vb6_TypeName(vb6_VARIANT v);
+int32_t vb6_VarType(vb6_VARIANT v);
 
 // 内置对象
 void vb6_Debug_Print(BSTR s);
@@ -258,7 +261,7 @@ int32_t vb6_Second(double time);
 int16_t vb6_CBool(double v);
 uint8_t vb6_CByte(double v);
 float vb6_CSng(double v);
-double vb6_CDate(VARIANT v);
+double vb6_CDate(vb6_VARIANT v);
 BSTR vb6_Hex(int32_t n);
 BSTR vb6_Oct(int32_t n);
 
@@ -276,7 +279,7 @@ typedef enum vb6_safearray_elemtype {
     vb6_sa_single= 5,   // float
     vb6_sa_double= 6,   // double
     vb6_sa_bstr  = 7,   // BSTR (需要逐元素释放)
-    vb6_sa_variant=8,   // VARIANT (需要逐元素清理)
+    vb6_sa_variant=8,   // vb6_VARIANT (需要逐元素清理)
     vb6_sa_ptr   = 9,   // void* (对象引用)
 } vb6_safearray_elemtype;
 
@@ -382,15 +385,15 @@ void vb6_ReleaseObject(void** objPtr);
 
 // COM对象方法/属性调用 — 后期绑定 (P6.2)
 // 通过IDispatch::Invoke调用方法/属性
-// args参数为Windows VARIANT数组指针(由vb6com.c定义), cgen通过void*传递
+// args参数为Windows vb6_VARIANT数组指针(由vb6com.c定义), cgen通过void*传递
 void* vb6_ComCall(void* disp, const wchar_t* methodName,
                   void* args, int32_t argc);
 void* vb6_ComGetProp(void* disp, const wchar_t* propName);
 void vb6_ComSetProp(void* disp, const wchar_t* propName, void* value);
 void vb6_ComSetRef(void* disp, const wchar_t* propName, void* objRef);
 
-// COM VARIANT封装/解封 — cgen生成的C代码使用 (P6.2)
-// 实际实现在vb6com.c, 此处用void*避免VARIANT类型冲突
+// COM vb6_VARIANT封装/解封 — cgen生成的C代码使用 (P6.2)
+// 实际实现在vb6com.c, 此处用void*避免vb6_VARIANT类型冲突
 void* vb6_ComPackBSTR(const wchar_t* bstr);
 void* vb6_ComPackInt(int32_t val);
 void* vb6_ComPackDouble(double val);
@@ -402,7 +405,7 @@ void* vb6_ComUnpackObject(void* variant);
 void vb6_ComVarClear(void* variant);
 void vb6_ComVarFree(void* variant);
 
-// 一体化COM辅助函数 (内部处理临时VARIANT清理)
+// 一体化COM辅助函数 (内部处理临时vb6_VARIANT清理)
 void* vb6_ComCallObject(void* disp, const wchar_t* methodName,
                         void* args, int32_t argc);
 wchar_t* vb6_ComCallBSTR(void* disp, const wchar_t* methodName,

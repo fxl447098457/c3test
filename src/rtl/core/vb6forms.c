@@ -38,14 +38,14 @@ int vb6_RegisterFormClass(const char* className, void* wndProc, void* hInstance,
     wc.style = CS_HREDRAW | CS_VREDRAW | CS_DBLCLKS;  // 支持双击
     wc.lpfnWndProc = (WNDPROC)wndProc;
     wc.hInstance = (HINSTANCE)hInstance;
-    wc.hCursor = LoadCursor(NULL, IDC_ARROW);
+    wc.hCursor = LoadCursorA(NULL, IDC_ARROW);
     wc.hbrBackground = (HBRUSH)(COLOR_BTNFACE + 1);  // VB6默认灰色背景
     wc.lpszClassName = className;
 
     if (iconResId > 0) {
-        wc.hIcon = LoadIcon((HINSTANCE)hInstance, MAKEINTRESOURCEA(iconResId));
+        wc.hIcon = LoadIconA((HINSTANCE)hInstance, MAKEINTRESOURCEA(iconResId));
     } else {
-        wc.hIcon = LoadIcon(NULL, IDI_APPLICATION);
+        wc.hIcon = LoadIconA(NULL, IDI_APPLICATION);
     }
     wc.hIconSm = wc.hIcon;
 

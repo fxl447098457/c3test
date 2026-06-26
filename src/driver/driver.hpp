@@ -102,6 +102,9 @@ private:
     // 窗体描述 (P7, .frm文件解析结果, 按模块名索引)
     std::map<std::string, FrmFile> frmFiles_;
 
+    // TypeLib解析器 (P6.3, COM类型导入)
+    std::unique_ptr<TypeLibParser> typelibParser_;
+
     // 编译流水线各阶段
     bool runLexer(const CompileOptions& options);
     bool runPreprocess(const CompileOptions& options);
