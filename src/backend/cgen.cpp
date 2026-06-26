@@ -61,8 +61,18 @@ bool CCodeGen::generate(Module& module, const std::string& baseName,
     h_.emitLine("#include <wchar.h>");
     h_.emitLine("#include \"vb6rtl.h\"");
     // 跨模块 #include: 引用外部模块的头文件
+    // P6.5修复: 类模块只包含其他类模块的头文件，避免循环依赖
+    // (标准模块包含类模块，但类模块不应包含标准模块)
     for (const auto& extMod : externalModules) {
-        h_.emitLine("#include \"" + extMod + ".h\"");
+        if (isClassModule_) {
+            // 类模块: 只包含其他类模块的头文件
+            auto* extSym = symTab_.lookup(extMod);
+            if (extSym && extSym->kind == SymbolKind::Class) {
+                h_.emitLine("#include \"" + extMod + ".h\"");
+            }
+        } else {
+            h_.emitLine("#include \"" + extMod + ".h\"");
+        }
     }
     h_.emitBlank();
 
@@ -75,6 +85,17 @@ bool CCodeGen::generate(Module& module, const std::string& baseName,
     if (isClassModule_) {
         std::string clsStruct = "vb6_cls_" + cIdent(baseName_);
         h_.emitLine("// Class module: " + module.moduleName);
+
+        // P6.5: 前向声明event sink结构体 (在类结构体定义之前)
+        bool hasEvents = false;
+        for (auto& decl : module.declarations) {
+            if (decl->kind == ASTNodeKind::EventDecl) { hasEvents = true; break; }
+        }
+        if (hasEvents) {
+            std::string sinkName = "vb6_events_" + cIdent(baseName_);
+            h_.emitLine("struct " + sinkName + ";  /* P6.5: forward decl */");
+        }
+
         h_.emitLine("typedef struct " + clsStruct + " {");
 
         // 收集模块级变量作为结构体字段
@@ -102,6 +123,11 @@ bool CCodeGen::generate(Module& module, const std::string& baseName,
         if (!hasFields) {
             h_.emitLine("    int _placeholder;  /* interface class: no data members */");
         }
+        // P6.5: 如果类有事件声明，添加事件接收器指针字段
+        if (hasEvents) {
+            std::string sinkName = "vb6_events_" + cIdent(baseName_);
+            h_.emitLine("    struct " + sinkName + "* events;  /* P6.5: event sink */");
+        }
         h_.emitLine("} " + clsStruct + ";");
         h_.emitBlank();
 
@@ -113,6 +139,11 @@ bool CCodeGen::generate(Module& module, const std::string& baseName,
         // P6.4: 生成接口vtable结构体 + 包装类型 + 全局vtable实例
         if (!module.implements.empty()) {
             emitInterfaceVtable(module);
+        }
+
+        // P6.5: 生成事件接收器表 (事件源类的回调函数指针表)
+        if (hasEvents) {
+            emitEventSink(module);
         }
     }
 
@@ -206,6 +237,57 @@ bool CCodeGen::generate(Module& module, const std::string& baseName,
         }
     }
 
+    // P6.5: 先生成事件处理器包装函数的.h声明（在#endif之前）
+    // 收集wrapper函数签名，稍后在#endif之前输出到.h
+    std::vector<std::string> evtWrapperSigs;
+    if (!knownWithEventsVars_.empty()) {
+        for (auto& [varLower, srcClassName] : knownWithEventsVars_) {
+            auto* srcClsSym = symTab_.lookup(srcClassName);
+            if (!srcClsSym || srcClsSym->kind != SymbolKind::Class) continue;
+            for (auto& evtName : srcClsSym->eventNames) {
+                std::string varName = varLower;
+                auto* varSym = symTab_.lookup(varLower);
+                if (varSym) varName = varSym->name;
+                std::string handlerName = varName + "_" + evtName;
+                auto* handlerSym = symTab_.lookup(handlerName);
+                if (!handlerSym) continue;
+                std::string wrapperName = "vb6_evt_wrap_" + varLower + "_" + cIdent(evtName);
+                // 查找Event声明的参数
+                std::vector<ParameterInfo> evtParams;
+                for (auto& decl2 : module.declarations) {
+                    if (decl2->kind == ASTNodeKind::SubDecl) {
+                        auto& sub = static_cast<SubDecl&>(*decl2);
+                        if (Symbol::toLower(sub.name) == Symbol::toLower(handlerName)) {
+                            for (auto& param : sub.params) {
+                                ParameterInfo pi;
+                                pi.name = param->name;
+                                pi.type = (param->asType && param->asType->kind == ASTNodeKind::SimpleTypeRef)
+                                    ? typeSys_.resolveTypeName(static_cast<SimpleTypeRef*>(param->asType.get())->name)
+                                    : Vb6Type::Variant;
+                                if (pi.type == Vb6Type::Unknown || pi.type == Vb6Type::Empty)
+                                    pi.type = Vb6Type::Variant;
+                                pi.isByVal = true;
+                                evtParams.push_back(pi);
+                            }
+                            break;
+                        }
+                    }
+                }
+                std::string sig = "void " + wrapperName + "(void* handler";
+                for (auto& p : evtParams) {
+                    sig += ", " + mapType(p.type) + " " + cIdent(p.name);
+                }
+                sig += ")";
+                evtWrapperSigs.push_back(sig);
+            }
+        }
+    }
+    // 输出wrapper声明到.h（在#endif之前）
+    for (auto& sig : evtWrapperSigs) {
+        h_.emitLine(sig + ";");
+        h_.emitBlank();
+    }
+
     h_.emitBlank();
     h_.emitLine("#endif /* " + guard + " */");
 
@@ -228,6 +310,90 @@ bool CCodeGen::generate(Module& module, const std::string& baseName,
     // === 类模块: 生成工厂函数 ===
     if (isClassModule_ && !currentClassIsInterface) {  // P6.4: 接口类不生成工厂/析构函数
         emitClassFactory(module);
+    }
+
+    // === P6.5: 生成事件处理器包装函数 ===
+    // 查找 WithEvents 变量，为 obj_EventName 形式的处理器生成C回调包装
+    if (!knownWithEventsVars_.empty()) {
+        c_.emitBlank();
+        c_.emitLine("// === P6.5: Event handler wrappers ===");
+        for (auto& [varLower, srcClassName] : knownWithEventsVars_) {
+            auto* srcClsSym = symTab_.lookup(srcClassName);
+            if (!srcClsSym || srcClsSym->kind != SymbolKind::Class) continue;
+
+            for (auto& evtName : srcClsSym->eventNames) {
+                std::string handlerName;
+                // 查找原始变量名（保留大小写）
+                std::string varName = varLower;
+                // 从符号表查找保留大小写的变量名 (用lookup跨模块查找)
+                auto* varSym = symTab_.lookup(varLower);
+                if (varSym) varName = varSym->name;
+                handlerName = varName + "_" + evtName;
+
+                auto* handlerSym = symTab_.lookup(handlerName);
+                if (!handlerSym) continue;
+
+                // 生成包装函数: void vb6_evt_wrap_<var>_<evt>(void* handler, params...)
+                std::string wrapperName = "vb6_evt_wrap_" + varLower + "_" + cIdent(evtName);
+                std::string sinkName = "vb6_events_" + cIdent(srcClassName);
+
+                // 查找Event声明的参数
+                std::vector<ParameterInfo> evtParams;
+                for (auto& decl2 : module.declarations) {
+                    // 事件处理器参数与源类Event声明参数相同
+                    // 从处理器Sub的参数获取
+                    if (decl2->kind == ASTNodeKind::SubDecl) {
+                        auto& sub = static_cast<SubDecl&>(*decl2);
+                        if (Symbol::toLower(sub.name) == Symbol::toLower(handlerName)) {
+                            for (auto& param : sub.params) {
+                                ParameterInfo pi;
+                                pi.name = param->name;
+                                pi.type = (param->asType && param->asType->kind == ASTNodeKind::SimpleTypeRef)
+                                    ? typeSys_.resolveTypeName(static_cast<SimpleTypeRef*>(param->asType.get())->name)
+                                    : Vb6Type::Variant;
+                                if (pi.type == Vb6Type::Unknown || pi.type == Vb6Type::Empty)
+                                    pi.type = Vb6Type::Variant;
+                                pi.isByVal = true;
+                                evtParams.push_back(pi);
+                            }
+                            break;
+                        }
+                    }
+                }
+
+                // 构建包装函数签名
+                std::string sig = "void " + wrapperName + "(void* handler";
+                for (auto& p : evtParams) {
+                    sig += ", " + mapType(p.type) + " " + cIdent(p.name);
+                }
+                sig += ")";
+
+                // .h前向声明已在上方（#endif之前）输出，此处只生成.c实现
+
+                // 生成.c实现
+                c_.emitLine(sig + " {");
+                c_.indent();
+                // 调用实际的VB6处理器函数
+                // 如果是类模块，处理器是 vb6_<Mod>_<HandlerName>(me, params...)
+                // 如果是标准模块，处理器是 vb6_<HandlerName>(params...)
+                std::string procCall = cProcName(handlerName, handlerSym->access);
+                std::string callArgs = "(";
+                if (isClassModule_) {
+                    callArgs += classMeParam() + "/* from handler */";
+                }
+                for (size_t i = 0; i < evtParams.size(); i++) {
+                    if (i > 0 || isClassModule_) {
+                        callArgs += ", ";
+                    }
+                    callArgs += cIdent(evtParams[i].name);
+                }
+                callArgs += ");";
+                c_.emitLine(procCall + callArgs);
+                c_.dedent();
+                c_.emitLine("}");
+                c_.emitBlank();
+            }
+        }
     }
 
     // 生成入口点 (类模块不生成main; 多模块工程中仅有Sub Main的模块生成main)
@@ -1304,6 +1470,30 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
         callee = callee.substr(0, callee.size() - 2);
     }
 
+    // P6.5修复: 如果callee已经是func(obj)形式(如类方法调用 vb6_Button_SetCaption(btn)),
+    // 且IndexOrCallExpr有额外参数, 需要拆开重组为func(obj, userArgs...),
+    // 避免生成 func(obj)(userArgs) 双重括号
+    std::string classMethodObjArg;  // 如果非空, 表示callee已被拆开, 需要前置此参数
+    if (callee.size() >= 2 && callee.back() == ')'
+        && (!node.positional.empty() || !node.named.empty())) {
+        // 检查是否是完整的函数调用（以右括号结尾且匹配左括号）
+        int depth = 0;
+        int openPos = -1;
+        for (int i = (int)callee.size() - 2; i >= 0; i--) {
+            if (callee[i] == ')') depth++;
+            else if (callee[i] == '(') {
+                if (depth == 0) { openPos = i; break; }
+                depth--;
+            }
+        }
+        if (openPos > 0) {
+            // callee = "funcName(existingArgs)" → 拆开
+            std::string funcPart = callee.substr(0, openPos);
+            classMethodObjArg = callee.substr(openPos + 1, callee.size() - openPos - 2);
+            callee = funcPart;
+        }
+    }
+
     // 位置参数
     // 需要检查被调用函数的参数签名: ByRef参数在调用点需要传指针(&arg)
     std::vector<ParameterInfo> calleeParams;
@@ -1410,6 +1600,15 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
             argList += ", -1, 0";
         } else if (args.size() == 5) {
             argList += ", 0";
+        }
+    }
+
+    // P6.5: 如果classMethodObjArg非空, 需要将其作为第一个参数插入
+    if (!classMethodObjArg.empty()) {
+        if (argList.empty()) {
+            argList = classMethodObjArg;
+        } else {
+            argList = classMethodObjArg + ", " + argList;
         }
     }
 
@@ -1590,6 +1789,7 @@ void CCodeGen::emitStmtList(StmtList& stmts) {
             case ASTNodeKind::ChDirStmt:       visit(static_cast<ChDirStmt&>(*stmt)); break;
             case ASTNodeKind::ChDriveStmt:     visit(static_cast<ChDriveStmt&>(*stmt)); break;
             case ASTNodeKind::FileCopyStmt:    visit(static_cast<FileCopyStmt&>(*stmt)); break;
+            case ASTNodeKind::RaiseEventStmt:  visit(static_cast<RaiseEventStmt&>(*stmt)); break;
             case ASTNodeKind::EndStmt:
                 c_.emitLine("vb6_End();");
                 break;
@@ -1794,6 +1994,60 @@ void CCodeGen::visit(SetStmt& node) {
     }
 
     c_.emitLine(target + " = " + value + ";  /* Set */");
+
+    // P6.5: WithEvents变量事件连接
+    // Set obj = newInst → 如果obj是WithEvents变量, 设置事件接收器
+    {
+        std::string targetLower = target;
+        std::transform(targetLower.begin(), targetLower.end(), targetLower.begin(), ::tolower);
+        auto itWE = knownWithEventsVars_.find(targetLower);
+        if (itWE != knownWithEventsVars_.end()) {
+            std::string sourceClass = itWE->second;
+            std::string sinkName = "vb6_events_" + cIdent(sourceClass);
+            // 生成事件连接: if (target) { static sink = {...}; target->events = &sink; }
+            // 需要查找当前模块中是否有 obj_EventName 形式的事件处理器
+            c_.emitLine("if (" + target + ") {");
+            c_.indent();
+            // 生成静态事件接收器实例
+            c_.emitLine("static " + sinkName + " " + targetLower + "_sink = {");
+            c_.indent();
+            // handler: 指向当前对象(me)
+            std::string handlerExpr = isClassModule_ ? "(void*)me" : "NULL";
+            c_.emitLine(".handler = " + handlerExpr + ",");
+            // 为源类的每个事件生成回调指针
+            // 查找源类的类符号获取事件列表 (用lookup跨模块查找)
+            auto* srcClsSym = symTab_.lookup(sourceClass);
+            if (srcClsSym && srcClsSym->kind == SymbolKind::Class) {
+                // 遍历源类的事件，查找当前模块中是否有 targetName_EventName 处理器
+                bool firstEvent = true;
+                for (auto& evtName : srcClsSym->eventNames) {
+                    std::string handlerName = target + "_" + evtName;  // VB6: obj_Click
+                    std::string handlerLower = handlerName;
+                    std::transform(handlerLower.begin(), handlerLower.end(), handlerLower.begin(), ::tolower);
+                    // 查找处理器函数符号 (用lookup跨模块查找)
+                    auto* handlerSym = symTab_.lookup(handlerName);
+                    std::string cbField = ".on" + cIdent(evtName) + " = ";
+                    if (handlerSym) {
+                        // 生成包装函数名: vb6_evt_<EventName>_wrap_<varName>
+                        std::string wrapperName = "vb6_evt_wrap_" + targetLower + "_" + cIdent(evtName);
+                        cbField += wrapperName;
+                    } else {
+                        cbField += "NULL";
+                    }
+                    if (!firstEvent || srcClsSym->eventNames.size() > 1) {
+                        // 多事件时加逗号
+                    }
+                    c_.emitLine(cbField + ",");
+                    firstEvent = false;
+                }
+            }
+            c_.dedent();
+            c_.emitLine("};");
+            c_.emitLine(target + "->events = &" + targetLower + "_sink;");
+            c_.dedent();
+            c_.emitLine("}");
+        }
+    }
 }
 
 void CCodeGen::visit(LetStmt& node) {
@@ -3013,6 +3267,10 @@ void CCodeGen::visit(VariableDecl& node) {
             } else {
                 knownClassVars_.insert(lower);
             }
+            // P6.5: WithEvents变量 → 注册到 knownWithEventsVars_
+            if (node.isWithEvents) {
+                knownWithEventsVars_[lower] = clsSym->name;
+            }
         }
     }
 
@@ -3176,9 +3434,9 @@ void CCodeGen::visit(PropertyDecl& node) {
 }
 
 void CCodeGen::visit(EventDecl& node) {
-    // Event声明: 生成事件触发的辅助函数占位
-    std::string evtName = "vb6_event_" + cIdent(node.name);
-    c_.emitLine("/* Event " + node.name + " —.RaiseEvent handled at call site */");
+    // P6.5: Event声明 → 回调函数指针typedef在emitEventSink中统一生成
+    // 此处仅生成注释标记
+    c_.emitLine("/* Event " + node.name + " — callback typedef in event sink table */");
 }
 
 // ============================================================
@@ -3257,6 +3515,15 @@ void CCodeGen::emitClassFactory(Module& module) {
                 c_.emitLine("me->" + field + " = 0;");
             }
         }
+    }
+
+    // P6.5: 初始化事件接收器指针为NULL
+    bool hasEvents = false;
+    for (auto& decl : module.declarations) {
+        if (decl->kind == ASTNodeKind::EventDecl) { hasEvents = true; break; }
+    }
+    if (hasEvents) {
+        c_.emitLine("me->events = NULL;  /* P6.5: no event sink initially */");
     }
 
     // 检查是否有 Class_Initialize 方法
@@ -3426,6 +3693,97 @@ void CCodeGen::emitInterfaceVtable(Module& module) {
         c_.dedent();
         c_.emitLine("}");
     }
+}
+
+// ============================================================
+// P6.5: RaiseEvent语句 → 生成事件回调分发代码
+// ============================================================
+
+void CCodeGen::visit(RaiseEventStmt& node) {
+    // RaiseEvent EventName(args...)
+    // 生成: if (me->events && me->events->onEventName) { me->events->onEventName(me->events->handler, args...); }
+    std::string evtId = cIdent(node.eventName);
+    std::string callbackName = "on" + evtId;  // 事件接收器中的回调字段名
+
+    c_.emitLine("if (me->events && me->events->" + callbackName + ") {");
+    c_.indent();
+    // 生成回调调用
+    std::string call = "me->events->" + callbackName + "(me->events->handler";
+    for (size_t i = 0; i < node.args.size(); i++) {
+        emitExpr(*node.args[i]);
+        call += ", " + lastExpr_;
+    }
+    call += ");";
+    c_.emitLine(call);
+    c_.dedent();
+    c_.emitLine("}");
+}
+
+// ============================================================
+// P6.5: 事件接收器表生成 (Event Sink Table)
+// ============================================================
+
+void CCodeGen::emitEventSink(Module& module) {
+    std::string clsStruct = "vb6_cls_" + cIdent(baseName_);
+    std::string sinkName = "vb6_events_" + cIdent(baseName_);
+
+    // 收集所有Event声明
+    struct EventInfo {
+        std::string name;           // 事件名(原始)
+        std::string cName;          // 安全C标识符
+        std::vector<ParameterInfo> params;  // 事件参数
+    };
+    std::vector<EventInfo> events;
+
+    for (auto& decl : module.declarations) {
+        if (decl->kind == ASTNodeKind::EventDecl) {
+            auto& evt = static_cast<EventDecl&>(*decl);
+            EventInfo info;
+            info.name = evt.name;
+            info.cName = cIdent(evt.name);
+            for (auto& param : evt.params) {
+                ParameterInfo pi;
+                pi.name = param->name;
+                // 用mapTypeRef获取C类型, 同时从TypeSystem获取Vb6Type
+                std::string cType = mapTypeRef(param->asType.get());
+                pi.type = (param->asType && param->asType->kind == ASTNodeKind::SimpleTypeRef)
+                    ? typeSys_.resolveTypeName(static_cast<SimpleTypeRef*>(param->asType.get())->name)
+                    : Vb6Type::Variant;
+                if (pi.type == Vb6Type::Unknown || pi.type == Vb6Type::Empty)
+                    pi.type = Vb6Type::Variant;
+                // 事件参数总是ByVal传递(跨对象边界)
+                pi.isByVal = true;
+                info.params.push_back(pi);
+            }
+            events.push_back(std::move(info));
+        }
+    }
+
+    if (events.empty()) return;
+
+    // 1. 生成事件回调函数指针typedef
+    h_.emitLine("// P6.5: Event callback function pointer types");
+    for (auto& evt : events) {
+        std::string cbName = "vb6_evt_" + evt.cName + "_cb";
+        std::string sig = "void (*" + cbName + ")(void* handler";
+        for (auto& p : evt.params) {
+            sig += ", " + mapType(p.type) + " " + cIdent(p.name);
+        }
+        sig += ")";
+        h_.emitLine("typedef " + sig + ";");
+    }
+    h_.emitBlank();
+
+    // 2. 生成事件接收器表结构体
+    h_.emitLine("// Event sink table: " + module.moduleName);
+    h_.emitLine("typedef struct " + sinkName + " {");
+    h_.emitLine("    void* handler;  /* event handler object (consumer) */");
+    for (auto& evt : events) {
+        std::string cbName = "vb6_evt_" + evt.cName + "_cb";
+        h_.emitLine("    " + cbName + " on" + evt.cName + ";  /* Event " + evt.name + " */");
+    }
+    h_.emitLine("} " + sinkName + ";");
+    h_.emitBlank();
 }
 
 void CCodeGen::visit(ParameterDecl& node) {

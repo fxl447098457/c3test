@@ -100,6 +100,11 @@ struct Symbol {
     std::vector<ParameterInfo> interfaceMethodParams;  // 备用: 接口方法参数信息
     std::vector<std::string> interfaceMethodNames;     // 接口方法名列表(小写)
 
+    // --- P6.5 事件相关 ---
+    bool isWithEvents = false;                         // 变量是否声明为WithEvents
+    std::vector<std::string> eventNames;               // 类声明的事件名列表(仅Class)
+    std::string withEventsSourceClass;                 // WithEvents变量的源类名
+
     // --- COM前期绑定相关 (P6.3, SymbolKind::ComClass/ComInterface) ---
     std::string comIidStr;            // 接口IID字符串 (如 "{2A0A3E20-...}")
     std::string comClsidStr;          // coclass CLSID字符串

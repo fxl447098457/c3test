@@ -51,6 +51,7 @@ static void dispatchStmt(Stmt& stmt, SemanticAnalyzer& analyzer) {
         case ASTNodeKind::LabelStmt:        analyzer.visit(static_cast<LabelStmt&>(stmt)); break;
         case ASTNodeKind::OptionStmt:       analyzer.visit(static_cast<OptionStmt&>(stmt)); break;
         case ASTNodeKind::LocalDeclStmt:    analyzer.visit(static_cast<LocalDeclStmt&>(stmt)); break;
+        case ASTNodeKind::RaiseEventStmt:   /* P6.5: RaiseEvent在Pass2语义分析中验证事件存在性 */ break;
         // 其他语句暂不处理
         default: break;
     }
@@ -120,6 +121,7 @@ bool SemanticAnalyzer::analyze(Module& module) {
                 case ASTNodeKind::EventDecl: {
                     auto& e = static_cast<EventDecl&>(*decl);
                     classSym->memberNames.push_back(e.name);
+                    classSym->eventNames.push_back(e.name);  // P6.5: 收集事件名
                     break;
                 }
                 default:
@@ -296,6 +298,13 @@ void SemanticAnalyzer::registerVariable(VariableDecl& decl) {
     );
     sym->isStatic = decl.isStatic;
     sym->isArray = !decl.dimensions.empty() || decl.isDynamicArray;
+    // P6.5: 记录WithEvents标志和源类名
+    if (decl.isWithEvents) {
+        sym->isWithEvents = true;
+        if (decl.asType && decl.asType->kind == ASTNodeKind::SimpleTypeRef) {
+            sym->withEventsSourceClass = static_cast<SimpleTypeRef*>(decl.asType.get())->name;
+        }
+    }
     symTab_.define(std::move(sym));
 }
 

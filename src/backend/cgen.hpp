@@ -130,6 +130,7 @@ public:
     void visit(LabelStmt& node) override;
     void visit(OptionStmt& node) override;
     void visit(LocalDeclStmt& node) override;
+    void visit(RaiseEventStmt& node) override;
 
     // --- 表达式 (返回C表达式字符串) ---
     void visit(BinaryExpr& node) override;
@@ -245,6 +246,10 @@ private:
     bool hasGoSub_ = false;
     int gosubReturnCounter_ = 0;
 
+    // P6.5: WithEvents变量 (小写变量名 → 源类名)
+    // Dim WithEvents obj As ClassName → knownWithEventsVars_["obj"] = "ClassName"
+    std::unordered_map<std::string, std::string> knownWithEventsVars_;
+
     // ---- 类型映射 ----
 
     // Vb6Type → C类型字符串
@@ -297,6 +302,9 @@ private:
 
     // P6.4: 生成接口vtable和包装 (Implements代码生成)
     void emitInterfaceVtable(Module& module);
+
+    // P6.5: 生成事件接收器表和回调 (WithEvents代码生成)
+    void emitEventSink(Module& module);
 
     // 生成类方法函数体中的Me引用名
     std::string classMeParam() const;

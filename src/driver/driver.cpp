@@ -709,6 +709,7 @@ bool Driver::runCrossModuleResolution() {
                 extSym->isInterface = srcSym->isInterface;  // P6.4
                 extSym->implementsNames = srcSym->implementsNames;  // P6.4
                 extSym->interfaceMethodNames = srcSym->interfaceMethodNames;  // P6.4
+                extSym->eventNames = srcSym->eventNames;  // P6.5
             }
 
             symTab.defineExternal(std::move(extSym));
