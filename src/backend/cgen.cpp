@@ -1125,6 +1125,33 @@ void CCodeGen::visit(UnaryExpr& node) {
 }
 
 void CCodeGen::visit(MemberAccessExpr& node) {
+    // P7.6: 控件数组属性读取 ctrlArr(idx).Property
+    // 必须在IdentifierExpr分支前检查, 因为cmdBtn(0)的object是IndexOrCallExpr
+    if (node.object && node.object->kind == ASTNodeKind::IndexOrCallExpr) {
+        auto& idxExpr = static_cast<IndexOrCallExpr&>(*node.object);
+        if (idxExpr.callee && idxExpr.callee->kind == ASTNodeKind::IdentifierExpr) {
+            auto& arrIdent = static_cast<IdentifierExpr&>(*idxExpr.callee);
+            std::string arrNameLower = arrIdent.name;
+            std::transform(arrNameLower.begin(), arrNameLower.end(), arrNameLower.begin(), ::tolower);
+            if (knownControlArrays_.count(arrNameLower)) {
+                auto itCtrl = knownFormControls_.find(arrNameLower);
+                if (itCtrl != knownFormControls_.end()) {
+                    std::string readFn = getControlPropReadFn(itCtrl->second, node.memberName);
+                    if (!readFn.empty()) {
+                        std::string idxArg;
+                        if (!idxExpr.positional.empty()) {
+                            emitExpr(*idxExpr.positional[0]);
+                            idxArg = std::move(lastExpr_);
+                        } else {
+                            idxArg = "0";
+                        }
+                        lastExpr_ = readFn + "(vb6_CtrlArr_GetAt(&vb6_arr_" + cIdent(arrIdent.name) + ", " + idxArg + "))";
+                        return;
+                    }
+                }
+            }
+        }
+    }
     // 内置对象方法: Debug.Print → vb6_DebugPrint
     // 检查 object 是否是 IdentifierExpr
     if (node.object && node.object->kind == ASTNodeKind::IdentifierExpr) {
@@ -1143,9 +1170,11 @@ void CCodeGen::visit(MemberAccessExpr& node) {
             return;
         }
 
-        // P7.5: 窗体控件属性读取: ctrl.Property → vb6_GetControlXxx(vb6_hwnd_ctrl)
-        // 在COM前期绑定之前检测, 因为控件名不会是COM变量
+        // P7.5+P7.6: 窗体控件属性读取
+        // 情况1: ctrl.Property (非数组) → vb6_GetControlXxx(vb6_hwnd_ctrl)
+        // 情况2: ctrlArr(idx).Property (数组) → vb6_GetControlXxx(vb6_CtrlArr_GetAt(&vb6_arr_ctrl, idx))
         {
+            // P7.5: 非数组控件属性读取
             auto itCtrl = knownFormControls_.find(objLower);
             if (itCtrl != knownFormControls_.end()) {
                 std::string readFn = getControlPropReadFn(itCtrl->second, node.memberName);
@@ -1153,9 +1182,8 @@ void CCodeGen::visit(MemberAccessExpr& node) {
                     lastExpr_ = readFn + "(vb6_hwnd_" + cIdent(objIdent.name) + ")";
                     return;
                 }
-                // 未知属性: 警告并回退到结构体字段访问 (可能无法编译)
                 diag_.warn(DiagnosticID::CodeGenUnsupportedFeature, SourceLocation{},
-                    "P7.5: Unknown control property '" + objIdent.name + "." + node.memberName +
+                    std::string("P7.5: Unknown control property '") + objIdent.name + "." + node.memberName +
                     "' for control type, generating struct field access (may not compile)");
             }
         }
@@ -1924,11 +1952,43 @@ void CCodeGen::visit(Block& node) {
 
 void CCodeGen::visit(AssignmentStmt& node) {
     if (!node.target || !node.value) return;
-
-    // P7.5: 控件属性写入: ctrl.Property = value → vb6_SetControlXxx(vb6_hwnd_ctrl, value)
-    // 在Property Let检测之前, 因为控件属性优先于自定义Property
+    // P7.5+P7.6: 控件属性写入
+    // 情况1: ctrl.Property = value (非数组)
+    // 情况2: ctrlArr(idx).Property = value (数组)
     if (node.target->kind == ASTNodeKind::MemberAccessExpr) {
         auto& maExpr = static_cast<MemberAccessExpr&>(*node.target);
+        // P7.6: 控件数组属性写入 ctrlArr(idx).Property = value
+        if (maExpr.object && maExpr.object->kind == ASTNodeKind::IndexOrCallExpr) {
+            auto& idxExpr = static_cast<IndexOrCallExpr&>(*maExpr.object);
+            if (idxExpr.callee && idxExpr.callee->kind == ASTNodeKind::IdentifierExpr) {
+                auto& arrId = static_cast<IdentifierExpr&>(*idxExpr.callee);
+                std::string arrLower = arrId.name;
+                std::transform(arrLower.begin(), arrLower.end(), arrLower.begin(), ::tolower);
+                if (knownControlArrays_.count(arrLower)) {
+                    auto itCtrl = knownFormControls_.find(arrLower);
+                    if (itCtrl != knownFormControls_.end()) {
+                        std::string writeFn = getControlPropWriteFn(itCtrl->second, maExpr.memberName);
+                        if (!writeFn.empty()) {
+                            emitExpr(*node.value);
+                            std::string valExpr = std::move(lastExpr_);
+                            std::string idxArg;
+                            if (!idxExpr.positional.empty()) {
+                                emitExpr(*idxExpr.positional[0]);
+                                idxArg = std::move(lastExpr_);
+                                // Re-emit value because we just clobbered lastExpr_
+                                emitExpr(*node.value);
+                                valExpr = std::move(lastExpr_);
+                            } else {
+                                idxArg = "0";
+                            }
+                            c_.emitLine(writeFn + "(vb6_CtrlArr_GetAt(&vb6_arr_" + cIdent(arrId.name) + ", " + idxArg + "), " + valExpr + ");  /* Control Array Property */");
+                            return;
+                        }
+                    }
+                }
+            }
+        }
+        // P7.5: 非数组控件属性写入 ctrl.Property = value
         if (maExpr.object && maExpr.object->kind == ASTNodeKind::IdentifierExpr) {
             auto& objId = static_cast<IdentifierExpr&>(*maExpr.object);
             std::string objLower = objId.name;
@@ -1942,8 +2002,8 @@ void CCodeGen::visit(AssignmentStmt& node) {
                     c_.emitLine(writeFn + "(vb6_hwnd_" + cIdent(objId.name) + ", " + valExpr + ");  /* Control Property */");
                     return;
                 }
-                // 未知属性: 警告并继续走普通赋值 (可能无法编译)
-                diag_.warn(DiagnosticID::CodeGenUnsupportedFeature, SourceLocation{}, "P7.5: Unknown control property write '" + objId.name + "." + maExpr.memberName +
+                diag_.warn(DiagnosticID::CodeGenUnsupportedFeature, SourceLocation{},
+                    std::string("P7.5: Unknown control property write '") + objId.name + "." + maExpr.memberName +
                     "' for control type, generating struct field access (may not compile)");
             }
         }
@@ -2208,9 +2268,40 @@ void CCodeGen::visit(SetStmt& node) {
 void CCodeGen::visit(LetStmt& node) {
     if (!node.target || !node.value) return;
 
-    // P7.5: 控件属性写入 (Let语句)
+    // P7.5+P7.6: 控件属性写入 (Let语句)
     if (node.target->kind == ASTNodeKind::MemberAccessExpr) {
         auto& maExpr = static_cast<MemberAccessExpr&>(*node.target);
+        // P7.6: 控件数组属性写入 ctrlArr(idx).Property = value
+        if (maExpr.object && maExpr.object->kind == ASTNodeKind::IndexOrCallExpr) {
+            auto& idxExpr = static_cast<IndexOrCallExpr&>(*maExpr.object);
+            if (idxExpr.callee && idxExpr.callee->kind == ASTNodeKind::IdentifierExpr) {
+                auto& arrId = static_cast<IdentifierExpr&>(*idxExpr.callee);
+                std::string arrLower = arrId.name;
+                std::transform(arrLower.begin(), arrLower.end(), arrLower.begin(), ::tolower);
+                if (knownControlArrays_.count(arrLower)) {
+                    auto itCtrl = knownFormControls_.find(arrLower);
+                    if (itCtrl != knownFormControls_.end()) {
+                        std::string writeFn = getControlPropWriteFn(itCtrl->second, maExpr.memberName);
+                        if (!writeFn.empty()) {
+                            emitExpr(*node.value);
+                            std::string valExpr = std::move(lastExpr_);
+                            std::string idxArg;
+                            if (!idxExpr.positional.empty()) {
+                                emitExpr(*idxExpr.positional[0]);
+                                idxArg = std::move(lastExpr_);
+                                emitExpr(*node.value);
+                                valExpr = std::move(lastExpr_);
+                            } else {
+                                idxArg = "0";
+                            }
+                            c_.emitLine(writeFn + "(vb6_CtrlArr_GetAt(&vb6_arr_" + cIdent(arrId.name) + ", " + idxArg + "), " + valExpr + ");  /* Let Control Array Property */");
+                            return;
+                        }
+                    }
+                }
+            }
+        }
+        // P7.5: 非数组控件属性写入
         if (maExpr.object && maExpr.object->kind == ASTNodeKind::IdentifierExpr) {
             auto& objId = static_cast<IdentifierExpr&>(*maExpr.object);
             std::string objLower = objId.name;
@@ -4020,6 +4111,7 @@ void CCodeGen::emitFormFramework(const FrmFormDesc& frmDesc, Module& module) {
     std::string wndProc = "vb6_form_wndproc_" + cIdent(formName);  // WndProc函数名
     std::string createFn = "vb6_form_create_" + cIdent(formName);  // 控件创建函数名
     std::string showFn = "vb6_form_show_" + cIdent(formName);      // Show函数名
+    int ctrlId = 0;  // P7.6: 控件ID计数器(在WM_COMMAND和CreateControls中复用)
 
     // --- 提取窗体属性 ---
     std::string caption = formName;  // 默认标题=窗体名
@@ -4042,17 +4134,41 @@ void CCodeGen::emitFormFramework(const FrmFormDesc& frmDesc, Module& module) {
     it = frmDesc.formControl.properties.find("StartUpPosition");
     if (it != frmDesc.formControl.properties.end()) startupPos = (int)it->second.intValue;
 
-    // --- P7.5: 填充已知控件名映射 (用于识别 ctrl.Property 属性访问) ---
+    // --- P7.5+P7.6: 填充已知控件名映射 + 检测控件数组 ---
     {
         std::string formNameLower = formName;
         std::transform(formNameLower.begin(), formNameLower.end(), formNameLower.begin(), ::tolower);
         knownFormName_ = formNameLower;
-        // 窗体自身也可以有属性访问: Form1.Caption → vb6_GetControlText(vb6_hwnd_Form1)
         knownFormControls_[formNameLower] = FrmControlType::Form;
+
+        // P7.6: 先扫描控件数组 (同名控件出现多次 = 数组)
+        std::unordered_map<std::string, int> ctrlNameCount;
         for (const auto& ctrl : frmDesc.formControl.children) {
             std::string ctrlNameLower = ctrl.controlName;
             std::transform(ctrlNameLower.begin(), ctrlNameLower.end(), ctrlNameLower.begin(), ::tolower);
+            ctrlNameCount[ctrlNameLower]++;
             knownFormControls_[ctrlNameLower] = ctrl.controlType;
+        }
+        for (const auto& kv : ctrlNameCount) {
+            if (kv.second > 1) {
+                knownControlArrays_[kv.first] = true;
+            }
+        }
+
+        // P7.6: 构建控件ID→Index映射 (WM_COMMAND事件分发用)
+        {
+            int tempId = 100;
+            for (const auto& ctrl : frmDesc.formControl.children) {
+                std::string ctrlNameLower = ctrl.controlName;
+                std::transform(ctrlNameLower.begin(), ctrlNameLower.end(), ctrlNameLower.begin(), ::tolower);
+                if (knownControlArrays_.count(ctrlNameLower) && ctrl.index >= 0) {
+                    auto& idxMap = controlIdToIndexMap_[ctrlNameLower];
+                    int idSlot = tempId - 100;
+                    while ((int)idxMap.size() <= idSlot) idxMap.push_back(-1);
+                    idxMap[idSlot] = ctrl.index;
+                }
+                tempId++;
+            }
         }
     }
 
@@ -4063,11 +4179,20 @@ void CCodeGen::emitFormFramework(const FrmFormDesc& frmDesc, Module& module) {
     // 窗体句柄变量
     h_.emitLine("static void* vb6_hwnd_" + cIdent(formName) + " = NULL;");
 
-    // 控件句柄变量
-    for (const auto& ctrl : frmDesc.formControl.children) {
-        if (FrmParser::controlTypeToWin32Class(ctrl.controlType)) {
-            // 可见控件有HWND
-            h_.emitLine("static void* vb6_hwnd_" + cIdent(ctrl.controlName) + " = NULL;");
+    // 控件句柄变量 (P7.6: 数组控件使用vb6_CtrlArr, 非数组使用void*)
+    {
+        std::unordered_set<std::string> emitted;
+        for (const auto& ctrl : frmDesc.formControl.children) {
+            std::string ctrlNameLower = ctrl.controlName;
+            std::transform(ctrlNameLower.begin(), ctrlNameLower.end(), ctrlNameLower.begin(), ::tolower);
+            if (emitted.count(ctrlNameLower)) continue;
+            if (!FrmParser::controlTypeToWin32Class(ctrl.controlType)) continue;
+            if (knownControlArrays_.count(ctrlNameLower)) {
+                h_.emitLine("static vb6_CtrlArr vb6_arr_" + cIdent(ctrl.controlName) + ";");
+            } else {
+                h_.emitLine("static void* vb6_hwnd_" + cIdent(ctrl.controlName) + " = NULL;");
+            }
+            emitted.insert(ctrlNameLower);
         }
     }
 
@@ -4123,7 +4248,7 @@ void CCodeGen::emitFormFramework(const FrmFormDesc& frmDesc, Module& module) {
     c_.dedent();
     c_.emitLine("}");
 
-    // WM_COMMAND: 按钮点击等
+    // WM_COMMAND: 按钮点击等 (P7.6: 支持控件数组Index参数)
     c_.emitLine("case WM_COMMAND: {");
     c_.indent();
     c_.emitLine("int id = LOWORD(wParam);");
@@ -4131,21 +4256,25 @@ void CCodeGen::emitFormFramework(const FrmFormDesc& frmDesc, Module& module) {
     c_.emitLine("(void)code;");
 
     // 为每个CommandButton/CheckBox/OptionButton生成WM_COMMAND处理
-    int ctrlId = 100;
+    ctrlId = 100;
     for (const auto& ctrl : frmDesc.formControl.children) {
-        if (ctrl.controlType == FrmControlType::CommandButton) {
+        std::string ctrlNameLower = ctrl.controlName;
+        std::transform(ctrlNameLower.begin(), ctrlNameLower.end(), ctrlNameLower.begin(), ::tolower);
+        bool isArrayCtrl = knownControlArrays_.count(ctrlNameLower) > 0;
+
+        if (ctrl.controlType == FrmControlType::CommandButton ||
+            ctrl.controlType == FrmControlType::CheckBox ||
+            ctrl.controlType == FrmControlType::OptionButton) {
             std::string clickFn = cProcName(ctrl.controlName + "_Click", AccessLevel::Private);
             c_.emitLine("if (id == " + std::to_string(ctrlId) + ") {");
             c_.indent();
-            c_.emitLine("{ extern void " + clickFn + "(); " + clickFn + "(); }");
-            c_.dedent();
-            c_.emitLine("}");
-        }
-        if (ctrl.controlType == FrmControlType::CheckBox || ctrl.controlType == FrmControlType::OptionButton) {
-            std::string clickFn = cProcName(ctrl.controlName + "_Click", AccessLevel::Private);
-            c_.emitLine("if (id == " + std::to_string(ctrlId) + ") {");
-            c_.indent();
-            c_.emitLine("{ extern void " + clickFn + "(); " + clickFn + "(); }");
+            if (isArrayCtrl) {
+                // 控件数组: 事件处理带Index参数
+                std::string idxVar = "vb6_idx_" + std::to_string(ctrl.index >= 0 ? ctrl.index : 0);
+                c_.emitLine("{ int16_t " + idxVar + " = " + std::to_string(ctrl.index >= 0 ? ctrl.index : 0) + "; extern void " + clickFn + "(int16_t*); " + clickFn + "(&" + idxVar + "); }");
+            } else {
+                c_.emitLine("{ extern void " + clickFn + "(); " + clickFn + "(); }");
+            }
             c_.dedent();
             c_.emitLine("}");
         }
@@ -4154,6 +4283,7 @@ void CCodeGen::emitFormFramework(const FrmFormDesc& frmDesc, Module& module) {
     c_.emitLine("break;");
     c_.dedent();
     c_.emitLine("}");
+
 
     // WM_CLOSE: 调用Form_Unload判断是否允许关闭
     c_.emitLine("case WM_CLOSE: {");
@@ -4206,6 +4336,19 @@ void CCodeGen::emitFormFramework(const FrmFormDesc& frmDesc, Module& module) {
     c_.emitLine("vb6_ResetControlId();");
     c_.emitBlank();
 
+    // P7.6: 初始化控件数组
+    for (const auto& kv : knownControlArrays_) {
+        // Find the original control name (need non-lowered version)
+        for (const auto& ctrl : frmDesc.formControl.children) {
+            std::string ctrlNameLower = ctrl.controlName;
+            std::transform(ctrlNameLower.begin(), ctrlNameLower.end(), ctrlNameLower.begin(), ::tolower);
+            if (ctrlNameLower == kv.first) {
+                c_.emitLine("vb6_CtrlArr_Init(&vb6_arr_" + cIdent(ctrl.controlName) + ");");
+                break;
+            }
+        }
+    }
+    c_.emitBlank();
     // 为每个控件生成CreateWindow调用
     ctrlId = 100;
     for (const auto& ctrl : frmDesc.formControl.children) {
@@ -4297,14 +4440,26 @@ void CCodeGen::emitFormFramework(const FrmFormDesc& frmDesc, Module& module) {
         }
 
         // 生成vb6_CreateControl调用
-        c_.emitLine("vb6_hwnd_" + cIdent(ctrl.controlName) + " = vb6_CreateControl(");
-        c_.indent();
-        c_.emitLine("\"" + std::string(win32Class) + "\", \"" + createCaption + "\",");
-        c_.emitLine(std::to_string(style) + "L, " + std::to_string(exStyle) + "L,");
-        c_.emitLine(std::to_string(left) + ", " + std::to_string(top) + ", "
-                   + std::to_string(width) + ", " + std::to_string(height) + ",");
-        c_.emitLine(std::to_string(ctrlId) + ", hwnd, hInstance);");
-        c_.dedent();
+        // 生成vb6_CreateControl调用 (P7.6: 数组控件用CtrlArr_SetAt)
+        {
+            std::string ctrlNameLower = ctrl.controlName;
+            std::transform(ctrlNameLower.begin(), ctrlNameLower.end(), ctrlNameLower.begin(), ::tolower);
+            c_.emitLine("{ void* vb6_tmp_hwnd = vb6_CreateControl(");
+            c_.indent();
+            c_.emitLine("\"" + std::string(win32Class) + "\", \"" + createCaption + "\",");
+            c_.emitLine(std::to_string(style) + "L, " + std::to_string(exStyle) + "L,");
+            c_.emitLine(std::to_string(left) + ", " + std::to_string(top) + ", "
+                       + std::to_string(width) + ", " + std::to_string(height) + ",");
+            c_.emitLine(std::to_string(ctrlId) + ", hwnd, hInstance);");
+            c_.dedent();
+            if (knownControlArrays_.count(ctrlNameLower)) {
+                // 控件数组: 存入vb6_CtrlArr
+                c_.emitLine("vb6_CtrlArr_SetAt(&vb6_arr_" + cIdent(ctrl.controlName) + ", "
+                           + std::to_string(ctrl.index >= 0 ? ctrl.index : 0) + ", vb6_tmp_hwnd); }");
+            } else {
+                c_.emitLine("vb6_hwnd_" + cIdent(ctrl.controlName) + " = vb6_tmp_hwnd; }");
+            }
+        }
 
         ctrlId++;
     }

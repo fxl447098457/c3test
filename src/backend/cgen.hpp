@@ -271,6 +271,15 @@ private:
     // P7.5: 窗体名 (小写)，用于识别 Form.Caption 等窗体自身属性
     std::string knownFormName_;
 
+
+    // P7.6: 控件数组名集合 (小写控件名 → 是否为数组)
+    // 同名控件出现多次时标记为数组, 生成 vb6_CtrlArr 而非 void* HWND
+    std::unordered_map<std::string, bool> knownControlArrays_;
+
+    // P7.6: 控件数组名 → 控件ID映射 (控件ID → 数组Index, 用于事件分发)
+    // key=小写控件名, value=vector<int>按控件ID顺序对应的Index
+    std::unordered_map<std::string, std::vector<int>> controlIdToIndexMap_;
+
     // P6.6: ActiveX DLL模式
     bool isDll_ = false;                    // 编译为ActiveX DLL
     std::string dllProgId_;                  // DLL的ProgID前缀

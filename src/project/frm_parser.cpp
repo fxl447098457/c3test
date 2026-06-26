@@ -319,6 +319,10 @@ FrmControl FrmParser::parseControlBlock(
         FrmValue value;
         if (parsePropertyLine(curLine, key, value)) {
             ctrl.properties[key] = value;
+            // P7.6: Index属性设置控件数组索引
+            if (key == "Index" && value.type == FrmValueType::Integer) {
+                ctrl.index = (int)value.intValue;
+            }
         }
 
         lineIdx++;

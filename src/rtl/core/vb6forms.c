@@ -387,3 +387,100 @@ void vb6_SetControlEnabled(void* hwnd, int enabled) {
     if (!hwnd) return;
     EnableWindow((HWND)hwnd, enabled ? TRUE : FALSE);
 }
+// ============================================================
+// 控件数组 (P7.6)
+// ============================================================
+
+void vb6_CtrlArr_Init(vb6_CtrlArr* arr) {
+    int i;
+    for (i = 0; i < VB6_CTRLARR_MAX; i++) {
+        arr->hwnds[i] = NULL;
+    }
+    arr->count = 0;
+    arr->lowerBound = 0;
+    arr->upperBound = -1;
+}
+
+void vb6_CtrlArr_SetAt(vb6_CtrlArr* arr, int index, void* hwnd) {
+    if (index < 0 || index >= VB6_CTRLARR_MAX) return;
+    if (arr->hwnds[index] == NULL && hwnd != NULL) {
+        arr->count++;
+    } else if (arr->hwnds[index] != NULL && hwnd == NULL) {
+        arr->count--;
+    }
+    arr->hwnds[index] = hwnd;
+    /* 更新界 */
+    if (hwnd != NULL) {
+        if (arr->upperBound < 0 || index > arr->upperBound) arr->upperBound = index;
+        if (index < arr->lowerBound) arr->lowerBound = index;
+    }
+}
+
+void* vb6_CtrlArr_GetAt(const vb6_CtrlArr* arr, int index) {
+    if (index < 0 || index >= VB6_CTRLARR_MAX) return NULL;
+    return arr->hwnds[index];
+}
+
+int vb6_CtrlArr_GetCount(const vb6_CtrlArr* arr) {
+    return arr->count;
+}
+
+int vb6_CtrlArr_LBound(const vb6_CtrlArr* arr) {
+    return arr->lowerBound;
+}
+
+int vb6_CtrlArr_UBound(const vb6_CtrlArr* arr) {
+    return arr->upperBound;
+}
+
+void* vb6_CtrlArr_Load(vb6_CtrlArr* arr, int index, void* hParent, void* hInstance) {
+    HWND hNew, hTemplate;
+    WCHAR className[256] = {0};
+    WCHAR text[1024] = {0};
+    RECT rc;
+    DWORD style, exStyle;
+    int ctrlId;
+
+    if (index < 0 || index >= VB6_CTRLARR_MAX) return NULL;
+    if (arr->hwnds[index] != NULL) return arr->hwnds[index];  /* 已存在 */
+
+    /* 找模板: 优先index=0, 否则第一个非空 */
+    hTemplate = (HWND)vb6_CtrlArr_GetAt(arr, 0);
+    if (!hTemplate) {
+        int i;
+        for (i = 0; i < VB6_CTRLARR_MAX; i++) {
+            if (arr->hwnds[i]) { hTemplate = (HWND)arr->hwnds[i]; break; }
+        }
+    }
+    if (!hTemplate) return NULL;
+
+    /* 从模板复制窗口属性 */
+    GetClassNameW(hTemplate, className, 256);
+    GetWindowTextW(hTemplate, text, 1024);
+    GetWindowRect(hTemplate, &rc);
+    style = (DWORD)GetWindowLongPtrA(hTemplate, GWL_STYLE);
+    exStyle = (DWORD)GetWindowLongPtrA(hTemplate, GWL_EXSTYLE);
+
+    ctrlId = vb6_NextControlId();
+
+    hNew = CreateWindowExW(
+        exStyle, className, text, style,
+        rc.left, rc.top, rc.right - rc.left, rc.bottom - rc.top,
+        (HWND)hParent, (HMENU)(intptr_t)ctrlId, (HINSTANCE)hInstance, NULL
+    );
+
+    if (hNew) {
+        HFONT hFont = (HFONT)SendMessage(hTemplate, WM_GETFONT, 0, 0);
+        if (hFont) SendMessage(hNew, WM_SETFONT, (WPARAM)hFont, MAKELPARAM(FALSE, 0));
+        vb6_CtrlArr_SetAt(arr, index, (void*)hNew);
+    }
+    return (void*)hNew;
+}
+
+void vb6_CtrlArr_Unload(vb6_CtrlArr* arr, int index) {
+    if (index < 0 || index >= VB6_CTRLARR_MAX) return;
+    if (arr->hwnds[index] == NULL) return;
+    /* 不能卸载设计时创建的元素(index=0或其他初始元素) — VB6也是如此 */
+    DestroyWindow((HWND)arr->hwnds[index]);
+    vb6_CtrlArr_SetAt(arr, index, NULL);
+}

@@ -738,8 +738,13 @@ bool Driver::runSemanticAnalysis(const CompileOptions& options) {
                 sym->isBuiltin = true;
                 analyzer->symbolTable().define(std::move(sym));
             }
-            // 注册所有顶层控件名
+            // 注册控件名 (去重: 控件数组只注册一次)
+            std::unordered_set<std::string> registeredCtrls;
             for (const auto& ctrl : frmDesc.formControl.children) {
+                std::string ctrlLower = ctrl.controlName;
+                for (auto& c : ctrlLower) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+                if (registeredCtrls.count(ctrlLower)) continue;
+                registeredCtrls.insert(ctrlLower);
                 auto sym = std::make_unique<Symbol>(
                     SymbolKind::Variable, ctrl.controlName, Vb6Type::Object,
                     SourceLocation{}, AccessLevel::Public);
@@ -747,6 +752,7 @@ bool Driver::runSemanticAnalysis(const CompileOptions& options) {
                 analyzer->symbolTable().define(std::move(sym));
             }
         }
+
         bool ok = analyzer->analyze(*module);
 
         if (options.dumpSymbols) {
