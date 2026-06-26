@@ -38,7 +38,8 @@ CCodeGen::CCodeGen(Diagnostics& diag, const SymbolTable& symTab,
 
 bool CCodeGen::generate(Module& module, const std::string& baseName,
                          const std::unordered_set<std::string>& externalModules,
-                         bool isDll, const std::string& dllProgId) {
+                         bool isDll, const std::string& dllProgId,
+                         const FrmFormDesc* frmDesc) {
     currentModule_ = &module;
     baseName_ = baseName;
     moduleName_ = baseName;  // 模块名 = 输出基名（如 "MathUtils"）
@@ -63,6 +64,11 @@ bool CCodeGen::generate(Module& module, const std::string& baseName,
     h_.emitLine("#include <stdbool.h>");
     h_.emitLine("#include <wchar.h>");
     h_.emitLine("#include \"vb6rtl.h\"");
+    // P7: 窗体模块需要Win32头文件和窗体运行时
+    if (module.isFormModule) {
+        h_.emitLine("#include <windows.h>");
+        h_.emitLine("#include \"vb6forms.h\"");
+    }
     // 跨模块 #include: 引用外部模块的头文件
     // P6.5修复: 类模块只包含其他类模块的头文件，避免循环依赖
     // (标准模块包含类模块，但类模块不应包含标准模块)
@@ -177,13 +183,19 @@ bool CCodeGen::generate(Module& module, const std::string& baseName,
     }
 
     // 4. 类模块不生成模块级变量(变量已在结构体中)
-    //    标准模块: 生成变量声明
+    //    标准模块/窗体模块: 生成变量声明
     if (!isClassModule_) {
         for (auto& decl : module.declarations) {
             if (decl->kind == ASTNodeKind::VariableDecl) {
                 visit(static_cast<VariableDecl&>(*decl));
             }
         }
+    }
+
+    // === P7: 窗体模块额外代码 ===
+    // 窗体模块需要: WndProc声明、控件句柄变量、控件创建函数
+    if (module.isFormModule && frmDesc) {
+        emitFormFramework(*frmDesc, module);
     }
 
     // 5. Declare (外部函数声明)
@@ -430,29 +442,60 @@ bool CCodeGen::generate(Module& module, const std::string& baseName,
                     auto& sub = static_cast<SubDecl&>(*decl);
                     if (sub.access == AccessLevel::Public) {
                         shouldGenMain = true;
-                        // 使用第一个Public Sub作为入口
-                        c_.emitLine("int main(int argc, char* argv[]) {");
-                        c_.indent();
-                        c_.emitLine("vb6_Init();");
-                        c_.emitLine(cProcName(sub.name, sub.access) + "();");
-                        c_.emitLine("vb6_Exit();");
-                        c_.emitLine("return 0;");
-                        c_.dedent();
-                        c_.emitLine("}");
+                        // P7: 窗体模块生成WinMain, 标准模块生成main
+                        if (module.isFormModule && frmDesc) {
+                            // 窗体模块: WinMain → 显示窗体 → 消息循环
+                            std::string formName = frmDesc->formName;
+                            c_.emitLine("int WINAPI WinMain(HINSTANCE hInst, HINSTANCE hPrevInst, LPSTR lpCmdLine, int nCmdShow) {");
+                            c_.indent();
+                            c_.emitLine("(void)hPrevInst; (void)lpCmdLine; (void)nCmdShow;");
+                            c_.emitLine("vb6_Init();");
+                            c_.emitLine("vb6_SetAppInstance((void*)hInst);");
+                            c_.emitLine("vb6_form_show_" + cIdent(formName) + "(0);  /* Show form modeless */");
+                            c_.emitLine("int ret = vb6_MessageLoop();");
+                            c_.emitLine("vb6_Exit();");
+                            c_.emitLine("return ret;");
+                            c_.dedent();
+                            c_.emitLine("}");
+                        } else {
+                            c_.emitLine("int main(int argc, char* argv[]) {");
+                            c_.indent();
+                            c_.emitLine("vb6_Init();");
+                            c_.emitLine(cProcName(sub.name, sub.access) + "();");
+                            c_.emitLine("vb6_Exit();");
+                            c_.emitLine("return 0;");
+                            c_.dedent();
+                            c_.emitLine("}");
+                        }
                         break;
                     }
                 }
             }
         }
         if (shouldGenMain && hasMain) {
-            c_.emitLine("int main(int argc, char* argv[]) {");
-            c_.indent();
-            c_.emitLine("vb6_Init();");
-            c_.emitLine(cProcName("Main", AccessLevel::Public) + "();");
-            c_.emitLine("vb6_Exit();");
-            c_.emitLine("return 0;");
-            c_.dedent();
-            c_.emitLine("}");
+            // P7: 窗体模块生成WinMain, 标准模块生成main
+            if (module.isFormModule) {
+                c_.emitLine("int WINAPI WinMain(HINSTANCE hInst, HINSTANCE hPrevInst, LPSTR lpCmdLine, int nCmdShow) {");
+                c_.indent();
+                c_.emitLine("(void)hPrevInst; (void)lpCmdLine; (void)nCmdShow;");
+                c_.emitLine("vb6_Init();");
+                c_.emitLine("vb6_SetAppInstance((void*)hInst);");
+                c_.emitLine(cProcName("Main", AccessLevel::Public) + "();");
+                c_.emitLine("int ret = vb6_MessageLoop();");
+                c_.emitLine("vb6_Exit();");
+                c_.emitLine("return ret;");
+                c_.dedent();
+                c_.emitLine("}");
+            } else {
+                c_.emitLine("int main(int argc, char* argv[]) {");
+                c_.indent();
+                c_.emitLine("vb6_Init();");
+                c_.emitLine(cProcName("Main", AccessLevel::Public) + "();");
+                c_.emitLine("vb6_Exit();");
+                c_.emitLine("return 0;");
+                c_.dedent();
+                c_.emitLine("}");
+            }
         } else if (!shouldGenMain) {
                 c_.emitLine("// No entry point (library module)");
             }
@@ -787,8 +830,9 @@ void CCodeGen::visit(IdentifierExpr& node) {
     // 检查是否是当前函数名 (Function返回值赋值 = 设置返回变量)
     // 关键: 区分赋值 vs 调用。赋值左侧用返回值变量, 其他场景用函数过程名
     // AssignmentStmt::visit 会对赋值左侧做特殊替换
+    // P6.7: Property Get也使用返回值赋值语义 (Name = value → vb6_ret_Name = value)
     if (currentProc_ && lower == Symbol::toLower(currentProc_->name)
-        && currentProc_->kind == SymbolKind::Function) {
+        && (currentProc_->kind == SymbolKind::Function || currentProc_->kind == SymbolKind::PropertyGet)) {
         lastExpr_ = cProcName(currentProc_->name, currentProc_->access, currentProc_->sourceModule);
         return;
     }
@@ -1133,7 +1177,16 @@ void CCodeGen::visit(MemberAccessExpr& node) {
 
             // 优先级2: 类实例成员访问: obj.Method → vb6_Method(obj) 或 vb6_Counter_Method(obj)
             if (knownClassVars_.count(objLower)) {
-                std::string funcName = cProcName(node.memberName, memSym->access,
+                // Property需要加前缀: prop_get_/prop_let_/prop_set_
+                std::string memberCName = node.memberName;
+                if (memSym->kind == SymbolKind::PropertyGet) {
+                    memberCName = "prop_get_" + node.memberName;
+                } else if (memSym->kind == SymbolKind::PropertyLet) {
+                    memberCName = "prop_let_" + node.memberName;
+                } else if (memSym->kind == SymbolKind::PropertySet) {
+                    memberCName = "prop_set_" + node.memberName;
+                }
+                std::string funcName = cProcName(memberCName, memSym->access,
                                                   memSym->isExternal ? memSym->sourceModule : "");
                 emitExpr(*node.object);
                 std::string objExpr = std::move(lastExpr_);
@@ -1837,6 +1890,38 @@ void CCodeGen::visit(Block& node) {
 void CCodeGen::visit(AssignmentStmt& node) {
     if (!node.target || !node.value) return;
 
+    // P6.7: 检测类Property Let赋值: obj.Prop = value → vb6_prop_let_Prop(obj, value)
+    // 在emitExpr左侧前, 先检查target是否为MemberAccessExpr且成员是Property
+    if (node.target->kind == ASTNodeKind::MemberAccessExpr) {
+        auto& maExpr = static_cast<MemberAccessExpr&>(*node.target);
+        // 查找Property Let符号
+        auto* propLetSym = symTab_.lookupModuleByKind(maExpr.memberName, SymbolKind::PropertyLet);
+        if (!propLetSym) {
+            // 也尝试Property Set
+            propLetSym = symTab_.lookupModuleByKind(maExpr.memberName, SymbolKind::PropertySet);
+        }
+        if (propLetSym) {
+            // 检查对象是否是类实例变量
+            if (maExpr.object && maExpr.object->kind == ASTNodeKind::IdentifierExpr) {
+                auto& objId = static_cast<IdentifierExpr&>(*maExpr.object);
+                std::string objLower = objId.name;
+                std::transform(objLower.begin(), objLower.end(), objLower.begin(), ::tolower);
+                if (knownClassVars_.count(objLower)) {
+                    // 生成Property Let调用: vb6_prop_let_Name(obj, value)
+                    std::string prefix = (propLetSym->kind == SymbolKind::PropertySet) ? "prop_set_" : "prop_let_";
+                    std::string funcName = cProcName(prefix + maExpr.memberName, propLetSym->access,
+                                                      propLetSym->isExternal ? propLetSym->sourceModule : "");
+                    emitExpr(*maExpr.object);
+                    std::string objExpr = std::move(lastExpr_);
+                    emitExpr(*node.value);
+                    std::string valExpr = std::move(lastExpr_);
+                    c_.emitLine(funcName + "(" + objExpr + ", " + valExpr + ");  /* Property Let */");
+                    return;
+                }
+            }
+        }
+    }
+
     emitExpr(*node.target);
     std::string target = std::move(lastExpr_);
 
@@ -1858,8 +1943,9 @@ void CCodeGen::visit(AssignmentStmt& node) {
     if (isComMarker_) resolveComValue();
     std::string value = std::move(lastExpr_);
 
-    // 如果赋值目标是当前Function名 (VB6语义: 设置返回值), 替换为返回值变量
-    if (currentProc_ && currentProc_->kind == SymbolKind::Function) {
+    // 如果赋值目标是当前Function/PropertyGet名 (VB6语义: 设置返回值), 替换为返回值变量
+    if (currentProc_ && (currentProc_->kind == SymbolKind::Function ||
+                         currentProc_->kind == SymbolKind::PropertyGet)) {
         std::string procCName = cProcName(currentProc_->name, currentProc_->access, currentProc_->sourceModule);
         if (target == procCName) {
             target = currentReturnVar_;
@@ -3423,6 +3509,17 @@ void CCodeGen::visit(PropertyDecl& node) {
     std::string sig = makePropertySignature(node);
     c_.emitLine(sig + " {");
 
+    // Property Get: 设置返回值变量 (与Function相同语义)
+    if (node.propKind == ProcKind::PropertyGet) {
+        currentReturnVar_ = "vb6_ret_" + cIdent(node.name);
+        if (node.returnType) {
+            std::string retType = mapTypeRef(node.returnType.get());
+            Vb6Type retVb6Type = typeSys_.resolveTypeName(
+                static_cast<SimpleTypeRef*>(node.returnType.get())->name);
+            c_.emitLine(retType + " " + currentReturnVar_ + " = " + defaultValue(retVb6Type) + ";");
+        }
+    }
+
     if (!node.body.empty()) {
         c_.indent();
         // 类模块: 设置当前me变量为第一个参数
@@ -3434,9 +3531,14 @@ void CCodeGen::visit(PropertyDecl& node) {
 
         // Property Get: 隐式返回 vb6_ret_<propName>
         if (node.propKind == ProcKind::PropertyGet && node.returnType) {
-            c_.emitLine("return vb6_ret_" + cIdent(node.name) + ";");
+            c_.emitLine("return " + currentReturnVar_ + ";");
         }
         c_.dedent();
+    }
+
+    // 清理返回值变量
+    if (node.propKind == ProcKind::PropertyGet) {
+        currentReturnVar_ = "";
     }
 
     c_.emitLine("}");
@@ -3454,7 +3556,16 @@ void CCodeGen::visit(EventDecl& node) {
 // ============================================================
 
 std::string CCodeGen::makePropertySignature(PropertyDecl& node) {
-    std::string propName = cProcName("prop_" + node.name, node.access);
+    // Property Get/Let/Set使用不同前缀: prop_get_/prop_let_/prop_set_
+    // 避免同名Property在C层面链接冲突
+    std::string prefix;
+    switch (node.propKind) {
+        case ProcKind::PropertyGet:  prefix = "prop_get_"; break;
+        case ProcKind::PropertyLet:  prefix = "prop_let_"; break;
+        case ProcKind::PropertySet:  prefix = "prop_set_"; break;
+        default:                     prefix = "prop_get_"; break;
+    }
+    std::string propName = cProcName(prefix + node.name, node.access);
     std::string params;
 
     // 类模块: 第一个参数为 me 指针
@@ -3463,7 +3574,12 @@ std::string CCodeGen::makePropertySignature(PropertyDecl& node) {
         if (!node.params.empty()) params += ", ";
     }
 
-    params += makeParamList(node.params);
+    // 空参数列表: 类模块已有me参数时不需要"void"
+    if (node.params.empty() && isClassModule_) {
+        // params已经有me, 不追加
+    } else {
+        params += makeParamList(node.params);
+    }
 
     switch (node.propKind) {
         case ProcKind::PropertyGet: {
@@ -3471,19 +3587,13 @@ std::string CCodeGen::makePropertySignature(PropertyDecl& node) {
             return retType + " " + propName + "(" + params + ")";
         }
         case ProcKind::PropertyLet: {
-            // Property Let: 最后一个参数是赋值值
-            std::string valType = node.returnType ? mapTypeRef(node.returnType.get()) : "VARIANT";
-            if (node.params.empty()) {
-                return "void " + propName + "(" + params + (params == "void" ? "" : ", ") + valType + " vb6_let_value)";
-            }
-            return "void " + propName + "(" + params + ", " + valType + " vb6_let_value)";
+            // VB6: Property Let Name(v) — 最后一个参数v就是赋值值
+            // 不追加额外的vb6_let_value参数
+            return "void " + propName + "(" + params + ")";
         }
         case ProcKind::PropertySet: {
-            std::string valType = "void*";  // 对象引用
-            if (node.params.empty()) {
-                return "void " + propName + "(" + params + (params == "void" ? "" : ", ") + valType + " vb6_set_value)";
-            }
-            return "void " + propName + "(" + params + ", " + valType + " vb6_set_value)";
+            // VB6: Property Set Name(v) — 最后一个参数v就是对象引用
+            return "void " + propName + "(" + params + ")";
         }
         default:
             return "void " + propName + "(" + params + ")";
@@ -3640,12 +3750,16 @@ void CCodeGen::emitInterfaceVtable(Module& module) {
                     std::string methodName = prop.name.substr(ifaceName.size() + 1);
                     std::string params = makeParamList(prop.params);
                     // Property Get → Function, Property Let/Set → Sub
+                    // 使用prop_get_/prop_let_/prop_set_前缀
+                    std::string propPrefix;
                     if (prop.propKind == ProcKind::PropertyGet) {
+                        propPrefix = "prop_get_";
                         std::string retType = mapTypeRef(prop.returnType.get());
-                        methods.push_back({methodName, cProcName(prop.name, prop.access),
+                        methods.push_back({methodName, cProcName(propPrefix + prop.name, prop.access),
                                            retType, params, false});
                     } else {
-                        methods.push_back({methodName, cProcName(prop.name, prop.access),
+                        propPrefix = (prop.propKind == ProcKind::PropertySet) ? "prop_set_" : "prop_let_";
+                        methods.push_back({methodName, cProcName(propPrefix + prop.name, prop.access),
                                            "void", params, true});
                     }
                 }
@@ -3810,6 +3924,262 @@ void CCodeGen::visit(ParameterDecl& node) {
 //   5. DllRegisterServer / DllUnregisterServer
 //   6. .def导出文件
 // ============================================================
+// P7: 窗体框架代码生成
+// ============================================================
+
+void CCodeGen::emitFormFramework(const FrmFormDesc& frmDesc, Module& module) {
+    std::string formName = frmDesc.formName;
+    std::string clsName = "VB6_Form_" + cIdent(formName);    // Win32窗口类名
+    std::string wndProc = "vb6_form_wndproc_" + cIdent(formName);  // WndProc函数名
+    std::string createFn = "vb6_form_create_" + cIdent(formName);  // 控件创建函数名
+    std::string showFn = "vb6_form_show_" + cIdent(formName);      // Show函数名
+
+    // --- 提取窗体属性 ---
+    std::string caption = formName;  // 默认标题=窗体名
+    int clientHeight = 3000;  // 默认客户区高度 (缇)
+    int clientWidth = 4680;  // 默认客户区宽度 (缇)
+    int startupPos = 3;  // 默认: Windows Default
+
+    auto it = frmDesc.formControl.properties.find("Caption");
+    if (it != frmDesc.formControl.properties.end() && it->second.type == FrmValueType::String) {
+        // 去掉引号
+        std::string raw = it->second.rawText;
+        if (raw.size() >= 2 && raw.front() == '"' && raw.back() == '"') {
+            caption = raw.substr(1, raw.size() - 2);
+        }
+    }
+    it = frmDesc.formControl.properties.find("ClientHeight");
+    if (it != frmDesc.formControl.properties.end()) clientHeight = (int)it->second.intValue;
+    it = frmDesc.formControl.properties.find("ClientWidth");
+    if (it != frmDesc.formControl.properties.end()) clientWidth = (int)it->second.intValue;
+    it = frmDesc.formControl.properties.find("StartUpPosition");
+    if (it != frmDesc.formControl.properties.end()) startupPos = (int)it->second.intValue;
+
+    // --- .h文件: 声明 ---
+    h_.emitLine("// P7: Win32 Form - " + formName);
+    h_.emitBlank();
+
+    // 窗体句柄变量
+    h_.emitLine("static void* vb6_hwnd_" + cIdent(formName) + " = NULL;");
+
+    // 控件句柄变量
+    for (const auto& ctrl : frmDesc.formControl.children) {
+        if (FrmParser::controlTypeToWin32Class(ctrl.controlType)) {
+            // 可见控件有HWND
+            h_.emitLine("static void* vb6_hwnd_" + cIdent(ctrl.controlName) + " = NULL;");
+        }
+    }
+
+    h_.emitBlank();
+
+    // WndProc前向声明
+    h_.emitLine("LRESULT CALLBACK " + wndProc + "(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);");
+    // 创建函数前向声明
+    h_.emitLine("void " + createFn + "(void* hwnd, void* hInstance);");
+    // Show函数前向声明
+    h_.emitLine("void " + showFn + "(int modal);");
+    h_.emitBlank();
+
+    // --- .c文件: 实现 ---
+
+    // WndProc
+    c_.emitLine("// === " + formName + " WndProc ===");
+    c_.emitLine("LRESULT CALLBACK " + wndProc + "(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {");
+    c_.indent();
+    c_.emitLine("switch (msg) {");
+
+    // WM_CREATE: 创建控件
+    c_.indent();
+    c_.emitLine("case WM_CREATE: {");
+    c_.indent();
+    c_.emitLine("CREATESTRUCTA* cs = (CREATESTRUCTA*)lParam;");
+    c_.emitLine(createFn + "((void*)hwnd, (void*)cs->hInstance);");
+
+    // 调用VB6 Form_Load事件
+    std::string formLoadFn = cProcName("Form_Load", AccessLevel::Private);
+    c_.emitLine("{ /* Form_Load */ extern void " + formLoadFn + "(); " + formLoadFn + "(); }");
+    c_.dedent();
+    c_.emitLine("break;");
+    c_.dedent();
+
+    // WM_COMMAND: 按钮点击等
+    c_.emitLine("case WM_COMMAND: {");
+    c_.indent();
+    c_.emitLine("int id = LOWORD(wParam);");
+    c_.emitLine("int code = HIWORD(wParam);");
+    c_.emitLine("(void)code;");
+
+    // 为每个CommandButton/CheckBox/OptionButton生成WM_COMMAND处理
+    int ctrlId = 100;
+    for (const auto& ctrl : frmDesc.formControl.children) {
+        if (ctrl.controlType == FrmControlType::CommandButton) {
+            std::string clickFn = cProcName(ctrl.controlName + "_Click", AccessLevel::Private);
+            c_.emitLine("if (id == " + std::to_string(ctrlId) + ") {");
+            c_.indent();
+            c_.emitLine("{ extern void " + clickFn + "(); " + clickFn + "(); }");
+            c_.dedent();
+            c_.emitLine("}");
+        }
+        // TODO: CheckBox/OptionButton的Click事件 (BN_CLICKED)
+        ctrlId++;
+    }
+    c_.emitLine("break;");
+    c_.dedent();
+    c_.dedent();
+
+    // WM_CLOSE: 调用VB6 Form_Unload, 然后DestroyWindow
+    c_.emitLine("case WM_CLOSE: {");
+    c_.indent();
+    // 简化: 直接销毁窗口 (完整实现应调用QueryUnload事件)
+    c_.emitLine("DestroyWindow(hwnd);");
+    c_.emitLine("break;");
+    c_.dedent();
+    c_.dedent();
+
+    // WM_DESTROY: PostQuitMessage (如果是主窗体)
+    c_.emitLine("case WM_DESTROY: {");
+    c_.indent();
+    c_.emitLine("PostQuitMessage(0);");
+    c_.emitLine("break;");
+    c_.dedent();
+    c_.dedent();
+
+    // default: DefWindowProc
+    c_.emitLine("default:");
+    c_.indent();
+    c_.emitLine("return DefWindowProcA(hwnd, msg, wParam, lParam);");
+    c_.dedent();
+
+    c_.dedent();
+    c_.emitLine("}");  // switch
+    c_.emitLine("return 0;");
+    c_.dedent();
+    c_.emitLine("}");  // WndProc
+    c_.emitBlank();
+
+    // --- 控件创建函数 ---
+    c_.emitLine("// === " + formName + " CreateControls ===");
+    c_.emitLine("void " + createFn + "(void* hwnd, void* hInstance) {");
+    c_.indent();
+    c_.emitLine("(void)hwnd; (void)hInstance;");
+    c_.emitLine("vb6_ResetControlId();");
+    c_.emitBlank();
+
+    // 为每个控件生成CreateWindow调用
+    ctrlId = 100;
+    for (const auto& ctrl : frmDesc.formControl.children) {
+        const char* win32Class = FrmParser::controlTypeToWin32Class(ctrl.controlType);
+        if (!win32Class) {
+            // 不可见控件 (Timer等) — 跳过
+            ctrlId++;
+            continue;
+        }
+
+        // 提取控件属性
+        int left = 0, top = 0, width = 1000, height = 300;
+        std::string ctrlCaption = ctrl.controlName;  // 默认Caption=控件名
+        std::string ctrlText;  // TextBox的Text属性
+
+        auto propIt = ctrl.properties.find("Left");
+        if (propIt != ctrl.properties.end()) left = (int)propIt->second.intValue;
+        propIt = ctrl.properties.find("Top");
+        if (propIt != ctrl.properties.end()) top = (int)propIt->second.intValue;
+        propIt = ctrl.properties.find("Width");
+        if (propIt != ctrl.properties.end()) width = (int)propIt->second.intValue;
+        propIt = ctrl.properties.find("Height");
+        if (propIt != ctrl.properties.end()) height = (int)propIt->second.intValue;
+
+        propIt = ctrl.properties.find("Caption");
+        if (propIt != ctrl.properties.end() && propIt->second.type == FrmValueType::String) {
+            std::string raw = propIt->second.rawText;
+            if (raw.size() >= 2 && raw.front() == '"' && raw.back() == '"') {
+                ctrlCaption = raw.substr(1, raw.size() - 2);
+            }
+        }
+        propIt = ctrl.properties.find("Text");
+        if (propIt != ctrl.properties.end() && propIt->second.type == FrmValueType::String) {
+            std::string raw = propIt->second.rawText;
+            if (raw.size() >= 2 && raw.front() == '"' && raw.back() == '"') {
+                ctrlText = raw.substr(1, raw.size() - 2);
+            }
+        }
+
+        // Win32样式
+        long style = WS_CHILD | WS_VISIBLE;
+        long exStyle = 0;
+        std::string createCaption = ctrlCaption;
+
+        switch (ctrl.controlType) {
+            case FrmControlType::CommandButton:
+                style |= BS_PUSHBUTTON;
+                break;
+            case FrmControlType::TextBox:
+                style |= WS_BORDER | ES_AUTOHSCROLL;
+                createCaption = ctrlText;  // TextBox用Text而非Caption
+                break;
+            case FrmControlType::Label:
+                style |= SS_LEFT;
+                break;
+            case FrmControlType::CheckBox:
+                style |= BS_AUTOCHECKBOX;
+                break;
+            case FrmControlType::OptionButton:
+                style |= BS_AUTORADIOBUTTON;
+                break;
+            case FrmControlType::Frame:
+                style |= BS_GROUPBOX;
+                break;
+            case FrmControlType::ListBox:
+                style |= LBS_NOTIFY | WS_BORDER;
+                break;
+            case FrmControlType::ComboBox:
+                style |= CBS_DROPDOWN | WS_BORDER;
+                break;
+            default:
+                break;
+        }
+
+        // 生成vb6_CreateControl调用
+        c_.emitLine("vb6_hwnd_" + cIdent(ctrl.controlName) + " = vb6_CreateControl(");
+        c_.indent();
+        c_.emitLine("\"" + std::string(win32Class) + "\", \"" + createCaption + "\",");
+        c_.emitLine(std::to_string(style) + "L, " + std::to_string(exStyle) + "L,");
+        c_.emitLine(std::to_string(left) + ", " + std::to_string(top) + ", "
+                   + std::to_string(width) + ", " + std::to_string(height) + ",");
+        c_.emitLine(std::to_string(ctrlId) + ", hwnd, hInstance);");
+        c_.dedent();
+
+        ctrlId++;
+    }
+    c_.dedent();
+    c_.emitLine("}");  // CreateControls
+    c_.emitBlank();
+
+    // --- Show函数 ---
+    c_.emitLine("// === " + formName + " Show ===");
+    c_.emitLine("void " + showFn + "(int modal) {");
+    c_.indent();
+    c_.emitLine("void* hInst = vb6_GetAppInstance();");
+    c_.emitLine("vb6_RegisterFormClass(\"" + clsName + "\", (void*)" + wndProc + ", hInst, 0);");
+    c_.emitLine("vb6_hwnd_" + cIdent(formName) + " = vb6_CreateFormWindow(");
+    c_.indent();
+    c_.emitLine("\"" + clsName + "\", \"" + caption + "\",");
+    // StartUpPosition: 3=CW_USEDEFAULT, 1=所有者中心, 2=屏幕中心
+    if (startupPos == 3) {
+        c_.emitLine("CW_USEDEFAULT, CW_USEDEFAULT,");
+    } else {
+        c_.emitLine("0, 0,");  // 位置由后续计算
+    }
+    c_.emitLine(std::to_string(clientWidth) + ", " + std::to_string(clientHeight) + ",");
+    c_.emitLine("hInst, NULL);");
+    c_.dedent();
+    c_.emitLine("vb6_ShowForm(vb6_hwnd_" + cIdent(formName) + ", modal);");
+    c_.dedent();
+    c_.emitLine("}");  // Show
+    c_.emitBlank();
+}
+
+// ============================================================
 
 void CCodeGen::emitActiveXDll(Module& module) {
     // 收集所有instancing >= PublicNotCreatable的类模块
@@ -3938,7 +4308,17 @@ void CCodeGen::emitActiveXDll(Module& module) {
             };
 
             // 生成调用 (Private方法也有static前缀, 但Public在多模块模式下是vb6_Mod_Method)
-            std::string procName = cProcName(methodName, methodSym->access);
+            // Property需要加前缀: prop_get_/prop_let_/prop_set_
+            std::string procName;
+            if (methodSym->kind == SymbolKind::PropertyGet) {
+                procName = cProcName("prop_get_" + methodName, methodSym->access);
+            } else if (methodSym->kind == SymbolKind::PropertyLet) {
+                procName = cProcName("prop_let_" + methodName, methodSym->access);
+            } else if (methodSym->kind == SymbolKind::PropertySet) {
+                procName = cProcName("prop_set_" + methodName, methodSym->access);
+            } else {
+                procName = cProcName(methodName, methodSym->access);
+            }
 
             if (methodSym->kind == SymbolKind::Function) {
                 // Function: 返回值写入result
@@ -4193,7 +4573,16 @@ std::string CCodeGen::generateDllEntry(const std::string& progId) {
         // 类的方法函数前向声明
         for (size_t mi = 0; mi < cc.publicMethodNames.size(); mi++) {
             Symbol* methodSym = cc.publicMethodSyms[mi];
-            std::string procName = cProcName(cc.publicMethodNames[mi], methodSym->access);
+            // Property需要加前缀: prop_get_/prop_let_/prop_set_
+            std::string methodCName = cc.publicMethodNames[mi];
+            if (methodSym->kind == SymbolKind::PropertyGet) {
+                methodCName = "prop_get_" + methodCName;
+            } else if (methodSym->kind == SymbolKind::PropertyLet) {
+                methodCName = "prop_let_" + methodCName;
+            } else if (methodSym->kind == SymbolKind::PropertySet) {
+                methodCName = "prop_set_" + methodCName;
+            }
+            std::string procName = cProcName(methodCName, methodSym->access);
             if (methodSym->kind == SymbolKind::Function) {
                 std::string retType = mapType(methodSym->type);
                 std::string params = "struct " + clsStruct + "*";
@@ -4265,7 +4654,16 @@ std::string CCodeGen::generateDllEntry(const std::string& progId) {
                 }
             }
 
-            std::string procName = cProcName(methodName, methodSym->access);
+            // Property需要加前缀: prop_get_/prop_let_/prop_set_
+            std::string methodCName = methodName;
+            if (methodSym->kind == SymbolKind::PropertyGet) {
+                methodCName = "prop_get_" + methodCName;
+            } else if (methodSym->kind == SymbolKind::PropertyLet) {
+                methodCName = "prop_let_" + methodCName;
+            } else if (methodSym->kind == SymbolKind::PropertySet) {
+                methodCName = "prop_set_" + methodCName;
+            }
+            std::string procName = cProcName(methodCName, methodSym->access);
 
             if (methodSym->kind == SymbolKind::Function) {
                 std::string retType = mapType(methodSym->type);

@@ -115,7 +115,15 @@ bool SemanticAnalyzer::analyze(Module& module) {
                 }
                 case ASTNodeKind::PropertyDecl: {
                     auto& p = static_cast<PropertyDecl&>(*decl);
-                    classSym->memberNames.push_back(p.name);
+                    // 同名Property Get/Let/Set只加一次memberNames
+                    {
+                        std::string lower = Symbol::toLower(p.name);
+                        bool found = false;
+                        for (auto& mn : classSym->memberNames) {
+                            if (Symbol::toLower(mn) == lower) { found = true; break; }
+                        }
+                        if (!found) classSym->memberNames.push_back(p.name);
+                    }
                     break;
                 }
                 case ASTNodeKind::EventDecl: {
@@ -562,7 +570,15 @@ void SemanticAnalyzer::visit(PropertyDecl& node) {
 
         symTab_.define(std::move(sym));
     } else {
-        auto* sym = symTab_.lookupModule(node.name);
+        // Pass2: 分析过程体 — 使用lookupModuleByKind精确查找同名Property
+        SymbolKind sk;
+        switch (node.propKind) {
+            case ProcKind::PropertyGet:  sk = SymbolKind::PropertyGet; break;
+            case ProcKind::PropertyLet:  sk = SymbolKind::PropertyLet; break;
+            case ProcKind::PropertySet:  sk = SymbolKind::PropertySet; break;
+            default:                     sk = SymbolKind::PropertyGet; break;
+        }
+        auto* sym = symTab_.lookupModuleByKind(node.name, sk);
         if (!sym) return;
 
         currentProc_ = sym;

@@ -8,18 +8,61 @@ namespace vb6c3 {
 // ============================================================
 
 bool Scope::define(std::unique_ptr<Symbol> sym) {
-    auto it = symbols_.find(sym->lowerName);
+    // 使用storageKey作为键: Property Get/Let/Set加后缀区分同名共存
+    std::string key = sym->storageKey();
+    auto it = symbols_.find(key);
     if (it != symbols_.end()) {
         return false;  // 重定义
     }
-    symbols_[sym->lowerName] = std::move(sym);
+    symbols_[key] = std::move(sym);
     return true;
 }
 
 Symbol* Scope::lookupLocal(const std::string& name) const {
     std::string lower = Symbol::toLower(name);
+    // 先查找非Property符号 (key == lowerName)
     auto it = symbols_.find(lower);
     if (it != symbols_.end()) {
+        return it->second.get();
+    }
+    // 再查找Property Get (key == lowerName + "$pg") - 默认返回Property Get
+    it = symbols_.find(lower + "$pg");
+    if (it != symbols_.end()) {
+        return it->second.get();
+    }
+    // 再查找Property Let
+    it = symbols_.find(lower + "$pl");
+    if (it != symbols_.end()) {
+        return it->second.get();
+    }
+    // 再查找Property Set
+    it = symbols_.find(lower + "$ps");
+    if (it != symbols_.end()) {
+        return it->second.get();
+    }
+    return nullptr;
+}
+
+Symbol* Scope::lookupLocalByKind(const std::string& name, SymbolKind kind) const {
+    std::string lower = Symbol::toLower(name);
+    if (isPropertyKind(kind)) {
+        // Property: 使用带后缀的键精确查找
+        std::string key = lower;
+        switch (kind) {
+            case SymbolKind::PropertyGet:  key += "$pg"; break;
+            case SymbolKind::PropertyLet:  key += "$pl"; break;
+            case SymbolKind::PropertySet:  key += "$ps"; break;
+            default: break;
+        }
+        auto it = symbols_.find(key);
+        if (it != symbols_.end()) {
+            return it->second.get();
+        }
+        return nullptr;
+    }
+    // 非Property: 直接用lowerName
+    auto it = symbols_.find(lower);
+    if (it != symbols_.end() && it->second->kind == kind) {
         return it->second.get();
     }
     return nullptr;
@@ -89,6 +132,9 @@ bool SymbolTable::define(std::unique_ptr<Symbol> sym) {
         }
     }
 
+    // Property Get/Let/Set允许同名共存 (VB6合法: Property Get Name + Property Let Name)
+    // Scope::define已用storageKey区分, 这里只需确认不报错即可
+
     if (!current_->define(std::move(sym))) {
         diag_.error(DiagnosticID::SemDuplicateDeclaration, loc,
             "重复声明: '" + lowerName + "'");
@@ -107,9 +153,19 @@ Symbol* SymbolTable::lookupLocal(const std::string& name) const {
     return current_->lookupLocal(name);
 }
 
+Symbol* SymbolTable::lookupLocalByKind(const std::string& name, SymbolKind kind) const {
+    if (!current_) return nullptr;
+    return current_->lookupLocalByKind(name, kind);
+}
+
 Symbol* SymbolTable::lookupModule(const std::string& name) const {
     if (!moduleScope_) return nullptr;
     return moduleScope_->lookupLocal(name);
+}
+
+Symbol* SymbolTable::lookupModuleByKind(const std::string& name, SymbolKind kind) const {
+    if (!moduleScope_) return nullptr;
+    return moduleScope_->lookupLocalByKind(name, kind);
 }
 
 int SymbolTable::scopeDepth() const {
@@ -141,12 +197,13 @@ void SymbolTable::defineExternal(std::unique_ptr<Symbol> sym) {
     // 在模块级作用域定义外部符号
     // 如果已存在同名符号（本地已有定义），跳过不覆盖
     if (!moduleScope_) return;
-    auto it = moduleScope_->symbols_.find(sym->lowerName);
+    std::string key = sym->storageKey();
+    auto it = moduleScope_->symbols_.find(key);
     if (it != moduleScope_->symbols_.end()) {
         // 本地已有定义，不注入外部符号
         return;
     }
-    moduleScope_->symbols_[sym->lowerName] = std::move(sym);
+    moduleScope_->symbols_[key] = std::move(sym);
 }
 
 std::vector<const Symbol*> SymbolTable::getPublicSymbols() const {
@@ -159,7 +216,10 @@ std::vector<const Symbol*> SymbolTable::getPublicSymbols() const {
                 sym->kind == SymbolKind::Function ||
                 sym->kind == SymbolKind::Variable ||
                 sym->kind == SymbolKind::Constant ||
-                sym->kind == SymbolKind::Class) {
+                sym->kind == SymbolKind::Class ||
+                sym->kind == SymbolKind::PropertyGet ||
+                sym->kind == SymbolKind::PropertyLet ||
+                sym->kind == SymbolKind::PropertySet) {
                 result.push_back(sym.get());
             }
         }

@@ -8,6 +8,7 @@
 #include "semantics/symbol_table.hpp"
 #include "semantics/type_system.hpp"
 #include "common/diagnostics.hpp"
+#include "project/frm_parser.hpp"
 #include <string>
 #include <vector>
 #include <sstream>
@@ -68,9 +69,11 @@ public:
     // externalModules: 当前模块引用的外部模块基名列表 (用于生成 #include)
     // isDll: P6.6 ActiveX DLL模式, 生成COM服务端代码
     // dllProgId: P6.6 DLL的ProgID前缀
+    // frmDesc: P7 窗体描述 (仅.frm有效, nullptr=非窗体模块)
     bool generate(Module& module, const std::string& baseName,
                   const std::unordered_set<std::string>& externalModules = {},
-                  bool isDll = false, const std::string& dllProgId = "");
+                  bool isDll = false, const std::string& dllProgId = "",
+                  const FrmFormDesc* frmDesc = nullptr);
 
     // P6.6: 单独生成ActiveX DLL入口文件 (dll_entry.c)
     // 当DLL工程只有类模块(无标准模块)时, 由Driver调用此方法生成DLL导出代码
@@ -321,6 +324,9 @@ private:
 
     // P6.6: 生成ActiveX DLL COM服务端代码 (DllGetClassObject/Register/Unregister等)
     void emitActiveXDll(Module& module);
+
+    // P7: 生成Win32窗体框架代码 (WndProc + 控件创建 + 消息映射)
+    void emitFormFramework(const FrmFormDesc& frmDesc, Module& module);
 
     // 生成类方法函数体中的Me引用名
     std::string classMeParam() const;

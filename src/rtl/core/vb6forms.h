@@ -1,0 +1,107 @@
+#pragma once
+// VB6 Win32窗体运行时 (P7)
+// 提供Win32窗口注册、创建、消息循环、控件管理等基础功能
+// 编译器生成的C代码调用此运行时API
+
+#ifdef _WIN32
+#include <windows.h>
+#endif
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+// ============================================================
+// 窗体框架
+// ============================================================
+
+// 注册窗体窗口类 (内部调用RegisterClassEx)
+// className: 窗口类名 (如 "VB6_Form1")
+// wndProc: 窗口过程
+// hInstance: 应用实例
+// iconResId: 图标资源ID (0=默认)
+// 返回: 0=成功, -1=失败
+int vb6_RegisterFormClass(const char* className, void* wndProc, void* hInstance, int iconResId);
+
+// 创建窗体窗口
+// className: 已注册的窗口类名
+// formName: 窗口标题
+// x, y: 窗口位置 (CW_USEDEFAULT表示系统默认)
+// width, height: 客户区大小 (缇, 1缇=1/15像素)
+// hInstance: 应用实例
+// userData: 传递给WM_CREATE的用户数据指针
+// 返回: 窗口句柄 (HWND)
+void* vb6_CreateFormWindow(const char* className, const char* formName,
+    int x, int y, int width, int height, void* hInstance, void* userData);
+
+// VB6缇(Twip)转像素
+// VB6坐标单位: 1英寸=1440缇, 1像素=15缇 (96DPI标准)
+int vb6_TwipToX(int twips);
+int vb6_TwipToY(int twips);
+
+// ============================================================
+// 控件创建
+// ============================================================
+
+// 创建子控件 (通用)
+// win32Class: Win32窗口类名 (BUTTON, EDIT, STATIC, etc.)
+// controlName: 控件名 (用于SetWindowText和WM_COMMAND标识)
+// style: 窗口样式 (WS_CHILD | WS_VISIBLE | ...)
+// exStyle: 扩展样式
+// x, y, width, height: 位置和大小 (缇)
+// id: 控件ID (用于WM_COMMAND)
+// hParent: 父窗口句柄
+// hInstance: 应用实例
+// 返回: 控件窗口句柄
+void* vb6_CreateControl(const char* win32Class, const char* controlName,
+    long style, long exStyle,
+    int x, int y, int width, int height,
+    int id, void* hParent, void* hInstance);
+
+// 控件ID分配器 (每个窗体独立ID空间)
+int vb6_NextControlId(void);
+
+// 重置控件ID计数器 (新窗体开始时调用)
+void vb6_ResetControlId(void);
+
+// ============================================================
+// 消息循环
+// ============================================================
+
+// 标准VB6消息循环 (GetMessage + TranslateMessage + DispatchMessage)
+// 返回: WM_QUIT的wParam值
+int vb6_MessageLoop(void);
+
+// DoEvents — 处理消息队列中的待处理消息
+// 返回: 待处理消息数
+int vb6_DoEvents(void);
+
+// ============================================================
+// 窗体事件桥接
+// ============================================================
+
+// 设置窗体用户数据 (将VB6窗体对象指针存入GWLP_USERDATA)
+void vb6_SetFormUserData(void* hwnd, void* userData);
+
+// 获取窗体用户数据
+void* vb6_GetFormUserData(void* hwnd);
+
+// ============================================================
+// 窗体工具函数
+// ============================================================
+
+// 获取应用程序实例句柄
+void* vb6_GetAppInstance(void);
+
+// 设置应用程序实例句柄 (WinMain中调用)
+void vb6_SetAppInstance(void* hInstance);
+
+// 显示窗体 (vbModeless=0, vbModal=1)
+void vb6_ShowForm(void* hwnd, int modal);
+
+// 卸载窗体
+void vb6_UnloadForm(void* hwnd);
+
+#ifdef __cplusplus
+}
+#endif

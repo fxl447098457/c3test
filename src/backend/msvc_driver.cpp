@@ -99,6 +99,9 @@ bool MsvcDriver::compileAndLink(const MsvcDriverOptions& options) {
         if (options.isDll) {
             cmd << " \"" << options.rtlDir << "\\vb6comserver.c\"";  // P6.6: COM服务端运行时
         }
+        if (options.isGui) {
+            cmd << " \"" << options.rtlDir << "\\vb6forms.c\"";  // P7: 窗体运行时
+        }
     }
 
     // 链接选项
@@ -109,6 +112,9 @@ bool MsvcDriver::compileAndLink(const MsvcDriverOptions& options) {
             cmd << " /DEF:\"" << options.defFile << "\"";
         }
         cmd << " ole32.lib oleaut32.lib uuid.lib advapi32.lib";
+    } else if (options.isGui) {
+        // P7: GUI程序 (Win32窗口)
+        cmd << " /link /SUBSYSTEM:WINDOWS user32.lib gdi32.lib ole32.lib oleaut32.lib uuid.lib";
     } else {
         // 控制台程序
         cmd << " /link /SUBSYSTEM:CONSOLE ole32.lib oleaut32.lib uuid.lib";

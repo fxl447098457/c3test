@@ -41,6 +41,13 @@ enum class SymbolKind : uint8_t {
     ComInterface,   // COM 接口 (来自TypeLib, 前期绑定)
 };
 
+// 判断是否为Property类型
+inline bool isPropertyKind(SymbolKind k) {
+    return k == SymbolKind::PropertyGet ||
+           k == SymbolKind::PropertyLet ||
+           k == SymbolKind::PropertySet;
+}
+
 // ============================================================
 // 符号
 // ============================================================
@@ -139,6 +146,19 @@ struct Symbol {
         return result;
     }
 
+    // 存储键: Property Get/Let/Set加后缀区分同名共存, 其他用lowerName
+    std::string storageKey() const {
+        if (isPropertyKind(kind)) {
+            switch (kind) {
+                case SymbolKind::PropertyGet:  return lowerName + "$pg";
+                case SymbolKind::PropertyLet:  return lowerName + "$pl";
+                case SymbolKind::PropertySet:  return lowerName + "$ps";
+                default: break;
+            }
+        }
+        return lowerName;
+    }
+
     const char* kindName() const {
         switch (kind) {
             case SymbolKind::Variable:        return "Variable";
@@ -180,11 +200,14 @@ public:
     Scope(ScopeKind kind, Scope* parent = nullptr)
         : kind_(kind), parent_(parent) {}
 
-    // 定义符号, 返回false如果已存在同名符号
+    // 定义符号, 返回false如果已存在同名符号(Property Get/Let/Set允许同名共存)
     bool define(std::unique_ptr<Symbol> sym);
 
-    // 按名称查找 (本作用域, 不递归)
+    // 按名称查找 (本作用域, 不递归) - 返回第一个匹配
     Symbol* lookupLocal(const std::string& name) const;
+
+    // 按名称+类别查找 (本作用域, 不递归) - 精确匹配
+    Symbol* lookupLocalByKind(const std::string& name, SymbolKind kind) const;
 
     // 按名称查找 (递归向上搜索所有祖先作用域)
     Symbol* lookup(const std::string& name) const;
@@ -200,7 +223,7 @@ public:
 private:
     ScopeKind kind_;
     Scope* parent_;
-    std::unordered_map<std::string, std::unique_ptr<Symbol>> symbols_;  // key是小写名
+    std::unordered_map<std::string, std::unique_ptr<Symbol>> symbols_;  // key=storageKey()
 };
 
 // ============================================================
@@ -230,8 +253,14 @@ public:
     // 查找符号 (仅当前作用域)
     Symbol* lookupLocal(const std::string& name) const;
 
+    // 查找符号 (按名称+类别, 仅当前作用域)
+    Symbol* lookupLocalByKind(const std::string& name, SymbolKind kind) const;
+
     // 查找模块级符号
     Symbol* lookupModule(const std::string& name) const;
+
+    // 查找模块级符号 (按名称+类别, 用于Property Get/Let精确查找)
+    Symbol* lookupModuleByKind(const std::string& name, SymbolKind kind) const;
 
     // 当前作用域深度 (0=模块级)
     int scopeDepth() const;

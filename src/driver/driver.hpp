@@ -5,9 +5,11 @@
 #include "semantics/symbol_table.hpp"
 #include "semantics/type_system.hpp"
 #include "com/typelib_parser.hpp"
+#include "project/frm_parser.hpp"
 #include <string>
 #include <vector>
 #include <memory>
+#include <map>
 
 namespace vb6c3 {
 
@@ -58,6 +60,9 @@ struct CompileOptions {
     // ActiveX DLL (P6.6)
     bool isDll = false;                      // 编译为ActiveX DLL (而非EXE)
     std::string dllProgId;                   // DLL的ProgID前缀 (如 "MyLib")
+
+    // 窗体调试 (P7)
+    bool dumpFrm = false;                    // 输出.frm窗体描述解析结果
 };
 
 // 编译结果
@@ -94,8 +99,8 @@ private:
     // 语义分析产出 (供代码生成使用)
     std::vector<std::unique_ptr<SemanticAnalyzer>> analyzers_;
 
-    // TypeLib解析器 (P6.3, 编译期加载COM类型信息)
-    std::unique_ptr<TypeLibParser> typelibParser_;
+    // 窗体描述 (P7, .frm文件解析结果, 按模块名索引)
+    std::map<std::string, FrmFile> frmFiles_;
 
     // 编译流水线各阶段
     bool runLexer(const CompileOptions& options);

@@ -16,6 +16,7 @@ struct MsvcDriverOptions {
     int optimizationLevel = 0;
     bool isDll = false;                     // P6.6: ActiveX DLL模式
     std::string defFile;                    // P6.6: DLL导出定义文件(.def)路径
+    bool isGui = false;                     // P7: GUI程序 (Win32窗口, 非控制台)
 };
 
 class MsvcDriver {

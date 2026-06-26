@@ -10,6 +10,7 @@
 #include "backend/cgen.hpp"
 #include "backend/msvc_driver.hpp"
 #include "project/vbp_parser.hpp"
+#include "project/frm_parser.hpp"
 
 #include <iostream>
 #include <fstream>
@@ -86,6 +87,9 @@ std::pair<CompileOptions, int> Driver::parseArgs(int argc, char* argv[]) {
         }
         else if (arg == "--progid" && i + 1 < argc) {
             opts.dllProgId = argv[++i];  // P6.6: ProgID前缀
+        }
+        else if (arg == "--dump-frm") {
+            opts.dumpFrm = true;  // P7: 输出.frm窗体描述
         }
         else if (arg == "-v" || arg == "--verbose") {
             opts.verbose = true;
@@ -180,6 +184,63 @@ CompileResult Driver::compile(const CompileOptions& options) {
                 effectiveOpts.dllProgId = project.projectName.empty() ? "VB6DLL" : project.projectName;
             }
         }
+    }
+
+    // === P7: .frm窗体描述解析 ===
+    if (effectiveOpts.dumpFrm) {
+        bool hasFrm = false;
+        for (const auto& srcFile : effectiveOpts.sourceFiles) {
+            if (srcFile.size() >= 4 &&
+                (srcFile.compare(srcFile.size()-4, 4, ".frm") == 0 ||
+                 srcFile.compare(srcFile.size()-4, 4, ".FRM") == 0)) {
+                hasFrm = true;
+                auto frm = FrmParser::parse(srcFile);
+
+                std::cout << "=== FrmParser: " << srcFile << " ===\n";
+                std::cout << "Version: " << frm.version << "\n";
+                std::cout << "FormName: " << frm.form.formName << "\n";
+                std::cout << "ControlType: " << FrmParser::controlTypeToVb6Name(frm.form.formControl.controlType) << "\n";
+
+                // 窗体属性
+                std::cout << "Properties:\n";
+                for (const auto& [k, v] : frm.form.formControl.properties) {
+                    std::cout << "  " << k << " = " << v.rawText << "\n";
+                }
+
+                // 控件列表
+                std::cout << "Controls (" << frm.form.formControl.children.size() << "):\n";
+                for (const auto& ctrl : frm.form.formControl.children) {
+                    std::cout << "  " << FrmParser::controlTypeToVb6Name(ctrl.controlType)
+                              << " " << ctrl.controlName;
+                    if (ctrl.index >= 0) std::cout << "(" << ctrl.index << ")";
+                    std::cout << " [" << ctrl.controlTypeName << "]\n";
+                    for (const auto& [k, v] : ctrl.properties) {
+                        std::cout << "    " << k << " = " << v.rawText << "\n";
+                    }
+                    // 子控件
+                    for (const auto& child : ctrl.children) {
+                        std::cout << "    " << FrmParser::controlTypeToVb6Name(child.controlType)
+                                  << " " << child.controlName << "\n";
+                    }
+                }
+
+                // 复合属性块
+                for (const auto& block : frm.form.formControl.propertyBlocks) {
+                    std::cout << "PropertyBlock: " << block.blockName << "\n";
+                    for (const auto& [k, v] : block.properties) {
+                        std::cout << "  " << k << " = " << v.rawText << "\n";
+                    }
+                }
+
+                std::cout << "CodeSection: " << frm.codeSection.size() << " chars\n";
+                std::cout << "\n";
+            }
+        }
+        if (!hasFrm) {
+            std::cerr << "c3: --dump-frm: 未找到.frm文件\n";
+        }
+        result.success = true;
+        return result;
     }
 
     // === 阶段1: 词法分析 ===
@@ -447,14 +508,33 @@ bool Driver::runParser(const CompileOptions& options) {
 
         // 根据文件扩展名判断模块类型
         bool isClassModule = false;
+        bool isFormModule = false;
+        FrmFile frmDesc;  // P7: 窗体描述 (仅.frm有效)
         if (filePath.size() >= 4) {
             std::string ext = filePath.substr(filePath.size() - 4);
             for (auto& c : ext) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
             isClassModule = (ext == ".cls");
+            isFormModule = (ext == ".frm");  // P7: 窗体模块
+
+            // P7: 解析.frm窗体描述, 提取VB代码段
+            if (isFormModule) {
+                frmDesc = FrmParser::parse(filePath);
+                // 用代码段替换原始源文件内容 (窗体描述块不是VB代码)
+                if (!frmDesc.codeSection.empty()) {
+                    buffer = SourceBuffer::fromString(filePath, frmDesc.codeSection);
+                }
+            }
         }
 
         Parser parser(std::move(buffer), *diag_, ppOpts);
         auto module = parser.parseModule(isClassModule);
+
+        // P7: 设置窗体模块标志
+        if (module && isFormModule) {
+            module->isFormModule = true;
+            // 保存窗体描述供代码生成使用
+            frmFiles_[module->moduleName] = std::move(frmDesc);
+        }
 
         if (options.dumpAST && module) {
             ASTPrinter printer(std::cout);
@@ -769,8 +849,14 @@ bool Driver::runCodeGeneration(const CompileOptions& options, const std::string&
 
         // 传入模块基名和外部模块列表
         // P6.6: 传递ActiveX DLL模式信息
+        // P7: 传递窗体描述 (仅.frm模块有效)
+        const FrmFormDesc* frmDescPtr = nullptr;
+        auto frmIt = frmFiles_.find(module->moduleName);
+        if (frmIt != frmFiles_.end()) {
+            frmDescPtr = &frmIt->second.form;
+        }
         bool ok = cgen.generate(*module, baseName, externalModules,
-                                options.isDll, options.dllProgId);
+                                options.isDll, options.dllProgId, frmDescPtr);
         if (!ok) return false;
 
         // 写 .h 文件
@@ -907,6 +993,13 @@ bool Driver::runLinker(const CompileOptions& options, const std::string& outputD
     }
 
     msvcOpts.isDll = options.isDll;  // P6.6: DLL编译模式
+    // P7: 检测是否为GUI程序 (包含窗体模块)
+    for (auto& module : modules_) {
+        if (module->isFormModule) {
+            msvcOpts.isGui = true;
+            break;
+        }
+    }
     msvcOpts.verbose = options.verbose;
     msvcOpts.debugInfo = options.debugInfo;
     msvcOpts.optimizationLevel = options.optimizationLevel;

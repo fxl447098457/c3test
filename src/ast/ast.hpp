@@ -1323,6 +1323,7 @@ public:
 
     // 模块类别
     bool isClassModule = false;     // true = .cls类模块, false = .bas标准模块/.frm窗体模块
+    bool isFormModule = false;      // true = .frm窗体模块 (P7)
     VBInstancing instancing = VBInstancing::Private;  // 类Instancing属性 (仅类模块)
 
     // Option 语句
