@@ -78,8 +78,10 @@ bool CCodeGen::generate(Module& module, const std::string& baseName,
         h_.emitLine("typedef struct " + clsStruct + " {");
 
         // 收集模块级变量作为结构体字段
+        bool hasFields = false;
         for (auto& decl : module.declarations) {
             if (decl->kind == ASTNodeKind::VariableDecl) {
+                hasFields = true;
                 auto& var = static_cast<VariableDecl&>(*decl);
                 std::string cType = mapTypeRef(var.asType.get());
                 if (var.isDynamicArray || !var.dimensions.empty()) {
@@ -96,6 +98,10 @@ bool CCodeGen::generate(Module& module, const std::string& baseName,
                 }
             }
         }
+        // C不允许空结构体 → 接口类无数据成员时添加占位字段
+        if (!hasFields) {
+            h_.emitLine("    int _placeholder;  /* interface class: no data members */");
+        }
         h_.emitLine("} " + clsStruct + ";");
         h_.emitBlank();
 
@@ -103,6 +109,11 @@ bool CCodeGen::generate(Module& module, const std::string& baseName,
         h_.emitLine(clsStruct + "* " + clsStruct + "_New(void);");
         h_.emitLine("void " + clsStruct + "_Destroy(" + clsStruct + "* me);");
         h_.emitBlank();
+
+        // P6.4: 生成接口vtable结构体 + 包装类型 + 全局vtable实例
+        if (!module.implements.empty()) {
+            emitInterfaceVtable(module);
+        }
     }
 
     // === 第一遍: 声明 (前向声明 → .h, 定义 → .c) ===
@@ -158,7 +169,16 @@ bool CCodeGen::generate(Module& module, const std::string& baseName,
     }
 
     // 7. 过程前向声明 → .h
+    // P6.4: 接口类的方法不生成前向声明 (方法是抽象的, 由实现类提供)
+    bool currentClassIsInterface = false;
+    if (isClassModule_) {
+        auto* clsSym = symTab_.lookupModule(module.moduleName);
+        if (clsSym && clsSym->kind == SymbolKind::Class && clsSym->isInterface) {
+            currentClassIsInterface = true;
+        }
+    }
     for (auto& decl : module.declarations) {
+        if (currentClassIsInterface) continue;  // 接口类: 跳过方法声明
         if (decl->kind == ASTNodeKind::SubDecl) {
             auto& sub = static_cast<SubDecl&>(*decl);
             std::string sig = makeProcSignature(sub);
@@ -195,6 +215,7 @@ bool CCodeGen::generate(Module& module, const std::string& baseName,
     c_.emitBlank();
 
     for (auto& decl : module.declarations) {
+        if (currentClassIsInterface) continue;  // P6.4: 接口类不生成方法实现体 (由实现类提供)
         if (decl->kind == ASTNodeKind::SubDecl) {
             visit(static_cast<SubDecl&>(*decl));
         } else if (decl->kind == ASTNodeKind::FunctionDecl) {
@@ -205,7 +226,7 @@ bool CCodeGen::generate(Module& module, const std::string& baseName,
     }
 
     // === 类模块: 生成工厂函数 ===
-    if (isClassModule_) {
+    if (isClassModule_ && !currentClassIsInterface) {  // P6.4: 接口类不生成工厂/析构函数
         emitClassFactory(module);
     }
 
@@ -228,8 +249,9 @@ bool CCodeGen::generate(Module& module, const std::string& baseName,
         bool shouldGenMain = hasMain;
         if (!shouldGenMain && !isMultiModule_) {
             // 单模块模式: 无Sub Main时自动找首个Public Sub
-            for (auto& decl : module.declarations) {
-                if (decl->kind == ASTNodeKind::SubDecl) {
+    for (auto& decl : module.declarations) {
+        if (currentClassIsInterface) continue;  // P6.4: 接口类不生成方法实现体
+        if (decl->kind == ASTNodeKind::SubDecl) {
                     auto& sub = static_cast<SubDecl&>(*decl);
                     if (sub.access == AccessLevel::Public) {
                         shouldGenMain = true;
@@ -264,6 +286,34 @@ bool CCodeGen::generate(Module& module, const std::string& baseName,
     // 保存生成结果
     header_ = h_.str();
     source_ = c_.str();
+
+    // P6.3: 如果使用了COM接口类型, 在头文件中插入typedef前向声明
+    // vb6_ComIface_<Name> 是不透明结构体, 仅用作类型化指针
+    if (!usedComIfaceTypes_.empty() || !usedVb6IfaceTypes_.empty()) {
+        std::string typedefBlock;
+        if (!usedComIfaceTypes_.empty()) {
+            typedefBlock += "\n// P6.3: COM接口类型前向声明 (早期绑定)\n";
+            for (const auto& ifaceName : usedComIfaceTypes_) {
+                typedefBlock += "typedef struct vb6_ComIface_" + ifaceName + " vb6_ComIface_" + ifaceName + ";\n";
+            }
+        }
+        if (!usedVb6IfaceTypes_.empty()) {
+            typedefBlock += "\n// P6.4: VB6接口类型前向声明 (Implements)\n";
+            for (const auto& ifaceName : usedVb6IfaceTypes_) {
+                typedefBlock += "typedef struct vb6_vtbl_" + ifaceName + " vb6_vtbl_" + ifaceName + ";\n";
+                typedefBlock += "typedef struct vb6_iface_" + ifaceName + " vb6_iface_" + ifaceName + ";\n";
+            }
+        }
+        // 在 #include "vb6rtl.h" 之后插入
+        std::string marker = "#include \"vb6rtl.h\"";
+        size_t pos = header_.find(marker);
+        if (pos != std::string::npos) {
+            pos = header_.find('\n', pos);  // 找到行尾
+            if (pos != std::string::npos) {
+                header_.insert(pos + 1, typedefBlock);
+            }
+        }
+    }
 
     currentModule_ = nullptr;
     return diag_.errorCount() == 0;
@@ -309,7 +359,7 @@ std::string CCodeGen::mapType(Vb6Type type) const {
     return cType;
 }
 
-std::string CCodeGen::mapTypeRef(ASTNode* typeRef) const {
+std::string CCodeGen::mapTypeRef(ASTNode* typeRef) {
     if (!typeRef) return "VARIANT";  // 未指定类型 = Variant
 
     switch (typeRef->kind) {
@@ -323,7 +373,24 @@ std::string CCodeGen::mapTypeRef(ASTNode* typeRef) const {
             // 检查是否是类名 → 映射为类结构体指针
             auto* clsSym = symTab_.lookupModule(simple.name);
             if (clsSym && clsSym->kind == SymbolKind::Class) {
+                // P6.4: 接口类 → vb6_iface_<Name> 包装类型 (非指针)
+                if (clsSym->isInterface) {
+                    usedVb6IfaceTypes_.insert(cIdent(clsSym->name));  // 收集用于前向声明
+                    return "vb6_iface_" + cIdent(clsSym->name);
+                }
                 return "vb6_cls_" + cIdent(clsSym->name) + "*";
+            }
+            // P6.3: 检查是否是COM coclass/接口 → 映射为接口指针类型 (前期绑定)
+            if (clsSym && (clsSym->kind == SymbolKind::ComClass || clsSym->kind == SymbolKind::ComInterface)) {
+                // 生成类型化接口指针: vb6_ComIface_<InterfaceName>*
+                // 运行时通过vb6_ComQI获取, vtable直接调用
+                std::string ifaceName = clsSym->name;
+                if (clsSym->kind == SymbolKind::ComClass && !clsSym->comDefaultIfaceName.empty()) {
+                    ifaceName = clsSym->comDefaultIfaceName;
+                }
+                std::string cIfaceName = cIdent(ifaceName);
+                usedComIfaceTypes_.insert(cIfaceName);  // 收集接口类型名用于typedef
+                return "vb6_ComIface_" + cIfaceName + "*";
             }
             // 检查是否是用户定义类型 (UDT) → vb6_type_<Name>
             auto* udtSym = symTab_.lookup(simple.name);
@@ -840,6 +907,34 @@ void CCodeGen::visit(MemberAccessExpr& node) {
             return;
         }
 
+        // 优先级0: COM前期绑定成员访问 (P6.3, Dim x As FileSystemObject)
+        // 有具体类型信息的COM变量, 通过vtable直接调用而非IDispatch::Invoke
+        if (knownTypedComVars_.count(objLower)) {
+            emitExpr(*node.object);
+            comObjExpr_ = lastExpr_;       // 保存对象表达式
+            comMemberName_ = node.memberName;  // 保存成员名
+            isComMarker_ = true;           // 标记为COM调用
+            isEarlyBoundCom_ = true;       // P6.3: 标记为前期绑定
+            earlyBoundSym_ = knownTypedComVars_[objLower];  // ComClass符号
+            lastExpr_ = lastExpr_;         // 保持不变
+            return;
+        }
+
+        // P6.4: 接口引用成员访问 (Dim x As IFoo) → 通过vtable调用
+        // 设置接口标记, 由IndexOrCallExpr/AssignmentStmt识别
+        auto itIfaceVar = knownIfaceVars_.find(objLower);
+        if (itIfaceVar != knownIfaceVars_.end()) {
+            emitExpr(*node.object);
+            comObjExpr_ = lastExpr_;       // 接口引用变量C表达式
+            comMemberName_ = node.memberName;  // 接口方法名
+            isComMarker_ = true;           // 复用COM标记机制
+            isEarlyBoundCom_ = false;      // 不是COM前期绑定
+            // 设置接口标记
+            earlyBoundSym_ = nullptr;       // P6.4接口不是ComClass
+            lastExpr_ = lastExpr_;         // 保持接口引用变量名
+            return;
+        }
+
         // 优先级1: COM对象成员访问 (Object类型变量, 后期绑定)
         // COM对象的成员名不在符号表中, 需通过IDispatch::Invoke调用
         // 设置COM标记, 由IndexOrCallExpr/AssignmentStmt/SetStmt识别并处理
@@ -956,7 +1051,16 @@ void CCodeGen::visit(MemberAccessExpr& node) {
         return;
     }
 
-    lastExpr_ = obj + "." + cIdent(node.memberName);
+    // 如果object是类实例指针变量, 使用 -> 而非 .
+    {
+        std::string objLower = obj;
+        std::transform(objLower.begin(), objLower.end(), objLower.begin(), ::tolower);
+        if (knownClassVars_.count(objLower) || knownTypedComVars_.count(objLower)) {
+            lastExpr_ = obj + "->" + cIdent(node.memberName);
+        } else {
+            lastExpr_ = obj + "." + cIdent(node.memberName);
+        }
+    }
 }
 
 void CCodeGen::visit(DictionaryAccessExpr& node) {
@@ -1015,12 +1119,130 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
     emitExpr(*node.callee);
     std::string callee = std::move(lastExpr_);
 
-    // --- COM后期绑定检测 (P6.2) ---
+    // --- COM后期绑定检测 (P6.2) + 前期绑定检测 (P6.3) + P6.4接口调用 ---
     // MemberAccessExpr为COM对象设置isComMarker_标志 + comObjExpr_/comMemberName_
     if (isComMarker_) {
         isComMarker_ = false;  // 消费标记
         std::string objExpr = std::move(comObjExpr_);
         std::string memberName = std::move(comMemberName_);
+
+        // P6.4: 接口引用方法调用 (Dim x As IFoo → x.Method → x.vtbl->Method(x.obj, args))
+        {
+            std::string objLower = objExpr;
+            std::transform(objLower.begin(), objLower.end(), objLower.begin(), ::tolower);
+            auto itIfaceVar = knownIfaceVars_.find(objLower);
+            if (itIfaceVar != knownIfaceVars_.end() && !isEarlyBoundCom_) {
+                std::string ifaceName = itIfaceVar->second;
+                std::string ifaceId = cIdent(ifaceName);
+                // 生成参数列表
+                std::vector<std::string> callArgs;
+                for (size_t i = 0; i < node.positional.size(); i++) {
+                    emitExpr(*node.positional[i]);
+                    callArgs.push_back(lastExpr_);
+                }
+                for (auto& named : node.named) {
+                    emitExpr(*named.value);
+                    callArgs.push_back(lastExpr_);
+                }
+                std::string argsStr;
+                for (size_t i = 0; i < callArgs.size(); i++) {
+                    if (i > 0) argsStr += ", ";
+                    argsStr += callArgs[i];
+                }
+                // x.vtbl->Method(x.obj, args...)
+                std::string call = objExpr + ".vtbl->" + cIdent(memberName) + "(" + objExpr + ".obj";
+                if (!argsStr.empty()) call += ", " + argsStr;
+                call += ")";
+                lastExpr_ = call;
+                return;
+            }
+        }
+
+        // P6.3: 前期绑定 (vtable直接调用)
+        if (isEarlyBoundCom_ && earlyBoundSym_) {
+            isEarlyBoundCom_ = false;
+            const Symbol* comSym = earlyBoundSym_;
+            earlyBoundSym_ = nullptr;
+
+            // 查找方法签名
+            std::string memLower = memberName;
+            std::transform(memLower.begin(), memLower.end(), memLower.begin(), ::tolower);
+            auto it = comSym->comMethods.find(memLower);
+            if (it != comSym->comMethods.end()) {
+                const auto& sig = it->second;
+
+                // 生成接口类型名
+                std::string ifaceName = comSym->name;
+                if (comSym->kind == SymbolKind::ComClass && !comSym->comDefaultIfaceName.empty()) {
+                    ifaceName = comSym->comDefaultIfaceName;
+                }
+                std::string ifaceType = "vb6_ComIface_" + cIdent(ifaceName);
+
+                // vtable调用: ((ReturnType(*)(Iface*))vt[idx])(obj, args...)
+                // 或属性get: obj->vt[idx](obj)
+                std::string vtOffset = std::to_string(sig.vtableIndex);
+
+                // 参数生成 (不包含this指针, vtable辅助函数的第一个参数已经是obj)
+                std::vector<std::string> callArgs;
+                for (size_t i = 0; i < node.positional.size(); i++) {
+                    emitExpr(*node.positional[i]);
+                    callArgs.push_back(lastExpr_);
+                }
+                for (auto& named : node.named) {
+                    emitExpr(*named.value);
+                    callArgs.push_back(lastExpr_);
+                }
+
+                std::string argsStr;
+                for (size_t i = 0; i < callArgs.size(); i++) {
+                    if (i > 0) argsStr += ", ";
+                    argsStr += callArgs[i];
+                }
+
+                // 生成vtable间接调用
+                // ((void*)obj)[idx] 是vtable中第idx个函数指针
+                // 简化: 使用运行时辅助函数 vb6_ComVtableCall
+                if (sig.isPropertyGet) {
+                    // 属性Get: vb6_ComVtableGet<type>(obj, vtIndex, args...)
+                    std::string returnType = mapType(sig.returnType);
+                    if (returnType == "BSTR") {
+                        lastExpr_ = "vb6_ComVtableGetBSTR(" + objExpr + ", " + vtOffset + ", " + argsStr + ")";
+                    } else if (returnType == "int32_t" || returnType == "int16_t") {
+                        lastExpr_ = "vb6_ComVtableGetInt(" + objExpr + ", " + vtOffset + ", " + argsStr + ")";
+                    } else if (returnType == "double" || returnType == "float") {
+                        lastExpr_ = "vb6_ComVtableGetDouble(" + objExpr + ", " + vtOffset + ", " + argsStr + ")";
+                    } else if (returnType == "void*") {
+                        lastExpr_ = "vb6_ComVtableGetObject(" + objExpr + ", " + vtOffset + ", " + argsStr + ")";
+                    } else {
+                        lastExpr_ = "vb6_ComVtableGetVoid(" + objExpr + ", " + vtOffset + ", " + argsStr + ")";
+                    }
+                } else if (sig.isPropertyPut || sig.isPropertyPutRef) {
+                    // 属性Put: vb6_ComVtablePut(obj, vtIndex, value)
+                    lastExpr_ = "vb6_ComVtableCallVoid(" + objExpr + ", " + vtOffset + ", " + argsStr + ")";
+                } else {
+                    // 方法调用
+                    std::string returnType = mapType(sig.returnType);
+                    if (returnType == "BSTR") {
+                        lastExpr_ = "vb6_ComVtableGetBSTR(" + objExpr + ", " + vtOffset + ", " + argsStr + ")";
+                    } else if (returnType == "int32_t" || returnType == "int16_t") {
+                        lastExpr_ = "vb6_ComVtableGetInt(" + objExpr + ", " + vtOffset + ", " + argsStr + ")";
+                    } else if (returnType == "double" || returnType == "float") {
+                        lastExpr_ = "vb6_ComVtableGetDouble(" + objExpr + ", " + vtOffset + ", " + argsStr + ")";
+                    } else if (returnType == "void*") {
+                        lastExpr_ = "vb6_ComVtableGetObject(" + objExpr + ", " + vtOffset + ", " + argsStr + ")";
+                    } else if (returnType == "void") {
+                        lastExpr_ = "vb6_ComVtableCallVoid(" + objExpr + ", " + vtOffset + ", " + argsStr + ")";
+                    } else {
+                        // 默认: 返回VARIANT
+                        lastExpr_ = "vb6_ComVtableGetVoid(" + objExpr + ", " + vtOffset + ", " + argsStr + ")";
+                    }
+                }
+                return;
+            }
+            // 方法签名未找到 → 降级为后期绑定
+            isEarlyBoundCom_ = false;
+        }
+        isEarlyBoundCom_ = false;
 
         if (!node.positional.empty() || !node.named.empty()) {
             // 有参数: obj.Method(args) → vb6_ComCall(obj, L"Method", variantArgs, argc)
@@ -1456,7 +1678,14 @@ void CCodeGen::visit(SetStmt& node) {
                 return;
             }
 
-            c_.emitLine("vb6_ReleaseObject((void**)&" + target + ");  /* Set Nothing */");
+            // P6.3: 早期绑定COM变量 → vb6_ComReleaseTyped
+            std::string targetLower = target;
+            std::transform(targetLower.begin(), targetLower.end(), targetLower.begin(), ::tolower);
+            if (knownTypedComVars_.count(targetLower)) {
+                c_.emitLine("vb6_ComReleaseTyped((void**)&" + target + ");  /* Set Nothing (early bound) */");
+            } else {
+                c_.emitLine("vb6_ReleaseObject((void**)&" + target + ");  /* Set Nothing */");
+            }
             return;
         }
     }
@@ -1490,6 +1719,78 @@ void CCodeGen::visit(SetStmt& node) {
     if (value.find("vb6_ComCall(") == 0) {
         // vb6_ComCall(obj, L"Method", args, argc) → vb6_ComCallObject(obj, L"Method", args, argc)
         value = "vb6_ComCallObject" + value.substr(strlen("vb6_ComCall"));
+    }
+
+    // P6.3: 早期绑定COM变量赋值: Set fso = CreateObject("X") → fso = (Type*)vb6_ComCreateTyped(L"X", "{IID}")
+    // 检查target是否是早期绑定COM变量, 且value是vb6_CreateObject
+    if (value.find("vb6_CreateObject(") == 0) {
+        // 提取target变量名
+        std::string targetLower = target;
+        std::transform(targetLower.begin(), targetLower.end(), targetLower.begin(), ::tolower);
+        auto it = knownTypedComVars_.find(targetLower);
+        if (it != knownTypedComVars_.end()) {
+            const Symbol* comSym = it->second;
+            // 生成类型转换: (vb6_ComIface_<Iface>*)vb6_ComCreateTyped(progId, iidStr)
+            std::string ifaceName = comSym->name;
+            if (comSym->kind == SymbolKind::ComClass && !comSym->comDefaultIfaceName.empty()) {
+                ifaceName = comSym->comDefaultIfaceName;
+            }
+            std::string ifaceType = "vb6_ComIface_" + cIdent(ifaceName);
+            // 从vb6_CreateObject(progId)中提取progId参数
+            size_t start = value.find('(');
+            size_t end = value.rfind(')');
+            if (start != std::string::npos && end != std::string::npos && end > start) {
+                std::string progIdArg = value.substr(start + 1, end - start - 1);
+                std::string iidStr = comSym->comIidStr.empty() ? "" : "\"" + comSym->comIidStr + "\"";
+                if (!iidStr.empty()) {
+                    value = "(" + ifaceType + "*)vb6_ComCreateTyped(" + progIdArg + ", " + iidStr + ")";
+                }
+                // 如果没有IID, 降级为后期绑定 (保持vb6_CreateObject)
+            }
+        }
+    }
+
+    // P6.3: 早期绑定COM的vtable调用返回对象 → 自动类型转换
+    // vb6_ComVtableGetObject(...) → (Type*)vb6_ComVtableGetObject(...)
+    if (value.find("vb6_ComVtableGetObject(") == 0) {
+        std::string targetLower = target;
+        std::transform(targetLower.begin(), targetLower.end(), targetLower.begin(), ::tolower);
+        auto it = knownTypedComVars_.find(targetLower);
+        if (it != knownTypedComVars_.end()) {
+            const Symbol* comSym = it->second;
+            std::string ifaceName = comSym->name;
+            if (comSym->kind == SymbolKind::ComClass && !comSym->comDefaultIfaceName.empty()) {
+                ifaceName = comSym->comDefaultIfaceName;
+            }
+            std::string ifaceType = "vb6_ComIface_" + cIdent(ifaceName);
+            value = "(" + ifaceType + "*)" + value;
+        }
+    }
+
+    // P6.3: 早期绑定COM变量Set Nothing → vb6_ComReleaseTyped
+    // (已在前面的Nothing分支处理, 但那里用的是vb6_ReleaseObject)
+    // 这里检查target是否是早期绑定变量, 将vb6_ReleaseObject改为vb6_ComReleaseTyped
+
+    // P6.4: 接口引用赋值: Set ifaceRef = obj → ifaceRef = vb6_iface_IFoo_wrap(obj)
+    {
+        std::string targetLower = target;
+        std::transform(targetLower.begin(), targetLower.end(), targetLower.begin(), ::tolower);
+        auto itIface = knownIfaceVars_.find(targetLower);
+        if (itIface != knownIfaceVars_.end()) {
+            std::string ifaceName = itIface->second;
+            std::string ifaceType = "vb6_iface_" + cIdent(ifaceName);
+            // 如果右侧值包含_New()或是指向类实例的变量, 包装为接口引用
+            if (value.find("_New()") != std::string::npos) {
+                value = ifaceType + "_wrap(" + value + ")";
+            } else {
+                // 简单变量引用: value可能是类实例指针变量名
+                std::string valLower = value;
+                std::transform(valLower.begin(), valLower.end(), valLower.begin(), ::tolower);
+                if (knownClassVars_.count(valLower)) {
+                    value = ifaceType + "_wrap(" + value + ")";
+                }
+            }
+        }
     }
 
     c_.emitLine(target + " = " + value + ";  /* Set */");
@@ -2322,6 +2623,20 @@ void CCodeGen::visit(LocalDeclStmt& node) {
                 knownObjectVars_.insert(lower);
             }
 
+            // P6.3: 记录前期绑定COM变量 (Dim x As FileSystemObject)
+            // 查找类型名是否对应ComClass符号
+            if (var.asType && var.asType->kind == ASTNodeKind::SimpleTypeRef) {
+                auto& simple = static_cast<SimpleTypeRef&>(*var.asType);
+                auto* comSym = symTab_.lookupModule(simple.name);
+                if (comSym && (comSym->kind == SymbolKind::ComClass || comSym->kind == SymbolKind::ComInterface)) {
+                    std::string lower = var.name;
+                    std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+                    knownTypedComVars_[lower] = comSym;
+                    // 从后期绑定集合中移除 (优先前期绑定)
+                    knownObjectVars_.erase(lower);
+                }
+            }
+
             // 记录double/single类型变量名 (用于Debug.Print浮点输出)
             if (cType == "double" || cType == "float") {
                 std::string lower = var.name;
@@ -2332,14 +2647,25 @@ void CCodeGen::visit(LocalDeclStmt& node) {
             // 记录类类型变量名, 默认值用NULL
             bool isLocalClassType = false;
             bool isLocalUdtType = false;
+            bool isLocalComIfaceType = false;
+            bool isLocalVb6IfaceType = false;  // P6.4: VB6接口引用
             if (var.asType && var.asType->kind == ASTNodeKind::SimpleTypeRef) {
                 auto& simple = static_cast<SimpleTypeRef&>(*var.asType);
                 auto* clsSym = symTab_.lookupModule(simple.name);
                 if (clsSym && clsSym->kind == SymbolKind::Class) {
                     std::string lower = var.name;
                     std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
-                    knownClassVars_.insert(lower);
-                    isLocalClassType = true;
+                    // P6.4: 接口类 → knownIfaceVars_ (而非 knownClassVars_)
+                    if (clsSym->isInterface) {
+                        knownIfaceVars_[lower] = clsSym->name;
+                        isLocalVb6IfaceType = true;
+                    } else {
+                        knownClassVars_.insert(lower);
+                        isLocalClassType = true;
+                    }
+                }
+                if (clsSym && (clsSym->kind == SymbolKind::ComClass || clsSym->kind == SymbolKind::ComInterface)) {
+                    isLocalComIfaceType = true;
                 }
                 // 检查是否是UDT类型
                 auto* udtSym = symTab_.lookup(simple.name);
@@ -2357,8 +2683,10 @@ void CCodeGen::visit(LocalDeclStmt& node) {
                 c_.emitLine(storageClass + cType + " " + cName + " = " + lastExpr_ + ";");
             } else {
                 std::string initVal;
-                if (isLocalClassType) {
+                if (isLocalClassType || isLocalComIfaceType) {
                     initVal = "NULL";
+                } else if (isLocalVb6IfaceType) {
+                    initVal = "{0}";  // P6.4: 接口引用 = {vtbl=NULL, obj=NULL}
                 } else if (isLocalUdtType) {
                     initVal = "{0}";
                 } else {
@@ -2679,7 +3007,12 @@ void CCodeGen::visit(VariableDecl& node) {
         if (clsSym && clsSym->kind == SymbolKind::Class) {
             std::string lower = node.name;
             std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
-            knownClassVars_.insert(lower);
+            // P6.4: 接口类 → 注册到 knownIfaceVars_ (而非 knownClassVars_)
+            if (clsSym->isInterface) {
+                knownIfaceVars_[lower] = clsSym->name;
+            } else {
+                knownClassVars_.insert(lower);
+            }
         }
     }
 
@@ -2688,6 +3021,18 @@ void CCodeGen::visit(VariableDecl& node) {
         std::string lower = node.name;
         std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
         knownObjectVars_.insert(lower);
+    }
+
+    // P6.3: 检查是否是前期绑定COM变量 → 注册到 knownTypedComVars_
+    if (node.asType && node.asType->kind == ASTNodeKind::SimpleTypeRef) {
+        auto& simple = static_cast<SimpleTypeRef&>(*node.asType);
+        auto* comSym = symTab_.lookupModule(simple.name);
+        if (comSym && (comSym->kind == SymbolKind::ComClass || comSym->kind == SymbolKind::ComInterface)) {
+            std::string lower = node.name;
+            std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+            knownTypedComVars_[lower] = comSym;
+            knownObjectVars_.erase(lower);  // 优先前期绑定
+        }
     }
 
     // 记录double/single类型变量名 (用于Debug.Print浮点输出)
@@ -2709,10 +3054,14 @@ void CCodeGen::visit(VariableDecl& node) {
     // 变量定义 → .c
     // 类类型变量的默认值是NULL
     bool isClassType = false;
+    bool isComIfaceType = false;
+    bool isVb6IfaceType = false;  // P6.4: VB6接口引用类型
     if (node.asType && node.asType->kind == ASTNodeKind::SimpleTypeRef) {
         auto& simple = static_cast<SimpleTypeRef&>(*node.asType);
         auto* clsSym = symTab_.lookupModule(simple.name);
-        isClassType = (clsSym && clsSym->kind == SymbolKind::Class);
+        isClassType = (clsSym && clsSym->kind == SymbolKind::Class && !clsSym->isInterface);
+        isVb6IfaceType = (clsSym && clsSym->kind == SymbolKind::Class && clsSym->isInterface);
+        isComIfaceType = (clsSym && (clsSym->kind == SymbolKind::ComClass || clsSym->kind == SymbolKind::ComInterface));
     }
 
     if (node.initializer) {
@@ -2731,8 +3080,10 @@ void CCodeGen::visit(VariableDecl& node) {
             isUdtType = (sym && sym->kind == SymbolKind::UserDefinedType);
         }
         std::string initVal;
-        if (isClassType) {
+        if (isClassType || isComIfaceType) {
             initVal = "NULL";
+        } else if (isVb6IfaceType) {
+            initVal = "{0}";  // P6.4: 接口引用 = {vtbl=NULL, obj=NULL}
         } else if (isUdtType) {
             initVal = "{0}";
         } else {
@@ -2958,6 +3309,123 @@ void CCodeGen::emitClassFactory(Module& module) {
     c_.emitLine("vb6_Free(me);");
     c_.dedent();
     c_.emitLine("}");
+}
+
+// ============================================================
+// P6.4: 接口 vtable + 包装类型生成 (Implements 代码生成)
+// ============================================================
+
+void CCodeGen::emitInterfaceVtable(Module& module) {
+    std::string clsStruct = "vb6_cls_" + cIdent(baseName_);
+
+    for (auto& impl : module.implements) {
+        const std::string& ifaceName = impl->interfaceName;
+        std::string ifaceId = cIdent(ifaceName);
+
+        // 收集接口方法信息: 从实现类中查找 IFoo_MethodName 方法
+        struct IfaceMethodInfo {
+            std::string methodName;   // 原始方法名 (如 "Bar")
+            std::string implFuncName; // 实现函数C名 (如 "vb6_Class1_IFoo_Bar")
+            std::string retType;      // 返回C类型
+            std::string params;       // 参数列表 (不含me, 如 "int32_t x")
+            bool isSub;               // Sub vs Function
+        };
+        std::vector<IfaceMethodInfo> methods;
+
+        for (auto& decl : module.declarations) {
+            if (decl->kind == ASTNodeKind::SubDecl) {
+                auto& sub = static_cast<SubDecl&>(*decl);
+                // 检查是否为 Implements 实现方法 (IFoo_MethodName 格式)
+                if (sub.name.size() > ifaceName.size() + 1 &&
+                    Symbol::toLower(sub.name.substr(0, ifaceName.size() + 1)) ==
+                    Symbol::toLower(ifaceName + "_")) {
+                    std::string methodName = sub.name.substr(ifaceName.size() + 1);
+                    std::string params = makeParamList(sub.params);
+                    methods.push_back({methodName, cProcName(sub.name, sub.access),
+                                       "void", params, true});
+                }
+            } else if (decl->kind == ASTNodeKind::FunctionDecl) {
+                auto& func = static_cast<FunctionDecl&>(*decl);
+                if (func.name.size() > ifaceName.size() + 1 &&
+                    Symbol::toLower(func.name.substr(0, ifaceName.size() + 1)) ==
+                    Symbol::toLower(ifaceName + "_")) {
+                    std::string methodName = func.name.substr(ifaceName.size() + 1);
+                    std::string params = makeParamList(func.params);
+                    std::string retType = mapTypeRef(func.returnType.get());
+                    methods.push_back({methodName, cProcName(func.name, func.access),
+                                       retType, params, false});
+                }
+            } else if (decl->kind == ASTNodeKind::PropertyDecl) {
+                auto& prop = static_cast<PropertyDecl&>(*decl);
+                if (prop.name.size() > ifaceName.size() + 1 &&
+                    Symbol::toLower(prop.name.substr(0, ifaceName.size() + 1)) ==
+                    Symbol::toLower(ifaceName + "_")) {
+                    std::string methodName = prop.name.substr(ifaceName.size() + 1);
+                    std::string params = makeParamList(prop.params);
+                    // Property Get → Function, Property Let/Set → Sub
+                    if (prop.propKind == ProcKind::PropertyGet) {
+                        std::string retType = mapTypeRef(prop.returnType.get());
+                        methods.push_back({methodName, cProcName(prop.name, prop.access),
+                                           retType, params, false});
+                    } else {
+                        methods.push_back({methodName, cProcName(prop.name, prop.access),
+                                           "void", params, true});
+                    }
+                }
+            }
+        }
+
+        if (methods.empty()) continue;
+
+        // 1. 生成 vtable 结构体 (函数指针表)
+        std::string vtblName = "vb6_vtbl_" + ifaceId;
+        h_.emitLine("// Interface vtable: " + ifaceName);
+        h_.emitLine("typedef struct " + vtblName + " {");
+        for (auto& m : methods) {
+            std::string paramList = classMeParam();
+            if (m.params != "void") {
+                paramList += ", " + m.params;
+            }
+            h_.emitLine("    " + m.retType + " (*" + cIdent(m.methodName) + ")(" + paramList + ");");
+        }
+        h_.emitLine("} " + vtblName + ";");
+        h_.emitBlank();
+
+        // 2. 生成接口引用包装类型 (vtable指针 + 对象指针)
+        std::string ifaceTypeName = "vb6_iface_" + ifaceId;
+        h_.emitLine("typedef struct " + ifaceTypeName + " {");
+        h_.emitLine("    " + vtblName + "* vtbl;");
+        h_.emitLine("    void* obj;");
+        h_.emitLine("} " + ifaceTypeName + ";");
+        h_.emitBlank();
+
+        // 3. 生成全局 vtable 实例 (指向实现类的接口方法)
+        std::string vtblInstance = vtblName + "_for_" + cIdent(baseName_);
+        c_.emitBlank();
+        c_.emitLine("// Interface vtable instance: " + ifaceName + " for " + module.moduleName);
+        c_.emitLine("static " + vtblName + " " + vtblInstance + " = {");
+        c_.indent();
+        for (size_t i = 0; i < methods.size(); i++) {
+            std::string entry = "." + cIdent(methods[i].methodName) + " = " + methods[i].implFuncName;
+            if (i < methods.size() - 1) entry += ",";
+            c_.emitLine(entry);
+        }
+        c_.dedent();
+        c_.emitLine("};");
+
+        // 4. 生成包装函数: vb6_iface_IFoo_wrap(obj) → 创建接口引用
+        h_.emitLine(ifaceTypeName + " " + ifaceTypeName + "_wrap(" + clsStruct + "* obj);");
+        h_.emitBlank();
+        c_.emitBlank();
+        c_.emitLine(ifaceTypeName + " " + ifaceTypeName + "_wrap(" + clsStruct + "* obj) {");
+        c_.indent();
+        c_.emitLine(ifaceTypeName + " iface;");
+        c_.emitLine("iface.vtbl = &" + vtblInstance + ";");
+        c_.emitLine("iface.obj = obj;");
+        c_.emitLine("return iface;");
+        c_.dedent();
+        c_.emitLine("}");
+    }
 }
 
 void CCodeGen::visit(ParameterDecl& node) {

@@ -126,6 +126,10 @@ bool SemanticAnalyzer::analyze(Module& module) {
                     break;
             }
         }
+        // 收集 Implements 列表
+        for (auto& impl : module.implements) {
+            classSym->implementsNames.push_back(impl->interfaceName);
+        }
         symTab_.define(std::move(classSym));
     }
 
@@ -154,6 +158,49 @@ bool SemanticAnalyzer::analyze(Module& module) {
     // Pass 2 结束后，检查未引用的变量 (仅警告)
     if (verbose_) {
         checkUnreferencedSymbols();
+    }
+
+    // Pass 2 结束后，验证 Implements 语句
+    if (module.isClassModule && !module.implements.empty()) {
+        auto* classSym = symTab_.lookupModule(module.moduleName);
+        if (classSym && classSym->kind == SymbolKind::Class) {
+            for (auto& impl : module.implements) {
+                const std::string& ifaceName = impl->interfaceName;
+                // 查找接口类符号
+                auto* ifaceSym = symTab_.lookupModule(ifaceName);
+                if (!ifaceSym || ifaceSym->kind != SymbolKind::Class) {
+                    diag_.warn(DiagnosticID::SemUndeclaredIdentifier, impl->loc,
+                        "Implements: interface '" + ifaceName + "' not found");
+                    continue;
+                }
+                // 标记接口类
+                ifaceSym->isInterface = true;
+                // 收集接口方法名
+                std::vector<std::string> ifaceMethodNames;
+                for (auto& m : ifaceSym->memberNames) {
+                    std::string lower = Symbol::toLower(m);
+                    ifaceMethodNames.push_back(lower);
+                    ifaceSym->interfaceMethodNames.push_back(lower);
+                }
+                // 验证实现类包含 InterfaceName_MethodName 方法
+                for (auto& m : ifaceSym->memberNames) {
+                    std::string required = ifaceName + "_" + m;
+                    std::string lowerRequired = Symbol::toLower(required);
+                    bool found = false;
+                    for (auto& cm : classSym->memberNames) {
+                        if (Symbol::toLower(cm) == lowerRequired) {
+                            found = true;
+                            break;
+                        }
+                    }
+                    if (!found) {
+                        diag_.warn(DiagnosticID::SemUndeclaredIdentifier, impl->loc,
+                            "Implements " + ifaceName + ": method '" + required +
+                            "' not implemented in class '" + module.moduleName + "'");
+                    }
+                }
+            }
+        }
     }
 
     return !diag_.hasErrors();

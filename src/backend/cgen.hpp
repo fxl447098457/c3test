@@ -201,12 +201,29 @@ private:
     // 已知COM对象变量名集合 (小写) - 用于后期绑定 obj.Method → vb6_ComCall(obj, L"Method", ...)
     std::unordered_set<std::string> knownObjectVars_;
 
+    // P6.3: 前期绑定COM变量 (小写变量名 → ComClass符号指针)
+    // Dim fso As FileSystemObject → knownTypedComVars_["fso"] = &FileSystemObject符号
+    // 生成vtable直接调用而非IDispatch后期绑定
+    std::unordered_map<std::string, const Symbol*> knownTypedComVars_;
+
+    // P6.3: 已使用的COM接口类型名 (如 "IFileSystem3")
+    // 用于在.h文件中生成typedef前向声明, 使 vb6_ComIface_<Name>* 类型可用
+    std::unordered_set<std::string> usedComIfaceTypes_;
+
+    // P6.4: 已使用的VB6接口类型名 (如 "IFoo")
+    // 用于在.h文件中生成typedef前向声明, 使 vb6_iface_<Name> 类型可用
+    std::unordered_set<std::string> usedVb6IfaceTypes_;
+
     // COM后期绑定中间状态 (P6.2)
     // MemberAccessExpr为COM对象设置此字段, IndexOrCallExpr/AssignmentStmt/SetStmt读取后清除
     // 当此字段非空时, lastExpr_中的"值"是对象表达式, comMemberName_是成员名
     std::string comObjExpr_;        // COM对象C表达式 (如 "fso")
     std::string comMemberName_;     // COM成员名 (如 "CreateTextFile")
     bool isComMarker_ = false;      // lastExpr_是否为COM标记
+
+    // P6.3: 前期绑定中间状态 (在isComMarker_基础上额外标记)
+    bool isEarlyBoundCom_ = false;  // 当前COM标记是否为前期绑定 (vtable直接调用)
+    const Symbol* earlyBoundSym_ = nullptr;  // 前期绑定的ComClass符号 (含方法签名)
 
     // 是否需要 setjmp.h (On Error GoTo label)
     bool needSetjmp_ = false;
@@ -216,6 +233,10 @@ private:
 
     // 类模块标志
     bool isClassModule_ = false;
+
+    // P6.4: Implements 接口引用变量 (小写变量名 → 接口名)
+    // Dim x As IFoo → knownIfaceVars_["x"] = "IFoo"
+    std::unordered_map<std::string, std::string> knownIfaceVars_;
 
     // VB6 Static Sub/Function标志: 过程内所有局部变量都应生成C static
     bool inStaticProc_ = false;
@@ -229,8 +250,8 @@ private:
     // Vb6Type → C类型字符串
     std::string mapType(Vb6Type type) const;
 
-    // TypeRefPtr → C类型字符串
-    std::string mapTypeRef(ASTNode* typeRef) const;
+    // TypeRefPtr → C类型字符串 (非const: P6.3收集COM接口类型名)
+    std::string mapTypeRef(ASTNode* typeRef);
 
     // VB6默认值 → C表达式
     std::string defaultValue(Vb6Type type) const;
@@ -273,6 +294,9 @@ private:
 
     // 生成类工厂函数 (New/Destroy)
     void emitClassFactory(Module& module);
+
+    // P6.4: 生成接口vtable和包装 (Implements代码生成)
+    void emitInterfaceVtable(Module& module);
 
     // 生成类方法函数体中的Me引用名
     std::string classMeParam() const;

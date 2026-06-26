@@ -1,0 +1,205 @@
+#pragma once
+// VB6 TypeLib解析器 - P6.3 前期绑定支持
+// 编译期使用Windows LoadTypeLib/ITypeInfo API提取类型库信息
+// 注册COM coclass/接口/方法签名到符号表
+
+#include "common/types.hpp"
+#include "common/diagnostics.hpp"
+#include <algorithm>
+#include <string>
+#include <vector>
+#include <unordered_map>
+#include <memory>
+
+// Windows COM类型前置声明 (编译期仅Windows可用)
+typedef struct tagTYPEATTR TYPEATTR;
+typedef struct tagFUNCDESC FUNCDESC;
+typedef struct tagVARDESC VARDESC;
+typedef struct tagELEMDESC ELEMDESC;
+typedef struct tagTYPEDESC TYPEDESC;
+typedef struct tagPARAMDESC PARAMDESC;
+
+namespace vb6c3 {
+
+// ============================================================
+// COM方法/属性描述 (从ITypeInfo提取)
+// ============================================================
+
+enum class ComMemberKind : uint8_t {
+    Method,         // 普通方法 (INVOKE_FUNC)
+    PropertyGet,    // 属性读取 (INVOKE_PROPERTYGET)
+    PropertyPut,    // 属性赋值 (INVOKE_PROPERTYPUT)
+    PropertyPutRef, // 属性引用赋值 (INVOKE_PROPERTYPUTREF)
+};
+
+enum class ComParamDir : uint8_t {
+    In,     // [in] 参数
+    Out,    // [out] 参数
+    InOut,  // [in,out] 参数
+    RetVal, // [out, retval] 返回值参数
+};
+
+struct ComParamInfo {
+    std::string name;           // 参数名
+    Vb6Type type;              // VB6类型
+    ComParamDir direction;     // 参数方向
+    bool isOptional = false;   // Optional参数
+    bool hasDefault = false;   // 有默认值
+};
+
+struct ComMemberInfo {
+    std::string name;           // 方法/属性名 (小写, 用于查找)
+    std::string realName;       // 原始名称 (保留大小写)
+    ComMemberKind kind;         // 成员类别
+    Vb6Type returnType;         // 返回类型 (Method/PropertyGet)
+    std::vector<ComParamInfo> params;  // 参数列表
+    int32_t memid = 0;          // DISPID (成员ID)
+    int32_t vtableIndex = -1;   // vtable偏移 (前期绑定用)
+    CallConv callConv = CallConv::StdCall;  // 调用约定
+};
+
+// ============================================================
+// COM接口描述
+// ============================================================
+
+struct ComInterfaceInfo {
+    std::string name;           // 接口名 (如 "IFileSystem3")
+    std::string iidStr;         // IID字符串 (如 "{2A0A3E20-...}")
+    bool isDual = false;        // 双重接口 (dispinterface + vtable)
+    bool isDispatch = false;    // 纯IDispatch接口
+    std::vector<ComMemberInfo> members;  // 方法/属性列表
+
+    // 按名称查找成员 (小写)
+    const ComMemberInfo* findMember(const std::string& lowerName) const {
+        for (auto& m : members) {
+            if (m.name == lowerName) return &m;
+        }
+        return nullptr;
+    }
+};
+
+// ============================================================
+// COM coclass描述
+// ============================================================
+
+struct ComCoClassInfo {
+    std::string name;           // coclass名 (如 "FileSystemObject")
+    std::string progId;         // ProgID (如 "Scripting.FileSystemObject")
+    std::string clsidStr;       // CLSID字符串
+    std::string defaultIfaceName;  // 默认接口名
+    const ComInterfaceInfo* defaultIface = nullptr;  // 默认接口指针 (解析后填充)
+};
+
+// ============================================================
+// TypeLib解析结果
+// ============================================================
+
+struct TypeLibResult {
+    std::string name;           // 类型库名 (如 "Microsoft Scripting Runtime")
+    std::string version;        // 版本 (如 "1.0")
+    std::string tlbPath;        // 类型库文件路径
+
+    std::vector<std::unique_ptr<ComInterfaceInfo>> interfaces;
+    std::vector<std::unique_ptr<ComCoClassInfo>> coclasses;
+
+    // 按名称查找coclass (不区分大小写)
+    ComCoClassInfo* findCoClass(const std::string& name) const {
+        std::string lower = name;
+        std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+        for (auto& cc : coclasses) {
+            std::string ccLower = cc->name;
+            std::transform(ccLower.begin(), ccLower.end(), ccLower.begin(), ::tolower);
+            if (ccLower == lower) return cc.get();
+            // 也匹配ProgID
+            std::string progLower = cc->progId;
+            std::transform(progLower.begin(), progLower.end(), progLower.begin(), ::tolower);
+            if (progLower == lower) return cc.get();
+        }
+        return nullptr;
+    }
+
+    // 按名称查找接口
+    ComInterfaceInfo* findInterface(const std::string& name) const {
+        std::string lower = name;
+        std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+        for (auto& iface : interfaces) {
+            std::string iLower = iface->name;
+            std::transform(iLower.begin(), iLower.end(), iLower.begin(), ::tolower);
+            if (iLower == lower) return iface.get();
+        }
+        return nullptr;
+    }
+};
+
+// ============================================================
+// TypeLib解析器
+// ============================================================
+
+class TypeLibParser {
+public:
+    TypeLibParser(Diagnostics& diag);
+    ~TypeLibParser();
+
+    // 按ProgID从注册表加载类型库
+    // progId: "Scripting.FileSystemObject" 或 "Scripting"
+    // 返回解析结果, 失败返回nullptr
+    std::unique_ptr<TypeLibResult> loadByProgId(const std::string& progId);
+
+    // 按类型库文件路径加载
+    std::unique_ptr<TypeLibResult> loadByPath(const std::string& tlbPath);
+
+    // 按CLSID从注册表加载
+    std::unique_ptr<TypeLibResult> loadByClsid(const std::string& clsidStr);
+
+    // 按TypeLib名称+版本从注册表加载
+    // name: "Microsoft Scripting Runtime", version: "1.0"
+    std::unique_ptr<TypeLibResult> loadByName(const std::string& name,
+                                               const std::string& version = "1.0");
+
+    // 获取已解析的TypeLib缓存
+    const std::vector<std::unique_ptr<TypeLibResult>>& cachedResults() const {
+        return cache_;
+    }
+
+    // 查找已缓存中某个coclass (跨所有已加载TypeLib)
+    ComCoClassInfo* findCachedCoClass(const std::string& name) const;
+
+private:
+    Diagnostics& diag_;
+
+    // TypeLib缓存 (避免重复加载)
+    std::vector<std::unique_ptr<TypeLibResult>> cache_;
+
+    // ---- 内部实现 (Windows API) ----
+
+    // 从ITypeLib解析所有类型
+    bool parseTypeLib(void* pTypeLib, TypeLibResult& result);
+
+    // 从ITypeInfo解析接口
+    std::unique_ptr<ComInterfaceInfo> parseInterface(void* pTypeInfo,
+                                                     const std::string& name);
+
+    // 从ITypeInfo解析coclass
+    std::unique_ptr<ComCoClassInfo> parseCoClass(void* pTypeInfo,
+                                                  const std::string& name);
+
+    // 从FUNCDESC解析方法/属性
+    ComMemberInfo parseFuncDesc(void* pTypeInfo, void* pFuncDesc, int index);
+
+    // 从VARDESC解析属性
+    ComMemberInfo parseVarDesc(void* pTypeInfo, void* pVarDesc);
+
+    // TYPEDESC → Vb6Type 映射
+    Vb6Type mapTypeDesc(void* pTypeDesc, void* pTypeInfo);
+
+    // ELEMDESC → ComParamInfo
+    ComParamInfo mapElemDesc(void* pElemDesc, const std::string& name, void* pTypeInfo);
+
+    // IID → 字符串
+    static std::string iidToString(const uint8_t* iidBytes);
+
+    // ProgID → CLSID → TypeLib路径 (从注册表查找)
+    std::string findTypeLibPathForProgId(const std::string& progId);
+};
+
+} // namespace vb6c3

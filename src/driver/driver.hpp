@@ -4,6 +4,7 @@
 #include "preprocessor/preprocessor.hpp"
 #include "semantics/symbol_table.hpp"
 #include "semantics/type_system.hpp"
+#include "com/typelib_parser.hpp"
 #include <string>
 #include <vector>
 #include <memory>
@@ -49,6 +50,10 @@ struct CompileOptions {
 
     // 兼容性
     bool compatCheck = false;                // 跨平台兼容性检查
+
+    // COM TypeLib引用 (P6.3, 前期绑定)
+    std::vector<std::string> typelibRefs;    // TypeLib路径或ProgID列表
+    bool autoTypelib = true;                 // 自动从源码中提取COM类型并加载TypeLib
 };
 
 // 编译结果
@@ -85,10 +90,14 @@ private:
     // 语义分析产出 (供代码生成使用)
     std::vector<std::unique_ptr<SemanticAnalyzer>> analyzers_;
 
+    // TypeLib解析器 (P6.3, 编译期加载COM类型信息)
+    std::unique_ptr<TypeLibParser> typelibParser_;
+
     // 编译流水线各阶段
     bool runLexer(const CompileOptions& options);
     bool runPreprocess(const CompileOptions& options);
     bool runParser(const CompileOptions& options);
+    bool runTypeLibImport(const CompileOptions& options);  // P6.3: 加载TypeLib+注册COM类型
     bool runSemanticAnalysis(const CompileOptions& options);
     bool runCrossModuleResolution();  // 跨模块符号链接
     bool runCodeGeneration(const CompileOptions& options, const std::string& outputDir);

@@ -75,6 +75,12 @@ std::pair<CompileOptions, int> Driver::parseArgs(int argc, char* argv[]) {
         else if (arg == "--syntax-only") {
             opts.syntaxOnly = true;
         }
+        else if (arg == "--typelib" && i + 1 < argc) {
+            opts.typelibRefs.push_back(argv[++i]);  // P6.3: 显式TypeLib引用
+        }
+        else if (arg == "--no-auto-typelib") {
+            opts.autoTypelib = false;  // P6.3: 禁用自动TypeLib加载
+        }
         else if (arg == "-v" || arg == "--verbose") {
             opts.verbose = true;
         }
@@ -200,6 +206,14 @@ CompileResult Driver::compile(const CompileOptions& options) {
         return result;
     }
 
+    // === 阶段2.5: TypeLib导入 (P6.3, 前期绑定) ===
+    if (!runTypeLibImport(effectiveOpts)) {
+        // TypeLib加载失败不阻断编译, 仅降级为后期绑定
+        if (effectiveOpts.verbose) {
+            std::cerr << "c3: note: TypeLib import skipped, using late binding" << std::endl;
+        }
+    }
+
     // === 阶段3: 语义分析 ===
     if (!runSemanticAnalysis(effectiveOpts)) {
         std::cerr << diag_->toString();
@@ -216,6 +230,27 @@ CompileResult Driver::compile(const CompileOptions& options) {
             result.errorCount = diag_->errorCount();
             result.warningCount = diag_->warningCount();
             return result;
+        }
+    }
+
+    // === 阶段3.6: P6.4 标记接口类 ===
+    // 遍历所有模块的类符号, 将被Implements引用的类标记为isInterface
+    for (size_t i = 0; i < analyzers_.size(); i++) {
+        SymbolTable& symTab = analyzers_[i]->symbolTable();
+        for (auto& [key, sym] : symTab.moduleScope()->symbols()) {
+            if (sym->kind == SymbolKind::Class && !sym->implementsNames.empty()) {
+                // 这个类有Implements列表, 它实现的接口需要标记
+                for (const auto& ifaceName : sym->implementsNames) {
+                    // 在所有模块中查找并标记接口类
+                    for (size_t j = 0; j < analyzers_.size(); j++) {
+                        SymbolTable& otherSymTab = analyzers_[j]->symbolTable();
+                        Symbol* ifaceSym = otherSymTab.lookupModule(ifaceName);
+                        if (ifaceSym && ifaceSym->kind == SymbolKind::Class) {
+                            ifaceSym->isInterface = true;
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -442,10 +477,152 @@ bool Driver::runParser(const CompileOptions& options) {
     return !diag_->hasErrors();
 }
 
+bool Driver::runTypeLibImport(const CompileOptions& options) {
+    // P6.3: 编译期TypeLib导入, 提取COM类型信息用于前期绑定
+    // 此阶段在语义分析之前运行, 将TypeLib中的coclass/接口注册为全局符号
+
+    typelibParser_ = std::make_unique<TypeLibParser>(*diag_);
+
+    // 1. 加载显式引用的TypeLib
+    for (const auto& ref : options.typelibRefs) {
+        // 判断是文件路径还是ProgID
+        if (ref.find('.') != std::string::npos && ref.find('\\') == std::string::npos && ref.find('/') == std::string::npos) {
+            // 含点但不含路径分隔符 → ProgID
+            typelibParser_->loadByProgId(ref);
+        } else if (ref.find('{') != std::string::npos) {
+            // 含花括号 → CLSID
+            typelibParser_->loadByClsid(ref);
+        } else {
+            // 否则视为文件路径
+            typelibParser_->loadByPath(ref);
+        }
+    }
+
+    // 2. 自动加载常用TypeLib (可被--no-auto-typelib关闭)
+    if (options.autoTypelib) {
+        // 常用COM组件ProgID列表
+        static const std::vector<std::string> commonProgIds = {
+            "Scripting.FileSystemObject",   // Scripting Runtime
+            "Scripting.Dictionary",         // Scripting Runtime (同一TypeLib)
+            "ADODB.Connection",             // ADO
+            "Excel.Application",            // Excel
+            "Word.Application",             // Word
+            "Shell.Application",            // Shell
+            "WScript.Shell",                // WScript
+            "MSXML2.DOMDocument",           // MSXML
+        };
+
+        for (const auto& progId : commonProgIds) {
+            // 仅在缓存中不存在时加载
+            if (!typelibParser_->findCachedCoClass(progId)) {
+                typelibParser_->loadByProgId(progId);
+            }
+        }
+    }
+
+    // 3. 输出加载结果 (verbose模式)
+    if (options.verbose) {
+        std::cerr << "c3: TypeLib import: ";
+        int totalCoClasses = 0, totalIfaces = 0;
+        for (auto& tl : typelibParser_->cachedResults()) {
+            totalCoClasses += (int)tl->coclasses.size();
+            totalIfaces += (int)tl->interfaces.size();
+        }
+        std::cerr << totalCoClasses << " coclasses, " << totalIfaces
+                  << " interfaces from " << typelibParser_->cachedResults().size()
+                  << " type libraries" << std::endl;
+    }
+
+    return true;  // TypeLib加载失败不阻断编译
+}
+
 bool Driver::runSemanticAnalysis(const CompileOptions& options) {
     analyzers_.clear();
     for (auto& module : modules_) {
         auto analyzer = std::make_unique<SemanticAnalyzer>(*diag_, options.verbose);
+
+        // P6.3: 如果有TypeLib解析结果, 注入COM类型信息到符号表
+        if (typelibParser_) {
+            for (auto& tl : typelibParser_->cachedResults()) {
+                for (auto& cc : tl->coclasses) {
+                    // 注册ComClass符号
+                    auto sym = std::make_unique<Symbol>(
+                        SymbolKind::ComClass, cc->name, Vb6Type::Object,
+                        SourceLocation{}, AccessLevel::Public);
+                    sym->isBuiltin = true;
+                    sym->comClsidStr = cc->clsidStr;
+                    sym->comProgId = cc->progId;
+                    sym->comDefaultIfaceName = cc->defaultIfaceName;
+
+                    // 复制默认接口的方法签名到ComClass
+                    if (cc->defaultIface) {
+                        sym->comIidStr = cc->defaultIface->iidStr;
+                        sym->comIsDual = cc->defaultIface->isDual;
+                        sym->comVtblBase = cc->defaultIface->isDispatch ? 7 : 3;
+
+                        for (auto& member : cc->defaultIface->members) {
+                            Symbol::ComMethodSig sig;
+                            sig.realName = member.realName;
+                            sig.memid = member.memid;
+                            sig.vtableIndex = member.vtableIndex;
+                            sig.returnType = member.returnType;
+                            sig.isPropertyGet = (member.kind == ComMemberKind::PropertyGet);
+                            sig.isPropertyPut = (member.kind == ComMemberKind::PropertyPut);
+                            sig.isPropertyPutRef = (member.kind == ComMemberKind::PropertyPutRef);
+                            for (auto& param : member.params) {
+                                ParameterInfo pi;
+                                pi.name = param.name;
+                                pi.type = param.type;
+                                pi.isByVal = (param.direction == ComParamDir::In);
+                                pi.isOptional = param.isOptional;
+                                sig.params.push_back(std::move(pi));
+                            }
+                            sym->comMethods[member.name] = std::move(sig);
+                        }
+                        // 填充memberNames (类成员名列表, 兼容现有逻辑)
+                        for (auto& member : cc->defaultIface->members) {
+                            sym->memberNames.push_back(member.realName);
+                        }
+                    }
+
+                    analyzer->symbolTable().define(std::move(sym));
+                }
+
+                // 也注册ComInterface符号
+                for (auto& iface : tl->interfaces) {
+                    auto sym = std::make_unique<Symbol>(
+                        SymbolKind::ComInterface, iface->name, Vb6Type::Object,
+                        SourceLocation{}, AccessLevel::Public);
+                    sym->isBuiltin = true;
+                    sym->comIidStr = iface->iidStr;
+                    sym->comIsDual = iface->isDual;
+                    sym->comVtblBase = iface->isDispatch ? 7 : 3;
+
+                    for (auto& member : iface->members) {
+                        Symbol::ComMethodSig sig;
+                        sig.realName = member.realName;
+                        sig.memid = member.memid;
+                        sig.vtableIndex = member.vtableIndex;
+                        sig.returnType = member.returnType;
+                        sig.isPropertyGet = (member.kind == ComMemberKind::PropertyGet);
+                        sig.isPropertyPut = (member.kind == ComMemberKind::PropertyPut);
+                        sig.isPropertyPutRef = (member.kind == ComMemberKind::PropertyPutRef);
+                        for (auto& param : member.params) {
+                            ParameterInfo pi;
+                            pi.name = param.name;
+                            pi.type = param.type;
+                            pi.isByVal = (param.direction == ComParamDir::In);
+                            pi.isOptional = param.isOptional;
+                            sig.params.push_back(std::move(pi));
+                        }
+                        sym->comMethods[member.name] = std::move(sig);
+                    }
+
+                    analyzer->symbolTable().define(std::move(sym));
+                }
+            }
+        }
+
         bool ok = analyzer->analyze(*module);
 
         if (options.dumpSymbols) {
@@ -525,10 +702,13 @@ bool Driver::runCrossModuleResolution() {
             extSym->sourceModule = moduleBaseNames[srcIdx];
             extSym->params = srcSym->params;  // 复制参数列表（函数调用需要）
             extSym->isArray = srcSym->isArray;
-            // 类符号: 复制instancing和memberNames
+            // 类符号: 复制instancing、memberNames、isInterface、implementsNames
             if (srcSym->kind == SymbolKind::Class) {
                 extSym->instancing = srcSym->instancing;
                 extSym->memberNames = srcSym->memberNames;
+                extSym->isInterface = srcSym->isInterface;  // P6.4
+                extSym->implementsNames = srcSym->implementsNames;  // P6.4
+                extSym->interfaceMethodNames = srcSym->interfaceMethodNames;  // P6.4
             }
 
             symTab.defineExternal(std::move(extSym));

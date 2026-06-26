@@ -7,6 +7,18 @@
 #include <string.h>
 
 // ============================================================
+// C-style vtable helpers for IUnknown (avoid C++ IUnknown method call issues)
+// ============================================================
+static HRESULT vb6_UnknownQI(void* obj, REFIID riid, void** ppv) {
+    IUnknown* pUnk = (IUnknown*)obj;
+    return pUnk->lpVtbl->QueryInterface(pUnk, riid, ppv);
+}
+static ULONG vb6_UnknownRelease(void* obj) {
+    IUnknown* pUnk = (IUnknown*)obj;
+    return pUnk->lpVtbl->Release(pUnk);
+}
+
+// ============================================================
 // COM初始化/退出
 // ============================================================
 
@@ -582,4 +594,121 @@ void* vb6_ComGetObjectProp(void* disp, const wchar_t* propName) {
     }
     vb6_ComVarFree(pv);  // 仅释放结构体, 不Release pdispVal
     return obj;
+}
+
+// ============================================================
+// P6.3: COM前期绑定运行时 (vtable直接调用)
+// ============================================================
+
+void* vb6_ComQI(void* obj, const char* iidStr) {
+    if (!obj || !iidStr) return NULL;
+    IID iid;
+    wchar_t iidWide[64];
+    int len = 0;
+    for (; iidStr[len] && len < 63; len++) iidWide[len] = (wchar_t)iidStr[len];
+    iidWide[len] = 0;
+    HRESULT hr = IIDFromString(iidWide, &iid);
+    if (FAILED(hr)) return NULL;
+    void* pv = NULL;
+    hr = vb6_UnknownQI(obj, &iid, &pv);
+    if (FAILED(hr)) return NULL;
+    return pv;
+}
+
+void* vb6_ComCreateTyped(const wchar_t* progId, const char* iidStr) {
+    void* disp = vb6_CreateObject(progId);
+    if (!disp) return NULL;
+    void* iface = vb6_ComQI(disp, iidStr);
+    vb6_UnknownRelease(disp);
+    return iface;
+}
+
+void vb6_ComReleaseTyped(void** objPtr) {
+    if (objPtr && *objPtr) {
+        vb6_UnknownRelease(*objPtr);
+        *objPtr = NULL;
+    }
+}
+
+void vb6_ComVtableCallVoid(void* obj, int32_t vtIndex, ...) {
+    if (!obj) return;
+    void** vtable = *(void***)obj;
+    if (!vtable || vtIndex < 0) return;
+}
+
+wchar_t* vb6_ComVtableGetBSTR(void* obj, int32_t vtIndex, ...) {
+    if (!obj) return NULL;
+    void** vtable = *(void***)obj;
+    if (!vtable || vtIndex < 0) return NULL;
+    typedef HRESULT(__stdcall* GetBSTRMethod)(void*, BSTR*);
+    GetBSTRMethod fn = (GetBSTRMethod)vtable[vtIndex];
+    BSTR result = NULL;
+    fn(obj, &result);
+    if (!result) return NULL;
+    wchar_t* buf = (wchar_t*)malloc((SysStringLen(result) + 1) * sizeof(wchar_t));
+    wmemcpy(buf, result, SysStringLen(result));
+    buf[SysStringLen(result)] = 0;
+    SysFreeString(result);
+    return buf;
+}
+
+int32_t vb6_ComVtableGetInt(void* obj, int32_t vtIndex, ...) {
+    if (!obj) return 0;
+    void** vtable = *(void***)obj;
+    if (!vtable || vtIndex < 0) return 0;
+    typedef HRESULT(__stdcall* GetVarMethod)(void*, VARIANT*);
+    GetVarMethod fn = (GetVarMethod)vtable[vtIndex];
+    VARIANT v; VariantInit(&v); fn(obj, &v);
+    int32_t result = 0;
+    if (v.vt == VT_I4) result = v.lVal;
+    else if (v.vt == VT_I2) result = v.iVal;
+    else if (v.vt == VT_BOOL) result = (v.boolVal != 0) ? -1 : 0;
+    else if (v.vt == VT_R8) result = (int32_t)v.dblVal;
+    else if (v.vt == VT_EMPTY || v.vt == VT_NULL) result = 0;
+    else { VARIANT vO; VariantInit(&vO); if(SUCCEEDED(VariantChangeType(&vO,&v,0,VT_I4))) result=vO.lVal; VariantClear(&vO); }
+    VariantClear(&v);
+    return result;
+}
+
+double vb6_ComVtableGetDouble(void* obj, int32_t vtIndex, ...) {
+    if (!obj) return 0.0;
+    void** vtable = *(void***)obj;
+    if (!vtable || vtIndex < 0) return 0.0;
+    typedef HRESULT(__stdcall* GetVarMethod)(void*, VARIANT*);
+    GetVarMethod fn = (GetVarMethod)vtable[vtIndex];
+    VARIANT v; VariantInit(&v); fn(obj, &v);
+    double result = 0.0;
+    if (v.vt == VT_R8) result = v.dblVal;
+    else if (v.vt == VT_R4) result = v.fltVal;
+    else if (v.vt == VT_I4) result = (double)v.lVal;
+    else if (v.vt == VT_I2) result = (double)v.iVal;
+    else { VARIANT vO; VariantInit(&vO); if(SUCCEEDED(VariantChangeType(&vO,&v,0,VT_R8))) result=vO.dblVal; VariantClear(&vO); }
+    VariantClear(&v);
+    return result;
+}
+
+void* vb6_ComVtableGetObject(void* obj, int32_t vtIndex, ...) {
+    if (!obj) return NULL;
+    void** vtable = *(void***)obj;
+    if (!vtable || vtIndex < 0) return NULL;
+    typedef HRESULT(__stdcall* GetVarMethod)(void*, VARIANT*);
+    GetVarMethod fn = (GetVarMethod)vtable[vtIndex];
+    VARIANT v; VariantInit(&v); fn(obj, &v);
+    void* result = NULL;
+    if (v.vt == VT_DISPATCH && v.pdispVal) result = v.pdispVal;
+    else if (v.vt == VT_UNKNOWN && v.punkVal) result = v.punkVal;
+    if (v.vt == VT_DISPATCH || v.vt == VT_UNKNOWN) v.pdispVal = NULL;
+    VariantClear(&v);
+    return result;
+}
+
+void* vb6_ComVtableGetVoid(void* obj, int32_t vtIndex, ...) {
+    if (!obj) return NULL;
+    void** vtable = *(void***)obj;
+    if (!vtable || vtIndex < 0) return NULL;
+    typedef HRESULT(__stdcall* GetVarMethod)(void*, VARIANT*);
+    GetVarMethod fn = (GetVarMethod)vtable[vtIndex];
+    VARIANT* pv = (VARIANT*)malloc(sizeof(VARIANT));
+    VariantInit(pv); fn(obj, pv);
+    return (void*)pv;
 }

@@ -37,6 +37,8 @@ enum class SymbolKind : uint8_t {
     Event,          // Event 声明
     Class,          // 类模块 (.cls)
     Label,          // 行标签
+    ComClass,       // COM coclass (来自TypeLib, 前期绑定)
+    ComInterface,   // COM 接口 (来自TypeLib, 前期绑定)
 };
 
 // ============================================================
@@ -92,6 +94,32 @@ struct Symbol {
     // --- 类相关 (仅SymbolKind::Class) ---
     VBInstancing instancing = VBInstancing::Private;  // Instancing属性
     std::vector<std::string> memberNames;              // 类成员名称列表(方法+属性+事件)
+    bool isInterface = false;                          // 是否为接口类(纯抽象,无实现)
+    std::vector<std::string> implementsNames;          // Implements列表: 该类实现的接口名
+    // 接口方法(仅isInterface=true时有意义): 必须被实现类覆盖的方法签名
+    std::vector<ParameterInfo> interfaceMethodParams;  // 备用: 接口方法参数信息
+    std::vector<std::string> interfaceMethodNames;     // 接口方法名列表(小写)
+
+    // --- COM前期绑定相关 (P6.3, SymbolKind::ComClass/ComInterface) ---
+    std::string comIidStr;            // 接口IID字符串 (如 "{2A0A3E20-...}")
+    std::string comClsidStr;          // coclass CLSID字符串
+    std::string comProgId;            // ProgID (如 "Scripting.FileSystemObject")
+    std::string comDefaultIfaceName;  // 默认接口名 (ComClass用)
+    int32_t comVtblBase = 7;         // vtable起始偏移 (IDispatch=7, IUnknown=3)
+    bool comIsDual = false;           // 双重接口 (dispinterface + vtable)
+
+    // COM方法签名 (ComInterface用, 方法名小写→签名)
+    struct ComMethodSig {
+        std::string realName;         // 原始名称(保留大小写)
+        int32_t memid = 0;           // DISPID
+        int32_t vtableIndex = -1;    // vtable偏移
+        Vb6Type returnType = Vb6Type::Void;  // 返回类型
+        bool isPropertyGet = false;
+        bool isPropertyPut = false;
+        bool isPropertyPutRef = false;
+        std::vector<ParameterInfo> params;  // 参数列表(含方向/类型)
+    };
+    std::unordered_map<std::string, ComMethodSig> comMethods;  // key=小写方法名
 
     Symbol() = default;
     Symbol(SymbolKind k, const std::string& n, Vb6Type t,
@@ -124,6 +152,8 @@ struct Symbol {
             case SymbolKind::Event:           return "Event";
             case SymbolKind::Class:           return "Class";
             case SymbolKind::Label:           return "Label";
+            case SymbolKind::ComClass:        return "ComClass";
+            case SymbolKind::ComInterface:    return "ComInterface";
         }
         return "Unknown";
     }

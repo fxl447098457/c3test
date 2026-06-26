@@ -89,6 +89,45 @@ double vb6_ComGetDoubleProp(void* disp, const wchar_t* propName);
 // COM属性Get→对象 (内部UnpackObject+VarFree)
 void* vb6_ComGetObjectProp(void* disp, const wchar_t* propName);
 
+// ============================================================
+// P6.3: COM前期绑定运行时支持 (vtable直接调用)
+// ============================================================
+
+// QueryInterface获取指定接口指针 (用于前期绑定初始化)
+// iidStr: IID字符串 (如 "{2A0A3E20-...}")
+// 返回: 请求的接口指针, 失败返回NULL
+void* vb6_ComQI(void* obj, const char* iidStr);
+
+// 创建前期绑定COM对象: CreateObject + QI
+// progId: ProgID, iidStr: 目标接口IID
+// 返回: 接口指针 (前期绑定类型), 失败返回NULL
+void* vb6_ComCreateTyped(const wchar_t* progId, const char* iidStr);
+
+// 释放前期绑定COM对象 (与ReleaseObject类似, 但针对接口指针)
+void vb6_ComReleaseTyped(void** objPtr);
+
+// vtable直接调用辅助函数 (P6.3 cgen使用)
+// obj: 接口指针, vtIndex: vtable偏移量
+// 参数通过va_list传递, 返回值从VARIANT解封
+
+// vtable调用→void (无返回值/丢弃)
+void vb6_ComVtableCallVoid(void* obj, int32_t vtIndex, ...);
+
+// vtable调用→BSTR
+wchar_t* vb6_ComVtableGetBSTR(void* obj, int32_t vtIndex, ...);
+
+// vtable调用→int32_t
+int32_t vb6_ComVtableGetInt(void* obj, int32_t vtIndex, ...);
+
+// vtable调用→double
+double vb6_ComVtableGetDouble(void* obj, int32_t vtIndex, ...);
+
+// vtable调用→对象(void*)
+void* vb6_ComVtableGetObject(void* obj, int32_t vtIndex, ...);
+
+// vtable调用→通用void* (VARIANT结果)
+void* vb6_ComVtableGetVoid(void* obj, int32_t vtIndex, ...);
+
 // COM初始化/退出 (由vb6_Init/vb6_Exit调用)
 void vb6_ComInit(void);
 void vb6_ComExit(void);

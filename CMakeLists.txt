@@ -73,8 +73,11 @@ add_library(vb6c3-core STATIC
     src/semantics/type_system.cpp
     src/semantics/semantic_analyzer.cpp
     src/project/vbp_parser.cpp
+    src/com/typelib_parser.cpp
 )
 target_compile_definitions(vb6c3-core PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
+# TypeLib解析器需要ole32/oleaut32 (编译期COM API)
+target_link_libraries(vb6c3-core PRIVATE ole32 oleaut32 uuid)
 
 # --- C代码生成后端 ---
 add_library(vb6c3-cgen STATIC

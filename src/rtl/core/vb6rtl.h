@@ -416,6 +416,17 @@ int32_t vb6_ComGetIntProp(void* disp, const wchar_t* propName);
 double vb6_ComGetDoubleProp(void* disp, const wchar_t* propName);
 void* vb6_ComGetObjectProp(void* disp, const wchar_t* propName);
 
+// P6.3: COM前期绑定 (vtable直接调用)
+void* vb6_ComQI(void* obj, const char* iidStr);
+void* vb6_ComCreateTyped(const wchar_t* progId, const char* iidStr);
+void vb6_ComReleaseTyped(void** objPtr);
+void vb6_ComVtableCallVoid(void* obj, int32_t vtIndex, ...);
+wchar_t* vb6_ComVtableGetBSTR(void* obj, int32_t vtIndex, ...);
+int32_t vb6_ComVtableGetInt(void* obj, int32_t vtIndex, ...);
+double vb6_ComVtableGetDouble(void* obj, int32_t vtIndex, ...);
+void* vb6_ComVtableGetObject(void* obj, int32_t vtIndex, ...);
+void* vb6_ComVtableGetVoid(void* obj, int32_t vtIndex, ...);
+
 // ============================================================
 // 运行时初始化/退出
 // ============================================================
