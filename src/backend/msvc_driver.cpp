@@ -96,10 +96,23 @@ bool MsvcDriver::compileAndLink(const MsvcDriverOptions& options) {
     if (!options.rtlDir.empty()) {
         cmd << " \"" << options.rtlDir << "\\vb6rtl.c\"";
         cmd << " \"" << options.rtlDir << "\\vb6com.c\"";
+        if (options.isDll) {
+            cmd << " \"" << options.rtlDir << "\\vb6comserver.c\"";  // P6.6: COM服务端运行时
+        }
     }
 
-    // 链接: 控制台程序 + COM库 (ole32/oleaut32/uuid)
-    cmd << " /link /SUBSYSTEM:CONSOLE ole32.lib oleaut32.lib uuid.lib";
+    // 链接选项
+    if (options.isDll) {
+        // P6.6: ActiveX DLL链接
+        cmd << " /link /DLL";
+        if (!options.defFile.empty()) {
+            cmd << " /DEF:\"" << options.defFile << "\"";
+        }
+        cmd << " ole32.lib oleaut32.lib uuid.lib advapi32.lib";
+    } else {
+        // 控制台程序
+        cmd << " /link /SUBSYSTEM:CONSOLE ole32.lib oleaut32.lib uuid.lib";
+    }
 
     if (options.verbose) {
         std::cout << "c3: 执行: " << cmd.str() << std::endl;

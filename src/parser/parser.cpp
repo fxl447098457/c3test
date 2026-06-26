@@ -416,10 +416,9 @@ void Parser::parseModuleBody(Module& mod) {
             skipToNextLine();
             skipNewLines();
 
-            // 跳过 BEGIN ... END 块
+            // 解析 BEGIN ... END 块, 提取 MultiUse 等 instancing 属性
             if (cur_.kind == TokenKind::Begin) {
                 advance();  // consume BEGIN
-                // 跳过直到匹配的 END
                 int depth = 1;
                 while (cur_.kind != TokenKind::EndOfFile && depth > 0) {
                     if (cur_.kind == TokenKind::Begin) {
@@ -429,6 +428,28 @@ void Parser::parseModuleBody(Module& mod) {
                         if (depth == 0) {
                             advance();  // consume END
                             break;
+                        }
+                    } else if (depth == 1 && cur_.kind == TokenKind::Identifier) {
+                        // 顶层属性: 检查是否为 MultiUse
+                        std::string attrName = toLower(cur_.text);
+                        if (attrName == "multiuse") {
+                            advance();  // consume MultiUse
+                            if (cur_.kind == TokenKind::Equals) {
+                                advance();  // consume =
+                                // -1 = True (MultiUse), 0 = False (Private)
+                                if (cur_.kind == TokenKind::Minus) {
+                                    advance();  // consume -
+                                }
+                                if (cur_.kind == TokenKind::IntegerLiteral ||
+                                    cur_.kind == TokenKind::LongLiteral) {
+                                    int val = std::atoi(cur_.text.c_str());
+                                    if (val != 0) {
+                                        mod.instancing = VBInstancing::MultiUse;
+                                    }
+                                    advance();
+                                }
+                            }
+                            continue;  // 已消费属性, 不再 advance
                         }
                     }
                     advance();

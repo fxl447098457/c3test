@@ -37,12 +37,15 @@ CCodeGen::CCodeGen(Diagnostics& diag, const SymbolTable& symTab,
 // ============================================================
 
 bool CCodeGen::generate(Module& module, const std::string& baseName,
-                         const std::unordered_set<std::string>& externalModules) {
+                         const std::unordered_set<std::string>& externalModules,
+                         bool isDll, const std::string& dllProgId) {
     currentModule_ = &module;
     baseName_ = baseName;
     moduleName_ = baseName;  // 模块名 = 输出基名（如 "MathUtils"）
     isMultiModule_ = !externalModules.empty();  // 有外部依赖 = 多模块项目
     isClassModule_ = module.isClassModule;
+    isDll_ = isDll;  // P6.6
+    dllProgId_ = dllProgId;  // P6.6
     emittedSymbols_.clear();
     labelCounter_ = 0;
     tempCounter_ = 0;
@@ -397,10 +400,16 @@ bool CCodeGen::generate(Module& module, const std::string& baseName,
     }
 
     // 生成入口点 (类模块不生成main; 多模块工程中仅有Sub Main的模块生成main)
+    // P6.6: ActiveX DLL入口点统一由dll_entry.c生成, 不在各模块.c中生成
     if (!isClassModule_) {
-        c_.emitBlank();
-        c_.emitLine("// === 入口点 ===");
-        bool hasMain = false;
+        if (isDll_) {
+            // P6.6: DLL模式下, 入口点由driver额外生成的dll_entry.c提供
+            // 这里只生成vb6_Init/vb6_Exit的调用桩 (供dll_entry.c中的DllMain使用)
+            // 不再调用emitActiveXDll()以避免符号重复定义
+        } else {
+            c_.emitBlank();
+            c_.emitLine("// === 入口点 ===");
+            bool hasMain = false;
         for (auto& decl : module.declarations) {
             if (decl->kind == ASTNodeKind::SubDecl) {
                 auto& sub = static_cast<SubDecl&>(*decl);
@@ -445,8 +454,9 @@ bool CCodeGen::generate(Module& module, const std::string& baseName,
             c_.dedent();
             c_.emitLine("}");
         } else if (!shouldGenMain) {
-            c_.emitLine("// No entry point (library module)");
-        }
+                c_.emitLine("// No entry point (library module)");
+            }
+        }  // end else (EXE mode)
     }
 
     // 保存生成结果
@@ -3791,8 +3801,627 @@ void CCodeGen::visit(ParameterDecl& node) {
 }
 
 // ============================================================
-// 类型引用 visit (代码生成中通常不用这些, mapTypeRef直接处理)
+// P6.6: ActiveX DLL代码生成
+// 为ActiveX DLL工程生成COM服务端代码:
+//   1. coclass描述表 (g_vb6_coclasses[])
+//   2. IDispatch方法描述 (g_vb6_disp_<Class>Methods[])
+//   3. IDispatch方法调用桥接 (vb6_disp_<Class>_<Method>_invoke)
+//   4. DllGetClassObject / DllCanUnloadNow
+//   5. DllRegisterServer / DllUnregisterServer
+//   6. .def导出文件
 // ============================================================
+
+void CCodeGen::emitActiveXDll(Module& module) {
+    // 收集所有instancing >= PublicNotCreatable的类模块
+    // 在多模块DLL工程中, 需要查找所有类模块
+    struct CoClassInfo {
+        std::string moduleName;   // 类模块名
+        std::string clsidStr;     // CLSID字符串
+        std::string progId;       // ProgID (dllProgId.ModuleName)
+        std::vector<std::string> publicMethodNames;  // Public方法名
+        std::vector<Symbol*> publicMethodSyms;       // Public方法符号
+    };
+    std::vector<CoClassInfo> coClasses;
+
+    // 生成CLSID (基于模块名的确定性UUID v5)
+    // 使用简单哈希生成伪CLSID (MVP: 生产环境应支持.vbp中指定CLSID)
+    auto generateClsid = [](const std::string& name) -> std::string {
+        // 简单确定性哈希: 使用名称的FNV-1a变体生成UUID格式字符串
+        uint32_t h1 = 0x811c9dc5, h2 = 0x01000193, h3 = 0xabcd1234, h4 = 0x5678ef01;
+        for (char c : name) {
+            h1 ^= (uint32_t)(unsigned char)c; h1 *= 0x01000193;
+            h2 ^= (uint32_t)(unsigned char)c; h2 *= 0x01000193;
+            h3 ^= (uint32_t)(unsigned char)c; h3 *= 0x01000193;
+            h4 ^= (uint32_t)(unsigned char)c; h4 *= 0x01000193;
+        }
+        char buf[64];
+        snprintf(buf, sizeof(buf), "{%08X-%04X-%04X-%04X-%04X%08X}",
+                 h1, (h2 >> 16) & 0xFFFF, h2 & 0xFFFF | 0x4000,  // version 4
+                 (h3 >> 16) & 0xFFFF | 0x8000,  // variant 10
+                 h3 & 0xFFFF, h4);
+        return std::string(buf);
+    };
+
+    // 搜索当前模块和所有已知类
+    // 当前模块是标准模块(.bas), 类模块是单独编译的
+    // DLL模式下, 需要收集所有Public类符号
+    for (auto& [key, sym] : symTab_.moduleScope()->symbols()) {
+        if (sym->kind == SymbolKind::Class && !sym->isInterface) {
+            if (sym->instancing != VBInstancing::Private) {
+                CoClassInfo info;
+                info.moduleName = sym->name;
+                info.clsidStr = generateClsid(dllProgId_ + "." + sym->name);
+                info.progId = dllProgId_ + "." + sym->name;
+
+                // 收集Public方法 (使用类的memberNames查找, 而非按前缀搜索)
+                for (auto& memberName : sym->memberNames) {
+                    Symbol* memSym = symTab_.lookupModule(memberName);
+                    if (!memSym) memSym = symTab_.lookup(memberName);
+                    if (!memSym) continue;
+                    if (memSym->kind != SymbolKind::Sub && memSym->kind != SymbolKind::Function &&
+                        memSym->kind != SymbolKind::PropertyGet &&
+                        memSym->kind != SymbolKind::PropertyLet &&
+                        memSym->kind != SymbolKind::PropertySet) continue;
+                    if (memSym->access != AccessLevel::Public) continue;
+                    info.publicMethodNames.push_back(memSym->name);
+                    info.publicMethodSyms.push_back(memSym);
+                }
+                coClasses.push_back(std::move(info));
+            }
+        }
+    }
+
+    if (coClasses.empty()) {
+        c_.emitLine("// P6.6: No public creatable classes found for ActiveX DLL");
+        return;
+    }
+
+    c_.emitBlank();
+    c_.emitLine("// ============================================================");
+    c_.emitLine("// P6.6: ActiveX DLL COM Server");
+    c_.emitLine("// ============================================================");
+    c_.emitBlank();
+
+    // 包含vb6comserver.h
+    c_.emitLine("#include \"vb6comserver.h\"");
+    c_.emitBlank();
+
+    // 1. 为每个coclass生成IDispatch方法桥接函数
+    for (auto& cc : coClasses) {
+        std::string clsId = cIdent(cc.moduleName);
+        std::string clsStruct = "vb6_cls_" + clsId;
+
+        for (size_t mi = 0; mi < cc.publicMethodNames.size(); mi++) {
+            std::string& methodName = cc.publicMethodNames[mi];
+            Symbol* methodSym = cc.publicMethodSyms[mi];
+            // 提取方法名去掉类前缀 (如 CMath_Add → Add)
+            std::string prefix = cc.moduleName + "_";
+            std::string bareName = methodName;
+            if (Symbol::toLower(bareName).substr(0, prefix.size()) == Symbol::toLower(prefix)) {
+                bareName = bareName.substr(prefix.size());
+            }
+            std::string invokeName = "vb6_disp_" + clsId + "_" + cIdent(bareName) + "_invoke";
+
+            c_.emitLine("static void " + invokeName + "(void* instance, void** args, int32_t argc, void* result) {");
+            c_.indent();
+            c_.emitLine(clsStruct + "* me = (" + clsStruct + "*)instance;");
+
+            // 构建调用参数
+            // 注意: args[i] 是 VARIANT* (来自DISPPARAMS.rgvarg), 需用VARIANT字段提取值
+            std::string callArgs = "me";
+            for (int i = 0; i < (int)methodSym->params.size(); i++) {
+                callArgs += ", ";
+                Vb6Type pType = methodSym->params[i].type;
+                if (methodSym->params[i].isByVal) {
+                    // 从VARIANT中提取ByVal值
+                    if (pType == Vb6Type::Long || pType == Vb6Type::Integer ||
+                        pType == Vb6Type::Boolean || pType == Vb6Type::Byte) {
+                        callArgs += "((VARIANT*)args[" + std::to_string(i) + "])->lVal";
+                    } else if (pType == Vb6Type::Double || pType == Vb6Type::Single) {
+                        callArgs += "((VARIANT*)args[" + std::to_string(i) + "])->dblVal";
+                    } else if (pType == Vb6Type::String) {
+                        callArgs += "((VARIANT*)args[" + std::to_string(i) + "])->bstrVal";
+                    } else {
+                        callArgs += "((VARIANT*)args[" + std::to_string(i) + "])->lVal";
+                    }
+                } else {
+                    // ByRef: 传递VARIANT中的值指针
+                    if (pType == Vb6Type::Long || pType == Vb6Type::Integer ||
+                        pType == Vb6Type::Boolean || pType == Vb6Type::Byte) {
+                        callArgs += "&((VARIANT*)args[" + std::to_string(i) + "])->lVal";
+                    } else if (pType == Vb6Type::Double || pType == Vb6Type::Single) {
+                        callArgs += "&((VARIANT*)args[" + std::to_string(i) + "])->dblVal";
+                    } else {
+                        callArgs += "(void*)&((VARIANT*)args[" + std::to_string(i) + "])->lVal";
+                    }
+                }
+            };
+
+            // 生成调用 (Private方法也有static前缀, 但Public在多模块模式下是vb6_Mod_Method)
+            std::string procName = cProcName(methodName, methodSym->access);
+
+            if (methodSym->kind == SymbolKind::Function) {
+                // Function: 返回值写入result
+                std::string retType = mapType(methodSym->type);
+                c_.emitLine("if (result) {");
+                c_.indent();
+                c_.emitLine(retType + " _r = " + procName + "(" + callArgs + ");");
+                // 将返回值写入VARIANT result
+                if (methodSym->type == Vb6Type::Long || methodSym->type == Vb6Type::Integer ||
+                    methodSym->type == Vb6Type::Boolean || methodSym->type == Vb6Type::Byte) {
+                    c_.emitLine("((VARIANT*)result)->vt = VT_I4; ((VARIANT*)result)->lVal = (int32_t)_r;");
+                } else if (methodSym->type == Vb6Type::Double || methodSym->type == Vb6Type::Single) {
+                    c_.emitLine("((VARIANT*)result)->vt = VT_R8; ((VARIANT*)result)->dblVal = (double)_r;");
+                } else if (methodSym->type == Vb6Type::String) {
+                    c_.emitLine("((VARIANT*)result)->vt = VT_BSTR; ((VARIANT*)result)->bstrVal = _r;");
+                } else {
+                    c_.emitLine("((VARIANT*)result)->vt = VT_I4; ((VARIANT*)result)->lVal = (int32_t)(intptr_t)_r;");
+                }
+                c_.dedent();
+                c_.emitLine("}");
+            } else {
+                // Sub: 直接调用
+                c_.emitLine(procName + "(" + callArgs + ");");
+            }
+            c_.dedent();
+            c_.emitLine("}");
+            c_.emitBlank();
+        }
+    }
+
+    // 2. 为每个coclass生成IDispatch方法描述表
+    for (auto& cc : coClasses) {
+        std::string clsId = cIdent(cc.moduleName);
+        std::string methodsVar = "g_vb6_disp_" + clsId + "Methods";
+
+        c_.emitLine("static const vb6_DispMethodDesc " + methodsVar + "[] = {");
+        c_.indent();
+
+        for (size_t mi = 0; mi < cc.publicMethodNames.size(); mi++) {
+            std::string& methodName = cc.publicMethodNames[mi];
+            Symbol* methodSym = cc.publicMethodSyms[mi];
+            std::string prefix = cc.moduleName + "_";
+            std::string bareName = methodName;
+            if (Symbol::toLower(bareName).substr(0, prefix.size()) == Symbol::toLower(prefix)) {
+                bareName = bareName.substr(prefix.size());
+            }
+            std::string invokeName = "vb6_disp_" + clsId + "_" + cIdent(bareName) + "_invoke";
+
+            // invkind: 1=Method, 2=PropertyGet, 4=PropertyPut, 8=PropertyPutRef
+            int invkind = 1;  // 默认方法
+            if (methodSym->kind == SymbolKind::PropertyGet) {
+                invkind = 2;  // DISPATCH_PROPERTYGET
+            } else if (methodSym->kind == SymbolKind::PropertyLet) {
+                invkind = 4;  // DISPATCH_PROPERTYPUT
+            } else if (methodSym->kind == SymbolKind::PropertySet) {
+                invkind = 8;  // DISPATCH_PROPERTYPUTREF
+            }
+
+            // 宽字符方法名 (L"MethodName")
+            std::string wideName = "L\"" + bareName + "\"";
+
+            c_.emitLine("{ " + wideName + ", " + std::to_string((int32_t)(mi + 1)) +
+                        ", " + std::to_string(invkind) + ", " + invokeName + " },");
+        }
+
+        c_.dedent();
+        c_.emitLine("};");
+        c_.emitBlank();
+    }
+
+    // 3. 生成全局coclass描述表
+    c_.emitLine("const vb6_CoClassDesc g_vb6_coclasses[] = {");
+    c_.indent();
+    for (auto& cc : coClasses) {
+        std::string clsId = cIdent(cc.moduleName);
+        std::string clsStruct = "vb6_cls_" + clsId;
+        c_.emitLine("{");
+        c_.indent();
+        c_.emitLine("\"" + cc.progId + "\",  /* progId */");
+        c_.emitLine("\"" + cc.clsidStr + "\",  /* clsidStr */");
+        c_.emitLine("\"" + cc.moduleName + "\",  /* classVariable */");
+        c_.emitLine("(void*(*)(void))" + clsStruct + "_New,  /* factoryFunc */");
+        c_.emitLine("(void(*)(void*))" + clsStruct + "_Destroy,  /* destroyFunc */");
+        c_.emitLine("NULL,  /* dispatchVtable (auto-generated by runtime) */");
+        c_.emitLine(std::to_string(cc.publicMethodNames.size()) + ",  /* methodCount */");
+        c_.emitLine("g_vb6_disp_" + clsId + "Methods,  /* methods */");
+        c_.dedent();
+        c_.emitLine("},");
+    }
+    c_.dedent();
+    c_.emitLine("};");
+    c_.emitBlank();
+
+    c_.emitLine("const int g_vb6_coclassCount = " + std::to_string(coClasses.size()) + ";");
+    c_.emitBlank();
+
+    // 4. DLL导出函数
+    c_.emitLine("// === DLL Export Functions ===");
+    c_.emitBlank();
+
+    // DllGetClassObject
+    c_.emitLine("HRESULT WINAPI DllGetClassObject(REFCLSID rclsid, REFIID riid, void** ppv) {");
+    c_.indent();
+    c_.emitLine("return vb6_GetClassFactory(rclsid, riid, ppv, g_vb6_coclasses, g_vb6_coclassCount);");
+    c_.dedent();
+    c_.emitLine("}");
+    c_.emitBlank();
+
+    // DllCanUnloadNow
+    c_.emitLine("HRESULT WINAPI DllCanUnloadNow(void) {");
+    c_.indent();
+    c_.emitLine("return vb6_DllCanUnloadNow();");
+    c_.dedent();
+    c_.emitLine("}");
+    c_.emitBlank();
+
+    // DllRegisterServer
+    c_.emitLine("HRESULT WINAPI DllRegisterServer(void) {");
+    c_.indent();
+    c_.emitLine("wchar_t dllPath[MAX_PATH];");
+    c_.emitLine("HRESULT hr = vb6_GetDllPath(dllPath, MAX_PATH);");
+    c_.emitLine("if (FAILED(hr)) return hr;");
+    c_.emitLine("for (int i = 0; i < g_vb6_coclassCount; i++) {");
+    c_.indent();
+    c_.emitLine("hr = vb6_RegisterCoClass(&g_vb6_coclasses[i], dllPath);");
+    c_.emitLine("if (FAILED(hr)) return hr;");
+    c_.dedent();
+    c_.emitLine("}");
+    c_.emitLine("return S_OK;");
+    c_.dedent();
+    c_.emitLine("}");
+    c_.emitBlank();
+
+    // DllUnregisterServer
+    c_.emitLine("HRESULT WINAPI DllUnregisterServer(void) {");
+    c_.indent();
+    c_.emitLine("for (int i = 0; i < g_vb6_coclassCount; i++) {");
+    c_.indent();
+    c_.emitLine("vb6_UnregisterCoClass(&g_vb6_coclasses[i]);");
+    c_.dedent();
+    c_.emitLine("}");
+    c_.emitLine("return S_OK;");
+    c_.dedent();
+    c_.emitLine("}");
+    c_.emitBlank();
+
+    // DLL主入口 (DllMain)
+    c_.emitLine("BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved) {");
+    c_.indent();
+    c_.emitLine("if (fdwReason == DLL_PROCESS_ATTACH) {");
+    c_.indent();
+    c_.emitLine("DisableThreadLibraryCalls(hinstDLL);");
+    c_.emitLine("vb6_Init();");
+    c_.dedent();
+    c_.emitLine("} else if (fdwReason == DLL_PROCESS_DETACH) {");
+    c_.indent();
+    c_.emitLine("vb6_Exit();");
+    c_.dedent();
+    c_.emitLine("}");
+    c_.emitLine("return TRUE;");
+    c_.dedent();
+    c_.emitLine("}");
+    c_.emitBlank();
+}
+
+// ============================================================
+// P6.6: 单独生成 DLL 入口文件 (dll_entry.c)
+// 当DLL工程只有类模块(无标准模块)时使用
+// ============================================================
+
+std::string CCodeGen::generateDllEntry(const std::string& progId) {
+    CodeEmitter entry;
+    dllProgId_ = progId;
+
+    // 收集所有instancing >= PublicNotCreatable的类模块
+    struct CoClassInfo {
+        std::string moduleName;
+        std::string clsidStr;
+        std::string progId;
+        std::vector<std::string> publicMethodNames;
+        std::vector<Symbol*> publicMethodSyms;
+    };
+    std::vector<CoClassInfo> coClasses;
+
+    auto generateClsid = [](const std::string& name) -> std::string {
+        uint32_t h1 = 0x811c9dc5, h2 = 0x01000193, h3 = 0xabcd1234, h4 = 0x5678ef01;
+        for (char c : name) {
+            h1 ^= (uint32_t)(unsigned char)c; h1 *= 0x01000193;
+            h2 ^= (uint32_t)(unsigned char)c; h2 *= 0x01000193;
+            h3 ^= (uint32_t)(unsigned char)c; h3 *= 0x01000193;
+            h4 ^= (uint32_t)(unsigned char)c; h4 *= 0x01000193;
+        }
+        char buf[64];
+        snprintf(buf, sizeof(buf), "{%08X-%04X-%04X-%04X-%04X%08X}",
+                 h1, (h2 >> 16) & 0xFFFF, h2 & 0xFFFF | 0x4000,
+                 (h3 >> 16) & 0xFFFF | 0x8000,
+                 h3 & 0xFFFF, h4);
+        return std::string(buf);
+    };
+
+    for (auto& [key, sym] : symTab_.moduleScope()->symbols()) {
+        if (sym->kind == SymbolKind::Class && !sym->isInterface) {
+            if (sym->instancing != VBInstancing::Private) {
+                CoClassInfo info;
+                info.moduleName = sym->name;
+                info.clsidStr = generateClsid(progId + "." + sym->name);
+                info.progId = progId + "." + sym->name;
+
+                // 使用类的memberNames查找Public方法符号
+                // (不能按前缀"ClassName_"搜索, 因为单模块工程中方法名是"SetValue"而非"Calc_SetValue")
+                for (auto& memberName : sym->memberNames) {
+                    Symbol* memSym = symTab_.lookupModule(memberName);
+                    if (!memSym) memSym = symTab_.lookup(memberName);
+                    if (!memSym) continue;
+                    if (memSym->kind != SymbolKind::Sub && memSym->kind != SymbolKind::Function &&
+                        memSym->kind != SymbolKind::PropertyGet &&
+                        memSym->kind != SymbolKind::PropertyLet &&
+                        memSym->kind != SymbolKind::PropertySet) continue;
+                    if (memSym->access != AccessLevel::Public) continue;
+                    info.publicMethodNames.push_back(memSym->name);
+                    info.publicMethodSyms.push_back(memSym);
+                }
+                coClasses.push_back(std::move(info));
+            }
+        }
+    }
+
+    if (coClasses.empty()) {
+        return "// P6.6: No public creatable classes found for ActiveX DLL\n";
+    }
+
+    // 生成 dll_entry.c 内容
+
+    // 头文件注释
+    entry.emitLine("// Generated by vb6c3 (c3.exe) - ActiveX DLL entry point");
+    entry.emitLine("// Contains COM server exports: DllGetClassObject, DllRegisterServer, etc.");
+    entry.emitBlank();
+
+    // 包含必要头文件
+    // 注意: 不include类模块的.h文件, 因为vb6rtl.h中的VARIANT定义
+    // 与Windows <oleauto.h>中的VARIANT冲突。改用前向声明。
+    entry.emitLine("#include \"vb6comserver.h\"");
+    entry.emitBlank();
+
+    // 前向声明: 类结构体和工厂/销毁函数 (C语言需要struct关键字)
+    for (auto& cc : coClasses) {
+        std::string clsId = cIdent(cc.moduleName);
+        std::string clsStruct = "vb6_cls_" + clsId;
+        entry.emitLine("struct " + clsStruct + ";  /* forward decl */");
+        entry.emitLine("extern struct " + clsStruct + "* vb6_cls_" + clsId + "_New(void);");
+        entry.emitLine("extern void vb6_cls_" + clsId + "_Destroy(struct " + clsStruct + "*);");
+        // 类的方法函数前向声明
+        for (size_t mi = 0; mi < cc.publicMethodNames.size(); mi++) {
+            Symbol* methodSym = cc.publicMethodSyms[mi];
+            std::string procName = cProcName(cc.publicMethodNames[mi], methodSym->access);
+            if (methodSym->kind == SymbolKind::Function) {
+                std::string retType = mapType(methodSym->type);
+                std::string params = "struct " + clsStruct + "*";
+                for (auto& p : methodSym->params) {
+                    params += ", " + mapType(p.type);
+                }
+                entry.emitLine("extern " + retType + " " + procName + "(" + params + ");");
+            } else {
+                std::string params = "struct " + clsStruct + "*";
+                for (auto& p : methodSym->params) {
+                    params += ", " + mapType(p.type);
+                }
+                entry.emitLine("extern void " + procName + "(" + params + ");");
+            }
+        }
+    }
+    // vb6_Init/vb6_Exit 前向声明 (定义在vb6rtl.c)
+    entry.emitLine("extern void vb6_Init(void);");
+    entry.emitLine("extern void vb6_Exit(void);");
+    entry.emitBlank();
+
+    // 1. IDispatch方法桥接函数
+    for (auto& cc : coClasses) {
+        std::string clsId = cIdent(cc.moduleName);
+        std::string clsStruct = "vb6_cls_" + clsId;
+
+        for (size_t mi = 0; mi < cc.publicMethodNames.size(); mi++) {
+            std::string& methodName = cc.publicMethodNames[mi];
+            Symbol* methodSym = cc.publicMethodSyms[mi];
+            std::string prefix = cc.moduleName + "_";
+            std::string bareName = methodName;
+            if (Symbol::toLower(bareName).substr(0, prefix.size()) == Symbol::toLower(prefix)) {
+                bareName = bareName.substr(prefix.size());
+            }
+            std::string invokeName = "vb6_disp_" + clsId + "_" + cIdent(bareName) + "_invoke";
+
+            entry.emitLine("static void " + invokeName + "(void* instance, void** args, int32_t argc, void* result) {");
+            entry.indent();
+            entry.emitLine("struct " + clsStruct + "* me = (struct " + clsStruct + "*)instance;");
+
+            // 构建实参列表 (不含me的类型, 只有表达式)
+            // 注意: args[i] 是 VARIANT* (来自DISPPARAMS.rgvarg), 需用VARIANT字段提取值
+            std::string callArgs = "me";
+            for (int i = 0; i < (int)methodSym->params.size(); i++) {
+                callArgs += ", ";
+                Vb6Type pType = methodSym->params[i].type;
+                if (methodSym->params[i].isByVal) {
+                    // 从VARIANT中提取ByVal值
+                    if (pType == Vb6Type::Long || pType == Vb6Type::Integer ||
+                        pType == Vb6Type::Boolean || pType == Vb6Type::Byte) {
+                        callArgs += "((VARIANT*)args[" + std::to_string(i) + "])->lVal";
+                    } else if (pType == Vb6Type::Double || pType == Vb6Type::Single) {
+                        callArgs += "((VARIANT*)args[" + std::to_string(i) + "])->dblVal";
+                    } else if (pType == Vb6Type::String) {
+                        callArgs += "((VARIANT*)args[" + std::to_string(i) + "])->bstrVal";
+                    } else {
+                        callArgs += "((VARIANT*)args[" + std::to_string(i) + "])->lVal";
+                    }
+                } else {
+                    // ByRef: 传递VARIANT中的值指针
+                    if (pType == Vb6Type::Long || pType == Vb6Type::Integer ||
+                        pType == Vb6Type::Boolean || pType == Vb6Type::Byte) {
+                        callArgs += "&((VARIANT*)args[" + std::to_string(i) + "])->lVal";
+                    } else if (pType == Vb6Type::Double || pType == Vb6Type::Single) {
+                        callArgs += "&((VARIANT*)args[" + std::to_string(i) + "])->dblVal";
+                    } else {
+                        callArgs += "(void*)&((VARIANT*)args[" + std::to_string(i) + "])->lVal";
+                    }
+                }
+            }
+
+            std::string procName = cProcName(methodName, methodSym->access);
+
+            if (methodSym->kind == SymbolKind::Function) {
+                std::string retType = mapType(methodSym->type);
+                entry.emitLine("if (result) {");
+                entry.indent();
+                entry.emitLine(retType + " _r = " + procName + "(" + callArgs + ");");
+                if (methodSym->type == Vb6Type::Long || methodSym->type == Vb6Type::Integer ||
+                    methodSym->type == Vb6Type::Boolean || methodSym->type == Vb6Type::Byte) {
+                    entry.emitLine("((VARIANT*)result)->vt = VT_I4; ((VARIANT*)result)->lVal = (int32_t)_r;");
+                } else if (methodSym->type == Vb6Type::Double || methodSym->type == Vb6Type::Single) {
+                    entry.emitLine("((VARIANT*)result)->vt = VT_R8; ((VARIANT*)result)->dblVal = (double)_r;");
+                } else if (methodSym->type == Vb6Type::String) {
+                    entry.emitLine("((VARIANT*)result)->vt = VT_BSTR; ((VARIANT*)result)->bstrVal = _r;");
+                } else {
+                    entry.emitLine("((VARIANT*)result)->vt = VT_I4; ((VARIANT*)result)->lVal = (int32_t)(intptr_t)_r;");
+                }
+                entry.dedent();
+                entry.emitLine("}");
+            } else {
+                entry.emitLine(procName + "(" + callArgs + ");");
+            }
+            entry.dedent();
+            entry.emitLine("}");
+            entry.emitBlank();
+        }
+    }
+
+    // 2. IDispatch方法描述表
+    for (auto& cc : coClasses) {
+        std::string clsId = cIdent(cc.moduleName);
+        std::string methodsVar = "g_vb6_disp_" + clsId + "Methods";
+
+        entry.emitLine("static const vb6_DispMethodDesc " + methodsVar + "[] = {");
+        entry.indent();
+
+        for (size_t mi = 0; mi < cc.publicMethodNames.size(); mi++) {
+            std::string& methodName = cc.publicMethodNames[mi];
+            Symbol* methodSym = cc.publicMethodSyms[mi];
+            std::string prefix = cc.moduleName + "_";
+            std::string bareName = methodName;
+            if (Symbol::toLower(bareName).substr(0, prefix.size()) == Symbol::toLower(prefix)) {
+                bareName = bareName.substr(prefix.size());
+            }
+            std::string invokeName = "vb6_disp_" + clsId + "_" + cIdent(bareName) + "_invoke";
+
+            int invkind = 1;
+            if (methodSym->kind == SymbolKind::PropertyGet) {
+                invkind = 2;
+            } else if (methodSym->kind == SymbolKind::PropertyLet) {
+                invkind = 4;
+            } else if (methodSym->kind == SymbolKind::PropertySet) {
+                invkind = 8;
+            }
+
+            std::string wideName = "L\"" + bareName + "\"";
+
+            entry.emitLine("{ " + wideName + ", " + std::to_string((int32_t)(mi + 1)) +
+                        ", " + std::to_string(invkind) + ", " + invokeName + " },");
+        }
+
+        entry.dedent();
+        entry.emitLine("};");
+        entry.emitBlank();
+    }
+
+    // 3. 全局coclass描述表
+    entry.emitLine("const vb6_CoClassDesc g_vb6_coclasses[] = {");
+    entry.indent();
+    for (auto& cc : coClasses) {
+        std::string clsId = cIdent(cc.moduleName);
+        std::string clsStruct = "vb6_cls_" + clsId;
+        entry.emitLine("{");
+        entry.indent();
+        entry.emitLine("\"" + cc.progId + "\",  /* progId */");
+        entry.emitLine("\"" + cc.clsidStr + "\",  /* clsidStr */");
+        entry.emitLine("\"" + cc.moduleName + "\",  /* classVariable */");
+        entry.emitLine("(void*(*)(void))" + clsStruct + "_New,  /* factoryFunc */");
+        entry.emitLine("(void(*)(void*))" + clsStruct + "_Destroy,  /* destroyFunc */");
+        entry.emitLine("NULL,  /* dispatchVtable */");
+        entry.emitLine(std::to_string(cc.publicMethodNames.size()) + ",  /* methodCount */");
+        entry.emitLine("g_vb6_disp_" + clsId + "Methods,  /* methods */");
+        entry.dedent();
+        entry.emitLine("},");
+    }
+    entry.dedent();
+    entry.emitLine("};");
+    entry.emitBlank();
+
+    entry.emitLine("const int g_vb6_coclassCount = " + std::to_string(coClasses.size()) + ";");
+    entry.emitBlank();
+
+    // 4. DLL导出函数
+    entry.emitLine("// === DLL Export Functions ===");
+    entry.emitBlank();
+
+    entry.emitLine("HRESULT WINAPI DllGetClassObject(REFCLSID rclsid, REFIID riid, void** ppv) {");
+    entry.indent();
+    entry.emitLine("return vb6_GetClassFactory(rclsid, riid, ppv, g_vb6_coclasses, g_vb6_coclassCount);");
+    entry.dedent();
+    entry.emitLine("}");
+    entry.emitBlank();
+
+    entry.emitLine("HRESULT WINAPI DllCanUnloadNow(void) {");
+    entry.indent();
+    entry.emitLine("return vb6_DllCanUnloadNow();");
+    entry.dedent();
+    entry.emitLine("}");
+    entry.emitBlank();
+
+    entry.emitLine("HRESULT WINAPI DllRegisterServer(void) {");
+    entry.indent();
+    entry.emitLine("wchar_t dllPath[MAX_PATH];");
+    entry.emitLine("HRESULT hr = vb6_GetDllPath(dllPath, MAX_PATH);");
+    entry.emitLine("if (FAILED(hr)) return hr;");
+    entry.emitLine("for (int i = 0; i < g_vb6_coclassCount; i++) {");
+    entry.indent();
+    entry.emitLine("hr = vb6_RegisterCoClass(&g_vb6_coclasses[i], dllPath);");
+    entry.emitLine("if (FAILED(hr)) return hr;");
+    entry.dedent();
+    entry.emitLine("}");
+    entry.emitLine("return S_OK;");
+    entry.dedent();
+    entry.emitLine("}");
+    entry.emitBlank();
+
+    entry.emitLine("HRESULT WINAPI DllUnregisterServer(void) {");
+    entry.indent();
+    entry.emitLine("for (int i = 0; i < g_vb6_coclassCount; i++) {");
+    entry.indent();
+    entry.emitLine("vb6_UnregisterCoClass(&g_vb6_coclasses[i]);");
+    entry.dedent();
+    entry.emitLine("}");
+    entry.emitLine("return S_OK;");
+    entry.dedent();
+    entry.emitLine("}");
+    entry.emitBlank();
+
+    entry.emitLine("BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved) {");
+    entry.indent();
+    entry.emitLine("if (fdwReason == DLL_PROCESS_ATTACH) {");
+    entry.indent();
+    entry.emitLine("DisableThreadLibraryCalls(hinstDLL);");
+    entry.emitLine("vb6_Init();");
+    entry.dedent();
+    entry.emitLine("} else if (fdwReason == DLL_PROCESS_DETACH) {");
+    entry.indent();
+    entry.emitLine("vb6_Exit();");
+    entry.dedent();
+    entry.emitLine("}");
+    entry.emitLine("return TRUE;");
+    entry.dedent();
+    entry.emitLine("}");
+    entry.emitBlank();
+
+    return entry.str();
+}
 
 void CCodeGen::visit(SimpleTypeRef& node) {}
 void CCodeGen::visit(ArrayTypeRef& node) {}

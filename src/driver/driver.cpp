@@ -81,6 +81,12 @@ std::pair<CompileOptions, int> Driver::parseArgs(int argc, char* argv[]) {
         else if (arg == "--no-auto-typelib") {
             opts.autoTypelib = false;  // P6.3: 禁用自动TypeLib加载
         }
+        else if (arg == "--dll") {
+            opts.isDll = true;  // P6.6: 编译为ActiveX DLL
+        }
+        else if (arg == "--progid" && i + 1 < argc) {
+            opts.dllProgId = argv[++i];  // P6.6: ProgID前缀
+        }
         else if (arg == "-v" || arg == "--verbose") {
             opts.verbose = true;
         }
@@ -160,6 +166,18 @@ CompileResult Driver::compile(const CompileOptions& options) {
             // 如果没有指定输出文件, 使用工程名
             if (effectiveOpts.outputFile.empty() && !project.exeName.empty()) {
                 effectiveOpts.outputFile = project.exeName;
+            }
+
+            // P6.6: 从VBP工程类型推断是否为ActiveX DLL
+            if (!effectiveOpts.isDll && project.projectType == VbpProjectType::ActiveXDLL) {
+                effectiveOpts.isDll = true;
+                if (effectiveOpts.verbose) {
+                    std::cout << "c3: 检测到ActiveX DLL工程 (Type=DLL)" << std::endl;
+                }
+            }
+            // ProgID前缀: 优先CLI指定, 否则用工程名
+            if (effectiveOpts.isDll && effectiveOpts.dllProgId.empty()) {
+                effectiveOpts.dllProgId = project.projectName.empty() ? "VB6DLL" : project.projectName;
             }
         }
     }
@@ -750,7 +768,9 @@ bool Driver::runCodeGeneration(const CompileOptions& options, const std::string&
                       options.verbose);
 
         // 传入模块基名和外部模块列表
-        bool ok = cgen.generate(*module, baseName, externalModules);
+        // P6.6: 传递ActiveX DLL模式信息
+        bool ok = cgen.generate(*module, baseName, externalModules,
+                                options.isDll, options.dllProgId);
         if (!ok) return false;
 
         // 写 .h 文件
@@ -787,6 +807,31 @@ bool Driver::runCodeGeneration(const CompileOptions& options, const std::string&
         }
     }
 
+    // P6.6: ActiveX DLL模式, 额外生成 dll_entry.c (包含DLL导出函数)
+    // 这个文件始终由driver生成, 而不是在单个模块的.c中生成
+    // 原因: DLL工程可能只有类模块而没有标准模块, emitActiveXDll()在类模块中不会被执行
+    if (options.isDll && !analyzers_.empty()) {
+        // 使用最后一个analyzer的符号表 (已包含跨模块符号)
+        auto& lastAnalyzer = analyzers_.back();
+        CCodeGen dllCgen(*diag_, lastAnalyzer->symbolTable(), lastAnalyzer->typeSystem(),
+                         options.verbose);
+        std::string dllEntryCode = dllCgen.generateDllEntry(options.dllProgId);
+
+        std::string dllEntryPath = outputDir + "/dll_entry.c";
+        {
+            std::ofstream ofs(dllEntryPath, std::ios::out | std::ios::trunc);
+            if (!ofs) {
+                std::cerr << "c3: 无法写入文件: " << dllEntryPath << std::endl;
+                return false;
+            }
+            ofs << dllEntryCode;
+        }
+
+        if (options.verbose) {
+            std::cout << "c3: 生成 " << dllEntryPath << " (" << dllEntryCode.size() << " bytes)" << std::endl;
+        }
+    }
+
     return !diag_->hasErrors();
 }
 
@@ -810,6 +855,12 @@ bool Driver::runLinker(const CompileOptions& options, const std::string& outputD
         std::string baseName = p.stem().string();
         std::string cPath = outputDir + "/" + baseName + ".c";
         msvcOpts.sourceFiles.push_back(cPath);
+    }
+
+    // P6.6: ActiveX DLL模式, 加入 dll_entry.c
+    if (options.isDll) {
+        std::string dllEntryPath = outputDir + "/dll_entry.c";
+        msvcOpts.sourceFiles.push_back(dllEntryPath);
     }
 
     // 查找RTL目录: 优先VB6RTL_DIR环境变量, 其次尝试相对路径
@@ -839,19 +890,46 @@ bool Driver::runLinker(const CompileOptions& options, const std::string& outputD
     msvcOpts.rtlDir = rtlDir;
 
     // 输出文件 - 放入 outputDir
+    std::string outputExt = options.isDll ? ".dll" : ".exe";
     if (!options.outputFile.empty()) {
-        // 用户指定了绝对/相对路径, 直接使用
+        // 用户指定了绝对/相对路径
         msvcOpts.outputFile = options.outputFile;
+        // P6.6: 如果是DLL模式且用户指定了.exe后缀, 自动改为.dll
+        if (options.isDll && msvcOpts.outputFile.size() >= 4 &&
+            msvcOpts.outputFile.compare(msvcOpts.outputFile.size()-4, 4, ".exe") == 0) {
+            msvcOpts.outputFile.replace(msvcOpts.outputFile.size()-4, 4, ".dll");
+        }
     } else if (modules_.size() == 1) {
         std::filesystem::path p(modules_[0]->filename);
-        msvcOpts.outputFile = outputDir + "/" + p.stem().string() + ".exe";
+        msvcOpts.outputFile = outputDir + "/" + p.stem().string() + outputExt;
     } else {
-        msvcOpts.outputFile = outputDir + "/a.exe";
+        msvcOpts.outputFile = outputDir + "/a" + outputExt;
     }
 
+    msvcOpts.isDll = options.isDll;  // P6.6: DLL编译模式
     msvcOpts.verbose = options.verbose;
     msvcOpts.debugInfo = options.debugInfo;
     msvcOpts.optimizationLevel = options.optimizationLevel;
+
+    // P6.6: ActiveX DLL模式, 生成.def导出文件
+    if (options.isDll) {
+        std::string defPath = outputDir + "/activex_dll.def";
+        std::ofstream defFile(defPath, std::ios::out | std::ios::trunc);
+        if (defFile) {
+            defFile << "LIBRARY\n";
+            defFile << "EXPORTS\n";
+            defFile << "    DllGetClassObject\n";
+            defFile << "    DllCanUnloadNow\n";
+            defFile << "    DllRegisterServer\n";
+            defFile << "    DllUnregisterServer\n";
+            defFile << "    DllMain\n";
+            defFile.close();
+            msvcOpts.defFile = defPath;
+            if (options.verbose) {
+                std::cout << "c3: 生成导出定义: " << defPath << std::endl;
+            }
+        }
+    }
 
     MsvcDriver msvc;
     return msvc.compileAndLink(msvcOpts);
@@ -881,6 +959,8 @@ void Driver::printHelp() {
               << "  -O <级别>           优化级别 (0-3)\n"
               << "  -g, --debug         生成调试信息\n"
               << "  --compat-check      跨平台兼容性检查\n"
+              << "  --dll               编译为ActiveX DLL (P6.6)\n"
+              << "  --progid <前缀>     ActiveX DLL的ProgID前缀\n"
               << "  -v, --verbose       详细输出\n"
               << "  -h, --help          显示帮助\n"
               << "  -V, --version       显示版本\n"

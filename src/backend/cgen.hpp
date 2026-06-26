@@ -66,8 +66,17 @@ public:
 
     // 主入口: 生成C代码，返回是否成功
     // externalModules: 当前模块引用的外部模块基名列表 (用于生成 #include)
+    // isDll: P6.6 ActiveX DLL模式, 生成COM服务端代码
+    // dllProgId: P6.6 DLL的ProgID前缀
     bool generate(Module& module, const std::string& baseName,
-                  const std::unordered_set<std::string>& externalModules = {});
+                  const std::unordered_set<std::string>& externalModules = {},
+                  bool isDll = false, const std::string& dllProgId = "");
+
+    // P6.6: 单独生成ActiveX DLL入口文件 (dll_entry.c)
+    // 当DLL工程只有类模块(无标准模块)时, 由Driver调用此方法生成DLL导出代码
+    // progId: DLL的ProgID前缀
+    // 返回: 生成的dll_entry.c文件内容
+    std::string generateDllEntry(const std::string& progId);
 
     // 获取生成的代码
     const std::string& headerCode() const { return header_; }
@@ -250,6 +259,10 @@ private:
     // Dim WithEvents obj As ClassName → knownWithEventsVars_["obj"] = "ClassName"
     std::unordered_map<std::string, std::string> knownWithEventsVars_;
 
+    // P6.6: ActiveX DLL模式
+    bool isDll_ = false;                    // 编译为ActiveX DLL
+    std::string dllProgId_;                  // DLL的ProgID前缀
+
     // ---- 类型映射 ----
 
     // Vb6Type → C类型字符串
@@ -305,6 +318,9 @@ private:
 
     // P6.5: 生成事件接收器表和回调 (WithEvents代码生成)
     void emitEventSink(Module& module);
+
+    // P6.6: 生成ActiveX DLL COM服务端代码 (DllGetClassObject/Register/Unregister等)
+    void emitActiveXDll(Module& module);
 
     // 生成类方法函数体中的Me引用名
     std::string classMeParam() const;

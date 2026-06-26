@@ -9,11 +9,13 @@ namespace vb6c3 {
 
 struct MsvcDriverOptions {
     std::vector<std::string> sourceFiles;  // .c 文件路径
-    std::string outputFile;                 // 输出 .exe 路径
+    std::string outputFile;                 // 输出 .exe/.dll 路径
     std::string rtlDir;                     // vb6rtl.h / vb6rtl.c 所在目录
     bool verbose = false;
     bool debugInfo = false;
     int optimizationLevel = 0;
+    bool isDll = false;                     // P6.6: ActiveX DLL模式
+    std::string defFile;                    // P6.6: DLL导出定义文件(.def)路径
 };
 
 class MsvcDriver {
@@ -21,7 +23,7 @@ public:
     MsvcDriver();
     ~MsvcDriver();
 
-    // 编译+链接: .c → .exe
+    // 编译+链接: .c → .exe 或 .dll (取决于isDll)
     bool compileAndLink(const MsvcDriverOptions& options);
 
     // 检测cl.exe是否可用
