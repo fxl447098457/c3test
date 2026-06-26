@@ -65,15 +65,30 @@ int vb6_NextControlId(void);
 void vb6_ResetControlId(void);
 
 // ============================================================
+// Timer管理
+// ============================================================
+
+// 设置定时器 (VB6 Timer控件底层实现)
+// interval: 间隔毫秒 (VB6 Interval属性)
+// callback: 定时器回调函数 (Timer_Timer事件)
+// 返回: 定时器ID (用于vb6_KillTimer)
+int vb6_SetTimer(int interval, void* callback);
+
+// 销毁定时器
+void vb6_KillTimer(int timerId);
+
+// ============================================================
 // 消息循环
 // ============================================================
 
 // 标准VB6消息循环 (GetMessage + TranslateMessage + DispatchMessage)
+// 同时处理WM_TIMER回调分发
 // 返回: WM_QUIT的wParam值
 int vb6_MessageLoop(void);
 
 // DoEvents — 处理消息队列中的待处理消息
-// 返回: 待处理消息数
+// 包括WM_TIMER回调分发
+// 返回: 处理的消息数
 int vb6_DoEvents(void);
 
 // ============================================================
@@ -97,10 +112,23 @@ void* vb6_GetAppInstance(void);
 void vb6_SetAppInstance(void* hInstance);
 
 // 显示窗体 (vbModeless=0, vbModal=1)
+// 模态时: 禁用父窗口, 进入本地消息循环直到窗体关闭
 void vb6_ShowForm(void* hwnd, int modal);
 
 // 卸载窗体
 void vb6_UnloadForm(void* hwnd);
+
+// ============================================================
+// Form_Unload回调
+// ============================================================
+
+// 设置Form_Unload回调 (WM_CLOSE时查询是否允许关闭)
+// callback: 返回0=允许关闭, 返回非0=取消关闭
+void vb6_SetFormUnloadCallback(void* callback);
+
+// 查询Form_Unload (由WndProc的WM_CLOSE调用)
+// 返回: 0=允许关闭, 非0=取消关闭
+int vb6_QueryFormUnload(void);
 
 #ifdef __cplusplus
 }

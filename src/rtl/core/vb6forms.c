@@ -1,4 +1,4 @@
-// VB6 Win32窗体运行时实现 (P7)
+// VB6 Win32窓体运行时实现 (P7)
 // 提供Win32窗口注册、创建、消息循环、控件管理等基础功能
 
 #ifdef _WIN32
@@ -13,6 +13,28 @@
 // 全局变量
 static HINSTANCE g_hInstance = NULL;
 static int g_nextControlId = 100;  // 控件ID从100开始 (1-99保留给菜单)
+
+// 模态窗体状态
+static HWND g_modalOwner = NULL;   // 被禁用的父窗口 (模态时)
+static int g_modalResult = 0;      // 模态返回值
+
+// Form_Unload回调类型:
+// 返回0=允许关闭, 返回1=取消关闭 (对应VB6 vbCancel)
+typedef int (*vb6_FormUnloadCallback)(void);
+
+// 当前窗体的Unload回调 (每个窗体单独设置)
+static vb6_FormUnloadCallback g_formUnloadCb = NULL;
+
+// Timer回调类型
+typedef void (*vb6_TimerCallback)(void);
+
+// Timer回调表 (控件ID → 回调函数)
+#define VB6_MAX_TIMERS 32
+static struct {
+    int timerId;
+    vb6_TimerCallback callback;
+} g_timerTable[VB6_MAX_TIMERS];
+static int g_timerCount = 0;
 
 // ============================================================
 // 缇(Twip)转换
@@ -38,14 +60,14 @@ int vb6_RegisterFormClass(const char* className, void* wndProc, void* hInstance,
     wc.style = CS_HREDRAW | CS_VREDRAW | CS_DBLCLKS;  // 支持双击
     wc.lpfnWndProc = (WNDPROC)wndProc;
     wc.hInstance = (HINSTANCE)hInstance;
-    wc.hCursor = LoadCursorA(NULL, IDC_ARROW);
+    wc.hCursor = LoadCursorA(NULL, (LPCSTR)IDC_ARROW);
     wc.hbrBackground = (HBRUSH)(COLOR_BTNFACE + 1);  // VB6默认灰色背景
     wc.lpszClassName = className;
 
     if (iconResId > 0) {
-        wc.hIcon = LoadIconA((HINSTANCE)hInstance, MAKEINTRESOURCEA(iconResId));
+        wc.hIcon = LoadIconA((HINSTANCE)hInstance, (LPCSTR)MAKEINTRESOURCEA(iconResId));
     } else {
-        wc.hIcon = LoadIconA(NULL, IDI_APPLICATION);
+        wc.hIcon = LoadIconA(NULL, (LPCSTR)IDI_APPLICATION);
     }
     wc.hIconSm = wc.hIcon;
 
@@ -64,7 +86,6 @@ void* vb6_CreateFormWindow(const char* className, const char* formName,
     int ph = vb6_TwipToY(height);
 
     // 创建窗口, 使用WS_OVERLAPPEDWINDOW样式 (VB6标准窗口)
-    // VB6窗体样式: 标题栏+系统菜单+最小化/最大化按钮+可调边框
     DWORD style = WS_OVERLAPPEDWINDOW;
     DWORD exStyle = 0;
 
@@ -118,7 +139,6 @@ void* vb6_CreateControl(const char* win32Class, const char* controlName,
     if (hwnd) {
         HFONT hFont = (HFONT)GetStockObject(DEFAULT_GUI_FONT);
         if (!hFont) {
-            // 回退: 创建MS Sans Serif 8pt字体
             hFont = CreateFontA(
                 -11, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
                 DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
@@ -140,12 +160,51 @@ void vb6_ResetControlId(void) {
 }
 
 // ============================================================
+// Timer管理
+// ============================================================
+
+int vb6_SetTimer(int interval, void* callback) {
+    if (g_timerCount >= VB6_MAX_TIMERS) return -1;
+    int id = g_nextControlId++;
+    g_timerTable[g_timerCount].timerId = id;
+    g_timerTable[g_timerCount].callback = (vb6_TimerCallback)callback;
+    g_timerCount++;
+    // 使用窗体句柄NULL + 定时器ID, 由消息循环分发
+    SetTimer(NULL, id, interval, NULL);
+    return id;
+}
+
+void vb6_KillTimer(int timerId) {
+    KillTimer(NULL, timerId);
+    // 从回调表移除
+    for (int i = 0; i < g_timerCount; i++) {
+        if (g_timerTable[i].timerId == timerId) {
+            g_timerTable[i] = g_timerTable[g_timerCount - 1];
+            g_timerCount--;
+            break;
+        }
+    }
+}
+
+// ============================================================
 // 消息循环
 // ============================================================
 
 int vb6_MessageLoop(void) {
     MSG msg;
     while (GetMessage(&msg, NULL, 0, 0)) {
+        // WM_TIMER: 查找回调表并调用
+        if (msg.message == WM_TIMER) {
+            int tid = (int)msg.wParam;
+            for (int i = 0; i < g_timerCount; i++) {
+                if (g_timerTable[i].timerId == tid) {
+                    if (g_timerTable[i].callback) {
+                        g_timerTable[i].callback();
+                    }
+                    break;
+                }
+            }
+        }
         TranslateMessage(&msg);
         DispatchMessage(&msg);
     }
@@ -156,9 +215,23 @@ int vb6_DoEvents(void) {
     MSG msg;
     int count = 0;
     while (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) {
+        // WM_TIMER: 查找回调表并调用
+        if (msg.message == WM_TIMER) {
+            int tid = (int)msg.wParam;
+            for (int i = 0; i < g_timerCount; i++) {
+                if (g_timerTable[i].timerId == tid) {
+                    if (g_timerTable[i].callback) {
+                        g_timerTable[i].callback();
+                    }
+                    break;
+                }
+            }
+        }
         TranslateMessage(&msg);
         DispatchMessage(&msg);
         count++;
+        // 安全限制: 防止无限循环 (VB6 DoEvents行为: 处理完就返回)
+        if (count > 1000) break;
     }
     return count;
 }
@@ -193,12 +266,60 @@ void vb6_ShowForm(void* hwnd, int modal) {
     UpdateWindow((HWND)hwnd);
 
     if (modal) {
-        // 模态: 禁用父窗口, 进入消息循环直到窗体关闭
-        // 简化实现: 暂不支持模态
+        // 模态窗体: 禁用所有者, 进入本地消息循环
+        HWND owner = GetWindow((HWND)hwnd, GW_OWNER);
+        if (owner) {
+            g_modalOwner = owner;
+            EnableWindow(owner, FALSE);
+        }
+
+        // 本地消息循环 (直到窗体被销毁)
+        MSG msg;
+        while (IsWindow((HWND)hwnd) && GetMessage(&msg, NULL, 0, 0)) {
+            // WM_TIMER分发
+            if (msg.message == WM_TIMER) {
+                int tid = (int)msg.wParam;
+                for (int i = 0; i < g_timerCount; i++) {
+                    if (g_timerTable[i].timerId == tid) {
+                        if (g_timerTable[i].callback) {
+                            g_timerTable[i].callback();
+                        }
+                        break;
+                    }
+                }
+            }
+            // 模态Tab键导航 (IsDialogMessage处理对话框键盘导航)
+            if (!IsDialogMessageA((HWND)hwnd, &msg)) {
+                TranslateMessage(&msg);
+                DispatchMessage(&msg);
+            }
+        }
+
+        // 恢复所有者窗口
+        if (g_modalOwner) {
+            EnableWindow(g_modalOwner, TRUE);
+            SetActiveWindow(g_modalOwner);
+            g_modalOwner = NULL;
+        }
     }
 }
 
 void vb6_UnloadForm(void* hwnd) {
     if (!hwnd) return;
     DestroyWindow((HWND)hwnd);
+}
+
+// ============================================================
+// Form_Unload回调
+// ============================================================
+
+void vb6_SetFormUnloadCallback(void* callback) {
+    g_formUnloadCb = (vb6_FormUnloadCallback)callback;
+}
+
+int vb6_QueryFormUnload(void) {
+    if (g_formUnloadCb) {
+        return g_formUnloadCb();
+    }
+    return 0;  // 无回调=允许关闭
 }

@@ -10,6 +10,7 @@
 #include <time.h>
 #ifdef _WIN32
 #include <direct.h>
+#include <windows.h>
 #endif
 
 // ============================================================
@@ -408,6 +409,21 @@ void vb6_Init(void) {
 void vb6_Exit(void) {
     // 清理COM库
     vb6_ComExit();
+}
+
+void vb6_End(void) {
+    vb6_Exit();
+    exit(0);
+}
+
+void vb6_Beep(void) {
+#ifdef _WIN32
+    // Beep() requires windows.h, use MessageBeep as fallback
+    MessageBeep(0);
+#else
+    putchar('\a');
+    fflush(stdout);
+#endif
 }
 
 // ============================================================

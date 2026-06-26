@@ -143,6 +143,8 @@ public:
     void visit(OptionStmt& node) override;
     void visit(LocalDeclStmt& node) override;
     void visit(RaiseEventStmt& node) override;
+    void visit(BeepStmt& node) override;
+    void visit(DoEventsStmt& node) override;
 
     // --- 表达式 (返回C表达式字符串) ---
     void visit(BinaryExpr& node) override;

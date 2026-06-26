@@ -1869,6 +1869,8 @@ void CCodeGen::emitStmtList(StmtList& stmts) {
             case ASTNodeKind::ChDriveStmt:     visit(static_cast<ChDriveStmt&>(*stmt)); break;
             case ASTNodeKind::FileCopyStmt:    visit(static_cast<FileCopyStmt&>(*stmt)); break;
             case ASTNodeKind::RaiseEventStmt:  visit(static_cast<RaiseEventStmt&>(*stmt)); break;
+            case ASTNodeKind::BeepStmt:        visit(static_cast<BeepStmt&>(*stmt)); break;
+            case ASTNodeKind::DoEventsStmt:    visit(static_cast<DoEventsStmt&>(*stmt)); break;
             case ASTNodeKind::EndStmt:
                 c_.emitLine("vb6_End();");
                 break;
@@ -3859,6 +3861,14 @@ void CCodeGen::visit(RaiseEventStmt& node) {
     c_.emitLine("}");
 }
 
+void CCodeGen::visit(BeepStmt& node) {
+    c_.emitLine("vb6_Beep();");
+}
+
+void CCodeGen::visit(DoEventsStmt& node) {
+    c_.emitLine("vb6_DoEvents();");
+}
+
 // ============================================================
 // P6.5: 事件接收器表生成 (Event Sink Table)
 // ============================================================
@@ -3998,6 +4008,23 @@ void CCodeGen::emitFormFramework(const FrmFormDesc& frmDesc, Module& module) {
 
     // --- .c文件: 实现 ---
 
+    // Form_Unload trampoline (如果存在Form_Unload)
+    {
+        std::string formUnloadFn = cProcName("Form_Unload", AccessLevel::Private);
+        auto* unloadSym = symTab_.lookup("Form_Unload");
+        if (unloadSym) {
+            c_.emitLine("// Form_Unload trampoline: bridge callback int(*)(void) to void(int16_t*)");
+            c_.emitLine("static int " + formUnloadFn + "_trampoline(void) {");
+            c_.indent();
+            c_.emitLine("int16_t vb6_cancel = 0;");
+            c_.emitLine("extern void " + formUnloadFn + "(int16_t*);");
+            c_.emitLine(formUnloadFn + "(&vb6_cancel);");
+            c_.emitLine("return (int)vb6_cancel;");
+            c_.dedent();
+            c_.emitLine("}");
+            c_.emitBlank();
+        }
+    }
     // WndProc
     c_.emitLine("// === " + formName + " WndProc ===");
     c_.emitLine("LRESULT CALLBACK " + wndProc + "(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {");
@@ -4013,7 +4040,7 @@ void CCodeGen::emitFormFramework(const FrmFormDesc& frmDesc, Module& module) {
 
     // 调用VB6 Form_Load事件 (仅当存在时调用)
     std::string formLoadFn = cProcName("Form_Load", AccessLevel::Private);
-    auto* formLoadSym = symTab_.lookup(formLoadFn);
+    auto* formLoadSym = symTab_.lookup("Form_Load");
     if (formLoadSym) {
         c_.emitLine("{ /* Form_Load */ extern void " + formLoadFn + "(); " + formLoadFn + "(); }");
     }
@@ -4039,22 +4066,42 @@ void CCodeGen::emitFormFramework(const FrmFormDesc& frmDesc, Module& module) {
             c_.dedent();
             c_.emitLine("}");
         }
-        // TODO: CheckBox/OptionButton的Click事件 (BN_CLICKED)
+        if (ctrl.controlType == FrmControlType::CheckBox || ctrl.controlType == FrmControlType::OptionButton) {
+            std::string clickFn = cProcName(ctrl.controlName + "_Click", AccessLevel::Private);
+            c_.emitLine("if (id == " + std::to_string(ctrlId) + ") {");
+            c_.indent();
+            c_.emitLine("{ extern void " + clickFn + "(); " + clickFn + "(); }");
+            c_.dedent();
+            c_.emitLine("}");
+        }
         ctrlId++;
     }
     c_.emitLine("break;");
     c_.dedent();
     c_.emitLine("}");
 
-    // WM_CLOSE: 调用VB6 Form_Unload, 然后DestroyWindow
+    // WM_CLOSE: 调用Form_Unload判断是否允许关闭
     c_.emitLine("case WM_CLOSE: {");
     c_.indent();
-    // 简化: 直接销毁窗口 (完整实现应调用QueryUnload事件)
-    c_.emitLine("DestroyWindow(hwnd);");
+    {
+        std::string formUnloadFn = cProcName("Form_Unload", AccessLevel::Private);
+        auto* formUnloadSym2 = symTab_.lookup("Form_Unload");
+        if (formUnloadSym2) {
+            // 生成trampoline: 桥接 int(*)(void) 回调和 void(int16_t*) VB6签名
+            std::string trampoline = formUnloadFn + "_trampoline";
+            c_.emitLine("vb6_SetFormUnloadCallback((void*)" + trampoline + ");");
+            c_.emitLine("if (vb6_QueryFormUnload() == 0) {");
+            c_.indent();
+            c_.emitLine("DestroyWindow(hwnd);");
+            c_.dedent();
+            c_.emitLine("}");
+        } else {
+            c_.emitLine("DestroyWindow(hwnd);");
+        }
+    }
     c_.emitLine("break;");
     c_.dedent();
     c_.emitLine("}");
-
     // WM_DESTROY: PostQuitMessage (如果是主窗体)
     c_.emitLine("case WM_DESTROY: {");
     c_.indent();

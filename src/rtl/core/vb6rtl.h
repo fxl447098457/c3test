@@ -437,6 +437,7 @@ void* vb6_ComVtableGetVoid(void* obj, int32_t vtIndex, ...);
 void vb6_Init(void);
 void vb6_Exit(void);
 void vb6_End(void);
+void vb6_Beep(void);
 
 #ifdef __cplusplus
 }
