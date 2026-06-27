@@ -1,0 +1,155 @@
+================================================================
+  C3 - 第三代 VB6 编译器  v0.9.0-beta  使用说明
+================================================================
+
+一、简介
+----------------------------------------------------------------
+
+C3 是现代化 Visual Basic 6.0 编译器，将 VB6 代码编译为原生
+x64 Windows 可执行文件 (.exe) 和动态链接库 (.dll)。
+
+核心能力：
+  - x64 原生编译（突破 2GB 内存限制）
+  - Unicode (UTF-16) 字符串全程支持
+  - 多线程运行时（告别 STA 单线程单元）
+  - COM 客户端/服务端 + ActiveX DLL 编译
+  - 内建 TypeLib 生成（无需 MIDL 外部工具）
+  - 静态链接 RTL（无运行时 DLL 依赖）
+  - C 代码生成（可调试中间产物）
+  - VBP 工程文件支持
+  - GBK/UTF-8/UTF-16 源码自动识别
+
+二、目录结构
+----------------------------------------------------------------
+
+  c3.exe              编译器主程序
+  rtl\                VB6 运行时库（C 头文件 + 源文件）
+    vb6rtl.h / .c     核心运行时：BSTR、VARIANT、数组、文件I/O、
+                      字符串/数学/日期/类型转换/错误处理
+    vb6com.h / .c     COM 客户端运行时：CreateObject、IDispatch
+                      后期绑定、早期绑定 vtable 调用
+    vb6comserver.h/.c COM 服务端运行时：ActiveX DLL 服务端框架
+                      DllGetClassObject、IClassFactory
+    vb6forms.h / .c   Win32 窗体运行时：窗体创建、控件事件、
+                      MDI、菜单、消息循环
+  demos\              示例工程
+    hello\            控制台入门（Hello World + 循环 + 函数）
+    com_client\       COM 客户端（CreateObject + 后期绑定）
+    activex_dll\      ActiveX DLL（VBP + 类模块 + CLSID）
+    win32_form\       Win32 窗体应用（控件 + 事件）
+    multimodule\      多模块 VBP 工程（跨模块符号引用）
+
+三、关于 rtl 目录
+----------------------------------------------------------------
+
+rtl 目录包含 C3 的 VB6 运行时库源码，是 C3 编译流程的核心
+依赖。C3 编译 VB6 代码时会生成 C 中间代码，这些 C 代码需要
+#include rtl 中的头文件，然后与 rtl 源文件一起编译链接为最终
+的 .exe 或 .dll。
+
+rtl 目录不需要用户手动操作，C3 编译器会自动查找和引用。
+只需通过 VB6RTL_DIR 环境变量或默认路径让 c3.exe 找到 rtl
+目录即可。
+
+四、环境要求
+----------------------------------------------------------------
+
+C3 生成 C 代码后需要外部 C 编译器来编译链接。推荐两套工具链：
+
+  方案一（推荐）：Microsoft Visual C++ (MSVC)
+    - 安装 Visual Studio 2022 Community（免费）
+    - 安装时勾选"使用 C++ 的桌面开发"
+    - 编译前运行 vcvarsall.bat x64 初始化环境
+    - 优势：原生 PDB 调试、最佳 Windows 兼容性、ActiveX DLL 完整支持
+
+  方案二：MinGW-w64
+    - 自行下载安装 x86_64-posix-seh 版本
+    - 确保 gcc.exe 在系统 PATH 中
+    - 限制：不支持 ActiveX DLL 编译（需 MSVC）
+
+五、快速开始
+----------------------------------------------------------------
+
+1. 控制台程序
+
+   set VB6RTL_DIR=<本目录>\rtl
+   c3 hello.bas -o hello.exe
+   hello.exe
+
+2. COM 客户端程序
+
+   set VB6RTL_DIR=<本目录>\rtl
+   c3 com_client.bas -o com_client.exe
+   com_client.exe
+
+3. ActiveX DLL
+
+   set VB6RTL_DIR=<本目录>\rtl
+   call "C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvarsall.bat" x64
+   c3 test_activex_dll.vbp -o MyDLL.dll
+   regsvr32 MyDLL.dll
+
+4. Win32 窗体程序
+
+   set VB6RTL_DIR=<本目录>\rtl
+   call vcvarsall.bat x64
+   c3 simple_form.frm -o SimpleForm.exe
+   SimpleForm.exe
+
+5. 多模块 VBP 工程
+
+   set VB6RTL_DIR=<本目录>\rtl
+   call vcvarsall.bat x64
+   c3 TestVBP.vbp -o TestVBP.exe
+   TestVBP.exe
+
+六、命令行参数
+----------------------------------------------------------------
+
+  c3 <源文件或VBP> [选项]
+
+  选项：
+    -o, --output <路径>      输出文件路径（.exe / .dll）
+    --output-dir <目录>      输出目录（默认 output/）
+    --define <宏=值>         定义条件编译常量（#Const）
+    --typelib <TLB>          导入额外类型库
+    --no-auto-typelib        禁用自动类型库导入
+    --source-encoding <编码> 源文件编码（auto/gbk/utf8/utf16）
+    --dump-tokens            输出词法分析结果
+    --dump-ast               输出语法树
+    --dump-symbols           输出符号表
+    --dump-frm               输出窗体解析结果
+    -h, --help               显示帮助信息
+
+七、环境变量
+----------------------------------------------------------------
+
+  VB6RTL_DIR     VB6 运行时库目录路径（必需）
+                 指向本目录的 rtl\ 子目录
+
+  如果未设置 VB6RTL_DIR，c3 会尝试在以下位置查找：
+    1. 可执行文件同级 rtl\ 目录
+    2. ../rtl/ 目录
+
+八、已知限制
+----------------------------------------------------------------
+
+  - 多维数组尚未支持（仅一维）
+  - On Error GoTo label 仅设置标志，未实现实际跳转
+  - Get/Put 文件语句代码生成未实现
+  - Variant 类型处理不完善
+  - 控件数组之外的容器控件尚未支持
+  - 不支持的语法必然报错，绝不静默误编
+
+九、版本信息
+----------------------------------------------------------------
+
+  版本：v0.9.0-beta
+  里程碑：M1-M8 全部达成
+  回归测试：66/66 零失败
+  源代码：18,000+ 行 C++
+  网站：https://c3.vb6.pro/
+
+================================================================
+  (c) 2026 vb6c3 project
+================================================================
