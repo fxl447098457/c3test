@@ -1,4 +1,4 @@
-// P10: RTL 运行时内嵌资源管理 - 实现
+﻿// P10: RTL 运行时内嵌资源管理 - 实现
 // 从 c3.exe 的 RCDATA 资源释放 8 个 RTL 文件到临时会话目录
 
 #include "driver/rtl_embedded.hpp"
@@ -81,7 +81,7 @@ std::string SessionManager::create() {
     std::error_code ec;
     std::filesystem::create_directories(rtlDir_, ec);
     if (ec) {
-        std::cerr << "c3: 无法创建会话目录: " << rtlDir_ << " (" << ec.message() << ")" << std::endl;
+        std::cerr << "C3: 无法创建会话目录: " << rtlDir_ << " (" << ec.message() << ")" << std::endl;
         rtlDir_.clear();
         sessionDir_.clear();
         return "";
@@ -102,7 +102,7 @@ std::string SessionManager::create() {
 
     for (auto& entry : files) {
         if (!extractResource(entry.id, entry.name, rtlDir_)) {
-            std::cerr << "c3: 无法释放 RTL 资源: " << entry.name << std::endl;
+            std::cerr << "C3: 无法释放 RTL 资源: " << entry.name << std::endl;
             cleanup();
             return "";
         }

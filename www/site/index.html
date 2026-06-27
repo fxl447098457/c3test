@@ -115,6 +115,9 @@
         <a href="#roadmap" class="scroll-dot" data-section="roadmap" aria-label="开发路线">
             <span class="scroll-dot-label">开发路线</span>
         </a>
+        <a href="#limitations" class="scroll-dot" data-section="limitations" aria-label="已知限制">
+            <span class="scroll-dot-label">已知限制</span>
+        </a>
     </nav>
 
     <!-- ========== 顶部导航 ========== -->
@@ -129,6 +132,7 @@
              <li><a href="#pipeline">工作流程</a></li>
              <li><a href="#download">下载配置</a></li>
              <li><a href="#roadmap">开发路线</a></li>
+             <li><a href="#limitations">已知限制</a></li>
              <li><a href="http://qm.qq.com/cgi-bin/qm/qr?_wv=1027&k=i6FzaX8HERWYCbhNcPLOdJMt5TgpxBh4&authKey=FwbukNL9WDkJF7bSu1r6IflSu%2F0acN6R5OOHKBhI6ALzG7CL7EQIa3R4BA%2BnNpsM&noverify=0&group_code=788160802" target="_blank" rel="noopener" class="nav-external">加群</a></li>
              <li><a href="https://vb6.pro" target="_blank" rel="noopener" class="nav-external">VB6.PRO</a></li>
          </ul>
@@ -506,6 +510,78 @@
                     <div class="stat-item">
                         <div class="stat-value">0</div>
                         <div class="stat-label">失败项</div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ========== Section 7: 已知限制 ========== -->
+        <section class="section limitations" id="limitations">
+            <div class="section-inner">
+                <div class="section-header">
+                    <span class="section-label">已知限制</span>
+                    <h2 class="section-title">当前支持范围与限制</h2>
+                    <p class="section-desc">C3 正在持续完善中，以下是目前已支持和尚未覆盖的控件及功能。</p>
+                </div>
+
+                <div class="limitations-grid">
+                    <!-- 已支持控件 -->
+                    <div class="glass-card limitations-card animate-in">
+                        <div class="limitations-card-header">
+                            <div class="limitations-icon limitations-icon-supported">
+                                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 11-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+                            </div>
+                            <h3>已支持的控件</h3>
+                        </div>
+                        <ul class="limitations-list supported">
+                            <li><span class="ctrl-name">Form / MDIForm</span><span class="ctrl-desc">窗体与 MDI 父窗体</span></li>
+                            <li><span class="ctrl-name">CommandButton</span><span class="ctrl-desc">命令按钮</span></li>
+                            <li><span class="ctrl-name">TextBox</span><span class="ctrl-desc">文本框</span></li>
+                            <li><span class="ctrl-name">Label</span><span class="ctrl-desc">标签</span></li>
+                            <li><span class="ctrl-name">CheckBox</span><span class="ctrl-desc">复选框</span></li>
+                            <li><span class="ctrl-name">OptionButton</span><span class="ctrl-desc">单选按钮</span></li>
+                            <li><span class="ctrl-name">ListBox</span><span class="ctrl-desc">列表框</span></li>
+                            <li><span class="ctrl-name">ComboBox</span><span class="ctrl-desc">组合框</span></li>
+                            <li><span class="ctrl-name">Frame</span><span class="ctrl-desc">分组框（BS_GROUPBOX）</span></li>
+                            <li><span class="ctrl-name">PictureBox</span><span class="ctrl-desc">图片框（SS_BITMAP）</span></li>
+                            <li><span class="ctrl-name">HScrollBar / VScrollBar</span><span class="ctrl-desc">水平/垂直滚动条</span></li>
+                            <li><span class="ctrl-name">Image</span><span class="ctrl-desc">图像（SS_BITMAP）</span></li>
+                            <li><span class="ctrl-name">Timer</span><span class="ctrl-desc">定时器（不可见，无窗口句柄）</span></li>
+                            <li><span class="ctrl-name">Menu</span><span class="ctrl-desc">菜单系统（多级、分隔线、勾选、禁用）</span></li>
+                            <li><span class="ctrl-name">WebBrowser</span><span class="ctrl-desc">浏览器宿主（WebView2 / ShellNavigate）</span></li>
+                        </ul>
+                    </div>
+
+                    <!-- 尚未支持控件 -->
+                    <div class="glass-card limitations-card animate-in">
+                        <div class="limitations-card-header">
+                            <div class="limitations-icon limitations-icon-pending">
+                                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+                            </div>
+                            <h3>尚未支持的控件</h3>
+                        </div>
+                        <ul class="limitations-list pending">
+                            <li><span class="ctrl-name">Shape / Line</span><span class="ctrl-desc">图形与线条控件</span></li>
+                            <li><span class="ctrl-name">Data / OLE</span><span class="ctrl-desc">数据绑定与 OLE 容器</span></li>
+                            <li><span class="ctrl-name">DriveListBox / DirListBox / FileListBox</span><span class="ctrl-desc">文件系统控件</span></li>
+                            <li><span class="ctrl-name">SSTab</span><span class="ctrl-desc">选项卡容器</span></li>
+                            <li><span class="ctrl-name">Toolbar / StatusBar</span><span class="ctrl-desc">工具栏与状态栏（MSComctlLib）</span></li>
+                            <li><span class="ctrl-name">CommonDialog</span><span class="ctrl-desc">通用对话框（MSComDlg）</span></li>
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- 其他限制 -->
+                <div class="glass-card limitations-note animate-in">
+                    <div class="limitations-note-icon">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                    </div>
+                    <div class="limitations-note-content">
+                        <h4>其他限制</h4>
+                        <ul>
+                            <li>控件数组之外的容器控件嵌套尚未完整支持</li>
+                            <li>不支持的语法必然报错，绝不静默误编</li>
+                        </ul>
                     </div>
                 </div>
             </div>

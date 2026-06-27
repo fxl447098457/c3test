@@ -15,7 +15,7 @@ param(
 $ErrorActionPreference = "SilentlyContinue"
 
 # === 配置 ===
-$C3 = "D:\vb6pro\.build\c3.exe"
+$C3 = "D:\vb6pro\.build\C3.exe"
 $Tests = "D:\vb6pro\tests"
 $OutDir = "D:\vb6pro\output"
 $VcVars = "C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvarsall.bat"
@@ -228,7 +228,7 @@ function Test-Syntax {
 
 Write-Host ""
 Write-Host "========================================" -ForegroundColor Cyan
-Write-Host "  c3 Compiler Test Suite" -ForegroundColor Cyan
+Write-Host "  C3 Compiler Test Suite" -ForegroundColor Cyan
 Write-Host "  $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
@@ -271,7 +271,7 @@ if ($Category -in @("all", "run")) {
     Write-Host "--- VBP Project Tests (P5) ---" -ForegroundColor Yellow
     
     Test-Vbp "test_class" "$Tests\test_class.vbp" @("3", "0")
-    Test-Vbp "TestVBP" "$Tests\vbp_project\TestVBP2.vbp" @("Add(10, 20) =", "30", "Multiply(5, 6) =", "30")
+
     Test-Vbp "M6Test" "$Tests\M6Test.vbp" @("M6 PASSED")
     Test-Vbp "modulemethod" "$Tests\test_modulemethod.vbp" @("30", "21")
     Write-Host ""

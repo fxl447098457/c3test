@@ -1,4 +1,4 @@
-#include "backend/msvc_driver.hpp"
+﻿#include "backend/msvc_driver.hpp"
 
 #include <iostream>
 #include <fstream>
@@ -42,7 +42,7 @@ int MsvcDriver::executeCommand(const std::string& cmd) const {
 
 bool MsvcDriver::compileAndLink(const MsvcDriverOptions& options) {
     if (options.sourceFiles.empty()) {
-        std::cerr << "c3: 没有C源文件需要编译" << std::endl;
+        std::cerr << "C3: 没有源文件需要编译" << std::endl;
         return false;
     }
 
@@ -124,7 +124,7 @@ bool MsvcDriver::compileAndLink(const MsvcDriverOptions& options) {
     }
 
     if (options.verbose) {
-        std::cout << "c3: 执行: " << cmd.str() << std::endl;
+        std::cout << "C3: 执行: " << cmd.str() << std::endl;
     }
 
     // P10.9: 将 MSVC 输出重定向到临时文件, 失败时保存为 c3-error.log
@@ -144,7 +144,7 @@ bool MsvcDriver::compileAndLink(const MsvcDriverOptions& options) {
         std::ifstream tmpLog(tmpLogPath);
         std::ofstream errLog(errorLogPath, std::ios::out | std::ios::trunc);
         if (tmpLog && errLog) {
-            errLog << "c3: MSVC compilation failed (exit code " << ret << ")" << std::endl;
+            errLog << "C3: Compilation failed (exit code " << ret << ")" << std::endl;
             errLog << "=== MSVC Output ===" << std::endl;
             std::string line;
             while (std::getline(tmpLog, line)) {
@@ -160,8 +160,8 @@ bool MsvcDriver::compileAndLink(const MsvcDriverOptions& options) {
                 std::cerr << line << std::endl;
             }
         }
-        std::cerr << "c3: MSVC编译失败 (exit code " << ret << ")" << std::endl;
-        std::cerr << "c3: 错误日志已保存: " << errorLogPath << std::endl;
+        std::cerr << "C3: 编译失败 (exit code " << ret << ")" << std::endl;
+        std::cerr << "C3: 错误日志已保存: " << errorLogPath << std::endl;
         std::filesystem::remove(tmpLogPath, std::error_code());
         return false;
     }
@@ -169,7 +169,7 @@ bool MsvcDriver::compileAndLink(const MsvcDriverOptions& options) {
     std::filesystem::remove(tmpLogPath, std::error_code());
 
     if (options.verbose) {
-        std::cout << "c3: 编译成功: " << options.outputFile << std::endl;
+        std::cout << "C3: 编译成功: " << options.outputFile << std::endl;
     }
 
     return true;

@@ -21,7 +21,7 @@ x64 Windows 可执行文件 (.exe) 和动态链接库 (.dll)。
 二、目录结构
 ----------------------------------------------------------------
 
-  c3.exe              编译器
+  C3.exe              编译器
   demos\              示例工程
     hello\            控制台入门（Hello World + 循环 + 函数）
     com_client\       COM 客户端（CreateObject + 后期绑定）
@@ -33,7 +33,7 @@ x64 Windows 可执行文件 (.exe) 和动态链接库 (.dll)。
 ----------------------------------------------------------------
 
 C3 为一体化封装设计，编译所需的一切均已内置，无需额外配置
-路径、环境变量或安装附属组件。拿到 c3.exe 即可直接编译。
+路径、环境变量或安装附属组件。拿到 C3.exe 即可直接编译。
 
 四、环境要求
 ----------------------------------------------------------------
@@ -50,37 +50,37 @@ C3 为一体化封装设计，编译所需的一切均已内置，无需额外�
 1. 控制台程序
 
    call vcvarsall.bat x64
-   c3 hello.bas -o hello.exe
+   C3 hello.bas -o hello.exe
    hello.exe
 
 2. COM 客户端程序
 
    call vcvarsall.bat x64
-   c3 com_client.bas -o com_client.exe
+   C3 com_client.bas -o com_client.exe
    com_client.exe
 
 3. ActiveX DLL
 
    call vcvarsall.bat x64
-   c3 test_activex_dll.vbp -o MyDLL.dll
+   C3 test_activex_dll.vbp -o MyDLL.dll
    regsvr32 MyDLL.dll
 
 4. Win32 窗体程序
 
    call vcvarsall.bat x64
-   c3 simple_form.frm -o SimpleForm.exe
+   C3 simple_form.frm -o SimpleForm.exe
    SimpleForm.exe
 
 5. 多模块 VBP 工程
 
    call vcvarsall.bat x64
-   c3 TestVBP.vbp -o TestVBP.exe
+   C3 TestVBP.vbp -o TestVBP.exe
    TestVBP.exe
 
 六、命令行参数
 ----------------------------------------------------------------
 
-  c3 <源文件或VBP> [选项]
+  C3 <源文件或VBP> [选项]
 
   选项：
     -o, --output <路径>      输出文件路径（.exe / .dll）
@@ -97,23 +97,45 @@ C3 为一体化封装设计，编译所需的一切均已内置，无需额外�
 七、编译失败排查
 ----------------------------------------------------------------
 
-  编译失败时，C3 会在输出目录生成 c3-error.log 文件，
+  编译失败时，C3 会在输出目录生成 C3-error.log 文件，
   包含完整的诊断信息。例如：
 
-    c3: 编译失败 (exit code 2)
-    c3: 错误日志已保存: output/c3-error.log
+    C3: 编译失败 (exit code 2)
+    C3: 错误日志已保存: output/C3-error.log
 
   查看错误日志即可定位问题。
 
 八、已知限制
 ----------------------------------------------------------------
 
-  - 多维数组尚未支持（仅一维）
-  - On Error GoTo label 仅设置标志，未实现实际跳转
-  - Get/Put 文件语句未实现
-  - Variant 类型处理不完善
-  - 控件数组之外的容器控件尚未支持
-  - 不支持的语法必然报错，绝不静默误编
+  已支持的控件：
+    Form / MDIForm       窗体与 MDI 父窗体
+    CommandButton        命令按钮
+    TextBox              文本框
+    Label                标签
+    CheckBox             复选框
+    OptionButton         单选按钮
+    ListBox              列表框
+    ComboBox             组合框
+    Frame                分组框（BS_GROUPBOX）
+    PictureBox           图片框（SS_BITMAP）
+    HScrollBar / VScrollBar  水平/垂直滚动条
+    Image                图像（SS_BITMAP）
+    Timer                定时器（不可见，无窗口句柄）
+    Menu                 菜单系统（多级、分隔线、勾选、禁用）
+    WebBrowser           浏览器宿主（WebView2 / ShellNavigate）
+
+  尚未支持的控件：
+    Shape / Line         图形与线条控件
+    Data / OLE           数据绑定与 OLE 容器
+    DriveListBox / DirListBox / FileListBox  文件系统控件
+    SSTab                选项卡容器
+    Toolbar / StatusBar  工具栏与状态栏（MSComctlLib）
+    CommonDialog         通用对话框（MSComDlg）
+
+  其他限制：
+    - 控件数组之外的容器控件嵌套尚未完整支持
+    - 不支持的语法必然报错，绝不静默误编
 
 九、版本信息
 ----------------------------------------------------------------

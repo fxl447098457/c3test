@@ -1,4 +1,4 @@
-@echo off
+﻿@echo off
 setlocal
 set VCVARS=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvarsall.bat
 set PROJECT=D:\vb6pro
@@ -35,5 +35,5 @@ if errorlevel 1 (
 )
 echo.
 echo === Build complete ===
-echo c3.exe: %PROJECT%\.build\c3.exe
+echo C3.exe: %PROJECT%\.build\C3.exe
 endlocal

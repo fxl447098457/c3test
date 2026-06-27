@@ -1,4 +1,4 @@
-#include "driver/driver.hpp"
+﻿#include "driver/driver.hpp"
 #include "common/diagnostics.hpp"
 #include "common/source_manager.hpp"
 #include "lexer/lexer.hpp"
@@ -111,7 +111,7 @@ std::pair<CompileOptions, int> Driver::parseArgs(int argc, char* argv[]) {
             }
         }
         else if (arg[0] == '-') {
-            std::cerr << "c3: 未知选项: " << arg << std::endl;
+            std::cerr << "C3: 未知选项: " << arg << std::endl;
             resultCode = 1;
         }
         else {
@@ -120,7 +120,7 @@ std::pair<CompileOptions, int> Driver::parseArgs(int argc, char* argv[]) {
     }
 
     if (opts.sourceFiles.empty() && resultCode == 0) {
-        std::cerr << "c3: 错误: 未指定源文件" << std::endl;
+        std::cerr << "C3: 错误: 未指定源文件" << std::endl;
         resultCode = 1;
     }
 
@@ -152,13 +152,13 @@ CompileResult Driver::compile(const CompileOptions& options) {
 
             VbpProject project = VbpParser::parse(srcFile);
             if (project.sources.empty()) {
-                std::cerr << "c3: 错误: .vbp文件中没有源文件: " << srcFile << std::endl;
+                std::cerr << "C3: 错误: .vbp文件中没有源文件: " << srcFile << std::endl;
                 result.errorCount = 1;
                 return result;
             }
 
             if (options.verbose) {
-                std::cout << "c3: 加载工程: " << project.projectName
+                std::cout << "C3: 加载工程: " << project.projectName
                           << " (" << project.sources.size() << " 个源文件)" << std::endl;
             }
 
@@ -195,7 +195,7 @@ CompileResult Driver::compile(const CompileOptions& options) {
             if (!effectiveOpts.isDll && project.projectType == VbpProjectType::ActiveXDLL) {
                 effectiveOpts.isDll = true;
                 if (effectiveOpts.verbose) {
-                    std::cout << "c3: 检测到ActiveX DLL工程 (Type=DLL)" << std::endl;
+                    std::cout << "C3: 检测到ActiveX DLL工程 (Type=DLL)" << std::endl;
                 }
             }
             // ProgID前缀: 优先CLI指定, 否则用工程名
@@ -256,7 +256,7 @@ CompileResult Driver::compile(const CompileOptions& options) {
             }
         }
         if (!hasFrm) {
-            std::cerr << "c3: --dump-frm: 未找到.frm文件\n";
+            std::cerr << "C3: --dump-frm: 未找到.frm文件\n";
         }
         result.success = true;
         return result;
@@ -308,7 +308,7 @@ CompileResult Driver::compile(const CompileOptions& options) {
     if (!runTypeLibImport(effectiveOpts)) {
         // TypeLib加载失败不阻断编译, 仅降级为后期绑定
         if (effectiveOpts.verbose) {
-            std::cerr << "c3: note: TypeLib import skipped, using late binding" << std::endl;
+            std::cerr << "C3: note: TypeLib import skipped, using late binding" << std::endl;
         }
     }
 
@@ -643,7 +643,7 @@ bool Driver::runTypeLibImport(const CompileOptions& options) {
 
     // 3. 输出加载结果 (verbose模式)
     if (options.verbose) {
-        std::cerr << "c3: TypeLib import: ";
+        std::cerr << "C3: TypeLib import: ";
         int totalCoClasses = 0, totalIfaces = 0;
         for (auto& tl : typelibParser_->cachedResults()) {
             totalCoClasses += (int)tl->coclasses.size();
@@ -872,7 +872,7 @@ bool Driver::runCrossModuleResolution() {
 
 bool Driver::runCodeGeneration(const CompileOptions& options, const std::string& outputDir) {
     if (modules_.size() != analyzers_.size()) {
-        std::cerr << "c3: 内部错误: 模块数与分析器数不匹配" << std::endl;
+        std::cerr << "C3: 内部错误: 模块数与分析器数不匹配" << std::endl;
         return false;
     }
 
@@ -916,7 +916,7 @@ bool Driver::runCodeGeneration(const CompileOptions& options, const std::string&
         {
             std::ofstream ofs(hPath, std::ios::out | std::ios::trunc);
             if (!ofs) {
-                std::cerr << "c3: 无法写入文件: " << hPath << std::endl;
+                std::cerr << "C3: 无法写入文件: " << hPath << std::endl;
                 return false;
             }
             ofs << cgen.headerCode();
@@ -927,15 +927,15 @@ bool Driver::runCodeGeneration(const CompileOptions& options, const std::string&
         {
             std::ofstream ofs(cPath, std::ios::out | std::ios::trunc);
             if (!ofs) {
-                std::cerr << "c3: 无法写入文件: " << cPath << std::endl;
+                std::cerr << "C3: 无法写入文件: " << cPath << std::endl;
                 return false;
             }
             ofs << cgen.sourceCode();
         }
 
         if (options.verbose) {
-            std::cout << "c3: 生成 " << hPath << " (" << cgen.headerCode().size() << " bytes)" << std::endl;
-            std::cout << "c3: 生成 " << cPath << " (" << cgen.sourceCode().size() << " bytes)" << std::endl;
+            std::cout << "C3: 生成 " << hPath << " (" << cgen.headerCode().size() << " bytes)" << std::endl;
+            std::cout << "C3: 生成 " << cPath << " (" << cgen.sourceCode().size() << " bytes)" << std::endl;
         }
 
         // --emit-c 模式: 输出C代码后结束
@@ -975,14 +975,14 @@ bool Driver::runCodeGeneration(const CompileOptions& options, const std::string&
         {
             std::ofstream ofs(dllEntryPath, std::ios::out | std::ios::trunc);
             if (!ofs) {
-                std::cerr << "c3: 无法写入文件: " << dllEntryPath << std::endl;
+                std::cerr << "C3: 无法写入文件: " << dllEntryPath << std::endl;
                 return false;
             }
             ofs << dllEntryCode;
         }
 
                 if (options.verbose) {
-            std::cout << "c3: 生成 " << dllEntryPath << " (" << dllEntryCode.size() << " bytes)" << std::endl;
+            std::cout << "C3: 生成 " << dllEntryPath << " (" << dllEntryCode.size() << " bytes)" << std::endl;
         }
 
                 // P9: Build TypeLib using CreateTypeLib2 API (replaces MIDL)
@@ -1044,12 +1044,12 @@ bool Driver::runCodeGeneration(const CompileOptions& options, const std::string&
                 }
 
                 if (!tlbBuilder.endLib(tlbPath)) {
-                    std::cerr << "c3: TypeLib generation failed: " << tlbBuilder.lastError() << std::endl;
+                    std::cerr << "C3: TypeLib generation failed: " << tlbBuilder.lastError() << std::endl;
                 } else if (options.verbose) {
-                    std::cout << "c3: TypeLib generated: " << tlbPath << std::endl;
+                    std::cout << "C3: TypeLib generated: " << tlbPath << std::endl;
                 }
             } else {
-                std::cerr << "c3: TypeLib init failed: " << tlbBuilder.lastError() << std::endl;
+                std::cerr << "C3: TypeLib init failed: " << tlbBuilder.lastError() << std::endl;
             }
         }
     }
@@ -1065,8 +1065,8 @@ bool Driver::runLinker(const CompileOptions& options, const std::string& outputD
 
     // 检查 MSVC 是否可用
     if (!MsvcDriver::isMsvcAvailable()) {
-        std::cerr << "c3: 错误: 未检测到MSVC环境 (请先运行vcvarsall.bat)" << std::endl;
-        std::cerr << "c3: 使用 --emit-c 选项可仅生成C代码" << std::endl;
+        std::cerr << "C3: 错误: 未检测到MSVC环境 (请先运行vcvarsall.bat)" << std::endl;
+        std::cerr << "C3: 使用 --emit-c 选项可仅生成C代码" << std::endl;
         return false;
     }
 
@@ -1089,7 +1089,7 @@ bool Driver::runLinker(const CompileOptions& options, const std::string& outputD
     SessionManager session;
     std::string rtlDir = session.create();
     if (rtlDir.empty()) {
-        std::cerr << "c3: 错误: 无法释放RTL运行时资源" << std::endl;
+        std::cerr << "C3: 错误: 无法释放RTL运行时资源" << std::endl;
         return false;
     }
     msvcOpts.rtlDir = rtlDir;
@@ -1140,7 +1140,7 @@ bool Driver::runLinker(const CompileOptions& options, const std::string& outputD
             defFile.close();
             msvcOpts.defFile = defPath;
             if (options.verbose) {
-                std::cout << "c3: 生成导出定义: " << defPath << std::endl;
+                std::cout << "C3: 生成导出定义: " << defPath << std::endl;
             }
         }
     }
@@ -1191,21 +1191,21 @@ bool Driver::runLinker(const CompileOptions& options, const std::string& outputD
                 std::ostringstream rcArgs;
                 rcArgs << "\"" << rcExePath << "\" /r /fo \"" << resPath << "\" \"" << rcPath << "\"";
                 if (options.verbose) {
-                    std::cout << "c3: RC: " << rcArgs.str() << std::endl;
+                    std::cout << "C3: RC: " << rcArgs.str() << std::endl;
                 }
                 std::string rcFullCmd = std::string("cmd /c \"") + rcArgs.str() + "\"";
                 int rcRet = std::system(rcFullCmd.c_str());
                 if (rcRet == 0 && std::filesystem::exists(resPath)) {
                     msvcOpts.typelibResFile = resPath;
                     if (options.verbose) {
-                        std::cout << "c3: TypeLib resource embedded: " << resPath << std::endl;
+                        std::cout << "C3: TypeLib resource embedded: " << resPath << std::endl;
                     }
                 }
             } else if (options.verbose) {
-                std::cout << "c3: rc.exe not found, TypeLib will not be embedded in DLL" << std::endl;
+                std::cout << "C3: rc.exe not found, TypeLib will not be embedded in DLL" << std::endl;
             }
         } else if (options.verbose) {
-            std::cout << "c3: TypeLib file not found: " << tlbPath << std::endl;
+            std::cout << "C3: TypeLib file not found: " << tlbPath << std::endl;
         }
     }
     MsvcDriver msvc;
@@ -1215,9 +1215,9 @@ bool Driver::runLinker(const CompileOptions& options, const std::string& outputD
 // === 帮助/版本 ===
 
 void Driver::printHelp() {
-    std::cout << "c3 - Visual Basic 6.0 Compiler\n"
+    std::cout << "C3 - Visual Basic 6.0 Compiler\n"
               << "\n"
-              << "用法: c3 [选项] <源文件...>\n"
+              << "用法: C3 [选项] <源文件...>\n"
               << "\n"
               << "选项:\n"
               << "  -o <文件>          输出文件路径\n"
@@ -1243,14 +1243,14 @@ void Driver::printHelp() {
               << "  -V, --version       显示版本\n"
               << "\n"
               << "示例:\n"
-              << "  c3 hello.bas -o hello.exe\n"
-              << "  c3 module.bas --dump-tokens\n"
-              << "  c3 app.vbp --target win-x64\n"
-              << "  c3 module.bas -d:WIN64=-1 --dump-preprocess\n";
+              << "  C3 hello.bas -o hello.exe\n"
+              << "  C3 module.bas --dump-tokens\n"
+              << "  C3 app.vbp --target win-x64\n"
+              << "  C3 module.bas -d:WIN64=-1 --dump-preprocess\n";
 }
 
 void Driver::printVersion() {
-    std::cout << "c3 version 0.1.0 (vb6.pro project)" << std::endl;
+    std::cout << "C3 version 0.10.0 (vb6.pro project)" << std::endl;
 }
 
 } // namespace vb6c3

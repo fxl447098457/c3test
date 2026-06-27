@@ -3,6 +3,17 @@ AIGC:
   ContentProducer: '001191110102MAD55U9H0F10002'
   ContentPropagator: '001191110102MAD55U9H0F10002'
   Label: '1'
+  ProduceID: '96ea9b49-400d-4383-8347-626f1da41601'
+  PropagateID: '96ea9b49-400d-4383-8347-626f1da41601'
+  ReservedCode1: 'ec4d4d59-44ce-4cf1-bcd1-d758d33a49e3'
+  ReservedCode2: 'ec4d4d59-44ce-4cf1-bcd1-d758d33a49e3'
+---
+
+---
+AIGC:
+  ContentProducer: '001191110102MAD55U9H0F10002'
+  ContentPropagator: '001191110102MAD55U9H0F10002'
+  Label: '1'
   ProduceID: '7b035d93-441f-4307-8cb1-7fc76f374ccb'
   PropagateID: '7b035d93-441f-4307-8cb1-7fc76f374ccb'
   ReservedCode1: 'ca1dc0a7-ba29-4396-8e9c-c0a71e991560'
@@ -20,7 +31,7 @@ AIGC:
   ReservedCode2: 'bd11dbed-fe9f-4042-8784-624f5e14a5e8'
 ---
 
-# VB6编译器（c3）开发环境速查
+# VB6编译器（C3）开发环境速查
 
 > 本文件是 AI Agent 每次会话的环境参考，避免重复试错。
 
@@ -44,7 +55,7 @@ AIGC:
 | 项目 | 路径 |
 |------|------|
 | vcvarsall.bat | `C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvarsall.bat` |
-| c3.exe | `.build\c3.exe`（项目根目录下，构建后直接在 .build 根目录） |
+| C3.exe | `.build\C3.exe`（项目根目录下，构建后直接在 .build 根目录） |
 | 构建目录 | `.build\`（CMake + Ninja 生成） |
 | 输出目录 | `output\`（编译生成的 .h/.c/.exe 中间产物） |
 | 测试目录 | `tests\`（57个.bas + 4个.vbp 测试文件） |
@@ -94,13 +105,13 @@ Start-Process -FilePath "cmd.exe" -ArgumentList '/c D:\vb6pro\.temp\full_build.b
 cmd /c "call "C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvarsall.bat" x64 >nul 2>&1 && cd /d D:\vb6pro && cmake --build .build --config Release 2>&1"
 ```
 
-### 运行 c3.exe
+### 运行 C3.exe
 
 ```bat
-D:\vb6pro\.build\c3.exe <参数>
+D:\vb6pro\.build\C3.exe <参数>
 ```
 
-**c3.exe 就在 .build 根目录，不在 .build\Release\ 下！**
+**C3.exe 就在 .build 根目录，不在 .build\Release\ 下！**
 
 ### 运行自动化测试
 
@@ -132,7 +143,7 @@ D:\vb6pro\tests\run_tests.ps1
 
 | 脚本 | 用法 | 说明 |
 |------|------|------|
-| build.bat | build [clean] | 构建 c3.exe（clean=清理后完整构建）**注意：会被hook注入，推荐用 .temp\full_build.bat** |
+| build.bat | build [clean] | 构建 C3.exe（clean=清理后完整构建）**注意：会被hook注入，推荐用 .temp\full_build.bat** |
 | test.bat | test [all\|run\|compile\|syntax] [verbose] | 运行回归测试 |
 | compile.bat | compile <source> [outdir] | 编译 .bas/.frm/.vbp（自动加载 MSVC+VB6RTL） |
 | run.bat | run <exename> [timeout] | 运行 output/ 下的 EXE |

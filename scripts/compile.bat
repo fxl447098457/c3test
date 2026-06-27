@@ -1,6 +1,6 @@
-@echo off
+﻿@echo off
 REM ============================================================
-REM  compile.bat - 用 c3.exe 编译 VB6 源文件
+REM  compile.bat - 用 C3.exe 编译 VB6 源文件
 REM  用法: compile <source.bas/.frm/.vbp> [output-dir]
 REM  示例:
 REM    compile tests\hello.bas
@@ -36,7 +36,7 @@ if not "%2"=="" set OUTDIR=%2
 echo [INFO] 编译: %1
 echo [INFO] 输出: %OUTDIR%
 
-.build\c3.exe %1 --output-dir %OUTDIR%
+.build\C3.exe %1 --output-dir %OUTDIR%
 if errorlevel 1 (
     echo [ERROR] 编译失败
     exit /b 1

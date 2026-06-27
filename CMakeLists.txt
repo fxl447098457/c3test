@@ -111,7 +111,7 @@ add_library(vb6c3-ir STATIC
 target_compile_definitions(vb6c3-ir PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
 target_link_libraries(vb6c3-ir PRIVATE vb6c3-core)
 
-# --- Compiler CLI: c3.exe ---
+# --- Compiler CLI: C3.exe ---
 # P10: c3rtl.rc embeds RTL .h/.c files as RCDATA resources
 add_executable(c3
     src/driver/main.cpp
@@ -119,6 +119,7 @@ add_executable(c3
     src/driver/rtl_embedded.cpp
     src/driver/c3rtl.rc
 )
+set_target_properties(c3 PROPERTIES OUTPUT_NAME C3)
 target_link_libraries(c3 PRIVATE vb6c3-core vb6c3-cgen)
 if(VB6C3_ENABLE_LLVM)
     target_link_libraries(c3 PRIVATE vb6c3-llvm)

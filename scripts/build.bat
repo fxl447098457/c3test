@@ -1,6 +1,6 @@
-@echo off
+﻿@echo off
 REM ============================================================
-REM  build.bat - 构建 c3.exe
+REM  build.bat - 构建 C3.exe
 REM  用法: build [clean]
 REM    build       = 增量构建
 REM    build clean = 清理后完整构建
@@ -25,11 +25,11 @@ if "%1"=="clean" (
     )
 )
 
-echo [INFO] 构建 c3.exe...
+echo [INFO] 构建 C3.exe...
 cmake --build .build --config Release
 if errorlevel 1 (
     echo [ERROR] 构建失败
     exit /b 1
 )
 
-echo [OK] c3.exe 构建成功: .build\c3.exe
+echo [OK] C3.exe 构建成功: .build\C3.exe

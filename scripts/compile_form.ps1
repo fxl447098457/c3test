@@ -1,4 +1,4 @@
-#!/usr/bin/env powershell
+﻿#!/usr/bin/env powershell
 # ============================================================
 #  compile_form.ps1 - 编译 .frm 窗体并可选运行
 #  用法: compile_form.ps1 <form.frm> [-Run] [-TimeoutSec 5]
@@ -40,7 +40,7 @@ if (-not (Test-Path $FormFile)) {
 
 # 编译
 Write-Host "[INFO] Compiling: $FormFile" -ForegroundColor Yellow
-$result = & "$ProjectDir\.build\c3.exe" $FormFile --output-dir "$ProjectDir\output" 2>&1
+$result = & "$ProjectDir\.build\C3.exe" $FormFile --output-dir "$ProjectDir\output" 2>&1
 $result | ForEach-Object { Write-Host $_ }
 
 if ($LASTEXITCODE -ne 0) {
