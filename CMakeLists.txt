@@ -10,7 +10,7 @@ if(MSVC)
     add_compile_options(/utf-8)
 endif()
 
-# === LLVM 后端选项 (默认关闭，006决策：现阶段走C代码生成+MSVC路线) ===
+# === LLVM backend (disabled by default, decision 006: C code gen + MSVC) ===
 option(VB6C3_ENABLE_LLVM "Enable LLVM backend" OFF)
 set(VB6C3_LLVM_DIR "" CACHE PATH "LLVM installation directory (for tool mode)")
 
@@ -49,12 +49,12 @@ endif()
 include_directories(${CMAKE_SOURCE_DIR}/src)
 
 # ============================================================
-# 008决策：库优先架构
-# vb6c3-core = 词法/语法/AST/语义/符号/类型/诊断/源码管理
-# c3.exe = 薄壳CLI驱动
+# Decision 008: Library-first architecture
+# vb6c3-core = lexer/parser/AST/semantics/symbols/types/diagnostics
+# c3.exe = thin CLI driver
 # ============================================================
 
-# --- 核心库 vb6c3-core ---
+# --- Core library vb6c3-core ---
 add_library(vb6c3-core STATIC
     src/common/diagnostics.cpp
     src/common/source_manager.cpp
@@ -75,12 +75,13 @@ add_library(vb6c3-core STATIC
     src/project/vbp_parser.cpp
     src/project/frm_parser.cpp
     src/com/typelib_parser.cpp
+    src/typelib/typelib_builder.cpp
 )
 target_compile_definitions(vb6c3-core PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
-# TypeLib解析器需要ole32/oleaut32 (编译期COM API)
+# TypeLib parser needs ole32/oleaut32 (COM API)
 target_link_libraries(vb6c3-core PRIVATE ole32 oleaut32 uuid)
 
-# --- C代码生成后端 ---
+# --- C code generation backend ---
 add_library(vb6c3-cgen STATIC
     src/backend/cgen.cpp
     src/backend/msvc_driver.cpp
@@ -88,7 +89,7 @@ add_library(vb6c3-cgen STATIC
 target_compile_definitions(vb6c3-cgen PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
 target_link_libraries(vb6c3-cgen PRIVATE vb6c3-core)
 
-# --- LLVM后端 (可选) ---
+# --- LLVM backend (optional) ---
 if(VB6C3_ENABLE_LLVM)
     add_library(vb6c3-llvm STATIC
         src/backend/llvm_backend.cpp
@@ -102,7 +103,7 @@ if(VB6C3_ENABLE_LLVM)
     target_link_libraries(vb6c3-llvm PRIVATE vb6c3-core)
 endif()
 
-# --- IR层 (暂保留) ---
+# --- IR layer (preserved) ---
 add_library(vb6c3-ir STATIC
     src/ir/ir.cpp
     src/ir/ir_emitter.cpp
@@ -110,7 +111,7 @@ add_library(vb6c3-ir STATIC
 target_compile_definitions(vb6c3-ir PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
 target_link_libraries(vb6c3-ir PRIVATE vb6c3-core)
 
-# --- 编译器CLI: c3.exe ---
+# --- Compiler CLI: c3.exe ---
 add_executable(c3
     src/driver/main.cpp
     src/driver/driver.cpp
@@ -123,7 +124,7 @@ else()
 endif()
 target_compile_definitions(c3 PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
 
-# --- 运行时 RTL ---
+# --- Runtime RTL ---
 add_library(vb6c3-rtl3-core STATIC
     src/rtl/core/bstring.cpp
     src/rtl/core/variant.cpp

@@ -82,13 +82,6 @@ public:
     std::string generateDllEntry(const std::string& progId,
                                   const std::vector<SymbolTable*>& allSymTabs = {});
 
-    // P6.13: 生成IDL文件 (用于MIDL编译成TypeLib)
-    // dllPath: DLL的相对/绝对路径, 写入IDL的helpstring
-    // 返回: 生成的.idl文件内容
-    std::string generateIdl(const std::string& progId,
-                            const std::string& libidStr,
-                            const std::vector<SymbolTable*>& allSymTabs = {});
-
     // 获取生成的代码
     const std::string& headerCode() const { return header_; }
     const std::string& sourceCode() const { return source_; }

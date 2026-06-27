@@ -9,6 +9,7 @@
 #include "semantics/semantic_analyzer.hpp"
 #include "backend/cgen.hpp"
 #include "backend/msvc_driver.hpp"
+#include "typelib/typelib_builder.hpp"
 #include "project/vbp_parser.hpp"
 #include "project/frm_parser.hpp"
 
@@ -983,20 +984,71 @@ bool Driver::runCodeGeneration(const CompileOptions& options, const std::string&
             std::cout << "c3: 生成 " << dllEntryPath << " (" << dllEntryCode.size() << " bytes)" << std::endl;
         }
 
-        // P6.13: Generate IDL file for MIDL -> TypeLib
+                // P9: Build TypeLib using CreateTypeLib2 API (replaces MIDL)
         {
-            std::string idlCode = dllCgen.generateIdl(options.dllProgId, options.libidStr, allSymTabs);
-            std::string idlPath = outputDir + "/" + options.dllProgId + ".idl";
-            {
-                std::ofstream ofs(idlPath, std::ios::out | std::ios::trunc);
-                if (!ofs) {
-                    std::cerr << "c3: cannot write IDL: " << idlPath << std::endl;
-                } else {
-                    ofs << idlCode;
+            TypeLibBuilder tlbBuilder;
+            std::string tlbPath = std::filesystem::absolute(outputDir + "/" + options.dllProgId + ".tlb").string();
+            std::string libId = options.libidStr.empty()
+                ? TypeLibBuilder::generateUuid(options.dllProgId + ".TypeLib")
+                : options.libidStr;
+
+            if (tlbBuilder.beginLib(tlbPath, libId, options.dllProgId + " TypeLib", options.dllProgId + ".TypeLib")) {
+                int dispidCounter = 1;
+                for (auto* symTab : allSymTabs) {
+                    // 遍历模块级作用域中的符号, 找出 Public Class (ActiveX DLL 的 coclass)
+                    auto* modScope = symTab->moduleScope();
+                    if (!modScope) continue;
+                    for (auto& [key, symPtr] : modScope->symbols()) {
+                        if (!symPtr || symPtr->kind != SymbolKind::Class) continue;
+                        if (symPtr->instancing == VBInstancing::Private) continue;
+                        auto& clsSym = *symPtr;
+
+                        std::vector<TypeLibBuilder::MethodInfo> methods;
+                        for (auto& memberName : clsSym.memberNames) {
+                            // 在模块作用域查找成员符号
+                            auto* memberSym = symTab->lookupModule(memberName);
+                            if (!memberSym || memberSym->access != AccessLevel::Public) continue;
+                            if (memberSym->kind != SymbolKind::Sub && memberSym->kind != SymbolKind::Function
+                                && memberSym->kind != SymbolKind::PropertyGet
+                                && memberSym->kind != SymbolKind::PropertyLet
+                                && memberSym->kind != SymbolKind::PropertySet) continue;
+
+                            TypeLibBuilder::MethodInfo mi;
+                            mi.name = memberSym->name;
+                            mi.dispid = dispidCounter++;
+                            mi.returnType = memberSym->type;
+                            mi.isPropertyGet = (memberSym->kind == SymbolKind::PropertyGet);
+                            mi.isPropertyPut = (memberSym->kind == SymbolKind::PropertyLet);
+                            mi.isPropertyPutRef = (memberSym->kind == SymbolKind::PropertySet);
+
+                            // 使用 Symbol::params (不是 comMethodSig, 那是 COM 导入接口专用的)
+                            for (auto& param : memberSym->params) {
+                                mi.params.push_back(param);
+                            }
+                            methods.push_back(mi);
+                        }
+
+                        std::string iid = TypeLibBuilder::generateUuid("_" + clsSym.name);
+                        std::string ifaceName = "_" + clsSym.name;
+                        tlbBuilder.addDispInterface(ifaceName, iid, methods);
+
+                        std::string clsid = clsSym.comClsidStr;
+                        if (clsid.empty()) {
+                            auto it = classClsidMap_.find(clsSym.lowerName);
+                            if (it != classClsidMap_.end()) clsid = it->second;
+                        }
+                        if (clsid.empty()) clsid = TypeLibBuilder::generateUuid(clsSym.name);
+                        tlbBuilder.addCoClass(clsSym.name, clsid, ifaceName);
+                    }
                 }
-            }
-            if (options.verbose) {
-                std::cout << "c3: generated " << idlPath << " (" << idlCode.size() << " bytes)" << std::endl;
+
+                if (!tlbBuilder.endLib(tlbPath)) {
+                    std::cerr << "c3: TypeLib generation failed: " << tlbBuilder.lastError() << std::endl;
+                } else if (options.verbose) {
+                    std::cout << "c3: TypeLib generated: " << tlbPath << std::endl;
+                }
+            } else {
+                std::cerr << "c3: TypeLib init failed: " << tlbBuilder.lastError() << std::endl;
             }
         }
     }
@@ -1112,137 +1164,67 @@ bool Driver::runLinker(const CompileOptions& options, const std::string& outputD
         }
     }
 
-    // P6.13: MIDL + RC for TypeLib embedding in DLL
+    // P9: Embed TypeLib into DLL resource (TypeLib now generated by CreateTypeLib2, no MIDL needed)
     if (options.isDll && !options.dllProgId.empty()) {
-        std::string idlPath = std::filesystem::absolute(outputDir + "/" + options.dllProgId + ".idl").string();
-        if (std::filesystem::exists(idlPath)) {
-            // Check for MIDL: prefer tools/midl.exe, then Windows SDK
-            std::string midlPath;
-            std::filesystem::path toolsMidl = std::filesystem::current_path() / "tools" / "midl.exe";
-            if (std::filesystem::exists(toolsMidl)) {
-                midlPath = toolsMidl.string();
+        std::string tlbPath = std::filesystem::absolute(outputDir + "/" + options.dllProgId + ".tlb").string();
+        if (std::filesystem::exists(tlbPath)) {
+            std::string absOutputDir = std::filesystem::absolute(outputDir).string();
+            std::string rcPath = absOutputDir + "\\activex_dll_typelib.rc";
+            {
+                std::ofstream rcFile(rcPath, std::ios::out | std::ios::trunc);
+                if (rcFile) {
+                    rcFile << "1 TYPELIB \"" << options.dllProgId << ".tlb\"\n";
+                }
+            }
+
+            // Find rc.exe: tools/ first, then Windows SDK
+            std::string rcExePath;
+            std::filesystem::path toolsRc = std::filesystem::current_path() / "tools" / "rc.exe";
+            if (std::filesystem::exists(toolsRc)) {
+                rcExePath = toolsRc.string();
             } else {
-                // Search Windows SDK: WindowsSdkDir=C:\...\Windows Kits\10\
-                // MIDL is at WindowsSdkDir\bin\<version>\x64\midl.exe
                 std::string sdkBinDir;
                 const char* sdkDir = std::getenv("WindowsSdkDir");
                 if (sdkDir && sdkDir[0] != '\0') {
-                    // WindowsSdkDir typically ends with \10\, append "bin"
                     std::string sdkRoot = sdkDir;
-                    // Remove trailing backslash
                     while (!sdkRoot.empty() && sdkRoot.back() == '\\') sdkRoot.pop_back();
                     sdkBinDir = sdkRoot + "\\bin";
                 }
                 if (sdkBinDir.empty() || !std::filesystem::exists(sdkBinDir)) {
-                    // Fallback: try common path directly to bin dir
                     static const char* commonSdkBin = "C:\\Program Files (x86)\\Windows Kits\\10\\bin";
                     if (std::filesystem::exists(commonSdkBin)) sdkBinDir = commonSdkBin;
                 }
                 if (!sdkBinDir.empty() && std::filesystem::exists(sdkBinDir)) {
-                    // Find latest SDK version with x64/midl.exe
                     for (auto& entry : std::filesystem::directory_iterator(sdkBinDir)) {
                         if (!entry.is_directory()) continue;
-                        std::filesystem::path candidate = entry.path() / "x64" / "midl.exe";
+                        std::filesystem::path candidate = entry.path() / "x64" / "rc.exe";
                         if (std::filesystem::exists(candidate)) {
-                            midlPath = candidate.string();
+                            rcExePath = candidate.string();
                         }
                     }
                 }
             }
 
-            if (!midlPath.empty()) {
-                // Convert paths to absolute for MIDL reliability
-                std::string absOutputDir = std::filesystem::absolute(outputDir).string();
-                std::string tlbPath = absOutputDir + "\\" + options.dllProgId + ".tlb";
-
-                // Find SDK include dirs for MIDL
-                // WindowsSdkDir=C:\...\Windows Kits\10\, includes at Include\<version>\um\oaidl.idl
-                std::string sdkIncludeDir;
-                std::string sdkIncBase;
-                const char* sdkInc = std::getenv("WindowsSdkDir");
-                if (sdkInc && sdkInc[0] != '\0') {
-                    std::string sdkRoot = sdkInc;
-                    while (!sdkRoot.empty() && sdkRoot.back() == '\\') sdkRoot.pop_back();
-                    sdkIncBase = sdkRoot + "\\Include";
-                }
-                if (sdkIncBase.empty() || !std::filesystem::exists(sdkIncBase)) {
-                    sdkIncBase = "C:\\Program Files (x86)\\Windows Kits\\10\\Include";
-                }
-                if (std::filesystem::exists(sdkIncBase)) {
-                    for (auto& entry : std::filesystem::directory_iterator(sdkIncBase)) {
-                        if (!entry.is_directory()) continue;
-                        if (std::filesystem::exists(entry.path() / "um" / "oaidl.idl")) {
-                            sdkIncludeDir = entry.path().string();
-                        }
-                    }
-                }
-
-                // Run MIDL: midl /I<sdk>/um /I<sdk>/shared /tlb<out>.tlb <in>.idl
-                // Build MIDL args, then exec via cmd /c to handle paths with spaces
-                std::ostringstream midlArgs;
-                midlArgs << "\"" << midlPath << "\"";
-                if (!sdkIncludeDir.empty()) {
-                    midlArgs << " /I\"" << sdkIncludeDir << "\\um\"";
-                    midlArgs << " /I\"" << sdkIncludeDir << "\\shared\"";
-                }
-                midlArgs << " /tlb \"" << tlbPath << "\"";
-                // Don't use /out - it conflicts with /tlb absolute path (causes doubled directory)
-                midlArgs << " \"" << idlPath << "\"";
-
+            if (!rcExePath.empty()) {
+                std::string resPath = absOutputDir + "\\activex_dll_typelib.res";
+                std::ostringstream rcArgs;
+                rcArgs << "\"" << rcExePath << "\" /r /fo \"" << resPath << "\" \"" << rcPath << "\"";
                 if (options.verbose) {
-                    std::cout << "c3: MIDL: " << midlArgs.str() << std::endl;
+                    std::cout << "c3: RC: " << rcArgs.str() << std::endl;
                 }
-                // On Windows, std::system() uses cmd.exe which strips outer quotes.
-                // Wrap in cmd /c "..." to preserve inner quotes for paths with spaces.
-                std::string midlFullCmd = std::string("cmd /c \"") + midlArgs.str() + "\"";
-                int midlRet = std::system(midlFullCmd.c_str());
-                if (midlRet == 0 && std::filesystem::exists(tlbPath)) {
-                    // Generate .rc file
-                    std::string rcPath = absOutputDir + "\\activex_dll_typelib.rc";
-                    {
-                        std::ofstream rcFile(rcPath, std::ios::out | std::ios::trunc);
-                        if (rcFile) {
-                            rcFile << "// P6.13: TypeLib resource - embed .tlb into DLL\n";
-                            rcFile << "1 TYPELIB \"" << options.dllProgId << ".tlb\"\n";
-                        }
+                std::string rcFullCmd = std::string("cmd /c \"") + rcArgs.str() + "\"";
+                int rcRet = std::system(rcFullCmd.c_str());
+                if (rcRet == 0 && std::filesystem::exists(resPath)) {
+                    msvcOpts.typelibResFile = resPath;
+                    if (options.verbose) {
+                        std::cout << "c3: TypeLib resource embedded: " << resPath << std::endl;
                     }
-
-                    // Find RC compiler
-                    std::string rcExePath;
-                    std::filesystem::path toolsRc = std::filesystem::current_path() / "tools" / "rc.exe";
-                    if (std::filesystem::exists(toolsRc)) {
-                        rcExePath = toolsRc.string();
-                    } else if (!midlPath.empty()) {
-                        // RC is usually in same directory as MIDL
-                        std::filesystem::path rcCandidate = std::filesystem::path(midlPath).parent_path() / "rc.exe";
-                        if (std::filesystem::exists(rcCandidate)) {
-                            rcExePath = rcCandidate.string();
-                        }
-                    }
-
-                    if (!rcExePath.empty()) {
-                        std::string resPath = absOutputDir + "\\activex_dll_typelib.res";
-                        std::ostringstream rcArgs;
-                        rcArgs << "\"" << rcExePath << "\" /r /fo \"" << resPath << "\" \"" << rcPath << "\"";
-
-                        if (options.verbose) {
-                            std::cout << "c3: RC: " << rcArgs.str() << std::endl;
-                        }
-                        std::string rcFullCmd = std::string("cmd /c \"") + rcArgs.str() + "\"";
-                        int rcRet = std::system(rcFullCmd.c_str());
-                        if (rcRet == 0 && std::filesystem::exists(resPath)) {
-                            msvcOpts.typelibResFile = resPath;
-                            if (options.verbose) {
-                                std::cout << "c3: TypeLib资源嵌入: " << resPath << std::endl;
-                            }
-                        }
-                    }
-                } else if (options.verbose) {
-                    std::cout << "c3: MIDL编译失败, TypeLib不会嵌入DLL" << std::endl;
                 }
             } else if (options.verbose) {
-                std::cout << "c3: 未找到MIDL编译器, 跳过TypeLib生成" << std::endl;
+                std::cout << "c3: rc.exe not found, TypeLib will not be embedded in DLL" << std::endl;
             }
+        } else if (options.verbose) {
+            std::cout << "c3: TypeLib file not found: " << tlbPath << std::endl;
         }
     }
     MsvcDriver msvc;

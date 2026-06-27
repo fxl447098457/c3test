@@ -17,7 +17,6 @@ struct MsvcDriverOptions {
     bool isDll = false;                     // P6.6: ActiveX DLL模式
     std::string defFile;                    // P6.6: DLL导出定义文件(.def)路径
     bool isGui = false;                     // P7: GUI程序 (Win32窗口, 非控制台)
-    std::string idlFile;                    // P6.13: IDL文件路径 (空=跳过MIDL)
     std::string typelibResFile;              // P6.13: .res文件路径 (已编译好的资源)
 };
 
