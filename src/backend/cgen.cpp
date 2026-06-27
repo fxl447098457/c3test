@@ -1,4 +1,4 @@
-#include "backend/cgen.hpp"
+﻿#include "backend/cgen.hpp"
 #include <algorithm>
 #include <cctype>
 #include <iostream>
@@ -50,6 +50,38 @@ bool CCodeGen::generate(Module& module, const std::string& baseName,
     emittedSymbols_.clear();
     labelCounter_ = 0;
     tempCounter_ = 0;
+
+    // P6.11: 类模块成员变量类型扫描 (用于方法体内的BSTR安全赋值)
+    // 生成代码时类成员的C名格式为 m_Xxx (首字母大写), lowercase 后为 m_xxx
+    classBstrMembers_.clear();
+    classLongMembers_.clear();
+    classDoubleMembers_.clear();
+    if (isClassModule_) {
+        for (auto& decl : module.declarations) {
+            if (decl->kind == ASTNodeKind::VariableDecl) {
+                auto& var = static_cast<VariableDecl&>(*decl);
+                if (var.asType) {
+                    Vb6Type vtype = resolveArrayElemType(var.asType.get());
+                    // 注册 C 字段名 m_Xxx 的 lowercase: m_xxx
+                    std::string mLower = "m_" + var.name;
+                    std::transform(mLower.begin(), mLower.end(), mLower.begin(), ::tolower);
+                    // 同时注册不带 m_ 前缀的原始名 lowercase
+                    std::string oLower = var.name;
+                    std::transform(oLower.begin(), oLower.end(), oLower.begin(), ::tolower);
+                    if (vtype == Vb6Type::String) {
+                        classBstrMembers_.insert(mLower);
+                        classBstrMembers_.insert(oLower);
+                    } else if (vtype == Vb6Type::Long || vtype == Vb6Type::Integer || vtype == Vb6Type::Boolean) {
+                        classLongMembers_.insert(mLower);
+                        classLongMembers_.insert(oLower);
+                    } else if (vtype == Vb6Type::Double || vtype == Vb6Type::Single) {
+                        classDoubleMembers_.insert(mLower);
+                        classDoubleMembers_.insert(oLower);
+                    }
+                }
+            }
+        }
+    }
 
     // 生成 .h 头文件
     std::string guard = "VB6CGEN_" + cIdent(baseName_) + "_H";
@@ -2108,8 +2140,22 @@ void CCodeGen::visit(AssignmentStmt& node) {
     }
 
     emitExpr(*node.value);
-    // COM属性值: 如果右侧是COM属性, 解析为值
-    if (isComMarker_) resolveComValue();
+    // COM属性值: 如果右侧是COM属性, 根据目标变量类型解析为适当C类型
+    if (isComMarker_) {
+        // 推断目标变量类型, 用于COM值解封
+        std::string unpackHint;
+        if (node.target->kind == ASTNodeKind::IdentifierExpr) {
+            auto& idExpr = static_cast<IdentifierExpr&>(*node.target);
+            std::string lower = idExpr.name;
+            std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+            // 从已知变量集合推断类型
+            if (knownLongVars_.count(lower)) unpackHint = "Long";
+            else if (knownDoubleVars_.count(lower)) unpackHint = "Double";
+            else if (knownObjectVars_.count(lower)) unpackHint = "Object";
+            else if (knownBstrVars_.count(lower)) unpackHint = "BSTR";
+        }
+        resolveComValue(unpackHint);
+    }
     std::string value = std::move(lastExpr_);
 
     // 如果赋值目标是当前Function/PropertyGet名 (VB6语义: 设置返回值), 替换为返回值变量
@@ -2121,7 +2167,28 @@ void CCodeGen::visit(AssignmentStmt& node) {
         }
     }
 
-    c_.emitLine(target + " = " + value + ";");
+    // BSTR赋值检测: 如果目标是BSTR变量, 使用vb6_BSTR_Assign防止悬垂指针和双重释放
+    bool targetIsBstr = false;
+    {
+        // 检查目标是否是已知BSTR变量 (me->field 或 模块级变量)
+        std::string checkName = target;
+        if (checkName.substr(0, 4) == "me->") checkName = checkName.substr(4);  // 去掉me->前缀
+        std::string lower = checkName;
+        std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+        if (knownBstrVars_.count(lower)) targetIsBstr = true;
+        // 也检查不含前缀的原始名 (Property Let参数等)
+        if (node.target->kind == ASTNodeKind::IdentifierExpr) {
+            auto& id = static_cast<IdentifierExpr&>(*node.target);
+            std::string idLower = id.name;
+            std::transform(idLower.begin(), idLower.end(), idLower.begin(), ::tolower);
+            if (knownBstrVars_.count(idLower)) targetIsBstr = true;
+        }
+    }
+    if (targetIsBstr) {
+        c_.emitLine("vb6_BSTR_Assign(&" + target + ", " + value + ");");
+    } else {
+        c_.emitLine(target + " = " + value + ";");
+    }
 }
 
 void CCodeGen::visit(SetStmt& node) {
@@ -2372,6 +2439,20 @@ void CCodeGen::visit(LetStmt& node) {
     emitExpr(*node.target);
     std::string target = std::move(lastExpr_);
     emitExpr(*node.value);
+    // COM属性值: 根据目标变量类型解封
+    if (isComMarker_) {
+        std::string unpackHint;
+        if (node.target->kind == ASTNodeKind::IdentifierExpr) {
+            auto& idExpr = static_cast<IdentifierExpr&>(*node.target);
+            std::string lower = idExpr.name;
+            std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+            if (knownLongVars_.count(lower)) unpackHint = "Long";
+            else if (knownDoubleVars_.count(lower)) unpackHint = "Double";
+            else if (knownObjectVars_.count(lower)) unpackHint = "Object";
+            else if (knownBstrVars_.count(lower)) unpackHint = "BSTR";
+        }
+        resolveComValue(unpackHint);
+    }
     std::string value = std::move(lastExpr_);
 
     c_.emitLine(target + " = " + value + ";  /* Let */");
@@ -3179,11 +3260,15 @@ void CCodeGen::visit(LocalDeclStmt& node) {
 
             std::string cType = mapTypeRef(var.asType.get());
 
-            // 记录BSTR类型变量名
+            // 记录变量类型集合 (用于Debug.Print和COM解封类型推断)
             if (cType == "BSTR") {
                 std::string lower = var.name;
                 std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
                 knownBstrVars_.insert(lower);
+            } else if (cType == "int32_t" || cType == "int16_t" || cType == "VBABOOL") {
+                std::string lower = var.name;
+                std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+                knownLongVars_.insert(lower);
             }
 
             // 记录Object类型变量名 (COM后期绑定)
@@ -3309,6 +3394,11 @@ void CCodeGen::visit(SubDecl& node) {
     arrayElemTypes_.clear();
     knownBstrVars_.clear();
     knownDoubleVars_.clear();
+    knownLongVars_.clear();
+    // P6.11: 恢复类模块成员变量类型 (clear后从持久化集合恢复)
+    knownBstrVars_.insert(classBstrMembers_.begin(), classBstrMembers_.end());
+    knownDoubleVars_.insert(classDoubleMembers_.begin(), classDoubleMembers_.end());
+    knownLongVars_.insert(classLongMembers_.begin(), classLongMembers_.end());
 
     // VB6 Static Sub: 过程内所有局部变量都是static
     inStaticProc_ = node.isStatic;
@@ -3352,6 +3442,11 @@ void CCodeGen::visit(FunctionDecl& node) {
     arrayElemTypes_.clear();
     knownBstrVars_.clear();
     knownDoubleVars_.clear();
+    knownLongVars_.clear();
+    // P6.11: 恢复类模块成员变量类型 (clear后从持久化集合恢复)
+    knownBstrVars_.insert(classBstrMembers_.begin(), classBstrMembers_.end());
+    knownDoubleVars_.insert(classDoubleMembers_.begin(), classDoubleMembers_.end());
+    knownLongVars_.insert(classLongMembers_.begin(), classLongMembers_.end());
 
     // VB6 Static Function: 过程内所有局部变量都是static
     inStaticProc_ = node.isStatic;
@@ -3363,9 +3458,14 @@ void CCodeGen::visit(FunctionDecl& node) {
     // Function返回值变量
     std::string retType = mapTypeRef(node.returnType.get());
     currentReturnVar_ = "vb6_ret_" + cIdent(node.name);
-    c_.emitLine(retType + " " + currentReturnVar_ + " = " + defaultValue(
-        node.returnType ? typeSys_.resolveTypeName(static_cast<SimpleTypeRef*>(node.returnType.get())->name) : Vb6Type::Variant
-    ) + ";");
+    Vb6Type funcRetVb6Type = node.returnType ? typeSys_.resolveTypeName(static_cast<SimpleTypeRef*>(node.returnType.get())->name) : Vb6Type::Variant;
+    c_.emitLine(retType + " " + currentReturnVar_ + " = " + defaultValue(funcRetVb6Type) + ";");
+    // P6.11: 注册返回值变量类型 (用于BSTR安全赋值)
+    std::string funcRetLower = currentReturnVar_;
+    std::transform(funcRetLower.begin(), funcRetLower.end(), funcRetLower.begin(), ::tolower);
+    if (funcRetVb6Type == Vb6Type::String) knownBstrVars_.insert(funcRetLower);
+    else if (funcRetVb6Type == Vb6Type::Double) knownDoubleVars_.insert(funcRetLower);
+    else if (funcRetVb6Type == Vb6Type::Long || funcRetVb6Type == Vb6Type::Integer || funcRetVb6Type == Vb6Type::Boolean) knownLongVars_.insert(funcRetLower);
 
     if (hasGoSub_) {
         c_.emitLine("int vb6_gosub_stack[32];");
@@ -3609,7 +3709,7 @@ void CCodeGen::visit(VariableDecl& node) {
         }
     }
 
-    // 记录double/single类型变量名 (用于Debug.Print浮点输出)
+    // 记录变量类型集合 (用于Debug.Print和COM解封类型推断)
     if (cType == "double" || cType == "float") {
         std::string lower = node.name;
         std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
@@ -3618,6 +3718,10 @@ void CCodeGen::visit(VariableDecl& node) {
         std::string lower = node.name;
         std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
         knownBstrVars_.insert(lower);
+    } else if (cType == "int32_t" || cType == "int16_t" || cType == "VBABOOL") {
+        std::string lower = node.name;
+        std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+        knownLongVars_.insert(lower);
     }
 
     // 前向声明 → .h, 定义 → .c
@@ -3739,6 +3843,11 @@ void CCodeGen::visit(PropertyDecl& node) {
     arrayElemTypes_.clear();
     knownBstrVars_.clear();
     knownDoubleVars_.clear();
+    knownLongVars_.clear();
+    // P6.11: 恢复类模块成员变量类型 (clear后从持久化集合恢复)
+    knownBstrVars_.insert(classBstrMembers_.begin(), classBstrMembers_.end());
+    knownDoubleVars_.insert(classDoubleMembers_.begin(), classDoubleMembers_.end());
+    knownLongVars_.insert(classLongMembers_.begin(), classLongMembers_.end());
 
     // Property Get: 设置返回值变量 (与Function相同语义)
     if (node.propKind == ProcKind::PropertyGet) {
@@ -3748,6 +3857,15 @@ void CCodeGen::visit(PropertyDecl& node) {
             Vb6Type retVb6Type = typeSys_.resolveTypeName(
                 static_cast<SimpleTypeRef*>(node.returnType.get())->name);
             c_.emitLine(retType + " " + currentReturnVar_ + " = " + defaultValue(retVb6Type) + ";");
+            // P6.11: 注册返回值变量类型 (用于BSTR安全赋值)
+            // Property Get 的 Prefix = me->m_Prefix 会被替换为 vb6_ret_Prefix = me->m_Prefix
+            // 如果返回类型是String, 必须使用 vb6_BSTR_Assign 确保 deep copy,
+            // 否则返回浅引用会导致 COM 调用者 SysFreeString 与 me->m_Prefix 双重释放
+            std::string retLower = currentReturnVar_;
+            std::transform(retLower.begin(), retLower.end(), retLower.begin(), ::tolower);
+            if (retVb6Type == Vb6Type::String) knownBstrVars_.insert(retLower);
+            else if (retVb6Type == Vb6Type::Double) knownDoubleVars_.insert(retLower);
+            else if (retVb6Type == Vb6Type::Long || retVb6Type == Vb6Type::Integer || retVb6Type == Vb6Type::Boolean) knownLongVars_.insert(retLower);
         }
     }
 
@@ -3848,10 +3966,20 @@ void CCodeGen::emitClassFactory(Module& module) {
     c_.emitLine("if (!me) return NULL;");
 
     // 初始化所有字段为默认值
+    // 同时注册BSTR/Long类型成员到knownBstrVars_/knownLongVars_ (用于赋值时BSTR安全处理)
     for (auto& decl : module.declarations) {
         if (decl->kind == ASTNodeKind::VariableDecl) {
             auto& var = static_cast<VariableDecl&>(*decl);
             std::string field = cIdent(var.name);
+            // 注册到类型集合 (用于后续赋值时BSTR安全处理)
+            std::string lower = var.name;
+            std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+            if (var.asType) {
+                Vb6Type vtype = resolveArrayElemType(var.asType.get());
+                if (vtype == Vb6Type::String) knownBstrVars_.insert(lower);
+                else if (vtype == Vb6Type::Long || vtype == Vb6Type::Integer || vtype == Vb6Type::Boolean) knownLongVars_.insert(lower);
+                else if (vtype == Vb6Type::Double || vtype == Vb6Type::Single) knownDoubleVars_.insert(lower);
+            }
             if (var.isDynamicArray || !var.dimensions.empty()) {
                 c_.emitLine("me->" + field + " = NULL;");
             } else if (var.asType) {
@@ -5206,6 +5334,7 @@ Vb6Type CCodeGen::inferExprType(Expr& expr) const {
             std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
             if (knownBstrVars_.count(lower)) return Vb6Type::String;
             if (knownDoubleVars_.count(lower)) return Vb6Type::Double;
+            if (knownLongVars_.count(lower)) return Vb6Type::Long;
             // 检查符号表
             auto* sym = symTab_.lookup(id.name);
             if (!sym) sym = symTab_.lookupModule(id.name);
@@ -5359,6 +5488,7 @@ std::string CCodeGen::comPackExpr(Expr& expr) {
                 if (knownObjectVars_.count(lower)) return "vb6_ComPackObject";
                 if (knownBstrVars_.count(lower)) return "vb6_ComPackBSTR";
                 if (knownDoubleVars_.count(lower)) return "vb6_ComPackDouble";
+                if (knownLongVars_.count(lower)) return "vb6_ComPackInt";
             }
             return "vb6_ComPackInt";  // 默认整数封装
     }

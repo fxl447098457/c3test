@@ -1,4 +1,4 @@
-# c3 编译器集成测试框架
+﻿# c3 编译器集成测试框架
 # 用法: .\run_tests.ps1 [-Category <all|compile|run|syntax>] [-Verbose]
 #
 # 测试分类:
@@ -279,7 +279,7 @@ if ($Category -in @("all", "run")) {
     Test-Run "test_earlybound" "$Tests\test_earlybound.bas" @("Early binding test OK")
     Test-Vbp "test_implements" "$Tests\test_implements.vbp" @("Implements test PASSED")
     Test-Vbp "test_events" "$Tests\test_events\test_events.vbp" @("Events test PASSED")
-    Test-Vbp "M7Test" "$Tests\m7_test\M7Test.vbp" @("4 /4 PASSED")
+    Test-Vbp "M7Test" "$Tests\m7_test\M7Test.vbp" @("4/4 PASSED")
     Write-Host ""
 }
 

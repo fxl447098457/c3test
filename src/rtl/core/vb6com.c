@@ -401,12 +401,7 @@ wchar_t* vb6_ComUnpackBSTR(void* variant) {
     if (pv->vt == VT_BSTR) {
         if (pv->bstrVal) {
             // 复制BSTR内容, 调用方用vb6_BSTR_Free释放
-            size_t len = SysStringLen(pv->bstrVal);
-            uint32_t* p = (uint32_t*)malloc(sizeof(uint32_t) + (len + 1) * sizeof(wchar_t));
-            *p = (uint32_t)len;
-            wchar_t* result = (wchar_t*)(p + 1);
-            memcpy(result, pv->bstrVal, (len + 1) * sizeof(wchar_t));
-            return result;
+            return SysAllocString(pv->bstrVal);
         } else {
             // VT_BSTR + bstrVal=NULL = 空BSTR, 返回NULL (与VB6 vb6_BSTR_Empty()一致)
             return NULL;
@@ -417,13 +412,9 @@ wchar_t* vb6_ComUnpackBSTR(void* variant) {
         VARIANT vBstr;
         VariantInit(&vBstr);
         if (SUCCEEDED(VariantChangeType(&vBstr, pv, 0, VT_BSTR))) {
-            size_t len = SysStringLen(vBstr.bstrVal);
-            uint32_t* p = (uint32_t*)malloc(sizeof(uint32_t) + (len + 1) * sizeof(wchar_t));
-            *p = (uint32_t)len;
-            wchar_t* result = (wchar_t*)(p + 1);
-            memcpy(result, vBstr.bstrVal, (len + 1) * sizeof(wchar_t));
+            BSTR tmp = SysAllocString(vBstr.bstrVal);
             VariantClear(&vBstr);
-            return result;
+            return tmp;
         }
     }
     return NULL;
@@ -645,11 +636,7 @@ wchar_t* vb6_ComVtableGetBSTR(void* obj, int32_t vtIndex, ...) {
     BSTR result = NULL;
     fn(obj, &result);
     if (!result) return NULL;
-    wchar_t* buf = (wchar_t*)malloc((SysStringLen(result) + 1) * sizeof(wchar_t));
-    wmemcpy(buf, result, SysStringLen(result));
-    buf[SysStringLen(result)] = 0;
-    SysFreeString(result);
-    return buf;
+    return result;  // Already OLE BSTR, caller uses vb6_BSTR_Free (SysFreeString)
 }
 
 int32_t vb6_ComVtableGetInt(void* obj, int32_t vtIndex, ...) {

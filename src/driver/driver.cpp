@@ -1,4 +1,4 @@
-#include "driver/driver.hpp"
+﻿#include "driver/driver.hpp"
 #include "common/diagnostics.hpp"
 #include "common/source_manager.hpp"
 #include "lexer/lexer.hpp"
@@ -177,9 +177,17 @@ CompileResult Driver::compile(const CompileOptions& options) {
             }
 
             // 如果没有指定输出文件, 使用工程名
-            if (effectiveOpts.outputFile.empty() && !project.exeName.empty()) {
-                effectiveOpts.outputFile = project.exeName;
+            // 保存VBP工程基名 (用于输出文件命名)
+            // 优先使用ExeName32的stem, 否则用VBP文件名
+            if (!project.exeName.empty()) {
+                std::filesystem::path exePath(project.exeName);
+                projectBaseName_ = exePath.stem().string();
+            } else {
+                std::filesystem::path vbpPath(srcFile);
+                projectBaseName_ = vbpPath.stem().string();
             }
+            // 注意: 不再设置effectiveOpts.outputFile, 让runLinker通过projectBaseName_统一处理
+            // 这样确保输出路径始终包含outputDir前缀
 
             // P6.6: 从VBP工程类型推断是否为ActiveX DLL
             if (!effectiveOpts.isDll && project.projectType == VbpProjectType::ActiveXDLL) {
@@ -1043,6 +1051,9 @@ bool Driver::runLinker(const CompileOptions& options, const std::string& outputD
             msvcOpts.outputFile.compare(msvcOpts.outputFile.size()-4, 4, ".exe") == 0) {
             msvcOpts.outputFile.replace(msvcOpts.outputFile.size()-4, 4, ".dll");
         }
+    } else if (!projectBaseName_.empty()) {
+        // VBP工程: 使用工程基名
+        msvcOpts.outputFile = outputDir + "/" + projectBaseName_ + outputExt;
     } else if (modules_.size() == 1) {
         std::filesystem::path p(modules_[0]->filename);
         msvcOpts.outputFile = outputDir + "/" + p.stem().string() + outputExt;

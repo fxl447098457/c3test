@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 // vb6c3 - C代码生成器
 // 将语义分析后的AST+符号表翻译为C代码，交由MSVC编译
 // 设计参考: cfront, Nim, Zig早期均采用C代码生成路线
@@ -211,6 +211,16 @@ private:
     // 已知double变量名集合 (小写) - 用于Debug.Print区分整数/浮点输出
     std::unordered_set<std::string> knownDoubleVars_;
 
+    // 已知Long/Integer/Boolean变量名集合 (小写) - 用于COM值解封类型推断
+    std::unordered_set<std::string> knownLongVars_;
+
+
+    // P6.11: 类模块成员变量类型集合 (小写, 含m_前缀格式)
+    // 在generate()开头从模块声明填充, 每个方法/属性入口的clear()后从此恢复
+    // 防止类方法内对me->m_Xxx的BSTR赋值无法识别类型
+    std::unordered_set<std::string> classBstrMembers_;
+    std::unordered_set<std::string> classLongMembers_;
+    std::unordered_set<std::string> classDoubleMembers_;
     // 已知类实例变量名集合 (小写) - 用于方法调用翻译 c.Method → vb6_Method(c)
     std::unordered_set<std::string> knownClassVars_;
 

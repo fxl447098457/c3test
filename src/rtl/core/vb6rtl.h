@@ -58,6 +58,16 @@ static inline BSTR vb6_BSTR_FromStr(const wchar_t* s) {
 #endif
 }
 
+// 复制BSTR (创建独立副本, 调用方负责释放)
+static inline BSTR vb6_BSTR_FromBSTR(BSTR bstr) {
+    if (!bstr) return vb6_BSTR_Empty();
+#ifdef _WIN32
+    return SysAllocString(bstr);
+#else
+    return vb6_BSTR_FromStr(bstr);
+#endif
+}
+
 // 释放BSTR
 static inline void vb6_BSTR_Free(BSTR bstr) {
     if (bstr) {
@@ -67,6 +77,15 @@ static inline void vb6_BSTR_Free(BSTR bstr) {
         uint32_t* p = ((uint32_t*)bstr) - 1;
         free(p);
 #endif
+    }
+}
+
+// BSTR赋值 (释放旧值, 复制新值, 防止悬垂指针和双重释放)
+static inline void vb6_BSTR_Assign(BSTR* target, BSTR source) {
+    if (target) {
+        BSTR copy = source ? vb6_BSTR_FromBSTR(source) : vb6_BSTR_Empty();
+        vb6_BSTR_Free(*target);
+        *target = copy;
     }
 }
 

@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 // 编译器驱动 - 命令行解析 + 编译流程编排
 
 #include "preprocessor/preprocessor.hpp"
@@ -104,6 +104,9 @@ private:
 
     // P6.8: VBP指定的类CLSID映射 (模块名小写 -> CLSID字符串)
     std::unordered_map<std::string, std::string> classClsidMap_;
+
+    // VBP工程基名 (用于多模块工程的输出文件命名)
+    std::string projectBaseName_;
 
     // TypeLib解析器 (P6.3, COM类型导入)
     std::unique_ptr<TypeLibParser> typelibParser_;
