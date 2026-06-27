@@ -1,4 +1,4 @@
-// P10: RTL 运行时内嵌资源管理
+﻿// P10: RTL 运行时内嵌资源管理
 // 从 c3.exe 内嵌的 RCDATA 资源释放 RTL .h/.c 文件到临时会话目录
 // 编译完成后自动清除临时目录
 
@@ -36,6 +36,9 @@ public:
 
     // 获取当前会话的 RTL 目录路径
     const std::string& rtlDir() const { return rtlDir_; }
+
+    // P11.2: session root dir (for intermediates .c/.h/.obj)
+    const std::string& sessionDir() const { return sessionDir_; }
 
     // 清除会话目录 (析构时自动调用)
     void cleanup();

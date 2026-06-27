@@ -190,6 +190,11 @@ CompileResult Driver::compile(const CompileOptions& options) {
             }
             // 注意: 不再设置effectiveOpts.outputFile, 让runLinker通过projectBaseName_统一处理
             // 这样确保输出路径始终包含outputDir前缀
+            // P11.1: Save VBP Path32 for output directory resolution
+            if (!project.outputPath.empty()) {
+                projectPath32_ = project.resolvePath(project.outputPath).string();
+            }
+
 
             // P6.6: 从VBP工程类型推断是否为ActiveX DLL
             if (!effectiveOpts.isDll && project.projectType == VbpProjectType::ActiveXDLL) {
@@ -360,27 +365,62 @@ CompileResult Driver::compile(const CompileOptions& options) {
         return result;
     }
 
-    // === 阶段4: 代码生成 ===
-    // 确定输出目录
-    std::string outputDir = effectiveOpts.outputDir.empty() ? "output" : effectiveOpts.outputDir;
+    // === P11.1: Determine output directory ===
+    // Priority: user-specified --output-dir > VBP Path32 > source file directory
+    std::string outputDir;
+    if (!effectiveOpts.outputDir.empty()) {
+        // User explicitly specified --output-dir
+        outputDir = effectiveOpts.outputDir;
+    } else if (!projectPath32_.empty()) {
+        // VBP specified Path32
+        outputDir = projectPath32_;
+    } else {
+        // Default: source file directory
+        if (effectiveOpts.sourceFiles.size() == 1) {
+            std::filesystem::path srcPath(effectiveOpts.sourceFiles[0]);
+            outputDir = srcPath.parent_path().string();
+        } else {
+            outputDir = ".";
+        }
+    }
+    outputDir = std::filesystem::absolute(outputDir).string();
     if (!std::filesystem::exists(outputDir)) {
         std::filesystem::create_directories(outputDir);
     }
 
-    if (!runCodeGeneration(effectiveOpts, outputDir)) {
+    // === P11.2: Create session for intermediates ===
+    // === P11.2: Create session for intermediates ===
+    SessionManager session;
+    std::string rtlDir = session.create();
+    if (rtlDir.empty()) {
+        std::cerr << "C3: error: failed to create session directory" << std::endl;
+        result.errorCount = 1;
+        return result;
+    }
+    // Intermediates (.c/.h/.obj) go to session root dir; RTL is in session_dir/rtl/
+    std::string intermediatesDir = session.sessionDir();
+    // === Stage 4: Code Generation ===
+    if (!runCodeGeneration(effectiveOpts, intermediatesDir)) {
         std::cerr << diag_->toString();
+        writeErrorLog(outputDir + "/c3-error.log", "code-generation");
+        session.cleanup();
         result.errorCount = diag_->errorCount();
         result.warningCount = diag_->warningCount();
         return result;
     }
 
-    // === 阶段5: 链接 ===
-    if (!runLinker(effectiveOpts, outputDir)) {
+    // === Stage 5: Link ===
+    if (!runLinker(effectiveOpts, outputDir, intermediatesDir, session)) {
         std::cerr << diag_->toString();
+        writeErrorLog(outputDir + "/c3-error.log", "linking");
+        session.cleanup();
         result.errorCount = diag_->errorCount();
         result.warningCount = diag_->warningCount();
         return result;
     }
+
+    // Success: clean up intermediates
+    session.cleanup();
 
     result.success = true;
     result.outputFile = effectiveOpts.outputFile;
@@ -388,6 +428,7 @@ CompileResult Driver::compile(const CompileOptions& options) {
     result.warningCount = diag_->warningCount();
     return result;
 }
+
 
 // === 词法分析阶段 ===
 
@@ -1057,54 +1098,56 @@ bool Driver::runCodeGeneration(const CompileOptions& options, const std::string&
     return !diag_->hasErrors();
 }
 
-bool Driver::runLinker(const CompileOptions& options, const std::string& outputDir) {
-    // 如果是 --emit-c 模式, 不需要链接
+bool Driver::runLinker(const CompileOptions& options, const std::string& outputDir,
+                       const std::string& intermediatesDir, SessionManager& session) {
+    // --emit-c mode: no linking needed
     if (options.emitC) {
         return true;
     }
 
-    // 检查 MSVC 是否可用
+    // Check MSVC availability
     if (!MsvcDriver::isMsvcAvailable()) {
-        std::cerr << "C3: 错误: 未检测到MSVC环境 (请先运行vcvarsall.bat)" << std::endl;
-        std::cerr << "C3: 使用 --emit-c 选项可仅生成C代码" << std::endl;
+        std::cerr << "C3: error: MSVC environment not detected (run vcvarsall.bat first)" << std::endl;
+        std::cerr << "C3: Use --emit-c to generate C code only" << std::endl;
         return false;
     }
 
-    // 收集生成的 .c 文件
+    // Collect generated .c files from intermediatesDir
     MsvcDriverOptions msvcOpts;
     for (auto& module : modules_) {
         std::filesystem::path p(module->filename);
         std::string baseName = p.stem().string();
-        std::string cPath = outputDir + "/" + baseName + ".c";
+        std::string cPath = intermediatesDir + "/" + baseName + ".c";
         msvcOpts.sourceFiles.push_back(cPath);
     }
 
-    // P6.6: ActiveX DLL模式, 加入 dll_entry.c
+    // P6.6: ActiveX DLL mode, add dll_entry.c
     if (options.isDll) {
-        std::string dllEntryPath = outputDir + "/dll_entry.c";
+        std::string dllEntryPath = intermediatesDir + "/dll_entry.c";
         msvcOpts.sourceFiles.push_back(dllEntryPath);
     }
 
-        // P10: 从内嵌资源释放 RTL 到临时会话目录
-    SessionManager session;
-    std::string rtlDir = session.create();
+    // P10: Get RTL directory from session
+    std::string rtlDir = session.rtlDir();
     if (rtlDir.empty()) {
-        std::cerr << "C3: 错误: 无法释放RTL运行时资源" << std::endl;
+        std::cerr << "C3: error: RTL runtime not available" << std::endl;
         return false;
     }
     msvcOpts.rtlDir = rtlDir;
-    // 输出文件 - 放入 outputDir
+
+    // P11.1+P11.2: Set intermediate directories
+    msvcOpts.srcDir = intermediatesDir;   // /I for generated .h files
+    msvcOpts.objDir = intermediatesDir;   // /Fo for .obj files
+
+    // Output file path (in user's output directory, not intermediates)
     std::string outputExt = options.isDll ? ".dll" : ".exe";
     if (!options.outputFile.empty()) {
-        // 用户指定了绝对/相对路径
         msvcOpts.outputFile = options.outputFile;
-        // P6.6: 如果是DLL模式且用户指定了.exe后缀, 自动改为.dll
         if (options.isDll && msvcOpts.outputFile.size() >= 4 &&
             msvcOpts.outputFile.compare(msvcOpts.outputFile.size()-4, 4, ".exe") == 0) {
             msvcOpts.outputFile.replace(msvcOpts.outputFile.size()-4, 4, ".dll");
         }
     } else if (!projectBaseName_.empty()) {
-        // VBP工程: 使用工程基名
         msvcOpts.outputFile = outputDir + "/" + projectBaseName_ + outputExt;
     } else if (modules_.size() == 1) {
         std::filesystem::path p(modules_[0]->filename);
@@ -1113,8 +1156,8 @@ bool Driver::runLinker(const CompileOptions& options, const std::string& outputD
         msvcOpts.outputFile = outputDir + "/a" + outputExt;
     }
 
-    msvcOpts.isDll = options.isDll;  // P6.6: DLL编译模式
-    // P7: 检测是否为GUI程序 (包含窗体模块)
+    msvcOpts.isDll = options.isDll;
+    // P7: Detect GUI program
     for (auto& module : modules_) {
         if (module->isFormModule) {
             msvcOpts.isGui = true;
@@ -1125,9 +1168,9 @@ bool Driver::runLinker(const CompileOptions& options, const std::string& outputD
     msvcOpts.debugInfo = options.debugInfo;
     msvcOpts.optimizationLevel = options.optimizationLevel;
 
-    // P6.6: ActiveX DLL模式, 生成.def导出文件
+    // P6.6: ActiveX DLL - generate .def export file (in intermediatesDir)
     if (options.isDll) {
-        std::string defPath = outputDir + "/activex_dll.def";
+        std::string defPath = intermediatesDir + "/activex_dll.def";
         std::ofstream defFile(defPath, std::ios::out | std::ios::trunc);
         if (defFile) {
             defFile << "LIBRARY\n";
@@ -1140,25 +1183,28 @@ bool Driver::runLinker(const CompileOptions& options, const std::string& outputD
             defFile.close();
             msvcOpts.defFile = defPath;
             if (options.verbose) {
-                std::cout << "C3: 生成导出定义: " << defPath << std::endl;
+                std::cout << "C3: Generated export definition: " << defPath << std::endl;
             }
         }
     }
 
-    // P9: Embed TypeLib into DLL resource (TypeLib now generated by CreateTypeLib2, no MIDL needed)
+    // P9: Embed TypeLib into DLL resource
     if (options.isDll && !options.dllProgId.empty()) {
-        std::string tlbPath = std::filesystem::absolute(outputDir + "/" + options.dllProgId + ".tlb").string();
+        std::string tlbPath = std::filesystem::absolute(intermediatesDir + "/" + options.dllProgId + ".tlb").string();
         if (std::filesystem::exists(tlbPath)) {
-            std::string absOutputDir = std::filesystem::absolute(outputDir).string();
-            std::string rcPath = absOutputDir + "\\activex_dll_typelib.rc";
+            std::string absInterDir = std::filesystem::absolute(intermediatesDir).string();
+            std::string rcPath = absInterDir + "\\activex_dll_typelib.rc";
             {
                 std::ofstream rcFile(rcPath, std::ios::out | std::ios::trunc);
                 if (rcFile) {
-                    rcFile << "1 TYPELIB \"" << options.dllProgId << ".tlb\"\n";
+                    std::string tlbPathForRc = tlbPath;
+                    for (auto& c : tlbPathForRc) { if (c == '\\') c = '/'; }
+                    rcFile << "1 TYPELIB \"" << tlbPathForRc << "\"\n";
+
                 }
             }
 
-            // Find rc.exe: tools/ first, then Windows SDK
+            // Find rc.exe
             std::string rcExePath;
             std::filesystem::path toolsRc = std::filesystem::current_path() / "tools" / "rc.exe";
             if (std::filesystem::exists(toolsRc)) {
@@ -1187,7 +1233,7 @@ bool Driver::runLinker(const CompileOptions& options, const std::string& outputD
             }
 
             if (!rcExePath.empty()) {
-                std::string resPath = absOutputDir + "\\activex_dll_typelib.res";
+                std::string resPath = absInterDir + "\\activex_dll_typelib.res";
                 std::ostringstream rcArgs;
                 rcArgs << "\"" << rcExePath << "\" /r /fo \"" << resPath << "\" \"" << rcPath << "\"";
                 if (options.verbose) {
@@ -1212,7 +1258,16 @@ bool Driver::runLinker(const CompileOptions& options, const std::string& outputD
     return msvc.compileAndLink(msvcOpts);
 }
 
+
 // === 帮助/版本 ===
+
+void Driver::writeErrorLog(const std::string& logPath, const std::string& stage) {
+    std::ofstream errLog(logPath, std::ios::out | std::ios::trunc);
+    if (!errLog) return;
+    errLog << "C3: Compilation failed at stage: " << stage << std::endl;
+    errLog << diag_->toString();
+}
+
 
 void Driver::printHelp() {
     std::cout << "C3 - Visual Basic 6.0 Compiler\n"

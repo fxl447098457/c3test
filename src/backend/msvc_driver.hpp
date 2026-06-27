@@ -18,6 +18,8 @@ struct MsvcDriverOptions {
     std::string defFile;                    // P6.6: DLL导出定义文件(.def)路径
     bool isGui = false;                     // P7: GUI程序 (Win32窗口, 非控制台)
     std::string typelibResFile;              // P6.13: .res文件路径 (已编译好的资源)
+    std::string objDir;                      // P11.2: .obj intermediate directory
+    std::string srcDir;                      // P11.2: generated .c/.h directory (/I include path)
 };
 
 class MsvcDriver {

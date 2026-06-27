@@ -56,6 +56,9 @@ bool MsvcDriver::compileAndLink(const MsvcDriverOptions& options) {
     if (!options.rtlDir.empty()) {
         cmd << " /I\"" << options.rtlDir << "\"";
     }
+    if (!options.srcDir.empty()) {
+        cmd << " /I\"" << options.srcDir << "\"";
+    }
 
     // 优化级别
     switch (options.optimizationLevel) {
@@ -76,14 +79,17 @@ bool MsvcDriver::compileAndLink(const MsvcDriverOptions& options) {
     // 警告级别
     cmd << " /W3";
 
-    // 输出对象文件名
+    // Output file and .obj directory (P11.2: intermediates go to objDir)
     if (!options.outputFile.empty()) {
         cmd << " /Fe\"" << options.outputFile << "\"";
-        // .obj文件与.exe同目录
-        std::filesystem::path outPath(options.outputFile);
-        std::string objDir = outPath.parent_path().string();
-        if (!objDir.empty()) {
-            cmd << " /Fo\"" << objDir << "/\"";
+        if (!options.objDir.empty()) {
+            cmd << " /Fo\"" << options.objDir << "/\"";
+        } else {
+            std::filesystem::path outPath(options.outputFile);
+            std::string objDir = outPath.parent_path().string();
+            if (!objDir.empty()) {
+                cmd << " /Fo\"" << objDir << "/\"";
+            }
         }
     }
 
@@ -127,19 +133,27 @@ bool MsvcDriver::compileAndLink(const MsvcDriverOptions& options) {
         std::cout << "C3: 执行: " << cmd.str() << std::endl;
     }
 
-    // P10.9: 将 MSVC 输出重定向到临时文件, 失败时保存为 c3-error.log
-    std::string outputDirForLog;
-    if (!options.outputFile.empty()) {
+    // P11.2: MSVC output to temp file in objDir (intermediates dir)
+    std::string tmpLogDir;
+    if (!options.objDir.empty()) {
+        tmpLogDir = options.objDir;
+    } else if (!options.outputFile.empty()) {
         std::filesystem::path outP(options.outputFile);
-        outputDirForLog = outP.parent_path().string();
+        tmpLogDir = outP.parent_path().string();
     }
-    if (outputDirForLog.empty()) outputDirForLog = ".";
-    std::string tmpLogPath = outputDirForLog + "/_c3_msvc_out.txt";
+    if (tmpLogDir.empty()) tmpLogDir = ".";
+    std::string tmpLogPath = tmpLogDir + "/_c3_msvc_out.txt";
     std::string fullCmd = cmd.str() + " > \"" + tmpLogPath + "\" 2>&1";
 
     int ret = executeCommand(fullCmd);
     if (ret != 0) {
-        // 编译失败: 将临时日志保存为 c3-error.log, 并输出到 stderr
+        // c3-error.log goes to output dir (user project dir), not intermediates
+        std::string outputDirForLog;
+        if (!options.outputFile.empty()) {
+            std::filesystem::path outP(options.outputFile);
+            outputDirForLog = outP.parent_path().string();
+        }
+        if (outputDirForLog.empty()) outputDirForLog = ".";
         std::string errorLogPath = outputDirForLog + "/c3-error.log";
         std::ifstream tmpLog(tmpLogPath);
         std::ofstream errLog(errorLogPath, std::ios::out | std::ios::trunc);

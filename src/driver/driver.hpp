@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 // 编译器驱动 - 命令行解析 + 编译流程编排
 
 #include "preprocessor/preprocessor.hpp"
@@ -17,6 +17,7 @@ class Diagnostics;
 class SourceBuffer;
 class Module;
 class SemanticAnalyzer;
+class SessionManager;
 
 // 编译选项
 struct CompileOptions {
@@ -108,6 +109,7 @@ private:
 
     // VBP工程基名 (用于多模块工程的输出文件命名)
     std::string projectBaseName_;
+    std::string projectPath32_;    // P11.1: VBP Path32 field (output dir)
 
     // TypeLib解析器 (P6.3, COM类型导入)
     std::unique_ptr<TypeLibParser> typelibParser_;
@@ -120,7 +122,8 @@ private:
     bool runSemanticAnalysis(const CompileOptions& options);
     bool runCrossModuleResolution();  // 跨模块符号链接
     bool runCodeGeneration(const CompileOptions& options, const std::string& outputDir);
-    bool runLinker(const CompileOptions& options, const std::string& outputDir);
+    void writeErrorLog(const std::string& logPath, const std::string& stage);
+    bool runLinker(const CompileOptions& options, const std::string& outputDir, const std::string& intermediatesDir, SessionManager& session);
 };
 
 } // namespace vb6c3
