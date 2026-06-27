@@ -41,7 +41,7 @@
         "url": "https://c3.vb6.pro/",
         "applicationCategory": "DeveloperApplication",
         "operatingSystem": "Windows",
-        "programmingLanguage": "C++",
+        "programmingLanguage": "Visual Basic 6.0",
         "offers": {
             "@type": "Offer",
             "price": "0",
@@ -49,12 +49,12 @@
             "description": "免费使用"
         },
         "featureList": [
-            "x64 原生编译",
+            "原生 x64 代码产出",
             "Unicode 字符串全程支持",
             "多线程运行时",
             "COM / ActiveX DLL 互操作",
-            "静态链接运行时（无 DLL 依赖）",
-            "C 代码生成（可调试中间产物）",
+            "静态链接零依赖部署",
+            "开箱即用的编译体验",
             "VBP 工程文件支持",
             "GBK/UTF-8/UTF-16 源码自动识别"
         ]
@@ -106,8 +106,8 @@
         <a href="#comparison" class="scroll-dot" data-section="comparison" aria-label="架构对比">
             <span class="scroll-dot-label">架构对比</span>
         </a>
-        <a href="#pipeline" class="scroll-dot" data-section="pipeline" aria-label="编译流程">
-            <span class="scroll-dot-label">编译流程</span>
+        <a href="#pipeline" class="scroll-dot" data-section="pipeline" aria-label="工作流程">
+            <span class="scroll-dot-label">工作流程</span>
         </a>
         <a href="#download" class="scroll-dot" data-section="download" aria-label="下载配置">
             <span class="scroll-dot-label">下载配置</span>
@@ -126,7 +126,7 @@
          <ul class="nav-links" id="navLinks">
              <li><a href="#features">核心优势</a></li>
              <li><a href="#comparison">架构对比</a></li>
-             <li><a href="#pipeline">编译流程</a></li>
+             <li><a href="#pipeline">工作流程</a></li>
              <li><a href="#download">下载配置</a></li>
              <li><a href="#roadmap">开发路线</a></li>
              <li><a href="https://vb6.pro" target="_blank" rel="noopener" class="nav-external">VB6.PRO</a></li>
@@ -150,7 +150,7 @@
                     <span class="hero-title-sub">第三代 VB6 编译器</span>
                 </h1>
                 <p class="hero-subtitle">
-                    将 Visual Basic 6.0 代码编译为原生 <strong>x64</strong> Windows 二进制<br>
+                    让 Visual Basic 6.0 工程直接产出原生 <strong>x64</strong> Windows 程序<br>
                     <strong>Unicode</strong> 全程支持、<strong>多线程</strong>运行时、<strong>COM 互操作</strong>、<strong>静态链接</strong>零依赖
                 </p>
                 <p class="hero-tagline">x64 &middot; Unicode &middot; Multi-threaded &middot; COM &middot; Zero-modification</p>
@@ -175,15 +175,15 @@
                 <div class="section-header">
                     <span class="section-label">核心优势</span>
                     <h2 class="section-title">VB6 迈入新时代所需的一切</h2>
-                    <p class="section-desc">无需修改任何源代码，你的 VB6 工程直接编译为原生 x64 二进制。</p>
+                    <p class="section-desc">无需修改任何源代码，你的 VB6 工程直接产出原生 x64 Windows 程序。</p>
                 </div>
                 <div class="features-grid">
                     <article class="glass-card feature-card animate-in">
                         <div class="feature-icon blue">
                             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
                         </div>
-                        <h3>x64 原生编译</h3>
-                        <p>生成 64 位 Windows 可执行文件和 DLL。突破 2GB 内存限制，通过 MSVC ABI 实现 x64 COM 互操作。</p>
+                        <h3>x64 原生产出</h3>
+                        <p>生成 64 位 Windows 可执行文件和 DLL。突破 2GB 内存限制，原生支持 x64 COM 互操作。</p>
                     </article>
                     <article class="glass-card feature-card animate-in">
                         <div class="feature-icon purple">
@@ -211,7 +211,7 @@
                             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6M16 13H8M16 17H8M10 9H8"/></svg>
                         </div>
                         <h3>静态链接 RTL</h3>
-                        <p>无运行时 DLL 依赖。200+ VB6 运行时函数全部编译进可执行文件，部署干净利落。</p>
+                        <p>无运行时 DLL 依赖。200+ VB6 内置函数全部内置到可执行文件，部署干净利落。</p>
                     </article>
                     <article class="glass-card feature-card animate-in">
                         <div class="feature-icon rose">
@@ -250,8 +250,8 @@
                                 </tr>
                                 <tr>
                                     <td>字符串编码</td>
-                                    <td>ANSI / BSTR</td>
-                                    <td>Unicode (UTF-16) <span class="tag-new">NEW</span></td>
+                                    <td>ANSI / Unicode</td>
+                                    <td>Unicode (UTF-16) 全程 <span class="tag-new">NEW</span></td>
                                 </tr>
                                 <tr>
                                     <td>线程模型</td>
@@ -261,17 +261,12 @@
                                 <tr>
                                     <td>运行时</td>
                                     <td>MSVBVM60.dll</td>
-                                    <td>静态链接（无 DLL）</td>
+                                    <td>静态链接（零依赖部署）</td>
                                 </tr>
                                 <tr>
-                                    <td>调试信息</td>
+                                    <td>调试支持</td>
                                     <td>PDB</td>
-                                    <td>PDB (MSVC 原生)</td>
-                                </tr>
-                                <tr>
-                                    <td>C 代码输出</td>
-                                    <td>无</td>
-                                    <td>支持（可调试中间产物）</td>
+                                    <td>PDB 原生调试信息</td>
                                 </tr>
                                 <tr>
                                     <td>COM 支持</td>
@@ -285,8 +280,8 @@
                                 </tr>
                                 <tr>
                                     <td>CLSID 固定</td>
-                                    <td>需 二进制兼容（无法指定）</td>
-                                    <td>可指定CLSID（在VBP） <span class="tag-new">NEW</span></td>
+                                    <td>需二进制兼容（无法指定）</td>
+                                    <td>可在 VBP 中指定 <span class="tag-new">NEW</span></td>
                                 </tr>                                
                             </tbody>
                         </table>
@@ -299,9 +294,9 @@
         <section class="section pipeline" id="pipeline">
             <div class="section-inner">
                 <div class="section-header">
-                    <span class="section-label">编译流程</span>
-                    <h2 class="section-title">VB6 源码 &rarr; 原生二进制</h2>
-                    <p class="section-desc">C 代码生成 + MSVC 驱动，输出可读、可调试的产品级二进制，零外部依赖。</p>
+                    <span class="section-label">工作流程</span>
+                    <h2 class="section-title">VB6 源码 &rarr; 原生程序</h2>
+                    <p class="section-desc">从源码到可运行程序，一步到位，零外部依赖。</p>
                 </div>
                 <div class="pipeline-steps">
                     <div class="glass-card pipeline-step animate-in">
@@ -315,35 +310,35 @@
                         <div class="pipeline-step-icon" style="color:var(--accent-teal)">
                             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
                         </div>
-                        <span>词法分析</span>
+                        <span>源码理解</span>
                     </div>
                     <div class="pipeline-arrow">&rarr;</div>
                     <div class="glass-card pipeline-step animate-in">
                         <div class="pipeline-step-icon" style="color:#06b6d4">
                             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v18M3 12h18"/></svg>
                         </div>
-                        <span>语法分析</span>
+                        <span>结构解析</span>
                     </div>
                     <div class="pipeline-arrow">&rarr;</div>
                     <div class="glass-card pipeline-step animate-in">
                         <div class="pipeline-step-icon" style="color:var(--accent-green)">
                             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>
                         </div>
-                        <span>语义分析</span>
+                        <span>逻辑验证</span>
                     </div>
                     <div class="pipeline-arrow">&rarr;</div>
                     <div class="glass-card pipeline-step animate-in">
                         <div class="pipeline-step-icon" style="color:var(--accent-amber)">
                             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
                         </div>
-                        <span>C 代码生成</span>
+                        <span>代码生成</span>
                     </div>
                     <div class="pipeline-arrow">&rarr;</div>
                     <div class="glass-card pipeline-step animate-in">
                         <div class="pipeline-step-icon" style="color:var(--accent-brand)">
                             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10"/></svg>
                         </div>
-                        <span>cl.exe 编译</span>
+                        <span>原生编译</span>
                     </div>
                     <div class="pipeline-arrow">&rarr;</div>
                     <div class="glass-card pipeline-step animate-in">
@@ -362,7 +357,7 @@
                 <div class="section-header">
                     <span class="section-label">下载配置</span>
                     <h2 class="section-title">开始使用 C3</h2>
-                    <p class="section-desc">三步即可开始：下载 C3 → 配置编译环境 → 编译你的第一个 VB6 工程</p>
+                    <p class="section-desc">三步即可开始：下载 C3 → 配置运行环境 → 编译你的第一个 VB6 工程</p>
                 </div>
 
                 <div class="download-grid">
@@ -371,8 +366,8 @@
                         <div class="download-icon">
                             <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
                         </div>
-                        <h3>下载 C3 编译器</h3>
-                        <p class="download-version">v0.8.0 · Windows x64 · 内置多个测试示例</p>
+                        <h3>下载 C3</h3>
+                        <p class="download-version">v0.8.0 · Windows x64 · 内置多个演示示例</p>
                         <ul class="download-includes">
                             <li>包含 hello.bas、数组、文件 I/O 等测试源码</li>
                             <li>VBP 工程示例（多模块编译）</li>
@@ -387,13 +382,13 @@
 
                     <!-- 编译环境卡片 -->
                     <div class="glass-card download-card download-card-env animate-in">
-                        <h3>编译环境配置</h3>
-                        <p class="download-env-desc">C3 生成 C 代码后需要 C 编译器进行最终编译链接。</p>
+                        <h3>运行环境配置</h3>
+                        <p class="download-env-desc">C3 需要配合 Windows 平台工具链来产出最终程序。</p>
 
                         <div class="env-option env-option-primary">
                             <div class="env-badge">推荐</div>
-                            <h4>MSVC (Visual Studio)</h4>
-                            <p>最佳兼容性，原生 PDB 调试信息，Windows SDK 完整支持。</p>
+                            <h4>Visual Studio</h4>
+                            <p>最佳兼容性，原生调试信息，Windows SDK 完整支持。</p>
                             <p class="env-detail">安装 <a href="https://visualstudio.microsoft.com/zh-hans/vs/community/" target="_blank" rel="noopener">Visual Studio 2022 Community</a>（免费），勾选「桌面开发用 C++」工作负载即可。</p>
                         </div>
 
@@ -431,14 +426,8 @@
 <span class="cli-prompt">&gt;</span> <span class="cli-cmd">c3</span> <span class="cli-file">MyLib.vbp</span> <span class="cli-flag">--target dll</span>
 <span class="cli-ok">✓ 编译成功: MyLib.dll (x64)</span>
 
-<span class="cli-comment">:: 4. 查看编译中间产物</span>
-<span class="cli-prompt">&gt;</span> <span class="cli-cmd">c3</span> <span class="cli-file">hello.bas</span> <span class="cli-flag">--dump-ast</span>
-<span class="cli-output">Module: hello.bas
-  Sub Main (access=Public)
-    LocalDecl → Dim name As String
-    Assign: name = "World"
-    If → Else → End If
-    For i = 1 To 10 → Next i</span>
+<span class="cli-comment">:: 4. 查看诊断信息</span>
+<span class="cli-prompt">&gt;</span> <span class="cli-cmd">c3</span> <span class="cli-file">hello.bas</span>
 <span class="cli-ok">✓ 0 错误, 0 警告</span></code></pre>
                 </div>
             </div>
@@ -456,72 +445,72 @@
                     <div class="roadmap-item">
                         <div class="roadmap-dot done">M1</div>
                         <div class="glass-card roadmap-info">
-                            <h4>P0 — 基础设施</h4>
-                            <p>CMake 构建、诊断系统、源码管理器（GBK/UTF-8/UTF-16）、LL(2) 词法器、编译器驱动</p>
+                            <h4>基石搭建</h4>
+                            <p>项目框架构建、错误诊断系统、多编码源码支持、源码扫描引擎、命令行驱动</p>
                             <span class="status done">已完成</span>
                         </div>
                     </div>
                     <div class="roadmap-item">
                         <div class="roadmap-dot done">M2</div>
                         <div class="glass-card roadmap-info">
-                            <h4>P1 — 语法分析与 AST</h4>
-                            <p>递归下降 + Pratt 解析（14 级优先级）、80+ AST 节点类型、软关键字、约 2900 行解析器代码</p>
+                            <h4>语法理解引擎</h4>
+                            <p>完整的 VB6 语法结构识别、80+ 语法节点覆盖、软关键字智能识别、条件编译指令支持</p>
                             <span class="status done">已完成</span>
                         </div>
                     </div>
                     <div class="roadmap-item">
                         <div class="roadmap-dot done">M3</div>
                         <div class="glass-card roadmap-info">
-                            <h4>P2 — 语义分析</h4>
-                            <p>符号表、类型系统、Variant 类型推断、默认属性解析、类型检查</p>
+                            <h4>逻辑与类型验证</h4>
+                            <p>变量与作用域管理、类型系统与兼容性检查、智能类型推导、默认属性自动识别</p>
                             <span class="status done">已完成</span>
                         </div>
                     </div>
                     <div class="roadmap-item">
                         <div class="roadmap-dot done">M4</div>
                         <div class="glass-card roadmap-info">
-                            <h4>P3 — C 代码生成 + MSVC 驱动</h4>
-                            <p>VB6→C 类型映射、表达式/语句/过程代码生成、cl.exe + link.exe 驱动</p>
+                            <h4>原生代码生成引擎</h4>
+                            <p>VB6 类型到原生类型的精确映射、表达式与流程控制代码输出、Windows 平台工具链集成</p>
                             <span class="status done">已完成</span>
                         </div>
                     </div>
                     <div class="roadmap-item">
                         <div class="roadmap-dot done">M5</div>
                         <div class="glass-card roadmap-info">
-                            <h4>P4 — 运行时库 (RTL)</h4>
-                            <p>BSTR、VARIANT、SAFEARRAY、200+ 运行时函数、文件 I/O、错误处理，全部静态链接</p>
+                            <h4>运行时支持库</h4>
+                            <p>字符串、动态数组、变体类型、200+ 内置函数、文件读写、错误处理，全部内置零依赖</p>
                             <span class="status done">已完成</span>
                         </div>
                     </div>
                     <div class="roadmap-item">
                         <div class="roadmap-dot done">M6</div>
                         <div class="glass-card roadmap-info">
-                            <h4>P5 — 工程支持</h4>
-                            <p>VBP 工程文件解析、多模块编译、跨模块符号解析、Declare 语句支持</p>
+                            <h4>工程与多模块支持</h4>
+                            <p>VBP 工程文件直接编译、多模块联合编译、跨模块引用解析、外部 DLL 调用声明</p>
                             <span class="status done">已完成</span>
                         </div>
                     </div>
                     <div class="roadmap-item">
                         <div class="roadmap-dot done">M7</div>
                         <div class="glass-card roadmap-info">
-                            <h4>P6 — COM + 对象系统</h4>
-                            <p>COM 客户端/服务端、TypeLib 导入、Implements 接口、WithEvents 事件、ActiveX DLL 编译</p>
+                            <h4>COM 与对象系统</h4>
+                            <p>COM 对象创建与调用、类型库自动导入、接口实现、事件处理、ActiveX DLL 编译</p>
                             <span class="status done">已完成</span>
                         </div>
                     </div>
                     <div class="roadmap-item">
                         <div class="roadmap-dot done">M8</div>
                         <div class="glass-card roadmap-info">
-                            <h4>P7 — 窗体控件</h4>
-                            <p>窗体解析、控件事件绑定、窗体代码生成、GUI 应用编译</p>
+                            <h4>窗体与控件</h4>
+                            <p>窗体描述解析、控件事件自动绑定、可视化界面程序编译、菜单与浏览器控件</p>
                             <span class="status done">已完成</span>
                         </div>
                     </div>
                     <div class="roadmap-item">
                         <div class="roadmap-dot evolving">Mx</div>
                         <div class="glass-card evolving-card roadmap-info">
-                            <h4>Pn — 持续迭代中</h4>
-                            <p>更多功能正在完善...</p>
+                            <h4>持续完善中</h4>
+                            <p>更多功能正在打磨...</p>
                             <span class="status evolving">开发中</span>
                         </div>
                     </div>                    
@@ -531,11 +520,11 @@
                 <div class="stats-bar glass-card animate-in">
                     <div class="stat-item">
                         <div class="stat-value">18,000+</div>
-                        <div class="stat-label">C++ 源代码行</div>
+                        <div class="stat-label">引擎核心代码行</div>
                     </div>
                     <div class="stat-item">
                         <div class="stat-value">80+</div>
-                        <div class="stat-label">AST 节点类型</div>
+                        <div class="stat-label">语法覆盖种类</div>
                     </div>
                     <div class="stat-item">
                         <div class="stat-value">66</div>
