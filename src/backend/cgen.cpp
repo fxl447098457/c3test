@@ -4282,6 +4282,17 @@ void CCodeGen::emitFormFramework(const FrmFormDesc& frmDesc, Module& module) {
         }
         ctrlId++;
     }
+
+    // P7.8: 菜单项点击事件派发 (Menu控件ID从1000开始)
+    {
+        int menuId = 1000;
+        for (const auto& ctrl : frmDesc.formControl.children) {
+            if (ctrl.controlType == FrmControlType::Menu) {
+                emitMenuClickDispatch(ctrl, menuId);
+            }
+        }
+    }
+
     c_.emitLine("break;");
     c_.dedent();
     c_.emitLine("}");
@@ -4471,6 +4482,55 @@ void CCodeGen::emitFormFramework(const FrmFormDesc& frmDesc, Module& module) {
 
         ctrlId++;
     }
+
+    // P7.8: 菜单构建 (VB.Menu控件不创建窗口, 用Win32菜单API)
+    {
+        int menuId = 1000;  // 菜单项ID起始值 (控件ID用100-999)
+        bool hasMenu = false;
+        for (const auto& ctrl : frmDesc.formControl.children) {
+            if (ctrl.controlType == FrmControlType::Menu) {
+                hasMenu = true;
+                break;
+            }
+        }
+        if (hasMenu) {
+            c_.emitBlank();
+            c_.emitLine("// P7.8: Menu construction");
+            c_.emitLine("HMENU hMenuBar = CreateMenu();");
+
+            for (const auto& ctrl : frmDesc.formControl.children) {
+                if (ctrl.controlType != FrmControlType::Menu) continue;
+
+                // Top-level menu item -> popup menu
+                std::string caption = ctrl.controlName;
+                auto capIt = ctrl.properties.find("Caption");
+                if (capIt != ctrl.properties.end() && capIt->second.type == FrmValueType::String) {
+                    std::string raw = capIt->second.rawText;
+                    if (raw.size() >= 2 && raw.front() == '"' && raw.back() == '"') {
+                        caption = raw.substr(1, raw.size() - 2);
+                    }
+                }
+
+                if (ctrl.children.empty()) {
+                    c_.emitLine("AppendMenuA(hMenuBar, MF_STRING, " + std::to_string(menuId) + ", \"" + escapeCString(caption) + "\");");
+                    menuId++;
+                } else {
+                    std::string popupVar = "hPopup_" + cIdent(ctrl.controlName);
+                    c_.emitLine("HMENU " + popupVar + " = CreatePopupMenu();");
+
+                    for (const auto& child : ctrl.children) {
+                        emitMenuItem(popupVar, child, menuId);
+                    }
+
+                    c_.emitLine("AppendMenuA(hMenuBar, MF_POPUP, (UINT_PTR)" + popupVar + ", \"" + escapeCString(caption) + "\");");
+                }
+            }
+
+            c_.emitLine("SetMenu((HWND)hwnd, hMenuBar);");
+            c_.emitBlank();
+        }
+    }
+
     c_.dedent();
     c_.emitLine("}");  // CreateControls
     c_.emitBlank();
@@ -4527,8 +4587,141 @@ void CCodeGen::emitFormFramework(const FrmFormDesc& frmDesc, Module& module) {
     c_.emitBlank();
 }
 
+// P7.8: 递归生成菜单项
+void CCodeGen::emitMenuItem(const std::string& parentVar, const FrmControl& menuCtrl, int& menuId) {
+    std::string caption = menuCtrl.controlName;
+    auto capIt = menuCtrl.properties.find("Caption");
+    if (capIt != menuCtrl.properties.end() && capIt->second.type == FrmValueType::String) {
+        std::string raw = capIt->second.rawText;
+        if (raw.size() >= 2 && raw.front() == '"' && raw.back() == '"') {
+            caption = raw.substr(1, raw.size() - 2);
+        }
+    }
 
-// ============================================================
+    // Check for separator: Caption = "-"
+    if (caption == "-") {
+        c_.emitLine("AppendMenuA(" + parentVar + ", MF_SEPARATOR, 0, NULL);");
+        return;
+    }
+
+    // Extract menu properties
+    bool checked = false;
+    bool enabled = true;
+    bool visible = true;
+
+    auto chkIt = menuCtrl.properties.find("Checked");
+    if (chkIt != menuCtrl.properties.end() && chkIt->second.type == FrmValueType::Integer) {
+        checked = (chkIt->second.intValue != 0);
+    }
+    auto enIt = menuCtrl.properties.find("Enabled");
+    if (enIt != menuCtrl.properties.end() && enIt->second.type == FrmValueType::Identifier) {
+        if (enIt->second.rawText == "0" || enIt->second.rawText == "False") enabled = false;
+    }
+    // Also check integer Enabled = 0
+    if (enIt != menuCtrl.properties.end() && enIt->second.type == FrmValueType::Integer) {
+        if (enIt->second.intValue == 0) enabled = false;
+    }
+    auto visIt = menuCtrl.properties.find("Visible");
+    if (visIt != menuCtrl.properties.end() && visIt->second.type == FrmValueType::Identifier) {
+        if (visIt->second.rawText == "0" || visIt->second.rawText == "False") visible = false;
+    }
+    if (visIt != menuCtrl.properties.end() && visIt->second.type == FrmValueType::Integer) {
+        if (visIt->second.intValue == 0) visible = false;
+    }
+
+    if (!visible) {
+        // Invisible menu item: skip entirely, but still assign ID
+        menuId++;
+        return;
+    }
+
+    long flags = 0;  // MF_STRING = 0
+    if (checked) flags |= 0x0008;  // MF_CHECKED
+    if (!enabled) flags |= 0x0002;  // MF_GRAYED
+
+    if (!menuCtrl.children.empty()) {
+        // Submenu: create a popup
+        std::string popupVar = "hPopup_" + cIdent(menuCtrl.controlName);
+        c_.emitLine("HMENU " + popupVar + " = CreatePopupMenu();");
+
+        for (const auto& child : menuCtrl.children) {
+            emitMenuItem(popupVar, child, menuId);
+        }
+
+        c_.emitLine("AppendMenuA(" + parentVar + ", 0x0010L | " + std::to_string(flags) + ", (UINT_PTR)" + popupVar + ", \"" + escapeCString(caption) + "\");");
+        // 0x0010 = MF_POPUP
+    } else {
+        // Leaf menu item
+        c_.emitLine("AppendMenuA(" + parentVar + ", " + std::to_string(flags) + ", " + std::to_string(menuId) + ", \"" + escapeCString(caption) + "\");");
+        menuId++;
+    }
+}
+
+// P7.8: 递归生成菜单点击事件派发 (WM_COMMAND中)
+void CCodeGen::emitMenuClickDispatch(const FrmControl& menuCtrl, int& menuId) {
+    // 顶层Menu控件 (如mnuFile) 只是popup容器，不生成Click处理
+    // 只对叶子菜单项和子菜单项生成WM_COMMAND派发
+    for (const auto& child : menuCtrl.children) {
+        std::string caption = child.controlName;
+        auto capIt = child.properties.find("Caption");
+        if (capIt != child.properties.end() && capIt->second.type == FrmValueType::String) {
+            std::string raw = capIt->second.rawText;
+            if (raw.size() >= 2 && raw.front() == '"' && raw.back() == '"') {
+                caption = raw.substr(1, raw.size() - 2);
+            }
+        }
+
+        if (caption == "-") {
+            // 分隔线没有点击事件，不分配ID
+            continue;
+        }
+
+        // 检查Visible属性
+        bool visible = true;
+        auto visIt = child.properties.find("Visible");
+        if (visIt != child.properties.end()) {
+            if (visIt->second.type == FrmValueType::Identifier &&
+                (visIt->second.rawText == "0" || visIt->second.rawText == "False")) {
+                visible = false;
+            }
+            if (visIt->second.type == FrmValueType::Integer && visIt->second.intValue == 0) {
+                visible = false;
+            }
+        }
+
+        if (!child.children.empty()) {
+            // 子菜单: 递归处理子项
+            emitMenuClickDispatch(child, menuId);
+        } else {
+            // 叶子菜单项
+            if (visible) {
+                std::string clickFn = cProcName(child.controlName + "_Click", AccessLevel::Private);
+                c_.emitLine("if (id == " + std::to_string(menuId) + ") {");
+                c_.indent();
+                c_.emitLine("{ extern void " + clickFn + "(); " + clickFn + "(); }");
+                c_.dedent();
+                c_.emitLine("}");
+            }
+            menuId++;
+        }
+    }
+}
+// P7.8: 转义C字符串
+std::string CCodeGen::escapeCString(const std::string& s) {
+    std::string result;
+    for (char c : s) {
+        switch (c) {
+            case '"':  result += "\\\""; break;
+            case '\\': result += "\\\\"; break;
+            case '\n': result += "\\n"; break;
+            case '\r': result += "\\r"; break;
+            case '\t': result += "\\t"; break;
+            default:   result += c; break;
+        }
+    }
+    return result;
+}
+
 
 void CCodeGen::emitActiveXDll(Module& module) {
     // 收集所有instancing >= PublicNotCreatable的类模块

@@ -346,6 +346,15 @@ private:
     // P7: 生成Win32窗体框架代码 (WndProc + 控件创建 + 消息映射)
     void emitFormFramework(const FrmFormDesc& frmDesc, Module& module);
 
+    // P7.8: 递归生成菜单项 (VB.Menu子项)
+    void emitMenuItem(const std::string& parentVar, const FrmControl& menuCtrl, int& menuId);
+
+    // P7.8: 递归生成菜单点击事件派发 (WM_COMMAND中)
+    void emitMenuClickDispatch(const FrmControl& menuCtrl, int& menuId);
+
+    // P7.8: 转义C字符串中的特殊字符
+    static std::string escapeCString(const std::string& s);
+
     // P7.5: 判断控件属性访问 → 返回RTL读取函数名 (如"vb6_GetControlText")
     // 空字符串表示不是已知控件属性
     std::string getControlPropReadFn(FrmControlType ctrlType, const std::string& propName) const;
