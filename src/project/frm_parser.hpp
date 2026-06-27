@@ -91,6 +91,7 @@ enum class FrmControlType {
     DirListBox,         // VB.DirListBox
     FileListBox,        // VB.FileListBox
     Menu,               // VB.Menu (菜单项)
+    WebBrowser,         // SHDocVw.WebBrowser / WebBrowser (WebView2宿主)
     Toolbar,            // MSComctlLib.Toolbar 等 (第三方)
     StatusBar,          // MSComctlLib.StatusBar
     CommonDialog,       // MSComDlg.CommonDialog

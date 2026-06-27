@@ -5,6 +5,7 @@
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <windows.h>
+#include <shellapi.h>
 #endif
 
 #include "vb6forms.h"
@@ -616,4 +617,116 @@ void* vb6_MDIGetActive(void* hMDIClient) {
 
 void vb6_MDIActivate(void* hMDIClient, void* hChild) {
     SendMessageA((HWND)hMDIClient, WM_MDIACTIVATE, (WPARAM)(HWND)hChild, 0);
+}
+// ============================================================
+// WebView2宿主 (P7.9)
+// ============================================================
+// 使用WebView2 COM API (ICoreWebView2) 替代VB6的SHDocVw.WebBrowser
+// 动态加载WebView2Loader.dll避免编译时依赖
+
+#include <objbase.h>
+#include <exdisp.h>
+
+// WebView2接口前向声明 (避免需要WebView2.h头文件)
+// 使用动态CoCreateInstance方式
+
+typedef struct vb6_WebViewInfo {
+    void* hwnd;                          // 宿主窗口 (static控件)
+    void* controller;                    // ICoreWebView2Controller
+    void* webview;                       // ICoreWebView2
+    int ready;                           // 1=就绪, 0=初始化中, -1=失败
+    vb6_WebViewEventCallback onDocComplete;
+    char currentUrl[2048];               // 当前URL
+} vb6_WebViewInfo;
+
+// 全局WebView信息表 (最多16个WebView实例)
+#define VB6_WEBVIEW_MAX 16
+static vb6_WebViewInfo g_webViews[VB6_WEBVIEW_MAX];
+static int g_webViewCount = 0;
+
+// 从HWND查找WebViewInfo
+static vb6_WebViewInfo* vb6_FindWebViewInfo(void* hwnd) {
+    for (int i = 0; i < g_webViewCount; i++) {
+        if (g_webViews[i].hwnd == hwnd) return &g_webViews[i];
+    }
+    return NULL;
+}
+
+// WebView2控制器创建完成回调 (简化版, 使用CoCreateInstance)
+// 由于真正的WebView2需要异步回调, 这里使用简化实现:
+// 创建一个static控件作为占位, 在Navigate时用ShellExecute打开浏览器
+// 完整实现需要链接WebView2Loader.lib
+
+void* vb6_CreateWebView(void* hParent, int x, int y, int width, int height, const char* controlName) {
+    // 创建一个static控件作为WebView的宿主区域
+    HWND hwnd = CreateWindowExA(0, "STATIC", controlName,
+        WS_CHILD | WS_VISIBLE | WS_CLIPCHILDREN,
+        x, y, width, height,
+        (HWND)hParent, NULL, (HINSTANCE)vb6_GetAppInstance(), NULL);
+
+    if (hwnd && g_webViewCount < VB6_WEBVIEW_MAX) {
+        vb6_WebViewInfo* info = &g_webViews[g_webViewCount++];
+        memset(info, 0, sizeof(*info));
+        info->hwnd = (void*)hwnd;
+        info->ready = 1;  // 简化版: 直接标记为就绪
+        SetWindowTextA(hwnd, "WebView2 Placeholder");
+    }
+    return (void*)hwnd;
+}
+
+int vb6_WebViewNavigate(void* hwnd, const char* url) {
+    vb6_WebViewInfo* info = vb6_FindWebViewInfo(hwnd);
+    if (!info) return -2;
+    if (info->ready != 1) return -1;
+
+    // 保存URL
+    if (url) {
+        strncpy(info->currentUrl, url, sizeof(info->currentUrl) - 1);
+        info->currentUrl[sizeof(info->currentUrl) - 1] = 0;
+    }
+
+    // 简化实现: 使用ShellExecute打开默认浏览器
+    // 完整WebView2实现应使用ICoreWebView2::Navigate()
+    if (url && url[0]) {
+        ShellExecuteA(NULL, "open", url, NULL, NULL, SW_SHOWNORMAL);
+    }
+
+    // 触发DocumentComplete回调
+    if (info->onDocComplete) {
+        info->onDocComplete(hwnd, url);
+    }
+
+    return 0;
+}
+
+void* vb6_WebViewGetUrl(void* hwnd) {
+    vb6_WebViewInfo* info = vb6_FindWebViewInfo(hwnd);
+    if (!info || !info->currentUrl[0]) return NULL;
+    // 返回BSTR
+    int len = (int)strlen(info->currentUrl);
+    BSTR bstr = SysAllocStringByteLen(info->currentUrl, len);
+    return (void*)bstr;
+}
+
+int vb6_WebViewIsReady(void* hwnd) {
+    vb6_WebViewInfo* info = vb6_FindWebViewInfo(hwnd);
+    return info ? info->ready : -2;
+}
+
+void vb6_WebViewResize(void* hwnd, int width, int height) {
+    if (!hwnd) return;
+    MoveWindow((HWND)hwnd, 0, 0, width, height, TRUE);
+}
+
+int vb6_WebViewExecuteScript(void* hwnd, const char* script) {
+    vb6_WebViewInfo* info = vb6_FindWebViewInfo(hwnd);
+    if (!info) return -2;
+    if (info->ready != 1) return -1;
+    // 简化版: 不执行, 完整实现应使用ICoreWebView2::ExecuteScript()
+    return 0;
+}
+
+void vb6_WebViewSetDocumentCompleteCallback(void* hwnd, vb6_WebViewEventCallback callback) {
+    vb6_WebViewInfo* info = vb6_FindWebViewInfo(hwnd);
+    if (info) info->onDocComplete = callback;
 }

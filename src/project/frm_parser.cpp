@@ -130,6 +130,10 @@ FrmControlType FrmParser::parseControlType(const std::string& typeName) {
     if (lower.find("vb.filelistbox") != std::string::npos) return FrmControlType::FileListBox;
     if (lower.find("vb.menu") != std::string::npos) return FrmControlType::Menu;
 
+    // WebBrowser (WebView2宿主)
+    if (lower.find("webbrowser") != std::string::npos) return FrmControlType::WebBrowser;
+    if (lower.find("shdocvw") != std::string::npos) return FrmControlType::WebBrowser;
+
     // 常见第三方控件
     if (lower.find("toolbar") != std::string::npos) return FrmControlType::Toolbar;
     if (lower.find("statusbar") != std::string::npos) return FrmControlType::StatusBar;
@@ -156,6 +160,7 @@ const char* FrmParser::controlTypeToWin32Class(FrmControlType type) {
         case FrmControlType::Timer:        return nullptr;       // 不可见控件, 无窗口
         case FrmControlType::Image:        return "STATIC";     // SS_BITMAP
         case FrmControlType::Menu:         return nullptr;       // 菜单, 非窗口
+        case FrmControlType::WebBrowser:  return nullptr;       // WebView2, 运行时动态创建
         default:                           return nullptr;
     }
 }
@@ -180,6 +185,7 @@ const char* FrmParser::controlTypeToVb6Name(FrmControlType type) {
         case FrmControlType::Shape:        return "Shape";
         case FrmControlType::Line:         return "Line";
         case FrmControlType::Menu:         return "Menu";
+        case FrmControlType::WebBrowser:  return "WebBrowser";
         default:                           return "Control";
     }
 }

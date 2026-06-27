@@ -111,13 +111,13 @@ bool MsvcDriver::compileAndLink(const MsvcDriverOptions& options) {
         if (!options.defFile.empty()) {
             cmd << " /DEF:\"" << options.defFile << "\"";
         }
-        cmd << " ole32.lib oleaut32.lib uuid.lib advapi32.lib user32.lib";
+        cmd << " ole32.lib oleaut32.lib uuid.lib advapi32.lib user32.lib shell32.lib";
     } else if (options.isGui) {
         // P7: GUI程序 (Win32窗口)
-        cmd << " /link /SUBSYSTEM:WINDOWS user32.lib gdi32.lib ole32.lib oleaut32.lib uuid.lib";
+        cmd << " /link /SUBSYSTEM:WINDOWS user32.lib gdi32.lib shell32.lib ole32.lib oleaut32.lib uuid.lib";
     } else {
         // 控制台程序
-        cmd << " /link /SUBSYSTEM:CONSOLE ole32.lib oleaut32.lib uuid.lib user32.lib";
+        cmd << " /link /SUBSYSTEM:CONSOLE ole32.lib oleaut32.lib uuid.lib user32.lib shell32.lib";
     }
 
     if (options.verbose) {

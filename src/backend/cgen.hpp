@@ -268,6 +268,9 @@ private:
     // 由emitFormFramework从FrmFormDesc填充，用于识别 ctrl.Property 的控件属性访问
     std::unordered_map<std::string, FrmControlType> knownFormControls_;
 
+    // P7.9: Window control name mapping (lowercase -> original casing for HWND vars)
+    std::unordered_map<std::string, std::string> knownFormControlOriginalNames_;
+
     // P7.5: 窗体名 (小写)，用于识别 Form.Caption 等窗体自身属性
     std::string knownFormName_;
 

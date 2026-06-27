@@ -1182,6 +1182,21 @@ void CCodeGen::visit(MemberAccessExpr& node) {
                     lastExpr_ = readFn + "(vb6_hwnd_" + cIdent(objIdent.name) + ")";
                     return;
                 }
+                                // P7.9: WebBrowser method access (Navigate/GoBack/GoForward/Refresh)
+                if (itCtrl->second == FrmControlType::WebBrowser) {
+                    std::string memLower = node.memberName;
+                    std::transform(memLower.begin(), memLower.end(), memLower.begin(), ::tolower);
+                    if (memLower == "navigate" || memLower == "goback" || memLower == "goforward" || memLower == "refresh") {
+                        // Set marker for IndexOrCallExpr to handle
+                        comObjExpr_ = objLower;  // Store lowercase control name
+                        comMemberName_ = memLower;
+                        isComMarker_ = true;
+                        isEarlyBoundCom_ = false;
+                        earlyBoundSym_ = nullptr;
+                        lastExpr_ = objLower;  // Placeholder expression
+                        return;
+                    }
+                }
                 diag_.warn(DiagnosticID::CodeGenUnsupportedFeature, SourceLocation{},
                     std::string("P7.5: Unknown control property '") + objIdent.name + "." + node.memberName +
                     "' for control type, generating struct field access (may not compile)");
@@ -1408,6 +1423,32 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
     // 函数调用路径 (原有逻辑)
     emitExpr(*node.callee);
     std::string callee = std::move(lastExpr_);
+
+    // --- P7.9: WebBrowser控件方法调用 ---
+    // Navigate/GoBack/GoForward/Refresh via isComMarker_ flag set by MemberAccessExpr
+    if (isComMarker_) {
+        auto itCtrl = knownFormControls_.find(comObjExpr_);
+        if (itCtrl != knownFormControls_.end() && itCtrl->second == FrmControlType::WebBrowser) {
+            isComMarker_ = false;
+            std::string method = std::move(comMemberName_);
+            std::string ctrlName = cIdent(knownFormControlOriginalNames_.count(comObjExpr_) ? knownFormControlOriginalNames_[comObjExpr_] : comObjExpr_);
+            comObjExpr_.clear();
+            comMemberName_.clear();
+            if (method == "navigate") {
+                std::string urlArg = "0";
+                if (!node.positional.empty()) {
+                    emitExpr(*node.positional[0]);
+                    urlArg = std::move(lastExpr_);
+                }
+                lastExpr_ = "(void)vb6_WebViewNavigate((void*)vb6_hwnd_" + ctrlName + ", " + urlArg + ")";
+                return;
+            } else if (method == "goback" || method == "goforward" || method == "refresh") {
+                // Simplified: not yet implemented
+                lastExpr_ = "(void)0";
+                return;
+            }
+        }
+    }
 
     // --- COM后期绑定检测 (P6.2) + 前期绑定检测 (P6.3) + P6.4接口调用 ---
     // MemberAccessExpr为COM对象设置isComMarker_标志 + comObjExpr_/comMemberName_
@@ -4142,6 +4183,7 @@ void CCodeGen::emitFormFramework(const FrmFormDesc& frmDesc, Module& module) {
         std::transform(formNameLower.begin(), formNameLower.end(), formNameLower.begin(), ::tolower);
         knownFormName_ = formNameLower;
         knownFormControls_[formNameLower] = FrmControlType::Form;
+        knownFormControlOriginalNames_[formNameLower] = formName;
 
         // P7.6: 先扫描控件数组 (同名控件出现多次 = 数组)
         std::unordered_map<std::string, int> ctrlNameCount;
@@ -4150,6 +4192,7 @@ void CCodeGen::emitFormFramework(const FrmFormDesc& frmDesc, Module& module) {
             std::transform(ctrlNameLower.begin(), ctrlNameLower.end(), ctrlNameLower.begin(), ::tolower);
             ctrlNameCount[ctrlNameLower]++;
             knownFormControls_[ctrlNameLower] = ctrl.controlType;
+            knownFormControlOriginalNames_[ctrlNameLower] = ctrl.controlName;
         }
         for (const auto& kv : ctrlNameCount) {
             if (kv.second > 1) {
@@ -4188,7 +4231,14 @@ void CCodeGen::emitFormFramework(const FrmFormDesc& frmDesc, Module& module) {
             std::string ctrlNameLower = ctrl.controlName;
             std::transform(ctrlNameLower.begin(), ctrlNameLower.end(), ctrlNameLower.begin(), ::tolower);
             if (emitted.count(ctrlNameLower)) continue;
-            if (!FrmParser::controlTypeToWin32Class(ctrl.controlType)) continue;
+            if (!FrmParser::controlTypeToWin32Class(ctrl.controlType)) {
+                // P7.9: WebBrowser needs HWND declaration though no Win32 class
+                if (ctrl.controlType == FrmControlType::WebBrowser) {
+                    h_.emitLine("static void* vb6_hwnd_" + cIdent(ctrl.controlName) + " = NULL;");
+                    emitted.insert(ctrlNameLower);
+                }
+                continue;
+            }
             if (knownControlArrays_.count(ctrlNameLower)) {
                 h_.emitLine("static vb6_CtrlArr vb6_arr_" + cIdent(ctrl.controlName) + ";");
             } else {
@@ -4373,7 +4423,25 @@ void CCodeGen::emitFormFramework(const FrmFormDesc& frmDesc, Module& module) {
     for (const auto& ctrl : frmDesc.formControl.children) {
         const char* win32Class = FrmParser::controlTypeToWin32Class(ctrl.controlType);
         if (!win32Class) {
-            // 不可见控件 (Timer等) — 跳过
+            // P7.9: WebBrowser控件用vb6_CreateWebView创建
+            if (ctrl.controlType == FrmControlType::WebBrowser) {
+                int wbLeft = 0, wbTop = 0, wbWidth = 5000, wbHeight = 3000;
+                auto pIt = ctrl.properties.find("Left");
+                if (pIt != ctrl.properties.end()) wbLeft = (int)pIt->second.intValue;
+                pIt = ctrl.properties.find("Top");
+                if (pIt != ctrl.properties.end()) wbTop = (int)pIt->second.intValue;
+                pIt = ctrl.properties.find("Width");
+                if (pIt != ctrl.properties.end()) wbWidth = (int)pIt->second.intValue;
+                pIt = ctrl.properties.find("Height");
+                if (pIt != ctrl.properties.end()) wbHeight = (int)pIt->second.intValue;
+                // 缇转像素: 1缇=1/15像素 (96DPI)
+                c_.emitLine("{ void* vb6_tmp_hwnd = vb6_CreateWebView((void*)hwnd, " +
+                    std::to_string(wbLeft / 15) + ", " + std::to_string(wbTop / 15) + ", " +
+                    std::to_string(wbWidth / 15) + ", " + std::to_string(wbHeight / 15) + ", \"" +
+                    cIdent(ctrl.controlName) + "\");");
+                c_.emitLine("vb6_hwnd_" + cIdent(ctrl.controlName) + " = vb6_tmp_hwnd; }");
+            }
+            // 不可见控件 (Timer等) 跳过
             ctrlId++;
             continue;
         }
@@ -5580,6 +5648,11 @@ std::string CCodeGen::getControlPropReadFn(FrmControlType ctrlType, const std::s
         if (propLower == "visible") return "vb6_GetControlVisible";
         if (propLower == "enabled") return "vb6_GetControlEnabled";
         break;
+    case FrmControlType::WebBrowser:
+        if (propLower == "url" || propLower == "locationurl") return "vb6_WebViewGetUrl";
+        if (propLower == "visible") return "vb6_GetControlVisible";
+        if (propLower == "enabled") return "vb6_GetControlEnabled";
+        break;
     default:
         // 所有可见控件通用属性
         if (propLower == "visible") return "vb6_GetControlVisible";
@@ -5618,6 +5691,10 @@ std::string CCodeGen::getControlPropWriteFn(FrmControlType ctrlType, const std::
         break;
     case FrmControlType::Form:
         if (propLower == "caption") return "vb6_SetControlText";
+        if (propLower == "visible") return "vb6_SetControlVisible";
+        if (propLower == "enabled") return "vb6_SetControlEnabled";
+        break;
+    case FrmControlType::WebBrowser:
         if (propLower == "visible") return "vb6_SetControlVisible";
         if (propLower == "enabled") return "vb6_SetControlEnabled";
         break;
