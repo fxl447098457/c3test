@@ -92,6 +92,19 @@ static inline void vb6_BSTR_Assign(BSTR* target, BSTR source) {
 // BSTR连接
 BSTR vb6_BSTR_Concat(BSTR a, BSTR b);
 
+// BSTR连接并释放第一个参数 (用于链式Concat中间节点, 防止临时BSTR泄漏)
+// a & b & c → vb6_BSTR_ConcatFree(vb6_BSTR_Concat(a, b), c) → 内层结果被ConcatFree释放
+BSTR vb6_BSTR_ConcatFree(BSTR a, BSTR b);
+
+// BSTR转移所有权赋值 (free旧值+直接持有source, 不做deep copy)
+// 用于Concat等返回新BSTR的赋值场景, source是返回的新BSTR不存在共享引用
+static inline void vb6_BSTR_AssignMove(BSTR* target, BSTR source) {
+    if (target) {
+        vb6_BSTR_Free(*target);
+        *target = source;
+    }
+}
+
 // BSTR长度 (返回字符数, 非字节数)
 static inline int32_t vb6_BSTR_Len(BSTR bstr) {
     if (!bstr) return 0;

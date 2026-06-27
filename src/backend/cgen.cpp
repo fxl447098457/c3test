@@ -1,4 +1,4 @@
-﻿#include "backend/cgen.hpp"
+#include "backend/cgen.hpp"
 #include <algorithm>
 #include <cctype>
 #include <iostream>
@@ -1098,9 +1098,15 @@ void CCodeGen::visit(BinaryExpr& node) {
     if (isComMarker_) resolveComValue();
     std::string right = std::move(lastExpr_);
 
-    // 字符串连接运算: VB6 & → vb6_BSTR_Concat
+    // 字符串连接运算: VB6 & → vb6_BSTR_Concat / vb6_BSTR_ConcatFree
+    // 嵌套Concat时用ConcatFree释放中间临时BSTR，避免内存泄漏
     if (node.op == BinaryOp::Concat) {
-        lastExpr_ = "vb6_BSTR_Concat(" + left + ", " + right + ")";
+        bool leftIsConcat = (left.find("vb6_BSTR_Concat") != std::string::npos);
+        if (leftIsConcat) {
+            lastExpr_ = "vb6_BSTR_ConcatFree(" + left + ", " + right + ")";
+        } else {
+            lastExpr_ = "vb6_BSTR_Concat(" + left + ", " + right + ")";
+        }
         return;
     }
 
