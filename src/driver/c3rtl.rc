@@ -1,0 +1,13 @@
+// c3rtl.rc - RTL runtime library embedded as resources
+// 8 files (4 .h + 4 .c) embedded as RCDATA
+// Runtime: FindResource/LoadResource extract to temp session directory
+// Paths relative to this RC file's location (src/driver/)
+
+100 RCDATA "../rtl/core/vb6rtl.h"
+101 RCDATA "../rtl/core/vb6rtl.c"
+102 RCDATA "../rtl/core/vb6com.h"
+103 RCDATA "../rtl/core/vb6com.c"
+104 RCDATA "../rtl/core/vb6comserver.h"
+105 RCDATA "../rtl/core/vb6comserver.c"
+106 RCDATA "../rtl/core/vb6forms.h"
+107 RCDATA "../rtl/core/vb6forms.c"

@@ -10,6 +10,7 @@
 #include "backend/cgen.hpp"
 #include "backend/msvc_driver.hpp"
 #include "typelib/typelib_builder.hpp"
+#include "driver/rtl_embedded.hpp"
 #include "project/vbp_parser.hpp"
 #include "project/frm_parser.hpp"
 
@@ -1084,34 +1085,14 @@ bool Driver::runLinker(const CompileOptions& options, const std::string& outputD
         msvcOpts.sourceFiles.push_back(dllEntryPath);
     }
 
-    // 查找RTL目录: 优先VB6RTL_DIR环境变量, 其次尝试相对路径
-    std::string rtlDir;
-    const char* envRtl = std::getenv("VB6RTL_DIR");
-    if (envRtl && envRtl[0] != '\0') {
-        rtlDir = envRtl;
-        // Trim trailing whitespace (common issue with cmd /c set VAR=VALUE && ...)
-        while (!rtlDir.empty() && (rtlDir.back() == ' ' || rtlDir.back() == '\t' || rtlDir.back() == '\r' || rtlDir.back() == '\n')) rtlDir.pop_back();
-    } else {
-        // 尝试从当前工作目录向上查找 src/rtl/core
-        std::filesystem::path search = std::filesystem::current_path();
-        for (int i = 0; i < 10; i++) {
-            std::filesystem::path candidate = search / "src" / "rtl" / "core";
-            if (std::filesystem::exists(candidate / "vb6rtl.h")) {
-                rtlDir = candidate.string();
-                break;
-            }
-            auto parent = search.parent_path();
-            if (parent == search) break;
-            search = parent;
-        }
-    }
-
+        // P10: 从内嵌资源释放 RTL 到临时会话目录
+    SessionManager session;
+    std::string rtlDir = session.create();
     if (rtlDir.empty()) {
-        std::cerr << "c3: 错误: 找不到VB6 RTL目录 (请设置VB6RTL_DIR环境变量)" << std::endl;
+        std::cerr << "c3: 错误: 无法释放RTL运行时资源" << std::endl;
         return false;
     }
     msvcOpts.rtlDir = rtlDir;
-
     // 输出文件 - 放入 outputDir
     std::string outputExt = options.isDll ? ".dll" : ".exe";
     if (!options.outputFile.empty()) {

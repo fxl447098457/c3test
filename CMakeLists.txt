@@ -112,9 +112,12 @@ target_compile_definitions(vb6c3-ir PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN
 target_link_libraries(vb6c3-ir PRIVATE vb6c3-core)
 
 # --- Compiler CLI: c3.exe ---
+# P10: c3rtl.rc embeds RTL .h/.c files as RCDATA resources
 add_executable(c3
     src/driver/main.cpp
     src/driver/driver.cpp
+    src/driver/rtl_embedded.cpp
+    src/driver/c3rtl.rc
 )
 target_link_libraries(c3 PRIVATE vb6c3-core vb6c3-cgen)
 if(VB6C3_ENABLE_LLVM)
@@ -123,27 +126,3 @@ else()
     target_compile_definitions(c3 PRIVATE VB6C3_NO_LLVM)
 endif()
 target_compile_definitions(c3 PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
-
-# --- Runtime RTL ---
-add_library(vb6c3-rtl3-core STATIC
-    src/rtl/core/bstring.cpp
-    src/rtl/core/variant.cpp
-    src/rtl/core/safearray.cpp
-    src/rtl/core/fileio.cpp
-    src/rtl/core/string_funcs.cpp
-    src/rtl/core/math_funcs.cpp
-    src/rtl/core/datetime.cpp
-    src/rtl/core/conversion.cpp
-    src/rtl/core/error_handler.cpp
-)
-target_compile_definitions(vb6c3-rtl3-core PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
-
-if(WIN32)
-    add_library(vb6c3-rtl3-win32 STATIC
-        src/rtl/platform/win32/com_interop.cpp
-        src/rtl/platform/win32/registry.cpp
-        src/rtl/platform/win32/forms.cpp
-        src/rtl/platform/win32/controls.cpp
-    )
-    target_link_libraries(vb6c3-rtl3-win32 PRIVATE vb6c3-rtl3-core ole32 oleaut32 uuid)
-endif()

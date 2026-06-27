@@ -127,11 +127,46 @@ bool MsvcDriver::compileAndLink(const MsvcDriverOptions& options) {
         std::cout << "c3: 执行: " << cmd.str() << std::endl;
     }
 
-    int ret = executeCommand(cmd.str());
+    // P10.9: 将 MSVC 输出重定向到临时文件, 失败时保存为 c3-error.log
+    std::string outputDirForLog;
+    if (!options.outputFile.empty()) {
+        std::filesystem::path outP(options.outputFile);
+        outputDirForLog = outP.parent_path().string();
+    }
+    if (outputDirForLog.empty()) outputDirForLog = ".";
+    std::string tmpLogPath = outputDirForLog + "/_c3_msvc_out.txt";
+    std::string fullCmd = cmd.str() + " > \"" + tmpLogPath + "\" 2>&1";
+
+    int ret = executeCommand(fullCmd);
     if (ret != 0) {
+        // 编译失败: 将临时日志保存为 c3-error.log, 并输出到 stderr
+        std::string errorLogPath = outputDirForLog + "/c3-error.log";
+        std::ifstream tmpLog(tmpLogPath);
+        std::ofstream errLog(errorLogPath, std::ios::out | std::ios::trunc);
+        if (tmpLog && errLog) {
+            errLog << "c3: MSVC compilation failed (exit code " << ret << ")" << std::endl;
+            errLog << "=== MSVC Output ===" << std::endl;
+            std::string line;
+            while (std::getline(tmpLog, line)) {
+                errLog << line << "\n";
+            }
+        }
+        // 将 MSVC 输出打印到 stderr
+        if (tmpLog) {
+            tmpLog.clear();
+            tmpLog.seekg(0);
+            std::string line;
+            while (std::getline(tmpLog, line)) {
+                std::cerr << line << std::endl;
+            }
+        }
         std::cerr << "c3: MSVC编译失败 (exit code " << ret << ")" << std::endl;
+        std::cerr << "c3: 错误日志已保存: " << errorLogPath << std::endl;
+        std::filesystem::remove(tmpLogPath, std::error_code());
         return false;
     }
+    // 编译成功: 清理临时文件
+    std::filesystem::remove(tmpLogPath, std::error_code());
 
     if (options.verbose) {
         std::cout << "c3: 编译成功: " << options.outputFile << std::endl;
