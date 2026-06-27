@@ -954,6 +954,20 @@ void CCodeGen::visit(IdentifierExpr& node) {
     // 用户变量/常量 (非参数、非函数)
     if (foundSym && (foundSym->kind == SymbolKind::Variable
                   || foundSym->kind == SymbolKind::Constant)) {
+        // P11.7: 如果是内置Object类型变量(=窗体控件), 优先走默认属性读取
+        if (foundSym->isBuiltin && foundSym->type == Vb6Type::Object) {
+            auto itCtrl = knownFormControls_.find(lower);
+            if (itCtrl != knownFormControls_.end()) {
+                const char* defaultProp = getDefaultPropertyName(itCtrl->second);
+                if (defaultProp) {
+                    std::string readFn = getControlPropReadFn(itCtrl->second, defaultProp);
+                    if (!readFn.empty()) {
+                        lastExpr_ = readFn + "(vb6_hwnd_" + cIdent(node.name) + ")  /* default prop: ." + std::string(defaultProp) + " */";
+                        return;
+                    }
+                }
+            }
+        }
         // 类模块变量通过me->访问
         if (isClassModule_ && currentProc_ && foundSym->kind == SymbolKind::Variable) {
             Symbol* paramSym = symTab_.lookupLocal(node.name);
@@ -2219,6 +2233,26 @@ void CCodeGen::visit(AssignmentStmt& node) {
         }
     }
 
+    // P11.7: 默认属性写入 — 如果赋值目标是已知窗体控件标识符 (如 Label1 = value)
+    // 自动转换为默认属性写入 (如 Label1.Caption = value → vb6_SetControlText(...))
+    if (node.target->kind == ASTNodeKind::IdentifierExpr) {
+        auto& tgtId = static_cast<IdentifierExpr&>(*node.target);
+        std::string tgtLower = tgtId.name;
+        std::transform(tgtLower.begin(), tgtLower.end(), tgtLower.begin(), ::tolower);
+        auto itCtrl = knownFormControls_.find(tgtLower);
+        if (itCtrl != knownFormControls_.end()) {
+            const char* defaultProp = getDefaultPropertyName(itCtrl->second);
+            if (defaultProp) {
+                std::string writeFn = getControlPropWriteFn(itCtrl->second, defaultProp);
+                if (!writeFn.empty()) {
+                    emitExpr(*node.value);
+                    std::string valExpr = std::move(lastExpr_);
+                    c_.emitLine(writeFn + "(vb6_hwnd_" + cIdent(tgtId.name) + ", " + valExpr + ");  /* default prop: ." + std::string(defaultProp) + " */");
+                    return;
+                }
+            }
+        }
+    }
     emitExpr(*node.target);
     std::string target = std::move(lastExpr_);
 
@@ -5868,6 +5902,22 @@ std::string CCodeGen::getControlPropWriteFn(FrmControlType ctrlType, const std::
     }
     return "";  // 未知属性
 }
+const char* CCodeGen::getDefaultPropertyName(FrmControlType ctrlType) {
+    switch (ctrlType) {
+    case FrmControlType::TextBox:      return "Text";
+    case FrmControlType::Label:        return "Caption";
+    case FrmControlType::CommandButton: return "Caption";
+    case FrmControlType::CheckBox:     return "Value";
+    case FrmControlType::OptionButton: return "Value";
+    case FrmControlType::ListBox:      return "Text";
+    case FrmControlType::ComboBox:     return "Text";
+    case FrmControlType::Frame:        return "Caption";
+    case FrmControlType::Form:         return "Caption";
+    case FrmControlType::MDIForm:      return "Caption";
+    default:                           return nullptr;
+    }
+}
+
 
 
 // ============================================================

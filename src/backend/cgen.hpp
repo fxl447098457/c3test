@@ -383,6 +383,10 @@ private:
     // P7.5: 判断控件属性写入 → 返回RTL写入函数名 (如"vb6_SetControlText")
     std::string getControlPropWriteFn(FrmControlType ctrlType, const std::string& propName) const;
 
+    // P11.7: 返回控件类型的默认属性名 (如 TextBox->"Text", Label->"Caption")
+    // 空字符串表示该控件类型无默认属性
+    static const char* getDefaultPropertyName(FrmControlType ctrlType);
+
     // 生成类方法函数体中的Me引用名
     std::string classMeParam() const;
 
