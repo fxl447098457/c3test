@@ -488,7 +488,7 @@ code.accent {
     align-items: center;
     gap: 8px;
     padding: 7px 20px;
-    background: rgba(18, 113, 255, 0.15);
+    background: rgba(0, 0, 0, 0.5);
     border: 1px solid rgba(18, 113, 255, 0.3);
     border-radius: 100px;
     font-size: 0.82rem;
@@ -1068,6 +1068,29 @@ code.accent {
 .status.done   { background: rgba(16, 185, 129, 0.12); color: var(--accent-green-light); }
 .status.active { background: rgba(18, 113, 255, 0.12); color: var(--accent-brand-light); }
 .status.pending { background: rgba(255, 255, 255, 0.04); color: var(--text-tertiary); }
+/* ---- 持续迭代中---- */
+.roadmap-dot.evolving {
+    background: rgba(139, 92, 246, 0.15);
+    color: #ff271d;
+    border: 2px solid #ff271d;
+    animation: pulse-ring 2s ease-in-out infinite;
+}
+
+.evolving-card {
+    border-color: rgba(139, 92, 246, 0.25) !important;
+}
+
+.evolving-card h4 {
+    background: linear-gradient(135deg, #ff271d, #a78bfa, #818cf8);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+}
+
+.status.evolving {
+    background: rgba(139, 92, 246, 0.12);
+    color: #ff271d;
+}
 
 /* ---- Stats Bar ---- */
 .stats-bar {
@@ -1180,6 +1203,8 @@ code.accent {
 
     .nav-links { display: none; }
     .nav-mobile-toggle { display: block; }
+    
+    .hero-badge-on{display: none}
 
     .nav-links.open {
         display: flex;
@@ -1211,9 +1236,12 @@ code.accent {
         margin: 0;
     }
 
+    .hero-card { padding: 30px 10px; max-width: 100%; }
     .hero-actions { flex-direction: column; align-items: center; }
     .btn { width: 100%; max-width: 320px; justify-content: center; }
-
+    .section.hero {
+        padding: 120px 20px;
+    }
     .scroll-indicator { display: none; }
 }
 
