@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 // 编译器驱动 - 命令行解析 + 编译流程编排
 
 #include "preprocessor/preprocessor.hpp"
@@ -60,6 +60,7 @@ struct CompileOptions {
     // ActiveX DLL (P6.6)
     bool isDll = false;                      // 编译为ActiveX DLL (而非EXE)
     std::string dllProgId;                   // DLL的ProgID前缀 (如 "MyLib")
+    std::string libidStr;                    // P6.13: TypeLib的LibID (UUID格式, 空则自动生成)
 
     // 窗体调试 (P7)
     bool dumpFrm = false;                    // 输出.frm窗体描述解析结果

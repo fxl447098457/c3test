@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 // vb6c3 - C代码生成器
 // 将语义分析后的AST+符号表翻译为C代码，交由MSVC编译
 // 设计参考: cfront, Nim, Zig早期均采用C代码生成路线
@@ -81,6 +81,13 @@ public:
     // 返回: 生成的dll_entry.c文件内容
     std::string generateDllEntry(const std::string& progId,
                                   const std::vector<SymbolTable*>& allSymTabs = {});
+
+    // P6.13: 生成IDL文件 (用于MIDL编译成TypeLib)
+    // dllPath: DLL的相对/绝对路径, 写入IDL的helpstring
+    // 返回: 生成的.idl文件内容
+    std::string generateIdl(const std::string& progId,
+                            const std::string& libidStr,
+                            const std::vector<SymbolTable*>& allSymTabs = {});
 
     // 获取生成的代码
     const std::string& headerCode() const { return header_; }

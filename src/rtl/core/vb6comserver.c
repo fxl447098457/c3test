@@ -1,4 +1,4 @@
-﻿// vb6comserver.c - VB6 COM服务端运行时 (P6.6 ActiveX DLL)
+// vb6comserver.c - VB6 COM服务端运行时 (P6.6 ActiveX DLL)
 // 实现IClassFactory、IDispatch包装、DLL导出骨架、注册表辅助
 
 #include "vb6comserver.h"
@@ -426,5 +426,49 @@ HRESULT vb6_GetDllPath(wchar_t* path, DWORD size) {
     }
     DWORD len = GetModuleFileNameW(hModule, path, size);
     if (len == 0 || len >= size) return E_FAIL;
+    return S_OK;
+}
+
+// ============================================================
+// P6.13: TypeLib注册辅助
+// ============================================================
+
+HRESULT vb6_RegisterTypeLib(const wchar_t* dllPath) {
+    if (!dllPath) return E_POINTER;
+    
+    // 从DLL资源加载TypeLib (资源类型=TYPELIB, ID=1)
+    ITypeLib* pTypeLib = NULL;
+    HRESULT hr = LoadTypeLib(dllPath, &pTypeLib);
+    if (FAILED(hr)) {
+        // TypeLib资源可能不存在, 不算致命错误
+        return S_FALSE;
+    }
+    
+    // 注册TypeLib到注册表 (包括所有接口/coclass的TypeLib信息)
+    hr = RegisterTypeLib(pTypeLib, (OLECHAR*)dllPath, NULL);
+    pTypeLib->lpVtbl->Release(pTypeLib);
+    
+    return hr;
+}
+
+HRESULT vb6_UnregisterTypeLib(const wchar_t* dllPath) {
+    if (!dllPath) return E_POINTER;
+    
+    // 先加载TypeLib获取LibID和版本号
+    ITypeLib* pTypeLib = NULL;
+    HRESULT hr = LoadTypeLib(dllPath, &pTypeLib);
+    if (FAILED(hr)) return S_FALSE;
+    
+    // 获取TypeLib属性
+    TLIBATTR* pAttr = NULL;
+    hr = pTypeLib->lpVtbl->GetLibAttr(pTypeLib, &pAttr);
+    if (SUCCEEDED(hr) && pAttr) {
+        // 反注册TypeLib
+        UnRegisterTypeLib(&pAttr->guid, pAttr->wMajorVerNum, pAttr->wMinorVerNum,
+                         SYS_WIN64, pAttr->lcid);
+        pTypeLib->lpVtbl->ReleaseTLibAttr(pTypeLib, pAttr);
+    }
+    pTypeLib->lpVtbl->Release(pTypeLib);
+    
     return S_OK;
 }

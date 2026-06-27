@@ -149,6 +149,12 @@ HRESULT vb6_UnregisterCoClass(const vb6_CoClassDesc* desc);
 // 获取当前DLL路径 (用于注册InprocServer32)
 HRESULT vb6_GetDllPath(wchar_t* path, DWORD size);
 
+// P6.13: TypeLib注册辅助
+// 注册嵌入DLL资源的TypeLib到注册表
+HRESULT vb6_RegisterTypeLib(const wchar_t* dllPath);
+// 反注册TypeLib
+HRESULT vb6_UnregisterTypeLib(const wchar_t* dllPath);
+
 #ifdef __cplusplus
 }
 #endif

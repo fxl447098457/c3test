@@ -108,6 +108,9 @@ bool MsvcDriver::compileAndLink(const MsvcDriverOptions& options) {
     if (options.isDll) {
         // P6.6: ActiveX DLL链接
         cmd << " /link /DLL";
+        if (!options.typelibResFile.empty()) {
+            cmd << " \"" << options.typelibResFile << "\"";
+        }
         if (!options.defFile.empty()) {
             cmd << " /DEF:\"" << options.defFile << "\"";
         }
