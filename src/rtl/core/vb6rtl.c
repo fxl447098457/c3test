@@ -1,4 +1,4 @@
-﻿// vb6rtl.c - VB6运行时库最小实现
+// vb6rtl.c - VB6运行时库最小实现
 // 仅支持 hello.bas 等简单程序运行
 
 #include "vb6rtl.h"
@@ -196,9 +196,15 @@ BSTR vb6_Str(int32_t n) {
 }
 
 BSTR vb6_Format(vb6_VARIANT expr, BSTR fmt) {
-    // 简化实现
+    // P8.4: 改进版 - 支持更多Variant类型转换
     (void)fmt;
     switch (expr.vt) {
+        case vb6_vtEmpty:
+            return vb6_BSTR_FromStr(L"");
+        case vb6_vtNull:
+            return vb6_BSTR_FromStr(L"");
+        case vb6_vtInteger:
+            return vb6_Str((int32_t)expr.iVal);
         case vb6_vtLong:
             return vb6_Str(expr.lVal);
         case vb6_vtDouble:
@@ -207,6 +213,13 @@ BSTR vb6_Format(vb6_VARIANT expr, BSTR fmt) {
             swprintf(buf, 64, L"%g", expr.dblVal);
             return vb6_BSTR_FromStr(buf);
         }
+        case vb6_vtBSTR:
+            // P8.4: String类型直接返回副本
+            return expr.bstrVal ? vb6_BSTR_FromBSTR(expr.bstrVal) : vb6_BSTR_Empty();
+        case vb6_vtBoolean:
+            return vb6_BSTR_FromStr(expr.boolVal ? L"True" : L"False");
+        case vb6_vtByte:
+            return vb6_Str((int32_t)expr.bVal);
         default:
             return vb6_BSTR_FromStr(L"");
     }
@@ -272,6 +285,34 @@ int32_t vb6_IsNumeric(vb6_VARIANT v) {
 int32_t vb6_IsNull(vb6_VARIANT v) { return v.vt == vb6_vtNull ? -1 : 0; }
 int32_t vb6_IsEmpty(vb6_VARIANT v) { return v.vt == vb6_vtEmpty ? -1 : 0; }
 int32_t vb6_IsObject(vb6_VARIANT v) { return (v.vt == vb6_vtDispatch && v.pdispVal != NULL) ? -1 : 0; }
+int32_t vb6_IsArray(vb6_VARIANT v) { (void)v; return 0; }  // 简化: 暂不支持
+int32_t vb6_IsDate(vb6_VARIANT v) { return v.vt == vb6_vtDate ? -1 : 0; }
+int32_t vb6_IsError(vb6_VARIANT v) { return v.vt == vb6_vtError ? -1 : 0; }
+
+// P8.4: VarType - 返回Variant的VT类型码
+int32_t vb6_VarType(vb6_VARIANT v) { return (int32_t)v.vt; }
+
+// P8.4: TypeName - 返回Variant类型的VB6类型名
+BSTR vb6_TypeName(vb6_VARIANT v) {
+    const wchar_t* name = L"Empty";
+    switch (v.vt) {
+        case vb6_vtEmpty:    name = L"Empty"; break;
+        case vb6_vtNull:     name = L"Null"; break;
+        case vb6_vtInteger:  name = L"Integer"; break;
+        case vb6_vtLong:     name = L"Long"; break;
+        case vb6_vtSingle:   name = L"Single"; break;
+        case vb6_vtDouble:   name = L"Double"; break;
+        case vb6_vtCurrency: name = L"Currency"; break;
+        case vb6_vtDate:     name = L"Date"; break;
+        case vb6_vtBSTR:     name = L"String"; break;
+        case vb6_vtDispatch: name = L"Object"; break;
+        case vb6_vtError:    name = L"Error"; break;
+        case vb6_vtBoolean:  name = L"Boolean"; break;
+        case vb6_vtByte:     name = L"Byte"; break;
+        default:             name = L"Variant"; break;
+    }
+    return vb6_BSTR_FromStr(name);
+}
 
 // ============================================================
 // Debug对象
@@ -475,6 +516,37 @@ BSTR vb6_VariantToString(vb6_VARIANT v) {
     return vb6_CStr(v);
 }
 
+// P8.4: Variant清理 - 释放内含BSTR等资源
+void vb6_VariantClear(vb6_VARIANT* v) {
+    if (!v) return;
+    // 释放BSTR
+    if (v->vt == vb6_vtBSTR && v->bstrVal) {
+        vb6_BSTR_Free(v->bstrVal);
+        v->bstrVal = NULL;
+    }
+    // 释放IDispatch指针
+    if (v->vt == vb6_vtDispatch && v->pdispVal) {
+        vb6_ReleaseObject(&v->pdispVal);
+        v->pdispVal = NULL;
+    }
+    v->vt = vb6_vtEmpty;
+}
+
+// P8.4: Variant深拷贝 - 复制BSTR等需要独立所有权的资源
+void vb6_VariantCopy(vb6_VARIANT* dst, const vb6_VARIANT* src) {
+    if (!dst || !src) return;
+    *dst = *src;  // 浅拷贝
+    // BSTR需要深拷贝
+    if (src->vt == vb6_vtBSTR && src->bstrVal) {
+        dst->bstrVal = vb6_BSTR_FromBSTR(src->bstrVal);
+    }
+    // Dispatch需要AddRef
+    if (src->vt == vb6_vtDispatch && src->pdispVal) {
+        // COM AddRef would go here; simplified: just copy pointer
+        dst->pdispVal = src->pdispVal;
+    }
+}
+
 // ============================================================
 // 字符串函数 (补充)
 // ============================================================
@@ -644,9 +716,11 @@ static int32_t vb6_date_to_serial(int32_t year, int32_t month, int32_t day) {
 // Excel序列号 → 年月日 (Julian Date Number逆运算)
 // 基于 vb6_date_to_serial 的逆运算, 含Lotus 1900-02-29 bug兼容
 static void vb6_serial_to_date(int32_t serial, int32_t* year, int32_t* month, int32_t* day) {
-    // 调整: serial=1 → 1900-01-01, serial=0 → 1899-12-30, serial=60 → 1900-02-29(Lotus bug)
-    // 使用Julian Day Number逆公式
-    int32_t jd = serial + 2415080;  // 调整到Julian Day基准(1899-12-30=JD 2415080)
+    // VB6/OLE Automation日期序列号 → 年月日
+    // OLE日期: 1899-12-30=0, 1900-01-01=2, 1900-02-28=60, 1900-03-01=61
+    // 注意: OLE日期系统不含Lotus 1900-02-29 bug(那是Excel的)
+    // serial = JD - 2415019, 因此 JD = serial + 2415019
+    int32_t jd = serial + 2415019;
     int32_t a = jd + 32044;
     int32_t b = (4 * a + 3) / 146097;
     int32_t c = a - (146097 * b) / 4;
@@ -661,8 +735,10 @@ static void vb6_serial_to_date(int32_t serial, int32_t* year, int32_t* month, in
 static double vb6_now_serial(void) {
     time_t t = time(NULL);
     struct tm* lt = localtime(&t);
-    int32_t datePart = vb6_date_to_serial(1900 + lt->tm_year, 1 + lt->tm_mon, lt->tm_mday)
-                     - vb6_date_to_serial(1899, 12, 30);
+    // OLE日期: serial = JD(date) - JD(1899-12-30), 无Lotus bug
+    int32_t jd_date = vb6_date_to_serial(1900 + lt->tm_year, 1 + lt->tm_mon, lt->tm_mday);
+    int32_t jd_base = vb6_date_to_serial(1899, 12, 30);
+    int32_t datePart = jd_date - jd_base;
     double timePart = (lt->tm_hour * 3600.0 + lt->tm_min * 60.0 + lt->tm_sec) / 86400.0;
     return (double)datePart + timePart;
 }
@@ -672,25 +748,21 @@ double vb6_Date(void) { return (double)(int32_t)vb6_now_serial(); }
 double vb6_Time(void) { double n = vb6_now_serial(); return n - (double)(int32_t)n; }
 
 int32_t vb6_Year(double date) {
-    // 简化: 用localtime反推
-    (void)date;
-    time_t t = time(NULL);
-    struct tm* lt = localtime(&t);
-    return 1900 + lt->tm_year;
+    int32_t y, m, d;
+    vb6_serial_to_date((int32_t)date, &y, &m, &d);
+    return y;
 }
 
 int32_t vb6_Month(double date) {
-    (void)date;
-    time_t t = time(NULL);
-    struct tm* lt = localtime(&t);
-    return 1 + lt->tm_mon;
+    int32_t y, m, d;
+    vb6_serial_to_date((int32_t)date, &y, &m, &d);
+    return m;
 }
 
 int32_t vb6_Day(double date) {
-    (void)date;
-    time_t t = time(NULL);
-    struct tm* lt = localtime(&t);
-    return lt->tm_mday;
+    int32_t y, m, d;
+    vb6_serial_to_date((int32_t)date, &y, &m, &d);
+    return d;
 }
 
 int32_t vb6_Hour(double time) {

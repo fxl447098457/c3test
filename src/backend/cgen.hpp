@@ -223,6 +223,9 @@ private:
     // 已知Long/Integer/Boolean变量名集合 (小写) - 用于COM值解封类型推断
     std::unordered_set<std::string> knownLongVars_;
 
+    // P8.4: 已知Variant变量名集合 (小写) - 用于赋值时包装值
+    std::unordered_set<std::string> knownVariantVars_;
+
 
     // P6.11: 类模块成员变量类型集合 (小写, 含m_前缀格式)
     // 在generate()开头从模块声明填充, 每个方法/属性入口的clear()后从此恢复
@@ -322,6 +325,10 @@ private:
 
     // VB6标识符 → 安全C标识符 (处理关键字冲突、特殊字符)
     std::string cIdent(const std::string& vb6Name) const;
+
+    // P8.4: 根据表达式类型推断Variant构造函数
+    // 例如: 整数字面量→vb6_VariantLong, 浮点→vb6_VariantDouble, BSTR→vb6_VariantString
+    std::string wrapVariantValue(ASTNode* valueNode, const std::string& cExpr) const;
 
     // VB6标识符 → C全局函数名
     // 本模块: vb6_<ProcName>

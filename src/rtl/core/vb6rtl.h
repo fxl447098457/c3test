@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 // vb6rtl.h - VB6运行时库最小头文件
 // 为C代码生成器提供VB6基本类型的C定义
 // P3.6 阎段: 最小子集, 仅支撑 hello.bas 等简单程序
@@ -201,6 +201,11 @@ int32_t vb6_VariantToLong(vb6_VARIANT v);
 double vb6_VariantToDouble(vb6_VARIANT v);
 BSTR vb6_VariantToString(vb6_VARIANT v);
 
+// P8.4: Variant清理(释放内含BSTR等资源)
+void vb6_VariantClear(vb6_VARIANT* v);
+// P8.4: Variant深拷贝(复制BSTR)
+void vb6_VariantCopy(vb6_VARIANT* dst, const vb6_VARIANT* src);
+
 // ============================================================
 // 内置函数 (最小子集)
 // ============================================================
@@ -241,6 +246,10 @@ int16_t vb6_CInt(double x);
 int32_t vb6_CLng(double x);
 double vb6_CDbl(double x);
 BSTR vb6_CStr(vb6_VARIANT x);
+// P8.4: Variant版转换函数
+static inline int16_t vb6_CIntV(vb6_VARIANT v) { return vb6_CInt(vb6_VariantToDouble(v)); }
+static inline int32_t vb6_CLngV(vb6_VARIANT v) { return vb6_CLng(vb6_VariantToDouble(v)); }
+static inline double vb6_CDblV(vb6_VARIANT v) { return vb6_VariantToDouble(v); }
 
 // 类型检查
 int32_t vb6_IsNumeric(vb6_VARIANT v);
