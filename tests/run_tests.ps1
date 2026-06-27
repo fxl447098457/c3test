@@ -1,6 +1,6 @@
-# P5 集成测试框架
+# c3 编译器集成测试框架
 # 用法: .\run_tests.ps1 [-Category <all|compile|run|syntax>] [-Verbose]
-# 
+#
 # 测试分类:
 #   compile - 编译测试 (c3 .bas -> .exe, 不运行)
 #   run     - 运行测试 (编译+运行+校验输出)
@@ -228,7 +228,7 @@ function Test-Syntax {
 
 Write-Host ""
 Write-Host "========================================" -ForegroundColor Cyan
-Write-Host "  c3 P5 Integration Test Suite" -ForegroundColor Cyan
+Write-Host "  c3 Compiler Test Suite" -ForegroundColor Cyan
 Write-Host "  $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
@@ -246,7 +246,7 @@ if ($Category -in @("all", "run")) {
     Test-Run "test_now" "$Tests\test_now.bas"
     Write-Host ""
     
-    # --- P5.5 兼容性测试 (新增) ---
+    # --- P5.5 兼容性测试 ---
     Write-Host "--- Compat Tests (P5.5) ---" -ForegroundColor Yellow
     
     Test-Run "test_compat" "$Tests\test_compat.bas"
@@ -255,11 +255,31 @@ if ($Category -in @("all", "run")) {
     Test-Run "test_declare" "$Tests\test_declare.bas"
     Write-Host ""
     
-    # --- VBP工程测试 ---
-    Write-Host "--- VBP Project Tests ---" -ForegroundColor Yellow
+    # --- P5.7 已知限制修复测试 ---
+    Write-Host "--- Bugfix Tests (P5.7) ---" -ForegroundColor Yellow
+    
+    Test-Run "test_fixes" "$Tests\test_fixes.bas" @("All fixes passed!")
+    Write-Host ""
+    
+    # --- VBP工程测试 (P5) ---
+    Write-Host "--- VBP Project Tests (P5) ---" -ForegroundColor Yellow
     
     Test-Vbp "test_class" "$Tests\test_class.vbp" @("3", "0")
     Test-Vbp "TestVBP" "$Tests\vbp_project\TestVBP2.vbp" @("Add(10, 20) =", "30", "Multiply(5, 6) =", "30")
+    Test-Vbp "M6Test" "$Tests\M6Test.vbp" @("M6 PASSED")
+    Test-Vbp "modulemethod" "$Tests\test_modulemethod.vbp" @("30", "21")
+    Write-Host ""
+    
+    # --- P6 COM 测试 ---
+    Write-Host "--- COM Tests (P6) ---" -ForegroundColor Yellow
+    
+    Test-Run "test_com" "$Tests\test_com.bas" @("COM basic tests completed")
+    Test-Run "test_com2" "$Tests\test_com2.bas" @("Users")
+    Test-Run "test_com3" "$Tests\test_com3.bas" @("All tests passed")
+    Test-Run "test_earlybound" "$Tests\test_earlybound.bas" @("Early binding test OK")
+    Test-Vbp "test_implements" "$Tests\test_implements.vbp" @("Implements test PASSED")
+    Test-Vbp "test_events" "$Tests\test_events\test_events.vbp" @("Events test PASSED")
+    Test-Vbp "M7Test" "$Tests\m7_test\M7Test.vbp" @("4 /4 PASSED")
     Write-Host ""
 }
 
@@ -269,6 +289,29 @@ if ($Category -in @("all", "compile")) {
     
     Test-Compile "test_comprehensive" "$Tests\test_comprehensive.bas"
     Test-Compile "test_comprehensive2" "$Tests\test_comprehensive2.bas"
+    Write-Host ""
+    
+    # --- P7 窗体编译测试 (GUI程序只验证编译通过) ---
+    Write-Host "--- Form Compile Tests (P7) ---" -ForegroundColor Yellow
+    
+    $formTests = @(
+        "test_form\empty_form.frm",
+        "test_form\form_test_p74.frm",
+        "form_test_p75.frm",
+        "form_test_p76.frm",
+        "form_test_p78.frm",
+        "form_test_p79.frm",
+        "form_test_m8.frm",
+        "form_mdi_parent.frm"
+    )
+    
+    foreach ($t in $formTests) {
+        $path = Join-Path $Tests $t
+        if (Test-Path $path) {
+            $name = [System.IO.Path]::GetFileNameWithoutExtension($t)
+            Test-Compile $name $path
+        }
+    }
     Write-Host ""
 }
 
