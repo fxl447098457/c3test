@@ -7,10 +7,10 @@
     <meta http-equiv="X-UA-Compatible" content="IE=edge">
 
     <!-- SEO: Primary Meta Tags -->
-    <title>c3 - 第三代 Visual Basic 6.0 编译器 | x64 · Unicode · 多线程</title>
-    <meta name="title" content="c3 - 第三代 Visual Basic 6.0 编译器 | x64 · Unicode · 多线程">
-    <meta name="description" content="c3 是现代化 VB6 编译器，将 VB6 代码编译为原生 x64 Windows 二进制。支持 Unicode、多线程、COM 互操作，无需修改源码即可编译。">
-    <meta name="keywords" content="VB6编译器,Visual Basic 6.0,VB6 x64,VB6 Unicode,VB6多线程,VB6现代化,VB6迁移,c3 compiler,vb6c3">
+    <title>C3 - 第三代 VB6 编译器 | x64 · Unicode · 多线程 · COM</title>
+    <meta name="title" content="C3 - 第三代 VB6 编译器 | x64 · Unicode · 多线程 · COM">
+    <meta name="description" content="C3 是现代化 Visual Basic 6.0 编译器，将 VB6 代码编译为原生 x64 Windows 二进制。支持 Unicode、多线程、COM 互操作，静态链接运行时，无需修改源码即可编译。">
+    <meta name="keywords" content="VB6编译器,Visual Basic 6.0,VB6 x64,VB6 Unicode,VB6多线程,VB6现代化,VB6迁移,C3 compiler,vb6c3,VB6 COM,ActiveX DLL,VBA编译">
     <meta name="author" content="vb6c3 project">
     <meta name="robots" content="index, follow">
     <link rel="canonical" href="https://c3.vb6.pro/">
@@ -19,14 +19,15 @@
     <!-- SEO: Open Graph -->
     <meta property="og:type" content="website">
     <meta property="og:url" content="https://c3.vb6.pro/">
-    <meta property="og:title" content="c3 - 第三代 Visual Basic 6.0 编译器">
-    <meta property="og:description" content="现代化 VB6 编译器：x64 · Unicode · 多线程。让 VB6 代码拥抱新时代。">
-    <meta property="og:site_name" content="c3 compiler">
+    <meta property="og:title" content="C3 - 第三代 VB6 编译器">
+    <meta property="og:description" content="现代化 VB6 编译器：x64 原生编译 · Unicode 全程支持 · 多线程运行时 · COM 互操作。让 VB6 代码拥抱新时代。">
+    <meta property="og:site_name" content="C3 Compiler">
+    <meta property="og:locale" content="zh_CN">
 
     <!-- SEO: Twitter -->
     <meta property="twitter:card" content="summary_large_image">
     <meta property="twitter:url" content="https://c3.vb6.pro/">
-    <meta property="twitter:title" content="c3 - 第三代 VB6 编译器 | x64 · Unicode · 多线程">
+    <meta property="twitter:title" content="C3 - 第三代 VB6 编译器 | x64 · Unicode · 多线程">
     <meta property="twitter:description" content="现代化 VB6 编译器，让 VB6 代码拥抱新时代。">
 
     <!-- SEO: Structured Data -->
@@ -34,9 +35,9 @@
     {
         "@context": "https://schema.org",
         "@type": "SoftwareApplication",
-        "name": "c3",
+        "name": "C3",
         "alternateName": "vb6c3",
-        "description": "现代化 Visual Basic 6.0 编译器，支持 x64、Unicode、多线程，无需修改源码即可编译",
+        "description": "现代化 Visual Basic 6.0 编译器，支持 x64 原生编译、Unicode、多线程、COM 互操作，静态链接运行时，无需修改源码",
         "url": "https://c3.vb6.pro/",
         "applicationCategory": "DeveloperApplication",
         "operatingSystem": "Windows",
@@ -47,7 +48,16 @@
             "priceCurrency": "CNY",
             "description": "免费使用"
         },
-        "featureList": ["x64 原生编译", "Unicode 字符串", "多线程支持", "COM 互操作", "静态链接运行时"]
+        "featureList": [
+            "x64 原生编译",
+            "Unicode 字符串全程支持",
+            "多线程运行时",
+            "COM / ActiveX DLL 互操作",
+            "静态链接运行时（无 DLL 依赖）",
+            "C 代码生成（可调试中间产物）",
+            "VBP 工程文件支持",
+            "GBK/UTF-8/UTF-16 源码自动识别"
+        ]
     }
     </script>
 
@@ -58,401 +68,486 @@
 
 <body>
 
-    <!-- Navigation -->
-    <nav>
-        <div class="container nav-inner">
-            <a href="/" class="nav-logo" aria-label="c3 compiler home">
-                <span class="nav-logo-icon">C3</span>
-                <span>c3</span>
-            </a>
-            <ul class="nav-links" id="navLinks">
-                <li><a href="#features">Features</a></li>
-                <li><a href="#roadmap">Roadmap</a></li>
-                <li><a href="#cli">CLI</a></li>
-                <li><a href="https://vb6.pro" target="_blank" class="nav-cta">HOME</a></li>
-            </ul>
-            <button class="nav-mobile-toggle" id="navToggle" aria-label="Toggle navigation">&#9776;</button>
+    <!-- ========== 动态渐变背景 ========== -->
+    <div class="gradient-bg" aria-hidden="true">
+        <svg viewBox="0 0 1000 1000" preserveAspectRatio="xMidYMid slice" xmlns="http://www.w3.org/2000/svg" class="noiseBg">
+            <filter id="noiseFilterBg">
+                <feTurbulence type="fractalNoise" baseFrequency="0.6" stitchTiles="stitch"></feTurbulence>
+            </filter>
+            <rect width="100%" height="100%" preserveAspectRatio="xMidYMid meet" filter="url(#noiseFilterBg)"></rect>
+        </svg>
+        <svg xmlns="http://www.w3.org/2000/svg" class="svgBlur">
+            <defs>
+                <filter id="goo">
+                    <feGaussianBlur in="SourceGraphic" stdDeviation="10" result="blur"></feGaussianBlur>
+                    <feColorMatrix in="blur" mode="matrix" values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 18 -8" result="goo"></feColorMatrix>
+                    <feBlend in="SourceGraphic" in2="goo"></feBlend>
+                </filter>
+            </defs>
+        </svg>
+        <div class="gradients-container">
+            <div class="g1"></div>
+            <div class="g2"></div>
+            <div class="g3"></div>
+            <div class="g4"></div>
+            <div class="g5"></div>
+            <div class="interactive"></div>
         </div>
+    </div>
+
+    <!-- ========== 右侧滚动指示器 ========== -->
+    <nav class="scroll-indicator" id="scrollIndicator" aria-label="页面导航">
+        <a href="#hero" class="scroll-dot active" data-section="hero" aria-label="首页">
+            <span class="scroll-dot-label">首页简介</span>
+        </a>
+        <a href="#features" class="scroll-dot" data-section="features" aria-label="核心优势">
+            <span class="scroll-dot-label">核心优势</span>
+        </a>
+        <a href="#comparison" class="scroll-dot" data-section="comparison" aria-label="架构对比">
+            <span class="scroll-dot-label">架构对比</span>
+        </a>
+        <a href="#pipeline" class="scroll-dot" data-section="pipeline" aria-label="编译流程">
+            <span class="scroll-dot-label">编译流程</span>
+        </a>
+        <a href="#download" class="scroll-dot" data-section="download" aria-label="下载配置">
+            <span class="scroll-dot-label">下载配置</span>
+        </a>
+        <a href="#roadmap" class="scroll-dot" data-section="roadmap" aria-label="开发路线">
+            <span class="scroll-dot-label">开发路线</span>
+        </a>
     </nav>
 
-    <!-- Hero -->
-    <section class="hero" id="hero">
-        <div class="hero-grid"></div>
-        <div class="hero-content">
-            <div class="hero-badge">
-                <span class="hero-badge-dot"></span>
-                <span>Active Development &middot; M2 Achieved</span>
-            </div>
-            <h1 class="hero-title">
-                <span class="brand gradient-text">c3</span> &mdash; The Next-Gen<br>VB6 Compiler
-            </h1>
-            <p class="hero-subtitle">
-                Modern compiler that takes your VB6 code to the <strong>x64</strong> era &mdash; with
-                <strong>Unicode</strong>, <strong>multi-threading</strong>, and <strong>zero-modification
-                    compilation</strong> built in.
-            </p>
-            <p class="hero-tagline">x64 &middot; Unicode &middot; Multi-threaded &middot; Zero modification</p>
-            <div class="hero-actions">
-                <a href="#cta" class="btn btn-primary">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3" />
-                    </svg>
-                    Download
-                </a>
-                <a href="#features" class="btn btn-secondary">
-                    Explore Features &rarr;
-                </a>
-            </div>
-        </div>
-    </section>
+    <!-- ========== 顶部导航 ========== -->
+    <header class="top-nav" id="topNav">
+        <a href="#hero" class="nav-logo" aria-label="C3 编译器首页">
+            <span class="nav-logo-icon">C3</span>
+            <span class="nav-logo-text">C3 Compiler</span>
+        </a>
+         <ul class="nav-links" id="navLinks">
+             <li><a href="#features">核心优势</a></li>
+             <li><a href="#comparison">架构对比</a></li>
+             <li><a href="#pipeline">编译流程</a></li>
+             <li><a href="#download">下载配置</a></li>
+             <li><a href="#roadmap">开发路线</a></li>
+             <li><a href="https://vb6.pro" target="_blank" rel="noopener" class="nav-external">VB6.PRO</a></li>
+         </ul>
+        <button class="nav-mobile-toggle" id="navToggle" aria-label="打开导航">&#9776;</button>
+    </header>
 
-    <!-- Stats Bar -->
-    <section class="stats">
-        <div class="container">
-            <div class="stats-grid">
-                <div class="stat-item">
-                    <div class="stat-value gradient-text">8,178</div>
-                    <div class="stat-label">Lines of Code</div>
-                </div>
-                <div class="stat-item">
-                    <div class="stat-value gradient-text">80+</div>
-                    <div class="stat-label">AST Node Types</div>
-                </div>
-                <div class="stat-item">
-                    <div class="stat-value gradient-text">14</div>
-                    <div class="stat-label">Precedence Levels</div>
-                </div>
-                <div class="stat-item">
-                    <div class="stat-value gradient-text">200+</div>
-                    <div class="stat-label">RTL Functions Planned</div>
-                </div>
-            </div>
-        </div>
-    </section>
+    <main>
 
-    <!-- Comparison Table -->
-    <section class="comparison" id="comparison">
-        <div class="container">
-            <div class="section-label">Why c3</div>
-            <h2 class="section-title">c2 &rarr; c3: Three Generations of Progress</h2>
-            <p class="section-desc">
-                VB6's original compiler <code>c2.exe</code> targets x86 only. <code class="accent">c3.exe</code> brings
-                three fundamental upgrades.
-            </p>
-            <table class="comparison-table">
-                <thead>
-                    <tr>
-                        <th>Capability</th>
-                        <th>c2.exe (VB6)</th>
-                        <th>c3.exe (vb6c3)</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <tr>
-                        <td>Architecture</td>
-                        <td>x86 (32-bit)</td>
-                        <td>x64 (64-bit) <span class="tag-new">NEW</span></td>
-                    </tr>
-                    <tr>
-                        <td>String Encoding</td>
-                        <td>ANSI / BSTR</td>
-                        <td>Unicode (UTF-16) <span class="tag-new">NEW</span></td>
-                    </tr>
-                    <tr>
-                        <td>Threading</td>
-                        <td>Single / STA</td>
-                        <td>Multi-threaded <span class="tag-new">NEW</span></td>
-                    </tr>
-                    <tr>
-                        <td>Runtime</td>
-                        <td>MSVBVM60.dll</td>
-                        <td>Static-linked (no DLL)</td>
-                    </tr>
-                    <tr>
-                        <td>Debug Info</td>
-                        <td>PDB</td>
-                        <td>PDB (MSVC native)</td>
-                    </tr>
-                    <tr>
-                        <td>C Code Output</td>
-                        <td>No</td>
-                        <td>Yes (debuggable)</td>
-                    </tr>
-                </tbody>
-            </table>
-        </div>
-    </section>
+        <!-- ========== Section 1: Hero ========== -->
+        <section class="section hero" id="hero">
+            <div class="glass-card hero-card">
+            <div class="hero-content">
+                <div class="hero-badge">
+                    <span class="hero-badge-dot"></span>
+                    <span>活跃开发中 · 8 个里程碑全部达成 · 66 项测试零失败</span>
+                </div>
+                <h1 class="hero-title">
+                    <span class="brand">C3</span>
+                    <span class="hero-title-sub">第三代 VB6 编译器</span>
+                </h1>
+                <p class="hero-subtitle">
+                    将 Visual Basic 6.0 代码编译为原生 <strong>x64</strong> Windows 二进制<br>
+                    <strong>Unicode</strong> 全程支持、<strong>多线程</strong>运行时、<strong>COM 互操作</strong>、<strong>静态链接</strong>零依赖
+                </p>
+                <p class="hero-tagline">x64 &middot; Unicode &middot; Multi-threaded &middot; COM &middot; Zero-modification</p>
+                <div class="hero-actions">
+                    <a href="#download" class="btn btn-primary">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3" />
+                        </svg>
+                        下载 C3
+                    </a>
+                    <a href="#features" class="btn btn-secondary">
+                        了解详情 &rarr;
+                    </a>
+                </div>
+            </div>
+            </div>
+        </section>
 
-    <!-- Features -->
-    <section class="features" id="features">
-        <div class="container">
-            <div class="features-header">
-                <div class="section-label">Core Features</div>
-                <h2 class="section-title">Everything VB6 Needs for the Modern Era</h2>
-                <p class="section-desc">No source code modification required. Your VB6 projects compile as-is.</p>
+        <!-- ========== Section 2: 核心优势 ========== -->
+        <section class="section features" id="features">
+            <div class="section-inner">
+                <div class="section-header">
+                    <span class="section-label">核心优势</span>
+                    <h2 class="section-title">VB6 迈入新时代所需的一切</h2>
+                    <p class="section-desc">无需修改任何源代码，你的 VB6 工程直接编译为原生 x64 二进制。</p>
+                </div>
+                <div class="features-grid">
+                    <article class="glass-card feature-card animate-in">
+                        <div class="feature-icon blue">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
+                        </div>
+                        <h3>x64 原生编译</h3>
+                        <p>生成 64 位 Windows 可执行文件和 DLL。突破 2GB 内存限制，通过 MSVC ABI 实现 x64 COM 互操作。</p>
+                    </article>
+                    <article class="glass-card feature-card animate-in">
+                        <div class="feature-icon purple">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z"/></svg>
+                        </div>
+                        <h3>Unicode 优先</h3>
+                        <p>BSTR 字符串全程 UTF-16。源文件支持 GBK/UTF-8/UTF-16 三种编码自动检测，中文处理零障碍。</p>
+                    </article>
+                    <article class="glass-card feature-card animate-in">
+                        <div class="feature-icon cyan">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 18a5 5 0 00-10 0M12 9V2M4.22 10.22l1.42 1.42M1 18h2M21 18h2M18.36 11.64l1.42-1.42M23 22H1M12 12a5 5 0 015 5"/></svg>
+                        </div>
+                        <h3>多线程运行时</h3>
+                        <p>告别单线程单元模型。自由线程 COM、CreateThread、真正的并行执行，发挥多核性能。</p>
+                    </article>
+                    <article class="glass-card feature-card animate-in">
+                        <div class="feature-icon green">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+                        </div>
+                        <h3>安全编译保证</h3>
+                        <p>不支持的语法必然报错，绝不静默误编。误编比不编更危险——这是 C3 的核心信条。</p>
+                    </article>
+                    <article class="glass-card feature-card animate-in">
+                        <div class="feature-icon amber">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6M16 13H8M16 17H8M10 9H8"/></svg>
+                        </div>
+                        <h3>静态链接 RTL</h3>
+                        <p>无运行时 DLL 依赖。200+ VB6 运行时函数全部编译进可执行文件，部署干净利落。</p>
+                    </article>
+                    <article class="glass-card feature-card animate-in">
+                        <div class="feature-icon rose">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
+                        </div>
+                        <h3>COM / ActiveX DLL</h3>
+                        <p>原生 COM 客户端/服务端支持。编译 ActiveX DLL、TypeLib 导入、Implements 接口、WithEvents 事件。</p>
+                    </article>
+                </div>
             </div>
-            <div class="features-grid">
-                <article class="feature-card animate-in">
-                    <div class="feature-icon blue">
-                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                            stroke-width="2">
-                            <rect x="2" y="3" width="20" height="14" rx="2" />
-                            <path d="M8 21h8M12 17v4" />
-                        </svg>
-                    </div>
-                    <h3>Native x64 Compilation</h3>
-                    <p>Generate 64-bit Windows executables and DLLs. Break the 2GB memory barrier. Direct x64 COM
-                        interop via MSVC ABI.</p>
-                </article>
-                <article class="feature-card animate-in">
-                    <div class="feature-icon purple">
-                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                            stroke-width="2">
-                            <circle cx="12" cy="12" r="10" />
-                            <path
-                                d="M2 12h20M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z" />
-                        </svg>
-                    </div>
-                    <h3>First-Class Unicode</h3>
-                    <p>BSTR strings are UTF-16 throughout. Source files support UTF-8/GBK/UTF-16 encoding with automatic
-                        detection.</p>
-                </article>
-                <article class="feature-card animate-in">
-                    <div class="feature-icon cyan">
-                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                            stroke-width="2">
-                            <path
-                                d="M17 18a5 5 0 00-10 0M12 9V2M4.22 10.22l1.42 1.42M1 18h2M21 18h2M18.36 11.64l1.42-1.42M23 22H1M12 12a5 5 0 015 5" />
-                        </svg>
-                    </div>
-                    <h3>Multi-threaded Runtime</h3>
-                    <p>No more single-threaded apartment model. Free-threaded COM, CreateThread, and true parallel
-                        execution.</p>
-                </article>
-                <article class="feature-card animate-in">
-                    <div class="feature-icon green">
-                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                            stroke-width="2">
-                            <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />
-                            <path d="M14 2v6h6M16 13H8M16 17H8M10 9H8" />
-                        </svg>
-                    </div>
-                    <h3>VBA Compilation</h3>
-                    <p>Compile VBA code alongside VB6 projects. Supported as a first-class compilation target.</p>
-                </article>
-                <article class="feature-card animate-in">
-                    <div class="feature-icon amber">
-                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                            stroke-width="2">
-                            <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" />
-                        </svg>
-                    </div>
-                    <h3>Static-Linked RTL</h3>
-                    <p>No runtime DLL dependency. All 200+ VB6 runtime functions are compiled directly into your
-                        executable. Clean deployment.</p>
-                </article>
-                <article class="feature-card animate-in">
-                    <div class="feature-icon rose">
-                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                            stroke-width="2">
-                            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
-                        </svg>
-                    </div>
-                    <h3>Safe Compilation</h3>
-                    <p>Unsupported syntax always reports an error. Never silently miscompiles. Miscompilation is worse
-                        than no compilation.</p>
-                </article>
-            </div>
-        </div>
-    </section>
+        </section>
 
-    <!-- Compilation Pipeline -->
-    <section class="pipeline" id="pipeline">
-        <div class="container">
-            <div class="pipeline-header">
-                <div class="section-label">How It Works</div>
-                <h2 class="section-title">VB6 Source &rarr; Native Binary</h2>
-                <p class="section-desc">C code generation + MSVC gives you readable, debuggable output with zero
-                    external dependencies.</p>
+        <!-- ========== Section 3: 架构对比 ========== -->
+        <section class="section comparison" id="comparison">
+            <div class="section-inner">
+                <div class="section-header">
+                    <span class="section-label">架构对比</span>
+                    <h2 class="section-title">c2 &rarr; C3：三代的跨越</h2>
+                    <p class="section-desc">VB6 原生编译器 <code>c2.exe</code> 仅支持 x86。<code class="accent">C3</code> 带来三项根本性升级。</p>
+                </div>
+                <div class="glass-card comparison-card">
+                    <div class="comparison-table-wrap">
+                        <table class="comparison-table">
+                            <thead>
+                                <tr>
+                                    <th>能力</th>
+                                    <th>c2.exe (VB6 原生)</th>
+                                    <th>C3 (vb6c3)</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr>
+                                    <td>目标架构</td>
+                                    <td>x86 (32位)</td>
+                                    <td>x64 (64位) <span class="tag-new">NEW</span></td>
+                                </tr>
+                                <tr>
+                                    <td>字符串编码</td>
+                                    <td>ANSI / BSTR</td>
+                                    <td>Unicode (UTF-16) <span class="tag-new">NEW</span></td>
+                                </tr>
+                                <tr>
+                                    <td>线程模型</td>
+                                    <td>单线程 / STA</td>
+                                    <td>多线程 <span class="tag-new">NEW</span></td>
+                                </tr>
+                                <tr>
+                                    <td>运行时</td>
+                                    <td>MSVBVM60.dll</td>
+                                    <td>静态链接（无 DLL）</td>
+                                </tr>
+                                <tr>
+                                    <td>调试信息</td>
+                                    <td>PDB</td>
+                                    <td>PDB (MSVC 原生)</td>
+                                </tr>
+                                <tr>
+                                    <td>C 代码输出</td>
+                                    <td>无</td>
+                                    <td>支持（可调试中间产物）</td>
+                                </tr>
+                                <tr>
+                                    <td>COM 支持</td>
+                                    <td>客户端 + 服务端</td>
+                                    <td>客户端 + 服务端 (x64)</td>
+                                </tr>
+                                <tr>
+                                    <td>ActiveX DLL</td>
+                                    <td>需 VB6 IDE</td>
+                                    <td>命令行直接编译 <span class="tag-new">NEW</span></td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
             </div>
-            <div class="pipeline-steps">
-                <div class="pipeline-step">
-                    <div class="pipeline-step-icon" style="color:var(--accent-brand)">&#128196;</div>
-                    <span>VB6 Source</span>
-                </div>
-                <div class="pipeline-arrow">&rarr;</div>
-                <div class="pipeline-step">
-                    <div class="pipeline-step-icon" style="color:var(--accent-teal)">&#128269;</div>
-                    <span>Lexer</span>
-                </div>
-                <div class="pipeline-arrow">&rarr;</div>
-                <div class="pipeline-step">
-                    <div class="pipeline-step-icon" style="color:#06b6d4">&#127795;</div>
-                    <span>Parser</span>
-                </div>
-                <div class="pipeline-arrow">&rarr;</div>
-                <div class="pipeline-step">
-                    <div class="pipeline-step-icon" style="color:var(--accent-green)">&#128206;</div>
-                    <span>AST</span>
-                </div>
-                <div class="pipeline-arrow">&rarr;</div>
-                <div class="pipeline-step">
-                    <div class="pipeline-step-icon" style="color:var(--accent-amber)">&#128736;</div>
-                    <span>Semantic</span>
-                </div>
-                <div class="pipeline-arrow">&rarr;</div>
-                <div class="pipeline-step">
-                    <div class="pipeline-step-icon" style="color:var(--accent-rose)">&#128187;</div>
-                    <span>C Code</span>
-                </div>
-                <div class="pipeline-arrow">&rarr;</div>
-                <div class="pipeline-step">
-                    <div class="pipeline-step-icon" style="color:var(--accent-brand)">&#9889;</div>
-                    <span>cl.exe</span>
-                </div>
-                <div class="pipeline-arrow">&rarr;</div>
-                <div class="pipeline-step">
-                    <div class="pipeline-step-icon" style="color:var(--accent-green)">&#128640;</div>
-                    <span>.exe/.dll</span>
-                </div>
-            </div>
-        </div>
-    </section>
+        </section>
 
-    <!-- Roadmap -->
-    <section class="roadmap" id="roadmap">
-        <div class="container">
-            <div class="roadmap-header">
-                <div class="section-label">Roadmap</div>
-                <h2 class="section-title">Development Progress</h2>
-                <p class="section-desc">Milestone-driven development. Every phase must pass verification before
-                    advancing.</p>
+        <!-- ========== Section 4: 编译流水线 ========== -->
+        <section class="section pipeline" id="pipeline">
+            <div class="section-inner">
+                <div class="section-header">
+                    <span class="section-label">编译流程</span>
+                    <h2 class="section-title">VB6 源码 &rarr; 原生二进制</h2>
+                    <p class="section-desc">C 代码生成 + MSVC 驱动，输出可读、可调试的产品级二进制，零外部依赖。</p>
+                </div>
+                <div class="pipeline-steps">
+                    <div class="glass-card pipeline-step animate-in">
+                        <div class="pipeline-step-icon" style="color:var(--accent-brand)">
+                            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6"/></svg>
+                        </div>
+                        <span>VB6 源码</span>
+                    </div>
+                    <div class="pipeline-arrow">&rarr;</div>
+                    <div class="glass-card pipeline-step animate-in">
+                        <div class="pipeline-step-icon" style="color:var(--accent-teal)">
+                            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
+                        </div>
+                        <span>词法分析</span>
+                    </div>
+                    <div class="pipeline-arrow">&rarr;</div>
+                    <div class="glass-card pipeline-step animate-in">
+                        <div class="pipeline-step-icon" style="color:#06b6d4">
+                            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v18M3 12h18"/></svg>
+                        </div>
+                        <span>语法分析</span>
+                    </div>
+                    <div class="pipeline-arrow">&rarr;</div>
+                    <div class="glass-card pipeline-step animate-in">
+                        <div class="pipeline-step-icon" style="color:var(--accent-green)">
+                            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>
+                        </div>
+                        <span>语义分析</span>
+                    </div>
+                    <div class="pipeline-arrow">&rarr;</div>
+                    <div class="glass-card pipeline-step animate-in">
+                        <div class="pipeline-step-icon" style="color:var(--accent-amber)">
+                            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+                        </div>
+                        <span>C 代码生成</span>
+                    </div>
+                    <div class="pipeline-arrow">&rarr;</div>
+                    <div class="glass-card pipeline-step animate-in">
+                        <div class="pipeline-step-icon" style="color:var(--accent-brand)">
+                            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10"/></svg>
+                        </div>
+                        <span>cl.exe 编译</span>
+                    </div>
+                    <div class="pipeline-arrow">&rarr;</div>
+                    <div class="glass-card pipeline-step animate-in">
+                        <div class="pipeline-step-icon" style="color:var(--accent-green)">
+                            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 11-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+                        </div>
+                        <span>.exe / .dll</span>
+                    </div>
+                </div>
             </div>
-            <div class="roadmap-timeline">
-                <div class="roadmap-item">
-                    <div class="roadmap-dot done">M1</div>
-                    <div class="roadmap-info">
-                        <h4>P0 &mdash; Infrastructure</h4>
-                        <p>CMake build, diagnostics, source manager (GBK/UTF-8/UTF-16), LL(2) lexer, compiler driver</p>
-                        <span class="status done">Completed</span>
-                    </div>
-                </div>
-                <div class="roadmap-item">
-                    <div class="roadmap-dot done">M2</div>
-                    <div class="roadmap-info">
-                        <h4>P1 &mdash; Parser &amp; AST</h4>
-                        <p>Recursive descent + Pratt (14 levels), 80+ AST nodes, soft keywords, ~2900 lines parser code
-                        </p>
-                        <span class="status done">Completed</span>
-                    </div>
-                </div>
-                <div class="roadmap-item">
-                    <div class="roadmap-dot active">P2</div>
-                    <div class="roadmap-info">
-                        <h4>P2 &mdash; Semantic Analysis</h4>
-                        <p>Symbol table, type system, Variant inference, default property resolution, type checking</p>
-                        <span class="status active">Next Up</span>
-                    </div>
-                </div>
-                <div class="roadmap-item">
-                    <div class="roadmap-dot pending">P3</div>
-                    <div class="roadmap-info">
-                        <h4>P3 &mdash; C Code Generation + MSVC</h4>
-                        <p>VB6&rarr;C type mapping, expression/stmt/proc codegen, cl.exe + link.exe driver</p>
-                        <span class="status pending">Planned</span>
-                    </div>
-                </div>
-                <div class="roadmap-item">
-                    <div class="roadmap-dot pending">P4</div>
-                    <div class="roadmap-info">
-                        <h4>P4 &mdash; Runtime Library (RTL)</h4>
-                        <p>BSTR, Variant, SAFEARRAY, 200+ runtime functions, all statically linked</p>
-                        <span class="status pending">Planned</span>
-                    </div>
-                </div>
-                <div class="roadmap-item">
-                    <div class="roadmap-dot pending">P6</div>
-                    <div class="roadmap-info">
-                        <h4>P6 &mdash; VBA Compilation Support</h4>
-                        <p>Compile VBA code from Office documents as first-class target</p>
-                        <span class="status pending">Planned</span>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </section>
+        </section>
 
-    <!-- CLI Preview -->
-    <section class="cli-preview" id="cli">
-        <div class="container">
-            <div class="cli-inner">
-                <div class="cli-content">
-                    <div class="section-label">Command Line</div>
-                    <h2 class="section-title">Developer-Friendly CLI</h2>
-                    <p class="section-desc">
-                        Clean, composable command-line interface designed for CI/CD pipelines and build automation.
-                    </p>
-                    <ul class="cli-features">
-                        <li><code>--dump-tokens</code> Inspect lexer output</li>
-                        <li><code>--dump-ast</code> Visualize parse tree</li>
-                        <li><code>--syntax-only</code> Fast syntax validation</li>
-                        <li><code>--target win-x64</code> Cross-target support</li>
-                        <li><code>-O2 -g</code> Optimize + debug info</li>
-                    </ul>
+        <!-- ========== Section 5: 下载与环境 ========== -->
+        <section class="section download" id="download">
+            <div class="section-inner">
+                <div class="section-header">
+                    <span class="section-label">下载配置</span>
+                    <h2 class="section-title">开始使用 C3</h2>
+                    <p class="section-desc">三步即可开始：下载 C3 → 配置编译环境 → 编译你的第一个 VB6 工程</p>
                 </div>
-                <div class="cli-terminal">
-                    <div class="cli-terminal-header">
+
+                <div class="download-grid">
+                    <!-- C3 下载卡片 -->
+                    <div class="glass-card download-card download-card-primary animate-in">
+                        <div class="download-icon">
+                            <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
+                        </div>
+                        <h3>下载 C3 编译器</h3>
+                        <p class="download-version">v0.8.0 · Windows x64 · 内置多个测试示例</p>
+                        <ul class="download-includes">
+                            <li>包含 hello.bas、数组、文件 I/O 等测试源码</li>
+                            <li>VBP 工程示例（多模块编译）</li>
+                            <li>COM 客户端/服务端示例</li>
+                            <li>条件编译、Declare 语句示例</li>
+                        </ul>
+                        <a href="https://github.com/vb6pro/c3/releases" target="_blank" rel="noopener" class="btn btn-primary btn-download">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
+                            下载 C3
+                        </a>
+                    </div>
+
+                    <!-- 编译环境卡片 -->
+                    <div class="glass-card download-card download-card-env animate-in">
+                        <h3>编译环境配置</h3>
+                        <p class="download-env-desc">C3 生成 C 代码后需要 C 编译器进行最终编译链接。</p>
+
+                        <div class="env-option env-option-primary">
+                            <div class="env-badge">推荐</div>
+                            <h4>MSVC (Visual Studio)</h4>
+                            <p>最佳兼容性，原生 PDB 调试信息，Windows SDK 完整支持。</p>
+                            <p class="env-detail">安装 <a href="https://visualstudio.microsoft.com/zh-hans/vs/community/" target="_blank" rel="noopener">Visual Studio 2022 Community</a>（免费），勾选「桌面开发用 C++」工作负载即可。</p>
+                        </div>
+
+                        <div class="env-option env-option-alt">
+                            <div class="env-badge env-badge-alt">备选</div>
+                            <h4>MinGW-w64</h4>
+                            <p>轻量替代方案，无需安装 Visual Studio。</p>
+                            <p class="env-detail">如果本机已有 MinGW，确保 <code>gcc</code> 在 PATH 中即可。如未安装：</p>
+                        </div>
+
+                        <a href="https://winlibs.com/" target="_blank" rel="noopener" class="btn btn-secondary btn-download">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6M15 3h6v6M10 14L21 3"/></svg>
+                            下载 MinGW-w64
+                        </a>
+                    </div>
+                </div>
+
+                <!-- 快速开始终端 -->
+                <div class="glass-card cli-card animate-in">
+                    <div class="cli-header">
                         <div class="term-dot" style="background:#ff5f57"></div>
                         <div class="term-dot" style="background:#febc2e"></div>
                         <div class="term-dot" style="background:#28c840"></div>
+                        <span class="cli-title">快速开始</span>
                     </div>
-                    <pre><span class="prompt">$</span> <span class="cmd">c3</span> <span class="file">hello.bas</span> <span class="flag">--dump-ast</span>
-<span class="output">Module: hello.bas</span>
-  <span class="output">Sub Main (access=Public)</span>
-    <span class="output">LocalDecl &rarr; Dim name As String</span>
-    <span class="output">Assign: name = "World"</span>
-    <span class="output">If &rarr; Else &rarr; End If</span>
-    <span class="output">For i = 1 To 10 &rarr; Next i</span>
-    <span class="ok">&#10003; 0 errors, 0 warnings</span>
+                    <pre class="cli-body"><code><span class="cli-comment">:: 1. 编译单个 VB6 源文件</span>
+<span class="cli-prompt">&gt;</span> <span class="cli-cmd">c3</span> <span class="cli-file">hello.bas</span>
+<span class="cli-ok">✓ 编译成功: hello.exe (x64)</span>
 
-<span class="prompt">$</span> <span class="cmd">c3</span> <span class="file">hello.bas</span> <span class="flag">-o</span> <span class="file">hello.exe</span> <span class="flag">-O2</span>
-<span class="ok">&#10003; Compiled: hello.exe (x64)</span></pre>
+<span class="cli-comment">:: 2. 编译 VBP 工程文件</span>
+<span class="cli-prompt">&gt;</span> <span class="cli-cmd">c3</span> <span class="cli-file">MyProject.vbp</span>
+<span class="cli-ok">✓ 编译成功: MyProject.exe (x64)</span>
+
+<span class="cli-comment">:: 3. 编译 ActiveX DLL</span>
+<span class="cli-prompt">&gt;</span> <span class="cli-cmd">c3</span> <span class="cli-file">MyLib.vbp</span> <span class="cli-flag">--target dll</span>
+<span class="cli-ok">✓ 编译成功: MyLib.dll (x64)</span>
+
+<span class="cli-comment">:: 4. 查看编译中间产物</span>
+<span class="cli-prompt">&gt;</span> <span class="cli-cmd">c3</span> <span class="cli-file">hello.bas</span> <span class="cli-flag">--dump-ast</span>
+<span class="cli-output">Module: hello.bas
+  Sub Main (access=Public)
+    LocalDecl → Dim name As String
+    Assign: name = "World"
+    If → Else → End If
+    For i = 1 To 10 → Next i</span>
+<span class="cli-ok">✓ 0 错误, 0 警告</span></code></pre>
                 </div>
             </div>
-        </div>
-    </section>
+        </section>
 
-    <!-- CTA -->
-    <section class="cta" id="cta">
-        <div class="container">
-            <h2 class="section-title">Ready to Bring VB6 to <span class="gradient-text">x64</span>?</h2>
-            <p class="section-desc">
-                c3 is under active development. Follow progress or try the latest build.
-            </p>
-            <div class="hero-actions">
-                <a href="#hero" class="btn btn-primary">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3" />
-                    </svg>
-                    Coming Soon
-                </a>
-                <a href="#roadmap" class="btn btn-secondary">
-                    View Roadmap &rarr;
-                </a>
+        <!-- ========== Section 6: 开发路线 ========== -->
+        <section class="section roadmap" id="roadmap">
+            <div class="section-inner">
+                <div class="section-header">
+                    <span class="section-label">开发路线</span>
+                    <h2 class="section-title">里程碑驱动开发</h2>
+                    <p class="section-desc">每个阶段必须通过验证才能推进。8 个里程碑全部达成。</p>
+                </div>
+                <div class="roadmap-timeline">
+                    <div class="roadmap-item">
+                        <div class="roadmap-dot done">M1</div>
+                        <div class="glass-card roadmap-info">
+                            <h4>P0 — 基础设施</h4>
+                            <p>CMake 构建、诊断系统、源码管理器（GBK/UTF-8/UTF-16）、LL(2) 词法器、编译器驱动</p>
+                            <span class="status done">已完成</span>
+                        </div>
+                    </div>
+                    <div class="roadmap-item">
+                        <div class="roadmap-dot done">M2</div>
+                        <div class="glass-card roadmap-info">
+                            <h4>P1 — 语法分析与 AST</h4>
+                            <p>递归下降 + Pratt 解析（14 级优先级）、80+ AST 节点类型、软关键字、约 2900 行解析器代码</p>
+                            <span class="status done">已完成</span>
+                        </div>
+                    </div>
+                    <div class="roadmap-item">
+                        <div class="roadmap-dot done">M3</div>
+                        <div class="glass-card roadmap-info">
+                            <h4>P2 — 语义分析</h4>
+                            <p>符号表、类型系统、Variant 类型推断、默认属性解析、类型检查</p>
+                            <span class="status done">已完成</span>
+                        </div>
+                    </div>
+                    <div class="roadmap-item">
+                        <div class="roadmap-dot done">M4</div>
+                        <div class="glass-card roadmap-info">
+                            <h4>P3 — C 代码生成 + MSVC 驱动</h4>
+                            <p>VB6→C 类型映射、表达式/语句/过程代码生成、cl.exe + link.exe 驱动</p>
+                            <span class="status done">已完成</span>
+                        </div>
+                    </div>
+                    <div class="roadmap-item">
+                        <div class="roadmap-dot done">M5</div>
+                        <div class="glass-card roadmap-info">
+                            <h4>P4 — 运行时库 (RTL)</h4>
+                            <p>BSTR、VARIANT、SAFEARRAY、200+ 运行时函数、文件 I/O、错误处理，全部静态链接</p>
+                            <span class="status done">已完成</span>
+                        </div>
+                    </div>
+                    <div class="roadmap-item">
+                        <div class="roadmap-dot done">M6</div>
+                        <div class="glass-card roadmap-info">
+                            <h4>P5 — 工程支持</h4>
+                            <p>VBP 工程文件解析、多模块编译、跨模块符号解析、Declare 语句支持</p>
+                            <span class="status done">已完成</span>
+                        </div>
+                    </div>
+                    <div class="roadmap-item">
+                        <div class="roadmap-dot done">M7</div>
+                        <div class="glass-card roadmap-info">
+                            <h4>P6 — COM + 对象系统</h4>
+                            <p>COM 客户端/服务端、TypeLib 导入、Implements 接口、WithEvents 事件、ActiveX DLL 编译</p>
+                            <span class="status done">已完成</span>
+                        </div>
+                    </div>
+                    <div class="roadmap-item">
+                        <div class="roadmap-dot done">M8</div>
+                        <div class="glass-card roadmap-info">
+                            <h4>P7 — 窗体控件</h4>
+                            <p>窗体解析、控件事件绑定、窗体代码生成、GUI 应用编译</p>
+                            <span class="status done">已完成</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 统计数据 -->
+                <div class="stats-bar glass-card animate-in">
+                    <div class="stat-item">
+                        <div class="stat-value">15,000+</div>
+                        <div class="stat-label">C++ 源代码行</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-value">80+</div>
+                        <div class="stat-label">AST 节点类型</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-value">66</div>
+                        <div class="stat-label">回归测试</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-value">0</div>
+                        <div class="stat-label">失败项</div>
+                    </div>
+                </div>
             </div>
-        </div>
-    </section>
+        </section>
 
-    <!-- Footer -->
-    <footer>
-        <div class="container footer-inner">
+    </main>
+
+    <!-- ========== Footer ========== -->
+    <footer class="site-footer">
+        <div class="footer-inner">
             <div class="footer-left">
-                <span class="nav-logo-icon" style="width:24px;height:24px;font-size:0.7rem">C3</span>
+                <span class="nav-logo-icon" style="width:28px;height:28px;font-size:0.7rem">C3</span>
                 <span>vb6c3 project</span>
             </div>
             <div class="footer-right">
                 <a href="https://c3.vb6.pro/">c3.vb6.pro</a>
-                <a href="mailto:215879458@qq.com">215879458@qq.com</a>
+                <a href="https://vb6.pro" target="_blank" rel="noopener">vb6.pro</a>
+                <a href="mailto:215879458@qq.com">联系作者</a>
                 <span>&copy; 2026</span>
             </div>
         </div>
@@ -463,7 +558,6 @@
     <!-- Matomo -->
     <script>
       var _paq = window._paq = window._paq || [];
-      /* tracker methods like "setCustomDimension" should be called before "trackPageView" */
       _paq.push(['trackPageView']);
       _paq.push(['enableLinkTracking']);
       (function() {
@@ -474,8 +568,6 @@
         g.async=true; g.src=u+'matomo.js'; s.parentNode.insertBefore(g,s);
       })();
     </script>
-    <!-- End Matomo Code -->
-    
 </body>
 
 </html>

@@ -1,39 +1,147 @@
-// Mobile navigation toggle
-const navToggle = document.getElementById('navToggle');
-const navLinks = document.getElementById('navLinks');
-navToggle.addEventListener('click', () => {
-    navLinks.classList.toggle('open');
-});
+/**
+ * C3 Landing Page — Interaction Controller
+ * Scroll indicator, mouse-following background, navigation, animations
+ */
 
-// Close mobile nav on link click
-navLinks.querySelectorAll('a').forEach(link => {
-    link.addEventListener('click', () => {
-        navLinks.classList.remove('open');
-    });
-});
+(function () {
+    'use strict';
 
-// Intersection Observer for scroll animations
-const observer = new IntersectionObserver((entries) => {
-    entries.forEach(entry => {
-        if (entry.isIntersecting) {
-            entry.target.style.animationPlayState = 'running';
+    // ==================== 鼠标跟随动态背景 ====================
+    const interBubble = document.querySelector('.gradient-bg .interactive');
+    if (interBubble) {
+        let curX = 0, curY = 0, tgX = 0, tgY = 0;
+        const move = () => {
+            curX += (tgX - curX) / 20;
+            curY += (tgY - curY) / 20;
+            interBubble.style.transform = `translate(${Math.round(curX)}px, ${Math.round(curY)}px)`;
+            requestAnimationFrame(move);
+        };
+        window.addEventListener('mousemove', e => { tgX = e.clientX; tgY = e.clientY; });
+        move();
+    }
+
+    // ==================== 右侧滚动指示器 ====================
+    const scrollDots = document.querySelectorAll('.scroll-dot');
+    const sections = document.querySelectorAll('.section');
+
+    function updateScrollIndicator() {
+        const scrollY = window.scrollY;
+        const windowHeight = window.innerHeight;
+        let currentSection = 'hero';
+
+        sections.forEach(section => {
+            const rect = section.getBoundingClientRect();
+            // Section considered "active" when its top is above 50% viewport
+            if (rect.top <= windowHeight * 0.5) {
+                currentSection = section.id;
+            }
+        });
+
+        scrollDots.forEach(dot => {
+            const section = dot.getAttribute('data-section');
+            if (section === currentSection) {
+                dot.classList.add('active');
+            } else {
+                dot.classList.remove('active');
+            }
+        });
+    }
+
+    // Throttle scroll handler
+    let scrollTicking = false;
+    window.addEventListener('scroll', () => {
+        if (!scrollTicking) {
+            requestAnimationFrame(() => {
+                updateScrollIndicator();
+                updateNavBackground();
+                scrollTicking = false;
+            });
+            scrollTicking = true;
         }
     });
-}, { threshold: 0.1 });
 
-document.querySelectorAll('.animate-in').forEach(el => {
-    el.style.animationPlayState = 'paused';
-    observer.observe(el);
-});
+    // Smooth scroll for indicator clicks
+    scrollDots.forEach(dot => {
+        dot.addEventListener('click', e => {
+            e.preventDefault();
+            const targetId = dot.getAttribute('href').substring(1);
+            const target = document.getElementById(targetId);
+            if (target) {
+                target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }
+        });
+    });
 
-// Smooth nav background on scroll
-const nav = document.querySelector('nav');
-window.addEventListener('scroll', () => {
-    if (window.scrollY > 20) {
-        nav.style.background = 'rgba(248,250,252,0.95)';
-        nav.style.borderBottomColor = 'rgba(15,23,42,0.08)';
-    } else {
-        nav.style.background = 'rgba(248,250,252,0.85)';
-        nav.style.borderBottomColor = 'rgba(15,23,42,0.06)';
+    // ==================== 顶部导航 ====================
+    const topNav = document.getElementById('topNav');
+    const navToggle = document.getElementById('navToggle');
+    const navLinks = document.getElementById('navLinks');
+
+    function updateNavBackground() {
+        if (!topNav) return;
+        if (window.scrollY > 40) {
+            topNav.classList.add('scrolled');
+        } else {
+            topNav.classList.remove('scrolled');
+        }
     }
-});
+
+    // Mobile nav toggle
+    if (navToggle && navLinks) {
+        navToggle.addEventListener('click', () => {
+            navLinks.classList.toggle('open');
+        });
+
+        // Close on link click
+        navLinks.querySelectorAll('a').forEach(link => {
+            link.addEventListener('click', () => {
+                navLinks.classList.remove('open');
+            });
+        });
+    }
+
+    // Smooth scroll for nav links
+    document.querySelectorAll('a[href^="#"]').forEach(anchor => {
+        anchor.addEventListener('click', e => {
+            e.preventDefault();
+            const targetId = anchor.getAttribute('href').substring(1);
+            const target = document.getElementById(targetId);
+            if (target) {
+                target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }
+        });
+    });
+
+    // ==================== 滚动入场动画 ====================
+    const animateElements = document.querySelectorAll('.animate-in');
+
+    if ('IntersectionObserver' in window) {
+        const observer = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+                if (entry.isIntersecting) {
+                    entry.target.style.animationPlayState = 'running';
+                    observer.unobserve(entry.target);
+                }
+            });
+        }, {
+            threshold: 0.1,
+            rootMargin: '0px 0px -50px 0px'
+        });
+
+        animateElements.forEach(el => {
+            el.style.animationPlayState = 'paused';
+            observer.observe(el);
+        });
+    } else {
+        // Fallback: just show everything
+        animateElements.forEach(el => {
+            el.style.opacity = '1';
+            el.style.animation = 'none';
+        });
+    }
+
+    // ==================== 初始化 ====================
+    updateScrollIndicator();
+    updateNavBackground();
+
+})();
