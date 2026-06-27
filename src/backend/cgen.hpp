@@ -211,6 +211,8 @@ private:
     std::unordered_set<std::string> knownArrays_;
     // 数组名 → 元素Vb6Type (小写key)
     std::unordered_map<std::string, Vb6Type> arrayElemTypes_;
+    // P8.1: 数组名 → 维度数 (小写key, 1=一维1D, 2+=多维ND)
+    std::unordered_map<std::string, int> arrayDimCounts_;
 
     // 已知BSTR变量名集合 (小写) - 用于Debug.Print等场景判断表达式类型
     std::unordered_set<std::string> knownBstrVars_;

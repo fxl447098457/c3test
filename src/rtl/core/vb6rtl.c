@@ -871,6 +871,189 @@ int32_t vb6_LBound(vb6_SafeArray1D* safeArray, int32_t dimension) {
 }
 
 // ============================================================
+// SAFEARRAY ND - VB6 多维数组实现
+// ============================================================
+
+vb6_SafeArrayND* vb6_SafeArrayCreateND(vb6_safearray_elemtype elemType,
+    int32_t dimCount, vb6_SafeArrayBound bounds[]) {
+    if (dimCount <= 0 || dimCount > 16) return NULL;
+
+    vb6_SafeArrayND* arr = (vb6_SafeArrayND*)calloc(1, sizeof(vb6_SafeArrayND));
+    if (!arr) return NULL;
+
+    arr->dimCount = dimCount;
+    arr->elemType = elemType;
+    arr->elemSize = vb6_sa_elem_size(elemType);
+
+    int32_t total = 1;
+    for (int32_t d = 0; d < dimCount; d++) {
+        arr->bounds[d] = bounds[d];
+        if (bounds[d].cElements <= 0) {
+            arr->totalElements = 0;
+            arr->data = NULL;
+            return arr;
+        }
+        total *= bounds[d].cElements;
+    }
+    arr->totalElements = total;
+
+    if (total > 0) {
+        arr->data = calloc((size_t)total, (size_t)arr->elemSize);
+        if (!arr->data) {
+            free(arr);
+            return NULL;
+        }
+    }
+
+    return arr;
+}
+
+void vb6_SafeArrayDestroyND(vb6_SafeArrayND* arr) {
+    if (!arr) return;
+
+    if (arr->elemType == vb6_sa_bstr && arr->data) {
+        for (int32_t i = 0; i < arr->totalElements; i++) {
+            BSTR* slot = (BSTR*)((char*)arr->data + i * arr->elemSize);
+            if (*slot) vb6_BSTR_Free(*slot);
+        }
+    }
+    if (arr->elemType == vb6_sa_variant && arr->data) {
+        for (int32_t i = 0; i < arr->totalElements; i++) {
+            vb6_VARIANT* slot = (vb6_VARIANT*)((char*)arr->data + i * arr->elemSize);
+            if (slot->vt == vb6_vtBSTR && slot->bstrVal) {
+                vb6_BSTR_Free(slot->bstrVal);
+            }
+        }
+    }
+
+    if (arr->data) free(arr->data);
+    free(arr);
+}
+
+int32_t vb6_SafeArrayND_Offset(vb6_SafeArrayND* arr, int32_t dimCount, int32_t indices[]) {
+    int32_t offset = indices[0] - arr->bounds[0].lBound;
+    int32_t stride = arr->bounds[0].cElements;
+    for (int32_t d = 1; d < dimCount; d++) {
+        offset += (indices[d] - arr->bounds[d].lBound) * stride;
+        stride *= arr->bounds[d].cElements;
+    }
+    return offset;
+}
+
+void* vb6_SafeArrayND_GetPtr(vb6_SafeArrayND* arr, ...) {
+    if (!arr) return NULL;
+    int32_t indices[16];
+    va_list ap;
+    va_start(ap, arr);
+    for (int32_t d = 0; d < arr->dimCount; d++) {
+        indices[d] = va_arg(ap, int32_t);
+    }
+    va_end(ap);
+
+    int32_t offset = vb6_SafeArrayND_Offset(arr, arr->dimCount, indices);
+    if (offset < 0 || offset >= arr->totalElements) return NULL;
+    return (char*)arr->data + offset * arr->elemSize;
+}
+
+vb6_SafeArrayND* vb6_SafeArrayReDimND(vb6_safearray_elemtype elemType,
+    int32_t dimCount, vb6_SafeArrayBound bounds[]) {
+    return vb6_SafeArrayCreateND(elemType, dimCount, bounds);
+}
+
+vb6_SafeArrayND* vb6_SafeArrayReDimPreserveND(vb6_SafeArrayND* arr,
+    int32_t dimCount, vb6_SafeArrayBound newBounds[]) {
+    if (!arr) return vb6_SafeArrayCreateND(vb6_sa_empty, dimCount, newBounds);
+
+    int32_t newTotal = 1;
+    for (int32_t d = 0; d < dimCount; d++) {
+        if (newBounds[d].cElements <= 0) {
+            vb6_SafeArrayDestroyND(arr);
+            return NULL;
+        }
+        newTotal *= newBounds[d].cElements;
+    }
+
+    void* newData = calloc((size_t)newTotal, (size_t)arr->elemSize);
+    if (!newData) return arr;
+
+    if (arr->data && arr->totalElements > 0) {
+        int32_t minDims = (dimCount < arr->dimCount) ? dimCount : arr->dimCount;
+
+        int32_t copyCounts[16];
+        int32_t oldCounts[16];
+        int32_t newCounts[16];
+        int32_t oldStrides[16];
+        int32_t newStrides[16];
+
+        for (int32_t d = 0; d < dimCount; d++)
+            newCounts[d] = newBounds[d].cElements;
+        for (int32_t d = 0; d < minDims; d++)
+            oldCounts[d] = arr->bounds[d].cElements;
+        for (int32_t d = minDims; d < 16; d++)
+            oldCounts[d] = 0;
+
+        for (int32_t d = 0; d < dimCount; d++)
+            copyCounts[d] = (oldCounts[d] < newCounts[d]) ? oldCounts[d] : newCounts[d];
+
+        oldStrides[minDims - 1] = 1;
+        for (int32_t d = minDims - 2; d >= 0; d--)
+            oldStrides[d] = oldStrides[d + 1] * arr->bounds[d + 1].cElements;
+
+        newStrides[dimCount - 1] = 1;
+        for (int32_t d = dimCount - 2; d >= 0; d--)
+            newStrides[d] = newStrides[d + 1] * newBounds[d + 1].cElements;
+
+        int32_t iterMax = 1;
+        for (int32_t d = 0; d < minDims; d++)
+            iterMax *= copyCounts[d];
+
+        for (int32_t linear = 0; linear < iterMax; linear++) {
+            int32_t tmp = linear;
+            int32_t oldOff = 0, newOff = 0;
+            int32_t bounds_check = 1;
+            for (int32_t d = minDims - 1; d >= 0; d--) {
+                int32_t idx = tmp % copyCounts[d];
+                tmp /= copyCounts[d];
+                if (idx >= oldCounts[d] || idx >= newCounts[d]) {
+                    bounds_check = 0;
+                    break;
+                }
+                oldOff += idx * oldStrides[d];
+                newOff += idx * newStrides[d];
+            }
+            if (bounds_check) {
+                memcpy((char*)newData + newOff * arr->elemSize,
+                       (char*)arr->data + oldOff * arr->elemSize,
+                       (size_t)arr->elemSize);
+            }
+        }
+    }
+
+    if (arr->data) free(arr->data);
+    arr->data = newData;
+    arr->dimCount = dimCount;
+    arr->totalElements = newTotal;
+    for (int32_t d = 0; d < dimCount; d++)
+        arr->bounds[d] = newBounds[d];
+    for (int32_t d = dimCount; d < 16; d++) {
+        arr->bounds[d].lBound = 0;
+        arr->bounds[d].cElements = 0;
+    }
+
+    return arr;
+}
+
+int32_t vb6_UBoundND(vb6_SafeArrayND* arr, int32_t dimension) {
+    if (!arr || dimension < 1 || dimension > arr->dimCount) return 0;
+    return arr->bounds[dimension - 1].lBound + arr->bounds[dimension - 1].cElements - 1;
+}
+
+int32_t vb6_LBoundND(vb6_SafeArrayND* arr, int32_t dimension) {
+    if (!arr || dimension < 1 || dimension > arr->dimCount) return 0;
+    return arr->bounds[dimension - 1].lBound;
+}
+
+// ============================================================
 // 文件 I/O (MVP)
 // ============================================================
 

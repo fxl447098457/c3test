@@ -1443,19 +1443,54 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
     }
 
     if (isArrayAccess) {
-        // 数组元素访问: arr(i) → VB6_SA_AT(type, arr, i)
+        // P8.1: 数组元素访问, 支持多维
         emitExpr(*node.callee);
         std::string callee = std::move(lastExpr_);
 
-        // 参数: 只取第一个位置参数作为索引 (一维)
-        std::string index = "0";
-        if (!node.positional.empty()) {
-            emitExpr(*node.positional[0]);
-            index = std::move(lastExpr_);
-        }
+        int dimCount = 1;
+        auto itDc = arrayDimCounts_.find(arrName);
+        if (itDc != arrayDimCounts_.end()) dimCount = itDc->second;
 
-        std::string elemCType = mapSaElemCType(arrElemType);
-        lastExpr_ = "VB6_SA_AT(" + elemCType + ", " + arrName + ", " + index + ")";
+        if (dimCount == 1 || node.positional.size() == 1) {
+            // 一维访问: arr(i) -> VB6_SA_AT(type, arr, i)
+            std::string index = "0";
+            if (!node.positional.empty()) {
+                emitExpr(*node.positional[0]);
+                index = std::move(lastExpr_);
+            }
+            std::string elemCType = mapSaElemCType(arrElemType);
+            lastExpr_ = "VB6_SA_AT(" + elemCType + ", " + arrName + ", " + index + ")";
+        } else if (dimCount == 2 && node.positional.size() == 2) {
+            // 二维访问: arr(i, j) -> VB6_SA_ND_AT2(type, arr, i, j)
+            emitExpr(*node.positional[0]);
+            std::string idx0 = std::move(lastExpr_);
+            emitExpr(*node.positional[1]);
+            std::string idx1 = std::move(lastExpr_);
+            std::string elemCType = mapSaElemCType(arrElemType);
+            lastExpr_ = "VB6_SA_ND_AT2(" + elemCType + ", " + arrName + ", " + idx0 + ", " + idx1 + ")";
+        } else if (dimCount == 3 && node.positional.size() == 3) {
+            // 三维访问: arr(i, j, k) -> VB6_SA_ND_AT3(type, arr, i, j, k)
+            emitExpr(*node.positional[0]);
+            std::string idx0 = std::move(lastExpr_);
+            emitExpr(*node.positional[1]);
+            std::string idx1 = std::move(lastExpr_);
+            emitExpr(*node.positional[2]);
+            std::string idx2 = std::move(lastExpr_);
+            std::string elemCType = mapSaElemCType(arrElemType);
+            lastExpr_ = "VB6_SA_ND_AT3(" + elemCType + ", " + arrName + ", " + idx0 + ", " + idx1 + ", " + idx2 + ")";
+        } else {
+            // 4+维: 通用通过vb6_SafeArrayND_Offset + 直接指针访问
+            std::vector<std::string> indices;
+            for (auto& arg : node.positional) {
+                emitExpr(*arg);
+                indices.push_back(std::move(lastExpr_));
+            }
+            std::string elemCType = mapSaElemCType(arrElemType);
+            // 构建indices数组 + offset计算
+            std::string offVar = "_ndoff_" + std::to_string(tempCounter_++);
+            c_.emitLine("int " + offVar + " = vb6_SafeArrayND_Offset(" + arrName + ", " + std::to_string(dimCount) + ", (int[]){" + indices[0] + ", " + indices[1] + "});");
+            lastExpr_ = "((" + elemCType + "*)(((char*)" + arrName + "->data) + " + offVar + "))[0]";
+        }
         return;
     }
 
@@ -1782,11 +1817,31 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
         argList += args[i];
     }
 
-    // 特殊处理: UBound/LBound 缺省维度参数时补1
-    if ((callee == "vb6_UBound" || callee == "vb6_LBound") && args.size() == 1) {
-        argList += ", 1";
+    // P8.1: UBound/LBound - 1D用vb6_UBound, ND用vb6_UBoundND/vb6_LBoundND
+    if (callee == "vb6_UBound" || callee == "vb6_LBound") {
+        if (args.size() == 1) {
+            // 缺省维度参数, 补1
+            argList += ", 1";
+        }
+        // 检查是否为ND数组, 需要用ND版本
+        if (node.positional.size() >= 1) {
+            auto& firstArg = node.positional[0];
+            std::string arrLower;
+            if (firstArg->kind == ASTNodeKind::IdentifierExpr) {
+                arrLower = static_cast<IdentifierExpr&>(*firstArg).name;
+                std::transform(arrLower.begin(), arrLower.end(), arrLower.begin(), ::tolower);
+            }
+            auto itDc = arrayDimCounts_.find(arrLower);
+            if (itDc != arrayDimCounts_.end() && itDc->second > 1) {
+                // ND数组 -> 使用vb6_UBoundND/vb6_LBoundND
+                if (callee == "vb6_UBound") {
+                    callee = "vb6_UBoundND";
+                } else {
+                    callee = "vb6_LBoundND";
+                }
+            }
+        }
     }
-
     // InStr: VB6允许2参数形式 InStr(string1, string2)
     // RTL: vb6_InStr(start, haystack, needle) → 2参数时补start=1
     if (callee == "vb6_InStr") {
@@ -2960,30 +3015,69 @@ void CCodeGen::visit(ReDimStmt& node) {
 
     if (node.dimensions.empty()) return;
 
-    auto& dim = node.dimensions[0];
-    std::string lBound = "0";
-    std::string uBound = "0";
-    if (dim.lower) {
-        emitExpr(*dim.lower);
-        lBound = std::move(lastExpr_);
-    }
-    if (dim.upper) {
-        emitExpr(*dim.upper);
-        uBound = std::move(lastExpr_);
-    }
+    int dimCount = (int)node.dimensions.size();
 
-    if (node.preserve) {
-        c_.emitLine(cName + " = vb6_SafeArrayReDimPreserve1D(" + cName + ", " + lBound + ", " + uBound + ");");
+    if (dimCount == 1) {
+        // 涓€缁?ReDim (淇濇寔鍘熸湁1D浠ｇ爜)
+        auto& dim = node.dimensions[0];
+        std::string lBound = "0";
+        std::string uBound = "0";
+        if (dim.lower) {
+            emitExpr(*dim.lower);
+            lBound = std::move(lastExpr_);
+        }
+        if (dim.upper) {
+            emitExpr(*dim.upper);
+            uBound = std::move(lastExpr_);
+        }
+
+        if (node.preserve) {
+            c_.emitLine(cName + " = vb6_SafeArrayReDimPreserve1D(" + cName + ", " + lBound + ", " + uBound + ");");
+        } else {
+            c_.emitLine("vb6_SafeArrayDestroy1D(" + cName + ");");
+            c_.emitLine(cName + " = vb6_SafeArrayReDim1D(" + saElemType + ", " + lBound + ", " + uBound + ");");
+        }
     } else {
-        c_.emitLine("vb6_SafeArrayDestroy1D(" + cName + ");");
-        c_.emitLine(cName + " = vb6_SafeArrayReDim1D(" + saElemType + ", " + lBound + ", " + uBound + ");");
+        // P8.1: 澶氱淮 ReDim
+        std::string boundsVar = "_redim_bounds_" + cName;
+        c_.emitLine("vb6_SafeArrayBound " + boundsVar + "[] = {");
+        c_.indent();
+        for (int d = 0; d < dimCount; d++) {
+            auto& dim = node.dimensions[d];
+            std::string lb = "0", ub = "0";
+            if (dim.lower) { emitExpr(*dim.lower); lb = std::move(lastExpr_); }
+            if (dim.upper) { emitExpr(*dim.upper); ub = std::move(lastExpr_); }
+            std::string trailing = (d < dimCount - 1) ? "," : "";
+            c_.emitLine("{" + lb + ", " + ub + "}" + trailing);
+        }
+        c_.dedent();
+        c_.emitLine("};");
+        if (node.preserve) {
+            c_.emitLine(cName + " = vb6_SafeArrayReDimPreserveND(" + cName + ", " + std::to_string(dimCount) + ", " + boundsVar + ");");
+        } else {
+            c_.emitLine("vb6_SafeArrayDestroyND(" + cName + ");");
+            c_.emitLine(cName + " = vb6_SafeArrayReDimND(" + saElemType + ", " + std::to_string(dimCount) + ", " + boundsVar + ");");
+        }
+
+        // 鏇存柊鏁扮粍缁村害淇℃伅
+        std::string lower = node.varName;
+        std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+        arrayDimCounts_[lower] = dimCount;
     }
 }
 
 void CCodeGen::visit(EraseStmt& node) {
     for (auto& name : node.varNames) {
         std::string cName = cIdent(name);
-        c_.emitLine("vb6_SafeArrayDestroy1D(" + cName + "); " + cName + " = NULL;");
+        // P8.1: 鏍规嵁缁村害鏁伴€夋嫨1D/ND閿€姣?
+        std::string lower = name;
+        std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+        auto it = arrayDimCounts_.find(lower);
+        if (it != arrayDimCounts_.end() && it->second > 1) {
+            c_.emitLine("vb6_SafeArrayDestroyND(" + cName + "); " + cName + " = NULL;");
+        } else {
+            c_.emitLine("vb6_SafeArrayDestroy1D(" + cName + "); " + cName + " = NULL;");
+        }
     }
 }
 
@@ -3245,35 +3339,55 @@ void CCodeGen::visit(LocalDeclStmt& node) {
             auto& var = static_cast<VariableDecl&>(*node.decl);
             std::string cName = cIdent(var.name);
 
-            // 局部数组声明
+            // P8.1: 局部数组声明 (支持多维)
             if (!var.dimensions.empty()) {
                 Vb6Type elemType = resolveArrayElemType(var.asType.get());
                 std::string saElemType = mapSaElemType(elemType);
+                int dimCount = (int)var.dimensions.size();
 
-                auto& dim = var.dimensions[0];
-                std::string lBound = "0";
-                std::string uBound = "0";
-                if (dim.lower) {
-                    emitExpr(*dim.lower);
-                    lBound = std::move(lastExpr_);
+                if (dimCount == 1) {
+                    // 一维数组: 保持原有1D代码
+                    auto& dim = var.dimensions[0];
+                    std::string lBound = "0";
+                    std::string uBound = "0";
+                    if (dim.lower) {
+                        emitExpr(*dim.lower);
+                        lBound = std::move(lastExpr_);
+                    }
+                    if (dim.upper) {
+                        emitExpr(*dim.upper);
+                        uBound = std::move(lastExpr_);
+                    }
+                    std::string initCode = "vb6_SafeArrayCreate1D(" + saElemType + ", " + lBound + ", " + uBound + ")";
+                    c_.emitLine("vb6_SafeArray1D* " + cName + " = " + initCode + ";");
+                } else {
+                    // 多维数组: 使用ND运行时
+                    std::string boundsVar = "_bounds_" + cName;
+                    c_.emitLine("vb6_SafeArrayBound " + boundsVar + "[] = {");
+                    c_.indent();
+                    for (int d = 0; d < dimCount; d++) {
+                        auto& dim = var.dimensions[d];
+                        std::string lb = "0", ub = "0";
+                        if (dim.lower) { emitExpr(*dim.lower); lb = std::move(lastExpr_); }
+                        if (dim.upper) { emitExpr(*dim.upper); ub = std::move(lastExpr_); }
+                        std::string trailing = (d < dimCount - 1) ? "," : "";
+                        c_.emitLine("{" + lb + ", " + ub + "}" + trailing);
+                    }
+                    c_.dedent();
+                    c_.emitLine("};");
+                    c_.emitLine("vb6_SafeArrayND* " + cName + " = vb6_SafeArrayCreateND(" + saElemType + ", " + std::to_string(dimCount) + ", " + boundsVar + ");");
                 }
-                if (dim.upper) {
-                    emitExpr(*dim.upper);
-                    uBound = std::move(lastExpr_);
-                }
-
-                std::string initCode = "vb6_SafeArrayCreate1D(" + saElemType + ", " + lBound + ", " + uBound + ")";
-                c_.emitLine("vb6_SafeArray1D* " + cName + " = " + initCode + ";");
 
                 // 注册到已知数组集合
                 std::string lower = var.name;
                 std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
                 knownArrays_.insert(lower);
                 arrayElemTypes_[lower] = elemType;
+                arrayDimCounts_[lower] = dimCount;
                 break;
             }
 
-            // 动态数组声明: Dim arr() As Long → vb6_SafeArray1D* arr = NULL;
+            // P8.1: 动态数组声明: Dim arr() As Long → 默认1D, ReDim时可能升级
             if (var.isDynamicArray) {
                 Vb6Type elemType = resolveArrayElemType(var.asType.get());
                 c_.emitLine("vb6_SafeArray1D* " + cName + " = NULL;");
@@ -3283,6 +3397,7 @@ void CCodeGen::visit(LocalDeclStmt& node) {
                 std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
                 knownArrays_.insert(lower);
                 arrayElemTypes_[lower] = elemType;
+                arrayDimCounts_[lower] = 1;  // 动态数组默认1D
                 break;
             }
 
@@ -3636,36 +3751,52 @@ void CCodeGen::visit(ConstDecl& node) {
 void CCodeGen::visit(VariableDecl& node) {
     std::string cName = cIdent(node.name);
 
-    // 数组声明
+    // P8.1: 模块级数组声明 (支持多维)
     if (!node.dimensions.empty()) {
         Vb6Type elemType = resolveArrayElemType(node.asType.get());
         std::string saElemType = mapSaElemType(elemType);
-        std::string cType = "vb6_SafeArray1D*";
+        int dimCount = (int)node.dimensions.size();
+        std::string cType = (dimCount > 1) ? "vb6_SafeArrayND*" : "vb6_SafeArray1D*";
 
-        // 前向声明 → .h
+        // 前向声明 -> .h
         if (node.access == AccessLevel::Public) {
             h_.emitLine("extern " + cType + " " + cName + ";");
         }
 
-        // 数组创建代码
-        // 目前只支持一维数组
-        auto& dim = node.dimensions[0];
-        std::string lBound = "0";
-        std::string uBound = "0";
-        if (dim.lower) {
-            emitExpr(*dim.lower);
-            lBound = std::move(lastExpr_);
-        }
-        if (dim.upper) {
-            emitExpr(*dim.upper);
-            uBound = std::move(lastExpr_);
-        }
-
-        std::string initCode = "vb6_SafeArrayCreate1D(" + saElemType + ", " + lBound + ", " + uBound + ")";
-        if (node.access == AccessLevel::Public) {
-            c_.emitLine(cType + " " + cName + " = " + initCode + ";");
+        if (dimCount == 1) {
+            // 一维数组
+            auto& dim = node.dimensions[0];
+            std::string lBound = "0";
+            std::string uBound = "0";
+            if (dim.lower) { emitExpr(*dim.lower); lBound = std::move(lastExpr_); }
+            if (dim.upper) { emitExpr(*dim.upper); uBound = std::move(lastExpr_); }
+            std::string initCode = "vb6_SafeArrayCreate1D(" + saElemType + ", " + lBound + ", " + uBound + ")";
+            if (node.access == AccessLevel::Public) {
+                c_.emitLine(cType + " " + cName + " = " + initCode + ";");
+            } else {
+                c_.emitLine("static " + cType + " " + cName + " = " + initCode + ";");
+            }
         } else {
-            c_.emitLine("static " + cType + " " + cName + " = " + initCode + ";");
+            // 多维数组: 使用ND运行时
+            std::string boundsVar = "_bounds_" + cName;
+            c_.emitLine("vb6_SafeArrayBound " + boundsVar + "[] = {");
+            c_.indent();
+            for (int d = 0; d < dimCount; d++) {
+                auto& dim = node.dimensions[d];
+                std::string lb = "0", ub = "0";
+                if (dim.lower) { emitExpr(*dim.lower); lb = std::move(lastExpr_); }
+                if (dim.upper) { emitExpr(*dim.upper); ub = std::move(lastExpr_); }
+                std::string trailing = (d < dimCount - 1) ? "," : "";
+                c_.emitLine("{" + lb + ", " + ub + "}" + trailing);
+            }
+            c_.dedent();
+            c_.emitLine("};");
+            std::string initCode = "vb6_SafeArrayCreateND(" + saElemType + ", " + std::to_string(dimCount) + ", " + boundsVar + ")";
+            if (node.access == AccessLevel::Public) {
+                c_.emitLine(cType + " " + cName + " = " + initCode + ";");
+            } else {
+                c_.emitLine("static " + cType + " " + cName + " = " + initCode + ";");
+            }
         }
 
         // 注册到已知数组集合
@@ -3673,10 +3804,11 @@ void CCodeGen::visit(VariableDecl& node) {
         std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
         knownArrays_.insert(lower);
         arrayElemTypes_[lower] = elemType;
+        arrayDimCounts_[lower] = dimCount;
         return;
     }
 
-    // 动态数组声明: Dim arr() As Long → vb6_SafeArray1D* arr = NULL;
+    // P8.1: 动态数组声明: Dim arr() As Long -> 默认1D
     if (node.isDynamicArray) {
         Vb6Type elemType = resolveArrayElemType(node.asType.get());
         std::string cType = "vb6_SafeArray1D*";
@@ -3693,6 +3825,7 @@ void CCodeGen::visit(VariableDecl& node) {
         std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
         knownArrays_.insert(lower);
         arrayElemTypes_[lower] = elemType;
+        arrayDimCounts_[lower] = 1;  // 动态数组默认1D
         return;
     }
 

@@ -377,6 +377,52 @@ void  vb6_SafeArrayPutElem(vb6_SafeArray1D* arr, int32_t index, void* value);
 // UBound/LBound (替换旧stub)
 int32_t vb6_UBound(vb6_SafeArray1D* safeArray, int32_t dimension);
 int32_t vb6_LBound(vb6_SafeArray1D* safeArray, int32_t dimension);
+// ============================================================
+// SAFEARRAY ND - VB6 多维数组
+// ============================================================
+
+typedef struct vb6_SafeArrayBound {
+    int32_t lBound;
+    int32_t cElements;
+} vb6_SafeArrayBound;
+
+typedef struct vb6_SafeArrayND {
+    int32_t dimCount;
+    vb6_safearray_elemtype elemType;
+    int32_t elemSize;
+    int32_t totalElements;
+    void* data;
+    vb6_SafeArrayBound bounds[16];
+} vb6_SafeArrayND;
+
+vb6_SafeArrayND* vb6_SafeArrayCreateND(vb6_safearray_elemtype elemType,
+    int32_t dimCount, vb6_SafeArrayBound bounds[]);
+void vb6_SafeArrayDestroyND(vb6_SafeArrayND* arr);
+vb6_SafeArrayND* vb6_SafeArrayReDimND(vb6_safearray_elemtype elemType,
+    int32_t dimCount, vb6_SafeArrayBound bounds[]);
+vb6_SafeArrayND* vb6_SafeArrayReDimPreserveND(vb6_SafeArrayND* arr,
+    int32_t dimCount, vb6_SafeArrayBound newBounds[]);
+
+int32_t vb6_SafeArrayND_Offset(vb6_SafeArrayND* arr, int32_t dimCount, int32_t indices[]);
+void* vb6_SafeArrayND_GetPtr(vb6_SafeArrayND* arr, ...);
+
+int32_t vb6_UBoundND(vb6_SafeArrayND* arr, int32_t dimension);
+int32_t vb6_LBoundND(vb6_SafeArrayND* arr, int32_t dimension);
+
+#define VB6_SA_ND_AT1(elemType, arr, i) \
+    (*((elemType*)((arr)->data) + \
+       ((i) - (arr)->bounds[0].lBound)))
+
+#define VB6_SA_ND_AT2(elemType, arr, i, j) \
+    (*((elemType*)((arr)->data) + \
+       (((i) - (arr)->bounds[0].lBound) + \
+        ((j) - (arr)->bounds[1].lBound) * (arr)->bounds[0].cElements)))
+
+#define VB6_SA_ND_AT3(elemType, arr, i, j, k) \
+    (*((elemType*)((arr)->data) + \
+       (((i) - (arr)->bounds[0].lBound) + \
+        ((j) - (arr)->bounds[1].lBound) * (arr)->bounds[0].cElements + \
+        ((k) - (arr)->bounds[2].lBound) * (arr)->bounds[0].cElements * (arr)->bounds[1].cElements)))
 
 // 文件 I/O
 int32_t vb6_FreeFile(void);

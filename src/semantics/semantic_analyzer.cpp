@@ -306,6 +306,7 @@ void SemanticAnalyzer::registerVariable(VariableDecl& decl) {
     );
     sym->isStatic = decl.isStatic;
     sym->isArray = !decl.dimensions.empty() || decl.isDynamicArray;
+    sym->dimCount = (int32_t)decl.dimensions.size();  // P8.1: 多维数组维度数
     // P6.5: 记录WithEvents标志和源类名
     if (decl.isWithEvents) {
         sym->isWithEvents = true;
@@ -914,6 +915,7 @@ void SemanticAnalyzer::visit(LocalDeclStmt& node) {
                 );
                 sym->isStatic = varDecl.isStatic;
                 sym->isArray = !varDecl.dimensions.empty() || varDecl.isDynamicArray;
+                sym->dimCount = (int32_t)varDecl.dimensions.size();  // P8.1: 多维数组维度数
                 symTab_.define(std::move(sym));
                 break;
             }

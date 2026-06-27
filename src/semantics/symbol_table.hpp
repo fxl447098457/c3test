@@ -76,6 +76,7 @@ struct Symbol {
     std::vector<ParameterInfo> params;
     bool isStatic = false;      // Static Sub/Function
     bool isArray = false;       // 数组变量
+    int32_t dimCount = 0;       // 数组维度数 (0=非数组, 1=一维, 2+=多维)
 
     // 常量值 (仅Constant)
     bool hasConstValue = false;
