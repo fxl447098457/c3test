@@ -1,4 +1,4 @@
-// vb6com.c - VB6 COM互操作运行时实现 (P6)
+﻿// vb6com.c - VB6 COM互操作运行时实现 (P6)
 // 使用Windows原生COM API, 独立于vb6rtl.h避免VARIANT冲突
 
 #include "vb6com.h"
@@ -373,6 +373,16 @@ void* vb6_ComPackInt(int32_t val) {
     VariantInit(pv);
     pv->vt = VT_I4;
     pv->lVal = val;
+    return (void*)pv;
+}
+
+// 将VB6 Boolean (int32_t: -1=True, 0=False) 封装为VARIANT VT_BOOL
+// VBScript/COM 期望 VT_BOOL 而非 VT_I4
+void* vb6_ComPackBool(int32_t val) {
+    VARIANT* pv = (VARIANT*)calloc(1, sizeof(VARIANT));
+    VariantInit(pv);
+    pv->vt = VT_BOOL;
+    pv->boolVal = val ? VARIANT_TRUE : VARIANT_FALSE;
     return (void*)pv;
 }
 

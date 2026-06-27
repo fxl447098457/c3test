@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 // vb6com.h - VB6 COM互操作运行时 (P6)
 // 独立于vb6rtl.h, 避免VARIANT定义冲突
 // 此文件使用Windows原生VARIANT/IDispatch等类型
@@ -41,6 +41,9 @@ void* vb6_ComPackBSTR(const wchar_t* bstr);
 // 将int32_t封装为VARIANT
 void* vb6_ComPackInt(int32_t val);
 
+
+// 将VB6 Boolean (int32_t: -1=True, 0=False) 封装为VARIANT VT_BOOL
+void* vb6_ComPackBool(int32_t val);
 // 将double封装为VARIANT
 void* vb6_ComPackDouble(double val);
 
