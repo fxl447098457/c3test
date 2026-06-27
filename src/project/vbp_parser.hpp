@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 // VB6 工程文件 (.vbp) 解析器
 // .vbp 是纯文本行导向的INI风格文件, 每行 Key=Value
 
@@ -24,6 +24,7 @@ struct VbpSourceEntry {
     VbpSourceType type;
     std::string moduleName;     // 模块名 (Form无此字段, Module/Class有)
     std::string filePath;       // 文件路径 (相对或绝对)
+    std::string clsidStr;       // P6.8: CLSID (仅Class, 格式: Class=Name; File.cls; {CLSID})
 };
 
 // 项目类型

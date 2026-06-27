@@ -102,6 +102,9 @@ private:
     // 窗体描述 (P7, .frm文件解析结果, 按模块名索引)
     std::map<std::string, FrmFile> frmFiles_;
 
+    // P6.8: VBP指定的类CLSID映射 (模块名小写 -> CLSID字符串)
+    std::unordered_map<std::string, std::string> classClsidMap_;
+
     // TypeLib解析器 (P6.3, COM类型导入)
     std::unique_ptr<TypeLibParser> typelibParser_;
 

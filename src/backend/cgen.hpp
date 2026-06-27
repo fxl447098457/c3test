@@ -344,8 +344,6 @@ private:
     // P6.5: 生成事件接收器表和回调 (WithEvents代码生成)
     void emitEventSink(Module& module);
 
-    // P6.6: 生成ActiveX DLL COM服务端代码 (DllGetClassObject/Register/Unregister等)
-    void emitActiveXDll(Module& module);
 
     // P7: 生成Win32窗体框架代码 (WndProc + 控件创建 + 消息映射)
     void emitFormFramework(const FrmFormDesc& frmDesc, Module& module);

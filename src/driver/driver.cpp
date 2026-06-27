@@ -167,6 +167,15 @@ CompileResult Driver::compile(const CompileOptions& options) {
                 effectiveOpts.sourceFiles.push_back(absPath.string());
             }
 
+            // P6.8: 收集VBP中的CLSID映射
+            for (const auto& entry : project.sources) {
+                if (!entry.clsidStr.empty()) {
+                    std::string lowerName = entry.moduleName;
+                    std::transform(lowerName.begin(), lowerName.end(), lowerName.begin(), ::tolower);
+                    classClsidMap_[lowerName] = entry.clsidStr;
+                }
+            }
+
             // 如果没有指定输出文件, 使用工程名
             if (effectiveOpts.outputFile.empty() && !project.exeName.empty()) {
                 effectiveOpts.outputFile = project.exeName;
@@ -840,6 +849,7 @@ bool Driver::runCrossModuleResolution() {
                 extSym->implementsNames = srcSym->implementsNames;  // P6.4
                 extSym->interfaceMethodNames = srcSym->interfaceMethodNames;  // P6.4
                 extSym->eventNames = srcSym->eventNames;  // P6.5
+                extSym->comClsidStr = srcSym->comClsidStr;  // P6.8: CLSID
             }
 
             symTab.defineExternal(std::move(extSym));
@@ -937,6 +947,17 @@ bool Driver::runCodeGeneration(const CompileOptions& options, const std::string&
         std::vector<SymbolTable*> allSymTabs;
         for (auto& analyzer : analyzers_) {
             allSymTabs.push_back(&analyzer->symbolTable());
+        }
+        // P6.8: 注入VBP指定的CLSID到类符号
+        for (auto& [key, sym] : lastAnalyzer->symbolTable().moduleScope()->symbols()) {
+            if (sym->kind == SymbolKind::Class && !sym->isInterface) {
+                std::string lowerName = sym->name;
+                std::transform(lowerName.begin(), lowerName.end(), lowerName.begin(), ::tolower);
+                auto it = classClsidMap_.find(lowerName);
+                if (it != classClsidMap_.end() && sym->comClsidStr.empty()) {
+                    sym->comClsidStr = it->second;
+                }
+            }
         }
         std::string dllEntryCode = dllCgen.generateDllEntry(options.dllProgId, allSymTabs);
 

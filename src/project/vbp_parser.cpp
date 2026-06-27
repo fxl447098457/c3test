@@ -1,4 +1,4 @@
-// vb6c3 - VB6工程文件(.vbp)解析器
+﻿// vb6c3 - VB6工程文件(.vbp)解析器
 // .vbp 是纯文本行导向的INI风格文件, 每行 Key=Value
 
 #include "project/vbp_parser.hpp"
@@ -74,23 +74,51 @@ VbpProject VbpParser::parseString(const std::string& content, const std::string&
                 entry.filePath = value;
             } else {
                 // Module=Name; xxx.bas 或 Class=Name; xxx.cls
-                // 分号分隔: 可能是 "Name; File" 或 "Name;File"
+                // Class还支持3段格式: Class=Name; xxx.cls; {CLSID}
+                // 分号分隔: 可能是 "Name; File" 或 "Name; File; {CLSID}"
                 auto semiPos = value.find(';');
                 if (semiPos != std::string::npos) {
                     entry.moduleName = value.substr(0, semiPos);
-                    // 去除模块名和路径两端的空白
-                    auto filePart = value.substr(semiPos + 1);
-                    // ltrim
-                    size_t start = filePart.find_first_not_of(" \t");
-                    if (start != std::string::npos) {
-                        entry.filePath = filePart.substr(start);
+                    auto rest = value.substr(semiPos + 1);
+                    // 检查是否有第三个段 (CLSID)
+                    auto semiPos2 = rest.find(';');
+                    if (semiPos2 != std::string::npos) {
+                        // 3段格式: File; {CLSID}
+                        auto filePart = rest.substr(0, semiPos2);
+                        auto clsidPart = rest.substr(semiPos2 + 1);
+                        // ltrim/rtrim filePart
+                        size_t start = filePart.find_first_not_of(" \t");
+                        if (start != std::string::npos) {
+                            entry.filePath = filePart.substr(start);
+                        } else {
+                            entry.filePath = filePart;
+                        }
+                        while (!entry.filePath.empty() &&
+                               (entry.filePath.back() == ' ' || entry.filePath.back() == '\t')) {
+                            entry.filePath.pop_back();
+                        }
+                        // 解析CLSID: 去除前后空白, 验证{...}格式
+                        size_t cs = clsidPart.find_first_not_of(" \t");
+                        if (cs != std::string::npos) clsidPart = clsidPart.substr(cs);
+                        while (!clsidPart.empty() &&
+                               (clsidPart.back() == ' ' || clsidPart.back() == '\t')) {
+                            clsidPart.pop_back();
+                        }
+                        if (clsidPart.size() >= 2 && clsidPart.front() == '{' && clsidPart.back() == '}') {
+                            entry.clsidStr = clsidPart;  // P6.8: 存储CLSID
+                        }
                     } else {
-                        entry.filePath = filePart;
-                    }
-                    // rtrim
-                    while (!entry.filePath.empty() &&
-                           (entry.filePath.back() == ' ' || entry.filePath.back() == '\t')) {
-                        entry.filePath.pop_back();
+                        // 2段格式: Name; File
+                        size_t start = rest.find_first_not_of(" \t");
+                        if (start != std::string::npos) {
+                            entry.filePath = rest.substr(start);
+                        } else {
+                            entry.filePath = rest;
+                        }
+                        while (!entry.filePath.empty() &&
+                               (entry.filePath.back() == ' ' || entry.filePath.back() == '\t')) {
+                            entry.filePath.pop_back();
+                        }
                     }
                 } else {
                     entry.filePath = value;
