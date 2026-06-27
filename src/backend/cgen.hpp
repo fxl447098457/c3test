@@ -79,7 +79,8 @@ public:
     // 当DLL工程只有类模块(无标准模块)时, 由Driver调用此方法生成DLL导出代码
     // progId: DLL的ProgID前缀
     // 返回: 生成的dll_entry.c文件内容
-    std::string generateDllEntry(const std::string& progId);
+    std::string generateDllEntry(const std::string& progId,
+                                  const std::vector<SymbolTable*>& allSymTabs = {});
 
     // 获取生成的代码
     const std::string& headerCode() const { return header_; }

@@ -1,4 +1,4 @@
-// vb6comserver.c - VB6 COM服务端运行时 (P6.6 ActiveX DLL)
+﻿// vb6comserver.c - VB6 COM服务端运行时 (P6.6 ActiveX DLL)
 // 实现IClassFactory、IDispatch包装、DLL导出骨架、注册表辅助
 
 #include "vb6comserver.h"
@@ -103,29 +103,28 @@ static HRESULT STDMETHODCALLTYPE ComObj_Invoke(vb6_ComObject* self, DISPID dispI
 {
     if (!self->desc || !self->desc->methods) return DISP_E_MEMBERNOTFOUND;
     
-    // 查找方法
+    // Find method matching dispid AND invkind (same dispid may have Get/Let variants)
     const vb6_DispMethodDesc* method = NULL;
     for (int i = 0; i < self->desc->methodCount; i++) {
         if (self->desc->methods[i].dispid == dispIdMember) {
-            method = &self->desc->methods[i];
-            break;
+            int ik = self->desc->methods[i].invkind;
+            int ok = 0;
+            if (ik == 1 && (wFlags & DISPATCH_METHOD)) ok = 1;
+            else if (ik == 2 && (wFlags & DISPATCH_PROPERTYGET)) ok = 1;
+            else if ((ik == 4 || ik == 8) && (wFlags & DISPATCH_PROPERTYPUT)) ok = 1;
+            if (ok) { method = &self->desc->methods[i]; break; }
+        }
+    }
+    // Fallback: if no invkind match, try first dispid match
+    if (!method) {
+        for (int i = 0; i < self->desc->methodCount; i++) {
+            if (self->desc->methods[i].dispid == dispIdMember) {
+                method = &self->desc->methods[i];
+                break;
+            }
         }
     }
     if (!method) return DISP_E_MEMBERNOTFOUND;
-    
-    // 检查调用类型匹配
-    // VBScript调用函数时: wFlags = DISPATCH_METHOD | DISPATCH_PROPERTYGET
-    // 所以不能简单逐一检查, 需要根据invkind判断是否兼容
-    if (method->invkind == 1) {
-        // 方法: 接受 DISPATCH_METHOD (可能同时带 DISPATCH_PROPERTYGET)
-        if (!(wFlags & DISPATCH_METHOD)) return DISP_E_MEMBERNOTFOUND;
-    } else if (method->invkind == 2) {
-        // PropertyGet: 接受 DISPATCH_PROPERTYGET
-        if (!(wFlags & DISPATCH_PROPERTYGET)) return DISP_E_MEMBERNOTFOUND;
-    } else if (method->invkind == 4 || method->invkind == 8) {
-        // PropertyPut/PropertyPutRef: 接受 DISPATCH_PROPERTYPUT
-        if (!(wFlags & DISPATCH_PROPERTYPUT)) return DISP_E_MEMBERNOTFOUND;
-    }
     
     // 收集参数
     // 注意: VBScript等脚本引擎传入的VARIANT可能是VT_I2等类型,

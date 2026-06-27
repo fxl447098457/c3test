@@ -1768,6 +1768,15 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
         }
     }
 
+    // P6.6: 类模块中调用同类方法(包括递归), 需要自动添加me作为第一个参数
+    // 如 Factorial(N-1) -> vb6_MathLib_Factorial(me, (N-1))
+    if (classMethodObjArg.empty() && isClassModule_ && currentProc_) {
+        std::string modPrefix = "vb6_" + cIdent(moduleName_) + "_";
+        if (callee.find(modPrefix) == 0) {
+            classMethodObjArg = "(void*)me";
+        }
+    }
+
     // P6.5: 如果classMethodObjArg非空, 需要将其作为第一个参数插入
     if (!classMethodObjArg.empty()) {
         if (argList.empty()) {
@@ -3720,6 +3729,17 @@ void CCodeGen::visit(PropertyDecl& node) {
     std::string sig = makePropertySignature(node);
     c_.emitLine(sig + " {");
 
+    // P6.6修复: 设置currentProc_ (与SubDecl/FunctionDecl相同)
+    // 这确保IdentifierExpr中的类模块变量加me->前缀, PropertyGet返回值赋值正确
+    auto* propSym = symTab_.lookupModule(node.name);
+    currentProc_ = propSym;
+
+    // 清空已知数组集合 (新过程)
+    knownArrays_.clear();
+    arrayElemTypes_.clear();
+    knownBstrVars_.clear();
+    knownDoubleVars_.clear();
+
     // Property Get: 设置返回值变量 (与Function相同语义)
     if (node.propKind == ProcKind::PropertyGet) {
         currentReturnVar_ = "vb6_ret_" + cIdent(node.name);
@@ -3731,26 +3751,20 @@ void CCodeGen::visit(PropertyDecl& node) {
         }
     }
 
-    if (!node.body.empty()) {
-        c_.indent();
-        // 类模块: 设置当前me变量为第一个参数
-        if (isClassModule_) {
-            // 在类方法中, 模块级变量引用需通过 me-> 前缀
-            // 这通过 visit(IdentifierExpr) 和 visit(AssignmentStmt) 处理
-        }
-        emitStmtList(node.body);
+    c_.indent();
+    emitStmtList(node.body);
 
-        // Property Get: 隐式返回 vb6_ret_<propName>
-        if (node.propKind == ProcKind::PropertyGet && node.returnType) {
-            c_.emitLine("return " + currentReturnVar_ + ";");
-        }
-        c_.dedent();
+    // Property Get: 隐式返回 vb6_ret_<propName>
+    if (node.propKind == ProcKind::PropertyGet && node.returnType) {
+        c_.emitLine("return " + currentReturnVar_ + ";");
     }
+    c_.dedent();
 
-    // 清理返回值变量
+    // 清理返回值变量和currentProc_
     if (node.propKind == ProcKind::PropertyGet) {
         currentReturnVar_ = "";
     }
+    currentProc_ = nullptr;
 
     c_.emitLine("}");
     c_.emitBlank();
@@ -4880,7 +4894,11 @@ void CCodeGen::emitActiveXDll(Module& module) {
             if (Symbol::toLower(bareName).substr(0, prefix.size()) == Symbol::toLower(prefix)) {
                 bareName = bareName.substr(prefix.size());
             }
-            std::string invokeName = "vb6_disp_" + clsId + "_" + cIdent(bareName) + "_invoke";
+            std::string invokeSuffix;
+            if (methodSym->kind == SymbolKind::PropertyGet) invokeSuffix = "_get";
+            else if (methodSym->kind == SymbolKind::PropertyLet) invokeSuffix = "_let";
+            else if (methodSym->kind == SymbolKind::PropertySet) invokeSuffix = "_set";
+            std::string invokeName = "vb6_disp_" + clsId + "_" + cIdent(bareName) + invokeSuffix + "_invoke";
 
             c_.emitLine("static void " + invokeName + "(void* instance, void** args, int32_t argc, void* result) {");
             c_.indent();
@@ -4896,23 +4914,23 @@ void CCodeGen::emitActiveXDll(Module& module) {
                     // 从VARIANT中提取ByVal值
                     if (pType == Vb6Type::Long || pType == Vb6Type::Integer ||
                         pType == Vb6Type::Boolean || pType == Vb6Type::Byte) {
-                        callArgs += "((vb6_VARIANT*)args[" + std::to_string(i) + "])->lVal";
+                        callArgs += "((VARIANT*)args[" + std::to_string(i) + "])->lVal";
                     } else if (pType == Vb6Type::Double || pType == Vb6Type::Single) {
-                        callArgs += "((vb6_VARIANT*)args[" + std::to_string(i) + "])->dblVal";
+                        callArgs += "((VARIANT*)args[" + std::to_string(i) + "])->dblVal";
                     } else if (pType == Vb6Type::String) {
-                        callArgs += "((vb6_VARIANT*)args[" + std::to_string(i) + "])->bstrVal";
+                        callArgs += "((VARIANT*)args[" + std::to_string(i) + "])->bstrVal";
                     } else {
-                        callArgs += "((vb6_VARIANT*)args[" + std::to_string(i) + "])->lVal";
+                        callArgs += "((VARIANT*)args[" + std::to_string(i) + "])->lVal";
                     }
                 } else {
                     // ByRef: 传递VARIANT中的值指针
                     if (pType == Vb6Type::Long || pType == Vb6Type::Integer ||
                         pType == Vb6Type::Boolean || pType == Vb6Type::Byte) {
-                        callArgs += "&((vb6_VARIANT*)args[" + std::to_string(i) + "])->lVal";
+                        callArgs += "&((VARIANT*)args[" + std::to_string(i) + "])->lVal";
                     } else if (pType == Vb6Type::Double || pType == Vb6Type::Single) {
-                        callArgs += "&((vb6_VARIANT*)args[" + std::to_string(i) + "])->dblVal";
+                        callArgs += "&((VARIANT*)args[" + std::to_string(i) + "])->dblVal";
                     } else {
-                        callArgs += "(void*)&((vb6_VARIANT*)args[" + std::to_string(i) + "])->lVal";
+                        callArgs += "(void*)&((VARIANT*)args[" + std::to_string(i) + "])->lVal";
                     }
                 }
             };
@@ -4939,13 +4957,13 @@ void CCodeGen::emitActiveXDll(Module& module) {
                 // 将返回值写入VARIANT result
                 if (methodSym->type == Vb6Type::Long || methodSym->type == Vb6Type::Integer ||
                     methodSym->type == Vb6Type::Boolean || methodSym->type == Vb6Type::Byte) {
-                    c_.emitLine("((vb6_VARIANT*)result)->vt = VT_I4; ((vb6_VARIANT*)result)->lVal = (int32_t)_r;");
+                    c_.emitLine("((VARIANT*)result)->vt = VT_I4; ((VARIANT*)result)->lVal = (int32_t)_r;");
                 } else if (methodSym->type == Vb6Type::Double || methodSym->type == Vb6Type::Single) {
-                    c_.emitLine("((vb6_VARIANT*)result)->vt = VT_R8; ((vb6_VARIANT*)result)->dblVal = (double)_r;");
+                    c_.emitLine("((VARIANT*)result)->vt = VT_R8; ((VARIANT*)result)->dblVal = (double)_r;");
                 } else if (methodSym->type == Vb6Type::String) {
-                    c_.emitLine("((vb6_VARIANT*)result)->vt = VT_BSTR; ((vb6_VARIANT*)result)->bstrVal = _r;");
+                    c_.emitLine("((VARIANT*)result)->vt = VT_BSTR; ((VARIANT*)result)->bstrVal = _r;");
                 } else {
-                    c_.emitLine("((vb6_VARIANT*)result)->vt = VT_I4; ((vb6_VARIANT*)result)->lVal = (int32_t)(intptr_t)_r;");
+                    c_.emitLine("((VARIANT*)result)->vt = VT_I4; ((VARIANT*)result)->lVal = (int32_t)(intptr_t)_r;");
                 }
                 c_.dedent();
                 c_.emitLine("}");
@@ -5099,7 +5117,7 @@ void CCodeGen::emitActiveXDll(Module& module) {
 // 当DLL工程只有类模块(无标准模块)时使用
 // ============================================================
 
-std::string CCodeGen::generateDllEntry(const std::string& progId) {
+std::string CCodeGen::generateDllEntry(const std::string& progId, const std::vector<SymbolTable*>& allSymTabs) {
     CodeEmitter entry;
     dllProgId_ = progId;
 
@@ -5140,16 +5158,36 @@ std::string CCodeGen::generateDllEntry(const std::string& progId) {
                 // 使用类的memberNames查找Public方法符号
                 // (不能按前缀"ClassName_"搜索, 因为单模块工程中方法名是"SetValue"而非"Calc_SetValue")
                 for (auto& memberName : sym->memberNames) {
-                    Symbol* memSym = symTab_.lookupModule(memberName);
+                    // Try Sub/Function: search in all symbol tables
+                    Symbol* memSym = nullptr;
+                    memSym = symTab_.lookupModule(memberName);
                     if (!memSym) memSym = symTab_.lookup(memberName);
-                    if (!memSym) continue;
-                    if (memSym->kind != SymbolKind::Sub && memSym->kind != SymbolKind::Function &&
-                        memSym->kind != SymbolKind::PropertyGet &&
-                        memSym->kind != SymbolKind::PropertyLet &&
-                        memSym->kind != SymbolKind::PropertySet) continue;
-                    if (memSym->access != AccessLevel::Public) continue;
-                    info.publicMethodNames.push_back(memSym->name);
-                    info.publicMethodSyms.push_back(memSym);
+                    if (!memSym) {
+                        for (auto* st : allSymTabs) {
+                            memSym = st->lookupModule(memberName);
+                            if (memSym) break;
+                        }
+                    }
+                    if (memSym && (memSym->kind == SymbolKind::Sub || memSym->kind == SymbolKind::Function)
+                        && memSym->access == AccessLevel::Public) {
+                        info.publicMethodNames.push_back(memSym->name);
+                        info.publicMethodSyms.push_back(memSym);
+                        memSym = nullptr;  // Don't double-count
+                    }
+                    // Lookup Property Get/Let/Set: search in all symbol tables
+                    for (auto kind : {SymbolKind::PropertyGet, SymbolKind::PropertyLet, SymbolKind::PropertySet}) {
+                        Symbol* propSym = symTab_.lookupModuleByKind(memberName, kind);
+                        if (!propSym) {
+                            for (auto* st : allSymTabs) {
+                                propSym = st->lookupModuleByKind(memberName, kind);
+                                if (propSym) break;
+                            }
+                        }
+                        if (propSym && propSym->access == AccessLevel::Public) {
+                            info.publicMethodNames.push_back(propSym->name);
+                            info.publicMethodSyms.push_back(propSym);
+                        }
+                    }
                 }
                 coClasses.push_back(std::move(info));
             }
@@ -5192,8 +5230,8 @@ std::string CCodeGen::generateDllEntry(const std::string& progId) {
             } else if (methodSym->kind == SymbolKind::PropertySet) {
                 methodCName = "prop_set_" + methodCName;
             }
-            std::string procName = cProcName(methodCName, methodSym->access);
-            if (methodSym->kind == SymbolKind::Function) {
+            std::string procName = cProcName(methodCName, methodSym->access, cc.moduleName);
+            if (methodSym->kind == SymbolKind::Function || methodSym->kind == SymbolKind::PropertyGet) {
                 std::string retType = mapType(methodSym->type);
                 std::string params = "struct " + clsStruct + "*";
                 for (auto& p : methodSym->params) {
@@ -5227,7 +5265,11 @@ std::string CCodeGen::generateDllEntry(const std::string& progId) {
             if (Symbol::toLower(bareName).substr(0, prefix.size()) == Symbol::toLower(prefix)) {
                 bareName = bareName.substr(prefix.size());
             }
-            std::string invokeName = "vb6_disp_" + clsId + "_" + cIdent(bareName) + "_invoke";
+            std::string invokeSuffixMD;
+            if (methodSym->kind == SymbolKind::PropertyGet) invokeSuffixMD = "_get";
+            else if (methodSym->kind == SymbolKind::PropertyLet) invokeSuffixMD = "_let";
+            else if (methodSym->kind == SymbolKind::PropertySet) invokeSuffixMD = "_set";
+            std::string invokeName = "vb6_disp_" + clsId + "_" + cIdent(bareName) + invokeSuffixMD + "_invoke";
 
             entry.emitLine("static void " + invokeName + "(void* instance, void** args, int32_t argc, void* result) {");
             entry.indent();
@@ -5243,23 +5285,23 @@ std::string CCodeGen::generateDllEntry(const std::string& progId) {
                     // 从VARIANT中提取ByVal值
                     if (pType == Vb6Type::Long || pType == Vb6Type::Integer ||
                         pType == Vb6Type::Boolean || pType == Vb6Type::Byte) {
-                        callArgs += "((vb6_VARIANT*)args[" + std::to_string(i) + "])->lVal";
+                        callArgs += "((VARIANT*)args[" + std::to_string(i) + "])->lVal";
                     } else if (pType == Vb6Type::Double || pType == Vb6Type::Single) {
-                        callArgs += "((vb6_VARIANT*)args[" + std::to_string(i) + "])->dblVal";
+                        callArgs += "((VARIANT*)args[" + std::to_string(i) + "])->dblVal";
                     } else if (pType == Vb6Type::String) {
-                        callArgs += "((vb6_VARIANT*)args[" + std::to_string(i) + "])->bstrVal";
+                        callArgs += "((VARIANT*)args[" + std::to_string(i) + "])->bstrVal";
                     } else {
-                        callArgs += "((vb6_VARIANT*)args[" + std::to_string(i) + "])->lVal";
+                        callArgs += "((VARIANT*)args[" + std::to_string(i) + "])->lVal";
                     }
                 } else {
                     // ByRef: 传递VARIANT中的值指针
                     if (pType == Vb6Type::Long || pType == Vb6Type::Integer ||
                         pType == Vb6Type::Boolean || pType == Vb6Type::Byte) {
-                        callArgs += "&((vb6_VARIANT*)args[" + std::to_string(i) + "])->lVal";
+                        callArgs += "&((VARIANT*)args[" + std::to_string(i) + "])->lVal";
                     } else if (pType == Vb6Type::Double || pType == Vb6Type::Single) {
-                        callArgs += "&((vb6_VARIANT*)args[" + std::to_string(i) + "])->dblVal";
+                        callArgs += "&((VARIANT*)args[" + std::to_string(i) + "])->dblVal";
                     } else {
-                        callArgs += "(void*)&((vb6_VARIANT*)args[" + std::to_string(i) + "])->lVal";
+                        callArgs += "(void*)&((VARIANT*)args[" + std::to_string(i) + "])->lVal";
                     }
                 }
             }
@@ -5273,22 +5315,22 @@ std::string CCodeGen::generateDllEntry(const std::string& progId) {
             } else if (methodSym->kind == SymbolKind::PropertySet) {
                 methodCName = "prop_set_" + methodCName;
             }
-            std::string procName = cProcName(methodCName, methodSym->access);
+            std::string procName = cProcName(methodCName, methodSym->access, cc.moduleName);
 
-            if (methodSym->kind == SymbolKind::Function) {
+            if (methodSym->kind == SymbolKind::Function || methodSym->kind == SymbolKind::PropertyGet) {
                 std::string retType = mapType(methodSym->type);
                 entry.emitLine("if (result) {");
                 entry.indent();
                 entry.emitLine(retType + " _r = " + procName + "(" + callArgs + ");");
                 if (methodSym->type == Vb6Type::Long || methodSym->type == Vb6Type::Integer ||
                     methodSym->type == Vb6Type::Boolean || methodSym->type == Vb6Type::Byte) {
-                    entry.emitLine("((vb6_VARIANT*)result)->vt = VT_I4; ((vb6_VARIANT*)result)->lVal = (int32_t)_r;");
+                    entry.emitLine("((VARIANT*)result)->vt = VT_I4; ((VARIANT*)result)->lVal = (int32_t)_r;");
                 } else if (methodSym->type == Vb6Type::Double || methodSym->type == Vb6Type::Single) {
-                    entry.emitLine("((vb6_VARIANT*)result)->vt = VT_R8; ((vb6_VARIANT*)result)->dblVal = (double)_r;");
+                    entry.emitLine("((VARIANT*)result)->vt = VT_R8; ((VARIANT*)result)->dblVal = (double)_r;");
                 } else if (methodSym->type == Vb6Type::String) {
-                    entry.emitLine("((vb6_VARIANT*)result)->vt = VT_BSTR; ((vb6_VARIANT*)result)->bstrVal = _r;");
+                    entry.emitLine("((VARIANT*)result)->vt = VT_BSTR; ((VARIANT*)result)->bstrVal = _r;");
                 } else {
-                    entry.emitLine("((vb6_VARIANT*)result)->vt = VT_I4; ((vb6_VARIANT*)result)->lVal = (int32_t)(intptr_t)_r;");
+                    entry.emitLine("((VARIANT*)result)->vt = VT_I4; ((VARIANT*)result)->lVal = (int32_t)(intptr_t)_r;");
                 }
                 entry.dedent();
                 entry.emitLine("}");
@@ -5302,6 +5344,10 @@ std::string CCodeGen::generateDllEntry(const std::string& progId) {
     }
 
     // 2. IDispatch方法描述表
+        // DISPID tracking: same-named Property Get/Let/Set share the same DISPID
+    std::unordered_map<std::string, int> dispIdMap;
+    int nextDispid = 1;
+
     for (auto& cc : coClasses) {
         std::string clsId = cIdent(cc.moduleName);
         std::string methodsVar = "g_vb6_disp_" + clsId + "Methods";
@@ -5317,7 +5363,11 @@ std::string CCodeGen::generateDllEntry(const std::string& progId) {
             if (Symbol::toLower(bareName).substr(0, prefix.size()) == Symbol::toLower(prefix)) {
                 bareName = bareName.substr(prefix.size());
             }
-            std::string invokeName = "vb6_disp_" + clsId + "_" + cIdent(bareName) + "_invoke";
+            std::string invokeSuffixMD;
+            if (methodSym->kind == SymbolKind::PropertyGet) invokeSuffixMD = "_get";
+            else if (methodSym->kind == SymbolKind::PropertyLet) invokeSuffixMD = "_let";
+            else if (methodSym->kind == SymbolKind::PropertySet) invokeSuffixMD = "_set";
+            std::string invokeName = "vb6_disp_" + clsId + "_" + cIdent(bareName) + invokeSuffixMD + "_invoke";
 
             int invkind = 1;
             if (methodSym->kind == SymbolKind::PropertyGet) {
@@ -5328,9 +5378,19 @@ std::string CCodeGen::generateDllEntry(const std::string& progId) {
                 invkind = 8;
             }
 
-            std::string wideName = "L\"" + bareName + "\"";
+                        // COM convention: Property Get/Let/Set share the same DISPID
+            std::string lowerBareName = Symbol::toLower(bareName);
+            int dispid;
+            auto dpIt = dispIdMap.find(lowerBareName);
+            if (dpIt != dispIdMap.end()) {
+                dispid = dpIt->second;
+            } else {
+                dispid = nextDispid++;
+                dispIdMap[lowerBareName] = dispid;
+            }
+std::string wideName = "L\"" + bareName + "\"";
 
-            entry.emitLine("{ " + wideName + ", " + std::to_string((int32_t)(mi + 1)) +
+            entry.emitLine("{ " + wideName + ", " + std::to_string((int32_t)dispid) +
                         ", " + std::to_string(invkind) + ", " + invokeName + " },");
         }
 

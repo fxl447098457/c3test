@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 // vb6rtl.h - VB6运行时库最小头文件
 // 为C代码生成器提供VB6基本类型的C定义
 // P3.6 阎段: 最小子集, 仅支撑 hello.bas 等简单程序
@@ -13,53 +13,75 @@
 #include <math.h>
 #include <limits.h>
 
+#ifdef _WIN32
+#include <windows.h>
+#include <oleauto.h>
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 // ============================================================
-// BSTR - VB6 字符串类型 (OLE BSTR 简化实现)
+// BSTR - VB6 字符串类型 (OLE BSTR)
 // ============================================================
 
-// BSTR 本质是 wchar_t* (指向长度前缀之后的字符数据)
-// 简化实现: 直接用 wchar_t*, 不做引用计数
+// BSTR 本质是 wchar_t* (指向OLE BSTR长度前缀之后的字符数据)
+// Windows: 使用OLE API (SysAllocString/SysFreeString/SysStringLen)
+// 非Windows: 自定义malloc实现
 typedef wchar_t* BSTR;
 
 // 空BSTR
 static inline BSTR vb6_BSTR_Empty(void) {
+#ifdef _WIN32
+    return SysAllocStringLen(L"", 0);
+#else
     return NULL;
+#endif
 }
 
-// 从宽字符串字面量创建BSTR (零拷贝, 不修改原字符串)
-// 注意: 字面量的BSTR不能用SysFreeString释放
+// 从宽字符串创建BSTR
+// Windows: 使用SysAllocString (分配副本, 可安全释放)
+// 非Windows: malloc分配自定义长度前缀
 static inline BSTR vb6_BSTR_FromStr(const wchar_t* s) {
     if (!s) return NULL;
+#ifdef _WIN32
+    return SysAllocString(s);
+#else
     size_t len = wcslen(s);
-    // 分配4字节长度前缀 + 字符数据 + null终止符
     uint32_t* p = (uint32_t*)malloc(sizeof(uint32_t) + (len + 1) * sizeof(wchar_t));
     if (!p) return NULL;
     *p = (uint32_t)len;
     BSTR bstr = (BSTR)(p + 1);
     memcpy(bstr, s, (len + 1) * sizeof(wchar_t));
     return bstr;
+#endif
 }
 
 // 释放BSTR
 static inline void vb6_BSTR_Free(BSTR bstr) {
     if (bstr) {
+#ifdef _WIN32
+        SysFreeString(bstr);
+#else
         uint32_t* p = ((uint32_t*)bstr) - 1;
         free(p);
+#endif
     }
 }
 
 // BSTR连接
 BSTR vb6_BSTR_Concat(BSTR a, BSTR b);
 
-// BSTR长度
+// BSTR长度 (返回字符数, 非字节数)
 static inline int32_t vb6_BSTR_Len(BSTR bstr) {
     if (!bstr) return 0;
+#ifdef _WIN32
+    return (int32_t)SysStringLen(bstr);
+#else
     uint32_t* p = ((uint32_t*)bstr) - 1;
     return (int32_t)*p;
+#endif
 }
 
 // ============================================================

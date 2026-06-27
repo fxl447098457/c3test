@@ -933,7 +933,12 @@ bool Driver::runCodeGeneration(const CompileOptions& options, const std::string&
         auto& lastAnalyzer = analyzers_.back();
         CCodeGen dllCgen(*diag_, lastAnalyzer->symbolTable(), lastAnalyzer->typeSystem(),
                          options.verbose);
-        std::string dllEntryCode = dllCgen.generateDllEntry(options.dllProgId);
+        // Collect all symbol tables for cross-module Property lookup
+        std::vector<SymbolTable*> allSymTabs;
+        for (auto& analyzer : analyzers_) {
+            allSymTabs.push_back(&analyzer->symbolTable());
+        }
+        std::string dllEntryCode = dllCgen.generateDllEntry(options.dllProgId, allSymTabs);
 
         std::string dllEntryPath = outputDir + "/dll_entry.c";
         {

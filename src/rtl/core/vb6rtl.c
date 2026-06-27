@@ -1,4 +1,4 @@
-// vb6rtl.c - VB6运行时库最小实现
+﻿// vb6rtl.c - VB6运行时库最小实现
 // 仅支持 hello.bas 等简单程序运行
 
 #include "vb6rtl.h"
@@ -36,10 +36,8 @@ BSTR vb6_BSTR_Concat(BSTR a, BSTR b) {
     int32_t lenB = vb6_BSTR_Len(b);
     int32_t total = lenA + lenB;
 
-    uint32_t* p = (uint32_t*)malloc(sizeof(uint32_t) + (total + 1) * sizeof(wchar_t));
-    if (!p) return NULL;
-    *p = (uint32_t)total;
-    BSTR result = (BSTR)(p + 1);
+    BSTR result = SysAllocStringLen(NULL, total);
+    if (!result) return NULL;
 
     if (a) memcpy(result, a, lenA * sizeof(wchar_t));
     if (b) memcpy(result + lenA, b, lenB * sizeof(wchar_t));
