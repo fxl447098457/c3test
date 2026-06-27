@@ -1,4 +1,4 @@
-#include "semantics/semantic_analyzer.hpp"
+﻿#include "semantics/semantic_analyzer.hpp"
 #include <algorithm>
 #include <cctype>
 
@@ -52,6 +52,10 @@ static void dispatchStmt(Stmt& stmt, SemanticAnalyzer& analyzer) {
         case ASTNodeKind::OptionStmt:       analyzer.visit(static_cast<OptionStmt&>(stmt)); break;
         case ASTNodeKind::LocalDeclStmt:    analyzer.visit(static_cast<LocalDeclStmt&>(stmt)); break;
         case ASTNodeKind::RaiseEventStmt:   /* P6.5: RaiseEvent在Pass2语义分析中验证事件存在性 */ break;
+        // 文件I/O语句
+        case ASTNodeKind::OpenStmt:        analyzer.visit(static_cast<OpenStmt&>(stmt)); break;
+        case ASTNodeKind::GetStmt:         analyzer.visit(static_cast<GetStmt&>(stmt)); break;
+        case ASTNodeKind::PutStmt:         analyzer.visit(static_cast<PutStmt&>(stmt)); break;
         // 其他语句暂不处理
         default: break;
     }
@@ -1183,6 +1187,26 @@ void SemanticAnalyzer::visit(ArrayTypeRef& node) {
 
 void SemanticAnalyzer::visit(FixedStringTypeRef& node) {
     if (node.length) analyzeExpr(*node.length);
+}
+
+// ---- 文件I/O语句 ----
+
+void SemanticAnalyzer::visit(OpenStmt& node) {
+    analyzeExpr(*node.pathName);
+    if (node.recordLength) analyzeExpr(*node.recordLength);
+    analyzeExpr(*node.fileNumber);
+}
+
+void SemanticAnalyzer::visit(GetStmt& node) {
+    analyzeExpr(*node.fileNumber);
+    if (node.recordNumber) analyzeExpr(*node.recordNumber);
+    analyzeExpr(*node.varName);
+}
+
+void SemanticAnalyzer::visit(PutStmt& node) {
+    analyzeExpr(*node.fileNumber);
+    if (node.recordNumber) analyzeExpr(*node.recordNumber);
+    analyzeExpr(*node.varName);
 }
 
 // ============================================================

@@ -244,6 +244,9 @@ if ($Category -in @("all", "run")) {
     Test-Run "test_fileio" "$Tests\test_fileio.bas"
     Test-Run "test_error" "$Tests\test_error.bas"
     Test-Run "test_now" "$Tests\test_now.bas"
+    Test-Run "test_getput" "$Tests\test_getput.bas" @("PASS1a", "PASS1b", "PASS1c", "PASS2", "PASS3", "PASS4")
+    Test-Run "test_onerror" "$Tests\test_onerror.bas" @("PASS1", "PASS2", "PASS3a", "PASS3b", "Done")
+    Test-Run "test_ndarray" "$Tests\test_ndarray.bas" @("2D sum=270", "P8.1 ALL TESTS DONE")
     Write-Host ""
     
     # --- P5.5 兼容性测试 ---

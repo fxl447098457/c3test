@@ -1,4 +1,4 @@
-// vb6c3 - 语句解析器
+﻿// vb6c3 - 语句解析器
 // VB6 块语句 + 单行语句
 
 #include "parser/parser.hpp"
@@ -870,8 +870,12 @@ std::unique_ptr<OpenStmt> Parser::parseOpenStmt() {
     auto fileNumber = parseExpression();
 
     ExprPtr recordLength;
-    if (match(TokenKind::Identifier) && toLower(cur_.text) == "len") {
-        // Len= 不太常见, 简化处理
+    // Len=reclength (可选)
+    if (cur_.kind == TokenKind::Identifier && toLower(cur_.text) == "len") {
+        advance(); // consume 'Len'
+        if (match(TokenKind::Equals)) {
+            recordLength = parseExpression();
+        }
     }
 
     return std::make_unique<OpenStmt>(loc, std::move(pathName), mode, access,

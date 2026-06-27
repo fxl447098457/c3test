@@ -1,4 +1,4 @@
-// vb6rtl.c - VB6运行时库最小实现
+﻿// vb6rtl.c - VB6运行时库最小实现
 // 仅支持 hello.bas 等简单程序运行
 
 #include "vb6rtl.h"
@@ -641,6 +641,23 @@ static int32_t vb6_date_to_serial(int32_t year, int32_t month, int32_t day) {
     // 调整到VB6的基准(1899-12-30 = 0)
 }
 
+// Excel序列号 → 年月日 (Julian Date Number逆运算)
+// 基于 vb6_date_to_serial 的逆运算, 含Lotus 1900-02-29 bug兼容
+static void vb6_serial_to_date(int32_t serial, int32_t* year, int32_t* month, int32_t* day) {
+    // 调整: serial=1 → 1900-01-01, serial=0 → 1899-12-30, serial=60 → 1900-02-29(Lotus bug)
+    // 使用Julian Day Number逆公式
+    int32_t jd = serial + 2415080;  // 调整到Julian Day基准(1899-12-30=JD 2415080)
+    int32_t a = jd + 32044;
+    int32_t b = (4 * a + 3) / 146097;
+    int32_t c = a - (146097 * b) / 4;
+    int32_t d = (4 * c + 3) / 1461;
+    int32_t e = c - (1461 * d) / 4;
+    int32_t m = (5 * e + 2) / 153;
+    *day = e - (153 * m + 2) / 5 + 1;
+    *month = m + 3 - 12 * (m / 10);
+    *year = 100 * b + d - 4800 + m / 10;
+}
+
 static double vb6_now_serial(void) {
     time_t t = time(NULL);
     struct tm* lt = localtime(&t);
@@ -1061,6 +1078,7 @@ int32_t vb6_LBoundND(vb6_SafeArrayND* arr, int32_t dimension) {
 #define VB6_MAX_FILES 32
 static FILE* vb6_file_table[VB6_MAX_FILES] = {0};
 static int32_t vb6_file_mode[VB6_MAX_FILES] = {0};  // 1=Input, 2=Output, 4=Random, 8=Append, 16=Binary
+static int32_t vb6_file_reclen[VB6_MAX_FILES] = {0}; // P8.2: 记录长度 (Random模式)
 
 int32_t vb6_FreeFile(void) {
     for (int32_t i = 1; i < VB6_MAX_FILES; i++) {
@@ -1069,7 +1087,7 @@ int32_t vb6_FreeFile(void) {
     return -1;  // 无可用通道
 }
 
-int32_t vb6_Open(BSTR pathname, int32_t mode, int32_t access, int32_t filenumber) {
+int32_t vb6_Open(BSTR pathname, int32_t mode, int32_t access, int32_t filenumber, int32_t reclength) {
     (void)access;  // 简化: 忽略access参数
     if (filenumber < 1 || filenumber >= VB6_MAX_FILES) return 0;
     if (vb6_file_table[filenumber]) return 0;  // 已打开
@@ -1086,13 +1104,14 @@ int32_t vb6_Open(BSTR pathname, int32_t mode, int32_t access, int32_t filenumber
         case 2: modeStr = "w"; break;   // Output
         case 4: modeStr = "r+b"; break; // Random
         case 8: modeStr = "a"; break;   // Append
-        case 16: modeStr = "rb"; break; // Binary
+        case 16: modeStr = "r+b"; break; // Binary (读写)
         default: free(narrow); return 0;
     }
 
     // Random/Binary模式需要文件存在才能r+b, 否则先创建
     FILE* f = NULL;
-    if (mode == 4) {
+    if (mode == 4 || mode == 16) {
+        // Random/Binary模式需要读写, 尝试打开已有文件, 不存在则创建
         f = fopen(narrow, "r+b");
         if (!f) f = fopen(narrow, "w+b");
     } else {
@@ -1100,9 +1119,13 @@ int32_t vb6_Open(BSTR pathname, int32_t mode, int32_t access, int32_t filenumber
     }
     free(narrow);
 
-    if (!f) return 0;
+    if (!f) {
+        vb6_RaiseError(53, vb6_BSTR_FromStr(L"File not found"));
+        return 0;
+    }
     vb6_file_table[filenumber] = f;
     vb6_file_mode[filenumber] = mode;
+    vb6_file_reclen[filenumber] = (reclength > 0) ? reclength : 128;  // P8.2: 默认128
     return -1;  // True
 }
 
@@ -1112,6 +1135,7 @@ int32_t vb6_Close(int32_t filenumber) {
         fclose(vb6_file_table[filenumber]);
         vb6_file_table[filenumber] = NULL;
         vb6_file_mode[filenumber] = 0;
+        vb6_file_reclen[filenumber] = 0;
     }
     return -1;
 }
@@ -1306,4 +1330,70 @@ void vb6_RaiseError(int32_t errNum, BSTR description) {
     fwprintf(stderr, L"Unhandled VB6 Error #%d: %ls\n", errNum,
              description ? description : L"(no description)");
     exit(errNum);
+}
+
+// ============================================================
+// P8.2: 随机/二进制文件访问 (Get/Put)
+// ============================================================
+
+int32_t vb6_Get(int32_t filenumber, int32_t recnumber, void* varPtr, int32_t varSize) {
+    if (filenumber < 1 || filenumber >= VB6_MAX_FILES || !vb6_file_table[filenumber]) return 0;
+    FILE* f = vb6_file_table[filenumber];
+    int32_t mode = vb6_file_mode[filenumber];
+
+    if (mode == 4) {
+        // Random模式: recnumber是1-based记录号, 按reclength定位
+        int32_t reclen = vb6_file_reclen[filenumber];
+        if (reclen <= 0) reclen = 128;
+        long pos = (long)(recnumber - 1) * reclen;
+        fseek(f, pos, SEEK_SET);
+        // 读取min(varSize, reclen)字节
+        int32_t readLen = (varSize < reclen) ? varSize : reclen;
+        size_t n = fread(varPtr, 1, readLen, f);
+        // 不足部分填零
+        if ((int32_t)n < varSize) {
+            memset((char*)varPtr + n, 0, varSize - n);
+        }
+    } else if (mode == 16) {
+        // Binary模式: recnumber是1-based字节位置
+        if (recnumber > 0) {
+            fseek(f, (long)(recnumber - 1), SEEK_SET);
+        }
+        fread(varPtr, 1, varSize, f);
+    } else {
+        return 0;  // 不支持的模式
+    }
+    return -1;  // True
+}
+
+int32_t vb6_Put(int32_t filenumber, int32_t recnumber, void* varPtr, int32_t varSize) {
+    if (filenumber < 1 || filenumber >= VB6_MAX_FILES || !vb6_file_table[filenumber]) return 0;
+    FILE* f = vb6_file_table[filenumber];
+    int32_t mode = vb6_file_mode[filenumber];
+
+    if (mode == 4) {
+        // Random模式: recnumber是1-based记录号, 按reclength定位
+        int32_t reclen = vb6_file_reclen[filenumber];
+        if (reclen <= 0) reclen = 128;
+        long pos = (long)(recnumber - 1) * reclen;
+        fseek(f, pos, SEEK_SET);
+        // 写入min(varSize, reclen)字节, 不足部分填零
+        int32_t writeLen = (varSize < reclen) ? varSize : reclen;
+        fwrite(varPtr, 1, writeLen, f);
+        if (writeLen < reclen) {
+            // 记录剩余部分填零
+            char zero = 0;
+            for (int32_t i = writeLen; i < reclen; i++) fwrite(&zero, 1, 1, f);
+        }
+    } else if (mode == 16) {
+        // Binary模式: recnumber是1-based字节位置
+        if (recnumber > 0) {
+            fseek(f, (long)(recnumber - 1), SEEK_SET);
+        }
+        fwrite(varPtr, 1, varSize, f);
+    } else {
+        return 0;  // 不支持的模式
+    }
+    fflush(f);
+    return -1;  // True
 }

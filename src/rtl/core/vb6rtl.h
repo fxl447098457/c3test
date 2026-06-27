@@ -426,7 +426,7 @@ int32_t vb6_LBoundND(vb6_SafeArrayND* arr, int32_t dimension);
 
 // 文件 I/O
 int32_t vb6_FreeFile(void);
-int32_t vb6_Open(BSTR pathname, int32_t mode, int32_t access, int32_t filenumber);
+int32_t vb6_Open(BSTR pathname, int32_t mode, int32_t access, int32_t filenumber, int32_t reclength);
 int32_t vb6_Close(int32_t filenumber);
 int32_t vb6_EOF(int32_t filenumber);
 int32_t vb6_LOF(int32_t filenumber);
@@ -442,6 +442,10 @@ int32_t vb6_ChDir(BSTR pathname);
 int32_t vb6_ChDrive(BSTR drive);
 int32_t vb6_Name(BSTR oldPath, BSTR newPath);
 int32_t vb6_FileCopy(BSTR source, BSTR destination);
+
+// P8.2: 随机/二进制文件访问 (Get/Put)
+int32_t vb6_Get(int32_t filenumber, int32_t recnumber, void* varPtr, int32_t varSize);
+int32_t vb6_Put(int32_t filenumber, int32_t recnumber, void* varPtr, int32_t varSize);
 
 // 错误处理
 int32_t vb6_ErrNumber(void);

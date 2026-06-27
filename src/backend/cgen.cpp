@@ -1,4 +1,4 @@
-#include "backend/cgen.hpp"
+﻿#include "backend/cgen.hpp"
 #include <algorithm>
 #include <cctype>
 #include <iostream>
@@ -2837,6 +2837,7 @@ void CCodeGen::visit(OnErrorStmt& node) {
             c_.dedent();
             c_.emitLine("}");
             c_.emitLine("vb6_err_jmp_active = 1;");
+            c_.emitLine("vb6_error_jmp_set = 1;");
             // 需要setjmp头文件
             needSetjmp_ = true;
             break;
@@ -2850,6 +2851,7 @@ void CCodeGen::visit(OnErrorStmt& node) {
             // On Error GoTo 0: 禁用错误处理
             c_.emitLine("vb6_err_resume_next = 0;");
             c_.emitLine("vb6_err_jmp_active = 0;");
+            c_.emitLine("vb6_error_jmp_set = 0;");
             break;
     }
 }
@@ -3109,8 +3111,13 @@ void CCodeGen::visit(OpenStmt& node) {
     emitExpr(*node.fileNumber);
     std::string fnum = std::move(lastExpr_);
 
+    std::string recLen = "0";
+    if (node.recordLength) {
+        emitExpr(*node.recordLength);
+        recLen = std::move(lastExpr_);
+    }
     c_.emitLine("vb6_Open(" + pathName + ", " + std::to_string(modeVal) + ", " +
-                std::to_string(accessVal) + ", " + fnum + ");");
+                std::to_string(accessVal) + ", " + fnum + ", " + recLen + ");");
 }
 
 void CCodeGen::visit(CloseStmt& node) {
@@ -3230,13 +3237,29 @@ void CCodeGen::visit(GetStmt& node) {
     // Get #fnum, [recnum], var
     emitExpr(*node.fileNumber);
     std::string fnum = std::move(lastExpr_);
+    emitExpr(*node.varName);
+    std::string varExpr = std::move(lastExpr_);
+    // 确定变量大小: 根据变量名查询已知类型
+    std::string varLower = varExpr;
+    std::transform(varLower.begin(), varLower.end(), varLower.begin(), ::tolower);
+    std::string bareName = varLower;
+    std::string sizeExpr;
+    if (knownBstrVars_.count(bareName)) {
+        sizeExpr = "0";  // BSTR: varSize=0 让RTL层特殊处理
+    } else if (knownDoubleVars_.count(bareName)) {
+        sizeExpr = "sizeof(double)";
+    } else if (knownLongVars_.count(bareName)) {
+        sizeExpr = "sizeof(int32_t)";
+    } else {
+        sizeExpr = "sizeof(int32_t)";  // 默认: Long
+    }
     if (node.recordNumber) {
         emitExpr(*node.recordNumber);
-        std::string recnum = lastExpr_;
-        emitExpr(*node.varName);
-        c_.emitLine("/* TODO: vb6_Get(" + fnum + ", " + recnum + ", &" + lastExpr_ + ") */");
+        std::string recnum = std::move(lastExpr_);
+        c_.emitLine("vb6_Get(" + fnum + ", " + recnum + ", &" + varExpr + ", " + sizeExpr + ");");
     } else {
-        c_.emitLine("/* TODO: Get sequential */");
+        // 无 recnum: 顺序读, recnum=0 表示当前位置
+        c_.emitLine("vb6_Get(" + fnum + ", 0, &" + varExpr + ", " + sizeExpr + ");");
     }
 }
 
@@ -3244,16 +3267,30 @@ void CCodeGen::visit(PutStmt& node) {
     // Put #fnum, [recnum], var
     emitExpr(*node.fileNumber);
     std::string fnum = std::move(lastExpr_);
+    emitExpr(*node.varName);
+    std::string varExpr = std::move(lastExpr_);
+    // 确定变量大小: 根据变量名查询已知类型
+    std::string varLower = varExpr;
+    std::transform(varLower.begin(), varLower.end(), varLower.begin(), ::tolower);
+    std::string bareName = varLower;
+    std::string sizeExpr;
+    if (knownBstrVars_.count(bareName)) {
+        sizeExpr = "0";  // BSTR: varSize=0 让RTL层特殊处理
+    } else if (knownDoubleVars_.count(bareName)) {
+        sizeExpr = "sizeof(double)";
+    } else if (knownLongVars_.count(bareName)) {
+        sizeExpr = "sizeof(int32_t)";
+    } else {
+        sizeExpr = "sizeof(int32_t)";  // 默认: Long
+    }
     if (node.recordNumber) {
         emitExpr(*node.recordNumber);
-        std::string recnum = lastExpr_;
-        emitExpr(*node.varName);
-        c_.emitLine("/* TODO: vb6_Put(" + fnum + ", " + recnum + ", &" + lastExpr_ + ") */");
+        std::string recnum = std::move(lastExpr_);
+        c_.emitLine("vb6_Put(" + fnum + ", " + recnum + ", &" + varExpr + ", " + sizeExpr + ");");
     } else {
-        c_.emitLine("/* TODO: Put sequential */");
+        c_.emitLine("vb6_Put(" + fnum + ", 0, &" + varExpr + ", " + sizeExpr + ");");
     }
 }
-
 void CCodeGen::visit(SeekStmt& node) {
     emitExpr(*node.fileNumber);
     std::string fnum = std::move(lastExpr_);
