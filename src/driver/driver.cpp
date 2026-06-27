@@ -1276,33 +1276,24 @@ void Driver::printHelp() {
               << "\n"
               << "选项:\n"
               << "  -o <文件>          输出文件路径\n"
-              << "  --output-dir <目录> 输出目录 (默认: output)\n"
+              << "  --output-dir <目录> 输出目录 (默认: 源文件所在目录)\n"
               << "  --target <平台>     目标平台 (win-x86, win-x64, linux-x64, macos-arm64)\n"
               << "  --gui <模式>        GUI模式 (native, webview, none)\n"
-              << "  --dump-tokens       输出token列表\n"
-              << "  --dump-preprocess   输出预处理后的token列表\n"
-              << "  --dump-ast          输出AST\n"
-              << "  --dump-symbols      输出符号表\n"
-              << "  --dump-ir           输出IR\n"
-              << "  --emit-c           输出C代码 (.h/.c)\n"
-              << "  --emit-llvm         输出LLVM IR (.ll)\n"
               << "  --syntax-only       只做语法检查\n"
               << "  -d, --define <N=V>  定义条件编译常量 (如 -d:DEBUG=-1)\n"
               << "  -O <级别>           优化级别 (0-3)\n"
               << "  -g, --debug         生成调试信息\n"
-              << "  --compat-check      跨平台兼容性检查\n"
-              << "  --dll               编译为ActiveX DLL (P6.6)\n"
-              << "  --progid <前缀>     ActiveX DLL的ProgID前缀\n"
+              << "  --dll               编译为ActiveX DLL\n"
               << "  -v, --verbose       详细输出\n"
               << "  -h, --help          显示帮助\n"
               << "  -V, --version       显示版本\n"
               << "\n"
               << "示例:\n"
               << "  C3 hello.bas -o hello.exe\n"
-              << "  C3 module.bas --dump-tokens\n"
               << "  C3 app.vbp --target win-x64\n"
-              << "  C3 module.bas -d:WIN64=-1 --dump-preprocess\n";
+              << "  C3 module.bas -d:DEBUG=-1\n";
 }
+
 
 void Driver::printVersion() {
     std::cout << "C3 version 0.10.0 (vb6.pro project)" << std::endl;

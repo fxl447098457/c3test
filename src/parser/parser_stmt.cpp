@@ -181,14 +181,28 @@ StmtList Parser::parseBlock(TokenKind endKind1, TokenKind endKind2) {
     return stmts;
 }
 
+// --- parseBlockUntil replacement content ---
 StmtList Parser::parseBlockUntil(std::initializer_list<TokenKind> endKinds) {
     StmtList stmts;
     skipNewLines();
 
     while (cur_.kind != TokenKind::EndOfFile) {
+        bool isEndOfBlock = false;
         for (auto k : endKinds) {
-            if (cur_.kind == k) return stmts;
+            if (cur_.kind == k) {
+                // Special handling for End token:
+                // If End is followed by Sub/Function/Property/etc., it's a block terminator (End Sub, etc.)
+                // If End is followed by newline or non-block keyword, it's a standalone End statement
+                if (k == TokenKind::End && !isEndBlock()) {
+                    // Bare End statement (terminate program), not a block terminator - continue parsing
+                    break;
+                }
+                isEndOfBlock = true;
+                break;
+            }
         }
+        if (isEndOfBlock) return stmts;
+
         auto stmt = parseStatement();
         if (stmt) {
             stmts.push_back(std::move(stmt));
@@ -198,6 +212,7 @@ StmtList Parser::parseBlockUntil(std::initializer_list<TokenKind> endKinds) {
 
     return stmts;
 }
+
 
 // ============================================================
 // If 语句
