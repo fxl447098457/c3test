@@ -1,9 +1,11 @@
-﻿// vb6comserver.c - VB6 COM服务端运行时 (P6.6 ActiveX DLL)
+// vb6comserver.c - VB6 COM服务端运行时 (P6.6 ActiveX DLL)
 // 实现IClassFactory、IDispatch包装、DLL导出骨架、注册表辅助
 
-#include "vb6comserver.h"
 #include <string.h>
 #include <stdio.h>
+#include <stdarg.h>
+#define COBJMACROS  /* P6.6.6: 启用C COM宏 (ITypeLib_Release等) */
+#include "vb6comserver.h"
 
 #ifndef CONNECT_E_NOCONNECTION
 #define CONNECT_E_NOCONNECTION 0x80040200
@@ -45,14 +47,41 @@ static const IID IID_IProvideClassInfo2_ = {0x25F711BE,0x2E07,0x4E84,{0x97,0xF2,
 // vb6_ComObject - IDispatch包装实现
 // ============================================================
 
+// P6.6.6: Debug helper - log QI/GetTypeInfo info to c3_com_debug.log
+static void vb6_com_debug_log(const char* fmt, ...) {
+    static const char* debugPath = "c3_com_debug.log";
+    FILE* f = fopen(debugPath, "a");
+    if (!f) return;
+    va_list ap;
+    va_start(ap, fmt);
+    vfprintf(f, fmt, ap);
+    va_end(ap);
+    fprintf(f, "\n");
+    fclose(f);
+}
+
+static void vb6_format_iid(REFIID riid, char* buf, size_t bufsz) {
+    snprintf(buf, bufsz, "{%08lX-%04X-%04X-%02X%02X-%02X%02X%02X%02X%02X%02X}",
+        riid->Data1, riid->Data2, riid->Data3,
+        riid->Data4[0], riid->Data4[1], riid->Data4[2], riid->Data4[3],
+        riid->Data4[4], riid->Data4[5], riid->Data4[6], riid->Data4[7]);
+}
+
 // --- IUnknown ---
 
 static HRESULT STDMETHODCALLTYPE ComObj_QueryInterface(vb6_ComObject* self, REFIID riid, void** ppv) {
     int i;
+    char riidStr[64], defIidStr[64];
+    vb6_format_iid(riid, riidStr, sizeof(riidStr));
+    vb6_com_debug_log("QI: riid=%s progId=%s defaultIfaceIid=%s",
+        riidStr,
+        self->desc ? self->desc->progId : "(null)",
+        (self->desc && self->desc->defaultIfaceIid) ? (vb6_format_iid(self->desc->defaultIfaceIid, defIidStr, sizeof(defIidStr)), defIidStr) : "(null)");
     if (!ppv) return E_POINTER;
     if (IsEqualIID(riid, &IID_IUnknown_) || IsEqualIID(riid, &IID_IDispatch_)) {
         *ppv = self;
         self->vtable->AddRef(self);
+        vb6_com_debug_log("QI: matched IUnknown/IDispatch -> S_OK");
         return S_OK;
     }
     // P12.1: Check Implements interface IIDs
@@ -61,14 +90,16 @@ static HRESULT STDMETHODCALLTYPE ComObj_QueryInterface(vb6_ComObject* self, REFI
             if (IsEqualIID(riid, self->desc->ifaceIids[i])) {
                 *ppv = self;  // dispinterface: same IDispatch pointer
                 self->vtable->AddRef(self);
+                vb6_com_debug_log("QI: matched Implements iface[%d] -> S_OK", i);
                 return S_OK;
             }
         }
     }
-    // P6.6.6: Default dispinterface IID (早绑定时VBA QI _ClassName IID)
+    // P6.6.6: Default dispinterface IID
     if (self->desc && self->desc->defaultIfaceIid && IsEqualIID(riid, self->desc->defaultIfaceIid)) {
         *ppv = self;  // dispinterface = same IDispatch pointer
         self->vtable->AddRef(self);
+        vb6_com_debug_log("QI: matched defaultIfaceIid -> S_OK");
         return S_OK;
     }
     // P6.6: IConnectionPointContainer (only if coclass has events)
@@ -79,10 +110,11 @@ static HRESULT STDMETHODCALLTYPE ComObj_QueryInterface(vb6_ComObject* self, REFI
         if (self->cpc) {
             *ppv = self->cpc;
             self->cpc->vtable->AddRef(self->cpc);
+            vb6_com_debug_log("QI: matched IConnectionPointContainer -> S_OK");
             return S_OK;
         }
     }
-    // P6.6: IProvideClassInfo2 (VBScript event discovery)
+    // P6.6: IProvideClassInfo2
     if (self->desc && IsEqualIID(riid, &IID_IProvideClassInfo2_)) {
         if (!self->pci) {
             self->pci = vb6_PCI_Create(self);
@@ -90,10 +122,12 @@ static HRESULT STDMETHODCALLTYPE ComObj_QueryInterface(vb6_ComObject* self, REFI
         if (self->pci) {
             *ppv = self->pci;
             self->pci->vtable->AddRef(self->pci);
+            vb6_com_debug_log("QI: matched IProvideClassInfo2 -> S_OK");
             return S_OK;
         }
     }
     *ppv = NULL;
+    vb6_com_debug_log("QI: no match -> E_NOINTERFACE");
     return E_NOINTERFACE;
 }
 
@@ -134,29 +168,40 @@ static HRESULT STDMETHODCALLTYPE ComObj_GetTypeInfoCount(vb6_ComObject* self, UI
     *pctinfo = 1;  // 提供TypeLib信息 (早绑定需要)
     return S_OK;
 }
-
 static HRESULT STDMETHODCALLTYPE ComObj_GetTypeInfo(vb6_ComObject* self, UINT iTInfo, LCID lcid, ITypeInfo** ppTInfo) {
+    char clsidStrBuf[64] = {0};
     if (!ppTInfo) return E_POINTER;
     if (iTInfo != 0) return DISP_E_BADINDEX;
     *ppTInfo = NULL;
     if (!self->desc) return E_FAIL;
+    vb6_com_debug_log("GetTypeInfo: progId=%s clsidStr=%s", self->desc->progId, self->desc->clsidStr ? self->desc->clsidStr : "(null)");
     // 获取DLL路径, 从嵌入资源加载TypeLib
     wchar_t dllPath[MAX_PATH];
     HMODULE hMod = NULL;
-    if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS, (LPCWSTR)&g_vb6_cRef, &hMod))
+    if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS, (LPCWSTR)&g_vb6_cRef, &hMod)) {
+        vb6_com_debug_log("GetTypeInfo: GetModuleHandleExW failed -> E_FAIL");
         return E_FAIL;
+    }
     GetModuleFileNameW(hMod, dllPath, MAX_PATH);
     ITypeLib* pTypeLib = NULL;
     HRESULT hr = LoadTypeLib(dllPath, &pTypeLib);
-    if (FAILED(hr) || !pTypeLib) return E_FAIL;
-    // 通过CLSID查找coclass的ITypeInfo (C语言必须通过vtable调用)
+    if (FAILED(hr) || !pTypeLib) {
+        vb6_com_debug_log("GetTypeInfo: LoadTypeLib failed hr=0x%08lX -> E_FAIL", hr);
+        return E_FAIL;
+    }
+    vb6_com_debug_log("GetTypeInfo: LoadTypeLib succeeded");
+    // 通过CLSID查找coclass的ITypeInfo
     CLSID clsid;
     hr = vb6_CLSIDFromStrA(self->desc->clsidStr, &clsid);
     if (FAILED(hr)) {
+        vb6_com_debug_log("GetTypeInfo: CLSIDFromStr failed hr=0x%08lX", hr);
         ITypeLib_Release(pTypeLib);
         return E_FAIL;
     }
-    hr = ITypeLib_GetTypeInfoOfGuid(pTypeLib, clsid, ppTInfo);
+    vb6_format_iid(&clsid, clsidStrBuf, sizeof(clsidStrBuf));
+    vb6_com_debug_log("GetTypeInfo: looking up CLSID=%s", clsidStrBuf);
+    hr = ITypeLib_GetTypeInfoOfGuid(pTypeLib, &clsid, ppTInfo);
+    vb6_com_debug_log("GetTypeInfo: GetTypeInfoOfGuid hr=0x%08lX", hr);
     ITypeLib_Release(pTypeLib);
     return hr;
 }

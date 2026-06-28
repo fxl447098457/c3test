@@ -1,4 +1,4 @@
-﻿#include "backend/cgen.hpp"
+#include "backend/cgen.hpp"
 #include <algorithm>
 #include <cctype>
 #include <iostream>
@@ -5713,7 +5713,10 @@ std::string CCodeGen::generateDllEntry(const std::string& progId, const std::vec
                 // P6.6.4: 收集事件信息
                 if (!sym->eventNames.empty()) {
                     info.eventNames = sym->eventNames;
-                    info.sourceIfaceIid = generateIid("source:" + progId + "." + sym->name + "Events");
+                    // P6.6.6: 优先使用TypeLib builder回写的IID, 保证与TypeLib中一致
+                    info.sourceIfaceIid = sym->comSourceIfaceIid.empty()
+                        ? generateIid("source:" + progId + "." + sym->name + "Events")
+                        : sym->comSourceIfaceIid;
                 }
                 // P6.6.6: 默认接口IID (由driver TypeLib builder回写)
                 info.defaultIfaceIid = sym->comDefaultIfaceIid;

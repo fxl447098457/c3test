@@ -76,6 +76,9 @@ std::pair<CompileOptions, int> Driver::parseArgs(int argc, char* argv[]) {
         else if (arg == "--emit-c") {
             opts.emitC = true;
         }
+        else if (arg == "--keep-for-debug") {
+            opts.keepTemps = true;  // 隐藏参数: 保留中间文件便于调试
+        }
         else if (arg == "--syntax-only") {
             opts.syntaxOnly = true;
         }
@@ -418,8 +421,13 @@ CompileResult Driver::compile(const CompileOptions& options) {
         return result;
     }
 
-    // Success: clean up intermediates
-    session.cleanup();
+    // Success: clean up intermediates (unless --keep-for-debug)
+    if (!effectiveOpts.keepTemps) {
+        session.cleanup();
+    } else {
+        session.release();  // clear paths so destructor won't delete
+        std::cout << "C3: [debug] intermediates kept at: " << intermediatesDir << std::endl;
+    }
 
     result.success = true;
     result.outputFile = effectiveOpts.outputFile;
@@ -1022,23 +1030,11 @@ bool Driver::runCodeGeneration(const CompileOptions& options, const std::string&
                 }
             }
         }
-        std::string dllEntryCode = dllCgen.generateDllEntry(options.dllProgId, allSymTabs);
+        // P6.6.6: TypeLib building MUST run before generateDllEntry()
+        // Reason: TypeLib builder writes back comDefaultIfaceIid and comClsidStr
+        // to the symbol table, which cgen's generateDllEntry() reads
 
-        std::string dllEntryPath = outputDir + "/dll_entry.c";
-        {
-            std::ofstream ofs(dllEntryPath, std::ios::out | std::ios::trunc);
-            if (!ofs) {
-                std::cerr << "C3: 无法写入文件: " << dllEntryPath << std::endl;
-                return false;
-            }
-            ofs << dllEntryCode;
-        }
-
-                if (options.verbose) {
-            std::cout << "C3: 生成 " << dllEntryPath << " (" << dllEntryCode.size() << " bytes)" << std::endl;
-        }
-
-                // P9: Build TypeLib using CreateTypeLib2 API (replaces MIDL)
+        // P9: Build TypeLib using CreateTypeLib2 API (replaces MIDL)
         {
             TypeLibBuilder tlbBuilder;
             std::string tlbPath = std::filesystem::absolute(outputDir + "/" + options.dllProgId + ".tlb").string();
@@ -1136,6 +1132,10 @@ bool Driver::runCodeGeneration(const CompileOptions& options, const std::string&
                             }
                             tlbBuilder.addDispInterface(sourceIfaceName, sourceIid, eventMethods);
 
+                            // P6.6.6: 回写事件源IID到符号表 (供cgen生成sourceIfaceIid用)
+                            clsSym.comSourceIfaceIid = sourceIid;
+                            clsSym.comSourceIfaceName = sourceIfaceName;
+
                             // 回写事件DISPID到符号表
                             for (size_t ei = 0; ei < clsSym.eventNames.size(); ei++) {
                                 std::string evtLower = Symbol::toLower(clsSym.eventNames[ei]);
@@ -1149,6 +1149,8 @@ bool Driver::runCodeGeneration(const CompileOptions& options, const std::string&
                             if (it != classClsidMap_.end()) clsid = it->second;
                         }
                         if (clsid.empty()) clsid = TypeLibBuilder::generateUuid(clsSym.name);
+                        // P6.6.6: Write back CLSID to symbol table, ensuring cgen and TypeLib use same CLSID
+                        if (clsSym.comClsidStr.empty()) clsSym.comClsidStr = clsid;
                         if (!tlbBuilder.addCoClass(clsSym.name, clsid, ifaceName, sourceIfaceName)) {
                             std::cerr << "C3: TypeLib addCoClass failed for " << clsSym.name << ": " << tlbBuilder.lastError() << std::endl;
                         }
@@ -1163,6 +1165,45 @@ bool Driver::runCodeGeneration(const CompileOptions& options, const std::string&
             } else {
                 std::cerr << "C3: TypeLib init failed: " << tlbBuilder.lastError() << std::endl;
             }
+        }
+
+        // P6.6.6: Sync comDefaultIfaceIid/comClsidStr from allSymTabs to lastAnalyzer's symbol table
+        // (TypeLib builder writes to per-module Symbol objects, but cgen uses lastAnalyzer's merged table)
+        for (auto& [key, sym] : lastAnalyzer->symbolTable().moduleScope()->symbols()) {
+            if (sym->kind == SymbolKind::Class && !sym->isInterface && sym->comDefaultIfaceIid.empty()) {
+                // Search all symbol tables for a matching class with IID info
+                for (auto* st : allSymTabs) {
+                    auto* srcSym = st->lookupModule(sym->name);
+                    if (srcSym && srcSym->kind == SymbolKind::Class && !srcSym->comDefaultIfaceIid.empty()) {
+                        sym->comDefaultIfaceIid = srcSym->comDefaultIfaceIid;
+                        sym->comDefaultIfaceName = srcSym->comDefaultIfaceName;
+                    }
+                    if (srcSym && srcSym->kind == SymbolKind::Class && !srcSym->comClsidStr.empty() && sym->comClsidStr.empty()) {
+                        sym->comClsidStr = srcSym->comClsidStr;
+                    }
+                    if (srcSym && srcSym->kind == SymbolKind::Class && !srcSym->comSourceIfaceIid.empty() && sym->comSourceIfaceIid.empty()) {
+                        sym->comSourceIfaceIid = srcSym->comSourceIfaceIid;
+                        sym->comSourceIfaceName = srcSym->comSourceIfaceName;
+                    }
+                }
+            }
+        }
+
+        // P6.6.6: generateDllEntry() runs after TypeLib building so IIDs/CLSIDs are available
+        std::string dllEntryCode = dllCgen.generateDllEntry(options.dllProgId, allSymTabs);
+
+        std::string dllEntryPath = outputDir + "/dll_entry.c";
+        {
+            std::ofstream ofs(dllEntryPath, std::ios::out | std::ios::trunc);
+            if (!ofs) {
+                std::cerr << "C3: 无法写入文件: " << dllEntryPath << std::endl;
+                return false;
+            }
+            ofs << dllEntryCode;
+        }
+
+        if (options.verbose) {
+            std::cout << "C3: 生成 " << dllEntryPath << " (" << dllEntryCode.size() << " bytes)" << std::endl;
         }
     }
 
@@ -1333,9 +1374,14 @@ bool Driver::runLinker(const CompileOptions& options, const std::string& outputD
 // === 帮助/版本 ===
 
 void Driver::writeErrorLog(const std::string& logPath, const std::string& stage) {
-    std::ofstream errLog(logPath, std::ios::out | std::ios::trunc);
+    // Prepend fail info (also creates file if not exists from MSVC driver)
+    if (!std::filesystem::exists(logPath)) {
+        std::ofstream createLog(logPath, std::ios::out);
+        createLog << "C3: Compilation failed (stage: " << stage << ")" << std::endl;
+    }
+    std::ofstream errLog(logPath, std::ios::out | std::ios::app);
     if (!errLog) return;
-    errLog << "C3: Compilation failed at stage: " << stage << std::endl;
+    errLog << "\n=== C3 Diagnostics (" << stage << ") ===" << std::endl;
     errLog << diag_->toString();
 }
 
