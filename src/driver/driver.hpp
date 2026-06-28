@@ -65,6 +65,7 @@ struct CompileOptions {
 
     // 窗体调试 (P7)
     bool dumpFrm = false;                    // 输出.frm窗体描述解析结果
+    bool keepTemps = false;                   // 保留中间文件 (调试用)
 };
 
 // 编译结果

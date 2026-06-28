@@ -7,6 +7,7 @@
 #include <sstream>
 #include <algorithm>
 #include <cstdint>
+#include <cstdio>
 
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
@@ -39,7 +40,7 @@ std::string TypeLibBuilder::generateUuid(const std::string& seed) {
         (unsigned long)(h1 >> 32),
         (unsigned int)((h1 >> 16) & 0xFFFF),
         (unsigned int)(h1 & 0xFFFF),
-        (unsigned int)(h2 >> 48),
+        (unsigned int)((h2 >> 48) & 0xFFFF),
         (unsigned int)((h2 >> 32) & 0xFFFF),
         (unsigned long)(h2 & 0xFFFFFFFF));
     return buf;
@@ -79,6 +80,10 @@ TypeLibBuilder::~TypeLibBuilder() {
         pCreateLib_ = nullptr;
     }
     for (auto& iface : interfaces_) {
+        if (iface.pCreateTypeInfo) {
+            static_cast<ICreateTypeInfo*>(iface.pCreateTypeInfo)->Release();
+            iface.pCreateTypeInfo = nullptr;
+        }
         if (iface.pTypeInfo) {
             static_cast<ITypeInfo*>(iface.pTypeInfo)->Release();
             iface.pTypeInfo = nullptr;
@@ -216,8 +221,12 @@ bool TypeLibBuilder::addDispInterface(const std::string& name,
         fd.oVft = 0;   // dispinterface 不使用 vtable 偏移
         fd.wFuncFlags = 0;
 
-        // 返回类型
-        fd.elemdescFunc.tdesc.vt = mapVartype(m.returnType);
+        // 返回类型 (Property Let/Set 无返回值)
+        if (m.isPropertyPut || m.isPropertyPutRef) {
+            fd.elemdescFunc.tdesc.vt = VT_VOID;
+        } else {
+            fd.elemdescFunc.tdesc.vt = mapVartype(m.returnType);
+        }
 
         // 设置 INVOKE_KIND
         if (m.isPropertyGet) {
@@ -261,39 +270,40 @@ bool TypeLibBuilder::addDispInterface(const std::string& name,
             return false;
         }
 
-        // 设置方法名+参数名 (ICreateTypeInfo::SetFuncAndParamNames: index, name, cNames, *rgsNames)
+        // 设置方法名+参数名
+        // 关键: 对于 Property Put/PutRef, 最后一个参数 (RHS) 是未命名的
+        // MSDN: "The last parameter for put and putref accessor functions is unnamed."
+        // 所以 cNames = 1 + (cParams - 1 for propput, else cParams)
         int mwlen = MultiByteToWideChar(CP_UTF8, 0, m.name.c_str(), -1, nullptr, 0);
         std::vector<WCHAR> wMName(mwlen);
         MultiByteToWideChar(CP_UTF8, 0, m.name.c_str(), -1, wMName.data(), mwlen);
 
-        if (!m.params.empty()) {
-            // 构造名称数组: [方法名, 参数1, 参数2, ...]
-            UINT cNames = 1 + (UINT)m.params.size();
-            std::vector<OLECHAR*> namePtrs(cNames);
-            std::vector<std::vector<WCHAR>> paramNameBufs;
-
-            namePtrs[0] = wMName.data();
-            for (size_t p = 0; p < m.params.size(); p++) {
-                int pwlen = MultiByteToWideChar(CP_UTF8, 0, m.params[p].name.c_str(), -1, nullptr, 0);
-                std::vector<WCHAR> wPName(pwlen);
-                MultiByteToWideChar(CP_UTF8, 0, m.params[p].name.c_str(), -1, wPName.data(), pwlen);
-                paramNameBufs.push_back(std::move(wPName));
-                namePtrs[p + 1] = paramNameBufs.back().data();
-            }
-
-            hr = pCTI->SetFuncAndParamNames((UINT)i, namePtrs.data(), cNames);
-        } else {
-            // 无参数：只需方法名
-            OLECHAR* names[] = { wMName.data() };
-            hr = pCTI->SetFuncAndParamNames((UINT)i, names, 1);
+        UINT cParamNames = (UINT)m.params.size();
+        // Property Put/PutRef: 最后一个参数 (RHS value) 不命名
+        if ((m.isPropertyPut || m.isPropertyPutRef) && !m.params.empty()) {
+            cParamNames = (UINT)m.params.size() - 1;
         }
 
+        UINT cNames = 1 + cParamNames;
+        std::vector<OLECHAR*> namePtrs(cNames);
+        std::vector<std::vector<WCHAR>> paramNameBufs;
+
+        namePtrs[0] = wMName.data();
+        for (size_t p = 0; p < cParamNames; p++) {
+            int pwlen = MultiByteToWideChar(CP_UTF8, 0, m.params[p].name.c_str(), -1, nullptr, 0);
+            std::vector<WCHAR> wPName(pwlen);
+            MultiByteToWideChar(CP_UTF8, 0, m.params[p].name.c_str(), -1, wPName.data(), pwlen);
+            paramNameBufs.push_back(std::move(wPName));
+            namePtrs[p + 1] = paramNameBufs.back().data();
+        }
+
+        hr = pCTI->SetFuncAndParamNames((UINT)i, namePtrs.data(), cNames);
         if (FAILED(hr)) {
             lastError_ = "SetFuncAndParamNames failed for " + m.name + ": 0x" + std::to_string(hr);
             pCTI->Release();
             return false;
         }
-    }
+    } // end for each method
 
     // LayOut
     hr = pCTI->LayOut();
@@ -303,12 +313,9 @@ bool TypeLibBuilder::addDispInterface(const std::string& name,
         return false;
     }
 
-    // 保存 TypeInfo 指针 (供 coclass AddImplType 引用)
-    ITypeInfo* pTI = nullptr;
-    pCTI->QueryInterface(IID_ITypeInfo, (void**)&pTI);
-    pCTI->Release();  // 释放 CreateTypeInfo, 保留 ITypeInfo
-
-    interfaces_.push_back({name, pTI, (int32_t)interfaces_.size()});
+    // 保存 TypeInfo 指针 (供 coclass AddRefTypeInfo 引用)
+    // pCTI 不释放, 留到 endLib() 释放
+    interfaces_.push_back({name, nullptr, pCTI, (int32_t)interfaces_.size()});
     return true;
 #else
     (void)name; (void)iidStr; (void)methods;
@@ -323,16 +330,16 @@ bool TypeLibBuilder::addDispInterface(const std::string& name,
 
 bool TypeLibBuilder::addCoClass(const std::string& name,
                                  const std::string& clsidStr,
-                                 const std::string& ifaceName) {
+                                 const std::string& ifaceName,
+                                 const std::string& sourceIfaceName) {
 #ifdef _WIN32
     if (!pCreateLib_) {
-        lastError_ = "beginLib() not called";
         return false;
     }
 
     auto* pCTL = static_cast<ICreateTypeLib2*>(pCreateLib_);
 
-    // 创建 TypeInfo (ICreateTypeInfo, not ICreateTypeInfo2)
+    // 创建 TypeInfo
     int wlen = MultiByteToWideChar(CP_UTF8, 0, name.c_str(), -1, nullptr, 0);
     std::vector<WCHAR> wName(wlen);
     MultiByteToWideChar(CP_UTF8, 0, name.c_str(), -1, wName.data(), wlen);
@@ -356,31 +363,81 @@ bool TypeLibBuilder::addCoClass(const std::string& name,
         pCTI->SetGuid(clsidGuid);
     }
 
-    // 设置 type flags: can create
+    // 设置 type flags
     pCTI->SetTypeFlags(TYPEFLAG_FCANCREATE);
 
-    // 查找默认接口 — 用 TypeLib 内序号作为 AddImplType 参数
+    // 查找默认接口 — 使用 AddRefTypeInfo 获取正确的 HREFTYPE
     int ifaceIdx = -1;
-    ITypeInfo* pIfaceTI = nullptr;
     for (size_t i = 0; i < interfaces_.size(); i++) {
         if (interfaces_[i].name == ifaceName) {
-            ifaceIdx = interfaces_[i].index;
-            pIfaceTI = static_cast<ITypeInfo*>(interfaces_[i].pTypeInfo);
+            ifaceIdx = (int)i;
             break;
         }
     }
-    if (ifaceIdx < 0 || !pIfaceTI) {
+    if (ifaceIdx < 0) {
         lastError_ = "Interface not found: " + ifaceName;
         pCTI->Release();
         return false;
     }
 
-    // AddImplType: index 为接口在 TypeLib 中的创建序号, flags 标记为默认接口
-    hr = pCTI->AddImplType(ifaceIdx, IMPLTYPEFLAG_FDEFAULT);
-    if (FAILED(hr)) {
-        lastError_ = "AddImplType failed for " + ifaceName + ": 0x" + std::to_string(hr);
-        pCTI->Release();
-        return false;
+    // 从保存的 ICreateTypeInfo 获得 ITypeInfo (同一 TypeLib 内, AddRefTypeInfo 必须)
+    {
+        auto* srcCTI = static_cast<ICreateTypeInfo*>(interfaces_[ifaceIdx].pCreateTypeInfo);
+        ITypeInfo* pSrcTI = nullptr;
+        hr = srcCTI->QueryInterface(IID_ITypeInfo, (void**)&pSrcTI);
+        if (FAILED(hr) || !pSrcTI) {
+            lastError_ = "QI ITypeInfo failed for " + ifaceName;
+            pCTI->Release();
+            return false;
+        }
+
+        HREFTYPE hRefType = 0;
+        hr = pCTI->AddRefTypeInfo(pSrcTI, &hRefType);
+        pSrcTI->Release();
+
+        if (FAILED(hr)) {
+            lastError_ = "AddRefTypeInfo failed for " + ifaceName + ": 0x" + std::to_string(hr);
+            pCTI->Release();
+            return false;
+        }
+
+        // AddImplType: index=0 (第一个实现的接口), hRefType
+        hr = pCTI->AddImplType(0, hRefType);
+        if (FAILED(hr)) {
+            lastError_ = "AddImplType failed for " + ifaceName + ": 0x" + std::to_string(hr) + " (hRefType=" + std::to_string(hRefType) + ")";
+            pCTI->Release();
+            return false;
+        }
+    }
+
+    // Set default interface flag
+    pCTI->SetImplTypeFlags(0, IMPLTYPEFLAG_FDEFAULT);
+
+    // 添加事件源接口 (source dispinterface)
+    if (!sourceIfaceName.empty()) {
+        int srcIdx = -1;
+        for (size_t i = 0; i < interfaces_.size(); i++) {
+            if (interfaces_[i].name == sourceIfaceName) {
+                srcIdx = (int)i;
+                break;
+            }
+        }
+        if (srcIdx >= 0) {
+            auto* srcCTI = static_cast<ICreateTypeInfo*>(interfaces_[srcIdx].pCreateTypeInfo);
+            ITypeInfo* pSrcTI = nullptr;
+            hr = srcCTI->QueryInterface(IID_ITypeInfo, (void**)&pSrcTI);
+            if (SUCCEEDED(hr) && pSrcTI) {
+                HREFTYPE hSrcRefType = 0;
+                hr = pCTI->AddRefTypeInfo(pSrcTI, &hSrcRefType);
+                pSrcTI->Release();
+                if (SUCCEEDED(hr)) {
+                    hr = pCTI->AddImplType(1, hSrcRefType);
+                    if (SUCCEEDED(hr)) {
+                        pCTI->SetImplTypeFlags(1, IMPLTYPEFLAG_FDEFAULT | IMPLTYPEFLAG_FSOURCE);
+                    }
+                }
+            }
+        }
     }
 
     // LayOut
@@ -394,7 +451,7 @@ bool TypeLibBuilder::addCoClass(const std::string& name,
     pCTI->Release();
     return true;
 #else
-    (void)name; (void)clsidStr; (void)ifaceName;
+    (void)name; (void)clsidStr; (void)ifaceName; (void)sourceIfaceName;
     lastError_ = "Not supported on this platform";
     return false;
 #endif
@@ -414,6 +471,19 @@ bool TypeLibBuilder::endLib(const std::string& tlbPath) {
 
     auto* pCTL = static_cast<ICreateTypeLib2*>(pCreateLib_);
 
+    // 释放接口引用 (必须在 SaveAllChanges 之前释放所有 ICreateTypeInfo)
+    for (auto& iface : interfaces_) {
+        if (iface.pCreateTypeInfo) {
+            static_cast<ICreateTypeInfo*>(iface.pCreateTypeInfo)->Release();
+            iface.pCreateTypeInfo = nullptr;
+        }
+        if (iface.pTypeInfo) {
+            static_cast<ITypeInfo*>(iface.pTypeInfo)->Release();
+            iface.pTypeInfo = nullptr;
+        }
+    }
+    interfaces_.clear();
+
     // 保存所有更改
     HRESULT hr = pCTL->SaveAllChanges();
     if (FAILED(hr)) {
@@ -424,15 +494,6 @@ bool TypeLibBuilder::endLib(const std::string& tlbPath) {
     // 释放
     pCTL->Release();
     pCreateLib_ = nullptr;
-
-    // 清理接口引用
-    for (auto& iface : interfaces_) {
-        if (iface.pTypeInfo) {
-            static_cast<ITypeInfo*>(iface.pTypeInfo)->Release();
-            iface.pTypeInfo = nullptr;
-        }
-    }
-    interfaces_.clear();
 
     CoUninitialize();
     libOpen_ = false;

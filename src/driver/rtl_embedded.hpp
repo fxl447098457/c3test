@@ -45,6 +45,9 @@ public:
     // Clean up session directory (auto-called by destructor)
     void cleanup();
 
+    // Release session without cleanup (keep intermediates for debugging)
+    void release() { sessionDir_.clear(); rtlDir_.clear(); }
+
     // Clean up old session dirs (>300 seconds)
     // Auto-called on each create()
     static void cleanupOldSessions();

@@ -19,6 +19,7 @@
 #include <algorithm>
 #include <filesystem>
 #include <cstdlib>
+#include <set>
 
 namespace vb6c3 {
 
@@ -1049,6 +1050,7 @@ bool Driver::runCodeGeneration(const CompileOptions& options, const std::string&
 
             if (tlbBuilder.beginLib(tlbPath, libId, options.dllProgId + " TypeLib", options.dllProgId + ".TypeLib")) {
                 int dispidCounter = 1;
+                std::set<std::string> processedClasses;
                 for (auto* symTab : allSymTabs) {
                     // 遍历模块级作用域中的符号, 找出 Public Class (ActiveX DLL 的 coclass)
                     auto* modScope = symTab->moduleScope();
@@ -1057,35 +1059,87 @@ bool Driver::runCodeGeneration(const CompileOptions& options, const std::string&
                         if (!symPtr || symPtr->kind != SymbolKind::Class) continue;
                         if (symPtr->instancing == VBInstancing::Private) continue;
                         auto& clsSym = *symPtr;
+                        // Deduplicate: each class only once across all symbol tables
+                        if (processedClasses.count(clsSym.name)) continue;
+                        processedClasses.insert(clsSym.name);
 
                         std::vector<TypeLibBuilder::MethodInfo> methods;
                         for (auto& memberName : clsSym.memberNames) {
-                            // 在模块作用域查找成员符号
-                            auto* memberSym = symTab->lookupModule(memberName);
-                            if (!memberSym || memberSym->access != AccessLevel::Public) continue;
-                            if (memberSym->kind != SymbolKind::Sub && memberSym->kind != SymbolKind::Function
-                                && memberSym->kind != SymbolKind::PropertyGet
-                                && memberSym->kind != SymbolKind::PropertyLet
-                                && memberSym->kind != SymbolKind::PropertySet) continue;
+                            // 同名属性可能有 PropertyGet/Let/Set 多个符号
+                            // memberNames 中同名属性只存一次, 需要分别查找各变体
+                            auto* subSym = symTab->lookupModuleByKind(memberName, SymbolKind::Sub);
+                            auto* fnSym = symTab->lookupModuleByKind(memberName, SymbolKind::Function);
+                            auto* propGetSym = symTab->lookupModuleByKind(memberName, SymbolKind::PropertyGet);
+                            auto* propLetSym = symTab->lookupModuleByKind(memberName, SymbolKind::PropertyLet);
+                            auto* propSetSym = symTab->lookupModuleByKind(memberName, SymbolKind::PropertySet);
 
-                            TypeLibBuilder::MethodInfo mi;
-                            mi.name = memberSym->name;
-                            mi.dispid = dispidCounter++;
-                            mi.returnType = memberSym->type;
-                            mi.isPropertyGet = (memberSym->kind == SymbolKind::PropertyGet);
-                            mi.isPropertyPut = (memberSym->kind == SymbolKind::PropertyLet);
-                            mi.isPropertyPutRef = (memberSym->kind == SymbolKind::PropertySet);
+                            // 收集所有 Public 成员变体 (PropertyGet 必须在 PropertyLet 前面)
+                            struct MemberRef { Symbol* sym; bool isGet; bool isPut; bool isPutRef; };
+                            std::vector<MemberRef> refs;
+                            if (subSym && subSym->access == AccessLevel::Public)
+                                refs.push_back({subSym, false, false, false});
+                            if (fnSym && fnSym->access == AccessLevel::Public)
+                                refs.push_back({fnSym, false, false, false});
+                            if (propGetSym && propGetSym->access == AccessLevel::Public)
+                                refs.push_back({propGetSym, true, false, false});
+                            if (propLetSym && propLetSym->access == AccessLevel::Public)
+                                refs.push_back({propLetSym, false, true, false});
+                            if (propSetSym && propSetSym->access == AccessLevel::Public)
+                                refs.push_back({propSetSym, false, false, true});
 
-                            // 使用 Symbol::params (不是 comMethodSig, 那是 COM 导入接口专用的)
-                            for (auto& param : memberSym->params) {
-                                mi.params.push_back(param);
+                            for (auto& mr : refs) {
+                                TypeLibBuilder::MethodInfo mi;
+                                mi.name = mr.sym->name;
+                                mi.returnType = mr.sym->type;
+                                mi.isPropertyGet = mr.isGet;
+                                mi.isPropertyPut = mr.isPut;
+                                mi.isPropertyPutRef = mr.isPutRef;
+                                // Property Get/Let/Set with same name share DISPID
+                                bool foundExistingDispid = false;
+                                for (const auto& existing : methods) {
+                                    if (existing.name == mi.name) {
+                                        mi.dispid = existing.dispid;
+                                        foundExistingDispid = true;
+                                        break;
+                                    }
+                                }
+                                if (!foundExistingDispid) {
+                                    mi.dispid = dispidCounter++;
+                                }
+                                for (auto& param : mr.sym->params) {
+                                    mi.params.push_back(param);
+                                }
+                                methods.push_back(mi);
                             }
-                            methods.push_back(mi);
                         }
 
                         std::string iid = TypeLibBuilder::generateUuid("_" + clsSym.name);
                         std::string ifaceName = "_" + clsSym.name;
-                        tlbBuilder.addDispInterface(ifaceName, iid, methods);
+                        if (!tlbBuilder.addDispInterface(ifaceName, iid, methods)) {
+                            std::cerr << "C3: TypeLib addDispInterface failed for " << ifaceName << ": " << tlbBuilder.lastError() << std::endl;
+                        }
+
+                        // P6.6.2: 如果类有事件, 创建 source dispinterface (_ClassNameEvents)
+                        std::string sourceIfaceName;
+                        if (!clsSym.eventNames.empty()) {
+                            sourceIfaceName = "_" + clsSym.name + "Events";
+                            std::string sourceIid = TypeLibBuilder::generateUuid(sourceIfaceName);
+                            std::vector<TypeLibBuilder::MethodInfo> eventMethods;
+                            for (size_t ei = 0; ei < clsSym.eventNames.size(); ei++) {
+                                TypeLibBuilder::MethodInfo emi;
+                                emi.name = clsSym.eventNames[ei];
+                                emi.dispid = (int32_t)(ei + 1);
+                                emi.returnType = Vb6Type::Void;
+                                eventMethods.push_back(emi);
+                            }
+                            tlbBuilder.addDispInterface(sourceIfaceName, sourceIid, eventMethods);
+
+                            // 回写事件DISPID到符号表
+                            for (size_t ei = 0; ei < clsSym.eventNames.size(); ei++) {
+                                std::string evtLower = Symbol::toLower(clsSym.eventNames[ei]);
+                                clsSym.comEventDispids[evtLower] = eventMethods[ei].dispid;
+                            }
+                        }
 
                         std::string clsid = clsSym.comClsidStr;
                         if (clsid.empty()) {
@@ -1093,7 +1147,9 @@ bool Driver::runCodeGeneration(const CompileOptions& options, const std::string&
                             if (it != classClsidMap_.end()) clsid = it->second;
                         }
                         if (clsid.empty()) clsid = TypeLibBuilder::generateUuid(clsSym.name);
-                        tlbBuilder.addCoClass(clsSym.name, clsid, ifaceName);
+                        if (!tlbBuilder.addCoClass(clsSym.name, clsid, ifaceName, sourceIfaceName)) {
+                            std::cerr << "C3: TypeLib addCoClass failed for " << clsSym.name << ": " << tlbBuilder.lastError() << std::endl;
+                        }
                     }
                 }
 

@@ -45,6 +45,12 @@ static inline void vb6_ServerRelease(void) {
 // coclass描述表 (由cgen生成)
 // ============================================================
 
+// P6.6: 事件描述 (source dispinterface中的每个事件)
+typedef struct vb6_EventDesc {
+    const wchar_t* name;    // 事件名称
+    int32_t dispid;         // DISPID
+} vb6_EventDesc;
+
 // coclass描述结构
 // 每个Public类(instancing >= PublicNotCreatable)生成一条
 typedef struct vb6_CoClassDesc {
@@ -64,6 +70,10 @@ typedef struct vb6_CoClassDesc {
     // P12.1: Implements接口IID表 (QI时遍历匹配)
     int ifaceCount;                       // 实现的接口数量 (Implements语句)
     const IID* const* ifaceIids;          // 接口IID指针数组 (每个元素指向一个静态IID)
+    // P6.6: 事件源接口 (IConnectionPointContainer)
+    const char* sourceIfaceIid;           // source dispinterface IID字符串 (NULL=无事件)
+    int eventCount;                       // 事件数量
+    const vb6_EventDesc* events;          // 事件描述表 (DISPID + 名称)
 } vb6_CoClassDesc;
 
 // IDispatch方法描述
@@ -90,7 +100,9 @@ typedef struct vb6_ComObject {
     const struct vb6_IDispatchVtable* vtable;
     LONG refCount;
     const vb6_CoClassDesc* desc;
-    void* vb6Instance;  // VB6类实例 (vb6_cls_<Name>*)
+    void* vb6Instance;  // VB6类实例
+    struct vb6_ConnectionPointContainer* cpc;  // P6.6: 事件连接点容器 (lazy init)
+    struct vb6_ProvideClassInfo2* pci;  // P6.6: IProvideClassInfo2 (lazy init)
 } vb6_ComObject;
 
 // IDispatch vtable (C风格)
@@ -157,6 +169,91 @@ HRESULT vb6_GetDllPath(wchar_t* path, DWORD size);
 HRESULT vb6_RegisterTypeLib(const wchar_t* dllPath);
 // 反注册TypeLib
 HRESULT vb6_UnregisterTypeLib(const wchar_t* dllPath);
+
+
+// ============================================================
+// P6.6: 服务端 IConnectionPointContainer + IConnectionPoint
+// 允许ActiveX DLL的COM对象向客户端触发事件
+// ============================================================
+
+typedef struct vb6_ConnectionPoint vb6_ConnectionPoint;
+typedef struct vb6_ConnectionPointContainer vb6_ConnectionPointContainer;
+
+// IConnectionPoint vtable
+typedef struct vb6_IConnectionPointVtable {
+    HRESULT (STDMETHODCALLTYPE *QueryInterface)(vb6_ConnectionPoint*, REFIID, void**);
+    ULONG (STDMETHODCALLTYPE *AddRef)(vb6_ConnectionPoint*);
+    ULONG (STDMETHODCALLTYPE *Release)(vb6_ConnectionPoint*);
+    HRESULT (STDMETHODCALLTYPE *GetConnectionInterface)(vb6_ConnectionPoint*, IID*);
+    HRESULT (STDMETHODCALLTYPE *GetConnectionPointContainer)(vb6_ConnectionPoint*, void**);
+    HRESULT (STDMETHODCALLTYPE *Advise)(vb6_ConnectionPoint*, IUnknown*, DWORD*);
+    HRESULT (STDMETHODCALLTYPE *Unadvise)(vb6_ConnectionPoint*, DWORD);
+    HRESULT (STDMETHODCALLTYPE *EnumConnections)(vb6_ConnectionPoint*, void**);
+} vb6_IConnectionPointVtable;
+
+// IConnectionPoint 实现
+struct vb6_ConnectionPoint {
+    const vb6_IConnectionPointVtable* vtable;
+    LONG refCount;
+    IID sourceIid;
+    vb6_ConnectionPointContainer* container;
+    DWORD* cookies;
+    IUnknown** sinks;
+    int connCount;
+    int connCapacity;
+    DWORD nextCookie;
+};
+
+// IConnectionPointContainer vtable
+typedef struct vb6_IConnectionPointContainerVtable {
+    HRESULT (STDMETHODCALLTYPE *QueryInterface)(vb6_ConnectionPointContainer*, REFIID, void**);
+    ULONG (STDMETHODCALLTYPE *AddRef)(vb6_ConnectionPointContainer*);
+    ULONG (STDMETHODCALLTYPE *Release)(vb6_ConnectionPointContainer*);
+    HRESULT (STDMETHODCALLTYPE *EnumConnectionPoints)(vb6_ConnectionPointContainer*, void**);
+    HRESULT (STDMETHODCALLTYPE *FindConnectionPoint)(vb6_ConnectionPointContainer*, REFIID, void**);
+} vb6_IConnectionPointContainerVtable;
+
+// IConnectionPointContainer 实现
+struct vb6_ConnectionPointContainer {
+    const vb6_IConnectionPointContainerVtable* vtable;
+    LONG refCount;
+    vb6_ComObject* comObj;
+    vb6_ConnectionPoint* connPoint;
+};
+
+// 为COM对象创建ConnectionPointContainer
+vb6_ConnectionPointContainer* vb6_CPC_Create(vb6_ComObject* comObj);
+
+// 通过COM对象触发事件 (由RaiseEvent调用)
+void vb6_FireEvent(vb6_ComObject* comObj, int32_t dispid, VARIANT* args, int argc);
+// ============================================================
+// P6.6: IProvideClassInfo2 实现
+// VBScript通过此接口发现事件源dispinterface
+// ============================================================
+
+typedef struct vb6_ProvideClassInfo2 vb6_ProvideClassInfo2;
+
+// IProvideClassInfo2 vtable
+typedef struct vb6_IProvideClassInfo2Vtable {
+    // IUnknown
+    HRESULT (STDMETHODCALLTYPE *QueryInterface)(vb6_ProvideClassInfo2*, REFIID, void**);
+    ULONG (STDMETHODCALLTYPE *AddRef)(vb6_ProvideClassInfo2*);
+    ULONG (STDMETHODCALLTYPE *Release)(vb6_ProvideClassInfo2*);
+    // IProvideClassInfo
+    HRESULT (STDMETHODCALLTYPE *GetClassInfo)(vb6_ProvideClassInfo2*, ITypeInfo**);
+    // IProvideClassInfo2
+    HRESULT (STDMETHODCALLTYPE *GetGUID)(vb6_ProvideClassInfo2*, DWORD, GUID*);
+} vb6_IProvideClassInfo2Vtable;
+
+// IProvideClassInfo2 实现
+struct vb6_ProvideClassInfo2 {
+    const vb6_IProvideClassInfo2Vtable* vtable;
+    LONG refCount;
+    vb6_ComObject* comObj;
+};
+
+// 为COM对象创建IProvideClassInfo2
+vb6_ProvideClassInfo2* vb6_PCI_Create(vb6_ComObject* comObj);
 
 #ifdef __cplusplus
 }

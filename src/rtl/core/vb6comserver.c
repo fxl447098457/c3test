@@ -5,6 +5,10 @@
 #include <string.h>
 #include <stdio.h>
 
+#ifndef CONNECT_E_NOCONNECTION
+#define CONNECT_E_NOCONNECTION 0x80040200
+#endif
+
 // ANSI CLSID字符串 → GUID (MSVC不导出vb6_CLSIDFromStrA, 手动转宽字符)
 static HRESULT vb6_CLSIDFromStrA(const char* str, CLSID* clsid) {
     wchar_t wbuf[64];
@@ -29,6 +33,13 @@ LONG g_vb6_cServerLock = 0;
 static const IID IID_IUnknown_ = {0x00000000,0x0000,0x0000,{0xC0,0x00,0x00,0x00,0x00,0x00,0x00,0x46}};
 static const IID IID_IDispatch_ = {0x00020400,0x0000,0x0000,{0xC0,0x00,0x00,0x00,0x00,0x00,0x00,0x46}};
 static const IID IID_IClassFactory_ = {0x00000001,0x0000,0x0000,{0xC0,0x00,0x00,0x00,0x00,0x00,0x00,0x46}};
+static const IID IID_IConnectionPointContainer_ = {0xB196B284,0xBAB4,0x101A,{0xB6,0x9C,0x00,0xAA,0x00,0x34,0x1D,0x07}};
+static const IID IID_IConnectionPoint_ = {0xB196B286,0xBAB4,0x101A,{0xB6,0x9C,0x00,0xAA,0x00,0x34,0x1D,0x07}};
+static const IID IID_IProvideClassInfo2_ = {0x25F711BE,0x2E07,0x4E84,{0x97,0xF2,0x14,0x3E,0x55,0x82,0x9B,0x5C}};
+
+#ifndef GUIDKIND_DEFAULT_SOURCE_DISP_IID
+#define GUIDKIND_DEFAULT_SOURCE_DISP_IID 1
+#endif
 
 // ============================================================
 // vb6_ComObject - IDispatch包装实现
@@ -54,6 +65,28 @@ static HRESULT STDMETHODCALLTYPE ComObj_QueryInterface(vb6_ComObject* self, REFI
             }
         }
     }
+    // P6.6: IConnectionPointContainer (only if coclass has events)
+    if (self->desc && self->desc->sourceIfaceIid && IsEqualIID(riid, &IID_IConnectionPointContainer_)) {
+        if (!self->cpc) {
+            self->cpc = vb6_CPC_Create(self);
+        }
+        if (self->cpc) {
+            *ppv = self->cpc;
+            self->cpc->vtable->AddRef(self->cpc);
+            return S_OK;
+        }
+    }
+    // P6.6: IProvideClassInfo2 (VBScript event discovery)
+    if (self->desc && IsEqualIID(riid, &IID_IProvideClassInfo2_)) {
+        if (!self->pci) {
+            self->pci = vb6_PCI_Create(self);
+        }
+        if (self->pci) {
+            *ppv = self->pci;
+            self->pci->vtable->AddRef(self->pci);
+            return S_OK;
+        }
+    }
     *ppv = NULL;
     return E_NOINTERFACE;
 }
@@ -73,6 +106,16 @@ static ULONG STDMETHODCALLTYPE ComObj_Release(vb6_ComObject* self) {
             self->desc->destroyFunc(self->vb6Instance);
         }
         self->vb6Instance = NULL;
+        // P6.6: Release PCI
+        if (self->pci) {
+            self->pci->vtable->Release(self->pci);
+            self->pci = NULL;
+        }
+        // P6.6: Release CPC
+        if (self->cpc) {
+            self->cpc->vtable->Release(self->cpc);
+            self->cpc = NULL;
+        }
         CoTaskMemFree(self);
     }
     return count;
@@ -215,6 +258,13 @@ vb6_ComObject* vb6_ComObject_Create(const vb6_CoClassDesc* desc) {
     obj->refCount = 1;
     obj->desc = desc;
     obj->vb6Instance = desc->factoryFunc();  // 调用 vb6_cls_<Name>_New()
+    obj->cpc = NULL;  // P6.6: lazy init CPC
+    obj->pci = NULL;  // P6.6: lazy init PCI
+    // P6.6.3: Set back-pointer for event support (first field of VB6 class struct = __comObj)
+    if (obj->vb6Instance) {
+        void** ppComObj = (void**)obj->vb6Instance;
+        *ppComObj = obj;
+    }
     
     if (!obj->vb6Instance) {
         CoTaskMemFree(obj);
@@ -456,10 +506,45 @@ HRESULT vb6_RegisterTypeLib(const wchar_t* dllPath) {
         return S_FALSE;
     }
     
-    // 注册TypeLib到注册表 (包括所有接口/coclass的TypeLib信息)
+    // 注册TypeLib到注册表
     hr = RegisterTypeLib(pTypeLib, (OLECHAR*)dllPath, NULL);
+    if (SUCCEEDED(hr)) {
+        // P6.6: Also add TypeLib subkey to each coclass CLSID entry
+        // RegisterTypeLib may not add this if the CLSID entry already exists
+        TLIBATTR* pAttr = NULL;
+        hr = pTypeLib->lpVtbl->GetLibAttr(pTypeLib, &pAttr);
+        if (SUCCEEDED(hr) && pAttr) {
+            UINT typeCount = pTypeLib->lpVtbl->GetTypeInfoCount(pTypeLib);
+            for (UINT i = 0; i < typeCount; i++) {
+                TYPEKIND tk;
+                pTypeLib->lpVtbl->GetTypeInfoType(pTypeLib, i, &tk);
+                if (tk == TKIND_COCLASS) {
+                    ITypeInfo* pInfo = NULL;
+                    if (SUCCEEDED(pTypeLib->lpVtbl->GetTypeInfo(pTypeLib, i, &pInfo))) {
+                        TYPEATTR* pTA = NULL;
+                        if (SUCCEEDED(pInfo->lpVtbl->GetTypeAttr(pInfo, &pTA))) {
+                            // Add CLSID\{clsid}\TypeLib = {LibID}
+                            wchar_t clsidStr[64];
+                            StringFromGUID2(&pTA->guid, clsidStr, 64);
+                            wchar_t libidStr[64];
+                            StringFromGUID2(&pAttr->guid, libidStr, 64);
+                            wchar_t keyPath[512];
+                            HKEY hKey;
+                            swprintf(keyPath, 512, L"CLSID\\%s\\TypeLib", clsidStr);
+                            if (RegCreateKeyExW(HKEY_CLASSES_ROOT, keyPath, 0, NULL, 0, KEY_WRITE, NULL, &hKey, NULL) == ERROR_SUCCESS) {
+                                RegSetValueExW(hKey, NULL, 0, REG_SZ, (BYTE*)libidStr, (DWORD)(wcslen(libidStr)+1)*2);
+                                RegCloseKey(hKey);
+                            }
+                            pInfo->lpVtbl->ReleaseTypeAttr(pInfo, pTA);
+                        }
+                        pInfo->lpVtbl->Release(pInfo);
+                    }
+                }
+            }
+            pTypeLib->lpVtbl->ReleaseTLibAttr(pTypeLib, pAttr);
+        }
+    }
     pTypeLib->lpVtbl->Release(pTypeLib);
-    
     return hr;
 }
 
@@ -483,4 +568,362 @@ HRESULT vb6_UnregisterTypeLib(const wchar_t* dllPath) {
     pTypeLib->lpVtbl->Release(pTypeLib);
     
     return S_OK;
+}
+
+
+// ============================================================
+// P6.6: IProvideClassInfo2 实现
+// ============================================================
+
+// Helper: Load ITypeInfo for this coclass from the registered TypeLib
+static HRESULT vb6_LoadCoClassTypeInfo(const vb6_CoClassDesc* desc, ITypeInfo** ppTypeInfo) {
+    HKEY hKey;
+    LONG ret;
+    wchar_t dllPath[MAX_PATH];
+    DWORD sz;
+    ITypeLib* pTypeLib;
+    CLSID clsid;
+    HRESULT hr;
+    UINT count, i;
+    
+    if (!desc || !ppTypeInfo) return E_POINTER;
+    *ppTypeInfo = NULL;
+    
+    // Parse CLSID
+    hr = vb6_CLSIDFromStrA(desc->clsidStr, &clsid);
+    if (FAILED(hr)) return hr;
+    
+    // Get DLL path from CLSID\InprocServer32
+    {
+        wchar_t clsidStr[64];
+        wchar_t keyPath[256];
+        StringFromGUID2(&clsid, clsidStr, 64);
+        swprintf(keyPath, 256, L"CLSID\\%s\\InprocServer32", clsidStr);
+        hKey = NULL;
+        ret = RegOpenKeyExW(HKEY_CLASSES_ROOT, keyPath, 0, KEY_READ, &hKey);
+        if (ret != ERROR_SUCCESS) return TYPE_E_REGISTRYACCESS;
+        sz = sizeof(dllPath);
+        ret = RegQueryValueExW(hKey, NULL, NULL, NULL, (LPBYTE)dllPath, &sz);
+        RegCloseKey(hKey);
+        if (ret != ERROR_SUCCESS) return TYPE_E_REGISTRYACCESS;
+    }
+    
+    // Load TypeLib directly from the DLL file
+    hr = LoadTypeLib(dllPath, &pTypeLib);
+    if (FAILED(hr)) return hr;
+    
+    // Find the coclass ITypeInfo by CLSID
+    count = pTypeLib->lpVtbl->GetTypeInfoCount(pTypeLib);
+    for (i = 0; i < count; i++) {
+        ITypeInfo* pInfo = NULL;
+        hr = pTypeLib->lpVtbl->GetTypeInfo(pTypeLib, i, &pInfo);
+        if (FAILED(hr)) continue;
+        
+        TYPEATTR* pAttr = NULL;
+        hr = pInfo->lpVtbl->GetTypeAttr(pInfo, &pAttr);
+        if (SUCCEEDED(hr) && pAttr) {
+            if (pAttr->typekind == TKIND_COCLASS && IsEqualIID(&pAttr->guid, &clsid)) {
+                *ppTypeInfo = pInfo;
+                pInfo->lpVtbl->ReleaseTypeAttr(pInfo, pAttr);
+                pTypeLib->lpVtbl->Release(pTypeLib);
+                return S_OK;
+            }
+            pInfo->lpVtbl->ReleaseTypeAttr(pInfo, pAttr);
+        }
+        pInfo->lpVtbl->Release(pInfo);
+    }
+    
+    pTypeLib->lpVtbl->Release(pTypeLib);
+    return TYPE_E_ELEMENTNOTFOUND;
+}
+// ============================================================
+// P6.6: IConnectionPointContainer + IConnectionPoint 实现
+// ============================================================
+
+// --- IConnectionPoint methods ---
+
+static HRESULT STDMETHODCALLTYPE CP_QueryInterface(vb6_ConnectionPoint* self, REFIID riid, void** ppv) {
+    if (!ppv) return E_POINTER;
+    if (IsEqualIID(riid, &IID_IUnknown_) || IsEqualIID(riid, &IID_IConnectionPoint_)) {
+        *ppv = self;
+        self->vtable->AddRef(self);
+        return S_OK;
+    }
+    *ppv = NULL;
+    return E_NOINTERFACE;
+}
+
+static ULONG STDMETHODCALLTYPE CP_AddRef(vb6_ConnectionPoint* self) {
+    return InterlockedIncrement(&self->refCount);
+}
+
+static ULONG STDMETHODCALLTYPE CP_Release(vb6_ConnectionPoint* self) {
+    ULONG c = InterlockedDecrement(&self->refCount);
+    if (c == 0) {
+        int i;
+        for (i = 0; i < self->connCount; i++) {
+            if (self->sinks[i]) self->sinks[i]->lpVtbl->Release(self->sinks[i]);
+        }
+        CoTaskMemFree(self->cookies);
+        CoTaskMemFree(self->sinks);
+        CoTaskMemFree(self);
+    }
+    return c;
+}
+
+static HRESULT STDMETHODCALLTYPE CP_GetConnectionInterface(vb6_ConnectionPoint* self, IID* pIID) {
+    if (!pIID) return E_POINTER;
+    *pIID = self->sourceIid;
+    return S_OK;
+}
+
+static HRESULT STDMETHODCALLTYPE CP_GetConnectionPointContainer(vb6_ConnectionPoint* self, void** ppCPC) {
+    if (!ppCPC) return E_POINTER;
+    if (!self->container) return E_FAIL;
+    *ppCPC = self->container;
+    self->container->vtable->AddRef(self->container);
+    return S_OK;
+}
+
+static HRESULT STDMETHODCALLTYPE CP_Advise(vb6_ConnectionPoint* self, IUnknown* pUnkSink, DWORD* pdwCookie) {
+    int i;
+    if (!pUnkSink || !pdwCookie) return E_POINTER;
+    *pdwCookie = 0;
+    // Grow arrays if needed
+    if (self->connCount >= self->connCapacity) {
+        int newCap = self->connCapacity ? self->connCapacity * 2 : 4;
+        DWORD* newCookies = (DWORD*)CoTaskMemRealloc(self->cookies, newCap * sizeof(DWORD));
+        IUnknown** newSinks = (IUnknown**)CoTaskMemRealloc(self->sinks, newCap * sizeof(IUnknown*));
+        if (!newCookies || !newSinks) return E_OUTOFMEMORY;
+        self->cookies = newCookies;
+        self->sinks = newSinks;
+        self->connCapacity = newCap;
+    }
+    i = self->connCount++;
+    self->cookies[i] = ++self->nextCookie;
+    pUnkSink->lpVtbl->AddRef(pUnkSink);
+    self->sinks[i] = pUnkSink;
+    *pdwCookie = self->cookies[i];
+    return S_OK;
+}
+
+static HRESULT STDMETHODCALLTYPE CP_Unadvise(vb6_ConnectionPoint* self, DWORD dwCookie) {
+    int i;
+    if (dwCookie == 0) return E_POINTER;
+    for (i = 0; i < self->connCount; i++) {
+        if (self->cookies[i] == dwCookie) {
+            if (self->sinks[i]) {
+                self->sinks[i]->lpVtbl->Release(self->sinks[i]);
+                self->sinks[i] = NULL;
+            }
+            self->cookies[i] = 0;
+            return S_OK;
+        }
+    }
+    return CONNECT_E_NOCONNECTION;
+}
+
+static HRESULT STDMETHODCALLTYPE CP_EnumConnections(vb6_ConnectionPoint* self, void** ppEnum) {
+    if (!ppEnum) return E_POINTER;
+    *ppEnum = NULL;
+    return E_NOTIMPL;
+}
+
+static const vb6_IConnectionPointVtable g_CPVtable = {
+    CP_QueryInterface,
+    CP_AddRef,
+    CP_Release,
+    CP_GetConnectionInterface,
+    CP_GetConnectionPointContainer,
+    CP_Advise,
+    CP_Unadvise,
+    CP_EnumConnections,
+};
+
+// --- IConnectionPointContainer methods ---
+
+static HRESULT STDMETHODCALLTYPE CPC_QueryInterface(vb6_ConnectionPointContainer* self, REFIID riid, void** ppv) {
+    if (!ppv) return E_POINTER;
+    if (IsEqualIID(riid, &IID_IUnknown_) || IsEqualIID(riid, &IID_IConnectionPointContainer_)) {
+        *ppv = self;
+        self->vtable->AddRef(self);
+        return S_OK;
+    }
+    *ppv = NULL;
+    return E_NOINTERFACE;
+}
+
+static ULONG STDMETHODCALLTYPE CPC_AddRef(vb6_ConnectionPointContainer* self) {
+    return InterlockedIncrement(&self->refCount);
+}
+
+static ULONG STDMETHODCALLTYPE CPC_Release(vb6_ConnectionPointContainer* self) {
+    ULONG c = InterlockedDecrement(&self->refCount);
+    if (c == 0) {
+        if (self->connPoint) self->connPoint->vtable->Release(self->connPoint);
+        CoTaskMemFree(self);
+    }
+    return c;
+}
+
+static HRESULT STDMETHODCALLTYPE CPC_EnumConnectionPoints(vb6_ConnectionPointContainer* self, void** ppEnum) {
+    if (!ppEnum) return E_POINTER;
+    *ppEnum = NULL;
+    return E_NOTIMPL;  // P6.6: deferred — not needed for basic event support
+}
+
+static HRESULT STDMETHODCALLTYPE CPC_FindConnectionPoint(vb6_ConnectionPointContainer* self, REFIID riid, void** ppCP) {
+    if (!ppCP) return E_POINTER;
+    *ppCP = NULL;
+    if (!self->connPoint) return CONNECT_E_NOCONNECTION;
+    // Check if requested IID matches our source interface
+    if (IsEqualIID(riid, &self->connPoint->sourceIid)) {
+        *ppCP = self->connPoint;
+        self->connPoint->vtable->AddRef(self->connPoint);
+        return S_OK;
+    }
+    return CONNECT_E_NOCONNECTION;
+}
+
+static const vb6_IConnectionPointContainerVtable g_CPCVtable = {
+    CPC_QueryInterface,
+    CPC_AddRef,
+    CPC_Release,
+    CPC_EnumConnectionPoints,
+    CPC_FindConnectionPoint,
+};
+
+
+// Create ConnectionPointContainer for a COM object
+vb6_ConnectionPointContainer* vb6_CPC_Create(vb6_ComObject* comObj) {
+    if (!comObj || !comObj->desc || !comObj->desc->sourceIfaceIid) return NULL;
+    
+    vb6_ConnectionPointContainer* cpc = (vb6_ConnectionPointContainer*)CoTaskMemAlloc(sizeof(vb6_ConnectionPointContainer));
+    if (!cpc) return NULL;
+    
+    cpc->vtable = &g_CPCVtable;
+    cpc->refCount = 1;
+    cpc->comObj = comObj;
+    cpc->connPoint = NULL;
+    
+    // Create the single ConnectionPoint
+    vb6_ConnectionPoint* cp = (vb6_ConnectionPoint*)CoTaskMemAlloc(sizeof(vb6_ConnectionPoint));
+    if (!cp) {
+        CoTaskMemFree(cpc);
+        return NULL;
+    }
+    cp->vtable = &g_CPVtable;
+    cp->refCount = 1;
+    // Parse source IID from string
+    {
+        wchar_t wbuf[64];
+        MultiByteToWideChar(CP_ACP, 0, comObj->desc->sourceIfaceIid, -1, wbuf, 64);
+        CLSIDFromString(wbuf, &cp->sourceIid);
+    }
+    cp->container = cpc;
+    cp->cookies = NULL;
+    cp->sinks = NULL;
+    cp->connCount = 0;
+    cp->connCapacity = 0;
+    cp->nextCookie = 0;
+    
+    cpc->connPoint = cp;
+    return cpc;
+}
+
+// Fire an event to all connected sinks
+void vb6_FireEvent(vb6_ComObject* comObj, int32_t dispid, VARIANT* args, int argc) {
+    int i, j;
+    if (!comObj || !comObj->cpc || !comObj->cpc->connPoint) return;
+    vb6_ConnectionPoint* cp = comObj->cpc->connPoint;
+    
+    for (i = 0; i < cp->connCount; i++) {
+        if (!cp->sinks[i]) continue;
+        // QI for IDispatch
+        IDispatch* pDisp = NULL;
+        HRESULT hr = cp->sinks[i]->lpVtbl->QueryInterface(cp->sinks[i], &IID_IDispatch_, (void**)&pDisp);
+        if (SUCCEEDED(hr) && pDisp) {
+            DISPPARAMS dp = {0};
+            VARIANT* reversedArgs = NULL;
+            if (argc > 0) {
+                reversedArgs = (VARIANT*)CoTaskMemAlloc(argc * sizeof(VARIANT));
+                for (j = 0; j < argc; j++) {
+                    VariantInit(&reversedArgs[j]);
+                    VariantCopy(&reversedArgs[j], &args[argc - 1 - j]);
+                }
+                dp.rgvarg = reversedArgs;
+                dp.cArgs = (UINT)argc;
+            }
+            pDisp->lpVtbl->Invoke(pDisp, dispid, &IID_NULL, LOCALE_USER_DEFAULT,
+                DISPATCH_METHOD, &dp, NULL, NULL, NULL);
+            if (reversedArgs) {
+                for (j = 0; j < argc; j++) VariantClear(&reversedArgs[j]);
+                CoTaskMemFree(reversedArgs);
+            }
+            pDisp->lpVtbl->Release(pDisp);
+        }
+    }
+}
+
+// ============================================================
+// P6.6: IProvideClassInfo2 实现 (minimal — GetGUID only)
+// ============================================================
+
+static HRESULT STDMETHODCALLTYPE PCI_QueryInterface(vb6_ProvideClassInfo2* self, REFIID riid, void** ppv) {
+    if (!ppv) return E_POINTER;
+    if (IsEqualIID(riid, &IID_IUnknown_) || IsEqualIID(riid, &IID_IProvideClassInfo2_)) {
+        *ppv = self;
+        self->vtable->AddRef(self);
+        return S_OK;
+    }
+    *ppv = NULL;
+    return E_NOINTERFACE;
+}
+
+static ULONG STDMETHODCALLTYPE PCI_AddRef(vb6_ProvideClassInfo2* self) {
+    return InterlockedIncrement(&self->refCount);
+}
+
+static ULONG STDMETHODCALLTYPE PCI_Release(vb6_ProvideClassInfo2* self) {
+    ULONG c = InterlockedDecrement(&self->refCount);
+    if (c == 0) {
+        CoTaskMemFree(self);
+    }
+    return c;
+}
+
+static HRESULT STDMETHODCALLTYPE PCI_GetClassInfo(vb6_ProvideClassInfo2* self, ITypeInfo** ppTI) {
+    if (!ppTI) return E_POINTER;
+    *ppTI = NULL;
+    // Load ITypeInfo for this coclass from registered TypeLib
+    if (!self->comObj || !self->comObj->desc) return E_FAIL;
+    return vb6_LoadCoClassTypeInfo(self->comObj->desc, ppTI);
+}
+
+static HRESULT STDMETHODCALLTYPE PCI_GetGUID(vb6_ProvideClassInfo2* self, DWORD dwGuidKind, GUID* pGUID) {
+    if (!pGUID) return E_POINTER;
+    if (dwGuidKind != GUIDKIND_DEFAULT_SOURCE_DISP_IID) return E_FAIL;
+    if (!self->comObj || !self->comObj->desc || !self->comObj->desc->sourceIfaceIid) return E_FAIL;
+    // Parse source IID from string
+    wchar_t wbuf[64];
+    MultiByteToWideChar(CP_ACP, 0, self->comObj->desc->sourceIfaceIid, -1, wbuf, 64);
+    return CLSIDFromString(wbuf, pGUID);
+}
+
+static const vb6_IProvideClassInfo2Vtable g_PCIVtable = {
+    PCI_QueryInterface,
+    PCI_AddRef,
+    PCI_Release,
+    PCI_GetClassInfo,
+    PCI_GetGUID,
+};
+
+vb6_ProvideClassInfo2* vb6_PCI_Create(vb6_ComObject* comObj) {
+    if (!comObj) return NULL;
+    vb6_ProvideClassInfo2* pci = (vb6_ProvideClassInfo2*)CoTaskMemAlloc(sizeof(vb6_ProvideClassInfo2));
+    if (!pci) return NULL;
+    pci->vtable = &g_PCIVtable;
+    pci->refCount = 1;
+    pci->comObj = comObj;
+    return pci;
 }

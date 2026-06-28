@@ -1,0 +1,36 @@
+Type=DLL
+Reference=*\G{00020430-0000-0000-C000-000000000046}#2.0#0#C:\Windows\SysWOW64\stdole2.tlb#OLE Automation
+Class=EventCalc; EventCalc.cls; {E1F2A3B4-C5D6-7890-ABCD-123456789ABC}
+Class=Calc; Calc.cls; {D84F362F-8EF1-D16D-8814-C16ADB700BAB}
+Class=StringLib; StringLib.cls; {A1B2C3D4-E5F6-7890-ABCD-EF1234567890}
+Class=MathLib; MathLib.cls; {F1E2D3C4-B5A6-9876-5432-10FEDCBA0987}
+Class=ExtLib; ExtLib.cls; {B2C3D4E5-F6A7-8901-BCDE-F23456789012}
+Startup=""
+Command32=""
+Name="TestEventAXDLL"
+HelpContextID="0"
+CompatibleMode="0"
+MajorVer=1
+MinorVer=0
+RevisionVer=0
+AutoIncrementVer=0
+ServerSupportFiles=0
+CompilationType=0
+OptimizationType=0
+FavorPentiumPro(tm)=0
+CodeViewDebugInfo=0
+NoAliasing=0
+BoundsCheck=0
+OverflowCheck=0
+FlPointCheck=0
+FDIVCheck=0
+UnroundedFP=0
+StartMode=0
+Unattended=0
+Retained=0
+ThreadPerObject=0
+MaxNumberOfThreads=1
+DebugStartupOption=0
+
+[MS Transaction Server]
+AutoRefresh=1

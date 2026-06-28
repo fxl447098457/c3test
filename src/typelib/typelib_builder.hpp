@@ -64,13 +64,15 @@ public:
                           const std::vector<MethodInfo>& methods);
 
     /// 添加 coclass
-    /// @param name       类名 (如 "Calc")
-    /// @param clsidStr   CLSID, 空则自动生成
-    /// @param ifaceName  默认接口名 (如 "_Calc")
+    /// @param name           类名 (如 "Calc")
+    /// @param clsidStr       CLSID, 空则自动生成
+    /// @param ifaceName      默认接口名 (如 "_Calc")
+    /// @param sourceIfaceName 事件源接口名 (如 "_CalcEvents"), 空则无事件源
     /// @return true=成功
     bool addCoClass(const std::string& name,
                     const std::string& clsidStr,
-                    const std::string& ifaceName);
+                    const std::string& ifaceName,
+                    const std::string& sourceIfaceName = "");
 
     /// 结束构建, 保存到文件
     /// @param tlbPath 输出 .tlb 文件路径
@@ -98,8 +100,9 @@ private:
     // 已添加的接口名列表 (用于 coclass AddImplType 引用)
     struct InterfaceInfo {
         std::string name;
-        void* pTypeInfo = nullptr;  // ITypeInfo* (AddRef'd)
-        int32_t index = -1;         // TypeLib 内序号
+        void* pTypeInfo = nullptr;       // ITypeInfo* (AddRef'd)
+        void* pCreateTypeInfo = nullptr; // ICreateTypeInfo* (NOT released until endLib)
+        int32_t index = -1;              // TypeLib 内序号
     };
     std::vector<InterfaceInfo> interfaces_;
 
