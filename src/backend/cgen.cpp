@@ -1,4 +1,4 @@
-﻿#include "backend/cgen.hpp"
+#include "backend/cgen.hpp"
 #include <algorithm>
 #include <cctype>
 #include <iostream>
@@ -2700,9 +2700,78 @@ void CCodeGen::visit(ForStmt& node) {
 }
 
 void CCodeGen::visit(ForEachStmt& node) {
-    c_.emitLine("/* TODO: For Each */");
-    emitStmtList(node.body);
+    // P12.4: For Each item In collection
+    // 支持: 数组(VB6 SafeArray)迭代
+    // 暂不支持: COM集合(IEnumVARIANT)迭代
+
+    // 检测集合是否为数组
+    bool isCollArray = false;
+    std::string collArrName;
+    Vb6Type collElemType = Vb6Type::Variant;
+
+    if (node.collection->kind == ASTNodeKind::IdentifierExpr) {
+        auto& ident = static_cast<IdentifierExpr&>(*node.collection);
+        std::string lower = ident.name;
+        std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+
+        // 查已知数组集合
+        if (knownArrays_.count(lower)) {
+            isCollArray = true;
+            collArrName = cIdent(ident.name);
+            collElemType = arrayElemTypes_[lower];
+        } else {
+            // 查符号表
+            Symbol* sym = symTab_.lookupModule(ident.name);
+            if (sym && sym->kind == SymbolKind::Variable && sym->isArray) {
+                isCollArray = true;
+                collArrName = cIdent(ident.name);
+                collElemType = sym->type;
+            }
+        }
+    }
+
+    std::string var = cIdent(node.varName);
+    int tmpIdx = tempCounter_++;
+
+    if (isCollArray) {
+        // For Each item In arr -> SafeArray index iteration
+        // {
+        //     int32_t _fe_i0, _fe_lb0, _fe_ub0;
+        //     _fe_lb0 = vb6_LBound(arr, 1);
+        //     _fe_ub0 = vb6_UBound(arr, 1);
+        //     for (_fe_i0 = _fe_lb0; _fe_i0 <= _fe_ub0; _fe_i0++) {
+        //         vb6_item = VB6_SA_AT(VARIANT, arr, _fe_i0);
+        //         // body
+        //     }
+        // }
+        c_.emitLine("{");
+        c_.indent();
+        std::string idxVar = "_fe_i" + std::to_string(tmpIdx);
+        std::string lbVar = "_fe_lb" + std::to_string(tmpIdx);
+        std::string ubVar = "_fe_ub" + std::to_string(tmpIdx);
+        c_.emitLine("int32_t " + idxVar + ", " + lbVar + ", " + ubVar + ";");
+        c_.emitLine(lbVar + " = vb6_LBound(" + collArrName + ", 1);");
+        c_.emitLine(ubVar + " = vb6_UBound(" + collArrName + ", 1);");
+        c_.emitLine("for (" + idxVar + " = " + lbVar + "; " + idxVar + " <= " + ubVar + "; " + idxVar + "++) {");
+        c_.indent();
+
+        // 赋值循环变量: vb6_item = VB6_SA_AT(elemCType, arr, _fe_i0)
+        std::string elemCType = mapSaElemCType(collElemType);
+        c_.emitLine(var + " = VB6_SA_AT(" + elemCType + ", " + collArrName + ", " + idxVar + ");");
+
+        emitStmtList(node.body);
+        c_.dedent();
+        c_.emitLine("}");
+        c_.dedent();
+        c_.emitLine("}");
+    } else {
+        // 非数组集合: 暂不支持 (COM _NewEnum / IEnumVARIANT 留待P13)
+        c_.emitLine("/* For Each: collection type not supported (array only) */");
+        // 仍然发出循环体（一次），避免语义完全缺失
+        emitStmtList(node.body);
+    }
 }
+
 
 void CCodeGen::visit(DoLoopStmt& node) {
     switch (node.loopKind) {
