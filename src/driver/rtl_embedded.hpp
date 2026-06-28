@@ -1,6 +1,7 @@
-﻿// P10: RTL 运行时内嵌资源管理
-// 从 c3.exe 内嵌的 RCDATA 资源释放 RTL .h/.c 文件到临时会话目录
-// 编译完成后自动清除临时目录
+// P10/P11.3: RTL runtime embedded resource management
+// Extract RTL .h headers + pre-compiled .lib from c3.exe RCDATA resources
+// P11.3: .c source replaced by .lib static libraries (source protection)
+// Compiles and cleans up temp session dir automatically
 
 #ifndef VB6C3_RTL_EMBEDDED_HPP
 #define VB6C3_RTL_EMBEDDED_HPP
@@ -10,57 +11,55 @@
 
 namespace vb6c3 {
 
-// RTL 嵌入资源 ID 定义 (与 c3rtl.rc 中的编号对应)
+// RTL embedded resource IDs (must match c3rtl.rc)
 enum RtlResourceID {
-    RTL_VB6RTL_H      = 100,
-    RTL_VB6RTL_C      = 101,
-    RTL_VB6COM_H      = 102,
-    RTL_VB6COM_C      = 103,
-    RTL_VB6COMSERVER_H = 104,
-    RTL_VB6COMSERVER_C = 105,
-    RTL_VB6FORMS_H    = 106,
-    RTL_VB6FORMS_C    = 107,
+    // Headers (for #include in generated code)
+    RTL_VB6RTL_H        = 100,
+    RTL_VB6COM_H        = 102,
+    RTL_VB6COMSERVER_H  = 104,
+    RTL_VB6FORMS_H      = 106,
+    // Pre-compiled static libraries (P11.3: replaces .c source)
+    RTL_VB6RTL_LIB      = 110,  // vb6rtl + vb6com (all programs)
+    RTL_VB6RTL_DLL_LIB  = 111,  // vb6comserver (ActiveX DLL only)
+    RTL_VB6RTL_GUI_LIB  = 112,  // vb6forms (GUI programs only)
 };
 
-// 会话目录管理器
-// 创建 %TMP%\C3C\{timestamp}\ 临时目录, 释放 RTL 文件, 编译完成后清除
+// Session directory manager
+// Creates %TMP%\C3C\{timestamp}\ temp dir, extracts RTL files, cleans up after compile
 class SessionManager {
 public:
     SessionManager();
     ~SessionManager();
 
-    // 创建新的会话目录并释放 RTL 文件
-    // 返回: RTL 目录路径 (含 .h/.c 文件)
-    // 如果释放失败返回空字符串
+    // Create new session directory and extract RTL files
+    // Returns: RTL directory path (contains .h + .lib)
+    // Empty string on failure
     std::string create();
 
-    // 获取当前会话的 RTL 目录路径
+    // Get current session's RTL directory path
     const std::string& rtlDir() const { return rtlDir_; }
 
     // P11.2: session root dir (for intermediates .c/.h/.obj)
     const std::string& sessionDir() const { return sessionDir_; }
 
-    // 清除会话目录 (析构时自动调用)
+    // Clean up session directory (auto-called by destructor)
     void cleanup();
 
-    // 清理旧的会话目录 (>300 秒)
-    // 每次创建会话时自动调用
+    // Clean up old session dirs (>300 seconds)
+    // Auto-called on each create()
     static void cleanupOldSessions();
 
-    // 检查是否已创建会话
+    // Check if session is active
     bool isActive() const { return !rtlDir_.empty(); }
 
 private:
     std::string sessionDir_;  // session root dir (e.g. %TMP%\C3C\{ts})
     std::string rtlDir_;      // rtl subdir (sessionDir_\rtl)
 
-    // 从 RCDATA 资源释放文件
-    // resId: 资源 ID
-    // fileName: 目标文件名 (如 "vb6rtl.h")
-    // targetDir: 目标目录
+    // Extract file from RCDATA resource
     bool extractResource(int resId, const std::string& fileName, const std::string& targetDir);
 
-    // 获取会话根目录 (%TMP%\C3C)
+    // Get session root directory (%TMP%\C3C)
     static std::string getSessionRoot();
 };
 

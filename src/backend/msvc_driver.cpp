@@ -98,22 +98,17 @@ bool MsvcDriver::compileAndLink(const MsvcDriverOptions& options) {
         cmd << " \"" << src << "\"";
     }
 
-    // RTL实现文件
-    if (!options.rtlDir.empty()) {
-        cmd << " \"" << options.rtlDir << "\\vb6rtl.c\"";
-        cmd << " \"" << options.rtlDir << "\\vb6com.c\"";
-        if (options.isDll) {
-            cmd << " \"" << options.rtlDir << "\\vb6comserver.c\"";  // P6.6: COM服务端运行时
-        }
-        if (options.isGui) {
-            cmd << " \"" << options.rtlDir << "\\vb6forms.c\"";  // P7: 窗体运行时
-        }
-    }
+    // P11.3: RTL pre-compiled .lib files linked via /link (no .c source compilation)
+    // .lib paths are added to the /link section below
 
     // 链接选项
     if (options.isDll) {
         // P6.6: ActiveX DLL链接
         cmd << " /link /DLL";
+        if (!options.rtlDir.empty()) {
+            cmd << " \"" << options.rtlDir << "\\vb6rtl.lib\""
+                << " \"" << options.rtlDir << "\\vb6rtl_dll.lib\"";
+        }
         if (!options.typelibResFile.empty()) {
             cmd << " \"" << options.typelibResFile << "\"";
         }
@@ -123,11 +118,21 @@ bool MsvcDriver::compileAndLink(const MsvcDriverOptions& options) {
         cmd << " ole32.lib oleaut32.lib uuid.lib advapi32.lib user32.lib shell32.lib";
     } else if (options.isGui) {
         // P7: GUI程序 (Win32窗口)
-        cmd << " /link /SUBSYSTEM:WINDOWS user32.lib gdi32.lib shell32.lib ole32.lib oleaut32.lib uuid.lib";
+        cmd << " /link /SUBSYSTEM:WINDOWS";
+        if (!options.rtlDir.empty()) {
+            cmd << " \"" << options.rtlDir << "\\vb6rtl.lib\""
+                << " \"" << options.rtlDir << "\\vb6rtl_gui.lib\"";
+        }
+        cmd << " user32.lib gdi32.lib shell32.lib ole32.lib oleaut32.lib uuid.lib";
     } else {
         // 控制台程序
-        cmd << " /link /SUBSYSTEM:CONSOLE ole32.lib oleaut32.lib uuid.lib user32.lib shell32.lib";
+        cmd << " /link /SUBSYSTEM:CONSOLE";
+        if (!options.rtlDir.empty()) {
+            cmd << " \"" << options.rtlDir << "\\vb6rtl.lib\"";
+        }
+        cmd << " ole32.lib oleaut32.lib uuid.lib user32.lib shell32.lib";
     }
+
 
     if (options.verbose) {
         std::cout << "C3: 执行: " << cmd.str() << std::endl;

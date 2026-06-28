@@ -1,5 +1,6 @@
-﻿// P10: RTL 运行时内嵌资源管理 - 实现
-// 从 c3.exe 的 RCDATA 资源释放 8 个 RTL 文件到临时会话目录
+// P10/P11.3: RTL runtime embedded resource management - implementation
+// Extract 4 .h headers + 3 .lib static libraries from c3.exe RCDATA resources
+// P11.3: .c source replaced by pre-compiled .lib (source protection)
 
 #include "driver/rtl_embedded.hpp"
 
@@ -18,13 +19,13 @@
 namespace vb6c3 {
 
 // ============================================================
-// 辅助: 从当前 EXE 的 RCDATA 资源读取数据
+// Helper: load RCDATA resource from current EXE
 // ============================================================
 static bool loadRtlResource(int resId, std::vector<char>& outData) {
 #ifdef _WIN32
     HRSRC hrsrc = FindResourceW(nullptr, MAKEINTRESOURCEW(resId), RT_RCDATA);
     if (!hrsrc) {
-        // 尝试从当前模块加载 (当作为 DLL 加载时)
+        // Fallback: try loading from current module (when loaded as DLL)
         HMODULE hMod = nullptr;
         GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS,
                            reinterpret_cast<LPCWSTR>(&loadRtlResource), &hMod);
@@ -52,7 +53,7 @@ static bool loadRtlResource(int resId, std::vector<char>& outData) {
 }
 
 // ============================================================
-// SessionManager 实现
+// SessionManager implementation
 // ============================================================
 
 SessionManager::SessionManager() = default;
@@ -69,10 +70,10 @@ std::string SessionManager::getSessionRoot() {
 }
 
 std::string SessionManager::create() {
-    // 1. 清理旧会话
+    // 1. Clean up old sessions
     cleanupOldSessions();
 
-    // 2. 创建唯一会话目录
+    // 2. Create unique session directory
     auto now = std::chrono::steady_clock::now().time_since_epoch().count();
     std::string root = getSessionRoot();
     sessionDir_ = root + "\\" + std::to_string(now);
@@ -81,28 +82,30 @@ std::string SessionManager::create() {
     std::error_code ec;
     std::filesystem::create_directories(rtlDir_, ec);
     if (ec) {
-        std::cerr << "C3: 无法创建会话目录: " << rtlDir_ << " (" << ec.message() << ")" << std::endl;
+        std::cerr << "C3: cannot create session directory: " << rtlDir_ << " (" << ec.message() << ")" << std::endl;
         rtlDir_.clear();
         sessionDir_.clear();
         return "";
     }
 
-    // 3. 释放 RTL 资源文件
+    // 3. Extract RTL resource files
+    // P11.3: 4 .h headers + 3 .lib static libraries (no .c source)
     struct RtlFileEntry { int id; const char* name; };
     static const RtlFileEntry files[] = {
+        // Headers (for #include)
         { RTL_VB6RTL_H,       "vb6rtl.h" },
-        { RTL_VB6RTL_C,       "vb6rtl.c" },
         { RTL_VB6COM_H,       "vb6com.h" },
-        { RTL_VB6COM_C,       "vb6com.c" },
         { RTL_VB6COMSERVER_H, "vb6comserver.h" },
-        { RTL_VB6COMSERVER_C, "vb6comserver.c" },
         { RTL_VB6FORMS_H,     "vb6forms.h" },
-        { RTL_VB6FORMS_C,     "vb6forms.c" },
+        // Pre-compiled static libraries (P11.3: replaces .c source)
+        { RTL_VB6RTL_LIB,     "vb6rtl.lib" },       // vb6rtl + vb6com (all programs)
+        { RTL_VB6RTL_DLL_LIB, "vb6rtl_dll.lib" },   // vb6comserver (ActiveX DLL)
+        { RTL_VB6RTL_GUI_LIB, "vb6rtl_gui.lib" },   // vb6forms (GUI programs)
     };
 
     for (auto& entry : files) {
         if (!extractResource(entry.id, entry.name, rtlDir_)) {
-            std::cerr << "C3: 无法释放 RTL 资源: " << entry.name << std::endl;
+            std::cerr << "C3: cannot extract RTL resource: " << entry.name << std::endl;
             cleanup();
             return "";
         }

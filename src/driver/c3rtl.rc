@@ -1,13 +1,19 @@
 // c3rtl.rc - RTL runtime library embedded as resources
-// 8 files (4 .h + 4 .c) embedded as RCDATA
+// P11.3: Pre-compiled .lib replaces .c source (source protection)
+// 7 resources: 4 .h headers + 3 .lib static libraries
 // Runtime: FindResource/LoadResource extract to temp session directory
 // Paths relative to this RC file's location (src/driver/)
 
+// Headers (needed for #include in generated code)
 100 RCDATA "../rtl/core/vb6rtl.h"
-101 RCDATA "../rtl/core/vb6rtl.c"
 102 RCDATA "../rtl/core/vb6com.h"
-103 RCDATA "../rtl/core/vb6com.c"
 104 RCDATA "../rtl/core/vb6comserver.h"
-105 RCDATA "../rtl/core/vb6comserver.c"
 106 RCDATA "../rtl/core/vb6forms.h"
-107 RCDATA "../rtl/core/vb6forms.c"
+
+// Pre-compiled static libraries (replaces .c source files)
+// vb6rtl.lib = vb6rtl.obj + vb6com.obj (all programs)
+110 RCDATA "../rtl/lib/vb6rtl.lib"
+// vb6rtl_dll.lib = vb6comserver.obj (ActiveX DLL only)
+111 RCDATA "../rtl/lib/vb6rtl_dll.lib"
+// vb6rtl_gui.lib = vb6forms.obj (GUI programs only)
+112 RCDATA "../rtl/lib/vb6rtl_gui.lib"
