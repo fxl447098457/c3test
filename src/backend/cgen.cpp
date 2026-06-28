@@ -457,6 +457,86 @@ bool CCodeGen::generate(Module& module, const std::string& baseName,
         }
     }
 
+        // P13.23: External COM WithEvents event callback generation
+        for (auto& [varLower, srcClassName] : knownWithEventsVars_) {
+            auto* srcClsSym = symTab_.lookup(srcClassName);
+            if (!srcClsSym || srcClsSym->kind != SymbolKind::ComClass) continue;
+
+            for (auto& evtName : srcClsSym->eventNames) {
+                std::string varName = varLower;
+                auto* varSym = symTab_.lookup(varLower);
+                if (varSym) varName = varSym->name;
+                std::string handlerName = varName + "_" + evtName;
+
+                auto* handlerSym = symTab_.lookup(handlerName);
+                if (!handlerSym) continue;
+
+                // Generate: void vb6_com_evt_<var>_<evt>(VARIANT* args, int argc, VARIANT* result)
+                std::string wrapperName = "vb6_com_evt_" + varLower + "_" + cIdent(evtName);
+
+                // Get event handler parameters from Sub declaration
+                std::vector<ParameterInfo> evtParams;
+                for (auto& decl2 : module.declarations) {
+                    if (decl2->kind == ASTNodeKind::SubDecl) {
+                        auto& sub = static_cast<SubDecl&>(*decl2);
+                        if (Symbol::toLower(sub.name) == Symbol::toLower(handlerName)) {
+                            for (auto& param : sub.params) {
+                                ParameterInfo pi;
+                                pi.name = param->name;
+                                pi.type = (param->asType && param->asType->kind == ASTNodeKind::SimpleTypeRef)
+                                    ? typeSys_.resolveTypeName(static_cast<SimpleTypeRef*>(param->asType.get())->name)
+                                    : Vb6Type::Variant;
+                                if (pi.type == Vb6Type::Unknown || pi.type == Vb6Type::Empty)
+                                    pi.type = Vb6Type::Variant;
+                                pi.isByVal = true;
+                                evtParams.push_back(pi);
+                            }
+                            break;
+                        }
+                    }
+                }
+
+                c_.emitLine("void " + wrapperName + "(VARIANT* args, int argc, VARIANT* result) {");
+                c_.indent();
+
+                // Extract parameters from VARIANT args
+                for (size_t pi = 0; pi < evtParams.size(); pi++) {
+                    std::string pName = cIdent(evtParams[pi].name);
+                    std::string pType = mapType(evtParams[pi].type);
+                    c_.emitLine(pType + " " + pName + ";");
+                    if (evtParams[pi].type == Vb6Type::String) {
+                        c_.emitLine(pName + " = (args[" + std::to_string(pi) + "].vt == VT_BSTR) ? args[" + std::to_string(pi) + "].bstrVal : NULL;");
+                    } else if (evtParams[pi].type == Vb6Type::Long || evtParams[pi].type == Vb6Type::Integer) {
+                        c_.emitLine(pName + " = (" + pType + ")V_I4(&args[" + std::to_string(pi) + "]);");
+                    } else if (evtParams[pi].type == Vb6Type::Boolean) {
+                        c_.emitLine(pName + " = (args[" + std::to_string(pi) + "].vt == VT_BOOL) ? (V_I4(&args[" + std::to_string(pi) + "]) != 0) : 0;");
+                    } else if (evtParams[pi].type == Vb6Type::Single || evtParams[pi].type == Vb6Type::Double) {
+                        c_.emitLine(pName + " = (" + pType + ")V_R8(&args[" + std::to_string(pi) + "]);");
+                    } else {
+                        c_.emitLine(pName + " = args[" + std::to_string(pi) + "];");
+                    }
+                }
+
+                // Call the VB6 handler function
+                std::string procCall = cProcName(handlerName, handlerSym->access);
+                std::string callArgs = "(";
+                if (isClassModule_) {
+                    callArgs += classMeParam() + "/* from com-evt */";
+                }
+                for (size_t i = 0; i < evtParams.size(); i++) {
+                    if (i > 0 || isClassModule_) {
+                        callArgs += ", ";
+                    }
+                    callArgs += cIdent(evtParams[i].name);
+                }
+                callArgs += ");";
+                c_.emitLine(procCall + callArgs);
+
+                c_.dedent();
+                c_.emitLine("}");
+                c_.emitBlank();
+            }
+        }
     // 生成入口点 (类模块不生成main; 多模块工程中仅有Sub Main的模块生成main)
     // P6.6: ActiveX DLL入口点统一由dll_entry.c生成, 不在各模块.c中生成
     if (!isClassModule_) {
@@ -2602,12 +2682,55 @@ void CCodeGen::visit(SetStmt& node) {
                     c_.emitLine(cbField + ",");
                     firstEvent = false;
                 }
-            }
             c_.dedent();
             c_.emitLine("};");
             c_.emitLine(target + "->events = &" + targetLower + "_sink;");
             c_.dedent();
             c_.emitLine("}");
+            } else if (srcClsSym && srcClsSym->kind == SymbolKind::ComClass && srcClsSym->comHasSourceIface) {
+            // P13.23: External COM WithEvents - vb6_CreateEventSink + vb6_ComAdvise
+            c_.emitLine("if (" + target + ") {");
+            c_.indent();
+                std::vector<std::string> dispids;
+                std::vector<std::string> callbacks;
+                for (auto& evtName : srcClsSym->eventNames) {
+                    std::string handlerName = target + "_" + evtName;
+                    auto* handlerSym = symTab_.lookup(handlerName);
+                    if (handlerSym) {
+                        std::string evtLower = evtName;
+                        std::transform(evtLower.begin(), evtLower.end(), evtLower.begin(), ::tolower);
+                        auto itDispId = srcClsSym->comEventDispids.find(evtLower);
+                        int dispid = (itDispId != srcClsSym->comEventDispids.end()) ? itDispId->second : 0;
+                        dispids.push_back(std::to_string(dispid));
+                        callbacks.push_back("vb6_com_evt_" + targetLower + "_" + cIdent(evtName));
+                    }
+                }
+                if (!dispids.empty()) {
+                    std::string dispidsVar = targetLower + "_evt_dispids";
+                    std::string dispidsInit;
+                    for (size_t di = 0; di < dispids.size(); di++) {
+                        if (di > 0) dispidsInit += ", ";
+                        dispidsInit += dispids[di];
+                    }
+                    c_.emitLine("static int " + dispidsVar + "[] = {" + dispidsInit + "};");
+                    std::string callbacksVar = targetLower + "_evt_cbs";
+                    std::string callbacksInit;
+                    for (size_t ci = 0; ci < callbacks.size(); ci++) {
+                        if (ci > 0) callbacksInit += ", ";
+                        callbacksInit += "(void(*)(VARIANT*,int,VARIANT*))" + callbacks[ci];
+                    }
+                    c_.emitLine("static void (*" + callbacksVar + "[])(VARIANT*,int,VARIANT*) = {" + callbacksInit + "};");
+                    std::string sinkVar = targetLower + "_comsink";
+                    c_.emitLine("void* " + sinkVar + " = vb6_CreateEventSink(" +
+                        dispidsVar + ", (void**)" + callbacksVar + ", " + std::to_string(dispids.size()) + ");");
+                    std::string iidStr = srcClsSym->comSourceIfaceIid;
+                    c_.emitLine("static int " + targetLower + "_evt_cookie = 0;");
+                    c_.emitLine("static const char* " + targetLower + "_evt_iid = \"" + iidStr + "\";");
+                    c_.emitLine("vb6_ComAdvise((IUnknown*)" + target + ", " + targetLower + "_evt_iid, " + sinkVar + ", &" + targetLower + "_evt_cookie);");
+                }
+            c_.dedent();
+            c_.emitLine("}");
+            }
         }
     }
 }
@@ -4154,6 +4277,10 @@ void CCodeGen::visit(VariableDecl& node) {
             std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
             knownTypedComVars_[lower] = comSym;
             knownObjectVars_.erase(lower);  // 优先前期绑定
+            // P13.23: ComClass WithEvents -> knownWithEventsVars_
+            if (node.isWithEvents && comSym->kind == SymbolKind::ComClass && comSym->comHasSourceIface) {
+                knownWithEventsVars_[lower] = comSym->name;
+            }
         }
     }
 

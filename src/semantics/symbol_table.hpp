@@ -120,6 +120,11 @@ struct Symbol {
     std::string comDefaultIfaceName;  // 默认接口名 (ComClass用)
     int32_t comVtblBase = 7;         // vtable起始偏移 (IDispatch=7, IUnknown=3)
     bool comIsDual = false;           // 双重接口 (dispinterface + vtable)
+    // P13.23: COM event source interface (for WithEvents on external COM objects)
+    std::string comSourceIfaceName;    // 默认事件源接口名
+    std::string comSourceIfaceIid;     // 事件源接口IID
+    bool comHasSourceIface = false;    // 是否有事件源接口
+    std::unordered_map<std::string, int32_t> comEventDispids;  // 事件源方法名(lower)→DISPID
 
     // COM方法签名 (ComInterface用, 方法名小写→签名)
     struct ComMethodSig {

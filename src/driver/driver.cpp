@@ -1,4 +1,4 @@
-﻿#include "driver/driver.hpp"
+#include "driver/driver.hpp"
 #include "common/diagnostics.hpp"
 #include "common/source_manager.hpp"
 #include "lexer/lexer.hpp"
@@ -747,6 +747,19 @@ bool Driver::runSemanticAnalysis(const CompileOptions& options) {
                         }
                     }
 
+                    // P13.23: 填充事件源接口信息 (用于外部COM WithEvents)
+                    if (!cc->defaultSourceIfaceName.empty()) {
+                        sym->comHasSourceIface = true;
+                        sym->comSourceIfaceName = cc->defaultSourceIfaceName;
+                        if (cc->defaultSourceIface) {
+                            sym->comSourceIfaceIid = cc->defaultSourceIface->iidStr;
+                            // 注册事件源接口的方法到 eventNames (复用内部类事件机制)
+                            for (auto& member : cc->defaultSourceIface->members) {
+                                sym->eventNames.push_back(member.realName);
+                            sym->comEventDispids[Symbol::toLower(member.name)] = member.memid;
+                            }
+                        }
+                    }
                     analyzer->symbolTable().define(std::move(sym));
                 }
 
