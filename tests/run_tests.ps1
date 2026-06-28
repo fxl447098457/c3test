@@ -285,6 +285,7 @@ if ($Category -in @("all", "run")) {
     Test-Run "test_com2" "$Tests\test_com2.bas" @("Users")
     Test-Run "test_com3" "$Tests\test_com3.bas" @("All tests passed")
     Test-Run "test_earlybound" "$Tests\test_earlybound.bas" @("Early binding test OK")
+    Test-Run "test_p1324" "$Tests\test_p1324.bas" @("P13.24 PASS")
     Test-Vbp "test_implements" "$Tests\test_implements.vbp" @("Implements test PASSED")
     Test-Vbp "test_events" "$Tests\test_events\test_events.vbp" @("Events test PASSED")
     Test-Vbp "M7Test" "$Tests\m7_test\M7Test.vbp" @("4/4 PASSED")

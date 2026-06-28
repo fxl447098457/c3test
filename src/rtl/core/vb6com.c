@@ -803,8 +803,8 @@ int vb6_ComUnadvise(void* obj, const char* riidStr, int adviseCookie) {
    maps DISPIDs to VB6 callback functions */
 
 typedef struct VB6EventSink {
-    /* IDispatch vtable (7 methods from IUnknown + 4 from IDispatch) */
-    void* vtable[11];
+    /* Pointer to IDispatch vtable (11 methods: 7 IUnknown + 4 IDispatch) */
+    void** vtable;
     /* Ref count */
     LONG refCount;
     /* DISPID → callback mapping */
@@ -817,7 +817,7 @@ typedef struct VB6EventSink {
 static HRESULT STDMETHODCALLTYPE sink_QueryInterface(IDispatch* This, REFIID riid, void** ppv) {
     if (IsEqualIID(riid, &IID_IUnknown) || IsEqualIID(riid, &IID_IDispatch)) {
         *ppv = This;
-        ((IUnknown*)This)->lpVtbl->AddRef(This);
+        sink_AddRef(This);
         return S_OK;
     }
     *ppv = NULL;
@@ -825,7 +825,7 @@ static HRESULT STDMETHODCALLTYPE sink_QueryInterface(IDispatch* This, REFIID rii
 }
 
 static ULONG STDMETHODCALLTYPE sink_AddRef(IDispatch* This) {
-    VB6EventSink* s = (VB6EventSink*)((char*)This - offsetof(VB6EventSink, vtable));
+    VB6EventSink* s = (VB6EventSink*)This;
     return InterlockedIncrement(&s->refCount);
 }
 
@@ -906,7 +906,7 @@ void* vb6_CreateEventSink(const int* dispids, void** callbacks, int count) {
     if (!s) return NULL;
     
     /* Copy vtable template */
-    memcpy(s->vtable, g_eventSinkVtable, sizeof(g_eventSinkVtable));
+    s->vtable = g_eventSinkVtable;
     
     s->refCount = 1;
     s->count = count;
