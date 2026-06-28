@@ -1,4 +1,4 @@
-﻿// vb6c3 - 语句解析器
+// vb6c3 - 语句解析器
 // VB6 块语句 + 单行语句
 
 #include "parser/parser.hpp"
@@ -51,18 +51,100 @@ StmtPtr Parser::parseStatement() {
         case TokenKind::Private:  return parseAccessDeclInBody();
 
         // --- 文件 I/O ---
-        case TokenKind::Open:     return parseOpenStmt();
-        case TokenKind::Close:    return parseCloseStmt();
-        case TokenKind::Get:      return parseGetStmt();
-        case TokenKind::Put:      return parsePutStmt();
-        case TokenKind::Input:    return parseInputStmt();
-        case TokenKind::Print:    return parsePrintStmt();
-        case TokenKind::Write:    return parseWriteStmt();
-        case TokenKind::Line:     return parseLineInputStmt();
-        case TokenKind::Width:    return parseWidthStmt();
-        case TokenKind::Seek:     return parseSeekStmt();
-        case TokenKind::Lock:     return parseLockStmt();
-        case TokenKind::Unlock:   return parseUnlockStmt();
+        // P12.6: 双用关键字消歧 — 文件I/O语句 vs 变量名赋值/调用
+        // 如果后跟 = 或 ( 或 . , 视为标识符(赋值/调用), 否则作为I/O语句
+        case TokenKind::Get: {
+            if (next_.kind == TokenKind::Equals ||
+                next_.kind == TokenKind::LeftParen ||
+                next_.kind == TokenKind::Dot) {
+                return parseLabelOrAssignmentOrCall();
+            }
+            return parseGetStmt();
+        }
+        case TokenKind::Put: {
+            if (next_.kind == TokenKind::Equals ||
+                next_.kind == TokenKind::LeftParen ||
+                next_.kind == TokenKind::Dot) {
+                return parseLabelOrAssignmentOrCall();
+            }
+            return parsePutStmt();
+        }
+        case TokenKind::Input: {
+            if (next_.kind == TokenKind::Equals ||
+                next_.kind == TokenKind::LeftParen ||
+                next_.kind == TokenKind::Dot) {
+                return parseLabelOrAssignmentOrCall();
+            }
+            return parseInputStmt();
+        }
+        case TokenKind::Print: {
+            if (next_.kind == TokenKind::Equals) {
+                return parseLabelOrAssignmentOrCall();
+            }
+            return parsePrintStmt();
+        }
+        case TokenKind::Write: {
+            if (next_.kind == TokenKind::Equals) {
+                return parseLabelOrAssignmentOrCall();
+            }
+            return parseWriteStmt();
+        }
+        case TokenKind::Open: {
+            if (next_.kind == TokenKind::Equals ||
+                next_.kind == TokenKind::LeftParen ||
+                next_.kind == TokenKind::Dot) {
+                return parseLabelOrAssignmentOrCall();
+            }
+            return parseOpenStmt();
+        }
+        case TokenKind::Close: {
+            if (next_.kind == TokenKind::Equals ||
+                next_.kind == TokenKind::LeftParen ||
+                next_.kind == TokenKind::Dot) {
+                return parseLabelOrAssignmentOrCall();
+            }
+            return parseCloseStmt();
+        }
+        case TokenKind::Line: {
+            if (next_.kind == TokenKind::Equals ||
+                next_.kind == TokenKind::LeftParen ||
+                next_.kind == TokenKind::Dot) {
+                return parseLabelOrAssignmentOrCall();
+            }
+            return parseLineInputStmt();
+        }
+        case TokenKind::Width: {
+            if (next_.kind == TokenKind::Equals ||
+                next_.kind == TokenKind::LeftParen ||
+                next_.kind == TokenKind::Dot) {
+                return parseLabelOrAssignmentOrCall();
+            }
+            return parseWidthStmt();
+        }
+        case TokenKind::Seek: {
+            if (next_.kind == TokenKind::Equals ||
+                next_.kind == TokenKind::LeftParen ||
+                next_.kind == TokenKind::Dot) {
+                return parseLabelOrAssignmentOrCall();
+            }
+            return parseSeekStmt();
+        }
+        case TokenKind::Lock: {
+            if (next_.kind == TokenKind::Equals ||
+                next_.kind == TokenKind::LeftParen ||
+                next_.kind == TokenKind::Dot) {
+                return parseLabelOrAssignmentOrCall();
+            }
+            return parseLockStmt();
+        }
+        case TokenKind::Unlock: {
+            if (next_.kind == TokenKind::Equals ||
+                next_.kind == TokenKind::LeftParen ||
+                next_.kind == TokenKind::Dot) {
+                return parseLabelOrAssignmentOrCall();
+            }
+            return parseUnlockStmt();
+        }
         case TokenKind::FileCopy: return parseFileCopyStmt();
         case TokenKind::Kill:     return parseKillStmt();
         case TokenKind::MkDir:    return parseMkDirStmt();
