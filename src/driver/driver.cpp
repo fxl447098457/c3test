@@ -1109,16 +1109,20 @@ bool Driver::runCodeGeneration(const CompileOptions& options, const std::string&
 
                         std::string iid = TypeLibBuilder::generateUuid("_" + clsSym.name);
                         std::string ifaceName = "_" + clsSym.name;
-                        if (!tlbBuilder.addDispInterface(ifaceName, iid, methods)) {
+                        bool ifaceOk = tlbBuilder.addDispInterface(ifaceName, iid, methods);
+                        if (!ifaceOk) {
                             std::cerr << "C3: TypeLib addDispInterface failed for " << ifaceName << ": " << tlbBuilder.lastError() << std::endl;
                         }
 
-                        // 回写默认接口IID到符号表 (供cgen生成QI匹配用)
-                        clsSym.comDefaultIfaceIid = iid;
-                        clsSym.comDefaultIfaceName = ifaceName;
+                        // Only write back IID if addDispInterface succeeded
+                        if (ifaceOk) {
+                            clsSym.comDefaultIfaceIid = iid;
+                            clsSym.comDefaultIfaceName = ifaceName;
+                        }
 
-                        // P6.6.2: 如果类有事件, 创建 source dispinterface (_ClassNameEvents)
+                        // If class has events, create source dispinterface (_ClassNameEvents)
                         std::string sourceIfaceName;
+                        bool sourceIfaceOk = false;
                         if (!clsSym.eventNames.empty()) {
                             sourceIfaceName = "_" + clsSym.name + "Events";
                             std::string sourceIid = TypeLibBuilder::generateUuid(sourceIfaceName);
@@ -1130,29 +1134,36 @@ bool Driver::runCodeGeneration(const CompileOptions& options, const std::string&
                                 emi.returnType = Vb6Type::Void;
                                 eventMethods.push_back(emi);
                             }
-                            tlbBuilder.addDispInterface(sourceIfaceName, sourceIid, eventMethods);
+                            sourceIfaceOk = tlbBuilder.addDispInterface(sourceIfaceName, sourceIid, eventMethods);
+                            if (!sourceIfaceOk) {
+                                std::cerr << "C3: TypeLib addDispInterface failed for " << sourceIfaceName << ": " << tlbBuilder.lastError() << std::endl;
+                            }
 
-                            // P6.6.6: 回写事件源IID到符号表 (供cgen生成sourceIfaceIid用)
-                            clsSym.comSourceIfaceIid = sourceIid;
-                            clsSym.comSourceIfaceName = sourceIfaceName;
+                            // Only write back sourceIfaceIid if addDispInterface succeeded
+                            if (sourceIfaceOk) {
+                                clsSym.comSourceIfaceIid = sourceIid;
+                                clsSym.comSourceIfaceName = sourceIfaceName;
+                            }
 
-                            // 回写事件DISPID到符号表
+                            // Write event DISPIDs to symbol table
                             for (size_t ei = 0; ei < clsSym.eventNames.size(); ei++) {
                                 std::string evtLower = Symbol::toLower(clsSym.eventNames[ei]);
                                 clsSym.comEventDispids[evtLower] = eventMethods[ei].dispid;
                             }
                         }
 
-                        std::string clsid = clsSym.comClsidStr;
-                        if (clsid.empty()) {
-                            auto it = classClsidMap_.find(clsSym.lowerName);
-                            if (it != classClsidMap_.end()) clsid = it->second;
-                        }
-                        if (clsid.empty()) clsid = TypeLibBuilder::generateUuid(clsSym.name);
-                        // P6.6.6: Write back CLSID to symbol table, ensuring cgen and TypeLib use same CLSID
-                        if (clsSym.comClsidStr.empty()) clsSym.comClsidStr = clsid;
-                        if (!tlbBuilder.addCoClass(clsSym.name, clsid, ifaceName, sourceIfaceName)) {
-                            std::cerr << "C3: TypeLib addCoClass failed for " << clsSym.name << ": " << tlbBuilder.lastError() << std::endl;
+                        // Only add CoClass if primary interface was added successfully
+                        if (ifaceOk) {
+                            std::string clsid = clsSym.comClsidStr;
+                            if (clsid.empty()) {
+                                auto it = classClsidMap_.find(clsSym.lowerName);
+                                if (it != classClsidMap_.end()) clsid = it->second;
+                            }
+                            if (clsid.empty()) clsid = TypeLibBuilder::generateUuid(clsSym.name);
+                            if (clsSym.comClsidStr.empty()) clsSym.comClsidStr = clsid;
+                            if (!tlbBuilder.addCoClass(clsSym.name, clsid, ifaceName, sourceIfaceName)) {
+                                std::cerr << "C3: TypeLib addCoClass failed for " << clsSym.name << ": " << tlbBuilder.lastError() << std::endl;
+                            }
                         }
                     }
                 }
