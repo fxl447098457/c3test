@@ -1,4 +1,4 @@
-﻿#include "semantics/semantic_analyzer.hpp"
+#include "semantics/semantic_analyzer.hpp"
 #include <algorithm>
 #include <cctype>
 
@@ -56,6 +56,8 @@ static void dispatchStmt(Stmt& stmt, SemanticAnalyzer& analyzer) {
         case ASTNodeKind::OpenStmt:        analyzer.visit(static_cast<OpenStmt&>(stmt)); break;
         case ASTNodeKind::GetStmt:         analyzer.visit(static_cast<GetStmt&>(stmt)); break;
         case ASTNodeKind::PutStmt:         analyzer.visit(static_cast<PutStmt&>(stmt)); break;
+        case ASTNodeKind::GoSubStmt:        analyzer.visit(static_cast<GoSubStmt&>(stmt)); break;
+        case ASTNodeKind::ReturnStmt:       analyzer.visit(static_cast<ReturnStmt&>(stmt)); break;
         // 其他语句暂不处理
         default: break;
     }
@@ -498,6 +500,21 @@ void SemanticAnalyzer::visit(SubDecl& node) {
         analyzeStmtList(node.body);
 
         symTab_.popScope();
+        // P12.5: GoSub标签边界验证（GoSub目标必须在当前过程内）
+        for (auto& [gosubLabel, gosubLoc] : gosubTargetLabels_) {
+            bool found = false;
+            for (auto& declLabel : declaredLabels_) {
+                if (Symbol::toLower(declLabel) == Symbol::toLower(gosubLabel)) {
+                    found = true; break;
+                }
+            }
+            if (!found) {
+                diag_.error(DiagnosticID::SemUndeclaredIdentifier, gosubLoc,
+                    "GoSub target label '" + gosubLabel + "' not found in current procedure");
+            }
+        }
+        declaredLabels_.clear();
+        gosubTargetLabels_.clear();
         currentProc_ = nullptr;
     }
 }
@@ -546,6 +563,21 @@ void SemanticAnalyzer::visit(FunctionDecl& node) {
         analyzeStmtList(node.body);
 
         symTab_.popScope();
+        // P12.5: GoSub标签边界验证（GoSub目标必须在当前过程内）
+        for (auto& [gosubLabel, gosubLoc] : gosubTargetLabels_) {
+            bool found = false;
+            for (auto& declLabel : declaredLabels_) {
+                if (Symbol::toLower(declLabel) == Symbol::toLower(gosubLabel)) {
+                    found = true; break;
+                }
+            }
+            if (!found) {
+                diag_.error(DiagnosticID::SemUndeclaredIdentifier, gosubLoc,
+                    "GoSub target label '" + gosubLabel + "' not found in current procedure");
+            }
+        }
+        declaredLabels_.clear();
+        gosubTargetLabels_.clear();
         currentProc_ = nullptr;
     }
 }
@@ -601,6 +633,21 @@ void SemanticAnalyzer::visit(PropertyDecl& node) {
         analyzeStmtList(node.body);
 
         symTab_.popScope();
+        // P12.5: GoSub标签边界验证（GoSub目标必须在当前过程内）
+        for (auto& [gosubLabel, gosubLoc] : gosubTargetLabels_) {
+            bool found = false;
+            for (auto& declLabel : declaredLabels_) {
+                if (Symbol::toLower(declLabel) == Symbol::toLower(gosubLabel)) {
+                    found = true; break;
+                }
+            }
+            if (!found) {
+                diag_.error(DiagnosticID::SemUndeclaredIdentifier, gosubLoc,
+                    "GoSub target label '" + gosubLabel + "' not found in current procedure");
+            }
+        }
+        declaredLabels_.clear();
+        gosubTargetLabels_.clear();
         currentProc_ = nullptr;
     }
 }
@@ -864,6 +911,17 @@ void SemanticAnalyzer::visit(WithStmt& node) {
 
 void SemanticAnalyzer::visit(GoToStmt& node) {
     // GoTo标签存在性检查 (Pass2简单记录, 后续验证)
+}
+void SemanticAnalyzer::visit(GoSubStmt& node) {
+    // P12.5: GoSub标签记录（验证在过程结束时进行）
+    if (pass_ == 2) {
+        gosubTargetLabels_.push_back({node.labelName, node.loc});
+    }
+}
+
+void SemanticAnalyzer::visit(ReturnStmt& node) {
+    // Return from GoSub - 无需特殊语义检查
+    // 运行时由vb6_gosub_stack处理
 }
 
 void SemanticAnalyzer::visit(OnErrorStmt& node) {

@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 // VB6语义分析器 - 符号表构建 + 类型检查
 // 两遍扫描: Pass1收集声明, Pass2分析过程体
 
@@ -64,6 +64,8 @@ public:
     void visit(CaseClause& node) override;
     void visit(WithStmt& node) override;
     void visit(GoToStmt& node) override;
+    void visit(GoSubStmt& node) override;
+    void visit(ReturnStmt& node) override;
     void visit(OnErrorStmt& node) override;
     void visit(ExitStmt& node) override;
     void visit(CallStmt& node) override;
@@ -120,6 +122,7 @@ private:
 
     // 已声明的标签 (用于GoTo检查)
     std::vector<std::string> declaredLabels_;
+        std::vector<std::pair<std::string, SourceLocation>> gosubTargetLabels_;  // P12.5: GoSub引用的标签+位置
 
     // ---- 内部辅助 ----
 
