@@ -5248,8 +5248,20 @@ std::string CCodeGen::generateDllEntry(const std::string& progId, const std::vec
         std::string progId;
         std::vector<std::string> publicMethodNames;
         std::vector<Symbol*> publicMethodSyms;
+        std::vector<std::string> implementsNames;  // P12.1: Implements接口列表
     };
     std::vector<CoClassInfo> coClasses;
+
+    // P12.1: Hex格式化辅助 (IID常量生成用)
+    auto StringFormatHex2 = [](uint8_t v) -> std::string {
+        char buf[4]; snprintf(buf, sizeof(buf), "%02X", v); return buf;
+    };
+    auto StringFormatHex4 = [](uint16_t v) -> std::string {
+        char buf[6]; snprintf(buf, sizeof(buf), "%04X", v); return buf;
+    };
+    auto StringFormatHex8 = [](uint32_t v) -> std::string {
+        char buf[10]; snprintf(buf, sizeof(buf), "%08X", v); return buf;
+    };
 
     auto generateClsid = [](const std::string& name) -> std::string {
         uint32_t h1 = 0x811c9dc5, h2 = 0x01000193, h3 = 0xabcd1234, h4 = 0x5678ef01;
@@ -5309,6 +5321,8 @@ std::string CCodeGen::generateDllEntry(const std::string& progId, const std::vec
                         }
                     }
                 }
+                // P12.1: 收集 Implements 接口列表
+                info.implementsNames = sym->implementsNames;
                 coClasses.push_back(std::move(info));
             }
         }
@@ -5525,6 +5539,68 @@ std::string wideName = "L\"" + bareName + "\"";
         entry.emitBlank();
     }
 
+    // P12.1: 2.5 为 Implements 接口生成 IID 常量和 ifaceIids 数组
+    // IID生成: 使用FNV-1a变体（与CLSID不同种子，确保不冲突）
+    auto generateIid = [](const std::string& name) -> std::string {
+        uint32_t h1 = 0xa1b2c3d4, h2 = 0xe5f60718, h3 = 0x9a0b1c2d, h4 = 0x3e4f5061;
+        for (char c : name) {
+            h1 ^= (uint32_t)(unsigned char)c; h1 *= 0x01000193;
+            h2 ^= (uint32_t)(unsigned char)c; h2 *= 0x01000193;
+            h3 ^= (uint32_t)(unsigned char)c; h3 *= 0x01000193;
+            h4 ^= (uint32_t)(unsigned char)c; h4 *= 0x01000193;
+        }
+        char buf[64];
+        snprintf(buf, sizeof(buf), "{%08X-%04X-%04X-%04X-%04X%08X}",
+                 h1, (h2 >> 16) & 0xFFFF, (h2 & 0xFFFF) | 0x4000,
+                 (h3 >> 16) & 0xFFFF | 0x8000,
+                 h3 & 0xFFFF, h4);
+        return std::string(buf);
+    };
+
+    // 收集所有IID字符串 (interfaceName -> IID字符串)，避免重复
+    std::unordered_map<std::string, std::string> iidMap;
+    for (auto& cc : coClasses) {
+        for (auto& ifaceName : cc.implementsNames) {
+            if (iidMap.find(ifaceName) == iidMap.end()) {
+                iidMap[ifaceName] = generateIid("iface:" + progId + "." + ifaceName);
+            }
+        }
+    }
+
+    // 生成静态IID常量 (仅在有Implements接口时生成)
+    if (!iidMap.empty()) {
+        entry.emitLine("// P12.1: Implements interface IIDs");
+        for (auto& [ifaceName, iidStr] : iidMap) {
+            std::string iidVar = "IID_vb6iface_" + cIdent(ifaceName);
+            // 解析IID字符串并生成静态IID常量
+            // 格式: {0xAABBCCDD,0xEEFF,0x1122,{0x33,0x44,0x55,0x66,0x77,0x88,0x99,0xAA}}
+            uint32_t d1; uint16_t d2, d3; uint8_t d4[8];
+            sscanf(iidStr.c_str(), "{%08X-%04hX-%04hX-%02hhX%02hhX-%02hhX%02hhX%02hhX%02hhX%02hhX%02hhX}",
+                   &d1, &d2, &d3, &d4[0], &d4[1], &d4[2], &d4[3], &d4[4], &d4[5], &d4[6], &d4[7]);
+            entry.emitLine("static const IID " + iidVar + " = {0x" + 
+                StringFormatHex8(d1) + ",0x" + StringFormatHex4(d2) + ",0x" + StringFormatHex4(d3) +
+                ",{0x" + StringFormatHex2(d4[0]) + ",0x" + StringFormatHex2(d4[1]) +
+                ",0x" + StringFormatHex2(d4[2]) + ",0x" + StringFormatHex2(d4[3]) +
+                ",0x" + StringFormatHex2(d4[4]) + ",0x" + StringFormatHex2(d4[5]) +
+                ",0x" + StringFormatHex2(d4[6]) + ",0x" + StringFormatHex2(d4[7]) + "}};");
+        }
+        entry.emitBlank();
+
+        // 生成每个coclass的ifaceIids数组
+        for (auto& cc : coClasses) {
+            if (cc.implementsNames.empty()) continue;
+            std::string clsId = cIdent(cc.moduleName);
+            std::string iidsVar = "g_vb6_ifaceIids_" + clsId;
+            entry.emitLine("static const IID* const " + iidsVar + "[] = {");
+            entry.indent();
+            for (auto& ifaceName : cc.implementsNames) {
+                entry.emitLine("&IID_vb6iface_" + cIdent(ifaceName) + ",");
+            }
+            entry.dedent();
+            entry.emitLine("};");
+            entry.emitBlank();
+        }
+    }
     // 3. 全局coclass描述表
     entry.emitLine("const vb6_CoClassDesc g_vb6_coclasses[] = {");
     entry.indent();
@@ -5541,6 +5617,14 @@ std::string wideName = "L\"" + bareName + "\"";
         entry.emitLine("NULL,  /* dispatchVtable */");
         entry.emitLine(std::to_string(cc.publicMethodNames.size()) + ",  /* methodCount */");
         entry.emitLine("g_vb6_disp_" + clsId + "Methods,  /* methods */");
+        // P12.1: Implements interface IIDs
+        if (!cc.implementsNames.empty()) {
+            entry.emitLine(std::to_string(cc.implementsNames.size()) + ",  /* ifaceCount */");
+            entry.emitLine("g_vb6_ifaceIids_" + clsId + ",  /* ifaceIids */");
+        } else {
+            entry.emitLine("0,  /* ifaceCount */");
+            entry.emitLine("NULL,  /* ifaceIids */");
+        }
         entry.dedent();
         entry.emitLine("},");
     }

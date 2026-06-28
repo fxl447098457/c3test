@@ -1,4 +1,4 @@
-// vb6comserver.c - VB6 COM服务端运行时 (P6.6 ActiveX DLL)
+﻿// vb6comserver.c - VB6 COM服务端运行时 (P6.6 ActiveX DLL)
 // 实现IClassFactory、IDispatch包装、DLL导出骨架、注册表辅助
 
 #include "vb6comserver.h"
@@ -37,11 +37,22 @@ static const IID IID_IClassFactory_ = {0x00000001,0x0000,0x0000,{0xC0,0x00,0x00,
 // --- IUnknown ---
 
 static HRESULT STDMETHODCALLTYPE ComObj_QueryInterface(vb6_ComObject* self, REFIID riid, void** ppv) {
+    int i;
     if (!ppv) return E_POINTER;
     if (IsEqualIID(riid, &IID_IUnknown_) || IsEqualIID(riid, &IID_IDispatch_)) {
         *ppv = self;
         self->vtable->AddRef(self);
         return S_OK;
+    }
+    // P12.1: Check Implements interface IIDs
+    if (self->desc && self->desc->ifaceCount > 0 && self->desc->ifaceIids) {
+        for (i = 0; i < self->desc->ifaceCount; i++) {
+            if (IsEqualIID(riid, self->desc->ifaceIids[i])) {
+                *ppv = self;  // dispinterface: same IDispatch pointer
+                self->vtable->AddRef(self);
+                return S_OK;
+            }
+        }
     }
     *ppv = NULL;
     return E_NOINTERFACE;
@@ -221,6 +232,7 @@ vb6_ComObject* vb6_ComObject_Create(const vb6_CoClassDesc* desc) {
 // --- IUnknown ---
 
 static HRESULT STDMETHODCALLTYPE CF_QueryInterface(vb6_ClassFactory* self, REFIID riid, void** ppv) {
+    int i;
     if (!ppv) return E_POINTER;
     if (IsEqualIID(riid, &IID_IUnknown_) || IsEqualIID(riid, &IID_IClassFactory_)) {
         *ppv = self;

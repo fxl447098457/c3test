@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 // vb6comserver.h - VB6 COM服务端运行时 (P6.6 ActiveX DLL)
 // 提供ActiveX DLL所需的基础设施:
 //   - 全局引用计数 (g_vb6_cRef + g_vb6_cServerLock)
@@ -61,6 +61,9 @@ typedef struct vb6_CoClassDesc {
     int methodCount;
     // 方法描述表 (name/dispid/invkind)
     const struct vb6_DispMethodDesc* methods;
+    // P12.1: Implements接口IID表 (QI时遍历匹配)
+    int ifaceCount;                       // 实现的接口数量 (Implements语句)
+    const IID* const* ifaceIids;          // 接口IID指针数组 (每个元素指向一个静态IID)
 } vb6_CoClassDesc;
 
 // IDispatch方法描述
