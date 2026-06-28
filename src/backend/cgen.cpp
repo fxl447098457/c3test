@@ -1231,6 +1231,18 @@ void CCodeGen::visit(BinaryExpr& node) {
         return;
     }
 
+    // P14.1.1: VB6 + 运算符 — 两端String时等同&拼接
+    // VB6允许 "a" + "b" 作为字符串连接，语义与 & 相同
+    if (node.op == BinaryOp::Add && inferExprType(node) == Vb6Type::String) {
+        bool leftIsConcat = (left.find("vb6_BSTR_Concat") != std::string::npos);
+        if (leftIsConcat) {
+            lastExpr_ = "vb6_BSTR_ConcatFree(" + left + ", " + right + ")";
+        } else {
+            lastExpr_ = "vb6_BSTR_Concat(" + left + ", " + right + ")";
+        }
+        return;
+    }
+
     // 幂运算: VB6 ^ → pow()
     if (node.op == BinaryOp::Pow) {
         lastExpr_ = "vb6_Pow(" + left + ", " + right + ")";
