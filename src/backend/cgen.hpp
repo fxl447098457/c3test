@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 // vb6c3 - C代码生成器
 // 将语义分析后的AST+符号表翻译为C代码，交由MSVC编译
 // 设计参考: cfront, Nim, Zig早期均采用C代码生成路线
@@ -276,6 +276,9 @@ private:
     bool hasGoSub_ = false;
     int gosubReturnCounter_ = 0;
 
+    // P12.3: On Error嵌套支持标志 (每个过程独立)
+    bool hasOnError_ = false;
+
     // P6.5: WithEvents变量 (小写变量名 → 源类名)
     // Dim WithEvents obj As ClassName → knownWithEventsVars_["obj"] = "ClassName"
     std::unordered_map<std::string, std::string> knownWithEventsVars_;
@@ -400,6 +403,8 @@ private:
     // ---- AST辅助 ----
     // 检测语句列表中是否包含GoSubStmt
     bool hasGoSubInStmts(StmtList& stmts) const;
+    // P12.3: 检测语句列表中是否包含OnErrorStmt
+    bool hasOnErrorInStmts(StmtList& stmts) const;
 
     // ---- COM辅助 (P6.2) ----
     // 推断COM参数的封装函数: 根据表达式类型选择vb6_ComPackBSTR/Int/Double/Object

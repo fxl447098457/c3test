@@ -2919,11 +2919,12 @@ void CCodeGen::visit(OnErrorStmt& node) {
             //       goto vb6_label_ErrorHandler;
             //   }
             //   vb6_err_jmp_active = 1;
-            c_.emitLine("if (setjmp(vb6_error_jmp_buf) != 0) {");
+            c_.emitLine("if (setjmp(vb6_local_err_jmp) != 0) {");
             c_.indent();
             c_.emitLine("goto vb6_label_" + cIdent(node.labelName) + ";");
             c_.dedent();
             c_.emitLine("}");
+            c_.emitLine("vb6_error_jmp_ptr = &vb6_local_err_jmp;");
             c_.emitLine("vb6_err_jmp_active = 1;");
             c_.emitLine("vb6_error_jmp_set = 1;");
             // 需要setjmp头文件
@@ -3685,12 +3686,25 @@ void CCodeGen::visit(SubDecl& node) {
         c_.emitLine("int vb6_gosub_sp = 0;");
     }
 
+    // P12.3: 检测On Error并声明局部错误处理
+    hasOnError_ = hasOnErrorInStmts(node.body);
+    if (hasOnError_) {
+        c_.emitLine("jmp_buf vb6_local_err_jmp;");
+        c_.emitLine("vb6_SaveErrState();");
+    }
+
     // 生成过程体
     emitStmtList(node.body);
+
+        // P12.3: 恢复调用者的错误处理状态
+    if (hasOnError_) {
+        c_.emitLine("vb6_RestoreErrState();");
+    }
 
     currentProc_ = nullptr;
     inStaticProc_ = false;
     hasGoSub_ = false;
+    hasOnError_ = false;
     c_.dedent();
     c_.emitLine("}");
     c_.emitBlank();
@@ -3747,8 +3761,20 @@ void CCodeGen::visit(FunctionDecl& node) {
         c_.emitLine("int vb6_gosub_sp = 0;");
     }
 
+    // P12.3: 检测On Error并声明局部错误处理
+    hasOnError_ = hasOnErrorInStmts(node.body);
+    if (hasOnError_) {
+        c_.emitLine("jmp_buf vb6_local_err_jmp;");
+        c_.emitLine("vb6_SaveErrState();");
+    }
+
     // 生成过程体
     emitStmtList(node.body);
+
+        // P12.3: 恢复调用者的错误处理状态
+    if (hasOnError_) {
+        c_.emitLine("vb6_RestoreErrState();");
+    }
 
     // 返回值
     c_.emitLine("return " + currentReturnVar_ + ";");
@@ -3757,6 +3783,7 @@ void CCodeGen::visit(FunctionDecl& node) {
     currentReturnVar_ = "";
     inStaticProc_ = false;
     hasGoSub_ = false;
+    hasOnError_ = false;
     c_.dedent();
     c_.emitLine("}");
     c_.emitBlank();
@@ -4148,6 +4175,11 @@ void CCodeGen::visit(PropertyDecl& node) {
     knownDoubleVars_.insert(classDoubleMembers_.begin(), classDoubleMembers_.end());
     knownLongVars_.insert(classLongMembers_.begin(), classLongMembers_.end());
 
+        // P12.3: 恢复调用者的错误处理状态
+    if (hasOnError_) {
+        c_.emitLine("vb6_RestoreErrState();");
+    }
+
     // Property Get: 设置返回值变量 (与Function相同语义)
     if (node.propKind == ProcKind::PropertyGet) {
         currentReturnVar_ = "vb6_ret_" + cIdent(node.name);
@@ -4170,6 +4202,12 @@ void CCodeGen::visit(PropertyDecl& node) {
     }
 
     c_.indent();
+    // P12.3: 检测On Error并声明局部错误处理
+    hasOnError_ = hasOnErrorInStmts(node.body);
+    if (hasOnError_) {
+        c_.emitLine("jmp_buf vb6_local_err_jmp;");
+        c_.emitLine("vb6_SaveErrState();");
+    }
     emitStmtList(node.body);
 
     // Property Get: 隐式返回 vb6_ret_<propName>
@@ -4183,6 +4221,7 @@ void CCodeGen::visit(PropertyDecl& node) {
         currentReturnVar_ = "";
     }
     currentProc_ = nullptr;
+    hasOnError_ = false;
 
     c_.emitLine("}");
     c_.emitBlank();
@@ -5832,6 +5871,39 @@ bool CCodeGen::hasGoSubInStmts(StmtList& stmts) const {
 }
 
 // ============================================================
+// P12.3: 检测语句列表中是否包含OnErrorStmt
+// ============================================================
+
+bool CCodeGen::hasOnErrorInStmts(StmtList& stmts) const {
+    for (auto& stmt : stmts) {
+        if (!stmt) continue;
+        if (stmt->kind == ASTNodeKind::OnErrorStmt) return true;
+        // 递归检查复合语句
+        if (stmt->kind == ASTNodeKind::IfStmt) {
+            auto& ifStmt = static_cast<IfStmt&>(*stmt);
+            if (hasOnErrorInStmts(ifStmt.thenBody)) return true;
+            if (hasOnErrorInStmts(ifStmt.elseBody)) return true;
+            for (auto& elif : ifStmt.elseIfs) {
+                if (hasOnErrorInStmts(elif->body)) return true;
+            }
+        } else if (stmt->kind == ASTNodeKind::ForStmt) {
+            if (hasOnErrorInStmts(static_cast<ForStmt&>(*stmt).body)) return true;
+        } else if (stmt->kind == ASTNodeKind::DoLoopStmt) {
+            if (hasOnErrorInStmts(static_cast<DoLoopStmt&>(*stmt).body)) return true;
+        } else if (stmt->kind == ASTNodeKind::WhileWendStmt) {
+            if (hasOnErrorInStmts(static_cast<WhileWendStmt&>(*stmt).body)) return true;
+        } else if (stmt->kind == ASTNodeKind::SelectCaseStmt) {
+            auto& sel = static_cast<SelectCaseStmt&>(*stmt);
+            for (auto& c : sel.cases) {
+                if (hasOnErrorInStmts(c->body)) return true;
+            }
+            if (hasOnErrorInStmts(sel.elseCase)) return true;
+        }
+    }
+    return false;
+}
+
+// ============================================================
 // COM辅助 (P6.2)
 // ============================================================
 
@@ -5907,19 +5979,6 @@ std::string CCodeGen::getControlPropReadFn(FrmControlType ctrlType, const std::s
     if (propLower == "width") return "vb6_GetControlWidth";
     if (propLower == "height") return "vb6_GetControlHeight";
     if (propLower == "hwnd") return "vb6_GetControlHwnd";
-
-
-    // P11.8: Common properties for all visible controls (checked before switch)
-    if (propLower == "left") return "vb6_SetControlLeft";
-    if (propLower == "top") return "vb6_SetControlTop";
-    if (propLower == "width") return "vb6_SetControlWidth";
-    if (propLower == "height") return "vb6_SetControlHeight";
-
-        // P11.8: Common properties for all visible controls (checked before switch)
-    if (propLower == "left") return "vb6_SetControlLeft";
-    if (propLower == "top") return "vb6_SetControlTop";
-    if (propLower == "width") return "vb6_SetControlWidth";
-    if (propLower == "height") return "vb6_SetControlHeight";
 
     switch (ctrlType) {
     case FrmControlType::TextBox:

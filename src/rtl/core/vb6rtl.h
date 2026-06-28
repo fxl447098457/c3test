@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 // vb6rtl.h - VB6运行时库最小头文件
 // 为C代码生成器提供VB6基本类型的C定义
 // P3.6 阎段: 最小子集, 仅支撑 hello.bas 等简单程序
@@ -466,8 +466,13 @@ void vb6_RaiseError(int32_t errNum, BSTR description);
 extern int32_t vb6_err_resume_next;  // On Error Resume Next 标志
 extern int32_t vb6_err_jmp_active;    // On Error GoTo label 标志
 extern void* vb6_err_handler_label;   // 错误跳转标签 (MVP, 暂不用)
-extern jmp_buf vb6_error_jmp_buf;     // On Error GoTo label 的 setjmp 缓冲区
+extern jmp_buf* vb6_error_jmp_ptr;    // 指向当前函数的局部jmp_buf (P12.3)
 extern int32_t vb6_error_jmp_set;     // setjmp 是否已设置
+
+// P12.3: On Error嵌套 — 保存/恢复调用者的错误处理状态
+#define VB6_ERR_STACK_SIZE 8
+void vb6_SaveErrState(void);      // 保存当前错误状态到栈 (函数入口调用)
+void vb6_RestoreErrState(void);   // 从栈恢复错误状态 (函数出口调用)
 
 // 字典访问
 BSTR vb6_BSTR_Concat(BSTR a, BSTR b);

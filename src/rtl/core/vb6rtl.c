@@ -1,4 +1,4 @@
-// vb6rtl.c - VB6运行时库最小实现
+﻿// vb6rtl.c - VB6运行时库最小实现
 // 仅支持 hello.bas 等简单程序运行
 
 #include "vb6rtl.h"
@@ -1380,8 +1380,39 @@ void* vb6_err_handler_label = NULL;
 
 // 错误跳转缓冲区 (支持On Error GoTo label)
 #include <setjmp.h>
-jmp_buf vb6_error_jmp_buf;
+jmp_buf* vb6_error_jmp_ptr = NULL;
 int32_t vb6_error_jmp_set = 0;
+
+// P12.3: On Error嵌套栈 — 保存/恢复错误处理状态
+typedef struct vb6_ErrFrame {
+    jmp_buf* jmp_ptr;
+    int32_t jmp_set;
+    int32_t jmp_active;
+    int32_t resume_next;
+} vb6_ErrFrame;
+
+static vb6_ErrFrame vb6_err_stack[VB6_ERR_STACK_SIZE];
+static int32_t vb6_err_stack_top = 0;
+
+void vb6_SaveErrState(void) {
+    if (vb6_err_stack_top < VB6_ERR_STACK_SIZE) {
+        vb6_err_stack[vb6_err_stack_top].jmp_ptr = vb6_error_jmp_ptr;
+        vb6_err_stack[vb6_err_stack_top].jmp_set = vb6_error_jmp_set;
+        vb6_err_stack[vb6_err_stack_top].jmp_active = vb6_err_jmp_active;
+        vb6_err_stack[vb6_err_stack_top].resume_next = vb6_err_resume_next;
+        vb6_err_stack_top++;
+    }
+}
+
+void vb6_RestoreErrState(void) {
+    if (vb6_err_stack_top > 0) {
+        vb6_err_stack_top--;
+        vb6_error_jmp_ptr = vb6_err_stack[vb6_err_stack_top].jmp_ptr;
+        vb6_error_jmp_set = vb6_err_stack[vb6_err_stack_top].jmp_set;
+        vb6_err_jmp_active = vb6_err_stack[vb6_err_stack_top].jmp_active;
+        vb6_err_resume_next = vb6_err_stack[vb6_err_stack_top].resume_next;
+    }
+}
 
 int32_t vb6_ErrNumber(void) { return vb6_err.number; }
 BSTR vb6_ErrDescription(void) { return vb6_err.description; }
@@ -1394,9 +1425,9 @@ void vb6_RaiseError(int32_t errNum, BSTR description) {
         // On Error Resume Next: 忽略错误, 继续执行
         return;
     }
-    if (vb6_err_jmp_active && vb6_error_jmp_set) {
+    if (vb6_err_jmp_active && vb6_error_jmp_set && vb6_error_jmp_ptr) {
         // On Error GoTo label: longjmp 跳到 setjmp 点
-        longjmp(vb6_error_jmp_buf, errNum);
+        longjmp(*vb6_error_jmp_ptr, errNum);
     }
     // 未设置错误处理: 终止程序
     fwprintf(stderr, L"Unhandled VB6 Error #%d: %ls\n", errNum,
