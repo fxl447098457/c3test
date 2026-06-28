@@ -132,6 +132,15 @@ void* vb6_ComVtableGetObject(void* obj, int32_t vtIndex, ...);
 void* vb6_ComVtableGetVoid(void* obj, int32_t vtIndex, ...);
 
 // COM初始化/退出 (由vb6_Init/vb6_Exit调用)
+// P13.21: IConnectionPointContainer / Advise support (WithEvents)
+// Connect a COM object's event source to a sink (IDispatch-based callback)
+int vb6_ComAdvise(void* obj, const char* riidStr, void* sink, int* adviseCookie);
+int vb6_ComUnadvise(void* obj, const char* riidStr, int adviseCookie);
+
+// P13.22: Create a generic IDispatch event sink
+// Maps DISPID (event IDs) to callback functions
+void* vb6_CreateEventSink(const int* dispids, void** callbacks, int count);
+void vb6_FreeEventSink(void* sink);
 void vb6_ComInit(void);
 void vb6_ComExit(void);
 

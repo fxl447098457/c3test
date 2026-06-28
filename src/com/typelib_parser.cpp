@@ -1,4 +1,4 @@
-// VB6 TypeLib解析器实现 - P6.3 前期绑定支持
+﻿// VB6 TypeLib解析器实现 - P6.3 前期绑定支持
 // 编译期使用Windows LoadTypeLib/ITypeInfo API
 
 #include "com/typelib_parser.hpp"
@@ -81,6 +81,10 @@ std::unique_ptr<TypeLibResult> TypeLibParser::loadByPath(const std::string& tlbP
     for (auto& cc : result->coclasses) {
         if (!cc->defaultIfaceName.empty()) {
             cc->defaultIface = result->findInterface(cc->defaultIfaceName);
+        // P13.20: Link default source (event) interface
+        if (!cc->defaultSourceIfaceName.empty()) {
+            cc->defaultSourceIface = result->findInterface(cc->defaultSourceIfaceName);
+        }
         }
     }
 
@@ -489,19 +493,27 @@ std::unique_ptr<ComCoClassInfo> TypeLibParser::parseCoClass(void* pTypeInfo,
             }
             SysFreeString(implName);
 
-            // 默认源(事件)或默认接口
-            if (implFlags & IMPLTYPEFLAG_FDEFAULT) {
-                if (implFlags & IMPLTYPEFLAG_FSOURCE) {
-                    // 默认事件接口 (暂不处理, P6.5 WithEvents)
-                } else {
+                        // P13.20: Event source interface recognition
+            bool isSource = (implFlags & IMPLTYPEFLAG_FSOURCE) != 0;
+            bool isDefault = (implFlags & IMPLTYPEFLAG_FDEFAULT) != 0;
+            
+            if (isSource) {
+                // Event source interface
+                cc->sourceIfaceNames.push_back(ifaceName);
+                if (isDefault || cc->defaultSourceIfaceName.empty()) {
+                    cc->defaultSourceIfaceName = ifaceName;
+                }
+            } else {
+                // Regular (outgoing) interface
+                if (isDefault) {
+                    cc->defaultIfaceName = ifaceName;
+                }
+                // If no FDEFAULT flag, take first non-source interface
+                if (cc->defaultIfaceName.empty()) {
                     cc->defaultIfaceName = ifaceName;
                 }
             }
-            // 如果没有标记FDEFAULT, 取第一个非source接口
-            if (cc->defaultIfaceName.empty() && !(implFlags & IMPLTYPEFLAG_FSOURCE)) {
-                cc->defaultIfaceName = ifaceName;
-            }
-        }
+        }  // end if (implName)
         pImplTI->Release();
     }
 

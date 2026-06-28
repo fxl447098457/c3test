@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 // VB6 TypeLib解析器 - P6.3 前期绑定支持
 // 编译期使用Windows LoadTypeLib/ITypeInfo API提取类型库信息
 // 注册COM coclass/接口/方法签名到符号表
@@ -88,6 +88,10 @@ struct ComCoClassInfo {
     std::string clsidStr;       // CLSID字符串
     std::string defaultIfaceName;  // 默认接口名
     const ComInterfaceInfo* defaultIface = nullptr;  // 默认接口指针 (解析后填充)
+    // P13.20: Event source interface (IMPLTYPEFLAG_FSOURCE)
+    std::string defaultSourceIfaceName;   // 默认事件源接口名
+    const ComInterfaceInfo* defaultSourceIface = nullptr;  // 默认事件源接口指针
+    std::vector<std::string> sourceIfaceNames;  // 所有事件源接口名列表
 };
 
 // ============================================================
