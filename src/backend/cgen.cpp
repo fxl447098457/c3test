@@ -5817,6 +5817,26 @@ std::string CCodeGen::getControlPropReadFn(FrmControlType ctrlType, const std::s
     std::string propLower = propName;
     std::transform(propLower.begin(), propLower.end(), propLower.begin(), ::tolower);
 
+        // P11.8: Common properties for all visible controls (checked before switch)
+    if (propLower == "left") return "vb6_GetControlLeft";
+    if (propLower == "top") return "vb6_GetControlTop";
+    if (propLower == "width") return "vb6_GetControlWidth";
+    if (propLower == "height") return "vb6_GetControlHeight";
+    if (propLower == "hwnd") return "vb6_GetControlHwnd";
+
+
+    // P11.8: Common properties for all visible controls (checked before switch)
+    if (propLower == "left") return "vb6_SetControlLeft";
+    if (propLower == "top") return "vb6_SetControlTop";
+    if (propLower == "width") return "vb6_SetControlWidth";
+    if (propLower == "height") return "vb6_SetControlHeight";
+
+        // P11.8: Common properties for all visible controls (checked before switch)
+    if (propLower == "left") return "vb6_SetControlLeft";
+    if (propLower == "top") return "vb6_SetControlTop";
+    if (propLower == "width") return "vb6_SetControlWidth";
+    if (propLower == "height") return "vb6_SetControlHeight";
+
     switch (ctrlType) {
     case FrmControlType::TextBox:
         if (propLower == "text") return "vb6_GetControlText";
@@ -5862,6 +5882,12 @@ std::string CCodeGen::getControlPropReadFn(FrmControlType ctrlType, const std::s
 std::string CCodeGen::getControlPropWriteFn(FrmControlType ctrlType, const std::string& propName) const {
     std::string propLower = propName;
     std::transform(propLower.begin(), propLower.end(), propLower.begin(), ::tolower);
+
+        // P11.8: Common properties for all visible controls (checked before switch)
+    if (propLower == "left") return "vb6_SetControlLeft";
+    if (propLower == "top") return "vb6_SetControlTop";
+    if (propLower == "width") return "vb6_SetControlWidth";
+    if (propLower == "height") return "vb6_SetControlHeight";
 
     switch (ctrlType) {
     case FrmControlType::TextBox:

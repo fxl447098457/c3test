@@ -388,6 +388,76 @@ void vb6_SetControlEnabled(void* hwnd, int enabled) {
     if (!hwnd) return;
     EnableWindow((HWND)hwnd, enabled ? TRUE : FALSE);
 }
+// P11.8: Position/Size attributes (pixels, all visible controls)
+int vb6_GetControlLeft(void* hwnd) {
+    if (!hwnd) return 0;
+    RECT rc;
+    GetWindowRect((HWND)hwnd, &rc);
+    POINT pt = { rc.left, rc.top };
+    ScreenToClient(GetParent((HWND)hwnd), &pt);
+    return pt.x;
+}
+
+void vb6_SetControlLeft(void* hwnd, int left) {
+    if (!hwnd) return;
+    RECT rc;
+    GetWindowRect((HWND)hwnd, &rc);
+    POINT pt = { rc.left, rc.top };
+    ScreenToClient(GetParent((HWND)hwnd), &pt);
+    SetWindowPos((HWND)hwnd, NULL, left, pt.y, 0, 0, SWP_NOSIZE | SWP_NOZORDER);
+}
+
+int vb6_GetControlTop(void* hwnd) {
+    if (!hwnd) return 0;
+    RECT rc;
+    GetWindowRect((HWND)hwnd, &rc);
+    POINT pt = { rc.left, rc.top };
+    ScreenToClient(GetParent((HWND)hwnd), &pt);
+    return pt.y;
+}
+
+void vb6_SetControlTop(void* hwnd, int top) {
+    if (!hwnd) return;
+    RECT rc;
+    GetWindowRect((HWND)hwnd, &rc);
+    POINT pt = { rc.left, rc.top };
+    ScreenToClient(GetParent((HWND)hwnd), &pt);
+    SetWindowPos((HWND)hwnd, NULL, pt.x, top, 0, 0, SWP_NOSIZE | SWP_NOZORDER);
+}
+
+int vb6_GetControlWidth(void* hwnd) {
+    if (!hwnd) return 0;
+    RECT rc;
+    GetWindowRect((HWND)hwnd, &rc);
+    return rc.right - rc.left;
+}
+
+void vb6_SetControlWidth(void* hwnd, int width) {
+    if (!hwnd) return;
+    RECT rc;
+    GetWindowRect((HWND)hwnd, &rc);
+    SetWindowPos((HWND)hwnd, NULL, 0, 0, width, rc.bottom - rc.top, SWP_NOMOVE | SWP_NOZORDER);
+}
+
+int vb6_GetControlHeight(void* hwnd) {
+    if (!hwnd) return 0;
+    RECT rc;
+    GetWindowRect((HWND)hwnd, &rc);
+    return rc.bottom - rc.top;
+}
+
+void vb6_SetControlHeight(void* hwnd, int height) {
+    if (!hwnd) return;
+    RECT rc;
+    GetWindowRect((HWND)hwnd, &rc);
+    SetWindowPos((HWND)hwnd, NULL, 0, 0, rc.right - rc.left, height, SWP_NOMOVE | SWP_NOZORDER);
+}
+
+// P11.8: hWnd attribute (read-only)
+void* vb6_GetControlHwnd(void* hwnd) {
+    return hwnd;  // Already the HWND
+}
+
 // ============================================================
 // 控件数组 (P7.6)
 // ============================================================

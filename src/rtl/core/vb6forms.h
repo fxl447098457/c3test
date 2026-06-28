@@ -151,6 +151,20 @@ void vb6_SetControlVisible(void* hwnd, int visible);
 int vb6_GetControlEnabled(void* hwnd);
 void vb6_SetControlEnabled(void* hwnd, int enabled);
 
+// P11.8: Position/Size attributes (all visible controls, in pixels)
+// VB6 uses twips internally, but Win32 uses pixels; RTL handles conversion
+int vb6_GetControlLeft(void* hwnd);
+void vb6_SetControlLeft(void* hwnd, int left);
+int vb6_GetControlTop(void* hwnd);
+void vb6_SetControlTop(void* hwnd, int top);
+int vb6_GetControlWidth(void* hwnd);
+void vb6_SetControlWidth(void* hwnd, int width);
+int vb6_GetControlHeight(void* hwnd);
+void vb6_SetControlHeight(void* hwnd, int height);
+
+// P11.8: hWnd attribute (read-only, returns the Win32 HWND as pointer)
+void* vb6_GetControlHwnd(void* hwnd);
+
 
 // ============================================================
 // 控件数组 (P7.6)
