@@ -1107,7 +1107,7 @@ bool Driver::runLinker(const CompileOptions& options, const std::string& outputD
 
     // Check MSVC availability
     if (!MsvcDriver::isMsvcAvailable()) {
-        std::cerr << "C3: error: MSVC environment not detected (run vcvarsall.bat first)" << std::endl;
+        std::cerr << "C3: error: MSVC not found (install Visual Studio 2017+ with C++ workload)" << std::endl;
         std::cerr << "C3: Use --emit-c to generate C code only" << std::endl;
         return false;
     }

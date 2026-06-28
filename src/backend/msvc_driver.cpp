@@ -3,6 +3,7 @@
 #include <iostream>
 #include <fstream>
 #include <cstdlib>
+#include <cstdio>
 #include <sstream>
 #include <filesystem>
 
@@ -16,19 +17,111 @@ MsvcDriver::MsvcDriver() {}
 MsvcDriver::~MsvcDriver() = default;
 
 bool MsvcDriver::isMsvcAvailable() {
-    // 检查环境变量是否已设置vcvarsall
-    const char* clPath = std::getenv("VCINSTALLDIR");
-    if (clPath && clPath[0] != '\0') {
+    // 1. Check if vcvarsall environment already set
+    const char* vcDir = std::getenv("VCINSTALLDIR");
+    if (vcDir && vcDir[0] != '\0') {
         return true;
     }
-    // 尝试直接运行cl.exe
+    // 2. Try running cl.exe directly (might be in PATH from other setup)
     int ret = std::system("cl.exe >nul 2>&1");
-    return ret == 0;
+    if (ret == 0) return true;
+    // 3. P11.4: Check if vswhere can find VS installation
+    std::string vcvars = findVcvarsallBat();
+    return !vcvars.empty();
+}
+
+// P11.4: Find VS installation path via vswhere.exe or registry
+std::string MsvcDriver::findVsInstallPath() {
+    // Method 1: vswhere.exe (VS2017+)
+    const char* pf_x86 = std::getenv("ProgramFiles(x86)");
+    if (!pf_x86) pf_x86 = "C:\\Program Files (x86)";
+    std::string vswhere = std::string(pf_x86) + "\\Microsoft Visual Studio\\Installer\\vswhere.exe";
+
+    if (std::filesystem::exists(vswhere)) {
+        // Run vswhere to get installation path
+        std::string cmd = "\"" + vswhere + "\" -all -latest -property installationPath";
+        // Use _popen to capture output
+        FILE* pipe = _popen(cmd.c_str(), "r");
+        if (pipe) {
+            char buffer[512];
+            std::string result;
+            while (fgets(buffer, sizeof(buffer), pipe)) {
+                result += buffer;
+            }
+            _pclose(pipe);
+            // Trim whitespace
+            while (!result.empty() && (result.back() == '\n' || result.back() == '\r' || result.back() == ' '))
+                result.pop_back();
+            if (!result.empty() && std::filesystem::exists(result)) {
+                return result;
+            }
+        }
+    }
+
+    // Method 2: Registry fallback (VS2015 and earlier)
+#ifdef _WIN32
+    HKEY hKey;
+    if (RegOpenKeyExA(HKEY_LOCAL_MACHINE, "SOFTWARE\\Microsoft\\VisualStudio\\SxS\\VS7",
+                       0, KEY_READ | KEY_WOW64_32KEY, &hKey) == ERROR_SUCCESS) {
+        char value[512];
+        DWORD size = sizeof(value);
+        // Check for VS2022 (17.0), VS2019 (16.0), VS2017 (15.0), VS2015 (14.0)
+        const char* versions[] = {"17.0", "16.0", "15.0", "14.0"};
+        for (const char* ver : versions) {
+            size = sizeof(value);
+            if (RegQueryValueExA(hKey, ver, nullptr, nullptr, (LPBYTE)value, &size) == ERROR_SUCCESS) {
+                std::string path(value);
+                // Trim trailing backslash
+                while (!path.empty() && path.back() == '\\') path.pop_back();
+                RegCloseKey(hKey);
+                if (!path.empty()) return path;
+            }
+        }
+        RegCloseKey(hKey);
+    }
+#endif
+
+    return "";
+}
+
+// P11.4: Find vcvarsall.bat path
+std::string MsvcDriver::findVcvarsallBat() {
+    // 1. Check VCINSTALLDIR (already set from previous vcvarsall)
+    const char* vcDir = std::getenv("VCINSTALLDIR");
+    if (vcDir && vcDir[0] != '\0') {
+        std::string bat = std::string(vcDir) + "Auxiliary\\Build\\vcvarsall.bat";
+        if (std::filesystem::exists(bat)) return bat;
+    }
+
+    // 2. Find via vswhere/registry
+    std::string vsPath = findVsInstallPath();
+    if (!vsPath.empty()) {
+        std::string bat = vsPath + "\\VC\\Auxiliary\\Build\\vcvarsall.bat";
+        if (std::filesystem::exists(bat)) return bat;
+    }
+
+    return "";
 }
 
 std::string MsvcDriver::findClExe() const {
-    // 如果vcvarsall已设置, cl.exe应该在PATH中
     return "cl.exe";
+}
+
+// P11.4: Build vcvarsall.bat prefix if needed
+std::string MsvcDriver::buildVcvarsPrefix() const {
+    // If vcvarsall already set, no prefix needed
+    const char* vcDir = std::getenv("VCINSTALLDIR");
+    if (vcDir && vcDir[0] != '\0') {
+        return "";
+    }
+
+    // Try to find vcvarsall.bat
+    std::string vcvars = findVcvarsallBat();
+    if (!vcvars.empty()) {
+        return "call \"" + vcvars + "\" x64 >nul 2>&1 && ";
+    }
+
+    return "";
 }
 
 int MsvcDriver::executeCommand(const std::string& cmd) const {
@@ -39,7 +132,6 @@ int MsvcDriver::executeCommand(const std::string& cmd) const {
     return std::system(cmd.c_str());
 #endif
 }
-
 bool MsvcDriver::compileAndLink(const MsvcDriverOptions& options) {
     if (options.sourceFiles.empty()) {
         std::cerr << "C3: 没有源文件需要编译" << std::endl;
@@ -148,7 +240,9 @@ bool MsvcDriver::compileAndLink(const MsvcDriverOptions& options) {
     }
     if (tmpLogDir.empty()) tmpLogDir = ".";
     std::string tmpLogPath = tmpLogDir + "/_c3_msvc_out.txt";
-    std::string fullCmd = cmd.str() + " > \"" + tmpLogPath + "\" 2>&1";
+    // P11.4: Prepend vcvarsall.bat setup if cl.exe not in PATH
+    std::string vcvarsPrefix = buildVcvarsPrefix();
+    std::string fullCmd = vcvarsPrefix + cmd.str() + " > \"" + tmpLogPath + "\" 2>&1";
 
     int ret = executeCommand(fullCmd);
     if (ret != 0) {
