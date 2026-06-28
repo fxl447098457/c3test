@@ -71,7 +71,8 @@ typedef struct vb6_CoClassDesc {
     int ifaceCount;                       // 实现的接口数量 (Implements语句)
     const IID* const* ifaceIids;          // 接口IID指针数组 (每个元素指向一个静态IID)
     // P6.6: 事件源接口 (IConnectionPointContainer)
-    const char* sourceIfaceIid;           // source dispinterface IID字符串 (NULL=无事件)
+    const IID* defaultIfaceIid;            // 默认dispinterface IID (指向静态常量, 早绑定QI用)
+    const char* sourceIfaceIid;           // source dispinterface IID字符串字符串 (NULL=无事件)
     int eventCount;                       // 事件数量
     const vb6_EventDesc* events;          // 事件描述表 (DISPID + 名称)
 } vb6_CoClassDesc;

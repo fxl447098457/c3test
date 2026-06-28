@@ -5618,6 +5618,7 @@ std::string CCodeGen::generateDllEntry(const std::string& progId, const std::vec
         std::vector<std::string> implementsNames;  // P12.1: Implements接口列表
         // P6.6.4: 事件源信息
         std::vector<std::string> eventNames;       // 事件名称列表
+        std::string defaultIfaceIid;              // 默认dispinterface IID (用于早绑定QI)
         std::string sourceIfaceIid;               // source dispinterface IID
     };
     std::vector<CoClassInfo> coClasses;
@@ -5714,6 +5715,8 @@ std::string CCodeGen::generateDllEntry(const std::string& progId, const std::vec
                     info.eventNames = sym->eventNames;
                     info.sourceIfaceIid = generateIid("source:" + progId + "." + sym->name + "Events");
                 }
+                // P6.6.6: 默认接口IID (由driver TypeLib builder回写)
+                info.defaultIfaceIid = sym->comDefaultIfaceIid;
                 coClasses.push_back(std::move(info));
             }
         }
@@ -5978,6 +5981,32 @@ std::string wideName = "L\"" + bareName + "\"";
     }
     // P6.6.4: 生成事件描述表和source IID常量
     bool hasAnyEvents = false;
+
+    // P6.6.6: Default dispinterface IID constants (用于早绑定QI匹配)
+    {
+        bool hasDefaultIid = false;
+        for (auto& cc : coClasses) {
+            if (!cc.defaultIfaceIid.empty()) { hasDefaultIid = true; break; }
+        }
+        if (hasDefaultIid) {
+            entry.emitLine("// P6.6.6: Default dispinterface IID constants");
+            for (auto& cc : coClasses) {
+                if (cc.defaultIfaceIid.empty()) continue;
+                std::string clsId = cIdent(cc.moduleName);
+                std::string iidVar = "IID_vb6def_" + clsId;
+                uint32_t d1; uint16_t d2, d3; uint8_t d4[8];
+                sscanf(cc.defaultIfaceIid.c_str(), "{%08X-%04hX-%04hX-%02hhX%02hhX-%02hhX%02hhX%02hhX%02hhX%02hhX%02hhX}",
+                       &d1, &d2, &d3, &d4[0], &d4[1], &d4[2], &d4[3], &d4[4], &d4[5], &d4[6], &d4[7]);
+                entry.emitLine("static const IID " + iidVar + " = {0x" +
+                    StringFormatHex8(d1) + ",0x" + StringFormatHex4(d2) + ",0x" + StringFormatHex4(d3) +
+                    ",{0x" + StringFormatHex2(d4[0]) + ",0x" + StringFormatHex2(d4[1]) +
+                    ",0x" + StringFormatHex2(d4[2]) + ",0x" + StringFormatHex2(d4[3]) +
+                    ",0x" + StringFormatHex2(d4[4]) + ",0x" + StringFormatHex2(d4[5]) +
+                    ",0x" + StringFormatHex2(d4[6]) + ",0x" + StringFormatHex2(d4[7]) + "}};");
+            }
+            entry.emitBlank();
+        }
+    }
     for (auto& cc : coClasses) {
         if (!cc.eventNames.empty()) { hasAnyEvents = true; break; }
     }
@@ -6039,6 +6068,12 @@ std::string wideName = "L\"" + bareName + "\"";
         } else {
             entry.emitLine("0,  /* ifaceCount */");
             entry.emitLine("NULL,  /* ifaceIids */");
+        }
+        // P6.6.6: 默认接口IID (早绑定QI用)
+        if (!cc.defaultIfaceIid.empty()) {
+            entry.emitLine("&IID_vb6def_" + clsId + ",  /* defaultIfaceIid */");
+        } else {
+            entry.emitLine("NULL,  /* defaultIfaceIid */");
         }
         // P6.6.4: 事件源信息
         if (!cc.sourceIfaceIid.empty()) {

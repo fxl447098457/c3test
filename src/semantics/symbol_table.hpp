@@ -118,6 +118,7 @@ struct Symbol {
     std::string comClsidStr;          // coclass CLSID字符串
     std::string comProgId;            // ProgID (如 "Scripting.FileSystemObject")
     std::string comDefaultIfaceName;  // 默认接口名 (ComClass用)
+    std::string comDefaultIfaceIid;   // 默认接口IID (由TypeLib builder回写, 用于早绑定QI)
     int32_t comVtblBase = 7;         // vtable起始偏移 (IDispatch=7, IUnknown=3)
     bool comIsDual = false;           // 双重接口 (dispinterface + vtable)
     // P13.23: COM event source interface (for WithEvents on external COM objects)

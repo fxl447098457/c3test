@@ -65,6 +65,12 @@ static HRESULT STDMETHODCALLTYPE ComObj_QueryInterface(vb6_ComObject* self, REFI
             }
         }
     }
+    // P6.6.6: Default dispinterface IID (早绑定时VBA QI _ClassName IID)
+    if (self->desc && self->desc->defaultIfaceIid && IsEqualIID(riid, self->desc->defaultIfaceIid)) {
+        *ppv = self;  // dispinterface = same IDispatch pointer
+        self->vtable->AddRef(self);
+        return S_OK;
+    }
     // P6.6: IConnectionPointContainer (only if coclass has events)
     if (self->desc && self->desc->sourceIfaceIid && IsEqualIID(riid, &IID_IConnectionPointContainer_)) {
         if (!self->cpc) {
@@ -125,12 +131,34 @@ static ULONG STDMETHODCALLTYPE ComObj_Release(vb6_ComObject* self) {
 
 static HRESULT STDMETHODCALLTYPE ComObj_GetTypeInfoCount(vb6_ComObject* self, UINT* pctinfo) {
     if (!pctinfo) return E_POINTER;
-    *pctinfo = 0;  // 不提供TypeLib信息
+    *pctinfo = 1;  // 提供TypeLib信息 (早绑定需要)
     return S_OK;
 }
 
 static HRESULT STDMETHODCALLTYPE ComObj_GetTypeInfo(vb6_ComObject* self, UINT iTInfo, LCID lcid, ITypeInfo** ppTInfo) {
-    return DISP_E_BADINDEX;  // 无TypeLib
+    if (!ppTInfo) return E_POINTER;
+    if (iTInfo != 0) return DISP_E_BADINDEX;
+    *ppTInfo = NULL;
+    if (!self->desc) return E_FAIL;
+    // 获取DLL路径, 从嵌入资源加载TypeLib
+    wchar_t dllPath[MAX_PATH];
+    HMODULE hMod = NULL;
+    if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS, (LPCWSTR)&g_vb6_cRef, &hMod))
+        return E_FAIL;
+    GetModuleFileNameW(hMod, dllPath, MAX_PATH);
+    ITypeLib* pTypeLib = NULL;
+    HRESULT hr = LoadTypeLib(dllPath, &pTypeLib);
+    if (FAILED(hr) || !pTypeLib) return E_FAIL;
+    // 通过CLSID查找coclass的ITypeInfo (C语言必须通过vtable调用)
+    CLSID clsid;
+    hr = vb6_CLSIDFromStrA(self->desc->clsidStr, &clsid);
+    if (FAILED(hr)) {
+        ITypeLib_Release(pTypeLib);
+        return E_FAIL;
+    }
+    hr = ITypeLib_GetTypeInfoOfGuid(pTypeLib, clsid, ppTInfo);
+    ITypeLib_Release(pTypeLib);
+    return hr;
 }
 
 static HRESULT STDMETHODCALLTYPE ComObj_GetIDsOfNames(vb6_ComObject* self, REFIID riid, 
@@ -544,7 +572,7 @@ HRESULT vb6_RegisterTypeLib(const wchar_t* dllPath) {
             pTypeLib->lpVtbl->ReleaseTLibAttr(pTypeLib, pAttr);
         }
     }
-    pTypeLib->lpVtbl->Release(pTypeLib);
+    ITypeLib_Release(pTypeLib);
     return hr;
 }
 
@@ -565,7 +593,7 @@ HRESULT vb6_UnregisterTypeLib(const wchar_t* dllPath) {
                          SYS_WIN64, pAttr->lcid);
         pTypeLib->lpVtbl->ReleaseTLibAttr(pTypeLib, pAttr);
     }
-    pTypeLib->lpVtbl->Release(pTypeLib);
+    ITypeLib_Release(pTypeLib);
     
     return S_OK;
 }
@@ -625,7 +653,7 @@ static HRESULT vb6_LoadCoClassTypeInfo(const vb6_CoClassDesc* desc, ITypeInfo** 
             if (pAttr->typekind == TKIND_COCLASS && IsEqualIID(&pAttr->guid, &clsid)) {
                 *ppTypeInfo = pInfo;
                 pInfo->lpVtbl->ReleaseTypeAttr(pInfo, pAttr);
-                pTypeLib->lpVtbl->Release(pTypeLib);
+                ITypeLib_Release(pTypeLib);
                 return S_OK;
             }
             pInfo->lpVtbl->ReleaseTypeAttr(pInfo, pAttr);
@@ -633,7 +661,7 @@ static HRESULT vb6_LoadCoClassTypeInfo(const vb6_CoClassDesc* desc, ITypeInfo** 
         pInfo->lpVtbl->Release(pInfo);
     }
     
-    pTypeLib->lpVtbl->Release(pTypeLib);
+    ITypeLib_Release(pTypeLib);
     return TYPE_E_ELEMENTNOTFOUND;
 }
 // ============================================================

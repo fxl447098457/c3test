@@ -264,7 +264,7 @@ CompileResult Driver::compile(const CompileOptions& options) {
         if (!hasFrm) {
             std::cerr << "C3: --dump-frm: 未找到.frm文件\n";
         }
-        result.success = true;
+    result.success = true;
         return result;
     }
 
@@ -404,7 +404,6 @@ CompileResult Driver::compile(const CompileOptions& options) {
     if (!runCodeGeneration(effectiveOpts, intermediatesDir)) {
         std::cerr << diag_->toString();
         writeErrorLog(outputDir + "/c3-error.log", "code-generation");
-        session.cleanup();
         result.errorCount = diag_->errorCount();
         result.warningCount = diag_->warningCount();
         return result;
@@ -414,7 +413,6 @@ CompileResult Driver::compile(const CompileOptions& options) {
     if (!runLinker(effectiveOpts, outputDir, intermediatesDir, session)) {
         std::cerr << diag_->toString();
         writeErrorLog(outputDir + "/c3-error.log", "linking");
-        session.cleanup();
         result.errorCount = diag_->errorCount();
         result.warningCount = diag_->warningCount();
         return result;
@@ -1118,6 +1116,10 @@ bool Driver::runCodeGeneration(const CompileOptions& options, const std::string&
                         if (!tlbBuilder.addDispInterface(ifaceName, iid, methods)) {
                             std::cerr << "C3: TypeLib addDispInterface failed for " << ifaceName << ": " << tlbBuilder.lastError() << std::endl;
                         }
+
+                        // 回写默认接口IID到符号表 (供cgen生成QI匹配用)
+                        clsSym.comDefaultIfaceIid = iid;
+                        clsSym.comDefaultIfaceName = ifaceName;
 
                         // P6.6.2: 如果类有事件, 创建 source dispinterface (_ClassNameEvents)
                         std::string sourceIfaceName;
