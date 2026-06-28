@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 // VB6 Win32窗体运行时 (P7)
 // 提供Win32窗口注册、创建、消息循环、控件管理等基础功能
 // 编译器生成的C代码调用此运行时API
@@ -165,8 +165,151 @@ void vb6_SetControlHeight(void* hwnd, int height);
 // P11.8: hWnd attribute (read-only, returns the Win32 HWND as pointer)
 void* vb6_GetControlHwnd(void* hwnd);
 
+// P13.1: Font properties (all visible controls with text)
+// FontName: returns BSTR (caller responsible for SysFreeString)
+void* vb6_GetControlFontName(void* hwnd);
+void vb6_SetControlFontName(void* hwnd, void* bstrName);
+// FontSize: returns VB6 Single (points) as float
+float vb6_GetControlFontSize(void* hwnd);
+void vb6_SetControlFontSize(void* hwnd, float sizePt);
+// FontBold: VB6 True=-1, False=0
+int vb6_GetControlFontBold(void* hwnd);
+void vb6_SetControlFontBold(void* hwnd, int bold);
+// FontItalic
+int vb6_GetControlFontItalic(void* hwnd);
+void vb6_SetControlFontItalic(void* hwnd, int italic);
+// FontUnderline
+int vb6_GetControlFontUnderline(void* hwnd);
+void vb6_SetControlFontUnderline(void* hwnd, int underline);
+// FontStrikethrough
+int vb6_GetControlFontStrikethrough(void* hwnd);
+void vb6_SetControlFontStrikethrough(void* hwnd, int strike);
+
+// P13.2: ForeColor/BackColor (all visible controls)
+// Returns OLE color (VB6 Long), 0x00BBGGRR format
+int vb6_GetControlForeColor(void* hwnd);
+void vb6_SetControlForeColor(void* hwnd, int color);
+int vb6_GetControlBackColor(void* hwnd);
+void vb6_SetControlBackColor(void* hwnd, int color);
+
 
 // ============================================================
+// 
+// P13.3: ListBox/ComboBox properties
+// ListCount: number of items
+int vb6_GetListCount(void* hwnd);
+// ListIndex: current selection index (-1=none)
+int vb6_GetListIndex(void* hwnd);
+void vb6_SetListIndex(void* hwnd, int index);
+// List(idx): get item text by index (returns BSTR)
+void* vb6_GetListItem(void* hwnd, int index);
+// AddItem: add string to list
+void vb6_AddItem(void* hwnd, void* bstrItem);
+// RemoveItem: remove item by index
+void vb6_RemoveItem(void* hwnd, int index);
+// Clear: remove all items
+void vb6_ClearList(void* hwnd);
+
+// P13.4: TextBox-specific properties
+// MultiLine: read/write, VB6 True=-1
+int vb6_GetMultiLine(void* hwnd);
+void vb6_SetMultiLine(void* hwnd, int multiline);
+// ScrollBars: 0=None, 1=Horizontal, 2=Vertical, 3=Both
+int vb6_GetScrollBars(void* hwnd);
+void vb6_SetScrollBars(void* hwnd, int scrollbars);
+// MaxLength: maximum text length (0=unlimited)
+int vb6_GetMaxLength(void* hwnd);
+void vb6_SetMaxLength(void* hwnd, int maxlength);
+// PasswordChar: returns BSTR (single char)
+void* vb6_GetPasswordChar(void* hwnd);
+void vb6_SetPasswordChar(void* hwnd, void* bstrChar);
+// Locked: VB6 True=-1
+int vb6_GetLocked(void* hwnd);
+void vb6_SetLocked(void* hwnd, int locked);
+
+// P13.5: Alignment (TextBox/Label/CheckBox/OptionButton/Frame)
+// 0=Left, 1=Right, 2=Center
+int vb6_GetAlignment(void* hwnd);
+void vb6_SetAlignment(void* hwnd, int align);
+
+// P13.6: TabIndex/TabStop
+int vb6_GetTabIndex(void* hwnd);
+void vb6_SetTabIndex(void* hwnd, int index);
+int vb6_GetTabStop(void* hwnd);
+void vb6_SetTabStop(void* hwnd, int tabstop);
+
+// P13.8: ToolTipText (returns BSTR)
+void* vb6_GetToolTipText(void* hwnd);
+void vb6_SetToolTipText(void* hwnd, void* bstrText);
+
+// P13.9: Tag (returns BSTR, stored as window property)
+void* vb6_GetControlTag(void* hwnd);
+void vb6_SetControlTag(void* hwnd, void* bstrTag);
+
+// P13.7: MousePointer/MouseIcon (all visible controls)
+// MousePointer: 0=Default, 1=Arrow, 2=Cross, 3=I-Beam, 4=Icon, 5=Size, 6=Size NE-SW,
+//   7=Size N-S, 8=Size NW-SE, 9=Size W-E, 10=Up Arrow, 11=Hourglass, 12=No Drop,
+//   13=App Starting, 14=Help, 15=Size All, 99=Custom
+int vb6_GetMousePointer(void* hwnd);
+void vb6_SetMousePointer(void* hwnd, int pointer);
+// MouseIcon: custom cursor handle (stored as window property)
+void* vb6_GetMouseIcon(void* hwnd);
+void vb6_SetMouseIcon(void* hwnd, void* hCursor);
+
+// P13.10: BorderStyle (Form/TextBox/ComboBox/ListBox)
+// Form: 0=None, 1=Fixed Single, 2=Sizable, 3=Fixed Dialog, 4=Fixed ToolWindow, 5=Sizable ToolWindow
+// TextBox: 0=None, 1=Fixed Single
+int vb6_GetBorderStyle(void* hwnd);
+void vb6_SetBorderStyle(void* hwnd, int style);
+
+// P13.11: ScrollBar properties (HScrollBar/VScrollBar)
+int vb6_GetScrollMin(void* hwnd);
+void vb6_SetScrollMin(void* hwnd, int min);
+int vb6_GetScrollMax(void* hwnd);
+void vb6_SetScrollMax(void* hwnd, int max);
+int vb6_GetScrollValue(void* hwnd);
+void vb6_SetScrollValue(void* hwnd, int value);
+int vb6_GetLargeChange(void* hwnd);
+void vb6_SetLargeChange(void* hwnd, int change);
+int vb6_GetSmallChange(void* hwnd);
+void vb6_SetSmallChange(void* hwnd, int change);
+
+// P13.12: Timer properties
+// Interval: milliseconds (0=disabled)
+int vb6_GetTimerInterval(void* hwnd);
+void vb6_SetTimerInterval(void* hwnd, int interval);
+// Timer Enabled (separate from generic Enabled for Timer specifics)
+int vb6_GetTimerEnabled(void* hwnd);
+void vb6_SetTimerEnabled(void* hwnd, int enabled);
+
+// P13.14: TextBox selection properties
+int vb6_GetSelStart(void* hwnd);
+void vb6_SetSelStart(void* hwnd, int start);
+int vb6_GetSelLength(void* hwnd);
+void vb6_SetSelLength(void* hwnd, int length);
+void* vb6_GetSelText(void* hwnd);  // returns BSTR
+void vb6_SetSelText(void* hwnd, void* bstrText);
+
+// P13.15: CommandButton Default/Cancel
+// Default: True if button responds to Enter key
+int vb6_GetDefaultButton(void* hwnd);
+void vb6_SetDefaultButton(void* hwnd, int isDefault);
+// Cancel: True if button responds to Esc key
+int vb6_GetCancelButton(void* hwnd);
+void vb6_SetCancelButton(void* hwnd, int isCancel);
+// P13.13: Picture (PictureBox/Image)
+// vb6_LoadPictureFromFile: load picture from file (BMP/ICO/CUR/WMF/EMF)
+// Returns HBITMAP/HICON (as void*), or NULL on failure
+void* vb6_LoadPictureFromFile(const char* filePath);
+// vb6_LoadPictureFromResource: load picture from resource
+// Returns handle from resource, or NULL on failure
+void* vb6_LoadPictureFromResource(void* hInstance, int resourceId, const char* type);
+// Set/get Picture property on PictureBox/Image controls
+void* vb6_GetControlPicture(void* hwnd);
+void vb6_SetControlPicture(void* hwnd, void* hPicture);
+// AutoSize for PictureBox: resize to fit picture
+int vb6_GetPictureAutoSize(void* hwnd);
+void vb6_SetPictureAutoSize(void* hwnd, int autoSize);
 // 控件数组 (P7.6)
 // ============================================================
 // VB6控件数组: 同名控件带不同Index, 共享事件处理器(Index参数)

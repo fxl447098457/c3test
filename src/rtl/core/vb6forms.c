@@ -1,4 +1,4 @@
-// VB6 Win32窓体运行时实现 (P7)
+﻿// VB6 Win32窓体运行时实现 (P7)
 // 提供Win32窗口注册、创建、消息循环、控件管理等基础功能
 
 #ifdef _WIN32
@@ -6,6 +6,7 @@
 #define NOMINMAX
 #include <windows.h>
 #include <shellapi.h>
+#include <commctrl.h>
 #endif
 
 #include "vb6forms.h"
@@ -459,7 +460,1024 @@ void* vb6_GetControlHwnd(void* hwnd) {
 }
 
 // ============================================================
-// 控件数组 (P7.6)
+// P13.1: Font properties
+// ============================================================
+
+// Helper: get LOGFONT from control's current font
+static int vb6_GetControlLogFont(void* hwnd, LOGFONTW* plf) {
+    if (!hwnd || !plf) return 0;
+    HFONT hFont = (HFONT)SendMessageW((HWND)hwnd, WM_GETFONT, 0, 0);
+    if (!hFont) return 0;
+    return GetObjectW(hFont, sizeof(LOGFONTW), plf) > 0;
+}
+
+// Helper: create new font from modified LOGFONT and set it on control
+// Also deletes the old font if it was created by us (we track via prop)
+static void vb6_SetControlFontFromLogFont(void* hwnd, const LOGFONTW* plf) {
+    if (!hwnd || !plf) return;
+    HFONT hNewFont = CreateFontIndirectW(plf);
+    if (!hNewFont) return;
+    HFONT hOldFont = (HFONT)SendMessageW((HWND)hwnd, WM_GETFONT, 0, 0);
+    SendMessageW((HWND)hwnd, WM_SETFONT, (WPARAM)hNewFont, (LPARAM)TRUE);
+    // Force redraw
+    InvalidateRect((HWND)hwnd, NULL, TRUE);
+    // Delete old font only if it's not a stock font
+    if (hOldFont && GetObjectType(hOldFont) == OBJ_FONT) {
+        // Safe to delete non-stock fonts; stock fonts have OBJ_FONT but
+        // DeleteObject on stock fonts is a no-op, so it's safe
+        DeleteObject(hOldFont);
+    }
+}
+
+void* vb6_GetControlFontName(void* hwnd) {
+    LOGFONTW lf;
+    if (!vb6_GetControlLogFont(hwnd, &lf)) {
+        WCHAR empty[] = {0};
+        return SysAllocString(empty);
+    }
+    return SysAllocString(lf.lfFaceName);
+}
+
+void vb6_SetControlFontName(void* hwnd, void* bstrName) {
+    if (!hwnd || !bstrName) return;
+    LOGFONTW lf;
+    if (!vb6_GetControlLogFont(hwnd, &lf)) {
+        // No existing font, create a default LOGFONT
+        memset(&lf, 0, sizeof(lf));
+        lf.lfHeight = -13;  // Default ~10pt
+        lf.lfCharSet = DEFAULT_CHARSET;
+        lf.lfOutPrecision = OUT_DEFAULT_PRECIS;
+        lf.lfClipPrecision = CLIP_DEFAULT_PRECIS;
+        lf.lfQuality = DEFAULT_QUALITY;
+        lf.lfPitchAndFamily = DEFAULT_PITCH | FF_DONTCARE;
+    }
+    BSTR bs = (BSTR)bstrName;
+    int len = SysStringLen(bs);
+    if (len > LF_FACESIZE - 1) len = LF_FACESIZE - 1;
+    memcpy(lf.lfFaceName, bs, len * sizeof(WCHAR));
+    lf.lfFaceName[len] = L'\0';
+    vb6_SetControlFontFromLogFont(hwnd, &lf);
+}
+
+float vb6_GetControlFontSize(void* hwnd) {
+    LOGFONTW lf;
+    if (!vb6_GetControlLogFont(hwnd, &lf)) return 0.0f;
+    HDC hdc = GetDC(NULL);
+    int dpi = GetDeviceCaps(hdc, LOGPIXELSY);
+    ReleaseDC(NULL, hdc);
+    if (dpi <= 0) dpi = 96;
+    int heightPx = lf.lfHeight < 0 ? -lf.lfHeight : lf.lfHeight;
+    return (float)heightPx * 72.0f / (float)dpi;
+}
+
+void vb6_SetControlFontSize(void* hwnd, float sizePt) {
+    if (!hwnd) return;
+    LOGFONTW lf;
+    if (!vb6_GetControlLogFont(hwnd, &lf)) {
+        memset(&lf, 0, sizeof(lf));
+        lf.lfCharSet = DEFAULT_CHARSET;
+        lf.lfOutPrecision = OUT_DEFAULT_PRECIS;
+        lf.lfClipPrecision = CLIP_DEFAULT_PRECIS;
+        lf.lfQuality = DEFAULT_QUALITY;
+        lf.lfPitchAndFamily = DEFAULT_PITCH | FF_DONTCARE;
+    }
+    HDC hdc = GetDC(NULL);
+    int dpi = GetDeviceCaps(hdc, LOGPIXELSY);
+    ReleaseDC(NULL, hdc);
+    if (dpi <= 0) dpi = 96;
+    // Convert points to pixel height (negative for character height)
+    lf.lfHeight = -(int)(sizePt * (float)dpi / 72.0f + 0.5f);
+    vb6_SetControlFontFromLogFont(hwnd, &lf);
+}
+
+int vb6_GetControlFontBold(void* hwnd) {
+    LOGFONTW lf;
+    if (!vb6_GetControlLogFont(hwnd, &lf)) return 0;
+    return (lf.lfWeight >= FW_BOLD) ? -1 : 0;  // VB6: True=-1
+}
+
+void vb6_SetControlFontBold(void* hwnd, int bold) {
+    if (!hwnd) return;
+    LOGFONTW lf;
+    if (!vb6_GetControlLogFont(hwnd, &lf)) {
+        memset(&lf, 0, sizeof(lf));
+        lf.lfHeight = -13;
+        lf.lfCharSet = DEFAULT_CHARSET;
+        lf.lfOutPrecision = OUT_DEFAULT_PRECIS;
+        lf.lfClipPrecision = CLIP_DEFAULT_PRECIS;
+        lf.lfQuality = DEFAULT_QUALITY;
+        lf.lfPitchAndFamily = DEFAULT_PITCH | FF_DONTCARE;
+    }
+    lf.lfWeight = bold ? FW_BOLD : FW_NORMAL;
+    vb6_SetControlFontFromLogFont(hwnd, &lf);
+}
+
+int vb6_GetControlFontItalic(void* hwnd) {
+    LOGFONTW lf;
+    if (!vb6_GetControlLogFont(hwnd, &lf)) return 0;
+    return lf.lfItalic ? -1 : 0;  // VB6: True=-1
+}
+
+void vb6_SetControlFontItalic(void* hwnd, int italic) {
+    if (!hwnd) return;
+    LOGFONTW lf;
+    if (!vb6_GetControlLogFont(hwnd, &lf)) {
+        memset(&lf, 0, sizeof(lf));
+        lf.lfHeight = -13;
+        lf.lfCharSet = DEFAULT_CHARSET;
+        lf.lfOutPrecision = OUT_DEFAULT_PRECIS;
+        lf.lfClipPrecision = CLIP_DEFAULT_PRECIS;
+        lf.lfQuality = DEFAULT_QUALITY;
+        lf.lfPitchAndFamily = DEFAULT_PITCH | FF_DONTCARE;
+    }
+    lf.lfItalic = italic ? TRUE : FALSE;
+    vb6_SetControlFontFromLogFont(hwnd, &lf);
+}
+
+int vb6_GetControlFontUnderline(void* hwnd) {
+    LOGFONTW lf;
+    if (!vb6_GetControlLogFont(hwnd, &lf)) return 0;
+    return lf.lfUnderline ? -1 : 0;  // VB6: True=-1
+}
+
+void vb6_SetControlFontUnderline(void* hwnd, int underline) {
+    if (!hwnd) return;
+    LOGFONTW lf;
+    if (!vb6_GetControlLogFont(hwnd, &lf)) {
+        memset(&lf, 0, sizeof(lf));
+        lf.lfHeight = -13;
+        lf.lfCharSet = DEFAULT_CHARSET;
+        lf.lfOutPrecision = OUT_DEFAULT_PRECIS;
+        lf.lfClipPrecision = CLIP_DEFAULT_PRECIS;
+        lf.lfQuality = DEFAULT_QUALITY;
+        lf.lfPitchAndFamily = DEFAULT_PITCH | FF_DONTCARE;
+    }
+    lf.lfUnderline = underline ? TRUE : FALSE;
+    vb6_SetControlFontFromLogFont(hwnd, &lf);
+}
+
+int vb6_GetControlFontStrikethrough(void* hwnd) {
+    LOGFONTW lf;
+    if (!vb6_GetControlLogFont(hwnd, &lf)) return 0;
+    return lf.lfStrikeOut ? -1 : 0;  // VB6: True=-1
+}
+
+void vb6_SetControlFontStrikethrough(void* hwnd, int strike) {
+    if (!hwnd) return;
+    LOGFONTW lf;
+    if (!vb6_GetControlLogFont(hwnd, &lf)) {
+        memset(&lf, 0, sizeof(lf));
+        lf.lfHeight = -13;
+        lf.lfCharSet = DEFAULT_CHARSET;
+        lf.lfOutPrecision = OUT_DEFAULT_PRECIS;
+        lf.lfClipPrecision = CLIP_DEFAULT_PRECIS;
+        lf.lfQuality = DEFAULT_QUALITY;
+        lf.lfPitchAndFamily = DEFAULT_PITCH | FF_DONTCARE;
+    }
+    lf.lfStrikeOut = strike ? TRUE : FALSE;
+    vb6_SetControlFontFromLogFont(hwnd, &lf);
+}
+
+// ============================================================
+// P13.2: ForeColor/BackColor
+// ============================================================
+
+int vb6_GetControlForeColor(void* hwnd) {
+    if (!hwnd) return 0;
+    // For most controls, text color is set via WM_CTLCOLOR* parent handler
+    // We store foreground color as a window property
+    HANDLE hProp = GetPropW((HWND)hwnd, L"VB6_ForeColor");
+    if (hProp) return (int)(INT_PTR)hProp;
+    return 0;  // Default black
+}
+
+void vb6_SetControlForeColor(void* hwnd, int color) {
+    if (!hwnd) return;
+    SetPropW((HWND)hwnd, L"VB6_ForeColor", (HANDLE)(INT_PTR)color);
+    InvalidateRect((HWND)hwnd, NULL, TRUE);
+}
+
+int vb6_GetControlBackColor(void* hwnd) {
+    if (!hwnd) return 0;
+    HANDLE hProp = GetPropW((HWND)hwnd, L"VB6_BackColor");
+    if (hProp) return (int)(INT_PTR)hProp;
+    return (int)(INT_PTR)GetSysColor(COLOR_BTNFACE);  // Default
+}
+
+void vb6_SetControlBackColor(void* hwnd, int color) {
+    if (!hwnd) return;
+    SetPropW((HWND)hwnd, L"VB6_BackColor", (HANDLE)(INT_PTR)color);
+    InvalidateRect((HWND)hwnd, NULL, TRUE);
+}
+
+// ============================================================
+// ============================================================
+// P13.3: ListBox/ComboBox properties
+// ============================================================
+
+// Helper: check if HWND is a ListBox
+static int vb6_IsListBox(void* hwnd) {
+    if (!hwnd) return 0;
+    wchar_t cls[64];
+    GetClassNameW((HWND)hwnd, cls, 64);
+    // VB6 ListBox creates "ListBox" class, our RTL uses "LISTBOX"
+    return (wcsicmp(cls, L"LISTBOX") == 0 || wcsicmp(cls, L"ListBox") == 0);
+}
+
+int vb6_GetListCount(void* hwnd) {
+    if (!hwnd) return 0;
+    if (vb6_IsListBox(hwnd)) {
+        return (int)SendMessageW((HWND)hwnd, LB_GETCOUNT, 0, 0);
+    }
+    return (int)SendMessageW((HWND)hwnd, CB_GETCOUNT, 0, 0);
+}
+
+int vb6_GetListIndex(void* hwnd) {
+    if (!hwnd) return -1;
+    if (vb6_IsListBox(hwnd)) {
+        return (int)SendMessageW((HWND)hwnd, LB_GETCURSEL, 0, 0);
+    }
+    return (int)SendMessageW((HWND)hwnd, CB_GETCURSEL, 0, 0);
+}
+
+void vb6_SetListIndex(void* hwnd, int index) {
+    if (!hwnd) return;
+    if (vb6_IsListBox(hwnd)) {
+        SendMessageW((HWND)hwnd, LB_SETCURSEL, (WPARAM)index, 0);
+    } else {
+        SendMessageW((HWND)hwnd, CB_SETCURSEL, (WPARAM)index, 0);
+    }
+}
+
+void* vb6_GetListItem(void* hwnd, int index) {
+    if (!hwnd) return SysAllocString(L"");
+    int len;
+    WCHAR* buf;
+    BSTR bstr;
+    if (vb6_IsListBox(hwnd)) {
+        len = (int)SendMessageW((HWND)hwnd, LB_GETTEXTLEN, (WPARAM)index, 0);
+        if (len == LB_ERR) return SysAllocString(L"");
+        buf = (WCHAR*)malloc((len + 1) * sizeof(WCHAR));
+        if (!buf) return SysAllocString(L"");
+        SendMessageW((HWND)hwnd, LB_GETTEXT, (WPARAM)index, (LPARAM)buf);
+        bstr = SysAllocString(buf);
+        free(buf);
+    } else {
+        len = (int)SendMessageW((HWND)hwnd, CB_GETLBTEXTLEN, (WPARAM)index, 0);
+        if (len == CB_ERR) return SysAllocString(L"");
+        buf = (WCHAR*)malloc((len + 1) * sizeof(WCHAR));
+        if (!buf) return SysAllocString(L"");
+        SendMessageW((HWND)hwnd, CB_GETLBTEXT, (WPARAM)index, (LPARAM)buf);
+        bstr = SysAllocString(buf);
+        free(buf);
+    }
+    return (void*)bstr;
+}
+
+void vb6_AddItem(void* hwnd, void* bstrItem) {
+    if (!hwnd) return;
+    BSTR bs = (BSTR)bstrItem;
+    if (!bs) {
+        bs = SysAllocString(L"");
+    }
+    if (vb6_IsListBox(hwnd)) {
+        SendMessageW((HWND)hwnd, LB_ADDSTRING, 0, (LPARAM)bs);
+    } else {
+        SendMessageW((HWND)hwnd, CB_ADDSTRING, 0, (LPARAM)bs);
+    }
+    if (bstrItem == NULL) {
+        SysFreeString(bs);
+    }
+}
+
+void vb6_RemoveItem(void* hwnd, int index) {
+    if (!hwnd) return;
+    if (vb6_IsListBox(hwnd)) {
+        SendMessageW((HWND)hwnd, LB_DELETESTRING, (WPARAM)index, 0);
+    } else {
+        SendMessageW((HWND)hwnd, CB_DELETESTRING, (WPARAM)index, 0);
+    }
+}
+
+void vb6_ClearList(void* hwnd) {
+    if (!hwnd) return;
+    if (vb6_IsListBox(hwnd)) {
+        SendMessageW((HWND)hwnd, LB_RESETCONTENT, 0, 0);
+    } else {
+        SendMessageW((HWND)hwnd, CB_RESETCONTENT, 0, 0);
+    }
+}
+
+// ============================================================
+// P13.4: TextBox-specific properties
+// ============================================================
+
+int vb6_GetMultiLine(void* hwnd) {
+    if (!hwnd) return 0;
+    LONG style = GetWindowLongW((HWND)hwnd, GWL_STYLE);
+    return (style & ES_MULTILINE) ? -1 : 0;  // VB6: True=-1
+}
+
+void vb6_SetMultiLine(void* hwnd, int multiline) {
+    // Note: ES_MULTILINE cannot be changed after creation in Win32
+    // This is a VB6 design-time only property; we store it but it has no effect
+    if (!hwnd) return;
+    // Store in window property for consistency
+    SetPropW((HWND)hwnd, L"VB6_MultiLine", (HANDLE)(INT_PTR)(multiline ? -1 : 0));
+}
+
+int vb6_GetScrollBars(void* hwnd) {
+    if (!hwnd) return 0;
+    HANDLE hProp = GetPropW((HWND)hwnd, L"VB6_ScrollBars");
+    if (hProp) return (int)(INT_PTR)hProp;
+    // Infer from style
+    LONG style = GetWindowLongW((HWND)hwnd, GWL_STYLE);
+    int result = 0;
+    if (style & WS_HSCROLL) result |= 1;
+    if (style & WS_VSCROLL) result |= 2;
+    return result;
+}
+
+void vb6_SetScrollBars(void* hwnd, int scrollbars) {
+    // ScrollBars is design-time only in VB6; store as property
+    if (!hwnd) return;
+    SetPropW((HWND)hwnd, L"VB6_ScrollBars", (HANDLE)(INT_PTR)scrollbars);
+}
+
+int vb6_GetMaxLength(void* hwnd) {
+    if (!hwnd) return 0;
+    return (int)SendMessageW((HWND)hwnd, EM_GETLIMITTEXT, 0, 0);
+}
+
+void vb6_SetMaxLength(void* hwnd, int maxlength) {
+    if (!hwnd) return;
+    if (maxlength <= 0) maxlength = 0x7FFFFFFE;  // VB6: 0 = unlimited
+    SendMessageW((HWND)hwnd, EM_SETLIMITTEXT, (WPARAM)maxlength, 0);
+}
+
+void* vb6_GetPasswordChar(void* hwnd) {
+    if (!hwnd) return SysAllocString(L"");
+    WCHAR ch = (WCHAR)SendMessageW((HWND)hwnd, EM_GETPASSWORDCHAR, 0, 0);
+    if (ch == 0) return SysAllocString(L"");
+    WCHAR buf[2] = { ch, 0 };
+    return SysAllocString(buf);
+}
+
+void vb6_SetPasswordChar(void* hwnd, void* bstrChar) {
+    if (!hwnd) return;
+    WCHAR ch = 0;
+    if (bstrChar) {
+        BSTR bs = (BSTR)bstrChar;
+        if (SysStringLen(bs) > 0) ch = bs[0];
+    }
+    SendMessageW((HWND)hwnd, EM_SETPASSWORDCHAR, (WPARAM)ch, 0);
+    InvalidateRect((HWND)hwnd, NULL, TRUE);
+}
+
+int vb6_GetLocked(void* hwnd) {
+    if (!hwnd) return 0;
+    LONG style = GetWindowLongW((HWND)hwnd, GWL_STYLE);
+    // Locked = read-only in Win32 terms
+    return (style & ES_READONLY) ? -1 : 0;  // VB6: True=-1
+}
+
+void vb6_SetLocked(void* hwnd, int locked) {
+    if (!hwnd) return;
+    SendMessageW((HWND)hwnd, EM_SETREADONLY, (WPARAM)(locked ? TRUE : FALSE), 0);
+}
+
+// ============================================================
+// P13.5: Alignment
+// ============================================================
+
+int vb6_GetAlignment(void* hwnd) {
+    if (!hwnd) return 0;
+    LONG style = GetWindowLongW((HWND)hwnd, GWL_STYLE);
+    if (style & ES_CENTER) return 2;
+    if (style & ES_RIGHT) return 1;
+    return 0;  // Left
+}
+
+void vb6_SetAlignment(void* hwnd, int align) {
+    if (!hwnd) return;
+    LONG style = GetWindowLongW((HWND)hwnd, GWL_STYLE);
+    style &= ~(ES_LEFT | ES_CENTER | ES_RIGHT);
+    switch (align) {
+        case 1: style |= ES_RIGHT; break;
+        case 2: style |= ES_CENTER; break;
+        default: style |= ES_LEFT; break;
+    }
+    SetWindowLongW((HWND)hwnd, GWL_STYLE, style);
+    InvalidateRect((HWND)hwnd, NULL, TRUE);
+}
+
+// ============================================================
+// P13.6: TabIndex/TabStop
+// ============================================================
+
+int vb6_GetTabIndex(void* hwnd) {
+    if (!hwnd) return 0;
+    HANDLE hProp = GetPropW((HWND)hwnd, L"VB6_TabIndex");
+    if (hProp) return (int)(INT_PTR)hProp;
+    return 0;
+}
+
+void vb6_SetTabIndex(void* hwnd, int index) {
+    if (!hwnd) return;
+    SetPropW((HWND)hwnd, L"VB6_TabIndex", (HANDLE)(INT_PTR)index);
+}
+
+int vb6_GetTabStop(void* hwnd) {
+    if (!hwnd) return -1;  // Default: True
+    LONG style = GetWindowLongW((HWND)hwnd, GWL_STYLE);
+    return (style & WS_TABSTOP) ? -1 : 0;  // VB6: True=-1
+}
+
+void vb6_SetTabStop(void* hwnd, int tabstop) {
+    if (!hwnd) return;
+    LONG style = GetWindowLongW((HWND)hwnd, GWL_STYLE);
+    if (tabstop) {
+        style |= WS_TABSTOP;
+    } else {
+        style &= ~WS_TABSTOP;
+    }
+    SetWindowLongW((HWND)hwnd, GWL_STYLE, style);
+}
+
+// ============================================================
+// P13.8: ToolTipText
+// ============================================================
+
+// Helper: ToolTip control management
+static HWND vb6_GetToolTipCtrl(void) {
+    // Use a shared tooltip control (lazy init)
+    static HWND s_hwndTT = NULL;
+    if (!s_hwndTT) {
+        s_hwndTT = CreateWindowExW(0, TOOLTIPS_CLASSW, NULL,
+            WS_POPUP | TTS_NOPREFIX | TTS_ALWAYSTIP,
+            CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT,
+            NULL, NULL, g_hInstance, NULL);
+    }
+    return s_hwndTT;
+}
+
+void* vb6_GetToolTipText(void* hwnd) {
+    if (!hwnd) return SysAllocString(L"");
+    HANDLE hProp = GetPropW((HWND)hwnd, L"VB6_ToolTipText");
+    if (!hProp) return SysAllocString(L"");
+    return SysAllocString((LPCWSTR)hProp);
+}
+
+void vb6_SetToolTipText(void* hwnd, void* bstrText) {
+    if (!hwnd) return;
+    // Free old tooltip text stored in property
+    HANDLE hOld = GetPropW((HWND)hwnd, L"VB6_ToolTipText");
+    if (hOld) {
+        SysFreeString((BSTR)hOld);
+        RemovePropW((HWND)hwnd, L"VB6_ToolTipText");
+    }
+    if (bstrText) {
+        BSTR bs = (BSTR)bstrText;
+        BSTR copy = SysAllocString(bs);
+        SetPropW((HWND)hwnd, L"VB6_ToolTipText", (HANDLE)copy);
+        
+        // Register with tooltip control
+        HWND hwndTT = vb6_GetToolTipCtrl();
+        if (hwndTT) {
+            TOOLINFOW ti;
+            memset(&ti, 0, sizeof(ti));
+            ti.cbSize = sizeof(ti);
+            ti.uFlags = TTF_IDISHWND | TTF_SUBCLASS;
+            ti.hwnd = GetParent((HWND)hwnd);
+            ti.uId = (UINT_PTR)hwnd;
+            ti.lpszText = copy;
+            // Try update first, then add
+            SendMessageW(hwndTT, TTM_UPDATETIPTEXTW, 0, (LPARAM)&ti);
+            if (SendMessageW(hwndTT, TTM_GETTOOLINFO, 0, (LPARAM)&ti) == 0) {
+                // Tool not yet added
+                SendMessageW(hwndTT, TTM_ADDTOOLW, 0, (LPARAM)&ti);
+            }
+        }
+    }
+}
+
+// ============================================================
+// P13.9: Tag
+// ============================================================
+
+void* vb6_GetControlTag(void* hwnd) {
+    if (!hwnd) return SysAllocString(L"");
+    HANDLE hProp = GetPropW((HWND)hwnd, L"VB6_Tag");
+    if (!hProp) return SysAllocString(L"");
+    return SysAllocString((LPCWSTR)hProp);
+}
+
+void vb6_SetControlTag(void* hwnd, void* bstrTag) {
+    if (!hwnd) return;
+    // Free old tag
+    HANDLE hOld = GetPropW((HWND)hwnd, L"VB6_Tag");
+    if (hOld) {
+        SysFreeString((BSTR)hOld);
+        RemovePropW((HWND)hwnd, L"VB6_Tag");
+    }
+    BSTR copy = bstrTag ? SysAllocString((BSTR)bstrTag) : SysAllocString(L"");
+    SetPropW((HWND)hwnd, L"VB6_Tag", (HANDLE)copy);
+}
+
+// ============================================================
+// P13.7: MousePointer/MouseIcon
+// ============================================================
+
+// VB6 MousePointer values to Windows cursor mapping
+static LPCWSTR vb6_MousePointerToCursor(int pointer) {
+    switch (pointer) {
+        case 0:  return NULL;              // vbDefault - use class cursor
+        case 1:  return IDC_ARROW;         // vbArrow
+        case 2:  return IDC_CROSS;         // vbCrosshair
+        case 3:  return IDC_IBEAM;         // vbIbeam
+        case 4:  return IDC_ICON;          // vbIconPointer (obsolete)
+        case 5:  return IDC_SIZE;          // vbSizePointer
+        case 6:  return IDC_SIZENESW;      // vbSizeNESW
+        case 7:  return IDC_SIZENS;        // vbSizeNS
+        case 8:  return IDC_SIZENWSE;      // vbSizeNWSE
+        case 9:  return IDC_SIZEWE;        // vbSizeEW
+        case 10: return IDC_UPARROW;       // vbUpArrow
+        case 11: return IDC_WAIT;          // vbHourglass
+        case 12: return IDC_NO;            // vbNoDrop
+        case 13: return IDC_APPSTARTING;   // vbArrowHourglass
+        case 14: return IDC_HELP;          // vbArrowQuestion
+        case 15: return IDC_SIZEALL;       // vbSizeAll
+        case 99: return NULL;              // vbCustom - use MouseIcon
+        default: return NULL;
+    }
+}
+
+int vb6_GetMousePointer(void* hwnd) {
+    if (!hwnd) return 0;
+    HANDLE hProp = GetPropW((HWND)hwnd, L"VB6_MousePointer");
+    if (hProp) return (int)(INT_PTR)hProp;
+    return 0;  // Default
+}
+
+void vb6_SetMousePointer(void* hwnd, int pointer) {
+    if (!hwnd) return;
+    SetPropW((HWND)hwnd, L"VB6_MousePointer", (HANDLE)(INT_PTR)pointer);
+    if (pointer == 99) {
+        // Custom: use MouseIcon cursor if set
+        HANDLE hIcon = GetPropW((HWND)hwnd, L"VB6_MouseIcon");
+        if (hIcon) {
+            SetClassLongPtrW((HWND)hwnd, GCLP_HCURSOR, (LONG_PTR)hIcon);
+        }
+    } else if (pointer == 0) {
+        // Default: restore class cursor
+        SetClassLongPtrW((HWND)hwnd, GCLP_HCURSOR, (LONG_PTR)LoadCursorW(NULL, IDC_ARROW));
+    } else {
+        LPCWSTR cursorName = vb6_MousePointerToCursor(pointer);
+        if (cursorName) {
+            HCURSOR hCur = LoadCursorW(NULL, cursorName);
+            if (hCur) SetClassLongPtrW((HWND)hwnd, GCLP_HCURSOR, (LONG_PTR)hCur);
+        }
+    }
+}
+
+void* vb6_GetMouseIcon(void* hwnd) {
+    if (!hwnd) return NULL;
+    HANDLE hProp = GetPropW((HWND)hwnd, L"VB6_MouseIcon");
+    return hProp;  // HCURSOR handle
+}
+
+void vb6_SetMouseIcon(void* hwnd, void* hCursor) {
+    if (!hwnd) return;
+    SetPropW((HWND)hwnd, L"VB6_MouseIcon", (HANDLE)hCursor);
+    // If MousePointer is 99 (Custom), apply immediately
+    int mp = vb6_GetMousePointer(hwnd);
+    if (mp == 99 && hCursor) {
+        SetClassLongPtrW((HWND)hwnd, GCLP_HCURSOR, (LONG_PTR)hCursor);
+    }
+}
+
+// ============================================================
+// P13.10: BorderStyle
+// ============================================================
+
+int vb6_GetBorderStyle(void* hwnd) {
+    if (!hwnd) return 0;
+    HWND hw = (HWND)hwnd;
+    WCHAR className[256] = {0};
+    GetClassNameW(hw, className, 256);
+
+    if (wcsicmp(className, L"Edit") == 0) {
+        // TextBox: 0=None(No border), 1=Fixed Single
+        LONG style = GetWindowLongW(hw, GWL_EXSTYLE);
+        return (style & WS_EX_CLIENTEDGE) ? 1 : 0;
+    }
+    // Form/ComboBox/ListBox: store as property
+    HANDLE hProp = GetPropW(hw, L"VB6_BorderStyle");
+    if (hProp) return (int)(INT_PTR)hProp;
+    // Form default is 2 (Sizable)
+    if (wcsicmp(className, L"VB6_Form") == 0 || 
+        GetWindowLongW(hw, GWL_STYLE) & WS_OVERLAPPEDWINDOW) {
+        return 2;
+    }
+    return 1;  // Default Fixed Single for most controls
+}
+
+void vb6_SetBorderStyle(void* hwnd, int style) {
+    if (!hwnd) return;
+    HWND hw = (HWND)hwnd;
+    WCHAR className[256] = {0};
+    GetClassNameW(hw, className, 256);
+
+    if (wcsicmp(className, L"Edit") == 0) {
+        // TextBox: only 0 or 1
+        LONG exStyle = GetWindowLongW(hw, GWL_EXSTYLE);
+        if (style == 0) {
+            exStyle &= ~WS_EX_CLIENTEDGE;
+        } else {
+            exStyle |= WS_EX_CLIENTEDGE;
+        }
+        SetWindowLongW(hw, GWL_EXSTYLE, exStyle);
+        SetWindowPos(hw, NULL, 0, 0, 0, 0,
+            SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER);
+    } else {
+        // Store as property for other controls
+        SetPropW(hw, L"VB6_BorderStyle", (HANDLE)(INT_PTR)style);
+    }
+}
+
+// ============================================================
+// P13.11: ScrollBar properties (HScrollBar/VScrollBar)
+// ============================================================
+
+int vb6_GetScrollMin(void* hwnd) {
+    if (!hwnd) return 0;
+    HANDLE hProp = GetPropW((HWND)hwnd, L"VB6_ScrollMin");
+    if (hProp) return (int)(INT_PTR)hProp;
+    return 0;
+}
+
+void vb6_SetScrollMin(void* hwnd, int min) {
+    if (!hwnd) return;
+    SetPropW((HWND)hwnd, L"VB6_ScrollMin", (HANDLE)(INT_PTR)min);
+    // Apply to Win32 scrollbar: Win32 min is always 0, we scale
+    // Store VB6 Min/Max, set Win32 range to 0..(Max-Min)
+    int max = vb6_GetScrollMax(hwnd);
+    int winMax = max - min;
+    if (winMax < 0) winMax = 0;
+    HWND hw = (HWND)hwnd;
+    WCHAR className[256] = {0};
+    GetClassNameW(hw, className, 256);
+    if (wcsicmp(className, L"SCROLLBAR") == 0) {
+        SetScrollRange(hw, SB_CTL, 0, winMax, TRUE);
+    } else {
+        // Form scrollbars
+        SetScrollRange(hw, SB_HORZ, 0, winMax, TRUE);
+    }
+    // Adjust current value
+    int val = vb6_GetScrollValue(hwnd);
+    int winVal = val - min;
+    if (wcsicmp(className, L"SCROLLBAR") == 0) {
+        SetScrollPos(hw, SB_CTL, winVal, TRUE);
+    }
+}
+
+int vb6_GetScrollMax(void* hwnd) {
+    if (!hwnd) return 32767;
+    HANDLE hProp = GetPropW((HWND)hwnd, L"VB6_ScrollMax");
+    if (hProp) return (int)(INT_PTR)hProp;
+    return 32767;  // VB6 default
+}
+
+void vb6_SetScrollMax(void* hwnd, int max) {
+    if (!hwnd) return;
+    SetPropW((HWND)hwnd, L"VB6_ScrollMax", (HANDLE)(INT_PTR)max);
+    int min = vb6_GetScrollMin(hwnd);
+    int winMax = max - min;
+    if (winMax < 0) winMax = 0;
+    HWND hw = (HWND)hwnd;
+    WCHAR className[256] = {0};
+    GetClassNameW(hw, className, 256);
+    if (wcsicmp(className, L"SCROLLBAR") == 0) {
+        SetScrollRange(hw, SB_CTL, 0, winMax, TRUE);
+    }
+}
+
+int vb6_GetScrollValue(void* hwnd) {
+    if (!hwnd) return 0;
+    HWND hw = (HWND)hwnd;
+    WCHAR className[256] = {0};
+    GetClassNameW(hw, className, 256);
+    int winPos;
+    if (wcsicmp(className, L"SCROLLBAR") == 0) {
+        winPos = GetScrollPos(hw, SB_CTL);
+    } else {
+        winPos = GetScrollPos(hw, SB_HORZ);
+    }
+    int min = vb6_GetScrollMin(hwnd);
+    return winPos + min;  // Convert from Win32 (0-based) to VB6
+}
+
+void vb6_SetScrollValue(void* hwnd, int value) {
+    if (!hwnd) return;
+    int min = vb6_GetScrollMin(hwnd);
+    int winPos = value - min;
+    if (winPos < 0) winPos = 0;
+    HWND hw = (HWND)hwnd;
+    WCHAR className[256] = {0};
+    GetClassNameW(hw, className, 256);
+    if (wcsicmp(className, L"SCROLLBAR") == 0) {
+        SetScrollPos(hw, SB_CTL, winPos, TRUE);
+    }
+}
+
+int vb6_GetLargeChange(void* hwnd) {
+    if (!hwnd) return 1;
+    HANDLE hProp = GetPropW((HWND)hwnd, L"VB6_LargeChange");
+    if (hProp) return (int)(INT_PTR)hProp;
+    return 1;
+}
+
+void vb6_SetLargeChange(void* hwnd, int change) {
+    if (!hwnd) return;
+    SetPropW((HWND)hwnd, L"VB6_LargeChange", (HANDLE)(INT_PTR)change);
+    // Win32 scroll info page size
+    HWND hw = (HWND)hwnd;
+    WCHAR className[256] = {0};
+    GetClassNameW(hw, className, 256);
+    SCROLLINFO si;
+    si.cbSize = sizeof(si);
+    si.fMask = SIF_PAGE;
+    si.nPage = (UINT)change;
+    if (wcsicmp(className, L"SCROLLBAR") == 0) {
+        SetScrollInfo(hw, SB_CTL, &si, TRUE);
+    }
+}
+
+int vb6_GetSmallChange(void* hwnd) {
+    if (!hwnd) return 1;
+    HANDLE hProp = GetPropW((HWND)hwnd, L"VB6_SmallChange");
+    if (hProp) return (int)(INT_PTR)hProp;
+    return 1;
+}
+
+void vb6_SetSmallChange(void* hwnd, int change) {
+    if (!hwnd) return;
+    SetPropW((HWND)hwnd, L"VB6_SmallChange", (HANDLE)(INT_PTR)change);
+    // SmallChange is handled in WM_HSCROLL/WM_VSCROLL handler, just store
+}
+
+// ============================================================
+// P13.12: Timer properties
+// ============================================================
+
+int vb6_GetTimerInterval(void* hwnd) {
+    if (!hwnd) return 0;
+    HANDLE hProp = GetPropW((HWND)hwnd, L"VB6_TimerInterval");
+    if (hProp) return (int)(INT_PTR)hProp;
+    return 0;
+}
+
+void vb6_SetTimerInterval(void* hwnd, int interval) {
+    if (!hwnd) return;
+    SetPropW((HWND)hwnd, L"VB6_TimerInterval", (HANDLE)(INT_PTR)interval);
+    // Timer hwnd is actually the timer ID stored as a property
+    // This is a design-time placeholder; actual timer manipulation
+    // goes through vb6_SetTimer/vb6_KillTimer
+}
+
+int vb6_GetTimerEnabled(void* hwnd) {
+    if (!hwnd) return -1;  // VB6 default: True
+    HANDLE hProp = GetPropW((HWND)hwnd, L"VB6_TimerEnabled");
+    if (hProp) return (int)(INT_PTR)hProp;
+    return -1;  // True
+}
+
+void vb6_SetTimerEnabled(void* hwnd, int enabled) {
+    if (!hwnd) return;
+    SetPropW((HWND)hwnd, L"VB6_TimerEnabled", (HANDLE)(INT_PTR)enabled);
+}
+
+// ============================================================
+// P13.14: TextBox selection properties
+// ============================================================
+
+int vb6_GetSelStart(void* hwnd) {
+    if (!hwnd) return 0;
+    DWORD start = 0, end = 0;
+    SendMessageW((HWND)hwnd, EM_GETSEL, (WPARAM)&start, (LPARAM)&end);
+    return (int)start;
+}
+
+void vb6_SetSelStart(void* hwnd, int start) {
+    if (!hwnd) return;
+    if (start < 0) start = 0;
+    DWORD oldStart = 0, oldEnd = 0;
+    SendMessageW((HWND)hwnd, EM_GETSEL, (WPARAM)&oldStart, (LPARAM)&oldEnd);
+    // Keep selection length, move start
+    DWORD selLen = oldEnd - oldStart;
+    SendMessageW((HWND)hwnd, EM_SETSEL, (WPARAM)start, (LPARAM)(start + selLen));
+}
+
+int vb6_GetSelLength(void* hwnd) {
+    if (!hwnd) return 0;
+    DWORD start = 0, end = 0;
+    SendMessageW((HWND)hwnd, EM_GETSEL, (WPARAM)&start, (LPARAM)&end);
+    return (int)(end - start);
+}
+
+void vb6_SetSelLength(void* hwnd, int length) {
+    if (!hwnd) return;
+    if (length < 0) length = 0;
+    DWORD start = 0, end = 0;
+    SendMessageW((HWND)hwnd, EM_GETSEL, (WPARAM)&start, (LPARAM)&end);
+    SendMessageW((HWND)hwnd, EM_SETSEL, (WPARAM)start, (LPARAM)(start + length));
+}
+
+void* vb6_GetSelText(void* hwnd) {
+    if (!hwnd) return SysAllocString(L"");
+    HWND hw = (HWND)hwnd;
+    DWORD start = 0, end = 0;
+    SendMessageW(hw, EM_GETSEL, (WPARAM)&start, (LPARAM)&end);
+    if (start >= end) return SysAllocString(L"");
+    int textLen = (int)SendMessageW(hw, WM_GETTEXTLENGTH, 0, 0);
+    if (textLen <= 0) return SysAllocString(L"");
+    WCHAR* buf = (WCHAR*)malloc((textLen + 1) * sizeof(WCHAR));
+    if (!buf) return SysAllocString(L"");
+    SendMessageW(hw, WM_GETTEXT, (WPARAM)(textLen + 1), (LPARAM)buf);
+    /* Extract selection from full text */
+    int selLen = (int)(end - start);
+    if ((int)start + selLen > textLen) selLen = textLen - (int)start;
+    if (selLen < 0) selLen = 0;
+    WCHAR* selBuf = (WCHAR*)malloc((selLen + 1) * sizeof(WCHAR));
+    if (!selBuf) { free(buf); return SysAllocString(L""); }
+    memcpy(selBuf, buf + start, selLen * sizeof(WCHAR));
+    selBuf[selLen] = L'\0';
+    BSTR result = SysAllocString(selBuf);
+    free(selBuf);
+    free(buf);
+    return result;
+    return result;
+}ext(void* hwnd, void* bstrText) {
+    if (!hwnd) return;
+    HWND hw = (HWND)hwnd;
+    // Replace current selection with new text
+    if (!bstrText) {
+        // Replace with empty = delete selection
+        SendMessageW(hw, EM_REPLACESEL, TRUE, (LPARAM)L"");
+    } else {
+        SendMessageW(hw, EM_REPLACESEL, TRUE, (LPARAM)(BSTR)bstrText);
+    }
+}
+
+// ============================================================
+// P13.15: CommandButton Default/Cancel
+// ============================================================
+
+int vb6_GetDefaultButton(void* hwnd) {
+    if (!hwnd) return 0;
+    HANDLE hProp = GetPropW((HWND)hwnd, L"VB6_DefaultButton");
+    if (hProp) return (int)(INT_PTR)hProp;
+    return 0;
+}
+
+void vb6_SetDefaultButton(void* hwnd, int isDefault) {
+    if (!hwnd) return;
+    SetPropW((HWND)hwnd, L"VB6_DefaultButton", (HANDLE)(INT_PTR)isDefault);
+    // Visual feedback: default button has BS_DEFPUSHBUTTON style
+    LONG style = GetWindowLongW((HWND)hwnd, GWL_STYLE);
+    if (isDefault) {
+        style |= BS_DEFPUSHBUTTON;
+        style &= ~BS_PUSHBUTTON;
+    } else {
+        style &= ~BS_DEFPUSHBUTTON;
+        style |= BS_PUSHBUTTON;
+    }
+    SetWindowLongW((HWND)hwnd, GWL_STYLE, style);
+    // Redraw
+    InvalidateRect((HWND)hwnd, NULL, TRUE);
+}
+
+int vb6_GetCancelButton(void* hwnd) {
+    if (!hwnd) return 0;
+    HANDLE hProp = GetPropW((HWND)hwnd, L"VB6_CancelButton");
+    if (hProp) return (int)(INT_PTR)hProp;
+    return 0;
+}
+
+void vb6_SetCancelButton(void* hwnd, int isCancel) {
+    if (!hwnd) return;
+    SetPropW((HWND)hwnd, L"VB6_CancelButton", (HANDLE)(INT_PTR)isCancel);
+    // Cancel button is a logical property only; no visual change
+    // The parent form's message loop should check this on VK_ESCAPE
+}
+// ============================================================
+// P13.13: Picture (PictureBox/Image)
+// ============================================================
+
+void* vb6_LoadPictureFromFile(const char* filePath) {
+    if (!filePath || !filePath[0]) return NULL;
+    /* Determine type by extension */
+    const char* ext = strrchr(filePath, '.');
+    if (!ext) ext = "";
+    
+    WCHAR wPath[MAX_PATH] = {0};
+    MultiByteToWideChar(CP_ACP, 0, filePath, -1, wPath, MAX_PATH);
+    
+    if (_stricmp(ext, ".ico") == 0 || _stricmp(ext, ".cur") == 0) {
+        /* Icon/Cursor */
+        if (_stricmp(ext, ".cur") == 0) {
+            return (void*)LoadCursorFromFileW(wPath);
+        }
+        return (void*)LoadImageW(NULL, wPath, IMAGE_ICON, 0, 0, LR_LOADFROMFILE);
+    } else if (_stricmp(ext, ".bmp") == 0) {
+        return (void*)LoadImageW(NULL, wPath, IMAGE_BITMAP, 0, 0, LR_LOADFROMFILE);
+    } else if (_stricmp(ext, ".emf") == 0 || _stricmp(ext, ".wmf") == 0) {
+        /* Enhanced/Regular metafile - use GetEnhMetaFile/GetMetaFile */
+        HENHMETAFILE hemf = GetEnhMetaFileW(wPath);
+        return (void*)hemf;
+    }
+    /* Try as bitmap fallback */
+    return (void*)LoadImageW(NULL, wPath, IMAGE_BITMAP, 0, 0, LR_LOADFROMFILE);
+}
+
+void* vb6_LoadPictureFromResource(void* hInstance, int resourceId, const char* type) {
+    if (!hInstance) return NULL;
+    HINSTANCE hInst = (HINSTANCE)hInstance;
+    WCHAR wType[64] = {0};
+    if (type) MultiByteToWideChar(CP_ACP, 0, type, -1, wType, 64);
+    
+    if (type && _stricmp(type, "ICON") == 0) {
+        return (void*)LoadIconW(hInst, MAKEINTRESOURCEW(resourceId));
+    } else if (type && _stricmp(type, "BITMAP") == 0) {
+        return (void*)LoadBitmapW(hInst, MAKEINTRESOURCEW(resourceId));
+    } else if (type && _stricmp(type, "CURSOR") == 0) {
+        return (void*)LoadCursorW(hInst, MAKEINTRESOURCEW(resourceId));
+    }
+    /* Try bitmap as default */
+    return (void*)LoadBitmapW(hInst, MAKEINTRESOURCEW(resourceId));
+}
+
+void* vb6_GetControlPicture(void* hwnd) {
+    if (!hwnd) return NULL;
+    HANDLE hProp = GetPropW((HWND)hwnd, L"VB6_Picture");
+    return hProp;  // HBITMAP/HICON handle
+}
+
+void vb6_SetControlPicture(void* hwnd, void* hPicture) {
+    if (!hwnd) return;
+    HWND hw = (HWND)hwnd;
+    /* Store the picture handle */
+    SetPropW(hw, L"VB6_Picture", (HANDLE)hPicture);
+    
+    /* Apply to the control */
+    WCHAR className[256] = {0};
+    GetClassNameW(hw, className, 256);
+    
+    if (wcsicmp(className, L"STATIC") == 0) {
+        /* PictureBox uses STATIC control with SS_BITMAP/SS_ICON style */
+        if (hPicture) {
+            /* Detect picture type - check if it's an icon by trying */
+            LONG style = GetWindowLongW(hw, GWL_STYLE);
+            style &= ~(SS_BITMAP | SS_ICON | SS_ENHMETAFILE);
+            
+            /* For now assume bitmap; icon detection would require more logic */
+            style |= SS_BITMAP | SS_CENTERIMAGE;
+            SetWindowLongW(hw, GWL_STYLE, style);
+            SendMessageW(hw, STM_SETIMAGE, (WPARAM)IMAGE_BITMAP, (LPARAM)hPicture);
+        } else {
+            /* Clear picture */
+            LONG style = GetWindowLongW(hw, GWL_STYLE);
+            style &= ~(SS_BITMAP | SS_ICON | SS_ENHMETAFILE);
+            SetWindowLongW(hw, GWL_STYLE, style);
+            SendMessageW(hw, STM_SETIMAGE, (WPARAM)IMAGE_BITMAP, (LPARAM)NULL);
+        }
+        InvalidateRect(hw, NULL, TRUE);
+    }
+    
+    /* AutoSize: if enabled, resize to fit picture */
+    int autoSize = vb6_GetPictureAutoSize(hwnd);
+    if (autoSize && hPicture) {
+        BITMAP bm;
+        HBITMAP hBmp = (HBITMAP)hPicture;
+        if (GetObjectW(hBmp, sizeof(bm), &bm) != 0) {
+            SetWindowPos(hw, NULL, 0, 0, bm.bmWidth, bm.bmHeight,
+                SWP_NOMOVE | SWP_NOZORDER);
+        }
+    }
+}
+
+int vb6_GetPictureAutoSize(void* hwnd) {
+    if (!hwnd) return 0;
+    HANDLE hProp = GetPropW((HWND)hwnd, L"VB6_AutoSize");
+    if (hProp) return (int)(INT_PTR)hProp;
+    return 0;
+}
+
+void vb6_SetPictureAutoSize(void* hwnd, int autoSize) {
+    if (!hwnd) return;
+    SetPropW((HWND)hwnd, L"VB6_AutoSize", (HANDLE)(INT_PTR)autoSize);
+}
+// // 控件数组 (P7.6)
 // ============================================================
 
 void vb6_CtrlArr_Init(vb6_CtrlArr* arr) {

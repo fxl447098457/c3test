@@ -1,4 +1,4 @@
-#include "backend/cgen.hpp"
+﻿#include "backend/cgen.hpp"
 #include <algorithm>
 #include <cctype>
 #include <iostream>
@@ -1019,6 +1019,7 @@ void CCodeGen::visit(IdentifierExpr& node) {
         {"typename", "vb6_TypeName"},
         {"createobject","vb6_CreateObject"},
         {"getobject","vb6_GetObject"},
+        {"loadpicture","vb6_LoadPictureFromFile"},
         // 字符串函数 (P4新增)
         {"replace",  "vb6_Replace"},
         {"space",    "vb6_Space"},
@@ -1260,6 +1261,20 @@ void CCodeGen::visit(MemberAccessExpr& node) {
                         isEarlyBoundCom_ = false;
                         earlyBoundSym_ = nullptr;
                         lastExpr_ = objLower;  // Placeholder expression
+                        return;
+                    }
+                }
+                // P13.3: ListBox/ComboBox method access (AddItem/RemoveItem/Clear/List)
+                if (itCtrl->second == FrmControlType::ListBox || itCtrl->second == FrmControlType::ComboBox) {
+                    std::string memLower = node.memberName;
+                    std::transform(memLower.begin(), memLower.end(), memLower.begin(), ::tolower);
+                    if (memLower == "additem" || memLower == "removeitem" || memLower == "clear" || memLower == "list") {
+                        comObjExpr_ = objLower;
+                        comMemberName_ = memLower;
+                        isComMarker_ = true;
+                        isEarlyBoundCom_ = false;
+                        earlyBoundSym_ = nullptr;
+                        lastExpr_ = objLower;
                         return;
                     }
                 }
@@ -1551,6 +1566,50 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
         }
     }
 
+    // P13.3: ListBox/ComboBox methods (AddItem/RemoveItem/Clear/List) via isComMarker_ flag
+    if (isComMarker_) {
+        auto itCtrl = knownFormControls_.find(comObjExpr_);
+        if (itCtrl != knownFormControls_.end() &&
+            (itCtrl->second == FrmControlType::ListBox || itCtrl->second == FrmControlType::ComboBox)) {
+            isComMarker_ = false;
+            std::string method = std::move(comMemberName_);
+            std::string ctrlName = cIdent(knownFormControlOriginalNames_.count(comObjExpr_) ? knownFormControlOriginalNames_[comObjExpr_] : comObjExpr_);
+            comObjExpr_.clear();
+            comMemberName_.clear();
+            if (method == "additem") {
+                std::string itemArg = "0";
+                if (!node.positional.empty()) {
+                    emitExpr(*node.positional[0]);
+                    itemArg = std::move(lastExpr_);
+                }
+                c_.emitLine("vb6_AddItem((void*)vb6_hwnd_" + ctrlName + ", " + itemArg + ");  /* ListBox.AddItem */");
+                lastExpr_ = "0";
+                return;
+            } else if (method == "removeitem") {
+                std::string idxArg = "0";
+                if (!node.positional.empty()) {
+                    emitExpr(*node.positional[0]);
+                    idxArg = std::move(lastExpr_);
+                }
+                c_.emitLine("vb6_RemoveItem((void*)vb6_hwnd_" + ctrlName + ", " + idxArg + ");  /* ListBox.RemoveItem */");
+                lastExpr_ = "0";
+                return;
+            } else if (method == "clear") {
+                c_.emitLine("vb6_ClearList((void*)vb6_hwnd_" + ctrlName + ");  /* ListBox.Clear */");
+                lastExpr_ = "0";
+                return;
+            } else if (method == "list") {
+                // List(idx) property read - List1.List(0)
+                std::string idxArg = "0";
+                if (!node.positional.empty()) {
+                    emitExpr(*node.positional[0]);
+                    idxArg = std::move(lastExpr_);
+                }
+                lastExpr_ = "vb6_GetListItem((void*)vb6_hwnd_" + ctrlName + ", " + idxArg + ")";
+                return;
+            }
+        }
+    }
     // --- COM后期绑定检测 (P6.2) + 前期绑定检测 (P6.3) + P6.4接口调用 ---
     // MemberAccessExpr为COM对象设置isComMarker_标志 + comObjExpr_/comMemberName_
     if (isComMarker_) {
@@ -6048,10 +6107,56 @@ std::string CCodeGen::getControlPropReadFn(FrmControlType ctrlType, const std::s
     if (propLower == "width") return "vb6_GetControlWidth";
     if (propLower == "height") return "vb6_GetControlHeight";
     if (propLower == "hwnd") return "vb6_GetControlHwnd";
+    // P13.1: Font properties (all visible controls with text)
+    if (propLower == "fontname") return "vb6_GetControlFontName";
+    if (propLower == "fontsize") return "vb6_GetControlFontSize";
+    if (propLower == "fontbold") return "vb6_GetControlFontBold";
+    if (propLower == "fontitalic") return "vb6_GetControlFontItalic";
+    if (propLower == "fontunderline") return "vb6_GetControlFontUnderline";
+    if (propLower == "fontstrikethrough") return "vb6_GetControlFontStrikethrough";
+    // P13.2: Color properties (all visible controls)
+    if (propLower == "forecolor") return "vb6_GetControlForeColor";
+    if (propLower == "backcolor") return "vb6_GetControlBackColor";
+    // P13.5: Alignment (all text controls)
+    if (propLower == "alignment") return "vb6_GetAlignment";
+    // P13.6: TabIndex/TabStop (all visible controls)
+    if (propLower == "tabindex") return "vb6_GetTabIndex";
+    if (propLower == "tabstop") return "vb6_GetTabStop";
+    // P13.8: ToolTipText (all visible controls)
+    if (propLower == "tooltiptext") return "vb6_GetToolTipText";
+    // P13.9: Tag (all controls)
+    if (propLower == "tag") return "vb6_GetControlTag";
+    // P13.7: MousePointer/MouseIcon (all visible controls)
+    if (propLower == "mousepointer") return "vb6_GetMousePointer";
+    if (propLower == "mouseicon") return "vb6_GetMouseIcon";
+    // P13.10: BorderStyle (all visible controls)
+    if (propLower == "borderstyle") return "vb6_GetBorderStyle";
 
     switch (ctrlType) {
     case FrmControlType::TextBox:
         if (propLower == "text") return "vb6_GetControlText";
+        if (propLower == "multiline") return "vb6_GetMultiLine";
+        if (propLower == "scrollbars") return "vb6_GetScrollBars";
+        if (propLower == "maxlength") return "vb6_GetMaxLength";
+        if (propLower == "passwordchar") return "vb6_GetPasswordChar";
+        if (propLower == "locked") return "vb6_GetLocked";
+        if (propLower == "selstart") return "vb6_GetSelStart";
+        if (propLower == "sellength") return "vb6_GetSelLength";
+        if (propLower == "seltext") return "vb6_GetSelText";
+        if (propLower == "visible") return "vb6_GetControlVisible";
+        if (propLower == "enabled") return "vb6_GetControlEnabled";
+        break;
+    case FrmControlType::ListBox:
+    case FrmControlType::ComboBox:
+        if (propLower == "text") return "vb6_GetControlText";
+        if (propLower == "listcount") return "vb6_GetListCount";
+        if (propLower == "listindex") return "vb6_GetListIndex";
+        if (propLower == "list") return "vb6_GetListItem";
+        if (propLower == "visible") return "vb6_GetControlVisible";
+        if (propLower == "enabled") return "vb6_GetControlEnabled";
+        break;
+    case FrmControlType::Frame:
+        if (propLower == "caption") return "vb6_GetControlText";
         if (propLower == "visible") return "vb6_GetControlVisible";
         if (propLower == "enabled") return "vb6_GetControlEnabled";
         break;
@@ -6062,6 +6167,8 @@ std::string CCodeGen::getControlPropReadFn(FrmControlType ctrlType, const std::s
         break;
     case FrmControlType::CommandButton:
         if (propLower == "caption") return "vb6_GetControlText";
+        if (propLower == "default") return "vb6_GetDefaultButton";
+        if (propLower == "cancel") return "vb6_GetCancelButton";
         if (propLower == "visible") return "vb6_GetControlVisible";
         if (propLower == "enabled") return "vb6_GetControlEnabled";
         break;
@@ -6082,6 +6189,35 @@ std::string CCodeGen::getControlPropReadFn(FrmControlType ctrlType, const std::s
         if (propLower == "visible") return "vb6_GetControlVisible";
         if (propLower == "enabled") return "vb6_GetControlEnabled";
         break;
+    case FrmControlType::HScrollBar:
+    case FrmControlType::VScrollBar:
+        if (propLower == "value") return "vb6_GetScrollValue";
+        if (propLower == "min") return "vb6_GetScrollMin";
+        if (propLower == "max") return "vb6_GetScrollMax";
+        if (propLower == "largechange") return "vb6_GetLargeChange";
+        if (propLower == "smallchange") return "vb6_GetSmallChange";
+        if (propLower == "visible") return "vb6_GetControlVisible";
+        if (propLower == "enabled") return "vb6_GetControlEnabled";
+        break;
+    case FrmControlType::Timer:
+        if (propLower == "interval") return "vb6_GetTimerInterval";
+        if (propLower == "enabled") return "vb6_GetTimerEnabled";
+        break;
+    case FrmControlType::PictureBox:
+        if (propLower == "caption") return "vb6_GetControlText";
+        if (propLower == "picture") return "vb6_GetControlPicture";
+        if (propLower == "autosize") return "vb6_GetPictureAutoSize";
+        if (propLower == "visible") return "vb6_GetControlVisible";
+        if (propLower == "enabled") return "vb6_GetControlEnabled";
+        break;
+    case FrmControlType::Image:
+        if (propLower == "picture") return "vb6_GetControlPicture";
+        if (propLower == "visible") return "vb6_GetControlVisible";
+        if (propLower == "enabled") return "vb6_GetControlEnabled";
+        break;
+    case FrmControlType::Shape:
+        if (propLower == "visible") return "vb6_GetControlVisible";
+        break;
     default:
         // 所有可见控件通用属性
         if (propLower == "visible") return "vb6_GetControlVisible";
@@ -6100,10 +6236,54 @@ std::string CCodeGen::getControlPropWriteFn(FrmControlType ctrlType, const std::
     if (propLower == "top") return "vb6_SetControlTop";
     if (propLower == "width") return "vb6_SetControlWidth";
     if (propLower == "height") return "vb6_SetControlHeight";
+    // P13.1: Font properties (all visible controls with text)
+    if (propLower == "fontname") return "vb6_SetControlFontName";
+    if (propLower == "fontsize") return "vb6_SetControlFontSize";
+    if (propLower == "fontbold") return "vb6_SetControlFontBold";
+    if (propLower == "fontitalic") return "vb6_SetControlFontItalic";
+    if (propLower == "fontunderline") return "vb6_SetControlFontUnderline";
+    if (propLower == "fontstrikethrough") return "vb6_SetControlFontStrikethrough";
+    // P13.2: Color properties (all visible controls)
+    if (propLower == "forecolor") return "vb6_SetControlForeColor";
+    if (propLower == "backcolor") return "vb6_SetControlBackColor";
+    // P13.5: Alignment (all text controls)
+    if (propLower == "alignment") return "vb6_SetAlignment";
+    // P13.6: TabIndex/TabStop (all visible controls)
+    if (propLower == "tabindex") return "vb6_SetTabIndex";
+    if (propLower == "tabstop") return "vb6_SetTabStop";
+    // P13.8: ToolTipText (all visible controls)
+    if (propLower == "tooltiptext") return "vb6_SetToolTipText";
+    // P13.9: Tag (all controls)
+    if (propLower == "tag") return "vb6_SetControlTag";
+    // P13.7: MousePointer/MouseIcon (all visible controls)
+    if (propLower == "mousepointer") return "vb6_SetMousePointer";
+    if (propLower == "mouseicon") return "vb6_SetMouseIcon";
+    // P13.10: BorderStyle (all visible controls)
+    if (propLower == "borderstyle") return "vb6_SetBorderStyle";
 
     switch (ctrlType) {
     case FrmControlType::TextBox:
         if (propLower == "text") return "vb6_SetControlText";
+        if (propLower == "multiline") return "vb6_SetMultiLine";
+        if (propLower == "scrollbars") return "vb6_SetScrollBars";
+        if (propLower == "maxlength") return "vb6_SetMaxLength";
+        if (propLower == "passwordchar") return "vb6_SetPasswordChar";
+        if (propLower == "locked") return "vb6_SetLocked";
+        if (propLower == "selstart") return "vb6_SetSelStart";
+        if (propLower == "sellength") return "vb6_SetSelLength";
+        if (propLower == "seltext") return "vb6_SetSelText";
+        if (propLower == "visible") return "vb6_SetControlVisible";
+        if (propLower == "enabled") return "vb6_SetControlEnabled";
+        break;
+    case FrmControlType::ListBox:
+    case FrmControlType::ComboBox:
+        if (propLower == "text") return "vb6_SetControlText";
+        if (propLower == "listindex") return "vb6_SetListIndex";
+        if (propLower == "visible") return "vb6_SetControlVisible";
+        if (propLower == "enabled") return "vb6_SetControlEnabled";
+        break;
+    case FrmControlType::Frame:
+        if (propLower == "caption") return "vb6_SetControlText";
         if (propLower == "visible") return "vb6_SetControlVisible";
         if (propLower == "enabled") return "vb6_SetControlEnabled";
         break;
@@ -6114,6 +6294,8 @@ std::string CCodeGen::getControlPropWriteFn(FrmControlType ctrlType, const std::
         break;
     case FrmControlType::CommandButton:
         if (propLower == "caption") return "vb6_SetControlText";
+        if (propLower == "default") return "vb6_SetDefaultButton";
+        if (propLower == "cancel") return "vb6_SetCancelButton";
         if (propLower == "visible") return "vb6_SetControlVisible";
         if (propLower == "enabled") return "vb6_SetControlEnabled";
         break;
@@ -6132,6 +6314,35 @@ std::string CCodeGen::getControlPropWriteFn(FrmControlType ctrlType, const std::
     case FrmControlType::WebBrowser:
         if (propLower == "visible") return "vb6_SetControlVisible";
         if (propLower == "enabled") return "vb6_SetControlEnabled";
+        break;
+    case FrmControlType::HScrollBar:
+    case FrmControlType::VScrollBar:
+        if (propLower == "value") return "vb6_SetScrollValue";
+        if (propLower == "min") return "vb6_SetScrollMin";
+        if (propLower == "max") return "vb6_SetScrollMax";
+        if (propLower == "largechange") return "vb6_SetLargeChange";
+        if (propLower == "smallchange") return "vb6_SetSmallChange";
+        if (propLower == "visible") return "vb6_SetControlVisible";
+        if (propLower == "enabled") return "vb6_SetControlEnabled";
+        break;
+    case FrmControlType::Timer:
+        if (propLower == "interval") return "vb6_SetTimerInterval";
+        if (propLower == "enabled") return "vb6_SetTimerEnabled";
+        break;
+    case FrmControlType::PictureBox:
+        if (propLower == "caption") return "vb6_SetControlText";
+        if (propLower == "picture") return "vb6_SetControlPicture";
+        if (propLower == "autosize") return "vb6_SetPictureAutoSize";
+        if (propLower == "visible") return "vb6_SetControlVisible";
+        if (propLower == "enabled") return "vb6_SetControlEnabled";
+        break;
+    case FrmControlType::Image:
+        if (propLower == "picture") return "vb6_SetControlPicture";
+        if (propLower == "visible") return "vb6_SetControlVisible";
+        if (propLower == "enabled") return "vb6_SetControlEnabled";
+        break;
+    case FrmControlType::Shape:
+        if (propLower == "visible") return "vb6_SetControlVisible";
         break;
     default:
         if (propLower == "visible") return "vb6_SetControlVisible";
