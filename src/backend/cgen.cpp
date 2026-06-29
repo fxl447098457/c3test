@@ -1024,7 +1024,10 @@ void CCodeGen::visit(IdentifierExpr& node) {
     if (currentProc_) {
         for (auto& param : currentProc_->params) {
             if (Symbol::toLower(param.name) == lower) {
-                if (!param.isByVal) {
+                if (param.isParamArray) {
+                    // P14.1.5: ParamArray is SAFEARRAY*, no dereference needed
+                    lastExpr_ = cName;
+                } else if (!param.isByVal) {
                     lastExpr_ = "(*" + cName + ")";
                 } else {
                     lastExpr_ = cName;
@@ -1171,7 +1174,9 @@ void CCodeGen::visit(IdentifierExpr& node) {
         {"environ",  "vb6_Environ"},
         {"command",  "vb6_Command"},
         {"split",    "vb6_Split"},
-        {"join",     "vb6_Join"},
+        {"join",     "vb6_Join"},
+        // ParamArray (P14.1.5)
+        {"ismissing", "vb6_IsMissing"},
         
     };
 
@@ -1579,7 +1584,39 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
     // VB6 不区分数组索引和函数调用, 统一为 IndexOrCallExpr
     bool isArrayAccess = false;
     std::string arrName;
-    Vb6Type arrElemType = Vb6Type::Variant;
+    Vb6Type arrElemType = Vb6Type::Variant;
+
+    // P14.1.5: Check if identifier is a ParamArray parameter of current procedure
+    bool isParamArrayAccess = false;
+    std::string paName;
+    if (node.callee && node.callee->kind == ASTNodeKind::IdentifierExpr && node.named.empty() && currentProc_) {
+        auto& ident = static_cast<IdentifierExpr&>(*node.callee);
+        for (auto& p : currentProc_->params) {
+            if (p.isParamArray) {
+                std::string pLower = p.name;
+                std::transform(pLower.begin(), pLower.end(), pLower.begin(), ::tolower);
+                std::string iLower = ident.name;
+                std::transform(iLower.begin(), iLower.end(), iLower.begin(), ::tolower);
+                if (pLower == iLower) {
+                    isParamArrayAccess = true;
+                    paName = cIdent(p.name);
+                    break;
+                }
+            }
+        }
+    }
+
+    if (isParamArrayAccess) {
+        // ParamArray access: args(i) -> vb6_PA_GetLong(args, i) or vb6_PA_GetBSTR(args, i)
+        if (node.positional.size() == 1) {
+            emitExpr(*node.positional[0]);
+            std::string index = std::move(lastExpr_);
+            lastExpr_ = "vb6_PA_GetLong(" + paName + ", " + index + ")";
+        } else {
+            lastExpr_ = paName;  // bare reference to the SAFEARRAY*
+        }
+        return;
+    }
 
     if (node.callee && node.callee->kind == ASTNodeKind::IdentifierExpr && node.named.empty()) {
         auto& ident = static_cast<IdentifierExpr&>(*node.callee);
@@ -1972,7 +2009,7 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
         std::string argVal = std::move(lastExpr_);
         // ByRef参数: 调用点传指针. 如果实参已经是解引用形式(*x), 取地址还原为x;
         // 如果是普通变量, 加&取地址
-        bool isByRef = (i < calleeParams.size() && !calleeParams[i].isByVal);
+        bool isByRef = (i < calleeParams.size() && !calleeParams[i].isByVal && !calleeParams[i].isParamArray);
         if (isByRef) {
             if (argVal.size() > 3 && argVal.substr(0, 2) == "(*" && argVal.back() == ')') {
                 // (*x) → &x (ByRef参数传ByRef参数, 还原指针)
@@ -2014,39 +2051,153 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
         args.push_back(std::move(lastExpr_));
     }
 
-    // 构造调用
-    std::string argList;
-    for (size_t i = 0; i < args.size(); i++) {
-        if (i > 0) argList += ", ";
-        argList += args[i];
+    // P14.1.5: ParamArray packing - if callee has a ParamArray parameter,
+    // pack extra arguments into a SAFEARRAY* and adjust argList
+    std::string argList;
+    int paIndex = -1;  // index of ParamArray parameter in calleeParams
+    for (size_t i = 0; i < calleeParams.size(); i++) {
+        if (calleeParams[i].isParamArray) { paIndex = (int)i; break; }
+    }
+
+    if (paIndex >= 0) {
+        // Split args: normal args [0..paIndex-1] + ParamArray args [paIndex..end]
+        int normalCount = paIndex;  // number of non-ParamArray params
+        int paArgCount = (int)args.size() - normalCount;
+        if (paArgCount < 0) paArgCount = 0;
+
+        // Build normal argList
+        for (int i = 0; i < normalCount && i < (int)args.size(); i++) {
+            if (i > 0) argList += ", ";
+            argList += args[i];
+        }
+
+        // Pack ParamArray args into SAFEARRAY* using a temp variable
+        std::string paVar = "_pa_" + std::to_string(tempCounter_++);
+        if (paArgCount > 0) {
+            c_.emitLine("SAFEARRAY* " + paVar + " = vb6_PA_Create(" + std::to_string(paArgCount) + ");");
+            for (int i = 0; i < paArgCount; i++) {
+                int argIdx = normalCount + i;
+                if (argIdx < (int)args.size()) {
+                    std::string paArgExpr = args[argIdx];
+                    bool isLongArg = false;
+                    bool isDoubleArg = false;
+                    if (argIdx < (int)node.positional.size()) {
+                        auto& paArg = node.positional[argIdx];
+                        if (paArg->kind == ASTNodeKind::LiteralExpr) {
+                            auto& lit = static_cast<LiteralExpr&>(*paArg);
+                            if (lit.literalKind == LiteralKind::Integer) isLongArg = true;
+                            else if (lit.literalKind == LiteralKind::Double) isDoubleArg = true;
+                        }
+                    }
+                    if (isLongArg) {
+                        c_.emitLine("vb6_PA_SetLong(" + paVar + ", " + std::to_string(i) + ", " + paArgExpr + ");");
+                    } else if (isDoubleArg) {
+                        c_.emitLine("vb6_PA_SetDouble(" + paVar + ", " + std::to_string(i) + ", " + paArgExpr + ");");
+                    } else {
+                        bool looksLikeBSTR = (paArgExpr.find("vb6_BSTR") != std::string::npos ||
+                                             paArgExpr.find("L\"") != std::string::npos);
+                        if (looksLikeBSTR) {
+                            c_.emitLine("vb6_PA_SetBSTR(" + paVar + ", " + std::to_string(i) + ", " + paArgExpr + ");");
+                        } else {
+                            c_.emitLine("vb6_PA_SetLong(" + paVar + ", " + std::to_string(i) + ", " + paArgExpr + ");");
+                        }
+                    }
+                }
+            }
+        } else {
+            c_.emitLine("SAFEARRAY* " + paVar + " = NULL;");
+        }
+
+        // Append SAFEARRAY* to argList
+        if (!argList.empty()) argList += ", ";
+        argList += paVar;
+
+        // P14.1.4 Optional padding for params BEFORE the ParamArray
+        if (normalCount > (int)args.size()) {
+            for (int i = (int)args.size(); i < normalCount; i++) {
+                if (!argList.empty()) argList += ", ";
+                const auto& param = calleeParams[i];
+                std::string defVal;
+                if (param.hasDefaultValue && !param.defaultValueExpr.empty()) {
+                    defVal = param.defaultValueExpr;
+                } else {
+                    defVal = defaultValue(param.type);
+                }
+                if (param.isByVal) {
+                    argList += defVal;
+                } else {
+                    std::string cType = mapType(param.type);
+                    argList += "&(" + cType + "){" + defVal + "}";
+                }
+            }
+        }
+    } else {
+        // No ParamArray - normal argList construction
+        for (size_t i = 0; i < args.size(); i++) {
+            if (i > 0) argList += ", ";
+            argList += args[i];
+        }
     }
 
-    // P8.1: UBound/LBound - 1D用vb6_UBound, ND用vb6_UBoundND/vb6_LBoundND
-    if (callee == "vb6_UBound" || callee == "vb6_LBound") {
-        if (args.size() == 1) {
-            // 缺省维度参数, 补1
-            argList += ", 1";
-        }
-        // 检查是否为ND数组, 需要用ND版本
-        if (node.positional.size() >= 1) {
-            auto& firstArg = node.positional[0];
-            std::string arrLower;
-            if (firstArg->kind == ASTNodeKind::IdentifierExpr) {
-                arrLower = static_cast<IdentifierExpr&>(*firstArg).name;
-                std::transform(arrLower.begin(), arrLower.end(), arrLower.begin(), ::tolower);
-            }
-            auto itDc = arrayDimCounts_.find(arrLower);
-            if (itDc != arrayDimCounts_.end() && itDc->second > 1) {
-                // ND数组 -> 使用vb6_UBoundND/vb6_LBoundND
-                if (callee == "vb6_UBound") {
-                    callee = "vb6_UBoundND";
-                } else {
-                    callee = "vb6_LBoundND";
-                }
-            }
-        }
-    }
-    // InStr: VB6允许2参数形式 InStr(string1, string2)
+    // P8.1: UBound/LBound - 1D鐢╲b6_UBound, ND鐢╲b6_UBoundND/vb6_LBoundND
+    // P14.1.5: Also handle UBound/LBound on ParamArray parameters
+    if (callee == "vb6_UBound" || callee == "vb6_LBound") {
+        // P14.1.5: Check if first arg is a ParamArray parameter
+        bool firstArgIsPA = false;
+        if (node.positional.size() >= 1 && currentProc_) {
+            auto& firstArg = node.positional[0];
+            if (firstArg->kind == ASTNodeKind::IdentifierExpr) {
+                std::string argLower = static_cast<IdentifierExpr&>(*firstArg).name;
+                std::transform(argLower.begin(), argLower.end(), argLower.begin(), ::tolower);
+                for (auto& p : currentProc_->params) {
+                    if (p.isParamArray) {
+                        std::string pLower = p.name;
+                        std::transform(pLower.begin(), pLower.end(), pLower.begin(), ::tolower);
+                        if (pLower == argLower) {
+                            firstArgIsPA = true;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
+        if (firstArgIsPA) {
+            // ParamArray: UBound(args) -> vb6_PA_UBound(args), LBound(args) -> vb6_PA_LBound(args)
+            if (callee == "vb6_UBound") {
+                callee = "vb6_PA_UBound";
+            } else {
+                callee = "vb6_PA_LBound";
+            }
+            // argList should be just the PA variable name (no dimension param)
+            if (args.size() == 1) {
+                argList = args[0];
+            }
+        } else {
+            if (args.size() == 1) {
+                // 缂虹渷缁村害鍙傛暟, 琛?
+                argList += ", 1";
+            }
+            // 妫€鏌ユ槸鍚︿负ND鏁扮粍, 闇€瑕佺敤ND鐗堟湰
+            if (node.positional.size() >= 1) {
+                auto& firstArg = node.positional[0];
+                std::string arrLower;
+                if (firstArg->kind == ASTNodeKind::IdentifierExpr) {
+                    arrLower = static_cast<IdentifierExpr&>(*firstArg).name;
+                    std::transform(arrLower.begin(), arrLower.end(), arrLower.begin(), ::tolower);
+                }
+                auto itDc = arrayDimCounts_.find(arrLower);
+                if (itDc != arrayDimCounts_.end() && itDc->second > 1) {
+                    // ND鏁扮粍 -> 浣跨敤vb6_UBoundND/vb6_LBoundND
+                    if (callee == "vb6_UBound") {
+                        callee = "vb6_UBoundND";
+                    } else {
+                        callee = "vb6_LBoundND";
+                    }
+                }
+            }
+        }
+    }    // InStr: VB6允许2参数形式 InStr(string1, string2)
     // RTL: vb6_InStr(start, haystack, needle) → 2参数时补start=1
     if (callee == "vb6_InStr") {
         if (args.size() == 2) {
@@ -2124,7 +2275,7 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
 
     // P14.1.4: General Optional parameter padding for user-defined functions
     // calleeParams is empty for builtin RTL functions (registered without params), so they're auto-skipped
-    if (calleeParams.size() > 0 && args.size() < calleeParams.size()) {
+    if (calleeParams.size() > 0 && args.size() < calleeParams.size() && paIndex < 0) {
         for (size_t i = args.size(); i < calleeParams.size(); i++) {
             if (i > 0 || !args.empty()) argList += ", ";
             const auto& param = calleeParams[i];
@@ -3505,7 +3656,23 @@ void CCodeGen::visit(CallStmt& node) {
             comObjExpr_.clear();
             comMemberName_.clear();
         } else if (callExpr.find('(') == std::string::npos) {
-            callExpr += "()";
+            // P14.1.5: Check if callee is a ParamArray function (needs NULL SAFEARRAY* arg)
+            bool calleeHasPA = false;
+            if (node.callee && node.callee->kind == ASTNodeKind::IdentifierExpr) {
+                auto& idExpr = static_cast<IdentifierExpr&>(*node.callee);
+                Symbol* sym = symTab_.lookupModule(idExpr.name);
+                if (!sym) sym = symTab_.lookup(idExpr.name);
+                if (sym && (sym->kind == SymbolKind::Sub || sym->kind == SymbolKind::Function)) {
+                    for (auto& p : sym->params) {
+                        if (p.isParamArray) { calleeHasPA = true; break; }
+                    }
+                }
+            }
+            if (calleeHasPA) {
+                callExpr += "(NULL)";
+            } else {
+                callExpr += "()";
+            }
         }
 
         // ComCall返回VARIANT*, 需要释放 (语句级调用丢弃返回值)
@@ -4311,6 +4478,14 @@ std::string CCodeGen::makeParamList(std::vector<std::unique_ptr<ParameterDecl>>&
     for (size_t i = 0; i < params.size(); i++) {
         if (i > 0) result += ", ";
         auto& p = params[i];
+
+        // P14.1.5: ParamArray → SAFEARRAY* (always Variant array)
+        if (p->isParamArray) {
+            std::string cName = cIdent(p->name);
+            result += "SAFEARRAY* " + cName;
+            continue;
+        }
+
         std::string cType = mapTypeRef(p->asType.get());
         std::string cName = cIdent(p->name);
 

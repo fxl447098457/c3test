@@ -1635,6 +1635,7 @@ void SemanticAnalyzer::registerBuiltins() {
     addBuiltinFunc("Unload", Vb6Type::Void);
     addBuiltinFunc("SendKeys", Vb6Type::Void);
     addBuiltinFunc("AppActivate", Vb6Type::Void);
+    addBuiltinFunc("IsMissing", Vb6Type::Boolean);
     addBuiltinFunc("Beep", Vb6Type::Void);
 }
 

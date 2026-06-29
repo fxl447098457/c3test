@@ -2022,3 +2022,137 @@ int32_t vb6_Put(int32_t filenumber, int32_t recnumber, void* varPtr, int32_t var
     fflush(f);
     return -1;  // True
 }
+
+
+// ============================================================
+// ParamArray runtime support (P14.1.5)
+// ============================================================
+
+SAFEARRAY* vb6_PA_Create(int32_t count) {
+    if (count <= 0) return NULL;
+    SAFEARRAYBOUND bound;
+    bound.lLbound = 0;
+    bound.cElements = (ULONG)count;
+    SAFEARRAY* psa = SafeArrayCreate(VT_VARIANT, 1, &bound);
+    return psa;
+}
+
+void vb6_PA_Destroy(SAFEARRAY* psa) {
+    if (psa) SafeArrayDestroy(psa);
+}
+
+void vb6_PA_SetVariant(SAFEARRAY* psa, int32_t index, VARIANT* pv) {
+    if (!psa || !pv) return;
+    long idx = (long)index;
+    SafeArrayPutElement(psa, &idx, pv);
+}
+
+void vb6_PA_SetLong(SAFEARRAY* psa, int32_t index, int32_t val) {
+    if (!psa) return;
+    VARIANT v;
+    VariantInit(&v);
+    v.vt = VT_I4;
+    v.lVal = val;
+    long idx = (long)index;
+    SafeArrayPutElement(psa, &idx, &v);
+    // SafeArrayPutElement copies the VARIANT, no need to keep v alive
+}
+
+void vb6_PA_SetDouble(SAFEARRAY* psa, int32_t index, double val) {
+    if (!psa) return;
+    VARIANT v;
+    VariantInit(&v);
+    v.vt = VT_R8;
+    v.dblVal = val;
+    long idx = (long)index;
+    SafeArrayPutElement(psa, &idx, &v);
+}
+
+void vb6_PA_SetBSTR(SAFEARRAY* psa, int32_t index, BSTR val) {
+    if (!psa) return;
+    VARIANT v;
+    VariantInit(&v);
+    v.vt = VT_BSTR;
+    v.bstrVal = SysAllocString(val);  // SafeArrayPutElement doesn't copy BSTR
+    long idx = (long)index;
+    SafeArrayPutElement(psa, &idx, &v);
+    // v.bstrVal is now owned by the array element
+}
+
+VARIANT vb6_PA_GetVariant(SAFEARRAY* psa, int32_t index) {
+    VARIANT v;
+    VariantInit(&v);
+    if (!psa) return v;
+    long idx = (long)index;
+    SafeArrayGetElement(psa, &idx, &v);
+    return v;
+}
+
+int32_t vb6_PA_GetLong(SAFEARRAY* psa, int32_t index) {
+    if (!psa) return 0;
+    VARIANT v;
+    VariantInit(&v);
+    long idx = (long)index;
+    SafeArrayGetElement(psa, &idx, &v);
+    int32_t result = 0;
+    if (v.vt == VT_I4) result = v.lVal;
+    else if (v.vt == VT_I2) result = (int32_t)v.iVal;
+    else if (v.vt == VT_R8) result = (int32_t)v.dblVal;
+    VariantClear(&v);
+    return result;
+}
+
+double vb6_PA_GetDouble(SAFEARRAY* psa, int32_t index) {
+    if (!psa) return 0.0;
+    VARIANT v;
+    VariantInit(&v);
+    long idx = (long)index;
+    SafeArrayGetElement(psa, &idx, &v);
+    double result = 0.0;
+    if (v.vt == VT_R8) result = v.dblVal;
+    else if (v.vt == VT_I4) result = (double)v.lVal;
+    else if (v.vt == VT_BSTR && v.bstrVal) result = wcstod(v.bstrVal, NULL);
+    VariantClear(&v);
+    return result;
+}
+
+BSTR vb6_PA_GetBSTR(SAFEARRAY* psa, int32_t index) {
+    if (!psa) return NULL;
+    VARIANT v;
+    VariantInit(&v);
+    long idx = (long)index;
+    SafeArrayGetElement(psa, &idx, &v);
+    BSTR result = NULL;
+    if (v.vt == VT_BSTR && v.bstrVal) {
+        result = SysAllocString(v.bstrVal);
+    } else if (v.vt == VT_I4) {
+        wchar_t buf[32];
+        _ltow_s(v.lVal, buf, 32, 10);
+        result = SysAllocString(buf);
+    } else if (v.vt == VT_R8) {
+        wchar_t buf[64];
+        swprintf_s(buf, 64, L"%g", v.dblVal);
+        result = SysAllocString(buf);
+    }
+    VariantClear(&v);
+    return result;
+}
+
+int32_t vb6_IsMissing(SAFEARRAY* psa) {
+    // IsMissing returns True if no arguments were passed to ParamArray
+    return (psa == NULL) ? -1 : 0;  // VB6 True = -1, False = 0
+}
+
+int32_t vb6_PA_UBound(SAFEARRAY* psa) {
+    if (!psa) return -1;  // empty ParamArray: UBound returns -1 (VB6 behavior)
+    long ubound = 0;
+    SafeArrayGetUBound(psa, 1, &ubound);
+    return (int32_t)ubound;
+}
+
+int32_t vb6_PA_LBound(SAFEARRAY* psa) {
+    if (!psa) return 0;
+    long lbound = 0;
+    SafeArrayGetLBound(psa, 1, &lbound);
+    return (int32_t)lbound;
+}

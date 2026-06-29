@@ -592,6 +592,24 @@ void* vb6_ComVtableGetVoid(void* obj, int32_t vtIndex, ...);
 // 运行时初始化/退出
 // ============================================================
 
+// ============================================================
+// ParamArray runtime support (P14.1.5)
+// ============================================================
+
+SAFEARRAY* vb6_PA_Create(int32_t count);
+void vb6_PA_Destroy(SAFEARRAY* psa);
+void vb6_PA_SetVariant(SAFEARRAY* psa, int32_t index, VARIANT* pv);
+void vb6_PA_SetLong(SAFEARRAY* psa, int32_t index, int32_t val);
+void vb6_PA_SetDouble(SAFEARRAY* psa, int32_t index, double val);
+void vb6_PA_SetBSTR(SAFEARRAY* psa, int32_t index, BSTR val);
+VARIANT vb6_PA_GetVariant(SAFEARRAY* psa, int32_t index);
+int32_t vb6_PA_GetLong(SAFEARRAY* psa, int32_t index);
+double vb6_PA_GetDouble(SAFEARRAY* psa, int32_t index);
+BSTR vb6_PA_GetBSTR(SAFEARRAY* psa, int32_t index);
+int32_t vb6_IsMissing(SAFEARRAY* psa);
+int32_t vb6_PA_UBound(SAFEARRAY* psa);
+int32_t vb6_PA_LBound(SAFEARRAY* psa);
+
 void vb6_Init(void);
 void vb6_Exit(void);
 void vb6_End(void);
