@@ -48,7 +48,8 @@ StmtPtr Parser::parseStatement() {
             return parseErrorStmt();
         }
 
-        // --- 赋值/调用 ---kenKind::Set:      return parseSetStmt();
+        // --- 赋值/调用 ---
+        case TokenKind::Set:      return parseSetStmt();
         case TokenKind::Let:      return parseLetStmt();
         case TokenKind::Call:     return parseCallStmt();
 
