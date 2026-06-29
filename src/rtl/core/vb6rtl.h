@@ -300,7 +300,20 @@ BSTR vb6_StrReverse(BSTR s);
 int32_t vb6_InStrRev(BSTR haystack, BSTR needle, int32_t start, int32_t compare);
 BSTR vb6_LCase_str(BSTR s);  // LCase$别名
 BSTR vb6_UCase_str(BSTR s);
-int16_t vb6_Like(BSTR source, BSTR pattern);  // UCase$别名
+int16_t vb6_Like(BSTR source, BSTR pattern);  // Like运算符
+
+// ============================================================
+// P14.2.2: 系统函数
+// ============================================================
+BSTR vb6_Dir(BSTR pathname, int32_t attributes);
+BSTR vb6_CurDir(BSTR drive);
+int32_t vb6_Shell(BSTR pathname, int32_t windowstyle);
+BSTR vb6_Environ(BSTR envstring);
+BSTR vb6_Command(void);
+
+
+
+
 
 // 数学函数 (补充)
 double vb6_Sin(double x);

@@ -1160,6 +1160,12 @@ void CCodeGen::visit(IdentifierExpr& node) {
         {"lof",      "vb6_LOF"},
         {"loc",      "vb6_Loc"},
         {"kill",     "vb6_Kill"},
+        // 系统函数 (P14.2.2新增)
+        
+        {"shell",    "vb6_Shell"},
+        {"environ",  "vb6_Environ"},
+        {"command",  "vb6_Command"},
+        
     };
 
     auto it = builtinFuncs.find(lower);
@@ -1167,7 +1173,7 @@ void CCodeGen::visit(IdentifierExpr& node) {
         // 无参内置函数: VB6允许省略括号(如 Now, Date, Time)
         // 当IdentifierExpr引用这些函数时，必须生成调用(带括号)
         static const std::unordered_set<std::string> zeroArgBuiltinFuncs = {
-            "now", "date", "time", "freefile"
+            "now", "date", "time", "freefile", "command"
         };
         if (zeroArgBuiltinFuncs.count(lower)) {
             lastExpr_ = it->second + "()";
@@ -2038,6 +2044,20 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
     if (callee == "vb6_InStr") {
         if (args.size() == 2) {
             argList = "1, " + argList;
+        }
+    }
+
+    // P14.2.2: CurDir - VB6 allows 0-arg CurDir() → vb6_CurDir(NULL)
+    if (callee == "vb6_CurDir") {
+        if (args.empty()) {
+            argList = "NULL";
+        }
+    }
+
+    // P14.2.2: Dir - VB6 allows 1-arg Dir(pattern) → vb6_Dir(pattern, 0)
+    if (callee == "vb6_Dir") {
+        if (args.size() == 1) {
+            argList += ", 0";
         }
     }
 

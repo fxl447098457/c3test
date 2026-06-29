@@ -732,7 +732,123 @@ int16_t vb6_Like(BSTR source, BSTR pattern) {
 }
 
 // ============================================================
-// 数学函数 (补充)
+
+// ============================================================
+// P14.2.2: 系统函数 (Dir/CurDir/Shell/Environ/Command)
+// ============================================================
+
+// Dir() - 静态状态，支持多次调用遍历
+static HANDLE vb6_dir_handle = INVALID_HANDLE_VALUE;
+static WIN32_FIND_DATAW vb6_dir_data;
+static int vb6_dir_first = 0;
+
+BSTR vb6_Dir(BSTR pathname, int32_t attributes) {
+    if (pathname && vb6_BSTR_Len(pathname) > 0) {
+        // 新搜索: 关闭之前的句柄
+        if (vb6_dir_handle != INVALID_HANDLE_VALUE) {
+            FindClose(vb6_dir_handle);
+            vb6_dir_handle = INVALID_HANDLE_VALUE;
+        }
+        vb6_dir_handle = FindFirstFileW(pathname, &vb6_dir_data);
+        if (vb6_dir_handle == INVALID_HANDLE_VALUE) {
+            return vb6_BSTR_Empty();  // 未找到
+        }
+        vb6_dir_first = 1;
+        // 跳过 . 和 ..
+        while (wcscmp(vb6_dir_data.cFileName, L".") == 0 ||
+               wcscmp(vb6_dir_data.cFileName, L"..") == 0) {
+            if (!FindNextFileW(vb6_dir_handle, &vb6_dir_data)) {
+                FindClose(vb6_dir_handle);
+                vb6_dir_handle = INVALID_HANDLE_VALUE;
+                return vb6_BSTR_Empty();
+            }
+        }
+        return vb6_BSTR_FromStr(vb6_dir_data.cFileName);
+    } else {
+        // 继续搜索
+        if (vb6_dir_handle == INVALID_HANDLE_VALUE) {
+            return vb6_BSTR_Empty();
+        }
+        while (FindNextFileW(vb6_dir_handle, &vb6_dir_data)) {
+            if (wcscmp(vb6_dir_data.cFileName, L".") == 0 ||
+                wcscmp(vb6_dir_data.cFileName, L"..") == 0) {
+                continue;
+            }
+            return vb6_BSTR_FromStr(vb6_dir_data.cFileName);
+        }
+        FindClose(vb6_dir_handle);
+        vb6_dir_handle = INVALID_HANDLE_VALUE;
+        return vb6_BSTR_Empty();
+    }
+}
+
+BSTR vb6_CurDir(BSTR drive) {
+    wchar_t buf[MAX_PATH];
+    if (drive && vb6_BSTR_Len(drive) > 0) {
+        wchar_t driveLetter[4];
+        driveLetter[0] = drive[0];
+        driveLetter[1] = L':';
+        driveLetter[2] = L'\0';
+        if (GetDriveTypeW(driveLetter) == DRIVE_NO_ROOT_DIR) {
+            return vb6_BSTR_Empty();
+        }
+        // 切换到指定驱动器获取当前目录
+        wchar_t oldDir[MAX_PATH];
+        GetCurrentDirectoryW(MAX_PATH, oldDir);
+        SetCurrentDirectoryW(driveLetter);
+        GetCurrentDirectoryW(MAX_PATH, buf);
+        SetCurrentDirectoryW(oldDir);
+    } else {
+        GetCurrentDirectoryW(MAX_PATH, buf);
+    }
+    return vb6_BSTR_FromStr(buf);
+}
+
+int32_t vb6_Shell(BSTR pathname, int32_t windowstyle) {
+    if (!pathname) return 0;
+    // 使用WinExec简化实现 (返回值>31表示成功)
+    // VB6 Shell返回进程ID，WinExec返回实例句柄
+    UINT ret = WinExec(NULL, 0);  // avoid unused warning
+    (void)ret;
+    STARTUPINFOW si = {0};
+    PROCESS_INFORMATION pi = {0};
+    si.cb = sizeof(si);
+    si.dwFlags = STARTF_USESHOWWINDOW;
+    si.wShowWindow = (WORD)((windowstyle > 0) ? windowstyle : SW_SHOWNORMAL);
+    if (CreateProcessW(NULL, pathname, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi)) {
+        DWORD pid = pi.dwProcessId;
+        CloseHandle(pi.hProcess);
+        CloseHandle(pi.hThread);
+        return (int32_t)pid;
+    }
+    return 0;
+}
+
+BSTR vb6_Environ(BSTR envstring) {
+    if (!envstring) return vb6_BSTR_Empty();
+    wchar_t buf[32768];  // Windows最大环境变量长度
+    DWORD len = GetEnvironmentVariableW(envstring, buf, 32768);
+    if (len == 0) return vb6_BSTR_Empty();
+    return vb6_BSTR_FromStr(buf);
+}
+
+BSTR vb6_Command(void) {
+    LPWSTR cmdLine = GetCommandLineW();
+    if (!cmdLine) return vb6_BSTR_Empty();
+    // 跳过可执行文件名 (可能在引号内)
+    while (*cmdLine == L' ') cmdLine++;
+    if (*cmdLine == L'"') {
+        cmdLine++;
+        while (*cmdLine && *cmdLine != L'"') cmdLine++;
+        if (*cmdLine == L'"') cmdLine++;
+    } else {
+        while (*cmdLine && *cmdLine != L' ') cmdLine++;
+    }
+    while (*cmdLine == L' ') cmdLine++;
+    if (*cmdLine == L'\0') return vb6_BSTR_Empty();
+    return vb6_BSTR_FromStr(cmdLine);
+}
+//  数学函数 (补充)
 // ============================================================
 
 double vb6_Sin(double x) { return sin(x); }
