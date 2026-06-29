@@ -848,7 +848,119 @@ BSTR vb6_Command(void) {
     if (*cmdLine == L'\0') return vb6_BSTR_Empty();
     return vb6_BSTR_FromStr(cmdLine);
 }
-//  数学函数 (补充)
+
+// ============================================================
+// P14.2.3: Split/Join 字符串数组函数
+// ============================================================
+
+vb6_SafeArray1D* vb6_Split(BSTR expr, BSTR delimiter, int32_t limit, int32_t compare) {
+    (void)compare;  // simplified: binary compare only
+    if (!expr) expr = vb6_BSTR_Empty();
+    // Default delimiter is space " " when NULL is passed
+    BSTR defaultDelim = NULL;
+    if (!delimiter) {
+        defaultDelim = vb6_BSTR_FromStr(L" ");
+        delimiter = defaultDelim;
+    }
+    if (limit == 0) limit = -1;
+    
+    int32_t exprLen = vb6_BSTR_Len(expr);
+    int32_t delimLen = vb6_BSTR_Len(delimiter);
+    
+    // Empty string -> single empty element
+    if (exprLen == 0) {
+        vb6_SafeArray1D* arr = vb6_SafeArrayCreate1D(vb6_sa_bstr, 0, 0);
+        if (arr) VB6_SA_AT(BSTR, arr, 0) = vb6_BSTR_Empty();
+        return arr;
+    }
+    
+    // Count substrings
+    int32_t count = 1;
+    if (delimLen > 0) {
+        for (int32_t i = 0; i <= exprLen - delimLen; ) {
+            if (memcmp(expr + i, delimiter, delimLen * sizeof(wchar_t)) == 0) {
+                count++;
+                i += delimLen;
+                if (limit > 0 && count >= limit) break;
+            } else {
+                i++;
+            }
+        }
+    } else {
+        // Empty delimiter: split each character
+        count = exprLen;
+    }
+    if (limit > 0 && count > limit) count = limit;
+    
+    // Create array
+    vb6_SafeArray1D* arr = vb6_SafeArrayCreate1D(vb6_sa_bstr, 0, count - 1);
+    if (!arr) return NULL;
+    
+    // Populate elements
+    int32_t idx = 0, start = 0;
+    if (delimLen > 0) {
+        for (int32_t i = 0; i <= exprLen - delimLen && idx < count - 1; ) {
+            if (memcmp(expr + i, delimiter, delimLen * sizeof(wchar_t)) == 0) {
+                int32_t len = i - start;
+                VB6_SA_AT(BSTR, arr, idx) = SysAllocStringLen(expr + start, len);
+                idx++;
+                start = i + delimLen;
+                i += delimLen;
+            } else {
+                i++;
+            }
+        }
+        // Last element
+        VB6_SA_AT(BSTR, arr, idx) = SysAllocStringLen(expr + start, exprLen - start);
+    } else {
+        // Empty delimiter: each character as element
+        for (int32_t i = 0; i < count; i++) {
+            VB6_SA_AT(BSTR, arr, i) = SysAllocStringLen(expr + i, 1);
+        }
+    }
+    
+    if (defaultDelim) vb6_BSTR_Free(defaultDelim);
+    return arr;
+}
+
+BSTR vb6_Join(vb6_SafeArray1D* arr, BSTR delimiter) {
+    BSTR defaultDelim = NULL;
+    if (!delimiter) { defaultDelim = vb6_BSTR_FromStr(L" "); delimiter = defaultDelim; }
+    if (!arr || arr->count <= 0) { if (defaultDelim) vb6_BSTR_Free(defaultDelim); return vb6_BSTR_Empty(); }
+    
+    int32_t delimLen = vb6_BSTR_Len(delimiter);
+    
+    // Calculate total length
+    int32_t totalLen = 0;
+    for (int32_t i = 0; i < arr->count; i++) {
+        BSTR elem = VB6_SA_AT(BSTR, arr, i + arr->lBound);
+        totalLen += elem ? vb6_BSTR_Len(elem) : 0;
+        if (i < arr->count - 1) totalLen += delimLen;
+    }
+    
+    // Build result
+    wchar_t* buf = (wchar_t*)malloc((totalLen + 1) * sizeof(wchar_t));
+    if (!buf) { if (defaultDelim) vb6_BSTR_Free(defaultDelim); return vb6_BSTR_Empty(); }
+    int32_t pos = 0;
+    for (int32_t i = 0; i < arr->count; i++) {
+        BSTR elem = VB6_SA_AT(BSTR, arr, i + arr->lBound);
+        if (elem) {
+            int32_t elemLen = vb6_BSTR_Len(elem);
+            memcpy(buf + pos, elem, elemLen * sizeof(wchar_t));
+            pos += elemLen;
+        }
+        if (i < arr->count - 1 && delimLen > 0) {
+            memcpy(buf + pos, delimiter, delimLen * sizeof(wchar_t));
+            pos += delimLen;
+        }
+    }
+    buf[totalLen] = L'\0';
+    BSTR result = vb6_BSTR_FromStr(buf);
+    free(buf);
+    if (defaultDelim) vb6_BSTR_Free(defaultDelim);
+    return result;
+}
+
 // ============================================================
 
 double vb6_Sin(double x) { return sin(x); }

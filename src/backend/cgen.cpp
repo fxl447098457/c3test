@@ -1165,6 +1165,8 @@ void CCodeGen::visit(IdentifierExpr& node) {
         {"shell",    "vb6_Shell"},
         {"environ",  "vb6_Environ"},
         {"command",  "vb6_Command"},
+        {"split",    "vb6_Split"},
+        {"join",     "vb6_Join"},
         
     };
 
@@ -2058,6 +2060,28 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
     if (callee == "vb6_Dir") {
         if (args.size() == 1) {
             argList += ", 0";
+        }
+    }
+
+    // P14.2.3: Split - VB6 Split(expr[, delim[, limit[, compare]]])
+    // RTL: vb6_Split(expr, delim, limit, compare)
+    if (callee == "vb6_Split") {
+        if (args.size() == 1) {
+            argList += ", NULL";        // default delimiter = space
+        }
+        if (args.size() <= 2) {
+            argList += ", -1";          // limit = -1 (unlimited)
+        }
+        if (args.size() <= 3) {
+            argList += ", 0";           // compare = binary
+        }
+    }
+
+    // P14.2.3: Join - VB6 Join(arr[, delimiter])
+    // RTL: vb6_Join(arr, delimiter)
+    if (callee == "vb6_Join") {
+        if (args.size() == 1) {
+            argList += ", NULL";        // default delimiter = space
         }
     }
 

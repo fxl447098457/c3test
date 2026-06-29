@@ -315,6 +315,11 @@ BSTR vb6_Command(void);
 
 
 
+
+
+
+
+
 // 数学函数 (补充)
 double vb6_Sin(double x);
 double vb6_Cos(double x);
@@ -374,6 +379,10 @@ typedef struct vb6_SafeArray1D {
     void*   data;                      // 数据指针 (calloc分配, 零初始化)
     int32_t isDynamic;                 // 是否动态数组 (ReDim创建)
 } vb6_SafeArray1D;
+
+// P14.2.3: 字符串数组函数
+vb6_SafeArray1D* vb6_Split(BSTR expr, BSTR delimiter, int32_t limit, int32_t compare);
+BSTR vb6_Join(vb6_SafeArray1D* arr, BSTR delimiter);
 
 // 创建一维静态数组
 vb6_SafeArray1D* vb6_SafeArrayCreate1D(vb6_safearray_elemtype elemType,
