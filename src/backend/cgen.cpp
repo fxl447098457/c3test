@@ -1142,6 +1142,11 @@ void CCodeGen::visit(IdentifierExpr& node) {
         {"hour",     "vb6_Hour"},
         {"minute",   "vb6_Minute"},
         {"second",   "vb6_Second"},
+        // 日期函数 P14.2.4
+        {"dateadd",  "vb6_DateAdd"},
+        {"datediff", "vb6_DateDiff"},
+        {"datepart", "vb6_DatePart"},
+        {"dateserial", "vb6_DateSerial"},
         // 类型转换 (P4新增)
         {"cbyte",    "vb6_CByte"},
         {"cvar",     "vb6_CVar"},
@@ -2082,6 +2087,26 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
     if (callee == "vb6_Join") {
         if (args.size() == 1) {
             argList += ", NULL";        // default delimiter = space
+        }
+    }
+
+    // P14.2.4: DateDiff - VB6 DateDiff(interval, date1, date2[, firstDayOfWeek[, firstWeekOfYear]])
+    // RTL: vb6_DateDiff(interval, date1, date2, firstDayOfWeek, firstWeekOfYear)
+    if (callee == "vb6_DateDiff") {
+        if (args.size() == 3) {
+            argList += ", 1, 1";  // vbSunday, vbFirstJan1
+        } else if (args.size() == 4) {
+            argList += ", 1";     // vbFirstJan1
+        }
+    }
+
+    // P14.2.4: DatePart - VB6 DatePart(interval, date[, firstDayOfWeek[, firstWeekOfYear]])
+    // RTL: vb6_DatePart(interval, date, firstDayOfWeek, firstWeekOfYear)
+    if (callee == "vb6_DatePart") {
+        if (args.size() == 2) {
+            argList += ", 1, 1";  // vbSunday, vbFirstJan1
+        } else if (args.size() == 3) {
+            argList += ", 1";     // vbFirstJan1
         }
     }
 

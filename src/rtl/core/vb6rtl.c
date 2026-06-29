@@ -1,4 +1,4 @@
-﻿// vb6rtl.c - VB6运行时库最小实现
+// vb6rtl.c - VB6运行时库最小实现
 // 仅支持 hello.bas 等简单程序运行
 
 #include "vb6rtl.h"
@@ -1072,6 +1072,223 @@ int32_t vb6_Second(double time) {
     return (int32_t)(t * 86400.0) % 60;
 }
 
+// ============================================================
+double vb6_DateSerial(int32_t year, int32_t month, int32_t day) {
+    int32_t jd_date = vb6_date_to_serial(year, month, day);
+    int32_t jd_base = vb6_date_to_serial(1899, 12, 30);
+    return (double)(jd_date - jd_base);
+}
+
+// P14.2.4: DateAdd/DateDiff/DatePart 日期函数
+// ============================================================
+
+// 解析VB6间隔字符串为枚举
+typedef enum {
+    vb6_di_year, vb6_di_quarter, vb6_di_month, vb6_di_dayofyear,
+    vb6_di_day, vb6_di_weekday, vb6_di_week, vb6_di_hour,
+    vb6_di_minute, vb6_di_second
+} vb6_date_interval;
+
+static vb6_date_interval vb6_parse_interval(BSTR interval) {
+    if (!interval || vb6_BSTR_Len(interval) == 0) return vb6_di_day;
+    wchar_t ch = interval[0];
+    switch (ch) {
+        case L'y': case L'Y':
+            if (vb6_BSTR_Len(interval) >= 4)
+                return vb6_di_year;  // "yyyy" = year
+            return vb6_di_dayofyear;  // "y" = DayOfYear
+        case L'q': case L'Q': return vb6_di_quarter;
+        case L'm': case L'M': return vb6_di_month;
+        case L'd': case L'D': return vb6_di_day;
+        case L'w': case L'W':
+            if (vb6_BSTR_Len(interval) >= 2 && (interval[1] == L'w' || interval[1] == L'W'))
+                return vb6_di_week;
+            return vb6_di_weekday;
+        case L'h': case L'H': return vb6_di_hour;
+        case L'n': case L'N': return vb6_di_minute;
+        case L's': case L'S': return vb6_di_second;
+        default: return vb6_di_day;
+    }
+}
+
+double vb6_DateAdd(BSTR interval, double number, double date) {
+    vb6_date_interval di = vb6_parse_interval(interval);
+    int32_t datePart = (int32_t)date;
+    double timePart = date - (double)datePart;
+    if (timePart < 0) { timePart += 1.0; datePart--; }
+    
+    int32_t y, m, d;
+    vb6_serial_to_date(datePart, &y, &m, &d);
+    int32_t hh = (int32_t)(timePart * 24.0) % 24;
+    int32_t mm = (int32_t)(timePart * 1440.0) % 60;
+    int32_t ss = (int32_t)(timePart * 86400.0) % 60;
+    
+    int32_t n = (int32_t)number;
+    
+    switch (di) {
+        case vb6_di_year:
+            y += n;
+            break;
+        case vb6_di_quarter:
+            m += n * 3;
+            while (m > 12) { m -= 12; y++; }
+            while (m < 1)  { m += 12; y--; }
+            break;
+        case vb6_di_month:
+            m += n;
+            while (m > 12) { m -= 12; y++; }
+            while (m < 1)  { m += 12; y--; }
+            break;
+        case vb6_di_day:
+        case vb6_di_dayofyear:
+        case vb6_di_weekday:
+            datePart += n;
+            goto rebuild;
+        case vb6_di_week:
+            datePart += n * 7;
+            goto rebuild;
+        case vb6_di_hour:
+            hh += n;
+            while (hh >= 24) { hh -= 24; datePart++; }
+            while (hh < 0)   { hh += 24; datePart--; }
+            goto rebuild;
+        case vb6_di_minute:
+            mm += n;
+            while (mm >= 60) { mm -= 60; hh++; }
+            while (mm < 0)   { mm += 60; hh--; }
+            while (hh >= 24) { hh -= 24; datePart++; }
+            while (hh < 0)   { hh += 24; datePart--; }
+            goto rebuild;
+        case vb6_di_second:
+            ss += n;
+            while (ss >= 60) { ss -= 60; mm++; }
+            while (ss < 0)   { ss += 60; mm--; }
+            while (mm >= 60) { mm -= 60; hh++; }
+            while (mm < 0)   { mm += 60; hh--; }
+            while (hh >= 24) { hh -= 24; datePart++; }
+            while (hh < 0)   { hh += 24; datePart--; }
+            goto rebuild;
+    }
+    // For year/quarter/month: clamp day to valid range for the new month
+    {
+        static const int32_t daysInMonth[] = {0,31,28,31,30,31,30,31,31,30,31,30,31};
+        int32_t maxDay = daysInMonth[m];
+        if (m == 2 && (y % 4 == 0 && (y % 100 != 0 || y % 400 == 0))) maxDay = 29;
+        if (d > maxDay) d = maxDay;
+        // Rebuild serial
+        int32_t jd_date = vb6_date_to_serial(y, m, d);
+        int32_t jd_base = vb6_date_to_serial(1899, 12, 30);
+        datePart = jd_date - jd_base;
+    }
+rebuild:
+    {
+        double result = (double)datePart + (hh * 3600.0 + mm * 60.0 + ss) / 86400.0;
+        return result;
+    }
+}
+
+int64_t vb6_DateDiff(BSTR interval, double date1, double date2, int32_t firstDayOfWeek, int32_t firstWeekOfYear) {
+    (void)firstDayOfWeek;
+    (void)firstWeekOfYear;
+    vb6_date_interval di = vb6_parse_interval(interval);
+    
+    int32_t d1 = (int32_t)date1, d2 = (int32_t)date2;
+    
+    switch (di) {
+        case vb6_di_year: {
+            int32_t y1, m1, dd1, y2, m2, dd2;
+            vb6_serial_to_date(d1, &y1, &m1, &dd1);
+            vb6_serial_to_date(d2, &y2, &m2, &dd2);
+            return (int64_t)(y2 - y1);
+        }
+        case vb6_di_quarter: {
+            int32_t y1, m1, dd1, y2, m2, dd2;
+            vb6_serial_to_date(d1, &y1, &m1, &dd1);
+            vb6_serial_to_date(d2, &y2, &m2, &dd2);
+            return (int64_t)((y2 * 4 + (m2 - 1) / 3) - (y1 * 4 + (m1 - 1) / 3));
+        }
+        case vb6_di_month: {
+            int32_t y1, m1, dd1, y2, m2, dd2;
+            vb6_serial_to_date(d1, &y1, &m1, &dd1);
+            vb6_serial_to_date(d2, &y2, &m2, &dd2);
+            return (int64_t)((y2 * 12 + m2) - (y1 * 12 + m1));
+        }
+        case vb6_di_day:
+        case vb6_di_dayofyear:
+            return (int64_t)(d2 - d1);
+        case vb6_di_weekday:
+            return (int64_t)(d2 - d1);
+        case vb6_di_week:
+            return (int64_t)((d2 - d1) / 7);
+        case vb6_di_hour:
+            return (int64_t)((date2 - date1) * 24.0);
+        case vb6_di_minute:
+            return (int64_t)((date2 - date1) * 1440.0);
+        case vb6_di_second:
+            return (int64_t)((date2 - date1) * 86400.0);
+    }
+    return 0;
+}
+
+int32_t vb6_DatePart(BSTR interval, double date, int32_t firstDayOfWeek, int32_t firstWeekOfYear) {
+    (void)firstDayOfWeek;
+    (void)firstWeekOfYear;
+    vb6_date_interval di = vb6_parse_interval(interval);
+    int32_t d = (int32_t)date;
+    
+    switch (di) {
+        case vb6_di_year: {
+            int32_t y, m, dd;
+            vb6_serial_to_date(d, &y, &m, &dd);
+            return y;
+        }
+        case vb6_di_quarter: {
+            int32_t y, m, dd;
+            vb6_serial_to_date(d, &y, &m, &dd);
+            return (m - 1) / 3 + 1;
+        }
+        case vb6_di_month: {
+            int32_t y, m, dd;
+            vb6_serial_to_date(d, &y, &m, &dd);
+            return m;
+        }
+        case vb6_di_day:
+        case vb6_di_dayofyear: {
+            int32_t y, m, dd;
+            vb6_serial_to_date(d, &y, &m, &dd);
+            // Day of year: simple approximation (days since start of year)
+            int32_t jd_this = vb6_date_to_serial(y, m, dd);
+            int32_t jd_jan1 = vb6_date_to_serial(y, 1, 1);
+            return jd_this - jd_jan1 + 1;
+        }
+        case vb6_di_weekday: {
+            // Sunday=1, Monday=2, ..., Saturday=7
+            // 1899-12-30 (serial 0) was a Saturday (day 7)
+            int32_t wd = (d % 7 + 7) % 7;  // 0=Sat,1=Sun,...,6=Fri
+            int32_t weekday = wd + 1;        // Sat=1,Sun=2,...,Fri=7
+            // Remap: Sun=1,Mon=2,...,Sat=7
+            // wd: 0=Sat,1=Sun,2=Mon,3=Tue,4=Wed,5=Thu,6=Fri
+            if (wd == 0) return 7;  // Saturday
+            return wd;              // Sunday=1, Monday=2, etc.
+        }
+        case vb6_di_week: {
+            // ISO 8601 simplified: week 1 contains Jan 4
+            int32_t y, m, dd;
+            vb6_serial_to_date(d, &y, &m, &dd);
+            int32_t jd_this = vb6_date_to_serial(y, m, dd);
+            int32_t jd_jan1 = vb6_date_to_serial(y, 1, 1);
+            int32_t dayOfYear = jd_this - jd_jan1 + 1;
+            return (dayOfYear - 1) / 7 + 1;
+        }
+        case vb6_di_hour:
+            return vb6_Hour(date);
+        case vb6_di_minute:
+            return vb6_Minute(date);
+        case vb6_di_second:
+            return vb6_Second(date);
+    }
+    return 0;
+}
 // ============================================================
 // 类型转换 (补充)
 // ============================================================

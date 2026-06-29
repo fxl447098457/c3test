@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 // vb6rtl.h - VB6运行时库最小头文件
 // 为C代码生成器提供VB6基本类型的C定义
 // P3.6 阎段: 最小子集, 仅支撑 hello.bas 等简单程序
@@ -342,6 +342,13 @@ int32_t vb6_Day(double date);
 int32_t vb6_Hour(double time);
 int32_t vb6_Minute(double time);
 int32_t vb6_Second(double time);
+
+// P14.2.4: DateAdd/DateDiff/DatePart/DateSerial
+double vb6_DateSerial(int32_t year, int32_t month, int32_t day);
+// P14.2.4: DateAdd/DateDiff/DatePart
+double vb6_DateAdd(BSTR interval, double number, double date);
+int64_t vb6_DateDiff(BSTR interval, double date1, double date2, int32_t firstDayOfWeek, int32_t firstWeekOfYear);
+int32_t vb6_DatePart(BSTR interval, double date, int32_t firstDayOfWeek, int32_t firstWeekOfYear);
 
 // 类型转换 (补充)
 int16_t vb6_CBool(double v);

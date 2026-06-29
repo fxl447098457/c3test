@@ -1608,7 +1608,7 @@ void SemanticAnalyzer::registerBuiltins() {
     addBuiltinFunc("DateAdd", Vb6Type::Date);
     addBuiltinFunc("DateDiff", Vb6Type::Long);
     addBuiltinFunc("DatePart", Vb6Type::Long);
-    addBuiltinFunc("DateSerial", Vb6Type::Date);
+    addBuiltinFunc("DateSerial", Vb6Type::Double);
     addBuiltinFunc("DateValue", Vb6Type::Date);
     addBuiltinFunc("TimeSerial", Vb6Type::Date);
     addBuiltinFunc("TimeValue", Vb6Type::Date);
@@ -1619,6 +1619,7 @@ void SemanticAnalyzer::registerBuiltins() {
     addBuiltinFunc("Minute", Vb6Type::Long);
     addBuiltinFunc("Second", Vb6Type::Long);
     addBuiltinFunc("Weekday", Vb6Type::Long);
+
     // 交互
     addBuiltinFunc("MsgBox", Vb6Type::Long);
     addBuiltinFunc("InputBox", Vb6Type::String);
