@@ -668,7 +668,68 @@ int32_t vb6_InStrRev(BSTR haystack, BSTR needle, int32_t start, int32_t compare)
 }
 
 BSTR vb6_LCase_str(BSTR s) { return vb6_LCase(s); }  // 别名
-BSTR vb6_UCase_str(BSTR s) { return vb6_UCase(s); }  // 别名
+BSTR vb6_UCase_str(BSTR s) { return vb6_UCase(s); }
+
+// ============================================================
+// P14.2.1: Like运算符 - 通配符模式匹配
+// 支持: ? (单字符), * (零或多个字符), # (单个数字),
+//       [charlist] (字符列表), [!charlist] (排除字符列表)
+// ============================================================
+
+static int likeMatch(const wchar_t* src, const wchar_t* pat) {
+    while (*pat) {
+        if (*pat == L'*') {
+            while (*pat == L'*') pat++;
+            if (*pat == L'\0') return 1;
+            while (*src) {
+                if (likeMatch(src, pat)) return 1;
+                src++;
+            }
+            return likeMatch(src, pat);
+        }
+        else if (*pat == L'?') {
+            if (*src == L'\0') return 0;
+            src++; pat++;
+        }
+        else if (*pat == L'#') {
+            if (*src == L'\0') return 0;
+            if (*src < L'0' || *src > L'9') return 0;
+            src++; pat++;
+        }
+        else if (*pat == L'[') {
+            pat++;
+            int negate = 0;
+            if (*pat == L'!') { negate = 1; pat++; }
+            int match = 0;
+            if (*src == L'\0') return 0;
+            while (*pat && *pat != L']') {
+                if (pat[1] == L'-' && pat[2] && pat[2] != L']') {
+                    wchar_t lo = *pat, hi = pat[2];
+                    if (*src >= lo && *src <= hi) match = 1;
+                    pat += 3;
+                } else {
+                    if (*src == *pat) match = 1;
+                    pat++;
+                }
+            }
+            if (*pat == L']') pat++;
+            if (negate) match = !match;
+            if (!match) return 0;
+            src++;
+        }
+        else {
+            if (*src != *pat) return 0;
+            src++; pat++;
+        }
+    }
+    return (*src == L'\0');
+}
+
+int16_t vb6_Like(BSTR source, BSTR pattern) {
+    const wchar_t* s = source ? source : L"";
+    const wchar_t* p = pattern ? pattern : L"";
+    return likeMatch(s, p) ? -1 : 0;
+}
 
 // ============================================================
 // 数学函数 (补充)

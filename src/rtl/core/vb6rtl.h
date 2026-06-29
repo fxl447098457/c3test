@@ -299,7 +299,8 @@ int32_t vb6_StrComp(BSTR s1, BSTR s2, int32_t compare);
 BSTR vb6_StrReverse(BSTR s);
 int32_t vb6_InStrRev(BSTR haystack, BSTR needle, int32_t start, int32_t compare);
 BSTR vb6_LCase_str(BSTR s);  // LCase$别名
-BSTR vb6_UCase_str(BSTR s);  // UCase$别名
+BSTR vb6_UCase_str(BSTR s);
+int16_t vb6_Like(BSTR source, BSTR pattern);  // UCase$别名
 
 // 数学函数 (补充)
 double vb6_Sin(double x);
