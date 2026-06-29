@@ -1793,6 +1793,20 @@ int32_t vb6_Close(int32_t filenumber) {
     return -1;
 }
 
+int32_t vb6_CloseAll() {
+    int count = 0;
+    for (int i = 1; i < VB6_MAX_FILES; i++) {
+        if (vb6_file_table[i]) {
+            fclose(vb6_file_table[i]);
+            vb6_file_table[i] = NULL;
+            vb6_file_mode[i] = 0;
+            vb6_file_reclen[i] = 0;
+            count++;
+        }
+    }
+    return count;
+}
+
 int32_t vb6_EOF(int32_t filenumber) {
     if (filenumber < 1 || filenumber >= VB6_MAX_FILES || !vb6_file_table[filenumber]) return -1;
     FILE* f = vb6_file_table[filenumber];
@@ -1863,6 +1877,24 @@ int32_t vb6_Input(int32_t filenumber, BSTR* outVar) {
     BSTR result = vb6_LineInput(filenumber);
     if (outVar) *outVar = result;
     return (result != NULL) ? -1 : 0;
+}
+
+// P15.4: Input function - reads count characters from file
+BSTR vb6_InputString(int32_t filenumber, int32_t count) {
+    if (filenumber < 1 || filenumber > 511 || !vb6_file_table[filenumber]) return NULL;
+    if (count <= 0) return vb6_BSTR_Empty();
+    wchar_t* buf = (wchar_t*)malloc((count + 1) * sizeof(wchar_t));
+    if (!buf) return NULL;
+    int32_t read = 0;
+    for (int32_t i = 0; i < count; i++) {
+        int ch = fgetc(vb6_file_table[filenumber]);
+        if (ch == EOF) break;
+        buf[read++] = (wchar_t)(unsigned char)ch;
+    }
+    buf[read] = L'\0';
+    BSTR result = vb6_BSTR_FromStr(buf);
+    free(buf);
+    return result;
 }
 
 int32_t vb6_Kill(BSTR pathname) {

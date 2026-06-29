@@ -155,6 +155,34 @@ ExprPtr Parser::parseNullDenotation() {
             return std::make_unique<DictionaryAccessExpr>(loc, nullptr, key.text);
         }
 
+                // --- Input$() 函数 (P15.4) ---
+        case TokenKind::Input: {
+            // Input 后跟 '(' -> Input$ function; otherwise not an expression
+            auto loc = currentLoc();
+            advance(); // consume 'Input'
+            // skip optional $ suffix
+            if (cur_.kind == TokenKind::Dollar) advance();
+            // must be followed by '('
+            if (cur_.kind == TokenKind::LeftParen) {
+                advance(); // consume '('
+                auto call = std::make_unique<IndexOrCallExpr>(loc,
+                    std::make_unique<IdentifierExpr>(loc, "Input$"));
+                // parse argument list
+                if (cur_.kind != TokenKind::RightParen) {
+                    do {
+                        auto arg = parseExpression();
+                        call->positional.push_back(std::move(arg));
+                    } while (match(TokenKind::Comma));
+                }
+                expect(TokenKind::RightParen, DiagnosticID::ParseExpectedToken, "expected ')'");
+                return call;
+            }
+            diag_.error(DiagnosticID::ParseExpectedExpression, loc,
+                "expected '(' after Input$ function");
+            return nullptr;
+        }
+
+
         default:
             // 软关键字在表达式位置 → 解析为标识符
             if (isSoftKeyword(cur_.kind)) {

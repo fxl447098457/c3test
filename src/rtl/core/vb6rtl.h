@@ -476,6 +476,7 @@ int32_t vb6_LBoundND(vb6_SafeArrayND* arr, int32_t dimension);
 int32_t vb6_FreeFile(void);
 int32_t vb6_Open(BSTR pathname, int32_t mode, int32_t access, int32_t filenumber, int32_t reclength);
 int32_t vb6_Close(int32_t filenumber);
+int32_t vb6_CloseAll();  // Close all open files
 int32_t vb6_EOF(int32_t filenumber);
 int32_t vb6_LOF(int32_t filenumber);
 int32_t vb6_Loc(int32_t filenumber);
@@ -483,6 +484,7 @@ void vb6_Print(int32_t filenumber, BSTR s);
 void vb6_Write(int32_t filenumber, BSTR s);
 BSTR vb6_LineInput(int32_t filenumber);
 int32_t vb6_Input(int32_t filenumber, BSTR* outVar);
+BSTR vb6_InputString(int32_t filenumber, int32_t count);  // P15.4: Input function
 int32_t vb6_Kill(BSTR pathname);
 int32_t vb6_MkDir(BSTR pathname);
 int32_t vb6_RmDir(BSTR pathname);

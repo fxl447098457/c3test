@@ -1,4 +1,4 @@
-// vb6c3 - 语句解析器
+﻿// vb6c3 - 语句解析器
 // VB6 块语句 + 单行语句
 
 #include "parser/parser.hpp"
@@ -891,11 +891,25 @@ StmtPtr Parser::parseLabelOrAssignmentOrCall() {
         return std::make_unique<AssignmentStmt>(loc, std::move(expr), std::move(value));
     }
 
+    // P15.6: 检测 Debug.Print/Debug.Assert (后续的-应为一元负号而非中缀减法)
+    auto isDebugPrint = false;
+    if (expr->kind == ASTNodeKind::MemberAccessExpr) {
+        auto& ma = static_cast<MemberAccessExpr&>(*expr);
+        if (ma.object->kind == ASTNodeKind::IdentifierExpr) {
+            auto& obj = static_cast<IdentifierExpr&>(*ma.object);
+            std::string objL = toLower(obj.name);
+            std::string memL = toLower(ma.memberName);
+            if (objL == "debug" && (memL == "print" || memL == "assert")) {
+                isDebugPrint = true;
+            }
+        }
+    }
+
     // VB6 无括号调用: Sub arg1, arg2 / Debug.Print "text"
     // 如果表达式后还有同一行的 token (非 NewLine/Colon/EndOfFile),
     // 且不是中缀运算符, 则视为无括号调用的参数列表
     if (cur_.kind != TokenKind::NewLine && cur_.kind != TokenKind::Colon &&
-        cur_.kind != TokenKind::EndOfFile && !isInfixOperator(cur_.kind)) {
+        cur_.kind != TokenKind::EndOfFile && (!isInfixOperator(cur_.kind) || isDebugPrint)) {
         // 将表达式包装为 IndexOrCallExpr, 追加参数
         auto call = std::make_unique<IndexOrCallExpr>(loc, std::move(expr));
 

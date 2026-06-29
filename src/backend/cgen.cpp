@@ -1091,6 +1091,7 @@ void CCodeGen::visit(IdentifierExpr& node) {
         {"len",      "vb6_Len"},
         {"msgbox",   "vb6_MsgBox"},
         {"inputbox", "vb6_InputBox"},
+        {"input$",  "vb6_InputString"},  // P15.4: Input function
         {"format",   "vb6_Format"},
         {"cstr",     "vb6_CStr"},
         {"cint",     "vb6_CInt"},
@@ -4881,8 +4882,20 @@ void CCodeGen::visit(TypeDecl& node) {
     for (auto& member : node.members) {
         std::string memType = mapTypeRef(member->type.get());
         std::string memName = cIdent(member->name);
-        // TODO: 固定大小数组成员
-        h_.emitLine(memType + " " + memName + ";");
+        // P15.2: 固定大小数组成员 (如 Buf(0 To 255) As Byte)
+        if (member->arraySize) {
+            // 评估数组上界表达式
+            if (member->arraySize->kind == ASTNodeKind::LiteralExpr) {
+                auto& lit = static_cast<LiteralExpr&>(*member->arraySize);
+                int upperBound = (lit.literalKind == LiteralKind::Long) ? (int)lit.longValue : lit.intValue;
+                h_.emitLine(memType + " " + memName + "[" + std::to_string(upperBound + 1) + "];");
+            } else {
+                emitExpr(*member->arraySize);
+                h_.emitLine(memType + " " + memName + "[(" + lastExpr_ + ") + 1];");
+            }
+        } else {
+            h_.emitLine(memType + " " + memName + ";");
+        }
     }
 
     h_.dedent();
@@ -5589,9 +5602,20 @@ void CCodeGen::visit(RaiseEventStmt& node) {
             for (size_t i = 0; i < node.args.size(); i++) {
                 c_.emitLine("VariantInit(&__evt_args[" + std::to_string(i) + "]);");
                 emitExpr(*node.args[i]);
-                // TODO: 根据参数类型设置VARIANT (目前统一用BSTR)
-                c_.emitLine("__evt_args[" + std::to_string(i) + "].vt = VT_BSTR;");
-                c_.emitLine("__evt_args[" + std::to_string(i) + "].bstrVal = vb6_BSTR_FromStr(" + lastExpr_ + ");");
+                // P15.1: 根据参数类型设置VARIANT
+                Vb6Type argType = inferExprType(*node.args[i]);
+                std::string idx = std::to_string(i);
+                if (argType == Vb6Type::Long || argType == Vb6Type::Integer || argType == Vb6Type::Boolean) {
+                    c_.emitLine("__evt_args[" + idx + "].vt = VT_I4; __evt_args[" + idx + "].lVal = (int32_t)(" + lastExpr_ + ");");
+                } else if (argType == Vb6Type::Single) {
+                    c_.emitLine("__evt_args[" + idx + "].vt = VT_R4; __evt_args[" + idx + "].lVal = *(int32_t*)&(float){" + lastExpr_ + "};");
+                } else if (argType == Vb6Type::Double) {
+                    c_.emitLine("__evt_args[" + idx + "].vt = VT_R8; __evt_args[" + idx + "].dblVal = (double)(" + lastExpr_ + ");");
+                } else if (argType == Vb6Type::Object) {
+                    c_.emitLine("__evt_args[" + idx + "].vt = VT_DISPATCH; __evt_args[" + idx + "].pdispVal = (IDispatch*)(" + lastExpr_ + ");");
+                } else {
+                    c_.emitLine("__evt_args[" + idx + "].vt = VT_BSTR; __evt_args[" + idx + "].bstrVal = vb6_BSTR_FromStr(" + lastExpr_ + ");");
+                }
             }
             c_.emitLine("vb6_FireEvent((vb6_ComObject*)me->__comObj, " + std::to_string(evtDispid) + ", __evt_args, " + std::to_string(node.args.size()) + ");");
             for (size_t i = 0; i < node.args.size(); i++) {
