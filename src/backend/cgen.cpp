@@ -68,6 +68,7 @@ bool CCodeGen::generate(Module& module, const std::string& baseName,
     moduleName_ = baseName;  // 模块名 = 输出基名（如 "MathUtils"）
     isMultiModule_ = !externalModules.empty();  // 有外部依赖 = 多模块项目
     isClassModule_ = module.isClassModule;
+    isFormModule_ = module.isFormModule;
     isDll_ = isDll;  // P6.6
     dllProgId_ = dllProgId;  // P6.6
     emittedSymbols_.clear();
@@ -1075,6 +1076,12 @@ void CCodeGen::visit(IdentifierExpr& node) {
                   || foundSym->kind == SymbolKind::Constant)) {
         // P11.7: 如果是内置Object类型变量(=窗体控件), 优先走默认属性读取
         if (foundSym->isBuiltin && foundSym->type == Vb6Type::Object) {
+            // P17.1: With块内抑制默认属性解析, 返回HWND引用
+            if (suppressDefaultProp_) {
+                lastExpr_ = "vb6_hwnd_" + cIdent(node.name);
+                return;
+            }
+
             auto itCtrl = knownFormControls_.find(lower);
             if (itCtrl != knownFormControls_.end()) {
                 const char* defaultProp = getDefaultPropertyName(itCtrl->second);
@@ -1113,6 +1120,7 @@ void CCodeGen::visit(IdentifierExpr& node) {
     static const std::unordered_map<std::string, std::string> builtinFuncs = {
         {"len",      "vb6_Len"},
         {"msgbox",   "vb6_MsgBox"},
+        {"unload",   "vb6_UnloadForm"},
         {"inputbox", "vb6_InputBox"},
         {"input$",  "vb6_InputString"},  // P15.4: Input function
         {"format",   "vb6_Format"},
@@ -2706,17 +2714,88 @@ void CCodeGen::visit(MeExpr& node) {
     // 类模块中: me 是方法参数
     if (isClassModule_) {
         lastExpr_ = "me";
+    } else if (isFormModule_ && !knownFormName_.empty()) {
+        // 窗体模块: Me => vb6_hwnd_<FormName> (保持原始大小写)
+        auto it = knownFormControlOriginalNames_.find(knownFormName_);
+        if (it != knownFormControlOriginalNames_.end()) {
+            lastExpr_ = "vb6_hwnd_" + cIdent(it->second);
+        } else {
+            lastExpr_ = "vb6_hwnd_" + moduleName_;
+        }
     } else {
         lastExpr_ = "vb6_Me";
     }
 }
 
 void CCodeGen::visit(WithMemberExpr& node) {
-    // With块内的 .Member
-    if (!withObjectVars_.empty()) {
-        lastExpr_ = withObjectVars_.back() + "." + cIdent(node.memberName);
-    } else {
+    // P17.1: With块内 .Member — 根据对象类型分发
+    if (withObjectVars_.empty() || withObjectInfoStack_.empty()) {
         lastExpr_ = "/* .Member outside With */";
+        return;
+    }
+
+    const auto& info = withObjectInfoStack_.back();
+    const std::string& tempVar = withObjectVars_.back();
+    std::string memLower = node.memberName;
+    std::transform(memLower.begin(), memLower.end(), memLower.begin(), ::tolower);
+
+    switch (info.kind) {
+    case WithObjKind::FormControl: {
+        // .Property → vb6_GetControlXxx(tempVar)
+        std::string readFn = getControlPropReadFn(info.ctrlType, node.memberName);
+        if (!readFn.empty()) {
+            lastExpr_ = readFn + "(" + tempVar + ")  /* With ctrl .Property */";
+            return;
+        }
+        diag_.warn(DiagnosticID::CodeGenUnsupportedFeature, SourceLocation{},
+            std::string("P17.1: Unknown control property '.'") + node.memberName + "' in With block");
+        lastExpr_ = tempVar + "." + cIdent(node.memberName);
+        return;
+    }
+    case WithObjKind::WithEventsCtrl: {
+        // .Property → vb6_GetControlXxx(ctrlOrigName)
+        std::string readFn = getControlPropReadFn(info.ctrlType, node.memberName);
+        if (!readFn.empty()) {
+            lastExpr_ = readFn + "(" + info.ctrlOrigName + ")  /* With WE ctrl .Property */";
+            return;
+        }
+        lastExpr_ = info.ctrlOrigName + "." + cIdent(node.memberName);
+        return;
+    }
+    case WithObjKind::COMObject: {
+        // .Property → 设置COM标记，让下游(IndexOrCallExpr/AssignmentStmt)处理
+        comObjExpr_ = tempVar;
+        comMemberName_ = node.memberName;
+        isComMarker_ = true;
+        isEarlyBoundCom_ = false;
+        earlyBoundSym_ = nullptr;
+        lastExpr_ = tempVar + "  /* With COM ." + node.memberName + " */";
+        return;
+    }
+    case WithObjKind::ClassInstance: {
+        // .Method/Property → 类方法调用 vb6_Method(tempVar)
+        Symbol* memSym = symTab_.lookupModule(node.memberName);
+        if (memSym) {
+            std::string memberCName = node.memberName;
+            if (memSym->kind == SymbolKind::PropertyGet)
+                memberCName = "prop_get_" + node.memberName;
+            else if (memSym->kind == SymbolKind::PropertyLet)
+                memberCName = "prop_let_" + node.memberName;
+            else if (memSym->kind == SymbolKind::PropertySet)
+                memberCName = "prop_set_" + node.memberName;
+            std::string funcName = cProcName(memberCName, memSym->access,
+                memSym->isExternal ? memSym->sourceModule : "");
+            lastExpr_ = funcName + "(" + tempVar + ")  /* With class .Member */";
+            return;
+        }
+        lastExpr_ = tempVar + "." + cIdent(node.memberName);
+        return;
+    }
+    case WithObjKind::Unknown:
+    default:
+        // UDT/fallback: struct.field访问
+        lastExpr_ = tempVar + "." + cIdent(node.memberName);
+        return;
     }
 }
 
@@ -3024,6 +3103,55 @@ void CCodeGen::visit(AssignmentStmt& node) {
                     return;
                 }
             }
+        }
+    }
+    // P17.1: WithMemberExpr作为赋值目标 (With块内 .Property = value)
+    if (node.target->kind == ASTNodeKind::WithMemberExpr && !withObjectVars_.empty() && !withObjectInfoStack_.empty()) {
+        auto& wmExpr = static_cast<WithMemberExpr&>(*node.target);
+        const auto& info = withObjectInfoStack_.back();
+        const std::string& tempVar = withObjectVars_.back();
+
+        switch (info.kind) {
+        case WithObjKind::FormControl: {
+            std::string writeFn = getControlPropWriteFn(info.ctrlType, wmExpr.memberName);
+            if (!writeFn.empty()) {
+                emitExpr(*node.value);
+                c_.emitLine(writeFn + "(" + tempVar + ", " + lastExpr_ + ");");
+                return;
+            }
+            break;
+        }
+        case WithObjKind::WithEventsCtrl: {
+            std::string writeFn = getControlPropWriteFn(info.ctrlType, wmExpr.memberName);
+            if (!writeFn.empty()) {
+                emitExpr(*node.value);
+                c_.emitLine(writeFn + "(" + info.ctrlOrigName + ", " + lastExpr_ + ");");
+                return;
+            }
+            break;
+        }
+        case WithObjKind::COMObject: {
+            emitExpr(*node.value);
+            std::string valExpr = std::move(lastExpr_);
+            std::string packFn = comPackExpr(*node.value);
+            c_.emitLine("vb6_ComSetProp(" + tempVar + ", L\"" + wmExpr.memberName + "\", " +
+                         packFn + "(" + valExpr + "));  /* With COM SetProp */");
+            return;
+        }
+        case WithObjKind::ClassInstance: {
+            Symbol* memSym = symTab_.lookupModule(wmExpr.memberName);
+            if (memSym && memSym->kind == SymbolKind::PropertyLet) {
+                std::string propFn = "prop_let_" + wmExpr.memberName;
+                std::string funcName = cProcName(propFn, memSym->access,
+                    memSym->isExternal ? memSym->sourceModule : "");
+                emitExpr(*node.value);
+                c_.emitLine(funcName + "(" + tempVar + ", " + lastExpr_ + ");");
+                return;
+            }
+            break;
+        }
+        default:
+            break;
         }
     }
     emitExpr(*node.target);
@@ -3465,6 +3593,29 @@ void CCodeGen::visit(LetStmt& node) {
         }
     }
 
+    // P17.1: WithMemberExpr作为Let目标
+    if (node.target->kind == ASTNodeKind::WithMemberExpr && !withObjectVars_.empty() && !withObjectInfoStack_.empty()) {
+        auto& wmExpr = static_cast<WithMemberExpr&>(*node.target);
+        const auto& info = withObjectInfoStack_.back();
+        const std::string& tempVar = withObjectVars_.back();
+
+        // FormControl + WithEventsCtrl Only (COM/Class handled via AssignmentStmt)
+        if (info.kind == WithObjKind::FormControl) {
+            std::string writeFn = getControlPropWriteFn(info.ctrlType, wmExpr.memberName);
+            if (!writeFn.empty()) {
+                emitExpr(*node.value);
+                c_.emitLine(writeFn + "(" + tempVar + ", " + lastExpr_ + ");");
+                return;
+            }
+        } else if (info.kind == WithObjKind::WithEventsCtrl) {
+            std::string writeFn = getControlPropWriteFn(info.ctrlType, wmExpr.memberName);
+            if (!writeFn.empty()) {
+                emitExpr(*node.value);
+                c_.emitLine(writeFn + "(" + info.ctrlOrigName + ", " + lastExpr_ + ");");
+                return;
+            }
+        }
+    }
     emitExpr(*node.target);
     std::string target = std::move(lastExpr_);
     emitExpr(*node.value);
@@ -3847,16 +3998,81 @@ void CCodeGen::visit(CaseClause& node) {
 }
 
 void CCodeGen::visit(WithStmt& node) {
-    emitExpr(*node.object);
+    // P17.1: With块 — 根据对象类型创建适当类型的临时变量
+    WithObjInfo withInfo;
     std::string tempVar = "_vb6_with_" + std::to_string(tempCounter_++);
+    std::string tempType = "void*";
+
+    // 检测With对象类型: 遍历表达式判断
+    if (node.object) {
+        std::string objNameLower;
+        if (node.object->kind == ASTNodeKind::IdentifierExpr) {
+            auto& idExpr = static_cast<IdentifierExpr&>(*node.object);
+            objNameLower = idExpr.name;
+            std::transform(objNameLower.begin(), objNameLower.end(), objNameLower.begin(), ::tolower);
+        }
+
+        if (!objNameLower.empty()) {
+            // P16: WithEvents控件 (优先于普通控件)
+            auto itWE = knownWithEventsCtrlVars_.find(objNameLower);
+            if (itWE != knownWithEventsCtrlVars_.end()) {
+                withInfo.kind = WithObjKind::WithEventsCtrl;
+                withInfo.ctrlType = itWE->second;
+                auto itOrig = knownWithEventsCtrlOrigNames_.find(objNameLower);
+                withInfo.ctrlOrigName = (itOrig != knownWithEventsCtrlOrigNames_.end())
+                    ? "vb6_hwnd_" + cIdent(itOrig->second) : "vb6_hwnd_" + cIdent(objNameLower);
+                tempType = "HWND";
+            } else {
+                // 窗体控件
+                auto itCtrl = knownFormControls_.find(objNameLower);
+                if (itCtrl != knownFormControls_.end()) {
+                    withInfo.kind = WithObjKind::FormControl;
+                    withInfo.ctrlType = itCtrl->second;
+                    withInfo.ctrlOrigName = "vb6_hwnd_" + cIdent(objNameLower);
+                    tempType = "HWND";
+                }
+            }
+
+            // COM对象变量检测
+            if (withInfo.kind == WithObjKind::Unknown) {
+                if (knownObjectVars_.count(objNameLower)) {
+                    withInfo.kind = WithObjKind::COMObject;
+                }
+            }
+
+            // 类实例变量检测
+            if (withInfo.kind == WithObjKind::Unknown) {
+                if (knownClassVars_.count(objNameLower)) {
+                    withInfo.kind = WithObjKind::ClassInstance;
+                }
+            }
+        }
+    }
+
+    withObjectInfoStack_.push_back(withInfo);
+
+    // P17.1: 抑制With对象表达式的默认属性解析
+    bool prevSuppress = suppressDefaultProp_;
+    if (withInfo.kind == WithObjKind::FormControl || withInfo.kind == WithObjKind::WithEventsCtrl) {
+        suppressDefaultProp_ = true;
+    }
+
+    emitExpr(*node.object);
+
+    suppressDefaultProp_ = prevSuppress;
+
+    c_.emitLine(tempType + " " + tempVar + " = (" + tempType + ")" + lastExpr_ + "  /* With object ref */;");
+
+    withObjectVars_.push_back(tempVar);
+
     c_.emitLine("{");
     c_.indent();
-    c_.emitLine("void* " + tempVar + " = " + lastExpr_ + ";");
-    withObjectVars_.push_back(tempVar);
     emitStmtList(node.body);
-    withObjectVars_.pop_back();
     c_.dedent();
     c_.emitLine("}");
+
+    withObjectVars_.pop_back();
+    withObjectInfoStack_.pop_back();
 }
 
 void CCodeGen::visit(GoToStmt& node) {
@@ -3995,7 +4211,7 @@ void CCodeGen::visit(CallStmt& node) {
                                 "vb6_Trim", "vb6_LTrim", "vb6_RTrim", "vb6_Chr",
                                 "vb6_Str", "vb6_CStr", "vb6_Format", "vb6_Hex", "vb6_Oct",
                                 "vb6_Replace", "vb6_Space", "vb6_String", "vb6_StrReverse",
-                                "vb6_BSTR_Concat", "vb6_BSTR_Empty", "vb6_App_Path", "vb6_App_EXEName"
+                                "vb6_BSTR_Concat", "vb6_BSTR_Empty", "vb6_App_Path", "vb6_App_EXEName", "vb6_GetControlText", "vb6_GetControlCaption"
                             };
                             auto isBstrExpr = [&](const std::string& expr) -> bool {
                                 for (auto& prefix : bstrFuncs) {
@@ -4251,7 +4467,7 @@ void CCodeGen::visit(PrintStmt& node) {
         "vb6_Trim", "vb6_LTrim", "vb6_RTrim", "vb6_Chr",
         "vb6_Str", "vb6_CStr", "vb6_Format", "vb6_Hex", "vb6_Oct",
         "vb6_Replace", "vb6_Space", "vb6_String", "vb6_StrReverse",
-        "vb6_BSTR_Concat", "vb6_BSTR_Empty", "vb6_App_Path", "vb6_App_EXEName"
+        "vb6_BSTR_Concat", "vb6_BSTR_Empty", "vb6_App_Path", "vb6_App_EXEName", "vb6_GetControlText", "vb6_GetControlCaption"
     };
     auto isBstrExpr = [&](const std::string& expr) -> bool {
         for (auto& prefix : bstrFuncs) {
@@ -4292,7 +4508,7 @@ void CCodeGen::visit(WriteStmt& node) {
         "vb6_Trim", "vb6_LTrim", "vb6_RTrim", "vb6_Chr",
         "vb6_Str", "vb6_CStr", "vb6_Format", "vb6_Hex", "vb6_Oct",
         "vb6_Replace", "vb6_Space", "vb6_String", "vb6_StrReverse",
-        "vb6_BSTR_Concat", "vb6_BSTR_Empty", "vb6_App_Path", "vb6_App_EXEName"
+        "vb6_BSTR_Concat", "vb6_BSTR_Empty", "vb6_App_Path", "vb6_App_EXEName", "vb6_GetControlText", "vb6_GetControlCaption"
     };
     auto isBstrExpr = [&](const std::string& expr) -> bool {
         for (auto& prefix : bstrFuncs) {

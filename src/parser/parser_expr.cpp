@@ -1,4 +1,4 @@
-﻿// vb6c3 - Pratt 表达式解析器
+// vb6c3 - Pratt 表达式解析器
 // 参考: RustASP 45行核心实现, (l_bp, r_bp) 绑定力对设计
 // VB6 14级优先级, 右结合 ^ 运算符
 
@@ -363,6 +363,19 @@ ExprPtr Parser::parsePostfix(ExprPtr expr) {
         switch (cur_.kind) {
             case TokenKind::Dot: {
                 auto loc = currentLoc();
+                // P17.1: In With context, Debug.Print .Member should parse .Member
+                // as WithMemberExpr argument, not chain MemberAccessExpr
+                if (withDepth_ > 0 && expr->kind == ASTNodeKind::MemberAccessExpr) {
+                    auto& ma = static_cast<MemberAccessExpr&>(*expr);
+                    if (ma.object && ma.object->kind == ASTNodeKind::IdentifierExpr) {
+                        auto& obj = static_cast<IdentifierExpr&>(*ma.object);
+                        std::string objL = toLower(obj.name);
+                        std::string memL = toLower(ma.memberName);
+                        if (objL == "debug" && (memL == "print" || memL == "assert")) {
+                            return expr;  // stop postfix, let arg parser handle .Member
+                        }
+                    }
+                }
                 advance(); // consume '.'
                 auto member = expectName("expected member name after '.'");
                 expr = std::make_unique<MemberAccessExpr>(

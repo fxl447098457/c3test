@@ -201,6 +201,22 @@ private:
     // With语句名称栈
     std::vector<std::string> withObjectVars_;
 
+    // P17.1: With对象元信息栈 — 与withObjectVars_平行，记录对象类别
+    enum class WithObjKind {
+        Unknown,        // UDT/未知: 生成 struct.field 访问
+        FormControl,    // 窗体控件HWND: 使用 getControlPropReadFn/WriteFn
+        WithEventsCtrl, // WithEvents控件变量HWND: 使用WE属性路径
+        COMObject,      // COM IDispatch*: 使用 vb6_ComGetProp/ComSetProp
+        ClassInstance   // 类实例指针: 使用类方法调用
+    };
+    struct WithObjInfo {
+        WithObjKind kind = WithObjKind::Unknown;
+        FrmControlType ctrlType = FrmControlType::Unknown;
+        std::string ctrlOrigName;    // 控件原始大小写名称(用于HWND变量名)
+    };
+    std::vector<WithObjInfo> withObjectInfoStack_;
+    bool suppressDefaultProp_ = false;  // P17.1: With对象表达式时抑制默认属性读取
+
     // P14.3.1: Dim As New自动实例化变量集合 (小写key → 类名C标识)
     std::unordered_map<std::string, std::string> knownNewVars_;
 
@@ -276,6 +292,7 @@ private:
 
     // 类模块标志
     bool isClassModule_ = false;
+    bool isFormModule_ = false;
 
     // P6.4: Implements 接口引用变量 (小写变量名 → 接口名)
     // Dim x As IFoo → knownIfaceVars_["x"] = "IFoo"
