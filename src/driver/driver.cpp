@@ -409,6 +409,7 @@ CompileResult Driver::compile(const CompileOptions& options) {
         writeErrorLog(outputDir + "/c3-error.log", "code-generation");
         result.errorCount = diag_->errorCount();
         result.warningCount = diag_->warningCount();
+        session.release();
         return result;
     }
 
@@ -418,6 +419,8 @@ CompileResult Driver::compile(const CompileOptions& options) {
         writeErrorLog(outputDir + "/c3-error.log", "linking");
         result.errorCount = diag_->errorCount();
         result.warningCount = diag_->warningCount();
+        std::cout << "C3: [debug] intermediates kept at: " << intermediatesDir << std::endl;
+        session.release();
         return result;
     }
 

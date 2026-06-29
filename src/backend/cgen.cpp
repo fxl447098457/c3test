@@ -1,4 +1,4 @@
-﻿#include "backend/cgen.hpp"
+#include "backend/cgen.hpp"
 #include <algorithm>
 #include <cctype>
 #include <iostream>
@@ -2094,6 +2094,30 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
             argList += ", -1, 0";
         } else if (args.size() == 5) {
             argList += ", 0";
+        }
+    }
+
+    // P14.1.4: General Optional parameter padding for user-defined functions
+    // calleeParams is empty for builtin RTL functions (registered without params), so they're auto-skipped
+    if (calleeParams.size() > 0 && args.size() < calleeParams.size()) {
+        for (size_t i = args.size(); i < calleeParams.size(); i++) {
+            if (i > 0 || !args.empty()) argList += ", ";
+            const auto& param = calleeParams[i];
+            // Determine the default value (explicit or type-zero)
+            std::string defVal;
+            if (param.hasDefaultValue && !param.defaultValueExpr.empty()) {
+                defVal = param.defaultValueExpr;
+            } else {
+                defVal = defaultValue(param.type);
+            }
+            // ByRef params need pointer, ByVal need value
+            if (param.isByVal) {
+                argList += defVal;
+            } else {
+                // ByRef: pass address of compound literal: &(type){defVal}
+                std::string cType = mapType(param.type);
+                argList += "&(" + cType + "){" + defVal + "}";
+            }
         }
     }
 

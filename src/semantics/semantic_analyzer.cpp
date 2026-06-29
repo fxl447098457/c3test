@@ -1,4 +1,4 @@
-﻿#include "semantics/semantic_analyzer.hpp"
+#include "semantics/semantic_analyzer.hpp"
 #include <algorithm>
 #include <cctype>
 
@@ -475,6 +475,11 @@ void SemanticAnalyzer::visit(SubDecl& node) {
             pi.isByVal = param->isByVal;
             pi.isOptional = param->isOptional;
             pi.isParamArray = param->isParamArray;
+            // P14.1.4: 传播Optional默认值
+            if (param->isOptional) {
+                pi.hasDefaultValue = (param->defaultValue != nullptr);
+                pi.defaultValueExpr = evalOptionalDefault(param->defaultValue.get(), pi.type);
+            }
             sym->params.push_back(std::move(pi));
         }
 
@@ -539,6 +544,11 @@ void SemanticAnalyzer::visit(FunctionDecl& node) {
             pi.isByVal = param->isByVal;
             pi.isOptional = param->isOptional;
             pi.isParamArray = param->isParamArray;
+            // P14.1.4: 传播Optional默认值
+            if (param->isOptional) {
+                pi.hasDefaultValue = (param->defaultValue != nullptr);
+                pi.defaultValueExpr = evalOptionalDefault(param->defaultValue.get(), pi.type);
+            }
             sym->params.push_back(std::move(pi));
         }
 
@@ -604,6 +614,11 @@ void SemanticAnalyzer::visit(PropertyDecl& node) {
             pi.isByVal = param->isByVal;
             pi.isOptional = param->isOptional;
             pi.isParamArray = param->isParamArray;
+            // P14.1.4: 传播Optional默认值
+            if (param->isOptional) {
+                pi.hasDefaultValue = (param->defaultValue != nullptr);
+                pi.defaultValueExpr = evalOptionalDefault(param->defaultValue.get(), pi.type);
+            }
             sym->params.push_back(std::move(pi));
         }
 
@@ -727,6 +742,11 @@ void SemanticAnalyzer::visit(DeclareDecl& node) {
             pi.isByVal = param->isByVal;
             pi.isOptional = param->isOptional;
             pi.isParamArray = param->isParamArray;
+            // P14.1.4: 传播Optional默认值
+            if (param->isOptional) {
+                pi.hasDefaultValue = (param->defaultValue != nullptr);
+                pi.defaultValueExpr = evalOptionalDefault(param->defaultValue.get(), pi.type);
+            }
             sym->params.push_back(std::move(pi));
         }
 
@@ -748,6 +768,11 @@ void SemanticAnalyzer::visit(EventDecl& node) {
             pi.isByVal = param->isByVal;
             pi.isOptional = param->isOptional;
             pi.isParamArray = param->isParamArray;
+            // P14.1.4: 传播Optional默认值
+            if (param->isOptional) {
+                pi.hasDefaultValue = (param->defaultValue != nullptr);
+                pi.defaultValueExpr = evalOptionalDefault(param->defaultValue.get(), pi.type);
+            }
             sym->params.push_back(std::move(pi));
         }
         symTab_.define(std::move(sym));
@@ -1610,6 +1635,49 @@ void SemanticAnalyzer::registerBuiltins() {
     addBuiltinFunc("SendKeys", Vb6Type::Void);
     addBuiltinFunc("AppActivate", Vb6Type::Void);
     addBuiltinFunc("Beep", Vb6Type::Void);
+}
+
+// ============================================================
+// P14.1.4: Optional参数默认值求值
+// ============================================================
+std::string SemanticAnalyzer::evalOptionalDefault(ASTNode* defaultValue, Vb6Type paramType) {
+    // 无显式默认值 -> 返回空字符串, cgen将使用类型零值
+    if (!defaultValue) return "";
+    
+    // 将AST字面量表达式转换为C表达式字符串
+    auto* lit = dynamic_cast<LiteralExpr*>(defaultValue);
+    if (lit) {
+        switch (lit->literalKind) {
+            case LiteralKind::Integer:
+            case LiteralKind::Long:
+                return lit->rawText;  // "10", "-1" 等
+            case LiteralKind::Single:
+            case LiteralKind::Double:
+                return lit->rawText;  // "3.14" 等
+            case LiteralKind::String:
+                // VB6 "hello" -> C vb6_BSTR_FromStr(L"hello")
+                {
+                    std::string sInner = lit->rawText;
+                    if (sInner.size() >= 2 && sInner.front() == '"' && sInner.back() == '"')
+                        sInner = sInner.substr(1, sInner.size() - 2);
+                    return "vb6_BSTR_FromStr(L\"" + sInner + "\")";
+                }
+            case LiteralKind::Boolean:
+                // VB6 True = -1, False = 0
+                return (lit->rawText == "True" || lit->rawText == "-1") ? "-1" : "0";
+            case LiteralKind::Nothing:
+                return "NULL";
+            case LiteralKind::Empty:
+                return "vb6_VariantEmpty()";
+            case LiteralKind::Null:
+                return "vb6_VariantNull()";
+            default:
+                break;
+        }
+    }
+    
+    // 非字面量表达式(如常量引用、运算表达式) -> 暂不支持, 返回空让cgen用类型零值
+    return "";
 }
 
 } // namespace vb6c3

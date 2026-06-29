@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 // VB6语义分析器 - 符号表构建 + 类型检查
 // 两遍扫描: Pass1收集声明, Pass2分析过程体
 
@@ -164,6 +164,9 @@ private:
 
     // 生成唯一内部名称
     static std::string makeInternalName(const std::string& prefix, const std::string& name);
+
+    // P14.1.4: 将Optional参数的默认值AST表达式转换为C表达式字符串
+    std::string evalOptionalDefault(ASTNode* defaultValue, Vb6Type paramType);
 };
 
 } // namespace vb6c3

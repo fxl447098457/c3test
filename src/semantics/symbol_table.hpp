@@ -58,6 +58,9 @@ struct ParameterInfo {
     bool isByVal = false;
     bool isOptional = false;
     bool isParamArray = false;
+    // P14.1.4: Optional参数默认值
+    bool hasDefaultValue = false;       // 有显式默认值(Optional = expr)
+    std::string defaultValueExpr;       // C表达式字符串(如"10", "vb6_BSTR_FromStr(L\"hello\")", "-1"等)
 };
 
 struct Symbol {
