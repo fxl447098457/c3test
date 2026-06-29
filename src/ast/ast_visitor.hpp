@@ -47,6 +47,8 @@ public:
     virtual void visit(GoSubStmt& node) {}
     virtual void visit(ReturnStmt& node) {}
     virtual void visit(OnErrorStmt& node) {}
+    virtual void visit(ResumeStmt& node) {}
+    virtual void visit(ErrorStmt& node) {}
     virtual void visit(OnGoToStmt& node) {}
     virtual void visit(OnGoSubStmt& node) {}
     virtual void visit(ExitStmt& node) {}

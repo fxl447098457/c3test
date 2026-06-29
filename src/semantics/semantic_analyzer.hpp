@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 // VB6语义分析器 - 符号表构建 + 类型检查
 // 两遍扫描: Pass1收集声明, Pass2分析过程体
 
@@ -67,6 +67,8 @@ public:
     void visit(GoSubStmt& node) override;
     void visit(ReturnStmt& node) override;
     void visit(OnErrorStmt& node) override;
+    void visit(ResumeStmt& node) override;
+    void visit(ErrorStmt& node) override;
     void visit(ExitStmt& node) override;
     void visit(CallStmt& node) override;
     void visit(ReDimStmt& node) override;

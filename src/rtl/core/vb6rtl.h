@@ -469,6 +469,12 @@ extern void* vb6_err_handler_label;   // 错误跳转标签 (MVP, 暂不用)
 extern jmp_buf* vb6_error_jmp_ptr;    // 指向当前函数的局部jmp_buf (P12.3)
 extern int32_t vb6_error_jmp_set;     // setjmp 是否已设置
 
+// P14.1.2: Resume恢复点跟踪
+extern int32_t vb6_err_resume_point;    // 出错语句resume点索引
+extern int32_t vb6_err_resume_next_point;   // 出错下一句resume点索引
+extern int32_t vb6_err_dispatch;        // dispatch switch变量
+extern int32_t vb6_err_in_handler;      // 当前在On Error GoTo处理器中
+
 // P12.3: On Error嵌套 — 保存/恢复调用者的错误处理状态
 #define VB6_ERR_STACK_SIZE 8
 void vb6_SaveErrState(void);      // 保存当前错误状态到栈 (函数入口调用)

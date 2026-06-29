@@ -136,6 +136,8 @@ private:
     // 单行语句
     StmtPtr parseOnStmt();
     std::unique_ptr<OnErrorStmt> parseOnErrorStmt();
+    std::unique_ptr<ResumeStmt> parseResumeStmt();
+    std::unique_ptr<ErrorStmt> parseErrorStmt();
     std::unique_ptr<OnGoToStmt> parseOnGoToStmt();
     std::unique_ptr<OnGoSubStmt> parseOnGoSubStmt();
     std::unique_ptr<ExitStmt> parseExitStmt();

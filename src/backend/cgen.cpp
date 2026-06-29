@@ -1,4 +1,4 @@
-#include "backend/cgen.hpp"
+﻿#include "backend/cgen.hpp"
 #include <algorithm>
 #include <cctype>
 #include <iostream>
@@ -2226,9 +2226,21 @@ std::string CCodeGen::mapBinaryOp(BinaryOp op) const {
 // 语句 visit 方法
 // ============================================================
 
-void CCodeGen::emitStmtList(StmtList& stmts) {
+void CCodeGen::emitStmtList(StmtList& stmts, bool emitResumePoints) {
     for (auto& stmt : stmts) {
         if (!stmt) continue;
+
+        // P14.1.2: 在受保护区块中为每条语句生成resume点
+        if (emitResumePoints && inProtectedBlock_ &&
+            stmt->kind != ASTNodeKind::OnErrorStmt &&
+            stmt->kind != ASTNodeKind::LabelStmt) {
+            int pt = resumePointCounter_++;
+            c_.emitLine("vb6_err_resume_point = " + std::to_string(pt) + ";");
+            c_.emitLine("vb6_err_resume_next_point = " + std::to_string(pt + 1) + ";");
+            c_.emitLine("vb6_resume_" + std::to_string(pt) + ":;");
+            dispatchPoints_.push_back(pt);
+        }
+
         switch (stmt->kind) {
             case ASTNodeKind::AssignmentStmt:  visit(static_cast<AssignmentStmt&>(*stmt)); break;
             case ASTNodeKind::SetStmt:         visit(static_cast<SetStmt&>(*stmt)); break;
@@ -2243,6 +2255,8 @@ void CCodeGen::emitStmtList(StmtList& stmts) {
             case ASTNodeKind::GoToStmt:        visit(static_cast<GoToStmt&>(*stmt)); break;
             case ASTNodeKind::GoSubStmt:       visit(static_cast<GoSubStmt&>(*stmt)); break;
             case ASTNodeKind::OnErrorStmt:     visit(static_cast<OnErrorStmt&>(*stmt)); break;
+    case ASTNodeKind::ResumeStmt:      visit(static_cast<ResumeStmt&>(*stmt)); break;
+    case ASTNodeKind::ErrorStmt:       visit(static_cast<ErrorStmt&>(*stmt)); break;
             case ASTNodeKind::ExitStmt:        visit(static_cast<ExitStmt&>(*stmt)); break;
             case ASTNodeKind::CallStmt:        visit(static_cast<CallStmt&>(*stmt)); break;
             case ASTNodeKind::ReDimStmt:       visit(static_cast<ReDimStmt&>(*stmt)); break;
@@ -3197,12 +3211,22 @@ void CCodeGen::visit(OnErrorStmt& node) {
             //   vb6_err_jmp_active = 1;
             c_.emitLine("if (setjmp(vb6_local_err_jmp) != 0) {");
             c_.indent();
+            if (hasResume_) {
+                c_.emitLine("vb6_err_in_handler = 0;");
+            }
             c_.emitLine("goto vb6_label_" + cIdent(node.labelName) + ";");
             c_.dedent();
             c_.emitLine("}");
             c_.emitLine("vb6_error_jmp_ptr = &vb6_local_err_jmp;");
             c_.emitLine("vb6_err_jmp_active = 1;");
             c_.emitLine("vb6_error_jmp_set = 1;");
+            c_.emitLine("vb6_err_resume_next = 0;");  // P14.1.2: 清除Resume Next模式
+            // P14.1.2: 标记进入受保护区块
+            if (hasResume_) {
+                inProtectedBlock_ = true;
+                currentErrorHandlerLabel_ = node.labelName;
+                // resumePointCounter_不重置: 避免标签重定义
+            }
             // 需要setjmp头文件
             needSetjmp_ = true;
             break;
@@ -3221,6 +3245,34 @@ void CCodeGen::visit(OnErrorStmt& node) {
     }
 }
 
+
+
+// P14.1.2: Resume语句 -- 在错误处理器中恢复执行
+void CCodeGen::visit(ResumeStmt& node) {
+    switch (node.resumeKind) {
+        case ResumeKind::ResumeHere:
+            c_.emitLine("vb6_err_dispatch = vb6_err_resume_point;");
+            c_.emitLine("vb6_ErrClear();");
+            c_.emitLine("goto vb6_err_dispatch_switch;");
+            break;
+        case ResumeKind::ResumeNext:
+            c_.emitLine("vb6_err_dispatch = vb6_err_resume_next_point;");
+            c_.emitLine("vb6_ErrClear();");
+            c_.emitLine("goto vb6_err_dispatch_switch;");
+            break;
+        case ResumeKind::ResumeLabel:
+            c_.emitLine("vb6_ErrClear();");
+            c_.emitLine("goto vb6_label_" + cIdent(node.labelName) + ";");
+            break;
+    }
+}
+
+// P14.1.3: Error语句 -- 触发运行时错误
+void CCodeGen::visit(ErrorStmt& node) {
+    emitExpr(*node.errorNumber);
+    std::string errNum = std::move(lastExpr_);
+    c_.emitLine("vb6_RaiseError(" + errNum + ", NULL);");
+}
 void CCodeGen::visit(ExitStmt& node) {
     switch (node.exitKind) {
         case ExitKind::Do:
@@ -3718,6 +3770,11 @@ void CCodeGen::visit(FileCopyStmt& node) {
 
 void CCodeGen::visit(LabelStmt& node) {
     c_.emitLine("vb6_label_" + cIdent(node.labelName) + ":;");
+    // P14.1.2: 如果这是错误处理器标签，结束受保护区块
+    if (inProtectedBlock_ && !currentErrorHandlerLabel_.empty() &&
+        Symbol::toLower(node.labelName) == Symbol::toLower(currentErrorHandlerLabel_)) {
+        inProtectedBlock_ = false;
+    }
 }
 
 void CCodeGen::visit(GoSubStmt& node) {
@@ -3964,23 +4021,52 @@ void CCodeGen::visit(SubDecl& node) {
 
     // P12.3: 检测On Error并声明局部错误处理
     hasOnError_ = hasOnErrorInStmts(node.body);
+    // P14.1.2: 检测Resume/Resume Next
+    hasResume_ = hasResumeInStmts(node.body);
+    inProtectedBlock_ = false;
+    resumePointCounter_ = 0;
+    dispatchPoints_.clear();
+    currentErrorHandlerLabel_.clear();
     if (hasOnError_) {
         c_.emitLine("jmp_buf vb6_local_err_jmp;");
+        if (hasResume_) {
+            c_.emitLine("int32_t vb6_err_resume_point = 0;");
+            c_.emitLine("int32_t vb6_err_resume_next_point = 0;");
+        }
         c_.emitLine("vb6_SaveErrState();");
     }
 
-    // 生成过程体
-    emitStmtList(node.body);
+    // 生成过程体 (P14.1.2: 传入hasResume_以启用resume点生成)
+    emitStmtList(node.body, hasResume_);
 
         // P12.3: 恢复调用者的错误处理状态
     if (hasOnError_) {
         c_.emitLine("vb6_RestoreErrState();");
     }
 
+    // 正常退出守卫 - 防止落入dispatch switch
+    c_.emitLine("return;");
+
+    // P14.1.2: Resume dispatch switch - 仅通过goto可达
+    if (hasResume_ && !dispatchPoints_.empty()) {
+        c_.emitLine("vb6_err_dispatch_switch:;");
+        c_.emitLine("switch(vb6_err_dispatch) {");
+        c_.indent();
+        for (int pt : dispatchPoints_) {
+            c_.emitLine("case " + std::to_string(pt) + ": goto vb6_resume_" + std::to_string(pt) + ";");
+        }
+        c_.dedent();
+        c_.emitLine("}");
+    }
+
     currentProc_ = nullptr;
     inStaticProc_ = false;
     hasGoSub_ = false;
     hasOnError_ = false;
+    hasResume_ = false;
+    inProtectedBlock_ = false;
+    dispatchPoints_.clear();
+    currentErrorHandlerLabel_.clear();
     c_.dedent();
     c_.emitLine("}");
     c_.emitBlank();
@@ -4039,13 +4125,24 @@ void CCodeGen::visit(FunctionDecl& node) {
 
     // P12.3: 检测On Error并声明局部错误处理
     hasOnError_ = hasOnErrorInStmts(node.body);
+    // P14.1.2: 检测Resume/Resume Next
+    hasResume_ = hasResumeInStmts(node.body);
+    inProtectedBlock_ = false;
+    resumePointCounter_ = 0;
+    dispatchPoints_.clear();
+    currentErrorHandlerLabel_.clear();
     if (hasOnError_) {
         c_.emitLine("jmp_buf vb6_local_err_jmp;");
+        if (hasResume_) {
+            c_.emitLine("int32_t vb6_err_resume_point = 0;");
+            c_.emitLine("int32_t vb6_err_resume_next_point = 0;");
+        }
         c_.emitLine("vb6_SaveErrState();");
     }
 
-    // 生成过程体
-    emitStmtList(node.body);
+
+    // 生成过程体 (P14.1.2: 传入hasResume_以启用resume点生成)
+    emitStmtList(node.body, hasResume_);
 
         // P12.3: 恢复调用者的错误处理状态
     if (hasOnError_) {
@@ -4055,11 +4152,29 @@ void CCodeGen::visit(FunctionDecl& node) {
     // 返回值
     c_.emitLine("return " + currentReturnVar_ + ";");
 
+    // P14.1.2: Resume dispatch switch - 仅通过goto可达 (在return之后)
+    if (hasResume_ && !dispatchPoints_.empty()) {
+        c_.emitLine("vb6_err_dispatch_switch:;");
+        c_.emitLine("switch(vb6_err_dispatch) {");
+        c_.indent();
+        for (int pt : dispatchPoints_) {
+            c_.emitLine("case " + std::to_string(pt) + ": goto vb6_resume_" + std::to_string(pt) + ";");
+        }
+        c_.dedent();
+        c_.emitLine("}");
+    }
+
+    currentProc_ = nullptr;
+
     currentProc_ = nullptr;
     currentReturnVar_ = "";
     inStaticProc_ = false;
     hasGoSub_ = false;
     hasOnError_ = false;
+    hasResume_ = false;
+    inProtectedBlock_ = false;
+    dispatchPoints_.clear();
+    currentErrorHandlerLabel_.clear();
     c_.dedent();
     c_.emitLine("}");
     c_.emitBlank();
@@ -6334,6 +6449,40 @@ bool CCodeGen::hasGoSubInStmts(StmtList& stmts) const {
     return false;
 }
 
+// P14.1.2: 检测语句列表中是否包含Resume/Resume Next语句
+bool CCodeGen::hasResumeInStmts(StmtList& stmts) const {
+    for (auto& stmt : stmts) {
+        if (!stmt) continue;
+        if (stmt->kind == ASTNodeKind::ResumeStmt) {
+            auto& resume = static_cast<ResumeStmt&>(*stmt);
+            if (resume.resumeKind == ResumeKind::ResumeHere || resume.resumeKind == ResumeKind::ResumeNext)
+                return true;
+        }
+        // 递归检查复合语句
+        if (stmt->kind == ASTNodeKind::IfStmt) {
+            auto& ifStmt = static_cast<IfStmt&>(*stmt);
+            if (hasResumeInStmts(ifStmt.thenBody)) return true;
+            if (hasResumeInStmts(ifStmt.elseBody)) return true;
+            for (auto& elif : ifStmt.elseIfs) {
+                if (hasResumeInStmts(elif->body)) return true;
+            }
+        } else if (stmt->kind == ASTNodeKind::ForStmt) {
+            if (hasResumeInStmts(static_cast<ForStmt&>(*stmt).body)) return true;
+        } else if (stmt->kind == ASTNodeKind::DoLoopStmt) {
+            if (hasResumeInStmts(static_cast<DoLoopStmt&>(*stmt).body)) return true;
+        } else if (stmt->kind == ASTNodeKind::WhileWendStmt) {
+            if (hasResumeInStmts(static_cast<WhileWendStmt&>(*stmt).body)) return true;
+        } else if (stmt->kind == ASTNodeKind::SelectCaseStmt) {
+            auto& sel = static_cast<SelectCaseStmt&>(*stmt);
+            for (auto& c : sel.cases) {
+                if (hasResumeInStmts(c->body)) return true;
+            }
+            if (hasResumeInStmts(sel.elseCase)) return true;
+        }
+    }
+    return false;
+}
+
 // ============================================================
 // P12.3: 检测语句列表中是否包含OnErrorStmt
 // ============================================================
@@ -6341,7 +6490,7 @@ bool CCodeGen::hasGoSubInStmts(StmtList& stmts) const {
 bool CCodeGen::hasOnErrorInStmts(StmtList& stmts) const {
     for (auto& stmt : stmts) {
         if (!stmt) continue;
-        if (stmt->kind == ASTNodeKind::OnErrorStmt) return true;
+        if (stmt->kind == ASTNodeKind::OnErrorStmt || stmt->kind == ASTNodeKind::ResumeStmt) return true;
         // 递归检查复合语句
         if (stmt->kind == ASTNodeKind::IfStmt) {
             auto& ifStmt = static_cast<IfStmt&>(*stmt);
@@ -6366,6 +6515,7 @@ bool CCodeGen::hasOnErrorInStmts(StmtList& stmts) const {
     }
     return false;
 }
+
 
 // ============================================================
 // COM辅助 (P6.2)

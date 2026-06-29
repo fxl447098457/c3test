@@ -37,8 +37,18 @@ StmtPtr Parser::parseStatement() {
         // --- On Error / On GoTo ---
         case TokenKind::On:       return parseOnStmt();
 
-        // --- 赋值/调用 ---
-        case TokenKind::Set:      return parseSetStmt();
+        // --- P14.1.2: Resume --
+        case TokenKind::Resume:   return parseResumeStmt();
+
+        // --- P14.1.3: Error --
+        case TokenKind::Error: {
+            if (next_.kind == TokenKind::Equals || next_.kind == TokenKind::LeftParen) {
+                return parseLabelOrAssignmentOrCall();
+            }
+            return parseErrorStmt();
+        }
+
+        // --- 赋值/调用 ---kenKind::Set:      return parseSetStmt();
         case TokenKind::Let:      return parseLetStmt();
         case TokenKind::Call:     return parseCallStmt();
 
@@ -601,6 +611,28 @@ std::unique_ptr<OnErrorStmt> Parser::parseOnErrorStmt() {
 
     auto labelTok = expectName("expected label after 'On Error GoTo'");
     return std::make_unique<OnErrorStmt>(loc, OnErrorKind::GoToLabel, labelTok.text);
+}
+
+// P14.1.2: Resume语句解析
+std::unique_ptr<ResumeStmt> Parser::parseResumeStmt() {
+    auto loc = currentLoc();
+    advance();
+    if (match(TokenKind::Next)) {
+        return std::make_unique<ResumeStmt>(loc, ResumeKind::ResumeNext);
+    }
+    if (cur_.kind == TokenKind::Identifier) {
+        auto labelTok = expectName("expected label after 'Resume'");
+        return std::make_unique<ResumeStmt>(loc, ResumeKind::ResumeLabel, labelTok.text);
+    }
+    return std::make_unique<ResumeStmt>(loc, ResumeKind::ResumeHere);
+}
+
+// P14.1.3: Error语句解析
+std::unique_ptr<ErrorStmt> Parser::parseErrorStmt() {
+    auto loc = currentLoc();
+    advance();
+    auto errNum = parseExpression();
+    return std::make_unique<ErrorStmt>(loc, std::move(errNum));
 }
 
 std::unique_ptr<OnGoToStmt> Parser::parseOnGoToStmt() {

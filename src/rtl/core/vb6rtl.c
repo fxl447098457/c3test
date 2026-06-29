@@ -1383,12 +1383,21 @@ void* vb6_err_handler_label = NULL;
 jmp_buf* vb6_error_jmp_ptr = NULL;
 int32_t vb6_error_jmp_set = 0;
 
+// P14.1.2: Resume恢复点跟踪
+int32_t vb6_err_resume_point = 0;
+int32_t vb6_err_resume_next_point = 0;
+int32_t vb6_err_dispatch = 0;
+int32_t vb6_err_in_handler = 0;
+
 // P12.3: On Error嵌套栈 — 保存/恢复错误处理状态
 typedef struct vb6_ErrFrame {
     jmp_buf* jmp_ptr;
     int32_t jmp_set;
     int32_t jmp_active;
     int32_t resume_next;
+    int32_t resume_point;          // P14.1.2
+    int32_t resume_next_point;     // P14.1.2
+    int32_t in_handler;            // P14.1.2
 } vb6_ErrFrame;
 
 static vb6_ErrFrame vb6_err_stack[VB6_ERR_STACK_SIZE];
@@ -1400,6 +1409,9 @@ void vb6_SaveErrState(void) {
         vb6_err_stack[vb6_err_stack_top].jmp_set = vb6_error_jmp_set;
         vb6_err_stack[vb6_err_stack_top].jmp_active = vb6_err_jmp_active;
         vb6_err_stack[vb6_err_stack_top].resume_next = vb6_err_resume_next;
+        vb6_err_stack[vb6_err_stack_top].resume_point = vb6_err_resume_point;
+        vb6_err_stack[vb6_err_stack_top].resume_next_point = vb6_err_resume_next_point;
+        vb6_err_stack[vb6_err_stack_top].in_handler = vb6_err_in_handler;
         vb6_err_stack_top++;
     }
 }
@@ -1411,6 +1423,9 @@ void vb6_RestoreErrState(void) {
         vb6_error_jmp_set = vb6_err_stack[vb6_err_stack_top].jmp_set;
         vb6_err_jmp_active = vb6_err_stack[vb6_err_stack_top].jmp_active;
         vb6_err_resume_next = vb6_err_stack[vb6_err_stack_top].resume_next;
+        vb6_err_resume_point = vb6_err_stack[vb6_err_stack_top].resume_point;
+        vb6_err_resume_next_point = vb6_err_stack[vb6_err_stack_top].resume_next_point;
+        vb6_err_in_handler = vb6_err_stack[vb6_err_stack_top].in_handler;
     }
 }
 
@@ -1427,6 +1442,7 @@ void vb6_RaiseError(int32_t errNum, BSTR description) {
     }
     if (vb6_err_jmp_active && vb6_error_jmp_set && vb6_error_jmp_ptr) {
         // On Error GoTo label: longjmp 跳到 setjmp 点
+        vb6_err_in_handler = 1;  // P14.1.2: 标记进入错误处理器
         longjmp(*vb6_error_jmp_ptr, errNum);
     }
     // 未设置错误处理: 终止程序

@@ -117,6 +117,8 @@ public:
     void visit(GoToStmt& node) override;
     void visit(GoSubStmt& node) override;
     void visit(OnErrorStmt& node) override;
+    void visit(ResumeStmt& node) override;
+    void visit(ErrorStmt& node) override;
     void visit(ExitStmt& node) override;
     void visit(CallStmt& node) override;
     void visit(ReDimStmt& node) override;
@@ -279,6 +281,13 @@ private:
     // P12.3: On Error嵌套支持标志 (每个过程独立)
     bool hasOnError_ = false;
 
+    // P14.1.2: Resume dispatch switch支持 (每个过程独立)
+    bool hasResume_ = false;            // 当前过程使用了Resume/Resume Next
+    bool inProtectedBlock_ = false;     // 在On Error GoTo和错误处理器标签之间
+    int resumePointCounter_ = 0;        // 当前resume点索引
+    std::vector<int> dispatchPoints_;   // 已生成的resume点索引列表
+    std::string currentErrorHandlerLabel_; // 当前On Error GoTo的错误处理器标签名
+
     // P6.5: WithEvents变量 (小写变量名 → 源类名)
     // Dim WithEvents obj As ClassName → knownWithEventsVars_["obj"] = "ClassName"
     std::unordered_map<std::string, std::string> knownWithEventsVars_;
@@ -340,7 +349,7 @@ private:
     // ---- 语句生成 ----
 
     // 生成语句列表
-    void emitStmtList(StmtList& stmts);
+    void emitStmtList(StmtList& stmts, bool emitResumePoints = false);
 
     // ---- 声明生成 ----
 
@@ -405,6 +414,8 @@ private:
     bool hasGoSubInStmts(StmtList& stmts) const;
     // P12.3: 检测语句列表中是否包含OnErrorStmt
     bool hasOnErrorInStmts(StmtList& stmts) const;
+    // P14.1.2: 检测语句列表中是否包含Resume/Resume Next
+    bool hasResumeInStmts(StmtList& stmts) const;
 
     // ---- COM辅助 (P6.2) ----
     // 推断COM参数的封装函数: 根据表达式类型选择vb6_ComPackBSTR/Int/Double/Object

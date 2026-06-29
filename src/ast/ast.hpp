@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 // vb6c - Visual Basic 6.0 Compiler
 // AST节点体系 - 覆盖VB6全部语法结构
 // P1.1 定义
@@ -140,6 +140,8 @@ enum class ASTNodeKind : uint16_t {
     GoSubStmt,
     ReturnStmt,
     OnErrorStmt,
+    ResumeStmt,
+    ErrorStmt,
     OnGoToStmt,
     OnGoSubStmt,
     ExitStmt,
@@ -229,6 +231,8 @@ class GoToStmt;
 class GoSubStmt;
 class ReturnStmt;
 class OnErrorStmt;
+class ResumeStmt;
+class ErrorStmt;
 class OnGoToStmt;
 class OnGoSubStmt;
 class ExitStmt;
@@ -717,6 +721,33 @@ public:
     OnErrorStmt(SourceLocation loc, OnErrorKind kind, std::string label = "")
         : Stmt(ASTNodeKind::OnErrorStmt, loc),
           errorKind(kind), labelName(std::move(label)) {}
+};
+
+// P14.1.2: Resume语句 — 在错误处理器中恢复执行
+enum class ResumeKind : uint8_t {
+    ResumeHere,     // Resume (回到出错点)
+    ResumeNext,     // Resume Next (跳到出错点下一句)
+    ResumeLabel,    // Resume label (跳到指定标签)
+};
+
+class ResumeStmt : public Stmt {
+public:
+    ResumeKind resumeKind;
+    std::string labelName;  // ResumeLabel时使用
+
+    ResumeStmt(SourceLocation loc, ResumeKind kind, std::string label = "")
+        : Stmt(ASTNodeKind::ResumeStmt, loc),
+          resumeKind(kind), labelName(std::move(label)) {}
+};
+
+// P14.1.3: Error语句 — 触发运行时错误 (等同 Err.Raise)
+class ErrorStmt : public Stmt {
+public:
+    ExprPtr errorNumber;
+
+    ErrorStmt(SourceLocation loc, ExprPtr errNum)
+        : Stmt(ASTNodeKind::ErrorStmt, loc),
+          errorNumber(std::move(errNum)) {}
 };
 
 // On...GoTo: On x GoTo label1, label2, label3

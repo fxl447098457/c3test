@@ -1,4 +1,4 @@
-#include "semantics/semantic_analyzer.hpp"
+﻿#include "semantics/semantic_analyzer.hpp"
 #include <algorithm>
 #include <cctype>
 
@@ -45,6 +45,8 @@ static void dispatchStmt(Stmt& stmt, SemanticAnalyzer& analyzer) {
         case ASTNodeKind::WithStmt:         analyzer.visit(static_cast<WithStmt&>(stmt)); break;
         case ASTNodeKind::GoToStmt:         analyzer.visit(static_cast<GoToStmt&>(stmt)); break;
         case ASTNodeKind::OnErrorStmt:      analyzer.visit(static_cast<OnErrorStmt&>(stmt)); break;
+        case ASTNodeKind::ResumeStmt:       analyzer.visit(static_cast<ResumeStmt&>(stmt)); break;
+        case ASTNodeKind::ErrorStmt:        analyzer.visit(static_cast<ErrorStmt&>(stmt)); break;
         case ASTNodeKind::ExitStmt:         analyzer.visit(static_cast<ExitStmt&>(stmt)); break;
         case ASTNodeKind::CallStmt:         analyzer.visit(static_cast<CallStmt&>(stmt)); break;
         case ASTNodeKind::ReDimStmt:        analyzer.visit(static_cast<ReDimStmt&>(stmt)); break;
@@ -926,6 +928,14 @@ void SemanticAnalyzer::visit(ReturnStmt& node) {
 
 void SemanticAnalyzer::visit(OnErrorStmt& node) {
     // On Error语句无需类型检查
+}
+
+void SemanticAnalyzer::visit(ResumeStmt& node) {
+    // Resume语句无需类型检查
+}
+
+void SemanticAnalyzer::visit(ErrorStmt& node) {
+    if (node.errorNumber) analyzeExpr(*node.errorNumber);
 }
 
 void SemanticAnalyzer::visit(ExitStmt& node) {
