@@ -6262,6 +6262,63 @@ void CCodeGen::emitFormFramework(const FrmFormDesc& frmDesc, Module& module) {
         ctrlId++;
     }
 
+
+    // P14.4.2: Frame容器 - 创建Frame的子控件(以Frame HWND为父窗口)
+    for (const auto& ctrl : frmDesc.formControl.children) {
+        if (ctrl.controlType == FrmControlType::Frame && !ctrl.children.empty()) {
+            int frameLeft = 0, frameTop = 0;
+            auto lIt = ctrl.properties.find("Left");
+            if (lIt != ctrl.properties.end()) frameLeft = (int)lIt->second.intValue;
+            auto tIt = ctrl.properties.find("Top");
+            if (tIt != ctrl.properties.end()) frameTop = (int)tIt->second.intValue;
+            std::string frameHwnd = "vb6_hwnd_" + cIdent(ctrl.controlName);
+            int childCtrlId = 200;  // Frame子控件ID起始值(避免与顶层冲突)
+            for (const auto& child : ctrl.children) {
+                const char* childClass = FrmParser::controlTypeToWin32Class(child.controlType);
+                if (!childClass) continue;
+                int cLeft = 0, cTop = 0, cWidth = 2000, cHeight = 300;
+                auto clIt = child.properties.find("Left");
+                if (clIt != child.properties.end()) cLeft = (int)clIt->second.intValue;
+                auto ctIt = child.properties.find("Top");
+                if (ctIt != child.properties.end()) cTop = (int)ctIt->second.intValue;
+                auto cwIt = child.properties.find("Width");
+                if (cwIt != child.properties.end()) cWidth = (int)cwIt->second.intValue;
+                auto chIt = child.properties.find("Height");
+                if (chIt != child.properties.end()) cHeight = (int)chIt->second.intValue;
+                // 位置相对于Frame(缇→像素, 减去Frame偏移)
+                int pxLeft = (cLeft - frameLeft) * 15 / 10;
+                int pxTop = (cTop - frameTop) * 15 / 10;
+                int pxWidth = cWidth * 15 / 10;
+                int pxHeight = cHeight * 15 / 10;
+                long childStyle = 0x40000000L | 0x10000000L;  // WS_CHILD | WS_VISIBLE
+                std::string childCaption = child.controlName;
+                auto ccIt = child.properties.find("Caption");
+                if (ccIt != child.properties.end() && ccIt->second.type == FrmValueType::String) {
+                    std::string raw = ccIt->second.rawText;
+                    if (raw.size() >= 2 && raw.front() == 0x22 && raw.back() == 0x22) childCaption = raw.substr(1, raw.size() - 2);
+                }
+                auto ctIt2 = child.properties.find("Text");
+                if (ctIt2 != child.properties.end() && ctIt2->second.type == FrmValueType::String) {
+                    std::string raw = ctIt2->second.rawText;
+                    if (raw.size() >= 2 && raw.front() == 0x22 && raw.back() == 0x22) childCaption = raw.substr(1, raw.size() - 2);
+                }
+                c_.emitLine("vb6_hwnd_" + cIdent(child.controlName) + " = vb6_CreateControl("
+                    + "\"" + std::string(childClass) + "\", \"" + childCaption + "\","
+                    + std::to_string(childStyle) + "L, 0L,"
+                    + std::to_string(pxLeft) + ", " + std::to_string(pxTop) + ", "
+                    + std::to_string(pxWidth) + ", " + std::to_string(pxHeight) + ","
+                    + std::to_string(childCtrlId) + ", " + frameHwnd + ", hInstance);");
+                // 注册控件名到knownFormControls_(供属性访问)
+                {
+                    std::string childNameLower = child.controlName;
+                    std::transform(childNameLower.begin(), childNameLower.end(), childNameLower.begin(), ::tolower);
+                    knownFormControls_[childNameLower] = child.controlType;
+                    knownFormControlOriginalNames_[childNameLower] = child.controlName;
+                }
+                childCtrlId++;
+            }
+        }
+    }
     // P14.4.1c: Timer回调注册
     for (const auto& ctrl : frmDesc.formControl.children) {
         if (ctrl.controlType == FrmControlType::Timer) {
