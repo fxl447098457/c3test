@@ -1,4 +1,4 @@
-// vb6rtl.c - VB6运行时库最小实现
+﻿// vb6rtl.c - VB6运行时库最小实现
 // 仅支持 hello.bas 等简单程序运行
 
 #include "vb6rtl.h"
@@ -848,7 +848,82 @@ BSTR vb6_Command(void) {
     if (*cmdLine == L'\0') return vb6_BSTR_Empty();
     return vb6_BSTR_FromStr(cmdLine);
 }
+// ============================================================
+// P14.3.4: App全局对象属性
+// ============================================================
 
+/* App.Path: 返回EXE所在目录 (去掉文件名部分) */
+BSTR vb6_App_Path(void) {
+    wchar_t buf[1024];
+    DWORD len = GetModuleFileNameW(NULL, buf, 1024);
+    if (len == 0) return vb6_BSTR_FromStr(L".");
+    for (DWORD i = len; i > 0; i--) {
+        if (buf[i-1] == L'\\' || buf[i-1] == L'/') {
+            buf[i-1] = L'\0';
+            return vb6_BSTR_FromStr(buf);
+        }
+    }
+    return vb6_BSTR_FromStr(L".");
+}
+
+/* App.EXEName: 返回EXE文件名(不含路径和扩展名) */
+BSTR vb6_App_EXEName(void) {
+    wchar_t buf[1024];
+    DWORD len = GetModuleFileNameW(NULL, buf, 1024);
+    if (len == 0) return vb6_BSTR_Empty();
+    wchar_t* fname = buf;
+    for (DWORD i = 0; i < len; i++) {
+        if (buf[i] == L'\\' || buf[i] == L'/') fname = &buf[i+1];
+    }
+    wchar_t* dot = wcsrchr(fname, L'.');
+    if (dot) *dot = L'\0';
+    return vb6_BSTR_FromStr(fname);
+}
+
+/* App.hInstance: 返回模块实例句柄 */
+int32_t vb6_App_hInstance(void) {
+    return (int32_t)(intptr_t)GetModuleHandleW(NULL);
+}
+
+
+// ============================================================
+// P14.2.4: IIf / InputBox
+// ============================================================
+
+/* IIf: VB6内联条件函数 - 注意VB6的IIf不短路，两个分支都求值 */
+vb6_VARIANT vb6_IIf(int16_t expr, vb6_VARIANT truepart, vb6_VARIANT falsepart) {
+    return expr ? truepart : falsepart;
+}
+
+/* InputBox: 简化实现 - 使用控制台输入 (非GUI环境) */
+BSTR vb6_InputBox(BSTR prompt, BSTR title, BSTR defaultstr, int32_t xpos, int32_t ypos, BSTR helpfile, int32_t context) {
+    (void)title; (void)xpos; (void)ypos; (void)helpfile; (void)context;
+    /* 输出提示 */
+    if (prompt) {
+        fwprintf(stdout, L"%ls", prompt);
+        fwprintf(stdout, L"\r\n");
+    }
+    /* 显示默认值提示 */
+    if (defaultstr && vb6_BSTR_Len(defaultstr) > 0) {
+        fwprintf(stdout, L"[%ls] ", defaultstr);
+    }
+    fwprintf(stdout, L"> ");
+    fflush(stdout);
+    /* 读取一行输入 */
+    wchar_t buf[1024];
+    if (fgetws(buf, 1024, stdin)) {
+        /* 去掉尾部换行 */
+        int32_t len = (int32_t)wcslen(buf);
+        while (len > 0 && (buf[len-1] == L'\n' || buf[len-1] == L'\r')) {
+            buf[--len] = L'\0';
+        }
+        if (len == 0 && defaultstr) return vb6_BSTR_FromStr(defaultstr);
+        return vb6_BSTR_FromStr(buf);
+    }
+    /* 读取失败则返回默认值 */
+    if (defaultstr) return vb6_BSTR_FromStr(defaultstr);
+    return vb6_BSTR_Empty();
+}
 // ============================================================
 // P14.2.3: Split/Join 字符串数组函数
 // ============================================================
@@ -2155,4 +2230,90 @@ int32_t vb6_PA_LBound(SAFEARRAY* psa) {
     long lbound = 0;
     SafeArrayGetLBound(psa, 1, &lbound);
     return (int32_t)lbound;
+}
+
+// P14.3.5: CallByName - 按名称动态调用方法/属性
+// calltype: 1=VbLet(set property), 2=VbMethod(call method), 3=VbGet(get property)
+vb6_VARIANT vb6_CallByName(void* obj, const wchar_t* procName, int32_t callType,
+                           void* args, int32_t argc) {
+    vb6_VARIANT result;
+    memset(&result, 0, sizeof(result));
+    result.vt = VT_EMPTY;
+
+    if (!obj || !procName) return result;
+
+    IDispatch* disp = (IDispatch*)obj;
+    DISPID dispid = 0;
+    HRESULT hr;
+
+    // Get DISPID
+    hr = disp->lpVtbl->GetIDsOfNames(disp, &IID_NULL, (LPOLESTR*)&procName, 1, LOCALE_USER_DEFAULT, &dispid);
+    if (FAILED(hr)) return result;
+
+    // Determine INVOKE_KIND from calltype
+    INVOKEKIND invKind;
+    switch (callType) {
+        case 1: invKind = DISPATCH_PROPERTYPUT; break;  // VbLet
+        case 2: invKind = DISPATCH_METHOD; break;        // VbMethod
+        case 3: invKind = DISPATCH_PROPERTYGET; break;   // VbGet
+        default: invKind = DISPATCH_METHOD; break;
+    }
+
+    // Build DISPPARAMS from args array
+    DISPPARAMS dp;
+    memset(&dp, 0, sizeof(dp));
+    VARIANT* pArgs = NULL;
+
+    if (argc > 0 && args) {
+        pArgs = (VARIANT*)CoTaskMemAlloc(argc * sizeof(VARIANT));
+        if (pArgs) {
+            for (int32_t i = 0; i < argc; i++) {
+                memcpy(&pArgs[i], (char*)args + i * sizeof(VARIANT), sizeof(VARIANT));
+            }
+            dp.cArgs = (UINT)argc;
+            dp.rgvarg = pArgs;
+            // Reverse args for DISPPARAMS (COM expects right-to-left)
+            // For PropertyPut, also set named arg
+            if (invKind == DISPATCH_PROPERTYPUT) {
+                DISPID putId = DISPID_PROPERTYPUT;
+                dp.cNamedArgs = 1;
+                dp.rgdispidNamedArgs = &putId;
+            }
+        }
+    }
+
+    // Invoke
+    VARIANT retVal;
+    VariantInit(&retVal);
+    EXCEPINFO excep;
+    memset(&excep, 0, sizeof(excep));
+    UINT argErr = 0;
+
+    hr = disp->lpVtbl->Invoke(disp, dispid, &IID_NULL, LOCALE_USER_DEFAULT,
+                              invKind, &dp, &retVal, &excep, &argErr);
+
+    if (SUCCEEDED(hr)) {
+        result.vt = (vb6_vartype)retVal.vt;
+        // Copy value from COM VARIANT to vb6_VARIANT
+        switch (retVal.vt) {
+            case VT_I2: result.iVal = retVal.iVal; break;
+            case VT_I4: result.lVal = retVal.lVal; break;
+            case VT_R4: result.fltVal = retVal.fltVal; break;
+            case VT_R8: result.dblVal = retVal.dblVal; break;
+            case VT_BSTR: result.bstrVal = retVal.bstrVal; VariantInit(&retVal); break;
+            case VT_DISPATCH: result.pdispVal = retVal.pdispVal; VariantInit(&retVal); break;
+            case VT_BOOL: result.boolVal = retVal.boolVal; break;
+            case VT_UI1: result.bVal = retVal.bVal; break;
+            default: result.lVal = retVal.lVal; break;
+        }
+    }
+
+    // Cleanup
+    if (pArgs) CoTaskMemFree(pArgs);
+    VariantClear(&retVal);
+    if (excep.bstrSource) SysFreeString(excep.bstrSource);
+    if (excep.bstrDescription) SysFreeString(excep.bstrDescription);
+    if (excep.bstrHelpFile) SysFreeString(excep.bstrHelpFile);
+
+    return result;
 }

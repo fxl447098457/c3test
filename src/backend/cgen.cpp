@@ -1,4 +1,4 @@
-#include "backend/cgen.hpp"
+﻿#include "backend/cgen.hpp"
 #include <algorithm>
 #include <cctype>
 #include <iostream>
@@ -1069,8 +1069,18 @@ void CCodeGen::visit(IdentifierExpr& node) {
             Symbol* paramSym = symTab_.lookupLocal(node.name);
             if (!paramSym || paramSym->kind != SymbolKind::Parameter) {
                 lastExpr_ = "me->" + cName;
+                // P14.3.1: Dim As New自动实例化 (类模块成员)
+                auto itNewM = knownNewVars_.find(lower);
+                if (itNewM != knownNewVars_.end()) {
+                    c_.emitLine("if (!me->" + cName + ") me->" + cName + " = vb6_New_" + itNewM->second + "();  /* Dim As New auto-instantiate */");
+                }
                 return;
             }
+        }
+        // P14.3.1: Dim As New自动实例化守卫
+        auto itNew = knownNewVars_.find(lower);
+        if (itNew != knownNewVars_.end()) {
+            c_.emitLine("if (!" + cName + ") " + cName + " = vb6_New_" + itNew->second + "();  /* Dim As New auto-instantiate */");
         }
         lastExpr_ = cName;
         return;
@@ -1177,6 +1187,8 @@ void CCodeGen::visit(IdentifierExpr& node) {
         {"join",     "vb6_Join"},
         // ParamArray (P14.1.5)
         {"ismissing", "vb6_IsMissing"},
+        // P14.3.5: CallByName
+        {"callbyname", "vb6_CallByName"},
         
     };
 
@@ -1358,6 +1370,17 @@ void CCodeGen::visit(MemberAccessExpr& node) {
         if (objLower == "debug" && memLower == "assert") {
             lastExpr_ = "vb6_DebugAssert";
             return;
+        }
+        // P14.3.4: App全局对象属性
+        if (objLower == "app") {
+            if (memLower == "path") { lastExpr_ = "vb6_App_Path()"; return; }
+            if (memLower == "exename") { lastExpr_ = "vb6_App_EXEName()"; return; }
+            if (memLower == "hinstance") { lastExpr_ = "vb6_App_hInstance()"; return; }
+            if (memLower == "hinstancehnd") { lastExpr_ = "vb6_App_hInstance()"; return; }  // VB6别名
+            if (memLower == "title") { lastExpr_ = "vb6_App_EXEName()"; return; }  // 简化
+            if (memLower == "major") { lastExpr_ = "0"; return; }
+            if (memLower == "minor") { lastExpr_ = "0"; return; }
+            if (memLower == "revision") { lastExpr_ = "0"; return; }
         }
 
         // P7.5+P7.6: 窗体控件属性读取
@@ -1689,6 +1712,23 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
             lastExpr_ = "((" + elemCType + "*)(((char*)" + arrName + "->data) + " + offVar + "))[0]";
         }
         return;
+    }
+
+    // P14.2.4: IIf特殊处理 - 生成C三元表达式 (VB6 IIf不短路，但实际用例99%无副作用)
+    if (node.callee && node.callee->kind == ASTNodeKind::IdentifierExpr && node.positional.size() == 3) {
+        auto& ident = static_cast<IdentifierExpr&>(*node.callee);
+        std::string iifLower = ident.name;
+        std::transform(iifLower.begin(), iifLower.end(), iifLower.begin(), ::tolower);
+        if (iifLower == "iif") {
+            emitExpr(*node.positional[0]);
+            std::string cond = std::move(lastExpr_);
+            emitExpr(*node.positional[1]);
+            std::string trueVal = std::move(lastExpr_);
+            emitExpr(*node.positional[2]);
+            std::string falseVal = std::move(lastExpr_);
+            lastExpr_ = "((" + cond + ") ? (" + trueVal + ") : (" + falseVal + "))";
+            return;
+        }
     }
 
     // 函数调用路径 (原有逻辑)
@@ -2045,10 +2085,93 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
         args.push_back(std::move(argVal));
     }
 
-    // 命名参数暂按位置展开(TODO: 按参数名映射)
-    for (auto& named : node.named) {
-        emitExpr(*named.value);
-        args.push_back(std::move(lastExpr_));
+    // P14.3.3: 命名参数位置展开 - 按参数名映射到正确位置
+    if (!node.named.empty() && !calleeParams.empty()) {
+        // Build name->index map from callee params (case-insensitive)
+        std::unordered_map<std::string, size_t> paramMap;
+        for (size_t i = 0; i < calleeParams.size(); i++) {
+            std::string lower = calleeParams[i].name;
+            std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+            if (!lower.empty()) paramMap[lower] = i;
+        }
+
+        // Create position-mapped args vector
+        size_t totalParams = calleeParams.size();
+        std::vector<std::string> orderedArgs(totalParams);
+        std::vector<bool> filled(totalParams, false);
+
+        // Place positional args (already in args[])
+        for (size_t i = 0; i < args.size() && i < totalParams; i++) {
+            orderedArgs[i] = std::move(args[i]);
+            filled[i] = true;
+        }
+
+        // ByRef handling helper lambda
+        auto applyByRef = [&](std::string& argVal, size_t pi) {
+            bool isByRef = (pi < calleeParams.size() && !calleeParams[pi].isByVal && !calleeParams[pi].isParamArray);
+            if (!isByRef) return;
+            if (argVal.size() > 3 && argVal.substr(0, 2) == "(*" && argVal.back() == ')') {
+                argVal = "&" + argVal.substr(2, argVal.size() - 3);
+            } else if (argVal.size() > 2 && argVal[0] == '&') {
+                // already has &, keep as-is
+            } else if (argVal.size() > 2 && argVal.substr(0, 2) == "me" && argVal[2] == '-') {
+                argVal = "&(" + argVal + ")";
+            } else {
+                bool isSimpleIdent = !argVal.empty() && (std::isalpha(static_cast<unsigned char>(argVal[0])) || argVal[0] == '_');
+                if (isSimpleIdent) {
+                    for (char c : argVal) {
+                        if (!std::isalnum(static_cast<unsigned char>(c)) && c != '_') {
+                            isSimpleIdent = false; break;
+                        }
+                    }
+                }
+                if (isSimpleIdent && !argVal.empty()) {
+                    argVal = "&" + argVal;
+                } else {
+                    std::string cType = "int32_t";
+                    if (pi < calleeParams.size()) cType = mapType(calleeParams[pi].type);
+                    argVal = "&(" + cType + "){" + argVal + "}";
+                }
+            }
+        };
+
+        // Place named args at their parameter positions
+        for (auto& named : node.named) {
+            std::string lower = named.name;
+            std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+            auto it = paramMap.find(lower);
+            if (it != paramMap.end()) {
+                size_t pi = it->second;
+                emitExpr(*named.value);
+                std::string argVal = std::move(lastExpr_);
+                applyByRef(argVal, pi);
+                if (pi < orderedArgs.size()) {
+                    orderedArgs[pi] = std::move(argVal);
+                    filled[pi] = true;
+                }
+            }
+        }
+
+        // Fill gaps with optional/missing param defaults
+        for (size_t i = 0; i < totalParams; i++) {
+            if (!filled[i]) {
+                if (calleeParams[i].isParamArray) {
+                    orderedArgs[i] = "NULL";
+                    filled[i] = true;
+                } else {
+                    orderedArgs[i] = defaultValue(calleeParams[i].type);
+                    filled[i] = true;
+                }
+            }
+        }
+
+        args = std::move(orderedArgs);
+    } else {
+        // No named args or no param info: append named args as-is (fallback)
+        for (auto& named : node.named) {
+            emitExpr(*named.value);
+            args.push_back(std::move(lastExpr_));
+        }
     }
 
     // P14.1.5: ParamArray packing - if callee has a ParamArray parameter,
@@ -3138,6 +3261,10 @@ void CCodeGen::visit(ForStmt& node) {
 
     std::string var = cIdent(node.varName);
 
+    // P14.3.2: 嵌套循环栈 - 支持Exit For跳转到正确层
+    std::string exitLabel = "vb6_loop_exit_" + std::to_string(labelCounter_++);
+    loopStack_.push_back({ExitKind::For, exitLabel});
+
     c_.emitLine("{");
     c_.indent();
     c_.emitLine("int32_t " + var + "_end = " + end + ";");
@@ -3162,9 +3289,15 @@ void CCodeGen::visit(ForStmt& node) {
     c_.emitLine("}");
     c_.dedent();
     c_.emitLine("}");
+    c_.emitLine(exitLabel + ":;  /* Exit For target */");
+
+    loopStack_.pop_back();
 }
 
 void CCodeGen::visit(ForEachStmt& node) {
+    // P14.3.2: 嵌套循环栈
+    std::string exitLabel = "vb6_loop_exit_" + std::to_string(labelCounter_++);
+    loopStack_.push_back({ExitKind::For, exitLabel});
     // P12.4: For Each item In collection
     // 支持: 数组(VB6 SafeArray)迭代
     // 暂不支持: COM集合(IEnumVARIANT)迭代
@@ -3235,10 +3368,17 @@ void CCodeGen::visit(ForEachStmt& node) {
         // 仍然发出循环体（一次），避免语义完全缺失
         emitStmtList(node.body);
     }
+    c_.emitLine(exitLabel + ":;  /* Exit For target */");
+
+    loopStack_.pop_back();
 }
 
 
 void CCodeGen::visit(DoLoopStmt& node) {
+    // P14.3.2: 嵌套循环栈
+    std::string exitLabel = "vb6_loop_exit_" + std::to_string(labelCounter_++);
+    loopStack_.push_back({ExitKind::Do, exitLabel});
+
     switch (node.loopKind) {
         case DoLoopKind::DoWhileLoop:
             if (node.condition) {
@@ -3301,15 +3441,25 @@ void CCodeGen::visit(DoLoopStmt& node) {
             c_.emitLine("} while (1);");
             break;
     }
+    c_.emitLine(exitLabel + ":;  /* Exit Do target */");
+
+    loopStack_.pop_back();
 }
 
 void CCodeGen::visit(WhileWendStmt& node) {
+    // P14.3.2: 嵌套循环栈 (While...Wend 等同于 Do While...Loop)
+    std::string exitLabel = "vb6_loop_exit_" + std::to_string(labelCounter_++);
+    loopStack_.push_back({ExitKind::Do, exitLabel});
+
     emitExpr(*node.condition);
     c_.emitLine("while (" + lastExpr_ + ") {");
     c_.indent();
     emitStmtList(node.body);
     c_.dedent();
     c_.emitLine("}");
+    c_.emitLine(exitLabel + ":;  /* Exit Do target */");
+
+    loopStack_.pop_back();
 }
 
 void CCodeGen::visit(SelectCaseStmt& node) {
@@ -3520,11 +3670,22 @@ void CCodeGen::visit(ErrorStmt& node) {
 void CCodeGen::visit(ExitStmt& node) {
     switch (node.exitKind) {
         case ExitKind::Do:
-            c_.emitLine("break;");
+        case ExitKind::For: {
+            // P14.3.2: 从循环栈查找匹配的跳出标签
+            std::string targetLabel;
+            for (int i = (int)loopStack_.size() - 1; i >= 0; --i) {
+                if (loopStack_[i].kind == node.exitKind) {
+                    targetLabel = loopStack_[i].exitLabel;
+                    break;
+                }
+            }
+            if (!targetLabel.empty()) {
+                c_.emitLine("goto " + targetLabel + ";");
+            } else {
+                c_.emitLine("break;  /* fallback: no matching loop in stack */");
+            }
             break;
-        case ExitKind::For:
-            c_.emitLine("break;");
-            break;
+        }
         case ExitKind::Sub:
             c_.emitLine("return;");
             break;
@@ -3564,7 +3725,7 @@ void CCodeGen::visit(CallStmt& node) {
                                 "vb6_Trim", "vb6_LTrim", "vb6_RTrim", "vb6_Chr",
                                 "vb6_Str", "vb6_CStr", "vb6_Format", "vb6_Hex", "vb6_Oct",
                                 "vb6_Replace", "vb6_Space", "vb6_String", "vb6_StrReverse",
-                                "vb6_BSTR_Concat", "vb6_BSTR_Empty"
+                                "vb6_BSTR_Concat", "vb6_BSTR_Empty", "vb6_App_Path", "vb6_App_EXEName"
                             };
                             auto isBstrExpr = [&](const std::string& expr) -> bool {
                                 for (auto& prefix : bstrFuncs) {
@@ -3820,7 +3981,7 @@ void CCodeGen::visit(PrintStmt& node) {
         "vb6_Trim", "vb6_LTrim", "vb6_RTrim", "vb6_Chr",
         "vb6_Str", "vb6_CStr", "vb6_Format", "vb6_Hex", "vb6_Oct",
         "vb6_Replace", "vb6_Space", "vb6_String", "vb6_StrReverse",
-        "vb6_BSTR_Concat", "vb6_BSTR_Empty"
+        "vb6_BSTR_Concat", "vb6_BSTR_Empty", "vb6_App_Path", "vb6_App_EXEName"
     };
     auto isBstrExpr = [&](const std::string& expr) -> bool {
         for (auto& prefix : bstrFuncs) {
@@ -3861,7 +4022,7 @@ void CCodeGen::visit(WriteStmt& node) {
         "vb6_Trim", "vb6_LTrim", "vb6_RTrim", "vb6_Chr",
         "vb6_Str", "vb6_CStr", "vb6_Format", "vb6_Hex", "vb6_Oct",
         "vb6_Replace", "vb6_Space", "vb6_String", "vb6_StrReverse",
-        "vb6_BSTR_Concat", "vb6_BSTR_Empty"
+        "vb6_BSTR_Concat", "vb6_BSTR_Empty", "vb6_App_Path", "vb6_App_EXEName"
     };
     auto isBstrExpr = [&](const std::string& expr) -> bool {
         for (auto& prefix : bstrFuncs) {
@@ -4184,6 +4345,10 @@ void CCodeGen::visit(LocalDeclStmt& node) {
                     } else {
                         knownClassVars_.insert(lower);
                         isLocalClassType = true;
+                        // P14.3.1: Dim As New自动实例化
+                        if (var.isNew) {
+                            knownNewVars_[lower] = cIdent(clsSym->name);
+                        }
                     }
                 }
                 if (clsSym && (clsSym->kind == SymbolKind::ComClass || clsSym->kind == SymbolKind::ComInterface)) {
@@ -4661,6 +4826,10 @@ void CCodeGen::visit(VariableDecl& node) {
                 knownIfaceVars_[lower] = clsSym->name;
             } else {
                 knownClassVars_.insert(lower);
+                // P14.3.1: Dim As New自动实例化 (模块级)
+                if (node.isNew) {
+                    knownNewVars_[lower] = cIdent(clsSym->name);
+                }
             }
             // P6.5: WithEvents变量 → 注册到 knownWithEventsVars_
             if (node.isWithEvents) {

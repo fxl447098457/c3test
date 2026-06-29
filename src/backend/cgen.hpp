@@ -201,6 +201,16 @@ private:
     // With语句名称栈
     std::vector<std::string> withObjectVars_;
 
+    // P14.3.1: Dim As New自动实例化变量集合 (小写key → 类名C标识)
+    std::unordered_map<std::string, std::string> knownNewVars_;
+
+    // P14.3.2: 循环栈 - 支持嵌套Exit For/Exit Do跳转到正确层
+    struct LoopInfo {
+        ExitKind kind;          // For 或 Do
+        std::string exitLabel;  // 跳出标签 (如 "vb6_loop_exit_0")
+    };
+    std::vector<LoopInfo> loopStack_;
+
     // 当前过程的已知数组变量名集合 (小写)
     // 用于IndexOrCallExpr中区分数组访问(vs函数调用)
     std::unordered_set<std::string> knownArrays_;

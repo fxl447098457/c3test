@@ -1,4 +1,4 @@
-#include "semantics/semantic_analyzer.hpp"
+﻿#include "semantics/semantic_analyzer.hpp"
 #include <algorithm>
 #include <cctype>
 
@@ -1337,7 +1337,7 @@ void SemanticAnalyzer::checkCallArgs(Symbol* procSym, IndexOrCallExpr& callNode)
         expectedParams++;
     }
 
-    size_t providedArgs = callNode.positional.size();
+    size_t providedArgs = callNode.positional.size() + callNode.named.size();
 
     if (hasParamArray) {
         // ParamArray: 至少需要 required 个参数
@@ -1601,6 +1601,7 @@ void SemanticAnalyzer::registerBuiltins() {
     addBuiltinFunc("CurDir", Vb6Type::String);
     addBuiltinFunc("Shell", Vb6Type::Long);
     addBuiltinFunc("Environ", Vb6Type::String);
+    addBuiltinFunc("Command", Vb6Type::String);
     // 日期时间
     addBuiltinFunc("Now", Vb6Type::Date);
     addBuiltinFunc("Date", Vb6Type::Date);
@@ -1636,7 +1637,10 @@ void SemanticAnalyzer::registerBuiltins() {
     addBuiltinFunc("SendKeys", Vb6Type::Void);
     addBuiltinFunc("AppActivate", Vb6Type::Void);
     addBuiltinFunc("IsMissing", Vb6Type::Boolean);
+    addBuiltinFunc("IIf", Vb6Type::Variant);
     addBuiltinFunc("Beep", Vb6Type::Void);
+    // P14.3.5: CallByName(obj, procName$, callType, [args...])
+    addBuiltinFunc("CallByName", Vb6Type::Variant);
 }
 
 // ============================================================

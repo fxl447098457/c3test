@@ -1,4 +1,4 @@
-// vb6c3 - Pratt 表达式解析器
+﻿// vb6c3 - Pratt 表达式解析器
 // 参考: RustASP 45行核心实现, (l_bp, r_bp) 绑定力对设计
 // VB6 14级优先级, 右结合 ^ 运算符
 
@@ -237,8 +237,11 @@ ExprPtr Parser::parseLiteral() {
             return std::make_unique<LiteralExpr>(loc, LiteralKind::String, tok.text);
         case TokenKind::DateLiteral:
             return std::make_unique<LiteralExpr>(loc, LiteralKind::Date, tok.text);
-        case TokenKind::TrueKeyword:
-            return std::make_unique<LiteralExpr>(loc, LiteralKind::Boolean, tok.text);
+        case TokenKind::TrueKeyword: {
+            auto expr = std::make_unique<LiteralExpr>(loc, LiteralKind::Boolean, tok.text);
+            expr->boolValue = true;
+            return expr;
+        }
         case TokenKind::FalseKeyword: {
             auto expr = std::make_unique<LiteralExpr>(loc, LiteralKind::Boolean, tok.text);
             expr->boolValue = false;
