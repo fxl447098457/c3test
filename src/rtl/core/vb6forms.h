@@ -209,6 +209,17 @@ void vb6_AddItem(void* hwnd, void* bstrItem);
 void vb6_RemoveItem(void* hwnd, int index);
 // Clear: remove all items
 void vb6_ClearList(void* hwnd);
+// P14.4.3: ListBox/ComboBox extended properties
+// SetListItem: set item text by index (List(idx) = value)
+void vb6_SetListItem(void* hwnd, int index, void* bstrItem);
+// Selected(idx): get/set selection state (for MultiSelect ListBox)
+int vb6_GetSelected(void* hwnd, int index);
+void vb6_SetSelected(void* hwnd, int index, int selected);
+// ItemData(idx): get/set per-item Long data
+int32_t vb6_GetItemData(void* hwnd, int index);
+void vb6_SetItemData(void* hwnd, int index, int32_t data);
+// NewIndex: index of most recently added item
+int vb6_GetNewIndex(void* hwnd);
 
 // P13.4: TextBox-specific properties
 // MultiLine: read/write, VB6 True=-1

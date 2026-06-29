@@ -768,6 +768,62 @@ void vb6_ClearList(void* hwnd) {
     }
 }
 
+// P14.4.3: ListBox/ComboBox extended properties
+void vb6_SetListItem(void* hwnd, int index, void* bstrItem) {
+    if (!hwnd) return;
+    if (index < 0) return;
+    const wchar_t* wstr = bstrItem ? (const wchar_t*)bstrItem : L"";
+    if (vb6_IsListBox(hwnd)) {
+        SendMessageW((HWND)hwnd, LB_DELETESTRING, (WPARAM)index, 0);
+        SendMessageW((HWND)hwnd, LB_INSERTSTRING, (WPARAM)index, (LPARAM)wstr);
+    } else {
+        SendMessageW((HWND)hwnd, CB_DELETESTRING, (WPARAM)index, 0);
+        SendMessageW((HWND)hwnd, CB_INSERTSTRING, (WPARAM)index, (LPARAM)wstr);
+    }
+}
+
+int vb6_GetSelected(void* hwnd, int index) {
+    if (!hwnd || index < 0) return 0;
+    if (vb6_IsListBox(hwnd)) {
+        return (int)SendMessageW((HWND)hwnd, LB_GETSEL, (WPARAM)index, 0);
+    }
+    return 0;  /* ComboBox: use ListIndex instead */
+}
+
+void vb6_SetSelected(void* hwnd, int index, int selected) {
+    if (!hwnd || index < 0) return;
+    if (vb6_IsListBox(hwnd)) {
+        SendMessageW((HWND)hwnd, LB_SETSEL, (WPARAM)(selected ? 1 : 0), (LPARAM)index);
+    }
+}
+
+int32_t vb6_GetItemData(void* hwnd, int index) {
+    if (!hwnd || index < 0) return 0;
+    if (vb6_IsListBox(hwnd)) {
+        return (int32_t)SendMessageW((HWND)hwnd, LB_GETITEMDATA, (WPARAM)index, 0);
+    } else {
+        return (int32_t)SendMessageW((HWND)hwnd, CB_GETITEMDATA, (WPARAM)index, 0);
+    }
+}
+
+void vb6_SetItemData(void* hwnd, int index, int32_t data) {
+    if (!hwnd || index < 0) return;
+    if (vb6_IsListBox(hwnd)) {
+        SendMessageW((HWND)hwnd, LB_SETITEMDATA, (WPARAM)index, (LPARAM)data);
+    } else {
+        SendMessageW((HWND)hwnd, CB_SETITEMDATA, (WPARAM)index, (LPARAM)data);
+    }
+}
+
+int vb6_GetNewIndex(void* hwnd) {
+    if (!hwnd) return -1;
+    if (vb6_IsListBox(hwnd)) {
+        return (int)SendMessageW((HWND)hwnd, LB_GETCOUNT, 0, 0) - 1;
+    } else {
+        return (int)SendMessageW((HWND)hwnd, CB_GETCOUNT, 0, 0) - 1;
+    }
+}
+
 // ============================================================
 // P13.4: TextBox-specific properties
 // ============================================================

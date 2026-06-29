@@ -5930,6 +5930,24 @@ void CCodeGen::emitFormFramework(const FrmFormDesc& frmDesc, Module& module) {
                 c_.dedent();
                 c_.emitLine("}");
             }
+            // CBN_DROPDOWN (code=7) -> _DropDown() (仅当处理器存在时)
+            if (symTab_.lookup(ctrl.controlName + "_DropDown")) {
+                std::string dropDownFn = cProcName(ctrl.controlName + "_DropDown", AccessLevel::Private);
+                c_.emitLine("if (id == " + std::to_string(ctrlId) + " && code == 7) {");
+                c_.indent();
+                c_.emitLine("{ extern void " + dropDownFn + "(); " + dropDownFn + "(); }");
+                c_.dedent();
+                c_.emitLine("}");
+            }
+            // CBN_CLOSEUP (code=8) -> _CloseUp() (仅当处理器存在时)
+            if (symTab_.lookup(ctrl.controlName + "_CloseUp")) {
+                std::string closeUpFn = cProcName(ctrl.controlName + "_CloseUp", AccessLevel::Private);
+                c_.emitLine("if (id == " + std::to_string(ctrlId) + " && code == 8) {");
+                c_.indent();
+                c_.emitLine("{ extern void " + closeUpFn + "(); " + closeUpFn + "(); }");
+                c_.dedent();
+                c_.emitLine("}");
+            }
         }
         ctrlId++;
     }
@@ -6186,12 +6204,35 @@ void CCodeGen::emitFormFramework(const FrmFormDesc& frmDesc, Module& module) {
             case FrmControlType::Frame:
                 style |= kBsGroupBox;
                 break;
-            case FrmControlType::ListBox:
+            case FrmControlType::ListBox: {
                 style |= kLbsNotify | kWsBorder;
+                // Sorted: LBS_SORT = 0x0002
+                auto sortIt = ctrl.properties.find("Sorted");
+                if (sortIt != ctrl.properties.end() && sortIt->second.intValue != 0) style |= 0x0002L;
+                // MultiSelect: 1=LBS_MULTIPLESEL(0x8), 2=LBS_EXTENDEDSEL(0x800)
+                auto msIt = ctrl.properties.find("MultiSelect");
+                if (msIt != ctrl.properties.end()) {
+                    if (msIt->second.intValue == 1) style |= 0x0008L;
+                    else if (msIt->second.intValue == 2) style |= 0x0800L;
+                }
                 break;
-            case FrmControlType::ComboBox:
-                style |= kCbsDrop | kWsBorder;
+            }
+            case FrmControlType::ComboBox: {
+                // Style: 0=CBS_DROPDOWN(2), 1=CBS_SIMPLE(1), 2=CBS_DROPDOWNLIST(3)
+                auto stIt = ctrl.properties.find("Style");
+                if (stIt != ctrl.properties.end()) {
+                    if (stIt->second.intValue == 1) style |= 0x0001L;  // CBS_SIMPLE
+                    else if (stIt->second.intValue == 2) style |= 0x0003L;  // CBS_DROPDOWNLIST
+                    else style |= kCbsDrop;  // default: CBS_DROPDOWN
+                } else {
+                    style |= kCbsDrop;
+                }
+                style |= kWsBorder;
+                // Sorted: CBS_SORT = 0x0100
+                auto sortIt = ctrl.properties.find("Sorted");
+                if (sortIt != ctrl.properties.end() && sortIt->second.intValue != 0) style |= 0x0100L;
                 break;
+            }
             default:
                 break;
         }
@@ -7387,6 +7428,9 @@ std::string CCodeGen::getControlPropReadFn(FrmControlType ctrlType, const std::s
         if (propLower == "listcount") return "vb6_GetListCount";
         if (propLower == "listindex") return "vb6_GetListIndex";
         if (propLower == "list") return "vb6_GetListItem";
+        if (propLower == "selected") return "vb6_GetSelected";
+        if (propLower == "itemdata") return "vb6_GetItemData";
+        if (propLower == "newindex") return "vb6_GetNewIndex";
         if (propLower == "visible") return "vb6_GetControlVisible";
         if (propLower == "enabled") return "vb6_GetControlEnabled";
         break;
@@ -7514,6 +7558,9 @@ std::string CCodeGen::getControlPropWriteFn(FrmControlType ctrlType, const std::
     case FrmControlType::ComboBox:
         if (propLower == "text") return "vb6_SetControlText";
         if (propLower == "listindex") return "vb6_SetListIndex";
+        if (propLower == "list") return "vb6_SetListItem";
+        if (propLower == "selected") return "vb6_SetSelected";
+        if (propLower == "itemdata") return "vb6_SetItemData";
         if (propLower == "visible") return "vb6_SetControlVisible";
         if (propLower == "enabled") return "vb6_SetControlEnabled";
         break;
