@@ -1,9 +1,32 @@
-﻿#include "backend/cgen.hpp"
+#include "backend/cgen.hpp"
 #include <algorithm>
 #include <cctype>
 #include <iostream>
 
 namespace vb6c3 {
+// P16: 控件类型名→FrmControlType映射 (Dim WithEvents cmd As CommandButton)
+static FrmControlType controlTypeFromName(const std::string& name) {
+    static const std::unordered_map<std::string, FrmControlType> map = {
+        {"commandbutton", FrmControlType::CommandButton},
+        {"textbox", FrmControlType::TextBox},
+        {"label", FrmControlType::Label},
+        {"checkbox", FrmControlType::CheckBox},
+        {"optionbutton", FrmControlType::OptionButton},
+        {"listbox", FrmControlType::ListBox},
+        {"combobox", FrmControlType::ComboBox},
+        {"hscrollbar", FrmControlType::HScrollBar},
+        {"vscrollbar", FrmControlType::VScrollBar},
+        {"frame", FrmControlType::Frame},
+        {"timer", FrmControlType::Timer},
+        {"picturebox", FrmControlType::PictureBox},
+        {"image", FrmControlType::Image},
+    };
+    std::string lower = name;
+    std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+    auto it = map.find(lower);
+    return (it != map.end()) ? it->second : FrmControlType::Unknown;
+}
+
 
 // ============================================================
 // CodeEmitter
@@ -1390,6 +1413,17 @@ void CCodeGen::visit(MemberAccessExpr& node) {
         // 情况1: ctrl.Property (非数组) → vb6_GetControlXxx(vb6_hwnd_ctrl)
         // 情况2: ctrlArr(idx).Property (数组) → vb6_GetControlXxx(vb6_CtrlArr_GetAt(&vb6_arr_ctrl, idx))
         {
+            // P16: WithEvents控件属性读取 (优先于标准控件, 因为变量名可能同名)
+            auto itWECtrl = knownWithEventsCtrlVars_.find(objLower);
+            if (itWECtrl != knownWithEventsCtrlVars_.end()) {
+                std::string readFn = getControlPropReadFn(itWECtrl->second, node.memberName);
+                if (!readFn.empty()) {
+                    auto itOrig = knownWithEventsCtrlOrigNames_.find(objLower);
+                    std::string weVarName = (itOrig != knownWithEventsCtrlOrigNames_.end()) ? itOrig->second : objLower;
+                    lastExpr_ = readFn + "(" + weVarName + ")  /* WithEvents ctrl */";
+                    return;
+                }
+            }
             // P7.5: 非数组控件属性读取
             auto itCtrl = knownFormControls_.find(objLower);
             if (itCtrl != knownFormControls_.end()) {
@@ -2909,6 +2943,21 @@ void CCodeGen::visit(AssignmentStmt& node) {
             auto& objId = static_cast<IdentifierExpr&>(*maExpr.object);
             std::string objLower = objId.name;
             std::transform(objLower.begin(), objLower.end(), objLower.begin(), ::tolower);
+            // P16: WithEvents控件属性写入
+            {
+                auto itWECtrl = knownWithEventsCtrlVars_.find(objLower);
+                if (itWECtrl != knownWithEventsCtrlVars_.end()) {
+                    std::string writeFn = getControlPropWriteFn(itWECtrl->second, maExpr.memberName);
+                    if (!writeFn.empty()) {
+                        auto itOrig = knownWithEventsCtrlOrigNames_.find(objLower);
+                        std::string weVarName = (itOrig != knownWithEventsCtrlOrigNames_.end()) ? itOrig->second : objLower;
+                        emitExpr(*node.value);
+                        std::string valExpr = std::move(lastExpr_);
+                        c_.emitLine(writeFn + "(" + weVarName + ", " + valExpr + ");  /* WithEvents ctrl prop write */");
+                        return;
+                    }
+                }
+            }
             auto itCtrl = knownFormControls_.find(objLower);
             if (itCtrl != knownFormControls_.end()) {
                 std::string writeFn = getControlPropWriteFn(itCtrl->second, maExpr.memberName);
@@ -3141,6 +3190,22 @@ void CCodeGen::visit(SetStmt& node) {
     }
     std::string value = std::move(lastExpr_);
 
+    // P16: Set cmd = Command1 → value应为vb6_hwnd_Command1而非默认属性值
+    {
+        std::string targetLower = target;
+        std::transform(targetLower.begin(), targetLower.end(), targetLower.begin(), ::tolower);
+        if (knownWithEventsCtrlVars_.count(targetLower)) {
+            // value可能是vb6_GetControlXxx(vb6_hwnd_Name)形式, 需提取为vb6_hwnd_Name
+            size_t hwndPos = value.find("vb6_hwnd_");
+            if (hwndPos != std::string::npos) {
+                size_t endPos = value.find(")", hwndPos);
+                if (endPos != std::string::npos) {
+                    value = value.substr(hwndPos, endPos - hwndPos);
+                }
+            }
+        }
+    }
+
     // 如果ComCall/ComGetProp返回VARIANT*含对象, 需要UnpackObject
     // 使用一体化函数: vb6_ComCallObject 内部完成 UnpackObject+VarFree
     if (value.find("vb6_ComCall(") == 0) {
@@ -3318,6 +3383,17 @@ void CCodeGen::visit(SetStmt& node) {
             }
         }
     }
+    // P16: WithEvents控件变量赋值 - 无需额外操作
+    // Set cmd = Command1 → cmd = ctrl_Command1 (HWND拷贝已在赋值行完成)
+    // 事件通过WndProc的HWND匹配分发，不需要COM Sink/Advise
+    {
+        std::string targetLower = target;
+        std::transform(targetLower.begin(), targetLower.end(), targetLower.begin(), ::tolower);
+        auto itCtrl = knownWithEventsCtrlVars_.find(targetLower);
+        if (itCtrl != knownWithEventsCtrlVars_.end()) {
+            // 控件WithEvents变量已在赋值行 target = value; 完成HWND拷贝
+        }
+    }
 }
 
 void CCodeGen::visit(LetStmt& node) {
@@ -3361,6 +3437,21 @@ void CCodeGen::visit(LetStmt& node) {
             auto& objId = static_cast<IdentifierExpr&>(*maExpr.object);
             std::string objLower = objId.name;
             std::transform(objLower.begin(), objLower.end(), objLower.begin(), ::tolower);
+            // P16: WithEvents控件属性写入 (Let)
+            {
+                auto itWECtrl = knownWithEventsCtrlVars_.find(objLower);
+                if (itWECtrl != knownWithEventsCtrlVars_.end()) {
+                    std::string writeFn = getControlPropWriteFn(itWECtrl->second, maExpr.memberName);
+                    if (!writeFn.empty()) {
+                        auto itOrig = knownWithEventsCtrlOrigNames_.find(objLower);
+                        std::string weVarName = (itOrig != knownWithEventsCtrlOrigNames_.end()) ? itOrig->second : objLower;
+                        emitExpr(*node.value);
+                        std::string valExpr = std::move(lastExpr_);
+                        c_.emitLine(writeFn + "(" + weVarName + ", " + valExpr + ");  /* Let WithEvents ctrl prop */");
+                        return;
+                    }
+                }
+            }
             auto itCtrl = knownFormControls_.find(objLower);
             if (itCtrl != knownFormControls_.end()) {
                 std::string writeFn = getControlPropWriteFn(itCtrl->second, maExpr.memberName);
@@ -5052,7 +5143,22 @@ void CCodeGen::visit(VariableDecl& node) {
         }
     }
 
-    // 记录变量类型集合 (用于Debug.Print和COM解封类型推断)
+        // P16: WithEvents控件类型检测 → 注册到 knownWithEventsCtrlVars_
+    // Dim WithEvents cmd As CommandButton → knownWithEventsCtrlVars_["cmd"] = CommandButton
+    if (node.isWithEvents && node.asType && node.asType->kind == ASTNodeKind::SimpleTypeRef) {
+        auto& simple16 = static_cast<SimpleTypeRef&>(*node.asType);
+        FrmControlType ctrlType = controlTypeFromName(simple16.name);
+        if (ctrlType != FrmControlType::Unknown) {
+            std::string lower16 = node.name;
+            std::transform(lower16.begin(), lower16.end(), lower16.begin(), ::tolower);
+            knownWithEventsCtrlVars_[lower16] = ctrlType;
+            knownWithEventsCtrlOrigNames_[lower16] = cName;  // 保留原始变量名(大小写)
+            cType = "HWND";  // 控件WithEvents变量存储HWND
+            knownObjectVars_.erase(lower16);  // 移除可能的void*标记
+            knownVariantVars_.erase(lower16);  // 移除可能的Variant标记
+        }
+    }
+// 记录变量类型集合 (用于Debug.Print和COM解封类型推断)
     if (cType == "double" || cType == "float") {
         std::string lower = node.name;
         std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
@@ -5106,7 +5212,7 @@ void CCodeGen::visit(VariableDecl& node) {
             isUdtType = (sym && sym->kind == SymbolKind::UserDefinedType);
         }
         std::string initVal;
-        if (isClassType || isComIfaceType) {
+        if (isClassType || isComIfaceType || cType == "HWND") {
             initVal = "NULL";
         } else if (isVb6IfaceType) {
             initVal = "{0}";  // P6.4: 接口引用 = {vtbl=NULL, obj=NULL}
@@ -5976,6 +6082,90 @@ void CCodeGen::emitFormFramework(const FrmFormDesc& frmDesc, Module& module) {
         ctrlId++;
     }
 
+    // P16: WithEvents控件事件分发 (按HWND匹配, 在标准命名handler之后)
+    // 对于每个WithEvents控件变量, 检查其HWND是否匹配lParam, 是则调用对应handler
+    if (!knownWithEventsCtrlVars_.empty()) {
+        c_.emitLine("if ((HWND)lParam != NULL) {");
+        c_.indent();
+        c_.emitLine("HWND hCtrlWE = (HWND)lParam;");
+        for (const auto& we : knownWithEventsCtrlVars_) {
+            std::string varLower = we.first;
+            FrmControlType ctrlType = we.second;
+            std::string varName = knownWithEventsCtrlOrigNames_.count(varLower) ? knownWithEventsCtrlOrigNames_[varLower] : cIdent(varLower);  // 用原始大小写变量名
+            // 根据控件类型生成不同的事件分发
+            if (ctrlType == FrmControlType::CommandButton ||
+                ctrlType == FrmControlType::CheckBox ||
+                ctrlType == FrmControlType::OptionButton) {
+                // BN_CLICKED (code=0) → _Click()
+                auto* clickSym = symTab_.lookup(varLower + "_click");
+                if (clickSym) {
+                    std::string clickFn = cProcName(clickSym->name, AccessLevel::Private);
+                    c_.emitLine("if (code == 0 && " + varName + " != NULL && " + varName + " == hCtrlWE) {");
+                    c_.indent();
+                    c_.emitLine("{ extern void " + clickFn + "(); " + clickFn + "(); }");
+                    c_.dedent();
+                    c_.emitLine("}");
+                }
+            } else if (ctrlType == FrmControlType::TextBox) {
+                // EN_CHANGE (code=768) → _Change()
+                auto* changeSym = symTab_.lookup(varLower + "_change");
+                if (changeSym) {
+                    std::string changeFn = cProcName(changeSym->name, AccessLevel::Private);
+                    c_.emitLine("if (code == 768 && " + varName + " != NULL && " + varName + " == hCtrlWE) {");
+                    c_.indent();
+                    c_.emitLine("{ extern void " + changeFn + "(); " + changeFn + "(); }");
+                    c_.dedent();
+                    c_.emitLine("}");
+                }
+            } else if (ctrlType == FrmControlType::ListBox) {
+                // LBN_SELCHANGE (code=1) → _Click()
+                auto* clickSym = symTab_.lookup(varLower + "_click");
+                if (clickSym) {
+                    std::string clickFn = cProcName(clickSym->name, AccessLevel::Private);
+                    c_.emitLine("if (code == 1 && " + varName + " != NULL && " + varName + " == hCtrlWE) {");
+                    c_.indent();
+                    c_.emitLine("{ extern void " + clickFn + "(); " + clickFn + "(); }");
+                    c_.dedent();
+                    c_.emitLine("}");
+                }
+                // LBN_DBLCLK (code=2) → _DblClick()
+                auto* dblClickSym = symTab_.lookup(varLower + "_dblclick");
+                if (dblClickSym) {
+                    std::string dblClickFn = cProcName(dblClickSym->name, AccessLevel::Private);
+                    c_.emitLine("if (code == 2 && " + varName + " != NULL && " + varName + " == hCtrlWE) {");
+                    c_.indent();
+                    c_.emitLine("{ extern void " + dblClickFn + "(); " + dblClickFn + "(); }");
+                    c_.dedent();
+                    c_.emitLine("}");
+                }
+            } else if (ctrlType == FrmControlType::ComboBox) {
+                // CBN_SELCHANGE (code=1) → _Click()
+                auto* clickSym = symTab_.lookup(varLower + "_click");
+                if (clickSym) {
+                    std::string clickFn = cProcName(clickSym->name, AccessLevel::Private);
+                    c_.emitLine("if (code == 1 && " + varName + " != NULL && " + varName + " == hCtrlWE) {");
+                    c_.indent();
+                    c_.emitLine("{ extern void " + clickFn + "(); " + clickFn + "(); }");
+                    c_.dedent();
+                    c_.emitLine("}");
+                }
+                // CBN_EDITCHANGE (code=5) → _Change()
+                auto* changeSym = symTab_.lookup(varLower + "_change");
+                if (changeSym) {
+                    std::string changeFn = cProcName(changeSym->name, AccessLevel::Private);
+                    c_.emitLine("if (code == 5 && " + varName + " != NULL && " + varName + " == hCtrlWE) {");
+                    c_.indent();
+                    c_.emitLine("{ extern void " + changeFn + "(); " + changeFn + "(); }");
+                    c_.dedent();
+                    c_.emitLine("}");
+                }
+            }
+            // Timer: 已通过SetTimer回调处理, 无需WndProc分发
+            // HScrollBar/VScrollBar: 在WM_HSCROLL/WM_VSCROLL中处理(下方)
+        }
+        c_.dedent();
+        c_.emitLine("}");  /* close if ((HWND)lParam != NULL) */
+    }
     // P7.8: 菜单项点击事件派发 (Menu控件ID从1000开始)
     {
         int menuId = 1000;
@@ -6048,7 +6238,26 @@ void CCodeGen::emitFormFramework(const FrmFormDesc& frmDesc, Module& module) {
     }
     c_.emitLine("}");
     }
-    c_.emitLine("break;");
+    // P16: WithEvents HScrollBar/VScrollBar事件分发
+    for (const auto& we : knownWithEventsCtrlVars_) {
+        if (we.second == FrmControlType::HScrollBar || we.second == FrmControlType::VScrollBar) {
+            std::string varName = knownWithEventsCtrlOrigNames_.count(we.first) ? knownWithEventsCtrlOrigNames_[we.first] : cIdent(we.first);
+            auto* scrollSym = symTab_.lookup(we.first + "_scroll");
+            auto* changeSym = symTab_.lookup(we.first + "_change");
+            c_.emitLine("if (" + varName + " != NULL && (void*)" + varName + " == scrollHwnd) {");
+            c_.indent();
+            if (scrollSym) {
+                std::string scrollFn = cProcName(scrollSym->name, AccessLevel::Private);
+                c_.emitLine("if (scrollCode == 5 || scrollCode == 4) { extern void " + scrollFn + "(); " + scrollFn + "(); }");
+            }
+            if (changeSym) {
+                std::string changeFn = cProcName(changeSym->name, AccessLevel::Private);
+                c_.emitLine("else { extern void " + changeFn + "(); " + changeFn + "(); }");
+            }
+            c_.dedent();
+            c_.emitLine("}");
+        }
+    }    c_.emitLine("break;");
     c_.dedent();
     c_.emitLine("}");
 

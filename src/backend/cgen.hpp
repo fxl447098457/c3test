@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 // vb6c3 - C代码生成器
 // 将语义分析后的AST+符号表翻译为C代码，交由MSVC编译
 // 设计参考: cfront, Nim, Zig早期均采用C代码生成路线
@@ -301,6 +301,11 @@ private:
     // P6.5: WithEvents变量 (小写变量名 → 源类名)
     // Dim WithEvents obj As ClassName → knownWithEventsVars_["obj"] = "ClassName"
     std::unordered_map<std::string, std::string> knownWithEventsVars_;
+    // P16: WithEvents控件变量 (小写变量名 → FrmControlType)
+    // Dim WithEvents cmd As CommandButton → knownWithEventsCtrlVars_["cmd"] = CommandButton
+    std::unordered_map<std::string, FrmControlType> knownWithEventsCtrlVars_;
+    // P16: WithEvents控件变量原始名 (小写 → cIdent原名, 如"cmd" → "cmd")
+    std::unordered_map<std::string, std::string> knownWithEventsCtrlOrigNames_;
 
     // P7.5: 窗体控件名映射 (小写控件名 → FrmControlType)
     // 由emitFormFramework从FrmFormDesc填充，用于识别 ctrl.Property 的控件属性访问
