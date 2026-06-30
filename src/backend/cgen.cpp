@@ -1214,7 +1214,10 @@ void CCodeGen::visit(IdentifierExpr& node) {
         
         {"shell",    "vb6_Shell"},
         {"environ",  "vb6_Environ"},
+        {"dir",      "vb6_Dir"},
+        {"curdir",   "vb6_CurDir"},
         {"command",  "vb6_Command"},
+        {"command$", "vb6_Command"},  // P14.2.2: Command$ alias
         {"split",    "vb6_Split"},
         {"join",     "vb6_Join"},
 
@@ -1231,7 +1234,7 @@ void CCodeGen::visit(IdentifierExpr& node) {
         // 无参内置函数: VB6允许省略括号(如 Now, Date, Time)
         // 当IdentifierExpr引用这些函数时，必须生成调用(带括号)
         static const std::unordered_set<std::string> zeroArgBuiltinFuncs = {
-            "now", "date", "time", "freefile", "command"
+            "now", "date", "time", "freefile", "command", "curdir"
         };
         if (zeroArgBuiltinFuncs.count(lower)) {
             lastExpr_ = it->second + "()";
@@ -1791,7 +1794,7 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
         return;
     }
 
-    // P14.2.4: IIf特殊处理 - 生成C三元表达式 (VB6 IIf不短路，但实际用例99%无副作用)
+    // P14.2.4: IIf特殊处理 - 调用类型化RTL函数(函数调用语义确保两个分支都求值,符合VB6规范)
     if (node.callee && node.callee->kind == ASTNodeKind::IdentifierExpr && node.positional.size() == 3) {
         auto& ident = static_cast<IdentifierExpr&>(*node.callee);
         std::string iifLower = ident.name;
@@ -1799,11 +1802,35 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
         if (iifLower == "iif") {
             emitExpr(*node.positional[0]);
             std::string cond = std::move(lastExpr_);
+            // VB6 True=-1, C needs explicit !=0
+            cond = "((" + cond + ") != 0)";
             emitExpr(*node.positional[1]);
             std::string trueVal = std::move(lastExpr_);
             emitExpr(*node.positional[2]);
             std::string falseVal = std::move(lastExpr_);
-            lastExpr_ = "((" + cond + ") ? (" + trueVal + ") : (" + falseVal + "))";
+            // Type dispatch: BSTR > double > long
+            auto isBstrResult = [&](const std::string& e) -> bool {
+                if (e.compare(0, 8, "vb6_BSTR") == 0) return true;
+                if (e.find("VB6_SA_AT(BSTR,") != std::string::npos) return true;
+                static const char* bstrPfx[] = {"vb6_BSTR_FromStr","vb6_Left","vb6_Right","vb6_Mid",
+                    "vb6_UCase","vb6_LCase","vb6_Trim","vb6_LTrim","vb6_RTrim","vb6_Chr",
+                    "vb6_Str","vb6_CStr","vb6_Format","vb6_Replace","vb6_Space","vb6_String",
+                    "vb6_Command","vb6_CurDir","vb6_Environ","vb6_Dir",
+                    "vb6_IIfBSTR","vb6_InputBox","vb6_App_Path","vb6_App_EXEName",
+                    "vb6_GetControlText","vb6_GetControlCaption",nullptr};
+                for (int i = 0; bstrPfx[i]; i++)
+                    if (e.compare(0, strlen(bstrPfx[i]), bstrPfx[i]) == 0) return true;
+                std::string low = e;
+                std::transform(low.begin(), low.end(), low.begin(), ::tolower);
+                return knownBstrVars_.count(low) > 0;
+            };
+            if (isBstrResult(trueVal) || isBstrResult(falseVal)) {
+                lastExpr_ = "vb6_IIfBSTR(" + cond + ", " + trueVal + ", " + falseVal + ")";
+            } else if (trueVal.find('.') != std::string::npos || falseVal.find('.') != std::string::npos) {
+                lastExpr_ = "vb6_IIfDouble(" + cond + ", " + trueVal + ", " + falseVal + ")";
+            } else {
+                lastExpr_ = "vb6_IIfLong(" + cond + ", " + trueVal + ", " + falseVal + ")";
+            }
             return;
         }
     }
@@ -4211,7 +4238,7 @@ void CCodeGen::visit(CallStmt& node) {
                                 "vb6_Trim", "vb6_LTrim", "vb6_RTrim", "vb6_Chr",
                                 "vb6_Str", "vb6_CStr", "vb6_Format", "vb6_Hex", "vb6_Oct",
                                 "vb6_Replace", "vb6_Space", "vb6_String", "vb6_StrReverse",
-                                "vb6_BSTR_Concat", "vb6_BSTR_Empty", "vb6_App_Path", "vb6_App_EXEName", "vb6_GetControlText", "vb6_GetControlCaption"
+                                "vb6_BSTR_Concat", "vb6_BSTR_Empty", "vb6_App_Path", "vb6_App_EXEName", "vb6_Command", "vb6_CurDir", "vb6_Environ", "vb6_Dir", "vb6_IIfBSTR", "vb6_GetControlText", "vb6_GetControlCaption"
                             };
                             auto isBstrExpr = [&](const std::string& expr) -> bool {
                                 for (auto& prefix : bstrFuncs) {
@@ -4467,7 +4494,7 @@ void CCodeGen::visit(PrintStmt& node) {
         "vb6_Trim", "vb6_LTrim", "vb6_RTrim", "vb6_Chr",
         "vb6_Str", "vb6_CStr", "vb6_Format", "vb6_Hex", "vb6_Oct",
         "vb6_Replace", "vb6_Space", "vb6_String", "vb6_StrReverse",
-        "vb6_BSTR_Concat", "vb6_BSTR_Empty", "vb6_App_Path", "vb6_App_EXEName", "vb6_GetControlText", "vb6_GetControlCaption"
+        "vb6_BSTR_Concat", "vb6_BSTR_Empty", "vb6_App_Path", "vb6_App_EXEName", "vb6_Command", "vb6_CurDir", "vb6_Environ", "vb6_Dir", "vb6_IIfBSTR", "vb6_GetControlText", "vb6_GetControlCaption"
     };
     auto isBstrExpr = [&](const std::string& expr) -> bool {
         for (auto& prefix : bstrFuncs) {
@@ -4508,7 +4535,7 @@ void CCodeGen::visit(WriteStmt& node) {
         "vb6_Trim", "vb6_LTrim", "vb6_RTrim", "vb6_Chr",
         "vb6_Str", "vb6_CStr", "vb6_Format", "vb6_Hex", "vb6_Oct",
         "vb6_Replace", "vb6_Space", "vb6_String", "vb6_StrReverse",
-        "vb6_BSTR_Concat", "vb6_BSTR_Empty", "vb6_App_Path", "vb6_App_EXEName", "vb6_GetControlText", "vb6_GetControlCaption"
+        "vb6_BSTR_Concat", "vb6_BSTR_Empty", "vb6_App_Path", "vb6_App_EXEName", "vb6_Command", "vb6_CurDir", "vb6_Environ", "vb6_Dir", "vb6_IIfBSTR", "vb6_GetControlText", "vb6_GetControlCaption"
     };
     auto isBstrExpr = [&](const std::string& expr) -> bool {
         for (auto& prefix : bstrFuncs) {

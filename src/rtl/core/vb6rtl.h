@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 // vb6rtl.h - VB6运行时库最小头文件
 // 为C代码生成器提供VB6基本类型的C定义
 // P3.6 阎段: 最小子集, 仅支撑 hello.bas 等简单程序
@@ -356,7 +356,10 @@ BSTR vb6_App_EXEName(void);  // App.EXEName - EXE文件名(不含扩展名)
 int32_t vb6_App_hInstance(void); // App.hInstance - 模块实例句柄
 
 // P14.2.4: IIf / InputBox
-vb6_VARIANT vb6_IIf(int16_t expr, vb6_VARIANT truepart, vb6_VARIANT falsepart);
+BSTR vb6_IIfBSTR(int32_t cond, BSTR truepart, BSTR falsepart);
+int32_t vb6_IIfLong(int32_t cond, int32_t truepart, int32_t falsepart);
+double vb6_IIfDouble(int32_t cond, double truepart, double falsepart);
+vb6_VARIANT vb6_IIfVariant(int32_t cond, vb6_VARIANT truepart, vb6_VARIANT falsepart);
 BSTR vb6_InputBox(BSTR prompt, BSTR title, BSTR defaultstr, int32_t xpos, int32_t ypos, BSTR helpfile, int32_t context);
 
 // 类型转换 (补充)

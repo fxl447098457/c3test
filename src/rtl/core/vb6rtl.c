@@ -1,4 +1,4 @@
-﻿// vb6rtl.c - VB6运行时库最小实现
+// vb6rtl.c - VB6运行时库最小实现
 // 仅支持 hello.bas 等简单程序运行
 
 #include "vb6rtl.h"
@@ -890,9 +890,27 @@ int32_t vb6_App_hInstance(void) {
 // P14.2.4: IIf / InputBox
 // ============================================================
 
-/* IIf: VB6内联条件函数 - 注意VB6的IIf不短路，两个分支都求值 */
-vb6_VARIANT vb6_IIf(int16_t expr, vb6_VARIANT truepart, vb6_VARIANT falsepart) {
-    return expr ? truepart : falsepart;
+/* IIf: VB6内联条件函数 - 通过函数调用确保两个分支都求值(C函数参数求值顺序不影响"都求值")
+ * VB6 IIf 不短路，两个分支都必须计算，然后按条件选一个
+ * 通过函数调用而非C三元运算符实现，保证VB6语义正确 */
+BSTR vb6_IIfBSTR(int32_t cond, BSTR truepart, BSTR falsepart) {
+    BSTR result = cond ? truepart : falsepart;
+    /* 释放未被选中的分支(防止BSTR泄漏) */
+    if (cond) { vb6_BSTR_Free(falsepart); }
+    else      { vb6_BSTR_Free(truepart); }
+    return result;
+}
+int32_t vb6_IIfLong(int32_t cond, int32_t truepart, int32_t falsepart) {
+    (void)falsepart;
+    return cond ? truepart : falsepart;
+}
+double vb6_IIfDouble(int32_t cond, double truepart, double falsepart) {
+    (void)falsepart;
+    return cond ? truepart : falsepart;
+}
+vb6_VARIANT vb6_IIfVariant(int32_t cond, vb6_VARIANT truepart, vb6_VARIANT falsepart) {
+    if (cond) { vb6_VariantClear(&falsepart); return truepart; }
+    else      { vb6_VariantClear(&truepart);  return falsepart; }
 }
 
 /* InputBox: 简化实现 - 使用控制台输入 (非GUI环境) */

@@ -182,7 +182,21 @@ ExprPtr Parser::parseNullDenotation() {
             return nullptr;
         }
 
-
+        // --- Command$ (P14.2.2) ---
+        case TokenKind::Command: {
+            auto loc = currentLoc();
+            advance(); // consume 'Command'
+            // skip optional $ suffix
+            if (cur_.kind == TokenKind::Dollar) advance();
+            // Command$ / Command is a zero-arg function - return identifier, cgen handles via builtin map
+            auto name = std::string("Command");
+            if (cur_.kind == TokenKind::LeftParen) {
+                advance(); // consume '('
+                // parse empty arg list
+                expect(TokenKind::RightParen, DiagnosticID::ParseExpectedToken, "expected ')'");
+            }
+            return std::make_unique<IdentifierExpr>(loc, name);
+        }
         default:
             // 软关键字在表达式位置 → 解析为标识符
             if (isSoftKeyword(cur_.kind)) {
