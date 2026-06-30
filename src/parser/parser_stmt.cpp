@@ -164,6 +164,11 @@ StmtPtr Parser::parseStatement() {
             }
             return parseUnlockStmt();
         }
+        case TokenKind::Reset: {
+            auto loc = currentLoc();
+            advance(); // consume 'Reset'
+            return std::make_unique<ResetStmt>(loc);
+        }
         case TokenKind::FileCopy: return parseFileCopyStmt();
         case TokenKind::Kill:     return parseKillStmt();
         case TokenKind::MkDir:    return parseMkDirStmt();

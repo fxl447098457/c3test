@@ -333,7 +333,7 @@ bool Parser::isSoftKeyword(TokenKind kind) const {
         case TokenKind::Input:     case TokenKind::Output:   case TokenKind::Append:
         case TokenKind::Binary:    case TokenKind::Random:
         case TokenKind::Read:      case TokenKind::Write:    case TokenKind::ReadWrite:
-        case TokenKind::Shared:    case TokenKind::Lock:     case TokenKind::Unlock:
+        case TokenKind::Shared:    case TokenKind::Lock:     case TokenKind::Unlock: case TokenKind::Reset:
         case TokenKind::Put:       case TokenKind::Seek:     case TokenKind::Close:
         case TokenKind::Open:      case TokenKind::Print:    case TokenKind::Line:
         case TokenKind::FreeFile:  case TokenKind::EOF_keyword:

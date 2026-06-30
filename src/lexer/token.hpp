@@ -204,6 +204,7 @@ enum class TokenKind : uint16_t {
     Shared,
     Lock,
     Unlock,
+    Reset,
     Put,            // Put (文件I/O，与Get对应)
     Seek,
     Line,           // Line Input / Line控件

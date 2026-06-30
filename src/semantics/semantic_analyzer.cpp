@@ -1688,6 +1688,20 @@ addBuiltinFunc("CallByName", Vb6Type::Variant);
     addBuiltinFunc("FormatCurrency", Vb6Type::String);
     addBuiltinFunc("FormatNumber", Vb6Type::String);
     addBuiltinFunc("FormatPercent", Vb6Type::String);
+    // P18-E: Financial / Choose / Switch / Lock / Reset / Partition
+    addBuiltinFunc("Choose", Vb6Type::Variant);
+    addBuiltinFunc("Switch", Vb6Type::Variant);
+    addBuiltinFunc("SLN", Vb6Type::Double);
+    addBuiltinFunc("SYD", Vb6Type::Double);
+    addBuiltinFunc("DDB", Vb6Type::Double);
+    addBuiltinFunc("FV", Vb6Type::Double);
+    addBuiltinFunc("PV", Vb6Type::Double);
+    addBuiltinFunc("Pmt", Vb6Type::Double);
+    addBuiltinFunc("IPmt", Vb6Type::Double);
+    addBuiltinFunc("PPmt", Vb6Type::Double);
+    addBuiltinFunc("RATE", Vb6Type::Double);
+    addBuiltinFunc("NPV", Vb6Type::Double);
+    addBuiltinFunc("Partition", Vb6Type::String);
 }
 
 // ============================================================

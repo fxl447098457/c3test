@@ -158,7 +158,7 @@ enum class ASTNodeKind : uint16_t {
     OpenStmt, CloseStmt, GetStmt, PutStmt,
     InputStmt, PrintStmt, WriteStmt,
     LineInputStmt, WidthStmt,
-    SeekStmt, LockStmt, UnlockStmt,
+    SeekStmt, LockStmt, UnlockStmt, ResetStmt,
     NameStmt,
     FileCopyStmt, KillStmt, MkDirStmt, RmDirStmt,
     ChDirStmt, ChDriveStmt,
@@ -257,6 +257,7 @@ class WidthStmt;
 class SeekStmt;
 class LockStmt;
 class UnlockStmt;
+class ResetStmt;
 class NameStmt;
 class FileCopyStmt;
 class KillStmt;
@@ -1011,6 +1012,12 @@ public:
     UnlockStmt(SourceLocation loc, ExprPtr fn, ExprPtr s, ExprPtr e)
         : Stmt(ASTNodeKind::UnlockStmt, loc),
           fileNumber(std::move(fn)), start(std::move(s)), end(std::move(e)) {}
+};
+
+// Reset 语句: Reset (关闭所有文件)
+class ResetStmt : public Stmt {
+public:
+    ResetStmt(SourceLocation loc) : Stmt(ASTNodeKind::ResetStmt, loc) {}
 };
 
 // Name 语句: Name oldpathname As newpathname

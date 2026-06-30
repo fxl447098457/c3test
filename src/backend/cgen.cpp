@@ -1252,7 +1252,19 @@ void CCodeGen::visit(IdentifierExpr& node) {
         {"formatcurrency", "vb6_FormatCurrency"},
         {"formatnumber",  "vb6_FormatNumber"},
         {"formatpercent",  "vb6_FormatPercent"},
-        
+        // P18-E: 
+        {"sln",       "vb6_SLN"},
+        {"syd",       "vb6_SYD"},
+        {"ddb",       "vb6_DDB"},
+        {"fv",        "vb6_FV"},
+        {"pv",        "vb6_PV"},
+        {"pmt",       "vb6_Pmt"},
+        {"ipmt",      "vb6_IPmt"},
+        {"ppmt",      "vb6_PPmt"},
+        {"rate",      "vb6_RATE"},
+        {"npv",       "vb6_NPV"},
+        {"partition", "vb6_Partition"},
+
     };
 
     auto it = builtinFuncs.find(lower);
@@ -1906,6 +1918,36 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
         if (vpLower == "varptr") {
             emitExpr(*node.positional[0]);
             lastExpr_ = "(int32_t)(intptr_t)&(" + lastExpr_ + ")";
+            return;
+        }
+    }
+
+
+    // P18-E: Choose special handling - nested ternary chain
+    if (node.callee && node.callee->kind == ASTNodeKind::IdentifierExpr && !node.positional.empty()) {
+        auto& ident = static_cast<IdentifierExpr&>(*node.callee);
+        std::string csLower = ident.name;
+        std::transform(csLower.begin(), csLower.end(), csLower.begin(), ::tolower);
+        if (csLower == "choose" && node.positional.size() >= 2) {
+            emitExpr(*node.positional[0]);
+            std::string idx = std::move(lastExpr_);
+            std::string result = "NULL";
+            for (int i = (int)node.positional.size() - 1; i >= 1; i--) {
+                emitExpr(*node.positional[i]);
+                result = "((" + idx + ")==" + std::to_string(i) + " ? (" + lastExpr_ + ") : (" + result + "))";
+            }
+            lastExpr_ = result;
+            return;
+        }
+        if (csLower == "switch" && node.positional.size() >= 2 && node.positional.size() % 2 == 0) {
+            std::string result = "NULL";
+            for (int i = (int)node.positional.size() - 2; i >= 0; i -= 2) {
+                emitExpr(*node.positional[i]);
+                std::string cond = "((" + lastExpr_ + ")!=0)";
+                emitExpr(*node.positional[i + 1]);
+                result = "(" + cond + " ? (" + lastExpr_ + ") : (" + result + "))";
+            }
+            lastExpr_ = result;
             return;
         }
     }
@@ -3045,6 +3087,7 @@ case ASTNodeKind::GoSubStmt:       visit(static_cast<GoSubStmt&>(*stmt)); break;
             case ASTNodeKind::SeekStmt:        visit(static_cast<SeekStmt&>(*stmt)); break;
             case ASTNodeKind::LockStmt:        visit(static_cast<LockStmt&>(*stmt)); break;
             case ASTNodeKind::UnlockStmt:      visit(static_cast<UnlockStmt&>(*stmt)); break;
+            case ASTNodeKind::ResetStmt:        visit(static_cast<ResetStmt&>(*stmt)); break;
             case ASTNodeKind::WidthStmt:       visit(static_cast<WidthStmt&>(*stmt)); break;
             case ASTNodeKind::KillStmt:        visit(static_cast<KillStmt&>(*stmt)); break;
             case ASTNodeKind::NameStmt:        visit(static_cast<NameStmt&>(*stmt)); break;
@@ -4761,13 +4804,42 @@ void CCodeGen::visit(SeekStmt& node) {
 }
 
 void CCodeGen::visit(LockStmt& node) {
-    // 简化: 文件锁在单进程场景不需要
-    c_.emitLine("/* Lock: no-op in single-process */");
+    emitExpr(*node.fileNumber);
+    std::string fnum = std::move(lastExpr_);
+    std::string startArg = "0", endArg = "0";
+    if (node.start) {
+        emitExpr(*node.start);
+        startArg = std::move(lastExpr_);
+        if (node.end) {
+            emitExpr(*node.end);
+            endArg = std::move(lastExpr_);
+        } else {
+            endArg = "0";
+        }
+    }
+    c_.emitLine("vb6_Lock((int32_t)(" + fnum + "), (int64_t)(" + startArg + "), (int64_t)(" + endArg + "));");
 }
 
 void CCodeGen::visit(UnlockStmt& node) {
-    // 简化: 文件锁在单进程场景不需要
-    c_.emitLine("/* Unlock: no-op in single-process */");
+    emitExpr(*node.fileNumber);
+    std::string fnum = std::move(lastExpr_);
+    std::string startArg = "0", endArg = "0";
+    if (node.start) {
+        emitExpr(*node.start);
+        startArg = std::move(lastExpr_);
+        if (node.end) {
+            emitExpr(*node.end);
+            endArg = std::move(lastExpr_);
+        } else {
+            endArg = "0";
+        }
+    }
+    c_.emitLine("vb6_Unlock((int32_t)(" + fnum + "), (int64_t)(" + startArg + "), (int64_t)(" + endArg + "));");
+}
+
+void CCodeGen::visit(ResetStmt& node) {
+    (void)node;
+    c_.emitLine("vb6_Reset();");
 }
 
 void CCodeGen::visit(WidthStmt& node) {

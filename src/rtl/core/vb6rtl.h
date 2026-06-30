@@ -433,6 +433,22 @@ BSTR   vb6_FormatCurrency(double value, int32_t numDigits, int32_t incLeading, i
 BSTR   vb6_FormatNumber(double value, int32_t numDigits, int32_t incLeading, int32_t useParens, int32_t groupDigits);
 BSTR   vb6_FormatPercent(double value, int32_t numDigits, int32_t incLeading, int32_t useParens, int32_t groupDigits);
 
+// P18-E: 兼容性填平 — 金融函数+文件锁定+Partition
+double vb6_SLN(double cost, double salvage, double life);
+double vb6_SYD(double cost, double salvage, double life, double period);
+double vb6_DDB(double cost, double salvage, double life, double period, double factor);
+double vb6_FV(double rate, double nper, double pmt, double pv, int32_t type);
+double vb6_PV(double rate, double nper, double pmt, double fv, int32_t type);
+double vb6_Pmt(double rate, double nper, double pv, double fv, int32_t type);
+double vb6_IPmt(double rate, double per, double nper, double pv, double fv, int32_t type);
+double vb6_PPmt(double rate, double per, double nper, double pv, double fv, int32_t type);
+double vb6_RATE(double nper, double pmt, double pv, double fv, int32_t type, double guess);
+double vb6_NPV(double rate, struct vb6_SafeArray1D* values);
+void   vb6_Lock(int32_t filenum, int64_t start, int64_t end);
+void   vb6_Unlock(int32_t filenum, int64_t start, int64_t end);
+void   vb6_Reset(void);
+BSTR   vb6_Partition(int64_t number, int64_t start, int64_t stop, int64_t interval);
+
 // ============================================================
 // SAFEARRAY - VB6 动态/静态数组
 // ============================================================

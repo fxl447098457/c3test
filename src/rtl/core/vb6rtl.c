@@ -12,6 +12,7 @@
 #include <time.h>
 #ifdef _WIN32
 #include <direct.h>
+#include <io.h>
 #include <windows.h>
 #endif
 
@@ -2946,4 +2947,273 @@ vb6_VARIANT vb6_CallByName(void* obj, const wchar_t* procName, int32_t callType,
     if (excep.bstrHelpFile) SysFreeString(excep.bstrHelpFile);
 
     return result;
+}
+
+
+// ============================================================
+// P18-E: Financial Functions
+// ============================================================
+
+// SLN - Straight Line Depreciation
+double vb6_SLN(double cost, double salvage, double life) {
+    if (life == 0.0) return 0.0;
+    return (cost - salvage) / life;
+}
+
+// SYD - Sum of Years' Digits Depreciation
+double vb6_SYD(double cost, double salvage, double life, double period) {
+    if (life == 0.0) return 0.0;
+    return (cost - salvage) * (life - period + 1.0) * 2.0 / (life * (life + 1.0));
+}
+
+// DDB - Double Declining Balance Depreciation
+double vb6_DDB(double cost, double salvage, double life, double period, double factor) {
+    if (life == 0.0) return 0.0;
+    double bookValue = cost;
+    double depreciation = 0.0;
+    int pmax = (int)period;
+    for (int p = 1; p <= pmax; p++) {
+        depreciation = bookValue * factor / life;
+        if (bookValue - depreciation < salvage) {
+            depreciation = bookValue - salvage;
+        }
+        if (p == pmax) break;
+        bookValue -= depreciation;
+        if (bookValue <= salvage) {
+            if (p == pmax) break;
+            depreciation = 0.0;
+            break;
+        }
+    }
+    return depreciation;
+}
+
+// FV - Future Value of an annuity
+double vb6_FV(double rate, double nper, double pmt, double pv, int32_t type) {
+    if (rate == 0.0) {
+        return -(pv + pmt * nper);
+    }
+    double factor = pow(1.0 + rate, nper);
+    return -(pv * factor + pmt * (factor - 1.0) / rate * (1.0 + rate * (double)type));
+}
+
+// PV - Present Value of an annuity
+double vb6_PV(double rate, double nper, double pmt, double fv, int32_t type) {
+    if (rate == 0.0) {
+        return -(fv + pmt * nper);
+    }
+    double factor = pow(1.0 + rate, nper);
+    return -(fv / factor + pmt * (1.0 - 1.0 / factor) / rate * (1.0 + rate * (double)type));
+}
+
+// Pmt - Periodic Payment
+double vb6_Pmt(double rate, double nper, double pv, double fv, int32_t type) {
+    if (rate == 0.0) {
+        if (nper == 0.0) return 0.0;
+        return -(pv + fv) / nper;
+    }
+    double factor = pow(1.0 + rate, nper);
+    return -(pv * factor + fv) * rate / ((factor - 1.0) * (1.0 + rate * (double)type));
+}
+
+// IPmt - Interest Payment for a specific period
+double vb6_IPmt(double rate, double per, double nper, double pv, double fv, int32_t type) {
+    (void)nper; (void)fv;
+    double pmt = vb6_Pmt(rate, nper, pv, fv, type);
+    double n = per - 1.0;
+    if (type == 1) n -= 1.0;
+    if (n < 0.0) return 0.0;
+
+    double balance;
+    if (rate == 0.0) {
+        balance = pv + pmt * n;
+    } else {
+        double factor = pow(1.0 + rate, n);
+        balance = pv * factor + pmt * (factor - 1.0) / rate;
+    }
+    return -balance * rate;
+}
+
+// PPmt - Principal Payment for a specific period
+double vb6_PPmt(double rate, double per, double nper, double pv, double fv, int32_t type) {
+    double pmt = vb6_Pmt(rate, nper, pv, fv, type);
+    double ipmt = vb6_IPmt(rate, per, nper, pv, fv, type);
+    return pmt - ipmt;
+}
+
+// RATE - Interest rate per period (Newton's method iteration)
+double vb6_RATE(double nper, double pmt, double pv, double fv, int32_t type, double guess) {
+    double rate = guess;
+    if (rate == 0.0) rate = 0.1;
+
+    for (int iter = 0; iter < 100; iter++) {
+        double factor = pow(1.0 + rate, nper);
+        double f;
+        if (rate == 0.0) {
+            f = pv + pmt * nper * (1.0 + rate * (double)type) + fv;
+        } else {
+            f = pv * factor + pmt * (1.0 + rate * (double)type) * (factor - 1.0) / rate + fv;
+        }
+
+        double delta = rate * 0.0001;
+        if (delta < 1e-10) delta = 1e-10;
+        double rate2 = rate + delta;
+        double factor2 = pow(1.0 + rate2, nper);
+        double f2;
+        if (rate2 == 0.0) {
+            f2 = pv + pmt * nper * (1.0 + rate2 * (double)type) + fv;
+        } else {
+            f2 = pv * factor2 + pmt * (1.0 + rate2 * (double)type) * (factor2 - 1.0) / rate2 + fv;
+        }
+        double fp = (f2 - f) / delta;
+
+        if (fabs(fp) < 1e-15) break;
+
+        double newRate = rate - f / fp;
+        if (fabs(newRate - rate) < 1e-10) {
+            rate = newRate;
+            break;
+        }
+        rate = newRate;
+    }
+    return rate;
+}
+
+// NPV - Net Present Value
+double vb6_NPV(double rate, struct vb6_SafeArray1D* values) {
+    if (!values || !values->data || values->count <= 0) return 0.0;
+    double npv = 0.0;
+
+    for (int32_t i = 0; i < values->count; i++) {
+        double val = 0.0;
+        switch (values->elemType) {
+            case 6: /* vb6_sa_double */
+                val = ((double*)values->data)[i];
+                break;
+            case 5: /* vb6_sa_single */
+                val = (double)((float*)values->data)[i];
+                break;
+            case 4: /* vb6_sa_long */
+                val = (double)((int32_t*)values->data)[i];
+                break;
+            case 3: /* vb6_sa_int */
+                val = (double)((int16_t*)values->data)[i];
+                break;
+            case 2: /* vb6_sa_byte */
+                val = (double)((uint8_t*)values->data)[i];
+                break;
+            case 8: /* vb6_sa_variant */
+                val = vb6_VariantToDouble(((vb6_VARIANT*)values->data)[i]);
+                break;
+            default:
+                val = 0.0;
+                break;
+        }
+        npv += val / pow(1.0 + rate, (double)(i + 1));
+    }
+    return npv;
+}
+
+// ============================================================
+// P18-E: File Locking
+// ============================================================
+
+void vb6_Lock(int32_t filenum, int64_t start, int64_t end) {
+#ifdef _WIN32
+    if (filenum < 1 || filenum >= VB6_MAX_FILES) return;
+    FILE* f = vb6_file_table[filenum];
+    if (!f) return;
+
+    intptr_t osfhandle = _get_osfhandle(_fileno(f));
+    if (osfhandle == -1) return;
+    HANDLE h = (HANDLE)osfhandle;
+
+    DWORD64 offset, length;
+    if (start <= 0 && end <= 0) {
+        offset = 0;
+        length = 0x7FFFFFFF;
+    } else if (end <= 0) {
+        offset = (DWORD64)start;
+        length = 0x7FFFFFFF;
+    } else {
+        offset = (DWORD64)start;
+        length = (DWORD64)(end - start + 1);
+    }
+
+    OVERLAPPED ov;
+    ZeroMemory(&ov, sizeof(ov));
+    ov.Offset = (DWORD)offset;
+    ov.OffsetHigh = (DWORD)(offset >> 32);
+    LockFileEx(h, LOCKFILE_EXCLUSIVE_LOCK, 0, (DWORD)length, (DWORD)(length >> 32), &ov);
+#else
+    (void)filenum; (void)start; (void)end;
+#endif
+}
+
+void vb6_Unlock(int32_t filenum, int64_t start, int64_t end) {
+#ifdef _WIN32
+    if (filenum < 1 || filenum >= VB6_MAX_FILES) return;
+    FILE* f = vb6_file_table[filenum];
+    if (!f) return;
+
+    intptr_t osfhandle = _get_osfhandle(_fileno(f));
+    if (osfhandle == -1) return;
+    HANDLE h = (HANDLE)osfhandle;
+
+    DWORD64 offset, length;
+    if (start <= 0 && end <= 0) {
+        offset = 0;
+        length = 0x7FFFFFFF;
+    } else if (end <= 0) {
+        offset = (DWORD64)start;
+        length = 0x7FFFFFFF;
+    } else {
+        offset = (DWORD64)start;
+        length = (DWORD64)(end - start + 1);
+    }
+
+    OVERLAPPED ov;
+    ZeroMemory(&ov, sizeof(ov));
+    ov.Offset = (DWORD)offset;
+    ov.OffsetHigh = (DWORD)(offset >> 32);
+    UnlockFileEx(h, 0, (DWORD)length, (DWORD)(length >> 32), &ov);
+#else
+    (void)filenum; (void)start; (void)end;
+#endif
+}
+
+void vb6_Reset(void) {
+    vb6_CloseAll();
+}
+
+// ============================================================
+// P18-E: Partition Function
+// ============================================================
+
+BSTR vb6_Partition(int64_t number, int64_t start, int64_t stop, int64_t interval) {
+    int64_t rangeStart = 0, rangeEnd = 0;
+    int leftBlank = 0, rightBlank = 0;
+
+    if (number < start) {
+        leftBlank = 1;
+        rangeEnd = start - 1;
+    } else if (number > stop) {
+        rightBlank = 1;
+        rangeStart = stop + 1;
+    } else {
+        int64_t idx = (number - start) / interval;
+        rangeStart = start + idx * interval;
+        rangeEnd = rangeStart + interval - 1;
+        if (rangeEnd > stop) rangeEnd = stop;
+    }
+
+    wchar_t buf[64];
+    if (leftBlank) {
+        swprintf(buf, 64, L"%10ls: %10lld", L"", (long long)rangeEnd);
+    } else if (rightBlank) {
+        swprintf(buf, 64, L"%10lld: %10ls", (long long)rangeStart, L"");
+    } else {
+        swprintf(buf, 64, L"%10lld: %10lld", (long long)rangeStart, (long long)rangeEnd);
+    }
+    return vb6_BSTR_FromStr(buf);
 }

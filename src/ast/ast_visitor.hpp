@@ -72,6 +72,7 @@ public:
     virtual void visit(SeekStmt& node) {}
     virtual void visit(LockStmt& node) {}
     virtual void visit(UnlockStmt& node) {}
+    virtual void visit(ResetStmt& node) {}
     virtual void visit(NameStmt& node) {}
     virtual void visit(FileCopyStmt& node) {}
     virtual void visit(KillStmt& node) {}

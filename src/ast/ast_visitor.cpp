@@ -220,6 +220,7 @@ void traverseStmt(Stmt& stmt, ASTVisitor& visitor) {
     case ASTNodeKind::LabelStmt:
     case ASTNodeKind::BeepStmt:
     case ASTNodeKind::DoEventsStmt:
+    case ASTNodeKind::ResetStmt:
     case ASTNodeKind::OptionStmt:
     case ASTNodeKind::ImplementsStmt:
     case ASTNodeKind::DefTypeStmt:
@@ -237,6 +238,7 @@ void traverseStmt(Stmt& stmt, ASTVisitor& visitor) {
         case ASTNodeKind::LabelStmt:    visitor.visit(static_cast<LabelStmt&>(stmt)); break;
         case ASTNodeKind::BeepStmt:     visitor.visit(static_cast<BeepStmt&>(stmt)); break;
         case ASTNodeKind::DoEventsStmt: visitor.visit(static_cast<DoEventsStmt&>(stmt)); break;
+        case ASTNodeKind::ResetStmt:   visitor.visit(static_cast<ResetStmt&>(stmt)); break;
         case ASTNodeKind::OptionStmt:   visitor.visit(static_cast<OptionStmt&>(stmt)); break;
         case ASTNodeKind::ImplementsStmt: visitor.visit(static_cast<ImplementsStmt&>(stmt)); break;
         case ASTNodeKind::DefTypeStmt:  visitor.visit(static_cast<DefTypeStmt&>(stmt)); break;

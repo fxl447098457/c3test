@@ -311,6 +311,7 @@ public:
     void visit(SeekStmt&) override    { out() << "Seek\n"; }
     void visit(LockStmt&) override    { out() << "Lock\n"; }
     void visit(UnlockStmt&) override  { out() << "Unlock\n"; }
+    void visit(ResetStmt&) override   { out() << "Reset\n"; }
     void visit(NameStmt&) override    { out() << "Name\n"; }
     void visit(FileCopyStmt&) override { out() << "FileCopy\n"; }
     void visit(KillStmt&) override    { out() << "Kill\n"; }
@@ -539,6 +540,7 @@ private:
         case ASTNodeKind::SeekStmt:        visit(static_cast<SeekStmt&>(s)); break;
         case ASTNodeKind::LockStmt:        visit(static_cast<LockStmt&>(s)); break;
         case ASTNodeKind::UnlockStmt:      visit(static_cast<UnlockStmt&>(s)); break;
+        case ASTNodeKind::ResetStmt:        visit(static_cast<ResetStmt&>(s)); break;
         case ASTNodeKind::FileCopyStmt:    visit(static_cast<FileCopyStmt&>(s)); break;
         case ASTNodeKind::KillStmt:        visit(static_cast<KillStmt&>(s)); break;
         case ASTNodeKind::MkDirStmt:       visit(static_cast<MkDirStmt&>(s)); break;

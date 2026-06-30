@@ -137,6 +137,7 @@ public:
     void visit(SeekStmt& node) override;
     void visit(LockStmt& node) override;
     void visit(UnlockStmt& node) override;
+    void visit(ResetStmt& node) override;
     void visit(WidthStmt& node) override;
     void visit(KillStmt& node) override;
     void visit(NameStmt& node) override;

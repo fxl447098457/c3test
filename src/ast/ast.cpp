@@ -65,6 +65,7 @@ const char* ASTNode::kindName() const {
     case ASTNodeKind::SeekStmt:        return "SeekStmt";
     case ASTNodeKind::LockStmt:        return "LockStmt";
     case ASTNodeKind::UnlockStmt:      return "UnlockStmt";
+    case ASTNodeKind::ResetStmt:        return "ResetStmt";
     case ASTNodeKind::NameStmt:        return "NameStmt";
     case ASTNodeKind::FileCopyStmt:    return "FileCopyStmt";
     case ASTNodeKind::KillStmt:        return "KillStmt";

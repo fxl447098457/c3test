@@ -88,7 +88,7 @@ void Lexer::initKeywords() {
         {"random", TokenKind::Random}, {"access", TokenKind::Access},
         {"read", TokenKind::Read}, {"write", TokenKind::Write},
         {"readwrite", TokenKind::ReadWrite}, {"shared", TokenKind::Shared},
-        {"lock", TokenKind::Lock}, {"unlock", TokenKind::Unlock},
+        {"lock", TokenKind::Lock}, {"unlock", TokenKind::Unlock}, {"reset", TokenKind::Reset},
         {"get", TokenKind::Get}, {"put", TokenKind::Put},
         {"seek", TokenKind::Seek}, {"line", TokenKind::Line},
         {"width", TokenKind::Width}, {"print", TokenKind::Print},
