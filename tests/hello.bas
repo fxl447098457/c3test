@@ -8,7 +8,7 @@ Public Sub Main()
     name = "World"
     
     If Len(name) > 0 Then
-        MsgBox "Hello, " & name & "!", vbOKOnly, "Greeting"
+        ' MsgBox "Hello, " & name & "!", vbOKOnly, "Greeting"  ' commented: blocks automation
     Else
         Debug.Print "Name is empty"
     End If
