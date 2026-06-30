@@ -362,6 +362,7 @@ void vb6_AppActivate(BSTR title, int32_t wait) {
     if (hwnd) {
         SetForegroundWindow(hwnd);
     }
+}
 
 BSTR vb6_CDec(vb6_VARIANT v) {
     /* CDec: convert to Decimal — VB6 Decimal is 12-byte, simplified as BSTR representation */
@@ -398,7 +399,6 @@ void vb6_MidSet(BSTR* target, int32_t start, int32_t len, BSTR replacement) {
     /* Replace target */
     SysFreeString(*target);
     *target = result;
-}
 }
 
 // ============================================================
@@ -603,6 +603,12 @@ void vb6_Beep(void) {
     putchar('\a');
     fflush(stdout);
 #endif
+}
+// P18-C: Option Compare
+int g_vb6_optionCompareText = 0;  // 0=Binary(default), 1=Text
+int vb6_StrCmp(const wchar_t* a, const wchar_t* b) {
+    if (g_vb6_optionCompareText) return _wcsicmp(a, b);
+    return wcscmp(a, b);
 }
 
 // ============================================================
@@ -1017,6 +1023,222 @@ BSTR vb6_App_EXEName(void) {
 /* App.hInstance: 返回模块实例句柄 */
 int32_t vb6_App_hInstance(void) {
     return (int32_t)(intptr_t)GetModuleHandleW(NULL);
+}
+
+// ============================================================
+// P18-C: Clipboard 对象
+// ============================================================
+void vb6_Clipboard_SetText(BSTR text) {
+    if (!OpenClipboard(NULL)) return;
+    EmptyClipboard();
+    int len = SysStringLen(text);
+    HGLOBAL hMem = GlobalAlloc(GMEM_MOVEABLE, (len + 1) * sizeof(wchar_t));
+    if (hMem) {
+        wchar_t* p = (wchar_t*)GlobalLock(hMem);
+        if (p) {
+            memcpy(p, text, len * sizeof(wchar_t));
+            p[len] = 0;
+            GlobalUnlock(hMem);
+            SetClipboardData(CF_UNICODETEXT, hMem);
+        } else {
+            GlobalFree(hMem);
+        }
+    }
+    CloseClipboard();
+}
+
+BSTR vb6_Clipboard_GetText(void) {
+    if (!IsClipboardFormatAvailable(CF_UNICODETEXT)) return SysAllocString(L"");
+    if (!OpenClipboard(NULL)) return SysAllocString(L"");
+    HANDLE hData = GetClipboardData(CF_UNICODETEXT);
+    BSTR result = SysAllocString(L"");
+    if (hData) {
+        wchar_t* p = (wchar_t*)GlobalLock(hData);
+        if (p) {
+            result = SysAllocString(p);
+            GlobalUnlock(hData);
+        }
+    }
+    CloseClipboard();
+    return result;
+}
+
+void vb6_Clipboard_Clear(void) {
+    if (OpenClipboard(NULL)) { EmptyClipboard(); CloseClipboard(); }
+}
+
+int32_t vb6_Clipboard_GetFormat(int32_t format) {
+    /* format: 1=vbCFText, 2=vbCFBitmap, 3=vbCFMetafile, 8=vbCFDIB, 9=vbCFPalette, &HBF00+=vbCFRtf */
+    UINT cf = CF_UNICODETEXT;
+    if (format == 1 || format == 2) cf = CF_UNICODETEXT;
+    else if (format == 2) cf = CF_BITMAP;
+    else if (format == 3) cf = CF_METAFILEPICT;
+    else if (format == 8) cf = CF_DIB;
+    else if (format == 9) cf = CF_PALETTE;
+    else if (format == 0xBF00) cf = RegisterClipboardFormatW(L"Rich Text Format");
+    return IsClipboardFormatAvailable(cf) ? -1 : 0;
+}
+
+// ============================================================
+// P18-C: Screen 对象
+// ============================================================
+#define VB6_TWIPS_PER_INCH 1440
+
+int32_t vb6_Screen_Width(void) {
+    HDC dc = GetDC(NULL);
+    int w = GetDeviceCaps(dc, HORZRES);
+    int dpi = GetDeviceCaps(dc, LOGPIXELSX);
+    ReleaseDC(NULL, dc);
+    return dpi > 0 ? (int32_t)(w * (double)VB6_TWIPS_PER_INCH / dpi) : w * 15;
+}
+
+int32_t vb6_Screen_Height(void) {
+    HDC dc = GetDC(NULL);
+    int h = GetDeviceCaps(dc, VERTRES);
+    int dpi = GetDeviceCaps(dc, LOGPIXELSY);
+    ReleaseDC(NULL, dc);
+    return dpi > 0 ? (int32_t)(h * (double)VB6_TWIPS_PER_INCH / dpi) : h * 15;
+}
+
+int32_t vb6_Screen_MouseX(void) {
+    POINT pt; GetCursorPos(&pt);
+    HDC dc = GetDC(NULL);
+    int dpi = GetDeviceCaps(dc, LOGPIXELSX);
+    ReleaseDC(NULL, dc);
+    return dpi > 0 ? (int32_t)(pt.x * (double)VB6_TWIPS_PER_INCH / dpi) : pt.x * 15;
+}
+
+int32_t vb6_Screen_MouseY(void) {
+    POINT pt; GetCursorPos(&pt);
+    HDC dc = GetDC(NULL);
+    int dpi = GetDeviceCaps(dc, LOGPIXELSY);
+    ReleaseDC(NULL, dc);
+    return dpi > 0 ? (int32_t)(pt.y * (double)VB6_TWIPS_PER_INCH / dpi) : pt.y * 15;
+}
+
+void* vb6_Screen_ActiveControl(void) {
+    return (void*)GetFocus();
+}
+
+void* vb6_Screen_ActiveForm(void) {
+    HWND hwnd = GetFocus();
+    while (hwnd && !IsWindowVisible(hwnd)) hwnd = GetParent(hwnd);
+    while (hwnd) {
+        HWND parent = GetParent(hwnd);
+        if (!parent || parent == GetDesktopWindow()) break;
+        if (GetWindowLongPtrA(hwnd, GWLP_HWNDPARENT) == 0) break;
+        hwnd = (HWND)GetWindowLongPtrA(hwnd, GWLP_HWNDPARENT);
+        if (!hwnd) break;
+    }
+    return (void*)hwnd;
+}
+
+int32_t vb6_Screen_TwipsPerPixelX(void) {
+    HDC dc = GetDC(NULL);
+    int dpi = GetDeviceCaps(dc, LOGPIXELSX);
+    ReleaseDC(NULL, dc);
+    return dpi > 0 ? (int32_t)((double)VB6_TWIPS_PER_INCH / dpi + 0.5) : 15;
+}
+
+int32_t vb6_Screen_TwipsPerPixelY(void) {
+    HDC dc = GetDC(NULL);
+    int dpi = GetDeviceCaps(dc, LOGPIXELSY);
+    ReleaseDC(NULL, dc);
+    return dpi > 0 ? (int32_t)((double)VB6_TWIPS_PER_INCH / dpi + 0.5) : 15;
+}
+
+// ============================================================
+// P18-C: Printer 对象
+// ============================================================
+static HDC g_printerDC = NULL;
+static int g_printerCurrentX = 0;
+static int g_printerCurrentY = 0;
+static DOCINFOW g_docInfo = {0};
+static int g_printerStarted = 0;
+
+static void vb6_Printer_EnsureDC(void) {
+    if (!g_printerDC) {
+        g_printerDC = CreateDCW(L"WINSPOOL", NULL, NULL, NULL);
+    }
+    if (g_printerDC && !g_printerStarted) {
+        memset(&g_docInfo, 0, sizeof(g_docInfo));
+        g_docInfo.cbSize = sizeof(g_docInfo);
+        g_docInfo.lpszDocName = L"VB6 Print Job";
+        StartDocW(g_printerDC, &g_docInfo);
+        StartPage(g_printerDC);
+        g_printerStarted = 1;
+        g_printerCurrentX = 0;
+        g_printerCurrentY = 0;
+    }
+}
+
+void vb6_Printer_Print(BSTR text) {
+    vb6_Printer_EnsureDC();
+    if (!g_printerDC) return;
+    TextOutW(g_printerDC, g_printerCurrentX, g_printerCurrentY, text, SysStringLen(text));
+    SIZE sz;
+    GetTextExtentPoint32W(g_printerDC, text, SysStringLen(text), &sz);
+    g_printerCurrentY += sz.cy;
+}
+
+void vb6_Printer_EndDoc(void) {
+    if (g_printerDC && g_printerStarted) {
+        EndPage(g_printerDC);
+        EndDoc(g_printerDC);
+        g_printerStarted = 0;
+    }
+    if (g_printerDC) { DeleteDC(g_printerDC); g_printerDC = NULL; }
+}
+
+void vb6_Printer_NewPage(void) {
+    if (g_printerDC && g_printerStarted) {
+        EndPage(g_printerDC);
+        StartPage(g_printerDC);
+        g_printerCurrentX = 0;
+        g_printerCurrentY = 0;
+    }
+}
+
+int32_t vb6_Printer_Width(void) {
+    vb6_Printer_EnsureDC();
+    return g_printerDC ? GetDeviceCaps(g_printerDC, PHYSICALWIDTH) : 0;
+}
+
+int32_t vb6_Printer_Height(void) {
+    vb6_Printer_EnsureDC();
+    return g_printerDC ? GetDeviceCaps(g_printerDC, PHYSICALHEIGHT) : 0;
+}
+
+int32_t vb6_Printer_CurrentX(void) { return g_printerCurrentX; }
+int32_t vb6_Printer_CurrentY(void) { return g_printerCurrentY; }
+void vb6_Printer_SetCurrentX(int32_t x) { g_printerCurrentX = x; }
+void vb6_Printer_SetCurrentY(int32_t y) { g_printerCurrentY = y; }
+
+// ============================================================
+// P18-C: Forms 集合
+// ============================================================
+#define VB6_MAX_FORMS 64
+static HWND g_formList[VB6_MAX_FORMS] = {0};
+static int g_formCount = 0;
+
+void vb6_Forms_Register(void* hwnd_) {
+    if (g_formCount < VB6_MAX_FORMS) { g_formList[g_formCount++] = (HWND)hwnd_; }
+}
+void vb6_Forms_Unregister(void* hwnd_) {
+    HWND hwnd = (HWND)hwnd_;
+    for (int i = 0; i < g_formCount; i++) {
+        if (g_formList[i] == hwnd) {
+            g_formList[i] = g_formList[--g_formCount];
+            g_formList[g_formCount] = NULL;
+            return;
+        }
+    }
+}
+
+int32_t vb6_Forms_Count(void) { return g_formCount; }
+void* vb6_Forms_Item(int32_t index) {
+    if (index >= 0 && index < g_formCount) return (void*)g_formList[index];
+    return NULL;
 }
 
 

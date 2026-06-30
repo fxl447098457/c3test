@@ -1,4 +1,4 @@
-﻿#include "backend/msvc_driver.hpp"
+#include "backend/msvc_driver.hpp"
 
 #include <iostream>
 #include <fstream>
@@ -207,7 +207,7 @@ bool MsvcDriver::compileAndLink(const MsvcDriverOptions& options) {
         if (!options.defFile.empty()) {
             cmd << " /DEF:\"" << options.defFile << "\"";
         }
-        cmd << " ole32.lib oleaut32.lib uuid.lib advapi32.lib user32.lib shell32.lib";
+        cmd << " ole32.lib oleaut32.lib uuid.lib advapi32.lib user32.lib shell32.lib gdi32.lib";
     } else if (options.isGui) {
         // P7: GUI程序 (Win32窗口)
         cmd << " /link /SUBSYSTEM:WINDOWS";
@@ -222,7 +222,7 @@ bool MsvcDriver::compileAndLink(const MsvcDriverOptions& options) {
         if (!options.rtlDir.empty()) {
             cmd << " \"" << options.rtlDir << "\\vb6rtl.lib\"";
         }
-        cmd << " ole32.lib oleaut32.lib uuid.lib user32.lib shell32.lib";
+        cmd << " ole32.lib oleaut32.lib uuid.lib user32.lib shell32.lib gdi32.lib";
     }
 
 

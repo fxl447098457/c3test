@@ -355,6 +355,39 @@ BSTR vb6_App_Path(void);     // App.Path - EXE所在目录
 BSTR vb6_App_EXEName(void);  // App.EXEName - EXE文件名(不含扩展名)
 int32_t vb6_App_hInstance(void); // App.hInstance - 模块实例句柄
 
+// P18-C: Clipboard 对象
+void   vb6_Clipboard_SetText(BSTR text);
+BSTR   vb6_Clipboard_GetText(void);
+void   vb6_Clipboard_Clear(void);
+int32_t vb6_Clipboard_GetFormat(int32_t format);  // 1=vbCFText, 2=vbCFBitmap, etc.
+
+// P18-C: Screen 对象
+int32_t vb6_Screen_Width(void);      // Screen.Width (twips)
+int32_t vb6_Screen_Height(void);     // Screen.Height (twips)
+int32_t vb6_Screen_MouseX(void);     // Mouse position X (twips)
+int32_t vb6_Screen_MouseY(void);     // Mouse position Y (twips)
+void*  vb6_Screen_ActiveControl(void);  // Active control HWND
+void*  vb6_Screen_ActiveForm(void);     // Active form HWND
+int32_t vb6_Screen_TwipsPerPixelX(void);
+int32_t vb6_Screen_TwipsPerPixelY(void);
+
+// P18-C: Printer 对象
+void   vb6_Printer_Print(BSTR text);
+void   vb6_Printer_EndDoc(void);
+void   vb6_Printer_NewPage(void);
+int32_t vb6_Printer_Width(void);
+int32_t vb6_Printer_Height(void);
+int32_t vb6_Printer_CurrentX(void);
+int32_t vb6_Printer_CurrentY(void);
+void   vb6_Printer_SetCurrentX(int32_t x);
+void   vb6_Printer_SetCurrentY(int32_t y);
+
+// P18-C: Forms 集合
+int32_t vb6_Forms_Count(void);
+void*  vb6_Forms_Item(int32_t index);  // 0-based
+void   vb6_Forms_Register(void* hwnd);   // 窗体创建时注册
+void   vb6_Forms_Unregister(void* hwnd); // 窗体销毁时注销
+
 // P14.2.4: IIf / InputBox
 BSTR vb6_IIfBSTR(int32_t cond, BSTR truepart, BSTR falsepart);
 int32_t vb6_IIfLong(int32_t cond, int32_t truepart, int32_t falsepart);
@@ -643,6 +676,11 @@ void vb6_Init(void);
 void vb6_Exit(void);
 void vb6_End(void);
 void vb6_Beep(void);
+
+// P18-C: Option Compare (Text/Binary)
+extern int g_vb6_optionCompareText;  // 0=Binary(default), 1=Text
+int vb6_StrCmp(const wchar_t* a, const wchar_t* b);  // respects Option Compare
+
 
 #ifdef __cplusplus
 }

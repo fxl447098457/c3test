@@ -6,6 +6,7 @@
 #ifdef _WIN32
 #include <windows.h>
 #endif
+#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -320,7 +321,12 @@ void* vb6_GetControlPicture(void* hwnd);
 void vb6_SetControlPicture(void* hwnd, void* hPicture);
 // AutoSize for PictureBox: resize to fit picture
 int vb6_GetPictureAutoSize(void* hwnd);
-void vb6_SetPictureAutoSize(void* hwnd, int autoSize);·n// P17.2: Image.Stretch property·nint vb6_GetImageStretch(void* hwnd);·nvoid vb6_SetImageStretch(void* hwnd, int stretch);·n// P17.2: Image subclass for WM_PAINT (StretchBlt rendering)·nvoid vb6_InstallImageSubclass(void* hwnd);
+void vb6_SetPictureAutoSize(void* hwnd, int autoSize);
+// P17.2: Image.Stretch property
+int vb6_GetImageStretch(void* hwnd);
+void vb6_SetImageStretch(void* hwnd, int stretch);
+// P17.2: Image subclass for WM_PAINT (StretchBlt rendering)
+void vb6_InstallImageSubclass(void* hwnd);
 // 控件数组 (P7.6)
 // ============================================================
 // VB6控件数组: 同名控件带不同Index, 共享事件处理器(Index参数)

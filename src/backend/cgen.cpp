@@ -1429,6 +1429,43 @@ void CCodeGen::visit(MemberAccessExpr& node) {
             if (memLower == "revision") { lastExpr_ = "0"; return; }
         }
 
+        // P18-C: Clipboard 对象
+        if (objLower == "clipboard") {
+            if (memLower == "settext") { lastExpr_ = "vb6_Clipboard_SetText"; return; }
+            if (memLower == "gettext") { lastExpr_ = "vb6_Clipboard_GetText()"; return; }
+            if (memLower == "clear") { lastExpr_ = "vb6_Clipboard_Clear"; return; }
+            if (memLower == "getformat") { lastExpr_ = "vb6_Clipboard_GetFormat"; return; }
+        }
+
+        // P18-C: Screen 对象
+        if (objLower == "screen") {
+            if (memLower == "width") { lastExpr_ = "vb6_Screen_Width()"; return; }
+            if (memLower == "height") { lastExpr_ = "vb6_Screen_Height()"; return; }
+            if (memLower == "mousex") { lastExpr_ = "vb6_Screen_MouseX()"; return; }
+            if (memLower == "mousey") { lastExpr_ = "vb6_Screen_MouseY()"; return; }
+            if (memLower == "twipsperpixelx") { lastExpr_ = "vb6_Screen_TwipsPerPixelX()"; return; }
+            if (memLower == "twipsperpixely") { lastExpr_ = "vb6_Screen_TwipsPerPixelY()"; return; }
+            if (memLower == "activecontrol") { lastExpr_ = "(int32_t)(intptr_t)vb6_Screen_ActiveControl()"; return; }
+            if (memLower == "activeform") { lastExpr_ = "(int32_t)(intptr_t)vb6_Screen_ActiveForm()"; return; }
+        }
+
+        // P18-C: Printer 对象
+        if (objLower == "printer") {
+            if (memLower == "print") { lastExpr_ = "vb6_Printer_Print"; return; }
+            if (memLower == "enddoc") { lastExpr_ = "vb6_Printer_EndDoc"; return; }
+            if (memLower == "newpage") { lastExpr_ = "vb6_Printer_NewPage"; return; }
+            if (memLower == "width") { lastExpr_ = "vb6_Printer_Width()"; return; }
+            if (memLower == "height") { lastExpr_ = "vb6_Printer_Height()"; return; }
+            if (memLower == "currentx") { lastExpr_ = "vb6_Printer_CurrentX()"; return; }
+            if (memLower == "currenty") { lastExpr_ = "vb6_Printer_CurrentY()"; return; }
+        }
+
+        // P18-C: Forms 集合
+        if (objLower == "forms") {
+            if (memLower == "count") { lastExpr_ = "vb6_Forms_Count()"; return; }
+            if (memLower == "item") { lastExpr_ = "(int32_t)(intptr_t)vb6_Forms_Item"; return; }
+        }
+
         // P7.5+P7.6: 窗体控件属性读取
         // 情况1: ctrl.Property (非数组) → vb6_GetControlXxx(vb6_hwnd_ctrl)
         // 情况2: ctrlArr(idx).Property (数组) → vb6_GetControlXxx(vb6_CtrlArr_GetAt(&vb6_arr_ctrl, idx))
@@ -3032,6 +3069,19 @@ void CCodeGen::visit(AssignmentStmt& node) {
     // 情况2: ctrlArr(idx).Property = value (数组)
     if (node.target->kind == ASTNodeKind::MemberAccessExpr) {
         auto& maExpr = static_cast<MemberAccessExpr&>(*node.target);
+        // P18-C: Printer.CurrentX / Printer.CurrentY 赋值
+        if (maExpr.object && maExpr.object->kind == ASTNodeKind::IdentifierExpr) {
+            auto& objId = static_cast<IdentifierExpr&>(*maExpr.object);
+            std::string objName = objId.name;
+            std::transform(objName.begin(), objName.end(), objName.begin(), ::tolower);
+            std::string memName = maExpr.memberName;
+            std::transform(memName.begin(), memName.end(), memName.begin(), ::tolower);
+            if (objName == "printer") {
+                emitExpr(*node.value);
+                if (memName == "currentx") { c_.emitLine("vb6_Printer_SetCurrentX((int32_t)(" + lastExpr_ + "));"); return; }
+                if (memName == "currenty") { c_.emitLine("vb6_Printer_SetCurrentY((int32_t)(" + lastExpr_ + "));"); return; }
+            }
+        }
         // P7.6: 控件数组属性写入 ctrlArr(idx).Property = value
         if (maExpr.object && maExpr.object->kind == ASTNodeKind::IndexOrCallExpr) {
             auto& idxExpr = static_cast<IndexOrCallExpr&>(*maExpr.object);
@@ -3576,6 +3626,19 @@ void CCodeGen::visit(LetStmt& node) {
     // P7.5+P7.6: 控件属性写入 (Let语句)
     if (node.target->kind == ASTNodeKind::MemberAccessExpr) {
         auto& maExpr = static_cast<MemberAccessExpr&>(*node.target);
+        // P18-C: Printer.CurrentX / Printer.CurrentY 赋值
+        if (maExpr.object && maExpr.object->kind == ASTNodeKind::IdentifierExpr) {
+            auto& objId = static_cast<IdentifierExpr&>(*maExpr.object);
+            std::string objName = objId.name;
+            std::transform(objName.begin(), objName.end(), objName.begin(), ::tolower);
+            std::string memName = maExpr.memberName;
+            std::transform(memName.begin(), memName.end(), memName.begin(), ::tolower);
+            if (objName == "printer") {
+                emitExpr(*node.value);
+                if (memName == "currentx") { c_.emitLine("vb6_Printer_SetCurrentX((int32_t)(" + lastExpr_ + "));"); return; }
+                if (memName == "currenty") { c_.emitLine("vb6_Printer_SetCurrentY((int32_t)(" + lastExpr_ + "));"); return; }
+            }
+        }
         // P7.6: 控件数组属性写入 ctrlArr(idx).Property = value
         if (maExpr.object && maExpr.object->kind == ASTNodeKind::IndexOrCallExpr) {
             auto& idxExpr = static_cast<IndexOrCallExpr&>(*maExpr.object);
@@ -3975,8 +4038,8 @@ void CCodeGen::visit(SelectCaseStmt& node) {
                     emitExpr(*binExpr.right);
                     std::string rightVal = std::move(lastExpr_);
                     if (isStringSelect) {
-                        // 字符串比较: wcscmp(tempVar, rightVal) op 0
-                        cond = "wcscmp(" + tempVar + ", " + rightVal + ") " + mapBinaryOp(binExpr.op) + " 0";
+                        // 字符串比较: vb6_StrCmp(tempVar, rightVal) op 0
+                        cond = "vb6_StrCmp(" + tempVar + ", " + rightVal + ") " + mapBinaryOp(binExpr.op) + " 0";
                     } else {
                         cond = tempVar + " " + mapBinaryOp(binExpr.op) + " " + rightVal;
                     }
@@ -3996,7 +4059,7 @@ void CCodeGen::visit(SelectCaseStmt& node) {
                 std::string hi = std::move(lastExpr_);
                 if (isStringSelect) {
                     // 字符串范围比较: wcscmp >= lo && wcscmp <= hi
-                    cond = "wcscmp(" + tempVar + ", " + lo + ") >= 0 && wcscmp(" + tempVar + ", " + hi + ") <= 0";
+                    cond = "vb6_StrCmp(" + tempVar + ", " + lo + ") >= 0 && vb6_StrCmp(" + tempVar + ", " + hi + ") <= 0";
                 } else {
                     cond = tempVar + " >= " + lo + " && " + tempVar + " <= " + hi;
                 }
@@ -4004,7 +4067,7 @@ void CCodeGen::visit(SelectCaseStmt& node) {
                 // 精确匹配
                 emitExpr(*cv.value);
                 if (isStringSelect) {
-                    cond = "wcscmp(" + tempVar + ", " + lastExpr_ + ") == 0";
+                    cond = "vb6_StrCmp(" + tempVar + ", " + lastExpr_ + ") == 0";
                 } else {
                     cond = tempVar + " == " + lastExpr_;
                 }
@@ -4813,7 +4876,13 @@ void CCodeGen::visit(MidStmt& node) {
 }
 
 void CCodeGen::visit(OptionStmt& node) {
-    // Option语句不影响C代码生成
+    // P18-C: Option Compare Text/Binary
+    if (node.optionKind == OptionKind::CompareText) {
+        c_.emitLine("g_vb6_optionCompareText = 1; /* Option Compare Text */");
+    } else if (node.optionKind == OptionKind::CompareBinary) {
+        c_.emitLine("g_vb6_optionCompareText = 0; /* Option Compare Binary */");
+    }
+    // Option Explicit / Option Base 不影响C代码生成
 }
 
 void CCodeGen::visit(LocalDeclStmt& node) {
@@ -6305,6 +6374,7 @@ void CCodeGen::emitFormFramework(const FrmFormDesc& frmDesc, Module& module) {
     c_.indent();
     c_.emitLine("CREATESTRUCTA* cs = (CREATESTRUCTA*)lParam;");
     c_.emitLine(createFn + "((void*)hwnd, (void*)cs->hInstance);");
+    c_.emitLine("vb6_Forms_Register((void*)hwnd);");
 
     // 调用VB6 Form_Load事件 (仅当存在时调用)
     std::string formLoadFn = cProcName("Form_Load", AccessLevel::Private);
@@ -6585,6 +6655,7 @@ void CCodeGen::emitFormFramework(const FrmFormDesc& frmDesc, Module& module) {
     // WM_DESTROY: PostQuitMessage (如果是主窗体)
     c_.emitLine("case WM_DESTROY: {");
     c_.indent();
+    c_.emitLine("vb6_Forms_Unregister((void*)hwnd);");
     c_.emitLine("PostQuitMessage(0);");
     c_.emitLine("break;");
     c_.dedent();
