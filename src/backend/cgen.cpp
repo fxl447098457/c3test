@@ -1002,7 +1002,19 @@ void CCodeGen::visit(IdentifierExpr& node) {
     std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
 
     if (lower == "me") {
-        lastExpr_ = "vb6_Me";
+        // Same logic as MeExpr: form→hwnd, class→me, else→error
+        if (isClassModule_) {
+            lastExpr_ = "me";
+        } else if (isFormModule_ && !knownFormName_.empty()) {
+            auto it = knownFormControlOriginalNames_.find(knownFormName_);
+            if (it != knownFormControlOriginalNames_.end()) {
+                lastExpr_ = "vb6_hwnd_" + cIdent(it->second);
+            } else {
+                lastExpr_ = "vb6_hwnd_" + moduleName_;
+            }
+        } else {
+            lastExpr_ = "vb6_Me";  // should not happen (semantic error caught)
+        }
         return;
     }
 
@@ -5453,8 +5465,19 @@ void CCodeGen::visit(EnumDecl& node) {
             // 枚举成员有显式值
             emitExpr(*member->value);
             h_.emitLine("vb6_enum_" + memName + " = " + lastExpr_ + ",");
-            // 更新nextVal (简化: 不知道精确值, 重置为0自增)
-            nextVal = 0;  // TODO: 从表达式求值
+            // Try to evaluate the constant value for auto-increment
+            nextVal = 0;
+            if (auto* lit = dynamic_cast<LiteralExpr*>(member->value.get())) {
+                if (lit->literalKind == LiteralKind::Long) nextVal = lit->longValue;
+                else if (lit->literalKind == LiteralKind::Integer) nextVal = lit->intValue;
+            } else if (auto* unary = dynamic_cast<UnaryExpr*>(member->value.get())) {
+                if (auto* inner = dynamic_cast<LiteralExpr*>(unary->operand.get())) {
+                    int64_t v = 0;
+                    if (inner->literalKind == LiteralKind::Long) v = inner->longValue;
+                    else if (inner->literalKind == LiteralKind::Integer) v = inner->intValue;
+                    nextVal = (unary->op == UnaryOp::Negate) ? -v : v;
+                }
+            }
         } else {
             h_.emitLine("vb6_enum_" + memName + " = " + std::to_string(nextVal) + ",");
         }
@@ -6482,6 +6505,7 @@ void CCodeGen::emitFormFramework(const FrmFormDesc& frmDesc, Module& module) {
             bool hasKeyDown = false;
             bool hasKeyUp = false;
             bool hasDblClick = false;
+            bool hasValidate = false;
             FrmControlType ctrlType;
         };
         std::vector<SubclassInfo> subclassCtrls;
@@ -6516,6 +6540,8 @@ void CCodeGen::emitFormFramework(const FrmFormDesc& frmDesc, Module& module) {
                 info.hasGotFocus = symTab_.lookup(ctrl.controlName + "_GotFocus") != nullptr;
                 info.hasLostFocus = symTab_.lookup(ctrl.controlName + "_LostFocus") != nullptr;
             }
+            // P20-12: Validate event (all control types)
+            info.hasValidate = symTab_.lookup(ctrl.controlName + "_Validate") != nullptr;
 
             // MouseEnter/MouseLeave 总是需要子类化(TrackMouseEvent)
             info.hasMouseEnter = symTab_.lookup(ctrl.controlName + "_MouseEnter") != nullptr;
@@ -6536,7 +6562,7 @@ void CCodeGen::emitFormFramework(const FrmFormDesc& frmDesc, Module& module) {
             // 只要有任一子类化事件需求就加入列表
             if (info.hasGotFocus || info.hasLostFocus || info.hasMouseEnter || info.hasMouseLeave ||
                 info.hasMouseDown || info.hasMouseUp || info.hasMouseMove ||
-                info.hasKeyPress || info.hasKeyDown || info.hasKeyUp || info.hasDblClick) {
+                info.hasKeyPress || info.hasKeyDown || info.hasKeyUp || info.hasDblClick || info.hasValidate) {
                 subclassCtrls.push_back(std::move(info));
             }
         }
@@ -6564,6 +6590,8 @@ void CCodeGen::emitFormFramework(const FrmFormDesc& frmDesc, Module& module) {
                     info.hasGotFocus = symTab_.lookup(child.controlName + "_GotFocus") != nullptr;
                     info.hasLostFocus = symTab_.lookup(child.controlName + "_LostFocus") != nullptr;
                 }
+                // P20-12: Validate event (all control types)
+                info.hasValidate = symTab_.lookup(child.controlName + "_Validate") != nullptr;
                 info.hasMouseEnter = symTab_.lookup(child.controlName + "_MouseEnter") != nullptr;
                 info.hasMouseLeave = symTab_.lookup(child.controlName + "_MouseLeave") != nullptr;
                 info.hasMouseDown = symTab_.lookup(child.controlName + "_MouseDown") != nullptr;
@@ -6574,7 +6602,7 @@ void CCodeGen::emitFormFramework(const FrmFormDesc& frmDesc, Module& module) {
                 info.hasKeyUp = symTab_.lookup(child.controlName + "_KeyUp") != nullptr;
                 if (info.hasGotFocus || info.hasLostFocus || info.hasMouseEnter || info.hasMouseLeave ||
                     info.hasMouseDown || info.hasMouseUp || info.hasMouseMove ||
-                    info.hasKeyPress || info.hasKeyDown || info.hasKeyUp || info.hasDblClick) {
+                    info.hasKeyPress || info.hasKeyDown || info.hasKeyUp || info.hasDblClick || info.hasValidate) {
                     subclassCtrls.push_back(std::move(info));
                 }
             }
@@ -6594,7 +6622,36 @@ void CCodeGen::emitFormFramework(const FrmFormDesc& frmDesc, Module& module) {
             // LostFocus (WM_KILLFOCUS)
             if (info.hasLostFocus) {
                 std::string fn = cProcName(info.ctrlName + "_LostFocus", AccessLevel::Private);
+                if (info.hasValidate) {
+                c_.emitLine("if (msg == WM_KILLFOCUS && !GetPropW(hwnd, L\"VB6_ValidateCancel\")) { extern void " + fn + "(); " + fn + "(); }");
+            } else {
                 c_.emitLine("if (msg == WM_KILLFOCUS) { extern void " + fn + "(); " + fn + "(); }");
+            }
+            }
+            // P20-12: Validate event (WM_KILLFOCUS with CausesValidation + Cancel)
+            // Validate fires BEFORE LostFocus when the gaining focus control has CausesValidation=True
+            if (info.hasValidate) {
+                std::string fn = cProcName(info.ctrlName + "_Validate", AccessLevel::Private);
+                c_.emitLine("// Validate(Cancel As Boolean) - fires before LostFocus");
+                c_.emitLine("if (msg == WM_KILLFOCUS) {");
+                c_.indent();
+                c_.emitLine("HWND vb6_gaining = (HWND)wp;");
+                c_.emitLine("if (vb6_GetCausesValidation((void*)vb6_gaining)) {");
+                c_.indent();
+                c_.emitLine("int16_t vb6_vcancel = 0;");
+                c_.emitLine("extern void " + fn + "(int16_t*);");
+                c_.emitLine(fn + "(&vb6_vcancel);");
+                c_.emitLine("if (vb6_vcancel) {");
+                c_.indent();
+                c_.emitLine("// Cancel=True: prevent focus transfer, restore focus");
+                c_.emitLine("SetPropW(hwnd, L\"VB6_ValidateCancel\", (HANDLE)1);");
+                c_.emitLine("PostMessage(hwnd, 0x7FFF, 0, 0); /* WM_VB6_RESTOREFOCUS */");
+                c_.dedent();
+                c_.emitLine("}");
+                c_.dedent();
+                c_.emitLine("}");
+                c_.dedent();
+                c_.emitLine("}");
             }
 
             // MouseEnter/MouseLeave via TrackMouseEvent
@@ -6714,8 +6771,13 @@ void CCodeGen::emitFormFramework(const FrmFormDesc& frmDesc, Module& module) {
                 c_.emitLine("if (msg == WM_LBUTTONDBLCLK) { extern void " + fn + "(); " + fn + "(); }");
             }
 
-            // WM_DESTROY: 移除子类化
-            c_.emitLine("if (msg == WM_DESTROY) { vb6_RemoveControlSubclass((void*)hwnd); }");
+            // P20-12: WM_VB6_RESTOREFOCUS - restore focus after Validate cancel
+            if (info.hasValidate) {
+                c_.emitLine("if (msg == 0x7FFF) { RemovePropW(hwnd, L\"VB6_ValidateCancel\"); SetFocus(hwnd); return 0; }");
+            }
+
+            // WM_DESTROY: 移除子类化 + 清理ValidateCancel属性
+            c_.emitLine("if (msg == WM_DESTROY) { RemovePropW(hwnd, L\"VB6_ValidateCancel\"); vb6_RemoveControlSubclass((void*)hwnd); }");
 
             // Call original WndProc for unhandled messages
             c_.emitLine("WNDPROC vb6_orig = (WNDPROC)vb6_GetOriginalWndProc((void*)hwnd);");
@@ -6957,25 +7019,26 @@ void CCodeGen::emitFormFramework(const FrmFormDesc& frmDesc, Module& module) {
             std::string lostFn = cProcName(ctrl.controlName + "_LostFocus", AccessLevel::Private);
             bool hasGot = symTab_.lookup(ctrl.controlName + "_GotFocus") != nullptr;
             bool hasLost = symTab_.lookup(ctrl.controlName + "_LostFocus") != nullptr;
+            bool hasValidate = symTab_.lookup(ctrl.controlName + "_Validate") != nullptr;
             if (hasGot || hasLost) {
                 if (ctrl.controlType == FrmControlType::TextBox) {
                     // EN_SETFOCUS=256, EN_KILLFOCUS=512
                     if (hasGot) c_.emitLine("if (id == " + std::to_string(ctrlId) + " && code == 256) { extern void " + gotFn + "(); " + gotFn + "(); }");
-                    if (hasLost) c_.emitLine("if (id == " + std::to_string(ctrlId) + " && code == 512) { extern void " + lostFn + "(); " + lostFn + "(); }");
+                    if (hasLost) { if (hasValidate) c_.emitLine("if (id == " + std::to_string(ctrlId) + " && code == 512 && !GetPropW((HWND)lParam, L\"VB6_ValidateCancel\")) { extern void " + lostFn + "(); " + lostFn + "(); }"); else c_.emitLine("if (id == " + std::to_string(ctrlId) + " && code == 512) { extern void " + lostFn + "(); " + lostFn + "(); }"); }
                 } else if (ctrl.controlType == FrmControlType::ComboBox) {
                     // CBN_SETFOCUS=1024, CBN_KILLFOCUS=2048
                     if (hasGot) c_.emitLine("if (id == " + std::to_string(ctrlId) + " && code == 1024) { extern void " + gotFn + "(); " + gotFn + "(); }");
-                    if (hasLost) c_.emitLine("if (id == " + std::to_string(ctrlId) + " && code == 2048) { extern void " + lostFn + "(); " + lostFn + "(); }");
+                    if (hasLost) { if (hasValidate) c_.emitLine("if (id == " + std::to_string(ctrlId) + " && code == 2048 && !GetPropW((HWND)lParam, L\"VB6_ValidateCancel\")) { extern void " + lostFn + "(); " + lostFn + "(); }"); else c_.emitLine("if (id == " + std::to_string(ctrlId) + " && code == 2048) { extern void " + lostFn + "(); " + lostFn + "(); }"); }
                 } else if (ctrl.controlType == FrmControlType::ListBox) {
                     // LBN_SETFOCUS=4, LBN_KILLFOCUS=5
                     if (hasGot) c_.emitLine("if (id == " + std::to_string(ctrlId) + " && code == 4) { extern void " + gotFn + "(); " + gotFn + "(); }");
-                    if (hasLost) c_.emitLine("if (id == " + std::to_string(ctrlId) + " && code == 5) { extern void " + lostFn + "(); " + lostFn + "(); }");
+                    if (hasLost) { if (hasValidate) c_.emitLine("if (id == " + std::to_string(ctrlId) + " && code == 5 && !GetPropW((HWND)lParam, L\"VB6_ValidateCancel\")) { extern void " + lostFn + "(); " + lostFn + "(); }"); else c_.emitLine("if (id == " + std::to_string(ctrlId) + " && code == 5) { extern void " + lostFn + "(); " + lostFn + "(); }"); }
                 } else if (ctrl.controlType == FrmControlType::CommandButton ||
                            ctrl.controlType == FrmControlType::CheckBox ||
                            ctrl.controlType == FrmControlType::OptionButton) {
                     // BN_SETFOCUS=6, BN_KILLFOCUS=7 (button class notifications via WM_COMMAND)
                     if (hasGot) c_.emitLine("if (id == " + std::to_string(ctrlId) + " && code == 6) { extern void " + gotFn + "(); " + gotFn + "(); }");
-                    if (hasLost) c_.emitLine("if (id == " + std::to_string(ctrlId) + " && code == 7) { extern void " + lostFn + "(); " + lostFn + "(); }");
+                    if (hasLost) { if (hasValidate) c_.emitLine("if (id == " + std::to_string(ctrlId) + " && code == 7 && !GetPropW((HWND)lParam, L\"VB6_ValidateCancel\")) { extern void " + lostFn + "(); " + lostFn + "(); }"); else c_.emitLine("if (id == " + std::to_string(ctrlId) + " && code == 7) { extern void " + lostFn + "(); " + lostFn + "(); }"); }
                 }
                 // Label: no GotFocus/LostFocus in VB6 (windowless control)
                 // PictureBox: GotFocus/LostFocus handled via subclassing (P18-F)
@@ -7040,7 +7103,8 @@ void CCodeGen::emitFormFramework(const FrmFormDesc& frmDesc, Module& module) {
                 || symTab_.lookup(ctrl.controlName + "_MouseMove")
                 || symTab_.lookup(ctrl.controlName + "_KeyPress")
                 || symTab_.lookup(ctrl.controlName + "_KeyDown")
-                || symTab_.lookup(ctrl.controlName + "_KeyUp");
+                || symTab_.lookup(ctrl.controlName + "_KeyUp")
+              || symTab_.lookup(ctrl.controlName + "_Validate");
         };
         std::unordered_set<std::string> subEmitted;
         for (const auto& ctrl : frmDesc.formControl.children) {
@@ -7452,6 +7516,18 @@ void CCodeGen::emitFormFramework(const FrmFormDesc& frmDesc, Module& module) {
             }
         }
 
+        // P20-12: CausesValidation property from .frm (default=True, only set when explicitly False)
+        {
+            auto cvIt = ctrl.properties.find("CausesValidation");
+            if (cvIt != ctrl.properties.end() && cvIt->second.intValue == 0) {
+                std::string cvNLower = ctrl.controlName; std::transform(cvNLower.begin(), cvNLower.end(), cvNLower.begin(), ::tolower);
+                std::string cvHwnd = knownControlArrays_.count(cvNLower) ?
+                    ("vb6_CtrlArr_GetAt(&vb6_arr_" + cIdent(ctrl.controlName) + ", 0)") :
+                    ("vb6_hwnd_" + cIdent(ctrl.controlName));
+                c_.emitLine("vb6_SetCausesValidation((void*)" + cvHwnd + ", 0);");
+            }
+        }
+
         ctrlId++;
     }
 
@@ -7544,7 +7620,8 @@ void CCodeGen::emitFormFramework(const FrmFormDesc& frmDesc, Module& module) {
                 || symTab_.lookup(ctrl.controlName + "_MouseMove")
                 || symTab_.lookup(ctrl.controlName + "_KeyPress")
                 || symTab_.lookup(ctrl.controlName + "_KeyDown")
-                || symTab_.lookup(ctrl.controlName + "_KeyUp");
+                || symTab_.lookup(ctrl.controlName + "_KeyUp")
+              || symTab_.lookup(ctrl.controlName + "_Validate");
         };
         std::unordered_set<std::string> subEmitted;
         // 顶层控件
@@ -8702,6 +8779,7 @@ std::string CCodeGen::getControlPropReadFn(FrmControlType ctrlType, const std::s
     // P13.6: TabIndex/TabStop (all visible controls)
     if (propLower == "tabindex") return "vb6_GetTabIndex";
     if (propLower == "tabstop") return "vb6_GetTabStop";
+    if (propLower == "causesvalidation") return "vb6_GetCausesValidation";
     // P13.8: ToolTipText (all visible controls)
     if (propLower == "tooltiptext") return "vb6_GetToolTipText";
     // P13.9: Tag (all controls)
@@ -8835,6 +8913,7 @@ std::string CCodeGen::getControlPropWriteFn(FrmControlType ctrlType, const std::
     // P13.6: TabIndex/TabStop (all visible controls)
     if (propLower == "tabindex") return "vb6_SetTabIndex";
     if (propLower == "tabstop") return "vb6_SetTabStop";
+    if (propLower == "causesvalidation") return "vb6_SetCausesValidation";
     // P13.8: ToolTipText (all visible controls)
     if (propLower == "tooltiptext") return "vb6_SetToolTipText";
     // P13.9: Tag (all controls)

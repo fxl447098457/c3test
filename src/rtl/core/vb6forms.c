@@ -961,6 +961,22 @@ void vb6_SetTabStop(void* hwnd, int tabstop) {
 }
 
 // ============================================================
+// P20-12: CausesValidation
+// ============================================================
+
+int vb6_GetCausesValidation(void* hwnd) {
+    if (!hwnd) return -1;  // Default: True (VB6 convention)
+    HANDLE hProp = GetPropW((HWND)hwnd, L"VB6_CausesValidation");
+    if (hProp) return (int)(INT_PTR)hProp;
+    return -1;  // Default True
+}
+
+void vb6_SetCausesValidation(void* hwnd, int causes) {
+    if (!hwnd) return;
+    SetPropW((HWND)hwnd, L"VB6_CausesValidation", (HANDLE)(INT_PTR)causes);
+}
+
+// ============================================================
 // P13.8: ToolTipText
 // ============================================================
 

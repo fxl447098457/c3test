@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 // VB6 Win32窗体运行时 (P7)
 // 提供Win32窗口注册、创建、消息循环、控件管理等基础功能
 // 编译器生成的C代码调用此运行时API
@@ -249,6 +249,10 @@ int vb6_GetTabIndex(void* hwnd);
 void vb6_SetTabIndex(void* hwnd, int index);
 int vb6_GetTabStop(void* hwnd);
 void vb6_SetTabStop(void* hwnd, int tabstop);
+
+// P20-12: CausesValidation (default True=-1)
+int vb6_GetCausesValidation(void* hwnd);
+void vb6_SetCausesValidation(void* hwnd, int causes);
 
 // P13.8: ToolTipText (returns BSTR)
 void* vb6_GetToolTipText(void* hwnd);

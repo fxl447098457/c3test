@@ -383,6 +383,8 @@ CompileResult Driver::compile(const CompileOptions& options) {
         if (effectiveOpts.sourceFiles.size() == 1) {
             std::filesystem::path srcPath(effectiveOpts.sourceFiles[0]);
             outputDir = srcPath.parent_path().string();
+            // parent_path() returns empty for bare filename (e.g. "hello.bas")
+            if (outputDir.empty()) outputDir = ".";
         } else {
             outputDir = ".";
         }
@@ -1239,10 +1241,17 @@ bool Driver::runLinker(const CompileOptions& options, const std::string& outputD
     }
 
     // Collect generated .c files from intermediatesDir
+    // MUST match baseName logic in runCodeGeneration (single-file + -o uses output stem)
     MsvcDriverOptions msvcOpts;
-    for (auto& module : modules_) {
-        std::filesystem::path p(module->filename);
-        std::string baseName = p.stem().string();
+    for (size_t i = 0; i < modules_.size(); i++) {
+        std::string baseName;
+        if (modules_.size() == 1 && !options.outputFile.empty()) {
+            std::filesystem::path p(options.outputFile);
+            baseName = p.stem().string();
+        } else {
+            std::filesystem::path p(modules_[i]->filename);
+            baseName = p.stem().string();
+        }
         std::string cPath = intermediatesDir + "/" + baseName + ".c";
         msvcOpts.sourceFiles.push_back(cPath);
     }

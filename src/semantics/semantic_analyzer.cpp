@@ -712,6 +712,15 @@ void SemanticAnalyzer::visit(EnumDecl& node) {
                         nextValue = lit->longValue;
                     else if (lit->literalKind == LiteralKind::Integer)
                         nextValue = lit->intValue;
+                } else if (auto* unary = dynamic_cast<UnaryExpr*>(member->value.get())) {
+                    // Handle negative literals: -1, -42, etc.
+                    if (auto* inner = dynamic_cast<LiteralExpr*>(unary->operand.get())) {
+                        int64_t v = 0;
+                        if (inner->literalKind == LiteralKind::Long) v = inner->longValue;
+                        else if (inner->literalKind == LiteralKind::Integer) v = inner->intValue;
+                        if (unary->op == UnaryOp::Negate) nextValue = -v;
+                        else nextValue = v;
+                    }
                 }
             }
             memberSym->constIntValue = nextValue;
@@ -1274,12 +1283,12 @@ void SemanticAnalyzer::visit(AddressOfExpr& node) {
 }
 
 void SemanticAnalyzer::visit(MeExpr& node) {
-    // 如果当前模块是类模块, Me代表类实例
-    if (currentModule_ && currentModule_->isClassModule) {
+    // Me代表当前对象实例 (类模块或窗体模块)
+    if (currentModule_ && (currentModule_->isClassModule || currentModule_->isFormModule)) {
         lastExprType_ = Vb6Type::Object;
     } else {
-        diag_.warn(DiagnosticID::SemTypeMismatch, node.loc,
-            "'Me' can only be used in class modules");
+        diag_.error(DiagnosticID::SemTypeMismatch, node.loc,
+            "'Me' can only be used in class/form modules");
         lastExprType_ = Vb6Type::Object;
     }
 }
