@@ -1,4 +1,4 @@
-// vb6rtl.c - VB6运行时库最小实现
+﻿// vb6rtl.c - VB6运行时库最小实现
 // 仅支持 hello.bas 等简单程序运行
 
 #include "vb6rtl.h"
@@ -2014,6 +2014,7 @@ static int32_t vb6_sa_elem_size(vb6_safearray_elemtype t) {
         case vb6_sa_bstr:    return (int32_t)sizeof(BSTR);
         case vb6_sa_variant: return (int32_t)sizeof(vb6_VARIANT);
         case vb6_sa_ptr:     return (int32_t)sizeof(void*);
+        case vb6_sa_currency: return (int32_t)sizeof(int64_t);  /* P1-9修复: VB6 Currency = 8bytes */
         default:             return 4;
     }
 }
@@ -2294,6 +2295,33 @@ vb6_SafeArrayND* vb6_SafeArrayReDimPreserveND(vb6_SafeArrayND* arr,
                 memcpy((char*)newData + newOff * arr->elemSize,
                        (char*)arr->data + oldOff * arr->elemSize,
                        (size_t)arr->elemSize);
+            }
+        }
+    }
+
+    // P1-12修复: BSTR/VARIANT - 旧区域中被丢弃的元素需要释放
+    if (arr->data && (arr->elemType == vb6_sa_bstr || arr->elemType == vb6_sa_variant)) {
+        for (int32_t linear = 0; linear < arr->totalElements; linear++) {
+            int32_t tmp = linear;
+            int32_t indices[16];
+            int32_t d;
+            for (d = arr->dimCount - 1; d >= 0; d--) {
+                indices[d] = tmp % arr->bounds[d].cElements;
+                tmp /= arr->bounds[d].cElements;
+            }
+            int32_t inNewBounds = 1;
+            for (d = 0; d < arr->dimCount && d < dimCount; d++) {
+                if (indices[d] >= newBounds[d].cElements) { inNewBounds = 0; break; }
+            }
+            if (arr->dimCount > dimCount) inNewBounds = 0;
+            if (!inNewBounds) {
+                if (arr->elemType == vb6_sa_bstr) {
+                    BSTR* slot = (BSTR*)((char*)arr->data + linear * arr->elemSize);
+                    if (*slot) vb6_BSTR_Free(*slot);
+                } else if (arr->elemType == vb6_sa_variant) {
+                    vb6_VARIANT* slot = (vb6_VARIANT*)((char*)arr->data + linear * arr->elemSize);
+                    vb6_VariantClear(slot);
+                }
             }
         }
     }

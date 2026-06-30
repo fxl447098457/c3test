@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 // vb6rtl.h - VB6运行时库最小头文件
 // 为C代码生成器提供VB6基本类型的C定义
 // P3.6 阎段: 最小子集, 仅支撑 hello.bas 等简单程序
@@ -465,6 +465,7 @@ typedef enum vb6_safearray_elemtype {
     vb6_sa_bstr  = 7,   // BSTR (需要逐元素释放)
     vb6_sa_variant=8,   // vb6_VARIANT (需要逐元素清理)
     vb6_sa_ptr   = 9,   // void* (对象引用)
+    vb6_sa_currency = 10, // int64_t (VB6 Currency: value*10000)
 } vb6_safearray_elemtype;
 
 // 一维数组描述符 (VB6绝大多数用例是一维)

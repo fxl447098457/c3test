@@ -2956,7 +2956,7 @@ std::string CCodeGen::mapSaElemType(Vb6Type type) const {
         case Vb6Type::Single:   return "vb6_sa_single";
         case Vb6Type::Double:   return "vb6_sa_double";
         case Vb6Type::Date:     return "vb6_sa_double";
-        case Vb6Type::Currency: return "vb6_sa_long";  // 简化
+        case Vb6Type::Currency: return "vb6_sa_currency";  // P1-9修复: 8-byte Currency
         case Vb6Type::String:   return "vb6_sa_bstr";
         case Vb6Type::Variant:  return "vb6_sa_variant";
         case Vb6Type::Object:   return "vb6_sa_ptr";
@@ -3124,7 +3124,7 @@ c_.emitLine("switch(vb6_gosub_stack[--vb6_gosub_sp]) {");
                 break;
             // 文件I/O和杂项语句暂不处理, 后续P4阶段
             default:
-                c_.emitLine("/* TODO: " + std::string(stmt->kindName()) + " */");
+                c_.emitLine("/* unhandled stmt: " + std::string(stmt->kindName()) + " */");
                 break;
         }
     }
@@ -4627,7 +4627,7 @@ void CCodeGen::visit(OpenStmt& node) {
 
 void CCodeGen::visit(CloseStmt& node) {
     if (node.fileNumbers.empty()) {
-        c_.emitLine("/* Close All: TODO close all open files */");
+        c_.emitLine("vb6_CloseAll();");
     } else {
         for (auto& fn : node.fileNumbers) {
             emitExpr(*fn);
@@ -5171,7 +5171,7 @@ void CCodeGen::visit(LocalDeclStmt& node) {
             break;
         }
         default:
-            c_.emitLine("/* TODO: LocalDeclStmt " + std::string(node.decl->kindName()) + " */");
+            c_.emitLine("/* unhandled LocalDeclStmt: " + std::string(node.decl->kindName()) + " */");
             break;
     }
 }
@@ -6480,6 +6480,7 @@ void CCodeGen::emitFormFramework(const FrmFormDesc& frmDesc, Module& module) {
             bool hasKeyPress = false;
             bool hasKeyDown = false;
             bool hasKeyUp = false;
+            bool hasDblClick = false;
             FrmControlType ctrlType;
         };
         std::vector<SubclassInfo> subclassCtrls;
@@ -6529,15 +6530,54 @@ void CCodeGen::emitFormFramework(const FrmFormDesc& frmDesc, Module& module) {
             info.hasKeyPress = symTab_.lookup(ctrl.controlName + "_KeyPress") != nullptr;
             info.hasKeyDown = symTab_.lookup(ctrl.controlName + "_KeyDown") != nullptr;
             info.hasKeyUp = symTab_.lookup(ctrl.controlName + "_KeyUp") != nullptr;
+            info.hasDblClick = symTab_.lookup(ctrl.controlName + "_DblClick") != nullptr;
 
             // 只要有任一子类化事件需求就加入列表
             if (info.hasGotFocus || info.hasLostFocus || info.hasMouseEnter || info.hasMouseLeave ||
                 info.hasMouseDown || info.hasMouseUp || info.hasMouseMove ||
-                info.hasKeyPress || info.hasKeyDown || info.hasKeyUp) {
+                info.hasKeyPress || info.hasKeyDown || info.hasKeyUp || info.hasDblClick) {
                 subclassCtrls.push_back(std::move(info));
             }
         }
 
+        // P0-5修复: 扫描Frame容器内的子控件
+        for (const auto& ctrl : frmDesc.formControl.children) {
+            if (ctrl.controlType != FrmControlType::Frame) continue;
+            for (const auto& child : ctrl.children) {
+                std::string childNameLower = child.controlName;
+                std::transform(childNameLower.begin(), childNameLower.end(), childNameLower.begin(), ::tolower);
+                if (emitted.count(childNameLower)) continue;
+                emitted.insert(childNameLower);
+                if (child.controlType == FrmControlType::Timer ||
+                    child.controlType == FrmControlType::Menu ||
+                    child.controlType == FrmControlType::CommonDialog ||
+                    child.controlType == FrmControlType::WebBrowser) continue;
+                SubclassInfo info;
+                info.ctrlName = child.controlName;
+                info.ctrlType = child.controlType;
+                info.hwndVar = "vb6_hwnd_" + cIdent(child.controlName);
+                if (child.controlType == FrmControlType::PictureBox ||
+                    child.controlType == FrmControlType::Frame ||
+                    child.controlType == FrmControlType::Label ||
+                    child.controlType == FrmControlType::Image) {
+                    info.hasGotFocus = symTab_.lookup(child.controlName + "_GotFocus") != nullptr;
+                    info.hasLostFocus = symTab_.lookup(child.controlName + "_LostFocus") != nullptr;
+                }
+                info.hasMouseEnter = symTab_.lookup(child.controlName + "_MouseEnter") != nullptr;
+                info.hasMouseLeave = symTab_.lookup(child.controlName + "_MouseLeave") != nullptr;
+                info.hasMouseDown = symTab_.lookup(child.controlName + "_MouseDown") != nullptr;
+                info.hasMouseUp = symTab_.lookup(child.controlName + "_MouseUp") != nullptr;
+                info.hasMouseMove = symTab_.lookup(child.controlName + "_MouseMove") != nullptr;
+                info.hasKeyPress = symTab_.lookup(child.controlName + "_KeyPress") != nullptr;
+                info.hasKeyDown = symTab_.lookup(child.controlName + "_KeyDown") != nullptr;
+                info.hasKeyUp = symTab_.lookup(child.controlName + "_KeyUp") != nullptr;
+                if (info.hasGotFocus || info.hasLostFocus || info.hasMouseEnter || info.hasMouseLeave ||
+                    info.hasMouseDown || info.hasMouseUp || info.hasMouseMove ||
+                    info.hasKeyPress || info.hasKeyDown || info.hasKeyUp || info.hasDblClick) {
+                    subclassCtrls.push_back(std::move(info));
+                }
+            }
+        }
         // 为每个需要子类化的控件生成 subclass WndProc
         for (const auto& info : subclassCtrls) {
             std::string subProcName = "vb6_ctrl_subproc_" + cIdent(info.ctrlName);
@@ -6666,6 +6706,11 @@ void CCodeGen::emitFormFramework(const FrmFormDesc& frmDesc, Module& module) {
                 c_.emitLine("extern void " + fn + "(int16_t*, int16_t*); " + fn + "(&vb6_keycode, &vb6_shift); }");
                 c_.dedent();
                 c_.emitLine("}");
+            }
+            // P1-13修复: DblClick (WM_LBUTTONDBLCLK)
+            if (info.hasDblClick) {
+                std::string fn = cProcName(info.ctrlName + "_DblClick", AccessLevel::Private);
+                c_.emitLine("if (msg == WM_LBUTTONDBLCLK) { extern void " + fn + "(); " + fn + "(); }");
             }
 
             // WM_DESTROY: 移除子类化
@@ -6979,35 +7024,48 @@ void CCodeGen::emitFormFramework(const FrmFormDesc& frmDesc, Module& module) {
     c_.indent();
     c_.emitLine("vb6_Forms_Unregister((void*)hwnd);");
     // P18-F: 移除所有控件子类化
-    c_.emitLine("/* P18-F: Remove control subclasses */");
     {
+        auto needsSubclass = [&](const FrmControl& ctrl) -> bool {
+            return (ctrl.controlType == FrmControlType::PictureBox ||
+                    ctrl.controlType == FrmControlType::Frame ||
+                    ctrl.controlType == FrmControlType::Label ||
+                    ctrl.controlType == FrmControlType::Image)
+                   && (symTab_.lookup(ctrl.controlName + "_GotFocus") ||
+                       symTab_.lookup(ctrl.controlName + "_LostFocus"))
+                || symTab_.lookup(ctrl.controlName + "_MouseEnter")
+                || symTab_.lookup(ctrl.controlName + "_MouseLeave")
+                || symTab_.lookup(ctrl.controlName + "_MouseDown")
+                || symTab_.lookup(ctrl.controlName + "_MouseUp")
+                || symTab_.lookup(ctrl.controlName + "_MouseMove")
+                || symTab_.lookup(ctrl.controlName + "_KeyPress")
+                || symTab_.lookup(ctrl.controlName + "_KeyDown")
+                || symTab_.lookup(ctrl.controlName + "_KeyUp");
+        };
         std::unordered_set<std::string> subEmitted;
         for (const auto& ctrl : frmDesc.formControl.children) {
             std::string ctrlNameLower = ctrl.controlName;
             std::transform(ctrlNameLower.begin(), ctrlNameLower.end(), ctrlNameLower.begin(), ::tolower);
             if (subEmitted.count(ctrlNameLower)) continue;
             subEmitted.insert(ctrlNameLower);
-            // 检查是否有任何子类化事件
-            bool needsSub = (ctrl.controlType == FrmControlType::PictureBox ||
-                             ctrl.controlType == FrmControlType::Frame ||
-                             ctrl.controlType == FrmControlType::Label ||
-                             ctrl.controlType == FrmControlType::Image)
-                            && (symTab_.lookup(ctrl.controlName + "_GotFocus") ||
-                                symTab_.lookup(ctrl.controlName + "_LostFocus"));
-            needsSub = needsSub || symTab_.lookup(ctrl.controlName + "_MouseEnter") ||
-                       symTab_.lookup(ctrl.controlName + "_MouseLeave") ||
-                       symTab_.lookup(ctrl.controlName + "_MouseDown") ||
-                       symTab_.lookup(ctrl.controlName + "_MouseUp") ||
-                       symTab_.lookup(ctrl.controlName + "_MouseMove") ||
-                       symTab_.lookup(ctrl.controlName + "_KeyPress") ||
-                       symTab_.lookup(ctrl.controlName + "_KeyDown") ||
-                       symTab_.lookup(ctrl.controlName + "_KeyUp");
-            if (needsSub) {
-                std::string hwndVar = "vb6_hwnd_" + cIdent(ctrl.controlName);
-                if (knownControlArrays_.count(ctrlNameLower)) {
-                    hwndVar = "(void*)vb6_arr_" + cIdent(ctrl.controlName) + ".hwnds[0]";
-                }
-                c_.emitLine("vb6_RemoveControlSubclass((void*)" + hwndVar + ");");
+            if (!needsSubclass(ctrl)) continue;
+            if (knownControlArrays_.count(ctrlNameLower)) {
+                c_.emitLine("{ int vb6_si; for (vb6_si = 0; vb6_si < VB6_CTRLARR_MAX; vb6_si++) {");
+                c_.emitLine("  void* vb6_sub_hwnd = vb6_CtrlArr_GetAt(&vb6_arr_" + cIdent(ctrl.controlName) + ", vb6_si);");
+                c_.emitLine("  if (vb6_sub_hwnd) vb6_RemoveControlSubclass(vb6_sub_hwnd); } }");
+            } else {
+                c_.emitLine("vb6_RemoveControlSubclass((void*)vb6_hwnd_" + cIdent(ctrl.controlName) + ");");
+            }
+        }
+        // P0-5修复: Frame容器内子控件
+        for (const auto& ctrl : frmDesc.formControl.children) {
+            if (ctrl.controlType != FrmControlType::Frame) continue;
+            for (const auto& child : ctrl.children) {
+                std::string childNameLower = child.controlName;
+                std::transform(childNameLower.begin(), childNameLower.end(), childNameLower.begin(), ::tolower);
+                if (subEmitted.count(childNameLower)) continue;
+                subEmitted.insert(childNameLower);
+                if (!needsSubclass(child)) continue;
+                c_.emitLine("vb6_RemoveControlSubclass((void*)vb6_hwnd_" + cIdent(child.controlName) + ");");
             }
         }
     }
@@ -7468,36 +7526,57 @@ void CCodeGen::emitFormFramework(const FrmFormDesc& frmDesc, Module& module) {
     }
     // P18-F: 安装控件子类化 (在所有控件创建之后)
     {
+        // 收集需要子类化的控件名(去重)
+        auto needsSubclass = [&](const FrmControl& ctrl) -> bool {
+            return (ctrl.controlType == FrmControlType::PictureBox ||
+                    ctrl.controlType == FrmControlType::Frame ||
+                    ctrl.controlType == FrmControlType::Label ||
+                    ctrl.controlType == FrmControlType::Image)
+                   && (symTab_.lookup(ctrl.controlName + "_GotFocus") ||
+                       symTab_.lookup(ctrl.controlName + "_LostFocus"))
+                || symTab_.lookup(ctrl.controlName + "_MouseEnter")
+                || symTab_.lookup(ctrl.controlName + "_MouseLeave")
+                || symTab_.lookup(ctrl.controlName + "_MouseDown")
+                || symTab_.lookup(ctrl.controlName + "_MouseUp")
+                || symTab_.lookup(ctrl.controlName + "_MouseMove")
+                || symTab_.lookup(ctrl.controlName + "_KeyPress")
+                || symTab_.lookup(ctrl.controlName + "_KeyDown")
+                || symTab_.lookup(ctrl.controlName + "_KeyUp");
+        };
         std::unordered_set<std::string> subEmitted;
+        // 顶层控件
         for (const auto& ctrl : frmDesc.formControl.children) {
             std::string ctrlNameLower = ctrl.controlName;
             std::transform(ctrlNameLower.begin(), ctrlNameLower.end(), ctrlNameLower.begin(), ::tolower);
             if (subEmitted.count(ctrlNameLower)) continue;
             subEmitted.insert(ctrlNameLower);
-            // 检查是否有任何子类化事件 (必须与上面子类化Proc生成逻辑一致)
-            bool needsSub = (ctrl.controlType == FrmControlType::PictureBox ||
-                             ctrl.controlType == FrmControlType::Frame ||
-                             ctrl.controlType == FrmControlType::Label ||
-                             ctrl.controlType == FrmControlType::Image)
-                            && (symTab_.lookup(ctrl.controlName + "_GotFocus") ||
-                                symTab_.lookup(ctrl.controlName + "_LostFocus"));
-            needsSub = needsSub || symTab_.lookup(ctrl.controlName + "_MouseEnter") ||
-                       symTab_.lookup(ctrl.controlName + "_MouseLeave") ||
-                       symTab_.lookup(ctrl.controlName + "_MouseDown") ||
-                       symTab_.lookup(ctrl.controlName + "_MouseUp") ||
-                       symTab_.lookup(ctrl.controlName + "_MouseMove") ||
-                       symTab_.lookup(ctrl.controlName + "_KeyPress") ||
-                       symTab_.lookup(ctrl.controlName + "_KeyDown") ||
-                       symTab_.lookup(ctrl.controlName + "_KeyUp");
-            if (needsSub) {
-                std::string subProcName = "vb6_ctrl_subproc_" + cIdent(ctrl.controlName);
-                std::string hwndVar = knownControlArrays_.count(ctrlNameLower)
-                    ? "(void*)vb6_arr_" + cIdent(ctrl.controlName) + ".hwnds[0]"
-                    : "vb6_hwnd_" + cIdent(ctrl.controlName);
-                c_.emitLine("vb6_InstallControlSubclass((void*)" + hwndVar + ", (void*)" + subProcName + ");");
+            if (!needsSubclass(ctrl)) continue;
+            std::string subProcName = "vb6_ctrl_subproc_" + cIdent(ctrl.controlName);
+            if (knownControlArrays_.count(ctrlNameLower)) {
+                // P0-4修复: 控件数组遍历所有元素安装子类化
+                c_.emitLine("{ int vb6_si; for (vb6_si = 0; vb6_si < VB6_CTRLARR_MAX; vb6_si++) {");
+                c_.emitLine("  void* vb6_sub_hwnd = vb6_CtrlArr_GetAt(&vb6_arr_" + cIdent(ctrl.controlName) + ", vb6_si);");
+                c_.emitLine("  if (vb6_sub_hwnd) vb6_InstallControlSubclass(vb6_sub_hwnd, (void*)" + subProcName + "); } }");
+            } else {
+                c_.emitLine("vb6_InstallControlSubclass((void*)vb6_hwnd_" + cIdent(ctrl.controlName) + ", (void*)" + subProcName + ");");
+            }
+        }
+        // P0-5修复: Frame容器内的子控件
+        for (const auto& ctrl : frmDesc.formControl.children) {
+            if (ctrl.controlType == FrmControlType::Frame) {
+                for (const auto& child : ctrl.children) {
+                    std::string childNameLower = child.controlName;
+                    std::transform(childNameLower.begin(), childNameLower.end(), childNameLower.begin(), ::tolower);
+                    if (subEmitted.count(childNameLower)) continue;
+                    subEmitted.insert(childNameLower);
+                    if (!needsSubclass(child)) continue;
+                    std::string subProcName = "vb6_ctrl_subproc_" + cIdent(child.controlName);
+                    c_.emitLine("vb6_InstallControlSubclass((void*)vb6_hwnd_" + cIdent(child.controlName) + ", (void*)" + subProcName + ");");
+                }
             }
         }
     }
+
     // P7.8: 菜单构建 (VB.Menu控件不创建窗口, 用Win32菜单API)
     {
         int menuId = 1000;  // 菜单项ID起始值 (控件ID用100-999)
