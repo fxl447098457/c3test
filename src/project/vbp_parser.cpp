@@ -1,4 +1,4 @@
-﻿// vb6c3 - VB6工程文件(.vbp)解析器
+// vb6c3 - VB6工程文件(.vbp)解析器
 // .vbp 是纯文本行导向的INI风格文件, 每行 Key=Value
 
 #include "project/vbp_parser.hpp"
@@ -231,7 +231,18 @@ VbpProject VbpParser::parseString(const std::string& content, const std::string&
         } else if (key == "OptimizationType") {
             try { project.optimizationType = std::stoi(value); } catch (...) {}
         }
-        // 其他项目属性暂不处理 (版本信息、编译选项、线程选项等)
+        // 版本信息 (P20-22)
+        else if (key == "MajorVer") { try { project.majorVer = std::stoi(value); } catch (...) {} }
+        else if (key == "MinorVer") { try { project.minorVer = std::stoi(value); } catch (...) {} }
+        else if (key == "RevisionVer") { try { project.revisionVer = std::stoi(value); } catch (...) {} }
+        else if (key == "AutoIncrementVer") { try { project.autoIncrementVer = std::stoi(value); } catch (...) {} }
+        else if (key == "CompanyName") { project.companyName = unquote(value); }
+        else if (key == "FileDescription") { project.fileDescription = unquote(value); }
+        else if (key == "LegalCopyright") { project.legalCopyright = unquote(value); }
+        else if (key == "ProductName") { project.productName = unquote(value); }
+        else if (key == "Comments") { project.comments = unquote(value); }
+        else if (key == "LegalTrademarks") { project.legalTrademarks = unquote(value); }
+        else if (key == "OriginalFileName") { project.originalFileName = unquote(value); }
     }
 
     return project;
