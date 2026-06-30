@@ -3021,7 +3021,7 @@ std::string CCodeGen::mapBinaryOp(BinaryOp op) const {
         case BinaryOp::Eqv:    return "/* EQV */";
         case BinaryOp::Imp:    return "/* IMP */";
         case BinaryOp::Like:   return "/* LIKE */";
-        default:               return "/* ? */";
+        default:               return "/* unhandled BinaryOp */";
     }
 }
 
@@ -7369,6 +7369,8 @@ void CCodeGen::emitFormFramework(const FrmFormDesc& frmDesc, Module& module) {
         constexpr long kEsAutoH    = 0x00000080L;
         constexpr long kLbsNotify  = 0x00000001L;
         constexpr long kCbsDrop    = 0x00000002L;
+        constexpr long kSsBitmap   = 0x0000000EL;  // SS_BITMAP for PictureBox/Image
+        constexpr long kSsCenterImg= 0x00000200L;  // SS_CENTERIMAGE
 
         long style = kWsChild | kWsVisible;
         long exStyle = 0;

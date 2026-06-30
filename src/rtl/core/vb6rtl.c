@@ -1,4 +1,4 @@
-﻿// vb6rtl.c - VB6运行时库最小实现
+// vb6rtl.c - VB6运行时库最小实现
 // 仅支持 hello.bas 等简单程序运行
 
 #include "vb6rtl.h"
@@ -422,7 +422,7 @@ int32_t vb6_IsNumeric(vb6_VARIANT v) {
 int32_t vb6_IsNull(vb6_VARIANT v) { return v.vt == vb6_vtNull ? -1 : 0; }
 int32_t vb6_IsEmpty(vb6_VARIANT v) { return v.vt == vb6_vtEmpty ? -1 : 0; }
 int32_t vb6_IsObject(vb6_VARIANT v) { return (v.vt == vb6_vtDispatch && v.pdispVal != NULL) ? -1 : 0; }
-int32_t vb6_IsArray(vb6_VARIANT v) { (void)v; return 0; }  // 简化: 暂不支持
+int32_t vb6_IsArray(vb6_VARIANT v) { return (v.vt & 0x2000) ? -1 : 0; }  // VT_ARRAY=0x2000
 int32_t vb6_IsDate(vb6_VARIANT v) { return v.vt == vb6_vtDate ? -1 : 0; }
 int32_t vb6_IsError(vb6_VARIANT v) { return v.vt == vb6_vtError ? -1 : 0; }
 
@@ -3244,4 +3244,99 @@ BSTR vb6_Partition(int64_t number, int64_t start, int64_t stop, int64_t interval
         swprintf(buf, 64, L"%10lld: %10lld", (long long)rangeStart, (long long)rangeEnd);
     }
     return vb6_BSTR_FromStr(buf);
+}
+
+// ============================================================
+// P20-02: IEnumVARIANT support for COM For Each
+// ============================================================
+
+void* vb6_ComNewEnum(void* disp) {
+    if (!disp) return NULL;
+    IDispatch* pDisp = (IDispatch*)disp;
+
+    // _NewEnum has DISPID = -4 (DISPID_NEWENUM)
+    DISPID dispidNewEnum = -4;
+    OLECHAR* wszNewEnum = L"_NewEnum";
+    HRESULT hr = pDisp->lpVtbl->GetIDsOfNames(pDisp, &IID_NULL, &wszNewEnum, 1,
+                                                LOCALE_USER_DEFAULT, &dispidNewEnum);
+    if (FAILED(hr)) {
+        // Try known DISPID directly
+        dispidNewEnum = -4;
+    }
+
+    DISPPARAMS dp = {0};
+    VARIANT result;
+    VariantInit(&result);
+    EXCEPINFO exInfo = {0};
+
+    hr = pDisp->lpVtbl->Invoke(pDisp, dispidNewEnum, &IID_NULL, LOCALE_USER_DEFAULT,
+                                DISPATCH_PROPERTYGET | DISPATCH_METHOD,
+                                &dp, &result, &exInfo, NULL);
+    if (FAILED(hr)) return NULL;
+
+    // QI for IEnumVARIANT
+    IEnumVARIANT* pEnum = NULL;
+    if (result.vt == VT_UNKNOWN) {
+        hr = result.punkVal->lpVtbl->QueryInterface(result.punkVal, &IID_IEnumVARIANT, (void**)&pEnum);
+        result.punkVal->lpVtbl->Release(result.punkVal);
+    } else if (result.vt == VT_DISPATCH) {
+        hr = result.pdispVal->lpVtbl->QueryInterface(result.pdispVal, &IID_IEnumVARIANT, (void**)&pEnum);
+        result.pdispVal->lpVtbl->Release(result.pdispVal);
+    } else {
+        VariantClear(&result);
+        return NULL;
+    }
+    return (void*)pEnum;
+}
+
+int vb6_EnumNext(void* penum, vb6_VARIANT* outElem) {
+    if (!penum || !outElem) return 0;
+    IEnumVARIANT* pEnum = (IEnumVARIANT*)penum;
+
+    VARIANT varElem;
+    VariantInit(&varElem);
+    ULONG fetched = 0;
+    HRESULT hr = pEnum->lpVtbl->Next(pEnum, 1, &varElem, &fetched);
+
+    if (hr != S_OK || fetched == 0) {
+        VariantClear(&varElem);
+        return 0;
+    }
+
+    // Convert COM VARIANT to vb6_VARIANT
+    memset(outElem, 0, sizeof(vb6_VARIANT));
+    switch (varElem.vt) {
+        case VT_EMPTY:  outElem->vt = vb6_vtEmpty; break;
+        case VT_NULL:   outElem->vt = vb6_vtNull; break;
+        case VT_I2:     outElem->vt = vb6_vtInteger; outElem->iVal = varElem.iVal; break;
+        case VT_I4:     outElem->vt = vb6_vtLong; outElem->lVal = varElem.lVal; break;
+        case VT_R4:     outElem->vt = vb6_vtSingle; outElem->fltVal = varElem.fltVal; break;
+        case VT_R8:     outElem->vt = vb6_vtDouble; outElem->dblVal = varElem.dblVal; break;
+        case VT_BSTR:   outElem->vt = vb6_vtBSTR; outElem->bstrVal = varElem.bstrVal; break;
+        case VT_BOOL:   outElem->vt = vb6_vtBoolean; outElem->boolVal = varElem.boolVal ? -1 : 0; VariantClear(&varElem); break;
+        case VT_DISPATCH: outElem->vt = vb6_vtDispatch; outElem->pdispVal = varElem.pdispVal; break;
+        case VT_DATE:   outElem->vt = vb6_vtDate; outElem->dblVal = varElem.date; VariantClear(&varElem); break;
+        default: {
+            // Convert to BSTR for unknown types
+            VariantChangeType(&varElem, &varElem, 0, VT_BSTR);
+            if (varElem.vt == VT_BSTR) {
+                outElem->vt = vb6_vtBSTR;
+                outElem->bstrVal = varElem.bstrVal;
+            } else {
+                VariantClear(&varElem);
+            }
+            return 1;
+        }
+    }
+    // Cleanup for types we didn't transfer ownership of
+    if (varElem.vt != VT_BSTR && varElem.vt != VT_DISPATCH && varElem.vt != VT_UNKNOWN) {
+        VariantClear(&varElem);
+    }
+    return 1;
+}
+
+void vb6_EnumRelease(void* penum) {
+    if (!penum) return;
+    IEnumVARIANT* pEnum = (IEnumVARIANT*)penum;
+    pEnum->lpVtbl->Release(pEnum);
 }

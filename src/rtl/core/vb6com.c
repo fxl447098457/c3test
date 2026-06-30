@@ -1,4 +1,4 @@
-﻿// vb6com.c - VB6 COM互操作运行时实现 (P6)
+// vb6com.c - VB6 COM互操作运行时实现 (P6)
 // 使用Windows原生COM API, 独立于vb6rtl.h避免VARIANT冲突
 
 #include "vb6com.h"

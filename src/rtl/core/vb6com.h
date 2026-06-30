@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 // vb6com.h - VB6 COM互操作运行时 (P6)
 // 独立于vb6rtl.h, 避免VARIANT定义冲突
 // 此文件使用Windows原生VARIANT/IDispatch等类型
