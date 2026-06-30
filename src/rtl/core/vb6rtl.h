@@ -370,6 +370,17 @@ double vb6_CDate(vb6_VARIANT v);
 BSTR vb6_Hex(int32_t n);
 BSTR vb6_Oct(int32_t n);
 
+// P18-A: 兼容性填平 — 新增RTL函数
+int64_t vb6_CCur(double v);            // CCur: value * 10000
+BSTR   vb6_CDec(vb6_VARIANT v);        // CDec: 返回Decimal的字符串表示
+int32_t vb6_RGB(int32_t r, int32_t g, int32_t b);  // RGB: OLE color
+int32_t vb6_QBColor(int32_t n);        // QBColor: 16-color lookup
+double vb6_FileDateTime(BSTR pathname); // FileDateTime: 文件修改时间→VB6 date serial
+int32_t vb6_FileLen(BSTR pathname);    // FileLen: 文件大小(字节)
+void   vb6_SendKeys(BSTR keys, int32_t wait);    // SendKeys: 发送按键
+void   vb6_AppActivate(BSTR title, int32_t wait); // AppActivate: 激活窗口
+void   vb6_MidSet(BSTR* target, int32_t start, int32_t len, BSTR replacement); // Mid$ statement赋值
+
 // ============================================================
 // SAFEARRAY - VB6 动态/静态数组
 // ============================================================

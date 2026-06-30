@@ -213,6 +213,7 @@ void traverseStmt(Stmt& stmt, ASTVisitor& visitor) {
     case ASTNodeKind::ReturnStmt:
     case ASTNodeKind::OnGoToStmt:
     case ASTNodeKind::OnGoSubStmt:
+    case ASTNodeKind::MidStmt:  // P18-A
     case ASTNodeKind::StopStmt:
     case ASTNodeKind::EndStmt:
     case ASTNodeKind::EraseStmt:
@@ -229,6 +230,7 @@ void traverseStmt(Stmt& stmt, ASTVisitor& visitor) {
         case ASTNodeKind::ReturnStmt:   visitor.visit(static_cast<ReturnStmt&>(stmt)); break;
         case ASTNodeKind::OnGoToStmt:   visitor.visit(static_cast<OnGoToStmt&>(stmt)); break;
         case ASTNodeKind::OnGoSubStmt:  visitor.visit(static_cast<OnGoSubStmt&>(stmt)); break;
+        case ASTNodeKind::MidStmt:       visitor.visit(static_cast<MidStmt&>(stmt)); break;  // P18-A
         case ASTNodeKind::StopStmt:     visitor.visit(static_cast<StopStmt&>(stmt)); break;
         case ASTNodeKind::EndStmt:      visitor.visit(static_cast<EndStmt&>(stmt)); break;
         case ASTNodeKind::EraseStmt:    visitor.visit(static_cast<EraseStmt&>(stmt)); break;

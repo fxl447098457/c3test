@@ -1226,6 +1226,15 @@ void CCodeGen::visit(IdentifierExpr& node) {
         {"ismissing", "vb6_IsMissing"},
         // P14.3.5: CallByName
         {"callbyname", "vb6_CallByName"},
+        // P18-A: 兼容性填平新增内置函数
+        {"ccur",       "vb6_CCur"},
+        {"cdec",       "vb6_CDec"},
+        {"rgb",        "vb6_RGB"},
+        {"qbcolor",    "vb6_QBColor"},
+        {"filedatetime", "vb6_FileDateTime"},
+        {"filelen",    "vb6_FileLen"},
+        {"sendkeys",   "vb6_SendKeys"},
+        {"appactivate", "vb6_AppActivate"},
         
     };
 
@@ -2942,6 +2951,12 @@ void CCodeGen::emitStmtList(StmtList& stmts, bool emitResumePoints) {
                         case ASTNodeKind::OnGoSubStmt:
                 visit(static_cast<OnGoSubStmt&>(*stmt));
                 break;
+            case ASTNodeKind::OnGoToStmt:
+                visit(static_cast<OnGoToStmt&>(*stmt));
+                break;
+            case ASTNodeKind::MidStmt:
+                visit(static_cast<MidStmt&>(*stmt));
+                break;
 case ASTNodeKind::GoSubStmt:       visit(static_cast<GoSubStmt&>(*stmt)); break;
             case ASTNodeKind::OnErrorStmt:     visit(static_cast<OnErrorStmt&>(*stmt)); break;
     case ASTNodeKind::ResumeStmt:      visit(static_cast<ResumeStmt&>(*stmt)); break;
@@ -4242,7 +4257,7 @@ void CCodeGen::visit(CallStmt& node) {
                                 "vb6_Trim", "vb6_LTrim", "vb6_RTrim", "vb6_Chr",
                                 "vb6_Str", "vb6_CStr", "vb6_Format", "vb6_Hex", "vb6_Oct",
                                 "vb6_Replace", "vb6_Space", "vb6_String", "vb6_StrReverse",
-                                "vb6_BSTR_Concat", "vb6_BSTR_Empty", "vb6_App_Path", "vb6_App_EXEName", "vb6_Command", "vb6_CurDir", "vb6_Environ", "vb6_Dir", "vb6_IIfBSTR", "vb6_GetControlText", "vb6_GetControlCaption"
+                                "vb6_BSTR_Concat", "vb6_BSTR_Empty", "vb6_App_Path", "vb6_App_EXEName", "vb6_Command", "vb6_CurDir", "vb6_Environ", "vb6_Dir", "vb6_IIfBSTR", "vb6_CDec", "vb6_GetControlText", "vb6_GetControlCaption"
                             };
                             auto isBstrExpr = [&](const std::string& expr) -> bool {
                                 for (auto& prefix : bstrFuncs) {
@@ -4498,7 +4513,7 @@ void CCodeGen::visit(PrintStmt& node) {
         "vb6_Trim", "vb6_LTrim", "vb6_RTrim", "vb6_Chr",
         "vb6_Str", "vb6_CStr", "vb6_Format", "vb6_Hex", "vb6_Oct",
         "vb6_Replace", "vb6_Space", "vb6_String", "vb6_StrReverse",
-        "vb6_BSTR_Concat", "vb6_BSTR_Empty", "vb6_App_Path", "vb6_App_EXEName", "vb6_Command", "vb6_CurDir", "vb6_Environ", "vb6_Dir", "vb6_IIfBSTR", "vb6_GetControlText", "vb6_GetControlCaption"
+        "vb6_BSTR_Concat", "vb6_BSTR_Empty", "vb6_App_Path", "vb6_App_EXEName", "vb6_Command", "vb6_CurDir", "vb6_Environ", "vb6_Dir", "vb6_IIfBSTR", "vb6_CDec", "vb6_GetControlText", "vb6_GetControlCaption"
     };
     auto isBstrExpr = [&](const std::string& expr) -> bool {
         for (auto& prefix : bstrFuncs) {
@@ -4539,7 +4554,7 @@ void CCodeGen::visit(WriteStmt& node) {
         "vb6_Trim", "vb6_LTrim", "vb6_RTrim", "vb6_Chr",
         "vb6_Str", "vb6_CStr", "vb6_Format", "vb6_Hex", "vb6_Oct",
         "vb6_Replace", "vb6_Space", "vb6_String", "vb6_StrReverse",
-        "vb6_BSTR_Concat", "vb6_BSTR_Empty", "vb6_App_Path", "vb6_App_EXEName", "vb6_Command", "vb6_CurDir", "vb6_Environ", "vb6_Dir", "vb6_IIfBSTR", "vb6_GetControlText", "vb6_GetControlCaption"
+        "vb6_BSTR_Concat", "vb6_BSTR_Empty", "vb6_App_Path", "vb6_App_EXEName", "vb6_Command", "vb6_CurDir", "vb6_Environ", "vb6_Dir", "vb6_IIfBSTR", "vb6_CDec", "vb6_GetControlText", "vb6_GetControlCaption"
     };
     auto isBstrExpr = [&](const std::string& expr) -> bool {
         for (auto& prefix : bstrFuncs) {
@@ -4754,6 +4769,47 @@ void CCodeGen::visit(OnGoSubStmt& node) {
     c_.emitLine("}");
     // Return landing point (after On...GoSub)
     c_.emitLine("vb6_gosub_ret_" + std::to_string(retId) + ":;");
+}
+
+void CCodeGen::visit(OnGoToStmt& node) {
+    // P18-A: On x GoTo label1, label2, ... - computed goto
+    emitExpr(*node.index);
+    std::string idxVar = std::move(lastExpr_);
+    c_.emitLine("{");
+    c_.indent();
+    c_.emitLine("int _goto_idx = " + idxVar + ";");
+    c_.emitLine("if (_goto_idx >= 1 && _goto_idx <= " + std::to_string(node.labels.size()) + ") {");
+    c_.indent();
+    c_.emitLine("switch(_goto_idx) {");
+    c_.indent();
+    for (size_t k = 0; k < node.labels.size(); k++) {
+        c_.emitLine("case " + std::to_string(k + 1) + ": goto vb6_label_" + cIdent(node.labels[k]) + ";");
+    }
+    c_.dedent();
+    c_.emitLine("}");
+    c_.dedent();
+    c_.emitLine("}");
+    c_.dedent();
+    c_.emitLine("}");
+}
+
+void CCodeGen::visit(MidStmt& node) {
+    // P18-A: Mid$(var, start, len) = expr → vb6_MidSet(&var, start, len, expr)
+    emitExpr(*node.start);
+    std::string startVar = std::move(lastExpr_);
+    std::string lenVar;
+    if (node.hasLength) {
+        emitExpr(*node.length);
+        lenVar = std::move(lastExpr_);
+    } else {
+        lenVar = "0";
+    }
+    emitExpr(*node.value);
+    std::string valueVar = std::move(lastExpr_);
+    // Emit target variable address
+    emitExpr(*node.target);
+    std::string targetVar = std::move(lastExpr_);
+    c_.emitLine("vb6_MidSet(&" + targetVar + ", " + startVar + ", " + lenVar + ", " + valueVar + ");");
 }
 
 void CCodeGen::visit(OptionStmt& node) {

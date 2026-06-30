@@ -45,8 +45,8 @@ const char* ASTNode::kindName() const {
     case ASTNodeKind::OnErrorStmt:     return "OnErrorStmt";
     case ASTNodeKind::OnGoToStmt:      return "OnGoToStmt";
     case ASTNodeKind::OnGoSubStmt:     return "OnGoSubStmt";
-    case ASTNodeKind::ExitStmt:        return "ExitStmt";
-    case ASTNodeKind::StopStmt:        return "StopStmt";
+    case ASTNodeKind::MidStmt:         return "MidStmt";  // P18-A
+
     case ASTNodeKind::EndStmt:         return "EndStmt";
     case ASTNodeKind::CallStmt:        return "CallStmt";
     case ASTNodeKind::ReDimStmt:       return "ReDimStmt";

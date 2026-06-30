@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 // vb6c - Visual Basic 6.0 Compiler
 // AST节点体系 - 覆盖VB6全部语法结构
 // P1.1 定义
@@ -144,6 +144,7 @@ enum class ASTNodeKind : uint16_t {
     ErrorStmt,
     OnGoToStmt,
     OnGoSubStmt,
+    MidStmt,  // P18-A: Mid$ statement (assignment)
     ExitStmt,
     StopStmt,
     EndStmt,
@@ -235,6 +236,7 @@ class ResumeStmt;
 class ErrorStmt;
 class OnGoToStmt;
 class OnGoSubStmt;
+class MidStmt;
 class ExitStmt;
 class StopStmt;
 class EndStmt;
@@ -770,6 +772,21 @@ public:
     OnGoSubStmt(SourceLocation loc, ExprPtr idx, std::vector<std::string> labels)
         : Stmt(ASTNodeKind::OnGoSubStmt, loc),
           index(std::move(idx)), labels(std::move(labels)) {}
+};
+
+// P18-A: Mid$ statement (assignment) — Mid$(var, start, len) = expr
+class MidStmt : public Stmt {
+public:
+    ExprPtr target;      // target variable (must be a BSTR lvalue)
+    ExprPtr start;       // start position (1-based)
+    ExprPtr length;      // length (optional, 0 = rest of string from start)
+    ExprPtr value;       // replacement string expression
+    int32_t hasLength;   // whether length argument was provided
+
+    MidStmt(SourceLocation loc, ExprPtr tgt, ExprPtr s, ExprPtr l, ExprPtr v, int32_t hl)
+        : Stmt(ASTNodeKind::MidStmt, loc),
+          target(std::move(tgt)), start(std::move(s)), length(std::move(l)),
+          value(std::move(v)), hasLength(hl) {}
 };
 
 // Exit 语句: Exit Sub/Function/Property/Do/For

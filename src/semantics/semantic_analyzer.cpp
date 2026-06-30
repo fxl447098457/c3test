@@ -60,6 +60,8 @@ static void dispatchStmt(Stmt& stmt, SemanticAnalyzer& analyzer) {
         case ASTNodeKind::PutStmt:         analyzer.visit(static_cast<PutStmt&>(stmt)); break;
         case ASTNodeKind::GoSubStmt:        analyzer.visit(static_cast<GoSubStmt&>(stmt)); break;
 case ASTNodeKind::OnGoSubStmt:      /* P17.4: OnGoSub labels validated in GoSub validation pass */ break;
+        case ASTNodeKind::OnGoToStmt:      /* P18-A: OnGoTo labels validated in GoSub validation pass */ break;
+        case ASTNodeKind::MidStmt:        /* P18-A: Mid$ statement */ break;
         case ASTNodeKind::ReturnStmt:       analyzer.visit(static_cast<ReturnStmt&>(stmt)); break;
         // 其他语句暂不处理
         default: break;
@@ -955,6 +957,23 @@ void SemanticAnalyzer::visit(OnGoSubStmt& node) {
     }
 }
 
+void SemanticAnalyzer::visit(OnGoToStmt& node) {
+    // P18-A: OnGoTo labels validated in GoSub validation pass (same as OnGoSub)
+    if (pass_ == 2) {
+        for (auto& label : node.labels) {
+            gosubTargetLabels_.push_back({label, node.loc});
+        }
+    }
+}
+
+void SemanticAnalyzer::visit(MidStmt& node) {
+    // P18-A: Mid$ statement — validate expressions
+    if (node.target) analyzeExpr(*node.target);
+    if (node.start)  analyzeExpr(*node.start);
+    if (node.hasLength && node.length) analyzeExpr(*node.length);
+    if (node.value)  analyzeExpr(*node.value);
+}
+
 void SemanticAnalyzer::visit(ReturnStmt& node) {
     // Return from GoSub - 无需特殊语义检查
     // 运行时由vb6_gosub_stack处理
@@ -1568,6 +1587,7 @@ void SemanticAnalyzer::registerBuiltins() {
     addBuiltinFunc("CDate", Vb6Type::Date);
     addBuiltinFunc("CByte", Vb6Type::Byte);
     addBuiltinFunc("CCur", Vb6Type::Currency);
+    addBuiltinFunc("CDec", Vb6Type::Variant);  // P18-A: CDec returns Variant (Decimal subtype)
     addBuiltinFunc("CVar", Vb6Type::Variant);
     addBuiltinFunc("CVErr", Vb6Type::Variant);
     // 数值函数

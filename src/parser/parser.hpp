@@ -138,6 +138,7 @@ private:
     std::unique_ptr<OnErrorStmt> parseOnErrorStmt();
     std::unique_ptr<ResumeStmt> parseResumeStmt();
     std::unique_ptr<ErrorStmt> parseErrorStmt();
+    StmtPtr parseMidStmt();  // P18-A
     std::unique_ptr<OnGoToStmt> parseOnGoToStmt();
     std::unique_ptr<OnGoSubStmt> parseOnGoSubStmt();
     std::unique_ptr<ExitStmt> parseExitStmt();

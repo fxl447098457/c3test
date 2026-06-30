@@ -265,6 +265,10 @@ public:
         out() << "On ... GoSub\n";
     }
 
+    void visit(MidStmt& node) override {  // P18-A
+        out() << "Mid$ Statement\n";
+    }
+
     void visit(ExitStmt& node) override {
         out() << "Exit " << exitKindToString(node.exitKind) << "\n";
     }
@@ -520,6 +524,7 @@ private:
         case ASTNodeKind::LocalDeclStmt:   visit(static_cast<LocalDeclStmt&>(s)); break;
         case ASTNodeKind::OnGoToStmt:      visit(static_cast<OnGoToStmt&>(s)); break;
         case ASTNodeKind::OnGoSubStmt:     visit(static_cast<OnGoSubStmt&>(s)); break;
+        case ASTNodeKind::MidStmt:        visit(static_cast<MidStmt&>(s)); break;  // P18-A
         case ASTNodeKind::NameStmt:        visit(static_cast<NameStmt&>(s)); break;
         // 文件I/O
         case ASTNodeKind::OpenStmt:        visit(static_cast<OpenStmt&>(s)); break;

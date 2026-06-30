@@ -266,6 +266,140 @@ double vb6_CDbl(double x) {
 BSTR vb6_CStr(vb6_VARIANT x) {
     return vb6_Format(x, NULL);
 }
+// ============================================================
+// P18: Missing RTL functions (CCur/RGB/QBColor/FileDateTime/FileLen/SendKeys/AppActivate)
+// ============================================================
+
+int64_t vb6_CCur(double v) {
+    /* CCur: convert to Currency (int64_t scaled by 10000) */
+    return (int64_t)(v * 10000.0);
+}
+
+long vb6_RGB(int32_t r, int32_t g, int32_t b) {
+    /* RGB: combine red/green/blue into OLE color */
+    if (r < 0) r = 0; if (r > 255) r = 255;
+    if (g < 0) g = 0; if (g > 255) g = 255;
+    if (b < 0) b = 0; if (b > 255) b = 255;
+    return (long)(r | (g << 8) | (b << 16));
+}
+
+long vb6_QBColor(int32_t n) {
+    /* QBColor: return RGB for 16 QB colors (0-15) */
+    static const long qbc[16] = {
+        0x000000, 0x800000, 0x008000, 0x808000,
+        0x000080, 0x800080, 0x008080, 0xC0C0C0,
+        0x808080, 0xFF0000, 0x00FF00, 0xFFFF00,
+        0x0000FF, 0xFF00FF, 0x00FFFF, 0xFFFFFF
+    };
+    if (n >= 0 && n < 16) return qbc[n];
+    return 0;
+}
+
+double vb6_FileDateTime(BSTR path) {
+    /* FileDateTime: return VB6 date serial for file modification time */
+    if (!path) return 0.0;
+    WIN32_FILE_ATTRIBUTE_DATA fad;
+    if (!GetFileAttributesExW(path, GetFileExInfoStandard, &fad)) return 0.0;
+    /* Convert FILETIME to VB6 date serial */
+    SYSTEMTIME st;
+    FileTimeToSystemTime(&fad.ftLastWriteTime, &st);
+    /* Build date: days since 1899-12-30 */
+    struct tm t = {0};
+    t.tm_year = st.wYear - 1900;
+    t.tm_mon = st.wMonth - 1;
+    t.tm_mday = st.wDay;
+    t.tm_hour = st.wHour;
+    t.tm_min = st.wMinute;
+    t.tm_sec = st.wSecond;
+    t.tm_isdst = -1;
+    /* VB6 serial = days from 1899-12-30 + time fraction */
+    /* 1899-12-30 is day -1, 1900-01-01 is day 2 in VB6 serial system */
+    /* Use difftime from 1899-12-30 00:00:00 */
+    struct tm epoch = {0};
+    epoch.tm_year = -1;  /* 1899 */
+    epoch.tm_mon = 11;   /* December */
+    epoch.tm_mday = 30;
+    double secs = difftime(mktime(&t), mktime(&epoch));
+    return secs / 86400.0;
+}
+
+int32_t vb6_FileLen(BSTR path) {
+    /* FileLen: return file size in bytes */
+    if (!path) return 0;
+    WIN32_FILE_ATTRIBUTE_DATA fad;
+    if (!GetFileAttributesExW(path, GetFileExInfoStandard, &fad)) return 0;
+    ULARGE_INTEGER size;
+    size.LowPart = fad.nFileSizeLow;
+    size.HighPart = fad.nFileSizeHigh;
+    return (int32_t)size.QuadPart;  /* Truncate to Long for VB6 compatibility */
+}
+
+void vb6_SendKeys(BSTR keys, int32_t wait) {
+    /* SendKeys: simplified - only supports single characters and basic keys */
+    (void)wait;
+    if (!keys) return;
+    /* Simple implementation: send each character via SendInput */
+    size_t len = vb6_BSTR_Len(keys);
+    for (size_t i = 0; i < len; i++) {
+        INPUT inputs[2] = {0};
+        inputs[0].type = INPUT_KEYBOARD;
+        inputs[0].ki.wVk = 0;
+        inputs[0].ki.wScan = keys[i];
+        inputs[0].ki.dwFlags = KEYEVENTF_UNICODE;
+        inputs[1].type = INPUT_KEYBOARD;
+        inputs[1].ki.wVk = 0;
+        inputs[1].ki.wScan = keys[i];
+        inputs[1].ki.dwFlags = KEYEVENTF_UNICODE | KEYEVENTF_KEYUP;
+        SendInput(2, inputs, sizeof(INPUT));
+    }
+}
+
+void vb6_AppActivate(BSTR title, int32_t wait) {
+    /* AppActivate: activate window by title */
+    (void)wait;
+    if (!title) return;
+    HWND hwnd = FindWindowW(NULL, title);
+    if (hwnd) {
+        SetForegroundWindow(hwnd);
+    }
+
+BSTR vb6_CDec(vb6_VARIANT v) {
+    /* CDec: convert to Decimal — VB6 Decimal is 12-byte, simplified as BSTR representation */
+    /* For now, convert the value to its string representation */
+    return vb6_CStr(v);
+}
+
+void vb6_MidSet(BSTR* target, int32_t start, int32_t len, BSTR replacement) {
+    /* P18-A: Mid$ statement assignment — Mid$(target, start, len) = replacement */
+    /* Replaces len characters of target starting at position start (1-based) */
+    if (!target || !*target || start < 1) return;
+    int32_t tLen = vb6_BSTR_Len(*target);
+    if (start > tLen) return;
+    int32_t rLen = replacement ? vb6_BSTR_Len(replacement) : 0;
+    /* If len <= 0, use replacement length (VB6 behavior when length omitted) */
+    if (len <= 0) len = rLen;
+    /* Clamp to available characters */
+    int32_t avail = tLen - start + 1;
+    if (len > avail) len = avail;
+    if (len > rLen) len = rLen;
+    if (len <= 0) return;
+    /* Build new string: prefix + replacement[0..len-1] + suffix */
+    int32_t newLen = tLen;  /* Mid$ doesn't change length, only replaces in-place */
+    BSTR result = SysAllocStringLen(NULL, newLen);
+    if (!result) return;
+    /* Copy prefix (before start) */
+    if (start > 1) memcpy(result, *target, (start - 1) * sizeof(wchar_t));
+    /* Copy replacement */
+    if (replacement && len > 0) memcpy(result + start - 1, replacement, len * sizeof(wchar_t));
+    /* Copy suffix (after start+len-1) */
+    int32_t afterStart = start - 1 + len;
+    if (afterStart < tLen) memcpy(result + afterStart, *target + afterStart, (tLen - afterStart) * sizeof(wchar_t));
+    result[newLen] = L'\0';
+    /* Replace target */
+    SysFreeString(*target);
+    *target = result;
+}
+}
 
 // ============================================================
 // 类型检查

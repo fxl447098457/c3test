@@ -1,4 +1,4 @@
-﻿// vb6c3 - 语句解析器
+// vb6c3 - 语句解析器
 // VB6 块语句 + 单行语句
 
 #include "parser/parser.hpp"
@@ -35,6 +35,14 @@ StmtPtr Parser::parseStatement() {
         }
 
         // --- On Error / On GoTo ---
+
+        // --- P18-A: Mid$ statement (assignment) ---
+        case TokenKind::Mid:
+            if (next_.kind == TokenKind::LeftParen || next_.kind == TokenKind::Dollar) {
+                return parseMidStmt();
+            }
+            return parseLabelOrAssignmentOrCall();
+
         case TokenKind::On:       return parseOnStmt();
 
         // --- P14.1.2: Resume --
@@ -634,6 +642,52 @@ std::unique_ptr<ErrorStmt> Parser::parseErrorStmt() {
     advance();
     auto errNum = parseExpression();
     return std::make_unique<ErrorStmt>(loc, std::move(errNum));
+}
+
+// P18-A: Mid$ statement (assignment) — Mid$(var, start[, length]) = expr
+// P18-A: Mid$ statement (assignment) — Mid$(var, start[, length]) = expr
+// When Mid$(var, start, len) is NOT followed by =, treat as function call expression statement
+StmtPtr Parser::parseMidStmt() {
+    auto loc = currentLoc();
+    advance(); // consume 'Mid'
+    // optional $ suffix
+    if (cur_.kind == TokenKind::Dollar) advance();
+    expect(TokenKind::LeftParen, DiagnosticID::ParseExpectedToken,
+           "expected '(' after Mid$");
+    // Parse target variable
+    auto target = parseExpression();
+    expect(TokenKind::Comma, DiagnosticID::ParseExpectedToken,
+           "expected ',' in Mid$ statement");
+    // Parse start position
+    auto startPos = parseExpression();
+    // Optional length argument
+    ExprPtr lengthExpr;
+    int32_t hasLength = 0;
+    if (match(TokenKind::Comma)) {
+        lengthExpr = parseExpression();
+        hasLength = 1;
+    }
+    expect(TokenKind::RightParen, DiagnosticID::ParseExpectedToken,
+           "expected ')' in Mid$ statement");
+    // Check for = (Mid$ statement assignment)
+    if (match(TokenKind::Equals)) {
+        // Parse replacement value
+        auto value = parseExpression();
+        if (!hasLength) {
+            // Create dummy length expr (0 means "rest of string")
+            auto dummyLen = std::make_unique<LiteralExpr>(loc, LiteralKind::Integer, "0");
+            dummyLen->intValue = 0;
+            lengthExpr = std::move(dummyLen);
+        }
+        return std::make_unique<MidStmt>(loc, std::move(target), std::move(startPos),
+                                          std::move(lengthExpr), std::move(value), hasLength);
+    }
+    // Not Mid$ statement assignment — treat as function call expression statement
+    // Construct Mid$(target, start, len) as IndexOrCallExpr
+    auto call = std::make_unique<IndexOrCallExpr>(loc, std::move(target));
+    call->positional.push_back(std::move(startPos));
+    if (hasLength && lengthExpr) call->positional.push_back(std::move(lengthExpr));
+    return std::make_unique<CallStmt>(loc, std::move(call));
 }
 
 std::unique_ptr<OnGoToStmt> Parser::parseOnGoToStmt() {

@@ -51,6 +51,7 @@ public:
     virtual void visit(ErrorStmt& node) {}
     virtual void visit(OnGoToStmt& node) {}
     virtual void visit(OnGoSubStmt& node) {}
+    virtual void visit(MidStmt& node) {}  // P18-A
     virtual void visit(ExitStmt& node) {}
     virtual void visit(StopStmt& node) {}
     virtual void visit(EndStmt& node) {}
