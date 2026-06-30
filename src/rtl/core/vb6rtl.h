@@ -414,6 +414,25 @@ void   vb6_SendKeys(BSTR keys, int32_t wait);    // SendKeys: 发送按键
 void   vb6_AppActivate(BSTR title, int32_t wait); // AppActivate: 激活窗口
 void   vb6_MidSet(BSTR* target, int32_t start, int32_t len, BSTR replacement); // Mid$ statement赋值
 
+// P18-D: 兼容性填平 — 字符串/指针/格式化函数
+int32_t vb6_AscW(BSTR s);           // AscW: Unicode code point
+BSTR   vb6_ChrW(int32_t code);      // ChrW: Unicode character
+int32_t vb6_AscB(BSTR s);           // AscB: first byte value
+BSTR   vb6_ChrB(int32_t code);      // ChrB: single-byte string
+double  vb6_Timer(void);            // Timer: seconds since midnight (fractional)
+BSTR   vb6_StrConv(BSTR text, int32_t conversion, int32_t localeID); // StrConv
+struct vb6_SafeArray1D; // forward declaration
+struct vb6_SafeArray1D* vb6_Filter(struct vb6_SafeArray1D* source, BSTR match, int32_t include, int32_t compare);
+int32_t vb6_StrPtr(BSTR s);          // StrPtr: address of string data
+int32_t vb6_ObjPtr(void* obj);       // ObjPtr: address of object
+BSTR   vb6_LSet(BSTR str, int32_t length);  // LSet: left-justify
+BSTR   vb6_RSet(BSTR str, int32_t length);  // RSet: right-justify
+BSTR   vb6_WeekdayName(int32_t weekday, int32_t abbreviate, int32_t firstDayOfWeek);
+BSTR   vb6_MonthName(int32_t month, int32_t abbreviate);
+BSTR   vb6_FormatCurrency(double value, int32_t numDigits, int32_t incLeading, int32_t useParens, int32_t groupDigits);
+BSTR   vb6_FormatNumber(double value, int32_t numDigits, int32_t incLeading, int32_t useParens, int32_t groupDigits);
+BSTR   vb6_FormatPercent(double value, int32_t numDigits, int32_t incLeading, int32_t useParens, int32_t groupDigits);
+
 // ============================================================
 // SAFEARRAY - VB6 动态/静态数组
 // ============================================================

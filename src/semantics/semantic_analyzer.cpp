@@ -1670,6 +1670,24 @@ void SemanticAnalyzer::registerBuiltins() {
     addBuiltinFunc("Beep", Vb6Type::Void);
 // P14.3.5: CallByName(obj, procName$, callType, [args...])
 addBuiltinFunc("CallByName", Vb6Type::Variant);
+    // P18-D: 兼容性填平新增内置函数
+    addBuiltinFunc("AscW", Vb6Type::Long);
+    addBuiltinFunc("ChrW", Vb6Type::String);
+    addBuiltinFunc("AscB", Vb6Type::Long);
+    addBuiltinFunc("ChrB", Vb6Type::String);
+    addBuiltinFunc("Timer", Vb6Type::Single);
+    addBuiltinFunc("StrConv", Vb6Type::String);
+    addBuiltinFunc("Filter", Vb6Type::Variant);
+    addBuiltinFunc("VarPtr", Vb6Type::Long);
+    addBuiltinFunc("StrPtr", Vb6Type::Long);
+    addBuiltinFunc("ObjPtr", Vb6Type::Long);
+    addBuiltinFunc("LSet", Vb6Type::String);
+    addBuiltinFunc("RSet", Vb6Type::String);
+    addBuiltinFunc("WeekdayName", Vb6Type::String);
+    addBuiltinFunc("MonthName", Vb6Type::String);
+    addBuiltinFunc("FormatCurrency", Vb6Type::String);
+    addBuiltinFunc("FormatNumber", Vb6Type::String);
+    addBuiltinFunc("FormatPercent", Vb6Type::String);
 }
 
 // ============================================================

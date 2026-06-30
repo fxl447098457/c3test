@@ -1235,6 +1235,23 @@ void CCodeGen::visit(IdentifierExpr& node) {
         {"filelen",    "vb6_FileLen"},
         {"sendkeys",   "vb6_SendKeys"},
         {"appactivate", "vb6_AppActivate"},
+        // P18-D: 兼容性填平新增内置函数
+        {"ascw",       "vb6_AscW"},
+        {"chrw",       "vb6_ChrW"},
+        {"ascb",       "vb6_AscB"},
+        {"chrb",       "vb6_ChrB"},
+        {"timer",      "vb6_Timer"},
+        {"strconv",    "vb6_StrConv"},
+        {"filter",     "vb6_Filter"},
+        {"strptr",     "vb6_StrPtr"},
+        {"objptr",     "vb6_ObjPtr"},
+        {"lset",       "vb6_LSet"},
+        {"rset",       "vb6_RSet"},
+        {"weekdayname", "vb6_WeekdayName"},
+        {"monthname",  "vb6_MonthName"},
+        {"formatcurrency", "vb6_FormatCurrency"},
+        {"formatnumber",  "vb6_FormatNumber"},
+        {"formatpercent",  "vb6_FormatPercent"},
         
     };
 
@@ -1243,7 +1260,7 @@ void CCodeGen::visit(IdentifierExpr& node) {
         // 无参内置函数: VB6允许省略括号(如 Now, Date, Time)
         // 当IdentifierExpr引用这些函数时，必须生成调用(带括号)
         static const std::unordered_set<std::string> zeroArgBuiltinFuncs = {
-            "now", "date", "time", "freefile", "command", "curdir"
+            "now", "date", "time", "freefile", "command", "curdir", "timer"
         };
         if (zeroArgBuiltinFuncs.count(lower)) {
             lastExpr_ = it->second + "()";
@@ -1877,6 +1894,18 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
             } else {
                 lastExpr_ = "vb6_IIfLong(" + cond + ", " + trueVal + ", " + falseVal + ")";
             }
+            return;
+        }
+    }
+
+    // P18-D: VarPtr special handling - returns address of variable
+    if (node.callee && node.callee->kind == ASTNodeKind::IdentifierExpr && node.positional.size() == 1) {
+        auto& ident = static_cast<IdentifierExpr&>(*node.callee);
+        std::string vpLower = ident.name;
+        std::transform(vpLower.begin(), vpLower.end(), vpLower.begin(), ::tolower);
+        if (vpLower == "varptr") {
+            emitExpr(*node.positional[0]);
+            lastExpr_ = "(int32_t)(intptr_t)&(" + lastExpr_ + ")";
             return;
         }
     }
