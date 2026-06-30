@@ -233,11 +233,8 @@ BSTR vb6_Format(vb6_VARIANT expr, BSTR fmt) {
 // ============================================================
 
 int32_t vb6_MsgBox(BSTR prompt, int32_t buttons, BSTR title) {
-    (void)buttons;
-    // 简化: 控制台输出
-    wprintf(L"MsgBox: %s\n", prompt ? prompt : L"");
-    (void)title;
-    return 1;  // vbOK
+    /* Win32 MessageBox */
+    return (int32_t)MessageBoxW(NULL, prompt ? prompt : L"", title ? title : L"", (UINT)buttons);
 }
 
 // ============================================================
