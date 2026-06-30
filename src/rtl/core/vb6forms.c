@@ -1,4 +1,4 @@
-﻿// VB6 Win32窓体运行时实现 (P7)
+// VB6 Win32窓体运行时实现 (P7)
 // 提供Win32窗口注册、创建、消息循环、控件管理等基础功能
 
 #ifdef _WIN32
@@ -1532,6 +1532,80 @@ int vb6_GetPictureAutoSize(void* hwnd) {
 void vb6_SetPictureAutoSize(void* hwnd, int autoSize) {
     if (!hwnd) return;
     SetPropW((HWND)hwnd, L"VB6_AutoSize", (HANDLE)(INT_PTR)autoSize);
+}
+// ============================================================
+// P17.2: Image.Stretch property + WM_PAINT subclass (StretchBlt)
+// ============================================================
+
+int vb6_GetImageStretch(void* hwnd) {
+    if (!hwnd) return 0;
+    HANDLE hProp = GetPropW((HWND)hwnd, L"VB6_Stretch");
+    return hProp ? (int)(INT_PTR)hProp : 0;
+}
+
+void vb6_SetImageStretch(void* hwnd, int stretch) {
+    if (!hwnd) return;
+    HWND hw = (HWND)hwnd;
+    SetPropW(hw, L"VB6_Stretch", (HANDLE)(INT_PTR)stretch);
+    if (stretch) {
+        vb6_InstallImageSubclass(hwnd);
+    }
+    InvalidateRect(hw, NULL, TRUE);
+}
+
+/* Image control subclass WndProc for WM_PAINT (StretchBlt rendering) */
+static LRESULT CALLBACK vb6_ImageSubclassProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
+    if (msg == WM_PAINT) {
+        int stretch = (int)(INT_PTR)GetPropW(hwnd, L"VB6_Stretch");
+        HANDLE hPict = GetPropW(hwnd, L"VB6_Picture");
+        if (stretch && hPict) {
+            /* Check if it's a bitmap (StretchBlt only works with HBITMAP) */
+            DWORD objType = GetObjectType((HGDIOBJ)hPict);
+            if (objType == OBJ_BITMAP) {
+                PAINTSTRUCT ps;
+                HDC hdc = BeginPaint(hwnd, &ps);
+                RECT rc;
+                GetClientRect(hwnd, &rc);
+                
+                HDC memDC = CreateCompatibleDC(hdc);
+                HBITMAP hBmp = (HBITMAP)hPict;
+                BITMAP bm;
+                GetObjectW(hBmp, sizeof(bm), &bm);
+                HBITMAP oldBmp = (HBITMAP)SelectObject(memDC, hBmp);
+                
+                SetStretchBltMode(hdc, HALFTONE);
+                SetBrushOrgEx(hdc, 0, 0, NULL);
+                StretchBlt(hdc, 0, 0, rc.right, rc.bottom,
+                           memDC, 0, 0, bm.bmWidth, bm.bmHeight, SRCCOPY);
+                
+                SelectObject(memDC, oldBmp);
+                DeleteDC(memDC);
+                EndPaint(hwnd, &ps);
+                return 0;
+            }
+            /* For icons: fall through to original STATIC proc (no stretch) */
+        }
+    } else if (msg == WM_DESTROY) {
+        /* Remove subclass on destroy */
+        WNDPROC origProc = (WNDPROC)GetPropW(hwnd, L"VB6_OrigProc");
+        if (origProc) {
+            SetWindowLongPtrW(hwnd, GWLP_WNDPROC, (LONG_PTR)origProc);
+            RemovePropW(hwnd, L"VB6_OrigProc");
+        }
+    }
+    /* Fall through to original STATIC WndProc */
+    WNDPROC origProc = (WNDPROC)GetPropW(hwnd, L"VB6_OrigProc");
+    if (origProc) return CallWindowProcW(origProc, hwnd, msg, wp, lp);
+    return DefWindowProcW(hwnd, msg, wp, lp);
+}
+
+void vb6_InstallImageSubclass(void* hwnd) {
+    if (!hwnd) return;
+    HWND hw = (HWND)hwnd;
+    /* Only install once */
+    if (GetPropW(hw, L"VB6_OrigProc")) return;
+    WNDPROC origProc = (WNDPROC)SetWindowLongPtrW(hw, GWLP_WNDPROC, (LONG_PTR)vb6_ImageSubclassProc);
+    if (origProc) SetPropW(hw, L"VB6_OrigProc", (HANDLE)origProc);
 }
 // // 控件数组 (P7.6)
 // ============================================================

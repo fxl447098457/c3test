@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 // VB6 Win32窗体运行时 (P7)
 // 提供Win32窗口注册、创建、消息循环、控件管理等基础功能
 // 编译器生成的C代码调用此运行时API
@@ -320,7 +320,7 @@ void* vb6_GetControlPicture(void* hwnd);
 void vb6_SetControlPicture(void* hwnd, void* hPicture);
 // AutoSize for PictureBox: resize to fit picture
 int vb6_GetPictureAutoSize(void* hwnd);
-void vb6_SetPictureAutoSize(void* hwnd, int autoSize);
+void vb6_SetPictureAutoSize(void* hwnd, int autoSize);·n// P17.2: Image.Stretch property·nint vb6_GetImageStretch(void* hwnd);·nvoid vb6_SetImageStretch(void* hwnd, int stretch);·n// P17.2: Image subclass for WM_PAINT (StretchBlt rendering)·nvoid vb6_InstallImageSubclass(void* hwnd);
 // 控件数组 (P7.6)
 // ============================================================
 // VB6控件数组: 同名控件带不同Index, 共享事件处理器(Index参数)

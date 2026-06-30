@@ -8024,6 +8024,7 @@ std::string CCodeGen::getControlPropReadFn(FrmControlType ctrlType, const std::s
         break;
     case FrmControlType::Image:
         if (propLower == "picture") return "vb6_GetControlPicture";
+        if (propLower == "stretch") return "vb6_GetImageStretch";  // P17.2
         if (propLower == "visible") return "vb6_GetControlVisible";
         if (propLower == "enabled") return "vb6_GetControlEnabled";
         break;
@@ -8153,6 +8154,7 @@ std::string CCodeGen::getControlPropWriteFn(FrmControlType ctrlType, const std::
         break;
     case FrmControlType::Image:
         if (propLower == "picture") return "vb6_SetControlPicture";
+        if (propLower == "stretch") return "vb6_SetImageStretch";  // P17.2
         if (propLower == "visible") return "vb6_SetControlVisible";
         if (propLower == "enabled") return "vb6_SetControlEnabled";
         break;
@@ -8178,6 +8180,8 @@ const char* CCodeGen::getDefaultPropertyName(FrmControlType ctrlType) {
     case FrmControlType::Frame:        return "Caption";
     case FrmControlType::Form:         return "Caption";
     case FrmControlType::MDIForm:      return "Caption";
+    case FrmControlType::PictureBox:   return "Picture";  // P17.2
+    case FrmControlType::Image:        return "Picture";  // P17.2
     default:                           return nullptr;
     }
 }
