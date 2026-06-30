@@ -6511,6 +6511,40 @@ void CCodeGen::emitFormFramework(const FrmFormDesc& frmDesc, Module& module) {
         }
     }
 
+    // P18-B: GotFocus/LostFocus events (EN_SETFOCUS/EN_KILLFOCUS/CBN_SETFOCUS/CBN_KILLFOCUS)
+    {
+        ctrlId = 100;
+        for (const auto& ctrl : frmDesc.formControl.children) {
+            std::string gotFn = cProcName(ctrl.controlName + "_GotFocus", AccessLevel::Private);
+            std::string lostFn = cProcName(ctrl.controlName + "_LostFocus", AccessLevel::Private);
+            bool hasGot = symTab_.lookup(ctrl.controlName + "_GotFocus") != nullptr;
+            bool hasLost = symTab_.lookup(ctrl.controlName + "_LostFocus") != nullptr;
+            if (hasGot || hasLost) {
+                if (ctrl.controlType == FrmControlType::TextBox) {
+                    // EN_SETFOCUS=256, EN_KILLFOCUS=512
+                    if (hasGot) c_.emitLine("if (id == " + std::to_string(ctrlId) + " && code == 256) { extern void " + gotFn + "(); " + gotFn + "(); }");
+                    if (hasLost) c_.emitLine("if (id == " + std::to_string(ctrlId) + " && code == 512) { extern void " + lostFn + "(); " + lostFn + "(); }");
+                } else if (ctrl.controlType == FrmControlType::ComboBox) {
+                    // CBN_SETFOCUS=1024, CBN_KILLFOCUS=2048
+                    if (hasGot) c_.emitLine("if (id == " + std::to_string(ctrlId) + " && code == 1024) { extern void " + gotFn + "(); " + gotFn + "(); }");
+                    if (hasLost) c_.emitLine("if (id == " + std::to_string(ctrlId) + " && code == 2048) { extern void " + lostFn + "(); " + lostFn + "(); }");
+                } else if (ctrl.controlType == FrmControlType::ListBox) {
+                    // LBN_SETFOCUS=4, LBN_KILLFOCUS=5
+                    if (hasGot) c_.emitLine("if (id == " + std::to_string(ctrlId) + " && code == 4) { extern void " + gotFn + "(); " + gotFn + "(); }");
+                    if (hasLost) c_.emitLine("if (id == " + std::to_string(ctrlId) + " && code == 5) { extern void " + lostFn + "(); " + lostFn + "(); }");
+                } else if (ctrl.controlType == FrmControlType::CommandButton ||
+                           ctrl.controlType == FrmControlType::CheckBox ||
+                           ctrl.controlType == FrmControlType::OptionButton) {
+                    // BN_SETFOCUS=6, BN_KILLFOCUS=7 (button class notifications via WM_COMMAND)
+                    if (hasGot) c_.emitLine("if (id == " + std::to_string(ctrlId) + " && code == 6) { extern void " + gotFn + "(); " + gotFn + "(); }");
+                    if (hasLost) c_.emitLine("if (id == " + std::to_string(ctrlId) + " && code == 7) { extern void " + lostFn + "(); " + lostFn + "(); }");
+                }
+                // Label: no GotFocus/LostFocus in VB6 (windowless control)
+                // PictureBox: would require subclassing for WM_SETFOCUS/WM_KILLFOCUS; deferred
+            }
+            ctrlId++;
+        }
+    }
     c_.emitLine("break;");
     c_.dedent();
     c_.emitLine("}");
@@ -6525,6 +6559,16 @@ void CCodeGen::emitFormFramework(const FrmFormDesc& frmDesc, Module& module) {
         if (formUnloadSym2) {
             // 生成trampoline: 桥接 int(*)(void) 回调和 void(int16_t*) VB6签名
             std::string trampoline = formUnloadFn + "_trampoline";
+            // P18-B: Form_QueryUnload - check if close is allowed before Unload
+            {
+                std::string queryUnloadFn = cProcName("Form_QueryUnload", AccessLevel::Private);
+                auto* quSym = symTab_.lookup("Form_QueryUnload");
+                if (quSym) {
+                    c_.emitLine("{ int16_t vb6_cancel = 0; int16_t vb6_unloadmode = 0; /* 0=vbFormControlMenu */");
+                    c_.emitLine("extern void " + queryUnloadFn + "(int16_t*, int16_t*); " + queryUnloadFn + "(&vb6_cancel, &vb6_unloadmode);");
+                    c_.emitLine("if (vb6_cancel != 0) return 0; /* Cancel close */ }");
+                }
+            }
             c_.emitLine("vb6_SetFormUnloadCallback((void*)" + trampoline + ");");
             c_.emitLine("if (vb6_QueryFormUnload() == 0) {");
             c_.indent();
@@ -6615,7 +6659,7 @@ void CCodeGen::emitFormFramework(const FrmFormDesc& frmDesc, Module& module) {
         if (symTab_.lookup(formName + "_KeyDown") || symTab_.lookup("Form_KeyDown")) {
             c_.emitLine("case WM_KEYDOWN: {");
             c_.indent();
-            c_.emitLine("{ int16_t vb6_keyCode = (int16_t)wParam; int16_t vb6_shift = 0;");
+            c_.emitLine("{ int16_t vb6_keyCode = (int16_t)wParam; int16_t vb6_shift = 0; if (GetKeyState(VK_SHIFT) & 0x8000) vb6_shift |= 1; if (GetKeyState(VK_CONTROL) & 0x8000) vb6_shift |= 2; if (GetKeyState(VK_MENU) & 0x8000) vb6_shift |= 4;");
             c_.emitLine("extern void " + keyDownFn + "(int16_t*, int16_t*); " + keyDownFn + "(&vb6_keyCode, &vb6_shift); }");
             c_.emitLine("break;");
             c_.dedent();
@@ -6629,6 +6673,100 @@ void CCodeGen::emitFormFramework(const FrmFormDesc& frmDesc, Module& module) {
             c_.indent();
             c_.emitLine("{ int16_t vb6_keyAscii = (int16_t)wParam;");
             c_.emitLine("extern void " + keyPressFn + "(int16_t*); " + keyPressFn + "(&vb6_keyAscii); }");
+            c_.emitLine("break;");
+            c_.dedent();
+            c_.emitLine("}");
+        }
+    }
+    // P18-B: Form_KeyUp (WM_KEYUP)
+    {
+        std::string keyUpFn = cProcName(formName + "_KeyUp", AccessLevel::Private);
+        if (symTab_.lookup(formName + "_KeyUp") || symTab_.lookup("Form_KeyUp")) {
+            c_.emitLine("case WM_KEYUP: {");
+            c_.indent();
+            c_.emitLine("{ int16_t vb6_keyCode = (int16_t)wParam; int16_t vb6_shift = 0; if (GetKeyState(VK_SHIFT) & 0x8000) vb6_shift |= 1; if (GetKeyState(VK_CONTROL) & 0x8000) vb6_shift |= 2; if (GetKeyState(VK_MENU) & 0x8000) vb6_shift |= 4;");
+            c_.emitLine("extern void " + keyUpFn + "(int16_t*, int16_t*); " + keyUpFn + "(&vb6_keyCode, &vb6_shift); }");
+            c_.emitLine("break;");
+            c_.dedent();
+            c_.emitLine("}");
+        }
+    }
+    // P18-B: Form_MouseDown/MouseUp/MouseMove (WM_LBUTTONDOWN/UP/MOVE)
+    {
+        std::string mouseDownFn = cProcName(formName + "_MouseDown", AccessLevel::Private);
+        std::string mouseUpFn = cProcName(formName + "_MouseUp", AccessLevel::Private);
+        std::string mouseMoveFn = cProcName(formName + "_MouseMove", AccessLevel::Private);
+        bool hasMouseDown = symTab_.lookup(formName + "_MouseDown") || symTab_.lookup("Form_MouseDown");
+        bool hasMouseUp = symTab_.lookup(formName + "_MouseUp") || symTab_.lookup("Form_MouseUp");
+        bool hasMouseMove = symTab_.lookup(formName + "_MouseMove") || symTab_.lookup("Form_MouseMove");
+        if (hasMouseDown) {
+            c_.emitLine("case WM_LBUTTONDOWN: case WM_RBUTTONDOWN: case WM_MBUTTONDOWN: {");
+            c_.indent();
+            c_.emitLine("{ int16_t vb6_button = 0; int16_t vb6_shift = 0;");
+            c_.emitLine("if (msg == WM_LBUTTONDOWN) vb6_button = 1;");
+            c_.emitLine("else if (msg == WM_RBUTTONDOWN) vb6_button = 2;");
+            c_.emitLine("else if (msg == WM_MBUTTONDOWN) vb6_button = 4;");
+            c_.emitLine("if (wParam & MK_SHIFT) vb6_shift |= 1; if (wParam & MK_CONTROL) vb6_shift |= 2; if (GetKeyState(VK_MENU) & 0x8000) vb6_shift |= 4;");
+            c_.emitLine("float vb6_x = (float)(int16_t)LOWORD(lParam); float vb6_y = (float)(int16_t)HIWORD(lParam);");
+            c_.emitLine("extern void " + mouseDownFn + "(int16_t*, int16_t*, float*, float*); " + mouseDownFn + "(&vb6_button, &vb6_shift, &vb6_x, &vb6_y); }");
+            c_.emitLine("break;");
+            c_.dedent();
+            c_.emitLine("}");
+        }
+        if (hasMouseUp) {
+            c_.emitLine("case WM_LBUTTONUP: case WM_RBUTTONUP: case WM_MBUTTONUP: {");
+            c_.indent();
+            c_.emitLine("{ int16_t vb6_button = 0; int16_t vb6_shift = 0;");
+            c_.emitLine("if (msg == WM_LBUTTONUP) vb6_button = 1;");
+            c_.emitLine("else if (msg == WM_RBUTTONUP) vb6_button = 2;");
+            c_.emitLine("else if (msg == WM_MBUTTONUP) vb6_button = 4;");
+            c_.emitLine("if (wParam & MK_SHIFT) vb6_shift |= 1; if (wParam & MK_CONTROL) vb6_shift |= 2; if (GetKeyState(VK_MENU) & 0x8000) vb6_shift |= 4;");
+            c_.emitLine("float vb6_x = (float)(int16_t)LOWORD(lParam); float vb6_y = (float)(int16_t)HIWORD(lParam);");
+            c_.emitLine("extern void " + mouseUpFn + "(int16_t*, int16_t*, float*, float*); " + mouseUpFn + "(&vb6_button, &vb6_shift, &vb6_x, &vb6_y); }");
+            c_.emitLine("break;");
+            c_.dedent();
+            c_.emitLine("}");
+        }
+        if (hasMouseMove) {
+            c_.emitLine("case WM_MOUSEMOVE: {");
+            c_.indent();
+            c_.emitLine("{ int16_t vb6_button = 0; int16_t vb6_shift = 0;");
+            c_.emitLine("if (wParam & MK_LBUTTON) vb6_button |= 1; if (wParam & MK_RBUTTON) vb6_button |= 2; if (wParam & MK_MBUTTON) vb6_button |= 4;");
+            c_.emitLine("if (wParam & MK_SHIFT) vb6_shift |= 1; if (wParam & MK_CONTROL) vb6_shift |= 2; if (GetKeyState(VK_MENU) & 0x8000) vb6_shift |= 4;");
+            c_.emitLine("float vb6_x = (float)(int16_t)LOWORD(lParam); float vb6_y = (float)(int16_t)HIWORD(lParam);");
+            c_.emitLine("extern void " + mouseMoveFn + "(int16_t*, int16_t*, float*, float*); " + mouseMoveFn + "(&vb6_button, &vb6_shift, &vb6_x, &vb6_y); }");
+            c_.emitLine("break;");
+            c_.dedent();
+            c_.emitLine("}");
+        }
+    }
+    // P18-B: Form_DblClick (WM_LBUTTONDBLCLK)
+    {
+        std::string dblClickFn = cProcName(formName + "_DblClick", AccessLevel::Private);
+        if (symTab_.lookup(formName + "_DblClick") || symTab_.lookup("Form_DblClick")) {
+            c_.emitLine("case WM_LBUTTONDBLCLK: {");
+            c_.indent();
+            c_.emitLine("extern void " + dblClickFn + "(); " + dblClickFn + "();");
+            c_.emitLine("break;");
+            c_.dedent();
+            c_.emitLine("}");
+        }
+    }
+    // P18-B: WM_ACTIVATE -> Form_Activate/Deactivate
+    {
+        std::string activateFn = cProcName(formName + "_Activate", AccessLevel::Private);
+        std::string deactivateFn = cProcName(formName + "_Deactivate", AccessLevel::Private);
+        bool hasActivate = symTab_.lookup(formName + "_Activate") || symTab_.lookup("Form_Activate");
+        bool hasDeactivate = symTab_.lookup(formName + "_Deactivate") || symTab_.lookup("Form_Deactivate");
+        if (hasActivate || hasDeactivate) {
+            c_.emitLine("case WM_ACTIVATE: {");
+            c_.indent();
+            if (hasActivate) {
+                c_.emitLine("if (LOWORD(wParam) != WA_INACTIVE) { extern void " + activateFn + "(); " + activateFn + "(); }");
+            }
+            if (hasDeactivate) {
+                c_.emitLine("if (LOWORD(wParam) == WA_INACTIVE) { extern void " + deactivateFn + "(); " + deactivateFn + "(); }");
+            }
             c_.emitLine("break;");
             c_.dedent();
             c_.emitLine("}");
