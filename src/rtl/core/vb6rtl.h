@@ -411,7 +411,8 @@ int32_t vb6_QBColor(int32_t n);        // QBColor: 16-color lookup
 double vb6_FileDateTime(BSTR pathname); // FileDateTime: 文件修改时间→VB6 date serial
 int32_t vb6_FileLen(BSTR pathname);    // FileLen: 文件大小(字节)
 void   vb6_SendKeys(BSTR keys, int32_t wait);    // SendKeys: 发送按键
-void   vb6_AppActivate(BSTR title, int32_t wait); // AppActivate: 激活窗口
+void   vb6_AppActivate(BSTR title, int32_t wait); // AppActivate: 激活窗口(标题或数字PID)
+void   vb6_AppActivateByPid(int32_t pid, int32_t wait); // AppActivate: 按进程ID激活窗口
 void   vb6_MidSet(BSTR* target, int32_t start, int32_t len, BSTR replacement); // Mid$ statement赋值
 
 // P18-D: 兼容性填平 — 字符串/指针/格式化函数

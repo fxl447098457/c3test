@@ -337,36 +337,164 @@ int32_t vb6_FileLen(BSTR path) {
     return (int32_t)size.QuadPart;  /* Truncate to Long for VB6 compatibility */
 }
 
+/* Helper: send a single virtual key press+release */
+static void vb6_SendKeyVk(WORD vk) {
+    INPUT inputs[2] = {0};
+    inputs[0].type = INPUT_KEYBOARD;
+    inputs[0].ki.wVk = vk;
+    inputs[1].type = INPUT_KEYBOARD;
+    inputs[1].ki.wVk = vk;
+    inputs[1].ki.dwFlags = KEYEVENTF_KEYUP;
+    SendInput(2, inputs, sizeof(INPUT));
+}
+
+/* Helper: lookup VB6 SendKeys special key name to VK code */
+static WORD vb6_SendKeysLookup(const wchar_t* name, size_t len) {
+    /* F1-F24 */
+    if ((len == 2 || len == 3) && (name[0]|0x20) == L'f') {
+        int fnum = 0;
+        for (size_t i = 1; i < len; i++) {
+            if (name[i] >= L'0' && name[i] <= L'9') fnum = fnum * 10 + (name[i] - L'0');
+            else { fnum = 0; break; }
+        }
+        if (fnum >= 1 && fnum <= 24) return (WORD)(VK_F1 + fnum - 1);
+    }
+    if (len == 3 && _wcsnicmp(name, L"TAB", 3) == 0) return VK_TAB;
+    if (len == 5 && _wcsnicmp(name, L"ENTER", 5) == 0) return VK_RETURN;
+    if (len == 3 && _wcsnicmp(name, L"ESC", 3) == 0) return VK_ESCAPE;
+    if (len == 4 && _wcsnicmp(name, L"BACK", 4) == 0) return VK_BACK;
+    if (len == 3 && _wcsnicmp(name, L"DEL", 3) == 0) return VK_DELETE;
+    if (len == 6 && _wcsnicmp(name, L"DELETE", 6) == 0) return VK_DELETE;
+    if (len == 3 && _wcsnicmp(name, L"INS", 3) == 0) return VK_INSERT;
+    if (len == 4 && _wcsnicmp(name, L"HOME", 4) == 0) return VK_HOME;
+    if (len == 3 && _wcsnicmp(name, L"END", 3) == 0) return VK_END;
+    if (len == 4 && _wcsnicmp(name, L"PGUP", 4) == 0) return VK_PRIOR;
+    if (len == 4 && _wcsnicmp(name, L"PGDN", 4) == 0) return VK_NEXT;
+    if (len == 2 && _wcsnicmp(name, L"UP", 2) == 0) return VK_UP;
+    if (len == 4 && _wcsnicmp(name, L"DOWN", 4) == 0) return VK_DOWN;
+    if (len == 4 && _wcsnicmp(name, L"LEFT", 4) == 0) return VK_LEFT;
+    if (len == 5 && _wcsnicmp(name, L"RIGHT", 5) == 0) return VK_RIGHT;
+    if (len == 8 && _wcsnicmp(name, L"CAPSLOCK", 8) == 0) return VK_CAPITAL;
+    if (len == 7 && _wcsnicmp(name, L"NUMLOCK", 7) == 0) return VK_NUMLOCK;
+    if (len == 10 && _wcsnicmp(name, L"SCROLLLOCK", 10) == 0) return VK_SCROLL;
+    if (len == 5 && _wcsnicmp(name, L"BREAK", 5) == 0) return VK_CANCEL;
+    if (len == 4 && _wcsnicmp(name, L"HELP", 4) == 0) return VK_HELP;
+    if (len == 6 && _wcsnicmp(name, L"PRTSC", 5) == 0) return VK_SNAPSHOT;
+    if (len == 11 && _wcsnicmp(name, L"PRINTSCREEN", 11) == 0) return VK_SNAPSHOT;
+    if (len == 5 && _wcsnicmp(name, L"SPACE", 5) == 0) return VK_SPACE;
+    if (len == 8 && _wcsnicmp(name, L"BACKSPACE", 9) == 0) return VK_BACK;
+    if (len == 8 && _wcsnicmp(name, L"CLEAR", 5) == 0) return VK_CLEAR;
+    return 0;
+}
+
 void vb6_SendKeys(BSTR keys, int32_t wait) {
-    /* SendKeys: simplified - only supports single characters and basic keys */
+    /* SendKeys: supports single chars, {ENTER}/{TAB}/{ESC}/{F1}-{F24} etc., +^% modifiers */
     (void)wait;
     if (!keys) return;
-    /* Simple implementation: send each character via SendInput */
     size_t len = vb6_BSTR_Len(keys);
-    for (size_t i = 0; i < len; i++) {
-        INPUT inputs[2] = {0};
-        inputs[0].type = INPUT_KEYBOARD;
-        inputs[0].ki.wVk = 0;
-        inputs[0].ki.wScan = keys[i];
-        inputs[0].ki.dwFlags = KEYEVENTF_UNICODE;
-        inputs[1].type = INPUT_KEYBOARD;
-        inputs[1].ki.wVk = 0;
-        inputs[1].ki.wScan = keys[i];
-        inputs[1].ki.dwFlags = KEYEVENTF_UNICODE | KEYEVENTF_KEYUP;
-        SendInput(2, inputs, sizeof(INPUT));
+    size_t i = 0;
+    while (i < len) {
+        int modShift = 0, modCtrl = 0, modAlt = 0;
+        while (i < len && (keys[i] == L'+' || keys[i] == L'^' || keys[i] == L'%')) {
+            if (keys[i] == L'+') modShift = 1;
+            else if (keys[i] == L'^') modCtrl = 1;
+            else if (keys[i] == L'%') modAlt = 1;
+            i++;
+        }
+        if (i >= len) break;
+        WORD vk = 0;
+        int isUnicode = 0;
+        wchar_t ch = 0;
+        if (keys[i] == L'{') {
+            size_t start = i + 1;
+            size_t end = start;
+            while (end < len && keys[end] != L'}') end++;
+            if (end < len) {
+                size_t klen = end - start;
+                if (klen == 1 && keys[start] == L'~') {
+                    vk = VK_RETURN;
+                } else {
+                    vk = vb6_SendKeysLookup(&keys[start], klen);
+                }
+            }
+            i = end + 1;
+        } else {
+            isUnicode = 1;
+            ch = keys[i];
+            i++;
+        }
+        /* Press modifier keys */
+        if (modShift) { INPUT mi = {0}; mi.type = INPUT_KEYBOARD; mi.ki.wVk = VK_SHIFT; SendInput(1, &mi, sizeof(INPUT)); }
+        if (modCtrl) { INPUT mi = {0}; mi.type = INPUT_KEYBOARD; mi.ki.wVk = VK_CONTROL; SendInput(1, &mi, sizeof(INPUT)); }
+        if (modAlt) { INPUT mi = {0}; mi.type = INPUT_KEYBOARD; mi.ki.wVk = VK_MENU; SendInput(1, &mi, sizeof(INPUT)); }
+        if (isUnicode) {
+            INPUT inputs[2] = {0};
+            inputs[0].type = INPUT_KEYBOARD;
+            inputs[0].ki.wScan = ch;
+            inputs[0].ki.dwFlags = KEYEVENTF_UNICODE;
+            inputs[1].type = INPUT_KEYBOARD;
+            inputs[1].ki.wScan = ch;
+            inputs[1].ki.dwFlags = KEYEVENTF_UNICODE | KEYEVENTF_KEYUP;
+            SendInput(2, inputs, sizeof(INPUT));
+        } else if (vk) {
+            vb6_SendKeyVk(vk);
+        }
+        /* Release modifier keys */
+        if (modAlt) { INPUT mi = {0}; mi.type = INPUT_KEYBOARD; mi.ki.wVk = VK_MENU; mi.ki.dwFlags = KEYEVENTF_KEYUP; SendInput(1, &mi, sizeof(INPUT)); }
+        if (modCtrl) { INPUT mi = {0}; mi.type = INPUT_KEYBOARD; mi.ki.wVk = VK_CONTROL; mi.ki.dwFlags = KEYEVENTF_KEYUP; SendInput(1, &mi, sizeof(INPUT)); }
+        if (modShift) { INPUT mi = {0}; mi.type = INPUT_KEYBOARD; mi.ki.wVk = VK_SHIFT; mi.ki.dwFlags = KEYEVENTF_KEYUP; SendInput(1, &mi, sizeof(INPUT)); }
     }
 }
 
+/* AppActivate EnumWindows callback context */
+typedef struct { DWORD pid; HWND result; } vb6_AppActivateCtx;
+static BOOL CALLBACK vb6_AppActivateEnumProc(HWND hwnd, LPARAM lParam) {
+    vb6_AppActivateCtx* ctx = (vb6_AppActivateCtx*)lParam;
+    DWORD winPid = 0;
+    GetWindowThreadProcessId(hwnd, &winPid);
+    if (winPid == ctx->pid && IsWindowVisible(hwnd) && GetParent(hwnd) == NULL) {
+        ctx->result = hwnd;
+        return FALSE;
+    }
+    return TRUE;
+}
 void vb6_AppActivate(BSTR title, int32_t wait) {
-    /* AppActivate: activate window by title */
+    /* AppActivate: activate window by title or processID */
     (void)wait;
     if (!title) return;
-    HWND hwnd = FindWindowW(NULL, title);
-    if (hwnd) {
-        SetForegroundWindow(hwnd);
+    
+    /* Check if title is a numeric processID (pure digits) */
+    int32_t isPid = 1;
+    int32_t pidVal = 0;
+    size_t tLen = vb6_BSTR_Len(title);
+    if (tLen == 0) return;
+    for (size_t i = 0; i < tLen; i++) {
+        if (title[i] >= L'0' && title[i] <= L'9') {
+            pidVal = pidVal * 10 + (title[i] - L'0');
+        } else {
+            isPid = 0;
+            break;
+        }
+    }
+    
+    if (isPid && pidVal > 0) {
+        vb6_AppActivateCtx ctx = { (DWORD)pidVal, NULL };
+        EnumWindows(vb6_AppActivateEnumProc, (LPARAM)&ctx);
+        if (ctx.result) SetForegroundWindow(ctx.result);
+    } else {
+        HWND hwnd = FindWindowW(NULL, title);
+        if (hwnd) SetForegroundWindow(hwnd);
     }
 }
 
+void vb6_AppActivateByPid(int32_t pid, int32_t wait) {
+    /* AppActivate by processID */
+    (void)wait;
+    if (pid <= 0) return;
+    vb6_AppActivateCtx ctx = { (DWORD)pid, NULL };
+    EnumWindows(vb6_AppActivateEnumProc, (LPARAM)&ctx);
+    if (ctx.result) SetForegroundWindow(ctx.result);
+}
 BSTR vb6_CDec(vb6_VARIANT v) {
     /* CDec: convert to Decimal — VB6 Decimal is 12-byte, simplified as BSTR representation */
     /* For now, convert the value to its string representation */

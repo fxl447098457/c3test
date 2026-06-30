@@ -2975,6 +2975,7 @@ std::string CCodeGen::mapSaElemCType(Vb6Type type) const {
         case Vb6Type::Date:     return "double";
         case Vb6Type::String:   return "BSTR";
         case Vb6Type::Variant:  return "vb6_VARIANT";
+        case Vb6Type::Currency: return "int64_t";
         case Vb6Type::Object:   return "void*";
         default:                return "vb6_VARIANT";
     }
