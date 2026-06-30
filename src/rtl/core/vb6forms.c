@@ -1,4 +1,4 @@
-// VB6 Win32窓体运行时实现 (P7)
+﻿// VB6 Win32窓体运行时实现 (P7)
 // 提供Win32窗口注册、创建、消息循环、控件管理等基础功能
 
 #ifdef _WIN32
@@ -1947,4 +1947,48 @@ int vb6_WebViewExecuteScript(void* hwnd, const char* script) {
 void vb6_WebViewSetDocumentCompleteCallback(void* hwnd, vb6_WebViewEventCallback callback) {
     vb6_WebViewInfo* info = vb6_FindWebViewInfo(hwnd);
     if (info) info->onDocComplete = callback;
+}
+
+
+// ============================================================
+// P18-F: 控件子类化基础设施
+// ============================================================
+
+// 通用控件子类化安装 (复用VB6_OrigProc属性模式)
+void vb6_InstallControlSubclass(void* hwnd, void* subclassProc) {
+    if (!hwnd) return;
+    HWND hw = (HWND)hwnd;
+    /* Only install once */
+    if (GetPropW(hw, L"VB6_OrigProc")) return;
+    WNDPROC origProc = (WNDPROC)SetWindowLongPtrW(hw, GWLP_WNDPROC, (LONG_PTR)subclassProc);
+    if (origProc) SetPropW(hw, L"VB6_OrigProc", (HANDLE)origProc);
+}
+
+// 获取原始窗口过程 (子类化Proc内调用CallWindowProc用)
+void* vb6_GetOriginalWndProc(void* hwnd) {
+    if (!hwnd) return NULL;
+    return (void*)GetPropW((HWND)hwnd, L"VB6_OrigProc");
+}
+
+// 移除控件子类化 (WM_DESTROY时调用)
+void vb6_RemoveControlSubclass(void* hwnd) {
+    if (!hwnd) return;
+    HWND hw = (HWND)hwnd;
+    WNDPROC origProc = (WNDPROC)GetPropW(hw, L"VB6_OrigProc");
+    if (origProc) {
+        SetWindowLongPtrW(hw, GWLP_WNDPROC, (LONG_PTR)origProc);
+        RemovePropW(hw, L"VB6_OrigProc");
+    }
+    RemovePropW(hw, L"VB6_MouseTracked");
+}
+
+// 启动鼠标跟踪 (TrackMouseEvent封装, 用于MouseEnter/MouseLeave)
+void vb6_StartMouseTracking(void* hwnd) {
+    if (!hwnd) return;
+    TRACKMOUSEEVENT tme;
+    tme.cbSize = sizeof(tme);
+    tme.dwFlags = TME_LEAVE;
+    tme.hwndTrack = (HWND)hwnd;
+    tme.dwHoverTime = HOVER_DEFAULT;
+    TrackMouseEvent(&tme);
 }
