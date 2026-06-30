@@ -116,6 +116,7 @@ public:
     void visit(WithStmt& node) override;
     void visit(GoToStmt& node) override;
     void visit(GoSubStmt& node) override;
+    void visit(OnGoSubStmt& node) override;  // P17.4
     void visit(OnErrorStmt& node) override;
     void visit(ResumeStmt& node) override;
     void visit(ErrorStmt& node) override;

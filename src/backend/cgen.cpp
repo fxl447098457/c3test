@@ -2939,7 +2939,10 @@ void CCodeGen::emitStmtList(StmtList& stmts, bool emitResumePoints) {
             case ASTNodeKind::SelectCaseStmt:  visit(static_cast<SelectCaseStmt&>(*stmt)); break;
             case ASTNodeKind::WithStmt:        visit(static_cast<WithStmt&>(*stmt)); break;
             case ASTNodeKind::GoToStmt:        visit(static_cast<GoToStmt&>(*stmt)); break;
-            case ASTNodeKind::GoSubStmt:       visit(static_cast<GoSubStmt&>(*stmt)); break;
+                        case ASTNodeKind::OnGoSubStmt:
+                visit(static_cast<OnGoSubStmt&>(*stmt));
+                break;
+case ASTNodeKind::GoSubStmt:       visit(static_cast<GoSubStmt&>(*stmt)); break;
             case ASTNodeKind::OnErrorStmt:     visit(static_cast<OnErrorStmt&>(*stmt)); break;
     case ASTNodeKind::ResumeStmt:      visit(static_cast<ResumeStmt&>(*stmt)); break;
     case ASTNodeKind::ErrorStmt:       visit(static_cast<ErrorStmt&>(*stmt)); break;
@@ -2981,7 +2984,8 @@ void CCodeGen::emitStmtList(StmtList& stmts, bool emitResumePoints) {
             case ASTNodeKind::ReturnStmt:
                 if (hasGoSub_) {
                     // VB6 GoSub Return: 弹出返回地址并跳转
-                    c_.emitLine("switch(vb6_gosub_stack[--vb6_gosub_sp]) {");
+                    c_.emitLine("if (vb6_gosub_sp <= 0) { /* P17.4: GoSub stack underflow */ return; }");
+c_.emitLine("switch(vb6_gosub_stack[--vb6_gosub_sp]) {");
                     c_.indent();
                     for (int i = 0; i < gosubReturnCounter_; i++) {
                         c_.emitLine("case " + std::to_string(i) + ": goto vb6_gosub_ret_" + std::to_string(i) + ";");
@@ -4715,8 +4719,40 @@ void CCodeGen::visit(GoSubStmt& node) {
     hasGoSub_ = true;
     // GoSub label: 压入返回地址 → goto label
     int retId = gosubReturnCounter_++;
-    c_.emitLine("vb6_gosub_stack[vb6_gosub_sp++] = " + std::to_string(retId) + ";");
+    c_.emitLine("if (vb6_gosub_sp >= 32) { /* P17.4: GoSub stack overflow */ return; }");
+c_.emitLine("vb6_gosub_stack[vb6_gosub_sp++] = " + std::to_string(retId) + ";");
     c_.emitLine("goto vb6_label_" + cIdent(node.labelName) + ";");
+    c_.emitLine("vb6_gosub_ret_" + std::to_string(retId) + ":;");
+}
+
+void CCodeGen::visit(OnGoSubStmt& node) {
+    hasGoSub_ = true;
+    // P17.4: On x GoSub label1, label2, ... - computed GoSub
+    int retId = gosubReturnCounter_++;
+    // Stack overflow guard
+    c_.emitLine("if (vb6_gosub_sp >= 32) { /* P17.4: GoSub stack overflow */ return; }");
+    // Push return address
+    c_.emitLine("vb6_gosub_stack[vb6_gosub_sp++] = " + std::to_string(retId) + ";");
+    // Evaluate index and dispatch to selected label
+    emitExpr(*node.index);
+    std::string idxVar = std::move(lastExpr_);
+    c_.emitLine("{");
+    c_.indent();
+    c_.emitLine("int _gosub_idx = " + idxVar + ";");
+    c_.emitLine("if (_gosub_idx >= 1 && _gosub_idx <= " + std::to_string(node.labels.size()) + ") {");
+    c_.indent();
+    c_.emitLine("switch(_gosub_idx) {");
+    c_.indent();
+    for (size_t k = 0; k < node.labels.size(); k++) {
+        c_.emitLine("case " + std::to_string(k + 1) + ": goto vb6_label_" + cIdent(node.labels[k]) + ";");
+    }
+    c_.dedent();
+    c_.emitLine("}");
+    c_.dedent();
+    c_.emitLine("}");
+    c_.dedent();
+    c_.emitLine("}");
+    // Return landing point (after On...GoSub)
     c_.emitLine("vb6_gosub_ret_" + std::to_string(retId) + ":;");
 }
 
@@ -7747,6 +7783,7 @@ bool CCodeGen::hasGoSubInStmts(StmtList& stmts) const {
     for (auto& stmt : stmts) {
         if (!stmt) continue;
         if (stmt->kind == ASTNodeKind::GoSubStmt) return true;
+if (stmt->kind == ASTNodeKind::OnGoSubStmt) return true;  // P17.4
         // 递归检查复合语句
         if (stmt->kind == ASTNodeKind::IfStmt) {
             auto& ifStmt = static_cast<IfStmt&>(*stmt);

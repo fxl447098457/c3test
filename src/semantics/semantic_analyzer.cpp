@@ -1,4 +1,4 @@
-﻿#include "semantics/semantic_analyzer.hpp"
+#include "semantics/semantic_analyzer.hpp"
 #include <algorithm>
 #include <cctype>
 
@@ -59,6 +59,7 @@ static void dispatchStmt(Stmt& stmt, SemanticAnalyzer& analyzer) {
         case ASTNodeKind::GetStmt:         analyzer.visit(static_cast<GetStmt&>(stmt)); break;
         case ASTNodeKind::PutStmt:         analyzer.visit(static_cast<PutStmt&>(stmt)); break;
         case ASTNodeKind::GoSubStmt:        analyzer.visit(static_cast<GoSubStmt&>(stmt)); break;
+case ASTNodeKind::OnGoSubStmt:      /* P17.4: OnGoSub labels validated in GoSub validation pass */ break;
         case ASTNodeKind::ReturnStmt:       analyzer.visit(static_cast<ReturnStmt&>(stmt)); break;
         // 其他语句暂不处理
         default: break;
@@ -945,6 +946,14 @@ void SemanticAnalyzer::visit(GoSubStmt& node) {
         gosubTargetLabels_.push_back({node.labelName, node.loc});
     }
 }
+// P17.4: OnGoSub label validation
+void SemanticAnalyzer::visit(OnGoSubStmt& node) {
+    if (pass_ == 2) {
+        for (auto& label : node.labels) {
+            gosubTargetLabels_.push_back({label, node.loc});
+        }
+    }
+}
 
 void SemanticAnalyzer::visit(ReturnStmt& node) {
     // Return from GoSub - 无需特殊语义检查
@@ -1639,8 +1648,8 @@ void SemanticAnalyzer::registerBuiltins() {
     addBuiltinFunc("IsMissing", Vb6Type::Boolean);
     addBuiltinFunc("IIf", Vb6Type::Variant);
     addBuiltinFunc("Beep", Vb6Type::Void);
-    // P14.3.5: CallByName(obj, procName$, callType, [args...])
-    addBuiltinFunc("CallByName", Vb6Type::Variant);
+// P14.3.5: CallByName(obj, procName$, callType, [args...])
+addBuiltinFunc("CallByName", Vb6Type::Variant);
 }
 
 // ============================================================
