@@ -2003,8 +2003,152 @@ void vb6_StartMouseTracking(void* hwnd) {
     if (!hwnd) return;
     TRACKMOUSEEVENT tme;
     tme.cbSize = sizeof(tme);
-    tme.dwFlags = TME_LEAVE;
+    tme.dwFlags = TME_LEAVE | TME_HOVER;
     tme.hwndTrack = (HWND)hwnd;
     tme.dwHoverTime = HOVER_DEFAULT;
     TrackMouseEvent(&tme);
+}
+
+// ============================================================
+// P20-40: Form属性 (KeyPreview/WindowState/ControlBox/MaxButton/MinButton)
+// ============================================================
+
+int32_t vb6_GetKeyPreview(void* hwnd) {
+    if (!hwnd) return 0;
+    return GetPropW((HWND)hwnd, L"VB6_KeyPreview") ? -1 : 0;
+}
+
+void vb6_SetKeyPreview(void* hwnd, int32_t val) {
+    if (!hwnd) return;
+    if (val) SetPropW((HWND)hwnd, L"VB6_KeyPreview", (HANDLE)1);
+    else RemovePropW((HWND)hwnd, L"VB6_KeyPreview");
+}
+
+int32_t vb6_GetWindowState(void* hwnd) {
+    if (!hwnd) return 0;
+    WINDOWPLACEMENT wp;
+    wp.length = sizeof(wp);
+    if (GetWindowPlacement((HWND)hwnd, &wp)) {
+        switch (wp.showCmd) {
+            case SW_SHOWMINIMIZED: return 1;
+            case SW_SHOWMAXIMIZED: return 2;
+            default: return 0;
+        }
+    }
+    return 0;
+}
+
+void vb6_SetWindowState(void* hwnd, int32_t val) {
+    if (!hwnd) return;
+    switch (val) {
+        case 0: ShowWindow((HWND)hwnd, SW_SHOWNORMAL); break;
+        case 1: ShowWindow((HWND)hwnd, SW_MINIMIZE); break;
+        case 2: ShowWindow((HWND)hwnd, SW_SHOWMAXIMIZED); break;
+    }
+}
+
+int32_t vb6_GetControlBox(void* hwnd) {
+    if (!hwnd) return -1;
+    LONG style = GetWindowLongW((HWND)hwnd, GWL_STYLE);
+    return (style & WS_SYSMENU) ? -1 : 0;
+}
+
+void vb6_SetControlBox(void* hwnd, int32_t val) {
+    if (!hwnd) return;
+    LONG style = GetWindowLongW((HWND)hwnd, GWL_STYLE);
+    if (val) style |= WS_SYSMENU;
+    else style &= ~WS_SYSMENU;
+    SetWindowLongW((HWND)hwnd, GWL_STYLE, style);
+    SetWindowPos((HWND)hwnd, NULL, 0, 0, 0, 0, SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER);
+}
+
+int32_t vb6_GetMaxButton(void* hwnd) {
+    if (!hwnd) return -1;
+    LONG style = GetWindowLongW((HWND)hwnd, GWL_STYLE);
+    return (style & WS_MAXIMIZEBOX) ? -1 : 0;
+}
+
+void vb6_SetMaxButton(void* hwnd, int32_t val) {
+    if (!hwnd) return;
+    LONG style = GetWindowLongW((HWND)hwnd, GWL_STYLE);
+    if (val) style |= WS_MAXIMIZEBOX;
+    else style &= ~WS_MAXIMIZEBOX;
+    SetWindowLongW((HWND)hwnd, GWL_STYLE, style);
+    SetWindowPos((HWND)hwnd, NULL, 0, 0, 0, 0, SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER);
+}
+
+int32_t vb6_GetMinButton(void* hwnd) {
+    if (!hwnd) return -1;
+    LONG style = GetWindowLongW((HWND)hwnd, GWL_STYLE);
+    return (style & WS_MINIMIZEBOX) ? -1 : 0;
+}
+
+void vb6_SetMinButton(void* hwnd, int32_t val) {
+    if (!hwnd) return;
+    LONG style = GetWindowLongW((HWND)hwnd, GWL_STYLE);
+    if (val) style |= WS_MINIMIZEBOX;
+    else style &= ~WS_MINIMIZEBOX;
+    SetWindowLongW((HWND)hwnd, GWL_STYLE, style);
+    SetWindowPos((HWND)hwnd, NULL, 0, 0, 0, 0, SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER);
+}
+
+// ============================================================
+// P20-39: Label属性 (AutoSize/WordWrap/BackStyle)
+// ============================================================
+
+int32_t vb6_GetLabelAutoSize(void* hwnd) {
+    if (!hwnd) return 0;
+    return GetPropW((HWND)hwnd, L"VB6_AutoSize") ? -1 : 0;
+}
+
+void vb6_SetLabelAutoSize(void* hwnd, int32_t val) {
+    if (!hwnd) return;
+    if (val) {
+        SetPropW((HWND)hwnd, L"VB6_AutoSize", (HANDLE)1);
+        HDC hdc = GetDC((HWND)hwnd);
+        char text[1024] = {0};
+        GetWindowTextA((HWND)hwnd, text, sizeof(text));
+        HFONT hFont = (HFONT)SendMessageW((HWND)hwnd, WM_GETFONT, 0, 0);
+        HFONT hOld = (HFONT)SelectObject(hdc, hFont);
+        SIZE sz;
+        GetTextExtentPoint32A(hdc, text, (int)strlen(text), &sz);
+        SelectObject(hdc, hOld);
+        ReleaseDC((HWND)hwnd, hdc);
+        SetWindowPos((HWND)hwnd, NULL, 0, 0, sz.cx + 4, sz.cy + 2, SWP_NOMOVE | SWP_NOZORDER);
+    } else {
+        RemovePropW((HWND)hwnd, L"VB6_AutoSize");
+    }
+}
+
+int32_t vb6_GetLabelWordWrap(void* hwnd) {
+    if (!hwnd) return 0;
+    return GetPropW((HWND)hwnd, L"VB6_WordWrap") ? -1 : 0;
+}
+
+void vb6_SetLabelWordWrap(void* hwnd, int32_t val) {
+    if (!hwnd) return;
+    if (val) SetPropW((HWND)hwnd, L"VB6_WordWrap", (HANDLE)1);
+    else RemovePropW((HWND)hwnd, L"VB6_WordWrap");
+}
+
+int32_t vb6_GetLabelBackStyle(void* hwnd) {
+    if (!hwnd) return 1;
+    return GetPropW((HWND)hwnd, L"VB6_BackStyle0") ? 0 : 1;
+}
+
+void vb6_SetLabelBackStyle(void* hwnd, int32_t val) {
+    if (!hwnd) return;
+    if (val == 0) {
+        SetPropW((HWND)hwnd, L"VB6_BackStyle0", (HANDLE)1);
+        LONG exStyle = GetWindowLongW((HWND)hwnd, GWL_EXSTYLE);
+        exStyle |= WS_EX_TRANSPARENT;
+        SetWindowLongW((HWND)hwnd, GWL_EXSTYLE, exStyle);
+        InvalidateRect((HWND)hwnd, NULL, TRUE);
+    } else {
+        RemovePropW((HWND)hwnd, L"VB6_BackStyle0");
+        LONG exStyle = GetWindowLongW((HWND)hwnd, GWL_EXSTYLE);
+        exStyle &= ~WS_EX_TRANSPARENT;
+        SetWindowLongW((HWND)hwnd, GWL_EXSTYLE, exStyle);
+        InvalidateRect((HWND)hwnd, NULL, TRUE);
+    }
 }

@@ -1752,7 +1752,85 @@ std::string SemanticAnalyzer::evalOptionalDefault(ASTNode* defaultValue, Vb6Type
         }
     }
     
-    // 非字面量表达式(如常量引用、运算表达式) -> 暂不支持, 返回空让cgen用类型零值
+    // UnaryExpr: 递归求值操作数, 加前缀 (P20-20)
+    auto* unary = dynamic_cast<UnaryExpr*>(defaultValue);
+    if (unary) {
+        std::string inner = evalOptionalDefault(unary->operand.get(), paramType);
+        if (inner.empty()) return "";
+        switch (unary->op) {
+            case UnaryOp::Negate:
+                // 数值型: "(-1)" "(-3.14)"
+                if (inner.find("vb6_") == 0) return "";  // 非数值C表达式, 暂不处理
+                return "(-" + inner + ")";
+            case UnaryOp::Not:
+                // Not表达式: 暂不常见做默认值, 返回空
+                return "";
+        }
+    }
+
+    // IdentifierExpr: 解析VB6内建常量 (P20-20)
+    auto* ident = dynamic_cast<IdentifierExpr*>(defaultValue);
+    if (ident) {
+        const std::string& n = ident->name;
+        // 转小写比较
+        std::string nLower = n;
+        for (auto& c : nLower) c = (char)tolower((unsigned char)c);
+
+        // 字符串常量
+        if (nLower == "vbcrlf" || nLower == "vbnewline")
+            return "vb6_BSTR_FromStr(L\"\\r\\n\")";
+        if (nLower == "vbcr")
+            return "vb6_BSTR_FromStr(L\"\\r\")";
+        if (nLower == "vblf")
+            return "vb6_BSTR_FromStr(L\"\\n\")";
+        if (nLower == "vbtab")
+            return "vb6_BSTR_FromStr(L\"\\t\")";
+        if (nLower == "vbnullstring")
+            return "vb6_BSTR_FromStr(L\"\")";
+        if (nLower == "vbback")
+            return "vb6_BSTR_FromStr(L\"\\b\")";
+        if (nLower == "vbformfeed")
+            return "vb6_BSTR_FromStr(L\"\\f\")";
+        if (nLower == "vbverticaltab")
+            return "vb6_BSTR_FromStr(L\"\\v\")";
+
+        // 数值/枚举常量
+        if (nLower == "vbtrue")  return "-1";
+        if (nLower == "vbfalse") return "0";
+        if (nLower == "vbyes")   return "6";
+        if (nLower == "vbno")    return "7";
+        if (nLower == "vbok")    return "1";
+        if (nLower == "vbcancel") return "2";
+        if (nLower == "vbabort")  return "3";
+        if (nLower == "vbretry")  return "4";
+        if (nLower == "vbignore") return "5";
+
+        // 特殊值
+        if (nLower == "vbempty")    return "vb6_VariantEmpty()";
+        if (nLower == "vbnull")     return "vb6_VariantNull()";
+        if (nLower == "vbnothing")  return "NULL";
+
+        // 项目级Const: 通过符号表查找Constant符号 (P20-20)
+        {
+            Symbol* sym = symTab_.lookup(n);
+            if (sym && sym->kind == SymbolKind::Constant && sym->hasConstValue) {
+                switch (sym->constType) {
+                    case Vb6Type::Long:
+                    case Vb6Type::Integer: { return std::to_string(sym->constIntValue); }
+                    case Vb6Type::Single:
+                    case Vb6Type::Double: { return std::to_string(sym->constFloatValue); }
+                    case Vb6Type::String: { return std::string("vb6_BSTR_FromStr(L\"") + sym->constStringValue + "\")"; }
+                    case Vb6Type::Boolean: { return sym->constBoolValue ? "-1" : "0"; }
+                    default: break;
+                }
+            }
+        }
+
+        // 未知标识符, 暂不处理
+        return "";
+    }
+    
+    // 其他非字面量表达式 -> 暂不支持, 返回空让cgen用类型零值
     return "";
 }
 

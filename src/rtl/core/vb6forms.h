@@ -342,6 +342,24 @@ void* vb6_GetOriginalWndProc(void* hwnd);
 void vb6_RemoveControlSubclass(void* hwnd);
 // 启动鼠标跟踪 (TrackMouseEvent封装, 用于MouseEnter/MouseLeave)
 void vb6_StartMouseTracking(void* hwnd);
+// Form属性 (P20-40)
+int32_t vb6_GetKeyPreview(void* hwnd);
+void vb6_SetKeyPreview(void* hwnd, int32_t val);
+int32_t vb6_GetWindowState(void* hwnd);
+void vb6_SetWindowState(void* hwnd, int32_t val);
+int32_t vb6_GetControlBox(void* hwnd);
+void vb6_SetControlBox(void* hwnd, int32_t val);
+int32_t vb6_GetMaxButton(void* hwnd);
+void vb6_SetMaxButton(void* hwnd, int32_t val);
+int32_t vb6_GetMinButton(void* hwnd);
+void vb6_SetMinButton(void* hwnd, int32_t val);
+// Label属性 (P20-39)
+int32_t vb6_GetLabelAutoSize(void* hwnd);
+void vb6_SetLabelAutoSize(void* hwnd, int32_t val);
+int32_t vb6_GetLabelWordWrap(void* hwnd);
+void vb6_SetLabelWordWrap(void* hwnd, int32_t val);
+int32_t vb6_GetLabelBackStyle(void* hwnd);
+void vb6_SetLabelBackStyle(void* hwnd, int32_t val);
 // 控件数组 (P7.6)
 // ============================================================
 // VB6控件数组: 同名控件带不同Index, 共享事件处理器(Index参数)

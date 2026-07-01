@@ -6505,6 +6505,7 @@ void CCodeGen::emitFormFramework(const FrmFormDesc& frmDesc, Module& module) {
             bool hasKeyDown = false;
             bool hasKeyUp = false;
             bool hasDblClick = false;
+            bool hasMouseHover = false;
             bool hasValidate = false;
             FrmControlType ctrlType;
         };
@@ -6558,11 +6559,12 @@ void CCodeGen::emitFormFramework(const FrmFormDesc& frmDesc, Module& module) {
             info.hasKeyDown = symTab_.lookup(ctrl.controlName + "_KeyDown") != nullptr;
             info.hasKeyUp = symTab_.lookup(ctrl.controlName + "_KeyUp") != nullptr;
             info.hasDblClick = symTab_.lookup(ctrl.controlName + "_DblClick") != nullptr;
+            info.hasMouseHover = symTab_.lookup(ctrl.controlName + "_MouseHover") != nullptr;
 
             // 只要有任一子类化事件需求就加入列表
             if (info.hasGotFocus || info.hasLostFocus || info.hasMouseEnter || info.hasMouseLeave ||
                 info.hasMouseDown || info.hasMouseUp || info.hasMouseMove ||
-                info.hasKeyPress || info.hasKeyDown || info.hasKeyUp || info.hasDblClick || info.hasValidate) {
+                info.hasKeyPress || info.hasKeyDown || info.hasKeyUp || info.hasDblClick || info.hasValidate || info.hasMouseHover) {
                 subclassCtrls.push_back(std::move(info));
             }
         }
@@ -6600,9 +6602,11 @@ void CCodeGen::emitFormFramework(const FrmFormDesc& frmDesc, Module& module) {
                 info.hasKeyPress = symTab_.lookup(child.controlName + "_KeyPress") != nullptr;
                 info.hasKeyDown = symTab_.lookup(child.controlName + "_KeyDown") != nullptr;
                 info.hasKeyUp = symTab_.lookup(child.controlName + "_KeyUp") != nullptr;
+                info.hasDblClick = symTab_.lookup(child.controlName + "_DblClick") != nullptr;
+                info.hasMouseHover = symTab_.lookup(child.controlName + "_MouseHover") != nullptr;
                 if (info.hasGotFocus || info.hasLostFocus || info.hasMouseEnter || info.hasMouseLeave ||
                     info.hasMouseDown || info.hasMouseUp || info.hasMouseMove ||
-                    info.hasKeyPress || info.hasKeyDown || info.hasKeyUp || info.hasDblClick || info.hasValidate) {
+                    info.hasKeyPress || info.hasKeyDown || info.hasKeyUp || info.hasDblClick || info.hasValidate || info.hasMouseHover) {
                     subclassCtrls.push_back(std::move(info));
                 }
             }
@@ -6655,7 +6659,7 @@ void CCodeGen::emitFormFramework(const FrmFormDesc& frmDesc, Module& module) {
             }
 
             // MouseEnter/MouseLeave via TrackMouseEvent
-            if (info.hasMouseEnter || info.hasMouseLeave) {
+            if (info.hasMouseEnter || info.hasMouseLeave || info.hasMouseHover) {
                 c_.emitLine("if (msg == WM_MOUSEMOVE) {");
                 c_.indent();
                 c_.emitLine("if (!GetPropW(hwnd, L\"VB6_MouseTracked\")) {");
@@ -6688,6 +6692,14 @@ void CCodeGen::emitFormFramework(const FrmFormDesc& frmDesc, Module& module) {
                 }
                 c_.dedent();
                 c_.emitLine("}");
+                if (info.hasMouseHover) {
+                    c_.emitLine("if (msg == WM_MOUSEHOVER) {");
+                    c_.indent();
+                    std::string hfn = cProcName(info.ctrlName + "_MouseHover", AccessLevel::Private);
+                    c_.emitLine("{ extern void " + hfn + "(); " + hfn + "(); }");
+                    c_.dedent();
+                    c_.emitLine("}");
+                }
             } else if (info.hasMouseMove) {
                 // 只有MouseMove没有MouseEnter/Leave
                 c_.emitLine("if (msg == WM_MOUSEMOVE) {");
@@ -6805,6 +6817,30 @@ void CCodeGen::emitFormFramework(const FrmFormDesc& frmDesc, Module& module) {
     c_.emitLine("CREATESTRUCTA* cs = (CREATESTRUCTA*)lParam;");
     c_.emitLine(createFn + "((void*)hwnd, (void*)cs->hInstance);");
     c_.emitLine("vb6_Forms_Register((void*)hwnd);");
+
+    // P20-40: 从.frm属性初始化Form属性
+    {
+        auto kpIt = frmDesc.formControl.properties.find("KeyPreview");
+        if (kpIt != frmDesc.formControl.properties.end() && kpIt->second.intValue != 0) {
+            c_.emitLine("vb6_SetKeyPreview((void*)hwnd, -1);");
+        }
+        auto cbIt = frmDesc.formControl.properties.find("ControlBox");
+        if (cbIt != frmDesc.formControl.properties.end() && cbIt->second.intValue == 0) {
+            c_.emitLine("vb6_SetControlBox((void*)hwnd, 0);");
+        }
+        auto mbIt = frmDesc.formControl.properties.find("MaxButton");
+        if (mbIt != frmDesc.formControl.properties.end() && mbIt->second.intValue == 0) {
+            c_.emitLine("vb6_SetMaxButton((void*)hwnd, 0);");
+        }
+        auto mnIt = frmDesc.formControl.properties.find("MinButton");
+        if (mnIt != frmDesc.formControl.properties.end() && mnIt->second.intValue == 0) {
+            c_.emitLine("vb6_SetMinButton((void*)hwnd, 0);");
+        }
+        auto wsIt = frmDesc.formControl.properties.find("WindowState");
+        if (wsIt != frmDesc.formControl.properties.end() && wsIt->second.intValue != 0) {
+            c_.emitLine("vb6_SetWindowState((void*)hwnd, " + std::to_string((int)wsIt->second.intValue) + ");");
+        }
+    }
 
     // 调用VB6 Form_Load事件 (仅当存在时调用)
     std::string formLoadFn = cProcName("Form_Load", AccessLevel::Private);
@@ -7104,7 +7140,8 @@ void CCodeGen::emitFormFramework(const FrmFormDesc& frmDesc, Module& module) {
                 || symTab_.lookup(ctrl.controlName + "_KeyPress")
                 || symTab_.lookup(ctrl.controlName + "_KeyDown")
                 || symTab_.lookup(ctrl.controlName + "_KeyUp")
-              || symTab_.lookup(ctrl.controlName + "_Validate");
+              || symTab_.lookup(ctrl.controlName + "_Validate")
+                || symTab_.lookup(ctrl.controlName + "_MouseHover");
         };
         std::unordered_set<std::string> subEmitted;
         for (const auto& ctrl : frmDesc.formControl.children) {
@@ -7621,7 +7658,8 @@ void CCodeGen::emitFormFramework(const FrmFormDesc& frmDesc, Module& module) {
                 || symTab_.lookup(ctrl.controlName + "_KeyPress")
                 || symTab_.lookup(ctrl.controlName + "_KeyDown")
                 || symTab_.lookup(ctrl.controlName + "_KeyUp")
-              || symTab_.lookup(ctrl.controlName + "_Validate");
+              || symTab_.lookup(ctrl.controlName + "_Validate")
+                || symTab_.lookup(ctrl.controlName + "_MouseHover");
         };
         std::unordered_set<std::string> subEmitted;
         // 顶层控件
