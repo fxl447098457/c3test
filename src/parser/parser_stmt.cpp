@@ -233,7 +233,14 @@ StmtPtr Parser::parseStatement() {
                 cur_.kind != TokenKind::EndOfFile) {
                 args.push_back(parseExpression());
                 while (match(TokenKind::Comma)) {
-                    args.push_back(parseExpression());
+                    // VB6 allows empty params: MsgBox "hi", , "title" (buttons omitted)
+                    // Use a LiteralExpr with kind EmptyPlaceholder to represent skipped params
+                    if (cur_.kind == TokenKind::Comma || cur_.kind == TokenKind::NewLine ||
+                        cur_.kind == TokenKind::Colon || cur_.kind == TokenKind::EndOfFile) {
+                        args.push_back(std::make_unique<LiteralExpr>(currentLoc(), LiteralKind::Long, "0"));
+                    } else {
+                        args.push_back(parseExpression());
+                    }
                 }
             }
             auto callExpr = std::make_unique<IndexOrCallExpr>(loc,

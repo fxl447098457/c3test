@@ -84,8 +84,6 @@ int vb6_RegisterFormClass(const char* className, void* wndProc, void* hInstance,
 void* vb6_CreateFormWindow(const char* className, const char* formName,
     int x, int y, int width, int height, void* hInstance, void* userData) {
     // VB6坐标是缇, 转为像素
-    int px = (x == CW_USEDEFAULT) ? CW_USEDEFAULT : vb6_TwipToX(x);
-    int py = (y == CW_USEDEFAULT) ? CW_USEDEFAULT : vb6_TwipToY(y);
     int pw = vb6_TwipToX(width);
     int ph = vb6_TwipToY(height);
 
@@ -96,6 +94,18 @@ void* vb6_CreateFormWindow(const char* className, const char* formName,
     // 调整窗口大小使客户区匹配指定大小
     RECT rc = {0, 0, pw, ph};
     AdjustWindowRectEx(&rc, style, FALSE, exStyle);
+    int winW = rc.right - rc.left;
+    int winH = rc.bottom - rc.top;
+
+    int px, py;
+    if (x == -1 && y == -1) {
+        // M22-Issue2: CenterScreen -- 用窗口实际尺寸计算居中位置
+        px = (GetSystemMetrics(SM_CXSCREEN) - winW) / 2;
+        py = (GetSystemMetrics(SM_CYSCREEN) - winH) / 2;
+    } else {
+        px = (x == CW_USEDEFAULT) ? CW_USEDEFAULT : vb6_TwipToX(x);
+        py = (y == CW_USEDEFAULT) ? CW_USEDEFAULT : vb6_TwipToY(y);
+    }
 
     HWND hwnd = CreateWindowExA(
         exStyle,
@@ -103,8 +113,7 @@ void* vb6_CreateFormWindow(const char* className, const char* formName,
         formName,
         style,
         px, py,
-        rc.right - rc.left,
-        rc.bottom - rc.top,
+        winW, winH,
         NULL,   // 无父窗口
         NULL,   // 无菜单
         (HINSTANCE)hInstance,
@@ -1802,11 +1811,28 @@ int vb6_RegisterMDIFormClass(const char* className, void* wndProc, void* hInstan
 
 void* vb6_CreateMDIFormWindow(const char* className, const char* formName,
     int x, int y, int width, int height, void* hInstance) {
+    int pw = vb6_TwipToX(width);
+    int ph = vb6_TwipToY(height);
+    DWORD mdiStyle = WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN;
+    // Adjust for non-client area to get actual window size
+    RECT rcM = {0, 0, pw, ph};
+    AdjustWindowRectEx(&rcM, mdiStyle, FALSE, 0);
+    int winW = rcM.right - rcM.left;
+    int winH = rcM.bottom - rcM.top;
+    int px, py;
+    if (x == -1 && y == -1) {
+        // M22-Issue2: CenterScreen
+        px = (GetSystemMetrics(SM_CXSCREEN) - winW) / 2;
+        py = (GetSystemMetrics(SM_CYSCREEN) - winH) / 2;
+    } else {
+        px = x;
+        py = y;
+    }
     HWND hwnd = CreateWindowExA(
         0, className, formName,
-        WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN,
-        x, y,
-        vb6_TwipToX(width), vb6_TwipToY(height),
+        mdiStyle,
+        px, py,
+        winW, winH,
         NULL, NULL, (HINSTANCE)hInstance, NULL);
     if (!hwnd) return NULL;
 
@@ -1838,13 +1864,29 @@ void* vb6_CreateMDIChildWindow(const char* className, const char* formName,
     /* P7.7: 自动查找MDIClient (当hMDIClient=NULL时枚举窗口查找) */
     if (!hMDIClient) hMDIClient = vb6_AutoFindMDIClient();
     if (!hMDIClient) return NULL;  /* 没有MDI父窗体 */
+    int pw = vb6_TwipToX(width);
+    int ph = vb6_TwipToY(height);
+    DWORD childStyle = WS_CHILD | WS_CLIPCHILDREN | WS_SYSMENU | WS_CAPTION | WS_THICKFRAME;
+    RECT rcC = {0, 0, pw, ph};
+    AdjustWindowRectEx(&rcC, childStyle, FALSE, 0);
+    int winW = rcC.right - rcC.left;
+    int winH = rcC.bottom - rcC.top;
+    int px, py;
+    if (x == -1 && y == -1) {
+        // M22-Issue2: CenterScreen
+        px = (GetSystemMetrics(SM_CXSCREEN) - winW) / 2;
+        py = (GetSystemMetrics(SM_CYSCREEN) - winH) / 2;
+    } else {
+        px = (x == CW_USEDEFAULT) ? CW_USEDEFAULT : vb6_TwipToX(x);
+        py = (y == CW_USEDEFAULT) ? CW_USEDEFAULT : vb6_TwipToY(y);
+    }
     MDICREATESTRUCTA mcs = {0};
     mcs.szClass = className;
     mcs.szTitle = formName;
-    mcs.x = (x == CW_USEDEFAULT) ? CW_USEDEFAULT : vb6_TwipToX(x);
-    mcs.y = (y == CW_USEDEFAULT) ? CW_USEDEFAULT : vb6_TwipToY(y);
-    mcs.cx = vb6_TwipToX(width);
-    mcs.cy = vb6_TwipToY(height);
+    mcs.x = px;
+    mcs.y = py;
+    mcs.cx = winW;
+    mcs.cy = winH;
     mcs.style = 0;
     mcs.lParam = 0;
 

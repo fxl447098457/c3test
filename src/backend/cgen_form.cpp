@@ -1491,8 +1491,7 @@ ctrlId++;
         c_.emitLine("\"" + clsName + "\", \"" + caption + "\",");
         if (startupPos == 2) {
             // M22-Issue2: StartUpPosition=2 CenterScreen
-            c_.emitLine("(GetSystemMetrics(SM_CXSCREEN) - " + std::to_string(clientWidth) + ") / 2,");
-            c_.emitLine("(GetSystemMetrics(SM_CYSCREEN) - " + std::to_string(clientHeight) + ") / 2,");
+            c_.emitLine("-1, -1,  /* M22-Issue2: CenterScreen, RTL handles pixel calc */");
         } else if (startupPos == 3) {
             c_.emitLine("CW_USEDEFAULT, CW_USEDEFAULT,");
         } else {
@@ -1508,8 +1507,7 @@ ctrlId++;
         c_.emitLine("\"" + clsName + "\", \"" + caption + "\",");
         if (startupPos == 2) {
             // M22-Issue2: StartUpPosition=2 CenterScreen
-            c_.emitLine("(GetSystemMetrics(SM_CXSCREEN) - " + std::to_string(clientWidth) + ") / 2,");
-            c_.emitLine("(GetSystemMetrics(SM_CYSCREEN) - " + std::to_string(clientHeight) + ") / 2,");
+            c_.emitLine("-1, -1,  /* M22-Issue2: CenterScreen, RTL handles pixel calc */");
         } else if (startupPos == 3) {
             c_.emitLine("CW_USEDEFAULT, CW_USEDEFAULT,");
         } else {
@@ -1525,8 +1523,7 @@ ctrlId++;
         c_.emitLine("\"" + clsName + "\", \"" + caption + "\",");
         if (startupPos == 2) {
             // M22-Issue2: StartUpPosition=2 CenterScreen
-            c_.emitLine("(GetSystemMetrics(SM_CXSCREEN) - " + std::to_string(clientWidth) + ") / 2,");
-            c_.emitLine("(GetSystemMetrics(SM_CYSCREEN) - " + std::to_string(clientHeight) + ") / 2,");
+            c_.emitLine("-1, -1,  /* M22-Issue2: CenterScreen, RTL handles pixel calc */");
         } else if (startupPos == 3) {
             c_.emitLine("CW_USEDEFAULT, CW_USEDEFAULT,");
         } else {
