@@ -1671,7 +1671,11 @@ void SemanticAnalyzer::registerBuiltins() {
     addBuiltinFunc("LOF", Vb6Type::Long);
     addBuiltinFunc("EOF", Vb6Type::Boolean);
     addBuiltinFunc("Loc", Vb6Type::Long);
+    addBuiltinFunc("GetAttr", Vb6Type::Long);
+    addBuiltinFunc("SetAttr", Vb6Type::Void);
+    addBuiltinFunc("Seek", Vb6Type::Long);
     addBuiltinFunc("FileLen", Vb6Type::Long);
+    addBuiltinFunc("FileAttr", Vb6Type::Long);
     addBuiltinFunc("FileDateTime", Vb6Type::Date);
     addBuiltinFunc("Dir", Vb6Type::String);
     addBuiltinFunc("CurDir", Vb6Type::String);
@@ -1704,6 +1708,9 @@ void SemanticAnalyzer::registerBuiltins() {
     addBuiltinFunc("QBColor", Vb6Type::Long);
     // 杂项
     addBuiltinFunc("DoEvents", Vb6Type::Long);
+    addBuiltinFunc("Erl", Vb6Type::Long);
+    addBuiltinFunc("Tab", Vb6Type::String);
+    addBuiltinFunc("Spc", Vb6Type::String);
     addBuiltinFunc("CreateObject", Vb6Type::Object);
     addBuiltinFunc("GetObject", Vb6Type::Object);
     addBuiltinFunc("LoadPicture", Vb6Type::Object);
@@ -1735,6 +1742,7 @@ addBuiltinFunc("CallByName", Vb6Type::Variant);
     addBuiltinFunc("FormatCurrency", Vb6Type::String);
     addBuiltinFunc("FormatNumber", Vb6Type::String);
     addBuiltinFunc("FormatPercent", Vb6Type::String);
+    addBuiltinFunc("FormatDateTime", Vb6Type::String);
     // P18-E: Financial / Choose / Switch / Lock / Reset / Partition
     addBuiltinFunc("Choose", Vb6Type::Variant);
     addBuiltinFunc("Switch", Vb6Type::Variant);
@@ -1747,6 +1755,9 @@ addBuiltinFunc("CallByName", Vb6Type::Variant);
     addBuiltinFunc("IPmt", Vb6Type::Double);
     addBuiltinFunc("PPmt", Vb6Type::Double);
     addBuiltinFunc("RATE", Vb6Type::Double);
+    addBuiltinFunc("NPer", Vb6Type::Double);
+    addBuiltinFunc("IRR", Vb6Type::Double);
+    addBuiltinFunc("MIRR", Vb6Type::Double);
     addBuiltinFunc("NPV", Vb6Type::Double);
     addBuiltinFunc("Partition", Vb6Type::String);
 }

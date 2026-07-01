@@ -374,6 +374,20 @@ int32_t vb6_FileLen(BSTR path) {
     size.HighPart = fad.nFileSizeHigh;
     return (int32_t)size.QuadPart;  /* Truncate to Long for VB6 compatibility */
 }
+// P21-11: GetAttr — return file attributes
+int32_t vb6_GetAttr(BSTR pathname) {
+    if (!pathname) return 0;
+    DWORD attrs = GetFileAttributesW(pathname);
+    if (attrs == INVALID_FILE_ATTRIBUTES) return 0;
+    return (int32_t)attrs;
+}
+
+// P21-12: SetAttr — set file attributes
+void vb6_SetAttr(BSTR pathname, int32_t attributes) {
+    if (!pathname) return;
+    SetFileAttributesW(pathname, (DWORD)attributes);
+}
+
 
 /* Helper: send a single virtual key press+release */
 static void vb6_SendKeyVk(WORD vk) {
@@ -632,6 +646,15 @@ int32_t vb6_IsObject(vb6_VARIANT v) { return (v.vt == vb6_vtDispatch && v.pdispV
 int32_t vb6_IsArray(vb6_VARIANT v) { return (v.vt & 0x2000) ? -1 : 0; }  // VT_ARRAY=0x2000
 int32_t vb6_IsDate(vb6_VARIANT v) { return v.vt == vb6_vtDate ? -1 : 0; }
 int32_t vb6_IsError(vb6_VARIANT v) { return v.vt == vb6_vtError ? -1 : 0; }
+// P21-09: CVErr — create VT_ERROR Variant
+vb6_VARIANT vb6_CVErr(int32_t errorNumber) {
+    vb6_VARIANT v;
+    memset(&v, 0, sizeof(v));
+    v.vt = vb6_vtError;
+    v.lVal = errorNumber;
+    return v;
+}
+
 
 // P8.4: VarType - 返回Variant的VT类型码
 int32_t vb6_VarType(vb6_VARIANT v) { return (int32_t)v.vt; }
@@ -1092,6 +1115,50 @@ static HANDLE vb6_dir_handle = INVALID_HANDLE_VALUE;
 static WIN32_FIND_DATAW vb6_dir_data;
 static int vb6_dir_first = 0;
 
+
+// P21-10: FormatDateTime — named date/time formatting
+// namedFormat: 0=vbGeneralDate, 1=vbLongDate, 2=vbShortDate, 3=vbLongTime, 4=vbShortTime
+BSTR vb6_FormatDateTime(double dateSerial, int32_t namedFormat) {
+    SYSTEMTIME st;
+    double intPart, fracPart;
+    fracPart = modf(dateSerial, &intPart);
+    if (dateSerial == 0.0) {
+        GetLocalTime(&st);
+    } else {
+        if (!VariantTimeToSystemTime(dateSerial, &st)) {
+            GetLocalTime(&st);
+        }
+    }
+    wchar_t buf[256] = {0};
+    int len = 0;
+    switch (namedFormat) {
+        case 1: // vbLongDate
+            len = GetDateFormatW(LOCALE_USER_DEFAULT, DATE_LONGDATE, &st, NULL, buf, 256);
+            break;
+        case 2: // vbShortDate
+            len = GetDateFormatW(LOCALE_USER_DEFAULT, DATE_SHORTDATE, &st, NULL, buf, 256);
+            break;
+        case 3: // vbLongTime
+            len = GetTimeFormatW(LOCALE_USER_DEFAULT, 0, &st, NULL, buf, 256);
+            break;
+        case 4: // vbShortTime
+            len = GetTimeFormatW(LOCALE_USER_DEFAULT, TIME_NOSECONDS, &st, NULL, buf, 256);
+            break;
+        case 0: // vbGeneralDate
+        default: {
+            // General date: date + time if time part nonzero
+            len = GetDateFormatW(LOCALE_USER_DEFAULT, DATE_SHORTDATE, &st, NULL, buf, 256);
+            if (len > 0) buf[len-1] = L' ';
+            if (fracPart != 0.0) {
+                GetTimeFormatW(LOCALE_USER_DEFAULT, 0, &st, NULL, buf + len, 256 - len);
+            }
+            len = (int)wcslen(buf);
+            break;
+        }
+    }
+    if (len <= 0) buf[0] = L'\0';
+    return SysAllocString(buf);
+}
 BSTR vb6_Dir(BSTR pathname, int32_t attributes) {
     if (pathname && vb6_BSTR_Len(pathname) > 0) {
         // 新搜索: 关闭之前的句柄
@@ -2828,6 +2895,19 @@ int32_t vb6_Loc(int32_t filenumber) {
     // 简化: 返回当前字节位置 / 128 (VB6 Random模式)
     return (int32_t)(ftell(vb6_file_table[filenumber]) / 128) + 1;
 }
+
+// P21-13: Seek function — return current file position
+int32_t vb6_SeekFunc(int32_t filenumber) {
+    if (filenumber < 1 || filenumber > 255 || !vb6_file_table[filenumber]) return 0;
+    return (int32_t)(ftell(vb6_file_table[filenumber]) + 1);  // VB6 is 1-based
+}
+
+// P21-13: Seek statement — set file position
+void vb6_SeekStmt(int32_t filenumber, int32_t position) {
+    if (filenumber < 1 || filenumber > 255 || !vb6_file_table[filenumber]) return;
+    fseek(vb6_file_table[filenumber], (long)(position - 1), SEEK_SET);  // VB6 is 1-based
+}
+
 
 void vb6_Print(int32_t filenumber, BSTR s) {
     if (filenumber < 1 || filenumber >= VB6_MAX_FILES || !vb6_file_table[filenumber]) return;

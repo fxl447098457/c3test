@@ -1950,7 +1950,7 @@ void CCodeGen::visit(SeekStmt& node) {
     emitExpr(*node.fileNumber);
     std::string fnum = std::move(lastExpr_);
     emitExpr(*node.position);
-    c_.emitLine("fseek(vb6_file_table[" + fnum + "], (long)" + lastExpr_ + ", SEEK_SET);");
+    c_.emitLine("vb6_SeekStmt(" + fnum + ", " + lastExpr_ + ");");
 }
 
 void CCodeGen::visit(LockStmt& node) {

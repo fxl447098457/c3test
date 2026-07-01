@@ -456,6 +456,22 @@ void CCodeGen::visit(IdentifierExpr& node) {
         {"rate",      "vb6_RATE"},
         {"npv",       "vb6_NPV"},
         {"partition", "vb6_Partition"},
+        // P21-C: new functions
+        {"cverr",          "vb6_CVErr"},
+        {"formatdatetime", "vb6_FormatDateTime"},
+        {"getattr",        "vb6_GetAttr"},
+        {"setattr",        "vb6_SetAttr"},
+        {"seek",           "vb6_SeekFunc"},
+        {"doevents",       "vb6_DoEvents"},
+        {"savepicture",    "vb6_SavePicture"},
+        {"load",           "vb6_LoadForm"},
+        {"nper",           "vb6_NPer"},
+        {"fileattr",       "vb6_FileAttr"},
+        {"erl",            "vb6_Erl"},
+        {"tab",            "vb6_Tab"},
+        {"spc",            "vb6_Spc"},
+        {"irr",            "vb6_IRR"},
+        {"mirr",           "vb6_MIRR"},
 
     };
 
@@ -2214,6 +2230,24 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
         if (args.size() == 1) {
             argList += ", 1";
         }
+    }
+
+    // P21-10: FormatDateTime(date[, namedFormat]) - default namedFormat=0 (vbGeneralDate)
+    if (callee == "vb6_FormatDateTime") {
+        if (args.size() == 1) {
+            argList += ", 0";
+        }
+    }
+
+    // P21-16: NPer(rate, pmt, pv[, fv][, type]) - defaults: fv=0, type=0
+    if (callee == "vb6_NPer") {
+        if (args.size() == 3) argList += ", 0, 0";
+        else if (args.size() == 4) argList += ", 0";
+    }
+
+    // P21-19: IRR(values[, guess]) - default guess=0.1
+    if (callee == "vb6_IRR") {
+        if (args.size() == 1) argList += ", 0.1";
     }
 
     // P14.1.4: General Optional parameter padding for user-defined functions

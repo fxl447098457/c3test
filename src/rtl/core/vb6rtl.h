@@ -298,6 +298,9 @@ int32_t vb6_IsObject(vb6_VARIANT v);
 int32_t vb6_IsArray(vb6_VARIANT v);
 int32_t vb6_IsDate(vb6_VARIANT v);
 int32_t vb6_IsError(vb6_VARIANT v);
+// P21-09: CVErr — create VT_ERROR Variant
+vb6_VARIANT vb6_CVErr(int32_t errorNumber);
+
 BSTR vb6_TypeName(vb6_VARIANT v);
 int32_t vb6_VarType(vb6_VARIANT v);
 
@@ -615,7 +618,11 @@ int32_t vb6_Close(int32_t filenumber);
 int32_t vb6_CloseAll();  // Close all open files
 int32_t vb6_EOF(int32_t filenumber);
 int32_t vb6_LOF(int32_t filenumber);
-int32_t vb6_Loc(int32_t filenumber);
+int32_t vb6_Loc(int32_t filenumber);// P21-13: Seek function (return current file position)
+int32_t vb6_SeekFunc(int32_t filenumber);
+// P21-13: Seek statement (set file position)
+void vb6_SeekStmt(int32_t filenumber, int32_t position);
+
 void vb6_Print(int32_t filenumber, BSTR s);
 void vb6_Write(int32_t filenumber, BSTR s);
 BSTR vb6_LineInput(int32_t filenumber);
@@ -666,6 +673,33 @@ BSTR vb6_BSTR_Concat(BSTR a, BSTR b);
 
 void* vb6_Alloc(size_t size);
 void vb6_Free(void* ptr);
+
+// P21-14: SavePicture — save picture to file (GDI+ BMP save)
+void vb6_SavePicture(void* hBitmap, BSTR filename);
+
+// P21-15: Load statement — preload form without showing
+void vb6_LoadForm(void* hwnd);
+
+// P21-16: NPer — number of periods (financial)
+double vb6_NPer(double rate, double pmt, double pv, double fv, int32_t type_);
+
+// P21-17: FileAttr — return file mode/position
+int32_t vb6_FileAttr(int32_t filenumber, int32_t attribute);
+
+// P21-27: Erl — error line number
+int32_t vb6_Erl(void);
+
+// P21-28: Tab — print column positioning
+BSTR vb6_Tab(int32_t column);
+
+// P21-29: Spc — print space insertion
+BSTR vb6_Spc(int32_t count);
+
+// P21-19: IRR — internal rate of return
+double vb6_IRR(void* valuesArray, double guess);
+
+// P21-20: MIRR — modified internal rate of return
+double vb6_MIRR(void* valuesArray, double financeRate, double reinvestRate);
 
 // ============================================================
 // COM 互操作 (P6)
