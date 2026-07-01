@@ -335,6 +335,10 @@ private:
     // P7.9: Window control name mapping (lowercase -> original casing for HWND vars)
     std::unordered_map<std::string, std::string> knownFormControlOriginalNames_;
 
+    // P20-36: 菜单项ID映射 (小写菜单名 → menuId, 与emitMenuItem/emitMenuClickDispatch一致)
+    std::unordered_map<std::string, int> knownMenuIds_;
+    std::string knownMenuFormHwnd_;  // 当前窗体HWND变量名 (如 "vb6_hwnd_Form1")
+
     // P7.5: 窗体名 (小写)，用于识别 Form.Caption 等窗体自身属性
     std::string knownFormName_;
 
@@ -430,6 +434,8 @@ private:
 
     // P7.5: 判断控件属性写入 → 返回RTL写入函数名 (如"vb6_SetControlText")
     std::string getControlPropWriteFn(FrmControlType ctrlType, const std::string& propName) const;
+    // P20-36: 生成控件属性访问的HWND参数 (Menu控件用GetMenu+menuId)
+    std::string makeCtrlHwndArg(const std::string& ctrlNameLower, FrmControlType ctrlType) const;
 
     // P11.7: 返回控件类型的默认属性名 (如 TextBox->"Text", Label->"Caption")
     // 空字符串表示该控件类型无默认属性

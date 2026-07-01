@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <cctype>
 #include <iostream>
+#include <functional>
 
 namespace vb6c3 {
 // P16: 控件类型名→FrmControlType映射 (Dim WithEvents cmd As CommandButton)
@@ -1100,7 +1101,7 @@ void CCodeGen::visit(IdentifierExpr& node) {
                 if (defaultProp) {
                     std::string readFn = getControlPropReadFn(itCtrl->second, defaultProp);
                     if (!readFn.empty()) {
-                        lastExpr_ = readFn + "(vb6_hwnd_" + cIdent(node.name) + ")  /* default prop: ." + std::string(defaultProp) + " */";
+                        lastExpr_ = readFn + "(" + makeCtrlHwndArg(lower, itCtrl->second) + ")  /* default prop: ." + std::string(defaultProp) + " */";
                         return;
                     }
                 }
@@ -1527,7 +1528,7 @@ void CCodeGen::visit(MemberAccessExpr& node) {
             if (itCtrl != knownFormControls_.end()) {
                 std::string readFn = getControlPropReadFn(itCtrl->second, node.memberName);
                 if (!readFn.empty()) {
-                    lastExpr_ = readFn + "(vb6_hwnd_" + cIdent(objIdent.name) + ")";
+                    lastExpr_ = readFn + "(" + makeCtrlHwndArg(objLower, itCtrl->second) + ")  /* ctrl prop read */";
                     return;
                 }
                                 // P7.9: WebBrowser method access (Navigate/GoBack/GoForward/Refresh)
@@ -2897,10 +2898,16 @@ void CCodeGen::visit(WithMemberExpr& node) {
 
     switch (info.kind) {
     case WithObjKind::FormControl: {
-        // .Property → vb6_GetControlXxx(tempVar)
+        // .Property → vb6_GetControlXxx(tempVar) or Menu prop
         std::string readFn = getControlPropReadFn(info.ctrlType, node.memberName);
         if (!readFn.empty()) {
-            lastExpr_ = readFn + "(" + tempVar + ")  /* With ctrl .Property */";
+            if (info.ctrlType == FrmControlType::Menu) {  // P20-36: Menu uses (hmenu, menuId) args
+                std::string mnuLower = info.ctrlOrigName;
+                std::transform(mnuLower.begin(), mnuLower.end(), mnuLower.begin(), ::tolower);
+                lastExpr_ = readFn + "(" + makeCtrlHwndArg(mnuLower, info.ctrlType) + ")  /* With menu .Property */";
+            } else {
+                lastExpr_ = readFn + "(" + tempVar + ")  /* With ctrl .Property */";
+            }
             return;
         }
         diag_.warn(DiagnosticID::CodeGenUnsupportedFeature, SourceLocation{},
@@ -3224,7 +3231,7 @@ void CCodeGen::visit(AssignmentStmt& node) {
                 if (!writeFn.empty()) {
                     emitExpr(*node.value);
                     std::string valExpr = std::move(lastExpr_);
-                    c_.emitLine(writeFn + "(vb6_hwnd_" + cIdent(objId.name) + ", " + valExpr + ");  /* Control Property */");
+                    c_.emitLine(writeFn + "(" + makeCtrlHwndArg(objLower, itCtrl->second) + ", " + valExpr + ");  /* Control Property */");
                     return;
                 }
                 diag_.warn(DiagnosticID::CodeGenUnsupportedFeature, SourceLocation{},
@@ -3280,7 +3287,7 @@ void CCodeGen::visit(AssignmentStmt& node) {
                 if (!writeFn.empty()) {
                     emitExpr(*node.value);
                     std::string valExpr = std::move(lastExpr_);
-                    c_.emitLine(writeFn + "(vb6_hwnd_" + cIdent(tgtId.name) + ", " + valExpr + ");  /* default prop: ." + std::string(defaultProp) + " */");
+                    c_.emitLine(writeFn + "(" + makeCtrlHwndArg(tgtLower, itCtrl->second) + ", " + valExpr + ");  /* default prop: ." + std::string(defaultProp) + " */");
                     return;
                 }
             }
@@ -3297,7 +3304,13 @@ void CCodeGen::visit(AssignmentStmt& node) {
             std::string writeFn = getControlPropWriteFn(info.ctrlType, wmExpr.memberName);
             if (!writeFn.empty()) {
                 emitExpr(*node.value);
-                c_.emitLine(writeFn + "(" + tempVar + ", " + lastExpr_ + ");");
+                if (info.ctrlType == FrmControlType::Menu) {  // P20-36
+                    std::string mnuLower = info.ctrlOrigName;
+                    std::transform(mnuLower.begin(), mnuLower.end(), mnuLower.begin(), ::tolower);
+                    c_.emitLine(writeFn + "(" + makeCtrlHwndArg(mnuLower, info.ctrlType) + ", " + lastExpr_ + ");  /* With menu prop write */");
+                } else {
+                    c_.emitLine(writeFn + "(" + tempVar + ", " + lastExpr_ + ");");
+                }
                 return;
             }
             break;
@@ -3780,7 +3793,7 @@ void CCodeGen::visit(LetStmt& node) {
                 if (!writeFn.empty()) {
                     emitExpr(*node.value);
                     std::string valExpr = std::move(lastExpr_);
-                    c_.emitLine(writeFn + "(vb6_hwnd_" + cIdent(objId.name) + ", " + valExpr + ");  /* Let Control Property */");
+                    c_.emitLine(writeFn + "(" + makeCtrlHwndArg(objLower, itCtrl->second) + ", " + valExpr + ");  /* Let Control Property */");
                     return;
                 }
             }
@@ -3798,7 +3811,13 @@ void CCodeGen::visit(LetStmt& node) {
             std::string writeFn = getControlPropWriteFn(info.ctrlType, wmExpr.memberName);
             if (!writeFn.empty()) {
                 emitExpr(*node.value);
-                c_.emitLine(writeFn + "(" + tempVar + ", " + lastExpr_ + ");");
+                if (info.ctrlType == FrmControlType::Menu) {  // P20-36
+                    std::string mnuLower = info.ctrlOrigName;
+                    std::transform(mnuLower.begin(), mnuLower.end(), mnuLower.begin(), ::tolower);
+                    c_.emitLine(writeFn + "(" + makeCtrlHwndArg(mnuLower, info.ctrlType) + ", " + lastExpr_ + ");  /* Let With menu prop */");
+                } else {
+                    c_.emitLine(writeFn + "(" + tempVar + ", " + lastExpr_ + ");");
+                }
                 return;
             }
         } else if (info.kind == WithObjKind::WithEventsCtrl) {
@@ -4222,7 +4241,11 @@ void CCodeGen::visit(WithStmt& node) {
                 if (itCtrl != knownFormControls_.end()) {
                     withInfo.kind = WithObjKind::FormControl;
                     withInfo.ctrlType = itCtrl->second;
-                    withInfo.ctrlOrigName = "vb6_hwnd_" + cIdent(objNameLower);
+                    if (itCtrl->second == FrmControlType::Menu) {  // P20-36: Menu stores lowercase name for makeCtrlHwndArg
+                        withInfo.ctrlOrigName = objNameLower;
+                    } else {
+                        withInfo.ctrlOrigName = "vb6_hwnd_" + cIdent(objNameLower);
+                    }
                     tempType = "HWND";
                 }
             }
@@ -4255,7 +4278,11 @@ void CCodeGen::visit(WithStmt& node) {
 
     suppressDefaultProp_ = prevSuppress;
 
-    c_.emitLine(tempType + " " + tempVar + " = (" + tempType + ")" + lastExpr_ + "  /* With object ref */;");
+    if (!withObjectInfoStack_.empty() && withObjectInfoStack_.back().kind == WithObjKind::FormControl && withObjectInfoStack_.back().ctrlType == FrmControlType::Menu) {  // P20-36
+        c_.emitLine("int " + tempVar + " = 0;  /* Menu: no HWND, props use (hmenu,menuId) */");
+    } else {
+        c_.emitLine(tempType + " " + tempVar + " = (" + tempType + ")" + lastExpr_ + "  /* With object ref */;");
+    }
 
     withObjectVars_.push_back(tempVar);
 
@@ -6365,6 +6392,35 @@ void CCodeGen::emitFormFramework(const FrmFormDesc& frmDesc, Module& module) {
     int ctrlId = 0;  // P7.6: 控件ID计数器(在WM_COMMAND和CreateControls中复用)
     bool isMDIForm = (frmDesc.formControl.controlType == FrmControlType::MDIForm);  // P7.7
     bool isMDIChild = frmDesc.isMDIChild;  // P7.7
+
+    // P20-36: 收集菜单项ID映射 (与emitMenuItem/emitMenuClickDispatch一致)
+    {
+        std::function<void(const FrmControl&, int&)> collectMenuIds;
+        collectMenuIds = [&](const FrmControl& menuCtrl, int& mid) {
+            for (const auto& child : menuCtrl.children) {
+                std::string cap = child.controlName;
+                auto capIt2 = child.properties.find("Caption");
+                if (capIt2 != child.properties.end() && capIt2->second.type == FrmValueType::String) {
+                    std::string raw = capIt2->second.rawText;
+                    if (raw.size() >= 2 && raw.front() == '"' && raw.back() == '"') cap = raw.substr(1, raw.size() - 2);
+                }
+                if (cap == "-") continue;  // separator: no ID
+                if (!child.children.empty()) {
+                    collectMenuIds(child, mid);  // submenu: recurse, no ID for container
+                } else {
+                    std::string cLower = child.controlName;
+                    std::transform(cLower.begin(), cLower.end(), cLower.begin(), ::tolower);
+                    knownMenuIds_[cLower] = mid;
+                    mid++;
+                }
+            }
+        };
+        int collId = 1000;
+        knownMenuFormHwnd_ = "vb6_hwnd_" + cIdent(formName);
+        for (const auto& ctrl : frmDesc.formControl.children) {
+            if (ctrl.controlType == FrmControlType::Menu) collectMenuIds(ctrl, collId);
+        }
+    }
 
     // --- 提取窗体属性 ---
     std::string caption = formName;  // 默认标题=窗体名
@@ -8926,6 +8982,12 @@ std::string CCodeGen::getControlPropReadFn(FrmControlType ctrlType, const std::s
         if (propLower == "visible") return "vb6_GetControlVisible";
         if (propLower == "enabled") return "vb6_GetControlEnabled";
         break;
+    case FrmControlType::Menu:  // P20-36
+        if (propLower == "caption") return "vb6_GetMenuCaption";
+        if (propLower == "checked") return "vb6_GetMenuChecked";
+        if (propLower == "enabled") return "vb6_GetMenuEnabled";
+        if (propLower == "visible") return "vb6_GetMenuVisible";
+        break;
     case FrmControlType::Shape:
         if (propLower == "visible") return "vb6_GetControlVisible";
         break;
@@ -9057,6 +9119,12 @@ std::string CCodeGen::getControlPropWriteFn(FrmControlType ctrlType, const std::
         if (propLower == "visible") return "vb6_SetControlVisible";
         if (propLower == "enabled") return "vb6_SetControlEnabled";
         break;
+    case FrmControlType::Menu:  // P20-36
+        if (propLower == "caption") return "vb6_SetMenuCaption";
+        if (propLower == "checked") return "vb6_SetMenuChecked";
+        if (propLower == "enabled") return "vb6_SetMenuEnabled";
+        if (propLower == "visible") return "vb6_SetMenuVisible";
+        break;
     case FrmControlType::Shape:
         if (propLower == "visible") return "vb6_SetControlVisible";
         break;
@@ -9066,6 +9134,18 @@ std::string CCodeGen::getControlPropWriteFn(FrmControlType ctrlType, const std::
         break;
     }
     return "";  // 未知属性
+}
+// P20-36: 生成控件属性访问的HWND参数 (Menu控件用GetMenu+menuId)
+std::string CCodeGen::makeCtrlHwndArg(const std::string& ctrlNameLower, FrmControlType ctrlType) const {
+    if (ctrlType == FrmControlType::Menu) {
+        auto menuIt = knownMenuIds_.find(ctrlNameLower);
+        if (menuIt != knownMenuIds_.end()) {
+            return "(void*)GetMenu((HWND)" + knownMenuFormHwnd_ + "), " + std::to_string(menuIt->second);
+        }
+    }
+    auto origIt = knownFormControlOriginalNames_.find(ctrlNameLower);
+    std::string origName = (origIt != knownFormControlOriginalNames_.end()) ? origIt->second : ctrlNameLower;
+    return "vb6_hwnd_" + cIdent(origName);
 }
 const char* CCodeGen::getDefaultPropertyName(FrmControlType ctrlType) {
     switch (ctrlType) {
