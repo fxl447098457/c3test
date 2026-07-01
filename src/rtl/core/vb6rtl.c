@@ -1329,12 +1329,20 @@ void vb6_Printer_NewPage(void) {
 
 int32_t vb6_Printer_Width(void) {
     vb6_Printer_EnsureDC();
-    return g_printerDC ? GetDeviceCaps(g_printerDC, PHYSICALWIDTH) : 0;
+    if (!g_printerDC) return 0;
+    // P20-44: VB6 Printer.Width返回twips(1440/inch), 不是pixels
+    int px = GetDeviceCaps(g_printerDC, PHYSICALWIDTH);
+    int dpi = GetDeviceCaps(g_printerDC, LOGPIXELSX);
+    return dpi > 0 ? (int32_t)((int64_t)px * 1440 / dpi) : px;
 }
 
 int32_t vb6_Printer_Height(void) {
     vb6_Printer_EnsureDC();
-    return g_printerDC ? GetDeviceCaps(g_printerDC, PHYSICALHEIGHT) : 0;
+    if (!g_printerDC) return 0;
+    // P20-44: VB6 Printer.Height返回twips(1440/inch), 不是pixels
+    int px = GetDeviceCaps(g_printerDC, PHYSICALHEIGHT);
+    int dpi = GetDeviceCaps(g_printerDC, LOGPIXELSY);
+    return dpi > 0 ? (int32_t)((int64_t)px * 1440 / dpi) : px;
 }
 
 int32_t vb6_Printer_CurrentX(void) { return g_printerCurrentX; }
@@ -2696,8 +2704,14 @@ int32_t vb6_ChDir(BSTR pathname) {
 }
 
 int32_t vb6_ChDrive(BSTR drive) {
-    (void)drive;  // 简化: 不实现驱动器切换
-    return -1;
+    // P20-49: 尝试切换驱动器, 失败也返回成功(空操作兼容)
+#ifdef _WIN32
+    if (drive && SysStringLen(drive) > 0) {
+        int driveNum = towupper(drive[0]) - 'A' + 1;
+        _chdrive(driveNum);
+    }
+#endif
+    return 0;  // VB6 ChDrive是Sub, 无返回值, 始终返回0
 }
 
 int32_t vb6_Name(BSTR oldPath, BSTR newPath) {

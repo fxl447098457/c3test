@@ -7565,7 +7565,18 @@ void CCodeGen::emitFormFramework(const FrmFormDesc& frmDesc, Module& module) {
             }
         }
 
-        ctrlId++;
+        
+        // P20-37: DriveListBox/DirListBox/FileListBox initial population
+        if (ctrl.controlType == FrmControlType::DriveListBox) {
+            c_.emitLine("vb6_DriveListBoxRefresh((void*)vb6_hwnd_" + cIdent(ctrl.controlName) + ");");
+        } else if (ctrl.controlType == FrmControlType::DirListBox) {
+            c_.emitLine("{ wchar_t _p" + cIdent(ctrl.controlName) + "[MAX_PATH]; GetCurrentDirectoryW(MAX_PATH, _p" + cIdent(ctrl.controlName) + ");");
+            c_.emitLine("  vb6_DirListBoxSetPath((void*)vb6_hwnd_" + cIdent(ctrl.controlName) + ", _p" + cIdent(ctrl.controlName) + "); }");
+        } else if (ctrl.controlType == FrmControlType::FileListBox) {
+            c_.emitLine("{ wchar_t _p" + cIdent(ctrl.controlName) + "[MAX_PATH]; GetCurrentDirectoryW(MAX_PATH, _p" + cIdent(ctrl.controlName) + ");");
+            c_.emitLine("  vb6_FileListBoxSetPath((void*)vb6_hwnd_" + cIdent(ctrl.controlName) + ", _p" + cIdent(ctrl.controlName) + "); }");
+        }
+ctrlId++;
     }
 
 

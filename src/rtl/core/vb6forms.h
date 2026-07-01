@@ -503,6 +503,11 @@ typedef void (*vb6_WebViewEventCallback)(void* hwnd, const char* url);
 // 设置DocumentComplete事件回调
 void vb6_WebViewSetDocumentCompleteCallback(void* hwnd, vb6_WebViewEventCallback callback);
 
+// P20-50: WebBrowser导航方法占位
+int vb6_WebViewGoBack(void* hwnd);
+int vb6_WebViewGoForward(void* hwnd);
+int vb6_WebViewRefresh(void* hwnd);
+
 #ifdef __cplusplus
 }
 #endif
