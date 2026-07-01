@@ -360,6 +360,36 @@ int32_t vb6_GetLabelWordWrap(void* hwnd);
 void vb6_SetLabelWordWrap(void* hwnd, int32_t val);
 int32_t vb6_GetLabelBackStyle(void* hwnd);
 void vb6_SetLabelBackStyle(void* hwnd, int32_t val);
+// Menu属性 (P20-36)
+void* vb6_GetMenuCaption(void* menuHandle, int menuId);
+void vb6_SetMenuCaption(void* menuHandle, int menuId, void* bstrCaption);
+int32_t vb6_GetMenuChecked(void* menuHandle, int menuId);
+void vb6_SetMenuChecked(void* menuHandle, int menuId, int32_t val);
+int32_t vb6_GetMenuEnabled(void* menuHandle, int menuId);
+void vb6_SetMenuEnabled(void* menuHandle, int menuId, int32_t val);
+int32_t vb6_GetMenuVisible(void* menuHandle, int menuId);
+void vb6_SetMenuVisible(void* menuHandle, int menuId, int32_t val);
+// 按钮Style属性 (P20-38)
+int32_t vb6_GetButtonStyle(void* hwnd);
+void vb6_SetButtonStyle(void* hwnd, int32_t val);
+// Shape属性 (P20-34)
+int32_t vb6_GetShapeType(void* hwnd);
+void vb6_SetShapeType(void* hwnd, int32_t val);
+int32_t vb6_GetShapeBorderWidth(void* hwnd);
+void vb6_SetShapeBorderWidth(void* hwnd, int32_t val);
+int32_t vb6_GetShapeBorderStyle(void* hwnd);
+void vb6_SetShapeBorderStyle(void* hwnd, int32_t val);
+int32_t vb6_GetShapeFillStyle(void* hwnd);
+void vb6_SetShapeFillStyle(void* hwnd, int32_t val);
+// PictureBox图形属性 (P20-42)
+int32_t vb6_GetAutoRedraw(void* hwnd);
+void vb6_SetAutoRedraw(void* hwnd, int32_t val);
+int32_t vb6_GetScaleMode(void* hwnd);
+void vb6_SetScaleMode(void* hwnd, int32_t val);
+float vb6_GetCurrentX(void* hwnd);
+void vb6_SetCurrentX(void* hwnd, float val);
+float vb6_GetCurrentY(void* hwnd);
+void vb6_SetCurrentY(void* hwnd, float val);
 // 控件数组 (P7.6)
 // ============================================================
 // VB6控件数组: 同名控件带不同Index, 共享事件处理器(Index参数)

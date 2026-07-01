@@ -9070,6 +9070,8 @@ const char* CCodeGen::getDefaultPropertyName(FrmControlType ctrlType) {
     case FrmControlType::MDIForm:      return "Caption";
     case FrmControlType::PictureBox:   return "Picture";  // P17.2
     case FrmControlType::Image:        return "Picture";  // P17.2
+    case FrmControlType::HScrollBar:   return "Value";  // P20-41
+    case FrmControlType::VScrollBar:   return "Value";  // P20-41
     default:                           return nullptr;
     }
 }
