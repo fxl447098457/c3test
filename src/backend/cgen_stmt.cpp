@@ -251,6 +251,27 @@ void CCodeGen::visit(AssignmentStmt& node) {
                 }
             }
         }
+        // P20-31: WithEvents控件变量默认属性写入
+        if (node.target->kind == ASTNodeKind::IdentifierExpr) {
+            auto& tgtId2 = static_cast<IdentifierExpr&>(*node.target);
+            std::string tgtLower2 = tgtId2.name;
+            std::transform(tgtLower2.begin(), tgtLower2.end(), tgtLower2.begin(), ::tolower);
+            auto itWECtrl = knownWithEventsCtrlVars_.find(tgtLower2);
+            if (itWECtrl != knownWithEventsCtrlVars_.end()) {
+                const char* defaultProp2 = getDefaultPropertyName(itWECtrl->second);
+                if (defaultProp2) {
+                    std::string writeFn2 = getControlPropWriteFn(itWECtrl->second, defaultProp2);
+                    if (!writeFn2.empty()) {
+                        auto itOrig2 = knownWithEventsCtrlOrigNames_.find(tgtLower2);
+                        std::string weVarName2 = (itOrig2 != knownWithEventsCtrlOrigNames_.end()) ? itOrig2->second : cIdent(tgtId2.name);
+                        emitExpr(*node.value);
+                        std::string valExpr2 = std::move(lastExpr_);
+                        c_.emitLine(writeFn2 + "(" + weVarName2 + ", " + valExpr2 + ");  /* WithEvents ctrl default prop: ." + std::string(defaultProp2) + " */");
+                        return;
+                    }
+                }
+            }
+        }
     }
     // P17.1: WithMemberExpr作为赋值目标 (With块内 .Property = value)
     if (node.target->kind == ASTNodeKind::WithMemberExpr && !withObjectVars_.empty() && !withObjectInfoStack_.empty()) {
@@ -1391,7 +1412,7 @@ void CCodeGen::visit(CallStmt& node) {
                                 "vb6_Trim", "vb6_LTrim", "vb6_RTrim", "vb6_Chr",
                                 "vb6_Str", "vb6_CStr", "vb6_Format", "vb6_Hex", "vb6_Oct",
                                 "vb6_Replace", "vb6_Space", "vb6_String", "vb6_StrReverse",
-                                "vb6_BSTR_Concat", "vb6_BSTR_Empty", "vb6_App_Path", "vb6_App_EXEName", "vb6_Command", "vb6_CurDir", "vb6_Environ", "vb6_Dir", "vb6_IIfBSTR", "vb6_CDec", "vb6_GetControlText", "vb6_GetControlCaption"
+                                "vb6_BSTR_Concat", "vb6_BSTR_Empty", "vb6_App_Path", "vb6_App_EXEName", "vb6_Command", "vb6_CurDir", "vb6_Environ", "vb6_Dir", "vb6_IIfBSTR", "vb6_GetControlText", "vb6_GetControlCaption"
                             };
                             auto isBstrExpr = [&](const std::string& expr) -> bool {
                                 for (auto& prefix : bstrFuncs) {
@@ -1647,7 +1668,7 @@ void CCodeGen::visit(PrintStmt& node) {
         "vb6_Trim", "vb6_LTrim", "vb6_RTrim", "vb6_Chr",
         "vb6_Str", "vb6_CStr", "vb6_Format", "vb6_Hex", "vb6_Oct",
         "vb6_Replace", "vb6_Space", "vb6_String", "vb6_StrReverse",
-        "vb6_BSTR_Concat", "vb6_BSTR_Empty", "vb6_App_Path", "vb6_App_EXEName", "vb6_Command", "vb6_CurDir", "vb6_Environ", "vb6_Dir", "vb6_IIfBSTR", "vb6_CDec", "vb6_GetControlText", "vb6_GetControlCaption"
+        "vb6_BSTR_Concat", "vb6_BSTR_Empty", "vb6_App_Path", "vb6_App_EXEName", "vb6_Command", "vb6_CurDir", "vb6_Environ", "vb6_Dir", "vb6_IIfBSTR", "vb6_GetControlText", "vb6_GetControlCaption"
     };
     auto isBstrExpr = [&](const std::string& expr) -> bool {
         for (auto& prefix : bstrFuncs) {
@@ -1688,7 +1709,7 @@ void CCodeGen::visit(WriteStmt& node) {
         "vb6_Trim", "vb6_LTrim", "vb6_RTrim", "vb6_Chr",
         "vb6_Str", "vb6_CStr", "vb6_Format", "vb6_Hex", "vb6_Oct",
         "vb6_Replace", "vb6_Space", "vb6_String", "vb6_StrReverse",
-        "vb6_BSTR_Concat", "vb6_BSTR_Empty", "vb6_App_Path", "vb6_App_EXEName", "vb6_Command", "vb6_CurDir", "vb6_Environ", "vb6_Dir", "vb6_IIfBSTR", "vb6_CDec", "vb6_GetControlText", "vb6_GetControlCaption"
+        "vb6_BSTR_Concat", "vb6_BSTR_Empty", "vb6_App_Path", "vb6_App_EXEName", "vb6_Command", "vb6_CurDir", "vb6_Environ", "vb6_Dir", "vb6_IIfBSTR", "vb6_GetControlText", "vb6_GetControlCaption"
     };
     auto isBstrExpr = [&](const std::string& expr) -> bool {
         for (auto& prefix : bstrFuncs) {

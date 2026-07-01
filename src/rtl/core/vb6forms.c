@@ -2628,3 +2628,277 @@ void vb6_SetCurrentY(void* hwnd, float val) {
     memcpy(&hProp, &val, sizeof(float));
     SetPropW((HWND)hwnd, L"VB6_CurrentY", hProp);
 }
+
+// ============================================================
+// P20-35: Shape/Line自定义窗口类 + WM_PAINT绘制
+// ============================================================
+
+// --- Shape WndProc: 根据Shape属性绘制图形 ---
+static LRESULT CALLBACK vb6_ShapeWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
+    if (msg == WM_PAINT) {
+        PAINTSTRUCT ps;
+        HDC hdc = BeginPaint(hwnd, &ps);
+        RECT rc;
+        GetClientRect(hwnd, &rc);
+
+        int shapeType = (int)(INT_PTR)GetPropW(hwnd, L"VB6_ShapeType");
+        int borderW  = (int)(INT_PTR)GetPropW(hwnd, L"VB6_ShapeBorderWidth");
+        int borderS  = (int)(INT_PTR)GetPropW(hwnd, L"VB6_ShapeBorderStyle");
+        int fillS    = (int)(INT_PTR)GetPropW(hwnd, L"VB6_ShapeFillStyle");
+        int32_t borderC = (int32_t)(INT_PTR)GetPropW(hwnd, L"VB6_ShapeBorderColor");
+        int32_t fillC   = (int32_t)(INT_PTR)GetPropW(hwnd, L"VB6_ShapeFillColor");
+
+        if (borderW <= 0) borderW = 1;
+        if (borderS <= 0) borderS = 1;  /* 1=Solid */
+
+        /* 画笔: borderS映射 VB6: 0=Transparent,1=Solid,2=Dash,3=Dot,4=DashDot,5=DashDotDot,6=InsideSolid */
+        int penStyle = PS_SOLID;
+        if (borderS == 0) penStyle = PS_NULL;
+        else if (borderS == 2) penStyle = PS_DASH;
+        else if (borderS == 3) penStyle = PS_DOT;
+        else if (borderS == 4) penStyle = PS_DASHDOT;
+        else if (borderS == 5) penStyle = PS_DASHDOTDOT;
+        else if (borderS == 6) penStyle = PS_INSIDEFRAME;
+
+        COLORREF bcr = borderC ? (COLORREF)borderC : RGB(0,0,0);
+        HPEN hPen = CreatePen(penStyle, borderW, bcr);
+        HPEN hOldPen = (HPEN)SelectObject(hdc, hPen);
+
+        /* 画刷: fillS映射 VB6: 0=Solid,1=Transparent,2=HorizontalLine,3=VerticalLine,4=UpwardDiagonal,5=DownwardDiagonal,6=Cross,7=DiagonalCross */
+        HBRUSH hBr;
+        COLORREF fcr = fillC ? (COLORREF)fillC : RGB(0,0,0);
+        if (fillS == 1 || fillS == 0) {
+            /* 0=Solid fill, 1=Transparent */
+            hBr = (fillS == 1) ? (HBRUSH)GetStockObject(NULL_BRUSH) : CreateSolidBrush(fcr);
+        } else {
+            /* Hatch patterns: HS_HORIZONTAL=0, HS_VERTICAL=1, HS_FDIAGONAL=2, HS_BDIAGONAL=3, HS_CROSS=4, HS_DIAGCROSS=5 */
+            int hatchMap[] = {0, 0, 0, 1, 2, 3, 4, 5};  /* fillS 2..7 -> HS_XXX */
+            int hi = (fillS >= 2 && fillS <= 7) ? fillS : 2;
+            hBr = CreateHatchBrush(hatchMap[hi], fcr);
+        }
+        HBRUSH hOldBr = (HBRUSH)SelectObject(hdc, hBr);
+
+        /* 绘制形状: 0=Rectangle,1=Square,2=Oval,3=Circle,4=RoundedRectangle,5=RoundedSquare */
+        int cx = rc.right / 2, cy = rc.bottom / 2;
+        int r = (rc.right < rc.bottom) ? rc.right / 2 : rc.bottom / 2;
+        int rw = rc.right / 6, rh = rc.bottom / 6;  /* 圆角大小 */
+
+        switch (shapeType) {
+            case 0: /* Rectangle */
+                Rectangle(hdc, rc.left, rc.top, rc.right, rc.bottom);
+                break;
+            case 1: /* Square */
+                { RECT sr = { cx - r, cy - r, cx + r, cy + r };
+                  Rectangle(hdc, sr.left, sr.top, sr.right, sr.bottom); }
+                break;
+            case 2: /* Oval */
+                Ellipse(hdc, rc.left, rc.top, rc.right, rc.bottom);
+                break;
+            case 3: /* Circle */
+                Ellipse(hdc, cx - r, cy - r, cx + r, cy + r);
+                break;
+            case 4: /* Rounded Rectangle */
+                RoundRect(hdc, rc.left, rc.top, rc.right, rc.bottom, rw, rh);
+                break;
+            case 5: /* Rounded Square */
+                RoundRect(hdc, cx - r, cy - r, cx + r, cy + r, rw/2, rh/2);
+                break;
+            default:
+                Rectangle(hdc, rc.left, rc.top, rc.right, rc.bottom);
+                break;
+        }
+
+        SelectObject(hdc, hOldPen);
+        SelectObject(hdc, hOldBr);
+        DeleteObject(hPen);
+        if (fillS != 1) DeleteObject(hBr);  /* NULL_BRUSH is stock, don't delete */
+        EndPaint(hwnd, &ps);
+        return 0;
+    } else if (msg == WM_DESTROY) {
+        /* 清理属性 */
+        RemovePropW(hwnd, L"VB6_ShapeType");
+        RemovePropW(hwnd, L"VB6_ShapeBorderWidth");
+        RemovePropW(hwnd, L"VB6_ShapeBorderStyle");
+        RemovePropW(hwnd, L"VB6_ShapeFillStyle");
+        RemovePropW(hwnd, L"VB6_ShapeBorderColor");
+        RemovePropW(hwnd, L"VB6_ShapeFillColor");
+        return 0;
+    }
+    return DefWindowProcW(hwnd, msg, wp, lp);
+}
+
+// --- Line WndProc: 绘制直线 ---
+static LRESULT CALLBACK vb6_LineWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
+    if (msg == WM_PAINT) {
+        PAINTSTRUCT ps;
+        HDC hdc = BeginPaint(hwnd, &ps);
+        RECT rc;
+        GetClientRect(hwnd, &rc);
+
+        /* Line属性: X1/Y1/X2/Y2 (像素坐标, 相对于控件区域) */
+        int x1 = (int)(INT_PTR)GetPropW(hwnd, L"VB6_LineX1");
+        int y1 = (int)(INT_PTR)GetPropW(hwnd, L"VB6_LineY1");
+        int x2 = (int)(INT_PTR)GetPropW(hwnd, L"VB6_LineX2");
+        int y2 = (int)(INT_PTR)GetPropW(hwnd, L"VB6_LineY2");
+        int borderW = (int)(INT_PTR)GetPropW(hwnd, L"VB6_LineBorderWidth");
+        int borderS = (int)(INT_PTR)GetPropW(hwnd, L"VB6_LineBorderStyle");
+        int32_t borderC = (int32_t)(INT_PTR)GetPropW(hwnd, L"VB6_LineBorderColor");
+
+        if (borderW <= 0) borderW = 1;
+        if (x2 == 0 && y2 == 0) { x2 = rc.right; y2 = rc.bottom; }  /* 默认左上到右下 */
+
+        int penStyle = PS_SOLID;
+        if (borderS == 0) penStyle = PS_NULL;
+        else if (borderS == 2) penStyle = PS_DASH;
+        else if (borderS == 3) penStyle = PS_DOT;
+        else if (borderS == 4) penStyle = PS_DASHDOT;
+        else if (borderS == 5) penStyle = PS_DASHDOTDOT;
+
+        COLORREF cr = borderC ? (COLORREF)borderC : RGB(0,0,0);
+        HPEN hPen = CreatePen(penStyle, borderW, cr);
+        HPEN hOldPen = (HPEN)SelectObject(hdc, hPen);
+
+        MoveToEx(hdc, x1, y1, NULL);
+        LineTo(hdc, x2, y2);
+
+        SelectObject(hdc, hOldPen);
+        DeleteObject(hPen);
+        EndPaint(hwnd, &ps);
+        return 0;
+    } else if (msg == WM_DESTROY) {
+        RemovePropW(hwnd, L"VB6_LineX1");
+        RemovePropW(hwnd, L"VB6_LineY1");
+        RemovePropW(hwnd, L"VB6_LineX2");
+        RemovePropW(hwnd, L"VB6_LineY2");
+        RemovePropW(hwnd, L"VB6_LineBorderWidth");
+        RemovePropW(hwnd, L"VB6_LineBorderStyle");
+        RemovePropW(hwnd, L"VB6_LineBorderColor");
+        return 0;
+    }
+    return DefWindowProcW(hwnd, msg, wp, lp);
+}
+
+// --- 注册VB6_Shape和VB6_Line窗口类 ---
+void vb6_RegisterShapeLineClasses(void* hInstance) {
+    static int registered = 0;
+    if (registered) return;
+    registered = 1;
+
+    WNDCLASSW wc;
+    memset(&wc, 0, sizeof(wc));
+    wc.hInstance = (HINSTANCE)hInstance;
+    wc.hCursor = LoadCursorW(NULL, IDC_ARROW);
+    wc.hbrBackground = (HBRUSH)GetStockObject(NULL_BRUSH);  /* 透明背景 */
+
+    /* VB6_Shape class */
+    wc.lpszClassName = L"VB6_SHAPE";
+    wc.lpfnWndProc = vb6_ShapeWndProc;
+    RegisterClassW(&wc);
+
+    /* VB6_Line class */
+    wc.lpszClassName = L"VB6_LINE";
+    wc.lpfnWndProc = vb6_LineWndProc;
+    RegisterClassW(&wc);
+}
+
+// ============================================================
+// P20-35: Line属性 (X1/Y1/X2/Y2/BorderColor/BorderStyle/BorderWidth)
+// ============================================================
+
+int32_t vb6_GetLineX1(void* hwnd) {
+    if (!hwnd) return 0;
+    HANDLE h = GetPropW((HWND)hwnd, L"VB6_LineX1");
+    return h ? (int32_t)(INT_PTR)h : 0;
+}
+void vb6_SetLineX1(void* hwnd, int32_t val) {
+    if (!hwnd) return;
+    SetPropW((HWND)hwnd, L"VB6_LineX1", (HANDLE)(INT_PTR)val);
+    InvalidateRect((HWND)hwnd, NULL, TRUE);
+}
+int32_t vb6_GetLineY1(void* hwnd) {
+    if (!hwnd) return 0;
+    HANDLE h = GetPropW((HWND)hwnd, L"VB6_LineY1");
+    return h ? (int32_t)(INT_PTR)h : 0;
+}
+void vb6_SetLineY1(void* hwnd, int32_t val) {
+    if (!hwnd) return;
+    SetPropW((HWND)hwnd, L"VB6_LineY1", (HANDLE)(INT_PTR)val);
+    InvalidateRect((HWND)hwnd, NULL, TRUE);
+}
+int32_t vb6_GetLineX2(void* hwnd) {
+    if (!hwnd) return 0;
+    HANDLE h = GetPropW((HWND)hwnd, L"VB6_LineX2");
+    return h ? (int32_t)(INT_PTR)h : 0;
+}
+void vb6_SetLineX2(void* hwnd, int32_t val) {
+    if (!hwnd) return;
+    SetPropW((HWND)hwnd, L"VB6_LineX2", (HANDLE)(INT_PTR)val);
+    InvalidateRect((HWND)hwnd, NULL, TRUE);
+}
+int32_t vb6_GetLineY2(void* hwnd) {
+    if (!hwnd) return 0;
+    HANDLE h = GetPropW((HWND)hwnd, L"VB6_LineY2");
+    return h ? (int32_t)(INT_PTR)h : 0;
+}
+void vb6_SetLineY2(void* hwnd, int32_t val) {
+    if (!hwnd) return;
+    SetPropW((HWND)hwnd, L"VB6_LineY2", (HANDLE)(INT_PTR)val);
+    InvalidateRect((HWND)hwnd, NULL, TRUE);
+}
+int32_t vb6_GetLineBorderWidth(void* hwnd) {
+    if (!hwnd) return 1;
+    HANDLE h = GetPropW((HWND)hwnd, L"VB6_LineBorderWidth");
+    return h ? (int32_t)(INT_PTR)h : 1;
+}
+void vb6_SetLineBorderWidth(void* hwnd, int32_t val) {
+    if (!hwnd) return;
+    if (val < 1) val = 1;
+    if (val > 8192) val = 8192;
+    SetPropW((HWND)hwnd, L"VB6_LineBorderWidth", (HANDLE)(INT_PTR)val);
+    InvalidateRect((HWND)hwnd, NULL, TRUE);
+}
+int32_t vb6_GetLineBorderStyle(void* hwnd) {
+    if (!hwnd) return 1;
+    HANDLE h = GetPropW((HWND)hwnd, L"VB6_LineBorderStyle");
+    return h ? (int32_t)(INT_PTR)h : 1;  /* Default: Solid */
+}
+void vb6_SetLineBorderStyle(void* hwnd, int32_t val) {
+    if (!hwnd) return;
+    SetPropW((HWND)hwnd, L"VB6_LineBorderStyle", (HANDLE)(INT_PTR)val);
+    InvalidateRect((HWND)hwnd, NULL, TRUE);
+}
+int32_t vb6_GetLineColor(void* hwnd) {
+    if (!hwnd) return 0;
+    HANDLE h = GetPropW((HWND)hwnd, L"VB6_LineBorderColor");
+    return h ? (int32_t)(INT_PTR)h : (int32_t)RGB(0,0,0);
+}
+void vb6_SetLineColor(void* hwnd, int32_t val) {
+    if (!hwnd) return;
+    SetPropW((HWND)hwnd, L"VB6_LineBorderColor", (HANDLE)(INT_PTR)val);
+    InvalidateRect((HWND)hwnd, NULL, TRUE);
+}
+
+// ============================================================
+// P20-34补充: Shape FillColor/BorderColor属性
+// ============================================================
+
+int32_t vb6_GetShapeBorderColor(void* hwnd) {
+    if (!hwnd) return 0;
+    HANDLE h = GetPropW((HWND)hwnd, L"VB6_ShapeBorderColor");
+    return h ? (int32_t)(INT_PTR)h : (int32_t)RGB(0,0,0);
+}
+void vb6_SetShapeBorderColor(void* hwnd, int32_t val) {
+    if (!hwnd) return;
+    SetPropW((HWND)hwnd, L"VB6_ShapeBorderColor", (HANDLE)(INT_PTR)val);
+    InvalidateRect((HWND)hwnd, NULL, TRUE);
+}
+int32_t vb6_GetShapeFillColor(void* hwnd) {
+    if (!hwnd) return 0;
+    HANDLE h = GetPropW((HWND)hwnd, L"VB6_ShapeFillColor");
+    return h ? (int32_t)(INT_PTR)h : (int32_t)RGB(0,0,0);
+}
+void vb6_SetShapeFillColor(void* hwnd, int32_t val) {
+    if (!hwnd) return;
+    SetPropW((HWND)hwnd, L"VB6_ShapeFillColor", (HANDLE)(INT_PTR)val);
+    InvalidateRect((HWND)hwnd, NULL, TRUE);
+}

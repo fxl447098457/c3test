@@ -678,13 +678,30 @@ void SemanticAnalyzer::visit(TypeDecl& node) {
             SymbolKind::UserDefinedType, node.name,
             Vb6Type::UserDefinedType, node.loc, node.access
         );
+        // P20-21: 注册UDT成员信息
+        for (const auto& memberPtr : node.members) {
+            Symbol::UdtMemberInfo mi;
+            mi.name = memberPtr->name;
+            if (memberPtr->type) {
+                mi.type = resolveTypeRef(memberPtr->type.get());
+                // 若类型是UDT/Enum等命名类型, 保存类型引用名
+                if (auto* stRef = dynamic_cast<SimpleTypeRef*>(memberPtr->type.get())) {
+                    if (mi.type == Vb6Type::UserDefinedType) {
+                        mi.typeRefName = stRef->name;
+                    }
+                }
+            }
+            if (memberPtr->arraySize) {
+                mi.arraySize = 1;
+            }
+            sym->udtMembers.push_back(std::move(mi));
+        }
         symTab_.define(std::move(sym));
     }
-    // UDT成员在Pass1注册到类型符号 (暂简化, 后续扩展)
 }
 
 void SemanticAnalyzer::visit(TypeMember& node) {
-    // UDT成员分析 (暂不实现, 留待扩展)
+    // P20-21: UDT成员已在TypeDecl中统一处理
 }
 
 void SemanticAnalyzer::visit(EnumDecl& node) {
@@ -1195,8 +1212,26 @@ void SemanticAnalyzer::visit(IdentifierExpr& node) {
 
 void SemanticAnalyzer::visit(MemberAccessExpr& node) {
     Vb6Type objType = analyzeExpr(*node.object);
-    // VB6的.访问在编译期通常无法确定类型 (晚期绑定)
-    // 简化: 推导为Variant
+    // P20-21: 如果object是UDT, 查找成员类型
+    if (objType == Vb6Type::UserDefinedType) {
+        // 查找UDT符号获取成员类型
+        if (auto* ident = dynamic_cast<IdentifierExpr*>(node.object.get())) {
+            auto* udtSym = symTab_.lookup(ident->name);
+            if (udtSym && udtSym->kind == SymbolKind::UserDefinedType) {
+                std::string memberLower = node.memberName;
+                std::transform(memberLower.begin(), memberLower.end(), memberLower.begin(), ::tolower);
+                for (const auto& mi : udtSym->udtMembers) {
+                    std::string miLower = mi.name;
+                    std::transform(miLower.begin(), miLower.end(), miLower.begin(), ::tolower);
+                    if (miLower == memberLower) {
+                        lastExprType_ = mi.type;
+                        return;
+                    }
+                }
+            }
+        }
+    }
+    // 简化: 非UDT或未找到成员, 推导为Variant
     lastExprType_ = Vb6Type::Variant;
 }
 

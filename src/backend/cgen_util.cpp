@@ -990,7 +990,23 @@ std::string CCodeGen::getControlPropReadFn(FrmControlType ctrlType, const std::s
         if (propLower == "enabled") return "vb6_GetMenuEnabled";
         if (propLower == "visible") return "vb6_GetMenuVisible";
         break;
-    case FrmControlType::Shape:
+    case FrmControlType::Shape:  // P20-35
+        if (propLower == "shape") return "vb6_GetShapeType";
+        if (propLower == "borderwidth") return "vb6_GetShapeBorderWidth";
+        if (propLower == "borderstyle") return "vb6_GetShapeBorderStyle";
+        if (propLower == "fillstyle") return "vb6_GetShapeFillStyle";
+        if (propLower == "bordercolor") return "vb6_GetShapeBorderColor";
+        if (propLower == "fillcolor") return "vb6_GetShapeFillColor";
+        if (propLower == "visible") return "vb6_GetControlVisible";
+        break;
+    case FrmControlType::Line:  // P20-35
+        if (propLower == "x1") return "vb6_GetLineX1";
+        if (propLower == "y1") return "vb6_GetLineY1";
+        if (propLower == "x2") return "vb6_GetLineX2";
+        if (propLower == "y2") return "vb6_GetLineY2";
+        if (propLower == "borderwidth") return "vb6_GetLineBorderWidth";
+        if (propLower == "borderstyle") return "vb6_GetLineBorderStyle";
+        if (propLower == "bordercolor") return "vb6_GetLineColor";
         if (propLower == "visible") return "vb6_GetControlVisible";
         break;
     default:
@@ -1127,7 +1143,23 @@ std::string CCodeGen::getControlPropWriteFn(FrmControlType ctrlType, const std::
         if (propLower == "enabled") return "vb6_SetMenuEnabled";
         if (propLower == "visible") return "vb6_SetMenuVisible";
         break;
-    case FrmControlType::Shape:
+    case FrmControlType::Shape:  // P20-35
+        if (propLower == "shape") return "vb6_SetShapeType";
+        if (propLower == "borderwidth") return "vb6_SetShapeBorderWidth";
+        if (propLower == "borderstyle") return "vb6_SetShapeBorderStyle";
+        if (propLower == "fillstyle") return "vb6_SetShapeFillStyle";
+        if (propLower == "bordercolor") return "vb6_SetShapeBorderColor";
+        if (propLower == "fillcolor") return "vb6_SetShapeFillColor";
+        if (propLower == "visible") return "vb6_SetControlVisible";
+        break;
+    case FrmControlType::Line:  // P20-35
+        if (propLower == "x1") return "vb6_SetLineX1";
+        if (propLower == "y1") return "vb6_SetLineY1";
+        if (propLower == "x2") return "vb6_SetLineX2";
+        if (propLower == "y2") return "vb6_SetLineY2";
+        if (propLower == "borderwidth") return "vb6_SetLineBorderWidth";
+        if (propLower == "borderstyle") return "vb6_SetLineBorderStyle";
+        if (propLower == "bordercolor") return "vb6_SetLineColor";
         if (propLower == "visible") return "vb6_SetControlVisible";
         break;
     default:

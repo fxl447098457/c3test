@@ -135,6 +135,7 @@ typedef enum vb6_vartype {
     vb6_vtError = 10,
     vb6_vtBoolean = 11,
     vb6_vtVariant = 12,
+    vb6_vtDecimal = 14,
     vb6_vtByte = 17,
 } vb6_vartype;
 
@@ -151,6 +152,7 @@ typedef struct vb6_VARIANT {
         int16_t boolVal;
         uint8_t bVal;
         int64_t cyVal;
+        struct { uint16_t wReserved1; uint8_t scale; uint8_t sign; uint32_t Hi32; uint32_t Lo32; uint32_t Mid32; } decVal;
     };
 } vb6_VARIANT;
 
@@ -405,7 +407,7 @@ BSTR vb6_Oct(int32_t n);
 
 // P18-A: 兼容性填平 — 新增RTL函数
 int64_t vb6_CCur(double v);            // CCur: value * 10000
-BSTR   vb6_CDec(vb6_VARIANT v);        // CDec: 返回Decimal的字符串表示
+vb6_VARIANT vb6_CDec(vb6_VARIANT v);     // P20-07: CDec返回真实DECIMAL (vt=14)
 int32_t vb6_RGB(int32_t r, int32_t g, int32_t b);  // RGB: OLE color
 int32_t vb6_QBColor(int32_t n);        // QBColor: 16-color lookup
 double vb6_FileDateTime(BSTR pathname); // FileDateTime: 文件修改时间→VB6 date serial

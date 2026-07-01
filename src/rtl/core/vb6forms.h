@@ -381,6 +381,27 @@ int32_t vb6_GetShapeBorderStyle(void* hwnd);
 void vb6_SetShapeBorderStyle(void* hwnd, int32_t val);
 int32_t vb6_GetShapeFillStyle(void* hwnd);
 void vb6_SetShapeFillStyle(void* hwnd, int32_t val);
+int32_t vb6_GetShapeBorderColor(void* hwnd);
+void vb6_SetShapeBorderColor(void* hwnd, int32_t val);
+int32_t vb6_GetShapeFillColor(void* hwnd);
+void vb6_SetShapeFillColor(void* hwnd, int32_t val);
+// Shape/Line窗口类注册 (P20-35)
+void vb6_RegisterShapeLineClasses(void* hInstance);
+// Line属性 (P20-35)
+int32_t vb6_GetLineX1(void* hwnd);
+void vb6_SetLineX1(void* hwnd, int32_t val);
+int32_t vb6_GetLineY1(void* hwnd);
+void vb6_SetLineY1(void* hwnd, int32_t val);
+int32_t vb6_GetLineX2(void* hwnd);
+void vb6_SetLineX2(void* hwnd, int32_t val);
+int32_t vb6_GetLineY2(void* hwnd);
+void vb6_SetLineY2(void* hwnd, int32_t val);
+int32_t vb6_GetLineBorderWidth(void* hwnd);
+void vb6_SetLineBorderWidth(void* hwnd, int32_t val);
+int32_t vb6_GetLineBorderStyle(void* hwnd);
+void vb6_SetLineBorderStyle(void* hwnd, int32_t val);
+int32_t vb6_GetLineColor(void* hwnd);
+void vb6_SetLineColor(void* hwnd, int32_t val);
 // PictureBox图形属性 (P20-42)
 int32_t vb6_GetAutoRedraw(void* hwnd);
 void vb6_SetAutoRedraw(void* hwnd, int32_t val);

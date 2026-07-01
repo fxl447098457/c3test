@@ -221,6 +221,22 @@ void CCodeGen::visit(IdentifierExpr& node) {
                     }
                 }
             }
+            // P20-31: WithEvents控件变量默认属性读取
+            if (!suppressDefaultProp_) {
+                auto itWECtrl = knownWithEventsCtrlVars_.find(lower);
+                if (itWECtrl != knownWithEventsCtrlVars_.end()) {
+                    const char* defaultProp = getDefaultPropertyName(itWECtrl->second);
+                    if (defaultProp) {
+                        std::string readFn = getControlPropReadFn(itWECtrl->second, defaultProp);
+                        if (!readFn.empty()) {
+                            auto itOrig = knownWithEventsCtrlOrigNames_.find(lower);
+                            std::string weVarName = (itOrig != knownWithEventsCtrlOrigNames_.end()) ? itOrig->second : cName;
+                            lastExpr_ = readFn + "(" + weVarName + ")  /* WithEvents ctrl default prop: ." + std::string(defaultProp) + " */";
+                            return;
+                        }
+                    }
+                }
+            }
         }
         // 类模块变量通过me->访问
         if (isClassModule_ && currentProc_ && foundSym->kind == SymbolKind::Variable) {

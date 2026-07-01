@@ -68,7 +68,7 @@ const char* TypeSystem::typeToString(Vb6Type t) {
 }
 
 bool TypeSystem::isNumeric(Vb6Type t) {
-    return isIntegral(t) || isFloat(t) || t == Vb6Type::Currency;
+    return isIntegral(t) || isFloat(t) || t == Vb6Type::Currency || t == Vb6Type::Decimal;
 }
 
 bool TypeSystem::isIntegral(Vb6Type t) {
@@ -146,6 +146,7 @@ Vb6Type TypeSystem::promote(Vb6Type a, Vb6Type b) {
             case Vb6Type::Single:  return 4;
             case Vb6Type::Double:  return 5;
             case Vb6Type::Currency:return 6;
+            case Vb6Type::Decimal:  return 7;  // P20-07: Decimal wider than Currency
             case Vb6Type::Date:    return 5;  // Date内部是Double
             default:               return 0;
         }
@@ -175,6 +176,7 @@ int TypeSystem::typeSize(Vb6Type t) {
         case Vb6Type::String:   return 4;  // BSTR指针
         case Vb6Type::Object:   return 4;  // IDispatch指针
         case Vb6Type::Variant:  return 16; // VARIANT
+        case Vb6Type::Decimal:  return 16;  // P20-07: DECIMAL is 14 bytes but aligned to 16
         default:                return 0;
     }
 }

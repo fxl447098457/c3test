@@ -143,6 +143,15 @@ struct Symbol {
     };
     std::unordered_map<std::string, ComMethodSig> comMethods;  // key=小写方法名
 
+    // --- P20-21: UDT成员信息 (仅SymbolKind::UserDefinedType) ---
+    struct UdtMemberInfo {
+        std::string name;           // 成员名 (保留大小写)
+        Vb6Type type = Vb6Type::Empty;  // 成员类型
+        std::string typeRefName;    // 若类型为UDT, 保存UDT名称
+        int32_t arraySize = 0;      // 固定大小数组: 0=非数组, >0=上界+1
+    };
+    std::vector<UdtMemberInfo> udtMembers;
+
     Symbol() = default;
     Symbol(SymbolKind k, const std::string& n, Vb6Type t,
            SourceLocation loc, AccessLevel acc = AccessLevel::Public)

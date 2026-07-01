@@ -13,6 +13,7 @@
 #ifdef _WIN32
 #include <direct.h>
 #include <io.h>
+#include <oleauto.h>
 #include <windows.h>
 #endif
 
@@ -492,10 +493,51 @@ void vb6_AppActivateByPid(int32_t pid, int32_t wait) {
     EnumWindows(vb6_AppActivateEnumProc, (LPARAM)&ctx);
     if (ctx.result) SetForegroundWindow(ctx.result);
 }
-BSTR vb6_CDec(vb6_VARIANT v) {
-    /* CDec: convert to Decimal — VB6 Decimal is 12-byte, simplified as BSTR representation */
-    /* For now, convert the value to its string representation */
-    return vb6_CStr(v);
+vb6_VARIANT vb6_CDec(vb6_VARIANT v) {
+    /* P20-07: CDec - convert to Decimal (VT_DECIMAL=14) */
+    vb6_VARIANT result;
+    memset(&result, 0, sizeof(result));
+    result.vt = vb6_vtDecimal;
+    switch (v.vt) {
+        case vb6_vtInteger: case vb6_vtLong: case vb6_vtByte: {
+            int32_t ival = (v.vt == vb6_vtInteger) ? v.iVal : (v.vt == vb6_vtByte) ? (int32_t)v.bVal : v.lVal;
+            result.decVal.Lo32 = (uint32_t)(ival < 0 ? -ival : ival);
+            result.decVal.Mid32 = 0;
+            result.decVal.Hi32 = 0;
+            result.decVal.scale = 0;
+            result.decVal.sign = (ival < 0) ? 0x80 : 0;
+            break;
+        }
+        case vb6_vtSingle: case vb6_vtDouble: case vb6_vtCurrency: {
+            double dval = (v.vt == vb6_vtSingle) ? (double)v.fltVal :
+                          (v.vt == vb6_vtCurrency) ? (double)v.cyVal / 10000.0 : v.dblVal;
+            DECIMAL winDec;
+            if (VarDecFromR8(dval, &winDec) == S_OK) {
+                memcpy(&result.decVal, &winDec, sizeof(winDec));
+            } else {
+                int64_t i64 = (int64_t)dval;
+                result.decVal.Lo32 = (uint32_t)(i64 & 0xFFFFFFFF);
+                result.decVal.Mid32 = (uint32_t)((i64 >> 32) & 0xFFFFFFFF);
+                result.decVal.Hi32 = 0;
+                result.decVal.scale = 0;
+                result.decVal.sign = (dval < 0) ? 0x80 : 0;
+            }
+            break;
+        }
+        case vb6_vtBSTR: {
+            DECIMAL winDec;
+            if (v.bstrVal && VarDecFromStr(v.bstrVal, LOCALE_USER_DEFAULT, 0, &winDec) == S_OK) {
+                memcpy(&result.decVal, &winDec, sizeof(winDec));
+            }
+            break;
+        }
+        case vb6_vtDecimal: {
+            result = v;
+            break;
+        }
+        default: break;
+    }
+    return result;
 }
 
 void vb6_MidSet(BSTR* target, int32_t start, int32_t len, BSTR replacement) {
@@ -1410,31 +1452,83 @@ double vb6_Timer(void) {
 }
 
 BSTR vb6_StrConv(BSTR text, int32_t conversion, int32_t localeID) {
-    (void)localeID;
     if (!text) return vb6_BSTR_Empty();
     int32_t len = vb6_BSTR_Len(text);
     if (len == 0) return vb6_BSTR_Empty();
-    wchar_t* buf = (wchar_t*)malloc((len + 1) * sizeof(wchar_t));
-    if (!buf) return vb6_BSTR_Empty();
-    memcpy(buf, text, len * sizeof(wchar_t));
-    buf[len] = L'\0';
-    // vbUpperCase=1, vbLowerCase=2, vbProperCase=3
-    if (conversion == 1) {  // vbUpperCase
-        for (int i = 0; i < len; i++) buf[i] = towupper(buf[i]);
-    } else if (conversion == 2) {  // vbLowerCase
-        for (int i = 0; i < len; i++) buf[i] = towlower(buf[i]);
-    } else if (conversion == 3) {  // vbProperCase
-        int capNext = 1;
-        for (int i = 0; i < len; i++) {
-            if (iswspace(buf[i])) { capNext = 1; }
-            else if (capNext) { buf[i] = towupper(buf[i]); capNext = 0; }
-            else { buf[i] = towlower(buf[i]); }
+
+    /* vbUpperCase=1, vbLowerCase=2, vbProperCase=3 - simple wchar transforms */
+    if (conversion == 1 || conversion == 2 || conversion == 3) {
+        wchar_t* buf = (wchar_t*)malloc((len + 1) * sizeof(wchar_t));
+        if (!buf) return vb6_BSTR_Empty();
+        memcpy(buf, text, len * sizeof(wchar_t));
+        buf[len] = L'\0';
+        if (conversion == 1) {
+            for (int i = 0; i < len; i++) buf[i] = towupper(buf[i]);
+        } else if (conversion == 2) {
+            for (int i = 0; i < len; i++) buf[i] = towlower(buf[i]);
+        } else { /* vbProperCase */
+            int capNext = 1;
+            for (int i = 0; i < len; i++) {
+                if (iswspace(buf[i])) { capNext = 1; }
+                else if (capNext) { buf[i] = towupper(buf[i]); capNext = 0; }
+                else { buf[i] = towlower(buf[i]); }
+            }
         }
+        BSTR result = vb6_BSTR_FromStr(buf);
+        free(buf);
+        return result;
     }
-    // vbUnicode=64, vbFromUnicode=128: no-op (already Unicode)
-    BSTR result = vb6_BSTR_FromStr(buf);
-    free(buf);
-    return result;
+
+    /* vbWide=4, vbNarrow=8, vbKatakana=16, vbHiragana=32
+       Use LCMapStringEx for CJK locale-aware conversions.
+       These can be combined (e.g. vbWide+vbKatakana = 4+16 = 20).
+       LCMapStringEx flag mapping:
+         vbWide     -> LCMAP_FULLWIDTH     (0x00800000)
+         vbNarrow   -> LCMAP_HALFWIDTH     (0x00400000)
+         vbKatakana -> LCMAP_KATAKANA      (0x00200000)
+         vbHiragana -> LCMAP_HIRAGANA      (0x00100000)
+    */
+    if (conversion & 0x3C) { /* bits 2-5: wide/narrow/katakana/hiragana */
+        DWORD mapFlags = 0;
+        if (conversion & 4)  mapFlags |= 0x00800000; /* LCMAP_FULLWIDTH */
+        if (conversion & 8)  mapFlags |= 0x00400000; /* LCMAP_HALFWIDTH */
+        if (conversion & 16) mapFlags |= 0x00200000; /* LCMAP_KATAKANA */
+        if (conversion & 32) mapFlags |= 0x00100000; /* LCMAP_HIRAGANA */
+        if (mapFlags == 0) goto strconv_unicode;
+
+        /* Determine locale name from localeID */
+        wchar_t localeName[85];
+        if (localeID == 0) localeID = 0x0411; /* default to Japanese */
+        if (!LCIDToLocaleName((DWORD)localeID, localeName, 84, 0)) {
+            wcscpy(localeName, L"ja-JP"); /* fallback */
+        }
+
+        /* First call: get required buffer size */
+        int outLen = LCMapStringEx(localeName, mapFlags, text, len, NULL, 0, NULL, NULL, 0);
+        if (outLen <= 0) {
+            /* LCMapStringEx failed - return original string unchanged */
+            return SysAllocStringLen(text, len);
+        }
+
+        wchar_t* outBuf = (wchar_t*)malloc((outLen + 1) * sizeof(wchar_t));
+        if (!outBuf) return vb6_BSTR_Empty();
+
+        /* Second call: perform the mapping */
+        outLen = LCMapStringEx(localeName, mapFlags, text, len, outBuf, outLen, NULL, NULL, 0);
+        if (outLen <= 0) {
+            free(outBuf);
+            return SysAllocStringLen(text, len);
+        }
+        outBuf[outLen] = L'\0';
+        BSTR result = vb6_BSTR_FromStr(outBuf);
+        free(outBuf);
+        return result;
+    }
+
+strconv_unicode:
+    /* vbUnicode=64, vbFromUnicode=128: no-op (internal strings are already Unicode) */
+    (void)localeID;
+    return SysAllocStringLen(text, len);
 }
 
 
