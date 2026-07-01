@@ -129,7 +129,9 @@ End Sub
 - `IsMissing(paramName)` → `!_has_<param>`
 - Variant 类型 Optional: 替代方案用 VT_ERROR/DISP_E_PARAMNOTFOUND 哨兵值
 
-### 记入 P20+ 待办
+### 后续任务
+
+已记入进度表 P20-36（004-进度表.md），下一周期执行。
 
 ---
 

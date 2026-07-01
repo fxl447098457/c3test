@@ -3,6 +3,17 @@ AIGC:
   ContentProducer: '001191110102MAD55U9H0F10002'
   ContentPropagator: '001191110102MAD55U9H0F10002'
   Label: '1'
+  ProduceID: 'c2e7a921-82ee-453d-8e26-f5f30bd04672'
+  PropagateID: 'c2e7a921-82ee-453d-8e26-f5f30bd04672'
+  ReservedCode1: '44cb6b27-e85a-448c-a1b9-3c8c17efde66'
+  ReservedCode2: '44cb6b27-e85a-448c-a1b9-3c8c17efde66'
+---
+
+---
+AIGC:
+  ContentProducer: '001191110102MAD55U9H0F10002'
+  ContentPropagator: '001191110102MAD55U9H0F10002'
+  Label: '1'
   ProduceID: 'fd55fcb5-9699-4833-b9d0-460689a65e5d'
   PropagateID: 'fd55fcb5-9699-4833-b9d0-460689a65e5d'
   ReservedCode1: 'fbdbaf81-36c7-41ad-8a3b-d6527871228a'
@@ -147,6 +158,8 @@ END
 3. **GUI 程序**可选闪屏（splash），1-2秒自动消失，或首次显示关于框
 
 免费/付费的区分放在**付费版的正向价值**上（优化、VBA保护、去标识、优先支持），而不是惩罚免费用户。
+
+> AI生成
 
 > AI生成
 
