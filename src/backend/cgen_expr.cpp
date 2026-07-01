@@ -967,6 +967,14 @@ void CCodeGen::visit(MemberAccessExpr& node) {
         if (objSym2 && (objSym2->kind == SymbolKind::Variable || objSym2->kind == SymbolKind::Parameter)) {
             isVarName2 = true;
         }
+        // M22-fix: symTab_在模块作用域, 找不到过程级局部变量
+        // 补充检查cgen层的跟踪集合: UDT变量、类实例变量、Dim As New变量、COM对象变量
+        if (!isVarName2 && knownUdtVars_.count(objLower2)) isVarName2 = true;
+        if (!isVarName2 && knownClassVars_.count(objLower2)) isVarName2 = true;
+        if (!isVarName2 && knownNewVars_.count(objLower2)) isVarName2 = true;
+        if (!isVarName2 && knownObjectVars_.count(objLower2)) isVarName2 = true;
+        if (!isVarName2 && knownTypedComVars_.count(objLower2)) isVarName2 = true;
+        if (!isVarName2 && knownIfaceVars_.count(objLower2)) isVarName2 = true;
         if (!isVarName2) {
             // object不是已知变量 → 假设是模块名限定符
             // 成员是变量: Module1.myName
@@ -2170,6 +2178,21 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
             argList = classMethodObjArg;
         } else {
             argList = classMethodObjArg + ", " + argList;
+        }
+    }
+
+    // M22-fix: CStr(BSTR) → 直接返回BSTR, 不需要vb6_CStr(VARIANT)
+    if (callee == "vb6_CStr" && !node.positional.empty()) {
+        auto& firstArg = node.positional[0];
+        if (firstArg->kind == ASTNodeKind::IdentifierExpr) {
+            auto& idArg = static_cast<IdentifierExpr&>(*firstArg);
+            std::string argLower = idArg.name;
+            std::transform(argLower.begin(), argLower.end(), argLower.begin(), ::tolower);
+            // 参数是BSTR变量 → CStr是空操作, 直接使用参数
+            if (knownBstrVars_.count(argLower)) {
+                emitExpr(*firstArg);
+                return;
+            }
         }
     }
 

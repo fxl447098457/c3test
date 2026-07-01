@@ -261,6 +261,10 @@ private:
     // 已知类实例变量名集合 (小写) - 用于方法调用翻译 c.Method → vb6_Method(c)
     std::unordered_set<std::string> knownClassVars_;
 
+    // UDT变量名集合 (小写var名 → UDT类型C标识符, 如 "p" → "vb6_type_Point")
+    // 用于成员访问时区分"p.X"(结构体字段) vs "Module1.X"(模块变量)
+    std::unordered_map<std::string, std::string> knownUdtVars_;
+
     // 已知COM对象变量名集合 (小写) - 用于后期绑定 obj.Method → vb6_ComCall(obj, L"Method", ...)
     std::unordered_set<std::string> knownObjectVars_;
 

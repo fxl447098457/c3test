@@ -39,10 +39,39 @@ void CCodeGen::visit(SubDecl& node) {
     knownDoubleVars_.clear();
     knownLongVars_.clear();
     knownVariantVars_.clear();
+    // M22-fix: 只清空UDT变量map(旧条目会冲突), set类型不清空(WithEvents等模块级条目需跨过程保留)
+    knownUdtVars_.clear();
     // P6.11: 恢复类模块成员变量类型 (clear后从持久化集合恢复)
     knownBstrVars_.insert(classBstrMembers_.begin(), classBstrMembers_.end());
     knownDoubleVars_.insert(classDoubleMembers_.begin(), classDoubleMembers_.end());
     knownLongVars_.insert(classLongMembers_.begin(), classLongMembers_.end());
+
+    // M22-fix: 注册参数中的UDT/类/接口变量到跟踪集合
+    for (auto& p : node.params) {
+        if (p->asType && p->asType->kind == ASTNodeKind::SimpleTypeRef) {
+            auto& simpleP = static_cast<SimpleTypeRef&>(*p->asType);
+            std::string pLower = p->name;
+            std::transform(pLower.begin(), pLower.end(), pLower.begin(), ::tolower);
+            auto* pSym = symTab_.lookupModule(simpleP.name);
+            if (pSym && pSym->kind == SymbolKind::UserDefinedType) {
+                knownUdtVars_[pLower] = cIdent(simpleP.name);
+            } else if (pSym && pSym->kind == SymbolKind::Class) {
+                knownClassVars_.insert(pLower);
+            } else if (pSym && (pSym->kind == SymbolKind::ComClass || pSym->kind == SymbolKind::ComInterface)) {
+                knownTypedComVars_[pLower] = pSym;
+            }
+            // 接口类型的参数
+            auto* pSym2 = symTab_.lookup(simpleP.name);
+            if (pSym2 && pSym2->kind == SymbolKind::Class && pSym2->isInterface) {
+                knownIfaceVars_[pLower] = pSym2->name;
+            }
+            // 注册BSTR/Double/Long类型参数到类型跟踪集合
+            Vb6Type paramType = typeSys_.resolveTypeName(simpleP.name);
+            if (paramType == Vb6Type::String) knownBstrVars_.insert(pLower);
+            else if (paramType == Vb6Type::Double) knownDoubleVars_.insert(pLower);
+            else if (paramType == Vb6Type::Long || paramType == Vb6Type::Integer || paramType == Vb6Type::Boolean) knownLongVars_.insert(pLower);
+        }
+    }
 
     // VB6 Static Sub: 过程内所有局部变量都是static
     inStaticProc_ = node.isStatic;
@@ -130,10 +159,38 @@ void CCodeGen::visit(FunctionDecl& node) {
     knownDoubleVars_.clear();
     knownLongVars_.clear();
     knownVariantVars_.clear();
+    // M22-fix: 只清空UDT变量map(旧条目会冲突), set类型不清空(WithEvents等模块级条目需跨过程保留)
+    knownUdtVars_.clear();
     // P6.11: 恢复类模块成员变量类型 (clear后从持久化集合恢复)
     knownBstrVars_.insert(classBstrMembers_.begin(), classBstrMembers_.end());
     knownDoubleVars_.insert(classDoubleMembers_.begin(), classDoubleMembers_.end());
     knownLongVars_.insert(classLongMembers_.begin(), classLongMembers_.end());
+
+    // M22-fix: 注册参数中的UDT/类/接口变量到跟踪集合
+    for (auto& p : node.params) {
+        if (p->asType && p->asType->kind == ASTNodeKind::SimpleTypeRef) {
+            auto& simpleP = static_cast<SimpleTypeRef&>(*p->asType);
+            std::string pLower = p->name;
+            std::transform(pLower.begin(), pLower.end(), pLower.begin(), ::tolower);
+            auto* pSym = symTab_.lookupModule(simpleP.name);
+            if (pSym && pSym->kind == SymbolKind::UserDefinedType) {
+                knownUdtVars_[pLower] = cIdent(simpleP.name);
+            } else if (pSym && pSym->kind == SymbolKind::Class) {
+                knownClassVars_.insert(pLower);
+            } else if (pSym && (pSym->kind == SymbolKind::ComClass || pSym->kind == SymbolKind::ComInterface)) {
+                knownTypedComVars_[pLower] = pSym;
+            }
+            auto* pSym2 = symTab_.lookup(simpleP.name);
+            if (pSym2 && pSym2->kind == SymbolKind::Class && pSym2->isInterface) {
+                knownIfaceVars_[pLower] = pSym2->name;
+            }
+            // 注册BSTR/Double/Long类型参数到类型跟踪集合
+            Vb6Type paramType = typeSys_.resolveTypeName(simpleP.name);
+            if (paramType == Vb6Type::String) knownBstrVars_.insert(pLower);
+            else if (paramType == Vb6Type::Double) knownDoubleVars_.insert(pLower);
+            else if (paramType == Vb6Type::Long || paramType == Vb6Type::Integer || paramType == Vb6Type::Boolean) knownLongVars_.insert(pLower);
+        }
+    }
 
     // VB6 Static Function: 过程内所有局部变量都是static
     inStaticProc_ = node.isStatic;
@@ -472,6 +529,17 @@ void CCodeGen::visit(VariableDecl& node) {
         }
     }
 
+    // 检查是否是UDT类型变量 → 注册到 knownUdtVars_
+    if (node.asType && node.asType->kind == ASTNodeKind::SimpleTypeRef) {
+        auto& simpleUdt = static_cast<SimpleTypeRef&>(*node.asType);
+        auto* udtSymDecl = symTab_.lookup(simpleUdt.name);
+        if (udtSymDecl && udtSymDecl->kind == SymbolKind::UserDefinedType) {
+            std::string udtLower = node.name;
+            std::transform(udtLower.begin(), udtLower.end(), udtLower.begin(), ::tolower);
+            knownUdtVars_[udtLower] = cIdent(simpleUdt.name);
+        }
+    }
+
     // 检查是否是Object类型变量 → 注册到 knownObjectVars_ (COM后期绑定)
     if (cType == "void*") {  // Object类型映射为void*
         std::string lower = node.name;
@@ -653,10 +721,38 @@ void CCodeGen::visit(PropertyDecl& node) {
     knownDoubleVars_.clear();
     knownLongVars_.clear();
     knownVariantVars_.clear();
+    // M22-fix: 只清空UDT变量map(旧条目会冲突), set类型不清空(WithEvents等模块级条目需跨过程保留)
+    knownUdtVars_.clear();
     // P6.11: 恢复类模块成员变量类型 (clear后从持久化集合恢复)
     knownBstrVars_.insert(classBstrMembers_.begin(), classBstrMembers_.end());
     knownDoubleVars_.insert(classDoubleMembers_.begin(), classDoubleMembers_.end());
     knownLongVars_.insert(classLongMembers_.begin(), classLongMembers_.end());
+
+    // M22-fix: 注册参数中的UDT/类/接口变量到跟踪集合
+    for (auto& p : node.params) {
+        if (p->asType && p->asType->kind == ASTNodeKind::SimpleTypeRef) {
+            auto& simpleP = static_cast<SimpleTypeRef&>(*p->asType);
+            std::string pLower = p->name;
+            std::transform(pLower.begin(), pLower.end(), pLower.begin(), ::tolower);
+            auto* pSym = symTab_.lookupModule(simpleP.name);
+            if (pSym && pSym->kind == SymbolKind::UserDefinedType) {
+                knownUdtVars_[pLower] = cIdent(simpleP.name);
+            } else if (pSym && pSym->kind == SymbolKind::Class) {
+                knownClassVars_.insert(pLower);
+            } else if (pSym && (pSym->kind == SymbolKind::ComClass || pSym->kind == SymbolKind::ComInterface)) {
+                knownTypedComVars_[pLower] = pSym;
+            }
+            auto* pSym2 = symTab_.lookup(simpleP.name);
+            if (pSym2 && pSym2->kind == SymbolKind::Class && pSym2->isInterface) {
+                knownIfaceVars_[pLower] = pSym2->name;
+            }
+            // 注册BSTR/Double/Long类型参数到类型跟踪集合
+            Vb6Type paramType = typeSys_.resolveTypeName(simpleP.name);
+            if (paramType == Vb6Type::String) knownBstrVars_.insert(pLower);
+            else if (paramType == Vb6Type::Double) knownDoubleVars_.insert(pLower);
+            else if (paramType == Vb6Type::Long || paramType == Vb6Type::Integer || paramType == Vb6Type::Boolean) knownLongVars_.insert(pLower);
+        }
+    }
 
         // P12.3: 恢复调用者的错误处理状态
     if (hasOnError_) {

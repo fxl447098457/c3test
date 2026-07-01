@@ -246,7 +246,14 @@ void CCodeGen::visit(AssignmentStmt& node) {
             auto* objSym = symTab_.lookup(objIdent.name);
             if (!objSym) objSym = symTab_.lookupModule(objIdent.name);
             bool isVarName = (objSym && (objSym->kind == SymbolKind::Variable || objSym->kind == SymbolKind::Parameter));
-            if (!isVarName && !knownClassVars_.count(objLower) && !knownFormControls_.count(objLower)) {
+            // M22-fix: 补充检查cgen层跟踪集合，防止过程级UDT/类变量被误判为模块名
+            if (!isVarName && knownUdtVars_.count(objLower)) isVarName = true;
+            if (!isVarName && knownClassVars_.count(objLower)) isVarName = true;
+            if (!isVarName && knownNewVars_.count(objLower)) isVarName = true;
+            if (!isVarName && knownObjectVars_.count(objLower)) isVarName = true;
+            if (!isVarName && knownTypedComVars_.count(objLower)) isVarName = true;
+            if (!isVarName && knownIfaceVars_.count(objLower)) isVarName = true;
+            if (!isVarName && !knownFormControls_.count(objLower)) {
                 // Module.varName = expr
                 // When module is #included, use unprefixed name
                 std::string modName = objIdent.name;
@@ -2268,6 +2275,10 @@ void CCodeGen::visit(LocalDeclStmt& node) {
                 auto* udtSym = symTab_.lookup(simple.name);
                 if (udtSym && udtSym->kind == SymbolKind::UserDefinedType) {
                     isLocalUdtType = true;
+                    // M22-fix: 注册到knownUdtVars_，防止成员访问被误判为模块名限定
+                    std::string udtLower = var.name;
+                    std::transform(udtLower.begin(), udtLower.end(), udtLower.begin(), ::tolower);
+                    knownUdtVars_[udtLower] = cIdent(simple.name);
                 }
             }
 
