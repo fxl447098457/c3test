@@ -570,14 +570,6 @@ bool Driver::runParser(const CompileOptions& options) {
     }
 
     for (const auto& filePath : options.sourceFiles) {
-        auto buffer = SourceBuffer::fromFile(filePath);
-        if (!buffer) {
-            SourceLocation loc{filePath, 0, 0};
-            diag_->error(DiagnosticID::LexFileEncodingError, loc,
-                "无法打开文件: " + filePath);
-            return false;
-        }
-
         // 根据文件扩展名判断模块类型
         bool isClassModule = false;
         bool isFormModule = false;
@@ -587,15 +579,30 @@ bool Driver::runParser(const CompileOptions& options) {
             for (auto& c : ext) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
             isClassModule = (ext == ".cls");
             isFormModule = (ext == ".frm");  // P7: 窗体模块
+        }
 
+        // M22: 统一编码处理 — .frm经由FrmParser读取(已含编码转换+代码段提取),
+        // .bas/.cls经由SourceBuffer::fromFile读取(含编码转换)
+        std::unique_ptr<SourceBuffer> buffer;
+        if (isFormModule) {
             // P7: 解析.frm窗体描述, 提取VB代码段
-            if (isFormModule) {
-                frmDesc = FrmParser::parse(filePath);
-                // 用代码段替换原始源文件内容 (窗体描述块不是VB代码)
-                if (!frmDesc.codeSection.empty()) {
-                    buffer = SourceBuffer::fromString(filePath, frmDesc.codeSection);
-                }
+            // M22: FrmParser.parse已使用readAndConvertToUtf8, 返回的codeSection是UTF-8
+            frmDesc = FrmParser::parse(filePath);
+            if (!frmDesc.codeSection.empty()) {
+                buffer = SourceBuffer::fromString(filePath, frmDesc.codeSection);
+            } else {
+                // 无代码段的.frm: 用fromFile读取完整内容
+                buffer = SourceBuffer::fromFile(filePath);
             }
+        } else {
+            buffer = SourceBuffer::fromFile(filePath);
+        }
+
+        if (!buffer) {
+            SourceLocation loc{filePath, 0, 0};
+            diag_->error(DiagnosticID::LexFileEncodingError, loc,
+                "无法打开文件: " + filePath);
+            return false;
         }
 
         Parser parser(std::move(buffer), *diag_, ppOpts);

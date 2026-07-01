@@ -25,6 +25,14 @@ public:
     // 从文件加载
     static std::unique_ptr<SourceBuffer> fromFile(const std::string& path);
 
+    // M22: 读取文件并转换为UTF-8 (供VbpParser/FrmParser等使用, 返回UTF-8内容)
+    // 返回空string表示读取失败, 同时返回检测到的编码
+    struct ReadResult {
+        std::string content;   // UTF-8规范化内容 (CRLF→LF)
+        SourceEncoding encoding;
+    };
+    static ReadResult readAndConvertToUtf8(const std::string& path);
+
     // 从字符串创建(测试用)
     static std::unique_ptr<SourceBuffer> fromString(
         const std::string& filename,

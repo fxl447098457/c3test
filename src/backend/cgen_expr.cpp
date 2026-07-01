@@ -3,6 +3,7 @@
 #include <cctype>
 #include <iostream>
 #include <functional>
+#include <cstdio>
 
 namespace vb6c3 {
 
@@ -68,24 +69,44 @@ void CCodeGen::visit(LiteralExpr& node) {
                 inner = inner.substr(1, inner.size() - 2);
             }
             // VB6的""转义 (双引号在字符串内) → C的\"转义
-            // 同时转义反斜杠
+            // 同时转义反斜杠; 非ASCII字符→\xNNNN宽字符转义
             std::string escaped;
-            escaped.reserve(inner.size() + 4);
-            for (size_t j = 0; j < inner.size(); j++) {
-                char ch = inner[j];
+            escaped.reserve(inner.size() + 16);
+            for (size_t j = 0; j < inner.size(); ) {
+                unsigned char ch = (unsigned char)inner[j];
                 if (ch == '"') {
-                    // VB6中""表示引号内的一个", 已被lexer解码为单个"
-                    escaped += "\\\"";
+                    escaped.push_back('\\'); escaped.push_back('"');
+                    j++;
                 } else if (ch == '\\') {
                     escaped += "\\\\";
+                    j++;
                 } else if (ch == '\n') {
                     escaped += "\\n";
+                    j++;
                 } else if (ch == '\r') {
                     escaped += "\\r";
+                    j++;
                 } else if (ch == '\t') {
                     escaped += "\\t";
+                    j++;
+                } else if (ch < 0x80) {
+                    escaped += (char)ch;
+                    j++;
                 } else {
-                    escaped += ch;
+                    // UTF-8多字节: 解码Unicode码点, 输出\xNNNN
+                    uint32_t cp = 0;
+                    int bytes = 0;
+                    if ((ch & 0xE0) == 0xC0) { cp = ch & 0x1F; bytes = 2; }
+                    else if ((ch & 0xF0) == 0xE0) { cp = ch & 0x0F; bytes = 3; }
+                    else if ((ch & 0xF8) == 0xF8) { cp = ch & 0x07; bytes = 4; }
+                    else { cp = ch; bytes = 1; }
+                    for (int b = 1; b < bytes && j + b < inner.size(); b++) {
+                        cp = (cp << 6) | ((unsigned char)inner[j + b] & 0x3F);
+                    }
+                    j += bytes;
+                    char hex[8];
+                    snprintf(hex, sizeof(hex), "\\x%04X", cp);
+                    escaped += hex;
                 }
             }
             lastExpr_ = "vb6_BSTR_FromStr(L\"" + escaped + "\")";
@@ -134,13 +155,19 @@ void CCodeGen::visit(IdentifierExpr& node) {
         return;
     }
 
-    // 检查是否是当前函数名 (Function返回值赋值 = 设置返回变量)
-    // 关键: 区分赋值 vs 调用。赋值左侧用返回值变量, 其他场景用函数过程名
-    // AssignmentStmt::visit 会对赋值左侧做特殊替换
-    // P6.7: Property Get也使用返回值赋值语义 (Name = value → vb6_ret_Name = value)
+    // M22: 检查是否是当前函数名 — VB6语义歧义
+    // - 作为IndexOrCallExpr的callee(函数调用) → 返回函数过程名
+    // - 作为普通表达式(返回值引用) → 返回返回值变量
+    // P6.7: Property Get也使用返回值赋值语义
     if (currentProc_ && lower == Symbol::toLower(currentProc_->name)
         && (currentProc_->kind == SymbolKind::Function || currentProc_->kind == SymbolKind::PropertyGet)) {
-        lastExpr_ = cProcName(currentProc_->name, currentProc_->access, currentProc_->sourceModule);
+        if (asCallCallee_) {
+            // 在IndexOrCallExpr的callee上下文中, 返回函数名供调用
+            lastExpr_ = cProcName(currentProc_->name, currentProc_->access, currentProc_->sourceModule);
+        } else {
+            // 在普通表达式上下文中, 返回返回值变量(VB6: 引用函数名=引用返回值)
+            lastExpr_ = currentReturnVar_;
+        }
         return;
     }
 
@@ -431,6 +458,19 @@ void CCodeGen::visit(IdentifierExpr& node) {
     Symbol* sym = symTab_.lookupModule(node.name);
     if (sym && (sym->kind == SymbolKind::Sub || sym->kind == SymbolKind::Function
              || sym->kind == SymbolKind::DeclareSub || sym->kind == SymbolKind::DeclareFunc)) {
+        // M22: VB6语义 — 在函数体内引用自身函数名等同于引用返回值变量
+        // e.g. Function Add(): Add = a & b → vb6_ret_Add = ...; Module1.myName = Add → ...myName = vb6_ret_Add
+        if (currentProc_ && !currentReturnVar_.empty() &&
+            sym->kind == SymbolKind::Function && !sym->isExternal) {
+            std::string procLower = currentProc_->name;
+            std::transform(procLower.begin(), procLower.end(), procLower.begin(), ::tolower);
+            std::string nameLower = node.name;
+            std::transform(nameLower.begin(), nameLower.end(), nameLower.begin(), ::tolower);
+            if (procLower == nameLower) {
+                lastExpr_ = currentReturnVar_;
+                return;
+            }
+        }
         // Declare函数: 使用VB6函数名的cIdent形式 (通过#define映射到导出名)
         if (sym->kind == SymbolKind::DeclareSub || sym->kind == SymbolKind::DeclareFunc) {
             lastExpr_ = cIdent(node.name);
@@ -455,7 +495,105 @@ void CCodeGen::visit(IdentifierExpr& node) {
         return;
     }
 
+    // M22: Cross-module variable resolution - if identifier is not found locally,
+    // check if it exists as a public variable in an external module
+    {
+        Symbol* extSym = symTab_.lookupModule(node.name);
+        if (extSym && extSym->kind == SymbolKind::Variable && extSym->isExternal) {
+            // When module is #included, use the unprefixed name directly
+            // (Module1.h declares "extern BSTR myName;" which is already visible)
+            std::string srcLower = extSym->sourceModule;
+            std::transform(srcLower.begin(), srcLower.end(), srcLower.begin(), ::tolower);
+            bool isIncluded = false;
+            for (const auto& extMod : externalModules_) {
+                std::string extLower = extMod;
+                std::transform(extLower.begin(), extLower.end(), extLower.begin(), ::tolower);
+                if (extLower == srcLower) { isIncluded = true; break; }
+            }
+            if (isIncluded) {
+                lastExpr_ = cName;
+            } else {
+                lastExpr_ = "vb6_" + cIdent(extSym->sourceModule) + "_" + cName;
+            }
+            return;
+        }
+    }
     lastExpr_ = cName;
+}
+
+// M22: 将非BSTR表达式包装为BSTR (用于字符串连接 & 运算符)
+std::string CCodeGen::wrapToBSTR(const std::string& expr, Expr& node) {
+    // 已经是BSTR表达式: vb6_BSTR_xxx, vb6_CStr, L"...", vb6_MsgBox, etc.
+    if (expr.find("vb6_BSTR") != std::string::npos) return expr;
+    if (expr.find("vb6_CStr") != std::string::npos) return expr;
+    if (expr.find("vb6_GetControlText") != std::string::npos) return expr;
+    if (expr.find("vb6_GetControlCaption") != std::string::npos) return expr;
+    // vb6_Now() returns double (Date), NOT BSTR — removed early return
+    // vb6_Now will fall through to inferExprType → Vb6Type::Date → vb6_CStrDate()
+    if (expr.find("vb6_Left") != std::string::npos) return expr;
+    if (expr.find("vb6_Right") != std::string::npos) return expr;
+    if (expr.find("vb6_Mid") != std::string::npos) return expr;
+    if (expr.find("vb6_Format") != std::string::npos) return expr;
+    if (expr.find("vb6_Str") != std::string::npos) return expr;
+    if (expr.find("vb6_Chr") != std::string::npos) return expr;
+    if (expr.find("vb6_Replace") != std::string::npos) return expr;
+    if (expr.find("vb6_Space") != std::string::npos) return expr;
+    if (expr.find("vb6_InputBox") != std::string::npos) return expr;
+    if (expr.find("vb6_Dir") != std::string::npos) return expr;
+    if (expr.find("vb6_Command") != std::string::npos) return expr;
+    if (expr.find("vb6_Environ") != std::string::npos) return expr;
+    if (expr.find("vb6_CurDir") != std::string::npos) return expr;
+    if (expr.find("vb6_App_Path") != std::string::npos) return expr;
+    if (expr.find("vb6_App_EXEName") != std::string::npos) return expr;
+    // BSTR变量: 已知BSTR变量或者vb6_Module1_xxx 格式的BSTR
+    // 简化: 如果以vb6_开头且非数值函数, 假定是BSTR
+    if (expr.find("vb6_") == 0) {
+        // 数值/日期函数需要包装为BSTR
+        // Date类: vb6_Now/vb6_Date/vb6_Time 返回double(Date)
+        if (expr.find("vb6_Now") != std::string::npos ||
+            expr.find("vb6_Date") != std::string::npos ||
+            expr.find("vb6_Time") != std::string::npos) {
+            return "vb6_CStrDate(" + expr + ")";
+        }
+        // 数值函数: 返回int/double等
+        if (expr.find("vb6_CLng") != std::string::npos ||
+            expr.find("vb6_CInt") != std::string::npos ||
+            expr.find("vb6_CDbl") != std::string::npos ||
+            expr.find("vb6_CSng") != std::string::npos ||
+            expr.find("vb6_CBool") != std::string::npos ||
+            expr.find("vb6_CByte") != std::string::npos ||
+            expr.find("vb6_Abs") != std::string::npos ||
+            expr.find("vb6_Len") != std::string::npos ||
+            expr.find("vb6_LenB") != std::string::npos ||
+            expr.find("vb6_InStr") != std::string::npos ||
+            expr.find("vb6_InStrRev") != std::string::npos ||
+            expr.find("vb6_Timer") != std::string::npos ||
+            expr.find("vb6_Rnd") != std::string::npos ||
+            expr.find("vb6_Sqr") != std::string::npos ||
+            expr.find("vb6_Sgn") != std::string::npos ||
+            expr.find("vb6_Fix") != std::string::npos ||
+            expr.find("vb6_Int") != std::string::npos ||
+            expr.find("vb6_Val") != std::string::npos) {
+            return "vb6_CStrLong(" + expr + ")";
+        }
+        return expr;  // 其他vb6_函数假定为BSTR
+    }
+    // string literal L"..."
+    if (expr.find("vb6_BSTR_FromStr(") != std::string::npos) return expr;
+    // 推断类型
+    Vb6Type t = inferExprType(node);
+    switch (t) {
+        case Vb6Type::String: return expr;
+        case Vb6Type::Integer:
+        case Vb6Type::Long:   return "vb6_CStrLong(" + expr + ")";
+        case Vb6Type::Single:
+        case Vb6Type::Double: return "vb6_CStrDbl(" + expr + ")";
+        case Vb6Type::Boolean: return "vb6_CStrBool(" + expr + ")";
+        case Vb6Type::Byte:   return "vb6_CStrByte(" + expr + ")";
+        case Vb6Type::Date:   return "vb6_CStrDate(" + expr + ")";
+        case Vb6Type::Variant: return "vb6_CStr(" + expr + ")";
+        default: return "vb6_CStrLong(" + expr + ")";  // fallback
+    }
 }
 
 void CCodeGen::visit(BinaryExpr& node) {
@@ -470,7 +608,10 @@ void CCodeGen::visit(BinaryExpr& node) {
 
     // 字符串连接运算: VB6 & → vb6_BSTR_Concat / vb6_BSTR_ConcatFree
     // 嵌套Concat时用ConcatFree释放中间临时BSTR，避免内存泄漏
+    // M22: 非BSTR操作数自动包装为BSTR (int→vb6_CStr(vb6_CLng(x)), double→vb6_CStr(vb6_CDbl(x)))
     if (node.op == BinaryOp::Concat) {
+        left = wrapToBSTR(left, *node.left);
+        right = wrapToBSTR(right, *node.right);
         bool leftIsConcat = (left.find("vb6_BSTR_Concat") != std::string::npos);
         if (leftIsConcat) {
             lastExpr_ = "vb6_BSTR_ConcatFree(" + left + ", " + right + ")";
@@ -483,6 +624,8 @@ void CCodeGen::visit(BinaryExpr& node) {
     // P14.1.1: VB6 + 运算符 — 两端String时等同&拼接
     // VB6允许 "a" + "b" 作为字符串连接，语义与 & 相同
     if (node.op == BinaryOp::Add && inferExprType(node) == Vb6Type::String) {
+        left = wrapToBSTR(left, *node.left);
+        right = wrapToBSTR(right, *node.right);
         bool leftIsConcat = (left.find("vb6_BSTR_Concat") != std::string::npos);
         if (leftIsConcat) {
             lastExpr_ = "vb6_BSTR_ConcatFree(" + left + ", " + right + ")";
@@ -796,6 +939,37 @@ void CCodeGen::visit(MemberAccessExpr& node) {
         }
     }
 
+    // M22: 跨模块变量访问 Module1.myName → vb6_Module1_myName
+    // 优先级4: object不是已知变量, 成员也不是函数 → 模块名.变量名
+    if (node.object && node.object->kind == ASTNodeKind::IdentifierExpr) {
+        auto& objIdent2 = static_cast<IdentifierExpr&>(*node.object);
+        std::string objLower2 = objIdent2.name;
+        std::transform(objLower2.begin(), objLower2.end(), objLower2.begin(), ::tolower);
+        bool isVarName2 = false;
+        auto* objSym2 = symTab_.lookup(objIdent2.name);
+        if (!objSym2) objSym2 = symTab_.lookupModule(objIdent2.name);
+        if (objSym2 && (objSym2->kind == SymbolKind::Variable || objSym2->kind == SymbolKind::Parameter)) {
+            isVarName2 = true;
+        }
+        if (!isVarName2) {
+            // object不是已知变量 → 假设是模块名限定符
+            // 成员是变量: Module1.myName
+            // When module is #included, use the unprefixed name directly
+            std::string modName2 = objIdent2.name;
+            std::string varName2 = cIdent(node.memberName);
+            std::string modLower2 = modName2;
+            std::transform(modLower2.begin(), modLower2.end(), modLower2.begin(), ::tolower);
+            bool isIncluded2 = false;
+            for (const auto& extMod : externalModules_) {
+                std::string extLower = extMod;
+                std::transform(extLower.begin(), extLower.end(), extLower.begin(), ::tolower);
+                if (extLower == modLower2) { isIncluded2 = true; break; }
+            }
+            lastExpr_ = isIncluded2 ? varName2 : ("vb6_" + cIdent(modName2) + "_" + varName2);
+            return;
+        }
+    }
+
     // 通用成员访问 (结构体字段 / 链式COM访问)
     emitExpr(*node.object);
 
@@ -1097,7 +1271,11 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
     }
 
     // 函数调用路径 (原有逻辑)
+    // M22: 设置asCallCallee_标志, 让IdentifierExpr知道当前是函数调用callee上下文
+    // 这确保递归调用时(如 Factorial(n-1))返回函数名而非返回值变量
+    asCallCallee_ = true;
     emitExpr(*node.callee);
+    asCallCallee_ = false;
     std::string callee = std::move(lastExpr_);
 
     // --- P7.9: WebBrowser控件方法调用 ---
@@ -1443,7 +1621,39 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
                     if (i < calleeParams.size()) {
                         cType = mapType(calleeParams[i].type);
                     }
-                    argVal = "&(" + cType + "){" + argVal + "}";
+                    // M22: VARIANT类型需要指定字段初始化 (.vt=VT_xxx, .field=value)
+                    if (cType == "vb6_VARIANT") {
+                        // 推断实参的VB6类型来决定VARIANT字段
+                        Vb6Type argVbType = inferExprType(*node.positional[i]);
+                        switch (argVbType) {
+                            case Vb6Type::String:
+                                argVal = "&(vb6_VARIANT){.vt=VT_BSTR, .bstrVal=" + argVal + "}";
+                                break;
+                            case Vb6Type::Long:
+                            case Vb6Type::Integer:
+                                argVal = "&(vb6_VARIANT){.vt=VT_I4, .lVal=(int32_t)(" + argVal + ")}";
+                                break;
+                            case Vb6Type::Double:
+                            case Vb6Type::Single:
+                                argVal = "&(vb6_VARIANT){.vt=VT_R8, .dblVal=(double)(" + argVal + ")}";
+                                break;
+                            case Vb6Type::Boolean:
+                                argVal = "&(vb6_VARIANT){.vt=VT_BOOL, .boolVal=(int16_t)(" + argVal + ")}";
+                                break;
+                            case Vb6Type::Byte:
+                                argVal = "&(vb6_VARIANT){.vt=VT_UI1, .bVal=(uint8_t)(" + argVal + ")}";
+                                break;
+                            case Vb6Type::Date:
+                                argVal = "&(vb6_VARIANT){.vt=VT_DATE, .dblVal=(double)(" + argVal + ")}";
+                                break;
+                            default:
+                                // Variant or unknown: try bstrVal first (most common case)
+                                argVal = "&(vb6_VARIANT){.vt=VT_BSTR, .bstrVal=" + argVal + "}";
+                                break;
+                        }
+                    } else {
+                        argVal = "&(" + cType + "){" + argVal + "}";
+                    }
                 }
             }
         }
@@ -1968,6 +2178,15 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
         }
     }
 
+    // MsgBox默认参数补全: MsgBox(prompt) -> vb6_MsgBox1(prompt)
+    // MsgBox(prompt, buttons) -> vb6_MsgBox(prompt, buttons, NULL)
+    if (callee == "vb6_MsgBox") {
+        if (node.positional.size() == 1) {
+            callee = "vb6_MsgBox1";
+        } else if (node.positional.size() == 2) {
+            argList += ", NULL";
+        }
+    }
     lastExpr_ = callee + "(" + argList + ")";
 }
 

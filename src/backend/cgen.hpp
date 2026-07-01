@@ -294,6 +294,13 @@ private:
     // 多模块项目标志 (影响Public函数命名: vb6_<Module>_<Proc> vs vb6_<Proc>)
     bool isMultiModule_ = false;
 
+    // M22: 外部模块名称集合 (用于跨模块变量解析时判断模块是否已#include)
+    std::unordered_set<std::string> externalModules_;
+
+    // M22: 当前IdentifierExpr是否在IndexOrCallExpr的callee位置
+    // VB6语义: 同名函数引用 — callee上下文返回函数名(供调用), 其他上下文返回返回值变量
+    bool asCallCallee_ = false;
+
     // 类模块标志
     bool isClassModule_ = false;
     bool isFormModule_ = false;
@@ -424,6 +431,12 @@ private:
 
     // P7.8: 递归生成菜单点击事件派发 (WM_COMMAND中)
     void emitMenuClickDispatch(const FrmControl& menuCtrl, int& menuId);
+
+    // M22: 转义宽C字符串（UTF-8→\xNNNN），用于AppendMenuW等宽字符API
+    static std::string escapeWideCString(const std::string& s);
+
+    // M22: 将非BSTR表达式包装为BSTR (用于字符串连接运算)
+    std::string wrapToBSTR(const std::string& expr, Expr& node);
 
     // P7.8: 转义C字符串中的特殊字符
     static std::string escapeCString(const std::string& s);

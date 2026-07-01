@@ -575,6 +575,8 @@ void CCodeGen::visit(VariableDecl& node) {
                 node.asType ? typeSys_.resolveTypeName(static_cast<SimpleTypeRef*>(node.asType.get())->name) : Vb6Type::Variant
             );
         }
+        // M22: 文件作用域BSTR初始化不能用函数调用(vb6_BSTR_Empty), 用NULL替代
+        if (initVal == "vb6_BSTR_Empty()") initVal = "NULL";
         if (node.access == AccessLevel::Public) {
             c_.emitLine(cType + " " + cName + " = " + initVal + ";");
         } else {

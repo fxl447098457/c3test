@@ -248,6 +248,12 @@ int16_t vb6_CInt(double x);
 int32_t vb6_CLng(double x);
 double vb6_CDbl(double x);
 BSTR vb6_CStr(vb6_VARIANT x);
+// M22: typed CStr overloads
+BSTR vb6_CStrLong(int32_t x);
+BSTR vb6_CStrDbl(double x);
+BSTR vb6_CStrBool(int16_t x);
+BSTR vb6_CStrByte(uint8_t x);
+BSTR vb6_CStrDate(double x);
 // P8.4: Variant版转换函数
 static inline int16_t vb6_CIntV(vb6_VARIANT v) { return vb6_CInt(vb6_VariantToDouble(v)); }
 static inline int32_t vb6_CLngV(vb6_VARIANT v) { return vb6_CLng(vb6_VariantToDouble(v)); }

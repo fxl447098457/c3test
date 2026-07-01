@@ -202,6 +202,43 @@ std::unique_ptr<SourceBuffer> SourceBuffer::fromFile(const std::string& path) {
     return buf;
 }
 
+// M22: 读取文件并转换为UTF-8的通用方法
+SourceBuffer::ReadResult SourceBuffer::readAndConvertToUtf8(const std::string& path) {
+    ReadResult result;
+    result.encoding = SourceEncoding::Unknown;
+    
+    std::ifstream file(path, std::ios::binary);
+    if (!file.is_open()) return result;
+
+    file.seekg(0, std::ios::end);
+    auto size = file.tellg();
+    file.seekg(0, std::ios::beg);
+
+    std::vector<uint8_t> raw(static_cast<size_t>(size));
+    file.read(reinterpret_cast<char*>(raw.data()), size);
+    if (!file) return result;
+
+    SourceBuffer tmp;
+    result.encoding = tmp.detectEncoding(raw.data(), raw.size());
+    result.content = tmp.convertToUtf8(raw.data(), raw.size(), result.encoding);
+
+    // 统一换行符为LF
+    std::string normalized;
+    normalized.reserve(result.content.size());
+    for (size_t i = 0; i < result.content.size(); i++) {
+        if (result.content[i] == '\r') {
+            if (i + 1 < result.content.size() && result.content[i+1] == '\n') {
+                continue; // 跳过\r, 保留\n
+            }
+            normalized += '\n'; // 孤立\r转为\n
+        } else {
+            normalized += result.content[i];
+        }
+    }
+    result.content = std::move(normalized);
+    return result;
+}
+
 std::unique_ptr<SourceBuffer> SourceBuffer::fromString(
     const std::string& filename,
     const std::string& content)

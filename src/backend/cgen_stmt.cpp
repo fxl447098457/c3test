@@ -133,6 +133,36 @@ void CCodeGen::visit(AssignmentStmt& node) {
                 if (memName == "currenty") { c_.emitLine("vb6_Printer_SetCurrentY((int32_t)(" + lastExpr_ + "));"); return; }
             }
         }
+
+        // M22: Me.Property = expr — 窗体模块中Me的属性赋值 (如 Me.Caption = myName)
+        if (maExpr.object && (maExpr.object->kind == ASTNodeKind::MeExpr ||
+                              (maExpr.object->kind == ASTNodeKind::IdentifierExpr &&
+                               static_cast<IdentifierExpr&>(*maExpr.object).name.size() == 2 &&
+                               (static_cast<IdentifierExpr&>(*maExpr.object).name[0] == 'M' || static_cast<IdentifierExpr&>(*maExpr.object).name[0] == 'm') &&
+                               (static_cast<IdentifierExpr&>(*maExpr.object).name[1] == 'e' || static_cast<IdentifierExpr&>(*maExpr.object).name[1] == 'E')))) {
+            if (isFormModule_ && !knownFormName_.empty()) {
+                std::string memLower = maExpr.memberName;
+                std::transform(memLower.begin(), memLower.end(), memLower.begin(), ::tolower);
+                std::string formHwnd = "vb6_hwnd_" + moduleName_;
+                auto origIt = knownFormControlOriginalNames_.find(knownFormName_);
+                if (origIt != knownFormControlOriginalNames_.end()) {
+                    formHwnd = "vb6_hwnd_" + cIdent(origIt->second);
+                }
+                // Form properties: Caption, Text, Visible, etc.
+                std::string writeFn = getControlPropWriteFn(FrmControlType::Form, maExpr.memberName);
+                if (!writeFn.empty()) {
+                    emitExpr(*node.value);
+                    std::string valExpr = std::move(lastExpr_);
+                    // M22: Text/Caption property writes need BSTR value
+                    if (writeFn.find("SetControlText") != std::string::npos ||
+                        writeFn.find("SetMenuCaption") != std::string::npos) {
+                        valExpr = wrapToBSTR(valExpr, *node.value);
+                    }
+                    c_.emitLine(writeFn + "(" + formHwnd + ", " + valExpr + ");  /* Me." + maExpr.memberName + " */");
+                    return;
+                }
+            }
+        }
         // P7.6: 控件数组属性写入 ctrlArr(idx).Property = value
         if (maExpr.object && maExpr.object->kind == ASTNodeKind::IndexOrCallExpr) {
             auto& idxExpr = static_cast<IndexOrCallExpr&>(*maExpr.object);
@@ -190,12 +220,66 @@ void CCodeGen::visit(AssignmentStmt& node) {
                 if (!writeFn.empty()) {
                     emitExpr(*node.value);
                     std::string valExpr = std::move(lastExpr_);
+                    // M22: Text/Caption property writes need BSTR value
+                    if (writeFn.find("SetControlText") != std::string::npos ||
+                        writeFn.find("SetMenuCaption") != std::string::npos) {
+                        valExpr = wrapToBSTR(valExpr, *node.value);
+                    }
                     c_.emitLine(writeFn + "(" + makeCtrlHwndArg(objLower, itCtrl->second) + ", " + valExpr + ");  /* Control Property */");
                     return;
                 }
                 diag_.warn(DiagnosticID::CodeGenUnsupportedFeature, SourceLocation{},
                     std::string("P7.5: Unknown control property write '") + objId.name + "." + maExpr.memberName +
                     "' for control type, generating struct field access (may not compile)");
+            }
+        }
+    }
+
+    // M22: 跨模块变量赋值 Module1.myName = expr → vb6_BSTR_Assign(&vb6_Module1_myName, expr)
+    if (node.target->kind == ASTNodeKind::MemberAccessExpr) {
+        auto& maExpr = static_cast<MemberAccessExpr&>(*node.target);
+        if (maExpr.object && maExpr.object->kind == ASTNodeKind::IdentifierExpr) {
+            auto& objIdent = static_cast<IdentifierExpr&>(*maExpr.object);
+            std::string objLower = objIdent.name;
+            std::transform(objLower.begin(), objLower.end(), objLower.begin(), ::tolower);
+            // Check if object is NOT a known variable → assume module name
+            auto* objSym = symTab_.lookup(objIdent.name);
+            if (!objSym) objSym = symTab_.lookupModule(objIdent.name);
+            bool isVarName = (objSym && (objSym->kind == SymbolKind::Variable || objSym->kind == SymbolKind::Parameter));
+            if (!isVarName && !knownClassVars_.count(objLower) && !knownFormControls_.count(objLower)) {
+                // Module.varName = expr
+                // When module is #included, use unprefixed name
+                std::string modName = objIdent.name;
+                std::string varName = cIdent(maExpr.memberName);
+                std::string modLower = modName;
+                std::transform(modLower.begin(), modLower.end(), modLower.begin(), ::tolower);
+                bool isIncluded = false;
+                for (const auto& extMod : externalModules_) {
+                    std::string extLower = extMod;
+                    std::transform(extLower.begin(), extLower.end(), extLower.begin(), ::tolower);
+                    if (extLower == modLower) { isIncluded = true; break; }
+                }
+                std::string memberAccess = isIncluded ? varName : ("vb6_" + cIdent(modName) + "_" + varName);
+                emitExpr(*node.value);
+                std::string valExpr = std::move(lastExpr_);
+                std::string memLower = maExpr.memberName;
+                std::transform(memLower.begin(), memLower.end(), memLower.begin(), ::tolower);
+                // M22: Check if cross-module variable is BSTR type
+                // knownBstrVars_ only has current module's BSTR vars, so also check symbol table
+                bool isBstrVar = knownBstrVars_.count(memLower) > 0;
+                if (!isBstrVar) {
+                    Symbol* memSym = symTab_.lookupModule(maExpr.memberName);
+                    if (!memSym) memSym = symTab_.lookup(maExpr.memberName);
+                    if (memSym && memSym->kind == SymbolKind::Variable && memSym->type == Vb6Type::String) {
+                        isBstrVar = true;
+                    }
+                }
+                if (isBstrVar) {
+                    c_.emitLine("vb6_BSTR_Assign(&" + memberAccess + ", " + valExpr + ");  /* Module." + maExpr.memberName + " */");
+                } else {
+                    c_.emitLine(memberAccess + " = " + valExpr + ";  /* Module." + maExpr.memberName + " */");
+                }
+                return;
             }
         }
     }
@@ -246,6 +330,11 @@ void CCodeGen::visit(AssignmentStmt& node) {
                 if (!writeFn.empty()) {
                     emitExpr(*node.value);
                     std::string valExpr = std::move(lastExpr_);
+                    // M22: Text/Caption default prop writes need BSTR value
+                    if (writeFn.find("SetControlText") != std::string::npos ||
+                        writeFn.find("SetMenuCaption") != std::string::npos) {
+                        valExpr = wrapToBSTR(valExpr, *node.value);
+                    }
                     c_.emitLine(writeFn + "(" + makeCtrlHwndArg(tgtLower, itCtrl->second) + ", " + valExpr + ");  /* default prop: ." + std::string(defaultProp) + " */");
                     return;
                 }
@@ -289,6 +378,12 @@ void CCodeGen::visit(AssignmentStmt& node) {
                     std::transform(mnuLower.begin(), mnuLower.end(), mnuLower.begin(), ::tolower);
                     c_.emitLine(writeFn + "(" + makeCtrlHwndArg(mnuLower, info.ctrlType) + ", " + lastExpr_ + ");  /* With menu prop write */");
                 } else {
+                    // M22: Text/Caption prop writes need BSTR
+                    { std::string _v = lastExpr_;
+                      if (writeFn.find("SetControlText") != std::string::npos || writeFn.find("SetMenuCaption") != std::string::npos) {
+                          lastExpr_ = wrapToBSTR(_v, *node.value);
+                      }
+                    }
                     c_.emitLine(writeFn + "(" + tempVar + ", " + lastExpr_ + ");");
                 }
                 return;
@@ -1503,6 +1598,9 @@ void CCodeGen::visit(CallStmt& node) {
             callExpr = "vb6_ComCall(" + comObjExpr_ + ", L\"" + comMemberName_ + "\", NULL, 0)";
             comObjExpr_.clear();
             comMemberName_.clear();
+        } else if (callExpr == "0") {
+            // M22: void function call returned 0 (no-value), discard entire statement
+            return;
         } else if (callExpr.find('(') == std::string::npos) {
             // P14.1.5: Check if callee is a ParamArray function (needs NULL SAFEARRAY* arg)
             bool calleeHasPA = false;
@@ -1523,7 +1621,6 @@ void CCodeGen::visit(CallStmt& node) {
             }
         }
 
-        // ComCall返回VARIANT*, 需要释放 (语句级调用丢弃返回值)
         if (callExpr.find("vb6_ComCall(") == 0) {
             // ComCall返回可能含对象的VARIANT*, 用VarFree避免Release对象
             c_.emitLine("vb6_ComVarFree((void*)" + callExpr + ");  /* COM call, discard result */");

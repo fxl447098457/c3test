@@ -70,6 +70,7 @@ bool CCodeGen::generate(Module& module, const std::string& baseName,
     baseName_ = baseName;
     moduleName_ = baseName;  // 模块名 = 输出基名（如 "MathUtils"）
     isMultiModule_ = !externalModules.empty();  // 有外部依赖 = 多模块项目
+    externalModules_ = externalModules;  // M22: 保存外部模块集合
     isClassModule_ = module.isClassModule;
     isFormModule_ = module.isFormModule;
     isDll_ = isDll;  // P6.6
@@ -161,12 +162,15 @@ bool CCodeGen::generate(Module& module, const std::string& baseName,
             c_.emitLine("#include \"vb6comserver.h\"");
         }
     }
-    // P8.7: 标准模块之间的跨模块#include放在.c文件，避免.h循环依赖
-    if (!isClassModule_) {
+    // P8.7: 跨模块#include放在.c文件，避免.h循环依赖
+    // 标准模块引用标准模块 → .c; 类模块引用标准模块 → .c
+    // (类模块引用其他类模块 → .h, 见上方)
+    {
         for (const auto& extMod : externalModules) {
             auto* extSym = symTab_.lookup(extMod);
             bool extIsClass = extSym && extSym->kind == SymbolKind::Class;
             if (!extIsClass) {
+                // 标准模块头文件放.c（不论当前模块是标准模块还是类模块）
                 c_.emitLine("#include \"" + extMod + ".h\"");
             }
         }

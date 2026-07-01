@@ -8,7 +8,7 @@ Begin VB.Form Form1
    LinkTopic       =   "Form1"
    ScaleHeight     =   6510
    ScaleWidth      =   6435
-   StartUpPosition =   3  '窗口缺省
+   StartUpPosition =   2  '屏幕中心
    Begin VB.ListBox List1 
       Height          =   1320
       Left            =   4440

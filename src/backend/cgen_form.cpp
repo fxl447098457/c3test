@@ -1109,7 +1109,7 @@ void CCodeGen::emitFormFramework(const FrmFormDesc& frmDesc, Module& module) {
                 // 缇转像素: 1缇=1/15像素 (96DPI)
                 c_.emitLine("{ void* vb6_tmp_hwnd = vb6_CreateWebView((void*)hwnd, " +
                     std::to_string(wbLeft / 15) + ", " + std::to_string(wbTop / 15) + ", " +
-                    std::to_string(wbWidth / 15) + ", " + std::to_string(wbHeight / 15) + ", \"" +
+                    std::to_string(wbWidth / 15) + ", " + std::to_string(wbHeight / 15) + ", L\"" +
                     cIdent(ctrl.controlName) + "\");");
                 c_.emitLine("vb6_hwnd_" + cIdent(ctrl.controlName) + " = vb6_tmp_hwnd; }");
             }
@@ -1454,7 +1454,7 @@ ctrlId++;
                 }
 
                 if (ctrl.children.empty()) {
-                    c_.emitLine("AppendMenuA(hMenuBar, MF_STRING, " + std::to_string(menuId) + ", \"" + escapeCString(caption) + "\");");
+                    c_.emitLine("AppendMenuW(hMenuBar, MF_STRING, " + std::to_string(menuId) + ", L\"" + escapeWideCString(caption) + "\");");
                     menuId++;
                 } else {
                     std::string popupVar = "hPopup_" + cIdent(ctrl.controlName);
@@ -1464,7 +1464,7 @@ ctrlId++;
                         emitMenuItem(popupVar, child, menuId);
                     }
 
-                    c_.emitLine("AppendMenuA(hMenuBar, MF_POPUP, (UINT_PTR)" + popupVar + ", \"" + escapeCString(caption) + "\");");
+                    c_.emitLine("AppendMenuW(hMenuBar, MF_POPUP, (UINT_PTR)" + popupVar + ", L\"" + escapeWideCString(caption) + "\");");
                 }
             }
 
@@ -1542,7 +1542,7 @@ void CCodeGen::emitMenuItem(const std::string& parentVar, const FrmControl& menu
 
     // Check for separator: Caption = "-"
     if (caption == "-") {
-        c_.emitLine("AppendMenuA(" + parentVar + ", MF_SEPARATOR, 0, NULL);");
+        c_.emitLine("AppendMenuW(" + parentVar + ", MF_SEPARATOR, 0, NULL);");
         return;
     }
 
@@ -1590,11 +1590,11 @@ void CCodeGen::emitMenuItem(const std::string& parentVar, const FrmControl& menu
             emitMenuItem(popupVar, child, menuId);
         }
 
-        c_.emitLine("AppendMenuA(" + parentVar + ", 0x0010L | " + std::to_string(flags) + ", (UINT_PTR)" + popupVar + ", \"" + escapeCString(caption) + "\");");
+        c_.emitLine("AppendMenuW(" + parentVar + ", 0x0010L | " + std::to_string(flags) + ", (UINT_PTR)" + popupVar + ", L\"" + escapeWideCString(caption) + "\");");
         // 0x0010 = MF_POPUP
     } else {
         // Leaf menu item
-        c_.emitLine("AppendMenuA(" + parentVar + ", " + std::to_string(flags) + ", " + std::to_string(menuId) + ", \"" + escapeCString(caption) + "\");");
+        c_.emitLine("AppendMenuW(" + parentVar + ", " + std::to_string(flags) + ", " + std::to_string(menuId) + ", L\"" + escapeWideCString(caption) + "\");");
         menuId++;
     }
 }
@@ -1648,6 +1648,43 @@ void CCodeGen::emitMenuClickDispatch(const FrmControl& menuCtrl, int& menuId) {
         }
     }
 }
+// M22: 转义宽C字符串（UTF-8多字节→Unicode \xNNNN转义）
+std::string CCodeGen::escapeWideCString(const std::string& s) {
+    std::string result;
+    result.reserve(s.size() + 16);
+    for (size_t j = 0; j < s.size(); ) {
+        unsigned char ch = (unsigned char)s[j];
+        if (ch == '"') {
+            result += "\\\""; j++;
+        } else if (ch == '\\') {
+            result += "\\\\"; j++;
+        } else if (ch == '\n') {
+            result += "\\n"; j++;
+        } else if (ch == '\r') {
+            result += "\\r"; j++;
+        } else if (ch == '\t') {
+            result += "\\t"; j++;
+        } else if (ch < 0x80) {
+            result += (char)ch; j++;
+        } else {
+            uint32_t cp = 0;
+            int bytes = 0;
+            if ((ch & 0xE0) == 0xC0) { cp = ch & 0x1F; bytes = 2; }
+            else if ((ch & 0xF0) == 0xE0) { cp = ch & 0x0F; bytes = 3; }
+            else if ((ch & 0xF8) == 0xF8) { cp = ch & 0x07; bytes = 4; }
+            else { cp = ch; bytes = 1; }
+            for (int b = 1; b < bytes && j + b < s.size(); b++) {
+                cp = (cp << 6) | ((unsigned char)s[j + b] & 0x3F);
+            }
+            j += bytes;
+            char hex[8];
+            snprintf(hex, sizeof(hex), "\\x%04X", cp);
+            result += hex;
+        }
+    }
+    return result;
+}
+
 // P7.8: 转义C字符串
 std::string CCodeGen::escapeCString(const std::string& s) {
     std::string result;

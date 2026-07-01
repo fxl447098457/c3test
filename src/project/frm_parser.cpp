@@ -3,7 +3,7 @@
 // 窗体描述块包含: 窗体属性 + 嵌套控件(递归Begin...End) + 复合属性(BeginProperty...EndProperty)
 
 #include "project/frm_parser.hpp"
-#include <fstream>
+#include "common/source_manager.hpp"
 #include <sstream>
 #include <algorithm>
 #include <cctype>
@@ -364,16 +364,13 @@ FrmFile FrmParser::parse(const std::string& frmFilePath) {
     FrmFile frmFile;
     frmFile.frmFilePath = std::filesystem::absolute(frmFilePath);
 
-    std::ifstream ifs(frmFilePath);
-    if (!ifs.is_open()) {
+    // M22: 使用编码检测+转换读取, 确保GBK等非UTF-8文件正确解码
+    auto readResult = SourceBuffer::readAndConvertToUtf8(frmFilePath);
+    if (readResult.content.empty()) {
         return frmFile;
     }
 
-    std::stringstream ss;
-    ss << ifs.rdbuf();
-    std::string content = ss.str();
-
-    return parseString(content, frmFilePath);
+    return parseString(readResult.content, frmFilePath);
 }
 
 FrmFile FrmParser::parseString(const std::string& content, const std::string& frmFilePath) {

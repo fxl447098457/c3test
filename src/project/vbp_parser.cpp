@@ -2,7 +2,7 @@
 // .vbp 是纯文本行导向的INI风格文件, 每行 Key=Value
 
 #include "project/vbp_parser.hpp"
-#include <fstream>
+#include "common/source_manager.hpp"
 #include <sstream>
 #include <algorithm>
 
@@ -12,16 +12,13 @@ VbpProject VbpParser::parse(const std::string& vbpFilePath) {
     VbpProject project;
     project.vbpFilePath = std::filesystem::absolute(vbpFilePath);
 
-    std::ifstream ifs(vbpFilePath);
-    if (!ifs.is_open()) {
+    // M22: 使用编码检测+转换读取, 确保GBK等非UTF-8文件正确解码
+    auto readResult = SourceBuffer::readAndConvertToUtf8(vbpFilePath);
+    if (readResult.content.empty()) {
         return project;
     }
 
-    std::stringstream ss;
-    ss << ifs.rdbuf();
-    std::string content = ss.str();
-
-    return parseString(content, vbpFilePath);
+    return parseString(readResult.content, vbpFilePath);
 }
 
 VbpProject VbpParser::parseString(const std::string& content, const std::string& vbpFilePath) {

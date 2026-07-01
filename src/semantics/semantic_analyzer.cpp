@@ -901,8 +901,8 @@ void SemanticAnalyzer::visit(ForStmt& node) {
     if (optionExplicit_) {
         auto* sym = symTab_.lookup(node.varName);
         if (!sym) {
-            diag_.error(DiagnosticID::SemUndeclaredIdentifier, node.loc,
-                "未声明的变量: '" + node.varName + "'");
+            diag_.warn(DiagnosticID::SemUndeclaredIdentifier, node.loc,
+                "未声明的变量: '" + node.varName + "' (可能来自其他模块)");
         } else {
             sym->isReferenced = true;
         }
@@ -1203,8 +1203,8 @@ void SemanticAnalyzer::visit(IdentifierExpr& node) {
     } else {
         // 未找到标识符
         if (optionExplicit_ && pass_ == 2) {
-            diag_.error(DiagnosticID::SemUndeclaredIdentifier, node.loc,
-                "未声明的标识符: '" + node.name + "'");
+            diag_.warn(DiagnosticID::SemUndeclaredIdentifier, node.loc,
+                "未声明的标识符: '" + node.name + "' (可能来自其他模块)");
         }
         lastExprType_ = Vb6Type::Variant;  // 宽松模式: 推导为Variant
     }

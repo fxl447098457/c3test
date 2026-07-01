@@ -267,6 +267,28 @@ double vb6_CDbl(double x) {
 BSTR vb6_CStr(vb6_VARIANT x) {
     return vb6_Format(x, NULL);
 }
+
+// M22: typed CStr overloads (C has no overloading, use suffix)
+BSTR vb6_CStrLong(int32_t x) {
+    vb6_VARIANT v; memset(&v, 0, sizeof(v)); v.vt = VT_I4; v.lVal = x;
+    return vb6_Format(v, NULL);
+}
+BSTR vb6_CStrDbl(double x) {
+    vb6_VARIANT v; memset(&v, 0, sizeof(v)); v.vt = VT_R8; v.dblVal = x;
+    return vb6_Format(v, NULL);
+}
+BSTR vb6_CStrBool(int16_t x) {
+    vb6_VARIANT v; memset(&v, 0, sizeof(v)); v.vt = VT_BOOL; v.boolVal = x;
+    return vb6_Format(v, NULL);
+}
+BSTR vb6_CStrByte(uint8_t x) {
+    vb6_VARIANT v; memset(&v, 0, sizeof(v)); v.vt = VT_UI1; v.bVal = x;
+    return vb6_Format(v, NULL);
+}
+BSTR vb6_CStrDate(double x) {
+    vb6_VARIANT v; memset(&v, 0, sizeof(v)); v.vt = VT_DATE; v.dblVal = x;
+    return vb6_Format(v, NULL);
+}
 // ============================================================
 // P18: Missing RTL functions (CCur/RGB/QBColor/FileDateTime/FileLen/SendKeys/AppActivate)
 // ============================================================
