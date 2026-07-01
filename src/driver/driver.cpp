@@ -45,6 +45,24 @@ static std::string pathToUtf8(const std::filesystem::path& p) {
 #endif
 }
 
+// M22-IssueB: Convert UTF-8 string to wide string for filesystem::path construction
+// When a string is already UTF-8 (e.g. from VBP parser), we must NOT use
+// filesystem::path(const char*) which interprets as ACP on Windows.
+// Instead, convert to wstring first and use filesystem::path(wstring).
+static std::wstring utf8ToWide(const std::string& utf8) {
+#ifdef _WIN32
+    if (utf8.empty()) return L"";
+    int wlen = MultiByteToWideChar(CP_UTF8, 0, utf8.c_str(), -1, nullptr, 0);
+    if (wlen <= 0) return L"";
+    std::wstring wide(wlen, L'\0');
+    MultiByteToWideChar(CP_UTF8, 0, utf8.c_str(), -1, &wide[0], wlen);
+    while (!wide.empty() && wide.back() == L'\0') wide.pop_back();
+    return wide;
+#else
+    return std::wstring(utf8.begin(), utf8.end());
+#endif
+}
+
 Driver::Driver() : diag_(std::make_unique<Diagnostics>()) {}
 Driver::~Driver() = default;
 
@@ -208,7 +226,9 @@ CompileResult Driver::compile(const CompileOptions& options) {
             // 保存VBP工程基名 (用于输出文件命名)
             // 优先使用ExeName32的stem, 否则用VBP文件名
             if (!project.exeName.empty()) {
-                std::filesystem::path exePath(project.exeName);
+                // project.exeName is already UTF-8 from VBP parser (GBK→UTF-8)
+                // Must construct path from wstring to avoid ACP reinterpretation
+                std::filesystem::path exePath(utf8ToWide(project.exeName));
                 projectBaseName_ = pathToUtf8(exePath.stem());
             } else {
                 std::filesystem::path vbpPath(srcFile);

@@ -126,34 +126,57 @@ std::string MsvcDriver::buildVcvarsPrefix() const {
 
 int MsvcDriver::executeCommand(const std::string& cmd) const {
 #ifdef _WIN32
-    // 使用cmd /c执行, 避免路径问题
-    return std::system(cmd.c_str());
+    // M22-IssueB: Use CreateProcessW to pass UTF-16 command line to cmd.exe
+    // This preserves Chinese/Unicode characters in file paths (e.g. /Fe"工程1.exe")
+    // std::system() converts char* via CRT codepage, which corrupts UTF-8 paths
+    
+    // Convert UTF-8 command to wide string
+    int wlen = MultiByteToWideChar(CP_UTF8, 0, cmd.c_str(), -1, nullptr, 0);
+    if (wlen <= 0) return std::system(cmd.c_str());
+    std::wstring wcmd(wlen, L'\0');
+    MultiByteToWideChar(CP_UTF8, 0, cmd.c_str(), -1, &wcmd[0], wlen);
+    wcmd.pop_back(); // remove trailing null from MultiByteToWideChar
+    
+    // Build full command: cmd.exe /c <command>
+    std::wstring fullCmd = L"cmd.exe /c " + wcmd;
+    
+    STARTUPINFOW si = { sizeof(si) };
+    PROCESS_INFORMATION pi = {};
+    
+    // CreateProcessW requires mutable command line buffer
+    std::wstring mutableCmd = fullCmd;
+    
+    BOOL ok = CreateProcessW(
+        nullptr,                // application name (nullptr = use command line)
+        &mutableCmd[0],         // command line (mutable)
+        nullptr,                // process security
+        nullptr,                // thread security
+        FALSE,                  // inherit handles
+        0,                      // creation flags
+        nullptr,                // environment
+        nullptr,                // current directory
+        &si,                    // startup info
+        &pi                     // process info
+    );
+    
+    if (!ok) {
+        // Fallback to std::system if CreateProcessW fails
+        return std::system(cmd.c_str());
+    }
+    
+    WaitForSingleObject(pi.hProcess, INFINITE);
+    DWORD exitCode = 1;
+    GetExitCodeProcess(pi.hProcess, &exitCode);
+    CloseHandle(pi.hProcess);
+    CloseHandle(pi.hThread);
+    
+    return static_cast<int>(exitCode);
 #else
     return std::system(cmd.c_str());
 #endif
 }
 
-// M22-Issue1: Convert UTF-8 string to system codepage (ACP) for MSVC command line
-// MSVC cl.exe /Fe interprets paths in system codepage, not UTF-8
-static std::string utf8ToAcp(const std::string& utf8) {
-#ifdef _WIN32
-    // UTF-8 -> wide string
-    int wlen = MultiByteToWideChar(CP_UTF8, 0, utf8.c_str(), -1, nullptr, 0);
-    if (wlen <= 0) return utf8;
-    std::wstring wide(wlen, L'\0');
-    MultiByteToWideChar(CP_UTF8, 0, utf8.c_str(), -1, &wide[0], wlen);
-    // wide string -> ACP
-    int alen = WideCharToMultiByte(CP_ACP, 0, wide.c_str(), -1, nullptr, 0, nullptr, nullptr);
-    if (alen <= 0) return utf8;
-    std::string acp(alen, '\0');
-    WideCharToMultiByte(CP_ACP, 0, wide.c_str(), -1, &acp[0], alen, nullptr, nullptr);
-    // Remove trailing null
-    while (!acp.empty() && acp.back() == '\0') acp.pop_back();
-    return acp;
-#else
-    return utf8;
-#endif
-}
+// utf8ToAcp removed: CreateProcessW handles UTF-16 natively
 
 bool MsvcDriver::compileAndLink(const MsvcDriverOptions& options) {
     if (options.sourceFiles.empty()) {
@@ -196,9 +219,8 @@ bool MsvcDriver::compileAndLink(const MsvcDriverOptions& options) {
 
     // Output file and .obj directory (P11.2: intermediates go to objDir)
     if (!options.outputFile.empty()) {
-        // M22-Issue1: Convert UTF-8 output path to ACP for MSVC /Fe
-    std::string acpOutputFile = utf8ToAcp(options.outputFile);
-    cmd << " /Fe\"" << acpOutputFile << "\"";
+        // M22-IssueB: UTF-8 path preserved through CreateProcessW UTF-16 conversion
+    cmd << " /Fe\"" << options.outputFile << "\"";
         if (!options.objDir.empty()) {
             cmd << " /Fo\"" << options.objDir << "/\"";
         } else {

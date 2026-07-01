@@ -524,6 +524,11 @@ void CCodeGen::emitFormFramework(const FrmFormDesc& frmDesc, Module& module) {
         }
     }
 
+    // M22-fix: 在Form_Load之前先赋值vb6_hwnd_<Form>，这样Form_Load中
+    // Me.Caption / Me.Text 等才能通过vb6_hwnd_引用到正确的HWND
+    // CreateFormWindow还未返回，vb6_hwnd_尚未被赋值
+    c_.emitLine("vb6_hwnd_" + cIdent(formName) + " = (void*)hwnd;  /* early assign for Form_Load */");
+
     // 调用VB6 Form_Load事件 (仅当存在时调用)
     std::string formLoadFn = cProcName("Form_Load", AccessLevel::Private);
     auto* formLoadSym = symTab_.lookup("Form_Load");

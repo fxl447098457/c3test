@@ -32,6 +32,7 @@ Unattended=0
 Retained=0
 ThreadPerObject=0
 MaxNumberOfThreads=1
+
 [AmicForVB]
 XPSTYLE=0
 DLLOUT=0

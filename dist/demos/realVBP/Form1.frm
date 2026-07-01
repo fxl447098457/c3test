@@ -3,7 +3,7 @@ Begin VB.Form Form1
    Caption         =   "Form1"
    ClientHeight    =   6510
    ClientLeft      =   225
-   ClientTop       =   870
+   ClientTop       =   570
    ClientWidth     =   6435
    LinkTopic       =   "Form1"
    ScaleHeight     =   6510
@@ -92,6 +92,11 @@ Private Sub Form_Load()
         List1.AddItem "1 - " & i
     Next
     Check1.Value = 1
+End Sub
+
+Private Sub List1_Click()
+    Dim a As New Class1
+    MsgBox a.Add("deng", "wei"), , Module1.myName
 End Sub
 
 Private Sub MQ_Click()

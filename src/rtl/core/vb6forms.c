@@ -344,13 +344,17 @@ void vb6_Form_Print(void* hwnd, void* bstrText) {
     if (len > 0) {
         // Calculate text size for advancing CurrentX
         SIZE size;
+        TEXTMETRICW tm;
         GetTextExtentPoint32W(hdc, text, len, &size);
+        GetTextMetricsW(hdc, &tm);
         
         // Draw text at CurrentX, CurrentY
         TextOutW(hdc, (int)currentX, (int)currentY, text, len);
         
-        // Advance CurrentX by text width (VB6 behavior: semicolon keeps on same line)
-        vb6_SetCurrentX(hwnd, currentX + (float)size.cx);
+        // VB6 behavior: Print automatically advances to next line (newline)
+        // CurrentY += line height, CurrentX reset to 0
+        vb6_SetCurrentY(hwnd, currentY + (float)tm.tmHeight);
+        vb6_SetCurrentX(hwnd, 0.0f);
     } else {
         // Empty Print = newline: advance CurrentY by font height, reset CurrentX
         TEXTMETRICW tm;
