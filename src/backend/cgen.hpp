@@ -304,6 +304,7 @@ private:
     // 类模块标志
     bool isClassModule_ = false;
     bool isFormModule_ = false;
+    std::string formName_;  // M22-Issue6: 当前窗体模块名 (用于Form Print)
 
     // P6.4: Implements 接口引用变量 (小写变量名 → 接口名)
     // Dim x As IFoo → knownIfaceVars_["x"] = "IFoo"

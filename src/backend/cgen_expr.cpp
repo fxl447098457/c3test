@@ -273,7 +273,7 @@ void CCodeGen::visit(IdentifierExpr& node) {
                 // P14.3.1: Dim As New自动实例化 (类模块成员)
                 auto itNewM = knownNewVars_.find(lower);
                 if (itNewM != knownNewVars_.end()) {
-                    c_.emitLine("if (!me->" + cName + ") me->" + cName + " = vb6_New_" + itNewM->second + "();  /* Dim As New auto-instantiate */");
+                    c_.emitLine("if (!me->" + cName + ") me->" + cName + " = vb6_cls_" + itNewM->second + "_New();  /* Dim As New auto-instantiate */");
                 }
                 return;
             }
@@ -281,10 +281,26 @@ void CCodeGen::visit(IdentifierExpr& node) {
         // P14.3.1: Dim As New自动实例化守卫
         auto itNew = knownNewVars_.find(lower);
         if (itNew != knownNewVars_.end()) {
-            c_.emitLine("if (!" + cName + ") " + cName + " = vb6_New_" + itNew->second + "();  /* Dim As New auto-instantiate */");
+            c_.emitLine("if (!" + cName + ") " + cName + " = vb6_cls_" + itNew->second + "_New();  /* Dim As New auto-instantiate */");
         }
         lastExpr_ = cName;
         return;
+    }
+
+    // M22-Issue5: foundSym为null但可能是cgen过程级跟踪的Dim As New变量
+    // 符号表在语义分析后current_指向模块scope, 过程级局部变量查找失败
+    // 此时knownNewVars_/knownClassVars_仍然有效(cgen过程中维护)
+    if (!foundSym) {
+        auto itNew = knownNewVars_.find(lower);
+        if (itNew != knownNewVars_.end()) {
+            c_.emitLine("if (!" + cName + ") " + cName + " = vb6_cls_" + itNew->second + "_New();  /* Dim As New auto-instantiate */");
+            lastExpr_ = cName;
+            return;
+        }
+        if (knownClassVars_.count(lower)) {
+            lastExpr_ = cName;
+            return;
+        }
     }
 
     // 内置函数映射 (名称 → RTL函数名) - 仅当符号表中没有用户定义的函数时使用

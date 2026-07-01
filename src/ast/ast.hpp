@@ -941,6 +941,7 @@ class PrintStmt : public Stmt {
 public:
     ExprPtr fileNumber;
     std::vector<ExprPtr> outputList;
+    bool isFormPrint = false;  // M22-Issue6: true=Print to form surface, false=Print # to file
 
     PrintStmt(SourceLocation loc, ExprPtr fn, std::vector<ExprPtr> output)
         : Stmt(ASTNodeKind::PrintStmt, loc),

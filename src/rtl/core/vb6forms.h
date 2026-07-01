@@ -119,6 +119,11 @@ void vb6_ShowForm(void* hwnd, int modal);
 // 卸载窗体
 void vb6_UnloadForm(void* hwnd);
 
+// M22-Issue6: 窗体表面Print (VB6的"Print expr"语句)
+// hwnd: 窗体HWND, text: BSTR要输出的文本
+// 使用TextOutW在窗体HDC上绘制, 维护CurrentX/CurrentY位置
+void vb6_Form_Print(void* hwnd, void* bstrText);
+
 // ============================================================
 // Form_Unload回调
 // ============================================================
@@ -325,11 +330,16 @@ void* vb6_GetControlPicture(void* hwnd);
 void vb6_SetControlPicture(void* hwnd, void* hPicture);
 // AutoSize for PictureBox: resize to fit picture
 int vb6_GetPictureAutoSize(void* hwnd);
-void vb6_SetPictureAutoSize(void* hwnd, int autoSize);
-// P17.2: Image.Stretch property
-int vb6_GetImageStretch(void* hwnd);
-void vb6_SetImageStretch(void* hwnd, int stretch);
-// P17.2: Image subclass for WM_PAINT (StretchBlt rendering)
+void vb6_SetPictureAutoSize(void* hwnd, int autoSize);
+
+// P17.2: Image.Stretch property
+
+int vb6_GetImageStretch(void* hwnd);
+
+void vb6_SetImageStretch(void* hwnd, int stretch);
+
+// P17.2: Image subclass for WM_PAINT (StretchBlt rendering)
+
 void vb6_InstallImageSubclass(void* hwnd);
 
 // P18-F: 控件子类化基础设施 (GotFocus/LostFocus/MouseEnter/MouseLeave/控件级事件)

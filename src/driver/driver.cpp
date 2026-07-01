@@ -21,7 +21,29 @@
 #include <cstdlib>
 #include <set>
 
+#ifdef _WIN32
+#include <windows.h>
+#endif
+
 namespace vb6c3 {
+
+// M22-Issue1-fix: Convert std::filesystem::path to UTF-8 std::string
+// On Windows, path::string() returns ACP-encoded string which is wrong for our internal UTF-8 usage.
+// Path internally stores UTF-16 on Windows, so use wstring() + conversion for correct results.
+static std::string pathToUtf8(const std::filesystem::path& p) {
+#ifdef _WIN32
+    std::wstring wide = p.wstring();
+    if (wide.empty()) return "";
+    int len = WideCharToMultiByte(CP_UTF8, 0, wide.c_str(), -1, nullptr, 0, nullptr, nullptr);
+    if (len <= 0) return p.string();  // fallback
+    std::string utf8(len, '\0');
+    WideCharToMultiByte(CP_UTF8, 0, wide.c_str(), -1, &utf8[0], len, nullptr, nullptr);
+    while (!utf8.empty() && utf8.back() == '\0') utf8.pop_back();
+    return utf8;
+#else
+    return p.string();
+#endif
+}
 
 Driver::Driver() : diag_(std::make_unique<Diagnostics>()) {}
 Driver::~Driver() = default;
@@ -170,7 +192,7 @@ CompileResult Driver::compile(const CompileOptions& options) {
             effectiveOpts.sourceFiles.clear();
             for (const auto& entry : project.sources) {
                 auto absPath = project.resolvePath(entry.filePath);
-                effectiveOpts.sourceFiles.push_back(absPath.string());
+                effectiveOpts.sourceFiles.push_back(pathToUtf8(absPath));
             }
 
             // P6.8: 收集VBP中的CLSID映射
@@ -187,16 +209,16 @@ CompileResult Driver::compile(const CompileOptions& options) {
             // 优先使用ExeName32的stem, 否则用VBP文件名
             if (!project.exeName.empty()) {
                 std::filesystem::path exePath(project.exeName);
-                projectBaseName_ = exePath.stem().string();
+                projectBaseName_ = pathToUtf8(exePath.stem());
             } else {
                 std::filesystem::path vbpPath(srcFile);
-                projectBaseName_ = vbpPath.stem().string();
+                projectBaseName_ = pathToUtf8(vbpPath.stem());
             }
             // 注意: 不再设置effectiveOpts.outputFile, 让runLinker通过projectBaseName_统一处理
             // 这样确保输出路径始终包含outputDir前缀
             // P11.1: Save VBP Path32 for output directory resolution
             if (!project.outputPath.empty()) {
-                projectPath32_ = project.resolvePath(project.outputPath).string();
+                projectPath32_ = pathToUtf8(project.resolvePath(project.outputPath));
             }
 
 
@@ -382,14 +404,14 @@ CompileResult Driver::compile(const CompileOptions& options) {
         // Default: source file directory
         if (effectiveOpts.sourceFiles.size() == 1) {
             std::filesystem::path srcPath(effectiveOpts.sourceFiles[0]);
-            outputDir = srcPath.parent_path().string();
+            outputDir = pathToUtf8(srcPath.parent_path());
             // parent_path() returns empty for bare filename (e.g. "hello.bas")
             if (outputDir.empty()) outputDir = ".";
         } else {
             outputDir = ".";
         }
     }
-    outputDir = std::filesystem::absolute(outputDir).string();
+    outputDir = pathToUtf8(std::filesystem::absolute(outputDir));
     if (!std::filesystem::exists(outputDir)) {
         std::filesystem::create_directories(outputDir);
     }
@@ -641,7 +663,7 @@ bool Driver::runParser(const CompileOptions& options) {
             // 如果没有 VB_Name 属性，使用文件名（去掉扩展名）作为模块名
             if (module->moduleName.empty()) {
                 std::filesystem::path p(filePath);
-                module->moduleName = p.stem().string();
+                module->moduleName = pathToUtf8(p.stem());
             }
             // P7: 保存窗体描述 (此时moduleName已从Attribute VB_Name或文件名确定)
             if (isFormModule && module->isFormModule) {
@@ -868,7 +890,7 @@ bool Driver::runCrossModuleResolution() {
     std::vector<std::string> moduleBaseNames;
     for (const auto& module : modules_) {
         std::filesystem::path p(module->filename);
-        moduleBaseNames.push_back(p.stem().string());
+        moduleBaseNames.push_back(pathToUtf8(p.stem()));
     }
 
     // 收集每个模块导出的Public符号: [模块索引] -> vector<Symbol*>
@@ -958,11 +980,11 @@ bool Driver::runCodeGeneration(const CompileOptions& options, const std::string&
         if (modules_.size() == 1 && !options.outputFile.empty()) {
             // 单文件: 用输出文件名作为基名
             std::filesystem::path p(options.outputFile);
-            baseName = p.stem().string();
+            baseName = pathToUtf8(p.stem());
         } else {
             // 多文件: 用源文件名作为基名
             std::filesystem::path p(module->filename);
-            baseName = p.stem().string();
+            baseName = pathToUtf8(p.stem());
         }
 
         // 收集跨模块include需求（从符号表获取外部模块名）
@@ -1254,10 +1276,10 @@ bool Driver::runLinker(const CompileOptions& options, const std::string& outputD
         std::string baseName;
         if (modules_.size() == 1 && !options.outputFile.empty()) {
             std::filesystem::path p(options.outputFile);
-            baseName = p.stem().string();
+            baseName = pathToUtf8(p.stem());
         } else {
             std::filesystem::path p(modules_[i]->filename);
-            baseName = p.stem().string();
+            baseName = pathToUtf8(p.stem());
         }
         std::string cPath = intermediatesDir + "/" + baseName + ".c";
         msvcOpts.sourceFiles.push_back(cPath);
@@ -1293,7 +1315,7 @@ bool Driver::runLinker(const CompileOptions& options, const std::string& outputD
         msvcOpts.outputFile = outputDir + "/" + projectBaseName_ + outputExt;
     } else if (modules_.size() == 1) {
         std::filesystem::path p(modules_[0]->filename);
-        msvcOpts.outputFile = outputDir + "/" + p.stem().string() + outputExt;
+        msvcOpts.outputFile = outputDir + "/" + pathToUtf8(p.stem()) + outputExt;
     } else {
         msvcOpts.outputFile = outputDir + "/a" + outputExt;
     }

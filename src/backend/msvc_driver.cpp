@@ -132,6 +132,29 @@ int MsvcDriver::executeCommand(const std::string& cmd) const {
     return std::system(cmd.c_str());
 #endif
 }
+
+// M22-Issue1: Convert UTF-8 string to system codepage (ACP) for MSVC command line
+// MSVC cl.exe /Fe interprets paths in system codepage, not UTF-8
+static std::string utf8ToAcp(const std::string& utf8) {
+#ifdef _WIN32
+    // UTF-8 -> wide string
+    int wlen = MultiByteToWideChar(CP_UTF8, 0, utf8.c_str(), -1, nullptr, 0);
+    if (wlen <= 0) return utf8;
+    std::wstring wide(wlen, L'\0');
+    MultiByteToWideChar(CP_UTF8, 0, utf8.c_str(), -1, &wide[0], wlen);
+    // wide string -> ACP
+    int alen = WideCharToMultiByte(CP_ACP, 0, wide.c_str(), -1, nullptr, 0, nullptr, nullptr);
+    if (alen <= 0) return utf8;
+    std::string acp(alen, '\0');
+    WideCharToMultiByte(CP_ACP, 0, wide.c_str(), -1, &acp[0], alen, nullptr, nullptr);
+    // Remove trailing null
+    while (!acp.empty() && acp.back() == '\0') acp.pop_back();
+    return acp;
+#else
+    return utf8;
+#endif
+}
+
 bool MsvcDriver::compileAndLink(const MsvcDriverOptions& options) {
     if (options.sourceFiles.empty()) {
         std::cerr << "C3: 没有源文件需要编译" << std::endl;
@@ -173,7 +196,9 @@ bool MsvcDriver::compileAndLink(const MsvcDriverOptions& options) {
 
     // Output file and .obj directory (P11.2: intermediates go to objDir)
     if (!options.outputFile.empty()) {
-        cmd << " /Fe\"" << options.outputFile << "\"";
+        // M22-Issue1: Convert UTF-8 output path to ACP for MSVC /Fe
+    std::string acpOutputFile = utf8ToAcp(options.outputFile);
+    cmd << " /Fe\"" << acpOutputFile << "\"";
         if (!options.objDir.empty()) {
             cmd << " /Fo\"" << options.objDir << "/\"";
         } else {

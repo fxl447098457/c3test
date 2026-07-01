@@ -211,8 +211,26 @@ BSTR vb6_Format(vb6_VARIANT expr, BSTR fmt) {
             return vb6_Str((int32_t)expr.iVal);
         case vb6_vtLong:
             return vb6_Str(expr.lVal);
-        case vb6_vtDouble:
+        case vb6_vtDouble: {
+            wchar_t buf[64];
+            swprintf(buf, 64, L"%g", expr.dblVal);
+            return vb6_BSTR_FromStr(buf);
+        }
         case vb6_vtDate: {
+            // M22-Issue4: Format VT_DATE as date/time string using system locale
+            // When fmt is NULL, VB6 uses system short date + time format
+            SYSTEMTIME st;
+            if (VariantTimeToSystemTime(expr.dblVal, &st)) {
+                wchar_t dateBuf[64], timeBuf[64];
+                // Get system short date format
+                GetDateFormatW(LOCALE_USER_DEFAULT, DATE_SHORTDATE, &st, NULL, dateBuf, 64);
+                // Get system time format (without seconds for clean display like VB6)
+                GetTimeFormatW(LOCALE_USER_DEFAULT, 0, &st, NULL, timeBuf, 64);
+                wchar_t fullBuf[128];
+                swprintf(fullBuf, 128, L"%s %s", dateBuf, timeBuf);
+                return vb6_BSTR_FromStr(fullBuf);
+            }
+            // Fallback: print as number
             wchar_t buf[64];
             swprintf(buf, 64, L"%g", expr.dblVal);
             return vb6_BSTR_FromStr(buf);

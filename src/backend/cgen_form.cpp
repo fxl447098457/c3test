@@ -10,6 +10,7 @@ namespace vb6c3 {
 
 void CCodeGen::emitFormFramework(const FrmFormDesc& frmDesc, Module& module) {
     std::string formName = frmDesc.formName;
+    formName_ = formName;  // M22-Issue6: save for Form Print use
     std::string clsName = "VB6_Form_" + cIdent(formName);    // Win32窗口类名
     std::string wndProc = "vb6_form_wndproc_" + cIdent(formName);  // WndProc函数名
     std::string createFn = "vb6_form_create_" + cIdent(formName);  // 控件创建函数名
@@ -1488,7 +1489,11 @@ ctrlId++;
         c_.emitLine("vb6_hwnd_" + cIdent(formName) + " = vb6_CreateMDIFormWindow(");
         c_.indent();
         c_.emitLine("\"" + clsName + "\", \"" + caption + "\",");
-        if (startupPos == 3) {
+        if (startupPos == 2) {
+            // M22-Issue2: StartUpPosition=2 CenterScreen
+            c_.emitLine("(GetSystemMetrics(SM_CXSCREEN) - " + std::to_string(clientWidth) + ") / 2,");
+            c_.emitLine("(GetSystemMetrics(SM_CYSCREEN) - " + std::to_string(clientHeight) + ") / 2,");
+        } else if (startupPos == 3) {
             c_.emitLine("CW_USEDEFAULT, CW_USEDEFAULT,");
         } else {
             c_.emitLine("0, 0,");
@@ -1501,7 +1506,11 @@ ctrlId++;
         c_.emitLine("vb6_hwnd_" + cIdent(formName) + " = vb6_CreateMDIChildWindow(");
         c_.indent();
         c_.emitLine("\"" + clsName + "\", \"" + caption + "\",");
-        if (startupPos == 3) {
+        if (startupPos == 2) {
+            // M22-Issue2: StartUpPosition=2 CenterScreen
+            c_.emitLine("(GetSystemMetrics(SM_CXSCREEN) - " + std::to_string(clientWidth) + ") / 2,");
+            c_.emitLine("(GetSystemMetrics(SM_CYSCREEN) - " + std::to_string(clientHeight) + ") / 2,");
+        } else if (startupPos == 3) {
             c_.emitLine("CW_USEDEFAULT, CW_USEDEFAULT,");
         } else {
             c_.emitLine("0, 0,");
@@ -1514,7 +1523,11 @@ ctrlId++;
         c_.emitLine("vb6_hwnd_" + cIdent(formName) + " = vb6_CreateFormWindow(");
         c_.indent();
         c_.emitLine("\"" + clsName + "\", \"" + caption + "\",");
-        if (startupPos == 3) {
+        if (startupPos == 2) {
+            // M22-Issue2: StartUpPosition=2 CenterScreen
+            c_.emitLine("(GetSystemMetrics(SM_CXSCREEN) - " + std::to_string(clientWidth) + ") / 2,");
+            c_.emitLine("(GetSystemMetrics(SM_CYSCREEN) - " + std::to_string(clientHeight) + ") / 2,");
+        } else if (startupPos == 3) {
             c_.emitLine("CW_USEDEFAULT, CW_USEDEFAULT,");
         } else {
             c_.emitLine("0, 0,");
@@ -1601,8 +1614,41 @@ void CCodeGen::emitMenuItem(const std::string& parentVar, const FrmControl& menu
 
 // P7.8: 递归生成菜单点击事件派发 (WM_COMMAND中)
 void CCodeGen::emitMenuClickDispatch(const FrmControl& menuCtrl, int& menuId) {
-    // 顶层Menu控件 (如mnuFile) 只是popup容器，不生成Click处理
-    // 只对叶子菜单项和子菜单项生成WM_COMMAND派发
+    // M22-Issue3: 如果顶层Menu控件没有children, 它自身就是叶菜单项, 需要生成Click处理
+    if (menuCtrl.children.empty()) {
+        std::string caption = menuCtrl.controlName;
+        auto capIt = menuCtrl.properties.find("Caption");
+        if (capIt != menuCtrl.properties.end() && capIt->second.type == FrmValueType::String) {
+            std::string raw = capIt->second.rawText;
+            if (raw.size() >= 2 && raw.front() == '"' && raw.back() == '"') {
+                caption = raw.substr(1, raw.size() - 2);
+            }
+        }
+        if (caption != "-") {
+            bool visible = true;
+            auto visIt = menuCtrl.properties.find("Visible");
+            if (visIt != menuCtrl.properties.end()) {
+                if (visIt->second.type == FrmValueType::Identifier &&
+                    (visIt->second.rawText == "0" || visIt->second.rawText == "False")) {
+                    visible = false;
+                }
+                if (visIt->second.type == FrmValueType::Integer && visIt->second.intValue == 0) {
+                    visible = false;
+                }
+            }
+            if (visible) {
+                std::string clickFn = cProcName(menuCtrl.controlName + "_Click", AccessLevel::Private);
+                c_.emitLine("if (id == " + std::to_string(menuId) + ") {");
+                c_.indent();
+                c_.emitLine("{ extern void " + clickFn + "(); " + clickFn + "(); }");
+                c_.dedent();
+                c_.emitLine("}");
+            }
+            menuId++;
+        }
+        return;
+    }
+    // 顶层Menu控件 (如mnuFile) 只是popup容器, 只对叶子菜单项和子菜单项生成WM_COMMAND派发
     for (const auto& child : menuCtrl.children) {
         std::string caption = child.controlName;
         auto capIt = child.properties.find("Caption");

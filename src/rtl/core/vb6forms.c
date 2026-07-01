@@ -313,6 +313,46 @@ void vb6_UnloadForm(void* hwnd) {
     DestroyWindow((HWND)hwnd);
 }
 
+// M22-Issue6: 窗体表面Print
+// VB6的"Print expr"语句在窗体表面绘制文本
+// 维护CurrentX/CurrentY用于定位下一次输出
+void vb6_Form_Print(void* hwnd, void* bstrText) {
+    if (!hwnd) return;
+    HWND hw = (HWND)hwnd;
+    BSTR text = (BSTR)bstrText;
+    
+    // Get CurrentX/CurrentY from window properties (stored as pixels)
+    float currentX = vb6_GetCurrentX(hwnd);
+    float currentY = vb6_GetCurrentY(hwnd);
+    
+    HDC hdc = GetDC(hw);
+    if (!hdc) return;
+    
+    // Set text color and background mode (transparent for form printing)
+    SetBkMode(hdc, TRANSPARENT);
+    
+    int len = text ? (int)SysStringLen(text) : 0;
+    if (len > 0) {
+        // Calculate text size for advancing CurrentX
+        SIZE size;
+        GetTextExtentPoint32W(hdc, text, len, &size);
+        
+        // Draw text at CurrentX, CurrentY
+        TextOutW(hdc, (int)currentX, (int)currentY, text, len);
+        
+        // Advance CurrentX by text width (VB6 behavior: semicolon keeps on same line)
+        vb6_SetCurrentX(hwnd, currentX + (float)size.cx);
+    } else {
+        // Empty Print = newline: advance CurrentY by font height, reset CurrentX
+        TEXTMETRICW tm;
+        GetTextMetricsW(hdc, &tm);
+        vb6_SetCurrentY(hwnd, currentY + (float)tm.tmHeight);
+        vb6_SetCurrentX(hwnd, 0.0f);
+    }
+    
+    ReleaseDC(hw, hdc);
+}
+
 // ============================================================
 // Form_Unload回调
 // ============================================================

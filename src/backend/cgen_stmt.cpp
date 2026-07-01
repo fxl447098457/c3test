@@ -1754,11 +1754,7 @@ void CCodeGen::visit(CloseStmt& node) {
 }
 
 void CCodeGen::visit(PrintStmt& node) {
-    // Print #fnum, expr1; expr2; ...
-    emitExpr(*node.fileNumber);
-    std::string fnum = std::move(lastExpr_);
-
-    // BSTR表达式检测 (复用Debug.Print相同逻辑)
+    // M22-Issue6: BSTR expression detection shared by both Print modes
     static const std::vector<std::string> bstrFuncs = {
         "vb6_BSTR_FromStr", "vb6_Left", "vb6_Right", "vb6_Mid",
         "vb6_UCase", "vb6_LCase", "vb6_UCase_str", "vb6_LCase_str",
@@ -1778,6 +1774,28 @@ void CCodeGen::visit(PrintStmt& node) {
         if (knownBstrVars_.count(lower)) return true;
         return false;
     };
+
+    if (node.isFormPrint) {
+        // M22-Issue6: Form surface Print - "Print expr" in form module
+        // Generate: vb6_Form_Print(formHwnd, bstrExpr) for each output item
+        std::string formHwnd = isFormModule_ ? ("vb6_hwnd_" + cIdent(formName_)) : "NULL";
+        for (auto& expr : node.outputList) {
+            emitExpr(*expr);
+            std::string val = lastExpr_;
+            if (isBstrExpr(val)) {
+                c_.emitLine("vb6_Form_Print(" + formHwnd + ", " + val + ");");
+            } else {
+                // Use wrapToBSTR for proper type conversion (Date→CStrDate, etc.)
+                std::string bstrVal = wrapToBSTR(val, *expr);
+                c_.emitLine("vb6_Form_Print(" + formHwnd + ", " + bstrVal + ");");
+            }
+        }
+        return;
+    }
+
+    // File I/O Print: Print #fnum, expr1; expr2; ...
+    emitExpr(*node.fileNumber);
+    std::string fnum = std::move(lastExpr_);
 
     if (node.outputList.empty()) {
         c_.emitLine("vb6_Print(" + fnum + ", NULL);");

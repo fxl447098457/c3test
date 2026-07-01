@@ -1148,17 +1148,41 @@ std::unique_ptr<InputStmt> Parser::parseInputStmt() {
 std::unique_ptr<PrintStmt> Parser::parsePrintStmt() {
     auto loc = currentLoc();
     advance(); // consume 'Print'
-    if (cur_.kind == TokenKind::Hash) advance();
-    auto fileNumber = parseExpression();
+    
+    // M22-Issue6: Distinguish "Print expr" (form surface) from "Print #n, expr" (file I/O)
+    // If '#' is present, this is file I/O mode
+    // If no '#', the first expression is the first output item (form print mode)
+    bool hasHash = (cur_.kind == TokenKind::Hash);
+    if (hasHash) advance();
+    
+    auto firstExpr = parseExpression();
     std::vector<ExprPtr> outputList;
-    if (match(TokenKind::Comma) || match(TokenKind::Semicolon)) {
-        // 简化: 读取到行尾
-        while (cur_.kind != TokenKind::NewLine && cur_.kind != TokenKind::EndOfFile) {
+    ExprPtr fileNumber;
+    bool isFormPrint = false;
+    
+    if (hasHash) {
+        // File I/O mode: "Print #n, expr1; expr2; ..."
+        fileNumber = std::move(firstExpr);
+        if (match(TokenKind::Comma) || match(TokenKind::Semicolon)) {
+            while (cur_.kind != TokenKind::NewLine && cur_.kind != TokenKind::EndOfFile) {
+                outputList.push_back(parseExpression());
+                if (!match(TokenKind::Comma) && !match(TokenKind::Semicolon)) break;
+            }
+        }
+    } else {
+        // Form print mode: "Print expr1; expr2; ..."
+        // The first expression IS the first output item
+        isFormPrint = true;
+        outputList.push_back(std::move(firstExpr));
+        while (match(TokenKind::Semicolon) || match(TokenKind::Comma)) {
+            if (cur_.kind == TokenKind::NewLine || cur_.kind == TokenKind::EndOfFile) break;
             outputList.push_back(parseExpression());
-            if (!match(TokenKind::Comma) && !match(TokenKind::Semicolon)) break;
         }
     }
-    return std::make_unique<PrintStmt>(loc, std::move(fileNumber), std::move(outputList));
+    
+    auto stmt = std::make_unique<PrintStmt>(loc, std::move(fileNumber), std::move(outputList));
+    stmt->isFormPrint = isFormPrint;
+    return stmt;
 }
 
 std::unique_ptr<WriteStmt> Parser::parseWriteStmt() {
