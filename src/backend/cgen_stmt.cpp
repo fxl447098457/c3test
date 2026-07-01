@@ -106,6 +106,12 @@ c_.emitLine("switch(vb6_gosub_stack[--vb6_gosub_sp]) {");
                 c_.emitLine("/* unhandled stmt: " + std::string(stmt->kindName()) + " */");
                 break;
         }
+
+        // M22: 释放Declare ANSI函数的临时char*变量 (每条语句后统一清理, 无内存泄露)
+        for (auto& ansiVar : ansiTempsToFree_) {
+            c_.emitLine("vb6_FreeANSI(" + ansiVar + ");");
+        }
+        ansiTempsToFree_.clear();
     }
 }
 
@@ -1636,6 +1642,8 @@ void CCodeGen::visit(CallStmt& node) {
         } else {
             c_.emitLine(callExpr + ";");
         }
+
+        // M22: ANSI临时变量释放由emitStmtList统一处理, 此处不再单独清理
     }
 }
 

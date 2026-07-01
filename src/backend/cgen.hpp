@@ -265,6 +265,15 @@ private:
     // 用于成员访问时区分"p.X"(结构体字段) vs "Module1.X"(模块变量)
     std::unordered_map<std::string, std::string> knownUdtVars_;
 
+    // M22: Declare A版API函数名集合 (小写) - 需要BSTR->ANSI转换的ByVal String参数
+    // 判断: 函数名或Alias以'A'结尾 (如 GetWindowTextA, Alias "WritePrivateProfileStringA")
+    std::unordered_set<std::string> knownDeclareAnsi_;
+
+    // M22: ANSI临时变量待释放列表 (变量名) + 计数器
+    // 在Declare ANSI函数调用前声明临时char*变量, 调用后立即FreeANSI
+    std::vector<std::string> ansiTempsToFree_;
+    int ansiCounter_ = 0;
+
     // 已知COM对象变量名集合 (小写) - 用于后期绑定 obj.Method → vb6_ComCall(obj, L"Method", ...)
     std::unordered_set<std::string> knownObjectVars_;
 

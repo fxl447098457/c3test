@@ -237,7 +237,9 @@ StmtPtr Parser::parseStatement() {
                     // Use a LiteralExpr with kind EmptyPlaceholder to represent skipped params
                     if (cur_.kind == TokenKind::Comma || cur_.kind == TokenKind::NewLine ||
                         cur_.kind == TokenKind::Colon || cur_.kind == TokenKind::EndOfFile) {
-                        args.push_back(std::make_unique<LiteralExpr>(currentLoc(), LiteralKind::Long, "0"));
+                        auto _ph = std::make_unique<LiteralExpr>(currentLoc(), LiteralKind::Long, "0");
+                        _ph->longValue = 0;  // Union与intValue共享内存, 必须显式设置longValue
+                        args.push_back(std::move(_ph));
                     } else {
                         args.push_back(parseExpression());
                     }

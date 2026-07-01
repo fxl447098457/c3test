@@ -34,6 +34,8 @@ void CCodeGen::visit(SubDecl& node) {
 
     // 清空已知数组集合 (新过程)
     knownArrays_.clear();
+    ansiTempsToFree_.clear();
+    ansiCounter_ = 0;
     arrayElemTypes_.clear();
     knownBstrVars_.clear();
     knownDoubleVars_.clear();
@@ -109,6 +111,12 @@ void CCodeGen::visit(SubDecl& node) {
         c_.emitLine("vb6_RestoreErrState();");
     }
 
+    // M22: 释放当前过程中残留的ANSI临时变量 (正常退出路径)
+    for (auto& ansiVar : ansiTempsToFree_) {
+        c_.emitLine("vb6_FreeANSI(" + ansiVar + ");");
+    }
+    ansiTempsToFree_.clear();
+
     // 正常退出守卫 - 防止落入dispatch switch
     c_.emitLine("return;");
 
@@ -154,6 +162,8 @@ void CCodeGen::visit(FunctionDecl& node) {
 
     // 清空已知数组集合 (新过程)
     knownArrays_.clear();
+    ansiTempsToFree_.clear();
+    ansiCounter_ = 0;
     arrayElemTypes_.clear();
     knownBstrVars_.clear();
     knownDoubleVars_.clear();
@@ -241,6 +251,12 @@ void CCodeGen::visit(FunctionDecl& node) {
     if (hasOnError_) {
         c_.emitLine("vb6_RestoreErrState();");
     }
+
+    // M22: 释放当前过程中残留的ANSI临时变量 (正常退出路径)
+    for (auto& ansiVar : ansiTempsToFree_) {
+        c_.emitLine("vb6_FreeANSI(" + ansiVar + ");");
+    }
+    ansiTempsToFree_.clear();
 
     // 返回值
     c_.emitLine("return " + currentReturnVar_ + ";");
@@ -689,6 +705,32 @@ void CCodeGen::visit(DeclareDecl& node) {
     // 注意: Windows API函数名是大小写敏感的, 需要保持原始大小写
     std::string exportedName = aliasName.empty() ? node.name : aliasName;
 
+    // M22: 检测A版Declare函数 (函数名或Alias以'A'结尾)
+    // A版API需要BSTR->ANSI转换: vb6_BSTR_ToANSI/vb6_FreeANSI
+    bool isAnsiDeclare = false;
+    if (!aliasName.empty()) {
+        // Alias "SomeFuncA" - check if alias ends with 'A'
+        std::string aliasStr = stripQuotes(node.aliasName);
+        if (aliasStr.size() >= 2 && aliasStr.back() == 'A' && std::isupper(static_cast<unsigned char>(aliasStr[aliasStr.size()-1]))) {
+            // Also check that the char before 'A' is lowercase (to avoid false positives like "Data")
+            if (std::isalpha(static_cast<unsigned char>(aliasStr[aliasStr.size()-2])) &&
+                std::islower(static_cast<unsigned char>(aliasStr[aliasStr.size()-2]))) {
+                isAnsiDeclare = true;
+            }
+        }
+    } else {
+        // No Alias - check if function name ends with 'A'
+        if (node.name.size() >= 2 && node.name.back() == 'A' &&
+            std::islower(static_cast<unsigned char>(node.name[node.name.size()-2]))) {
+            isAnsiDeclare = true;
+        }
+    }
+    if (isAnsiDeclare) {
+        std::string funcLower = node.name;
+        std::transform(funcLower.begin(), funcLower.end(), funcLower.begin(), ::tolower);
+        knownDeclareAnsi_.insert(funcLower);
+    }
+
     // 生成: #pragma comment(lib, "xxx.lib")
     c_.emitLine("#pragma comment(lib, \"" + libName + ".lib\")");
 
@@ -716,6 +758,8 @@ void CCodeGen::visit(PropertyDecl& node) {
 
     // 清空已知数组集合 (新过程)
     knownArrays_.clear();
+    ansiTempsToFree_.clear();
+    ansiCounter_ = 0;
     arrayElemTypes_.clear();
     knownBstrVars_.clear();
     knownDoubleVars_.clear();
@@ -788,6 +832,12 @@ void CCodeGen::visit(PropertyDecl& node) {
         c_.emitLine("vb6_SaveErrState();");
     }
     emitStmtList(node.body);
+
+    // M22: 释放ANSI临时变量
+    for (auto& ansiVar : ansiTempsToFree_) {
+        c_.emitLine("vb6_FreeANSI(" + ansiVar + ");");
+    }
+    ansiTempsToFree_.clear();
 
     // Property Get: 隐式返回 vb6_ret_<propName>
     if (node.propKind == ProcKind::PropertyGet && node.returnType) {

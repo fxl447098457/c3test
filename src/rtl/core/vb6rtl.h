@@ -80,6 +80,37 @@ static inline void vb6_BSTR_Free(BSTR bstr) {
     }
 }
 
+// M22: BSTR->ANSI conversion (for Declare A-version API ByVal String params)
+// Converts BSTR(UTF-16) to GBK multibyte string. Caller must free with vb6_FreeANSI.
+static inline char* vb6_BSTR_ToANSI(BSTR bstr) {
+    if (!bstr) {
+        char* r = (char*)malloc(1);
+        if (r) r[0] = '\0';
+        return r;
+    }
+#ifdef _WIN32
+    int len = WideCharToMultiByte(CP_ACP, 0, bstr, -1, NULL, 0, NULL, NULL);
+    if (len <= 0) { char* r = (char*)malloc(1); if (r) r[0] = '\0'; return r; }
+    char* buf = (char*)malloc(len);
+    if (!buf) return NULL;
+    WideCharToMultiByte(CP_ACP, 0, bstr, -1, buf, len, NULL, NULL);
+    return buf;
+#else
+    // Non-Windows: simplified to UTF-8
+    size_t len = wcstombs(NULL, bstr, 0);
+    if (len == (size_t)-1) { char* r = (char*)malloc(1); if (r) r[0] = '\0'; return r; }
+    char* buf = (char*)malloc(len + 1);
+    if (!buf) return NULL;
+    wcstombs(buf, bstr, len + 1);
+    return buf;
+#endif
+}
+
+// M22: Free ANSI string buffer
+static inline void vb6_FreeANSI(char* ansi) {
+    free(ansi);
+}
+
 // BSTR赋值 (释放旧值, 复制新值, 防止悬垂指针和双重释放)
 static inline void vb6_BSTR_Assign(BSTR* target, BSTR source) {
     if (target) {

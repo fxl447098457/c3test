@@ -1610,10 +1610,30 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
         }
     }
 
+    // M22: 检测Declare ANSI函数调用 - 需要BSTR->ANSI转换
+    bool isDeclareAnsiCall = false;
+    if (node.callee && node.callee->kind == ASTNodeKind::IdentifierExpr) {
+        auto& idExpr = static_cast<IdentifierExpr&>(*node.callee);
+        std::string funcLower = idExpr.name;
+        std::transform(funcLower.begin(), funcLower.end(), funcLower.begin(), ::tolower);
+        if (knownDeclareAnsi_.count(funcLower)) isDeclareAnsiCall = true;
+    }
+
     std::vector<std::string> args;
     for (size_t i = 0; i < node.positional.size(); i++) {
         emitExpr(*node.positional[i]);
         std::string argVal = std::move(lastExpr_);
+
+        // M22: Declare ANSI函数 - ByVal String参数需要BSTR->ANSI转换
+        // 生成临时char*变量, 调用后释放, 无内存泄露
+        if (isDeclareAnsiCall && i < calleeParams.size() && calleeParams[i].isByVal
+            && calleeParams[i].type == Vb6Type::String) {
+            std::string ansiVar = "_ansi_" + std::to_string(ansiCounter_++);
+            c_.emitLine("char* " + ansiVar + " = vb6_BSTR_ToANSI(" + argVal + ");");
+            ansiTempsToFree_.push_back(ansiVar);
+            argVal = ansiVar;
+        }
+
         // ByRef参数: 调用点传指针. 如果实参已经是解引用形式(*x), 取地址还原为x;
         // 如果是普通变量, 加&取地址
         bool isByRef = (i < calleeParams.size() && !calleeParams[i].isByVal && !calleeParams[i].isParamArray);
