@@ -83,7 +83,13 @@ target_link_libraries(vb6c3-core PRIVATE ole32 oleaut32 uuid)
 
 # --- C code generation backend ---
 add_library(vb6c3-cgen STATIC
-    src/backend/cgen.cpp
+    src/backend/cgen_base.cpp
+    src/backend/cgen_expr.cpp
+    src/backend/cgen_stmt.cpp
+    src/backend/cgen_decl.cpp
+    src/backend/cgen_com.cpp
+    src/backend/cgen_form.cpp
+    src/backend/cgen_util.cpp
     src/backend/msvc_driver.cpp
 )
 target_compile_definitions(vb6c3-cgen PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
