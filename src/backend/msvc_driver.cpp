@@ -1,4 +1,5 @@
 #include "backend/msvc_driver.hpp"
+#include "common/encoding.hpp"
 
 #include <iostream>
 #include <fstream>
@@ -176,7 +177,6 @@ int MsvcDriver::executeCommand(const std::string& cmd) const {
 #endif
 }
 
-// utf8ToAcp removed: CreateProcessW handles UTF-16 natively
 
 bool MsvcDriver::compileAndLink(const MsvcDriverOptions& options) {
     if (options.sourceFiles.empty()) {
@@ -224,8 +224,8 @@ bool MsvcDriver::compileAndLink(const MsvcDriverOptions& options) {
         if (!options.objDir.empty()) {
             cmd << " /Fo\"" << options.objDir << "/\"";
         } else {
-            std::filesystem::path outPath(options.outputFile);
-            std::string objDir = outPath.parent_path().string();
+            std::filesystem::path outPath(utf8ToPath(options.outputFile));
+            std::string objDir = pathToUtf8(outPath.parent_path());
             if (!objDir.empty()) {
                 cmd << " /Fo\"" << objDir << "/\"";
             }
@@ -282,8 +282,8 @@ bool MsvcDriver::compileAndLink(const MsvcDriverOptions& options) {
     if (!options.objDir.empty()) {
         tmpLogDir = options.objDir;
     } else if (!options.outputFile.empty()) {
-        std::filesystem::path outP(options.outputFile);
-        tmpLogDir = outP.parent_path().string();
+        std::filesystem::path outP(utf8ToPath(options.outputFile));
+        tmpLogDir = pathToUtf8(outP.parent_path());
     }
     if (tmpLogDir.empty()) tmpLogDir = ".";
     std::string tmpLogPath = tmpLogDir + "/_c3_msvc_out.txt";
@@ -296,8 +296,8 @@ bool MsvcDriver::compileAndLink(const MsvcDriverOptions& options) {
         // c3-error.log goes to output dir (user project dir), not intermediates
         std::string outputDirForLog;
         if (!options.outputFile.empty()) {
-            std::filesystem::path outP(options.outputFile);
-            outputDirForLog = outP.parent_path().string();
+            std::filesystem::path outP(utf8ToPath(options.outputFile));
+            outputDirForLog = pathToUtf8(outP.parent_path());
         }
         if (outputDirForLog.empty()) outputDirForLog = ".";
         std::string errorLogPath = outputDirForLog + "/c3-error.log";

@@ -1,5 +1,6 @@
 #include "driver/driver.hpp"
 #include "common/diagnostics.hpp"
+#include "common/encoding.hpp"
 #include "common/source_manager.hpp"
 #include "lexer/lexer.hpp"
 #include "lexer/token.hpp"
@@ -27,41 +28,7 @@
 
 namespace vb6c3 {
 
-// M22-Issue1-fix: Convert std::filesystem::path to UTF-8 std::string
-// On Windows, path::string() returns ACP-encoded string which is wrong for our internal UTF-8 usage.
-// Path internally stores UTF-16 on Windows, so use wstring() + conversion for correct results.
-static std::string pathToUtf8(const std::filesystem::path& p) {
-#ifdef _WIN32
-    std::wstring wide = p.wstring();
-    if (wide.empty()) return "";
-    int len = WideCharToMultiByte(CP_UTF8, 0, wide.c_str(), -1, nullptr, 0, nullptr, nullptr);
-    if (len <= 0) return p.string();  // fallback
-    std::string utf8(len, '\0');
-    WideCharToMultiByte(CP_UTF8, 0, wide.c_str(), -1, &utf8[0], len, nullptr, nullptr);
-    while (!utf8.empty() && utf8.back() == '\0') utf8.pop_back();
-    return utf8;
-#else
-    return p.string();
-#endif
-}
-
-// M22-IssueB: Convert UTF-8 string to wide string for filesystem::path construction
-// When a string is already UTF-8 (e.g. from VBP parser), we must NOT use
-// filesystem::path(const char*) which interprets as ACP on Windows.
-// Instead, convert to wstring first and use filesystem::path(wstring).
-static std::wstring utf8ToWide(const std::string& utf8) {
-#ifdef _WIN32
-    if (utf8.empty()) return L"";
-    int wlen = MultiByteToWideChar(CP_UTF8, 0, utf8.c_str(), -1, nullptr, 0);
-    if (wlen <= 0) return L"";
-    std::wstring wide(wlen, L'\0');
-    MultiByteToWideChar(CP_UTF8, 0, utf8.c_str(), -1, &wide[0], wlen);
-    while (!wide.empty() && wide.back() == L'\0') wide.pop_back();
-    return wide;
-#else
-    return std::wstring(utf8.begin(), utf8.end());
-#endif
-}
+// pathToUtf8/utf8ToWide/utf8ToPath moved to common/encoding.hpp
 
 Driver::Driver() : diag_(std::make_unique<Diagnostics>()) {}
 Driver::~Driver() = default;
@@ -228,7 +195,7 @@ CompileResult Driver::compile(const CompileOptions& options) {
             if (!project.exeName.empty()) {
                 // project.exeName is already UTF-8 from VBP parser (GBK→UTF-8)
                 // Must construct path from wstring to avoid ACP reinterpretation
-                std::filesystem::path exePath(utf8ToWide(project.exeName));
+                std::filesystem::path exePath(utf8ToPath(project.exeName));
                 projectBaseName_ = pathToUtf8(exePath.stem());
             } else {
                 std::filesystem::path vbpPath(srcFile);
@@ -423,7 +390,7 @@ CompileResult Driver::compile(const CompileOptions& options) {
     } else {
         // Default: source file directory
         if (effectiveOpts.sourceFiles.size() == 1) {
-            std::filesystem::path srcPath(effectiveOpts.sourceFiles[0]);
+            std::filesystem::path srcPath(utf8ToPath(effectiveOpts.sourceFiles[0]));
             outputDir = pathToUtf8(srcPath.parent_path());
             // parent_path() returns empty for bare filename (e.g. "hello.bas")
             if (outputDir.empty()) outputDir = ".";
@@ -431,9 +398,9 @@ CompileResult Driver::compile(const CompileOptions& options) {
             outputDir = ".";
         }
     }
-    outputDir = pathToUtf8(std::filesystem::absolute(outputDir));
-    if (!std::filesystem::exists(outputDir)) {
-        std::filesystem::create_directories(outputDir);
+    outputDir = pathToUtf8(std::filesystem::absolute(utf8ToPath(outputDir)));
+    if (!std::filesystem::exists(utf8ToPath(outputDir))) {
+        std::filesystem::create_directories(utf8ToPath(outputDir));
     }
 
     // === P11.2: Create session for intermediates ===
@@ -682,7 +649,7 @@ bool Driver::runParser(const CompileOptions& options) {
             }
             // 如果没有 VB_Name 属性，使用文件名（去掉扩展名）作为模块名
             if (module->moduleName.empty()) {
-                std::filesystem::path p(filePath);
+                std::filesystem::path p(utf8ToPath(filePath));
                 module->moduleName = pathToUtf8(p.stem());
             }
             // P7: 保存窗体描述 (此时moduleName已从Attribute VB_Name或文件名确定)
@@ -909,7 +876,7 @@ bool Driver::runCrossModuleResolution() {
     // 为每个模块计算基名（用于sourceModule标识）
     std::vector<std::string> moduleBaseNames;
     for (const auto& module : modules_) {
-        std::filesystem::path p(module->filename);
+        std::filesystem::path p(utf8ToPath(module->filename));
         moduleBaseNames.push_back(pathToUtf8(p.stem()));
     }
 
@@ -1003,7 +970,7 @@ bool Driver::runCodeGeneration(const CompileOptions& options, const std::string&
             baseName = pathToUtf8(p.stem());
         } else {
             // 多文件: 用源文件名作为基名
-            std::filesystem::path p(module->filename);
+            std::filesystem::path p(utf8ToPath(module->filename));
             baseName = pathToUtf8(p.stem());
         }
 
@@ -1091,7 +1058,7 @@ bool Driver::runCodeGeneration(const CompileOptions& options, const std::string&
         // P9: Build TypeLib using CreateTypeLib2 API (replaces MIDL)
         {
             TypeLibBuilder tlbBuilder;
-            std::string tlbPath = std::filesystem::absolute(outputDir + "/" + options.dllProgId + ".tlb").string();
+            std::string tlbPath = pathToUtf8(std::filesystem::absolute(utf8ToPath(outputDir + "/" + options.dllProgId + ".tlb")));
             std::string libId = options.libidStr.empty()
                 ? TypeLibBuilder::generateUuid(options.dllProgId + ".TypeLib")
                 : options.libidStr;
@@ -1298,7 +1265,7 @@ bool Driver::runLinker(const CompileOptions& options, const std::string& outputD
             std::filesystem::path p(options.outputFile);
             baseName = pathToUtf8(p.stem());
         } else {
-            std::filesystem::path p(modules_[i]->filename);
+            std::filesystem::path p(utf8ToPath(modules_[i]->filename));
             baseName = pathToUtf8(p.stem());
         }
         std::string cPath = intermediatesDir + "/" + baseName + ".c";
@@ -1334,7 +1301,7 @@ bool Driver::runLinker(const CompileOptions& options, const std::string& outputD
     } else if (!projectBaseName_.empty()) {
         msvcOpts.outputFile = outputDir + "/" + projectBaseName_ + outputExt;
     } else if (modules_.size() == 1) {
-        std::filesystem::path p(modules_[0]->filename);
+        std::filesystem::path p(utf8ToPath(modules_[0]->filename));
         msvcOpts.outputFile = outputDir + "/" + pathToUtf8(p.stem()) + outputExt;
     } else {
         msvcOpts.outputFile = outputDir + "/a" + outputExt;
@@ -1374,9 +1341,9 @@ bool Driver::runLinker(const CompileOptions& options, const std::string& outputD
 
     // P9: Embed TypeLib into DLL resource
     if (options.isDll && !options.dllProgId.empty()) {
-        std::string tlbPath = std::filesystem::absolute(intermediatesDir + "/" + options.dllProgId + ".tlb").string();
+        std::string tlbPath = pathToUtf8(std::filesystem::absolute(utf8ToPath(intermediatesDir + "/" + options.dllProgId + ".tlb")));
         if (std::filesystem::exists(tlbPath)) {
-            std::string absInterDir = std::filesystem::absolute(intermediatesDir).string();
+            std::string absInterDir = pathToUtf8(std::filesystem::absolute(utf8ToPath(intermediatesDir)));
             std::string rcPath = absInterDir + "\\activex_dll_typelib.rc";
             {
                 std::ofstream rcFile(rcPath, std::ios::out | std::ios::trunc);
@@ -1447,7 +1414,7 @@ bool Driver::runLinker(const CompileOptions& options, const std::string& outputD
 
 void Driver::writeErrorLog(const std::string& logPath, const std::string& stage) {
     // Prepend fail info (also creates file if not exists from MSVC driver)
-    if (!std::filesystem::exists(logPath)) {
+    if (!std::filesystem::exists(utf8ToPath(logPath))) {
         std::ofstream createLog(logPath, std::ios::out);
         createLog << "C3: Compilation failed (stage: " << stage << ")" << std::endl;
     }

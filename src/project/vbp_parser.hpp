@@ -5,6 +5,7 @@
 #include <string>
 #include <vector>
 #include <filesystem>
+#include "common/encoding.hpp"
 
 namespace vb6c3 {
 
@@ -96,10 +97,12 @@ struct VbpProject {
 
     // 获取源文件的绝对路径
     std::filesystem::path resolvePath(const std::string& relativePath) const {
-        if (std::filesystem::path(relativePath).is_absolute()) {
-            return relativePath;
+        // relativePath is UTF-8 (from VBP parser GBK→UTF-8 conversion)
+        // Must use utf8ToPath() to avoid ACP reinterpretation on Windows
+        if (utf8ToPath(relativePath).is_absolute()) {
+            return utf8ToPath(relativePath);
         }
-        return vbpFilePath.parent_path() / relativePath;
+        return vbpFilePath.parent_path() / utf8ToPath(relativePath);
     }
 };
 
