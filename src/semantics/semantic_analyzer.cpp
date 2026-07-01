@@ -1633,6 +1633,8 @@ void SemanticAnalyzer::registerBuiltins() {
     addBuiltinFunc("CCur", Vb6Type::Currency);
     addBuiltinFunc("CDec", Vb6Type::Variant);  // P18-A: CDec returns Variant (Decimal subtype)
     addBuiltinFunc("CVar", Vb6Type::Variant);
+    addBuiltinFunc("Hex", Vb6Type::String);  // P21-02: cgen already maps hex->vb6_Hex
+    addBuiltinFunc("Oct", Vb6Type::String);  // P21-03: cgen already maps oct->vb6_Oct
     addBuiltinFunc("CVErr", Vb6Type::Variant);
     // 数值函数
     addBuiltinFunc("Abs", Vb6Type::Double);
@@ -1650,6 +1652,7 @@ void SemanticAnalyzer::registerBuiltins() {
     addBuiltinFunc("IsObject", Vb6Type::Boolean);
     addBuiltinFunc("IsArray", Vb6Type::Boolean);
     addBuiltinFunc("IsNothing", Vb6Type::Boolean);
+    addBuiltinFunc("IsError", Vb6Type::Boolean);  // P21-01: CVErr detection
     addBuiltinFunc("TypeName", Vb6Type::String);
     addBuiltinFunc("VarType", Vb6Type::Long);
     // 数组

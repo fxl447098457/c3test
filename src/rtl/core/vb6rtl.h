@@ -389,6 +389,12 @@ double vb6_DateAdd(BSTR interval, double number, double date);
 int64_t vb6_DateDiff(BSTR interval, double date1, double date2, int32_t firstDayOfWeek, int32_t firstWeekOfYear);
 int32_t vb6_DatePart(BSTR interval, double date, int32_t firstDayOfWeek, int32_t firstWeekOfYear);
 
+// P21-B: Weekday/DateValue/TimeSerial/TimeValue
+int32_t vb6_Weekday(double date, int32_t firstDayOfWeek);
+double vb6_DateValue(BSTR dateStr);
+double vb6_TimeSerial(int32_t hour, int32_t minute, int32_t second);
+double vb6_TimeValue(BSTR timeStr);
+
 // P14.3.4: App全局对象属性
 BSTR vb6_App_Path(void);     // App.Path - EXE所在目录
 BSTR vb6_App_EXEName(void);  // App.EXEName - EXE文件名(不含扩展名)
@@ -548,6 +554,13 @@ void  vb6_SafeArrayPutElem(vb6_SafeArray1D* arr, int32_t index, void* value);
 // UBound/LBound (替换旧stub)
 int32_t vb6_UBound(vb6_SafeArray1D* safeArray, int32_t dimension);
 int32_t vb6_LBound(vb6_SafeArray1D* safeArray, int32_t dimension);
+
+// P21-B: Array() function support
+vb6_SafeArray1D* vb6_ArrayCreate(int32_t count);
+void vb6_ArraySetLong(vb6_SafeArray1D* arr, int32_t index, int32_t val);
+void vb6_ArraySetDouble(vb6_SafeArray1D* arr, int32_t index, double val);
+void vb6_ArraySetBSTR(vb6_SafeArray1D* arr, int32_t index, BSTR val);
+void vb6_ArraySetVariant(vb6_SafeArray1D* arr, int32_t index, vb6_VARIANT val);
 // ============================================================
 // SAFEARRAY ND - VB6 多维数组
 // ============================================================

@@ -2231,6 +2231,109 @@ int32_t vb6_DatePart(BSTR interval, double date, int32_t firstDayOfWeek, int32_t
     return 0;
 }
 // ============================================================
+
+// ============================================================
+// P21-B: Weekday/DateValue/TimeSerial/TimeValue/Array
+// ============================================================
+
+int32_t vb6_Weekday(double date, int32_t firstDayOfWeek) {
+    /* VB6 Weekday(date[, firstDayOfWeek])
+       Returns the day of the week as an integer.
+       firstDayOfWeek: 1=vbSunday(default), 2=vbMonday, ..., 7=vbSaturday
+       Return: 1-based relative to firstDayOfWeek.
+       For default (vbSunday=1): Sunday=1, Monday=2, ..., Saturday=7 */
+    int32_t d = (int32_t)date;
+    /* 1899-12-30 (serial 0) was a Saturday */
+    int32_t wd = (d % 7 + 7) % 7;  /* 0=Sat,1=Sun,2=Mon,3=Tue,4=Wed,5=Thu,6=Fri */
+    /* Convert to Sunday=1,Monday=2,...,Saturday=7 */
+    int32_t weekday;
+    if (wd == 0) weekday = 7;  /* Saturday */
+    else weekday = wd;         /* Sunday=1,Monday=2,... */
+    
+    /* Adjust for firstDayOfWeek */
+    if (firstDayOfWeek <= 0) firstDayOfWeek = 1;  /* default vbSunday */
+    if (firstDayOfWeek > 7) firstDayOfWeek = 1;
+    if (firstDayOfWeek == 1) return weekday;  /* vbSunday: no shift needed */
+    /* Shift: e.g. vbMonday(2) -> Monday=1,...,Sunday=7 */
+    int32_t shifted = weekday - (firstDayOfWeek - 1);
+    if (shifted < 1) shifted += 7;
+    return shifted;
+}
+
+double vb6_DateValue(BSTR dateStr) {
+    /* VB6 DateValue(datestring) -> date serial (double)
+       Parses a date string using Windows OLE Automation */
+    if (!dateStr) return 0.0;
+    DATE result = 0.0;
+    if (SUCCEEDED(VarDateFromStr(dateStr, LOCALE_USER_DEFAULT, 0, &result))) {
+        return (double)(int32_t)result;
+    }
+    return 0.0;
+}
+
+double vb6_TimeSerial(int32_t hour, int32_t minute, int32_t second) {
+    /* VB6 TimeSerial(hour, minute, second) -> date serial (double)
+       The date part is 0 (Dec 30, 1899), time part is the fraction of day */
+    int32_t totalSeconds = hour * 3600 + minute * 60 + second;
+    while (totalSeconds < 0) totalSeconds += 86400;
+    int32_t extraDays = totalSeconds / 86400;
+    int32_t timeSeconds = totalSeconds % 86400;
+    return (double)extraDays + (double)timeSeconds / 86400.0;
+}
+
+double vb6_TimeValue(BSTR timeStr) {
+    /* VB6 TimeValue(timestring) -> date serial (double)
+       Parses a time string using Windows OLE Automation */
+    if (!timeStr) return 0.0;
+    DATE result = 0.0;
+    if (SUCCEEDED(VarDateFromStr(timeStr, LOCALE_USER_DEFAULT, 0, &result))) {
+        double datePart = (double)(int32_t)result;
+        double timePart = result - datePart;
+        if (timePart < 0) timePart += 1.0;
+        return timePart;
+    }
+    return 0.0;
+}
+
+vb6_SafeArray1D* vb6_ArrayCreate(int32_t count) {
+    /* VB6 Array(arglist) helper: creates a Variant SafeArray with count elements.
+       Caller (cgen) sets each element directly via VB6_SA_AT. */
+    if (count <= 0) count = 0;
+    vb6_SafeArray1D* arr = vb6_SafeArrayCreate1D(vb6_sa_variant, 0, count > 0 ? count - 1 : 0);
+    return arr;
+}
+
+void vb6_ArraySetLong(vb6_SafeArray1D* arr, int32_t index, int32_t val) {
+    if (!arr || index < arr->lBound || index > arr->uBound) return;
+    vb6_VARIANT* v = &VB6_SA_AT(vb6_VARIANT, arr, index);
+    vb6_VariantClear(v);
+    v->vt = vb6_vtLong;
+    v->lVal = val;
+}
+
+void vb6_ArraySetDouble(vb6_SafeArray1D* arr, int32_t index, double val) {
+    if (!arr || index < arr->lBound || index > arr->uBound) return;
+    vb6_VARIANT* v = &VB6_SA_AT(vb6_VARIANT, arr, index);
+    vb6_VariantClear(v);
+    v->vt = vb6_vtDouble;
+    v->dblVal = val;
+}
+
+void vb6_ArraySetBSTR(vb6_SafeArray1D* arr, int32_t index, BSTR val) {
+    if (!arr || index < arr->lBound || index > arr->uBound) return;
+    vb6_VARIANT* v = &VB6_SA_AT(vb6_VARIANT, arr, index);
+    vb6_VariantClear(v);
+    v->vt = vb6_vtBSTR;
+    v->bstrVal = vb6_BSTR_FromBSTR(val);
+}
+
+void vb6_ArraySetVariant(vb6_SafeArray1D* arr, int32_t index, vb6_VARIANT val) {
+    if (!arr || index < arr->lBound || index > arr->uBound) return;
+    vb6_VARIANT* v = &VB6_SA_AT(vb6_VARIANT, arr, index);
+    vb6_VariantClear(v);
+    vb6_VariantCopy(v, &val);
+}
+
 // 类型转换 (补充)
 // ============================================================
 

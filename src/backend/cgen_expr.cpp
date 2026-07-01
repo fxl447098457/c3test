@@ -379,6 +379,11 @@ void CCodeGen::visit(IdentifierExpr& node) {
         {"datediff", "vb6_DateDiff"},
         {"datepart", "vb6_DatePart"},
         {"dateserial", "vb6_DateSerial"},
+        // P21-B: 日期/数组函数
+        {"weekday",  "vb6_Weekday"},
+        {"datevalue","vb6_DateValue"},
+        {"timeserial","vb6_TimeSerial"},
+        {"timevalue","vb6_TimeValue"},
         // 类型转换 (P4新增)
         {"cbyte",    "vb6_CByte"},
         {"cvar",     "vb6_CVar"},
@@ -1294,6 +1299,51 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
         }
     }
 
+        // P21-B: Array(arglist) special handling - creates a Variant SafeArray
+    // Array(1, "hello", 3.14) → vb6_ArrayCreate(3) + vb6_ArraySetLong/SetBSTR/SetDouble
+    if (node.callee && node.callee->kind == ASTNodeKind::IdentifierExpr) {
+        auto& arrIdent = static_cast<IdentifierExpr&>(*node.callee);
+        std::string arrLower = arrIdent.name;
+        std::transform(arrLower.begin(), arrLower.end(), arrLower.begin(), ::tolower);
+        if (arrLower == "array" && node.positional.size() >= 0) {
+            int count = (int)node.positional.size();
+            std::string arrVar = "_arr_" + std::to_string(tempCounter_++);
+            if (count > 0) {
+                c_.emitLine("vb6_SafeArray1D* " + arrVar + " = vb6_ArrayCreate(" + std::to_string(count) + ");");
+                for (int i = 0; i < count; i++) {
+                    emitExpr(*node.positional[i]);
+                    std::string argExpr = std::move(lastExpr_);
+                    // Detect argument type for proper setter selection
+                    bool isLongArg = false;
+                    bool isDoubleArg = false;
+                    if (node.positional[i]->kind == ASTNodeKind::LiteralExpr) {
+                        auto& lit = static_cast<LiteralExpr&>(*node.positional[i]);
+                        if (lit.literalKind == LiteralKind::Integer) isLongArg = true;
+                        else if (lit.literalKind == LiteralKind::Double) isDoubleArg = true;
+                    }
+                    if (isLongArg) {
+                        c_.emitLine("vb6_ArraySetLong(" + arrVar + ", " + std::to_string(i) + ", " + argExpr + ");");
+                    } else if (isDoubleArg) {
+                        c_.emitLine("vb6_ArraySetDouble(" + arrVar + ", " + std::to_string(i) + ", " + argExpr + ");");
+                    } else {
+                        bool looksLikeBSTR = (argExpr.find("vb6_BSTR") != std::string::npos ||
+                                              argExpr.find("L\"") != std::string::npos);
+                        if (looksLikeBSTR) {
+                            c_.emitLine("vb6_ArraySetBSTR(" + arrVar + ", " + std::to_string(i) + ", " + argExpr + ");");
+                        } else {
+                            // Default: treat as Long (covers variable references etc.)
+                            c_.emitLine("vb6_ArraySetLong(" + arrVar + ", " + std::to_string(i) + ", " + argExpr + ");");
+                        }
+                    }
+                }
+            } else {
+                c_.emitLine("vb6_SafeArray1D* " + arrVar + " = vb6_ArrayCreate(0);");
+            }
+            lastExpr_ = arrVar;
+            return;
+        }
+    }
+
     // 函数调用路径 (原有逻辑)
     // M22: 设置asCallCallee_标志, 让IdentifierExpr知道当前是函数调用callee上下文
     // 这确保递归调用时(如 Factorial(n-1))返回函数名而非返回值变量
@@ -2156,6 +2206,13 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
             argList += ", -1, 0";
         } else if (args.size() == 5) {
             argList += ", 0";
+        }
+    }
+
+    // P21-B: Weekday(date[, firstDayOfWeek]) - default firstDayOfWeek=1 (vbSunday)
+    if (callee == "vb6_Weekday") {
+        if (args.size() == 1) {
+            argList += ", 1";
         }
     }
 
