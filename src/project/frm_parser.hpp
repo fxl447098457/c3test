@@ -65,8 +65,10 @@ struct FrmValue {
 // ============================================================
 
 struct FrmPropertyBlock {
-    std::string blockName;          // "Font", "FontTrans", 等
-    std::map<std::string, FrmValue> properties;   // Name="MS Sans Serif", Size=8.25, 等
+    std::string blockName;          // "Font", "Images", "ListImage1", 等
+    std::string blockGuid;          // GUID (含花括号): "{2C247F25-8591-11D1-B16A-00C0F0283628}", 无GUID时为空
+    std::map<std::string, FrmValue> properties;   // Name="MS Sans Serif", Size=8.25, Picture="Form1.frx":1A89, 等
+    std::vector<FrmPropertyBlock> nestedBlocks;   // 嵌套 BeginProperty 块 (如 ListImage1..N 嵌套在 Images 内)
 };
 
 // ============================================================

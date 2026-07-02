@@ -218,19 +218,36 @@ const char* FrmParser::controlTypeToVb6Name(FrmControlType type) {
 FrmPropertyBlock FrmParser::parsePropertyBlock(
     const std::vector<std::string>& lines,
     size_t& lineIdx) {
-    // 当前行: BeginProperty Font
-    //   Name = "MS Sans Serif"
-    //   Size = 8.25
-    // EndProperty
+    // 当前行格式:
+    //   BeginProperty Font
+    //   BeginProperty Images {2C247F25-8591-11D1-B16A-00C0F0283628}
+    //     NumListImages = 5
+    //     BeginProperty ListImage1 {2C247F27-8591-11D1-B16A-00C0F0283628}
+    //       Picture = "Form1.frx":1A89
+    //       Key = ""
+    //     EndProperty
+    //   EndProperty
 
     FrmPropertyBlock block;
 
-    // 解析 BeginProperty 行
+    // 解析 BeginProperty 行: "BeginProperty Name" 或 "BeginProperty Name {GUID}"
     std::string line = trim(lines[lineIdx]);
-    // "BeginProperty Font" → blockName = "Font"
+    // "BeginProperty Font" → rest = "Font"
+    // "BeginProperty Images {GUID}" → rest = "Images {GUID}"
     auto spacePos = line.find(' ');
     if (spacePos != std::string::npos) {
-        block.blockName = trim(line.substr(spacePos));
+        std::string rest = trim(line.substr(spacePos));
+        // 分离 blockName 和 blockGuid
+        auto bracePos = rest.find('{');
+        if (bracePos != std::string::npos) {
+            block.blockName = trim(rest.substr(0, bracePos));
+            auto endBrace = rest.find('}', bracePos);
+            if (endBrace != std::string::npos) {
+                block.blockGuid = rest.substr(bracePos, endBrace - bracePos + 1);
+            }
+        } else {
+            block.blockName = rest;
+        }
     }
 
     lineIdx++;  // 进入块体
@@ -249,7 +266,14 @@ FrmPropertyBlock FrmParser::parsePropertyBlock(
             break;
         }
 
-        // 属性行
+        // 嵌套 BeginProperty — 递归解析
+        if (curLine.find("BeginProperty") == 0) {
+            auto nested = parsePropertyBlock(lines, lineIdx);
+            block.nestedBlocks.push_back(std::move(nested));
+            continue;
+        }
+
+        // 属性行: Key = Value (包括 "Object.Tag" 等带点号的键)
         std::string key;
         FrmValue value;
         if (parsePropertyLine(curLine, key, value)) {

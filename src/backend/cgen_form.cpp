@@ -1,4 +1,4 @@
-#include "backend/cgen.hpp"
+﻿#include "backend/cgen.hpp"
 #include "project/frx_reader.hpp"
 #include <algorithm>
 #include <cctype>
@@ -1268,10 +1268,67 @@ void CCodeGen::emitFormFramework(const FrmFormDesc& frmDesc, Module& module) {
                 ctrl.controlType == FrmControlType::CommonDialog) {
                 // controlTypeName 即 ProgID, 如 "MSComctlLib.ImageList"
                 std::string progId = ctrl.controlTypeName;
-                std::string wideProgId;
-                for (char c : progId) wideProgId += c; wideProgId += '\0';
                 c_.emitLine("{ CLSID vb6_clsid; CLSIDFromProgID(L\"" + progId + "\", &vb6_clsid);");
                 c_.emitLine("  CoCreateInstance(&vb6_clsid, NULL, 1/*CLSCTX_INPROC_SERVER*/, &IID_IDispatch, (void**)&vb6_com_" + cIdent(ctrl.controlName) + "); }");
+
+                // ImageList: set ImageWidth/ImageHeight and load ListImages from .frx
+                if (ctrl.controlType == FrmControlType::ImageList && frxLoaded) {
+                    std::string comVar = "vb6_com_" + cIdent(ctrl.controlName);
+                    // Set ImageWidth/ImageHeight via COM (must be set before adding images)
+                    auto iwIt = ctrl.properties.find("ImageWidth");
+                    if (iwIt != ctrl.properties.end() && iwIt->second.intValue > 0) {
+                        c_.emitLine("vb6_ComSetProp((void*)" + comVar + ", L\"ImageWidth\", vb6_ComPackInt(" + std::to_string((int)iwIt->second.intValue) + "));");
+                    }
+                    auto ihIt = ctrl.properties.find("ImageHeight");
+                    if (ihIt != ctrl.properties.end() && ihIt->second.intValue > 0) {
+                        c_.emitLine("vb6_ComSetProp((void*)" + comVar + ", L\"ImageHeight\", vb6_ComPackInt(" + std::to_string((int)ihIt->second.intValue) + "));");
+                    }
+
+                    // Find "Images" property block with nested ListImage entries
+                    for (const auto& block : ctrl.propertyBlocks) {
+                        if (block.blockName == "Images") {
+                            int imgIdx = 0;
+                            for (const auto& listImg : block.nestedBlocks) {
+                                // Each nested block is like: blockName="ListImage1", has Picture/Key/Tag
+                                auto picIt = listImg.properties.find("Picture");
+                                if (picIt == listImg.properties.end() || picIt->second.type != FrmValueType::FrxReference) continue;
+
+                                // Read image data from .frx (ImageList format: isImageList=true)
+                                auto pic = FrxReader::readPicture(picIt->second.frxOffset, true);
+                                if (pic.data.empty()) continue;
+
+                                // Generate byte array in .h file
+                                imgIdx++;
+                                std::string varName = "vb6_frx_imglist_" + cIdent(ctrl.controlName) + "_" + std::to_string(imgIdx);
+                                h_.emitLine(bytesToHexArray(pic.data.data(), pic.data.size(), varName));
+
+                                // Get Key property (may be empty string)
+                                std::string keyStr;
+                                auto keyIt = listImg.properties.find("Key");
+                                if (keyIt != listImg.properties.end() && keyIt->second.type == FrmValueType::String) {
+                                    std::string raw = keyIt->second.rawText;
+                                    if (raw.size() >= 2 && raw.front() == '"' && raw.back() == '"') keyStr = raw.substr(1, raw.size() - 2);
+                                }
+
+                                // ListImages.Add(index, key, picture) via COM
+                                // Get ListImages collection, then call Add method
+                                c_.emitLine("{ void* vb6_lstImgs = vb6_ComGetObjectProp((void*)" + comVar + ", L\"ListImages\");");
+                                c_.emitLine("  if (vb6_lstImgs) {");
+                                c_.emitLine("    void* vb6_picCom = vb6_LoadPictureAsCom(" + varName + ", " + varName + "_size);");
+                                c_.emitLine("    if (vb6_picCom) {");
+                                // args: [index, key, picture] -- VB6 positional parameter order
+                                c_.emitLine("      void* vb6_args[] = { vb6_ComPackInt(" + std::to_string(imgIdx) + "), vb6_ComPackBSTR(L\"" + keyStr + "\"), vb6_ComPackObject(vb6_picCom) };");
+                                c_.emitLine("      vb6_ComCall(vb6_lstImgs, L\"Add\", vb6_args, 3);");
+                                c_.emitLine("      vb6_ReleaseObject(&vb6_picCom);");
+                                c_.emitLine("    }");
+                                c_.emitLine("    vb6_ReleaseObject(&vb6_lstImgs);");
+                                c_.emitLine("  } }");
+                            }
+                            break;  // Only one "Images" block expected
+                        }
+                    }
+                }
+
                 ctrlId++;
                 continue;
             }
@@ -1385,7 +1442,7 @@ void CCodeGen::emitFormFramework(const FrmFormDesc& frmDesc, Module& module) {
                 style |= kBsGroupBox;
                 break;
             case FrmControlType::ListBox: {
-                style |= kLbsNotify | kWsBorder;
+                style |= kLbsNotify | kWsBorder | kWsVscroll;  // VB6 ListBox always shows vertical scrollbar
                 // Sorted: LBS_SORT = 0x0002
                 auto sortIt = ctrl.properties.find("Sorted");
                 if (sortIt != ctrl.properties.end() && sortIt->second.intValue != 0) style |= 0x0002L;
@@ -1652,7 +1709,7 @@ ctrlId++;
             if (pIt != ctrl.properties.end()) enabled = (int)pIt->second.intValue;
             std::string timerFn = cProcName(ctrl.controlName + "_Timer", AccessLevel::Private);
             if (enabled) {
-                c_.emitLine("vb6_SetTimer(" + std::to_string(interval) + ", (void*)" + timerFn + ");");
+                c_.emitLine("{ extern void " + timerFn + "(); vb6_SetTimer(" + std::to_string(interval) + ", (void*)" + timerFn + "); }");
             }
         }
     }

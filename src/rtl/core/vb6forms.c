@@ -1657,6 +1657,57 @@ void* vb6_LoadPictureFromMemory(const void* data, int size) {
     return (void*)result;
 }
 
+// ============================================================
+// Load picture from memory buffer as COM IDispatch* (IPictureDisp)
+// Returns IDispatch* suitable for passing to COM property/method calls
+// e.g. ImageList.ListImages.Add(index, key, picture)
+// Caller must Release the returned IDispatch* when done (via vb6_ReleaseObject)
+// ============================================================
+void* vb6_LoadPictureAsCom(const void* data, int size) {
+    if (!data || size <= 0) return NULL;
+
+    /* Ensure COM is initialized */
+    static int oleInited2 = 0;
+    if (!oleInited2) {
+        if (SUCCEEDED(OleInitialize(NULL))) {
+            oleInited2 = 1;
+        } else {
+            CoInitialize(NULL);
+            oleInited2 = 2;
+        }
+    }
+
+    /* Create IStream from memory */
+    HGLOBAL hMem = GlobalAlloc(GMEM_MOVEABLE, (SIZE_T)size);
+    if (!hMem) return NULL;
+    void* pMem = GlobalLock(hMem);
+    if (!pMem) { GlobalFree(hMem); return NULL; }
+    memcpy(pMem, data, (size_t)size);
+    GlobalUnlock(hMem);
+
+    IStream* pStream = NULL;
+    HRESULT hr = CreateStreamOnHGlobal(hMem, TRUE, &pStream);
+    if (FAILED(hr) || !pStream) {
+        GlobalFree(hMem);
+        return NULL;
+    }
+
+    /* Load picture as IPictureDisp (IDispatch) */
+    IPictureDisp* pPictureDisp = NULL;
+    /* IID_IPictureDisp = {7BF80981-BF32-101A-8BBB-00AA00300CAB} */
+    static const GUID local_IID_IPictureDisp =
+        {0x7BF80981, 0xBF32, 0x101A, {0x8B, 0xBB, 0x00, 0xAA, 0x00, 0x30, 0x0C, 0xAB}};
+    hr = OleLoadPicture(pStream, (LONG)size, FALSE, &local_IID_IPictureDisp, (void**)&pPictureDisp);
+
+    pStream->lpVtbl->Release(pStream);
+
+    if (FAILED(hr) || !pPictureDisp) {
+        return NULL;
+    }
+
+    /* Return as IDispatch* — caller owns the reference and must Release */
+    return (void*)pPictureDisp;
+}
 void* vb6_LoadIconFromMemory(const void* data, int size) {
     /* Load ICO data and return HICON by directly parsing .ico file format.
        .ico format: [2B reserved=0] [2B type=1] [2B count] [count*16B dir entries] [image data...]

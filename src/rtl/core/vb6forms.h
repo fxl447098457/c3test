@@ -327,7 +327,13 @@ void* vb6_LoadPictureFromFile(const char* filePath);
 void* vb6_LoadPictureFromResource(void* hInstance, int resourceId, const char* type);
 // P24: Load picture from memory buffer (JPEG/BMP/ICO/PNG/GIF via OleLoadPicture + IStream)
 // Returns HBITMAP/HICON handle, or NULL on failure
+
 void* vb6_LoadPictureFromMemory(const void* data, int size);
+// Load picture from memory as COM IDispatch* (IPictureDisp)
+// For passing pictures to COM controls (e.g. ImageList.ListImages.Add)
+// Caller must Release the returned IDispatch* (via vb6_ReleaseObject)
+void* vb6_LoadPictureAsCom(const void* data, int size);
+
 void* vb6_LoadIconFromMemory(const void* data, int size);
 
 void vb6_GraphicalBtn_SetImage(void* hwnd, void* hBitmap);

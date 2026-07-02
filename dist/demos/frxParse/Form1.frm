@@ -11,7 +11,12 @@ Begin VB.Form Form1
    Picture         =   "Form1.frx":10CA
    ScaleHeight     =   6945
    ScaleWidth      =   11055
-   StartUpPosition =   3  '窗口缺省
+   StartUpPosition =   1  '所有者中心
+   Begin VB.Timer Timer1 
+      Interval        =   1000
+      Left            =   6360
+      Top             =   5880
+   End
    Begin VB.PictureBox Picture2 
       Height          =   855
       Left            =   7080
@@ -167,21 +172,32 @@ Attribute VB_PredeclaredId = True
 Attribute VB_Exposed = False
 Option Explicit
 
+Dim dic As New Scripting.Dictionary
+
 Private Sub Command1_Click()
-    Static i As Long
-    If i = 0 Or i = 6 Then i = 1
-    Picture2.Picture = ImageList1.ListImages(i).Picture
-    i = i + 1
+    MsgBox dic.Count
 End Sub
 
 Private Sub Form_Load()
-    Dim a As String * 10, i As Long
+    Dim a As String * 10, i As Long, b
+    List1.AddItem "图片：" & ImageList1.ListImages.Count
     For i = 0 To 10
         LSet a = "等等"
         List1.AddItem a & Now
     Next
+    For Each b In ImageList1.ListImages
+        dic.Add CStr(b.Index), b.Picture
+    Next
+'    Me.Caption = "Power by vbman - " & VBMAN.Version()
 End Sub
 
 Private Sub Option1_Click(Index As Integer)
     Command1.Enabled = CBool(Index)
+End Sub
+
+Private Sub Timer1_Timer()
+    Static i As Long
+    If i = 0 Or i = 6 Then i = 1
+    Picture2.Picture = ImageList1.ListImages(i).Picture
+    i = i + 1
 End Sub
