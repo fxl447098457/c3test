@@ -144,7 +144,37 @@ esolveTypeOrDefault
 
 74/74 全部通过，零回归。
 
-## 待推进
+## P22 第四轮扩展 (P22-10~11)
 
-- For Each COM集合(IEnumVARIANT)
-- UDT LSet复赋值 (LSet udt1 = udt2)
+### P22-10: UDT LSet 内存拷贝
+
+VB6中 LSet udt1 = udt2 将UDT2的原始内存拷贝到UDT1（截断到目标大小）。
+
+**实现**: cgen_stmt.cpp 的 LSet/RSet 拦截块增加 UDT 检测：
+- 查 knownUdtVars_ 判断目标变量是否是 UDT
+- UDT路径: memcpy(&tgt, &src, sizeof(vb6_type_UdtName))
+- 非UDT路径: 保持原有 BSTR vb6_LSet/vb6_RSet
+
+### P22-11: For Each COM 集合 (IEnumVARIANT)
+
+VB6 For Each item In collection 针对COM集合对象的标准遍历方式。
+
+**实现**:
+- vb6com.c: 三个RTL函数
+  - b6_ForEach_Init(disp): 调用IDispatch::Invoke(DISPID -4, _NewEnum)获取IEnumVARIANT
+  - b6_ForEach_Next(enumPtr, &var): 调用IEnumVARIANT::Next(1, &var, &fetched)
+  - b6_ForEach_Release(enumPtr): 释放IEnumVARIANT
+- cgen_stmt.cpp: 非数组集合分支生成IEnumVARIANT while循环
+- vb6com.h/vb6rtl.h: 函数声明
+
+## 回归测试
+
+74/74 全部通过，零回归。
+
+## P22 完成总结
+
+P22共完成11项任务，VB6语言覆盖率大幅提升：
+- 语句: 91.7% → ~97% (Width#+LSet/RSet语句+DefType+Date$/Time$+UDT LSet)
+- 常量: 216 → 274 (从~60%提升到~78%)
+- For Each: 数组+COM双路径支持
+- VBP: 版本信息键名修复+CompatibleMode/StartMode解析

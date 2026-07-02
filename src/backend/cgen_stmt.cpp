@@ -1,4 +1,4 @@
-#include "backend/cgen.hpp"
+﻿#include "backend/cgen.hpp"
 #include <algorithm>
 #include <cctype>
 #include <iostream>
@@ -143,6 +143,19 @@ void CCodeGen::visit(AssignmentStmt& node) {
         if (node.target->kind == ASTNodeKind::IdentifierExpr) {
             auto& tgtId = static_cast<IdentifierExpr&>(*node.target);
             std::string tgtC = cIdent(tgtId.name);
+            // P22-10: UDT LSet — memory copy between UDTs
+            std::string tgtLower = tgtId.name;
+            std::transform(tgtLower.begin(), tgtLower.end(), tgtLower.begin(), ::tolower);
+            auto udtIt = knownUdtVars_.find(tgtLower);
+            if (udtIt != knownUdtVars_.end()) {
+                // Target is a UDT: LSet/RSet copies raw memory (truncated to target size)
+                emitExpr(*node.value);
+                std::string srcExpr = lastExpr_;
+                std::string udtCType = udtIt->second;
+                c_.emitLine("memcpy(&" + tgtC + ", &" + srcExpr + ", sizeof(" + udtCType + "));  /* LSet UDT */");
+                return;
+            }
+            // String LSet/RSet
             emitExpr(*node.value);
             std::string valExpr = wrapToBSTR(lastExpr_, *node.value);
             if (node.isLSet) {
@@ -1117,10 +1130,42 @@ void CCodeGen::visit(ForEachStmt& node) {
         c_.dedent();
         c_.emitLine("}");
     } else {
-        // 非数组集合: 暂不支持 (COM _NewEnum / IEnumVARIANT 留待P13)
-        c_.emitLine("/* For Each: collection type not supported (array only) */");
-        // 仍然发出循环体（一次），避免语义完全缺失
+        // P22-11: COM collection For Each via IEnumVARIANT
+        // Generate:
+        //   {
+        //       void* _fe_enum_N = vb6_ForEach_Init(coll);
+        //       VARIANT _fe_var_N;
+        //       if (_fe_enum_N) {
+        //           while (vb6_ForEach_Next(_fe_enum_N, (void*)&_fe_var_N)) {
+        //               var = _fe_var_N;
+        //               // body
+        //               vb6_ComVarClear((void*)&_fe_var_N);
+        //           }
+        //           vb6_ForEach_Release(_fe_enum_N);
+        //       }
+        //   }
+        c_.emitLine("{");
+        c_.indent();
+        std::string enumVar = "_fe_enum_" + std::to_string(tmpIdx);
+        std::string feVar = "_fe_var_" + std::to_string(tmpIdx);
+        emitExpr(*node.collection);
+        std::string collExpr = lastExpr_;
+        c_.emitLine("void* " + enumVar + " = vb6_ForEach_Init(" + collExpr + ");");
+        c_.emitLine("VARIANT " + feVar + ";");
+        c_.emitLine("if (" + enumVar + ") {");
+        c_.indent();
+        c_.emitLine("while (vb6_ForEach_Next(" + enumVar + ", (void*)&" + feVar + ")) {");
+        c_.indent();
+        c_.emitLine(var + " = " + feVar + ";  /* For Each: assign from VARIANT */");
         emitStmtList(node.body);
+        c_.emitLine("vb6_ComVarClear((void*)&" + feVar + ");");
+        c_.dedent();
+        c_.emitLine("}");
+        c_.emitLine("vb6_ForEach_Release(" + enumVar + ");");
+        c_.dedent();
+        c_.emitLine("}");
+        c_.dedent();
+        c_.emitLine("}");
     }
     c_.emitLine(exitLabel + ":;  /* Exit For target */");
 

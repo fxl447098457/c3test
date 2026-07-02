@@ -1,4 +1,4 @@
-// vb6com.c - VB6 COM互操作运行时实现 (P6)
+﻿// vb6com.c - VB6 COM互操作运行时实现 (P6)
 // 使用Windows原生COM API, 独立于vb6rtl.h避免VARIANT冲突
 
 #include "vb6com.h"
@@ -931,4 +931,80 @@ void vb6_FreeEventSink(void* sink) {
     if (!sink) return;
     IDispatch* pDisp = (IDispatch*)sink;
     pDisp->lpVtbl->Release(pDisp);
+}
+
+// ============================================================
+// P22-11: For Each COM collection (IEnumVARIANT)
+// ============================================================
+
+// For Each Init: Call _NewEnum (DISPID -4) on collection object to get IEnumVARIANT
+// Returns IEnumVARIANT* (or NULL on failure)
+void* vb6_ForEach_Init(void* disp) {
+    if (!disp) return NULL;
+    IDispatch* pDisp = (IDispatch*)disp;
+
+    // DISPID -4 is the standard _NewEnum dispid in VB6/Automation
+    DISPPARAMS dp = { NULL, NULL, 0, 0 };
+    VARIANT result;
+    VariantInit(&result);
+
+    HRESULT hr = pDisp->lpVtbl->Invoke(pDisp, (DISPID)-4,
+        &IID_NULL, LOCALE_USER_DEFAULT,
+        DISPATCH_METHOD | DISPATCH_PROPERTYGET,
+        &dp, &result, NULL, NULL);
+
+    if (FAILED(hr) || (V_VT(&result) != VT_UNKNOWN && V_VT(&result) != VT_DISPATCH)) {
+        // Try named invocation as fallback
+        OLECHAR* names[] = { L"_NewEnum" };
+        DISPID dispid;
+        hr = pDisp->lpVtbl->GetIDsOfNames(pDisp, &IID_NULL, names, 1,
+            LOCALE_USER_DEFAULT, &dispid);
+        if (SUCCEEDED(hr)) {
+            hr = pDisp->lpVtbl->Invoke(pDisp, dispid,
+                &IID_NULL, LOCALE_USER_DEFAULT,
+                DISPATCH_METHOD | DISPATCH_PROPERTYGET,
+                &dp, &result, NULL, NULL);
+        }
+    }
+
+    if (FAILED(hr)) {
+        VariantClear(&result);
+        return NULL;
+    }
+
+    // Get IEnumVARIANT from the returned IUnknown/IDispatch
+    IEnumVARIANT* pEnum = NULL;
+    if (V_VT(&result) == VT_UNKNOWN && V_UNKNOWN(&result)) {
+        hr = V_UNKNOWN(&result)->lpVtbl->QueryInterface(
+            V_UNKNOWN(&result), &IID_IEnumVARIANT, (void**)&pEnum);
+    } else if (V_VT(&result) == VT_DISPATCH && V_DISPATCH(&result)) {
+        hr = V_DISPATCH(&result)->lpVtbl->QueryInterface(
+            V_DISPATCH(&result), &IID_IEnumVARIANT, (void**)&pEnum);
+    }
+
+    VariantClear(&result);
+    return (void*)pEnum;
+}
+
+// For Each Next: Fetch one element from IEnumVARIANT
+// Returns 1 if element fetched, 0 if enumeration complete
+int32_t vb6_ForEach_Next(void* enumPtr, VARIANT* outVar) {
+    if (!enumPtr || !outVar) return 0;
+    IEnumVARIANT* pEnum = (IEnumVARIANT*)enumPtr;
+
+    VariantInit(outVar);
+    ULONG fetched = 0;
+    HRESULT hr = pEnum->lpVtbl->Next(pEnum, 1, outVar, &fetched);
+    if (FAILED(hr) || fetched == 0) {
+        VariantClear(outVar);
+        return 0;
+    }
+    return 1;
+}
+
+// For Each Release: Release IEnumVARIANT
+void vb6_ForEach_Release(void* enumPtr) {
+    if (!enumPtr) return;
+    IEnumVARIANT* pEnum = (IEnumVARIANT*)enumPtr;
+    pEnum->lpVtbl->Release(pEnum);
 }

@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 // vb6com.h - VB6 COM互操作运行时 (P6)
 // 独立于vb6rtl.h, 避免VARIANT定义冲突
 // 此文件使用Windows原生VARIANT/IDispatch等类型
@@ -143,6 +143,11 @@ void* vb6_CreateEventSink(const int* dispids, void** callbacks, int count);
 void vb6_FreeEventSink(void* sink);
 void vb6_ComInit(void);
 void vb6_ComExit(void);
+
+// P22-11: For Each COM collection (IEnumVARIANT)
+void* vb6_ForEach_Init(void* disp);       // Call _NewEnum, return IEnumVARIANT*
+int32_t vb6_ForEach_Next(void* enumPtr, VARIANT* outVar);  // Next element, returns 1=ok 0=done
+void vb6_ForEach_Release(void* enumPtr);  // Release IEnumVARIANT
 
 #ifdef __cplusplus
 }

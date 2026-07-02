@@ -701,6 +701,11 @@ BSTR vb6_Tab(int32_t column);
 // P21-29: Spc — print space insertion
 BSTR vb6_Spc(int32_t count);
 
+// P22-11: For Each COM collection (IEnumVARIANT) - cgen uses these via void*
+void* vb6_ForEach_Init(void* disp);
+int32_t vb6_ForEach_Next(void* enumPtr, void* outVar);  // outVar is VARIANT*
+void vb6_ForEach_Release(void* enumPtr);
+
 // P21-19: IRR — internal rate of return
 double vb6_IRR(void* valuesArray, double guess);
 
