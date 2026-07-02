@@ -3253,6 +3253,17 @@ static LRESULT CALLBACK vb6_GraphicalBtnSubclassProc(HWND hwnd, UINT msg, WPARAM
         EndPaint(hwnd, &ps);
         return 0;
     }
+    /* State-change messages: let default proc handle, then force our repaint.
+       Default button wndproc directly draws to DC (bypassing WM_PAINT),
+       which overwrites our custom picture+text. Force InvalidateRect after. */
+    if (msg == WM_SETFOCUS || msg == WM_KILLFOCUS ||
+        msg == WM_ENABLE || msg == WM_CANCELMODE ||
+        (msg == BM_SETCHECK) || (msg == BM_SETSTATE)) {
+        WNDPROC origProc = (WNDPROC)GetPropW(hwnd, L"VB6_GfxBtn_OrigProc");
+        LRESULT result = CallWindowProcW(origProc, hwnd, msg, wp, lp);
+        InvalidateRect(hwnd, NULL, FALSE);
+        return result;
+    }
     if (msg == WM_ERASEBKGND) {
         /* We handle all drawing in WM_PAINT, no need to erase background */
         return 1;
