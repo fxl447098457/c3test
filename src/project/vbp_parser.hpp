@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 // VB6 工程文件 (.vbp) 解析器
 // .vbp 是纯文本行导向的INI风格文件, 每行 Key=Value
 
@@ -91,6 +91,10 @@ struct VbpProject {
     std::string comments;
     std::string legalTrademarks;
     std::string originalFileName;
+
+    // P22: ActiveX 二进制兼容和启动模式
+    int compatibleMode = 0;  // 0=None, 1=Project, 2=Binary
+    int startMode = 0;       // 0=Standalone, 1=ActiveX
 
     // .vbp 文件路径 (用于解析相对路径)
     std::filesystem::path vbpFilePath;

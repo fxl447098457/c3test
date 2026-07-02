@@ -1,4 +1,4 @@
-// vb6c3 - VB6工程文件(.vbp)解析器
+﻿// vb6c3 - VB6工程文件(.vbp)解析器
 // .vbp 是纯文本行导向的INI风格文件, 每行 Key=Value
 
 #include "project/vbp_parser.hpp"
@@ -227,6 +227,10 @@ VbpProject VbpParser::parseString(const std::string& content, const std::string&
             try { project.compilationType = std::stoi(value); } catch (...) {}
         } else if (key == "OptimizationType") {
             try { project.optimizationType = std::stoi(value); } catch (...) {}
+        } else if (key == "CompatibleMode") {
+            try { project.compatibleMode = std::stoi(value); } catch (...) {}
+        } else if (key == "StartMode") {
+            try { project.startMode = std::stoi(value); } catch (...) {}
         }
         // 版本信息 (P20-22)
         else if (key == "MajorVer") { try { project.majorVer = std::stoi(value); } catch (...) {} }

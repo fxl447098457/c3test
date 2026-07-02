@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 // VB6语义分析器 - 符号表构建 + 类型检查
 // 两遍扫描: Pass1收集声明, Pass2分析过程体
 
@@ -122,6 +122,10 @@ private:
     // Option Explicit 标志
     bool optionExplicit_ = false;
 
+    // P22: DefType mapping - letter -> implicit type
+    Vb6Type defTypeMap_[26];  // index = toupper(letter) - 'A', default Variant
+    bool defTypeActive_ = false;  // whether any DefType is declared
+
     // With 语句对象类型栈
     std::vector<Vb6Type> withStack_;
 
@@ -133,6 +137,7 @@ private:
 
     // 解析TypeRefPtr为Vb6Type
     Vb6Type resolveTypeRef(ASTNode* typeRef);
+    Vb6Type resolveTypeOrDefault(const std::string& name, ASTNode* typeRef);  // P22: DefType-aware
 
     // 注册单个声明到符号表 (Pass1)
     void registerDecl(Decl& decl);

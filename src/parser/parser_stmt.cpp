@@ -1,4 +1,4 @@
-// vb6c3 - 语句解析器
+﻿// vb6c3 - 语句解析器
 // VB6 块语句 + 单行语句
 
 #include "parser/parser.hpp"
@@ -249,6 +249,31 @@ StmtPtr Parser::parseStatement() {
                 std::make_unique<IdentifierExpr>(loc, "MsgBox"));
             callExpr->positional = std::move(args);
             return std::make_unique<CallStmt>(loc, std::move(callExpr));
+        }
+
+        // P22: LSet/RSet statement form (LSet strVar = strExpr / RSet strVar = strExpr)
+        case TokenKind::LSet:
+        case TokenKind::RSet: {
+            auto loc = currentLoc();
+            bool isLSet = (cur_.kind == TokenKind::LSet);
+            advance();  // consume LSet/RSet
+            if (!canBeName(cur_.kind)) {
+                diag_.error(DiagnosticID::ParseExpectedToken, loc,
+                    isLSet ? "LSet statement requires variable name" : "RSet statement requires variable name");
+                return nullptr;
+            }
+            auto targetName = advance();
+            if (!match(TokenKind::Equals)) {
+                diag_.error(DiagnosticID::ParseExpectedToken, loc,
+                    isLSet ? "LSet statement requires =" : "RSet statement requires =");
+                return nullptr;
+            }
+            auto value = parseExpression();
+            auto assignStmt = std::make_unique<AssignmentStmt>(loc,
+                std::make_unique<IdentifierExpr>(loc, targetName.text), std::move(value));
+            if (isLSet) assignStmt->isLSet = true;
+            else assignStmt->isRSet = true;
+            return assignStmt;
         }
 
         default:

@@ -1,4 +1,4 @@
-#include "backend/cgen.hpp"
+﻿#include "backend/cgen.hpp"
 #include <algorithm>
 #include <cctype>
 #include <iostream>
@@ -135,6 +135,21 @@ void CCodeGen::visit(AssignmentStmt& node) {
         if (_tgtLower22 == "time") {
             emitExpr(*node.value);
             c_.emitLine("vb6_TimeSet(" + wrapToBSTR(lastExpr_, *node.value) + ");  /* Time$ = ... */");
+            return;
+        }
+    }
+    // P22: LSet/RSet statement (LSet strVar = expr / RSet strVar = expr)
+    if (node.isLSet || node.isRSet) {
+        if (node.target->kind == ASTNodeKind::IdentifierExpr) {
+            auto& tgtId = static_cast<IdentifierExpr&>(*node.target);
+            std::string tgtC = cIdent(tgtId.name);
+            emitExpr(*node.value);
+            std::string valExpr = wrapToBSTR(lastExpr_, *node.value);
+            if (node.isLSet) {
+                c_.emitLine("vb6_BSTR_Assign(&" + tgtC + ", vb6_LSet(" + valExpr + ", SysStringLen(" + tgtC + ")));  /* LSet */");
+            } else {
+                c_.emitLine("vb6_BSTR_Assign(&" + tgtC + ", vb6_RSet(" + valExpr + ", SysStringLen(" + tgtC + ")));  /* RSet */");
+            }
             return;
         }
     }

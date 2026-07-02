@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 // vb6c - Visual Basic 6.0 Compiler
 // AST节点体系 - 覆盖VB6全部语法结构
 // P1.1 定义
@@ -539,6 +539,8 @@ class AssignmentStmt : public Stmt {
 public:
     ExprPtr target;   // 左值
     ExprPtr value;    // 右值
+    bool isLSet = false;  // P22: LSet statement form
+    bool isRSet = false;  // P22: RSet statement form
 
     AssignmentStmt(SourceLocation loc, ExprPtr t, ExprPtr v)
         : Stmt(ASTNodeKind::AssignmentStmt, loc),

@@ -1,3 +1,14 @@
+﻿---
+AIGC:
+  ContentProducer: '001191110102MAD55U9H0F10002'
+  ContentPropagator: '001191110102MAD55U9H0F10002'
+  Label: '1'
+  ProduceID: '376d9e22-5439-453f-8a42-9179cf57bd43'
+  PropagateID: '376d9e22-5439-453f-8a42-9179cf57bd43'
+  ReservedCode1: '6995a3f7-57e5-475a-a73c-f13b6ce3eac6'
+  ReservedCode2: '6995a3f7-57e5-475a-a73c-f13b6ce3eac6'
+---
+
 # 39-P22-VB6覆盖率综合分析与缝隙补全
 
 > 日期: 2026-07-02
@@ -74,10 +85,42 @@ VB6中 `Date$ = "12-31-2025"` 和 `Time$ = "23:59:59"` 是设置系统日期/时
 
 74/74 全部通过，零回归。
 
+## P22 第二轮扩展 (P22-05~07)
+
+### P22-05: DefType 实际影响类型推断
+
+**问题**: DefInt A-Z 等声明已被解析到 AST，但语义分析完全忽略，变量无显式 As 子句时一律为 Variant。
+
+**实现**:
+- semantic_analyzer.hpp: 添加 defTypeMap_[26] 映射表 + defTypeActive_ 标志
+- semantic_analyzer.cpp:
+  - 构造函数初始化 defTypeMap_ 全部为 Variant
+  - analyze() Pass 1 之前遍历 module.defTypes 构建映射
+  - 新增 esolveTypeOrDefault(name, typeRef) 方法
+  - 所有变量/常量/参数/返回值类型推断调用点从 esolveTypeRef 替换为 esolveTypeOrDefault
+- 效果: DefInt A-Z 后，iCounter（I开头）自动推断为 Integer 而非 Variant
+
+### P22-06: LSet/RSet 语句形式
+
+**语法**: LSet strVar = strExpr / RSet strVar = strExpr — 原位左/右对齐字符串赋值
+
+**实现**:
+- st.hpp: AssignmentStmt 新增 isLSet / isRSet 布尔标志
+- parser_stmt.cpp: 新增 TokenKind::LSet/RSet case，解析为 AssignmentStmt + 设标志
+- cgen_stmt.cpp: AssignmentStmt 拦截 isLSet/isRSet，生成 b6_BSTR_Assign(&var, vb6_LSet(expr, SysStringLen(var)))
+
+### P22-07: VBP CompatibleMode/StartMode 解析
+
+**实现**:
+- bp_parser.hpp: VbpProject 添加 compatibleMode/startMode 字段
+- bp_parser.cpp: 解析 CompatibleMode= 和 StartMode= 键值对
+
+## 回归测试
+
+74/74 全部通过，零回归。
+
 ## 待推进
 
-- DefType实际影响类型推断（P2优先级）
-- LSet/RSet语句形式解析支持
-- 更多常量补全（打印机常量等）
-- VBP CompatibleMode/StartMode解析
 - For Each COM集合(IEnumVARIANT)
+- 更多常量补全（打印机常量等）
+- UDT LSet复赋值 (LSet udt1 = udt2)

@@ -1,4 +1,4 @@
-// vb6rtl.c - VB6运行时库最小实现
+﻿// vb6rtl.c - VB6运行时库最小实现
 // 仅支持 hello.bas 等简单程序运行
 
 #include "vb6rtl.h"
@@ -1725,6 +1725,7 @@ BSTR vb6_RSet(BSTR str, int32_t length) {
     free(buf);
     return result;
 }
+
 
 BSTR vb6_WeekdayName(int32_t weekday, int32_t abbreviate, int32_t firstDayOfWeek) {
     /* firstDayOfWeek: 1=Sunday(default), 2=Monday, ..., 7=Saturday

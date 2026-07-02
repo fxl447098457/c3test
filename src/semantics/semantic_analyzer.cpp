@@ -1,4 +1,4 @@
-#include "semantics/semantic_analyzer.hpp"
+﻿#include "semantics/semantic_analyzer.hpp"
 #include <algorithm>
 #include <cctype>
 
@@ -92,7 +92,9 @@ static void dispatchExpr(Expr& expr, SemanticAnalyzer& analyzer) {
 // ============================================================
 
 SemanticAnalyzer::SemanticAnalyzer(Diagnostics& diag, bool verbose)
-    : diag_(diag), symTab_(diag), verbose_(verbose) {}
+    : diag_(diag), symTab_(diag), verbose_(verbose) {
+    for (int i = 0; i < 26; i++) defTypeMap_[i] = Vb6Type::Variant;
+}
 
 // ============================================================
 // 两遍扫描入口
@@ -152,6 +154,33 @@ bool SemanticAnalyzer::analyze(Module& module) {
             classSym->implementsNames.push_back(impl->interfaceName);
         }
         symTab_.define(std::move(classSym));
+    }
+
+    // P22: 收集 DefType 声明 (字母->隐式类型映射)
+    for (auto& dt : module.defTypes) {
+        defTypeActive_ = true;
+        Vb6Type dtType = Vb6Type::Variant;
+        switch (dt->defKind) {
+            case DefTypeKind::Bool: dtType = Vb6Type::Boolean; break;
+            case DefTypeKind::Byte: dtType = Vb6Type::Byte; break;
+            case DefTypeKind::Int:  dtType = Vb6Type::Integer; break;
+            case DefTypeKind::Lng:  dtType = Vb6Type::Long; break;
+            case DefTypeKind::Cur:  dtType = Vb6Type::Currency; break;
+            case DefTypeKind::Sng:  dtType = Vb6Type::Single; break;
+            case DefTypeKind::Dbl:  dtType = Vb6Type::Double; break;
+            case DefTypeKind::Date: dtType = Vb6Type::Date; break;
+            case DefTypeKind::Str:  dtType = Vb6Type::String; break;
+            case DefTypeKind::Obj:  dtType = Vb6Type::Object; break;
+            case DefTypeKind::Var:  dtType = Vb6Type::Variant; break;
+        }
+        for (auto& range : dt->ranges) {
+            char from = toupper(range.from);
+            char to = toupper(range.to);
+            for (char c = from; c <= to; c++) {
+                int idx = c - 'A';
+                if (idx >= 0 && idx < 26) defTypeMap_[idx] = dtType;
+            }
+        }
     }
 
     // --- Pass 1: 收集所有模块级声明 ---
@@ -312,7 +341,7 @@ void SemanticAnalyzer::registerDecl(Decl& decl) {
 void SemanticAnalyzer::registerVariable(VariableDecl& decl) {
     auto sym = std::make_unique<Symbol>(
         SymbolKind::Variable, decl.name,
-        resolveTypeRef(decl.asType.get()),
+        resolveTypeOrDefault(decl.name, decl.asType.get()),
         decl.loc, decl.access
     );
     sym->isStatic = decl.isStatic;
@@ -331,7 +360,7 @@ void SemanticAnalyzer::registerVariable(VariableDecl& decl) {
 void SemanticAnalyzer::registerConstant(ConstDecl& decl) {
     auto sym = std::make_unique<Symbol>(
         SymbolKind::Constant, decl.name,
-        resolveTypeRef(decl.asType.get()),
+        resolveTypeOrDefault(decl.name, decl.asType.get()),
         decl.loc, decl.access
     );
 
@@ -418,6 +447,18 @@ void SemanticAnalyzer::registerConstant(ConstDecl& decl) {
 // 类型引用解析
 // ============================================================
 
+Vb6Type SemanticAnalyzer::resolveTypeOrDefault(const std::string& name, ASTNode* typeRef) {
+    Vb6Type t = resolveTypeRef(typeRef);
+    // P22: If no explicit type and DefType is active, use DefType inference
+    if (!typeRef && defTypeActive_ && !name.empty()) {
+        char first = toupper(name[0]);
+        int idx = first - 'A';
+        if (idx >= 0 && idx < 26 && defTypeMap_[idx] != Vb6Type::Variant) {
+            return defTypeMap_[idx];
+        }
+    }
+    return t;
+}
 Vb6Type SemanticAnalyzer::resolveTypeRef(ASTNode* typeRef) {
     if (!typeRef) return Vb6Type::Variant;  // VB6默认: Variant
 
@@ -474,7 +515,7 @@ void SemanticAnalyzer::visit(SubDecl& node) {
         for (auto& param : node.params) {
             ParameterInfo pi;
             pi.name = param->name;
-            pi.type = resolveTypeRef(param->asType.get());
+            pi.type = resolveTypeOrDefault(param->name, param->asType.get());
             pi.isByVal = param->isByVal;
             pi.isOptional = param->isOptional;
             pi.isParamArray = param->isParamArray;
@@ -500,7 +541,7 @@ void SemanticAnalyzer::visit(SubDecl& node) {
         for (auto& param : node.params) {
             auto paramSym = std::make_unique<Symbol>(
                 SymbolKind::Parameter, param->name,
-                resolveTypeRef(param->asType.get()),
+                resolveTypeOrDefault(param->name, param->asType.get()),
                 param->loc, AccessLevel::Private
             );
             symTab_.define(std::move(paramSym));
@@ -532,7 +573,7 @@ void SemanticAnalyzer::visit(SubDecl& node) {
 void SemanticAnalyzer::visit(FunctionDecl& node) {
     if (pass_ == 1) {
         // Pass1: 注册Function符号
-        Vb6Type retType = resolveTypeRef(node.returnType.get());
+        Vb6Type retType = resolveTypeOrDefault(node.name, node.returnType.get());
         auto sym = std::make_unique<Symbol>(
             SymbolKind::Function, node.name,
             retType, node.loc, node.access
@@ -543,7 +584,7 @@ void SemanticAnalyzer::visit(FunctionDecl& node) {
         for (auto& param : node.params) {
             ParameterInfo pi;
             pi.name = param->name;
-            pi.type = resolveTypeRef(param->asType.get());
+            pi.type = resolveTypeOrDefault(param->name, param->asType.get());
             pi.isByVal = param->isByVal;
             pi.isOptional = param->isOptional;
             pi.isParamArray = param->isParamArray;
@@ -569,7 +610,7 @@ void SemanticAnalyzer::visit(FunctionDecl& node) {
         for (auto& param : node.params) {
             auto paramSym = std::make_unique<Symbol>(
                 SymbolKind::Parameter, param->name,
-                resolveTypeRef(param->asType.get()),
+                resolveTypeOrDefault(param->name, param->asType.get()),
                 param->loc, AccessLevel::Private
             );
             symTab_.define(std::move(paramSym));
@@ -607,13 +648,13 @@ void SemanticAnalyzer::visit(PropertyDecl& node) {
             default:                     sk = SymbolKind::PropertyGet; break;
         }
 
-        Vb6Type retType = resolveTypeRef(node.returnType.get());
+        Vb6Type retType = resolveTypeOrDefault(node.name, node.returnType.get());
         auto sym = std::make_unique<Symbol>(sk, node.name, retType, node.loc, node.access);
 
         for (auto& param : node.params) {
             ParameterInfo pi;
             pi.name = param->name;
-            pi.type = resolveTypeRef(param->asType.get());
+            pi.type = resolveTypeOrDefault(param->name, param->asType.get());
             pi.isByVal = param->isByVal;
             pi.isOptional = param->isOptional;
             pi.isParamArray = param->isParamArray;
@@ -644,7 +685,7 @@ void SemanticAnalyzer::visit(PropertyDecl& node) {
         for (auto& param : node.params) {
             auto paramSym = std::make_unique<Symbol>(
                 SymbolKind::Parameter, param->name,
-                resolveTypeRef(param->asType.get()),
+                resolveTypeOrDefault(param->name, param->asType.get()),
                 param->loc, AccessLevel::Private
             );
             symTab_.define(std::move(paramSym));
@@ -767,7 +808,7 @@ void SemanticAnalyzer::visit(DeclareDecl& node) {
         for (auto& param : node.params) {
             ParameterInfo pi;
             pi.name = param->name;
-            pi.type = resolveTypeRef(param->asType.get());
+            pi.type = resolveTypeOrDefault(param->name, param->asType.get());
             pi.isByVal = param->isByVal;
             pi.isOptional = param->isOptional;
             pi.isParamArray = param->isParamArray;
@@ -793,7 +834,7 @@ void SemanticAnalyzer::visit(EventDecl& node) {
         for (auto& param : node.params) {
             ParameterInfo pi;
             pi.name = param->name;
-            pi.type = resolveTypeRef(param->asType.get());
+            pi.type = resolveTypeOrDefault(param->name, param->asType.get());
             pi.isByVal = param->isByVal;
             pi.isOptional = param->isOptional;
             pi.isParamArray = param->isParamArray;
@@ -1061,7 +1102,7 @@ void SemanticAnalyzer::visit(LocalDeclStmt& node) {
                 auto& varDecl = static_cast<VariableDecl&>(*node.decl);
                 auto sym = std::make_unique<Symbol>(
                     SymbolKind::Variable, varDecl.name,
-                    resolveTypeRef(varDecl.asType.get()),
+                    resolveTypeOrDefault(varDecl.name, varDecl.asType.get()),
                     varDecl.loc, varDecl.access
                 );
                 sym->isStatic = varDecl.isStatic;
@@ -1074,7 +1115,7 @@ void SemanticAnalyzer::visit(LocalDeclStmt& node) {
                 auto& constDecl = static_cast<ConstDecl&>(*node.decl);
                 auto sym = std::make_unique<Symbol>(
                     SymbolKind::Constant, constDecl.name,
-                    resolveTypeRef(constDecl.asType.get()),
+                    resolveTypeOrDefault(constDecl.name, constDecl.asType.get()),
                     constDecl.loc, constDecl.access
                 );
                 // 简化: 常量值推导 (与registerConstant类似)
