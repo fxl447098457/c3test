@@ -1,0 +1,49 @@
+<svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <!-- 深邃背景：径向渐变营造立体纵深感 -->
+    <radialGradient id="bgRadial" cx="50%" cy="40%" r="75%">
+      <stop offset="0%" stop-color="#1e2d4a" />
+      <stop offset="55%" stop-color="#121b30" />
+      <stop offset="100%" stop-color="#080c18" />
+    </radialGradient>
+    <!-- 暗角晕影增强深度 -->
+    <radialGradient id="vignette" cx="50%" cy="50%" r="65%">
+      <stop offset="55%" stop-color="#000000" stop-opacity="0" />
+      <stop offset="100%" stop-color="#000000" stop-opacity="0.35" />
+    </radialGradient>
+
+    <!-- C3 暖色渐变：柠黄 → 橙黄 → 亮橙 -->
+    <linearGradient id="c3Grad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#FFF238" />
+      <stop offset="45%" stop-color="#FFB627" />
+      <stop offset="100%" stop-color="#FF5E00" />
+    </linearGradient>
+
+    <!-- 外发光 -->
+    <filter id="glow" x="-12%" y="-12%" width="124%" height="124%">
+      <feGaussianBlur stdDeviation="5" result="blur" />
+      <feFlood flood-color="#FF8C00" flood-opacity="0.3" result="color" />
+      <feComposite in="color" in2="blur" operator="in" result="glow" />
+      <feMerge>
+        <feMergeNode in="glow" />
+        <feMergeNode in="SourceGraphic" />
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- 深邃立体背景 -->
+  <rect width="512" height="512" fill="url(#bgRadial)" />
+  <rect width="512" height="512" fill="url(#vignette)" />
+
+  <!-- C3 同构连字，完美居中 -->
+  <g filter="url(#glow)">
+    <!-- C：粗体圆角弧线，右侧开口 -->
+    <path d="M 230 191 A 85 85 0 1 0 230 321"
+          stroke="url(#c3Grad)" stroke-width="52"
+          stroke-linecap="round" fill="none" />
+    <!-- 3：S形连续曲线，左端紧贴 C 右开口 -->
+    <path d="M 230 256 C 230 155, 422 155, 422 256 C 422 357, 230 357, 230 256"
+          stroke="url(#c3Grad)" stroke-width="52"
+          stroke-linecap="round" fill="none" />
+  </g>
+</svg>

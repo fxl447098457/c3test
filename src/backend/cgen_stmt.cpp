@@ -121,6 +121,23 @@ void CCodeGen::visit(Block& node) {
 
 void CCodeGen::visit(AssignmentStmt& node) {
     if (!node.target || !node.value) return;
+    // P22: Date$/Time$ statement interception (Date$ = "12-31-2025" / Time$ = "23:59:59")
+    if (node.target->kind == ASTNodeKind::IdentifierExpr) {
+        auto& _tgtId22 = static_cast<IdentifierExpr&>(*node.target);
+        std::string _tgtLower22 = _tgtId22.name;
+        std::transform(_tgtLower22.begin(), _tgtLower22.end(), _tgtLower22.begin(), ::tolower);
+        if (_tgtLower22.size() > 1 && _tgtLower22.back() == '$') _tgtLower22.pop_back();
+        if (_tgtLower22 == "date") {
+            emitExpr(*node.value);
+            c_.emitLine("vb6_DateSet(" + wrapToBSTR(lastExpr_, *node.value) + ");  /* Date$ = ... */");
+            return;
+        }
+        if (_tgtLower22 == "time") {
+            emitExpr(*node.value);
+            c_.emitLine("vb6_TimeSet(" + wrapToBSTR(lastExpr_, *node.value) + ");  /* Time$ = ... */");
+            return;
+        }
+    }
     // P7.5+P7.6: 控件属性写入
     // 情况1: ctrl.Property = value (非数组)
     // 情况2: ctrlArr(idx).Property = value (数组)

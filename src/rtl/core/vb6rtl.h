@@ -379,6 +379,8 @@ float vb6_Rnd_Full(int32_t seed);
 double vb6_Now(void);
 double vb6_Date(void);
 double vb6_Time(void);
+void vb6_DateSet(BSTR dateStr);
+void vb6_TimeSet(BSTR timeStr);
 int32_t vb6_Year(double date);
 int32_t vb6_Month(double date);
 int32_t vb6_Day(double date);

@@ -233,13 +233,13 @@ VbpProject VbpParser::parseString(const std::string& content, const std::string&
         else if (key == "MinorVer") { try { project.minorVer = std::stoi(value); } catch (...) {} }
         else if (key == "RevisionVer") { try { project.revisionVer = std::stoi(value); } catch (...) {} }
         else if (key == "AutoIncrementVer") { try { project.autoIncrementVer = std::stoi(value); } catch (...) {} }
-        else if (key == "CompanyName") { project.companyName = unquote(value); }
-        else if (key == "FileDescription") { project.fileDescription = unquote(value); }
-        else if (key == "LegalCopyright") { project.legalCopyright = unquote(value); }
-        else if (key == "ProductName") { project.productName = unquote(value); }
-        else if (key == "Comments") { project.comments = unquote(value); }
-        else if (key == "LegalTrademarks") { project.legalTrademarks = unquote(value); }
-        else if (key == "OriginalFileName") { project.originalFileName = unquote(value); }
+        else if (key == "VersionCompanyName") { project.companyName = unquote(value); }
+        else if (key == "VersionFileDescription") { project.fileDescription = unquote(value); }
+        else if (key == "VersionLegalCopyright") { project.legalCopyright = unquote(value); }
+        else if (key == "VersionProductName") { project.productName = unquote(value); }
+        else if (key == "VersionComments") { project.comments = unquote(value); }
+        else if (key == "VersionLegalTrademarks") { project.legalTrademarks = unquote(value); }
+        else if (key == "VersionOriginalFileName") { project.originalFileName = unquote(value); }
     }
 
     return project;

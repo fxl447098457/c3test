@@ -1772,6 +1772,58 @@ void SemanticAnalyzer::registerBuiltins() {
     addConst("vbKeyF15", Vb6Type::Long, 126);
     addConst("vbKeyF16", Vb6Type::Long, 127);
 
+    // P22: Shell constants (for Shell function window style)
+    addConst("vbHide", Vb6Type::Long, 0);
+    addConst("vbNormalFocus", Vb6Type::Long, 1);
+    addConst("vbMinimizedFocus", Vb6Type::Long, 2);
+    addConst("vbMaximizedFocus", Vb6Type::Long, 3);
+    addConst("vbNormalNoFocus", Vb6Type::Long, 4);
+    addConst("vbMinimizedNoFocus", Vb6Type::Long, 6);
+    // P22: Date format constants (for FormatDateTime)
+    addConst("vbGeneralDate", Vb6Type::Long, 0);
+    addConst("vbLongDate", Vb6Type::Long, 1);
+    addConst("vbShortDate", Vb6Type::Long, 2);
+    addConst("vbLongTime", Vb6Type::Long, 3);
+    addConst("vbShortTime", Vb6Type::Long, 4);
+    // P22: System color constants (OLE system colors)
+    addConst("vbScrollBars", Vb6Type::Long, -2147483648LL);
+    addConst("vbDesktop", Vb6Type::Long, -2147483647LL);
+    addConst("vbActiveTitleBar", Vb6Type::Long, -2147483646LL);
+    addConst("vbInactiveTitleBar", Vb6Type::Long, -2147483645LL);
+    addConst("vbMenu", Vb6Type::Long, -2147483644LL);
+    addConst("vbWindowBackground", Vb6Type::Long, -2147483643LL);
+    addConst("vbWindowFrame", Vb6Type::Long, -2147483642LL);
+    addConst("vbMenuText", Vb6Type::Long, -2147483641LL);
+    addConst("vbWindowText", Vb6Type::Long, -2147483640LL);
+    addConst("vbTitleBarText", Vb6Type::Long, -2147483639LL);
+    addConst("vbActiveBorder", Vb6Type::Long, -2147483638LL);
+    addConst("vbInactiveBorder", Vb6Type::Long, -2147483637LL);
+    addConst("vbApplicationWorkspace", Vb6Type::Long, -2147483636LL);
+    addConst("vbHighlight", Vb6Type::Long, -2147483635LL);
+    addConst("vbHighlightText", Vb6Type::Long, -2147483634LL);
+    addConst("vbButtonFace", Vb6Type::Long, -2147483633LL);
+    addConst("vbButtonShadow", Vb6Type::Long, -2147483632LL);
+    addConst("vbGrayText", Vb6Type::Long, -2147483631LL);
+    addConst("vbButtonText", Vb6Type::Long, -2147483630LL);
+    addConst("vbInactiveCaptionText", Vb6Type::Long, -2147483629LL);
+    addConst("vb3DHighlight", Vb6Type::Long, -2147483628LL);
+    addConst("vb3DDKShadow", Vb6Type::Long, -2147483627LL);
+    addConst("vb3DLight", Vb6Type::Long, -2147483626LL);
+    addConst("vb3DFace", Vb6Type::Long, -2147483625LL);
+    addConst("vb3DShadow", Vb6Type::Long, -2147483624LL);
+    // P22: IME status constants
+    addConst("vbIMEModeNoControl", Vb6Type::Long, 0);
+    addConst("vbIMEModeOn", Vb6Type::Long, 1);
+    addConst("vbIMEModeOff", Vb6Type::Long, 2);
+    addConst("vbIMEModeDisable", Vb6Type::Long, 3);
+    addConst("vbIMEModeHiragana", Vb6Type::Long, 4);
+    addConst("vbIMEModeKatakana", Vb6Type::Long, 5);
+    addConst("vbIMEModeKatakanaHalf", Vb6Type::Long, 6);
+    addConst("vbIMEModeAlphaFull", Vb6Type::Long, 7);
+    addConst("vbIMEModeAlpha", Vb6Type::Long, 8);
+    addConst("vbIMEModeHangulFull", Vb6Type::Long, 9);
+    addConst("vbIMEModeHangul", Vb6Type::Long, 10);
+
     // String constants (additional)
     addStrConst("vbNullString", "");
 

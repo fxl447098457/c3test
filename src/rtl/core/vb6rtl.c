@@ -2045,6 +2045,43 @@ double vb6_Now(void) { return vb6_now_serial(); }
 double vb6_Date(void) { return (double)(int32_t)vb6_now_serial(); }
 double vb6_Time(void) { double n = vb6_now_serial(); return n - (double)(int32_t)n; }
 
+void vb6_DateSet(BSTR dateStr) {
+    if (!dateStr || SysStringLen(dateStr) == 0) return;
+    char buf[32] = {0};
+    WideCharToMultiByte(CP_ACP, 0, dateStr, -1, buf, 31, NULL, NULL);
+    int m = 0, d = 0, y = 0;
+    char sep = strchr(buf, '/') ? '/' : '-';
+    char *ctx = NULL;
+    char buf2[32]; memcpy(buf2, buf, 32);
+    char *p1 = strtok_s(buf2, &sep, &ctx);
+    char *p2 = p1 ? strtok_s(NULL, &sep, &ctx) : NULL;
+    char *p3 = p2 ? strtok_s(NULL, &sep, &ctx) : NULL;
+    if (p1 && p2 && p3) {
+        m = atoi(p1); d = atoi(p2); y = atoi(p3);
+        SYSTEMTIME st; GetLocalTime(&st);
+        st.wYear = (WORD)y; st.wMonth = (WORD)m; st.wDay = (WORD)d;
+        SetLocalTime(&st);
+    }
+}
+
+void vb6_TimeSet(BSTR timeStr) {
+    if (!timeStr || SysStringLen(timeStr) == 0) return;
+    char buf[32] = {0};
+    WideCharToMultiByte(CP_ACP, 0, timeStr, -1, buf, 31, NULL, NULL);
+    int h = 0, mi = 0, s = 0;
+    char *ctx = NULL;
+    char buf2[32]; memcpy(buf2, buf, 32);
+    char *p1 = strtok_s(buf2, ":", &ctx);
+    char *p2 = p1 ? strtok_s(NULL, ":", &ctx) : NULL;
+    char *p3 = p2 ? strtok_s(NULL, ":", &ctx) : NULL;
+    if (p1) h = atoi(p1);
+    if (p2) mi = atoi(p2);
+    if (p3) s = atoi(p3);
+    SYSTEMTIME st; GetLocalTime(&st);
+    st.wHour = (WORD)h; st.wMinute = (WORD)mi; st.wSecond = (WORD)s; st.wMilliseconds = 0;
+    SetLocalTime(&st);
+}
+
 int32_t vb6_Year(double date) {
     int32_t y, m, d;
     vb6_serial_to_date((int32_t)date, &y, &m, &d);
