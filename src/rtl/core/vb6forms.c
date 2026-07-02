@@ -3152,19 +3152,28 @@ void vb6_SetShapeFillColor(void* hwnd, int32_t val) {
 static LRESULT CALLBACK vb6_GraphicalBtnSubclassProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     if (msg == WM_PAINT) {
         HANDLE hBmp = GetPropW(hwnd, L"VB6_GfxBtn_Bmp");
+        PAINTSTRUCT ps;
+        HDC hdc = BeginPaint(hwnd, &ps);
+        RECT rc;
+        GetClientRect(hwnd, &rc);
+
+        /* Determine button state: check state + push state */
+        LRESULT checkState = SendMessageW(hwnd, BM_GETCHECK, 0, 0);
+        LRESULT btnState = SendMessageW(hwnd, BM_GETSTATE, 0, 0);
+        BOOL isChecked = (checkState != BST_UNCHECKED);
+        BOOL isPushed = isChecked || (btnState & BST_PUSHED);
+        BOOL isFocused = (btnState & BST_FOCUS) ? TRUE : FALSE;
+
+        /* Draw button background (3D raised/sunken) */
+        UINT dfcState = DFCS_BUTTONPUSH;
+        if (isPushed) dfcState |= DFCS_PUSHED;
+        DrawFrameControl(hdc, &rc, DFC_BUTTON, dfcState);
+
+        /* Offset for 3D push effect */
+        int pushOff = isPushed ? 1 : 0;
+
+        /* Draw picture if available */
         if (hBmp && GetObjectType((HGDIOBJ)hBmp) == OBJ_BITMAP) {
-            PAINTSTRUCT ps;
-            HDC hdc = BeginPaint(hwnd, &ps);
-            RECT rc;
-            GetClientRect(hwnd, &rc);
-
-            /* Draw button background (3D raised/sunken) */
-            BOOL isChecked = (SendMessageW(hwnd, BM_GETCHECK, 0, 0) != BST_UNCHECKED);
-            UINT state = DFCS_BUTTONPUSH;
-            if (isChecked) state |= DFCS_PUSHED;
-            DrawFrameControl(hdc, &rc, DFC_BUTTON, state);
-
-            /* Get bitmap dimensions */
             BITMAP bm;
             GetObjectW((HBITMAP)hBmp, sizeof(bm), &bm);
 
@@ -3176,7 +3185,11 @@ static LRESULT CALLBACK vb6_GraphicalBtnSubclassProc(HWND hwnd, UINT msg, WPARAM
             int textH = 0;
             if (captionLen > 0) {
                 SIZE sz;
+                HFONT hFont = (HFONT)SendMessageW(hwnd, WM_GETFONT, 0, 0);
+                HFONT oldFont = NULL;
+                if (hFont) oldFont = (HFONT)SelectObject(hdc, hFont);
                 GetTextExtentPoint32W(hdc, caption, captionLen, &sz);
+                if (oldFont) SelectObject(hdc, oldFont);
                 textH = sz.cy + 4; /* 2px padding top+bottom */
             }
 
@@ -3186,9 +3199,9 @@ static LRESULT CALLBACK vb6_GraphicalBtnSubclassProc(HWND hwnd, UINT msg, WPARAM
             int availH = btnH - 2 * border - textH;
 
             /* Draw bitmap centered horizontally, top-aligned in available area */
-            int imgX = border + (btnW - 2 * border - bm.bmWidth) / 2;
-            int imgY = border + (availH - bm.bmHeight) / 2;
-            if (imgY < border) imgY = border;
+            int imgX = pushOff + border + (btnW - 2 * border - bm.bmWidth) / 2;
+            int imgY = pushOff + border + (availH - bm.bmHeight) / 2;
+            if (imgY < pushOff + border) imgY = pushOff + border;
 
             HDC memDC = CreateCompatibleDC(hdc);
             HBITMAP oldBmp = (HBITMAP)SelectObject(memDC, (HBITMAP)hBmp);
@@ -3198,12 +3211,12 @@ static LRESULT CALLBACK vb6_GraphicalBtnSubclassProc(HWND hwnd, UINT msg, WPARAM
 
             /* Draw caption text below image, centered */
             if (captionLen > 0) {
-                int textY = imgY + bm.bmHeight + 2;
+                int textY = pushOff + imgY + bm.bmHeight + 2 - pushOff;
                 if (textY + textH > btnH - border) textY = btnH - border - textH;
                 RECT textRc;
-                textRc.left = border;
+                textRc.left = pushOff + border;
                 textRc.top = textY;
-                textRc.right = btnW - border;
+                textRc.right = btnW - border + pushOff;
                 textRc.bottom = textY + textH;
                 HFONT hFont = (HFONT)SendMessageW(hwnd, WM_GETFONT, 0, 0);
                 HFONT oldFont = NULL;
@@ -3212,10 +3225,37 @@ static LRESULT CALLBACK vb6_GraphicalBtnSubclassProc(HWND hwnd, UINT msg, WPARAM
                 DrawTextW(hdc, caption, captionLen, &textRc, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
                 if (oldFont) SelectObject(hdc, oldFont);
             }
-
-            EndPaint(hwnd, &ps);
-            return 0;
+        } else {
+            /* No bitmap: just draw caption text */
+            WCHAR caption[256] = {0};
+            int captionLen = GetWindowTextW(hwnd, caption, 256);
+            if (captionLen > 0) {
+                HFONT hFont = (HFONT)SendMessageW(hwnd, WM_GETFONT, 0, 0);
+                HFONT oldFont = NULL;
+                if (hFont) oldFont = (HFONT)SelectObject(hdc, hFont);
+                SetBkMode(hdc, TRANSPARENT);
+                RECT textRc = rc;
+                InflateRect(&textRc, -4, -4);
+                textRc.left += pushOff;
+                textRc.top += pushOff;
+                DrawTextW(hdc, caption, captionLen, &textRc, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+                if (oldFont) SelectObject(hdc, oldFont);
+            }
         }
+
+        /* Draw focus rectangle if button has focus */
+        if (isFocused) {
+            RECT focusRc = rc;
+            InflateRect(&focusRc, -3, -3);
+            DrawFocusRect(hdc, &focusRc);
+        }
+
+        EndPaint(hwnd, &ps);
+        return 0;
+    }
+    if (msg == WM_ERASEBKGND) {
+        /* We handle all drawing in WM_PAINT, no need to erase background */
+        return 1;
     }
     if (msg == WM_DESTROY) {
         HANDLE hBmp = GetPropW(hwnd, L"VB6_GfxBtn_Bmp");
