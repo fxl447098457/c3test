@@ -626,6 +626,9 @@ int32_t vb6_SeekFunc(int32_t filenumber);
 // P21-13: Seek statement (set file position)
 void vb6_SeekStmt(int32_t filenumber, int32_t position);
 
+// P22-08: Width# — set file output line width
+void vb6_Width(int32_t filenumber, int32_t width);
+
 void vb6_Print(int32_t filenumber, BSTR s);
 void vb6_Write(int32_t filenumber, BSTR s);
 BSTR vb6_LineInput(int32_t filenumber);

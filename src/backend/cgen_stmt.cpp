@@ -1,4 +1,4 @@
-﻿#include "backend/cgen.hpp"
+#include "backend/cgen.hpp"
 #include <algorithm>
 #include <cctype>
 #include <iostream>
@@ -2025,7 +2025,11 @@ void CCodeGen::visit(ResetStmt& node) {
 }
 
 void CCodeGen::visit(WidthStmt& node) {
-    c_.emitLine("/* Width: no-op */");
+    emitExpr(*node.fileNumber);
+    std::string fnum = std::move(lastExpr_);
+    emitExpr(*node.width);
+    std::string w = std::move(lastExpr_);
+    c_.emitLine("vb6_Width((int32_t)(" + fnum + "), (int32_t)(" + w + "));");
 }
 
 void CCodeGen::visit(KillStmt& node) {

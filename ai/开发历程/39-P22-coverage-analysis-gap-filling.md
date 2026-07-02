@@ -96,8 +96,11 @@ VB6中 `Date$ = "12-31-2025"` 和 `Time$ = "23:59:59"` 是设置系统日期/时
 - semantic_analyzer.cpp:
   - 构造函数初始化 defTypeMap_ 全部为 Variant
   - analyze() Pass 1 之前遍历 module.defTypes 构建映射
-  - 新增 esolveTypeOrDefault(name, typeRef) 方法
-  - 所有变量/常量/参数/返回值类型推断调用点从 esolveTypeRef 替换为 esolveTypeOrDefault
+  - 新增 
+esolveTypeOrDefault(name, typeRef) 方法
+  - 所有变量/常量/参数/返回值类型推断调用点从 
+esolveTypeRef 替换为 
+esolveTypeOrDefault
 - 效果: DefInt A-Z 后，iCounter（I开头）自动推断为 Integer 而非 Variant
 
 ### P22-06: LSet/RSet 语句形式
@@ -119,8 +122,29 @@ VB6中 `Date$ = "12-31-2025"` 和 `Time$ = "23:59:59"` 是设置系统日期/时
 
 74/74 全部通过，零回归。
 
+## P22 第三轮扩展 (P22-08~09)
+
+### P22-08: Width# 语句实现
+
+**问题**: Width# 语句（设置文件输出行宽）此前是空操作，Print# 无视行宽限制。
+
+**实现**:
+- vb6rtl.c: 添加 vb6_width_table[32]+vb6_col_table[32]; 新增 vb6_Width(); 修改 vb6_Print 逐字符列跟踪+自动换行; Open/Close/CloseAll 重置 width/col
+- vb6rtl.h: 声明 vb6_Width
+- cgen_stmt.cpp: visit(WidthStmt&) 从 no-op 改为 vb6_Width(fnum, w)
+
+### P22-09: Printer 常量 + 其他缺失常量补全
+
+新增 11 个不重复常量:
+- Printer常量(15个): vbPRORPortrait/Landscape, vbPRPQDraft~High, vbPRCMMillimeters~Characters, vbPRBPSingle~Triple, vbPRDPHorizontal/Vertical
+- 其他(6个): vbUseSystem, vbUseCompareOption, Win16, Win32, vbDot, vbMsgBoxHelpButton
+- 常量总数 263→274 (~78%覆盖率)
+
+## 回归测试
+
+74/74 全部通过，零回归。
+
 ## 待推进
 
 - For Each COM集合(IEnumVARIANT)
-- 更多常量补全（打印机常量等）
 - UDT LSet复赋值 (LSet udt1 = udt2)

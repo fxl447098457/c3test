@@ -1865,6 +1865,35 @@ void SemanticAnalyzer::registerBuiltins() {
     addConst("vbIMEModeHangulFull", Vb6Type::Long, 9);
     addConst("vbIMEModeHangul", Vb6Type::Long, 10);
 
+    // P22-09: Printer constants
+    addConst("vbPRORPortrait", Vb6Type::Long, 1);        // Printer orientation: Portrait
+    addConst("vbPRORLandscape", Vb6Type::Long, 2);       // Printer orientation: Landscape
+    addConst("vbPRPQDraft", Vb6Type::Long, -1);          // Print quality: Draft
+    addConst("vbPRPQLow", Vb6Type::Long, -2);            // Print quality: Low
+    addConst("vbPRPQMedium", Vb6Type::Long, -3);         // Print quality: Medium
+    addConst("vbPRPQHigh", Vb6Type::Long, -4);           // Print quality: High
+    addConst("vbPRCMMillimeters", Vb6Type::Long, 1);     // Page scale: Millimeters
+    addConst("vbPRCMCentimeters", Vb6Type::Long, 2);     // Page scale: Centimeters
+    addConst("vbPRCMInches", Vb6Type::Long, 3);          // Page scale: Inches
+    addConst("vbPRCMCharacters", Vb6Type::Long, 4);      // Page scale: Characters
+    addConst("vbPRBPSingle", Vb6Type::Long, 1);          // Binary performation: Single
+    addConst("vbPRBPSDouble", Vb6Type::Long, 2);         // Binary performation: Double
+    addConst("vbPRBPTriple", Vb6Type::Long, 3);          // Binary performation: Triple
+    addConst("vbPRDPHorizontal", Vb6Type::Long, 1);      // Duplex: Horizontal
+    addConst("vbPRDPVertical", Vb6Type::Long, 2);        // Duplex: Vertical
+
+    // P22-09: Other missing constants
+    addConst("vbUseSystem", Vb6Type::Long, -1);           // Use system setting
+    addConst("vbUseCompareOption", Vb6Type::Long, -1);   // Use Option Compare setting
+    addConst("Win16", Vb6Type::Long, 0);                  // Obsolete: always False
+    addConst("Win32", Vb6Type::Long, -1);                 // True on 32-bit Windows
+    addConst("vbDot", Vb6Type::Long, 46);                 // "." character code
+
+
+    // P22-09: MsgBox additional constants
+    addConst("vbMsgBoxHelpButton", Vb6Type::Long, 16384); // &H4000
+
+
     // String constants (additional)
     addStrConst("vbNullString", "");
 

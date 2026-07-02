@@ -2835,6 +2835,8 @@ int32_t vb6_LBoundND(vb6_SafeArrayND* arr, int32_t dimension) {
 static FILE* vb6_file_table[VB6_MAX_FILES] = {0};
 static int32_t vb6_file_mode[VB6_MAX_FILES] = {0};  // 1=Input, 2=Output, 4=Random, 8=Append, 16=Binary
 static int32_t vb6_file_reclen[VB6_MAX_FILES] = {0}; // P8.2: 记录长度 (Random模式)
+static int32_t vb6_width_table[VB6_MAX_FILES] = {0}; // P22-08: Width# 行宽 (0=不限)
+static int32_t vb6_col_table[VB6_MAX_FILES] = {0};   // P22-08: 当前列位置
 
 int32_t vb6_FreeFile(void) {
     for (int32_t i = 1; i < VB6_MAX_FILES; i++) {
@@ -2882,6 +2884,8 @@ int32_t vb6_Open(BSTR pathname, int32_t mode, int32_t access, int32_t filenumber
     vb6_file_table[filenumber] = f;
     vb6_file_mode[filenumber] = mode;
     vb6_file_reclen[filenumber] = (reclength > 0) ? reclength : 128;  // P8.2: 默认128
+    vb6_width_table[filenumber] = 0;  // P22-08: reset width on open
+    vb6_col_table[filenumber] = 0;    // P22-08: reset column on open
     return -1;  // True
 }
 
@@ -2892,6 +2896,8 @@ int32_t vb6_Close(int32_t filenumber) {
         vb6_file_table[filenumber] = NULL;
         vb6_file_mode[filenumber] = 0;
         vb6_file_reclen[filenumber] = 0;
+        vb6_width_table[filenumber] = 0;  // P22-08
+        vb6_col_table[filenumber] = 0;    // P22-08
     }
     return -1;
 }
@@ -2904,6 +2910,8 @@ int32_t vb6_CloseAll() {
             vb6_file_table[i] = NULL;
             vb6_file_mode[i] = 0;
             vb6_file_reclen[i] = 0;
+            vb6_width_table[i] = 0;  // P22-08
+            vb6_col_table[i] = 0;    // P22-08
             count++;
         }
     }
@@ -2948,14 +2956,35 @@ void vb6_SeekStmt(int32_t filenumber, int32_t position) {
 }
 
 
+// P22-08: Width# — 设置文件输出行宽
+void vb6_Width(int32_t filenumber, int32_t width) {
+    if (filenumber < 1 || filenumber >= VB6_MAX_FILES) return;
+    vb6_width_table[filenumber] = width;
+}
+
 void vb6_Print(int32_t filenumber, BSTR s) {
     if (filenumber < 1 || filenumber >= VB6_MAX_FILES || !vb6_file_table[filenumber]) return;
     FILE* f = vb6_file_table[filenumber];
+    int32_t w = vb6_width_table[filenumber];  // P22-08: Width# supported line width
     if (s) {
         int32_t len = vb6_BSTR_Len(s);
-        for (int32_t i = 0; i < len; i++) fputc((char)s[i], f);
+        for (int32_t i = 0; i < len; i++) {
+            char ch = (char)s[i];
+            if (ch == '\n') {
+                fputc('\n', f);
+                vb6_col_table[filenumber] = 0;
+            } else {
+                if (w > 0 && vb6_col_table[filenumber] >= w) {
+                    fputc('\n', f);
+                    vb6_col_table[filenumber] = 0;
+                }
+                fputc(ch, f);
+                vb6_col_table[filenumber]++;
+            }
+        }
     }
     fputc('\n', f);
+    vb6_col_table[filenumber] = 0;
     fflush(f);
 }
 
