@@ -642,6 +642,8 @@ void CCodeGen::emitFormFramework(const FrmFormDesc& frmDesc, Module& module) {
             c_.emitLine("if (vb6_bg && GetObjectType((HGDIOBJ)vb6_bg) == OBJ_BITMAP) {");
             c_.indent();
             c_.emitLine("HDC hdc = (HDC)(WPARAM)wParam;");
+            c_.emitLine("RECT rc; GetClientRect(hwnd, &rc);");
+            c_.emitLine("HBRUSH hBr = (HBRUSH)(COLOR_BTNFACE+1); FillRect(hdc, &rc, hBr);");
             c_.emitLine("HDC memDC = CreateCompatibleDC(hdc);");
             c_.emitLine("HBITMAP hBmp = (HBITMAP)vb6_bg;");
             c_.emitLine("BITMAP bm; GetObjectW(hBmp, sizeof(bm), &bm);");
@@ -1320,7 +1322,7 @@ void CCodeGen::emitFormFramework(const FrmFormDesc& frmDesc, Module& module) {
                 {
                     auto stIt = ctrl.properties.find("Style");
                     if (stIt != ctrl.properties.end() && stIt->second.intValue == 1)
-                        style |= kBsBitmap | kBsPushLike;  // Graphical: button-style with picture
+                        style |= kBsPushLike;  // Graphical: button-style with picture (no BS_BITMAP, we draw ourselves)
                 }
                 break;
             case FrmControlType::TextBox:
@@ -1346,7 +1348,7 @@ void CCodeGen::emitFormFramework(const FrmFormDesc& frmDesc, Module& module) {
                 {
                     auto stIt = ctrl.properties.find("Style");
                     if (stIt != ctrl.properties.end() && stIt->second.intValue == 1)
-                        style |= kBsBitmap | kBsPushLike;  // Graphical: button-style toggle with picture
+                        style |= kBsPushLike;  // Graphical: button-style toggle with picture (no BS_BITMAP, we draw ourselves)
                 }
                 break;
             case FrmControlType::OptionButton:
@@ -1354,7 +1356,7 @@ void CCodeGen::emitFormFramework(const FrmFormDesc& frmDesc, Module& module) {
                 {
                     auto stIt = ctrl.properties.find("Style");
                     if (stIt != ctrl.properties.end() && stIt->second.intValue == 1)
-                        style |= kBsBitmap | kBsPushLike;  // Graphical: button-style toggle with picture
+                        style |= kBsPushLike;  // Graphical: button-style toggle with picture (no BS_BITMAP, we draw ourselves)
                 }
                 break;
             case FrmControlType::Frame:
@@ -1501,7 +1503,7 @@ void CCodeGen::emitFormFramework(const FrmFormDesc& frmDesc, Module& module) {
                         if (isGraphicalBtn) {
                             // Graphical button: use BM_SETIMAGE with IMAGE_BITMAP
                             c_.emitLine("{ void* vb6_pic = vb6_LoadPictureFromMemory(" + varName + ", " + varName + "_size);");
-                            c_.emitLine("  if (vb6_pic) SendMessageW((HWND)" + ctrlHwndVar + ", BM_SETIMAGE, IMAGE_BITMAP, (LPARAM)vb6_pic); }");
+                            c_.emitLine("  if (vb6_pic) vb6_GraphicalBtn_SetImage((void*)" + ctrlHwndVar + ", vb6_pic); }");
                         } else {
                             // PictureBox/Image: use vb6_SetControlPicture
                             c_.emitLine("{ void* vb6_pic = vb6_LoadPictureFromMemory(" + varName + ", " + varName + "_size);");

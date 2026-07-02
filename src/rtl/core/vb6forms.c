@@ -1653,35 +1653,51 @@ void* vb6_LoadPictureFromMemory(const void* data, int size) {
 }
 
 void* vb6_LoadIconFromMemory(const void* data, int size) {
-    /* Load ICO data and return HICON. Uses LookupIconIdFromDirectoryEx + CreateIconFromResourceEx
-       which is the standard Win32 way to load ICO from memory, always returns HICON. */
-    if (!data || size <= 0) return NULL;
-    const BYTE* pDir = (const BYTE*)data;
-    /* ICO directory: [0-1] reserved=0, [2-3] type=1(ICO), [4-5] count */
-    if (size < 6 || pDir[0] != 0 || pDir[1] != 0 || pDir[2] != 1 || pDir[3] != 0) {
-        /* Not a valid ICO directory, fall back to OleLoadPicture */
+    /* Load ICO data and return HICON by directly parsing .ico file format.
+       .ico format: [2B reserved=0] [2B type=1] [2B count] [count*16B dir entries] [image data...]
+       Each dir entry: [B w] [B h] [B colors] [B reserved] [W planes] [W bpp] [D dataSize] [D dataOffset]
+    */
+    if (!data || size <= 6) return NULL;
+    const BYTE* p = (const BYTE*)data;
+    /* Verify ICO magic */
+    if (p[0] != 0 || p[1] != 0 || p[2] != 1 || p[3] != 0) {
+        /* Not ICO format, fall back to OleLoadPicture */
         return vb6_LoadPictureFromMemory(data, size);
     }
-    int iconIndex = LookupIconIdFromDirectoryEx((PBYTE)pDir, TRUE,
-        GetSystemMetrics(SM_CXICON), GetSystemMetrics(SM_CYICON), LR_DEFAULTCOLOR);
-    if (iconIndex == 0) {
-        /* Try with SM_CXSMICON for small icon */
-        iconIndex = LookupIconIdFromDirectoryEx((PBYTE)pDir, TRUE,
-            GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON), LR_DEFAULTCOLOR);
+    WORD count = (WORD)(p[4] | (p[5] << 8));
+    if (count == 0) return NULL;
+    /* Find best matching entry: prefer 32x32 or closest to SM_CXICON */
+    int targetSize = GetSystemMetrics(SM_CXSMICON); /* small icon for title bar */
+    int bestIdx = 0;
+    int bestDiff = 9999;
+    int bestBpp = 0;
+    for (int i = 0; i < count && i < 20; i++) {
+        const BYTE* entry = p + 6 + i * 16;
+        int w = entry[0]; if (w == 0) w = 256;
+        int h = entry[1]; if (h == 0) h = 256;
+        int bpp = (int)(entry[6] | (entry[7] << 8));
+        int diff = abs(w - targetSize) + abs(h - targetSize);
+        /* Prefer higher bpp if same size */
+        if (diff < bestDiff || (diff == bestDiff && bpp > bestBpp)) {
+            bestDiff = diff;
+            bestIdx = i;
+            bestBpp = bpp;
+        }
     }
-    if (iconIndex == 0) return NULL;
-    /* Find the icon data offset from the ICO directory entry */
-    WORD count = (WORD)(pDir[4] | (pDir[5] << 8));
-    /* Each dir entry is 16 bytes: [0-3] w/h/colors/reserved, [4-5] planes, [6-7] bpp, [8-11] dataSize, [12-15] dataOffset */
-    if (iconIndex >= count) return NULL;
-    const BYTE* pEntry = pDir + 6 + iconIndex * 16;
-    DWORD dataOffset = (DWORD)(pEntry[12] | (pEntry[13] << 8) | (pEntry[14] << 16) | (pEntry[15] << 24));
-    DWORD dataSize = (DWORD)(pEntry[8] | (pEntry[9] << 8) | (pEntry[10] << 16) | (pEntry[11] << 24));
-    if (dataOffset + dataSize > (DWORD)size) return NULL;
-    const BYTE* pRes = pDir + dataOffset;
-    /* CreateIconFromResourceEx expects the resource data (after the directory) */
-    HICON hIcon = CreateIconFromResourceEx((PBYTE)pRes, dataSize, TRUE, 0x00030000,
-        GetSystemMetrics(SM_CXICON), GetSystemMetrics(SM_CYICON), LR_DEFAULTCOLOR);
+    /* Read the best entry's data offset and size */
+    const BYTE* bestEntry = p + 6 + bestIdx * 16;
+    DWORD imgDataSize = (DWORD)(bestEntry[8] | (bestEntry[9] << 8) | (bestEntry[10] << 16) | (bestEntry[11] << 24));
+    DWORD imgDataOffset = (DWORD)(bestEntry[12] | (bestEntry[13] << 8) | (bestEntry[14] << 16) | (bestEntry[15] << 24));
+    if (imgDataOffset + imgDataSize > (DWORD)size || imgDataSize == 0) return NULL;
+    /* CreateIconFromResourceEx expects the icon image data (BITMAPINFOHEADER + colors + XOR + AND) */
+    const BYTE* pImgData = p + imgDataOffset;
+    HICON hIcon = CreateIconFromResourceEx((PBYTE)pImgData, imgDataSize, TRUE, 0x00030000,
+        targetSize, targetSize, LR_DEFAULTCOLOR);
+    if (!hIcon) {
+        /* Fallback: try with SM_CXICON */
+        hIcon = CreateIconFromResourceEx((PBYTE)pImgData, imgDataSize, TRUE, 0x00030000,
+            GetSystemMetrics(SM_CXICON), GetSystemMetrics(SM_CYICON), LR_DEFAULTCOLOR);
+    }
     return (void*)hIcon;
 }
 
@@ -3130,4 +3146,98 @@ void vb6_SetShapeFillColor(void* hwnd, int32_t val) {
     if (!hwnd) return;
     SetPropW((HWND)hwnd, L"VB6_ShapeFillColor", (HANDLE)(INT_PTR)val);
     InvalidateRect((HWND)hwnd, NULL, TRUE);
+}
+
+/* M12-FIX3: Graphical button (Style=1) subclass - draw picture above caption text */
+static LRESULT CALLBACK vb6_GraphicalBtnSubclassProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
+    if (msg == WM_PAINT) {
+        HANDLE hBmp = GetPropW(hwnd, L"VB6_GfxBtn_Bmp");
+        if (hBmp && GetObjectType((HGDIOBJ)hBmp) == OBJ_BITMAP) {
+            PAINTSTRUCT ps;
+            HDC hdc = BeginPaint(hwnd, &ps);
+            RECT rc;
+            GetClientRect(hwnd, &rc);
+
+            /* Draw button background (3D raised/sunken) */
+            BOOL isChecked = (SendMessageW(hwnd, BM_GETCHECK, 0, 0) != BST_UNCHECKED);
+            UINT state = DFCS_BUTTONPUSH;
+            if (isChecked) state |= DFCS_PUSHED;
+            DrawFrameControl(hdc, &rc, DFC_BUTTON, state);
+
+            /* Get bitmap dimensions */
+            BITMAP bm;
+            GetObjectW((HBITMAP)hBmp, sizeof(bm), &bm);
+
+            /* Get caption text to calculate layout */
+            WCHAR caption[256] = {0};
+            int captionLen = GetWindowTextW(hwnd, caption, 256);
+
+            /* Layout: picture on top, text on bottom, both centered */
+            int textH = 0;
+            if (captionLen > 0) {
+                SIZE sz;
+                GetTextExtentPoint32W(hdc, caption, captionLen, &sz);
+                textH = sz.cy + 4; /* 2px padding top+bottom */
+            }
+
+            int btnW = rc.right - rc.left;
+            int btnH = rc.bottom - rc.top;
+            int border = 4; /* inset from button edge */
+            int availH = btnH - 2 * border - textH;
+
+            /* Draw bitmap centered horizontally, top-aligned in available area */
+            int imgX = border + (btnW - 2 * border - bm.bmWidth) / 2;
+            int imgY = border + (availH - bm.bmHeight) / 2;
+            if (imgY < border) imgY = border;
+
+            HDC memDC = CreateCompatibleDC(hdc);
+            HBITMAP oldBmp = (HBITMAP)SelectObject(memDC, (HBITMAP)hBmp);
+            BitBlt(hdc, imgX, imgY, bm.bmWidth, bm.bmHeight, memDC, 0, 0, SRCCOPY);
+            SelectObject(memDC, oldBmp);
+            DeleteDC(memDC);
+
+            /* Draw caption text below image, centered */
+            if (captionLen > 0) {
+                int textY = imgY + bm.bmHeight + 2;
+                if (textY + textH > btnH - border) textY = btnH - border - textH;
+                RECT textRc;
+                textRc.left = border;
+                textRc.top = textY;
+                textRc.right = btnW - border;
+                textRc.bottom = textY + textH;
+                HFONT hFont = (HFONT)SendMessageW(hwnd, WM_GETFONT, 0, 0);
+                HFONT oldFont = NULL;
+                if (hFont) oldFont = (HFONT)SelectObject(hdc, hFont);
+                SetBkMode(hdc, TRANSPARENT);
+                DrawTextW(hdc, caption, captionLen, &textRc, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+                if (oldFont) SelectObject(hdc, oldFont);
+            }
+
+            EndPaint(hwnd, &ps);
+            return 0;
+        }
+    }
+    if (msg == WM_DESTROY) {
+        HANDLE hBmp = GetPropW(hwnd, L"VB6_GfxBtn_Bmp");
+        if (hBmp) { DeleteObject(hBmp); RemovePropW(hwnd, L"VB6_GfxBtn_Bmp"); }
+        WNDPROC orig = (WNDPROC)GetPropW(hwnd, L"VB6_GfxBtn_OrigProc");
+        if (orig) { RemovePropW(hwnd, L"VB6_GfxBtn_OrigProc"); SetWindowLongPtrW(hwnd, GWLP_WNDPROC, (LONG_PTR)orig); }
+        return 0;
+    }
+    WNDPROC origProc = (WNDPROC)GetPropW(hwnd, L"VB6_GfxBtn_OrigProc");
+    if (origProc) return CallWindowProcW(origProc, hwnd, msg, wp, lp);
+    return DefWindowProcW(hwnd, msg, wp, lp);
+}
+
+void vb6_GraphicalBtn_SetImage(void* hwnd, void* hBitmap) {
+    if (!hwnd || !hBitmap) return;
+    HWND hw = (HWND)hwnd;
+    /* Store bitmap as property */
+    SetPropW(hw, L"VB6_GfxBtn_Bmp", (HANDLE)hBitmap);
+    /* Subclass if not already */
+    if (!GetPropW(hw, L"VB6_GfxBtn_OrigProc")) {
+        WNDPROC origProc = (WNDPROC)SetWindowLongPtrW(hw, GWLP_WNDPROC, (LONG_PTR)vb6_GraphicalBtnSubclassProc);
+        SetPropW(hw, L"VB6_GfxBtn_OrigProc", (HANDLE)origProc);
+    }
+    InvalidateRect(hw, NULL, TRUE);
 }
