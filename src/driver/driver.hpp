@@ -112,6 +112,20 @@ private:
     std::string projectBaseName_;
     std::string projectPath32_;    // P11.1: VBP Path32 field (output dir)
 
+    // P23-05: VBP version info (for VS_VERSION_INFO resource)
+    int verMajor_ = 1;
+    int verMinor_ = 0;
+    int verRevision_ = 0;
+    std::string verCompanyName_;
+    std::string verFileDescription_;
+    std::string verLegalCopyright_;
+    std::string verProductName_;
+    std::string verComments_;
+    std::string verLegalTrademarks_;
+    std::string verOriginalFileName_;
+    std::string verTitle_;
+    std::string userResFile_;         // P23-03: VBP ResFile= .res path (absolute)
+
     // TypeLib解析器 (P6.3, COM类型导入)
     std::unique_ptr<TypeLibParser> typelibParser_;
 

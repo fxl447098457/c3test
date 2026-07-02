@@ -1894,6 +1894,123 @@ void SemanticAnalyzer::registerBuiltins() {
     addConst("vbMsgBoxHelpButton", Vb6Type::Long, 16384); // &H4000
 
 
+    // --- P23-04: Low-frequency constants (85 additions) ---
+
+    // VbCallType (CallType)
+    addConst("vbMethod", Vb6Type::Long, 2);
+    addConst("vbGet", Vb6Type::Long, 3);
+    addConst("vbLet", Vb6Type::Long, 1);
+    addConst("vbSet", Vb6Type::Long, 4);
+
+    // VbCalendar
+
+    // VbQueryClose
+
+    // Clipboard format constants
+    addConst("vbCFText", Vb6Type::Long, 1);
+    addConst("vbCFBitmap", Vb6Type::Long, 2);
+    addConst("vbCFMetafile", Vb6Type::Long, 3);
+    addConst("vbCFDIB", Vb6Type::Long, 8);
+    addConst("vbCFPalette", Vb6Type::Long, 9);
+    addConst("vbCFRTF", Vb6Type::Long, -16639);       // &HFFFFBF01
+    addConst("vbCFEMetafile", Vb6Type::Long, 14);
+
+    // DriveType constants
+    addConst("vbDriveTypeRemovable", Vb6Type::Long, 1);
+    addConst("vbDriveTypeFixed", Vb6Type::Long, 2);
+    addConst("vbDriveTypeNetwork", Vb6Type::Long, 3);
+    addConst("vbDriveTypeCDRom", Vb6Type::Long, 4);
+    addConst("vbDriveTypeRAMDisk", Vb6Type::Long, 5);
+
+    // VbAppWinStyle
+    addConst("vbAppWinStyleNormal", Vb6Type::Long, 1);
+    addConst("vbAppWinStyleMinimize", Vb6Type::Long, 2);
+    addConst("vbAppWinStyleMaximize", Vb6Type::Long, 3);
+
+    // VbIMEStatus (distinct from IMEMode)
+    addConst("vbIMEOn", Vb6Type::Long, 1);
+    addConst("vbIMEOff", Vb6Type::Long, 0);
+    addConst("vbIMEDisable", Vb6Type::Long, 2);
+    addConst("vbIMEHiragana", Vb6Type::Long, 4);
+    addConst("vbIMEKatakana", Vb6Type::Long, 5);
+    addConst("vbIMEKatakanaHalf", Vb6Type::Long, 6);
+    addConst("vbIMEAlphaFull", Vb6Type::Long, 7);
+    addConst("vbIMEAlpha", Vb6Type::Long, 8);
+
+    // Shape control constants
+    addConst("vbShapeRectangle", Vb6Type::Long, 0);
+    addConst("vbShapeSquare", Vb6Type::Long, 1);
+    addConst("vbShapeOval", Vb6Type::Long, 2);
+    addConst("vbShapeCircle", Vb6Type::Long, 3);
+    addConst("vbShapeRoundedRectangle", Vb6Type::Long, 4);
+    addConst("vbShapeRoundedSquare", Vb6Type::Long, 5);
+
+    // BorderStyle (Shape/Line)
+    addConst("vbTransparent", Vb6Type::Long, 0);
+    addConst("vbBSSolid", Vb6Type::Long, 1);
+    addConst("vbBSDash", Vb6Type::Long, 2);
+    addConst("vbBSDot", Vb6Type::Long, 3);
+    addConst("vbBSDashDot", Vb6Type::Long, 4);
+    addConst("vbBSDashDotDot", Vb6Type::Long, 5);
+    addConst("vbBSInsideSolid", Vb6Type::Long, 6);
+
+    // FillStyle constants
+    addConst("vbFSSolid", Vb6Type::Long, 0);
+    addConst("vbFSTransparent", Vb6Type::Long, 1);
+    addConst("vbFSHorizontalLine", Vb6Type::Long, 2);
+    addConst("vbFSVerticalLine", Vb6Type::Long, 3);
+    addConst("vbFSUpwardDiagonal", Vb6Type::Long, 4);
+    addConst("vbFSDownwardDiagonal", Vb6Type::Long, 5);
+    addConst("vbFSCross", Vb6Type::Long, 6);
+    addConst("vbFSDiagonalCross", Vb6Type::Long, 7);
+
+    // MousePointer constants
+    addConst("vbDefault", Vb6Type::Long, 0);
+    addConst("vbArrow", Vb6Type::Long, 1);
+    addConst("vbCrosshair", Vb6Type::Long, 2);
+    addConst("vbIbeam", Vb6Type::Long, 3);
+    addConst("vbIconPointer", Vb6Type::Long, 4);
+    addConst("vbSizePointer", Vb6Type::Long, 5);
+    addConst("vbSizeNESW", Vb6Type::Long, 6);
+    addConst("vbSizeNS", Vb6Type::Long, 7);
+    addConst("vbSizeNWSE", Vb6Type::Long, 8);
+    addConst("vbSizeEW", Vb6Type::Long, 9);
+    addConst("vbUpArrow", Vb6Type::Long, 10);
+    addConst("vbHourglass", Vb6Type::Long, 11);
+    addConst("vbNoDrop", Vb6Type::Long, 12);
+    addConst("vbArrowHourglass", Vb6Type::Long, 13);
+    addConst("vbArrowQuestion", Vb6Type::Long, 14);
+    addConst("vbSizeAll", Vb6Type::Long, 15);
+    addConst("vbCustom", Vb6Type::Long, 99);
+
+    // Alignment constants
+    addConst("vbLeftJustify", Vb6Type::Long, 0);
+    addConst("vbRightJustify", Vb6Type::Long, 1);
+    addConst("vbCenter", Vb6Type::Long, 2);
+
+    // ScrollBar constants
+    addConst("vbSBNone", Vb6Type::Long, 0);
+    addConst("vbSBHorizontal", Vb6Type::Long, 1);
+    addConst("vbSBVertical", Vb6Type::Long, 2);
+    addConst("vbSBBoth", Vb6Type::Long, 3);
+
+    // ScaleMode constants
+    addConst("vbTwips", Vb6Type::Long, 1);
+    addConst("vbPoints", Vb6Type::Long, 2);
+    addConst("vbPixels", Vb6Type::Long, 3);
+    addConst("vbCharacters", Vb6Type::Long, 4);
+    addConst("vbInches", Vb6Type::Long, 5);
+    addConst("vbMillimeters", Vb6Type::Long, 6);
+    addConst("vbCentimeters", Vb6Type::Long, 7);
+    addConst("vbHimetric", Vb6Type::Long, 8);
+    addConst("vbContainerPosition", Vb6Type::Long, 9);
+    addConst("vbContainerSize", Vb6Type::Long, 10);
+    addConst("vbUser", Vb6Type::Long, 0);
+
+    // WindowState constants
+    addConst("vbMinimized", Vb6Type::Long, 1);
+    addConst("vbMaximized", Vb6Type::Long, 2);
+
     // String constants (additional)
     addStrConst("vbNullString", "");
 

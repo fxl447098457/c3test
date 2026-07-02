@@ -18,6 +18,8 @@ struct MsvcDriverOptions {
     std::string defFile;                    // P6.6: DLL export definition file (.def) path
     bool isGui = false;                     // P7: GUI program (Win32 window, not console)
     std::string typelibResFile;              // P6.13: .res file path (compiled resource)
+    std::string versionInfoResFile;          // P23-05: VS_VERSION_INFO .res file path
+    std::string userResFile;                // P23-03: User-specified .res file (from VBP ResFile=)
     std::string objDir;                      // P11.2: .obj intermediate directory
     std::string srcDir;                      // P11.2: generated .c/.h directory (/I include path)
 };

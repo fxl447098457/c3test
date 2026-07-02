@@ -251,6 +251,12 @@ bool MsvcDriver::compileAndLink(const MsvcDriverOptions& options) {
         if (!options.typelibResFile.empty()) {
             cmd << " \"" << options.typelibResFile << "\"";
         }
+        if (!options.versionInfoResFile.empty()) {
+            cmd << " \"" << options.versionInfoResFile << "\"";
+        }
+        if (!options.userResFile.empty()) {
+            cmd << " \"" << options.userResFile << "\"";
+        }
         if (!options.defFile.empty()) {
             cmd << " /DEF:\"" << options.defFile << "\"";
         }

@@ -1,4 +1,4 @@
-#include "driver/driver.hpp"
+﻿#include "driver/driver.hpp"
 #include "common/diagnostics.hpp"
 #include "common/encoding.hpp"
 #include "common/source_manager.hpp"
@@ -219,6 +219,39 @@ CompileResult Driver::compile(const CompileOptions& options) {
             // ProgID前缀: 优先CLI指定, 否则用工程名
             if (effectiveOpts.isDll && effectiveOpts.dllProgId.empty()) {
                 effectiveOpts.dllProgId = project.projectName.empty() ? "VB6DLL" : project.projectName;
+            }
+
+            // P23-01: Feed VBP Reference= and Object= entries into TypeLib import pipeline
+            // Reference= GUID -> loadByClsid, path -> loadByPath
+            for (const auto& ref : project.references) {
+                if (!ref.guid.empty()) {
+                    effectiveOpts.typelibRefs.push_back(ref.guid);
+                } else if (!ref.path.empty()) {
+                    effectiveOpts.typelibRefs.push_back(ref.path);
+                }
+            }
+            // Object= GUID (ActiveX controls) -> loadByClsid
+            for (const auto& obj : project.objects) {
+                if (!obj.guid.empty()) {
+                    effectiveOpts.typelibRefs.push_back(obj.guid);
+                }
+            }
+
+            // P23-05: Collect version info from VBP for VS_VERSION_INFO resource
+            verMajor_ = project.majorVer;
+            verMinor_ = project.minorVer;
+            verRevision_ = project.revisionVer;
+            verCompanyName_ = project.companyName;
+            verFileDescription_ = project.fileDescription;
+            verLegalCopyright_ = project.legalCopyright;
+            verProductName_ = project.productName;
+            verComments_ = project.comments;
+            verLegalTrademarks_ = project.legalTrademarks;
+            verOriginalFileName_ = project.originalFileName;
+            verTitle_ = project.title;
+            // P23-03: Collect ResFile path
+            if (!project.resFile.empty()) {
+                userResFile_ = pathToUtf8(project.resolvePath(project.resFile));
             }
         }
     }
@@ -1405,6 +1438,132 @@ bool Driver::runLinker(const CompileOptions& options, const std::string& outputD
             std::cout << "C3: TypeLib file not found: " << tlbPath << std::endl;
         }
     }
+    // P23-05: Generate VS_VERSION_INFO resource if version info is available
+    if (verMajor_ > 0 || verMinor_ > 0 || !verCompanyName_.empty() || !verFileDescription_.empty()) {
+        std::string absInterDir2 = pathToUtf8(std::filesystem::absolute(utf8ToPath(intermediatesDir)));
+        std::string verRcPath = absInterDir2 + "\\version_info.rc";
+        {
+            std::ofstream rcFile(verRcPath, std::ios::out | std::ios::trunc);
+            if (rcFile) {
+                // Determine internal name from project base name or output file
+                std::string internalName = projectBaseName_.empty() ? "VB6App" : projectBaseName_;
+                std::string originalName = verOriginalFileName_.empty() ? (internalName + ".exe") : verOriginalFileName_;
+                std::string prodName = verProductName_.empty() ? internalName : verProductName_;
+                std::string fileDesc = verFileDescription_.empty() ? internalName : verFileDescription_;
+                std::string company = verCompanyName_;
+                std::string copyright = verLegalCopyright_;
+                std::string comments = verComments_;
+                std::string trademarks = verLegalTrademarks_;
+
+                // Escape backslashes for RC string values
+                auto escapeRc = [](std::string s) -> std::string {
+                    std::string result;
+                    for (char c : s) {
+                        if (c == '\\') result += "\\\\";
+                        else if (c == '"') result += "\\\"";
+                        else result += c;
+                    }
+                    return result;
+                };
+
+                int fileVerMs = verMajor_;
+                int fileVerLs = verMinor_;
+                int prodVerMs = verMajor_;
+                int prodVerLs = verMinor_;
+
+                rcFile << "#include <winver.h>\n";
+                rcFile << "\n";
+                rcFile << "VS_VERSION_INFO VERSIONINFO\n";
+                rcFile << "FILEVERSION " << fileVerMs << "," << fileVerLs << ",0," << verRevision_ << "\n";
+                rcFile << "PRODUCTVERSION " << prodVerMs << "," << prodVerLs << ",0," << verRevision_ << "\n";
+                rcFile << "FILEFLAGSMASK 0x3fL\n";
+                rcFile << "FILEFLAGS 0x0L\n";
+                rcFile << "FILEOS VOS_NT_WINDOWS32\n";
+                rcFile << "FILETYPE VFT_APP\n";
+                rcFile << "FILESUBTYPE VFT2_UNKNOWN\n";
+                rcFile << "BEGIN\n";
+                rcFile << "  BLOCK \"StringFileInfo\"\n";
+                rcFile << "  BEGIN\n";
+                rcFile << "    BLOCK \"080404b0\"\n";
+                rcFile << "    BEGIN\n";
+                rcFile << "      VALUE \"CompanyName\", \"" << escapeRc(company) << "\"\n";
+                rcFile << "      VALUE \"FileDescription\", \"" << escapeRc(fileDesc) << "\"\n";
+                rcFile << "      VALUE \"FileVersion\", \"" << fileVerMs << "." << fileVerLs << ".0." << verRevision_ << "\"\n";
+                rcFile << "      VALUE \"InternalName\", \"" << escapeRc(internalName) << "\"\n";
+                rcFile << "      VALUE \"LegalCopyright\", \"" << escapeRc(copyright) << "\"\n";
+                rcFile << "      VALUE \"LegalTrademarks\", \"" << escapeRc(trademarks) << "\"\n";
+                rcFile << "      VALUE \"OriginalFilename\", \"" << escapeRc(originalName) << "\"\n";
+                rcFile << "      VALUE \"ProductName\", \"" << escapeRc(prodName) << "\"\n";
+                rcFile << "      VALUE \"ProductVersion\", \"" << prodVerMs << "." << prodVerLs << ".0." << verRevision_ << "\"\n";
+                if (!comments.empty()) {
+                    rcFile << "      VALUE \"Comments\", \"" << escapeRc(comments) << "\"\n";
+                }
+                rcFile << "    END\n";
+                rcFile << "  END\n";
+                rcFile << "  BLOCK \"VarFileInfo\"\n";
+                rcFile << "  BEGIN\n";
+                rcFile << "    VALUE \"Translation\", 0x0804, 1200\n";
+                rcFile << "  END\n";
+                rcFile << "END\n";
+            }
+        }
+
+        // Find rc.exe (reuse same logic as TypeLib RC)
+        std::string rcExePath2;
+        std::filesystem::path toolsRc2 = std::filesystem::current_path() / "tools" / "rc.exe";
+        if (std::filesystem::exists(toolsRc2)) {
+            rcExePath2 = toolsRc2.string();
+        } else {
+            std::string sdkBinDir2;
+            const char* sdkDir2 = std::getenv("WindowsSdkDir");
+            if (sdkDir2 && sdkDir2[0] != '\0') {
+                std::string sdkRoot2 = sdkDir2;
+                while (!sdkRoot2.empty() && sdkRoot2.back() == '\\') sdkRoot2.pop_back();
+                sdkBinDir2 = sdkRoot2 + "\\bin";
+            }
+            if (sdkBinDir2.empty() || !std::filesystem::exists(sdkBinDir2)) {
+                static const char* commonSdkBin2 = "C:\\Program Files (x86)\\Windows Kits\\10\\bin";
+                if (std::filesystem::exists(commonSdkBin2)) sdkBinDir2 = commonSdkBin2;
+            }
+            if (!sdkBinDir2.empty() && std::filesystem::exists(sdkBinDir2)) {
+                for (auto& entry : std::filesystem::directory_iterator(sdkBinDir2)) {
+                    if (!entry.is_directory()) continue;
+                    std::filesystem::path candidate = entry.path() / "x64" / "rc.exe";
+                    if (std::filesystem::exists(candidate)) {
+                        rcExePath2 = candidate.string();
+                    }
+                }
+            }
+        }
+
+        if (!rcExePath2.empty()) {
+            std::string verResPath = absInterDir2 + "\\version_info.res";
+            std::ostringstream verRcArgs;
+            verRcArgs << "\"" << rcExePath2 << "\" /r /fo \"" << verResPath << "\" \"" << verRcPath << "\"";
+            if (options.verbose) {
+                std::cout << "C3: RC (version): " << verRcArgs.str() << std::endl;
+            }
+            std::string verRcFullCmd = std::string("cmd /c \"") + verRcArgs.str() + "\"";
+            int verRcRet = std::system(verRcFullCmd.c_str());
+            if (verRcRet == 0 && std::filesystem::exists(verResPath)) {
+                msvcOpts.versionInfoResFile = verResPath;
+                if (options.verbose) {
+                    std::cout << "C3: VS_VERSION_INFO resource compiled: " << verResPath << std::endl;
+                }
+            }
+        } else if (options.verbose) {
+            std::cout << "C3: rc.exe not found, version info will not be embedded" << std::endl;
+        }
+    }
+
+        // P23-03: Pass user .res file to linker
+    if (!userResFile_.empty() && std::filesystem::exists(utf8ToPath(userResFile_))) {
+        msvcOpts.userResFile = userResFile_;
+        if (options.verbose) {
+            std::cout << "C3: User resource file: " << userResFile_ << std::endl;
+        }
+    }
+
     MsvcDriver msvc;
     return msvc.compileAndLink(msvcOpts);
 }
