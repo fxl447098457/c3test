@@ -260,6 +260,15 @@ bool MsvcDriver::compileAndLink(const MsvcDriverOptions& options) {
         if (!options.defFile.empty()) {
             cmd << " /DEF:\"" << options.defFile << "\"";
         }
+        if (!options.typelibResFile.empty()) {
+            cmd << " \"" << options.typelibResFile << "\"";
+        }
+        if (!options.versionInfoResFile.empty()) {
+            cmd << " \"" << options.versionInfoResFile << "\"";
+        }
+        if (!options.userResFile.empty()) {
+            cmd << " \"" << options.userResFile << "\"";
+        }
         cmd << " ole32.lib oleaut32.lib uuid.lib advapi32.lib user32.lib shell32.lib gdi32.lib";
     } else if (options.isGui) {
         // P7: GUI程序 (Win32窗口)
@@ -268,12 +277,30 @@ bool MsvcDriver::compileAndLink(const MsvcDriverOptions& options) {
             cmd << " \"" << options.rtlDir << "\\vb6rtl.lib\""
                 << " \"" << options.rtlDir << "\\vb6rtl_gui.lib\"";
         }
+        if (!options.typelibResFile.empty()) {
+            cmd << " \"" << options.typelibResFile << "\"";
+        }
+        if (!options.versionInfoResFile.empty()) {
+            cmd << " \"" << options.versionInfoResFile << "\"";
+        }
+        if (!options.userResFile.empty()) {
+            cmd << " \"" << options.userResFile << "\"";
+        }
         cmd << " user32.lib gdi32.lib shell32.lib ole32.lib oleaut32.lib uuid.lib advapi32.lib";
     } else {
         // 控制台程序
         cmd << " /link /SUBSYSTEM:CONSOLE";
         if (!options.rtlDir.empty()) {
             cmd << " \"" << options.rtlDir << "\\vb6rtl.lib\"";
+        }
+        if (!options.typelibResFile.empty()) {
+            cmd << " \"" << options.typelibResFile << "\"";
+        }
+        if (!options.versionInfoResFile.empty()) {
+            cmd << " \"" << options.versionInfoResFile << "\"";
+        }
+        if (!options.userResFile.empty()) {
+            cmd << " \"" << options.userResFile << "\"";
         }
         cmd << " ole32.lib oleaut32.lib uuid.lib advapi32.lib user32.lib shell32.lib gdi32.lib";
     }

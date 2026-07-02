@@ -406,6 +406,19 @@ FrmFile FrmParser::parseString(const std::string& content, const std::string& fr
         }
     }
 
+    // 1.5 Skip Object= lines (ActiveX control references in .frm header)
+    // e.g. Object = "{831FDD16-0C5C-11D2-A9FC-0000F8754DA1}#2.0#0"; "MSCOMCTL.OCX"
+    while (lineIdx < lines.size()) {
+        std::string objLine = trim(lines[lineIdx]);
+        if (objLine.empty() ||
+            objLine.find("Object ") == 0 ||
+            objLine.find("Object=") == 0) {
+            lineIdx++;
+            continue;
+        }
+        break;
+    }
+
     // 2. Begin VB.Form ... End 窗体描述块
     if (lineIdx < lines.size()) {
         std::string beginLine = trim(lines[lineIdx]);

@@ -1471,16 +1471,16 @@ bool Driver::runLinker(const CompileOptions& options, const std::string& outputD
                 int prodVerMs = verMajor_;
                 int prodVerLs = verMinor_;
 
-                rcFile << "#include <winver.h>\n";
-                rcFile << "\n";
-                rcFile << "VS_VERSION_INFO VERSIONINFO\n";
+                                rcFile << "\n";
+                rcFile << "#pragma code_page(65001)\n";
+                rcFile << "1 VERSIONINFO\n";
                 rcFile << "FILEVERSION " << fileVerMs << "," << fileVerLs << ",0," << verRevision_ << "\n";
                 rcFile << "PRODUCTVERSION " << prodVerMs << "," << prodVerLs << ",0," << verRevision_ << "\n";
                 rcFile << "FILEFLAGSMASK 0x3fL\n";
                 rcFile << "FILEFLAGS 0x0L\n";
-                rcFile << "FILEOS VOS_NT_WINDOWS32\n";
-                rcFile << "FILETYPE VFT_APP\n";
-                rcFile << "FILESUBTYPE VFT2_UNKNOWN\n";
+                rcFile << "FILEOS 0x00040004L\n";
+                rcFile << "FILETYPE 0x00000001L\n";
+                rcFile << "FILESUBTYPE 0x00000000L\n";
                 rcFile << "BEGIN\n";
                 rcFile << "  BLOCK \"StringFileInfo\"\n";
                 rcFile << "  BEGIN\n";
