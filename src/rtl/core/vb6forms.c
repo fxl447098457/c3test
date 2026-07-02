@@ -3260,8 +3260,10 @@ static LRESULT CALLBACK vb6_GraphicalBtnSubclassProc(HWND hwnd, UINT msg, WPARAM
         msg == WM_ENABLE || msg == WM_CANCELMODE ||
         (msg == BM_SETCHECK) || (msg == BM_SETSTATE)) {
         WNDPROC origProc = (WNDPROC)GetPropW(hwnd, L"VB6_GfxBtn_OrigProc");
+        SendMessageW(hwnd, WM_SETREDRAW, FALSE, 0);  /* prevent flicker: disable auto-redraw */
         LRESULT result = CallWindowProcW(origProc, hwnd, msg, wp, lp);
-        InvalidateRect(hwnd, NULL, FALSE);
+        SendMessageW(hwnd, WM_SETREDRAW, TRUE, 0);   /* re-enable redraw */
+        InvalidateRect(hwnd, NULL, FALSE);            /* our WM_PAINT draws picture+text */
         return result;
     }
     if (msg == WM_ERASEBKGND) {
