@@ -109,7 +109,7 @@ std::string MsvcDriver::findClExe() const {
 }
 
 // P11.4: Build vcvarsall.bat prefix if needed
-std::string MsvcDriver::buildVcvarsPrefix() const {
+std::string MsvcDriver::buildVcvarsPrefix(const std::string& arch) const {
     // If vcvarsall already set, no prefix needed
     const char* vcDir = std::getenv("VCINSTALLDIR");
     if (vcDir && vcDir[0] != '\0') {
@@ -119,7 +119,7 @@ std::string MsvcDriver::buildVcvarsPrefix() const {
     // Try to find vcvarsall.bat
     std::string vcvars = findVcvarsallBat();
     if (!vcvars.empty()) {
-        return "call \"" + vcvars + "\" x64 >nul 2>&1 && ";
+        return "call \"" + vcvars + "\" " + arch + " >nul 2>&1 && ";
     }
 
     return "";
@@ -305,6 +305,10 @@ bool MsvcDriver::compileAndLink(const MsvcDriverOptions& options) {
         cmd << " ole32.lib oleaut32.lib uuid.lib advapi32.lib user32.lib shell32.lib gdi32.lib";
     }
 
+    // DualArch: /MACHINE flag for x86 target (x64 is default, no explicit flag needed)
+    if (options.arch == "x86") {
+        cmd << " /MACHINE:X86";
+    }
 
     if (options.verbose) {
         std::cout << "C3: 执行: " << cmd.str() << std::endl;
@@ -321,7 +325,7 @@ bool MsvcDriver::compileAndLink(const MsvcDriverOptions& options) {
     if (tmpLogDir.empty()) tmpLogDir = ".";
     std::string tmpLogPath = tmpLogDir + "/_c3_msvc_out.txt";
     // P11.4: Prepend vcvarsall.bat setup if cl.exe not in PATH
-    std::string vcvarsPrefix = buildVcvarsPrefix();
+    std::string vcvarsPrefix = buildVcvarsPrefix(options.arch);
     std::string fullCmd = vcvarsPrefix + cmd.str() + " > \"" + tmpLogPath + "\" 2>&1";
 
     int ret = executeCommand(fullCmd);

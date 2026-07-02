@@ -813,6 +813,10 @@ typedef struct VB6EventSink {
     int count;
 } VB6EventSink;
 
+/* Forward declarations for x86 compat (sink_AddRef/Release used before definition) */
+static ULONG STDMETHODCALLTYPE sink_AddRef(IDispatch* This);
+static ULONG STDMETHODCALLTYPE sink_Release(IDispatch* This);
+
 /* IDispatch vtable methods */
 static HRESULT STDMETHODCALLTYPE sink_QueryInterface(IDispatch* This, REFIID riid, void** ppv) {
     if (IsEqualIID(riid, &IID_IUnknown) || IsEqualIID(riid, &IID_IDispatch)) {

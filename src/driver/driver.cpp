@@ -59,6 +59,13 @@ std::pair<CompileOptions, int> Driver::parseArgs(int argc, char* argv[]) {
         else if (arg == "--target" && i + 1 < argc) {
             opts.target = argv[++i];
         }
+        else if (arg == "--arch" && i + 1 < argc) {
+            opts.arch = argv[++i];
+            if (opts.arch != "x86" && opts.arch != "x64") {
+                std::cerr << "C3: --arch must be x86 or x64 (got: " << opts.arch << ")" << std::endl;
+                resultCode = 1;
+            }
+        }
         else if (arg == "--gui" && i + 1 < argc) {
             opts.guiMode = argv[++i];
         }
@@ -437,9 +444,8 @@ CompileResult Driver::compile(const CompileOptions& options) {
     }
 
     // === P11.2: Create session for intermediates ===
-    // === P11.2: Create session for intermediates ===
     SessionManager session;
-    std::string rtlDir = session.create();
+    std::string rtlDir = session.create(effectiveOpts.arch);
     if (rtlDir.empty()) {
         std::cerr << "C3: error: failed to create session directory" << std::endl;
         result.errorCount = 1;
@@ -1359,6 +1365,7 @@ bool Driver::runLinker(const CompileOptions& options, const std::string& outputD
     msvcOpts.verbose = options.verbose;
     msvcOpts.debugInfo = options.debugInfo;
     msvcOpts.optimizationLevel = options.optimizationLevel;
+    msvcOpts.arch = options.arch;  // DualArch: pass target architecture
 
     // P6.6: ActiveX DLL - generate .def export file (in intermediatesDir)
     if (options.isDll) {
@@ -1601,6 +1608,7 @@ void Driver::printHelp() {
               << "  -o <文件>          输出文件路径\n"
               << "  --output-dir <目录> 输出目录 (默认: 源文件所在目录)\n"
               << "  --target <平台>     目标平台 (win-x86, win-x64, linux-x64, macos-arm64)\n"
+              << "  --arch <架构>      目标架构 x64 (默认) 或 x86 (用于32位COM组件)\n"
               << "  --gui <模式>        GUI模式 (native, webview, none)\n"
               << "  --syntax-only       只做语法检查\n"
               << "  -d, --define <N=V>  定义条件编译常量 (如 -d:DEBUG=-1)\n"

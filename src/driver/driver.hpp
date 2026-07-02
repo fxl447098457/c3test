@@ -26,7 +26,8 @@ struct CompileOptions {
     std::string outputDir;                   // 输出目录 (默认: output)
 
     // 目标平台
-    std::string target = "win-x86";          // win-x86, win-x64, linux-x64, etc.
+    std::string target = "win-x64";         // win-x86, win-x64, linux-x64, etc.
+    std::string arch = "x64";              // x64 (default) or x86 — output binary architecture
 
     // GUI模式
     std::string guiMode = "native";          // native, webview, none

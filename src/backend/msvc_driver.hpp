@@ -22,6 +22,7 @@ struct MsvcDriverOptions {
     std::string userResFile;                // P23-03: User-specified .res file (from VBP ResFile=)
     std::string objDir;                      // P11.2: .obj intermediate directory
     std::string srcDir;                      // P11.2: generated .c/.h directory (/I include path)
+    std::string arch = "x64";               // DualArch: x64 or x86 — target binary architecture
 };
 
 class MsvcDriver {
@@ -46,7 +47,7 @@ private:
     static std::string findVsInstallPath();
 
     // Build vcvarsall setup prefix for cl.exe command
-    std::string buildVcvarsPrefix() const;
+    std::string buildVcvarsPrefix(const std::string& arch = "x64") const;
 
     // Execute command line
     int executeCommand(const std::string& cmd) const;

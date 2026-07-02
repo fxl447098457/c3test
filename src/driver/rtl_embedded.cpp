@@ -1,6 +1,7 @@
-// P10/P11.3: RTL runtime embedded resource management - implementation
+// P10/P11.3/DualArch: RTL runtime embedded resource management - implementation
 // Extract 4 .h headers + 3 .lib static libraries from c3.exe RCDATA resources
 // P11.3: .c source replaced by pre-compiled .lib (source protection)
+// DualArch: x64 (IDs 110-112) or x86 (IDs 120-122) based on target arch
 
 #include "driver/rtl_embedded.hpp"
 
@@ -69,7 +70,7 @@ std::string SessionManager::getSessionRoot() {
     return std::string(tmp) + "\\C3C";
 }
 
-std::string SessionManager::create() {
+std::string SessionManager::create(const std::string& arch) {
     // 1. Clean up old sessions
     cleanupOldSessions();
 
@@ -89,23 +90,45 @@ std::string SessionManager::create() {
     }
 
     // 3. Extract RTL resource files
-    // P11.3: 4 .h headers + 3 .lib static libraries (no .c source)
+    // Headers are arch-neutral (always extract), .lib depends on target arch
     struct RtlFileEntry { int id; const char* name; };
-    static const RtlFileEntry files[] = {
-        // Headers (for #include)
+    static const RtlFileEntry headers[] = {
         { RTL_VB6RTL_H,       "vb6rtl.h" },
         { RTL_VB6COM_H,       "vb6com.h" },
         { RTL_VB6COMSERVER_H, "vb6comserver.h" },
         { RTL_VB6FORMS_H,     "vb6forms.h" },
-        // Pre-compiled static libraries (P11.3: replaces .c source)
+    };
+
+    // Select .lib resource IDs based on target architecture
+    bool isX86 = (arch == "x86");
+    static const RtlFileEntry libs_x64[] = {
         { RTL_VB6RTL_LIB,     "vb6rtl.lib" },       // vb6rtl + vb6com (all programs)
         { RTL_VB6RTL_DLL_LIB, "vb6rtl_dll.lib" },   // vb6comserver (ActiveX DLL)
         { RTL_VB6RTL_GUI_LIB, "vb6rtl_gui.lib" },   // vb6forms (GUI programs)
     };
+    static const RtlFileEntry libs_x86[] = {
+        { RTL_VB6RTL_LIB_X86,     "vb6rtl.lib" },       // vb6rtl + vb6com (all programs)
+        { RTL_VB6RTL_DLL_LIB_X86, "vb6rtl_dll.lib" },   // vb6comserver (ActiveX DLL)
+        { RTL_VB6RTL_GUI_LIB_X86, "vb6rtl_gui.lib" },   // vb6forms (GUI programs)
+    };
 
-    for (auto& entry : files) {
+    // Extract headers (arch-neutral)
+    for (auto& entry : headers) {
         if (!extractResource(entry.id, entry.name, rtlDir_)) {
             std::cerr << "C3: cannot extract RTL resource: " << entry.name << std::endl;
+            cleanup();
+            return "";
+        }
+    }
+
+    // Extract .lib files (arch-specific)
+    const RtlFileEntry* libs = isX86 ? libs_x86 : libs_x64;
+    int libsCount = isX86 ? (int)(sizeof(libs_x86)/sizeof(libs_x86[0]))
+                          : (int)(sizeof(libs_x64)/sizeof(libs_x64[0]));
+    for (int i = 0; i < libsCount; i++) {
+        if (!extractResource(libs[i].id, libs[i].name, rtlDir_)) {
+            std::cerr << "C3: cannot extract RTL resource: " << libs[i].name
+                      << " (arch=" << arch << ")" << std::endl;
             cleanup();
             return "";
         }

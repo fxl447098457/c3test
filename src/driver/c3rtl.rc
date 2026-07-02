@@ -1,19 +1,28 @@
 // c3rtl.rc - RTL runtime library embedded as resources
 // P11.3: Pre-compiled .lib replaces .c source (source protection)
-// 7 resources: 4 .h headers + 3 .lib static libraries
+// Dual-architecture: x64 + x86 .lib files
+// 4 .h headers (arch-neutral) + 3 .lib x64 + 3 .lib x86 = 10 resources
 // Runtime: FindResource/LoadResource extract to temp session directory
 // Paths relative to this RC file's location (src/driver/)
 
-// Headers (needed for #include in generated code)
+// Headers (needed for #include in generated code) — arch-neutral
 100 RCDATA "../rtl/core/vb6rtl.h"
 102 RCDATA "../rtl/core/vb6com.h"
 104 RCDATA "../rtl/core/vb6comserver.h"
 106 RCDATA "../rtl/core/vb6forms.h"
 
-// Pre-compiled static libraries (replaces .c source files)
+// Pre-compiled static libraries — x64 (default target)
 // vb6rtl.lib = vb6rtl.obj + vb6com.obj (all programs)
 110 RCDATA "../rtl/lib/vb6rtl.lib"
 // vb6rtl_dll.lib = vb6comserver.obj (ActiveX DLL only)
 111 RCDATA "../rtl/lib/vb6rtl_dll.lib"
 // vb6rtl_gui.lib = vb6forms.obj (GUI programs only)
 112 RCDATA "../rtl/lib/vb6rtl_gui.lib"
+
+// Pre-compiled static libraries — x86 (--arch x86 target)
+// vb6rtl.lib = vb6rtl.obj + vb6com.obj (all programs)
+120 RCDATA "../rtl/lib/x86/vb6rtl.lib"
+// vb6rtl_dll.lib = vb6comserver.obj (ActiveX DLL only)
+121 RCDATA "../rtl/lib/x86/vb6rtl_dll.lib"
+// vb6rtl_gui.lib = vb6forms.obj (GUI programs only)
+122 RCDATA "../rtl/lib/x86/vb6rtl_gui.lib"
