@@ -632,6 +632,41 @@ void CCodeGen::emitFormFramework(const FrmFormDesc& frmDesc, Module& module) {
     c_.dedent();
     c_.emitLine("}");
 
+    // M12-FIX: Form.Picture background tiling via WM_ERASEBKGND
+    {
+        auto picIt = frmDesc.formControl.properties.find("Picture");
+        if (picIt != frmDesc.formControl.properties.end() && picIt->second.type == FrmValueType::FrxReference && frxLoaded) {
+            c_.emitLine("case WM_ERASEBKGND: {");
+            c_.indent();
+            c_.emitLine("HANDLE vb6_bg = GetPropW(hwnd, L\"VB6_Picture\");");
+            c_.emitLine("if (vb6_bg && GetObjectType((HGDIOBJ)vb6_bg) == OBJ_BITMAP) {");
+            c_.indent();
+            c_.emitLine("HDC hdc = (HDC)(WPARAM)wParam;");
+            c_.emitLine("RECT rc; GetClientRect(hwnd, &rc);");
+            c_.emitLine("HDC memDC = CreateCompatibleDC(hdc);");
+            c_.emitLine("HBITMAP hBmp = (HBITMAP)vb6_bg;");
+            c_.emitLine("BITMAP bm; GetObjectW(hBmp, sizeof(bm), &bm);");
+            c_.emitLine("HBITMAP oldBmp = (HBITMAP)SelectObject(memDC, hBmp);");
+            c_.emitLine("for (int y = 0; y < rc.bottom; y += bm.bmHeight) {");
+            c_.indent();
+            c_.emitLine("for (int x = 0; x < rc.right; x += bm.bmWidth) {");
+            c_.indent();
+            c_.emitLine("BitBlt(hdc, x, y, bm.bmWidth, bm.bmHeight, memDC, 0, 0, SRCCOPY);");
+            c_.dedent();
+            c_.emitLine("}");
+            c_.dedent();
+            c_.emitLine("}");
+            c_.emitLine("SelectObject(memDC, oldBmp);");
+            c_.emitLine("DeleteDC(memDC);");
+            c_.emitLine("return 1;");
+            c_.dedent();
+            c_.emitLine("}");
+            c_.emitLine("break;");
+            c_.dedent();
+            c_.emitLine("}");
+        }
+    }
+
     // WM_COMMAND: 按钮点击等 (P7.6: 支持控件数组Index参数)
     c_.emitLine("case WM_COMMAND: {");
     c_.indent();
@@ -949,6 +984,19 @@ void CCodeGen::emitFormFramework(const FrmFormDesc& frmDesc, Module& module) {
                 if (!needsSubclass(child)) continue;
                 c_.emitLine("vb6_RemoveControlSubclass((void*)vb6_hwnd_" + cIdent(child.controlName) + ");");
             }
+        }
+    }
+    // M12-FIX: Cleanup Form.Picture and Form.Icon from .frx
+    {
+        auto picIt = frmDesc.formControl.properties.find("Picture");
+        if (picIt != frmDesc.formControl.properties.end() && picIt->second.type == FrmValueType::FrxReference && frxLoaded) {
+            c_.emitLine("{ HANDLE vb6_bg = GetPropW(hwnd, L\"VB6_Picture\");");
+            c_.emitLine("  if (vb6_bg) { DeleteObject(vb6_bg); RemovePropW(hwnd, L\"VB6_Picture\"); } }");
+        }
+        auto iconIt = frmDesc.formControl.properties.find("Icon");
+        if (iconIt != frmDesc.formControl.properties.end() && iconIt->second.type == FrmValueType::FrxReference && frxLoaded) {
+            c_.emitLine("{ HANDLE vb6_ico = (HANDLE)SendMessageW(hwnd, WM_GETICON, ICON_BIG, 0);");
+            c_.emitLine("  if (vb6_ico) DestroyIcon((HICON)vb6_ico); }");
         }
     }
     c_.emitLine("PostQuitMessage(0);");

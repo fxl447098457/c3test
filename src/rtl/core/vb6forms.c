@@ -1637,8 +1637,14 @@ void* vb6_LoadPictureFromMemory(const void* data, int size) {
                 result = (HANDLE)hDst;
             }
         }
+    } else if (picType == 3) {
+        /* PICTURE_TYPE_ICON - must duplicate because IPicture owns it */
+        HICON hSrc = (HICON)(LONG_PTR)hHandle;
+        if (hSrc) {
+            result = (HANDLE)DuplicateIcon(NULL, hSrc);
+        }
     } else {
-        /* Icon or metafile - just use the handle directly */
+        /* Metafile - use handle directly (rare for .frx) */
         result = (HANDLE)(LONG_PTR)hHandle;
     }
     
