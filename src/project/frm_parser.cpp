@@ -158,6 +158,7 @@ FrmControlType FrmParser::parseControlType(const std::string& typeName) {
     if (lower.find("toolbar") != std::string::npos) return FrmControlType::Toolbar;
     if (lower.find("statusbar") != std::string::npos) return FrmControlType::StatusBar;
     if (lower.find("commondialog") != std::string::npos) return FrmControlType::CommonDialog;
+    if (lower.find("imagelist") != std::string::npos) return FrmControlType::ImageList;
 
     return FrmControlType::Unknown;
 }

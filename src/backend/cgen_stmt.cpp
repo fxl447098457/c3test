@@ -270,11 +270,26 @@ void CCodeGen::visit(AssignmentStmt& node) {
                 std::string writeFn = getControlPropWriteFn(itCtrl->second, maExpr.memberName);
                 if (!writeFn.empty()) {
                     emitExpr(*node.value);
+                    // ImageList Picture fix: resolve COM marker on RHS before using value
+                    // e.g. Picture2.Picture = ImageList1.ListImages(i).Picture
+                    bool rhsIsComPicture = false;
+                    if (isComMarker_) {
+                        if (comMemberName_ == "Picture" || comMemberName_ == "picture") {
+                            rhsIsComPicture = true;
+                            resolveComValue("Object");
+                        } else {
+                            resolveComValue();
+                        }
+                    }
                     std::string valExpr = std::move(lastExpr_);
                     // M22: Text/Caption property writes need BSTR value
                     if (writeFn.find("SetControlText") != std::string::npos ||
                         writeFn.find("SetMenuCaption") != std::string::npos) {
                         valExpr = wrapToBSTR(valExpr, *node.value);
+                    }
+                    // ImageList Picture fix: use SetControlPictureFromCom for COM IPictureDisp
+                    if (rhsIsComPicture && writeFn.find("SetControlPicture") != std::string::npos) {
+                        writeFn = "vb6_SetControlPictureFromCom";
                     }
                     c_.emitLine(writeFn + "(" + makeCtrlHwndArg(objLower, itCtrl->second) + ", " + valExpr + ");  /* Control Property */");
                     return;
@@ -618,6 +633,41 @@ void CCodeGen::visit(SetStmt& node) {
                 c_.emitLine("vb6_ReleaseObject((void**)&" + target + ");  /* Set Nothing */");
             }
             return;
+        }
+    }
+
+    // P25: Set ctrl.Property = COM_value (e.g. Set Picture2.Picture = ImageList1.ListImages(i).Picture)
+    // SetStmt的emitExpr左侧走属性读取路径, 但Picture赋值需要写函数
+    if (node.target->kind == ASTNodeKind::MemberAccessExpr) {
+        auto& _setMa = static_cast<MemberAccessExpr&>(*node.target);
+        if (_setMa.object && _setMa.object->kind == ASTNodeKind::IdentifierExpr) {
+            auto& _setId = static_cast<IdentifierExpr&>(*_setMa.object);
+            std::string _setObjLower = _setId.name;
+            std::transform(_setObjLower.begin(), _setObjLower.end(), _setObjLower.begin(), ::tolower);
+            auto _setItCtrl = knownFormControls_.find(_setObjLower);
+            if (_setItCtrl != knownFormControls_.end()) {
+                std::string _setWriteFn = getControlPropWriteFn(_setItCtrl->second, _setMa.memberName);
+                if (!_setWriteFn.empty()) {
+                    emitExpr(*node.value);
+                    // Resolve COM marker on RHS
+                    bool _rhsIsComPicture = false;
+                    if (isComMarker_) {
+                        if (comMemberName_ == "Picture" || comMemberName_ == "picture") {
+                            _rhsIsComPicture = true;
+                            resolveComValue("Object");
+                        } else {
+                            resolveComValue("Object");
+                        }
+                    }
+                    std::string _setValExpr = std::move(lastExpr_);
+                    // Use SetControlPictureFromCom for COM IPictureDisp
+                    if (_rhsIsComPicture && _setWriteFn.find("SetControlPicture") != std::string::npos) {
+                        _setWriteFn = "vb6_SetControlPictureFromCom";
+                    }
+                    c_.emitLine(_setWriteFn + "(" + makeCtrlHwndArg(_setObjLower, _setItCtrl->second) + ", " + _setValExpr + ");  /* Set Control Property */");
+                    return;
+                }
+            }
         }
     }
 

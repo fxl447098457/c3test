@@ -102,6 +102,7 @@ enum class FrmControlType {
     Toolbar,            // MSComctlLib.Toolbar 等 (第三方)
     StatusBar,          // MSComctlLib.StatusBar
     CommonDialog,       // MSComDlg.CommonDialog
+    ImageList,          // MSComctlLib.ImageList (ActiveX, COM后期绑定)
     Unknown,            // 未识别的控件类型
 };
 

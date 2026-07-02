@@ -1,4 +1,4 @@
-// VB6 Win32窓体运行时实现 (P7)
+﻿// VB6 Win32窓体运行时实现 (P7)
 // 提供Win32窗口注册、创建、消息循环、控件管理等基础功能
 
 #ifdef _WIN32
@@ -137,10 +137,15 @@ void* vb6_CreateControl(const char* win32Class, const char* controlName,
     int pw = vb6_TwipToX(width);
     int ph = vb6_TwipToY(height);
 
-    HWND hwnd = CreateWindowExA(
+    // UTF-8 to wide string for CreateWindowExW (fix Chinese caption mojibake)
+    WCHAR wideClass[256] = {0};
+    WCHAR wideName[256] = {0};
+    MultiByteToWideChar(CP_UTF8, 0, win32Class, -1, wideClass, 255);
+    MultiByteToWideChar(CP_UTF8, 0, controlName, -1, wideName, 255);
+    HWND hwnd = CreateWindowExW(
         (DWORD)exStyle,
-        win32Class,
-        controlName,
+        wideClass,
+        wideName,
         (DWORD)style,
         px, py, pw, ph,
         (HWND)hParent,
@@ -1750,6 +1755,38 @@ void vb6_SetControlPicture(void* hwnd, void* hPicture) {
     }
 }
 
+
+// Set Picture from COM IPictureDisp object (e.g. ImageList1.ListImages(i).Picture)
+// IPictureDisp::get_Handle returns OLE_HANDLE (HBITMAP for bitmap type)
+void vb6_SetControlPictureFromCom(void* hwnd, void* pPictureDisp) {
+    if (!hwnd || !pPictureDisp) return;
+    HRESULT hr;
+    IPicture* pPic = (IPicture*)pPictureDisp;
+    OLE_HANDLE hOle = 0;
+    SHORT nType = 0;
+    // Get picture type: 1=Bitmap, 2=Metafile, 3=Icon
+    hr = pPic->lpVtbl->get_Type(pPic, &nType);
+    if (FAILED(hr)) return;
+    hr = pPic->lpVtbl->get_Handle(pPic, &hOle);
+    if (FAILED(hr) || !hOle) return;
+    if (nType == 1) {
+        // Bitmap: OLE_HANDLE is HBITMAP
+        vb6_SetControlPicture(hwnd, (void*)(HANDLE)hOle);
+    } else if (nType == 3) {
+        // Icon: OLE_HANDLE is HICON - set as icon on STATIC
+        HWND hw = (HWND)hwnd;
+        SetPropW(hw, L"VB6_Picture", (HANDLE)hOle);
+        LONG style = GetWindowLongW(hw, GWL_STYLE);
+        style &= ~(SS_BITMAP | SS_ICON | SS_ENHMETAFILE);
+        style |= SS_ICON | SS_CENTERIMAGE;
+        SetWindowLongW(hw, GWL_STYLE, style);
+        SendMessageW(hw, STM_SETIMAGE, (WPARAM)IMAGE_ICON, (LPARAM)hOle);
+        InvalidateRect(hw, NULL, TRUE);
+    } else {
+        // Metafile or other - try as bitmap
+        vb6_SetControlPicture(hwnd, (void*)(HANDLE)hOle);
+    }
+}
 int vb6_GetPictureAutoSize(void* hwnd) {
     if (!hwnd) return 0;
     HANDLE hProp = GetPropW((HWND)hwnd, L"VB6_AutoSize");
@@ -3157,16 +3194,18 @@ static LRESULT CALLBACK vb6_GraphicalBtnSubclassProc(HWND hwnd, UINT msg, WPARAM
         RECT rc;
         GetClientRect(hwnd, &rc);
 
-        /* Determine button state: check state + push state */
+        /* Determine button state: check state + push state + disabled */
         LRESULT checkState = SendMessageW(hwnd, BM_GETCHECK, 0, 0);
         LRESULT btnState = SendMessageW(hwnd, BM_GETSTATE, 0, 0);
         BOOL isChecked = (checkState != BST_UNCHECKED);
         BOOL isPushed = isChecked || (btnState & BST_PUSHED);
         BOOL isFocused = (btnState & BST_FOCUS) ? TRUE : FALSE;
+        BOOL isEnabled = IsWindowEnabled(hwnd);
 
         /* Draw button background (3D raised/sunken) */
         UINT dfcState = DFCS_BUTTONPUSH;
         if (isPushed) dfcState |= DFCS_PUSHED;
+        if (!isEnabled) dfcState |= DFCS_INACTIVE;
         DrawFrameControl(hdc, &rc, DFC_BUTTON, dfcState);
 
         /* Offset for 3D push effect */
@@ -3205,7 +3244,18 @@ static LRESULT CALLBACK vb6_GraphicalBtnSubclassProc(HWND hwnd, UINT msg, WPARAM
 
             HDC memDC = CreateCompatibleDC(hdc);
             HBITMAP oldBmp = (HBITMAP)SelectObject(memDC, (HBITMAP)hBmp);
-            BitBlt(hdc, imgX, imgY, bm.bmWidth, bm.bmHeight, memDC, 0, 0, SRCCOPY);
+            if (isEnabled) {
+                BitBlt(hdc, imgX, imgY, bm.bmWidth, bm.bmHeight, memDC, 0, 0, SRCCOPY);
+            } else {
+                /* Disabled: draw grayed image using PATCOPY with halftone brush */
+                BitBlt(hdc, imgX, imgY, bm.bmWidth, bm.bmHeight, memDC, 0, 0, SRCCOPY);
+                /* Overlay with semi-transparent gray to indicate disabled state */
+                HBRUSH hGray = CreateSolidBrush(GetSysColor(COLOR_GRAYTEXT));
+                HBRUSH oldBrush = (HBRUSH)SelectObject(hdc, hGray);
+                PatBlt(hdc, imgX, imgY, bm.bmWidth, bm.bmHeight, PATINVERT);
+                SelectObject(hdc, oldBrush);
+                DeleteObject(hGray);
+            }
             SelectObject(memDC, oldBmp);
             DeleteDC(memDC);
 
@@ -3222,6 +3272,7 @@ static LRESULT CALLBACK vb6_GraphicalBtnSubclassProc(HWND hwnd, UINT msg, WPARAM
                 HFONT oldFont = NULL;
                 if (hFont) oldFont = (HFONT)SelectObject(hdc, hFont);
                 SetBkMode(hdc, TRANSPARENT);
+                if (!isEnabled) SetTextColor(hdc, GetSysColor(COLOR_GRAYTEXT));
                 DrawTextW(hdc, caption, captionLen, &textRc, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
                 if (oldFont) SelectObject(hdc, oldFont);
             }
@@ -3234,6 +3285,7 @@ static LRESULT CALLBACK vb6_GraphicalBtnSubclassProc(HWND hwnd, UINT msg, WPARAM
                 HFONT oldFont = NULL;
                 if (hFont) oldFont = (HFONT)SelectObject(hdc, hFont);
                 SetBkMode(hdc, TRANSPARENT);
+                if (!isEnabled) SetTextColor(hdc, GetSysColor(COLOR_GRAYTEXT));
                 RECT textRc = rc;
                 InflateRect(&textRc, -4, -4);
                 textRc.left += pushOff;

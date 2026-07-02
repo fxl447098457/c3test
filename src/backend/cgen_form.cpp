@@ -202,6 +202,14 @@ void CCodeGen::emitFormFramework(const FrmFormDesc& frmDesc, Module& module) {
                     h_.emitLine("static void* vb6_hwnd_" + cIdent(ctrl.controlName) + " = NULL;");
                     emitted.insert(ctrlNameLower);
                 }
+                // ActiveX控件 (ImageList等): 生成IDispatch*变量, 运行时CoCreateInstance
+                if (ctrl.controlType == FrmControlType::ImageList ||
+                    ctrl.controlType == FrmControlType::Toolbar ||
+                    ctrl.controlType == FrmControlType::StatusBar ||
+                    ctrl.controlType == FrmControlType::CommonDialog) {
+                    h_.emitLine("static void* vb6_com_" + cIdent(ctrl.controlName) + " = NULL;  /* IDispatch* */");
+                    emitted.insert(ctrlNameLower);
+                }
                 continue;
             }
             if (knownControlArrays_.count(ctrlNameLower)) {
@@ -1253,6 +1261,20 @@ void CCodeGen::emitFormFramework(const FrmFormDesc& frmDesc, Module& module) {
                     cIdent(ctrl.controlName) + "\");");
                 c_.emitLine("vb6_hwnd_" + cIdent(ctrl.controlName) + " = vb6_tmp_hwnd; }");
             }
+            // ActiveX控件: CLSIDFromProgID + CoCreateInstance
+            if (ctrl.controlType == FrmControlType::ImageList ||
+                ctrl.controlType == FrmControlType::Toolbar ||
+                ctrl.controlType == FrmControlType::StatusBar ||
+                ctrl.controlType == FrmControlType::CommonDialog) {
+                // controlTypeName 即 ProgID, 如 "MSComctlLib.ImageList"
+                std::string progId = ctrl.controlTypeName;
+                std::string wideProgId;
+                for (char c : progId) wideProgId += c; wideProgId += '\0';
+                c_.emitLine("{ CLSID vb6_clsid; CLSIDFromProgID(L\"" + progId + "\", &vb6_clsid);");
+                c_.emitLine("  CoCreateInstance(&vb6_clsid, NULL, 1/*CLSCTX_INPROC_SERVER*/, &IID_IDispatch, (void**)&vb6_com_" + cIdent(ctrl.controlName) + "); }");
+                ctrlId++;
+                continue;
+            }
             // 不可见控件 (Timer等) 跳过
             ctrlId++;
             continue;
@@ -1391,6 +1413,17 @@ void CCodeGen::emitFormFramework(const FrmFormDesc& frmDesc, Module& module) {
                 if (sortIt != ctrl.properties.end() && sortIt->second.intValue != 0) style |= 0x0100L;
                 break;
             }
+            case FrmControlType::PictureBox:
+                // VB6 PictureBox: STATIC + SS_BITMAP + SS_CENTERIMAGE + border
+                style |= kSsBitmap | kSsCenterImg;
+                style |= kWsBorder;  // WS_BORDER for sunken border
+                createCaption = "";   // No text for picture controls
+                break;
+            case FrmControlType::Image:
+                // VB6 Image: STATIC + SS_BITMAP + SS_CENTERIMAGE (no border)
+                style |= kSsBitmap | kSsCenterImg;
+                createCaption = "";
+                break;
             default:
                 break;
         }

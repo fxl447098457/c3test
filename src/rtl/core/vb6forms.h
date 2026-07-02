@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 // VB6 Win32窗体运行时 (P7)
 // 提供Win32窗口注册、创建、消息循环、控件管理等基础功能
 // 编译器生成的C代码调用此运行时API
@@ -336,6 +336,8 @@ wchar_t* vb6_Utf8ToWide(const char* utf8);
 // Set/get Picture property on PictureBox/Image controls
 void* vb6_GetControlPicture(void* hwnd);
 void vb6_SetControlPicture(void* hwnd, void* hPicture);
+// Set Picture from COM IPictureDisp object (extracts HBITMAP via IPicture::get_Handle)
+void vb6_SetControlPictureFromCom(void* hwnd, void* pPictureDisp);
 // AutoSize for PictureBox: resize to fit picture
 int vb6_GetPictureAutoSize(void* hwnd);
 void vb6_SetPictureAutoSize(void* hwnd, int autoSize);

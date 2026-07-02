@@ -876,6 +876,23 @@ void CCodeGen::visit(MemberAccessExpr& node) {
                         return;
                     }
                 }
+                // ActiveX控件 (ImageList等): 属性访问走COM后期绑定
+                if (itCtrl->second == FrmControlType::ImageList ||
+                    itCtrl->second == FrmControlType::Toolbar ||
+                    itCtrl->second == FrmControlType::StatusBar ||
+                    itCtrl->second == FrmControlType::CommonDialog) {
+                    std::string memLower = node.memberName;
+                    std::transform(memLower.begin(), memLower.end(), memLower.begin(), ::tolower);
+                    std::string ctrlOrigName = knownFormControlOriginalNames_.count(objLower) ?
+                        knownFormControlOriginalNames_[objLower] : objIdent.name;
+                    comObjExpr_ = "vb6_com_" + cIdent(ctrlOrigName);
+                    comMemberName_ = node.memberName;
+                    isComMarker_ = true;
+                    isEarlyBoundCom_ = false;
+                    earlyBoundSym_ = nullptr;
+                    lastExpr_ = comObjExpr_;  // IDispatch* expression
+                    return;
+                }
                 diag_.warn(DiagnosticID::CodeGenUnsupportedFeature, SourceLocation{},
                     std::string("P7.5: Unknown control property '") + objIdent.name + "." + node.memberName +
                     "' for control type, generating struct field access (may not compile)");
@@ -1474,6 +1491,32 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
     // --- COM后期绑定检测 (P6.2) + 前期绑定检测 (P6.3) + P6.4接口调用 ---
     // MemberAccessExpr为COM对象设置isComMarker_标志 + comObjExpr_/comMemberName_
     if (isComMarker_) {
+        // ActiveX控件COM属性: 先获取属性对象, 再用Item(idx)索引
+        // comObjExpr_以"vb6_com_"开头 = ActiveX控件变量
+        if (comObjExpr_.find("vb6_com_") == 0 && !node.positional.empty()) {
+            std::string axObjExpr = std::move(comObjExpr_);
+            std::string axMember = std::move(comMemberName_);
+            isComMarker_ = false;
+            // Step 1: 获取属性对象 (如 ListImages 集合)
+            std::string collectionExpr = "vb6_ComGetObjectProp(" + axObjExpr + ", L\"" + axMember + "\")";
+            // Step 2: 调用 Item(idx) 获取集合中的元素
+            std::vector<std::string> packedArgs;
+            for (size_t i = 0; i < node.positional.size(); i++) {
+                std::string packFn = comPackExpr(*node.positional[i]);
+                emitExpr(*node.positional[i]);
+                packedArgs.push_back(packFn + "(" + lastExpr_ + ")");
+            }
+            int32_t argc = (int32_t)packedArgs.size();
+            std::string argsArray = "(void*[]){";
+            for (int i = 0; i < argc; i++) {
+                if (i > 0) argsArray += ", ";
+                argsArray += packedArgs[i];
+            }
+            argsArray += "}";
+            // 返回对象类型 (用于后续 .Picture 等链式访问)
+            lastExpr_ = "vb6_ComCallObject(" + collectionExpr + ", L\"Item\", " + argsArray + ", " + std::to_string(argc) + ")";
+            return;
+        }
         isComMarker_ = false;  // 消费标记
         std::string objExpr = std::move(comObjExpr_);
         std::string memberName = std::move(comMemberName_);

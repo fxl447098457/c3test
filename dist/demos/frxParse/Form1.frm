@@ -12,9 +12,18 @@ Begin VB.Form Form1
    ScaleHeight     =   6945
    ScaleWidth      =   11055
    StartUpPosition =   3  '窗口缺省
+   Begin VB.PictureBox Picture2 
+      Height          =   855
+      Left            =   7080
+      ScaleHeight     =   795
+      ScaleWidth      =   915
+      TabIndex        =   9
+      Top             =   4200
+      Width           =   975
+   End
    Begin MSComctlLib.ImageList ImageList1 
-      Left            =   6480
-      Top             =   4320
+      Left            =   6120
+      Top             =   4560
       _ExtentX        =   1005
       _ExtentY        =   1005
       BackColor       =   -2147483643
@@ -89,14 +98,15 @@ Begin VB.Form Form1
       Top             =   5760
       Width           =   975
    End
-   Begin VB.OptionButton Option2 
-      Caption         =   "Option2"
-      Height          =   735
+   Begin VB.OptionButton Option1 
+      Caption         =   "启用"
+      Height          =   975
+      Index           =   1
       Left            =   4080
       Picture         =   "Form1.frx":2DCD
       Style           =   1  'Graphical
       TabIndex        =   4
-      Top             =   5280
+      Top             =   5520
       Width           =   1695
    End
    Begin VB.CheckBox Check1 
@@ -111,8 +121,9 @@ Begin VB.Form Form1
       Width           =   975
    End
    Begin VB.OptionButton Option1 
-      Caption         =   "Option1"
-      Height          =   855
+      Caption         =   "禁用"
+      Height          =   1095
+      Index           =   0
       Left            =   4080
       Picture         =   "Form1.frx":334C
       Style           =   1  'Graphical
@@ -156,3 +167,13 @@ Attribute VB_PredeclaredId = True
 Attribute VB_Exposed = False
 Option Explicit
 
+Private Sub Command1_Click()
+    Static i As Long
+    If i = 0 Or i = 6 Then i = 1
+    Picture2.Picture = ImageList1.ListImages(i).Picture
+    i = i + 1
+End Sub
+
+Private Sub Option1_Click(Index As Integer)
+    Command1.Enabled = CBool(Index)
+End Sub
