@@ -30,6 +30,7 @@ enum class FrmValueType {
     Float,          // 浮点: 8.25
     String,         // 字符串: "Hello"
     Identifier,     // 标识符: vbModal, vbUpperCase
+    FrxReference,   // .frx引用: "Form1.frx":10CA
 };
 
 struct FrmValue {
@@ -37,19 +38,25 @@ struct FrmValue {
     std::string rawText;        // 原始文本（字符串含引号）
     long long intValue = 0;     // type==Integer时有效
     double floatValue = 0.0;    // type==Float时有效
+    std::string frxFile;        // type==FrxReference时: .frx文件名
+    size_t frxOffset = 0;       // type==FrxReference时: .frx文件内偏移
 
     // 便捷构造
     static FrmValue fromInt(long long v, const std::string& raw) {
-        return {FrmValueType::Integer, raw, v, 0.0};
+        FrmValue r; r.type = FrmValueType::Integer; r.rawText = raw; r.intValue = v; return r;
     }
     static FrmValue fromFloat(double v, const std::string& raw) {
-        return {FrmValueType::Float, raw, 0, v};
+        FrmValue r; r.type = FrmValueType::Float; r.rawText = raw; r.floatValue = v; return r;
     }
     static FrmValue fromString(const std::string& raw) {
-        return {FrmValueType::String, raw, 0, 0.0};
+        FrmValue r; r.type = FrmValueType::String; r.rawText = raw; return r;
     }
     static FrmValue fromIdent(const std::string& raw) {
-        return {FrmValueType::Identifier, raw, 0, 0.0};
+        FrmValue r; r.type = FrmValueType::Identifier; r.rawText = raw; return r;
+    }
+    static FrmValue fromFrxRef(const std::string& file, size_t offset, const std::string& raw) {
+        FrmValue r; r.type = FrmValueType::FrxReference; r.rawText = raw;
+        r.frxFile = file; r.frxOffset = offset; return r;
     }
 };
 
@@ -133,6 +140,8 @@ struct FrmFormDesc {
     // .frx 二进制资源引用 (图片等)
     // 格式: 属性值中出现的 $begin...$end 块 或 :X 形式的偏移引用
     std::map<std::string, std::string> frxReferences;  // key=偏移, value=资源描述
+    // P24: .frx 文件路径 (与 .frm 同目录)
+    std::filesystem::path frxFilePath;
 };
 
 // ============================================================

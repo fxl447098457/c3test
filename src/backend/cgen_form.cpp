@@ -1,16 +1,64 @@
 #include "backend/cgen.hpp"
+#include "project/frx_reader.hpp"
 #include <algorithm>
 #include <cctype>
 #include <iostream>
 #include <functional>
+#include <sstream>
+#include <iomanip>
 
 namespace vb6c3 {
+
+// P24: Convert binary data to C hex array string
+static std::string bytesToHexArray(const uint8_t* data, size_t size, const std::string& varName) {
+    std::ostringstream ss;
+    ss << "static const unsigned char " << varName << "[] = {\n";
+    for (size_t i = 0; i < size; i++) {
+        if (i % 16 == 0) ss << "    ";
+        ss << "0x" << std::setfill('0') << std::setw(2) << std::hex << (int)data[i];
+        if (i + 1 < size) ss << ",";
+        if (i % 16 == 15 || i + 1 == size) ss << "\n";
+        else ss << " ";
+    }
+    ss << "};\n";
+    ss << "static const int " << varName << "_size = " << std::dec << size << ";";
+    return ss.str();
+}
+
+// P24: Escape string for C string literal (handles backslash, quote, newlines, tabs, etc.)
+static std::string escapeCString(const std::string& s) {
+    std::string result;
+    for (char c : s) {
+        switch (c) {
+            case '\\': result += "\\\\"; break;
+            case '"': result += "\\\""; break;
+            case '\n': result += "\\n"; break;
+            case '\r': result += "\\r"; break;
+            case '\t': result += "\\t"; break;
+            default:
+                if ((unsigned char)c < 0x20) {
+                    char buf[8];
+                    snprintf(buf, sizeof(buf), "\\x%02x", (unsigned char)c);
+                    result += buf;
+                } else {
+                    result += c;
+                }
+        }
+    }
+    return result;
+}
 
 // --- cgen_form.cpp: 窗体框架 + 菜单 + 转义 ---
 
 void CCodeGen::emitFormFramework(const FrmFormDesc& frmDesc, Module& module) {
     std::string formName = frmDesc.formName;
     formName_ = formName;  // M22-Issue6: save for Form Print use
+
+    // P24: Load .frx file if present
+    bool frxLoaded = false;
+    if (!frmDesc.frxFilePath.empty()) {
+        frxLoaded = FrxReader::load(frmDesc.frxFilePath);
+    }
     std::string clsName = "VB6_Form_" + cIdent(formName);    // Win32窗口类名
     std::string wndProc = "vb6_form_wndproc_" + cIdent(formName);  // WndProc函数名
     std::string createFn = "vb6_form_create_" + cIdent(formName);  // 控件创建函数名
@@ -68,6 +116,31 @@ void CCodeGen::emitFormFramework(const FrmFormDesc& frmDesc, Module& module) {
     if (it != frmDesc.formControl.properties.end()) clientWidth = (int)it->second.intValue;
     it = frmDesc.formControl.properties.find("StartUpPosition");
     if (it != frmDesc.formControl.properties.end()) startupPos = (int)it->second.intValue;
+
+    // P24: Form.Icon from .frx
+    {
+        auto iconIt = frmDesc.formControl.properties.find("Icon");
+        if (iconIt != frmDesc.formControl.properties.end() && iconIt->second.type == FrmValueType::FrxReference && frxLoaded) {
+            auto pic = FrxReader::readPicture(iconIt->second.frxOffset, false);
+            if (!pic.data.empty()) {
+                std::string varName = "vb6_frx_icon_" + cIdent(formName);
+                h_.emitLine(bytesToHexArray(pic.data.data(), pic.data.size(), varName));
+                // Will be used in WM_CREATE to set window icon
+                // Store a flag for later code generation
+            }
+        }
+    }
+    // P24: Form.Picture from .frx
+    {
+        auto picIt2 = frmDesc.formControl.properties.find("Picture");
+        if (picIt2 != frmDesc.formControl.properties.end() && picIt2->second.type == FrmValueType::FrxReference && frxLoaded) {
+            auto pic = FrxReader::readPicture(picIt2->second.frxOffset, false);
+            if (!pic.data.empty()) {
+                std::string varName = "vb6_frx_bgpic_" + cIdent(formName);
+                h_.emitLine(bytesToHexArray(pic.data.data(), pic.data.size(), varName));
+            }
+        }
+    }
 
     // --- P7.5+P7.6: 填充已知控件名映射 + 检测控件数组 ---
     {
@@ -499,6 +572,26 @@ void CCodeGen::emitFormFramework(const FrmFormDesc& frmDesc, Module& module) {
     c_.emitLine("CREATESTRUCTA* cs = (CREATESTRUCTA*)lParam;");
     c_.emitLine(createFn + "((void*)hwnd, (void*)cs->hInstance);");
     c_.emitLine("vb6_Forms_Register((void*)hwnd);");
+
+    // P24: Form.Icon from .frx - load and set window icon
+    {
+        auto iconIt = frmDesc.formControl.properties.find("Icon");
+        if (iconIt != frmDesc.formControl.properties.end() && iconIt->second.type == FrmValueType::FrxReference && frxLoaded) {
+            std::string varName = "vb6_frx_icon_" + cIdent(formName);
+            c_.emitLine("{ void* vb6_icon = vb6_LoadPictureFromMemory(" + varName + ", " + varName + "_size);");
+            c_.emitLine("  if (vb6_icon) { SendMessageW(hwnd, WM_SETICON, ICON_BIG, (LPARAM)vb6_icon);");
+            c_.emitLine("    SendMessageW(hwnd, WM_SETICON, ICON_SMALL, (LPARAM)vb6_icon); } }");
+        }
+    }
+    // P24: Form.Picture from .frx - load and store as window property
+    {
+        auto picIt2 = frmDesc.formControl.properties.find("Picture");
+        if (picIt2 != frmDesc.formControl.properties.end() && picIt2->second.type == FrmValueType::FrxReference && frxLoaded) {
+            std::string varName = "vb6_frx_bgpic_" + cIdent(formName);
+            c_.emitLine("{ void* vb6_bgpic = vb6_LoadPictureFromMemory(" + varName + ", " + varName + "_size);");
+            c_.emitLine("  if (vb6_bgpic) vb6_SetControlPicture((void*)hwnd, vb6_bgpic); }");
+        }
+    }
 
     // P20-40: 从.frm属性初始化Form属性
     {
@@ -1301,6 +1394,75 @@ void CCodeGen::emitFormFramework(const FrmFormDesc& frmDesc, Module& module) {
             c_.emitLine("{ wchar_t _p" + cIdent(ctrl.controlName) + "[MAX_PATH]; GetCurrentDirectoryW(MAX_PATH, _p" + cIdent(ctrl.controlName) + ");");
             c_.emitLine("  vb6_FileListBoxSetPath((void*)vb6_hwnd_" + cIdent(ctrl.controlName) + ", _p" + cIdent(ctrl.controlName) + "); }");
         }
+
+        // P24: .frx resource loading for this control
+        if (frxLoaded) {
+            std::string ctrlHwndVar;
+            {
+                std::string ctrlNameLower = ctrl.controlName;
+                std::transform(ctrlNameLower.begin(), ctrlNameLower.end(), ctrlNameLower.begin(), ::tolower);
+                if (knownControlArrays_.count(ctrlNameLower)) {
+                    ctrlHwndVar = "vb6_CtrlArr_GetAt(&vb6_arr_" + cIdent(ctrl.controlName) + ", " +
+                                  std::to_string(ctrl.index >= 0 ? ctrl.index : 0) + ")";
+                } else {
+                    ctrlHwndVar = "vb6_hwnd_" + cIdent(ctrl.controlName);
+                }
+            }
+
+            // P24: Control.Picture from .frx (CommandButton/OptionButton/CheckBox/PictureBox/Image)
+            if (ctrl.controlType == FrmControlType::CommandButton ||
+                ctrl.controlType == FrmControlType::OptionButton ||
+                ctrl.controlType == FrmControlType::CheckBox ||
+                ctrl.controlType == FrmControlType::PictureBox ||
+                ctrl.controlType == FrmControlType::Image) {
+                auto picIt = ctrl.properties.find("Picture");
+                if (picIt != ctrl.properties.end() && picIt->second.type == FrmValueType::FrxReference) {
+                    auto pic = FrxReader::readPicture(picIt->second.frxOffset, false);
+                    if (!pic.data.empty()) {
+                        std::string varName = "vb6_frx_pic_" + cIdent(ctrl.controlName);
+                        if (ctrl.index >= 0) varName += "_" + std::to_string(ctrl.index);
+                        h_.emitLine(bytesToHexArray(pic.data.data(), pic.data.size(), varName));
+                        c_.emitLine("{ void* vb6_pic = vb6_LoadPictureFromMemory(" + varName + ", " + varName + "_size);");
+                        c_.emitLine("  if (vb6_pic) vb6_SetControlPicture((void*)" + ctrlHwndVar + ", vb6_pic); }");
+                    }
+                }
+            }
+
+            // P24: TextBox.Text from .frx (multiline text)
+            if (ctrl.controlType == FrmControlType::TextBox) {
+                auto txtIt = ctrl.properties.find("Text");
+                if (txtIt != ctrl.properties.end() && txtIt->second.type == FrmValueType::FrxReference) {
+                    auto txt = FrxReader::readText(txtIt->second.frxOffset);
+                    if (!txt.text.empty()) {
+                        c_.emitLine("{ wchar_t* vb6_wtxt = vb6_Utf8ToWide(\"" + escapeCString(txt.text) + "\");");
+                        c_.emitLine("  if (vb6_wtxt) { SetWindowTextW((HWND)" + ctrlHwndVar + ", vb6_wtxt); free(vb6_wtxt); } }");
+                    }
+                }
+            }
+
+            // P24: ListBox.List + ItemData from .frx
+            if (ctrl.controlType == FrmControlType::ListBox) {
+                auto listIt = ctrl.properties.find("List");
+                bool hasListFromFrx = (listIt != ctrl.properties.end() && listIt->second.type == FrmValueType::FrxReference);
+                FrxListData listData;
+                if (hasListFromFrx) {
+                    listData = FrxReader::readStringList(listIt->second.frxOffset);
+                    for (size_t i = 0; i < listData.items.size(); i++) {
+                        c_.emitLine("{ wchar_t* vb6_witem = vb6_Utf8ToWide(\"" + escapeCString(listData.items[i]) + "\");");
+                        c_.emitLine("  if (vb6_witem) { SendMessageW((HWND)" + ctrlHwndVar + ", LB_ADDSTRING, 0, (LPARAM)vb6_witem); free(vb6_witem); } }");
+                    }
+                }
+                auto idataIt = ctrl.properties.find("ItemData");
+                if (idataIt != ctrl.properties.end() && idataIt->second.type == FrmValueType::FrxReference) {
+                    auto intData = FrxReader::readIntList(idataIt->second.frxOffset);
+                    for (size_t i = 0; i < intData.items.size(); i++) {
+                        c_.emitLine("SendMessageW((HWND)" + ctrlHwndVar + ", LB_SETITEMDATA, " +
+                                    std::to_string((int)i) + ", (LPARAM)" + std::to_string(intData.items[i]) + ");");
+                    }
+                }
+            }
+        }
+
 ctrlId++;
     }
 

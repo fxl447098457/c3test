@@ -33,6 +33,25 @@ FrmValue FrmParser::parseValue(const std::string& s) {
     std::string t = trim(s);
     if (t.empty()) return FrmValue::fromInt(0, "");
 
+    // .frx 二进制资源引用: "filename.frx":HEXOFFSET
+    // 格式: "Form1.frx":0000  或  "Form1.frx":10CA
+    if (t.size() >= 8 && t.front() == '"') {
+        size_t colon = t.find("\":");
+        if (colon != std::string::npos && colon + 2 < t.size()) {
+            std::string fileName = t.substr(1, colon - 1);  // 去掉前引号
+            std::string offsetStr = t.substr(colon + 2);
+            // 验证偏移是十六进制
+            bool validHex = !offsetStr.empty();
+            for (char c : offsetStr) {
+                if (!std::isxdigit(static_cast<unsigned char>(c))) { validHex = false; break; }
+            }
+            if (validHex) {
+                size_t offset = std::stoull(offsetStr, nullptr, 16);
+                return FrmValue::fromFrxRef(fileName, offset, t);
+            }
+        }
+    }
+
     // 字符串字面量
     if (t.size() >= 2 && t.front() == '"') {
         return FrmValue::fromString(t);

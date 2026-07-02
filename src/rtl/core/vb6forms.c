@@ -13,6 +13,7 @@
 #include <stdio.h>
 #include <stdlib.h>   /* malloc, free */
 #include <oleauto.h>  /* SysAllocString, BSTR */
+#include <olectl.h>   /* IPicture, OleLoadPicture, OLE_HANDLE */
 
 // 全局变量
 static HINSTANCE g_hInstance = NULL;
@@ -1441,8 +1442,9 @@ void* vb6_GetSelText(void* hwnd) {
     free(selBuf);
     free(buf);
     return result;
-    return result;
-}ext(void* hwnd, void* bstrText) {
+}
+
+void vb6_SetSelText(void* hwnd, void* bstrText) {
     if (!hwnd) return;
     HWND hw = (HWND)hwnd;
     // Replace current selection with new text
@@ -1540,6 +1542,108 @@ void* vb6_LoadPictureFromResource(void* hInstance, int resourceId, const char* t
     }
     /* Try bitmap as default */
     return (void*)LoadBitmapW(hInst, MAKEINTRESOURCEW(resourceId));
+}
+
+// ============================================================
+// P24: UTF-8 to wide string conversion (caller must free())
+// ============================================================
+wchar_t* vb6_Utf8ToWide(const char* utf8) {
+    if (!utf8) return NULL;
+    int wlen = MultiByteToWideChar(CP_UTF8, 0, utf8, -1, NULL, 0);
+    if (wlen <= 0) return NULL;
+    wchar_t* wstr = (wchar_t*)malloc((size_t)wlen * sizeof(wchar_t));
+    if (!wstr) return NULL;
+    MultiByteToWideChar(CP_UTF8, 0, utf8, -1, wstr, wlen);
+    return wstr;
+}
+
+// ============================================================
+// P24: Load picture from memory buffer
+// Uses CreateStreamOnHGlobal + OleLoadPicture to support JPEG/BMP/ICO/PNG/GIF
+// ============================================================
+void* vb6_LoadPictureFromMemory(const void* data, int size) {
+    if (!data || size <= 0) return NULL;
+
+    /* Ensure COM is initialized for OLE picture loading */
+    static int oleInited = 0;
+    if (!oleInited) {
+        if (SUCCEEDED(OleInitialize(NULL))) {
+            oleInited = 1;
+        } else {
+            /* Try CoInitialize as fallback */
+            CoInitialize(NULL);
+            oleInited = 2;
+        }
+    }
+
+    /* Create IStream from memory via HGLOBAL */
+    HGLOBAL hMem = GlobalAlloc(GMEM_MOVEABLE, (SIZE_T)size);
+    if (!hMem) return NULL;
+    void* pMem = GlobalLock(hMem);
+    if (!pMem) { GlobalFree(hMem); return NULL; }
+    memcpy(pMem, data, (size_t)size);
+    GlobalUnlock(hMem);
+
+    IStream* pStream = NULL;
+    HRESULT hr = CreateStreamOnHGlobal(hMem, TRUE, &pStream);
+    if (FAILED(hr) || !pStream) {
+        GlobalFree(hMem);
+        return NULL;
+    }
+
+    /* Load picture from stream */
+    IPicture* pPicture = NULL;
+    /* IID_IPicture = {7BF80980-BF32-101A-8BBB-00AA00300CAB} */
+    static const GUID local_IID_IPicture = 
+        {0x7BF80980, 0xBF32, 0x101A, {0x8B, 0xBB, 0x00, 0xAA, 0x00, 0x30, 0x0C, 0xAB}};
+    hr = OleLoadPicture(pStream, (LONG)size, FALSE, &local_IID_IPicture, (void**)&pPicture);
+    
+    /* Stream is released by OleLoadPicture or we release it ourselves */
+    pStream->lpVtbl->Release(pStream);
+    /* Note: CreateStreamOnHGlobal with TRUE means HGLOBAL is freed when stream is released */
+
+    if (FAILED(hr) || !pPicture) {
+        return NULL;
+    }
+
+    /* Get the picture handle (HBITMAP for BMP/JPEG, HICON for ICO) */
+    OLE_HANDLE hHandle = 0;
+    pPicture->lpVtbl->get_Handle(pPicture, &hHandle);
+    
+    /* Get picture type to know if it's bitmap or icon */
+    short picType = 0;
+    pPicture->lpVtbl->get_Type(pPicture, &picType);
+    
+    /* For bitmaps, we need to copy the handle because IPicture owns it */
+    HANDLE result = NULL;
+    if (picType == 1) {
+        /* PICTURE_TYPE_BITMAP - copy the bitmap */
+        HBITMAP hSrc = (HBITMAP)(LONG_PTR)hHandle;
+        if (hSrc) {
+            BITMAP bm;
+            if (GetObjectW(hSrc, sizeof(bm), &bm) != 0) {
+                HDC hdcScreen = GetDC(NULL);
+                HDC hdcSrc = CreateCompatibleDC(hdcScreen);
+                HDC hdcDst = CreateCompatibleDC(hdcScreen);
+                HBITMAP hDst = CreateCompatibleBitmap(hdcScreen, bm.bmWidth, bm.bmHeight);
+                HBITMAP oldSrc = (HBITMAP)SelectObject(hdcSrc, hSrc);
+                HBITMAP oldDst = (HBITMAP)SelectObject(hdcDst, hDst);
+                BitBlt(hdcDst, 0, 0, bm.bmWidth, bm.bmHeight, hdcSrc, 0, 0, SRCCOPY);
+                SelectObject(hdcSrc, oldSrc);
+                SelectObject(hdcDst, oldDst);
+                DeleteDC(hdcSrc);
+                DeleteDC(hdcDst);
+                ReleaseDC(NULL, hdcScreen);
+                result = (HANDLE)hDst;
+            }
+        }
+    } else {
+        /* Icon or metafile - just use the handle directly */
+        result = (HANDLE)(LONG_PTR)hHandle;
+    }
+    
+    pPicture->lpVtbl->Release(pPicture);
+    return (void*)result;
 }
 
 void* vb6_GetControlPicture(void* hwnd) {

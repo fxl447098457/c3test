@@ -74,6 +74,7 @@ add_library(vb6c3-core STATIC
     src/semantics/semantic_analyzer.cpp
     src/project/vbp_parser.cpp
     src/project/frm_parser.cpp
+    src/project/frx_reader.cpp
     src/com/typelib_parser.cpp
     src/typelib/typelib_builder.cpp
 )

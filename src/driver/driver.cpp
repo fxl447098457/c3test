@@ -630,6 +630,14 @@ bool Driver::runParser(const CompileOptions& options) {
             // P7: 解析.frm窗体描述, 提取VB代码段
             // M22: FrmParser.parse已使用readAndConvertToUtf8, 返回的codeSection是UTF-8
             frmDesc = FrmParser::parse(filePath);
+            // P24: 设置 .frx 文件路径 (与 .frm 同目录同名)
+            {
+                auto frxPath = frmDesc.frmFilePath;
+                frxPath.replace_extension(".frx");
+                if (std::filesystem::exists(frxPath)) {
+                    frmDesc.form.frxFilePath = frxPath;
+                }
+            }
             if (!frmDesc.codeSection.empty()) {
                 buffer = SourceBuffer::fromString(filePath, frmDesc.codeSection);
             } else {
