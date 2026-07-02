@@ -1652,6 +1652,39 @@ void* vb6_LoadPictureFromMemory(const void* data, int size) {
     return (void*)result;
 }
 
+void* vb6_LoadIconFromMemory(const void* data, int size) {
+    /* Load ICO data and return HICON. Uses LookupIconIdFromDirectoryEx + CreateIconFromResourceEx
+       which is the standard Win32 way to load ICO from memory, always returns HICON. */
+    if (!data || size <= 0) return NULL;
+    const BYTE* pDir = (const BYTE*)data;
+    /* ICO directory: [0-1] reserved=0, [2-3] type=1(ICO), [4-5] count */
+    if (size < 6 || pDir[0] != 0 || pDir[1] != 0 || pDir[2] != 1 || pDir[3] != 0) {
+        /* Not a valid ICO directory, fall back to OleLoadPicture */
+        return vb6_LoadPictureFromMemory(data, size);
+    }
+    int iconIndex = LookupIconIdFromDirectoryEx((PBYTE)pDir, TRUE,
+        GetSystemMetrics(SM_CXICON), GetSystemMetrics(SM_CYICON), LR_DEFAULTCOLOR);
+    if (iconIndex == 0) {
+        /* Try with SM_CXSMICON for small icon */
+        iconIndex = LookupIconIdFromDirectoryEx((PBYTE)pDir, TRUE,
+            GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON), LR_DEFAULTCOLOR);
+    }
+    if (iconIndex == 0) return NULL;
+    /* Find the icon data offset from the ICO directory entry */
+    WORD count = (WORD)(pDir[4] | (pDir[5] << 8));
+    /* Each dir entry is 16 bytes: [0-3] w/h/colors/reserved, [4-5] planes, [6-7] bpp, [8-11] dataSize, [12-15] dataOffset */
+    if (iconIndex >= count) return NULL;
+    const BYTE* pEntry = pDir + 6 + iconIndex * 16;
+    DWORD dataOffset = (DWORD)(pEntry[12] | (pEntry[13] << 8) | (pEntry[14] << 16) | (pEntry[15] << 24));
+    DWORD dataSize = (DWORD)(pEntry[8] | (pEntry[9] << 8) | (pEntry[10] << 16) | (pEntry[11] << 24));
+    if (dataOffset + dataSize > (DWORD)size) return NULL;
+    const BYTE* pRes = pDir + dataOffset;
+    /* CreateIconFromResourceEx expects the resource data (after the directory) */
+    HICON hIcon = CreateIconFromResourceEx((PBYTE)pRes, dataSize, TRUE, 0x00030000,
+        GetSystemMetrics(SM_CXICON), GetSystemMetrics(SM_CYICON), LR_DEFAULTCOLOR);
+    return (void*)hIcon;
+}
+
 void* vb6_GetControlPicture(void* hwnd) {
     if (!hwnd) return NULL;
     HANDLE hProp = GetPropW((HWND)hwnd, L"VB6_Picture");

@@ -328,6 +328,7 @@ void* vb6_LoadPictureFromResource(void* hInstance, int resourceId, const char* t
 // P24: Load picture from memory buffer (JPEG/BMP/ICO/PNG/GIF via OleLoadPicture + IStream)
 // Returns HBITMAP/HICON handle, or NULL on failure
 void* vb6_LoadPictureFromMemory(const void* data, int size);
+void* vb6_LoadIconFromMemory(const void* data, int size);
 // P24: Convert UTF-8 string to wide string (caller must free())
 wchar_t* vb6_Utf8ToWide(const char* utf8);
 // Set/get Picture property on PictureBox/Image controls

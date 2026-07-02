@@ -578,7 +578,7 @@ void CCodeGen::emitFormFramework(const FrmFormDesc& frmDesc, Module& module) {
         auto iconIt = frmDesc.formControl.properties.find("Icon");
         if (iconIt != frmDesc.formControl.properties.end() && iconIt->second.type == FrmValueType::FrxReference && frxLoaded) {
             std::string varName = "vb6_frx_icon_" + cIdent(formName);
-            c_.emitLine("{ void* vb6_icon = vb6_LoadPictureFromMemory(" + varName + ", " + varName + "_size);");
+            c_.emitLine("{ void* vb6_icon = vb6_LoadIconFromMemory(" + varName + ", " + varName + "_size);");
             c_.emitLine("  if (vb6_icon) { SendMessageW(hwnd, WM_SETICON, ICON_BIG, (LPARAM)vb6_icon);");
             c_.emitLine("    SendMessageW(hwnd, WM_SETICON, ICON_SMALL, (LPARAM)vb6_icon); } }");
         }
@@ -632,7 +632,7 @@ void CCodeGen::emitFormFramework(const FrmFormDesc& frmDesc, Module& module) {
     c_.dedent();
     c_.emitLine("}");
 
-    // M12-FIX: Form.Picture background tiling via WM_ERASEBKGND
+    // M12-FIX: Form.Picture background via WM_ERASEBKGND (single display at 0,0)
     {
         auto picIt = frmDesc.formControl.properties.find("Picture");
         if (picIt != frmDesc.formControl.properties.end() && picIt->second.type == FrmValueType::FrxReference && frxLoaded) {
@@ -642,20 +642,11 @@ void CCodeGen::emitFormFramework(const FrmFormDesc& frmDesc, Module& module) {
             c_.emitLine("if (vb6_bg && GetObjectType((HGDIOBJ)vb6_bg) == OBJ_BITMAP) {");
             c_.indent();
             c_.emitLine("HDC hdc = (HDC)(WPARAM)wParam;");
-            c_.emitLine("RECT rc; GetClientRect(hwnd, &rc);");
             c_.emitLine("HDC memDC = CreateCompatibleDC(hdc);");
             c_.emitLine("HBITMAP hBmp = (HBITMAP)vb6_bg;");
             c_.emitLine("BITMAP bm; GetObjectW(hBmp, sizeof(bm), &bm);");
             c_.emitLine("HBITMAP oldBmp = (HBITMAP)SelectObject(memDC, hBmp);");
-            c_.emitLine("for (int y = 0; y < rc.bottom; y += bm.bmHeight) {");
-            c_.indent();
-            c_.emitLine("for (int x = 0; x < rc.right; x += bm.bmWidth) {");
-            c_.indent();
-            c_.emitLine("BitBlt(hdc, x, y, bm.bmWidth, bm.bmHeight, memDC, 0, 0, SRCCOPY);");
-            c_.dedent();
-            c_.emitLine("}");
-            c_.dedent();
-            c_.emitLine("}");
+            c_.emitLine("BitBlt(hdc, 0, 0, bm.bmWidth, bm.bmHeight, memDC, 0, 0, SRCCOPY);");
             c_.emitLine("SelectObject(memDC, oldBmp);");
             c_.emitLine("DeleteDC(memDC);");
             c_.emitLine("return 1;");
