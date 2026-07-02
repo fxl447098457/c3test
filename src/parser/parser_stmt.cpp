@@ -849,7 +849,44 @@ StmtPtr Parser::parseDimStmt() {
     auto loc = currentLoc();
     advance(); // consume 'Dim'
     auto varDecl = parseVariableDecl(AccessLevel::Private, false);
-    return std::make_unique<LocalDeclStmt>(loc, std::move(varDecl));
+    // P20: Dim a As Long, b As String — comma-separated multi-variable
+    if (cur_.kind != TokenKind::Comma) {
+        return std::make_unique<LocalDeclStmt>(loc, std::move(varDecl));
+    }
+    // Multiple variables: wrap in Block
+    StmtList stmts;
+    stmts.push_back(std::make_unique<LocalDeclStmt>(loc, std::move(varDecl)));
+    while (match(TokenKind::Comma)) {
+        // Parse additional variable name As Type
+        auto nameTok = expectName("expected variable name");
+        std::vector<VariableDecl::Dimension> dimensions;
+        bool isDynamicArray = false;
+        if (match(TokenKind::LeftParen)) {
+            if (cur_.kind != TokenKind::RightParen) {
+                do {
+                    VariableDecl::Dimension dim;
+                    auto first = parseExpression();
+                    if (match(TokenKind::To)) { dim.lower = std::move(first); dim.upper = parseExpression(); }
+                    else { dim.upper = std::move(first); }
+                    dimensions.push_back(std::move(dim));
+                } while (match(TokenKind::Comma));
+            } else { isDynamicArray = true; }
+            expect(TokenKind::RightParen, DiagnosticID::ParseExpectedToken, "expected ')'");
+        }
+        bool isNew = false;
+        TypeRefPtr asType;
+        if (match(TokenKind::As)) {
+            if (match(TokenKind::New)) isNew = true;
+            asType = parseTypeRef();
+        }
+        ExprPtr initializer;
+        if (match(TokenKind::Equals)) initializer = parseExpression();
+        stmts.push_back(std::make_unique<LocalDeclStmt>(loc,
+            std::make_unique<VariableDecl>(loc, AccessLevel::Private, nameTok.text,
+                false, false, isNew, std::move(asType), std::move(initializer),
+                std::move(dimensions), isDynamicArray)));
+    }
+    return std::make_unique<Block>(loc, std::move(stmts));
 }
 
 std::unique_ptr<ReDimStmt> Parser::parseReDimStmt() {

@@ -174,6 +174,14 @@ Private Sub Command1_Click()
     i = i + 1
 End Sub
 
+Private Sub Form_Load()
+    Dim a As String * 10, i As Long
+    For i = 0 To 10
+        LSet a = "µÈµÈ"
+        List1.AddItem a & Now
+    Next
+End Sub
+
 Private Sub Option1_Click(Index As Integer)
     Command1.Enabled = CBool(Index)
 End Sub

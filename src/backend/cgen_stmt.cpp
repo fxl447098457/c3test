@@ -54,6 +54,7 @@ case ASTNodeKind::GoSubStmt:       visit(static_cast<GoSubStmt&>(*stmt)); break;
             case ASTNodeKind::EraseStmt:       visit(static_cast<EraseStmt&>(*stmt)); break;
             case ASTNodeKind::LabelStmt:       visit(static_cast<LabelStmt&>(*stmt)); break;
             case ASTNodeKind::LocalDeclStmt:   visit(static_cast<LocalDeclStmt&>(*stmt)); break;
+            case ASTNodeKind::Block:            visit(static_cast<Block&>(*stmt)); break;
             // 文件 I/O
             case ASTNodeKind::OpenStmt:        visit(static_cast<OpenStmt&>(*stmt)); break;
             case ASTNodeKind::CloseStmt:       visit(static_cast<CloseStmt&>(*stmt)); break;
@@ -2436,9 +2437,13 @@ void CCodeGen::visit(LocalDeclStmt& node) {
                     initVal = "{0}";  // P6.4: 接口引用 = {vtbl=NULL, obj=NULL}
                 } else if (isLocalUdtType) {
                     initVal = "{0}";
+                } else if (var.asType && var.asType->kind == ASTNodeKind::FixedStringTypeRef) {
+                    initVal = "NULL";  // Fixed-length string: BSTR initially NULL, LSet/assignment sets it
                 } else {
                     initVal = defaultValue(
-                        var.asType ? typeSys_.resolveTypeName(static_cast<SimpleTypeRef*>(var.asType.get())->name) : Vb6Type::Variant
+                        var.asType && var.asType->kind == ASTNodeKind::SimpleTypeRef
+                            ? typeSys_.resolveTypeName(static_cast<SimpleTypeRef*>(var.asType.get())->name)
+                            : Vb6Type::Variant
                     );
                 }
                 c_.emitLine(storageClass + cType + " " + cName + " = " + initVal + ";");

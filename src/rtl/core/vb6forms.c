@@ -1761,14 +1761,20 @@ void vb6_SetControlPicture(void* hwnd, void* hPicture) {
 void vb6_SetControlPictureFromCom(void* hwnd, void* pPictureDisp) {
     if (!hwnd || !pPictureDisp) return;
     HRESULT hr;
-    IPicture* pPic = (IPicture*)pPictureDisp;
+    /* IPictureDisp and IPicture are separate interfaces.
+     * IPictureDisp inherits IDispatch, IPicture inherits IUnknown.
+     * Must QI for IID_IPicture from IPictureDisp pointer. */
+    IPicture* pPic = NULL;
+    IUnknown* pUnk = (IUnknown*)pPictureDisp;
+    hr = pUnk->lpVtbl->QueryInterface(pUnk, &IID_IPicture, (void**)&pPic);
+    if (FAILED(hr) || !pPic) return;
     OLE_HANDLE hOle = 0;
     SHORT nType = 0;
     // Get picture type: 1=Bitmap, 2=Metafile, 3=Icon
     hr = pPic->lpVtbl->get_Type(pPic, &nType);
-    if (FAILED(hr)) return;
+    if (FAILED(hr)) { pPic->lpVtbl->Release(pPic); return; }
     hr = pPic->lpVtbl->get_Handle(pPic, &hOle);
-    if (FAILED(hr) || !hOle) return;
+    if (FAILED(hr) || !hOle) { pPic->lpVtbl->Release(pPic); return; }
     if (nType == 1) {
         // Bitmap: OLE_HANDLE is HBITMAP
         vb6_SetControlPicture(hwnd, (void*)(HANDLE)hOle);
@@ -1786,6 +1792,7 @@ void vb6_SetControlPictureFromCom(void* hwnd, void* pPictureDisp) {
         // Metafile or other - try as bitmap
         vb6_SetControlPicture(hwnd, (void*)(HANDLE)hOle);
     }
+    pPic->lpVtbl->Release(pPic);
 }
 int vb6_GetPictureAutoSize(void* hwnd) {
     if (!hwnd) return 0;
