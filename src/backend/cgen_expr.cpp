@@ -344,7 +344,7 @@ void CCodeGen::visit(IdentifierExpr& node) {
         {"typename", "vb6_TypeName"},
         {"createobject","vb6_CreateObject"},
         {"getobject","vb6_GetObject"},
-        {"loadpicture","vb6_LoadPictureFromFile"},
+        {"loadpicture","vb6_LoadPictureEx"},
         // 字符串函数 (P4新增)
         {"replace",  "vb6_Replace"},
         {"space",    "vb6_Space"},
@@ -472,6 +472,11 @@ void CCodeGen::visit(IdentifierExpr& node) {
         {"spc",            "vb6_Spc"},
         {"irr",            "vb6_IRR"},
         {"mirr",           "vb6_MIRR"},
+        // P20-37: Registry functions
+        {"savesetting",    "vb6_SaveSetting"},
+        {"getsetting",     "vb6_GetSetting"},
+        {"deletesetting",  "vb6_DeleteSetting"},
+        {"getallsettings", "vb6_GetAllSettings"},
 
     };
 
@@ -1361,6 +1366,34 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
     }
 
     // 函数调用路径 (原有逻辑)
+    // P20-36: IsMissing(arg) -> (!_has_arg) for Optional params
+    // Must intercept BEFORE callee mapping to vb6_IsMissing
+    if (node.callee && node.callee->kind == ASTNodeKind::IdentifierExpr && node.named.empty()) {
+        auto& ismIdent = static_cast<IdentifierExpr&>(*node.callee);
+        std::string ismLower = ismIdent.name;
+        std::transform(ismLower.begin(), ismLower.end(), ismLower.begin(), ::tolower);
+        if (ismLower == "ismissing" && node.positional.size() == 1) {
+            auto& arg = node.positional[0];
+            if (arg->kind == ASTNodeKind::IdentifierExpr) {
+                std::string argName = static_cast<IdentifierExpr&>(*arg).name;
+                std::string argLower = argName;
+                std::transform(argLower.begin(), argLower.end(), argLower.begin(), ::tolower);
+                if (currentProc_) {
+                    for (auto& p : currentProc_->params) {
+                        std::string pLower = p.name;
+                        std::transform(pLower.begin(), pLower.end(), pLower.begin(), ::tolower);
+                        if (pLower == argLower && p.isOptional && !p.isParamArray) {
+                            lastExpr_ = "(!_has_" + cIdent(p.name) + ")";
+                            return;
+                        }
+                    }
+                }
+                // Not an Optional param - IsMissing returns False (0)
+                lastExpr_ = "(0)";
+                return;
+            }
+        }
+    }
     // M22: 设置asCallCallee_标志, 让IdentifierExpr知道当前是函数调用callee上下文
     // 这确保递归调用时(如 Factorial(n-1))返回函数名而非返回值变量
     asCallCallee_ = true;
@@ -2011,12 +2044,27 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
 
                     std::string cType = mapType(param.type);
 
-                    argList += "&(" + cType + "){" + defVal + "}";
+                    // P20-36: Variant/struct types can't use {funcCall()} compound literal
+                    if (param.type == Vb6Type::Variant || param.type == Vb6Type::Empty ||
+                        param.type == Vb6Type::Null || param.type == Vb6Type::Object) {
+                        argList += "&(" + cType + "){0}";
+                    } else {
+                        argList += "&(" + cType + "){" + defVal + "}";
+                    }
 
                 }
 
             }
 
+        }
+
+        // P20-36: IsMissing _has_ flags for Optional params before ParamArray
+        for (int i = 0; i < normalCount; i++) {
+            const auto& param = calleeParams[i];
+            if (param.isOptional && !param.isParamArray) {
+                if (!argList.empty()) argList += ", ";
+                argList += (i < (int)args.size()) ? "1" : "0";
+            }
         }
 
     } else {
@@ -2250,6 +2298,11 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
         if (args.size() == 1) argList += ", 0.1";
     }
 
+    // P20-37: GetSetting(app, section, key[, default]) - default is empty string
+    if (callee == "vb6_GetSetting") {
+        if (args.size() == 3) argList += ", vb6_BSTR_Empty()";
+    }
+
     // P14.1.4: General Optional parameter padding for user-defined functions
     // calleeParams is empty for builtin RTL functions (registered without params), so they're auto-skipped
     if (calleeParams.size() > 0 && args.size() < calleeParams.size() && paIndex < 0) {
@@ -2269,7 +2322,25 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
             } else {
                 // ByRef: pass address of compound literal: &(type){defVal}
                 std::string cType = mapType(param.type);
-                argList += "&(" + cType + "){" + defVal + "}";
+                // P20-36: Variant/struct types can't use {funcCall()} compound literal
+                if (param.type == Vb6Type::Variant || param.type == Vb6Type::Empty ||
+                    param.type == Vb6Type::Null || param.type == Vb6Type::Object) {
+                    argList += "&(" + cType + "){0}";
+                } else {
+                    argList += "&(" + cType + "){" + defVal + "}";
+                }
+            }
+        }
+    }
+    
+    // P20-36: IsMissing support - append _has_ flags for Optional params
+    // For each Optional param in calleeParams: 1 if actually passed, 0 if padded
+    if (calleeParams.size() > 0 && paIndex < 0) {
+        for (size_t i = 0; i < calleeParams.size(); i++) {
+            const auto& param = calleeParams[i];
+            if (param.isOptional && !param.isParamArray) {
+                if (!argList.empty()) argList += ", ";
+                argList += (i < args.size()) ? "1" : "0";
             }
         }
     }

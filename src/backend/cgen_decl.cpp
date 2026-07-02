@@ -345,6 +345,13 @@ std::string CCodeGen::makeParamList(std::vector<std::unique_ptr<ParameterDecl>>&
             result += cType + "* " + cName;
         }
     }
+    // P20-36: IsMissing support - append _has_ flags for Optional params
+    for (size_t i = 0; i < params.size(); i++) {
+        auto& p = params[i];
+        if (p->isOptional && !p->isParamArray) {
+            result += ", int _has_" + cIdent(p->name);
+        }
+    }
     return result;
 }
 

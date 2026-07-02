@@ -262,14 +262,14 @@ bool MsvcDriver::compileAndLink(const MsvcDriverOptions& options) {
             cmd << " \"" << options.rtlDir << "\\vb6rtl.lib\""
                 << " \"" << options.rtlDir << "\\vb6rtl_gui.lib\"";
         }
-        cmd << " user32.lib gdi32.lib shell32.lib ole32.lib oleaut32.lib uuid.lib";
+        cmd << " user32.lib gdi32.lib shell32.lib ole32.lib oleaut32.lib uuid.lib advapi32.lib";
     } else {
         // 控制台程序
         cmd << " /link /SUBSYSTEM:CONSOLE";
         if (!options.rtlDir.empty()) {
             cmd << " \"" << options.rtlDir << "\\vb6rtl.lib\"";
         }
-        cmd << " ole32.lib oleaut32.lib uuid.lib user32.lib shell32.lib gdi32.lib";
+        cmd << " ole32.lib oleaut32.lib uuid.lib advapi32.lib user32.lib shell32.lib gdi32.lib";
     }
 
 

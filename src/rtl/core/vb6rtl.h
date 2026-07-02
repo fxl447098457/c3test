@@ -183,6 +183,7 @@ typedef struct vb6_VARIANT {
         int16_t boolVal;
         uint8_t bVal;
         int64_t cyVal;
+        struct vb6_SafeArray1D* parray;  /* P20-37: array pointer for GetAllSettings etc */
         struct { uint16_t wReserved1; uint8_t scale; uint8_t sign; uint32_t Hi32; uint32_t Lo32; uint32_t Mid32; } decVal;
     };
 } vb6_VARIANT;
@@ -700,6 +701,17 @@ double vb6_IRR(void* valuesArray, double guess);
 
 // P21-20: MIRR — modified internal rate of return
 double vb6_MIRR(void* valuesArray, double financeRate, double reinvestRate);
+
+// P20-37: Registry functions (VB6: SaveSetting/GetSetting/DeleteSetting/GetAllSettings)
+// VB6 registry path: HKEY_CURRENT_USER\Software\VB and VBA Program Settings\
+void vb6_SaveSetting(BSTR appName, BSTR section, BSTR key, BSTR setting);
+BSTR vb6_GetSetting(BSTR appName, BSTR section, BSTR key, BSTR default_);
+void vb6_DeleteSetting(BSTR appName, BSTR section, BSTR key);
+// GetAllSettings returns a SafeArray of (key, value) pairs - returns 2D variant array
+vb6_VARIANT vb6_GetAllSettings(BSTR appName, BSTR section);
+
+// P21-18: LoadPicture enhancement - OleLoadPicturePath for ICO/CUR/WMF/EMF/GIF/JPG/PNG
+void* vb6_LoadPictureEx(BSTR pathname);
 
 // ============================================================
 // COM 互操作 (P6)
