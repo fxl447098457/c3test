@@ -583,13 +583,13 @@ void CCodeGen::emitFormFramework(const FrmFormDesc& frmDesc, Module& module) {
             c_.emitLine("    SendMessageW(hwnd, WM_SETICON, ICON_SMALL, (LPARAM)vb6_icon); } }");
         }
     }
-    // P24: Form.Picture from .frx - load and store as window property
+    // P24: Form.Picture from .frx - load and store as window property (for WM_PAINT)
     {
         auto picIt2 = frmDesc.formControl.properties.find("Picture");
         if (picIt2 != frmDesc.formControl.properties.end() && picIt2->second.type == FrmValueType::FrxReference && frxLoaded) {
             std::string varName = "vb6_frx_bgpic_" + cIdent(formName);
             c_.emitLine("{ void* vb6_bgpic = vb6_LoadPictureFromMemory(" + varName + ", " + varName + "_size);");
-            c_.emitLine("  if (vb6_bgpic) vb6_SetControlPicture((void*)hwnd, vb6_bgpic); }");
+            c_.emitLine("  if (vb6_bgpic) SetPropW(hwnd, L\"VB6_Picture\", (HANDLE)vb6_bgpic); }");
         }
     }
 
@@ -1264,6 +1264,12 @@ void CCodeGen::emitFormFramework(const FrmFormDesc& frmDesc, Module& module) {
         constexpr long kCbsDrop    = 0x00000002L;
         constexpr long kSsBitmap   = 0x0000000EL;  // SS_BITMAP for PictureBox/Image
         constexpr long kSsCenterImg= 0x00000200L;  // SS_CENTERIMAGE
+        constexpr long kBsBitmap   = 0x00000080L;  // BS_BITMAP for Graphical buttons
+        constexpr long kBsPushLike = 0x00001000L;  // BS_PUSHLIKE: button-style toggle
+        constexpr long kEsMulti    = 0x00000004L;  // ES_MULTILINE for TextBox
+        constexpr long kEsAutoV    = 0x00000040L;  // ES_AUTOVSCROLL
+        constexpr long kWsHscroll  = 0x00100000L;  // WS_HSCROLL
+        constexpr long kWsVscroll  = 0x00200000L;  // WS_VSCROLL
 
         long style = kWsChild | kWsVisible;
         long exStyle = 0;
@@ -1272,19 +1278,45 @@ void CCodeGen::emitFormFramework(const FrmFormDesc& frmDesc, Module& module) {
         switch (ctrl.controlType) {
             case FrmControlType::CommandButton:
                 style |= kBsPush;
+                {
+                    auto stIt = ctrl.properties.find("Style");
+                    if (stIt != ctrl.properties.end() && stIt->second.intValue == 1)
+                        style |= kBsBitmap | kBsPushLike;  // Graphical: button-style with picture
+                }
                 break;
             case FrmControlType::TextBox:
                 style |= kWsBorder | kEsAutoH;
                 createCaption = ctrlText;  // TextBox用Text而非Caption
+                {
+                    auto mlIt = ctrl.properties.find("MultiLine");
+                    if (mlIt != ctrl.properties.end() && mlIt->second.intValue != 0)
+                        style |= kEsMulti | kEsAutoV;
+                    auto sbIt = ctrl.properties.find("ScrollBars");
+                    if (sbIt != ctrl.properties.end()) {
+                        int sb = (int)sbIt->second.intValue;
+                        if (sb == 1 || sb == 3) style |= kWsVscroll;  // Vertical
+                        if (sb == 2 || sb == 3) style |= kWsHscroll;  // Horizontal
+                    }
+                }
                 break;
             case FrmControlType::Label:
                 style |= kSsLeft;
                 break;
             case FrmControlType::CheckBox:
                 style |= kBsAutoChk;
+                {
+                    auto stIt = ctrl.properties.find("Style");
+                    if (stIt != ctrl.properties.end() && stIt->second.intValue == 1)
+                        style |= kBsBitmap | kBsPushLike;  // Graphical: button-style toggle with picture
+                }
                 break;
             case FrmControlType::OptionButton:
                 style |= kBsAutoRad;
+                {
+                    auto stIt = ctrl.properties.find("Style");
+                    if (stIt != ctrl.properties.end() && stIt->second.intValue == 1)
+                        style |= kBsBitmap | kBsPushLike;  // Graphical: button-style toggle with picture
+                }
                 break;
             case FrmControlType::Frame:
                 style |= kBsGroupBox;
@@ -1422,8 +1454,20 @@ void CCodeGen::emitFormFramework(const FrmFormDesc& frmDesc, Module& module) {
                         std::string varName = "vb6_frx_pic_" + cIdent(ctrl.controlName);
                         if (ctrl.index >= 0) varName += "_" + std::to_string(ctrl.index);
                         h_.emitLine(bytesToHexArray(pic.data.data(), pic.data.size(), varName));
-                        c_.emitLine("{ void* vb6_pic = vb6_LoadPictureFromMemory(" + varName + ", " + varName + "_size);");
-                        c_.emitLine("  if (vb6_pic) vb6_SetControlPicture((void*)" + ctrlHwndVar + ", vb6_pic); }");
+                        bool isGraphicalBtn = (ctrl.controlType == FrmControlType::CommandButton ||
+                                               ctrl.controlType == FrmControlType::OptionButton ||
+                                               ctrl.controlType == FrmControlType::CheckBox) &&
+                                              ctrl.properties.count("Style") &&
+                                              ctrl.properties.at("Style").intValue == 1;
+                        if (isGraphicalBtn) {
+                            // Graphical button: use BM_SETIMAGE with IMAGE_BITMAP
+                            c_.emitLine("{ void* vb6_pic = vb6_LoadPictureFromMemory(" + varName + ", " + varName + "_size);");
+                            c_.emitLine("  if (vb6_pic) SendMessageW((HWND)" + ctrlHwndVar + ", BM_SETIMAGE, IMAGE_BITMAP, (LPARAM)vb6_pic); }");
+                        } else {
+                            // PictureBox/Image: use vb6_SetControlPicture
+                            c_.emitLine("{ void* vb6_pic = vb6_LoadPictureFromMemory(" + varName + ", " + varName + "_size);");
+                            c_.emitLine("  if (vb6_pic) vb6_SetControlPicture((void*)" + ctrlHwndVar + ", vb6_pic); }");
+                        }
                     }
                 }
             }

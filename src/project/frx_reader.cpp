@@ -187,8 +187,10 @@ FrxListData FrxReader::readStringList(size_t offset) {
     }
 
     const uint8_t* base = fileData_.data() + offset;
+    // VB6 .frx List format: [2B count] [2B prefix] [per item: 2B len + GBK text]
+    // The prefix value equals count; skip both
     uint16_t count = readLE16(base);
-    size_t pos = 2;
+    size_t pos = 4;  // skip count(2B) + prefix(2B)
 
     for (uint16_t i = 0; i < count; i++) {
         if (offset + pos + 2 > fileData_.size()) break;
@@ -219,34 +221,21 @@ FrxIntListData FrxReader::readIntList(size_t offset) {
     }
 
     const uint8_t* base = fileData_.data() + offset;
-    // 尝试4字节count (VB6可能使用DWORD)
-    uint32_t count = readLE32(base);
-    size_t pos = 4;
+    // VB6 .frx ItemData format: [2B count] [2B prefix] [per item: 2B Integer]
+    // The prefix value equals count; skip both
+    uint16_t count = readLE16(base);
+    size_t pos = 4;  // skip count(2B) + prefix(2B)
 
-    // 如果count不合理, 回退到2字节
-    if (count > 10000 || offset + 4 + count * 4 > fileData_.size()) {
-        count = readLE16(base);
-        pos = 2;
-        if (count > 10000 || offset + 2 + count * 2 > fileData_.size()) {
-            lastError_ = "Invalid int list count in .frx";
-            return result;
-        }
+    if (count > 10000) {
+        lastError_ = "Invalid int list count in .frx";
+        return result;
     }
 
-    for (uint32_t i = 0; i < count; i++) {
-        if (pos == 4) {
-            // 4-byte mode: ItemData is Long (DWORD)
-            if (offset + pos + 4 > fileData_.size()) break;
-            int32_t val = (int32_t)readLE32(base + pos);
-            result.items.push_back(val);
-            pos += 4;
-        } else {
-            // 2-byte mode
-            if (offset + pos + 2 > fileData_.size()) break;
-            int16_t val = (int16_t)readLE16(base + pos);
-            result.items.push_back(val);
-            pos += 2;
-        }
+    for (uint16_t i = 0; i < count; i++) {
+        if (offset + pos + 2 > fileData_.size()) break;
+        int16_t val = (int16_t)readLE16(base + pos);
+        result.items.push_back(val);
+        pos += 2;
     }
     return result;
 }
