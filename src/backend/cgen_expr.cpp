@@ -1,4 +1,4 @@
-#include "backend/cgen.hpp"
+﻿#include "backend/cgen.hpp"
 #include <algorithm>
 #include <cctype>
 #include <iostream>
@@ -273,7 +273,17 @@ void CCodeGen::visit(IdentifierExpr& node) {
                 // P14.3.1: Dim As New自动实例化 (类模块成员)
                 auto itNewM = knownNewVars_.find(lower);
                 if (itNewM != knownNewVars_.end()) {
-                    c_.emitLine("if (!me->" + cName + ") me->" + cName + " = vb6_cls_" + itNewM->second + "_New();  /* Dim As New auto-instantiate */");
+                    {
+                std::string newExpr;
+                auto itCom = knownTypedComVars_.find(lower);
+                if (itCom != knownTypedComVars_.end()) {
+                    const std::string& _progId = itCom->second->comProgId.empty() ? itCom->second->name : itCom->second->comProgId;
+                    newExpr = "(void*)vb6_NewObject(L\"" + _progId + "\")";
+                } else {
+                    newExpr = "vb6_cls_" + itNewM->second + "_New()";
+                }
+                c_.emitLine("if (!me->" + cName + ") me->" + cName + " = " + newExpr + ";  /* Dim As New auto-instantiate */");
+            }
                 }
                 return;
             }
@@ -281,7 +291,17 @@ void CCodeGen::visit(IdentifierExpr& node) {
         // P14.3.1: Dim As New自动实例化守卫
         auto itNew = knownNewVars_.find(lower);
         if (itNew != knownNewVars_.end()) {
-            c_.emitLine("if (!" + cName + ") " + cName + " = vb6_cls_" + itNew->second + "_New();  /* Dim As New auto-instantiate */");
+            {
+            std::string newExpr;
+            auto itCom = knownTypedComVars_.find(lower);
+            if (itCom != knownTypedComVars_.end()) {
+                const std::string& _progId = itCom->second->comProgId.empty() ? itCom->second->name : itCom->second->comProgId;
+                newExpr = "(void*)vb6_NewObject(L\"" + _progId + "\")";
+            } else {
+                newExpr = "vb6_cls_" + itNew->second + "_New()";
+            }
+            c_.emitLine("if (!" + cName + ") " + cName + " = " + newExpr + ";  /* Dim As New auto-instantiate */");
+        }
         }
         lastExpr_ = cName;
         return;
@@ -293,7 +313,17 @@ void CCodeGen::visit(IdentifierExpr& node) {
     if (!foundSym) {
         auto itNew = knownNewVars_.find(lower);
         if (itNew != knownNewVars_.end()) {
-            c_.emitLine("if (!" + cName + ") " + cName + " = vb6_cls_" + itNew->second + "_New();  /* Dim As New auto-instantiate */");
+            {
+            std::string newExpr;
+            auto itCom = knownTypedComVars_.find(lower);
+            if (itCom != knownTypedComVars_.end()) {
+                const std::string& _progId = itCom->second->comProgId.empty() ? itCom->second->name : itCom->second->comProgId;
+                newExpr = "(void*)vb6_NewObject(L\"" + _progId + "\")";
+            } else {
+                newExpr = "vb6_cls_" + itNew->second + "_New()";
+            }
+            c_.emitLine("if (!" + cName + ") " + cName + " = " + newExpr + ";  /* Dim As New auto-instantiate */");
+        }
             lastExpr_ = cName;
             return;
         }
@@ -1553,88 +1583,38 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
             }
         }
 
-        // P6.3: 前期绑定 (vtable直接调用)
+        // P6.3: 前期绑定 — 利用类型签名确定返回类型，统一走后期绑定(IDispatch)
+        // 原因: vtable直接调用的函数签名可能不是VARIANT* (如get_Count用long*)，
+        // vb6_ComVtableGet*辅助函数统一用VARIANT*签名会导致调用错误
         if (isEarlyBoundCom_ && earlyBoundSym_) {
             isEarlyBoundCom_ = false;
             const Symbol* comSym = earlyBoundSym_;
             earlyBoundSym_ = nullptr;
 
-            // 查找方法签名
+            // 查找方法签名以确定返回类型
             std::string memLower = memberName;
             std::transform(memLower.begin(), memLower.end(), memLower.begin(), ::tolower);
             auto it = comSym->comMethods.find(memLower);
-            if (it != comSym->comMethods.end()) {
+            bool hasArgs = (!node.positional.empty() || !node.named.empty());
+
+            // 无参属性Get: 用后期绑定属性读取，根据返回类型选函数
+            if (it != comSym->comMethods.end() && it->second.isPropertyGet && !hasArgs) {
                 const auto& sig = it->second;
-
-                // 生成接口类型名
-                std::string ifaceName = comSym->name;
-                if (comSym->kind == SymbolKind::ComClass && !comSym->comDefaultIfaceName.empty()) {
-                    ifaceName = comSym->comDefaultIfaceName;
-                }
-                std::string ifaceType = "vb6_ComIface_" + cIdent(ifaceName);
-
-                // vtable调用: ((ReturnType(*)(Iface*))vt[idx])(obj, args...)
-                // 或属性get: obj->vt[idx](obj)
-                std::string vtOffset = std::to_string(sig.vtableIndex);
-
-                // 参数生成 (不包含this指针, vtable辅助函数的第一个参数已经是obj)
-                std::vector<std::string> callArgs;
-                for (size_t i = 0; i < node.positional.size(); i++) {
-                    emitExpr(*node.positional[i]);
-                    callArgs.push_back(lastExpr_);
-                }
-                for (auto& named : node.named) {
-                    emitExpr(*named.value);
-                    callArgs.push_back(lastExpr_);
-                }
-
-                std::string argsStr;
-                for (size_t i = 0; i < callArgs.size(); i++) {
-                    if (i > 0) argsStr += ", ";
-                    argsStr += callArgs[i];
-                }
-
-                // 生成vtable间接调用
-                // ((void*)obj)[idx] 是vtable中第idx个函数指针
-                // 简化: 使用运行时辅助函数 vb6_ComVtableCall
-                if (sig.isPropertyGet) {
-                    // 属性Get: vb6_ComVtableGet<type>(obj, vtIndex, args...)
-                    std::string returnType = mapType(sig.returnType);
-                    if (returnType == "BSTR") {
-                        lastExpr_ = "vb6_ComVtableGetBSTR(" + objExpr + ", " + vtOffset + ", " + argsStr + ")";
-                    } else if (returnType == "int32_t" || returnType == "int16_t") {
-                        lastExpr_ = "vb6_ComVtableGetInt(" + objExpr + ", " + vtOffset + ", " + argsStr + ")";
-                    } else if (returnType == "double" || returnType == "float") {
-                        lastExpr_ = "vb6_ComVtableGetDouble(" + objExpr + ", " + vtOffset + ", " + argsStr + ")";
-                    } else if (returnType == "void*") {
-                        lastExpr_ = "vb6_ComVtableGetObject(" + objExpr + ", " + vtOffset + ", " + argsStr + ")";
-                    } else {
-                        lastExpr_ = "vb6_ComVtableGetVoid(" + objExpr + ", " + vtOffset + ", " + argsStr + ")";
-                    }
-                } else if (sig.isPropertyPut || sig.isPropertyPutRef) {
-                    // 属性Put: vb6_ComVtablePut(obj, vtIndex, value)
-                    lastExpr_ = "vb6_ComVtableCallVoid(" + objExpr + ", " + vtOffset + ", " + argsStr + ")";
+                std::string returnType = mapType(sig.returnType);
+                if (returnType == "BSTR") {
+                    lastExpr_ = "vb6_ComGetStringProp(" + objExpr + ", L\"" + memberName + "\")";
+                } else if (returnType == "int32_t" || returnType == "int16_t") {
+                    lastExpr_ = "vb6_ComGetIntProp(" + objExpr + ", L\"" + memberName + "\")";
+                } else if (returnType == "double" || returnType == "float") {
+                    lastExpr_ = "vb6_ComGetDoubleProp(" + objExpr + ", L\"" + memberName + "\")";
+                } else if (returnType == "void*") {
+                    lastExpr_ = "vb6_ComGetObjectProp(" + objExpr + ", L\"" + memberName + "\")";
                 } else {
-                    // 方法调用
-                    std::string returnType = mapType(sig.returnType);
-                    if (returnType == "BSTR") {
-                        lastExpr_ = "vb6_ComVtableGetBSTR(" + objExpr + ", " + vtOffset + ", " + argsStr + ")";
-                    } else if (returnType == "int32_t" || returnType == "int16_t") {
-                        lastExpr_ = "vb6_ComVtableGetInt(" + objExpr + ", " + vtOffset + ", " + argsStr + ")";
-                    } else if (returnType == "double" || returnType == "float") {
-                        lastExpr_ = "vb6_ComVtableGetDouble(" + objExpr + ", " + vtOffset + ", " + argsStr + ")";
-                    } else if (returnType == "void*") {
-                        lastExpr_ = "vb6_ComVtableGetObject(" + objExpr + ", " + vtOffset + ", " + argsStr + ")";
-                    } else if (returnType == "void") {
-                        lastExpr_ = "vb6_ComVtableCallVoid(" + objExpr + ", " + vtOffset + ", " + argsStr + ")";
-                    } else {
-                        // 默认: 返回VARIANT
-                        lastExpr_ = "vb6_ComVtableGetVoid(" + objExpr + ", " + vtOffset + ", " + argsStr + ")";
-                    }
+                    lastExpr_ = "vb6_ComGetStringProp(" + objExpr + ", L\"" + memberName + "\")";
                 }
                 return;
             }
-            // 方法签名未找到 → 降级为后期绑定
+            // 有参数的方法/属性Put/签名未找到 → 降级为后期绑定 (fall through)
             isEarlyBoundCom_ = false;
         }
         isEarlyBoundCom_ = false;
@@ -1764,6 +1744,40 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
     std::vector<std::string> args;
     for (size_t i = 0; i < node.positional.size(); i++) {
         emitExpr(*node.positional[i]);
+      // COM属性标记残留: MsgBox dic.Count 等场景 — 参数是COM属性读取但标记未被消费
+        // 统一用后期绑定(IDispatch), 避免vtable签名不匹配问题
+        if (isComMarker_) {
+            isComMarker_ = false;
+            std::string objExpr = std::move(comObjExpr_);
+            std::string memName = std::move(comMemberName_);
+            if (isEarlyBoundCom_ && earlyBoundSym_) {
+                isEarlyBoundCom_ = false;
+                const Symbol* comSym = earlyBoundSym_;
+                earlyBoundSym_ = nullptr;
+                std::string memLower = memName;
+                std::transform(memLower.begin(), memLower.end(), memLower.begin(), ::tolower);
+                auto it = comSym->comMethods.find(memLower);
+                if (it != comSym->comMethods.end() && it->second.isPropertyGet) {
+                    const auto& sig = it->second;
+                    std::string returnType = mapType(sig.returnType);
+                    if (returnType == "int32_t" || returnType == "int16_t") {
+                        lastExpr_ = "vb6_ComGetIntProp(" + objExpr + ", L\"" + memName + "\")";
+                    } else if (returnType == "BSTR") {
+                        lastExpr_ = "vb6_ComGetStringProp(" + objExpr + ", L\"" + memName + "\")";
+                    } else if (returnType == "double" || returnType == "float") {
+                        lastExpr_ = "vb6_ComGetDoubleProp(" + objExpr + ", L\"" + memName + "\")";
+                    } else if (returnType == "void*") {
+                        lastExpr_ = "vb6_ComGetObjectProp(" + objExpr + ", L\"" + memName + "\")";
+                    } else {
+                        lastExpr_ = "vb6_ComGetStringProp(" + objExpr + ", L\"" + memName + "\")";
+                    }
+                } else {
+                    lastExpr_ = "vb6_ComGetStringProp(" + objExpr + ", L\"" + memName + "\")";
+                }
+            } else {
+                lastExpr_ = "vb6_ComGetStringProp(" + objExpr + ", L\"" + memName + "\")";
+            }
+        }
         std::string argVal = std::move(lastExpr_);
 
         // M22: Declare ANSI函数 - ByVal String参数需要BSTR->ANSI转换
@@ -2406,7 +2420,7 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
         }
     }
 
-    // M22-fix: CStr(BSTR) → 直接返回BSTR, 不需要vb6_CStr(VARIANT)
+    // M22-fix: CStr类型适配 — 根据参数类型选择正确的CStr变体
     if (callee == "vb6_CStr" && !node.positional.empty()) {
         auto& firstArg = node.positional[0];
         if (firstArg->kind == ASTNodeKind::IdentifierExpr) {
@@ -2418,9 +2432,25 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
                 emitExpr(*firstArg);
                 return;
             }
+            // 参数是int32_t/Long变量 → 用vb6_CStrLong
+            if (knownLongVars_.count(argLower)) {
+                callee = "vb6_CStrLong";
+            }
+            // 参数是double变量 → 用vb6_CStrDbl
+            else if (knownDoubleVars_.count(argLower)) {
+                callee = "vb6_CStrDbl";
+            }
+            // 参数是Variant变量 → 保留vb6_CStr(VARIANT)
+        } else {
+            // 非标识符表达式: 推断类型选择CStr变体
+            Vb6Type argType = inferExprType(*firstArg);
+            if (argType == Vb6Type::Long || argType == Vb6Type::Integer) {
+                callee = "vb6_CStrLong";
+            } else if (argType == Vb6Type::Double || argType == Vb6Type::Single) {
+                callee = "vb6_CStrDbl";
+            }
         }
     }
-
     // P8.4: Variant参数适配 — 如果目标函数不接受Variant但参数是Variant类型, 使用V后缀函数
     // CInt(Variant)→vb6_CIntV, CDbl(Variant)→vb6_CDblV, CLng(Variant)→vb6_CLngV
     if (callee == "vb6_CInt" || callee == "vb6_CLng" || callee == "vb6_CDbl") {
@@ -2442,7 +2472,18 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
         }
     }
 
-    // MsgBox默认参数补全: MsgBox(prompt) -> vb6_MsgBox1(prompt)
+    // MsgBox自动BSTR转换: MsgBox期望BSTR, 非BSTR参数需包装
+    if (callee == "vb6_MsgBox" || callee == "vb6_MsgBox1") {
+        if (!argList.empty()) {
+            if (argList.find("vb6_ComGetIntProp") != std::string::npos ||
+                argList.find("vb6_ComVtableGetInt") != std::string::npos) {
+                argList = "vb6_CStrLong(" + argList + ")";
+            } else if (argList.find("vb6_ComGetDoubleProp") != std::string::npos ||
+                       argList.find("vb6_ComVtableGetDouble") != std::string::npos) {
+                argList = "vb6_CStrDbl(" + argList + ")";
+            }
+        }
+    }    // MsgBox(prompt) -> vb6_MsgBox1(prompt)
     // MsgBox(prompt, buttons) -> vb6_MsgBox(prompt, buttons, NULL)
     if (callee == "vb6_MsgBox") {
         if (node.positional.size() == 1) {

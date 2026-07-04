@@ -775,8 +775,16 @@ std::string CCodeGen::mapTypeRef(ASTNode* typeRef) {
             if (t != Vb6Type::Unknown) {
                 return mapType(t);
             }
+            // 限定类型名 (如 Scripting.Dictionary): 用最后一部分查找符号
+            std::string lookupName = simple.name;
+            size_t dotPos = simple.name.find('.');
+            if (dotPos != std::string::npos) {
+                std::string shortName = simple.name.substr(dotPos + 1);
+                auto* dotSym = symTab_.lookupModule(shortName);
+                if (dotSym) lookupName = shortName;
+            }
             // 检查是否是类名 → 映射为类结构体指针
-            auto* clsSym = symTab_.lookupModule(simple.name);
+            auto* clsSym = symTab_.lookupModule(lookupName);
             if (clsSym && clsSym->kind == SymbolKind::Class) {
                 // P6.4: 接口类 → vb6_iface_<Name> 包装类型 (非指针)
                 if (clsSym->isInterface) {
@@ -798,7 +806,7 @@ std::string CCodeGen::mapTypeRef(ASTNode* typeRef) {
                 return "vb6_ComIface_" + cIfaceName + "*";
             }
             // 检查是否是用户定义类型 (UDT) → vb6_type_<Name>
-            auto* udtSym = symTab_.lookup(simple.name);
+            auto* udtSym = symTab_.lookup(lookupName);
             if (udtSym && udtSym->kind == SymbolKind::UserDefinedType) {
                 return "vb6_type_" + cIdent(simple.name);
             }
@@ -807,7 +815,7 @@ std::string CCodeGen::mapTypeRef(ASTNode* typeRef) {
                 return "int32_t";
             }
             // 兜底: 可能是未知类型
-            return cIdent(simple.name);
+            return cIdent(lookupName);
         }
         case ASTNodeKind::ArrayTypeRef:
             return "vb6_SafeArray1D*";  // SAFEARRAY指针

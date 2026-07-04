@@ -479,6 +479,27 @@ TypeRefPtr Parser::parseTypeRef() {
         auto tok = advance();
         auto typeRef = std::make_unique<SimpleTypeRef>(loc, tok.text);
 
+        // 限定类型名: Scripting.Dictionary, MSComctlLib.ImageList 等
+        if (cur_.kind == TokenKind::Dot) {
+            std::string qualified = tok.text;
+            while (cur_.kind == TokenKind::Dot) {
+                advance(); // consume '.'
+                if (cur_.kind == TokenKind::Identifier || cur_.kind == TokenKind::Boolean ||
+                    cur_.kind == TokenKind::Byte || cur_.kind == TokenKind::Integer ||
+                    cur_.kind == TokenKind::Long || cur_.kind == TokenKind::LongLong ||
+                    cur_.kind == TokenKind::LongPtr || cur_.kind == TokenKind::Single ||
+                    cur_.kind == TokenKind::Double || cur_.kind == TokenKind::Currency ||
+                    cur_.kind == TokenKind::Decimal || cur_.kind == TokenKind::Date ||
+                    cur_.kind == TokenKind::Object || cur_.kind == TokenKind::String ||
+                    cur_.kind == TokenKind::Variant) {
+                    qualified += "." + advance().text;
+                } else {
+                    break;
+                }
+            }
+            typeRef = std::make_unique<SimpleTypeRef>(loc, qualified);
+        }
+
         // 数组类型: Long(), String(10)
         if (match(TokenKind::LeftParen)) {
             std::vector<ArrayTypeRef::Dimension> dims;

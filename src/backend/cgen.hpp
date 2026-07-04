@@ -175,9 +175,30 @@ public:
     // --- 模块 ---
     void visit(Module& node) override;
 
+    // 限定类型名符号查找: "Scripting.Dictionary" → 先查全名，失败则查短名 "Dictionary"
+    Symbol* lookupModuleDotted(const std::string& name) const {
+        auto* sym = symTab_.lookupModule(name);
+        if (!sym) {
+            size_t dot = name.find('.');
+            if (dot != std::string::npos) {
+                sym = symTab_.lookupModule(name.substr(dot + 1));
+            }
+        }
+        return sym;
+    }
+    Symbol* lookupDotted(const std::string& name) const {
+        auto* sym = symTab_.lookup(name);
+        if (!sym) {
+            size_t dot = name.find('.');
+            if (dot != std::string::npos) {
+                sym = symTab_.lookup(name.substr(dot + 1));
+            }
+        }
+        return sym;
+    }
+
 private:
-    Diagnostics& diag_;
-    const SymbolTable& symTab_;
+    Diagnostics& diag_;    const SymbolTable& symTab_;
     const TypeSystem& typeSys_;
     bool verbose_;
 

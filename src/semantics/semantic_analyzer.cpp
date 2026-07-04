@@ -467,13 +467,29 @@ Vb6Type SemanticAnalyzer::resolveTypeRef(ASTNode* typeRef) {
             auto& simple = static_cast<SimpleTypeRef&>(*typeRef);
             Vb6Type t = typeSys_.resolveTypeName(simple.name);
             if (t == Vb6Type::Unknown) {
-                // 可能是用户自定义类型 -> 在符号表中查找
+                                // 可能是用户自定义类型 -> 在符号表中查找
                 std::string lower = Symbol::toLower(simple.name);
                 if (auto* sym = symTab_.lookupModule(lower)) {
                     if (sym->kind == SymbolKind::UserDefinedType)
                         return Vb6Type::UserDefinedType;
                     if (sym->kind == SymbolKind::EnumType)
                         return Vb6Type::Long;  // Enum成员是Long
+                    if (sym->kind == SymbolKind::ComClass || sym->kind == SymbolKind::ComInterface)
+                        return Vb6Type::Object;
+                    if (sym->kind == SymbolKind::Class)
+                        return Vb6Type::Object;
+                }
+                // 限定类型名 (如 Scripting.Dictionary): 用最后一部分查找
+                size_t dotPos = simple.name.find('.');
+                if (dotPos != std::string::npos) {
+                    std::string shortName = simple.name.substr(dotPos + 1);
+                    std::string shortLower = Symbol::toLower(shortName);
+                    if (auto* sym2 = symTab_.lookupModule(shortLower)) {
+                        if (sym2->kind == SymbolKind::ComClass || sym2->kind == SymbolKind::ComInterface)
+                            return Vb6Type::Object;
+                        if (sym2->kind == SymbolKind::Class)
+                            return Vb6Type::Object;
+                    }
                 }
                 // 未识别类型 → Variant (宽松策略)
                 return Vb6Type::Variant;

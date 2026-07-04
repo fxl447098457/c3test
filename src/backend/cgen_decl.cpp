@@ -531,7 +531,7 @@ void CCodeGen::visit(VariableDecl& node) {
     // 检查是否是类类型变量 → 注册到 knownClassVars_
     if (node.asType && node.asType->kind == ASTNodeKind::SimpleTypeRef) {
         auto& simple = static_cast<SimpleTypeRef&>(*node.asType);
-        auto* clsSym = symTab_.lookupModule(simple.name);
+        auto* clsSym = lookupModuleDotted(simple.name);
         if (clsSym && clsSym->kind == SymbolKind::Class) {
             std::string lower = node.name;
             std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
@@ -555,7 +555,7 @@ void CCodeGen::visit(VariableDecl& node) {
     // 检查是否是UDT类型变量 → 注册到 knownUdtVars_
     if (node.asType && node.asType->kind == ASTNodeKind::SimpleTypeRef) {
         auto& simpleUdt = static_cast<SimpleTypeRef&>(*node.asType);
-        auto* udtSymDecl = symTab_.lookup(simpleUdt.name);
+        auto* udtSymDecl = lookupDotted(simpleUdt.name);
         if (udtSymDecl && udtSymDecl->kind == SymbolKind::UserDefinedType) {
             std::string udtLower = node.name;
             std::transform(udtLower.begin(), udtLower.end(), udtLower.begin(), ::tolower);
@@ -573,12 +573,16 @@ void CCodeGen::visit(VariableDecl& node) {
     // P6.3: 检查是否是前期绑定COM变量 → 注册到 knownTypedComVars_
     if (node.asType && node.asType->kind == ASTNodeKind::SimpleTypeRef) {
         auto& simple = static_cast<SimpleTypeRef&>(*node.asType);
-        auto* comSym = symTab_.lookupModule(simple.name);
+        auto* comSym = lookupModuleDotted(simple.name);
         if (comSym && (comSym->kind == SymbolKind::ComClass || comSym->kind == SymbolKind::ComInterface)) {
             std::string lower = node.name;
             std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
             knownTypedComVars_[lower] = comSym;
             knownObjectVars_.erase(lower);  // 优先前期绑定
+            // Dim As New ComClass 自动实例化 (P14.3.1扩展)
+            if (node.isNew && comSym->kind == SymbolKind::ComClass) {
+                knownNewVars_[lower] = cIdent(comSym->name);
+            }
             // P13.23: ComClass WithEvents -> knownWithEventsVars_
             if (node.isWithEvents && comSym->kind == SymbolKind::ComClass && comSym->comHasSourceIface) {
                 knownWithEventsVars_[lower] = comSym->name;
@@ -633,7 +637,7 @@ void CCodeGen::visit(VariableDecl& node) {
     bool isVb6IfaceType = false;  // P6.4: VB6接口引用类型
     if (node.asType && node.asType->kind == ASTNodeKind::SimpleTypeRef) {
         auto& simple = static_cast<SimpleTypeRef&>(*node.asType);
-        auto* clsSym = symTab_.lookupModule(simple.name);
+        auto* clsSym = lookupModuleDotted(simple.name);
         isClassType = (clsSym && clsSym->kind == SymbolKind::Class && !clsSym->isInterface);
         isVb6IfaceType = (clsSym && clsSym->kind == SymbolKind::Class && clsSym->isInterface);
         isComIfaceType = (clsSym && (clsSym->kind == SymbolKind::ComClass || clsSym->kind == SymbolKind::ComInterface));
@@ -651,7 +655,7 @@ void CCodeGen::visit(VariableDecl& node) {
         bool isUdtType = false;
         if (node.asType && node.asType->kind == ASTNodeKind::SimpleTypeRef) {
             auto& simple = static_cast<SimpleTypeRef&>(*node.asType);
-            auto* sym = symTab_.lookup(simple.name);
+            auto* sym = lookupDotted(simple.name);
             isUdtType = (sym && sym->kind == SymbolKind::UserDefinedType);
         }
         std::string initVal;

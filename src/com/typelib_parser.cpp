@@ -426,12 +426,14 @@ std::unique_ptr<ComInterfaceInfo> TypeLibParser::parseInterface(void* pTypeInfo,
 
         ComMemberInfo member = parseFuncDesc(pTI, pFuncDesc, i);
 
-        // vtable索引: 对于dispinterface, 从vtableBase开始
-        if (typeKindSaved == TKIND_DISPATCH || iface->isDual) {
-            member.vtableIndex = vtableBase + (int)i;
-        } else {
-            // 纯vtable接口: FUNCDESC.oVft / sizeof(void*)
+        // vtable索引: 统一使用FUNCDESC.oVft / sizeof(void*)
+        // 注意: 对于dispinterface/dual, 枚举序号i不等于vtable位置,
+        // oVft才是正确的vtable字节偏移 (包含IUnknown+IDispatch槽位)
+        if (pFuncDesc->oVft > 0) {
             member.vtableIndex = pFuncDesc->oVft / (int)sizeof(void*);
+        } else {
+            // 兜底: 对于没有oVft的接口, 使用计算值
+            member.vtableIndex = vtableBase + (int)i;
         }
 
         iface->members.push_back(std::move(member));
@@ -517,11 +519,24 @@ std::unique_ptr<ComCoClassInfo> TypeLibParser::parseCoClass(void* pTypeInfo,
         pImplTI->Release();
     }
 
-    pTI->ReleaseTypeAttr(pTypeAttr);
+    // ProgID: 从CLSID反查注册表获取真实ProgID
+    {
+        CLSID clsid = pTypeAttr->guid;
+        LPOLESTR progIdW = nullptr;
+        HRESULT progHr = ProgIDFromCLSID(clsid, &progIdW);
+        if (SUCCEEDED(progHr) && progIdW) {
+            std::string progIdStr;
+            for (const wchar_t* p = progIdW; *p; p++) {
+                progIdStr += (char)*p;
+            }
+            cc->progId = progIdStr;
+            CoTaskMemFree(progIdW);
+        } else {
+            cc->progId = name;  // fallback: 使用coclass短名
+        }
+    }
 
-    // ProgID: 从注册表反查 (CLSID → ProgID)
-    // 简化: 直接用coclass名作为ProgID的一部分 (后续可精确查询)
-    cc->progId = name;  // 可能不精确, 但作为fallback
+    pTI->ReleaseTypeAttr(pTypeAttr);
 
     return cc;
 }

@@ -2367,7 +2367,7 @@ void CCodeGen::visit(LocalDeclStmt& node) {
             // 查找类型名是否对应ComClass符号
             if (var.asType && var.asType->kind == ASTNodeKind::SimpleTypeRef) {
                 auto& simple = static_cast<SimpleTypeRef&>(*var.asType);
-                auto* comSym = symTab_.lookupModule(simple.name);
+                auto* comSym = lookupModuleDotted(simple.name);
                 if (comSym && (comSym->kind == SymbolKind::ComClass || comSym->kind == SymbolKind::ComInterface)) {
                     std::string lower = var.name;
                     std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
@@ -2391,7 +2391,7 @@ void CCodeGen::visit(LocalDeclStmt& node) {
             bool isLocalVb6IfaceType = false;  // P6.4: VB6接口引用
             if (var.asType && var.asType->kind == ASTNodeKind::SimpleTypeRef) {
                 auto& simple = static_cast<SimpleTypeRef&>(*var.asType);
-                auto* clsSym = symTab_.lookupModule(simple.name);
+                auto* clsSym = lookupModuleDotted(simple.name);
                 if (clsSym && clsSym->kind == SymbolKind::Class) {
                     std::string lower = var.name;
                     std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
@@ -2412,7 +2412,7 @@ void CCodeGen::visit(LocalDeclStmt& node) {
                     isLocalComIfaceType = true;
                 }
                 // 检查是否是UDT类型
-                auto* udtSym = symTab_.lookup(simple.name);
+                auto* udtSym = lookupDotted(simple.name);
                 if (udtSym && udtSym->kind == SymbolKind::UserDefinedType) {
                     isLocalUdtType = true;
                     // M22-fix: 注册到knownUdtVars_，防止成员访问被误判为模块名限定

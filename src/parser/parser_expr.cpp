@@ -327,7 +327,14 @@ ExprPtr Parser::parseNewExpr() {
     auto loc = currentLoc();
     advance(); // consume 'New'
     auto classTok = expectName("expected class name after 'New'");
-    return std::make_unique<NewExpr>(loc, classTok.text);
+    std::string className = classTok.text;
+    // Qualified class name: New Scripting.Dictionary, New MSComctlLib.ImageList, etc.
+    while (cur_.kind == TokenKind::Dot) {
+        advance(); // consume '.'
+        auto nextTok = expectName("expected class name after '.'");
+        className += "." + nextTok.text;
+    }
+    return std::make_unique<NewExpr>(loc, className);
 }
 
 ExprPtr Parser::parseTypeOfExpr() {
