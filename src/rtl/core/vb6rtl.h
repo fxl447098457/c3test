@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 // vb6rtl.h - VB6运行时库最小头文件
 // 为C代码生成器提供VB6基本类型的C定义
 // P3.6 阎段: 最小子集, 仅支撑 hello.bas 等简单程序
@@ -168,6 +168,7 @@ typedef enum vb6_vartype {
     vb6_vtVariant = 12,
     vb6_vtDecimal = 14,
     vb6_vtByte = 17,
+    vb6_vtArray = 0x2000,
 } vb6_vartype;
 
 
@@ -229,6 +230,17 @@ static inline vb6_VARIANT vb6_VariantBool(int16_t val) {
     vb6_VARIANT v; memset(&v, 0, sizeof(v));
     v.vt = vb6_vtBoolean; v.boolVal = val; return v;
 }
+
+// Variant containing a SafeArray (VB6: a = Array(1,2,3))
+static inline vb6_VARIANT vb6_VariantArray(void* _arr) {
+    vb6_VARIANT v; memset(&v, 0, sizeof(v));
+    v.vt = vb6_vtArray | vb6_vtVariant; v.parray = (struct vb6_SafeArray1D*)_arr; return v;
+}
+
+// Index into a Variant that holds an array -- returns element as vb6_VARIANT
+vb6_VARIANT vb6_VariantArrayGet(vb6_VARIANT* v, int32_t index);
+// Set element in a Variant that holds an array
+void vb6_VariantArraySet(vb6_VARIANT* v, int32_t index, vb6_VARIANT val);
 
 // Variant转基本类型
 int32_t vb6_VariantToLong(vb6_VARIANT v);

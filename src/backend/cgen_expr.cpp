@@ -1,4 +1,4 @@
-#include "backend/cgen.hpp"
+﻿#include "backend/cgen.hpp"
 #include <algorithm>
 #include <cctype>
 #include <iostream>
@@ -1231,6 +1231,20 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
             }
         }
     }
+    // Variant数组索引: a(i) 其中a是Variant变量(可能持有SafeArray)
+    // VB6: a = Array(1,2,3); MsgBox a(0) → vb6_VariantArrayGet(&a, 0)
+    if (!isArrayAccess && node.callee && node.callee->kind == ASTNodeKind::IdentifierExpr && node.named.empty() && !node.positional.empty()) {
+        auto& vIdent = static_cast<IdentifierExpr&>(*node.callee);
+        std::string vLower = vIdent.name;
+        std::transform(vLower.begin(), vLower.end(), vLower.begin(), ::tolower);
+        if (knownVariantVars_.count(vLower)) {
+            emitExpr(*node.positional[0]);
+            std::string vIndex = std::move(lastExpr_);
+            lastExpr_ = "vb6_VariantArrayGet(&" + cIdent(vIdent.name) + ", " + vIndex + ")";
+            return;
+        }
+    }
+
 
     if (isArrayAccess) {
         // P8.1: 数组元素访问, 支持多维

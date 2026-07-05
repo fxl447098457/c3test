@@ -1,4 +1,4 @@
-#include "backend/cgen.hpp"
+﻿#include "backend/cgen.hpp"
 #include <algorithm>
 #include <cctype>
 #include <iostream>
@@ -1250,6 +1250,11 @@ std::string CCodeGen::wrapVariantValue(ASTNode* valueNode, const std::string& cE
     // COM后期绑定调用: vb6_ComCall返回VARIANT*, 需转为vb6_VARIANT
     if (cExpr.find("vb6_ComCall(") != std::string::npos) {
         return "vb6_VariantFromComResult(" + cExpr + ")";
+    }
+    
+    // Array()临时变量: _arr_N is vb6_SafeArray1D*, 包装为Variant持有数组
+    if (cExpr.find("_arr_") == 0) {
+        return "vb6_VariantArray(" + cExpr + ")";
     }
     
     // 默认: 尝试用Long包装 (VB6默认整数类型)

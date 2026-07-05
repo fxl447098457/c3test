@@ -4097,3 +4097,72 @@ vb6_VARIANT vb6_VariantFromComResult(void* variant_ptr) {
     free(pv);
     return result;
 }
+
+/* Variant数组索引: 从持有SafeArray的Variant中取/设元素 */
+vb6_VARIANT vb6_VariantArrayGet(vb6_VARIANT* v, int32_t index) {
+    vb6_VARIANT result;
+    memset(&result, 0, sizeof(result));
+    result.vt = vb6_vtEmpty;
+    if (!v || !(v->vt & vb6_vtArray) || !v->parray) return result;
+    vb6_SafeArray1D* arr = v->parray;
+    if (index < arr->lBound || index > arr->uBound) return result;
+    int32_t off = index - arr->lBound;
+    switch (arr->elemType) {
+        case vb6_sa_long:
+            result.vt = vb6_vtLong;
+            result.lVal = ((int32_t*)arr->data)[off];
+            break;
+        case vb6_sa_int:
+            result.vt = vb6_vtInteger;
+            result.iVal = ((int16_t*)arr->data)[off];
+            break;
+        case vb6_sa_double:
+            result.vt = vb6_vtDouble;
+            result.dblVal = ((double*)arr->data)[off];
+            break;
+        case vb6_sa_single:
+            result.vt = vb6_vtDouble; /* VB6 Single -> Double promotion */
+            result.dblVal = (double)((float*)arr->data)[off];
+            break;
+        case vb6_sa_bstr:
+            result.vt = vb6_vtBSTR;
+            result.bstrVal = ((BSTR*)arr->data)[off];
+            break;
+        case vb6_sa_bool:
+            result.vt = vb6_vtBoolean;
+            result.boolVal = ((int16_t*)arr->data)[off];
+            break;
+        case vb6_sa_byte:
+            result.vt = vb6_vtInteger; /* VB6 Byte -> Integer promotion */
+            result.iVal = (int16_t)((uint8_t*)arr->data)[off];
+            break;
+        case vb6_sa_variant:
+            result = ((vb6_VARIANT*)arr->data)[off];
+            break;
+        case vb6_sa_ptr:
+            result.vt = vb6_vtLong; /* object pointer as Long */
+            result.lVal = (int32_t)(intptr_t)((void**)arr->data)[off];
+            break;
+        case vb6_sa_currency:
+            result.vt = vb6_vtLong;
+            result.lVal = (int32_t)((int64_t*)arr->data)[off]; /* truncate to Long */
+            break;
+        default:
+            result.vt = vb6_vtEmpty;
+            break;
+    }
+    return result;
+}
+
+void vb6_VariantArraySet(vb6_VARIANT* v, int32_t index, vb6_VARIANT val) {
+    if (!v || !(v->vt & vb6_vtArray) || !v->parray) return;
+    vb6_SafeArray1D* arr = v->parray;
+    if (index < arr->lBound || index > arr->uBound) return;
+    int32_t off = index - arr->lBound;
+    if (arr->elemType == vb6_sa_variant) {
+        vb6_VARIANT* slot = &((vb6_VARIANT*)arr->data)[off];
+        vb6_VariantClear(slot);
+        *slot = val;
+    }
+    /* 对于非Variant数组, 赋值时需要按目标类型转换(简化: 仅Variant数组支持赋值) */
+}
