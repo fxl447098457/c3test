@@ -43,6 +43,7 @@ void CCodeGen::visit(SubDecl& node) {
     knownVariantVars_.clear();
     // M22-fix: 只清空UDT变量map(旧条目会冲突), set类型不清空(WithEvents等模块级条目需跨过程保留)
     knownUdtVars_.clear();
+    knownFixedStringLen_.clear();
     // P6.11: 恢复类模块成员变量类型 (clear后从持久化集合恢复)
     knownBstrVars_.insert(classBstrMembers_.begin(), classBstrMembers_.end());
     knownDoubleVars_.insert(classDoubleMembers_.begin(), classDoubleMembers_.end());
@@ -171,6 +172,7 @@ void CCodeGen::visit(FunctionDecl& node) {
     knownVariantVars_.clear();
     // M22-fix: 只清空UDT变量map(旧条目会冲突), set类型不清空(WithEvents等模块级条目需跨过程保留)
     knownUdtVars_.clear();
+    knownFixedStringLen_.clear();
     // P6.11: 恢复类模块成员变量类型 (clear后从持久化集合恢复)
     knownBstrVars_.insert(classBstrMembers_.begin(), classBstrMembers_.end());
     knownDoubleVars_.insert(classDoubleMembers_.begin(), classDoubleMembers_.end());
@@ -563,6 +565,16 @@ void CCodeGen::visit(VariableDecl& node) {
         }
     }
 
+    // 检查是否是定长字符串变量 → 注册到 knownFixedStringLen_
+    if (node.asType && node.asType->kind == ASTNodeKind::FixedStringTypeRef) {
+        auto& fs = static_cast<FixedStringTypeRef&>(*node.asType);
+        std::string fsLower = node.name;
+        std::transform(fsLower.begin(), fsLower.end(), fsLower.begin(), ::tolower);
+        // 评估长度表达式(必须是编译期常量)
+        emitExpr(*fs.length);
+        knownFixedStringLen_[fsLower] = lastExpr_;
+    }
+
     // 检查是否是Object类型变量 → 注册到 knownObjectVars_ (COM后期绑定)
     if (cType == "void*") {  // Object类型映射为void*
         std::string lower = node.name;
@@ -778,6 +790,7 @@ void CCodeGen::visit(PropertyDecl& node) {
     knownVariantVars_.clear();
     // M22-fix: 只清空UDT变量map(旧条目会冲突), set类型不清空(WithEvents等模块级条目需跨过程保留)
     knownUdtVars_.clear();
+    knownFixedStringLen_.clear();
     // P6.11: 恢复类模块成员变量类型 (clear后从持久化集合恢复)
     knownBstrVars_.insert(classBstrMembers_.begin(), classBstrMembers_.end());
     knownDoubleVars_.insert(classDoubleMembers_.begin(), classDoubleMembers_.end());

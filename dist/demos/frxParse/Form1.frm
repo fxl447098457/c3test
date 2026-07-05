@@ -155,7 +155,7 @@ Private Sub Form_Load()
 '    For Each b In ImageList1.ListImages
 '        dic.Add CStr(b.Index), b.Picture
 '    Next
-'    Me.Caption = "Power by vbman - " & VBMAN.Version()
+    Me.Caption = "Power by vbman - " & VBMAN.Version()
 End Sub
 
 Private Sub Option1_Click(Index As Integer)

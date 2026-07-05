@@ -159,10 +159,18 @@ void CCodeGen::visit(AssignmentStmt& node) {
             // String LSet/RSet
             emitExpr(*node.value);
             std::string valExpr = wrapToBSTR(lastExpr_, *node.value);
-            if (node.isLSet) {
-                c_.emitLine("vb6_BSTR_Assign(&" + tgtC + ", vb6_LSet(" + valExpr + ", SysStringLen(" + tgtC + ")));  /* LSet */");
+            // 定长字符串使用固定长度而非SysStringLen
+            std::string strLen;
+            auto fsIt = knownFixedStringLen_.find(tgtLower);
+            if (fsIt != knownFixedStringLen_.end()) {
+                strLen = fsIt->second;
             } else {
-                c_.emitLine("vb6_BSTR_Assign(&" + tgtC + ", vb6_RSet(" + valExpr + ", SysStringLen(" + tgtC + ")));  /* RSet */");
+                strLen = "SysStringLen(" + tgtC + ")";
+            }
+            if (node.isLSet) {
+                c_.emitLine("vb6_BSTR_Assign(&" + tgtC + ", vb6_LSet(" + valExpr + ", " + strLen + "));  /* LSet */");
+            } else {
+                c_.emitLine("vb6_BSTR_Assign(&" + tgtC + ", vb6_RSet(" + valExpr + ", " + strLen + "));  /* RSet */");
             }
             return;
         }
@@ -2438,7 +2446,15 @@ void CCodeGen::visit(LocalDeclStmt& node) {
                 } else if (isLocalUdtType) {
                     initVal = "{0}";
                 } else if (var.asType && var.asType->kind == ASTNodeKind::FixedStringTypeRef) {
-                    initVal = "NULL";  // Fixed-length string: BSTR initially NULL, LSet/assignment sets it
+                    // String * N: 初始化为N个空格的BSTR, LSet/RSet使用固定长度
+                    auto& fs = static_cast<FixedStringTypeRef&>(*var.asType);
+                    emitExpr(*fs.length);
+                    std::string fsLen = lastExpr_;
+                    initVal = "vb6_BSTR_FixedSTR(" + fsLen + ")";
+                    // 注册定长字符串变量名→长度
+                    std::string fsLower = var.name;
+                    std::transform(fsLower.begin(), fsLower.end(), fsLower.begin(), ::tolower);
+                    knownFixedStringLen_[fsLower] = fsLen;
                 } else {
                     initVal = defaultValue(
                         var.asType && var.asType->kind == ASTNodeKind::SimpleTypeRef

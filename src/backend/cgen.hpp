@@ -286,6 +286,10 @@ private:
     // 用于成员访问时区分"p.X"(结构体字段) vs "Module1.X"(模块变量)
     std::unordered_map<std::string, std::string> knownUdtVars_;
 
+    // 定长字符串变量 (小写var名 → 长度表达式, 如 "a" → "10")
+    // 用于LSet/RSet使用固定长度而非SysStringLen
+    std::unordered_map<std::string, std::string> knownFixedStringLen_;
+
     // M22: Declare A版API函数名集合 (小写) - 需要BSTR->ANSI转换的ByVal String参数
     // 判断: 函数名或Alias以'A'结尾 (如 GetWindowTextA, Alias "WritePrivateProfileStringA")
     std::unordered_set<std::string> knownDeclareAnsi_;

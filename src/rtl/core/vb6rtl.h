@@ -40,6 +40,18 @@ static inline BSTR vb6_BSTR_Empty(void) {
 #endif
 }
 
+// 定长字符串初始化: 返回len个空格的BSTR (VB6 Dim a As String * N)
+static inline BSTR vb6_BSTR_FixedSTR(int32_t len) {
+    if (len <= 0) return vb6_BSTR_Empty();
+#ifdef _WIN32
+    BSTR bstr = SysAllocStringLen(NULL, len);
+    if (bstr) { for (int32_t i = 0; i < len; i++) bstr[i] = L' '; }
+    return bstr;
+#else
+    return NULL;
+#endif
+}
+
 // 从宽字符串创建BSTR
 // Windows: 使用SysAllocString (分配副本, 可安全释放)
 // 非Windows: malloc分配自定义长度前缀
