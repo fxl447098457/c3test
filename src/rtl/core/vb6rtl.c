@@ -4163,6 +4163,105 @@ vb6_VARIANT vb6_VariantFromComResult(void* variant_ptr) {
     free(pv);
     return result;
 }
+// P24-03: 栈上VARIANT→vb6_VARIANT转换 (不释放源VARIANT)
+// 用于For Each等场景, 源VARIANT在栈上而非堆上
+vb6_VARIANT vb6_VariantFromStackVARIANT(VARIANT* pv) {
+    vb6_VARIANT result;
+    memset(&result, 0, sizeof(result));
+    if (!pv) { result.vt = vb6_vtEmpty; return result; }
+    result.vt = (vb6_vartype)pv->vt;
+    switch (pv->vt) {
+        case VT_EMPTY: break;
+        case VT_NULL:  break;
+        case VT_I2:    result.iVal = pv->iVal; break;
+        case VT_I4:    result.lVal = pv->lVal; break;
+        case VT_R4:    result.fltVal = pv->fltVal; break;
+        case VT_R8:    result.dblVal = pv->dblVal; break;
+        case VT_CY:    result.cyVal = *(int64_t*)&pv->cyVal; break;
+        case VT_DATE:  result.dblVal = pv->date; break;
+        case VT_BSTR:
+            result.bstrVal = SysAllocString(pv->bstrVal);  /* copy (不转移所有权) */
+            break;
+        case VT_DISPATCH:
+            result.pdispVal = pv->pdispVal;
+            if (pv->pdispVal) pv->pdispVal->lpVtbl->AddRef(pv->pdispVal);
+            break;
+        case VT_BOOL:   result.boolVal = pv->boolVal; break;
+        case VT_UI1:    result.bVal = pv->bVal; break;
+        case VT_ERROR:  result.lVal = pv->scode; break;
+        case VT_DECIMAL:
+            memcpy(&result.decVal, &pv->decVal, sizeof(result.decVal));
+            break;
+        case VT_ARRAY|VT_BSTR:
+        case VT_ARRAY|VT_VARIANT:
+        case VT_ARRAY|VT_I4:
+        case VT_ARRAY|VT_I2:
+        case VT_ARRAY|VT_R8:
+        case VT_ARRAY|VT_R4: {
+            SAFEARRAY* psa = pv->parray;
+            if (psa && SafeArrayGetDim(psa) == 1) {
+                LONG lBound = 0, uBound = 0;
+                SafeArrayGetLBound(psa, 1, &lBound);
+                SafeArrayGetUBound(psa, 1, &uBound);
+                int32_t count = uBound - lBound + 1;
+                VARTYPE baseVt = pv->vt & VT_TYPEMASK;
+                vb6_safearray_elemtype et;
+                int32_t esz;
+                switch (baseVt) {
+                    case VT_BSTR:    et = vb6_sa_bstr;     esz = sizeof(BSTR); break;
+                    case VT_VARIANT: et = vb6_sa_variant;  esz = sizeof(VARIANT); break;
+                    case VT_I4:      et = vb6_sa_long;     esz = sizeof(int32_t); break;
+                    case VT_I2:      et = vb6_sa_int;      esz = sizeof(int16_t); break;
+                    case VT_R8:      et = vb6_sa_double;   esz = sizeof(double); break;
+                    case VT_R4:      et = vb6_sa_single;   esz = sizeof(float); break;
+                    default:         et = vb6_sa_variant;  esz = sizeof(VARIANT); break;
+                }
+                vb6_SafeArray1D* arr = (vb6_SafeArray1D*)calloc(1, sizeof(vb6_SafeArray1D));
+                arr->elemType = et;
+                arr->elemSize = esz;
+                arr->lBound = lBound;
+                arr->uBound = uBound;
+                arr->count = count;
+                arr->data = calloc(count, esz);
+                arr->isDynamic = 0;
+                char* srcData = (char*)psa->pvData;
+                if (baseVt == VT_BSTR) {
+                    for (int32_t i = 0; i < count; i++) {
+                        ((BSTR*)arr->data)[i] = SysAllocString(((BSTR*)srcData)[i]);
+                    }
+                } else if (baseVt == VT_VARIANT) {
+                    for (int32_t i = 0; i < count; i++) {
+                        VARIANT* srcElem = (VARIANT*)(srcData + i * sizeof(VARIANT));
+                        vb6_VARIANT* dstElem = (vb6_VARIANT*)((char*)arr->data + i * sizeof(vb6_VARIANT));
+                        *dstElem = vb6_VariantFromStackVARIANT(srcElem);  /* recursive */
+                    }
+                } else {
+                    memcpy(arr->data, srcData, (size_t)count * esz);
+                }
+                result.vt = (vb6_vartype)(vb6_vtArray | (baseVt == VT_BSTR ? vb6_vtBSTR : baseVt == VT_VARIANT ? vb6_vtVariant : vb6_vtLong));
+                result.parray = arr;
+            }
+            break;
+        }
+        default:
+            {
+                VARIANT vBSTR;
+                VariantInit(&vBSTR);
+                if (SUCCEEDED(VariantChangeType(&vBSTR, pv, 0, VT_BSTR))) {
+                    result.vt = vb6_vtBSTR;
+                    result.bstrVal = vBSTR.bstrVal;
+                    vBSTR.bstrVal = NULL;
+                } else {
+                    result.vt = vb6_vtEmpty;
+                }
+                VariantClear(&vBSTR);
+            }
+            break;
+    }
+    /* 注意: 不调用 free(pv), 因为源VARIANT在栈上 */
+    return result;
+}
+
 
 /* Variant数组索引: 从持有SafeArray的Variant中取/设元素 */
 vb6_VARIANT vb6_VariantArrayGet(vb6_VARIANT* v, int32_t index) {

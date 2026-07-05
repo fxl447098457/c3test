@@ -805,6 +805,7 @@ double vb6_ComGetDoubleProp(void* disp, const wchar_t* propName);
 void* vb6_ComGetObjectProp(void* disp, const wchar_t* propName);
 // COM调用结果→vb6_VARIANT (后期绑定, 如dic.Item(key))
 vb6_VARIANT vb6_VariantFromComResult(void* variant_ptr);
+vb6_VARIANT vb6_VariantFromStackVARIANT(VARIANT* pv);  /* P24-03: 栈上VARIANT转换(不释放) */
 
 
 // P14.3.5: CallByName - 按名称动态调用方法/属性

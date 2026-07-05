@@ -1217,9 +1217,9 @@ void CCodeGen::visit(ForEachStmt& node) {
         c_.indent();
         c_.emitLine("while (vb6_ForEach_Next(" + enumVar + ", (void*)&" + feVar + ")) {");
         c_.indent();
-        c_.emitLine(var + " = " + feVar + ";  /* For Each: assign from VARIANT */");
+        c_.emitLine(var + " = vb6_VariantFromStackVARIANT(&" + feVar + ");  /* P24-03: For Each: VARIANT→vb6_VARIANT */");
         emitStmtList(node.body);
-        c_.emitLine("vb6_ComVarClear((void*)&" + feVar + ");");
+        c_.emitLine("VariantClear(&" + feVar + ");  /* P24-03: 栈VARIANT只清不清 */");
         c_.dedent();
         c_.emitLine("}");
         c_.emitLine("vb6_ForEach_Release(" + enumVar + ");");
