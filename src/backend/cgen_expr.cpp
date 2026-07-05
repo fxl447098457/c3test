@@ -595,7 +595,19 @@ void CCodeGen::visit(IdentifierExpr& node) {
 
 // M22: 将非BSTR表达式包装为BSTR (用于字符串连接 & 运算符)
 std::string CCodeGen::wrapToBSTR(const std::string& expr, Expr& node) {
-    // 已经是BSTR表达式: vb6_BSTR_xxx, vb6_CStr, L"...", vb6_MsgBox, etc.
+    // P24-01: 后期绑定COM调用返回VARIANT*, 需解包为BSTR(必须在vb6_BSTR检查之前)
+    if (expr.find("vb6_ComCall(") != std::string::npos) {
+        return "vb6_VariantToString(vb6_VariantFromComResult(" + expr + "))";
+    }
+    // P24-01: COM属性返回int/double, 需转BSTR
+    if (expr.find("vb6_ComGetIntProp(") != std::string::npos ||
+        expr.find("vb6_ComVtableGetInt(") != std::string::npos) {
+        return "vb6_CStrLong(" + expr + ")";
+    }
+    if (expr.find("vb6_ComGetDoubleProp(") != std::string::npos ||
+        expr.find("vb6_ComVtableGetDouble(") != std::string::npos) {
+        return "vb6_CStrDbl(" + expr + ")";
+    }
     if (expr.find("vb6_BSTR") != std::string::npos) return expr;
     if (expr.find("vb6_CStr") != std::string::npos) return expr;
     if (expr.find("vb6_GetControlText") != std::string::npos) return expr;
@@ -2489,15 +2501,18 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
     // MsgBox自动BSTR转换: MsgBox期望BSTR, 非BSTR参数需包装
     if (callee == "vb6_MsgBox" || callee == "vb6_MsgBox1") {
         if (!argList.empty()) {
-            if (argList.find("vb6_ComGetIntProp") != std::string::npos ||
-                argList.find("vb6_ComVtableGetInt") != std::string::npos) {
+            if (argList.find("vb6_ComGetIntProp") == 0 ||
+                argList.find("vb6_ComVtableGetInt") == 0) {
                 argList = "vb6_CStrLong(" + argList + ")";
-            } else if (argList.find("vb6_ComGetDoubleProp") != std::string::npos ||
-                       argList.find("vb6_ComVtableGetDouble") != std::string::npos) {
+            } else if (argList.find("vb6_ComGetDoubleProp") == 0 ||
+                       argList.find("vb6_ComVtableGetDouble") == 0) {
                 argList = "vb6_CStrDbl(" + argList + ")";
-            } else if (argList.find("vb6_VariantFromComResult") != std::string::npos) {
+            } else if (argList.find("vb6_VariantFromComResult") == 0) {
                 // COM调用结果(VARIANT*)→vb6_VARIANT, 需转BSTR
                 argList = "vb6_VariantToString(" + argList + ")";
+            } else if (argList.find("vb6_ComCall(") == 0) {
+                // P24-01: 后期绑定COM调用返回VARIANT*, 需解包转BSTR
+                argList = "vb6_VariantToString(vb6_VariantFromComResult(" + argList + "))";
             } else if (!node.positional.empty() && inferExprType(*node.positional[0]) == Vb6Type::Variant) {
                 // Variant类型变量/表达式: MsgBox v → vb6_VariantToString(v)
                 argList = "vb6_VariantToString(" + argList + ")";
