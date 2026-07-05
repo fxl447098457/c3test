@@ -4040,3 +4040,60 @@ void* vb6_LoadPictureEx(BSTR pathname) {
     pPicture->lpVtbl->Release(pPicture);
     return (void*)(intptr_t)hHandle;
 }
+
+// ============================================================
+// COM调用结果→vb6_VARIANT转换
+// 将后期绑定COM调用的VARIANT*结果转为vb6_VARIANT并释放原指针
+// 用于: v = dic.Item("hello") 等场景
+// 此函数消耗VARIANT*所有权, 调用后原指针不可再使用
+// ============================================================
+vb6_VARIANT vb6_VariantFromComResult(void* variant_ptr) {
+    vb6_VARIANT result;
+    memset(&result, 0, sizeof(result));
+    if (!variant_ptr) { result.vt = vb6_vtEmpty; return result; }
+    VARIANT* pv = (VARIANT*)variant_ptr;
+    // Windows VARENUM 与 vb6_vartype 值一致, 可直接赋值
+    result.vt = (vb6_vartype)pv->vt;
+    switch (pv->vt) {
+        case VT_EMPTY: break;
+        case VT_NULL:  break;
+        case VT_I2:    result.iVal = pv->iVal; break;
+        case VT_I4:    result.lVal = pv->lVal; break;
+        case VT_R4:    result.fltVal = pv->fltVal; break;
+        case VT_R8:    result.dblVal = pv->dblVal; break;
+        case VT_CY:    result.cyVal = *(int64_t*)&pv->cyVal; break;
+        case VT_DATE:  result.dblVal = pv->date; break;
+        case VT_BSTR:
+            result.bstrVal = pv->bstrVal;
+            pv->bstrVal = NULL;  // 转移所有权, 防止VariantClear释放
+            break;
+        case VT_DISPATCH:
+            result.pdispVal = pv->pdispVal;
+            pv->pdispVal = NULL;  // 转移所有权
+            break;
+        case VT_BOOL:   result.boolVal = pv->boolVal; break;
+        case VT_UI1:    result.bVal = pv->bVal; break;
+        case VT_ERROR:  result.lVal = pv->scode; break;
+        case VT_DECIMAL:
+            memcpy(&result.decVal, &pv->decVal, sizeof(result.decVal));
+            break;
+        default:
+            // 未知类型: 尝试转换为BSTR
+            {
+                VARIANT vBSTR;
+                VariantInit(&vBSTR);
+                if (SUCCEEDED(VariantChangeType(&vBSTR, pv, 0, VT_BSTR))) {
+                    result.vt = vb6_vtBSTR;
+                    result.bstrVal = vBSTR.bstrVal;
+                    vBSTR.bstrVal = NULL;
+                } else {
+                    result.vt = vb6_vtEmpty;
+                }
+                VariantClear(&vBSTR);
+            }
+            break;
+    }
+    VariantClear(pv);  // 清理原始VARIANT (BSTR/pdispVal已转移)
+    free(pv);
+    return result;
+}

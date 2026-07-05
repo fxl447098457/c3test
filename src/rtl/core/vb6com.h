@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 // vb6com.h - VB6 COM互操作运行时 (P6)
 // 独立于vb6rtl.h, 避免VARIANT定义冲突
 // 此文件使用Windows原生VARIANT/IDispatch等类型
@@ -92,6 +92,21 @@ double vb6_ComGetDoubleProp(void* disp, const wchar_t* propName);
 // COM属性Get→对象 (内部UnpackObject+VarFree)
 void* vb6_ComGetObjectProp(void* disp, const wchar_t* propName);
 
+// 参数化属性Get (带参数, 如Dictionary.Item(key))
+// 内部使用DISPATCH_METHOD|DISPATCH_PROPERTYGET组合标志
+void* vb6_ComGetPropArg(void* disp, const wchar_t* propName,
+                        void* args, int32_t argc);
+wchar_t* vb6_ComGetPropertyString(void* disp, const wchar_t* propName,
+                                   void* args, int32_t argc);
+int32_t vb6_ComGetPropertyInt(void* disp, const wchar_t* propName,
+                               void* args, int32_t argc);
+double vb6_ComGetPropertyDouble(void* disp, const wchar_t* propName,
+                                 void* args, int32_t argc);
+void* vb6_ComGetPropertyObject(void* disp, const wchar_t* propName,
+                                void* args, int32_t argc);
+void* vb6_ComGetPropertyVariant(void* disp, const wchar_t* propName,
+                                 void* args, int32_t argc);
+
 // ============================================================
 // P6.3: COM前期绑定运行时支持 (vtable直接调用)
 // ============================================================
@@ -143,6 +158,7 @@ void* vb6_CreateEventSink(const int* dispids, void** callbacks, int count);
 void vb6_FreeEventSink(void* sink);
 void vb6_ComInit(void);
 void vb6_ComExit(void);
+
 
 // P22-11: For Each COM collection (IEnumVARIANT)
 void* vb6_ForEach_Init(void* disp);       // Call _NewEnum, return IEnumVARIANT*

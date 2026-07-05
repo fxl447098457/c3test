@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 // vb6rtl.h - VB6运行时库最小头文件
 // 为C代码生成器提供VB6基本类型的C定义
 // P3.6 阎段: 最小子集, 仅支撑 hello.bas 等简单程序
@@ -779,6 +779,10 @@ wchar_t* vb6_ComGetStringProp(void* disp, const wchar_t* propName);
 int32_t vb6_ComGetIntProp(void* disp, const wchar_t* propName);
 double vb6_ComGetDoubleProp(void* disp, const wchar_t* propName);
 void* vb6_ComGetObjectProp(void* disp, const wchar_t* propName);
+// COM调用结果→vb6_VARIANT (后期绑定, 如dic.Item(key))
+vb6_VARIANT vb6_VariantFromComResult(void* variant_ptr);
+
+
 // P14.3.5: CallByName - 按名称动态调用方法/属性
 // calltype: 1=VbLet, 2=VbMethod, 3=VbGet
 vb6_VARIANT vb6_CallByName(void* obj, const wchar_t* procName, int32_t callType,

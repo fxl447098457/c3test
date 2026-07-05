@@ -1,4 +1,4 @@
-﻿#include "backend/cgen.hpp"
+#include "backend/cgen.hpp"
 #include <algorithm>
 #include <cctype>
 #include <iostream>
@@ -2481,6 +2481,12 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
             } else if (argList.find("vb6_ComGetDoubleProp") != std::string::npos ||
                        argList.find("vb6_ComVtableGetDouble") != std::string::npos) {
                 argList = "vb6_CStrDbl(" + argList + ")";
+            } else if (argList.find("vb6_VariantFromComResult") != std::string::npos) {
+                // COM调用结果(VARIANT*)→vb6_VARIANT, 需转BSTR
+                argList = "vb6_VariantToString(" + argList + ")";
+            } else if (!node.positional.empty() && inferExprType(*node.positional[0]) == Vb6Type::Variant) {
+                // Variant类型变量/表达式: MsgBox v → vb6_VariantToString(v)
+                argList = "vb6_VariantToString(" + argList + ")";
             }
         }
     }    // MsgBox(prompt) -> vb6_MsgBox1(prompt)

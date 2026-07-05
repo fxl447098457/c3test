@@ -206,7 +206,7 @@ void* vb6_ComCall(void* disp, const wchar_t* methodName,
     UINT argErr = 0;
 
     HRESULT hr = pDisp->lpVtbl->Invoke(pDisp, dispid, &IID_NULL,
-        LOCALE_USER_DEFAULT, DISPATCH_METHOD, &dp, result, &excep, &argErr);
+        LOCALE_USER_DEFAULT, DISPATCH_METHOD | DISPATCH_PROPERTYGET, &dp, result, &excep, &argErr);
 
     if (FAILED(hr)) {
         fwprintf(stderr, L"vb6_ComCall: Invoke(\"%ls\") failed: 0x%08lX\n",
@@ -269,6 +269,64 @@ void* vb6_ComGetProp(void* disp, const wchar_t* propName) {
     return (void*)result;
 }
 
+
+// COM属性Get带参数 (参数化属性读取, 如Dictionary.Item(key))
+// 使用DISPATCH_METHOD|DISPATCH_PROPERTYGET组合标志
+// 返回VARIANT* (调用方需vb6_ComVarClear释放)
+void* vb6_ComGetPropArg(void* disp, const wchar_t* propName,
+                        void* args_void, int32_t argc) {
+    VARIANT** args = (VARIANT**)args_void;
+    if (!disp) return NULL;
+    IDispatch* pDisp = (IDispatch*)disp;
+
+    DISPID dispid = vb6_getDispid(pDisp, propName);
+    if (dispid == DISPID_UNKNOWN) {
+        fwprintf(stderr, L"vb6_ComGetPropArg: property \"%ls\" not found\n", propName);
+        return NULL;
+    }
+
+    DISPPARAMS dp;
+    memset(&dp, 0, sizeof(dp));
+    dp.cArgs = (UINT)argc;
+
+    VARIANT* result = (VARIANT*)calloc(1, sizeof(VARIANT));
+    VariantInit(result);
+
+    if (argc > 0) {
+        dp.rgvarg = (VARIANTARG*)malloc((size_t)argc * sizeof(VARIANTARG));
+        for (int32_t i = 0; i < argc; i++) {
+            VariantInit(&dp.rgvarg[argc - 1 - i]);
+            if (args[i]) {
+                dp.rgvarg[argc - 1 - i] = *args[i];
+            }
+        }
+    }
+
+    EXCEPINFO excep;
+    memset(&excep, 0, sizeof(excep));
+    UINT argErr = 0;
+
+    HRESULT hr = pDisp->lpVtbl->Invoke(pDisp, dispid, &IID_NULL,
+        LOCALE_USER_DEFAULT, DISPATCH_METHOD | DISPATCH_PROPERTYGET,
+        &dp, result, &excep, &argErr);
+
+    if (FAILED(hr)) {
+        fwprintf(stderr, L"vb6_ComGetPropArg: Invoke(\"%ls\") failed: 0x%08lX\n",
+                 propName, (unsigned long)hr);
+        if (result) { VariantClear(result); free(result); result = NULL; }
+    }
+
+    if (dp.rgvarg) {
+        for (UINT i = 0; i < dp.cArgs; i++) {
+            VariantClear(&dp.rgvarg[i]);
+        }
+        free(dp.rgvarg);
+    }
+
+    return (void*)result;
+}
+
+// COM属性Set (值类型)
 // COM属性Set (值类型)
 void vb6_ComSetProp(void* disp, const wchar_t* propName, void* value_void) {
     VARIANT value;
@@ -596,6 +654,72 @@ void* vb6_ComGetObjectProp(void* disp, const wchar_t* propName) {
     vb6_ComVarFree(pv);  // 仅释放结构体, 不Release pdispVal
     return obj;
 }
+
+// ============================================================
+// 参数化属性Get (带参数, 如Dictionary.Item(key))
+// ============================================================
+
+// 参数化属性Get→BSTR
+wchar_t* vb6_ComGetPropertyString(void* disp, const wchar_t* propName,
+                                   void* args, int32_t argc) {
+    VARIANT* pv = (VARIANT*)vb6_ComGetPropArg(disp, propName, args, argc);
+    if (!pv) return NULL;
+    BSTR result = vb6_ComUnpackBSTR(pv);
+    vb6_ComVarClear(pv);
+    return result;
+}
+
+// 参数化属性Get→int32_t
+int32_t vb6_ComGetPropertyInt(void* disp, const wchar_t* propName,
+                               void* args, int32_t argc) {
+    VARIANT* pv = (VARIANT*)vb6_ComGetPropArg(disp, propName, args, argc);
+    if (!pv) return 0;
+    int32_t result = vb6_ComUnpackInt(pv);
+    vb6_ComVarClear(pv);
+    return result;
+}
+
+// 参数化属性Get→double
+double vb6_ComGetPropertyDouble(void* disp, const wchar_t* propName,
+                                 void* args, int32_t argc) {
+    VARIANT* pv = (VARIANT*)vb6_ComGetPropArg(disp, propName, args, argc);
+    if (!pv) return 0.0;
+    double result = vb6_ComUnpackDouble(pv);
+    vb6_ComVarClear(pv);
+    return result;
+}
+
+// 参数化属性Get→对象
+void* vb6_ComGetPropertyObject(void* disp, const wchar_t* propName,
+                                void* args, int32_t argc) {
+    VARIANT* pv = (VARIANT*)vb6_ComGetPropArg(disp, propName, args, argc);
+    if (!pv) return NULL;
+    void* obj = NULL;
+    if (pv->vt == VT_DISPATCH) {
+        obj = (void*)pv->pdispVal;
+    } else if (pv->vt == VT_UNKNOWN) {
+        pv->punkVal->lpVtbl->QueryInterface(pv->punkVal, &IID_IDispatch, &obj);
+    } else if (pv->vt != VT_EMPTY && pv->vt != VT_NULL) {
+        VARIANT vObj;
+        VariantInit(&vObj);
+        if (SUCCEEDED(VariantChangeType(&vObj, pv, 0, VT_DISPATCH))) {
+            obj = (void*)vObj.pdispVal;
+        }
+        VariantClear(&vObj);
+    }
+    vb6_ComVarFree(pv);
+    return obj;
+}
+
+// 参数化属性Get→VARIANT (保留原样, 用于Variant变量赋值)
+// 注意: 返回的VARIANT*需要调用方用vb6_ComVarClear释放
+void* vb6_ComGetPropertyVariant(void* disp, const wchar_t* propName,
+                                 void* args, int32_t argc) {
+    return vb6_ComGetPropArg(disp, propName, args, argc);
+}
+
+// ============================================================
+// P6.3: COM前期绑定运行时 (vtable直接调用)
 
 // ============================================================
 // P6.3: COM前期绑定运行时 (vtable直接调用)

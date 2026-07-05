@@ -1,5 +1,4 @@
 VERSION 5.00
-Object = "{831FDD16-0C5C-11D2-A9FC-0000F8754DA1}#2.0#0"; "MSCOMCTL.OCX"
 Begin VB.Form Form1 
    Caption         =   "Form1"
    ClientHeight    =   6945
@@ -11,7 +10,7 @@ Begin VB.Form Form1
    Picture         =   "Form1.frx":10CA
    ScaleHeight     =   6945
    ScaleWidth      =   11055
-   StartUpPosition =   1  '所有者中心
+   StartUpPosition =   2  '屏幕中心
    Begin VB.Timer Timer1 
       Interval        =   1000
       Left            =   6360
@@ -26,57 +25,21 @@ Begin VB.Form Form1
       Top             =   4200
       Width           =   975
    End
-   Begin MSComctlLib.ImageList ImageList1 
-      Left            =   6120
-      Top             =   4560
-      _ExtentX        =   1005
-      _ExtentY        =   1005
-      BackColor       =   -2147483643
-      ImageWidth      =   19
-      ImageHeight     =   19
-      MaskColor       =   12632256
-      _Version        =   393216
-      BeginProperty Images {2C247F25-8591-11D1-B16A-00C0F0283628} 
-         NumListImages   =   5
-         BeginProperty ListImage1 {2C247F27-8591-11D1-B16A-00C0F0283628} 
-            Picture         =   "Form1.frx":1A89
-            Key             =   ""
-         EndProperty
-         BeginProperty ListImage2 {2C247F27-8591-11D1-B16A-00C0F0283628} 
-            Picture         =   "Form1.frx":1D9E
-            Key             =   "nuqi"
-         EndProperty
-         BeginProperty ListImage3 {2C247F27-8591-11D1-B16A-00C0F0283628} 
-            Picture         =   "Form1.frx":20DB
-            Key             =   ""
-         EndProperty
-         BeginProperty ListImage4 {2C247F27-8591-11D1-B16A-00C0F0283628} 
-            Picture         =   "Form1.frx":232C
-            Key             =   "haha"
-            Object.Tag             =   "哈哈咖啡"
-         EndProperty
-         BeginProperty ListImage5 {2C247F27-8591-11D1-B16A-00C0F0283628} 
-            Picture         =   "Form1.frx":2572
-            Key             =   ""
-            Object.Tag             =   "小狗"
-         EndProperty
-      EndProperty
-   End
    Begin VB.TextBox Text1 
       Height          =   975
       Left            =   6000
       MultiLine       =   -1  'True
       ScrollBars      =   3  'Both
       TabIndex        =   8
-      Text            =   "Form1.frx":27C4
+      Text            =   "Form1.frx":1A89
       Top             =   3000
       Width           =   1575
    End
    Begin VB.ListBox List1 
       Height          =   2400
-      ItemData        =   "Form1.frx":27DE
+      ItemData        =   "Form1.frx":1AA3
       Left            =   6480
-      List            =   "Form1.frx":27EB
+      List            =   "Form1.frx":1AB0
       TabIndex        =   7
       Top             =   120
       Width           =   4455
@@ -86,7 +49,7 @@ Begin VB.Form Form1
       Height          =   735
       Index           =   2
       Left            =   2280
-      Picture         =   "Form1.frx":2801
+      Picture         =   "Form1.frx":1AC6
       Style           =   1  'Graphical
       TabIndex        =   6
       Top             =   5760
@@ -97,7 +60,7 @@ Begin VB.Form Form1
       Height          =   735
       Index           =   1
       Left            =   1320
-      Picture         =   "Form1.frx":2AE4
+      Picture         =   "Form1.frx":1DA9
       Style           =   1  'Graphical
       TabIndex        =   5
       Top             =   5760
@@ -108,7 +71,7 @@ Begin VB.Form Form1
       Height          =   975
       Index           =   1
       Left            =   4080
-      Picture         =   "Form1.frx":2DCD
+      Picture         =   "Form1.frx":2092
       Style           =   1  'Graphical
       TabIndex        =   4
       Top             =   5520
@@ -119,7 +82,7 @@ Begin VB.Form Form1
       Height          =   735
       Index           =   0
       Left            =   360
-      Picture         =   "Form1.frx":30A6
+      Picture         =   "Form1.frx":236B
       Style           =   1  'Graphical
       TabIndex        =   3
       Top             =   5760
@@ -130,7 +93,7 @@ Begin VB.Form Form1
       Height          =   1095
       Index           =   0
       Left            =   4080
-      Picture         =   "Form1.frx":334C
+      Picture         =   "Form1.frx":2611
       Style           =   1  'Graphical
       TabIndex        =   2
       Top             =   4440
@@ -141,7 +104,7 @@ Begin VB.Form Form1
       Caption         =   "Command1"
       Height          =   1335
       Left            =   240
-      Picture         =   "Form1.frx":3620
+      Picture         =   "Form1.frx":28E5
       Style           =   1  'Graphical
       TabIndex        =   1
       Top             =   4200
@@ -150,7 +113,7 @@ Begin VB.Form Form1
    Begin VB.PictureBox Picture1 
       Height          =   615
       Left            =   5760
-      Picture         =   "Form1.frx":38E5
+      Picture         =   "Form1.frx":2BAA
       ScaleHeight     =   555
       ScaleWidth      =   555
       TabIndex        =   0
@@ -160,7 +123,7 @@ Begin VB.Form Form1
    Begin VB.Image Image1 
       Height          =   600
       Left            =   5760
-      Picture         =   "Form1.frx":3B00
+      Picture         =   "Form1.frx":2DC5
       Top             =   840
       Width           =   600
    End
@@ -175,19 +138,23 @@ Option Explicit
 Dim dic As New Scripting.Dictionary
 
 Private Sub Command1_Click()
-    MsgBox dic.Count
+    Dim v As Variant
+    dic.Add "hello", "world"
+    v = dic.Item("hello")
+    MsgBox v
 End Sub
 
 Private Sub Form_Load()
     Dim a As String * 10, i As Long, b
-    List1.AddItem "图片：" & ImageList1.ListImages.Count
+'    List1.AddItem "图片：" & ImageList1.ListImages.Count
     For i = 0 To 10
         LSet a = "等等"
         List1.AddItem a & Now
+        ' dic.Add removed for testing
     Next
-    For Each b In ImageList1.ListImages
-        dic.Add CStr(b.Index), b.Picture
-    Next
+'    For Each b In ImageList1.ListImages
+'        dic.Add CStr(b.Index), b.Picture
+'    Next
 '    Me.Caption = "Power by vbman - " & VBMAN.Version()
 End Sub
 
@@ -198,6 +165,6 @@ End Sub
 Private Sub Timer1_Timer()
     Static i As Long
     If i = 0 Or i = 6 Then i = 1
-    Picture2.Picture = ImageList1.ListImages(i).Picture
+'    Picture2.Picture = ImageList1.ListImages(i).Picture
     i = i + 1
 End Sub
