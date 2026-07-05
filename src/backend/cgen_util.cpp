@@ -818,11 +818,15 @@ std::string CCodeGen::resolveComValue(const std::string& unpackType) {
         lastExpr_ = "vb6_ComGetDoubleProp(" + getPropArgs + ")";
     } else if (unpackType == "Object") {
         lastExpr_ = "vb6_ComGetObjectProp(" + getPropArgs + ")";
+    } else if (unpackType == "Variant") {
+        // P24-02: COM属性返回原生VARIANT(如dic.Keys/dic.Items返回SAFEARRAY)
+        lastExpr_ = "vb6_VariantFromComResult(vb6_ComCall(" + objExpr + ", L\"" + memberName + "\", NULL, 0))";
     } else {
         // 默认: BSTR解封 (最通用, COM VARIANT → BSTR自动转换)
         lastExpr_ = "vb6_ComGetStringProp(" + getPropArgs + ")";
     }
     return lastExpr_;
+
 }
 
 std::string CCodeGen::comPackExpr(Expr& expr) {

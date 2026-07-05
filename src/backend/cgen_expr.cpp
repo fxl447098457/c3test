@@ -596,6 +596,10 @@ void CCodeGen::visit(IdentifierExpr& node) {
 // M22: 将非BSTR表达式包装为BSTR (用于字符串连接 & 运算符)
 std::string CCodeGen::wrapToBSTR(const std::string& expr, Expr& node) {
     // P24-01: 后期绑定COM调用返回VARIANT*, 需解包为BSTR(必须在vb6_BSTR检查之前)
+    // P24-02: Variant数组索引返回vb6_VARIANT, 需转BSTR
+    if (expr.find("vb6_VariantArrayGet") != std::string::npos) {
+        return "vb6_VariantToString(" + expr + ")";
+    }
     if (expr.find("vb6_ComCall(") != std::string::npos) {
         return "vb6_VariantToString(vb6_VariantFromComResult(" + expr + "))";
     }
@@ -657,7 +661,8 @@ std::string CCodeGen::wrapToBSTR(const std::string& expr, Expr& node) {
             expr.find("vb6_Sgn") != std::string::npos ||
             expr.find("vb6_Fix") != std::string::npos ||
             expr.find("vb6_Int") != std::string::npos ||
-            expr.find("vb6_Val") != std::string::npos) {
+            expr.find("vb6_Val") != std::string::npos ||
+            expr.find("vb6_VarType") != std::string::npos) {
             return "vb6_CStrLong(" + expr + ")";
         }
         return expr;  // 其他vb6_函数假定为BSTR
@@ -683,11 +688,18 @@ std::string CCodeGen::wrapToBSTR(const std::string& expr, Expr& node) {
 void CCodeGen::visit(BinaryExpr& node) {
     emitExpr(*node.left);
     // COM标记解析: 如果左操作数是COM属性, 解析为值
-    if (isComMarker_) resolveComValue();
+    // P24-02: 算术运算默认Long解包
+    if (isComMarker_) {
+        if (node.op == BinaryOp::Concat) resolveComValue();
+        else resolveComValue("Long");
+    }
     std::string left = std::move(lastExpr_);
     emitExpr(*node.right);
     // COM标记解析: 如果右操作数是COM属性, 解析为值
-    if (isComMarker_) resolveComValue();
+    if (isComMarker_) {
+        if (node.op == BinaryOp::Concat) resolveComValue();
+        else resolveComValue("Long");
+    }
     std::string right = std::move(lastExpr_);
 
     // 字符串连接运算: VB6 & → vb6_BSTR_Concat / vb6_BSTR_ConcatFree

@@ -535,6 +535,7 @@ void CCodeGen::visit(AssignmentStmt& node) {
             else if (knownDoubleVars_.count(lower)) unpackHint = "Double";
             else if (knownObjectVars_.count(lower)) unpackHint = "Object";
             else if (knownBstrVars_.count(lower)) unpackHint = "BSTR";
+            else if (knownVariantVars_.count(lower)) unpackHint = "Variant";
         }
         resolveComValue(unpackHint);
     }
@@ -1035,6 +1036,7 @@ void CCodeGen::visit(LetStmt& node) {
             else if (knownDoubleVars_.count(lower)) unpackHint = "Double";
             else if (knownObjectVars_.count(lower)) unpackHint = "Object";
             else if (knownBstrVars_.count(lower)) unpackHint = "BSTR";
+            else if (knownVariantVars_.count(lower)) unpackHint = "Variant";
         }
         resolveComValue(unpackHint);
     }

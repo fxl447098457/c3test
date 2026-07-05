@@ -4078,7 +4078,73 @@ vb6_VARIANT vb6_VariantFromComResult(void* variant_ptr) {
             memcpy(&result.decVal, &pv->decVal, sizeof(result.decVal));
             break;
         default:
-            // 未知类型: 尝试转换为BSTR
+            // P24-02: VT_ARRAY - 将Windows SAFEARRAY转换为vb6_SafeArray1D
+        case VT_ARRAY|VT_BSTR:
+        case VT_ARRAY|VT_VARIANT:
+        case VT_ARRAY|VT_I4:
+        case VT_ARRAY|VT_I2:
+        case VT_ARRAY|VT_R8:
+        case VT_ARRAY|VT_R4: {
+            SAFEARRAY* psa = pv->parray;
+            if (psa && SafeArrayGetDim(psa) == 1) {
+                LONG lBound = 0, uBound = 0;
+                SafeArrayGetLBound(psa, 1, &lBound);
+                SafeArrayGetUBound(psa, 1, &uBound);
+                int32_t count = uBound - lBound + 1;
+                VARTYPE baseVt = pv->vt & VT_TYPEMASK;
+                vb6_safearray_elemtype et;
+                int32_t esz;
+                switch (baseVt) {
+                    case VT_BSTR:    et = vb6_sa_bstr;     esz = sizeof(BSTR); break;
+                    case VT_VARIANT: et = vb6_sa_variant;  esz = sizeof(VARIANT); break;
+                    case VT_I4:      et = vb6_sa_long;     esz = sizeof(int32_t); break;
+                    case VT_I2:      et = vb6_sa_int;      esz = sizeof(int16_t); break;
+                    case VT_R8:      et = vb6_sa_double;   esz = sizeof(double); break;
+                    case VT_R4:      et = vb6_sa_single;   esz = sizeof(float); break;
+                    default:         et = vb6_sa_variant;  esz = sizeof(VARIANT); break;
+                }
+                vb6_SafeArray1D* arr = (vb6_SafeArray1D*)calloc(1, sizeof(vb6_SafeArray1D));
+                arr->elemType = et;
+                arr->elemSize = esz;
+                arr->lBound = lBound;
+                arr->uBound = uBound;
+                arr->count = count;
+                arr->data = calloc(count, esz);
+                arr->isDynamic = 0;
+                // Copy elements from Windows SAFEARRAY
+                char* srcData = (char*)psa->pvData;
+                if (baseVt == VT_VARIANT) {
+                    // VARIANT elements: convert each to vb6_VARIANT
+                    for (int32_t i = 0; i < count; i++) {
+                        VARIANT* srcElem = (VARIANT*)(srcData + i * sizeof(VARIANT));
+                        vb6_VARIANT* dstElem = (vb6_VARIANT*)((char*)arr->data + i * sizeof(vb6_VARIANT));
+                        // Use recursive call for each element
+                        VARIANT* copy = (VARIANT*)malloc(sizeof(VARIANT));
+                        VariantInit(copy);
+                        VariantCopy(copy, srcElem);
+                        *dstElem = vb6_VariantFromComResult(copy);
+                    }
+                } else if (baseVt == VT_BSTR) {
+                    // BSTR elements: copy pointer (transfer ownership)
+                    for (int32_t i = 0; i < count; i++) {
+                        BSTR srcBstr = ((BSTR*)srcData)[i];
+                        BSTR* dstBstr = &((BSTR*)arr->data)[i];
+                        *dstBstr = srcBstr;
+                        // Clear source so VariantClear doesn't free it
+                        ((BSTR*)srcData)[i] = NULL;
+                    }
+                } else {
+                    // Numeric types: direct memcpy
+                    memcpy(arr->data, srcData, (size_t)count * esz);
+                }
+                result.vt = (vb6_vartype)(vb6_vtArray | (baseVt == VT_BSTR ? vb6_vtBSTR : baseVt == VT_VARIANT ? vb6_vtVariant : vb6_vtLong));
+                result.parray = arr;
+            }
+            // Null out the SAFEARRAY pointer before VariantClear
+            pv->parray = NULL;
+            break;
+        }
+// 未知类型: 尝试转换为BSTR
             {
                 VARIANT vBSTR;
                 VariantInit(&vBSTR);
