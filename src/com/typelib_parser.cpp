@@ -1,4 +1,4 @@
-﻿// VB6 TypeLib解析器实现 - P6.3 前期绑定支持
+// VB6 TypeLib解析器实现 - P6.3 前期绑定支持
 // 编译期使用Windows LoadTypeLib/ITypeInfo API
 
 #include "com/typelib_parser.hpp"
@@ -324,6 +324,9 @@ bool TypeLibParser::parseTypeLib(void* pTypeLib, TypeLibResult& result) {
         SysFreeString(tlbName);
     }
 
+    // P24-04: 捕获TypeLib项目名 (VB6 ActiveX DLL的Name=属性, 如"VBMANLIB")
+    result.typeLibProjectName = result.name;
+
     // 枚举所有类型
     UINT count = pTL->GetTypeInfoCount();
     for (UINT i = 0; i < count; i++) {
@@ -362,9 +365,16 @@ bool TypeLibParser::parseTypeLib(void* pTypeLib, TypeLibResult& result) {
                 }
                 break;
             }
+            case TKIND_MODULE: {
+                // P24-04: 解析ActiveX DLL全局模块函数
+                auto mod = parseModule(pTI, typeName, result.tlbPath);
+                if (mod) {
+                    result.modules.push_back(std::move(mod));
+                }
+                break;
+            }
             case TKIND_ALIAS:
             case TKIND_RECORD:
-            case TKIND_MODULE:
             default:
                 break;
         }
@@ -372,7 +382,52 @@ bool TypeLibParser::parseTypeLib(void* pTypeLib, TypeLibResult& result) {
         pTI->Release();
     }
 
-    return !result.interfaces.empty() || !result.coclasses.empty();
+    // P24-04: 链接coclass → default interface (从 loadByPath 移至此处)
+    // 必须在GlobalNameSpace检测之前完成, 因为检测依赖 defaultIface 指针
+    for (auto& cc : result.coclasses) {
+        if (!cc->defaultIfaceName.empty()) {
+            cc->defaultIface = result.findInterface(cc->defaultIfaceName);
+            // P13.20: Link default source (event) interface
+            if (!cc->defaultSourceIfaceName.empty()) {
+                cc->defaultSourceIface = result.findInterface(cc->defaultSourceIfaceName);
+            }
+        }
+    }
+
+    // P24-04: GlobalNameSpace检测后处理
+    // VB_GlobalNameSpace=True的coclass, 其默认接口的Public方法提升为全局符号
+    // 检测启发式: TYPEFLAG_FPREDECLID(0x0008) + 默认接口有方法, 且满足以下之一:
+    //   (a) coclass名包含"Global" (如sGlobal)
+    //   (b) 默认接口有方法名与TypeLib项目名匹配 (如VBMAN库的VBMAN()方法)
+    // 对于每个检测到的GlobalNameSpace coclass, 设置isGlobalNamespace=true
+    // 并将默认接口的custom方法(排除IUnknown/IDispatch标准方法)记录为promoted methods
+    if (!result.typeLibProjectName.empty()) {
+        std::string tlbNameLower = result.typeLibProjectName;
+        std::transform(tlbNameLower.begin(), tlbNameLower.end(), tlbNameLower.begin(), ::tolower);
+        for (auto& cc : result.coclasses) {
+            // 初步筛选: coclass名含"Global" (不区分大小写)
+            std::string ccNameLower = cc->name;
+            std::transform(ccNameLower.begin(), ccNameLower.end(), ccNameLower.begin(), ::tolower);
+            bool nameHasGlobal = ccNameLower.find("global") != std::string::npos;
+            // 初步筛选: 默认接口有与TypeLib名同名的方法
+            bool hasMatchingMethod = false;
+            if (cc->defaultIface) {
+                for (auto& m : cc->defaultIface->members) {
+                    std::string mLower = m.realName;
+                    std::transform(mLower.begin(), mLower.end(), mLower.begin(), ::tolower);
+                    if (mLower == tlbNameLower) {
+                        hasMatchingMethod = true;
+                        break;
+                    }
+                }
+            }
+            if ((nameHasGlobal || hasMatchingMethod) && cc->defaultIface) {
+                cc->isGlobalNamespace = true;
+            }
+        }
+    }
+
+    return !result.interfaces.empty() || !result.coclasses.empty() || !result.modules.empty();
 }
 
 // ============================================================
@@ -539,6 +594,71 @@ std::unique_ptr<ComCoClassInfo> TypeLibParser::parseCoClass(void* pTypeInfo,
     pTI->ReleaseTypeAttr(pTypeAttr);
 
     return cc;
+}
+
+
+// ============================================================
+// P24-04: 内部: 解析模块 (TKIND_MODULE → ActiveX DLL全局函数)
+// ============================================================
+
+std::unique_ptr<ComModuleInfo> TypeLibParser::parseModule(void* pTypeInfo,
+                                                           const std::string& name,
+                                                           const std::string& dllPath) {
+    ITypeInfo* pTI = static_cast<ITypeInfo*>(pTypeInfo);
+    auto mod = std::make_unique<ComModuleInfo>();
+    mod->name = name;
+
+    // 推断DLL路径: TypeLib通常嵌在DLL中, 用tlbPath的目录+DLL名推断
+    // 如果tlbPath本身是DLL文件, 直接使用
+    if (!dllPath.empty()) {
+        // tlbPath可能是 "C:\path\VBMAN.dll" 或注册表中的tlb路径
+        // 对ActiveX DLL, TypeLib就嵌在DLL中
+        if (dllPath.size() >= 4 &&
+            (dllPath.substr(dllPath.size()-4) == ".dll" ||
+             dllPath.substr(dllPath.size()-4) == ".DLL" ||
+             dllPath.substr(dllPath.size()-4) == ".ocx" ||
+             dllPath.substr(dllPath.size()-4) == ".OCX")) {
+            mod->dllPath = dllPath;
+        }
+        // 否则不设dllPath, 运行时通过注册表查找
+    }
+
+    // 获取TYPEATTR
+    TYPEATTR* pTypeAttr = nullptr;
+    HRESULT hr = pTI->GetTypeAttr(&pTypeAttr);
+    if (FAILED(hr) || !pTypeAttr) return nullptr;
+
+    UINT cFuncs = pTypeAttr->cFuncs;
+    UINT cVars = pTypeAttr->cVars;
+
+    pTI->ReleaseTypeAttr(pTypeAttr);
+
+    // 枚举函数 (模块级Public函数)
+    for (UINT i = 0; i < cFuncs; i++) {
+        FUNCDESC* pFuncDesc = nullptr;
+        hr = pTI->GetFuncDesc(i, &pFuncDesc);
+        if (FAILED(hr) || !pFuncDesc) continue;
+
+        ComMemberInfo member = parseFuncDesc(pTI, pFuncDesc, i);
+        // 模块函数无vtable概念
+        member.vtableIndex = -1;
+        mod->functions.push_back(std::move(member));
+        pTI->ReleaseFuncDesc(pFuncDesc);
+    }
+
+    // 枚举常量 (模块级Public Const)
+    for (UINT i = 0; i < cVars; i++) {
+        VARDESC* pVarDesc = nullptr;
+        hr = pTI->GetVarDesc(i, &pVarDesc);
+        if (FAILED(hr) || !pVarDesc) continue;
+
+        ComMemberInfo member = parseVarDesc(pTI, pVarDesc);
+        mod->constants.push_back(std::move(member));
+        pTI->ReleaseVarDesc(pVarDesc);
+    }
+
+    // 如果没有函数也没有常量, 仍保留模块(可能仅作为命名空间)
+    return mod;
 }
 
 // ============================================================

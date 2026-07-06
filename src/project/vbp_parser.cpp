@@ -154,7 +154,12 @@ VbpProject VbpParser::parseString(const std::string& content, const std::string&
                 try { ref.major = std::stoi(parts[1]); } catch (...) {}
                 try { ref.minor = std::stoi(parts[2]); } catch (...) {}
             }
-            if (parts.size() >= 6) {
+            // VBP Reference: GUID#version#lcid#path#desc (5 fields standard)
+            // Also: GUID#major#minor#lcid#path#desc (6 fields)
+            if (parts.size() == 5) {
+                ref.path = parts[3];
+                ref.description = parts[4];
+            } else if (parts.size() >= 6) {
                 ref.path = parts[4];
                 ref.description = parts[5];
             }

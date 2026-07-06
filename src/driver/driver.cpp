@@ -1,4 +1,4 @@
-﻿#include "driver/driver.hpp"
+#include "driver/driver.hpp"
 #include "common/diagnostics.hpp"
 #include "common/encoding.hpp"
 #include "common/source_manager.hpp"
@@ -227,14 +227,19 @@ CompileResult Driver::compile(const CompileOptions& options) {
             if (effectiveOpts.isDll && effectiveOpts.dllProgId.empty()) {
                 effectiveOpts.dllProgId = project.projectName.empty() ? "VB6DLL" : project.projectName;
             }
-
             // P23-01: Feed VBP Reference= and Object= entries into TypeLib import pipeline
-            // Reference= GUID -> loadByClsid, path -> loadByPath
+            // Reference= GUID -> loadByClsid, path -> loadByPath (fallback when GUID not in registry)
             for (const auto& ref : project.references) {
                 if (!ref.guid.empty()) {
                     effectiveOpts.typelibRefs.push_back(ref.guid);
-                } else if (!ref.path.empty()) {
-                    effectiveOpts.typelibRefs.push_back(ref.path);
+                }
+                // P24-04: 同时推送resolved path作为fallback
+                // 当GUID未注册(regsvr32未运行)时, loadByClsid会失败, 此时可loadByPath
+                if (!ref.path.empty()) {
+                    auto resolvedPath = project.resolvePath(ref.path);
+                    if (std::filesystem::exists(resolvedPath)) {
+                        effectiveOpts.typelibRefs.push_back(resolvedPath.u8string());
+                    }
                 }
             }
             // Object= GUID (ActiveX controls) -> loadByClsid
@@ -723,6 +728,7 @@ bool Driver::runTypeLibImport(const CompileOptions& options) {
     // 1. 加载显式引用的TypeLib
     for (const auto& ref : options.typelibRefs) {
         // 判断是文件路径还是ProgID
+        if (options.verbose) std::cerr << "C3: Loading TypeLib ref: " << ref << std::endl;
         if (ref.find('.') != std::string::npos && ref.find('\\') == std::string::npos && ref.find('/') == std::string::npos) {
             // 含点但不含路径分隔符 → ProgID
             typelibParser_->loadByProgId(ref);
@@ -760,16 +766,34 @@ bool Driver::runTypeLibImport(const CompileOptions& options) {
     // 3. 输出加载结果 (verbose模式)
     if (options.verbose) {
         std::cerr << "C3: TypeLib import: ";
-        int totalCoClasses = 0, totalIfaces = 0;
+        int totalCoClasses = 0, totalIfaces = 0, totalModules = 0;
         for (auto& tl : typelibParser_->cachedResults()) {
             totalCoClasses += (int)tl->coclasses.size();
             totalIfaces += (int)tl->interfaces.size();
+            totalModules += (int)tl->modules.size();
+            // P24-04: verbose module details
+            if (!tl->modules.empty()) {
+                for (auto& m : tl->modules) {
+                    std::cerr << "\n  MODULE: " << m->name << " dllPath=" << m->dllPath
+                              << " funcs=" << m->functions.size() << " consts=" << m->constants.size();
+                    for (auto& f : m->functions) {
+                        std::cerr << "\n    func: " << f.realName << " memid=" << f.memid;
+                    }
+                }
+            }
         }
         std::cerr << totalCoClasses << " coclasses, " << totalIfaces
-                  << " interfaces from " << typelibParser_->cachedResults().size()
+                  << " interfaces, " << totalModules << " modules from "
+                  << typelibParser_->cachedResults().size()
                   << " type libraries" << std::endl;
     }
 
+    // P24-04: verbose - show each cached TypeLib info
+    if (options.verbose) {
+        for (auto& tl : typelibParser_->cachedResults()) {
+            std::cerr << "  TL: " << tl->tlbPath << " cclasses=" << tl->coclasses.size() << " ifaces=" << tl->interfaces.size() << " mods=" << tl->modules.size() << std::endl;
+        }
+    }
     return true;  // TypeLib加载失败不阻断编译
 }
 
@@ -872,8 +896,82 @@ bool Driver::runSemanticAnalysis(const CompileOptions& options) {
                 }
             }
         }
+            // P24-04: 注册ComModule符号 (TKIND_MODULE → ActiveX DLL全局函数命名空间)
+            // VBMAN.Version() 这种调用: VBMAN是工程名/模块名, Version是全局函数
+            for (auto& tl : typelibParser_->cachedResults()) {
+                for (auto& mod : tl->modules) {
+                    auto sym = std::make_unique<Symbol>(
+                        SymbolKind::ComModule, mod->name, Vb6Type::Object,
+                        SourceLocation{}, AccessLevel::Public);
+                    sym->isBuiltin = true;
+                    sym->comModuleDllPath = mod->dllPath;
+                    for (auto& func : mod->functions) {
+                        Symbol::ComMethodSig sig;
+                        sig.realName = func.realName;
+                        sig.memid = func.memid;
+                        sig.vtableIndex = -1;  // 模块函数无vtable
+                        sig.returnType = func.returnType;
+                        sig.isPropertyGet = false;
+                        sig.isPropertyPut = false;
+                        sig.isPropertyPutRef = false;
+                        for (auto& param : func.params) {
+                            ParameterInfo pi;
+                            pi.name = param.name;
+                            pi.type = param.type;
+                            pi.isByVal = (param.direction == ComParamDir::In);
+                            pi.isOptional = param.isOptional;
+                            sig.params.push_back(std::move(pi));
+                        }
+                        sym->comModuleFunctions[func.name] = std::move(sig);
+                    }
+                    analyzer->symbolTable().define(std::move(sym));
+                }
+            }
 
-
+            // P24-04: 注册VB_GlobalNameSpace promoted函数为ComGlobalNs符号
+            // GlobalNameSpace coclass (如sGlobal) 的默认接口Public方法提升为全局符号
+            // 示例: VBMAN库的sGlobal._sGlobal.VBMAN() → 全局"VBMAN"函数 (SymbolKind::ComGlobalNs)
+            // 代码生成: VBMAN() → vb6_ComCallObject(vb6_CreateObject(L"VBMANLIB.sGlobal"), L"VBMAN", NULL, 0)
+            for (auto& tl : typelibParser_->cachedResults()) {
+                for (auto& cc : tl->coclasses) {
+                    if (!cc->isGlobalNamespace || !cc->defaultIface) continue;
+                    // 只提升非标准方法 (排除IUnknown/IDispatch的7个标准方法)
+                    // IDispatch dispatch接口: 前7个是IUnknown(3)+IDispatch(4)标准方法
+                    size_t standardMethods = cc->defaultIface->isDispatch ? 7 : 3;
+                    for (size_t mi = standardMethods; mi < cc->defaultIface->members.size(); mi++) {
+                        auto& member = cc->defaultIface->members[mi];
+                        // 每个promoted方法注册为独立的ComGlobalNs符号
+                        auto sym = std::make_unique<Symbol>(
+                            SymbolKind::ComGlobalNs, member.realName, member.returnType,
+                            SourceLocation{}, AccessLevel::Public);
+                        sym->isBuiltin = true;
+                        sym->comClsidStr = cc->clsidStr;
+                        sym->comProgId = cc->progId;
+                        sym->comDefaultIfaceName = cc->defaultIfaceName;
+                        sym->comDefaultIfaceIid = cc->defaultIface->iidStr;
+                        sym->comGlobalNsMethodName = member.realName;
+                        // 复制方法签名
+                        Symbol::ComMethodSig sig;
+                        sig.realName = member.realName;
+                        sig.memid = member.memid;
+                        sig.vtableIndex = member.vtableIndex;
+                        sig.returnType = member.returnType;
+                        sig.isPropertyGet = (member.kind == ComMemberKind::PropertyGet);
+                        sig.isPropertyPut = (member.kind == ComMemberKind::PropertyPut);
+                        sig.isPropertyPutRef = (member.kind == ComMemberKind::PropertyPutRef);
+                        for (auto& param : member.params) {
+                            ParameterInfo pi;
+                            pi.name = param.name;
+                            pi.type = param.type;
+                            pi.isByVal = (param.direction == ComParamDir::In);
+                            pi.isOptional = param.isOptional;
+                            sig.params.push_back(std::move(pi));
+                        }
+                        sym->comMethods[member.name] = std::move(sig);
+                        analyzer->symbolTable().define(std::move(sym));
+                    }
+                }
+            }
         // P7.5: 注册窗体控件名为符号 (否则语义分析报"未声明的标识符")
         auto frmIt = frmFiles_.find(module->moduleName);
         if (frmIt != frmFiles_.end()) {

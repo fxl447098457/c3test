@@ -1,4 +1,4 @@
-﻿#include "backend/cgen.hpp"
+#include "backend/cgen.hpp"
 #include <algorithm>
 #include <cctype>
 #include <iostream>
@@ -223,6 +223,16 @@ void CCodeGen::visit(IdentifierExpr& node) {
         } else {
             lastExpr_ = cName;
         }
+        return;
+    }
+
+    // P24-04: ComGlobalNs — VB_GlobalNameSpace promoted函数 (如VBMAN)
+    // 当VBMAN作为独立标识符出现时 (不在MemberAccessExpr.object位置),
+    // 生成sGlobal单例创建 + promoted方法调用
+    if (foundSym && foundSym->kind == SymbolKind::ComGlobalNs) {
+        std::string progIdWide = "L\"" + foundSym->comProgId + "\"";
+        std::string methodName = foundSym->comGlobalNsMethodName;
+        lastExpr_ = "vb6_ComCallObject(vb6_CreateObject(" + progIdWide + "), L\"" + methodName + "\", NULL, 0)";
         return;
     }
 
@@ -994,6 +1004,39 @@ void CCodeGen::visit(MemberAccessExpr& node) {
             return;
         }
 
+        // P24-04: Variant变量成员访问 (Variant持有COM对象, 后期绑定)
+        // VB6: For Each b In col: b.Index -> vb6_ComCall(vb6_VariantToObject(&b), L"Index", ...)
+        // Variant变量可能持有IDispatch指针, 成员访问需要通过COM晚绑定
+        if (knownVariantVars_.count(objLower)) {
+            emitExpr(*node.object);
+            std::string varExpr = std::move(lastExpr_);
+            comObjExpr_ = "vb6_VariantToObject(&" + varExpr + ")";
+            comMemberName_ = node.memberName;
+            isComMarker_ = true;
+            lastExpr_ = "vb6_VariantFromComResult(vb6_ComCall(vb6_VariantToObject(&" + varExpr + "), L\"" + node.memberName + "\"" + ", NULL, 0))";  // P24-04: Variant default prop Get
+            return;
+        }
+
+        // P24-04: VB_GlobalNameSpace promoted函数的成员访问 (如 VBMAN.Version)
+        // VBMAN是提升到全局的函数(sGlobal._sGlobal.VBMAN()), 返回cVBMAN COM对象
+        // VBMAN.Version = VBMAN().Version = 先创建sGlobal单例, 调用VBMAN()获取cVBMAN, 再访问.Version
+        if (auto* gnsSym = symTab_.lookup(objIdent.name)) {
+            if (gnsSym->kind == SymbolKind::ComGlobalNs) {
+                // 1. 生成sGlobal单例创建 + promoted方法调用表达式
+                std::string progIdWide = "L\"" + gnsSym->comProgId + "\"";
+                std::string methodName = gnsSym->comGlobalNsMethodName;
+                std::string gnsCallExpr = "vb6_ComCallObject(vb6_CreateObject(" + progIdWide + "), L\"" + methodName + "\", NULL, 0)";
+                // 2. 设置COM marker, .memberName将在IndexOrCallExpr中消费
+                comObjExpr_ = gnsCallExpr;
+                comMemberName_ = node.memberName;
+                isComMarker_ = true;
+                isEarlyBoundCom_ = false;
+                earlyBoundSym_ = nullptr;
+                lastExpr_ = gnsCallExpr + "  /* GlobalNs." + methodName + " */";
+                return;
+            }
+        }
+
         // 查找成员名称的符号
         auto* memSym = symTab_.lookupModule(node.memberName);
         if (memSym && (memSym->kind == SymbolKind::Sub || memSym->kind == SymbolKind::Function
@@ -1682,10 +1725,12 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
 
             lastExpr_ = "vb6_ComCall(" + objExpr + ", L\"" + memberName + "\", " +
                         argsArray + ", " + std::to_string(argc) + ")";
+            isComMarker_ = false;  // P24-04: 参数emission可能设置脏isComMarker_
             return;
         } else {
             // 无参数: obj.Method() → vb6_ComCall(obj, L"Method", NULL, 0)
             lastExpr_ = "vb6_ComCall(" + objExpr + ", L\"" + memberName + "\", NULL, 0)";
+            isComMarker_ = false;  // P24-04: 清除残留标记
             return;
         }
     }

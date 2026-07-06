@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 // VB6 TypeLib解析器 - P6.3 前期绑定支持
 // 编译期使用Windows LoadTypeLib/ITypeInfo API提取类型库信息
 // 注册COM coclass/接口/方法签名到符号表
@@ -76,6 +76,7 @@ struct ComInterfaceInfo {
         }
         return nullptr;
     }
+
 };
 
 // ============================================================
@@ -92,8 +93,31 @@ struct ComCoClassInfo {
     std::string defaultSourceIfaceName;   // 默认事件源接口名
     const ComInterfaceInfo* defaultSourceIface = nullptr;  // 默认事件源接口指针
     std::vector<std::string> sourceIfaceNames;  // 所有事件源接口名列表
+    // P24-04: VB_GlobalNameSpace = True 的coclass, 其默认接口的Public方法提升为全局符号
+    // 检测启发式: TYPEFLAG_FPREDECLID + 默认接口有与TypeLib项目名同名的方法, 或名字含"Global"
+    bool isGlobalNamespace = false;
 };
 
+// ============================================================
+// COM模块描述 (P24-04: TKIND_MODULE → ActiveX DLL全局函数)
+// VB6 ActiveX DLL中的标准模块(.bas) Public函数在TypeLib中记录为TKIND_MODULE
+// 调用方式: VBMAN.Version() — 工程名为命名空间, 非COM对象创建
+// ============================================================
+
+struct ComModuleInfo {
+    std::string name;           // 模块名 (= VB6工程名, 如 "VBMAN")
+    std::string dllPath;        // 源DLL路径 (从TypeLib文件路径推断)
+    std::vector<ComMemberInfo> functions;  // 模块级全局函数
+    std::vector<ComMemberInfo> constants;  // 模块级常量
+
+    // 按名称查找函数 (小写)
+    const ComMemberInfo* findFunction(const std::string& lowerName) const {
+        for (auto& f : functions) {
+            if (f.name == lowerName) return &f;
+        }
+        return nullptr;
+    }
+};
 // ============================================================
 // TypeLib解析结果
 // ============================================================
@@ -102,9 +126,11 @@ struct TypeLibResult {
     std::string name;           // 类型库名 (如 "Microsoft Scripting Runtime")
     std::string version;        // 版本 (如 "1.0")
     std::string tlbPath;        // 类型库文件路径
+    std::string typeLibProjectName;  // P24-04: TypeLib项目名 (VB6工程Name=, 如"VBMANLIB")
 
     std::vector<std::unique_ptr<ComInterfaceInfo>> interfaces;
     std::vector<std::unique_ptr<ComCoClassInfo>> coclasses;
+    std::vector<std::unique_ptr<ComModuleInfo>> modules;  // P24-04: TKIND_MODULE
 
     // 按名称查找coclass (不区分大小写)
     ComCoClassInfo* findCoClass(const std::string& name) const {
@@ -130,6 +156,18 @@ struct TypeLibResult {
             std::string iLower = iface->name;
             std::transform(iLower.begin(), iLower.end(), iLower.begin(), ::tolower);
             if (iLower == lower) return iface.get();
+        }
+        return nullptr;
+    }
+
+    // P24-04: 按名称查找模块 (不区分大小写)
+    ComModuleInfo* findModule(const std::string& name) const {
+        std::string lower = name;
+        std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+        for (auto& mod : modules) {
+            std::string mLower = mod->name;
+            std::transform(mLower.begin(), mLower.end(), mLower.begin(), ::tolower);
+            if (mLower == lower) return mod.get();
         }
         return nullptr;
     }
@@ -186,6 +224,11 @@ private:
     // 从ITypeInfo解析coclass
     std::unique_ptr<ComCoClassInfo> parseCoClass(void* pTypeInfo,
                                                   const std::string& name);
+
+    // P24-04: 从ITypeInfo解析模块 (TKIND_MODULE)
+    std::unique_ptr<ComModuleInfo> parseModule(void* pTypeInfo,
+                                                const std::string& name,
+                                                const std::string& dllPath);
 
     // 从FUNCDESC解析方法/属性
     ComMemberInfo parseFuncDesc(void* pTypeInfo, void* pFuncDesc, int index);

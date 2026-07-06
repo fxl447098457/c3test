@@ -845,6 +845,8 @@ std::string CCodeGen::comPackExpr(Expr& expr) {
             return "vb6_ComPackDouble"; // double → VARIANT
         case Vb6Type::Object:
             return "vb6_ComPackObject"; // void* → VARIANT
+        case Vb6Type::Variant:
+            return "vb6_ComPackVariant"; // vb6_VARIANT → VARIANT
         default:
             // Variant/未知: 尝试用BSTR封装 (运行时会处理转换)
             // 更安全的做法: 检查已知变量类型
@@ -856,6 +858,16 @@ std::string CCodeGen::comPackExpr(Expr& expr) {
                 if (knownBstrVars_.count(lower)) return "vb6_ComPackBSTR";
                 if (knownDoubleVars_.count(lower)) return "vb6_ComPackDouble";
                 if (knownLongVars_.count(lower)) return "vb6_ComPackInt";
+                if (knownVariantVars_.count(lower)) return "vb6_ComPackVariant";
+            }
+            if (expr.kind == ASTNodeKind::MemberAccessExpr) {
+                auto& ma = static_cast<MemberAccessExpr&>(expr);
+                if (ma.object && ma.object->kind == ASTNodeKind::IdentifierExpr) {
+                    auto& objId = static_cast<IdentifierExpr&>(*ma.object);
+                    std::string objLower = objId.name;
+                    std::transform(objLower.begin(), objLower.end(), objLower.begin(), ::tolower);
+                    if (knownVariantVars_.count(objLower)) return "vb6_ComPackVariant";
+                }
             }
             return "vb6_ComPackInt";  // 默认整数封装
     }

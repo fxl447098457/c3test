@@ -4262,6 +4262,37 @@ vb6_VARIANT vb6_VariantFromStackVARIANT(VARIANT* pv) {
     return result;
 }
 
+/* P24-04: Extract IDispatch pointer from Variant for COM late-binding */
+/* When vb6_VARIANT holds an object (vt==vb6_vtDispatch), return its pdispVal; */
+/* otherwise return NULL. Used when Variant-typed vars access COM members. */
+void* vb6_VariantToObject(vb6_VARIANT* v) {
+    if (!v) return NULL;
+    if (v->vt == vb6_vtDispatch) return v->pdispVal;
+    return NULL;
+}
+
+/* P24-04: Pack vb6_VARIANT (by value) into Windows VARIANT for COM call args */
+/* Used when Variant-typed variable member access result is passed as COM arg */
+void* vb6_ComPackVariant(vb6_VARIANT v) {
+    VARIANT* pv = (VARIANT*)CoTaskMemAlloc(sizeof(VARIANT));
+    if (!pv) return NULL;
+    VariantInit(pv);
+    switch (v.vt) {
+        case vb6_vtEmpty: pv->vt = VT_EMPTY; break;
+        case vb6_vtNull:  pv->vt = VT_NULL; break;
+        case vb6_vtInteger: pv->vt = VT_I2; pv->iVal = v.iVal; break;
+        case vb6_vtLong:    pv->vt = VT_I4; pv->lVal = v.lVal; break;
+        case vb6_vtSingle:  pv->vt = VT_R4; pv->fltVal = v.fltVal; break;
+        case vb6_vtDouble:  pv->vt = VT_R8; pv->dblVal = v.dblVal; break;
+        case vb6_vtBSTR:    pv->vt = VT_BSTR; pv->bstrVal = SysAllocString(v.bstrVal); break;
+        case vb6_vtDispatch: pv->vt = VT_DISPATCH; pv->pdispVal = (IDispatch*)v.pdispVal; break;
+        case vb6_vtBoolean: pv->vt = VT_BOOL; pv->boolVal = v.boolVal ? VARIANT_TRUE : VARIANT_FALSE; break;
+        case vb6_vtByte:    pv->vt = VT_UI1; pv->bVal = v.bVal; break;
+        default: pv->vt = VT_EMPTY; break;
+    }
+    return pv;
+}
+
 
 /* Variant数组索引: 从持有SafeArray的Variant中取/设元素 */
 vb6_VARIANT vb6_VariantArrayGet(vb6_VARIANT* v, int32_t index) {

@@ -806,6 +806,8 @@ void* vb6_ComGetObjectProp(void* disp, const wchar_t* propName);
 // COM调用结果→vb6_VARIANT (后期绑定, 如dic.Item(key))
 vb6_VARIANT vb6_VariantFromComResult(void* variant_ptr);
 vb6_VARIANT vb6_VariantFromStackVARIANT(VARIANT* pv);  /* P24-03: 栈上VARIANT转换(不释放) */
+void* vb6_VariantToObject(vb6_VARIANT* v);  /* P24-04: Extract IDispatch from Variant for COM late-binding */
+void* vb6_ComPackVariant(vb6_VARIANT v);     /* P24-04: Pack vb6_VARIANT (by value) into Windows VARIANT */
 
 
 // P14.3.5: CallByName - 按名称动态调用方法/属性

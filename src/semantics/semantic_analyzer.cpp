@@ -1,4 +1,4 @@
-﻿#include "semantics/semantic_analyzer.hpp"
+#include "semantics/semantic_analyzer.hpp"
 #include <algorithm>
 #include <cctype>
 
@@ -474,7 +474,7 @@ Vb6Type SemanticAnalyzer::resolveTypeRef(ASTNode* typeRef) {
                         return Vb6Type::UserDefinedType;
                     if (sym->kind == SymbolKind::EnumType)
                         return Vb6Type::Long;  // Enum成员是Long
-                    if (sym->kind == SymbolKind::ComClass || sym->kind == SymbolKind::ComInterface)
+                    if (sym->kind == SymbolKind::ComClass || sym->kind == SymbolKind::ComInterface || sym->kind == SymbolKind::ComModule || sym->kind == SymbolKind::ComGlobalNs)
                         return Vb6Type::Object;
                     if (sym->kind == SymbolKind::Class)
                         return Vb6Type::Object;
@@ -485,7 +485,7 @@ Vb6Type SemanticAnalyzer::resolveTypeRef(ASTNode* typeRef) {
                     std::string shortName = simple.name.substr(dotPos + 1);
                     std::string shortLower = Symbol::toLower(shortName);
                     if (auto* sym2 = symTab_.lookupModule(shortLower)) {
-                        if (sym2->kind == SymbolKind::ComClass || sym2->kind == SymbolKind::ComInterface)
+                        if (sym2->kind == SymbolKind::ComClass || sym2->kind == SymbolKind::ComInterface || sym2->kind == SymbolKind::ComModule)
                             return Vb6Type::Object;
                         if (sym2->kind == SymbolKind::Class)
                             return Vb6Type::Object;
@@ -1286,6 +1286,30 @@ void SemanticAnalyzer::visit(MemberAccessExpr& node) {
                     }
                 }
             }
+        }
+    }
+    // P24-04: ComModule全局函数访问 (VBMAN.Version)
+    if (auto* ident = dynamic_cast<IdentifierExpr*>(node.object.get())) {
+        auto* modSym = symTab_.lookup(ident->name);
+        if (modSym && modSym->kind == SymbolKind::ComModule) {
+            std::string memberLower = node.memberName;
+            std::transform(memberLower.begin(), memberLower.end(), memberLower.begin(), ::tolower);
+            auto it = modSym->comModuleFunctions.find(memberLower);
+            if (it != modSym->comModuleFunctions.end()) {
+                lastExprType_ = it->second.returnType;
+                return;
+            }
+        }
+    }
+    // P24-04: ComGlobalNs — VB_GlobalNameSpace promoted函数访问 (如 VBMAN.Version)
+    // VBMAN是提升到全局的函数, VBMAN()返回cVBMAN COM对象, .Version是cVBMAN的方法
+    // 所以 VBMAN.Version = VBMAN().Version, 即先调用 promoted函数获取对象, 再访问成员
+    if (auto* ident = dynamic_cast<IdentifierExpr*>(node.object.get())) {
+        auto* gnsSym = symTab_.lookup(ident->name);
+        if (gnsSym && gnsSym->kind == SymbolKind::ComGlobalNs) {
+            // promoted函数返回Object (COM对象), 成员访问走晚绑定
+            lastExprType_ = Vb6Type::Variant;
+            return;
         }
     }
     // 简化: 非UDT或未找到成员, 推导为Variant

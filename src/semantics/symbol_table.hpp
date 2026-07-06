@@ -39,6 +39,8 @@ enum class SymbolKind : uint8_t {
     Label,          // 行标签
     ComClass,       // COM coclass (来自TypeLib, 前期绑定)
     ComInterface,   // COM 接口 (来自TypeLib, 前期绑定)
+    ComModule,      // COM 模块 (P24-04: TKIND_MODULE, ActiveX DLL全局函数命名空间)
+    ComGlobalNs,    // P24-04: VB_GlobalNameSpace promoted函数 (如 VBMAN.Version()中的VBMAN)
 };
 
 // 判断是否为Property类型
@@ -143,6 +145,18 @@ struct Symbol {
     };
     std::unordered_map<std::string, ComMethodSig> comMethods;  // key=小写方法名
 
+    // --- P24-04: COM Module全局函数 (SymbolKind::ComModule) ---
+    std::string comModuleDllPath;    // 源DLL路径 (用于LoadLibrary)
+    std::unordered_map<std::string, ComMethodSig> comModuleFunctions;  // key=小写函数名
+
+    // --- P24-04: VB_GlobalNameSpace promoted函数 (SymbolKind::ComGlobalNs) ---
+    // coclass的VB_GlobalNameSpace=True时, 默认接口的Public方法提升为全局符号
+    // 如VBMAN库的sGlobal._sGlobal.VBMAN() → 全局VBMAN函数
+    // comClsidStr: GlobalNameSpace coclass的CLSID (如sGlobal的CLSID)
+    // comDefaultIfaceIid: 默认接口的IID (如_sGlobal的IID)
+    // comMethods[name]: 包含提升的方法签名 (key=小写方法名)
+    std::string comGlobalNsMethodName;  // P24-04: 提升的方法名 (原始大小写, 如"VBMAN")
+
     // --- P20-21: UDT成员信息 (仅SymbolKind::UserDefinedType) ---
     struct UdtMemberInfo {
         std::string name;           // 成员名 (保留大小写)
@@ -198,6 +212,8 @@ struct Symbol {
             case SymbolKind::Label:           return "Label";
             case SymbolKind::ComClass:        return "ComClass";
             case SymbolKind::ComInterface:    return "ComInterface";
+            case SymbolKind::ComModule:       return "ComModule";
+            case SymbolKind::ComGlobalNs:    return "ComGlobalNs";
         }
         return "Unknown";
     }
