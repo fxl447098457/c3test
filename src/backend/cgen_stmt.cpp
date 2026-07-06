@@ -1210,6 +1210,11 @@ void CCodeGen::visit(ForEachStmt& node) {
         std::string enumVar = "_fe_enum_" + std::to_string(tmpIdx);
         std::string feVar = "_fe_var_" + std::to_string(tmpIdx);
         emitExpr(*node.collection);
+        // P24-05: 物化COM标记 — For Each的集合表达式可能是COM成员访问(如fso.Drives)
+        // COM标记设置了comObjExpr_/comMemberName_但lastExpr_只有基础对象名
+        if (isComMarker_) {
+            resolveComValue("Object");  // 集合必须是Object(IDispatch*), 生成ComGetObjectProp
+        }
         std::string collExpr = lastExpr_;
         c_.emitLine("void* " + enumVar + " = vb6_ForEach_Init(" + collExpr + ");");
         c_.emitLine("VARIANT " + feVar + ";");
@@ -1217,7 +1222,18 @@ void CCodeGen::visit(ForEachStmt& node) {
         c_.indent();
         c_.emitLine("while (vb6_ForEach_Next(" + enumVar + ", (void*)&" + feVar + ")) {");
         c_.indent();
-        c_.emitLine(var + " = vb6_VariantFromStackVARIANT(&" + feVar + ");  /* P24-03: For Each: VARIANT→vb6_VARIANT */");
+        // P24-05: For Each循环变量类型感知赋值
+        // Object类型 → vb6_VariantToObject提取IDispatch*
+        // Variant类型 → vb6_VariantFromStackVARIANT转换为vb6_VARIANT
+        {
+            std::string lower = node.varName;
+            std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+            if (knownObjectVars_.count(lower) || knownTypedComVars_.count(lower)) {
+                c_.emitLine(var + " = vb6_ComUnpackObject(&" + feVar + ");  /* P24-05: For Each Object: VARIANT→IDispatch* */");
+            } else {
+                c_.emitLine(var + " = vb6_VariantFromStackVARIANT(&" + feVar + ");  /* P24-05: For Each Variant: VARIANT→vb6_VARIANT */");
+            }
+        }
         emitStmtList(node.body);
         c_.emitLine("VariantClear(&" + feVar + ");  /* P24-03: 栈VARIANT只清不清 */");
         c_.dedent();

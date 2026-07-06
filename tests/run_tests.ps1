@@ -1,4 +1,4 @@
-# c3 编译器集成测试框架
+﻿# c3 编译器集成测试框架
 # 用法: .\run_tests.ps1 [-Category <all|compile|run|syntax>] [-Verbose]
 #
 # 测试分类:
@@ -72,13 +72,18 @@ function Test-Run {
     param(
         [string]$Name, 
         [string]$Source,
-        [string[]]$ExpectedOutputs  # 预期输出行
+        [string[]]$ExpectedOutputs,  # 预期输出行
+        [string]$Arch = ""            # 可选架构参数 (x86/x64)
     )
     $script:total++
     Write-Host -NoNewline "  [RUN] $Name ... "
     
     # 编译
-    $compileResult = & $C3 $Source --output-dir $OutDir 2>&1
+    if ($Arch) {
+        $compileResult = & $C3 $Source --arch $Arch --output-dir $OutDir 2>&1
+    } else {
+        $compileResult = & $C3 $Source --output-dir $OutDir 2>&1
+    }
     if ($LASTEXITCODE -ne 0) {
         $script:fail++
         Write-Host "FAIL (compile)" -ForegroundColor Red
@@ -142,13 +147,18 @@ function Test-Vbp {
     param(
         [string]$Name,
         [string]$VbpFile,
-        [string[]]$ExpectedOutputs
+        [string[]]$ExpectedOutputs,
+        [string]$Arch = ""            # 可选架构参数 (x86/x64)
     )
     $script:total++
     Write-Host -NoNewline "  [VBP] $Name ... "
 
     # 编译VBP工程
-    $compileResult = & $C3 $VbpFile --output-dir $OutDir 2>&1
+    if ($Arch) {
+        $compileResult = & $C3 $VbpFile --arch $Arch --output-dir $OutDir 2>&1
+    } else {
+        $compileResult = & $C3 $VbpFile --output-dir $OutDir 2>&1
+    }
     if ($LASTEXITCODE -ne 0) {
         $script:fail++
         Write-Host "FAIL (compile)" -ForegroundColor Red
@@ -289,6 +299,12 @@ if ($Category -in @("all", "run")) {
     Test-Vbp "test_implements" "$Tests\test_implements.vbp" @("Implements test PASSED")
     Test-Vbp "test_events" "$Tests\test_events\test_events.vbp" @("Events test PASSED")
     Test-Vbp "M7Test" "$Tests\m7_test\M7Test.vbp" @("4/4 PASSED")
+    
+    # --- P24 COM优化专项测试 ---
+    Write-Host "--- P24 COM Optimization Tests ---" -ForegroundColor Yellow
+    
+    Test-Run "test_p24" "$Tests\test_p24.bas" @("P24 PASS")
+    Test-Compile "test_vbman" "$Tests\test_vbman\test_vbman.vbp"
     Write-Host ""
 }
 
