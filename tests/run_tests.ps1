@@ -1,4 +1,4 @@
-﻿# c3 编译器集成测试框架
+# c3 编译器集成测试框架
 # 用法: .\run_tests.ps1 [-Category <all|compile|run|syntax>] [-Verbose]
 #
 # 测试分类:
@@ -276,7 +276,7 @@ if ($Category -in @("all", "run")) {
     # --- P5.7 已知限制修复测试 ---
     Write-Host "--- Bugfix Tests (P5.7) ---" -ForegroundColor Yellow
     
-    Test-Run "test_fixes" "$Tests\test_fixes.bas" @("All fixes passed!")
+    Test-Run "test_fixes" "$Tests\test_fixes.bas" @("FIX1:OK", "FIX2:OK", "FIX3:OK", "All fixes passed!")
     Write-Host ""
     
     # --- VBP工程测试 (P5) ---
@@ -284,19 +284,19 @@ if ($Category -in @("all", "run")) {
     
     Test-Vbp "test_class" "$Tests\test_class.vbp" @("3", "0")
 
-    Test-Vbp "M6Test" "$Tests\M6Test.vbp" @("M6 PASSED")
+    Test-Vbp "M6Test" "$Tests\M6Test.vbp" @("M6A:OK", "M6B:OK", "M6C:OK", "M6D:OK", "M6 PASSED")
     Test-Vbp "modulemethod" "$Tests\test_modulemethod.vbp" @("30", "21")
     Write-Host ""
     
     # --- P6 COM 测试 ---
     Write-Host "--- COM Tests (P6) ---" -ForegroundColor Yellow
     
-    Test-Run "test_com" "$Tests\test_com.bas" @("COM basic tests completed")
+    Test-Run "test_com" "$Tests\test_com.bas" @("COM-1:OK", "COM-2:OK", "COM-3:OK", "COM:3/3")
     Test-Run "test_com2" "$Tests\test_com2.bas" @("Users")
-    Test-Run "test_com3" "$Tests\test_com3.bas" @("All tests passed")
-    Test-Run "test_earlybound" "$Tests\test_earlybound.bas" @("Early binding test OK")
-    Test-Run "test_p1324" "$Tests\test_p1324.bas" @("P13.24 PASS")
-    Test-Vbp "test_implements" "$Tests\test_implements.vbp" @("Implements test PASSED")
+    Test-Run "test_com3" "$Tests\test_com3.bas" @("COM3-1:OK", "COM3-2:OK", "COM3-3:OK", "COM3-4:OK", "COM3:4/4")
+    Test-Run "test_earlybound" "$Tests\test_earlybound.bas" @("EB-1:OK", "EB-2:OK", "EB:2/2")
+    Test-Run "test_p1324" "$Tests\test_p1324.bas" @("P13-1:OK", "P13-3:OK", "P13-5:OK", "P13:8/8")
+    Test-Vbp "test_implements" "$Tests\test_implements.vbp" @("IMPL1:OK", "IMPL2:OK", "Implements test PASSED")
     Test-Vbp "test_events" "$Tests\test_events\test_events.vbp" @("Events test PASSED")
     Test-Vbp "M7Test" "$Tests\m7_test\M7Test.vbp" @("4/4 PASSED")
     
@@ -304,7 +304,7 @@ if ($Category -in @("all", "run")) {
     Write-Host "--- P24 COM Optimization Tests ---" -ForegroundColor Yellow
     
     Test-Run "test_p24" "$Tests\test_p24.bas" @("P24-01a:OK", "P24-01b:OK", "P24-01c:OK", "P24-03a:OK", "P24-03b:OK", "P24:5/5")
-    Test-Compile "test_vbman" "$Tests\test_vbman\test_vbman.vbp"
+    Test-Vbp "test_vbman" "$Tests\test_vbman\test_vbman.vbp" @("P24-04a:OK", "P24-04b:OK", "P24-04:2/2") -Arch "x86"
     Write-Host ""
 }
 

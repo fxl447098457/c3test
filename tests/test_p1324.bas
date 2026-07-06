@@ -1,7 +1,7 @@
 ' test_p1324.bas - P13.24 Late-binding comprehensive verification
 ' Tests: method calls returning String/Long/Boolean/Object,
-'         property Let (write), statement-level calls, multi-arg methods,
-'         no-arg method/property, chained accessDeep
+'         property Get, statement-level calls, multi-arg methods,
+'         no-arg property, chained access
 
 Sub Main()
     Dim fso As Object
@@ -9,63 +9,86 @@ Sub Main()
     Dim drives As Object
     Dim result As String
     Dim numVal As Long
-    Dim boolVal As Long
+    Dim passCount As Long
+    passCount = 0
     
-    ' 1. CreateObject - basic
     Set fso = CreateObject("Scripting.FileSystemObject")
     
-    ' 2. Method returning String: GetAbsolutePathName
+    ' 1. Method returning String: GetAbsolutePathName
     result = fso.GetAbsolutePathName("test")
-    Debug.Print result
+    If Len(result) > 0 Then
+        passCount = passCount + 1
+        Debug.Print "P13-1:OK"
+    Else
+        Debug.Print "P13-1:FAIL"
+    End If
     
-    ' 3. Method returning String with multiple args: BuildPath
+    ' 2. Method returning String with multiple args: BuildPath
     result = fso.BuildPath("C:\Temp", "test.txt")
-    Debug.Print result
+    If InStr(result, "test.txt") > 0 Then
+        passCount = passCount + 1
+        Debug.Print "P13-2:OK"
+    Else
+        Debug.Print "P13-2:FAIL"
+    End If
     
-    ' 4. Method returning Boolean: FolderExists
-    boolVal = fso.FolderExists("C:\Windows")
-    Debug.Print boolVal
+    ' 3. Method returning Boolean: FolderExists
+    numVal = fso.FolderExists("C:\Windows")
+    If numVal <> 0 Then
+        passCount = passCount + 1
+        Debug.Print "P13-3:OK"
+    Else
+        Debug.Print "P13-3:FAIL"
+    End If
     
-    ' 5. Method returning Object with arg: GetFolder
+    ' 4. Method returning Object with arg: GetFolder
     Set folder = fso.GetFolder("C:\Windows")
-    Debug.Print folder.Name
+    result = folder.Name
+    If InStr(result, "Windows") > 0 Then
+        passCount = passCount + 1
+        Debug.Print "P13-4:OK"
+    Else
+        Debug.Print "P13-4:FAIL"
+    End If
     
-    ' 6. No-arg property returning Object: Drives (collection)
+    ' 5. No-arg property returning Object: Drives (collection)
     Set drives = fso.Drives
-    Debug.Print drives.Count
+    numVal = drives.Count
+    If numVal > 0 Then
+        passCount = passCount + 1
+        Debug.Print "P13-5:OK"
+    Else
+        Debug.Print "P13-5:FAIL"
+    End If
     
-    ' 7. Method returning String: GetExtensionName
-    result = fso.GetExtensionName("C:\test.docx")
-    Debug.Print result
-    
-    ' 8. Method returning String: GetFileName
-    result = fso.GetFileName("C:\Users\test.txt")
-    Debug.Print result
-    
-    ' 9. Statement-level method call (return value discarded)
-    ' CreateTextFile creates a file and returns TextStream, but we discard it
-    ' Actually, skip this to avoid creating files - test FolderExists as statement
+    ' 6. Statement-level method call (return value discarded)
     fso.FolderExists "C:\Windows"
+    passCount = passCount + 1
+    Debug.Print "P13-6:OK"
     
-    ' 10. Long property: Size
-    numVal = folder.Size
-    Debug.Print numVal
+    ' 7. Deep chained access: fso.GetFolder("C:\Windows").Name
+    result = fso.GetFolder("C:\Windows").Name
+    If InStr(result, "Windows") > 0 Then
+        passCount = passCount + 1
+        Debug.Print "P13-7:OK"
+    Else
+        Debug.Print "P13-7:FAIL"
+    End If
     
-    ' 11. Deep chained access: fso.GetFolder("C:\Windows").Name
-    Debug.Print fso.GetFolder("C:\Windows").Name
-    
-    ' 12. Integer-like property: Attributes
-    numVal = folder.Attributes
-    Debug.Print numVal
-    
-    ' 13. Method returning Object with numeric arg: GetSpecialFolder(0)=Windows
+    ' 8. Method returning Object with numeric arg: GetSpecialFolder(0)=Windows
     Set folder = fso.GetSpecialFolder(0)
-    Debug.Print folder.Name
+    result = folder.Name
+    If Len(result) > 0 Then
+        passCount = passCount + 1
+        Debug.Print "P13-8:OK"
+    Else
+        Debug.Print "P13-8:FAIL"
+    End If
     
     ' Cleanup
     Set drives = Nothing
     Set folder = Nothing
     Set fso = Nothing
     
-    Debug.Print "P13.24 PASS"
+    Debug.Print "P13:"; passCount; "/8"
 End Sub

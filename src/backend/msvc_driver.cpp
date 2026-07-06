@@ -110,10 +110,21 @@ std::string MsvcDriver::findClExe() const {
 
 // P11.4: Build vcvarsall.bat prefix if needed
 std::string MsvcDriver::buildVcvarsPrefix(const std::string& arch) const {
-    // If vcvarsall already set, no prefix needed
+    // P24-05: Check if vcvarsall already set AND target arch matches current env
     const char* vcDir = std::getenv("VCINSTALLDIR");
     if (vcDir && vcDir[0] != '\0') {
-        return "";
+        // VSCMD_ARG_TGT_ARCH is set by VS2017+ vcvarsall.bat ("x86" or "x64")
+        const char* tgtArch = std::getenv("VSCMD_ARG_TGT_ARCH");
+        if (tgtArch && tgtArch[0] != '\0') {
+            if (arch == tgtArch) {
+                return "";  // env already matches target arch
+            }
+            // Mismatch: must re-call vcvarsall with correct arch (e.g. x64 env but --arch x86)
+            // Fall through to findVcvarsallBat below
+        } else {
+            // VSCMD_ARG_TGT_ARCH not set (old VS) — conservatively assume match
+            return "";
+        }
     }
 
     // Try to find vcvarsall.bat

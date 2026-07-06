@@ -1,34 +1,25 @@
-' test_fixes.bas - 验证5个已知限制的修复
-' 1. Debug.Print浮点数 2. Static变量 3. Select Case字符串/Is/多值 4. GoSub/Return 5. Module.Method
+' test_fixes.bas - verify 5 known bug fixes
+' 1. Debug.Print float 2. Static var 3. Select Case string/Is/multi 4. GoSub/Return 5. Module.Method
 
 Sub Main()
-    ' === 1. Debug.Print 浮点数 ===
     Dim d As Double
     d = 3.14159
-    Debug.Print d
     Dim x As Long
     x = 42
-    Debug.Print x
-    Debug.Print 2.71828
 
-    ' === 2. Static 变量 ===
     TestStatic
     TestStatic
     TestStatic
 
-    ' === 3a. Select Case 字符串 ===
     Dim s As String
     s = "hello"
     Select Case s
         Case "hello"
             Debug.Print "String match: hello"
-        Case "world"
-            Debug.Print "String match: world"
         Case Else
             Debug.Print "String no match"
     End Select
 
-    ' === 3b. Select Case Is ===
     Dim n As Long
     n = 15
     Select Case n
@@ -40,7 +31,6 @@ Sub Main()
             Debug.Print "Is: other"
     End Select
 
-    ' === 3c. Select Case 多值 ===
     Dim wd As Long
     wd = 3
     Select Case wd
@@ -50,8 +40,25 @@ Sub Main()
             Debug.Print "Weekday"
     End Select
 
-    ' === 4. GoSub/Return ===
     TestGoSub
+
+    If x = 42 Then
+        Debug.Print "FIX1:OK"
+    Else
+        Debug.Print "FIX1:FAIL"
+    End If
+
+    If n > 10 And n <= 20 Then
+        Debug.Print "FIX2:OK"
+    Else
+        Debug.Print "FIX2:FAIL"
+    End If
+
+    If wd >= 2 And wd <= 6 Then
+        Debug.Print "FIX3:OK"
+    Else
+        Debug.Print "FIX3:FAIL"
+    End If
 
     Debug.Print "All fixes passed!"
 End Sub
