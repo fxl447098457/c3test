@@ -303,7 +303,7 @@ if ($Category -in @("all", "run")) {
     # --- P24 COM优化专项测试 ---
     Write-Host "--- P24 COM Optimization Tests ---" -ForegroundColor Yellow
     
-    Test-Run "test_p24" "$Tests\test_p24.bas" @("P24 PASS")
+    Test-Run "test_p24" "$Tests\test_p24.bas" @("P24-01a:OK", "P24-01b:OK", "P24-01c:OK", "P24-03a:OK", "P24-03b:OK", "P24:5/5")
     Test-Compile "test_vbman" "$Tests\test_vbman\test_vbman.vbp"
     Write-Host ""
 }
