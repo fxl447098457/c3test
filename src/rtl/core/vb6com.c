@@ -3,6 +3,7 @@
 
 #include "vb6com.h"
 #include <stdio.h>
+
 #include <stdlib.h>
 #include <string.h>
 
@@ -335,11 +336,12 @@ void vb6_ComSetProp(void* disp, const wchar_t* propName, void* value_void) {
     if (value_void) {
         value = *(VARIANT*)value_void;
     }
-    if (!disp) return;
+    if (!disp) { free(value_void); return; }
     IDispatch* pDisp = (IDispatch*)disp;
 
     DISPID dispid = vb6_getDispid(pDisp, propName);
     if (dispid == DISPID_UNKNOWN) {
+        free(value_void);
         fwprintf(stderr, L"vb6_ComSetProp: property \"%ls\" not found\n", propName);
         return;
     }
@@ -363,6 +365,7 @@ void vb6_ComSetProp(void* disp, const wchar_t* propName, void* value_void) {
         fwprintf(stderr, L"vb6_ComSetProp: Invoke(\"%ls\") failed: 0x%08lX\n",
                  propName, (unsigned long)hr);
     }
+    free(value_void);  /* 释放ComPackXxx分配的堆VARIANT结构体 */
 }
 
 // COM属性SetRef (对象引用 -- PROPERTYPUTREF)
@@ -459,6 +462,7 @@ void* vb6_ComPackObject(void* obj) {
     VariantInit(pv);
     pv->vt = VT_DISPATCH;
     pv->pdispVal = (IDispatch*)obj;
+    if (obj) ((IDispatch*)obj)->lpVtbl->AddRef((IDispatch*)obj);  /* AddRef: VariantClear will Release */
     return (void*)pv;
 }
 

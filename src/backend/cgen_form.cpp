@@ -1,4 +1,4 @@
-﻿#include "backend/cgen.hpp"
+#include "backend/cgen.hpp"
 #include "project/frx_reader.hpp"
 #include <algorithm>
 #include <cctype>
@@ -1261,15 +1261,57 @@ void CCodeGen::emitFormFramework(const FrmFormDesc& frmDesc, Module& module) {
                     cIdent(ctrl.controlName) + "\");");
                 c_.emitLine("vb6_hwnd_" + cIdent(ctrl.controlName) + " = vb6_tmp_hwnd; }");
             }
-            // ActiveX控件: CLSIDFromProgID + CoCreateInstance
+            // ActiveX控件: CoCreateInstance
+            // P24-05: 优先用TypeLib中的CLSID直接生成代码, 避免ProgID不存在或错误
+            // VB6 .frm的Begin行用CoClass名(如MSComctlLib.ImageList), 但真实ProgID可能不同(如MSComctlLib.ImageListCtrl)
             if (ctrl.controlType == FrmControlType::ImageList ||
                 ctrl.controlType == FrmControlType::Toolbar ||
                 ctrl.controlType == FrmControlType::StatusBar ||
                 ctrl.controlType == FrmControlType::CommonDialog) {
-                // controlTypeName 即 ProgID, 如 "MSComctlLib.ImageList"
-                std::string progId = ctrl.controlTypeName;
-                c_.emitLine("{ CLSID vb6_clsid; CLSIDFromProgID(L\"" + progId + "\", &vb6_clsid);");
-                c_.emitLine("  CoCreateInstance(&vb6_clsid, NULL, 1/*CLSCTX_INPROC_SERVER*/, &IID_IDispatch, (void**)&vb6_com_" + cIdent(ctrl.controlName) + "); }");
+                // 从符号表查找ComClass, 获取真实的CLSID或ProgID
+                std::string comVarName = "vb6_com_" + cIdent(ctrl.controlName);
+                Symbol* comSym = lookupDotted(ctrl.controlTypeName);
+                if (!comSym || comSym->kind != SymbolKind::ComClass) {
+                    // Try short name (e.g. "ImageList")
+                    size_t dot = ctrl.controlTypeName.find('.');
+                    if (dot != std::string::npos) {
+                        comSym = symTab_.lookup(ctrl.controlTypeName.substr(dot + 1));
+                    }
+                }
+                if (comSym && comSym->kind == SymbolKind::ComClass && !comSym->comClsidStr.empty()) {
+                    // Use CLSID directly (most reliable, no runtime ProgID lookup)
+                    // Convert "{XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX}" to C init form:
+                    // {0xXXXXXXXX,0xXXXX,0xXXXX,{0xXX,0xXX,0xXX,0xXX,0xXX,0xXX,0xXX,0xXX}}
+                    std::string raw = comSym->comClsidStr;  // e.g. "{2C247F23-8591-11D1-B16A-00C0F0283628}"
+                    std::string cInit;
+                    if (raw.size() >= 38 && raw.front() == '{' && raw.back() == '}') {
+                        std::string h = raw.substr(1, raw.size()-2); // strip braces
+                        // Split by '-'
+                        std::vector<std::string> parts;
+                        size_t pos = 0;
+                        while (pos < h.size()) {
+                            size_t dash = h.find('-', pos);
+                            if (dash == std::string::npos) { parts.push_back(h.substr(pos)); break; }
+                            parts.push_back(h.substr(pos, dash-pos));
+                            pos = dash + 1;
+                        }
+                        if (parts.size() == 5) {
+                            cInit = "0x" + parts[0] + ",0x" + parts[1] + ",0x" + parts[2] + ",{0x"
+                                + parts[3].substr(0,2) + ",0x" + parts[3].substr(2,2) + ",0x"
+                                + parts[4].substr(0,2) + ",0x" + parts[4].substr(2,2) + ",0x"
+                                + parts[4].substr(4,2) + ",0x" + parts[4].substr(6,2) + ",0x"
+                                + parts[4].substr(8,2) + ",0x" + parts[4].substr(10,2) + "}";
+                        }
+                    }
+                    if (cInit.empty()) cInit = "0,0,0,{0,0,0,0,0,0,0,0}";  // fallback
+                    c_.emitLine("{ static const CLSID vb6_clsid_" + cIdent(ctrl.controlName) + " = {" + cInit + "};");
+                    c_.emitLine("  CoCreateInstance(&vb6_clsid_" + cIdent(ctrl.controlName) + ", NULL, 1/*CLSCTX_INPROC_SERVER*/, &IID_IDispatch, (void**)&" + comVarName + "); }");
+                } else {
+                    // Fallback: use ProgID from TypeLib if available, else controlTypeName
+                    std::string progId = (comSym && !comSym->comProgId.empty()) ? comSym->comProgId : ctrl.controlTypeName;
+                    c_.emitLine("{ CLSID vb6_clsid; CLSIDFromProgID(L\"" + progId + "\", &vb6_clsid);");
+                    c_.emitLine("  CoCreateInstance(&vb6_clsid, NULL, 1/*CLSCTX_INPROC_SERVER*/, &IID_IDispatch, (void**)&" + comVarName + "); }");
+                }
 
                 // ImageList: set ImageWidth/ImageHeight and load ListImages from .frx
                 if (ctrl.controlType == FrmControlType::ImageList && frxLoaded) {
@@ -1318,7 +1360,7 @@ void CCodeGen::emitFormFramework(const FrmFormDesc& frmDesc, Module& module) {
                                 c_.emitLine("    if (vb6_picCom) {");
                                 // args: [index, key, picture] -- VB6 positional parameter order
                                 c_.emitLine("      void* vb6_args[] = { vb6_ComPackInt(" + std::to_string(imgIdx) + "), vb6_ComPackBSTR(L\"" + keyStr + "\"), vb6_ComPackObject(vb6_picCom) };");
-                                c_.emitLine("      vb6_ComCall(vb6_lstImgs, L\"Add\", vb6_args, 3);");
+                                c_.emitLine("      vb6_ComVarFree((void*)vb6_ComCall(vb6_lstImgs, L\"Add\", vb6_args, 3));");
                                 c_.emitLine("      vb6_ReleaseObject(&vb6_picCom);");
                                 c_.emitLine("    }");
                                 c_.emitLine("    vb6_ReleaseObject(&vb6_lstImgs);");

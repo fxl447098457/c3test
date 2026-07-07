@@ -607,10 +607,10 @@ void CCodeGen::visit(IdentifierExpr& node) {
 std::string CCodeGen::wrapToBSTR(const std::string& expr, Expr& node) {
     // P24-01: 后期绑定COM调用返回VARIANT*, 需解包为BSTR(必须在vb6_BSTR检查之前)
     // P24-02: Variant数组索引返回vb6_VARIANT, 需转BSTR
-    if (expr.find("vb6_VariantArrayGet") != std::string::npos) {
+    if (expr.find("vb6_VariantArrayGet") == 0) {
         return "vb6_VariantToString(" + expr + ")";
     }
-    if (expr.find("vb6_ComCall(") != std::string::npos) {
+    if (expr.find("vb6_ComCall(") == 0) {
         return "vb6_VariantToString(vb6_VariantFromComResult(" + expr + "))";
     }
     // P24-01: COM属性返回int/double, 需转BSTR
