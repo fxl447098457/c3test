@@ -1,4 +1,4 @@
-﻿// vb6com.c - VB6 COM互操作运行时实现 (P6)
+// vb6com.c - VB6 COM互操作运行时实现 (P6)
 // 使用Windows原生COM API, 独立于vb6rtl.h避免VARIANT冲突
 
 #include "vb6com.h"
@@ -7,6 +7,46 @@
 #include <stdlib.h>
 #include <string.h>
 
+
+// P24-08: COM错误传播 — 将HRESULT/EXCEPINFO转换为VB6运行时错误
+// VB6行为: COM方法失败时自动触发Err.Raise, 可被On Error捕获
+extern void vb6_RaiseError(int32_t errNum, void* description);
+extern int32_t vb6_err_resume_next;
+
+// COM错误→VB6错误转换辅助函数
+// hr: Invoke返回的HRESULT
+// excep: EXCEPINFO结构 (可能包含scode/bstrDescription)
+// context: 调用上下文 (用于默认错误描述, 如L"ComCall" / L"ComSetProp")
+static void vb6_ComCheckError(HRESULT hr, EXCEPINFO* excep, const wchar_t* context) {
+    int32_t errNum = (int32_t)(hr & 0xFFFF);  // VB6错误号 = HRESULT低16位
+    if (errNum == 0) errNum = (int32_t)hr;  // 非标准HRESULT直接用整个值
+
+    // 优先使用EXCEPINFO中的scode (OLE自动化错误码的低16位 = VB6错误号)
+    if (excep && excep->scode) {
+        errNum = (int32_t)(excep->scode & 0xFFFF);
+    }
+
+    // 构造错误描述BSTR
+    BSTR desc = NULL;
+    if (excep && excep->bstrDescription) {
+        desc = excep->bstrDescription;
+        // 转移所有权给vb6_RaiseError, 后者不释放BSTR
+        excep->bstrDescription = NULL;  // 防止后续SysFreeString释放
+    } else {
+        // 默认描述: "COM error in <context>: 0xXXXXXXXX"
+        wchar_t buf[256];
+        swprintf(buf, 256, L"COM error in %ls: 0x%08lX", context ? context : L"?", (unsigned long)hr);
+        desc = SysAllocString(buf);
+    }
+
+    // 清理EXCEPINFO中的其他BSTR (bstrDescription已转移)
+    if (excep) {
+        if (excep->bstrSource) { SysFreeString(excep->bstrSource); excep->bstrSource = NULL; }
+        if (excep->bstrHelpFile) { SysFreeString(excep->bstrHelpFile); excep->bstrHelpFile = NULL; }
+    }
+
+    vb6_RaiseError(errNum, desc);
+}
 // ============================================================
 // C-style vtable helpers for IUnknown (avoid C++ IUnknown method call issues)
 // ============================================================
@@ -41,8 +81,9 @@ void* vb6_CreateObject(const wchar_t* progId) {
     CLSID clsid;
     HRESULT hr = CLSIDFromProgID(progId, &clsid);
     if (FAILED(hr)) {
-        fwprintf(stderr, L"vb6_CreateObject: CLSIDFromProgID(\"%ls\") failed: 0x%08lX\n",
-                 progId, (unsigned long)hr);
+        // VB6 Error 429: ActiveX component can't create object
+        BSTR desc = SysAllocString(L"ActiveX component can't create object");
+        vb6_RaiseError(429, desc);
         return NULL;
     }
 
@@ -50,8 +91,8 @@ void* vb6_CreateObject(const wchar_t* progId) {
     hr = CoCreateInstance(&clsid, NULL, CLSCTX_LOCAL_SERVER | CLSCTX_INPROC_SERVER,
                           &IID_IDispatch, (void**)&pDisp);
     if (FAILED(hr)) {
-        fwprintf(stderr, L"vb6_CreateObject: CoCreateInstance(\"%ls\") failed: 0x%08lX\n",
-                 progId, (unsigned long)hr);
+        BSTR desc = SysAllocString(L"ActiveX component can't create object");
+        vb6_RaiseError(429, desc);
         return NULL;
     }
 
@@ -210,8 +251,8 @@ void* vb6_ComCall(void* disp, const wchar_t* methodName,
         LOCALE_USER_DEFAULT, DISPATCH_METHOD | DISPATCH_PROPERTYGET, &dp, result, &excep, &argErr);
 
     if (FAILED(hr)) {
-        fwprintf(stderr, L"vb6_ComCall: Invoke(\"%ls\") failed: 0x%08lX\n",
-                 methodName, (unsigned long)hr);
+        vb6_ComCheckError(hr, &excep, L"ComCall");
+        // On Error Resume Next: continue with NULL result
         if (result) { VariantClear(result); free(result); result = NULL; }
     }
 
@@ -262,8 +303,7 @@ void* vb6_ComGetProp(void* disp, const wchar_t* propName) {
         LOCALE_USER_DEFAULT, DISPATCH_PROPERTYGET, &dp, result, &excep, &argErr);
 
     if (FAILED(hr)) {
-        fwprintf(stderr, L"vb6_ComGetProp: Invoke(\"%ls\") failed: 0x%08lX\n",
-                 propName, (unsigned long)hr);
+        vb6_ComCheckError(hr, &excep, L"ComGetProp");
         if (result) { VariantClear(result); free(result); result = NULL; }
     }
 
@@ -312,8 +352,7 @@ void* vb6_ComGetPropArg(void* disp, const wchar_t* propName,
         &dp, result, &excep, &argErr);
 
     if (FAILED(hr)) {
-        fwprintf(stderr, L"vb6_ComGetPropArg: Invoke(\"%ls\") failed: 0x%08lX\n",
-                 propName, (unsigned long)hr);
+        vb6_ComCheckError(hr, &excep, L"ComGetPropArg");
         if (result) { VariantClear(result); free(result); result = NULL; }
     }
 
@@ -362,8 +401,7 @@ void vb6_ComSetProp(void* disp, const wchar_t* propName, void* value_void) {
         LOCALE_USER_DEFAULT, DISPATCH_PROPERTYPUT, &dp, NULL, &excep, &argErr);
 
     if (FAILED(hr)) {
-        fwprintf(stderr, L"vb6_ComSetProp: Invoke(\"%ls\") failed: 0x%08lX\n",
-                 propName, (unsigned long)hr);
+        vb6_ComCheckError(hr, &excep, L"ComSetProp");
     }
     free(value_void);  /* 释放ComPackXxx分配的堆VARIANT结构体 */
 }
@@ -405,8 +443,7 @@ void vb6_ComSetRef(void* disp, const wchar_t* propName, void* objRef) {
     }
 
     if (FAILED(hr)) {
-        fwprintf(stderr, L"vb6_ComSetRef: Invoke(\"%ls\") failed: 0x%08lX\n",
-                 propName, (unsigned long)hr);
+        vb6_ComCheckError(hr, &excep, L"ComSetRef");
     }
 }
 
