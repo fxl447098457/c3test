@@ -112,21 +112,24 @@ bool SymbolTable::define(std::unique_ptr<Symbol> sym) {
     std::string lowerName = sym->lowerName;
     SourceLocation loc = sym->location;
 
-    // P6.3: ComClass/ComInterface与用户变量可同名 (不同namespace)
-    // 如果新符号是builtin的ComClass/ComInterface, 且已有同名符号, 跳过不报错
-    // 如果已有符号是ComClass/ComInterface, 且新符号是用户变量, 也允许覆盖
-    if (sym->isBuiltin && (sym->kind == SymbolKind::ComClass || sym->kind == SymbolKind::ComInterface || sym->kind == SymbolKind::ComModule)) {
+    // P6.3 + P24-05: COM内置类型与用户变量可同名 (不同namespace)
+    // 如果新符号是builtin的ComClass/ComInterface/ComModule/ComGlobalNs, 且已有同名符号, 跳过不报错
+    // 如果已有符号是ComClass/ComInterface/ComModule, 且新符号是用户变量, 也允许覆盖
+    if (sym->isBuiltin && (sym->kind == SymbolKind::ComClass || sym->kind == SymbolKind::ComInterface
+                         || sym->kind == SymbolKind::ComModule || sym->kind == SymbolKind::ComGlobalNs)) {
         auto* existing = current_->lookupLocal(lowerName);
         if (existing) {
-            // 已有同名符号, 跳过COM类型注册
+            // 已有同名符号, 跳过COM类型注册 (避免重复注册)
             return true;  // 不报错
         }
     }
-    // 如果已有同名ComClass/ComInterface, 新符号是用户变量, 先移除旧的
+    // 如果已有同名ComClass/ComInterface/ComModule, 新符号是用户变量, 先移除旧的
     {
         auto* existing = current_->lookupLocal(lowerName);
-        if (existing && (existing->kind == SymbolKind::ComClass || existing->kind == SymbolKind::ComInterface || existing->kind == SymbolKind::ComModule)
-            && sym->kind != SymbolKind::ComClass && sym->kind != SymbolKind::ComInterface) {
+        if (existing && (existing->kind == SymbolKind::ComClass || existing->kind == SymbolKind::ComInterface
+                      || existing->kind == SymbolKind::ComModule || existing->kind == SymbolKind::ComGlobalNs)
+            && sym->kind != SymbolKind::ComClass && sym->kind != SymbolKind::ComInterface
+            && sym->kind != SymbolKind::ComModule && sym->kind != SymbolKind::ComGlobalNs) {
             // 移除COM类型符号, 允许用户变量覆盖
             current_->symbols_.erase(lowerName);
         }
@@ -137,7 +140,7 @@ bool SymbolTable::define(std::unique_ptr<Symbol> sym) {
 
     if (!current_->define(std::move(sym))) {
         diag_.error(DiagnosticID::SemDuplicateDeclaration, loc,
-            "重复声明: '" + lowerName + "'");
+            "重复声明: \x27" + lowerName + "\x27");
         return false;
     }
     return true;

@@ -126,6 +126,7 @@ struct TypeLibResult {
     std::string name;           // 类型库名 (如 "Microsoft Scripting Runtime")
     std::string version;        // 版本 (如 "1.0")
     std::string tlbPath;        // 类型库文件路径
+    std::string canonPath;      // P24-05: 规范化路径(小写长路径, 用于缓存去重)
     std::string typeLibProjectName;  // P24-04: TypeLib项目名 (VB6工程Name=, 如"VBMANLIB")
 
     std::vector<std::unique_ptr<ComInterfaceInfo>> interfaces;

@@ -42,9 +42,23 @@ std::unique_ptr<TypeLibResult> TypeLibParser::loadByProgId(const std::string& pr
 }
 
 std::unique_ptr<TypeLibResult> TypeLibParser::loadByPath(const std::string& tlbPath) {
-    // 检查缓存
+    // P24-05: 规范化路径(短路径→长路径), 避免同DLL不同路径导致缓存未命中
+    std::wstring tlbPathW(tlbPath.begin(), tlbPath.end());
+    wchar_t canonicalPath[MAX_PATH];
+    DWORD len = GetLongPathNameW(tlbPathW.c_str(), canonicalPath, MAX_PATH);
+    std::string canonPath;
+    if (len > 0 && len < MAX_PATH) {
+        // 统一转小写用于缓存比较 (Windows路径不区分大小写)
+        canonPath = std::string(canonicalPath, canonicalPath + len);
+        for (auto& c : canonPath) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    } else {
+        canonPath = tlbPath;
+        for (auto& c : canonPath) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    }
+
+    // 检查缓存 (用规范化路径比较)
     for (auto& cached : cache_) {
-        if (cached->tlbPath == tlbPath) {
+        if (cached->canonPath == canonPath) {
             return nullptr;  // 已缓存
         }
     }
@@ -52,7 +66,7 @@ std::unique_ptr<TypeLibResult> TypeLibParser::loadByPath(const std::string& tlbP
     // 加载TypeLib
     ITypeLib* pTypeLib = nullptr;
     HRESULT hr = LoadTypeLibEx(
-        std::wstring(tlbPath.begin(), tlbPath.end()).c_str(),
+        tlbPathW.c_str(),
         REGKIND_NONE,
         &pTypeLib
     );
@@ -67,6 +81,7 @@ std::unique_ptr<TypeLibResult> TypeLibParser::loadByPath(const std::string& tlbP
     // 解析
     auto result = std::make_unique<TypeLibResult>();
     result->tlbPath = tlbPath;
+    result->canonPath = canonPath;
 
     bool ok = parseTypeLib(pTypeLib, *result);
     pTypeLib->Release();
@@ -95,15 +110,50 @@ std::unique_ptr<TypeLibResult> TypeLibParser::loadByPath(const std::string& tlbP
 }
 
 std::unique_ptr<TypeLibResult> TypeLibParser::loadByClsid(const std::string& clsidStr) {
-    // CLSID → 查注册表TypeLib键 → 加载
+    // P24-05: Object=行的GUID可能是TypeLib ID或CoClass CLSID
+    // 先尝试按TypeLib ID直接查找 HKCR\TypeLib\{guid}, 失败再走CLSID反查
+    std::wstring guidW(clsidStr.begin(), clsidStr.end());
+
+    // --- 尝试1: 直接按TypeLib ID查找 ---
+    {
+        std::wstring tlbidKey = L"TypeLib\\" + guidW;
+        HKEY hTlbKey;
+        if (RegOpenKeyExW(HKEY_CLASSES_ROOT, tlbidKey.c_str(), 0, KEY_READ, &hTlbKey) == ERROR_SUCCESS) {
+            // TypeLib ID有效, 枚举版本找win32路径
+            wchar_t version[32];
+            DWORD verSz = sizeof(version);
+            DWORD idx = 0;
+            std::wstring latestPath;
+            while (RegEnumKeyExW(hTlbKey, idx, version, &verSz, nullptr, nullptr, nullptr, nullptr) == ERROR_SUCCESS) {
+                verSz = sizeof(version);
+                std::wstring pathKey = tlbidKey + L"\\" + version + L"\\0\\win32";
+                HKEY hPathKey;
+                if (RegOpenKeyExW(HKEY_CLASSES_ROOT, pathKey.c_str(), 0, KEY_READ, &hPathKey) == ERROR_SUCCESS) {
+                    wchar_t path[MAX_PATH];
+                    DWORD pathSz = sizeof(path);
+                    if (RegQueryValueExW(hPathKey, nullptr, nullptr, nullptr, (LPBYTE)path, &pathSz) == ERROR_SUCCESS) {
+                        latestPath = path;
+                    }
+                    RegCloseKey(hPathKey);
+                }
+                idx++;
+            }
+            RegCloseKey(hTlbKey);
+            if (!latestPath.empty()) {
+                std::string pathStr(latestPath.begin(), latestPath.end());
+                return loadByPath(pathStr);
+            }
+        }
+    }
+
+    // --- 尝试2: 按CoClass CLSID反查 TypeLib ---
     // 格式: HKCR\CLSID\{...}\TypeLib → {typelibid}
-    std::wstring clsidW(clsidStr.begin(), clsidStr.end());
     CLSID clsid;
-    HRESULT hr = CLSIDFromString(clsidW.c_str(), &clsid);
+    HRESULT hr = CLSIDFromString(guidW.c_str(), &clsid);
     if (FAILED(hr)) return nullptr;
 
     // 查TypeLib子键
-    std::wstring keyPath = L"CLSID\\" + clsidW + L"\\TypeLib";
+    std::wstring keyPath = L"CLSID\\" + guidW + L"\\TypeLib";
     HKEY hKey;
     if (RegOpenKeyExW(HKEY_CLASSES_ROOT, keyPath.c_str(), 0, KEY_READ, &hKey) != ERROR_SUCCESS) {
         return nullptr;
@@ -117,36 +167,34 @@ std::unique_ptr<TypeLibResult> TypeLibParser::loadByClsid(const std::string& cls
     RegCloseKey(hKey);
 
     // TypeLib ID → 查TypeLib版本路径
-    std::wstring tlbidKey = L"TypeLib\\" + std::wstring(tlbidStr);
-    // 找最新版本子键
-    HKEY hTlbKey;
-    if (RegOpenKeyExW(HKEY_CLASSES_ROOT, tlbidKey.c_str(), 0, KEY_READ, &hTlbKey) != ERROR_SUCCESS) {
+    std::wstring tlbidKey2 = L"TypeLib\\" + std::wstring(tlbidStr);
+    HKEY hTlbKey2;
+    if (RegOpenKeyExW(HKEY_CLASSES_ROOT, tlbidKey2.c_str(), 0, KEY_READ, &hTlbKey2) != ERROR_SUCCESS) {
         return nullptr;
     }
-    wchar_t version[32];
-    DWORD idx = 0;
-    std::wstring latestPath;
-    while (RegEnumKeyExW(hTlbKey, idx, version, &sz, nullptr, nullptr, nullptr, nullptr) == ERROR_SUCCESS) {
-        sz = sizeof(version);
-        // 查FLAGS\0路径
-        std::wstring pathKey = tlbidKey + L"\\" + version + L"\\0\\win32";
+    wchar_t version2[32];
+    DWORD idx2 = 0;
+    std::wstring latestPath2;
+    while (RegEnumKeyExW(hTlbKey2, idx2, version2, &sz, nullptr, nullptr, nullptr, nullptr) == ERROR_SUCCESS) {
+        sz = sizeof(version2);
+        std::wstring pathKey = tlbidKey2 + L"\\" + version2 + L"\\0\\win32";
         HKEY hPathKey;
         if (RegOpenKeyExW(HKEY_CLASSES_ROOT, pathKey.c_str(), 0, KEY_READ, &hPathKey) == ERROR_SUCCESS) {
             wchar_t path[MAX_PATH];
             DWORD pathSz = sizeof(path);
             if (RegQueryValueExW(hPathKey, nullptr, nullptr, nullptr, (LPBYTE)path, &pathSz) == ERROR_SUCCESS) {
-                latestPath = path;
+                latestPath2 = path;
             }
             RegCloseKey(hPathKey);
         }
-        idx++;
+        idx2++;
     }
-    RegCloseKey(hTlbKey);
+    RegCloseKey(hTlbKey2);
 
-    if (latestPath.empty()) return nullptr;
+    if (latestPath2.empty()) return nullptr;
 
-    std::string pathStr(latestPath.begin(), latestPath.end());
-    return loadByPath(pathStr);
+    std::string pathStr2(latestPath2.begin(), latestPath2.end());
+    return loadByPath(pathStr2);
 }
 
 std::unique_ptr<TypeLibResult> TypeLibParser::loadByName(const std::string& name,
