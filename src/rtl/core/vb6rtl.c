@@ -18,6 +18,10 @@
 #include <windows.h>
 #endif
 
+// P24-08: MessageBoxW (user32) + GetConsoleWindow (kernel32)
+#pragma comment(lib, "user32.lib")
+#pragma comment(lib, "kernel32.lib")
+
 // ============================================================
 // COM互操作前向声明 (实现在vb6com.c中，避免vb6_VARIANT类型冲突)
 // ============================================================
@@ -3209,9 +3213,18 @@ void vb6_RaiseError(int32_t errNum, BSTR description) {
         vb6_err_in_handler = 1;  // P14.1.2: 标记进入错误处理器
         longjmp(*vb6_error_jmp_ptr, errNum);
     }
-    // 未设置错误处理: 终止程序
-    fwprintf(stderr, L"Unhandled VB6 Error #%d: %ls\n", errNum,
-             description ? description : L"(no description)");
+    // 未设置错误处理: GUI程序弹MessageBox, CLI程序输出stderr
+    if (GetConsoleWindow()) {
+        // CLI程序: 输出到stderr
+        fwprintf(stderr, L"Unhandled VB6 Error #%d: %ls\n", errNum,
+                 description ? description : L"(no description)");
+    } else {
+        // GUI程序: 弹出VB6风格错误对话框
+        wchar_t msg[512];
+        swprintf(msg, 512, L"Run-time error '%d':\n%ls",
+                 errNum, description ? description : L"(no description)");
+        MessageBoxW(NULL, msg, L"VB6 Runtime Error", MB_ICONERROR | MB_OK);
+    }
     exit(errNum);
 }
 

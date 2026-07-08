@@ -1666,7 +1666,7 @@ void* vb6_LoadPictureFromMemory(const void* data, int size) {
 // Caller must Release the returned IDispatch* when done (via vb6_ReleaseObject)
 // ============================================================
 void* vb6_LoadPictureAsCom(const void* data, int size) {
-    static int _lpcnt = 0; _lpcnt++; _vb6_forms_trace("LOADPIC[%d]: size=%d\n", _lpcnt, size);
+    { static int _lpcnt = 0; _lpcnt++; fwprintf(stderr, L"LOADPIC[%d]: size=%d\n", _lpcnt, size); }
     if (!data || size <= 0) return NULL;
 
     /* Ensure COM is initialized */

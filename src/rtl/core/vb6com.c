@@ -1,4 +1,4 @@
-// vb6com.c - VB6 COM互操作运行时实现 (P6)
+﻿// vb6com.c - VB6 COM互操作运行时实现 (P6)
 // 使用Windows原生COM API, 独立于vb6rtl.h避免VARIANT冲突
 
 #include "vb6com.h"
@@ -17,6 +17,85 @@ extern int32_t vb6_err_resume_next;
 // hr: Invoke返回的HRESULT
 // excep: EXCEPINFO结构 (可能包含scode/bstrDescription)
 // context: 调用上下文 (用于默认错误描述, 如L"ComCall" / L"ComSetProp")
+// VB6标准错误号→中文描述映射 (FormatMessageW查不到时的兜底)
+static const wchar_t* vb6_StdErrorDesc(int32_t errNum) {
+    switch (errNum) {
+        case   5: return L"无效的过程调用或参数";
+        case   6: return L"溢出";
+        case   7: return L"内存不足";
+        case   9: return L"下标越界";
+        case  10: return L"数组长度固定或被暂时锁定";
+        case  11: return L"除数为零";
+        case  13: return L"类型不匹配";
+        case  14: return L"字符串空间不足";
+        case  18: return L"出现用户中断";
+        case  20: return L"无错误时Resume";
+        case  28: return L"栈空间不足";
+        case  35: return L"子程序或函数未定义";
+        case  48: return L"加载DLL时出错";
+        case  49: return L"DLL调用约定错误";
+        case  51: return L"内部错误";
+        case  52: return L"文件名或文件号错误";
+        case  53: return L"找不到文件";
+        case  54: return L"文件模式错误";
+        case  55: return L"文件已打开";
+        case  57: return L"设备I/O错误";
+        case  58: return L"文件已存在";
+        case  59: return L"记录长度错误";
+        case  61: return L"磁盘已满";
+        case  62: return L"输入超出文件尾";
+        case  63: return L"记录号错误";
+        case  67: return L"文件过多";
+        case  68: return L"设备不可用";
+        case  70: return L"权限被拒绝";
+        case  71: return L"磁盘未准备好";
+        case  75: return L"路径/文件访问错误";
+        case  76: return L"找不到路径";
+        case  91: return L"对象变量或With块变量未设置";
+        case  92: return L"For循环未初始化";
+        case  93: return L"无效的模式字符串";
+        case  94: return L"Null的使用无效";
+        case 321: return L"无效的文件格式";
+        case 322: return L"无法创建必要的临时文件";
+        case 380: return L"属性值无效";
+        case 381: return L"属性数组索引无效";
+        case 422: return L"找不到属性";
+        case 423: return L"找不到属性或方法";
+        case 424: return L"需要对象";
+        case 429: return L"ActiveX组件不能创建对象";
+        case 430: return L"类不支持自动化或不支持预期接口";
+        case 432: return L"自动化操作期间找不到文件名或类名";
+        case 438: return L"对象不支持此属性或方法";
+        case 440: return L"自动化错误";
+        case 445: return L"对象不支持此操作";
+        case 446: return L"对象不支持命名参数";
+        case 447: return L"对象不支持当前区域设置";
+        case 448: return L"找不到命名参数";
+        case 449: return L"参数不是可选的";
+        case 450: return L"参数个数错误或属性赋值无效";
+        case 451: return L"Property let过程未定义，Property get过程未返回对象";
+        case 452: return L"无效的序号";
+        case 453: return L"找不到指定的DLL函数";
+        case 457: return L"此键已经与该集合的一个元素关联";
+        case 458: return L"变量使用了Visual Basic不支持的自动化类型";
+        case 459: return L"对象或类不支持事件集";
+        case 460: return L"剪贴板格式无效";
+        case 461: return L"找不到方法或数据成员";
+        case 462: return L"远程服务器机器不存在或不可用";
+        case 463: return L"类未在本地机器上注册";
+        case 481: return L"图片无效";
+        case 482: return L"打印机错误";
+        case 735: return L"无法将文件保存到TEMP";
+        case 744: return L"找不到搜索文本";
+        case 746: return L"替换内容过长";
+        default: return NULL;
+    }
+}
+
+// COM错误→VB6错误转换辅助函数
+// hr: Invoke返回的HRESULT
+// excep: EXCEPINFO结构 (可能包含scode/bstrDescription)
+// context: 调用上下文 (用于默认错误描述, 如L"ComCall" / L"ComSetProp")
 static void vb6_ComCheckError(HRESULT hr, EXCEPINFO* excep, const wchar_t* context) {
     int32_t errNum = (int32_t)(hr & 0xFFFF);  // VB6错误号 = HRESULT低16位
     if (errNum == 0) errNum = (int32_t)hr;  // 非标准HRESULT直接用整个值
@@ -26,17 +105,52 @@ static void vb6_ComCheckError(HRESULT hr, EXCEPINFO* excep, const wchar_t* conte
         errNum = (int32_t)(excep->scode & 0xFFFF);
     }
 
-    // 构造错误描述BSTR
+    // 构造错误描述BSTR — 四级fallback:
+    //   1. EXCEPINFO.bstrDescription (COM对象直接提供)
+    //   2. IErrorInfo::GetDescription (COM错误接口)
+    //   3. VB6标准错误号中文查表 (scode有效时优先)
+    //   4. FormatMessageW(FROM_SYSTEM) (系统HRESULT描述)
+    //   5. 默认: "COM error in <context>: 0xXXXXXXXX"
     BSTR desc = NULL;
     if (excep && excep->bstrDescription) {
+        // 1. EXCEPINFO有描述: 直接使用
         desc = excep->bstrDescription;
-        // 转移所有权给vb6_RaiseError, 后者不释放BSTR
-        excep->bstrDescription = NULL;  // 防止后续SysFreeString释放
+        excep->bstrDescription = NULL;  // 转移所有权
     } else {
-        // 默认描述: "COM error in <context>: 0xXXXXXXXX"
-        wchar_t buf[256];
-        swprintf(buf, 256, L"COM error in %ls: 0x%08lX", context ? context : L"?", (unsigned long)hr);
-        desc = SysAllocString(buf);
+        // 2. 尝试IErrorInfo
+        IErrorInfo* perror = NULL;
+        if (SUCCEEDED(GetErrorInfo(0, &perror)) && perror) {
+            BSTR eiDesc = NULL;
+            perror->lpVtbl->GetDescription(perror, &eiDesc);
+            DWORD helpCtx = 0;
+            perror->lpVtbl->GetHelpContext(perror, &helpCtx);
+            if (helpCtx) errNum = (int32_t)(helpCtx & 0xFFFF);
+            perror->lpVtbl->Release(perror);
+            if (eiDesc) desc = eiDesc;
+        }
+        if (!desc) {
+            // 3. VB6标准错误号中文查表 (scode提取的VB6错误号优先)
+            const wchar_t* stdDesc = vb6_StdErrorDesc(errNum);
+            if (stdDesc) desc = SysAllocString(stdDesc);
+        }
+        if (!desc) {
+            // 4. FormatMessageW(FROM_SYSTEM) — 仅当VB6表查不到时使用
+            //    注意: DISP_E_EXCEPTION(0x80020009)会返回"发生意外"等无用通用描述
+            //    所以当scode有效(VB6错误号)时不应走到这里
+            wchar_t sysBuf[512] = {0};
+            DWORD fmLen = FormatMessageW(FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
+                NULL, (DWORD)hr, 0, sysBuf, 512, NULL);
+            if (fmLen > 0) {
+                while (fmLen > 0 && (sysBuf[fmLen-1] == L'\r' || sysBuf[fmLen-1] == L'\n')) sysBuf[--fmLen] = L'\0';
+                if (fmLen > 0) desc = SysAllocString(sysBuf);
+            }
+        }
+        if (!desc) {
+            // 5. 默认描述
+            wchar_t buf[256];
+            swprintf(buf, 256, L"COM error in %ls: 0x%08lX", context ? context : L"?", (unsigned long)hr);
+            desc = SysAllocString(buf);
+        }
     }
 
     // 清理EXCEPINFO中的其他BSTR (bstrDescription已转移)
@@ -82,7 +196,9 @@ void* vb6_CreateObject(const wchar_t* progId) {
     HRESULT hr = CLSIDFromProgID(progId, &clsid);
     if (FAILED(hr)) {
         // VB6 Error 429: ActiveX component can't create object
-        BSTR desc = SysAllocString(L"ActiveX component can't create object");
+        wchar_t buf429[512];
+        swprintf(buf429, 512, L"ActiveX component can't create object (ProgID: %ls, HRESULT: 0x%08lX)", progId, (unsigned long)hr);
+        BSTR desc = SysAllocString(buf429);
         vb6_RaiseError(429, desc);
         return NULL;
     }
@@ -91,8 +207,19 @@ void* vb6_CreateObject(const wchar_t* progId) {
     hr = CoCreateInstance(&clsid, NULL, CLSCTX_LOCAL_SERVER | CLSCTX_INPROC_SERVER,
                           &IID_IDispatch, (void**)&pDisp);
     if (FAILED(hr)) {
-        BSTR desc = SysAllocString(L"ActiveX component can't create object");
-        vb6_RaiseError(429, desc);
+        BSTR desc429 = NULL;
+        IErrorInfo* perror429 = NULL;
+        if (SUCCEEDED(GetErrorInfo(0, &perror429)) && perror429) {
+            perror429->lpVtbl->GetDescription(perror429, &desc429);
+            perror429->lpVtbl->Release(perror429);
+        }
+        if (!desc429) {
+            wchar_t buf429b[512];
+            swprintf(buf429b, 512, L"ActiveX component can't create object (ProgID: %ls, HRESULT: 0x%08lX)", progId, (unsigned long)hr);
+            desc429 = SysAllocString(buf429b);
+        }
+        vb6_RaiseError(429, desc429);
+        vb6_RaiseError(429, desc429);
         return NULL;
     }
 
