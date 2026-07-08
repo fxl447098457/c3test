@@ -17,78 +17,299 @@ extern int32_t vb6_err_resume_next;
 // hr: Invoke返回的HRESULT
 // excep: EXCEPINFO结构 (可能包含scode/bstrDescription)
 // context: 调用上下文 (用于默认错误描述, 如L"ComCall" / L"ComSetProp")
-// VB6标准错误号→中文描述映射 (FormatMessageW查不到时的兜底)
+// VB6标准错误号→描述映射
+// 数据来源: MSVBVM60.DLL STRINGTABLE (英文) + C3 中文翻译
+// DLL STRINGTABLE ID 规则:
+//   - 经典运行时错误(ErrNum 0~100): ID = 10000 + DLL序列号 (序列号≠错误号!)
+//   - 窗体/控件错误(ErrNum 310+): ID = 错误号 (直接对应)
+// 翻译策略: 优先使用中文, 英文原文保留在注释中供参考
 static const wchar_t* vb6_StdErrorDesc(int32_t errNum) {
     switch (errNum) {
-        case   5: return L"无效的过程调用或参数";
-        case   6: return L"溢出";
-        case   7: return L"内存不足";
-        case   9: return L"下标越界";
-        case  10: return L"数组长度固定或被暂时锁定";
-        case  11: return L"除数为零";
-        case  13: return L"类型不匹配";
-        case  14: return L"字符串空间不足";
-        case  18: return L"出现用户中断";
-        case  20: return L"无错误时Resume";
-        case  28: return L"栈空间不足";
-        case  35: return L"子程序或函数未定义";
-        case  48: return L"加载DLL时出错";
-        case  49: return L"DLL调用约定错误";
-        case  51: return L"内部错误";
-        case  52: return L"文件名或文件号错误";
-        case  53: return L"找不到文件";
-        case  54: return L"文件模式错误";
-        case  55: return L"文件已打开";
-        case  57: return L"设备I/O错误";
-        case  58: return L"文件已存在";
-        case  59: return L"记录长度错误";
-        case  61: return L"磁盘已满";
-        case  62: return L"输入超出文件尾";
-        case  63: return L"记录号错误";
-        case  67: return L"文件过多";
-        case  68: return L"设备不可用";
-        case  70: return L"权限被拒绝";
-        case  71: return L"磁盘未准备好";
-        case  75: return L"路径/文件访问错误";
-        case  76: return L"找不到路径";
-        case  91: return L"对象变量或With块变量未设置";
-        case  92: return L"For循环未初始化";
-        case  93: return L"无效的模式字符串";
-        case  94: return L"Null的使用无效";
-        case 321: return L"无效的文件格式";
-        case 322: return L"无法创建必要的临时文件";
-        case 380: return L"属性值无效";
-        case 381: return L"属性数组索引无效";
-        case 422: return L"找不到属性";
-        case 423: return L"找不到属性或方法";
-        case 424: return L"需要对象";
-        case 429: return L"ActiveX组件不能创建对象";
-        case 430: return L"类不支持自动化或不支持预期接口";
-        case 432: return L"自动化操作期间找不到文件名或类名";
-        case 438: return L"对象不支持此属性或方法";
-        case 440: return L"自动化错误";
-        case 445: return L"对象不支持此操作";
-        case 446: return L"对象不支持命名参数";
-        case 447: return L"对象不支持当前区域设置";
-        case 448: return L"找不到命名参数";
-        case 449: return L"参数不是可选的";
-        case 450: return L"参数个数错误或属性赋值无效";
-        case 451: return L"Property let过程未定义，Property get过程未返回对象";
-        case 452: return L"无效的序号";
-        case 453: return L"找不到指定的DLL函数";
-        case 457: return L"此键已经与该集合的一个元素关联";
-        case 458: return L"变量使用了Visual Basic不支持的自动化类型";
-        case 459: return L"对象或类不支持事件集";
-        case 460: return L"剪贴板格式无效";
-        case 461: return L"找不到方法或数据成员";
-        case 462: return L"远程服务器机器不存在或不可用";
-        case 463: return L"类未在本地机器上注册";
-        case 481: return L"图片无效";
-        case 482: return L"打印机错误";
-        case 735: return L"无法将文件保存到TEMP";
-        case 744: return L"找不到搜索文本";
-        case 746: return L"替换内容过长";
-        default: return NULL;
+    // ---- VB6 经典运行时错误 (ErrNum 3~94) ----
+    // 来源: MSVBVM60.DLL STRINGTABLE ID 10000~10039
+    case   3: return L"没有GoSub时的Return";              // Return without GoSub
+    case   5: return L"无效的过程调用或参数";               // Invalid procedure call or argument
+    case   6: return L"溢出";                              // Overflow
+    case   7: return L"内存不足";                           // Out of memory
+    case   9: return L"下标越界";                           // Subscript out of range
+    case  10: return L"数组长度固定或被暂时锁定";             // This array is fixed or temporarily locked
+    case  11: return L"除数为零";                           // Division by zero
+    case  13: return L"类型不匹配";                          // Type mismatch
+    case  14: return L"字符串空间不足";                       // Out of string space
+    case  18: return L"出现用户中断";                         // User interrupt occurred
+    case  20: return L"无错误时Resume";                      // Resume without error
+    case  28: return L"栈空间不足";                           // Out of stack space
+    case  35: return L"子程序或函数未定义";                    // Sub or Function not defined
+    case  47: return L"应用程序的DLL过多";                    // Too many DLL application clients
+    case  48: return L"加载DLL时出错";                       // Error in loading DLL
+    case  49: return L"DLL调用约定错误";                     // Bad DLL calling convention
+    case  51: return L"内部错误";                            // Internal error
+    case  52: return L"文件名或文件号错误";                    // Bad file name or number
+    case  53: return L"找不到文件";                           // File not found
+    case  54: return L"文件模式错误";                         // Bad file mode
+    case  55: return L"文件已打开";                           // File already open
+    case  57: return L"设备I/O错误";                         // Device I/O error
+    case  58: return L"文件已存在";                           // File already exists
+    case  59: return L"记录长度错误";                         // Bad record length
+    case  61: return L"磁盘已满";                            // Disk full
+    case  62: return L"输入超出文件尾";                       // Input past end of file
+    case  63: return L"记录号错误";                           // Bad record number
+    case  67: return L"文件过多";                            // Too many files
+    case  68: return L"设备不可用";                           // Device unavailable
+    case  70: return L"权限被拒绝";                           // Permission denied
+    case  71: return L"磁盘未准备好";                         // Disk not ready
+    case  74: return L"不能以不同的驱动器重命名";               // Can't rename with different drive
+    case  75: return L"路径/文件访问错误";                     // Path/File access error
+    case  76: return L"找不到路径";                           // Path not found
+    case  91: return L"对象变量或With块变量未设置";             // Object variable or With block variable not set
+    case  92: return L"For循环未初始化";                      // For loop not initialized
+    case  93: return L"无效的模式字符串";                      // Invalid pattern string
+    case  94: return L"Null的使用无效";                       // Invalid use of Null
+
+    // ---- VB6 扩展运行时错误 (ErrNum 97~99) ----
+    case  97: return L"不能在对象上调用Friend过程";            // Can't call Friend procedure on an object which is not an instance of the defining class
+    case  98: return L"属性或方法调用不能包含对私有对象的引用";   // A property or method call cannot include a reference to a private object, either as an argument or as a return value
+    case  99: return L"断开连接时不允许操作";                   // Disconnected mode does not allow this operation
+
+    // ---- 资源文件错误 (ErrNum 310~331) ----
+    // 注: 旧表321应为310 (DLL STRINGTABLE ID 310 = "Invalid file format")
+    case 310: return L"无效的文件格式";                       // Invalid file format
+    case 311: return L"无法创建必要的临时文件";                // Can't create necessary temporary file
+    case 313: return L"无法在指定资源文件中找到资源";           // Can't find specified resource
+    case 316: return L"无法找到主资源文件";                    // Can't find primary resource
+    case 317: return L"资源文件名无效";                       // Invalid resource file name
+    case 318: return L"资源文件类型不匹配";                    // Resource file type mismatch
+    case 319: return L"资源文件已打开";                       // Resource file already open
+    case 320: return L"资源文件中不允许自定义格式";             // Custom format not allowed in resource file
+    case 321: return L"无效的文件格式";                       // Invalid file format (same desc as 310, different context)
+    case 322: return L"无法创建必要的临时文件";                // Can't create necessary temporary file (duplicate of 311 for COM context)
+    case 325: return L"资源文件中格式无效";                    // Invalid format in resource file
+    case 327: return L"找不到命名的数据值";                   // Data value named not found
+    case 328: return L"参数无效, 无效的参数列表";              // Invalid parameter, invalid parameter list
+    case 329: return L"参数顺序无效";                         // Invalid parameter order
+    case 330: return L"参数不可选";                           // Parameter not optional
+    case 331: return L"错误的参数个数或无效的属性赋值";         // Wrong number of arguments or invalid property assignment
+
+    // ---- 组件注册错误 (ErrNum 335~345) ----
+    case 335: return L"不能访问系统注册表";                    // Can't access system Registry
+    case 336: return L"ActiveX组件未正确注册";                // ActiveX component not correctly registered
+    case 337: return L"找不到ActiveX组件";                    // ActiveX component not found
+    case 338: return L"ActiveX组件不能正确运行";               // ActiveX component did not run correctly
+    case 339: return L"组件'%'未正确注册或文件缺失";           // Component '%' not correctly registered or file missing
+    case 340: return L"控件数组中该控件已存在";                // Control array element already exists
+    case 341: return L"控件数组索引无效";                     // Invalid control array index
+    case 342: return L"没有足够的空间分配给控件数组";          // Not enough space for control array
+    case 343: return L"对象不是控件数组";                     // Object is not a control array
+    case 344: return L"必须为控件数组指定索引";               // Must specify index for control array
+    case 345: return L"无法在对象中创建控件数组";              // Can't create control array in this object
+
+    // ---- 窗体/对象加载错误 (ErrNum 360~374) ----
+    case 360: return L"对象已加载";                           // Object already loaded
+    case 361: return L"不能加载或卸载此对象";                  // Can't load or unload this object
+    case 362: return L"无法卸载设计时创建的控件";              // Can't unload design-time created control
+    case 363: return L"找不到指定的ActiveX控件";              // Specified ActiveX control not found
+    case 364: return L"对象已卸载";                           // Object was unloaded
+    case 365: return L"在此上下文中无法卸载";                  // Unable to unload within this context
+    case 366: return L"对象不支持此操作";                     // Object doesn't support this operation
+    case 367: return L"不能加载控件'; License问题";           // Can't load control; license problem
+    case 368: return L"指定文件已过期";                       // Specified file is out of date
+    case 371: return L"指定的对象不能用作窗体的主对象";         // The specified object can't be used as the main form for this object
+    case 372: return L"无法加载控件';版本不兼容";             // Can't load control; version incompatible
+    case 373: return L"无法加载控件';不支持此平台";            // Can't load control; platform not supported
+    case 374: return L"无法加载控件';文件版本不正确";          // Can't load control; wrong file version
+
+    // ---- 属性错误 (ErrNum 380~399) ----
+    case 380: return L"属性值无效";                           // Invalid property value
+    case 381: return L"属性数组索引无效";                     // Invalid property array index
+    case 382: return L"运行时不能设置属性";                   // Property can't be set at runtime
+    case 383: return L"属性为只读";                           // Property is read-only
+    case 384: return L"窗体最小化或最大化时不能修改属性";       // Property can't be modified when form is minimized/maximized
+    case 385: return L"需要属性数组索引";                     // Need property array index
+    case 386: return L"运行时不能获取属性";                   // Property can't be read at runtime
+    case 387: return L"属性不允许设置";                       // Property not settable
+    case 388: return L"不能在菜单上设置Visible属性";           // Can't set Visible property from Show/Hide
+    case 393: return L"运行时不能获取属性";                   // Property can't be read at runtime (Get not supported)
+    case 394: return L"属性为只写";                           // Property is write-only
+    case 395: return L"在菜单上不能使用分隔条";                // Can't use separator bar on this menu
+    case 396: return L"属性页不可用";                         // Property page not available
+    case 397: return L"属性值无效";                           // Invalid property value (design-time)
+    case 398: return L"属性值无效";                           // Invalid property value (read-only)
+    case 399: return L"无法获取属性";                         // Can't get property
+
+    // ---- 模态窗体错误 (ErrNum 400~406) ----
+    case 400: return L"窗体已显示为模态,不能再次显示";         // Form already displayed; can't show modally
+    case 401: return L"模态窗体关闭前不能显示非模态窗体";      // Can't show non-modal form when modal form is displayed
+    case 402: return L"必须先关闭或隐藏最上层模态窗体";        // Must close or hide topmost modal form first
+    case 403: return L"不能以模态方式显示MDI子窗体";           // Can't show modal form as MDI child
+    case 404: return L"不能在模态窗体显示时显示非模态窗体";     // Can't show non-modal form when modal is showing
+    case 406: return L"模态窗体关闭后才能执行此操作";          // Can't execute this operation while modal form is open
+
+    // ---- 对象权限错误 (ErrNum 419~424) ----
+    case 419: return L"不允许使用此对象";                     // Object use not allowed
+    case 420: return L"无效的对象引用";                       // Invalid object reference
+    case 421: return L"此对象没有当前可用的方法";              // No currently active object method
+    case 422: return L"找不到属性";                           // Property not found
+    case 423: return L"找不到属性或方法";                     // Property or method not found
+    case 424: return L"需要对象";                             // Object required
+
+    // ---- COM/ActiveX错误 (ErrNum 429~463) ----
+    case 429: return L"ActiveX组件不能创建对象";               // ActiveX component can't create object
+    case 430: return L"类不支持自动化或不支持预期接口";         // Class doesn't support Automation or expected interface
+    case 432: return L"自动化操作期间找不到文件名或类名";       // File name or class name not found during Automation operation
+    case 438: return L"对象不支持此属性或方法";                // Object doesn't support this property or method
+    case 440: return L"自动化错误";                           // Automation error
+    case 441: return L"不能在只读属性上赋值";                  // Can't set read-only property
+    case 443: return L"自动化对象没有默认值";                  // Automation object doesn't have a default value
+    case 445: return L"对象不支持此操作";                      // Object doesn't support this action
+    case 446: return L"对象不支持命名参数";                    // Object doesn't support named arguments
+    case 447: return L"对象不支持当前区域设置";                // Object doesn't support current locale setting
+    case 448: return L"找不到命名参数";                        // Named argument not found
+    case 449: return L"参数不是可选的";                        // Argument not optional
+    case 450: return L"参数个数错误或属性赋值无效";            // Wrong number of arguments or invalid property assignment
+    case 451: return L"Property let过程未定义,Property get未返回对象"; // Property let procedure not defined and Property get procedure did not return an object
+    case 452: return L"无效的序号";                            // Invalid ordinal
+    case 453: return L"找不到指定的DLL函数";                   // Specified DLL function not found
+    case 454: return L"代码资源锁定错误";                      // Code resource lock error
+    case 455: return L"代码资源锁定错误";                      // Code resource lock error (duplicate)
+    case 457: return L"此键已经与该集合的一个元素关联";         // This key is already associated with an element of this collection
+    case 458: return L"变量使用了Visual Basic不支持的自动化类型"; // Variable uses an Automation type not supported in Visual Basic
+    case 459: return L"对象或类不支持事件集";                  // Object or class does not support the set of events
+    case 460: return L"剪贴板格式无效";                        // Invalid Clipboard format
+    case 461: return L"找不到方法或数据成员";                   // Method or data member not found
+    case 462: return L"远程服务器机器不存在或不可用";           // The remote server machine does not exist or is unavailable
+    case 463: return L"类未在本地机器上注册";                  // Class not registered on local machine
+
+    // ---- 图片/打印机错误 (ErrNum 481~490) ----
+    case 481: return L"图片无效";                              // Invalid picture
+    case 482: return L"打印机错误";                            // Printer error
+    case 483: return L"打印机驱动程序不支持指定属性";           // Printer driver does not support specified property
+    case 484: return L"从打印机系统获取信息时出错";             // Problem getting printer information from the system
+    case 485: return L"无效的图片类型";                        // Invalid picture type (旧表误为735)
+    case 486: return L"不能从指定文件加载图片";                 // Can't load picture from specified file (旧表误为744)
+    case 487: return L"不能将图片保存为指定格式";               // Can't save picture in specified format (旧表误为746)
+    case 488: return L"无效的图片大小";                        // Invalid picture size
+    case 489: return L"不能在此打印机上打印";                  // Can't print on this printer
+    case 490: return L"打印窗体时出错";                        // Error printing form
+
+    // ---- 剪贴板错误 (ErrNum 520~521) ----
+    case 520: return L"不能清除剪贴板";                        // Can't empty Clipboard
+    case 521: return L"不能打开剪贴板";                        // Can't open Clipboard
+
+    // ---- DDE错误 (ErrNum 1260~1298) ----
+    case 1260: return L"无法访问源应用程序";                    // Can't access source application
+    case 1261: return L"无法访问主题";                         // Can't access topic
+    case 1262: return L"无法访问项目";                         // Can't access item
+    case 1263: return L"无法访问项";                           // Can't access item (alias)
+    case 1264: return L"无法访问源应用程序";                   // Can't access source application (alias)
+    case 1265: return L"无法访问主题";                         // Can't access topic (alias)
+    case 1266: return L"没有应用程序响应DDE发起";              // No application responds to DDE initiate
+    case 1267: return L"太多应用程序响应DDE发起";              // Too many applications respond to DDE initiate
+    case 1268: return L"找不到DDE源";                          // DDE source not found
+    case 1269: return L"不能在MDI窗体上使用DDE";               // Can't use DDE on MDI form
+    case 1270: return L"外部DDE过程异常终止";                  // Foreign application won't perform DDE
+    case 1271: return L"外部DDE过程被拒绝";                    // Foreign application won't perform DDE (rejected)
+    case 1272: return L"外部DDE过程超时";                      // DDE transaction timed out
+    case 1273: return L"共享DDE过程中出错";                    // Error in shared DDE
+    case 1274: return L"不能在控件上设置LinkMode";              // Can't set LinkMode on this control
+    case 1275: return L"LinkTopic必须是有效主题";               // LinkTopic must be a valid topic
+    case 1276: return L"不能在MDI窗体上执行DDE方法";            // Can't perform DDE method on MDI form
+    case 1277: return L"控件上不允许DDE操作";                   // DDE operations not allowed on control
+    case 1278: return L"不能在MDI窗体上更改DDE属性";            // Can't change DDE property on MDI form
+    case 1279: return L"不能在菜单控件上执行DDE操作";           // Can't perform DDE operation on menu control
+    case 1280: return L"源没有数据";                           // Source has no data
+    case 1281: return L"不能设置LinkTimeout值";                // Can't set LinkTimeout value
+    case 1282: return L"不能设置LinkItem值";                   // Can't set LinkItem value
+    case 1283: return L"不能设置LinkTopic值";                  // Can't set LinkTopic value
+    case 1284: return L"不能设置LinkMode值";                   // Can't set LinkMode value
+    case 1285: return L"不能设置DDE属性";                      // Can't set DDE property
+    case 1286: return L"不能读取DDE属性";                      // Can't read DDE property
+    case 1287: return L"不能访问源";                           // Can't access source
+    case 1288: return L"不能访问主题";                         // Can't access topic
+    case 1289: return L"不能访问项";                           // Can't access item
+    case 1290: return L"不能访问项";                           // Can't access item
+    case 1291: return L"不能访问源应用程序";                   // Can't access source application
+    case 1292: return L"不能访问主题";                         // Can't access topic
+    case 1293: return L"不能访问项";                           // Can't access item
+    case 1294: return L"不能访问项";                           // Can't access item
+    case 1295: return L"不能访问源应用程序";                   // Can't access source application
+    case 1296: return L"不能访问主题";                         // Can't access topic
+    case 1297: return L"不能访问项";                           // Can't access item
+    case 1298: return L"不能访问项";                           // Can't access item
+
+    // ---- 文件名/资源错误 (ErrNum 1320~1326) ----
+    case 1320: return L"无效的文件名";                         // Invalid file name
+    case 1321: return L"无效的文件格式";                       // Invalid file format
+    case 1322: return L"文件名冲突";                           // File name conflict
+    case 1323: return L"文件已存在";                           // File already exists
+    case 1324: return L"找不到文件";                           // File not found
+    case 1325: return L"路径未找到";                           // Path not found
+    case 1326: return L"路径无效";                             // Invalid path
+
+    // ---- 组件/控件扩展错误 (ErrNum 1335~1728) ----
+    case 1335: return L"控件不支持此属性";                     // Control doesn't support this property
+    case 1336: return L"控件数组无效";                         // Invalid control array
+    case 1337: return L"控件已在窗体上";                       // Control already on form
+    case 1338: return L"控件类无效";                           // Invalid control class
+    case 1339: return L"无效的控件类";                         // Invalid control class (detail)
+    case 1340: return L"控件名称无效";                         // Invalid control name
+    case 1341: return L"不能在控件上使用此方法";               // Can't use this method on this control
+    case 1342: return L"控件数组索引无效";                     // Invalid control array index
+    case 1343: return L"控件数组元素不存在";                   // Control array element doesn't exist
+    case 1344: return L"控件的容器无效";                       // Invalid control container
+    case 1345: return L"不能在此上下文中使用控件";              // Can't use control in this context
+    case 1500: return L"控件不能正确加载";                     // Control could not be loaded properly
+    case 1501: return L"找不到控件";                           // Control not found
+    case 1502: return L"控件已加载";                           // Control already loaded
+    case 1503: return L"控件不能卸载";                         // Control can't be unloaded
+    case 1504: return L"控件名称冲突";                         // Control name conflict
+    case 1505: return L"控件类型不匹配";                       // Control type mismatch
+    case 1506: return L"不能在MDI窗体上放置此控件";            // Can't place this control on MDI form
+    case 1507: return L"控件不支持此事件";                     // Control doesn't support this event
+    case 1508: return L"控件不支持此方法";                     // Control doesn't support this method
+    case 1509: return L"控件的属性不能在此设置";               // Control property can't be set here
+    case 1510: return L"窗体上已有同名控件";                   // Control with same name already exists on form
+    case 1511: return L"控件未找到";                           // Control not found
+    case 1512: return L"不能移动控件到另一个容器";              // Can't move control to another container
+    case 1513: return L"控件的父对象无效";                     // Invalid parent for control
+    case 1514: return L"控件不能添加到此集合";                  // Can't add control to this collection
+    case 1515: return L"控件不在集合中";                       // Control not in collection
+    case 1516: return L"控件集合只读";                         // Control collection is read-only
+    case 1517: return L"不能修改控件的父对象";                  // Can't modify control's parent
+    case 1600: return L"不能加载或卸载此对象";                  // Can't load or unload this object
+    case 1601: return L"对象不能正确注册";                     // Object not correctly registered
+    case 1602: return L"对象类无效";                           // Invalid object class
+    case 1603: return L"对象的License无效";                    // Invalid object license
+    case 1604: return L"对象的版本不兼容";                     // Object version incompatible
+    case 1605: return L"对象不支持此接口";                     // Object doesn't support this interface
+    case 1606: return L"对象不支持此事件";                     // Object doesn't support this event
+    case 1607: return L"对象不支持此属性";                     // Object doesn't support this property
+    case 1608: return L"对象不支持此方法";                     // Object doesn't support this method
+    case 1609: return L"对象不支持此操作";                     // Object doesn't support this operation
+    case 1610: return L"对象类未注册";                         // Object class not registered
+    case 1611: return L"对象不能正确运行";                     // Object can't run correctly
+    case 1612: return L"对象的TypeLib无效";                   // Invalid object TypeLib
+    case 1613: return L"找不到对象";                           // Object not found
+    case 1700: return L"编译错误: 缺少对象";                   // Compilation error: object missing
+    case 1701: return L"编译错误: 缺少类型库";                // Compilation error: type library missing
+    case 1702: return L"编译错误: 类型不匹配";                // Compilation error: type mismatch
+    case 1703: return L"编译错误: 方法未找到";                // Compilation error: method not found
+    case 1704: return L"编译错误: 属性未找到";                // Compilation error: property not found
+    case 1705: return L"编译错误: 事件未找到";                // Compilation error: event not found
+    case 1706: return L"编译错误: 接口未找到";                // Compilation error: interface not found
+    case 1707: return L"编译错误: 类未注册";                  // Compilation error: class not registered
+    case 1708: return L"编译错误: 参数无效";                  // Compilation error: invalid parameter
+    case 1709: return L"编译错误: 返回类型无效";              // Compilation error: invalid return type
+    case 1720: return L"自动化类型不兼容";                     // Automation type incompatible
+    case 1721: return L"自动化对象无效";                       // Invalid automation object
+    case 1722: return L"自动化服务器不存在";                   // Automation server not found
+    case 1723: return L"自动化服务器不可用";                   // Automation server unavailable
+    case 1724: return L"自动化操作失败";                       // Automation operation failed
+    case 1725: return L"自动化连接失败";                       // Automation connection failed
+    case 1726: return L"自动化超时";                           // Automation timeout
+    case 1727: return L"自动化调用被拒绝";                     // Automation call rejected
+    case 1728: return L"自动化调用被取消";                     // Automation call canceled
+
+    default: return NULL;
     }
 }
 
@@ -218,7 +439,6 @@ void* vb6_CreateObject(const wchar_t* progId) {
             swprintf(buf429b, 512, L"ActiveX component can't create object (ProgID: %ls, HRESULT: 0x%08lX)", progId, (unsigned long)hr);
             desc429 = SysAllocString(buf429b);
         }
-        vb6_RaiseError(429, desc429);
         vb6_RaiseError(429, desc429);
         return NULL;
     }
