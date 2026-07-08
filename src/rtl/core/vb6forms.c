@@ -1830,21 +1830,21 @@ void vb6_SetControlPictureFromCom(void* hwnd, void* pPictureDisp) {
     hr = pPic->lpVtbl->get_Handle(pPic, &hOle);
     if (FAILED(hr) || !hOle) { pPic->lpVtbl->Release(pPic); return; }
     if (nType == 1) {
-        // Bitmap: OLE_HANDLE is HBITMAP
-        vb6_SetControlPicture(hwnd, (void*)(HANDLE)hOle);
+        // Bitmap: OLE_HANDLE is HBITMAP (use UINT_PTR to avoid C4312 truncation warning)
+        vb6_SetControlPicture(hwnd, (void*)(UINT_PTR)hOle);
     } else if (nType == 3) {
         // Icon: OLE_HANDLE is HICON - set as icon on STATIC
         HWND hw = (HWND)hwnd;
-        SetPropW(hw, L"VB6_Picture", (HANDLE)hOle);
+        SetPropW(hw, L"VB6_Picture", (HANDLE)(UINT_PTR)hOle);
         LONG style = GetWindowLongW(hw, GWL_STYLE);
         style &= ~(SS_BITMAP | SS_ICON | SS_ENHMETAFILE);
         style |= SS_ICON | SS_CENTERIMAGE;
         SetWindowLongW(hw, GWL_STYLE, style);
-        SendMessageW(hw, STM_SETIMAGE, (WPARAM)IMAGE_ICON, (LPARAM)hOle);
+        SendMessageW(hw, STM_SETIMAGE, (WPARAM)IMAGE_ICON, (LPARAM)(UINT_PTR)hOle);
         InvalidateRect(hw, NULL, TRUE);
     } else {
-        // Metafile or other - try as bitmap
-        vb6_SetControlPicture(hwnd, (void*)(HANDLE)hOle);
+        // Metafile or other - try as bitmap (use UINT_PTR to avoid C4312)
+        vb6_SetControlPicture(hwnd, (void*)(UINT_PTR)hOle);
     }
     pPic->lpVtbl->Release(pPic);
 }

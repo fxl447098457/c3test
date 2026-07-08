@@ -481,8 +481,8 @@ BSTR vb6_Oct(int32_t n);
 // P18-A: 兼容性填平 — 新增RTL函数
 int64_t vb6_CCur(double v);            // CCur: value * 10000
 vb6_VARIANT vb6_CDec(vb6_VARIANT v);     // P20-07: CDec返回真实DECIMAL (vt=14)
-int32_t vb6_RGB(int32_t r, int32_t g, int32_t b);  // RGB: OLE color
-int32_t vb6_QBColor(int32_t n);        // QBColor: 16-color lookup
+long vb6_RGB(int32_t r, int32_t g, int32_t b);  // RGB: OLE color
+long vb6_QBColor(int32_t n);        // QBColor: 16-color lookup
 double vb6_FileDateTime(BSTR pathname); // FileDateTime: 文件修改时间→VB6 date serial
 int32_t vb6_FileLen(BSTR pathname);    // FileLen: 文件大小(字节)
 void   vb6_SendKeys(BSTR keys, int32_t wait);    // SendKeys: 发送按键
@@ -737,7 +737,7 @@ double vb6_IRR(void* valuesArray, double guess);
 double vb6_MIRR(void* valuesArray, double financeRate, double reinvestRate);
 
 // P20-37: Registry functions (VB6: SaveSetting/GetSetting/DeleteSetting/GetAllSettings)
-// VB6 registry path: HKEY_CURRENT_USER\Software\VB and VBA Program Settings\
+// VB6 registry path: HKEY_CURRENT_USER\Software\VB and VBA Program Settings
 void vb6_SaveSetting(BSTR appName, BSTR section, BSTR key, BSTR setting);
 BSTR vb6_GetSetting(BSTR appName, BSTR section, BSTR key, BSTR default_);
 void vb6_DeleteSetting(BSTR appName, BSTR section, BSTR key);

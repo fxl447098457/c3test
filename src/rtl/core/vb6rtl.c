@@ -293,23 +293,23 @@ BSTR vb6_CStr(vb6_VARIANT x) {
 
 // M22: typed CStr overloads (C has no overloading, use suffix)
 BSTR vb6_CStrLong(int32_t x) {
-    vb6_VARIANT v; memset(&v, 0, sizeof(v)); v.vt = VT_I4; v.lVal = x;
+    vb6_VARIANT v; memset(&v, 0, sizeof(v)); v.vt = (vb6_vartype)VT_I4; v.lVal = x;
     return vb6_Format(v, NULL);
 }
 BSTR vb6_CStrDbl(double x) {
-    vb6_VARIANT v; memset(&v, 0, sizeof(v)); v.vt = VT_R8; v.dblVal = x;
+    vb6_VARIANT v; memset(&v, 0, sizeof(v)); v.vt = (vb6_vartype)VT_R8; v.dblVal = x;
     return vb6_Format(v, NULL);
 }
 BSTR vb6_CStrBool(int16_t x) {
-    vb6_VARIANT v; memset(&v, 0, sizeof(v)); v.vt = VT_BOOL; v.boolVal = x;
+    vb6_VARIANT v; memset(&v, 0, sizeof(v)); v.vt = (vb6_vartype)VT_BOOL; v.boolVal = x;
     return vb6_Format(v, NULL);
 }
 BSTR vb6_CStrByte(uint8_t x) {
-    vb6_VARIANT v; memset(&v, 0, sizeof(v)); v.vt = VT_UI1; v.bVal = x;
+    vb6_VARIANT v; memset(&v, 0, sizeof(v)); v.vt = (vb6_vartype)VT_UI1; v.bVal = x;
     return vb6_Format(v, NULL);
 }
 BSTR vb6_CStrDate(double x) {
-    vb6_VARIANT v; memset(&v, 0, sizeof(v)); v.vt = VT_DATE; v.dblVal = x;
+    vb6_VARIANT v; memset(&v, 0, sizeof(v)); v.vt = (vb6_vartype)VT_DATE; v.dblVal = x;
     return vb6_Format(v, NULL);
 }
 // ============================================================
@@ -3434,7 +3434,7 @@ vb6_VARIANT vb6_CallByName(void* obj, const wchar_t* procName, int32_t callType,
                            void* args, int32_t argc) {
     vb6_VARIANT result;
     memset(&result, 0, sizeof(result));
-    result.vt = VT_EMPTY;
+    result.vt = (vb6_vartype)VT_EMPTY;
 
     if (!obj || !procName) return result;
 
