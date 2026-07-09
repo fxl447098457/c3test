@@ -3230,13 +3230,13 @@ void vb6_ErrRaiseNumber(int32_t errNum) {
 
 static double vb6_VarToDouble_internal(vb6_VARIANT* v) {
     if (!v) return 0.0;
-    switch (v->vt) {
-        case VT_I2: return (double)v->iVal;
-        case VT_I4: return (double)v->lVal;
-        case VT_R4: return (double)v->fltVal;
-        case VT_R8: return v->dblVal;
-        case VT_BOOL: return v->boolVal ? -1.0 : 0.0;
-        case VT_BSTR: {
+    switch ((vb6_vartype)v->vt) {
+        case (vb6_vartype)VT_I2: return (double)v->iVal;
+        case (vb6_vartype)VT_I4: return (double)v->lVal;
+        case (vb6_vartype)VT_R4: return (double)v->fltVal;
+        case (vb6_vartype)VT_R8: return v->dblVal;
+        case (vb6_vartype)VT_BOOL: return v->boolVal ? -1.0 : 0.0;
+        case (vb6_vartype)VT_BSTR: {
             if (!v->bstrVal) return 0.0;
             return wcstod(v->bstrVal, NULL);
         }
@@ -3245,7 +3245,7 @@ static double vb6_VarToDouble_internal(vb6_VARIANT* v) {
 }
 
 static int32_t vb6_VarIsString(vb6_VARIANT* v) {
-    return v && v->vt == VT_BSTR;
+    return v && v->vt == (vb6_vartype)VT_BSTR;
 }
 
 int32_t vb6_VarCmpEq(vb6_VARIANT* a, vb6_VARIANT* b) {
@@ -3290,12 +3290,12 @@ int32_t vb6_VarCmpGe(vb6_VARIANT* a, vb6_VARIANT* b) {
 }
 
 // Variant vs Long (常见场景: If v > 0 Then)
-int32_t vb6_VarCmpLongEq(vb6_VARIANT* a, int32_t b) { vb6_VARIANT vb; memset(&vb, 0, sizeof(vb)); vb.vt = VT_I4; vb.lVal = b; return vb6_VarCmpEq(a, &vb); }
-int32_t vb6_VarCmpLongNe(vb6_VARIANT* a, int32_t b) { vb6_VARIANT vb; memset(&vb, 0, sizeof(vb)); vb.vt = VT_I4; vb.lVal = b; return vb6_VarCmpNe(a, &vb); }
-int32_t vb6_VarCmpLongLt(vb6_VARIANT* a, int32_t b) { vb6_VARIANT vb; memset(&vb, 0, sizeof(vb)); vb.vt = VT_I4; vb.lVal = b; return vb6_VarCmpLt(a, &vb); }
-int32_t vb6_VarCmpLongGt(vb6_VARIANT* a, int32_t b) { vb6_VARIANT vb; memset(&vb, 0, sizeof(vb)); vb.vt = VT_I4; vb.lVal = b; return vb6_VarCmpGt(a, &vb); }
-int32_t vb6_VarCmpLongLe(vb6_VARIANT* a, int32_t b) { vb6_VARIANT vb; memset(&vb, 0, sizeof(vb)); vb.vt = VT_I4; vb.lVal = b; return vb6_VarCmpLe(a, &vb); }
-int32_t vb6_VarCmpLongGe(vb6_VARIANT* a, int32_t b) { vb6_VARIANT vb; memset(&vb, 0, sizeof(vb)); vb.vt = VT_I4; vb.lVal = b; return vb6_VarCmpGe(a, &vb); }
+int32_t vb6_VarCmpLongEq(vb6_VARIANT* a, int32_t b) { vb6_VARIANT vb; memset(&vb, 0, sizeof(vb)); vb.vt = (vb6_vartype)VT_I4; vb.lVal = b; return vb6_VarCmpEq(a, &vb); }
+int32_t vb6_VarCmpLongNe(vb6_VARIANT* a, int32_t b) { vb6_VARIANT vb; memset(&vb, 0, sizeof(vb)); vb.vt = (vb6_vartype)VT_I4; vb.lVal = b; return vb6_VarCmpNe(a, &vb); }
+int32_t vb6_VarCmpLongLt(vb6_VARIANT* a, int32_t b) { vb6_VARIANT vb; memset(&vb, 0, sizeof(vb)); vb.vt = (vb6_vartype)VT_I4; vb.lVal = b; return vb6_VarCmpLt(a, &vb); }
+int32_t vb6_VarCmpLongGt(vb6_VARIANT* a, int32_t b) { vb6_VARIANT vb; memset(&vb, 0, sizeof(vb)); vb.vt = (vb6_vartype)VT_I4; vb.lVal = b; return vb6_VarCmpGt(a, &vb); }
+int32_t vb6_VarCmpLongLe(vb6_VARIANT* a, int32_t b) { vb6_VARIANT vb; memset(&vb, 0, sizeof(vb)); vb.vt = (vb6_vartype)VT_I4; vb.lVal = b; return vb6_VarCmpLe(a, &vb); }
+int32_t vb6_VarCmpLongGe(vb6_VARIANT* a, int32_t b) { vb6_VARIANT vb; memset(&vb, 0, sizeof(vb)); vb.vt = (vb6_vartype)VT_I4; vb.lVal = b; return vb6_VarCmpGe(a, &vb); }
 
 
 void vb6_RaiseError(int32_t errNum, BSTR description) {

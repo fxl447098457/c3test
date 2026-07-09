@@ -1,4 +1,4 @@
-﻿#include "backend/cgen.hpp"
+#include "backend/cgen.hpp"
 #include <algorithm>
 #include <cctype>
 #include <iostream>
@@ -891,6 +891,7 @@ void CCodeGen::visit(SetStmt& node) {
                     std::string iidStr = srcClsSym->comSourceIfaceIid;
                     c_.emitLine("static int " + targetLower + "_evt_cookie = 0;");
                     c_.emitLine("static const char* " + targetLower + "_evt_iid = \"" + iidStr + "\";");
+                    c_.emitLine("if (" + targetLower + "_evt_cookie != 0) { vb6_ComUnadvise((IUnknown*)" + target + ", " + targetLower + "_evt_iid, " + targetLower + "_evt_cookie); " + targetLower + "_evt_cookie = 0; }");
                     c_.emitLine("vb6_ComAdvise((IUnknown*)" + target + ", " + targetLower + "_evt_iid, " + sinkVar + ", &" + targetLower + "_evt_cookie);");
                 }
             c_.dedent();
