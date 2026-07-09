@@ -39,6 +39,7 @@ typedef void (*vb6_TimerCallback)(void);
 #define VB6_MAX_TIMERS 32
 static struct {
     int timerId;
+    HWND hwnd;                  // P24-Timer: 关联的窗体句柄 (窗口关联定时器)
     vb6_TimerCallback callback;
 } g_timerTable[VB6_MAX_TIMERS];
 static int g_timerCount = 0;
@@ -184,24 +185,45 @@ void vb6_ResetControlId(void) {
 // Timer管理
 // ============================================================
 
-int vb6_SetTimer(int interval, void* callback) {
+int vb6_SetTimer(void* hwnd, int interval, void* callback) {
     if (g_timerCount >= VB6_MAX_TIMERS) return -1;
     int id = g_nextControlId++;
     g_timerTable[g_timerCount].timerId = id;
+    g_timerTable[g_timerCount].hwnd = (HWND)hwnd;
     g_timerTable[g_timerCount].callback = (vb6_TimerCallback)callback;
     g_timerCount++;
-    // 使用窗体句柄NULL + 定时器ID, 由消息循环分发
-    SetTimer(NULL, id, interval, NULL);
+    // P24-Timer: 使用窗口关联定时器, WM_TIMER由WndProc分发
+    SetTimer((HWND)hwnd, id, interval, NULL);
     return id;
 }
 
 void vb6_KillTimer(int timerId) {
-    KillTimer(NULL, timerId);
+    // P24-Timer: 鏌ユ壘鍏宠仈hwnd鐢ㄤ簬KillTimer
+    HWND killHwnd = NULL;
+    for (int i = 0; i < g_timerCount; i++) {
+        if (g_timerTable[i].timerId == timerId) {
+            killHwnd = g_timerTable[i].hwnd;
+            break;
+        }
+    }
+    KillTimer(killHwnd, timerId);
     // 从回调表移除
     for (int i = 0; i < g_timerCount; i++) {
         if (g_timerTable[i].timerId == timerId) {
             g_timerTable[i] = g_timerTable[g_timerCount - 1];
             g_timerCount--;
+            break;
+        }
+    }
+}
+
+// P24-Timer: WndProc中分发WM_TIMER (替代消息循环拦截)
+void vb6_DispatchTimer(int timerId) {
+    for (int i = 0; i < g_timerCount; i++) {
+        if (g_timerTable[i].timerId == timerId) {
+            if (g_timerTable[i].callback) {
+                g_timerTable[i].callback();
+            }
             break;
         }
     }
@@ -214,18 +236,7 @@ void vb6_KillTimer(int timerId) {
 int vb6_MessageLoop(void) {
     MSG msg;
     while (GetMessage(&msg, NULL, 0, 0)) {
-        // WM_TIMER: 查找回调表并调用
-        if (msg.message == WM_TIMER) {
-            int tid = (int)msg.wParam;
-            for (int i = 0; i < g_timerCount; i++) {
-                if (g_timerTable[i].timerId == tid) {
-                    if (g_timerTable[i].callback) {
-                        g_timerTable[i].callback();
-                    }
-                    break;
-                }
-            }
-        }
+        // P24-Timer: WM_TIMER现在由WndProc分发, 消息循环不再拦截
         TranslateMessage(&msg);
         DispatchMessage(&msg);
     }
@@ -236,18 +247,7 @@ int vb6_DoEvents(void) {
     MSG msg;
     int count = 0;
     while (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) {
-        // WM_TIMER: 查找回调表并调用
-        if (msg.message == WM_TIMER) {
-            int tid = (int)msg.wParam;
-            for (int i = 0; i < g_timerCount; i++) {
-                if (g_timerTable[i].timerId == tid) {
-                    if (g_timerTable[i].callback) {
-                        g_timerTable[i].callback();
-                    }
-                    break;
-                }
-            }
-        }
+        // P24-Timer: WM_TIMER现在由WndProc分发, DoEvents不再拦截
         TranslateMessage(&msg);
         DispatchMessage(&msg);
         count++;
@@ -297,18 +297,7 @@ void vb6_ShowForm(void* hwnd, int modal) {
         // 本地消息循环 (直到窗体被销毁)
         MSG msg;
         while (IsWindow((HWND)hwnd) && GetMessage(&msg, NULL, 0, 0)) {
-            // WM_TIMER分发
-            if (msg.message == WM_TIMER) {
-                int tid = (int)msg.wParam;
-                for (int i = 0; i < g_timerCount; i++) {
-                    if (g_timerTable[i].timerId == tid) {
-                        if (g_timerTable[i].callback) {
-                            g_timerTable[i].callback();
-                        }
-                        break;
-                    }
-                }
-            }
+            // P24-Timer: WM_TIMER现在由WndProc分发, 模态循环不再拦截
             // 模态Tab键导航 (IsDialogMessage处理对话框键盘导航)
             if (!IsDialogMessageA((HWND)hwnd, &msg)) {
                 TranslateMessage(&msg);

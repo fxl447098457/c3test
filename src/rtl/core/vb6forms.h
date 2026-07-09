@@ -73,10 +73,13 @@ void vb6_ResetControlId(void);
 // interval: 间隔毫秒 (VB6 Interval属性)
 // callback: 定时器回调函数 (Timer_Timer事件)
 // 返回: 定时器ID (用于vb6_KillTimer)
-int vb6_SetTimer(int interval, void* callback);
+int vb6_SetTimer(void* hwnd, int interval, void* callback);
 
 // 销毁定时器
 void vb6_KillTimer(int timerId);
+
+// P24-Timer: WndProc dispatch for WM_TIMER (generated WndProc calls this)
+void vb6_DispatchTimer(int timerId);
 
 // ============================================================
 // 消息循环

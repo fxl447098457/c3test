@@ -636,6 +636,21 @@ void CCodeGen::emitFormFramework(const FrmFormDesc& frmDesc, Module& module) {
     if (formLoadSym) {
         c_.emitLine("{ /* Form_Load */ extern void " + formLoadFn + "(); " + formLoadFn + "(); }");
     }
+    // P24-Timer: 在WM_CREATE中注册Timer (此时hwnd可用)
+    for (const auto& ctrl : frmDesc.formControl.children) {
+        if (ctrl.controlType == FrmControlType::Timer) {
+            int interval = 1000;
+            auto pIt = ctrl.properties.find("Interval");
+            if (pIt != ctrl.properties.end()) interval = (int)pIt->second.intValue;
+            int enabled = 1;
+            pIt = ctrl.properties.find("Enabled");
+            if (pIt != ctrl.properties.end()) enabled = (int)pIt->second.intValue;
+            std::string timerFn = cProcName(ctrl.controlName + "_Timer", AccessLevel::Private);
+            if (enabled) {
+                c_.emitLine("{ extern void " + timerFn + "(); vb6_SetTimer((void*)hwnd, " + std::to_string(interval) + ", (void*)" + timerFn + "); }");
+            }
+        }
+    }
     c_.emitLine("break;");
     c_.dedent();
     c_.emitLine("}");
@@ -847,7 +862,7 @@ void CCodeGen::emitFormFramework(const FrmFormDesc& frmDesc, Module& module) {
                     c_.emitLine("}");
                 }
             }
-            // Timer: 已通过SetTimer回调处理, 无需WndProc分发
+            // P24-Timer: WM_TIMER由WndProc分发 (不再由消息循环拦截)
             // HScrollBar/VScrollBar: 在WM_HSCROLL/WM_VSCROLL中处理(下方)
         }
         c_.dedent();
@@ -1187,6 +1202,14 @@ void CCodeGen::emitFormFramework(const FrmFormDesc& frmDesc, Module& module) {
             c_.emitLine("}");
         }
     }
+    // P24-Timer: WM_TIMER分发 (窗口关联定时器触发)
+    c_.emitLine("case WM_TIMER: {");
+    c_.indent();
+    c_.emitLine("vb6_DispatchTimer((int)wParam);");
+    c_.emitLine("break;");
+    c_.dedent();
+    c_.emitLine("}");
+
     // default: DefWindowProc (P7.7: MDI窗体使用DefFrameProc/DefMDIChildProc)
     c_.emitLine("default:");
     c_.indent();
@@ -1740,21 +1763,7 @@ ctrlId++;
             }
         }
     }
-    // P14.4.1c: Timer回调注册
-    for (const auto& ctrl : frmDesc.formControl.children) {
-        if (ctrl.controlType == FrmControlType::Timer) {
-            int interval = 1000;
-            auto pIt = ctrl.properties.find("Interval");
-            if (pIt != ctrl.properties.end()) interval = (int)pIt->second.intValue;
-            int enabled = 1;
-            pIt = ctrl.properties.find("Enabled");
-            if (pIt != ctrl.properties.end()) enabled = (int)pIt->second.intValue;
-            std::string timerFn = cProcName(ctrl.controlName + "_Timer", AccessLevel::Private);
-            if (enabled) {
-                c_.emitLine("{ extern void " + timerFn + "(); vb6_SetTimer(" + std::to_string(interval) + ", (void*)" + timerFn + "); }");
-            }
-        }
-    }
+
     // P18-F: 安装控件子类化 (在所有控件创建之后)
     {
         // 收集需要子类化的控件名(去重)
