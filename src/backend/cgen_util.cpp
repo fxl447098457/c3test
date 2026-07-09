@@ -800,12 +800,51 @@ bool CCodeGen::hasOnErrorInStmts(StmtList& stmts) const {
 // ============================================================
 
 std::string CCodeGen::resolveComValue(const std::string& unpackType) {
-    // 将COM标记解析为C值表达式
-    // 使用一体化辅助函数 (内部处理VARIANT清理, 无内存泄露)
+    // P24-07: 早期绑定 — 利用签名returnType选择正确的解包函数
     if (!isComMarker_) return lastExpr_;
 
     std::string objExpr = std::move(comObjExpr_);
     std::string memberName = std::move(comMemberName_);
+
+    // P24-07: 早期绑定推断 — 利用TypeLib签名的returnType决策
+    if (isEarlyBoundCom_ && earlyBoundSym_) {
+        isEarlyBoundCom_ = false;
+        const Symbol* comSym = earlyBoundSym_;
+        earlyBoundSym_ = nullptr;
+        std::string memLower = memberName;
+        std::transform(memLower.begin(), memLower.end(), memLower.begin(), ::tolower);
+        auto it = comSym->comMethods.find(memLower);
+        if (it != comSym->comMethods.end()) {
+            const auto& sig = it->second;
+            std::string returnType = mapType(sig.returnType);
+            std::string getPropArgs = objExpr + ", L\"" + memberName + "\"";
+            if (returnType == "BSTR") {
+                lastExpr_ = "vb6_ComGetStringProp(" + getPropArgs + ")";
+            } else if (returnType == "int32_t" || returnType == "int16_t") {
+                lastExpr_ = "vb6_ComGetIntProp(" + getPropArgs + ")";
+            } else if (returnType == "double" || returnType == "float") {
+                lastExpr_ = "vb6_ComGetDoubleProp(" + getPropArgs + ")";
+            } else if (returnType == "void*") {
+                lastExpr_ = "vb6_ComGetObjectProp(" + getPropArgs + ")";
+            } else {
+                // P24-07: 未知返回类型(如Enum→UserDefinedType) → 按目标变量类型选择
+                if (unpackType == "BSTR") {
+                    lastExpr_ = "vb6_ComGetStringProp(" + getPropArgs + ")";
+                } else if (unpackType == "Int" || unpackType == "Long" || unpackType == "Boolean") {
+                    lastExpr_ = "vb6_ComGetIntProp(" + getPropArgs + ")";
+                } else if (unpackType == "Double" || unpackType == "Single") {
+                    lastExpr_ = "vb6_ComGetDoubleProp(" + getPropArgs + ")";
+                } else if (unpackType == "Object") {
+                    lastExpr_ = "vb6_ComGetObjectProp(" + getPropArgs + ")";
+                } else {
+                    lastExpr_ = "vb6_VariantFromComResult(vb6_ComCall(" + objExpr + ", L\"" + memberName + "\", NULL, 0))";
+                }
+            }
+            isComMarker_ = false;
+            return lastExpr_;
+        }
+    }
+    isEarlyBoundCom_ = false;
     isComMarker_ = false;
 
     std::string getPropArgs = objExpr + ", L\"" + memberName + "\"";
@@ -826,7 +865,6 @@ std::string CCodeGen::resolveComValue(const std::string& unpackType) {
         lastExpr_ = "vb6_ComGetStringProp(" + getPropArgs + ")";
     }
     return lastExpr_;
-
 }
 
 std::string CCodeGen::comPackExpr(Expr& expr) {
@@ -1278,3 +1316,4 @@ std::string CCodeGen::wrapVariantValue(ASTNode* valueNode, const std::string& cE
 }
 
 } // namespace vb6c3
+

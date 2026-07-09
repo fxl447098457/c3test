@@ -781,6 +781,7 @@ void vb6_ComSetRef(void* disp, const wchar_t* propName, void* objRef);
 // 实际实现在vb6com.c, 此处用void*避免vb6_VARIANT类型冲突
 void* vb6_ComPackBSTR(const wchar_t* bstr);
 void* vb6_ComPackInt(int32_t val);
+void* vb6_ComPackBool(int32_t val);
 void* vb6_ComPackDouble(double val);
 void* vb6_ComPackObject(void* obj);
 wchar_t* vb6_ComUnpackBSTR(void* variant);

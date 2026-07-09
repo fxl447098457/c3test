@@ -350,7 +350,7 @@ End Sub
 
 Private Sub Form_Load()
     Dim a As String * 10, i As Long, b
-'    List1.AddItem "Í¼Æ¬£º" & ImageList1.ListImages.Count
+    List1.AddItem "Í¼Æ¬£º" & ImageList1.ListImages.Count
     For i = 0 To 10
         LSet a = "µÈµÈ"
         List1.AddItem a & Now
@@ -369,6 +369,6 @@ End Sub
 Private Sub Timer1_Timer()
     Static i As Long
     If i = 0 Or i = 6 Then i = 1
-'    Picture2.Picture = ImageList1.ListImages(i).Picture
+    Picture2.Picture = ImageList1.ListImages(i).Picture
     i = i + 1
 End Sub

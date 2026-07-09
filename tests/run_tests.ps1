@@ -1,4 +1,4 @@
-# c3 编译器集成测试框架
+﻿# c3 编译器集成测试框架
 # 用法: .\run_tests.ps1 [-Category <all|compile|run|syntax>] [-Verbose]
 #
 # 测试分类:
@@ -305,6 +305,8 @@ if ($Category -in @("all", "run")) {
     
     Test-Run "test_p24" "$Tests\test_p24.bas" @("P24-01a:OK", "P24-01b:OK", "P24-01c:OK", "P24-03a:OK", "P24-03b:OK", "P24:5/5")
     Test-Vbp "test_vbman" "$Tests\test_vbman\test_vbman.vbp" @("P24-04a:OK", "P24-04b:OK", "P24-04:2/2") -Arch "x86"
+    Test-Run "test_earlybound2" "$Tests\test_earlybound2.bas" @("EB2-1:OK", "EB2-7:DriveType=2", "EB2-8:OK", "EB2-10:OK", "EB2:10/10") -Arch "x86"
+    Test-Run "test_not_com" "$Tests\test_not_com.bas" @("NOT-COM:OK", "NOT-COM2:OK", "NOT-COM:PASS") -Arch "x86"
     Write-Host ""
 }
 

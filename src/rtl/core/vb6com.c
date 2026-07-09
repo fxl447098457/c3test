@@ -546,7 +546,7 @@ void* vb6_ComGetProp(void* disp, const wchar_t* propName) {
     UINT argErr = 0;
 
     HRESULT hr = pDisp->lpVtbl->Invoke(pDisp, dispid, &IID_NULL,
-        LOCALE_USER_DEFAULT, DISPATCH_PROPERTYGET, &dp, result, &excep, &argErr);
+        LOCALE_USER_DEFAULT, (DISPATCH_METHOD | DISPATCH_PROPERTYGET), &dp, result, &excep, &argErr);
 
     if (FAILED(hr)) {
         vb6_ComCheckError(hr, &excep, L"ComGetProp");

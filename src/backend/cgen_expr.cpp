@@ -1,4 +1,4 @@
-#include "backend/cgen.hpp"
+﻿#include "backend/cgen.hpp"
 #include <algorithm>
 #include <cctype>
 #include <iostream>
@@ -769,6 +769,31 @@ void CCodeGen::visit(BinaryExpr& node) {
     if (node.op == BinaryOp::Like) {
         lastExpr_ = "vb6_Like(" + left + ", " + right + ")";
         return;
+    }
+
+    // P24-07: 字符串比较运算 — BSTR不能用==做指针比较, 需用vb6_StrCmp
+    if (node.op == BinaryOp::Eq || node.op == BinaryOp::Neq ||
+        node.op == BinaryOp::Lt || node.op == BinaryOp::Gt ||
+        node.op == BinaryOp::Le || node.op == BinaryOp::Ge) {
+        Vb6Type lt = inferExprType(*node.left);
+        Vb6Type rt = inferExprType(*node.right);
+        if (lt == Vb6Type::String || rt == Vb6Type::String) {
+            // 两侧都需要是BSTR: 非BSTR端用wrapToBSTR转换
+            if (lt != Vb6Type::String) left = wrapToBSTR(left, *node.left);
+            if (rt != Vb6Type::String) right = wrapToBSTR(right, *node.right);
+            std::string cmpOp;
+            switch (node.op) {
+                case BinaryOp::Eq:       cmpOp = "== 0"; break;
+                case BinaryOp::Neq:    cmpOp = "!= 0"; break;
+                case BinaryOp::Lt:        cmpOp = "< 0";  break;
+                case BinaryOp::Gt:     cmpOp = "> 0";  break;
+                case BinaryOp::Le:   cmpOp = "<= 0"; break;
+                case BinaryOp::Ge:cmpOp = ">= 0"; break;
+                default: cmpOp = "== 0"; break;
+            }
+            lastExpr_ = "(vb6_StrCmp(" + left + ", " + right + ") " + cmpOp + ")";
+            return;
+        }
     }
 
     std::string op = mapBinaryOp(node.op);
@@ -1693,6 +1718,43 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
                 } else {
                     lastExpr_ = "vb6_ComGetStringProp(" + objExpr + ", L\"" + memberName + "\")";
                 }
+                return;
+            }
+            // P24-07: 有参数的前期绑定方法 → 利用签名选择类型化COM调用函数
+            if (it != comSym->comMethods.end() && hasArgs) {
+                const auto& sig = it->second;
+                std::string returnType = mapType(sig.returnType);
+                std::vector<std::string> packedArgs;
+                for (size_t i = 0; i < node.positional.size(); i++) {
+                    std::string packFn = comPackExpr(*node.positional[i]);
+                    emitExpr(*node.positional[i]);
+                    packedArgs.push_back(packFn + "(" + lastExpr_ + ")");
+                }
+                for (auto& named : node.named) {
+                    std::string packFn = comPackExpr(*named.value);
+                    emitExpr(*named.value);
+                    packedArgs.push_back(packFn + "(" + lastExpr_ + ")");
+                }
+                int32_t argc = (int32_t)packedArgs.size();
+                std::string argsArray = "(void*[]){";
+                for (int i = 0; i < argc; i++) {
+                    if (i > 0) argsArray += ", ";
+                    argsArray += packedArgs[i];
+                }
+                argsArray += "}";
+                std::string callArgs = objExpr + ", L\"" + memberName + "\", " + argsArray + ", " + std::to_string(argc);
+                if (returnType == "BSTR") {
+                    lastExpr_ = "vb6_ComCallBSTR(" + callArgs + ")";
+                } else if (returnType == "int32_t" || returnType == "int16_t") {
+                    lastExpr_ = "vb6_ComCallInt(" + callArgs + ")";
+                } else if (returnType == "double" || returnType == "float") {
+                    lastExpr_ = "vb6_ComCallDouble(" + callArgs + ")";
+                } else if (returnType == "void*") {
+                    lastExpr_ = "vb6_ComCallObject(" + callArgs + ")";
+                } else {
+                    lastExpr_ = "vb6_ComCall(" + callArgs + ")";  // 未知返回类型: 返回void*
+                }
+                isComMarker_ = false;
                 return;
             }
             // 有参数的方法/属性Put/签名未找到 → 降级为后期绑定 (fall through)

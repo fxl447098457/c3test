@@ -1,4 +1,4 @@
-// VB6 TypeLib解析器实现 - P6.3 前期绑定支持
+﻿// VB6 TypeLib解析器实现 - P6.3 前期绑定支持
 // 编译期使用Windows LoadTypeLib/ITypeInfo API
 
 #include "com/typelib_parser.hpp"
@@ -888,6 +888,10 @@ Vb6Type TypeLibParser::mapTypeDesc(void* pTypeDesc, void* pTypeInfo) {
                         refResult = Vb6Type::Long;  // Enum → Long
                     } else if (pRefAttr->typekind == TKIND_RECORD) {
                         refResult = Vb6Type::UserDefinedType;  // UDT
+                    } else if (pRefAttr->typekind == TKIND_ALIAS) {
+                        // TKIND_ALIAS: 递归解析别名指向的实际类型
+                        // tdescAlias字段包含别名的底层TYPEDESC
+                        refResult = mapTypeDesc(&pRefAttr->tdescAlias, pRefTI);
                     }
                     pRefTI->ReleaseTypeAttr(pRefAttr);
                 }

@@ -3,6 +3,17 @@ AIGC:
   ContentProducer: '001191110102MAD55U9H0F10002'
   ContentPropagator: '001191110102MAD55U9H0F10002'
   Label: '1'
+  ProduceID: 'ea92ecdf-a648-4d07-8314-592468dd28e0'
+  PropagateID: 'ea92ecdf-a648-4d07-8314-592468dd28e0'
+  ReservedCode1: '1a4af5b8-8e5f-440d-bf86-472b88e88434'
+  ReservedCode2: '1a4af5b8-8e5f-440d-bf86-472b88e88434'
+---
+
+---
+AIGC:
+  ContentProducer: '001191110102MAD55U9H0F10002'
+  ContentPropagator: '001191110102MAD55U9H0F10002'
+  Label: '1'
   ProduceID: '93dc214b-81ba-40ce-9241-669e948746ae'
   PropagateID: '93dc214b-81ba-40ce-9241-669e948746ae'
   ReservedCode1: '2ff1d3b2-b793-4a5b-a57e-3a6d71ee53ec'
@@ -110,6 +121,8 @@ VBP文件 Object=...#VBMAN.dll → loadByClsid(新修复) → HKCR\TypeLib\{guid
 | B7 | wrapToBSTR/wrapVariantValue BSTR→VARIANT*类型混淆 | cgen_expr.cpp, cgen_util.cpp | 运行时(崩溃) |
 | B8 | TypeLib同DLL不同路径→缓存未命中→双重注册 | typelib_parser.cpp | 编译期 |
 | B9 | ComGlobalNs未加入符号表冲突容错 | symbol_table.cpp | 编译期 |
+
+> AI生成
 
 > AI生成
 
