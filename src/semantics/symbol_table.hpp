@@ -145,6 +145,11 @@ struct Symbol {
     };
     std::unordered_map<std::string, ComMethodSig> comMethods;  // key=小写方法名
 
+    // P24-10: COM默认成员名 (DISPID_VALUE=0, 如 Dictionary.Item, Collection._Item)
+    // VB6语义: obj(args) 等价于 obj.DefaultMember(args)
+    std::string comDefaultMemberName;       // 小写, 用于查找
+    std::string comDefaultMemberRealName;   // 原始大小写, 用于代码生成
+
     // --- P24-04: COM Module全局函数 (SymbolKind::ComModule) ---
     std::string comModuleDllPath;    // 源DLL路径 (用于LoadLibrary)
     std::unordered_map<std::string, ComMethodSig> comModuleFunctions;  // key=小写函数名

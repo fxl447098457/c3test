@@ -69,6 +69,11 @@ struct ComInterfaceInfo {
     bool isDispatch = false;    // 纯IDispatch接口
     std::vector<ComMemberInfo> members;  // 方法/属性列表
 
+    // P24-10: 默认成员 (DISPID_VALUE=0), 如 Collection.Item / Dictionary.Item
+    // VB6语义: obj(args) 等价于 obj.DefaultMember(args)
+    std::string defaultMemberName;       // 小写, 用于查找
+    std::string defaultMemberRealName;   // 原始大小写, 用于代码生成
+
     // 按名称查找成员 (小写)
     const ComMemberInfo* findMember(const std::string& lowerName) const {
         for (auto& m : members) {

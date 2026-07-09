@@ -821,6 +821,10 @@ bool Driver::runSemanticAnalysis(const CompileOptions& options) {
                         sym->comIsDual = cc->defaultIface->isDual;
                         sym->comVtblBase = cc->defaultIface->isDispatch ? 7 : 3;
 
+                        // P24-10: 传播默认成员名 (DISPID_VALUE=0)
+                        sym->comDefaultMemberName = cc->defaultIface->defaultMemberName;
+                        sym->comDefaultMemberRealName = cc->defaultIface->defaultMemberRealName;
+
                         for (auto& member : cc->defaultIface->members) {
                             Symbol::ComMethodSig sig;
                             sig.realName = member.realName;
@@ -949,6 +953,8 @@ bool Driver::runSemanticAnalysis(const CompileOptions& options) {
                         sym->comProgId = cc->progId;
                         sym->comDefaultIfaceName = cc->defaultIfaceName;
                         sym->comDefaultIfaceIid = cc->defaultIface->iidStr;
+                        sym->comDefaultMemberName = cc->defaultIface->defaultMemberName;
+                        sym->comDefaultMemberRealName = cc->defaultIface->defaultMemberRealName;
                         sym->comGlobalNsMethodName = member.realName;
                         // 复制方法签名
                         Symbol::ComMethodSig sig;
@@ -1354,6 +1360,8 @@ bool Driver::runCodeGeneration(const CompileOptions& options, const std::string&
                     if (srcSym && srcSym->kind == SymbolKind::Class && !srcSym->comDefaultIfaceIid.empty()) {
                         sym->comDefaultIfaceIid = srcSym->comDefaultIfaceIid;
                         sym->comDefaultIfaceName = srcSym->comDefaultIfaceName;
+                        sym->comDefaultMemberName = srcSym->comDefaultMemberName;
+                        sym->comDefaultMemberRealName = srcSym->comDefaultMemberRealName;
                     }
                     if (srcSym && srcSym->kind == SymbolKind::Class && !srcSym->comClsidStr.empty() && sym->comClsidStr.empty()) {
                         sym->comClsidStr = srcSym->comClsidStr;

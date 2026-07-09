@@ -682,6 +682,20 @@ Vb6Type CCodeGen::inferExprType(Expr& expr) const {
         }
         case ASTNodeKind::MemberAccessExpr: {
             auto& ma = static_cast<MemberAccessExpr&>(expr);
+            // P24-12: Err对象特殊处理
+            if (ma.object && ma.object->kind == ASTNodeKind::IdentifierExpr) {
+                auto& objId = static_cast<IdentifierExpr&>(*ma.object);
+                std::string objLower = objId.name;
+                std::transform(objLower.begin(), objLower.end(), objLower.begin(), ::tolower);
+                if (objLower == "err") {
+                    std::string memLower = ma.memberName;
+                    std::transform(memLower.begin(), memLower.end(), memLower.begin(), ::tolower);
+                    if (memLower == "number") return Vb6Type::Long;
+                    if (memLower == "description" || memLower == "source") return Vb6Type::String;
+                    if (memLower == "helppath" || memLower == "helpfile" || memLower == "helpcontext") return Vb6Type::String;
+                    if (memLower == "lastdllerror") return Vb6Type::Long;
+                }
+            }
             // 查找成员函数/属性的返回类型
             auto* memSym = symTab_.lookupModule(ma.memberName);
             if (memSym) return memSym->type;

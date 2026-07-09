@@ -796,6 +796,54 @@ void CCodeGen::visit(BinaryExpr& node) {
         }
     }
 
+    // P24-Bug2: Variant比较运算 — vb6_VARIANT不能用C内置比较运算符
+    if (node.op == BinaryOp::Eq || node.op == BinaryOp::Neq ||
+        node.op == BinaryOp::Lt || node.op == BinaryOp::Gt ||
+        node.op == BinaryOp::Le || node.op == BinaryOp::Ge) {
+        Vb6Type lt = inferExprType(*node.left);
+        Vb6Type rt = inferExprType(*node.right);
+        if (lt == Vb6Type::Variant || rt == Vb6Type::Variant) {
+            // 确定比较函数后缀
+            std::string cmpFn;
+            switch (node.op) {
+                case BinaryOp::Eq:  cmpFn = "Eq";  break;
+                case BinaryOp::Neq: cmpFn = "Ne";  break;
+                case BinaryOp::Lt:  cmpFn = "Lt";  break;
+                case BinaryOp::Gt:  cmpFn = "Gt";  break;
+                case BinaryOp::Le:  cmpFn = "Le";  break;
+                case BinaryOp::Ge:  cmpFn = "Ge";  break;
+                default: cmpFn = "Eq"; break;
+            }
+            // Variant vs NonVariant: 使用VarCmpLong快捷函数
+            if (lt == Vb6Type::Variant && rt != Vb6Type::Variant) {
+                Vb6Type rActual = rt;
+                if (rActual == Vb6Type::Long || rActual == Vb6Type::Integer || rActual == Vb6Type::Boolean) {
+                    lastExpr_ = "(vb6_VarCmpLong" + cmpFn + "(&" + left + ", " + right + "))";
+                    return;
+                }
+            }
+            if (rt == Vb6Type::Variant && lt != Vb6Type::Variant) {
+                Vb6Type lActual = lt;
+                if (lActual == Vb6Type::Long || lActual == Vb6Type::Integer || lActual == Vb6Type::Boolean) {
+                    // 反转比较方向: Long op Variant → Variant reverseOp Long
+                    std::string revCmpFn;
+                    switch (node.op) {
+                        case BinaryOp::Lt: revCmpFn = "Gt"; break;
+                        case BinaryOp::Gt: revCmpFn = "Lt"; break;
+                        case BinaryOp::Le: revCmpFn = "Ge"; break;
+                        case BinaryOp::Ge: revCmpFn = "Le"; break;
+                        default: revCmpFn = cmpFn; break;  // Eq/Ne是对称的
+                    }
+                    lastExpr_ = "(vb6_VarCmpLong" + revCmpFn + "(&" + right + ", " + left + "))";
+                    return;
+                }
+            }
+            // Variant vs Variant: 使用VarCmp函数
+            lastExpr_ = "(vb6_VarCmp" + cmpFn + "(&" + left + ", &" + right + "))";
+            return;
+        }
+    }
+
     std::string op = mapBinaryOp(node.op);
 
     // VB6的And/Or/Not是逻辑运算也是位运算（取决于操作数类型）
@@ -874,6 +922,15 @@ void CCodeGen::visit(MemberAccessExpr& node) {
             if (memLower == "major") { lastExpr_ = "0"; return; }
             if (memLower == "minor") { lastExpr_ = "0"; return; }
             if (memLower == "revision") { lastExpr_ = "0"; return; }
+        }
+
+        // P24-12: Err对象属性读取
+        if (objLower == "err") {
+            if (memLower == "number") { lastExpr_ = "vb6_ErrNumber()"; return; }
+            if (memLower == "description") { lastExpr_ = "vb6_ErrDescription()"; return; }
+            if (memLower == "source") { lastExpr_ = "vb6_ErrSource()"; return; }
+            if (memLower == "clear") { lastExpr_ = "vb6_ErrClear"; return; }  // Err.Clear无参数
+            if (memLower == "raise") { lastExpr_ = "vb6_ErrRaiseNumber"; return; }  // Err.Raise n → vb6_ErrRaiseNumber(n)
         }
 
         // P18-C: Clipboard 对象
@@ -1335,6 +1392,68 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
             lastExpr_ = "vb6_VariantArrayGet(&" + cIdent(vIdent.name) + ", " + vIndex + ")";
             return;
         }
+    // P24-10: COM默认属性调用 — obj(args) 其中obj是COM变量, 等价于 obj.DefaultMember(args)
+    // VB6: dict(0) → dict.Item(0), collection(1) → collection._Item(1)
+    // DISPID_VALUE=0标识默认成员, 在TypeLib解析时已提取到Symbol::comDefaultMemberName
+    if (!isArrayAccess && node.callee && node.callee->kind == ASTNodeKind::IdentifierExpr && node.named.empty() && !node.positional.empty()) {
+        auto& comIdent = static_cast<IdentifierExpr&>(*node.callee);
+        std::string comLower = comIdent.name;
+        std::transform(comLower.begin(), comLower.end(), comLower.begin(), ::tolower);
+
+        // 前期绑定COM变量 (Dim d As Dictionary → knownTypedComVars_["d"] = &Dictionary)
+        auto itTyped = knownTypedComVars_.find(comLower);
+        if (itTyped != knownTypedComVars_.end() && !itTyped->second->comDefaultMemberName.empty()) {
+            const Symbol* comSym = itTyped->second;
+            emitExpr(*node.callee);
+            std::string objExpr = std::move(lastExpr_);
+            std::string defMember = comSym->comDefaultMemberRealName;
+
+            // 查找默认成员签名以确定返回类型
+            std::string defLower = comSym->comDefaultMemberName;
+            auto itSig = comSym->comMethods.find(defLower);
+
+            // 有参数的默认属性调用: obj(args) → vb6_ComCall*(obj, L"Item", args, argc)
+            std::vector<std::string> packedArgs;
+            for (size_t i = 0; i < node.positional.size(); i++) {
+                std::string packFn = comPackExpr(*node.positional[i]);
+                emitExpr(*node.positional[i]);
+                packedArgs.push_back(packFn + "(" + lastExpr_ + ")");
+            }
+            int32_t argc = (int32_t)packedArgs.size();
+            std::string argsArray = "(void*[]){";
+            for (int i = 0; i < argc; i++) {
+                if (i > 0) argsArray += ", ";
+                argsArray += packedArgs[i];
+            }
+            argsArray += "}";
+
+            std::string callArgs = objExpr + ", L\"" + defMember + "\", " + argsArray + ", " + std::to_string(argc);
+
+            // 根据签名返回类型选择类型化调用函数
+            if (itSig != comSym->comMethods.end()) {
+                std::string returnType = mapType(itSig->second.returnType);
+                if (returnType == "BSTR") {
+                    lastExpr_ = "vb6_ComCallBSTR(" + callArgs + ")";
+                } else if (returnType == "int32_t" || returnType == "int16_t") {
+                    lastExpr_ = "vb6_ComCallInt(" + callArgs + ")";
+                } else if (returnType == "double" || returnType == "float") {
+                    lastExpr_ = "vb6_ComCallDouble(" + callArgs + ")";
+                } else if (returnType == "void*") {
+                    lastExpr_ = "vb6_ComCallObject(" + callArgs + ")";
+                } else {
+                    lastExpr_ = "vb6_ComCall(" + callArgs + ")";
+                }
+            } else {
+                lastExpr_ = "vb6_ComCall(" + callArgs + ")";
+            }
+            return;
+        }
+
+        // P24-10 TODO: 后期绑定COM变量 (Dim obj As Object → knownObjectVars_)
+        // 后期绑定的 obj(args) 需要VARIANT返回类型推导, 暂不支持
+        // 前期绑定 (Dim d As Dictionary) 已完全支持
+    }
+
     }
 
 

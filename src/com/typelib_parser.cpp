@@ -554,6 +554,17 @@ std::unique_ptr<ComInterfaceInfo> TypeLibParser::parseInterface(void* pTypeInfo,
         pTI->ReleaseVarDesc(pVarDesc);
     }
 
+    // P24-10: 检测默认成员 (DISPID_VALUE=0)
+    // VB6语义: obj(args) 等价于 obj.DefaultMember(args)
+    // COM中DISPID=0标识默认成员, 如Dictionary.Item, Collection._Item
+    for (auto& m : iface->members) {
+        if (m.memid == 0 /* DISPID_VALUE */) {
+            iface->defaultMemberName = m.name;         // 小写
+            iface->defaultMemberRealName = m.realName; // 原始大小写
+            break;
+        }
+    }
+
     return iface;
 }
 

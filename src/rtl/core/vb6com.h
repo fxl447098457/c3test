@@ -28,6 +28,8 @@ void vb6_ReleaseObject(void** objPtr);
 // 返回VARIANT* (Windows VARIANT), 调用方需vb6_ComVarClear释放
 void* vb6_ComCall(void* disp, const wchar_t* methodName,
                   void* args, int32_t argc);
+void* vb6_ComCallByDispid(void* disp, int32_t dispid,
+                         void* args, int32_t argc);
 void* vb6_ComGetProp(void* disp, const wchar_t* propName);
 void vb6_ComSetProp(void* disp, const wchar_t* propName, void* value);
 void vb6_ComSetRef(void* disp, const wchar_t* propName, void* objRef);

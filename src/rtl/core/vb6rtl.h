@@ -671,10 +671,27 @@ int32_t vb6_Get(int32_t filenumber, int32_t recnumber, void* varPtr, int32_t var
 int32_t vb6_Put(int32_t filenumber, int32_t recnumber, void* varPtr, int32_t varSize);
 
 // 错误处理
+// Variant比较 (VB6语义: 数值vs数值, 字符串vs字符串, 混合转Double)
+int32_t vb6_VarCmpEq(vb6_VARIANT* a, vb6_VARIANT* b);
+int32_t vb6_VarCmpNe(vb6_VARIANT* a, vb6_VARIANT* b);
+int32_t vb6_VarCmpLt(vb6_VARIANT* a, vb6_VARIANT* b);
+int32_t vb6_VarCmpGt(vb6_VARIANT* a, vb6_VARIANT* b);
+int32_t vb6_VarCmpLe(vb6_VARIANT* a, vb6_VARIANT* b);
+int32_t vb6_VarCmpGe(vb6_VARIANT* a, vb6_VARIANT* b);
+int32_t vb6_VarCmpLongEq(vb6_VARIANT* a, int32_t b);
+int32_t vb6_VarCmpLongLt(vb6_VARIANT* a, int32_t b);
+int32_t vb6_VarCmpLongGt(vb6_VARIANT* a, int32_t b);
+int32_t vb6_VarCmpLongLe(vb6_VARIANT* a, int32_t b);
+int32_t vb6_VarCmpLongGe(vb6_VARIANT* a, int32_t b);
+int32_t vb6_VarCmpLongNe(vb6_VARIANT* a, int32_t b);
+
 int32_t vb6_ErrNumber(void);
 BSTR vb6_ErrDescription(void);
 void vb6_ErrClear(void);
 void vb6_RaiseError(int32_t errNum, BSTR description);
+BSTR vb6_ErrSource(void);
+void vb6_ErrRaise(int32_t errNum, BSTR source, BSTR description);
+void vb6_ErrRaiseNumber(int32_t errNum);
 
 // 全局错误处理状态 (由cgen生成的代码直接使用)
 extern int32_t vb6_err_resume_next;  // On Error Resume Next 标志
@@ -773,6 +790,9 @@ void vb6_ReleaseObject(void** objPtr);
 // args参数为Windows vb6_VARIANT数组指针(由vb6com.c定义), cgen通过void*传递
 void* vb6_ComCall(void* disp, const wchar_t* methodName,
                   void* args, int32_t argc);
+// P24-10: COM默认成员调用 (按DISPID直接调用, 跳过名称查找)
+void* vb6_ComCallByDispid(void* disp, int32_t dispid,
+                         void* args, int32_t argc);
 void* vb6_ComGetProp(void* disp, const wchar_t* propName);
 void vb6_ComSetProp(void* disp, const wchar_t* propName, void* value);
 void vb6_ComSetRef(void* disp, const wchar_t* propName, void* objRef);

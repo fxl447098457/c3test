@@ -524,6 +524,58 @@ void* vb6_ComCall(void* disp, const wchar_t* methodName,
     return (void*)result;
 }
 
+
+// P24-10: COM默认成员调用 (按DISPID直接调用, 跳过名称查找)
+// 用于后期绑定: Dim obj As Object; obj(args) → DISPID_VALUE(0)
+void* vb6_ComCallByDispid(void* disp, int32_t dispid,
+                          void* args_void, int32_t argc) {
+    VARIANT** args = (VARIANT**)args_void;
+    if (!disp) return NULL;
+    IDispatch* pDisp = (IDispatch*)disp;
+
+    DISPPARAMS dp;
+    memset(&dp, 0, sizeof(dp));
+    dp.cArgs = (UINT)argc;
+
+    VARIANT* result = (VARIANT*)calloc(1, sizeof(VARIANT));
+    VariantInit(result);
+
+    if (argc > 0) {
+        dp.rgvarg = (VARIANTARG*)malloc((size_t)argc * sizeof(VARIANTARG));
+        for (int32_t i = 0; i < argc; i++) {
+            VariantInit(&dp.rgvarg[argc - 1 - i]);
+            if (args[i]) {
+                dp.rgvarg[argc - 1 - i] = *args[i];
+            }
+        }
+    }
+
+    EXCEPINFO excep;
+    memset(&excep, 0, sizeof(excep));
+    UINT argErr = 0;
+
+    HRESULT hr = pDisp->lpVtbl->Invoke(pDisp, (DISPID)dispid, &IID_NULL,
+        LOCALE_USER_DEFAULT, DISPATCH_METHOD | DISPATCH_PROPERTYGET, &dp, result, &excep, &argErr);
+
+    if (FAILED(hr)) {
+        vb6_ComCheckError(hr, &excep, L"ComCallByDispid");
+        if (result) { VariantClear(result); free(result); result = NULL; }
+    }
+
+    if (dp.rgvarg) {
+        for (UINT i = 0; i < dp.cArgs; i++) {
+            VariantClear(&dp.rgvarg[i]);
+        }
+        free(dp.rgvarg);
+    }
+    if (args) {
+        for (int32_t i = 0; i < argc; i++) {
+            if (args[i]) { free(args[i]); }
+        }
+    }
+
+    return (void*)result;
+}
 // COM属性Get (返回VARIANT*)
 void* vb6_ComGetProp(void* disp, const wchar_t* propName) {
     if (!disp) return NULL;
