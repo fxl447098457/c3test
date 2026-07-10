@@ -1,4 +1,4 @@
-﻿#include "backend/cgen.hpp"
+#include "backend/cgen.hpp"
 #include <algorithm>
 #include <cctype>
 #include <iostream>
@@ -1417,6 +1417,7 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
             for (size_t i = 0; i < node.positional.size(); i++) {
                 std::string packFn = comPackExpr(*node.positional[i]);
                 emitExpr(*node.positional[i]);
+                { std::string resolved = resolveComMarkerForPack(packFn); if (!resolved.empty()) lastExpr_ = resolved; }
                 packedArgs.push_back(packFn + "(" + lastExpr_ + ")");
             }
             int32_t argc = (int32_t)packedArgs.size();
@@ -1759,6 +1760,7 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
             for (size_t i = 0; i < node.positional.size(); i++) {
                 std::string packFn = comPackExpr(*node.positional[i]);
                 emitExpr(*node.positional[i]);
+                { std::string resolved = resolveComMarkerForPack(packFn); if (!resolved.empty()) lastExpr_ = resolved; }
                 packedArgs.push_back(packFn + "(" + lastExpr_ + ")");
             }
             int32_t argc = (int32_t)packedArgs.size();
@@ -1847,11 +1849,13 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
                 for (size_t i = 0; i < node.positional.size(); i++) {
                     std::string packFn = comPackExpr(*node.positional[i]);
                     emitExpr(*node.positional[i]);
+                    { std::string resolved = resolveComMarkerForPack(packFn); if (!resolved.empty()) lastExpr_ = resolved; }
                     packedArgs.push_back(packFn + "(" + lastExpr_ + ")");
                 }
                 for (auto& named : node.named) {
                     std::string packFn = comPackExpr(*named.value);
                     emitExpr(*named.value);
+                    { std::string resolved = resolveComMarkerForPack(packFn); if (!resolved.empty()) lastExpr_ = resolved; }
                     packedArgs.push_back(packFn + "(" + lastExpr_ + ")");
                 }
                 int32_t argc = (int32_t)packedArgs.size();
@@ -1887,11 +1891,13 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
             for (size_t i = 0; i < node.positional.size(); i++) {
                 std::string packFn = comPackExpr(*node.positional[i]);
                 emitExpr(*node.positional[i]);
+                { std::string resolved = resolveComMarkerForPack(packFn); if (!resolved.empty()) lastExpr_ = resolved; }
                 packedArgs.push_back(packFn + "(" + lastExpr_ + ")");
             }
             for (auto& named : node.named) {
                 std::string packFn = comPackExpr(*named.value);
                 emitExpr(*named.value);
+                { std::string resolved = resolveComMarkerForPack(packFn); if (!resolved.empty()) lastExpr_ = resolved; }
                 packedArgs.push_back(packFn + "(" + lastExpr_ + ")");
             }
 
@@ -2713,6 +2719,19 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
             } else if (argType == Vb6Type::Double || argType == Vb6Type::Single) {
                 callee = "vb6_CStrDbl";
             }
+            // P25: COM属性取值已在args[0]中, 根据取值函数选择CStr变体或跳过
+            if (!args.empty()) {
+                const std::string& a0 = args[0];
+                if (a0.find("vb6_ComGetStringProp") == 0 || a0.find("vb6_ComCallBSTR") == 0) {
+                    // 已是BSTR, CStr是空操作
+                    lastExpr_ = a0;
+                    return;
+                } else if (a0.find("vb6_ComGetIntProp") == 0 || a0.find("vb6_ComVtableGetInt") == 0) {
+                    callee = "vb6_CStrLong";
+                } else if (a0.find("vb6_ComGetDoubleProp") == 0 || a0.find("vb6_ComVtableGetDouble") == 0) {
+                    callee = "vb6_CStrDbl";
+                }
+            }
         }
     }
     // P8.4: Variant参数适配 — 如果目标函数不接受Variant但参数是Variant类型, 使用V后缀函数
@@ -2735,28 +2754,38 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
             else if (callee == "vb6_CDbl") callee = "vb6_CDblV";
         }
     }
-
-    // MsgBox自动BSTR转换: MsgBox期望BSTR, 非BSTR参数需包装
+    // MsgBox自动BSTR转换: MsgBox期望BSTR, 非BSTR的prompt参数需包装
+    // 注意: 只转换第一个参数(prompt), 不能把整个argList包进去(MsgBox v, , title时argList含3个参数)
     if (callee == "vb6_MsgBox" || callee == "vb6_MsgBox1") {
-        if (!argList.empty()) {
-            if (argList.find("vb6_ComGetIntProp") == 0 ||
-                argList.find("vb6_ComVtableGetInt") == 0) {
-                argList = "vb6_CStrLong(" + argList + ")";
-            } else if (argList.find("vb6_ComGetDoubleProp") == 0 ||
-                       argList.find("vb6_ComVtableGetDouble") == 0) {
-                argList = "vb6_CStrDbl(" + argList + ")";
-            } else if (argList.find("vb6_VariantFromComResult") == 0) {
+        if (!args.empty()) {
+            std::string& firstArg = args[0];
+            if (firstArg.find("vb6_ComGetIntProp") == 0 ||
+                firstArg.find("vb6_ComVtableGetInt") == 0) {
+                firstArg = "vb6_CStrLong(" + firstArg + ")";
+            } else if (firstArg.find("vb6_ComGetDoubleProp") == 0 ||
+                       firstArg.find("vb6_ComVtableGetDouble") == 0) {
+                firstArg = "vb6_CStrDbl(" + firstArg + ")";
+            } else if (firstArg.find("vb6_VariantFromComResult") == 0) {
                 // COM调用结果(VARIANT*)→vb6_VARIANT, 需转BSTR
-                argList = "vb6_VariantToString(" + argList + ")";
-            } else if (argList.find("vb6_ComCall(") == 0) {
+                firstArg = "vb6_VariantToString(" + firstArg + ")";
+            } else if (firstArg.find("vb6_ComCall(") == 0) {
                 // P24-01: 后期绑定COM调用返回VARIANT*, 需解包转BSTR
-                argList = "vb6_VariantToString(vb6_VariantFromComResult(" + argList + "))";
+                firstArg = "vb6_VariantToString(vb6_VariantFromComResult(" + firstArg + "))";
             } else if (!node.positional.empty() && inferExprType(*node.positional[0]) == Vb6Type::Variant) {
                 // Variant类型变量/表达式: MsgBox v → vb6_VariantToString(v)
-                argList = "vb6_VariantToString(" + argList + ")";
+                firstArg = "vb6_VariantToString(" + firstArg + ")";
             }
         }
-    }    // MsgBox(prompt) -> vb6_MsgBox1(prompt)
+    }
+    // P25: MsgBox BSTR转换可能修改了args[0], 需重建argList
+    if (callee == "vb6_MsgBox" || callee == "vb6_MsgBox1") {
+        argList.clear();
+        for (size_t i = 0; i < args.size(); i++) {
+            if (i > 0) argList += ", ";
+            argList += args[i];
+        }
+    }
+    // MsgBox(prompt) -> vb6_MsgBox1(prompt)
     // MsgBox(prompt, buttons) -> vb6_MsgBox(prompt, buttons, NULL)
     if (callee == "vb6_MsgBox") {
         if (node.positional.size() == 1) {

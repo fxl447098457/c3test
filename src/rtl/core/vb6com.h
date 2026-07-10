@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 // vb6com.h - VB6 COM互操作运行时 (P6)
 // 独立于vb6rtl.h, 避免VARIANT定义冲突
 // 此文件使用Windows原生VARIANT/IDispatch等类型
@@ -32,6 +32,7 @@ void* vb6_ComCallByDispid(void* disp, int32_t dispid,
                          void* args, int32_t argc);
 void* vb6_ComGetProp(void* disp, const wchar_t* propName);
 void vb6_ComSetProp(void* disp, const wchar_t* propName, void* value);
+void vb6_ComSetPropArg(void* disp, const wchar_t* propName, void** args, int32_t argc, void* value);
 void vb6_ComSetRef(void* disp, const wchar_t* propName, void* objRef);
 
 // COM VARIANT封装/解封 (P6.2 cgen使用)

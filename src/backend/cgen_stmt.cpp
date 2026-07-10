@@ -505,6 +505,54 @@ void CCodeGen::visit(AssignmentStmt& node) {
             break;
         }
     }
+    // P25: 参数化COM属性赋值检测: dic.Item(key) = value → vb6_ComSetPropArg
+    if (node.target->kind == ASTNodeKind::IndexOrCallExpr) {
+        auto& callTarget = static_cast<IndexOrCallExpr&>(*node.target);
+        if (callTarget.callee && callTarget.callee->kind == ASTNodeKind::MemberAccessExpr) {
+            auto& maTarget = static_cast<MemberAccessExpr&>(*callTarget.callee);
+            // 检查对象是否是COM变量
+            if (maTarget.object && maTarget.object->kind == ASTNodeKind::IdentifierExpr) {
+                auto& objId = static_cast<IdentifierExpr&>(*maTarget.object);
+                std::string objLower = objId.name;
+                std::transform(objLower.begin(), objLower.end(), objLower.begin(), ::tolower);
+                bool isComVar = knownObjectVars_.count(objLower) || knownVariantVars_.count(objLower);
+                // 也检查前期绑定COM变量
+                if (!isComVar) {
+                    isComVar = knownTypedComVars_.count(objLower) > 0;
+                }
+                if (isComVar && !callTarget.positional.empty()) {
+                    // 生成: vb6_ComSetPropArg(obj, L"Prop", {pack(arg1),...}, argc, pack(value))
+                    emitExpr(*maTarget.object);
+                    std::string objExpr = lastExpr_;
+                    std::string memberName = maTarget.memberName;
+                    // 打包索引参数
+                    std::vector<std::string> packedIdxArgs;
+                    for (size_t i = 0; i < callTarget.positional.size(); i++) {
+                        std::string packFn = comPackExpr(*callTarget.positional[i]);
+                        emitExpr(*callTarget.positional[i]);
+                        { std::string resolved = resolveComMarkerForPack(packFn); if (!resolved.empty()) lastExpr_ = resolved; }
+                        packedIdxArgs.push_back(packFn + "(" + lastExpr_ + ")");
+                    }
+                    int32_t idxArgc = (int32_t)packedIdxArgs.size();
+                    std::string idxArgsArray = "(void*[]){";
+                    for (int i = 0; i < idxArgc; i++) {
+                        if (i > 0) idxArgsArray += ", ";
+                        idxArgsArray += packedIdxArgs[i];
+                    }
+                    idxArgsArray += "}";
+                    // 打包值参数并生成调用
+                    emitExpr(*node.value);
+                    std::string valExpr = std::move(lastExpr_);
+                    std::string packFn = comPackExpr(*node.value);
+                    c_.emitLine("vb6_ComSetPropArg(" + objExpr + ", L\"" + memberName + "\", " +
+                                 idxArgsArray + ", " + std::to_string(idxArgc) + ", " +
+                                 packFn + "(" + valExpr + "));  /* COM SetPropArg */");
+                    return;
+                }
+            }
+        }
+    }
+
     emitExpr(*node.target);
     std::string target = std::move(lastExpr_);
 

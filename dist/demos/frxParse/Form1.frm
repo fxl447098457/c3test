@@ -342,10 +342,10 @@ Dim dic As New Scripting.Dictionary
 
 Private Sub Command1_Click()
     Dim v As Variant
-    dic.Add "hello", "wo" & Now
-'    dic.Item("hello") = "world"
+'    dic.Add "hello", "wo" & Now
+    dic.Item("hello") = "world"
     v = dic.Item("hello")
-    MsgBox v
+    MsgBox v, , dic.Count
 End Sub
 
 Private Sub Form_Load()
@@ -356,9 +356,10 @@ Private Sub Form_Load()
         List1.AddItem a & Now
         ' dic.Add removed for testing
     Next
-'    For Each b In ImageList1.ListImages
-'        dic.Add CStr(b.Index), b.Picture
-'    Next
+    For Each b In ImageList1.ListImages
+        MsgBox b.Index
+        dic.Add CStr(b.Index), b.Picture
+    Next
     Me.Caption = "Power by vbman - " & VBMAN.Version()
 End Sub
 

@@ -795,6 +795,7 @@ void* vb6_ComCallByDispid(void* disp, int32_t dispid,
                          void* args, int32_t argc);
 void* vb6_ComGetProp(void* disp, const wchar_t* propName);
 void vb6_ComSetProp(void* disp, const wchar_t* propName, void* value);
+void vb6_ComSetPropArg(void* disp, const wchar_t* propName, void** args, int32_t argc, void* value);
 void vb6_ComSetRef(void* disp, const wchar_t* propName, void* objRef);
 
 // COM vb6_VARIANT封装/解封 — cgen生成的C代码使用 (P6.2)

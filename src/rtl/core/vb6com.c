@@ -704,6 +704,57 @@ void vb6_ComSetProp(void* disp, const wchar_t* propName, void* value_void) {
     free(value_void);  /* 释放ComPackXxx分配的堆VARIANT结构体 */
 }
 
+// P25: COM参数化属性Put (如dic.Item(key) = value)
+// propName: 属性名 (如"Item"), args: 索引参数数组, argc: 索引参数个数
+// value: 新值(已打包为堆VARIANT*, 同ComSetProp)
+void vb6_ComSetPropArg(void* disp, const wchar_t* propName, void** args, int32_t argc, void* value_void) {
+    VARIANT varValue;
+    VariantInit(&varValue);
+    if (value_void) varValue = *(VARIANT*)value_void;
+    if (!disp) { free(value_void); return; }
+    IDispatch* pDisp = (IDispatch*)disp;
+
+    DISPID dispid = vb6_getDispid(pDisp, propName);
+    if (dispid == DISPID_UNKNOWN) {
+        free(value_void);
+        fwprintf(stderr, L"vb6_ComSetPropArg: property \"%ls\" not found\n", propName);
+        return;
+    }
+
+    /* 构建rgvarg: [索引参数..., value], 值在最后 */
+    int32_t totalArgs = argc + 1;
+    VARIANT* rgvarg = (VARIANT*)calloc(totalArgs, sizeof(VARIANT));
+    /* 值参数放rgvarg[0] (DISPATCH反序), 索引参数依次放rgvarg[1..argc] */
+    rgvarg[0] = varValue;
+    for (int32_t i = 0; i < argc; i++) {
+        rgvarg[i + 1] = *(VARIANT*)args[i];
+    }
+
+    DISPID putId = DISPID_PROPERTYPUT;
+    DISPPARAMS dp;
+    memset(&dp, 0, sizeof(dp));
+    dp.cArgs = totalArgs;
+    dp.cNamedArgs = 1;
+    dp.rgvarg = rgvarg;
+    dp.rgdispidNamedArgs = &putId;
+
+    EXCEPINFO excep;
+    memset(&excep, 0, sizeof(excep));
+    UINT argErr = 0;
+
+    HRESULT hr = pDisp->lpVtbl->Invoke(pDisp, dispid, &IID_NULL,
+        LOCALE_USER_DEFAULT, DISPATCH_PROPERTYPUT, &dp, NULL, &excep, &argErr);
+
+    /* 清理: 释放索引参数的堆VARIANT和索引数组, 以及value */
+    for (int32_t i = 0; i < argc; i++) free(args[i]);
+    free(rgvarg);
+    free(value_void);
+
+    if (FAILED(hr)) {
+        vb6_ComCheckError(hr, &excep, L"ComSetPropArg");
+    }
+}
+
 // COM属性SetRef (对象引用 -- PROPERTYPUTREF)
 void vb6_ComSetRef(void* disp, const wchar_t* propName, void* objRef) {
     if (!disp) return;

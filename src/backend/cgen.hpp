@@ -515,6 +515,11 @@ private:
     // 推断COM参数的封装函数: 根据表达式类型选择vb6_ComPackBSTR/Int/Double/Object
     std::string comPackExpr(Expr& expr);
 
+    // P25: 解析COM标记为类型化属性取值, 用于COM调用参数打包
+    // 当isComMarker_为true时调用, 根据packFnHint选择ComGetObjectProp/GetIntProp/GetStringProp等
+    // packFnHint: comPackExpr返回的封装函数名, 用于推断所需属性类型
+    std::string resolveComMarkerForPack(const std::string& packFnHint);
+
     // 解析COM标记为C值表达式 (属性读取语义)
     // 当isComMarker_为true时调用, 生成vb6_ComGetProp+Unpack, 并清除标记
     // unresolvedType: 期望的解封类型, 默认为BSTR (最通用)

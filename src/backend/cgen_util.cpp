@@ -925,6 +925,55 @@ std::string CCodeGen::comPackExpr(Expr& expr) {
     }
 }
 
+// P25: 解析COM标记为类型化属性取值, 用于COM调用参数打包
+// 当isComMarker_为true时, 根据packFnHint选择对应类型的COM属性取值函数
+// 如果isComMarker_为false, 返回空串
+std::string CCodeGen::resolveComMarkerForPack(const std::string& packFnHint) {
+    if (!isComMarker_) return "";
+    isComMarker_ = false;
+    std::string objExpr = std::move(comObjExpr_);
+    std::string memName = std::move(comMemberName_);
+
+    // 前期绑定: 利用签名确定返回类型
+    if (isEarlyBoundCom_ && earlyBoundSym_) {
+        isEarlyBoundCom_ = false;
+        const Symbol* comSym = earlyBoundSym_;
+        earlyBoundSym_ = nullptr;
+        std::string memLower = memName;
+        std::transform(memLower.begin(), memLower.end(), memLower.begin(), ::tolower);
+        auto it = comSym->comMethods.find(memLower);
+        if (it != comSym->comMethods.end() && it->second.isPropertyGet) {
+            const auto& sig = it->second;
+            std::string returnType = mapType(sig.returnType);
+            if (returnType == "int32_t" || returnType == "int16_t") {
+                return "vb6_ComGetIntProp(" + objExpr + ", L\"" + memName + "\")";
+            } else if (returnType == "BSTR") {
+                return "vb6_ComGetStringProp(" + objExpr + ", L\"" + memName + "\")";
+            } else if (returnType == "double" || returnType == "float") {
+                return "vb6_ComGetDoubleProp(" + objExpr + ", L\"" + memName + "\")";
+            } else if (returnType == "void*") {
+                return "vb6_ComGetObjectProp(" + objExpr + ", L\"" + memName + "\")";
+            }
+        }
+    }
+
+    // 后期绑定: 根据packFnHint推断所需的属性取值函数
+    // packFnHint由comPackExpr根据上下文确定, 代表参数期望的C类型
+    if (packFnHint == "vb6_ComPackObject") {
+        return "vb6_ComGetObjectProp(" + objExpr + ", L\"" + memName + "\")";
+    } else if (packFnHint == "vb6_ComPackBSTR" || packFnHint.empty()) {
+        return "vb6_ComGetStringProp(" + objExpr + ", L\"" + memName + "\")";
+    } else if (packFnHint == "vb6_ComPackInt") {
+        return "vb6_ComGetIntProp(" + objExpr + ", L\"" + memName + "\")";
+    } else if (packFnHint == "vb6_ComPackDouble") {
+        return "vb6_ComGetDoubleProp(" + objExpr + ", L\"" + memName + "\")";
+    } else if (packFnHint == "vb6_ComPackBool") {
+        return "vb6_ComGetIntProp(" + objExpr + ", L\"" + memName + "\")";
+    }
+    // vb6_ComPackVariant: 保留默认的VariantFromComResult形式
+    return "";
+}
+
 // ============================================================
 // P7.5: 控件属性 → RTL读取函数名映射
 // ============================================================
