@@ -354,11 +354,10 @@ Private Sub Form_Load()
     For i = 0 To 10
         LSet a = "µÈµÈ"
         List1.AddItem a & Now
-        ' dic.Add removed for testing
     Next
     For Each b In ImageList1.ListImages
-        MsgBox b.Index
         dic.Add CStr(b.Index), b.Picture
+        List1.AddItem b.Index & " pic"
     Next
     Me.Caption = "Power by vbman - " & VBMAN.Version()
 End Sub
@@ -369,7 +368,7 @@ End Sub
 
 Private Sub Timer1_Timer()
     Static i As Long
-    If i = 0 Or i = 6 Then i = 1
-    Picture2.Picture = ImageList1.ListImages(i).Picture
     i = i + 1
+    If i > ImageList1.ListImages.Count Then i = 1
+    Picture2.Picture = ImageList1.ListImages(i).Picture
 End Sub
