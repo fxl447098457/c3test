@@ -1,4 +1,4 @@
-﻿// vb6com.c - VB6 COM互操作运行时实现 (P6)
+// vb6com.c - VB6 COM互操作运行时实现 (P6)
 // 使用Windows原生COM API, 独立于vb6rtl.h避免VARIANT冲突
 
 #include "vb6com.h"
@@ -1506,18 +1506,28 @@ void* vb6_ForEach_Init(void* disp) {
 
 // For Each Next: Fetch one element from IEnumVARIANT
 // Returns 1 if element fetched, 0 if enumeration complete
+// P25: VB6 compat - skip VT_EMPTY/VT_NULL/VT_ERROR items (e.g. ImageList
+// _NewEnum may return extra placeholder entries that VB6 silently skips)
 int32_t vb6_ForEach_Next(void* enumPtr, VARIANT* outVar) {
     if (!enumPtr || !outVar) return 0;
     IEnumVARIANT* pEnum = (IEnumVARIANT*)enumPtr;
 
-    VariantInit(outVar);
-    ULONG fetched = 0;
-    HRESULT hr = pEnum->lpVtbl->Next(pEnum, 1, outVar, &fetched);
-    if (FAILED(hr) || fetched == 0) {
-        VariantClear(outVar);
-        return 0;
+    for (;;) {
+        VariantInit(outVar);
+        ULONG fetched = 0;
+        HRESULT hr = pEnum->lpVtbl->Next(pEnum, 1, outVar, &fetched);
+        if (FAILED(hr) || fetched == 0) {
+            VariantClear(outVar);
+            return 0;
+        }
+        // VB6: skip items that are Empty, Null, or Error (e.g. Nothing)
+        VARTYPE vt = V_VT(outVar);
+        if (vt == VT_EMPTY || vt == VT_NULL || vt == VT_ERROR) {
+            VariantClear(outVar);
+            continue;
+        }
+        return 1;
     }
-    return 1;
 }
 
 // For Each Release: Release IEnumVARIANT
