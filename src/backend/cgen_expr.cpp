@@ -802,6 +802,20 @@ void CCodeGen::visit(BinaryExpr& node) {
         node.op == BinaryOp::Le || node.op == BinaryOp::Ge) {
         Vb6Type lt = inferExprType(*node.left);
         Vb6Type rt = inferExprType(*node.right);
+        // P25: inferExprType对后期绑定COM属性返回Variant, 但实际代码生成的是类型化getter
+        // 修正类型以避免对rvalue取地址或选择错误的比较函数
+        if (lt == Vb6Type::Variant) {
+            if (left.find("vb6_ComGetIntProp") == 0 || left.find("vb6_ComVtableGetInt") == 0) lt = Vb6Type::Long;
+            else if (left.find("vb6_ComGetDoubleProp") == 0 || left.find("vb6_ComVtableGetDouble") == 0) lt = Vb6Type::Double;
+            else if (left.find("vb6_ComGetStringProp") == 0) lt = Vb6Type::String;
+            else if (left.find("vb6_ComGetObjectProp") == 0) lt = Vb6Type::Object;
+        }
+        if (rt == Vb6Type::Variant) {
+            if (right.find("vb6_ComGetIntProp") == 0 || right.find("vb6_ComVtableGetInt") == 0) rt = Vb6Type::Long;
+            else if (right.find("vb6_ComGetDoubleProp") == 0 || right.find("vb6_ComVtableGetDouble") == 0) rt = Vb6Type::Double;
+            else if (right.find("vb6_ComGetStringProp") == 0) rt = Vb6Type::String;
+            else if (right.find("vb6_ComGetObjectProp") == 0) rt = Vb6Type::Object;
+        }
         if (lt == Vb6Type::Variant || rt == Vb6Type::Variant) {
             // 确定比较函数后缀
             std::string cmpFn;
@@ -818,7 +832,16 @@ void CCodeGen::visit(BinaryExpr& node) {
             if (lt == Vb6Type::Variant && rt != Vb6Type::Variant) {
                 Vb6Type rActual = rt;
                 if (rActual == Vb6Type::Long || rActual == Vb6Type::Integer || rActual == Vb6Type::Boolean) {
-                    lastExpr_ = "(vb6_VarCmpLong" + cmpFn + "(&" + left + ", " + right + "))";
+                    // P25: left可能是VARIANT rvalue(vb6_VariantFromComResult), 需要临时变量
+                    bool leftIsLvalue = !left.empty() && (std::isalpha(static_cast<unsigned char>(left[0])) || left[0] == '_');
+                    if (leftIsLvalue) { for (char c : left) { if (!std::isalnum(static_cast<unsigned char>(c)) && c != '_') { leftIsLvalue = false; break; } } }
+                    if (leftIsLvalue) {
+                        lastExpr_ = "(vb6_VarCmpLong" + cmpFn + "(&" + left + ", " + right + "))";
+                    } else {
+                        std::string tmp = "_vcmp_" + std::to_string(vcmpCounter_++);
+                        c_.emitLine("vb6_VARIANT " + tmp + " = " + left + ";");
+                        lastExpr_ = "(vb6_VarCmpLong" + cmpFn + "(&" + tmp + ", " + right + "))";
+                    }
                     return;
                 }
             }
@@ -834,12 +857,29 @@ void CCodeGen::visit(BinaryExpr& node) {
                         case BinaryOp::Ge: revCmpFn = "Le"; break;
                         default: revCmpFn = cmpFn; break;  // Eq/Ne是对称的
                     }
-                    lastExpr_ = "(vb6_VarCmpLong" + revCmpFn + "(&" + right + ", " + left + "))";
+                    bool rightIsLvalue = !right.empty() && (std::isalpha(static_cast<unsigned char>(right[0])) || right[0] == '_');
+                    if (rightIsLvalue) { for (char c : right) { if (!std::isalnum(static_cast<unsigned char>(c)) && c != '_') { rightIsLvalue = false; break; } } }
+                    if (rightIsLvalue) {
+                        lastExpr_ = "(vb6_VarCmpLong" + revCmpFn + "(&" + right + ", " + left + "))";
+                    } else {
+                        std::string tmp = "_vcmp_" + std::to_string(vcmpCounter_++);
+                        c_.emitLine("vb6_VARIANT " + tmp + " = " + right + ";");
+                        lastExpr_ = "(vb6_VarCmpLong" + revCmpFn + "(&" + tmp + ", " + left + "))";
+                    }
                     return;
                 }
             }
             // Variant vs Variant: 使用VarCmp函数
-            lastExpr_ = "(vb6_VarCmp" + cmpFn + "(&" + left + ", &" + right + "))";
+            // P25: 检测rvalue, 非左值需要存临时变量
+            auto isLvalue = [](const std::string& s) -> bool {
+                if (s.empty()) return false;
+                if (!(std::isalpha(static_cast<unsigned char>(s[0])) || s[0] == '_')) return false;
+                for (char c : s) { if (!std::isalnum(static_cast<unsigned char>(c)) && c != '_') return false; }
+                return true;
+            };
+            std::string leftAddr = isLvalue(left) ? ("&" + left) : ([&]{ std::string tmp = "_vcmp_" + std::to_string(vcmpCounter_++); c_.emitLine("vb6_VARIANT " + tmp + " = " + left + ";"); return "&" + tmp; }());
+            std::string rightAddr = isLvalue(right) ? ("&" + right) : ([&]{ std::string tmp = "_vcmp_" + std::to_string(vcmpCounter_++); c_.emitLine("vb6_VARIANT " + tmp + " = " + right + ";"); return "&" + tmp; }());
+            lastExpr_ = "(vb6_VarCmp" + cmpFn + "(" + leftAddr + ", " + rightAddr + "))";
             return;
         }
     }

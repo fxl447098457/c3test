@@ -298,6 +298,7 @@ private:
     // 在Declare ANSI函数调用前声明临时char*变量, 调用后立即FreeANSI
     std::vector<std::string> ansiTempsToFree_;
     int ansiCounter_ = 0;
+    int vcmpCounter_ = 0;  // P25: Variant比较临时变量计数器
 
     // 已知COM对象变量名集合 (小写) - 用于后期绑定 obj.Method → vb6_ComCall(obj, L"Method", ...)
     std::unordered_set<std::string> knownObjectVars_;
