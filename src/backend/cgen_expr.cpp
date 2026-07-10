@@ -1095,7 +1095,7 @@ void CCodeGen::visit(MemberAccessExpr& node) {
             comObjExpr_ = "vb6_VariantToObject(&" + varExpr + ")";
             comMemberName_ = node.memberName;
             isComMarker_ = true;
-            lastExpr_ = "vb6_VariantFromComResult(vb6_ComCall(vb6_VariantToObject(&" + varExpr + "), L\"" + node.memberName + "\"" + ", NULL, 0))";  // P24-04: Variant default prop Get
+            lastExpr_ = "vb6_VariantFromComResult(vb6_ComGetProp(vb6_VariantToObject(&" + varExpr + "), L\"" + node.memberName + "\"))";  // P25: Variant COM prop Get → VARIANT
             return;
         }
 
@@ -2039,13 +2039,13 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
                     } else if (returnType == "void*") {
                         lastExpr_ = "vb6_ComGetObjectProp(" + objExpr + ", L\"" + memName + "\")";
                     } else {
-                        lastExpr_ = "vb6_ComGetStringProp(" + objExpr + ", L\"" + memName + "\")";
+                        lastExpr_ = "vb6_VariantFromComResult(vb6_ComGetProp(" + objExpr + ", L\"" + memName + "\"))";
                     }
                 } else {
-                    lastExpr_ = "vb6_ComGetStringProp(" + objExpr + ", L\"" + memName + "\")";
+                    lastExpr_ = "vb6_VariantFromComResult(vb6_ComGetProp(" + objExpr + ", L\"" + memName + "\"))";
                 }
             } else {
-                lastExpr_ = "vb6_ComGetStringProp(" + objExpr + ", L\"" + memName + "\")";
+                lastExpr_ = "vb6_VariantFromComResult(vb6_ComGetProp(" + objExpr + ", L\"" + memName + "\"))";  /* P25: late-bound VARIANT */
             }
         }
         std::string argVal = std::move(lastExpr_);
