@@ -678,6 +678,11 @@ Vb6Type CCodeGen::inferExprType(Expr& expr) const {
                 if (!sym) sym = symTab_.lookupModule(id.name);
                 if (sym) return sym->type;
             }
+            // P26: 类实例方法调用 a.Method(args) → callee是MemberAccessExpr
+            // 需要查询成员函数的返回类型, 而非直接fallback到Variant
+            if (call.callee && call.callee->kind == ASTNodeKind::MemberAccessExpr) {
+                return inferExprType(*call.callee);
+            }
             break;
         }
         case ASTNodeKind::MemberAccessExpr: {
