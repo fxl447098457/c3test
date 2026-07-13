@@ -1,4 +1,4 @@
-#include "backend/cgen.hpp"
+﻿#include "backend/cgen.hpp"
 #include <algorithm>
 #include <cctype>
 #include <iostream>
@@ -657,6 +657,9 @@ Vb6Type CCodeGen::inferExprType(Expr& expr) const {
             // 逻辑运算符 → Boolean (VB6中)
             if (bin.op == BinaryOp::And || bin.op == BinaryOp::Or || bin.op == BinaryOp::Xor)
                 return Vb6Type::Boolean;
+            // 浮点除法 → Double
+            if (bin.op == BinaryOp::Div) return Vb6Type::Double;
+
             // 算术运算符: 提升左右类型
             {
                 Vb6Type lt = inferExprType(*bin.left);
@@ -934,6 +937,16 @@ std::string CCodeGen::comPackExpr(Expr& expr) {
 // 当isComMarker_为true时, 根据packFnHint选择对应类型的COM属性取值函数
 // 如果isComMarker_为false, 返回空串
 std::string CCodeGen::resolveComMarkerForPack(const std::string& packFnHint) {
+    // P26: vb6_ComPackVariant 需要把 COM 调用返回的 VARIANT* 转成 vb6_VARIANT
+    // (即使 isComMarker_ 已被消费, lastExpr_ 仍可能是 COM 调用结果)
+    if (packFnHint == "vb6_ComPackVariant") {
+        if (lastExpr_.find("vb6_ComCall(") == 0 ||
+            lastExpr_.find("vb6_ComGetProp(") == 0 ||
+            lastExpr_.find("vb6_ComGetObjectProp(") == 0 ||
+            lastExpr_.find("vb6_ComCallObject(") == 0) {
+            return "vb6_VariantFromComResult(" + lastExpr_ + ")";
+        }
+    }
     if (!isComMarker_) return "";
     isComMarker_ = false;
     std::string objExpr = std::move(comObjExpr_);
@@ -975,7 +988,15 @@ std::string CCodeGen::resolveComMarkerForPack(const std::string& packFnHint) {
     } else if (packFnHint == "vb6_ComPackBool") {
         return "vb6_ComGetIntProp(" + objExpr + ", L\"" + memName + "\")";
     }
-    // vb6_ComPackVariant: 保留默认的VariantFromComResult形式
+    // vb6_ComPackVariant: 需要把 COM 返回的 VARIANT* 转成 vb6_VARIANT
+    if (packFnHint == "vb6_ComPackVariant") {
+        if (lastExpr_.find("vb6_ComCall(") == 0 ||
+            lastExpr_.find("vb6_ComGetProp(") == 0 ||
+            lastExpr_.find("vb6_ComGetObjectProp(") == 0 ||
+            lastExpr_.find("vb6_ComCallObject(") == 0) {
+            return "vb6_VariantFromComResult(" + lastExpr_ + ")";
+        }
+    }
     return "";
 }
 

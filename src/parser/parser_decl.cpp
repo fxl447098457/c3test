@@ -1,4 +1,4 @@
-// vb6c3 - 声明解析器
+﻿// vb6c3 - 声明解析器
 // Sub / Function / Property / Type / Enum / Declare / Event / Const / Variable
 
 #include "parser/parser.hpp"
@@ -434,10 +434,11 @@ std::unique_ptr<ParameterDecl> Parser::parseParameter() {
     auto nameTok = expectName("expected parameter name");
 
     // 数组参数: name() As Type
+    bool isArrayParam = false;
     if (match(TokenKind::LeftParen)) {
         expect(TokenKind::RightParen, DiagnosticID::ParseExpectedToken,
                "expected ')'");
-        // 数组参数标记在类型上
+        isArrayParam = true;
     }
 
     TypeRefPtr asType;
@@ -454,6 +455,13 @@ std::unique_ptr<ParameterDecl> Parser::parseParameter() {
     ExprPtr defaultValue;
     if (isOptional && match(TokenKind::Equals)) {
         defaultValue = parseExpression();
+    }
+
+    // 数组参数: name() As Type 需要将类型包装为 ArrayTypeRef
+    if (isArrayParam && asType && asType->kind == ASTNodeKind::SimpleTypeRef) {
+        auto& simple = static_cast<SimpleTypeRef&>(*asType);
+        auto elemType = std::make_unique<SimpleTypeRef>(simple.loc, simple.name);
+        asType = std::make_unique<ArrayTypeRef>(simple.loc, std::move(elemType), std::vector<ArrayTypeRef::Dimension>{});
     }
 
     return std::make_unique<ParameterDecl>(loc, nameTok.text, isOptional,

@@ -1,4 +1,4 @@
-#include "backend/cgen.hpp"
+﻿#include "backend/cgen.hpp"
 #include <algorithm>
 #include <cctype>
 #include <iostream>
@@ -340,7 +340,20 @@ std::string CCodeGen::makeParamList(std::vector<std::unique_ptr<ParameterDecl>>&
         std::string cType = mapTypeRef(p->asType.get());
         std::string cName = cIdent(p->name);
 
-        if (p->isByVal) {
+        // P26: Byte数组参数映射为 uint8_t* 且不再额外加 * (数组本身已是指针)
+        bool isByteArray = false;
+        if (p->asType && p->asType->kind == ASTNodeKind::ArrayTypeRef) {
+            auto& arr = static_cast<ArrayTypeRef&>(*p->asType);
+            if (arr.elementType && arr.elementType->kind == ASTNodeKind::SimpleTypeRef) {
+                Vb6Type elemType = typeSys_.resolveTypeName(static_cast<SimpleTypeRef*>(arr.elementType.get())->name);
+                if (elemType == Vb6Type::Byte) {
+                    isByteArray = true;
+                    cType = "uint8_t*";
+                }
+            }
+        }
+
+        if (p->isByVal || isByteArray) {
             result += cType + " " + cName;
         } else {
             // ByRef → C指针

@@ -851,7 +851,7 @@ void CCodeGen::visit(SetStmt& node) {
     c_.emitLine(target + " = " + value + ";  /* Set */");
 
     // P6.5: WithEvents变量事件连接
-    // Set obj = newInst → 如果obj是WithEvents变量, 设置事件接收器
+    // Set obj = newInst -> 如果obj是WithEvents变量, 设置事件接收器
     {
         std::string targetLower = target;
         std::transform(targetLower.begin(), targetLower.end(), targetLower.begin(), ::tolower);
@@ -859,21 +859,20 @@ void CCodeGen::visit(SetStmt& node) {
         if (itWE != knownWithEventsVars_.end()) {
             std::string sourceClass = itWE->second;
             std::string sinkName = "vb6_events_" + cIdent(sourceClass);
-            // 生成事件连接: if (target) { static sink = {...}; target->events = &sink; }
-            // 需要查找当前模块中是否有 obj_EventName 形式的事件处理器
-            c_.emitLine("if (" + target + ") {");
-            c_.indent();
-            // 生成静态事件接收器实例
-            c_.emitLine("static " + sinkName + " " + targetLower + "_sink = {");
-            c_.indent();
-            // handler: 指向当前对象(me)
-            std::string handlerExpr = isClassModule_ ? "(void*)me" : "NULL";
-            c_.emitLine(".handler = " + handlerExpr + ",");
-            // 为源类的每个事件生成回调指针
-            // 查找源类的类符号获取事件列表 (用lookup跨模块查找)
+            // 查找源类符号，区分内部类与外部COM类
             auto* srcClsSym = symTab_.lookup(sourceClass);
             if (srcClsSym && srcClsSym->kind == SymbolKind::Class) {
-                // 遍历源类的事件，查找当前模块中是否有 targetName_EventName 处理器
+                // 内部类 WithEvents: if (target) { static sink = {...}; target->events = &sink; }
+                // 需要查找当前模块中是否有 obj_EventName 形式的事件处理器
+                c_.emitLine("if (" + target + ") {");
+                c_.indent();
+                // 生成静态事件接收器实例
+                c_.emitLine("static " + sinkName + " " + targetLower + "_sink = {");
+                c_.indent();
+                // handler: 指向当前对象(me)
+                std::string handlerExpr = isClassModule_ ? "(void*)me" : "NULL";
+                c_.emitLine(".handler = " + handlerExpr + ",");
+                // 为源类的每个事件生成回调指针
                 bool firstEvent = true;
                 for (auto& evtName : srcClsSym->eventNames) {
                     std::string handlerName = target + "_" + evtName;  // VB6: obj_Click
@@ -895,15 +894,15 @@ void CCodeGen::visit(SetStmt& node) {
                     c_.emitLine(cbField + ",");
                     firstEvent = false;
                 }
-            c_.dedent();
-            c_.emitLine("};");
-            c_.emitLine(target + "->events = &" + targetLower + "_sink;");
-            c_.dedent();
-            c_.emitLine("}");
+                c_.dedent();
+                c_.emitLine("};");
+                c_.emitLine(target + "->events = &" + targetLower + "_sink;");
+                c_.dedent();
+                c_.emitLine("}");
             } else if (srcClsSym && srcClsSym->kind == SymbolKind::ComClass && srcClsSym->comHasSourceIface) {
-            // P13.23: External COM WithEvents - vb6_CreateEventSink + vb6_ComAdvise
-            c_.emitLine("if (" + target + ") {");
-            c_.indent();
+                // P13.23: External COM WithEvents - vb6_CreateEventSink + vb6_ComAdvise
+                c_.emitLine("if (" + target + ") {");
+                c_.indent();
                 std::vector<std::string> dispids;
                 std::vector<std::string> callbacks;
                 for (auto& evtName : srcClsSym->eventNames) {
@@ -942,12 +941,13 @@ void CCodeGen::visit(SetStmt& node) {
                     c_.emitLine("if (" + targetLower + "_evt_cookie != 0) { vb6_ComUnadvise((IUnknown*)" + target + ", " + targetLower + "_evt_iid, " + targetLower + "_evt_cookie); " + targetLower + "_evt_cookie = 0; }");
                     c_.emitLine("vb6_ComAdvise((IUnknown*)" + target + ", " + targetLower + "_evt_iid, " + sinkVar + ", &" + targetLower + "_evt_cookie);");
                 }
-            c_.dedent();
-            c_.emitLine("}");
+                c_.dedent();
+                c_.emitLine("}");
             }
         }
     }
-    // P16: WithEvents控件变量赋值 - 无需额外操作
+    
+// P16: WithEvents控件变量赋值 - 无需额外操作
     // Set cmd = Command1 → cmd = ctrl_Command1 (HWND拷贝已在赋值行完成)
     // 事件通过WndProc的HWND匹配分发，不需要COM Sink/Advise
     {

@@ -1,4 +1,4 @@
-#include "backend/msvc_driver.hpp"
+﻿#include "backend/msvc_driver.hpp"
 #include "common/encoding.hpp"
 
 #include <iostream>
@@ -227,6 +227,11 @@ bool MsvcDriver::compileAndLink(const MsvcDriverOptions& options) {
 
     // 警告级别
     cmd << " /W3";
+
+    // P24-09: x86 RTL libraries are built with /MT (static CRT); match it to avoid LNK2038
+    if (options.arch == "x86") {
+        cmd << " /MT";
+    }
 
     // Output file and .obj directory (P11.2: intermediates go to objDir)
     if (!options.outputFile.empty()) {

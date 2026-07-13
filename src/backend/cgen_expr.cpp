@@ -1,4 +1,4 @@
-#include "backend/cgen.hpp"
+﻿#include "backend/cgen.hpp"
 #include <algorithm>
 #include <cctype>
 #include <iostream>
@@ -750,6 +750,12 @@ void CCodeGen::visit(BinaryExpr& node) {
     // 整除: VB6 \ → vb6_IntDiv (确保整数截断)
     if (node.op == BinaryOp::IntDiv) {
         lastExpr_ = "vb6_IntDiv(" + left + ", " + right + ")";
+        return;
+    }
+
+    // 浮点除法: VB6 / → (double)left / (double)right
+    if (node.op == BinaryOp::Div) {
+        lastExpr_ = "((double)(" + left + ") / (double)(" + right + "))";
         return;
     }
 
@@ -2832,6 +2838,28 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
             callee = "vb6_MsgBox1";
         } else if (node.positional.size() == 2) {
             argList += ", NULL";
+        }
+    }
+    // P26: Format 第一个参数需要包装为 vb6_VARIANT
+    if (callee == "vb6_Format" && !args.empty()) {
+        Vb6Type argType = inferExprType(*node.positional[0]);
+        if (argType == Vb6Type::Long || argType == Vb6Type::Integer) {
+            args[0] = "vb6_VariantLong(" + args[0] + ")";
+        } else if (argType == Vb6Type::Double || argType == Vb6Type::Single) {
+            args[0] = "vb6_VariantDouble(" + args[0] + ")";
+        } else if (argType == Vb6Type::String) {
+            args[0] = "vb6_VariantString(" + args[0] + ")";
+        } else if (argType == Vb6Type::Boolean) {
+            args[0] = "vb6_VariantInt((int16_t)(" + args[0] + "))";
+        } else if (argType == Vb6Type::Byte) {
+            args[0] = "vb6_VariantInt((int16_t)(" + args[0] + "))";
+        } else if (argType == Vb6Type::Date) {
+            args[0] = "vb6_VariantDouble((double)(" + args[0] + "))";
+        }
+        argList.clear();
+        for (size_t i = 0; i < args.size(); i++) {
+            if (i > 0) argList += ", ";
+            argList += args[i];
         }
     }
     lastExpr_ = callee + "(" + argList + ")";
