@@ -2876,12 +2876,15 @@ void CCodeGen::visit(NewExpr& node) {
         // 本工程类: 调用类工厂函数
         std::string clsStruct = "vb6_cls_" + cIdent(clsSym->name);
         lastExpr_ = "(" + clsStruct + "_New())";
+    } else if (clsSym && clsSym->kind == SymbolKind::ComClass) {
+        // P24-11: COM early-bound class: use real ProgID from TypeLib, not the raw class name
+        std::string progId = clsSym->comProgId.empty() ? node.className : clsSym->comProgId;
+        lastExpr_ = "(void*)vb6_NewObject(L\"" + progId + "\")";
     } else {
         // 外部/COM对象: 回退到运行时
         lastExpr_ = "vb6_NewObject(L\"" + node.className + "\")";
     }
 }
-
 void CCodeGen::visit(TypeOfExpr& node) {
     emitExpr(*node.object);
     std::string obj = std::move(lastExpr_);
