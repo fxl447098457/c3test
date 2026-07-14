@@ -407,6 +407,12 @@ private:
     // Vb6Type → C类型字符串
     std::string mapType(Vb6Type type) const;
 
+    // Vb6Type → COM vtable 方法参数 C类型字符串 (数组→SAFEARRAY*等)
+    std::string mapComType(Vb6Type type) const;
+
+    // IID字符串 {XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX} → GUID结构体初始化字符串
+    std::string emitGuidInitializer(const std::string& iidStr) const;
+
     // TypeRefPtr → C类型字符串 (非const: P6.3收集COM接口类型名)
     std::string mapTypeRef(ASTNode* typeRef);
 
@@ -455,12 +461,11 @@ private:
 
     // 生成类工厂函数 (New/Destroy)
     void emitClassFactory(Module& module);
-
-    // P6.4: 生成接口vtable和包装 (Implements代码生成)
     void emitInterfaceVtable(Module& module);
-
-    // P6.5: 生成事件接收器表和回调 (WithEvents代码生成)
     void emitEventSink(Module& module);
+    void emitComVtableSinkDecls();  // .h 前向声明
+    void emitComVtableSinks();      // .c 实现
+
 
 
     // P7: 生成Win32窗体框架代码 (WndProc + 控件创建 + 消息映射)

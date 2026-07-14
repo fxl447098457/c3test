@@ -8,6 +8,15 @@
 
 namespace vb6c3 {
 
+// P24-12: 扩展注册表路径中的环境变量 (如 %SystemRoot%)
+static std::wstring expandEnvironmentStrings(const std::wstring& src) {
+    DWORD len = ExpandEnvironmentStringsW(src.c_str(), nullptr, 0);
+    if (len == 0) return src;
+    std::wstring result(len - 1, L'\\0');
+    ExpandEnvironmentStringsW(src.c_str(), &result[0], len);
+    return result;
+}
+
 // ============================================================
 // 构造/析构
 // ============================================================
@@ -44,6 +53,7 @@ std::unique_ptr<TypeLibResult> TypeLibParser::loadByProgId(const std::string& pr
 std::unique_ptr<TypeLibResult> TypeLibParser::loadByPath(const std::string& tlbPath) {
     // P24-05: 规范化路径(短路径→长路径), 避免同DLL不同路径导致缓存未命中
     std::wstring tlbPathW(tlbPath.begin(), tlbPath.end());
+    tlbPathW = expandEnvironmentStrings(tlbPathW);  // P24-12: expand %SystemRoot% etc.
     wchar_t canonicalPath[MAX_PATH];
     DWORD len = GetLongPathNameW(tlbPathW.c_str(), canonicalPath, MAX_PATH);
     std::string canonPath;
@@ -867,6 +877,10 @@ Vb6Type TypeLibParser::mapTypeDesc(void* pTypeDesc, void* pTypeInfo) {
             if (inner == Vb6Type::Object) return Vb6Type::Object;
             // 字符串指针 → String
             if (inner == Vb6Type::String) return Vb6Type::String;
+            // 其他指针 → Object (接口指针)
+            // SAFEARRAY指针 (VT_PTR → VT_SAFEARRAY) 保留数组类型
+            bool isArray = (static_cast<uint16_t>(inner) & static_cast<uint16_t>(Vb6Type::Array)) != 0;
+            if (isArray) return inner;
             // 其他指针 → Object (接口指针)
             return Vb6Type::Object;
         }

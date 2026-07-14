@@ -856,10 +856,24 @@ bool Driver::runSemanticAnalysis(const CompileOptions& options) {
                         sym->comSourceIfaceName = cc->defaultSourceIfaceName;
                         if (cc->defaultSourceIface) {
                             sym->comSourceIfaceIid = cc->defaultSourceIface->iidStr;
-                            // 注册事件源接口的方法到 eventNames (复用内部类事件机制)
+                            sym->comSourceIfaceIsDispatch = cc->defaultSourceIface->isDispatch;
                             for (auto& member : cc->defaultSourceIface->members) {
                                 sym->eventNames.push_back(member.realName);
-                            sym->comEventDispids[Symbol::toLower(member.name)] = member.memid;
+                                sym->comEventDispids[Symbol::toLower(member.name)] = member.memid;
+                                Symbol::ComMethodSig sig;
+                                sig.realName = member.realName;
+                                sig.memid = member.memid;
+                                sig.vtableIndex = member.vtableIndex;
+                                sig.returnType = member.returnType;
+                                for (auto& param : member.params) {
+                                    ParameterInfo pi;
+                                    pi.name = param.name;
+                                    pi.type = param.type;
+                                    pi.isByVal = (param.direction == ComParamDir::In);
+                                    pi.isOptional = param.isOptional;
+                                    sig.params.push_back(pi);
+                                }
+                                sym->comSourceMethods[Symbol::toLower(member.name)] = std::move(sig);
                             }
                         }
                     }

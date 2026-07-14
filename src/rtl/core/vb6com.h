@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 // vb6com.h - VB6 COM互操作运行时 (P6)
 // 独立于vb6rtl.h, 避免VARIANT定义冲突
 // 此文件使用Windows原生VARIANT/IDispatch等类型
@@ -157,7 +157,8 @@ int vb6_ComUnadvise(void* obj, const char* riidStr, int adviseCookie);
 
 // P13.22: Create a generic IDispatch event sink
 // Maps DISPID (event IDs) to callback functions
-void* vb6_CreateEventSink(const int* dispids, void** callbacks, int count);
+// sourceIid: optional source interface IID (for dispinterface event sinks)
+void* vb6_CreateEventSink(const int* dispids, void** callbacks, int count, const IID* sourceIid);
 void vb6_FreeEventSink(void* sink);
 void vb6_ComInit(void);
 void vb6_ComExit(void);

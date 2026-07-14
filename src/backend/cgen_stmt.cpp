@@ -900,45 +900,56 @@ void CCodeGen::visit(SetStmt& node) {
                 c_.dedent();
                 c_.emitLine("}");
             } else if (srcClsSym && srcClsSym->kind == SymbolKind::ComClass && srcClsSym->comHasSourceIface) {
-                // P13.23: External COM WithEvents - vb6_CreateEventSink + vb6_ComAdvise
+                // P13.23: External COM WithEvents
                 c_.emitLine("if (" + target + ") {");
                 c_.indent();
-                std::vector<std::string> dispids;
-                std::vector<std::string> callbacks;
-                for (auto& evtName : srcClsSym->eventNames) {
-                    std::string handlerName = target + "_" + evtName;
-                    auto* handlerSym = symTab_.lookup(handlerName);
-                    if (handlerSym) {
-                        std::string evtLower = evtName;
-                        std::transform(evtLower.begin(), evtLower.end(), evtLower.begin(), ::tolower);
-                        auto itDispId = srcClsSym->comEventDispids.find(evtLower);
-                        int dispid = (itDispId != srcClsSym->comEventDispids.end()) ? itDispId->second : 0;
-                        dispids.push_back(std::to_string(dispid));
-                        callbacks.push_back("vb6_com_evt_" + targetLower + "_" + cIdent(evtName));
+                std::string iidStr = srcClsSym->comSourceIfaceIid;
+                c_.emitLine("static int " + targetLower + "_evt_cookie = 0;");
+                std::string iidInit = emitGuidInitializer(iidStr);
+                c_.emitLine("static const char* " + targetLower + "_evt_iid = \"" + iidStr + "\";");
+                if (!iidInit.empty()) { c_.emitLine("static const IID " + targetLower + "_evt_iid_struct = " + iidInit + ";"); }
+                c_.emitLine("if (" + targetLower + "_evt_cookie != 0) { vb6_ComUnadvise((IUnknown*)" + target + ", " + targetLower + "_evt_iid, " + targetLower + "_evt_cookie); " + targetLower + "_evt_cookie = 0; }");
+                if (srcClsSym->comSourceIfaceIsDispatch) {
+                    // dispinterface: use existing IDispatch sink
+                    std::vector<std::string> dispids;
+                    std::vector<std::string> callbacks;
+                    for (auto& evtName : srcClsSym->eventNames) {
+                        std::string handlerName = target + "_" + evtName;
+                        auto* handlerSym = symTab_.lookup(handlerName);
+                        if (handlerSym) {
+                            std::string evtLower = Symbol::toLower(evtName);
+                            auto itDispId = srcClsSym->comEventDispids.find(evtLower);
+                            int dispid = (itDispId != srcClsSym->comEventDispids.end()) ? itDispId->second : 0;
+                            dispids.push_back(std::to_string(dispid));
+                            callbacks.push_back("vb6_com_evt_" + targetLower + "_" + cIdent(evtName));
+                        }
                     }
-                }
-                if (!dispids.empty()) {
-                    std::string dispidsVar = targetLower + "_evt_dispids";
-                    std::string dispidsInit;
-                    for (size_t di = 0; di < dispids.size(); di++) {
-                        if (di > 0) dispidsInit += ", ";
-                        dispidsInit += dispids[di];
+                    if (!dispids.empty()) {
+                        std::string dispidsVar = targetLower + "_evt_dispids";
+                        std::string dispidsInit;
+                        for (size_t di = 0; di < dispids.size(); di++) {
+                            if (di > 0) dispidsInit += ", ";
+                            dispidsInit += dispids[di];
+                        }
+                        c_.emitLine("static int " + dispidsVar + "[] = {" + dispidsInit + "};");
+                        std::string callbacksVar = targetLower + "_evt_cbs";
+                        std::string callbacksInit;
+                        for (size_t ci = 0; ci < callbacks.size(); ci++) {
+                            if (ci > 0) callbacksInit += ", ";
+                            callbacksInit += "(void(*)(VARIANT*,int,VARIANT*))" + callbacks[ci];
+                        }
+                        c_.emitLine("static void (*" + callbacksVar + "[])(VARIANT*,int,VARIANT*) = {" + callbacksInit + "};");
+                        std::string sinkVar = targetLower + "_comsink";
+                        std::string iidStructRef = iidInit.empty() ? "NULL" : "&" + targetLower + "_evt_iid_struct";
+                        c_.emitLine("void* " + sinkVar + " = vb6_CreateEventSink(" +
+                            dispidsVar + ", (void**)" + callbacksVar + ", " + std::to_string(dispids.size()) +
+                            ", " + iidStructRef + ");");
+                        c_.emitLine("vb6_ComAdvise((IUnknown*)" + target + ", " + targetLower + "_evt_iid, " + sinkVar + ", &" + targetLower + "_evt_cookie);");
                     }
-                    c_.emitLine("static int " + dispidsVar + "[] = {" + dispidsInit + "};");
-                    std::string callbacksVar = targetLower + "_evt_cbs";
-                    std::string callbacksInit;
-                    for (size_t ci = 0; ci < callbacks.size(); ci++) {
-                        if (ci > 0) callbacksInit += ", ";
-                        callbacksInit += "(void(*)(VARIANT*,int,VARIANT*))" + callbacks[ci];
-                    }
-                    c_.emitLine("static void (*" + callbacksVar + "[])(VARIANT*,int,VARIANT*) = {" + callbacksInit + "};");
+                } else {
+                    // vtable source interface: use custom vtable sink
                     std::string sinkVar = targetLower + "_comsink";
-                    c_.emitLine("void* " + sinkVar + " = vb6_CreateEventSink(" +
-                        dispidsVar + ", (void**)" + callbacksVar + ", " + std::to_string(dispids.size()) + ");");
-                    std::string iidStr = srcClsSym->comSourceIfaceIid;
-                    c_.emitLine("static int " + targetLower + "_evt_cookie = 0;");
-                    c_.emitLine("static const char* " + targetLower + "_evt_iid = \"" + iidStr + "\";");
-                    c_.emitLine("if (" + targetLower + "_evt_cookie != 0) { vb6_ComUnadvise((IUnknown*)" + target + ", " + targetLower + "_evt_iid, " + targetLower + "_evt_cookie); " + targetLower + "_evt_cookie = 0; }");
+                    c_.emitLine("void* " + sinkVar + " = vb6_vsink_" + targetLower + "_create();");
                     c_.emitLine("vb6_ComAdvise((IUnknown*)" + target + ", " + targetLower + "_evt_iid, " + sinkVar + ", &" + targetLower + "_evt_cookie);");
                 }
                 c_.dedent();

@@ -1,4 +1,4 @@
-// vb6com.c - VB6 COM互操作运行时实现 (P6)
+﻿// vb6com.c - VB6 COM互操作运行时实现 (P6)
 // 使用Windows原生COM API, 独立于vb6rtl.h避免VARIANT冲突
 
 #include "vb6com.h"
@@ -281,7 +281,6 @@ static void vb6_ComCheckError(HRESULT hr, EXCEPINFO* excep, const wchar_t* conte
 
     vb6_RaiseError(errNum, desc);
 }
-// ============================================================
 // C-style vtable helpers for IUnknown (avoid C++ IUnknown method call issues)
 // ============================================================
 static HRESULT vb6_UnknownQI(void* obj, REFIID riid, void** ppv) {
@@ -1306,7 +1305,8 @@ int vb6_ComUnadvise(void* obj, const char* riidStr, int adviseCookie) {
     UnadviseFunc unadviseFn = (UnadviseFunc)pCPVt[6];
     hr = unadviseFn(pCPUnk, (DWORD)adviseCookie);
     pCPUnk->lpVtbl->Release(pCPUnk);
-    return SUCCEEDED(hr) ? 0 : -5;
+    int advResult = SUCCEEDED(hr) ? 0 : -5;
+    return advResult;
 }
 
 // ============================================================
@@ -1321,10 +1321,13 @@ typedef struct VB6EventSink {
     void** vtable;
     /* Ref count */
     LONG refCount;
-    /* DISPID → callback mapping */
+    /* DISPID -> callback mapping */
     int* dispids;
     void (**callbacks)(VARIANT*, int, VARIANT*);
     int count;
+    /* Source interface IID (dispinterface event sinks need to respond to QI for it) */
+    IID sourceIid;
+    int hasSourceIid;
 } VB6EventSink;
 
 /* Forward declarations for x86 compat (sink_AddRef/Release used before definition) */
@@ -1333,7 +1336,8 @@ static ULONG STDMETHODCALLTYPE sink_Release(IDispatch* This);
 
 /* IDispatch vtable methods */
 static HRESULT STDMETHODCALLTYPE sink_QueryInterface(IDispatch* This, REFIID riid, void** ppv) {
-    if (IsEqualIID(riid, &IID_IUnknown) || IsEqualIID(riid, &IID_IDispatch)) {
+    VB6EventSink* s = (VB6EventSink*)This;
+    if (IsEqualIID(riid, &IID_IUnknown) || IsEqualIID(riid, &IID_IDispatch) || (s->hasSourceIid && IsEqualIID(riid, &s->sourceIid))) {
         *ppv = This;
         sink_AddRef(This);
         return S_OK;
@@ -1374,7 +1378,7 @@ static HRESULT STDMETHODCALLTYPE sink_GetIDsOfNames(IDispatch* This, REFIID riid
 static HRESULT STDMETHODCALLTYPE sink_Invoke(IDispatch* This, DISPID dispIdMember, REFIID riid,
     LCID lcid, WORD wFlags, DISPPARAMS* pDispParams, VARIANT* pVarResult,
     EXCEPINFO* pExcepInfo, UINT* puArgErr) {
-    
+
     VB6EventSink* s = (VB6EventSink*)((char*)This - offsetof(VB6EventSink, vtable));
     int i, argc, j;
     VARIANT result;
@@ -1419,7 +1423,7 @@ static void* g_eventSinkVtable[11] = {
     sink_Invoke
 };
 
-void* vb6_CreateEventSink(const int* dispids, void** callbacks, int count) {
+void* vb6_CreateEventSink(const int* dispids, void** callbacks, int count, const IID* sourceIid) {
     VB6EventSink* s = (VB6EventSink*)calloc(1, sizeof(VB6EventSink));
     if (!s) return NULL;
     
@@ -1428,6 +1432,12 @@ void* vb6_CreateEventSink(const int* dispids, void** callbacks, int count) {
     
     s->refCount = 1;
     s->count = count;
+    
+    /* Copy source interface IID if provided */
+    if (sourceIid) {
+        s->sourceIid = *sourceIid;
+        s->hasSourceIid = 1;
+    }
     
     /* Copy DISPID mappings */
     s->dispids = (int*)malloc(count * sizeof(int));

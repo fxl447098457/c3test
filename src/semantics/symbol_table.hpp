@@ -130,6 +130,7 @@ struct Symbol {
     std::string comSourceIfaceName;    // 默认事件源接口名
     std::string comSourceIfaceIid;     // 事件源接口IID
     bool comHasSourceIface = false;    // 是否有事件源接口
+    bool comSourceIfaceIsDispatch = false;  // source interface 是 dispinterface (true) 还是 vtable 接口 (false)
     std::unordered_map<std::string, int32_t> comEventDispids;  // 事件源方法名(lower)→DISPID
 
     // COM方法签名 (ComInterface用, 方法名小写→签名)
@@ -144,6 +145,7 @@ struct Symbol {
         std::vector<ParameterInfo> params;  // 参数列表(含方向/类型)
     };
     std::unordered_map<std::string, ComMethodSig> comMethods;  // key=小写方法名
+    std::unordered_map<std::string, ComMethodSig> comSourceMethods;  // source interface 方法签名 (key=小写方法名)
 
     // P24-10: COM默认成员名 (DISPID_VALUE=0, 如 Dictionary.Item, Collection._Item)
     // VB6语义: obj(args) 等价于 obj.DefaultMember(args)

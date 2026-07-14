@@ -1,5 +1,6 @@
-﻿#include "backend/cgen.hpp"
+#include "backend/cgen.hpp"
 #include <algorithm>
+#include <cstdio>
 #include <cctype>
 #include <iostream>
 #include <functional>
@@ -430,6 +431,9 @@ bool CCodeGen::generate(Module& module, const std::string& baseName,
         h_.emitBlank();
     }
 
+    // P13.23: vtable source interface 事件接收器创建函数前向声明
+    emitComVtableSinkDecls();
+
     h_.emitBlank();
     h_.emitLine("#endif /* " + guard + " */");
 
@@ -642,6 +646,10 @@ bool CCodeGen::generate(Module& module, const std::string& baseName,
                 c_.emitBlank();
             }
         }
+
+    // P13.23: 生成外部COM vtable source interface 事件接收器实现
+    emitComVtableSinks();
+
     // 生成入口点 (类模块不生成main; 多模块工程中仅有Sub Main的模块生成main)
     // P6.6: ActiveX DLL入口点统一由dll_entry.c生成, 不在各模块.c中生成
     if (!isClassModule_) {
@@ -827,6 +835,62 @@ std::string CCodeGen::mapType(Vb6Type type) const {
         }
     }
     return cType;
+}
+
+std::string CCodeGen::mapComType(Vb6Type type) const {
+    // COM vtable 方法签名映射 (用于外部COM事件接收器)
+    bool isArray = (static_cast<uint16_t>(type) & static_cast<uint16_t>(Vb6Type::Array)) != 0;
+    Vb6Type baseType = isArray
+        ? static_cast<Vb6Type>(static_cast<uint16_t>(type) & ~static_cast<uint16_t>(Vb6Type::Array))
+        : type;
+    if (isArray) {
+        return "SAFEARRAY*";  // 数组在COM vtable中总是SAFEARRAY指针
+    }
+    switch (baseType) {
+        case Vb6Type::Integer:  return "int16_t";
+        case Vb6Type::Long:     return "int32_t";
+        case Vb6Type::Single:   return "float";
+        case Vb6Type::Double:   return "double";
+        case Vb6Type::Currency: return "int64_t";
+        case Vb6Type::Date:     return "double";
+        case Vb6Type::String:   return "BSTR";
+        case Vb6Type::Object:   return "IUnknown*";
+        case Vb6Type::Error:    return "int32_t";
+        case Vb6Type::Boolean:  return "int16_t";
+        case Vb6Type::Variant:  return "VARIANT";
+        case Vb6Type::Byte:     return "uint8_t";
+        case Vb6Type::ULong:    return "uint32_t";
+        case Vb6Type::Void:     return "void";
+        default:                return "void*";
+    }
+}
+
+std::string CCodeGen::emitGuidInitializer(const std::string& iidStr) const {
+    // 解析 {XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX} 格式
+    if (iidStr.size() < 38 || iidStr.front() != '{' || iidStr.back() != '}') return "";
+    std::string s = iidStr.substr(1, iidStr.size() - 2);  // 去掉花括号
+    // 分割为5个部分
+    std::vector<std::string> parts;
+    size_t start = 0;
+    for (size_t i = 0; i < s.size(); ++i) {
+        if (s[i] == '-') {
+            parts.push_back(s.substr(start, i - start));
+            start = i + 1;
+        }
+    }
+    parts.push_back(s.substr(start));
+    if (parts.size() != 5) return "";
+    std::string d1 = parts[0];
+    std::string d2 = parts[1];
+    std::string d3 = parts[2];
+    std::string d4 = parts[3] + parts[4];  // 16个hex字符
+    if (d1.size() != 8 || d2.size() != 4 || d3.size() != 4 || d4.size() != 16) return "";
+    char buf[128];
+    snprintf(buf, sizeof(buf), "{0x%s, 0x%s, 0x%s, {0x%2s, 0x%2s, 0x%2s, 0x%2s, 0x%2s, 0x%2s, 0x%2s, 0x%2s}}",
+             d1.c_str(), d2.c_str(), d3.c_str(),
+             d4.substr(0,2).c_str(), d4.substr(2,2).c_str(), d4.substr(4,2).c_str(), d4.substr(6,2).c_str(),
+             d4.substr(8,2).c_str(), d4.substr(10,2).c_str(), d4.substr(12,2).c_str(), d4.substr(14,2).c_str());
+    return std::string(buf);
 }
 
 std::string CCodeGen::mapTypeRef(ASTNode* typeRef) {

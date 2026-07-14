@@ -412,8 +412,174 @@ void CCodeGen::visit(ParameterDecl& node) {
 //   5. DllRegisterServer / DllUnregisterServer
 //   6. .def导出文件
 // ============================================================
-// P7: 窗体框架代码生成
+// P13.23: 外部COM vtable source interface 事件接收器生成
+// ============================================================
+
+void CCodeGen::emitComVtableSinkDecls() {
+    for (auto& [varLower, srcClassName] : knownWithEventsVars_) {
+        auto* srcClsSym = symTab_.lookup(srcClassName);
+        if (!srcClsSym || srcClsSym->kind != SymbolKind::ComClass) continue;
+        if (!srcClsSym->comHasSourceIface) continue;
+        if (srcClsSym->comSourceIfaceIsDispatch) continue;  // dispinterface 使用 vb6_CreateEventSink
+        if (srcClsSym->comSourceMethods.empty()) continue;
+        if (srcClsSym->comSourceIfaceIid.empty()) continue;
+        std::string createFn = "vb6_vsink_" + varLower + "_create";
+        h_.emitLine("void* " + createFn + "(void);");
+        h_.emitBlank();
+    }
+}
+
+static std::string comEventParamExpr(const std::string& comName, Vb6Type uhType) {
+    // 将 COM vtable 参数转换为 VB6 用户处理器参数表达式
+    bool isArray = (static_cast<uint16_t>(uhType) & static_cast<uint16_t>(Vb6Type::Array)) != 0;
+    Vb6Type baseType = isArray
+        ? static_cast<Vb6Type>(static_cast<uint16_t>(uhType) & ~static_cast<uint16_t>(Vb6Type::Array))
+        : uhType;
+    if (isArray) {
+        if (baseType == Vb6Type::Byte) {
+            return "(" + comName + " ? (uint8_t*)" + comName + "->pvData : NULL)";
+        } else {
+            return "(" + comName + " ? (void*)" + comName + "->pvData : NULL)";
+        }
+    }
+    return comName;
+}
+
+void CCodeGen::emitComVtableSinks() {
+    for (auto& [varLower, srcClassName] : knownWithEventsVars_) {
+        auto* srcClsSym = symTab_.lookup(srcClassName);
+        if (!srcClsSym || srcClsSym->kind != SymbolKind::ComClass) continue;
+        if (!srcClsSym->comHasSourceIface) continue;
+        if (srcClsSym->comSourceIfaceIsDispatch) continue;
+        if (srcClsSym->comSourceMethods.empty()) continue;
+        std::string iidStr = srcClsSym->comSourceIfaceIid;
+        if (iidStr.empty()) continue;
+
+        std::string sinkType = "vb6_vsink_" + varLower;
+        std::string sinkPrefix = "vb6_vsink_" + varLower;
+        std::string iidConst = sinkPrefix + "_iid";
+        std::string guidInit = emitGuidInitializer(iidStr);
+        if (guidInit.empty()) continue;
+
+        // 查找原始变量名(保留大小写)
+        std::string varName = varLower;
+        auto* varSym = symTab_.lookup(varLower);
+        if (varSym) varName = varSym->name;
+
+        // 1. GUID 常量
+        c_.emitBlank();
+        c_.emitLine("// P13.23: vtable event sink for " + varName + " (" + srcClassName + ")");
+        c_.emitLine("static const IID " + iidConst + " = " + guidInit + ";");
+
+        // 2. Sink 结构体
+        c_.emitLine("typedef struct " + sinkType + " {");
+        c_.emitLine("    void** vtable;");
+        c_.emitLine("    LONG refCount;");
+        c_.emitLine("} " + sinkType + ";");
+
+        // Forward declarations (used by QI before definition)
+        c_.emitBlank();
+        c_.emitLine("static ULONG __stdcall " + sinkPrefix + "_AddRef(void* This);");
+        c_.emitLine("static ULONG __stdcall " + sinkPrefix + "_Release(void* This);");
+
+        // 3. IUnknown 方法
+        c_.emitBlank();
+        c_.emitLine("static HRESULT __stdcall " + sinkPrefix + "_QI(void* This, REFIID riid, void** ppv) {");
+        c_.indent();
+        c_.emitLine("if (IsEqualIID(riid, \u0026IID_IUnknown) || IsEqualIID(riid, \u0026" + iidConst + ")) {");
+        c_.indent();
+        c_.emitLine("*ppv = This;");
+        c_.emitLine(sinkPrefix + "_AddRef(This);");
+        c_.emitLine("return S_OK;");
+        c_.dedent();
+        c_.emitLine("}");
+        c_.emitLine("*ppv = NULL;");
+        c_.emitLine("return E_NOINTERFACE;");
+        c_.dedent();
+        c_.emitLine("}");
+
+        c_.emitBlank();
+        c_.emitLine("static ULONG __stdcall " + sinkPrefix + "_AddRef(void* This) {");
+        c_.indent();
+        c_.emitLine("return InterlockedIncrement(\u0026((" + sinkType + "*)This)->refCount);");
+        c_.dedent();
+        c_.emitLine("}");
+
+        c_.emitBlank();
+        c_.emitLine("static ULONG __stdcall " + sinkPrefix + "_Release(void* This) {");
+        c_.indent();
+        c_.emitLine("ULONG c = InterlockedDecrement(\u0026((" + sinkType + "*)This)->refCount);");
+        c_.emitLine("if (c == 0) free(This);");
+        c_.emitLine("return c;");
+        c_.dedent();
+        c_.emitLine("}");
+
+        // 4. Source interface 方法
+        for (auto& evtName : srcClsSym->eventNames) {
+            std::string evtLower = Symbol::toLower(evtName);
+            auto itSig = srcClsSym->comSourceMethods.find(evtLower);
+            if (itSig == srcClsSym->comSourceMethods.end()) continue;
+            auto& sig = itSig->second;
+
+            std::string handlerName = varName + "_" + evtName;
+            auto* handlerSym = symTab_.lookup(handlerName);
+            if (!handlerSym) continue;
+
+            std::string methodName = sinkPrefix + "_" + cIdent(evtName);
+            std::string methodSig = "static HRESULT __stdcall " + methodName + "(void* This";
+            std::string callArgs = "(";
+            for (size_t i = 0; i < sig.params.size(); i++) {
+                std::string comType = mapComType(sig.params[i].type);
+                std::string comName = "com_" + cIdent(sig.params[i].name);
+                methodSig += ", " + comType + " " + comName;
+                if (i > 0) callArgs += ", ";
+                callArgs += comEventParamExpr(comName, sig.params[i].type);
+            }
+            methodSig += ")";
+            callArgs += ")";
+
+            c_.emitBlank();
+            c_.emitLine(methodSig + " {");
+            c_.indent();
+            std::string procCall = cProcName(handlerName, handlerSym->access, handlerSym->sourceModule);
+            c_.emitLine(procCall + callArgs + ";");
+            c_.emitLine("return S_OK;");
+            c_.dedent();
+            c_.emitLine("}");
+        }
+
+        // 5. vtable 数组
+        c_.emitBlank();
+        c_.emitLine("static void* " + sinkPrefix + "_vtable[] = {");
+        c_.indent();
+        c_.emitLine(sinkPrefix + "_QI, " + sinkPrefix + "_AddRef, " + sinkPrefix + "_Release,");
+        for (auto& evtName : srcClsSym->eventNames) {
+            std::string evtLower = Symbol::toLower(evtName);
+            if (srcClsSym->comSourceMethods.find(evtLower) == srcClsSym->comSourceMethods.end()) continue;
+            c_.emitLine(sinkPrefix + "_" + cIdent(evtName) + ",");
+        }
+        c_.dedent();
+        c_.emitLine("};");
+
+        // 6. create 函数
+        c_.emitBlank();
+        c_.emitLine("void* " + sinkPrefix + "_create(void) {");
+        c_.indent();
+        c_.emitLine(sinkType + "* s = (" + sinkType + "*)calloc(1, sizeof(" + sinkType + "));");
+        c_.emitLine("if (!s) return NULL;");
+        c_.emitLine("s->vtable = " + sinkPrefix + "_vtable;");
+        c_.emitLine("s->refCount = 1;");
+        c_.emitLine("return s;");
+        c_.dedent();
+        c_.emitLine("}");
+    }
+}
+
+
+// ============================================================
+// P6.6: ActiveX DLL代码生成
 // ============================================================
 
 
 } // namespace vb6c3
+
