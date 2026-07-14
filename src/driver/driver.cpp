@@ -856,7 +856,7 @@ bool Driver::runSemanticAnalysis(const CompileOptions& options) {
                         sym->comSourceIfaceName = cc->defaultSourceIfaceName;
                         if (cc->defaultSourceIface) {
                             sym->comSourceIfaceIid = cc->defaultSourceIface->iidStr;
-                            sym->comSourceIfaceIsDispatch = cc->defaultSourceIface->isDispatch;
+                            sym->comSourceIfaceIsDispOnly = cc->defaultSourceIface->isDispatch;
                             for (auto& member : cc->defaultSourceIface->members) {
                                 sym->eventNames.push_back(member.realName);
                                 sym->comEventDispids[Symbol::toLower(member.name)] = member.memid;

@@ -420,7 +420,7 @@ void CCodeGen::emitComVtableSinkDecls() {
         auto* srcClsSym = symTab_.lookup(srcClassName);
         if (!srcClsSym || srcClsSym->kind != SymbolKind::ComClass) continue;
         if (!srcClsSym->comHasSourceIface) continue;
-        if (srcClsSym->comSourceIfaceIsDispatch) continue;  // dispinterface 使用 vb6_CreateEventSink
+        if (srcClsSym->comSourceIfaceIsDispOnly) continue;  // dispinterface uses vb6_CreateEventSink
         if (srcClsSym->comSourceMethods.empty()) continue;
         if (srcClsSym->comSourceIfaceIid.empty()) continue;
         std::string createFn = "vb6_vsink_" + varLower + "_create";
@@ -450,11 +450,11 @@ void CCodeGen::emitComVtableSinks() {
         auto* srcClsSym = symTab_.lookup(srcClassName);
         if (!srcClsSym || srcClsSym->kind != SymbolKind::ComClass) continue;
         if (!srcClsSym->comHasSourceIface) continue;
-        if (srcClsSym->comSourceIfaceIsDispatch) continue;
+        if (srcClsSym->comSourceIfaceIsDispOnly) continue;  // dispinterface uses vb6_CreateEventSink
         if (srcClsSym->comSourceMethods.empty()) continue;
-        std::string iidStr = srcClsSym->comSourceIfaceIid;
-        if (iidStr.empty()) continue;
+        if (srcClsSym->comSourceIfaceIid.empty()) continue;
 
+        std::string iidStr = srcClsSym->comSourceIfaceIid;
         std::string sinkType = "vb6_vsink_" + varLower;
         std::string sinkPrefix = "vb6_vsink_" + varLower;
         std::string iidConst = sinkPrefix + "_iid";
@@ -482,7 +482,9 @@ void CCodeGen::emitComVtableSinks() {
         c_.emitLine("static ULONG __stdcall " + sinkPrefix + "_AddRef(void* This);");
         c_.emitLine("static ULONG __stdcall " + sinkPrefix + "_Release(void* This);");
 
-        // 3. IUnknown 方法
+        // 3. IUnknown methods
+        // Note: QI does NOT respond to IID_IDispatch because this sink has no
+        // Invoke implementation — only IUnknown and the source IID are supported.
         c_.emitBlank();
         c_.emitLine("static HRESULT __stdcall " + sinkPrefix + "_QI(void* This, REFIID riid, void** ppv) {");
         c_.indent();
@@ -509,7 +511,7 @@ void CCodeGen::emitComVtableSinks() {
         c_.emitLine("static ULONG __stdcall " + sinkPrefix + "_Release(void* This) {");
         c_.indent();
         c_.emitLine("ULONG c = InterlockedDecrement(\u0026((" + sinkType + "*)This)->refCount);");
-        c_.emitLine("if (c == 0) free(This);");
+        c_.emitLine("if (c == 0) CoTaskMemFree(This);");
         c_.emitLine("return c;");
         c_.dedent();
         c_.emitLine("}");
@@ -565,8 +567,9 @@ void CCodeGen::emitComVtableSinks() {
         c_.emitBlank();
         c_.emitLine("void* " + sinkPrefix + "_create(void) {");
         c_.indent();
-        c_.emitLine(sinkType + "* s = (" + sinkType + "*)calloc(1, sizeof(" + sinkType + "));");
+        c_.emitLine(sinkType + "* s = (" + sinkType + "*)CoTaskMemAlloc(sizeof(" + sinkType + "));");
         c_.emitLine("if (!s) return NULL;");
+        c_.emitLine("memset(s, 0, sizeof(" + sinkType + "));");
         c_.emitLine("s->vtable = " + sinkPrefix + "_vtable;");
         c_.emitLine("s->refCount = 1;");
         c_.emitLine("return s;");

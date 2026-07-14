@@ -1,4 +1,4 @@
-﻿// vb6com.c - VB6 COM互操作运行时实现 (P6)
+// vb6com.c - VB6 COM互操作运行时实现 (P6)
 // 使用Windows原生COM API, 独立于vb6rtl.h避免VARIANT冲突
 
 #include "vb6com.h"
@@ -1355,9 +1355,9 @@ static ULONG STDMETHODCALLTYPE sink_Release(IDispatch* This) {
     VB6EventSink* s = (VB6EventSink*)((char*)This - offsetof(VB6EventSink, vtable));
     ULONG c = InterlockedDecrement(&s->refCount);
     if (c == 0) {
-        free(s->dispids);
-        free(s->callbacks);
-        free(s);
+        CoTaskMemFree(s->dispids);
+        CoTaskMemFree(s->callbacks);
+        CoTaskMemFree(s);
     }
     return c;
 }
@@ -1424,8 +1424,9 @@ static void* g_eventSinkVtable[11] = {
 };
 
 void* vb6_CreateEventSink(const int* dispids, void** callbacks, int count, const IID* sourceIid) {
-    VB6EventSink* s = (VB6EventSink*)calloc(1, sizeof(VB6EventSink));
+    VB6EventSink* s = (VB6EventSink*)CoTaskMemAlloc(sizeof(VB6EventSink));
     if (!s) return NULL;
+    memset(s, 0, sizeof(VB6EventSink));
     
     /* Copy vtable template */
     s->vtable = g_eventSinkVtable;
@@ -1440,12 +1441,12 @@ void* vb6_CreateEventSink(const int* dispids, void** callbacks, int count, const
     }
     
     /* Copy DISPID mappings */
-    s->dispids = (int*)malloc(count * sizeof(int));
-    s->callbacks = (void(**)(VARIANT*,int,VARIANT*))malloc(count * sizeof(void(*)(VARIANT*,int,VARIANT*)));
+    s->dispids = (int*)CoTaskMemAlloc(count * sizeof(int));
+    s->callbacks = (void(**)(VARIANT*,int,VARIANT*))CoTaskMemAlloc(count * sizeof(void(*)(VARIANT*,int,VARIANT*)));
     if (!s->dispids || !s->callbacks) {
-        free(s->dispids);
-        free(s->callbacks);
-        free(s);
+        CoTaskMemFree(s->dispids);
+        CoTaskMemFree(s->callbacks);
+        CoTaskMemFree(s);
         return NULL;
     }
     memcpy(s->dispids, dispids, count * sizeof(int));

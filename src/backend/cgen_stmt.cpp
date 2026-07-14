@@ -901,15 +901,23 @@ void CCodeGen::visit(SetStmt& node) {
                 c_.emitLine("}");
             } else if (srcClsSym && srcClsSym->kind == SymbolKind::ComClass && srcClsSym->comHasSourceIface) {
                 // P13.23: External COM WithEvents
+                std::string iidStr = srcClsSym->comSourceIfaceIid;
+                std::string iidInit = emitGuidInitializer(iidStr);
+                // Static declarations at function scope (before the if block)
+                c_.emitLine("static int " + targetLower + "_evt_cookie = 0;");
+                c_.emitLine("static const char* " + targetLower + "_evt_iid = \"" + iidStr + "\";");
+                if (!iidInit.empty()) {
+                    c_.emitLine("static const IID " + targetLower + "_evt_iid_struct = " + iidInit + ";");
+                }
                 c_.emitLine("if (" + target + ") {");
                 c_.indent();
-                std::string iidStr = srcClsSym->comSourceIfaceIid;
-                c_.emitLine("static int " + targetLower + "_evt_cookie = 0;");
-                std::string iidInit = emitGuidInitializer(iidStr);
-                c_.emitLine("static const char* " + targetLower + "_evt_iid = \"" + iidStr + "\";");
-                if (!iidInit.empty()) { c_.emitLine("static const IID " + targetLower + "_evt_iid_struct = " + iidInit + ";"); }
-                c_.emitLine("if (" + targetLower + "_evt_cookie != 0) { vb6_ComUnadvise((IUnknown*)" + target + ", " + targetLower + "_evt_iid, " + targetLower + "_evt_cookie); " + targetLower + "_evt_cookie = 0; }");
-                if (srcClsSym->comSourceIfaceIsDispatch) {
+                c_.emitLine("if (" + targetLower + "_evt_cookie != 0) {");
+                c_.indent();
+                c_.emitLine("vb6_ComUnadvise((IUnknown*)" + target + ", " + targetLower + "_evt_iid, " + targetLower + "_evt_cookie);");
+                c_.emitLine(targetLower + "_evt_cookie = 0;");
+                c_.dedent();
+                c_.emitLine("}");
+                if (srcClsSym->comSourceIfaceIsDispOnly) {
                     // dispinterface: use existing IDispatch sink
                     std::vector<std::string> dispids;
                     std::vector<std::string> callbacks;
@@ -957,8 +965,8 @@ void CCodeGen::visit(SetStmt& node) {
             }
         }
     }
-    
-// P16: WithEvents控件变量赋值 - 无需额外操作
+
+    // P16: WithEvents控件变量赋值 - 无需额外操作
     // Set cmd = Command1 → cmd = ctrl_Command1 (HWND拷贝已在赋值行完成)
     // 事件通过WndProc的HWND匹配分发，不需要COM Sink/Advise
     {

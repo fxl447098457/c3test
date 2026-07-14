@@ -1,4 +1,4 @@
-﻿#include "backend/msvc_driver.hpp"
+#include "backend/msvc_driver.hpp"
 #include "common/encoding.hpp"
 
 #include <iostream>

@@ -1,4 +1,4 @@
-﻿// vb6c3 - 声明解析器
+// vb6c3 - 声明解析器
 // Sub / Function / Property / Type / Enum / Declare / Event / Const / Variable
 
 #include "parser/parser.hpp"

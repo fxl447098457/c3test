@@ -886,7 +886,7 @@ std::string CCodeGen::emitGuidInitializer(const std::string& iidStr) const {
     std::string d4 = parts[3] + parts[4];  // 16个hex字符
     if (d1.size() != 8 || d2.size() != 4 || d3.size() != 4 || d4.size() != 16) return "";
     char buf[128];
-    snprintf(buf, sizeof(buf), "{0x%s, 0x%s, 0x%s, {0x%2s, 0x%2s, 0x%2s, 0x%2s, 0x%2s, 0x%2s, 0x%2s, 0x%2s}}",
+    snprintf(buf, sizeof(buf), "{0x%s, 0x%s, 0x%s, {0x%s, 0x%s, 0x%s, 0x%s, 0x%s, 0x%s, 0x%s, 0x%s}}",
              d1.c_str(), d2.c_str(), d3.c_str(),
              d4.substr(0,2).c_str(), d4.substr(2,2).c_str(), d4.substr(4,2).c_str(), d4.substr(6,2).c_str(),
              d4.substr(8,2).c_str(), d4.substr(10,2).c_str(), d4.substr(12,2).c_str(), d4.substr(14,2).c_str());
