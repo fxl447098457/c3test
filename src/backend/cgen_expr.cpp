@@ -68,8 +68,20 @@ void CCodeGen::visit(LiteralExpr& node) {
             if (inner.size() >= 2 && inner.front() == '"' && inner.back() == '"') {
                 inner = inner.substr(1, inner.size() - 2);
             }
-            // VB6的""转义 (双引号在字符串内) → C的\"转义
-            // 同时转义反斜杠; 非ASCII字符→\xNNNN宽字符转义
+            // VB6的""转义折叠: 字符串内""表示一个双引号 → 折叠为单个"
+            // 必须在C转义之前处理, 否则""会被错误转义为\""\""(两个引号)
+            std::string folded;
+            folded.reserve(inner.size());
+            for (size_t k = 0; k < inner.size(); k++) {
+                if (inner[k] == '"' && k + 1 < inner.size() && inner[k + 1] == '"') {
+                    folded += '"';  // "" → "
+                    k++;            // skip second "
+                } else {
+                    folded += inner[k];
+                }
+            }
+            inner = folded;
+            // C转义: " → \" , \ → \\ , 控制字符 → \n/\r/\t 等; 非ASCII字符→\xNNNN宽字符转义
             std::string escaped;
             escaped.reserve(inner.size() + 16);
             for (size_t j = 0; j < inner.size(); ) {

@@ -402,7 +402,24 @@ void SemanticAnalyzer::registerConstant(ConstDecl& decl) {
                     break;
                 case LiteralKind::String:
                     sym->constType = Vb6Type::String;
-                    sym->constStringValue = lit->rawText;
+                    // Strip outer quotes and fold VB6 "" escape (two quotes → one)
+                    {
+                        std::string cv = lit->rawText;
+                        if (cv.size() >= 2 && cv.front() == '"' && cv.back() == '"') {
+                            cv = cv.substr(1, cv.size() - 2);
+                        }
+                        std::string cvFolded;
+                        cvFolded.reserve(cv.size());
+                        for (size_t ci = 0; ci < cv.size(); ci++) {
+                            if (cv[ci] == '"' && ci + 1 < cv.size() && cv[ci + 1] == '"') {
+                                cvFolded += '"';
+                                ci++;
+                            } else {
+                                cvFolded += cv[ci];
+                            }
+                        }
+                        sym->constStringValue = cvFolded;
+                    }
                     if (sym->type == Vb6Type::Unknown)
                         sym->type = Vb6Type::String;
                     break;
@@ -2350,7 +2367,22 @@ std::string SemanticAnalyzer::evalOptionalDefault(ASTNode* defaultValue, Vb6Type
                     case Vb6Type::Integer: { return std::to_string(sym->constIntValue); }
                     case Vb6Type::Single:
                     case Vb6Type::Double: { return std::to_string(sym->constFloatValue); }
-                    case Vb6Type::String: { return std::string("vb6_BSTR_FromStr(L\"") + sym->constStringValue + "\")"; }
+                    case Vb6Type::String: {
+                        // C-escape constStringValue before embedding in C string literal
+                        std::string cEsc;
+                        cEsc.reserve(sym->constStringValue.size() + 16);
+                        for (char ec : sym->constStringValue) {
+                            switch (ec) {
+                                case '\\': cEsc += "\\\\"; break;
+                                case '"':  cEsc += "\\\""; break;
+                                case '\n': cEsc += "\\n"; break;
+                                case '\r': cEsc += "\\r"; break;
+                                case '\t': cEsc += "\\t"; break;
+                                default:   cEsc += ec; break;
+                            }
+                        }
+                        return std::string("vb6_BSTR_FromStr(L\"") + cEsc + "\")";
+                    }
                     case Vb6Type::Boolean: { return sym->constBoolValue ? "-1" : "0"; }
                     default: break;
                 }
