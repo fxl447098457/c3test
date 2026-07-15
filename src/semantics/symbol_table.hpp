@@ -186,7 +186,7 @@ struct Symbol {
         return result;
     }
 
-    // 存储键: Property Get/Let/Set加后缀区分同名共存, 其他用lowerName
+    // 存储键: Property Get/Let/Set加后缀区分同名共存, Event也加后缀, 其他用lowerName
     std::string storageKey() const {
         if (isPropertyKind(kind)) {
             switch (kind) {
@@ -195,6 +195,11 @@ struct Symbol {
                 case SymbolKind::PropertySet:  return lowerName + "$ps";
                 default: break;
             }
+        }
+        // Event 使用独立存储键, 允许同名 Sub/Function 共存
+        // VB6合法: Public Event CloseSck() + Public Sub CloseSck()
+        if (kind == SymbolKind::Event) {
+            return lowerName + "$ev";
         }
         return lowerName;
     }

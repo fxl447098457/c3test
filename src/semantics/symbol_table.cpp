@@ -135,6 +135,21 @@ bool SymbolTable::define(std::unique_ptr<Symbol> sym) {
         }
     }
 
+    // 允许用户定义的 Sub/Function/Variable/Constant 覆盖内置符号
+    // VB6合法: 类方法/变量名可与内置函数同名 (如 Timer, FormatDateTime, LTrim, App)
+    {
+        auto* existing = current_->lookupLocal(lowerName);
+        if (existing && existing->isBuiltin
+            && !sym->isBuiltin
+            && (sym->kind == SymbolKind::Sub
+                || sym->kind == SymbolKind::Function
+                || sym->kind == SymbolKind::Variable
+                || sym->kind == SymbolKind::Constant)) {
+            // 移除内置符号, 允许用户符号替换
+            current_->symbols_.erase(existing->storageKey());
+        }
+    }
+
     // Property Get/Let/Set允许同名共存 (VB6合法: Property Get Name + Property Let Name)
     // Scope::define已用storageKey区分, 这里只需确认不报错即可
 
