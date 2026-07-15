@@ -472,6 +472,13 @@ Token Lexer::scanIdentifierOrKeyword() {
     std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
     auto it = keywords_.find(lower);
     if (it != keywords_.end()) {
+        // Rem 关键字: 作为注释处理, 消费到行尾 (与 ' 注释行为一致)
+        if (it->second == TokenKind::REM_keyword) {
+            while (offset_ < content_.size() && peek() != '\n') {
+                text += advance();
+            }
+            return makeToken(TokenKind::Comment, text, startLine, startCol);
+        }
         return makeToken(it->second, text, startLine, startCol);
     }
 

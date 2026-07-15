@@ -905,9 +905,13 @@ std::unique_ptr<ReDimStmt> Parser::parseReDimStmt() {
         preserve = true;
     }
 
-    // 解析变量名, 支持点访问: uOutput.Buffer
-    auto varTok = expectName("expected variable name");
-    std::string varName = varTok.text;
+    // 解析变量名, 支持点访问: uOutput.Buffer 和 With块: .Member
+    std::string varName;
+    if (match(TokenKind::Dot)) {
+        varName = ".";
+    }
+    auto varTok = expectName("expected variable name in ReDim");
+    varName += varTok.text;
     while (match(TokenKind::Dot)) {
         if (canBeName(cur_.kind)) {
             varName += "." + advance().text;
