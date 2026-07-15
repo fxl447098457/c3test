@@ -166,7 +166,21 @@ std::unique_ptr<TypeDecl> Parser::parseTypeDecl(AccessLevel access) {
         if (cur_.kind == TokenKind::End) break;
 
         auto memberLoc = currentLoc();
-        auto memberName = expectName("expected member name");
+        // 允许硬关键字作为 Type 成员名 (如 Next, Type 等)
+        std::string memberNameStr;
+        if (canBeName(cur_.kind)) {
+            memberNameStr = advance().text;
+        } else if (!cur_.text.empty() && cur_.kind != TokenKind::EndOfFile &&
+                   cur_.kind != TokenKind::NewLine && cur_.kind != TokenKind::Colon &&
+                   cur_.kind != TokenKind::LeftParen && cur_.kind != TokenKind::RightParen &&
+                   cur_.kind != TokenKind::Comma && cur_.kind != TokenKind::End) {
+            memberNameStr = advance().text;
+        } else {
+            diag_.error(DiagnosticID::ParseExpectedToken, currentLoc(),
+                std::string("expected member name (got ") +
+                Token::kindToString(cur_.kind) + ")");
+            memberNameStr = "?";
+        }
 
         // 可能有数组维度:
         //   memberName(10) As Type    — 固定大小
@@ -205,7 +219,7 @@ std::unique_ptr<TypeDecl> Parser::parseTypeDecl(AccessLevel access) {
         expectEndOfStatement();
 
         members.push_back(std::make_unique<TypeMember>(memberLoc,
-            memberName.text, std::move(type), std::move(arraySize)));
+            memberNameStr, std::move(type), std::move(arraySize)));
     }
 
     expect(TokenKind::End, DiagnosticID::ParseMismatchedBlock,

@@ -367,6 +367,10 @@ std::unique_ptr<IfStmt> Parser::parseIfStmt() {
            "expected 'Then' after If condition");
 
     // 单行 If?  检查 Then 后面是否紧接语句 (无换行)
+    // 跳过 Then 后的可选冒号: If x Then: stmt
+    if (cur_.kind == TokenKind::Colon) {
+        advance();
+    }
     if (cur_.kind != TokenKind::NewLine && cur_.kind != TokenKind::EndOfFile) {
         // 单行 If...Then...[Else...]
         StmtList thenBody;
@@ -901,7 +905,21 @@ std::unique_ptr<ReDimStmt> Parser::parseReDimStmt() {
         preserve = true;
     }
 
+    // 解析变量名, 支持点访问: uOutput.Buffer
     auto varTok = expectName("expected variable name");
+    std::string varName = varTok.text;
+    while (match(TokenKind::Dot)) {
+        if (canBeName(cur_.kind)) {
+            varName += "." + advance().text;
+        } else if (!cur_.text.empty() && cur_.kind != TokenKind::EndOfFile &&
+                   cur_.kind != TokenKind::NewLine && cur_.kind != TokenKind::Colon &&
+                   cur_.kind != TokenKind::LeftParen && cur_.kind != TokenKind::RightParen &&
+                   cur_.kind != TokenKind::Comma) {
+            varName += "." + advance().text;
+        } else {
+            break;
+        }
+    }
     expect(TokenKind::LeftParen, DiagnosticID::ParseExpectedToken,
            "expected '(' after ReDim variable");
 
@@ -925,7 +943,7 @@ std::unique_ptr<ReDimStmt> Parser::parseReDimStmt() {
         asType = parseTypeRef();
     }
 
-    return std::make_unique<ReDimStmt>(loc, preserve, varTok.text,
+    return std::make_unique<ReDimStmt>(loc, preserve, varName,
         std::move(dims), std::move(asType));
 }
 
@@ -970,9 +988,38 @@ std::unique_ptr<EraseStmt> Parser::parseEraseStmt() {
     auto loc = currentLoc();
     advance(); // consume 'Erase'
     std::vector<std::string> names;
-    names.push_back(expectName("expected variable name").text);
+
+    // 辅助: 解析一个 Erase 目标, 支持 .Member (With块) 和 obj.Member
+    auto parseEraseTarget = [this]() -> std::string {
+        std::string name;
+        if (match(TokenKind::Dot)) {
+            name = ".";
+        }
+        if (canBeName(cur_.kind)) {
+            name += advance().text;
+        } else if (!cur_.text.empty() && cur_.kind != TokenKind::EndOfFile &&
+                   cur_.kind != TokenKind::NewLine && cur_.kind != TokenKind::Colon &&
+                   cur_.kind != TokenKind::Comma) {
+            name += advance().text;
+        }
+        // 支持 obj.Member.Member 链
+        while (match(TokenKind::Dot)) {
+            if (canBeName(cur_.kind)) {
+                name += "." + advance().text;
+            } else if (!cur_.text.empty() && cur_.kind != TokenKind::EndOfFile &&
+                       cur_.kind != TokenKind::NewLine && cur_.kind != TokenKind::Colon &&
+                       cur_.kind != TokenKind::Comma) {
+                name += "." + advance().text;
+            } else {
+                break;
+            }
+        }
+        return name;
+    };
+
+    names.push_back(parseEraseTarget());
     while (match(TokenKind::Comma)) {
-        names.push_back(expectName("expected variable name").text);
+        names.push_back(parseEraseTarget());
     }
     return std::make_unique<EraseStmt>(loc, std::move(names));
 }
