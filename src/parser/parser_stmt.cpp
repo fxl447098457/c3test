@@ -931,9 +931,9 @@ std::unique_ptr<ReDimStmt> Parser::parseReDimStmt() {
 
 StmtPtr Parser::parseConstStmtInBody() {
     auto loc = currentLoc();
-    advance(); // consume 'Const'
-    auto constDecl = parseConstDecl(AccessLevel::Private);
-    return std::make_unique<LocalDeclStmt>(loc, std::move(constDecl));
+    // 不需要 advance() — parseConstDeclList -> parseConstDecl 会消费 'Const'
+    auto decl = parseConstDeclList(AccessLevel::Private);
+    return std::make_unique<LocalDeclStmt>(loc, std::move(decl));
 }
 
 StmtPtr Parser::parseStaticStmtInBody() {
@@ -948,7 +948,7 @@ StmtPtr Parser::parseStaticStmtInBody() {
         auto funcDecl = parseFunctionDecl(AccessLevel::Private, true);
         return std::make_unique<LocalDeclStmt>(loc, std::move(funcDecl));
     }
-    auto varDecl = parseVariableDecl(AccessLevel::Private, true);
+    auto varDecl = parseVariableDeclList(AccessLevel::Private, true);
     return std::make_unique<LocalDeclStmt>(loc, std::move(varDecl));
 }
 
@@ -958,7 +958,7 @@ StmtPtr Parser::parseAccessDeclInBody() {
     AccessLevel access = (cur_.kind == TokenKind::Public)
         ? AccessLevel::Public : AccessLevel::Private;
     advance();
-    auto varDecl = parseVariableDecl(access, false);
+    auto varDecl = parseVariableDeclList(access, false);
     return std::make_unique<LocalDeclStmt>(loc, std::move(varDecl));
 }
 
