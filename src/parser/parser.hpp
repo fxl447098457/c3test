@@ -259,6 +259,9 @@ private:
     // With 嵌套深度 (>0 时 .member 为 WithMemberExpr)
     int withDepth_ = 0;
 
+    // 单行 If 上下文: >0 时禁止标签检测 (colon是语句分隔符, 非标签冒号)
+    int inSingleLineIf_ = 0;
+
     // 安全限制: advance调用计数
     size_t advanceCount_ = 0;
     static constexpr size_t MAX_ADVANCES = 10'000'000;

@@ -374,14 +374,30 @@ std::unique_ptr<IfStmt> Parser::parseIfStmt() {
     if (cur_.kind != TokenKind::NewLine && cur_.kind != TokenKind::EndOfFile) {
         // 单行 If...Then...[Else...]
         StmtList thenBody;
+        inSingleLineIf_++;
         auto stmt = parseStatement();
         if (stmt) thenBody.push_back(std::move(stmt));
+
+        // 解析 Then 后续的冒号分隔语句: If x Then stmt1: stmt2: stmt3
+        while (cur_.kind == TokenKind::Colon) {
+            advance(); // consume ':'
+            if (cur_.kind == TokenKind::Else) break;
+            auto moreStmt = parseStatement();
+            if (moreStmt) thenBody.push_back(std::move(moreStmt));
+        }
 
         StmtList elseBody;
         if (match(TokenKind::Else)) {
             auto elseStmt = parseStatement();
             if (elseStmt) elseBody.push_back(std::move(elseStmt));
+            // Else 也可以有冒号分隔的多语句
+            while (cur_.kind == TokenKind::Colon) {
+                advance(); // consume ':'
+                auto moreStmt = parseStatement();
+                if (moreStmt) elseBody.push_back(std::move(moreStmt));
+            }
         }
+        inSingleLineIf_--;
 
         return std::make_unique<IfStmt>(loc, std::move(condition),
             std::move(thenBody),
@@ -1054,7 +1070,8 @@ StmtPtr Parser::parseLabelOrAssignmentOrCall() {
 
     // 检查是否是标签: Name 后面紧跟冒号
     // 在语句起始位置, identifier: 只能是标签（VB6 规则）
-    if (canBeName(cur_.kind) && next_.kind == TokenKind::Colon) {
+    // 但在单行 If 内, colon 是语句分隔符 (If x Then a: b: c)
+    if (inSingleLineIf_ == 0 && canBeName(cur_.kind) && next_.kind == TokenKind::Colon) {
         auto nameTok = advance();  // consume label name
         advance();                 // consume ':'
         return std::make_unique<LabelStmt>(loc, nameTok.text);
