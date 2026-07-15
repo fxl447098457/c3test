@@ -1,0 +1,11 @@
+=== Array Tests ===
+arr(0)=0
+arr(3)=30
+arr(5)=50
+UBound=5
+LBound=0
+scores(2)=92
+scoresUB=3
+scoresLB=1
+names(1)=Bob
+=== Array Tests PASSED ===

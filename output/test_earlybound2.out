@@ -1,0 +1,11 @@
+EB2-1:OK FolderExists
+EB2-2:OK FileExists
+EB2-3:BuildPath=[C:\Windows\System32]
+EB2-4:Ext=[txt]
+EB2-5:FileName=[cmd.exe]
+EB2-6:AbsPath=[D:\vb6pro]
+EB2-7:DriveType=2
+EB2-8:OK IsReady
+EB2-9:OK CreateTextFile
+EB2-10:OK ReadAll
+EB2:10/10

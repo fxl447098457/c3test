@@ -1,0 +1,18 @@
+=== M6 Milestone Verification ===
+Config: MaxCount=100
+LogLevel=1
+Add(10,20)=30
+Multiply(5,6)=30
+Factorial(5)=120
+AfterSwap x=200
+AfterSwap y=100
+Greeting=Hello, World!
+Read:M6 Test Data
+ErrorHandled
+arr(5)=25
+Flags=3
+M6A:OK
+M6B:OK
+M6C:OK
+M6D:OK
+=== M6 PASSED ===

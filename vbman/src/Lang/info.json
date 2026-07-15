@@ -1,0 +1,33 @@
+{
+    "说明": [
+        "这是一个多语言支持的JSON文件。",
+        "它包含了不同语言的翻译和相关信息。"
+    ],
+    "DefaultIndex": 1,
+    "LangList": [
+        {
+            "ID": "zh-CN",
+            "Caption": "简体中文"
+        },
+        {
+            "ID": "en-US",
+            "Caption": "English"
+        },
+        {
+            "ID": "ja-JP",
+            "Caption": "日本語"
+        },
+        {
+            "ID": "zh-TW",
+            "Caption": "繁體中文"
+        },
+        {
+            "ID": "fr-FR",
+            "Caption": "francés"
+        },
+        {
+            "ID": "es-ES",
+            "Caption": "Espa?ol"
+        }
+    ]
+}

@@ -1,0 +1,5 @@
+VC-1:OK v>0
+VC-2:OK v=42
+VC-3:OK 100>v
+VC-4:OK v=hello
+VC:4/4

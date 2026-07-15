@@ -17,7 +17,7 @@ if "%1"=="" (
     exit /b 1
 )
 
-cd /d D:\vb6pro
+cd /d C:\Users\vi\Desktop\c3.vb6.pro
 
 REM 确定EXE路径
 set EXEPATH=%1

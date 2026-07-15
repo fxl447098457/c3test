@@ -18,16 +18,16 @@ if "%1"=="" (
     exit /b 1
 )
 
-call "C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvarsall.bat" x64 >nul 2>&1
+call "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvarsall.bat" x64 >nul 2>&1
 if errorlevel 1 (
     echo [ERROR] vcvarsall.bat 加载失败
     exit /b 1
 )
 
-cd /d D:\vb6pro
+cd /d C:\Users\vi\Desktop\c3.vb6.pro
 
 REM 设置VB6 RTL目录
-set VB6RTL_DIR=D:\vb6pro\src\rtl\core
+set VB6RTL_DIR=C:\Users\vi\Desktop\c3.vb6.pro\src\rtl\core
 
 REM 输出目录默认 output/
 set OUTDIR=output

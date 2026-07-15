@@ -1,0 +1,5 @@
+DP-1:OK dict("name") = Alice
+DP-2:OK dict("age") = 30
+DP-3:OK dict.Item("name") = dict("name")
+DP-4:OK dict("count") = 42
+P24-10: 4/4 passed

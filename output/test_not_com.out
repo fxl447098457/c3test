@@ -1,0 +1,3 @@
+NOT-COM:OK Not FileExists
+NOT-COM2:OK Not FolderExists
+NOT-COM:PASS

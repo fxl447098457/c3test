@@ -1,0 +1,17 @@
+Static count:
+1
+Static count:
+2
+Static count:
+3
+String match: hello
+Is: >10
+Weekday
+In GoSub
+After first GoSub
+In GoSub
+After second GoSub
+FIX1:OK
+FIX2:OK
+FIX3:OK
+All fixes passed!

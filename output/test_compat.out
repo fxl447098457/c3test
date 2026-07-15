@@ -1,0 +1,40 @@
+=== Compat Test Start ===
+Enum Green=2
+Point.X=100
+Point.Y=200
+PersonInfo.Age=30
+Factorial(6)=720
+Swap a=20
+Swap b=10
+AddAndDouble=13
+v_after=10
+Wednesday
+DoWhile=3
+DoUntil=5
+WhileWend=4
+And=8
+Or=14
+Xor=6
+InStr:7
+Replace:Hello VB6
+Left:Hello
+Right:World
+Mid:World
+LCase:hello world
+UCase:HELLO WORLD
+Len:9
+dyn(5)=50
+UBound=5
+dyn(5)_preserve=50
+UBound_preserve=10
+InGoSub
+AfterGoSub
+ExitFor_sum=55
+ExitFor_j=10
+ExitDo=7
+Medium
+CLng(3.7)=4
+CInt(2.3)=2
+CDbl(5)=5
+StrCmp_OK
+=== Compat Test End ===

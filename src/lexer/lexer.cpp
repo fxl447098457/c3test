@@ -355,6 +355,12 @@ Token Lexer::scanToken() {
         return makeToken(TokenKind::Hash, "#", startLine, startCol);
     }
 
+    // 行续接符 _ (必须在 isAlpha 检查之前, 因为 isAlpha('_') 返回 true,
+    // 否则 _ 会被当作标识符首字符, 导致行续接逻辑成为死代码)
+    if (c == '_' && isLineContinuation()) {
+        return scanLineContinuation();
+    }
+
     // 标识符/关键字
     if (isAlpha(c) || c == '[') {
         if (c == '[') {

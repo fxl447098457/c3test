@@ -1,0 +1,477 @@
+C3: Compilation failed (exit code 2)
+=== MSVC Output ===
+用于 x64 的 Microsoft (R) C/C++ 优化编译器 19.44.35223 版
+版权所有(C) Microsoft Corporation。保留所有权利。
+
+Form1.c
+C:\Users\woeoi\.local\state\TeleAgent\powershell-temp\C3C\164667010480500\rtl\vb6com.h(169): warning C4028: 形参 2 与声明不一致
+C:\Users\woeoi\.local\state\TeleAgent\powershell-temp\C3C\164667010480500/Form1.c(71): warning C4101: “vb6_local_err_jmp”: 未引用的局部变量
+Microsoft (R) Incremental Linker Version 14.44.35223.0
+Copyright (C) Microsoft Corporation.  All rights reserved.
+
+/out:D:\code\vi\c3.vb6.pro\tests\test_com_events_winhttp/test_com_events_winhttp.exe 
+/SUBSYSTEM:WINDOWS 
+C:\Users\woeoi\.local\state\TeleAgent\powershell-temp\C3C\164667010480500\rtl\vb6rtl.lib 
+C:\Users\woeoi\.local\state\TeleAgent\powershell-temp\C3C\164667010480500\rtl\vb6rtl_gui.lib 
+C:\Users\woeoi\.local\state\TeleAgent\powershell-temp\C3C\164667010480500\version_info.res 
+user32.lib 
+gdi32.lib 
+shell32.lib 
+ole32.lib 
+oleaut32.lib 
+uuid.lib 
+advapi32.lib 
+C:\Users\woeoi\.local\state\TeleAgent\powershell-temp\C3C\164667010480500/Form1.obj 
+LINK : warning LNK4098: 默认库“MSVCRT”与其他库的使用冲突；请使用 /NODEFAULTLIB:library
+LINK : warning LNK4217:符号“towlower”(在“ libucrt.lib(towlower.obj)”中定义)已由“vb6rtl.lib(vb6rtl.obj)”(函数“vb6_LCase”中)导入
+LINK : warning LNK4217:符号“iswctype”(在“ libucrt.lib(iswctype.obj)”中定义)已由“vb6rtl.lib(vb6rtl.obj)”(函数“vb6_LTrim”中)导入
+LINK : warning LNK4217:符号“__acrt_iob_func”(在“ libucrt.lib(_file.obj)”中定义)已由“vb6rtl.lib(vb6rtl.obj)”(函数“vb6_DebugOutputFmt”中)导入
+LINK : warning LNK4286:符号“__acrt_iob_func”(在“libucrt.lib(_file.obj)”中定义)已由“vb6rtl.lib(vb6com.obj)”导入
+LINK : warning LNK4217:符号“__acrt_iob_func”(在“ libucrt.lib(_file.obj)”中定义)已由“vb6rtl_gui.lib(vb6forms.obj)”(函数“vb6_LoadIconFromMemory”中)导入
+LINK : warning LNK4217:符号“__stdio_common_vfwprintf”(在“ libucrt.lib(output.obj)”中定义)已由“vb6rtl.lib(vb6rtl.obj)”(函数“_vfwprintf_l”中)导入
+LINK : warning LNK4286:符号“__stdio_common_vfwprintf”(在“libucrt.lib(output.obj)”中定义)已由“vb6rtl.lib(vb6com.obj)”导入
+LINK : warning LNK4286:符号“__stdio_common_vfwprintf”(在“libucrt.lib(output.obj)”中定义)已由“vb6rtl_gui.lib(vb6forms.obj)”导入
+LINK : warning LNK4217:符号“__stdio_common_vswprintf”(在“ libucrt.lib(output.obj)”中定义)已由“vb6rtl.lib(vb6rtl.obj)”(函数“_vswprintf_c_l”中)导入
+LINK : warning LNK4286:符号“__stdio_common_vswprintf”(在“libucrt.lib(output.obj)”中定义)已由“vb6rtl.lib(vb6com.obj)”导入
+LINK : warning LNK4217:符号“__stdio_common_vswprintf_s”(在“ libucrt.lib(output.obj)”中定义)已由“vb6rtl.lib(vb6rtl.obj)”(函数“_vswprintf_s_l”中)导入
+LINK : warning LNK4217:符号“_ltow_s”(在“ libucrt.lib(xtoa.obj)”中定义)已由“vb6rtl.lib(vb6rtl.obj)”(函数“vb6_PA_GetBSTR”中)导入
+LINK : warning LNK4217:符号“_wcsicmp”(在“ libucrt.lib(wcsicmp.obj)”中定义)已由“vb6rtl.lib(vb6rtl.obj)”(函数“vb6_StrCmp”中)导入
+LINK : warning LNK4286:符号“_wcsicmp”(在“libucrt.lib(wcsicmp.obj)”中定义)已由“vb6rtl_gui.lib(vb6forms.obj)”导入
+LINK : warning LNK4286:符号“_wcsicmp”(在“libucrt.lib(wcsicmp.obj)”中定义)已由“OLDNAMES.lib(wcsicmp.obi)”导入
+LINK : warning LNK4217:符号“_wcsnicmp”(在“ libucrt.lib(wcsnicmp.obj)”中定义)已由“vb6rtl.lib(vb6rtl.obj)”(函数“vb6_SendKeysLookup”中)导入
+LINK : warning LNK4217:符号“calloc”(在“ libucrt.lib(calloc.obj)”中定义)已由“vb6rtl.lib(vb6rtl.obj)”(函数“vb6_Alloc”中)导入
+LINK : warning LNK4286:符号“calloc”(在“libucrt.lib(calloc.obj)”中定义)已由“vb6rtl.lib(vb6com.obj)”导入
+LINK : warning LNK4217:符号“free”(在“ libucrt.lib(free.obj)”中定义)已由“vb6rtl.lib(vb6rtl.obj)”(函数“vb6_Free”中)导入
+LINK : warning LNK4286:符号“free”(在“libucrt.lib(free.obj)”中定义)已由“vb6rtl.lib(vb6com.obj)”导入
+LINK : warning LNK4286:符号“free”(在“libucrt.lib(free.obj)”中定义)已由“vb6rtl_gui.lib(vb6forms.obj)”导入
+LINK : warning LNK4217:符号“malloc”(在“ libucrt.lib(malloc.obj)”中定义)已由“vb6rtl.lib(vb6rtl.obj)”(函数“vb6_InputString”中)导入
+LINK : warning LNK4286:符号“malloc”(在“libucrt.lib(malloc.obj)”中定义)已由“vb6rtl.lib(vb6com.obj)”导入
+LINK : warning LNK4286:符号“malloc”(在“libucrt.lib(malloc.obj)”中定义)已由“vb6rtl_gui.lib(vb6forms.obj)”导入
+LINK : warning LNK4217:符号“exit”(在“ libucrt.lib(exit.obj)”中定义)已由“vb6rtl.lib(vb6rtl.obj)”(函数“vb6_End”中)导入
+LINK : warning LNK4217:符号“atoi”(在“ libucrt.lib(atox.obj)”中定义)已由“vb6rtl.lib(vb6rtl.obj)”(函数“vb6_DateSet”中)导入
+LINK : warning LNK4217:符号“fclose”(在“ libucrt.lib(fclose.obj)”中定义)已由“vb6rtl.lib(vb6rtl.obj)”(函数“vb6_Close”中)导入
+LINK : warning LNK4286:符号“fclose”(在“libucrt.lib(fclose.obj)”中定义)已由“vb6rtl.lib(vb6com.obj)”导入
+LINK : warning LNK4217:符号“fflush”(在“ libucrt.lib(fflush.obj)”中定义)已由“vb6rtl.lib(vb6rtl.obj)”(函数“vb6_DebugOutputFmt”中)导入
+LINK : warning LNK4217:符号“_fileno”(在“ libucrt.lib(fileno.obj)”中定义)已由“vb6rtl.lib(vb6rtl.obj)”(函数“vb6_Lock”中)导入
+LINK : warning LNK4217:符号“fputc”(在“ libucrt.lib(fputc.obj)”中定义)已由“vb6rtl.lib(vb6rtl.obj)”(函数“vb6_Print”中)导入
+LINK : warning LNK4217:符号“_get_osfhandle”(在“ libucrt.lib(osfinfo.obj)”中定义)已由“vb6rtl.lib(vb6rtl.obj)”(函数“vb6_Lock”中)导入
+LINK : warning LNK4217:符号“__stdio_common_vfprintf”(在“ libucrt.lib(output.obj)”中定义)已由“vb6rtl.lib(vb6com.obj)”(函数“_vfprintf_l”中)导入
+LINK : warning LNK4217:符号“__stdio_common_vsprintf”(在“ libucrt.lib(output.obj)”中定义)已由“vb6rtl.lib(vb6com.obj)”(函数“snprintf”中)导入
+LINK : warning LNK4217:符号“wcscpy_s”(在“ libucrt.lib(wcscpy_s.obj)”中定义)已由“vb6rtl_gui.lib(vb6forms.obj)”(函数“vb6_DirListBoxSetPath”中)导入
+LINK : warning LNK4217:符号“__stdio_common_vsnwprintf_s”(在“ libucrt.lib(output.obj)”中定义)已由“vb6rtl_gui.lib(vb6forms.obj)”(函数“_snwprintf_s”中)导入
+vb6rtl.lib(vb6rtl.obj) : error LNK2019: 无法解析的外部符号 __imp_towupper，函数 vb6_ChDrive 中引用了该符号
+vb6rtl_gui.lib(vb6forms.obj) : error LNK2001: 无法解析的外部符号 __imp_towupper
+vb6rtl.lib(vb6rtl.obj) : error LNK2019: 无法解析的外部符号 __imp_fgetws，函数 vb6_InputBox 中引用了该符号
+vb6rtl.lib(vb6rtl.obj) : error LNK2019: 无法解析的外部符号 __imp_wcstod，函数 vb6_PA_GetDouble 中引用了该符号
+vb6rtl.lib(vb6rtl.obj) : error LNK2019: 无法解析的外部符号 __imp_srand，函数 vb6_Init 中引用了该符号
+vb6rtl.lib(vb6rtl.obj) : error LNK2019: 无法解析的外部符号 __imp_rand，函数 vb6_Rnd 中引用了该符号
+vb6rtl.lib(vb6rtl.obj) : error LNK2019: 无法解析的外部符号 __imp_strtod，函数 vb6_Val 中引用了该符号
+vb6rtl.lib(vb6rtl.obj) : error LNK2019: 无法解析的外部符号 __imp_strtok_s，函数 vb6_DateSet 中引用了该符号
+vb6rtl.lib(vb6rtl.obj) : error LNK2019: 无法解析的外部符号 __imp_fgetc，函数 vb6_EOF 中引用了该符号
+vb6rtl.lib(vb6rtl.obj) : error LNK2019: 无法解析的外部符号 __imp_fgets，函数 vb6_LineInput 中引用了该符号
+vb6rtl.lib(vb6rtl.obj) : error LNK2019: 无法解析的外部符号 __imp_fopen，函数 vb6_FileCopy 中引用了该符号
+vb6rtl.lib(vb6com.obj) : error LNK2001: 无法解析的外部符号 __imp_fopen
+vb6rtl.lib(vb6rtl.obj) : error LNK2019: 无法解析的外部符号 __imp_fread，函数 vb6_FileCopy 中引用了该符号
+vb6rtl.lib(vb6rtl.obj) : error LNK2019: 无法解析的外部符号 __imp_fseek，函数 vb6_Get 中引用了该符号
+vb6rtl.lib(vb6rtl.obj) : error LNK2019: 无法解析的外部符号 __imp_ftell，函数 vb6_LOF 中引用了该符号
+vb6rtl.lib(vb6rtl.obj) : error LNK2019: 无法解析的外部符号 __imp_fwrite，函数 vb6_FileCopy 中引用了该符号
+vb6rtl.lib(vb6rtl.obj) : error LNK2019: 无法解析的外部符号 __imp_remove，函数 vb6_Kill 中引用了该符号
+vb6rtl.lib(vb6rtl.obj) : error LNK2019: 无法解析的外部符号 __imp_rename，函数 vb6_Name 中引用了该符号
+vb6rtl.lib(vb6rtl.obj) : error LNK2019: 无法解析的外部符号 __imp_ungetc，函数 vb6_EOF 中引用了该符号
+vb6rtl.lib(vb6rtl.obj) : error LNK2019: 无法解析的外部符号 __imp_modf，函数 vb6_FormatDateTime 中引用了该符号
+vb6rtl.lib(vb6rtl.obj) : error LNK2019: 无法解析的外部符号 __imp_round，函数 vb6_CInt 中引用了该符号
+vb6rtl.lib(vb6rtl.obj) : error LNK2019: 无法解析的外部符号 __imp__difftime64，函数 difftime 中引用了该符号
+vb6rtl.lib(vb6rtl.obj) : error LNK2019: 无法解析的外部符号 __imp__localtime64，函数 localtime 中引用了该符号
+vb6rtl.lib(vb6rtl.obj) : error LNK2019: 无法解析的外部符号 __imp__mktime64，函数 mktime 中引用了该符号
+vb6rtl.lib(vb6rtl.obj) : error LNK2019: 无法解析的外部符号 __imp__time64，函数 time 中引用了该符号
+vb6rtl.lib(vb6rtl.obj) : error LNK2019: 无法解析的外部符号 __imp__chdrive，函数 vb6_ChDrive 中引用了该符号
+vb6rtl.lib(vb6rtl.obj) : error LNK2019: 无法解析的外部符号 __imp__chdir，函数 vb6_ChDir 中引用了该符号
+vb6rtl.lib(vb6rtl.obj) : error LNK2019: 无法解析的外部符号 __imp__mkdir，函数 vb6_MkDir 中引用了该符号
+vb6rtl.lib(vb6rtl.obj) : error LNK2019: 无法解析的外部符号 __imp__rmdir，函数 vb6_RmDir 中引用了该符号
+vb6rtl.lib(vb6com.obj) : error LNK2019: 无法解析的外部符号 __imp_wcsncpy，函数 vb6_getDispid 中引用了该符号
+vb6rtl_gui.lib(vb6forms.obj) : error LNK2019: 无法解析的外部符号 __imp_wcsicmp，函数 vb6_GetBorderStyle 中引用了该符号
+OLDNAMES.lib(wcsicmp.obi) : error LNK2001: 无法解析的外部符号 __imp_wcsicmp
+vb6rtl_gui.lib(vb6forms.obj) : error LNK2019: 无法解析的外部符号 __imp__stricmp，函数 vb6_LoadPictureFromFile 中引用了该符号
+vb6rtl_gui.lib(vb6forms.obj) : error LNK2019: 无法解析的外部符号 __imp_strncpy，函数 vb6_WebViewNavigate 中引用了该符号
+D:\code\vi\c3.vb6.pro\tests\test_com_events_winhttp\test_com_events_winhttp.exe : fatal error LNK1120: 31 个无法解析的外部命令
+
+=== C3 Diagnostics (linking) ===
+(1,1): warning VB4001: TypeLib not found for ProgID: ADODB.Connection
+(1,1): warning VB4001: TypeLib not found for ProgID: Excel.Application
+(1,1): warning VB4001: TypeLib not found for ProgID: Word.Application
+(1,1): warning VB3001: 未使用的Constant: 'vbOK'
+(1,1): warning VB3001: 未使用的Constant: 'vbGet'
+(1,1): warning VB3001: 未使用的Constant: 'vbGreen'
+(1,1): warning VB3001: 未使用的Constant: 'vbFirstFullWeek'
+(1,1): warning VB3001: 未使用的Constant: 'vbHimetric'
+(1,1): warning VB3001: 未使用的Variable: 'Clipboard'
+(1,1): warning VB3001: 未使用的Constant: 'vbInformation'
+(1,1): warning VB3001: 未使用的Constant: 'vbKeyNumpad6'
+(1,1): warning VB3001: 未使用的Constant: 'vbKeyF'
+(1,1): warning VB3001: 未使用的Constant: 'vbFSSolid'
+(1,1): warning VB3001: 未使用的Constant: 'vbPRDPVertical'
+(1,1): warning VB3001: 未使用的Constant: 'vbMinimized'
+(1,1): warning VB3001: 未使用的Constant: 'vbDirectory'
+(1,1): warning VB3001: 未使用的Constant: 'vb3DLight'
+(1,1): warning VB3001: 未使用的Constant: 'vbKeySelect'
+(1,1): warning VB3001: 未使用的Constant: 'vbKeySpace'
+(1,1): warning VB3001: 未使用的Constant: 'vbFriday'
+(1,1): warning VB3001: 未使用的Constant: 'vbShiftMask'
+(1,1): warning VB3001: 未使用的Constant: 'vbIMEModeNoControl'
+(1,1): warning VB3001: 未使用的Constant: 'vbKeyPrint'
+(1,1): warning VB3001: 未使用的Constant: 'vbNewLine'
+(1,1): warning VB3001: 未使用的Constant: 'vbWednesday'
+(1,1): warning VB3001: 未使用的Constant: 'vbVolume'
+(1,1): warning VB3001: 未使用的Constant: 'vbWindowText'
+(1,1): warning VB3001: 未使用的Constant: 'vbShapeRoundedSquare'
+(1,1): warning VB3001: 未使用的Constant: 'vbKeyNumpad1'
+(1,1): warning VB3001: 未使用的Constant: 'vbSBHorizontal'
+(1,1): warning VB3001: 未使用的Constant: 'vbArrowHourglass'
+(1,1): warning VB3001: 未使用的Constant: 'vbFSHorizontalLine'
+(1,1): warning VB3001: 未使用的Constant: 'vbBSDash'
+(1,1): warning VB3001: 未使用的Constant: 'vbKeyPageUp'
+(1,1): warning VB3001: 未使用的Constant: 'vbLet'
+(1,1): warning VB3001: 未使用的Constant: 'vbNormalFocus'
+(1,1): warning VB3001: 未使用的Variable: 'Printer'
+(1,1): warning VB3001: 未使用的Constant: 'vbCFBitmap'
+(1,1): warning VB3001: 未使用的Constant: 'vbKey1'
+(1,1): warning VB3001: 未使用的Constant: 'vbKeyBack'
+(1,1): warning VB3001: 未使用的Constant: 'vbSet'
+(1,1): warning VB3001: 未使用的Constant: 'vbKeyU'
+(1,1): warning VB3001: 未使用的Constant: 'vbButtonShadow'
+(1,1): warning VB3001: 未使用的Constant: 'vbNullString'
+(1,1): warning VB3001: 未使用的Constant: 'vbKeyNumpad3'
+(1,1): warning VB3001: 未使用的Constant: 'vbIMEModeHangul'
+(1,1): warning VB3001: 未使用的Constant: 'vbError'
+(1,1): warning VB3001: 未使用的Constant: 'vbAbortRetryIgnore'
+(1,1): warning VB3001: 未使用的Variable: 'Forms'
+(1,1): warning VB3001: 未使用的Constant: 'vbIgnore'
+(1,1): warning VB3001: 未使用的Constant: 'vbAppWinStyleNormal'
+(1,1): warning VB3001: 未使用的Constant: 'vbCentimeters'
+(1,1): warning VB3001: 未使用的Constant: 'vbMiddleButton'
+(1,1): warning VB3001: 未使用的Constant: 'vbBSSolid'
+(1,1): warning VB3001: 未使用的Constant: 'vbShortDate'
+(1,1): warning VB3001: 未使用的Constant: 'vbKeyF15'
+(1,1): warning VB3001: 未使用的Constant: 'vbAltMask'
+(1,1): warning VB3001: 未使用的Constant: 'vbKeyMultiply'
+(1,1): warning VB3001: 未使用的Constant: 'vbLeftButton'
+(1,1): warning VB3001: 未使用的Constant: 'vbYellow'
+(1,1): warning VB3001: 未使用的Constant: 'vbKeyF1'
+(1,1): warning VB3001: 未使用的Constant: 'vbArray'
+(1,1): warning VB3001: 未使用的Constant: 'vbShapeCircle'
+(1,1): warning VB3001: 未使用的Constant: 'vbUserDefinedType'
+(1,1): warning VB3001: 未使用的Constant: 'vbDriveTypeFixed'
+(1,1): warning VB3001: 未使用的Constant: 'vbCtrlMask'
+(1,1): warning VB3001: 未使用的Constant: 'vbMinimizedFocus'
+(1,1): warning VB3001: 未使用的Constant: 'vbLeftJustify'
+(1,1): warning VB3001: 未使用的Constant: 'vbKeySubtract'
+(1,1): warning VB3001: 未使用的Variable: 'Debug'
+(1,1): warning VB3001: 未使用的Constant: 'vbKeyMButton'
+(1,1): warning VB3001: 未使用的Constant: 'vbIMEModeHiragana'
+(1,1): warning VB3001: 未使用的Constant: 'vbKeyDown'
+(1,1): warning VB3001: 未使用的Constant: 'vbKeyRight'
+(1,1): warning VB3001: 未使用的Constant: 'vbKeyF4'
+(1,1): warning VB3001: 未使用的Constant: 'vbLong'
+(1,1): warning VB3001: 未使用的Constant: 'vbFSTransparent'
+(1,1): warning VB3001: 未使用的Constant: 'vbIMEModeOff'
+(1,1): warning VB3001: 未使用的Constant: 'vbCFText'
+(1,1): warning VB3001: 未使用的Constant: 'vbLongTime'
+(1,1): warning VB3001: 未使用的Constant: 'vbFromUnicode'
+(1,1): warning VB3001: 未使用的Constant: 'vbDecimal'
+(1,1): warning VB3001: 未使用的Constant: 'vbIMEAlpha'
+(1,1): warning VB3001: 未使用的Constant: 'vbTextCompare'
+(1,1): warning VB3001: 未使用的Constant: 'vbKeyW'
+(1,1): warning VB3001: 未使用的Constant: 'vbIMEModeKatakana'
+(1,1): warning VB3001: 未使用的Constant: 'vbPRPQDraft'
+(1,1): warning VB3001: 未使用的Constant: 'vbByte'
+(1,1): warning VB3001: 未使用的Constant: 'vbFirstJan1'
+(1,1): warning VB3001: 未使用的Constant: 'vbKeySnapshot'
+(1,1): warning VB3001: 未使用的Constant: 'vbYes'
+(1,1): warning VB3001: 未使用的Constant: 'vbTuesday'
+(1,1): warning VB3001: 未使用的Constant: 'vbDriveTypeRemovable'
+(1,1): warning VB3001: 未使用的Constant: 'vbRed'
+(1,1): warning VB3001: 未使用的Constant: 'vbReadOnly'
+(1,1): warning VB3001: 未使用的Constant: 'vbKeyNumpad9'
+(1,1): warning VB3001: 未使用的Constant: 'vbCFMetafile'
+(1,1): warning VB3001: 未使用的Constant: 'vbVariant'
+(1,1): warning VB3001: 未使用的Variable: 'Form1'
+(1,1): warning VB3001: 未使用的Constant: 'vbCFPalette'
+(1,1): warning VB3001: 未使用的Constant: 'vbCancel'
+(1,1): warning VB3001: 未使用的Constant: 'vb3DFace'
+(1,1): warning VB3001: 未使用的Constant: 'vbAbort'
+(1,1): warning VB3001: 未使用的Constant: 'vbKeyControl'
+(1,1): warning VB3001: 未使用的Constant: 'vbRetry'
+(1,1): warning VB3001: 未使用的Constant: 'vbMenu'
+(1,1): warning VB3001: 未使用的Constant: 'vbNo'
+(1,1): warning VB3001: 未使用的Constant: 'vbBSDashDot'
+(1,1): warning VB3001: 未使用的Constant: 'vbBSInsideSolid'
+(1,1): warning VB3001: 未使用的Constant: 'vbOKOnly'
+(1,1): warning VB3001: 未使用的Constant: 'vbKeyNumpad2'
+(1,1): warning VB3001: 未使用的Constant: 'vbOKCancel'
+(1,1): warning VB3001: 未使用的Constant: 'vbKeyInsert'
+(1,1): warning VB3001: 未使用的Constant: 'vbYesNoCancel'
+(1,1): warning VB3001: 未使用的Constant: 'vbYesNo'
+(1,1): warning VB3001: 未使用的Constant: 'vbRetryCancel'
+(1,1): warning VB3001: 未使用的Constant: 'vbPRPQHigh'
+(1,1): warning VB3001: 未使用的Constant: 'vbCritical'
+(1,1): warning VB3001: 未使用的Constant: 'vbQuestion'
+(1,1): warning VB3001: 未使用的Constant: 'vbExclamation'
+(1,1): warning VB3001: 未使用的Constant: 'vbBlue'
+(1,1): warning VB3001: 未使用的Constant: 'vbDefaultButton1'
+(1,1): warning VB3001: 未使用的Constant: 'vbDefaultButton2'
+(1,1): warning VB3001: 未使用的Constant: 'vbDefaultButton3'
+(1,1): warning VB3001: 未使用的Constant: 'vbNormalNoFocus'
+(1,1): warning VB3001: 未使用的Constant: 'vbInactiveBorder'
+(1,1): warning VB3001: 未使用的Constant: 'vbDefaultButton4'
+(1,1): warning VB3001: 未使用的Constant: 'vbFirstFourDays'
+(1,1): warning VB3001: 未使用的Constant: 'vbApplicationModal'
+(1,1): warning VB3001: 未使用的Constant: 'vbSystemModal'
+(1,1): warning VB3001: 未使用的Constant: 'vbBlack'
+(1,1): warning VB3001: 未使用的Constant: 'vbMagenta'
+(1,1): warning VB3001: 未使用的Constant: 'vbCyan'
+(1,1): warning VB3001: 未使用的Constant: 'vbWide'
+(1,1): warning VB3001: 未使用的Constant: 'vbNarrow'
+(1,1): warning VB3001: 未使用的Constant: 'vbDriveTypeCDRom'
+(1,1): warning VB3001: 未使用的Constant: 'vbObject'
+(1,1): warning VB3001: 未使用的Constant: 'vbWhite'
+(1,1): warning VB3001: 未使用的Constant: 'vbFSCross'
+(1,1): warning VB3001: 未使用的Variable: 'Err'
+(1,1): warning VB3001: 未使用的Constant: 'vbHighlightText'
+(1,1): warning VB3001: 未使用的Constant: 'vbCr'
+(1,1): warning VB3001: 未使用的Constant: 'vbLf'
+(1,1): warning VB3001: 未使用的Constant: 'vbCrLf'
+(1,1): warning VB3001: 未使用的Constant: 'vbNullChar'
+(1,1): warning VB3001: 未使用的Constant: 'vbTab'
+(1,1): warning VB3001: 未使用的Constant: 'vbKeyRButton'
+(1,1): warning VB3001: 未使用的Constant: 'vbBack'
+(1,1): warning VB3001: 未使用的Constant: 'vbInput'
+(1,1): warning VB3001: 未使用的Constant: 'vbFormFeed'
+(1,1): warning VB3001: 未使用的Constant: 'vbVerticalTab'
+(1,1): warning VB3001: 未使用的Constant: 'vbUseSystem'
+(1,1): warning VB3001: 未使用的Constant: 'vbTrue'
+(1,1): warning VB3001: 未使用的Constant: 'vbFalse'
+(1,1): warning VB3001: 未使用的Constant: 'vbEmpty'
+(1,1): warning VB3001: 未使用的Constant: 'vbNull'
+(1,1): warning VB3001: 未使用的Constant: 'vbInteger'
+(1,1): warning VB3001: 未使用的Constant: 'vbUpArrow'
+(1,1): warning VB3001: 未使用的Constant: 'vbSingle'
+(1,1): warning VB3001: 未使用的Constant: 'vbDouble'
+(1,1): warning VB3001: 未使用的Constant: 'vbCurrency'
+(1,1): warning VB3001: 未使用的Constant: 'vbKeyV'
+(1,1): warning VB3001: 未使用的Constant: 'vbIMEHiragana'
+(1,1): warning VB3001: 未使用的Constant: 'vbDate'
+(1,1): warning VB3001: 未使用的Constant: 'vbIMEModeHangulFull'
+(1,1): warning VB3001: 未使用的Constant: 'vbString'
+(1,1): warning VB3001: 未使用的Constant: 'vbBoolean'
+(1,1): warning VB3001: 未使用的Constant: 'vbKeyNumpad4'
+(1,1): warning VB3001: 未使用的Constant: 'vb3DHighlight'
+(1,1): warning VB3001: 未使用的Constant: 'vbDBNull'
+(1,1): warning VB3001: 未使用的Constant: 'vbBinaryCompare'
+(1,1): warning VB3001: 未使用的Constant: 'vbDatabaseCompare'
+(1,1): warning VB3001: 未使用的Constant: 'vbKeyA'
+(1,1): warning VB3001: 未使用的Constant: 'vbIMEModeAlpha'
+(1,1): warning VB3001: 未使用的Constant: 'vbUpperCase'
+(1,1): warning VB3001: 未使用的Constant: 'vbKeyF7'
+(1,1): warning VB3001: 未使用的Constant: 'vbMsgBoxRight'
+(1,1): warning VB3001: 未使用的Constant: 'vbLowerCase'
+(1,1): warning VB3001: 未使用的Constant: 'vbProperCase'
+(1,1): warning VB3001: 未使用的Constant: 'vbPRCMInches'
+(1,1): warning VB3001: 未使用的Constant: 'vbKatakana'
+(1,1): warning VB3001: 未使用的Constant: 'vbKeyNumpad0'
+(1,1): warning VB3001: 未使用的Constant: 'vbHiragana'
+(1,1): warning VB3001: 未使用的Constant: 'vbDot'
+(1,1): warning VB3001: 未使用的Constant: 'vbUnicode'
+(1,1): warning VB3001: 未使用的Constant: 'vbIMEModeKatakanaHalf'
+(1,1): warning VB3001: 未使用的Constant: 'vbNormal'
+(1,1): warning VB3001: 未使用的Constant: 'vbHidden'
+(1,1): warning VB3001: 未使用的Constant: 'vbSystem'
+(1,1): warning VB3001: 未使用的Constant: 'vbArchive'
+(1,1): warning VB3001: 未使用的Constant: 'vbAppWinStyleMaximize'
+(1,1): warning VB3001: 未使用的Constant: 'vbAlias'
+(1,1): warning VB3001: 未使用的Constant: 'vbOutput'
+(1,1): warning VB3001: 未使用的Constant: 'vbKeyF2'
+(1,1): warning VB3001: 未使用的Constant: 'vbRandom'
+(1,1): warning VB3001: 未使用的Constant: 'vbAppend'
+(1,1): warning VB3001: 未使用的Constant: 'vbKeyO'
+(1,1): warning VB3001: 未使用的Constant: 'vbCenter'
+(1,1): warning VB3001: 未使用的Constant: 'vbBinary'
+(1,1): warning VB3001: 未使用的Constant: 'vbDataObject'
+(1,1): warning VB3001: 未使用的Constant: 'vbKeyR'
+(1,1): warning VB3001: 未使用的Constant: 'vbMsgBoxSetForeground'
+(1,1): warning VB3001: 未使用的Constant: 'vbMsgBoxRtlReading'
+(1,1): warning VB3001: 未使用的Constant: 'vbDefaultButton5'
+(1,1): warning VB3001: 未使用的Constant: 'vbUseSystemDayOfWeek'
+(1,1): warning VB3001: 未使用的Constant: 'vbPRBPSingle'
+(1,1): warning VB3001: 未使用的Constant: 'vbSunday'
+(1,1): warning VB3001: 未使用的Constant: 'vbMonday'
+(1,1): warning VB3001: 未使用的Constant: 'vbSBBoth'
+(1,1): warning VB3001: 未使用的Constant: 'vbHighlight'
+(1,1): warning VB3001: 未使用的Constant: 'vbThursday'
+(1,1): warning VB3001: 未使用的Constant: 'vbSaturday'
+(1,1): warning VB3001: 未使用的Constant: 'vbCalGreg'
+(1,1): warning VB3001: 未使用的Constant: 'vbCalHijri'
+(1,1): warning VB3001: 未使用的Constant: 'vbFormControlMenu'
+(1,1): warning VB3001: 未使用的Constant: 'vbDriveTypeNetwork'
+(1,1): warning VB3001: 未使用的Constant: 'vbFormCode'
+(1,1): warning VB3001: 未使用的Constant: 'vbUseCompareOption'
+(1,1): warning VB3001: 未使用的Constant: 'vbAppWindows'
+(1,1): warning VB3001: 未使用的Constant: 'vbAppTaskManager'
+(1,1): warning VB3001: 未使用的Constant: 'vbFormMDIForm'
+(1,1): warning VB3001: 未使用的Constant: 'vbFormOwner'
+(1,1): warning VB3001: 未使用的Constant: 'vbObjectError'
+(1,1): warning VB3001: 未使用的Constant: 'vbBSDashDotDot'
+(1,1): warning VB3001: 未使用的Constant: 'vbRightButton'
+(1,1): warning VB3001: 未使用的Constant: 'vbKeyLButton'
+(1,1): warning VB3001: 未使用的Constant: 'vbKeyCancel'
+(1,1): warning VB3001: 未使用的Constant: 'vbKeyTab'
+(1,1): warning VB3001: 未使用的Constant: 'vbKeyE'
+(1,1): warning VB3001: 未使用的Constant: 'vbKeyClear'
+(1,1): warning VB3001: 未使用的Constant: 'vbKeyReturn'
+(1,1): warning VB3001: 未使用的Constant: 'vbKeyShift'
+(1,1): warning VB3001: 未使用的Constant: 'vbKeyNumpad8'
+(1,1): warning VB3001: 未使用的Constant: 'vbKeySeparator'
+(1,1): warning VB3001: 未使用的Constant: 'vbKeyMenu'
+(1,1): warning VB3001: 未使用的Constant: 'vbArrow'
+(1,1): warning VB3001: 未使用的Constant: 'vbKeyPause'
+(1,1): warning VB3001: 未使用的Constant: 'vbPRPQLow'
+(1,1): warning VB3001: 未使用的Constant: 'vbKeyCapital'
+(1,1): warning VB3001: 未使用的Constant: 'vbKeyEscape'
+(1,1): warning VB3001: 未使用的Constant: 'vbKeyPageDown'
+(1,1): warning VB3001: 未使用的Constant: 'vbKeyHome'
+(1,1): warning VB3001: 未使用的Constant: 'vbKeyEnd'
+(1,1): warning VB3001: 未使用的Constant: 'vbKeyF5'
+(1,1): warning VB3001: 未使用的Constant: 'vbTitleBarText'
+(1,1): warning VB3001: 未使用的Constant: 'vbKeyLeft'
+(1,1): warning VB3001: 未使用的Constant: 'vbKeyUp'
+(1,1): warning VB3001: 未使用的Constant: 'vbKeyExecute'
+(1,1): warning VB3001: 未使用的Constant: 'vbPRPQMedium'
+(1,1): warning VB3001: 未使用的Constant: 'vbMaximizedFocus'
+(1,1): warning VB3001: 未使用的Constant: 'vbKeyDelete'
+(1,1): warning VB3001: 未使用的Constant: 'vbKeyHelp'
+(1,1): warning VB3001: 未使用的Constant: 'vb3DDKShadow'
+(1,1): warning VB3001: 未使用的Constant: 'vbKeyNumlock'
+(1,1): warning VB3001: 未使用的Constant: 'vbKey0'
+(1,1): warning VB3001: 未使用的Constant: 'vbIMEKatakana'
+(1,1): warning VB3001: 未使用的Constant: 'vbKey2'
+(1,1): warning VB3001: 未使用的Constant: 'vbPRCMCentimeters'
+(1,1): warning VB3001: 未使用的Variable: 'Screen'
+(1,1): warning VB3001: 未使用的Constant: 'vbKey3'
+(1,1): warning VB3001: 未使用的Constant: 'vbKey4'
+(1,1): warning VB3001: 未使用的Constant: 'vbMinimizedNoFocus'
+(1,1): warning VB3001: 未使用的Constant: 'vbKey5'
+(1,1): warning VB3001: 未使用的Constant: 'vbKey6'
+(1,1): warning VB3001: 未使用的Constant: 'vbPRCMMillimeters'
+(1,1): warning VB3001: 未使用的Constant: 'vbKey7'
+(1,1): warning VB3001: 未使用的Constant: 'vbKey8'
+(1,1): warning VB3001: 未使用的Constant: 'vbIMEModeDisable'
+(1,1): warning VB3001: 未使用的Constant: 'vbKey9'
+(1,1): warning VB3001: 未使用的Constant: 'vbKeyB'
+(1,1): warning VB3001: 未使用的Constant: 'vbKeyC'
+(1,1): warning VB3001: 未使用的Constant: 'vbKeyD'
+(1,1): warning VB3001: 未使用的Constant: 'vbKeyG'
+(1,1): warning VB3001: 未使用的Constant: 'vbTransparent'
+(1,1): warning VB3001: 未使用的Constant: 'vbKeyH'
+(1,1): warning VB3001: 未使用的Constant: 'vbAppWinStyleMinimize'
+(1,1): warning VB3001: 未使用的Constant: 'vbShapeRectangle'
+(1,1): warning VB3001: 未使用的Constant: 'vbKeyI'
+(1,1): warning VB3001: 未使用的Constant: 'vbKeyJ'
+(1,1): warning VB3001: 未使用的Constant: 'vbKeyK'
+(1,1): warning VB3001: 未使用的Constant: 'vbKeyL'
+(1,1): warning VB3001: 未使用的Constant: 'vbActiveTitleBar'
+(1,1): warning VB3001: 未使用的Constant: 'vbKeyM'
+(1,1): warning VB3001: 未使用的Constant: 'vbKeyN'
+(1,1): warning VB3001: 未使用的Constant: 'vbKeyP'
+(1,1): warning VB3001: 未使用的Constant: 'vbKeyQ'
+(1,1): warning VB3001: 未使用的Constant: 'vbKeyS'
+(1,1): warning VB3001: 未使用的Constant: 'vbKeyT'
+(1,1): warning VB3001: 未使用的Constant: 'vbKeyX'
+(1,1): warning VB3001: 未使用的Constant: 'vbSizeAll'
+(1,1): warning VB3001: 未使用的Constant: 'vbKeyY'
+(1,1): warning VB3001: 未使用的Constant: 'vbKeyZ'
+(1,1): warning VB3001: 未使用的Constant: 'vb3DShadow'
+(1,1): warning VB3001: 未使用的Constant: 'vbSizeEW'
+(1,1): warning VB3001: 未使用的Constant: 'vbShapeRoundedRectangle'
+(1,1): warning VB3001: 未使用的Constant: 'vbKeyNumpad5'
+(1,1): warning VB3001: 未使用的Constant: 'vbKeyNumpad7'
+(1,1): warning VB3001: 未使用的Constant: 'vbKeyF3'
+(1,1): warning VB3001: 未使用的Constant: 'vbKeyAdd'
+(1,1): warning VB3001: 未使用的Constant: 'vbKeyDecimal'
+(1,1): warning VB3001: 未使用的Constant: 'vbKeyDivide'
+(1,1): warning VB3001: 未使用的Constant: 'Win32'
+(1,1): warning VB3001: 未使用的Constant: 'vbKeyF6'
+(1,1): warning VB3001: 未使用的Constant: 'vbKeyF8'
+(1,1): warning VB3001: 未使用的Constant: 'vbIMEModeAlphaFull'
+(1,1): warning VB3001: 未使用的Constant: 'vbKeyF13'
+(1,1): warning VB3001: 未使用的Constant: 'vbKeyF12'
+(1,1): warning VB3001: 未使用的Constant: 'vbKeyF9'
+(1,1): warning VB3001: 未使用的Constant: 'vbKeyF10'
+(1,1): warning VB3001: 未使用的Constant: 'vbIMEModeOn'
+(1,1): warning VB3001: 未使用的Constant: 'vbKeyF11'
+(1,1): warning VB3001: 未使用的Constant: 'vbKeyF14'
+(1,1): warning VB3001: 未使用的Constant: 'vbKeyF16'
+(1,1): warning VB3001: 未使用的Constant: 'vbHide'
+(1,1): warning VB3001: 未使用的Constant: 'vbGeneralDate'
+(1,1): warning VB3001: 未使用的Constant: 'vbLongDate'
+(1,1): warning VB3001: 未使用的Constant: 'vbShortTime'
+(1,1): warning VB3001: 未使用的Constant: 'vbScrollBars'
+(1,1): warning VB3001: 未使用的Constant: 'vbDesktop'
+(1,1): warning VB3001: 未使用的Constant: 'vbCFDIB'
+(1,1): warning VB3001: 未使用的Constant: 'vbInactiveTitleBar'
+(1,1): warning VB3001: 未使用的Constant: 'vbWindowBackground'
+(1,1): warning VB3001: 未使用的Constant: 'vbWindowFrame'
+(1,1): warning VB3001: 未使用的Constant: 'vbMenuText'
+(1,1): warning VB3001: 未使用的Constant: 'vbActiveBorder'
+(1,1): warning VB3001: 未使用的Constant: 'vbBSDot'
+(1,1): warning VB3001: 未使用的Constant: 'vbApplicationWorkspace'
+(1,1): warning VB3001: 未使用的Constant: 'vbButtonFace'
+(1,1): warning VB3001: 未使用的Constant: 'vbGrayText'
+(1,1): warning VB3001: 未使用的Constant: 'vbButtonText'
+(1,1): warning VB3001: 未使用的Constant: 'vbInactiveCaptionText'
+(1,1): warning VB3001: 未使用的Constant: 'vbPRORPortrait'
+(1,1): warning VB3001: 未使用的Constant: 'vbPRORLandscape'
+(1,1): warning VB3001: 未使用的Constant: 'vbPRCMCharacters'
+(1,1): warning VB3001: 未使用的Constant: 'vbPRBPSDouble'
+(1,1): warning VB3001: 未使用的Constant: 'vbPRBPTriple'
+(1,1): warning VB3001: 未使用的Constant: 'vbPRDPHorizontal'
+(1,1): warning VB3001: 未使用的Constant: 'Win16'
+(1,1): warning VB3001: 未使用的Constant: 'vbMsgBoxHelpButton'
+(1,1): warning VB3001: 未使用的Constant: 'vbCFEMetafile'
+(1,1): warning VB3001: 未使用的Constant: 'vbMethod'
+(1,1): warning VB3001: 未使用的Constant: 'vbCFRTF'
+(1,1): warning VB3001: 未使用的Constant: 'vbDriveTypeRAMDisk'
+(1,1): warning VB3001: 未使用的Constant: 'vbIMEOn'
+(1,1): warning VB3001: 未使用的Constant: 'vbIMEOff'
+(1,1): warning VB3001: 未使用的Constant: 'vbIMEDisable'
+(1,1): warning VB3001: 未使用的Constant: 'vbIMEKatakanaHalf'
+(1,1): warning VB3001: 未使用的Constant: 'vbIMEAlphaFull'
+(1,1): warning VB3001: 未使用的Constant: 'vbShapeSquare'
+(1,1): warning VB3001: 未使用的Constant: 'vbShapeOval'
+(1,1): warning VB3001: 未使用的Constant: 'vbFSVerticalLine'
+(1,1): warning VB3001: 未使用的Constant: 'vbFSUpwardDiagonal'
+(1,1): warning VB3001: 未使用的Constant: 'vbFSDownwardDiagonal'
+(1,1): warning VB3001: 未使用的Constant: 'vbFSDiagonalCross'
+(1,1): warning VB3001: 未使用的Constant: 'vbDefault'
+(1,1): warning VB3001: 未使用的Constant: 'vbCrosshair'
+(1,1): warning VB3001: 未使用的Constant: 'vbIbeam'
+(1,1): warning VB3001: 未使用的Constant: 'vbIconPointer'
+(1,1): warning VB3001: 未使用的Constant: 'vbSizePointer'
+(1,1): warning VB3001: 未使用的Constant: 'vbSizeNESW'
+(1,1): warning VB3001: 未使用的Constant: 'vbSizeNS'
+(1,1): warning VB3001: 未使用的Constant: 'vbSizeNWSE'
+(1,1): warning VB3001: 未使用的Constant: 'vbHourglass'
+(1,1): warning VB3001: 未使用的Constant: 'vbNoDrop'
+(1,1): warning VB3001: 未使用的Constant: 'vbArrowQuestion'
+(1,1): warning VB3001: 未使用的Constant: 'vbCustom'
+(1,1): warning VB3001: 未使用的Constant: 'vbRightJustify'
+(1,1): warning VB3001: 未使用的Constant: 'vbSBNone'
+(1,1): warning VB3001: 未使用的Constant: 'vbSBVertical'
+(1,1): warning VB3001: 未使用的Constant: 'vbTwips'
+(1,1): warning VB3001: 未使用的Constant: 'vbPoints'
+(1,1): warning VB3001: 未使用的Constant: 'vbPixels'
+(1,1): warning VB3001: 未使用的Constant: 'vbCharacters'
+(1,1): warning VB3001: 未使用的Constant: 'vbInches'
+(1,1): warning VB3001: 未使用的Constant: 'vbMillimeters'
+(1,1): warning VB3001: 未使用的Constant: 'vbContainerPosition'
+(1,1): warning VB3001: 未使用的Constant: 'vbContainerSize'
+(1,1): warning VB3001: 未使用的Constant: 'vbUser'
+(1,1): warning VB3001: 未使用的Constant: 'vbMaximized'

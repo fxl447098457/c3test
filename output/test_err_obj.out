@@ -1,0 +1,7 @@
+ERR-1:OK Number=0
+ERR-2:OK Number=11
+ERR-3:OK Clear
+ERR-4:OK Raise 5
+ERR-5:OK Description
+ERR-6:OK Source
+ERR:6/6

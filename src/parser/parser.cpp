@@ -122,7 +122,7 @@ Token Parser::fetchNextToken() {
             tok.kind = TokenKind::EndOfFile;
             break;
         }
-    } while (tok.kind == TokenKind::Comment);
+    } while (tok.kind == TokenKind::Comment || tok.kind == TokenKind::LineContinuation);
     return tok;
 }
 
@@ -286,7 +286,7 @@ bool Parser::isDeclarationStart() const {
 // ============================================================
 
 void Parser::skipNewLines() {
-    while (cur_.kind == TokenKind::NewLine || cur_.kind == TokenKind::Comment) {
+    while (cur_.kind == TokenKind::NewLine || cur_.kind == TokenKind::Comment || cur_.kind == TokenKind::LineContinuation) {
         advance();
     }
 }
