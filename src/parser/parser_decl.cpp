@@ -18,9 +18,9 @@ DeclPtr Parser::parseDeclaration() {
         case TokenKind::Enum:     return parseEnumDecl(AccessLevel::Default);
         case TokenKind::Declare:  return parseDeclareDecl(AccessLevel::Default);
         case TokenKind::Event:    return parseEventDecl(AccessLevel::Default);
-        case TokenKind::Const:    return parseConstDecl(AccessLevel::Default);
-        case TokenKind::Dim:      return parseVariableDecl(AccessLevel::Default, false);
-        case TokenKind::Static:   return parseVariableDecl(AccessLevel::Private, true);
+        case TokenKind::Const:    return parseConstDeclList(AccessLevel::Default);
+        case TokenKind::Dim:      return parseVariableDeclList(AccessLevel::Default, false);
+        case TokenKind::Static:   return parseVariableDeclList(AccessLevel::Private, true);
 
         case TokenKind::Public:
         case TokenKind::Private:
@@ -36,7 +36,7 @@ DeclPtr Parser::parseDeclaration() {
             }
             advance(); // consume access modifier
 
-            // Public Sub/Function/Property/Type/Enum/Declare/Event/Const/Dim
+            // Public Sub/Function/property/Type/Enum/Declare/Event/Const/Dim
             switch (cur_.kind) {
                 case TokenKind::Sub:      return parseSubDecl(access, false);
                 case TokenKind::Function: return parseFunctionDecl(access, false);
@@ -45,8 +45,8 @@ DeclPtr Parser::parseDeclaration() {
                 case TokenKind::Enum:     return parseEnumDecl(access);
                 case TokenKind::Declare:  return parseDeclareDecl(access);
                 case TokenKind::Event:    return parseEventDecl(access);
-                case TokenKind::Const:    return parseConstDecl(access);
-                default:                  return parseVariableDecl(access, false);
+                case TokenKind::Const:    return parseConstDeclList(access);
+                default:                  return parseVariableDeclList(access, false);
             }
         }
 
@@ -321,6 +321,30 @@ std::unique_ptr<ConstDecl> Parser::parseConstDecl(AccessLevel access) {
         std::move(asType), std::move(value));
 }
 
+// Const 列表: Const A = 1, B = 2, C As Long = 3
+DeclPtr Parser::parseConstDeclList(AccessLevel access) {
+    auto first = parseConstDecl(access);
+    if (cur_.kind != TokenKind::Comma) {
+        return first;
+    }
+    DeclList decls;
+    decls.push_back(std::move(first));
+    while (match(TokenKind::Comma)) {
+        auto loc = currentLoc();
+        auto nameTok = expectName("expected Const name");
+        TypeRefPtr asType;
+        if (match(TokenKind::As)) {
+            asType = parseTypeRef();
+        }
+        expect(TokenKind::Equals, DiagnosticID::ParseExpectedToken,
+               "expected '=' in Const declaration");
+        auto value = parseExpression();
+        decls.push_back(std::make_unique<ConstDecl>(loc, access, nameTok.text,
+            std::move(asType), std::move(value)));
+    }
+    return std::make_unique<MultiDecl>(decls[0]->loc, std::move(decls));
+}
+
 // ============================================================
 // Variable 声明
 // ============================================================
@@ -385,6 +409,22 @@ std::unique_ptr<VariableDecl> Parser::parseVariableDecl(AccessLevel access, bool
     return std::make_unique<VariableDecl>(loc, access, nameTok.text,
         isWithEvents, isStatic, isNew, std::move(asType), std::move(initializer),
         std::move(dimensions), isDynamicArray);
+}
+
+// Variable 列表: Dim a, b As Long, c As String
+// parseVariableDecl 会条件性地消费 Dim/Private/Public 关键字,
+// 对逗号后的后续变量, 当前 token 是变量名而非关键字, 所以可以直接复用
+DeclPtr Parser::parseVariableDeclList(AccessLevel access, bool isStatic) {
+    auto first = parseVariableDecl(access, isStatic);
+    if (cur_.kind != TokenKind::Comma) {
+        return first;
+    }
+    DeclList decls;
+    decls.push_back(std::move(first));
+    while (match(TokenKind::Comma)) {
+        decls.push_back(parseVariableDecl(access, isStatic));
+    }
+    return std::make_unique<MultiDecl>(decls[0]->loc, std::move(decls));
 }
 
 // ============================================================

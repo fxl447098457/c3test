@@ -99,6 +99,8 @@ private:
     // 声明解析 (parser_decl.cpp)
     // ============================================================
     DeclPtr parseDeclaration();
+    DeclPtr parseVariableDeclList(AccessLevel access, bool isStatic);
+    DeclPtr parseConstDeclList(AccessLevel access);
     std::unique_ptr<SubDecl> parseSubDecl(AccessLevel access, bool isStatic);
     std::unique_ptr<FunctionDecl> parseFunctionDecl(AccessLevel access, bool isStatic);
     std::unique_ptr<PropertyDecl> parsePropertyDecl(AccessLevel access);

@@ -121,6 +121,7 @@ enum class ASTNodeKind : uint16_t {
     DeclareDecl, EventDecl,
     ConstDecl, VariableDecl,
     ParameterDecl,
+    MultiDecl,  // 逗号分隔的多变量声明 (Dim a, b, c As Long)
 
     // --- 语句 ---
     Block,
@@ -1364,7 +1365,17 @@ public:
           access(acc), name(std::move(n)), isWithEvents(withEvents),
           isStatic(isStatic), isNew(isNew), asType(std::move(type)),
           initializer(std::move(init)), dimensions(std::move(dims)),
-          isDynamicArray(isDynArr) {}
+           isDynamicArray(isDynArr) {}
+};
+
+// 多变量声明: Dim a, b, c As Long (逗号分隔的多个声明)
+// 仅用于解析阶段的传输, 在 parseModule 中展开为独立声明
+class MultiDecl : public Decl {
+public:
+    DeclList declarations;
+
+    MultiDecl(SourceLocation loc, DeclList decls)
+        : Decl(ASTNodeKind::MultiDecl, loc), declarations(std::move(decls)) {}
 };
 
 // ============================================================
@@ -1419,7 +1430,7 @@ inline bool isStmt(ASTNodeKind k) {
 
 // 判断节点是否为声明
 inline bool isDecl(ASTNodeKind k) {
-    return k >= ASTNodeKind::SubDecl && k <= ASTNodeKind::ParameterDecl;
+    return k >= ASTNodeKind::SubDecl && k <= ASTNodeKind::MultiDecl;
 }
 
 // BinaryOp 转字符串

@@ -569,6 +569,8 @@ std::unique_ptr<SelectCaseStmt> Parser::parseSelectCaseStmt() {
         } while (match(TokenKind::Comma));
 
         skipNewLines();
+        // VB6 允许 Case N: statement (冒号分隔)
+        match(TokenKind::Colon);
         auto body = parseBlockUntil({TokenKind::Case, TokenKind::End});
         cases.push_back(std::make_unique<CaseClause>(caseLoc,
             std::move(values), std::move(body)));
@@ -579,6 +581,8 @@ std::unique_ptr<SelectCaseStmt> Parser::parseSelectCaseStmt() {
         advance(); // consume 'Case'
         advance(); // consume 'Else'
         skipNewLines();
+        // VB6 允许 Case Else: statement (冒号分隔)
+        match(TokenKind::Colon);
         elseCase = parseBlockUntil({TokenKind::End});
     }
 
