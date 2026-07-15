@@ -370,8 +370,22 @@ ExprPtr Parser::parseMeExpr() {
 ExprPtr Parser::parseWithMemberExpr() {
     auto loc = currentLoc();
     advance(); // consume '.'
-    auto memberTok = expectName("expected member name after '.'");
-    auto expr = std::make_unique<WithMemberExpr>(loc, memberTok.text);
+    // 与 parsePostfix Dot 分支一致：允许硬关键字作为成员名 (如 .Type, .Loop)
+    std::string memberName;
+    if (canBeName(cur_.kind)) {
+        memberName = advance().text;
+    } else if (!cur_.text.empty() && cur_.kind != TokenKind::EndOfFile &&
+               cur_.kind != TokenKind::NewLine && cur_.kind != TokenKind::Colon &&
+               cur_.kind != TokenKind::LeftParen && cur_.kind != TokenKind::RightParen &&
+               cur_.kind != TokenKind::Comma) {
+        memberName = advance().text;
+    } else {
+        diag_.error(DiagnosticID::ParseExpectedToken, currentLoc(),
+            std::string("expected member name after '.' (got ") +
+            Token::kindToString(cur_.kind) + ")");
+        memberName = "?";
+    }
+    auto expr = std::make_unique<WithMemberExpr>(loc, memberName);
     return parsePostfix(std::move(expr));
 }
 

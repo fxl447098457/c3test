@@ -1064,8 +1064,19 @@ StmtPtr Parser::parseLabelOrAssignmentOrCall() {
         };
 
         // 第一个参数
+        if (cur_.kind == TokenKind::ByVal || cur_.kind == TokenKind::ByRef) {
+            advance(); // 消费 ByVal/ByRef
+        }
         if (canStartArg()) {
-            call->positional.push_back(parseExpression());
+            // 命名参数?  name := value
+            if (canBeName(cur_.kind) && next_.kind == TokenKind::Assign) {
+                auto nameTok = advance(); // name
+                advance(); // consume ':='
+                auto val = parseExpression();
+                call->named.push_back({nameTok.text, std::move(val)});
+            } else {
+                call->positional.push_back(parseExpression());
+            }
         }
 
         // 后续参数: 逗号或分号后继续
@@ -1078,8 +1089,20 @@ StmtPtr Parser::parseLabelOrAssignmentOrCall() {
             }
             // 逗号分隔 -> 继续解析下一个参数
             if (match(TokenKind::Comma)) {
+                // ByVal/ByRef 前缀
+                if (cur_.kind == TokenKind::ByVal || cur_.kind == TokenKind::ByRef) {
+                    advance();
+                }
                 if (canStartArg()) {
-                    call->positional.push_back(parseExpression());
+                    // 命名参数?  name := value
+                    if (canBeName(cur_.kind) && next_.kind == TokenKind::Assign) {
+                        auto nameTok = advance();
+                        advance(); // ':='
+                        auto val = parseExpression();
+                        call->named.push_back({nameTok.text, std::move(val)});
+                    } else {
+                        call->positional.push_back(parseExpression());
+                    }
                 }
                 continue;
             }
@@ -1180,7 +1203,10 @@ std::unique_ptr<GetStmt> Parser::parseGetStmt() {
     auto fileNumber = parseExpression();
     ExprPtr recordNumber;
     if (match(TokenKind::Comma)) {
-        recordNumber = parseExpression();
+        // VB6 允许省略记录号: Get #1, , data
+        if (cur_.kind != TokenKind::Comma) {
+            recordNumber = parseExpression();
+        }
     }
     expect(TokenKind::Comma, DiagnosticID::ParseExpectedToken,
            "expected ',' in Get statement");
@@ -1196,7 +1222,10 @@ std::unique_ptr<PutStmt> Parser::parsePutStmt() {
     auto fileNumber = parseExpression();
     ExprPtr recordNumber;
     if (match(TokenKind::Comma)) {
-        recordNumber = parseExpression();
+        // VB6 允许省略记录号: Put #1, , data
+        if (cur_.kind != TokenKind::Comma) {
+            recordNumber = parseExpression();
+        }
     }
     expect(TokenKind::Comma, DiagnosticID::ParseExpectedToken,
            "expected ',' in Put statement");

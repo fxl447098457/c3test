@@ -168,10 +168,32 @@ std::unique_ptr<TypeDecl> Parser::parseTypeDecl(AccessLevel access) {
         auto memberLoc = currentLoc();
         auto memberName = expectName("expected member name");
 
-        // 可能有数组维度: memberName(10) As Type
+        // 可能有数组维度:
+        //   memberName(10) As Type    — 固定大小
+        //   memberName() As Type      — 动态数组
+        //   memberName(1 To 8) As Type — 下界 To 上界
+        //   memberName(1, 2) As Type  — 多维
         ExprPtr arraySize;
         if (match(TokenKind::LeftParen)) {
-            arraySize = parseExpression();
+            if (cur_.kind != TokenKind::RightParen) {
+                // 解析第一个维度
+                auto first = parseExpression();
+                if (match(TokenKind::To)) {
+                    // 1 To 8: 只保留上界 (语法检查阶段)
+                    auto upper = parseExpression();
+                    arraySize = std::move(upper);
+                } else {
+                    arraySize = std::move(first);
+                }
+                // 消费后续维度 (多维数组)
+                while (match(TokenKind::Comma)) {
+                    parseExpression(); // 解析并丢弃后续维度
+                    if (match(TokenKind::To)) {
+                        parseExpression();
+                    }
+                }
+            }
+            // else: 空括号 () = 动态数组, arraySize 保持 nullptr
             expect(TokenKind::RightParen, DiagnosticID::ParseExpectedToken,
                    "expected ')'");
         }
