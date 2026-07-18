@@ -356,6 +356,14 @@ void CCodeGen::visit(IdentifierExpr& node) {
     // 用户变量/常量 (非参数、非函数)
     if (foundSym && (foundSym->kind == SymbolKind::Variable
                   || foundSym->kind == SymbolKind::Constant)) {
+        // Fix 017: 数值常量 (内置 vbMethod=2/vbDirectory=16, 或用户 Public Const,
+        // 或跨模块注入的 EnumMember-as-Constant) 直接输出数值, 避免发出裸标识符
+        // (C 代码中无对应 #define → C2065). hasConstValue 仅对整型常量为 true,
+        // 字符串常量等不受影响.
+        if (foundSym->kind == SymbolKind::Constant && foundSym->hasConstValue) {
+            lastExpr_ = std::to_string(foundSym->constIntValue);
+            return;
+        }
         // P11.7: 如果是内置Object类型变量(=窗体控件), 优先走默认属性读取
         if (foundSym->isBuiltin && foundSym->type == Vb6Type::Object) {
             // P17.1: With块内抑制默认属性解析, 返回HWND引用

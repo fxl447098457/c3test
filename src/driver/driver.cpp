@@ -1128,6 +1128,13 @@ bool Driver::runCrossModuleResolution() {
             // 对其它 kind 该字段为空, 无副作用. 原先把此赋值放在 Variable-only 分支内,
             // 导致 Function/PropertyGet 外部符号丢失返回类型名, 链式调用解析失败.
             extSym->variableTypeName = srcSym->variableTypeName;
+            // Fix 017: 复制常量值 (EnumMember / Constant 跨模块注入后需保留值).
+            // 外部 EnumMember 若 hasConstValue=false, cgen 会发出裸标识符 (如
+            // HASH_ALG_SHA256) 而非数值 → C2065. 此前外部符号构造只复制
+            // kind/name/type/location/access, 丢失 hasConstValue/constIntValue.
+            extSym->hasConstValue = srcSym->hasConstValue;
+            extSym->constIntValue = srcSym->constIntValue;
+            extSym->constType = srcSym->constType;
             if (srcSym->kind == SymbolKind::Variable) {
                 extSym->dimCount = srcSym->dimCount;
             }
