@@ -312,7 +312,7 @@ std::string CCodeGen::generateDllEntry(const std::string& progId, const std::vec
             continue;  // No public methods - skip method table
         }
 
-        // Per-class DISPID assignment (matches TypeLib builder sequential)
+        // M29: dispid取自methodSym->comDispid (来自driver TypeLib全局连续分配), nextDispid仅作fallback
         std::unordered_map<std::string, int> dispIdMap;
         int nextDispid = 1;
 
@@ -344,12 +344,14 @@ std::string CCodeGen::generateDllEntry(const std::string& progId, const std::vec
 
                         // COM convention: Property Get/Let/Set share the same DISPID
             std::string lowerBareName = Symbol::toLower(bareName);
-            int dispid;
-            auto dpIt = dispIdMap.find(lowerBareName);
-            if (dpIt != dispIdMap.end()) {
-                dispid = dpIt->second;
-            } else {
+            // M29: dispid优先取自methodSym->comDispid (driver TypeLib阶段回写), 保证dll_entry.c与TypeLib dispid一致
+            //      COM convention: Property Get/Let/Set共享同一dispid (driver已确保同名Property变体共享同一comDispid)
+            int dispid = methodSym->comDispid;
+            if (dispid == 0) {
+                // 安全fallback: 理论上不应发生 (driver TypeLib阶段已经回写comDispid) 仅防意外崩溃
                 dispid = nextDispid++;
+                dispIdMap[lowerBareName] = dispid;
+            } else if (dispIdMap.find(lowerBareName) == dispIdMap.end()) {
                 dispIdMap[lowerBareName] = dispid;
             }
 std::string wideName = "L\"" + bareName + "\"";
