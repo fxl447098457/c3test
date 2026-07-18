@@ -564,10 +564,12 @@ bool CCodeGen::generate(Module& module, const std::string& baseName,
                 // 调用实际的VB6处理器函数
                 // 如果是类模块，处理器是 vb6_<Mod>_<HandlerName>(me, params...)
                 // 如果是标准模块，处理器是 vb6_<HandlerName>(params...)
+                // Fix 019: 类模块必须将 handler (void*) 转换为 cls* 再作为 me 传入,
+                //          不可使用 classMeParam() (那是参数声明)
                 std::string procCall = cProcName(handlerName, handlerSym->access);
                 std::string callArgs = "(";
                 if (isClassModule_) {
-                    callArgs += classMeParam() + "/* from handler */";
+                    callArgs += classHandlerCast();
                 }
                 for (size_t i = 0; i < evtParams.size(); i++) {
                     if (i > 0 || isClassModule_) {
@@ -669,10 +671,12 @@ bool CCodeGen::generate(Module& module, const std::string& baseName,
                 }
 
                 // Call the VB6 handler function
+                // Fix 019: 类模块必须将 handler (void*) 转换为 cls* 再作为 me 传入,
+                //          不可使用 classMeParam() (那是参数声明)
                 std::string procCall = cProcName(handlerName, handlerSym->access);
                 std::string callArgs = "(";
                 if (isClassModule_) {
-                    callArgs += classMeParam() + "/* from com-evt */";
+                    callArgs += classHandlerCast();
                 }
                 for (size_t i = 0; i < evtParams.size(); i++) {
                     if (i > 0 || isClassModule_) {

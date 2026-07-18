@@ -1097,5 +1097,14 @@ std::string CCodeGen::classMeParam() const {
     return clsStruct + "* me";
 }
 
+// Fix 019: 在事件包装函数体内, handler (void*) 需要被强制转换为类指针类型
+// 以正确调用 vb6_<Mod>_<Handler>(cls* me, ...) 形式的类方法。
+// 历史上这里误用了 classMeParam() ("vb6_cls_X* me" — 参数声明) 作为函数调用实参,
+// 导致生成伪 C: vb6_<Mod>_<Hand>(vb6_cls_X* me/* from handler */, ...) 报 C2065 'me' 未声明。
+std::string CCodeGen::classHandlerCast() const {
+    std::string clsStruct = "vb6_cls_" + cIdent(moduleName_);
+    return "((" + clsStruct + "*)handler)";
+}
+
 
 } // namespace vb6c3

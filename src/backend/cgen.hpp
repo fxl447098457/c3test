@@ -545,6 +545,10 @@ private:
     // 生成类方法函数体中的Me引用名
     std::string classMeParam() const;
 
+    // Fix 019: 在事件包装函数体内把 void* handler 转换为类指针类型
+    // 用于替代历史上误用的 classMeParam() (那是参数声明, 不能作为函数调用实参)
+    std::string classHandlerCast() const;
+
     // ---- 二元运算符映射 ----
     std::string mapBinaryOp(BinaryOp op) const;
 
