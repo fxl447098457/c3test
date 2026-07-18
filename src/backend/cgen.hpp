@@ -366,6 +366,16 @@ private:
     // VB6语义: 同名函数引用 — callee上下文返回函数名(供调用), 其他上下文返回返回值变量
     bool asCallCallee_ = false;
 
+    // Fix 015: 类方法链式调用对象参数传递管道
+    // visit(MemberAccessExpr) 在 Fix 015 路径中, 当 asCallCallee_=true (外层是
+    // IndexOrCallExpr 或 CallStmt 的 callee context) 时, 不直接 emit "func(wrappedObj)"
+    // (那样会让 IndexOrCallExpr 的空参数shortcut 或 CallStmt 的 bare-call 分支错误地
+    // 把 callee 当作已完成调用, 跳过 Optional 参数默认值填充), 而是把 wrappedObj 存储
+    // 到此字段, lastExpr_ 只返回裸函数名. visit(IndexOrCallExpr) / visit(CallStmt) 在
+    // 完成参数处理后从此字段取出 wrappedObj, 作为首个 (this指针) 参数前置.
+    // 一旦消费即清空, 防止跨调用泄漏.
+    std::string pendingChainObj_;
+
     // 类模块标志
     bool isClassModule_ = false;
     bool isFormModule_ = false;
@@ -588,6 +598,25 @@ private:
     // 返回空串表示该类中无对应方法/属性, 调用者应视为数据字段访问 (obj->member)
     std::string resolveClassMemberCall(const std::string& className,
                                        const std::string& memberName) const;
+
+    // ---- Fix 015: Method chaining 解析辅助 ----
+    // 给定一个表达式 AST 节点, 推断其在运行时返回的类名 (如果它返回类实例)
+    //  - IdentifierExpr: 查 knownClassVars_, 找到则返回该变量的声明类名
+    //  - IndexOrCallExpr: 递归推断 callee.object 的类名, 再用 getClassMethodReturnType 找方法的返回类名
+    //  - 其他: 返回空串 (不可推断为类实例)
+    // 用于链式调用 db.Sql(s).Exec(...) 中 .Exec 的对象表达式 (db.Sql(s)) 类型推断
+    std::string inferClassTypeOfExpr(const ASTNode& expr) const;
+
+    // 给定类名与成员名, 在当前模块作用域符号表中查找属于该类的 Function/PropertyGet 符号,
+    // 若其返回类型为 Object 且记录了 variableTypeName (Fix 015), 返回经 canonicalClassName
+    // 规范化后的类名; 否则返回空串. 用于推断方法返回值的类类型.
+    std::string getClassMethodReturnType(const std::string& className,
+                                         const std::string& memberName) const;
+
+    // 将可能存在大小写差异的类型名 (来自源码 variableTypeName) 规范化为符号表中
+    // Class 符号记录的标准名称 (clsSym->name 或 sourceModule), 与 struct 定义
+    // vb6_cls_<canonicalName> 大小写一致. 找不到时原样返回.
+    std::string canonicalClassName(const std::string& typeName) const;
 
     // ---- 数组辅助 ----
     // VB6类型 → SAFEARRAY元素类型C枚举名

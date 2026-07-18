@@ -1221,6 +1221,128 @@ std::string CCodeGen::resolveClassMemberCall(const std::string& className,
 }
 
 // ============================================================
+// Fix 015: Method chaining 解析辅助
+// ============================================================
+
+std::string CCodeGen::canonicalClassName(const std::string& typeName) const {
+    if (typeName.empty()) return "";
+    if (!symTab_.moduleScope()) return typeName;
+    std::string lower = Symbol::toLower(typeName);
+    // 在模块作用域符号表中查找 Class 符号 (含本模块与 extern 注入),
+    // 返回符号记录的规范名 (clsSym->name 或 sourceModule) —
+    // 这与 struct 定义 vb6_cls_<name> 中使用的大小写一致.
+    for (const auto& [key, sym] : symTab_.moduleScope()->symbols()) {
+        if (sym->kind != SymbolKind::Class) continue;
+        if (sym->isExternal) {
+            if (Symbol::toLower(sym->sourceModule) == lower) return sym->sourceModule;
+        }
+        if (Symbol::toLower(sym->name) == lower) return sym->name;
+    }
+    return typeName;  // 未找到 Class 符号 — 用源码大小写返回 (caller 自行承担)
+}
+
+std::string CCodeGen::getClassMethodReturnType(const std::string& className,
+                                               const std::string& memberName) const {
+    if (!symTab_.moduleScope()) return "";
+    const std::string memberLower = Symbol::toLower(memberName);
+    const std::string classLower  = Symbol::toLower(className);
+
+    // 遍历模块级符号查找属于 className 的 Function/PropertyGet
+    // (与 resolveClassMemberCall 相同的匹配规则)
+    for (const auto& [key, sym] : symTab_.moduleScope()->symbols()) {
+        if (sym->lowerName != memberLower) continue;
+        bool matches = false;
+        if (sym->isExternal) {
+            if (Symbol::toLower(sym->sourceModule) == classLower) matches = true;
+        } else if (isClassModule_ && Symbol::toLower(moduleName_) == classLower) {
+            matches = true;
+        }
+        if (!matches) continue;
+
+        if (sym->kind == SymbolKind::Function || sym->kind == SymbolKind::PropertyGet) {
+            // 仅 Function/PropertyGet 有返回值
+            if (sym->type == Vb6Type::Object && !sym->variableTypeName.empty()) {
+                // Fix 015 semantic_analyzer 已在该 Function 的 variableTypeName 记录返回类名
+                return canonicalClassName(sym->variableTypeName);
+            }
+            return "";  // 非 Object 返回类型或无类型名 → 不能继续链
+        }
+        // Property Let/Set / Sub 无返回值, 跳过
+    }
+
+    // Fix 015: storageKey 冲突回退. 当多名 Public 方法在不同类中重名 (如 cCryptoHMAC.DataString
+    // 与 cCryptoHash.DataString, cCryptoHMAC.Mode/cCryptoHash.Mode/cDelay.Mode/...), driver.cpp 的
+    // globalPublicSyms 按 storageKey(lowerName) 去重, 消费模块作用域中该名字的外部符号
+    // 只保留首个注册者的 sourceModule — 与 className 不匹配 → 上面的循环找不到 → 返回 "".
+    // 类似 resolveClassMemberCall 的 Fix 014b 回退, 这里从 Class 符号自身的 memberReturnTypes
+    // 表(以 className 索引, 不受 storageKey 冲突影响)读取成员返回类型名. 再校验该返回类型
+    // 在当前作用域确实存在对应 Class 符号 (排除 UDT/Enum/String 等非类命名类型 — 链应终止).
+    const Symbol* classSym = nullptr;
+    for (const auto& [ckey, csym] : symTab_.moduleScope()->symbols()) {
+        if (csym->kind != SymbolKind::Class) continue;
+        if (csym->isExternal) {
+            if (Symbol::toLower(csym->sourceModule) == classLower) {
+                classSym = csym.get();
+                break;
+            }
+        } else if (isClassModule_ && Symbol::toLower(moduleName_) == classLower) {
+            // 类模块编译自身: 同模块的 Class 符号 isExternal=false
+            classSym = csym.get();
+            break;
+        }
+    }
+    if (classSym) {
+        auto it = classSym->memberReturnTypes.find(memberLower);
+        if (it != classSym->memberReturnTypes.end()) {
+            const std::string& rawRetName = it->second;
+            const std::string retLower = Symbol::toLower(rawRetName);
+            // 校验 rawRetName 对应当前作用域中真实存在的 Class 符号 (canonical 同时取大小写)
+            for (const auto& [k2, s2] : symTab_.moduleScope()->symbols()) {
+                if (s2->kind != SymbolKind::Class) continue;
+                if (s2->isExternal) {
+                    if (Symbol::toLower(s2->sourceModule) == retLower) {
+                        return s2->sourceModule;
+                    }
+                } else if (Symbol::toLower(s2->name) == retLower) {
+                    return s2->name;
+                }
+            }
+            // 返回类型不是类(可能是 UDT/Enum/String/接口等) → 链终止, 不应当继续链式调用
+            return "";
+        }
+    }
+    return "";
+}
+
+std::string CCodeGen::inferClassTypeOfExpr(const ASTNode& expr) const {
+    switch (expr.kind) {
+        case ASTNodeKind::IdentifierExpr: {
+            // base case: 变量 → knownClassVars_
+            auto& id = static_cast<const IdentifierExpr&>(expr);
+            std::string lower = Symbol::toLower(id.name);
+            auto it = knownClassVars_.find(lower);
+            if (it != knownClassVars_.end()) return it->second;
+            return "";
+        }
+        case ASTNodeKind::IndexOrCallExpr: {
+            // recursive case: 类方法调用 obj.Method(args) → 返回类
+            auto& call = static_cast<const IndexOrCallExpr&>(expr);
+            if (!call.callee
+                || call.callee->kind != ASTNodeKind::MemberAccessExpr) return "";
+            auto& ma = static_cast<const MemberAccessExpr&>(*call.callee);
+            if (!ma.object) return "";
+            // 递归推断对象表达式的类名
+            std::string baseClassName = inferClassTypeOfExpr(*ma.object);
+            if (baseClassName.empty()) return "";
+            // 查找该方法的返回类型
+            return getClassMethodReturnType(baseClassName, ma.memberName);
+        }
+        default:
+            return "";
+    }
+}
+
+// ============================================================
 // P7.5: 控件属性 → RTL读取函数名映射
 // ============================================================
 

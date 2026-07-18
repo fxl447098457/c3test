@@ -1467,6 +1467,59 @@ void CCodeGen::visit(MemberAccessExpr& node) {
         return;
     }
 
+    // Fix 015: 类方法链式调用 — db.Sql(s).Exec(...) 模式
+    // node.object 是 IndexOrCallExpr, 其 callee 是 MemberAccessExpr.
+    // 通过 inferClassTypeOfExpr 递归推断 node.object 求值后的类类型:
+    //   - 从最内层 IdentifierExpr 起在 knownClassVars_ 中拿到 base 类名
+    //   - 逐层用 getClassMethodReturnType 查方法的返回类型名 (Fix 015 在
+    //     semantic_analyzer 给 Function/PropertyGet 补了 variableTypeName)
+    // 若 node.object 确实返回类实例, 则用 C11 复合字面量把内层调用结果
+    // 装成左值, 再用 resolveClassMemberCall 分发外层成员:
+    //   db.Sql(s).Exec(args) →
+    //   vb6_cDataBase_Exec(&((vb6_cls_cDataBase){ vb6_cDataBase_Sql(db, s) }), args)
+    // 注: 链上的每一段 (Sql→Param→Exec 等) 都会经此分支处理, 复合字面量
+    // 可以嵌套, MSVC C11 接受.
+    if (node.object && node.object->kind == ASTNodeKind::IndexOrCallExpr) {
+        std::string retClassName = inferClassTypeOfExpr(*node.object);
+        if (!retClassName.empty()) {
+            // 内层调用返回类实例 → 合成 compound literal 作为 this 指针.
+            std::string wrappedObj =
+                "&((vb6_cls_" + cIdent(retClassName) + "){ /*fix015chain"
+                + node.memberName + "*/ " + obj + " })";
+
+            std::string resolvedFn =
+                resolveClassMemberCall(retClassName, node.memberName);
+
+            // 关键决策点: 外层是否要把本节点当作 callee 调用?
+            // - asCallCallee_=true: visit(IndexOrCallExpr)/visit(CallStmt) 会随后附加
+            //   用户参数 + Optional 默认值填充. 此时只 emit 裸函数名, wrappedObj 走
+            //   pendingChainObj_ 通道在 IndexOrCallExpr / CallStmt 里前置. 这样可
+            //   正确生成 vb6_cDataBase_Exec(wrappedObj, def1, def2, ...) (5个参数).
+            // - asCallCallee_=false: 上下文是值引用 (bX = obj.Sql(s).Prop), 没有外层
+            //   call 来填补默认值. 此时只能退化为 func(wrappedObj) 形式 (只有 this 指针,
+            //   默认参数缺失). 与非链式 obj.Method (无括号) 的 Priority 2 路径行为一致,
+            //   同样需要后续统一改进.
+            if (asCallCallee_) {
+                if (!resolvedFn.empty()) {
+                    pendingChainObj_ = wrappedObj;
+                    lastExpr_ = resolvedFn;  // 裸函数名, 由外层补全
+                } else {
+                    // 数据成员但被当作 callee 调用 — 罕见, 保持 wrappedObj->member 形式
+                    pendingChainObj_.clear();
+                    lastExpr_ = wrappedObj + "->" + cIdent(node.memberName);
+                }
+            } else {
+                if (!resolvedFn.empty()) {
+                    // 值上下文: emit 完整 func(wrappedObj) 形式 (无默认参数)
+                    lastExpr_ = resolvedFn + "(" + wrappedObj + ")";
+                } else {
+                    lastExpr_ = wrappedObj + "->" + cIdent(node.memberName);
+                }
+            }
+            return;
+        }
+    }
+
     // Fix 010r-10: 类实例变量的成员访问 fallback
     // 需要区分: 数据字段(obj->member) vs 方法/属性(vb6_ClassName_MethodName(obj))
     // Fix 011r-1: 用 resolveClassMemberCall 精确解析 (避免原 vb6_cls_ 前缀bug
@@ -1938,9 +1991,15 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
     }
     // M22: 设置asCallCallee_标志, 让IdentifierExpr知道当前是函数调用callee上下文
     // 这确保递归调用时(如 Factorial(n-1))返回函数名而非返回值变量
+    // Fix 015: 加 save/restore. 原代码硬编码 `asCallCallee_=false` 会丢失嵌套 callee
+    // 上下文 (如 CallStmt→MemberAccessExpr.Fix015→IndexOrCallExpr 链中, 内层 IndexOrCallExpr
+    // 反复重置成 false, 外层 Fix 015 看到的是 false 而非 CallStmt 设置的 true).
+    // 同时清空 pendingChainObj_ 防止跨调用泄漏 (Fix 015 在 callee emission 时设置).
+    pendingChainObj_.clear();
+    bool savedAsCallCallee = asCallCallee_;
     asCallCallee_ = true;
     emitExpr(*node.callee);
-    asCallCallee_ = false;
+    asCallCallee_ = savedAsCallCallee;
     std::string callee = std::move(lastExpr_);
 
     // --- P7.9: WebBrowser控件方法调用 ---
@@ -2222,6 +2281,16 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
     // 且IndexOrCallExpr有额外参数, 需要拆开重组为func(obj, userArgs...),
     // 避免生成 func(obj)(userArgs) 双重括号
     std::string classMethodObjArg;  // 如果非空, 表示callee已被拆开, 需要前置此参数
+
+    // Fix 015: 若 MemberAccessExpr.Fix015 路径已通过 pendingChainObj_ 交付对象参数,
+    // 移交给 classMethodObjArg (随后会被前置到参数列表).
+    // 此时 callee 是裸函数名 (如 "vb6_cDataBase_Exec"), 上面的 split 路径因
+    // callee.back() != ')' 不会触发, 故不会被双重设置.
+    if (!pendingChainObj_.empty()) {
+        classMethodObjArg = std::move(pendingChainObj_);
+        pendingChainObj_.clear();
+    }
+
     if (callee.size() >= 2 && callee.back() == ')'
         && (!node.positional.empty() || !node.named.empty())) {
         // 检查是否是完整的函数调用（以右括号结尾且匹配左括号）

@@ -111,6 +111,17 @@ struct Symbol {
     // --- 类相关 (仅SymbolKind::Class) ---
     VBInstancing instancing = VBInstancing::Private;  // Instancing属性
     std::vector<std::string> memberNames;              // 类成员名称列表(方法+属性+事件)
+    // Fix 015: 成员返回类型表 — 仅记录 Function/PropertyGet 返回类型名为命名类型
+    // (即 returnType 是 SimpleTypeRef 的成员) 的方法. key=成员名小写, value=返回类型名(源码原样).
+    // 用于 method chaining: 当跨模块 storageKey 冲突导致消费模块符号表中找不到
+    // 目标类的 Function 符号时 (如 cCryptoHMAC.DataString 与 cCryptoHash.DataString 冲突,
+    // 只保留首个外部符号), getClassMethodReturnType 可从 Class 符号本身读取返回类型,
+    // 从而让 HMAC.Secret(...).DataString(...).ReturnHex(...) 三级链式调用能继续.
+    // 注: 与 memberNames 不同, 此表不包含 Let/Set/Variable/Event — 它们无返回值.
+    //     同名 Property Get/Let/Set 共用同一个 lowerName 键; 只在 Get 时写入,
+    //     Let/Set 会覆盖. 因 Get 先于 Let/Set 处理, 同名共存时记录的是 Get 的返回类型
+    //     (后者无返回类型, 不写入, 但会覆盖 — 故需在写入前判断 node.propKind==Get).
+    std::unordered_map<std::string, std::string> memberReturnTypes;
     bool isInterface = false;                          // 是否为接口类(纯抽象,无实现)
     std::vector<std::string> implementsNames;          // Implements列表: 该类实现的接口名
     // 接口方法(仅isInterface=true时有意义): 必须被实现类覆盖的方法签名

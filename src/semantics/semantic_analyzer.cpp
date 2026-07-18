@@ -124,6 +124,12 @@ bool SemanticAnalyzer::analyze(Module& module) {
                 case ASTNodeKind::FunctionDecl: {
                     auto& f = static_cast<FunctionDecl&>(*decl);
                     classSym->memberNames.push_back(f.name);
+                    // Fix 015: 记录 Function 返回类型名(仅类型为命名类型 SimpleTypeRef 时)
+                    // 用于跨模块 storageKey 冲突场景下的 method chaining 返回类型推断
+                    if (f.returnType && f.returnType->kind == ASTNodeKind::SimpleTypeRef) {
+                        classSym->memberReturnTypes[Symbol::toLower(f.name)] =
+                            static_cast<SimpleTypeRef*>(f.returnType.get())->name;
+                    }
                     break;
                 }
                 case ASTNodeKind::PropertyDecl: {
@@ -136,6 +142,14 @@ bool SemanticAnalyzer::analyze(Module& module) {
                             if (Symbol::toLower(mn) == lower) { found = true; break; }
                         }
                         if (!found) classSym->memberNames.push_back(p.name);
+                    }
+                    // Fix 015: 仅 Property Get 有返回值; Let/Set 无返回类型不记录.
+                    // 用前判 propKind==PropertyGet 避免被后续 Let/Set 覆盖 Get 的返回类型.
+                    if (p.propKind == ProcKind::PropertyGet
+                        && p.returnType
+                        && p.returnType->kind == ASTNodeKind::SimpleTypeRef) {
+                        classSym->memberReturnTypes[Symbol::toLower(p.name)] =
+                            static_cast<SimpleTypeRef*>(p.returnType.get())->name;
                     }
                     break;
                 }
@@ -618,6 +632,13 @@ void SemanticAnalyzer::visit(FunctionDecl& node) {
         );
         sym->isStatic = node.isStatic;
 
+        // Fix 015: 记录Function的返回类型名(若返回类/UDT等命名类型)
+        // 用于cgen解析 method chaining: db.Sql(s).Exec(...) 链式调用时
+        // 需要根据 Sql 的返回类名(cDataBase)分发 .Exec → vb6_cDataBase_Exec
+        if (node.returnType && node.returnType->kind == ASTNodeKind::SimpleTypeRef) {
+            sym->variableTypeName = static_cast<SimpleTypeRef*>(node.returnType.get())->name;
+        }
+
         // 注册参数
         for (auto& param : node.params) {
             ParameterInfo pi;
@@ -688,6 +709,13 @@ void SemanticAnalyzer::visit(PropertyDecl& node) {
 
         Vb6Type retType = resolveTypeOrDefault(node.name, node.returnType.get());
         auto sym = std::make_unique<Symbol>(sk, node.name, retType, node.loc, node.access);
+
+        // Fix 015: 记录 Property Get 的返回类型名(若返回类/UDT等命名类型)
+        // 用于 cgen 解析 method chaining: obj.GetContainer().Method() 链式调用
+        if (sk == SymbolKind::PropertyGet
+            && node.returnType && node.returnType->kind == ASTNodeKind::SimpleTypeRef) {
+            sym->variableTypeName = static_cast<SimpleTypeRef*>(node.returnType.get())->name;
+        }
 
         for (auto& param : node.params) {
             ParameterInfo pi;

@@ -1113,15 +1113,21 @@ bool Driver::runCrossModuleResolution() {
             if (srcSym->kind == SymbolKind::Class) {
                 extSym->instancing = srcSym->instancing;
                 extSym->memberNames = srcSym->memberNames;
+                extSym->memberReturnTypes = srcSym->memberReturnTypes;  // Fix 015: 链式调用返回类型表
                 extSym->isInterface = srcSym->isInterface;  // P6.4
                 extSym->implementsNames = srcSym->implementsNames;  // P6.4
                 extSym->interfaceMethodNames = srcSym->interfaceMethodNames;  // P6.4
                 extSym->eventNames = srcSym->eventNames;  // P6.5
                 extSym->comClsidStr = srcSym->comClsidStr;  // P6.8: CLSID
             }
-            // Fix 010r-11: 复制变量类型名 (用于跨模块类实例变量识别)
+            // Fix 010r-11 / Fix 015: 复制变量/返回类型名
+            // - Variable: 用于跨模块类实例变量识别 (knownClassVars_)
+            // - Function / PropertyGet: 用于 method chaining 的返回类型推断
+            //   (getClassMethodReturnType 读取该字段判断链式调用能继续到哪一层)
+            // 对其它 kind 该字段为空, 无副作用. 原先把此赋值放在 Variable-only 分支内,
+            // 导致 Function/PropertyGet 外部符号丢失返回类型名, 链式调用解析失败.
+            extSym->variableTypeName = srcSym->variableTypeName;
             if (srcSym->kind == SymbolKind::Variable) {
-                extSym->variableTypeName = srcSym->variableTypeName;
                 extSym->dimCount = srcSym->dimCount;
             }
 

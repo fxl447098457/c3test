@@ -2118,7 +2118,14 @@ void CCodeGen::visit(CallStmt& node) {
         }
     }
 
+        // Fix 015: 标记 callee 上下文, 让 visit(MemberAccessExpr) 的 Fix 015 路径
+        // 把链式对象参数通过 pendingChainObj_ 交付, 而不是直接合成 func(wrappedObj)
+        // (那样会让下面的 bare-call 判定 callExpr.find('(') != npos 错过 padding).
+        pendingChainObj_.clear();
+        bool savedAsCallCallee = asCallCallee_;
+        asCallCallee_ = true;
         emitExpr(*node.callee);
+        asCallCallee_ = savedAsCallCallee;
         // 语句级调用: 确保表达式被求值(即使是void调用)
         // 如果结果是函数名(不含括号), 自动添加()调用
         std::string callExpr = lastExpr_;
@@ -2153,6 +2160,19 @@ void CCodeGen::visit(CallStmt& node) {
                     calleeParams = sym->params;
                 }
             }
+            // Fix 015: Call X.Y(args).Z (无尾括号) 形态下 node.callee 是 .Z MemberAccessExpr.
+            // 此时 Fix 015 emit 出的 lastExpr_ 是裸函数名 "vb6_cDataBase_Exec",
+            // 对象参数通过 pendingChainObj_ 传递. 这里需要按成员名查找参数签名,
+            // 才能正确填充 Optional 默认参数.
+            else if (node.callee && node.callee->kind == ASTNodeKind::MemberAccessExpr) {
+                auto& maExpr = static_cast<MemberAccessExpr&>(*node.callee);
+                Symbol* sym = symTab_.lookupModule(maExpr.memberName);
+                if (sym && (sym->kind == SymbolKind::Sub || sym->kind == SymbolKind::Function
+                    || sym->kind == SymbolKind::PropertyGet || sym->kind == SymbolKind::PropertyLet
+                    || sym->kind == SymbolKind::PropertySet)) {
+                    calleeParams = sym->params;
+                }
+            }
 
             // Check for ParamArray
             int paIndex = -1;
@@ -2167,6 +2187,13 @@ void CCodeGen::visit(CallStmt& node) {
                 if (callExpr.find(modPrefix) == 0) {
                     bareArgList = "(void*)me";
                 }
+            }
+
+            // Fix 015: 链式调用对象参数前置 — 由 visit(MemberAccessExpr).Fix015 交付
+            if (!pendingChainObj_.empty()) {
+                if (!bareArgList.empty()) bareArgList += ", ";
+                bareArgList += pendingChainObj_;
+                pendingChainObj_.clear();
             }
 
             if (calleeHasPA) {
