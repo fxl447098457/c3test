@@ -122,6 +122,20 @@ struct Symbol {
     //     Let/Set 会覆盖. 因 Get 先于 Let/Set 处理, 同名共存时记录的是 Get 的返回类型
     //     (后者无返回类型, 不写入, 但会覆盖 — 故需在写入前判断 node.propKind==Get).
     std::unordered_map<std::string, std::string> memberReturnTypes;
+    // Fix 016: 成员过程类型表 — 解决 prop_get_ 前缀启发式误判 (Fix 014b 遗留).
+    // 跨模块 storageKey 冲突场景下 resolveClassMemberCall 的 fallback 需要判断
+    // 目标成员在目标类中到底是 Function/Sub (无前缀) 还是 Property Get/Let/Set
+    // (对应 prop_get_/prop_let_/prop_set_ 前缀), 之前的启发式用 "作用域中存在
+    // <lower>$pg 外部符号" 判断, 在跨类同名混合 (如 cCryptoHMAC.Mode=Function,
+    // cDelay.Mode=PropertyGet 共 6 个类的 Mode 互相冲突) 时会误判.
+    // 覆盖规则 (语义分析填表时执行, 见 semantic_analyzer.cpp analyze()):
+    // - Function    → 写入 Function    (覆盖)
+    // - Sub         → 写入 Sub         (覆盖)
+    // - PropertyGet → 写入 PropertyGet (覆盖)  // 读上下文优先级最高
+    // - PropertyLet → 仅在当前键不存在或为 Let/Set 时写入 (不覆盖 Get/Function)
+    // - PropertySet → 仅在当前键不存在或为 Let 时写入    (不覆盖 Get/Function/Let)
+    // 读上下文 (resolveClassMemberCall) 优先级: Get > Function > Sub > Let > Set.
+    std::unordered_map<std::string, ProcKind> memberProcKinds;
     bool isInterface = false;                          // 是否为接口类(纯抽象,无实现)
     std::vector<std::string> implementsNames;          // Implements列表: 该类实现的接口名
     // 接口方法(仅isInterface=true时有意义): 必须被实现类覆盖的方法签名

@@ -70,6 +70,24 @@ std::string CCodeGen::generateDllEntry(const std::string& progId, const std::vec
                  h3 & 0xFFFF, h4);
         return std::string(buf);
     };
+    // Fix 016b: 构建 className(lower) -> 定义该类的 SymbolTable* 映射.
+    // COM 分派表收集每个类的 Public 方法时, 必须只搜索该类自身的符号表,
+    // 不能跨 allSymTabs 搜索同名方法 — 否则跨类同名冲突 (如 6 个类的 Mode:
+    // cCryptoHMAC/cCryptoHash 是 Function, cDelay/cModbusTransportTCP/... 是
+    // PropertyGet/Let) 会导致 cDelay 的 PropertyGet "mode$pg" 泄漏进 cCryptoHMAC
+    // 的分派表, 生成不存在的 vb6_cCryptoHMAC_prop_get_Mode → LNK2019.
+    // 每个类的本地方法符号只存在于定义该类的模块符号表中, 搜索 ownTab 即可
+    // 精确获取该类自己的方法, 完全避免跨类碰撞.
+    std::unordered_map<std::string, SymbolTable*> classOwningSymTab;
+    for (auto* st : allSymTabs) {
+        if (!st->moduleScope()) continue;
+        for (const auto& [ck, cs] : st->moduleScope()->symbols()) {
+            if (cs->kind == SymbolKind::Class && !cs->isExternal) {
+                classOwningSymTab.emplace(Symbol::toLower(cs->name), st);
+            }
+        }
+    }
+
     for (auto& [key, sym] : symTab_.moduleScope()->symbols()) {
         if (sym->kind == SymbolKind::Class && !sym->isInterface) {
             // BUG-4 fix: PublicNotCreatable(2) is visible but NOT externally creatable
@@ -82,10 +100,17 @@ std::string CCodeGen::generateDllEntry(const std::string& progId, const std::vec
 
                 // 使用类的memberNames查找Public方法符号
                 // (不能按前缀"ClassName_"搜索, 因为单模块工程中方法名是"SetValue"而非"Calc_SetValue")
+                // Fix 016b: 优先搜索该类自身的符号表 (classOwningSymTab), 避免跨类同名碰撞.
+                std::string classNameLower = Symbol::toLower(sym->name);
+                SymbolTable* ownTab = nullptr;
+                auto itOwn = classOwningSymTab.find(classNameLower);
+                if (itOwn != classOwningSymTab.end()) ownTab = itOwn->second;
+
                 for (auto& memberName : sym->memberNames) {
-                    // Try Sub/Function: search in all symbol tables
+                    // Try Sub/Function: 优先在类自身符号表搜索 (本类方法, 无碰撞)
                     Symbol* memSym = nullptr;
-                    memSym = symTab_.lookupModule(memberName);
+                    if (ownTab) memSym = ownTab->lookupModule(memberName);
+                    if (!memSym) memSym = symTab_.lookupModule(memberName);
                     if (!memSym) memSym = symTab_.lookup(memberName);
                     if (!memSym) {
                         for (auto* st : allSymTabs) {
@@ -93,15 +118,27 @@ std::string CCodeGen::generateDllEntry(const std::string& progId, const std::vec
                             if (memSym) break;
                         }
                     }
+                    // Fix 016b: 验证找到的符号属于当前类 (外部符号查 sourceModule;
+                    // 本地符号只需 ownTab 命中即可, 因 ownTab 只含本类定义)
                     if (memSym && (memSym->kind == SymbolKind::Sub || memSym->kind == SymbolKind::Function)
                         && memSym->access == AccessLevel::Public) {
-                        info.publicMethodNames.push_back(memSym->name);
-                        info.publicMethodSyms.push_back(memSym);
-                        memSym = nullptr;  // Don't double-count
+                        bool belongs = false;
+                        if (memSym->isExternal) {
+                            belongs = (Symbol::toLower(memSym->sourceModule) == classNameLower);
+                        } else {
+                            belongs = (ownTab && ownTab->lookupModule(memberName) == memSym);
+                        }
+                        if (belongs) {
+                            info.publicMethodNames.push_back(memSym->name);
+                            info.publicMethodSyms.push_back(memSym);
+                            memSym = nullptr;  // Don't double-count
+                        }
                     }
-                    // Lookup Property Get/Let/Set: search in all symbol tables
+                    // Lookup Property Get/Let/Set: 优先在类自身符号表搜索
                     for (auto kind : {SymbolKind::PropertyGet, SymbolKind::PropertyLet, SymbolKind::PropertySet}) {
-                        Symbol* propSym = symTab_.lookupModuleByKind(memberName, kind);
+                        Symbol* propSym = nullptr;
+                        if (ownTab) propSym = ownTab->lookupModuleByKind(memberName, kind);
+                        if (!propSym) propSym = symTab_.lookupModuleByKind(memberName, kind);
                         if (!propSym) {
                             for (auto* st : allSymTabs) {
                                 propSym = st->lookupModuleByKind(memberName, kind);
@@ -109,8 +146,17 @@ std::string CCodeGen::generateDllEntry(const std::string& progId, const std::vec
                             }
                         }
                         if (propSym && propSym->access == AccessLevel::Public) {
-                            info.publicMethodNames.push_back(propSym->name);
-                            info.publicMethodSyms.push_back(propSym);
+                            // Fix 016b: 验证归属, 阻止其他类的同名 Property 泄漏
+                            bool belongs = false;
+                            if (propSym->isExternal) {
+                                belongs = (Symbol::toLower(propSym->sourceModule) == classNameLower);
+                            } else {
+                                belongs = (ownTab && ownTab->lookupModuleByKind(memberName, kind) == propSym);
+                            }
+                            if (belongs) {
+                                info.publicMethodNames.push_back(propSym->name);
+                                info.publicMethodSyms.push_back(propSym);
+                            }
                         }
                     }
                 }
@@ -1156,6 +1202,7 @@ std::string CCodeGen::resolveClassMemberCall(const std::string& className,
     if (!chosen) chosen = foundSubFn;
     if (!chosen) chosen = foundLet;
     if (!chosen) chosen = foundSet;
+
     if (!chosen) {
         // Fix 014: 跨模块类成员符号缺失回退 (Class symbol fallback)
         // 当 cTlsSocket.Create 与其他类的 Public 方法同名时 (cPassword.Create / cAsyncSocket.Create),
@@ -1187,18 +1234,33 @@ std::string CCodeGen::resolveClassMemberCall(const std::string& className,
         if (classSym) {
             for (const auto& mn : classSym->memberNames) {
                 if (Symbol::toLower(mn) == memberLower) {
-                    // Fix 014a: 判断前缀 — Property Get 使用 prop_get_; Sub/Function 无前缀.
-                    // 仅靠 memberNames 无法区分方法 vs 属性 (语义分析时未保留 kind 信息).
-                    // 启发式: 若作用域中存在 "<memberLower>$pg" 外部符号 (任何类的同名属性
-                    // 都会因 storageKey 冲突被注入到一个外部符号, 消费方作用域只保留一个),
-                    // 通常意味着该成员名是 Property Get 模式 (跨类同名属性常见, 如 LastError).
-                    // 限制: 极少数场景下目标类与已注入外部符号所属类的 kind 可能不同;
-                    // 此时链接器会失败, 届时再细化 (例如在 Class 符号中保留 memberKinds).
+                    // Fix 016: 用 Class 符号的 memberProcKinds 直接判断前缀, 替代
+                    // Fix 014b 的 "$pg 外部符号启发式" (后者在跨类同名混合场景下误判:
+                    // 如 cCryptoHMAC.Mode 是 Function 而 cDelay.Mode 是 PropertyGet,
+                    // 6 个类的 Mode 共同以 storageKey="mode" 去重, 消费模块作用域中
+                    // "mode$pg" 外部符号被某个类率先占据, 启发式将所有类的 Mode 都
+                    // 发出 prop_get_Mode — 对 Function 类生成不存在的函数名 → LNK2019).
+                    // memberProcKinds 按 className 索引, 互不影响; 其值由
+                    // semantic_analyzer.cpp 在创建 Class 符号时按读上下文优先级
+                    // (Get > Function > Sub > Let > Set) 填充.
                     std::string prefix;
-                    std::string pgKey = memberLower + "$pg";
-                    if (symTab_.moduleScope()->symbols().find(pgKey)
-                        != symTab_.moduleScope()->symbols().end()) {
-                        prefix = "prop_get_";
+                    auto itKind = classSym->memberProcKinds.find(memberLower);
+                    if (itKind != classSym->memberProcKinds.end()) {
+                        switch (itKind->second) {
+                            case ProcKind::PropertyGet: prefix = "prop_get_"; break;
+                            case ProcKind::PropertyLet: prefix = "prop_let_"; break;
+                            case ProcKind::PropertySet: prefix = "prop_set_"; break;
+                            default: break;  // Function / Sub: 无前缀
+                        }
+                    }
+                    // 若 memberProcKinds 缺失 (理论上不应发生, 旧 Class 符号兼容),
+                    // 回退到原启发式: 作用域中存在 "<memberLower>$pg" 即判为 PropertyGet.
+                    if (prefix.empty() && itKind == classSym->memberProcKinds.end()) {
+                        std::string pgKey = memberLower + "$pg";
+                        if (symTab_.moduleScope()->symbols().find(pgKey)
+                            != symTab_.moduleScope()->symbols().end()) {
+                            prefix = "prop_get_";
+                        }
                     }
                     return "vb6_" + cIdent(classCanonName) + "_" + prefix + cIdent(memberName);
                 }

@@ -119,6 +119,8 @@ bool SemanticAnalyzer::analyze(Module& module) {
                 case ASTNodeKind::SubDecl: {
                     auto& s = static_cast<SubDecl&>(*decl);
                     classSym->memberNames.push_back(s.name);
+                    // Fix 016: Sub 写入 memberProcKinds (覆盖任意前值)
+                    classSym->memberProcKinds[Symbol::toLower(s.name)] = ProcKind::Sub;
                     break;
                 }
                 case ASTNodeKind::FunctionDecl: {
@@ -130,6 +132,9 @@ bool SemanticAnalyzer::analyze(Module& module) {
                         classSym->memberReturnTypes[Symbol::toLower(f.name)] =
                             static_cast<SimpleTypeRef*>(f.returnType.get())->name;
                     }
+                    // Fix 016: Function 写入 memberProcKinds (覆盖任意前值 — 同类内
+                    // 不允许 Function 与同名 Property 共存, 故此处覆盖无冲突风险)
+                    classSym->memberProcKinds[Symbol::toLower(f.name)] = ProcKind::Function;
                     break;
                 }
                 case ASTNodeKind::PropertyDecl: {
@@ -150,6 +155,29 @@ bool SemanticAnalyzer::analyze(Module& module) {
                         && p.returnType->kind == ASTNodeKind::SimpleTypeRef) {
                         classSym->memberReturnTypes[Symbol::toLower(p.name)] =
                             static_cast<SimpleTypeRef*>(p.returnType.get())->name;
+                    }
+                    // Fix 016: 按 ProcKind 写入 memberProcKinds, 同名共存时按
+                    // 读上下文优先级 Get > Function > Sub > Let > Set 选择, 即:
+                    // - Get 总是覆盖 (最高优先级)
+                    // - Let 仅在键不存在或现有是 Let/Set 时写入 (不覆盖 Get/Function/Sub)
+                    // - Set 仅在键不存在或现有是 Set/Let 时写入 (不覆盖 Get/Function/Sub/Let)
+                    {
+                        std::string lower = Symbol::toLower(p.name);
+                        auto it = classSym->memberProcKinds.find(lower);
+                        if (p.propKind == ProcKind::PropertyGet) {
+                            classSym->memberProcKinds[lower] = ProcKind::PropertyGet;
+                        } else if (p.propKind == ProcKind::PropertyLet) {
+                            if (it == classSym->memberProcKinds.end()
+                                || it->second == ProcKind::PropertyLet
+                                || it->second == ProcKind::PropertySet) {
+                                classSym->memberProcKinds[lower] = ProcKind::PropertyLet;
+                            }
+                        } else if (p.propKind == ProcKind::PropertySet) {
+                            if (it == classSym->memberProcKinds.end()
+                                || it->second == ProcKind::PropertySet) {
+                                classSym->memberProcKinds[lower] = ProcKind::PropertySet;
+                            }
+                        }
                     }
                     break;
                 }

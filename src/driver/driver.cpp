@@ -1114,6 +1114,7 @@ bool Driver::runCrossModuleResolution() {
                 extSym->instancing = srcSym->instancing;
                 extSym->memberNames = srcSym->memberNames;
                 extSym->memberReturnTypes = srcSym->memberReturnTypes;  // Fix 015: 链式调用返回类型表
+                extSym->memberProcKinds = srcSym->memberProcKinds;       // Fix 016: 成员过程类型表
                 extSym->isInterface = srcSym->isInterface;  // P6.4
                 extSym->implementsNames = srcSym->implementsNames;  // P6.4
                 extSym->interfaceMethodNames = srcSym->interfaceMethodNames;  // P6.4
