@@ -1003,6 +1003,105 @@ std::string CCodeGen::resolveComMarkerForPack(const std::string& packFnHint) {
 }
 
 // ============================================================
+// Fix 010r-16: COM/Property-Get 左值重写辅助函数实现
+// ============================================================
+bool CCodeGen::tryRewriteCOMLvalue(const std::string& target, const std::string& value,
+                                   Expr* valueExpr, bool isSet) {
+    if (target.empty()) return false;
+
+    // 工具 lambda: 在 target 中查找首个顶层括号 (跳过嵌套括号), 返回 '(' 与 ')'
+    // 的位置; 找不到返回 npos.
+    auto findCallParens = [](const std::string& s, size_t startAt) -> std::pair<size_t, size_t> {
+        size_t openPos = std::string::npos;
+        for (size_t i = startAt; i < s.size(); ++i) {
+            if (s[i] == '(') { openPos = i; break; }
+        }
+        if (openPos == std::string::npos) return {std::string::npos, std::string::npos};
+        int depth = 0;
+        for (size_t i = openPos; i < s.size(); ++i) {
+            if (s[i] == '(') depth++;
+            else if (s[i] == ')') {
+                depth--;
+                if (depth == 0) return {openPos, i};
+            }
+        }
+        return {std::string::npos, std::string::npos};
+    };
+
+    // ---- Pattern A: vb6_ComCall(obj, L"Item", args, n) = value ----
+    // vb6_ComCall 返回 VARIANT*, 不是左值. 改走 vb6_ComSetPropArg (内部
+    // DISPATCH_PROPERTYPUT|PUTREF).
+    if (target.find("vb6_ComCall") == 0) {
+        auto parens = findCallParens(target, 0);
+        if (parens.first != std::string::npos && parens.second != std::string::npos) {
+            std::string callArgs = target.substr(parens.first + 1,
+                                                 parens.second - parens.first - 1);
+            std::string packFn = valueExpr ? comPackExpr(*valueExpr) : "vb6_ComPackVariant";
+            std::string tag = isSet ? "Set" : "Let";
+            c_.emitLine("vb6_ComSetPropArg(" + callArgs + ", " + packFn + "(" + value +
+                        "));  /* COM Item assignment (Pattern A, " + tag + ") */");
+            return true;
+        }
+    }
+
+    // ---- Pattern F: vb6_ComGetStringProp(obj, L"Prop") = value ----
+    // With-block ClassInstance member: 当 Property 在跨模块符号表里找不到时,
+    // codegen 会走 "vb6_ComGetStringProp(_vb6_with_X, L\"Prop\")" 路径; 但读路径
+    // 产生的 wchar_t* 不是左值, 赋值触发 C2106. 改走 vb6_ComSetProp.
+    // 另外也匹配 vb6_ComGetIntProp / vb6_ComGetDoubleProp / vb6_ComGetObjectProp.
+    const std::vector<std::string> comGetFns = {
+        "vb6_ComGetStringProp", "vb6_ComGetIntProp", "vb6_ComGetDoubleProp",
+        "vb6_ComGetObjectProp", "vb6_ComGetProp"
+    };
+    for (const auto& fnName : comGetFns) {
+        if (target.find(fnName) == 0) {
+            auto parens = findCallParens(target, 0);
+            if (parens.first != std::string::npos && parens.second != std::string::npos) {
+                std::string callArgs = target.substr(parens.first + 1,
+                                                     parens.second - parens.first - 1);
+                // isSet=true => 对象引用语义, 用 PackObject (DISPATCH_PROPERTYPUTREF)
+                // isSet=false => Let 语义, 用 comPackExpr 推断
+                std::string packFn = isSet ? "vb6_ComPackObject"
+                                  : (valueExpr ? comPackExpr(*valueExpr) : "vb6_ComPackVariant");
+                std::string tag = isSet ? "Set" : "Let";
+                c_.emitLine("vb6_ComSetProp(" + callArgs + ", " + packFn + "(" + value +
+                            "));  /* COM prop assignment (Pattern F, " + tag + ") */");
+                return true;
+            }
+        }
+    }
+
+    // ---- Pattern C/D2: vb6_X_prop_get_Y(args) = value ----
+    // Property Get 用作 LHS. 改写为 prop_let_Y(args, value) (Let) 或
+    // prop_set_Y(args, value) (Set).
+    {
+        size_t pgPos = target.find("prop_get_");
+        if (pgPos != std::string::npos) {
+            auto parens = findCallParens(target, pgPos);
+            if (parens.first != std::string::npos && parens.second != std::string::npos) {
+                std::string prefix = target.substr(0, pgPos);              // vb6_cX_
+                std::string afterPg = target.substr(pgPos + strlen("prop_get_"),
+                                                    parens.first - (pgPos + strlen("prop_get_")));
+                std::string argsStr = target.substr(parens.first + 1,
+                                                    parens.second - parens.first - 1);
+                std::string newVerbs = isSet ? "prop_set_" : "prop_let_";
+                std::string newCall;
+                if (argsStr.empty()) {
+                    newCall = prefix + newVerbs + afterPg + "(" + value + ")";
+                } else {
+                    newCall = prefix + newVerbs + afterPg + "(" + argsStr + ", " + value + ")";
+                }
+                std::string tag = isSet ? "Set" : "Let";
+                c_.emitLine(newCall + ";  /* Property " + tag + " via prop_get_ rewrite (Pattern C/D2) */");
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
+// ============================================================
 // P7.5: 控件属性 → RTL读取函数名映射
 // ============================================================
 

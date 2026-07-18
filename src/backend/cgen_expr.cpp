@@ -309,11 +309,13 @@ void CCodeGen::visit(IdentifierExpr& node) {
         }
     }
 
-    // Fix 010r-12c: 局部变量必须遮蔽跨模块外部符号
+    // Fix 010r-12c + 010r-16b: 局部变量必须遮蔽跨模块外部符号 + 同模块的 Function/Property
     // codegen期间 symTab_.current_ 处于模块作用域(语义分析已完成),
-    // lookup()会找到从其他模块注入的外部Public符号。如果局部Dim变量
-    // 与外部符号同名, 局部变量优先 (VB6作用域: 局部 > 模块 > 跨模块)
-    if (knownLocalVars_.count(lower) && (!foundSym || foundSym->isExternal)) {
+    // lookup()会找到模块级 Public/Private Sub/Function/Property. 如果局部Dim变量
+    // 与这些符号同名, VB6 作用域语义规定局部变量优先 (局部 > 模块 > 跨模块).
+    // 注意: 自引用(过程内引用自身函数名作为返回值)已在上方 line 181-191 处理,
+    // 此处的局部变量一定不是当前过程的自引用.
+    if (knownLocalVars_.count(lower)) {
         // Dim As New 自动实例化守卫 (与下方Variable块的逻辑一致)
         auto itNew = knownNewVars_.find(lower);
         if (itNew != knownNewVars_.end()) {

@@ -139,6 +139,41 @@ void CCodeGen::visit(AssignmentStmt& node) {
             return;
         }
     }
+    // Fix 010r-14 (Pattern B): Mid$ statement — `Mid$(var, start[, len]) = value`
+    // 当 Mid$ 被词法器吃成单一 Identifier "Mid$" 时, 解析器无法走 TokenKind::Mid 分支,
+    // 会落到 parseLabelOrAssignmentOrCall(), 把 LHS 当作普通函数调用 (IndexOrCallExpr).
+    // 在 codegen 层面识别此模式并改写为 vb6_MidSet(&var, start, len, value); 调用
+    // (与 visit(MidStmt) 等价, 仅适用于 AssignmentStmt fallback 路径).
+    if (node.target->kind == ASTNodeKind::IndexOrCallExpr) {
+        auto& call = static_cast<IndexOrCallExpr&>(*node.target);
+        if (call.callee && call.callee->kind == ASTNodeKind::IdentifierExpr) {
+            auto& calleeId = static_cast<IdentifierExpr&>(*call.callee);
+            std::string calleeLower = calleeId.name;
+            std::transform(calleeLower.begin(), calleeLower.end(), calleeLower.begin(), ::tolower);
+            // 兼容 "mid$" 和 "mid" 两种写法
+            if (calleeLower == "mid$" || calleeLower == "mid") {
+                if (call.positional.size() >= 2 && call.positional.size() <= 3) {
+                    // 1. 发出 target (字符串变量)
+                    emitExpr(*call.positional[0]);
+                    std::string midTarget = std::move(lastExpr_);
+                    // 2. 发出 start
+                    emitExpr(*call.positional[1]);
+                    std::string midStart = std::move(lastExpr_);
+                    // 3. 发出 length (可选, 缺省为 0 表示 "到字符串末尾")
+                    std::string midLen = "0";
+                    if (call.positional.size() >= 3) {
+                        emitExpr(*call.positional[2]);
+                        midLen = std::move(lastExpr_);
+                    }
+                    // 4. 发出 value (RHS)
+                    emitExpr(*node.value);
+                    std::string midValue = std::move(lastExpr_);
+                    c_.emitLine("vb6_MidSet(&" + midTarget + ", " + midStart + ", " + midLen + ", " + midValue + ");  /* Mid$ statement */");
+                    return;
+                }
+            }
+        }
+    }
     // P22: LSet/RSet statement (LSet strVar = expr / RSet strVar = expr)
     if (node.isLSet || node.isRSet) {
         if (node.target->kind == ASTNodeKind::IdentifierExpr) {
@@ -636,6 +671,16 @@ void CCodeGen::visit(AssignmentStmt& node) {
         }
     }
 
+    // Fix 010r-15+010r-16 (Pattern A/C/D2/F): LHS 是非左值 COM 调用或 Property Get,
+    // 改写为对应的 COM SetProp/SetPropArg 或 prop_let_/prop_set_ 调用.
+    // 覆盖模式:
+    //   A: vb6_ComCall(obj, L"Item", args, n) = value → vb6_ComSetPropArg(...)
+    //   F: vb6_ComGetStringProp(obj, L"Prop") = value → vb6_ComSetProp(...)
+    //   C/D2: vb6_X_prop_get_Y(args) = value → vb6_X_prop_let_Y(args, value)
+    if (tryRewriteCOMLvalue(target, value, node.value.get(), /*isSet=*/false)) {
+        return;
+    }
+
     // 如果赋值目标是当前Function/PropertyGet名 (VB6语义: 设置返回值), 替换为返回值变量
     if (currentProc_ && (currentProc_->kind == SymbolKind::Function ||
                          currentProc_->kind == SymbolKind::PropertyGet)) {
@@ -872,6 +917,13 @@ void CCodeGen::visit(SetStmt& node) {
                 }
             }
         }
+    }
+
+    // Fix 010r-16: Set 语句中, 当 LHS 是非左值的 COM 调用或 Property Get
+    // (常见于 With-block 跨模块成员: Set .Request = value, Set dict.Item(k) = v)
+    // 重写为 vb6_ComSetProp / vb6_ComSetPropArg / prop_set_ 调用.
+    if (tryRewriteCOMLvalue(target, value, node.value.get(), /*isSet=*/true)) {
+        return;
     }
 
     c_.emitLine(target + " = " + value + ";  /* Set */");
@@ -1135,6 +1187,12 @@ void CCodeGen::visit(LetStmt& node) {
         resolveComValue(unpackHint);
     }
     std::string value = std::move(lastExpr_);
+
+    // Fix 010r-16: Let 语句中, 当 LHS 是非左值的 COM 调用或 Property Get,
+    // 重写为 vb6_ComSetProp / vb6_ComSetPropArg / prop_let_ 调用.
+    if (tryRewriteCOMLvalue(target, value, node.value.get(), /*isSet=*/false)) {
+        return;
+    }
 
     c_.emitLine(target + " = " + value + ";  /* Let */");
 }
@@ -2817,6 +2875,13 @@ void CCodeGen::visit(LocalDeclStmt& node) {
             }
             if (con.value) {
                 emitExpr(*con.value);
+                // Fix 010r-13: Local Const redefining Windows API macro? #undef first.
+                // 必须在声明 const 变量之前 #undef, 防止名字被 <windows.h> 等头文件中的
+                // 宏展开 (例: WHITE_BRUSH、MEM_COMMIT、CP_UTF8、SW_SHOWNORMAL 等
+                // 都是 windows.h 中的 #define, 否则 `const int32_t WHITE_BRUSH = 0;`
+                // 会被宏展开为 `const int32_t 0 = 0;` 引发 C2106).
+                // #undef 对没有定义为宏的名字是空操作, 无副作用.
+                c_.emitLine("#undef " + cName);
                 c_.emitLine("const " + cType + " " + cName + " = " + lastExpr_ + ";");
             }
             break;

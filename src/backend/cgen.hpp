@@ -560,6 +560,18 @@ private:
     // unresolvedType: 期望的解封类型, 默认为BSTR (最通用)
     std::string resolveComValue(const std::string& unresolvedType = "BSTR");
 
+    // Fix 010r-16: COM/Property-Get 左值重写辅助
+    // 当赋值语句(Let/Set/Assignment fallback)的 LHS 是非常量 C 表达式(非左值)时,
+    // 尝试重写为 COM SetProp/SetPropArg 或 Property Let/Set 调用.
+    // 参数:
+    //   target  - LHS 的 C 表达式(已被 emitExpr 产生)
+    //   value   - RHS 的 C 表达式(已被 emitExpr 产生, 已完成 COM 解封)
+    //   valueExpr - RHS 的 AST 节点(用于 comPackExpr 推断封装函数)
+    //   isSet   - true 表示 Set 语句(对象引用语义), false 表示 Let/Assignment
+    // 返回值: 若成功重写并已 emit, 返回 true; 否则返回 false(让调用者继续 fallback)
+    bool tryRewriteCOMLvalue(const std::string& target, const std::string& value,
+                             Expr* valueExpr, bool isSet);
+
     // ---- 数组辅助 ----
     // VB6类型 → SAFEARRAY元素类型C枚举名
     std::string mapSaElemType(Vb6Type type) const;
