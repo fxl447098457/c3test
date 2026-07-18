@@ -912,6 +912,29 @@ bool Driver::runSemanticAnalysis(const CompileOptions& options) {
 
                     analyzer->symbolTable().define(std::move(sym));
                 }
+
+                // Fix 018: 注册COM枚举成员为EnumMember符号 (TextCompare/adStateClosed 等)
+                // COM 类型库的 TKIND_ENUM 解析后, 成员作为全局可见命名常量注入符号表.
+                // hasConstValue=true 使 cgen 发出数值 (经 Fix 017-P1/P3 路径), 避免裸名 C2065.
+                // Volume guard: 跳过枚举成员过多的类型库 (如 MSHTML 数千成员), 避免命名空间
+                // 污染、内存膨胀 (125 模块 × N 成员) 和跨 enum 同名碰撞. 小型库 (Scripting ~30,
+                // ADO ~200) 正常注册, 覆盖 TextCompare / adXXX 等已知 C2065.
+                size_t totalEnumMembers = 0;
+                for (auto& en : tl->enums) totalEnumMembers += en->members.size();
+                if (totalEnumMembers <= 1000) {
+                    for (auto& en : tl->enums) {
+                        for (auto& m : en->members) {
+                            auto enumSym = std::make_unique<Symbol>(
+                                SymbolKind::EnumMember, m.name, Vb6Type::Long,
+                                SourceLocation{}, AccessLevel::Public);
+                            enumSym->isBuiltin = true;
+                            enumSym->hasConstValue = true;
+                            enumSym->constIntValue = m.value;
+                            enumSym->constType = Vb6Type::Long;
+                            analyzer->symbolTable().define(std::move(enumSym));
+                        }
+                    }
+                }
             }
         }
             // P24-04: 注册ComModule符号 (TKIND_MODULE → ActiveX DLL全局函数命名空间)

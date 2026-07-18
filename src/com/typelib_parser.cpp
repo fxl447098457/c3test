@@ -431,6 +431,14 @@ bool TypeLibParser::parseTypeLib(void* pTypeLib, TypeLibResult& result) {
                 }
                 break;
             }
+            case TKIND_ENUM: {
+                // Fix 018: 解析COM枚举类型 (TextCompare/adStateClosed 等命名常量)
+                auto en = parseEnum(pTI, typeName);
+                if (en) {
+                    result.enums.push_back(std::move(en));
+                }
+                break;
+            }
             case TKIND_ALIAS:
             case TKIND_RECORD:
             default:
@@ -485,7 +493,8 @@ bool TypeLibParser::parseTypeLib(void* pTypeLib, TypeLibResult& result) {
         }
     }
 
-    return !result.interfaces.empty() || !result.coclasses.empty() || !result.modules.empty();
+    return !result.interfaces.empty() || !result.coclasses.empty()
+        || !result.modules.empty() || !result.enums.empty();
 }
 
 // ============================================================
@@ -728,6 +737,73 @@ std::unique_ptr<ComModuleInfo> TypeLibParser::parseModule(void* pTypeInfo,
 
     // 如果没有函数也没有常量, 仍保留模块(可能仅作为命名空间)
     return mod;
+}
+
+// ============================================================
+// Fix 018: 内部: 解析枚举 (TKIND_ENUM → 枚举成员命名常量)
+// ============================================================
+
+std::unique_ptr<ComEnumInfo> TypeLibParser::parseEnum(void* pTypeInfo,
+                                                       const std::string& name) {
+    ITypeInfo* pTI = static_cast<ITypeInfo*>(pTypeInfo);
+    auto en = std::make_unique<ComEnumInfo>();
+    en->name = name;
+    en->lowerName = name;
+    std::transform(en->lowerName.begin(), en->lowerName.end(),
+                   en->lowerName.begin(), ::tolower);
+
+    // 获取TYPEATTR 得到 cVars (枚举成员数)
+    TYPEATTR* pTypeAttr = nullptr;
+    HRESULT hr = pTI->GetTypeAttr(&pTypeAttr);
+    if (FAILED(hr) || !pTypeAttr) return nullptr;
+
+    UINT cVars = pTypeAttr->cVars;
+    pTI->ReleaseTypeAttr(pTypeAttr);
+
+    // 枚举每个成员 (VARDESC, varkind==VAR_CONST, 值在 lpvarValue)
+    for (UINT i = 0; i < cVars; i++) {
+        VARDESC* pVarDesc = nullptr;
+        hr = pTI->GetVarDesc(i, &pVarDesc);
+        if (FAILED(hr) || !pVarDesc) continue;
+
+        ComEnumMemberInfo m;
+
+        // 成员名 (通过 memid 取文档名)
+        BSTR varName = nullptr;
+        pTI->GetDocumentation(pVarDesc->memid, &varName, nullptr, nullptr, nullptr);
+        if (varName) {
+            for (UINT j = 0; j < SysStringLen(varName); j++) {
+                m.name += (char)varName[j];
+            }
+            SysFreeString(varName);
+        }
+        m.lowerName = m.name;
+        std::transform(m.lowerName.begin(), m.lowerName.end(),
+                       m.lowerName.begin(), ::tolower);
+
+        // 枚举值: varkind==VAR_CONST 时 lpvarValue 指向 VARIANT
+        if (pVarDesc->varkind == VAR_CONST && pVarDesc->lpvarValue) {
+            VARIANT* pVar = pVarDesc->lpvarValue;
+            VARTYPE vt = pVar->vt & VT_TYPEMASK;
+            switch (vt) {
+                case VT_I1:   m.value = pVar->cVal; break;
+                case VT_UI1:  m.value = pVar->bVal; break;
+                case VT_I2:   m.value = pVar->iVal; break;
+                case VT_UI2:  m.value = pVar->uiVal; break;
+                case VT_I4:   m.value = pVar->lVal; break;
+                case VT_UI4:  m.value = (int64_t)pVar->ulVal; break;
+                case VT_BOOL: m.value = (pVar->boolVal != 0) ? -1 : 0; break;  // VB6 True=-1
+                default:      m.value = pVar->lVal; break;  // 回退到 Long
+            }
+        }
+
+        if (!m.name.empty()) {
+            en->members.push_back(std::move(m));
+        }
+        pTI->ReleaseVarDesc(pVarDesc);
+    }
+
+    return en;
 }
 
 // ============================================================

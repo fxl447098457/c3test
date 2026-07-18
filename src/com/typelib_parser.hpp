@@ -123,6 +123,25 @@ struct ComModuleInfo {
         return nullptr;
     }
 };
+
+// ============================================================
+// Fix 018: COM枚举类型描述 (TKIND_ENUM → 枚举成员)
+// VB6 引用 COM 类型库后, 枚举成员作为全局可见的命名常量
+// (如 Scripting.Runtime 的 TextCompare, ADO 的 adStateClosed)
+// ============================================================
+
+struct ComEnumMemberInfo {
+    std::string name;           // 成员名 (原始大小写, 如 "TextCompare")
+    std::string lowerName;      // 小写 (查找用)
+    int64_t value = 0;          // 枚举值 (来自 VARDESC.lpvarValue)
+};
+
+struct ComEnumInfo {
+    std::string name;           // 枚举类型名 (如 "CompareMethod")
+    std::string lowerName;      // 小写
+    std::vector<ComEnumMemberInfo> members;
+};
+
 // ============================================================
 // TypeLib解析结果
 // ============================================================
@@ -137,6 +156,7 @@ struct TypeLibResult {
     std::vector<std::unique_ptr<ComInterfaceInfo>> interfaces;
     std::vector<std::unique_ptr<ComCoClassInfo>> coclasses;
     std::vector<std::unique_ptr<ComModuleInfo>> modules;  // P24-04: TKIND_MODULE
+    std::vector<std::unique_ptr<ComEnumInfo>> enums;      // Fix 018: TKIND_ENUM
 
     // 按名称查找coclass (不区分大小写)
     ComCoClassInfo* findCoClass(const std::string& name) const {
@@ -233,8 +253,12 @@ private:
 
     // P24-04: 从ITypeInfo解析模块 (TKIND_MODULE)
     std::unique_ptr<ComModuleInfo> parseModule(void* pTypeInfo,
-                                                const std::string& name,
-                                                const std::string& dllPath);
+                                                 const std::string& name,
+                                                 const std::string& dllPath);
+
+    // Fix 018: 从ITypeInfo解析枚举 (TKIND_ENUM)
+    std::unique_ptr<ComEnumInfo> parseEnum(void* pTypeInfo,
+                                            const std::string& name);
 
     // 从FUNCDESC解析方法/属性
     ComMemberInfo parseFuncDesc(void* pTypeInfo, void* pFuncDesc, int index);
