@@ -1471,10 +1471,57 @@ void CCodeGen::visit(MemberAccessExpr& node) {
     // 需要区分: 数据字段(obj->member) vs 方法/属性(vb6_ClassName_MethodName(obj))
     // Fix 011r-1: 用 resolveClassMemberCall 精确解析 (避免原 vb6_cls_ 前缀bug
     // 同时处理Pattern D1 — 跨模块类Public数据字段访问)
+    // Fix 014: 链式类成员访问 — 如 me.m_oSocket.Create(...)
+    // emitExpr(node.object) 后 obj 可能是 "me->m_oSocket" 这样的 C 表达式,
+    // 而 knownClassVars_ 中的 key 注册的只是简单名 "m_osocket" (不带 me-> 前缀),
+    // 因此完整 objLower 在 map 中找不到. 此时提取 obj 尾部标识符
+    // (即最后一个 "->" 或 "." 之后的标识符) 再做一次 fallback 查找,
+    // 即可解析出 obj 的真实类类型, 让方法分发正确工作.
     {
         std::string objLower = obj;
         std::transform(objLower.begin(), objLower.end(), objLower.begin(), ::tolower);
         auto itClassVar = knownClassVars_.find(objLower);
+
+        // Fix 014: 链式成员访问 — 若完整 objLower 找不到, 尝试提取尾部标识符
+        // 例: obj = "me->m_oSocket" → trailingLower = "m_osocket"
+        //     obj = "vb6_x()->y"     → trailingLower = "y"
+        //     obj = "(*p).field"     → trailingLower = "field"
+        std::string trailingLower;
+        if (itClassVar == knownClassVars_.end()) {
+            size_t lastArrow = objLower.rfind("->");
+            size_t lastDot = objLower.rfind('.');
+            size_t start = std::string::npos;
+            if (lastArrow != std::string::npos && lastDot != std::string::npos) {
+                // 取后出现的边界: 对于 "->", '-' 在 pos, 跳过2字符到标识符; 对于 ".", '.' 在 pos, 跳过1字符
+                start = (lastDot > lastArrow) ? lastDot + 1 : lastArrow + 2;
+            } else if (lastArrow != std::string::npos) {
+                start = lastArrow + 2;
+            } else if (lastDot != std::string::npos) {
+                start = lastDot + 1;
+            }
+            if (start != std::string::npos && start < objLower.size()) {
+                // 跳过非标识符字符 ('>', '*', '(', ')', 空白 等)
+                while (start < objLower.size()
+                       && !isalnum((unsigned char)objLower[start])
+                       && objLower[start] != '_') {
+                    start++;
+                }
+                size_t endPos = start;
+                while (endPos < objLower.size()
+                       && (isalnum((unsigned char)objLower[endPos])
+                           || objLower[endPos] == '_')) {
+                    endPos++;
+                }
+                trailingLower = objLower.substr(start, endPos - start);
+            }
+            if (!trailingLower.empty()) {
+                auto itTrailing = knownClassVars_.find(trailingLower);
+                if (itTrailing != knownClassVars_.end()) {
+                    itClassVar = itTrailing;
+                }
+            }
+        }
+
         if (itClassVar != knownClassVars_.end()) {
             // 对象是类实例变量 — 用resolveClassMemberCall查证成员身份
             std::string resolvedFn = resolveClassMemberCall(itClassVar->second, node.memberName);
@@ -1487,7 +1534,8 @@ void CCodeGen::visit(MemberAccessExpr& node) {
                 lastExpr_ = obj + "->" + cIdent(node.memberName)
                           + "  /* class var ." + node.memberName + " field */";
             }
-        } else if (knownTypedComVars_.count(objLower)) {
+        } else if (knownTypedComVars_.count(objLower)
+                   || (!trailingLower.empty() && knownTypedComVars_.count(trailingLower))) {
             lastExpr_ = obj + "->" + cIdent(node.memberName);
         } else {
             lastExpr_ = obj + "." + cIdent(node.memberName);

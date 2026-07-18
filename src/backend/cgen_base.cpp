@@ -118,16 +118,21 @@ bool CCodeGen::generate(Module& module, const std::string& baseName,
                         classDoubleMembers_.insert(mLower);
                         classDoubleMembers_.insert(oLower);
                     }
-                    // Fix 010n: 记录UDT类型成员变量 (用于With块类型检测)
-                    if (var.asType->kind == ASTNodeKind::SimpleTypeRef) {
-                        auto& simple = static_cast<SimpleTypeRef&>(*var.asType);
-                        auto* udtSym = lookupDotted(simple.name);
-                        if (udtSym && udtSym->kind == SymbolKind::UserDefinedType) {
-                            std::string udtCType = "vb6_type_" + cIdent(simple.name);
-                            classUdtMembers_[oLower] = udtCType;
-                            classUdtMembers_[mLower] = udtCType;
+                        // Fix 010n: 记录UDT类型成员变量 (用于With块类型检测)
+                        if (var.asType->kind == ASTNodeKind::SimpleTypeRef) {
+                            auto& simple = static_cast<SimpleTypeRef&>(*var.asType);
+                            auto* udtSym = lookupDotted(simple.name);
+                            if (udtSym && udtSym->kind == SymbolKind::UserDefinedType) {
+                                std::string udtCType = "vb6_type_" + cIdent(simple.name);
+                                classUdtMembers_[oLower] = udtCType;
+                                classUdtMembers_[mLower] = udtCType;
+                            }
+                            // NOTE: 类类型成员变量 (Private WithEvents m_oSocket As cTlsSocket 等)
+                            // 由 visit(VariableDecl) 在 trackOnly_=true 路径 (cgen_decl.cpp:605-628)
+                            // 统一注册到 knownClassVars_, 此处无需重复注册.
+                            // Fix 014 改在 cgen_expr.cpp visit(MemberAccessExpr) 通用 fallback 中
+                            // 提取 C 表达式尾部标识符以支持链式访问 (me.m_oSocket.Create).
                         }
-                    }
                 }
             }
         }

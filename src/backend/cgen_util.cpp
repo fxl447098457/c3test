@@ -1156,7 +1156,56 @@ std::string CCodeGen::resolveClassMemberCall(const std::string& className,
     if (!chosen) chosen = foundSubFn;
     if (!chosen) chosen = foundLet;
     if (!chosen) chosen = foundSet;
-    if (!chosen) return "";  // 非方法/属性 → 视为数据字段访问
+    if (!chosen) {
+        // Fix 014: 跨模块类成员符号缺失回退 (Class symbol fallback)
+        // 当 cTlsSocket.Create 与其他类的 Public 方法同名时 (cPassword.Create / cAsyncSocket.Create),
+        // driver.cpp 的 globalPublicSyms 以 storageKey (lowerName) 去重, 只保留首个注入,
+        // 导致消费模块 (cTlsReMaster) 的作用域中外部 "create" 符号 sourceModule 不匹配 className.
+        // scope iteration 找不到 sourceModule==className 的方法符号 → chosen 为 null.
+        // 回退: 直接查找目标类的 Class 符号 (每个类的 Class 符号 storageKey=lowerName 唯一,
+        // 不会被同名方法冲突覆盖), 验证 memberName 是否在该类 memberNames 中,
+        // 命中则按 Sub/Function 风格发出 vb6_<className>_<memberName> (无前缀).
+        // 限制: Property 变体需要 prop_get_/let_/set_ 前缀, 此回退假设 Sub/Function;
+        //       若目标成员确实是 Property, 链接器会失败 — 届时再加 Property 分支.
+        const Symbol* classSym = nullptr;
+        std::string classCanonName;
+        for (const auto& [ckey, csym] : symTab_.moduleScope()->symbols()) {
+            if (csym->kind != SymbolKind::Class) continue;
+            if (csym->isExternal) {
+                if (Symbol::toLower(csym->sourceModule) == classNameLower) {
+                    classSym = csym.get();
+                    classCanonName = csym->sourceModule;
+                    break;
+                }
+            } else if (isClassModule_ && Symbol::toLower(moduleName_) == classNameLower) {
+                // 同模块 (本消费模块本身就是该类)
+                classSym = csym.get();
+                classCanonName = moduleName_;
+                break;
+            }
+        }
+        if (classSym) {
+            for (const auto& mn : classSym->memberNames) {
+                if (Symbol::toLower(mn) == memberLower) {
+                    // Fix 014a: 判断前缀 — Property Get 使用 prop_get_; Sub/Function 无前缀.
+                    // 仅靠 memberNames 无法区分方法 vs 属性 (语义分析时未保留 kind 信息).
+                    // 启发式: 若作用域中存在 "<memberLower>$pg" 外部符号 (任何类的同名属性
+                    // 都会因 storageKey 冲突被注入到一个外部符号, 消费方作用域只保留一个),
+                    // 通常意味着该成员名是 Property Get 模式 (跨类同名属性常见, 如 LastError).
+                    // 限制: 极少数场景下目标类与已注入外部符号所属类的 kind 可能不同;
+                    // 此时链接器会失败, 届时再细化 (例如在 Class 符号中保留 memberKinds).
+                    std::string prefix;
+                    std::string pgKey = memberLower + "$pg";
+                    if (symTab_.moduleScope()->symbols().find(pgKey)
+                        != symTab_.moduleScope()->symbols().end()) {
+                        prefix = "prop_get_";
+                    }
+                    return "vb6_" + cIdent(classCanonName) + "_" + prefix + cIdent(memberName);
+                }
+            }
+        }
+        return "";  // 非方法/属性 → 视为数据字段访问
+    }
 
     std::string prefix;
     switch (chosen->kind) {
