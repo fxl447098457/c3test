@@ -157,6 +157,30 @@ bool CCodeGen::generate(Module& module, const std::string& baseName,
         h_.emitLine("#include \"vb6forms.h\"");
     }
     h_.emitLine("#include \"vb6rtl.h\"");
+    // Fix 020: 取消 C/Windows 标准宏定义, 防止与 VB6 字段/方法名冲突
+    // 例: stdio.h 的 EOF 宏让 Db->Rs.EOF 被预处理展开为 Db->Rs.(-1) → C2059 语法错误
+    // vb6rtl.h 此前的 transitive include (stdio.h/windows.h/oleauto.h 等) 已完成声明,
+    // 此后生成的 C 代码不会以宏形式使用这些名字 (所有出现都是字符串字面量或字段访问).
+    // 列表保守, 仅含确认会冲突或极可能冲突的标准宏:
+    //   EOF (stdio.h — ADO Recordset 字段) — 已确认在 vbman 中冲突 11 处
+    //   ERROR (winerror.h — VB6 常用作属性/枚举名)
+    //   DELETE (winuser.h MF_DELETE — ADO Command.Delete 等)
+    //   min / max (windef.h 宏 — VB6 大小写不敏感, Min/Max/Field.Min 等都会撞)
+    //   OPTIONAL / IN / OUT (sal.h — 注解宏, 与 VB6 参数名冲突)
+    //   BEEP (winuser.h — VB6 内置 Beep 语句虽不冲突, 但用户可能定义 BEEP 字段)
+    {
+        static const char* kClashMacros[] = {
+            "EOF", "ERROR", "DELETE", "min", "max",
+            "OPTIONAL", "IN", "OUT", "BEEP"
+        };
+        // 使用 #ifdef/#undef 对保护: 未定义的宏也安全跳过
+        h_.emitLine("/* Fix 020: undef C/Windows macros clashing with VB6 identifiers */");
+        for (auto m : kClashMacros) {
+            h_.emitLine(std::string("#ifdef ") + m);
+            h_.emitLine(std::string("#undef ") + m);
+            h_.emitLine("#endif");
+        }
+    }
     // Fix 010r-11: 注册外部模块的类实例变量到 knownClassVars_
     // 遍历符号表中所有外部 Variable 符号, 检查 variableTypeName 是否是类名
     // 如 ToolsStr As New cToolsStr → variableTypeName = "cToolsStr"
