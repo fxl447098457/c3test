@@ -1093,7 +1093,7 @@ std::string CCodeGen::makePropertySignature(PropertyDecl& node) {
 // ============================================================
 
 std::string CCodeGen::classMeParam() const {
-    std::string clsStruct = "vb6_cls_" + cIdent(baseName_);
+    std::string clsStruct = "vb6_cls_" + cIdent(moduleName_);  // Fix 013: 用 moduleName_ (VB_Name)
     return clsStruct + "* me";
 }
 

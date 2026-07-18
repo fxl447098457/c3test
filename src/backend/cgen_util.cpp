@@ -1133,10 +1133,10 @@ std::string CCodeGen::resolveClassMemberCall(const std::string& className,
                 matches = true;
                 if (canonicalClassName.empty()) canonicalClassName = sym->sourceModule;
             }
-        } else if (isClassModule_ && Symbol::toLower(baseName_) == classNameLower) {
+        } else if (isClassModule_ && Symbol::toLower(moduleName_) == classNameLower) {  // Fix 013: moduleName_ = VB_Name
             // 当类模块编译自身时, 同模块类的方法符号 isExternal=false
             matches = true;
-            if (canonicalClassName.empty()) canonicalClassName = baseName_;
+            if (canonicalClassName.empty()) canonicalClassName = moduleName_;
         }
         if (!matches) continue;
 

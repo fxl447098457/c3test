@@ -69,7 +69,7 @@ bool CCodeGen::generate(Module& module, const std::string& baseName,
                          const FrmFormDesc* frmDesc) {
     currentModule_ = &module;
     baseName_ = baseName;
-    moduleName_ = baseName;  // 模块名 = 输出基名（如 "MathUtils"）
+    moduleName_ = module.moduleName;  // Fix 013: 模块名 = VB_Name (规范名称), 与 clsSym->name 一致
     isMultiModule_ = !externalModules.empty();  // 有外部依赖 = 多模块项目
     externalModules_ = externalModules;  // M22: 保存外部模块集合
     isClassModule_ = module.isClassModule;
@@ -241,7 +241,7 @@ bool CCodeGen::generate(Module& module, const std::string& baseName,
 
     // === 类模块: 生成结构体定义 ===
     if (isClassModule_) {
-        std::string clsStruct = "vb6_cls_" + cIdent(baseName_);
+        std::string clsStruct = "vb6_cls_" + cIdent(moduleName_);  // Fix 013: 用 moduleName_ (VB_Name)
         h_.emitLine("// Class module: " + module.moduleName);
 
         // P6.5: 前向声明event sink结构体 (在类结构体定义之前)
@@ -250,7 +250,7 @@ bool CCodeGen::generate(Module& module, const std::string& baseName,
             if (decl->kind == ASTNodeKind::EventDecl) { hasEvents = true; break; }
         }
         if (hasEvents) {
-            std::string sinkName = "vb6_events_" + cIdent(baseName_);
+            std::string sinkName = "vb6_events_" + cIdent(moduleName_);  // Fix 013: 用 moduleName_
             h_.emitLine("struct " + sinkName + ";  /* P6.5: forward decl */");
         }
 
@@ -288,7 +288,7 @@ bool CCodeGen::generate(Module& module, const std::string& baseName,
         }
         // P6.5: 如果类有事件声明，添加事件接收器指针字段
         if (hasEvents) {
-            std::string sinkName = "vb6_events_" + cIdent(baseName_);
+            std::string sinkName = "vb6_events_" + cIdent(moduleName_);  // Fix 013: 用 moduleName_
             h_.emitLine("    struct " + sinkName + "* events;  /* P6.5: event sink */");
         }
         h_.emitLine("} " + clsStruct + ";");

@@ -1038,11 +1038,11 @@ bool Driver::runSemanticAnalysis(const CompileOptions& options) {
 bool Driver::runCrossModuleResolution() {
     if (modules_.size() != analyzers_.size()) return false;
 
-    // 为每个模块计算基名（用于sourceModule标识）
+    // Fix 013: 为每个模块计算模块名 — 使用 module.moduleName (VB_Name)
+    // 而非文件名stem, 确保与 clsSym->name / mapTypeRef 生成的类型名一致
     std::vector<std::string> moduleBaseNames;
     for (const auto& module : modules_) {
-        std::filesystem::path p(utf8ToPath(module->filename));
-        moduleBaseNames.push_back(pathToUtf8(p.stem()));
+        moduleBaseNames.push_back(module->moduleName);
     }
 
     // 收集每个模块导出的Public符号: [模块索引] -> vector<Symbol*>
@@ -1150,9 +1150,9 @@ bool Driver::runCodeGeneration(const CompileOptions& options, const std::string&
             std::filesystem::path p(options.outputFile);
             baseName = pathToUtf8(p.stem());
         } else {
-            // 多文件: 用源文件名作为基名
-            std::filesystem::path p(utf8ToPath(module->filename));
-            baseName = pathToUtf8(p.stem());
+            // Fix 013: 多文件: 用 module.moduleName (VB_Name) 作为基名
+            // 确保输出文件名与 #include 指令、跨模块 sourceModule 一致
+            baseName = module->moduleName;
         }
 
         // 收集跨模块include需求（从符号表获取外部模块名）
@@ -1448,8 +1448,8 @@ bool Driver::runLinker(const CompileOptions& options, const std::string& outputD
             std::filesystem::path p(options.outputFile);
             baseName = pathToUtf8(p.stem());
         } else {
-            std::filesystem::path p(utf8ToPath(modules_[i]->filename));
-            baseName = pathToUtf8(p.stem());
+            // Fix 013: 用 module.moduleName (VB_Name) 作为基名, 与 runCodeGeneration 一致
+            baseName = modules_[i]->moduleName;
         }
         std::string cPath = intermediatesDir + "/" + baseName + ".c";
         msvcOpts.sourceFiles.push_back(cPath);

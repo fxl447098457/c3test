@@ -584,7 +584,7 @@ private:
     //   - Property Let     → vb6_<className>_prop_let_<memberName>  (仅当没有 Get 时返回)
     //   - Property Set     → vb6_<className>_prop_set_<memberName>  (仅当没有 Get/Let 时返回)
     // 匹配条件 (跨模块): sym->isExternal && sym->sourceModule == className
-    // 匹配条件 (同模块类): !sym->isExternal && isClassModule_ && baseName_ == className
+    // 匹配条件 (同模块类): !sym->isExternal && isClassModule_ && moduleName_ == className  (Fix 013: moduleName_ = VB_Name)
     // 返回空串表示该类中无对应方法/属性, 调用者应视为数据字段访问 (obj->member)
     std::string resolveClassMemberCall(const std::string& className,
                                        const std::string& memberName) const;

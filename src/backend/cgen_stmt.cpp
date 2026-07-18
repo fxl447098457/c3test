@@ -544,9 +544,9 @@ void CCodeGen::visit(AssignmentStmt& node) {
                                 matches = true;
                                 if (canonicalClassName.empty()) canonicalClassName = sym->sourceModule;
                             }
-                        } else if (isClassModule_ && Symbol::toLower(baseName_) == classNameLower) {
+                        } else if (isClassModule_ && Symbol::toLower(moduleName_) == classNameLower) {  // Fix 013: moduleName_ = VB_Name
                             matches = true;
-                            if (canonicalClassName.empty()) canonicalClassName = baseName_;
+                            if (canonicalClassName.empty()) canonicalClassName = moduleName_;
                         }
                         if (!matches) continue;
                         if (sym->kind == SymbolKind::PropertyLet) {
