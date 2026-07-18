@@ -2106,18 +2106,29 @@ std::string CCodeGen::escapeWideCString(const std::string& s) {
         } else if (ch < 0x80) {
             result += (char)ch; j++;
         } else {
+            // Fix 021: UTF-8多字节解码 Unicode 码点 (与 cgen_expr.cpp 同样修复)
+            // (a) 4-byte UTF-8 lead 掩码错 (0xF8→0xF0)
+            // (b) \x%04X -> \u%04X: \x 会贪婪吃掉后续十六进制字符触发 MSVC C7744
             uint32_t cp = 0;
             int bytes = 0;
             if ((ch & 0xE0) == 0xC0) { cp = ch & 0x1F; bytes = 2; }
             else if ((ch & 0xF0) == 0xE0) { cp = ch & 0x0F; bytes = 3; }
-            else if ((ch & 0xF8) == 0xF8) { cp = ch & 0x07; bytes = 4; }
+            else if ((ch & 0xF8) == 0xF0) { cp = ch & 0x07; bytes = 4; }
             else { cp = ch; bytes = 1; }
             for (int b = 1; b < bytes && j + b < s.size(); b++) {
                 cp = (cp << 6) | ((unsigned char)s[j + b] & 0x3F);
             }
             j += bytes;
-            char hex[8];
-            snprintf(hex, sizeof(hex), "\\x%04X", cp);
+            char hex[16];
+            if (cp <= 0xFFFF) {
+                snprintf(hex, sizeof(hex), "\\u%04X", cp);
+            } else {
+                // Supplementary plane: UTF-16 surrogate pair
+                uint32_t v = cp - 0x10000;
+                uint16_t hi = 0xD800 + (v >> 10);
+                uint16_t lo = 0xDC00 + (v & 0x3FF);
+                snprintf(hex, sizeof(hex), "\\u%04X\\u%04X", hi, lo);
+            }
             result += hex;
         }
     }

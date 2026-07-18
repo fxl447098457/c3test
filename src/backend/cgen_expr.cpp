@@ -105,19 +105,41 @@ void CCodeGen::visit(LiteralExpr& node) {
                     escaped += (char)ch;
                     j++;
                 } else {
-                    // UTF-8多字节: 解码Unicode码点, 输出\xNNNN
+                    // Fix 021: UTF-8多字节解码 Unicode 码点
+                    // 两处修复:
+                    // (a) 4-byte UTF-8 lead byte 掩码错误: 原 (0xF8==0xF8) 匹配
+                    //     11111xxx (0xF8-0xFF, 非法 UTF-8 字节), 应为 (0xF8==0xF0)
+                    //     匹配 11110xxx (0xF0-0xF7, 4-byte UTF-8 lead).
+                    // (b) \x%04X 在 C 中会被预处理器贪婪吃掉所有后续十六进制数字,
+                    //     当 VB6 字符串的下一个 ASCII 字符恰好是数字/字母 (如 "第1条"
+                    //     的 '1') 时, 拼成超长 hex escape 超出 wchar_t 范围 (16位)
+                    //     -> MSVC C7744 转义序列超出范围.
+                    //     改用 \u%04X (C99 universal character escape), 恰好消费 4 位,
+                    //     后续 '1' 被视为独立字符. \u 不接受 0x00-0x9F 范围, 但本分支
+                    //     只对 ch >= 0x80 调用, 多数为 CJK / 拉丁扩展 (>= 0xA0), 安全.
+                    //     罕见字符 < 0xA0 (C1 控制字符) 不出现在 VB6 源码中.
                     uint32_t cp = 0;
                     int bytes = 0;
                     if ((ch & 0xE0) == 0xC0) { cp = ch & 0x1F; bytes = 2; }
                     else if ((ch & 0xF0) == 0xE0) { cp = ch & 0x0F; bytes = 3; }
-                    else if ((ch & 0xF8) == 0xF8) { cp = ch & 0x07; bytes = 4; }
+                    else if ((ch & 0xF8) == 0xF0) { cp = ch & 0x07; bytes = 4; }
                     else { cp = ch; bytes = 1; }
                     for (int b = 1; b < bytes && j + b < inner.size(); b++) {
                         cp = (cp << 6) | ((unsigned char)inner[j + b] & 0x3F);
                     }
                     j += bytes;
-                    char hex[8];
-                    snprintf(hex, sizeof(hex), "\\x%04X", cp);
+                    char hex[16];
+                    if (cp <= 0xFFFF) {
+                        snprintf(hex, sizeof(hex), "\\u%04X", cp);
+                    } else {
+                        // Supplementary plane (cp > 0xFFFF, 如 emoji): 拆为 UTF-16
+                        // surrogate pair 作为两个 wchar_t 输出. wchar_t 在 Windows
+                        // 是 16 位, 单个 \u 无法直接表达.
+                        uint32_t v = cp - 0x10000;
+                        uint16_t hi = 0xD800 + (v >> 10);
+                        uint16_t lo = 0xDC00 + (v & 0x3FF);
+                        snprintf(hex, sizeof(hex), "\\u%04X\\u%04X", hi, lo);
+                    }
                     escaped += hex;
                 }
             }
