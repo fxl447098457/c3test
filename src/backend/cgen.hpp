@@ -239,6 +239,10 @@ private:
         WithObjKind kind = WithObjKind::Unknown;
         FrmControlType ctrlType = FrmControlType::Unknown;
         std::string ctrlOrigName;    // 控件原始大小写名称(用于HWND变量名)
+        // Fix 011r-1: 类实例的类名(如"cJson"), 仅 ClassInstance kind 有意义
+        // 已知时优先通过 resolveClassMemberCall 精确解析该类的成员方法/属性,
+        // 并把 tempType 设为 vb6_cls_<className>* (避免 void* 上的 .member/->member 错误)
+        std::string className;
     };
     std::vector<WithObjInfo> withObjectInfoStack_;
     bool suppressDefaultProp_ = false;  // P17.1: With对象表达式时抑制默认属性读取
@@ -571,6 +575,19 @@ private:
     // 返回值: 若成功重写并已 emit, 返回 true; 否则返回 false(让调用者继续 fallback)
     bool tryRewriteCOMLvalue(const std::string& target, const std::string& value,
                              Expr* valueExpr, bool isSet);
+
+    // Fix 011r-1: 类实例成员调用解析辅助
+    // 给定类名与成员名, 在当前作用域的模块级符号表中查找属于该类的方法/属性符号,
+    // 返回构造的 C 函数名:
+    //   - Sub/Function     → vb6_<className>_<memberName>
+    //   - Property Get     → vb6_<className>_prop_get_<memberName>  (读上下文优先)
+    //   - Property Let     → vb6_<className>_prop_let_<memberName>  (仅当没有 Get 时返回)
+    //   - Property Set     → vb6_<className>_prop_set_<memberName>  (仅当没有 Get/Let 时返回)
+    // 匹配条件 (跨模块): sym->isExternal && sym->sourceModule == className
+    // 匹配条件 (同模块类): !sym->isExternal && isClassModule_ && baseName_ == className
+    // 返回空串表示该类中无对应方法/属性, 调用者应视为数据字段访问 (obj->member)
+    std::string resolveClassMemberCall(const std::string& className,
+                                       const std::string& memberName) const;
 
     // ---- 数组辅助 ----
     // VB6类型 → SAFEARRAY元素类型C枚举名

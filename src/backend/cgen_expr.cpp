@@ -1324,37 +1324,22 @@ void CCodeGen::visit(MemberAccessExpr& node) {
                     || memSym->kind == SymbolKind::PropertyLet
                     || memSym->kind == SymbolKind::PropertySet)) {
 
-            // 优先级2: 类实例成员访问: obj.Method → vb6_cls_ClassName_MethodName(obj)
+            // 优先级2: 类实例成员访问: obj.Method → vb6_ClassName_MethodName(obj)
             // Fix 010r-10: 使用map查找, 可获取类名用于方法分发
+            // Fix 011r-1: 当obj在knownClassVars_中时, 优先用resolveClassMemberCall
+            // 精确解析该类的方法/属性, 避免memSym捡错模块的同类同名方法/属性
             auto itClassVar = knownClassVars_.find(objLower);
             if (itClassVar != knownClassVars_.end()) {
-                // Property需要加前缀: prop_get_/prop_let_/prop_set_
-                std::string memberCName = node.memberName;
-                if (memSym->kind == SymbolKind::PropertyGet) {
-                    memberCName = "prop_get_" + node.memberName;
-                } else if (memSym->kind == SymbolKind::PropertyLet) {
-                    memberCName = "prop_let_" + node.memberName;
-                } else if (memSym->kind == SymbolKind::PropertySet) {
-                    memberCName = "prop_set_" + node.memberName;
+                // 用对象的真实类名查找方法, 防止跨模块同名冲突
+                std::string resolvedFn = resolveClassMemberCall(itClassVar->second, node.memberName);
+                if (!resolvedFn.empty()) {
+                    emitExpr(*node.object);
+                    std::string objExpr = std::move(lastExpr_);
+                    lastExpr_ = resolvedFn + "(" + objExpr + ")";
+                    return;
                 }
-                // Fix 010r-10: 确定sourceModule用于cProcName
-                // 如果memSym->isExternal=true, 使用符号表的sourceModule
-                // 否则, 使用map中的类名(itClassVar->second)作为sourceModule
-                // 对于同模块类实例(me.AddFilter), itClassVar->second==moduleName_, cProcName默认处理
-                // 对于跨模块类实例(ToolsStr.HasStr), 需要显式传类名作为sourceModule
-                std::string sourceModule;
-                if (memSym->isExternal) {
-                    sourceModule = memSym->sourceModule;
-                } else {
-                    // memSym是当前模块的方法 (如本模块的AddFilter)
-                    // 使用对象所属类名, 确保即使同名方法存在于多个模块也能正确分发
-                    sourceModule = itClassVar->second;
-                }
-                std::string funcName = cProcName(memberCName, memSym->access, sourceModule);
-                emitExpr(*node.object);
-                std::string objExpr = std::move(lastExpr_);
-                lastExpr_ = funcName + "(" + objExpr + ")";
-                return;
+                // resolveClassMemberCall返回空 → 该类中无此方法/属性 → 数据字段访问
+                // 落入下方cross-module fallback分支处理 obj->member
             }
 
             // 优先级3: 模块名.方法名: MathUtils.Add → vb6_MathUtils_Add
@@ -1483,28 +1468,24 @@ void CCodeGen::visit(MemberAccessExpr& node) {
     }
 
     // Fix 010r-10: 类实例变量的成员访问 fallback
-    // 需要区分: 数据字段(obj->member) vs 方法/属性(vb6_cls_ClassName_MethodName(obj))
+    // 需要区分: 数据字段(obj->member) vs 方法/属性(vb6_ClassName_MethodName(obj))
+    // Fix 011r-1: 用 resolveClassMemberCall 精确解析 (避免原 vb6_cls_ 前缀bug
+    // 同时处理Pattern D1 — 跨模块类Public数据字段访问)
     {
         std::string objLower = obj;
         std::transform(objLower.begin(), objLower.end(), objLower.begin(), ::tolower);
         auto itClassVar = knownClassVars_.find(objLower);
         if (itClassVar != knownClassVars_.end()) {
-            // 对象是类实例变量 — 检查member是数据字段还是方法/属性
-            // 数据字段: 在classMemberVars_中 → obj->member (使用指针)
-            // 方法/属性: 不在classMemberVars_中 → vb6_cls_ClassName_MethodName(obj)
-            std::string memberLower = node.memberName;
-            std::transform(memberLower.begin(), memberLower.end(), memberLower.begin(), ::tolower);
-            if (classMemberVars_.count(memberLower) || knownLocalVars_.count(memberLower)) {
-                // 数据字段访问: obj->member
-                lastExpr_ = obj + "->" + cIdent(node.memberName);
+            // 对象是类实例变量 — 用resolveClassMemberCall查证成员身份
+            std::string resolvedFn = resolveClassMemberCall(itClassVar->second, node.memberName);
+            if (!resolvedFn.empty()) {
+                // 方法/属性调用: vb6_<className>_<prefix><memberName>(obj)
+                lastExpr_ = resolvedFn + "(" + obj + ")";
             } else {
-                // 方法/属性调用: vb6_cls_ClassName_MethodName(obj)
-                // 使用map中的类名(itClassVar->second)作为sourceModule
-                // Property需要加前缀: prop_get_/prop_let_/prop_set_
-                // 但在fallback路径, 符号表查找已失败, 无法区分Property vs Sub/Function
-                // 默认使用普通方法名; IndexOrCallExpr会处理参数追加
-                std::string funcName = "vb6_cls_" + cIdent(itClassVar->second) + "_" + cIdent(node.memberName);
-                lastExpr_ = funcName + "(" + obj + ")";
+                // 非方法/属性 → 数据字段访问: obj->member
+                // (此时obj类型为 vb6_cls_<className>*, ->访问可正确编译)
+                lastExpr_ = obj + "->" + cIdent(node.memberName)
+                          + "  /* class var ." + node.memberName + " field */";
             }
         } else if (knownTypedComVars_.count(objLower)) {
             lastExpr_ = obj + "->" + cIdent(node.memberName);
@@ -3200,6 +3181,22 @@ void CCodeGen::visit(WithMemberExpr& node) {
     case WithObjKind::ClassInstance: {
         // .Method/Property → 类方法调用 funcName(tempVar)
         // .DataMember → 尝试查找属性/方法, 找不到则用COM后期绑定
+        // Fix 011r-1: 若className已知, 优先用resolveClassMemberCall精确解析该类成员
+        // 避免symTab_.lookupModule捡错模块(Pattern A2)
+        if (!info.className.empty()) {
+            std::string funcName = resolveClassMemberCall(info.className, node.memberName);
+            if (!funcName.empty()) {
+                lastExpr_ = funcName + "(" + tempVar + ")";
+                return;
+            }
+            // 未找到方法/属性 → 假设是数据字段: tempVar->member
+            // (此时tempVar类型为 vb6_cls_<className>*, ->访问正确编译)
+            lastExpr_ = tempVar + "->" + cIdent(node.memberName)
+                      + "  /* With class ." + node.memberName + " field */";
+            return;
+        }
+
+        // className未知 — 使用原symTab查找(可能捡错模块, 但无法避免)
         Symbol* memSym = symTab_.lookupModule(node.memberName);
         if (!memSym) {
             memSym = symTab_.lookup(node.memberName);

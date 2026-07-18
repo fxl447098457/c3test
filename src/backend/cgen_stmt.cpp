@@ -527,6 +527,53 @@ void CCodeGen::visit(AssignmentStmt& node) {
             return;
         }
         case WithObjKind::ClassInstance: {
+            // Fix 011r-1: 优先用 info.className 精确查找该类的 Property Let/Set
+            // (原 symTab_.lookupModule 会捡错模块, 导致 Pattern A2 在 With 块赋值时出错)
+            // Fix 011r-1b: VB6 case-insensitive — 类名匹配与函数名输出均用规范类名 (来自符号表)
+            if (!info.className.empty()) {
+                std::string letFn, setFn;
+                std::string canonicalClassName;  // 与struct定义一致的大小写
+                std::string classNameLower = Symbol::toLower(info.className);
+                if (symTab_.moduleScope()) {
+                    std::string memberLower = Symbol::toLower(wmExpr.memberName);
+                    for (const auto& [key, sym] : symTab_.moduleScope()->symbols()) {
+                        if (sym->lowerName != memberLower) continue;
+                        bool matches = false;
+                        if (sym->isExternal) {
+                            if (Symbol::toLower(sym->sourceModule) == classNameLower) {
+                                matches = true;
+                                if (canonicalClassName.empty()) canonicalClassName = sym->sourceModule;
+                            }
+                        } else if (isClassModule_ && Symbol::toLower(baseName_) == classNameLower) {
+                            matches = true;
+                            if (canonicalClassName.empty()) canonicalClassName = baseName_;
+                        }
+                        if (!matches) continue;
+                        if (sym->kind == SymbolKind::PropertyLet) {
+                            letFn = "vb6_" + cIdent(canonicalClassName) + "_prop_let_" + cIdent(wmExpr.memberName);
+                        } else if (sym->kind == SymbolKind::PropertySet) {
+                            setFn = "vb6_" + cIdent(canonicalClassName) + "_prop_set_" + cIdent(wmExpr.memberName);
+                        }
+                    }
+                }
+                if (!letFn.empty()) {
+                    emitExpr(*node.value);
+                    c_.emitLine(letFn + "(" + tempVar + ", " + lastExpr_ + ");  /* With class prop_let_ */");
+                    return;
+                }
+                if (!setFn.empty()) {
+                    emitExpr(*node.value);
+                    c_.emitLine(setFn + "(" + tempVar + ", " + lastExpr_ + ");  /* With class prop_set_ (fallback) */");
+                    return;
+                }
+                // 既无Let也无Set → 视为数据字段写: tempVar->member = value
+                emitExpr(*node.value);
+                c_.emitLine(tempVar + "->" + cIdent(wmExpr.memberName) + " = " + lastExpr_
+                            + ";  /* With class field write */");
+                return;
+            }
+
+            // className未知 — 使用原symTab查找(可能捡错模块, 但无法避免)
             Symbol* memSym = symTab_.lookupModule(wmExpr.memberName);
             if (!memSym) memSym = symTab_.lookup(wmExpr.memberName);
             if (memSym && memSym->kind == SymbolKind::PropertyLet) {
@@ -1633,8 +1680,9 @@ void CCodeGen::visit(WithStmt& node) {
             std::transform(clsLower.begin(), clsLower.end(), clsLower.begin(), ::tolower);
             // "With New X" 总是类实例
             withInfo.kind = WithObjKind::ClassInstance;
-            tempType = "vb6_cls_" + cIdent(newExpr.className) + "*";
-            withInfo.ctrlOrigName = cIdent(newExpr.className);
+            withInfo.className = cIdent(newExpr.className);  // Fix 011r-1
+            tempType = "vb6_cls_" + withInfo.className + "*";
+            withInfo.ctrlOrigName = withInfo.className;
         }
         // --- Fix 010n: WithMemberExpr (嵌套With: With .Method()) ---
         else if (node.object->kind == ASTNodeKind::WithMemberExpr) {
@@ -1645,10 +1693,17 @@ void CCodeGen::visit(WithStmt& node) {
                     outerInfo.kind == WithObjKind::COMObject) {
                     // 方法返回值通常是同类或另一个类实例
                     withInfo.kind = WithObjKind::ClassInstance;
+                    // Fix 011r-1: 继承外层className (对property chain如 .SubObj.SubMethod常见)
+                    // 注意: 如外层方法返回不同类实例, 此继承会错误 — 当前简化处理
+                    withInfo.className = outerInfo.className;
+                    if (!withInfo.className.empty()) {
+                        tempType = "vb6_cls_" + withInfo.className + "*";
+                    }
                 } else if (outerInfo.kind == WithObjKind::FormControl ||
                            outerInfo.kind == WithObjKind::WithEventsCtrl) {
                     // 控件属性返回的对象 → 类实例
                     withInfo.kind = WithObjKind::ClassInstance;
+                    // 控件方法返回的对象类型未知, 不设置className
                 }
                 // UDT/Unknown/BuiltinObject: 保持Unknown (struct.field访问)
             }
@@ -1696,8 +1751,12 @@ void CCodeGen::visit(WithStmt& node) {
 
             // 类实例变量检测
             if (withInfo.kind == WithObjKind::Unknown) {
-                if (knownClassVars_.find(objNameLower) != knownClassVars_.end()) {
+                auto itClassVar = knownClassVars_.find(objNameLower);
+                if (itClassVar != knownClassVars_.end()) {
                     withInfo.kind = WithObjKind::ClassInstance;
+                    // Fix 011r-1: 设置className, 让WithMemberExpr能精确解析该类方法
+                    withInfo.className = cIdent(itClassVar->second);
+                    tempType = "vb6_cls_" + withInfo.className + "*";
                 }
             }
 
@@ -1731,6 +1790,12 @@ void CCodeGen::visit(WithStmt& node) {
             // 检查成员是否为类实例变量 (me.member As SomeClass)
             if (knownClassVars_.find(memberLower) != knownClassVars_.end()) {
                 withInfo.kind = WithObjKind::ClassInstance;
+                // Fix 011r-1: 获取成员的类名, 设置tempType
+                auto itClassVar = knownClassVars_.find(memberLower);
+                if (itClassVar != knownClassVars_.end()) {
+                    withInfo.className = cIdent(itClassVar->second);
+                    tempType = "vb6_cls_" + withInfo.className + "*";
+                }
             } else if (knownObjectVars_.count(memberLower)) {
                 withInfo.kind = WithObjKind::COMObject;
             } else if (knownUdtVars_.count(memberLower)) {
@@ -1749,6 +1814,11 @@ void CCodeGen::visit(WithStmt& node) {
                         // TODO: Symbol没有存储typeRefName, 需要其他方式
                     } else if (memSym->type == Vb6Type::Object) {
                         withInfo.kind = WithObjKind::ClassInstance;
+                        // Fix 011r-1: 若Symbol有variableTypeName, 用之; 否则className未知
+                        if (!memSym->variableTypeName.empty()) {
+                            withInfo.className = cIdent(memSym->variableTypeName);
+                            tempType = "vb6_cls_" + withInfo.className + "*";
+                        }
                     }
                 }
                 // 无法确定类型时默认为类实例 (void*不支持.member访问)

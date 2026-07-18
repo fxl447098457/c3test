@@ -1102,6 +1102,76 @@ bool CCodeGen::tryRewriteCOMLvalue(const std::string& target, const std::string&
 }
 
 // ============================================================
+// Fix 011r-1: 类实例成员调用解析 (跨模块符号表的精确类查找)
+// ============================================================
+std::string CCodeGen::resolveClassMemberCall(const std::string& className,
+                                               const std::string& memberName) const {
+    if (className.empty()) return "";
+    if (!symTab_.moduleScope()) return "";
+
+    const std::string memberLower = Symbol::toLower(memberName);
+    // Fix 011r-1b: VB6 case-insensitive — compare class name ignoring case
+    // (用户源代码可能写 "cWinsock", 但struct定义用的是文件名大小写 "cWinSock")
+    const std::string classNameLower = Symbol::toLower(className);
+    // 跟踪规范类名 (取自符号表, 用于C输出大小写一致)
+    std::string canonicalClassName;
+
+    // 遍历模块级符号, 收集属于指定类且名字匹配的所有方法/属性符号
+    // 优先 Get (读上下文最常见), 其次 Sub/Function, 再 Property Let, 最后 Set
+    const Symbol* foundGet   = nullptr;
+    const Symbol* foundLet   = nullptr;
+    const Symbol* foundSet   = nullptr;
+    const Symbol* foundSubFn = nullptr;
+
+    for (const auto& [key, sym] : symTab_.moduleScope()->symbols()) {
+        if (sym->lowerName != memberLower) continue;
+
+        // 类匹配判定 (case-insensitive: VB6 case-insensitive)
+        bool matches = false;
+        if (sym->isExternal) {
+            if (Symbol::toLower(sym->sourceModule) == classNameLower) {
+                matches = true;
+                if (canonicalClassName.empty()) canonicalClassName = sym->sourceModule;
+            }
+        } else if (isClassModule_ && Symbol::toLower(baseName_) == classNameLower) {
+            // 当类模块编译自身时, 同模块类的方法符号 isExternal=false
+            matches = true;
+            if (canonicalClassName.empty()) canonicalClassName = baseName_;
+        }
+        if (!matches) continue;
+
+        switch (sym->kind) {
+            case SymbolKind::PropertyGet:  foundGet   = sym.get(); break;
+            case SymbolKind::PropertyLet:  foundLet   = sym.get(); break;
+            case SymbolKind::PropertySet:  foundSet   = sym.get(); break;
+            case SymbolKind::Sub:
+            case SymbolKind::Function:     foundSubFn = sym.get(); break;
+            default: break;  // Variable / Constant / Class / EnumType... 跳过
+        }
+    }
+
+    // 选择优先级: Get > Sub/Function > Let > Set
+    // (本helper用于读上下文; 写上下文由tryRewriteCOMLvalue把Get改写成Let/Set)
+    const Symbol* chosen = foundGet;
+    if (!chosen) chosen = foundSubFn;
+    if (!chosen) chosen = foundLet;
+    if (!chosen) chosen = foundSet;
+    if (!chosen) return "";  // 非方法/属性 → 视为数据字段访问
+
+    std::string prefix;
+    switch (chosen->kind) {
+        case SymbolKind::PropertyGet: prefix = "prop_get_"; break;
+        case SymbolKind::PropertyLet: prefix = "prop_let_"; break;
+        case SymbolKind::PropertySet: prefix = "prop_set_"; break;
+        default: break;  // Sub/Function: 无前缀
+    }
+
+    // 强制使用规范类名 (来自符号表, 与类定义struct名一致),
+    // 避免用户源代码大小写差异导致生成的函数名与定义不匹配
+    return "vb6_" + cIdent(canonicalClassName) + "_" + prefix + cIdent(memberName);
+}
+
+// ============================================================
 // P7.5: 控件属性 → RTL读取函数名映射
 // ============================================================
 
