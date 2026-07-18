@@ -85,10 +85,21 @@ bool CCodeGen::generate(Module& module, const std::string& baseName,
     classBstrMembers_.clear();
     classLongMembers_.clear();
     classDoubleMembers_.clear();
+    classUdtMembers_.clear();  // Fix 010n
+    classMemberVars_.clear();  // Fix 010r
     if (isClassModule_) {
         for (auto& decl : module.declarations) {
             if (decl->kind == ASTNodeKind::VariableDecl) {
                 auto& var = static_cast<VariableDecl&>(*decl);
+                // Fix 010r: Register ALL class member variable names (lowercase)
+                {
+                    std::string mLower = "m_" + var.name;
+                    std::transform(mLower.begin(), mLower.end(), mLower.begin(), ::tolower);
+                    std::string oLower = var.name;
+                    std::transform(oLower.begin(), oLower.end(), oLower.begin(), ::tolower);
+                    classMemberVars_.insert(mLower);
+                    classMemberVars_.insert(oLower);
+                }
                 if (var.asType) {
                     Vb6Type vtype = resolveArrayElemType(var.asType.get());
                     // 注册 C 字段名 m_Xxx 的 lowercase: m_xxx
@@ -106,6 +117,16 @@ bool CCodeGen::generate(Module& module, const std::string& baseName,
                     } else if (vtype == Vb6Type::Double || vtype == Vb6Type::Single) {
                         classDoubleMembers_.insert(mLower);
                         classDoubleMembers_.insert(oLower);
+                    }
+                    // Fix 010n: 记录UDT类型成员变量 (用于With块类型检测)
+                    if (var.asType->kind == ASTNodeKind::SimpleTypeRef) {
+                        auto& simple = static_cast<SimpleTypeRef&>(*var.asType);
+                        auto* udtSym = lookupDotted(simple.name);
+                        if (udtSym && udtSym->kind == SymbolKind::UserDefinedType) {
+                            std::string udtCType = "vb6_type_" + cIdent(simple.name);
+                            classUdtMembers_[oLower] = udtCType;
+                            classUdtMembers_[mLower] = udtCType;
+                        }
                     }
                 }
             }
@@ -131,22 +152,54 @@ bool CCodeGen::generate(Module& module, const std::string& baseName,
         h_.emitLine("#include \"vb6forms.h\"");
     }
     h_.emitLine("#include \"vb6rtl.h\"");
-    // DEBUG: Show external modules for this module
-        for (const auto& extMod : externalModules) {
-        auto* extSym = symTab_.lookup(extMod);
+    // Fix 010r-11: 注册外部模块的类实例变量到 knownClassVars_
+    // 遍历符号表中所有外部 Variable 符号, 检查 variableTypeName 是否是类名
+    // 如 ToolsStr As New cToolsStr → variableTypeName = "cToolsStr"
+    // 这样在 MemberAccessExpr 中, ToolsStr.HasStr 能正确分发为 vb6_cToolsStr_HasStr(ToolsStr, ...)
+    for (const auto& [key, sym] : symTab_.moduleScope()->symbols()) {
+        if (sym->isExternal && sym->kind == SymbolKind::Variable && !sym->variableTypeName.empty()) {
+            auto* clsSym = symTab_.lookupModule(sym->variableTypeName);
+            if (clsSym && clsSym->kind == SymbolKind::Class && !clsSym->isInterface) {
+                std::string varLower = sym->name;
+                std::transform(varLower.begin(), varLower.end(), varLower.begin(), ::tolower);
+                knownClassVars_[varLower] = clsSym->name;
+                // P14.3.1: Dim As New 自动实例化 — 外部 As New 变量也需要注册
+                // 检查源Symbol是否有 As New 标志 (通过 knownNewVars_ 传递)
+                // 对于 Public x As New ClassName, 在 consuming 模块中也需要 auto-instantiate
+                // 暂时不注册 knownNewVars_, 因为 As New 信息没有传递到外部 Symbol
+            }
+        }
     }
-        // P8.7: 跨模块#include策略
-    // - 类模块之间的#include保留在.h (相互引用需要完整类型定义)
-    // - 标准模块引用类模块的#include保留在.h (类类型需要完整定义)
-    // - 标准模块之间的#include移到.c (避免.h之间循环依赖)
+
+    // Fix 010r-12: Enum和Type(UDT)定义必须在跨模块#include之前生成
+    // 原因: 类模块(如cTlsSocket)的.h需要标准模块(如mdTlsThunks)的UDT完整定义
+    // 作为类结构体值成员. 若UDT定义在#include之后, 循环引用会导致UDT不可见.
+    // UDT不引用类类型(只含基本类型/其他UDT/指针), 可安全地先输出.
+    // 1. Enum定义 (必须最先, 因为常量可能引用枚举值)
+    for (auto& decl : module.declarations) {
+        if (decl->kind == ASTNodeKind::EnumDecl) {
+            visit(static_cast<EnumDecl&>(*decl));
+        }
+    }
+
+    // 2. Type(UDT)定义 — 必须在跨模块#include之前, 确保循环引用时UDT定义先于include可见
+    for (auto& decl : module.declarations) {
+        if (decl->kind == ASTNodeKind::TypeDecl) {
+            visit(static_cast<TypeDecl&>(*decl));
+        }
+    }
+
+    // P8.7 + Fix 010r-12: 跨模块#include策略
+    // - 类模块引用任何模块(类或标准) → .h (类结构体需要完整UDT定义和类类型)
+    // - 标准模块引用类模块 → .h (函数参数需要完整类类型)
+    // - 标准模块引用标准模块 → .c (避免.h之间循环依赖)
+    // UDT定义已在上方输出, 循环#include时UDT定义总是先于include可见
     for (const auto& extMod : externalModules) {
         auto* extSym = symTab_.lookup(extMod);
         bool extIsClass = extSym && extSym->kind == SymbolKind::Class;
-        if (extIsClass) {
-            // 类模块引用其他模块 / 标准模块引用类模块 => 放.h
+        if (extIsClass || isClassModule_) {
             h_.emitLine("#include \"" + extMod + ".h\"");
         }
-        // 标准模块引用标准模块 => 放.c（见下方）
     }
     h_.emitBlank();
 
@@ -173,15 +226,13 @@ bool CCodeGen::generate(Module& module, const std::string& baseName,
             c_.emitLine("#include \"vb6comserver.h\"");
         }
     }
-    // P8.7: 跨模块#include放在.c文件，避免.h循环依赖
-    // 标准模块引用标准模块 → .c; 类模块引用标准模块 → .c
-    // (类模块引用其他类模块 → .h, 见上方)
+    // P8.7 + Fix 010r-12: 标准模块之间的#include放在.c文件，避免.h循环依赖
+    // 类模块引用标准模块 → .h (见上方); 标准模块引用标准模块 → .c
     {
         for (const auto& extMod : externalModules) {
             auto* extSym = symTab_.lookup(extMod);
             bool extIsClass = extSym && extSym->kind == SymbolKind::Class;
-            if (!extIsClass) {
-                // 标准模块头文件放.c（不论当前模块是标准模块还是类模块）
+            if (!extIsClass && !isClassModule_) {
                 c_.emitLine("#include \"" + extMod + ".h\"");
             }
         }
@@ -216,9 +267,11 @@ bool CCodeGen::generate(Module& module, const std::string& baseName,
                 auto& var = static_cast<VariableDecl&>(*decl);
                 std::string cType = mapTypeRef(var.asType.get());
                 if (var.isDynamicArray || !var.dimensions.empty()) {
-                    // 数组: 存为SAFEARRAY指针
+                    // 数组: 使用vb6_SafeArray1D*/vb6_SafeArrayND* (NOT SAFEARRAY*)
                     Vb6Type elemType = resolveArrayElemType(var.asType.get());
-                    h_.emitLine("    SAFEARRAY* " + cIdent(var.name) + "; /* " +
+                    int dimCount = (int)var.dimensions.size();
+                    std::string arrType = (dimCount > 1) ? "vb6_SafeArrayND*" : "vb6_SafeArray1D*";
+                    h_.emitLine("    " + arrType + " " + cIdent(var.name) + "; /* " +
                                 TypeSystem::typeToString(elemType) + " array */");
                 } else if (var.isNew) {
                     // Dim x As New ClassName → 指针字段
@@ -258,23 +311,7 @@ bool CCodeGen::generate(Module& module, const std::string& baseName,
     }
 
     // === 第一遍: 声明 (前向声明 → .h, 定义 → .c) ===
-
-    // 模块级声明: 枚举、类型、常量、变量、过程
-    // 按类别有序输出, 确保C编译器能看到前向声明
-
-    // 1. Enum定义 (必须最先, 因为常量可能引用枚举值)
-    for (auto& decl : module.declarations) {
-        if (decl->kind == ASTNodeKind::EnumDecl) {
-            visit(static_cast<EnumDecl&>(*decl));
-        }
-    }
-
-    // 2. Type定义
-    for (auto& decl : module.declarations) {
-        if (decl->kind == ASTNodeKind::TypeDecl) {
-            visit(static_cast<TypeDecl&>(*decl));
-        }
-    }
+    // (Enum和Type定义已在类结构体前生成, 见上方Fix 010)
 
     // 3. Const
     for (auto& decl : module.declarations) {
@@ -283,15 +320,15 @@ bool CCodeGen::generate(Module& module, const std::string& baseName,
         }
     }
 
-    // 4. 类模块不生成模块级变量(变量已在结构体中)
-    //    标准模块/窗体模块: 生成变量声明
-    if (!isClassModule_) {
-        for (auto& decl : module.declarations) {
-            if (decl->kind == ASTNodeKind::VariableDecl) {
-                visit(static_cast<VariableDecl&>(*decl));
-            }
+    // 4. 类模块变量: 只注册tracking set, 不生成声明(已在结构体中)
+    //    标准模块/窗体模块: 生成变量声明并注册tracking set
+    trackOnly_ = isClassModule_;
+    for (auto& decl : module.declarations) {
+        if (decl->kind == ASTNodeKind::VariableDecl) {
+            visit(static_cast<VariableDecl&>(*decl));
         }
     }
+    trackOnly_ = false;
 
     // P13.23: External COM WithEvents need vb6com.h for vb6_CreateEventSink/ComAdvise/ComUnadvise
     // (knownWithEventsVars_ is populated during VariableDecl visits above)
@@ -763,7 +800,7 @@ bool CCodeGen::generate(Module& module, const std::string& baseName,
 
     // P6.3: 如果使用了COM接口类型, 在头文件中插入typedef前向声明
     // vb6_ComIface_<Name> 是不透明结构体, 仅用作类型化指针
-    if (!usedComIfaceTypes_.empty() || !usedVb6IfaceTypes_.empty()) {
+    if (!usedComIfaceTypes_.empty() || !usedVb6IfaceTypes_.empty() || !usedClassTypes_.empty() || !usedUdtTypes_.empty()) {
         std::string typedefBlock;
         if (!usedComIfaceTypes_.empty()) {
             typedefBlock += "\n// P6.3: COM接口类型前向声明 (早期绑定)\n";
@@ -776,6 +813,23 @@ bool CCodeGen::generate(Module& module, const std::string& baseName,
             for (const auto& ifaceName : usedVb6IfaceTypes_) {
                 typedefBlock += "typedef struct vb6_vtbl_" + ifaceName + " vb6_vtbl_" + ifaceName + ";\n";
                 typedefBlock += "typedef struct vb6_iface_" + ifaceName + " vb6_iface_" + ifaceName + ";\n";
+            }
+        }
+        // Fix 010: VB6类类型前向声明
+        // C11允许typedef重定义, 所以无条件发出所有使用到的类类型前向声明
+        // 解决: (1) 当前模块类struct中使用UDT类型 (2) 循环#include导致的类型不可见
+        if (!usedClassTypes_.empty()) {
+            typedefBlock += "\n// VB6类类型前向声明\n";
+            for (const auto& clsName : usedClassTypes_) {
+                typedefBlock += "typedef struct vb6_cls_" + clsName + " vb6_cls_" + clsName + ";\n";
+            }
+        }
+        // Fix 010: VB6 UDT类型前向声明
+        // C11允许typedef重定义, 无条件发出 — 解决类struct中UDT类型先使用后定义的问题
+        if (!usedUdtTypes_.empty()) {
+            typedefBlock += "\n// VB6 UDT类型前向声明\n";
+            for (const auto& udtName : usedUdtTypes_) {
+                typedefBlock += "typedef struct vb6_type_" + udtName + " vb6_type_" + udtName + ";\n";
             }
         }
         // 在 #include "vb6rtl.h" 之后插入
@@ -899,16 +953,33 @@ std::string CCodeGen::mapTypeRef(ASTNode* typeRef) {
     switch (typeRef->kind) {
         case ASTNodeKind::SimpleTypeRef: {
             auto& simple = static_cast<SimpleTypeRef&>(*typeRef);
+            // Fix 010: VB6 As Any (Declare语句) → C void*
+            // Any在VB6中仅用于Declare语句的参数, 表示"任意类型指针"
+            if (simple.name == "Any" || simple.name == "any") {
+                return "void*";
+            }
+            // Fix 010: VBA.库前缀 (如 VBA.ErrObject, VBA.Collection) — 去除前缀
+            std::string typeName = simple.name;
+            if (typeName.size() > 4 && typeName.compare(0, 4, "VBA.") == 0) {
+                typeName = typeName.substr(4);
+            }
+            // Fix 010: VB6内置对象类型 (Collection, ErrObject等) → void* (对象指针)
+            static const std::unordered_set<std::string> vb6BuiltinObjTypes = {
+                "Collection", "Forms", "ErrObject", "App", "Screen", "Printer", "Clipboard"
+            };
+            if (vb6BuiltinObjTypes.count(typeName)) {
+                return "void*";
+            }
             // 尝试从类型系统解析
-            Vb6Type t = typeSys_.resolveTypeName(simple.name);
+            Vb6Type t = typeSys_.resolveTypeName(typeName);
             if (t != Vb6Type::Unknown) {
                 return mapType(t);
             }
             // 限定类型名 (如 Scripting.Dictionary): 用最后一部分查找符号
-            std::string lookupName = simple.name;
-            size_t dotPos = simple.name.find('.');
+            std::string lookupName = typeName;
+            size_t dotPos = typeName.find('.');
             if (dotPos != std::string::npos) {
-                std::string shortName = simple.name.substr(dotPos + 1);
+                std::string shortName = typeName.substr(dotPos + 1);
                 auto* dotSym = symTab_.lookupModule(shortName);
                 if (dotSym) lookupName = shortName;
             }
@@ -920,6 +991,8 @@ std::string CCodeGen::mapTypeRef(ASTNode* typeRef) {
                     usedVb6IfaceTypes_.insert(cIdent(clsSym->name));  // 收集用于前向声明
                     return "vb6_iface_" + cIdent(clsSym->name);
                 }
+                // Fix 010: 收集类类型名用于前向声明
+                usedClassTypes_.insert(cIdent(clsSym->name));
                 return "vb6_cls_" + cIdent(clsSym->name) + "*";
             }
             // P6.3: 检查是否是COM coclass/接口 → 映射为接口指针类型 (前期绑定)
@@ -937,14 +1010,61 @@ std::string CCodeGen::mapTypeRef(ASTNode* typeRef) {
             // 检查是否是用户定义类型 (UDT) → vb6_type_<Name>
             auto* udtSym = symTab_.lookup(lookupName);
             if (udtSym && udtSym->kind == SymbolKind::UserDefinedType) {
+                // Fix 010: 收集UDT类型名用于前向声明
+                usedUdtTypes_.insert(cIdent(simple.name));
                 return "vb6_type_" + cIdent(simple.name);
             }
             // 检查是否是枚举类型 → 基础类型int32_t (VB6枚举底层是Long)
             if (udtSym && udtSym->kind == SymbolKind::EnumType) {
                 return "int32_t";
             }
-            // 兜底: 可能是未知类型
-            return cIdent(lookupName);
+            // Fix 010b: VB6标准库与外部COM库的类型映射
+            // 以下类型不在项目符号表中, 但均为VB6/COM标准类型
+            // 注意: 能在符号表中找到的用户类型会已在上面被处理
+
+            // VB6语言类型别名
+            if (lookupName == "LongPtr" || lookupName == "Longptr") {
+                return "int32_t";  // VB6 LongPtr: 32位=Long, 64位=LongLong; C3目标为32位
+            }
+            // VB6内置枚举类型 (Vb前缀): VbCompareMethod, VbTriState, VbFileAttribute等
+            // VB6枚举底层是Long (int32_t)
+            if (lookupName.size() >= 2 && lookupName.compare(0, 2, "Vb") == 0) {
+                return "int32_t";
+            }
+            // COM类型别名 (OLE_前缀): OLE_COLOR, OLE_HANDLE等, 通常为DWORD
+            if (lookupName.size() >= 4 && lookupName.compare(0, 4, "OLE_") == 0) {
+                return "int32_t";
+            }
+            // ADODB等外部COM库枚举类型: 名称以Enum结尾
+            // 如 EventStatusEnum, ExecuteOptionEnum, CursorTypeEnum等
+            if (lookupName.size() >= 4 &&
+                lookupName.compare(lookupName.size() - 4, 4, "Enum") == 0) {
+                return "int32_t";
+            }
+            // ADODB等外部COM库对象类型 → void* (COM对象指针)
+            static const std::unordered_set<std::string> comObjTypes = {
+                "Connection", "Recordset", "Command", "Parameter",
+                "Field", "Fields", "Error", "Errors", "Property",
+                "Properties", "Stream"
+            };
+            if (comObjTypes.count(lookupName)) {
+                return "void*";
+            }
+            // Fix 010c: VB6标准枚举类型别名 (不带Vb前缀的常用枚举)
+            // 这些类型在VB6中等价于对应的Vb*枚举, 底层都是Long
+            static const std::unordered_set<std::string> vb6EnumAliases = {
+                "CompareMethod", "TriState", "FirstDayOfWeek", "FirstWeekOfYear",
+                "MsgBoxResult", "MsgBoxStyle", "FileAttribute", "DateFormat",
+                "Calendar", "DateTimeFormat", "CallType", "VariantType",
+                "VarType", "QueryDef", "EditModeEnum", "FieldAttributeEnum"
+            };
+            if (vb6EnumAliases.count(lookupName)) {
+                return "int32_t";
+            }
+            // 兜底: 未知类型 (如窗体模块名、外部COM类型别名等) → void*
+            // Fix 010c: 窗体模块(.frm)未注册为Class符号, 但VB6中可作为类型使用
+            // 任何不是内置类型/UDT/枚举/类/COM类型的名称都视为通用对象指针
+            return "void*";
         }
         case ASTNodeKind::ArrayTypeRef:
             return "vb6_SafeArray1D*";  // SAFEARRAY指针
@@ -952,6 +1072,138 @@ std::string CCodeGen::mapTypeRef(ASTNode* typeRef) {
             return "BSTR";
         default:
             return "vb6_VARIANT";
+    }
+}
+
+// Fix 010b: 常量折叠 — 将VB6 AST表达式求值为int64_t编译期常量
+// 用于enum成员值 (如 2^0 → 1, 2^1|2^2 → 6, &H10 → 16)
+bool CCodeGen::tryEvalConstInt(ASTNode* expr, int64_t& result) {
+    if (!expr) return false;
+
+    switch (expr->kind) {
+    case ASTNodeKind::LiteralExpr: {
+        auto* lit = static_cast<LiteralExpr*>(expr);
+        switch (lit->literalKind) {
+        case LiteralKind::Integer:
+            result = lit->intValue;
+            return true;
+        case LiteralKind::Long:
+            result = lit->longValue;
+            return true;
+        case LiteralKind::Boolean:
+            result = lit->boolValue ? 1 : 0;
+            return true;
+        case LiteralKind::Double:
+            result = (int64_t)lit->doubleValue;
+            return true;
+        case LiteralKind::Single:
+            result = (int64_t)lit->floatValue;
+            return true;
+        default:
+            return false;
+        }
+    }
+    case ASTNodeKind::UnaryExpr: {
+        auto* unary = static_cast<UnaryExpr*>(expr);
+        int64_t val;
+        if (!tryEvalConstInt(unary->operand.get(), val)) return false;
+        switch (unary->op) {
+        case UnaryOp::Negate:
+            result = -val;
+            return true;
+        case UnaryOp::Not:
+            result = ~val;
+            return true;
+        }
+        return false;
+    }
+    case ASTNodeKind::BinaryExpr: {
+        auto* bin = static_cast<BinaryExpr*>(expr);
+        int64_t l, r;
+        if (!tryEvalConstInt(bin->left.get(), l)) return false;
+        if (!tryEvalConstInt(bin->right.get(), r)) return false;
+        switch (bin->op) {
+        case BinaryOp::Add: result = l + r; return true;
+        case BinaryOp::Sub: result = l - r; return true;
+        case BinaryOp::Mul: result = l * r; return true;
+        case BinaryOp::Div:
+            if (r == 0) return false;
+            result = l / r; return true;
+        case BinaryOp::IntDiv:
+            if (r == 0) return false;
+            result = l / r; return true;
+        case BinaryOp::Mod:
+            if (r == 0) return false;
+            result = l % r; return true;
+        case BinaryOp::Pow: {
+            // 整数幂运算
+            if (r < 0) return false;
+            int64_t base = l, exp = r;
+            int64_t pw = 1;
+            while (exp > 0) {
+                if (exp & 1) pw *= base;
+                base *= base;
+                exp >>= 1;
+            }
+            result = pw;
+            return true;
+        }
+        case BinaryOp::Or:  result = l | r; return true;
+        case BinaryOp::And: result = l & r; return true;
+        case BinaryOp::Xor: result = l ^ r; return true;
+        case BinaryOp::Eqv: result = ~(l ^ r); return true;
+        case BinaryOp::Imp: result = (~l) | r; return true;
+        default:
+            return false;  // 比较、连接等不适用于enum常量
+        }
+    }
+    case ASTNodeKind::IndexOrCallExpr: {
+        // 处理 vb6_Pow(base, exp) 调用
+        auto* call = static_cast<IndexOrCallExpr*>(expr);
+        if (!call->callee) return false;
+        // 提取被调用者名称
+        std::string fnName;
+        if (auto* id = dynamic_cast<IdentifierExpr*>(call->callee.get())) {
+            fnName = id->name;
+        } else {
+            return false;
+        }
+        // 转小写比较
+        std::string fnLower = fnName;
+        for (auto& c : fnLower) c = (char)tolower(c);
+        if (fnLower == "pow" && call->positional.size() == 2) {
+            int64_t base, exp;
+            if (!tryEvalConstInt(call->positional[0].get(), base)) return false;
+            if (!tryEvalConstInt(call->positional[1].get(), exp)) return false;
+            if (exp < 0) return false;
+            int64_t pw = 1;
+            while (exp > 0) {
+                if (exp & 1) pw *= base;
+                base *= base;
+                exp >>= 1;
+            }
+            result = pw;
+            return true;
+        }
+        return false;
+    }
+    case ASTNodeKind::IdentifierExpr: {
+        // Fix 010c: 查找符号表中的常量 (跨模块Public Const)
+        auto* id = static_cast<IdentifierExpr*>(expr);
+        auto* sym = symTab_.lookup(id->name);
+        if (sym && sym->kind == SymbolKind::Constant && sym->hasConstValue) {
+            result = sym->constIntValue;
+            return true;
+        }
+        // 也检查枚举成员
+        if (sym && sym->kind == SymbolKind::EnumMember) {
+            result = sym->constIntValue;
+            return true;
+        }
+        return false;
+    }
+    default:
+        return false;
     }
 }
 
@@ -977,8 +1229,11 @@ std::string CCodeGen::defaultValue(Vb6Type type) const {
         case Vb6Type::Empty:
         case Vb6Type::Null:
             return "vb6_VariantEmpty()";
+        case Vb6Type::UserDefinedType:
+        case Vb6Type::Unknown:
+            return "0";  // Fix 010q: Enum types resolve to Unknown, default to 0
         default:
-            return "vb6_VariantEmpty()";
+            return "0";  // Fix 010q: safe default instead of vb6_VariantEmpty()
     }
 }
 
@@ -1007,6 +1262,14 @@ std::string CCodeGen::cIdent(const std::string& vb6Name) const {
         name = name.substr(1, name.size() - 2);
     }
 
+    // Fix 010c: 替换VB6标识符中的特殊字符 (如版本号 ucsOsvWin8.1 → ucsOsvWin8_1)
+    // C标识符只允许字母、数字、下划线
+    for (auto& ch : name) {
+        if (!std::isalnum(static_cast<unsigned char>(ch)) && ch != '_') {
+            ch = '_';
+        }
+    }
+
     // 如果是C关键字, 添加vb6_前缀
     std::string lower = name;
     std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
@@ -1023,10 +1286,12 @@ std::string CCodeGen::cProcName(const std::string& procName, AccessLevel access,
     if (!sourceModule.empty()) {
         return "vb6_" + cIdent(sourceModule) + "_" + cIdent(procName);
     }
-    // 多模块项目本模块 Public 函数: vb6_<ModuleName>_<ProcName>
-    // （Private 函数只在本模块内可见，不需要模块前缀）
-    // 单模块项目: vb6_<ProcName> (保持向后兼容)
-    if (isMultiModule_ && access == AccessLevel::Public && !moduleName_.empty()) {
+    // 多模块项目:
+    // - 所有函数都包含模块名, 避免与RTL函数名冲突
+    //   (如用户定义 Private Sub ErrRaise 会生成 vb6_ErrRaise, 与RTL的 vb6_ErrRaise 冲突)
+    // - Private标准模块函数也包含模块名 (虽然为static, 但其名可能被本模块内
+    //   Err.Raise等硬编码RTL调用遮蔽, 导致参数不匹配)
+    if (isMultiModule_ && !moduleName_.empty()) {
         return "vb6_" + cIdent(moduleName_) + "_" + cIdent(procName);
     }
     return "vb6_" + cIdent(procName);

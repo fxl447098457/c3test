@@ -186,8 +186,11 @@ void CCodeGen::emitFormFramework(const FrmFormDesc& frmDesc, Module& module) {
     h_.emitLine("// P7: Win32 Form - " + formName);
     h_.emitBlank();
 
+    // Fix 010c: 窗体/控件句柄变量移到.c文件, 避免跨窗体.h文件中static变量重定义(C2374)
+    // 不同窗体可能有同名控件(如Text1), static变量在.h中被多次包含会导致重定义
+
     // 窗体句柄变量
-    h_.emitLine("static void* vb6_hwnd_" + cIdent(formName) + " = NULL;");
+    c_.emitLine("static void* vb6_hwnd_" + cIdent(formName) + " = NULL;");
 
     // 控件句柄变量 (P7.6: 数组控件使用vb6_CtrlArr, 非数组使用void*)
     {
@@ -199,7 +202,7 @@ void CCodeGen::emitFormFramework(const FrmFormDesc& frmDesc, Module& module) {
             if (!FrmParser::controlTypeToWin32Class(ctrl.controlType)) {
                 // P7.9: WebBrowser needs HWND declaration though no Win32 class
                 if (ctrl.controlType == FrmControlType::WebBrowser) {
-                    h_.emitLine("static void* vb6_hwnd_" + cIdent(ctrl.controlName) + " = NULL;");
+                    c_.emitLine("static void* vb6_hwnd_" + cIdent(ctrl.controlName) + " = NULL;");
                     emitted.insert(ctrlNameLower);
                 }
                 // ActiveX控件 (ImageList等): 生成IDispatch*变量, 运行时CoCreateInstance
@@ -207,21 +210,21 @@ void CCodeGen::emitFormFramework(const FrmFormDesc& frmDesc, Module& module) {
                     ctrl.controlType == FrmControlType::Toolbar ||
                     ctrl.controlType == FrmControlType::StatusBar ||
                     ctrl.controlType == FrmControlType::CommonDialog) {
-                    h_.emitLine("static void* vb6_com_" + cIdent(ctrl.controlName) + " = NULL;  /* IDispatch* */");
+                    c_.emitLine("static void* vb6_com_" + cIdent(ctrl.controlName) + " = NULL;  /* IDispatch* */");
                     emitted.insert(ctrlNameLower);
                 }
                 continue;
             }
             if (knownControlArrays_.count(ctrlNameLower)) {
-                h_.emitLine("static vb6_CtrlArr vb6_arr_" + cIdent(ctrl.controlName) + ";");
+                c_.emitLine("static vb6_CtrlArr vb6_arr_" + cIdent(ctrl.controlName) + ";");
             } else {
-                h_.emitLine("static void* vb6_hwnd_" + cIdent(ctrl.controlName) + " = NULL;");
+                c_.emitLine("static void* vb6_hwnd_" + cIdent(ctrl.controlName) + " = NULL;");
             }
             emitted.insert(ctrlNameLower);
         }
     }
 
-    h_.emitBlank();
+    c_.emitBlank();
 
     // WndProc前向声明
     h_.emitLine("LRESULT CALLBACK " + wndProc + "(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);");

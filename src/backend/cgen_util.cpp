@@ -160,8 +160,10 @@ std::string CCodeGen::generateDllEntry(const std::string& progId, const std::vec
     entry.emitBlank();
 
     // 包含必要头文件
-    // 注意: 不include类模块的.h文件, 因为vb6rtl.h中的VARIANT定义
-    // 与Windows <oleauto.h>中的VARIANT冲突。改用前向声明。
+    // Fix 010b: 添加vb6rtl.h以提供vb6_VARIANT等类型定义
+    // (vb6comserver.h只include windows.h/oleauto.h, 不含vb6_VARIANT)
+    // vb6rtl.h使用vb6_前缀避免与Windows VARIANT冲突, 可安全与oleauto.h共存
+    entry.emitLine("#include \"vb6rtl.h\"");
     entry.emitLine("#include \"vb6comserver.h\"");
     entry.emitBlank();
 

@@ -354,6 +354,11 @@ void SemanticAnalyzer::registerVariable(VariableDecl& decl) {
             sym->withEventsSourceClass = static_cast<SimpleTypeRef*>(decl.asType.get())->name;
         }
     }
+    // Fix 010r-11: 记录变量的声明类型名 (用于跨模块解析)
+    // 当变量声明为 As ClassName 时，存储类名以便 consuming 模块的 cgen 能正确识别类实例变量
+    if (decl.asType && decl.asType->kind == ASTNodeKind::SimpleTypeRef) {
+        sym->variableTypeName = static_cast<SimpleTypeRef*>(decl.asType.get())->name;
+    }
     symTab_.define(std::move(sym));
 }
 

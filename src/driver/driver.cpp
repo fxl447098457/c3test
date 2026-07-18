@@ -1051,15 +1051,18 @@ bool Driver::runCrossModuleResolution() {
         exportedSymbols[i] = analyzers_[i]->symbolTable().getPublicSymbols();
     }
 
-    // 构建 "小写符号名 -> (模块索引, Symbol*)" 的全局查找表
-    // VB6不区分大小写，所以用小写名做key
+    // 构建 "存储键 -> (模块索引, Symbol*)" 的全局查找表
+    // Fix 010r-12: 使用storageKey()而非lowerName做去重键
+    // 原因: Property Get/Let/Set同名但有不同storageKey ($pg/$pl/$ps)
+    // 用lowerName去重会导致只有第一个变体(通常Get)被保留, Let/Set丢失
+    // 消费模块的P6.7查找 lookupModuleByKind(name, PropertyLet) 会失败
     std::unordered_map<std::string, std::pair<size_t, const Symbol*>> globalPublicSyms;
     for (size_t i = 0; i < exportedSymbols.size(); i++) {
         for (const Symbol* sym : exportedSymbols[i]) {
-            std::string lowerName = Symbol::toLower(sym->name);
-            // 如果多个模块导出同名Public符号，第一个遇到的优先（VB6行为：先声明的优先）
-            if (globalPublicSyms.find(lowerName) == globalPublicSyms.end()) {
-                globalPublicSyms[lowerName] = {i, sym};
+            std::string sKey = sym->storageKey();
+            // 同一个storageKey只保留第一个 (VB6行为: 先声明的优先)
+            if (globalPublicSyms.find(sKey) == globalPublicSyms.end()) {
+                globalPublicSyms[sKey] = {i, sym};
             }
         }
     }
@@ -1080,13 +1083,21 @@ bool Driver::runCrossModuleResolution() {
     for (size_t i = 0; i < analyzers_.size(); i++) {
         SymbolTable& symTab = analyzers_[i]->symbolTable();
 
-        for (const auto& [lowerName, entry] : globalPublicSyms) {
+        for (const auto& [sKey, entry] : globalPublicSyms) {
             auto [srcIdx, srcSym] = entry;
             // 跳过本模块导出的符号
             if (srcIdx == i) continue;
 
             // 检查本模块是否已有此符号的本地定义
-            Symbol* localSym = symTab.lookupModule(lowerName);
+            // Fix 010r-12: Property变体需按kind分别检查 (Get/Let/Set各自独立)
+            Symbol* localSym = nullptr;
+            if (srcSym->kind == SymbolKind::PropertyGet ||
+                srcSym->kind == SymbolKind::PropertyLet ||
+                srcSym->kind == SymbolKind::PropertySet) {
+                localSym = symTab.lookupModuleByKind(srcSym->name, srcSym->kind);
+            } else {
+                localSym = symTab.lookupModule(srcSym->name);
+            }
             if (localSym) continue;  // 已有本地定义，不需要外部符号
 
             // 注入外部符号
@@ -1107,6 +1118,11 @@ bool Driver::runCrossModuleResolution() {
                 extSym->interfaceMethodNames = srcSym->interfaceMethodNames;  // P6.4
                 extSym->eventNames = srcSym->eventNames;  // P6.5
                 extSym->comClsidStr = srcSym->comClsidStr;  // P6.8: CLSID
+            }
+            // Fix 010r-11: 复制变量类型名 (用于跨模块类实例变量识别)
+            if (srcSym->kind == SymbolKind::Variable) {
+                extSym->variableTypeName = srcSym->variableTypeName;
+                extSym->dimCount = srcSym->dimCount;
             }
 
             symTab.defineExternal(std::move(extSym));

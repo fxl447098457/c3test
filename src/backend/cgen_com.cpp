@@ -374,9 +374,10 @@ void CCodeGen::emitEventSink(Module& module) {
     if (events.empty()) return;
 
     // 1. 生成事件回调函数指针typedef
+    // Fix 010: typedef名称包含类名前缀, 避免不同类同名事件(但不同签名)的typedef冲突 (C2370/C2040/C2371)
     h_.emitLine("// P6.5: Event callback function pointer types");
     for (auto& evt : events) {
-        std::string cbName = "vb6_evt_" + evt.cName + "_cb";
+        std::string cbName = "vb6_evt_" + cIdent(baseName_) + "_" + evt.cName + "_cb";
         std::string sig = "void (*" + cbName + ")(void* handler";
         for (auto& p : evt.params) {
             sig += ", " + mapType(p.type) + " " + cIdent(p.name);
@@ -391,7 +392,7 @@ void CCodeGen::emitEventSink(Module& module) {
     h_.emitLine("typedef struct " + sinkName + " {");
     h_.emitLine("    void* handler;  /* event handler object (consumer) */");
     for (auto& evt : events) {
-        std::string cbName = "vb6_evt_" + evt.cName + "_cb";
+        std::string cbName = "vb6_evt_" + cIdent(baseName_) + "_" + evt.cName + "_cb";
         h_.emitLine("    " + cbName + " on" + evt.cName + ";  /* Event " + evt.name + " */");
     }
     h_.emitLine("} " + sinkName + ";");

@@ -232,7 +232,8 @@ private:
         FormControl,    // 窗体控件HWND: 使用 getControlPropReadFn/WriteFn
         WithEventsCtrl, // WithEvents控件变量HWND: 使用WE属性路径
         COMObject,      // COM IDispatch*: 使用 vb6_ComGetProp/ComSetProp
-        ClassInstance   // 类实例指针: 使用类方法调用
+        ClassInstance,  // 类实例指针: 使用类方法调用
+        BuiltinObject   // 内置全局对象(Err/App等): 使用函数调用
     };
     struct WithObjInfo {
         WithObjKind kind = WithObjKind::Unknown;
@@ -279,8 +280,20 @@ private:
     std::unordered_set<std::string> classBstrMembers_;
     std::unordered_set<std::string> classLongMembers_;
     std::unordered_set<std::string> classDoubleMembers_;
-    // 已知类实例变量名集合 (小写) - 用于方法调用翻译 c.Method → vb6_Method(c)
-    std::unordered_set<std::string> knownClassVars_;
+    // Fix 010r: ALL class member variable names (lowercase, both with/without m_ prefix)
+    // Used for me-> prefix detection in Erase/ReDim/Assignment statements
+    std::unordered_set<std::string> classMemberVars_;
+    // Fix 010n: 类模块UDT成员变量 (小写var名 → UDT类型C标识符)
+    // 用于在过程开始时恢复 knownUdtVars_ (因clear()会丢失类成员UDT变量)
+    std::unordered_map<std::string, std::string> classUdtMembers_;
+    // 已知类实例变量名 → 类名映射 (小写var名 → 类名, 如 "me" → "cDialog")
+    // 用于方法调用翻译 c.Method → vb6_cls_ClassName_Method(c)
+    // Fix 010r-10: 从 unordered_set 改为 unordered_map 以支持类名查找
+    std::unordered_map<std::string, std::string> knownClassVars_;
+
+    // Fix 010o: 过程局部变量名集合 (小写) — Dim声明的局部变量 + For/ForEach循环变量
+    // 用于在IdentifierExpr中避免对局部变量错误添加 me-> 前缀
+    std::unordered_set<std::string> knownLocalVars_;
 
     // UDT变量名集合 (小写var名 → UDT类型C标识符, 如 "p" → "vb6_type_Point")
     // 用于成员访问时区分"p.X"(结构体字段) vs "Module1.X"(模块变量)
@@ -316,6 +329,15 @@ private:
     // 用于在.h文件中生成typedef前向声明, 使 vb6_iface_<Name> 类型可用
     std::unordered_set<std::string> usedVb6IfaceTypes_;
 
+    // Fix 010: 已使用的VB6类类型名 (如 "cHttpServerContext")
+    // 用于在.h文件中生成typedef前向声明, 使 vb6_cls_<Name>* 类型可用
+    // 解决循环#include导致的类型未定义问题 (C2081错误)
+    std::unordered_set<std::string> usedClassTypes_;
+
+    // Fix 010: 已使用的VB6 UDT类型名 (如 "TypeLang")
+    // 用于在.h文件中生成typedef前向声明, 使 vb6_type_<Name> 类型可用
+    std::unordered_set<std::string> usedUdtTypes_;
+
     // COM后期绑定中间状态 (P6.2)
     // MemberAccessExpr为COM对象设置此字段, IndexOrCallExpr/AssignmentStmt/SetStmt读取后清除
     // 当此字段非空时, lastExpr_中的"值"是对象表达式, comMemberName_是成员名
@@ -343,6 +365,9 @@ private:
     // 类模块标志
     bool isClassModule_ = false;
     bool isFormModule_ = false;
+
+    // Fix 010: 类模块变量注册模式 — 只填充tracking set, 不生成变量声明(已在结构体中)
+    bool trackOnly_ = false;
     std::string formName_;  // M22-Issue6: 当前窗体模块名 (用于Form Print)
 
     // P6.4: Implements 接口引用变量 (小写变量名 → 接口名)
@@ -415,6 +440,10 @@ private:
 
     // TypeRefPtr → C类型字符串 (非const: P6.3收集COM接口类型名)
     std::string mapTypeRef(ASTNode* typeRef);
+
+    // Fix 010b: 尝试将AST表达式常量折叠为int64_t (用于enum成员值)
+    // 成功返回true并设置result, 失败返回false
+    bool tryEvalConstInt(ASTNode* expr, int64_t& result);
 
     // VB6默认值 → C表达式
     std::string defaultValue(Vb6Type type) const;

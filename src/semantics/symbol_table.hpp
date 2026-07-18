@@ -103,6 +103,10 @@ struct Symbol {
     // sourceModule 记录符号定义所在的模块基名（如 "MathUtils"）
     // 仅当 isExternal=true 时有效
     std::string sourceModule;
+    // Fix 010r-11: 变量的声明类型名 (如 "cToolsStr", "ADODB.Connection")
+    // 仅对 SymbolKind::Variable 有效 — 当变量声明为 As ClassName 时存储类名
+    // 用于跨模块解析时传递类类型信息到 consuming 模块的 cgen
+    std::string variableTypeName;
 
     // --- 类相关 (仅SymbolKind::Class) ---
     VBInstancing instancing = VBInstancing::Private;  // Instancing属性
