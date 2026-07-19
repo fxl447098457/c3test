@@ -2627,6 +2627,40 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
             && calleeParams[i].type == Vb6Type::Variant) {
             argVal = "vb6_VariantFromValue(" + argVal + ")";
         }
+        // Fix 029: 反向强制 — ByVal 具体类型参数 + 实参确定为 Variant: 自动调用提取函数.
+        // 与 Fix 024 P2 互补: P2 处理 V(callee)=Variant,V(arg)=scalar; 此处处理
+        // V(callee)=concrete,V(arg)=Variant. 覆盖 C2440 子类 to_int32/to_BSTR/to_SafeArray.
+        // 严格判断: 用 isDefinitelyVariantExpr 避免 inferExprType 默认回退到 Variant
+        // 造成对内置函数 (LenB 等) / UDT 字段访问 (uAddr.sin_addr) 的错误包装.
+        if (!isByRef && i < calleeParams.size() && calleeParams[i].isByVal
+            && calleeParams[i].type != Vb6Type::Variant) {
+            // 处理 Array 标志位 (例如 Variant() 参数对应 Vb6Type::Variant|Array)
+            bool paramIsArray = (static_cast<uint16_t>(calleeParams[i].type)
+                                  & static_cast<uint16_t>(Vb6Type::Array)) != 0;
+            Vb6Type paramBase = static_cast<Vb6Type>(
+                static_cast<uint16_t>(calleeParams[i].type)
+                & ~static_cast<uint16_t>(Vb6Type::Array));
+            bool argIsVariantArr = false;
+            bool argIsVariant = isDefinitelyVariantExpr(*node.positional[i], &argIsVariantArr);
+            if (argIsVariant || argIsVariantArr) {
+                if (paramIsArray && (paramBase == Vb6Type::Variant || paramBase == Vb6Type::Byte
+                    || paramBase == Vb6Type::String || paramBase == Vb6Type::Long)) {
+                    // 数组参数: 从 Variant 提取 SafeArray1D*
+                    argVal = "vb6_VariantToSafeArray1D(" + argVal + ")";
+                } else if (paramBase == Vb6Type::Long || paramBase == Vb6Type::Integer
+                           || paramBase == Vb6Type::Byte || paramBase == Vb6Type::Boolean) {
+                    argVal = "vb6_VariantToLong(" + argVal + ")";
+                } else if (paramBase == Vb6Type::Double || paramBase == Vb6Type::Single
+                           || paramBase == Vb6Type::Currency) {
+                    argVal = "vb6_VariantToDouble(" + argVal + ")";
+                } else if (paramBase == Vb6Type::String) {
+                    argVal = "vb6_VariantToString(" + argVal + ")";
+                } else if (paramBase == Vb6Type::Object) {
+                    // 右值兼容: 避免对函数返回值取址
+                    argVal = "vb6_VariantToObjectVal(" + argVal + ")";
+                }
+            }
+        }
         args.push_back(std::move(argVal));
     }
 

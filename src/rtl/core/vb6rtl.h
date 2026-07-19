@@ -309,6 +309,13 @@ void vb6_VariantArraySet(vb6_VARIANT* v, int32_t index, vb6_VARIANT val);
 int32_t vb6_VariantToLong(vb6_VARIANT v);
 double vb6_VariantToDouble(vb6_VARIANT v);
 BSTR vb6_VariantToString(vb6_VARIANT v);
+// Fix 029: Variant → SafeArray extraction (variant holding array).
+// 用于调用点反向强制: callee 期望 vb6_SafeArray1D* 但实参是 vb6_VARIANT.
+struct vb6_SafeArray1D* vb6_VariantToSafeArray1D(vb6_VARIANT v);
+// Fix 029: Variant → void* (按值传入, 避免调用点包装时的左值问题).
+// 与 vb6_VariantToObject(vb6_VARIANT*) 互补; 后者要求实参是左值 (取地址),
+// 但 IndexOrCallExpr 调用点包装的实参可能是函数返回的右值, 无法取址.
+void* vb6_VariantToObjectVal(vb6_VARIANT v);
 
 // P8.4: Variant清理(释放内含BSTR等资源)
 void vb6_VariantClear(vb6_VARIANT* v);

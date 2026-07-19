@@ -1457,6 +1457,24 @@ BSTR vb6_VariantToString(vb6_VARIANT v) {
     return vb6_CStr(v);
 }
 
+// Fix 029: 从 Variant 中提取 SafeArray1D* (当 Variant 持有数组时).
+// 用于调用点反向强制: callee 期望 vb6_SafeArray1D* 但实参是 vb6_VARIANT.
+struct vb6_SafeArray1D* vb6_VariantToSafeArray1D(vb6_VARIANT v) {
+    if ((v.vt & vb6_vtArray) && v.parray) {
+        return v.parray;
+    }
+    /* Variant 不持有数组时返回 NULL (与 VB6 行为一致; 调用方需 NULL 检查) */
+    return NULL;
+}
+
+// Fix 029: vb6_VariantToObject 的右值兼容版本.
+// vb6_VariantToObject 接受 vb6_VARIANT* (要求实参左值), 而调用点包装的实参
+// 经常是函数返回值 (vb6_VariantArrayGet(...) 等) 无法取址. 这里提供按值版本.
+void* vb6_VariantToObjectVal(vb6_VARIANT v) {
+    if (v.vt == vb6_vtDispatch) return v.pdispVal;
+    return NULL;
+}
+
 // P8.4: Variant清理 - 释放内含BSTR等资源
 void vb6_VariantClear(vb6_VARIANT* v) {
     if (!v) return;

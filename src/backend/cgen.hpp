@@ -570,6 +570,12 @@ private:
     // 推断表达式的Vb6Type（简化版，用于Select Case等需要类型判断的场景）
     Vb6Type inferExprType(Expr& expr) const;
 
+    // Fix 029: 严格 Variant 推断 — 仅当表达式"明确"为 Variant/Variant 数组时返回 true.
+    // 与 inferExprType 不同: inferExprType 对内置函数/Udt 字段访问等无法识别的情况
+    // 会回退到 Variant (默认值), 此处不认为那些是 Variant, 避免误用 vb6_VariantToXxx 包装.
+    // isArrOut: 若不为 nullptr, 用于返回是否为 Variant() 数组类型.
+    bool isDefinitelyVariantExpr(Expr& expr, bool* isArrOut = nullptr) const;
+
     // ---- AST辅助 ----
     // 检测语句列表中是否包含GoSubStmt
     bool hasGoSubInStmts(StmtList& stmts) const;

@@ -765,6 +765,92 @@ Vb6Type CCodeGen::inferExprType(Expr& expr) const {
     return Vb6Type::Variant;
 }
 
+// Fix 029: 严格 Variant 推断. 仅当表达式明确为 Variant 时返回 true.
+// 与 inferExprType 的差异: 内置函数 (sym==null) 与 UDT 字段访问 (lookupModule 失败) 等
+// 通过 fallback 返回 Variant 的情形, 此处视为非 Variant, 避免对 int/BSTR 等实参误包装.
+bool CCodeGen::isDefinitelyVariantExpr(Expr& expr, bool* isArrOut) const {
+    if (isArrOut) *isArrOut = false;
+    uint16_t variantArrRaw = static_cast<uint16_t>(Vb6Type::Variant)
+                           | static_cast<uint16_t>(Vb6Type::Array);
+
+    // 多态内置函数 denylist: symTab 注册为 Variant, 但 codegen 按上下文
+    // 发出类型化版本 (vb6_IIfBSTR/Long/Double, Choose 嵌套三元, Switch 嵌套三元),
+    // 实际 C 返回类型不是 vb6_VARIANT. 视为非 Variant 以避免错误包装.
+    auto isPolymorphicBuiltin = [](const std::string& name) -> bool {
+        std::string lower = name;
+        std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+        return lower == "iif" || lower == "choose" || lower == "switch";
+    };
+
+    auto checkSym = [&](Symbol* sym) -> bool {
+        if (!sym) return false;
+        if (sym->type == Vb6Type::Variant) return true;
+        if (static_cast<uint16_t>(sym->type) == variantArrRaw) {
+            if (isArrOut) *isArrOut = true;
+            return true;
+        }
+        return false;
+    };
+
+    switch (expr.kind) {
+        case ASTNodeKind::IdentifierExpr: {
+            auto& id = static_cast<IdentifierExpr&>(expr);
+            std::string lower = id.name;
+            std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+            // 已知 Variant 局部变量集合
+            if (knownVariantVars_.count(lower)) {
+                // 无法区分 Variant 与 Variant(), 视作普通 Variant
+                return true;
+            }
+            // 符号表查询
+            auto* sym = symTab_.lookup(id.name);
+            if (!sym) sym = symTab_.lookupModule(id.name);
+            return checkSym(sym);
+        }
+        case ASTNodeKind::IndexOrCallExpr: {
+            auto& call = static_cast<IndexOrCallExpr&>(expr);
+            if (call.callee && call.callee->kind == ASTNodeKind::IdentifierExpr) {
+                auto& cid = static_cast<IdentifierExpr&>(*call.callee);
+                // 多态内置函数: 实际返回类型与 symTab 注册不同, 不视为 Variant
+                if (isPolymorphicBuiltin(cid.name)) return false;
+                auto* sym = symTab_.lookup(cid.name);
+                if (!sym) sym = symTab_.lookupModule(cid.name);
+                // 关键差异: sym==null (内置函数) 视为非 Variant
+                return checkSym(sym);
+            }
+            // 类方法调用 a.Method(): 递归推断 callee 类型
+            if (call.callee && call.callee->kind == ASTNodeKind::MemberAccessExpr) {
+                bool arr = false;
+                bool v = isDefinitelyVariantExpr(*call.callee, &arr);
+                if (v && isArrOut) *isArrOut = arr;
+                return v;
+            }
+            return false;
+        }
+        case ASTNodeKind::MemberAccessExpr: {
+            auto& ma = static_cast<MemberAccessExpr&>(expr);
+            // Err 对象特殊处理 (与 inferExprType 一致)
+            if (ma.object && ma.object->kind == ASTNodeKind::IdentifierExpr) {
+                auto& objId = static_cast<IdentifierExpr&>(*ma.object);
+                std::string objLower = objId.name;
+                std::transform(objLower.begin(), objLower.end(), objLower.begin(), ::tolower);
+                if (objLower == "err") {
+                    // Err.* 的具体类型见 inferExprType, 均为具体类型 (Long/String), 非 Variant
+                    return false;
+                }
+            }
+            // 符号表查找成员 (Property/Function)
+            auto* memSym = symTab_.lookupModule(ma.memberName);
+            // 关键差异: memSym==null (UDT 字段访问或外部类成员) 视为非 Variant
+            return checkSym(memSym);
+        }
+        default:
+            // 其他表达式 (BinaryExpr/UnaryExpr/LiteralExpr 等) 不会明确返回 Variant,
+            // 除非其子表达式明确为 Variant. 此处不递归, 保持严格性.
+            return false;
+    }
+}
+
 // ============================================================
 // AST辅助: 检测语句列表中是否包含GoSubStmt
 // ============================================================

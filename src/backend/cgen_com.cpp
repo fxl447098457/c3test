@@ -242,13 +242,42 @@ void CCodeGen::visit(RaiseEventStmt& node) {
     std::string evtId = cIdent(node.eventName);
     std::string callbackName = "on" + evtId;  // 事件接收器中的回调字段名
 
+    // Fix 029: 查找当前模块的 EventDecl 以获取事件参数类型.
+    // 必须 按 Variant 参数声明对实参做包装: 否则当事件参数声明 "As Variant"
+    // (或无类型默认 Variant) 时, 直接回调 typedef 期望 vb6_VARIANT, 而实参
+    // 是 int32_t/BSTR 等标量, 触发 C2440 "scalar → vb6_VARIANT" 错误.
+    const EventDecl* evtDecl = nullptr;
+    if (currentModule_) {
+        for (auto& decl : currentModule_->declarations) {
+            if (!decl) continue;
+            if (decl->kind != ASTNodeKind::EventDecl) continue;
+            auto& evt = static_cast<EventDecl&>(*decl);
+            if (evt.name == node.eventName) { evtDecl = &evt; break; }
+        }
+    }
+
     c_.emitLine("if (me->events && me->events->" + callbackName + ") {");
     c_.indent();
     // 生成回调调用
     std::string call = "me->events->" + callbackName + "(me->events->handler";
     for (size_t i = 0; i < node.args.size(); i++) {
         emitExpr(*node.args[i]);
-        call += ", " + lastExpr_;
+        std::string argVal = lastExpr_;
+        // Fix 029: Variant 形参 → 用 vb6_VariantFromValue 包装标量实参.
+        // 其它具体类型 (Long/String/...)形参期望已由 emitExpr 生成匹配类型,
+        // 不做额外包装以避免破坏现有正确调用.
+        if (evtDecl && i < evtDecl->params.size()) {
+            auto& param = evtDecl->params[i];
+            Vb6Type paramType = (param->asType && param->asType->kind == ASTNodeKind::SimpleTypeRef)
+                ? typeSys_.resolveTypeName(static_cast<SimpleTypeRef*>(param->asType.get())->name)
+                : Vb6Type::Variant;
+            if (paramType == Vb6Type::Unknown || paramType == Vb6Type::Empty)
+                paramType = Vb6Type::Variant;
+            if (paramType == Vb6Type::Variant) {
+                argVal = "vb6_VariantFromValue(" + argVal + ")";
+            }
+        }
+        call += ", " + argVal;
     }
     call += ");";
     c_.emitLine(call);
