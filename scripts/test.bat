@@ -9,9 +9,9 @@ REM    test syntax   = 仅语法测试
 REM    test verbose  = 全部测试(详细模式)
 REM ============================================================
 
-cd /d D:\vb6pro
+cd /d C:\Users\vi\Desktop\c3.vb6.pro
 
 REM 设置VB6 RTL目录
-set VB6RTL_DIR=D:\vb6pro\src\rtl\core
+set VB6RTL_DIR=C:\Users\vi\Desktop\c3.vb6.pro\src\rtl\core
 
 powershell -ExecutionPolicy Bypass -File tests\run_tests.ps1 -Category %1 -Verbose:%2

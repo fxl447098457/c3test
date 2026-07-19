@@ -186,8 +186,11 @@ void CCodeGen::emitFormFramework(const FrmFormDesc& frmDesc, Module& module) {
     h_.emitLine("// P7: Win32 Form - " + formName);
     h_.emitBlank();
 
+    // Fix 010c: 窗体/控件句柄变量移到.c文件, 避免跨窗体.h文件中static变量重定义(C2374)
+    // 不同窗体可能有同名控件(如Text1), static变量在.h中被多次包含会导致重定义
+
     // 窗体句柄变量
-    h_.emitLine("static void* vb6_hwnd_" + cIdent(formName) + " = NULL;");
+    c_.emitLine("static void* vb6_hwnd_" + cIdent(formName) + " = NULL;");
 
     // 控件句柄变量 (P7.6: 数组控件使用vb6_CtrlArr, 非数组使用void*)
     {
@@ -199,7 +202,7 @@ void CCodeGen::emitFormFramework(const FrmFormDesc& frmDesc, Module& module) {
             if (!FrmParser::controlTypeToWin32Class(ctrl.controlType)) {
                 // P7.9: WebBrowser needs HWND declaration though no Win32 class
                 if (ctrl.controlType == FrmControlType::WebBrowser) {
-                    h_.emitLine("static void* vb6_hwnd_" + cIdent(ctrl.controlName) + " = NULL;");
+                    c_.emitLine("static void* vb6_hwnd_" + cIdent(ctrl.controlName) + " = NULL;");
                     emitted.insert(ctrlNameLower);
                 }
                 // ActiveX控件 (ImageList等): 生成IDispatch*变量, 运行时CoCreateInstance
@@ -207,21 +210,21 @@ void CCodeGen::emitFormFramework(const FrmFormDesc& frmDesc, Module& module) {
                     ctrl.controlType == FrmControlType::Toolbar ||
                     ctrl.controlType == FrmControlType::StatusBar ||
                     ctrl.controlType == FrmControlType::CommonDialog) {
-                    h_.emitLine("static void* vb6_com_" + cIdent(ctrl.controlName) + " = NULL;  /* IDispatch* */");
+                    c_.emitLine("static void* vb6_com_" + cIdent(ctrl.controlName) + " = NULL;  /* IDispatch* */");
                     emitted.insert(ctrlNameLower);
                 }
                 continue;
             }
             if (knownControlArrays_.count(ctrlNameLower)) {
-                h_.emitLine("static vb6_CtrlArr vb6_arr_" + cIdent(ctrl.controlName) + ";");
+                c_.emitLine("static vb6_CtrlArr vb6_arr_" + cIdent(ctrl.controlName) + ";");
             } else {
-                h_.emitLine("static void* vb6_hwnd_" + cIdent(ctrl.controlName) + " = NULL;");
+                c_.emitLine("static void* vb6_hwnd_" + cIdent(ctrl.controlName) + " = NULL;");
             }
             emitted.insert(ctrlNameLower);
         }
     }
 
-    h_.emitBlank();
+    c_.emitBlank();
 
     // WndProc前向声明
     h_.emitLine("LRESULT CALLBACK " + wndProc + "(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);");
@@ -2103,18 +2106,29 @@ std::string CCodeGen::escapeWideCString(const std::string& s) {
         } else if (ch < 0x80) {
             result += (char)ch; j++;
         } else {
+            // Fix 021: UTF-8多字节解码 Unicode 码点 (与 cgen_expr.cpp 同样修复)
+            // (a) 4-byte UTF-8 lead 掩码错 (0xF8→0xF0)
+            // (b) \x%04X -> \u%04X: \x 会贪婪吃掉后续十六进制字符触发 MSVC C7744
             uint32_t cp = 0;
             int bytes = 0;
             if ((ch & 0xE0) == 0xC0) { cp = ch & 0x1F; bytes = 2; }
             else if ((ch & 0xF0) == 0xE0) { cp = ch & 0x0F; bytes = 3; }
-            else if ((ch & 0xF8) == 0xF8) { cp = ch & 0x07; bytes = 4; }
+            else if ((ch & 0xF8) == 0xF0) { cp = ch & 0x07; bytes = 4; }
             else { cp = ch; bytes = 1; }
             for (int b = 1; b < bytes && j + b < s.size(); b++) {
                 cp = (cp << 6) | ((unsigned char)s[j + b] & 0x3F);
             }
             j += bytes;
-            char hex[8];
-            snprintf(hex, sizeof(hex), "\\x%04X", cp);
+            char hex[16];
+            if (cp <= 0xFFFF) {
+                snprintf(hex, sizeof(hex), "\\u%04X", cp);
+            } else {
+                // Supplementary plane: UTF-16 surrogate pair
+                uint32_t v = cp - 0x10000;
+                uint16_t hi = 0xD800 + (v >> 10);
+                uint16_t lo = 0xDC00 + (v & 0x3FF);
+                snprintf(hex, sizeof(hex), "\\u%04X\\u%04X", hi, lo);
+            }
             result += hex;
         }
     }

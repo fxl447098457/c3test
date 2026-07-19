@@ -9,7 +9,7 @@ namespace vb6c3 {
 // --- cgen_com.cpp: COM类工厂 + 接口vtable + RaiseEvent + 事件接收器 ---
 
 void CCodeGen::emitClassFactory(Module& module) {
-    std::string clsStruct = "vb6_cls_" + cIdent(baseName_);
+    std::string clsStruct = "vb6_cls_" + cIdent(moduleName_);  // Fix 013: VB_Name
 
     c_.emitBlank();
     c_.emitLine("// === 类工厂函数: " + module.moduleName + " ===");
@@ -115,7 +115,7 @@ void CCodeGen::emitClassFactory(Module& module) {
 // ============================================================
 
 void CCodeGen::emitInterfaceVtable(Module& module) {
-    std::string clsStruct = "vb6_cls_" + cIdent(baseName_);
+    std::string clsStruct = "vb6_cls_" + cIdent(moduleName_);  // Fix 013: VB_Name
 
     for (auto& impl : module.implements) {
         const std::string& ifaceName = impl->interfaceName;
@@ -203,7 +203,7 @@ void CCodeGen::emitInterfaceVtable(Module& module) {
         h_.emitBlank();
 
         // 3. 生成全局 vtable 实例 (指向实现类的接口方法)
-        std::string vtblInstance = vtblName + "_for_" + cIdent(baseName_);
+        std::string vtblInstance = vtblName + "_for_" + cIdent(moduleName_);  // Fix 013: VB_Name
         c_.emitBlank();
         c_.emitLine("// Interface vtable instance: " + ifaceName + " for " + module.moduleName);
         c_.emitLine("static " + vtblName + " " + vtblInstance + " = {");
@@ -336,8 +336,8 @@ void CCodeGen::visit(DoEventsStmt& node) {
 // ============================================================
 
 void CCodeGen::emitEventSink(Module& module) {
-    std::string clsStruct = "vb6_cls_" + cIdent(baseName_);
-    std::string sinkName = "vb6_events_" + cIdent(baseName_);
+    std::string clsStruct = "vb6_cls_" + cIdent(moduleName_);  // Fix 013: VB_Name
+    std::string sinkName = "vb6_events_" + cIdent(moduleName_);  // Fix 013: VB_Name
 
     // 收集所有Event声明
     struct EventInfo {
@@ -374,9 +374,10 @@ void CCodeGen::emitEventSink(Module& module) {
     if (events.empty()) return;
 
     // 1. 生成事件回调函数指针typedef
+    // Fix 010: typedef名称包含类名前缀, 避免不同类同名事件(但不同签名)的typedef冲突 (C2370/C2040/C2371)
     h_.emitLine("// P6.5: Event callback function pointer types");
     for (auto& evt : events) {
-        std::string cbName = "vb6_evt_" + evt.cName + "_cb";
+        std::string cbName = "vb6_evt_" + cIdent(moduleName_) + "_" + evt.cName + "_cb";
         std::string sig = "void (*" + cbName + ")(void* handler";
         for (auto& p : evt.params) {
             sig += ", " + mapType(p.type) + " " + cIdent(p.name);
@@ -391,7 +392,7 @@ void CCodeGen::emitEventSink(Module& module) {
     h_.emitLine("typedef struct " + sinkName + " {");
     h_.emitLine("    void* handler;  /* event handler object (consumer) */");
     for (auto& evt : events) {
-        std::string cbName = "vb6_evt_" + evt.cName + "_cb";
+        std::string cbName = "vb6_evt_" + cIdent(moduleName_) + "_" + evt.cName + "_cb";
         h_.emitLine("    " + cbName + " on" + evt.cName + ";  /* Event " + evt.name + " */");
     }
     h_.emitLine("} " + sinkName + ";");

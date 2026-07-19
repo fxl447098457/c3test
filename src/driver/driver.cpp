@@ -21,6 +21,8 @@
 #include <filesystem>
 #include <cstdlib>
 #include <set>
+#include <unordered_map>
+#include <cctype>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -924,6 +926,29 @@ bool Driver::runSemanticAnalysis(const CompileOptions& options) {
 
                     analyzer->symbolTable().define(std::move(sym));
                 }
+
+                // Fix 018: 注册COM枚举成员为EnumMember符号 (TextCompare/adStateClosed 等)
+                // COM 类型库的 TKIND_ENUM 解析后, 成员作为全局可见命名常量注入符号表.
+                // hasConstValue=true 使 cgen 发出数值 (经 Fix 017-P1/P3 路径), 避免裸名 C2065.
+                // Volume guard: 跳过枚举成员过多的类型库 (如 MSHTML 数千成员), 避免命名空间
+                // 污染、内存膨胀 (125 模块 × N 成员) 和跨 enum 同名碰撞. 小型库 (Scripting ~30,
+                // ADO ~200) 正常注册, 覆盖 TextCompare / adXXX 等已知 C2065.
+                size_t totalEnumMembers = 0;
+                for (auto& en : tl->enums) totalEnumMembers += en->members.size();
+                if (totalEnumMembers <= 1000) {
+                    for (auto& en : tl->enums) {
+                        for (auto& m : en->members) {
+                            auto enumSym = std::make_unique<Symbol>(
+                                SymbolKind::EnumMember, m.name, Vb6Type::Long,
+                                SourceLocation{}, AccessLevel::Public);
+                            enumSym->isBuiltin = true;
+                            enumSym->hasConstValue = true;
+                            enumSym->constIntValue = m.value;
+                            enumSym->constType = Vb6Type::Long;
+                            analyzer->symbolTable().define(std::move(enumSym));
+                        }
+                    }
+                }
             }
         }
             // P24-04: 注册ComModule符号 (TKIND_MODULE → ActiveX DLL全局函数命名空间)
@@ -1050,11 +1075,11 @@ bool Driver::runSemanticAnalysis(const CompileOptions& options) {
 bool Driver::runCrossModuleResolution() {
     if (modules_.size() != analyzers_.size()) return false;
 
-    // 为每个模块计算基名（用于sourceModule标识）
+    // Fix 013: 为每个模块计算模块名 — 使用 module.moduleName (VB_Name)
+    // 而非文件名stem, 确保与 clsSym->name / mapTypeRef 生成的类型名一致
     std::vector<std::string> moduleBaseNames;
     for (const auto& module : modules_) {
-        std::filesystem::path p(utf8ToPath(module->filename));
-        moduleBaseNames.push_back(pathToUtf8(p.stem()));
+        moduleBaseNames.push_back(module->moduleName);
     }
 
     // 收集每个模块导出的Public符号: [模块索引] -> vector<Symbol*>
@@ -1063,15 +1088,18 @@ bool Driver::runCrossModuleResolution() {
         exportedSymbols[i] = analyzers_[i]->symbolTable().getPublicSymbols();
     }
 
-    // 构建 "小写符号名 -> (模块索引, Symbol*)" 的全局查找表
-    // VB6不区分大小写，所以用小写名做key
+    // 构建 "存储键 -> (模块索引, Symbol*)" 的全局查找表
+    // Fix 010r-12: 使用storageKey()而非lowerName做去重键
+    // 原因: Property Get/Let/Set同名但有不同storageKey ($pg/$pl/$ps)
+    // 用lowerName去重会导致只有第一个变体(通常Get)被保留, Let/Set丢失
+    // 消费模块的P6.7查找 lookupModuleByKind(name, PropertyLet) 会失败
     std::unordered_map<std::string, std::pair<size_t, const Symbol*>> globalPublicSyms;
     for (size_t i = 0; i < exportedSymbols.size(); i++) {
         for (const Symbol* sym : exportedSymbols[i]) {
-            std::string lowerName = Symbol::toLower(sym->name);
-            // 如果多个模块导出同名Public符号，第一个遇到的优先（VB6行为：先声明的优先）
-            if (globalPublicSyms.find(lowerName) == globalPublicSyms.end()) {
-                globalPublicSyms[lowerName] = {i, sym};
+            std::string sKey = sym->storageKey();
+            // 同一个storageKey只保留第一个 (VB6行为: 先声明的优先)
+            if (globalPublicSyms.find(sKey) == globalPublicSyms.end()) {
+                globalPublicSyms[sKey] = {i, sym};
             }
         }
     }
@@ -1092,13 +1120,21 @@ bool Driver::runCrossModuleResolution() {
     for (size_t i = 0; i < analyzers_.size(); i++) {
         SymbolTable& symTab = analyzers_[i]->symbolTable();
 
-        for (const auto& [lowerName, entry] : globalPublicSyms) {
+        for (const auto& [sKey, entry] : globalPublicSyms) {
             auto [srcIdx, srcSym] = entry;
             // 跳过本模块导出的符号
             if (srcIdx == i) continue;
 
             // 检查本模块是否已有此符号的本地定义
-            Symbol* localSym = symTab.lookupModule(lowerName);
+            // Fix 010r-12: Property变体需按kind分别检查 (Get/Let/Set各自独立)
+            Symbol* localSym = nullptr;
+            if (srcSym->kind == SymbolKind::PropertyGet ||
+                srcSym->kind == SymbolKind::PropertyLet ||
+                srcSym->kind == SymbolKind::PropertySet) {
+                localSym = symTab.lookupModuleByKind(srcSym->name, srcSym->kind);
+            } else {
+                localSym = symTab.lookupModule(srcSym->name);
+            }
             if (localSym) continue;  // 已有本地定义，不需要外部符号
 
             // 注入外部符号
@@ -1114,11 +1150,30 @@ bool Driver::runCrossModuleResolution() {
             if (srcSym->kind == SymbolKind::Class) {
                 extSym->instancing = srcSym->instancing;
                 extSym->memberNames = srcSym->memberNames;
+                extSym->memberReturnTypes = srcSym->memberReturnTypes;  // Fix 015: 链式调用返回类型表
+                extSym->memberProcKinds = srcSym->memberProcKinds;       // Fix 016: 成员过程类型表
                 extSym->isInterface = srcSym->isInterface;  // P6.4
                 extSym->implementsNames = srcSym->implementsNames;  // P6.4
                 extSym->interfaceMethodNames = srcSym->interfaceMethodNames;  // P6.4
                 extSym->eventNames = srcSym->eventNames;  // P6.5
                 extSym->comClsidStr = srcSym->comClsidStr;  // P6.8: CLSID
+            }
+            // Fix 010r-11 / Fix 015: 复制变量/返回类型名
+            // - Variable: 用于跨模块类实例变量识别 (knownClassVars_)
+            // - Function / PropertyGet: 用于 method chaining 的返回类型推断
+            //   (getClassMethodReturnType 读取该字段判断链式调用能继续到哪一层)
+            // 对其它 kind 该字段为空, 无副作用. 原先把此赋值放在 Variable-only 分支内,
+            // 导致 Function/PropertyGet 外部符号丢失返回类型名, 链式调用解析失败.
+            extSym->variableTypeName = srcSym->variableTypeName;
+            // Fix 017: 复制常量值 (EnumMember / Constant 跨模块注入后需保留值).
+            // 外部 EnumMember 若 hasConstValue=false, cgen 会发出裸标识符 (如
+            // HASH_ALG_SHA256) 而非数值 → C2065. 此前外部符号构造只复制
+            // kind/name/type/location/access, 丢失 hasConstValue/constIntValue.
+            extSym->hasConstValue = srcSym->hasConstValue;
+            extSym->constIntValue = srcSym->constIntValue;
+            extSym->constType = srcSym->constType;
+            if (srcSym->kind == SymbolKind::Variable) {
+                extSym->dimCount = srcSym->dimCount;
             }
 
             symTab.defineExternal(std::move(extSym));
@@ -1135,6 +1190,94 @@ bool Driver::runCodeGeneration(const CompileOptions& options, const std::string&
         return false;
     }
 
+    // Fix 023: 预扫描所有模块的 AST, 构建 className → void* 字段集 映射.
+    // 这个映射在 cgen_expr.cpp 的 knownClassVars_ fallback 路径用于判断
+    // obj->member 是否返回 void* COM 指针 (例: cDataBase.Rs As New ADODB.Recordset,
+    // Rs 字段在 C 结构体中是 void*). 若是, 在 emit 的注释中加入 "voidptr" 标记,
+    // 由外层 MemberAccessExpr 识别并切换为 COM dispatch (vb6_ComCall/ComGet*Prop).
+    // 不依赖模块编译顺序 — driver 在主 codegen 循环前一次性扫描所有模块.
+    std::unordered_map<std::string, std::set<std::string>> classVoidFieldMap;
+    // void* 判定规则与 cgen_base.cpp::mapTypeRef 保持一致:
+    //   - var.isNew (As New ClassName) → void*
+    //   - vb6 内置对象类型 (Collection/ErrObject/...) → void*
+    //   - 已知 ADODB 等 COM 对象类型 (Connection/Recordset/...) → void*
+    //   - 兜底: 无法解析为 Class/ComClass/UDT/Enum/内置类型 的名称 → void*
+    auto isVoidFieldType = [](const VariableDecl& var,
+                              const TypeSystem& typeSys,
+                              const SymbolTable& symTab) -> bool {
+        if (var.isNew) return true;
+        if (!var.asType || var.asType->kind != ASTNodeKind::SimpleTypeRef) return false;
+        std::string typeName = static_cast<SimpleTypeRef*>(var.asType.get())->name;
+        if (typeName == "Any" || typeName == "any") return true;
+        if (typeName.size() > 4 && typeName.compare(0, 4, "VBA.") == 0) typeName = typeName.substr(4);
+        static const std::unordered_set<std::string> vb6BuiltinObj = {
+            "Collection", "Forms", "ErrObject", "App", "Screen", "Printer", "Clipboard"
+        };
+        if (vb6BuiltinObj.count(typeName)) return true;
+        Vb6Type t = typeSys.resolveTypeName(typeName);
+        if (t != Vb6Type::Unknown) return false;  // 基础类型可解析 → 非 void*
+        std::string lookupName = typeName;
+        size_t dotPos = typeName.find('.');
+        if (dotPos != std::string::npos) {
+            std::string shortName = typeName.substr(dotPos + 1);
+            auto* dotSym = symTab.lookupModule(shortName);
+            if (dotSym) lookupName = shortName;
+        }
+        auto* clsSym = symTab.lookupModule(lookupName);
+        if (clsSym) {
+            if (clsSym->kind == SymbolKind::Class) return false;        // 真实类实例指针
+            if (clsSym->kind == SymbolKind::ComClass ||
+                clsSym->kind == SymbolKind::ComInterface) return false; // 类型化 COM 接口指针
+        }
+        auto* udtSym = symTab.lookup(lookupName);
+        if (udtSym) {
+            if (udtSym->kind == SymbolKind::UserDefinedType) return false;
+            if (udtSym->kind == SymbolKind::EnumType) return false;
+        }
+        if (lookupName == "LongPtr" || lookupName == "Longptr") return false;
+        if (lookupName.size() >= 2 && lookupName.compare(0, 2, "Vb") == 0) return false;
+        if (lookupName.size() >= 4 && lookupName.compare(0, 4, "OLE_") == 0) return false;
+        if (lookupName.size() >= 4 &&
+            lookupName.compare(lookupName.size() - 4, 4, "Enum") == 0) return false;
+        static const std::unordered_set<std::string> comObjTypes = {
+            "Connection", "Recordset", "Command", "Parameter",
+            "Field", "Fields", "Error", "Errors", "Property",
+            "Properties", "Stream"
+        };
+        if (comObjTypes.count(lookupName)) return true;
+        static const std::unordered_set<std::string> vb6EnumAliases = {
+            "CompareMethod", "TriState", "FirstDayOfWeek", "FirstWeekOfYear",
+            "MsgBoxResult", "MsgBoxStyle", "FileAttribute", "DateFormat",
+            "Calendar", "DateTimeFormat", "CallType", "VariantType",
+            "VarType", "QueryDef", "EditModeEnum", "FieldAttributeEnum"
+        };
+        if (vb6EnumAliases.count(lookupName)) return false;
+        return true;  // 兜底: 未知类型 → void*
+    };
+    for (size_t i = 0; i < modules_.size(); i++) {
+        const auto& module = modules_[i];
+        // 类模块和窗体模块都有结构体字段; 标准模块无 struct 不需要扫描
+        if (!module->isClassModule && !module->isFormModule) continue;
+        const std::string& className = module->moduleName;
+        std::set<std::string> voidFields;
+        for (const auto& decl : module->declarations) {
+            if (decl->kind != ASTNodeKind::VariableDecl) continue;
+            const auto& var = static_cast<const VariableDecl&>(*decl);
+            if (var.isDynamicArray || !var.dimensions.empty()) continue;  // 数组字段不是 void*
+            if (!isVoidFieldType(var, analyzers_[i]->typeSystem(),
+                                 analyzers_[i]->symbolTable())) continue;
+            std::string oLower = var.name;
+            std::transform(oLower.begin(), oLower.end(), oLower.begin(),
+                           [](unsigned char c) { return (char)std::tolower(c); });
+            std::string mLower = "m_" + oLower;
+            voidFields.insert(oLower);
+            voidFields.insert(mLower);
+        }
+        if (!voidFields.empty()) {
+            classVoidFieldMap[className] = std::move(voidFields);
+        }
+    }
+
     for (size_t i = 0; i < modules_.size(); i++) {
         auto& module = modules_[i];
         auto& analyzer = analyzers_[i];
@@ -1146,17 +1289,18 @@ bool Driver::runCodeGeneration(const CompileOptions& options, const std::string&
             std::filesystem::path p(options.outputFile);
             baseName = pathToUtf8(p.stem());
         } else {
-            // 多文件: 用源文件名作为基名
-            std::filesystem::path p(utf8ToPath(module->filename));
-            baseName = pathToUtf8(p.stem());
+            // Fix 013: 多文件: 用 module.moduleName (VB_Name) 作为基名
+            // 确保输出文件名与 #include 指令、跨模块 sourceModule 一致
+            baseName = module->moduleName;
         }
 
         // 收集跨模块include需求（从符号表获取外部模块名）
         auto externalModules = analyzer->symbolTable().getExternalModuleNames();
 
         // 调用C代码生成器
+        // Fix 023: 传入 void* 字段表供 cgen_expr.cpp fallback 路径查询
         CCodeGen cgen(*diag_, analyzer->symbolTable(), analyzer->typeSystem(),
-                      options.verbose);
+                      &classVoidFieldMap, options.verbose);
 
         // 传入模块基名和外部模块列表
         // P6.6: 传递ActiveX DLL模式信息
@@ -1210,8 +1354,9 @@ bool Driver::runCodeGeneration(const CompileOptions& options, const std::string&
     if (options.isDll && !analyzers_.empty()) {
         // 使用最后一个analyzer的符号表 (已包含跨模块符号)
         auto& lastAnalyzer = analyzers_.back();
+        // Fix 023: 传入 void* 字段表 (与主 codegen 循环一致)
         CCodeGen dllCgen(*diag_, lastAnalyzer->symbolTable(), lastAnalyzer->typeSystem(),
-                         options.verbose);
+                         &classVoidFieldMap, options.verbose);
         // Collect all symbol tables for cross-module Property lookup
         std::vector<SymbolTable*> allSymTabs;
         for (auto& analyzer : analyzers_) {
@@ -1484,8 +1629,8 @@ bool Driver::runLinker(const CompileOptions& options, const std::string& outputD
             std::filesystem::path p(options.outputFile);
             baseName = pathToUtf8(p.stem());
         } else {
-            std::filesystem::path p(utf8ToPath(modules_[i]->filename));
-            baseName = pathToUtf8(p.stem());
+            // Fix 013: 用 module.moduleName (VB_Name) 作为基名, 与 runCodeGeneration 一致
+            baseName = modules_[i]->moduleName;
         }
         std::string cPath = intermediatesDir + "/" + baseName + ".c";
         msvcOpts.sourceFiles.push_back(cPath);

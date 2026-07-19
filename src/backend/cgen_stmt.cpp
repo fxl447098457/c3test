@@ -139,6 +139,41 @@ void CCodeGen::visit(AssignmentStmt& node) {
             return;
         }
     }
+    // Fix 010r-14 (Pattern B): Mid$ statement — `Mid$(var, start[, len]) = value`
+    // 当 Mid$ 被词法器吃成单一 Identifier "Mid$" 时, 解析器无法走 TokenKind::Mid 分支,
+    // 会落到 parseLabelOrAssignmentOrCall(), 把 LHS 当作普通函数调用 (IndexOrCallExpr).
+    // 在 codegen 层面识别此模式并改写为 vb6_MidSet(&var, start, len, value); 调用
+    // (与 visit(MidStmt) 等价, 仅适用于 AssignmentStmt fallback 路径).
+    if (node.target->kind == ASTNodeKind::IndexOrCallExpr) {
+        auto& call = static_cast<IndexOrCallExpr&>(*node.target);
+        if (call.callee && call.callee->kind == ASTNodeKind::IdentifierExpr) {
+            auto& calleeId = static_cast<IdentifierExpr&>(*call.callee);
+            std::string calleeLower = calleeId.name;
+            std::transform(calleeLower.begin(), calleeLower.end(), calleeLower.begin(), ::tolower);
+            // 兼容 "mid$" 和 "mid" 两种写法
+            if (calleeLower == "mid$" || calleeLower == "mid") {
+                if (call.positional.size() >= 2 && call.positional.size() <= 3) {
+                    // 1. 发出 target (字符串变量)
+                    emitExpr(*call.positional[0]);
+                    std::string midTarget = std::move(lastExpr_);
+                    // 2. 发出 start
+                    emitExpr(*call.positional[1]);
+                    std::string midStart = std::move(lastExpr_);
+                    // 3. 发出 length (可选, 缺省为 0 表示 "到字符串末尾")
+                    std::string midLen = "0";
+                    if (call.positional.size() >= 3) {
+                        emitExpr(*call.positional[2]);
+                        midLen = std::move(lastExpr_);
+                    }
+                    // 4. 发出 value (RHS)
+                    emitExpr(*node.value);
+                    std::string midValue = std::move(lastExpr_);
+                    c_.emitLine("vb6_MidSet(&" + midTarget + ", " + midStart + ", " + midLen + ", " + midValue + ");  /* Mid$ statement */");
+                    return;
+                }
+            }
+        }
+    }
     // P22: LSet/RSet statement (LSet strVar = expr / RSet strVar = expr)
     if (node.isLSet || node.isRSet) {
         if (node.target->kind == ASTNodeKind::IdentifierExpr) {
@@ -323,7 +358,7 @@ void CCodeGen::visit(AssignmentStmt& node) {
             bool isVarName = (objSym && (objSym->kind == SymbolKind::Variable || objSym->kind == SymbolKind::Parameter));
             // M22-fix: 补充检查cgen层跟踪集合，防止过程级UDT/类变量被误判为模块名
             if (!isVarName && knownUdtVars_.count(objLower)) isVarName = true;
-            if (!isVarName && knownClassVars_.count(objLower)) isVarName = true;
+            if (!isVarName && knownClassVars_.find(objLower) != knownClassVars_.end()) isVarName = true;
             if (!isVarName && knownNewVars_.count(objLower)) isVarName = true;
             if (!isVarName && knownObjectVars_.count(objLower)) isVarName = true;
             if (!isVarName && knownTypedComVars_.count(objLower)) isVarName = true;
@@ -382,11 +417,13 @@ void CCodeGen::visit(AssignmentStmt& node) {
                 auto& objId = static_cast<IdentifierExpr&>(*maExpr.object);
                 std::string objLower = objId.name;
                 std::transform(objLower.begin(), objLower.end(), objLower.begin(), ::tolower);
-                if (knownClassVars_.count(objLower)) {
+                if (knownClassVars_.find(objLower) != knownClassVars_.end()) {
                     // 生成Property Let调用: vb6_prop_let_Name(obj, value)
                     std::string prefix = (propLetSym->kind == SymbolKind::PropertySet) ? "prop_set_" : "prop_let_";
-                    std::string funcName = cProcName(prefix + maExpr.memberName, propLetSym->access,
-                                                      propLetSym->isExternal ? propLetSym->sourceModule : "");
+                    auto itClassVar = knownClassVars_.find(objLower);
+                    // Fix 010r-10: 使用map中的类名作为sourceModule
+                    std::string sourceModule = propLetSym->isExternal ? propLetSym->sourceModule : itClassVar->second;
+                    std::string funcName = cProcName(prefix + maExpr.memberName, propLetSym->access, sourceModule);
                     emitExpr(*maExpr.object);
                     std::string objExpr = std::move(lastExpr_);
                     emitExpr(*node.value);
@@ -490,7 +527,55 @@ void CCodeGen::visit(AssignmentStmt& node) {
             return;
         }
         case WithObjKind::ClassInstance: {
+            // Fix 011r-1: 优先用 info.className 精确查找该类的 Property Let/Set
+            // (原 symTab_.lookupModule 会捡错模块, 导致 Pattern A2 在 With 块赋值时出错)
+            // Fix 011r-1b: VB6 case-insensitive — 类名匹配与函数名输出均用规范类名 (来自符号表)
+            if (!info.className.empty()) {
+                std::string letFn, setFn;
+                std::string canonicalClassName;  // 与struct定义一致的大小写
+                std::string classNameLower = Symbol::toLower(info.className);
+                if (symTab_.moduleScope()) {
+                    std::string memberLower = Symbol::toLower(wmExpr.memberName);
+                    for (const auto& [key, sym] : symTab_.moduleScope()->symbols()) {
+                        if (sym->lowerName != memberLower) continue;
+                        bool matches = false;
+                        if (sym->isExternal) {
+                            if (Symbol::toLower(sym->sourceModule) == classNameLower) {
+                                matches = true;
+                                if (canonicalClassName.empty()) canonicalClassName = sym->sourceModule;
+                            }
+                        } else if (isClassModule_ && Symbol::toLower(moduleName_) == classNameLower) {  // Fix 013: moduleName_ = VB_Name
+                            matches = true;
+                            if (canonicalClassName.empty()) canonicalClassName = moduleName_;
+                        }
+                        if (!matches) continue;
+                        if (sym->kind == SymbolKind::PropertyLet) {
+                            letFn = "vb6_" + cIdent(canonicalClassName) + "_prop_let_" + cIdent(wmExpr.memberName);
+                        } else if (sym->kind == SymbolKind::PropertySet) {
+                            setFn = "vb6_" + cIdent(canonicalClassName) + "_prop_set_" + cIdent(wmExpr.memberName);
+                        }
+                    }
+                }
+                if (!letFn.empty()) {
+                    emitExpr(*node.value);
+                    c_.emitLine(letFn + "(" + tempVar + ", " + lastExpr_ + ");  /* With class prop_let_ */");
+                    return;
+                }
+                if (!setFn.empty()) {
+                    emitExpr(*node.value);
+                    c_.emitLine(setFn + "(" + tempVar + ", " + lastExpr_ + ");  /* With class prop_set_ (fallback) */");
+                    return;
+                }
+                // 既无Let也无Set → 视为数据字段写: tempVar->member = value
+                emitExpr(*node.value);
+                c_.emitLine(tempVar + "->" + cIdent(wmExpr.memberName) + " = " + lastExpr_
+                            + ";  /* With class field write */");
+                return;
+            }
+
+            // className未知 — 使用原symTab查找(可能捡错模块, 但无法避免)
             Symbol* memSym = symTab_.lookupModule(wmExpr.memberName);
+            if (!memSym) memSym = symTab_.lookup(wmExpr.memberName);
             if (memSym && memSym->kind == SymbolKind::PropertyLet) {
                 std::string propFn = "prop_let_" + wmExpr.memberName;
                 std::string funcName = cProcName(propFn, memSym->access,
@@ -499,7 +584,30 @@ void CCodeGen::visit(AssignmentStmt& node) {
                 c_.emitLine(funcName + "(" + tempVar + ", " + lastExpr_ + ");");
                 return;
             }
-            break;
+            if (memSym && memSym->kind == SymbolKind::PropertySet) {
+                std::string propFn = "prop_set_" + wmExpr.memberName;
+                std::string funcName = cProcName(propFn, memSym->access,
+                    memSym->isExternal ? memSym->sourceModule : "");
+                emitExpr(*node.value);
+                c_.emitLine(funcName + "(" + tempVar + ", " + lastExpr_ + ");  /* With class PropertySet */");
+                return;
+            }
+            // Fix 010n: 未知成员赋值 → COM后期绑定
+            // .DataMember = value → vb6_ComSetProp(obj, L"Member", packedValue)
+            emitExpr(*node.value);
+            std::string valExpr = std::move(lastExpr_);
+            std::string packFn = comPackExpr(*node.value);
+            c_.emitLine("vb6_ComSetProp(" + tempVar + ", L\"" + wmExpr.memberName + "\", " +
+                         packFn + "(" + valExpr + "));  /* With class .unknown COM SetProp */");
+            return;
+        }
+        case WithObjKind::BuiltinObject: {
+            // Fix 010l: .Property = value on builtin object (Err/App/etc.)
+            // Err properties are read-only in C RTL — emit as comment to avoid MSVC error
+            emitExpr(*node.value);
+            c_.emitLine("/* With " + info.ctrlOrigName + "." + wmExpr.memberName +
+                        " = <value> — builtin object property write (no-op) */");
+            return;
         }
         default:
             break;
@@ -608,6 +716,16 @@ void CCodeGen::visit(AssignmentStmt& node) {
         if (!comCallType.empty()) {
             value = "vb6_ComCall" + comCallType + callArgs;
         }
+    }
+
+    // Fix 010r-15+010r-16 (Pattern A/C/D2/F): LHS 是非左值 COM 调用或 Property Get,
+    // 改写为对应的 COM SetProp/SetPropArg 或 prop_let_/prop_set_ 调用.
+    // 覆盖模式:
+    //   A: vb6_ComCall(obj, L"Item", args, n) = value → vb6_ComSetPropArg(...)
+    //   F: vb6_ComGetStringProp(obj, L"Prop") = value → vb6_ComSetProp(...)
+    //   C/D2: vb6_X_prop_get_Y(args) = value → vb6_X_prop_let_Y(args, value)
+    if (tryRewriteCOMLvalue(target, value, node.value.get(), /*isSet=*/false)) {
+        return;
     }
 
     // 如果赋值目标是当前Function/PropertyGet名 (VB6语义: 设置返回值), 替换为返回值变量
@@ -841,11 +959,18 @@ void CCodeGen::visit(SetStmt& node) {
                 // 简单变量引用: value可能是类实例指针变量名
                 std::string valLower = value;
                 std::transform(valLower.begin(), valLower.end(), valLower.begin(), ::tolower);
-                if (knownClassVars_.count(valLower)) {
+                if (knownClassVars_.find(valLower) != knownClassVars_.end()) {
                     value = ifaceType + "_wrap(" + value + ")";
                 }
             }
         }
+    }
+
+    // Fix 010r-16: Set 语句中, 当 LHS 是非左值的 COM 调用或 Property Get
+    // (常见于 With-block 跨模块成员: Set .Request = value, Set dict.Item(k) = v)
+    // 重写为 vb6_ComSetProp / vb6_ComSetPropArg / prop_set_ 调用.
+    if (tryRewriteCOMLvalue(target, value, node.value.get(), /*isSet=*/true)) {
+        return;
     }
 
     c_.emitLine(target + " = " + value + ";  /* Set */");
@@ -1110,6 +1235,12 @@ void CCodeGen::visit(LetStmt& node) {
     }
     std::string value = std::move(lastExpr_);
 
+    // Fix 010r-16: Let 语句中, 当 LHS 是非左值的 COM 调用或 Property Get,
+    // 重写为 vb6_ComSetProp / vb6_ComSetPropArg / prop_let_ 调用.
+    if (tryRewriteCOMLvalue(target, value, node.value.get(), /*isSet=*/false)) {
+        return;
+    }
+
     c_.emitLine(target + " = " + value + ";  /* Let */");
 }
 
@@ -1157,6 +1288,30 @@ void CCodeGen::visit(ForStmt& node) {
 
     std::string var = cIdent(node.varName);
 
+    // Fix 022: For 循环变量若为类成员必须以 me->var 形式 emit.
+    // 原 Fix 010o 无差别将 For 变量注册到 knownLocalVars_, 但当变量实际是类成员
+    // (例: cCsv.cls:51 'Dim i As Long, ii As Long' at module level → class field)
+    // 时, 注册会让下游 IdentifierExpr (cgen_expr.cpp:425-432) 跳过 me-> 前缀,
+    // 循环体内对 ii 的引用变裸标识符 ii, 但函数内无 C 局部 ii 只有 me->ii
+    // → C2065 未声明标识符 (cCsv.c 34 处 ii + 13 处 i 同根因).
+    //
+    // 修复策略:
+    //   1. 若 For 变量是类成员 (且未被局部 Dim 遮蔽), 用 me->var 形式 emit loop
+    //      自身赋值/比较/累加语句, 且 **不** 注册到 knownLocalVars_ — 让循环体
+    //      内 IdentifierExpr 走 me-> 路径 (cgen_expr.cpp 已支持).
+    //   2. 否则保持原 Fix 010o 行为 (注册 + 裸 var), 覆盖局部 Dim 变量、
+    //      非类模块变量、跨模块变量等情况.
+    // 注: 临时变量 var_end / var_step 是 block-scoped int32_t 局部, 无需 me->.
+    std::string lower022 = node.varName;
+    std::transform(lower022.begin(), lower022.end(), lower022.begin(), ::tolower);
+    bool forVarIsClassMember = isClassModule_
+        && classMemberVars_.count(lower022)
+        && !knownLocalVars_.count(lower022);  // 局部 Dim 优先遮蔽类成员
+    std::string varAcc = forVarIsClassMember ? ("me->" + var) : var;
+    if (!forVarIsClassMember) {
+        knownLocalVars_.insert(lower022);  // Fix 010o (保留)
+    }
+
     // P14.3.2: 嵌套循环栈 - 支持Exit For跳转到正确层
     std::string exitLabel = "vb6_loop_exit_" + std::to_string(labelCounter_++);
     loopStack_.push_back({ExitKind::For, exitLabel});
@@ -1165,10 +1320,10 @@ void CCodeGen::visit(ForStmt& node) {
     c_.indent();
     c_.emitLine("int32_t " + var + "_end = " + end + ";");
     c_.emitLine("int32_t " + var + "_step = " + step + ";");
-    c_.emitLine(var + " = " + start + ";");
+    c_.emitLine(varAcc + " = " + start + ";");
     c_.emitLine("if (" + var + "_step > 0) {");
     c_.indent();
-    c_.emitLine("for (; " + var + " <= " + var + "_end; " + var + " += " + var + "_step) {");
+    c_.emitLine("for (; " + varAcc + " <= " + var + "_end; " + varAcc + " += " + var + "_step) {");
     c_.indent();
     emitStmtList(node.body);
     c_.dedent();
@@ -1176,7 +1331,7 @@ void CCodeGen::visit(ForStmt& node) {
     c_.dedent();
     c_.emitLine("} else {");
     c_.indent();
-    c_.emitLine("for (; " + var + " >= " + var + "_end; " + var + " += " + var + "_step) {");
+    c_.emitLine("for (; " + varAcc + " >= " + var + "_end; " + varAcc + " += " + var + "_step) {");
     c_.indent();
     emitStmtList(node.body);
     c_.dedent();
@@ -1227,6 +1382,19 @@ void CCodeGen::visit(ForEachStmt& node) {
     std::string var = cIdent(node.varName);
     int tmpIdx = tempCounter_++;
 
+    // Fix 022: ForEach 循环变量若为类成员必须以 me->var 形式 emit (同 ForStmt).
+    // 原 Fix 010o 无差别注册循环变量到 knownLocalVars_, 类成员场景会导致 C2065
+    // (详见 ForStmt 注释). 此处同步修复.
+    std::string lower022fe = node.varName;
+    std::transform(lower022fe.begin(), lower022fe.end(), lower022fe.begin(), ::tolower);
+    bool forEachVarIsClassMember = isClassModule_
+        && classMemberVars_.count(lower022fe)
+        && !knownLocalVars_.count(lower022fe);  // 局部 Dim 优先遮蔽
+    std::string varAcc = forEachVarIsClassMember ? ("me->" + var) : var;
+    if (!forEachVarIsClassMember) {
+        knownLocalVars_.insert(lower022fe);  // Fix 010o (保留)
+    }
+
     if (isCollArray) {
         // For Each item In arr -> SafeArray index iteration
         // {
@@ -1251,7 +1419,7 @@ void CCodeGen::visit(ForEachStmt& node) {
 
         // 赋值循环变量: vb6_item = VB6_SA_AT(elemCType, arr, _fe_i0)
         std::string elemCType = mapSaElemCType(collElemType);
-        c_.emitLine(var + " = VB6_SA_AT(" + elemCType + ", " + collArrName + ", " + idxVar + ");");
+        c_.emitLine(varAcc + " = VB6_SA_AT(" + elemCType + ", " + collArrName + ", " + idxVar + ");");
 
         emitStmtList(node.body);
         c_.dedent();
@@ -1297,9 +1465,9 @@ void CCodeGen::visit(ForEachStmt& node) {
             std::string lower = node.varName;
             std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
             if (knownObjectVars_.count(lower) || knownTypedComVars_.count(lower)) {
-                c_.emitLine(var + " = vb6_ComUnpackObject(&" + feVar + ");  /* P24-05: For Each Object: VARIANT→IDispatch* */");
+                c_.emitLine(varAcc + " = vb6_ComUnpackObject(&" + feVar + ");  /* P24-05: For Each Object: VARIANT→IDispatch* */");
             } else {
-                c_.emitLine(var + " = vb6_VariantFromStackVARIANT(&" + feVar + ");  /* P24-05: For Each Variant: VARIANT→vb6_VARIANT */");
+                c_.emitLine(varAcc + " = vb6_VariantFromStackVARIANT(&" + feVar + ");  /* P24-05: For Each Variant: VARIANT→vb6_VARIANT */");
             }
         }
         emitStmtList(node.body);
@@ -1528,6 +1696,43 @@ void CCodeGen::visit(WithStmt& node) {
 
     // 检测With对象类型: 遍历表达式判断
     if (node.object) {
+        // --- Fix 010n: New表达式检测 (With New ClassName) ---
+        if (node.object->kind == ASTNodeKind::NewExpr) {
+            auto& newExpr = static_cast<NewExpr&>(*node.object);
+            std::string clsLower = newExpr.className;
+            std::transform(clsLower.begin(), clsLower.end(), clsLower.begin(), ::tolower);
+            // "With New X" 总是类实例
+            withInfo.kind = WithObjKind::ClassInstance;
+            withInfo.className = cIdent(newExpr.className);  // Fix 011r-1
+            tempType = "vb6_cls_" + withInfo.className + "*";
+            withInfo.ctrlOrigName = withInfo.className;
+        }
+        // --- Fix 010n: WithMemberExpr (嵌套With: With .Method()) ---
+        else if (node.object->kind == ASTNodeKind::WithMemberExpr) {
+            // 嵌套With: .Member() — 继承外层With的对象类型
+            if (!withObjectInfoStack_.empty()) {
+                const auto& outerInfo = withObjectInfoStack_.back();
+                if (outerInfo.kind == WithObjKind::ClassInstance ||
+                    outerInfo.kind == WithObjKind::COMObject) {
+                    // 方法返回值通常是同类或另一个类实例
+                    withInfo.kind = WithObjKind::ClassInstance;
+                    // Fix 011r-1: 继承外层className (对property chain如 .SubObj.SubMethod常见)
+                    // 注意: 如外层方法返回不同类实例, 此继承会错误 — 当前简化处理
+                    withInfo.className = outerInfo.className;
+                    if (!withInfo.className.empty()) {
+                        tempType = "vb6_cls_" + withInfo.className + "*";
+                    }
+                } else if (outerInfo.kind == WithObjKind::FormControl ||
+                           outerInfo.kind == WithObjKind::WithEventsCtrl) {
+                    // 控件属性返回的对象 → 类实例
+                    withInfo.kind = WithObjKind::ClassInstance;
+                    // 控件方法返回的对象类型未知, 不设置className
+                }
+                // UDT/Unknown/BuiltinObject: 保持Unknown (struct.field访问)
+            }
+        }
+
+        // --- IdentifierExpr: 标识符With对象 ---
         std::string objNameLower;
         if (node.object->kind == ASTNodeKind::IdentifierExpr) {
             auto& idExpr = static_cast<IdentifierExpr&>(*node.object);
@@ -1569,14 +1774,129 @@ void CCodeGen::visit(WithStmt& node) {
 
             // 类实例变量检测
             if (withInfo.kind == WithObjKind::Unknown) {
-                if (knownClassVars_.count(objNameLower)) {
+                auto itClassVar = knownClassVars_.find(objNameLower);
+                if (itClassVar != knownClassVars_.end()) {
+                    withInfo.kind = WithObjKind::ClassInstance;
+                    // Fix 011r-1: 设置className, 让WithMemberExpr能精确解析该类方法
+                    withInfo.className = cIdent(itClassVar->second);
+                    tempType = "vb6_cls_" + withInfo.className + "*";
+                }
+            }
+
+            // Fix 010n: UDT变量检测 → 设置正确的struct类型 (而非void*)
+            // 这样 struct.field 访问才能通过编译 (C2224修复)
+            if (withInfo.kind == WithObjKind::Unknown) {
+                auto itUdt = knownUdtVars_.find(objNameLower);
+                if (itUdt != knownUdtVars_.end()) {
+                    tempType = itUdt->second;  // e.g., "vb6_type_OPENFILENAME"
+                    // Keep Unknown kind — struct.field 访问对UDT是正确的
+                }
+            }
+
+            // Fix 010l: 内置全局对象检测 (Err/App/Screen/Printer/Clipboard/Debug)
+            if (withInfo.kind == WithObjKind::Unknown) {
+                if (objNameLower == "err" || objNameLower == "app" ||
+                    objNameLower == "screen" || objNameLower == "printer" ||
+                    objNameLower == "clipboard" || objNameLower == "debug") {
+                    withInfo.kind = WithObjKind::BuiltinObject;
+                    withInfo.ctrlOrigName = objNameLower;  // store lowercase name
+                }
+            }
+        }
+
+        // --- Fix 010n: MemberAccessExpr (With obj.member / With me.member) ---
+        if (node.object->kind == ASTNodeKind::MemberAccessExpr && withInfo.kind == WithObjKind::Unknown) {
+            auto& memExpr = static_cast<MemberAccessExpr&>(*node.object);
+            std::string memberLower = memExpr.memberName;
+            std::transform(memberLower.begin(), memberLower.end(), memberLower.begin(), ::tolower);
+
+            // 检查成员是否为类实例变量 (me.member As SomeClass)
+            if (knownClassVars_.find(memberLower) != knownClassVars_.end()) {
+                withInfo.kind = WithObjKind::ClassInstance;
+                // Fix 011r-1: 获取成员的类名, 设置tempType
+                auto itClassVar = knownClassVars_.find(memberLower);
+                if (itClassVar != knownClassVars_.end()) {
+                    withInfo.className = cIdent(itClassVar->second);
+                    tempType = "vb6_cls_" + withInfo.className + "*";
+                }
+            } else if (knownObjectVars_.count(memberLower)) {
+                withInfo.kind = WithObjKind::COMObject;
+            } else if (knownUdtVars_.count(memberLower)) {
+                // UDT成员: 使用struct类型 (如 With ofn → vb6_type_OPENFILENAME)
+                auto itUdt = knownUdtVars_.find(memberLower);
+                if (itUdt != knownUdtVars_.end()) {
+                    tempType = itUdt->second;
+                }
+            } else {
+                // 尝试从符号表推断类型
+                Symbol* memSym = symTab_.lookupModule(memExpr.memberName);
+                if (!memSym) memSym = symTab_.lookup(memExpr.memberName);
+                if (memSym) {
+                    if (memSym->type == Vb6Type::UserDefinedType) {
+                        // 查找UDT类型的C标识符
+                        // TODO: Symbol没有存储typeRefName, 需要其他方式
+                    } else if (memSym->type == Vb6Type::Object) {
+                        withInfo.kind = WithObjKind::ClassInstance;
+                        // Fix 011r-1: 若Symbol有variableTypeName, 用之; 否则className未知
+                        if (!memSym->variableTypeName.empty()) {
+                            withInfo.className = cIdent(memSym->variableTypeName);
+                            tempType = "vb6_cls_" + withInfo.className + "*";
+                        }
+                    }
+                }
+                // 无法确定类型时默认为类实例 (void*不支持.member访问)
+                if (withInfo.kind == WithObjKind::Unknown && tempType == "void*") {
                     withInfo.kind = WithObjKind::ClassInstance;
                 }
             }
         }
+
+        // --- Fix 010n: IndexOrCallExpr (With arr(idx) / With func()) ---
+        if (node.object->kind == ASTNodeKind::IndexOrCallExpr && withInfo.kind == WithObjKind::Unknown) {
+            // 数组元素或函数返回值 — 通常是类实例或VARIANT
+            // 数组元素访问如 m_uWindowState(0) → VARIANT UDT
+            auto& callExpr = static_cast<IndexOrCallExpr&>(*node.object);
+            if (callExpr.callee && callExpr.callee->kind == ASTNodeKind::IdentifierExpr) {
+                auto& idExpr = static_cast<IdentifierExpr&>(*callExpr.callee);
+                std::string arrLower = idExpr.name;
+                std::transform(arrLower.begin(), arrLower.end(), arrLower.begin(), ::tolower);
+                // 检查是否为已知数组 → 元素类型
+                auto itArr = arrayElemTypes_.find(arrLower);
+                if (itArr != arrayElemTypes_.end()) {
+                    if (itArr->second == Vb6Type::UserDefinedType) {
+                        tempType = "vb6_VARIANT";  // UDT数组元素存储为VARIANT
+                    } else if (itArr->second == Vb6Type::Variant || itArr->second == Vb6Type::Object) {
+                        tempType = "vb6_VARIANT";
+                    }
+                }
+            }
+            // 函数返回值且仍为void* → 默认为类实例
+            if (withInfo.kind == WithObjKind::Unknown && tempType == "void*") {
+                withInfo.kind = WithObjKind::ClassInstance;
+            }
+        }
+
+        // --- 最终回退: void* 不支持 .member 访问 → 使用ClassInstance分发 ---
+        if (withInfo.kind == WithObjKind::Unknown && tempType == "void*") {
+            withInfo.kind = WithObjKind::ClassInstance;
+        }
     }
 
     withObjectInfoStack_.push_back(withInfo);
+
+    // Fix 010l: BuiltinObject 不需要临时变量 — 属性读写直接映射为RTL函数调用
+    if (withInfo.kind == WithObjKind::BuiltinObject) {
+        // 推入占位符以保持 withObjectVars_ 与 withObjectInfoStack_ 同步
+        withObjectVars_.push_back(withInfo.ctrlOrigName);
+        c_.emitLine("{");
+        c_.indent();
+        emitStmtList(node.body);
+        c_.dedent();
+        c_.emitLine("}");
+        withObjectVars_.pop_back();
+        withObjectInfoStack_.pop_back();
+        return;
+    }
 
     // P17.1: 抑制With对象表达式的默认属性解析
     bool prevSuppress = suppressDefaultProp_;
@@ -1821,7 +2141,14 @@ void CCodeGen::visit(CallStmt& node) {
         }
     }
 
+        // Fix 015: 标记 callee 上下文, 让 visit(MemberAccessExpr) 的 Fix 015 路径
+        // 把链式对象参数通过 pendingChainObj_ 交付, 而不是直接合成 func(wrappedObj)
+        // (那样会让下面的 bare-call 判定 callExpr.find('(') != npos 错过 padding).
+        pendingChainObj_.clear();
+        bool savedAsCallCallee = asCallCallee_;
+        asCallCallee_ = true;
         emitExpr(*node.callee);
+        asCallCallee_ = savedAsCallCallee;
         // 语句级调用: 确保表达式被求值(即使是void调用)
         // 如果结果是函数名(不含括号), 自动添加()调用
         std::string callExpr = lastExpr_;
@@ -1837,23 +2164,98 @@ void CCodeGen::visit(CallStmt& node) {
             // M22: void function call returned 0 (no-value), discard entire statement
             return;
         } else if (callExpr.find('(') == std::string::npos) {
-            // P14.1.5: Check if callee is a ParamArray function (needs NULL SAFEARRAY* arg)
+            // Fix 010m: Bare call (no parentheses) — build complete arg list
+            // Handle: me-prepend for class methods, ParamArray, Optional padding, _has_ flags
             bool calleeHasPA = false;
+            std::vector<ParameterInfo> calleeParams;
+
             if (node.callee && node.callee->kind == ASTNodeKind::IdentifierExpr) {
                 auto& idExpr = static_cast<IdentifierExpr&>(*node.callee);
                 Symbol* sym = symTab_.lookupModule(idExpr.name);
-                if (!sym) sym = symTab_.lookup(idExpr.name);
-                if (sym && (sym->kind == SymbolKind::Sub || sym->kind == SymbolKind::Function)) {
-                    for (auto& p : sym->params) {
-                        if (p.isParamArray) { calleeHasPA = true; break; }
+                if (!sym || (sym->kind != SymbolKind::Sub && sym->kind != SymbolKind::Function
+                    && sym->kind != SymbolKind::PropertyGet && sym->kind != SymbolKind::PropertyLet
+                    && sym->kind != SymbolKind::PropertySet)) {
+                    sym = symTab_.lookup(idExpr.name);
+                }
+                if (sym && (sym->kind == SymbolKind::Sub || sym->kind == SymbolKind::Function
+                    || sym->kind == SymbolKind::PropertyGet || sym->kind == SymbolKind::PropertyLet
+                    || sym->kind == SymbolKind::PropertySet)) {
+                    calleeParams = sym->params;
+                }
+            }
+            // Fix 015: Call X.Y(args).Z (无尾括号) 形态下 node.callee 是 .Z MemberAccessExpr.
+            // 此时 Fix 015 emit 出的 lastExpr_ 是裸函数名 "vb6_cDataBase_Exec",
+            // 对象参数通过 pendingChainObj_ 传递. 这里需要按成员名查找参数签名,
+            // 才能正确填充 Optional 默认参数.
+            else if (node.callee && node.callee->kind == ASTNodeKind::MemberAccessExpr) {
+                auto& maExpr = static_cast<MemberAccessExpr&>(*node.callee);
+                Symbol* sym = symTab_.lookupModule(maExpr.memberName);
+                if (sym && (sym->kind == SymbolKind::Sub || sym->kind == SymbolKind::Function
+                    || sym->kind == SymbolKind::PropertyGet || sym->kind == SymbolKind::PropertyLet
+                    || sym->kind == SymbolKind::PropertySet)) {
+                    calleeParams = sym->params;
+                }
+            }
+
+            // Check for ParamArray
+            int paIndex = -1;
+            for (size_t i = 0; i < calleeParams.size(); i++) {
+                if (calleeParams[i].isParamArray) { paIndex = (int)i; calleeHasPA = true; break; }
+            }
+
+            // P6.6: 类模块中调用同类方法, 需要自动添加me作为第一个参数
+            std::string bareArgList;
+            if (isClassModule_ && currentProc_) {
+                std::string modPrefix = "vb6_" + cIdent(moduleName_) + "_";
+                if (callExpr.find(modPrefix) == 0) {
+                    bareArgList = "(void*)me";
+                }
+            }
+
+            // Fix 015: 链式调用对象参数前置 — 由 visit(MemberAccessExpr).Fix015 交付
+            if (!pendingChainObj_.empty()) {
+                if (!bareArgList.empty()) bareArgList += ", ";
+                bareArgList += pendingChainObj_;
+                pendingChainObj_.clear();
+            }
+
+            if (calleeHasPA) {
+                // ParamArray: pass NULL SAFEARRAY*
+                if (!bareArgList.empty()) bareArgList += ", ";
+                bareArgList += "NULL";
+            } else if (calleeParams.size() > 0) {
+                // Pad all params with default values (bare call = 0 args)
+                for (size_t i = 0; i < calleeParams.size(); i++) {
+                    const auto& param = calleeParams[i];
+                    if (!bareArgList.empty()) bareArgList += ", ";
+                    std::string defVal;
+                    if (param.hasDefaultValue && !param.defaultValueExpr.empty()) {
+                        defVal = param.defaultValueExpr;
+                    } else {
+                        defVal = defaultValue(param.type);
+                    }
+                    if (param.isByVal) {
+                        bareArgList += defVal;
+                    } else {
+                        // ByRef: pass address of compound literal
+                        std::string cType = mapType(param.type);
+                        if (param.type == Vb6Type::Variant || param.type == Vb6Type::Empty ||
+                            param.type == Vb6Type::Null || param.type == Vb6Type::Object) {
+                            bareArgList += "&(" + cType + "){0}";
+                        } else {
+                            bareArgList += "&(" + cType + "){" + defVal + "}";
+                        }
+                    }
+                }
+                // Append _has_ flags for Optional params (all 0 since none passed)
+                for (size_t i = 0; i < calleeParams.size(); i++) {
+                    if (calleeParams[i].isOptional && !calleeParams[i].isParamArray) {
+                        if (!bareArgList.empty()) bareArgList += ", ";
+                        bareArgList += "0";
                     }
                 }
             }
-            if (calleeHasPA) {
-                callExpr += "(NULL)";
-            } else {
-                callExpr += "()";
-            }
+            callExpr += "(" + bareArgList + ")";
         }
 
         if (callExpr.find("vb6_ComCall(") == 0) {
@@ -1871,6 +2273,12 @@ void CCodeGen::visit(CallStmt& node) {
 
 void CCodeGen::visit(ReDimStmt& node) {
     std::string cName = cIdent(node.varName);
+    // Fix 010r: Add me-> prefix for class member arrays
+    std::string lowerVar = node.varName;
+    std::transform(lowerVar.begin(), lowerVar.end(), lowerVar.begin(), ::tolower);
+    if (isClassModule_ && classMemberVars_.count(lowerVar) && !knownLocalVars_.count(lowerVar)) {
+        cName = "me->" + cName;
+    }
     Vb6Type elemType = resolveArrayElemType(node.asType.get());
     std::string saElemType = mapSaElemType(elemType);
 
@@ -1930,9 +2338,13 @@ void CCodeGen::visit(ReDimStmt& node) {
 void CCodeGen::visit(EraseStmt& node) {
     for (auto& name : node.varNames) {
         std::string cName = cIdent(name);
-        // P8.1: 鏍规嵁缁村害鏁伴€夋嫨1D/ND閿€姣?
+        // Fix 010r: Add me-> prefix for class member arrays
         std::string lower = name;
         std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+        if (isClassModule_ && classMemberVars_.count(lower) && !knownLocalVars_.count(lower)) {
+            cName = "me->" + cName;
+        }
+        // P8.1: 根据维度数选择1D/ND销毁
         auto it = arrayDimCounts_.find(lower);
         if (it != arrayDimCounts_.end() && it->second > 1) {
             c_.emitLine("vb6_SafeArrayDestroyND(" + cName + "); " + cName + " = NULL;");
@@ -2415,6 +2827,7 @@ void CCodeGen::visit(LocalDeclStmt& node) {
                 knownArrays_.insert(lower);
                 arrayElemTypes_[lower] = elemType;
                 arrayDimCounts_[lower] = dimCount;
+                knownLocalVars_.insert(lower);
                 break;
             }
 
@@ -2429,6 +2842,7 @@ void CCodeGen::visit(LocalDeclStmt& node) {
                 knownArrays_.insert(lower);
                 arrayElemTypes_[lower] = elemType;
                 arrayDimCounts_[lower] = 1;  // 动态数组默认1D
+                knownLocalVars_.insert(lower);
                 break;
             }
 
@@ -2481,6 +2895,7 @@ void CCodeGen::visit(LocalDeclStmt& node) {
             // 记录类类型变量名, 默认值用NULL
             bool isLocalClassType = false;
             bool isLocalUdtType = false;
+            bool isLocalEnumType = false;  // Fix 010q
             bool isLocalComIfaceType = false;
             bool isLocalVb6IfaceType = false;  // P6.4: VB6接口引用
             if (var.asType && var.asType->kind == ASTNodeKind::SimpleTypeRef) {
@@ -2494,7 +2909,8 @@ void CCodeGen::visit(LocalDeclStmt& node) {
                         knownIfaceVars_[lower] = clsSym->name;
                         isLocalVb6IfaceType = true;
                     } else {
-                        knownClassVars_.insert(lower);
+                        // Fix 010r-10: map赋值, 存储类名以便方法分发时查找
+                        knownClassVars_[lower] = clsSym->name;
                         isLocalClassType = true;
                         // P14.3.1: Dim As New自动实例化
                         if (var.isNew) {
@@ -2512,13 +2928,26 @@ void CCodeGen::visit(LocalDeclStmt& node) {
                     // M22-fix: 注册到knownUdtVars_，防止成员访问被误判为模块名限定
                     std::string udtLower = var.name;
                     std::transform(udtLower.begin(), udtLower.end(), udtLower.begin(), ::tolower);
-                    knownUdtVars_[udtLower] = cIdent(simple.name);
+                    knownUdtVars_[udtLower] = "vb6_type_" + cIdent(simple.name);
+                }
+                // Fix 010q: 检查是否是Enum类型 (mapTypeRef映射为int32_t, 但defaultValue返回vb6_VariantEmpty())
+                if (udtSym && udtSym->kind == SymbolKind::EnumType) {
+                    isLocalEnumType = true;
                 }
             }
 
             // VB6 Static变量: 跨调用持久化 → C static局部变量
             // 包括: 显式Static声明 或 Static Sub/Function内的所有局部变量
             std::string storageClass = (var.isStatic || inStaticProc_) ? "static " : "";
+
+            // Fix 010r-12c: Register non-array local variable to knownLocalVars_
+            // so it shadows cross-module external Public symbols with the same name.
+            // (Array/dynamic-array cases already insert above; this covers all other types)
+            {
+                std::string lower = var.name;
+                std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+                knownLocalVars_.insert(lower);
+            }
 
             if (var.initializer) {
                 emitExpr(*var.initializer);
@@ -2531,6 +2960,8 @@ void CCodeGen::visit(LocalDeclStmt& node) {
                     initVal = "{0}";  // P6.4: 接口引用 = {vtbl=NULL, obj=NULL}
                 } else if (isLocalUdtType) {
                     initVal = "{0}";
+                } else if (isLocalEnumType) {  // Fix 010q
+                    initVal = "0";
                 } else if (var.asType && var.asType->kind == ASTNodeKind::FixedStringTypeRef) {
                     // String * N: 初始化为N个空格的BSTR, LSet/RSet使用固定长度
                     auto& fs = static_cast<FixedStringTypeRef&>(*var.asType);
@@ -2556,8 +2987,21 @@ void CCodeGen::visit(LocalDeclStmt& node) {
             auto& con = static_cast<ConstDecl&>(*node.decl);
             std::string cType = mapTypeRef(con.asType.get());
             std::string cName = cIdent(con.name);
+            // Fix 010r-12c: Register local constant to knownLocalVars_
+            {
+                std::string lower = con.name;
+                std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+                knownLocalVars_.insert(lower);
+            }
             if (con.value) {
                 emitExpr(*con.value);
+                // Fix 010r-13: Local Const redefining Windows API macro? #undef first.
+                // 必须在声明 const 变量之前 #undef, 防止名字被 <windows.h> 等头文件中的
+                // 宏展开 (例: WHITE_BRUSH、MEM_COMMIT、CP_UTF8、SW_SHOWNORMAL 等
+                // 都是 windows.h 中的 #define, 否则 `const int32_t WHITE_BRUSH = 0;`
+                // 会被宏展开为 `const int32_t 0 = 0;` 引发 C2106).
+                // #undef 对没有定义为宏的名字是空操作, 无副作用.
+                c_.emitLine("#undef " + cName);
                 c_.emitLine("const " + cType + " " + cName + " = " + lastExpr_ + ";");
             }
             break;

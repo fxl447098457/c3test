@@ -119,11 +119,22 @@ bool SemanticAnalyzer::analyze(Module& module) {
                 case ASTNodeKind::SubDecl: {
                     auto& s = static_cast<SubDecl&>(*decl);
                     classSym->memberNames.push_back(s.name);
+                    // Fix 016: Sub 写入 memberProcKinds (覆盖任意前值)
+                    classSym->memberProcKinds[Symbol::toLower(s.name)] = ProcKind::Sub;
                     break;
                 }
                 case ASTNodeKind::FunctionDecl: {
                     auto& f = static_cast<FunctionDecl&>(*decl);
                     classSym->memberNames.push_back(f.name);
+                    // Fix 015: 记录 Function 返回类型名(仅类型为命名类型 SimpleTypeRef 时)
+                    // 用于跨模块 storageKey 冲突场景下的 method chaining 返回类型推断
+                    if (f.returnType && f.returnType->kind == ASTNodeKind::SimpleTypeRef) {
+                        classSym->memberReturnTypes[Symbol::toLower(f.name)] =
+                            static_cast<SimpleTypeRef*>(f.returnType.get())->name;
+                    }
+                    // Fix 016: Function 写入 memberProcKinds (覆盖任意前值 — 同类内
+                    // 不允许 Function 与同名 Property 共存, 故此处覆盖无冲突风险)
+                    classSym->memberProcKinds[Symbol::toLower(f.name)] = ProcKind::Function;
                     break;
                 }
                 case ASTNodeKind::PropertyDecl: {
@@ -136,6 +147,37 @@ bool SemanticAnalyzer::analyze(Module& module) {
                             if (Symbol::toLower(mn) == lower) { found = true; break; }
                         }
                         if (!found) classSym->memberNames.push_back(p.name);
+                    }
+                    // Fix 015: 仅 Property Get 有返回值; Let/Set 无返回类型不记录.
+                    // 用前判 propKind==PropertyGet 避免被后续 Let/Set 覆盖 Get 的返回类型.
+                    if (p.propKind == ProcKind::PropertyGet
+                        && p.returnType
+                        && p.returnType->kind == ASTNodeKind::SimpleTypeRef) {
+                        classSym->memberReturnTypes[Symbol::toLower(p.name)] =
+                            static_cast<SimpleTypeRef*>(p.returnType.get())->name;
+                    }
+                    // Fix 016: 按 ProcKind 写入 memberProcKinds, 同名共存时按
+                    // 读上下文优先级 Get > Function > Sub > Let > Set 选择, 即:
+                    // - Get 总是覆盖 (最高优先级)
+                    // - Let 仅在键不存在或现有是 Let/Set 时写入 (不覆盖 Get/Function/Sub)
+                    // - Set 仅在键不存在或现有是 Set/Let 时写入 (不覆盖 Get/Function/Sub/Let)
+                    {
+                        std::string lower = Symbol::toLower(p.name);
+                        auto it = classSym->memberProcKinds.find(lower);
+                        if (p.propKind == ProcKind::PropertyGet) {
+                            classSym->memberProcKinds[lower] = ProcKind::PropertyGet;
+                        } else if (p.propKind == ProcKind::PropertyLet) {
+                            if (it == classSym->memberProcKinds.end()
+                                || it->second == ProcKind::PropertyLet
+                                || it->second == ProcKind::PropertySet) {
+                                classSym->memberProcKinds[lower] = ProcKind::PropertyLet;
+                            }
+                        } else if (p.propKind == ProcKind::PropertySet) {
+                            if (it == classSym->memberProcKinds.end()
+                                || it->second == ProcKind::PropertySet) {
+                                classSym->memberProcKinds[lower] = ProcKind::PropertySet;
+                            }
+                        }
                     }
                     break;
                 }
@@ -353,6 +395,11 @@ void SemanticAnalyzer::registerVariable(VariableDecl& decl) {
         if (decl.asType && decl.asType->kind == ASTNodeKind::SimpleTypeRef) {
             sym->withEventsSourceClass = static_cast<SimpleTypeRef*>(decl.asType.get())->name;
         }
+    }
+    // Fix 010r-11: 记录变量的声明类型名 (用于跨模块解析)
+    // 当变量声明为 As ClassName 时，存储类名以便 consuming 模块的 cgen 能正确识别类实例变量
+    if (decl.asType && decl.asType->kind == ASTNodeKind::SimpleTypeRef) {
+        sym->variableTypeName = static_cast<SimpleTypeRef*>(decl.asType.get())->name;
     }
     symTab_.define(std::move(sym));
 }
@@ -613,6 +660,13 @@ void SemanticAnalyzer::visit(FunctionDecl& node) {
         );
         sym->isStatic = node.isStatic;
 
+        // Fix 015: 记录Function的返回类型名(若返回类/UDT等命名类型)
+        // 用于cgen解析 method chaining: db.Sql(s).Exec(...) 链式调用时
+        // 需要根据 Sql 的返回类名(cDataBase)分发 .Exec → vb6_cDataBase_Exec
+        if (node.returnType && node.returnType->kind == ASTNodeKind::SimpleTypeRef) {
+            sym->variableTypeName = static_cast<SimpleTypeRef*>(node.returnType.get())->name;
+        }
+
         // 注册参数
         for (auto& param : node.params) {
             ParameterInfo pi;
@@ -683,6 +737,13 @@ void SemanticAnalyzer::visit(PropertyDecl& node) {
 
         Vb6Type retType = resolveTypeOrDefault(node.name, node.returnType.get());
         auto sym = std::make_unique<Symbol>(sk, node.name, retType, node.loc, node.access);
+
+        // Fix 015: 记录 Property Get 的返回类型名(若返回类/UDT等命名类型)
+        // 用于 cgen 解析 method chaining: obj.GetContainer().Method() 链式调用
+        if (sk == SymbolKind::PropertyGet
+            && node.returnType && node.returnType->kind == ASTNodeKind::SimpleTypeRef) {
+            sym->variableTypeName = static_cast<SimpleTypeRef*>(node.returnType.get())->name;
+        }
 
         for (auto& param : node.params) {
             ParameterInfo pi;

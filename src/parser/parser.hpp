@@ -99,6 +99,8 @@ private:
     // 声明解析 (parser_decl.cpp)
     // ============================================================
     DeclPtr parseDeclaration();
+    DeclPtr parseVariableDeclList(AccessLevel access, bool isStatic);
+    DeclPtr parseConstDeclList(AccessLevel access);
     std::unique_ptr<SubDecl> parseSubDecl(AccessLevel access, bool isStatic);
     std::unique_ptr<FunctionDecl> parseFunctionDecl(AccessLevel access, bool isStatic);
     std::unique_ptr<PropertyDecl> parsePropertyDecl(AccessLevel access);
@@ -256,6 +258,9 @@ private:
 
     // With 嵌套深度 (>0 时 .member 为 WithMemberExpr)
     int withDepth_ = 0;
+
+    // 单行 If 上下文: >0 时禁止标签检测 (colon是语句分隔符, 非标签冒号)
+    int inSingleLineIf_ = 0;
 
     // 安全限制: advance调用计数
     size_t advanceCount_ = 0;

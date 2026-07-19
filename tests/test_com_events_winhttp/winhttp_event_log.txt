@@ -1,9 +1,9 @@
 === WinHTTP COM Event Test ===
-Start: 2026/7/14 13:00:13
+Start: 2026/7/14 13:02:53
 Request opened
 Request sent, waiting for events...
 OnResponseStart Status=200 ContentType=text/html
 OnResponseDataAvailable
 OnResponseFinished Status=200
-Done: 2026/7/14 13:00:13
+Done: 2026/7/14 13:02:54
 PASS

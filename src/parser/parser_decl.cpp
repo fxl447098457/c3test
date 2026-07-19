@@ -18,9 +18,9 @@ DeclPtr Parser::parseDeclaration() {
         case TokenKind::Enum:     return parseEnumDecl(AccessLevel::Default);
         case TokenKind::Declare:  return parseDeclareDecl(AccessLevel::Default);
         case TokenKind::Event:    return parseEventDecl(AccessLevel::Default);
-        case TokenKind::Const:    return parseConstDecl(AccessLevel::Default);
-        case TokenKind::Dim:      return parseVariableDecl(AccessLevel::Default, false);
-        case TokenKind::Static:   return parseVariableDecl(AccessLevel::Private, true);
+        case TokenKind::Const:    return parseConstDeclList(AccessLevel::Default);
+        case TokenKind::Dim:      return parseVariableDeclList(AccessLevel::Default, false);
+        case TokenKind::Static:   return parseVariableDeclList(AccessLevel::Private, true);
 
         case TokenKind::Public:
         case TokenKind::Private:
@@ -36,7 +36,7 @@ DeclPtr Parser::parseDeclaration() {
             }
             advance(); // consume access modifier
 
-            // Public Sub/Function/Property/Type/Enum/Declare/Event/Const/Dim
+            // Public Sub/Function/property/Type/Enum/Declare/Event/Const/Dim
             switch (cur_.kind) {
                 case TokenKind::Sub:      return parseSubDecl(access, false);
                 case TokenKind::Function: return parseFunctionDecl(access, false);
@@ -45,8 +45,8 @@ DeclPtr Parser::parseDeclaration() {
                 case TokenKind::Enum:     return parseEnumDecl(access);
                 case TokenKind::Declare:  return parseDeclareDecl(access);
                 case TokenKind::Event:    return parseEventDecl(access);
-                case TokenKind::Const:    return parseConstDecl(access);
-                default:                  return parseVariableDecl(access, false);
+                case TokenKind::Const:    return parseConstDeclList(access);
+                default:                  return parseVariableDeclList(access, false);
             }
         }
 
@@ -166,12 +166,48 @@ std::unique_ptr<TypeDecl> Parser::parseTypeDecl(AccessLevel access) {
         if (cur_.kind == TokenKind::End) break;
 
         auto memberLoc = currentLoc();
-        auto memberName = expectName("expected member name");
+        // 允许硬关键字作为 Type 成员名 (如 Next, Type 等)
+        std::string memberNameStr;
+        if (canBeName(cur_.kind)) {
+            memberNameStr = advance().text;
+        } else if (!cur_.text.empty() && cur_.kind != TokenKind::EndOfFile &&
+                   cur_.kind != TokenKind::NewLine && cur_.kind != TokenKind::Colon &&
+                   cur_.kind != TokenKind::LeftParen && cur_.kind != TokenKind::RightParen &&
+                   cur_.kind != TokenKind::Comma && cur_.kind != TokenKind::End) {
+            memberNameStr = advance().text;
+        } else {
+            diag_.error(DiagnosticID::ParseExpectedToken, currentLoc(),
+                std::string("expected member name (got ") +
+                Token::kindToString(cur_.kind) + ")");
+            memberNameStr = "?";
+        }
 
-        // 可能有数组维度: memberName(10) As Type
+        // 可能有数组维度:
+        //   memberName(10) As Type    — 固定大小
+        //   memberName() As Type      — 动态数组
+        //   memberName(1 To 8) As Type — 下界 To 上界
+        //   memberName(1, 2) As Type  — 多维
         ExprPtr arraySize;
         if (match(TokenKind::LeftParen)) {
-            arraySize = parseExpression();
+            if (cur_.kind != TokenKind::RightParen) {
+                // 解析第一个维度
+                auto first = parseExpression();
+                if (match(TokenKind::To)) {
+                    // 1 To 8: 只保留上界 (语法检查阶段)
+                    auto upper = parseExpression();
+                    arraySize = std::move(upper);
+                } else {
+                    arraySize = std::move(first);
+                }
+                // 消费后续维度 (多维数组)
+                while (match(TokenKind::Comma)) {
+                    parseExpression(); // 解析并丢弃后续维度
+                    if (match(TokenKind::To)) {
+                        parseExpression();
+                    }
+                }
+            }
+            // else: 空括号 () = 动态数组, arraySize 保持 nullptr
             expect(TokenKind::RightParen, DiagnosticID::ParseExpectedToken,
                    "expected ')'");
         }
@@ -183,7 +219,7 @@ std::unique_ptr<TypeDecl> Parser::parseTypeDecl(AccessLevel access) {
         expectEndOfStatement();
 
         members.push_back(std::make_unique<TypeMember>(memberLoc,
-            memberName.text, std::move(type), std::move(arraySize)));
+            memberNameStr, std::move(type), std::move(arraySize)));
     }
 
     expect(TokenKind::End, DiagnosticID::ParseMismatchedBlock,
@@ -294,6 +330,7 @@ std::unique_ptr<EventDecl> Parser::parseEventDecl(AccessLevel access) {
     advance(); // consume 'Event'
     auto nameTok = expectName("expected Event name");
     auto params = parseParameterList();
+    expectEndOfStatement();
     return std::make_unique<EventDecl>(loc, access, nameTok.text, std::move(params));
 }
 
@@ -319,6 +356,30 @@ std::unique_ptr<ConstDecl> Parser::parseConstDecl(AccessLevel access) {
 
     return std::make_unique<ConstDecl>(loc, access, nameTok.text,
         std::move(asType), std::move(value));
+}
+
+// Const 列表: Const A = 1, B = 2, C As Long = 3
+DeclPtr Parser::parseConstDeclList(AccessLevel access) {
+    auto first = parseConstDecl(access);
+    if (cur_.kind != TokenKind::Comma) {
+        return first;
+    }
+    DeclList decls;
+    decls.push_back(std::move(first));
+    while (match(TokenKind::Comma)) {
+        auto loc = currentLoc();
+        auto nameTok = expectName("expected Const name");
+        TypeRefPtr asType;
+        if (match(TokenKind::As)) {
+            asType = parseTypeRef();
+        }
+        expect(TokenKind::Equals, DiagnosticID::ParseExpectedToken,
+               "expected '=' in Const declaration");
+        auto value = parseExpression();
+        decls.push_back(std::make_unique<ConstDecl>(loc, access, nameTok.text,
+            std::move(asType), std::move(value)));
+    }
+    return std::make_unique<MultiDecl>(decls[0]->loc, std::move(decls));
 }
 
 // ============================================================
@@ -385,6 +446,22 @@ std::unique_ptr<VariableDecl> Parser::parseVariableDecl(AccessLevel access, bool
     return std::make_unique<VariableDecl>(loc, access, nameTok.text,
         isWithEvents, isStatic, isNew, std::move(asType), std::move(initializer),
         std::move(dimensions), isDynamicArray);
+}
+
+// Variable 列表: Dim a, b As Long, c As String
+// parseVariableDecl 会条件性地消费 Dim/Private/Public 关键字,
+// 对逗号后的后续变量, 当前 token 是变量名而非关键字, 所以可以直接复用
+DeclPtr Parser::parseVariableDeclList(AccessLevel access, bool isStatic) {
+    auto first = parseVariableDecl(access, isStatic);
+    if (cur_.kind != TokenKind::Comma) {
+        return first;
+    }
+    DeclList decls;
+    decls.push_back(std::move(first));
+    while (match(TokenKind::Comma)) {
+        decls.push_back(parseVariableDecl(access, isStatic));
+    }
+    return std::make_unique<MultiDecl>(decls[0]->loc, std::move(decls));
 }
 
 // ============================================================
@@ -492,18 +569,19 @@ TypeRefPtr Parser::parseTypeRef() {
             std::string qualified = tok.text;
             while (cur_.kind == TokenKind::Dot) {
                 advance(); // consume '.'
-                if (cur_.kind == TokenKind::Identifier || cur_.kind == TokenKind::Boolean ||
-                    cur_.kind == TokenKind::Byte || cur_.kind == TokenKind::Integer ||
-                    cur_.kind == TokenKind::Long || cur_.kind == TokenKind::LongLong ||
-                    cur_.kind == TokenKind::LongPtr || cur_.kind == TokenKind::Single ||
-                    cur_.kind == TokenKind::Double || cur_.kind == TokenKind::Currency ||
-                    cur_.kind == TokenKind::Decimal || cur_.kind == TokenKind::Date ||
-                    cur_.kind == TokenKind::Object || cur_.kind == TokenKind::String ||
-                    cur_.kind == TokenKind::Variant) {
-                    qualified += "." + advance().text;
-                } else {
-                    break;
-                }
+            // VB6 允许关键字作为限定类型名组件: ADODB.Error, ADODB.Command 等
+            // 与 parsePostfix() Dot 分支一致, 使用 canBeName + 文本检查
+            if (canBeName(cur_.kind)) {
+                qualified += "." + advance().text;
+            } else if (!cur_.text.empty() && cur_.kind != TokenKind::EndOfFile &&
+                       cur_.kind != TokenKind::NewLine && cur_.kind != TokenKind::Colon &&
+                       cur_.kind != TokenKind::LeftParen && cur_.kind != TokenKind::RightParen &&
+                       cur_.kind != TokenKind::Comma) {
+                // 硬关键字也可作为限定类型名组件 (如 Error, Command, Type 等)
+                qualified += "." + advance().text;
+            } else {
+                break;
+            }
             }
             typeRef = std::make_unique<SimpleTypeRef>(loc, qualified);
         }

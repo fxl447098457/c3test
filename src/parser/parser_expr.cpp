@@ -370,8 +370,22 @@ ExprPtr Parser::parseMeExpr() {
 ExprPtr Parser::parseWithMemberExpr() {
     auto loc = currentLoc();
     advance(); // consume '.'
-    auto memberTok = expectName("expected member name after '.'");
-    auto expr = std::make_unique<WithMemberExpr>(loc, memberTok.text);
+    // 与 parsePostfix Dot 分支一致：允许硬关键字作为成员名 (如 .Type, .Loop)
+    std::string memberName;
+    if (canBeName(cur_.kind)) {
+        memberName = advance().text;
+    } else if (!cur_.text.empty() && cur_.kind != TokenKind::EndOfFile &&
+               cur_.kind != TokenKind::NewLine && cur_.kind != TokenKind::Colon &&
+               cur_.kind != TokenKind::LeftParen && cur_.kind != TokenKind::RightParen &&
+               cur_.kind != TokenKind::Comma) {
+        memberName = advance().text;
+    } else {
+        diag_.error(DiagnosticID::ParseExpectedToken, currentLoc(),
+            std::string("expected member name after '.' (got ") +
+            Token::kindToString(cur_.kind) + ")");
+        memberName = "?";
+    }
+    auto expr = std::make_unique<WithMemberExpr>(loc, memberName);
     return parsePostfix(std::move(expr));
 }
 
@@ -382,27 +396,43 @@ ExprPtr Parser::parseWithMemberExpr() {
 ExprPtr Parser::parsePostfix(ExprPtr expr) {
     while (true) {
         switch (cur_.kind) {
-            case TokenKind::Dot: {
-                auto loc = currentLoc();
-                // P17.1: In With context, Debug.Print .Member should parse .Member
-                // as WithMemberExpr argument, not chain MemberAccessExpr
-                if (withDepth_ > 0 && expr->kind == ASTNodeKind::MemberAccessExpr) {
-                    auto& ma = static_cast<MemberAccessExpr&>(*expr);
-                    if (ma.object && ma.object->kind == ASTNodeKind::IdentifierExpr) {
-                        auto& obj = static_cast<IdentifierExpr&>(*ma.object);
-                        std::string objL = toLower(obj.name);
-                        std::string memL = toLower(ma.memberName);
-                        if (objL == "debug" && (memL == "print" || memL == "assert")) {
-                            return expr;  // stop postfix, let arg parser handle .Member
-                        }
-                    }
+    case TokenKind::Dot: {
+        auto loc = currentLoc();
+        // P17.1: In With context, Debug.Print .Member should parse .Member
+        // as WithMemberExpr argument, not chain MemberAccessExpr
+        if (withDepth_ > 0 && expr->kind == ASTNodeKind::MemberAccessExpr) {
+            auto& ma = static_cast<MemberAccessExpr&>(*expr);
+            if (ma.object && ma.object->kind == ASTNodeKind::IdentifierExpr) {
+                auto& obj = static_cast<IdentifierExpr&>(*ma.object);
+                std::string objL = toLower(obj.name);
+                std::string memL = toLower(ma.memberName);
+                if (objL == "debug" && (memL == "print" || memL == "assert")) {
+                    return expr;  // stop postfix, let arg parser handle .Member
                 }
-                advance(); // consume '.'
-                auto member = expectName("expected member name after '.'");
-                expr = std::make_unique<MemberAccessExpr>(
-                    loc, std::move(expr), member.text);
-                break;
             }
+        }
+        advance(); // consume '.'
+        // VB6 允许关键字作为成员名: obj.Type, obj.Loop, etc.
+        // expectName 只接受 Identifier 和软关键字, 这里扩展为接受所有带文本的 token
+        std::string memberName;
+        if (canBeName(cur_.kind)) {
+            memberName = advance().text;
+        } else if (!cur_.text.empty() && cur_.kind != TokenKind::EndOfFile &&
+                   cur_.kind != TokenKind::NewLine && cur_.kind != TokenKind::Colon &&
+                   cur_.kind != TokenKind::LeftParen && cur_.kind != TokenKind::RightParen &&
+                   cur_.kind != TokenKind::Comma) {
+            // 硬关键字也可作为成员名 (如 Type, Loop, Next 等)
+            memberName = advance().text;
+        } else {
+            diag_.error(DiagnosticID::ParseExpectedToken, currentLoc(),
+                std::string("expected member name after '.' (got ") +
+                Token::kindToString(cur_.kind) + ")");
+            memberName = "?";
+        }
+        expr = std::make_unique<MemberAccessExpr>(
+            loc, std::move(expr), memberName);
+        break;
+    }
 
             case TokenKind::LeftParen: {
                 // VB6 不区分数组索引和函数调用 → IndexOrCallExpr
@@ -415,6 +445,11 @@ ExprPtr Parser::parsePostfix(ExprPtr expr) {
                 if (cur_.kind != TokenKind::RightParen) {
                     do {
                         skipNewLines();
+
+                        // VB6 允许在调用时覆盖传递方式: MyFunc(ByVal arg)
+                        if (cur_.kind == TokenKind::ByVal || cur_.kind == TokenKind::ByRef) {
+                            advance(); // consume ByVal/ByRef, 按位置参数处理
+                        }
 
                         // 命名参数?  name := value (允许软关键字作参数名)
                         if (canBeName(cur_.kind) &&

@@ -367,17 +367,37 @@ std::unique_ptr<IfStmt> Parser::parseIfStmt() {
            "expected 'Then' after If condition");
 
     // 单行 If?  检查 Then 后面是否紧接语句 (无换行)
+    // 跳过 Then 后的可选冒号: If x Then: stmt
+    if (cur_.kind == TokenKind::Colon) {
+        advance();
+    }
     if (cur_.kind != TokenKind::NewLine && cur_.kind != TokenKind::EndOfFile) {
         // 单行 If...Then...[Else...]
         StmtList thenBody;
+        inSingleLineIf_++;
         auto stmt = parseStatement();
         if (stmt) thenBody.push_back(std::move(stmt));
+
+        // 解析 Then 后续的冒号分隔语句: If x Then stmt1: stmt2: stmt3
+        while (cur_.kind == TokenKind::Colon) {
+            advance(); // consume ':'
+            if (cur_.kind == TokenKind::Else) break;
+            auto moreStmt = parseStatement();
+            if (moreStmt) thenBody.push_back(std::move(moreStmt));
+        }
 
         StmtList elseBody;
         if (match(TokenKind::Else)) {
             auto elseStmt = parseStatement();
             if (elseStmt) elseBody.push_back(std::move(elseStmt));
+            // Else 也可以有冒号分隔的多语句
+            while (cur_.kind == TokenKind::Colon) {
+                advance(); // consume ':'
+                auto moreStmt = parseStatement();
+                if (moreStmt) elseBody.push_back(std::move(moreStmt));
+            }
         }
+        inSingleLineIf_--;
 
         return std::make_unique<IfStmt>(loc, std::move(condition),
             std::move(thenBody),
@@ -569,6 +589,8 @@ std::unique_ptr<SelectCaseStmt> Parser::parseSelectCaseStmt() {
         } while (match(TokenKind::Comma));
 
         skipNewLines();
+        // VB6 允许 Case N: statement (冒号分隔)
+        match(TokenKind::Colon);
         auto body = parseBlockUntil({TokenKind::Case, TokenKind::End});
         cases.push_back(std::make_unique<CaseClause>(caseLoc,
             std::move(values), std::move(body)));
@@ -579,6 +601,8 @@ std::unique_ptr<SelectCaseStmt> Parser::parseSelectCaseStmt() {
         advance(); // consume 'Case'
         advance(); // consume 'Else'
         skipNewLines();
+        // VB6 允许 Case Else: statement (冒号分隔)
+        match(TokenKind::Colon);
         elseCase = parseBlockUntil({TokenKind::End});
     }
 
@@ -897,7 +921,25 @@ std::unique_ptr<ReDimStmt> Parser::parseReDimStmt() {
         preserve = true;
     }
 
-    auto varTok = expectName("expected variable name");
+    // 解析变量名, 支持点访问: uOutput.Buffer 和 With块: .Member
+    std::string varName;
+    if (match(TokenKind::Dot)) {
+        varName = ".";
+    }
+    auto varTok = expectName("expected variable name in ReDim");
+    varName += varTok.text;
+    while (match(TokenKind::Dot)) {
+        if (canBeName(cur_.kind)) {
+            varName += "." + advance().text;
+        } else if (!cur_.text.empty() && cur_.kind != TokenKind::EndOfFile &&
+                   cur_.kind != TokenKind::NewLine && cur_.kind != TokenKind::Colon &&
+                   cur_.kind != TokenKind::LeftParen && cur_.kind != TokenKind::RightParen &&
+                   cur_.kind != TokenKind::Comma) {
+            varName += "." + advance().text;
+        } else {
+            break;
+        }
+    }
     expect(TokenKind::LeftParen, DiagnosticID::ParseExpectedToken,
            "expected '(' after ReDim variable");
 
@@ -921,15 +963,15 @@ std::unique_ptr<ReDimStmt> Parser::parseReDimStmt() {
         asType = parseTypeRef();
     }
 
-    return std::make_unique<ReDimStmt>(loc, preserve, varTok.text,
+    return std::make_unique<ReDimStmt>(loc, preserve, varName,
         std::move(dims), std::move(asType));
 }
 
 StmtPtr Parser::parseConstStmtInBody() {
     auto loc = currentLoc();
-    advance(); // consume 'Const'
-    auto constDecl = parseConstDecl(AccessLevel::Private);
-    return std::make_unique<LocalDeclStmt>(loc, std::move(constDecl));
+    // 不需要 advance() — parseConstDeclList -> parseConstDecl 会消费 'Const'
+    auto decl = parseConstDeclList(AccessLevel::Private);
+    return std::make_unique<LocalDeclStmt>(loc, std::move(decl));
 }
 
 StmtPtr Parser::parseStaticStmtInBody() {
@@ -944,7 +986,7 @@ StmtPtr Parser::parseStaticStmtInBody() {
         auto funcDecl = parseFunctionDecl(AccessLevel::Private, true);
         return std::make_unique<LocalDeclStmt>(loc, std::move(funcDecl));
     }
-    auto varDecl = parseVariableDecl(AccessLevel::Private, true);
+    auto varDecl = parseVariableDeclList(AccessLevel::Private, true);
     return std::make_unique<LocalDeclStmt>(loc, std::move(varDecl));
 }
 
@@ -954,7 +996,7 @@ StmtPtr Parser::parseAccessDeclInBody() {
     AccessLevel access = (cur_.kind == TokenKind::Public)
         ? AccessLevel::Public : AccessLevel::Private;
     advance();
-    auto varDecl = parseVariableDecl(access, false);
+    auto varDecl = parseVariableDeclList(access, false);
     return std::make_unique<LocalDeclStmt>(loc, std::move(varDecl));
 }
 
@@ -966,9 +1008,38 @@ std::unique_ptr<EraseStmt> Parser::parseEraseStmt() {
     auto loc = currentLoc();
     advance(); // consume 'Erase'
     std::vector<std::string> names;
-    names.push_back(expectName("expected variable name").text);
+
+    // 辅助: 解析一个 Erase 目标, 支持 .Member (With块) 和 obj.Member
+    auto parseEraseTarget = [this]() -> std::string {
+        std::string name;
+        if (match(TokenKind::Dot)) {
+            name = ".";
+        }
+        if (canBeName(cur_.kind)) {
+            name += advance().text;
+        } else if (!cur_.text.empty() && cur_.kind != TokenKind::EndOfFile &&
+                   cur_.kind != TokenKind::NewLine && cur_.kind != TokenKind::Colon &&
+                   cur_.kind != TokenKind::Comma) {
+            name += advance().text;
+        }
+        // 支持 obj.Member.Member 链
+        while (match(TokenKind::Dot)) {
+            if (canBeName(cur_.kind)) {
+                name += "." + advance().text;
+            } else if (!cur_.text.empty() && cur_.kind != TokenKind::EndOfFile &&
+                       cur_.kind != TokenKind::NewLine && cur_.kind != TokenKind::Colon &&
+                       cur_.kind != TokenKind::Comma) {
+                name += "." + advance().text;
+            } else {
+                break;
+            }
+        }
+        return name;
+    };
+
+    names.push_back(parseEraseTarget());
     while (match(TokenKind::Comma)) {
-        names.push_back(expectName("expected variable name").text);
+        names.push_back(parseEraseTarget());
     }
     return std::make_unique<EraseStmt>(loc, std::move(names));
 }
@@ -999,7 +1070,8 @@ StmtPtr Parser::parseLabelOrAssignmentOrCall() {
 
     // 检查是否是标签: Name 后面紧跟冒号
     // 在语句起始位置, identifier: 只能是标签（VB6 规则）
-    if (canBeName(cur_.kind) && next_.kind == TokenKind::Colon) {
+    // 但在单行 If 内, colon 是语句分隔符 (If x Then a: b: c)
+    if (inSingleLineIf_ == 0 && canBeName(cur_.kind) && next_.kind == TokenKind::Colon) {
         auto nameTok = advance();  // consume label name
         advance();                 // consume ':'
         return std::make_unique<LabelStmt>(loc, nameTok.text);
@@ -1060,8 +1132,19 @@ StmtPtr Parser::parseLabelOrAssignmentOrCall() {
         };
 
         // 第一个参数
+        if (cur_.kind == TokenKind::ByVal || cur_.kind == TokenKind::ByRef) {
+            advance(); // 消费 ByVal/ByRef
+        }
         if (canStartArg()) {
-            call->positional.push_back(parseExpression());
+            // 命名参数?  name := value
+            if (canBeName(cur_.kind) && next_.kind == TokenKind::Assign) {
+                auto nameTok = advance(); // name
+                advance(); // consume ':='
+                auto val = parseExpression();
+                call->named.push_back({nameTok.text, std::move(val)});
+            } else {
+                call->positional.push_back(parseExpression());
+            }
         }
 
         // 后续参数: 逗号或分号后继续
@@ -1074,8 +1157,20 @@ StmtPtr Parser::parseLabelOrAssignmentOrCall() {
             }
             // 逗号分隔 -> 继续解析下一个参数
             if (match(TokenKind::Comma)) {
+                // ByVal/ByRef 前缀
+                if (cur_.kind == TokenKind::ByVal || cur_.kind == TokenKind::ByRef) {
+                    advance();
+                }
                 if (canStartArg()) {
-                    call->positional.push_back(parseExpression());
+                    // 命名参数?  name := value
+                    if (canBeName(cur_.kind) && next_.kind == TokenKind::Assign) {
+                        auto nameTok = advance();
+                        advance(); // ':='
+                        auto val = parseExpression();
+                        call->named.push_back({nameTok.text, std::move(val)});
+                    } else {
+                        call->positional.push_back(parseExpression());
+                    }
                 }
                 continue;
             }
@@ -1176,7 +1271,10 @@ std::unique_ptr<GetStmt> Parser::parseGetStmt() {
     auto fileNumber = parseExpression();
     ExprPtr recordNumber;
     if (match(TokenKind::Comma)) {
-        recordNumber = parseExpression();
+        // VB6 允许省略记录号: Get #1, , data
+        if (cur_.kind != TokenKind::Comma) {
+            recordNumber = parseExpression();
+        }
     }
     expect(TokenKind::Comma, DiagnosticID::ParseExpectedToken,
            "expected ',' in Get statement");
@@ -1192,7 +1290,10 @@ std::unique_ptr<PutStmt> Parser::parsePutStmt() {
     auto fileNumber = parseExpression();
     ExprPtr recordNumber;
     if (match(TokenKind::Comma)) {
-        recordNumber = parseExpression();
+        // VB6 允许省略记录号: Put #1, , data
+        if (cur_.kind != TokenKind::Comma) {
+            recordNumber = parseExpression();
+        }
     }
     expect(TokenKind::Comma, DiagnosticID::ParseExpectedToken,
            "expected ',' in Put statement");

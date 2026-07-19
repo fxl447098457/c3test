@@ -14,6 +14,7 @@
 #include <sstream>
 #include <unordered_set>
 #include <unordered_map>
+#include <set>
 
 namespace vb6c3 {
 
@@ -63,7 +64,9 @@ private:
 class CCodeGen : public ASTVisitor {
 public:
     CCodeGen(Diagnostics& diag, const SymbolTable& symTab,
-             const TypeSystem& typeSys, bool verbose = false);
+             const TypeSystem& typeSys,
+             const std::unordered_map<std::string, std::set<std::string>>* classVoidFieldMap = nullptr,
+             bool verbose = false);
 
     // 主入口: 生成C代码，返回是否成功
     // externalModules: 当前模块引用的外部模块基名列表 (用于生成 #include)
@@ -232,12 +235,17 @@ private:
         FormControl,    // 窗体控件HWND: 使用 getControlPropReadFn/WriteFn
         WithEventsCtrl, // WithEvents控件变量HWND: 使用WE属性路径
         COMObject,      // COM IDispatch*: 使用 vb6_ComGetProp/ComSetProp
-        ClassInstance   // 类实例指针: 使用类方法调用
+        ClassInstance,  // 类实例指针: 使用类方法调用
+        BuiltinObject   // 内置全局对象(Err/App等): 使用函数调用
     };
     struct WithObjInfo {
         WithObjKind kind = WithObjKind::Unknown;
         FrmControlType ctrlType = FrmControlType::Unknown;
         std::string ctrlOrigName;    // 控件原始大小写名称(用于HWND变量名)
+        // Fix 011r-1: 类实例的类名(如"cJson"), 仅 ClassInstance kind 有意义
+        // 已知时优先通过 resolveClassMemberCall 精确解析该类的成员方法/属性,
+        // 并把 tempType 设为 vb6_cls_<className>* (避免 void* 上的 .member/->member 错误)
+        std::string className;
     };
     std::vector<WithObjInfo> withObjectInfoStack_;
     bool suppressDefaultProp_ = false;  // P17.1: With对象表达式时抑制默认属性读取
@@ -279,8 +287,31 @@ private:
     std::unordered_set<std::string> classBstrMembers_;
     std::unordered_set<std::string> classLongMembers_;
     std::unordered_set<std::string> classDoubleMembers_;
-    // 已知类实例变量名集合 (小写) - 用于方法调用翻译 c.Method → vb6_Method(c)
-    std::unordered_set<std::string> knownClassVars_;
+    // Fix 010r: ALL class member variable names (lowercase, both with/without m_ prefix)
+    // Used for me-> prefix detection in Erase/ReDim/Assignment statements
+    std::unordered_set<std::string> classMemberVars_;
+    // Fix 023: 全局类 void* (外部 COM 类型) 字段表 — 跨 CCodeGen 实例共享.
+    // 由 driver.cpp 在 runCodeGeneration 主循环前一次性预扫描所有模块 AST 计算.
+    // key: 类名 (如 "cDataBase"), value: 该类结构体中 void* 字段的 lowercase 名集合
+    // (包含原名小写 + "m_" 前缀小写两种形式).
+    // 在 cgen_expr.cpp knownClassVars_ fallback 路径查询以判断 obj->member 是否
+    // 返回 void* COM 指针. 若是, 在 emit 的注释中加入 "voidptr" 标记, 由外层
+    // MemberAccessExpr 的链式 COM 检测2 (~line 1477) 识别并切换为 COM dispatch
+    // (vb6_ComCall/ComGet*Prop). 例: Db.Rs.EOF (Rs 是 ADODB.Recordset 字段)
+    //   内层 Db.Rs → emit "Db->Rs  /* class var .Rs field voidptr */"
+    //   外层 .EOF  → 识别 voidptr → vb6_ComGet*Prop(Db->Rs..., L"EOF")
+    const std::unordered_map<std::string, std::set<std::string>>* classVoidFieldMap_ = nullptr;
+    // Fix 010n: 类模块UDT成员变量 (小写var名 → UDT类型C标识符)
+    // 用于在过程开始时恢复 knownUdtVars_ (因clear()会丢失类成员UDT变量)
+    std::unordered_map<std::string, std::string> classUdtMembers_;
+    // 已知类实例变量名 → 类名映射 (小写var名 → 类名, 如 "me" → "cDialog")
+    // 用于方法调用翻译 c.Method → vb6_cls_ClassName_Method(c)
+    // Fix 010r-10: 从 unordered_set 改为 unordered_map 以支持类名查找
+    std::unordered_map<std::string, std::string> knownClassVars_;
+
+    // Fix 010o: 过程局部变量名集合 (小写) — Dim声明的局部变量 + For/ForEach循环变量
+    // 用于在IdentifierExpr中避免对局部变量错误添加 me-> 前缀
+    std::unordered_set<std::string> knownLocalVars_;
 
     // UDT变量名集合 (小写var名 → UDT类型C标识符, 如 "p" → "vb6_type_Point")
     // 用于成员访问时区分"p.X"(结构体字段) vs "Module1.X"(模块变量)
@@ -316,6 +347,15 @@ private:
     // 用于在.h文件中生成typedef前向声明, 使 vb6_iface_<Name> 类型可用
     std::unordered_set<std::string> usedVb6IfaceTypes_;
 
+    // Fix 010: 已使用的VB6类类型名 (如 "cHttpServerContext")
+    // 用于在.h文件中生成typedef前向声明, 使 vb6_cls_<Name>* 类型可用
+    // 解决循环#include导致的类型未定义问题 (C2081错误)
+    std::unordered_set<std::string> usedClassTypes_;
+
+    // Fix 010: 已使用的VB6 UDT类型名 (如 "TypeLang")
+    // 用于在.h文件中生成typedef前向声明, 使 vb6_type_<Name> 类型可用
+    std::unordered_set<std::string> usedUdtTypes_;
+
     // COM后期绑定中间状态 (P6.2)
     // MemberAccessExpr为COM对象设置此字段, IndexOrCallExpr/AssignmentStmt/SetStmt读取后清除
     // 当此字段非空时, lastExpr_中的"值"是对象表达式, comMemberName_是成员名
@@ -340,9 +380,22 @@ private:
     // VB6语义: 同名函数引用 — callee上下文返回函数名(供调用), 其他上下文返回返回值变量
     bool asCallCallee_ = false;
 
+    // Fix 015: 类方法链式调用对象参数传递管道
+    // visit(MemberAccessExpr) 在 Fix 015 路径中, 当 asCallCallee_=true (外层是
+    // IndexOrCallExpr 或 CallStmt 的 callee context) 时, 不直接 emit "func(wrappedObj)"
+    // (那样会让 IndexOrCallExpr 的空参数shortcut 或 CallStmt 的 bare-call 分支错误地
+    // 把 callee 当作已完成调用, 跳过 Optional 参数默认值填充), 而是把 wrappedObj 存储
+    // 到此字段, lastExpr_ 只返回裸函数名. visit(IndexOrCallExpr) / visit(CallStmt) 在
+    // 完成参数处理后从此字段取出 wrappedObj, 作为首个 (this指针) 参数前置.
+    // 一旦消费即清空, 防止跨调用泄漏.
+    std::string pendingChainObj_;
+
     // 类模块标志
     bool isClassModule_ = false;
     bool isFormModule_ = false;
+
+    // Fix 010: 类模块变量注册模式 — 只填充tracking set, 不生成变量声明(已在结构体中)
+    bool trackOnly_ = false;
     std::string formName_;  // M22-Issue6: 当前窗体模块名 (用于Form Print)
 
     // P6.4: Implements 接口引用变量 (小写变量名 → 接口名)
@@ -415,6 +468,10 @@ private:
 
     // TypeRefPtr → C类型字符串 (非const: P6.3收集COM接口类型名)
     std::string mapTypeRef(ASTNode* typeRef);
+
+    // Fix 010b: 尝试将AST表达式常量折叠为int64_t (用于enum成员值)
+    // 成功返回true并设置result, 失败返回false
+    bool tryEvalConstInt(ASTNode* expr, int64_t& result);
 
     // VB6默认值 → C表达式
     std::string defaultValue(Vb6Type type) const;
@@ -502,6 +559,10 @@ private:
     // 生成类方法函数体中的Me引用名
     std::string classMeParam() const;
 
+    // Fix 019: 在事件包装函数体内把 void* handler 转换为类指针类型
+    // 用于替代历史上误用的 classMeParam() (那是参数声明, 不能作为函数调用实参)
+    std::string classHandlerCast() const;
+
     // ---- 二元运算符映射 ----
     std::string mapBinaryOp(BinaryOp op) const;
 
@@ -530,6 +591,50 @@ private:
     // 当isComMarker_为true时调用, 生成vb6_ComGetProp+Unpack, 并清除标记
     // unresolvedType: 期望的解封类型, 默认为BSTR (最通用)
     std::string resolveComValue(const std::string& unresolvedType = "BSTR");
+
+    // Fix 010r-16: COM/Property-Get 左值重写辅助
+    // 当赋值语句(Let/Set/Assignment fallback)的 LHS 是非常量 C 表达式(非左值)时,
+    // 尝试重写为 COM SetProp/SetPropArg 或 Property Let/Set 调用.
+    // 参数:
+    //   target  - LHS 的 C 表达式(已被 emitExpr 产生)
+    //   value   - RHS 的 C 表达式(已被 emitExpr 产生, 已完成 COM 解封)
+    //   valueExpr - RHS 的 AST 节点(用于 comPackExpr 推断封装函数)
+    //   isSet   - true 表示 Set 语句(对象引用语义), false 表示 Let/Assignment
+    // 返回值: 若成功重写并已 emit, 返回 true; 否则返回 false(让调用者继续 fallback)
+    bool tryRewriteCOMLvalue(const std::string& target, const std::string& value,
+                             Expr* valueExpr, bool isSet);
+
+    // Fix 011r-1: 类实例成员调用解析辅助
+    // 给定类名与成员名, 在当前作用域的模块级符号表中查找属于该类的方法/属性符号,
+    // 返回构造的 C 函数名:
+    //   - Sub/Function     → vb6_<className>_<memberName>
+    //   - Property Get     → vb6_<className>_prop_get_<memberName>  (读上下文优先)
+    //   - Property Let     → vb6_<className>_prop_let_<memberName>  (仅当没有 Get 时返回)
+    //   - Property Set     → vb6_<className>_prop_set_<memberName>  (仅当没有 Get/Let 时返回)
+    // 匹配条件 (跨模块): sym->isExternal && sym->sourceModule == className
+    // 匹配条件 (同模块类): !sym->isExternal && isClassModule_ && moduleName_ == className  (Fix 013: moduleName_ = VB_Name)
+    // 返回空串表示该类中无对应方法/属性, 调用者应视为数据字段访问 (obj->member)
+    std::string resolveClassMemberCall(const std::string& className,
+                                       const std::string& memberName) const;
+
+    // ---- Fix 015: Method chaining 解析辅助 ----
+    // 给定一个表达式 AST 节点, 推断其在运行时返回的类名 (如果它返回类实例)
+    //  - IdentifierExpr: 查 knownClassVars_, 找到则返回该变量的声明类名
+    //  - IndexOrCallExpr: 递归推断 callee.object 的类名, 再用 getClassMethodReturnType 找方法的返回类名
+    //  - 其他: 返回空串 (不可推断为类实例)
+    // 用于链式调用 db.Sql(s).Exec(...) 中 .Exec 的对象表达式 (db.Sql(s)) 类型推断
+    std::string inferClassTypeOfExpr(const ASTNode& expr) const;
+
+    // 给定类名与成员名, 在当前模块作用域符号表中查找属于该类的 Function/PropertyGet 符号,
+    // 若其返回类型为 Object 且记录了 variableTypeName (Fix 015), 返回经 canonicalClassName
+    // 规范化后的类名; 否则返回空串. 用于推断方法返回值的类类型.
+    std::string getClassMethodReturnType(const std::string& className,
+                                         const std::string& memberName) const;
+
+    // 将可能存在大小写差异的类型名 (来自源码 variableTypeName) 规范化为符号表中
+    // Class 符号记录的标准名称 (clsSym->name 或 sourceModule), 与 struct 定义
+    // vb6_cls_<canonicalName> 大小写一致. 找不到时原样返回.
+    std::string canonicalClassName(const std::string& typeName) const;
 
     // ---- 数组辅助 ----
     // VB6类型 → SAFEARRAY元素类型C枚举名

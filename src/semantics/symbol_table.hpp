@@ -103,10 +103,39 @@ struct Symbol {
     // sourceModule 记录符号定义所在的模块基名（如 "MathUtils"）
     // 仅当 isExternal=true 时有效
     std::string sourceModule;
+    // Fix 010r-11: 变量的声明类型名 (如 "cToolsStr", "ADODB.Connection")
+    // 仅对 SymbolKind::Variable 有效 — 当变量声明为 As ClassName 时存储类名
+    // 用于跨模块解析时传递类类型信息到 consuming 模块的 cgen
+    std::string variableTypeName;
 
     // --- 类相关 (仅SymbolKind::Class) ---
     VBInstancing instancing = VBInstancing::Private;  // Instancing属性
     std::vector<std::string> memberNames;              // 类成员名称列表(方法+属性+事件)
+    // Fix 015: 成员返回类型表 — 仅记录 Function/PropertyGet 返回类型名为命名类型
+    // (即 returnType 是 SimpleTypeRef 的成员) 的方法. key=成员名小写, value=返回类型名(源码原样).
+    // 用于 method chaining: 当跨模块 storageKey 冲突导致消费模块符号表中找不到
+    // 目标类的 Function 符号时 (如 cCryptoHMAC.DataString 与 cCryptoHash.DataString 冲突,
+    // 只保留首个外部符号), getClassMethodReturnType 可从 Class 符号本身读取返回类型,
+    // 从而让 HMAC.Secret(...).DataString(...).ReturnHex(...) 三级链式调用能继续.
+    // 注: 与 memberNames 不同, 此表不包含 Let/Set/Variable/Event — 它们无返回值.
+    //     同名 Property Get/Let/Set 共用同一个 lowerName 键; 只在 Get 时写入,
+    //     Let/Set 会覆盖. 因 Get 先于 Let/Set 处理, 同名共存时记录的是 Get 的返回类型
+    //     (后者无返回类型, 不写入, 但会覆盖 — 故需在写入前判断 node.propKind==Get).
+    std::unordered_map<std::string, std::string> memberReturnTypes;
+    // Fix 016: 成员过程类型表 — 解决 prop_get_ 前缀启发式误判 (Fix 014b 遗留).
+    // 跨模块 storageKey 冲突场景下 resolveClassMemberCall 的 fallback 需要判断
+    // 目标成员在目标类中到底是 Function/Sub (无前缀) 还是 Property Get/Let/Set
+    // (对应 prop_get_/prop_let_/prop_set_ 前缀), 之前的启发式用 "作用域中存在
+    // <lower>$pg 外部符号" 判断, 在跨类同名混合 (如 cCryptoHMAC.Mode=Function,
+    // cDelay.Mode=PropertyGet 共 6 个类的 Mode 互相冲突) 时会误判.
+    // 覆盖规则 (语义分析填表时执行, 见 semantic_analyzer.cpp analyze()):
+    // - Function    → 写入 Function    (覆盖)
+    // - Sub         → 写入 Sub         (覆盖)
+    // - PropertyGet → 写入 PropertyGet (覆盖)  // 读上下文优先级最高
+    // - PropertyLet → 仅在当前键不存在或为 Let/Set 时写入 (不覆盖 Get/Function)
+    // - PropertySet → 仅在当前键不存在或为 Let 时写入    (不覆盖 Get/Function/Let)
+    // 读上下文 (resolveClassMemberCall) 优先级: Get > Function > Sub > Let > Set.
+    std::unordered_map<std::string, ProcKind> memberProcKinds;
     bool isInterface = false;                          // 是否为接口类(纯抽象,无实现)
     std::vector<std::string> implementsNames;          // Implements列表: 该类实现的接口名
     // 接口方法(仅isInterface=true时有意义): 必须被实现类覆盖的方法签名
@@ -187,7 +216,7 @@ struct Symbol {
         return result;
     }
 
-    // 存储键: Property Get/Let/Set加后缀区分同名共存, 其他用lowerName
+    // 存储键: Property Get/Let/Set加后缀区分同名共存, Event也加后缀, 其他用lowerName
     std::string storageKey() const {
         if (isPropertyKind(kind)) {
             switch (kind) {
@@ -196,6 +225,11 @@ struct Symbol {
                 case SymbolKind::PropertySet:  return lowerName + "$ps";
                 default: break;
             }
+        }
+        // Event 使用独立存储键, 允许同名 Sub/Function 共存
+        // VB6合法: Public Event CloseSck() + Public Sub CloseSck()
+        if (kind == SymbolKind::Event) {
+            return lowerName + "$ev";
         }
         return lowerName;
     }

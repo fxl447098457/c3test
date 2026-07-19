@@ -1,0 +1,198 @@
+VERSION 5.00
+Begin VB.Form Fmain 
+   Caption         =   "VBMAN"
+   ClientHeight    =   5610
+   ClientLeft      =   120
+   ClientTop       =   765
+   ClientWidth     =   9450
+   Icon            =   "Fmain.frx":0000
+   LinkTopic       =   "Form1"
+   ScaleHeight     =   5610
+   ScaleWidth      =   9450
+   StartUpPosition =   1  '所有者中心
+   Begin VB.Timer Timer1 
+      Enabled         =   0   'False
+      Interval        =   100
+      Left            =   5400
+      Top             =   4080
+   End
+   Begin VBMANLIB.ucLogs Logs 
+      Height          =   3255
+      Left            =   720
+      TabIndex        =   0
+      Top             =   360
+      Width           =   6615
+      _ExtentX        =   11668
+      _ExtentY        =   5741
+   End
+   Begin VB.Menu Install 
+      Caption         =   "安装"
+      Begin VB.Menu InstallService 
+         Caption         =   "系统服务"
+         Enabled         =   0   'False
+      End
+      Begin VB.Menu InstallDirMenu 
+         Caption         =   "右键启动"
+      End
+      Begin VB.Menu InstallUrlCall 
+         Caption         =   "URL协议启动"
+         Enabled         =   0   'False
+      End
+      Begin VB.Menu InstallCOM 
+         Caption         =   "COM组件"
+      End
+   End
+   Begin VB.Menu Servers 
+      Caption         =   "服务器"
+      Begin VB.Menu ServerHttp 
+         Caption         =   "Http/SSE服务器"
+      End
+      Begin VB.Menu ServerTcp 
+         Caption         =   "Tcp服务器"
+         Enabled         =   0   'False
+      End
+      Begin VB.Menu ServerWebsocket 
+         Caption         =   "Websocket服务器"
+         Enabled         =   0   'False
+      End
+      Begin VB.Menu ServerTelnet 
+         Caption         =   "Telnet服务器"
+         Enabled         =   0   'False
+      End
+   End
+   Begin VB.Menu LogLevels 
+      Caption         =   "日志级别"
+      Begin VB.Menu LogLevel 
+         Caption         =   "Debugger"
+         Index           =   0
+      End
+      Begin VB.Menu LogLevel 
+         Caption         =   "Info"
+         Index           =   1
+      End
+      Begin VB.Menu LogLevel 
+         Caption         =   "Warn"
+         Index           =   2
+      End
+      Begin VB.Menu LogLevel 
+         Caption         =   "Danger"
+         Index           =   3
+      End
+      Begin VB.Menu LogLevel 
+         Caption         =   "Errors"
+         Index           =   4
+      End
+      Begin VB.Menu LogLevel 
+         Caption         =   "Custom"
+         Index           =   9
+      End
+      Begin VB.Menu d1 
+         Caption         =   "-"
+      End
+      Begin VB.Menu LogLevelOnly 
+         Caption         =   "精确日志级别"
+      End
+   End
+   Begin VB.Menu Help 
+      Caption         =   "帮助"
+      Begin VB.Menu HelpDoc 
+         Caption         =   "使用手册"
+      End
+      Begin VB.Menu HelpAbout 
+         Caption         =   "关于软件"
+      End
+   End
+   Begin VB.Menu LangSelect 
+      Caption         =   "Language"
+      Begin VB.Menu LangSelectItem 
+         Caption         =   "-"
+         Index           =   0
+      End
+   End
+End
+Attribute VB_Name = "Fmain"
+Attribute VB_GlobalNameSpace = False
+Attribute VB_Creatable = False
+Attribute VB_PredeclaredId = True
+Attribute VB_Exposed = False
+Option Explicit
+
+Dim WithEvents HttpServer As cHttpServer
+Attribute HttpServer.VB_VarHelpID = -1
+
+Public Function StartServer( _
+    ByVal Address As String, _
+    ByVal Port As Long, _
+    ByVal WebRoot As String, _
+    ByVal SSEPath As String, _
+    ByVal IsSaveLogs As Boolean _
+    ) As Boolean
+    If ToolsFso.IsFullPath(WebRoot) = False Then
+        WebRoot = ToolsFso.AppPath(WebRoot)
+    End If
+    With HttpServer
+        If SSEPath <> "" Then .SSE.Start SSEPath
+        .ScriptEngine.Start
+        StartServer = .Start(Port, WebRoot, Address)
+        If StartServer = True Then
+            Logs.IsSaveToFile = IsSaveLogs
+            Logs.Add INFO, Lang("Fmain.StartServer.Logs.Info.1")
+            Logs.Add INFO, Lang("Fmain.StartServer.Logs.Info.2") & Address
+            Logs.Add INFO, Lang("Fmain.StartServer.Logs.Info.3") & Port
+            Logs.Add INFO, Lang("Fmain.StartServer.Logs.Info.4") & WebRoot
+            If SSEPath <> "" Then Logs.Add INFO, Lang("Fmain.StartServer.Logs.Info.5") & SSEPath
+        Else
+            MsgBox .LastError
+        End If
+    End With
+End Function
+
+Private Sub Form_Load()
+    Me.Caption = "VBMAN " & Common.Version
+    Lang.Render Me
+    Lang.SetSelector LangSelectItem
+    Set HttpServer = New cHttpServer
+    LogLevel(ToolsLogs.LogLevel).Checked = True
+End Sub
+
+Private Sub Form_Resize()
+    Logs.Move 0, 0, Me.ScaleWidth, Me.ScaleHeight
+End Sub
+
+Private Sub HelpAbout_Click()
+    With FLayer
+        .IsBlurClose = True
+        .ShowTo Lang("Fmain.HelpAbout.Content")
+    End With
+End Sub
+
+Private Sub HelpDoc_Click()
+    Shell "explorer https://doc.vb6.pro/vbsman"
+End Sub
+
+Private Sub HttpServer_OnLogs(ByVal Level As String, ByVal Content As String)
+    Logs.Add INFO, Content
+End Sub
+
+Private Sub LangSelectItem_Click(Index As Integer)
+    If Lang.Selected(Index) = False Then MsgBox "切换失败": Exit Sub
+    Logs.Add INFO, Lang("Wellcome")
+End Sub
+
+Private Sub LogLevel_Click(Index As Integer)
+    Logs.SetLogLevelMenu LogLevel, Index
+End Sub
+
+Private Sub LogLevelOnly_Click()
+    LogLevelOnly.Checked = Not LogLevelOnly.Checked
+    Logs.LogLevelOnly = LogLevelOnly.Checked
+End Sub
+
+Private Sub ServerHttp_Click()
+    FSettingHttp.Show 1
+End Sub
+
+Private Sub Timer1_Timer()
+    Logs.Add EnumLevel.Danger, "HHHHH"
+    Logs.Add EnumLevel.CUSTOM + 1002, "EEEEE"
+End Sub

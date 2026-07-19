@@ -115,8 +115,10 @@ bool SymbolTable::define(std::unique_ptr<Symbol> sym) {
     // P6.3 + P24-05: COM内置类型与用户变量可同名 (不同namespace)
     // 如果新符号是builtin的ComClass/ComInterface/ComModule/ComGlobalNs, 且已有同名符号, 跳过不报错
     // 如果已有符号是ComClass/ComInterface/ComModule, 且新符号是用户变量, 也允许覆盖
+    // Fix 018: builtin EnumMember 同样跳过 (COM 类型库枚举成员跨 enum 同名时 first-wins, 如 MSHTML)
     if (sym->isBuiltin && (sym->kind == SymbolKind::ComClass || sym->kind == SymbolKind::ComInterface
-                         || sym->kind == SymbolKind::ComModule || sym->kind == SymbolKind::ComGlobalNs)) {
+                         || sym->kind == SymbolKind::ComModule || sym->kind == SymbolKind::ComGlobalNs
+                         || sym->kind == SymbolKind::EnumMember)) {
         auto* existing = current_->lookupLocal(lowerName);
         if (existing) {
             // 已有同名符号, 跳过COM类型注册 (避免重复注册)
@@ -132,6 +134,24 @@ bool SymbolTable::define(std::unique_ptr<Symbol> sym) {
             && sym->kind != SymbolKind::ComModule && sym->kind != SymbolKind::ComGlobalNs) {
             // 移除COM类型符号, 允许用户变量覆盖
             current_->symbols_.erase(lowerName);
+        }
+    }
+
+    // 允许用户定义的 Sub/Function/Variable/Constant 覆盖内置符号
+    // VB6合法: 类方法/变量名可与内置函数同名 (如 Timer, FormatDateTime, LTrim, App)
+    // Fix 018: 用户 EnumMember 也可覆盖内置 COM 枚举成员 (如 cDatabase.cls 自定义 adEmpty
+    // 覆盖 ADO DataTypeEnum 的 adEmpty — 用户项目声明优先于引用的类型库)
+    {
+        auto* existing = current_->lookupLocal(lowerName);
+        if (existing && existing->isBuiltin
+            && !sym->isBuiltin
+            && (sym->kind == SymbolKind::Sub
+                || sym->kind == SymbolKind::Function
+                || sym->kind == SymbolKind::Variable
+                || sym->kind == SymbolKind::Constant
+                || sym->kind == SymbolKind::EnumMember)) {
+            // 移除内置符号, 允许用户符号替换
+            current_->symbols_.erase(existing->storageKey());
         }
     }
 
@@ -222,7 +242,10 @@ std::vector<const Symbol*> SymbolTable::getPublicSymbols() const {
                 sym->kind == SymbolKind::Class ||
                 sym->kind == SymbolKind::PropertyGet ||
                 sym->kind == SymbolKind::PropertyLet ||
-                sym->kind == SymbolKind::PropertySet) {
+                sym->kind == SymbolKind::PropertySet ||
+                sym->kind == SymbolKind::EnumType ||
+                sym->kind == SymbolKind::EnumMember ||
+                sym->kind == SymbolKind::UserDefinedType) {
                 result.push_back(sym.get());
             }
         }

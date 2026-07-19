@@ -122,7 +122,7 @@ Token Parser::fetchNextToken() {
             tok.kind = TokenKind::EndOfFile;
             break;
         }
-    } while (tok.kind == TokenKind::Comment);
+    } while (tok.kind == TokenKind::Comment || tok.kind == TokenKind::LineContinuation);
     return tok;
 }
 
@@ -286,7 +286,7 @@ bool Parser::isDeclarationStart() const {
 // ============================================================
 
 void Parser::skipNewLines() {
-    while (cur_.kind == TokenKind::NewLine || cur_.kind == TokenKind::Comment) {
+    while (cur_.kind == TokenKind::NewLine || cur_.kind == TokenKind::Comment || cur_.kind == TokenKind::LineContinuation) {
         advance();
     }
 }
@@ -498,7 +498,15 @@ void Parser::parseModuleBody(Module& mod) {
         if (isDeclarationStart()) {
             auto decl = parseDeclaration();
             if (decl) {
-                mod.declarations.push_back(std::move(decl));
+                // 逗号分隔的多变量声明展开为独立声明
+                if (decl->kind == ASTNodeKind::MultiDecl) {
+                    auto* multi = static_cast<MultiDecl*>(decl.get());
+                    for (auto& d : multi->declarations) {
+                        mod.declarations.push_back(std::move(d));
+                    }
+                } else {
+                    mod.declarations.push_back(std::move(decl));
+                }
             }
             continue;
         }

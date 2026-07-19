@@ -40,7 +40,8 @@ std::string MsvcDriver::findVsInstallPath() {
 
     if (std::filesystem::exists(vswhere)) {
         // Run vswhere to get installation path
-        std::string cmd = "\"" + vswhere + "\" -all -latest -property installationPath";
+        // -products * : include BuildTools (not just full VS editions)
+        std::string cmd = "\"" + vswhere + "\" -all -latest -products * -property installationPath";
         // Use _popen to capture output
         FILE* pipe = _popen(cmd.c_str(), "r");
         if (pipe) {
@@ -81,6 +82,26 @@ std::string MsvcDriver::findVsInstallPath() {
         RegCloseKey(hKey);
     }
 #endif
+
+    // Method 3: Check well-known filesystem paths directly (fallback for BuildTools
+    // when vswhere is absent or doesn't report the product)
+    const char* pf_x86_2 = std::getenv("ProgramFiles(x86)");
+    if (!pf_x86_2) pf_x86_2 = "C:\\Program Files (x86)";
+    const char* pf_64 = std::getenv("ProgramFiles");
+    if (!pf_64) pf_64 = "C:\\Program Files";
+    const char* editions[] = {"BuildTools", "Community", "Professional", "Enterprise"};
+    const char* versions[] = {"2022", "2019"};
+    const char* bases[] = {pf_x86_2, pf_64};
+    for (const char* base : bases) {
+        for (const char* ver : versions) {
+            for (const char* ed : editions) {
+                std::string path = std::string(base) + "\\Microsoft Visual Studio\\" + ver + "\\" + ed;
+                if (std::filesystem::exists(path + "\\VC\\Auxiliary\\Build\\vcvarsall.bat")) {
+                    return path;
+                }
+            }
+        }
+    }
 
     return "";
 }
@@ -352,9 +373,21 @@ bool MsvcDriver::compileAndLink(const MsvcDriverOptions& options) {
     }
     if (tmpLogDir.empty()) tmpLogDir = ".";
     std::string tmpLogPath = tmpLogDir + "/_c3_msvc_out.txt";
+
+    // Use response file to avoid cmd.exe command line length limit (8191 chars)
+    // when compiling many source files (e.g. 125+ .c files in a large project)
+    std::string rspPath = tmpLogDir + "/_c3_cl_args.rsp";
+    {
+        std::ofstream rspFile(rspPath, std::ios::out | std::ios::trunc);
+        if (rspFile) {
+            // Write arguments (everything after "cl.exe ")
+            rspFile << cmd.str().substr(cl.length());
+        }
+    }
+
     // P11.4: Prepend vcvarsall.bat setup if cl.exe not in PATH
     std::string vcvarsPrefix = buildVcvarsPrefix(options.arch);
-    std::string fullCmd = vcvarsPrefix + cmd.str() + " > \"" + tmpLogPath + "\" 2>&1";
+    std::string fullCmd = vcvarsPrefix + cl + " @\"" + rspPath + "\" > \"" + tmpLogPath + "\" 2>&1";
 
     int ret = executeCommand(fullCmd);
     if (ret != 0) {
@@ -388,10 +421,12 @@ bool MsvcDriver::compileAndLink(const MsvcDriverOptions& options) {
         std::cerr << "C3: 编译失败 (exit code " << ret << ")" << std::endl;
         std::cerr << "C3: 错误日志已保存: " << errorLogPath << std::endl;
         std::filesystem::remove(tmpLogPath, std::error_code());
+        std::filesystem::remove(rspPath, std::error_code());
         return false;
     }
     // 编译成功: 清理临时文件
     std::filesystem::remove(tmpLogPath, std::error_code());
+    std::filesystem::remove(rspPath, std::error_code());
 
     if (options.verbose) {
         std::cout << "C3: 编译成功: " << options.outputFile << std::endl;

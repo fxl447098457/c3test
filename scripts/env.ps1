@@ -6,8 +6,8 @@
 #  加载后可直接使用 cl.exe, cmake, ninja, C3.exe 等
 # ============================================================
 
-$VcVars = "C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvarsall.bat"
-$ProjectDir = "D:\vb6pro"
+$VcVars = "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvarsall.bat"
+$ProjectDir = "C:\Users\vi\Desktop\c3.vb6.pro"
 
 Write-Host "[INFO] Loading MSVC environment..." -ForegroundColor Yellow
 

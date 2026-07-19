@@ -355,6 +355,12 @@ Token Lexer::scanToken() {
         return makeToken(TokenKind::Hash, "#", startLine, startCol);
     }
 
+    // 行续接符 _ (必须在 isAlpha 检查之前, 因为 isAlpha('_') 返回 true,
+    // 否则 _ 会被当作标识符首字符, 导致行续接逻辑成为死代码)
+    if (c == '_' && isLineContinuation()) {
+        return scanLineContinuation();
+    }
+
     // 标识符/关键字
     if (isAlpha(c) || c == '[') {
         if (c == '[') {
@@ -466,6 +472,13 @@ Token Lexer::scanIdentifierOrKeyword() {
     std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
     auto it = keywords_.find(lower);
     if (it != keywords_.end()) {
+        // Rem 关键字: 作为注释处理, 消费到行尾 (与 ' 注释行为一致)
+        if (it->second == TokenKind::REM_keyword) {
+            while (offset_ < content_.size() && peek() != '\n') {
+                text += advance();
+            }
+            return makeToken(TokenKind::Comment, text, startLine, startCol);
+        }
         return makeToken(it->second, text, startLine, startCol);
     }
 
