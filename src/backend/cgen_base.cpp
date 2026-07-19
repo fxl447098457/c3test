@@ -56,8 +56,11 @@ void CodeEmitter::emitBlank() {
 // ============================================================
 
 CCodeGen::CCodeGen(Diagnostics& diag, const SymbolTable& symTab,
-                   const TypeSystem& typeSys, bool verbose)
-    : diag_(diag), symTab_(symTab), typeSys_(typeSys), verbose_(verbose) {}
+                   const TypeSystem& typeSys,
+                   const std::unordered_map<std::string, std::set<std::string>>* classVoidFieldMap,
+                   bool verbose)
+    : diag_(diag), symTab_(symTab), typeSys_(typeSys),
+      classVoidFieldMap_(classVoidFieldMap), verbose_(verbose) {}
 
 // ============================================================
 // 主入口: 生成 .h + .c

@@ -14,6 +14,7 @@
 #include <sstream>
 #include <unordered_set>
 #include <unordered_map>
+#include <set>
 
 namespace vb6c3 {
 
@@ -63,7 +64,9 @@ private:
 class CCodeGen : public ASTVisitor {
 public:
     CCodeGen(Diagnostics& diag, const SymbolTable& symTab,
-             const TypeSystem& typeSys, bool verbose = false);
+             const TypeSystem& typeSys,
+             const std::unordered_map<std::string, std::set<std::string>>* classVoidFieldMap = nullptr,
+             bool verbose = false);
 
     // 主入口: 生成C代码，返回是否成功
     // externalModules: 当前模块引用的外部模块基名列表 (用于生成 #include)
@@ -287,6 +290,17 @@ private:
     // Fix 010r: ALL class member variable names (lowercase, both with/without m_ prefix)
     // Used for me-> prefix detection in Erase/ReDim/Assignment statements
     std::unordered_set<std::string> classMemberVars_;
+    // Fix 023: 全局类 void* (外部 COM 类型) 字段表 — 跨 CCodeGen 实例共享.
+    // 由 driver.cpp 在 runCodeGeneration 主循环前一次性预扫描所有模块 AST 计算.
+    // key: 类名 (如 "cDataBase"), value: 该类结构体中 void* 字段的 lowercase 名集合
+    // (包含原名小写 + "m_" 前缀小写两种形式).
+    // 在 cgen_expr.cpp knownClassVars_ fallback 路径查询以判断 obj->member 是否
+    // 返回 void* COM 指针. 若是, 在 emit 的注释中加入 "voidptr" 标记, 由外层
+    // MemberAccessExpr 的链式 COM 检测2 (~line 1477) 识别并切换为 COM dispatch
+    // (vb6_ComCall/ComGet*Prop). 例: Db.Rs.EOF (Rs 是 ADODB.Recordset 字段)
+    //   内层 Db.Rs → emit "Db->Rs  /* class var .Rs field voidptr */"
+    //   外层 .EOF  → 识别 voidptr → vb6_ComGet*Prop(Db->Rs..., L"EOF")
+    const std::unordered_map<std::string, std::set<std::string>>* classVoidFieldMap_ = nullptr;
     // Fix 010n: 类模块UDT成员变量 (小写var名 → UDT类型C标识符)
     // 用于在过程开始时恢复 knownUdtVars_ (因clear()会丢失类成员UDT变量)
     std::unordered_map<std::string, std::string> classUdtMembers_;

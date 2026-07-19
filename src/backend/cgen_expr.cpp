@@ -1134,6 +1134,48 @@ void CCodeGen::visit(MemberAccessExpr& node) {
     }
     // 内置对象方法: Debug.Print → vb6_DebugPrint
     // 检查 object 是否是 IdentifierExpr
+
+    // Fix 023e: Form-module Me.member access — handle Form-specific properties
+    // (Height/Width/hwnd/Left/Top/Caption/Visible/Enabled/...) via vb6_GetControlXxx
+    // helpers and route unknown members (ScaleHeight/ScaleWidth/Move/Refresh/Show/Cls/...)
+    // through COM dispatch on the form HWND (treated as void* IDispatch*).
+    // 背景: MeExpr 在 isFormModule_ 时被 visit(MeExpr) 解析为 vb6_hwnd_<FormName>,
+    // 这是一个 void* 窗口句柄. Me.Height / Me.ScaleWidth / Me.Move(...) 等成员访问在
+    // 下方 IdentifierExpr 分支中无法匹配 (因为 node.object->kind == MeExpr 而非
+    // IdentifierExpr), 一直漏到 fallback 处直接 emit "vb6_hwnd_<FormName>.Member"
+    // 形成 C2224 (void* 上的 .member 访问). 此处统一处理:
+    //   1. 已知 Form 控件属性 (Height/Width/hwnd/Caption/Visible/Enabled/Font*/...) 
+    //      走 getControlPropReadFn 返回的 vb6_GetControlXxx(vb6_hwnd_<FormName>).
+    //   2. 未知的 Form 成员 (ScaleHeight/ScaleWidth/Move/Refresh/Show/Print/Cls/...)
+    //      走 COM dispatch (vb6_ComCall/ComGet*Prop).
+    // 注: form HWND 不是真正的 IDispatch*, 这是编译 stub (使 MSVC 接受代码); 真正的
+    // 运行时正确性需要为 Form 实现专门的 IDispatch 或在 RTL 中添加专用 Form-属性
+    // 辅助函数 (vb6_GetFormScaleWidth / vb6_MoveForm 等) — 留待后续 fix.
+    if (node.object && node.object->kind == ASTNodeKind::MeExpr && isFormModule_ && !knownFormName_.empty()) {
+        // 构造 form 的 HWND C 表达式: vb6_hwnd_<FormName> (保持原始大小写)
+        std::string formHwnd;
+        auto itOrig = knownFormControlOriginalNames_.find(knownFormName_);
+        if (itOrig != knownFormControlOriginalNames_.end()) {
+            formHwnd = "vb6_hwnd_" + cIdent(itOrig->second);
+        } else {
+            formHwnd = "vb6_hwnd_" + moduleName_;
+        }
+        // 优先用 Form 控件属性读函数解析已知属性
+        std::string readFn = getControlPropReadFn(FrmControlType::Form, node.memberName);
+        if (!readFn.empty()) {
+            lastExpr_ = readFn + "(" + formHwnd + ")  /* Form." + node.memberName + " via Me */";
+            return;
+        }
+        // 未知 Form 成员 → COM dispatch (作为编译 stub; 运行时不可靠)
+        comObjExpr_ = formHwnd;
+        comMemberName_ = node.memberName;
+        isComMarker_ = true;
+        isEarlyBoundCom_ = false;
+        earlyBoundSym_ = nullptr;
+        lastExpr_ = formHwnd;  // void* 表达式 (form HWND)
+        return;
+    }
+
     if (node.object && node.object->kind == ASTNodeKind::IdentifierExpr) {
         auto& objIdent = static_cast<IdentifierExpr&>(*node.object);
         std::string objLower = objIdent.name;
@@ -1265,6 +1307,21 @@ void CCodeGen::visit(MemberAccessExpr& node) {
                     isEarlyBoundCom_ = false;
                     earlyBoundSym_ = nullptr;
                     lastExpr_ = comObjExpr_;  // IDispatch* expression
+                    return;
+                }
+                // Fix 023e: Form 类型在 readFn 为空时 (未知 Form 属性/方法如 ScaleHeight/
+                // ScaleWidth/Move/Refresh/Show/Print/Cls等) 走 COM dispatch on form HWND,
+                // 避免落入下方 warn-and-fall-through 后由通用 fallback emit
+                // "vb6_hwnd_<FormName>.Member" 形成 C2224 (void* 上的 .member 访问).
+                // 注: 与上面 MeExpr 分支一致, 这是编译 stub; form HWND 不是真正的 IDispatch*.
+                if (itCtrl->second == FrmControlType::Form) {
+                    std::string formHwnd = makeCtrlHwndArg(objLower, itCtrl->second);
+                    comObjExpr_ = formHwnd;
+                    comMemberName_ = node.memberName;
+                    isComMarker_ = true;
+                    isEarlyBoundCom_ = false;
+                    earlyBoundSym_ = nullptr;
+                    lastExpr_ = formHwnd;  // void* 表达式 (form HWND)
                     return;
                 }
                 diag_.warn(DiagnosticID::CodeGenUnsupportedFeature, SourceLocation{},
@@ -1497,6 +1554,25 @@ void CCodeGen::visit(MemberAccessExpr& node) {
         return;
     }
 
+    // Fix 023: void* struct 字段访问结果作为 COM 对象使用.
+    // 内层 MemberAccessExpr 的 knownClassVars_ fallback 路径 (见本函数尾部) 在检测到
+    // 当前访问的类字段是 void* 时, 在 emit 的表达式中加入 "voidptr" 注释标记:
+    //   例: Db.Rs  →  "Db->Rs  /* class var .Rs field voidptr */"
+    // 此处 outer MemberAccessExpr 检测该标记, 将其视为 void* IDispatch* 指针,
+    // 设置 COM marker 让下游 (IndexOrCallExpr / BinaryExpr / resolveComValue) 通过
+    // vb6_ComCall/vb6_ComGet*Prop 走 COM dispatch 通道:
+    //   Db.Rs.EOF         → vb6_ComGetXXXProp(Db->Rs..., L"EOF")
+    //   Db.Rs.FileExists()→ vb6_ComCallXXX(Db->Rs..., L"FileExists", args, argc)
+    // 注: class_voidptr 的注释会被 MSVC 视为空白, 不影响 C 代码语义.
+    if (obj.find("/* class var .") != std::string::npos &&
+        obj.find(" voidptr */") != std::string::npos) {
+        comObjExpr_ = obj;
+        comMemberName_ = node.memberName;
+        isComMarker_ = true;
+        lastExpr_ = obj;  // 保持 void* 对象表达式供外层使用
+        return;
+    }
+
     // Fix 015: 类方法链式调用 — db.Sql(s).Exec(...) 模式
     // node.object 是 IndexOrCallExpr, 其 callee 是 MemberAccessExpr.
     // 通过 inferClassTypeOfExpr 递归推断 node.object 求值后的类类型:
@@ -1614,8 +1690,33 @@ void CCodeGen::visit(MemberAccessExpr& node) {
             } else {
                 // 非方法/属性 → 数据字段访问: obj->member
                 // (此时obj类型为 vb6_cls_<className>*, ->访问可正确编译)
-                lastExpr_ = obj + "->" + cIdent(node.memberName)
-                          + "  /* class var ." + node.memberName + " field */";
+                // Fix 023: 检查该字段是否是 void* (外部 COM 指针). 若是, 在注释中
+                // 加入 "voidptr" 标记, 由外层 MemberAccessExpr 的链式 COM 检测2
+                // (~line 1477 之后) 识别并切换为 COM dispatch.
+                // 例: Db.Rs (Rs As New ADODB.Recordset → C 结构体中 void* 字段)
+                //     内层 emit: "Db->Rs  /* class var .Rs field voidptr */"
+                //     外层 .EOF 识别 voidptr → vb6_ComGetIntProp(Db->Rs..., L"EOF")
+                bool isVoidPtr = false;
+                if (classVoidFieldMap_) {
+                    auto itV = classVoidFieldMap_->find(itClassVar->second);
+                    if (itV != classVoidFieldMap_->end()) {
+                        std::string memLower = node.memberName;
+                        std::transform(memLower.begin(), memLower.end(),
+                                       memLower.begin(),
+                                       [](unsigned char c) { return (char)std::tolower(c); });
+                        if (itV->second.count(memLower) ||
+                            itV->second.count("m_" + memLower)) {
+                            isVoidPtr = true;
+                        }
+                    }
+                }
+                if (isVoidPtr) {
+                    lastExpr_ = obj + "->" + cIdent(node.memberName)
+                              + "  /* class var ." + node.memberName + " field voidptr */";
+                } else {
+                    lastExpr_ = obj + "->" + cIdent(node.memberName)
+                              + "  /* class var ." + node.memberName + " field */";
+                }
             }
         } else if (knownTypedComVars_.count(objLower)
                    || (!trailingLower.empty() && knownTypedComVars_.count(trailingLower))) {
@@ -3366,9 +3467,24 @@ void CCodeGen::visit(WithMemberExpr& node) {
             }
             // 变量/常量/枚举成员 → 尝试属性查找
         }
-        // Fix 010n: 未知成员 → COM后期绑定 (void*不支持->或.member访问)
-        // obj.Property → vb6_ComGetProp(obj, L"Property")
-        lastExpr_ = "vb6_ComGetStringProp(" + tempVar + ", L\"" + node.memberName + "\")  /* With class .unknown COM */";
+        // Fix 010n/023d: 未知成员 → COM后期绑定. 改为设置 COM marker
+        // 让下游 (IndexOrCallExpr / AssignmentStmt / BinaryExpr / 外层
+        // MemberAccessExpr) 在 resolveComValue 时根据上下文 unpackType 选择
+        // 正确的 vb6_ComGet*Prop / vb6_ComCall 函数.
+        // 此前直接 emit `vb6_ComGetStringProp(tempVar, L"Member")` 会让外层
+        // MemberAccessExpr 的链式 COM 检测2 (visit(MemberAccessExpr) ~line 1479)
+        // 无法识别为 COM 对象表达式 — 因为该检测只匹配 vb6_ComCallObject /
+        // ComGetObjectProp / ComCall / ComGetProp, 不匹配 ComGetStringProp,
+        // 导致 `.X.Y` 被错生成成 `vb6_ComGetStringProp(obj, L"X").Y` (C2224:
+        // .Y of BSTR-结构体类型). 与 WithObjKind::COMObject case (line ~3362)
+        // 行为一致 — 走 COM marker 通道让 resolveComValue("Object") 在链式
+        // 外层自然展开为 vb6_ComGetObjectProp.
+        comObjExpr_ = tempVar;
+        comMemberName_ = node.memberName;
+        isComMarker_ = true;
+        isEarlyBoundCom_ = false;
+        earlyBoundSym_ = nullptr;
+        lastExpr_ = tempVar + "  /* With class ." + node.memberName + " COM dispatch */";
         return;
     }
     case WithObjKind::BuiltinObject: {

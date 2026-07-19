@@ -80,6 +80,21 @@ void CCodeGen::visit(SubDecl& node) {
             if (paramType == Vb6Type::String) knownBstrVars_.insert(pLower);
             else if (paramType == Vb6Type::Double) knownDoubleVars_.insert(pLower);
             else if (paramType == Vb6Type::Long || paramType == Vb6Type::Integer || paramType == Vb6Type::Boolean) knownLongVars_.insert(pLower);
+
+            // Fix 023c: 注册 void* 参数 (As Object / As Collection / 外部 COM 类型如
+            // ADODB.Recordset / Scripting.Dictionary 等) 到 knownObjectVars_ —
+            // 让成员访问走 COM dispatch (vb6_ComCall / vb6_ComGet*Prop),
+            // 而非直接 obj.member 字段访问, 避免 C2224 (void* 上 .member).
+            // 仅当参数未被前面分支精确注册为 Class / ComClass / Interface / UDT 时
+            // 才查 C 类型, 避免对 vb6_cls_* / vb6_ComIface_* 等 C 类型参数的错误
+            // 注册. 与 visit(VariableDecl) line 651-656 行为一致 (局部 void* 同样注册).
+            if (!knownClassVars_.count(pLower) && !knownTypedComVars_.count(pLower)
+                && !knownIfaceVars_.count(pLower) && !knownUdtVars_.count(pLower)) {
+                std::string paramCType = mapTypeRef(p->asType.get());
+                if (paramCType == "void*") {
+                    knownObjectVars_.insert(pLower);
+                }
+            }
         } else if (p->asType && p->asType->kind == ASTNodeKind::ArrayTypeRef) {
             // Fix 010r-6: Register array parameters so arr(idx) generates VB6_SA_AT instead of (*arr)(idx)
             Vb6Type elemType = resolveArrayElemType(p->asType.get());
@@ -224,6 +239,21 @@ void CCodeGen::visit(FunctionDecl& node) {
             if (paramType == Vb6Type::String) knownBstrVars_.insert(pLower);
             else if (paramType == Vb6Type::Double) knownDoubleVars_.insert(pLower);
             else if (paramType == Vb6Type::Long || paramType == Vb6Type::Integer || paramType == Vb6Type::Boolean) knownLongVars_.insert(pLower);
+
+            // Fix 023c: 注册 void* 参数 (As Object / As Collection / 外部 COM 类型如
+            // ADODB.Recordset / Scripting.Dictionary 等) 到 knownObjectVars_ —
+            // 让成员访问走 COM dispatch (vb6_ComCall / vb6_ComGet*Prop),
+            // 而非直接 obj.member 字段访问, 避免 C2224 (void* 上 .member).
+            // 仅当参数未被前面分支精确注册为 Class / ComClass / Interface / UDT 时
+            // 才查 C 类型, 避免对 vb6_cls_* / vb6_ComIface_* 等 C 类型参数的错误
+            // 注册. 与 visit(VariableDecl) line 651-656 行为一致 (局部 void* 同样注册).
+            if (!knownClassVars_.count(pLower) && !knownTypedComVars_.count(pLower)
+                && !knownIfaceVars_.count(pLower) && !knownUdtVars_.count(pLower)) {
+                std::string paramCType = mapTypeRef(p->asType.get());
+                if (paramCType == "void*") {
+                    knownObjectVars_.insert(pLower);
+                }
+            }
         } else if (p->asType && p->asType->kind == ASTNodeKind::ArrayTypeRef) {
             // Fix 010r-6: Register array parameters so arr(idx) generates VB6_SA_AT instead of (*arr)(idx)
             Vb6Type elemType = resolveArrayElemType(p->asType.get());
@@ -963,6 +993,21 @@ void CCodeGen::visit(PropertyDecl& node) {
             if (paramType == Vb6Type::String) knownBstrVars_.insert(pLower);
             else if (paramType == Vb6Type::Double) knownDoubleVars_.insert(pLower);
             else if (paramType == Vb6Type::Long || paramType == Vb6Type::Integer || paramType == Vb6Type::Boolean) knownLongVars_.insert(pLower);
+
+            // Fix 023c: 注册 void* 参数 (As Object / As Collection / 外部 COM 类型如
+            // ADODB.Recordset / Scripting.Dictionary 等) 到 knownObjectVars_ —
+            // 让成员访问走 COM dispatch (vb6_ComCall / vb6_ComGet*Prop),
+            // 而非直接 obj.member 字段访问, 避免 C2224 (void* 上 .member).
+            // 仅当参数未被前面分支精确注册为 Class / ComClass / Interface / UDT 时
+            // 才查 C 类型, 避免对 vb6_cls_* / vb6_ComIface_* 等 C 类型参数的错误
+            // 注册. 与 visit(VariableDecl) line 651-656 行为一致 (局部 void* 同样注册).
+            if (!knownClassVars_.count(pLower) && !knownTypedComVars_.count(pLower)
+                && !knownIfaceVars_.count(pLower) && !knownUdtVars_.count(pLower)) {
+                std::string paramCType = mapTypeRef(p->asType.get());
+                if (paramCType == "void*") {
+                    knownObjectVars_.insert(pLower);
+                }
+            }
         } else if (p->asType && p->asType->kind == ASTNodeKind::ArrayTypeRef) {
             // Fix 010r-6: Register array parameters so arr(idx) generates VB6_SA_AT instead of (*arr)(idx)
             Vb6Type elemType = resolveArrayElemType(p->asType.get());
