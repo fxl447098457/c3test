@@ -237,6 +237,16 @@ VbpProject VbpParser::parseString(const std::string& content, const std::string&
         } else if (key == "StartMode") {
             try { project.startMode = std::stoi(value); } catch (...) {}
         }
+        // C3 扩展: LibID={...} 固定 TypeLib 的 LibID, 跨构建稳定
+        // 值格式: "{xxxxxxxx-xxxx-...}" 或裸 GUID (不带引号)
+        else if (key == "LibID") {
+            std::string v = value;
+            // 兼容用户写成 LibID="{...}" 带引号的形式
+            if (v.size() >= 2 && v.front() == '"' && v.back() == '"') {
+                v = v.substr(1, v.size() - 2);
+            }
+            project.libidStr = v;
+        }
         // 版本信息 (P20-22)
         else if (key == "MajorVer") { try { project.majorVer = std::stoi(value); } catch (...) {} }
         else if (key == "MinorVer") { try { project.minorVer = std::stoi(value); } catch (...) {} }

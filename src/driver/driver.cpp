@@ -767,9 +767,10 @@ bool Driver::runTypeLibImport(const CompileOptions& options) {
         };
 
         for (const auto& progId : commonProgIds) {
-            // 仅在缓存中不存在时加载
+            // 仅在缓存中不存在时加载; silent=true: 缺失是预期(用户未显式引用),
+            // 不报VB4001避免污染c3-error.log
             if (!typelibParser_->findCachedCoClass(progId)) {
-                typelibParser_->loadByProgId(progId);
+                typelibParser_->loadByProgId(progId, true);
             }
         }
     }

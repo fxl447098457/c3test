@@ -96,6 +96,12 @@ struct VbpProject {
     int compatibleMode = 0;  // 0=None, 1=Project, 2=Binary
     int startMode = 0;       // 0=Standalone, 1=ActiveX
 
+    // C3 扩展: ActiveX DLL TypeLib 的 LibID (UUID 格式 "{...}")
+    // VB6 标准 VBP 不含此字段 (VB6 通过二进制兼容模式管理 LibID)
+    // C3 用此字段让 LibID 跨构建稳定, 避免每次编译生成新 LibID 导致
+    // VBA References 失效和注册表残留堆积
+    std::string libidStr;
+
     // .vbp 文件路径 (用于解析相对路径)
     std::filesystem::path vbpFilePath;
 
