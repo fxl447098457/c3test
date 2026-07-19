@@ -2458,27 +2458,33 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
     // 需要检查被调用函数的参数签名: ByRef参数在调用点需要传指针(&arg)
     std::vector<ParameterInfo> calleeParams;
     // 从IdentifierExpr或MemberAccessExpr获取被调用函数名, 在符号表中查找
+    // Fix 027: 加入 DeclareSub / DeclareFunc — 否则 WinAPI Declare 的 ByRef 参数无法 emit &,
+    //          导致 ByRef UDT/SafeArray/标量 全部按值传递 (例如 SOCKADDR_IN → SOCKADDR_IN* 错误).
     if (node.callee && node.callee->kind == ASTNodeKind::IdentifierExpr) {
         auto& idExpr = static_cast<IdentifierExpr&>(*node.callee);
         // 尝试多种查找方式: 先lookupModule(过程符号), 再lookup(嵌套作用域)
         Symbol* funcSym = symTab_.lookupModule(idExpr.name);
         if (!funcSym || (funcSym->kind != SymbolKind::Sub && funcSym->kind != SymbolKind::Function
             && funcSym->kind != SymbolKind::PropertyGet && funcSym->kind != SymbolKind::PropertyLet
-            && funcSym->kind != SymbolKind::PropertySet)) {
+            && funcSym->kind != SymbolKind::PropertySet
+            && funcSym->kind != SymbolKind::DeclareSub && funcSym->kind != SymbolKind::DeclareFunc)) {
             funcSym = symTab_.lookup(idExpr.name);
         }
         if (funcSym && (funcSym->kind == SymbolKind::Sub || funcSym->kind == SymbolKind::Function
             || funcSym->kind == SymbolKind::PropertyGet || funcSym->kind == SymbolKind::PropertyLet
-            || funcSym->kind == SymbolKind::PropertySet)) {
+            || funcSym->kind == SymbolKind::PropertySet
+            || funcSym->kind == SymbolKind::DeclareSub || funcSym->kind == SymbolKind::DeclareFunc)) {
             calleeParams = funcSym->params;
         }
     } else if (node.callee && node.callee->kind == ASTNodeKind::MemberAccessExpr) {
         // Module.Method 或 obj.Method 调用: 查找方法名的参数签名
+        // Fix 027: 同步加入 DeclareSub/DeclareFunc (模块方法形式的 declare 调用).
         auto& maExpr = static_cast<MemberAccessExpr&>(*node.callee);
         Symbol* funcSym = symTab_.lookupModule(maExpr.memberName);
         if (funcSym && (funcSym->kind == SymbolKind::Sub || funcSym->kind == SymbolKind::Function
             || funcSym->kind == SymbolKind::PropertyGet || funcSym->kind == SymbolKind::PropertyLet
-            || funcSym->kind == SymbolKind::PropertySet)) {
+            || funcSym->kind == SymbolKind::PropertySet
+            || funcSym->kind == SymbolKind::DeclareSub || funcSym->kind == SymbolKind::DeclareFunc)) {
             calleeParams = funcSym->params;
         }
     }
@@ -2578,32 +2584,36 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
                         Vb6Type argVbType = inferExprType(*node.positional[i]);
                         switch (argVbType) {
                             case Vb6Type::String:
-                                argVal = "&(vb6_VARIANT){.vt=VT_BSTR, .bstrVal=" + argVal + "}";
+                                // Fix 027b: 外层加括号让预处理器把 {a,b} 内的逗号视为同一参数
+                                // (避免宏调用时 #define RtlCopyMemory(D,s,l) memcpy(D,s,l) 把复合字面量
+                                //  内部的逗号错算成宏实参分隔符 → C4002 参数过多)
+                                argVal = "(&(vb6_VARIANT){.vt=VT_BSTR, .bstrVal=" + argVal + "})";
                                 break;
                             case Vb6Type::Long:
                             case Vb6Type::Integer:
-                                argVal = "&(vb6_VARIANT){.vt=VT_I4, .lVal=(int32_t)(" + argVal + ")}";
+                                argVal = "(&(vb6_VARIANT){.vt=VT_I4, .lVal=(int32_t)(" + argVal + ")})";
                                 break;
                             case Vb6Type::Double:
                             case Vb6Type::Single:
-                                argVal = "&(vb6_VARIANT){.vt=VT_R8, .dblVal=(double)(" + argVal + ")}";
+                                argVal = "(&(vb6_VARIANT){.vt=VT_R8, .dblVal=(double)(" + argVal + ")})";
                                 break;
                             case Vb6Type::Boolean:
-                                argVal = "&(vb6_VARIANT){.vt=VT_BOOL, .boolVal=(int16_t)(" + argVal + ")}";
+                                argVal = "(&(vb6_VARIANT){.vt=VT_BOOL, .boolVal=(int16_t)(" + argVal + ")})";
                                 break;
                             case Vb6Type::Byte:
-                                argVal = "&(vb6_VARIANT){.vt=VT_UI1, .bVal=(uint8_t)(" + argVal + ")}";
+                                argVal = "(&(vb6_VARIANT){.vt=VT_UI1, .bVal=(uint8_t)(" + argVal + ")})";
                                 break;
                             case Vb6Type::Date:
-                                argVal = "&(vb6_VARIANT){.vt=VT_DATE, .dblVal=(double)(" + argVal + ")}";
+                                argVal = "(&(vb6_VARIANT){.vt=VT_DATE, .dblVal=(double)(" + argVal + ")})";
                                 break;
                             default:
                                 // Variant or unknown: try bstrVal first (most common case)
-                                argVal = "&(vb6_VARIANT){.vt=VT_BSTR, .bstrVal=" + argVal + "}";
+                                argVal = "(&(vb6_VARIANT){.vt=VT_BSTR, .bstrVal=" + argVal + "})";
                                 break;
                         }
                     } else {
-                        argVal = "&(" + cType + "){" + argVal + "}";
+                        // Fix 027b: 同样加外层括号防止预处理器把复合字面量 `{a, b}` 内的逗号算成宏实参分隔符.
+                        argVal = "(&(" + cType + "){" + argVal + "})";
                     }
                 }
             }
