@@ -249,6 +249,57 @@ static inline vb6_VARIANT vb6_VariantArray(void* _arr) {
     v.vt = vb6_vtArray | vb6_vtVariant; v.parray = (struct vb6_SafeArray1D*)_arr; return v;
 }
 
+// Fix 024: Variant containing a Byte (VT_UI1)
+static inline vb6_VARIANT vb6_VariantByte(uint8_t val) {
+    vb6_VARIANT v; memset(&v, 0, sizeof(v));
+    v.vt = vb6_vtByte; v.bVal = val; return v;
+}
+
+// Fix 024: Variant containing a COM object pointer (VT_DISPATCH)
+static inline vb6_VARIANT vb6_VariantObject(void* val) {
+    vb6_VARIANT v; memset(&v, 0, sizeof(v));
+    v.vt = vb6_vtDispatch; v.pdispVal = val; return v;
+}
+
+// Fix 024: Variant identity passthrough — used by vb6_VariantFromValue
+//           when the expression is ALREADY a vb6_VARIANT (no wrapping).
+static inline vb6_VARIANT vb6_VariantIdentity(vb6_VARIANT v) { return v; }
+
+// Fix 024: Polymorphic Variant constructor via C11 _Generic.
+//   用法: vb6_VARIANT v = vb6_VariantFromValue(any_C_expr);
+//   按实参表达式的C类型(编译期推断)选择合适的Variant构造函数:
+//     _Bool/bool                        -> VariantBool
+//     整型(char/short/int/long/long long,
+//          signed/unsigned, wchar_t)    -> VariantLong 或 VariantByte(uchar) 或 VariantInt(short)
+//     浮点(float/double/long double)    -> VariantDouble
+//     wchar_t*  (BSTR别名)              -> VariantString
+//     struct vb6_SafeArray1D*           -> VariantArray
+//     vb6_VARIANT (已是变体)            -> VariantIdentity (no-op)
+//     其他指针 (void*/class*/type*)     -> VariantObject
+//   用途: 当 C3 的 inferExprType 把标量/LenB(...)误判为 Variant 时,
+//         temp 变量声明 "vb6_VARIANT _vcmp_N = scalar;" 会触发 C2440.
+//         改用 vb6_VariantFromValue(scalar) 让编译器按实类型自动包装, 消除 C2440.
+#define vb6_VariantFromValue(x) _Generic((x), \
+    _Bool:                vb6_VariantBool, \
+    char:                 vb6_VariantLong, \
+    signed char:          vb6_VariantLong, \
+    unsigned char:        vb6_VariantByte, \
+    short:                vb6_VariantInt, \
+    int:                  vb6_VariantLong, \
+    unsigned int:         vb6_VariantLong, \
+    long:                 vb6_VariantLong, \
+    unsigned long:        vb6_VariantLong, \
+    long long:            vb6_VariantLong, \
+    unsigned long long:   vb6_VariantLong, \
+    wchar_t:              vb6_VariantLong, \
+    float:                vb6_VariantDouble, \
+    double:               vb6_VariantDouble, \
+    wchar_t*:             vb6_VariantString, \
+    struct vb6_SafeArray1D*: vb6_VariantArray, \
+    vb6_VARIANT:          vb6_VariantIdentity, \
+    default:              vb6_VariantObject \
+)((x))
+
 // Index into a Variant that holds an array -- returns element as vb6_VARIANT
 vb6_VARIANT vb6_VariantArrayGet(vb6_VARIANT* v, int32_t index);
 // Set element in a Variant that holds an array

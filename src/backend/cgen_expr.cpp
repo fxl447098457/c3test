@@ -1015,7 +1015,9 @@ void CCodeGen::visit(BinaryExpr& node) {
                         lastExpr_ = "(vb6_VarCmpLong" + cmpFn + "(&" + left + ", " + right + "))";
                     } else {
                         std::string tmp = "_vcmp_" + std::to_string(vcmpCounter_++);
-                        c_.emitLine("vb6_VARIANT " + tmp + " = " + left + ";");
+                        // Fix 024: left 被 inferExprType 误判为 Variant, 但实际标量 (LenB/Asc/int 等).
+                        // 用 vb6_VariantFromValue 在编译期按实类型选择 variant 构造函数, 消除 C2440.
+                        c_.emitLine("vb6_VARIANT " + tmp + " = vb6_VariantFromValue(" + left + ");");
                         lastExpr_ = "(vb6_VarCmpLong" + cmpFn + "(&" + tmp + ", " + right + "))";
                     }
                     return;
@@ -1039,7 +1041,8 @@ void CCodeGen::visit(BinaryExpr& node) {
                         lastExpr_ = "(vb6_VarCmpLong" + revCmpFn + "(&" + right + ", " + left + "))";
                     } else {
                         std::string tmp = "_vcmp_" + std::to_string(vcmpCounter_++);
-                        c_.emitLine("vb6_VARIANT " + tmp + " = " + right + ";");
+                        // Fix 024: right 被 inferExprType 误判为 Variant, 但实际标量. 用 FromValue 包装.
+                        c_.emitLine("vb6_VARIANT " + tmp + " = vb6_VariantFromValue(" + right + ");");
                         lastExpr_ = "(vb6_VarCmpLong" + revCmpFn + "(&" + tmp + ", " + left + "))";
                     }
                     return;
@@ -1053,8 +1056,8 @@ void CCodeGen::visit(BinaryExpr& node) {
                 for (char c : s) { if (!std::isalnum(static_cast<unsigned char>(c)) && c != '_') return false; }
                 return true;
             };
-            std::string leftAddr = isLvalue(left) ? ("&" + left) : ([&]{ std::string tmp = "_vcmp_" + std::to_string(vcmpCounter_++); c_.emitLine("vb6_VARIANT " + tmp + " = " + left + ";"); return "&" + tmp; }());
-            std::string rightAddr = isLvalue(right) ? ("&" + right) : ([&]{ std::string tmp = "_vcmp_" + std::to_string(vcmpCounter_++); c_.emitLine("vb6_VARIANT " + tmp + " = " + right + ";"); return "&" + tmp; }());
+            std::string leftAddr = isLvalue(left) ? ("&" + left) : ([&]{ std::string tmp = "_vcmp_" + std::to_string(vcmpCounter_++); c_.emitLine("vb6_VARIANT " + tmp + " = vb6_VariantFromValue(" + left + ");"); return "&" + tmp; }());
+            std::string rightAddr = isLvalue(right) ? ("&" + right) : ([&]{ std::string tmp = "_vcmp_" + std::to_string(vcmpCounter_++); c_.emitLine("vb6_VARIANT " + tmp + " = vb6_VariantFromValue(" + right + ");"); return "&" + tmp; }());
             lastExpr_ = "(vb6_VarCmp" + cmpFn + "(" + leftAddr + ", " + rightAddr + "))";
             return;
         }
@@ -2595,6 +2598,15 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
                     }
                 }
             }
+        }
+        // Fix 024 P2: ByVal Variant 参数 — 调用点用 vb6_VariantFromValue 包装实参.
+        // 处理 callee 声明 "ByVal x As Variant" 而实参是标量/BSTR/SafeArray/class ptr 等情形.
+        // _Generic 在编译期按实类型选择 ctor: 标量->VariantLong/Int/Double, BSTR->String,
+        // SafeArray1D*->Array, void*/class ptr->Object, vb6_VARIANT->Identity(no-op).
+        // 仅对 ByVal Variant 生效 (ByRef Variant 走上面复合字面量路径, 取地址需左值).
+        if (!isByRef && i < calleeParams.size() && calleeParams[i].isByVal
+            && calleeParams[i].type == Vb6Type::Variant) {
+            argVal = "vb6_VariantFromValue(" + argVal + ")";
         }
         args.push_back(std::move(argVal));
     }
