@@ -1640,7 +1640,16 @@ void CCodeGen::visit(MemberAccessExpr& node) {
     // (即最后一个 "->" 或 "." 之后的标识符) 再做一次 fallback 查找,
     // 即可解析出 obj 的真实类类型, 让方法分发正确工作.
     {
-        std::string objLower = obj;
+        // Fix 026: 剥掉 (*name) 解引用外层 (ByRef class/UDT 参数 emit 形式为 (*name)).
+        // ByRef class 在 C 中是 cls**, (*name) 得 cls*, 应走类成员路径 (obj->member).
+        // ByRef UDT 在 C 中是 struct_t*, (*name) 得 struct_t, struct.field 仍正确.
+        // 仅剥完整 (*X) 外层; 其他形式 (me->X / a.b / 直接 X) 不动.
+        std::string objBase = obj;
+        if (objBase.size() > 4 && objBase[0] == '(' && objBase[1] == '*'
+            && objBase.back() == ')') {
+            objBase = objBase.substr(2, objBase.size() - 3);
+        }
+        std::string objLower = objBase;
         std::transform(objLower.begin(), objLower.end(), objLower.begin(), ::tolower);
         auto itClassVar = knownClassVars_.find(objLower);
 
