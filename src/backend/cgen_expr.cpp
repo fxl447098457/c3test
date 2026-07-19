@@ -1408,6 +1408,23 @@ void CCodeGen::visit(MemberAccessExpr& node) {
         }
 
         // 查找成员名称的符号
+        // Fix 031: UDT 变量字段访问 — 必须在 memSym 查找之前拦截.
+        // 当 obj 是已知 UDT 变量 (knownUdtVars_) 时, obj.member 总是结构体字段访问
+        // (obj.member 或 (*obj).member 形式, 取决于 emitExpr 对该 UDT 变量的求值),
+        // 不应进入 memSym 路径把 obj 当作模块名 (或 uOutput 误当类实例).
+        // 现象: Private Sub pvTlsBuildClientHello(uCtx As UcsTlsContext, uOutput As UcsBuffer)
+        //       其中 UcsBuffer UDT 含 Size As Long 字段, 同时项目里又有 cByteBuffer.cls
+        //       声明了 Property Get Size, memSym 查找命中该跨模块属性 → 误生成
+        //       vb6_cByteBuffer_Size 函数引用 (而非 (*uOutput).Size 字段访问), 触发 C2065.
+        // 已知 UDT 变量与类实例 (knownClassVars_) / Object (knownObjectVars_) 在注册阶段
+        // 互斥, 此处不冲突.
+        if (knownUdtVars_.count(objLower)) {
+            emitExpr(*node.object);
+            std::string obj = std::move(lastExpr_);
+            lastExpr_ = obj + "." + cIdent(node.memberName);
+            return;
+        }
+
         auto* memSym = symTab_.lookupModule(node.memberName);
         if (memSym && (memSym->kind == SymbolKind::Sub || memSym->kind == SymbolKind::Function
                     || memSym->kind == SymbolKind::PropertyGet
