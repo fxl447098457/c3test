@@ -5,6 +5,9 @@
 // Runtime: FindResource/LoadResource extract to temp session directory
 // Paths relative to this RC file's location (src/driver/)
 
+// Application icon (multi-size: 16/24/32/48/256, 32-bit ARGB)
+1 ICON "c3.ico"
+
 // Headers (needed for #include in generated code) — arch-neutral
 100 RCDATA "../rtl/core/vb6rtl.h"
 102 RCDATA "../rtl/core/vb6com.h"

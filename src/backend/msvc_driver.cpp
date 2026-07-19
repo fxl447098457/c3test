@@ -111,8 +111,23 @@ std::string MsvcDriver::findVcvarsallBat() {
     // 1. Check VCINSTALLDIR (already set from previous vcvarsall)
     const char* vcDir = std::getenv("VCINSTALLDIR");
     if (vcDir && vcDir[0] != '\0') {
-        std::string bat = std::string(vcDir) + "Auxiliary\\Build\\vcvarsall.bat";
+        // M30-AX86: Normalize to guarantee a trailing backslash.
+        // install_msvc.bat writes VCINSTALLDIR without one (e.g.
+        // "C:\pro\c3\msvc") while the portable vcvars.bat writes it WITH one.
+        // Without normalization the concatenations below yield
+        // "C:\pro\c3\msvcAuxiliary\..." (missing separator), which silently
+        // breaks --arch x86 on the mini toolchain deployed via install_msvc.bat
+        // (LNK1112: env stays x64 because findVcvarsallBat returns "").
+        std::string base = vcDir;
+        if (!base.empty() && base.back() != '\\') base.push_back('\\');
+        // Standard VS layout
+        std::string bat = base + "Auxiliary\\Build\\vcvarsall.bat";
         if (std::filesystem::exists(bat)) return bat;
+        // P24-AX86: Portable C3 mini toolchain layout (vcvars.bat lives in
+        // VCINSTALLDIR root, accepts x64/x86 arg). Enables --arch x86 even when
+        // the user env was permanently set to x64 by install_msvc.bat.
+        std::string portable = base + "vcvars.bat";
+        if (std::filesystem::exists(portable)) return portable;
     }
 
     // 2. Find via vswhere/registry
@@ -143,8 +158,14 @@ std::string MsvcDriver::buildVcvarsPrefix(const std::string& arch) const {
             // Mismatch: must re-call vcvarsall with correct arch (e.g. x64 env but --arch x86)
             // Fall through to findVcvarsallBat below
         } else {
-            // VSCMD_ARG_TGT_ARCH not set (old VS) — conservatively assume match
-            return "";
+            // VSCMD_ARG_TGT_ARCH not set (e.g. portable toolchain via install_msvc.bat)
+            // P24-AX86: x64 is the common default - assume env already matches x64.
+            // For x86 target we must reconfigure env (call vcvars.bat x86) to switch
+            // to the Hostx64 cross compiler and lib\x86; fall through.
+            if (arch == "x64") {
+                return "";
+            }
+            // non-x64 target with no arch hint: fall through to findVcvarsallBat
         }
     }
 
@@ -296,15 +317,6 @@ bool MsvcDriver::compileAndLink(const MsvcDriverOptions& options) {
         }
         if (!options.defFile.empty()) {
             cmd << " /DEF:\"" << options.defFile << "\"";
-        }
-        if (!options.typelibResFile.empty()) {
-            cmd << " \"" << options.typelibResFile << "\"";
-        }
-        if (!options.versionInfoResFile.empty()) {
-            cmd << " \"" << options.versionInfoResFile << "\"";
-        }
-        if (!options.userResFile.empty()) {
-            cmd << " \"" << options.userResFile << "\"";
         }
         cmd << " ole32.lib oleaut32.lib uuid.lib advapi32.lib user32.lib shell32.lib gdi32.lib";
     } else if (options.isGui) {

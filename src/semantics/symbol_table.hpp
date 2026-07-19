@@ -154,6 +154,7 @@ struct Symbol {
     std::string comDefaultIfaceName;  // 默认接口名 (ComClass用)
     std::string comDefaultIfaceIid;   // 默认接口IID (由TypeLib builder回写, 用于早绑定QI)
     int32_t comVtblBase = 7;         // vtable起始偏移 (IDispatch=7, IUnknown=3)
+    int32_t comDispid = 0;           // M29: 方法的TypeLib DISPID (由driver在TypeLib阶段回写, 供cgen生成dll_entry.c方法表用, 确保两边dispid一致; 0=未分配)
     bool comIsDual = false;           // 双重接口 (dispinterface + vtable)
     // P13.23: COM event source interface (for WithEvents on external COM objects)
     std::string comSourceIfaceName;    // 默认事件源接口名

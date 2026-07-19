@@ -1,4 +1,4 @@
-﻿// VB6 TypeLib解析器实现 - P6.3 前期绑定支持
+// VB6 TypeLib解析器实现 - P6.3 前期绑定支持
 // 编译期使用Windows LoadTypeLib/ITypeInfo API
 
 #include "com/typelib_parser.hpp"
@@ -30,7 +30,7 @@ TypeLibParser::~TypeLibParser() = default;
 // 公共接口
 // ============================================================
 
-std::unique_ptr<TypeLibResult> TypeLibParser::loadByProgId(const std::string& progId) {
+std::unique_ptr<TypeLibResult> TypeLibParser::loadByProgId(const std::string& progId, bool silent) {
     // 1. 查找缓存
     ComCoClassInfo* cached = findCachedCoClass(progId);
     if (cached) {
@@ -42,7 +42,10 @@ std::unique_ptr<TypeLibResult> TypeLibParser::loadByProgId(const std::string& pr
     // 2. 从注册表查找TypeLib路径
     std::string tlbPath = findTypeLibPathForProgId(progId);
     if (tlbPath.empty()) {
-        diag_.warn(DiagnosticID::CodeGenUnsupportedFeature, SourceLocation{}, "TypeLib not found for ProgID: " + progId);
+        // silent模式: auto-load常用组件未安装是预期情况, 不报warning避免污染c3-error.log
+        if (!silent) {
+            diag_.warn(DiagnosticID::CodeGenUnsupportedFeature, SourceLocation{}, "TypeLib not found for ProgID: " + progId);
+        }
         return nullptr;
     }
 

@@ -1,5 +1,0 @@
-OP-1:OK BuildPath = C:\Windows\System32
-OP-2:OK GetSpecialFolder(0)
-OP-3:OK OpenTextFile with 1 arg (3 optional omitted)
-OP-4:OK ReadLine returned data
-P24-11: 4/4 passed

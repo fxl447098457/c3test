@@ -211,7 +211,9 @@ public:
     // 按ProgID从注册表加载类型库
     // progId: "Scripting.FileSystemObject" 或 "Scripting"
     // 返回解析结果, 失败返回nullptr
-    std::unique_ptr<TypeLibResult> loadByProgId(const std::string& progId);
+    // silent=true: 不报告"TypeLib not found for ProgID"警告 (用于auto-load常用组件,
+    //               用户未显式引用时缺失是预期行为, 不应污染c3-error.log)
+    std::unique_ptr<TypeLibResult> loadByProgId(const std::string& progId, bool silent = false);
 
     // 按类型库文件路径加载
     std::unique_ptr<TypeLibResult> loadByPath(const std::string& tlbPath);

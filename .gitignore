@@ -1,9 +1,83 @@
+# ============================
+# vb6c3 项目 .gitignore
+# ============================
+
+# ---------- 构建产物 ----------
 .build/
-.temp/
+build/
+out/
+output/
+cmake-build-*/
+
+# ---------- CMake 生成物 ----------
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+*.ninja
+*.ninja_deps
+*.ninja_log
+compile_commands.json
+CTestTestfile.cmake
+deps/
+
+# ---------- 编译产物 ----------
 *.obj
+*.o
+*.a
 *.lib
 *.exe
+*.dll
 *.pdb
 *.ilk
-*.idb
-�ο�/
+*.exp
+*.res
+*.manifest
+*.rc（生成的）
+*.so
+*.dylib
+
+# ---------- IDE / 编辑器 ----------
+.vs/
+.vscode/
+*.user
+*.suo
+*.sln
+*.vcxproj*
+.idea/
+*.swp
+*.swo
+*~
+
+# ---------- 临时文件 ----------
+.temp/
+*.tmp
+*.bak
+*.log
+
+# ---------- OS 产物 ----------
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# ---------- Python（如果用脚本辅助）----------
+__pycache__/
+*.pyc
+
+# ---------- Node（如果做 VS Code 扩展）----------
+node_modules/
+
+# ---------- 参考项目源码（只保留 URL 书签）----------
+参考/freebasic/fbc/
+参考/AvaloniaVisualBasic6/AvaloniaVisualBasic6/
+参考/*/
+!参考/*.url
+
+
+.playwright-mcp
+
+vbman/
+
+publish/msvc
+
+_bak

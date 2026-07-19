@@ -110,6 +110,9 @@ std::pair<CompileOptions, int> Driver::parseArgs(int argc, char* argv[]) {
         else if (arg == "--progid" && i + 1 < argc) {
             opts.dllProgId = argv[++i];  // P6.6: ProgID前缀
         }
+        else if (arg == "--libid" && i + 1 < argc) {
+            opts.libidStr = argv[++i];  // C3 扩展: 显式指定 TypeLib LibID
+        }
         else if (arg == "--dump-frm") {
             opts.dumpFrm = true;  // P7: 输出.frm窗体描述
         }
@@ -228,6 +231,14 @@ CompileResult Driver::compile(const CompileOptions& options) {
             // ProgID前缀: 优先CLI指定, 否则用工程名
             if (effectiveOpts.isDll && effectiveOpts.dllProgId.empty()) {
                 effectiveOpts.dllProgId = project.projectName.empty() ? "VB6DLL" : project.projectName;
+            }
+            // LibID: 优先CLI --libid, 其次VBP的LibID=字段, 都空则编译期自动生成
+            // (typelib_builder.cpp:125 的 fallback)
+            if (effectiveOpts.isDll && effectiveOpts.libidStr.empty() && !project.libidStr.empty()) {
+                effectiveOpts.libidStr = project.libidStr;
+                if (effectiveOpts.verbose) {
+                    std::cout << "C3: 使用VBP指定的LibID: " << project.libidStr << std::endl;
+                }
             }
             // P23-01: Feed VBP Reference= and Object= entries into TypeLib import pipeline
             // Reference= GUID -> loadByClsid, path -> loadByPath (fallback when GUID not in registry)
@@ -758,9 +769,10 @@ bool Driver::runTypeLibImport(const CompileOptions& options) {
         };
 
         for (const auto& progId : commonProgIds) {
-            // 仅在缓存中不存在时加载
+            // 仅在缓存中不存在时加载; silent=true: 缺失是预期(用户未显式引用),
+            // 不报VB4001避免污染c3-error.log
             if (!typelibParser_->findCachedCoClass(progId)) {
-                typelibParser_->loadByProgId(progId);
+                typelibParser_->loadByProgId(progId, true);
             }
         }
     }
@@ -1392,11 +1404,19 @@ bool Driver::runCodeGeneration(const CompileOptions& options, const std::string&
                         for (auto& memberName : clsSym.memberNames) {
                             // 同名属性可能有 PropertyGet/Let/Set 多个符号
                             // memberNames 中同名属性只存一次, 需要分别查找各变体
+                            // M29: cross-symTab fallback - the class may be found in a "merged" analyzer
+                            // (e.g., lastAnalyzer), but its Property Let/Set variants might only exist in
+                            // the original per-module analyzer's table. Fall back to allSymTabs to find them.
                             auto* subSym = symTab->lookupModuleByKind(memberName, SymbolKind::Sub);
+                            if (!subSym) for (auto* st_ : allSymTabs) { subSym = st_->lookupModuleByKind(memberName, SymbolKind::Sub); if (subSym) break; }
                             auto* fnSym = symTab->lookupModuleByKind(memberName, SymbolKind::Function);
+                            if (!fnSym) for (auto* st_ : allSymTabs) { fnSym = st_->lookupModuleByKind(memberName, SymbolKind::Function); if (fnSym) break; }
                             auto* propGetSym = symTab->lookupModuleByKind(memberName, SymbolKind::PropertyGet);
+                            if (!propGetSym) for (auto* st_ : allSymTabs) { propGetSym = st_->lookupModuleByKind(memberName, SymbolKind::PropertyGet); if (propGetSym) break; }
                             auto* propLetSym = symTab->lookupModuleByKind(memberName, SymbolKind::PropertyLet);
+                            if (!propLetSym) for (auto* st_ : allSymTabs) { propLetSym = st_->lookupModuleByKind(memberName, SymbolKind::PropertyLet); if (propLetSym) break; }
                             auto* propSetSym = symTab->lookupModuleByKind(memberName, SymbolKind::PropertySet);
+                            if (!propSetSym) for (auto* st_ : allSymTabs) { propSetSym = st_->lookupModuleByKind(memberName, SymbolKind::PropertySet); if (propSetSym) break; }
 
                             // 收集所有 Public 成员变体 (PropertyGet 必须在 PropertyLet 前面)
                             struct MemberRef { Symbol* sym; bool isGet; bool isPut; bool isPutRef; };
@@ -1431,6 +1451,8 @@ bool Driver::runCodeGeneration(const CompileOptions& options, const std::string&
                                 if (!foundExistingDispid) {
                                     mi.dispid = dispidCounter++;
                                 }
+                                // M29: 回写dispid到method symbol, 供cgen生成dll_entry.c方法表使用, 确保TypeLib与dll_entry.c dispid一致
+                                mr.sym->comDispid = mi.dispid;
                                 for (auto& param : mr.sym->params) {
                                     mi.params.push_back(param);
                                 }
@@ -1533,6 +1555,36 @@ bool Driver::runCodeGeneration(const CompileOptions& options, const std::string&
             }
         }
 
+        // M29: Sync comDispid from per-module method symbols to lastAnalyzer's merged table
+        // (TypeLib builder writes comDispid to per-module Symbol* in allSymTabs, but cgen's
+        //  generateDllEntry reads via lastAnalyzer.symbolTable().lookupModule[ByKind], which
+        //  may return a DIFFERENT Symbol* than what driver TypeLib phase wrote to. Same pattern
+        //  as the comDefaultIfaceIid sync block above.)
+        for (auto& [mKey, mClsSym] : lastAnalyzer->symbolTable().moduleScope()->symbols()) {
+            if (!mClsSym || mClsSym->kind != SymbolKind::Class || mClsSym->isInterface) continue;
+            for (auto& memberName : mClsSym->memberNames) {
+                // Sync each possible method kind independently (Sub/Function are exclusive;
+                // Property Get/Let/Set share name but are distinct Symbol objects)
+                for (auto mKind : {SymbolKind::Sub, SymbolKind::Function,
+                                   SymbolKind::PropertyGet, SymbolKind::PropertyLet,
+                                   SymbolKind::PropertySet}) {
+                    // Find any Symbol* with comDispid set (the "source of truth" written by driver TypeLib phase)
+                    int knownDispid = 0;
+                    for (auto* st : allSymTabs) {
+                        Symbol* s = st->lookupModuleByKind(memberName, mKind);
+                        if (s && s->comDispid != 0) { knownDispid = s->comDispid; break; }
+                    }
+                    if (knownDispid == 0) continue;  // method not present, or driver didn't set dispid
+                    // Propagate to ALL matching Symbol* across all symbol tables (only fill zeros)
+                    // (cgen's generateDllEntry may read via a DIFFERENT Symbol* than what driver wrote to,
+                    //  because lastAnalyzer's merged table can have its own copy. Update every copy.)
+                    for (auto* st : allSymTabs) {
+                        Symbol* s = st->lookupModuleByKind(memberName, mKind);
+                        if (s && s->comDispid == 0) s->comDispid = knownDispid;
+                    }
+                }
+            }
+        }
         // P6.6.6: generateDllEntry() runs after TypeLib building so IIDs/CLSIDs are available
         std::string dllEntryCode = dllCgen.generateDllEntry(options.dllProgId, allSymTabs);
 
