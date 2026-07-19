@@ -1,6 +1,8 @@
 #include "semantics/semantic_analyzer.hpp"
 #include <algorithm>
 #include <cctype>
+#include <tuple>
+#include <initializer_list>
 
 namespace vb6c3 {
 
@@ -2154,6 +2156,24 @@ void SemanticAnalyzer::registerBuiltins() {
         sym->isBuiltin = true;
         symTab_.define(std::move(sym));
     };
+    // Fix 030b: 带参数签名的内置函数注册 — 填充 sym->params, 让 IndexOrCallExpr 的
+    // calleeParams 查找命中, 从而触发 Fix 024 P2 (ByVal Variant 正向包装) 和
+    // Fix 029 (ByVal 具体类型反向提取). params: vector of (name, type, isByVal, isOptional).
+    auto addBuiltinFuncWithParams = [&](const char* name, Vb6Type retType,
+                                        std::initializer_list<std::tuple<const char*, Vb6Type, bool, bool>> params) {
+        auto sym = std::make_unique<Symbol>(SymbolKind::Function, name, retType,
+            SourceLocation{}, AccessLevel::Public);
+        sym->isBuiltin = true;
+        for (auto& p : params) {
+            ParameterInfo pi;
+            pi.name = std::get<0>(p);
+            pi.type = std::get<1>(p);
+            pi.isByVal = std::get<2>(p);
+            pi.isOptional = std::get<3>(p);
+            sym->params.push_back(std::move(pi));
+        }
+        symTab_.define(std::move(sym));
+    };
     // 字符串函数
     addBuiltinFunc("Len", Vb6Type::Long);
     addBuiltinFunc("Left", Vb6Type::String);
@@ -2212,8 +2232,17 @@ void SemanticAnalyzer::registerBuiltins() {
     addBuiltinFunc("TypeName", Vb6Type::String);
     addBuiltinFunc("VarType", Vb6Type::Long);
     // 数组
-    addBuiltinFunc("UBound", Vb6Type::Long);
-    addBuiltinFunc("LBound", Vb6Type::Long);
+    // Fix 030b: UBound/LBound 注册带参数签名 — 让 Fix 029 反向提取能在 Variant 实参上
+    // 触发 vb6_VariantToSafeArray1D, 修正 C2440 (vb6_VARIANT → vb6_SafeArray1D*) 子类.
+    // RTL: int32_t vb6_UBound(vb6_SafeArray1D* safeArray, int32_t dimension);
+    // VB6: UBound(arrayname[, dimension]) — arrayname 接受 Variant 含数组或类型化数组.
+    // 第 1 参数用 Variant|Array (不纯 Variant, 让反向提取 paramIsArray 分支命中).
+    const Vb6Type kVariantArray = static_cast<Vb6Type>(
+        static_cast<uint16_t>(Vb6Type::Variant) | static_cast<uint16_t>(Vb6Type::Array));
+    addBuiltinFuncWithParams("UBound", Vb6Type::Long,
+        {{"array", kVariantArray, true, false}, {"dimension", Vb6Type::Long, true, true}});
+    addBuiltinFuncWithParams("LBound", Vb6Type::Long,
+        {{"array", kVariantArray, true, false}, {"dimension", Vb6Type::Long, true, true}});
     addBuiltinFunc("Array", Vb6Type::Variant);
     // 数学
     addBuiltinFunc("Sin", Vb6Type::Double);

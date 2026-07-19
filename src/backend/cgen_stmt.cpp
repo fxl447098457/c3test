@@ -2179,6 +2179,8 @@ void CCodeGen::visit(CallStmt& node) {
             // Handle: me-prepend for class methods, ParamArray, Optional padding, _has_ flags
             bool calleeHasPA = false;
             std::vector<ParameterInfo> calleeParams;
+            // Fix 030b: 跟踪 builtin 状态 — builtin 跳过 padding/IsMissing 尾叜
+            bool calleeIsBuiltin = false;
 
             if (node.callee && node.callee->kind == ASTNodeKind::IdentifierExpr) {
                 auto& idExpr = static_cast<IdentifierExpr&>(*node.callee);
@@ -2192,6 +2194,7 @@ void CCodeGen::visit(CallStmt& node) {
                     || sym->kind == SymbolKind::PropertyGet || sym->kind == SymbolKind::PropertyLet
                     || sym->kind == SymbolKind::PropertySet)) {
                     calleeParams = sym->params;
+                    calleeIsBuiltin = sym->isBuiltin;
                 }
             }
             // Fix 015: Call X.Y(args).Z (无尾括号) 形态下 node.callee 是 .Z MemberAccessExpr.
@@ -2205,6 +2208,7 @@ void CCodeGen::visit(CallStmt& node) {
                     || sym->kind == SymbolKind::PropertyGet || sym->kind == SymbolKind::PropertyLet
                     || sym->kind == SymbolKind::PropertySet)) {
                     calleeParams = sym->params;
+                    calleeIsBuiltin = sym->isBuiltin;
                 }
             }
 
@@ -2234,8 +2238,9 @@ void CCodeGen::visit(CallStmt& node) {
                 // ParamArray: pass NULL SAFEARRAY*
                 if (!bareArgList.empty()) bareArgList += ", ";
                 bareArgList += "NULL";
-            } else if (calleeParams.size() > 0) {
+            } else if (calleeParams.size() > 0 && !calleeIsBuiltin) {
                 // Pad all params with default values (bare call = 0 args)
+                // Fix 030b: builtin 跳过 padding/IsMissing 路径 (RTL C 签名不接受尾叜)
                 for (size_t i = 0; i < calleeParams.size(); i++) {
                     const auto& param = calleeParams[i];
                     if (!bareArgList.empty()) bareArgList += ", ";

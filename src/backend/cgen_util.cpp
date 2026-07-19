@@ -1042,7 +1042,7 @@ std::string CCodeGen::comPackExpr(Expr& expr) {
         case Vb6Type::Object:
             return "vb6_ComPackObject"; // void* → VARIANT
         case Vb6Type::Variant:
-            return "vb6_ComPackVariant"; // vb6_VARIANT → VARIANT
+            return "vb6_ComPackValue";  // Fix 030: 通用打包宏 — 路由任意 C 类型实参 (inferExprType 回退 Variant 时安全)
         default:
             // Variant/未知: 尝试用BSTR封装 (运行时会处理转换)
             // 更安全的做法: 检查已知变量类型
@@ -1073,9 +1073,11 @@ std::string CCodeGen::comPackExpr(Expr& expr) {
 // 当isComMarker_为true时, 根据packFnHint选择对应类型的COM属性取值函数
 // 如果isComMarker_为false, 返回空串
 std::string CCodeGen::resolveComMarkerForPack(const std::string& packFnHint) {
-    // P26: vb6_ComPackVariant 需要把 COM 调用返回的 VARIANT* 转成 vb6_VARIANT
-    // (即使 isComMarker_ 已被消费, lastExpr_ 仍可能是 COM 调用结果)
-    if (packFnHint == "vb6_ComPackVariant") {
+    // P26: vb6_ComPackVariant / Fix 030: vb6_ComPackValue 需要把 COM 调用返回的
+    // VARIANT* 转成 vb6_VARIANT (即使 isComMarker_ 已被消费, lastExpr_ 仍可能是 COM 调用结果).
+    // vb6_ComPackValue(vb6_VariantFromComResult(ComCall)) 经 _Generic VariantIdentity 路径
+    // 等价于 vb6_ComPackVariant(vb6_VariantFromComResult(ComCall)).
+    if (packFnHint == "vb6_ComPackVariant" || packFnHint == "vb6_ComPackValue") {
         if (lastExpr_.find("vb6_ComCall(") == 0 ||
             lastExpr_.find("vb6_ComGetProp(") == 0 ||
             lastExpr_.find("vb6_ComGetObjectProp(") == 0 ||
@@ -1124,8 +1126,8 @@ std::string CCodeGen::resolveComMarkerForPack(const std::string& packFnHint) {
     } else if (packFnHint == "vb6_ComPackBool") {
         return "vb6_ComGetIntProp(" + objExpr + ", L\"" + memName + "\")";
     }
-    // vb6_ComPackVariant: 需要把 COM 返回的 VARIANT* 转成 vb6_VARIANT
-    if (packFnHint == "vb6_ComPackVariant") {
+    // vb6_ComPackVariant / Fix 030 vb6_ComPackValue: 需要把 COM 返回的 VARIANT* 转成 vb6_VARIANT
+    if (packFnHint == "vb6_ComPackVariant" || packFnHint == "vb6_ComPackValue") {
         if (lastExpr_.find("vb6_ComCall(") == 0 ||
             lastExpr_.find("vb6_ComGetProp(") == 0 ||
             lastExpr_.find("vb6_ComGetObjectProp(") == 0 ||

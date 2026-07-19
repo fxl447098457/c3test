@@ -2457,6 +2457,10 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
     // 位置参数
     // 需要检查被调用函数的参数签名: ByRef参数在调用点需要传指针(&arg)
     std::vector<ParameterInfo> calleeParams;
+    // Fix 030b: 跟踪被调用者是否为 builtin — builtin 用 calleeParams 仅为触发
+    // Fix 024 P2/Fix 029 的参数包装, 但 RTL C 签名不接受 Optional padding 和
+    // IsMissing _has_ flag 尾叜 (那些只适用于用户定义函数). 见 line 3207/3237.
+    bool calleeIsBuiltin = false;
     // 从IdentifierExpr或MemberAccessExpr获取被调用函数名, 在符号表中查找
     // Fix 027: 加入 DeclareSub / DeclareFunc — 否则 WinAPI Declare 的 ByRef 参数无法 emit &,
     //          导致 ByRef UDT/SafeArray/标量 全部按值传递 (例如 SOCKADDR_IN → SOCKADDR_IN* 错误).
@@ -2475,6 +2479,7 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
             || funcSym->kind == SymbolKind::PropertySet
             || funcSym->kind == SymbolKind::DeclareSub || funcSym->kind == SymbolKind::DeclareFunc)) {
             calleeParams = funcSym->params;
+            calleeIsBuiltin = funcSym->isBuiltin;
         }
     } else if (node.callee && node.callee->kind == ASTNodeKind::MemberAccessExpr) {
         // Module.Method 或 obj.Method 调用: 查找方法名的参数签名
@@ -2486,6 +2491,7 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
             || funcSym->kind == SymbolKind::PropertySet
             || funcSym->kind == SymbolKind::DeclareSub || funcSym->kind == SymbolKind::DeclareFunc)) {
             calleeParams = funcSym->params;
+            calleeIsBuiltin = funcSym->isBuiltin;
         }
     }
 
@@ -3206,7 +3212,9 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
 
     // P14.1.4: General Optional parameter padding for user-defined functions
     // calleeParams is empty for builtin RTL functions (registered without params), so they're auto-skipped
-    if (calleeParams.size() > 0 && args.size() < calleeParams.size() && paIndex < 0) {
+    // Fix 030b: builtin 即使现在有 calleeParams (用于触发包装), 也不走 padding/IsMissing 路径
+    // (RTL C 签名不接受尾叜 _has_ flag, 默认值由 builtin 的特殊 codegen 处理如 UBound 补 dimension=
+    if (calleeParams.size() > 0 && args.size() < calleeParams.size() && paIndex < 0 && !calleeIsBuiltin) {
         for (size_t i = args.size(); i < calleeParams.size(); i++) {
             if (i > 0 || !args.empty()) argList += ", ";
             const auto& param = calleeParams[i];
@@ -3236,7 +3244,8 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
     
     // P20-36: IsMissing support - append _has_ flags for Optional params
     // For each Optional param in calleeParams: 1 if actually passed, 0 if padded
-    if (calleeParams.size() > 0 && paIndex < 0) {
+    // Fix 030b: builtin 跳过 (RTL C 函数无 _has_ 尾叜)
+    if (calleeParams.size() > 0 && paIndex < 0 && !calleeIsBuiltin) {
         for (size_t i = 0; i < calleeParams.size(); i++) {
             const auto& param = calleeParams[i];
             if (param.isOptional && !param.isParamArray) {

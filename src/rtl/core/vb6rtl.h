@@ -888,6 +888,11 @@ vb6_VARIANT vb6_VariantFromComResult(void* variant_ptr);
 vb6_VARIANT vb6_VariantFromStackVARIANT(VARIANT* pv);  /* P24-03: 栈上VARIANT转换(不释放) */
 void* vb6_VariantToObject(vb6_VARIANT* v);  /* P24-04: Extract IDispatch from Variant for COM late-binding */
 void* vb6_ComPackVariant(vb6_VARIANT v);     /* P24-04: Pack vb6_VARIANT (by value) into Windows VARIANT */
+// Fix 030: 通用 COM 参数打包宏 — 路由任意 C 类型实参通过 _Generic 选择合适的
+// Variant 构造函数 (scalar->Long/Int/Double/Bool, BSTR->String, SafeArray1D*->Array,
+// void*/class*->Object, vb6_VARIANT->Identity), 再交给 vb6_ComPackVariant 包装为
+// Windows VARIANT. 用于 comPackExpr 无法准确判定 (inferExprType 回退 Variant) 的场景.
+#define vb6_ComPackValue(x) vb6_ComPackVariant(vb6_VariantFromValue((x)))
 
 
 // P14.3.5: CallByName - 按名称动态调用方法/属性
