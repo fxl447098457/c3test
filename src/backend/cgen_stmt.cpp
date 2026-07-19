@@ -743,6 +743,11 @@ void CCodeGen::visit(AssignmentStmt& node) {
         // 检查目标是否是已知BSTR变量 (me->field 或 模块级变量)
         std::string checkName = target;
         if (checkName.substr(0, 4) == "me->") checkName = checkName.substr(4);  // 去掉me->前缀
+        // Fix 025: (*name) 解引用形式 — ByRef BSTR/Variant 参数写穿透, 剥掉 (* ... ) 取内部名
+        if (checkName.size() > 4 && checkName[0] == '(' && checkName[1] == '*'
+            && checkName.back() == ')') {
+            checkName = checkName.substr(2, checkName.size() - 3);
+        }
         std::string lower = checkName;
         std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
         if (knownBstrVars_.count(lower)) targetIsBstr = true;
@@ -759,6 +764,12 @@ void CCodeGen::visit(AssignmentStmt& node) {
     {
         std::string checkName = target;
         if (checkName.substr(0, 4) == "me->") checkName = checkName.substr(4);
+        // Fix 025: (*name) 解引用形式 — ByRef Variant 参数 (Dim X As Variant 走 ByRef),
+        //   codegen emit 写穿透为 (*X) = ...; 必须剥掉 (* ... ) 才能在 knownVariantVars_ 查到 X.
+        if (checkName.size() > 4 && checkName[0] == '(' && checkName[1] == '*'
+            && checkName.back() == ')') {
+            checkName = checkName.substr(2, checkName.size() - 3);
+        }
         std::string lower = checkName;
         std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
         if (knownVariantVars_.count(lower)) targetIsVariant = true;

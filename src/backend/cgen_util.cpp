@@ -1806,8 +1806,10 @@ std::string CCodeGen::wrapVariantValue(ASTNode* valueNode, const std::string& cE
         return "vb6_VariantArray(" + cExpr + ")";
     }
     
-    // 默认: 尝试用Long包装 (VB6默认整数类型)
-    return "vb6_VariantLong(" + cExpr + ")";
+    // Fix 025: 默认改用 _Generic 多态宏 vb6_VariantFromValue, 让编译器按实参 C 类型
+    // 自动选择 Variant 构造函数。覆盖标量/BSTR/void*/class ptr/vb6_SafeArray1D* 等所有
+    // 已注册的 _Generic 选择器, 不再粗暴回退到 VariantLong (会把指针/BSTR 当 int 截断)。
+    return "vb6_VariantFromValue(" + cExpr + ")";
 }
 
 } // namespace vb6c3
