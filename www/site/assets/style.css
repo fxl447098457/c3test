@@ -1,4 +1,4 @@
-/* ============================================
+﻿/* ============================================
    C3 Landing Page — Dark Glass Morphism
    Dynamic gradient background + noise texture
    ============================================ */
@@ -7,15 +7,6 @@
 :root {
     --color-bg1: rgb(8, 10, 15);
     --color-bg2: rgb(0, 17, 32);
-    --color1: 18, 113, 255;
-    --color2: 107, 74, 255;
-    --color3: 100, 100, 255;
-    --color4: 50, 160, 220;
-    --color5: 80, 47, 122;
-    --color-interactive: 140, 100, 255;
-    --circle-size: 80%;
-    --blending: hard-light;
-
     --accent-brand: #1271ff;
     --accent-brand-light: #7dd3fc;
     --accent-teal: #06b6d4;
@@ -89,18 +80,16 @@ code.accent {
 }
 
 /* ============================================
-   动态渐变背景（参考 fmt 站点）
+   深空背景 + 浮动星星
    ============================================ */
 .gradient-bg {
     position: fixed;
     top: 0; left: 0;
     width: 100vw; height: 100vh;
     overflow: hidden;
-    background: linear-gradient(40deg, var(--color-bg1), var(--color-bg2));
+    background: linear-gradient(170deg, #06080f 0%, #0a1628 40%, #0d0f1a 100%);
     z-index: 0;
 }
-
-.gradient-bg .svgBlur { display: none; }
 
 .gradient-bg .noiseBg {
     position: absolute;
@@ -108,101 +97,147 @@ code.accent {
     top: 0; left: 0;
     z-index: 1;
     mix-blend-mode: soft-light;
-    opacity: 0.3;
+    opacity: 0.25;
 }
 
-.gradient-bg .gradients-container {
-    filter: url(#goo) blur(40px);
+/* ---- 浮动星星 ---- */
+.gradient-bg .stars {
+    position: absolute;
     width: 100%; height: 100%;
+    top: 0; left: 0;
+    z-index: 2;
 }
 
-.gradient-bg .g1 {
+.gradient-bg .stars i {
     position: absolute;
-    background: radial-gradient(circle at center, rgba(var(--color1), 0.8) 0, rgba(var(--color1), 0) 50%) no-repeat;
-    mix-blend-mode: var(--blending);
-    width: var(--circle-size); height: var(--circle-size);
-    top: calc(50% - var(--circle-size) / 2);
-    left: calc(50% - var(--circle-size) / 2);
-    transform-origin: center center;
-    animation: moveVertical 30s ease infinite;
+    width: 2px; height: 2px;
+    background: rgba(255, 255, 255, 0.7);
+    border-radius: 50%;
+    animation: starFloat var(--dur, 12s) var(--delay, 0s) linear infinite;
+    will-change: transform, opacity;
 }
 
-.gradient-bg .g2 {
+/* 50 颗星星各自的位置 + 动画参数（nth-child 循环 5 组 x 10） */
+.gradient-bg .stars i:nth-child(5n+1) { left: 5%;  top: 10%; --dur: 10s; --delay: 0s;  width: 3px; height: 3px; }
+.gradient-bg .stars i:nth-child(5n+2) { left: 18%; top: 45%; --dur: 14s; --delay: 2s;  }
+.gradient-bg .stars i:nth-child(5n+3) { left: 32%; top: 25%; --dur: 11s; --delay: 4s;  width: 3px; height: 3px; }
+.gradient-bg .stars i:nth-child(5n+4) { left: 50%; top: 70%; --dur: 16s; --delay: 1s;  }
+.gradient-bg .stars i:nth-child(5n)   { left: 75%; top: 15%; --dur: 13s; --delay: 3s;  }
+
+/* 每 10 颗中的偏移（微调位置避免重叠） */
+.gradient-bg .stars i:nth-child(10n+6)  { left: 88%; top: 55%; --dur: 12s; --delay: 5s;  width: 2px; height: 2px; }
+.gradient-bg .stars i:nth-child(10n+7)  { left: 42%; top: 82%; --dur: 15s; --delay: 7s;  }
+.gradient-bg .stars i:nth-child(10n+8)  { left: 62%; top: 35%; --dur: 10s; --delay: 8s;  width: 3px; height: 3px; }
+.gradient-bg .stars i:nth-child(10n+9)  { left: 8%;  top: 68%; --dur: 17s; --delay: 6s;  }
+.gradient-bg .stars i:nth-child(10n+10) { left: 95%; top: 90%; --dur: 11s; --delay: 9s;  }
+
+/* 额外微调让 41-50 不完全重复 1-10 */
+.gradient-bg .stars i:nth-child(41) { left: 22%; top: 92%; --dur: 18s; --delay: 4s; }
+.gradient-bg .stars i:nth-child(42) { left: 68%; top: 8%;  --dur: 12s; --delay: 2s; width: 3px; height: 3px; }
+.gradient-bg .stars i:nth-child(43) { left: 38%; top: 58%; --dur: 14s; --delay: 7s; }
+.gradient-bg .stars i:nth-child(44) { left: 85%; top: 38%; --dur: 16s; --delay: 1s; width: 2px; height: 2px; }
+.gradient-bg .stars i:nth-child(45) { left: 15%; top: 22%; --dur: 13s; --delay: 5s; }
+.gradient-bg .stars i:nth-child(46) { left: 72%; top: 75%; --dur: 10s; --delay: 8s; width: 3px; height: 3px; }
+.gradient-bg .stars i:nth-child(47) { left: 55%; top: 50%; --dur: 15s; --delay: 3s; }
+.gradient-bg .stars i:nth-child(48) { left: 28%; top: 12%; --dur: 11s; --delay: 9s; }
+.gradient-bg .stars i:nth-child(49) { left: 92%; top: 62%; --dur: 17s; --delay: 6s; width: 2px; height: 2px; }
+.gradient-bg .stars i:nth-child(50) { left: 48%; top: 95%; --dur: 14s; --delay: 0s; }
+
+@keyframes starFloat {
+    0%   { transform: translateY(0) scale(1);   opacity: 0.3; }
+    10%  { opacity: 0.9; }
+    50%  { transform: translateY(-80px) scale(1.2); opacity: 0.6; }
+    90%  { opacity: 0.9; }
+    100% { transform: translateY(0) scale(1);   opacity: 0.3; }
+}
+
+/* ---- 左上角暖光晕 ---- */
+.gradient-bg .glow-warm {
     position: absolute;
-    background: radial-gradient(circle at center, rgba(var(--color2), 0.8) 0, rgba(var(--color2), 0) 50%) no-repeat;
-    mix-blend-mode: var(--blending);
-    width: var(--circle-size); height: var(--circle-size);
-    top: calc(50% - var(--circle-size) / 2);
-    left: calc(50% - var(--circle-size) / 2);
-    transform-origin: calc(50% - 400px);
-    animation: moveInCircle 20s reverse infinite;
+    width: 45vw; height: 45vw;
+    top: -12vw; left: -12vw;
+    background: radial-gradient(circle, rgba(210, 160, 60, 0.18) 0%, rgba(210, 140, 40, 0.06) 40%, transparent 70%);
+    border-radius: 50%;
+    z-index: 3;
+    pointer-events: none;
 }
 
-.gradient-bg .g3 {
+/* ---- 边缘浮动半球 ---- */
+.gradient-bg .orb {
     position: absolute;
-    background: radial-gradient(circle at center, rgba(var(--color3), 0.8) 0, rgba(var(--color3), 0) 50%) no-repeat;
-    mix-blend-mode: var(--blending);
-    width: var(--circle-size); height: var(--circle-size);
-    top: calc(50% - var(--circle-size) / 2 + 200px);
-    left: calc(50% - var(--circle-size) / 2 - 500px);
-    transform-origin: calc(50% + 400px);
-    animation: moveInCircle 40s linear infinite;
+    border-radius: 50%;
+    pointer-events: none;
+    z-index: 3;
+    will-change: transform, opacity;
+    animation: orbDrift var(--orb-dur, 22s) var(--orb-delay, 0s) ease-in-out infinite alternate;
 }
 
-.gradient-bg .g4 {
-    position: absolute;
-    background: radial-gradient(circle at center, rgba(var(--color4), 0.8) 0, rgba(var(--color4), 0) 50%) no-repeat;
-    mix-blend-mode: var(--blending);
-    width: var(--circle-size); height: var(--circle-size);
-    top: calc(50% - var(--circle-size) / 2);
-    left: calc(50% - var(--circle-size) / 2);
-    transform-origin: calc(50% - 200px);
-    animation: moveHorizontal 40s ease infinite;
-    opacity: 0.7;
+/* 左上 — 天蓝 */
+.gradient-bg .orb-tl {
+    width: 22vw; height: 22vw;
+    top: 5%; left: 2%;
+    background: radial-gradient(circle at 60% 60%, rgba(125, 211, 252, 0.10) 0%, rgba(56, 189, 248, 0.03) 50%, transparent 70%);
+    --orb-dur: 20s; --orb-delay: 0s;
+}
+/* 右上 — 青绿 */
+.gradient-bg .orb-tr {
+    width: 18vw; height: 18vw;
+    top: 8%; right: 3%;
+    background: radial-gradient(circle at 40% 60%, rgba(6, 182, 212, 0.09) 0%, rgba(20, 184, 166, 0.02) 50%, transparent 70%);
+    --orb-dur: 24s; --orb-delay: 3s;
+}
+/* 左下 — 深绿 */
+.gradient-bg .orb-bl {
+    width: 20vw; height: 20vw;
+    bottom: 8%; left: 4%;
+    background: radial-gradient(circle at 60% 40%, rgba(16, 185, 129, 0.08) 0%, rgba(5, 150, 105, 0.02) 50%, transparent 70%);
+    --orb-dur: 26s; --orb-delay: 5s;
+}
+/* 右下 — 暖橙 */
+.gradient-bg .orb-br {
+    width: 16vw; height: 16vw;
+    bottom: 5%; right: 5%;
+    background: radial-gradient(circle at 40% 40%, rgba(245, 158, 11, 0.07) 0%, rgba(217, 119, 6, 0.02) 50%, transparent 70%);
+    --orb-dur: 22s; --orb-delay: 2s;
+}
+/* 左中 — 靛青 */
+.gradient-bg .orb-l {
+    width: 14vw; height: 14vw;
+    top: 50%; left: -2%;
+    background: radial-gradient(circle at 70% 50%, rgba(56, 189, 248, 0.07) 0%, rgba(14, 165, 233, 0.02) 50%, transparent 70%);
+    --orb-dur: 28s; --orb-delay: 7s;
+}
+/* 右中 — 玫瑰 */
+.gradient-bg .orb-r {
+    width: 15vw; height: 15vw;
+    top: 48%; right: -3%;
+    background: radial-gradient(circle at 30% 50%, rgba(244, 63, 94, 0.06) 0%, rgba(225, 29, 72, 0.02) 50%, transparent 70%);
+    --orb-dur: 25s; --orb-delay: 4s;
 }
 
-.gradient-bg .g5 {
-    position: absolute;
-    background: radial-gradient(circle at center, rgba(var(--color5), 0.8) 0, rgba(var(--color5), 0) 50%) no-repeat;
-    mix-blend-mode: var(--blending);
-    width: calc(var(--circle-size) * 2);
-    height: calc(var(--circle-size) * 2);
-    top: calc(50% - var(--circle-size));
-    left: calc(50% - var(--circle-size));
-    transform-origin: calc(50% - 800px) calc(50% + 200px);
-    animation: moveInCircle 20s ease infinite;
+@keyframes orbDrift {
+    0%   { transform: translate(0, 0) scale(1);    opacity: 0.6; }
+    100% { transform: translate(var(--dx, 20px), var(--dy, -15px)) scale(1.08); opacity: 1; }
 }
 
-.gradient-bg .interactive {
-    position: absolute;
-    background: radial-gradient(circle at center, rgba(var(--color-interactive), 0.8) 0, rgba(var(--color-interactive), 0) 50%) no-repeat;
-    mix-blend-mode: var(--blending);
-    width: 100%; height: 100%;
-    top: -50%; left: -50%;
-    opacity: 0.7;
-}
-
-@keyframes moveInCircle {
-    0%   { transform: rotate(0deg); }
-    50%  { transform: rotate(180deg); }
-    100% { transform: rotate(360deg); }
-}
-
-@keyframes moveVertical {
-    0%   { transform: translateY(-50%); }
-    50%  { transform: translateY(50%); }
-    100% { transform: translateY(-50%); }
-}
-
-@keyframes moveHorizontal {
-    0%   { transform: translateX(-50%) translateY(-10%); }
-    50%  { transform: translateX(50%) translateY(10%); }
-    100% { transform: translateX(-50%) translateY(-10%); }
-}
+/* 每颗半球各自的漂移方向 */
+.gradient-bg .orb-tl { --dx: 30px;  --dy: 20px; }
+.gradient-bg .orb-tr { --dx: -25px; --dy: 25px; }
+.gradient-bg .orb-bl { --dx: 20px;  --dy: -18px; }
+.gradient-bg .orb-br { --dx: -22px; --dy: -22px; }
+.gradient-bg .orb-l  { --dx: 35px;  --dy: 12px; }
+.gradient-bg .orb-r  { --dx: -30px; --dy: -10px; }
 
 @media (prefers-reduced-motion: reduce) {
+    /* 星星 + 半球动画停掉（静态点缀），UI 动画也停 */
+    .gradient-bg .stars i,
+    .gradient-bg .orb {
+        animation: none !important;
+        opacity: 0.5 !important;
+    }
     *, *::before, *::after {
         animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
         transition-duration: 0.01ms !important;
     }
 }
@@ -395,6 +430,27 @@ code.accent {
 .nav-external:hover {
     background: rgba(255, 255, 255, 0.1);
 }
+
+.nav-donate {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 6px 16px;
+    background: linear-gradient(135deg, #ff5f87, #ff2a68);
+    border: 1px solid rgba(255, 42, 104, 0.5);
+    border-radius: var(--radius-sm);
+    color: #fff !important;
+    font-weight: 700 !important;
+    box-shadow: 0 2px 8px rgba(255, 42, 104, 0.3);
+    transition: var(--transition);
+}
+
+.nav-donate:hover {
+    background: linear-gradient(135deg, #ff7a9a, #ff3d7a);
+    box-shadow: 0 4px 14px rgba(255, 42, 104, 0.5);
+    transform: translateY(-1px);
+}
+
 
 .nav-mobile-toggle {
     display: none;

@@ -10,13 +10,13 @@
     <title>C3 - 第三代 VB6 编译器 | x64 · Unicode · 多线程 · COM</title>
     <meta name="title" content="C3 - 第三代 VB6 编译器 | x64 · Unicode · 多线程 · COM">
     <meta name="description"
-        content="C3 是现代化 Visual Basic 6.0 编译器，将 VB6 代码编译为原生 x64 Windows 二进制。支持 Unicode、多线程、COM 互操作，静态链接运行时，无需修改源码即可编译。">
+        content="C3 是现代化 Visual Basic 6.0 编译器，将 VB6 代码编译为原生 x64 Windows 二进制。支持 Unicode、多线程、COM 互操作、第三方 COM 事件源、ActiveX DLL，静态链接运行时，已通过实战 VB6 工程编译验证。">
     <meta name="keywords"
         content="VB6编译器,Visual Basic 6.0,VB6 x64,VB6 Unicode,VB6多线程,VB6现代化,VB6迁移,C3 compiler,vb6c3,VB6 COM,ActiveX DLL,VBA编译">
     <meta name="author" content="vb6c3 project">
     <meta name="robots" content="index, follow">
     <link rel="canonical" href="https://c3.vb6.pro/">
-    <link rel="icon" href="data:,">
+    <link rel="icon" href="favicon.ico">
 
     <!-- SEO: Open Graph -->
     <meta property="og:type" content="website">
@@ -58,19 +58,24 @@
             "静态链接零依赖部署",
             "开箱即用的编译体验",
             "VBP 工程文件支持",
-            "GBK/UTF-8/UTF-16 源码自动识别"
+            "GBK/UTF-8/UTF-16 源码自动识别",
+            "TypeLib 内建生成（无需 MIDL）",
+            "实战 VB6 工程编译验证（frxParse）",
+            "第三方 COM 事件源绑定（VBMAN / WinHTTP）",
+            ".frx 二进制资源读取",
+            "200+ 内置函数 · 359 内置常量"
         ]
     }
     </script>
 
     <!-- Fonts & Styles -->
-    <link rel="stylesheet" href="assets/inter.css">
-    <link rel="stylesheet" href="assets/style.css">
+    <link rel="stylesheet" href="assets/inter.css?v=1">
+    <link rel="stylesheet" href="assets/style.css?v=1">
 </head>
 
 <body>
 
-    <!-- ========== 动态渐变背景 ========== -->
+    <!-- ========== 深空背景 + 星星 ========== -->
     <div class="gradient-bg" aria-hidden="true">
         <svg viewBox="0 0 1000 1000" preserveAspectRatio="xMidYMid slice" xmlns="http://www.w3.org/2000/svg"
             class="noiseBg">
@@ -79,24 +84,22 @@
             </filter>
             <rect width="100%" height="100%" preserveAspectRatio="xMidYMid meet" filter="url(#noiseFilterBg)"></rect>
         </svg>
-        <svg xmlns="http://www.w3.org/2000/svg" class="svgBlur">
-            <defs>
-                <filter id="goo">
-                    <feGaussianBlur in="SourceGraphic" stdDeviation="10" result="blur"></feGaussianBlur>
-                    <feColorMatrix in="blur" mode="matrix" values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 18 -8"
-                        result="goo"></feColorMatrix>
-                    <feBlend in="SourceGraphic" in2="goo"></feBlend>
-                </filter>
-            </defs>
-        </svg>
-        <div class="gradients-container">
-            <div class="g1"></div>
-            <div class="g2"></div>
-            <div class="g3"></div>
-            <div class="g4"></div>
-            <div class="g5"></div>
-            <div class="interactive"></div>
+        <div class="stars">
+            <i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+            <i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+            <i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+            <i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+            <i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
         </div>
+        <!-- 左上角暖光晕 -->
+        <div class="glow-warm"></div>
+        <!-- 边缘浮动半球 -->
+        <div class="orb orb-tl"></div>
+        <div class="orb orb-tr"></div>
+        <div class="orb orb-bl"></div>
+        <div class="orb orb-br"></div>
+        <div class="orb orb-l"></div>
+        <div class="orb orb-r"></div>
     </div>
 
     <!-- ========== 右侧滚动指示器 ========== -->
@@ -139,7 +142,10 @@
             <li><a href="#limitations">已知限制</a></li>
             <li><a href="http://qm.qq.com/cgi-bin/qm/qr?_wv=1027&k=i6FzaX8HERWYCbhNcPLOdJMt5TgpxBh4&authKey=FwbukNL9WDkJF7bSu1r6IflSu%2F0acN6R5OOHKBhI6ALzG7CL7EQIa3R4BA%2BnNpsM&noverify=0&group_code=788160802"
                     target="_blank" rel="noopener" class="nav-external">加群</a></li>
+            <li><a href="https://pd.qq.com/s/10hc6rit8"
+            target="_blank" rel="noopener" class="nav-external">发帖</a></li>
             <li><a href="https://vb6.pro" target="_blank" rel="noopener" class="nav-external">VB6.PRO</a></li>
+            <li><a href="https://doc.vb6.pro/donate/" target="_blank" rel="noopener" class="nav-donate">💗 捐赠C3</a></li>
         </ul>
         <button class="nav-mobile-toggle" id="navToggle" aria-label="打开导航">&#9776;</button>
     </header>
@@ -152,8 +158,8 @@
                 <div class="hero-content">
                     <div class="hero-badge">
                         <span class="hero-badge-dot"></span>
-                        <span class="hero-badge-on">活跃开发中 </span>
-                        <span>· 8 个里程碑全部达成 · 66 项测试零失败</span>
+                        <span class="hero-badge-on">v1.0.0 Preview</span>
+                        <span>· 28 个里程碑全部达成 · 82 项测试零失败</span>
                     </div>
                     <h1 class="hero-title">
                         <span class="brand">C3</span>
@@ -390,26 +396,28 @@
                             </svg>
                         </div>
                         <h3>下载 C3</h3>
-                        <p class="download-version">v0.8.0 · Windows x64 · 内置多个演示示例</p>
+                        <p class="download-version">v1.0.0 Preview · Windows x64 · 内置多个演示示例</p>
                         <ul class="download-includes">
                             <li>包含 hello.bas、数组、文件 I/O 等测试源码</li>
                             <li>VBP 工程示例（多模块编译）</li>
                             <li>COM 客户端/服务端示例</li>
+                            <li>第三方 COM 事件源（VBMAN / WinHTTP）示例</li>
+                            <li>frxParse 实战工程编译演示</li>
                             <li>条件编译、Declare 语句示例</li>
                         </ul>
-                        <a href="https://github.com/vb6pro/c3/releases" target="_blank" rel="noopener"
+                        <a href="https://gitcode.com/woeoio/c3-demos/releases/download/c3-publish/c3-publish.zip" target="_blank" rel="noopener"
                             class="btn btn-primary btn-download">
                             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                                 stroke-width="2">
                                 <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3" />
                             </svg>
-                            下载 C3
+                            下载 C3 公测版本
                         </a>
                     </div>
 
                     <!-- 编译环境卡片 -->
                     <div class="glass-card download-card download-card-env animate-in">
-                        <h3>运行环境配置</h3>
+                        <h3>运行环境配置（选配，内置了自动化安装脚本）</h3>
                         <p class="download-env-desc">C3 需要配合 Windows 平台工具链来产出最终程序。</p>
 
                         <div class="env-option env-option-primary">
@@ -472,7 +480,7 @@
                 <div class="section-header">
                     <span class="section-label">开发路线</span>
                     <h2 class="section-title">里程碑驱动开发</h2>
-                    <p class="section-desc">每个阶段必须通过验证才能推进。8 个里程碑全部达成。</p>
+                    <p class="section-desc">每个阶段必须通过验证才能推进。28 个里程碑全部达成。</p>
                 </div>
                 <div class="roadmap-timeline">
                     <div class="roadmap-item">
@@ -540,10 +548,52 @@
                         </div>
                     </div>
                     <div class="roadmap-item">
-                        <div class="roadmap-dot evolving">Mx</div>
+                    </div>
+                    <div class="roadmap-item">
+                        <div class="roadmap-dot done">M9</div>
+                        <div class="glass-card roadmap-info">
+                            <h4>TypeLib 内建生成</h4>
+                            <p>CreateTypeLib2 API 内建 TypeLib 生成，彻底移除 MIDL 依赖；ActiveX DLL 全流程简化</p>
+                            <span class="status done">已完成</span>
+                        </div>
+                    </div>
+                    <div class="roadmap-item">
+                        <div class="roadmap-dot done">M10</div>
+                        <div class="glass-card roadmap-info">
+                            <h4>RTL 内嵌零配置编译</h4>
+                            <p>RTL 静态库作为 Windows 资源嵌入 c3.exe，编译时释放、完成后清理。单一可执行文件零依赖分发</p>
+                            <span class="status done">已完成</span>
+                        </div>
+                    </div>
+                    <div class="roadmap-item">
+                        <div class="roadmap-dot done">M11</div>
+                        <div class="glass-card roadmap-info">
+                            <h4>实战工程编译验证</h4>
+                            <p>frxParse 工程端到端编译+运行；.frm 含 OCX 引用行解析；.frx 二进制资源完整读取；COM ProgID 反查修复</p>
+                            <span class="status done">已完成</span>
+                        </div>
+                    </div>
+                    <div class="roadmap-item">
+                        <div class="roadmap-dot done">M22</div>
+                        <div class="glass-card roadmap-info">
+                            <h4>真实 VB6 项目编译</h4>
+                            <p>realVBP + Form demo 编译链接成功，9 项运行时深度修复，path 双重编码问题全面修复，74/74 回归</p>
+                            <span class="status done">已完成</span>
+                        </div>
+                    </div>
+                    <div class="roadmap-item">
+                        <div class="roadmap-dot done">M28</div>
+                        <div class="glass-card roadmap-info">
+                            <h4>第三方 COM 事件源</h4>
+                            <p>VBMAN cHttpClient / WinHTTP 事件源 Advise 修复；事件 Sink 响应 source IID；VB6 字符串语义修复；Format 函数 ~600 行完整重写</p>
+                            <span class="status done">已完成</span>
+                        </div>
+                    </div>
+                    <div class="roadmap-item">
+                        <div class="roadmap-dot evolving">P30</div>
                         <div class="glass-card evolving-card roadmap-info">
-                            <h4>持续完善中</h4>
-                            <p>更多功能正在打磨...</p>
+                            <h4>P30 / P31 持续推进</h4>
+                            <p>P30 扁平化 UI 引擎（--flat-ui 编译参数）；P31 VB6 工程文件类型覆盖（.ctl/.pag/.dsr/.dob）</p>
                             <span class="status evolving">开发中</span>
                         </div>
                     </div>
@@ -552,15 +602,15 @@
                 <!-- 统计数据 -->
                 <div class="stats-bar glass-card animate-in">
                     <div class="stat-item">
-                        <div class="stat-value">18,000+</div>
+                        <div class="stat-value">44,000+</div>
                         <div class="stat-label">引擎核心代码行</div>
                     </div>
                     <div class="stat-item">
-                        <div class="stat-value">80+</div>
-                        <div class="stat-label">语法覆盖种类</div>
+                        <div class="stat-value">200+ / 359</div>
+                        <div class="stat-label">内置函数 / 内置常量</div>
                     </div>
                     <div class="stat-item">
-                        <div class="stat-value">66</div>
+                        <div class="stat-value">82</div>
                         <div class="stat-label">回归测试</div>
                     </div>
                     <div class="stat-item">
@@ -681,7 +731,7 @@
         </div>
     </footer>
 
-    <script src="assets/app.js"></script>
+    <script src="assets/app.js?v=1"></script>
     <script defer src="https://tj.a-vi.com/script.js" data-website-id="a3f0b7d8-79a8-4d9d-96e0-fe0d7fede71e"></script>
     <!-- Matomo -->
     <script>

@@ -1,24 +1,10 @@
-/**
+﻿/**
  * C3 Landing Page — Interaction Controller
  * Scroll indicator, mouse-following background, navigation, animations
  */
 
 (function () {
     'use strict';
-
-    // ==================== 鼠标跟随动态背景 ====================
-    const interBubble = document.querySelector('.gradient-bg .interactive');
-    if (interBubble) {
-        let curX = 0, curY = 0, tgX = 0, tgY = 0;
-        const move = () => {
-            curX += (tgX - curX) / 20;
-            curY += (tgY - curY) / 20;
-            interBubble.style.transform = `translate(${Math.round(curX)}px, ${Math.round(curY)}px)`;
-            requestAnimationFrame(move);
-        };
-        window.addEventListener('mousemove', e => { tgX = e.clientX; tgY = e.clientY; });
-        move();
-    }
 
     // ==================== 右侧滚动指示器 ====================
     const scrollDots = document.querySelectorAll('.scroll-dot');

@@ -1,0 +1,537 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>C3 Logo</title>
+    <style>
+        /* ============================================
+           C3 Logo — 从首页第一屏完整搬移的 brand 样式
+           原始来源: www/site/assets/style.css .hero-title .brand
+           ============================================ */
+
+        :root {
+            /* 与首页完全一致的字体栈 */
+            --font-mono: 'Cascadia Code', 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        html, body {
+            height: 100%;
+            overflow: hidden;
+        }
+
+        body {
+            font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+            background:
+                radial-gradient(ellipse at center, #14181f 0%, #08090c 70%);
+            color: #fff;
+            display: flex;
+            flex-direction: row;
+            align-items: center;
+            justify-content: center;
+            gap: 48px;
+            padding: 20px 32px;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        /* ---------- 右侧操作栏 ---------- */
+        .right-side {
+            display: flex;
+            flex-direction: column;
+            align-items: stretch;
+            gap: 18px;
+            width: 300px;
+            flex-shrink: 0;
+        }
+
+        /* ---------- Logo 区域:固定 600x600 ---------- */
+        .logo-area {
+            width: 600px;
+            height: 600px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+            border-radius: 18px;
+            background-color: transparent;
+            /* 棋盘格表示透明区(仅展示用,导出时由 JS 控制) */
+            background-image:
+                linear-gradient(45deg, rgba(255, 255, 255, 0.035) 25%, transparent 25%),
+                linear-gradient(-45deg, rgba(255, 255, 255, 0.035) 25%, transparent 25%),
+                linear-gradient(45deg, transparent 75%, rgba(255, 255, 255, 0.035) 75%),
+                linear-gradient(-45deg, transparent 75%, rgba(255, 255, 255, 0.035) 75%);
+            background-size: 32px 32px;
+            background-position: 0 0, 0 16px, 16px -16px, -16px 0;
+            overflow: hidden;
+        }
+
+        /* ---------- ★ 核心 brand 样式(完整搬移) ★ ----------
+           1) font-family: var(--font-mono)
+           2) background: linear-gradient(to top, #ff4500...#fff176)
+           3) -webkit-background-clip: text + -webkit-text-fill-color: transparent
+           4) filter: drop-shadow(...) drop-shadow(...)
+           字号按 600x600 画布放大到 560px,字重 700
+        ---------- */
+        .brand {
+            font-family: var(--font-mono);
+            font-size: 560px;
+            font-weight: 700;
+            line-height: 0.92;
+            letter-spacing: -0.04em;
+            background: linear-gradient(to top, #ff4500, #ff6a00, #ffa500, #ffd700, #fff176);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            text-shadow: none;
+            filter:
+                drop-shadow(0 0 28px rgba(255, 100, 0, 0.45))
+                drop-shadow(0 0 60px rgba(255, 60, 0, 0.2));
+            user-select: none;
+        }
+
+        /* ---------- 工具栏(背景色 + 保存) ---------- */
+        .toolbar {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+
+        /* 次要按钮:背景色(描边风格) */
+        .tool-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+            padding: 14px 28px;
+            border-radius: 10px;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            border: 1px solid rgba(255, 255, 255, 0.18);
+            color: rgba(255, 255, 255, 0.9);
+            background: rgba(255, 255, 255, 0.05);
+            backdrop-filter: blur(6px);
+            transition: 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .tool-btn:hover {
+            background: rgba(255, 255, 255, 0.1);
+            border-color: rgba(255, 255, 255, 0.3);
+            transform: translateY(-2px);
+        }
+
+        .tool-btn:active {
+            transform: translateY(0);
+        }
+
+        /* 当前色色块 */
+        .swatch {
+            width: 18px;
+            height: 18px;
+            border-radius: 4px;
+            border: 1px solid rgba(255, 255, 255, 0.4);
+            /* 棋盘格底,体现透明 */
+            background-color: transparent;
+            background-image:
+                linear-gradient(45deg, rgba(255, 255, 255, 0.4) 25%, transparent 25%),
+                linear-gradient(-45deg, rgba(255, 255, 255, 0.4) 25%, transparent 25%),
+                linear-gradient(45deg, transparent 75%, rgba(255, 255, 255, 0.4) 75%),
+                linear-gradient(-45deg, transparent 75%, rgba(255, 255, 255, 0.4) 75%);
+            background-size: 8px 8px;
+            background-position: 0 0, 0 4px, 4px -4px, -4px 0;
+            flex-shrink: 0;
+        }
+
+        /* 主按钮:保存 PNG(琥珀色调,呼应 logo 火焰色) */
+        .save-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+            padding: 14px 34px;
+            border-radius: 10px;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            border: none;
+            color: #1a1206;
+            background: linear-gradient(135deg, #ffd700, #ffa500, #ff6a00);
+            box-shadow: 0 4px 20px rgba(255, 130, 0, 0.35);
+            transition: 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .save-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 28px rgba(255, 130, 0, 0.45);
+        }
+
+        .save-btn:active {
+            transform: translateY(0);
+        }
+
+        .save-btn:disabled {
+            opacity: 0.7;
+            cursor: wait;
+        }
+
+        /* ---------- 背景色面板 ---------- */
+        .bg-panel {
+            width: 320px;
+            background: rgba(20, 24, 31, 0.92);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            border-radius: 14px;
+            padding: 20px;
+            backdrop-filter: blur(12px);
+            box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+            display: none;
+            flex-direction: column;
+            gap: 18px;
+        }
+
+        .bg-panel.open {
+            display: flex;
+        }
+
+        .bg-panel-row {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .bg-panel-row label {
+            font-size: 0.8rem;
+            font-weight: 600;
+            color: rgba(255, 255, 255, 0.6);
+            letter-spacing: 0.02em;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .bg-panel-row label .val {
+            color: rgba(255, 255, 255, 0.9);
+            font-family: var(--font-mono);
+            font-size: 0.78rem;
+        }
+
+        /* 颜色选择器 */
+        input[type="color"] {
+            width: 100%;
+            height: 40px;
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            border-radius: 8px;
+            background: transparent;
+            cursor: pointer;
+            padding: 2px;
+        }
+
+        input[type="color"]::-webkit-color-swatch-wrapper {
+            padding: 0;
+        }
+
+        input[type="color"]::-webkit-color-swatch {
+            border: none;
+            border-radius: 6px;
+        }
+
+        /* 透明度滑块 */
+        input[type="range"] {
+            -webkit-appearance: none;
+            width: 100%;
+            height: 6px;
+            border-radius: 3px;
+            background: linear-gradient(to right, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.3));
+            outline: none;
+        }
+
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 18px;
+            height: 18px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #ffd700, #ff8c00);
+            cursor: pointer;
+            border: 2px solid #1a1206;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+        }
+
+        input[type="range"]::-moz-range-thumb {
+            width: 18px;
+            height: 18px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #ffd700, #ff8c00);
+            cursor: pointer;
+            border: 2px solid #1a1206;
+        }
+
+        /* 预设色快捷按钮 */
+        .presets {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        .preset-btn {
+            flex: 1;
+            min-width: 64px;
+            padding: 9px 10px;
+            border-radius: 8px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            cursor: pointer;
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            color: rgba(255, 255, 255, 0.85);
+            background: rgba(255, 255, 255, 0.04);
+            transition: 0.2s;
+        }
+
+        .preset-btn:hover {
+            background: rgba(255, 255, 255, 0.1);
+            border-color: rgba(255, 255, 255, 0.3);
+        }
+
+        .preset-btn.active {
+            border-color: #ffa500;
+            color: #ffd700;
+            box-shadow: 0 0 0 1px rgba(255, 165, 0, 0.5);
+        }
+
+        .hint {
+            color: rgba(255, 255, 255, 0.45);
+            font-size: 0.875rem;
+            text-align: center;
+            max-width: 560px;
+            line-height: 1.6;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="logo-area" id="logoArea">
+        <span class="brand">C3</span>
+    </div>
+
+    <div class="right-side">
+    <div class="toolbar">
+        <button class="tool-btn" id="bgBtn">
+            <span class="swatch" id="swatch"></span>
+            <span>背景色</span>
+        </button>
+        <button class="save-btn" id="saveBtn">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+                <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3" />
+            </svg>
+            <span id="btnLabel">保存为 PNG 图片</span>
+        </button>
+    </div>
+
+    <!-- 背景色面板 -->
+    <div class="bg-panel" id="bgPanel">
+        <div class="bg-panel-row">
+            <label>颜色 <span class="val" id="hexVal">#0A0C12</span></label>
+            <input type="color" id="bgColor" value="#0a0c12">
+        </div>
+        <div class="bg-panel-row">
+            <label>透明度 <span class="val" id="alphaVal">0%</span></label>
+            <input type="range" id="bgAlpha" min="0" max="100" value="0">
+        </div>
+        <div class="presets">
+            <button class="preset-btn active" data-color="transparent" data-alpha="0">透明</button>
+            <button class="preset-btn" data-color="#08090c" data-alpha="100">深色</button>
+            <button class="preset-btn" data-color="#ffffff" data-alpha="100">白色</button>
+            <button class="preset-btn" data-color="#000000" data-alpha="100">黑色</button>
+        </div>
+    </div>
+
+    <p class="hint">
+        点击「背景色」调整 logo 区域背景(含透明度),点击「保存为 PNG」导出 600×600 图片。<br>
+        导出分辨率为 2×(1200×1200),便于高清场景使用;背景为透明时导出透明 PNG。
+    </p>
+    </div>
+
+    <!-- 用 html-to-image 而非 html2canvas:
+         前者基于 SVG foreignObject,可完整保留 -webkit-background-clip:text
+         和 filter:drop-shadow;后者对这两项 CSS 支持极差,会丢失渐变与光晕。 -->
+    <script src="https://cdn.jsdelivr.net/npm/html-to-image@1.11.11/dist/html-to-image.min.js"></script>
+    <script>
+        const bgBtn = document.getElementById('bgBtn');
+        const bgPanel = document.getElementById('bgPanel');
+        const bgColorInput = document.getElementById('bgColor');
+        const bgAlphaInput = document.getElementById('bgAlpha');
+        const hexVal = document.getElementById('hexVal');
+        const alphaVal = document.getElementById('alphaVal');
+        const swatch = document.getElementById('swatch');
+        const presetBtns = document.querySelectorAll('.preset-btn');
+        const logoArea = document.getElementById('logoArea');
+
+        const saveBtn = document.getElementById('saveBtn');
+        const btnLabel = document.getElementById('btnLabel');
+
+        // ---- 背景状态 ----
+        // bgColor: 不含 alpha 的 hex 字符串(如 "#0a0c12")
+        // bgAlpha: 0~1 的浮点数
+        let bgColor = '#0a0c12';
+        let bgAlpha = 0;
+
+        // hex -> {r,g,b}
+        function hexToRgb(hex) {
+            const h = hex.replace('#', '');
+            return {
+                r: parseInt(h.substring(0, 2), 16),
+                g: parseInt(h.substring(2, 4), 16),
+                b: parseInt(h.substring(4, 6), 16)
+            };
+        }
+
+        // 把状态应用到 logo 区域 + 色块 + 数值显示
+        function applyBg() {
+            const rgb = hexToRgb(bgColor);
+            const alpha = bgAlpha;
+
+            // 数值显示
+            hexVal.textContent = bgColor.toUpperCase();
+            alphaVal.textContent = Math.round(alpha * 100) + '%';
+
+            // 色块:透明时显示棋盘格,否则纯色
+            if (alpha === 0) {
+                swatch.style.background = 'transparent';
+            } else {
+                swatch.style.background = `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${alpha})`;
+            }
+
+            // logo 区域
+            if (alpha === 0) {
+                // 透明:恢复棋盘格展示
+                logoArea.style.backgroundColor = 'transparent';
+                logoArea.style.backgroundImage = [
+                    'linear-gradient(45deg, rgba(255,255,255,0.035) 25%, transparent 25%)',
+                    'linear-gradient(-45deg, rgba(255,255,255,0.035) 25%, transparent 25%)',
+                    'linear-gradient(45deg, transparent 75%, rgba(255,255,255,0.035) 75%)',
+                    'linear-gradient(-45deg, transparent 75%, rgba(255,255,255,0.035) 75%)'
+                ].join(', ');
+                logoArea.style.backgroundSize = '32px 32px';
+                logoArea.style.backgroundPosition = '0 0, 0 16px, 16px -16px, -16px 0';
+            } else {
+                // 有背景色:覆盖棋盘格
+                logoArea.style.backgroundColor = `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${alpha})`;
+                logoArea.style.backgroundImage = 'none';
+            }
+
+            // 同步预设按钮高亮
+            presetBtns.forEach(b => {
+                const match = b.dataset.color === bgColor &&
+                    parseFloat(b.dataset.alpha) === Math.round(alpha * 100);
+                b.classList.toggle('active', match);
+            });
+        }
+
+        // ---- 面板开关 ----
+        bgBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            bgPanel.classList.toggle('open');
+        });
+
+        // 点击面板外关闭
+        document.addEventListener('click', (e) => {
+            if (!bgPanel.contains(e.target) && !bgBtn.contains(e.target)) {
+                bgPanel.classList.remove('open');
+            }
+        });
+
+        // ---- 颜色选择 ----
+        bgColorInput.addEventListener('input', () => {
+            bgColor = bgColorInput.value;
+            applyBg();
+        });
+
+        // ---- 透明度滑块 ----
+        bgAlphaInput.addEventListener('input', () => {
+            bgAlpha = parseInt(bgAlphaInput.value) / 100;
+            applyBg();
+        });
+
+        // ---- 预设快捷 ----
+        presetBtns.forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const c = btn.dataset.color;
+                const a = parseFloat(btn.dataset.alpha);
+
+                if (c === 'transparent') {
+                    // 保持当前颜色,仅透明度归零
+                    bgAlpha = 0;
+                } else {
+                    bgColor = c;
+                    bgAlpha = a / 100;
+                    bgColorInput.value = c;
+                }
+                bgAlphaInput.value = Math.round(bgAlpha * 100);
+                applyBg();
+            });
+        });
+
+        // ---- 保存 PNG ----
+        async function saveAsPng() {
+            const originalText = btnLabel.textContent;
+            saveBtn.disabled = true;
+            btnLabel.textContent = '正在生成...';
+
+            // 导出前清理:去掉棋盘格,仅保留用户选择的背景色(含透明度)
+            const rgb = hexToRgb(bgColor);
+            const prevBgColor = logoArea.style.backgroundColor;
+            const prevBgImage = logoArea.style.backgroundImage;
+            const prevBgSize = logoArea.style.backgroundSize;
+            const prevBgPos = logoArea.style.backgroundPosition;
+
+            if (bgAlpha === 0) {
+                // 透明背景
+                logoArea.style.backgroundColor = 'transparent';
+                logoArea.style.backgroundImage = 'none';
+            } else {
+                logoArea.style.backgroundColor = `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${bgAlpha})`;
+                logoArea.style.backgroundImage = 'none';
+            }
+
+            try {
+                const dataUrl = await htmlToImage.toPng(logoArea, {
+                    pixelRatio: 2,              // 2x 高清 → 1200x1200
+                    backgroundColor: undefined,  // 不额外填充,由元素自身背景决定
+                    cacheBust: true,
+                    skipFonts: false
+                });
+
+                const a = document.createElement('a');
+                a.href = dataUrl;
+                a.download = 'c3-logo.png';
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+            } catch (err) {
+                console.error('[logo] 导出失败:', err);
+                alert('PNG 导出失败:' + err.message + '\n请改用 Chrome/Edge 最新版再试。');
+            } finally {
+                // 恢复展示样式
+                logoArea.style.backgroundColor = prevBgColor;
+                logoArea.style.backgroundImage = prevBgImage;
+                logoArea.style.backgroundSize = prevBgSize;
+                logoArea.style.backgroundPosition = prevBgPos;
+                saveBtn.disabled = false;
+                btnLabel.textContent = originalText;
+            }
+        }
+
+        saveBtn.addEventListener('click', saveAsPng);
+
+        // 初始化
+        applyBg();
+    </script>
+</body>
+
+</html>
