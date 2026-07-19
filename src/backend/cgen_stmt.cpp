@@ -1288,11 +1288,28 @@ void CCodeGen::visit(ForStmt& node) {
 
     std::string var = cIdent(node.varName);
 
-    // Fix 010o: 注册For循环变量到 knownLocalVars_ (避免被错误加 me-> 前缀)
-    {
-        std::string lower = node.varName;
-        std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
-        knownLocalVars_.insert(lower);
+    // Fix 022: For 循环变量若为类成员必须以 me->var 形式 emit.
+    // 原 Fix 010o 无差别将 For 变量注册到 knownLocalVars_, 但当变量实际是类成员
+    // (例: cCsv.cls:51 'Dim i As Long, ii As Long' at module level → class field)
+    // 时, 注册会让下游 IdentifierExpr (cgen_expr.cpp:425-432) 跳过 me-> 前缀,
+    // 循环体内对 ii 的引用变裸标识符 ii, 但函数内无 C 局部 ii 只有 me->ii
+    // → C2065 未声明标识符 (cCsv.c 34 处 ii + 13 处 i 同根因).
+    //
+    // 修复策略:
+    //   1. 若 For 变量是类成员 (且未被局部 Dim 遮蔽), 用 me->var 形式 emit loop
+    //      自身赋值/比较/累加语句, 且 **不** 注册到 knownLocalVars_ — 让循环体
+    //      内 IdentifierExpr 走 me-> 路径 (cgen_expr.cpp 已支持).
+    //   2. 否则保持原 Fix 010o 行为 (注册 + 裸 var), 覆盖局部 Dim 变量、
+    //      非类模块变量、跨模块变量等情况.
+    // 注: 临时变量 var_end / var_step 是 block-scoped int32_t 局部, 无需 me->.
+    std::string lower022 = node.varName;
+    std::transform(lower022.begin(), lower022.end(), lower022.begin(), ::tolower);
+    bool forVarIsClassMember = isClassModule_
+        && classMemberVars_.count(lower022)
+        && !knownLocalVars_.count(lower022);  // 局部 Dim 优先遮蔽类成员
+    std::string varAcc = forVarIsClassMember ? ("me->" + var) : var;
+    if (!forVarIsClassMember) {
+        knownLocalVars_.insert(lower022);  // Fix 010o (保留)
     }
 
     // P14.3.2: 嵌套循环栈 - 支持Exit For跳转到正确层
@@ -1303,10 +1320,10 @@ void CCodeGen::visit(ForStmt& node) {
     c_.indent();
     c_.emitLine("int32_t " + var + "_end = " + end + ";");
     c_.emitLine("int32_t " + var + "_step = " + step + ";");
-    c_.emitLine(var + " = " + start + ";");
+    c_.emitLine(varAcc + " = " + start + ";");
     c_.emitLine("if (" + var + "_step > 0) {");
     c_.indent();
-    c_.emitLine("for (; " + var + " <= " + var + "_end; " + var + " += " + var + "_step) {");
+    c_.emitLine("for (; " + varAcc + " <= " + var + "_end; " + varAcc + " += " + var + "_step) {");
     c_.indent();
     emitStmtList(node.body);
     c_.dedent();
@@ -1314,7 +1331,7 @@ void CCodeGen::visit(ForStmt& node) {
     c_.dedent();
     c_.emitLine("} else {");
     c_.indent();
-    c_.emitLine("for (; " + var + " >= " + var + "_end; " + var + " += " + var + "_step) {");
+    c_.emitLine("for (; " + varAcc + " >= " + var + "_end; " + varAcc + " += " + var + "_step) {");
     c_.indent();
     emitStmtList(node.body);
     c_.dedent();
@@ -1365,11 +1382,17 @@ void CCodeGen::visit(ForEachStmt& node) {
     std::string var = cIdent(node.varName);
     int tmpIdx = tempCounter_++;
 
-    // Fix 010o: 注册ForEach循环变量到 knownLocalVars_
-    {
-        std::string lower = node.varName;
-        std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
-        knownLocalVars_.insert(lower);
+    // Fix 022: ForEach 循环变量若为类成员必须以 me->var 形式 emit (同 ForStmt).
+    // 原 Fix 010o 无差别注册循环变量到 knownLocalVars_, 类成员场景会导致 C2065
+    // (详见 ForStmt 注释). 此处同步修复.
+    std::string lower022fe = node.varName;
+    std::transform(lower022fe.begin(), lower022fe.end(), lower022fe.begin(), ::tolower);
+    bool forEachVarIsClassMember = isClassModule_
+        && classMemberVars_.count(lower022fe)
+        && !knownLocalVars_.count(lower022fe);  // 局部 Dim 优先遮蔽
+    std::string varAcc = forEachVarIsClassMember ? ("me->" + var) : var;
+    if (!forEachVarIsClassMember) {
+        knownLocalVars_.insert(lower022fe);  // Fix 010o (保留)
     }
 
     if (isCollArray) {
@@ -1396,7 +1419,7 @@ void CCodeGen::visit(ForEachStmt& node) {
 
         // 赋值循环变量: vb6_item = VB6_SA_AT(elemCType, arr, _fe_i0)
         std::string elemCType = mapSaElemCType(collElemType);
-        c_.emitLine(var + " = VB6_SA_AT(" + elemCType + ", " + collArrName + ", " + idxVar + ");");
+        c_.emitLine(varAcc + " = VB6_SA_AT(" + elemCType + ", " + collArrName + ", " + idxVar + ");");
 
         emitStmtList(node.body);
         c_.dedent();
@@ -1442,9 +1465,9 @@ void CCodeGen::visit(ForEachStmt& node) {
             std::string lower = node.varName;
             std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
             if (knownObjectVars_.count(lower) || knownTypedComVars_.count(lower)) {
-                c_.emitLine(var + " = vb6_ComUnpackObject(&" + feVar + ");  /* P24-05: For Each Object: VARIANT→IDispatch* */");
+                c_.emitLine(varAcc + " = vb6_ComUnpackObject(&" + feVar + ");  /* P24-05: For Each Object: VARIANT→IDispatch* */");
             } else {
-                c_.emitLine(var + " = vb6_VariantFromStackVARIANT(&" + feVar + ");  /* P24-05: For Each Variant: VARIANT→vb6_VARIANT */");
+                c_.emitLine(varAcc + " = vb6_VariantFromStackVARIANT(&" + feVar + ");  /* P24-05: For Each Variant: VARIANT→vb6_VARIANT */");
             }
         }
         emitStmtList(node.body);
