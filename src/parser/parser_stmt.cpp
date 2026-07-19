@@ -883,6 +883,9 @@ StmtPtr Parser::parseDimStmt() {
     while (match(TokenKind::Comma)) {
         // Parse additional variable name As Type
         auto nameTok = expectName("expected variable name");
+        // Fix 028: 剥离 VB6 类型后缀 ($%&!#@), 与 parseVariableDecl 保持一致
+        auto suffixInfo = stripTypeSuffix(nameTok.text);
+        const std::string& varName = suffixInfo.name;
         std::vector<VariableDecl::Dimension> dimensions;
         bool isDynamicArray = false;
         if (match(TokenKind::LeftParen)) {
@@ -906,7 +909,7 @@ StmtPtr Parser::parseDimStmt() {
         ExprPtr initializer;
         if (match(TokenKind::Equals)) initializer = parseExpression();
         stmts.push_back(std::make_unique<LocalDeclStmt>(loc,
-            std::make_unique<VariableDecl>(loc, AccessLevel::Private, nameTok.text,
+            std::make_unique<VariableDecl>(loc, AccessLevel::Private, varName,
                 false, false, isNew, std::move(asType), std::move(initializer),
                 std::move(dimensions), isDynamicArray)));
     }

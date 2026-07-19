@@ -344,6 +344,10 @@ std::unique_ptr<ConstDecl> Parser::parseConstDecl(AccessLevel access) {
 
     auto nameTok = expectName("expected Const name");
 
+    // Fix 028: 剥离 VB6 类型后缀 ($%&!#@)
+    auto suffixInfo = stripTypeSuffix(nameTok.text);
+    const std::string& constName = suffixInfo.name;
+
     TypeRefPtr asType;
     if (match(TokenKind::As)) {
         asType = parseTypeRef();
@@ -354,7 +358,7 @@ std::unique_ptr<ConstDecl> Parser::parseConstDecl(AccessLevel access) {
 
     auto value = parseExpression();
 
-    return std::make_unique<ConstDecl>(loc, access, nameTok.text,
+    return std::make_unique<ConstDecl>(loc, access, constName,
         std::move(asType), std::move(value));
 }
 
@@ -369,6 +373,9 @@ DeclPtr Parser::parseConstDeclList(AccessLevel access) {
     while (match(TokenKind::Comma)) {
         auto loc = currentLoc();
         auto nameTok = expectName("expected Const name");
+        // Fix 028: 剥离 VB6 类型后缀 ($%&!#@)
+        auto suffixInfo = stripTypeSuffix(nameTok.text);
+        const std::string& constName = suffixInfo.name;
         TypeRefPtr asType;
         if (match(TokenKind::As)) {
             asType = parseTypeRef();
@@ -376,7 +383,7 @@ DeclPtr Parser::parseConstDeclList(AccessLevel access) {
         expect(TokenKind::Equals, DiagnosticID::ParseExpectedToken,
                "expected '=' in Const declaration");
         auto value = parseExpression();
-        decls.push_back(std::make_unique<ConstDecl>(loc, access, nameTok.text,
+        decls.push_back(std::make_unique<ConstDecl>(loc, access, constName,
             std::move(asType), std::move(value)));
     }
     return std::make_unique<MultiDecl>(decls[0]->loc, std::move(decls));
@@ -402,6 +409,12 @@ std::unique_ptr<VariableDecl> Parser::parseVariableDecl(AccessLevel access, bool
     }
 
     auto nameTok = expectName("expected variable name");
+
+    // Fix 028: 剥离 VB6 类型后缀 ($%&!#@), 防止 cIdent 把 $ 改成 _ 导致
+    // 声明名(BSTR/VARIANT Address_) 与使用名(Address) 不一致 → C2065。
+    // 注意: 不注入后缀对应的类型, 保留默认 Variant 行为(避免引入 C2440)。
+    auto suffixInfo = stripTypeSuffix(nameTok.text);
+    const std::string& varName = suffixInfo.name;
 
     // 数组维度: dim a(1 To 10, 1 To 20) As Long
     // 或动态数组: dim a() As Long
@@ -443,7 +456,7 @@ std::unique_ptr<VariableDecl> Parser::parseVariableDecl(AccessLevel access, bool
         initializer = parseExpression();
     }
 
-    return std::make_unique<VariableDecl>(loc, access, nameTok.text,
+    return std::make_unique<VariableDecl>(loc, access, varName,
         isWithEvents, isStatic, isNew, std::move(asType), std::move(initializer),
         std::move(dimensions), isDynamicArray);
 }
@@ -510,6 +523,10 @@ std::unique_ptr<ParameterDecl> Parser::parseParameter() {
 
     auto nameTok = expectName("expected parameter name");
 
+    // Fix 028: 剥离 VB6 类型后缀 ($%&!#@), 见 parseVariableDecl 同样说明。
+    auto suffixInfo = stripTypeSuffix(nameTok.text);
+    const std::string& paramName = suffixInfo.name;
+
     // 数组参数: name() As Type
     bool isArrayParam = false;
     if (match(TokenKind::LeftParen)) {
@@ -541,7 +558,7 @@ std::unique_ptr<ParameterDecl> Parser::parseParameter() {
         asType = std::make_unique<ArrayTypeRef>(simple.loc, std::move(elemType), std::vector<ArrayTypeRef::Dimension>{});
     }
 
-    return std::make_unique<ParameterDecl>(loc, nameTok.text, isOptional,
+    return std::make_unique<ParameterDecl>(loc, paramName, isOptional,
         isByVal, isParamArray, std::move(asType), std::move(defaultValue));
 }
 

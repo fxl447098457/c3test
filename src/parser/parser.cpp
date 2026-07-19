@@ -383,6 +383,26 @@ Token Parser::expectName(const std::string& msg) {
     return Token{cur_.kind, cur_.text, cur_.line, cur_.column, cur_.length, {0}};
 }
 
+// Fix 028: 见 parser.hpp 注释。剥离 VB6 标识符末尾的类型后缀, 返回剥离后的名字和类型名。
+Parser::TypeSuffixStrip Parser::stripTypeSuffix(const std::string& text) const {
+    TypeSuffixStrip result;
+    result.name = text;
+    if (text.size() < 2) return result;  // 单字符标识符不含后缀
+    const char last = text.back();
+    switch (last) {
+        case '$': result.typeName = "String";   break;
+        case '%': result.typeName = "Integer";  break;
+        case '&': result.typeName = "Long";     break;
+        case '!': result.typeName = "Single";   break;
+        case '#': result.typeName = "Double";   break;
+        case '@': result.typeName = "Currency"; break;
+        default:
+            return result;  // 无类型后缀, name 保留原文
+    }
+    result.name = text.substr(0, text.size() - 1);
+    return result;
+}
+
 SourceLocation Parser::currentLoc() const {
     return SourceLocation{buffer_->filePath(), cur_.line, cur_.column};
 }

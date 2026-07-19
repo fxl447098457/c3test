@@ -246,6 +246,17 @@ private:
     // 返回 true 如果 End + next 构成 End XXX 块终止符
     bool isEndBlock() const;
 
+    // Fix 028: VB6 标识符类型后缀 ($ % & ! # @) 处理
+    // 词法器 scanIdentifierOrKeyword() 在类型后缀字符后跟非字母数字时,
+    // 会把后缀并入标识符文本 (如 'Dim x$' 得到 text="x$")。
+    // 这导致 cIdent() 把 $ 替换为 _ 后, 声明名为 'x_' 但使用名为 'x'
+    // (使用处后缀不并入), 形成 C2065 "未声明的标识符" 错误。
+    // stripTypeSuffix 剥离标识符末尾的类型后缀, 返回剥离后的名字
+    // 和后缀对应的 VB6 类型名(空表示无后缀)。Fix 028 暂不进行类型注入,
+    // 保留 Variant 默认类型(避免引入 Variant→BSTR/Long 的 C2440)。
+    struct TypeSuffixStrip { std::string name; std::string typeName; };
+    TypeSuffixStrip stripTypeSuffix(const std::string& text) const;
+
 private:
     Preprocessor preproc_;
     Diagnostics& diag_;
