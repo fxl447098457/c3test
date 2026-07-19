@@ -1,0 +1,18 @@
+Sub TestTestAXDLL()
+    Dim c As Calc
+    Set c = New Calc
+    Debug.Print "Calc.Add(3,4) =" & c.Add(3, 4)
+    Debug.Print "Calc.Multiply(6,7) =" & c.Multiply(6, 7)
+
+    Dim m As MathLib
+    Set m = New MathLib
+    m.SetPi 3.14159
+    Debug.Print "MathLib.CircleArea(2) =" & m.CircleArea(2)
+    Debug.Print "MathLib.Factorial(5) =" & m.Factorial(5)
+
+    Dim s As StringLib
+    Set s = New StringLib
+    s.Prefix = ">>"
+    Debug.Print "StringLib.Concat =" & s.Concat("Hello", "World")
+    Debug.Print "All tests done"
+End Sub
