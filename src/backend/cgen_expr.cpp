@@ -3428,6 +3428,7 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
     if (callee == "vb6_CInt" || callee == "vb6_CLng" || callee == "vb6_CDbl") {
         // 检查第一个参数是否为Variant变量
         bool firstArgIsVariant = false;
+        bool firstArgIsBstr = false;
         if (!node.positional.empty()) {
             auto& firstArg = node.positional[0];
             if (firstArg->kind == ASTNodeKind::IdentifierExpr) {
@@ -3435,12 +3436,26 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
                 std::string argLower = idArg.name;
                 std::transform(argLower.begin(), argLower.end(), argLower.begin(), ::tolower);
                 if (knownVariantVars_.count(argLower)) firstArgIsVariant = true;
+                else if (knownBstrVars_.count(argLower)) firstArgIsBstr = true;
+            }
+            // Fix 036: 非标识符 Variant 表达式 (函数返回 Variant 的调用/类方法等) 也需 V 后缀
+            if (!firstArgIsVariant) {
+                firstArgIsVariant = isDefinitelyVariantExpr(*firstArg);
             }
         }
         if (firstArgIsVariant) {
             if (callee == "vb6_CInt") callee = "vb6_CIntV";
             else if (callee == "vb6_CLng") callee = "vb6_CLngV";
             else if (callee == "vb6_CDbl") callee = "vb6_CDblV";
+        }
+        // Fix 036: BSTR 参数 → vb6_Val 转换为 double (CInt/CLng/CDbl 接 double)
+        else if (firstArgIsBstr && !args.empty()) {
+            args[0] = "vb6_Val(" + args[0] + ")";
+            argList.clear();
+            for (size_t i = 0; i < args.size(); i++) {
+                if (i > 0) argList += ", ";
+                argList += args[i];
+            }
         }
     }
     // MsgBox自动BSTR转换: MsgBox期望BSTR, 非BSTR的prompt参数需包装
@@ -3499,10 +3514,36 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
         } else if (argType == Vb6Type::Date) {
             args[0] = "vb6_VariantDouble((double)(" + args[0] + "))";
         }
+        // Fix 036: Format fallback — 未匹配类型 (Currency/Unknown 等, 非 Variant) 用
+        // vb6_VariantFromValue 包装. Variant 类型无需包装 (已是 vb6_VARIANT).
+        else if (argType != Vb6Type::Variant) {
+            args[0] = "vb6_VariantFromValue(" + args[0] + ")";
+        }
         argList.clear();
         for (size_t i = 0; i < args.size(); i++) {
             if (i > 0) argList += ", ";
             argList += args[i];
+        }
+    }
+    // Fix 036: CStr fallback — 当特殊分支未匹配 (Boolean/Byte/Date/Currency/常量/
+    // 未注册函数返回值/Const BSTR 等), callee 仍为 vb6_CStr (接 vb6_VARIANT). 用
+    // vb6_VariantFromValue 包装 args[0], _Generic 按实参 C 类型自动选择 Variant ctor,
+    // 避免 concrete → VARIANT C2440. 对已是 vb6_VARIANT 的实参为 identity (no-op), 安全.
+    // 但需排除确定 Variant 的表达式 (如 Me.Segments(i) 返回 Variant): _Generic 宏
+    // 对某些 Variant 表达式展开可能产生逗号问题 → C2197, 故用 isDefinitelyVariantExpr
+    // 跳过, 保留 vb6_CStr(variantExpr) 原样 (vb6_CStr 接 VARIANT, 直接可用).
+    if (callee == "vb6_CStr" && !args.empty()) {
+        bool argIsDefVariant = false;
+        if (!node.positional.empty()) {
+            argIsDefVariant = isDefinitelyVariantExpr(*node.positional[0]);
+        }
+        if (!argIsDefVariant) {
+            args[0] = "vb6_VariantFromValue(" + args[0] + ")";
+            argList.clear();
+            for (size_t i = 0; i < args.size(); i++) {
+                if (i > 0) argList += ", ";
+                argList += args[i];
+            }
         }
     }
     lastExpr_ = callee + "(" + argList + ")";
