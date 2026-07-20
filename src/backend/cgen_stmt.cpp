@@ -2271,6 +2271,12 @@ void CCodeGen::visit(CallStmt& node) {
                     }
                 }
             }
+            // Fix 034: Builtin Sub statements with Optional ByVal 参 — 硬编码补默认值.
+            // calleeParams 未注册的 builtin (如 Randomize), bare-call 无参时补默认值.
+            // Randomize([seed]) — RTL vb6_Randomize(double seed); 不传参时 seed=0.0.
+            if (callExpr == "vb6_Randomize" && bareArgList.empty()) {
+                bareArgList = "0.0";
+            }
             callExpr += "(" + bareArgList + ")";
         }
 

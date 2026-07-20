@@ -3283,6 +3283,38 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
             argList += "-1";
         }
     }
+    // Fix 034: Builtin RTL functions with Optional params — pad to required C RTL arg count.
+    // calleeParams 已对 builtin 标 isOptional, 但 general padding (line 3291+) 被 !calleeIsBuiltin
+    // 跳过 (RTL C 函数不接受 _has_ 尾叜). 各函数硬编码补默认值, 默认值取自 VB6 语义.
+    // InStrRev(string1, string2[, start[, compare]]) — start=-1 (从末尾), compare=0 (Binary)
+    if (callee == "vb6_InStrRev") {
+        if (args.size() == 2) {
+            argList += ", -1, 0";
+        } else if (args.size() == 3) {
+            argList += ", 0";
+        }
+    }
+    // Round(x[, decimals]) — decimals default = 0
+    if (callee == "vb6_Round" && args.size() == 1) {
+        argList += ", 0";
+    }
+    // StrComp(s1, s2[, compare]) — compare default = 0 (Binary)
+    if (callee == "vb6_StrComp" && args.size() == 2) {
+        argList += ", 0";
+    }
+    // Shell(pathname[, windowstyle]) — windowstyle default = 2 (vbMinimizedFocus)
+    if (callee == "vb6_Shell" && args.size() == 1) {
+        argList += ", 2";
+    }
+    // Rnd([seed]) — seed default = 0 (Rnd with no arg uses last seed or random)
+    // Randomize([seed]) — handled as Sub bare-call; see cgen_stmt.cpp Randomize dispatch
+    if (callee == "vb6_Rnd" && args.empty()) {
+        argList = "0";
+    }
+    // Randomize As Function-call form `Randomize()` — pad seed = 0.0
+    if (callee == "vb6_Randomize" && args.empty()) {
+        argList = "0.0";
+    }
 
     // P14.1.4: General Optional parameter padding for user-defined functions
     // calleeParams is empty for builtin RTL functions (registered without params), so they're auto-skipped
