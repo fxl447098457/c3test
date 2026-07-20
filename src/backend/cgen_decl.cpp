@@ -80,6 +80,9 @@ void CCodeGen::visit(SubDecl& node) {
             if (paramType == Vb6Type::String) knownBstrVars_.insert(pLower);
             else if (paramType == Vb6Type::Double) knownDoubleVars_.insert(pLower);
             else if (paramType == Vb6Type::Long || paramType == Vb6Type::Integer || paramType == Vb6Type::Boolean) knownLongVars_.insert(pLower);
+            // Fix 035: Variant 参数也要注册, 否则 `(*X) = concrete` 赋值不会触发
+            // wrapVariantValue 包装, 导致 C2440 (ByRef Variant 参数写穿透场景).
+            else if (paramType == Vb6Type::Variant) knownVariantVars_.insert(pLower);
 
             // Fix 023c: 注册 void* 参数 (As Object / As Collection / 外部 COM 类型如
             // ADODB.Recordset / Scripting.Dictionary 等) 到 knownObjectVars_ —
@@ -239,6 +242,9 @@ void CCodeGen::visit(FunctionDecl& node) {
             if (paramType == Vb6Type::String) knownBstrVars_.insert(pLower);
             else if (paramType == Vb6Type::Double) knownDoubleVars_.insert(pLower);
             else if (paramType == Vb6Type::Long || paramType == Vb6Type::Integer || paramType == Vb6Type::Boolean) knownLongVars_.insert(pLower);
+            // Fix 035: Variant 参数也要注册, 否则 `(*X) = concrete` 赋值不会触发
+            // wrapVariantValue 包装, 导致 C2440 (ByRef Variant 参数写穿透场景).
+            else if (paramType == Vb6Type::Variant) knownVariantVars_.insert(pLower);
 
             // Fix 023c: 注册 void* 参数 (As Object / As Collection / 外部 COM 类型如
             // ADODB.Recordset / Scripting.Dictionary 等) 到 knownObjectVars_ —
@@ -284,6 +290,9 @@ void CCodeGen::visit(FunctionDecl& node) {
     if (funcRetVb6Type == Vb6Type::String) knownBstrVars_.insert(funcRetLower);
     else if (funcRetVb6Type == Vb6Type::Double) knownDoubleVars_.insert(funcRetLower);
     else if (funcRetVb6Type == Vb6Type::Long || funcRetVb6Type == Vb6Type::Integer || funcRetVb6Type == Vb6Type::Boolean) knownLongVars_.insert(funcRetLower);
+    // Fix 035: Variant 返回值变量也要注册, 否则 `Foo = concrete_expr` 赋值不会触发
+    // wrapVariantValue 包装, 导致 C2440 (BSTR/int32_t → vb6_VARIANT).
+    else if (funcRetVb6Type == Vb6Type::Variant) knownVariantVars_.insert(funcRetLower);
 
     if (hasGoSub_) {
         c_.emitLine("int vb6_gosub_stack[32];");
@@ -1010,6 +1019,9 @@ void CCodeGen::visit(PropertyDecl& node) {
             if (paramType == Vb6Type::String) knownBstrVars_.insert(pLower);
             else if (paramType == Vb6Type::Double) knownDoubleVars_.insert(pLower);
             else if (paramType == Vb6Type::Long || paramType == Vb6Type::Integer || paramType == Vb6Type::Boolean) knownLongVars_.insert(pLower);
+            // Fix 035: Variant 参数也要注册, 否则 `(*X) = concrete` 赋值不会触发
+            // wrapVariantValue 包装, 导致 C2440 (ByRef Variant 参数写穿透场景).
+            else if (paramType == Vb6Type::Variant) knownVariantVars_.insert(pLower);
 
             // Fix 023c: 注册 void* 参数 (As Object / As Collection / 外部 COM 类型如
             // ADODB.Recordset / Scripting.Dictionary 等) 到 knownObjectVars_ —
