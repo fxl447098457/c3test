@@ -595,6 +595,17 @@ private:
     // isArrOut: 若不为 nullptr, 用于返回是否为 Variant() 数组类型.
     bool isDefinitelyVariantExpr(Expr& expr, bool* isArrOut = nullptr) const;
 
+    // Fix 038b: 基于 C 表达式字符串的 Variant 检测 — 补充 isDefinitelyVariantExpr
+    // 的 AST 级检测. 当 codegen 生成的 C 表达式包含已知返回 vb6_VARIANT 的函数调用
+    // (如 vb6_VariantArrayGet, vb6_VariantFromComResult 等) 时, 判定为 Variant.
+    // 仅检查顶层表达式 (去除前导括号后), 避免对子表达式误判.
+    static bool cExprIsVariant(const std::string& cExpr);
+
+    // Fix 038b: 运行时函数参数 C 类型查找表 — 当 calleeParams 为空 (运行时/内置函数)
+    // 时, 通过函数名和参数索引查找期望的 C 类型. 返回空字符串表示未知.
+    // 用于在函数调用参数生成时插入类型转换 (VARIANT→具体, 具体→VARIANT).
+    static std::string getRuntimeParamCType(const std::string& funcName, size_t paramIdx);
+
     // ---- AST辅助 ----
     // 检测语句列表中是否包含GoSubStmt
     bool hasGoSubInStmts(StmtList& stmts) const;

@@ -2097,10 +2097,44 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
                         if (lit.literalKind == LiteralKind::Integer) isLongArg = true;
                         else if (lit.literalKind == LiteralKind::Double) isDoubleArg = true;
                     }
+                    // Fix 038b-3: 检测 Variant 实参 — Array() 元素通过 vb6_ArraySetLong/
+                    // SetBSTR/SetDouble 设置, 这些函数期望具体类型. 当实参是 Variant
+                    // (如 vb6_VariantArrayGet, Variant 变量等) 时, 需要先提取具体值.
+                    // 仅使用 cExprIsVariant (C 字符串级) 和 knownVariantVars_ 检测.
+                    bool argIsVariant = cExprIsVariant(argExpr);
+                    if (!argIsVariant && node.positional[i]->kind == ASTNodeKind::IdentifierExpr) {
+                        auto& idArg = static_cast<IdentifierExpr&>(*node.positional[i]);
+                        std::string argLower = idArg.name;
+                        std::transform(argLower.begin(), argLower.end(), argLower.begin(), ::tolower);
+                        if (knownVariantVars_.count(argLower)) argIsVariant = true;
+                    }
+                    // 也检测 BSTR 变量
+                    bool argIsBstr = false;
+                    if (node.positional[i]->kind == ASTNodeKind::IdentifierExpr) {
+                        auto& idArg = static_cast<IdentifierExpr&>(*node.positional[i]);
+                        std::string argLower = idArg.name;
+                        std::transform(argLower.begin(), argLower.end(), argLower.begin(), ::tolower);
+                        if (knownBstrVars_.count(argLower)) argIsBstr = true;
+                    }
                     if (isLongArg) {
                         c_.emitLine("vb6_ArraySetLong(" + arrVar + ", " + std::to_string(i) + ", " + argExpr + ");");
                     } else if (isDoubleArg) {
                         c_.emitLine("vb6_ArraySetDouble(" + arrVar + ", " + std::to_string(i) + ", " + argExpr + ");");
+                    } else if (argIsVariant) {
+                        // Variant 实参: 无法确定具体类型, 统一用 VariantToLong 转换
+                        // (Array() 的元素通常是数值索引). 若为 BSTR Variant 则需
+                        // VariantToString, 但 Array() 上下文中 Long 是最常见的默认.
+                        // 更安全: 使用 vb6_VariantFromValue 让 _Generic 选择, 然后
+                        // 直接用 vb6_ArraySetVariant (如果存在) 或回退到 Long.
+                        bool looksLikeBSTR = (argExpr.find("vb6_BSTR") != std::string::npos ||
+                                              argExpr.find("L\"") != std::string::npos);
+                        if (looksLikeBSTR) {
+                            c_.emitLine("vb6_ArraySetBSTR(" + arrVar + ", " + std::to_string(i) + ", vb6_VariantToString(" + argExpr + "));");
+                        } else {
+                            c_.emitLine("vb6_ArraySetLong(" + arrVar + ", " + std::to_string(i) + ", vb6_VariantToLong(" + argExpr + "));");
+                        }
+                    } else if (argIsBstr) {
+                        c_.emitLine("vb6_ArraySetBSTR(" + arrVar + ", " + std::to_string(i) + ", " + argExpr + ");");
                     } else {
                         bool looksLikeBSTR = (argExpr.find("vb6_BSTR") != std::string::npos ||
                                               argExpr.find("L\"") != std::string::npos);
@@ -2145,6 +2179,23 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
                 }
                 // Not an Optional param - IsMissing returns False (0)
                 lastExpr_ = "(0)";
+                return;
+            }
+        }
+    }
+
+    // Fix 038: Len(udt) → sizeof(udt) — VB6 Len on UDT returns size in bytes.
+    // vb6_Len is declared as int32_t vb6_Len(BSTR), so passing a UDT causes C2440.
+    // Must intercept BEFORE callee mapping to vb6_Len.
+    if (node.callee && node.callee->kind == ASTNodeKind::IdentifierExpr && node.named.empty()) {
+        auto& lenIdent = static_cast<IdentifierExpr&>(*node.callee);
+        std::string lenLower = lenIdent.name;
+        std::transform(lenLower.begin(), lenLower.end(), lenLower.begin(), ::tolower);
+        if (lenLower == "len" && node.positional.size() == 1) {
+            std::string udtCType = inferUdtTypeOfExpr(*node.positional[0]);
+            if (!udtCType.empty()) {
+                emitExpr(*node.positional[0]);
+                lastExpr_ = "((int32_t)sizeof(" + lastExpr_ + "))";
                 return;
             }
         }
@@ -3103,6 +3154,11 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
                 & ~static_cast<uint16_t>(Vb6Type::Array));
             bool argIsVariantArr = false;
             bool argIsVariant = isDefinitelyVariantExpr(*node.positional[i], &argIsVariantArr);
+            // Fix 038b-2: 字符串级 Variant 检测回退 — 补充 isDefinitelyVariantExpr
+            // 无法识别的 C 级 Variant 表达式 (vb6_VariantArrayGet, vb6_VariantFromComResult 等)
+            if (!argIsVariant && !argIsVariantArr) {
+                argIsVariant = cExprIsVariant(argVal);
+            }
             if (argIsVariant || argIsVariantArr) {
                 if (paramIsArray && (paramBase == Vb6Type::Variant || paramBase == Vb6Type::Byte
                     || paramBase == Vb6Type::String || paramBase == Vb6Type::Long)) {
@@ -3119,6 +3175,41 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
                 } else if (paramBase == Vb6Type::Object) {
                     // 右值兼容: 避免对函数返回值取址
                     argVal = "vb6_VariantToObjectVal(" + argVal + ")";
+                }
+            }
+        }
+        // Fix 038b-2: calleeParams 为空 (运行时/内置函数) 时的参数类型转换.
+        // 通过 getRuntimeParamCType 查找期望的 C 类型, 当实参为 Variant 时
+        // 自动插入 VARIANT→具体类型提取函数. 解决 vb6_ErrRaise, vb6_BSTR_Assign,
+        // vb6_BSTR_Concat, vb6_StrCmp 等运行时函数的 C2440 错误.
+        // 注意: 仅使用 cExprIsVariant (C 字符串级) 和 knownVariantVars_ 检测,
+        // 不使用 isDefinitelyVariantExpr (AST 级), 因为符号表中的 Variant 返回类型
+        // 可能与实际 C 函数返回类型不一致 (如 prop_get 返回 void* 而非 vb6_VARIANT).
+        if (!isByRef && i >= calleeParams.size()) {
+            std::string rtParamType = getRuntimeParamCType(callee, i);
+            if (!rtParamType.empty() && rtParamType != "vb6_VARIANT"
+                && rtParamType != "vb6_VARIANT*") {
+                bool argIsVariant = cExprIsVariant(argVal);
+                // 也检查已知 Variant 变量
+                if (!argIsVariant && node.positional[i]->kind == ASTNodeKind::IdentifierExpr) {
+                    auto& idArg = static_cast<IdentifierExpr&>(*node.positional[i]);
+                    std::string argLower = idArg.name;
+                    std::transform(argLower.begin(), argLower.end(), argLower.begin(), ::tolower);
+                    if (knownVariantVars_.count(argLower)) argIsVariant = true;
+                }
+                if (argIsVariant) {
+                    if (rtParamType == "int32_t" || rtParamType == "int16_t"
+                        || rtParamType == "uint8_t" || rtParamType == "LONG") {
+                        argVal = "vb6_VariantToLong(" + argVal + ")";
+                    } else if (rtParamType == "double" || rtParamType == "float") {
+                        argVal = "vb6_VariantToDouble(" + argVal + ")";
+                    } else if (rtParamType == "BSTR") {
+                        argVal = "vb6_VariantToString(" + argVal + ")";
+                    } else if (rtParamType == "void*") {
+                        argVal = "vb6_VariantToObjectVal(" + argVal + ")";
+                    } else if (rtParamType == "vb6_SafeArray1D*") {
+                        argVal = "vb6_VariantToSafeArray1D(" + argVal + ")";
+                    }
                 }
             }
         }
@@ -3823,6 +3914,10 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
             if (!firstArgIsVariant) {
                 firstArgIsVariant = isDefinitelyVariantExpr(*firstArg);
             }
+            // Fix 038b-4: 字符串级 Variant 检测回退 — 捕获 vb6_VariantArrayGet 等表达式
+            if (!firstArgIsVariant && !args.empty()) {
+                firstArgIsVariant = cExprIsVariant(args[0]);
+            }
         }
         if (firstArgIsVariant) {
             if (callee == "vb6_CInt") callee = "vb6_CIntV";
@@ -3917,6 +4012,11 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
         bool argIsDefVariant = false;
         if (!node.positional.empty()) {
             argIsDefVariant = isDefinitelyVariantExpr(*node.positional[0]);
+        }
+        // Fix 038b-4: 字符串级 Variant 检测 — 如果是 C 级 Variant 表达式,
+        // 也跳过 VariantFromValue 包装 (vb6_CStr 直接接 VARIANT)
+        if (!argIsDefVariant) {
+            argIsDefVariant = cExprIsVariant(args[0]);
         }
         if (!argIsDefVariant) {
             args[0] = "vb6_VariantFromValue(" + args[0] + ")";

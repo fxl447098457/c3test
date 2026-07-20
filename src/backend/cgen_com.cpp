@@ -42,7 +42,13 @@ void CCodeGen::emitClassFactory(Module& module) {
             if (var.isDynamicArray || !var.dimensions.empty()) {
                 c_.emitLine("me->" + field + " = NULL;");
             } else if (var.asType) {
-                c_.emitLine("me->" + field + " = " + defaultValue(resolveArrayElemType(var.asType.get())) + ";");
+                Vb6Type fvt = resolveArrayElemType(var.asType.get());
+                // Fix 038: UDT 字段不能用 = 0 初始化 (C2440), 改用 memset 零化
+                if (fvt == Vb6Type::UserDefinedType) {
+                    c_.emitLine("memset(&me->" + field + ", 0, sizeof(me->" + field + "));");
+                } else {
+                    c_.emitLine("me->" + field + " = " + defaultValue(fvt) + ";");
+                }
             } else {
                 c_.emitLine("me->" + field + " = 0;");
             }

@@ -781,14 +781,97 @@ void CCodeGen::visit(AssignmentStmt& node) {
         }
     }
     if (targetIsBstr) {
+        // Fix 038b-6: BSTR 目标 + Variant 值 → 先提取 BSTR
+        // 仅使用 cExprIsVariant (C 字符串级) 和 knownVariantVars_ 检测,
+        // 不使用 isDefinitelyVariantExpr (AST 级), 避免符号表类型与 C 类型不一致的误判.
+        bool valueIsVariant = cExprIsVariant(value);
+        if (!valueIsVariant && node.value && node.value->kind == ASTNodeKind::IdentifierExpr) {
+            auto& id = static_cast<IdentifierExpr&>(*node.value);
+            std::string idLower = id.name;
+            std::transform(idLower.begin(), idLower.end(), idLower.begin(), ::tolower);
+            if (knownVariantVars_.count(idLower)) valueIsVariant = true;
+        }
+        if (valueIsVariant) {
+            value = "vb6_VariantToString(" + value + ")";
+        }
         c_.emitLine("vb6_BSTR_Assign(&" + target + ", " + value + ");");
     } else if (targetIsVariant) {
         // P8.4: 包装值为vb6_VARIANT, 先释放旧BSTR
         std::string wrappedValue = wrapVariantValue(node.value.get(), value);
         c_.emitLine("vb6_VariantClear(&" + target + ");");
         c_.emitLine(target + " = " + wrappedValue + ";");
+    } else if (target.find("vb6_VariantArrayGet(") == 0) {
+        // Fix 038 Group 2: vb6_VariantArrayGet(&arr, idx) = value
+        //   → vb6_VariantArraySet(&arr, idx, vb6_VariantFromValue(value))
+        // VariantArrayGet 返回右值, 不能赋值; 改写为 VariantArraySet.
+        size_t argStart = target.find('(');
+        size_t argEnd = target.rfind(')');
+        if (argStart != std::string::npos && argEnd != std::string::npos && argEnd > argStart) {
+            std::string args = target.substr(argStart + 1, argEnd - argStart - 1);
+            c_.emitLine("vb6_VariantArraySet(" + args + ", vb6_VariantFromValue(" + value + "));");
+        } else {
+            c_.emitLine(target + " = " + value + ";");
+        }
+    } else if (target.find("VB6_SA_AT(vb6_VARIANT,") != std::string::npos) {
+        // Fix 038 Group 1: VB6_SA_AT(vb6_VARIANT, arr, idx) = value
+        //   Variant 数组元素赋值: value 不是 VARIANT 时需要用 VariantFromValue 包装.
+        //   vb6_VariantFromValue 对已存在的 VARIANT 是 identity (no-op), 安全.
+        c_.emitLine(target + " = vb6_VariantFromValue(" + value + ");");
     } else {
-        c_.emitLine(target + " = " + value + ";");
+        // Fix 038b-6: 具体类型目标 + Variant 值 → 自动提取
+        // 覆盖: TimeOut = obj.Method() (Method 返回 Variant, TimeOut 是 Long)
+        //       VB6_SA_AT(BSTR, arr, i) = func() (func 返回 Variant)
+        //       int32_t_var = vb6_VariantArrayGet(...)
+        // 仅使用 cExprIsVariant (C 字符串级) 和 knownVariantVars_ 检测.
+        bool valueIsVariant = cExprIsVariant(value);
+        if (!valueIsVariant && node.value && node.value->kind == ASTNodeKind::IdentifierExpr) {
+            auto& id = static_cast<IdentifierExpr&>(*node.value);
+            std::string idLower = id.name;
+            std::transform(idLower.begin(), idLower.end(), idLower.begin(), ::tolower);
+            if (knownVariantVars_.count(idLower)) valueIsVariant = true;
+        }
+        if (valueIsVariant) {
+            // 检查目标类型
+            std::string convertedValue = value;
+            if (target.find("VB6_SA_AT(BSTR,") != std::string::npos) {
+                convertedValue = "vb6_VariantToString(" + value + ")";
+            } else if (target.find("VB6_SA_AT(int32_t,") != std::string::npos
+                       || target.find("VB6_SA_AT(int16_t,") != std::string::npos
+                       || target.find("VB6_SA_AT(uint8_t,") != std::string::npos
+                       || target.find("VB6_SA_AT(LONG,") != std::string::npos) {
+                convertedValue = "vb6_VariantToLong(" + value + ")";
+            } else if (target.find("VB6_SA_AT(double,") != std::string::npos
+                       || target.find("VB6_SA_AT(float,") != std::string::npos) {
+                convertedValue = "vb6_VariantToDouble(" + value + ")";
+            } else {
+                // 检查已知 Long/Double 变量
+                std::string checkName = target;
+                if (checkName.substr(0, 4) == "me->") checkName = checkName.substr(4);
+                if (checkName.size() > 4 && checkName[0] == '(' && checkName[1] == '*'
+                    && checkName.back() == ')') {
+                    checkName = checkName.substr(2, checkName.size() - 3);
+                }
+                std::string lower = checkName;
+                std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+                if (knownLongVars_.count(lower)) {
+                    convertedValue = "vb6_VariantToLong(" + value + ")";
+                } else if (knownDoubleVars_.count(lower)) {
+                    convertedValue = "vb6_VariantToDouble(" + value + ")";
+                } else if (node.target && node.target->kind == ASTNodeKind::IdentifierExpr) {
+                    auto& id = static_cast<IdentifierExpr&>(*node.target);
+                    std::string idLower = id.name;
+                    std::transform(idLower.begin(), idLower.end(), idLower.begin(), ::tolower);
+                    if (knownLongVars_.count(idLower)) {
+                        convertedValue = "vb6_VariantToLong(" + value + ")";
+                    } else if (knownDoubleVars_.count(idLower)) {
+                        convertedValue = "vb6_VariantToDouble(" + value + ")";
+                    }
+                }
+            }
+            c_.emitLine(target + " = " + convertedValue + ";");
+        } else {
+            c_.emitLine(target + " = " + value + ";");
+        }
     }
 }
 
@@ -997,6 +1080,23 @@ void CCodeGen::visit(SetStmt& node) {
     // 重写为 vb6_ComSetProp / vb6_ComSetPropArg / prop_set_ 调用.
     if (tryRewriteCOMLvalue(target, value, node.value.get(), /*isSet=*/true)) {
         return;
+    }
+
+    // Fix 038b-6: Set 语句中 Variant 值 → 对象引用提取
+    // 当 RHS 是 Variant (如 vb6_VariantFromStackVARIANT, vb6_VariantArrayGet,
+    // Variant 变量等) 而 LHS 是 typed 对象指针时, 用 vb6_VariantToObjectVal 提取.
+    // 仅使用 cExprIsVariant (C 字符串级) 和 knownVariantVars_ 检测.
+    {
+        bool valueIsVariant = cExprIsVariant(value);
+        if (!valueIsVariant && node.value && node.value->kind == ASTNodeKind::IdentifierExpr) {
+            auto& id = static_cast<IdentifierExpr&>(*node.value);
+            std::string idLower = id.name;
+            std::transform(idLower.begin(), idLower.end(), idLower.begin(), ::tolower);
+            if (knownVariantVars_.count(idLower)) valueIsVariant = true;
+        }
+        if (valueIsVariant && value.find("vb6_VariantToObjectVal") == std::string::npos) {
+            value = "vb6_VariantToObjectVal(" + value + ")";
+        }
     }
 
     c_.emitLine(target + " = " + value + ";  /* Set */");
@@ -1267,7 +1367,68 @@ void CCodeGen::visit(LetStmt& node) {
         return;
     }
 
-    c_.emitLine(target + " = " + value + ";  /* Let */");
+    // Fix 038 Group 1/2: Variant 数组元素赋值 (同 AssignmentStmt 路径)
+    if (target.find("vb6_VariantArrayGet(") == 0) {
+        size_t argStart = target.find('(');
+        size_t argEnd = target.rfind(')');
+        if (argStart != std::string::npos && argEnd != std::string::npos && argEnd > argStart) {
+            std::string args = target.substr(argStart + 1, argEnd - argStart - 1);
+            c_.emitLine("vb6_VariantArraySet(" + args + ", vb6_VariantFromValue(" + value + "));  /* Let */");
+        } else {
+            c_.emitLine(target + " = " + value + ";  /* Let */");
+        }
+    } else if (target.find("VB6_SA_AT(vb6_VARIANT,") != std::string::npos) {
+        c_.emitLine(target + " = vb6_VariantFromValue(" + value + ");  /* Let */");
+    } else {
+        // Fix 038b-6: 具体类型目标 + Variant 值 → 自动提取 (同 AssignmentStmt 路径)
+        // 仅使用 cExprIsVariant (C 字符串级) 和 knownVariantVars_ 检测.
+        bool valueIsVariant = cExprIsVariant(value);
+        if (!valueIsVariant && node.value && node.value->kind == ASTNodeKind::IdentifierExpr) {
+            auto& id = static_cast<IdentifierExpr&>(*node.value);
+            std::string idLower = id.name;
+            std::transform(idLower.begin(), idLower.end(), idLower.begin(), ::tolower);
+            if (knownVariantVars_.count(idLower)) valueIsVariant = true;
+        }
+        if (valueIsVariant) {
+            std::string convertedValue = value;
+            if (target.find("VB6_SA_AT(BSTR,") != std::string::npos) {
+                convertedValue = "vb6_VariantToString(" + value + ")";
+            } else if (target.find("VB6_SA_AT(int32_t,") != std::string::npos
+                       || target.find("VB6_SA_AT(int16_t,") != std::string::npos
+                       || target.find("VB6_SA_AT(uint8_t,") != std::string::npos) {
+                convertedValue = "vb6_VariantToLong(" + value + ")";
+            } else if (target.find("VB6_SA_AT(double,") != std::string::npos
+                       || target.find("VB6_SA_AT(float,") != std::string::npos) {
+                convertedValue = "vb6_VariantToDouble(" + value + ")";
+            } else {
+                std::string checkName = target;
+                if (checkName.substr(0, 4) == "me->") checkName = checkName.substr(4);
+                if (checkName.size() > 4 && checkName[0] == '(' && checkName[1] == '*'
+                    && checkName.back() == ')') {
+                    checkName = checkName.substr(2, checkName.size() - 3);
+                }
+                std::string lower = checkName;
+                std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+                if (knownLongVars_.count(lower)) {
+                    convertedValue = "vb6_VariantToLong(" + value + ")";
+                } else if (knownDoubleVars_.count(lower)) {
+                    convertedValue = "vb6_VariantToDouble(" + value + ")";
+                } else if (node.target && node.target->kind == ASTNodeKind::IdentifierExpr) {
+                    auto& id = static_cast<IdentifierExpr&>(*node.target);
+                    std::string idLower = id.name;
+                    std::transform(idLower.begin(), idLower.end(), idLower.begin(), ::tolower);
+                    if (knownLongVars_.count(idLower)) {
+                        convertedValue = "vb6_VariantToLong(" + value + ")";
+                    } else if (knownDoubleVars_.count(idLower)) {
+                        convertedValue = "vb6_VariantToDouble(" + value + ")";
+                    }
+                }
+            }
+            c_.emitLine(target + " = " + convertedValue + ";  /* Let */");
+        } else {
+            c_.emitLine(target + " = " + value + ";  /* Let */");
+        }
+    }
 }
 
 void CCodeGen::visit(IfStmt& node) {
@@ -1626,7 +1787,29 @@ void CCodeGen::visit(SelectCaseStmt& node) {
     }
 
     // 声明并初始化临时变量, 保存测试表达式的值
-    c_.emitLine(tempType + " " + tempVar + " = " + testVar + ";");
+    // Fix 038b-6: 如果测试表达式是 Variant 但临时变量是具体类型, 插入提取函数
+    // 仅使用 cExprIsVariant (C 字符串级) 和 knownVariantVars_ 检测.
+    {
+        std::string initExpr = testVar;
+        bool testIsVariant = cExprIsVariant(testVar);
+        if (!testIsVariant && node.testExpr && node.testExpr->kind == ASTNodeKind::IdentifierExpr) {
+            auto& id = static_cast<IdentifierExpr&>(*node.testExpr);
+            std::string idLower = id.name;
+            std::transform(idLower.begin(), idLower.end(), idLower.begin(), ::tolower);
+            if (knownVariantVars_.count(idLower)) testIsVariant = true;
+        }
+        if (testIsVariant && !isStringSelect && !isFloatSelect) {
+            // int32_t temp = Variant → vb6_VariantToLong(Variant)
+            initExpr = "vb6_VariantToLong(" + testVar + ")";
+        } else if (testIsVariant && isStringSelect) {
+            // BSTR temp = Variant → vb6_VariantToString(Variant)
+            initExpr = "vb6_VariantToString(" + testVar + ")";
+        } else if (testIsVariant && isFloatSelect) {
+            // double temp = Variant → vb6_VariantToDouble(Variant)
+            initExpr = "vb6_VariantToDouble(" + testVar + ")";
+        }
+        c_.emitLine(tempType + " " + tempVar + " = " + initExpr + ";");
+    }
 
     // 用if-else if链代替switch (VB6 Select Case支持范围比较和字符串)
     bool first = true;
@@ -1945,7 +2128,26 @@ void CCodeGen::visit(WithStmt& node) {
     if (!withObjectInfoStack_.empty() && withObjectInfoStack_.back().kind == WithObjKind::FormControl && withObjectInfoStack_.back().ctrlType == FrmControlType::Menu) {  // P20-36
         c_.emitLine("int " + tempVar + " = 0;  /* Menu: no HWND, props use (hmenu,menuId) */");
     } else {
-        c_.emitLine(tempType + " " + tempVar + " = (" + tempType + ")" + lastExpr_ + "  /* With object ref */;");
+        // Fix 038: C2440 修复 — UDT 同类型转换和 UDT/VARIANT → void* 转换
+        bool isUdtTempType = (tempType.rfind("vb6_type_", 0) == 0);
+        if (isUdtTempType) {
+            // UDT → UDT 同类型: 不需要 cast (C2440: 不能将 struct 转换为自身类型)
+            c_.emitLine(tempType + " " + tempVar + " = " + lastExpr_ + "  /* With object ref */;");
+        } else if (tempType == "void*") {
+            // 检查表达式是否为 UDT 或 VARIANT — 这些类型不能直接 cast 到 void*
+            std::string udtCType = inferUdtTypeOfExpr(*node.object);
+            if (!udtCType.empty()) {
+                // UDT → void*: 取地址获取指针
+                c_.emitLine(tempType + " " + tempVar + " = &(" + lastExpr_ + ")  /* With object ref */;");
+            } else if (isDefinitelyVariantExpr(*node.object)) {
+                // VARIANT → void*: 用 VariantToObjectVal 提取对象指针
+                c_.emitLine(tempType + " " + tempVar + " = vb6_VariantToObjectVal(" + lastExpr_ + ")  /* With object ref */;");
+            } else {
+                c_.emitLine(tempType + " " + tempVar + " = (" + tempType + ")" + lastExpr_ + "  /* With object ref */;");
+            }
+        } else {
+            c_.emitLine(tempType + " " + tempVar + " = (" + tempType + ")" + lastExpr_ + "  /* With object ref */;");
+        }
     }
 
     withObjectVars_.push_back(tempVar);

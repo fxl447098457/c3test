@@ -283,7 +283,14 @@ void CCodeGen::visit(FunctionDecl& node) {
     std::string retType = mapTypeRef(node.returnType.get());
     currentReturnVar_ = "vb6_ret_" + cIdent(node.name);
     Vb6Type funcRetVb6Type = node.returnType ? typeSys_.resolveTypeName(static_cast<SimpleTypeRef*>(node.returnType.get())->name) : Vb6Type::Variant;
-    c_.emitLine(retType + " " + currentReturnVar_ + " = " + defaultValue(funcRetVb6Type) + ";");
+    // Fix 038: UDT 返回值不能用 = 0 初始化 (C2440), 改用 {0} 零初始化
+    {
+        std::string initVal = defaultValue(funcRetVb6Type);
+        if (funcRetVb6Type == Vb6Type::UserDefinedType && retType.rfind("vb6_type_", 0) == 0) {
+            initVal = "{0}";
+        }
+        c_.emitLine(retType + " " + currentReturnVar_ + " = " + initVal + ";");
+    }
     // P6.11: 注册返回值变量类型 (用于BSTR安全赋值)
     std::string funcRetLower = currentReturnVar_;
     std::transform(funcRetLower.begin(), funcRetLower.end(), funcRetLower.begin(), ::tolower);
@@ -1066,7 +1073,12 @@ void CCodeGen::visit(PropertyDecl& node) {
             std::string retType = mapTypeRef(node.returnType.get());
             Vb6Type retVb6Type = typeSys_.resolveTypeName(
                 static_cast<SimpleTypeRef*>(node.returnType.get())->name);
-            c_.emitLine(retType + " " + currentReturnVar_ + " = " + defaultValue(retVb6Type) + ";");
+            // Fix 038: UDT 返回值不能用 = 0 初始化 (C2440), 改用 {0}
+            std::string initVal = defaultValue(retVb6Type);
+            if (retVb6Type == Vb6Type::UserDefinedType && retType.rfind("vb6_type_", 0) == 0) {
+                initVal = "{0}";
+            }
+            c_.emitLine(retType + " " + currentReturnVar_ + " = " + initVal + ";");
             // P6.11: 注册返回值变量类型 (用于BSTR安全赋值)
             // Property Get 的 Prefix = me->m_Prefix 会被替换为 vb6_ret_Prefix = me->m_Prefix
             // 如果返回类型是String, 必须使用 vb6_BSTR_Assign 确保 deep copy,

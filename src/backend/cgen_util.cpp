@@ -852,6 +852,160 @@ bool CCodeGen::isDefinitelyVariantExpr(Expr& expr, bool* isArrOut) const {
 }
 
 // ============================================================
+// Fix 038b-1: 基于 C 表达式字符串的 Variant 检测
+// ============================================================
+// 补充 isDefinitelyVariantExpr 的 AST 级检测. 当 codegen 生成的 C 表达式
+// 包含已知返回 vb6_VARIANT 的函数调用时, 判定为 Variant.
+// 仅检查顶层表达式 (去除前导括号/空白后), 避免对子表达式误判.
+
+bool CCodeGen::cExprIsVariant(const std::string& cExpr) {
+    // 去除前导空白和括号
+    size_t start = 0;
+    while (start < cExpr.size()) {
+        char c = cExpr[start];
+        if (c == '(' || c == ' ' || c == '\t' || c == '\n' || c == '\r') {
+            start++;
+        } else {
+            break;
+        }
+    }
+    if (start >= cExpr.size()) return false;
+
+    // 已知返回 vb6_VARIANT 的函数前缀
+    static const std::vector<std::string> variantPrefixes = {
+        "vb6_VariantArrayGet(",
+        "vb6_VariantFromComResult(",
+        "vb6_VariantFromStackVARIANT(",
+        "vb6_VariantFromValue(",
+        "vb6_VariantEmpty(",
+        "vb6_VariantLong(",
+        "vb6_VariantDouble(",
+        "vb6_VariantString(",
+        "vb6_VariantBool(",
+        "vb6_VariantArray(",
+        "vb6_VariantObject(",
+        "vb6_VariantNull(",
+        "vb6_VariantNothing(",
+        "vb6_VariantFromI2(",
+        "vb6_VariantFromI4(",
+        "vb6_VariantFromR4(",
+        "vb6_VariantFromR8(",
+        "vb6_VariantFromBSTR(",
+        "vb6_VariantFromBool(",
+        "vb6_VariantFromDate(",
+        "vb6_VariantFromUI1(",
+        "vb6_VariantFromSafeArray(",
+    };
+    for (const auto& prefix : variantPrefixes) {
+        if (cExpr.compare(start, prefix.size(), prefix) == 0) return true;
+    }
+
+    // 检查 (&(vb6_VARIANT){...}) 复合字面量 — 也是 VARIANT 类型
+    // 但这种形式通常作为 ByRef 参数传递, 不需要再转换, 故不检测.
+
+    return false;
+}
+
+// ============================================================
+// Fix 038b-5: 运行时函数参数 C 类型查找表
+// ============================================================
+// 当 calleeParams 为空 (运行时/内置函数) 时, 通过函数名和参数索引查找
+// 期望的 C 类型. 返回空字符串表示未知.
+
+std::string CCodeGen::getRuntimeParamCType(const std::string& funcName, size_t paramIdx) {
+    static const std::unordered_map<std::string, std::vector<std::string>> table = {
+        // Array 创建/设置
+        {"vb6_ArraySetLong",    {"vb6_SafeArray1D*", "int32_t", "int32_t"}},
+        {"vb6_ArraySetBSTR",    {"vb6_SafeArray1D*", "int32_t", "BSTR"}},
+        {"vb6_ArraySetDouble",  {"vb6_SafeArray1D*", "int32_t", "double"}},
+        {"vb6_ArraySetVariant", {"vb6_SafeArray1D*", "int32_t", "vb6_VARIANT"}},
+        {"vb6_ArrayGetLong",    {"vb6_SafeArray1D*", "int32_t"}},
+        {"vb6_ArrayGetBSTR",    {"vb6_SafeArray1D*", "int32_t"}},
+        {"vb6_ArrayGetDouble",  {"vb6_SafeArray1D*", "int32_t"}},
+        {"vb6_ArrayGetVariant", {"vb6_SafeArray1D*", "int32_t"}},
+        // BSTR 操作
+        {"vb6_BSTR_Assign",     {"BSTR*", "BSTR"}},
+        {"vb6_BSTR_Concat",     {"BSTR", "BSTR"}},
+        {"vb6_BSTR_ConcatFree", {"BSTR", "BSTR"}},
+        {"vb6_BSTR_FromStr",    {"const wchar_t*"}},
+        {"vb6_BSTR_Empty",      {}},
+        {"vb6_BSTR_ToANSI",     {"BSTR"}},
+        {"vb6_BSTR_Free",       {"BSTR*"}},
+        {"vb6_BSTR_Clone",      {"BSTR"}},
+        // 字符串比较/操作
+        {"vb6_StrCmp",          {"BSTR", "BSTR"}},
+        {"vb6_StrComp",         {"BSTR", "BSTR", "int32_t"}},
+        {"vb6_Val",             {"BSTR"}},
+        {"vb6_Trim",            {"BSTR"}},
+        {"vb6_LTrim",           {"BSTR"}},
+        {"vb6_RTrim",           {"BSTR"}},
+        {"vb6_Left",            {"BSTR", "int32_t"}},
+        {"vb6_Right",           {"BSTR", "int32_t"}},
+        {"vb6_Mid",             {"BSTR", "int32_t", "int32_t"}},
+        {"vb6_Mid_",            {"BSTR", "int32_t", "int32_t"}},
+        {"vb6_Len",             {"BSTR"}},
+        {"vb6_LenB",            {"BSTR"}},
+        {"vb6_InStr",           {"BSTR", "BSTR"}},
+        {"vb6_Replace",         {"BSTR", "BSTR", "BSTR"}},
+        {"vb6_Split",           {"BSTR", "BSTR"}},
+        {"vb6_Join",            {"vb6_SafeArray1D*", "BSTR"}},
+        {"vb6_UCase",           {"BSTR"}},
+        {"vb6_LCase",           {"BSTR"}},
+        {"vb6_Space",           {"int32_t"}},
+        {"vb6_String",          {"int32_t", "int32_t"}},
+        {"vb6_Chr",             {"int32_t"}},
+        {"vb6_Asc",             {"BSTR"}},
+        {"vb6_Hex_",            {"int32_t"}},
+        {"vb6_Oct_",            {"int32_t"}},
+        // 类型转换
+        {"vb6_CStr",            {"vb6_VARIANT"}},
+        {"vb6_CLng",            {"double"}},
+        {"vb6_CInt",            {"double"}},
+        {"vb6_CDbl",            {"double"}},
+        {"vb6_CSng",            {"double"}},
+        {"vb6_CBool",           {"vb6_VARIANT"}},
+        {"vb6_CByte",           {"vb6_VARIANT"}},
+        {"vb6_CDate",           {"vb6_VARIANT"}},
+        {"vb6_CCur",            {"vb6_VARIANT"}},
+        // 数组操作
+        {"vb6_UBound",          {"vb6_SafeArray1D*", "int32_t"}},
+        {"vb6_LBound",          {"vb6_SafeArray1D*", "int32_t"}},
+        {"vb6_ArrayCreate",     {"int32_t"}},
+        // 消息框
+        {"vb6_MsgBox",          {"BSTR"}},
+        {"vb6_MsgBox1",         {"BSTR"}},
+        // 错误处理
+        {"vb6_ErrRaise",        {"int32_t", "BSTR", "BSTR"}},
+        {"vb6_ErrNumber",       {}},
+        {"vb6_ErrDescription",  {}},
+        {"vb6_ErrSource",       {}},
+        {"vb6_ErrClear",        {}},
+        // IsMissing
+        {"vb6_IsMissing",       {"vb6_VARIANT*"}},
+        // Variant 提取
+        {"vb6_VariantToLong",      {"vb6_VARIANT"}},
+        {"vb6_VariantToDouble",    {"vb6_VARIANT"}},
+        {"vb6_VariantToString",    {"vb6_VARIANT"}},
+        {"vb6_VariantToBool",      {"vb6_VARIANT"}},
+        {"vb6_VariantToSafeArray1D", {"vb6_VARIANT"}},
+        {"vb6_VariantToObjectVal", {"vb6_VARIANT"}},
+        // Debug
+        {"vb6_DebugPrint",      {"BSTR"}},
+        {"vb6_DebugWriteLong",  {"int32_t"}},
+        // 对象操作
+        {"vb6_ObjPtr",          {"void*"}},
+        {"vb6_ReleaseObject",   {"void**"}},
+        {"vb6_NewObject",       {"const wchar_t*"}},
+        {"vb6_CallByName",      {"void*", "BSTR", "int32_t"}},
+    };
+    auto it = table.find(funcName);
+    if (it != table.end() && paramIdx < it->second.size()) {
+        return it->second[paramIdx];
+    }
+    return "";
+}
+
+// ============================================================
 // AST辅助: 检测语句列表中是否包含GoSubStmt
 // ============================================================
 
