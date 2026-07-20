@@ -123,6 +123,7 @@ bool SemanticAnalyzer::analyze(Module& module) {
                     classSym->memberNames.push_back(s.name);
                     // Fix 016: Sub 写入 memberProcKinds (覆盖任意前值)
                     classSym->memberProcKinds[Symbol::toLower(s.name)] = ProcKind::Sub;
+                    // Fix 033: memberParams 改在 Pass1 填充 (class init 阶段类型解析不完整, 导致 Variant 回归)
                     break;
                 }
                 case ASTNodeKind::FunctionDecl: {
@@ -137,6 +138,7 @@ bool SemanticAnalyzer::analyze(Module& module) {
                     // Fix 016: Function 写入 memberProcKinds (覆盖任意前值 — 同类内
                     // 不允许 Function 与同名 Property 共存, 故此处覆盖无冲突风险)
                     classSym->memberProcKinds[Symbol::toLower(f.name)] = ProcKind::Function;
+                    // Fix 033: memberParams 改在 Pass1 填充 (class init 阶段类型解析不完整)
                     break;
                 }
                 case ASTNodeKind::PropertyDecl: {
@@ -163,20 +165,32 @@ bool SemanticAnalyzer::analyze(Module& module) {
                     // - Get 总是覆盖 (最高优先级)
                     // - Let 仅在键不存在或现有是 Let/Set 时写入 (不覆盖 Get/Function/Sub)
                     // - Set 仅在键不存在或现有是 Set/Let 时写入 (不覆盖 Get/Function/Sub/Let)
+                    // Fix 033: memberParams 改在 Pass1 填充 (此处类型解析不完整, 且 memberProcKinds
+                    //         在本阶段结束后已确定最终胜出者, Pass1 可直接据其判定 wins)
                     {
                         std::string lower = Symbol::toLower(p.name);
                         auto it = classSym->memberProcKinds.find(lower);
+                        bool wins = false;
                         if (p.propKind == ProcKind::PropertyGet) {
-                            classSym->memberProcKinds[lower] = ProcKind::PropertyGet;
+                            wins = true;
                         } else if (p.propKind == ProcKind::PropertyLet) {
                             if (it == classSym->memberProcKinds.end()
                                 || it->second == ProcKind::PropertyLet
                                 || it->second == ProcKind::PropertySet) {
-                                classSym->memberProcKinds[lower] = ProcKind::PropertyLet;
+                                wins = true;
                             }
                         } else if (p.propKind == ProcKind::PropertySet) {
                             if (it == classSym->memberProcKinds.end()
                                 || it->second == ProcKind::PropertySet) {
+                                wins = true;
+                            }
+                        }
+                        if (wins) {
+                            if (p.propKind == ProcKind::PropertyGet) {
+                                classSym->memberProcKinds[lower] = ProcKind::PropertyGet;
+                            } else if (p.propKind == ProcKind::PropertyLet) {
+                                classSym->memberProcKinds[lower] = ProcKind::PropertyLet;
+                            } else if (p.propKind == ProcKind::PropertySet) {
                                 classSym->memberProcKinds[lower] = ProcKind::PropertySet;
                             }
                         }
@@ -609,6 +623,15 @@ void SemanticAnalyzer::visit(SubDecl& node) {
             sym->params.push_back(std::move(pi));
         }
 
+        // Fix 033: Pass1 填充 Class 符号的 memberParams (类型解析正确, 避免 class init phase 的 Variant 回归)
+        if (currentModule_->isClassModule) {
+            auto* classSym = symTab_.lookupModule(Symbol::toLower(currentModule_->moduleName));
+            if (classSym && classSym->kind == SymbolKind::Class) {
+                // Sub: 覆盖 (与 memberProcKinds Sub 行为一致; VB6 不允许 Sub 与同名 Property 共存)
+                classSym->memberParams[Symbol::toLower(node.name)] = sym->params;
+            }
+        }
+
         symTab_.define(std::move(sym));
     } else {
         // Pass2: 分析过程体
@@ -683,6 +706,15 @@ void SemanticAnalyzer::visit(FunctionDecl& node) {
                 pi.defaultValueExpr = evalOptionalDefault(param->defaultValue.get(), pi.type);
             }
             sym->params.push_back(std::move(pi));
+        }
+
+        // Fix 033: Pass1 填充 Class 符号的 memberParams (类型解析正确)
+        if (currentModule_->isClassModule) {
+            auto* classSym = symTab_.lookupModule(Symbol::toLower(currentModule_->moduleName));
+            if (classSym && classSym->kind == SymbolKind::Class) {
+                // Function: 覆盖 (与 memberProcKinds Function 行为一致)
+                classSym->memberParams[Symbol::toLower(node.name)] = sym->params;
+            }
         }
 
         symTab_.define(std::move(sym));
@@ -760,6 +792,29 @@ void SemanticAnalyzer::visit(PropertyDecl& node) {
                 pi.defaultValueExpr = evalOptionalDefault(param->defaultValue.get(), pi.type);
             }
             sym->params.push_back(std::move(pi));
+        }
+
+        // Fix 033: Pass1 填充 Class 符号的 memberParams (类型解析正确, 按 Get > Function > Sub > Let > Set 优先级)
+        if (currentModule_->isClassModule) {
+            auto* classSym = symTab_.lookupModule(Symbol::toLower(currentModule_->moduleName));
+            if (classSym && classSym->kind == SymbolKind::Class) {
+                std::string lower = Symbol::toLower(node.name);
+                // memberProcKinds 在 class init 阶段已确定最终胜出者, 据此判定当前 Property 是否为胜出者
+                auto it = classSym->memberProcKinds.find(lower);
+                bool wins = false;
+                if (node.propKind == ProcKind::PropertyGet) {
+                    wins = true;  // Get 总是胜出
+                } else if (node.propKind == ProcKind::PropertyLet) {
+                    wins = (it != classSym->memberProcKinds.end()
+                            && it->second == ProcKind::PropertyLet);
+                } else if (node.propKind == ProcKind::PropertySet) {
+                    wins = (it != classSym->memberProcKinds.end()
+                            && it->second == ProcKind::PropertySet);
+                }
+                if (wins) {
+                    classSym->memberParams[lower] = sym->params;
+                }
+            }
         }
 
         symTab_.define(std::move(sym));

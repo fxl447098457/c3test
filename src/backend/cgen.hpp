@@ -623,6 +623,22 @@ private:
     std::string resolveClassMemberCall(const std::string& className,
                                        const std::string& memberName) const;
 
+    // Fix 033: 类感知方法/属性参数查找 (类符号 + memberParams 表的精确解析).
+    // IndexOrCallExpr calleeParams 解析: 按 className 查找指定类的方法/属性参数表,
+    // 避免跨模块 storageKey 冲突命中的首个注册者导致 Optional _has_ 标志数错 (→ C2197).
+    // Phase A: 与 resolveClassMemberCall 同迭代规则 (匹配 sourceModule 或 同模块
+    //          moduleName_), 在 moduleScope 找到真实 Sub/Function/Property 符号,
+    //          返回其 params + isBuiltin. 命中即返回 true.
+    // Phase B: Phase A 失败时 (storageKey 冲突让消费模块的 external Create 符号的
+    //          sourceModule 不匹配 className), 退到 Class 符号自身的 memberParams[lower]
+    //          (语义分析阶段已按 Get > Function > Sub > Let > Set 优先级填充), 返回该
+    //          参数表 (isBuiltin=false). 命中即返回 true.
+    // 都未命中返回 false, 调用者回退到 class-unaware lookupModule.
+    bool findClassMemberCallParams(const std::string& className,
+                                   const std::string& memberName,
+                                   std::vector<ParameterInfo>& outParams,
+                                   bool& outIsBuiltin) const;
+
     // ---- Fix 015: Method chaining 解析辅助 ----
     // 给定一个表达式 AST 节点, 推断其在运行时返回的类名 (如果它返回类实例)
     //  - IdentifierExpr: 查 knownClassVars_, 找到则返回该变量的声明类名

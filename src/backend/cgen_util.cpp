@@ -1373,6 +1373,102 @@ std::string CCodeGen::resolveClassMemberCall(const std::string& className,
 }
 
 // ============================================================
+// Fix 033: 类感知方法/属性参数查找 (Phase A + Phase B 回退)
+// ============================================================
+// IndexOrCallExpr calleeParams 解析专用 — 与 resolveClassMemberCall 相同的
+// 类匹配规则, 但返回 ParameterInfo 列表本身 (而非函数名).
+// Phase A 失败的根本原因: driver.cpp globalPublicSyms 按 storageKey 去重,
+// 跨模块同名方法 (如 N 个类的 Create) 在消费模块中仅保留首个注册者的 external
+// 符号 → sourceModule 不匹配 className → Phase A 遍历不到目标类符号.
+// 此时 Phase B 通过 Class 符号自身的 memberParams 表 (semantic_analyzer 在
+// 类扫描阶段已填好, 按 Get > Function > Sub > Let > Set 优先级存参数) 取回.
+bool CCodeGen::findClassMemberCallParams(const std::string& className,
+                                         const std::string& memberName,
+                                         std::vector<ParameterInfo>& outParams,
+                                         bool& outIsBuiltin) const {
+    outParams.clear();
+    outIsBuiltin = false;
+    if (className.empty() || !symTab_.moduleScope()) return false;
+
+    const std::string memberLower = Symbol::toLower(memberName);
+    const std::string classLower  = Symbol::toLower(className);
+
+    // ---- Phase A: 与 resolveClassMemberCall 同迭代规则 ----
+    // 找出模块作用域中所有与目标 className / memberName 匹配的 Sub/Function/Property
+    // 符号, 按 Get > Function > Sub > Let > Set 优先级选择最优先者.
+    // Note: 同模块类 (!isExternal) 由 isClassModule_ && moduleName_ 匹配; 跨模块类
+    // 由 isExternal && sourceModule 匹配.
+    const Symbol* foundGet   = nullptr;
+    const Symbol* foundLet   = nullptr;
+    const Symbol* foundSet   = nullptr;
+    const Symbol* foundSubFn = nullptr;
+    for (const auto& [key, sym] : symTab_.moduleScope()->symbols()) {
+        if (sym->lowerName != memberLower) continue;
+
+        bool matches = false;
+        if (sym->isExternal) {
+            if (Symbol::toLower(sym->sourceModule) == classLower) matches = true;
+        } else if (isClassModule_ && Symbol::toLower(moduleName_) == classLower) {
+            matches = true;
+        }
+        if (!matches) continue;
+
+        switch (sym->kind) {
+            case SymbolKind::PropertyGet:  foundGet   = sym.get(); break;
+            case SymbolKind::PropertyLet:  foundLet   = sym.get(); break;
+            case SymbolKind::PropertySet:  foundSet   = sym.get(); break;
+            case SymbolKind::Sub:
+            case SymbolKind::Function:     foundSubFn = sym.get(); break;
+            default: break;  // Variable / Constant / Class / EnumType / DeclareSub/DeclareFunc 跳过
+        }
+    }
+
+    const Symbol* chosen = foundGet;
+    if (!chosen) chosen = foundSubFn;
+    if (!chosen) chosen = foundLet;
+    if (!chosen) chosen = foundSet;
+
+    if (chosen
+        && (chosen->kind == SymbolKind::Sub || chosen->kind == SymbolKind::Function
+            || chosen->kind == SymbolKind::PropertyGet
+            || chosen->kind == SymbolKind::PropertyLet
+            || chosen->kind == SymbolKind::PropertySet)) {
+        outParams = chosen->params;
+        outIsBuiltin = chosen->isBuiltin;
+        return true;
+    }
+
+    // ---- Phase B: 类符号自身 memberParams 表回退 ----
+    // Note: 按 className 找到 Class 符号 (跨模块 external Class 符号已由 driver.cpp
+    // 从 producing 模块拷贝 memberParams 表); 在该表上 lookup memberLower.
+    // memberProcKinds 表 (优先级一致) 同步检查: 若有则进一步确认该成员在该类存在;
+    // memberParams 表可能因 declaration 缺失 params 而存在性小于 memberProcKinds,
+    // 保险起见以 memberParams 命中作为唯一成功判据.
+    for (const auto& [ckey, csym] : symTab_.moduleScope()->symbols()) {
+        if (csym->kind != SymbolKind::Class) continue;
+        bool classMatches = false;
+        if (csym->isExternal) {
+            if (Symbol::toLower(csym->sourceModule) == classLower) classMatches = true;
+        } else if (isClassModule_ && Symbol::toLower(moduleName_) == classLower) {
+            classMatches = true;
+        }
+        if (!classMatches) continue;
+
+        auto it = csym->memberParams.find(memberLower);
+        if (it != csym->memberParams.end()) {
+            outParams = it->second;
+            outIsBuiltin = false;  // memberParams 仅记录用户类方法, 不是 RTL builtin
+            return true;
+        }
+        // 同 className 的 Class 符号在消费模块中可能注册了多个外部副本, 但都来自同一
+        // producing 模块的 Class 符号 memberParams, 命中任一即可. 未命中时继续遍历
+        // 后续同名 Class 符号 (理论上不应出现, 留作防御性).
+    }
+
+    return false;
+}
+
+// ============================================================
 // Fix 015: Method chaining 解析辅助
 // ============================================================
 

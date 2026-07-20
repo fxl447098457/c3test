@@ -136,6 +136,15 @@ struct Symbol {
     // - PropertySet → 仅在当前键不存在或为 Let 时写入    (不覆盖 Get/Function/Let)
     // 读上下文 (resolveClassMemberCall) 优先级: Get > Function > Sub > Let > Set.
     std::unordered_map<std::string, ProcKind> memberProcKinds;
+    // Fix 033: 成员参数表 — 解决 IndexOrCallExpr calleeParams 跨模块 storageKey 冲突.
+    // 当 cTlsSocket.Create / cAsyncSocket.Create / cPassword.Create 共享 storageKey="create"
+    // 时, driver.cpp 的 globalPublicSyms 按 storageKey 去重, 仅首个注册者的 sourceModule
+    // 进入消费模块作用域. 此时 findClassMemberCallParams 的 Phase A (按 sourceModule 匹配
+    // className) 失败, Phase B 通过 Class 符号自身的 memberParams[lower] 取回参数表 —
+    // 与 memberProcKinds 同一优先级 (Get > Function > Sub > Let > Set), 仅在 procKind 写入
+    // 胜出时同步更新 memberParams, 确保表中存储的是该类该成员读上下文优先级最高的参数表.
+    // 用于 IndexOrCallExpr 中 Optional 参数 _has_ 标志计数匹配, 避免 C2197.
+    std::unordered_map<std::string, std::vector<ParameterInfo>> memberParams;
     bool isInterface = false;                          // 是否为接口类(纯抽象,无实现)
     std::vector<std::string> implementsNames;          // Implements列表: 该类实现的接口名
     // 接口方法(仅isInterface=true时有意义): 必须被实现类覆盖的方法签名

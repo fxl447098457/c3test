@@ -2517,13 +2517,55 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
         // Module.Method 或 obj.Method 调用: 查找方法名的参数签名
         // Fix 027: 同步加入 DeclareSub/DeclareFunc (模块方法形式的 declare 调用).
         auto& maExpr = static_cast<MemberAccessExpr&>(*node.callee);
-        Symbol* funcSym = symTab_.lookupModule(maExpr.memberName);
-        if (funcSym && (funcSym->kind == SymbolKind::Sub || funcSym->kind == SymbolKind::Function
-            || funcSym->kind == SymbolKind::PropertyGet || funcSym->kind == SymbolKind::PropertyLet
-            || funcSym->kind == SymbolKind::PropertySet
-            || funcSym->kind == SymbolKind::DeclareSub || funcSym->kind == SymbolKind::DeclareFunc)) {
-            calleeParams = funcSym->params;
-            calleeIsBuiltin = funcSym->isBuiltin;
+
+        // Fix 033: 优先用类感知查找. 原 symTab_.lookupModule(maExpr.memberName) 在
+        // 跨模块同名方法冲突下 (例如 cAsyncSocket.Create / cTlsSocket.Create / cPassword.Create
+        // 6+ 个类共享 storageKey="create"), 命中首个注册者而非对象真实类的方法,
+        // 导致 Optional 参数 _has_ 标志个数填错 → C2197 ("too many arguments").
+        // 限制条件: 仅当 maExpr.object 是 IdentifierExpr 时启用 — 此时无副作用,
+        // 不需要重复 emit obj 表达式即可推断 className. 复杂链式 obj 留给原回退路径.
+        bool classAwareResolved = false;
+        if (maExpr.object && maExpr.object->kind == ASTNodeKind::IdentifierExpr) {
+            std::string className;
+            auto& idObj = static_cast<IdentifierExpr&>(*maExpr.object);
+            std::string nameLower = Symbol::toLower(idObj.name);
+            if (nameLower == "me") {
+                // 当前类模块实例 — className = 本模块名
+                if (isClassModule_) className = moduleName_;
+            } else {
+                auto it = knownClassVars_.find(nameLower);
+                if (it != knownClassVars_.end()) {
+                    className = it->second;
+                } else {
+                    // 不是已知类变量 → 可能是模块名或外部类名自身
+                    // (例: ToolsStr.HasStr — ToolsStr 是 .bas 模块; cWinsock.SomeStaticMethod — cWinsock 类)
+                    // findClassMemberCallParams 内部会按 sourceModule/moduleName_ 匹配
+                    className = idObj.name;
+                }
+            }
+            if (!className.empty()) {
+                std::vector<ParameterInfo> params;
+                bool isBuiltin = false;
+                if (findClassMemberCallParams(className, maExpr.memberName, params, isBuiltin)) {
+                    calleeParams = std::move(params);
+                    calleeIsBuiltin = isBuiltin;
+                    classAwareResolved = true;
+                }
+            }
+        }
+
+        // Fix 033 回退: 类感知未命中 (对象为链式表达式 / className 找不到方法符号 /
+        // 需要匹配 DeclareSub/DeclareFunc 等) → 用原 class-unaware lookupModule 兜底,
+        // 保留旧行为兼容性.
+        if (!classAwareResolved) {
+            Symbol* funcSym = symTab_.lookupModule(maExpr.memberName);
+            if (funcSym && (funcSym->kind == SymbolKind::Sub || funcSym->kind == SymbolKind::Function
+                || funcSym->kind == SymbolKind::PropertyGet || funcSym->kind == SymbolKind::PropertyLet
+                || funcSym->kind == SymbolKind::PropertySet
+                || funcSym->kind == SymbolKind::DeclareSub || funcSym->kind == SymbolKind::DeclareFunc)) {
+                calleeParams = funcSym->params;
+                calleeIsBuiltin = funcSym->isBuiltin;
+            }
         }
     }
 
