@@ -929,15 +929,37 @@ void CCodeGen::visit(BinaryExpr& node) {
         return;
     }
 
-    // 等价运算: VB6 Eqv → ~(a^b)
+    // Fix 039: VB6 Eqv → ~(a^b), cast to int32_t for non-integer operands
+    // (double from vb6_Pow, pointer from BSTR/void*/SafeArray*)
+    // Fix 039b: For Variant operands, use vb6_VariantToLong() instead of (int32_t)() cast.
     if (node.op == BinaryOp::Eqv) {
-        lastExpr_ = "(~(" + left + " ^ " + right + "))";
+        auto castBitwise = [&](const std::string& cExpr, const Expr* astExpr) -> std::string {
+            if (cExprIsVariant(cExpr)) return "vb6_VariantToLong(" + cExpr + ")";
+            if (astExpr && astExpr->kind == ASTNodeKind::IdentifierExpr) {
+                auto& ident = static_cast<IdentifierExpr&>(const_cast<Expr&>(*astExpr));
+                std::string lower = ident.name;
+                std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+                if (knownVariantVars_.count(lower)) return "vb6_VariantToLong(" + cExpr + ")";
+            }
+            return "(int32_t)(" + cExpr + ")";
+        };
+        lastExpr_ = "(~(" + castBitwise(left, node.left.get()) + " ^ " + castBitwise(right, node.right.get()) + "))";
         return;
     }
 
-    // 蕴含运算: VB6 Imp → (~a | b)
+    // Fix 039: VB6 Imp → (~a | b), cast to int32_t for non-integer operands
     if (node.op == BinaryOp::Imp) {
-        lastExpr_ = "((~" + left + ") | " + right + ")";
+        auto castBitwise = [&](const std::string& cExpr, const Expr* astExpr) -> std::string {
+            if (cExprIsVariant(cExpr)) return "vb6_VariantToLong(" + cExpr + ")";
+            if (astExpr && astExpr->kind == ASTNodeKind::IdentifierExpr) {
+                auto& ident = static_cast<IdentifierExpr&>(const_cast<Expr&>(*astExpr));
+                std::string lower = ident.name;
+                std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+                if (knownVariantVars_.count(lower)) return "vb6_VariantToLong(" + cExpr + ")";
+            }
+            return "(int32_t)(" + cExpr + ")";
+        };
+        lastExpr_ = "((~" + castBitwise(left, node.left.get()) + ") | " + castBitwise(right, node.right.get()) + ")";
         return;
     }
 
@@ -1065,6 +1087,26 @@ void CCodeGen::visit(BinaryExpr& node) {
 
     std::string op = mapBinaryOp(node.op);
 
+    // Fix 039: VB6 And/Or/Xor are bitwise operators that require integer operands.
+    // Cast to int32_t to handle double (from vb6_Pow) and pointer (BSTR, void*, SafeArray*)
+    // operands. VB6 semantics: And/Or/Xor convert operands to Long before bitwise op.
+    // Fix 039b: For Variant operands (knownVariantVars_ or cExprIsVariant), use
+    // vb6_VariantToLong() instead of (int32_t)() cast, since VARIANT can't be cast to int.
+    if (node.op == BinaryOp::And || node.op == BinaryOp::Or || node.op == BinaryOp::Xor) {
+        auto castBitwise = [&](const std::string& cExpr, const Expr* astExpr) -> std::string {
+            if (cExprIsVariant(cExpr)) return "vb6_VariantToLong(" + cExpr + ")";
+            if (astExpr && astExpr->kind == ASTNodeKind::IdentifierExpr) {
+                auto& ident = static_cast<IdentifierExpr&>(const_cast<Expr&>(*astExpr));
+                std::string lower = ident.name;
+                std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+                if (knownVariantVars_.count(lower)) return "vb6_VariantToLong(" + cExpr + ")";
+            }
+            return "(int32_t)(" + cExpr + ")";
+        };
+        lastExpr_ = "(" + castBitwise(left, node.left.get()) + " " + op + " " + castBitwise(right, node.right.get()) + ")";
+        return;
+    }
+
     // VB6的And/Or/Not是逻辑运算也是位运算（取决于操作数类型）
     // 简化处理: 直接映射为C位运算, VB6语义兼容
     lastExpr_ = "(" + left + " " + op + " " + right + ")";
@@ -1080,8 +1122,23 @@ void CCodeGen::visit(UnaryExpr& node) {
             lastExpr_ = "(-" + operand + ")";
             break;
         case UnaryOp::Not:
-            // VB6 Not = 位取反 (C: ~)
-            lastExpr_ = "(~" + operand + ")";
+            // Fix 039: VB6 Not = 位取反 (C: ~), cast to int32_t for non-integer
+            // operands (double from vb6_Pow, pointer from BSTR/void*/SafeArray*)
+            // Fix 039b: For Variant operands, use vb6_VariantToLong() instead.
+            if (cExprIsVariant(operand)) {
+                lastExpr_ = "(~vb6_VariantToLong(" + operand + "))";
+            } else if (node.operand && node.operand->kind == ASTNodeKind::IdentifierExpr) {
+                auto& ident = static_cast<IdentifierExpr&>(*node.operand);
+                std::string lower = ident.name;
+                std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+                if (knownVariantVars_.count(lower)) {
+                    lastExpr_ = "(~vb6_VariantToLong(" + operand + "))";
+                } else {
+                    lastExpr_ = "(~(int32_t)(" + operand + "))";
+                }
+            } else {
+                lastExpr_ = "(~(int32_t)(" + operand + "))";
+            }
             break;
     }
 }
