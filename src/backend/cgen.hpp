@@ -66,6 +66,7 @@ public:
     CCodeGen(Diagnostics& diag, const SymbolTable& symTab,
              const TypeSystem& typeSys,
              const std::unordered_map<std::string, std::set<std::string>>* classVoidFieldMap = nullptr,
+             const std::unordered_map<std::string, std::unordered_map<std::string, std::string>>* classTypedFieldMap = nullptr,
              bool verbose = false);
 
     // 主入口: 生成C代码，返回是否成功
@@ -287,6 +288,11 @@ private:
     std::unordered_set<std::string> classBstrMembers_;
     std::unordered_set<std::string> classLongMembers_;
     std::unordered_set<std::string> classDoubleMembers_;
+    // Fix 037: 类 Variant 成员变量集合 (As Variant 字段, 含 m_ 前缀格式).
+    // 用于 IndexOrCallExpr 处理 `me->VarField(idx)` 或 `obj.VarField(args)` 模式:
+    // Variant 字段可能持有 Collection/SafeArray/Object, 通过 idx 访问时应走
+    // vb6_VariantArrayGet(&me->VarField, idx) 而非误把 Variant 当函数调用 (C2064).
+    std::unordered_set<std::string> classVariantMembers_;
     // Fix 010r: ALL class member variable names (lowercase, both with/without m_ prefix)
     // Used for me-> prefix detection in Erase/ReDim/Assignment statements
     std::unordered_set<std::string> classMemberVars_;
@@ -301,6 +307,15 @@ private:
     //   内层 Db.Rs → emit "Db->Rs  /* class var .Rs field voidptr */"
     //   外层 .EOF  → 识别 voidptr → vb6_ComGet*Prop(Db->Rs..., L"EOF")
     const std::unordered_map<std::string, std::set<std::string>>* classVoidFieldMap_ = nullptr;
+    // Fix 037b: 类模块/窗体模块中 typed (非 void*) 对象字段的类型信息表.
+    // key: 类名 (如 "cDataBase"), value: (字段名小写 → VB6类型名)
+    //   - 项目类字段 (如 Rows As cCollection) → value="cCollection" (项目类名)
+    //   - COM 接口字段 (如 Header As Dictionary) → value="COM:Dictionary" (COM标记)
+    // 用于 IndexOrCallExpr 中 obj.typedField(idx) 模式识别 — typedField 不是函数
+    // 而是对象数据字段, VB6 语义为调用其默认 Item 属性.
+    // 项目类 → 直接调用 vb6_<Type>_prop_get_Item(obj.field, arg);
+    // COM 接口 → vb6_ComCall((void*)obj.field, L"Item", args, argc).
+    const std::unordered_map<std::string, std::unordered_map<std::string, std::string>>* classTypedFieldMap_ = nullptr;
     // Fix 010n: 类模块UDT成员变量 (小写var名 → UDT类型C标识符)
     // 用于在过程开始时恢复 knownUdtVars_ (因clear()会丢失类成员UDT变量)
     std::unordered_map<std::string, std::string> classUdtMembers_;
@@ -308,6 +323,10 @@ private:
     // 用于方法调用翻译 c.Method → vb6_cls_ClassName_Method(c)
     // Fix 010r-10: 从 unordered_set 改为 unordered_map 以支持类名查找
     std::unordered_map<std::string, std::string> knownClassVars_;
+
+    // Fix 037b: 标记最近一次 IndexOrCallExpr 生成的表达式是否为返回 VARIANT 的
+    // 项目类 Item 属性调用 — Set 语句需要将其转换为 void* 对象引用.
+    bool lastExprNeedsObjectUnpack_ = false;
 
     // Fix 010o: 过程局部变量名集合 (小写) — Dim声明的局部变量 + For/ForEach循环变量
     // 用于在IdentifierExpr中避免对局部变量错误添加 me-> 前缀
@@ -646,6 +665,18 @@ private:
     //  - 其他: 返回空串 (不可推断为类实例)
     // 用于链式调用 db.Sql(s).Exec(...) 中 .Exec 的对象表达式 (db.Sql(s)) 类型推断
     std::string inferClassTypeOfExpr(const ASTNode& expr) const;
+
+    // ---- Fix 037: UDT 类型推断辅助 ----
+    // 给定一个表达式 AST 节点, 递归推断其 UDT C 类型标识符 (如 "vb6_type_UcsBuffer").
+    //  - IdentifierExpr: 查 knownUdtVars_ 得到 UDT C 类型
+    //  - MemberAccessExpr: 递归推断 object 的 UDT 类型, 再在 udtMembers 中找
+    //    memberName 对应成员. 若该成员本身是 UDT (typeRefName 非空且符号表中有
+    //    UserDefinedType), 返回 "vb6_type_<memberUdtName>"; 否则返回空串.
+    //    支持嵌套 UDT: _vb6_with_3.DecrBuffer → 推断 DecrBuffer 的 UDT 类型.
+    //  - 其他: 返回空串
+    // 用于 IndexOrCallExpr 中 obj.udtArrayField(idx) 模式识别, 避免把 UDT 数组
+    // 字段误当函数调用 (C2064).
+    std::string inferUdtTypeOfExpr(const ASTNode& expr) const;
 
     // 给定类名与成员名, 在当前模块作用域符号表中查找属于该类的 Function/PropertyGet 符号,
     // 若其返回类型为 Object 且记录了 variableTypeName (Fix 015), 返回经 canonicalClassName

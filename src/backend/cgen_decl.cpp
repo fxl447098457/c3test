@@ -522,6 +522,11 @@ void CCodeGen::visit(TypeDecl& node) {
                 emitExpr(*member->arraySize);
                 h_.emitLine(memType + " " + memName + "[(" + lastExpr_ + ") + 1];");
             }
+        } else if (member->isArrayDynamic) {
+            // Fix 037 Pattern B: 动态数组成员 (`Data() As Byte`) emit `vb6_SafeArray1D* Member;`
+            // 之前 bug: arraySize==nullptr 与无括号成员无法区分, emit `uint8_t Data;` (单标量字段),
+            // 运行时不正确且导致 obj.Data(i) 调用变成 C2064.
+            h_.emitLine("vb6_SafeArray1D* " + memName + ";  /* dynamic array member */");
         } else {
             h_.emitLine(memType + " " + memName + ";");
         }

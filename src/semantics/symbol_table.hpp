@@ -209,6 +209,9 @@ struct Symbol {
         Vb6Type type = Vb6Type::Empty;  // 成员类型
         std::string typeRefName;    // 若类型为UDT, 保存UDT名称
         int32_t arraySize = 0;      // 固定大小数组: 0=非数组, >0=上界+1
+        // Fix 037: 动态数组标记. `memberName() As Type` 语法, arraySize=0 且 isArrayDynamic=true.
+        // 用于 UDT C 结构体 emit `vb6_SafeArray1D* Member;` 并支持 obj.member(idx) → VB6_SA_AT.
+        bool isArrayDynamic = false;
     };
     std::vector<UdtMemberInfo> udtMembers;
 

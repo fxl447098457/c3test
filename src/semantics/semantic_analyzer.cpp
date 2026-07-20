@@ -886,6 +886,10 @@ void SemanticAnalyzer::visit(TypeDecl& node) {
             if (memberPtr->arraySize) {
                 mi.arraySize = 1;
             }
+            // Fix 037: 传播动态数组标记 (`() As Type`) — UdtMemberInfo.isArrayDynamic
+            if (memberPtr->isArrayDynamic) {
+                mi.isArrayDynamic = true;
+            }
             sym->udtMembers.push_back(std::move(mi));
         }
         symTab_.define(std::move(sym));

@@ -905,6 +905,21 @@ void CCodeGen::visit(SetStmt& node) {
         value = "vb6_ComCallObject" + value.substr(strlen("vb6_ComCall"));
     }
 
+    // Fix 037b: 项目类 typed 字段的 Item 属性调用返回 VARIANT, Set 语句需要提取 void* 对象引用.
+    // 检测: value 以 "vb6_" 开头且第一个 '(' 恰在 "_prop_get_Item" 之后 → 顶层 Item 调用.
+    // 嵌套场景 (如 SomeFunc(obj.Rows(1))) 的第一个 '(' 在 SomeFunc 之后, 不会被误匹配.
+    if (value.find("vb6_") == 0
+        && value.find("vb6_VariantToObjectVal") == std::string::npos) {
+        size_t itemPos = value.find("_prop_get_Item(");
+        if (itemPos != std::string::npos) {
+            size_t firstParen = value.find('(');
+            if (firstParen == itemPos + 15) {  // 15 = strlen("_prop_get_Item")
+                value = "vb6_VariantToObjectVal(" + value + ")";
+            }
+        }
+    }
+    lastExprNeedsObjectUnpack_ = false;  // 清除标记 (字符串检测已覆盖)
+
     // P6.3: 早期绑定COM变量赋值: Set fso = CreateObject("X") → fso = (Type*)vb6_ComCreateTyped(L"X", "{IID}")
     // 检查target是否是早期绑定COM变量, 且value是vb6_CreateObject
     if (value.find("vb6_CreateObject(") == 0) {
@@ -1801,6 +1816,11 @@ void CCodeGen::visit(WithStmt& node) {
                 if (itUdt != knownUdtVars_.end()) {
                     tempType = itUdt->second;  // e.g., "vb6_type_OPENFILENAME"
                     // Keep Unknown kind — struct.field 访问对UDT是正确的
+                    // Fix 037: 注册 With 临时变量到 knownUdtVars_, 让嵌套 UDT 字段
+                    // 访问 (如 _vb6_with_N.DecrBuffer.Data(0)) 能推断出 UDT 类型,
+                    // 正确生成 VB6_SA_AT 而非误当函数调用 (C2064).
+                    knownUdtVars_[tempVar] = itUdt->second;
+                    knownLocalVars_.insert(tempVar);
                 }
             }
 
@@ -1837,6 +1857,9 @@ void CCodeGen::visit(WithStmt& node) {
                 auto itUdt = knownUdtVars_.find(memberLower);
                 if (itUdt != knownUdtVars_.end()) {
                     tempType = itUdt->second;
+                    // Fix 037: 注册 With 临时变量到 knownUdtVars_
+                    knownUdtVars_[tempVar] = itUdt->second;
+                    knownLocalVars_.insert(tempVar);
                 }
             } else {
                 // 尝试从符号表推断类型

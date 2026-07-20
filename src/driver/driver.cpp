@@ -1279,6 +1279,57 @@ bool Driver::runCodeGeneration(const CompileOptions& options, const std::string&
         }
     }
 
+    // Fix 037b: 构建 classTypedFieldMap — 非 void* 的 typed 对象字段类型表.
+    // 扫描每个类模块/窗体模块的字段声明, 对 isVoidFieldType 返回 false 但
+    // 类型为 Class/ComClass/ComInterface 的字段, 记录其 VB6 类型名.
+    // 用于 IndexOrCallExpr 中 obj.typedField(idx) 模式: typedField 是对象数据字段
+    // (非函数), VB6 语义为调用其默认 Item 属性.
+    std::unordered_map<std::string, std::unordered_map<std::string, std::string>> classTypedFieldMap;
+    for (size_t i = 0; i < modules_.size(); i++) {
+        const auto& module = modules_[i];
+        if (!module->isClassModule && !module->isFormModule) continue;
+        const std::string& className = module->moduleName;
+        std::unordered_map<std::string, std::string> typedFields;
+        for (const auto& decl : module->declarations) {
+            if (decl->kind != ASTNodeKind::VariableDecl) continue;
+            const auto& var = static_cast<const VariableDecl&>(*decl);
+            if (var.isDynamicArray || !var.dimensions.empty()) continue;
+            if (!var.asType || var.asType->kind != ASTNodeKind::SimpleTypeRef) continue;
+            // 跳过 void* 字段 (已在 classVoidFieldMap 中)
+            if (isVoidFieldType(var, analyzers_[i]->typeSystem(),
+                               analyzers_[i]->symbolTable())) continue;
+            std::string typeName = static_cast<SimpleTypeRef*>(var.asType.get())->name;
+            // 在符号表中查找类型, 区分项目类 vs COM 接口
+            std::string lookupName = typeName;
+            size_t dotPos = typeName.find('.');
+            if (dotPos != std::string::npos) {
+                std::string shortName = typeName.substr(dotPos + 1);
+                auto* dotSym = analyzers_[i]->symbolTable().lookupModule(shortName);
+                if (dotSym) lookupName = shortName;
+            }
+            auto* clsSym = analyzers_[i]->symbolTable().lookupModule(lookupName);
+            if (!clsSym) continue;
+            std::string fieldTypeMarker;
+            if (clsSym->kind == SymbolKind::Class) {
+                fieldTypeMarker = clsSym->name;  // 项目类名 (如 "cCollection")
+            } else if (clsSym->kind == SymbolKind::ComClass ||
+                       clsSym->kind == SymbolKind::ComInterface) {
+                fieldTypeMarker = "COM:" + typeName;  // COM 标记
+            } else {
+                continue;  // UDT/Enum 等非对象类型跳过
+            }
+            std::string oLower = var.name;
+            std::transform(oLower.begin(), oLower.end(), oLower.begin(),
+                           [](unsigned char c) { return (char)std::tolower(c); });
+            std::string mLower = "m_" + oLower;
+            typedFields[oLower] = fieldTypeMarker;
+            typedFields[mLower] = fieldTypeMarker;
+        }
+        if (!typedFields.empty()) {
+            classTypedFieldMap[className] = std::move(typedFields);
+        }
+    }
+
     for (size_t i = 0; i < modules_.size(); i++) {
         auto& module = modules_[i];
         auto& analyzer = analyzers_[i];
@@ -1301,7 +1352,7 @@ bool Driver::runCodeGeneration(const CompileOptions& options, const std::string&
         // 调用C代码生成器
         // Fix 023: 传入 void* 字段表供 cgen_expr.cpp fallback 路径查询
         CCodeGen cgen(*diag_, analyzer->symbolTable(), analyzer->typeSystem(),
-                      &classVoidFieldMap, options.verbose);
+                      &classVoidFieldMap, &classTypedFieldMap, options.verbose);
 
         // 传入模块基名和外部模块列表
         // P6.6: 传递ActiveX DLL模式信息
@@ -1357,7 +1408,7 @@ bool Driver::runCodeGeneration(const CompileOptions& options, const std::string&
         auto& lastAnalyzer = analyzers_.back();
         // Fix 023: 传入 void* 字段表 (与主 codegen 循环一致)
         CCodeGen dllCgen(*diag_, lastAnalyzer->symbolTable(), lastAnalyzer->typeSystem(),
-                         &classVoidFieldMap, options.verbose);
+                         &classVoidFieldMap, &classTypedFieldMap, options.verbose);
         // Collect all symbol tables for cross-module Property lookup
         std::vector<SymbolTable*> allSymTabs;
         for (auto& analyzer : analyzers_) {

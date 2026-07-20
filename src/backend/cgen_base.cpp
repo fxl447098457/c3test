@@ -58,9 +58,11 @@ void CodeEmitter::emitBlank() {
 CCodeGen::CCodeGen(Diagnostics& diag, const SymbolTable& symTab,
                    const TypeSystem& typeSys,
                    const std::unordered_map<std::string, std::set<std::string>>* classVoidFieldMap,
+                   const std::unordered_map<std::string, std::unordered_map<std::string, std::string>>* classTypedFieldMap,
                    bool verbose)
     : diag_(diag), symTab_(symTab), typeSys_(typeSys),
-      classVoidFieldMap_(classVoidFieldMap), verbose_(verbose) {}
+      classVoidFieldMap_(classVoidFieldMap), classTypedFieldMap_(classTypedFieldMap),
+      verbose_(verbose) {}
 
 // ============================================================
 // 主入口: 生成 .h + .c
@@ -88,6 +90,7 @@ bool CCodeGen::generate(Module& module, const std::string& baseName,
     classBstrMembers_.clear();
     classLongMembers_.clear();
     classDoubleMembers_.clear();
+    classVariantMembers_.clear();  // Fix 037
     classUdtMembers_.clear();  // Fix 010n
     classMemberVars_.clear();  // Fix 010r
     if (isClassModule_) {
@@ -120,6 +123,14 @@ bool CCodeGen::generate(Module& module, const std::string& baseName,
                     } else if (vtype == Vb6Type::Double || vtype == Vb6Type::Single) {
                         classDoubleMembers_.insert(mLower);
                         classDoubleMembers_.insert(oLower);
+                    }
+                    // Fix 037: Variant 类成员注册到 classVariantMembers_.
+                    // 用于 IndexOrCallExpr 处理 me->VarField(idx) / obj.VarField(args),
+                    // 应当 emit vb6_VariantArrayGet(&me->VarField, idx) 而非把 Variant
+                    // 字段当函数调用 (C2064 term does not evaluate to a function).
+                    else if (vtype == Vb6Type::Variant) {
+                        classVariantMembers_.insert(mLower);
+                        classVariantMembers_.insert(oLower);
                     }
                         // Fix 010n: 记录UDT类型成员变量 (用于With块类型检测)
                         if (var.asType->kind == ASTNodeKind::SimpleTypeRef) {

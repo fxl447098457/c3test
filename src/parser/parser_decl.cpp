@@ -188,6 +188,7 @@ std::unique_ptr<TypeDecl> Parser::parseTypeDecl(AccessLevel access) {
         //   memberName(1 To 8) As Type — 下界 To 上界
         //   memberName(1, 2) As Type  — 多维
         ExprPtr arraySize;
+        bool isArrayDynamic = false;  // Fix 037: 标记动态数组 `()` 语法
         if (match(TokenKind::LeftParen)) {
             if (cur_.kind != TokenKind::RightParen) {
                 // 解析第一个维度
@@ -206,8 +207,10 @@ std::unique_ptr<TypeDecl> Parser::parseTypeDecl(AccessLevel access) {
                         parseExpression();
                     }
                 }
+            } else {
+                // 空括号 () = 动态数组, arraySize 保持 nullptr
+                isArrayDynamic = true;
             }
-            // else: 空括号 () = 动态数组, arraySize 保持 nullptr
             expect(TokenKind::RightParen, DiagnosticID::ParseExpectedToken,
                    "expected ')'");
         }
@@ -218,8 +221,10 @@ std::unique_ptr<TypeDecl> Parser::parseTypeDecl(AccessLevel access) {
         }
         expectEndOfStatement();
 
-        members.push_back(std::make_unique<TypeMember>(memberLoc,
-            memberNameStr, std::move(type), std::move(arraySize)));
+        auto memberNode = std::make_unique<TypeMember>(memberLoc,
+            memberNameStr, std::move(type), std::move(arraySize));
+        memberNode->isArrayDynamic = isArrayDynamic;
+        members.push_back(std::move(memberNode));
     }
 
     expect(TokenKind::End, DiagnosticID::ParseMismatchedBlock,

@@ -1241,6 +1241,11 @@ public:
     std::string name;
     TypeRefPtr type;
     ExprPtr arraySize;  // 定长数组的上界 (可为nullptr)
+    // Fix 037: 动态数组成员标记 (`memberName() As Type`). arraySize 与 isArrayDynamic
+    // 互斥: 定长数组 arraySize!=nullptr 且 isArrayDynamic=false; 动态数组 arraySize=nullptr
+    // 且 isArrayDynamic=true; 标量字段两者皆 false/nullptr. 用于区分 UDT 动态数组字段
+    // (emit `vb6_SafeArray1D* Member`) 与普通标量字段 (`type Member`).
+    bool isArrayDynamic = false;
 
     TypeMember(SourceLocation loc, std::string n, TypeRefPtr t, ExprPtr arrSize)
         : Decl(ASTNodeKind::TypeMember, loc),

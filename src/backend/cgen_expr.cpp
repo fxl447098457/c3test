@@ -2149,6 +2149,387 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
             }
         }
     }
+
+    // ---- Fix 037: IdentifierExpr callee — implicit Me.field / ByRef Object param / local Object var ----
+    // 处理 name(idx) 模式 (无显式 obj. 前缀), name 可能是:
+    //   Pattern G: 类模块隐式 Me.field (void*/Variant) — VB6 在类模块内省略 Me. 时
+    //              codegen 会 emit me->field, 但 field 是数据字段不是函数 → C2064
+    //              → vb6_ComCall(me->field, L"Item", ...) / vb6_VariantArrayGet(&me->field, idx)
+    //   Pattern F: ByRef Object 参数 (*name)(idx) — VB6 Items(idx) 其中 Items 是 ByRef Object
+    //              参数, C 中是 void** → (*Items) 是 void*, 不可调用 → C2064
+    //              → vb6_ComCall((*name), L"Item", args, argc)
+    //   Pattern F2: 局部 Object 变量 (Dim x As Object) — knownObjectVars_ 后期绑定
+    //              → vb6_ComCall(name, L"Item", args, argc)
+    // 检查顺序: Pattern F (参数优先, 遮蔽类字段) > Pattern G (类字段) > Pattern F2 (局部 Object)
+    if (node.callee && node.callee->kind == ASTNodeKind::IdentifierExpr
+        && !node.positional.empty() && node.named.empty()) {
+        auto& idExpr = static_cast<IdentifierExpr&>(*node.callee);
+        std::string nameLower = Symbol::toLower(idExpr.name);
+        std::string nameMLower = "m_" + nameLower;
+        bool handled = false;
+
+        // ---- Pattern F: Object 参数 (ByRef 或 ByVal) ----
+        // currentProc_->params 中查找同名参数, 非数组, 非ParamArray, 类型为 Object/Variant.
+        // ByRef Object 在 C 中是 void** → emitExpr emit "(*name)"; ByVal Object 是 void* → emit "name".
+        if (!handled && currentProc_) {
+            for (auto& p : currentProc_->params) {
+                if (Symbol::toLower(p.name) == nameLower) {
+                    bool isArray = (static_cast<uint16_t>(p.type) & static_cast<uint16_t>(Vb6Type::Array)) != 0;
+                    if (!isArray && !p.isParamArray
+                        && (p.type == Vb6Type::Object || p.type == Vb6Type::Variant)) {
+                        emitExpr(*node.callee);  // emits "(*name)" for ByRef or "name" for ByVal
+                        std::string objExpr = std::move(lastExpr_);
+                        std::vector<std::string> packedArgs;
+                        for (size_t i = 0; i < node.positional.size(); i++) {
+                            std::string packFn = comPackExpr(*node.positional[i]);
+                            emitExpr(*node.positional[i]);
+                            { std::string resolved = resolveComMarkerForPack(packFn);
+                              if (!resolved.empty()) lastExpr_ = resolved; }
+                            packedArgs.push_back(packFn + "(" + lastExpr_ + ")");
+                        }
+                        int32_t argc = (int32_t)packedArgs.size();
+                        std::string argsArray = "(void*[]){";
+                        for (int i = 0; i < argc; i++) {
+                            if (i > 0) argsArray += ", ";
+                            argsArray += packedArgs[i];
+                        }
+                        argsArray += "}";
+                        lastExpr_ = "vb6_ComCall(" + objExpr + ", L\"Item\", "
+                                  + argsArray + ", " + std::to_string(argc) + ")";
+                        handled = true;
+                    }
+                    break;  // 参数匹配即终止 (无论是否 handled)
+                }
+            }
+        }
+
+        // ---- Pattern G: 隐式 Me.field (类模块上下文) ----
+        // isClassModule_ && name 不是局部变量 && 不是参数 → 类数据字段.
+        // emitExpr(*node.callee) 会 emit "me->field" (+ Dim As New 自动实例化守卫).
+        if (!handled && isClassModule_ && currentProc_
+            && !knownLocalVars_.count(nameLower)) {
+            // 确认 name 不是当前过程的参数 (Pattern F 已处理)
+            bool isParam = false;
+            for (auto& p : currentProc_->params) {
+                if (Symbol::toLower(p.name) == nameLower) { isParam = true; break; }
+            }
+            if (!isParam) {
+                // Variant 字段 → vb6_VariantArrayGet(&me->field, idx)
+                if (classVariantMembers_.count(nameLower) || classVariantMembers_.count(nameMLower)) {
+                    emitExpr(*node.callee);  // emits "me->field"
+                    std::string fieldExpr = std::move(lastExpr_);
+                    emitExpr(*node.positional[0]);
+                    std::string idx = std::move(lastExpr_);
+                    lastExpr_ = "vb6_VariantArrayGet(&" + fieldExpr + ", " + idx + ")";
+                    handled = true;
+                } else {
+                    // void* COM 字段 → vb6_ComCall(me->field, L"Item", args, argc)
+                    bool isVoidPtr = false;
+                    if (classVoidFieldMap_) {
+                        auto itV = classVoidFieldMap_->find(moduleName_);
+                        if (itV != classVoidFieldMap_->end()) {
+                            if (itV->second.count(nameLower) || itV->second.count(nameMLower)) {
+                                isVoidPtr = true;
+                            }
+                        }
+                    }
+                    if (isVoidPtr) {
+                        emitExpr(*node.callee);  // emits "me->field" (+ auto-instantiate guard)
+                        std::string objExpr = std::move(lastExpr_);
+                        std::vector<std::string> packedArgs;
+                        for (size_t i = 0; i < node.positional.size(); i++) {
+                            std::string packFn = comPackExpr(*node.positional[i]);
+                            emitExpr(*node.positional[i]);
+                            { std::string resolved = resolveComMarkerForPack(packFn);
+                              if (!resolved.empty()) lastExpr_ = resolved; }
+                            packedArgs.push_back(packFn + "(" + lastExpr_ + ")");
+                        }
+                        int32_t argc = (int32_t)packedArgs.size();
+                        std::string argsArray = "(void*[]){";
+                        for (int i = 0; i < argc; i++) {
+                            if (i > 0) argsArray += ", ";
+                            argsArray += packedArgs[i];
+                        }
+                        argsArray += "}";
+                        lastExpr_ = "vb6_ComCall(" + objExpr + ", L\"Item\", "
+                                  + argsArray + ", " + std::to_string(argc) + ")";
+                        handled = true;
+                    } else if (classTypedFieldMap_) {
+                        // Fix 037b: typed (非 void*) 对象字段 — 项目类或 COM 接口
+                        auto itT = classTypedFieldMap_->find(moduleName_);
+                        if (itT != classTypedFieldMap_->end()) {
+                            auto itF = itT->second.find(nameLower);
+                            if (itF == itT->second.end()) itF = itT->second.find(nameMLower);
+                            if (itF != itT->second.end()) {
+                                const std::string& fieldType = itF->second;
+                                if (fieldType.compare(0, 4, "COM:") == 0) {
+                                    // Pattern K: COM 接口字段 (如 Header As Dictionary)
+                                    // → vb6_ComCall((void*)me->field, L"Item", args, argc)
+                                    emitExpr(*node.callee);
+                                    std::string objExpr = std::move(lastExpr_);
+                                    std::vector<std::string> packedArgs;
+                                    for (size_t i = 0; i < node.positional.size(); i++) {
+                                        std::string packFn = comPackExpr(*node.positional[i]);
+                                        emitExpr(*node.positional[i]);
+                                        { std::string resolved = resolveComMarkerForPack(packFn);
+                                          if (!resolved.empty()) lastExpr_ = resolved; }
+                                        packedArgs.push_back(packFn + "(" + lastExpr_ + ")");
+                                    }
+                                    int32_t argc = (int32_t)packedArgs.size();
+                                    std::string argsArray = "(void*[]){";
+                                    for (int i = 0; i < argc; i++) {
+                                        if (i > 0) argsArray += ", ";
+                                        argsArray += packedArgs[i];
+                                    }
+                                    argsArray += "}";
+                                    lastExpr_ = "vb6_ComCall((void*)" + objExpr + ", L\"Item\", "
+                                              + argsArray + ", " + std::to_string(argc) + ")";
+                                    handled = true;
+                                } else if (node.positional.size() == 1) {
+                                    // Pattern L: 项目类字段 (如 Rows As cCollection)
+                                    // → vb6_<Type>_prop_get_Item(me->field, vb6_VariantFromValue(arg))
+                                    std::string itemFn = resolveClassMemberCall(fieldType, "Item");
+                                    if (!itemFn.empty()) {
+                                        emitExpr(*node.callee);
+                                        std::string objExpr = std::move(lastExpr_);
+                                        emitExpr(*node.positional[0]);
+                                        std::string arg = std::move(lastExpr_);
+                                        lastExpr_ = itemFn + "(" + objExpr + ", vb6_VariantFromValue(" + arg + "))";
+                                        lastExprNeedsObjectUnpack_ = true;  // Set 语句需转 void*
+                                        handled = true;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // ---- Pattern F2: 局部 Object 变量 (后期绑定) ----
+        // knownObjectVars_: Dim x As Object → C 中 x 是 void*, x(idx) 应为 vb6_ComCall(x, ...).
+        if (!handled && knownObjectVars_.count(nameLower)) {
+            emitExpr(*node.callee);  // emits "name"
+            std::string objExpr = std::move(lastExpr_);
+            std::vector<std::string> packedArgs;
+            for (size_t i = 0; i < node.positional.size(); i++) {
+                std::string packFn = comPackExpr(*node.positional[i]);
+                emitExpr(*node.positional[i]);
+                { std::string resolved = resolveComMarkerForPack(packFn);
+                  if (!resolved.empty()) lastExpr_ = resolved; }
+                packedArgs.push_back(packFn + "(" + lastExpr_ + ")");
+            }
+            int32_t argc = (int32_t)packedArgs.size();
+            std::string argsArray = "(void*[]){";
+            for (int i = 0; i < argc; i++) {
+                if (i > 0) argsArray += ", ";
+                argsArray += packedArgs[i];
+            }
+            argsArray += "}";
+            lastExpr_ = "vb6_ComCall(" + objExpr + ", L\"Item\", "
+                      + argsArray + ", " + std::to_string(argc) + ")";
+            handled = true;
+        }
+
+        if (handled) return;
+    }
+
+    // ---- Fix 037: MemberAccessExpr callee with positional args — array field/COM dispatch ----
+    // 处理 obj.field(idx) 模式, field 可能是:
+    //   - UDT 数组字段 (固定/动态)     — Pattern A/B → obj.member[idx] / VB6_SA_AT(...)
+    //   - 类 Variant 字段持有 SafeArray — Pattern C → vb6_VariantArrayGet(&obj->member, idx)
+    //   - 类 void* 字段持有 COM 对象    — Pattern D → vb6_ComCall(obj->member, L"Item", args, argc)
+    // 若 member 是该类的方法/属性, resolveClassMemberCall 返回非空 → 不拦截 (正常函数调用路径).
+    // 不拦截则 fallback path (line ~2158) 把 field 误当函数调用 → C2064.
+    if (node.callee && node.callee->kind == ASTNodeKind::MemberAccessExpr
+        && !node.positional.empty() && node.named.empty()) {
+        auto& maExpr = static_cast<MemberAccessExpr&>(*node.callee);
+        std::string memLower = Symbol::toLower(maExpr.memberName);
+        std::string memLowerM = "m_" + memLower;
+        bool handled = false;
+
+        // ---- Pattern A/B: UDT 数组字段 ----
+        // 仅当 maExpr.object 的 UDT 类型可推断 (IdentifierExpr / WithMemberExpr / 嵌套
+        // MemberAccessExpr). inferUdtTypeOfExpr 找到 UDT C 类型 → 在 udtMembers 中查 member.
+        if (maExpr.object) {
+            std::string udtCType = inferUdtTypeOfExpr(*maExpr.object);
+            if (!udtCType.empty()) {
+                const std::string prefix = "vb6_type_";
+                if (udtCType.size() > prefix.size()
+                    && udtCType.compare(0, prefix.size(), prefix) == 0) {
+                    std::string udtName = udtCType.substr(prefix.size());
+                    Symbol* udtSym = symTab_.lookupModule(udtName);
+                    if (udtSym && udtSym->kind == SymbolKind::UserDefinedType) {
+                        for (auto& mi : udtSym->udtMembers) {
+                            if (Symbol::toLower(mi.name) == memLower) {
+                                if (mi.arraySize > 0) {
+                                    // Pattern A: 固定大小数组成员 → obj.member[idx]
+                                    emitExpr(*node.callee);  // emits "obj.member"
+                                    std::string fieldExpr = std::move(lastExpr_);
+                                    emitExpr(*node.positional[0]);
+                                    std::string idx = std::move(lastExpr_);
+                                    lastExpr_ = fieldExpr + "[" + idx + "]";
+                                    handled = true;
+                                } else if (mi.isArrayDynamic) {
+                                    // Pattern B: 动态数组成员 → VB6_SA_AT(elemType, obj.member, idx)
+                                    emitExpr(*node.callee);
+                                    std::string fieldExpr = std::move(lastExpr_);
+                                    emitExpr(*node.positional[0]);
+                                    std::string idx = std::move(lastExpr_);
+                                    std::string elemCType = mapSaElemCType(mi.type);
+                                    lastExpr_ = "VB6_SA_AT(" + elemCType + ", "
+                                              + fieldExpr + ", " + idx + ")";
+                                    handled = true;
+                                } else if (mi.type == Vb6Type::Variant) {
+                                    // Pattern J: UDT Variant 字段 (持有 SafeArray) →
+                                    // vb6_VariantArrayGet(&obj.field, idx)
+                                    emitExpr(*node.callee);  // emits "obj.field"
+                                    std::string fieldExpr = std::move(lastExpr_);
+                                    emitExpr(*node.positional[0]);
+                                    std::string idx = std::move(lastExpr_);
+                                    lastExpr_ = "vb6_VariantArrayGet(&" + fieldExpr + ", " + idx + ")";
+                                    handled = true;
+                                } else if (mi.type == Vb6Type::Object) {
+                                    // Pattern H: UDT void* (Object) 字段 (持有 COM 对象) →
+                                    // vb6_ComCall(obj.field, L"Item", args, argc)
+                                    emitExpr(*node.callee);
+                                    std::string objExpr = std::move(lastExpr_);
+                                    std::vector<std::string> packedArgs;
+                                    for (size_t i = 0; i < node.positional.size(); i++) {
+                                        std::string packFn = comPackExpr(*node.positional[i]);
+                                        emitExpr(*node.positional[i]);
+                                        { std::string resolved = resolveComMarkerForPack(packFn);
+                                          if (!resolved.empty()) lastExpr_ = resolved; }
+                                        packedArgs.push_back(packFn + "(" + lastExpr_ + ")");
+                                    }
+                                    int32_t argc = (int32_t)packedArgs.size();
+                                    std::string argsArray = "(void*[]){";
+                                    for (int i = 0; i < argc; i++) {
+                                        if (i > 0) argsArray += ", ";
+                                        argsArray += packedArgs[i];
+                                    }
+                                    argsArray += "}";
+                                    lastExpr_ = "vb6_ComCall(" + objExpr + ", L\"Item\", "
+                                              + argsArray + ", " + std::to_string(argc) + ")";
+                                    handled = true;
+                                }
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // ---- Pattern C/D: 类实例字段访问 ----
+        if (!handled && maExpr.object) {
+            std::string className = inferClassTypeOfExpr(*maExpr.object);
+            if (!className.empty()) {
+                // resolveClassMemberCall 验证 member 是否为方法/属性:
+                // 是 → 跳过 (正常函数调用 fallback 处理); 否 → 数据字段 → 检查 Variant/void*
+                std::string resolvedFn = resolveClassMemberCall(className, maExpr.memberName);
+                if (resolvedFn.empty()) {
+                    // Pattern C: Variant 字段 → vb6_VariantArrayGet(&obj->member, idx)
+                    if (classVariantMembers_.count(memLower)
+                        || classVariantMembers_.count(memLowerM)) {
+                        emitExpr(*node.callee);  // emits "obj->member  /* class var .X field */"
+                        std::string fieldExpr = std::move(lastExpr_);
+                        emitExpr(*node.positional[0]);
+                        std::string idx = std::move(lastExpr_);
+                        lastExpr_ = "vb6_VariantArrayGet(&" + fieldExpr + ", " + idx + ")";
+                        handled = true;
+                    } else {
+                        // Pattern D: void* COM 字段 → vb6_ComCall(obj->member, L"Item", args, argc)
+                        bool isVoidPtr = false;
+                        if (classVoidFieldMap_) {
+                            auto itV = classVoidFieldMap_->find(className);
+                            if (itV != classVoidFieldMap_->end()) {
+                                if (itV->second.count(memLower)
+                                    || itV->second.count(memLowerM)) {
+                                    isVoidPtr = true;
+                                }
+                            }
+                        }
+                        if (isVoidPtr) {
+                            // 模仿 line 1880-1938 COM 默认属性调用 (comPackExpr/resolveComMarkerForPack)
+                            emitExpr(*node.callee);  // emits "obj->member  /* ... voidptr */"
+                            std::string objExpr = std::move(lastExpr_);
+                            std::vector<std::string> packedArgs;
+                            for (size_t i = 0; i < node.positional.size(); i++) {
+                                std::string packFn = comPackExpr(*node.positional[i]);
+                                emitExpr(*node.positional[i]);
+                                { std::string resolved = resolveComMarkerForPack(packFn);
+                                  if (!resolved.empty()) lastExpr_ = resolved; }
+                                packedArgs.push_back(packFn + "(" + lastExpr_ + ")");
+                            }
+                            int32_t argc = (int32_t)packedArgs.size();
+                            std::string argsArray = "(void*[]){";
+                            for (int i = 0; i < argc; i++) {
+                                if (i > 0) argsArray += ", ";
+                                argsArray += packedArgs[i];
+                            }
+                            argsArray += "}";
+                            // 默认成员名 "Item" — VB6 Collection / ADODB.Recordset 等大多数
+                            // void* 字段都是用 .Item(idx) 索引的 (DISPID_VALUE 默认成员).
+                            lastExpr_ = "vb6_ComCall(" + objExpr + ", L\"Item\", "
+                                      + argsArray + ", " + std::to_string(argc) + ")";
+                            handled = true;
+                        } else if (classTypedFieldMap_) {
+                            // Fix 037b: typed (非 void*) 对象字段 — 项目类或 COM 接口
+                            auto itT = classTypedFieldMap_->find(className);
+                            if (itT != classTypedFieldMap_->end()) {
+                                auto itF = itT->second.find(memLower);
+                                if (itF == itT->second.end()) itF = itT->second.find(memLowerM);
+                                if (itF != itT->second.end()) {
+                                    const std::string& fieldType = itF->second;
+                                    if (fieldType.compare(0, 4, "COM:") == 0) {
+                                        // Pattern K: COM 接口字段 (如 Header As Dictionary)
+                                        // → vb6_ComCall((void*)obj->member, L"Item", args, argc)
+                                        emitExpr(*node.callee);
+                                        std::string objExpr = std::move(lastExpr_);
+                                        std::vector<std::string> packedArgs;
+                                        for (size_t i = 0; i < node.positional.size(); i++) {
+                                            std::string packFn = comPackExpr(*node.positional[i]);
+                                            emitExpr(*node.positional[i]);
+                                            { std::string resolved = resolveComMarkerForPack(packFn);
+                                              if (!resolved.empty()) lastExpr_ = resolved; }
+                                            packedArgs.push_back(packFn + "(" + lastExpr_ + ")");
+                                        }
+                                        int32_t argc = (int32_t)packedArgs.size();
+                                        std::string argsArray = "(void*[]){";
+                                        for (int i = 0; i < argc; i++) {
+                                            if (i > 0) argsArray += ", ";
+                                            argsArray += packedArgs[i];
+                                        }
+                                        argsArray += "}";
+                                        lastExpr_ = "vb6_ComCall((void*)" + objExpr + ", L\"Item\", "
+                                                  + argsArray + ", " + std::to_string(argc) + ")";
+                                        handled = true;
+                                    } else if (node.positional.size() == 1) {
+                                        // Pattern L: 项目类字段 (如 Rows As cCollection)
+                                        // → vb6_<Type>_prop_get_Item(obj->member, vb6_VariantFromValue(arg))
+                                        std::string itemFn = resolveClassMemberCall(fieldType, "Item");
+                                        if (!itemFn.empty()) {
+                                            emitExpr(*node.callee);
+                                            std::string objExpr = std::move(lastExpr_);
+                                            emitExpr(*node.positional[0]);
+                                            std::string arg = std::move(lastExpr_);
+                                            lastExpr_ = itemFn + "(" + objExpr + ", vb6_VariantFromValue(" + arg + "))";
+                                            lastExprNeedsObjectUnpack_ = true;  // Set 语句需转 void*
+                                            handled = true;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if (handled) return;
+    }
+
     // M22: 设置asCallCallee_标志, 让IdentifierExpr知道当前是函数调用callee上下文
     // 这确保递归调用时(如 Factorial(n-1))返回函数名而非返回值变量
     // Fix 015: 加 save/restore. 原代码硬编码 `asCallCallee_=false` 会丢失嵌套 callee

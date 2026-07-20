@@ -1585,6 +1585,123 @@ std::string CCodeGen::inferClassTypeOfExpr(const ASTNode& expr) const {
             // 查找该方法的返回类型
             return getClassMethodReturnType(baseClassName, ma.memberName);
         }
+        // Fix 037: MeExpr → 类模块内 me 即当前类
+        case ASTNodeKind::MeExpr: {
+            if (isClassModule_) return moduleName_;
+            return "";
+        }
+        // Fix 037b: MemberAccessExpr → 递归推断 object 的类类型, 再从
+        // classTypedFieldMap_ 查找字段的类类型 (仅项目类字段, 非 COM).
+        // 用于链式访问 ctx.Request.QueryString(idx) 中 Request 的类型推断:
+        //   ctx (cHttpServerContext) → Request (cHttpServerRequest) → QueryString (COM:Dictionary)
+        case ASTNodeKind::MemberAccessExpr: {
+            auto& ma = static_cast<const MemberAccessExpr&>(expr);
+            if (!ma.object) return "";
+            std::string baseClassName = inferClassTypeOfExpr(*ma.object);
+            if (baseClassName.empty()) return "";
+            if (!classTypedFieldMap_) return "";
+            auto it = classTypedFieldMap_->find(baseClassName);
+            if (it == classTypedFieldMap_->end()) return "";
+            std::string memLower = Symbol::toLower(ma.memberName);
+            auto itF = it->second.find(memLower);
+            if (itF == it->second.end()) return "";
+            // 仅返回项目类字段类型 (COM: 前缀的不是项目类)
+            if (itF->second.compare(0, 4, "COM:") == 0) return "";
+            return itF->second;
+        }
+        // Fix 037: WithMemberExpr → 当前 With 块 tempVar 的类类型 (仅 ClassInstance kind)
+        case ASTNodeKind::WithMemberExpr: {
+            if (withObjectInfoStack_.empty() || withObjectVars_.empty()) return "";
+            const auto& info = withObjectInfoStack_.back();
+            if (info.kind == WithObjKind::ClassInstance && !info.className.empty()) {
+                return info.className;
+            }
+            return "";
+        }
+        default:
+            return "";
+    }
+}
+
+// Fix 037: 递归推断表达式的 UDT C 类型标识符 (如 "vb6_type_UcsBuffer").
+// 支持 IdentifierExpr (knownUdtVars_ 直查) 和 MemberAccessExpr (嵌套 UDT 字段递归).
+// 返回空串表示非 UDT 表达式.
+std::string CCodeGen::inferUdtTypeOfExpr(const ASTNode& expr) const {
+    switch (expr.kind) {
+        case ASTNodeKind::IdentifierExpr: {
+            auto& id = static_cast<const IdentifierExpr&>(expr);
+            std::string lower = Symbol::toLower(id.name);
+            auto it = knownUdtVars_.find(lower);
+            if (it != knownUdtVars_.end()) return it->second;
+            return "";
+        }
+        case ASTNodeKind::MemberAccessExpr: {
+            auto& ma = static_cast<const MemberAccessExpr&>(expr);
+            if (!ma.object) return "";
+            // 递归推断父对象的 UDT 类型
+            std::string parentUdtCType = inferUdtTypeOfExpr(*ma.object);
+            if (parentUdtCType.empty()) return "";
+            // parentUdtCType 形如 "vb6_type_UcsBuffer", 剥前缀得到 UDT 名
+            const std::string prefix = "vb6_type_";
+            if (parentUdtCType.size() <= prefix.size()
+                || parentUdtCType.compare(0, prefix.size(), prefix) != 0) return "";
+            std::string udtName = parentUdtCType.substr(prefix.size());
+            Symbol* udtSym = symTab_.lookupModule(udtName);
+            if (!udtSym || udtSym->kind != SymbolKind::UserDefinedType) return "";
+            std::string memLower = Symbol::toLower(ma.memberName);
+            for (auto& mi : udtSym->udtMembers) {
+                if (Symbol::toLower(mi.name) == memLower) {
+                    // 若该成员本身是 UDT (typeRefName 非空且能查到 UserDefinedType 符号)
+                    if (!mi.typeRefName.empty()) {
+                        Symbol* refSym = symTab_.lookupModule(mi.typeRefName);
+                        if (refSym && refSym->kind == SymbolKind::UserDefinedType) {
+                            return "vb6_type_" + cIdent(mi.typeRefName);
+                        }
+                    }
+                    return "";  // 成员是标量/数组, 不是嵌套 UDT
+                }
+            }
+            return "";
+        }
+        // Fix 037: WithMemberExpr → 当前 With 块 tempVar 的 UDT 类型递归.
+        // With 块临时变量 (_vb6_with_N) 已被 cgen_stmt.cpp 注册到 knownUdtVars_
+        // (仅 WithObjKind::Unknown — UDT — 才注册). 若 tempVar 不是 UDT (ClassInstance/
+        // COMObject 等其他 kind), 此处返回空串.
+        // 递归: .member 即 With 块 UDT 的某字段; 若该字段本身是嵌套 UDT (typeRefName
+        // 在符号表中查到 UserDefinedType), 返回 "vb6_type_<memberUdtName>".
+        // 例: With uCtx (UcsTlsContext) 内的 .DecrBuffer (UcsBuffer) → 返回
+        // "vb6_type_UcsBuffer"; 让外层 .DecrBuffer.Data(0) 的 IndexOrCallExpr 能
+        // 在 UcsBuffer 的 udtMembers 中找到 Data (动态数组成员) 并生成 VB6_SA_AT.
+        case ASTNodeKind::WithMemberExpr: {
+            if (withObjectInfoStack_.empty() || withObjectVars_.empty()) return "";
+            const auto& info = withObjectInfoStack_.back();
+            if (info.kind != WithObjKind::Unknown) return "";  // 仅 UDT
+            const std::string& tempVar = withObjectVars_.back();
+            std::string tempLower = Symbol::toLower(tempVar);
+            auto it = knownUdtVars_.find(tempLower);
+            if (it == knownUdtVars_.end()) return "";
+            const std::string parentUdtCType = it->second;
+            const std::string prefix = "vb6_type_";
+            if (parentUdtCType.size() <= prefix.size()
+                || parentUdtCType.compare(0, prefix.size(), prefix) != 0) return "";
+            std::string udtName = parentUdtCType.substr(prefix.size());
+            Symbol* udtSym = symTab_.lookupModule(udtName);
+            if (!udtSym || udtSym->kind != SymbolKind::UserDefinedType) return "";
+            auto& wm = static_cast<const WithMemberExpr&>(expr);
+            std::string memLower = Symbol::toLower(wm.memberName);
+            for (auto& mi : udtSym->udtMembers) {
+                if (Symbol::toLower(mi.name) == memLower) {
+                    if (!mi.typeRefName.empty()) {
+                        Symbol* refSym = symTab_.lookupModule(mi.typeRefName);
+                        if (refSym && refSym->kind == SymbolKind::UserDefinedType) {
+                            return "vb6_type_" + cIdent(mi.typeRefName);
+                        }
+                    }
+                    return "";
+                }
+            }
+            return "";
+        }
         default:
             return "";
     }
