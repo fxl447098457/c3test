@@ -2162,6 +2162,21 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
     asCallCallee_ = savedAsCallCallee;
     std::string callee = std::move(lastExpr_);
 
+    // Fix 032: args (positional + named + early-COM 早期路径) 是 值上下文, 不可能是
+    // callee 上下文. 外层 CallStmt(2159-2162) 或嵌套 IndexOrCallExpr 可能把
+    // asCallCallee_ 留在 true 状态. 若不强制 false, 后续所有 emitExpr(子表达式)
+    // 作为参数发联时, 会被 IdentifierExpr 的自引用检查 (line ~199-213) 误判为
+    // callee 上下文, 导致 Property Get / Function 返回值变量名引用错误地返回
+    // 过程名 (如 vb6_cTlsReMaster_LocalHostName 而非 vb6_ret_LocalHostName).
+    // RAII: 函数退出时 (任何 return 或自然走到末尾) 自动恢复为 savedAsCallCallee.
+    struct CallCalleeValueScope {
+        bool& ref;
+        bool saved;
+        CallCalleeValueScope(bool& r, bool s) : ref(r), saved(s) { ref = false; }
+        ~CallCalleeValueScope() { ref = saved; }
+    } _argsValueScope{asCallCallee_, savedAsCallCallee};
+    (void)_argsValueScope;  // suppress unused-warning
+
     // --- P7.9: WebBrowser控件方法调用 ---
     // Navigate/GoBack/GoForward/Refresh via isComMarker_ flag set by MemberAccessExpr
     if (isComMarker_) {

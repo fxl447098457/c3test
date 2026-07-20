@@ -943,7 +943,24 @@ void CCodeGen::visit(PropertyDecl& node) {
 
     // P6.6修复: 设置currentProc_ (与SubDecl/FunctionDecl相同)
     // 这确保IdentifierExpr中的类模块变量加me->前缀, PropertyGet返回值赋值正确
-    auto* propSym = symTab_.lookupModule(node.name);
+    // Fix 032: 必须按属性种类精确查找符号. lookupModule() 默认返回 PropertyGet
+    // ($pg 后缀, 优先级最高), 导致 Property Let/Set 体内 currentProc_ 被错误设为
+    // 同名 PropertyGet 的符号 — currentProc_->params 缺失 Let/Set 的最后一个
+    // 形参 (赋值 RHS, 如 Property Let SockOpt 中的 Value), 致使 IdentifierExpr
+    // 的 ByRef 形参短路 (line 311-332) 无法匹配 → 形参被误解析为跨模块
+    // PropertyGet 调用 (如 cAsyncSocket Value 形参 → vb6_cCsv_prop_get_Value).
+    // Fix 032 改 args 发射期间 asCallCallee_=false 后, 该引用从"函数名裸引用"
+    // 变为"实际函数调用 vb6_cCsv_prop_get_Value((void*)me)", 返回 vb6_VARIANT,
+    // 触发 100+ 个 C2440. 与语义分析 Pass2 (semantic_analyzer.cpp:775) 一致使用
+    // lookupModuleByKind 精确定位属性符号.
+    SymbolKind propSk;
+    switch (node.propKind) {
+        case ProcKind::PropertyGet:  propSk = SymbolKind::PropertyGet; break;
+        case ProcKind::PropertyLet:  propSk = SymbolKind::PropertyLet; break;
+        case ProcKind::PropertySet:  propSk = SymbolKind::PropertySet; break;
+        default:                     propSk = SymbolKind::PropertyGet; break;
+    }
+    auto* propSym = symTab_.lookupModuleByKind(node.name, propSk);
     currentProc_ = propSym;
 
     // 清空已知数组集合 (新过程)
