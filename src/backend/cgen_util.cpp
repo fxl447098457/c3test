@@ -802,6 +802,12 @@ bool CCodeGen::isDefinitelyVariantExpr(Expr& expr, bool* isArrOut) const {
                 // 无法区分 Variant 与 Variant(), 视作普通 Variant
                 return true;
             }
+            // Fix 049b: 如果已知为非 Variant 具体类型 (BSTR/Long/Double),
+            // 不应回退到符号表查找 (可能命中其他模块的同名 Variant 符号)
+            if (knownBstrVars_.count(lower) || knownLongVars_.count(lower)
+                || knownDoubleVars_.count(lower)) {
+                return false;
+            }
             // 符号表查询
             auto* sym = symTab_.lookup(id.name);
             if (!sym) sym = symTab_.lookupModule(id.name);

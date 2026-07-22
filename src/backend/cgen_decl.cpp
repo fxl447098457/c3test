@@ -558,6 +558,25 @@ void CCodeGen::visit(ConstDecl& node) {
     std::string cType = mapTypeRef(node.asType.get());
     std::string cName = cIdent(node.name);
 
+    // Fix 049: Register module-level constant to type-specific known*Vars_ sets.
+    // Module-level constants are emitted as #define macros; when used in
+    // expressions, the codegen writes the constant name. Without registration,
+    // inferExprType falls back to Variant, causing wrapToBSTR to generate
+    // vb6_CStr(BSTR_const) → C2440 (BSTR→VARIANT).
+    {
+        std::string lower = node.name;
+        std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+        if (cType == "BSTR") {
+            knownBstrVars_.insert(lower);
+        } else if (cType == "int32_t" || cType == "int16_t" || cType == "VBABOOL") {
+            knownLongVars_.insert(lower);
+        } else if (cType == "double" || cType == "float") {
+            knownDoubleVars_.insert(lower);
+        } else if (cType == "vb6_VARIANT") {
+            knownVariantVars_.insert(lower);
+        }
+    }
+
     if (node.value) {
         emitExpr(*node.value);
         // 公共常量 → .h, 私有 → .c

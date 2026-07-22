@@ -3314,6 +3314,23 @@ void CCodeGen::visit(LocalDeclStmt& node) {
                 std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
                 knownLocalVars_.insert(lower);
             }
+            // Fix 049: Register local constant to type-specific known*Vars_ sets.
+            // Same logic as Dim (cgen_decl.cpp:749-767). Without this, inferExprType
+            // falls back to Variant for unknown identifiers, causing wrapToBSTR to
+            // generate vb6_CStr(BSTR_const) which triggers C2440 (BSTR→VARIANT).
+            {
+                std::string lower = con.name;
+                std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+                if (cType == "BSTR") {
+                    knownBstrVars_.insert(lower);
+                } else if (cType == "int32_t" || cType == "int16_t" || cType == "VBABOOL") {
+                    knownLongVars_.insert(lower);
+                } else if (cType == "double" || cType == "float") {
+                    knownDoubleVars_.insert(lower);
+                } else if (cType == "vb6_VARIANT") {
+                    knownVariantVars_.insert(lower);
+                }
+            }
             if (con.value) {
                 emitExpr(*con.value);
                 // Fix 010r-13: Local Const redefining Windows API macro? #undef first.

@@ -809,6 +809,8 @@ std::string CCodeGen::wrapToBSTR(const std::string& expr, Expr& node) {
     if (expr.find("vb6_CStr") != std::string::npos) return expr;
     if (expr.find("vb6_GetControlText") != std::string::npos) return expr;
     if (expr.find("vb6_GetControlCaption") != std::string::npos) return expr;
+    // Fix 049a: VB6_SA_AT(BSTR, arr, idx) returns BSTR — no wrapping needed
+    if (expr.find("VB6_SA_AT(BSTR,") != std::string::npos) return expr;
     // vb6_Now() returns double (Date), NOT BSTR — removed early return
     // vb6_Now will fall through to inferExprType → Vb6Type::Date → vb6_CStrDate()
     if (expr.find("vb6_Left") != std::string::npos) return expr;
@@ -873,7 +875,20 @@ std::string CCodeGen::wrapToBSTR(const std::string& expr, Expr& node) {
         case Vb6Type::Boolean: return "vb6_CStrBool(" + expr + ")";
         case Vb6Type::Byte:   return "vb6_CStrByte(" + expr + ")";
         case Vb6Type::Date:   return "vb6_CStrDate(" + expr + ")";
-        case Vb6Type::Variant: return "vb6_CStr(" + expr + ")";
+        case Vb6Type::Variant: {
+            // Fix 049a: inferExprType falls back to Variant for unknown symbols.
+            // If the AST node is a known BSTR variable, return as-is to avoid
+            // generating vb6_CStr(BSTR_expr) which causes C2440 (BSTR→VARIANT).
+            // For all other cases (including actual Variant variables), keep
+            // vb6_CStr(expr) which correctly converts VARIANT→BSTR.
+            if (node.kind == ASTNodeKind::IdentifierExpr) {
+                auto& id = static_cast<IdentifierExpr&>(node);
+                std::string lower = id.name;
+                std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+                if (knownBstrVars_.count(lower)) return expr;
+            }
+            return "vb6_CStr(" + expr + ")";
+        }
         default: return "vb6_CStrLong(" + expr + ")";  // fallback
     }
 }
@@ -3341,7 +3356,13 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
                            || paramBase == Vb6Type::Currency) {
                     argVal = "vb6_VariantToDouble(" + argVal + ")";
                 } else if (paramBase == Vb6Type::String) {
-                    argVal = "vb6_VariantToString(" + argVal + ")";
+                    // Fix 049b: Skip extraction if the C expression is already BSTR
+                    // (e.g., VB6_SA_AT(BSTR, arr, idx) — isDefinitelyVariantExpr may
+                    // return true due to symbol table/actual type mismatch)
+                    if (argVal.find("VB6_SA_AT(BSTR,") == std::string::npos
+                        && argVal.find("vb6_BSTR") == std::string::npos) {
+                        argVal = "vb6_VariantToString(" + argVal + ")";
+                    }
                 } else if (paramBase == Vb6Type::Object) {
                     // 右值兼容: 避免对函数返回值取址
                     argVal = "vb6_VariantToObjectVal(" + argVal + ")";
@@ -3374,7 +3395,11 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
                     } else if (rtParamType == "double" || rtParamType == "float") {
                         argVal = "vb6_VariantToDouble(" + argVal + ")";
                     } else if (rtParamType == "BSTR") {
-                        argVal = "vb6_VariantToString(" + argVal + ")";
+                        // Fix 049b: Skip extraction if the C expression is already BSTR
+                        if (argVal.find("VB6_SA_AT(BSTR,") == std::string::npos
+                            && argVal.find("vb6_BSTR") == std::string::npos) {
+                            argVal = "vb6_VariantToString(" + argVal + ")";
+                        }
                     } else if (rtParamType == "void*") {
                         argVal = "vb6_VariantToObjectVal(" + argVal + ")";
                     } else if (rtParamType == "vb6_SafeArray1D*") {
