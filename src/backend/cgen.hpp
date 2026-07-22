@@ -530,7 +530,7 @@ private:
     std::string makeProcSignature(FunctionDecl& node);
 
     // 生成参数列表
-    std::string makeParamList(std::vector<std::unique_ptr<ParameterDecl>>& params);
+    std::string makeParamList(std::vector<std::unique_ptr<ParameterDecl>>& params, bool isDeclare = false);
 
     // 生成Property签名 (不含函数体)
     std::string makePropertySignature(PropertyDecl& node);

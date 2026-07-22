@@ -2987,6 +2987,10 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
     // Fix 024 P2/Fix 029 的参数包装, 但 RTL C 签名不接受 Optional padding 和
     // IsMissing _has_ flag 尾叜 (那些只适用于用户定义函数). 见 line 3207/3237.
     bool calleeIsBuiltin = false;
+    // Fix 042a: Declare 函数 (DeclareSub/DeclareFunc) 的 C 签名不接受 _has_ 尾叜,
+    // 与 builtin 类似 — Optional padding 仍需要 (C 函数期望所有参数),
+    // 但 IsMissing _has_ flags 不应追加.
+    bool calleeIsDeclare = false;
     // Fix 041b: Track whether calleeParams was successfully resolved (even if 0 params).
     // Used to distinguish "params not looked up" from "looked up with 0 params" (e.g., Property Get
     // with no params) — needed for arg truncation when args > params.
@@ -3011,6 +3015,10 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
             calleeParams = funcSym->params;
             calleeIsBuiltin = funcSym->isBuiltin;
             calleeParamsFound = true;
+            // Fix 042a: Track Declare functions for _has_ flag suppression
+            if (funcSym->kind == SymbolKind::DeclareSub || funcSym->kind == SymbolKind::DeclareFunc) {
+                calleeIsDeclare = true;
+            }
         }
     } else if (node.callee && node.callee->kind == ASTNodeKind::MemberAccessExpr) {
         // Module.Method 或 obj.Method 调用: 查找方法名的参数签名
@@ -3054,6 +3062,27 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
             }
         }
 
+        // Fix 042b: For method chains and complex object expressions (e.g.,
+        // db.Table("t").OrderByDesc("id").Limit(10).Offset(20)), the object is
+        // not a simple IdentifierExpr but an IndexOrCallExpr or MemberAccessExpr.
+        // Use inferClassTypeOfExpr to determine the class type, then look up
+        // member params. This enables Optional param padding for cross-module
+        // method chain calls.
+        if (!classAwareResolved && maExpr.object
+            && maExpr.object->kind != ASTNodeKind::IdentifierExpr) {
+            std::string className = inferClassTypeOfExpr(*maExpr.object);
+            if (!className.empty()) {
+                std::vector<ParameterInfo> params;
+                bool isBuiltin = false;
+                if (findClassMemberCallParams(className, maExpr.memberName, params, isBuiltin)) {
+                    calleeParams = std::move(params);
+                    calleeIsBuiltin = isBuiltin;
+                    classAwareResolved = true;
+                    calleeParamsFound = true;
+                }
+            }
+        }
+
         // Fix 033 回退: 类感知未命中 (对象为链式表达式 / className 找不到方法符号 /
         // 需要匹配 DeclareSub/DeclareFunc 等) → 用原 class-unaware lookupModule 兜底,
         // 保留旧行为兼容性.
@@ -3066,6 +3095,10 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
                 calleeParams = funcSym->params;
                 calleeIsBuiltin = funcSym->isBuiltin;
                 calleeParamsFound = true;
+                // Fix 042a: Track Declare functions for _has_ flag suppression
+                if (funcSym->kind == SymbolKind::DeclareSub || funcSym->kind == SymbolKind::DeclareFunc) {
+                    calleeIsDeclare = true;
+                }
             }
         }
     }
@@ -3924,7 +3957,8 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
     // P20-36: IsMissing support - append _has_ flags for Optional params
     // For each Optional param in calleeParams: 1 if actually passed, 0 if padded
     // Fix 030b: builtin 跳过 (RTL C 函数无 _has_ 尾叜)
-    if (calleeParams.size() > 0 && paIndex < 0 && !calleeIsBuiltin) {
+    // Fix 042a: Declare 函数也跳过 (Declare C 签名无 _has_ 尾叜, 但 Optional padding 仍需要)
+    if (calleeParams.size() > 0 && paIndex < 0 && !calleeIsBuiltin && !calleeIsDeclare) {
         for (size_t i = 0; i < calleeParams.size(); i++) {
             const auto& param = calleeParams[i];
             if (param.isOptional && !param.isParamArray) {

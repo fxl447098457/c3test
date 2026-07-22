@@ -400,7 +400,7 @@ std::string CCodeGen::makeProcSignature(FunctionDecl& node) {
     return retType + " " + name + "(" + params + ")";
 }
 
-std::string CCodeGen::makeParamList(std::vector<std::unique_ptr<ParameterDecl>>& params) {
+std::string CCodeGen::makeParamList(std::vector<std::unique_ptr<ParameterDecl>>& params, bool isDeclare) {
     if (params.empty()) return "void";
 
     std::string result;
@@ -442,10 +442,15 @@ std::string CCodeGen::makeParamList(std::vector<std::unique_ptr<ParameterDecl>>&
         }
     }
     // P20-36: IsMissing support - append _has_ flags for Optional params
-    for (size_t i = 0; i < params.size(); i++) {
-        auto& p = params[i];
-        if (p->isOptional && !p->isParamArray) {
-            result += ", int _has_" + cIdent(p->name);
+    // Fix 042c: Declare functions are __declspec(dllimport) — external DLL imports
+    // that don't use the _has_ convention. Skip _has_ flags for Declare functions
+    // so all modules agree on the same signature without _has_ params.
+    if (!isDeclare) {
+        for (size_t i = 0; i < params.size(); i++) {
+            auto& p = params[i];
+            if (p->isOptional && !p->isParamArray) {
+                result += ", int _has_" + cIdent(p->name);
+            }
         }
     }
     return result;
@@ -835,8 +840,7 @@ void CCodeGen::visit(DeclareDecl& node) {
     std::string retType = (node.procKind == ProcKind::Function)
         ? mapTypeRef(node.returnType.get()) : "void";
 
-    std::string params = makeParamList(node.params);
-    if (params.empty()) params = "void";
+    std::string params = makeParamList(node.params, true);
 
     // 调用约定
     std::string callConv = (node.callingConv == CallConv::CDecl) ? "__cdecl" : "__stdcall";
