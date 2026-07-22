@@ -547,6 +547,21 @@ Vb6Type SemanticAnalyzer::resolveTypeRef(ASTNode* typeRef) {
             auto& simple = static_cast<SimpleTypeRef&>(*typeRef);
             Vb6Type t = typeSys_.resolveTypeName(simple.name);
             if (t == Vb6Type::Unknown) {
+                // Fix 040a: VB6内置对象类型 (Collection, ErrObject等) → Object (void*).
+                // 与 cgen_base.cpp mapTypeRef 的 vb6BuiltinObjTypes 集合保持一致.
+                // 若返回 Variant, 则 ByVal Collection 参数会被 Fix 024 P2 错误地用
+                // vb6_VariantFromValue() 包装 void* 指针 → C2172 (实参不是指针).
+                static const std::unordered_set<std::string> vb6BuiltinObjTypes = {
+                    "Collection", "Forms", "ErrObject", "App", "Screen", "Printer", "Clipboard"
+                };
+                // Fix 040a: strip VBA. prefix (e.g. VBA.ErrObject → ErrObject)
+                std::string typeName = simple.name;
+                if (typeName.size() > 4 && typeName.compare(0, 4, "VBA.") == 0) {
+                    typeName = typeName.substr(4);
+                }
+                if (vb6BuiltinObjTypes.count(typeName)) {
+                    return Vb6Type::Object;
+                }
                                 // 可能是用户自定义类型 -> 在符号表中查找
                 std::string lower = Symbol::toLower(simple.name);
                 if (auto* sym = symTab_.lookupModule(lower)) {

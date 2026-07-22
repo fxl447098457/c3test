@@ -4084,6 +4084,28 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
             }
         }
     }
+    // Fix 040d: CallByName variadic args packing
+    // C signature: vb6_CallByName(void* obj, const wchar_t* procName, int32_t callType,
+    //                              void* args, int32_t argc)
+    // First 3 VB6 args map to obj/procName/callType. Extra args (4+) are method
+    // arguments, packed into (void*[]){vb6_ComPackValue(arg), ...} with argc.
+    if (callee == "vb6_CallByName" && args.size() >= 3) {
+        if (args.size() == 3) {
+            // No extra method args: pass NULL, 0
+            argList = args[0] + ", " + args[1] + ", " + args[2] + ", NULL, 0";
+        } else {
+            // Pack extra args [3..] into void*[] array using vb6_ComPackValue
+            std::string argsArray = "(void*[]){";
+            for (size_t i = 3; i < args.size(); i++) {
+                if (i > 3) argsArray += ", ";
+                argsArray += "vb6_ComPackValue(" + args[i] + ")";
+            }
+            argsArray += "}";
+            int32_t extraArgc = (int32_t)args.size() - 3;
+            argList = args[0] + ", " + args[1] + ", " + args[2] + ", "
+                    + argsArray + ", " + std::to_string(extraArgc);
+        }
+    }
     lastExpr_ = callee + "(" + argList + ")";
 }
 
@@ -4110,6 +4132,18 @@ void CCodeGen::visit(NewExpr& node) {
 void CCodeGen::visit(TypeOfExpr& node) {
     emitExpr(*node.object);
     std::string obj = std::move(lastExpr_);
+    // Fix 040b: vb6_TypeOf expects void* (IDispatch*). If the operand is a
+    // Variant (vb6_VARIANT struct), extract the object pointer first.
+    if (cExprIsVariant(obj)) {
+        obj = "vb6_VariantToObjectVal(" + obj + ")";
+    } else if (node.object && node.object->kind == ASTNodeKind::IdentifierExpr) {
+        auto& ident = static_cast<IdentifierExpr&>(*node.object);
+        std::string lower = ident.name;
+        std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+        if (knownVariantVars_.count(lower)) {
+            obj = "vb6_VariantToObjectVal(" + obj + ")";
+        }
+    }
     lastExpr_ = "vb6_TypeOf(" + obj + ", L\"" + node.typeName + "\")";
 }
 

@@ -1639,6 +1639,22 @@ void CCodeGen::visit(ForEachStmt& node) {
             resolveComValue("Object");  // 集合必须是Object(IDispatch*), 生成ComGetObjectProp
         }
         std::string collExpr = lastExpr_;
+        // Fix 040c: vb6_ForEach_Init expects void* (IDispatch*). If the collection
+        // expression is a Variant (vb6_VARIANT struct), extract the object pointer.
+        if (cExprIsVariant(collExpr)) {
+            collExpr = "vb6_VariantToObjectVal(" + collExpr + ")";
+        } else if (node.collection && node.collection->kind == ASTNodeKind::IdentifierExpr) {
+            auto& ident = static_cast<IdentifierExpr&>(*node.collection);
+            std::string lower = ident.name;
+            std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+            if (knownVariantVars_.count(lower)) {
+                collExpr = "vb6_VariantToObjectVal(" + collExpr + ")";
+            }
+        }
+        // Fix 040c: fallback — project class methods returning Variant (e.g. Dictionary.Keys)
+        else if (node.collection && isDefinitelyVariantExpr(*node.collection)) {
+            collExpr = "vb6_VariantToObjectVal(" + collExpr + ")";
+        }
         c_.emitLine("void* " + enumVar + " = vb6_ForEach_Init(" + collExpr + ");");
         c_.emitLine("VARIANT " + feVar + ";");
         c_.emitLine("if (" + enumVar + ") {");

@@ -4136,19 +4136,25 @@ vb6_VARIANT vb6_CallByName(void* obj, const wchar_t* procName, int32_t callType,
     }
 
     // Build DISPPARAMS from args array
+    // Fix 040d: args is now VARIANT** (array of pointers to VARIANTs),
+    // same convention as vb6_ComCall. Each element is a packed VARIANT*
+    // allocated by vb6_ComPackBSTR/Int/Double/Object/Value.
     DISPPARAMS dp;
     memset(&dp, 0, sizeof(dp));
     VARIANT* pArgs = NULL;
+    VARIANT** argArr = (VARIANT**)args;
 
     if (argc > 0 && args) {
-        pArgs = (VARIANT*)CoTaskMemAlloc(argc * sizeof(VARIANT));
+        pArgs = (VARIANT*)calloc(argc, sizeof(VARIANT));
         if (pArgs) {
             for (int32_t i = 0; i < argc; i++) {
-                memcpy(&pArgs[i], (char*)args + i * sizeof(VARIANT), sizeof(VARIANT));
+                VariantInit(&pArgs[argc - 1 - i]);  /* reverse for COM */
+                if (argArr[i]) {
+                    pArgs[argc - 1 - i] = *argArr[i];
+                }
             }
             dp.cArgs = (UINT)argc;
             dp.rgvarg = pArgs;
-            // Reverse args for DISPPARAMS (COM expects right-to-left)
             // For PropertyPut, also set named arg
             if (invKind == DISPATCH_PROPERTYPUT) {
                 DISPID putId = DISPID_PROPERTYPUT;
@@ -4185,7 +4191,20 @@ vb6_VARIANT vb6_CallByName(void* obj, const wchar_t* procName, int32_t callType,
     }
 
     // Cleanup
-    if (pArgs) CoTaskMemFree(pArgs);
+    // Fix 040d: cleanup packed VARIANT args (same pattern as vb6_ComCall)
+    if (pArgs) {
+        for (UINT i = 0; i < dp.cArgs; i++) {
+            VariantClear(&pArgs[i]);
+        }
+        free(pArgs);
+    }
+    if (argArr) {
+        for (int32_t i = 0; i < argc; i++) {
+            if (argArr[i]) {
+                free(argArr[i]);  /* free packed VARIANT struct */
+            }
+        }
+    }
     VariantClear(&retVal);
     if (excep.bstrSource) SysFreeString(excep.bstrSource);
     if (excep.bstrDescription) SysFreeString(excep.bstrDescription);

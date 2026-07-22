@@ -900,6 +900,10 @@ bool CCodeGen::cExprIsVariant(const std::string& cExpr) {
         if (cExpr.compare(start, prefix.size(), prefix) == 0) return true;
     }
 
+    // Fix 040b: VB6_SA_AT(vb6_VARIANT, arr, idx) expands to an array element
+    // of type vb6_VARIANT — also a Variant expression.
+    if (cExpr.compare(start, 21, "VB6_SA_AT(vb6_VARIANT") == 0) return true;
+
     // 检查 (&(vb6_VARIANT){...}) 复合字面量 — 也是 VARIANT 类型
     // 但这种形式通常作为 ByRef 参数传递, 不需要再转换, 故不检测.
 
