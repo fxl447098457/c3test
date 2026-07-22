@@ -411,6 +411,14 @@ ExprPtr Parser::parsePostfix(ExprPtr expr) {
                 }
             }
         }
+        // Fix 043c: In With context, ".Member1 .Member2" (space before 2nd dot)
+        // is a sub call: .Member1(.Member2), NOT member access .Member1.Member2.
+        // Detect space by comparing prevTok_ end column with cur_ start column.
+        if (withDepth_ > 0 && expr->kind == ASTNodeKind::WithMemberExpr &&
+            prevTok_.line == cur_.line &&
+            prevTok_.column + prevTok_.length < cur_.column) {
+            return expr;  // space detected — let caller parse .Member2 as argument
+        }
         advance(); // consume '.'
         // VB6 允许关键字作为成员名: obj.Type, obj.Loop, etc.
         // expectName 只接受 Identifier 和软关键字, 这里扩展为接受所有带文本的 token

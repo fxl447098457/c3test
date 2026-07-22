@@ -1028,6 +1028,9 @@ if (stmt->kind == ASTNodeKind::OnGoSubStmt) return true;  // P17.4
             }
         } else if (stmt->kind == ASTNodeKind::ForStmt) {
             if (hasGoSubInStmts(static_cast<ForStmt&>(*stmt).body)) return true;
+        } else if (stmt->kind == ASTNodeKind::ForEachStmt) {
+            // Fix 043a: ForEachStmt was missing — GoSub inside For Each was not detected
+            if (hasGoSubInStmts(static_cast<ForEachStmt&>(*stmt).body)) return true;
         } else if (stmt->kind == ASTNodeKind::DoLoopStmt) {
             if (hasGoSubInStmts(static_cast<DoLoopStmt&>(*stmt).body)) return true;
         } else if (stmt->kind == ASTNodeKind::WhileWendStmt) {
@@ -1062,6 +1065,9 @@ bool CCodeGen::hasResumeInStmts(StmtList& stmts) const {
             }
         } else if (stmt->kind == ASTNodeKind::ForStmt) {
             if (hasResumeInStmts(static_cast<ForStmt&>(*stmt).body)) return true;
+        } else if (stmt->kind == ASTNodeKind::ForEachStmt) {
+            // Fix 043a: ForEachStmt was missing — Resume inside For Each was not detected
+            if (hasResumeInStmts(static_cast<ForEachStmt&>(*stmt).body)) return true;
         } else if (stmt->kind == ASTNodeKind::DoLoopStmt) {
             if (hasResumeInStmts(static_cast<DoLoopStmt&>(*stmt).body)) return true;
         } else if (stmt->kind == ASTNodeKind::WhileWendStmt) {
@@ -1095,6 +1101,9 @@ bool CCodeGen::hasOnErrorInStmts(StmtList& stmts) const {
             }
         } else if (stmt->kind == ASTNodeKind::ForStmt) {
             if (hasOnErrorInStmts(static_cast<ForStmt&>(*stmt).body)) return true;
+        } else if (stmt->kind == ASTNodeKind::ForEachStmt) {
+            // Fix 043a: ForEachStmt was missing — OnError inside For Each was not detected
+            if (hasOnErrorInStmts(static_cast<ForEachStmt&>(*stmt).body)) return true;
         } else if (stmt->kind == ASTNodeKind::DoLoopStmt) {
             if (hasOnErrorInStmts(static_cast<DoLoopStmt&>(*stmt).body)) return true;
         } else if (stmt->kind == ASTNodeKind::WhileWendStmt) {

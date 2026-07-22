@@ -266,6 +266,8 @@ private:
     Token cur_;
     // 前瞻 token
     Token next_;
+    // 上一个已消费的 token (Fix 043c: 用于检测 .Member .Member 之间的空格)
+    Token prevTok_;
 
     // With 嵌套深度 (>0 时 .member 为 WithMemberExpr)
     int withDepth_ = 0;

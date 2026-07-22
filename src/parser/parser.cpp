@@ -109,6 +109,7 @@ Token Parser::advance() {
     Token tok = std::move(cur_);
     cur_ = std::move(next_);
     next_ = fetchNextToken();
+    prevTok_ = tok;  // Fix 043c: 保存已消费的 token 用于空格检测
     return tok;
 }
 

@@ -1997,6 +1997,18 @@ void CCodeGen::visit(WithStmt& node) {
                 }
             }
 
+            // Fix 043b: Early-bound COM variable detection (Dim x As Dictionary, etc.)
+            // knownObjectVars_ only contains void* (late-binding) variables.
+            // Early-bound COM variables (vb6_ComIface_IDictionary*, etc.) are in
+            // knownTypedComVars_. Without this check, With blocks on early-bound
+            // COM locals fall through as Unknown, causing .Add to be resolved as
+            // the class's own method instead of COM dispatch (C2198).
+            if (withInfo.kind == WithObjKind::Unknown) {
+                if (knownTypedComVars_.count(objNameLower)) {
+                    withInfo.kind = WithObjKind::COMObject;
+                }
+            }
+
             // 类实例变量检测
             if (withInfo.kind == WithObjKind::Unknown) {
                 auto itClassVar = knownClassVars_.find(objNameLower);
@@ -2005,6 +2017,43 @@ void CCodeGen::visit(WithStmt& node) {
                     // Fix 011r-1: 设置className, 让WithMemberExpr能精确解析该类方法
                     withInfo.className = cIdent(itClassVar->second);
                     tempType = "vb6_cls_" + withInfo.className + "*";
+                }
+            }
+
+            // Fix 043b: Class field detection — knownObjectVars_ and knownClassVars_
+            // only contain local variables/parameters, NOT class fields. When a With
+            // block targets a class field (e.g., `With Dic` where Dic is `Dim Dic As
+            // Dictionary`), we need to check classVoidFieldMap_ (for void*/COM fields)
+            // and classTypedFieldMap_ (for typed class fields) to determine the correct
+            // WithObjKind. Without this, COM fields like Dictionary fall through as
+            // Unknown, and .Add inside the With block gets resolved to the class's own
+            // Add method instead of COM dispatch (C2198).
+            if (withInfo.kind == WithObjKind::Unknown && isClassModule_) {
+                // Check void* (COM) fields first
+                if (classVoidFieldMap_) {
+                    auto itV = classVoidFieldMap_->find(moduleName_);
+                    if (itV != classVoidFieldMap_->end() && itV->second.count(objNameLower)) {
+                        withInfo.kind = WithObjKind::COMObject;
+                    }
+                }
+                // Check typed class fields (project class or COM interface)
+                if (withInfo.kind == WithObjKind::Unknown && classTypedFieldMap_) {
+                    auto itT = classTypedFieldMap_->find(moduleName_);
+                    if (itT != classTypedFieldMap_->end()) {
+                        auto itField = itT->second.find(objNameLower);
+                        if (itField != itT->second.end()) {
+                            const std::string& typeName = itField->second;
+                            if (typeName.rfind("COM:", 0) == 0) {
+                                // COM interface field (e.g., "COM:Dictionary")
+                                withInfo.kind = WithObjKind::COMObject;
+                            } else {
+                                // Project class field (e.g., "cAsyncSocket")
+                                withInfo.kind = WithObjKind::ClassInstance;
+                                withInfo.className = cIdent(typeName);
+                                tempType = "vb6_cls_" + withInfo.className + "*";
+                            }
+                        }
+                    }
                 }
             }
 
