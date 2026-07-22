@@ -782,8 +782,7 @@ void CCodeGen::visit(AssignmentStmt& node) {
     }
     if (targetIsBstr) {
         // Fix 038b-6: BSTR 目标 + Variant 值 → 先提取 BSTR
-        // 仅使用 cExprIsVariant (C 字符串级) 和 knownVariantVars_ 检测,
-        // 不使用 isDefinitelyVariantExpr (AST 级), 避免符号表类型与 C 类型不一致的误判.
+        // 使用 cExprIsVariant (C 字符串级) + knownVariantVars_ 检测.
         bool valueIsVariant = cExprIsVariant(value);
         if (!valueIsVariant && node.value && node.value->kind == ASTNodeKind::IdentifierExpr) {
             auto& id = static_cast<IdentifierExpr&>(*node.value);
@@ -818,11 +817,11 @@ void CCodeGen::visit(AssignmentStmt& node) {
         //   vb6_VariantFromValue 对已存在的 VARIANT 是 identity (no-op), 安全.
         c_.emitLine(target + " = vb6_VariantFromValue(" + value + ");");
     } else {
-        // Fix 038b-6: 具体类型目标 + Variant 值 → 自动提取
+        // Fix 038b-6/045: 具体类型目标 + Variant 值 → 自动提取
         // 覆盖: TimeOut = obj.Method() (Method 返回 Variant, TimeOut 是 Long)
         //       VB6_SA_AT(BSTR, arr, i) = func() (func 返回 Variant)
         //       int32_t_var = vb6_VariantArrayGet(...)
-        // 仅使用 cExprIsVariant (C 字符串级) 和 knownVariantVars_ 检测.
+        // 使用 cExprIsVariant (C 字符串级) + knownVariantVars_ 检测.
         bool valueIsVariant = cExprIsVariant(value);
         if (!valueIsVariant && node.value && node.value->kind == ASTNodeKind::IdentifierExpr) {
             auto& id = static_cast<IdentifierExpr&>(*node.value);
@@ -857,6 +856,9 @@ void CCodeGen::visit(AssignmentStmt& node) {
                     convertedValue = "vb6_VariantToLong(" + value + ")";
                 } else if (knownDoubleVars_.count(lower)) {
                     convertedValue = "vb6_VariantToDouble(" + value + ")";
+                } else if (knownObjectVars_.count(lower)) {
+                    // Fix 045: Object (void*) target + Variant value → extract object
+                    convertedValue = "vb6_VariantToObjectVal(" + value + ")";
                 } else if (node.target && node.target->kind == ASTNodeKind::IdentifierExpr) {
                     auto& id = static_cast<IdentifierExpr&>(*node.target);
                     std::string idLower = id.name;
@@ -865,6 +867,8 @@ void CCodeGen::visit(AssignmentStmt& node) {
                         convertedValue = "vb6_VariantToLong(" + value + ")";
                     } else if (knownDoubleVars_.count(idLower)) {
                         convertedValue = "vb6_VariantToDouble(" + value + ")";
+                    } else if (knownObjectVars_.count(idLower)) {
+                        convertedValue = "vb6_VariantToObjectVal(" + value + ")";
                     }
                 }
             }
@@ -1085,7 +1089,7 @@ void CCodeGen::visit(SetStmt& node) {
     // Fix 038b-6: Set 语句中 Variant 值 → 对象引用提取
     // 当 RHS 是 Variant (如 vb6_VariantFromStackVARIANT, vb6_VariantArrayGet,
     // Variant 变量等) 而 LHS 是 typed 对象指针时, 用 vb6_VariantToObjectVal 提取.
-    // 仅使用 cExprIsVariant (C 字符串级) 和 knownVariantVars_ 检测.
+    // 使用 cExprIsVariant (C 字符串级) + knownVariantVars_ 检测.
     {
         bool valueIsVariant = cExprIsVariant(value);
         if (!valueIsVariant && node.value && node.value->kind == ASTNodeKind::IdentifierExpr) {
@@ -1380,8 +1384,8 @@ void CCodeGen::visit(LetStmt& node) {
     } else if (target.find("VB6_SA_AT(vb6_VARIANT,") != std::string::npos) {
         c_.emitLine(target + " = vb6_VariantFromValue(" + value + ");  /* Let */");
     } else {
-        // Fix 038b-6: 具体类型目标 + Variant 值 → 自动提取 (同 AssignmentStmt 路径)
-        // 仅使用 cExprIsVariant (C 字符串级) 和 knownVariantVars_ 检测.
+        // Fix 038b-6/045: 具体类型目标 + Variant 值 → 自动提取 (同 AssignmentStmt 路径)
+        // 使用 cExprIsVariant (C 字符串级) + knownVariantVars_ 检测.
         bool valueIsVariant = cExprIsVariant(value);
         if (!valueIsVariant && node.value && node.value->kind == ASTNodeKind::IdentifierExpr) {
             auto& id = static_cast<IdentifierExpr&>(*node.value);
@@ -1413,6 +1417,9 @@ void CCodeGen::visit(LetStmt& node) {
                     convertedValue = "vb6_VariantToLong(" + value + ")";
                 } else if (knownDoubleVars_.count(lower)) {
                     convertedValue = "vb6_VariantToDouble(" + value + ")";
+                } else if (knownObjectVars_.count(lower)) {
+                    // Fix 045: Object (void*) target + Variant value → extract object
+                    convertedValue = "vb6_VariantToObjectVal(" + value + ")";
                 } else if (node.target && node.target->kind == ASTNodeKind::IdentifierExpr) {
                     auto& id = static_cast<IdentifierExpr&>(*node.target);
                     std::string idLower = id.name;
@@ -1421,6 +1428,8 @@ void CCodeGen::visit(LetStmt& node) {
                         convertedValue = "vb6_VariantToLong(" + value + ")";
                     } else if (knownDoubleVars_.count(idLower)) {
                         convertedValue = "vb6_VariantToDouble(" + value + ")";
+                    } else if (knownObjectVars_.count(idLower)) {
+                        convertedValue = "vb6_VariantToObjectVal(" + value + ")";
                     }
                 }
             }

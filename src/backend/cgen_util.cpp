@@ -904,6 +904,16 @@ bool CCodeGen::cExprIsVariant(const std::string& cExpr) {
     // of type vb6_VARIANT — also a Variant expression.
     if (cExpr.compare(start, 21, "VB6_SA_AT(vb6_VARIANT") == 0) return true;
 
+    // Fix 045: 检查项目函数是否返回 Variant — 通过 driver.cpp 预扫描构建的
+    // C 函数名集合. 提取 C 表达式中的函数名 (从 start 到第一个 '(') 并查集合.
+    if (variantReturnFuncs_) {
+        size_t parenPos = cExpr.find('(', start);
+        if (parenPos != std::string::npos) {
+            std::string funcName = cExpr.substr(start, parenPos - start);
+            if (variantReturnFuncs_->count(funcName)) return true;
+        }
+    }
+
     // 检查 (&(vb6_VARIANT){...}) 复合字面量 — 也是 VARIANT 类型
     // 但这种形式通常作为 ByRef 参数传递, 不需要再转换, 故不检测.
 

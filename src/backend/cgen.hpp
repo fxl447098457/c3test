@@ -66,8 +66,9 @@ public:
     CCodeGen(Diagnostics& diag, const SymbolTable& symTab,
              const TypeSystem& typeSys,
              const std::unordered_map<std::string, std::set<std::string>>* classVoidFieldMap = nullptr,
-             const std::unordered_map<std::string, std::unordered_map<std::string, std::string>>* classTypedFieldMap = nullptr,
-             bool verbose = false);
+              const std::unordered_map<std::string, std::unordered_map<std::string, std::string>>* classTypedFieldMap = nullptr,
+              const std::unordered_set<std::string>* variantReturnFuncs = nullptr,
+              bool verbose = false);
 
     // 主入口: 生成C代码，返回是否成功
     // externalModules: 当前模块引用的外部模块基名列表 (用于生成 #include)
@@ -316,6 +317,11 @@ private:
     // 项目类 → 直接调用 vb6_<Type>_prop_get_Item(obj.field, arg);
     // COM 接口 → vb6_ComCall((void*)obj.field, L"Item", args, argc).
     const std::unordered_map<std::string, std::unordered_map<std::string, std::string>>* classTypedFieldMap_ = nullptr;
+    // Fix 045: 跨模块 Variant 返回值函数 C 名集合 — 由 driver.cpp 预扫描所有模块构建.
+    // 包含所有返回 vb6_VARIANT 的项目函数的 C 名称 (如 "vb6_cAsyncSocket_Znl").
+    // 在 cExprIsVariant() 中检查 C 表达式是否调用这些函数, 以正确识别 Variant 值.
+    // 解决 cExprIsVariant() 无法检测项目类函数返回 Variant 的核心缺口.
+    const std::unordered_set<std::string>* variantReturnFuncs_ = nullptr;
     // Fix 010n: 类模块UDT成员变量 (小写var名 → UDT类型C标识符)
     // 用于在过程开始时恢复 knownUdtVars_ (因clear()会丢失类成员UDT变量)
     std::unordered_map<std::string, std::string> classUdtMembers_;
@@ -599,7 +605,7 @@ private:
     // 的 AST 级检测. 当 codegen 生成的 C 表达式包含已知返回 vb6_VARIANT 的函数调用
     // (如 vb6_VariantArrayGet, vb6_VariantFromComResult 等) 时, 判定为 Variant.
     // 仅检查顶层表达式 (去除前导括号后), 避免对子表达式误判.
-    static bool cExprIsVariant(const std::string& cExpr);
+    bool cExprIsVariant(const std::string& cExpr);
 
     // Fix 038b: 运行时函数参数 C 类型查找表 — 当 calleeParams 为空 (运行时/内置函数)
     // 时, 通过函数名和参数索引查找期望的 C 类型. 返回空字符串表示未知.

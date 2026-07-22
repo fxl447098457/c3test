@@ -59,10 +59,11 @@ CCodeGen::CCodeGen(Diagnostics& diag, const SymbolTable& symTab,
                    const TypeSystem& typeSys,
                    const std::unordered_map<std::string, std::set<std::string>>* classVoidFieldMap,
                    const std::unordered_map<std::string, std::unordered_map<std::string, std::string>>* classTypedFieldMap,
+                   const std::unordered_set<std::string>* variantReturnFuncs,
                    bool verbose)
     : diag_(diag), symTab_(symTab), typeSys_(typeSys),
       classVoidFieldMap_(classVoidFieldMap), classTypedFieldMap_(classTypedFieldMap),
-      verbose_(verbose) {}
+      variantReturnFuncs_(variantReturnFuncs), verbose_(verbose) {}
 
 // ============================================================
 // 主入口: 生成 .h + .c
