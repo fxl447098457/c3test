@@ -679,7 +679,12 @@ void CCodeGen::visit(IdentifierExpr& node) {
             "rnd", "erl", "doevents"
         };
         if (zeroArgBuiltinFuncs.count(lower)) {
-            lastExpr_ = it->second + "()";
+            // Fix 041: Rnd() requires 1 arg (int32_t seed). Emit vb6_Rnd(0) not vb6_Rnd().
+            if (lower == "rnd") {
+                lastExpr_ = "vb6_Rnd(0)";
+            } else {
+                lastExpr_ = it->second + "()";
+            }
         } else {
             lastExpr_ = it->second;
         }
@@ -2982,6 +2987,10 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
     // Fix 024 P2/Fix 029 的参数包装, 但 RTL C 签名不接受 Optional padding 和
     // IsMissing _has_ flag 尾叜 (那些只适用于用户定义函数). 见 line 3207/3237.
     bool calleeIsBuiltin = false;
+    // Fix 041b: Track whether calleeParams was successfully resolved (even if 0 params).
+    // Used to distinguish "params not looked up" from "looked up with 0 params" (e.g., Property Get
+    // with no params) — needed for arg truncation when args > params.
+    bool calleeParamsFound = false;
     // 从IdentifierExpr或MemberAccessExpr获取被调用函数名, 在符号表中查找
     // Fix 027: 加入 DeclareSub / DeclareFunc — 否则 WinAPI Declare 的 ByRef 参数无法 emit &,
     //          导致 ByRef UDT/SafeArray/标量 全部按值传递 (例如 SOCKADDR_IN → SOCKADDR_IN* 错误).
@@ -3001,6 +3010,7 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
             || funcSym->kind == SymbolKind::DeclareSub || funcSym->kind == SymbolKind::DeclareFunc)) {
             calleeParams = funcSym->params;
             calleeIsBuiltin = funcSym->isBuiltin;
+            calleeParamsFound = true;
         }
     } else if (node.callee && node.callee->kind == ASTNodeKind::MemberAccessExpr) {
         // Module.Method 或 obj.Method 调用: 查找方法名的参数签名
@@ -3039,6 +3049,7 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
                     calleeParams = std::move(params);
                     calleeIsBuiltin = isBuiltin;
                     classAwareResolved = true;
+                    calleeParamsFound = true;
                 }
             }
         }
@@ -3054,6 +3065,26 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
                 || funcSym->kind == SymbolKind::DeclareSub || funcSym->kind == SymbolKind::DeclareFunc)) {
                 calleeParams = funcSym->params;
                 calleeIsBuiltin = funcSym->isBuiltin;
+                calleeParamsFound = true;
+            }
+        }
+    }
+
+    // Fix 041b: WithMemberExpr callee — With-block member call (e.g., .Add(...) inside With)
+    // needs calleeParams for Optional param padding and IsMissing _has_ flags. Without this,
+    // cross-module With-block calls with Optional params generate C2198 (too few arguments).
+    if (node.callee && node.callee->kind == ASTNodeKind::WithMemberExpr) {
+        auto& wmExpr = static_cast<WithMemberExpr&>(*node.callee);
+        if (!withObjectInfoStack_.empty()) {
+            const auto& info = withObjectInfoStack_.back();
+            if (info.kind == WithObjKind::ClassInstance && !info.className.empty()) {
+                std::vector<ParameterInfo> params;
+                bool isBuiltin = false;
+                if (findClassMemberCallParams(info.className, wmExpr.memberName, params, isBuiltin)) {
+                    calleeParams = std::move(params);
+                    calleeIsBuiltin = isBuiltin;
+                    calleeParamsFound = true;
+                }
             }
         }
     }
@@ -3540,8 +3571,16 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
     } else {
 
         // No ParamArray - normal argList construction
+        // Fix 041c: Truncate extra args when more args than calleeParams.
+        // This handles Declare functions called with more args than their C signature
+        // (e.g., CallWindowProcW with 8 VB6 args but 5 C params) and Property Get
+        // called with index args that should have been default-member calls.
+        size_t maxArgs = args.size();
+        if (calleeParamsFound && !calleeIsBuiltin && args.size() > calleeParams.size()) {
+            maxArgs = calleeParams.size();
+        }
 
-        for (size_t i = 0; i < args.size(); i++) {
+        for (size_t i = 0; i < maxArgs; i++) {
 
             if (i > 0) argList += ", ";
 
@@ -3843,6 +3882,11 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
     // Randomize As Function-call form `Randomize()` — pad seed = 0.0
     if (callee == "vb6_Randomize" && args.empty()) {
         argList = "0.0";
+    }
+    // Fix 041: InStr(start, string1, string2, compare) — C function vb6_InStr takes 3 args
+    // (no compare parameter). Truncate the 4th arg (compare) when present.
+    if (callee == "vb6_InStr" && args.size() > 3) {
+        argList = args[0] + ", " + args[1] + ", " + args[2];
     }
 
     // P14.1.4: General Optional parameter padding for user-defined functions
