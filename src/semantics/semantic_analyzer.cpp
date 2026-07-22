@@ -427,6 +427,16 @@ void SemanticAnalyzer::registerConstant(ConstDecl& decl) {
         decl.loc, decl.access
     );
 
+    // Fix 046: If no explicit As Type, reset to Unknown so value derivation
+    // can infer the type from the literal value. Without this, resolveTypeOrDefault
+    // returns Variant (default), and the "if (sym->type == Vb6Type::Unknown)" checks
+    // in value derivation never fire, leaving all untyped constants as Variant.
+    // This causes false-positive Variant detection in codegen (e.g., vb6_VariantToLong
+    // wrapping integer constants like HWND_TOPMOST = -1, keybd_event keys = 18, etc.).
+    if (!decl.asType && sym->type == Vb6Type::Variant) {
+        sym->type = Vb6Type::Unknown;
+    }
+
     // 如果有值表达式，推导常量类型
     if (decl.value) {
         // 简单的常量值推导 (从字面量)
@@ -654,6 +664,28 @@ void SemanticAnalyzer::visit(SubDecl& node) {
         auto* sym = symTab_.lookupModule(node.name);
         if (!sym) return;  // 注册失败则跳过
 
+        // Fix 047: Re-resolve parameter types in Pass 2 after cross-module resolution.
+        // Enum/UDT types from other modules are not visible during Pass 1, so params
+        // declared as As SomeEnum get resolved to Variant in Pass 1. In Pass 2, after
+        // runCrossModuleResolution() has injected external symbols, re-resolve to get
+        // the correct type (e.g., Enum → Long). Also update classSym->memberParams.
+        if (sym->params.size() == node.params.size()) {
+            bool paramsChanged = false;
+            for (size_t i = 0; i < node.params.size(); i++) {
+                Vb6Type newType = resolveTypeOrDefault(node.params[i]->name, node.params[i]->asType.get());
+                if (newType != sym->params[i].type) {
+                    sym->params[i].type = newType;
+                    paramsChanged = true;
+                }
+            }
+            if (paramsChanged && currentModule_->isClassModule) {
+                auto* classSym = symTab_.lookupModule(Symbol::toLower(currentModule_->moduleName));
+                if (classSym && classSym->kind == SymbolKind::Class) {
+                    classSym->memberParams[Symbol::toLower(node.name)] = sym->params;
+                }
+            }
+        }
+
         currentProc_ = sym;
         symTab_.pushScope(ScopeKind::Procedure);
 
@@ -738,6 +770,31 @@ void SemanticAnalyzer::visit(FunctionDecl& node) {
         if (verbose_) std::cerr << "[Sem]   Function: " << node.name << std::endl;
         auto* sym = symTab_.lookupModule(node.name);
         if (!sym) return;
+
+        // Fix 047: Re-resolve parameter types AND return type in Pass 2.
+        // Enum/UDT types from other modules are not visible during Pass 1.
+        if (sym->params.size() == node.params.size()) {
+            bool paramsChanged = false;
+            for (size_t i = 0; i < node.params.size(); i++) {
+                Vb6Type newType = resolveTypeOrDefault(node.params[i]->name, node.params[i]->asType.get());
+                if (newType != sym->params[i].type) {
+                    sym->params[i].type = newType;
+                    paramsChanged = true;
+                }
+            }
+            // Also re-resolve return type
+            Vb6Type newRetType = resolveTypeOrDefault(node.name, node.returnType.get());
+            if (newRetType != sym->type) {
+                sym->type = newRetType;
+                paramsChanged = true;
+            }
+            if (paramsChanged && currentModule_->isClassModule) {
+                auto* classSym = symTab_.lookupModule(Symbol::toLower(currentModule_->moduleName));
+                if (classSym && classSym->kind == SymbolKind::Class) {
+                    classSym->memberParams[Symbol::toLower(node.name)] = sym->params;
+                }
+            }
+        }
 
         currentProc_ = sym;
         symTab_.pushScope(ScopeKind::Procedure);
@@ -844,6 +901,47 @@ void SemanticAnalyzer::visit(PropertyDecl& node) {
         }
         auto* sym = symTab_.lookupModuleByKind(node.name, sk);
         if (!sym) return;
+
+        // Fix 047: Re-resolve parameter types AND return type in Pass 2.
+        // Enum/UDT types from other modules are not visible during Pass 1.
+        if (sym->params.size() == node.params.size()) {
+            bool paramsChanged = false;
+            for (size_t i = 0; i < node.params.size(); i++) {
+                Vb6Type newType = resolveTypeOrDefault(node.params[i]->name, node.params[i]->asType.get());
+                if (newType != sym->params[i].type) {
+                    sym->params[i].type = newType;
+                    paramsChanged = true;
+                }
+            }
+            // Also re-resolve return type (for PropertyGet)
+            if (sk == SymbolKind::PropertyGet) {
+                Vb6Type newRetType = resolveTypeOrDefault(node.name, node.returnType.get());
+                if (newRetType != sym->type) {
+                    sym->type = newRetType;
+                    paramsChanged = true;
+                }
+            }
+            if (paramsChanged && currentModule_->isClassModule) {
+                auto* classSym = symTab_.lookupModule(Symbol::toLower(currentModule_->moduleName));
+                if (classSym && classSym->kind == SymbolKind::Class) {
+                    std::string lower = Symbol::toLower(node.name);
+                    auto it = classSym->memberProcKinds.find(lower);
+                    bool wins = false;
+                    if (node.propKind == ProcKind::PropertyGet) {
+                        wins = true;
+                    } else if (node.propKind == ProcKind::PropertyLet) {
+                        wins = (it != classSym->memberProcKinds.end()
+                                && it->second == ProcKind::PropertyLet);
+                    } else if (node.propKind == ProcKind::PropertySet) {
+                        wins = (it != classSym->memberProcKinds.end()
+                                && it->second == ProcKind::PropertySet);
+                    }
+                    if (wins) {
+                        classSym->memberParams[lower] = sym->params;
+                    }
+                }
+            }
+        }
 
         currentProc_ = sym;
         symTab_.pushScope(ScopeKind::Procedure);

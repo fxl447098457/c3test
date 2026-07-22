@@ -155,6 +155,17 @@ bool SymbolTable::define(std::unique_ptr<Symbol> sym) {
         }
     }
 
+    // Fix 047: Allow local declarations to overwrite pre-registered external symbols.
+    // Cross-module Enum/UDT types are pre-registered before Pass 1 so that parameter
+    // types resolve correctly. When the local module's own Pass 1 registers the same
+    // Enum/UDT, the external symbol must be replaced by the local definition.
+    {
+        auto* existing = current_->lookupLocal(lowerName);
+        if (existing && existing->isExternal && !sym->isExternal) {
+            current_->symbols_.erase(existing->storageKey());
+        }
+    }
+
     // Property Get/Let/Set允许同名共存 (VB6合法: Property Get Name + Property Let Name)
     // Scope::define已用storageKey区分, 这里只需确认不报错即可
 

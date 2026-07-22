@@ -1003,6 +1003,14 @@ std::string CCodeGen::getRuntimeParamCType(const std::string& funcName, size_t p
         {"vb6_VariantToBool",      {"vb6_VARIANT"}},
         {"vb6_VariantToSafeArray1D", {"vb6_VARIANT"}},
         {"vb6_VariantToObjectVal", {"vb6_VARIANT"}},
+        // Fix 046: IIf family + Variant-aware conversion functions
+        {"vb6_IIfBSTR",         {"int32_t", "BSTR", "BSTR"}},
+        {"vb6_IIfLong",         {"int32_t", "int32_t", "int32_t"}},
+        {"vb6_IIfDouble",       {"int32_t", "double", "double"}},
+        {"vb6_IIfVariant",      {"int32_t", "vb6_VARIANT", "vb6_VARIANT"}},
+        {"vb6_CLngV",           {"vb6_VARIANT"}},
+        {"vb6_CIntV",           {"vb6_VARIANT"}},
+        {"vb6_IntDiv",          {"int32_t", "int32_t"}},
         // Debug
         {"vb6_DebugPrint",      {"BSTR"}},
         {"vb6_DebugWriteLong",  {"int32_t"}},

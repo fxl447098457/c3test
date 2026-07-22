@@ -1057,6 +1057,47 @@ bool Driver::runSemanticAnalysis(const CompileOptions& options) {
             }
         }
 
+        // Fix 047: Pre-register Public Enum and UDT types from all other modules
+        // so that parameter types like "As UcsAsyncSocketEventMaskEnum" resolve
+        // to Long/UserDefinedType during Pass 1 (before runCrossModuleResolution).
+        // Without this, cross-module Enum/UDT parameter types are resolved as Variant,
+        // causing false-positive vb6_VariantFromValue() wrapping at call sites → C2440.
+        for (auto& otherModule : modules_) {
+            if (otherModule.get() == module.get()) continue;
+            for (auto& decl : otherModule->declarations) {
+                if (decl->kind == ASTNodeKind::EnumDecl) {
+                    auto& enumDecl = static_cast<EnumDecl&>(*decl);
+                    // AccessLevel::Default == Public, so all non-Private enums are public
+                    if (enumDecl.access != AccessLevel::Private) {
+                        std::string lower = Symbol::toLower(enumDecl.name);
+                        if (!analyzer->symbolTable().lookupModule(lower)) {
+                            auto sym = std::make_unique<Symbol>(
+                                SymbolKind::EnumType, enumDecl.name,
+                                Vb6Type::Long, enumDecl.loc, AccessLevel::Public
+                            );
+                            sym->isExternal = true;
+                            sym->sourceModule = otherModule->moduleName;
+                            analyzer->symbolTable().defineExternal(std::move(sym));
+                        }
+                    }
+                } else if (decl->kind == ASTNodeKind::TypeDecl) {
+                    auto& typeDecl = static_cast<TypeDecl&>(*decl);
+                    if (typeDecl.access != AccessLevel::Private) {
+                        std::string lower = Symbol::toLower(typeDecl.name);
+                        if (!analyzer->symbolTable().lookupModule(lower)) {
+                            auto sym = std::make_unique<Symbol>(
+                                SymbolKind::UserDefinedType, typeDecl.name,
+                                Vb6Type::UserDefinedType, typeDecl.loc, AccessLevel::Public
+                            );
+                            sym->isExternal = true;
+                            sym->sourceModule = otherModule->moduleName;
+                            analyzer->symbolTable().defineExternal(std::move(sym));
+                        }
+                    }
+                }
+            }
+        }
+
         bool ok = analyzer->analyze(*module);
 
         if (options.dumpSymbols) {

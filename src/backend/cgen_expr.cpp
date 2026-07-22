@@ -2084,11 +2084,39 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
                 std::transform(low.begin(), low.end(), low.begin(), ::tolower);
                 return knownBstrVars_.count(low) > 0;
             };
+            // Fix 046: IIf Variant arg extraction — when typed IIf function
+            // is selected but an arg is a Variant, extract the concrete value.
+            auto iifArgIsVariant = [&](int idx) -> bool {
+                const std::string& val = (idx == 1) ? trueVal : falseVal;
+                if (cExprIsVariant(val)) return true;
+                auto& arg = node.positional[idx];
+                if (arg->kind == ASTNodeKind::IdentifierExpr) {
+                    auto& idArg = static_cast<IdentifierExpr&>(*arg);
+                    std::string argLower = idArg.name;
+                    std::transform(argLower.begin(), argLower.end(), argLower.begin(), ::tolower);
+                    if (knownVariantVars_.count(argLower)) return true;
+                }
+                return false;
+            };
+            auto extractVariantArg = [&](std::string& val, int idx, const char* extractFn) {
+                if (iifArgIsVariant(idx)) {
+                    val = std::string(extractFn) + "(" + val + ")";
+                }
+            };
             if (isBstrResult(trueVal) || isBstrResult(falseVal)) {
+                extractVariantArg(trueVal, 1, "vb6_VariantToString");
+                extractVariantArg(falseVal, 2, "vb6_VariantToString");
                 lastExpr_ = "vb6_IIfBSTR(" + cond + ", " + trueVal + ", " + falseVal + ")";
             } else if (trueVal.find('.') != std::string::npos || falseVal.find('.') != std::string::npos) {
+                extractVariantArg(trueVal, 1, "vb6_VariantToDouble");
+                extractVariantArg(falseVal, 2, "vb6_VariantToDouble");
                 lastExpr_ = "vb6_IIfDouble(" + cond + ", " + trueVal + ", " + falseVal + ")";
+            } else if (iifArgIsVariant(1) && iifArgIsVariant(2)) {
+                // Both args are Variant — use vb6_IIfVariant (accepts VARIANT args)
+                lastExpr_ = "vb6_IIfVariant(" + cond + ", " + trueVal + ", " + falseVal + ")";
             } else {
+                extractVariantArg(trueVal, 1, "vb6_VariantToLong");
+                extractVariantArg(falseVal, 2, "vb6_VariantToLong");
                 lastExpr_ = "vb6_IIfLong(" + cond + ", " + trueVal + ", " + falseVal + ")";
             }
             return;
@@ -3322,7 +3350,7 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
         if (!isByRef && i >= calleeParams.size()) {
             std::string rtParamType = getRuntimeParamCType(callee, i);
             if (!rtParamType.empty() && rtParamType != "vb6_VARIANT"
-                && rtParamType != "vb6_VARIANT*") {
+                 && rtParamType != "vb6_VARIANT*") {
                 bool argIsVariant = cExprIsVariant(argVal);
                 // 也检查已知 Variant 变量
                 if (!argIsVariant && node.positional[i]->kind == ASTNodeKind::IdentifierExpr) {
