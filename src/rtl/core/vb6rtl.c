@@ -70,6 +70,10 @@ int32_t vb6_Len(BSTR s) {
     return vb6_BSTR_Len(s);
 }
 
+int32_t vb6_LenB_BSTR(BSTR s) {  // Fix 048: LenB for BSTR — byte length (wchar count * 2)
+    return vb6_BSTR_Len(s) * (int32_t)sizeof(wchar_t);
+}
+
 BSTR vb6_Left(BSTR s, int32_t n) {
     if (!s || n <= 0) return vb6_BSTR_Empty();
     int32_t len = vb6_BSTR_Len(s);
@@ -5073,4 +5077,10 @@ void vb6_VariantArraySet(vb6_VARIANT* v, int32_t index, vb6_VARIANT val) {
         *slot = val;
     }
     /* 对于非Variant数组, 赋值时需要按目标类型转换(简化: 仅Variant数组支持赋值) */
+}
+
+// Fix 048: LoadResData — stub (resource loading not supported in C3 runtime)
+vb6_VARIANT vb6_LoadResData(int32_t resourceId, int32_t resourceType) {
+    (void)resourceId; (void)resourceType;
+    vb6_VARIANT v; memset(&v, 0, sizeof(v)); return v;  /* empty Variant */
 }

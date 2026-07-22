@@ -496,6 +496,7 @@ void CCodeGen::visit(IdentifierExpr& node) {
     // 内置函数映射 (名称 → RTL函数名) - 仅当符号表中没有用户定义的函数时使用
     static const std::unordered_map<std::string, std::string> builtinFuncs = {
         {"len",      "vb6_Len"},
+        {"lenb",     "vb6_LenB"},  // Fix 048: LenB built-in
         {"msgbox",   "vb6_MsgBox"},
         {"unload",   "vb6_UnloadForm"},
         {"inputbox", "vb6_InputBox"},
@@ -662,6 +663,8 @@ void CCodeGen::visit(IdentifierExpr& node) {
         {"spc",            "vb6_Spc"},
         {"irr",            "vb6_IRR"},
         {"mirr",           "vb6_MIRR"},
+        // Fix 048: LoadResData
+        {"loadresdata", "vb6_LoadResData"},
         // P20-37: Registry functions
         {"savesetting",    "vb6_SaveSetting"},
         {"getsetting",     "vb6_GetSetting"},
@@ -670,7 +673,12 @@ void CCodeGen::visit(IdentifierExpr& node) {
 
     };
 
-    auto it = builtinFuncs.find(lower);
+    // Fix 048: Strip $ type suffix before builtin lookup (Mid$ -> mid, Left$ -> left, etc.)
+    std::string lookupName = lower;
+    if (!lookupName.empty() && lookupName.back() == '$') {
+        lookupName.pop_back();
+    }
+    auto it = builtinFuncs.find(lookupName);
     if (it != builtinFuncs.end()) {
         // 无参内置函数: VB6允许省略括号(如 Now, Date, Time)
         // 当IdentifierExpr引用这些函数时，必须生成调用(带括号)

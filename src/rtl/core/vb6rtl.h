@@ -328,6 +328,14 @@ void vb6_VariantCopy(vb6_VARIANT* dst, const vb6_VARIANT* src);
 
 // 字符串函数
 int32_t vb6_Len(BSTR s);
+int32_t vb6_LenB_BSTR(BSTR s);  // Fix 048: LenB for BSTR — byte length of string
+// Fix 048: LenB — _Generic macro: BSTR → byte length, UDT → sizeof
+// VB6 LenB() works for both strings (byte length) and UDTs (structure size)
+#define vb6_LenB(x) _Generic((x), \
+    BSTR: vb6_LenB_BSTR(x), \
+    const BSTR: vb6_LenB_BSTR(x), \
+    default: ((int32_t)sizeof(x)) \
+)
 BSTR vb6_Left(BSTR s, int32_t n);
 BSTR vb6_Right(BSTR s, int32_t n);
 BSTR vb6_Mid(BSTR s, int32_t start, int32_t len);
@@ -941,6 +949,27 @@ void vb6_Beep(void);
 // P18-C: Option Compare (Text/Binary)
 extern int g_vb6_optionCompareText;  // 0=Binary(default), 1=Text
 int vb6_StrCmp(const wchar_t* a, const wchar_t* b);  // respects Option Compare
+
+// Fix 048: Missing runtime functions that were generating C4013 warnings
+
+// vb6_SA_Destroy — generic SafeArray destroyer (used by COM class destructor codegen)
+// Destroys 1D SafeArray; for NULL it's a no-op
+static inline void vb6_SA_Destroy(void* arr) {
+    if (arr) vb6_SafeArrayDestroy1D((vb6_SafeArray1D*)arr);
+}
+
+// vb6_DebugAssert — Debug.Assert (no-op in compiled mode)
+static inline void vb6_DebugAssert(int32_t cond) {
+    (void)cond;  /* no-op: Debug.Assert only active in IDE */
+}
+
+// vb6_DebugPrint — Debug.Print (no-op in compiled mode, use DebugPrintStr for actual output)
+static inline void vb6_DebugPrint(BSTR s) {
+    vb6_DebugPrintStr(s);
+}
+
+// vb6_LoadResData — LoadResData (returns empty Variant, resource loading not supported)
+vb6_VARIANT vb6_LoadResData(int32_t resourceId, int32_t resourceType);
 
 
 #ifdef __cplusplus

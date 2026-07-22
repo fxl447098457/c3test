@@ -956,7 +956,6 @@ std::string CCodeGen::getRuntimeParamCType(const std::string& funcName, size_t p
         {"vb6_Left",            {"BSTR", "int32_t"}},
         {"vb6_Right",           {"BSTR", "int32_t"}},
         {"vb6_Mid",             {"BSTR", "int32_t", "int32_t"}},
-        {"vb6_Mid_",            {"BSTR", "int32_t", "int32_t"}},
         {"vb6_Len",             {"BSTR"}},
         {"vb6_LenB",            {"BSTR"}},
         {"vb6_InStr",           {"BSTR", "BSTR"}},
@@ -969,8 +968,8 @@ std::string CCodeGen::getRuntimeParamCType(const std::string& funcName, size_t p
         {"vb6_String",          {"int32_t", "int32_t"}},
         {"vb6_Chr",             {"int32_t"}},
         {"vb6_Asc",             {"BSTR"}},
-        {"vb6_Hex_",            {"int32_t"}},
-        {"vb6_Oct_",            {"int32_t"}},
+        {"vb6_Hex",             {"int32_t"}},
+        {"vb6_Oct",             {"int32_t"}},
         // 类型转换
         {"vb6_CStr",            {"vb6_VARIANT"}},
         {"vb6_CLng",            {"double"}},
