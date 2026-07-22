@@ -2919,6 +2919,19 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
         }
     }
 
+    // Fix 044b: Check if callee is a WithMemberExpr class method that might need
+    // Optional param padding. If so, skip the early-return and split the callee
+    // to allow Optional padding in the normal flow below.
+    bool needsSplitForOptionalPad = false;
+    if (node.callee && node.callee->kind == ASTNodeKind::WithMemberExpr) {
+        if (!withObjectInfoStack_.empty()) {
+            const auto& info = withObjectInfoStack_.back();
+            if (info.kind == WithObjKind::ClassInstance && !info.className.empty()) {
+                needsSplitForOptionalPad = true;
+            }
+        }
+    }
+
     // 如果callee已经是func(args)形式(如类方法调用 vb6_Counter_GetCount(c)),
     // 且IndexOrCallExpr没有额外参数, 直接使用callee避免双重括号
     if (callee.size() >= 2 && callee.back() == ')' && node.positional.empty() && node.named.empty()) {
@@ -2932,7 +2945,7 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
                 depth--;
             }
         }
-        if (isCompleteCall) {
+        if (isCompleteCall && !needsSplitForOptionalPad) {
             lastExpr_ = callee;
             return;
         }
@@ -2961,7 +2974,7 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
     }
 
     if (callee.size() >= 2 && callee.back() == ')'
-        && (!node.positional.empty() || !node.named.empty())) {
+        && ((!node.positional.empty() || !node.named.empty()) || needsSplitForOptionalPad)) {
         // 检查是否是完整的函数调用（以右括号结尾且匹配左括号）
         int depth = 0;
         int openPos = -1;
@@ -4305,7 +4318,53 @@ void CCodeGen::visit(WithMemberExpr& node) {
         if (!info.className.empty()) {
             std::string funcName = resolveClassMemberCall(info.className, node.memberName);
             if (!funcName.empty()) {
-                lastExpr_ = funcName + "(" + tempVar + ")";
+                // Fix 044a: When used as standalone expression (!asCallCallee_),
+                // pad Optional params (value + _has_ flags). When used as callee
+                // in IndexOrCallExpr (asCallCallee_=true), the IndexOrCallExpr
+                // will handle padding via Fix 044b.
+                if (!asCallCallee_) {
+                    std::vector<ParameterInfo> params;
+                    bool isBuiltin = false;
+                    if (findClassMemberCallParams(info.className, node.memberName,
+                                                   params, isBuiltin)
+                        && !params.empty() && !isBuiltin) {
+                        std::string argList = tempVar;
+                        for (size_t i = 0; i < params.size(); i++) {
+                            const auto& param = params[i];
+                            argList += ", ";
+                            std::string defVal;
+                            if (param.hasDefaultValue && !param.defaultValueExpr.empty()) {
+                                defVal = param.defaultValueExpr;
+                            } else {
+                                defVal = defaultValue(param.type);
+                            }
+                            if (param.isByVal) {
+                                argList += defVal;
+                            } else {
+                                std::string cType = mapType(param.type);
+                                if (param.type == Vb6Type::Variant
+                                    || param.type == Vb6Type::Empty
+                                    || param.type == Vb6Type::Null
+                                    || param.type == Vb6Type::Object) {
+                                    argList += "&(" + cType + "){0}";
+                                } else {
+                                    argList += "&(" + cType + "){" + defVal + "}";
+                                }
+                            }
+                        }
+                        for (size_t i = 0; i < params.size(); i++) {
+                            const auto& param = params[i];
+                            if (param.isOptional && !param.isParamArray) {
+                                argList += ", 0";
+                            }
+                        }
+                        lastExpr_ = funcName + "(" + argList + ")";
+                    } else {
+                        lastExpr_ = funcName + "(" + tempVar + ")";
+                    }
+                } else {
+                    lastExpr_ = funcName + "(" + tempVar + ")";
+                }
                 return;
             }
             // 未找到方法/属性 → 假设是数据字段: tempVar->member
