@@ -1103,6 +1103,30 @@ void CCodeGen::visit(SetStmt& node) {
         }
     }
 
+    // Fix 051: Set 语句中 void* → vb6_VARIANT 包装
+    // 当 LHS 是 Variant 变量 (如 vb6_ret_Xxx, Dim x As Variant) 而 RHS 是
+    // void* (对象指针, 如 vb6_ComCallObject, 类字段访问, vb6_VariantToObjectVal 等) 时,
+    // 用 vb6_VariantFromValue 包装. vb6_VariantFromValue 是 _Generic 宏:
+    //   - void* → vb6_VariantObject (包装对象指针)
+    //   - vb6_VARIANT → vb6_VariantIdentity (no-op, 安全)
+    // 因此始终包装是安全的, 只需避免对已包装的表达式双重包装.
+    {
+        std::string checkName = target;
+        if (checkName.substr(0, 4) == "me->") checkName = checkName.substr(4);
+        if (checkName.size() > 4 && checkName[0] == '(' && checkName[1] == '*'
+            && checkName.back() == ')') {
+            checkName = checkName.substr(2, checkName.size() - 3);
+        }
+        std::string targetLower = checkName;
+        std::transform(targetLower.begin(), targetLower.end(), targetLower.begin(), ::tolower);
+        bool targetIsVariant = knownVariantVars_.count(targetLower) > 0;
+        if (targetIsVariant
+            && value.find("vb6_VariantFromValue(") != 0
+            && value.find("vb6_VariantFromComResult(") != 0) {
+            value = "vb6_VariantFromValue(" + value + ")";
+        }
+    }
+
     c_.emitLine(target + " = " + value + ";  /* Set */");
 
     // P6.5: WithEvents变量事件连接

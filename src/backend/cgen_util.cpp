@@ -294,6 +294,9 @@ std::string CCodeGen::generateDllEntry(const std::string& progId, const std::vec
                         callArgs += "((VARIANT*)args[" + std::to_string(i) + "])->dblVal";
                     } else if (pType == Vb6Type::String) {
                         callArgs += "((VARIANT*)args[" + std::to_string(i) + "])->bstrVal";
+                    } else if (pType == Vb6Type::Variant) {
+                        // Fix 051: ByVal Variant — 传递整个 VARIANT 结构 (vb6_VARIANT 与 Windows VARIANT 布局兼容)
+                        callArgs += "*(vb6_VARIANT*)args[" + std::to_string(i) + "]";
                     } else {
                         callArgs += "((VARIANT*)args[" + std::to_string(i) + "])->lVal";
                     }
@@ -306,6 +309,9 @@ std::string CCodeGen::generateDllEntry(const std::string& progId, const std::vec
                         callArgs += "&((VARIANT*)args[" + std::to_string(i) + "])->lVal";  /* ByRef Boolean: same as Long, VB6 uses int32_t */
                     } else if (pType == Vb6Type::Double || pType == Vb6Type::Single) {
                         callArgs += "&((VARIANT*)args[" + std::to_string(i) + "])->dblVal";
+                    } else if (pType == Vb6Type::Variant) {
+                        // Fix 051: ByRef Variant — 传递 VARIANT 指针
+                        callArgs += "(vb6_VARIANT*)args[" + std::to_string(i) + "]";
                     } else {
                         callArgs += "(void*)&((VARIANT*)args[" + std::to_string(i) + "])->lVal";
                     }
@@ -337,6 +343,10 @@ std::string CCodeGen::generateDllEntry(const std::string& progId, const std::vec
                     entry.emitLine("((VARIANT*)result)->vt = VT_R8; ((VARIANT*)result)->dblVal = (double)_r;");
                 } else if (methodSym->type == Vb6Type::String) {
                     entry.emitLine("((VARIANT*)result)->vt = VT_BSTR; ((VARIANT*)result)->bstrVal = _r;");
+                } else if (methodSym->type == Vb6Type::Variant) {
+                    // Fix 051: Variant 返回值 — vb6_VARIANT 结构体不能 cast 为 intptr_t,
+                    // 用 memcpy 复制到 Windows VARIANT (布局兼容: vt + padding + union).
+                    entry.emitLine("memcpy(result, &_r, sizeof(vb6_VARIANT));");
                 } else {
                     entry.emitLine("((VARIANT*)result)->vt = VT_I4; ((VARIANT*)result)->lVal = (int32_t)(intptr_t)_r;");
                 }
@@ -2283,7 +2293,10 @@ std::string CCodeGen::wrapVariantValue(ASTNode* valueNode, const std::string& cE
     }
     
     // 如果右侧已经是vb6_VARIANT类型(如函数返回Variant), 直接赋值
-    if (cExpr.find("vb6_Variant") == 0 || cExpr.find("vb6_CStr") == 0) {
+    // Fix 051: 排除 vb6_VariantTo* 函数 (如 vb6_VariantToObjectVal 返回 void*,
+    // vb6_VariantToString 返回 BSTR), 这些不是 vb6_VARIANT 类型, 需要包装.
+    if ((cExpr.find("vb6_Variant") == 0 && cExpr.find("vb6_VariantTo") != 0)
+        || cExpr.find("vb6_CStr") == 0) {
         return cExpr;
     }
     
