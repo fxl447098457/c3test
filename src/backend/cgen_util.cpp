@@ -88,11 +88,16 @@ std::string CCodeGen::generateDllEntry(const std::string& progId, const std::vec
         }
     }
 
+    // Fix 053: 去重 — 同一类可能因符号表合并而在 moduleScope 中出现多次
+    std::set<std::string> seenCoClassNames;
     for (auto& [key, sym] : symTab_.moduleScope()->symbols()) {
         if (sym->kind == SymbolKind::Class && !sym->isInterface) {
             // BUG-4 fix: PublicNotCreatable(2) is visible but NOT externally creatable
             // Only MultiUse(5)/SingleUse(3) should have ClassFactory entries
             if (sym->instancing == VBInstancing::MultiUse || sym->instancing == VBInstancing::SingleUse) {
+                std::string lowerName = Symbol::toLower(sym->name);
+                if (seenCoClassNames.count(lowerName)) continue;  // 已处理, 跳过
+                seenCoClassNames.insert(lowerName);
                 CoClassInfo info;
                 info.moduleName = sym->name;
                 info.clsidStr = sym->comClsidStr.empty() ? generateClsid(progId + "." + sym->name) : sym->comClsidStr;  // P6.8: 优先使用VBP指定的CLSID
@@ -106,7 +111,11 @@ std::string CCodeGen::generateDllEntry(const std::string& progId, const std::vec
                 auto itOwn = classOwningSymTab.find(classNameLower);
                 if (itOwn != classOwningSymTab.end()) ownTab = itOwn->second;
 
+                // Fix 053: 去重 memberNames — Event 和 Sub/Function 可能同名,
+                // memberNames 中会有重复条目, 导致 dispatch 函数被生成两次 (C2084)
+                std::set<std::string> seenMemberNames;
                 for (auto& memberName : sym->memberNames) {
+                    if (!seenMemberNames.insert(Symbol::toLower(memberName)).second) continue;
                     // Try Sub/Function: 优先在类自身符号表搜索 (本类方法, 无碰撞)
                     Symbol* memSym = nullptr;
                     if (ownTab) memSym = ownTab->lookupModule(memberName);
