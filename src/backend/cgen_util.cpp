@@ -233,19 +233,28 @@ std::string CCodeGen::generateDllEntry(const std::string& progId, const std::vec
                 methodCName = "prop_set_" + methodCName;
             }
             std::string procName = cProcName(methodCName, methodSym->access, cc.moduleName);
-            if (methodSym->kind == SymbolKind::Function || methodSym->kind == SymbolKind::PropertyGet) {
-                std::string retType = mapType(methodSym->type);
+            // Fix 052: 前向声明必须与函数定义签名完全一致
+            // - ByRef 参数需要添加 * (指针)
+            // - Optional 参数需要添加 _has_ 标志
+            {
+                std::string retType = (methodSym->kind == SymbolKind::Function || methodSym->kind == SymbolKind::PropertyGet)
+                    ? mapType(methodSym->type) : "void";
                 std::string params = "struct " + clsStruct + "*";
                 for (auto& p : methodSym->params) {
-                    params += ", " + mapType(p.type);
+                    std::string pType = mapType(p.type);
+                    if (!p.isByVal) {
+                        // ByRef → C指针 (与 cgen_decl.cpp 函数定义一致)
+                        pType += "*";
+                    }
+                    params += ", " + pType;
+                }
+                // Optional 参数的 _has_ 标志
+                for (auto& p : methodSym->params) {
+                    if (p.isOptional && !p.isParamArray) {
+                        params += ", int _has_" + cIdent(p.name);
+                    }
                 }
                 entry.emitLine("extern " + retType + " " + procName + "(" + params + ");");
-            } else {
-                std::string params = "struct " + clsStruct + "*";
-                for (auto& p : methodSym->params) {
-                    params += ", " + mapType(p.type);
-                }
-                entry.emitLine("extern void " + procName + "(" + params + ");");
             }
         }
     }
@@ -277,7 +286,7 @@ std::string CCodeGen::generateDllEntry(const std::string& progId, const std::vec
             entry.indent();
             entry.emitLine("struct " + clsStruct + "* me = (struct " + clsStruct + "*)instance;");
 
-            // 构建实参列表 (不含me的类型, 只有表达式)
+            // Fix 052: 构建实参列表 (不含me的类型, 只有表达式)
             // 注意: args[i] 是 VARIANT* (来自DISPPARAMS.rgvarg), 需用VARIANT字段提取值
             std::string callArgs = "me";
             for (int i = 0; i < (int)methodSym->params.size(); i++) {
@@ -312,9 +321,17 @@ std::string CCodeGen::generateDllEntry(const std::string& progId, const std::vec
                     } else if (pType == Vb6Type::Variant) {
                         // Fix 051: ByRef Variant — 传递 VARIANT 指针
                         callArgs += "(vb6_VARIANT*)args[" + std::to_string(i) + "]";
+                    } else if (pType == Vb6Type::String) {
+                        callArgs += "&((VARIANT*)args[" + std::to_string(i) + "])->bstrVal";
                     } else {
                         callArgs += "(void*)&((VARIANT*)args[" + std::to_string(i) + "])->lVal";
                     }
+                }
+            }
+            // Fix 052: Optional 参数的 _has_ 标志 (COM dispatch 中所有参数都已提供)
+            for (auto& p : methodSym->params) {
+                if (p.isOptional && !p.isParamArray) {
+                    callArgs += ", 1";
                 }
             }
 
@@ -343,8 +360,9 @@ std::string CCodeGen::generateDllEntry(const std::string& progId, const std::vec
                     entry.emitLine("((VARIANT*)result)->vt = VT_R8; ((VARIANT*)result)->dblVal = (double)_r;");
                 } else if (methodSym->type == Vb6Type::String) {
                     entry.emitLine("((VARIANT*)result)->vt = VT_BSTR; ((VARIANT*)result)->bstrVal = _r;");
-                } else if (methodSym->type == Vb6Type::Variant) {
-                    // Fix 051: Variant 返回值 — vb6_VARIANT 结构体不能 cast 为 intptr_t,
+                } else if (retType == "vb6_VARIANT") {
+                    // Fix 052: 所有映射为 vb6_VARIANT 的返回类型 (Variant/Decimal/UDT等) 都用 memcpy
+                    // vb6_VARIANT 结构体不能 cast 为 intptr_t,
                     // 用 memcpy 复制到 Windows VARIANT (布局兼容: vt + padding + union).
                     entry.emitLine("memcpy(result, &_r, sizeof(vb6_VARIANT));");
                 } else {
