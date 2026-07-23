@@ -39,6 +39,29 @@ Vb6Type TypeSystem::resolveTypeName(const std::string& name) const {
     if (it != builtinTypes_.end()) {
         return it->second;
     }
+    // Fix 050: COM 枚举类型 (如 DataTypeEnum, CursorTypeEnum, LockTypeEnum)
+    // 来自引用的 COM 类型库, 不在项目符号表中。VB6 枚举底层是 Long。
+    // 以 "Enum" 结尾的类型名视为 Long, 使 resolveTypeRef 和 cgen_decl 中的
+    // resolveTypeName 调用都能正确返回 Long, 避免参数被误判为 Variant。
+    if (lower.size() > 4 && lower.compare(lower.size() - 4, 4, "enum") == 0) {
+        return Vb6Type::Long;
+    }
+    // Fix 050b: VB6 类型别名 — 这些类型在 mapTypeRef() 中被映射为 int32_t,
+    // 但 resolveTypeName() 返回 Unknown, 导致 resolveTypeRef() 回退到 Variant,
+    // 与代码生成器的 int32_t 不一致, 产生 vb6_VARIANT→int32_t C2440 错误。
+    // LongPtr: VB6 32位下等于 Long
+    if (lower == "longptr" || lower == "longptr") {
+        return Vb6Type::Long;
+    }
+    // OLE_ 前缀类型 (OLE_COLOR, OLE_HANDLE 等) — DWORD = Long
+    if (lower.size() >= 4 && lower.compare(0, 4, "ole_") == 0) {
+        return Vb6Type::Long;
+    }
+    // Vb 前缀枚举 (VbCompareMethod, VbTriState, VbFileAttribute 等) — Long
+    if (lower.size() >= 2 && lower.compare(0, 2, "vb") == 0 &&
+        lower != "boolean" && lower != "byte") {
+        return Vb6Type::Long;
+    }
     // 用户自定义类型 (Type/Enum)
     return Vb6Type::Unknown;
 }

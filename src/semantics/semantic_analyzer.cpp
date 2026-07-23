@@ -596,6 +596,17 @@ Vb6Type SemanticAnalyzer::resolveTypeRef(ASTNode* typeRef) {
                             return Vb6Type::Object;
                     }
                 }
+                // Fix 050: COM 枚举类型 (如 DataTypeEnum, CursorTypeEnum, LockTypeEnum)
+                // 来自引用的 COM 类型库 (如 ADODB)，不在项目符号表中。
+                // VB6 中所有 Enum 类型都是 Long (32位整数)，因此以 "Enum" 结尾的
+                // 未识别类型名应返回 Long 而非 Variant，避免 vb6_VARIANT→int32_t C2440 错误。
+                {
+                    std::string lowerName = Symbol::toLower(simple.name);
+                    if (lowerName.size() > 4 &&
+                        lowerName.compare(lowerName.size() - 4, 4, "enum") == 0) {
+                        return Vb6Type::Long;
+                    }
+                }
                 // 未识别类型 → Variant (宽松策略)
                 return Vb6Type::Variant;
             }
