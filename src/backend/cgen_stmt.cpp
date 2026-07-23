@@ -773,6 +773,8 @@ void CCodeGen::visit(AssignmentStmt& node) {
         std::string lower = checkName;
         std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
         if (knownVariantVars_.count(lower)) targetIsVariant = true;
+        // Fix 054: 也检查 classVariantMembers_ — 类成员 Variant 字段 (如 me->m_P1)
+        if (classVariantMembers_.count(lower)) targetIsVariant = true;
         if (node.target->kind == ASTNodeKind::IdentifierExpr) {
             auto& id = static_cast<IdentifierExpr&>(*node.target);
             std::string idLower = id.name;
