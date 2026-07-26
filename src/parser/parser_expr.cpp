@@ -419,6 +419,17 @@ ExprPtr Parser::parsePostfix(ExprPtr expr) {
             prevTok_.column + prevTok_.length < cur_.column) {
             return expr;  // space detected — let caller parse .Member2 as argument
         }
+        // Fix 077: In With context, "SubName .Field" (space before dot) is a bare
+        // sub call where .Field is a With-block member access used as argument,
+        // NOT a member access SubName.Field.  E.g.:
+        //   pvAppendBitsToBuffer .Mode, 4, baQrCode, lBitLen
+        // Without this, parser creates MemberAccessExpr(pvAppendBitsToBuffer, Mode)
+        // instead of IdentifierExpr(pvAppendBitsToBuffer) + WithMemberExpr(.Mode).
+        if (withDepth_ > 0 && expr->kind == ASTNodeKind::IdentifierExpr &&
+            prevTok_.line == cur_.line &&
+            prevTok_.column + prevTok_.length < cur_.column) {
+            return expr;  // space detected — .XXX is a With-member argument, not member access
+        }
         advance(); // consume '.'
         // VB6 允许关键字作为成员名: obj.Type, obj.Loop, etc.
         // expectName 只接受 Identifier 和软关键字, 这里扩展为接受所有带文本的 token
@@ -451,12 +462,17 @@ ExprPtr Parser::parsePostfix(ExprPtr expr) {
 
                 // 解析参数列表
                 if (cur_.kind != TokenKind::RightParen) {
+                    size_t argIndex = 0;
                     do {
                         skipNewLines();
 
                         // VB6 允许在调用时覆盖传递方式: MyFunc(ByVal arg)
-                        if (cur_.kind == TokenKind::ByVal || cur_.kind == TokenKind::ByRef) {
-                            advance(); // consume ByVal/ByRef, 按位置参数处理
+                        bool hasByValOverride = false;
+                        if (cur_.kind == TokenKind::ByVal) {
+                            advance(); // consume ByVal
+                            hasByValOverride = true;
+                        } else if (cur_.kind == TokenKind::ByRef) {
+                            advance(); // consume ByRef
                         }
 
                         // 命名参数?  name := value (允许软关键字作参数名)
@@ -478,6 +494,12 @@ ExprPtr Parser::parsePostfix(ExprPtr expr) {
                             call->positional.push_back(std::move(arg));
                         }
 
+                        // Fix 072: 记录 ByVal 覆盖的参数索引
+                        if (hasByValOverride) {
+                            call->byvalOverrides.insert(argIndex);
+                        }
+
+                        argIndex++;
                         skipNewLines();
                     } while (match(TokenKind::Comma));
                 }

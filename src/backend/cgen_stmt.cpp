@@ -834,18 +834,25 @@ void CCodeGen::visit(AssignmentStmt& node) {
         if (valueIsVariant) {
             // 检查目标类型
             std::string convertedValue = value;
-            if (target.find("VB6_SA_AT(BSTR,") != std::string::npos) {
+            if (target.find("VB6_SA_AT(BSTR,") != std::string::npos
+                || target.find("VB6_SA_ND_AT2(BSTR,") != std::string::npos) {
                 convertedValue = "vb6_VariantToString(" + value + ")";
             } else if (target.find("VB6_SA_AT(int32_t,") != std::string::npos
                        || target.find("VB6_SA_AT(int16_t,") != std::string::npos
                        || target.find("VB6_SA_AT(uint8_t,") != std::string::npos
-                       || target.find("VB6_SA_AT(LONG,") != std::string::npos) {
+                       || target.find("VB6_SA_AT(LONG,") != std::string::npos
+                       || target.find("VB6_SA_ND_AT2(int32_t,") != std::string::npos
+                       || target.find("VB6_SA_ND_AT2(int16_t,") != std::string::npos
+                       || target.find("VB6_SA_ND_AT2(uint8_t,") != std::string::npos
+                       || target.find("VB6_SA_ND_AT2(LONG,") != std::string::npos) {
                 convertedValue = "vb6_VariantToLong(" + value + ")";
             } else if (target.find("VB6_SA_AT(double,") != std::string::npos
-                       || target.find("VB6_SA_AT(float,") != std::string::npos) {
+                       || target.find("VB6_SA_AT(float,") != std::string::npos
+                       || target.find("VB6_SA_ND_AT2(double,") != std::string::npos
+                       || target.find("VB6_SA_ND_AT2(float,") != std::string::npos) {
                 convertedValue = "vb6_VariantToDouble(" + value + ")";
             } else {
-                // 检查已知 Long/Double 变量
+                // 检查已知 Long/Double/ByteArray 变量
                 std::string checkName = target;
                 if (checkName.substr(0, 4) == "me->") checkName = checkName.substr(4);
                 if (checkName.size() > 4 && checkName[0] == '(' && checkName[1] == '*'
@@ -861,6 +868,9 @@ void CCodeGen::visit(AssignmentStmt& node) {
                 } else if (knownObjectVars_.count(lower)) {
                     // Fix 045: Object (void*) target + Variant value → extract object
                     convertedValue = "vb6_VariantToObjectVal(" + value + ")";
+                } else if (knownByteArrayVars_.count(lower)) {
+                    // Fix 062: Byte array target + Variant value → extract SafeArray1D*
+                    convertedValue = "vb6_VariantToSafeArray1D(" + value + ")";
                 } else if (node.target && node.target->kind == ASTNodeKind::IdentifierExpr) {
                     auto& id = static_cast<IdentifierExpr&>(*node.target);
                     std::string idLower = id.name;
@@ -871,6 +881,8 @@ void CCodeGen::visit(AssignmentStmt& node) {
                         convertedValue = "vb6_VariantToDouble(" + value + ")";
                     } else if (knownObjectVars_.count(idLower)) {
                         convertedValue = "vb6_VariantToObjectVal(" + value + ")";
+                    } else if (knownByteArrayVars_.count(idLower)) {
+                        convertedValue = "vb6_VariantToSafeArray1D(" + value + ")";
                     }
                 }
             }
@@ -1474,12 +1486,18 @@ void CCodeGen::visit(IfStmt& node) {
     emitStmtList(node.thenBody);
     c_.dedent();
 
+    // Fix 063b: ElseIf 条件可能生成 _vcmp_ 临时变量声明,
+    // C 不允许在 } 和 else if 之间出现声明语句.
+    // 改用 } else { if (...) { 模式, 将 _vcmp_ 声明放入 else 块内.
+    int elseIfWrapCount = 0;
     for (auto& elseif : node.elseIfs) {
+        c_.emitLine("} else {");
         emitExpr(*elseif->condition);
-        c_.emitLine("} else if (" + lastExpr_ + ") {");
+        c_.emitLine("if (" + lastExpr_ + ") {");
         c_.indent();
         emitStmtList(elseif->body);
         c_.dedent();
+        elseIfWrapCount++;
     }
 
     if (!node.elseBody.empty()) {
@@ -1489,7 +1507,10 @@ void CCodeGen::visit(IfStmt& node) {
         c_.dedent();
     }
 
-    c_.emitLine("}");
+    c_.emitLine("}");  // 关闭最内层 if/else
+    for (int i = 0; i < elseIfWrapCount; i++) {
+        c_.emitLine("}");  // 关闭每个 else 包装块
+    }
 }
 
 void CCodeGen::visit(ElseIfClause& node) {
@@ -2107,6 +2128,21 @@ void CCodeGen::visit(WithStmt& node) {
                 }
             }
 
+            // Fix 054: With目标为当前函数UDT返回值 (如 With QRCodegenMakeBytes → vb6_ret_QRCodegenMakeBytes)
+            // 函数返回变量不在 knownUdtVars_ 中, 但返回类型可能是UDT
+            if (withInfo.kind == WithObjKind::Unknown && !currentReturnVar_.empty()) {
+                std::string retLower = currentReturnVar_;
+                std::transform(retLower.begin(), retLower.end(), retLower.begin(), ::tolower);
+                if (retLower.find(objNameLower) != std::string::npos) {
+                    // objName matches the return variable → check return type
+                    if (currentReturnCType_.rfind("vb6_type_", 0) == 0) {
+                        tempType = currentReturnCType_;
+                        knownUdtVars_[tempVar] = currentReturnCType_;
+                        knownLocalVars_.insert(tempVar);
+                    }
+                }
+            }
+
             // Fix 010l: 内置全局对象检测 (Err/App/Screen/Printer/Clipboard/Debug)
             if (withInfo.kind == WithObjKind::Unknown) {
                 if (objNameLower == "err" || objNameLower == "app" ||
@@ -2177,13 +2213,22 @@ void CCodeGen::visit(WithStmt& node) {
                 auto& idExpr = static_cast<IdentifierExpr&>(*callExpr.callee);
                 std::string arrLower = idExpr.name;
                 std::transform(arrLower.begin(), arrLower.end(), arrLower.begin(), ::tolower);
-                // 检查是否为已知数组 → 元素类型
-                auto itArr = arrayElemTypes_.find(arrLower);
-                if (itArr != arrayElemTypes_.end()) {
-                    if (itArr->second == Vb6Type::UserDefinedType) {
-                        tempType = "vb6_VARIANT";  // UDT数组元素存储为VARIANT
-                    } else if (itArr->second == Vb6Type::Variant || itArr->second == Vb6Type::Object) {
-                        tempType = "vb6_VARIANT";
+                // Fix 055: 优先检查UDT数组元素类型
+                auto itUdtArr = arrayUdtElemTypes_.find(arrLower);
+                if (itUdtArr != arrayUdtElemTypes_.end()) {
+                    tempType = itUdtArr->second;  // e.g. "vb6_type_RECT"
+                    // 注册到knownUdtVars_, 让后续字段访问正确
+                    knownUdtVars_[tempVar] = itUdtArr->second;
+                    knownLocalVars_.insert(tempVar);
+                } else {
+                    // 检查是否为已知数组 → 元素类型
+                    auto itArr = arrayElemTypes_.find(arrLower);
+                    if (itArr != arrayElemTypes_.end()) {
+                        if (itArr->second == Vb6Type::UserDefinedType) {
+                            tempType = "vb6_VARIANT";  // UDT数组元素存储为VARIANT (fallback, should be caught above)
+                        } else if (itArr->second == Vb6Type::Variant || itArr->second == Vb6Type::Object) {
+                            tempType = "vb6_VARIANT";
+                        }
                     }
                 }
             }
@@ -2194,8 +2239,13 @@ void CCodeGen::visit(WithStmt& node) {
         }
 
         // --- 最终回退: void* 不支持 .member 访问 → 使用ClassInstance分发 ---
+        // Fix 054: 但如果 tempType 是 UDT struct (vb6_type_*), 保持 Unknown 让 struct.field 访问生效
         if (withInfo.kind == WithObjKind::Unknown && tempType == "void*") {
             withInfo.kind = WithObjKind::ClassInstance;
+        }
+        // Fix 054: tempType 已解析为 UDT struct (vb6_type_*) → 保持 Unknown, 用 struct.field 访问
+        if (withInfo.kind == WithObjKind::ClassInstance && tempType.rfind("vb6_type_", 0) == 0) {
+            withInfo.kind = WithObjKind::Unknown;
         }
     }
 
@@ -2626,6 +2676,32 @@ void CCodeGen::visit(ReDimStmt& node) {
     if (isClassModule_ && classMemberVars_.count(lowerVar) && !knownLocalVars_.count(lowerVar)) {
         cName = "me->" + cName;
     }
+    // Fix 010r-6 rev2: ByRef array param in ReDim needs (*name) since it's vb6_SafeArray1D**
+    if (currentProc_) {
+        for (auto& param : currentProc_->params) {
+            std::string paramLower = param.name;
+            std::transform(paramLower.begin(), paramLower.end(), paramLower.begin(), ::tolower);
+            if (paramLower == lowerVar && !param.isByVal
+                && (static_cast<uint16_t>(param.type) & static_cast<uint16_t>(Vb6Type::Array))) {
+                cName = "(*" + cName + ")";
+                break;
+            }
+        }
+    }
+    // Fix 061: With块内 ReDim .Data(...) → _vb6_with_N.Data
+    // parser 在 varName 前加了 '.' 前缀表示 With 成员引用 (e.g. ".Data")
+    if (node.varName.size() > 1 && node.varName[0] == '.'
+        && !withObjectVars_.empty() && !withObjectInfoStack_.empty()) {
+        std::string memberName = node.varName.substr(1);  // strip leading '.'
+        const auto& info = withObjectInfoStack_.back();
+        if (info.kind == WithObjKind::Unknown) {
+            // UDT With block: _vb6_with_N.member
+            cName = withObjectVars_.back() + "." + cIdent(memberName);
+        } else if (info.kind == WithObjKind::ClassInstance) {
+            // Class With block: _vb6_with_N->member
+            cName = withObjectVars_.back() + "->" + cIdent(memberName);
+        }
+    }
     Vb6Type elemType = resolveArrayElemType(node.asType.get());
     std::string saElemType = mapSaElemType(elemType);
 
@@ -2654,8 +2730,13 @@ void CCodeGen::visit(ReDimStmt& node) {
             c_.emitLine(cName + " = vb6_SafeArrayReDim1D(" + saElemType + ", " + lBound + ", " + uBound + ");");
         }
     } else {
-        // P8.1: 澶氱淮 ReDim
-        std::string boundsVar = "_redim_bounds_" + cName;
+        // P8.1: 多维 ReDim
+        // Use raw variable name for boundsVar (must be a valid C identifier)
+        std::string rawCName = cIdent(node.varName);
+        if (isClassModule_ && classMemberVars_.count(lowerVar) && !knownLocalVars_.count(lowerVar)) {
+            rawCName = "me_" + rawCName;
+        }
+        std::string boundsVar = "_redim_bounds_" + rawCName;
         c_.emitLine("vb6_SafeArrayBound " + boundsVar + "[] = {");
         c_.indent();
         for (int d = 0; d < dimCount; d++) {
@@ -2669,10 +2750,10 @@ void CCodeGen::visit(ReDimStmt& node) {
         c_.dedent();
         c_.emitLine("};");
         if (node.preserve) {
-            c_.emitLine(cName + " = vb6_SafeArrayReDimPreserveND(" + cName + ", " + std::to_string(dimCount) + ", " + boundsVar + ");");
+            c_.emitLine(cName + " = (vb6_SafeArray1D*)vb6_SafeArrayReDimPreserveND((vb6_SafeArrayND*)" + cName + ", " + std::to_string(dimCount) + ", " + boundsVar + ");");
         } else {
-            c_.emitLine("vb6_SafeArrayDestroyND(" + cName + ");");
-            c_.emitLine(cName + " = vb6_SafeArrayReDimND(" + saElemType + ", " + std::to_string(dimCount) + ", " + boundsVar + ");");
+            c_.emitLine("vb6_SafeArrayDestroyND((vb6_SafeArrayND*)" + cName + ");");
+            c_.emitLine(cName + " = (vb6_SafeArray1D*)vb6_SafeArrayReDimND(" + saElemType + ", " + std::to_string(dimCount) + ", " + boundsVar + ");");
         }
 
         // 鏇存柊鏁扮粍缁村害淇℃伅
@@ -2694,7 +2775,7 @@ void CCodeGen::visit(EraseStmt& node) {
         // P8.1: 根据维度数选择1D/ND销毁
         auto it = arrayDimCounts_.find(lower);
         if (it != arrayDimCounts_.end() && it->second > 1) {
-            c_.emitLine("vb6_SafeArrayDestroyND(" + cName + "); " + cName + " = NULL;");
+            c_.emitLine("vb6_SafeArrayDestroyND((vb6_SafeArrayND*)" + cName + "); " + cName + " = NULL;");
         } else {
             c_.emitLine("vb6_SafeArrayDestroy1D(" + cName + "); " + cName + " = NULL;");
         }
@@ -3174,6 +3255,12 @@ void CCodeGen::visit(LocalDeclStmt& node) {
                 knownArrays_.insert(lower);
                 arrayElemTypes_[lower] = elemType;
                 arrayDimCounts_[lower] = dimCount;
+                if (elemType == Vb6Type::Byte) knownByteArrayVars_.insert(lower);
+                // Fix 055: 注册UDT数组元素C类型
+                {
+                    std::string udtCType = resolveArrayUdtElemCType(var.asType.get());
+                    if (!udtCType.empty()) arrayUdtElemTypes_[lower] = udtCType;
+                }
                 knownLocalVars_.insert(lower);
                 break;
             }
@@ -3189,6 +3276,12 @@ void CCodeGen::visit(LocalDeclStmt& node) {
                 knownArrays_.insert(lower);
                 arrayElemTypes_[lower] = elemType;
                 arrayDimCounts_[lower] = 1;  // 动态数组默认1D
+                if (elemType == Vb6Type::Byte) knownByteArrayVars_.insert(lower);
+                // Fix 055: 注册UDT数组元素C类型
+                {
+                    std::string udtCType = resolveArrayUdtElemCType(var.asType.get());
+                    if (!udtCType.empty()) arrayUdtElemTypes_[lower] = udtCType;
+                }
                 knownLocalVars_.insert(lower);
                 break;
             }

@@ -1,4 +1,5 @@
 #include "common/source_manager.hpp"
+#include "common/encoding.hpp"
 #include <fstream>
 #include <sstream>
 #include <algorithm>
@@ -167,7 +168,7 @@ void SourceBuffer::buildLineTable() {
 // === 公开接口 ===
 
 std::unique_ptr<SourceBuffer> SourceBuffer::fromFile(const std::string& path) {
-    std::ifstream file(path, std::ios::binary);
+    std::ifstream file(utf8ToPath(path), std::ios::binary);
     if (!file.is_open()) return nullptr;
 
     file.seekg(0, std::ios::end);
@@ -207,7 +208,7 @@ SourceBuffer::ReadResult SourceBuffer::readAndConvertToUtf8(const std::string& p
     ReadResult result;
     result.encoding = SourceEncoding::Unknown;
     
-    std::ifstream file(path, std::ios::binary);
+    std::ifstream file(utf8ToPath(path), std::ios::binary);
     if (!file.is_open()) return result;
 
     file.seekg(0, std::ios::end);

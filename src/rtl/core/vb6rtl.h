@@ -500,6 +500,7 @@ int32_t vb6_App_hInstance(void); // App.hInstance - 模块实例句柄
 void   vb6_Clipboard_SetText(BSTR text);
 BSTR   vb6_Clipboard_GetText(void);
 void   vb6_Clipboard_Clear(void);
+void   vb6_Clipboard_SetData(void* pPicture);
 int32_t vb6_Clipboard_GetFormat(int32_t format);  // 1=vbCFText, 2=vbCFBitmap, etc.
 
 // P18-C: Screen 对象

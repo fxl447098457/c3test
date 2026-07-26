@@ -1112,9 +1112,10 @@ StmtPtr Parser::parseLabelOrAssignmentOrCall() {
 
     // VB6 无括号调用: Sub arg1, arg2 / Debug.Print "text"
     // 如果表达式后还有同一行的 token (非 NewLine/Colon/EndOfFile),
-    // 且不是中缀运算符, 则视为无括号调用的参数列表
+    // 且不是中缀运算符 (但前缀运算符如 - 可开始新参数), 则视为无括号调用的参数列表
     if (cur_.kind != TokenKind::NewLine && cur_.kind != TokenKind::Colon &&
-        cur_.kind != TokenKind::EndOfFile && (!isInfixOperator(cur_.kind) || isDebugPrint)) {
+        cur_.kind != TokenKind::EndOfFile && 
+        (!isInfixOperator(cur_.kind) || isPrefixOperator(cur_.kind) || isDebugPrint)) {
         // 将表达式包装为 IndexOrCallExpr, 追加参数
         auto call = std::make_unique<IndexOrCallExpr>(loc, std::move(expr));
 
@@ -1125,17 +1126,24 @@ StmtPtr Parser::parseLabelOrAssignmentOrCall() {
         // Debug.Print "text";           — 末尾分号 (抑制换行, 无后续参数)
 
         // 辅助: 判断当前 token 是否可以开始一个表达式 (但不是语句结束符/中缀运算符)
+        // 注意: 逗号后的 - 可以是一元负号 (前缀运算符), 需要允许
         auto canStartArg = [this]() -> bool {
             return cur_.kind != TokenKind::NewLine &&
                    cur_.kind != TokenKind::Colon &&
                    cur_.kind != TokenKind::EndOfFile &&
-                   !isInfixOperator(cur_.kind) &&
+                   (!isInfixOperator(cur_.kind) || isPrefixOperator(cur_.kind)) &&
                    cur_.kind != TokenKind::Comma &&
                    cur_.kind != TokenKind::Semicolon;
         };
 
         // 第一个参数
+        // Fix 073: 无括号调用路径也需记录 ByVal 覆盖到 byvalOverrides,
+        // 与 parser_expr.cpp 带括号调用路径一致.
+        size_t stmtArgIndex = 0;
         if (cur_.kind == TokenKind::ByVal || cur_.kind == TokenKind::ByRef) {
+            if (cur_.kind == TokenKind::ByVal) {
+                call->byvalOverrides.insert(stmtArgIndex);
+            }
             advance(); // 消费 ByVal/ByRef
         }
         if (canStartArg()) {
@@ -1149,6 +1157,7 @@ StmtPtr Parser::parseLabelOrAssignmentOrCall() {
                 call->positional.push_back(parseExpression());
             }
         }
+        stmtArgIndex++;
 
         // 后续参数: 逗号或分号后继续
         while (true) {
@@ -1162,6 +1171,9 @@ StmtPtr Parser::parseLabelOrAssignmentOrCall() {
             if (match(TokenKind::Comma)) {
                 // ByVal/ByRef 前缀
                 if (cur_.kind == TokenKind::ByVal || cur_.kind == TokenKind::ByRef) {
+                    if (cur_.kind == TokenKind::ByVal) {
+                        call->byvalOverrides.insert(stmtArgIndex);
+                    }
                     advance();
                 }
                 if (canStartArg()) {
@@ -1175,6 +1187,7 @@ StmtPtr Parser::parseLabelOrAssignmentOrCall() {
                         call->positional.push_back(parseExpression());
                     }
                 }
+                stmtArgIndex++;
                 continue;
             }
             // 分号后跟着表达式 -> 作为下一个参数

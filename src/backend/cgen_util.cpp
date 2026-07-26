@@ -938,6 +938,7 @@ bool CCodeGen::cExprIsVariant(const std::string& cExpr) {
         "vb6_VariantFromDate(",
         "vb6_VariantFromUI1(",
         "vb6_VariantFromSafeArray(",
+        "vb6_DispCallByVtbl(",  // Fix 068: DispCallByVtbl returns Variant
     };
     for (const auto& prefix : variantPrefixes) {
         if (cExpr.compare(start, prefix.size(), prefix) == 0) return true;
@@ -2028,6 +2029,10 @@ std::string CCodeGen::getControlPropReadFn(FrmControlType ctrlType, const std::s
         if (propLower == "caption") return "vb6_GetControlText";
         if (propLower == "visible") return "vb6_GetControlVisible";
         if (propLower == "enabled") return "vb6_GetControlEnabled";
+        // Fix 056: Form-specific properties
+        if (propLower == "windowstate") return "vb6_GetWindowState";
+        if (propLower == "scalewidth") return "vb6_GetScaleWidth";
+        if (propLower == "scaleheight") return "vb6_GetScaleHeight";
         break;
     case FrmControlType::WebBrowser:
         if (propLower == "url" || propLower == "locationurl") return "vb6_WebViewGetUrl";

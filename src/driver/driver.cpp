@@ -1426,6 +1426,18 @@ bool Driver::runCodeGeneration(const CompileOptions& options, const std::string&
                 };
                 std::string cName = "vb6_" + cIdentS(modName) + "_" + cIdentS(procName);
                 variantReturnFuncs.insert(cName);
+                // Fix 066: 同模块调用 Private 函数时 C 函数名使用 vb6_pv_ 前缀,
+                // 也需加入 variantReturnFuncs 以便 cExprIsVariant 正确检测.
+                bool isPrivate = false;
+                if (decl->kind == ASTNodeKind::FunctionDecl) {
+                    isPrivate = (static_cast<const FunctionDecl&>(*decl).access == AccessLevel::Private);
+                } else if (decl->kind == ASTNodeKind::PropertyDecl) {
+                    isPrivate = (static_cast<const PropertyDecl&>(*decl).access == AccessLevel::Private);
+                }
+                if (isPrivate) {
+                    std::string privateCName = "vb6_pv_" + cIdentS(procName);
+                    variantReturnFuncs.insert(privateCName);
+                }
             }
         }
     }
@@ -1448,6 +1460,17 @@ bool Driver::runCodeGeneration(const CompileOptions& options, const std::string&
 
         // 收集跨模块include需求（从符号表获取外部模块名）
         auto externalModules = analyzer->symbolTable().getExternalModuleNames();
+
+        // Fix 075: 多模块项目中，所有模块的 isMultiModule_ 必须为 true，
+        // 否则函数定义名不带模块前缀而跨模块调用带模块前缀，导致 LNK2019。
+        // 将项目中所有其他模块名也加入 externalModules，确保 isMultiModule_=true。
+        if (modules_.size() > 1) {
+            for (size_t j = 0; j < modules_.size(); j++) {
+                if (j != i) {
+                    externalModules.insert(modules_[j]->moduleName);
+                }
+            }
+        }
 
         // 调用C代码生成器
         // Fix 023: 传入 void* 字段表供 cgen_expr.cpp fallback 路径查询

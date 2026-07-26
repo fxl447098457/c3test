@@ -861,7 +861,17 @@ ComMemberInfo TypeLibParser::parseFuncDesc(void* pTypeInfo, void* pFuncDesc, int
     }
 
     // 返回类型
-    member.returnType = mapTypeDesc(&pFD->elemdescFunc.tdesc, pTI);
+    // Fix-074: COM dispinterface 属性方法的返回类型在 pFD->elemdescFunc.tdesc 中
+    // 可能是 VT_HRESULT (0x0019) 或 VT_VOID (0x0018)，表示"方法本身无返回值，
+    // 实际返回值在最后一个 [out, retval] 参数中"。此时不应使用 tdesc 作为 returnType，
+    // 而应等待参数处理阶段从 [out, retval] 参数中提取。
+    VARTYPE funcVt = pFD->elemdescFunc.tdesc.vt;
+    if (funcVt == VT_HRESULT || funcVt == VT_VOID) {
+        // 方法的直接返回类型是 HRESULT/VOID，returnType 延后设置
+        member.returnType = Vb6Type::Empty;  // 标记为待覆盖
+    } else {
+        member.returnType = mapTypeDesc(&pFD->elemdescFunc.tdesc, pTI);
+    }
 
     // 参数
     // 获取参数名
@@ -898,6 +908,18 @@ ComMemberInfo TypeLibParser::parseFuncDesc(void* pTypeInfo, void* pFuncDesc, int
         }
 
         member.params.push_back(std::move(param));
+    }
+
+    // Fix-074: 对于 VT_HRESULT/VT_VOID 方法（如 dispinterface 属性 Get），
+    // 如果参数中没有 PARAMFLAG_FRETVAL 标志，尝试从最后一个 [out] 参数推断返回类型
+    if (member.returnType == Vb6Type::Empty && pFD->cParams > 0) {
+        // 检查最后一个参数是否是 [out]
+        UINT lastIdx = pFD->cParams - 1;
+        ELEMDESC* lastParam = &pFD->lprgelemdescParam[lastIdx];
+        if (lastParam->paramdesc.wParamFlags & PARAMFLAG_FOUT) {
+            ComParamInfo lastP = mapElemDesc(lastParam, "_retval", pTI);
+            member.returnType = lastP.type;
+        }
     }
 
     return member;
@@ -956,14 +978,62 @@ Vb6Type TypeLibParser::mapTypeDesc(void* pTypeDesc, void* pTypeInfo) {
             if (inner == Vb6Type::Object) return Vb6Type::Object;
             // 字符串指针 → String
             if (inner == Vb6Type::String) return Vb6Type::String;
-            // 其他指针 → Object (接口指针)
             // SAFEARRAY指针 (VT_PTR → VT_SAFEARRAY) 保留数组类型
             bool isArray = (static_cast<uint16_t>(inner) & static_cast<uint16_t>(Vb6Type::Array)) != 0;
             if (isArray) return inner;
+            // Fix-074: VT_PTR → 标量类型别名(如 OLE_XSIZE_HIMETRIC→Long, OLE_HANDLE→Long)
+            // 在 COM typelib 中，属性返回类型 VT_PTR → TKIND_ALIAS → VT_I4 是合法的
+            // 递归解析已正确还原底层类型，不应被降级为 Object
+            switch (inner) {
+                case Vb6Type::Long:
+                case Vb6Type::Integer:
+                case Vb6Type::Byte:
+                case Vb6Type::Boolean:
+                case Vb6Type::Single:
+                case Vb6Type::Double:
+                case Vb6Type::Currency:
+                case Vb6Type::Date:
+                case Vb6Type::Error:
+                case Vb6Type::Decimal:
+                    return inner;
+                default:
+                    break;
+            }
             // 其他指针 → Object (接口指针)
             return Vb6Type::Object;
         }
         return Vb6Type::Object;
+    }
+
+    // Fix-074: VT_BYREF 处理 — COM dispatch 接口属性可能使用 VT_BYREF 指向实际类型
+    // 例如 IPicture.Width 的 TypeLib 描述为 VT_BYREF → OLE_XSIZE_HIMETRIC → Long
+    if (vt == VT_BYREF) {
+        if (pTD->lptdesc) {
+            Vb6Type inner = mapTypeDesc(pTD->lptdesc, pTypeInfo);
+            // 标量类型直接透传（与 VT_PTR 相同逻辑）
+            switch (inner) {
+                case Vb6Type::Long:
+                case Vb6Type::Integer:
+                case Vb6Type::Byte:
+                case Vb6Type::Boolean:
+                case Vb6Type::Single:
+                case Vb6Type::Double:
+                case Vb6Type::Currency:
+                case Vb6Type::Date:
+                case Vb6Type::Error:
+                case Vb6Type::Decimal:
+                case Vb6Type::String:
+                    return inner;
+                case Vb6Type::Object:
+                    return Vb6Type::Object;
+                default:
+                    break;
+            }
+            bool isArray = (static_cast<uint16_t>(inner) & static_cast<uint16_t>(Vb6Type::Array)) != 0;
+            if (isArray) return inner;
+            return Vb6Type::Variant;
+        }
+        return Vb6Type::Variant;
     }
 
     if (vt == VT_SAFEARRAY) {

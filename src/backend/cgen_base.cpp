@@ -186,7 +186,10 @@ bool CCodeGen::generate(Module& module, const std::string& baseName,
     {
         static const char* kClashMacros[] = {
             "EOF", "ERROR", "DELETE", "min", "max",
-            "OPTIONAL", "IN", "OUT", "BEEP"
+            "OPTIONAL", "IN", "OUT", "BEEP",
+            // Fix 056: Windows SDK COM interface IID macros clash with VB6 array variables
+            // e.g. Private IID_IPersistStream(0 To 3) As Long
+            "IID_IPersistStream", "IID_IPicture"
         };
         // 使用 #ifdef/#undef 对保护: 未定义的宏也安全跳过
         h_.emitLine("/* Fix 020: undef C/Windows macros clashing with VB6 identifiers */");
@@ -194,6 +197,18 @@ bool CCodeGen::generate(Module& module, const std::string& baseName,
             h_.emitLine(std::string("#ifdef ") + m);
             h_.emitLine(std::string("#undef ") + m);
             h_.emitLine("#endif");
+        }
+        // Fix 059: Windows SDK extern declarations (not macros) also clash with VB6 variable names.
+        // #undef only removes macro definitions, but IID_IPersistStream / IID_IPicture are
+        // declared as 'extern const GUID' in objidl.h / olectl.h. We must #define-remap them
+        // so our generated C code uses a different identifier name.
+        static const char* kClashExterns[] = {
+            "IID_IPersistStream", "IID_IPicture"
+        };
+        h_.emitLine("/* Fix 059: remap Windows SDK extern names that clash with VB6 array vars */");
+        for (auto m : kClashExterns) {
+            std::string remap = "vb6_arr_" + std::string(m);
+            h_.emitLine("#define " + std::string(m) + " " + remap);
         }
     }
     // Fix 010r-11: 注册外部模块的类实例变量到 knownClassVars_
@@ -422,7 +437,9 @@ bool CCodeGen::generate(Module& module, const std::string& baseName,
         if (decl->kind == ASTNodeKind::SubDecl) {
             auto& sub = static_cast<SubDecl&>(*decl);
             std::string sig = makeProcSignature(sub);
-            if (sub.access == AccessLevel::Public) {
+            // Fix 055: Form事件处理函数不能为static, 因为wndproc用extern引用它们
+            bool isFormEventProc = module.isFormModule && sub.name.find("Form_") == 0;
+            if (sub.access == AccessLevel::Public || isFormEventProc) {
                 h_.emitLine(sig + ";");
             } else {
                 h_.emitLine("static " + sig + ";");
@@ -430,7 +447,9 @@ bool CCodeGen::generate(Module& module, const std::string& baseName,
         } else if (decl->kind == ASTNodeKind::FunctionDecl) {
             auto& func = static_cast<FunctionDecl&>(*decl);
             std::string sig = makeProcSignature(func);
-            if (func.access == AccessLevel::Public) {
+            // Fix 055: Form事件处理函数不能为static, 因为wndproc用extern引用它们
+            bool isFormEventFunc = module.isFormModule && func.name.find("Form_") == 0;
+            if (func.access == AccessLevel::Public || isFormEventFunc) {
                 h_.emitLine(sig + ";");
             } else {
                 h_.emitLine("static " + sig + ";");
@@ -735,6 +754,24 @@ bool CCodeGen::generate(Module& module, const std::string& baseName,
     // P13.23: 生成外部COM vtable source interface 事件接收器实现
     emitComVtableSinks();
 
+    // Fix 054: 模块级变量延迟初始化函数 (C2099 workaround)
+    // C语言文件作用域变量不能用运行时函数调用初始化, 所以先声明为 NULL/0,
+    // 再在模块初始化函数中执行实际的 SafeArrayCreate 等运行时初始化.
+    std::string modInitFuncName;
+    if (!moduleInitStmts_.empty()) {
+        modInitFuncName = "vb6_mod_" + cIdent(baseName_) + "_init";
+        c_.emitBlank();
+        c_.emitLine("// Fix 054: Module-level variable deferred initialization (C2099)");
+        c_.emitLine("static void " + modInitFuncName + "(void) {");
+        c_.indent();
+        for (auto& stmt : moduleInitStmts_) {
+            c_.emitLine(stmt);
+        }
+        c_.dedent();
+        c_.emitLine("}");
+        c_.emitBlank();
+    }
+
     // 生成入口点 (类模块不生成main; 多模块工程中仅有Sub Main的模块生成main)
     // P6.6: ActiveX DLL入口点统一由dll_entry.c生成, 不在各模块.c中生成
     if (!isClassModule_) {
@@ -773,9 +810,10 @@ bool CCodeGen::generate(Module& module, const std::string& baseName,
                             c_.emitLine("int WINAPI WinMain(HINSTANCE hInst, HINSTANCE hPrevInst, LPSTR lpCmdLine, int nCmdShow) {");
                             c_.indent();
                             c_.emitLine("(void)hPrevInst; (void)lpCmdLine; (void)nCmdShow;");
-                            c_.emitLine("vb6_Init();");
-                            c_.emitLine("vb6_SetAppInstance((void*)hInst);");
-                            c_.emitLine("vb6_form_show_" + cIdent(formName) + "(NULL);  /* Show form modeless, NULL=hMDIClient */");
+            c_.emitLine("vb6_Init();");
+            if (!modInitFuncName.empty()) c_.emitLine(modInitFuncName + "();");
+            c_.emitLine("vb6_SetAppInstance((void*)hInst);");
+            c_.emitLine("vb6_form_show_" + cIdent(formName) + "(NULL);  /* Show form modeless, NULL=hMDIClient */");
                             c_.emitLine("int ret = vb6_MessageLoop();");
                             c_.emitLine("vb6_Exit();");
                             c_.emitLine("return ret;");
@@ -784,9 +822,10 @@ bool CCodeGen::generate(Module& module, const std::string& baseName,
                         } else {
                             c_.emitLine("int main(int argc, char* argv[]) {");
                             c_.indent();
-                            c_.emitLine("vb6_Init();");
-                            c_.emitLine(cProcName(sub.name, sub.access) + "();");
-                            c_.emitLine("vb6_Exit();");
+            c_.emitLine("vb6_Init();");
+            if (!modInitFuncName.empty()) c_.emitLine(modInitFuncName + "();");
+            c_.emitLine(cProcName(sub.name, sub.access) + "();");
+            c_.emitLine("vb6_Exit();");
                             c_.emitLine("return 0;");
                             c_.dedent();
                             c_.emitLine("}");
@@ -813,8 +852,9 @@ bool CCodeGen::generate(Module& module, const std::string& baseName,
             } else {
                 c_.emitLine("int main(int argc, char* argv[]) {");
                 c_.indent();
-                c_.emitLine("vb6_Init();");
-                c_.emitLine(cProcName("Main", AccessLevel::Public) + "();");
+            c_.emitLine("vb6_Init();");
+            if (!modInitFuncName.empty()) c_.emitLine(modInitFuncName + "();");
+            c_.emitLine(cProcName("Main", AccessLevel::Public) + "();");
                 c_.emitLine("vb6_Exit();");
                 c_.emitLine("return 0;");
                 c_.dedent();
@@ -828,6 +868,7 @@ bool CCodeGen::generate(Module& module, const std::string& baseName,
                 c_.indent();
                 c_.emitLine("(void)hPrevInst; (void)lpCmdLine; (void)nCmdShow;");
                 c_.emitLine("vb6_Init();");
+                if (!modInitFuncName.empty()) c_.emitLine(modInitFuncName + "();");
                 c_.emitLine("vb6_SetAppInstance((void*)hInst);");
                 c_.emitLine("vb6_form_show_" + cIdent(formName) + "(NULL);  /* Show form modeless, NULL=hMDIClient */");
                 c_.emitLine("int ret = vb6_MessageLoop();");

@@ -376,6 +376,8 @@ int32_t vb6_GetKeyPreview(void* hwnd);
 void vb6_SetKeyPreview(void* hwnd, int32_t val);
 int32_t vb6_GetWindowState(void* hwnd);
 void vb6_SetWindowState(void* hwnd, int32_t val);
+int32_t vb6_GetScaleWidth(void* hwnd);
+int32_t vb6_GetScaleHeight(void* hwnd);
 int32_t vb6_GetControlBox(void* hwnd);
 void vb6_SetControlBox(void* hwnd, int32_t val);
 int32_t vb6_GetMaxButton(void* hwnd);
@@ -557,6 +559,18 @@ void vb6_WebViewSetDocumentCompleteCallback(void* hwnd, vb6_WebViewEventCallback
 int vb6_WebViewGoBack(void* hwnd);
 int vb6_WebViewGoForward(void* hwnd);
 int vb6_WebViewRefresh(void* hwnd);
+
+// ============================================================
+// 动态加载控件 (Controls.Add)
+// ============================================================
+
+// 设置Form窗口的IDispatch指针 (Form创建后调用)
+// 用于 Me.Controls.Add 等 COM 属性访问
+void vb6_Form_SetDispatch(void* hwnd, void* pDispatch);
+
+// Me.Controls.Add(progId, name) → 返回新控件的IDispatch*
+// 等价于 VB6: Set ctrl = Me.Controls.Add("WMPlayer.OCX", "WMP1")
+void* vb6_Form_ControlsAdd(void* hwnd, const wchar_t* progId, const wchar_t* ctrlName);
 
 #ifdef __cplusplus
 }

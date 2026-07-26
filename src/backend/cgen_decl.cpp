@@ -1,4 +1,4 @@
-#include "backend/cgen.hpp"
+﻿#include "backend/cgen.hpp"
 #include <algorithm>
 #include <cctype>
 #include <iostream>
@@ -19,7 +19,9 @@ namespace vb6c3 {
 void CCodeGen::visit(SubDecl& node) {
     std::string sig = makeProcSignature(node);
 
-    if (node.access != AccessLevel::Public) {
+    // Fix 055: Form事件处理函数不能为static, 因为wndproc用extern引用它们
+    bool isFormEventProc = isFormModule_ && node.name.find("Form_") == 0;
+    if (node.access != AccessLevel::Public && !isFormEventProc) {
         c_.emitLine("static " + sig + " {");
     } else {
         c_.emitLine(sig + " {");
@@ -31,16 +33,19 @@ void CCodeGen::visit(SubDecl& node) {
     auto* sym = symTab_.lookupModule(node.name);
     currentProc_ = sym;
     currentReturnVar_ = "";
+    currentReturnCType_ = "";  // Fix 054
 
     // 清空已知数组集合 (新过程)
     knownArrays_.clear();
     ansiTempsToFree_.clear();
     ansiCounter_ = 0;
     arrayElemTypes_.clear();
+    arrayUdtElemTypes_.clear();  // Fix 056: 每个过程开始清空UDT数组元素类型
     knownBstrVars_.clear();
     knownDoubleVars_.clear();
     knownLongVars_.clear();
     knownVariantVars_.clear();
+    knownByteArrayVars_.clear();
     // M22-fix: 只清空UDT变量map(旧条目会冲突), set类型不清空(WithEvents等模块级条目需跨过程保留)
     knownUdtVars_.clear();
     knownFixedStringLen_.clear();
@@ -57,12 +62,17 @@ void CCodeGen::visit(SubDecl& node) {
     knownUdtVars_.insert(classUdtMembers_.begin(), classUdtMembers_.end());
 
     // M22-fix: 注册参数中的UDT/类/接口变量到跟踪集合
+    std::cerr << "C3-FIX074-FUNCDECL: funcName='" << node.name << "' paramCount=" << node.params.size() << std::endl;
     for (auto& p : node.params) {
         if (p->asType && p->asType->kind == ASTNodeKind::SimpleTypeRef) {
             auto& simpleP = static_cast<SimpleTypeRef&>(*p->asType);
             std::string pLower = p->name;
             std::transform(pLower.begin(), pLower.end(), pLower.begin(), ::tolower);
             auto* pSym = symTab_.lookupModule(simpleP.name);
+            std::cerr << "C3-FIX074-FUNC-PARAM: param='" << p->name << "' typeName='" << simpleP.name
+                      << "' lookupModule=" << (pSym ? "FOUND" : "NULL");
+            if (pSym) std::cerr << " kind=" << static_cast<int>(pSym->kind);
+            std::cerr << std::endl;
             if (pSym && pSym->kind == SymbolKind::UserDefinedType) {
                 knownUdtVars_[pLower] = "vb6_type_" + cIdent(simpleP.name);
             } else if (pSym && pSym->kind == SymbolKind::Class) {
@@ -106,7 +116,19 @@ void CCodeGen::visit(SubDecl& node) {
             knownArrays_.insert(pLower);
             arrayElemTypes_[pLower] = elemType;
             arrayDimCounts_[pLower] = 1;
+            // Fix 055: 注册UDT数组元素C类型
+            std::string udtCType = resolveArrayUdtElemCType(p->asType.get());
+            if (!udtCType.empty()) {
+                arrayUdtElemTypes_[pLower] = udtCType;
+            }
             knownLocalVars_.insert(pLower);
+        } else {
+            // Fix-074-diag: 检查其他类型引用模式
+            if (p->asType) {
+                std::cerr << "C3-FIX074-DIAG-OTHER: param='" << p->name << "' typeKind=" << static_cast<int>(p->asType->kind) << std::endl;
+            } else {
+                std::cerr << "C3-FIX074-DIAG-OTHER: param='" << p->name << "' asType=NULL" << std::endl;
+            }
         }
     }
 
@@ -181,9 +203,25 @@ void CCodeGen::visit(SubDecl& node) {
 }
 
 void CCodeGen::visit(FunctionDecl& node) {
+    // Fix-074-diag
+    std::cerr << "C3-FIX074-FUNCDECL-VISIT: funcName='" << node.name << "' paramCount=" << node.params.size() << std::endl;
+    for (auto& pp : node.params) {
+        if (pp->asType) {
+            std::cerr << "C3-FIX074-FUNCDECL-PARAM: param='" << pp->name << "' typeKind=" << static_cast<int>(pp->asType->kind);
+            if (pp->asType->kind == ASTNodeKind::SimpleTypeRef) {
+                auto& sp = static_cast<SimpleTypeRef&>(*pp->asType);
+                std::cerr << " typeName='" << sp.name << "'";
+            }
+            std::cerr << std::endl;
+        } else {
+            std::cerr << "C3-FIX074-FUNCDECL-PARAM: param='" << pp->name << "' asType=NULL" << std::endl;
+        }
+    }
     std::string sig = makeProcSignature(node);
 
-    if (node.access != AccessLevel::Public) {
+    // Fix 055: Form事件处理函数不能为static, 因为wndproc用extern引用它们
+    bool isFormEventFunc = isFormModule_ && node.name.find("Form_") == 0;
+    if (node.access != AccessLevel::Public && !isFormEventFunc) {
         c_.emitLine("static " + sig + " {");
     } else {
         c_.emitLine(sig + " {");
@@ -200,10 +238,12 @@ void CCodeGen::visit(FunctionDecl& node) {
     ansiTempsToFree_.clear();
     ansiCounter_ = 0;
     arrayElemTypes_.clear();
+    arrayUdtElemTypes_.clear();  // Fix 056: 每个过程开始清空UDT数组元素类型
     knownBstrVars_.clear();
     knownDoubleVars_.clear();
     knownLongVars_.clear();
     knownVariantVars_.clear();
+    knownByteArrayVars_.clear();
     // M22-fix: 只清空UDT变量map(旧条目会冲突), set类型不清空(WithEvents等模块级条目需跨过程保留)
     knownUdtVars_.clear();
     knownFixedStringLen_.clear();
@@ -226,16 +266,28 @@ void CCodeGen::visit(FunctionDecl& node) {
             std::string pLower = p->name;
             std::transform(pLower.begin(), pLower.end(), pLower.begin(), ::tolower);
             auto* pSym = symTab_.lookupModule(simpleP.name);
+            // Fix-074-diag: IPicture lookupModule result
+            if (simpleP.name == "IPicture" || simpleP.name == "StdPicture" || simpleP.name == "ipicture" || simpleP.name == "stdpicture") {
+                auto* pSym2check = symTab_.lookup(simpleP.name);
+                std::cerr << "C3-FIX074-KEY: param='" << p->name << "' typeName='" << simpleP.name
+                          << "' lookupModule=" << (pSym ? "FOUND" : "NULL");
+                if (pSym) std::cerr << " kind=" << static_cast<int>(pSym->kind);
+                std::cerr << " lookup=" << (pSym2check ? "FOUND" : "NULL");
+                if (pSym2check) std::cerr << " kind=" << static_cast<int>(pSym2check->kind);
+                std::cerr << std::endl;
+            }
             if (pSym && pSym->kind == SymbolKind::UserDefinedType) {
                 knownUdtVars_[pLower] = "vb6_type_" + cIdent(simpleP.name);
             } else if (pSym && pSym->kind == SymbolKind::Class) {
                 knownClassVars_[pLower] = pSym->name;
             } else if (pSym && (pSym->kind == SymbolKind::ComClass || pSym->kind == SymbolKind::ComInterface)) {
                 knownTypedComVars_[pLower] = pSym;
+                std::cerr << "C3-FIX074-REG: registered '" << pLower << "' to knownTypedComVars_ kind=" << static_cast<int>(pSym->kind) << std::endl;
             }
             auto* pSym2 = symTab_.lookup(simpleP.name);
             if (pSym2 && pSym2->kind == SymbolKind::Class && pSym2->isInterface) {
                 knownIfaceVars_[pLower] = pSym2->name;
+                std::cerr << "C3-FIX074-REG2: registered '" << pLower << "' to knownIfaceVars_ name=" << pSym2->name << std::endl;
             }
             // 注册BSTR/Double/Long类型参数到类型跟踪集合
             Vb6Type paramType = typeSys_.resolveTypeName(simpleP.name);
@@ -268,6 +320,9 @@ void CCodeGen::visit(FunctionDecl& node) {
             knownArrays_.insert(pLower);
             arrayElemTypes_[pLower] = elemType;
             arrayDimCounts_[pLower] = 1;
+            // Fix 055: 注册UDT数组元素C类型
+            std::string udtCType = resolveArrayUdtElemCType(p->asType.get());
+            if (!udtCType.empty()) arrayUdtElemTypes_[pLower] = udtCType;
             knownLocalVars_.insert(pLower);
         }
     }
@@ -282,11 +337,13 @@ void CCodeGen::visit(FunctionDecl& node) {
     // Function返回值变量
     std::string retType = mapTypeRef(node.returnType.get());
     currentReturnVar_ = "vb6_ret_" + cIdent(node.name);
+    currentReturnCType_ = retType;  // Fix 054: 保存返回类型C名称, 供With块UDT检测
     Vb6Type funcRetVb6Type = node.returnType ? typeSys_.resolveTypeName(static_cast<SimpleTypeRef*>(node.returnType.get())->name) : Vb6Type::Variant;
-    // Fix 038: UDT 返回值不能用 = 0 初始化 (C2440), 改用 {0} 零初始化
+    // Fix 038/054: UDT 返回值不能用 = 0 初始化 (C2440), 改用 {0} 零初始化
+    // 修复: 仅检查 C 类型名前缀即可 (typeSys 可能将 UDT 解析为 Unknown/Variant)
     {
         std::string initVal = defaultValue(funcRetVb6Type);
-        if (funcRetVb6Type == Vb6Type::UserDefinedType && retType.rfind("vb6_type_", 0) == 0) {
+        if (retType.rfind("vb6_type_", 0) == 0) {
             initVal = "{0}";
         }
         c_.emitLine(retType + " " + currentReturnVar_ + " = " + initVal + ";");
@@ -357,6 +414,7 @@ void CCodeGen::visit(FunctionDecl& node) {
 
     currentProc_ = nullptr;
     currentReturnVar_ = "";
+    currentReturnCType_ = "";  // Fix 054
     inStaticProc_ = false;
     hasGoSub_ = false;
     hasOnError_ = false;
@@ -429,15 +487,18 @@ std::string CCodeGen::makeParamList(std::vector<std::unique_ptr<ParameterDecl>>&
             }
         }
 
-        // Fix 010r-6: Array parameters are already vb6_SafeArray1D* (from mapTypeRef),
-        // so no extra * for ByRef. Previously Byte arrays were special-cased to uint8_t*,
-        // but that broke VB6_SA_AT access which needs ->data and ->lBound members.
+        // Fix 010r-6 rev2: ByRef array parameters need vb6_SafeArray1D** (double pointer)
+        // so the callee can assign a new SafeArray (e.g. ReDim) and the caller sees it.
+        // ByVal array params and As Any params stay as single pointer.
         bool isArrayParam = (p->asType && p->asType->kind == ASTNodeKind::ArrayTypeRef);
 
-        if (p->isByVal || isArrayParam || isAnyType) {
+        if (p->isByVal || isAnyType) {
             result += cType + " " + cName;
+        } else if (isArrayParam) {
+            // ByRef array: vb6_SafeArray1D** — callee can modify the caller's pointer
+            result += cType + "* " + cName;
         } else {
-            // ByRef → C指针
+            // ByRef → C pointer
             result += cType + "* " + cName;
         }
     }
@@ -612,10 +673,14 @@ void CCodeGen::visit(VariableDecl& node) {
             if (dim.lower) { emitExpr(*dim.lower); lBound = std::move(lastExpr_); }
             if (dim.upper) { emitExpr(*dim.upper); uBound = std::move(lastExpr_); }
             std::string initCode = "vb6_SafeArrayCreate1D(" + saElemType + ", " + lBound + ", " + uBound + ")";
+            // Fix 054: C语言文件作用域变量必须用常量表达式初始化 (C2099)
+            // 改为先声明为NULL, 再在模块初始化函数中赋值
             if (node.access == AccessLevel::Public) {
-                c_.emitLine(cType + " " + cName + " = " + initCode + ";");
+                c_.emitLine(cType + " " + cName + " = NULL;");
+                moduleInitStmts_.push_back(cName + " = " + initCode + ";");
             } else {
-                c_.emitLine("static " + cType + " " + cName + " = " + initCode + ";");
+                c_.emitLine("static " + cType + " " + cName + " = NULL;");
+                moduleInitStmts_.push_back(cName + " = " + initCode + ";");
             }
         } else {
             // 多维数组: 使用ND运行时
@@ -633,10 +698,13 @@ void CCodeGen::visit(VariableDecl& node) {
             c_.dedent();
             c_.emitLine("};");
             std::string initCode = "vb6_SafeArrayCreateND(" + saElemType + ", " + std::to_string(dimCount) + ", " + boundsVar + ")";
+            // Fix 054: C语言文件作用域变量必须用常量表达式初始化 (C2099)
             if (node.access == AccessLevel::Public) {
-                c_.emitLine(cType + " " + cName + " = " + initCode + ";");
+                c_.emitLine(cType + " " + cName + " = NULL;");
+                moduleInitStmts_.push_back(cName + " = " + initCode + ";");
             } else {
-                c_.emitLine("static " + cType + " " + cName + " = " + initCode + ";");
+                c_.emitLine("static " + cType + " " + cName + " = NULL;");
+                moduleInitStmts_.push_back(cName + " = " + initCode + ";");
             }
         }
         } // end if (!trackOnly_)
@@ -647,6 +715,13 @@ void CCodeGen::visit(VariableDecl& node) {
         knownArrays_.insert(lower);
         arrayElemTypes_[lower] = elemType;
         arrayDimCounts_[lower] = dimCount;
+        // Fix 062: Byte 数组变量注册
+        if (elemType == Vb6Type::Byte) knownByteArrayVars_.insert(lower);
+        // Fix 055: 注册UDT数组元素C类型
+        {
+            std::string udtCType = resolveArrayUdtElemCType(node.asType.get());
+            if (!udtCType.empty()) arrayUdtElemTypes_[lower] = udtCType;
+        }
         if (!trackOnly_) knownLocalVars_.insert(lower);
         return;
     }
@@ -671,6 +746,13 @@ void CCodeGen::visit(VariableDecl& node) {
         knownArrays_.insert(lower);
         arrayElemTypes_[lower] = elemType;
         arrayDimCounts_[lower] = 1;  // 动态数组默认1D
+        // Fix 062: Byte 数组变量注册
+        if (elemType == Vb6Type::Byte) knownByteArrayVars_.insert(lower);
+        // Fix 055: 注册UDT数组元素C类型
+        {
+            std::string udtCType = resolveArrayUdtElemCType(node.asType.get());
+            if (!udtCType.empty()) arrayUdtElemTypes_[lower] = udtCType;
+        }
         if (!trackOnly_) knownLocalVars_.insert(lower);
         return;
     }
@@ -763,6 +845,17 @@ void CCodeGen::visit(VariableDecl& node) {
             cType = "HWND";  // 控件WithEvents变量存储HWND
             knownObjectVars_.erase(lower16);  // 移除可能的void*标记
             knownVariantVars_.erase(lower16);  // 移除可能的Variant标记
+        } else {
+            // Fix 056a: 非标准控件的WithEvents变量(如VBControlExtender)当作COM对象
+            // cType可能是int32_t(mapTypeRef默认值), 必须改为void*
+            std::string lower16 = node.name;
+            std::transform(lower16.begin(), lower16.end(), lower16.begin(), ::tolower);
+            if (cType != "void*") {
+                cType = "void*";
+                knownObjectVars_.insert(lower16);
+                knownVariantVars_.erase(lower16);
+                knownLongVars_.erase(lower16);
+            }
         }
     }
 // 记录变量类型集合 (用于Debug.Print和COM解封类型推断)
@@ -966,7 +1059,12 @@ void CCodeGen::visit(DeclareDecl& node) {
     std::string diGuard = "VB6_DI_" + sanitizedExport + "_DEFINED";
     h_.emitLine("#ifndef " + diGuard);
     h_.emitLine("#define " + diGuard);
-    h_.emitLine("__declspec(dllimport) " + retType + " " + callConv + " " + cExportedIdent + "(" + params + ");");
+    // Fix 076: Changed from __declspec(dllimport) to extern declaration.
+    // __declspec(dllimport) creates import symbols named vb6_di_Xxx that can't be
+    // resolved by Windows import libraries (which export the real API names like
+    // CloseEnhMetaFile, not vb6_di_CloseEnhMetaFile). Instead, we declare them as
+    // extern and provide forwarding stubs in vb6rtl.c that bridge vb6_di_Xxx → real API.
+    h_.emitLine("extern " + retType + " " + callConv + " " + cExportedIdent + "(" + params + ");");
     h_.emitLine("#endif");
 
     // 生成: #define <VB6名> → <内部导入名> (仅当VB6名未被SDK定义为宏时)
@@ -1012,10 +1110,12 @@ void CCodeGen::visit(PropertyDecl& node) {
     ansiTempsToFree_.clear();
     ansiCounter_ = 0;
     arrayElemTypes_.clear();
+    arrayUdtElemTypes_.clear();  // Fix 056: 每个过程开始清空UDT数组元素类型
     knownBstrVars_.clear();
     knownDoubleVars_.clear();
     knownLongVars_.clear();
     knownVariantVars_.clear();
+    knownByteArrayVars_.clear();
     // M22-fix: 只清空UDT变量map(旧条目会冲突), set类型不清空(WithEvents等模块级条目需跨过程保留)
     knownUdtVars_.clear();
     knownFixedStringLen_.clear();
@@ -1044,10 +1144,12 @@ void CCodeGen::visit(PropertyDecl& node) {
                 knownClassVars_[pLower] = pSym->name;
             } else if (pSym && (pSym->kind == SymbolKind::ComClass || pSym->kind == SymbolKind::ComInterface)) {
                 knownTypedComVars_[pLower] = pSym;
+                std::cerr << "C3-FIX074-REG: registered '" << pLower << "' to knownTypedComVars_ kind=" << static_cast<int>(pSym->kind) << std::endl;
             }
             auto* pSym2 = symTab_.lookup(simpleP.name);
             if (pSym2 && pSym2->kind == SymbolKind::Class && pSym2->isInterface) {
                 knownIfaceVars_[pLower] = pSym2->name;
+                std::cerr << "C3-FIX074-REG2: registered '" << pLower << "' to knownIfaceVars_ name=" << pSym2->name << std::endl;
             }
             // 注册BSTR/Double/Long类型参数到类型跟踪集合
             Vb6Type paramType = typeSys_.resolveTypeName(simpleP.name);
@@ -1080,6 +1182,9 @@ void CCodeGen::visit(PropertyDecl& node) {
             knownArrays_.insert(pLower);
             arrayElemTypes_[pLower] = elemType;
             arrayDimCounts_[pLower] = 1;
+            // Fix 055: 注册UDT数组元素C类型
+            std::string udtCType = resolveArrayUdtElemCType(p->asType.get());
+            if (!udtCType.empty()) arrayUdtElemTypes_[pLower] = udtCType;
             knownLocalVars_.insert(pLower);
         }
     }
@@ -1096,9 +1201,10 @@ void CCodeGen::visit(PropertyDecl& node) {
             std::string retType = mapTypeRef(node.returnType.get());
             Vb6Type retVb6Type = typeSys_.resolveTypeName(
                 static_cast<SimpleTypeRef*>(node.returnType.get())->name);
-            // Fix 038: UDT 返回值不能用 = 0 初始化 (C2440), 改用 {0}
+            // Fix 038/054: UDT 返回值不能用 = 0 初始化 (C2440), 改用 {0}
+            // 修复: 仅检查 C 类型名前缀即可 (typeSys 可能将 UDT 解析为 Unknown/Variant)
             std::string initVal = defaultValue(retVb6Type);
-            if (retVb6Type == Vb6Type::UserDefinedType && retType.rfind("vb6_type_", 0) == 0) {
+            if (retType.rfind("vb6_type_", 0) == 0) {
                 initVal = "{0}";
             }
             c_.emitLine(retType + " " + currentReturnVar_ + " = " + initVal + ";");

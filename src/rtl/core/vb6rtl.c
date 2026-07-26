@@ -1934,6 +1934,24 @@ void vb6_Clipboard_Clear(void) {
     if (OpenClipboard(NULL)) { EmptyClipboard(); CloseClipboard(); }
 }
 
+// Fix 056: Clipboard.SetData — copy IPicture bitmap to clipboard
+void vb6_Clipboard_SetData(void* pPicture) {
+    if (!pPicture) return;
+    if (!OpenClipboard(NULL)) return;
+    EmptyClipboard();
+    // Try to get bitmap handle from IPicture
+    HBITMAP hBmp = NULL;
+    IPicture* pPic = (IPicture*)pPicture;
+    HANDLE hPal = NULL;
+    OLE_HANDLE hOleHandle = 0;
+    pPic->lpVtbl->get_Handle(pPic, &hOleHandle);
+    hBmp = (HBITMAP)(uintptr_t)hOleHandle;
+    if (hBmp) {
+        SetClipboardData(CF_BITMAP, hBmp);
+    }
+    CloseClipboard();
+}
+
 int32_t vb6_Clipboard_GetFormat(int32_t format) {
     /* format: 1=vbCFText, 2=vbCFBitmap, 3=vbCFMetafile, 8=vbCFDIB, 9=vbCFPalette, &HBF00+=vbCFRtf */
     UINT cf = CF_UNICODETEXT;

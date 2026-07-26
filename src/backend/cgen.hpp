@@ -219,6 +219,7 @@ private:
     Module* currentModule_ = nullptr;
     Symbol* currentProc_ = nullptr;  // 当前过程符号
     std::string currentReturnVar_;   // Function返回值变量名 (如 "vb6_ret_CalculateSum")
+    std::string currentReturnCType_; // Fix 054: 当前函数返回值的C类型名 (如 "vb6_type_QRCodegenSegment")
     int labelCounter_ = 0;           // 标签计数器 (避免C标签冲突)
     int tempCounter_ = 0;            // 临时变量计数器
 
@@ -255,6 +256,9 @@ private:
     // P14.3.1: Dim As New自动实例化变量集合 (小写key → 类名C标识)
     std::unordered_map<std::string, std::string> knownNewVars_;
 
+    // Fix 054: 模块级变量延迟初始化语句 (C2099: 文件作用域变量不能用运行时函数调用初始化)
+    std::vector<std::string> moduleInitStmts_;
+
     // P14.3.2: 循环栈 - 支持嵌套Exit For/Exit Do跳转到正确层
     struct LoopInfo {
         ExitKind kind;          // For 或 Do
@@ -269,6 +273,10 @@ private:
     std::unordered_map<std::string, Vb6Type> arrayElemTypes_;
     // P8.1: 数组名 → 维度数 (小写key, 1=一维1D, 2+=多维ND)
     std::unordered_map<std::string, int> arrayDimCounts_;
+    // Fix 055: 数组名 → UDT元素C类型 (小写key, e.g. "uvectors" → "vb6_type_RECT")
+    // 当数组元素类型为 UserDefinedType 时, 记录实际 UDT C 类型名,
+    // 让 VB6_SA_AT / VB6_SA_ND_AT2 使用正确的 struct 类型而非 vb6_VARIANT
+    std::unordered_map<std::string, std::string> arrayUdtElemTypes_;
 
     // 已知BSTR变量名集合 (小写) - 用于Debug.Print等场景判断表达式类型
     std::unordered_set<std::string> knownBstrVars_;
@@ -281,6 +289,9 @@ private:
 
     // P8.4: 已知Variant变量名集合 (小写) - 用于赋值时包装值
     std::unordered_set<std::string> knownVariantVars_;
+
+    // Fix 062: 已知Byte数组变量名集合 (小写) - 用于Variant→SafeArray1D*转换
+    std::unordered_set<std::string> knownByteArrayVars_;
 
 
     // P6.11: 类模块成员变量类型集合 (小写, 含m_前缀格式)
@@ -713,6 +724,8 @@ private:
     std::string mapSaElemCType(Vb6Type type) const;
     // 从ArrayTypeRef或asType获取元素Vb6Type
     Vb6Type resolveArrayElemType(ASTNode* typeRef) const;
+    // Fix 055: 从ArrayTypeRef获取UDT元素C类型名 (如"vb6_type_RECT"), 非UDT返回空串
+    std::string resolveArrayUdtElemCType(ASTNode* typeRef) const;
 };
 
 } // namespace vb6c3

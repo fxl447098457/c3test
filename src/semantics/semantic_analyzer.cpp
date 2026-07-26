@@ -557,6 +557,15 @@ Vb6Type SemanticAnalyzer::resolveTypeRef(ASTNode* typeRef) {
             auto& simple = static_cast<SimpleTypeRef&>(*typeRef);
             Vb6Type t = typeSys_.resolveTypeName(simple.name);
             if (t == Vb6Type::Unknown) {
+                // Fix 069: "As Any" 是 VB6 Declare 语句中故意使用的基础类型,
+                // 映射为 Vb6Type::Unknown 且不应被回退为 Variant.
+                // 原代码将所有 Unknown 统一回退为 Variant, 导致 As Any 参数
+                // 在 calleeParams 中类型为 Variant → 调用点生成 VARIANT 复合字面量
+                // 而非 (void*) 指针 → MSVC C2440 类型转换错误.
+                std::string lowerName = Symbol::toLower(simple.name);
+                if (lowerName == "any") {
+                    return Vb6Type::Unknown;
+                }
                 // Fix 040a: VB6内置对象类型 (Collection, ErrObject等) → Object (void*).
                 // 与 cgen_base.cpp mapTypeRef 的 vb6BuiltinObjTypes 集合保持一致.
                 // 若返回 Variant, 则 ByVal Collection 参数会被 Fix 024 P2 错误地用
@@ -2313,6 +2322,11 @@ void SemanticAnalyzer::registerBuiltins() {
     // WindowState constants
     addConst("vbMinimized", Vb6Type::Long, 1);
     addConst("vbMaximized", Vb6Type::Long, 2);
+
+    // Fix 056: CheckBox constants
+    addConst("vbUnchecked", Vb6Type::Long, 0);
+    addConst("vbChecked", Vb6Type::Long, 1);
+    addConst("vbGrayed", Vb6Type::Long, 2);
 
     // String constants (additional)
     addStrConst("vbNullString", "");

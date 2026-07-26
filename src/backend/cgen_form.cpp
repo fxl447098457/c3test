@@ -633,11 +633,13 @@ void CCodeGen::emitFormFramework(const FrmFormDesc& frmDesc, Module& module) {
     // CreateFormWindow还未返回，vb6_hwnd_尚未被赋值
     c_.emitLine("vb6_hwnd_" + cIdent(formName) + " = (void*)hwnd;  /* early assign for Form_Load */");
 
+    // Fix 058: Form_Load 用 PostMessage 延迟执行, 避免在 WM_CREATE 中
+    // 执行 COM 操作 (如 Controls.Add) 导致消息死锁
     // 调用VB6 Form_Load事件 (仅当存在时调用)
     std::string formLoadFn = cProcName("Form_Load", AccessLevel::Private);
     auto* formLoadSym = symTab_.lookup("Form_Load");
     if (formLoadSym) {
-        c_.emitLine("{ /* Form_Load */ extern void " + formLoadFn + "(); " + formLoadFn + "(); }");
+        c_.emitLine("PostMessageA(hwnd, 0x7FF0, 0, 0);  /* defer Form_Load */");
     }
     // P24-Timer: 在WM_CREATE中注册Timer (此时hwnd可用)
     for (const auto& ctrl : frmDesc.formControl.children) {
@@ -684,6 +686,16 @@ void CCodeGen::emitFormFramework(const FrmFormDesc& frmDesc, Module& module) {
             c_.dedent();
             c_.emitLine("}");
         }
+    }
+
+    // Fix 058: 处理延迟的 Form_Load (WM_USER+0x100 = 0x7FF0)
+    if (formLoadSym) {
+        c_.emitLine("case 0x7FF0: {");
+        c_.indent();
+        c_.emitLine("{ /* Form_Load (deferred from WM_CREATE) */ extern void " + formLoadFn + "(); " + formLoadFn + "(); }");
+        c_.emitLine("break;");
+        c_.dedent();
+        c_.emitLine("}");
     }
 
     // WM_COMMAND: 按钮点击等 (P7.6: 支持控件数组Index参数)
@@ -1075,7 +1087,7 @@ void CCodeGen::emitFormFramework(const FrmFormDesc& frmDesc, Module& module) {
 
     // P14.4.1d: WM_SIZE -> Form_Resize() (仅当处理器存在时生成)
     {
-        std::string resizeFn = cProcName(formName + "_Resize", AccessLevel::Private);
+        std::string resizeFn = cProcName("Form_Resize", AccessLevel::Private);
         if (symTab_.lookup(formName + "_Resize") || symTab_.lookup("Form_Resize")) {
             c_.emitLine("case WM_SIZE: {");
             c_.indent();
@@ -1088,7 +1100,7 @@ void CCodeGen::emitFormFramework(const FrmFormDesc& frmDesc, Module& module) {
 
     // P14.4.1e: WM_KEYDOWN/WM_CHAR -> Form_KeyDown/KeyPress (仅当处理器存在时)
     {
-        std::string keyDownFn = cProcName(formName + "_KeyDown", AccessLevel::Private);
+        std::string keyDownFn = cProcName("Form_KeyDown", AccessLevel::Private);
         if (symTab_.lookup(formName + "_KeyDown") || symTab_.lookup("Form_KeyDown")) {
             c_.emitLine("case WM_KEYDOWN: {");
             c_.indent();
@@ -1100,7 +1112,7 @@ void CCodeGen::emitFormFramework(const FrmFormDesc& frmDesc, Module& module) {
         }
     }
     {
-        std::string keyPressFn = cProcName(formName + "_KeyPress", AccessLevel::Private);
+        std::string keyPressFn = cProcName("Form_KeyPress", AccessLevel::Private);
         if (symTab_.lookup(formName + "_KeyPress") || symTab_.lookup("Form_KeyPress")) {
             c_.emitLine("case WM_CHAR: {");
             c_.indent();
@@ -1113,7 +1125,7 @@ void CCodeGen::emitFormFramework(const FrmFormDesc& frmDesc, Module& module) {
     }
     // P18-B: Form_KeyUp (WM_KEYUP)
     {
-        std::string keyUpFn = cProcName(formName + "_KeyUp", AccessLevel::Private);
+        std::string keyUpFn = cProcName("Form_KeyUp", AccessLevel::Private);
         if (symTab_.lookup(formName + "_KeyUp") || symTab_.lookup("Form_KeyUp")) {
             c_.emitLine("case WM_KEYUP: {");
             c_.indent();
@@ -1126,9 +1138,9 @@ void CCodeGen::emitFormFramework(const FrmFormDesc& frmDesc, Module& module) {
     }
     // P18-B: Form_MouseDown/MouseUp/MouseMove (WM_LBUTTONDOWN/UP/MOVE)
     {
-        std::string mouseDownFn = cProcName(formName + "_MouseDown", AccessLevel::Private);
-        std::string mouseUpFn = cProcName(formName + "_MouseUp", AccessLevel::Private);
-        std::string mouseMoveFn = cProcName(formName + "_MouseMove", AccessLevel::Private);
+        std::string mouseDownFn = cProcName("Form_MouseDown", AccessLevel::Private);
+        std::string mouseUpFn = cProcName("Form_MouseUp", AccessLevel::Private);
+        std::string mouseMoveFn = cProcName("Form_MouseMove", AccessLevel::Private);
         bool hasMouseDown = symTab_.lookup(formName + "_MouseDown") || symTab_.lookup("Form_MouseDown");
         bool hasMouseUp = symTab_.lookup(formName + "_MouseUp") || symTab_.lookup("Form_MouseUp");
         bool hasMouseMove = symTab_.lookup(formName + "_MouseMove") || symTab_.lookup("Form_MouseMove");

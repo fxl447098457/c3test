@@ -9,6 +9,7 @@
 #include <vector>
 #include <memory>
 #include <cstdint>
+#include <set>
 
 namespace vb6c3 {
 
@@ -466,6 +467,7 @@ public:
     ExprPtr callee;                    // 被调用者 (IdentifierExpr 或 MemberAccessExpr)
     std::vector<ExprPtr> positional;   // 位置参数
     std::vector<NamedArg> named;       // 命名参数
+    std::set<size_t> byvalOverrides;  // Fix 072: ByVal 覆盖的参数索引 (VB6 允许 ByVal x 覆盖 ByRef 声明)
 
     IndexOrCallExpr(SourceLocation loc, ExprPtr callee)
         : Expr(ASTNodeKind::IndexOrCallExpr, loc),
