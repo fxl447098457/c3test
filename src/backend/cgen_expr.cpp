@@ -1,4 +1,4 @@
-#include "backend/cgen.hpp"
+﻿#include "backend/cgen.hpp"
 #include <algorithm>
 #include <cctype>
 #include <iostream>
@@ -233,6 +233,8 @@ void CCodeGen::visit(IdentifierExpr& node) {
     if (lower == "vbnothing")      { lastExpr_ = "NULL"; return; }
     if (lower == "vbtrue")         { lastExpr_ = "(-1)"; return; }
     if (lower == "vbfalse")        { lastExpr_ = "0"; return; }
+    // Fix 056b: vbUseDefault (-2) - 常用于字体/光标等可选参数
+    if (lower == "vbusedefault")   { lastExpr_ = "(-2)"; return; }
 
     // Fix 010q: VarType constants
     if (lower == "vbempty")        { lastExpr_ = "0"; return; }
@@ -397,11 +399,21 @@ void CCodeGen::visit(IdentifierExpr& node) {
                   || foundSym->kind == SymbolKind::Constant)) {
         // Fix 017: 数值常量 (内置 vbMethod=2/vbDirectory=16, 或用户 Public Const,
         // 或跨模块注入的 EnumMember-as-Constant) 直接输出数值, 避免发出裸标识符
-        // (C 代码中无对应 #define → C2065). hasConstValue 仅对整型常量为 true,
-        // 字符串常量等不受影响.
+        // (C 代码中无对应 #define → C2065).
+        // Fix 081d: 仅对整型/浮点/布尔常量内联数值; 字符串常量(hasConstValue=true
+        // 但 constType==String) 必须走正常标识符路径, 引用 #define 宏名, 否则
+        // constIntValue==0 被错误输出为 "0".
         if (foundSym->kind == SymbolKind::Constant && foundSym->hasConstValue) {
-            lastExpr_ = std::to_string(foundSym->constIntValue);
-            return;
+            if (foundSym->constType == Vb6Type::Long || foundSym->constType == Vb6Type::Integer
+                || foundSym->constType == Vb6Type::Boolean || foundSym->constType == Vb6Type::Byte
+                || foundSym->constType == Vb6Type::Error) {
+                lastExpr_ = std::to_string(foundSym->constIntValue);
+                return;
+            } else if (foundSym->constType == Vb6Type::Single || foundSym->constType == Vb6Type::Double) {
+                lastExpr_ = std::to_string(foundSym->constFloatValue);
+                return;
+            }
+            // 字符串常量和其他类型: 不内联, 让代码继续走标识符路径引用 #define 宏
         }
         // P11.7: 如果是内置Object类型变量(=窗体控件), 优先走默认属性读取
         if (foundSym->isBuiltin && foundSym->type == Vb6Type::Object) {
@@ -1059,6 +1071,42 @@ void CCodeGen::visit(BinaryExpr& node) {
             else if (right.find("vb6_ComGetStringProp") == 0) rt = Vb6Type::String;
             else if (right.find("vb6_ComGetObjectProp") == 0) rt = Vb6Type::Object;
         }
+        // Bug #2 fix: also check knownLongVars_/knownLongPtrVars_ for simple variable names
+        // because inferExprType may return Variant for optional params or out-of-scope variables
+        auto isSimpleIdent = [](const std::string& s) -> bool {
+            if (s.empty()) return false;
+            if (!(std::isalpha(static_cast<unsigned char>(s[0])) || s[0] == '_')) return false;
+            for (char c : s) { if (!std::isalnum(static_cast<unsigned char>(c)) && c != '_') return false; }
+            return true;
+        };
+        if (lt == Vb6Type::Variant && isSimpleIdent(left)) {
+            std::string lower = left;
+            std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+            if (knownLongPtrVars_.count(lower)) lt = Vb6Type::LongPtr;
+            else if (knownLongVars_.count(lower)) lt = Vb6Type::Long;
+        }
+        if (rt == Vb6Type::Variant && isSimpleIdent(right)) {
+            std::string lower = right;
+            std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+            if (knownLongPtrVars_.count(lower)) rt = Vb6Type::LongPtr;
+            else if (knownLongVars_.count(lower)) rt = Vb6Type::Long;
+        }
+        // Bug #2 fix: LongPtr (intptr_t) comparisons should use direct C operators
+        // instead of VarCmpLong which treats the operand as vb6_VARIANT*
+        if (lt == Vb6Type::LongPtr || rt == Vb6Type::LongPtr) {
+            std::string op;
+            switch (node.op) {
+                case BinaryOp::Eq:  op = "=="; break;
+                case BinaryOp::Neq: op = "!="; break;
+                case BinaryOp::Lt:  op = "<";  break;
+                case BinaryOp::Gt:  op = ">";  break;
+                case BinaryOp::Le:  op = "<="; break;
+                case BinaryOp::Ge:  op = ">="; break;
+                default: op = "=="; break;
+            }
+            lastExpr_ = "(" + left + " " + op + " " + right + ")";
+            return;
+        }
         if (lt == Vb6Type::Variant || rt == Vb6Type::Variant) {
             // 确定比较函数后缀
             std::string cmpFn;
@@ -1203,7 +1251,9 @@ void CCodeGen::visit(MemberAccessExpr& node) {
         std::string _memLower = node.memberName;
         std::transform(_memLower.begin(), _memLower.end(), _memLower.begin(), ::tolower);
 
-        if (_objLower == "err") {
+        if (_objLower == "err" || _objLower == "lasterror") {
+            // Fix 056b: LastError 属性返回 VBA.ErrObject (全局单例),
+            // .Number/.Description/.Source 等价于 Err.Number 等.
             if (_memLower == "number")      { lastExpr_ = "vb6_ErrNumber()";      return; }
             if (_memLower == "description") { lastExpr_ = "vb6_ErrDescription()"; return; }
             if (_memLower == "source")      { lastExpr_ = "vb6_ErrSource()";      return; }
@@ -1311,6 +1361,8 @@ void CCodeGen::visit(MemberAccessExpr& node) {
             if (memLower == "major") { lastExpr_ = "0"; return; }
             if (memLower == "minor") { lastExpr_ = "0"; return; }
             if (memLower == "revision") { lastExpr_ = "0"; return; }
+            // Fix 056b: App.ThreadID - 当前线程ID (windows.h 已包含)
+            if (memLower == "threadid") { lastExpr_ = "(int32_t)GetCurrentThreadId()"; return; }
         }
 
         // P18-C: Clipboard 对象
@@ -1444,13 +1496,6 @@ void CCodeGen::visit(MemberAccessExpr& node) {
 
         // 优先级0: COM前期绑定成员访问 (P6.3, Dim x As FileSystemObject)
         // 有具体类型信息的COM变量, 通过vtable直接调用而非IDispatch::Invoke
-        // Fix-074-diag
-        if (objLower.find("picture") != std::string::npos) {
-            std::cerr << "C3-FIX074-MAE: objLower='" << objLower << "' member='" << node.memberName
-                      << "' knownTypedComVars_.count=" << knownTypedComVars_.count(objLower)
-                      << " knownObjectVars_.count=" << knownObjectVars_.count(objLower)
-                      << " knownIfaceVars_.count=" << knownIfaceVars_.count(objLower) << std::endl;
-        }
         if (knownTypedComVars_.count(objLower)) {
             emitExpr(*node.object);
             comObjExpr_ = lastExpr_;       // 保存对象表达式
@@ -1574,6 +1619,25 @@ void CCodeGen::visit(MemberAccessExpr& node) {
                 isVarName = true;
             }
 
+            // Fix 083c: obj 是当前模块的属性(返回类对象) → pvSocket.GetLocalHost(...)
+            // 不能按"模块名.方法"处理(会丢失对象实例导致 me 参数缺失 C2198),
+            // 生成: vb6_<ObjClass>_<Method>((void*)vb6_<Mod>_prop_get_pvSocket(me), args...)
+            if (!isVarName && objSym && objSym->kind == SymbolKind::PropertyGet &&
+                !objSym->variableTypeName.empty()) {
+                std::string propMod = objSym->isExternal ? objSym->sourceModule
+                                    : (isClassModule_ ? moduleName_ : "");
+                if (!propMod.empty()) {  // 仅类模块属性带 me
+                    std::string propClass = objSym->variableTypeName;
+                    std::string resolvedFn = resolveClassMemberCall(propClass, node.memberName);
+                    if (!resolvedFn.empty()) {
+                        std::string propFn = cProcName("prop_get_" + objIdent.name, objSym->access, propMod);
+                        std::string objExpr = propFn + "((void*)me)";
+                        lastExpr_ = resolvedFn + "((void*)" + objExpr + ")";
+                        return;
+                    }
+                }
+            }
+
             if (!isVarName) {
                 // 确定函数名的模块前缀
                 std::string sourceMod;
@@ -1617,6 +1681,14 @@ void CCodeGen::visit(MemberAccessExpr& node) {
         if (!isVarName2 && knownObjectVars_.count(objLower2)) isVarName2 = true;
         if (!isVarName2 && knownTypedComVars_.count(objLower2)) isVarName2 = true;
         if (!isVarName2 && knownIfaceVars_.count(objLower2)) isVarName2 = true;
+        // Fix 056b: 属性符号也是有效对象表达式 (PropertyGet/Let/Set),
+        // 不能当作"模块名限定符"处理, 否则 LastError.Number → vb6_LastError_Number (C2065)
+        if (!isVarName2 && objSym2 &&
+            (objSym2->kind == SymbolKind::PropertyGet ||
+             objSym2->kind == SymbolKind::PropertyLet ||
+             objSym2->kind == SymbolKind::PropertySet)) {
+            isVarName2 = true;
+        }
         if (!isVarName2) {
             // object不是已知变量 → 假设是模块名限定符
             // 成员是变量: Module1.myName
@@ -1633,6 +1705,23 @@ void CCodeGen::visit(MemberAccessExpr& node) {
             }
             lastExpr_ = isIncluded2 ? varName2 : ("vb6_" + cIdent(modName2) + "_" + varName2);
             return;
+        }
+    }
+
+    // Fix 083d: 函数调用结果上的方法调用 — pvToSocket(.SocketPtr(lIdx)).frNotifyGetHostByName(...)
+    // object 是非标识符表达式(方法调用返回类实例) → 用类型推断得到类名,
+    // 生成全局方法调用 vb6_<Class>_<Method>((void*)<objExpr>, args...),
+    // 避免生成 objExpr.member(args) 非法 C (C2039/结构体无此成员)
+    if (node.object && node.object->kind != ASTNodeKind::IdentifierExpr) {
+        std::string className = inferClassTypeOfExpr(*node.object);
+        if (!className.empty()) {
+            std::string resolvedFn = resolveClassMemberCall(className, node.memberName);
+            if (!resolvedFn.empty()) {
+                emitExpr(*node.object);
+                std::string objExpr = std::move(lastExpr_);
+                lastExpr_ = resolvedFn + "((void*)" + objExpr + ")";
+                return;
+            }
         }
     }
 
@@ -2099,7 +2188,14 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
             elemCType = mapSaElemCType(arrElemType);
         }
 
-        if (dimCount == 1 || node.positional.size() == 1) {
+        // Fix 081f: Dynamic array params default dimCount=1, but VB6 arr(i,j) has 2 indices.
+        // Use positional.size() as the authoritative dimCount when it's >= 2.
+        int actualDimCount = dimCount;
+        if ((int)node.positional.size() >= 2 && (int)node.positional.size() > dimCount) {
+            actualDimCount = (int)node.positional.size();
+        }
+
+        if (actualDimCount == 1 || node.positional.size() == 1) {
             // 一维访问: arr(i) -> VB6_SA_AT(type, arr, i)
             std::string index = "0";
             if (!node.positional.empty()) {
@@ -2107,7 +2203,7 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
                 index = std::move(lastExpr_);
             }
             lastExpr_ = "VB6_SA_AT(" + elemCType + ", " + arrName + ", " + index + ")";
-        } else if (dimCount == 2 && node.positional.size() == 2) {
+        } else if (actualDimCount == 2 && node.positional.size() == 2) {
             // 二维访问: arr(i, j) -> VB6_SA_ND_AT2(type, (vb6_SafeArrayND*)arr, i, j)
             // Fix 056: 动态数组声明为vb6_SafeArray1D*但ReDim后可能是ND, 需要强转
             emitExpr(*node.positional[0]);
@@ -2116,7 +2212,7 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
             std::string idx1 = std::move(lastExpr_);
             std::string ndArr = "(vb6_SafeArrayND*)" + arrName;
             lastExpr_ = "VB6_SA_ND_AT2(" + elemCType + ", " + ndArr + ", " + idx0 + ", " + idx1 + ")";
-        } else if (dimCount == 3 && node.positional.size() == 3) {
+        } else if (actualDimCount == 3 && node.positional.size() == 3) {
             // 三维访问: arr(i, j, k) -> VB6_SA_ND_AT3(type, (vb6_SafeArrayND*)arr, i, j, k)
             emitExpr(*node.positional[0]);
             std::string idx0 = std::move(lastExpr_);
@@ -2135,7 +2231,7 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
             }
             // 构建indices数组 + offset计算
             std::string offVar = "_ndoff_" + std::to_string(tempCounter_++);
-            c_.emitLine("int " + offVar + " = vb6_SafeArrayND_Offset(" + arrName + ", " + std::to_string(dimCount) + ", (int[]){" + indices[0] + ", " + indices[1] + "});");
+            c_.emitLine("int " + offVar + " = vb6_SafeArrayND_Offset(" + arrName + ", " + std::to_string(actualDimCount) + ", (int[]){" + indices[0] + ", " + indices[1] + "});");
             lastExpr_ = "((" + elemCType + "*)(((char*)" + arrName + "->data) + " + offVar + "))[0]";
         }
         return;
@@ -2217,7 +2313,10 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
         std::transform(vpLower.begin(), vpLower.end(), vpLower.begin(), ::tolower);
         if (vpLower == "varptr") {
             emitExpr(*node.positional[0]);
-            lastExpr_ = "(int32_t)(intptr_t)&(" + lastExpr_ + ")";
+            /* Fix 082: VarPtr must return intptr_t, not int32_t.
+               On x64, (int32_t)(intptr_t) truncates 8-byte pointers.
+               Use (intptr_t) instead — safe on both x86 (4 bytes) and x64 (8 bytes). */
+            lastExpr_ = "(intptr_t)&(" + lastExpr_ + ")";
             return;
         }
     }
@@ -2305,6 +2404,11 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
                         // 直接用 vb6_ArraySetVariant (如果存在) 或回退到 Long.
                         bool looksLikeBSTR = (argExpr.find("vb6_BSTR") != std::string::npos ||
                                               argExpr.find("L\"") != std::string::npos);
+                        // Fix 081i: 也用 inferExprType 检测 BSTR 类型
+                        if (!looksLikeBSTR) {
+                            Vb6Type argVt = inferExprType(*node.positional[i]);
+                            if (argVt == Vb6Type::String) looksLikeBSTR = true;
+                        }
                         if (looksLikeBSTR) {
                             c_.emitLine("vb6_ArraySetBSTR(" + arrVar + ", " + std::to_string(i) + ", vb6_VariantToString(" + argExpr + "));");
                         } else {
@@ -2315,6 +2419,12 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
                     } else {
                         bool looksLikeBSTR = (argExpr.find("vb6_BSTR") != std::string::npos ||
                                               argExpr.find("L\"") != std::string::npos);
+                        // Fix 081i: 也用 inferExprType 检测, 避免内置函数返回 BSTR
+                        // (如 vb6_ErrSource/vb6_ErrDescription) 被误判为 Long
+                        if (!looksLikeBSTR) {
+                            Vb6Type argVt = inferExprType(*node.positional[i]);
+                            if (argVt == Vb6Type::String) looksLikeBSTR = true;
+                        }
                         if (looksLikeBSTR) {
                             c_.emitLine("vb6_ArraySetBSTR(" + arrVar + ", " + std::to_string(i) + ", " + argExpr + ");");
                         } else {
@@ -2784,18 +2894,20 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
                             if (Symbol::toLower(mi.name) == memLower) {
                                 bool isHandled = false;
                                 if (mi.arraySize > 0) {
-                                    // Pattern A: 固定大小数组字段 → tempVar.member[idx]
+                                    // Pattern A: 固定大小数组字段 → tempVar->member[idx]
+                                    // Fix 081j-2: With 块临时变量是指针，用 -> 访问成员
                                     emitExpr(*node.positional[0]);
                                     std::string idx = std::move(lastExpr_);
-                                    lastExpr_ = tempVar + "." + cIdent(mi.name) + "[" + idx + "]";
+                                    lastExpr_ = tempVar + "->" + cIdent(mi.name) + "[" + idx + "]";
                                     isHandled = true;
                                 } else if (mi.isArrayDynamic) {
-                                    // Pattern B: 动态数组字段 → VB6_SA_AT(elemType, tempVar.member, idx)
+                                    // Pattern B: 动态数组字段 → VB6_SA_AT(elemType, tempVar->member, idx)
+                                    // Fix 081j-2: With 块临时变量是指针，用 -> 访问成员
                                     emitExpr(*node.positional[0]);
                                     std::string idx = std::move(lastExpr_);
                                     std::string elemCType = mapSaElemCType(mi.type);
                                     lastExpr_ = "VB6_SA_AT(" + elemCType + ", "
-                                              + tempVar + "." + cIdent(mi.name) + ", " + idx + ")";
+                                              + tempVar + "->" + cIdent(mi.name) + ", " + idx + ")";
                                     isHandled = true;
                                 }
                                 if (isHandled) return;
@@ -2820,6 +2932,10 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
     emitExpr(*node.callee);
     asCallCallee_ = savedAsCallCallee;
     std::string callee = std::move(lastExpr_);
+
+    // Bug #3 fix: 清除COM Picture标志 — 每次新的IndexOrCallExpr重置
+    // 后续根据被调用函数的返回类型重新设置
+    lastExprIsComPicture_ = false;
 
     // Fix 032: args (positional + named + early-COM 早期路径) 是 值上下文, 不可能是
     // callee 上下文. 外层 CallStmt(2159-2162) 或嵌套 IndexOrCallExpr 可能把
@@ -3014,19 +3130,6 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
             auto it = comSym->comMethods.find(memLower);
             bool hasArgs = (!node.positional.empty() || !node.named.empty());
 
-            // Fix-074-diag: 列出comMethods中所有成员名
-            if (memberName == "Width" || memberName == "Height" || memberName == "Type" || memberName == "Handle" || memberName == "Render") {
-                std::cerr << "C3-FIX074-EARLY: member='" << memberName << "' found=" << (it != comSym->comMethods.end())
-                          << " hasArgs=" << hasArgs << " comMethods.size=" << comSym->comMethods.size();
-                std::cerr << " comMethodKeys=[";
-                bool first = true;
-                for (auto& [k, v] : comSym->comMethods) {
-                    if (!first) std::cerr << ",";
-                    std::cerr << "'" << k << "'";
-                    first = false;
-                }
-                std::cerr << "]" << std::endl;
-            }
 
             // 无参属性Get: 用后期绑定属性读取，根据返回类型选函数
             if (it != comSym->comMethods.end() && it->second.isPropertyGet && !hasArgs) {
@@ -3166,6 +3269,20 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
         callee = callee.substr(0, callee.size() - 2);
     }
 
+    // Fix 083e: Variant 数组嵌套索引 — vGateway(lIdx)(0) 不是 f(a,b) 而是嵌套元素访问.
+    // callee 若是 vb6_VariantArrayGet(&arr, idx) 完整调用, 外层 (0) 应对内层结果再取元素:
+    // vb6_VariantArrayGet(&(vb6_VARIANT){<内层完整调用>}, 0)
+    // (否则 P6.5 拆开会把索引合并成 vb6_VariantArrayGet(&arr, idx, 0) → C2197 参数太多)
+    if (callee.compare(0, 20, "vb6_VariantArrayGet(") == 0 && !node.positional.empty()) {
+        fprintf(stderr, "[DBG-083E] callee='%s' pos=%zu\n", callee.c_str(), node.positional.size());
+        std::string innerCall = callee;
+        std::string outerIdx;
+        emitExpr(*node.positional[0]);
+        outerIdx = std::move(lastExpr_);
+        lastExpr_ = "vb6_VariantArrayGet(&(vb6_VARIANT){" + innerCall + "}, " + outerIdx + ")";
+        return;
+    }
+
     // P6.5修复: 如果callee已经是func(obj)形式(如类方法调用 vb6_Button_SetCaption(btn)),
     // 且IndexOrCallExpr有额外参数, 需要拆开重组为func(obj, userArgs...),
     // 避免生成 func(obj)(userArgs) 双重括号
@@ -3238,6 +3355,15 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
             // Fix 042a: Track Declare functions for _has_ flag suppression
             if (funcSym->kind == SymbolKind::DeclareSub || funcSym->kind == SymbolKind::DeclareFunc) {
                 calleeIsDeclare = true;
+            }
+            // Bug #3 fix: 检测函数返回类型为StdPicture/IPictureDisp (COM Picture)
+            // 用于Picture属性赋值时选择vb6_SetControlPictureFromCom
+            if (!funcSym->variableTypeName.empty()) {
+                std::string vtLower = funcSym->variableTypeName;
+                std::transform(vtLower.begin(), vtLower.end(), vtLower.begin(), ::tolower);
+                if (vtLower == "stdpicture" || vtLower == "ipicturedisp" || vtLower == "ipicture") {
+                    lastExprIsComPicture_ = true;
+                }
             }
         }
     } else if (node.callee && node.callee->kind == ASTNodeKind::MemberAccessExpr) {
@@ -3319,6 +3445,14 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
                 if (funcSym->kind == SymbolKind::DeclareSub || funcSym->kind == SymbolKind::DeclareFunc) {
                     calleeIsDeclare = true;
                 }
+                // Bug #3 fix: 检测跨模块函数返回类型为StdPicture/IPictureDisp
+                if (!funcSym->variableTypeName.empty()) {
+                    std::string vtLower = funcSym->variableTypeName;
+                    std::transform(vtLower.begin(), vtLower.end(), vtLower.begin(), ::tolower);
+                    if (vtLower == "stdpicture" || vtLower == "ipicturedisp" || vtLower == "ipicture") {
+                        lastExprIsComPicture_ = true;
+                    }
+                }
             }
         }
     }
@@ -3360,9 +3494,6 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
             isComMarker_ = false;
             std::string objExpr = std::move(comObjExpr_);
             std::string memName = std::move(comMemberName_);
-            // Fix-074-diag
-            std::cerr << "C3-FIX074-ARGCOM: memName='" << memName << "' isEarlyBound=" << isEarlyBoundCom_
-                      << " earlyBoundSym=" << (earlyBoundSym_ ? "YES" : "NULL") << std::endl;
             if (isEarlyBoundCom_ && earlyBoundSym_) {
                 isEarlyBoundCom_ = false;
                 const Symbol* comSym = earlyBoundSym_;
@@ -3370,14 +3501,6 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
                 std::string memLower = memName;
                 std::transform(memLower.begin(), memLower.end(), memLower.begin(), ::tolower);
                 auto it = comSym->comMethods.find(memLower);
-                // Fix-074-diag
-                std::cerr << "C3-FIX074-ARGCOM2: memLower='" << memLower << "' found=" << (it != comSym->comMethods.end());
-                if (it != comSym->comMethods.end()) {
-                    std::cerr << " isPropGet=" << it->second.isPropertyGet << " returnType=" << static_cast<int>(it->second.returnType);
-                    std::string rt = mapType(it->second.returnType);
-                    std::cerr << " mapType='" << rt << "'";
-                }
-                std::cerr << std::endl;
                 if (it != comSym->comMethods.end() && it->second.isPropertyGet) {
                     const auto& sig = it->second;
                     std::string returnType = mapType(sig.returnType);
@@ -3427,11 +3550,34 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
                 // (*x) → depends on callee param type:
                 // If callee param is array (vb6_SafeArray1D**), arg (*x) means x is already vb6_SafeArray1D**,
                 // so pass x directly (not &x which would be ***).
-                // If callee param is non-array, (*x) → &x (ByRef param passing ByRef param, restore pointer)
+                // If callee param is non-array, (*x) → depends on whether x is a ByRef param of current function:
+                //   - If x is a current-function ByRef param (C type T*), then (*x) is T, and callee expects T*.
+                //     Since x itself is already T*, pass x directly (not &x which would be T**).
+                //   - Otherwise (e.g. local variable holding a pointer), (*x) → &x to restore the pointer.
+                std::string innerName = argVal.substr(2, argVal.size() - 3);
                 if (calleeParamIsArray) {
-                    argVal = argVal.substr(2, argVal.size() - 3);
+                    argVal = innerName;
                 } else {
-                    argVal = "&" + argVal.substr(2, argVal.size() - 3);
+                    // Fix 079: check if innerName is a ByRef param of the current function
+                    bool isCurrentByRefParam = false;
+                    if (currentProc_) {
+                        for (auto& p : currentProc_->params) {
+                            if (Symbol::toLower(p.name) == Symbol::toLower(innerName) && !p.isByVal && !p.isParamArray) {
+                                bool paramIsArray = (static_cast<uint16_t>(p.type) & static_cast<uint16_t>(Vb6Type::Array)) != 0;
+                                if (!paramIsArray) {
+                                    isCurrentByRefParam = true;
+                                }
+                                break;
+                            }
+                        }
+                    }
+                    if (isCurrentByRefParam) {
+                        // ByRef param of current function → already T*, pass directly
+                        argVal = innerName;
+                    } else {
+                        // Local pointer variable → restore pointer with &
+                        argVal = "&" + innerName;
+                    }
                 }
             } else if (argVal.size() > 2 && argVal.substr(0, 2) == "me" && argVal[2] == '-') {
                 // me->field → &(me->field) (类成员字段取地址)
@@ -3471,8 +3617,19 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
                             }
                         }
                     }
+                    // Fix 056b: UDT字段链 (uFile.Data.ftLastWriteTime) 也是左值,
+                    // 作为 ByRef UDT/AsAny 实参应取地址 &(x) 而非强转 (void*)(intptr_t)(x)
+                    bool isUdtFieldChain = !argVal.empty() && (std::isalpha(static_cast<unsigned char>(argVal[0])) || argVal[0] == '_');
+                    if (isUdtFieldChain) {
+                        for (char c : argVal) {
+                            if (!std::isalnum(static_cast<unsigned char>(c)) && c != '_' && c != '.') {
+                                isUdtFieldChain = false;
+                                break;
+                            }
+                        }
+                    }
                     bool isSaAt = (argVal.find("VB6_SA_AT(") == 0);
-                    bool isLValue = isSimpleIdent || isSaAt || argVal.find("me->") == 0
+                    bool isLValue = isSimpleIdent || isUdtFieldChain || isSaAt || argVal.find("me->") == 0
                         || (argVal.size() > 4 && argVal[0] == '(' && argVal[1] == '*' && argVal.back() == ')');
                     if (isLValue) {
                         // 左值: 变量名、数组元素、me->field、(*ptr) 解引用 — 可以取地址
@@ -3502,7 +3659,22 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
                     }
                 }
                 if (isSimpleIdent && !argVal.empty()) {
-                    argVal = "&" + argVal;
+                    // Fix 079: If the simple identifier is a ByRef param of the current function,
+                    // it's already a pointer (T*) — pass directly, don't add &.
+                    bool argIsCurrentByRefParam = false;
+                    if (currentProc_) {
+                        for (auto& p : currentProc_->params) {
+                            if (Symbol::toLower(p.name) == Symbol::toLower(argVal) && !p.isByVal && !p.isParamArray) {
+                                argIsCurrentByRefParam = true;
+                                break;
+                            }
+                        }
+                    }
+                    if (argIsCurrentByRefParam) {
+                        // ByRef param of current function → already T*, pass directly
+                    } else {
+                        argVal = "&" + argVal;
+                    }
                 } else {
                     // 字面量或复杂表达式: 使用C11复合字面量
                     // &(int32_t){10} 或 &(double){3.14}
@@ -3654,6 +3826,10 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
         args.push_back(std::move(argVal));
     }
 
+    // Fix 081c: For named-arg path, track which Optional params were actually passed
+    // (before gap-filling sets filled[i]=true for padding params too)
+    std::vector<bool> actuallyPassedParams;
+
     // P14.3.3: 命名参数位置展开 - 按参数名映射到正确位置
     if (!node.named.empty() && !calleeParams.empty()) {
         // Build name->index map from callee params (case-insensitive)
@@ -3687,10 +3863,28 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
                 && (static_cast<uint16_t>(calleeParams[pi].type) & static_cast<uint16_t>(Vb6Type::Array)));
             if (argVal.size() > 3 && argVal.substr(0, 2) == "(*" && argVal.back() == ')') {
                 // (*x) → depends on callee param type (see Fix 078 rev2 details in position-arg path)
+                std::string innerName = argVal.substr(2, argVal.size() - 3);
                 if (piCalleeParamIsArray) {
-                    argVal = argVal.substr(2, argVal.size() - 3);
+                    argVal = innerName;
                 } else {
-                    argVal = "&" + argVal.substr(2, argVal.size() - 3);
+                    // Fix 079: check if innerName is a ByRef param of the current function
+                    bool piIsCurrentByRefParam = false;
+                    if (currentProc_) {
+                        for (auto& p : currentProc_->params) {
+                            if (Symbol::toLower(p.name) == Symbol::toLower(innerName) && !p.isByVal && !p.isParamArray) {
+                                bool paramIsArray = (static_cast<uint16_t>(p.type) & static_cast<uint16_t>(Vb6Type::Array)) != 0;
+                                if (!paramIsArray) {
+                                    piIsCurrentByRefParam = true;
+                                }
+                                break;
+                            }
+                        }
+                    }
+                    if (piIsCurrentByRefParam) {
+                        argVal = innerName;
+                    } else {
+                        argVal = "&" + innerName;
+                    }
                 }
             } else if (argVal.size() > 2 && argVal[0] == '&') {
                 // already has &, keep as-is
@@ -3706,7 +3900,22 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
                     }
                 }
                 if (isSimpleIdent && !argVal.empty()) {
-                    argVal = "&" + argVal;
+                    // Fix 079: If the simple identifier is a ByRef param of the current function,
+                    // it's already a pointer (T*) — pass directly, don't add &.
+                    bool piArgIsCurrentByRefParam = false;
+                    if (currentProc_) {
+                        for (auto& p : currentProc_->params) {
+                            if (Symbol::toLower(p.name) == Symbol::toLower(argVal) && !p.isByVal && !p.isParamArray) {
+                                piArgIsCurrentByRefParam = true;
+                                break;
+                            }
+                        }
+                    }
+                    if (piArgIsCurrentByRefParam) {
+                        // ByRef param of current function → already T*, pass directly
+                    } else {
+                        argVal = "&" + argVal;
+                    }
                 } else {
                     std::string cType = "int32_t";
                     if (pi < calleeParams.size()) cType = mapType(calleeParams[pi].type);
@@ -3737,13 +3946,16 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
             if (!filled[i]) {
                 if (calleeParams[i].isParamArray) {
                     orderedArgs[i] = "NULL";
-                    filled[i] = true;
+                    // filled[i] stays false for actuallyPassed tracking
                 } else {
                     orderedArgs[i] = defaultValue(calleeParams[i].type);
-                    filled[i] = true;
+                    // filled[i] stays false for actuallyPassed tracking
                 }
             }
         }
+
+        // Fix 081c: Save which params were actually passed (before gap-filling set all to true)
+        actuallyPassedParams = filled;
 
         args = std::move(orderedArgs);
     } else {
@@ -3821,13 +4033,44 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
                         if (paArg->kind == ASTNodeKind::LiteralExpr) {
 
                             auto& lit = static_cast<LiteralExpr&>(*paArg);
-
                             if (lit.literalKind == LiteralKind::Integer) isLongArg = true;
-
                             else if (lit.literalKind == LiteralKind::Double) isDoubleArg = true;
 
                         }
+                    }
 
+                    /* Fix 082: Check if arg is a COM interface pointer or VarPtr result.
+                       These are pointer-sized and must use PA_SetLongPtr on x64. */
+                    bool isComPtrArg = false;
+                    if (argIdx < (int)node.positional.size()) {
+                        auto& paArg = node.positional[argIdx];
+                        // Check for VarPtr/ObjPtr/StrPtr call
+                        if (paArg->kind == ASTNodeKind::IndexOrCallExpr) {
+                            auto& callNode = static_cast<IndexOrCallExpr&>(*paArg);
+                            if (callNode.callee && callNode.callee->kind == ASTNodeKind::IdentifierExpr) {
+                                auto& ident = static_cast<IdentifierExpr&>(*callNode.callee);
+                                std::string vpLower = ident.name;
+                                std::transform(vpLower.begin(), vpLower.end(), vpLower.begin(), ::tolower);
+                                if (vpLower == "varptr" || vpLower == "objptr" || vpLower == "strptr") {
+                                    isComPtrArg = true;
+                                }
+                            }
+                        }
+                        // Check for LongPtr/Object variable (COM interface pointer)
+                        if (paArg->kind == ASTNodeKind::IdentifierExpr) {
+                            auto& ident = static_cast<IdentifierExpr&>(*paArg);
+                            std::string identLower = ident.name;
+                            std::transform(identLower.begin(), identLower.end(), identLower.begin(), ::tolower);
+                            if (knownLongPtrVars_.count(identLower)) {
+                                isComPtrArg = true;
+                            }
+                        }
+                    }
+                    /* Also detect from C expression: VarPtr result, address-of, COM iface */
+                    if (!isComPtrArg) {
+                        isComPtrArg = (paArgExpr.find("&(") != std::string::npos ||
+                                      paArgExpr.find("(intptr_t)") != std::string::npos ||
+                                      paArgExpr.find("vb6_ComIface_") != std::string::npos);
                     }
 
                     if (isLongArg) {
@@ -3847,6 +4090,12 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
                         if (looksLikeBSTR) {
 
                             c_.emitLine("vb6_PA_SetBSTR(" + paVar + ", " + std::to_string(i) + ", " + paArgExpr + ");");
+
+                        } else if (isComPtrArg) {
+
+                            /* Fix 082: COM interface pointers and VarPtr() results need PA_SetLongPtr
+                               (VT_I8 / intptr_t) to avoid pointer truncation on x64. */
+                            c_.emitLine("vb6_PA_SetLongPtr(" + paVar + ", " + std::to_string(i) + ", (intptr_t)" + paArgExpr + ");");
 
                         } else {
 
@@ -4023,13 +4272,19 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
 
             if (args.size() == 1) {
 
-                // 缂虹渷缁村害鍙傛暟, 琛?
+                // 缺省维度参数, 补1
 
                 argList += ", 1";
 
             }
 
-            // 妫€鏌ユ槸鍚︿负ND鏁扮粍, 闇€瑕佺敤ND鐗堟湰
+            // 检查是否为ND数组, 需要用ND版本
+
+            // Bug #1 fix: 两种检测方式:
+            // 1) arrayDimCounts_中有记录且维度>1 (适用于Dim声明的ND数组)
+            // 2) dimension参数值>1 (适用于ByRef参数, 声明时维度未知但调用时指定)
+
+            bool useND = false;
 
             if (node.positional.size() >= 1) {
 
@@ -4049,7 +4304,61 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
 
                 if (itDc != arrayDimCounts_.end() && itDc->second > 1) {
 
-                    // ND鏁扮粍 -> 浣跨敤vb6_UBoundND/vb6_LBoundND
+                    useND = true;
+
+                }
+
+                // Bug #1 fix: 如果dimension参数值>1, 也使用ND版本
+
+                // dimension参数是第二个参数 (index 1 in args, after the array arg)
+
+                if (!useND && args.size() >= 2) {
+
+                    // args[1] 是 dimension 参数的C表达式, 检查是否是常量>1
+
+                    const std::string& dimExpr = args[1];
+
+                    // 尝试解析为整数常量
+
+                    try {
+
+                        int dimVal = std::stoi(dimExpr);
+
+                        if (dimVal > 1) {
+
+                            useND = true;
+
+                        }
+
+                    } catch (...) {
+
+                        // 非常量表达式, 无法确定; 不启用ND
+
+                    }
+
+                }
+
+                // Bug #1 fix (082h): 第三种检测 - 同一过程中已有UBound(arr,N>1)使用ND版本
+
+                // 例如: UBound(uVectors, 2) 用了ND版本, 则 UBound(uVectors, 1) 也应使用ND版本
+
+                if (!useND && knownNDArraysInProc_.count(arrLower)) {
+
+                    useND = true;
+
+                }
+
+                if (useND) {
+
+                    // 注册到过程内ND数组集合, 后续 UBound(arr,1) 也会用ND版本
+
+                    if (!arrLower.empty()) {
+
+                        knownNDArraysInProc_.insert(arrLower);
+
+                    }
+
+                    // ND数组 -> 使用vb6_UBoundND/vb6_LBoundND
 
                     if (callee == "vb6_UBound") {
 
@@ -4058,6 +4367,20 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
                     } else {
 
                         callee = "vb6_LBoundND";
+
+                    }
+
+                    // ND版本需要(vb6_SafeArrayND*)转换第一个参数
+
+                    // argList格式是 "arrExpr, dimExpr", 需要改为 "(vb6_SafeArrayND*)(arrExpr), dimExpr"
+
+                    if (args.size() >= 2) {
+
+                        argList = "(vb6_SafeArrayND*)(" + args[0] + "), " + args[1];
+
+                    } else if (args.size() == 1) {
+
+                        argList = "(vb6_SafeArrayND*)(" + args[0] + "), 1";
 
                     }
 
@@ -4292,14 +4615,25 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
     // Fix 030b: builtin 跳过 (RTL C 函数无 _has_ 尾叜)
     // Fix 042a: Declare 函数也跳过 (Declare C 签名无 _has_ 尾叜, 但 Optional padding 仍需要)
     if (calleeParams.size() > 0 && paIndex < 0 && !calleeIsBuiltin && !calleeIsDeclare) {
+        bool hasOptional = false;
+        for (size_t i = 0; i < calleeParams.size(); i++) if (calleeParams[i].isOptional && !calleeParams[i].isParamArray) { hasOptional = true; break; }
+        if (hasOptional) {
         for (size_t i = 0; i < calleeParams.size(); i++) {
             const auto& param = calleeParams[i];
             if (param.isOptional && !param.isParamArray) {
                 if (!argList.empty()) argList += ", ";
-                argList += (i < args.size()) ? "1" : "0";
+                // Fix 081c: For named-arg path, use actuallyPassedParams to determine _has_ flag.
+                // For positional-arg path, args.size() already equals actual arg count (padding
+                // doesn't increase args.size()), so (i < args.size()) is correct.
+                if (!actuallyPassedParams.empty() && i < actuallyPassedParams.size()) {
+                    argList += actuallyPassedParams[i] ? "1" : "0";
+                } else {
+                    argList += (i < args.size()) ? "1" : "0";
+                }
             }
         }
-    }
+        }  // end if (hasOptional)
+    }  // end if (calleeParams.size() > 0 && ...)
 
     // P6.6: 类模块中调用同类方法(包括递归), 需要自动添加me作为第一个参数
     // 如 Factorial(N-1) -> vb6_MathLib_Factorial(me, (N-1))
@@ -4341,8 +4675,17 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
             }
             // 参数是Variant变量 → 保留vb6_CStr(VARIANT)
         } else {
+
+
             // 非标识符表达式: 推断类型选择CStr变体
             Vb6Type argType = inferExprType(*firstArg);
+            if (argType == Vb6Type::String) {
+                // Fix 056b: CStr(String) 是空操作 → 直接使用参数
+                // (否则生成 vb6_CStr(BSTR) → C2440: 无法从BSTR转换为vb6_VARIANT)
+                if (!args.empty()) { lastExpr_ = args[0]; return; }
+                lastExpr_ = "vb6_BSTR_Empty()";
+                return;
+            }
             if (argType == Vb6Type::Long || argType == Vb6Type::Integer) {
                 callee = "vb6_CStrLong";
             } else if (argType == Vb6Type::Double || argType == Vb6Type::Single) {
@@ -4361,6 +4704,13 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
                     callee = "vb6_CStrDbl";
                 }
             }
+        }
+        // Fix 056b: callee 仍为 vb6_CStr 且实参非Variant → 用 vb6_VariantFromValue 包装
+        // (如 CStr((int32_t)GetCurrentThreadId()) / CStr(模块级Long变量) →
+        //  vb6_CStr(vb6_VariantFromValue(x)), 由 _Generic 按实参类型自动包装, 消除 C2440)
+        if (callee == "vb6_CStr" && !args.empty()) {
+            lastExpr_ = "vb6_CStr(vb6_VariantFromValue(" + args[0] + "))";
+            return;
         }
     }
     // P8.4: Variant参数适配 — 如果目标函数不接受Variant但参数是Variant类型, 使用V后缀函数
@@ -4772,7 +5122,8 @@ void CCodeGen::visit(WithMemberExpr& node) {
     case WithObjKind::Unknown:
     default:
         // UDT/fallback: struct.field访问
-        lastExpr_ = tempVar + "." + cIdent(node.memberName);
+        // Fix 081j: With块临时变量改为指针，用 -> 访问成员
+        lastExpr_ = tempVar + "->" + cIdent(node.memberName);
         return;
     }
 }
@@ -4823,7 +5174,24 @@ Vb6Type CCodeGen::resolveArrayElemType(ASTNode* typeRef) const {
     }
     if (typeRef->kind == ASTNodeKind::SimpleTypeRef) {
         auto& simple = static_cast<SimpleTypeRef&>(*typeRef);
-        return typeSys_.resolveTypeName(simple.name);
+        Vb6Type t = typeSys_.resolveTypeName(simple.name);
+        if (t != Vb6Type::Unknown) return t;
+        // Fix 049b: 项目内 UDT/Enum/类名 需查符号表 (typeSys_ 只含内置类型)。
+        // 否则 Dim x() As 某UDT (且该 UDT 声明位于 Dim 之后, Fix 049 预扫描已注册)
+        // 的元素类型退回 Variant → arrayElemTypes_ 记录 Variant → 元素访问生成
+        // VB6_SA_AT(vb6_VARIANT, ...).字段 (C2039/C2223) → With 对象类型也变 Variant,
+        // 成员解析退化为跨模块类查找 (如 .Pos 误解析到 cToast.Pos, C2198)。
+        // 与 resolveArrayUdtElemCType (Fix 055b) 的符号表回退保持一致。
+        if (auto* sym = symTab_.lookup(simple.name)) {
+            if (sym->kind == SymbolKind::UserDefinedType) return Vb6Type::UserDefinedType;
+            if (sym->kind == SymbolKind::EnumType) return Vb6Type::Long;
+            if (sym->kind == SymbolKind::Class || sym->kind == SymbolKind::ComClass ||
+                sym->kind == SymbolKind::ComInterface || sym->kind == SymbolKind::ComModule ||
+                sym->kind == SymbolKind::ComGlobalNs) {
+                return Vb6Type::Object;
+            }
+        }
+        return Vb6Type::Variant;
     }
     return Vb6Type::Variant;
 }

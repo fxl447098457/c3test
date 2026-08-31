@@ -316,6 +316,7 @@ void CCodeGen::visit(AssignmentStmt& node) {
                     emitExpr(*node.value);
                     // ImageList Picture fix: resolve COM marker on RHS before using value
                     // e.g. Picture2.Picture = ImageList1.ListImages(i).Picture
+                    // Bug #3 fix: also detect vb6_ComIface_Picture* function return (e.g. QRCodegenBarcode)
                     bool rhsIsComPicture = false;
                     if (isComMarker_) {
                         if (comMemberName_ == "Picture" || comMemberName_ == "picture") {
@@ -324,6 +325,9 @@ void CCodeGen::visit(AssignmentStmt& node) {
                         } else {
                             resolveComValue();
                         }
+                    } else if (lastExprIsComPicture_) {
+                        rhsIsComPicture = true;
+                        lastExprIsComPicture_ = false;  // consume the flag
                     }
                     std::string valExpr = std::move(lastExpr_);
                     // M22: Text/Caption property writes need BSTR value
@@ -441,6 +445,47 @@ void CCodeGen::visit(AssignmentStmt& node) {
         auto& tgtId = static_cast<IdentifierExpr&>(*node.target);
         std::string tgtLower = tgtId.name;
         std::transform(tgtLower.begin(), tgtLower.end(), tgtLower.begin(), ::tolower);
+        // Fix 056b: 裸标识符目标可能是类属性 (pvState = sckOpen → vb6_<Class>_prop_let_pvState(me, value))
+        // 之前漏到此路径生成裸名赋值 → C2065 "未声明的标识符"
+        // Fix 083a: 当前过程的参数/局部变量优先于属性符号 — 例如 SyncReceiveText 的
+        // Optional ByVal TimeOut 参数会被全局符号表误匹配为 cHttpServerSession.TimeOut 属性,
+        // 生成 vb6_cHttpServerSession_prop_let_TimeOut(me, ...) → 错误调用
+        {
+            bool isLocalTarget = knownLocalVars_.count(tgtLower);
+            if (!isLocalTarget && currentProc_) {
+                for (const auto& p : currentProc_->params) {
+                    std::string pLower = p.name;
+                    std::transform(pLower.begin(), pLower.end(), pLower.begin(), ::tolower);
+                    if (pLower == tgtLower) { isLocalTarget = true; break; }
+                }
+            }
+            Symbol* propSym = nullptr;
+            if (!isLocalTarget) propSym = symTab_.lookupModuleByKind(tgtId.name, SymbolKind::PropertyLet);
+            if (!propSym && !isLocalTarget) propSym = symTab_.lookupModuleByKind(tgtId.name, SymbolKind::PropertySet);
+            if (propSym) {
+                // 属性过程内部 PropertyName = value 是设置返回值, 不是PropertyLet调用
+                // (如 Property Get pvThunkGlobalData 内: pvThunkGlobalData = Val(...) → vb6_ret_xxx = ...)
+                bool isAssigningReturnValue = false;
+                if (currentProc_ && (currentProc_->kind == SymbolKind::PropertyGet ||
+                                     currentProc_->kind == SymbolKind::PropertyLet ||
+                                     currentProc_->kind == SymbolKind::PropertySet)) {
+                    std::string curName = currentProc_->name;
+                    std::transform(curName.begin(), curName.end(), curName.begin(), ::tolower);
+                    std::string tgtName = tgtId.name;
+                    std::transform(tgtName.begin(), tgtName.end(), tgtName.begin(), ::tolower);
+                    if (curName == tgtName) isAssigningReturnValue = true;
+                }
+                if (!isAssigningReturnValue) {
+                    std::string prefix = (propSym->kind == SymbolKind::PropertySet) ? "prop_set_" : "prop_let_";
+                    std::string funcName = cProcName(prefix + tgtId.name, propSym->access,
+                        propSym->isExternal ? propSym->sourceModule : (isClassModule_ ? moduleName_ : ""));
+                    emitExpr(*node.value);
+                    std::string valExpr = std::move(lastExpr_);
+                    c_.emitLine(funcName + (isClassModule_ ? "((void*)me, " : "(") + valExpr + ");  /* Property Let/Set (bare) */");
+                    return;
+                }
+            }
+        }
         auto itCtrl = knownFormControls_.find(tgtLower);
         if (itCtrl != knownFormControls_.end()) {
             const char* defaultProp = getDefaultPropertyName(itCtrl->second);
@@ -579,7 +624,7 @@ void CCodeGen::visit(AssignmentStmt& node) {
             if (memSym && memSym->kind == SymbolKind::PropertyLet) {
                 std::string propFn = "prop_let_" + wmExpr.memberName;
                 std::string funcName = cProcName(propFn, memSym->access,
-                    memSym->isExternal ? memSym->sourceModule : "");
+                    memSym->isExternal ? memSym->sourceModule : (isClassModule_ ? moduleName_ : ""));
                 emitExpr(*node.value);
                 c_.emitLine(funcName + "(" + tempVar + ", " + lastExpr_ + ");");
                 return;
@@ -587,7 +632,7 @@ void CCodeGen::visit(AssignmentStmt& node) {
             if (memSym && memSym->kind == SymbolKind::PropertySet) {
                 std::string propFn = "prop_set_" + wmExpr.memberName;
                 std::string funcName = cProcName(propFn, memSym->access,
-                    memSym->isExternal ? memSym->sourceModule : "");
+                    memSym->isExternal ? memSym->sourceModule : (isClassModule_ ? moduleName_ : ""));
                 emitExpr(*node.value);
                 c_.emitLine(funcName + "(" + tempVar + ", " + lastExpr_ + ");  /* With class PropertySet */");
                 return;
@@ -912,6 +957,20 @@ void CCodeGen::visit(SetStmt& node) {
                 return;
             }
 
+            // Fix 056b: Set obj.Prop = Nothing → 属性setter调用传 NULL
+            // target 形如 vb6_cXxx_prop_set_fClient(obj) (来自 emitExpr 属性访问路径),
+            // 不能做 &(prop_set_...) (void* 左值) → C2198/C2440.
+            // Fix 083b: 匹配条件放宽 — 类名前缀使函数名形如 vb6_cXxx_prop_set_fClient(,
+            // 原先的 "prop_set_(" 子串匹配不到 (prop_set_ 后是函数名不是左括号)
+            if ((target.find("prop_set_") != std::string::npos && target.find("prop_set_") < target.find('(')) ||
+                (target.find("prop_let_") != std::string::npos && target.find("prop_let_") < target.find('('))) {
+                if (!target.empty() && target.back() == ')') {
+                    target = target.substr(0, target.size() - 1) + ", NULL)";
+                }
+                c_.emitLine(target + ";  /* Set Nothing (property setter) */");
+                return;
+            }
+
             // P6.3: 早期绑定COM变量 → vb6_ComReleaseTyped
             std::string targetLower = target;
             std::transform(targetLower.begin(), targetLower.end(), targetLower.begin(), ::tolower);
@@ -938,6 +997,7 @@ void CCodeGen::visit(SetStmt& node) {
                 if (!_setWriteFn.empty()) {
                     emitExpr(*node.value);
                     // Resolve COM marker on RHS
+                    // Bug #3 fix: also detect vb6_ComIface_Picture* function return
                     bool _rhsIsComPicture = false;
                     if (isComMarker_) {
                         if (comMemberName_ == "Picture" || comMemberName_ == "picture") {
@@ -946,6 +1006,9 @@ void CCodeGen::visit(SetStmt& node) {
                         } else {
                             resolveComValue("Object");
                         }
+                    } else if (lastExprIsComPicture_) {
+                        _rhsIsComPicture = true;
+                        lastExprIsComPicture_ = false;  // consume the flag
                     }
                     std::string _setValExpr = std::move(lastExpr_);
                     // Use SetControlPictureFromCom for COM IPictureDisp
@@ -1551,7 +1614,12 @@ void CCodeGen::visit(ForStmt& node) {
         && classMemberVars_.count(lower022)
         && !knownLocalVars_.count(lower022);  // 局部 Dim 优先遮蔽类成员
     std::string varAcc = forVarIsClassMember ? ("me->" + var) : var;
-    if (!forVarIsClassMember) {
+    // Fix 081g: If For-loop var is a ByRef param (C: int32_t*), use *var for assignments/comparisons
+    bool forVarIsByRef = !forVarIsClassMember && knownByRefParams_.count(lower022);
+    if (forVarIsByRef) {
+        varAcc = "(*" + var + ")";
+    }
+    if (!forVarIsClassMember && !forVarIsByRef) {
         knownLocalVars_.insert(lower022);  // Fix 010o (保留)
     }
 
@@ -2281,8 +2349,10 @@ void CCodeGen::visit(WithStmt& node) {
         // Fix 038: C2440 修复 — UDT 同类型转换和 UDT/VARIANT → void* 转换
         bool isUdtTempType = (tempType.rfind("vb6_type_", 0) == 0);
         if (isUdtTempType) {
-            // UDT → UDT 同类型: 不需要 cast (C2440: 不能将 struct 转换为自身类型)
-            c_.emitLine(tempType + " " + tempVar + " = " + lastExpr_ + "  /* With object ref */;");
+            // Fix 081j: UDT With块使用指针引用，而非值拷贝
+            // VB6中 With uPoints(lIdx) 内 .X = ... 直接修改数组元素
+            // C中需要用指针: vb6_type_RECT* _vb6_with = &VB6_SA_AT(...)
+            c_.emitLine(tempType + "* " + tempVar + " = &(" + lastExpr_ + ")  /* With object ref (ptr) */;");
         } else if (tempType == "void*") {
             // 检查表达式是否为 UDT 或 VARIANT — 这些类型不能直接 cast 到 void*
             std::string udtCType = inferUdtTypeOfExpr(*node.object);
@@ -2695,8 +2765,8 @@ void CCodeGen::visit(ReDimStmt& node) {
         std::string memberName = node.varName.substr(1);  // strip leading '.'
         const auto& info = withObjectInfoStack_.back();
         if (info.kind == WithObjKind::Unknown) {
-            // UDT With block: _vb6_with_N.member
-            cName = withObjectVars_.back() + "." + cIdent(memberName);
+            // Fix 081j-2: UDT With block 临时变量是指针，用 -> 访问成员
+            cName = withObjectVars_.back() + "->" + cIdent(memberName);
         } else if (info.kind == WithObjKind::ClassInstance) {
             // Class With block: _vb6_with_N->member
             cName = withObjectVars_.back() + "->" + cIdent(memberName);
@@ -2704,6 +2774,9 @@ void CCodeGen::visit(ReDimStmt& node) {
     }
     Vb6Type elemType = resolveArrayElemType(node.asType.get());
     std::string saElemType = mapSaElemType(elemType);
+    // Bug4-Fix: UDT数组需使用vb6_SafeArrayReDim1D_Udt
+    std::string udtCType = resolveArrayUdtElemCType(node.asType.get());
+    bool isUdtArray = !udtCType.empty();
 
     if (node.dimensions.empty()) return;
 
@@ -2727,7 +2800,12 @@ void CCodeGen::visit(ReDimStmt& node) {
             c_.emitLine(cName + " = vb6_SafeArrayReDimPreserve1D(" + cName + ", " + lBound + ", " + uBound + ");");
         } else {
             c_.emitLine("vb6_SafeArrayDestroy1D(" + cName + ");");
-            c_.emitLine(cName + " = vb6_SafeArrayReDim1D(" + saElemType + ", " + lBound + ", " + uBound + ");");
+            if (isUdtArray) {
+                // Bug4-Fix: UDT数组使用_Udt版本，传入sizeof(UDT类型)
+                c_.emitLine(cName + " = vb6_SafeArrayReDim1D_Udt((int32_t)sizeof(" + udtCType + "), " + lBound + ", " + uBound + ");");
+            } else {
+                c_.emitLine(cName + " = vb6_SafeArrayReDim1D(" + saElemType + ", " + lBound + ", " + uBound + ");");
+            }
         }
     } else {
         // P8.1: 多维 ReDim
@@ -2745,7 +2823,9 @@ void CCodeGen::visit(ReDimStmt& node) {
             if (dim.lower) { emitExpr(*dim.lower); lb = std::move(lastExpr_); }
             if (dim.upper) { emitExpr(*dim.upper); ub = std::move(lastExpr_); }
             std::string trailing = (d < dimCount - 1) ? "," : "";
-            c_.emitLine("{" + lb + ", " + ub + "}" + trailing);
+            // vb6_SafeArrayBound = {lLbound, cElements}
+            // cElements = uBound - lBound + 1 (VB6 "0 To 3" has 4 elements)
+            c_.emitLine("{" + lb + ", (" + ub + " - " + lb + " + 1)}" + trailing);
         }
         c_.dedent();
         c_.emitLine("};");
@@ -2753,7 +2833,12 @@ void CCodeGen::visit(ReDimStmt& node) {
             c_.emitLine(cName + " = (vb6_SafeArray1D*)vb6_SafeArrayReDimPreserveND((vb6_SafeArrayND*)" + cName + ", " + std::to_string(dimCount) + ", " + boundsVar + ");");
         } else {
             c_.emitLine("vb6_SafeArrayDestroyND((vb6_SafeArrayND*)" + cName + ");");
-            c_.emitLine(cName + " = (vb6_SafeArray1D*)vb6_SafeArrayReDimND(" + saElemType + ", " + std::to_string(dimCount) + ", " + boundsVar + ");");
+            if (isUdtArray) {
+                // Bug4-Fix: UDT多维数组使用_Udt版本，传入sizeof(UDT类型)
+                c_.emitLine(cName + " = (vb6_SafeArray1D*)vb6_SafeArrayReDimND_Udt((int32_t)sizeof(" + udtCType + "), " + std::to_string(dimCount) + ", " + boundsVar + ");");
+            } else {
+                c_.emitLine(cName + " = (vb6_SafeArray1D*)vb6_SafeArrayReDimND(" + saElemType + ", " + std::to_string(dimCount) + ", " + boundsVar + ");");
+            }
         }
 
         // 鏇存柊鏁扮粍缁村害淇℃伅
@@ -3214,6 +3299,9 @@ void CCodeGen::visit(LocalDeclStmt& node) {
             if (!var.dimensions.empty()) {
                 Vb6Type elemType = resolveArrayElemType(var.asType.get());
                 std::string saElemType = mapSaElemType(elemType);
+                // Bug4-Fix: UDT数组
+                std::string udtCType = resolveArrayUdtElemCType(var.asType.get());
+                bool isUdtArr = !udtCType.empty();
                 int dimCount = (int)var.dimensions.size();
 
                 if (dimCount == 1) {
@@ -3229,7 +3317,12 @@ void CCodeGen::visit(LocalDeclStmt& node) {
                         emitExpr(*dim.upper);
                         uBound = std::move(lastExpr_);
                     }
-                    std::string initCode = "vb6_SafeArrayCreate1D(" + saElemType + ", " + lBound + ", " + uBound + ")";
+                    std::string initCode;
+                    if (isUdtArr) {
+                        initCode = "vb6_SafeArrayReDim1D_Udt((int32_t)sizeof(" + udtCType + "), " + lBound + ", " + uBound + ")";
+                    } else {
+                        initCode = "vb6_SafeArrayCreate1D(" + saElemType + ", " + lBound + ", " + uBound + ")";
+                    }
                     c_.emitLine("vb6_SafeArray1D* " + cName + " = " + initCode + ";");
                 } else {
                     // 多维数组: 使用ND运行时
@@ -3242,7 +3335,9 @@ void CCodeGen::visit(LocalDeclStmt& node) {
                         if (dim.lower) { emitExpr(*dim.lower); lb = std::move(lastExpr_); }
                         if (dim.upper) { emitExpr(*dim.upper); ub = std::move(lastExpr_); }
                         std::string trailing = (d < dimCount - 1) ? "," : "";
-                        c_.emitLine("{" + lb + ", " + ub + "}" + trailing);
+                        // vb6_SafeArrayBound = {lLbound, cElements}
+                        // cElements = uBound - lBound + 1 (VB6 "0 To 3" has 4 elements)
+                        c_.emitLine("{" + lb + ", (" + ub + " - " + lb + " + 1)}" + trailing);
                     }
                     c_.dedent();
                     c_.emitLine("};");
@@ -3297,6 +3392,16 @@ void CCodeGen::visit(LocalDeclStmt& node) {
                 std::string lower = var.name;
                 std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
                 knownLongVars_.insert(lower);
+            } else if (cType == "intptr_t") {
+                // Bug #2 fix: LongPtr变量注册到独立集合
+                std::string lower = var.name;
+                std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+                knownLongPtrVars_.insert(lower);
+            } else if (cType.find("vb6_ComIface_") == 0 || cType.find("vb6_ComIface_") != std::string::npos) {
+                // Fix 082: COM interface pointer variables are also pointer-sized on x64
+                std::string lower = var.name;
+                std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+                knownLongPtrVars_.insert(lower);
             } else if (cType == "vb6_VARIANT") {
                 // P8.4: 记录Variant类型全局变量
                 std::string lower = var.name;
@@ -3442,8 +3547,14 @@ void CCodeGen::visit(LocalDeclStmt& node) {
                 std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
                 if (cType == "BSTR") {
                     knownBstrVars_.insert(lower);
-                } else if (cType == "int32_t" || cType == "int16_t" || cType == "VBABOOL") {
+            } else if (cType == "int32_t" || cType == "int16_t" || cType == "VBABOOL") {
                     knownLongVars_.insert(lower);
+                } else if (cType == "intptr_t") {
+                    // Bug #2 fix: LongPtr局部const变量注册到独立集合
+                    knownLongPtrVars_.insert(lower);
+                } else if (cType.find("vb6_ComIface_") != std::string::npos) {
+                    // Fix 082: COM interface pointer types are pointer-sized on x64
+                    knownLongPtrVars_.insert(lower);
                 } else if (cType == "double" || cType == "float") {
                     knownDoubleVars_.insert(lower);
                 } else if (cType == "vb6_VARIANT") {

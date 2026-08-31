@@ -714,6 +714,7 @@ Vb6Type CCodeGen::inferExprType(Expr& expr) const {
             if (knownBstrVars_.count(lower)) return Vb6Type::String;
             if (knownDoubleVars_.count(lower)) return Vb6Type::Double;
             if (knownLongVars_.count(lower)) return Vb6Type::Long;
+            if (knownLongPtrVars_.count(lower)) return Vb6Type::LongPtr;
             if (knownVariantVars_.count(lower)) return Vb6Type::Variant;
             // 检查符号表
             auto* sym = symTab_.lookup(id.name);
@@ -789,6 +790,30 @@ Vb6Type CCodeGen::inferExprType(Expr& expr) const {
                     if (memLower == "description" || memLower == "source") return Vb6Type::String;
                     if (memLower == "helppath" || memLower == "helpfile" || memLower == "helpcontext") return Vb6Type::String;
                     if (memLower == "lastdllerror") return Vb6Type::Long;
+                }
+            }
+            // Fix 081i: UDT字段访问 — 先查找UDT成员类型，避免lookupModule
+            // 匹配到内置函数(如Left→String)导致类型推断错误
+            {
+                std::string udtCType = inferUdtTypeOfExpr(*ma.object);
+                if (!udtCType.empty()) {
+                    const std::string prefix = "vb6_type_";
+                    if (udtCType.size() > prefix.size()
+                        && udtCType.compare(0, prefix.size(), prefix) == 0) {
+                        std::string udtName = udtCType.substr(prefix.size());
+                        Symbol* udtSym = symTab_.lookupModule(udtName);
+                        if (udtSym && udtSym->kind == SymbolKind::UserDefinedType) {
+                            std::string memLower = ma.memberName;
+                            std::transform(memLower.begin(), memLower.end(), memLower.begin(), ::tolower);
+                            for (auto& mi : udtSym->udtMembers) {
+                                std::string miLower = mi.name;
+                                std::transform(miLower.begin(), miLower.end(), miLower.begin(), ::tolower);
+                                if (miLower == memLower) {
+                                    return mi.type;  // 找到UDT字段，返回其Vb6Type
+                                }
+                            }
+                        }
+                    }
                 }
             }
             // 查找成员函数/属性的返回类型
@@ -1058,7 +1083,7 @@ std::string CCodeGen::getRuntimeParamCType(const std::string& funcName, size_t p
         {"vb6_DebugPrint",      {"BSTR"}},
         {"vb6_DebugWriteLong",  {"int32_t"}},
         // 对象操作
-        {"vb6_ObjPtr",          {"void*"}},
+        {"vb6_ObjPtr",          {"uintptr_t"}},
         {"vb6_ReleaseObject",   {"void**"}},
         {"vb6_NewObject",       {"const wchar_t*"}},
         {"vb6_CallByName",      {"void*", "BSTR", "int32_t"}},
@@ -1105,6 +1130,117 @@ if (stmt->kind == ASTNodeKind::OnGoSubStmt) return true;  // P17.4
         }
     }
     return false;
+}
+
+// Bug #1 fix (082h): 预扫描语句列表, 收集UBound/LBound(arr, N>1)的数组名
+// 到 knownNDArraysInProc_, 这样后续 UBound(arr, 1) 也能正确使用ND版本
+void CCodeGen::scanNDArraysInExpr(Expr& expr) {
+    if (expr.kind == ASTNodeKind::IndexOrCallExpr) {
+        auto& call = static_cast<IndexOrCallExpr&>(expr);
+        // Check if this is UBound/LBound with dimension > 1
+        if (call.callee && call.callee->kind == ASTNodeKind::IdentifierExpr) {
+            std::string name = static_cast<IdentifierExpr&>(*call.callee).name;
+            std::transform(name.begin(), name.end(), name.begin(), ::tolower);
+            if ((name == "ubound" || name == "lbound") && call.positional.size() >= 2) {
+                // Check if dimension arg > 1 (must be a literal integer)
+                auto& dimArg = call.positional[1];
+                if (dimArg && dimArg->kind == ASTNodeKind::LiteralExpr) {
+                    auto& lit = static_cast<LiteralExpr&>(*dimArg);
+                    if (lit.literalKind == LiteralKind::Integer && lit.intValue > 1) {
+                        // Register the array name
+                        auto& arrArg = call.positional[0];
+                        if (arrArg && arrArg->kind == ASTNodeKind::IdentifierExpr) {
+                            std::string arrName = static_cast<IdentifierExpr&>(*arrArg).name;
+                            std::transform(arrName.begin(), arrName.end(), arrName.begin(), ::tolower);
+                            knownNDArraysInProc_.insert(arrName);
+                        }
+                    }
+                }
+            }
+        }
+        // Also scan sub-expressions in call args and callee
+        if (call.callee) scanNDArraysInExpr(*call.callee);
+        for (auto& arg : call.positional) {
+            if (arg) scanNDArraysInExpr(*arg);
+        }
+    } else if (expr.kind == ASTNodeKind::BinaryExpr) {
+        auto& bin = static_cast<BinaryExpr&>(expr);
+        if (bin.left) scanNDArraysInExpr(*bin.left);
+        if (bin.right) scanNDArraysInExpr(*bin.right);
+    } else if (expr.kind == ASTNodeKind::UnaryExpr) {
+        auto& un = static_cast<UnaryExpr&>(expr);
+        if (un.operand) scanNDArraysInExpr(*un.operand);
+    } else if (expr.kind == ASTNodeKind::MemberAccessExpr) {
+        auto& ma = static_cast<MemberAccessExpr&>(expr);
+        if (ma.object) scanNDArraysInExpr(*ma.object);
+    } else if (expr.kind == ASTNodeKind::LiteralExpr) {
+        // No sub-expressions
+    } else if (expr.kind == ASTNodeKind::IdentifierExpr) {
+        // No sub-expressions
+    } else if (expr.kind == ASTNodeKind::WithMemberExpr) {
+        // No sub-expressions to scan
+    }
+}
+
+void CCodeGen::scanNDArraysInStmts(StmtList& stmts) {
+    for (auto& stmt : stmts) {
+        if (!stmt) continue;
+        // Scan expressions in statements
+        if (stmt->kind == ASTNodeKind::AssignmentStmt) {
+            auto& assign = static_cast<AssignmentStmt&>(*stmt);
+            if (assign.value) scanNDArraysInExpr(*assign.value);
+        } else if (stmt->kind == ASTNodeKind::CallStmt) {
+            auto& call = static_cast<CallStmt&>(*stmt);
+            if (call.callee) scanNDArraysInExpr(*call.callee);
+        } else if (stmt->kind == ASTNodeKind::ForStmt) {
+            auto& forStmt = static_cast<ForStmt&>(*stmt);
+            if (forStmt.start) scanNDArraysInExpr(*forStmt.start);
+            if (forStmt.end) scanNDArraysInExpr(*forStmt.end);
+            if (forStmt.step) scanNDArraysInExpr(*forStmt.step);
+            scanNDArraysInStmts(forStmt.body);
+        } else if (stmt->kind == ASTNodeKind::ForEachStmt) {
+            auto& fe = static_cast<ForEachStmt&>(*stmt);
+            if (fe.collection) scanNDArraysInExpr(*fe.collection);
+            scanNDArraysInStmts(fe.body);
+        } else if (stmt->kind == ASTNodeKind::DoLoopStmt) {
+            auto& dl = static_cast<DoLoopStmt&>(*stmt);
+            if (dl.condition) scanNDArraysInExpr(*dl.condition);
+            scanNDArraysInStmts(dl.body);
+        } else if (stmt->kind == ASTNodeKind::WhileWendStmt) {
+            auto& ww = static_cast<WhileWendStmt&>(*stmt);
+            if (ww.condition) scanNDArraysInExpr(*ww.condition);
+            scanNDArraysInStmts(ww.body);
+        } else if (stmt->kind == ASTNodeKind::IfStmt) {
+            auto& ifStmt = static_cast<IfStmt&>(*stmt);
+            if (ifStmt.condition) scanNDArraysInExpr(*ifStmt.condition);
+            scanNDArraysInStmts(ifStmt.thenBody);
+            scanNDArraysInStmts(ifStmt.elseBody);
+            for (auto& elif : ifStmt.elseIfs) {
+                if (elif && elif->condition) scanNDArraysInExpr(*elif->condition);
+                if (elif) scanNDArraysInStmts(elif->body);
+            }
+        } else if (stmt->kind == ASTNodeKind::SelectCaseStmt) {
+            auto& sel = static_cast<SelectCaseStmt&>(*stmt);
+            if (sel.testExpr) scanNDArraysInExpr(*sel.testExpr);
+            for (auto& c : sel.cases) {
+                if (c) scanNDArraysInStmts(c->body);
+            }
+            scanNDArraysInStmts(sel.elseCase);
+        } else if (stmt->kind == ASTNodeKind::SetStmt) {
+            auto& set = static_cast<SetStmt&>(*stmt);
+            if (set.value) scanNDArraysInExpr(*set.value);
+        } else if (stmt->kind == ASTNodeKind::LetStmt) {
+            auto& let = static_cast<LetStmt&>(*stmt);
+            if (let.value) scanNDArraysInExpr(*let.value);
+        } else if (stmt->kind == ASTNodeKind::WithStmt) {
+            auto& with = static_cast<WithStmt&>(*stmt);
+            if (with.object) scanNDArraysInExpr(*with.object);
+            scanNDArraysInStmts(with.body);
+        } else if (stmt->kind == ASTNodeKind::Block) {
+            auto& block = static_cast<Block&>(*stmt);
+            scanNDArraysInStmts(block.stmts);
+        }
+    }
 }
 
 // P14.1.2: 检测语句列表中是否包含Resume/Resume Next语句
@@ -1861,6 +1997,18 @@ std::string CCodeGen::inferUdtTypeOfExpr(const ASTNode& expr) const {
             std::string lower = Symbol::toLower(id.name);
             auto it = knownUdtVars_.find(lower);
             if (it != knownUdtVars_.end()) return it->second;
+            return "";
+        }
+        // Fix 081i: IndexOrCallExpr — UDT数组元素访问 arr(idx).field
+        // 查 arrayUdtElemTypes_ 获取数组元素UDT类型
+        case ASTNodeKind::IndexOrCallExpr: {
+            auto& call = static_cast<const IndexOrCallExpr&>(expr);
+            if (call.callee && call.callee->kind == ASTNodeKind::IdentifierExpr) {
+                auto& id = static_cast<const IdentifierExpr&>(*call.callee);
+                std::string lower = Symbol::toLower(id.name);
+                auto it = arrayUdtElemTypes_.find(lower);
+                if (it != arrayUdtElemTypes_.end()) return it->second;
+            }
             return "";
         }
         case ASTNodeKind::MemberAccessExpr: {

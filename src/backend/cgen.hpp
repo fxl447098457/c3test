@@ -207,6 +207,11 @@ private:
     const TypeSystem& typeSys_;
     bool verbose_;
 
+    // Fix 056b: 清理过程内局部数组注册, 保留模块级/类成员数组 (跨过程需要)
+    // 过程开始时清空knownArrays_会丢失模块级UDT数组的arrayUdtElemTypes_注册,
+    // 导致访问时元素类型回退vb6_VARIANT (MSVC C2440).
+    void clearProcArrayTracking();
+
     // 代码输出
     CodeEmitter h_;   // .h 文件内容
     CodeEmitter c_;   // .c 文件内容
@@ -277,6 +282,11 @@ private:
     // 当数组元素类型为 UserDefinedType 时, 记录实际 UDT C 类型名,
     // 让 VB6_SA_AT / VB6_SA_ND_AT2 使用正确的 struct 类型而非 vb6_VARIANT
     std::unordered_map<std::string, std::string> arrayUdtElemTypes_;
+
+    // Bug #1 fix (082h): 过程内已确认的ND数组名集合 (小写)
+    // 当 UBound(arr, N>1) 触发ND版本时将arr注册到此集合,
+    // 后续 UBound(arr, 1) 检查此集合也使用ND版本
+    std::unordered_set<std::string> knownNDArraysInProc_;
 
     // 已知BSTR变量名集合 (小写) - 用于Debug.Print等场景判断表达式类型
     std::unordered_set<std::string> knownBstrVars_;
@@ -351,6 +361,7 @@ private:
     // Fix 010o: 过程局部变量名集合 (小写) — Dim声明的局部变量 + For/ForEach循环变量
     // 用于在IdentifierExpr中避免对局部变量错误添加 me-> 前缀
     std::unordered_set<std::string> knownLocalVars_;
+    std::unordered_set<std::string> knownByRefParams_;  // Fix 081g: ByRef params (lowercase)
 
     // UDT变量名集合 (小写var名 → UDT类型C标识符, 如 "p" → "vb6_type_Point")
     // 用于成员访问时区分"p.X"(结构体字段) vs "Module1.X"(模块变量)
@@ -401,6 +412,11 @@ private:
     std::string comObjExpr_;        // COM对象C表达式 (如 "fso")
     std::string comMemberName_;     // COM成员名 (如 "CreateTextFile")
     bool isComMarker_ = false;      // lastExpr_是否为COM标记
+
+    // Bug #3 fix: 标记lastExpr_是vb6_ComIface_Picture*类型的函数返回值
+    // 当函数返回类型为StdPicture/IPictureDisp时设置, 用于Picture属性赋值时
+    // 选择vb6_SetControlPictureFromCom而非vb6_SetControlPicture
+    bool lastExprIsComPicture_ = false;
 
     // P6.3: 前期绑定中间状态 (在isComMarker_基础上额外标记)
     bool isEarlyBoundCom_ = false;  // 当前COM标记是否为前期绑定 (vtable直接调用)
@@ -636,6 +652,9 @@ private:
     bool hasOnErrorInStmts(StmtList& stmts) const;
     // P14.1.2: 检测语句列表中是否包含Resume/Resume Next
     bool hasResumeInStmts(StmtList& stmts) const;
+    // Bug #1 fix (082h): 预扫描语句中的UBound/LBound(arr,N>1)收集ND数组名
+    void scanNDArraysInStmts(StmtList& stmts);
+    void scanNDArraysInExpr(Expr& expr);
 
     // ---- COM辅助 (P6.2) ----
     // 推断COM参数的封装函数: 根据表达式类型选择vb6_ComPackBSTR/Int/Double/Object

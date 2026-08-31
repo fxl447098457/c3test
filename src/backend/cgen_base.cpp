@@ -624,7 +624,7 @@ bool CCodeGen::generate(Module& module, const std::string& baseName,
                 // 如果是标准模块，处理器是 vb6_<HandlerName>(params...)
                 // Fix 019: 类模块必须将 handler (void*) 转换为 cls* 再作为 me 传入,
                 //          不可使用 classMeParam() (那是参数声明)
-                std::string procCall = cProcName(handlerName, handlerSym->access);
+                std::string procCall = cProcName(handlerName, handlerSym->access, isClassModule_ ? moduleName_ : "");
                 std::string callArgs = "(";
                 if (isClassModule_) {
                     callArgs += classHandlerCast();
@@ -731,7 +731,7 @@ bool CCodeGen::generate(Module& module, const std::string& baseName,
                 // Call the VB6 handler function
                 // Fix 019: 类模块必须将 handler (void*) 转换为 cls* 再作为 me 传入,
                 //          不可使用 classMeParam() (那是参数声明)
-                std::string procCall = cProcName(handlerName, handlerSym->access);
+                std::string procCall = cProcName(handlerName, handlerSym->access, isClassModule_ ? moduleName_ : "");
                 std::string callArgs = "(";
                 if (isClassModule_) {
                     callArgs += classHandlerCast();
@@ -754,15 +754,23 @@ bool CCodeGen::generate(Module& module, const std::string& baseName,
     // P13.23: 生成外部COM vtable source interface 事件接收器实现
     emitComVtableSinks();
 
-    // Fix 054: 模块级变量延迟初始化函数 (C2099 workaround)
+    // Fix 054/080: 模块级变量延迟初始化函数 (C2099 workaround)
     // C语言文件作用域变量不能用运行时函数调用初始化, 所以先声明为 NULL/0,
     // 再在模块初始化函数中执行实际的 SafeArrayCreate 等运行时初始化.
-    std::string modInitFuncName;
-    if (!moduleInitStmts_.empty()) {
-        modInitFuncName = "vb6_mod_" + cIdent(baseName_) + "_init";
+    // Fix 080: 多模块工程中, 每个模块都生成初始化函数(即使为空),
+    // 非入口模块的初始化函数需要被入口模块调用,
+    // 所以去掉 static 改为 extern 可见, 并在 .h 中添加声明.
+    std::string modInitFuncName = "vb6_mod_" + cIdent(baseName_) + "_init";
+    bool needModInitFunc = isMultiModule_ || !moduleInitStmts_.empty();
+    if (needModInitFunc) {
         c_.emitBlank();
-        c_.emitLine("// Fix 054: Module-level variable deferred initialization (C2099)");
-        c_.emitLine("static void " + modInitFuncName + "(void) {");
+        c_.emitLine("// Fix 054/080: Module-level variable deferred initialization");
+        if (isMultiModule_) {
+            c_.emitLine("void " + modInitFuncName + "(void) {");
+            h_.emitLine("extern void " + modInitFuncName + "(void);");
+        } else {
+            c_.emitLine("static void " + modInitFuncName + "(void) {");
+        }
         c_.indent();
         for (auto& stmt : moduleInitStmts_) {
             c_.emitLine(stmt);
@@ -771,6 +779,7 @@ bool CCodeGen::generate(Module& module, const std::string& baseName,
         c_.emitLine("}");
         c_.emitBlank();
     }
+    if (!needModInitFunc) modInitFuncName.clear();
 
     // 生成入口点 (类模块不生成main; 多模块工程中仅有Sub Main的模块生成main)
     // P6.6: ActiveX DLL入口点统一由dll_entry.c生成, 不在各模块.c中生成
@@ -812,6 +821,13 @@ bool CCodeGen::generate(Module& module, const std::string& baseName,
                             c_.emitLine("(void)hPrevInst; (void)lpCmdLine; (void)nCmdShow;");
             c_.emitLine("vb6_Init();");
             if (!modInitFuncName.empty()) c_.emitLine(modInitFuncName + "();");
+            // Fix 080: 多模块工程中, 调用所有外部模块的初始化函数
+            if (isMultiModule_) {
+                for (const auto& extMod : externalModules_) {
+                    std::string extInitFunc = "vb6_mod_" + cIdent(extMod) + "_init";
+                    c_.emitLine(extInitFunc + "();");
+                }
+            }
             c_.emitLine("vb6_SetAppInstance((void*)hInst);");
             c_.emitLine("vb6_form_show_" + cIdent(formName) + "(NULL);  /* Show form modeless, NULL=hMDIClient */");
                             c_.emitLine("int ret = vb6_MessageLoop();");
@@ -824,6 +840,13 @@ bool CCodeGen::generate(Module& module, const std::string& baseName,
                             c_.indent();
             c_.emitLine("vb6_Init();");
             if (!modInitFuncName.empty()) c_.emitLine(modInitFuncName + "();");
+            // Fix 080: 多模块工程中, 调用所有外部模块的初始化函数
+            if (isMultiModule_) {
+                for (const auto& extMod : externalModules_) {
+                    std::string extInitFunc = "vb6_mod_" + cIdent(extMod) + "_init";
+                    c_.emitLine(extInitFunc + "();");
+                }
+            }
             c_.emitLine(cProcName(sub.name, sub.access) + "();");
             c_.emitLine("vb6_Exit();");
                             c_.emitLine("return 0;");
@@ -842,6 +865,14 @@ bool CCodeGen::generate(Module& module, const std::string& baseName,
                 c_.indent();
                 c_.emitLine("(void)hPrevInst; (void)lpCmdLine; (void)nCmdShow;");
                 c_.emitLine("vb6_Init();");
+                // Fix 080: 多模块工程中, 调用所有外部模块的初始化函数
+                if (isMultiModule_) {
+                    for (const auto& extMod : externalModules_) {
+                        std::string extInitFunc = "vb6_mod_" + cIdent(extMod) + "_init";
+                        c_.emitLine(extInitFunc + "();");
+                    }
+                }
+                if (!modInitFuncName.empty()) c_.emitLine(modInitFuncName + "();");
                 c_.emitLine("vb6_SetAppInstance((void*)hInst);");
                 c_.emitLine(cProcName("Main", AccessLevel::Public) + "();");
                 c_.emitLine("int ret = vb6_MessageLoop();");
@@ -854,6 +885,13 @@ bool CCodeGen::generate(Module& module, const std::string& baseName,
                 c_.indent();
             c_.emitLine("vb6_Init();");
             if (!modInitFuncName.empty()) c_.emitLine(modInitFuncName + "();");
+            // Fix 080: 多模块工程中, 调用所有外部模块的初始化函数
+            if (isMultiModule_) {
+                for (const auto& extMod : externalModules_) {
+                    std::string extInitFunc = "vb6_mod_" + cIdent(extMod) + "_init";
+                    c_.emitLine(extInitFunc + "();");
+                }
+            }
             c_.emitLine(cProcName("Main", AccessLevel::Public) + "();");
                 c_.emitLine("vb6_Exit();");
                 c_.emitLine("return 0;");
@@ -869,6 +907,13 @@ bool CCodeGen::generate(Module& module, const std::string& baseName,
                 c_.emitLine("(void)hPrevInst; (void)lpCmdLine; (void)nCmdShow;");
                 c_.emitLine("vb6_Init();");
                 if (!modInitFuncName.empty()) c_.emitLine(modInitFuncName + "();");
+                // Fix 080: 多模块工程中, 调用所有外部模块的初始化函数
+                if (isMultiModule_) {
+                    for (const auto& extMod : externalModules_) {
+                        std::string extInitFunc = "vb6_mod_" + cIdent(extMod) + "_init";
+                        c_.emitLine(extInitFunc + "();");
+                    }
+                }
                 c_.emitLine("vb6_SetAppInstance((void*)hInst);");
                 c_.emitLine("vb6_form_show_" + cIdent(formName) + "(NULL);  /* Show form modeless, NULL=hMDIClient */");
                 c_.emitLine("int ret = vb6_MessageLoop();");

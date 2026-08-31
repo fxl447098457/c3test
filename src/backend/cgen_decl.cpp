@@ -12,6 +12,25 @@ namespace vb6c3 {
 // --- cgen_decl.cpp: 声明生成 + 签名 + Property/Event ---
 
 
+// Fix 056b: 过程开始时清理数组注册, 但保留模块级/类成员数组 (跨过程需要)
+// 原逻辑 knownArrays_.clear() 会丢失模块级UDT数组的 arrayUdtElemTypes_ 注册,
+// 导致方法体内访问元素时类型回退 vb6_VARIANT (MSVC C2440: 无法从LONG转换为vb6_VARIANT等).
+void CCodeGen::clearProcArrayTracking() {
+    std::vector<std::string> toErase;
+    for (auto& name : knownArrays_) {
+        // 模块级/类成员数组 → 符号表模块作用域有对应Variable符号 → 保留
+        if (!symTab_.lookupModule(name)) toErase.push_back(name);
+    }
+    for (auto& name : toErase) {
+        knownArrays_.erase(name);
+        arrayElemTypes_.erase(name);
+        arrayUdtElemTypes_.erase(name);
+        arrayDimCounts_.erase(name);
+        knownByteArrayVars_.erase(name);
+    }
+    knownNDArraysInProc_.clear();
+}
+
 // ============================================================
 // 声明 visit 方法
 // ============================================================
@@ -35,22 +54,21 @@ void CCodeGen::visit(SubDecl& node) {
     currentReturnVar_ = "";
     currentReturnCType_ = "";  // Fix 054
 
-    // 清空已知数组集合 (新过程)
-    knownArrays_.clear();
+    // Fix 056b: 清理局部数组注册 (模块级/类成员数组跨过程保留)
+    clearProcArrayTracking();
     ansiTempsToFree_.clear();
     ansiCounter_ = 0;
-    arrayElemTypes_.clear();
-    arrayUdtElemTypes_.clear();  // Fix 056: 每个过程开始清空UDT数组元素类型
     knownBstrVars_.clear();
     knownDoubleVars_.clear();
     knownLongVars_.clear();
+    knownLongPtrVars_.clear();  // Bug #2 fix: 也清空LongPtr集合
     knownVariantVars_.clear();
-    knownByteArrayVars_.clear();
     // M22-fix: 只清空UDT变量map(旧条目会冲突), set类型不清空(WithEvents等模块级条目需跨过程保留)
     knownUdtVars_.clear();
     knownFixedStringLen_.clear();
     // Fix 010o: 清空局部变量集合
     knownLocalVars_.clear();
+    knownByRefParams_.clear();  // Fix 081g
     // Fix 010r/010r-10: 类模块中注册me到knownClassVars_ (使Me.Method()正确分发)
     // 改为map赋值: me → 当前模块名(类名)
     if (isClassModule_) knownClassVars_["me"] = moduleName_;
@@ -61,18 +79,18 @@ void CCodeGen::visit(SubDecl& node) {
     // Fix 010n: 恢复类模块UDT成员变量 (knownUdtVars_被clear后需要从classUdtMembers_恢复)
     knownUdtVars_.insert(classUdtMembers_.begin(), classUdtMembers_.end());
 
-    // M22-fix: 注册参数中的UDT/类/接口变量到跟踪集合
-    std::cerr << "C3-FIX074-FUNCDECL: funcName='" << node.name << "' paramCount=" << node.params.size() << std::endl;
     for (auto& p : node.params) {
+        // Fix 081g: Register ByRef params for For-loop dereference fix
+        if (!p->isByVal) {
+            std::string brKey = p->name;
+            std::transform(brKey.begin(), brKey.end(), brKey.begin(), ::tolower);
+            knownByRefParams_.insert(brKey);
+        }
         if (p->asType && p->asType->kind == ASTNodeKind::SimpleTypeRef) {
             auto& simpleP = static_cast<SimpleTypeRef&>(*p->asType);
             std::string pLower = p->name;
             std::transform(pLower.begin(), pLower.end(), pLower.begin(), ::tolower);
             auto* pSym = symTab_.lookupModule(simpleP.name);
-            std::cerr << "C3-FIX074-FUNC-PARAM: param='" << p->name << "' typeName='" << simpleP.name
-                      << "' lookupModule=" << (pSym ? "FOUND" : "NULL");
-            if (pSym) std::cerr << " kind=" << static_cast<int>(pSym->kind);
-            std::cerr << std::endl;
             if (pSym && pSym->kind == SymbolKind::UserDefinedType) {
                 knownUdtVars_[pLower] = "vb6_type_" + cIdent(simpleP.name);
             } else if (pSym && pSym->kind == SymbolKind::Class) {
@@ -90,6 +108,8 @@ void CCodeGen::visit(SubDecl& node) {
             if (paramType == Vb6Type::String) knownBstrVars_.insert(pLower);
             else if (paramType == Vb6Type::Double) knownDoubleVars_.insert(pLower);
             else if (paramType == Vb6Type::Long || paramType == Vb6Type::Integer || paramType == Vb6Type::Boolean) knownLongVars_.insert(pLower);
+            // Bug #2 fix: LongPtr 参数注册到独立集合
+            else if (paramType == Vb6Type::LongPtr) knownLongPtrVars_.insert(pLower);
             // Fix 035: Variant 参数也要注册, 否则 `(*X) = concrete` 赋值不会触发
             // wrapVariantValue 包装, 导致 C2440 (ByRef Variant 参数写穿透场景).
             else if (paramType == Vb6Type::Variant) knownVariantVars_.insert(pLower);
@@ -107,6 +127,18 @@ void CCodeGen::visit(SubDecl& node) {
                 if (paramCType == "void*") {
                     knownObjectVars_.insert(pLower);
                 }
+                // Bug #2 fix: Enum等未知类型参数, C类型为int32_t时注册为Long
+                else if (paramCType == "int32_t" || paramCType == "int16_t" || paramCType == "VBABOOL") {
+                    if (!knownLongVars_.count(pLower)) knownLongVars_.insert(pLower);
+                }
+                // Bug #2 fix: C类型为intptr_t时注册为LongPtr
+                else if (paramCType == "intptr_t") {
+                    if (!knownLongPtrVars_.count(pLower)) knownLongPtrVars_.insert(pLower);
+                }
+                // Fix 082: COM interface pointer types (vb6_ComIface_*) are pointer-sized on x64
+                else if (paramCType.find("vb6_ComIface_") != std::string::npos) {
+                    if (!knownLongPtrVars_.count(pLower)) knownLongPtrVars_.insert(pLower);
+                }
             }
         } else if (p->asType && p->asType->kind == ASTNodeKind::ArrayTypeRef) {
             // Fix 010r-6: Register array parameters so arr(idx) generates VB6_SA_AT instead of (*arr)(idx)
@@ -122,13 +154,6 @@ void CCodeGen::visit(SubDecl& node) {
                 arrayUdtElemTypes_[pLower] = udtCType;
             }
             knownLocalVars_.insert(pLower);
-        } else {
-            // Fix-074-diag: 检查其他类型引用模式
-            if (p->asType) {
-                std::cerr << "C3-FIX074-DIAG-OTHER: param='" << p->name << "' typeKind=" << static_cast<int>(p->asType->kind) << std::endl;
-            } else {
-                std::cerr << "C3-FIX074-DIAG-OTHER: param='" << p->name << "' asType=NULL" << std::endl;
-            }
         }
     }
 
@@ -141,6 +166,34 @@ void CCodeGen::visit(SubDecl& node) {
     if (hasGoSub_) {
         c_.emitLine("int vb6_gosub_stack[32];");
         c_.emitLine("int vb6_gosub_sp = 0;");
+    }
+
+    // Bug #1 fix (082h): 预扫描UBound/LBound(arr,N>1)收集ND数组名
+    scanNDArraysInStmts(node.body);
+
+    // Fix 081: Apply default values for Optional parameters when not passed
+    // VB6: Optional ByVal Ecl As Long = 1  →  if (!_has_Ecl) Ecl = 1;
+    // This ensures the parameter variable has the correct default value
+    // when the caller omits it, instead of the type's zero value.
+    if (sym) {
+        for (auto& pi : sym->params) {
+            if (pi.isOptional && !pi.isParamArray && pi.hasDefaultValue && !pi.defaultValueExpr.empty()) {
+                std::string pName = cIdent(pi.name);
+                std::string hasFlag = "_has_" + pName;
+                if (pi.isByVal) {
+                    c_.emitLine("if (!" + hasFlag + ") " + pName + " = " + pi.defaultValueExpr + ";");
+                } else {
+                    std::string cType = mapType(pi.type);
+                    if (pi.type == Vb6Type::String) {
+                        c_.emitLine("if (!" + hasFlag + ") vb6_BSTR_Assign(" + pName + ", " + pi.defaultValueExpr + ");");
+                    } else if (pi.type == Vb6Type::Variant) {
+                        c_.emitLine("if (!" + hasFlag + ") (*" + pName + ") = " + pi.defaultValueExpr + ";");
+                    } else {
+                        c_.emitLine("if (!" + hasFlag + ") (*" + pName + ") = " + pi.defaultValueExpr + ";");
+                    }
+                }
+            }
+        }
     }
 
     // P12.3: 检测On Error并声明局部错误处理
@@ -203,20 +256,6 @@ void CCodeGen::visit(SubDecl& node) {
 }
 
 void CCodeGen::visit(FunctionDecl& node) {
-    // Fix-074-diag
-    std::cerr << "C3-FIX074-FUNCDECL-VISIT: funcName='" << node.name << "' paramCount=" << node.params.size() << std::endl;
-    for (auto& pp : node.params) {
-        if (pp->asType) {
-            std::cerr << "C3-FIX074-FUNCDECL-PARAM: param='" << pp->name << "' typeKind=" << static_cast<int>(pp->asType->kind);
-            if (pp->asType->kind == ASTNodeKind::SimpleTypeRef) {
-                auto& sp = static_cast<SimpleTypeRef&>(*pp->asType);
-                std::cerr << " typeName='" << sp.name << "'";
-            }
-            std::cerr << std::endl;
-        } else {
-            std::cerr << "C3-FIX074-FUNCDECL-PARAM: param='" << pp->name << "' asType=NULL" << std::endl;
-        }
-    }
     std::string sig = makeProcSignature(node);
 
     // Fix 055: Form事件处理函数不能为static, 因为wndproc用extern引用它们
@@ -233,22 +272,21 @@ void CCodeGen::visit(FunctionDecl& node) {
     auto* sym = symTab_.lookupModule(node.name);
     currentProc_ = sym;
 
-    // 清空已知数组集合 (新过程)
-    knownArrays_.clear();
+    // Fix 056b: 清理局部数组注册 (模块级/类成员数组跨过程保留)
+    clearProcArrayTracking();
     ansiTempsToFree_.clear();
     ansiCounter_ = 0;
-    arrayElemTypes_.clear();
-    arrayUdtElemTypes_.clear();  // Fix 056: 每个过程开始清空UDT数组元素类型
     knownBstrVars_.clear();
     knownDoubleVars_.clear();
     knownLongVars_.clear();
+    knownLongPtrVars_.clear();  // Bug #2 fix: 也清空LongPtr集合
     knownVariantVars_.clear();
-    knownByteArrayVars_.clear();
     // M22-fix: 只清空UDT变量map(旧条目会冲突), set类型不清空(WithEvents等模块级条目需跨过程保留)
     knownUdtVars_.clear();
     knownFixedStringLen_.clear();
     // Fix 010o: 清空局部变量集合
     knownLocalVars_.clear();
+    knownByRefParams_.clear();  // Fix 081g
     // Fix 010r/010r-10: 类模块中注册me到knownClassVars_ (使Me.Method()正确分发)
     // 改为map赋值: me → 当前模块名(类名)
     if (isClassModule_) knownClassVars_["me"] = moduleName_;
@@ -261,39 +299,36 @@ void CCodeGen::visit(FunctionDecl& node) {
 
     // M22-fix: 注册参数中的UDT/类/接口变量到跟踪集合
     for (auto& p : node.params) {
+        // Fix 081g: Register ByRef params for For-loop dereference fix
+        if (!p->isByVal) {
+            std::string brKey = p->name;
+            std::transform(brKey.begin(), brKey.end(), brKey.begin(), ::tolower);
+            knownByRefParams_.insert(brKey);
+        }
         if (p->asType && p->asType->kind == ASTNodeKind::SimpleTypeRef) {
             auto& simpleP = static_cast<SimpleTypeRef&>(*p->asType);
             std::string pLower = p->name;
             std::transform(pLower.begin(), pLower.end(), pLower.begin(), ::tolower);
             auto* pSym = symTab_.lookupModule(simpleP.name);
-            // Fix-074-diag: IPicture lookupModule result
-            if (simpleP.name == "IPicture" || simpleP.name == "StdPicture" || simpleP.name == "ipicture" || simpleP.name == "stdpicture") {
-                auto* pSym2check = symTab_.lookup(simpleP.name);
-                std::cerr << "C3-FIX074-KEY: param='" << p->name << "' typeName='" << simpleP.name
-                          << "' lookupModule=" << (pSym ? "FOUND" : "NULL");
-                if (pSym) std::cerr << " kind=" << static_cast<int>(pSym->kind);
-                std::cerr << " lookup=" << (pSym2check ? "FOUND" : "NULL");
-                if (pSym2check) std::cerr << " kind=" << static_cast<int>(pSym2check->kind);
-                std::cerr << std::endl;
-            }
+
             if (pSym && pSym->kind == SymbolKind::UserDefinedType) {
                 knownUdtVars_[pLower] = "vb6_type_" + cIdent(simpleP.name);
             } else if (pSym && pSym->kind == SymbolKind::Class) {
                 knownClassVars_[pLower] = pSym->name;
             } else if (pSym && (pSym->kind == SymbolKind::ComClass || pSym->kind == SymbolKind::ComInterface)) {
                 knownTypedComVars_[pLower] = pSym;
-                std::cerr << "C3-FIX074-REG: registered '" << pLower << "' to knownTypedComVars_ kind=" << static_cast<int>(pSym->kind) << std::endl;
             }
             auto* pSym2 = symTab_.lookup(simpleP.name);
             if (pSym2 && pSym2->kind == SymbolKind::Class && pSym2->isInterface) {
                 knownIfaceVars_[pLower] = pSym2->name;
-                std::cerr << "C3-FIX074-REG2: registered '" << pLower << "' to knownIfaceVars_ name=" << pSym2->name << std::endl;
             }
             // 注册BSTR/Double/Long类型参数到类型跟踪集合
             Vb6Type paramType = typeSys_.resolveTypeName(simpleP.name);
             if (paramType == Vb6Type::String) knownBstrVars_.insert(pLower);
             else if (paramType == Vb6Type::Double) knownDoubleVars_.insert(pLower);
             else if (paramType == Vb6Type::Long || paramType == Vb6Type::Integer || paramType == Vb6Type::Boolean) knownLongVars_.insert(pLower);
+            // Bug #2 fix: LongPtr 参数注册到独立集合
+            else if (paramType == Vb6Type::LongPtr) knownLongPtrVars_.insert(pLower);
             // Fix 035: Variant 参数也要注册, 否则 `(*X) = concrete` 赋值不会触发
             // wrapVariantValue 包装, 导致 C2440 (ByRef Variant 参数写穿透场景).
             else if (paramType == Vb6Type::Variant) knownVariantVars_.insert(pLower);
@@ -310,6 +345,18 @@ void CCodeGen::visit(FunctionDecl& node) {
                 std::string paramCType = mapTypeRef(p->asType.get());
                 if (paramCType == "void*") {
                     knownObjectVars_.insert(pLower);
+                }
+                // Bug #2 fix: Enum等未知类型参数, C类型为int32_t时注册为Long
+                else if (paramCType == "int32_t" || paramCType == "int16_t" || paramCType == "VBABOOL") {
+                    if (!knownLongVars_.count(pLower)) knownLongVars_.insert(pLower);
+                }
+                // Bug #2 fix: C类型为intptr_t时注册为LongPtr
+                else if (paramCType == "intptr_t") {
+                    if (!knownLongPtrVars_.count(pLower)) knownLongPtrVars_.insert(pLower);
+                }
+                // Fix 082: COM interface pointer types (vb6_ComIface_*) are pointer-sized on x64
+                else if (paramCType.find("vb6_ComIface_") != std::string::npos) {
+                    if (!knownLongPtrVars_.count(pLower)) knownLongPtrVars_.insert(pLower);
                 }
             }
         } else if (p->asType && p->asType->kind == ASTNodeKind::ArrayTypeRef) {
@@ -334,6 +381,9 @@ void CCodeGen::visit(FunctionDecl& node) {
     hasGoSub_ = hasGoSubInStmts(node.body);
     gosubReturnCounter_ = 0;
 
+    // Bug #1 fix (082h): 预扫描UBound/LBound(arr,N>1)收集ND数组名
+    scanNDArraysInStmts(node.body);
+
     // Function返回值变量
     std::string retType = mapTypeRef(node.returnType.get());
     currentReturnVar_ = "vb6_ret_" + cIdent(node.name);
@@ -354,6 +404,8 @@ void CCodeGen::visit(FunctionDecl& node) {
     if (funcRetVb6Type == Vb6Type::String) knownBstrVars_.insert(funcRetLower);
     else if (funcRetVb6Type == Vb6Type::Double) knownDoubleVars_.insert(funcRetLower);
     else if (funcRetVb6Type == Vb6Type::Long || funcRetVb6Type == Vb6Type::Integer || funcRetVb6Type == Vb6Type::Boolean) knownLongVars_.insert(funcRetLower);
+    // Bug #2 fix: LongPtr 返回值变量注册到独立集合
+    else if (funcRetVb6Type == Vb6Type::LongPtr) knownLongPtrVars_.insert(funcRetLower);
     // Fix 035: Variant 返回值变量也要注册, 否则 `Foo = concrete_expr` 赋值不会触发
     // wrapVariantValue 包装, 导致 C2440 (BSTR/int32_t → vb6_VARIANT).
     else if (funcRetVb6Type == Vb6Type::Variant) knownVariantVars_.insert(funcRetLower);
@@ -361,6 +413,33 @@ void CCodeGen::visit(FunctionDecl& node) {
     if (hasGoSub_) {
         c_.emitLine("int vb6_gosub_stack[32];");
         c_.emitLine("int vb6_gosub_sp = 0;");
+    }
+
+    // Fix 081: Apply default values for Optional parameters when not passed
+    // VB6: Optional ByVal Ecl As Long = 1  →  if (!_has_Ecl) Ecl = 1;
+    // This ensures the parameter variable has the correct default value
+    // when the caller omits it, instead of the type's zero value.
+    if (sym) {
+        for (auto& pi : sym->params) {
+            if (pi.isOptional && !pi.isParamArray && pi.hasDefaultValue && !pi.defaultValueExpr.empty()) {
+                std::string pName = cIdent(pi.name);
+                std::string hasFlag = "_has_" + pName;
+                if (pi.isByVal) {
+                    c_.emitLine("if (!" + hasFlag + ") " + pName + " = " + pi.defaultValueExpr + ";");
+                } else {
+                    // ByRef Optional: dereference then assign default
+                    // E.g. if (!_has_sText) (*sText) = vb6_BSTR_FromStr(L"");
+                    std::string cType = mapType(pi.type);
+                    if (pi.type == Vb6Type::String) {
+                        c_.emitLine("if (!" + hasFlag + ") vb6_BSTR_Assign(" + pName + ", " + pi.defaultValueExpr + ");");
+                    } else if (pi.type == Vb6Type::Variant) {
+                        c_.emitLine("if (!" + hasFlag + ") (*" + pName + ") = " + pi.defaultValueExpr + ";");
+                    } else {
+                        c_.emitLine("if (!" + hasFlag + ") (*" + pName + ") = " + pi.defaultValueExpr + ";");
+                    }
+                }
+            }
+        }
     }
 
     // P12.3: 检测On Error并声明局部错误处理
@@ -428,7 +507,8 @@ void CCodeGen::visit(FunctionDecl& node) {
 }
 
 std::string CCodeGen::makeProcSignature(SubDecl& node) {
-    std::string name = cProcName(node.name, node.access);
+    // 类模块方法始终带 vb6_<ClassName>_ 前缀 (与 dll_entry.c / resolveClassMemberCall 调用一致)
+    std::string name = cProcName(node.name, node.access, isClassModule_ ? moduleName_ : "");
     std::string params;
     if (isClassModule_) {
         params = classMeParam();
@@ -443,7 +523,8 @@ std::string CCodeGen::makeProcSignature(SubDecl& node) {
 }
 
 std::string CCodeGen::makeProcSignature(FunctionDecl& node) {
-    std::string name = cProcName(node.name, node.access);
+    // 类模块方法始终带 vb6_<ClassName>_ 前缀 (与 dll_entry.c / resolveClassMemberCall 调用一致)
+    std::string name = cProcName(node.name, node.access, isClassModule_ ? moduleName_ : "");
     std::string params;
     if (isClassModule_) {
         params = classMeParam();
@@ -475,6 +556,24 @@ std::string CCodeGen::makeParamList(std::vector<std::unique_ptr<ParameterDecl>>&
 
         std::string cType = mapTypeRef(p->asType.get());
         std::string cName = cIdent(p->name);
+
+        // Fix 081e: Declare函数中ByVal Long/LongPtr参数映射为intptr_t
+        // VB6 Long在Declare中常用于传句柄/指针 (ByVal hdc As Long等),
+        // VB6是32位环境,Long=4字节=指针大小; 但x64下指针8字节,int32_t不够。
+        // 将Declare中ByVal Long和ByVal LongPtr都映射为intptr_t:
+        //   x86: intptr_t=4字节, 与VB6 Long兼容
+        //   x64: intptr_t=8字节, 可容纳指针/句柄值
+        // 纯值参数(如CodePage)传入intptr_t也不影响正确性(低32位包含值)。
+        // ByRef Long参数不受影响(已映射为int32_t*,指针大小由架构决定)。
+        if (isDeclare && p->isByVal && cType == "int32_t") {
+            // 只对SimpleTypeRef中的Long/LongPtr提升为intptr_t
+            if (p->asType && p->asType->kind == ASTNodeKind::SimpleTypeRef) {
+                auto& simpleP = static_cast<SimpleTypeRef&>(*p->asType);
+                if (simpleP.name == "Long" || simpleP.name == "LongPtr") {
+                    cType = "intptr_t";
+                }
+            }
+        }
 
         // Fix 010: As Any 参数 — VB6中Any仅用于Declare, ByRef/ByVal均映射为void*
         // 不额外添加ByRef指针 (void*已是"指向任意类型的指针")
@@ -693,7 +792,9 @@ void CCodeGen::visit(VariableDecl& node) {
                 if (dim.lower) { emitExpr(*dim.lower); lb = std::move(lastExpr_); }
                 if (dim.upper) { emitExpr(*dim.upper); ub = std::move(lastExpr_); }
                 std::string trailing = (d < dimCount - 1) ? "," : "";
-                c_.emitLine("{" + lb + ", " + ub + "}" + trailing);
+                // vb6_SafeArrayBound = {lLbound, cElements}
+                // cElements = uBound - lBound + 1 (VB6 "0 To 3" has 4 elements)
+                c_.emitLine("{" + lb + ", (" + ub + " - " + lb + " + 1)}" + trailing);
             }
             c_.dedent();
             c_.emitLine("};");
@@ -810,6 +911,13 @@ void CCodeGen::visit(VariableDecl& node) {
         std::string lower = node.name;
         std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
         knownObjectVars_.insert(lower);
+    }
+
+    // Fix 082: COM interface pointer types (vb6_ComIface_*) are pointer-sized on x64
+    if (cType.find("vb6_ComIface_") != std::string::npos) {
+        std::string lower = node.name;
+        std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+        knownLongPtrVars_.insert(lower);
     }
 
     // P6.3: 检查是否是前期绑定COM变量 → 注册到 knownTypedComVars_
@@ -949,8 +1057,11 @@ void CCodeGen::visit(VariableDecl& node) {
 
 void CCodeGen::visit(DeclareDecl& node) {
     // 外部函数声明 (Declare Sub/Function ... Lib "xxx" [Alias "yyy"] [CDecl])
+    // Fix 081e: Declare函数返回Long在x64下应映射为intptr_t
+    // VB6 Long (32-bit) 在Declare中常用于返回句柄/指针 (如CreateEnhMetaFileW返回HDC),
+    // 在x64下需要intptr_t (8字节) 才能容纳指针值
     std::string retType = (node.procKind == ProcKind::Function)
-        ? mapTypeRef(node.returnType.get()) : "void";
+        ? mapDeclareType(node.returnType.get()) : "void";
 
     std::string params = makeParamList(node.params, true);
 
@@ -1105,22 +1216,21 @@ void CCodeGen::visit(PropertyDecl& node) {
     auto* propSym = symTab_.lookupModuleByKind(node.name, propSk);
     currentProc_ = propSym;
 
-    // 清空已知数组集合 (新过程)
-    knownArrays_.clear();
+    // Fix 056b: 清理局部数组注册 (模块级/类成员数组跨过程保留)
+    clearProcArrayTracking();
     ansiTempsToFree_.clear();
     ansiCounter_ = 0;
-    arrayElemTypes_.clear();
-    arrayUdtElemTypes_.clear();  // Fix 056: 每个过程开始清空UDT数组元素类型
     knownBstrVars_.clear();
     knownDoubleVars_.clear();
     knownLongVars_.clear();
+    knownLongPtrVars_.clear();  // Bug #2 fix: 也清空LongPtr集合
     knownVariantVars_.clear();
-    knownByteArrayVars_.clear();
     // M22-fix: 只清空UDT变量map(旧条目会冲突), set类型不清空(WithEvents等模块级条目需跨过程保留)
     knownUdtVars_.clear();
     knownFixedStringLen_.clear();
     // Fix 010o: 清空局部变量集合
     knownLocalVars_.clear();
+    knownByRefParams_.clear();  // Fix 081g
     // Fix 010r/010r-10: 类模块中注册me到knownClassVars_ (使Me.Method()正确分发)
     // 改为map赋值: me → 当前模块名(类名)
     if (isClassModule_) knownClassVars_["me"] = moduleName_;
@@ -1133,6 +1243,12 @@ void CCodeGen::visit(PropertyDecl& node) {
 
     // M22-fix: 注册参数中的UDT/类/接口变量到跟踪集合
     for (auto& p : node.params) {
+        // Fix 081g: Register ByRef params for For-loop dereference fix
+        if (!p->isByVal) {
+            std::string brKey = p->name;
+            std::transform(brKey.begin(), brKey.end(), brKey.begin(), ::tolower);
+            knownByRefParams_.insert(brKey);
+        }
         if (p->asType && p->asType->kind == ASTNodeKind::SimpleTypeRef) {
             auto& simpleP = static_cast<SimpleTypeRef&>(*p->asType);
             std::string pLower = p->name;
@@ -1144,18 +1260,18 @@ void CCodeGen::visit(PropertyDecl& node) {
                 knownClassVars_[pLower] = pSym->name;
             } else if (pSym && (pSym->kind == SymbolKind::ComClass || pSym->kind == SymbolKind::ComInterface)) {
                 knownTypedComVars_[pLower] = pSym;
-                std::cerr << "C3-FIX074-REG: registered '" << pLower << "' to knownTypedComVars_ kind=" << static_cast<int>(pSym->kind) << std::endl;
             }
             auto* pSym2 = symTab_.lookup(simpleP.name);
             if (pSym2 && pSym2->kind == SymbolKind::Class && pSym2->isInterface) {
                 knownIfaceVars_[pLower] = pSym2->name;
-                std::cerr << "C3-FIX074-REG2: registered '" << pLower << "' to knownIfaceVars_ name=" << pSym2->name << std::endl;
             }
             // 注册BSTR/Double/Long类型参数到类型跟踪集合
             Vb6Type paramType = typeSys_.resolveTypeName(simpleP.name);
             if (paramType == Vb6Type::String) knownBstrVars_.insert(pLower);
             else if (paramType == Vb6Type::Double) knownDoubleVars_.insert(pLower);
             else if (paramType == Vb6Type::Long || paramType == Vb6Type::Integer || paramType == Vb6Type::Boolean) knownLongVars_.insert(pLower);
+            // Bug #2 fix: LongPtr 参数注册到独立集合
+            else if (paramType == Vb6Type::LongPtr) knownLongPtrVars_.insert(pLower);
             // Fix 035: Variant 参数也要注册, 否则 `(*X) = concrete` 赋值不会触发
             // wrapVariantValue 包装, 导致 C2440 (ByRef Variant 参数写穿透场景).
             else if (paramType == Vb6Type::Variant) knownVariantVars_.insert(pLower);
@@ -1172,6 +1288,18 @@ void CCodeGen::visit(PropertyDecl& node) {
                 std::string paramCType = mapTypeRef(p->asType.get());
                 if (paramCType == "void*") {
                     knownObjectVars_.insert(pLower);
+                }
+                // Bug #2 fix: Enum等未知类型参数, C类型为int32_t时注册为Long
+                else if (paramCType == "int32_t" || paramCType == "int16_t" || paramCType == "VBABOOL") {
+                    if (!knownLongVars_.count(pLower)) knownLongVars_.insert(pLower);
+                }
+                // Bug #2 fix: C类型为intptr_t时注册为LongPtr
+                else if (paramCType == "intptr_t") {
+                    if (!knownLongPtrVars_.count(pLower)) knownLongPtrVars_.insert(pLower);
+                }
+                // Fix 082: COM interface pointer types (vb6_ComIface_*) are pointer-sized on x64
+                else if (paramCType.find("vb6_ComIface_") != std::string::npos) {
+                    if (!knownLongPtrVars_.count(pLower)) knownLongPtrVars_.insert(pLower);
                 }
             }
         } else if (p->asType && p->asType->kind == ASTNodeKind::ArrayTypeRef) {
@@ -1220,6 +1348,9 @@ void CCodeGen::visit(PropertyDecl& node) {
             else if (retVb6Type == Vb6Type::Variant) knownVariantVars_.insert(retLower);
         }
     }
+
+    // Bug #1 fix (082h): 预扫描UBound/LBound(arr,N>1)收集ND数组名
+    scanNDArraysInStmts(node.body);
 
     c_.indent();
     // P12.3: 检测On Error并声明局部错误处理
@@ -1273,7 +1404,8 @@ std::string CCodeGen::makePropertySignature(PropertyDecl& node) {
         case ProcKind::PropertySet:  prefix = "prop_set_"; break;
         default:                     prefix = "prop_get_"; break;
     }
-    std::string propName = cProcName(prefix + node.name, node.access);
+    // 类模块属性始终带 vb6_<ClassName>_ 前缀 (与 dll_entry.c / resolveClassMemberCall 调用一致)
+    std::string propName = cProcName(prefix + node.name, node.access, isClassModule_ ? moduleName_ : "");
     std::string params;
 
     // 类模块: 第一个参数为 me 指针

@@ -71,7 +71,7 @@ void CCodeGen::emitClassFactory(Module& module) {
             auto& sub = static_cast<SubDecl&>(*decl);
             if (sub.name == "Class_Initialize") {
                 hasInit = true;
-                c_.emitLine(cProcName("Class_Initialize", sub.access) + "(me);");
+                c_.emitLine(cProcName("Class_Initialize", sub.access, isClassModule_ ? moduleName_ : "") + "(me);");
                 break;
             }
         }
@@ -92,7 +92,7 @@ void CCodeGen::emitClassFactory(Module& module) {
         if (decl->kind == ASTNodeKind::SubDecl) {
             auto& sub = static_cast<SubDecl&>(*decl);
             if (sub.name == "Class_Terminate") {
-                c_.emitLine(cProcName("Class_Terminate", sub.access) + "(me);");
+                c_.emitLine(cProcName("Class_Terminate", sub.access, isClassModule_ ? moduleName_ : "") + "(me);");
                 break;
             }
         }
@@ -146,7 +146,7 @@ void CCodeGen::emitInterfaceVtable(Module& module) {
                     Symbol::toLower(ifaceName + "_")) {
                     std::string methodName = sub.name.substr(ifaceName.size() + 1);
                     std::string params = makeParamList(sub.params);
-                    methods.push_back({methodName, cProcName(sub.name, sub.access),
+                    methods.push_back({methodName, cProcName(sub.name, sub.access, isClassModule_ ? moduleName_ : ""),
                                        "void", params, true});
                 }
             } else if (decl->kind == ASTNodeKind::FunctionDecl) {
@@ -157,7 +157,7 @@ void CCodeGen::emitInterfaceVtable(Module& module) {
                     std::string methodName = func.name.substr(ifaceName.size() + 1);
                     std::string params = makeParamList(func.params);
                     std::string retType = mapTypeRef(func.returnType.get());
-                    methods.push_back({methodName, cProcName(func.name, func.access),
+                    methods.push_back({methodName, cProcName(func.name, func.access, isClassModule_ ? moduleName_ : ""),
                                        retType, params, false});
                 }
             } else if (decl->kind == ASTNodeKind::PropertyDecl) {
@@ -173,11 +173,11 @@ void CCodeGen::emitInterfaceVtable(Module& module) {
                     if (prop.propKind == ProcKind::PropertyGet) {
                         propPrefix = "prop_get_";
                         std::string retType = mapTypeRef(prop.returnType.get());
-                        methods.push_back({methodName, cProcName(propPrefix + prop.name, prop.access),
+                        methods.push_back({methodName, cProcName(propPrefix + prop.name, prop.access, isClassModule_ ? moduleName_ : ""),
                                            retType, params, false});
                     } else {
                         propPrefix = (prop.propKind == ProcKind::PropertySet) ? "prop_set_" : "prop_let_";
-                        methods.push_back({methodName, cProcName(propPrefix + prop.name, prop.access),
+                        methods.push_back({methodName, cProcName(propPrefix + prop.name, prop.access, isClassModule_ ? moduleName_ : ""),
                                            "void", params, true});
                     }
                 }
@@ -579,7 +579,8 @@ void CCodeGen::emitComVtableSinks() {
             c_.emitBlank();
             c_.emitLine(methodSig + " {");
             c_.indent();
-            std::string procCall = cProcName(handlerName, handlerSym->access, handlerSym->sourceModule);
+            std::string procCall = cProcName(handlerName, handlerSym->access,
+                                             handlerSym->isExternal ? handlerSym->sourceModule : (isClassModule_ ? moduleName_ : ""));
             c_.emitLine(procCall + callArgs + ";");
             c_.emitLine("return S_OK;");
             c_.dedent();
