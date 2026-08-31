@@ -54,6 +54,8 @@ struct CondBlock {
 struct PreprocessOptions {
     // 命令行定义: -d:WIN32=1 或 --define:DEBUG=-1
     std::unordered_map<std::string, CondCompileValue> defines;
+    // Fix 081h: --arch x64 时 Win64 条件编译常量应为 true
+    bool is64Bit = false;
 };
 
 class Preprocessor {

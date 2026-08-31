@@ -13,11 +13,6 @@ Preprocessor::Preprocessor(std::shared_ptr<SourceBuffer> buffer, Diagnostics& di
     : lexer_(std::move(buffer), diag)
     , diag_(diag)
 {
-    // 初始化命令行定义
-    for (const auto& [name, value] : options.defines) {
-        constants_[name] = value;
-    }
-
     // VB6内置条件编译常量 (全部小写键, 与查找一致)
     // Win16, Win32, Win64, VBA6, VBA7, Mac, Win [按平台]
     // 默认: Win32=True, VBA6=True, VBA7=True (我们编译器兼容VB6/VBA7)
@@ -25,10 +20,15 @@ Preprocessor::Preprocessor(std::shared_ptr<SourceBuffer> buffer, Diagnostics& di
     constants_["vba6"] = CondCompileValue::fromBool(true);
     constants_["vba7"] = CondCompileValue::fromBool(true);
     constants_["win"] = CondCompileValue::fromBool(true);
-    // Win64默认False, 除非--target是x64
-    constants_["win64"] = CondCompileValue::fromBool(false);
+    // Fix 081h: Win64 根据 --arch x64 自动设置
+    constants_["win64"] = CondCompileValue::fromBool(options.is64Bit);
     constants_["win16"] = CondCompileValue::fromBool(false);
     constants_["mac"] = CondCompileValue::fromBool(false);
+
+    // 命令行 -D 定义 (在内置常量之后, 可覆盖)
+    for (const auto& [name, value] : options.defines) {
+        constants_[name] = value;
+    }
 
     // 预读第一个token
     rawCur_ = lexer_.nextToken();

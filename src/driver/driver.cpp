@@ -550,6 +550,7 @@ bool Driver::runPreprocess(const CompileOptions& options) {
     if (options.dumpPreprocess) {
         // 解析命令行定义
         PreprocessOptions ppOpts;
+        ppOpts.is64Bit = (options.arch == "x64");  // Fix 081h
         for (const auto& def : options.defines) {
             // NAME=VALUE 格式
             auto eq = def.find('=');
@@ -615,6 +616,7 @@ bool Driver::runPreprocess(const CompileOptions& options) {
 bool Driver::runParser(const CompileOptions& options) {
     // 解析命令行定义
     PreprocessOptions ppOpts;
+    ppOpts.is64Bit = (options.arch == "x64");  // Fix 081h
     for (const auto& def : options.defines) {
         auto eq = def.find('=');
         if (eq != std::string::npos) {
@@ -1212,9 +1214,13 @@ bool Driver::runCrossModuleResolution() {
             // 外部 EnumMember 若 hasConstValue=false, cgen 会发出裸标识符 (如
             // HASH_ALG_SHA256) 而非数值 → C2065. 此前外部符号构造只复制
             // kind/name/type/location/access, 丢失 hasConstValue/constIntValue.
+            // Fix 081d: 也复制 constStringValue/constFloatValue, 否则字符串常量跨模块时丢失.
             extSym->hasConstValue = srcSym->hasConstValue;
             extSym->constIntValue = srcSym->constIntValue;
             extSym->constType = srcSym->constType;
+            extSym->constStringValue = srcSym->constStringValue;
+            extSym->constFloatValue = srcSym->constFloatValue;
+            extSym->constBoolValue = srcSym->constBoolValue;
             if (srcSym->kind == SymbolKind::Variable) {
                 extSym->dimCount = srcSym->dimCount;
             }
@@ -1569,6 +1575,9 @@ bool Driver::runCodeGeneration(const CompileOptions& options, const std::string&
                     if (!modScope) continue;
                     for (auto& [key, symPtr] : modScope->symbols()) {
                         if (!symPtr || symPtr->kind != SymbolKind::Class) continue;
+                        // 跳过跨模块注入的外部类副本 (isExternal=true), 只处理宿主表中的本地类,
+                        // 否则其成员查找会命中本模块/其他模块的同名方法导致参数污染
+                        if (symPtr->isExternal) continue;
                         if (symPtr->instancing == VBInstancing::Private) continue;
                         auto& clsSym = *symPtr;
                         // Deduplicate: each class only once across all symbol tables
@@ -1576,22 +1585,62 @@ bool Driver::runCodeGeneration(const CompileOptions& options, const std::string&
                         processedClasses.insert(clsSym.name);
 
                         std::vector<TypeLibBuilder::MethodInfo> methods;
+                        // 类→宿主符号表映射 (与 cgen_util.cpp Fix 016b 一致):
+                        // 只记录 isExternal=false 的本地 Class 所在表, 成员查找优先用宿主表,
+                        // 彻底避免跨表 lookupModuleByKind 命中其他类同名方法 (参数污染,
+                        // 如 cCollection.Add 被查成 cHttpServerRouterAfter.Add 变成
+                        // RouteName/Handler/MethodLimit, 导致 SetFuncAndParamNames 因参数
+                        // 个数不匹配返回 TYPE_E_TYPEMISMATCH 0x800280EC)。
+                        std::unordered_map<std::string, SymbolTable*> classOwningSymTab;
+                        for (auto* st_ : allSymTabs) {
+                            if (!st_ || !st_->moduleScope()) continue;
+                            for (auto& [k, cs] : st_->moduleScope()->symbols()) {
+                                if (cs && cs->kind == SymbolKind::Class && !cs->isExternal) {
+                                    classOwningSymTab.emplace(Symbol::toLower(cs->name), st_);
+                                }
+                            }
+                        }
+                        auto findMemberInClass = [&](const std::string& name, SymbolKind kind) -> Symbol* {
+                            // 1) 类宿主表精确查找 (无跨类碰撞)。
+                            //    类宿主表 (classOwningSymTab) 由语义分析注册, 包含该类全部成员变体
+                            //    (Sub/Function/Property Get/Let/Set), 跨表 fallback 反而会命中
+                            //    其他类的同名方法 (如 cCollection 的 Sub Add(Item,Key) 之外, 又
+                            //    从其他类找到 Function Add(RouteName,Handler,MethodLimit), 导致
+                            //    SetFuncAndParamNames 因参数个数不匹配返回 TYPE_E_TYPEMISMATCH)。
+                            auto itOwn = classOwningSymTab.find(Symbol::toLower(clsSym.name));
+                            if (itOwn != classOwningSymTab.end() && itOwn->second && itOwn->second->moduleScope()) {
+                                // Fix 048: 排除 isBuiltin — 内置函数 (IsEmpty/Filter/Timer 等)
+                                // 注册于每个模块符号表 (key=无后缀名), 若类成员查找命中它们,
+                                // TypeLib 会出现幽灵 Function 变体 (与真实属性 $pg/$pl 同名同
+                                // dispid, SetFuncAndParamNames 返回 TYPE_E_TYPEMISMATCH)。
+                                Symbol* s = itOwn->second->lookupModuleByKind(name, kind);
+                                if (s && !s->isExternal && !s->isBuiltin) {
+                                    return s;
+                                }
+                            }
+                            // 2) 当前表兜底 (只接受本地符号)
+                            Symbol* s2 = symTab->lookupModuleByKind(name, kind);
+                            if (s2 && !s2->isExternal && !s2->isBuiltin) {
+                                return s2;
+                            }
+                            return nullptr;
+                        };
+                        // memberNames 可能含大小写不同的重复名 (VB6 标识符不区分大小写),
+                        // 重复处理会导致同一方法被添加多次, 且第二次查找可能命中其他类的同名
+                        // 方法符号 (参数污染)。按大小写不敏感去重。
+                        std::unordered_set<std::string> seenMemberNames;
                         for (auto& memberName : clsSym.memberNames) {
+                            if (!seenMemberNames.insert(Symbol::toLower(memberName)).second) continue;
                             // 同名属性可能有 PropertyGet/Let/Set 多个符号
                             // memberNames 中同名属性只存一次, 需要分别查找各变体
                             // M29: cross-symTab fallback - the class may be found in a "merged" analyzer
                             // (e.g., lastAnalyzer), but its Property Let/Set variants might only exist in
                             // the original per-module analyzer's table. Fall back to allSymTabs to find them.
-                            auto* subSym = symTab->lookupModuleByKind(memberName, SymbolKind::Sub);
-                            if (!subSym) for (auto* st_ : allSymTabs) { subSym = st_->lookupModuleByKind(memberName, SymbolKind::Sub); if (subSym) break; }
-                            auto* fnSym = symTab->lookupModuleByKind(memberName, SymbolKind::Function);
-                            if (!fnSym) for (auto* st_ : allSymTabs) { fnSym = st_->lookupModuleByKind(memberName, SymbolKind::Function); if (fnSym) break; }
-                            auto* propGetSym = symTab->lookupModuleByKind(memberName, SymbolKind::PropertyGet);
-                            if (!propGetSym) for (auto* st_ : allSymTabs) { propGetSym = st_->lookupModuleByKind(memberName, SymbolKind::PropertyGet); if (propGetSym) break; }
-                            auto* propLetSym = symTab->lookupModuleByKind(memberName, SymbolKind::PropertyLet);
-                            if (!propLetSym) for (auto* st_ : allSymTabs) { propLetSym = st_->lookupModuleByKind(memberName, SymbolKind::PropertyLet); if (propLetSym) break; }
-                            auto* propSetSym = symTab->lookupModuleByKind(memberName, SymbolKind::PropertySet);
-                            if (!propSetSym) for (auto* st_ : allSymTabs) { propSetSym = st_->lookupModuleByKind(memberName, SymbolKind::PropertySet); if (propSetSym) break; }
+                            auto* subSym = findMemberInClass(memberName, SymbolKind::Sub);
+                            auto* fnSym = findMemberInClass(memberName, SymbolKind::Function);
+                            auto* propGetSym = findMemberInClass(memberName, SymbolKind::PropertyGet);
+                            auto* propLetSym = findMemberInClass(memberName, SymbolKind::PropertyLet);
+                            auto* propSetSym = findMemberInClass(memberName, SymbolKind::PropertySet);
 
                             // 收集所有 Public 成员变体 (PropertyGet 必须在 PropertyLet 前面)
                             struct MemberRef { Symbol* sym; bool isGet; bool isPut; bool isPutRef; };
@@ -1640,6 +1689,12 @@ bool Driver::runCodeGeneration(const CompileOptions& options, const std::string&
                         bool ifaceOk = tlbBuilder.addDispInterface(ifaceName, iid, methods);
                         if (!ifaceOk) {
                             std::cerr << "C3: TypeLib addDispInterface failed for " << ifaceName << ": " << tlbBuilder.lastError() << std::endl;
+                            for (size_t mi_ = 0; mi_ < methods.size(); mi_++) {
+                                auto& mm = methods[mi_];
+                                fprintf(stderr, "  [%zu] %s get=%d put=%d putref=%d dispid=%d nparams=%zu\n",
+                                        mi_, mm.name.c_str(), (int)mm.isPropertyGet, (int)mm.isPropertyPut,
+                                        (int)mm.isPropertyPutRef, mm.dispid, mm.params.size());
+                            }
                         }
 
                         // Only write back IID if addDispInterface succeeded
@@ -1737,6 +1792,7 @@ bool Driver::runCodeGeneration(const CompileOptions& options, const std::string&
         //  as the comDefaultIfaceIid sync block above.)
         for (auto& [mKey, mClsSym] : lastAnalyzer->symbolTable().moduleScope()->symbols()) {
             if (!mClsSym || mClsSym->kind != SymbolKind::Class || mClsSym->isInterface) continue;
+            if (mClsSym->isExternal) continue;  // 跳过外部注入副本
             for (auto& memberName : mClsSym->memberNames) {
                 // Sync each possible method kind independently (Sub/Function are exclusive;
                 // Property Get/Let/Set share name but are distinct Symbol objects)
@@ -1747,7 +1803,7 @@ bool Driver::runCodeGeneration(const CompileOptions& options, const std::string&
                     int knownDispid = 0;
                     for (auto* st : allSymTabs) {
                         Symbol* s = st->lookupModuleByKind(memberName, mKind);
-                        if (s && s->comDispid != 0) { knownDispid = s->comDispid; break; }
+                        if (s && !s->isExternal && s->comDispid != 0) { knownDispid = s->comDispid; break; }
                     }
                     if (knownDispid == 0) continue;  // method not present, or driver didn't set dispid
                     // Propagate to ALL matching Symbol* across all symbol tables (only fill zeros)
@@ -1755,7 +1811,7 @@ bool Driver::runCodeGeneration(const CompileOptions& options, const std::string&
                     //  because lastAnalyzer's merged table can have its own copy. Update every copy.)
                     for (auto* st : allSymTabs) {
                         Symbol* s = st->lookupModuleByKind(memberName, mKind);
-                        if (s && s->comDispid == 0) s->comDispid = knownDispid;
+                        if (s && !s->isExternal && s->comDispid == 0) s->comDispid = knownDispid;
                     }
                 }
             }
@@ -2110,6 +2166,24 @@ void Driver::printHelp() {
               << "  -v, --verbose       详细输出\n"
               << "  -h, --help          显示帮助\n"
               << "  -V, --version       显示版本\n"
+              << "\n"
+              << "调试/转储选项:\n"
+              << "  --dump-tokens      输出词法分析后的Token流\n"
+              << "  --dump-ast         输出抽象语法树\n"
+              << "  --dump-symbols     输出符号表\n"
+              << "  --dump-preprocess  输出预处理后的源码\n"
+              << "  --dump-ir          输出中间表示\n"
+              << "  --dump-frm         输出.frm窗体描述\n"
+              << "  --emit-c           生成C代码 (输出到 --output-dir)\n"
+              << "  --emit-llvm        生成LLVM IR\n"
+              << "  --keep-for-debug   保留中间文件便于调试\n"
+              << "  --compat-check     兼容性检查模式\n"
+              << "\n"
+              << "TypeLib/COM 选项:\n"
+              << "  --typelib <文件>   显式引用TypeLib\n"
+              << "  --no-auto-typelib  禁用自动TypeLib加载\n"
+              << "  --progid <前缀>    ActiveX DLL的ProgID前缀\n"
+              << "  --libid <字符串>   显式指定TypeLib的LibID\n"
               << "\n"
               << "示例:\n"
               << "  C3 hello.bas -o hello.exe\n"

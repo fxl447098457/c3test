@@ -566,8 +566,8 @@ double  vb6_Timer(void);            // Timer: seconds since midnight (fractional
 BSTR   vb6_StrConv(BSTR text, int32_t conversion, int32_t localeID); // StrConv
 struct vb6_SafeArray1D; // forward declaration
 struct vb6_SafeArray1D* vb6_Filter(struct vb6_SafeArray1D* source, BSTR match, int32_t include, int32_t compare);
-int32_t vb6_StrPtr(BSTR s);          // StrPtr: address of string data
-int32_t vb6_ObjPtr(void* obj);       // ObjPtr: address of object
+void*    vb6_StrPtr(BSTR s);          // StrPtr: address of string data
+uintptr_t vb6_ObjPtr(void* obj);       // ObjPtr: address of object
 BSTR   vb6_LSet(BSTR str, int32_t length);  // LSet: left-justify
 BSTR   vb6_RSet(BSTR str, int32_t length);  // RSet: right-justify
 BSTR   vb6_WeekdayName(int32_t weekday, int32_t abbreviate, int32_t firstDayOfWeek);
@@ -609,10 +609,12 @@ typedef enum vb6_safearray_elemtype {
     vb6_sa_variant=8,   // vb6_VARIANT (需要逐元素清理)
     vb6_sa_ptr   = 9,   // void* (对象引用)
     vb6_sa_currency = 10, // int64_t (VB6 Currency: value*10000)
+    vb6_sa_udt    = 11,   // UDT (elemSize set externally)
 } vb6_safearray_elemtype;
 
 // 一维数组描述符 (VB6绝大多数用例是一维)
 typedef struct vb6_SafeArray1D {
+    int32_t signature;                  // Fix 082g: 魔数标识1D数组 = 0x5A1D ('SA1D')
     vb6_safearray_elemtype elemType;  // 元素类型
     int32_t elemSize;                  // 单个元素字节数
     int32_t lBound;                    // 下界 (VB6默认0, 可指定1)
@@ -632,6 +634,10 @@ vb6_SafeArray1D* vb6_SafeArrayCreate1D(vb6_safearray_elemtype elemType,
 
 // 创建一维动态数组 (ReDim)
 vb6_SafeArray1D* vb6_SafeArrayReDim1D(vb6_safearray_elemtype elemType,
+    int32_t lBound, int32_t uBound);
+
+// UDT版ReDim: elemSize由调用方提供 (用于UDT动态数组)
+vb6_SafeArray1D* vb6_SafeArrayReDim1D_Udt(int32_t elemSize,
     int32_t lBound, int32_t uBound);
 
 // ReDim Preserve: 保留原有数据, 调整大小
@@ -680,6 +686,8 @@ vb6_SafeArrayND* vb6_SafeArrayCreateND(vb6_safearray_elemtype elemType,
     int32_t dimCount, vb6_SafeArrayBound bounds[]);
 void vb6_SafeArrayDestroyND(vb6_SafeArrayND* arr);
 vb6_SafeArrayND* vb6_SafeArrayReDimND(vb6_safearray_elemtype elemType,
+    int32_t dimCount, vb6_SafeArrayBound bounds[]);
+vb6_SafeArrayND* vb6_SafeArrayReDimND_Udt(int32_t elemSize,
     int32_t dimCount, vb6_SafeArrayBound bounds[]);
 vb6_SafeArrayND* vb6_SafeArrayReDimPreserveND(vb6_SafeArrayND* arr,
     int32_t dimCount, vb6_SafeArrayBound newBounds[]);
@@ -932,6 +940,7 @@ SAFEARRAY* vb6_PA_Create(int32_t count);
 void vb6_PA_Destroy(SAFEARRAY* psa);
 void vb6_PA_SetVariant(SAFEARRAY* psa, int32_t index, VARIANT* pv);
 void vb6_PA_SetLong(SAFEARRAY* psa, int32_t index, int32_t val);
+void vb6_PA_SetLongPtr(SAFEARRAY* psa, int32_t index, intptr_t val);  /* Fix 082: x64-safe VarPtr parameter */
 void vb6_PA_SetDouble(SAFEARRAY* psa, int32_t index, double val);
 void vb6_PA_SetBSTR(SAFEARRAY* psa, int32_t index, BSTR val);
 VARIANT vb6_PA_GetVariant(SAFEARRAY* psa, int32_t index);

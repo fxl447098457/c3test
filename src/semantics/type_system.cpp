@@ -13,6 +13,8 @@ TypeSystem::TypeSystem() {
         {"int", Vb6Type::Integer},       // 缩写
         {"long", Vb6Type::Long},
         {"lng", Vb6Type::Long},
+        {"longptr", Vb6Type::LongPtr},    // Fix 081e: LongPtr = architecture-width integer
+        {"longlong", Vb6Type::LongPtr},   // VBA7 LongLong compatibility
         {"single", Vb6Type::Single},
         {"sng", Vb6Type::Single},
         {"double", Vb6Type::Double},
@@ -49,10 +51,7 @@ Vb6Type TypeSystem::resolveTypeName(const std::string& name) const {
     // Fix 050b: VB6 类型别名 — 这些类型在 mapTypeRef() 中被映射为 int32_t,
     // 但 resolveTypeName() 返回 Unknown, 导致 resolveTypeRef() 回退到 Variant,
     // 与代码生成器的 int32_t 不一致, 产生 vb6_VARIANT→int32_t C2440 错误。
-    // LongPtr: VB6 32位下等于 Long
-    if (lower == "longptr" || lower == "longptr") {
-        return Vb6Type::Long;
-    }
+    // LongPtr/LongLong已加入builtinTypes_ (Vb6Type::LongPtr → intptr_t)
     // OLE_ 前缀类型 (OLE_COLOR, OLE_HANDLE 等) — DWORD = Long
     if (lower.size() >= 4 && lower.compare(0, 4, "ole_") == 0) {
         return Vb6Type::Long;

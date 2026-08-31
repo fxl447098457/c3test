@@ -32,6 +32,7 @@ enum class Vb6Type : uint16_t {
     Decimal = 14,    // 96-bit unsigned integer + scaling
     Byte = 17,       // 8-bit unsigned
     ULong = 19,      // unsigned Long (VB7+)
+    LongPtr = 20,     // Fix 081e: LongPtr/LongLong - architecture-width integer (intptr_t)
     UserDefinedType = 36,
     Array = 8192,    // bit flag
     ByRef = 16384,   // bit flag

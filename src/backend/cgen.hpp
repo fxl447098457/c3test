@@ -287,6 +287,9 @@ private:
     // 已知Long/Integer/Boolean变量名集合 (小写) - 用于COM值解封类型推断
     std::unordered_set<std::string> knownLongVars_;
 
+    // Bug #2 fix: 已知LongPtr/intptr_t变量名集合 (小写) - 用于直接比较而非VarCmpLong
+    std::unordered_set<std::string> knownLongPtrVars_;
+
     // P8.4: 已知Variant变量名集合 (小写) - 用于赋值时包装值
     std::unordered_set<std::string> knownVariantVars_;
 
@@ -504,6 +507,9 @@ private:
 
     // TypeRefPtr → C类型字符串 (非const: P6.3收集COM接口类型名)
     std::string mapTypeRef(ASTNode* typeRef);
+
+    // Fix 081e: Declare函数返回类型映射 - Long/LongPtr → intptr_t (x64指针安全)
+    std::string mapDeclareType(ASTNode* typeRef);
 
     // Fix 010b: 尝试将AST表达式常量折叠为int64_t (用于enum成员值)
     // 成功返回true并设置result, 失败返回false

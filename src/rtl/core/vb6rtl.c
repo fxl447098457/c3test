@@ -2290,12 +2290,12 @@ struct vb6_SafeArray1D* vb6_Filter(struct vb6_SafeArray1D* source, BSTR match, i
     return result;
 }
 
-int32_t vb6_StrPtr(BSTR s) {
-    return (int32_t)(intptr_t)s;
+void* vb6_StrPtr(BSTR s) {
+    return (void*)s;  // BSTR points directly to string data
 }
 
-int32_t vb6_ObjPtr(void* obj) {
-    return (int32_t)(intptr_t)obj;
+uintptr_t vb6_ObjPtr(void* obj) {
+    return (uintptr_t)obj;
 }
 
 BSTR vb6_LSet(BSTR str, int32_t length) {
@@ -3098,6 +3098,7 @@ static int32_t vb6_sa_elem_size(vb6_safearray_elemtype t) {
         case vb6_sa_variant: return (int32_t)sizeof(vb6_VARIANT);
         case vb6_sa_ptr:     return (int32_t)sizeof(void*);
         case vb6_sa_currency: return (int32_t)sizeof(int64_t);  /* P1-9修复: VB6 Currency = 8bytes */
+        case vb6_sa_udt:     return 0;  /* UDT: elemSize set externally, cannot determine here */
         default:             return 4;
     }
 }
@@ -3106,6 +3107,7 @@ vb6_SafeArray1D* vb6_SafeArrayCreate1D(vb6_safearray_elemtype elemType,
     int32_t lBound, int32_t uBound) {
     vb6_SafeArray1D* arr = (vb6_SafeArray1D*)calloc(1, sizeof(vb6_SafeArray1D));
     if (!arr) return NULL;
+    arr->signature = 0x5A1D;  /* Fix 082g: 1D array magic */
     arr->elemType = elemType;
     arr->elemSize = vb6_sa_elem_size(elemType);
     arr->lBound = lBound;
@@ -3122,6 +3124,23 @@ vb6_SafeArray1D* vb6_SafeArrayReDim1D(vb6_safearray_elemtype elemType,
     int32_t lBound, int32_t uBound) {
     vb6_SafeArray1D* arr = vb6_SafeArrayCreate1D(elemType, lBound, uBound);
     if (arr) arr->isDynamic = 1;
+    return arr;
+}
+
+vb6_SafeArray1D* vb6_SafeArrayReDim1D_Udt(int32_t elemSize,
+    int32_t lBound, int32_t uBound) {
+    vb6_SafeArray1D* arr = (vb6_SafeArray1D*)calloc(1, sizeof(vb6_SafeArray1D));
+    if (!arr) return NULL;
+    arr->signature = 0x5A1D;  /* Fix 082g: 1D array magic */
+    arr->elemType = vb6_sa_udt;
+    arr->elemSize = elemSize;
+    arr->lBound = lBound;
+    arr->uBound = uBound;
+    arr->count = uBound - lBound + 1;
+    arr->isDynamic = 1;
+    if (arr->count > 0) {
+        arr->data = calloc((size_t)arr->count, (size_t)arr->elemSize);
+    }
     return arr;
 }
 
@@ -3212,14 +3231,44 @@ void vb6_SafeArrayPutElem(vb6_SafeArray1D* arr, int32_t index, void* value) {
 }
 
 int32_t vb6_UBound(vb6_SafeArray1D* safeArray, int32_t dimension) {
-    (void)dimension;  // 一维数组忽略维度参数
     if (!safeArray) return 0;
+    // Fix 082g: use signature field to distinguish 1D vs ND arrays
+    // SafeArray1D has signature=0x5A1D, SafeArrayND has dimCount (2-16)
+    if (safeArray->signature == 0x5A1D) {
+        // Confirmed 1D array
+        return safeArray->uBound;
+    }
+    // Not a 1D array - try ND path
+    if (dimension > 1) {
+        return vb6_UBoundND((vb6_SafeArrayND*)safeArray, dimension);
+    }
+    // Fallback: check if it looks like an ND array
+    int32_t possibleDimCount = *(int32_t*)safeArray;
+    if (possibleDimCount >= 2 && possibleDimCount <= 16) {
+        vb6_SafeArrayND* ndArr = (vb6_SafeArrayND*)safeArray;
+        if (ndArr->totalElements > 0 && ndArr->data != NULL) {
+            return vb6_UBoundND(ndArr, dimension);
+        }
+    }
     return safeArray->uBound;
 }
 
 int32_t vb6_LBound(vb6_SafeArray1D* safeArray, int32_t dimension) {
-    (void)dimension;
     if (!safeArray) return 0;
+    // Fix 082g: use signature field to distinguish 1D vs ND arrays
+    if (safeArray->signature == 0x5A1D) {
+        return safeArray->lBound;
+    }
+    if (dimension > 1) {
+        return vb6_LBoundND((vb6_SafeArrayND*)safeArray, dimension);
+    }
+    int32_t possibleDimCount = *(int32_t*)safeArray;
+    if (possibleDimCount >= 2 && possibleDimCount <= 16) {
+        vb6_SafeArrayND* ndArr = (vb6_SafeArrayND*)safeArray;
+        if (ndArr->totalElements > 0 && ndArr->data != NULL) {
+            return vb6_LBoundND(ndArr, dimension);
+        }
+    }
     return safeArray->lBound;
 }
 
@@ -3311,6 +3360,40 @@ void* vb6_SafeArrayND_GetPtr(vb6_SafeArrayND* arr, ...) {
 vb6_SafeArrayND* vb6_SafeArrayReDimND(vb6_safearray_elemtype elemType,
     int32_t dimCount, vb6_SafeArrayBound bounds[]) {
     return vb6_SafeArrayCreateND(elemType, dimCount, bounds);
+}
+
+vb6_SafeArrayND* vb6_SafeArrayReDimND_Udt(int32_t elemSize,
+    int32_t dimCount, vb6_SafeArrayBound bounds[]) {
+    if (dimCount <= 0 || dimCount > 16) return NULL;
+
+    vb6_SafeArrayND* arr = (vb6_SafeArrayND*)calloc(1, sizeof(vb6_SafeArrayND));
+    if (!arr) return NULL;
+
+    arr->dimCount = dimCount;
+    arr->elemType = vb6_sa_udt;
+    arr->elemSize = elemSize;
+
+    int32_t total = 1;
+    for (int32_t d = 0; d < dimCount; d++) {
+        arr->bounds[d] = bounds[d];
+        if (bounds[d].cElements <= 0) {
+            arr->totalElements = 0;
+            arr->data = NULL;
+            return arr;
+        }
+        total *= bounds[d].cElements;
+    }
+    arr->totalElements = total;
+
+    if (total > 0) {
+        arr->data = calloc((size_t)total, (size_t)arr->elemSize);
+        if (!arr->data) {
+            free(arr);
+            return NULL;
+        }
+    }
+
+    return arr;
 }
 
 vb6_SafeArrayND* vb6_SafeArrayReDimPreserveND(vb6_SafeArrayND* arr,
@@ -4028,7 +4111,17 @@ void vb6_PA_SetLong(SAFEARRAY* psa, int32_t index, int32_t val) {
     v.lVal = val;
     long idx = (long)index;
     SafeArrayPutElement(psa, &idx, &v);
-    // SafeArrayPutElement copies the VARIANT, no need to keep v alive
+}
+
+/* Fix 082: x64-safe VarPtr parameter - store as VT_I8 (LongPtr) */
+void vb6_PA_SetLongPtr(SAFEARRAY* psa, int32_t index, intptr_t val) {
+    if (!psa) return;
+    VARIANT v;
+    VariantInit(&v);
+    v.vt = VT_I8;
+    v.llVal = (LONGLONG)val;
+    long idx = (long)index;
+    SafeArrayPutElement(psa, &idx, &v);
 }
 
 void vb6_PA_SetDouble(SAFEARRAY* psa, int32_t index, double val) {
@@ -4838,6 +4931,7 @@ vb6_VARIANT vb6_VariantFromComResult(void* variant_ptr) {
                     default:         et = vb6_sa_variant;  esz = sizeof(VARIANT); break;
                 }
                 vb6_SafeArray1D* arr = (vb6_SafeArray1D*)calloc(1, sizeof(vb6_SafeArray1D));
+                arr->signature = 0x5A1D;  /* Fix 082g */
                 arr->elemType = et;
                 arr->elemSize = esz;
                 arr->lBound = lBound;
@@ -4951,6 +5045,7 @@ vb6_VARIANT vb6_VariantFromStackVARIANT(VARIANT* pv) {
                     default:         et = vb6_sa_variant;  esz = sizeof(VARIANT); break;
                 }
                 vb6_SafeArray1D* arr = (vb6_SafeArray1D*)calloc(1, sizeof(vb6_SafeArray1D));
+                arr->signature = 0x5A1D;  /* Fix 082g */
                 arr->elemType = et;
                 arr->elemSize = esz;
                 arr->lBound = lBound;

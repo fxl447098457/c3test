@@ -953,6 +953,7 @@ std::string CCodeGen::mapType(Vb6Type type) const {
         case Vb6Type::Null:     cType = "int16_t"; break;   // VB6 Null = 1
         case Vb6Type::Integer:  cType = "int16_t"; break;
         case Vb6Type::Long:     cType = "int32_t"; break;
+        case Vb6Type::LongPtr: cType = "intptr_t"; break;   // Fix 081e: architecture-width integer
         case Vb6Type::Single:   cType = "float"; break;
         case Vb6Type::Double:   cType = "double"; break;
         case Vb6Type::Currency: cType = "int64_t"; break;   // scaled integer
@@ -992,7 +993,7 @@ std::string CCodeGen::mapComType(Vb6Type type) const {
     switch (baseType) {
         case Vb6Type::Integer:  return "int16_t";
         case Vb6Type::Long:     return "int32_t";
-        case Vb6Type::Single:   return "float";
+        case Vb6Type::LongPtr: return "intptr_t";  // Fix 081e        case Vb6Type::Single:   return "float";
         case Vb6Type::Double:   return "double";
         case Vb6Type::Currency: return "int64_t";
         case Vb6Type::Date:     return "double";
@@ -1112,8 +1113,10 @@ std::string CCodeGen::mapTypeRef(ASTNode* typeRef) {
             // 注意: 能在符号表中找到的用户类型会已在上面被处理
 
             // VB6语言类型别名
-            if (lookupName == "LongPtr" || lookupName == "Longptr") {
-                return "int32_t";  // VB6 LongPtr: 32位=Long, 64位=LongLong; C3目标为32位
+            // Fix 081e: LongPtr now has its own Vb6Type::LongPtr → intptr_t
+            // (handled by resolveTypeName + mapType, this fallback is for edge cases)
+            if (lookupName == "LongPtr" || lookupName == "LongLong") {
+                return "intptr_t";
             }
             // VB6内置枚举类型 (Vb前缀): VbCompareMethod, VbTriState, VbFileAttribute等
             // VB6枚举底层是Long (int32_t)
@@ -1162,6 +1165,26 @@ std::string CCodeGen::mapTypeRef(ASTNode* typeRef) {
         default:
             return "vb6_VARIANT";
     }
+}
+
+// Fix 081e: Declare函数返回类型映射
+// 在VB6 Declare语句中, 返回值Long常用于返回句柄/指针(HDC/HBITMAP/HWND等)。
+// x64下int32_t只有4字节,无法容纳8字节指针,导致截断和后续崩溃。
+// LongPtr已经通过mapType映射为intptr_t, 这里只需将Long返回值也映射为intptr_t。
+// 映射为intptr_t: x86下4字节(兼容), x64下8字节(与指针同大小)。
+std::string CCodeGen::mapDeclareType(ASTNode* typeRef) {
+    if (!typeRef) return "vb6_VARIANT";
+    std::string base = mapTypeRef(typeRef);
+    if (base == "int32_t") {
+        // 检查是否是Long类型 (LongPtr已通过mapType返回intptr_t)
+        if (typeRef->kind == ASTNodeKind::SimpleTypeRef) {
+            auto& simple = static_cast<SimpleTypeRef&>(*typeRef);
+            if (simple.name == "Long") {
+                return "intptr_t";
+            }
+        }
+    }
+    return base;
 }
 
 // Fix 010b: 常量折叠 — 将VB6 AST表达式求值为int64_t编译期常量
