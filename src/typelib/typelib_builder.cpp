@@ -251,7 +251,8 @@ bool TypeLibBuilder::addDispInterface(const std::string& name,
                     paramDescs[p].paramdesc.wParamFlags = PARAMFLAG_FIN;
                 } else {
                     // ByRef: 标记为指针类型
-                    paramDescs[p].tdesc.vt |= VT_BYREF;
+                    // 注意: dispinterface 的 ByRef 参数 tdesc.vt 应保留原类型,
+                    // 参数标志用 PARAMFLAG_FIN | PARAMFLAG_FOUT 表示 In/Out
                     paramDescs[p].paramdesc.wParamFlags = PARAMFLAG_FIN | PARAMFLAG_FOUT;
                 }
                 // 使用 VARIANT 描述可选参数
@@ -299,7 +300,24 @@ bool TypeLibBuilder::addDispInterface(const std::string& name,
 
         hr = pCTI->SetFuncAndParamNames((UINT)i, namePtrs.data(), cNames);
         if (FAILED(hr)) {
-            lastError_ = "SetFuncAndParamNames failed for " + m.name + ": 0x" + std::to_string(hr);
+            std::string detail = "SetFuncAndParamNames failed for " + m.name + ": 0x" + std::to_string(hr)
+                + " [idx=" + std::to_string(i)
+                + " dispid=" + std::to_string(m.dispid)
+                + " get=" + (m.isPropertyGet ? "1" : "0")
+                + " put=" + (m.isPropertyPut ? "1" : "0")
+                + " putref=" + (m.isPropertyPutRef ? "1" : "0")
+                + " nparams=" + std::to_string(m.params.size())
+                + " cNames=" + std::to_string(cNames)
+                + " params=[";
+            for (size_t p = 0; p < m.params.size(); p++) {
+                detail += m.params[p].name;
+                detail += "(";
+                detail += m.params[p].isByVal ? "byval" : "byref";
+                detail += m.params[p].isOptional ? ",opt" : "";
+                detail += "),";
+            }
+            detail += "]]";
+            lastError_ = detail;
             pCTI->Release();
             return false;
         }
