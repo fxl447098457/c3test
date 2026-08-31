@@ -1,0 +1,41 @@
+C3 - Visual Basic 6.0 Compiler
+
+用法: C3 [选项] <源文件...>
+
+选项:
+  -o <文件>          输出文件路径
+  --output-dir <目录> 输出目录 (默认: 源文件所在目录)
+  --target <平台>     目标平台 (win-x86, win-x64, linux-x64, macos-arm64)
+  --arch <架构>      目标架构 x64 (默认) 或 x86 (用于32位COM组件)
+  --gui <模式>        GUI模式 (native, webview, none)
+  --syntax-only       只做语法检查
+  -d, --define <N=V>  定义条件编译常量 (如 -d:DEBUG=-1)
+  -O <级别>           优化级别 (0-3)
+  -g, --debug         生成调试信息
+  --dll               编译为ActiveX DLL
+  -v, --verbose       详细输出
+  -h, --help          显示帮助
+  -V, --version       显示版本
+
+调试/转储选项:
+  --dump-tokens      输出词法分析后的Token流
+  --dump-ast         输出抽象语法树
+  --dump-symbols     输出符号表
+  --dump-preprocess  输出预处理后的源码
+  --dump-ir          输出中间表示
+  --dump-frm         输出.frm窗体描述
+  --emit-c           生成C代码 (输出到 --output-dir)
+  --emit-llvm        生成LLVM IR
+  --keep-for-debug   保留中间文件便于调试
+  --compat-check     兼容性检查模式
+
+TypeLib/COM 选项:
+  --typelib <文件>   显式引用TypeLib
+  --no-auto-typelib  禁用自动TypeLib加载
+  --progid <前缀>    ActiveX DLL的ProgID前缀
+  --libid <字符串>   显式指定TypeLib的LibID
+
+示例:
+  C3 hello.bas -o hello.exe
+  C3 app.vbp --target win-x64
+  C3 module.bas -d:DEBUG=-1
