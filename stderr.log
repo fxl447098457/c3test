@@ -3,52 +3,54 @@ C3: TypeLib addDispInterface failed for _cHttpServerRouteItem: AddFuncDesc faile
 C3: TypeLib addDispInterface failed for _cHttpServerResponse: AddFuncDesc failed for Text: 0x-2147352568
 C3: TypeLib addDispInterface failed for _cStartUp: AddFuncDesc failed for Toggle: 0x-2147352568
 C3: TypeLib addDispInterface failed for _cHttpServerSession: SetFuncAndParamNames failed for Item: 0x-2147319764
-C3: TypeLib addDispInterface failed for _cModbusSlave: AddFuncDesc failed for Start: 0x-2147352568
+C3: TypeLib addDispInterface failed for _cHttpServerCookies: AddFuncDesc failed for Remove: 0x-2147352568
+C3: TypeLib addDispInterface failed for _cModbusSlave: AddFuncDesc failed for State: 0x-2147352568
 C3: TypeLib addDispInterface failed for _cDataBase: AddFuncDesc failed for Async: 0x-2147352568
 C3: TypeLib addDispInterface failed for _cHttpClient: AddFuncDesc failed for MapRequestContentType: 0x-2147352568
 C3: TypeLib addDispInterface failed for _cHttpServerRouterAfter: AddFuncDesc failed for Add: 0x-2147352568
 C3: TypeLib addDispInterface failed for _cToolsStream: AddFuncDesc failed for UseLineMode: 0x-2147352568
 C3: TypeLib addDispInterface failed for _cSSE: AddFuncDesc failed for Start: 0x-2147352568
-C3: TypeLib addDispInterface failed for _cHttpServerCookieAttr: AddFuncDesc failed for Domain: 0x-2147352568
 C3: TypeLib addDispInterface failed for _cAliyunCaptcha: AddFuncDesc failed for AccessKeyId: 0x-2147352568
 C3: TypeLib addDispInterface failed for _cToolsArray: AddFuncDesc failed for IsControlArray: 0x-2147352568
 C3: TypeLib addDispInterface failed for _cToolsWindow: AddFuncDesc failed for TopMost: 0x-2147352568
-C3: TypeLib addDispInterface failed for _cModbusTransportRTU: AddFuncDesc failed for TimeOut: 0x-2147352568
+C3: TypeLib addDispInterface failed for _cModbusTransportRTU: AddFuncDesc failed for Timeout: 0x-2147352568
 C3: TypeLib addDispInterface failed for _cTlsReMaster: AddFuncDesc failed for Connect: 0x-2147352568
 C3: TypeLib addDispInterface failed for _cBufferStream: AddFuncDesc failed for Init: 0x-2147352568
 C3: TypeLib addDispInterface failed for _cScriptEngine: AddFuncDesc failed for Start: 0x-2147352568
 C3: TypeLib addDispInterface failed for _cTimer: AddFuncDesc failed for Index: 0x-2147352568
 C3: TypeLib addDispInterface failed for _cDialog: SetFuncAndParamNames failed for Filter: 0x-2147319764
 C3: TypeLib addDispInterface failed for _cByteBuffer: SetFuncAndParamNames failed for IsEmpty: 0x-2147319764
-C3: TypeLib addDispInterface failed for _cRedisClient: AddFuncDesc failed for TimeOut: 0x-2147352568
+C3: TypeLib addDispInterface failed for _cRedisClient: AddFuncDesc failed for Timeout: 0x-2147352568
 C3: TypeLib addDispInterface failed for _cFileEx: AddFuncDesc failed for LastError: 0x-2147352568
 C3: TypeLib addDispInterface failed for _cTlsSocket: AddFuncDesc failed for Socket: 0x-2147352568
+C3: TypeLib addDispInterface failed for _cLayer: SetFuncAndParamNames failed for CloseAll: 0x-2147319764
+C3: TypeLib addDispInterface failed for _cToast: AddFuncDesc failed for Pos: 0x-2147352568
 C3: TypeLib addDispInterface failed for _cTcpServer: AddFuncDesc failed for StartMe: 0x-2147352568
+C3: TypeLib addDispInterface failed for _cPLI: AddFuncDesc failed for Request: 0x-2147352568
 C3: TypeLib addDispInterface failed for _cIni: AddFuncDesc failed for SaveTo: 0x-2147352568
 C3: TypeLib addDispInterface failed for _cLang: AddFuncDesc failed for SetSelector: 0x-2147352568
-C3: TypeLib addDispInterface failed for _cSSEContext: AddFuncDesc failed for SendPack: 0x-2147352568
+C3: TypeLib addDispInterface failed for _cSSEContext: AddFuncDesc failed for Data: 0x-2147352568
 C3: TypeLib addDispInterface failed for _cCryptoHMAC: AddFuncDesc failed for SetKeyBytes: 0x-2147352568
 C3: TypeLib addDispInterface failed for _cAsyncSocket: AddFuncDesc failed for LastError: 0x-2147352568
 C3: TypeLib addDispInterface failed for _cToolsHttp: AddFuncDesc failed for UrlEncode: 0x-2147352568
-C3: TypeLib addDispInterface failed for _cToast: AddFuncDesc failed for Pos: 0x-2147352568
 C3: TypeLib addDispInterface failed for _cJson: SetFuncAndParamNames failed for Item: 0x-2147319764
 C3: TypeLib addDispInterface failed for _cToolsDateTime: AddFuncDesc failed for IsDatePast: 0x-2147352568
-C3: TypeLib addDispInterface failed for _cHttpServerSvr: AddFuncDesc failed for WebRoot: 0x-2147352568
+C3: TypeLib addDispInterface failed for _cHttpServerSvr: SetFuncAndParamNames failed for WebRoot: 0x-2147319764
+C3: TypeLib addDispInterface failed for _cWebSocketFrame: SetFuncAndParamNames failed for IsValid: 0x-2147319764
+C3: TypeLib addDispInterface failed for _cHttpServerRequest: SetFuncAndParamNames failed for Item: 0x-2147319764
 C3: TypeLib addDispInterface failed for _cVBMAN: AddFuncDesc failed for Version: 0x-2147352568
 C3: TypeLib addDispInterface failed for _cToolsBase64: AddFuncDesc failed for BytesToBase64: 0x-2147352568
 C3: TypeLib addDispInterface failed for _cToolsStr: AddFuncDesc failed for ParseNumbers: 0x-2147352568
 C3: TypeLib addDispInterface failed for _cHttpServerRouteBefore: AddFuncDesc failed for Add: 0x-2147352568
-C3: TypeLib addDispInterface failed for _cWebSocketServer: AddFuncDesc failed for SendText: 0x-2147352568
+C3: TypeLib addDispInterface failed for _cWebSocketServer: AddFuncDesc failed for Listen: 0x-2147352568
 C3: TypeLib addDispInterface failed for _cWebSocketUtils: AddFuncDesc failed for UTF8ToString: 0x-2147352568
-C3: TypeLib addDispInterface failed for _cHttpCrossDomain: AddFuncDesc failed for Enable: 0x-2147352568
+C3: TypeLib addDispInterface failed for _cHttpCrossDomain: SetFuncAndParamNames failed for Enable: 0x-2147319764
 C3: TypeLib addDispInterface failed for _cDelay: AddFuncDesc failed for Index: 0x-2147352568
 C3: TypeLib addDispInterface failed for _cToolsMath: AddFuncDesc failed for GetRandRange: 0x-2147352568
 C3: TypeLib addDispInterface failed for _cHeartbeat: AddFuncDesc failed for Enabled: 0x-2147352568
-C3: TypeLib addDispInterface failed for _cWebSocketFrame: AddFuncDesc failed for ParseHeader: 0x-2147352568
 C3: TypeLib addDispInterface failed for _cHttpServerRouter: AddFuncDesc failed for Reg: 0x-2147352568
 C3: TypeLib addDispInterface failed for _cTimeUse: AddFuncDesc failed for Show: 0x-2147352568
-C3: TypeLib addDispInterface failed for _cHttpServer: AddFuncDesc failed for WebRoot: 0x-2147352568
-C3: TypeLib addDispInterface failed for _cHttpServerRequest: SetFuncAndParamNames failed for Item: 0x-2147319764
+C3: TypeLib addDispInterface failed for _cHttpServer: SetFuncAndParamNames failed for WebRoot: 0x-2147319764
 C3: TypeLib addDispInterface failed for _cSTDIO: AddFuncDesc failed for ExecuteCommand: 0x-2147352568
 C3: TypeLib addDispInterface failed for _cRegedit: AddFuncDesc failed for SaveItem: 0x-2147352568
 C3: TypeLib addDispInterface failed for _cToolsSystem: AddFuncDesc failed for RunAsAdmin: 0x-2147352568
@@ -56,33 +58,32 @@ C3: TypeLib addDispInterface failed for _cCollection: AddFuncDesc failed for Add
 C3: TypeLib addDispInterface failed for _cToolsList: AddFuncDesc failed for RsToCollection: 0x-2147352568
 C3: TypeLib addDispInterface failed for _cSSEClient: AddFuncDesc failed for Connect: 0x-2147352568
 C3: TypeLib addDispInterface failed for _cCsv: AddFuncDesc failed for ShowTo: 0x-2147352568
-C3: TypeLib addDispInterface failed for _cWebSocketClient: AddFuncDesc failed for Connect: 0x-2147352568
+C3: TypeLib addDispInterface failed for _cWebSocketClient: AddFuncDesc failed for State: 0x-2147352568
+C3: TypeLib addDispInterface failed for _cHttpServerCookieAttr: AddFuncDesc failed for Domain: 0x-2147352568
 C3: TypeLib addDispInterface failed for _cTimers: SetFuncAndParamNames failed for Count: 0x-2147319764
 C3: TypeLib addDispInterface failed for _cLogs: AddFuncDesc failed for ShowLogsViewer: 0x-2147352568
 C3: TypeLib addDispInterface failed for _iTcpServer: AddFuncDesc failed for OnDataArr: 0x-2147352568
 C3: TypeLib addDispInterface failed for _cShadow: AddFuncDesc failed for DrawBitmap: 0x-2147352568
 C3: TypeLib addDispInterface failed for _cWinsock: AddFuncDesc failed for Connect: 0x-2147352568
 C3: TypeLib addDispInterface failed for _cZipArchive: AddFuncDesc failed for LastError: 0x-2147352568
+C3: TypeLib addDispInterface failed for _cToolsCrc: AddFuncDesc failed for Data: 0x-2147352568
 C3: TypeLib addDispInterface failed for _cWebSocketServerClient: AddFuncDesc failed for Socket: 0x-2147352568
 C3: TypeLib addDispInterface failed for _cHttpServerFileCacheEntry: AddFuncDesc failed for SetContent: 0x-2147352568
-C3: TypeLib addDispInterface failed for _cModbusTransportTCP: AddFuncDesc failed for TimeOut: 0x-2147352568
+C3: TypeLib addDispInterface failed for _cModbusTransportTCP: SetFuncAndParamNames failed for Mode: 0x-2147319764
 C3: TypeLib addDispInterface failed for _dHttpSvr: AddFuncDesc failed for NianBao: 0x-2147352568
 C3: TypeLib addDispInterface failed for _cToolsDic: AddFuncDesc failed for ToWwwFormUrlencoded: 0x-2147352568
 C3: TypeLib addDispInterface failed for _cToolsFso: AddFuncDesc failed for IsFullPath: 0x-2147352568
 C3: TypeLib addDispInterface failed for _cCryptoHash: AddFuncDesc failed for ComputeHashBytesToHex: 0x-2147352568
 C3: TypeLib addDispInterface failed for _cPassword: AddFuncDesc failed for LastError: 0x-2147352568
-C3: TypeLib addDispInterface failed for _cFormater: AddFuncDesc failed for Base64Encode: 0x-2147352568
-C3: TypeLib addDispInterface failed for _cImage: AddFuncDesc failed for ShowTo: 0x-2147352568
+C3: TypeLib addDispInterface failed for _cFormater: AddFuncDesc failed for Data: 0x-2147352568
+C3: TypeLib addDispInterface failed for _cImage: AddFuncDesc failed for Data: 0x-2147352568
 C3: TypeLib addDispInterface failed for _cSerialPort: AddFuncDesc failed for LastError: 0x-2147352568
 C3: TypeLib addDispInterface failed for _cMemoryStream: AddFuncDesc failed for Contents: 0x-2147352568
 C3: TypeLib addDispInterface failed for _cDummyStream: AddFuncDesc failed for VfsSetEndOfFile: 0x-2147352568
-C3: TypeLib addDispInterface failed for _Dictionary: SetFuncAndParamNames failed for Items: 0x-2147319764
+C3: TypeLib addDispInterface failed for _Dictionary: AddFuncDesc failed for Add: 0x-2147352568
 C3: TypeLib generation failed: SaveAllChanges failed: 0x-2147312509
 C3: 编译失败 (exit code 2)
 C3: 错误日志已保存: C:\Users\vi\Desktop\c3.vb6.pro\vbman\dist/c3-error.log
-(1,1): warning VB4001: TypeLib not found for ProgID: ADODB.Connection
-(1,1): warning VB4001: TypeLib not found for ProgID: Excel.Application
-(1,1): warning VB4001: TypeLib not found for ProgID: Word.Application
 C:\Users\vi\Desktop\c3.vb6.pro\vbman\src\Socket\cAsyncSocket.cls(820,9): warning VB3003: assignment: 无法将 String 隐式转换为 ?
 C:\Users\vi\Desktop\c3.vb6.pro\vbman\src\Socket\cAsyncSocket.cls(835,21): warning VB3003: assignment: 无法将 String 隐式转换为 ?
 C:\Users\vi\Desktop\c3.vb6.pro\vbman\src\Socket\cAsyncSocket.cls(1041,9): warning VB3003: assignment: 无法将 ? 隐式转换为 String
@@ -160,8 +161,6 @@ C:\Users\vi\Desktop\c3.vb6.pro\vbman\src\HttpServer\cHttpServerRouter.cls(186,25
 C:\Users\vi\Desktop\c3.vb6.pro\vbman\src\HttpServer\cHttpServerRouter.cls(187,16): warning VB3001: 未声明的标识符: 'ToolsFso' (可能来自其他模块)
 C:\Users\vi\Desktop\c3.vb6.pro\vbman\src\HttpServer\cHttpServerRouter.cls(205,8): warning VB3001: 未声明的标识符: 'ToolsStr' (可能来自其他模块)
 C:\Users\vi\Desktop\c3.vb6.pro\vbman\src\HttpServer\cHttpServerRouter.cls(207,9): warning VB3001: 未声明的标识符: 'ToolsArray' (可能来自其他模块)
-C:\Users\vi\Desktop\c3.vb6.pro\vbman\src\HttpServer\cHttpServer.cls(241,25): warning VB3001: 未声明的标识符: 'RemasterProtocolConstants' (可能来自其他模块)
-C:\Users\vi\Desktop\c3.vb6.pro\vbman\src\HttpServer\cHttpServer.cls(246,25): warning VB3001: 未声明的标识符: 'RemasterProtocolConstants' (可能来自其他模块)
 C:\Users\vi\Desktop\c3.vb6.pro\vbman\src\HttpServer\cHttpServer.cls(561,17): warning VB3001: 未声明的标识符: 'ToolsUtf8' (可能来自其他模块)
 C:\Users\vi\Desktop\c3.vb6.pro\vbman\src\HttpServer\cHttpServer.cls(644,17): warning VB3001: 未声明的标识符: 'ToolsUtf8' (可能来自其他模块)
 C:\Users\vi\Desktop\c3.vb6.pro\vbman\src\HttpServer\cHttpServer.cls(758,20): warning VB3001: 未声明的标识符: 'ToolsUtf8' (可能来自其他模块)
@@ -426,22 +425,6 @@ C:\Users\vi\Desktop\c3.vb6.pro\vbman\src\Json\ToolsJsonVba.bas(1116,38): warning
 C:\Users\vi\Desktop\c3.vb6.pro\vbman\src\Json\ToolsJsonVba.bas(1117,40): warning VB3001: 未声明的标识符: 'VBA' (可能来自其他模块)
 C:\Users\vi\Desktop\c3.vb6.pro\vbman\src\Json\ToolsJsonVba.bas(1118,40): warning VB3001: 未声明的标识符: 'VBA' (可能来自其他模块)
 C:\Users\vi\Desktop\c3.vb6.pro\vbman\src\SSE\cSSE.cls(220,26): warning VB3001: 未声明的标识符: 'ToolsUtf8' (可能来自其他模块)
-C:\Users\vi\Desktop\c3.vb6.pro\vbman\src\SSE\cSSE.cls(251,5): warning VB3001: 未声明的标识符: 'ResponseLine' (可能来自其他模块)
-C:\Users\vi\Desktop\c3.vb6.pro\vbman\src\SSE\cSSE.cls(252,12): warning VB3001: 未声明的标识符: 'ResponseLine' (可能来自其他模块)
-C:\Users\vi\Desktop\c3.vb6.pro\vbman\src\SSE\cSSE.cls(252,5): warning VB3001: 未声明的标识符: 'Tstr' (可能来自其他模块)
-C:\Users\vi\Desktop\c3.vb6.pro\vbman\src\SSE\cSSE.cls(253,12): warning VB3001: 未声明的标识符: 'Tstr' (可能来自其他模块)
-C:\Users\vi\Desktop\c3.vb6.pro\vbman\src\SSE\cSSE.cls(253,5): warning VB3001: 未声明的标识符: 'Tstr' (可能来自其他模块)
-C:\Users\vi\Desktop\c3.vb6.pro\vbman\src\SSE\cSSE.cls(254,12): warning VB3001: 未声明的标识符: 'Tstr' (可能来自其他模块)
-C:\Users\vi\Desktop\c3.vb6.pro\vbman\src\SSE\cSSE.cls(254,5): warning VB3001: 未声明的标识符: 'Tstr' (可能来自其他模块)
-C:\Users\vi\Desktop\c3.vb6.pro\vbman\src\SSE\cSSE.cls(255,12): warning VB3001: 未声明的标识符: 'Tstr' (可能来自其他模块)
-C:\Users\vi\Desktop\c3.vb6.pro\vbman\src\SSE\cSSE.cls(255,5): warning VB3001: 未声明的标识符: 'Tstr' (可能来自其他模块)
-C:\Users\vi\Desktop\c3.vb6.pro\vbman\src\SSE\cSSE.cls(256,12): warning VB3001: 未声明的标识符: 'Tstr' (可能来自其他模块)
-C:\Users\vi\Desktop\c3.vb6.pro\vbman\src\SSE\cSSE.cls(256,5): warning VB3001: 未声明的标识符: 'Tstr' (可能来自其他模块)
-C:\Users\vi\Desktop\c3.vb6.pro\vbman\src\SSE\cSSE.cls(257,12): warning VB3001: 未声明的标识符: 'Tstr' (可能来自其他模块)
-C:\Users\vi\Desktop\c3.vb6.pro\vbman\src\SSE\cSSE.cls(257,5): warning VB3001: 未声明的标识符: 'Tstr' (可能来自其他模块)
-C:\Users\vi\Desktop\c3.vb6.pro\vbman\src\SSE\cSSE.cls(258,12): warning VB3001: 未声明的标识符: 'Tstr' (可能来自其他模块)
-C:\Users\vi\Desktop\c3.vb6.pro\vbman\src\SSE\cSSE.cls(258,5): warning VB3001: 未声明的标识符: 'Tstr' (可能来自其他模块)
-C:\Users\vi\Desktop\c3.vb6.pro\vbman\src\SSE\cSSE.cls(259,19): warning VB3001: 未声明的标识符: 'Tstr' (可能来自其他模块)
 C:\Users\vi\Desktop\c3.vb6.pro\vbman\src\Tools\cHttpCrossDomain.cls(56,5): warning VB3003: assignment: 无法将 String 隐式转换为 Object
 C:\Users\vi\Desktop\c3.vb6.pro\vbman\src\Tools\cHttpCrossDomain.cls(57,5): warning VB3003: assignment: 无法将 String 隐式转换为 Object
 C:\Users\vi\Desktop\c3.vb6.pro\vbman\src\Tools\cHttpCrossDomain.cls(58,5): warning VB3003: assignment: 无法将 String 隐式转换为 Object
@@ -477,7 +460,6 @@ C:\Users\vi\Desktop\c3.vb6.pro\vbman\src\HttpClient\cHttpClient.cls(372,22): war
 C:\Users\vi\Desktop\c3.vb6.pro\vbman\src\HttpClient\cHttpClient.cls(478,10): warning VB3001: 未声明的标识符: 'ToolsHttp' (可能来自其他模块)
 C:\Users\vi\Desktop\c3.vb6.pro\vbman\src\HttpClient\cHttpClient.cls(606,13): warning VB3003: assignment: 无法将 String 隐式转换为 Object
 C:\Users\vi\Desktop\c3.vb6.pro\vbman\src\Logs\ToolsLogs.bas(26,17): warning VB3001: 未声明的标识符: 'LvCustom' (可能来自其他模块)
-C:\Users\vi\Desktop\c3.vb6.pro\vbman\src\Logs\ToolsLogs.bas(29,46): warning VB3001: 未声明的标识符: 'EnumLogLevel' (可能来自其他模块)
 C:\Users\vi\Desktop\c3.vb6.pro\vbman\src\Layer\cLayer.cls(18,12): warning VB3001: 未声明的标识符: 'FLayer' (可能来自其他模块)
 C:\Users\vi\Desktop\c3.vb6.pro\vbman\src\Layer\cLayer.cls(27,10): warning VB3001: 未声明的标识符: 'FLayer' (可能来自其他模块)
 C:\Users\vi\Desktop\c3.vb6.pro\vbman\src\Layer\cLayer.cls(28,25): warning VB3001: 未声明的标识符: 'FLayer' (可能来自其他模块)
@@ -509,19 +491,6 @@ C:\Users\vi\Desktop\c3.vb6.pro\vbman\src\Tools\String\cToolsStr.cls(134,5): warn
 C:\Users\vi\Desktop\c3.vb6.pro\vbman\src\Tools\String\cToolsStr.cls(154,5): warning VB3003: assignment: 无法将 String 隐式转换为 ?
 C:\Users\vi\Desktop\c3.vb6.pro\vbman\src\Tools\String\cToolsStr.cls(377,8): warning VB3001: 未声明的标识符: 'ToolsStr' (可能来自其他模块)
 C:\Users\vi\Desktop\c3.vb6.pro\vbman\src\Tools\String\cToolsStr.cls(378,8): warning VB3001: 未声明的标识符: 'ToolsStr' (可能来自其他模块)
-C:\Users\vi\Desktop\c3.vb6.pro\vbman\src\Tools\String\cToolsStr.cls(411,5): warning VB3001: 未声明的标识符: 'hasLeft' (可能来自其他模块)
-C:\Users\vi\Desktop\c3.vb6.pro\vbman\src\Tools\String\cToolsStr.cls(412,8): warning VB3001: 未声明的标识符: 'hasLeft' (可能来自其他模块)
-C:\Users\vi\Desktop\c3.vb6.pro\vbman\src\Tools\String\cToolsStr.cls(413,12): warning VB3001: 未声明的标识符: 'hasLeft' (可能来自其他模块)
-C:\Users\vi\Desktop\c3.vb6.pro\vbman\src\Tools\String\cToolsStr.cls(413,5): warning VB3001: 未声明的标识符: 'POSF' (可能来自其他模块)
-C:\Users\vi\Desktop\c3.vb6.pro\vbman\src\Tools\String\cToolsStr.cls(415,9): warning VB3001: 未声明的标识符: 'POSE' (可能来自其他模块)
-C:\Users\vi\Desktop\c3.vb6.pro\vbman\src\Tools\String\cToolsStr.cls(418,13): warning VB3001: 未声明的标识符: 'POSE' (可能来自其他模块)
-C:\Users\vi\Desktop\c3.vb6.pro\vbman\src\Tools\String\cToolsStr.cls(420,26): warning VB3001: 未声明的标识符: 'POSF' (可能来自其他模块)
-C:\Users\vi\Desktop\c3.vb6.pro\vbman\src\Tools\String\cToolsStr.cls(420,13): warning VB3001: 未声明的标识符: 'POSE' (可能来自其他模块)
-C:\Users\vi\Desktop\c3.vb6.pro\vbman\src\Tools\String\cToolsStr.cls(423,8): warning VB3001: 未声明的标识符: 'POSE' (可能来自其他模块)
-C:\Users\vi\Desktop\c3.vb6.pro\vbman\src\Tools\String\cToolsStr.cls(423,15): warning VB3001: 未声明的标识符: 'POSF' (可能来自其他模块)
-C:\Users\vi\Desktop\c3.vb6.pro\vbman\src\Tools\String\cToolsStr.cls(424,33): warning VB3001: 未声明的标识符: 'POSF' (可能来自其他模块)
-C:\Users\vi\Desktop\c3.vb6.pro\vbman\src\Tools\String\cToolsStr.cls(424,39): warning VB3001: 未声明的标识符: 'POSE' (可能来自其他模块)
-C:\Users\vi\Desktop\c3.vb6.pro\vbman\src\Tools\String\cToolsStr.cls(424,46): warning VB3001: 未声明的标识符: 'POSF' (可能来自其他模块)
 C:\Users\vi\Desktop\c3.vb6.pro\vbman\src\Tools\String\cToolsStr.cls(457,5): warning VB3003: assignment: 无法将 String 隐式转换为 ?
 C:\Users\vi\Desktop\c3.vb6.pro\vbman\src\Tools\String\cToolsStr.cls(582,15): warning VB3001: 未声明的标识符: 'ToolsMath' (可能来自其他模块)
 C:\Users\vi\Desktop\c3.vb6.pro\vbman\src\Tools\String\cToolsStr.cls(593,5): warning VB3003: assignment: 无法将 ? 隐式转换为 Byte
