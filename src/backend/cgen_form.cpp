@@ -224,6 +224,8 @@ void CCodeGen::emitFormFramework(const FrmFormDesc& frmDesc, Module& module) {
         }
     }
 
+    c_.emitLine("static int vb6_formLoading_" + cIdent(formName) + " = 0;");
+
     c_.emitBlank();
 
     // WndProc前向声明
@@ -701,6 +703,7 @@ void CCodeGen::emitFormFramework(const FrmFormDesc& frmDesc, Module& module) {
     // WM_COMMAND: 按钮点击等 (P7.6: 支持控件数组Index参数)
     c_.emitLine("case WM_COMMAND: {");
     c_.indent();
+    c_.emitLine("if (vb6_formLoading_" + cIdent(formName) + ") break;  /* block events during form init */");
     c_.emitLine("int id = LOWORD(wParam);");
     c_.emitLine("int code = HIWORD(wParam);");
 
@@ -1249,6 +1252,7 @@ void CCodeGen::emitFormFramework(const FrmFormDesc& frmDesc, Module& module) {
     c_.emitLine("void " + createFn + "(void* hwnd, void* hInstance) {");
     c_.indent();
     c_.emitLine("(void)hwnd; (void)hInstance;");
+    c_.emitLine("vb6_formLoading_" + cIdent(formName) + " = 1;  /* block events during form init */");
     c_.emitLine("vb6_ResetControlId();");
     c_.emitBlank();
 
@@ -1486,7 +1490,8 @@ void CCodeGen::emitFormFramework(const FrmFormDesc& frmDesc, Module& module) {
                 break;
             case FrmControlType::TextBox:
                 style |= kWsBorder | kEsAutoH;
-                createCaption = ctrlText;  // TextBox用Text而非Caption
+                // Bug3-Fix: 不在CreateControl中传初始文本，避免EN_CHANGE在句柄赋值前触发
+                // createCaption will be set to "" below; text set after hwnd assignment
                 {
                     auto mlIt = ctrl.properties.find("MultiLine");
                     if (mlIt != ctrl.properties.end() && mlIt->second.intValue != 0)
@@ -1534,22 +1539,25 @@ void CCodeGen::emitFormFramework(const FrmFormDesc& frmDesc, Module& module) {
                 }
                 break;
             }
-            case FrmControlType::ComboBox: {
-                // Style: 0=CBS_DROPDOWN(2), 1=CBS_SIMPLE(1), 2=CBS_DROPDOWNLIST(3)
-                auto stIt = ctrl.properties.find("Style");
-                if (stIt != ctrl.properties.end()) {
-                    if (stIt->second.intValue == 1) style |= 0x0001L;  // CBS_SIMPLE
-                    else if (stIt->second.intValue == 2) style |= 0x0003L;  // CBS_DROPDOWNLIST
-                    else style |= kCbsDrop;  // default: CBS_DROPDOWN
-                } else {
-                    style |= kCbsDrop;
+            case FrmControlType::ComboBox:
+                // Bug3-Fix: ComboBox同TextBox，延迟设置初始文本
+                // createCaption will be set to "" below
+                {
+                    // Style: 0=CBS_DROPDOWN(2), 1=CBS_SIMPLE(1), 2=CBS_DROPDOWNLIST(3)
+                    auto stIt = ctrl.properties.find("Style");
+                    if (stIt != ctrl.properties.end()) {
+                        if (stIt->second.intValue == 1) style |= 0x0001L;  // CBS_SIMPLE
+                        else if (stIt->second.intValue == 2) style |= 0x0003L;  // CBS_DROPDOWNLIST
+                        else style |= kCbsDrop;  // default: CBS_DROPDOWN
+                    } else {
+                        style |= kCbsDrop;
+                    }
+                    style |= kWsBorder;
+                    // Sorted: CBS_SORT = 0x0100
+                    auto sortIt = ctrl.properties.find("Sorted");
+                    if (sortIt != ctrl.properties.end() && sortIt->second.intValue != 0) style |= 0x0100L;
                 }
-                style |= kWsBorder;
-                // Sorted: CBS_SORT = 0x0100
-                auto sortIt = ctrl.properties.find("Sorted");
-                if (sortIt != ctrl.properties.end() && sortIt->second.intValue != 0) style |= 0x0100L;
                 break;
-            }
             case FrmControlType::PictureBox:
                 // VB6 PictureBox: STATIC + SS_BITMAP + SS_CENTERIMAGE + border
                 style |= kSsBitmap | kSsCenterImg;
@@ -1564,6 +1572,12 @@ void CCodeGen::emitFormFramework(const FrmFormDesc& frmDesc, Module& module) {
             default:
                 break;
         }
+
+        // Bug3-Fix: TextBox/ComboBox 延迟设置初始文本，避免 EN_CHANGE 在句柄赋值前触发
+        bool needDelayedText = (ctrl.controlType == FrmControlType::TextBox ||
+                                ctrl.controlType == FrmControlType::ComboBox);
+        std::string delayedText = (ctrl.controlType == FrmControlType::TextBox) ? ctrlText : ctrlCaption;
+        if (needDelayedText) createCaption = "";  // 创建时不传文本
 
         // 生成vb6_CreateControl调用
         // 生成vb6_CreateControl调用 (P7.6: 数组控件用CtrlArr_SetAt)
@@ -1585,6 +1599,17 @@ void CCodeGen::emitFormFramework(const FrmFormDesc& frmDesc, Module& module) {
             } else {
                 c_.emitLine("vb6_hwnd_" + cIdent(ctrl.controlName) + " = vb6_tmp_hwnd; }");
             }
+        }
+
+        // Bug3-Fix: 延迟设置 TextBox/ComboBox 的初始文本（在句柄赋值之后）
+        if (needDelayedText && !delayedText.empty()) {
+            std::string ctrlNameLower2 = ctrl.controlName;
+            std::transform(ctrlNameLower2.begin(), ctrlNameLower2.end(), ctrlNameLower2.begin(), ::tolower);
+            std::string hwndVar = knownControlArrays_.count(ctrlNameLower2) ?
+                ("vb6_CtrlArr_GetAt(&vb6_arr_" + cIdent(ctrl.controlName) + ", 0)") :
+                ("vb6_hwnd_" + cIdent(ctrl.controlName));
+            // 使用 SendMessage WM_SETTEXT 设置初始文本（句柄已赋值，EN_CHANGE 安全触发）
+            c_.emitLine("SendMessageW((HWND)" + hwndVar + ", WM_SETTEXT, 0, (LPARAM)L\"" + delayedText + "\");");
         }
 
         // P20-12: CausesValidation property from .frm (default=True, only set when explicitly False)
@@ -1882,6 +1907,7 @@ ctrlId++;
         }
     }
 
+    c_.emitLine("vb6_formLoading_" + cIdent(formName) + " = 0;  /* allow events after form init */");
     c_.dedent();
     c_.emitLine("}");  // CreateControls
     c_.emitBlank();
