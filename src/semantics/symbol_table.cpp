@@ -137,10 +137,15 @@ bool SymbolTable::define(std::unique_ptr<Symbol> sym) {
         }
     }
 
-    // 允许用户定义的 Sub/Function/Variable/Constant 覆盖内置符号
+    // 允许用户定义的 Sub/Function/Variable/Constant/Property 覆盖内置符号
     // VB6合法: 类方法/变量名可与内置函数同名 (如 Timer, FormatDateTime, LTrim, App)
     // Fix 018: 用户 EnumMember 也可覆盖内置 COM 枚举成员 (如 cDatabase.cls 自定义 adEmpty
     // 覆盖 ADO DataTypeEnum 的 adEmpty — 用户项目声明优先于引用的类型库)
+    // Fix 048: Property Get/Let/Set 同样覆盖内置函数 — 否则类内属性与内置函数同名时
+    // (如 cByteBuffer.IsEmpty / cDialog.Filter 对内置 IsEmpty/Filter), 内置 Function 符号
+    // (storageKey=无后缀名) 与属性变体 ($pg/$pl) 共存, lookupLocal/lookupModuleByKind
+    // 按无后缀键优先返回内置符号, 导致 TypeLib 出现幽灵 Function 变体 (同名同 dispid,
+    // SetFuncAndParamNames 返回 TYPE_E_TYPEMISMATCH 0x800280EC)。
     {
         auto* existing = current_->lookupLocal(lowerName);
         if (existing && existing->isBuiltin
@@ -149,7 +154,10 @@ bool SymbolTable::define(std::unique_ptr<Symbol> sym) {
                 || sym->kind == SymbolKind::Function
                 || sym->kind == SymbolKind::Variable
                 || sym->kind == SymbolKind::Constant
-                || sym->kind == SymbolKind::EnumMember)) {
+                || sym->kind == SymbolKind::EnumMember
+                || sym->kind == SymbolKind::PropertyGet
+                || sym->kind == SymbolKind::PropertyLet
+                || sym->kind == SymbolKind::PropertySet)) {
             // 移除内置符号, 允许用户符号替换
             current_->symbols_.erase(existing->storageKey());
         }

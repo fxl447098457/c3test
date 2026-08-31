@@ -246,6 +246,18 @@ bool SemanticAnalyzer::analyze(Module& module) {
     if (verbose_) {
         std::cerr << "[Sem] Pass 1: collecting declarations..." << std::endl;
     }
+    // Fix 049: 预扫描模块级 Type/Enum 声明。
+    // VB6 允许模块级 Dim/Const/参数 在类型声明 (Private Type/Public Enum) 之前使用该类型,
+    // 编译器会先做整模块的类型收集. 若按语句顺序线性处理 (如 cAsyncSocket.cls 中
+    // "Private m_uWindowState() As UcsHelperWindowStateType" 位于该 Type 声明之前),
+    // resolveTypeRef 找不到符号而静默回退 Variant, 导致: 1) 生成 VB6_SA_AT(vb6_VARIANT,...)
+    // 的字段访问; 2) 对 Variant 收件人的 .成员 解析退化为跨模块类查找 (如 .Pos 误解析到
+    // cToast.Pos, 参数个数不符, MSVC C2198/C2039/C2223 错误)。
+    for (auto& decl : module.declarations) {
+        if (decl->kind == ASTNodeKind::TypeDecl || decl->kind == ASTNodeKind::EnumDecl) {
+            dispatchDecl(*decl, *this);
+        }
+    }
     for (auto& decl : module.declarations) {
         registerDecl(*decl);
     }
@@ -379,11 +391,13 @@ void SemanticAnalyzer::registerDecl(Decl& decl) {
         case ASTNodeKind::SubDecl:
         case ASTNodeKind::FunctionDecl:
         case ASTNodeKind::PropertyDecl:
-        case ASTNodeKind::TypeDecl:
-        case ASTNodeKind::EnumDecl:
         case ASTNodeKind::DeclareDecl:
         case ASTNodeKind::EventDecl:
             dispatchDecl(decl, *this);
+            break;
+        case ASTNodeKind::TypeDecl:
+        case ASTNodeKind::EnumDecl:
+            // 已在 Fix 049 预扫描中注册 (VB6 允许类型声明位于使用之后)
             break;
         case ASTNodeKind::VariableDecl:
             registerVariable(static_cast<VariableDecl&>(decl));
@@ -2719,11 +2733,14 @@ std::string SemanticAnalyzer::evalOptionalDefault(ASTNode* defaultValue, Vb6Type
         if (nLower == "vbnull")     return "vb6_VariantNull()";
         if (nLower == "vbnothing")  return "NULL";
 
-        // 项目级Const: 通过符号表查找Constant符号 (P20-20)
+        // 项目级Const/EnumMember: 通过符号表查找Constant或EnumMember符号 (P20-20)
+        // Fix 081a: 也查找 EnumMember，使 Optional ByVal Ecl As QRCodegenEcc = QRCodegenEcc_LOW
+        // 等枚举常量默认值能正确解析为整数值
         {
             Symbol* sym = symTab_.lookup(n);
-            if (sym && sym->kind == SymbolKind::Constant && sym->hasConstValue) {
-                switch (sym->constType) {
+            if (sym && sym->hasConstValue) {
+                if (sym->kind == SymbolKind::Constant || sym->kind == SymbolKind::EnumMember) {
+                    switch (sym->constType) {
                     case Vb6Type::Long:
                     case Vb6Type::Integer: { return std::to_string(sym->constIntValue); }
                     case Vb6Type::Single:
@@ -2748,6 +2765,7 @@ std::string SemanticAnalyzer::evalOptionalDefault(ASTNode* defaultValue, Vb6Type
                     default: break;
                 }
             }
+        }
         }
 
         // 未知标识符, 暂不处理
