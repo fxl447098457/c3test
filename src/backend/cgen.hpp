@@ -735,6 +735,17 @@ private:
     // 字段误当函数调用 (C2064).
     std::string inferUdtTypeOfExpr(const ASTNode& expr) const;
 
+    // Fix 084n: 推断 target 是否为 UDT 字段链, 是则返回该字段的 Vb6Type (含 Array 标志), 否则 Unknown.
+    // 供赋值语句判断 Variant RHS 需转换的目标类型 (如 cZipArchive 的 .FileName As String
+    // ← vb6_VariantArrayGet → vb6_VariantToString; uBuf.MaxMatch As Long ← At() → vb6_VariantToLong)
+    Vb6Type inferUdtFieldVb6Type(const ASTNode* target) const;
+
+    // Fix 084o: 若 C 表达式为 Variant (字符串级检测或已知 Variant 变量), 返回
+    // vb6_VariantToLong(...) 包装, 否则原样返回. 用于需要 int32_t 的上下文:
+    // 整除运算符 \ 的操作数、vb6_VariantArrayGet/GetVal 的索引、For 循环 Variant
+    // 控制变量的比较/步进等. astExpr 可为 nullptr.
+    std::string toLongIfVariant(const std::string& cExpr, const Expr* astExpr);
+
     // 给定类名与成员名, 在当前模块作用域符号表中查找属于该类的 Function/PropertyGet 符号,
     // 若其返回类型为 Object 且记录了 variableTypeName (Fix 015), 返回经 canonicalClassName
     // 规范化后的类名; 否则返回空串. 用于推断方法返回值的类类型.

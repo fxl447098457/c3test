@@ -914,6 +914,29 @@ void CCodeGen::visit(AssignmentStmt& node) {
                        || target.find("VB6_SA_ND_AT2(float,") != std::string::npos) {
                 convertedValue = "vb6_VariantToDouble(" + value + ")";
             } else {
+                // Fix 084n: UDT 字段目标 — 按字段 Vb6Type 转换 Variant RHS
+                // (如 cZipArchive 的 .FileName As String ← vb6_VariantArrayGet(...)
+                //  → vb6_VariantToString; uBuf.MaxMatch As Long ← At() → vb6_VariantToLong)
+                Vb6Type udtFieldT = inferUdtFieldVb6Type(node.target.get());
+                if (udtFieldT == Vb6Type::String) {
+                    convertedValue = "vb6_VariantToString(" + value + ")";
+                } else if (udtFieldT == Vb6Type::Long || udtFieldT == Vb6Type::Integer
+                           || udtFieldT == Vb6Type::Byte || udtFieldT == Vb6Type::Boolean
+                           || udtFieldT == Vb6Type::ULong || udtFieldT == Vb6Type::LongPtr) {
+                    convertedValue = "vb6_VariantToLong(" + value + ")";
+                } else if (udtFieldT == Vb6Type::Double || udtFieldT == Vb6Type::Single
+                           || udtFieldT == Vb6Type::Currency || udtFieldT == Vb6Type::Date) {
+                    convertedValue = "vb6_VariantToDouble(" + value + ")";
+                } else if (udtFieldT == Vb6Type::Object) {
+                    convertedValue = "vb6_VariantToObjectVal(" + value + ")";
+                } else if ((static_cast<uint16_t>(udtFieldT) & static_cast<uint16_t>(Vb6Type::Array))
+                           == static_cast<uint16_t>(Vb6Type::Array)) {
+                    convertedValue = "vb6_VariantToSafeArray1D(" + value + ")";
+                }
+                // 若已按 UDT 字段类型转换, 跳过已知变量集合检测
+                if (convertedValue != value) {
+                    // UDT 字段转换已完成
+                } else {
                 // 检查已知 Long/Double/ByteArray 变量
                 std::string checkName = target;
                 if (checkName.substr(0, 4) == "me->") checkName = checkName.substr(4);
@@ -946,6 +969,7 @@ void CCodeGen::visit(AssignmentStmt& node) {
                     } else if (knownByteArrayVars_.count(idLower)) {
                         convertedValue = "vb6_VariantToSafeArray1D(" + value + ")";
                     }
+                }
                 }
             }
             c_.emitLine(target + " = " + convertedValue + ";");
@@ -1249,6 +1273,11 @@ void CCodeGen::visit(SetStmt& node) {
         std::string targetLower = checkName;
         std::transform(targetLower.begin(), targetLower.end(), targetLower.begin(), ::tolower);
         bool targetIsVariant = knownVariantVars_.count(targetLower) > 0;
+        // Fix 084n: UDT 的 Variant 字段 (如 ZipFileInfo.SourceFile As Variant)
+        // Set .SourceFile = obj → 也需 vb6_VariantFromValue 包装对象指针 (void*→vb6_VARIANT C2440)
+        if (!targetIsVariant) {
+            targetIsVariant = (inferUdtFieldVb6Type(node.target.get()) == Vb6Type::Variant);
+        }
         if (targetIsVariant
             && value.find("vb6_VariantFromValue(") != 0
             && value.find("vb6_VariantFromComResult(") != 0) {
@@ -1679,6 +1708,46 @@ void CCodeGen::visit(ForStmt& node) {
     std::string exitLabel = "vb6_loop_exit_" + std::to_string(labelCounter_++);
     loopStack_.push_back({ExitKind::For, exitLabel});
 
+    // Fix 084o: For 循环控制变量为 Variant 时, 初始化/比较/步进必须包装.
+    // VB6 语义: Variant 循环变量按 Long 语义驱动循环, 循环体内保持实际索引值.
+    // 否则生成 var = 0 (int→vb6_VARIANT)、var <= end (vb6_VARIANT vs int32_t)
+    // 引发 C2440 (cToolsHttp 等以 Variant 做循环变量的模块).
+    bool forVarIsVariant = knownVariantVars_.count(lower022)
+        || (forVarIsClassMember && classVariantMembers_.count(lower022))
+        || cExprIsVariant(varAcc);
+    if (forVarIsVariant) {
+        c_.emitLine("{");
+        c_.indent();
+        c_.emitLine("int32_t " + var + "_end = " + end + ";");
+        c_.emitLine("int32_t " + var + "_step = " + step + ";");
+        c_.emitLine(varAcc + " = vb6_VariantFromValue(" + start + ");");
+        c_.emitLine("if (" + var + "_step > 0) {");
+        c_.indent();
+        c_.emitLine("for (; vb6_VariantToLong(" + varAcc + ") <= " + var + "_end; "
+                    + varAcc + " = vb6_VariantFromValue(vb6_VariantToLong(" + varAcc + ") + " + var + "_step)) {");
+        c_.indent();
+        emitStmtList(node.body);
+        c_.dedent();
+        c_.emitLine("}");
+        c_.dedent();
+        c_.emitLine("} else {");
+        c_.indent();
+        c_.emitLine("for (; vb6_VariantToLong(" + varAcc + ") >= " + var + "_end; "
+                    + varAcc + " = vb6_VariantFromValue(vb6_VariantToLong(" + varAcc + ") + " + var + "_step)) {");
+        c_.indent();
+        emitStmtList(node.body);
+        c_.dedent();
+        c_.emitLine("}");
+        c_.dedent();
+        c_.emitLine("}");
+        c_.dedent();
+        c_.emitLine("}");
+        c_.emitLine(exitLabel + ":;  /* Exit For target */");
+
+        loopStack_.pop_back();
+        return;
+    }
+
     c_.emitLine("{");
     c_.indent();
     c_.emitLine("int32_t " + var + "_end = " + end + ";");
@@ -1781,8 +1850,18 @@ void CCodeGen::visit(ForEachStmt& node) {
         c_.indent();
 
         // 赋值循环变量: vb6_item = VB6_SA_AT(elemCType, arr, _fe_i0)
+        // Fix 084o: 循环变量为 Variant 时需 vb6_VariantFromValue 包装 (String 数组
+        // 元素是 BSTR, 直接赋给 vb6_VARIANT 触发 C2440, 如 cToolsHttp 的 Pair As Variant)
         std::string elemCType = mapSaElemCType(collElemType);
-        c_.emitLine(varAcc + " = VB6_SA_AT(" + elemCType + ", " + collArrName + ", " + idxVar + ");");
+        bool feVarIsVariant = knownVariantVars_.count(lower022fe)
+            || (forEachVarIsClassMember && classVariantMembers_.count(lower022fe))
+            || cExprIsVariant(varAcc);
+        if (feVarIsVariant) {
+            c_.emitLine(varAcc + " = vb6_VariantFromValue(VB6_SA_AT(" + elemCType + ", "
+                        + collArrName + ", " + idxVar + "));");
+        } else {
+            c_.emitLine(varAcc + " = VB6_SA_AT(" + elemCType + ", " + collArrName + ", " + idxVar + ");");
+        }
 
         emitStmtList(node.body);
         c_.dedent();

@@ -2103,6 +2103,62 @@ std::string CCodeGen::inferUdtTypeOfExpr(const ASTNode& expr) const {
     }
 }
 
+// Fix 084n: 推断 target 是否为 UDT 字段链, 是则返回字段 Vb6Type (含 Array 标志), 否则 Unknown.
+// 供赋值语句 (cgen_stmt) 将 Variant RHS 转换为目标字段类型.
+Vb6Type CCodeGen::inferUdtFieldVb6Type(const ASTNode* target) const {
+    if (!target) return Vb6Type::Unknown;
+    std::string memName;
+    if (target->kind == ASTNodeKind::MemberAccessExpr) {
+        auto& ma = static_cast<const MemberAccessExpr&>(*target);
+        if (inferUdtTypeOfExpr(*ma.object).empty()) return Vb6Type::Unknown;
+        memName = ma.memberName;
+    } else if (target->kind == ASTNodeKind::WithMemberExpr) {
+        if (withObjectInfoStack_.empty() || withObjectVars_.empty()) return Vb6Type::Unknown;
+        const auto& info = withObjectInfoStack_.back();
+        if (info.kind != WithObjKind::Unknown) return Vb6Type::Unknown;  // 仅 UDT
+        auto& wm = static_cast<const WithMemberExpr&>(*target);
+        memName = wm.memberName;
+    } else {
+        return Vb6Type::Unknown;
+    }
+    if (memName.empty()) return Vb6Type::Unknown;
+
+    // 解析对象 UDT C 类型
+    std::string udtCType;
+    if (target->kind == ASTNodeKind::MemberAccessExpr) {
+        auto& ma = static_cast<const MemberAccessExpr&>(*target);
+        udtCType = inferUdtTypeOfExpr(*ma.object);
+    } else {
+        const std::string& tempVar = withObjectVars_.back();
+        auto it = knownUdtVars_.find(Symbol::toLower(tempVar));
+        if (it == knownUdtVars_.end()) return Vb6Type::Unknown;
+        udtCType = it->second;
+    }
+    const std::string prefix = "vb6_type_";
+    if (udtCType.size() <= prefix.size() || udtCType.compare(0, prefix.size(), prefix) != 0)
+        return Vb6Type::Unknown;
+    std::string udtName = udtCType.substr(prefix.size());
+    Symbol* udtSym = symTab_.lookupModule(udtName);
+    if (!udtSym || udtSym->kind != SymbolKind::UserDefinedType) return Vb6Type::Unknown;
+    std::string memLower = Symbol::toLower(memName);
+    for (auto& mi : udtSym->udtMembers) {
+        if (Symbol::toLower(mi.name) == memLower) return mi.type;
+    }
+    return Vb6Type::Unknown;
+}
+
+// Fix 084o: 需要 int32_t 上下文中的 Variant 表达式 → vb6_VariantToLong 包装
+std::string CCodeGen::toLongIfVariant(const std::string& cExpr, const Expr* astExpr) {
+    if (cExprIsVariant(cExpr)) return "vb6_VariantToLong(" + cExpr + ")";
+    if (astExpr && astExpr->kind == ASTNodeKind::IdentifierExpr) {
+        auto& ident = static_cast<IdentifierExpr&>(const_cast<Expr&>(*astExpr));
+        std::string lower = ident.name;
+        std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+        if (knownVariantVars_.count(lower)) return "vb6_VariantToLong(" + cExpr + ")";
+    }
+    return cExpr;
+}
+
 // ============================================================
 // P7.5: 控件属性 → RTL读取函数名映射
 // ============================================================

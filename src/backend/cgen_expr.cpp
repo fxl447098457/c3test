@@ -980,8 +980,11 @@ void CCodeGen::visit(BinaryExpr& node) {
     }
 
     // 整除: VB6 \ → vb6_IntDiv (确保整数截断)
+    // Fix 084o: 操作数为 Variant 时需显式转 Long (vb6_IntDiv 形参是 int32_t),
+    // 否则 cToolsHttp 等文件中 "nAsc \ 2^6" (nAsc As Variant) 产生 C2440.
     if (node.op == BinaryOp::IntDiv) {
-        lastExpr_ = "vb6_IntDiv(" + left + ", " + right + ")";
+        lastExpr_ = "vb6_IntDiv(" + toLongIfVariant(left, node.left.get())
+                  + ", " + toLongIfVariant(right, node.right.get()) + ")";
         return;
     }
 
@@ -2103,7 +2106,8 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
         std::transform(vLower.begin(), vLower.end(), vLower.begin(), ::tolower);
         if (knownVariantVars_.count(vLower)) {
             emitExpr(*node.positional[0]);
-            std::string vIndex = std::move(lastExpr_);
+            // Fix 084o: 索引为 Variant 时转 Long (vb6_VariantArrayGet 第二参是 int32_t)
+            std::string vIndex = toLongIfVariant(std::move(lastExpr_), node.positional[0].get());
             lastExpr_ = "vb6_VariantArrayGet(&" + cIdent(vIdent.name) + ", " + vIndex + ")";
             return;
         }
@@ -2562,7 +2566,8 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
                     emitExpr(*node.callee);  // emits "me->field"
                     std::string fieldExpr = std::move(lastExpr_);
                     emitExpr(*node.positional[0]);
-                    std::string idx = std::move(lastExpr_);
+                    // Fix 084o: 索引为 Variant 时转 Long
+                    std::string idx = toLongIfVariant(std::move(lastExpr_), node.positional[0].get());
                     lastExpr_ = "vb6_VariantArrayGet(&" + fieldExpr + ", " + idx + ")";
                     handled = true;
                 } else {
@@ -2729,7 +2734,8 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
                                     emitExpr(*node.callee);  // emits "obj.field"
                                     std::string fieldExpr = std::move(lastExpr_);
                                     emitExpr(*node.positional[0]);
-                                    std::string idx = std::move(lastExpr_);
+                                    // Fix 084o: 索引为 Variant 时转 Long
+                                    std::string idx = toLongIfVariant(std::move(lastExpr_), node.positional[0].get());
                                     lastExpr_ = "vb6_VariantArrayGet(&" + fieldExpr + ", " + idx + ")";
                                     handled = true;
                                 } else if (mi.type == Vb6Type::Object) {
@@ -2778,7 +2784,8 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
                         emitExpr(*node.callee);  // emits "obj->member  /* class var .X field */"
                         std::string fieldExpr = std::move(lastExpr_);
                         emitExpr(*node.positional[0]);
-                        std::string idx = std::move(lastExpr_);
+                        // Fix 084o: 索引为 Variant 时转 Long
+                        std::string idx = toLongIfVariant(std::move(lastExpr_), node.positional[0].get());
                         lastExpr_ = "vb6_VariantArrayGet(&" + fieldExpr + ", " + idx + ")";
                         handled = true;
                     } else {
@@ -3284,7 +3291,8 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
         std::string innerCall = callee;
         std::string outerIdx;
         emitExpr(*node.positional[0]);
-        outerIdx = std::move(lastExpr_);
+        // Fix 084o: 外层索引为 Variant 时转 Long
+        outerIdx = toLongIfVariant(std::move(lastExpr_), node.positional[0].get());
         lastExpr_ = "vb6_VariantArrayGetVal(" + innerCall + ", " + outerIdx + ")";
         return;
     }
@@ -3625,13 +3633,16 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
                     }
                     // Fix 056b: UDT字段链 (uFile.Data.ftLastWriteTime) 也是左值,
                     // 作为 ByRef UDT/AsAny 实参应取地址 &(x) 而非强转 (void*)(intptr_t)(x)
+                    // Fix 084m: 字段链须允许 -> — With变量展开 (._vb6_with_2->SendBuffer)
+                    // 也是左值字段链, 若判为非左值会生成 (void*)(intptr_t)(udt) → C2440
                     bool isUdtFieldChain = !argVal.empty() && (std::isalpha(static_cast<unsigned char>(argVal[0])) || argVal[0] == '_');
                     if (isUdtFieldChain) {
-                        for (char c : argVal) {
-                            if (!std::isalnum(static_cast<unsigned char>(c)) && c != '_' && c != '.') {
-                                isUdtFieldChain = false;
-                                break;
-                            }
+                        for (size_t ci = 0; ci < argVal.size(); ci++) {
+                            char c = argVal[ci];
+                            if (std::isalnum(static_cast<unsigned char>(c)) || c == '_' || c == '.') continue;
+                            if (c == '-' && ci + 1 < argVal.size() && argVal[ci + 1] == '>') { ci++; continue; }
+                            isUdtFieldChain = false;
+                            break;
                         }
                     }
                     bool isSaAt = (argVal.find("VB6_SA_AT(") == 0);
@@ -4757,6 +4768,25 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
             if (callee == "vb6_CInt") callee = "vb6_CIntV";
             else if (callee == "vb6_CLng") callee = "vb6_CLngV";
             else if (callee == "vb6_CDbl") callee = "vb6_CDblV";
+            // Fix 084l: 撤销 Fix 038b-2 的 Variant→double 提前提取 (getRuntimeParamCType
+            // 把 CLng/CDbl/CInt 形参当作 double, 已将 lRet 替换为 vb6_VariantToDouble(lRet)).
+            // V 后缀函数直接接受 vb6_VARIANT — 保留提取会产生 vb6_CLngV(double) → C2440.
+            if (!args.empty()) {
+                static const char* extractPrefixes[] = {
+                    "vb6_VariantToDouble(", "vb6_VariantToLong("};
+                for (auto* pre : extractPrefixes) {
+                    size_t pl = strlen(pre);
+                    if (args[0].compare(0, pl, pre) == 0 && args[0].size() > pl + 1) {
+                        args[0] = args[0].substr(pl, args[0].size() - pl - 1);
+                        argList.clear();
+                        for (size_t ai = 0; ai < args.size(); ai++) {
+                            if (ai > 0) argList += ", ";
+                            argList += args[ai];
+                        }
+                        break;
+                    }
+                }
+            }
         }
         // Fix 036: BSTR 参数 → vb6_Val 转换为 double (CInt/CLng/CDbl 接 double)
         // Fix 084c: 扩展检测到字符串级 BSTR 表达式 (vb6_Trim/vb6_BSTR_Concat/vb6_CStr
