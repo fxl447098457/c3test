@@ -3729,10 +3729,17 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
                                 break;
                             default:
                                 // Fix 054: Variant 或未知类型
-                                // 1. 如果 C 表达式已是 Variant (vb6_VariantArrayGet 等),
+                                // 1. 实参是 UDT 的 Variant 字段 (With 成员如 .SourceFile,
+                                //    .FileName 等 As Variant) → 值已是 vb6_VARIANT,
+                                //    ByRef Variant 形参直接取地址 &(...), 不要包装成
+                                //    {.vt=VT_BSTR, .bstrVal=...} (Variant→BSTR C2440).
+                                // 2. C 表达式已是 Variant (vb6_VariantArrayGet 等),
                                 //    提取 BSTR 值到 .bstrVal (避免 VARIANT→BSTR C2440)
-                                // 2. 其他未知类型保持原样 (UDT 等单独处理)
-                                if (cExprIsVariant(argVal)) {
+                                // 3. 其他未知类型保持原样 (UDT 等单独处理)
+                                if (i < node.positional.size()
+                                    && inferUdtFieldVb6Type(node.positional[i].get()) == Vb6Type::Variant) {
+                                    argVal = "&(" + argVal + ")";
+                                } else if (cExprIsVariant(argVal)) {
                                     argVal = "(&(vb6_VARIANT){.vt=VT_BSTR, .bstrVal=vb6_VariantToString(" + argVal + ")})";
                                 } else {
                                     argVal = "(&(vb6_VARIANT){.vt=VT_BSTR, .bstrVal=" + argVal + "})";

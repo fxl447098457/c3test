@@ -367,6 +367,59 @@ void CCodeGen::visit(AssignmentStmt& node) {
             if (!isVarName && knownObjectVars_.count(objLower)) isVarName = true;
             if (!isVarName && knownTypedComVars_.count(objLower)) isVarName = true;
             if (!isVarName && knownIfaceVars_.count(objLower)) isVarName = true;
+
+            // Fix 084o-4: 函数名引用返回 UDT 的字段赋值 ("FuncName.Field = expr").
+            // VB6 函数体内可用函数名访问返回 UDT 的字段 (如 pvVfsOpen.FileName = STR_BUFFER).
+            // 目标展开为 vb6_ret_FuncName.Field (与读取侧 cgen_expr.cpp:203 一致),
+            // 而非误当 Module 变量展开为 vb6_FuncName_Field (未声明 + 类型错误).
+            if (!isVarName && objSym && objSym->kind == SymbolKind::Function && !objSym->isExternal) {
+                std::string curLower084o = currentProc_ ? currentProc_->name : std::string();
+                std::transform(curLower084o.begin(), curLower084o.end(), curLower084o.begin(), ::tolower);
+                if (!curLower084o.empty() && objLower == curLower084o
+                    && currentReturnVar_.size() > 8
+                    && currentReturnCType_.rfind("vb6_type_", 0) == 0) {
+                    // 查返回 UDT 的字段类型 (与 inferUdtFieldVb6Type 相同的 udtMembers 查询)
+                    std::string udtName084o = currentReturnCType_.substr(9);
+                    Symbol* udtSym084o = symTab_.lookupModule(udtName084o);
+                    Vb6Type fldType084o = Vb6Type::Unknown;
+                    if (udtSym084o && udtSym084o->kind == SymbolKind::UserDefinedType) {
+                        std::string memLower084o = maExpr.memberName;
+                        std::transform(memLower084o.begin(), memLower084o.end(), memLower084o.begin(), ::tolower);
+                        for (auto& mi : udtSym084o->udtMembers) {
+                            if (Symbol::toLower(mi.name) == memLower084o) { fldType084o = mi.type; break; }
+                        }
+                    }
+                    std::string fieldAccess084o = currentReturnVar_ + "." + cIdent(maExpr.memberName);
+                    emitExpr(*node.value);
+                    std::string valExpr084o = std::move(lastExpr_);
+                    Vb6Type valType084o = inferExprType(*node.value);
+                    bool valIsVariant084o = (valType084o == Vb6Type::Variant) || cExprIsVariant(valExpr084o);
+                    switch (fldType084o) {
+                        case Vb6Type::String:
+                            if (valIsVariant084o) valExpr084o = "vb6_VariantToString(" + valExpr084o + ")";
+                            c_.emitLine("vb6_BSTR_Assign(&" + fieldAccess084o + ", " + valExpr084o + ");  /* FnRetUdt." + maExpr.memberName + " */");
+                            return;
+                        case Vb6Type::Long: case Vb6Type::Integer: case Vb6Type::Byte:
+                        case Vb6Type::Boolean: case Vb6Type::ULong: case Vb6Type::LongPtr:
+                            if (valIsVariant084o) valExpr084o = "vb6_VariantToLong(" + valExpr084o + ")";
+                            c_.emitLine(fieldAccess084o + " = " + valExpr084o + ";  /* FnRetUdt." + maExpr.memberName + " */");
+                            return;
+                        case Vb6Type::Double: case Vb6Type::Single:
+                        case Vb6Type::Currency: case Vb6Type::Date:
+                            if (valIsVariant084o) valExpr084o = "vb6_VariantToDouble(" + valExpr084o + ")";
+                            c_.emitLine(fieldAccess084o + " = " + valExpr084o + ";  /* FnRetUdt." + maExpr.memberName + " */");
+                            return;
+                        case Vb6Type::Variant:
+                            c_.emitLine("vb6_VariantClear(&" + fieldAccess084o + ");");
+                            c_.emitLine(fieldAccess084o + " = vb6_VariantFromValue(" + valExpr084o + ");  /* FnRetUdt." + maExpr.memberName + " */");
+                            return;
+                        default:
+                            c_.emitLine(fieldAccess084o + " = " + valExpr084o + ";  /* FnRetUdt." + maExpr.memberName + " */");
+                            return;
+                    }
+                }
+            }
+
             if (!isVarName && !knownFormControls_.count(objLower)) {
                 // Module.varName = expr
                 // When module is #included, use unprefixed name
@@ -2881,12 +2934,16 @@ void CCodeGen::visit(ReDimStmt& node) {
         cName = "me->" + cName;
     }
     // Fix 010r-6 rev2: ByRef array param in ReDim needs (*name) since it's vb6_SafeArray1D**
+    // Fix 084o-6: ByRef Variant 参数也是 vb6_VARIANT*, 同样需要 (*name)
+    // (VB6 允许 As Variant 参数后接 ReDim 变数组, 如 cZipArchive.Extract 的
+    // OutputTarget As Variant → ReDim OutputTarget(...) As Byte)
     if (currentProc_) {
         for (auto& param : currentProc_->params) {
             std::string paramLower = param.name;
             std::transform(paramLower.begin(), paramLower.end(), paramLower.begin(), ::tolower);
             if (paramLower == lowerVar && !param.isByVal
-                && (static_cast<uint16_t>(param.type) & static_cast<uint16_t>(Vb6Type::Array))) {
+                && ((static_cast<uint16_t>(param.type) & static_cast<uint16_t>(Vb6Type::Array))
+                    || param.type == Vb6Type::Variant)) {
                 cName = "(*" + cName + ")";
                 break;
             }

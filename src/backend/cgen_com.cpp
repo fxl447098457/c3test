@@ -342,7 +342,26 @@ void CCodeGen::visit(RaiseEventStmt& node) {
                 } else if (argType == Vb6Type::Object) {
                     c_.emitLine("__evt_args[" + idx + "].vt = VT_DISPATCH; __evt_args[" + idx + "].pdispVal = (IDispatch*)(" + lastExpr_ + ");");
                 } else {
-                    c_.emitLine("__evt_args[" + idx + "].vt = VT_BSTR; __evt_args[" + idx + "].bstrVal = vb6_BSTR_FromStr(" + lastExpr_ + ");");
+                    // Fix 084o-5: 仅当实参确实是 vb6_VARIANT (字符串级检测或已知
+                    // Variant 变量) 才先提取 BSTR 值, 否则 vb6_BSTR_FromStr(vb6_VARIANT)
+                    // 触发 C2440 (如 cZipArchive 的 RaiseEvent BeforeExtract(..., vFileName...)
+                    // 中 vFileName As Variant). 注意: 对象指针 (vb6_cls_*/IDispatch* 等)
+                    // 不能包 vb6_VariantToString — 那会把 C4047 警告升级为 C2440 错误,
+                    // 因此只用 cExprIsVariant + knownVariantVars_ 判定, 不用 inferExprType
+                    // (其 Variant 判定对 UDT 字段/对象变量不可靠).
+                    bool evtArgIsVariant = cExprIsVariant(lastExpr_);
+                    if (!evtArgIsVariant && i < node.args.size()
+                        && node.args[i]->kind == ASTNodeKind::IdentifierExpr) {
+                        auto& idArg = static_cast<IdentifierExpr&>(*node.args[i]);
+                        std::string argLower = idArg.name;
+                        std::transform(argLower.begin(), argLower.end(), argLower.begin(), ::tolower);
+                        if (knownVariantVars_.count(argLower)) evtArgIsVariant = true;
+                    }
+                    if (evtArgIsVariant) {
+                        c_.emitLine("__evt_args[" + idx + "].vt = VT_BSTR; __evt_args[" + idx + "].bstrVal = vb6_BSTR_FromStr(vb6_VariantToString(" + lastExpr_ + "));");
+                    } else {
+                        c_.emitLine("__evt_args[" + idx + "].vt = VT_BSTR; __evt_args[" + idx + "].bstrVal = vb6_BSTR_FromStr(" + lastExpr_ + ");");
+                    }
                 }
             }
             c_.emitLine("vb6_FireEvent((vb6_ComObject*)me->__comObj, " + std::to_string(evtDispid) + ", __evt_args, " + std::to_string(node.args.size()) + ");");

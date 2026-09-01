@@ -812,6 +812,10 @@ Vb6Type CCodeGen::inferExprType(Expr& expr) const {
                                     return mi.type;  // 找到UDT字段，返回其Vb6Type
                                 }
                             }
+                            // Fix 084o-2: UDT 已确认但字段未找到 → 字段类型未知, 返回 Variant.
+                            // 不要回退 lookupModule(memberName): 成员名是字段名而非模块符号,
+                            // 可能误匹配模块级同名符号 (如 SourceFile 变量) 导致类型误判为 String.
+                            return Vb6Type::Variant;
                         }
                     }
                 }
@@ -820,6 +824,36 @@ Vb6Type CCodeGen::inferExprType(Expr& expr) const {
             auto* memSym = symTab_.lookupModule(ma.memberName);
             if (memSym) return memSym->type;
             break;
+        }
+        // Fix 084o-2: With 块内 UDT 字段访问 (.SourceFile 等) 的类型推断.
+        // WithMemberExpr 由 With 语句展开 (_vb6_with_N->field), 必须按 UDT 字段查
+        // udtMembers, 且不能回退 lookupModule(memberName) — 与 MemberAccessExpr 同理.
+        case ASTNodeKind::WithMemberExpr: {
+            auto& wm = static_cast<WithMemberExpr&>(expr);
+            if (withObjectInfoStack_.empty() || withObjectVars_.empty()) return Vb6Type::Variant;
+            const auto& winfo = withObjectInfoStack_.back();
+            if (winfo.kind != WithObjKind::Unknown) {
+                // 非 UDT With (类实例/COM 对象): memberName 是属性/方法 → 查成员符号
+                auto* memSym2 = symTab_.lookupModule(wm.memberName);
+                if (memSym2) return memSym2->type;
+                return Vb6Type::Variant;
+            }
+            std::string tempLower = Symbol::toLower(withObjectVars_.back());
+            auto it = knownUdtVars_.find(tempLower);
+            if (it == knownUdtVars_.end()) return Vb6Type::Variant;
+            const std::string prefix = "vb6_type_";
+            const std::string& udtCType = it->second;
+            if (udtCType.size() <= prefix.size()
+                || udtCType.compare(0, prefix.size(), prefix) != 0) return Vb6Type::Variant;
+            std::string udtName = udtCType.substr(prefix.size());
+            Symbol* udtSym = symTab_.lookupModule(udtName);
+            if (udtSym && udtSym->kind == SymbolKind::UserDefinedType) {
+                std::string memLower = Symbol::toLower(wm.memberName);
+                for (auto& mi : udtSym->udtMembers) {
+                    if (Symbol::toLower(mi.name) == memLower) return mi.type;
+                }
+            }
+            return Vb6Type::Variant;
         }
         default:
             break;
@@ -1083,6 +1117,7 @@ std::string CCodeGen::getRuntimeParamCType(const std::string& funcName, size_t p
         {"vb6_DebugPrint",      {"BSTR"}},
         {"vb6_DebugWriteLong",  {"int32_t"}},
         // 对象操作
+        {"vb6_StrPtr",          {"BSTR"}},   // Fix 084o-7: StrPtr(Variant) → vb6_VariantToString 先行
         {"vb6_ObjPtr",          {"uintptr_t"}},
         {"vb6_ReleaseObject",   {"void**"}},
         {"vb6_NewObject",       {"const wchar_t*"}},
