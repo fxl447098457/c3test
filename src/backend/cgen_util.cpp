@@ -1574,17 +1574,27 @@ bool CCodeGen::tryRewriteCOMLvalue(const std::string& target, const std::string&
     // ---- Pattern C/D2: vb6_X_prop_get_Y(args) = value ----
     // Property Get 用作 LHS. 改写为 prop_let_Y(args, value) (Let) 或
     // prop_set_Y(args, value) (Set).
+    // Fix 084i: 也匹配 prop_set_/prop_let_ 前缀 — 当属性只有 PropertySet
+    // (无 Get) 时 emitExpr 直接生成 vb6_cX_prop_set_Y(obj) 单参数形式,
+    // 追加 value 参数改写成完整调用, 避免 prop_set_(obj) = value 左值错误.
     {
-        size_t pgPos = target.find("prop_get_");
+        const char* verbs[] = {"prop_get_", "prop_set_", "prop_let_"};
+        size_t pgPos = std::string::npos;
+        std::string matchedVerb;
+        for (const char* v : verbs) {
+            size_t p = target.find(v);
+            if (p != std::string::npos) { pgPos = p; matchedVerb = v; break; }
+        }
         if (pgPos != std::string::npos) {
             auto parens = findCallParens(target, pgPos);
             if (parens.first != std::string::npos && parens.second != std::string::npos) {
                 std::string prefix = target.substr(0, pgPos);              // vb6_cX_
-                std::string afterPg = target.substr(pgPos + strlen("prop_get_"),
-                                                    parens.first - (pgPos + strlen("prop_get_")));
+                std::string afterPg = target.substr(pgPos + matchedVerb.size(),
+                                                    parens.first - (pgPos + matchedVerb.size()));
                 std::string argsStr = target.substr(parens.first + 1,
                                                     parens.second - parens.first - 1);
-                std::string newVerbs = isSet ? "prop_set_" : "prop_let_";
+                std::string newVerbs = (matchedVerb != "prop_get_") ? matchedVerb
+                                      : (isSet ? "prop_set_" : "prop_let_");
                 std::string newCall;
                 if (argsStr.empty()) {
                     newCall = prefix + newVerbs + afterPg + "(" + value + ")";
@@ -1934,6 +1944,16 @@ std::string CCodeGen::inferClassTypeOfExpr(const ASTNode& expr) const {
             std::string lower = Symbol::toLower(id.name);
             auto it = knownClassVars_.find(lower);
             if (it != knownClassVars_.end()) return it->second;
+            // Fix 084g: 局部变量/参数声明为 As ClassName (如 Dim Response As cHttpServerResponse)
+            // 不在 knownClassVars_ (跨模块类变量表) 中, 从符号表 variableTypeName 推断类名
+            const Symbol* sym = symTab_.lookup(id.name);
+            if (sym && (sym->kind == SymbolKind::Variable || sym->kind == SymbolKind::Parameter)
+                && !sym->variableTypeName.empty()) {
+                const Symbol* clsSym = symTab_.lookup(sym->variableTypeName);
+                if (clsSym && clsSym->kind == SymbolKind::Class) {
+                    return sym->variableTypeName;
+                }
+            }
             return "";
         }
         case ASTNodeKind::IndexOrCallExpr: {

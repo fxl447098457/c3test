@@ -421,12 +421,29 @@ void CCodeGen::visit(AssignmentStmt& node) {
                 auto& objId = static_cast<IdentifierExpr&>(*maExpr.object);
                 std::string objLower = objId.name;
                 std::transform(objLower.begin(), objLower.end(), objLower.begin(), ::tolower);
-                if (knownClassVars_.find(objLower) != knownClassVars_.end()) {
+                std::string objClass;
+                auto itClassVar = knownClassVars_.find(objLower);
+                if (itClassVar != knownClassVars_.end()) {
+                    objClass = itClassVar->second;
+                } else {
+                    // Fix 084g: 局部变量/参数类对象 (如 Dim Response As cHttpServerResponse)
+                    // 不在 knownClassVars_ 中, 通过符号表推断类名
+                    objClass = inferClassTypeOfExpr(*maExpr.object);
+                }
+                // Fix 084g-2: 外部注入的跨类属性符号 (Friend/Public Property) —
+                // lookupModuleByKind 已确认该成员是某类的属性, 即使对象类型无法
+                // 从符号表推断 (cgen阶段访问不到过程作用域的局部变量类型), 也
+                // 生成属性调用; sourceModule 由外部符号提供.
+                // Fix 084j: UDT 变量的成员是结构体字段而非类属性 — lookupModuleByKind
+                // 会全局命中同名类属性 (如 dcb As MODBUS_DCB 的 .BaudRate 命中
+                // cModbusSlave.BaudRate; m_uCtx 的 .LastError 命中 cZipArchive.LastError),
+                // 误生成 vb6_cX_prop_let_Y(udtVar, ...) → C2440. 此类对象必须跳过,
+                // 交给 visit(MemberAccessExpr) 的 Fix 031 UDT 字段路径生成 obj.field.
+                if (!knownUdtVars_.count(objLower) && (!objClass.empty() || propLetSym->isExternal)) {
                     // 生成Property Let调用: vb6_prop_let_Name(obj, value)
                     std::string prefix = (propLetSym->kind == SymbolKind::PropertySet) ? "prop_set_" : "prop_let_";
-                    auto itClassVar = knownClassVars_.find(objLower);
                     // Fix 010r-10: 使用map中的类名作为sourceModule
-                    std::string sourceModule = propLetSym->isExternal ? propLetSym->sourceModule : itClassVar->second;
+                    std::string sourceModule = propLetSym->isExternal ? propLetSym->sourceModule : objClass;
                     std::string funcName = cProcName(prefix + maExpr.memberName, propLetSym->access, sourceModule);
                     emitExpr(*maExpr.object);
                     std::string objExpr = std::move(lastExpr_);
@@ -1018,6 +1035,41 @@ void CCodeGen::visit(SetStmt& node) {
                     c_.emitLine(_setWriteFn + "(" + makeCtrlHwndArg(_setObjLower, _setItCtrl->second) + ", " + _setValExpr + ");  /* Set Control Property */");
                     return;
                 }
+            }
+        }
+    }
+
+    // P6.8: Set obj.Prop = value — 跨类 Friend/Public Property Set/Let 赋值
+    // SetStmt 之前没有属性分支: target 被 emitExpr 当表达式生成 prop_set_ 单参数,
+    // 后续 tryRewriteCOMLvalue 只认 prop_get_ 前缀, 导致 "prop_set_(obj) = value"
+    // 左值错误 (C2440/C2198). 此处用符号信息直接生成完整属性调用.
+    if (node.target->kind == ASTNodeKind::MemberAccessExpr) {
+        auto& _ma = static_cast<MemberAccessExpr&>(*node.target);
+        Symbol* _psSym = symTab_.lookupModuleByKind(_ma.memberName, SymbolKind::PropertySet);
+        if (!_psSym) {
+            _psSym = symTab_.lookupModuleByKind(_ma.memberName, SymbolKind::PropertyLet);
+        }
+        if (_psSym) {
+            std::string _objClass = inferClassTypeOfExpr(*_ma.object);
+            // Fix 084g-2: 外部注入的跨类属性符号 — 对象类型无法从符号表推断
+            // (cgen阶段访问不到过程作用域局部变量) 时, 由外部符号提供 sourceModule.
+            if (!_objClass.empty() || _psSym->isExternal) {
+                std::string _verb = (_psSym->kind == SymbolKind::PropertySet) ? "prop_set_" : "prop_let_";
+                std::string _src = _psSym->isExternal ? _psSym->sourceModule : _objClass;
+                std::string _fn = cProcName(_verb + _ma.memberName, _psSym->access, _src);
+                emitExpr(*_ma.object);
+                std::string _objE = std::move(lastExpr_);
+                emitExpr(*node.value);
+                std::string _valE = std::move(lastExpr_);
+                // Object 形参 (void** ByRef 槽): 对象指针实参包装为 &(void*){...}
+                // 复合字面量, 与 cgen_expr 的 ByRef 实参规则一致.
+                std::string _arg2 = _valE;
+                if (_arg2 != "NULL" && _arg2 != "0" && _arg2[0] != '&'
+                    && _arg2.find("vb6_ComPack") == std::string::npos) {
+                    _arg2 = "&(void*){" + _valE + "}";
+                }
+                c_.emitLine(_fn + "(" + _objE + ", " + _arg2 + ");  /* Set Property */");
+                return;
             }
         }
     }
@@ -2359,8 +2411,11 @@ void CCodeGen::visit(WithStmt& node) {
             if (!udtCType.empty()) {
                 // UDT → void*: 取地址获取指针
                 c_.emitLine(tempType + " " + tempVar + " = &(" + lastExpr_ + ")  /* With object ref */;");
-            } else if (isDefinitelyVariantExpr(*node.object)) {
+            } else if (isDefinitelyVariantExpr(*node.object) && inferClassTypeOfExpr(*node.object).empty()) {
                 // VARIANT → void*: 用 VariantToObjectVal 提取对象指针
+                // Fix 084e: 若表达式实际是类对象 (如 Cookies("name") 返回
+                // vb6_cls_cHttpServerCookieAttr* 但被误判为 Variant), 则
+                // VariantToObjectVal(对象指针) 触发 C2440, 走下方 (void*) 直转.
                 c_.emitLine(tempType + " " + tempVar + " = vb6_VariantToObjectVal(" + lastExpr_ + ")  /* With object ref */;");
             } else {
                 c_.emitLine(tempType + " " + tempVar + " = (" + tempType + ")" + lastExpr_ + "  /* With object ref */;");
@@ -2778,6 +2833,21 @@ void CCodeGen::visit(ReDimStmt& node) {
     std::string udtCType = resolveArrayUdtElemCType(node.asType.get());
     bool isUdtArray = !udtCType.empty();
 
+    // Fix 084a: ReDim 目标若是 Variant 变量 (如 Dim vRetVal As Variant 后
+    // ReDim Preserve vRetVal(n)), 实参需从 Variant 提取 SafeArray1D*,
+    // 返回值需用 vb6_VariantFromValue 包装回 Variant, 否则触发 C2440.
+    auto isVariantArrayVar = [&](const std::string& name) -> bool {
+        std::string checkName = name;
+        if (checkName.substr(0, 4) == "me->") checkName = checkName.substr(4);
+        if (checkName.size() > 4 && checkName[0] == '(' && checkName[1] == '*'
+            && checkName.back() == ')') {
+            checkName = checkName.substr(2, checkName.size() - 3);
+        }
+        std::string lower = checkName;
+        std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+        return knownVariantVars_.count(lower) > 0;
+    };
+
     if (node.dimensions.empty()) return;
 
     int dimCount = (int)node.dimensions.size();
@@ -2797,15 +2867,30 @@ void CCodeGen::visit(ReDimStmt& node) {
         }
 
         if (node.preserve) {
-            c_.emitLine(cName + " = vb6_SafeArrayReDimPreserve1D(" + cName + ", " + lBound + ", " + uBound + ");");
+            // Fix 084a: Variant 数组 ReDim Preserve — 实参提取 SafeArray, 结果包装回 Variant
+            std::string callArg = cName;
+            std::string assignVal;
+            if (isVariantArrayVar(cName)) {
+                callArg = "vb6_VariantToSafeArray1D(" + cName + ")";
+                assignVal = "vb6_VariantFromValue(vb6_SafeArrayReDimPreserve1D(" + callArg + ", " + lBound + ", " + uBound + "))";
+            } else {
+                assignVal = "vb6_SafeArrayReDimPreserve1D(" + callArg + ", " + lBound + ", " + uBound + ")";
+            }
+            c_.emitLine(cName + " = " + assignVal + ";");
         } else {
-            c_.emitLine("vb6_SafeArrayDestroy1D(" + cName + ");");
+            // Fix 084a: Variant 数组非 preserve ReDim — 先销毁提取出的 SafeArray, 再包装新数组回 Variant
+            std::string destroyArg = cName;
+            if (isVariantArrayVar(cName)) destroyArg = "vb6_VariantToSafeArray1D(" + cName + ")";
+            c_.emitLine("vb6_SafeArrayDestroy1D(" + destroyArg + ");");
+            std::string newVal;
             if (isUdtArray) {
                 // Bug4-Fix: UDT数组使用_Udt版本，传入sizeof(UDT类型)
-                c_.emitLine(cName + " = vb6_SafeArrayReDim1D_Udt((int32_t)sizeof(" + udtCType + "), " + lBound + ", " + uBound + ");");
+                newVal = "vb6_SafeArrayReDim1D_Udt((int32_t)sizeof(" + udtCType + "), " + lBound + ", " + uBound + ")";
             } else {
-                c_.emitLine(cName + " = vb6_SafeArrayReDim1D(" + saElemType + ", " + lBound + ", " + uBound + ");");
+                newVal = "vb6_SafeArrayReDim1D(" + saElemType + ", " + lBound + ", " + uBound + ")";
             }
+            if (isVariantArrayVar(cName)) newVal = "vb6_VariantFromValue(" + newVal + ")";
+            c_.emitLine(cName + " = " + newVal + ";");
         }
     } else {
         // P8.1: 多维 ReDim
@@ -2829,16 +2914,29 @@ void CCodeGen::visit(ReDimStmt& node) {
         }
         c_.dedent();
         c_.emitLine("};");
+        // Fix 084a: Variant 多维数组 ReDim — 实参提取 SafeArray, 结果包装回 Variant
+        std::string redimArg = cName;
+        std::string wrapBack = "";
+        if (isVariantArrayVar(cName)) {
+            redimArg = "vb6_VariantToSafeArray1D(" + cName + ")";
+            wrapBack = "vb6_VariantFromValue(";
+        }
         if (node.preserve) {
-            c_.emitLine(cName + " = (vb6_SafeArray1D*)vb6_SafeArrayReDimPreserveND((vb6_SafeArrayND*)" + cName + ", " + std::to_string(dimCount) + ", " + boundsVar + ");");
+            std::string res = "vb6_SafeArrayReDimPreserveND((vb6_SafeArrayND*)" + redimArg + ", " + std::to_string(dimCount) + ", " + boundsVar + ")";
+            if (!wrapBack.empty()) res = wrapBack + res + ")";
+            c_.emitLine(cName + " = (vb6_SafeArray1D*)" + res + ";");
         } else {
-            c_.emitLine("vb6_SafeArrayDestroyND((vb6_SafeArrayND*)" + cName + ");");
+            std::string destroyArg = redimArg;
+            c_.emitLine("vb6_SafeArrayDestroyND((vb6_SafeArrayND*)" + destroyArg + ");");
+            std::string newVal;
             if (isUdtArray) {
                 // Bug4-Fix: UDT多维数组使用_Udt版本，传入sizeof(UDT类型)
-                c_.emitLine(cName + " = (vb6_SafeArray1D*)vb6_SafeArrayReDimND_Udt((int32_t)sizeof(" + udtCType + "), " + std::to_string(dimCount) + ", " + boundsVar + ");");
+                newVal = "vb6_SafeArrayReDimND_Udt((int32_t)sizeof(" + udtCType + "), " + std::to_string(dimCount) + ", " + boundsVar + ")";
             } else {
-                c_.emitLine(cName + " = (vb6_SafeArray1D*)vb6_SafeArrayReDimND(" + saElemType + ", " + std::to_string(dimCount) + ", " + boundsVar + ");");
+                newVal = "vb6_SafeArrayReDimND(" + saElemType + ", " + std::to_string(dimCount) + ", " + boundsVar + ")";
             }
+            if (!wrapBack.empty()) newVal = wrapBack + newVal + ")";
+            c_.emitLine(cName + " = (vb6_SafeArray1D*)" + newVal + ";");
         }
 
         // 鏇存柊鏁扮粍缁村害淇℃伅
@@ -3271,6 +3369,12 @@ void CCodeGen::visit(MidStmt& node) {
     }
     emitExpr(*node.value);
     std::string valueVar = std::move(lastExpr_);
+    // Fix 084b: Mid$(var, start, len) = VariantExpr (如 vSplit(i) 数组元素返回
+    // vb6_VARIANT) → 需 vb6_VariantToString 转 BSTR, 否则 vb6_MidSet 第4参数
+    // 类型不匹配触发 C2440.
+    if (cExprIsVariant(valueVar)) {
+        valueVar = "vb6_VariantToString(" + valueVar + ")";
+    }
     // Emit target variable address
     emitExpr(*node.target);
     std::string targetVar = std::move(lastExpr_);

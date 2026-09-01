@@ -252,7 +252,9 @@ std::vector<const Symbol*> SymbolTable::getPublicSymbols() const {
     std::vector<const Symbol*> result;
     if (!moduleScope_) return result;
     for (const auto& [key, sym] : moduleScope_->symbols()) {
-        if (sym->access == AccessLevel::Public && !sym->isBuiltin) {
+        // Fix 084g: Friend 在 VB6 中表示"工程内可见", 与跨模块注入场景一致,
+        // 因此 Friend 成员 (如 Friend Property Set fClient) 也应导出供其他模块引用
+        if ((sym->access == AccessLevel::Public || sym->access == AccessLevel::Friend) && !sym->isBuiltin) {
             // 仅导出可被其他模块引用的符号类型
             if (sym->kind == SymbolKind::Sub ||
                 sym->kind == SymbolKind::Function ||
