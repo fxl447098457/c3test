@@ -5123,6 +5123,11 @@ void* vb6_ComPackVariant(vb6_VARIANT v) {
 }
 
 
+/* Fix 084f: Variant数组嵌套索引按值版本 (见 vb6rtl.h 说明) */
+vb6_VARIANT vb6_VariantArrayGetVal(vb6_VARIANT v, int32_t index) {
+    return vb6_VariantArrayGet(&v, index);
+}
+
 /* Variant数组索引: 从持有SafeArray的Variant中取/设元素 */
 vb6_VARIANT vb6_VariantArrayGet(vb6_VARIANT* v, int32_t index) {
     vb6_VARIANT result;

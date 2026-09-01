@@ -304,6 +304,10 @@ static inline vb6_VARIANT vb6_VariantIdentity(vb6_VARIANT v) { return v; }
 vb6_VARIANT vb6_VariantArrayGet(vb6_VARIANT* v, int32_t index);
 // Set element in a Variant that holds an array
 void vb6_VariantArraySet(vb6_VARIANT* v, int32_t index, vb6_VARIANT val);
+// Fix 084f: Variant 数组嵌套索引按值版本 — vGateway(lIdx)(0) 中内层
+// vb6_VariantArrayGet(&vGateway, lIdx) 返回 vb6_VARIANT 值(非左值无法取地址),
+// 此函数按值接收后再按索引取元素, 替代非法的 (vb6_VARIANT){...} 复合字面量.
+vb6_VARIANT vb6_VariantArrayGetVal(vb6_VARIANT v, int32_t index);
 
 // Variant转基本类型
 int32_t vb6_VariantToLong(vb6_VARIANT v);

@@ -916,7 +916,12 @@ std::string CCodeGen::wrapToBSTR(const std::string& expr, Expr& node) {
                 std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
                 if (knownBstrVars_.count(lower)) return expr;
             }
-            return "vb6_CStr(" + expr + ")";
+            // Fix 084: inferExprType 回退 Variant 的表达式可能是标量(int32_t等)、
+            // BSTR 或已是 vb6_VARIANT. 直接 vb6_CStr(expr) 会因实参类型不匹配触发
+            // C2440 (如 vb6_CStr((int32_t)GetCurrentThreadId())). 用 vb6_VariantFromValue
+            // 按 C 实参类型 _Generic 自动包装: 标量→VariantLong, BSTR→VariantString,
+            // 已是 vb6_VARIANT→identity 直通, 再交给 vb6_CStr 统一转 BSTR.
+            return "vb6_CStr(vb6_VariantFromValue(" + expr + "))";
         }
         default: return "vb6_CStrLong(" + expr + ")";  // fallback
     }
@@ -3270,16 +3275,17 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
     }
 
     // Fix 083e: Variant 数组嵌套索引 — vGateway(lIdx)(0) 不是 f(a,b) 而是嵌套元素访问.
-    // callee 若是 vb6_VariantArrayGet(&arr, idx) 完整调用, 外层 (0) 应对内层结果再取元素:
-    // vb6_VariantArrayGet(&(vb6_VARIANT){<内层完整调用>}, 0)
+    // callee 若是 vb6_VariantArrayGet(&arr, idx) 完整调用, 外层 (0) 应对内层结果再取元素.
     // (否则 P6.5 拆开会把索引合并成 vb6_VariantArrayGet(&arr, idx, 0) → C2197 参数太多)
+    // Fix 084f: 旧实现用 (vb6_VARIANT){<内层调用>} 复合字面量以值初始化结构体,
+    // 首成员是 vb6_vartype → 触发 C2440 "vb6_VARIANT → vb6_vartype".
+    // 改用按值辅助函数 vb6_VariantArrayGetVal(内层调用, 外层索引).
     if (callee.compare(0, 20, "vb6_VariantArrayGet(") == 0 && !node.positional.empty()) {
-        fprintf(stderr, "[DBG-083E] callee='%s' pos=%zu\n", callee.c_str(), node.positional.size());
         std::string innerCall = callee;
         std::string outerIdx;
         emitExpr(*node.positional[0]);
         outerIdx = std::move(lastExpr_);
-        lastExpr_ = "vb6_VariantArrayGet(&(vb6_VARIANT){" + innerCall + "}, " + outerIdx + ")";
+        lastExpr_ = "vb6_VariantArrayGetVal(" + innerCall + ", " + outerIdx + ")";
         return;
     }
 
@@ -3737,7 +3743,17 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
         // 仅对 ByVal Variant 生效 (ByRef Variant 走上面复合字面量路径, 取地址需左值).
         if (!isByRef && i < calleeParams.size() && calleeParams[i].isByVal
             && calleeParams[i].type == Vb6Type::Variant) {
-            argVal = "vb6_VariantFromValue(" + argVal + ")";
+            // Fix 084d: 实参若是类对象表达式 (如 me->Database, 类方法返回类对象),
+            // 保持对象指针直传, 不要套 vb6_VariantFromValue — 符号表可能把类类型
+            // 参数误记为 Variant, 若包装成 vb6_VARIANT 传给 vb6_cls_cXxx* 参数
+            // 会触发 C2440 (如 cHttpServer.c LoadFromDatabase(..., me->Database)).
+            bool argIsClassObj = false;
+            if (i < node.positional.size()) {
+                argIsClassObj = !inferClassTypeOfExpr(*node.positional[i]).empty();
+            }
+            if (!argIsClassObj) {
+                argVal = "vb6_VariantFromValue(" + argVal + ")";
+            }
         }
         // Fix 029: 反向强制 — ByVal 具体类型参数 + 实参确定为 Variant: 自动调用提取函数.
         // 与 Fix 024 P2 互补: P2 处理 V(callee)=Variant,V(arg)=scalar; 此处处理
@@ -4743,7 +4759,26 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
             else if (callee == "vb6_CDbl") callee = "vb6_CDblV";
         }
         // Fix 036: BSTR 参数 → vb6_Val 转换为 double (CInt/CLng/CDbl 接 double)
-        else if (firstArgIsBstr && !args.empty()) {
+        // Fix 084c: 扩展检测到字符串级 BSTR 表达式 (vb6_Trim/vb6_BSTR_Concat/vb6_CStr
+        // /vb6_VariantToString 等), 不仅限于已知 BSTR 标识符 — 否则
+        // vb6_CLng(vb6_Trim(vb6_VariantToString(...))) 触发 C2440 "BSTR → double".
+        bool argIsBstrExpr = firstArgIsBstr;
+        if (!argIsBstrExpr && !args.empty()) {
+            std::string& a0 = args[0];
+            argIsBstrExpr =
+                a0.find("vb6_Trim(") == 0 || a0.find("vb6_LTrim(") == 0 ||
+                a0.find("vb6_RTrim(") == 0 || a0.find("vb6_StrConv(") == 0 ||
+                a0.find("vb6_Mid(") == 0 || a0.find("vb6_Left(") == 0 ||
+                a0.find("vb6_Right(") == 0 || a0.find("vb6_Replace(") == 0 ||
+                a0.find("vb6_String(") == 0 || a0.find("vb6_Format(") == 0 ||
+                a0.find("vb6_UCase(") == 0 || a0.find("vb6_LCase(") == 0 ||
+                a0.find("vb6_Space(") == 0 || a0.find("vb6_IIfBSTR(") == 0 ||
+                a0.find("vb6_Chr(") == 0 || a0.find("vb6_ChrW(") == 0 ||
+                a0.find("vb6_BSTR_Concat(") == 0 || a0.find("vb6_BSTR_FromStr(") == 0 ||
+                a0.find("vb6_CStr") == 0 || a0.find("vb6_VariantToString(") == 0 ||
+                a0.find("VB6_SA_AT(BSTR,") != std::string::npos;
+        }
+        if (argIsBstrExpr && !args.empty()) {
             args[0] = "vb6_Val(" + args[0] + ")";
             argList.clear();
             for (size_t i = 0; i < args.size(); i++) {
@@ -4880,6 +4915,23 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
         if (udtIt != knownUdtVars_.end()) {
             lastExpr_ = "(int32_t)sizeof(" + udtIt->second + ")";
             return;
+        }
+        // Fix 084h: UDT 数组元素 LenB(VB6_SA_AT(vb6_type_XXX, arr, idx)) →
+        // sizeof(vb6_type_XXX)。_Generic 宏无法匹配自定义结构体类型, 且
+        // 数组元素类型未知, 直接由类型名生成 sizeof。
+        {
+            std::string rawArg = args[0];
+            std::string rawLower = rawArg;
+            std::transform(rawLower.begin(), rawLower.end(), rawLower.begin(), ::tolower);
+            const char* saPrefix = "vb6_sa_at(vb6_type_";
+            if (rawLower.compare(0, 19, saPrefix) == 0) {
+                size_t comma = rawArg.find(',');
+                if (comma != std::string::npos) {
+                    std::string typeName = rawArg.substr(19, comma - 19);
+                    lastExpr_ = "(int32_t)sizeof(" + typeName + ")";
+                    return;
+                }
+            }
         }
     }
     lastExpr_ = callee + "(" + argList + ")";
