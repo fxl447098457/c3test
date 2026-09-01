@@ -483,6 +483,7 @@ bool CCodeGen::generate(Module& module, const std::string& baseName,
                     std::string wrapperName = "vb6_evt_wrap_" + varLower + "_" + cIdent(evtName);
                     // 查找Event声明的参数
                     std::vector<ParameterInfo> evtParams;
+                    std::vector<std::string> evtParamCTypes;
                     for (auto& decl2 : module.declarations) {
                         if (decl2->kind == ASTNodeKind::SubDecl) {
                             auto& sub = static_cast<SubDecl&>(*decl2);
@@ -497,14 +498,17 @@ bool CCodeGen::generate(Module& module, const std::string& baseName,
                                         pi.type = Vb6Type::Variant;
                                     pi.isByVal = true;
                                     evtParams.push_back(pi);
+                                    // Fix 084k: 类名参数用 mapTypeRef → vb6_cls_X*, 不能
+                                    // resolveTypeName 解析失败回退为 vb6_VARIANT (导致 C2440)
+                                    evtParamCTypes.push_back(mapTypeRef(param->asType.get()) + " " + cIdent(param->name));
                                 }
                                 break;
                             }
                         }
                     }
                     std::string sig = "void " + wrapperName + "(void* handler";
-                    for (auto& p : evtParams) {
-                        sig += ", " + mapType(p.type) + " " + cIdent(p.name);
+                    for (auto& pt : evtParamCTypes) {
+                        sig += ", " + pt;
                     }
                     sig += ")";
                     evtWrapperSigs.push_back(sig);
@@ -585,6 +589,9 @@ bool CCodeGen::generate(Module& module, const std::string& baseName,
 
                 // 查找Event声明的参数
                 std::vector<ParameterInfo> evtParams;
+                std::vector<std::string> evtParamCTypes;
+                std::vector<std::string> evtParamCTypeOnly;
+                std::vector<bool> evtParamIsClass;
                 for (auto& decl2 : module.declarations) {
                     // 事件处理器参数与源类Event声明参数相同
                     // 从处理器Sub的参数获取
@@ -601,6 +608,12 @@ bool CCodeGen::generate(Module& module, const std::string& baseName,
                                     pi.type = Vb6Type::Variant;
                                 pi.isByVal = true;
                                 evtParams.push_back(pi);
+                                // Fix 084k: 类名参数用 mapTypeRef → vb6_cls_X* (同 .h 前向声明),
+                                // 不能 resolveTypeName 解析失败回退为 vb6_VARIANT
+                                std::string wType = mapTypeRef(param->asType.get());
+                                evtParamCTypes.push_back(wType + " " + cIdent(param->name));
+                                evtParamCTypeOnly.push_back(wType);
+                                evtParamIsClass.push_back(wType.find("vb6_cls_") == 0);
                             }
                             break;
                         }
@@ -609,8 +622,8 @@ bool CCodeGen::generate(Module& module, const std::string& baseName,
 
                 // 构建包装函数签名
                 std::string sig = "void " + wrapperName + "(void* handler";
-                for (auto& p : evtParams) {
-                    sig += ", " + mapType(p.type) + " " + cIdent(p.name);
+                for (auto& pt : evtParamCTypes) {
+                    sig += ", " + pt;
                 }
                 sig += ")";
 
@@ -633,7 +646,14 @@ bool CCodeGen::generate(Module& module, const std::string& baseName,
                     if (i > 0 || isClassModule_) {
                         callArgs += ", ";
                     }
-                    callArgs += cIdent(evtParams[i].name);
+                    if (evtParamIsClass[i]) {
+                        // Fix 084k: 处理器Sub形参是 ByRef 具体类 (vb6_cls_X**),
+                        // 包装器形参是 ByVal 单指针 (vb6_cls_X*) — 用临时地址适配,
+                        // 否则 vb6_VARIANT→vb6_cls_X** 触发 C2440
+                        callArgs += "&(" + evtParamCTypeOnly[i] + "){" + cIdent(evtParams[i].name) + "}";
+                    } else {
+                        callArgs += cIdent(evtParams[i].name);
+                    }
                 }
                 callArgs += ");";
                 c_.emitLine(procCall + callArgs);

@@ -571,6 +571,10 @@ private:
     // 生成参数列表
     std::string makeParamList(std::vector<std::unique_ptr<ParameterDecl>>& params, bool isDeclare = false);
 
+    // Fix 084k: 生成单个参数的C类型+名字 ("int32_t x" / "vb6_cls_cWinsock** o"),
+    // 与makeParamList逐参数逻辑完全一致, 供事件包装器等复用
+    std::string makeParamCType(ParameterDecl* p, bool isDeclare = false);
+
     // 生成Property签名 (不含函数体)
     std::string makePropertySignature(PropertyDecl& node);
 

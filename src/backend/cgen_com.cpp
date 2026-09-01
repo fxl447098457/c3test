@@ -272,14 +272,13 @@ void CCodeGen::visit(RaiseEventStmt& node) {
         // Fix 029: Variant 形参 → 用 vb6_VariantFromValue 包装标量实参.
         // 其它具体类型 (Long/String/...)形参期望已由 emitExpr 生成匹配类型,
         // 不做额外包装以避免破坏现有正确调用.
+        // Fix 084k: 类名事件参数 — 回调typedef现用 mapTypeRef → vb6_cls_X*,
+        // 直接传对象指针即可; 旧代码 resolveTypeName 失败回退为 Variant 导致
+        // 这里错误包装成 vb6_VariantFromValue → 与 vb6_cls_X* 形参 C2440.
         if (evtDecl && i < evtDecl->params.size()) {
             auto& param = evtDecl->params[i];
-            Vb6Type paramType = (param->asType && param->asType->kind == ASTNodeKind::SimpleTypeRef)
-                ? typeSys_.resolveTypeName(static_cast<SimpleTypeRef*>(param->asType.get())->name)
-                : Vb6Type::Variant;
-            if (paramType == Vb6Type::Unknown || paramType == Vb6Type::Empty)
-                paramType = Vb6Type::Variant;
-            if (paramType == Vb6Type::Variant) {
+            std::string pCType = (param->asType ? mapTypeRef(param->asType.get()) : std::string("vb6_VARIANT"));
+            if (pCType == "vb6_VARIANT") {
                 argVal = "vb6_VariantFromValue(" + argVal + ")";
             }
         }
@@ -379,6 +378,7 @@ void CCodeGen::emitEventSink(Module& module) {
         std::string name;           // 事件名(原始)
         std::string cName;          // 安全C标识符
         std::vector<ParameterInfo> params;  // 事件参数
+        std::vector<std::string> ctypes;    // Fix 084k: 每个参数的C类型+名字
     };
     std::vector<EventInfo> events;
 
@@ -401,6 +401,9 @@ void CCodeGen::emitEventSink(Module& module) {
                 // 事件参数总是ByVal传递(跨对象边界)
                 pi.isByVal = true;
                 info.params.push_back(pi);
+                // Fix 084k: 回调typedef须与包装函数签名一致 — 类名参数用 mapTypeRef
+                // → vb6_cls_X* (ByVal单指针), 不能回退为 vb6_VARIANT (导致 C2440)
+                info.ctypes.push_back(mapTypeRef(param->asType.get()) + " " + cIdent(param->name));
             }
             events.push_back(std::move(info));
         }
@@ -414,8 +417,8 @@ void CCodeGen::emitEventSink(Module& module) {
     for (auto& evt : events) {
         std::string cbName = "vb6_evt_" + cIdent(moduleName_) + "_" + evt.cName + "_cb";
         std::string sig = "void (*" + cbName + ")(void* handler";
-        for (auto& p : evt.params) {
-            sig += ", " + mapType(p.type) + " " + cIdent(p.name);
+        for (auto& pt : evt.ctypes) {
+            sig += ", " + pt;
         }
         sig += ")";
         h_.emitLine("typedef " + sig + ";");

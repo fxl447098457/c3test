@@ -539,6 +539,58 @@ std::string CCodeGen::makeProcSignature(FunctionDecl& node) {
     return retType + " " + name + "(" + params + ")";
 }
 
+// Fix 084k: 单个参数的C类型+名字, 与makeParamList逐参数逻辑完全一致
+std::string CCodeGen::makeParamCType(ParameterDecl* p, bool isDeclare) {
+    // P14.1.5: ParamArray → SAFEARRAY* (always Variant array)
+    if (p->isParamArray) {
+        return "SAFEARRAY* " + cIdent(p->name);
+    }
+
+    std::string cType = mapTypeRef(p->asType.get());
+    std::string cName = cIdent(p->name);
+
+    // Fix 081e: Declare函数中ByVal Long/LongPtr参数映射为intptr_t
+    // VB6 Long在Declare中常用于传句柄/指针 (ByVal hdc As Long等),
+    // VB6是32位环境,Long=4字节=指针大小; 但x64下指针8字节,int32_t不够。
+    // 将Declare中ByVal Long和ByVal LongPtr都映射为intptr_t:
+    //   x86: intptr_t=4字节, 与VB6 Long兼容
+    //   x64: intptr_t=8字节, 可容纳指针/句柄值
+    // 纯值参数(如CodePage)传入intptr_t也不影响正确性(低32位包含值)。
+    // ByRef Long参数不受影响(已映射为int32_t*,指针大小由架构决定)。
+    if (isDeclare && p->isByVal && cType == "int32_t") {
+        // 只对SimpleTypeRef中的Long/LongPtr提升为intptr_t
+        if (p->asType && p->asType->kind == ASTNodeKind::SimpleTypeRef) {
+            auto& simpleP = static_cast<SimpleTypeRef&>(*p->asType);
+            if (simpleP.name == "Long" || simpleP.name == "LongPtr") {
+                cType = "intptr_t";
+            }
+        }
+    }
+
+    // Fix 010: As Any 参数 — VB6中Any仅用于Declare, ByRef/ByVal均映射为void*
+    // 不额外添加ByRef指针 (void*已是"指向任意类型的指针")
+    bool isAnyType = false;
+    if (p->asType && p->asType->kind == ASTNodeKind::SimpleTypeRef) {
+        auto& simpleType = static_cast<SimpleTypeRef&>(*p->asType);
+        if (simpleType.name == "Any" || simpleType.name == "any") {
+            isAnyType = true;
+            cType = "void*";
+        }
+    }
+
+    // Fix 010r-6 rev2: ByRef array parameters need vb6_SafeArray1D** (double pointer)
+    // so the callee can assign a new SafeArray (e.g. ReDim) and the caller sees it.
+    // ByVal array params and As Any params stay as single pointer.
+    bool isArrayParam = (p->asType && p->asType->kind == ASTNodeKind::ArrayTypeRef);
+
+    if (p->isByVal || isAnyType) {
+        return cType + " " + cName;
+    }
+    // ByRef → C pointer (ByRef array同: vb6_SafeArray1D** — callee can modify the caller's pointer)
+    (void)isArrayParam;
+    return cType + "* " + cName;
+}
+
 std::string CCodeGen::makeParamList(std::vector<std::unique_ptr<ParameterDecl>>& params, bool isDeclare) {
     if (params.empty()) return "void";
 
@@ -546,60 +598,7 @@ std::string CCodeGen::makeParamList(std::vector<std::unique_ptr<ParameterDecl>>&
     for (size_t i = 0; i < params.size(); i++) {
         if (i > 0) result += ", ";
         auto& p = params[i];
-
-        // P14.1.5: ParamArray → SAFEARRAY* (always Variant array)
-        if (p->isParamArray) {
-            std::string cName = cIdent(p->name);
-            result += "SAFEARRAY* " + cName;
-            continue;
-        }
-
-        std::string cType = mapTypeRef(p->asType.get());
-        std::string cName = cIdent(p->name);
-
-        // Fix 081e: Declare函数中ByVal Long/LongPtr参数映射为intptr_t
-        // VB6 Long在Declare中常用于传句柄/指针 (ByVal hdc As Long等),
-        // VB6是32位环境,Long=4字节=指针大小; 但x64下指针8字节,int32_t不够。
-        // 将Declare中ByVal Long和ByVal LongPtr都映射为intptr_t:
-        //   x86: intptr_t=4字节, 与VB6 Long兼容
-        //   x64: intptr_t=8字节, 可容纳指针/句柄值
-        // 纯值参数(如CodePage)传入intptr_t也不影响正确性(低32位包含值)。
-        // ByRef Long参数不受影响(已映射为int32_t*,指针大小由架构决定)。
-        if (isDeclare && p->isByVal && cType == "int32_t") {
-            // 只对SimpleTypeRef中的Long/LongPtr提升为intptr_t
-            if (p->asType && p->asType->kind == ASTNodeKind::SimpleTypeRef) {
-                auto& simpleP = static_cast<SimpleTypeRef&>(*p->asType);
-                if (simpleP.name == "Long" || simpleP.name == "LongPtr") {
-                    cType = "intptr_t";
-                }
-            }
-        }
-
-        // Fix 010: As Any 参数 — VB6中Any仅用于Declare, ByRef/ByVal均映射为void*
-        // 不额外添加ByRef指针 (void*已是"指向任意类型的指针")
-        bool isAnyType = false;
-        if (p->asType && p->asType->kind == ASTNodeKind::SimpleTypeRef) {
-            auto& simpleType = static_cast<SimpleTypeRef&>(*p->asType);
-            if (simpleType.name == "Any" || simpleType.name == "any") {
-                isAnyType = true;
-                cType = "void*";
-            }
-        }
-
-        // Fix 010r-6 rev2: ByRef array parameters need vb6_SafeArray1D** (double pointer)
-        // so the callee can assign a new SafeArray (e.g. ReDim) and the caller sees it.
-        // ByVal array params and As Any params stay as single pointer.
-        bool isArrayParam = (p->asType && p->asType->kind == ASTNodeKind::ArrayTypeRef);
-
-        if (p->isByVal || isAnyType) {
-            result += cType + " " + cName;
-        } else if (isArrayParam) {
-            // ByRef array: vb6_SafeArray1D** — callee can modify the caller's pointer
-            result += cType + "* " + cName;
-        } else {
-            // ByRef → C pointer
-            result += cType + "* " + cName;
-        }
+        result += makeParamCType(p.get(), isDeclare);
     }
     // P20-36: IsMissing support - append _has_ flags for Optional params
     // Fix 042c: Declare functions are __declspec(dllimport) — external DLL imports
