@@ -266,7 +266,9 @@ std::vector<const Symbol*> SymbolTable::getPublicSymbols() const {
                 sym->kind == SymbolKind::PropertySet ||
                 sym->kind == SymbolKind::EnumType ||
                 sym->kind == SymbolKind::EnumMember ||
-                sym->kind == SymbolKind::UserDefinedType) {
+                sym->kind == SymbolKind::UserDefinedType ||
+                sym->kind == SymbolKind::DeclareSub ||
+                sym->kind == SymbolKind::DeclareFunc) {
                 result.push_back(sym.get());
             }
         }
