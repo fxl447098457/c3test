@@ -6,6 +6,7 @@
 #include <vector>
 #include <sstream>
 #include <cstdint>
+#include <set>
 
 namespace vb6c3 {
 
@@ -116,6 +117,7 @@ public:
     }
 
     void warn(DiagnosticID id, const SourceLocation& loc, const std::string& msg) {
+        if (isSuppressed(id)) return;
         diagnostics_.push_back({DiagnosticLevel::Warning, id, loc, msg, {}});
         warningCount_++;
     }
@@ -159,8 +161,14 @@ public:
         warningCount_ = 0;
     }
 
+    // 抑制指定ID的警告 (性能优化: 大型项目如vbman会打印上千条
+    // VB3001/VB3003 宽松模式警告, 抑制后可减少日志I/O与输出膨胀)
+    void suppress(DiagnosticID id) { suppressed_.insert(id); }
+    bool isSuppressed(DiagnosticID id) const { return suppressed_.count(id) > 0; }
+
 private:
     std::vector<Diagnostic> diagnostics_;
+    std::set<DiagnosticID> suppressed_;
     int errorCount_ = 0;
     int warningCount_ = 0;
 };

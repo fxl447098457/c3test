@@ -129,6 +129,21 @@ std::pair<CompileOptions, int> Driver::parseArgs(int argc, char* argv[]) {
         else if (arg == "--compat-check") {
             opts.compatCheck = true;
         }
+        else if (arg == "--no-warn" && i + 1 < argc) {
+            // 抑制指定ID的警告, 逗号分隔 (如 --no-warn 3001,3003)
+            std::string list = argv[++i];
+            std::stringstream ss(list);
+            std::string item;
+            while (std::getline(ss, item, ',')) {
+                if (item.empty()) continue;
+                try {
+                    opts.suppressedWarningIds.push_back(std::stoi(item));
+                } catch (...) {
+                    std::cerr << "C3: 无效的警告ID: " << item << std::endl;
+                    resultCode = 1;
+                }
+            }
+        }
         else if (arg == "-d" || arg == "--define") {
             if (i + 1 < argc) {
                 opts.defines.push_back(argv[++i]);
@@ -164,6 +179,11 @@ CompileResult Driver::compile(int argc, char* argv[]) {
 CompileResult Driver::compile(const CompileOptions& options) {
     CompileResult result;
     diag_->clear();
+
+    // 应用警告抑制 (性能优化: 减少大型项目的日志I/O)
+    for (int id : options.suppressedWarningIds) {
+        diag_->suppress(static_cast<DiagnosticID>(id));
+    }
 
     // === 阶段0: VBP工程文件解析 ===
     // 如果输入是.vbp文件, 展开源文件列表
