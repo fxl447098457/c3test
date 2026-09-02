@@ -80,6 +80,11 @@ public:
                   bool isDll = false, const std::string& dllProgId = "",
                   const FrmFormDesc* frmDesc = nullptr);
 
+    // opt4: 裁剪标准模块.c中未实际引用的跨模块#include (降低预处理量, 加速cl编译)
+    void setTrimIncludes(bool b) { trimIncludes_ = b; }
+    // opt4: 设置"当前模块实际引用的外部模块"集合(小写), 由driver通过AST扫描提供
+    void setTrimModules(const std::unordered_set<std::string>& m) { trimModules_ = m; }
+
     // P6.6: 单独生成ActiveX DLL入口文件 (dll_entry.c)
     // 当DLL工程只有类模块(无标准模块)时, 由Driver调用此方法生成DLL导出代码
     // progId: DLL的ProgID前缀
@@ -369,6 +374,10 @@ private:
     // 在过程开头 knownUdtVars_.clear() 后同样会丢失, 导致 With m_uData 被误分类为 COM 对象.
     // 本集合在 generate() 扫描模块声明时填充, 过程开头 clear() 后恢复.
     std::unordered_map<std::string, std::string> moduleUdtMembers_;
+    // opt4: 裁剪标准模块.c中未实际引用的跨模块#include
+    bool trimIncludes_ = false;
+    // opt4: 当前模块实际引用的外部模块(小写), 由 driver 的 AST 收集器填充
+    std::unordered_set<std::string> trimModules_;
     // 已知类实例变量名 → 类名映射 (小写var名 → 类名, 如 "me" → "cDialog")
     // 用于方法调用翻译 c.Method → vb6_cls_ClassName_Method(c)
     // Fix 010r-10: 从 unordered_set 改为 unordered_map 以支持类名查找

@@ -7,6 +7,7 @@
 #include "preprocessor/preprocessor.hpp"
 #include "parser/parser.hpp"
 #include "ast/ast_printer.hpp"
+#include "ast/ast_visitor.hpp"
 #include "semantics/semantic_analyzer.hpp"
 #include "backend/cgen.hpp"
 #include "backend/msvc_driver.hpp"
@@ -95,6 +96,9 @@ std::pair<CompileOptions, int> Driver::parseArgs(int argc, char* argv[]) {
         }
         else if (arg == "--incremental") {
             opts.incremental = true;  // opt3: 增量编译 (obj级缓存)
+        }
+        else if (arg == "--trim-includes") {
+            opts.trimIncludes = true;  // opt4: 裁剪未实际引用的跨模块include
         }
         else if (arg == "--keep-for-debug") {
             opts.keepTemps = true;  // 隐藏参数: 保留中间文件便于调试
@@ -1166,6 +1170,60 @@ bool Driver::runSemanticAnalysis(const CompileOptions& options) {
 // 遍历每个模块的符号表，查找未定义的标识符，在其他模块的Public符号中查找匹配
 // 为匹配到的符号注入 isExternal=true + sourceModule 的外部符号
 
+// opt4: AST 引用收集器 — 扫描模块 AST, 收集"实际引用的外部模块"(小写)。
+// 注: 符号表经 runCrossModuleResolution 全量注入, getExternalModuleNames()
+// 返回所有其他模块(而非实际引用), 因此裁剪 include 需基于 AST 实际引用。
+class ExternalRefCollector : public ASTVisitor {
+public:
+    SymbolTable& symTab;
+    const std::unordered_set<std::string>& externalModules;
+    std::unordered_set<std::string>& refd;  // 输出: 小写模块名
+
+    ExternalRefCollector(SymbolTable& st, const std::unordered_set<std::string>& ext,
+                         std::unordered_set<std::string>& out)
+        : symTab(st), externalModules(ext), refd(out) {}
+
+    void visit(IdentifierExpr& node) override {
+        // 点号限定形式 Mod.var / Mod.UDT
+        size_t dot = node.name.find('.');
+        if (dot != std::string::npos) {
+            std::string modPart = node.name.substr(0, dot);
+            for (const auto& em : externalModules) {
+                if (Symbol::toLower(em) == Symbol::toLower(modPart)) {
+                    refd.insert(Symbol::toLower(em));
+                    return;
+                }
+            }
+            return;
+        }
+        // 普通名称: 查符号表定位归属模块
+        if (Symbol* s = symTab.lookup(node.name)) {
+            if (s->isExternal && !s->sourceModule.empty()) {
+                refd.insert(Symbol::toLower(s->sourceModule));
+            }
+        }
+    }
+
+    void visit(SimpleTypeRef& node) override {
+        size_t dot = node.name.find('.');
+        if (dot != std::string::npos) {
+            std::string modPart = node.name.substr(0, dot);
+            for (const auto& em : externalModules) {
+                if (Symbol::toLower(em) == Symbol::toLower(modPart)) {
+                    refd.insert(Symbol::toLower(em));
+                    return;
+                }
+            }
+            return;
+        }
+        if (Symbol* s = symTab.lookup(node.name)) {
+            if (s->isExternal && !s->sourceModule.empty()) {
+                refd.insert(Symbol::toLower(s->sourceModule));
+            }
+        }
+    }
+};
+
 bool Driver::runCrossModuleResolution() {
     if (modules_.size() != analyzers_.size()) return false;
 
@@ -1532,6 +1590,14 @@ bool Driver::runCodeGeneration(const CompileOptions& options, const std::string&
         // Fix 023: 传入 void* 字段表供 cgen_expr.cpp fallback 路径查询
         CCodeGen cgen(*diag_, analyzer->symbolTable(), analyzer->typeSystem(),
                       &classVoidFieldMap, &classTypedFieldMap, &variantReturnFuncs, options.verbose);
+        cgen.setTrimIncludes(options.trimIncludes);  // opt4: 裁剪未实际引用的跨模块include
+        if (options.trimIncludes) {
+            // opt4: 基于AST实际引用收集外部模块, 供 include 裁剪
+            std::unordered_set<std::string> refdModules;
+            ExternalRefCollector collector(analyzer->symbolTable(), externalModules, refdModules);
+            traverseAST(*module, collector);
+            cgen.setTrimModules(refdModules);
+        }
 
         // 传入模块基名和外部模块列表
         // P6.6: 传递ActiveX DLL模式信息

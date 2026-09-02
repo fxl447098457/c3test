@@ -73,6 +73,9 @@ struct CompileOptions {
 
     // 增量编译 (性能优化): 基于内容哈希的obj级缓存, 跳过未变化的.c编译
     bool incremental = false;
+
+    // 裁剪include (性能优化): 只include实际引用的外部模块, 降低cl预处理量
+    bool trimIncludes = false;
 };
 
 // 编译结果

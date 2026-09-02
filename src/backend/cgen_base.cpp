@@ -4,6 +4,7 @@
 #include <cctype>
 #include <iostream>
 #include <functional>
+#include <unordered_set>
 
 namespace vb6c3 {
 
@@ -309,12 +310,18 @@ bool CCodeGen::generate(Module& module, const std::string& baseName,
     }
     // P8.7 + Fix 010r-12: 标准模块之间的#include放在.c文件，避免.h循环依赖
     // 类模块引用标准模块 → .h (见上方); 标准模块引用标准模块 → .c
+    // opt4: --trim-includes 时按符号表实际引用裁剪, 未引用模块仅补 init 前向声明
     {
         for (const auto& extMod : externalModules) {
             auto* extSym = symTab_.lookup(extMod);
             bool extIsClass = extSym && extSym->kind == SymbolKind::Class;
             if (!extIsClass && !isClassModule_) {
-                c_.emitLine("#include \"" + extMod + ".h\"");
+                if (!trimIncludes_ || trimModules_.count(Symbol::toLower(extMod))) {
+                    c_.emitLine("#include \"" + extMod + ".h\"");
+                } else {
+                    // opt4: 未实际引用 → 只补初始化函数前向声明 (Fix 080 仍需调用)
+                    c_.emitLine("void vb6_mod_" + cIdent(extMod) + "_init(void);  /* opt4: trimmed include */");
+                }
             }
         }
     }
