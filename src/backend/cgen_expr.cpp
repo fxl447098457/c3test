@@ -1132,7 +1132,8 @@ void CCodeGen::visit(BinaryExpr& node) {
                 Vb6Type rActual = rt;
                 if (rActual == Vb6Type::Long || rActual == Vb6Type::Integer || rActual == Vb6Type::Boolean) {
                     // P25: left可能是VARIANT rvalue(vb6_VariantFromComResult), 需要临时变量
-                    bool leftIsLvalue = !left.empty() && (std::isalpha(static_cast<unsigned char>(left[0])) || left[0] == '_');
+                    // Fix 084aa: 常量宏 (#define) 不可取址 → 视为非左值走临时变量
+                    bool leftIsLvalue = !left.empty() && (std::isalpha(static_cast<unsigned char>(left[0])) || left[0] == '_') && !isConstIdent(left);
                     if (leftIsLvalue) { for (char c : left) { if (!std::isalnum(static_cast<unsigned char>(c)) && c != '_') { leftIsLvalue = false; break; } } }
                     if (leftIsLvalue) {
                         lastExpr_ = "(vb6_VarCmpLong" + cmpFn + "(&" + left + ", " + right + "))";
@@ -1158,7 +1159,8 @@ void CCodeGen::visit(BinaryExpr& node) {
                         case BinaryOp::Ge: revCmpFn = "Le"; break;
                         default: revCmpFn = cmpFn; break;  // Eq/Ne是对称的
                     }
-                    bool rightIsLvalue = !right.empty() && (std::isalpha(static_cast<unsigned char>(right[0])) || right[0] == '_');
+                    // Fix 084aa: 常量宏不可取址 → 视为非左值
+                    bool rightIsLvalue = !right.empty() && (std::isalpha(static_cast<unsigned char>(right[0])) || right[0] == '_') && !isConstIdent(right);
                     if (rightIsLvalue) { for (char c : right) { if (!std::isalnum(static_cast<unsigned char>(c)) && c != '_') { rightIsLvalue = false; break; } } }
                     if (rightIsLvalue) {
                         lastExpr_ = "(vb6_VarCmpLong" + revCmpFn + "(&" + right + ", " + left + "))";
@@ -1173,8 +1175,10 @@ void CCodeGen::visit(BinaryExpr& node) {
             }
             // Variant vs Variant: 使用VarCmp函数
             // P25: 检测rvalue, 非左值需要存临时变量
-            auto isLvalue = [](const std::string& s) -> bool {
+            // Fix 084aa: 常量宏 (#define) 不可取址 → 视为非左值走临时变量
+            auto isLvalue = [this](const std::string& s) -> bool {
                 if (s.empty()) return false;
+                if (isConstIdent(s)) return false;
                 if (!(std::isalpha(static_cast<unsigned char>(s[0])) || s[0] == '_')) return false;
                 for (char c : s) { if (!std::isalnum(static_cast<unsigned char>(c)) && c != '_') return false; }
                 return true;
@@ -1270,6 +1274,38 @@ void CCodeGen::visit(MemberAccessExpr& node) {
             if (_memLower == "helpcontext") { lastExpr_ = "0";                    return; }
             if (_memLower == "clear")       { lastExpr_ = "vb6_ErrClear";         return; }
             if (_memLower == "raise")       { lastExpr_ = "vb6_ErrRaise";         return; }
+        }
+
+        // Fix 084y-6: VBA 模块成员 (VBA.vbCr / VBA.Replace 等). 编译器不注册
+        // "VBA" 模块符号 → M22 fallback 生成 vb6_VBA_<member> (rtl 无此名 →
+        // C2065). 常量内联字面量; 函数生成裸 rtl 名 vb6_<member> (去 $ 后缀,
+        // 如 VBA.Mid$ → vb6_Mid), 由外层 IndexOrCallExpr 的 Fix 033 回退
+        // (lookupModule + lookup 全表) 解析参数表并填充 Optional 默认值.
+        if (_objLower == "vba" || _objLower == "vba5") {
+            static const std::unordered_map<std::string, std::string> vbaConsts = {
+                {"vbcr", "13"}, {"vblf", "10"}, {"vbtab", "9"},
+                {"vbnullchar", "0"}, {"vbnullstring", "vb6_BSTR_FromStr(L\"\")"},
+                {"vbcrif", "vb6_BSTR_FromStr(L\"\\r\\n\")"},
+                {"vbnewline", "vb6_BSTR_FromStr(L\"\\r\\n\")"},
+                {"vbempty", "0"}, {"vbnull", "1"}, {"vbinteger", "2"}, {"vblong", "3"},
+                {"vbsingle", "4"}, {"vbdouble", "5"}, {"vbcurrency", "6"}, {"vbdate", "7"},
+                {"vbstring", "8"}, {"vbobject", "9"}, {"vberror", "10"}, {"vbboolean", "11"},
+                {"vbvariant", "12"}, {"vbdecimal", "14"}, {"vbbyte", "17"}, {"vblonglong", "20"},
+                {"vbuserdefinedtype", "36"}, {"vbarray", "8192"},
+                {"vbtrue", "-1"}, {"vbfalse", "0"},
+            };
+            auto itC = vbaConsts.find(_memLower);
+            if (itC != vbaConsts.end()) { lastExpr_ = itC->second; return; }
+            std::string fnName = node.memberName;
+            if (!fnName.empty() && fnName.back() == '$') fnName.pop_back();
+            Symbol* vbaFn = symTab_.lookup(fnName);
+            if (vbaFn && (vbaFn->kind == SymbolKind::Function || vbaFn->kind == SymbolKind::Sub
+                          || vbaFn->kind == SymbolKind::PropertyGet
+                          || vbaFn->kind == SymbolKind::DeclareSub
+                          || vbaFn->kind == SymbolKind::DeclareFunc)) {
+                lastExpr_ = "vb6_" + cIdent(fnName);
+                return;
+            }
         }
     }
 
@@ -1594,6 +1630,23 @@ void CCodeGen::visit(MemberAccessExpr& node) {
             return;
         }
 
+        // Fix 084z-4: 函数名引用返回值的成员访问 (RHS 读取侧, 与 LHS 的
+        // Fix 084o-5 对称). VB6 函数体内可用函数名访问返回对象的成员
+        // (如 cJson: RootItems.Add NewItem.RootItem, NewItem As cJson) →
+        // 展开 vb6_ret_NewItem->RootItem; 而非误当模块名落入 M22 生成
+        // vb6_NewItem_RootItem (C2065 未声明).
+        if (node.object && node.object->kind == ASTNodeKind::IdentifierExpr) {
+            auto& objIdent084z = static_cast<IdentifierExpr&>(*node.object);
+            std::string objLower084z = Symbol::toLower(objIdent084z.name);
+            if (currentProc_ && objLower084z == Symbol::toLower(currentProc_->name)
+                && (currentProc_->kind == SymbolKind::Function || currentProc_->kind == SymbolKind::PropertyGet)
+                && !currentReturnVar_.empty()) {
+                bool isCls084z = currentReturnCType_.find("vb6_cls_") != std::string::npos;
+                lastExpr_ = currentReturnVar_ + (isCls084z ? "->" : ".") + cIdent(node.memberName);
+                return;
+            }
+        }
+
         auto* memSym = symTab_.lookupModule(node.memberName);
         if (memSym && (memSym->kind == SymbolKind::Sub || memSym->kind == SymbolKind::Function
                     || memSym->kind == SymbolKind::PropertyGet
@@ -1626,6 +1679,18 @@ void CCodeGen::visit(MemberAccessExpr& node) {
             if (objSym && (objSym->kind == SymbolKind::Variable || objSym->kind == SymbolKind::Parameter)) {
                 isVarName = true;
             }
+            // Fix 084x: 补充检查cgen层跟踪集合 (与M22分支一致), 防止过程级
+            // 局部类变量/UDT变量被误判为"模块名", 落入优先级3 "模块名.方法名"
+            // 用 memSym->sourceModule 生成 vb6_<他类>_<member> 函数名 (C2065).
+            // 例: oCallback.Socket.Accept 中 oCallback 是 Dim As cClientCallback 局部
+            // 变量, 不在模块作用域符号表 → 原判定 isVarName=false, memSym 命中
+            // cTlsSocket.Socket 属性 → 生成 vb6_cTlsSocket_Socket (错误).
+            if (!isVarName && knownUdtVars_.count(objLower)) isVarName = true;
+            if (!isVarName && knownClassVars_.find(objLower) != knownClassVars_.end()) isVarName = true;
+            if (!isVarName && knownNewVars_.count(objLower)) isVarName = true;
+            if (!isVarName && knownObjectVars_.count(objLower)) isVarName = true;
+            if (!isVarName && knownTypedComVars_.count(objLower)) isVarName = true;
+            if (!isVarName && knownIfaceVars_.count(objLower)) isVarName = true;
 
             // Fix 083c: obj 是当前模块的属性(返回类对象) → pvSocket.GetLocalHost(...)
             // 不能按"模块名.方法"处理(会丢失对象实例导致 me 参数缺失 C2198),
@@ -1697,6 +1762,21 @@ void CCodeGen::visit(MemberAccessExpr& node) {
              objSym2->kind == SymbolKind::PropertySet)) {
             isVarName2 = true;
         }
+        // Fix 084y-8: 枚举类型名.成员 (EnumLogLevel.LvCustom) — 枚举类型不是
+        // 变量也不是模块, 原逻辑落入模块名限定符 → vb6_EnumLogLevel_LvCustom
+        // (C2065, 声明名是 vb6_enum_EnumLogLevel_LvCustom 带 enum_ 层). 成员
+        // 有常量值则内联数值 (LvCustom=5), 否则生成声明同构名.
+        if (!isVarName2 && objSym2 && objSym2->kind == SymbolKind::EnumType) {
+            Symbol* enumMemSym = symTab_.lookup(node.memberName);
+            if (enumMemSym && enumMemSym->kind == SymbolKind::EnumMember
+                && enumMemSym->hasConstValue) {
+                lastExpr_ = std::to_string(enumMemSym->constIntValue);
+                return;
+            }
+            lastExpr_ = "vb6_enum_" + cIdent(objIdent2.name) + "_" + cIdent(node.memberName);
+            return;
+        }
+
         if (!isVarName2) {
             // object不是已知变量 → 假设是模块名限定符
             // 成员是变量: Module1.myName
@@ -1720,7 +1800,12 @@ void CCodeGen::visit(MemberAccessExpr& node) {
     // object 是非标识符表达式(方法调用返回类实例) → 用类型推断得到类名,
     // 生成全局方法调用 vb6_<Class>_<Method>((void*)<objExpr>, args...),
     // 避免生成 objExpr.member(args) 非法 C (C2039/结构体无此成员)
-    if (node.object && node.object->kind != ASTNodeKind::IdentifierExpr) {
+    // Fix 084y-4: 调用上下文 (asCallCallee_=true, 如 db.Sql(s).Exec(...)) 时跳过本
+    // 分支 — 它生成 func((void*)objExpr) 只含 this 指针, 绕过外层 IndexOrCallExpr
+    // 的 Optional 默认参数填充 → C2198 参数太少 (cDataBase.Exec 声明5参却传1参).
+    // 调用上下文应交给 Fix 015 (IndexOrCallExpr 链 → pendingChainObj_ 裸函数名,
+    // 由外层补齐参数). 值上下文 (bX = obj.Fn().Prop) 才走本分支.
+    if (node.object && node.object->kind != ASTNodeKind::IdentifierExpr && !asCallCallee_) {
         std::string className = inferClassTypeOfExpr(*node.object);
         if (!className.empty()) {
             std::string resolvedFn = resolveClassMemberCall(className, node.memberName);
@@ -2325,7 +2410,29 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
             /* Fix 082: VarPtr must return intptr_t, not int32_t.
                On x64, (int32_t)(intptr_t) truncates 8-byte pointers.
                Use (intptr_t) instead — safe on both x86 (4 bytes) and x64 (8 bytes). */
-            lastExpr_ = "(intptr_t)&(" + lastExpr_ + ")";
+            /* Fix 084aa: VarPtr(函数调用) — 调用结果不是左值, &(call) → C2102.
+               用复合字面量 &(void*){call} 包装 (VarPtr(.Glob(0)) 中的 .Glob 是 COM 属性
+               调用 vb6_ComCall(...)); 变量/字段/数组元素保持原 &(expr). */
+            bool vpIsCall = false;
+            if (!lastExpr_.empty()
+                && (std::isalpha(static_cast<unsigned char>(lastExpr_[0])) || lastExpr_[0] == '_')) {
+                size_t vpParen = lastExpr_.find('(');
+                if (vpParen != std::string::npos) {
+                    vpIsCall = true;
+                    for (size_t j = 0; j < vpParen; j++) {
+                        char ch = lastExpr_[j];
+                        if (!std::isalnum(static_cast<unsigned char>(ch)) && ch != '_') {
+                            vpIsCall = false;
+                            break;
+                        }
+                    }
+                }
+            }
+            if (vpIsCall) {
+                lastExpr_ = "(intptr_t)&(void*){" + lastExpr_ + "}";
+            } else {
+                lastExpr_ = "(intptr_t)&(" + lastExpr_ + ")";
+            }
             return;
         }
     }
@@ -3407,7 +3514,16 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
                     // 不是已知类变量 → 可能是模块名或外部类名自身
                     // (例: ToolsStr.HasStr — ToolsStr 是 .bas 模块; cWinsock.SomeStaticMethod — cWinsock 类)
                     // findClassMemberCallParams 内部会按 sourceModule/moduleName_ 匹配
+                    // Fix 084z-3: 对象是当前模块的属性 (Property Get 返回类实例, 如
+                    // cTlsRemaster.pvSocket → cTlsSocket) 时, inferClassTypeOfExpr
+                    // 可推断出类名 → 优先按类解析方法形参; 否则 findClassMemberCallParams
+                    // 按属性名查找失败, 回退 lookupModule 命中 storageKey 同名冲突的
+                    // 错误类 (SyncReceiveArray 按 cWinsock 12 参展开 → C2197).
                     className = idObj.name;
+                    std::string inferredClass = inferClassTypeOfExpr(*maExpr.object);
+                    if (!inferredClass.empty()) {
+                        className = inferredClass;
+                    }
                 }
             }
             if (!className.empty()) {
@@ -3448,6 +3564,15 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
         // 保留旧行为兼容性.
         if (!classAwareResolved) {
             Symbol* funcSym = symTab_.lookupModule(maExpr.memberName);
+            // Fix 084y-7: VBA 内置函数 (VBA.Replace / VBA.Mid$ / VBA.Val 等) 注册在
+            // 全局内置符号表, 不在模块作用域 — lookupModule 必然失败. 回退全表
+            // lookup (去 $ 后缀: Mid$ → Mid), 拿到含 Optional 的完整形参表,
+            // 才能填充默认参数 (vb6_Replace 声明6参, VB6 调用只传3参).
+            if (!funcSym) {
+                std::string fnName = maExpr.memberName;
+                if (!fnName.empty() && fnName.back() == '$') fnName.pop_back();
+                funcSym = symTab_.lookup(fnName);
+            }
             if (funcSym && (funcSym->kind == SymbolKind::Sub || funcSym->kind == SymbolKind::Function
                 || funcSym->kind == SymbolKind::PropertyGet || funcSym->kind == SymbolKind::PropertyLet
                 || funcSym->kind == SymbolKind::PropertySet
@@ -3689,6 +3814,12 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
                     }
                     if (argIsCurrentByRefParam) {
                         // ByRef param of current function → already T*, pass directly
+                    } else if (isConstIdent(argVal)) {
+                        // Fix 084aa: 常量是 #define 宏 (vb6_BSTR_FromStr(...) 或数值字面量),
+                        // 取址 &ERR_X 展开为函数结果取址 → C2102. 按形参类型复合字面量包装.
+                        Vb6Type pType = Vb6Type::Variant;
+                        if (i < calleeParams.size()) pType = calleeParams[i].type;
+                        argVal = wrapConstArgForByRef(argVal, pType);
                     } else {
                         argVal = "&" + argVal;
                     }
@@ -3947,6 +4078,11 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
                     }
                     if (piArgIsCurrentByRefParam) {
                         // ByRef param of current function → already T*, pass directly
+                    } else if (isConstIdent(argVal)) {
+                        // Fix 084aa: 常量宏不可取址 → 按形参类型复合字面量包装
+                        Vb6Type pType = Vb6Type::Variant;
+                        if (pi < calleeParams.size()) pType = calleeParams[pi].type;
+                        argVal = wrapConstArgForByRef(argVal, pType);
                     } else {
                         argVal = "&" + argVal;
                     }

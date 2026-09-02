@@ -375,12 +375,18 @@ void CCodeGen::visit(AssignmentStmt& node) {
             if (!isVarName && objSym && objSym->kind == SymbolKind::Function && !objSym->isExternal) {
                 std::string curLower084o = currentProc_ ? currentProc_->name : std::string();
                 std::transform(curLower084o.begin(), curLower084o.end(), curLower084o.begin(), ::tolower);
+                // Fix 084o-5: 函数返回类实例时的字段赋值 ("FuncName.Field = expr",
+                // 如 Set ConnInst.Conn = Me.Conn) → vb6_ret_FuncName->Field = expr,
+                // 而非误当 Module 变量生成 vb6_FuncName_Field (C2065 未声明).
+                bool isUdtRet084o = (currentReturnCType_.rfind("vb6_type_", 0) == 0);
+                bool isClsRet084o = !isUdtRet084o
+                    && currentReturnCType_.find("vb6_cls_") != std::string::npos;
                 if (!curLower084o.empty() && objLower == curLower084o
                     && currentReturnVar_.size() > 8
-                    && currentReturnCType_.rfind("vb6_type_", 0) == 0) {
+                    && (isUdtRet084o || isClsRet084o)) {
                     // 查返回 UDT 的字段类型 (与 inferUdtFieldVb6Type 相同的 udtMembers 查询)
-                    std::string udtName084o = currentReturnCType_.substr(9);
-                    Symbol* udtSym084o = symTab_.lookupModule(udtName084o);
+                    std::string udtName084o = isUdtRet084o ? currentReturnCType_.substr(9) : std::string();
+                    Symbol* udtSym084o = isUdtRet084o ? symTab_.lookupModule(udtName084o) : nullptr;
                     Vb6Type fldType084o = Vb6Type::Unknown;
                     if (udtSym084o && udtSym084o->kind == SymbolKind::UserDefinedType) {
                         std::string memLower084o = maExpr.memberName;
@@ -389,7 +395,8 @@ void CCodeGen::visit(AssignmentStmt& node) {
                             if (Symbol::toLower(mi.name) == memLower084o) { fldType084o = mi.type; break; }
                         }
                     }
-                    std::string fieldAccess084o = currentReturnVar_ + "." + cIdent(maExpr.memberName);
+                    std::string fieldAccess084o = currentReturnVar_
+                        + (isUdtRet084o ? "." : "->") + cIdent(maExpr.memberName);
                     emitExpr(*node.value);
                     std::string valExpr084o = std::move(lastExpr_);
                     Vb6Type valType084o = inferExprType(*node.value);
@@ -492,7 +499,23 @@ void CCodeGen::visit(AssignmentStmt& node) {
                 // cModbusSlave.BaudRate; m_uCtx 的 .LastError 命中 cZipArchive.LastError),
                 // 误生成 vb6_cX_prop_let_Y(udtVar, ...) → C2440. 此类对象必须跳过,
                 // 交给 visit(MemberAccessExpr) 的 Fix 031 UDT 字段路径生成 obj.field.
-                if (!knownUdtVars_.count(objLower) && (!objClass.empty() || propLetSym->isExternal)) {
+                // Fix 084y: 对象类与属性所属类不一致时, 该属性是其他类的同名成员,
+                // 不属于当前对象 — lookupModuleByKind 全局命中, 需校验类归属.
+                // 例: Set oCallback.Socket = New cTlsReMaster 中 oCallback 是
+                // cClientCallback, Socket 是数据字段, 但全局命中 cTlsSocket.Socket
+                // PropertySet → 原生成 vb6_cTlsSocket_prop_set_Socket(oCallback,..)
+                // (C2065 未声明 + C2440 参数类型错误). 必须跳过属性路径, 交给
+                // visit(MemberAccessExpr) 生成 oCallback->Socket = ... 字段赋值.
+                bool objClassMatchesProp = true;
+                if (!objClass.empty() && propLetSym->isExternal) {
+                    std::string propModLower = propLetSym->sourceModule;
+                    std::transform(propModLower.begin(), propModLower.end(), propModLower.begin(), ::tolower);
+                    std::string objClassLower = objClass;
+                    std::transform(objClassLower.begin(), objClassLower.end(), objClassLower.begin(), ::tolower);
+                    objClassMatchesProp = (propModLower == objClassLower);
+                }
+                if (!knownUdtVars_.count(objLower) && objClassMatchesProp &&
+                    (!objClass.empty() || propLetSym->isExternal)) {
                     // 生成Property Let调用: vb6_prop_let_Name(obj, value)
                     std::string prefix = (propLetSym->kind == SymbolKind::PropertySet) ? "prop_set_" : "prop_let_";
                     // Fix 010r-10: 使用map中的类名作为sourceModule
@@ -1068,10 +1091,31 @@ void CCodeGen::visit(SetStmt& node) {
             // P6.3: 早期绑定COM变量 → vb6_ComReleaseTyped
             std::string targetLower = target;
             std::transform(targetLower.begin(), targetLower.end(), targetLower.begin(), ::tolower);
+            // Fix 084aa: Set dict(key) = Nothing 的目标是 vb6_ComCall(...) 函数调用,
+            // 对调用结果取址 &vb6_ComCall(...) → C2102. 检测"以标识符开头+含("的
+            // 函数调用形态, 改用 (&(void*){...}) 复合字面量包装 (仅释放引用).
+            // me->Field / Client->Context->SSE 等可寻址形态不含 '(' 保持 &target.
+            bool isCallTarget = !target.empty()
+                && (std::isalpha(static_cast<unsigned char>(target[0])) || target[0] == '_');
+            if (isCallTarget) {
+                size_t paren = target.find('(');
+                if (paren != std::string::npos) {
+                    for (size_t j = 0; j < paren; j++) {
+                        char ch = target[j];
+                        if (!std::isalnum(static_cast<unsigned char>(ch)) && ch != '_') {
+                            isCallTarget = false;
+                            break;
+                        }
+                    }
+                } else {
+                    isCallTarget = false;
+                }
+            }
+            std::string relObjTarget = isCallTarget ? "(&(void*){" + target + "})" : ("&" + target);
             if (knownTypedComVars_.count(targetLower)) {
-                c_.emitLine("vb6_ComReleaseTyped((void**)&" + target + ");  /* Set Nothing (early bound) */");
+                c_.emitLine("vb6_ComReleaseTyped((void**)" + relObjTarget + ");  /* Set Nothing (early bound) */");
             } else {
-                c_.emitLine("vb6_ReleaseObject((void**)&" + target + ");  /* Set Nothing */");
+                c_.emitLine("vb6_ReleaseObject((void**)" + relObjTarget + ");  /* Set Nothing */");
             }
             return;
         }
@@ -1130,7 +1174,17 @@ void CCodeGen::visit(SetStmt& node) {
             std::string _objClass = inferClassTypeOfExpr(*_ma.object);
             // Fix 084g-2: 外部注入的跨类属性符号 — 对象类型无法从符号表推断
             // (cgen阶段访问不到过程作用域局部变量) 时, 由外部符号提供 sourceModule.
-            if (!_objClass.empty() || _psSym->isExternal) {
+            // Fix 084y-2: 同 P6.7 — 对象类与属性所属类不一致时, 属性是其他类的
+            // 同名成员, 不属于当前对象 (Set oCallback.Socket 命中 cTlsSocket.Socket
+            // PropertySet, 而 oCallback 是 cClientCallback, Socket 是数据字段) →
+            // 跳过属性路径, 交给 visit(MemberAccessExpr) 生成 obj->field 字段赋值.
+            bool _objClassMatchesProp = true;
+            if (!_objClass.empty() && _psSym->isExternal) {
+                std::string _psModLower = Symbol::toLower(_psSym->sourceModule);
+                std::string _objClassLower = Symbol::toLower(_objClass);
+                _objClassMatchesProp = (_psModLower == _objClassLower);
+            }
+            if (_objClassMatchesProp && (!_objClass.empty() || _psSym->isExternal)) {
                 std::string _verb = (_psSym->kind == SymbolKind::PropertySet) ? "prop_set_" : "prop_let_";
                 std::string _src = _psSym->isExternal ? _psSym->sourceModule : _objClass;
                 std::string _fn = cProcName(_verb + _ma.memberName, _psSym->access, _src);
@@ -1434,14 +1488,16 @@ void CCodeGen::visit(SetStmt& node) {
                         std::string callbacksInit;
                         for (size_t ci = 0; ci < callbacks.size(); ci++) {
                             if (ci > 0) callbacksInit += ", ";
-                            callbacksInit += "(void(*)(VARIANT*,int,VARIANT*))" + callbacks[ci];
+                            callbacksInit += "(void(*)(void*,VARIANT*,int,VARIANT*))" + callbacks[ci];
                         }
-                        c_.emitLine("static void (*" + callbacksVar + "[])(VARIANT*,int,VARIANT*) = {" + callbacksInit + "};");
+                        c_.emitLine("static void (*" + callbacksVar + "[])(void*,VARIANT*,int,VARIANT*) = {" + callbacksInit + "};");
                         std::string sinkVar = targetLower + "_comsink";
                         std::string iidStructRef = iidInit.empty() ? "NULL" : "&" + targetLower + "_evt_iid_struct";
+                        // P13.23: handler = 当前类实例(me), 传入包装函数供事件处理器调用
+                        std::string handlerExpr = isClassModule_ ? "(void*)me" : "NULL";
                         c_.emitLine("void* " + sinkVar + " = vb6_CreateEventSink(" +
                             dispidsVar + ", (void**)" + callbacksVar + ", " + std::to_string(dispids.size()) +
-                            ", " + iidStructRef + ");");
+                            ", " + iidStructRef + ", " + handlerExpr + ");");
                         c_.emitLine("vb6_ComAdvise((IUnknown*)" + target + ", " + targetLower + "_evt_iid, " + sinkVar + ", &" + targetLower + "_evt_cookie);");
                     }
                 } else {
@@ -2842,6 +2898,24 @@ void CCodeGen::visit(CallStmt& node) {
                     calleeParams = sym->params;
                     calleeIsBuiltin = sym->isBuiltin;
                 }
+                // Fix 084y-3: 链式调用对象方法时 (X.Y(args).Z), .Z 是类方法而非
+                // 模块成员, lookupModule 必然失败 → calleeParams 为空 → 不填充
+                // Optional 默认值 → C2198 参数太少 (如 Exec(Optional RecordsAffected,
+                // Optional Options As Long = -1) 声明5参却只传对象1参).
+                // 用 inferClassTypeOfExpr 推断对象类 (X.Y(args) → cDataBase),
+                // 再按类方法签名取形参表.
+                if (calleeParams.empty() && maExpr.object) {
+                    std::string chainClass = inferClassTypeOfExpr(*maExpr.object);
+                    if (!chainClass.empty()) {
+                        std::vector<ParameterInfo> clsParams;
+                        bool clsBuiltin = false;
+                        if (findClassMemberCallParams(chainClass, maExpr.memberName,
+                                                      clsParams, clsBuiltin)) {
+                            calleeParams = clsParams;
+                            calleeIsBuiltin = clsBuiltin;
+                        }
+                    }
+                }
             }
 
             // Check for ParamArray
@@ -2926,7 +3000,9 @@ void CCodeGen::visit(CallStmt& node) {
 }
 
 void CCodeGen::visit(ReDimStmt& node) {
-    std::string cName = cIdent(node.varName);
+    // Fix 084y-5: ReDim 目标含成员访问 (ByRef UDT 参数数组字段 uOutput.Buffer,
+    // With 块成员 .Field) 时按成员访问展开, 避免 cIdent 把 '.' 替换成 '_'
+    std::string cName = resolveArrayTargetIdent(node.varName);
     // Fix 010r: Add me-> prefix for class member arrays
     std::string lowerVar = node.varName;
     std::transform(lowerVar.begin(), lowerVar.end(), lowerVar.begin(), ::tolower);
@@ -3084,7 +3160,10 @@ void CCodeGen::visit(ReDimStmt& node) {
 
 void CCodeGen::visit(EraseStmt& node) {
     for (auto& name : node.varNames) {
-        std::string cName = cIdent(name);
+        // Fix 084y-5: Erase 目标含成员访问 (With 块成员 .Field, ByRef UDT 参数
+        // 数组字段) 时按成员访问展开, 避免 cIdent 把 '.' 替换成 '_' 生成
+        // 未声明的单标识符 (_RemoteLegacyNextTrafficKey / uOutput_Buffer → C2065)
+        std::string cName = resolveArrayTargetIdent(name);
         // Fix 010r: Add me-> prefix for class member arrays
         std::string lower = name;
         std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
@@ -3603,6 +3682,10 @@ void CCodeGen::visit(LocalDeclStmt& node) {
             // P8.1: 动态数组声明: Dim arr() As Long → 默认1D, ReDim时可能升级
             if (var.isDynamicArray) {
                 Vb6Type elemType = resolveArrayElemType(var.asType.get());
+                // Fix 084aa: #undef 防宏污染 — 模块常量被生成 #define 宏 (如 cStartUp 的
+                // #define K (vb6_BSTR_FromStr(...))), 同名局部变量声明会被宏展开破坏.
+                // 局部变量总是遮蔽模块常量, #undef 是安全且正确的.
+                c_.emitLine("#undef " + cName);
                 c_.emitLine("vb6_SafeArray1D* " + cName + " = NULL;");
 
                 // 注册到已知数组集合
@@ -3735,6 +3818,8 @@ void CCodeGen::visit(LocalDeclStmt& node) {
             }
 
             if (var.initializer) {
+                // Fix 084aa: #undef 防宏污染 (见 P8.1 动态数组处注释)
+                c_.emitLine("#undef " + cName);
                 emitExpr(*var.initializer);
                 c_.emitLine(storageClass + cType + " " + cName + " = " + lastExpr_ + ";");
             } else {
@@ -3764,6 +3849,15 @@ void CCodeGen::visit(LocalDeclStmt& node) {
                             : Vb6Type::Variant
                     );
                 }
+                // Fix 084aa: 静态局部变量初始化必须是编译期常量 (C2099).
+                // vb6_VariantEmpty()/vb6_BSTR_Empty() 是函数调用, 静态初始化会报错.
+                // {0} (vt=0=VT_EMPTY) 与 vb6_VariantEmpty() 语义一致; NULL 即空BSTR.
+                if (!storageClass.empty()) {
+                    if (initVal == "vb6_VariantEmpty()") initVal = "{0}";
+                    if (initVal == "vb6_BSTR_Empty()") initVal = "NULL";
+                }
+                // Fix 084aa: #undef 防宏污染 (见 P8.1 动态数组处注释)
+                c_.emitLine("#undef " + cName);
                 c_.emitLine(storageClass + cType + " " + cName + " = " + initVal + ";");
             }
             break;
