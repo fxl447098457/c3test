@@ -70,6 +70,9 @@ struct CompileOptions {
 
     // 警告抑制 (性能优化): 需要静默的诊断ID列表, 如 --no-warn 3001,3003
     std::vector<int> suppressedWarningIds;
+
+    // 增量编译 (性能优化): 基于内容哈希的obj级缓存, 跳过未变化的.c编译
+    bool incremental = false;
 };
 
 // 编译结果

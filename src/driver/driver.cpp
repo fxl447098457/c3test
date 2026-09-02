@@ -93,6 +93,9 @@ std::pair<CompileOptions, int> Driver::parseArgs(int argc, char* argv[]) {
         else if (arg == "--emit-c") {
             opts.emitC = true;
         }
+        else if (arg == "--incremental") {
+            opts.incremental = true;  // opt3: 增量编译 (obj级缓存)
+        }
         else if (arg == "--keep-for-debug") {
             opts.keepTemps = true;  // 隐藏参数: 保留中间文件便于调试
         }
@@ -1961,6 +1964,10 @@ bool Driver::runLinker(const CompileOptions& options, const std::string& outputD
     msvcOpts.debugInfo = options.debugInfo;
     msvcOpts.optimizationLevel = options.optimizationLevel;
     msvcOpts.arch = options.arch;  // DualArch: pass target architecture
+
+    // opt3: 增量编译 — obj级缓存目录放在输出目录下, 跨运行持久
+    msvcOpts.incremental = options.incremental;
+    msvcOpts.incrementalCacheDir = outputDir + "/.c3obj";
 
     // P6.6: ActiveX DLL - generate .def export file (in intermediatesDir)
     if (options.isDll) {
