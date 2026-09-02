@@ -270,6 +270,11 @@ bool MsvcDriver::compileAndLink(const MsvcDriverOptions& options) {
     // 警告级别
     cmd << " /W3";
 
+    // 性能优化: 多处理器并行编译 (cl.exe /MP, 默认进程数=CPU核心数)
+    // 大型项目(如vbman 389个.c文件)串行编译耗时极长, /MP 让每个源文件
+    // 由独立 cl 进程并行编译。注意 /MP 与 /GL、/Yc、/Yu 不兼容(本项目未使用)。
+    cmd << " /MP";
+
     // P24-09: x86 RTL libraries are built with /MT (static CRT); match it to avoid LNK2038
     if (options.arch == "x86") {
         cmd << " /MT";
