@@ -1323,8 +1323,10 @@ typedef struct VB6EventSink {
     LONG refCount;
     /* DISPID -> callback mapping */
     int* dispids;
-    void (**callbacks)(VARIANT*, int, VARIANT*);
+    void (**callbacks)(void*, VARIANT*, int, VARIANT*);
     int count;
+    /* Consumer object (VB6 class instance) passed to each callback */
+    void* handler;
     /* Source interface IID (dispinterface event sinks need to respond to QI for it) */
     IID sourceIid;
     int hasSourceIid;
@@ -1398,7 +1400,7 @@ static HRESULT STDMETHODCALLTYPE sink_Invoke(IDispatch* This, DISPID dispIdMembe
                         VariantCopy(&vbArgs[j], &pDispParams->rgvarg[argc - 1 - j]);
                     }
                 }
-                s->callbacks[i](vbArgs, argc, &result);
+                s->callbacks[i](s->handler, vbArgs, argc, &result);
                 if (vbArgs) {
                     for (j = 0; j < argc; j++) VariantClear(&vbArgs[j]);
                     free(vbArgs);
@@ -1423,7 +1425,7 @@ static void* g_eventSinkVtable[11] = {
     sink_Invoke
 };
 
-void* vb6_CreateEventSink(const int* dispids, void** callbacks, int count, const IID* sourceIid) {
+void* vb6_CreateEventSink(const int* dispids, void** callbacks, int count, const IID* sourceIid, void* handler) {
     VB6EventSink* s = (VB6EventSink*)CoTaskMemAlloc(sizeof(VB6EventSink));
     if (!s) return NULL;
     memset(s, 0, sizeof(VB6EventSink));
@@ -1433,6 +1435,7 @@ void* vb6_CreateEventSink(const int* dispids, void** callbacks, int count, const
     
     s->refCount = 1;
     s->count = count;
+    s->handler = handler;
     
     /* Copy source interface IID if provided */
     if (sourceIid) {
@@ -1442,7 +1445,7 @@ void* vb6_CreateEventSink(const int* dispids, void** callbacks, int count, const
     
     /* Copy DISPID mappings */
     s->dispids = (int*)CoTaskMemAlloc(count * sizeof(int));
-    s->callbacks = (void(**)(VARIANT*,int,VARIANT*))CoTaskMemAlloc(count * sizeof(void(*)(VARIANT*,int,VARIANT*)));
+    s->callbacks = (void(**)(void*,VARIANT*,int,VARIANT*))CoTaskMemAlloc(count * sizeof(void(*)(void*,VARIANT*,int,VARIANT*)));
     if (!s->dispids || !s->callbacks) {
         CoTaskMemFree(s->dispids);
         CoTaskMemFree(s->callbacks);

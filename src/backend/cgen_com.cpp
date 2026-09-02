@@ -43,8 +43,15 @@ void CCodeGen::emitClassFactory(Module& module) {
                 c_.emitLine("me->" + field + " = NULL;");
             } else if (var.asType) {
                 Vb6Type fvt = resolveArrayElemType(var.asType.get());
-                // Fix 038: UDT 字段不能用 = 0 初始化 (C2440), 改用 memset 零化
-                if (fvt == Vb6Type::UserDefinedType) {
+                // Fix 084m: 字段C类型为指针 (void*/vb6_ComIface_X*/vb6_cls_X*/vb6_SafeArray1D*)
+                // → 初始化为 NULL。resolveArrayElemType 对外部COM类型(ADODB.Connection等)返回
+                // Variant, 若用 vb6_VariantEmpty() 初始化指针字段会 C2440
+                // (cDataBase: me->Rs/Conn/pvWhereParams/Cmd = vb6_VariantEmpty())。
+                std::string fieldCT = mapTypeRef(var.asType.get());
+                if (!fieldCT.empty() && fieldCT.back() == '*') {
+                    c_.emitLine("me->" + field + " = NULL;");
+                } else if (fvt == Vb6Type::UserDefinedType) {
+                    // Fix 038: UDT 字段不能用 = 0 初始化 (C2440), 改用 memset 零化
                     c_.emitLine("memset(&me->" + field + ", 0, sizeof(me->" + field + "));");
                 } else {
                     c_.emitLine("me->" + field + " = " + defaultValue(fvt) + ";");

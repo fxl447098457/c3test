@@ -952,6 +952,33 @@ bool Driver::runSemanticAnalysis(const CompileOptions& options) {
                         }
                     }
                 }
+                // Fix 084m: ADODB 非标准别名。类型库 ExecuteOptionEnum 只有 adAsyncExecute(=16),
+                // 但源码 (cDatabase.Exec) 使用 adExecuteAsync; 未注册时生成裸名 → C2065。
+                {
+                    std::string tlPathLower = tl->tlbPath;
+                    std::transform(tlPathLower.begin(), tlPathLower.end(), tlPathLower.begin(), ::tolower);
+                    bool isAdodb = tlPathLower.find("msado") != std::string::npos
+                        || tl->typeLibProjectName.find("ADODB") != std::string::npos;
+                    if (isAdodb) {
+                        static const std::vector<std::pair<const char*, long>> adodbAliases = {
+                            {"adExecuteAsync", 16},
+                        };
+                        for (auto& al : adodbAliases) {
+                            std::string alLower = al.first;
+                            std::transform(alLower.begin(), alLower.end(), alLower.begin(), ::tolower);
+                            if (!analyzer->symbolTable().lookupModule(alLower)) {
+                                auto enumSym = std::make_unique<Symbol>(
+                                    SymbolKind::EnumMember, al.first, Vb6Type::Long,
+                                    SourceLocation{}, AccessLevel::Public);
+                                enumSym->isBuiltin = true;
+                                enumSym->hasConstValue = true;
+                                enumSym->constIntValue = al.second;
+                                enumSym->constType = Vb6Type::Long;
+                                analyzer->symbolTable().define(std::move(enumSym));
+                            }
+                        }
+                    }
+                }
             }
         }
             // P24-04: 注册ComModule符号 (TKIND_MODULE → ActiveX DLL全局函数命名空间)

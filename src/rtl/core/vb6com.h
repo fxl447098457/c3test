@@ -158,7 +158,8 @@ int vb6_ComUnadvise(void* obj, const char* riidStr, int adviseCookie);
 // P13.22: Create a generic IDispatch event sink
 // Maps DISPID (event IDs) to callback functions
 // sourceIid: optional source interface IID (for dispinterface event sinks)
-void* vb6_CreateEventSink(const int* dispids, void** callbacks, int count, const IID* sourceIid);
+// handler: consumer object passed to each callback as first argument
+void* vb6_CreateEventSink(const int* dispids, void** callbacks, int count, const IID* sourceIid, void* handler);
 void vb6_FreeEventSink(void* sink);
 void vb6_ComInit(void);
 void vb6_ComExit(void);
