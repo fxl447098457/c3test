@@ -93,6 +93,7 @@ bool CCodeGen::generate(Module& module, const std::string& baseName,
     classDoubleMembers_.clear();
     classVariantMembers_.clear();  // Fix 037
     classUdtMembers_.clear();  // Fix 010n
+    moduleUdtMembers_.clear();  // Fix 010n (扩展): 普通模块模块级UDT变量
     classMemberVars_.clear();  // Fix 010r
     if (isClassModule_) {
         for (auto& decl : module.declarations) {
@@ -148,6 +149,27 @@ bool CCodeGen::generate(Module& module, const std::string& baseName,
                             // Fix 014 改在 cgen_expr.cpp visit(MemberAccessExpr) 通用 fallback 中
                             // 提取 C 表达式尾部标识符以支持链式访问 (me.m_oSocket.Create).
                         }
+                }
+            }
+        }
+    }
+    // Fix 010n (扩展): 普通模块(.bas/.frm)模块级UDT变量持久化.
+    // 与类模块 classUdtMembers_ 对称 — 过程开头 knownUdtVars_.clear() 后,
+    // 模块级 UDT 变量 (如 Private m_uData As UcsCryptoData) 需要跨过程恢复,
+    // 否则过程内 With m_uData 被误分类为 COM 对象 → 生成 vb6_ComGetIntProp 而非
+    // 结构体成员访问 (C2224/C2198 错误).
+    if (!isClassModule_) {
+        for (auto& decl : module.declarations) {
+            if (decl->kind == ASTNodeKind::VariableDecl) {
+                auto& var = static_cast<VariableDecl&>(*decl);
+                if (var.asType && var.asType->kind == ASTNodeKind::SimpleTypeRef) {
+                    auto& simple = static_cast<SimpleTypeRef&>(*var.asType);
+                    auto* udtSym = lookupDotted(simple.name);
+                    if (udtSym && udtSym->kind == SymbolKind::UserDefinedType) {
+                        std::string oLower = var.name;
+                        std::transform(oLower.begin(), oLower.end(), oLower.begin(), ::tolower);
+                        moduleUdtMembers_[oLower] = "vb6_type_" + cIdent(simple.name);
+                    }
                 }
             }
         }
@@ -514,7 +536,7 @@ bool CCodeGen::generate(Module& module, const std::string& baseName,
                     evtWrapperSigs.push_back(sig);
                 }
             } else if (srcClsSym->kind == SymbolKind::ComClass && srcClsSym->comHasSourceIface) {
-                // P13.23: COM WithEvents 包装函数签名统一为 (VARIANT* args, int argc, VARIANT* result)
+                // P13.23: COM WithEvents 包装函数签名统一为 (void* handler, VARIANT* args, int argc, VARIANT* result)
                 for (auto& evtName : srcClsSym->eventNames) {
                     std::string varName = varLower;
                     auto* varSym = symTab_.lookup(varLower);
@@ -523,7 +545,7 @@ bool CCodeGen::generate(Module& module, const std::string& baseName,
                     auto* handlerSym = symTab_.lookup(handlerName);
                     if (!handlerSym) continue;
                     std::string wrapperName = "vb6_com_evt_" + varLower + "_" + cIdent(evtName);
-                    std::string sig = "void " + wrapperName + "(VARIANT* args, int argc, VARIANT* result)";
+                    std::string sig = "void " + wrapperName + "(void* handler, VARIANT* args, int argc, VARIANT* result)";
                     evtWrapperSigs.push_back(sig);
                 }
             }
@@ -678,11 +700,14 @@ bool CCodeGen::generate(Module& module, const std::string& baseName,
                 auto* handlerSym = symTab_.lookup(handlerName);
                 if (!handlerSym) continue;
 
-                // Generate: void vb6_com_evt_<var>_<evt>(VARIANT* args, int argc, VARIANT* result)
+                // Generate: void vb6_com_evt_<var>_<evt>(void* handler, VARIANT* args, int argc, VARIANT* result)
                 std::string wrapperName = "vb6_com_evt_" + varLower + "_" + cIdent(evtName);
 
                 // Get event handler parameters from Sub declaration
+                // 每个参数记录: Vb6Type / ByRef标志 / mapTypeRef 值类型 (对象→vb6_ComIface_X*)
                 std::vector<ParameterInfo> evtParams;
+                std::vector<std::string> evtParamRefCTypes;  // mapTypeRef 值类型
+                std::vector<bool> evtParamByRef;
                 for (auto& decl2 : module.declarations) {
                     if (decl2->kind == ASTNodeKind::SubDecl) {
                         auto& sub = static_cast<SubDecl&>(*decl2);
@@ -690,7 +715,7 @@ bool CCodeGen::generate(Module& module, const std::string& baseName,
                             for (auto& param : sub.params) {
                                 ParameterInfo pi;
                                 pi.name = param->name;
-                                pi.isByVal = true;
+                                pi.isByVal = param->isByVal;
                                 if (param->asType && param->asType->kind == ASTNodeKind::ArrayTypeRef) {
                                     auto& arr = static_cast<ArrayTypeRef&>(*param->asType);
                                     Vb6Type elemType = Vb6Type::Variant;
@@ -708,49 +733,65 @@ bool CCodeGen::generate(Module& module, const std::string& baseName,
                                     pi.type = Vb6Type::Variant;
                                 }
                                 evtParams.push_back(pi);
+                                evtParamRefCTypes.push_back(mapTypeRef(param->asType.get()));
+                                evtParamByRef.push_back(!param->isByVal);
                             }
                             break;
                         }
                     }
                 }
 
-                c_.emitLine("void " + wrapperName + "(VARIANT* args, int argc, VARIANT* result) {");
+                c_.emitLine("void " + wrapperName + "(void* handler, VARIANT* args, int argc, VARIANT* result) {");
                 c_.indent();
 
                 // Extract parameters from VARIANT args
                 for (size_t pi = 0; pi < evtParams.size(); pi++) {
                     std::string pName = cIdent(evtParams[pi].name);
                     std::string pType = mapType(evtParams[pi].type);
-                    c_.emitLine(pType + " " + pName + ";");
+                    std::string idx = std::to_string(pi);
                     bool isArray = (static_cast<uint16_t>(evtParams[pi].type) & static_cast<uint16_t>(Vb6Type::Array)) != 0;
                     Vb6Type baseType = isArray
                         ? static_cast<Vb6Type>(static_cast<uint16_t>(evtParams[pi].type) & ~static_cast<uint16_t>(Vb6Type::Array))
                         : evtParams[pi].type;
+                    // Fix 084m: COM对象参数 (As ADODB.Error等) — 值类型用 mapTypeRef
+                    // (vb6_ComIface_X* / void*), 不能解析为 vb6_VARIANT 否则 C2440
+                    std::string refType = evtParamRefCTypes[pi];
+                    bool isObj = refType.find("vb6_ComIface_") != std::string::npos
+                        || refType.find("vb6_cls_") != std::string::npos
+                        || refType.find("vb6_iface_") != std::string::npos
+                        || refType == "void*";
+                    std::string localType = pType;
+                    if (!isArray && isObj) localType = refType;
+                    c_.emitLine(localType + " " + pName + ";");
                     if (isArray) {
                         // P13.23: COM event arrays come as VARIANT containing SAFEARRAY (VT_ARRAY | VT_xxx).
                         // Extract raw pointer to the first element for 1D Byte arrays.
-                        std::string idx = std::to_string(pi);
                         if (baseType == Vb6Type::Byte) {
                             c_.emitLine(pName + " = (uint8_t*)((args[" + idx + "].vt & VT_ARRAY) ? args[" + idx + "].parray->pvData : NULL);");
                         } else {
                             c_.emitLine(pName + " = (" + pType + ")((args[" + idx + "].vt & VT_ARRAY) ? args[" + idx + "].parray->pvData : NULL);");
                         }
                     } else if (evtParams[pi].type == Vb6Type::String) {
-                        c_.emitLine(pName + " = (args[" + std::to_string(pi) + "].vt == VT_BSTR) ? args[" + std::to_string(pi) + "].bstrVal : NULL;");
+                        c_.emitLine(pName + " = (args[" + idx + "].vt == VT_BSTR) ? args[" + idx + "].bstrVal : NULL;");
+                    } else if (isObj) {
+                        // COM对象: 从VARIANT中取 IDispatch/IUnknown 指针, 与处理器形参类型一致
+                        c_.emitLine(pName + " = (" + refType + ")((args[" + idx + "].vt & VT_DISPATCH) ? args[" + idx + "].pdispVal : ((args[" + idx + "].vt & VT_UNKNOWN) ? args[" + idx + "].punkVal : NULL));");
                     } else if (evtParams[pi].type == Vb6Type::Long || evtParams[pi].type == Vb6Type::Integer) {
-                        c_.emitLine(pName + " = (" + pType + ")V_I4(&args[" + std::to_string(pi) + "]);");
+                        c_.emitLine(pName + " = (" + pType + ")V_I4(&args[" + idx + "]);");
                     } else if (evtParams[pi].type == Vb6Type::Boolean) {
-                        c_.emitLine(pName + " = (args[" + std::to_string(pi) + "].vt == VT_BOOL) ? (V_I4(&args[" + std::to_string(pi) + "]) != 0) : 0;");
+                        c_.emitLine(pName + " = (args[" + idx + "].vt == VT_BOOL) ? (V_I4(&args[" + idx + "]) != 0) : 0;");
                     } else if (evtParams[pi].type == Vb6Type::Single || evtParams[pi].type == Vb6Type::Double) {
-                        c_.emitLine(pName + " = (" + pType + ")V_R8(&args[" + std::to_string(pi) + "]);");
+                        c_.emitLine(pName + " = (" + pType + ")V_R8(&args[" + idx + "]);");
                     } else {
-                        c_.emitLine(pName + " = args[" + std::to_string(pi) + "];");
+                        // Variant: 转换COM VARIANT → vb6_VARIANT (栈上, 不释放)
+                        c_.emitLine(pName + " = vb6_VariantFromStackVARIANT(&args[" + idx + "]);");
                     }
                 }
 
                 // Call the VB6 handler function
                 // Fix 019: 类模块必须将 handler (void*) 转换为 cls* 再作为 me 传入,
                 //          不可使用 classMeParam() (那是参数声明)
+                // Fix 084m: ByRef 参数取地址 (&name), 与处理器形参 (int32_t* 等) 匹配
                 std::string procCall = cProcName(handlerName, handlerSym->access, isClassModule_ ? moduleName_ : "");
                 std::string callArgs = "(";
                 if (isClassModule_) {
@@ -759,6 +800,9 @@ bool CCodeGen::generate(Module& module, const std::string& baseName,
                 for (size_t i = 0; i < evtParams.size(); i++) {
                     if (i > 0 || isClassModule_) {
                         callArgs += ", ";
+                    }
+                    if (evtParamByRef[i]) {
+                        callArgs += "&";
                     }
                     callArgs += cIdent(evtParams[i].name);
                 }
@@ -1455,6 +1499,106 @@ std::string CCodeGen::cIdent(const std::string& vb6Name) const {
     }
 
     return name;
+}
+
+// Fix 084y-5: ReDim/Erase 目标的 C 标识符解析 (成员访问形态).
+// 1) ".Field" — With 块成员 → _vb6_with_N->Field (与 Fix 061 一致)
+// 2) "obj.Field" — UDT 成员:
+//    - obj 是 ByRef UDT/数组/Variant 参数 → (*obj).Field (参数是 vb6_type_X*)
+//    - obj 是 UDT 变量 (knownUdtVars_) → obj.Field (值类型)
+// 否则返回 cIdent(varName) 原逻辑.
+std::string CCodeGen::resolveArrayTargetIdent(const std::string& varName) {
+    if (varName.size() > 1 && varName[0] == '.'
+        && !withObjectVars_.empty() && !withObjectInfoStack_.empty()) {
+        const auto& info = withObjectInfoStack_.back();
+        if (info.kind == WithObjKind::Unknown || info.kind == WithObjKind::ClassInstance) {
+            return withObjectVars_.back() + "->" + cIdent(varName.substr(1));
+        }
+    }
+    size_t dot = varName.find('.');
+    if (dot != std::string::npos && dot > 0 && dot + 1 < varName.size()) {
+        std::string objName = varName.substr(0, dot);
+        std::string memberName = varName.substr(dot + 1);
+        std::string objLower = objName;
+        std::transform(objLower.begin(), objLower.end(), objLower.begin(), ::tolower);
+        if (currentProc_) {
+            for (auto& p : currentProc_->params) {
+                std::string pLower = p.name;
+                std::transform(pLower.begin(), pLower.end(), pLower.begin(), ::tolower);
+                if (pLower == objLower && !p.isByVal
+                    && (p.type == Vb6Type::UserDefinedType
+                        || (static_cast<uint16_t>(p.type) & static_cast<uint16_t>(Vb6Type::Array))
+                        || p.type == Vb6Type::Variant)) {
+                    return "(*" + objName + ")." + cIdent(memberName);
+                }
+            }
+        }
+        if (knownUdtVars_.count(objLower)) {
+            return objName + "." + cIdent(memberName);
+        }
+    }
+    return cIdent(varName);
+}
+
+// Fix 084aa: 常量符号查找.
+// 模块级 Const 被生成为 #define 宏 (如 #define K (vb6_BSTR_FromStr(L"..."))),
+// 对宏取址 &K 是非法的 (C2102). 局部变量同名时 lookup 优先命中局部符号,
+// 返回 false → 保持 &变量 正常取址.
+Symbol* CCodeGen::lookupConstSym(const std::string& name) const {
+    Symbol* sym = symTab_.lookup(name);
+    if (!sym) sym = symTab_.lookupModule(name);
+    if (sym && sym->kind == SymbolKind::Constant) {
+        return sym;
+    }
+    return nullptr;
+}
+
+bool CCodeGen::isStringConstIdent(const std::string& name) const {
+    Symbol* sym = lookupConstSym(name);
+    return sym && sym->constType == Vb6Type::String;
+}
+
+bool CCodeGen::isConstIdent(const std::string& name) const {
+    return lookupConstSym(name) != nullptr;
+}
+
+Vb6Type CCodeGen::constIdentType(const std::string& name) const {
+    Symbol* sym = lookupConstSym(name);
+    if (sym) return sym->constType;
+    return Vb6Type::Variant;
+}
+
+// Fix 084aa: 常量宏作为 ByRef 实参 — 生成可寻址复合字面量.
+// 常量是 #define 宏 (可能是函数调用如 vb6_BSTR_FromStr(L"...") 或数值字面量),
+// 不能 &CONST 取址, 须按形参 C 类型包装为 (&(TYPE){CONST}):
+//   - ByRef Variant → (&(vb6_VARIANT){.vt=..., .xxx=CONST}) 按常量自身类型选字段
+//   - ByRef String  → (&(BSTR){CONST})
+//   - 其他          → (&(cType){CONST})
+std::string CCodeGen::wrapConstArgForByRef(const std::string& argVal, Vb6Type paramVb6Type) const {
+    if (paramVb6Type == Vb6Type::Variant || paramVb6Type == Vb6Type::Empty ||
+        paramVb6Type == Vb6Type::Null || paramVb6Type == Vb6Type::Object) {
+        switch (constIdentType(argVal)) {
+            case Vb6Type::String:
+                return "(&(vb6_VARIANT){.vt=VT_BSTR, .bstrVal=" + argVal + "})";
+            case Vb6Type::Double:
+            case Vb6Type::Single:
+            case Vb6Type::Decimal:
+            case Vb6Type::Currency:
+                return "(&(vb6_VARIANT){.vt=VT_R8, .dblVal=(double)(" + argVal + ")})";
+            case Vb6Type::Boolean:
+                return "(&(vb6_VARIANT){.vt=VT_BOOL, .boolVal=(int16_t)(" + argVal + ")})";
+            case Vb6Type::Byte:
+                return "(&(vb6_VARIANT){.vt=VT_UI1, .bVal=(uint8_t)(" + argVal + ")})";
+            default:
+                return "(&(vb6_VARIANT){.vt=VT_I4, .lVal=(int32_t)(" + argVal + ")})";
+        }
+    }
+    if (isStringConstIdent(argVal)) {
+        return "(&(BSTR){" + argVal + "})";
+    }
+    std::string cType = mapType(paramVb6Type);
+    if (cType.empty()) cType = "int32_t";
+    return "(&(" + cType + "){" + argVal + "})";
 }
 
 std::string CCodeGen::cProcName(const std::string& procName, AccessLevel access,

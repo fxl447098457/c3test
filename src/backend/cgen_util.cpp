@@ -893,6 +893,13 @@ bool CCodeGen::isDefinitelyVariantExpr(Expr& expr, bool* isArrOut) const {
             auto& id = static_cast<IdentifierExpr&>(expr);
             std::string lower = id.name;
             std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+            // 已知数组变量: C 类型已是 vb6_SafeArray1D* (元素为具体类型或 VARIANT),
+            // 不是 vb6_VARIANT. 防止 symTab_ lookupModule 回退命中其他模块同名
+            // Variant 符号, 导致 UBound(arr) 被错误包装成 vb6_VariantToSafeArray1D(arr)
+            // (C2440: 无法从 vb6_SafeArray1D* 转换为 vb6_VARIANT, 如 cDataBase WhereIn).
+            if (knownArrays_.count(lower)) {
+                return false;
+            }
             // 已知 Variant 局部变量集合
             if (knownVariantVars_.count(lower)) {
                 // 无法区分 Variant 与 Variant(), 视作普通 Variant
@@ -1989,6 +1996,17 @@ std::string CCodeGen::inferClassTypeOfExpr(const ASTNode& expr) const {
                     return sym->variableTypeName;
                 }
             }
+            // Fix 084z-2: 当前模块的属性 (Property Get) 返回类 — 属性符号在模块
+            // 作用域符号表中 (如 cTlsRemaster.pvSocket() As cTlsSocket). 无参属性
+            // 可推断类实例, 用于 pvSocket.SyncReceiveArray(...) 的方法/形参签名解析
+            // (否则 Fix 033 把属性名当模块名, 回退 lookupModule 命中 storageKey
+            // 同名冲突的错误类 cWinsock.SyncReceiveArray → C2197 参数过多).
+            if (sym && sym->kind == SymbolKind::PropertyGet && !sym->variableTypeName.empty()) {
+                const Symbol* clsSym = symTab_.lookup(sym->variableTypeName);
+                if (clsSym && clsSym->kind == SymbolKind::Class) {
+                    return sym->variableTypeName;
+                }
+            }
             return "";
         }
         case ASTNodeKind::IndexOrCallExpr: {
@@ -2018,15 +2036,25 @@ std::string CCodeGen::inferClassTypeOfExpr(const ASTNode& expr) const {
             if (!ma.object) return "";
             std::string baseClassName = inferClassTypeOfExpr(*ma.object);
             if (baseClassName.empty()) return "";
-            if (!classTypedFieldMap_) return "";
-            auto it = classTypedFieldMap_->find(baseClassName);
-            if (it == classTypedFieldMap_->end()) return "";
-            std::string memLower = Symbol::toLower(ma.memberName);
-            auto itF = it->second.find(memLower);
-            if (itF == it->second.end()) return "";
-            // 仅返回项目类字段类型 (COM: 前缀的不是项目类)
-            if (itF->second.compare(0, 4, "COM:") == 0) return "";
-            return itF->second;
+            if (classTypedFieldMap_) {
+                auto it = classTypedFieldMap_->find(baseClassName);
+                if (it != classTypedFieldMap_->end()) {
+                    std::string memLower = Symbol::toLower(ma.memberName);
+                    auto itF = it->second.find(memLower);
+                    if (itF != it->second.end()) {
+                        // 仅返回项目类字段类型 (COM: 前缀的不是项目类)
+                        if (itF->second.compare(0, 4, "COM:") == 0) return "";
+                        return itF->second;
+                    }
+                }
+            }
+            // Fix 084z: 属性 Get 回退 — 成员是属性(返回类实例)而非数据字段时
+            // (如 pvSocket 是 cTlsReMaster 的 Property Get, 不在字段表中),
+            // 用 getClassMethodReturnType 推断返回类. 否则调用方类型推断失败
+            // → fallback 到错误类解析参数, 生成 C2197/C2198 (参数过多/过少:
+            // SyncReceiveArray 声明6参却按 cWinsock 的12参展开, Connect 声明
+            // 11参却按 cWinsock 的5参展开).
+            return getClassMethodReturnType(baseClassName, ma.memberName);
         }
         // Fix 037: WithMemberExpr → 当前 With 块 tempVar 的类类型 (仅 ClassInstance kind)
         case ASTNodeKind::WithMemberExpr: {

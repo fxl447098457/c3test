@@ -78,6 +78,8 @@ void CCodeGen::visit(SubDecl& node) {
     knownLongVars_.insert(classLongMembers_.begin(), classLongMembers_.end());
     // Fix 010n: 恢复类模块UDT成员变量 (knownUdtVars_被clear后需要从classUdtMembers_恢复)
     knownUdtVars_.insert(classUdtMembers_.begin(), classUdtMembers_.end());
+    // Fix 010n (扩展): 恢复普通模块模块级UDT变量 (同 classUdtMembers_ 机制)
+    knownUdtVars_.insert(moduleUdtMembers_.begin(), moduleUdtMembers_.end());
 
     for (auto& p : node.params) {
         // Fix 081g: Register ByRef params for For-loop dereference fix
@@ -85,6 +87,14 @@ void CCodeGen::visit(SubDecl& node) {
             std::string brKey = p->name;
             std::transform(brKey.begin(), brKey.end(), brKey.begin(), ::tolower);
             knownByRefParams_.insert(brKey);
+        }
+        // Fix 084m: 无类型子句的 Optional 参数 (如 Optional RecordsAffected) 默认是
+        // Variant, C 类型 vb6_VARIANT*; 必须注册到 knownVariantVars_,
+        // 否则 `RecordsAffected = 123` 生成裸赋值 → C2440 (cDataBase Exec).
+        if (!p->asType) {
+            std::string pLower = p->name;
+            std::transform(pLower.begin(), pLower.end(), pLower.begin(), ::tolower);
+            knownVariantVars_.insert(pLower);
         }
         if (p->asType && p->asType->kind == ASTNodeKind::SimpleTypeRef) {
             auto& simpleP = static_cast<SimpleTypeRef&>(*p->asType);
@@ -296,6 +306,8 @@ void CCodeGen::visit(FunctionDecl& node) {
     knownLongVars_.insert(classLongMembers_.begin(), classLongMembers_.end());
     // Fix 010n: 恢复类模块UDT成员变量 (knownUdtVars_被clear后需要从classUdtMembers_恢复)
     knownUdtVars_.insert(classUdtMembers_.begin(), classUdtMembers_.end());
+    // Fix 010n (扩展): 恢复普通模块模块级UDT变量 (同 classUdtMembers_ 机制)
+    knownUdtVars_.insert(moduleUdtMembers_.begin(), moduleUdtMembers_.end());
 
     // M22-fix: 注册参数中的UDT/类/接口变量到跟踪集合
     for (auto& p : node.params) {
@@ -304,6 +316,14 @@ void CCodeGen::visit(FunctionDecl& node) {
             std::string brKey = p->name;
             std::transform(brKey.begin(), brKey.end(), brKey.begin(), ::tolower);
             knownByRefParams_.insert(brKey);
+        }
+        // Fix 084m: 无类型子句的 Optional 参数 (如 Optional RecordsAffected) 默认是
+        // Variant, C 类型 vb6_VARIANT*; 必须注册到 knownVariantVars_,
+        // 否则 `RecordsAffected = 123` 生成裸赋值 → C2440 (cDataBase Exec).
+        if (!p->asType) {
+            std::string pLower = p->name;
+            std::transform(pLower.begin(), pLower.end(), pLower.begin(), ::tolower);
+            knownVariantVars_.insert(pLower);
         }
         if (p->asType && p->asType->kind == ASTNodeKind::SimpleTypeRef) {
             auto& simpleP = static_cast<SimpleTypeRef&>(*p->asType);
@@ -1046,6 +1066,9 @@ void CCodeGen::visit(VariableDecl& node) {
         }
         // M22: 文件作用域BSTR初始化不能用函数调用(vb6_BSTR_Empty), 用NULL替代
         if (initVal == "vb6_BSTR_Empty()") initVal = "NULL";
+        // Fix 084aa: 文件作用域Variant初始化不能用函数调用(vb6_VariantEmpty), 用{0}替代
+        // ({0} 即 vt=0=VT_EMPTY, 与 vb6_VariantEmpty() 语义一致)
+        if (initVal == "vb6_VariantEmpty()") initVal = "{0}";
         if (node.access == AccessLevel::Public) {
             c_.emitLine(cType + " " + cName + " = " + initVal + ";");
         } else {
@@ -1239,6 +1262,8 @@ void CCodeGen::visit(PropertyDecl& node) {
     knownLongVars_.insert(classLongMembers_.begin(), classLongMembers_.end());
     // Fix 010n: 恢复类模块UDT成员变量 (knownUdtVars_被clear后需要从classUdtMembers_恢复)
     knownUdtVars_.insert(classUdtMembers_.begin(), classUdtMembers_.end());
+    // Fix 010n (扩展): 恢复普通模块模块级UDT变量 (同 classUdtMembers_ 机制)
+    knownUdtVars_.insert(moduleUdtMembers_.begin(), moduleUdtMembers_.end());
 
     // M22-fix: 注册参数中的UDT/类/接口变量到跟踪集合
     for (auto& p : node.params) {
@@ -1247,6 +1272,14 @@ void CCodeGen::visit(PropertyDecl& node) {
             std::string brKey = p->name;
             std::transform(brKey.begin(), brKey.end(), brKey.begin(), ::tolower);
             knownByRefParams_.insert(brKey);
+        }
+        // Fix 084m: 无类型子句的 Optional 参数 (如 Optional RecordsAffected) 默认是
+        // Variant, C 类型 vb6_VARIANT*; 必须注册到 knownVariantVars_,
+        // 否则 `RecordsAffected = 123` 生成裸赋值 → C2440 (cDataBase Exec).
+        if (!p->asType) {
+            std::string pLower = p->name;
+            std::transform(pLower.begin(), pLower.end(), pLower.begin(), ::tolower);
+            knownVariantVars_.insert(pLower);
         }
         if (p->asType && p->asType->kind == ASTNodeKind::SimpleTypeRef) {
             auto& simpleP = static_cast<SimpleTypeRef&>(*p->asType);

@@ -131,6 +131,21 @@ public:
     void visit(CallStmt& node) override;
     void visit(ReDimStmt& node) override;
     void visit(EraseStmt& node) override;
+    // Fix 084y-5: ReDim/Erase 目标的 C 标识符解析 — 处理成员访问形态
+    // (.Field With块成员 → _vb6_with_N->Field; obj.Field UDT成员 →
+    // (*obj).Field 或 obj.Field), 避免 cIdent 把 '.' 替换成 '_' 生成
+    // 未声明的单标识符 (uOutput.Buffer → uOutput_Buffer → C2065)
+    std::string resolveArrayTargetIdent(const std::string& varName);
+    // Fix 084aa: 判断标识符是否引用 String 类型常量 (#define 宏, 不可取址)
+    bool isStringConstIdent(const std::string& name) const;
+    // Fix 084aa: 查找常量符号 (Constant kind), 无则返回 nullptr
+    Symbol* lookupConstSym(const std::string& name) const;
+    // Fix 084aa: 判断标识符是否引用任何类型的常量 (#define 宏)
+    bool isConstIdent(const std::string& name) const;
+    // Fix 084aa: 获取常量标识符的 VB6 类型
+    Vb6Type constIdentType(const std::string& name) const;
+    // Fix 084aa: 常量宏作为 ByRef 实参 → 生成可寻址复合字面量包装
+    std::string wrapConstArgForByRef(const std::string& argVal, Vb6Type paramVb6Type) const;
     void visit(OpenStmt& node) override;
     void visit(CloseStmt& node) override;
     void visit(PrintStmt& node) override;
@@ -349,6 +364,11 @@ private:
     // Fix 010n: 类模块UDT成员变量 (小写var名 → UDT类型C标识符)
     // 用于在过程开始时恢复 knownUdtVars_ (因clear()会丢失类成员UDT变量)
     std::unordered_map<std::string, std::string> classUdtMembers_;
+    // Fix 010n (扩展): 普通模块(.bas/.frm)模块级UDT变量 (小写var名 → UDT类型C标识符)
+    // classUdtMembers_ 仅覆盖类模块; 标准模块的模块级UDT变量 (如 Private m_uData As UcsCryptoData)
+    // 在过程开头 knownUdtVars_.clear() 后同样会丢失, 导致 With m_uData 被误分类为 COM 对象.
+    // 本集合在 generate() 扫描模块声明时填充, 过程开头 clear() 后恢复.
+    std::unordered_map<std::string, std::string> moduleUdtMembers_;
     // 已知类实例变量名 → 类名映射 (小写var名 → 类名, 如 "me" → "cDialog")
     // 用于方法调用翻译 c.Method → vb6_cls_ClassName_Method(c)
     // Fix 010r-10: 从 unordered_set 改为 unordered_map 以支持类名查找
