@@ -13,3 +13,7 @@
 2. [问题] UDT 成员不随架构加宽导致 Declare 结构体参数错位：Fix 081e 只作用于直接写 As Long 的参数/返回值，UDT 内部 Long 恒为 4 字节；含句柄/指针成员的结构体（OPENFILENAME.hwndOwner 等）x64 下应为 8 字节，老源码 As Long 生成 4 字节 → 传给 API 该成员之后全部错位；且朴素 struct 无 pack，含 Double/Currency 成员的 UDT 在 x64 默认对齐下尺寸与 VB6 布局可能不同
    [建议] 无法自动判断成员语义，需迁移指引+警告：提示将句柄类成员显式改 As LongPtr（VBA7 官方 API 声明同款做法）；对常见 Win32 API 结构体提供修正声明清单；文档说明 UDT 对齐边界
 3. [建议] 补 #If Win64 回归测试固化行为（特性已支持，Fix 081h：win64 = --arch 参数，常量查找小写不敏感，支持 #If/#ElseIf/#Else/#End If/#Const）：覆盖 --arch x64/x86 两套目标分支选择、#If Win64 Then LongPtr #Else Long 的 VBA7 双平台迁移代码、-D 覆盖内置常量
+
+## 群友质询延展：问题与建议（2026-09-03 三轮）
+1. [问题] 缺少编译器身份标识常量：内置条件编译常量仅 win16/win32/win64/vba6/vba7/mac/win 七个平台与语言版本属性，无 C3 专属标识；且 vba6 与 vba7 同时为 True（C3 双兼容定位），用户无法用 #If VBA7 Then 区分"当前是 C3 还是原生 VB6/VBA7"环境
+   [建议] preprocessor.cpp 内置注册 c3=True（小写键，与其他内置一致）；命名用 C3（条件编译符号表与运行时变量名空间独立，无冲突），保留 -d:C3=False 可覆盖以便测试原生分支；文档给出四分支标准写法：#If C3 / #ElseIf VBA7 And Win64 / #ElseIf VBA7 / #Else，配套回归测试
