@@ -2210,6 +2210,67 @@ Vb6Type CCodeGen::inferUdtFieldVb6Type(const ASTNode* target) const {
     return Vb6Type::Unknown;
 }
 
+// ============================================================
+// Fix 085: UDT 对象字段类型推断
+// ============================================================
+std::string CCodeGen::udtFieldObjCType(const std::string& udtCType,
+                                       const std::string& memberLower) const {
+    const std::string prefix = "vb6_type_";
+    if (udtCType.size() <= prefix.size() || udtCType.compare(0, prefix.size(), prefix) != 0)
+        return "";
+    std::string udtName = udtCType.substr(prefix.size());
+    Symbol* udtSym = symTab_.lookupModule(udtName);
+    if (!udtSym || udtSym->kind != SymbolKind::UserDefinedType) return "";
+    std::string memLower = Symbol::toLower(memberLower);
+    for (const auto& mi : udtSym->udtMembers) {
+        if (Symbol::toLower(mi.name) != memLower) continue;
+        if (mi.type == Vb6Type::UserDefinedType) {
+            // 嵌套 UDT 字段 (非对象) — 返回其 UDT C 类型供链式推断
+            return mi.typeRefName.empty() ? "" : "vb6_type_" + cIdent(mi.typeRefName);
+        }
+        if (mi.type == Vb6Type::Object) {
+            if (!mi.typeRefName.empty()) {
+                // VBA. 前缀剥离 (如 VBA.Collection → Collection)
+                std::string tn = mi.typeRefName;
+                if (tn.size() > 4 && tn.compare(0, 4, "VBA.") == 0) tn = tn.substr(4);
+                Symbol* refSym = symTab_.lookupModule(tn);
+                if (refSym && refSym->kind == SymbolKind::Class) {
+                    // 项目类对象字段 → 类方法/属性调度 (early bound).
+                    // 注意: C 层类类型名须用类的规范模块名 (sourceModule), 而非 UDT
+                    // 字段中的引用名 (如 tZipFileItem.SourceArchive As "ZipArchive" 实际
+                    // 对应 vb6_cls_cZipArchive* — 引用名可能与模块名不同, 用了引用名
+                    // 会让 resolveClassMemberCall 查不到成员 (类符号按模块名登记)).
+                    // sourceModule 仅在跨模块注入时填写; 类自身符号(当前类模块
+                    // 编译中)为空, 此时规范名即当前模块名 moduleName_.
+                    std::string clsCanon = !refSym->sourceModule.empty()
+                                               ? refSym->sourceModule
+                                               : moduleName_;
+                    return "vb6_cls_" + cIdent(clsCanon) + "*";
+                }
+            }
+            // Collection/COM/接口 等对象字段 → COM dispatch
+            return "void*";
+        }
+        // 标量/字符串/数组等非对象字段
+        return "";
+    }
+    return "";
+}
+
+std::string CCodeGen::appendUdtObjFieldMarker(const std::string& objExpr,
+                                              const std::string& udtCType,
+                                              const std::string& member,
+                                              const std::string& accessOp) const {
+    std::string fieldCType = udtFieldObjCType(udtCType, Symbol::toLower(member));
+    std::string fieldAccess = objExpr + accessOp + cIdent(member);
+    // 仅对象字段 (项目类 vb6_cls_* / Collection·COM void*) 才追加标记;
+    // 嵌套 UDT (vb6_type_*) 与标量/字符串等原样返回 — 嵌套 UDT 继续由
+    // inferUdtTypeOfExpr / 普通字段拼接处理, 标记残留会干扰函数参数等上下文.
+    if (fieldCType != "void*" && fieldCType.rfind("vb6_cls_", 0) != 0) return fieldAccess;
+    return fieldAccess + "  /* udt objfield " + fieldCType + " */";
+}
+
+
 // Fix 084o: 需要 int32_t 上下文中的 Variant 表达式 → vb6_VariantToLong 包装
 std::string CCodeGen::toLongIfVariant(const std::string& cExpr, const Expr* astExpr) {
     if (cExprIsVariant(cExpr)) return "vb6_VariantToLong(" + cExpr + ")";

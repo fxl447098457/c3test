@@ -1626,7 +1626,11 @@ void CCodeGen::visit(MemberAccessExpr& node) {
         if (knownUdtVars_.count(objLower)) {
             emitExpr(*node.object);
             std::string obj = std::move(lastExpr_);
-            lastExpr_ = obj + "." + cIdent(node.memberName);
+            // Fix 085: UDT 字段是对象 (项目类/Collection/COM) 时, 在生成的访问文本
+            // 上追加 "/* udt objfield <CType> */" 注释标记, 由外层 MemberAccessExpr
+            // 消费 → 转类方法调用 / COM dispatch (否则 obj.Field.Method 触发 C2039/
+            // C2224). 例: uFile.SourceArchive (As cZipArchive) 后接 .frCopyCompressed.
+            lastExpr_ = appendUdtObjFieldMarker(obj, knownUdtVars_[objLower], node.memberName);
             return;
         }
 
@@ -1642,7 +1646,14 @@ void CCodeGen::visit(MemberAccessExpr& node) {
                 && (currentProc_->kind == SymbolKind::Function || currentProc_->kind == SymbolKind::PropertyGet)
                 && !currentReturnVar_.empty()) {
                 bool isCls084z = currentReturnCType_.find("vb6_cls_") != std::string::npos;
-                lastExpr_ = currentReturnVar_ + (isCls084z ? "->" : ".") + cIdent(node.memberName);
+                if (isCls084z) {
+                    lastExpr_ = currentReturnVar_ + "->" + cIdent(node.memberName);
+                } else {
+                    // Fix 085: 当前函数返回 UDT 时, 字段为对象(Collection/COM)需标记,
+                    // 使外层链式成员访问走 COM/类方法路径 (例: retUdt.Stream.VfsSetFilePointer)
+                    lastExpr_ = appendUdtObjFieldMarker(currentReturnVar_, currentReturnCType_,
+                                                        node.memberName);
+                }
                 return;
             }
         }
@@ -1872,6 +1883,57 @@ void CCodeGen::visit(MemberAccessExpr& node) {
         return;
     }
 
+    // Fix 085: UDT 对象字段链的成员访问.
+    // 内层 UDT 字段访问 (Fix 031 / Fix 084z-4 / WithMemberExpr / 通用 fallback) 在
+    // 检测到字段是对象 (项目类 vb6_cls_X* / Collection·COM void*) 时, 于生成的访问
+    // 文本后追加 "/* udt objfield <CType> */" 注释标记. 此处外层 MemberAccessExpr
+    // 消费该标记:
+    //   - vb6_cls_X* (项目类)  → 类方法/属性/数据字段: vb6_cZipArchive_frCopyCompressed
+    //   - void* (Collection/COM)→ COM dispatch marker (同 Fix 023 机制)
+    // 例: uFile.SourceArchive.frCopyCompressed(...)  (uFile.SourceArchive As cZipArchive)
+    //     → vb6_cZipArchive_frCopyCompressed((void*)(uFile.SourceArchive), ...)
+    //   withCtx.LocalCertificates.Item(lIdx)  (As Collection)
+    //     → vb6_ComCall...(withCtx->LocalCertificates, L"Item", ...)
+    if (obj.find("  /* udt objfield ") != std::string::npos) {
+        size_t mkPos = obj.find("  /* udt objfield ");
+        std::string objExpr = obj.substr(0, mkPos);
+        std::string fldType = obj.substr(mkPos + 18);  // 跳过 "  /* udt objfield "
+        size_t endMark = fldType.find(" */");
+        if (endMark != std::string::npos) fldType = fldType.substr(0, endMark);
+        if (fldType.rfind("vb6_cls_", 0) == 0) {
+            // 项目类对象字段 (early bound): obj.Field.Method → vb6_Class_Method((void*)obj)
+            // 注意: "vb6_cls_" 为 8 字符, 类名紧随其后 (vb6_cls_cZipArchive* → cZipArchive).
+            std::string clsName = fldType.substr(8);
+            if (!clsName.empty() && clsName.back() == '*') clsName.pop_back();
+            std::string resolvedFn = resolveClassMemberCall(clsName, node.memberName);
+            if (!resolvedFn.empty()) {
+                std::string thisArg = "(void*)" + objExpr;
+                if (asCallCallee_) {
+                    // 由外层 IndexOrCallExpr 把 thisArg 前置到参数首 (同 Fix 015)
+                    pendingChainObj_ = thisArg;
+                    lastExpr_ = resolvedFn;
+                } else {
+                    lastExpr_ = resolvedFn + "(" + thisArg + ")";
+                }
+                return;
+            }
+            // 类中无此方法/属性 → 类数据字段 (Public Field): objExpr->field
+            lastExpr_ = objExpr + "->" + cIdent(node.memberName);
+            return;
+        }
+        if (fldType == "void*") {
+            // Collection/COM 对象字段 → 下游 IndexOrCallExpr/BinaryExpr 走 COM dispatch
+            comObjExpr_ = objExpr;
+            comMemberName_ = node.memberName;
+            isComMarker_ = true;
+            lastExpr_ = objExpr;
+            return;
+        }
+        // 兜底 (嵌套 UDT 等非对象标记不应出现) → 普通字段
+        lastExpr_ = objExpr + "." + cIdent(node.memberName);
+        return;
+    }
+
     // Fix 023: void* struct 字段访问结果作为 COM 对象使用.
     // 内层 MemberAccessExpr 的 knownClassVars_ fallback 路径 (见本函数尾部) 在检测到
     // 当前访问的类字段是 void* 时, 在 emit 的表达式中加入 "voidptr" 注释标记:
@@ -2049,7 +2111,16 @@ void CCodeGen::visit(MemberAccessExpr& node) {
                    || (!trailingLower.empty() && knownTypedComVars_.count(trailingLower))) {
             lastExpr_ = obj + "->" + cIdent(node.memberName);
         } else {
-            lastExpr_ = obj + "." + cIdent(node.memberName);
+            // Fix 085: 更深嵌套的 UDT 链末端字段访问 (Fix 031 只覆盖直接 UDT 变量).
+            // object 仍是 UDT 表达式时, 若 member 为对象字段则追加标记,
+            // 由外层 MemberAccessExpr (Fix 085 消费点) 转类方法/COM 路径.
+            std::string udtChainType =
+                node.object ? inferUdtTypeOfExpr(*node.object) : "";
+            if (!udtChainType.empty()) {
+                lastExpr_ = appendUdtObjFieldMarker(obj, udtChainType, node.memberName);
+            } else {
+                lastExpr_ = obj + "." + cIdent(node.memberName);
+            }
         }
     }
 }
@@ -5348,7 +5419,15 @@ void CCodeGen::visit(WithMemberExpr& node) {
     default:
         // UDT/fallback: struct.field访问
         // Fix 081j: With块临时变量改为指针，用 -> 访问成员
-        lastExpr_ = tempVar + "->" + cIdent(node.memberName);
+        // Fix 085: UDT With 块中字段为对象 (Collection/COM/项目类) 时追加标记,
+        // 供外层 MemberAccessExpr 消费转 COM/类方法路径.
+        // 例: With uCtx: .LocalCertificates.Item(lIdx) → _vb6_with_15->LocalCertificates
+        {
+            std::string tvLower = Symbol::toLower(tempVar);
+            std::string udtCType =
+                knownUdtVars_.count(tvLower) ? knownUdtVars_[tvLower] : "";
+            lastExpr_ = appendUdtObjFieldMarker(tempVar, udtCType, node.memberName, "->");
+        }
         return;
     }
 }

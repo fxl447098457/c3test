@@ -764,6 +764,25 @@ private:
     // 字段误当函数调用 (C2064).
     std::string inferUdtTypeOfExpr(const ASTNode& expr) const;
 
+    // ---- Fix 085: UDT 对象字段类型推断 ----
+    // 给定 UDT C 类型标识符 (如 "vb6_type_tZipFileItem") 与字段名(小写), 返回该字段
+    // 的对象类别 C 类型:
+    //   - ""                          → 非对象字段 (标量/字符串/数组等)
+    //   - "vb6_type_Y"                → 嵌套 UDT 字段 (非对象, 供链式推断)
+    //   - "vb6_cls_X*"                → 项目类对象字段 (X=类名, 走类方法调用)
+    //   - "void*"                     → Collection/COM/接口 对象字段 (走 COM dispatch)
+    // 依据语义阶段 TypeDecl 在 udtMembers 中登记的 type/typeRefName.
+    std::string udtFieldObjCType(const std::string& udtCType,
+                                 const std::string& memberLower) const;
+
+    // Fix 085: 在 UDT 字段访问拼接处追加对象字段注释标记 (供外层 MemberAccessExpr
+    // 消费): obj.field 追加 "  /* udt objfield <CType> */"; 非对象字段原样返回.
+    // objExpr 为已生成的左值表达式, udtCType/member 用于判定字段类别.
+    std::string appendUdtObjFieldMarker(const std::string& objExpr,
+                                        const std::string& udtCType,
+                                        const std::string& member,
+                                        const std::string& accessOp = ".") const;
+
     // Fix 084n: 推断 target 是否为 UDT 字段链, 是则返回该字段的 Vb6Type (含 Array 标志), 否则 Unknown.
     // 供赋值语句判断 Variant RHS 需转换的目标类型 (如 cZipArchive 的 .FileName As String
     // ← vb6_VariantArrayGet → vb6_VariantToString; uBuf.MaxMatch As Long ← At() → vb6_VariantToLong)

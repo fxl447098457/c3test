@@ -1028,6 +1028,14 @@ void SemanticAnalyzer::visit(TypeDecl& node) {
                     if (mi.type == Vb6Type::UserDefinedType) {
                         mi.typeRefName = stRef->name;
                     }
+                    // Fix 085: 对象字段 (As 项目类/Collection/COM接口, 均解析为 Object)
+                    // 也保存类型引用名 — 供 cgen 区分"项目类对象字段"与"COM/Collection
+                    // 对象字段", 从而把 obj.Field.Method(...) 生成到正确的类方法调用/
+                    // COM dispatch 通道 (否则 UDT 字段直接 obj.Field.Method 触发 C2039/
+                    // C2224). 现有 typeRefName 消费者均限定 UserDefinedType, 安全.
+                    else if (mi.type == Vb6Type::Object) {
+                        mi.typeRefName = stRef->name;
+                    }
                 }
             }
             if (memberPtr->arraySize) {
