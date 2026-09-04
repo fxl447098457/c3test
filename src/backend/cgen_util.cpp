@@ -2013,6 +2013,21 @@ std::string CCodeGen::inferClassTypeOfExpr(const ASTNode& expr) const {
             // recursive case: 类方法调用 obj.Method(args) → 返回类
             auto& call = static_cast<const IndexOrCallExpr&>(expr);
             if (!call.callee) return "";
+            if (call.callee->kind == ASTNodeKind::IdentifierExpr) {
+                // Fix 085c: 模块内裸函数调用返回类实例 (如 cAsyncSocket 内
+                // pvToSocket(idx) As cAsyncSocket), 后续 .frNotifyGetHostByName(...)
+                // 链式调用需要知道返回类以拆成 vb6_cAsyncSocket_frNotify...(this,...).
+                // 此前仅支持 MemberAccessExpr/WithMemberExpr callee, 裸函数推断断链 →
+                // 生成 (ret).Method(...) 非法字段访问 (C2039: 不是 vb6_cls_X 的成员).
+                auto& id = static_cast<const IdentifierExpr&>(*call.callee);
+                const Symbol* fn = symTab_.lookupModule(id.name);
+                if (fn && fn->kind == SymbolKind::Function
+                    && !fn->variableTypeName.empty()) {
+                    const Symbol* clsSym = symTab_.lookupModule(fn->variableTypeName);
+                    if (clsSym && clsSym->kind == SymbolKind::Class) return fn->variableTypeName;
+                }
+                return "";
+            }
             if (call.callee->kind != ASTNodeKind::MemberAccessExpr
                 && call.callee->kind != ASTNodeKind::WithMemberExpr) return "";
             // Fix 085b: With 块内方法链 .Data(...).CalculateCRC16(...) — callee 是
