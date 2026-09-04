@@ -2012,8 +2012,19 @@ std::string CCodeGen::inferClassTypeOfExpr(const ASTNode& expr) const {
         case ASTNodeKind::IndexOrCallExpr: {
             // recursive case: 类方法调用 obj.Method(args) → 返回类
             auto& call = static_cast<const IndexOrCallExpr&>(expr);
-            if (!call.callee
-                || call.callee->kind != ASTNodeKind::MemberAccessExpr) return "";
+            if (!call.callee) return "";
+            if (call.callee->kind != ASTNodeKind::MemberAccessExpr
+                && call.callee->kind != ASTNodeKind::WithMemberExpr) return "";
+            // Fix 085b: With 块内方法链 .Data(...).CalculateCRC16(...) — callee 是
+            // WithMemberExpr, 基类是 With 栈顶对象类, 不能按 MemberAccessExpr 解析
+            // (否则 With 链方法在推断中断链, 生成 (ret).Method(...) 非法字段调用).
+            if (call.callee->kind == ASTNodeKind::WithMemberExpr) {
+                auto& wm = static_cast<const WithMemberExpr&>(*call.callee);
+                if (withObjectInfoStack_.empty()) return "";
+                const auto& winfo = withObjectInfoStack_.back();
+                if (winfo.kind != WithObjKind::ClassInstance || winfo.className.empty()) return "";
+                return getClassMethodReturnType(winfo.className, wm.memberName);
+            }
             auto& ma = static_cast<const MemberAccessExpr&>(*call.callee);
             if (!ma.object) return "";
             // 递归推断对象表达式的类名

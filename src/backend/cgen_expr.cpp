@@ -1959,19 +1959,16 @@ void CCodeGen::visit(MemberAccessExpr& node) {
     //   - 从最内层 IdentifierExpr 起在 knownClassVars_ 中拿到 base 类名
     //   - 逐层用 getClassMethodReturnType 查方法的返回类型名 (Fix 015 在
     //     semantic_analyzer 给 Function/PropertyGet 补了 variableTypeName)
-    // 若 node.object 确实返回类实例, 则用 C11 复合字面量把内层调用结果
-    // 装成左值, 再用 resolveClassMemberCall 分发外层成员:
-    //   db.Sql(s).Exec(args) →
-    //   vb6_cDataBase_Exec(&((vb6_cls_cDataBase){ vb6_cDataBase_Sql(db, s) }), args)
-    // 注: 链上的每一段 (Sql→Param→Exec 等) 都会经此分支处理, 复合字面量
-    // 可以嵌套, MSVC C11 接受.
+    // 若 node.object 确实返回类实例, 用 resolveClassMemberCall 分发外层成员.
+    // 类方法返回的是 vb6_cls_X* 指针, 链上中间结果可直接作为下一段的 this
+    // 指针透传 (嵌套函数调用), 无需复合字面量:
+    //   db.Sql(s).Exec(args) → vb6_cDataBase_Exec((void*)vb6_cDataBase_Sql(db, s), args)
+    // 注: 链上的每一段 (Sql→Param→Exec 等) 都会经此分支处理, 嵌套调用本身合法.
     if (node.object && node.object->kind == ASTNodeKind::IndexOrCallExpr) {
         std::string retClassName = inferClassTypeOfExpr(*node.object);
         if (!retClassName.empty()) {
-            // 内层调用返回类实例 → 合成 compound literal 作为 this 指针.
-            std::string wrappedObj =
-                "&((vb6_cls_" + cIdent(retClassName) + "){ /*fix015chain"
-                + node.memberName + "*/ " + obj + " })";
+            // 内层调用返回类实例 (vb6_cls_X* 指针) → 直接作为 this 参数透传.
+            std::string wrappedObj = obj;
 
             std::string resolvedFn =
                 resolveClassMemberCall(retClassName, node.memberName);
