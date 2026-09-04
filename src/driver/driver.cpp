@@ -1250,8 +1250,20 @@ bool Driver::runCrossModuleResolution() {
         for (const Symbol* sym : exportedSymbols[i]) {
             std::string sKey = sym->storageKey();
             // 同一个storageKey只保留第一个 (VB6行为: 先声明的优先)
-            if (globalPublicSyms.find(sKey) == globalPublicSyms.end()) {
+            auto itExisting = globalPublicSyms.find(sKey);
+            if (itExisting == globalPublicSyms.end()) {
                 globalPublicSyms[sKey] = {i, sym};
+            } else {
+                // Fix 086: Property Get 优先于 Let/Set — 跨模块注入每个名字只保留
+                // 一个符号, 若保留 Let (声明顺序在前), 读上下文 (oClient.State == 1)
+                // 会误生成 prop_let_ 调用 (void 返回) → C2186.
+                // 写上下文由 tryRewriteCOMLvalue 的 prop_get_→prop_let_ 改写兜底.
+                const Symbol* existing = itExisting->second.second;
+                bool existingIsSetter = (existing->kind == SymbolKind::PropertyLet
+                                         || existing->kind == SymbolKind::PropertySet);
+                if (existingIsSetter && sym->kind == SymbolKind::PropertyGet) {
+                    globalPublicSyms[sKey] = {i, sym};
+                }
             }
         }
     }
@@ -1441,6 +1453,33 @@ bool Driver::runCodeGeneration(const CompileOptions& options, const std::string&
     // 用于 IndexOrCallExpr 中 obj.typedField(idx) 模式: typedField 是对象数据字段
     // (非函数), VB6 语义为调用其默认 Item 属性.
     std::unordered_map<std::string, std::unordered_map<std::string, std::string>> classTypedFieldMap;
+    // Fix 086: 收集工程内窗体模块名 (小写) — 供跨模块窗体默认实例引用
+    // (FLogs.Visible / Unload FLogs → vb6_form_hwnd_FLogs()) 解析
+    std::unordered_set<std::string> formModuleNames;
+    for (const auto& module : modules_) {
+        if (module->isFormModule && !module->moduleName.empty()) {
+            formModuleNames.insert(Symbol::toLower(module->moduleName));
+        }
+    }
+    // Fix 086: 收集各模块 Public 常量表 (小写模块名 → 小写常量名 → 值).
+    // 当本地同名过程符号 (如 cSerialPort.Sub SetDTR) 阻止了跨模块常量注入时,
+    // Module.Const (modSerialPortAPI.SetDTR) 引用仍能内联数值.
+    std::unordered_map<std::string, std::unordered_map<std::string, long long>> modulePublicConsts;
+    for (size_t i = 0; i < modules_.size(); i++) {
+        const std::string& modName = modules_[i]->moduleName;
+        if (modName.empty()) continue;
+        std::string modLower = Symbol::toLower(modName);
+        auto* modScope = analyzers_[i]->symbolTable().moduleScope();
+        if (!modScope) continue;
+        for (const auto& [ckey, csym] : modScope->symbols()) {
+            if (!csym || csym->kind != SymbolKind::Constant || !csym->hasConstValue) continue;
+            if (csym->access != AccessLevel::Public) continue;
+            if (csym->constType != Vb6Type::Long && csym->constType != Vb6Type::Integer
+                && csym->constType != Vb6Type::Boolean && csym->constType != Vb6Type::Byte
+                && csym->constType != Vb6Type::Error) continue;
+            modulePublicConsts[modLower][Symbol::toLower(csym->name)] = csym->constIntValue;
+        }
+    }
     for (size_t i = 0; i < modules_.size(); i++) {
         const auto& module = modules_[i];
         if (!module->isClassModule && !module->isFormModule) continue;
@@ -1590,6 +1629,8 @@ bool Driver::runCodeGeneration(const CompileOptions& options, const std::string&
         // Fix 023: 传入 void* 字段表供 cgen_expr.cpp fallback 路径查询
         CCodeGen cgen(*diag_, analyzer->symbolTable(), analyzer->typeSystem(),
                       &classVoidFieldMap, &classTypedFieldMap, &variantReturnFuncs, options.verbose);
+        cgen.setFormModuleNames(formModuleNames);  // Fix 086: 跨模块窗体默认实例引用
+        cgen.setModulePublicConsts(&modulePublicConsts);  // Fix 086: 跨模块常量内联
         cgen.setTrimIncludes(options.trimIncludes);  // opt4: 裁剪未实际引用的跨模块include
         if (options.trimIncludes) {
             // opt4: 基于AST实际引用收集外部模块, 供 include 裁剪
@@ -1654,6 +1695,8 @@ bool Driver::runCodeGeneration(const CompileOptions& options, const std::string&
         // Fix 023: 传入 void* 字段表 (与主 codegen 循环一致)
         CCodeGen dllCgen(*diag_, lastAnalyzer->symbolTable(), lastAnalyzer->typeSystem(),
                          &classVoidFieldMap, &classTypedFieldMap, &variantReturnFuncs, options.verbose);
+        dllCgen.setFormModuleNames(formModuleNames);  // Fix 086
+        dllCgen.setModulePublicConsts(&modulePublicConsts);  // Fix 086
         // Collect all symbol tables for cross-module Property lookup
         std::vector<SymbolTable*> allSymTabs;
         for (auto& analyzer : analyzers_) {

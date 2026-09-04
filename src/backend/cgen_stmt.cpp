@@ -168,6 +168,11 @@ void CCodeGen::visit(AssignmentStmt& node) {
                     // 4. 发出 value (RHS)
                     emitExpr(*node.value);
                     std::string midValue = std::move(lastExpr_);
+                    // Fix 086: 与 visit(MidStmt) 的 Fix 084b 一致 — Variant值
+                    // (vb6_VariantArrayGet 等) 需转 BSTR, 否则 C2440
+                    if (cExprIsVariant(midValue)) {
+                        midValue = "vb6_VariantToString(" + midValue + ")";
+                    }
                     c_.emitLine("vb6_MidSet(&" + midTarget + ", " + midStart + ", " + midLen + ", " + midValue + ");  /* Mid$ statement */");
                     return;
                 }
@@ -362,6 +367,9 @@ void CCodeGen::visit(AssignmentStmt& node) {
             bool isVarName = (objSym && (objSym->kind == SymbolKind::Variable || objSym->kind == SymbolKind::Parameter));
             // M22-fix: 补充检查cgen层跟踪集合，防止过程级UDT/类变量被误判为模块名
             if (!isVarName && knownUdtVars_.count(objLower)) isVarName = true;
+            // Fix 086: Variant局部变量 (For Each Ctl In o) 也是合法的赋值目标对象 —
+            // 成员写入走COM后期绑定 (vb6_ComSetProp), 而非 Module.X 回退 (C2065)
+            if (!isVarName && knownVariantVars_.count(objLower)) isVarName = true;
             if (!isVarName && knownClassVars_.find(objLower) != knownClassVars_.end()) isVarName = true;
             if (!isVarName && knownNewVars_.count(objLower)) isVarName = true;
             if (!isVarName && knownObjectVars_.count(objLower)) isVarName = true;
@@ -423,6 +431,48 @@ void CCodeGen::visit(AssignmentStmt& node) {
                         default:
                             c_.emitLine(fieldAccess084o + " = " + valExpr084o + ";  /* FnRetUdt." + maExpr.memberName + " */");
                             return;
+                    }
+                }
+                // Fix 086: 函数名持有对象时的成员赋值 (json_ParseObject.CompareMode = 1,
+                // json_ParseObject 是返回 Dictionary 的 Function). 此前误判为
+                // Module.X → 生成未声明的 vb6_<fn>_<member> (C2065).
+                // 此处处于 FnRetUdt 条件块内: objLower==当前过程名 且 kind 是
+                // Function/PropertyGet, 仅需按返回C类型分流.
+                if (currentReturnCType_.rfind("vb6_cls_", 0) == 0) {
+                    emitExpr(*node.value);
+                    std::string valExpr = std::move(lastExpr_);
+                    c_.emitLine(currentReturnVar_ + "->" + cIdent(maExpr.memberName)
+                                + " = " + valExpr + ";  /* FnRetObj." + maExpr.memberName + " */");
+                    return;
+                }
+                // COM对象/void* 函数返回值 → COM后期绑定属性赋值
+                emitExpr(*node.value);
+                std::string valExpr = std::move(lastExpr_);
+                std::string packFn = comPackExpr(*node.value);
+                c_.emitLine("vb6_ComSetProp((void*)" + currentReturnVar_ + ", L\""
+                            + maExpr.memberName + "\", " + packFn + "(" + valExpr
+                            + "));  /* FnRetObj COM SetProp */");
+                return;
+            }
+
+            // Fix 086: UDT返回属性的字段赋值 (CurLang.Index = 0) — VB6语义是修改
+            // 属性返回的临时副本 (赋值被丢弃). 生成 属性调用.字段 的void表达式,
+            // 而非 Module.X 回退 (C2065: vb6_CurLang_Index).
+            if (!isVarName) {
+                Symbol* propSym86 = symTab_.lookupModule(objIdent.name);
+                if (propSym86 && propSym86->kind == SymbolKind::PropertyGet
+                    && !propSym86->variableTypeName.empty()) {
+                    Symbol* udtSym86 = lookupDotted(propSym86->variableTypeName);
+                    if (udtSym86 && udtSym86->kind == SymbolKind::UserDefinedType) {
+                        emitExpr(*node.value);  // RHS 副作用保留
+                        std::string propFn86 = cProcName("prop_get_" + objIdent.name,
+                            propSym86->access,
+                            propSym86->isExternal ? propSym86->sourceModule : "");
+                        std::string propCall86 = propFn86 + "("
+                            + (isClassModule_ ? "(void*)me" : "") + ")";
+                        c_.emitLine("(void)(" + propCall86 + "." + cIdent(maExpr.memberName)
+                                    + ");  /* UDT prop copy assign (VB6 discards) */");
+                        return;
                     }
                 }
             }
@@ -1032,6 +1082,13 @@ void CCodeGen::visit(AssignmentStmt& node) {
                 } else if (knownByteArrayVars_.count(lower)) {
                     // Fix 062: Byte array target + Variant value → extract SafeArray1D*
                     convertedValue = "vb6_VariantToSafeArray1D(" + value + ")";
+                } else if (knownClassVars_.count(lower)) {
+                    // Fix 086: 类类型目标 (vb6_cls_X*) + Variant值 → 提取对象指针
+                    convertedValue = "(vb6_cls_" + cIdent(knownClassVars_[lower])
+                                   + "*)vb6_VariantToObjectVal(" + value + ")";
+                } else if (knownArrays_.count(lower)) {
+                    // Fix 086: 数组目标 (vb6_SafeArray1D*) + Variant值 → 提取数组
+                    convertedValue = "vb6_VariantToSafeArray1D(" + value + ")";
                 } else if (node.target && node.target->kind == ASTNodeKind::IdentifierExpr) {
                     auto& id = static_cast<IdentifierExpr&>(*node.target);
                     std::string idLower = id.name;
@@ -1043,6 +1100,13 @@ void CCodeGen::visit(AssignmentStmt& node) {
                     } else if (knownObjectVars_.count(idLower)) {
                         convertedValue = "vb6_VariantToObjectVal(" + value + ")";
                     } else if (knownByteArrayVars_.count(idLower)) {
+                        convertedValue = "vb6_VariantToSafeArray1D(" + value + ")";
+                    } else if (knownClassVars_.count(idLower)) {
+                        // Fix 086: 类类型目标 (vb6_cls_X*) + Variant值
+                        convertedValue = "(vb6_cls_" + cIdent(knownClassVars_[idLower])
+                                       + "*)vb6_VariantToObjectVal(" + value + ")";
+                    } else if (knownArrays_.count(idLower)) {
+                        // Fix 086: 数组目标 (vb6_SafeArray1D*) + Variant值
                         convertedValue = "vb6_VariantToSafeArray1D(" + value + ")";
                     }
                 }
@@ -1085,6 +1149,13 @@ void CCodeGen::visit(SetStmt& node) {
                     target = target.substr(0, target.size() - 1) + ", NULL)";
                 }
                 c_.emitLine(target + ";  /* Set Nothing (property setter) */");
+                return;
+            }
+
+            // Fix 086: 目标表达式解析为空对象 stub ((void*)0) — 无可释放引用,
+            // 跳过整条语句 (避免 &(void*)0 → C2101; 例: Set Response.fClient = Nothing
+            // 中 Response.fClient 链被解析为 COM NULL stub).
+            if (target == "(void*)0" || target == "NULL" || target == "0") {
                 return;
             }
 
@@ -1835,6 +1906,7 @@ void CCodeGen::visit(ForStmt& node) {
         c_.emitLine("for (; vb6_VariantToLong(" + varAcc + ") <= " + var + "_end; "
                     + varAcc + " = vb6_VariantFromValue(vb6_VariantToLong(" + varAcc + ") + " + var + "_step)) {");
         c_.indent();
+        labelCopyIdx_ = 0;
         emitStmtList(node.body);
         c_.dedent();
         c_.emitLine("}");
@@ -1844,7 +1916,9 @@ void CCodeGen::visit(ForStmt& node) {
         c_.emitLine("for (; vb6_VariantToLong(" + varAcc + ") >= " + var + "_end; "
                     + varAcc + " = vb6_VariantFromValue(vb6_VariantToLong(" + varAcc + ") + " + var + "_step)) {");
         c_.indent();
+        labelCopyIdx_ = 1;
         emitStmtList(node.body);
+        labelCopyIdx_ = 0;
         c_.dedent();
         c_.emitLine("}");
         c_.dedent();
@@ -1866,6 +1940,7 @@ void CCodeGen::visit(ForStmt& node) {
     c_.indent();
     c_.emitLine("for (; " + varAcc + " <= " + var + "_end; " + varAcc + " += " + var + "_step) {");
     c_.indent();
+    labelCopyIdx_ = 0;
     emitStmtList(node.body);
     c_.dedent();
     c_.emitLine("}");
@@ -1874,7 +1949,9 @@ void CCodeGen::visit(ForStmt& node) {
     c_.indent();
     c_.emitLine("for (; " + varAcc + " >= " + var + "_end; " + varAcc + " += " + var + "_step) {");
     c_.indent();
+    labelCopyIdx_ = 1;
     emitStmtList(node.body);
+    labelCopyIdx_ = 0;
     c_.dedent();
     c_.emitLine("}");
     c_.dedent();
@@ -2285,16 +2362,48 @@ void CCodeGen::visit(WithStmt& node) {
 
     // 检测With对象类型: 遍历表达式判断
     if (node.object) {
+        // --- Fix 086: 方法调用链对象推断 (With .Sql(...) / With obj.Method(...)) ---
+        // With 对象是 IndexOrCallExpr/MemberAccessExpr/WithMemberExpr (方法调用链) 时,
+        // 用 inferClassTypeOfExpr 推断返回类. 此前 `With .Sql(...)` 解析为
+        // IndexOrCallExpr (非裸 WithMemberExpr), 嵌套With分支不命中 → tempType void*
+        // → 成员解析回退全局 lookupModule 捡错符号 (如 .Fetch 命中模块级 Sub Fetch,
+        // 生成 vb6_Demo_Fetch(_vb6_with_N) 这类带多余参数的非法调用).
+        // 仅接受项目 Class (排除 COM 类/接口/UDT), 其余情况走原有分支.
+        if (node.object->kind == ASTNodeKind::IndexOrCallExpr
+            || node.object->kind == ASTNodeKind::MemberAccessExpr
+            || node.object->kind == ASTNodeKind::WithMemberExpr) {
+            std::string inferred = inferClassTypeOfExpr(*node.object);
+            if (!inferred.empty()) {
+                const Symbol* clsSym = lookupModuleDotted(inferred);
+                if (clsSym && clsSym->kind == SymbolKind::Class && !clsSym->isInterface) {
+                    withInfo.kind = WithObjKind::ClassInstance;
+                    withInfo.className = cIdent(inferred);
+                    tempType = "vb6_cls_" + withInfo.className + "*";
+                    withInfo.ctrlOrigName = withInfo.className;
+                }
+            }
+        }
         // --- Fix 010n: New表达式检测 (With New ClassName) ---
         if (node.object->kind == ASTNodeKind::NewExpr) {
             auto& newExpr = static_cast<NewExpr&>(*node.object);
             std::string clsLower = newExpr.className;
             std::transform(clsLower.begin(), clsLower.end(), clsLower.begin(), ::tolower);
-            // "With New X" 总是类实例
-            withInfo.kind = WithObjKind::ClassInstance;
-            withInfo.className = cIdent(newExpr.className);  // Fix 011r-1
-            tempType = "vb6_cls_" + withInfo.className + "*";
-            withInfo.ctrlOrigName = withInfo.className;
+            // Fix 086: COM类检测 — With New ADODB.Stream 等 COM 类型没有项目
+            // Class 符号 (ComClass/ComInterface 或未注册), 不能按项目类生成
+            // vb6_cls_<X>* 临时 (类型未定义 → C2065). 转 COMObject 走后期绑定.
+            const Symbol* newClsSym = lookupModuleDotted(newExpr.className);
+            if (!newClsSym || newClsSym->kind == SymbolKind::ComClass
+                || newClsSym->kind == SymbolKind::ComInterface) {
+                withInfo.kind = WithObjKind::COMObject;
+                tempType = "void*";
+                withInfo.ctrlOrigName = cIdent(newExpr.className);
+            } else {
+                // "With New X" 总是类实例
+                withInfo.kind = WithObjKind::ClassInstance;
+                withInfo.className = cIdent(newExpr.className);  // Fix 011r-1
+                tempType = "vb6_cls_" + withInfo.className + "*";
+                withInfo.ctrlOrigName = withInfo.className;
+            }
         }
         // --- Fix 010n: WithMemberExpr (嵌套With: With .Method()) ---
         else if (node.object->kind == ASTNodeKind::WithMemberExpr) {
@@ -2626,7 +2735,9 @@ void CCodeGen::visit(WithStmt& node) {
 }
 
 void CCodeGen::visit(GoToStmt& node) {
-    c_.emitLine("goto vb6_label_" + cIdent(node.labelName) + ";");
+    // Fix 086: 与 LabelStmt 的方向副本后缀配对
+    std::string lblSuffix = (labelCopyIdx_ > 0) ? ("_d" + std::to_string(labelCopyIdx_ + 1)) : "";
+    c_.emitLine("goto vb6_label_" + cIdent(node.labelName) + lblSuffix + ";");
 }
 
 void CCodeGen::visit(OnErrorStmt& node) {
@@ -2855,6 +2966,21 @@ void CCodeGen::visit(CallStmt& node) {
         // COM调用检测 (P6.2): isComMarker_标志
         if (isComMarker_) {
             isComMarker_ = false;
+            // Fix 086: 无括号的控件方法调用 (List1.Clear) — 与 IndexOrCallExpr
+            // 的 P13.3 处理一致, 生成 vb6_ClearList(vb6_hwnd_Listx), 而非
+            // vb6_ComCall(list1,...) 裸控制名 (C2065).
+            auto itCtrlCS = knownFormControls_.find(comObjExpr_);
+            if (itCtrlCS != knownFormControls_.end()
+                && (itCtrlCS->second == FrmControlType::ListBox
+                    || itCtrlCS->second == FrmControlType::ComboBox)
+                && Symbol::toLower(comMemberName_) == "clear") {
+                std::string ctrlNameCS = cIdent(knownFormControlOriginalNames_.count(comObjExpr_)
+                    ? knownFormControlOriginalNames_[comObjExpr_] : comObjExpr_);
+                comObjExpr_.clear();
+                comMemberName_.clear();
+                c_.emitLine("vb6_ClearList((void*)vb6_hwnd_" + ctrlNameCS + ");  /* ListBox.Clear */");
+                return;
+            }
             // 无括号的COM方法调用: obj.Method → vb6_ComCall(obj, L"Method", NULL, 0)
             callExpr = "vb6_ComCall(" + comObjExpr_ + ", L\"" + comMemberName_ + "\", NULL, 0)";
             comObjExpr_.clear();
@@ -3006,6 +3132,17 @@ void CCodeGen::visit(ReDimStmt& node) {
     // Fix 010r: Add me-> prefix for class member arrays
     std::string lowerVar = node.varName;
     std::transform(lowerVar.begin(), lowerVar.end(), lowerVar.begin(), ::tolower);
+    // Fix 086: ReDim 目标是当前 Function/PropertyGet 自身名 → 返回值变量
+    // (VB6: 数组返回函数内 ReDim Preserve FuncName(...) 重设返回数组.
+    //  此前生成裸函数名 → C2065, 如 cMemoryStream.Contents / cImage.PictureToBytes)
+    if (currentProc_ && !currentReturnVar_.empty()
+        && (currentProc_->kind == SymbolKind::Function
+            || currentProc_->kind == SymbolKind::PropertyGet)
+        && Symbol::toLower(currentProc_->name) == lowerVar
+        && !knownLocalVars_.count(lowerVar)) {
+        cName = currentReturnVar_;
+        lowerVar = currentReturnVar_;
+    }
     if (isClassModule_ && classMemberVars_.count(lowerVar) && !knownLocalVars_.count(lowerVar)) {
         cName = "me->" + cName;
     }
@@ -3500,7 +3637,10 @@ void CCodeGen::visit(FileCopyStmt& node) {
 }
 
 void CCodeGen::visit(LabelStmt& node) {
-    c_.emitLine("vb6_label_" + cIdent(node.labelName) + ":;");
+    // Fix 086: For循环方向拆分会发射两份循环体, 第二份的标签加 _d2 后缀,
+    // 与对应的 goto 配对, 避免同一函数内标签重定义 (C2045).
+    std::string lblSuffix = (labelCopyIdx_ > 0) ? ("_d" + std::to_string(labelCopyIdx_ + 1)) : "";
+    c_.emitLine("vb6_label_" + cIdent(node.labelName) + lblSuffix + ":;");
     // P14.1.2: 如果这是错误处理器标签，结束受保护区块
     if (inProtectedBlock_ && !currentErrorHandlerLabel_.empty() &&
         Symbol::toLower(node.labelName) == Symbol::toLower(currentErrorHandlerLabel_)) {
@@ -3607,6 +3747,12 @@ void CCodeGen::visit(OptionStmt& node) {
 }
 
 void CCodeGen::visit(LocalDeclStmt& node) {
+    // Fix 086: 已在过程序言处提升声明的节点, 原位置跳过
+    if (hoistedLocalDeclSet_.count(&node)) return;
+    emitLocalDeclCode(node);
+}
+
+void CCodeGen::emitLocalDeclCode(LocalDeclStmt& node) {
     if (!node.decl) return;
 
     switch (node.decl->kind) {
@@ -3911,6 +4057,81 @@ void CCodeGen::visit(LocalDeclStmt& node) {
         default:
             c_.emitLine("/* unhandled LocalDeclStmt: " + std::string(node.decl->kindName()) + " */");
             break;
+    }
+}
+
+// ---- Fix 086: 局部声明过程级作用域提升 ----
+
+void CCodeGen::collectLocalDeclStmts(StmtList& stmts, std::vector<LocalDeclStmt*>& out) {
+    for (auto& stmt : stmts) {
+        if (!stmt) continue;
+        switch (stmt->kind) {
+            case ASTNodeKind::LocalDeclStmt:
+                out.push_back(static_cast<LocalDeclStmt*>(stmt.get()));
+                break;
+            case ASTNodeKind::Block:
+                collectLocalDeclStmts(static_cast<Block&>(*stmt).stmts, out);
+                break;
+            case ASTNodeKind::IfStmt: {
+                auto& n = static_cast<IfStmt&>(*stmt);
+                collectLocalDeclStmts(n.thenBody, out);
+                for (auto& ei : n.elseIfs)
+                    if (ei) collectLocalDeclStmts(ei->body, out);
+                collectLocalDeclStmts(n.elseBody, out);
+                break;
+            }
+            case ASTNodeKind::ForStmt:
+                collectLocalDeclStmts(static_cast<ForStmt&>(*stmt).body, out);
+                break;
+            case ASTNodeKind::ForEachStmt:
+                collectLocalDeclStmts(static_cast<ForEachStmt&>(*stmt).body, out);
+                break;
+            case ASTNodeKind::DoLoopStmt:
+                collectLocalDeclStmts(static_cast<DoLoopStmt&>(*stmt).body, out);
+                break;
+            case ASTNodeKind::WhileWendStmt:
+                collectLocalDeclStmts(static_cast<WhileWendStmt&>(*stmt).body, out);
+                break;
+            case ASTNodeKind::SelectCaseStmt: {
+                auto& n = static_cast<SelectCaseStmt&>(*stmt);
+                for (auto& cc : n.cases)
+                    if (cc) collectLocalDeclStmts(cc->body, out);
+                collectLocalDeclStmts(n.elseCase, out);
+                break;
+            }
+            case ASTNodeKind::WithStmt:
+                collectLocalDeclStmts(static_cast<WithStmt&>(*stmt).body, out);
+                break;
+            default:
+                break;
+        }
+    }
+}
+
+void CCodeGen::hoistLocalDecls(StmtList& body) {
+    if (const char* dis = std::getenv("C3_NO_HOIST")) {
+        (void)dis;
+        hoistedLocalDeclSet_.clear();
+        return;
+    }
+    hoistedLocalDeclSet_.clear();
+    std::vector<LocalDeclStmt*> decls;
+    collectLocalDeclStmts(body, decls);
+    for (auto* d : decls) {
+        if (!d || !d->decl) continue;
+        if (hoistedLocalDeclSet_.count(d)) continue;
+        bool hoistable = false;
+        if (d->decl->kind == ASTNodeKind::VariableDecl) {
+            auto& var = static_cast<VariableDecl&>(*d->decl);
+            // 固定边界数组保留原位 (边界表达式可能依赖执行到该点时的状态)
+            hoistable = var.dimensions.empty();
+        } else if (d->decl->kind == ASTNodeKind::ConstDecl) {
+            hoistable = true;
+        }
+        if (hoistable) {
+            hoistedLocalDeclSet_.insert(d);
+            emitLocalDeclCode(*d);
+        }
     }
 }
 

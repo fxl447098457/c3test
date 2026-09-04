@@ -224,6 +224,8 @@ void CCodeGen::visit(SubDecl& node) {
     }
 
     // 生成过程体 (P14.1.2: 传入hasResume_以启用resume点生成)
+    // Fix 086: 先将块内 Dim/Const 提升到过程顶部 (VB6 局部声明是过程级作用域)
+    hoistLocalDecls(node.body);
     emitStmtList(node.body, hasResume_);
 
         // P12.3: 恢复调用者的错误处理状态
@@ -481,6 +483,8 @@ void CCodeGen::visit(FunctionDecl& node) {
 
 
     // 生成过程体 (P14.1.2: 传入hasResume_以启用resume点生成)
+    // Fix 086: 先将块内 Dim/Const 提升到过程顶部 (VB6 局部声明是过程级作用域)
+    hoistLocalDecls(node.body);
     emitStmtList(node.body, hasResume_);
 
         // P12.3: 恢复调用者的错误处理状态
@@ -1391,6 +1395,8 @@ void CCodeGen::visit(PropertyDecl& node) {
         c_.emitLine("jmp_buf vb6_local_err_jmp;");
         c_.emitLine("vb6_SaveErrState();");
     }
+    // Fix 086: 先将块内 Dim/Const 提升到过程顶部 (VB6 局部声明是过程级作用域)
+    hoistLocalDecls(node.body);
     emitStmtList(node.body);
 
     // M22: 释放ANSI临时变量

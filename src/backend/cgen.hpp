@@ -85,6 +85,16 @@ public:
     // opt4: 设置"当前模块实际引用的外部模块"集合(小写), 由driver通过AST扫描提供
     void setTrimModules(const std::unordered_set<std::string>& m) { trimModules_ = m; }
 
+    // Fix 086: 设置工程内全部窗体模块名集合(小写), 由driver预扫描提供.
+    // 跨模块窗体默认实例引用 (cLogs 里 FLogs.Visible / Unload FLogs) 需要知道
+    // FLogs 是窗体, 才能生成 vb6_form_hwnd_FLogs() 访问器调用而非裸标识符.
+    void setFormModuleNames(const std::unordered_set<std::string>& names) { knownFormModuleNames_ = names; }
+    // Fix 086: 各模块 Public 常量表 (小写模块名 → 小写常量名 → 整数值).
+    // 本地同名过程符号会阻止跨模块常量注入 (如 cSerialPort.Sub SetDTR 与
+    // modSerialPortAPI.Const SETDTR), 此表兜底内联数值.
+    void setModulePublicConsts(const std::unordered_map<std::string,
+        std::unordered_map<std::string, long long>>* consts) { modulePublicConsts_ = consts; }
+
     // P6.6: 单独生成ActiveX DLL入口文件 (dll_entry.c)
     // 当DLL工程只有类模块(无标准模块)时, 由Driver调用此方法生成DLL导出代码
     // progId: DLL的ProgID前缀
@@ -174,6 +184,8 @@ public:
     void visit(LabelStmt& node) override;
     void visit(OptionStmt& node) override;
     void visit(LocalDeclStmt& node) override;
+    // Fix 086: LocalDeclStmt 的实际声明发射代码 (visit 判重后调用; 提升阶段也直接调用)
+    void emitLocalDeclCode(LocalDeclStmt& node);
     void visit(RaiseEventStmt& node) override;
     void visit(BeepStmt& node) override;
     void visit(DoEventsStmt& node) override;
@@ -688,6 +700,23 @@ private:
     // Bug #1 fix (082h): 预扫描语句中的UBound/LBound(arr,N>1)收集ND数组名
     void scanNDArraysInStmts(StmtList& stmts);
     void scanNDArraysInExpr(Expr& expr);
+
+    // Fix 086: 局部声明过程级作用域提升
+    // VB6 的 Dim/Const 是过程级作用域 (块内 Dim 在块外仍可见), 而 C 块作用域
+    // 会造成 "分支内 Dim, 另一分支使用" 时 C2065 未声明标识符. 过程体发射前
+    // 预扫描收集所有可提升的 LocalDeclStmt (非数组标量/动态数组指针/Const),
+    // 在函数序言处统一声明, 原位置的 visit 跳过.
+    void hoistLocalDecls(StmtList& body);
+    void collectLocalDeclStmts(StmtList& stmts, std::vector<LocalDeclStmt*>& out);
+    // 已提升的声明节点集合 (按指针, 每过程清空)
+    std::set<const ASTNode*> hoistedLocalDeclSet_;
+    // Fix 086: 工程内窗体模块名集合 (小写), driver预扫描填充
+    std::unordered_set<std::string> knownFormModuleNames_;
+    // Fix 086: For方向拆分的循环体副本索引 (0=首份, 1=第二份); Label/GoTo配对加后缀
+    int labelCopyIdx_ = 0;
+    // Fix 086: 各模块 Public 常量表 (driver预扫描填充, 本体归driver所有)
+    const std::unordered_map<std::string,
+        std::unordered_map<std::string, long long>>* modulePublicConsts_ = nullptr;
 
     // ---- COM辅助 (P6.2) ----
     // 推断COM参数的封装函数: 根据表达式类型选择vb6_ComPackBSTR/Int/Double/Object

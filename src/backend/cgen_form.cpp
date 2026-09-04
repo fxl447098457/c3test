@@ -151,18 +151,28 @@ void CCodeGen::emitFormFramework(const FrmFormDesc& frmDesc, Module& module) {
         knownFormControlOriginalNames_[formNameLower] = formName;
 
         // P7.6: 先扫描控件数组 (同名控件出现多次 = 数组)
-        std::unordered_map<std::string, int> ctrlNameCount;
-        for (const auto& ctrl : frmDesc.formControl.children) {
+        // Fix 086: 递归注册嵌套控件 (Menu子项如 Window > WindowTopMost).
+        // 此前仅注册顶层控件, 嵌套菜单成员访问 (.Checked 等) 误判为
+        // Module.X → 生成 vb6_<菜单名>_<属性> 未声明标识符 (C2065).
+        std::unordered_set<std::string> ctrlArraySeen;
+        std::function<void(const FrmControl&)> registerCtrlRec;
+        registerCtrlRec = [&](const FrmControl& ctrl) {
             std::string ctrlNameLower = ctrl.controlName;
             std::transform(ctrlNameLower.begin(), ctrlNameLower.end(), ctrlNameLower.begin(), ::tolower);
-            ctrlNameCount[ctrlNameLower]++;
-            knownFormControls_[ctrlNameLower] = ctrl.controlType;
-            knownFormControlOriginalNames_[ctrlNameLower] = ctrl.controlName;
-        }
-        for (const auto& kv : ctrlNameCount) {
-            if (kv.second > 1) {
-                knownControlArrays_[kv.first] = true;
+            if (!ctrlNameLower.empty()) {
+                if (!ctrlArraySeen.insert(ctrlNameLower).second) {
+                    // 同名控件出现多次 = 控件数组
+                    knownControlArrays_[ctrlNameLower] = true;
+                }
+                knownFormControls_[ctrlNameLower] = ctrl.controlType;
+                knownFormControlOriginalNames_[ctrlNameLower] = ctrl.controlName;
             }
+            for (const auto& child : ctrl.children) {
+                registerCtrlRec(child);
+            }
+        };
+        for (const auto& ctrl : frmDesc.formControl.children) {
+            registerCtrlRec(ctrl);
         }
 
         // P7.6: 构建控件ID→Index映射 (WM_COMMAND事件分发用)
@@ -191,6 +201,10 @@ void CCodeGen::emitFormFramework(const FrmFormDesc& frmDesc, Module& module) {
 
     // 窗体句柄变量
     c_.emitLine("static void* vb6_hwnd_" + cIdent(formName) + " = NULL;");
+    // Fix 086: 跨模块窗体默认实例访问器 — 其他模块 (cLogs 等) 引用
+    // FLogs.Visible / Unload FLogs 时通过 vb6_form_hwnd_<Form>() 获取窗体HWND
+    h_.emitLine("void* vb6_form_hwnd_" + cIdent(formName) + "(void);");
+    c_.emitLine("void* vb6_form_hwnd_" + cIdent(formName) + "(void) { return vb6_hwnd_" + cIdent(formName) + "; }");
 
     // 控件句柄变量 (P7.6: 数组控件使用vb6_CtrlArr, 非数组使用void*)
     {
@@ -202,6 +216,13 @@ void CCodeGen::emitFormFramework(const FrmFormDesc& frmDesc, Module& module) {
             if (!FrmParser::controlTypeToWin32Class(ctrl.controlType)) {
                 // P7.9: WebBrowser needs HWND declaration though no Win32 class
                 if (ctrl.controlType == FrmControlType::WebBrowser) {
+                    c_.emitLine("static void* vb6_hwnd_" + cIdent(ctrl.controlName) + " = NULL;");
+                    emitted.insert(ctrlNameLower);
+                }
+                // Fix 086: Timer控件无Win32窗口, 但窗体代码引用 vb6_hwnd_<Timer>
+                // (Timer1.Enabled/Interval 走控件属性路径). 声明为NULL静态变量,
+                // RTL 的 vb6_SetTimerEnabled/vb6_SetTimerInterval 对 NULL 是安全空操作.
+                if (ctrl.controlType == FrmControlType::Timer) {
                     c_.emitLine("static void* vb6_hwnd_" + cIdent(ctrl.controlName) + " = NULL;");
                     emitted.insert(ctrlNameLower);
                 }
