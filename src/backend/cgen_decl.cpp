@@ -440,6 +440,14 @@ void CCodeGen::visit(FunctionDecl& node) {
         if (!clsName088c.empty() && clsName088c.back() == '*') clsName088c.pop_back();
         knownClassVars_[funcRetLower] = clsName088c;
     }
+    // Fix 089c: 函数返回内置 COM 对象 (As Collection / As Object → C void*)
+    // 时注册返回值变量到 knownObjectVars_, 使函数体内 FuncName.Add(...)/
+    // FuncName.Remove(...) 走 COM dispatch (vb6_ComCall) 而非结构成员调用
+    // (C2224: vb6_ret_json_ParseArray.Add — json_ParseArray As Collection).
+    // 与变量注册 (941-946: cType=="void*" → knownObjectVars_) 对齐.
+    else if (retType == "void*") {
+        knownObjectVars_.insert(funcRetLower);
+    }
 
     if (hasGoSub_) {
         c_.emitLine("int vb6_gosub_stack[32];");

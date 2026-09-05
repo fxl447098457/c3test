@@ -1665,19 +1665,22 @@ void CCodeGen::visit(MemberAccessExpr& node) {
                     lastExpr_ = comObjExpr_;  // IDispatch* expression
                     return;
                 }
-                // Fix 023e: Form 类型在 readFn 为空时 (未知 Form 属性/方法如 ScaleHeight/
-                // ScaleWidth/Move/Refresh/Show/Print/Cls等) 走 COM dispatch on form HWND,
-                // 避免落入下方 warn-and-fall-through 后由通用 fallback emit
-                // "vb6_hwnd_<FormName>.Member" 形成 C2224 (void* 上的 .member 访问).
-                // 注: 与上面 MeExpr 分支一致, 这是编译 stub; form HWND 不是真正的 IDispatch*.
-                if (itCtrl->second == FrmControlType::Form) {
-                    std::string formHwnd = makeCtrlHwndArg(objLower, itCtrl->second);
-                    comObjExpr_ = formHwnd;
+                // Fix 023e/089d: 控件 readFn 为空 (未知属性/方法如 Form.ScaleWidth,
+                // Move/Refresh/Align等) 走 COM dispatch on control HWND, 避免落入
+                // warn-and-fall-through 后由通用 fallback 先做默认属性展开再拼
+                // ".Member" → C2224 (vb6_GetControlText(...) .Move / .Align).
+                // Fix 089d 将 Form 分支扩展为所有非 Menu 控件 (FLogs List1.Move、
+                // FLayer LContent.Move、FToastDrawer Picture1.Align 等).
+                // 注: 与上面 MeExpr 分支一致, 这是编译 stub; 控件 HWND 不是真正的
+                // IDispatch*, 运行期语义由真实 VB6 runtime 提供.
+                if (itCtrl->second != FrmControlType::Menu) {
+                    std::string ctrlHwnd = makeCtrlHwndArg(objLower, itCtrl->second);
+                    comObjExpr_ = ctrlHwnd;
                     comMemberName_ = node.memberName;
                     isComMarker_ = true;
                     isEarlyBoundCom_ = false;
                     earlyBoundSym_ = nullptr;
-                    lastExpr_ = formHwnd;  // void* 表达式 (form HWND)
+                    lastExpr_ = ctrlHwnd;  // void* 表达式 (control HWND)
                     return;
                 }
                 diag_.warn(DiagnosticID::CodeGenUnsupportedFeature, SourceLocation{},
@@ -1817,6 +1820,20 @@ void CCodeGen::visit(MemberAccessExpr& node) {
                     }
                     // 类无此成员 → 公开数据字段 (RootItem 等)
                     lastExpr_ = currentReturnVar_ + "->" + cIdent(node.memberName);
+                } else if (currentReturnCType_ == "void*") {
+                    // Fix 089c2: 当前函数返回内置 COM 对象 (As Collection / As Object →
+                    // C void*) 时, 函数体内 FuncName.Add(...)/FuncName.Item(...) 走
+                    // COM dispatch (vb6_ComCall) — 如 cZipArchive.pvEnumFiles As
+                    // Collection → pvEnumFiles.Add path, key. 此前 isCls084z false 走
+                    // appendUdtObjFieldMarker(void* 无字段) → 生成
+                    // vb6_ret_X.Add(...) 结构成员调用 → C2224 (void* 上 .Add).
+                    // 与 Fix 088d (类返回) / Fix 085 (UDT 返回) 对齐.
+                    lastExpr_ = currentReturnVar_;
+                    comObjExpr_ = currentReturnVar_;   // void* Collection 对象表达式
+                    comMemberName_ = node.memberName;
+                    isComMarker_ = true;
+                    isEarlyBoundCom_ = false;
+                    earlyBoundSym_ = nullptr;
                 } else {
                     // Fix 085: 当前函数返回 UDT 时, 字段为对象(Collection/COM)需标记,
                     // 使外层链式成员访问走 COM/类方法路径 (例: retUdt.Stream.VfsSetFilePointer)
