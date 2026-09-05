@@ -1,14 +1,14 @@
 # C3 编译器错误修复 — 任务交接文档
 
 > 用途：新会话恢复上下文用。新开会话后直接说「读取 C3_FIX_HANDOFF.md 并继续修复」。
-> 更新日期：2026-09-02（第 5 节 m_uData 已完成修复验证：588 → 552）
+> 更新日期：2026-09-05（088e-089h 系列完成验证：552 → 216）
 
 ## 1. 项目与目标
 
 - **C3**：VB6→C 转换器（工作区 `c:/Users/vi/Desktop/c3.vb6.pro`）
 - **目标**：减少 `vbman/dist/c3-error.log` 中 MSVC 编译错误数
-- **进度**：777 → 588 → **552**（最新统计口径为 `: error C` 行数）
-- **当前状态**：C2102（`&` 要求左值）/ C2099（初始化值不是常量）已清零；m_uData With 分类已修复（ToolsTlsThunks 74 → 51）
+- **进度**：777 → 588 → 552 → **216**（最新统计口径为 `: error C` 行数）
+- **当前状态**：C2102/C2099/C2129/C2065 已清零；剩余大头 C2440 x118（COM/Variant 打包簇）+ C2198 x45 + C2039 x11 + 各零星错误
 
 ## 2. 构建 / 验证工作流
 
@@ -86,12 +86,24 @@
 ### 注意事项（踩坑记录）
 - **增量构建可能产生陈旧对象 → 运行时 0xC0000409 崩溃**（症状：任何模式跑 VBMAN.vbp 都崩溃，`--dump-symbols` 也在 `=== End Symbol Table ===` 后崩）。本次通过 `cmake --build .build --clean-first` 全量重建解决。**今后改 cgen.hpp 后若运行崩溃，优先怀疑陈旧对象，先 clean 构建**
 
-## 6. 剩余错误分布（552，最新确认 2026-09-02）
+## 5b. 已完成的修复（Fix 088e/089 系列，2026-09-05，552 → 216）
 
-按错误码（总数 552）：
-- C2440 x122、C2065 x88、C2198 x82、C2224 x66、C2039 x48、C2197 x38、C2088 x32、C2106 x27、C2223 x13、C2186 x7、C2045 x5、C2129 x4、C2037 x3、C2101 x3、C2064 x3、C2083 x2、C2063 x2、C2172 x2、C2296/C2171/C2110/C2059/C2166 各 1
-- 已清零：C2102、C2099（以及 ToolsTlsThunks 的 C2064 x24）
-- ToolsTlsThunks.c 剩余 51：C2224 x37（COM 集合簇，见第 9 节）+ C2039 x4（MessBuffer_Data 字段缺失）+ C2198 x3 + C2440 x3（SafeArray 簇）+ C2065 x2 + C2101 x1 + C2186 x1
+演进：552 → 502 → 489 → 486 → 301 → 278 → 267 → 260 → 251 → 243 → **216**
+- **088d/088e**：类返回实例链上成员访问 (ReturnJson.Decode)、getClassMethodReturnType Phase-B 兜底（278→267）
+- **089**：跨模块 COM/Collection 变量分发（267→260）
+- **089c/089d**：COM 返回函数变量、控件未知成员分发（260→251）
+- **089e**：Friend 成员被错误编译为 static → extern（251→243）
+- **089f**：类模块内无括号引用本类 Function（`pvSessionID = GenerateSessionID`，Fix 086 barecall）缺 `me` → 补 `((void*)me)`（与 PropertyGet/CallStmt 对齐）
+- **089g**（cgen_util.cpp resolveClassMemberCall）：跨模块同名成员 storageKey 抢占 —— 多个类有同名 Property Get（如 cWebSocketClient/cWebSocketServerClient 都有 State）时 driver 的 globalPublicSyms 按 `$pg` 键只保留先分析模块符号，目标类 Get 缺失而 Let 正常注入 → 读上下文误发 `prop_let_State`。修复：Get 缺失而读到 Let/Set 时查 Class 符号 memberProcKinds（semantic 按读上下文 Get>Function>Sub>Let>Set 写入），按读形式重定向 `prop_get_`
+- **089h**（cgen_expr.cpp ×3 处值上下文）：无括号裸方法引用只发 this → C2198 参数太少。三处分支（Fix 015 链式值上下文 / memSym 类变量分支 / class var 分支）补默认参数（Optional/必选 + `_has_` 尾参）。**属性（`_prop_` 前缀函数）不 pad** —— findClassMemberCallParams 对 Get+Let 并存属性返回 Let 参数，pad 会 C2197（经 stash 基线对比确认无回归，C2197 x5 为 pre-existing：cToolsStr Add x2 / Dictionary prop_let_key x2 / Demo_Database Item x1，属默认属性多级链与 COM 写 rewrite 簇）
+- 已验证零新增回归（git stash 基线 243 vs 当前 216，C2197/C2440 同桶）
+
+## 6. 剩余错误分布（216，最新确认 2026-09-05）
+
+按错误码（总数 216）：
+- C2440 x118（COM/Variant 打包解包簇：`vb6_VARIANT ↔ void*/double/int32_t`、`类实例 → VARIANT`、函数指针调用参数类型、SafeArray）、C2198 x45、C2039 x11、C2172 x5、C2223 x5、C2197 x5（pre-existing：cToolsStr Add / Dictionary prop_let_key / Demo_Database 默认属性链）、C2106 x5、C2094 x4、C2064 x3、C2037 x3、C2083 x2、C2059 x2、C2171/C2063/C2110/C2101/C2186/C2088/C2143/C2166 各 1
+- 已清零：C2102、C2099、C2129、C2065、C2045、C2296、C2224（C2224 已全部转译/消除）
+- 待办簇（按体量）：① C2440 x118 —— cTlsSocket.c 4093 等 Variant↔具体类型、cHttpServerRouter.c 29 类实例→VARIANT 参数、cHttpServer.c 374/892 double↔void*/VARIANT；② C2039 x11 —— 成员访问到错误类（Dictionary.Item/Value/Rs/ReturnJson 簇）；③ C2198 x45 中 DataBase 链式值上下文已修、余 COM 打包与默认属性链簇
 
 ## 7. 关键文件地图
 
