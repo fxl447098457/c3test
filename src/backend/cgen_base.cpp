@@ -487,7 +487,8 @@ bool CCodeGen::generate(Module& module, const std::string& baseName,
             std::string sig = makeProcSignature(sub);
             // Fix 055: Form事件处理函数不能为static, 因为wndproc用extern引用它们
             bool isFormEventProc = module.isFormModule && sub.name.find("Form_") == 0;
-            if (sub.access == AccessLevel::Public || isFormEventProc) {
+            // Fix 089e: Friend/Public 成员跨模块可调用 → 非 static 声明
+            if (sub.access == AccessLevel::Public || sub.access == AccessLevel::Friend || isFormEventProc) {
                 h_.emitLine(sig + ";");
             } else {
                 h_.emitLine("static " + sig + ";");
@@ -497,7 +498,8 @@ bool CCodeGen::generate(Module& module, const std::string& baseName,
             std::string sig = makeProcSignature(func);
             // Fix 055: Form事件处理函数不能为static, 因为wndproc用extern引用它们
             bool isFormEventFunc = module.isFormModule && func.name.find("Form_") == 0;
-            if (func.access == AccessLevel::Public || isFormEventFunc) {
+            // Fix 089e: Friend/Public 成员跨模块可调用 → 非 static 声明
+            if (func.access == AccessLevel::Public || func.access == AccessLevel::Friend || isFormEventFunc) {
                 h_.emitLine(sig + ";");
             } else {
                 h_.emitLine("static " + sig + ";");
@@ -505,7 +507,8 @@ bool CCodeGen::generate(Module& module, const std::string& baseName,
         } else if (decl->kind == ASTNodeKind::PropertyDecl) {
             auto& prop = static_cast<PropertyDecl&>(*decl);
             std::string sig = makePropertySignature(prop);
-            if (prop.access == AccessLevel::Public) {
+            // Fix 089e: Friend Property (Friend Property Get/Let/Set) 跨模块可调用
+            if (prop.access == AccessLevel::Public || prop.access == AccessLevel::Friend) {
                 h_.emitLine(sig + ";");
             } else {
                 h_.emitLine("static " + sig + ";");

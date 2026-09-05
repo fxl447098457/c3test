@@ -40,7 +40,11 @@ void CCodeGen::visit(SubDecl& node) {
 
     // Fix 055: Form事件处理函数不能为static, 因为wndproc用extern引用它们
     bool isFormEventProc = isFormModule_ && node.name.find("Form_") == 0;
-    if (node.access != AccessLevel::Public && !isFormEventProc) {
+    // Fix 089e: 仅 Private 成员编译为 static — Friend 成员跨模块调用
+    // (VB6 Friend = 工程内可见, 如 cHttpServer.OnDataArrival 被
+    // cClientCallback 调用 / cSerialConfig.BuildTimeouts 被 cSerialPort
+    // 调用), 若 static 则调用方 TU 中"声明但未定义" → C2129.
+    if (node.access == AccessLevel::Private && !isFormEventProc) {
         c_.emitLine("static " + sig + " {");
     } else {
         c_.emitLine(sig + " {");
@@ -272,7 +276,8 @@ void CCodeGen::visit(FunctionDecl& node) {
 
     // Fix 055: Form事件处理函数不能为static, 因为wndproc用extern引用它们
     bool isFormEventFunc = isFormModule_ && node.name.find("Form_") == 0;
-    if (node.access != AccessLevel::Public && !isFormEventFunc) {
+    // Fix 089e: 仅 Private 成员编译为 static (Friend/Public 跨模块可调用)
+    if (node.access == AccessLevel::Private && !isFormEventFunc) {
         c_.emitLine("static " + sig + " {");
     } else {
         c_.emitLine(sig + " {");
