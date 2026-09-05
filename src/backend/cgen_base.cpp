@@ -150,6 +150,20 @@ bool CCodeGen::generate(Module& module, const std::string& baseName,
                             // Fix 014 改在 cgen_expr.cpp visit(MemberAccessExpr) 通用 fallback 中
                             // 提取 C 表达式尾部标识符以支持链式访问 (me.m_oSocket.Create).
                         }
+                } else {
+                    // Fix 089j: VB6 无 As 类型声明的成员变量默认 Variant
+                    // (如 cTimer.cls 的 `Private mParentsColKey`), 必须注册到
+                    // classVariantMembers_, 否则 prop_let/prop_get 内的
+                    // `me->mParentsColKey = value` / `ret = me->mParentsColKey`
+                    // 不做 Variant 打包/解包 → C2440 (int→vb6_VARIANT /
+                    // vb6_VARIANT→int32_t). C 层 struct 字段即 vb6_VARIANT
+                    // (mapTypeRef(nullptr) 返回 vb6_VARIANT).
+                    std::string mLower89j = "m_" + var.name;
+                    std::transform(mLower89j.begin(), mLower89j.end(), mLower89j.begin(), ::tolower);
+                    std::string oLower89j = var.name;
+                    std::transform(oLower89j.begin(), oLower89j.end(), oLower89j.begin(), ::tolower);
+                    classVariantMembers_.insert(mLower89j);
+                    classVariantMembers_.insert(oLower89j);
                 }
             }
         }

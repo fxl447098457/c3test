@@ -57,7 +57,10 @@ void CCodeGen::emitClassFactory(Module& module) {
                     c_.emitLine("me->" + field + " = " + defaultValue(fvt) + ";");
                 }
             } else {
-                c_.emitLine("me->" + field + " = 0;");
+                // Fix 089j: VB6 无 As 类型声明的成员变量默认 Variant (C 字段
+                // 类型 vb6_VARIANT), 不能 `= 0` 初始化 → C2440 (int→vb6_VARIANT),
+                // 必须用 vb6_VariantEmpty() (与显式 `As Variant` 的 Tag 字段一致).
+                c_.emitLine("me->" + field + " = vb6_VariantEmpty();");
             }
         }
     }

@@ -980,6 +980,14 @@ void CCodeGen::visit(AssignmentStmt& node) {
             std::transform(idLower.begin(), idLower.end(), idLower.begin(), ::tolower);
             if (knownVariantVars_.count(idLower)) valueIsVariant = true;
         }
+        // Fix 089j: RHS 为类 Variant 字段 (me->mParentsColKey 等) 也视为
+        // Variant 表达式 — cExprIsVariant 只查函数前缀, me-> 成员不命中,
+        // 导致 PropertyGet 里 `ret = me->VarField` 不转 → C2440.
+        if (!valueIsVariant && value.compare(0, 4, "me->") == 0) {
+            std::string rhsMember = value.substr(4);
+            std::transform(rhsMember.begin(), rhsMember.end(), rhsMember.begin(), ::tolower);
+            if (classVariantMembers_.count(rhsMember)) valueIsVariant = true;
+        }
         if (valueIsVariant) {
             value = "vb6_VariantToString(" + value + ")";
         }
@@ -1018,6 +1026,14 @@ void CCodeGen::visit(AssignmentStmt& node) {
             std::string idLower = id.name;
             std::transform(idLower.begin(), idLower.end(), idLower.begin(), ::tolower);
             if (knownVariantVars_.count(idLower)) valueIsVariant = true;
+        }
+        // Fix 089j: RHS 为类 Variant 字段 (me->mParentsColKey 等) 也视为
+        // Variant 表达式 — cExprIsVariant 只查函数前缀, me-> 成员不命中,
+        // 导致 PropertyGet 里 `ret = me->VarField` 不转 → C2440.
+        if (!valueIsVariant && value.compare(0, 4, "me->") == 0) {
+            std::string rhsMember = value.substr(4);
+            std::transform(rhsMember.begin(), rhsMember.end(), rhsMember.begin(), ::tolower);
+            if (classVariantMembers_.count(rhsMember)) valueIsVariant = true;
         }
         if (valueIsVariant) {
             // 检查目标类型
@@ -1754,6 +1770,14 @@ void CCodeGen::visit(LetStmt& node) {
             std::string idLower = id.name;
             std::transform(idLower.begin(), idLower.end(), idLower.begin(), ::tolower);
             if (knownVariantVars_.count(idLower)) valueIsVariant = true;
+        }
+        // Fix 089j: RHS 为类 Variant 字段 (me->mParentsColKey 等) 也视为
+        // Variant 表达式 — cExprIsVariant 只查函数前缀, me-> 成员不命中,
+        // 导致 PropertyGet 里 `ret = me->VarField` 不转 → C2440.
+        if (!valueIsVariant && value.compare(0, 4, "me->") == 0) {
+            std::string rhsMember = value.substr(4);
+            std::transform(rhsMember.begin(), rhsMember.end(), rhsMember.begin(), ::tolower);
+            if (classVariantMembers_.count(rhsMember)) valueIsVariant = true;
         }
         if (valueIsVariant) {
             std::string convertedValue = value;
