@@ -81,3 +81,9 @@ vbman/
 publish/msvc
 
 _bak
+# ---------- 专项修复小工程 (fix_tool.ps1) ----------
+vbman/src/_fix/
+vbman/src/FIX_*.vbp
+scripts/_fix_run.cmd
+scripts/_fix_*.txt
+scripts/_fix_*.ps1
