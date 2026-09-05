@@ -4570,6 +4570,10 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
                     // Fix 049b: Skip extraction if the C expression is already BSTR
                     // (e.g., VB6_SA_AT(BSTR, arr, idx) — isDefinitelyVariantExpr may
                     // return true due to symbol table/actual type mismatch)
+                    // 注: 此正常形参路径保留子串判断 (089k 收紧只用于运行时函数
+                    // 超参分支 4622/4681) — MsgBox/Replace 等有符号形参的调用在
+                    // 本路径收紧会造成已由 MsgBox 专用逻辑/4622 分支转换过的
+                    // 表达式二次包装 → C2440 (BSTR→vb6_VARIANT).
                     if (argVal.find("VB6_SA_AT(BSTR,") == std::string::npos
                         && argVal.find("vb6_BSTR") == std::string::npos) {
                         argVal = "vb6_VariantToString(" + argVal + ")";
@@ -4675,9 +4679,48 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
                     } else if (rtParamType == "double" || rtParamType == "float") {
                         argVal = "vb6_VariantToDouble(" + argVal + ")";
                     } else if (rtParamType == "BSTR") {
-                        // Fix 049b: Skip extraction if the C expression is already BSTR
-                        if (argVal.find("VB6_SA_AT(BSTR,") == std::string::npos
-                            && argVal.find("vb6_BSTR") == std::string::npos) {
+                        // Fix 089k: 顶层表达式是否已是 BSTR — 原 049b 用
+                        // argVal.find("vb6_BSTR") 子串包含判断, 对内部实参含
+                        // vb6_BSTR_FromStr(...) 的用户函数调用 (如
+                        // json_ParseErrorMessage(...)) 误判"已 BSTR" → 跳过
+                        // vb6_VariantToString 包装 → C2440 (vb6_VARIANT→BSTR).
+                        // 收紧为剥外层括号后的顶层前缀判断.
+                        auto exprTopIsBstr = [](const std::string& s) -> bool {
+                            std::string t = s;
+                            while (t.size() >= 2 && t.front() == '(' && t.back() == ')') {
+                                int depth = 0;
+                                bool whole = true;
+                                for (size_t k = 0; k < t.size(); k++) {
+                                    if (t[k] == '(') depth++;
+                                    else if (t[k] == ')') {
+                                        depth--;
+                                        if (depth == 0 && k < t.size() - 1) {
+                                            whole = false;
+                                            break;
+                                        }
+                                    }
+                                }
+                                if (!whole) break;
+                                t = t.substr(1, t.size() - 2);
+                            }
+                            static const char* bstrTopPrefixes[] = {
+                                "vb6_BSTR_",
+                                "VB6_SA_AT(BSTR,",
+                                // 已由 vb6_VariantToString 转换的结果必为 BSTR,
+                                // 顶层识别避免二次包装 → C2440 (BSTR→vb6_VARIANT).
+                                "vb6_VariantToString(",
+                                // COM 链结果 vb6_VariantFromComResult(...) 已在
+                                // 链生成/MsgBox 专用逻辑转换为 BSTR, 顶层识别跳过
+                                // 二次包装 (与旧 049b 子串检查行为等价 — 链内必含
+                                // vb6_ComPackBSTR(vb6_BSTR_FromStr...) 被旧检查命中).
+                                "vb6_VariantFromComResult("};
+                            for (auto* bp : bstrTopPrefixes) {
+                                size_t bpl = strlen(bp);
+                                if (t.compare(0, bpl, bp) == 0) return true;
+                            }
+                            return false;
+                        };
+                        if (!exprTopIsBstr(argVal)) {
                             argVal = "vb6_VariantToString(" + argVal + ")";
                         }
                     } else if (rtParamType == "void*") {
