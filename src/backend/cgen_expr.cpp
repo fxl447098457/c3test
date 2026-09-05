@@ -4631,6 +4631,43 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
                     std::transform(argLower.begin(), argLower.end(), argLower.begin(), ::tolower);
                     if (knownVariantVars_.count(argLower)) argIsVariant = true;
                 }
+                // Fix 089i: 函数调用返回 Variant 的实参 (VB 未声明返回类型 =
+                // Variant, 如 json_ParseErrorMessage(...) 作为 Err.Raise 的
+                // Description) — cExprIsVariant 只查字符串前缀, 对
+                // "vb6_<mod>_<fn>(...)" 用户函数调用文本不生效 → C2440.
+                // 查被调函数符号的返回类型: kind Function/PropertyGet 且
+                // returnType Variant → C 层返回 vb6_VARIANT, 需按参数类型提取.
+                // 不匹配对象属性 (As Object → void*, returnType 非 Variant).
+                if (!argIsVariant && node.positional[i]->kind == ASTNodeKind::IndexOrCallExpr) {
+                    auto& callNode89i = static_cast<IndexOrCallExpr&>(*node.positional[i]);
+                    if (callNode89i.callee
+                        && callNode89i.callee->kind == ASTNodeKind::IdentifierExpr) {
+                        std::string calleeLower89i =
+                            static_cast<IdentifierExpr&>(*callNode89i.callee).name;
+                        std::transform(calleeLower89i.begin(), calleeLower89i.end(),
+                                       calleeLower89i.begin(), ::tolower);
+                        for (const auto& [k89i, s89i] : symTab_.moduleScope()->symbols()) {
+                            if (s89i->kind != SymbolKind::Function
+                                && s89i->kind != SymbolKind::PropertyGet) continue;
+                            if (s89i->lowerName != calleeLower89i) continue;
+                            // 返回类型语义 Variant (VB 未声明返回 = Variant).
+                            // 对象属性 As Object → void* (returnType Object),
+                            // 不会误匹配; PropertyGet 的 Unknown 属性(可能 void*)
+                            // 保守不包, 仅模块 Function 的 Unknown(未推断出类型但
+                            // 模块函数 C 返回 vb6_VARIANT)才包.
+                            bool retIsVar89i =
+                                (s89i->type == Vb6Type::Variant
+                                 || s89i->type == Vb6Type::Empty);
+                            if (s89i->kind == SymbolKind::PropertyGet) {
+                                if (retIsVar89i) argIsVariant = true;
+                            } else if (retIsVar89i
+                                       || s89i->type == Vb6Type::Unknown) {
+                                argIsVariant = true;
+                            }
+                            break;
+                        }
+                    }
+                }
                 if (argIsVariant) {
                     if (rtParamType == "int32_t" || rtParamType == "int16_t"
                         || rtParamType == "uint8_t" || rtParamType == "LONG") {
