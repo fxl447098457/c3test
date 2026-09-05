@@ -1929,7 +1929,13 @@ std::string CCodeGen::getClassMethodReturnType(const std::string& className,
                 // Fix 015 semantic_analyzer 已在该 Function 的 variableTypeName 记录返回类名
                 return canonicalClassName(sym->variableTypeName);
             }
-            return "";  // 非 Object 返回类型或无类型名 → 不能继续链
+            // Fix 088e: 符号匹配但注入的 type 记录不完整 (PropertyGet 返回类实例
+            // 如 RecvBuffer As cByteBuffer, 注入符号 type 未标 Object/变量类型名空)
+            // 时, 不再提前 return "" — 落入 Phase B 用 Class 符号的 memberReturnTypes
+            // (语义层原始记录, 不受注入影响) 兜底. 否则 Client.RecvBuffer.Size 等
+            // 链推断断 → 生成 prop_get(...).Size (C2039: Size 不是 vb6_cls_cByteBuffer
+            // 的成员).
+            continue;
         }
         // Property Let/Set / Sub 无返回值, 跳过
     }
