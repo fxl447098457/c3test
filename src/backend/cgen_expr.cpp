@@ -829,8 +829,10 @@ void CCodeGen::visit(IdentifierExpr& node) {
         if (asCallCallee_) {
             // Used as callee in IndexOrCallExpr — return function name, caller adds args + me
             lastExpr_ = funcName;
-        } else if (isClassModule_ && currentProc_) {
+        } else if (isClassModule_ && currentProc_ && !sym->isExternal) {
             // Bare reference in class method — call getter with me
+            // Fix 086: 外部属性 (跨模块, 如 ToolsIDE.IsIDE 标准模块属性) 不带 me —
+            // 其C签名无 me 参数, 追加会 C2197 (参数太多)
             lastExpr_ = funcName + "((void*)me)";
         } else {
             // Standard module or external — no me parameter
@@ -3754,6 +3756,46 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
             std::string funcPart = callee.substr(0, openPos);
             classMethodObjArg = callee.substr(openPos + 1, callee.size() - openPos - 2);
             callee = funcPart;
+            // Fix 086: 链式默认属性调用 — 内层是无参 prop_get_(如 .Root("data")) 或
+            // COM 调用 (Dic(N)(RouteName)) 时, 内层返回 COM 对象, 外层索引是对返回
+            // 对象的 Item 调用. 不能并入内层参数表 (C2197 参数太多).
+            // 有声明参数的 prop_get (Prop(k)) 仍走合并 (内层只发了this).
+            bool innerIsChainedObj = false;
+            if (!node.positional.empty() && node.named.empty()) {
+                // funcPart 是拆开后的裸函数名 (无括号)
+                if (funcPart == "vb6_ComCall" || funcPart == "vb6_ComCallObject"
+                    || funcPart == "vb6_ComGetObjectProp"
+                    || funcPart == "vb6_VariantFromComResult") {
+                    innerIsChainedObj = true;
+                } else {
+                    size_t gp = funcPart.find("_prop_get_");
+                    if (gp != std::string::npos) {
+                        std::string propName = funcPart.substr(gp + 10);
+                        Symbol* propSym86 = symTab_.lookupModuleByKind(propName, SymbolKind::PropertyGet);
+                        if (propSym86 && propSym86->params.empty()) innerIsChainedObj = true;
+                    }
+                }
+            }
+            if (innerIsChainedObj) {
+                std::string innerObj = funcPart + "(" + classMethodObjArg + ")";
+                std::vector<std::string> packedArgs86;
+                for (size_t i = 0; i < node.positional.size(); i++) {
+                    std::string packFn86 = comPackExpr(*node.positional[i]);
+                    emitExpr(*node.positional[i]);
+                    { std::string resolved86 = resolveComMarkerForPack(packFn86); if (!resolved86.empty()) lastExpr_ = resolved86; }
+                    packedArgs86.push_back(packFn86 + "(" + lastExpr_ + ")");
+                }
+                int32_t argc86 = (int32_t)packedArgs86.size();
+                std::string argsArray86 = "(void*[]){";
+                for (int i = 0; i < argc86; i++) {
+                    if (i > 0) argsArray86 += ", ";
+                    argsArray86 += packedArgs86[i];
+                }
+                argsArray86 += "}";
+                lastExpr_ = "vb6_VariantFromComResult(vb6_ComCall(" + innerObj + ", L\"Item\", "
+                          + argsArray86 + ", " + std::to_string(argc86) + "))";
+                return;
+            }
         }
     }
 
