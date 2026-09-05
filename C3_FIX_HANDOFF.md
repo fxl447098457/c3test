@@ -1,14 +1,25 @@
 # C3 编译器错误修复 — 任务交接文档
 
 > 用途：新会话恢复上下文用。新开会话后直接说「读取 C3_FIX_HANDOFF.md 并继续修复」。
-> 更新日期：2026-09-05（088e-089h 系列完成验证：552 → 216）
+> 更新日期：2026-09-05（089i-089k 系列完成验证：216 → 204）
 
 ## 1. 项目与目标
 
 - **C3**：VB6→C 转换器（工作区 `c:/Users/vi/Desktop/c3.vb6.pro`）
 - **目标**：减少 `vbman/dist/c3-error.log` 中 MSVC 编译错误数
-- **进度**：777 → 588 → 552 → **216**（最新统计口径为 `: error C` 行数）
-- **当前状态**：C2102/C2099/C2129/C2065 已清零；剩余大头 C2440 x118（COM/Variant 打包簇）+ C2198 x45 + C2039 x11 + 各零星错误
+- **进度**：777 → 588 → 552 → 216 → **204**（最新统计口径为 `: error C` 行数；C2440 110）
+- **当前状态**：C2102/C2099/C2129/C2065 已清零；剩余大头 C2440 x106 + C2198（参数过少）+ C2039（成员不存在/Item 链）等
+- **快速验证**：修复 C3 后不要直接全量编 vbman（2-3 分钟），先跑 `scripts/fix_tool.ps1` 裁剪出含错误模块的最小 vbp 工程（约 5-7 秒/簇）复现/验证，最后才全量回归。
+
+## 2. 构建 / 验证工作流
+
+1. `scripts/build.bat` — 重编 C3.exe
+2. **快速迭代（推荐）**：`powershell -File scripts/fix_tool.ps1 -Modules <相对 vbman/src 路径>[,<更多>...]`
+   - 从 VBMAN.vbp 裁剪只含指定模块的最小工程（产物 `vbman/src/FIX_<Name>.vbp` + `vbman/src/_fix/<Name>/out/c3-error.log`）
+   - 注意：多模块参数需写成 wrapper .ps1（`& fix_tool.ps1 -Modules @(...)`）或单模块直传；错误复现数与全量一致（已验证 ToolsJsonVba 7/7、cZipArchive 4 模块簇 23/23）
+3. 全量回归：`vbman/build_vbman.bat`（产物 `vbman/dist/c3-error.log`）
+4. `scripts/_tmp_count.ps1` — 统计错误总数
+5. **注意**：PowerShell 内联 `$_` 会被转义，复杂逻辑必须写进 .ps1 脚本文件再执行
 
 ## 2. 构建 / 验证工作流
 
@@ -22,7 +33,14 @@
 
 ## 3. 错误演进史
 
-777 → 774 → 748 → 723（VBA 子集常量）→ 700（VBA 全量 + 枚举）→ 638（ReDim/Erase + 枚举）→ 594（C2102 常量取址修复）→ 589 → 588（C2099 静态初始化清零）
+777 → 774 → 748 → 723（VBA 子集常量）→ 700（VBA 全量 + 枚举）→ 638（ReDim/Erase + 枚举）→ 594（C2102 常量取址修复）→ 589 → 588（C2099 静态初始化清零）→ 216（088e-089h）→ **204（089i/j/k）**
+
+### 最近修复摘要（089i-089k，216 → 204）
+
+- **089i**：用户函数调用返回 Variant 作实参时按形参类型解包（正常符号路径 + 运行时函数超参路径 089i 判定 argIsVariant）
+- **089j**：VB6 无 `As` 类型声明成员默认 Variant（打包/解包/初始化）
+- **089k**：4622（运行时函数超参 BSTR 分支）把 049b 的 `find("vb6_BSTR")` 子串包含判断收紧为「剥外层括号后的顶层前缀表」（`vb6_BSTR_`/`VB6_SA_AT(BSTR,`/`vb6_VariantToString(`/`vb6_VariantFromComResult(`，前缀长度用 `strlen` 避免硬编码错误）——修复 `json_ParseErrorMessage(...)` 这类内部实参含 `vb6_BSTR_FromStr` 的用户函数调用被误判「已 BSTR」而漏包 `vb6_VariantToString`（ToolsJsonVba ErrRaise 6 个 C2440）；4575 正常形参路径保留子串检查避免 MsgBox 专用逻辑已转换的表达式二次包装
+- **遗留**：Demo 104/534 的 COM 链（`cJson.Root.Item("data").Item(...)` 动态 dispatch 参数形态 C2172/BSTR→Variant）与 C2039 `Item` 成员为**既有深层问题**，专项修 Demo 模块时处理
 
 ## 4. 已完成的修复（Fix 084 系列）
 
