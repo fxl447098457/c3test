@@ -240,15 +240,34 @@ bool CCodeGen::generate(Module& module, const std::string& baseName,
     // 这样在 MemberAccessExpr 中, ToolsStr.HasStr 能正确分发为 vb6_cToolsStr_HasStr(ToolsStr, ...)
     for (const auto& [key, sym] : symTab_.moduleScope()->symbols()) {
         if (sym->isExternal && sym->kind == SymbolKind::Variable && !sym->variableTypeName.empty()) {
-            auto* clsSym = symTab_.lookupModule(sym->variableTypeName);
+            std::string varLower = sym->name;
+            std::transform(varLower.begin(), varLower.end(), varLower.begin(), ::tolower);
+            auto* clsSym = lookupModuleDotted(sym->variableTypeName);
             if (clsSym && clsSym->kind == SymbolKind::Class && !clsSym->isInterface) {
-                std::string varLower = sym->name;
-                std::transform(varLower.begin(), varLower.end(), varLower.begin(), ::tolower);
                 knownClassVars_[varLower] = clsSym->name;
                 // P14.3.1: Dim As New 自动实例化 — 外部 As New 变量也需要注册
                 // 检查源Symbol是否有 As New 标志 (通过 knownNewVars_ 传递)
                 // 对于 Public x As New ClassName, 在 consuming 模块中也需要 auto-instantiate
                 // 暂时不注册 knownNewVars_, 因为 As New 信息没有传递到外部 Symbol
+            }
+            // Fix 089: 注册外部模块的 COM/内置对象模块级变量 (C 类型 void*)
+            // 此前的注册只覆盖了"项目类实例变量" (knownClassVars_). 对 .bas 标准模块中
+            // Public timers As New Collection / Public x As Object 这类跨模块变量,
+            // consuming 类模块的 knownObjectVars_ 为空, 导致 timers.Add(...) 落入通用
+            // fallback 生成结构成员调用 (void* 上 .member) → C2224. 本分支将可判定为
+            // COM 对象 (sym->type == Object) 的外部变量注册到对应 COM 跟踪集合:
+            //   - ComClass / 接口 → knownTypedComVars_ / knownIfaceVars_ (与 cgen_decl
+            //     visit(VariableDecl) 的本地注册规则一致)
+            //   - 内置对象 (Collection/ErrObject 等) / 其它 Object → knownObjectVars_
+            //     (后期绑定 COM dispatch, vb6_ComCall)
+            else if (sym->type == Vb6Type::Object) {
+                if (clsSym && clsSym->kind == SymbolKind::ComClass) {
+                    knownTypedComVars_[varLower] = clsSym;
+                } else if (clsSym && clsSym->kind == SymbolKind::Class && clsSym->isInterface) {
+                    knownIfaceVars_[varLower] = clsSym->name;
+                } else {
+                    knownObjectVars_.insert(varLower);
+                }
             }
         }
     }

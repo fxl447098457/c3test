@@ -2408,8 +2408,15 @@ void CCodeGen::visit(MemberAccessExpr& node) {
                               + "  /* class var ." + node.memberName + " field */";
                 }
             }
+        // Fix 089b: trailing 变量名匹配在 obj 含 '.' 时跳过 — obj 是 UDT/属性字段链
+        // (如 uFile.Data) 时, 尾段 "data" 是字段名而非变量名. 若外部 COM 变量恰好
+        // 与 UDT 字段同名 (如 cSSE/cCsv 的 Public Data As Dictionary), trailing 匹配
+        // 会误把 UDT 值字段当 COM 指针 → obj->member (C2232: uFile.Data->X).
+        // 含 '.' 的链交由 Fix 088c / Fix 085(inferUdtTypeOfExpr) 兜底, 生成正确 . 访问.
+        // 形如 me->field / 裸变量名的 trailing (Fix 014 场景) 不受影响.
         } else if (knownTypedComVars_.count(objLower)
-                   || (!trailingLower.empty() && knownTypedComVars_.count(trailingLower))) {
+                   || (obj.find('.') == std::string::npos && !trailingLower.empty()
+                       && knownTypedComVars_.count(trailingLower))) {
             lastExpr_ = obj + "->" + cIdent(node.memberName);
         } else if (node.object) {
             // Fix 088c: AST 层兜底推断 — obj 是 knownClassVars_ 未覆盖的类实例
