@@ -1702,6 +1702,49 @@ std::string CCodeGen::resolveClassMemberCall(const std::string& className,
         }
     }
 
+    // Fix 089g: 跨模块同名成员 storageKey 抢占 — 多个类有同名 Property Get 时
+    // (如 cWebSocketClient / cWebSocketServerClient 都有 State), driver.cpp 的
+    // globalPublicSyms 按 storageKey (state$pg) 只保留先分析模块的符号. 目标类的
+    // Get 外部符号可能被别类抢占而 Let ($pl) 正常注入 → 上面的循环只找到 Let,
+    // 读上下文 (oClient.State = 1) 误发 prop_let_State → void 返回/C2198.
+    // 修正: Get 缺失但读到 Let/Set 时, 查 Class 符号的 memberProcKinds — semantic
+    // 按读上下文优先级 (Get > Function > Sub > Let > Set) 写入, 可确定该成员在读
+    // 上下文的真实形式. 若读形式是 PropertyGet/Function/Sub, 按读形式重定向,
+    // 避免生成 prop_let_/prop_set_ 调用.
+    if (!foundGet) {
+        const Symbol* classSymFix = nullptr;
+        std::string classCanonFix;
+        for (const auto& [ckey2, csym2] : symTab_.moduleScope()->symbols()) {
+            if (csym2->kind != SymbolKind::Class) continue;
+            if (csym2->isExternal) {
+                if (Symbol::toLower(csym2->sourceModule) == classNameLower) {
+                    classSymFix = csym2.get();
+                    classCanonFix = csym2->sourceModule;
+                    break;
+                }
+            } else if (isClassModule_ && Symbol::toLower(moduleName_) == classNameLower) {
+                classSymFix = csym2.get();
+                classCanonFix = moduleName_;
+                break;
+            }
+        }
+        if (classSymFix) {
+            auto itKindFix = classSymFix->memberProcKinds.find(memberLower);
+            if (itKindFix != classSymFix->memberProcKinds.end()) {
+                std::string canonFix = classCanonFix.empty() ? canonicalClassName : classCanonFix;
+                switch (itKindFix->second) {
+                    case ProcKind::PropertyGet:
+                        return "vb6_" + cIdent(canonFix) + "_prop_get_" + cIdent(memberName);
+                    case ProcKind::Function:
+                    case ProcKind::Sub:
+                        return "vb6_" + cIdent(canonFix) + "_" + cIdent(memberName);
+                    default:
+                        break;  // PropertyLet/PropertySet 为主 — 维持 scope 选择
+                }
+            }
+        }
+    }
+
     // 选择优先级: Get > Sub/Function > Let > Set
     // (本helper用于读上下文; 写上下文由tryRewriteCOMLvalue把Get改写成Let/Set)
     const Symbol* chosen = foundGet;

@@ -810,12 +810,27 @@ void CCodeGen::visit(IdentifierExpr& node) {
         // MySub 语句形式). callee上下文 (asCallCallee_) 由 IndexOrCallExpr 追加
         // 括号, 此处不重复; 含必选参数的过程无括号引用在 VB6 中是编译错误,
         // 保持裸名让其延续原有行为 (ParamArray 视同可选).
+        // Fix 089f: 类模块内无括号引用本类成员 Function (pvSessionID =
+        // GenerateSessionID) — C 签名带 me 首参, 只加 "()" 会漏 me → C2198
+        // 参数太少. 与 CallStmt (cgen_stmt P6.6) / PropertyGet (上方 832-836)
+        // 同一判定方式: 函数名以 "vb6_<本类>_" 前缀开头即本类成员方法.
         if (!asCallCallee_ && !std::getenv("C3_NO_BAREFN")) {
             bool hasRequired = false;
             for (const auto& p : sym->params) {
                 if (!p.isOptional && !p.isParamArray) { hasRequired = true; break; }
             }
-            if (!hasRequired) lastExpr_ += "()";
+            if (!hasRequired) {
+                if (isClassModule_ && currentProc_) {
+                    std::string modPrefix = "vb6_" + cIdent(moduleName_) + "_";
+                    if (lastExpr_.find(modPrefix) == 0) {
+                        lastExpr_ += "((void*)me)";
+                    } else {
+                        lastExpr_ += "()";
+                    }
+                } else {
+                    lastExpr_ += "()";
+                }
+            }
         }
         return;
     }
@@ -1880,7 +1895,57 @@ void CCodeGen::visit(MemberAccessExpr& node) {
                 if (!resolvedFn.empty()) {
                     emitExpr(*node.object);
                     std::string objExpr = std::move(lastExpr_);
-                    lastExpr_ = resolvedFn + "(" + objExpr + ")";
+                    // Fix 089h: 值上下文无括号方法引用 (Trim(FileStream.ReadLine)
+                    // → vb6_cToolsStream_ReadLine(me->FileStream) 只发 this) —
+                    // C2198 参数太少. 补默认参数 (Optional/必选), 与链式值上下文
+                    // / With 分支 (Fix 044a) 一致. asCallCallee_ 由外层补参.
+                    // 属性 (prop_get_/prop_let_/prop_set_) 不 pad — findClassMemberCallParams
+                    // 对 Get+Let 并存属性返回 Let 参数, 无括号属性读只发 me 即正确
+                    // (prop_get_State(oClient)), pad 反而 C2197 参数过多.
+                    if (!asCallCallee_
+                        && resolvedFn.find("_prop_") == std::string::npos) {
+                        std::vector<ParameterInfo> params89h;
+                        bool isBuiltin89h = false;
+                        if (findClassMemberCallParams(itClassVar->second, node.memberName,
+                                                       params89h, isBuiltin89h)
+                            && !params89h.empty() && !isBuiltin89h) {
+                            std::string argList89h = objExpr;
+                            for (size_t i = 0; i < params89h.size(); i++) {
+                                const auto& param = params89h[i];
+                                argList89h += ", ";
+                                std::string defVal89h;
+                                if (param.hasDefaultValue && !param.defaultValueExpr.empty()) {
+                                    defVal89h = param.defaultValueExpr;
+                                } else {
+                                    defVal89h = defaultValue(param.type);
+                                }
+                                if (param.isByVal) {
+                                    argList89h += defVal89h;
+                                } else {
+                                    std::string cType89h = mapType(param.type);
+                                    if (param.type == Vb6Type::Variant
+                                        || param.type == Vb6Type::Empty
+                                        || param.type == Vb6Type::Null
+                                        || param.type == Vb6Type::Object) {
+                                        argList89h += "&(" + cType89h + "){0}";
+                                    } else {
+                                        argList89h += "&(" + cType89h + "){" + defVal89h + "}";
+                                    }
+                                }
+                            }
+                            for (size_t i = 0; i < params89h.size(); i++) {
+                                const auto& param = params89h[i];
+                                if (param.isOptional && !param.isParamArray) {
+                                    argList89h += ", 0";
+                                }
+                            }
+                            lastExpr_ = resolvedFn + "(" + argList89h + ")";
+                        } else {
+                            lastExpr_ = resolvedFn + "(" + objExpr + ")";
+                        }
+                    } else {
+                        lastExpr_ = resolvedFn + "(" + objExpr + ")";
+                    }
                     return;
                 }
                 // resolveClassMemberCall返回空 → 该类中无此方法/属性 → 数据字段访问
@@ -2314,8 +2379,53 @@ void CCodeGen::visit(MemberAccessExpr& node) {
                 }
             } else {
                 if (!resolvedFn.empty()) {
-                    // 值上下文: emit 完整 func(wrappedObj) 形式 (无默认参数)
-                    lastExpr_ = resolvedFn + "(" + wrappedObj + ")";
+                    // 值上下文 (If Db.Sql(s).Param(p).QueryParam Then 等无括号裸引用):
+                    // emit 完整 func(wrappedObj) 形式 — 但要补默认参数. 仅发 this 会
+                    // C2198 参数太少 (QueryParam 声明5参传1参). 参数表经
+                    // findClassMemberCallParams 精确取得 (Fix 033 优先级与
+                    // resolveClassMemberCall 一致); 无参属性 Get 读 (params 空) 不受影响.
+                    // Fix 089h: Optional/必选参数按默认值补全 (同 With 类 Fix 044a),
+                    // 必选参数在 VB 无括号引用时非法, 但补默认值可保持可编译.
+                    std::vector<ParameterInfo> params89h;
+                    bool isBuiltin89h = false;
+                    if (resolvedFn.find("_prop_") == std::string::npos
+                        && findClassMemberCallParams(retClassName, node.memberName,
+                                                   params89h, isBuiltin89h)
+                        && !params89h.empty() && !isBuiltin89h) {
+                        std::string argList89h = wrappedObj;
+                        for (size_t i = 0; i < params89h.size(); i++) {
+                            const auto& param = params89h[i];
+                            argList89h += ", ";
+                            std::string defVal89h;
+                            if (param.hasDefaultValue && !param.defaultValueExpr.empty()) {
+                                defVal89h = param.defaultValueExpr;
+                            } else {
+                                defVal89h = defaultValue(param.type);
+                            }
+                            if (param.isByVal) {
+                                argList89h += defVal89h;
+                            } else {
+                                std::string cType89h = mapType(param.type);
+                                if (param.type == Vb6Type::Variant
+                                    || param.type == Vb6Type::Empty
+                                    || param.type == Vb6Type::Null
+                                    || param.type == Vb6Type::Object) {
+                                    argList89h += "&(" + cType89h + "){0}";
+                                } else {
+                                    argList89h += "&(" + cType89h + "){" + defVal89h + "}";
+                                }
+                            }
+                        }
+                        for (size_t i = 0; i < params89h.size(); i++) {
+                            const auto& param = params89h[i];
+                            if (param.isOptional && !param.isParamArray) {
+                                argList89h += ", 0";
+                            }
+                        }
+                        lastExpr_ = resolvedFn + "(" + argList89h + ")";
+                    } else {
+                        lastExpr_ = resolvedFn + "(" + wrappedObj + ")";
+                    }
                 } else {
                     lastExpr_ = wrappedObj + "->" + cIdent(node.memberName);
                 }
@@ -2393,7 +2503,54 @@ void CCodeGen::visit(MemberAccessExpr& node) {
             std::string resolvedFn = resolveClassMemberCall(itClassVar->second, node.memberName);
             if (!resolvedFn.empty()) {
                 // 方法/属性调用: vb6_<className>_<prefix><memberName>(obj)
-                lastExpr_ = resolvedFn + "(" + obj + ")";
+                // Fix 089h: 值上下文无括号方法引用 (x = obj.ReadLine 或参数内引用)
+                // 只发 this → C2198 参数太少 (ReadLine 声明3参). 补默认参数
+                // (同 Fix 015 链式值上下文 / With 类 Fix 044a). asCallCallee_
+                // (带括号调用) 由外层 IndexOrCallExpr 经 split 补参, 此处不 pad.
+                if (!asCallCallee_
+                    && resolvedFn.find("_prop_") == std::string::npos) {
+                    std::vector<ParameterInfo> params89h;
+                    bool isBuiltin89h = false;
+                    if (findClassMemberCallParams(itClassVar->second, node.memberName,
+                                                   params89h, isBuiltin89h)
+                        && !params89h.empty() && !isBuiltin89h) {
+                        std::string argList89h = obj;
+                        for (size_t i = 0; i < params89h.size(); i++) {
+                            const auto& param = params89h[i];
+                            argList89h += ", ";
+                            std::string defVal89h;
+                            if (param.hasDefaultValue && !param.defaultValueExpr.empty()) {
+                                defVal89h = param.defaultValueExpr;
+                            } else {
+                                defVal89h = defaultValue(param.type);
+                            }
+                            if (param.isByVal) {
+                                argList89h += defVal89h;
+                            } else {
+                                std::string cType89h = mapType(param.type);
+                                if (param.type == Vb6Type::Variant
+                                    || param.type == Vb6Type::Empty
+                                    || param.type == Vb6Type::Null
+                                    || param.type == Vb6Type::Object) {
+                                    argList89h += "&(" + cType89h + "){0}";
+                                } else {
+                                    argList89h += "&(" + cType89h + "){" + defVal89h + "}";
+                                }
+                            }
+                        }
+                        for (size_t i = 0; i < params89h.size(); i++) {
+                            const auto& param = params89h[i];
+                            if (param.isOptional && !param.isParamArray) {
+                                argList89h += ", 0";
+                            }
+                        }
+                        lastExpr_ = resolvedFn + "(" + argList89h + ")";
+                    } else {
+                        lastExpr_ = resolvedFn + "(" + obj + ")";
+                    }
+                } else {
+                    lastExpr_ = resolvedFn + "(" + obj + ")";
+                }
             } else {
                 // 非方法/属性 → 数据字段访问: obj->member
                 // (此时obj类型为 vb6_cls_<className>*, ->访问可正确编译)
