@@ -1,15 +1,16 @@
 # C3 编译器错误修复 — 任务交接文档
 
 > 用途：新会话恢复上下文用。新开会话后直接说「读取 C3_FIX_HANDOFF.md 并继续修复」。
-> 更新日期：2026-09-05（089i-089k 系列完成验证：216 → 204）
+> 更新日期：2026-09-06（090a/c/d/e + P25b 系列完成验证：204 → 176）
 
 ## 1. 项目与目标
 
 - **C3**：VB6→C 转换器（工作区 `c:/Users/vi/Desktop/c3.vb6.pro`）
 - **目标**：减少 `vbman/dist/c3-error.log` 中 MSVC 编译错误数
-- **进度**：777 → 588 → 552 → 216 → **204**（最新统计口径为 `: error C` 行数；C2440 110）
-- **当前状态**：C2102/C2099/C2129/C2065 已清零；剩余大头 C2440 x106 + C2198（参数过少）+ C2039（成员不存在/Item 链）等
+- **进度**：777 → 588 → 552 → 216 → 204 → **176**（最新统计口径为 `: error C` 行数；C2440 95）
+- **当前状态**：cIni 模块全量清零（ReadLine Optional padding / As New 类字段 cast / 默认成员链式写）；剩余大头 C2440 x95 + C2198 x36 + C2039 x11；cToolsStr 剩 Add C2197/C2440、cCollection 剩 cJson.Items 属性 Let 参数少（跨模块 cJson/cCollection 生成缺陷，专项处理）
 - **快速验证**：修复 C3 后不要直接全量编 vbman（2-3 分钟），先跑 `scripts/fix_tool.ps1` 裁剪出含错误模块的最小 vbp 工程（约 5-7 秒/簇）复现/验证，最后才全量回归。
+- **cluster 注意**：小工程缺依赖模块时部分跨模块代码分支不执行，可能零错但全量仍报（cCollection/cToolsStr 案例），须以全量回归为准。
 
 ## 2. 构建 / 验证工作流
 
@@ -33,7 +34,15 @@
 
 ## 3. 错误演进史
 
-777 → 774 → 748 → 723（VBA 子集常量）→ 700（VBA 全量 + 枚举）→ 638（ReDim/Erase + 枚举）→ 594（C2102 常量取址修复）→ 589 → 588（C2099 静态初始化清零）→ 216（088e-089h）→ **204（089i/j/k）**
+777 → 774 → 748 → 723（VBA 子集常量）→ 700（VBA 全量 + 枚举）→ 638（ReDim/Erase + 枚举）→ 594（C2102 常量取址修复）→ 589 → 588（C2099 静态初始化清零）→ 216（088e-089h）→ 204（089i/j/k）→ **176（090a/c/d/e + P25b）**
+
+### 最近修复摘要（090a/c/d/e + P25b 链式写，204 → 176）
+
+- **P25b（链式 COM 默认属性写）**：`Dic(Section)(Key) = v`（嵌套 Dictionary/默认项链）LHS → `vb6_ComSetPropArg(vb6_ComCallObject(...inner...), L"Item", outer-args, value)`。链层从最深（`chain[last]`）向 `chain[1]` 逆序取默认成员对象，`chain[0]` 为最外层带索引 Put；根须是 COM 变量或（**090e**）模块默认成员 PropertyGet（VB_UserMemId=0，如 cIni.Root 返回 Dictionary）→ emitExpr(Root) 得 `vb6_cIni_prop_get_Root(me)` 作为链起点
+- **090a（As New 类字段 cast）**：`Dim FileStream As New cToolsStream` → C 结构体 `void*` 字段；knownClassVars_ fallback 中 trailingLower 命中 knownNewVars_ 且为工程类（kind==Class）→ 成员访问前 cast `((vb6_cls_X*)obj)->member`（外部 COM 仍走 dispatch 不 cast）；driver.cpp classTypedFieldMap 纳入 As New 工程类字段使 inferClassTypeOfExpr 可推断字段类
+- **090c（无实参类方法调用的 Optional padding）**：`Trim(FileStream.ReadLine())` 空括号无参调用 → MAE 把 this 拼成完整调用文本 `vb6_cToolsStream_ReadLine(me->FileStream)`，ICE 3984 处"callee 完整调用且无实参"直接 return 跳过 P14.1.4 补齐 → C2198。修复：positional 空时若 callee 是 MemberAccessExpr 且 `findClassMemberCallParams` 非空（方法有参数），置 needsSplitForMissingArgs 落入拆分流程 → calleeParams 解析 → 补默认值 + `_has_` 尾参 `(me->FileStream, 0, 0)`
+- **090d（CByte/CSng/CBool 转换适配）**：P8.4 只覆盖 CInt/CLng/CDbl。`CByte("&H" & Mid(...))` 生成 `vb6_CByte(BSTR)` → C2440。修复：P8.4 扩展 CByte/CSng/CBool + V 后缀（新增 inline `vb6_CByteV/vb6_CSngV/vb6_CBoolV`）；BSTR 实参解析从 `vb6_Val` 升级为新 RTL `vb6_NumVal`（VB6 类型转换语义：支持 `&H`/`&O` 前缀 + 十进制前缀数字，Val 不识别 &H）；**改 RTL 后须重跑 `.temp/build_rtl_libs.bat` 并重编 C3.exe（lib 内嵌）**
+- **验证**：`scripts/_fix_ini_cluster.ps1`（cIni+cToolsStream+cCollection+cToolsStr 四模块簇）编译错误 204 阶段 6 个 → 0；全量 191 → 176（C2440 110→95）。cluster 残留仅 LNK2019（缺 ToolsFso/ToolsMath 模块，非编译缺陷）
 
 ### 最近修复摘要（089i-089k，216 → 204）
 
