@@ -1795,6 +1795,27 @@ void CCodeGen::visit(MemberAccessExpr& node) {
                 && !currentReturnVar_.empty()) {
                 bool isCls084z = currentReturnCType_.find("vb6_cls_") != std::string::npos;
                 if (isCls084z) {
+                    // Fix 088d: 函数返回类实例时, 函数名引用的成员可能是方法/属性
+                    // (ReturnJson.Decode s) 而非仅公开数据字段 (NewItem.RootItem).
+                    // 先尝试类方法/属性分发 (canonical 调用), 找不到才视为字段:
+                    //   vb6_cJson_Decode((void*)vb6_ret_ReturnJson, s)
+                    // 此前无条件生成 vb6_ret_X->member → C2039 (Decode 不是
+                    // vb6_cls_cJson 的成员).
+                    std::string retCls088d = currentReturnCType_.substr(8);
+                    if (!retCls088d.empty() && retCls088d.back() == '*')
+                        retCls088d.pop_back();
+                    std::string fn088d =
+                        resolveClassMemberCall(retCls088d, node.memberName);
+                    if (!fn088d.empty()) {
+                        if (asCallCallee_) {
+                            pendingChainObj_ = "(void*)" + currentReturnVar_;
+                            lastExpr_ = fn088d;  // 外层补参数
+                        } else {
+                            lastExpr_ = fn088d + "((void*)" + currentReturnVar_ + ")";
+                        }
+                        return;
+                    }
+                    // 类无此成员 → 公开数据字段 (RootItem 等)
                     lastExpr_ = currentReturnVar_ + "->" + cIdent(node.memberName);
                 } else {
                     // Fix 085: 当前函数返回 UDT 时, 字段为对象(Collection/COM)需标记,
@@ -2193,12 +2214,46 @@ void CCodeGen::visit(MemberAccessExpr& node) {
     //   Db.Rs.EOF         → vb6_ComGetXXXProp(Db->Rs..., L"EOF")
     //   Db.Rs.FileExists()→ vb6_ComCallXXX(Db->Rs..., L"FileExists", args, argc)
     // 注: class_voidptr 的注释会被 MSVC 视为空白, 不影响 C 代码语义.
-    if (obj.find("/* class var .") != std::string::npos &&
-        obj.find(" voidptr */") != std::string::npos) {
-        comObjExpr_ = obj;
-        comMemberName_ = node.memberName;
-        isComMarker_ = true;
-        lastExpr_ = obj;  // 保持 void* 对象表达式供外层使用
+    if (obj.find("/* class var .") != std::string::npos) {
+        if (obj.find(" voidptr */") != std::string::npos) {
+            comObjExpr_ = obj;
+            comMemberName_ = node.memberName;
+            isComMarker_ = true;
+            lastExpr_ = obj;  // 保持 void* 对象表达式供外层使用
+            return;
+        }
+        // Fix 088b: typed 类对象字段链 — obj 是 "objExpr  /* class var .X field */"
+        // (无 voidptr 注释), 字段是项目类实例 (vb6_cls_Y*). 外层 .Method/Property 应
+        // 解析为 canonical 调用, 与 udt objfield 的 vb6_cls_ 分支同机制. 此前只有
+        // void* (COM) 字段被消费, typed 字段 (如 oCallback.Socket As cTlsReMaster)
+        // 落入主 fallback 生成 obj'.'member → C2039 (Accept 不是 vb6_cls_cTlsReMaster
+        // 的成员). 例: oCallback.Socket.Accept requestId
+        //   → vb6_cTlsReMaster_Accept((void*)oCallback->Socket, &requestId)
+        std::string objExpr = obj;
+        size_t mkPos = obj.find("  /* class var .");
+        if (mkPos != std::string::npos) objExpr = obj.substr(0, mkPos);
+        std::string fieldCls =
+            node.object ? inferClassTypeOfExpr(*node.object) : "";
+        if (!fieldCls.empty()) {
+            std::string resolvedFn =
+                resolveClassMemberCall(fieldCls, node.memberName);
+            if (!resolvedFn.empty()) {
+                std::string thisArg = "(void*)" + objExpr;
+                if (asCallCallee_) {
+                    // 由外层 IndexOrCallExpr/CallStmt 把 thisArg 前置到参数首 (同 Fix 015)
+                    pendingChainObj_ = thisArg;
+                    lastExpr_ = resolvedFn;
+                } else {
+                    lastExpr_ = resolvedFn + "(" + thisArg + ")";
+                }
+                return;
+            }
+            // 类中无此方法/属性 → 类数据字段 (Public Field): objExpr->field
+            lastExpr_ = objExpr + "->" + cIdent(node.memberName);
+            return;
+        }
+        // 字段类型推断失败 → 按结构体数据字段访问
+        lastExpr_ = objExpr + "->" + cIdent(node.memberName);
         return;
     }
 
@@ -2356,17 +2411,42 @@ void CCodeGen::visit(MemberAccessExpr& node) {
         } else if (knownTypedComVars_.count(objLower)
                    || (!trailingLower.empty() && knownTypedComVars_.count(trailingLower))) {
             lastExpr_ = obj + "->" + cIdent(node.memberName);
-        } else {
+        } else if (node.object) {
+            // Fix 088c: AST 层兜底推断 — obj 是 knownClassVars_ 未覆盖的类实例
+            // 表达式文本 (prop_get 调用文本 vb6_cY_prop_get_Z(a)、类方法链返回、
+            // WithMemberExpr 等). inferClassTypeOfExpr 走 AST 递归
+            // (knownClassVars_/classTypedFieldMap_/方法返回类型表), 成功后按类成员
+            // 分发, 避免生成 obj'.'member/obj'->'member
+            // → C2039 (SendData 不是 vb6_cls_cWinsock 的成员等).
+            std::string clsFromAst = inferClassTypeOfExpr(*node.object);
+            if (!clsFromAst.empty()) {
+                std::string resolvedFn =
+                    resolveClassMemberCall(clsFromAst, node.memberName);
+                if (!resolvedFn.empty()) {
+                    if (asCallCallee_) {
+                        // 外层 IndexOrCallExpr/CallStmt 前置 this 并补参数
+                        pendingChainObj_ = "(void*)" + obj;
+                        lastExpr_ = resolvedFn;
+                    } else {
+                        lastExpr_ = resolvedFn + "((void*)" + obj + ")";
+                    }
+                    return;
+                }
+                // 类中无此成员 → 数据字段
+                lastExpr_ = obj + "->" + cIdent(node.memberName);
+                return;
+            }
             // Fix 085: 更深嵌套的 UDT 链末端字段访问 (Fix 031 只覆盖直接 UDT 变量).
             // object 仍是 UDT 表达式时, 若 member 为对象字段则追加标记,
             // 由外层 MemberAccessExpr (Fix 085 消费点) 转类方法/COM 路径.
-            std::string udtChainType =
-                node.object ? inferUdtTypeOfExpr(*node.object) : "";
+            std::string udtChainType = inferUdtTypeOfExpr(*node.object);
             if (!udtChainType.empty()) {
                 lastExpr_ = appendUdtObjFieldMarker(obj, udtChainType, node.memberName);
             } else {
                 lastExpr_ = obj + "." + cIdent(node.memberName);
             }
+        } else {
+            lastExpr_ = obj + "." + cIdent(node.memberName);
         }
     }
 }

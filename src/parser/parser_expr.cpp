@@ -349,7 +349,17 @@ ExprPtr Parser::parseTypeOfExpr() {
         advance();
     }
     auto typeTok = expectName("expected type name");
-    return std::make_unique<TypeOfExpr>(loc, std::move(obj), typeTok.text);
+    // Fix 088: TypeOf obj Is ADODB.Recordset / VBMANLIB.Dictionary — 类型名可带
+    // 库前缀 (点号限定). 此前只吃一个名字 token, 剩余的 ".Recordset" 会被
+    // parsePostfix 挂到 TypeOfExpr 结果上, 生成 vb6_TypeOf(...,L"ADODB").Recordset
+    // → C2224/C2039 (点号左侧非结构体 / 类型串不完整).
+    std::string typeName = typeTok.text;
+    while (cur_.kind == TokenKind::Dot) {
+        advance(); // consume '.'
+        auto nextTok = expectName("expected type name after '.'");
+        typeName += "." + nextTok.text;
+    }
+    return std::make_unique<TypeOfExpr>(loc, std::move(obj), typeName);
 }
 
 ExprPtr Parser::parseAddressOfExpr() {

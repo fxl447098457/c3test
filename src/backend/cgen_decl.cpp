@@ -431,6 +431,15 @@ void CCodeGen::visit(FunctionDecl& node) {
     // Fix 035: Variant 返回值变量也要注册, 否则 `Foo = concrete_expr` 赋值不会触发
     // wrapVariantValue 包装, 导致 C2440 (BSTR/int32_t → vb6_VARIANT).
     else if (funcRetVb6Type == Vb6Type::Variant) knownVariantVars_.insert(funcRetLower);
+    // Fix 088c: 函数返回类实例 → 注册返回值变量 (vb6_ret_X) 到 knownClassVars_,
+    // 使函数体内 FuncName.Method(...)/FuncName.Field 走类成员分发.
+    // 此前该变量未注册, MemberAccessExpr 主 fallback 找不到 → 生成
+    // vb6_ret_X->Method (C2039: Method 不是 vb6_cls_X 的成员).
+    if (retType.rfind("vb6_cls_", 0) == 0) {
+        std::string clsName088c = retType.substr(8);  // strip "vb6_cls_" (8 chars)
+        if (!clsName088c.empty() && clsName088c.back() == '*') clsName088c.pop_back();
+        knownClassVars_[funcRetLower] = clsName088c;
+    }
 
     if (hasGoSub_) {
         c_.emitLine("int vb6_gosub_stack[32];");
