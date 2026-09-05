@@ -352,6 +352,8 @@ BSTR vb6_RTrim(BSTR s);
 BSTR vb6_Chr(int32_t code);
 int32_t vb6_Asc(BSTR s);
 double vb6_Val(BSTR s);
+// Fix 090d: VB6 类型转换函数的字符串解析 (支持 &H/&O 前缀, 见 vb6rtl.c)
+double vb6_NumVal(BSTR s);
 BSTR vb6_Str(int32_t n);
 BSTR vb6_Format(vb6_VARIANT expr, BSTR fmt);
 
@@ -381,9 +383,16 @@ BSTR vb6_CStrBool(int16_t x);
 BSTR vb6_CStrByte(uint8_t x);
 BSTR vb6_CStrDate(double x);
 // P8.4: Variant版转换函数
+// Fix 090d: 前置声明 (定义在下方"类型转换"区, 供 inline V 变体引用)
+int16_t vb6_CBool(double v);
+uint8_t vb6_CByte(double v);
+float vb6_CSng(double v);
 static inline int16_t vb6_CIntV(vb6_VARIANT v) { return vb6_CInt(vb6_VariantToDouble(v)); }
 static inline int32_t vb6_CLngV(vb6_VARIANT v) { return vb6_CLng(vb6_VariantToDouble(v)); }
 static inline double vb6_CDblV(vb6_VARIANT v) { return vb6_VariantToDouble(v); }
+static inline uint8_t vb6_CByteV(vb6_VARIANT v) { return vb6_CByte(vb6_VariantToDouble(v)); }
+static inline float vb6_CSngV(vb6_VARIANT v) { return (float)vb6_VariantToDouble(v); }
+static inline int16_t vb6_CBoolV(vb6_VARIANT v) { return (v.vt == vb6_vtBoolean) ? v.boolVal : vb6_CBool(vb6_VariantToDouble(v)); }
 
 // 类型检查
 int32_t vb6_IsNumeric(vb6_VARIANT v);

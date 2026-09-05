@@ -203,6 +203,39 @@ double vb6_Val(BSTR s) {
     return strtod(narrow, NULL);
 }
 
+// Fix 090d: VB6 类型转换函数 (CByte/CInt/CLng/CDbl/CSng/CBool) 的字符串解析语义.
+// 与 Val 不同, 类型转换识别 &H(hex)/&O(octal) 前缀, 十进制按前缀数字解析,
+// 尾部无效字符忽略 (如 CByte("&HFF")=255, CByte("123abc")=123).
+double vb6_NumVal(BSTR s) {
+    if (!s) return 0.0;
+    int32_t len = vb6_BSTR_Len(s);
+    const wchar_t* p = s;
+    int32_t i = 0;
+    while (i < len && iswspace(p[i])) i++;
+    if (i + 2 < len && p[i] == L'&') {
+        wchar_t pre = p[i + 1];
+        if (pre == L'H' || pre == L'h') {
+            wchar_t tmp[64];
+            int32_t n = len - (i + 2);
+            if (n > 63) n = 63;
+            for (int32_t k = 0; k < n; k++) tmp[k] = p[i + 2 + k];
+            tmp[n] = L'\0';
+            return (double)(int32_t)wcstoul(tmp, NULL, 16);
+        }
+        if (pre == L'O' || pre == L'o') {
+            wchar_t tmp[64];
+            int32_t n = len - (i + 2);
+            if (n > 63) n = 63;
+            for (int32_t k = 0; k < n; k++) tmp[k] = p[i + 2 + k];
+            tmp[n] = L'\0';
+            return (double)(int32_t)wcstoul(tmp, NULL, 8);
+        }
+    }
+    wchar_t* end = NULL;
+    double d = wcstod(p + i, &end);
+    return d;
+}
+
 BSTR vb6_Str(int32_t n) {
     wchar_t buf[32];
     swprintf(buf, 32, L"%d", n);

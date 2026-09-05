@@ -1490,9 +1490,6 @@ bool Driver::runCodeGeneration(const CompileOptions& options, const std::string&
             const auto& var = static_cast<const VariableDecl&>(*decl);
             if (var.isDynamicArray || !var.dimensions.empty()) continue;
             if (!var.asType || var.asType->kind != ASTNodeKind::SimpleTypeRef) continue;
-            // 跳过 void* 字段 (已在 classVoidFieldMap 中)
-            if (isVoidFieldType(var, analyzers_[i]->typeSystem(),
-                               analyzers_[i]->symbolTable())) continue;
             std::string typeName = static_cast<SimpleTypeRef*>(var.asType.get())->name;
             // 在符号表中查找类型, 区分项目类 vs COM 接口
             std::string lookupName = typeName;
@@ -1504,21 +1501,30 @@ bool Driver::runCodeGeneration(const CompileOptions& options, const std::string&
             }
             auto* clsSym = analyzers_[i]->symbolTable().lookupModule(lookupName);
             if (!clsSym) continue;
-            std::string fieldTypeMarker;
-            if (clsSym->kind == SymbolKind::Class) {
-                fieldTypeMarker = clsSym->name;  // 项目类名 (如 "cCollection")
-            } else if (clsSym->kind == SymbolKind::ComClass ||
-                       clsSym->kind == SymbolKind::ComInterface) {
-                fieldTypeMarker = "COM:" + typeName;  // COM 标记
-            } else {
-                continue;  // UDT/Enum 等非对象类型跳过
-            }
             std::string oLower = var.name;
             std::transform(oLower.begin(), oLower.end(), oLower.begin(),
                            [](unsigned char c) { return (char)std::tolower(c); });
             std::string mLower = "m_" + oLower;
-            typedFields[oLower] = fieldTypeMarker;
-            typedFields[mLower] = fieldTypeMarker;
+            if (clsSym->kind == SymbolKind::Class) {
+                // Fix 090a: As New 项目类字段 (C 存储 void*) 也入 typed 表, 供
+                // inferClassTypeOfExpr 推断 (me.FileStream → cToolsStream). 此前被
+                // isVoidFieldType 跳过仅入 classVoidFieldMap_ 走 COM dispatch →
+                // me.FileStream.ReadLine() 等有括号调用的 Optional 参数无法补齐
+                // (callee 对象为 MemberAccessExpr(me,FileStream), Fix 042b 推断断链
+                // → calleeParams 空 → C2198 参数太少).
+                typedFields[oLower] = clsSym->name;
+                typedFields[mLower] = clsSym->name;
+                continue;
+            }
+            // 项目类外: void* 字段已在 classVoidFieldMap_ 走 COM dispatch
+            if (isVoidFieldType(var, analyzers_[i]->typeSystem(),
+                               analyzers_[i]->symbolTable())) continue;
+            if (clsSym->kind == SymbolKind::ComClass ||
+                clsSym->kind == SymbolKind::ComInterface) {
+                typedFields[oLower] = "COM:" + typeName;  // COM 标记
+                typedFields[mLower] = "COM:" + typeName;
+            }
+            // UDT/Enum 等非对象类型跳过
         }
         if (!typedFields.empty()) {
             classTypedFieldMap[className] = std::move(typedFields);

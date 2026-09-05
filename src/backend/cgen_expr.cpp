@@ -2499,6 +2499,22 @@ void CCodeGen::visit(MemberAccessExpr& node) {
         }
 
         if (itClassVar != knownClassVars_.end()) {
+            // Fix 090a: obj 若是 As New 自动实例化项目类变量 (knownNewVars_, C 存储 void*),
+            // 继续访问其成员前需 cast 回具体类指针 ((vb6_cls_X*)obj), 否则 void* 上
+            // 直接 -> 触发 C2223 / COM 误 dispatch.
+            // 例: cIni 内 Dim FileStream As New cToolsStream → me->FileStream->UseLine
+            //     (C2223). 仅当 As New 目标是工程内 Class (kind==Class) 时 cast;
+            //     As New 外部 COM (ADODB.Stream, kind==ComClass) 走 COM dispatch 不 cast.
+            std::string obj090 = obj;
+            if (!trailingLower.empty()) {
+                auto itNew090 = knownNewVars_.find(trailingLower);
+                if (itNew090 != knownNewVars_.end()) {
+                    auto* newClsSym090 = symTab_.lookupModule(itNew090->second);
+                    if (newClsSym090 && newClsSym090->kind == SymbolKind::Class) {
+                        obj090 = "((vb6_cls_" + cIdent(itNew090->second) + "*)" + obj + ")";
+                    }
+                }
+            }
             // 对象是类实例变量 — 用resolveClassMemberCall查证成员身份
             std::string resolvedFn = resolveClassMemberCall(itClassVar->second, node.memberName);
             if (!resolvedFn.empty()) {
@@ -2514,7 +2530,7 @@ void CCodeGen::visit(MemberAccessExpr& node) {
                     if (findClassMemberCallParams(itClassVar->second, node.memberName,
                                                    params89h, isBuiltin89h)
                         && !params89h.empty() && !isBuiltin89h) {
-                        std::string argList89h = obj;
+                        std::string argList89h = obj090;
                         for (size_t i = 0; i < params89h.size(); i++) {
                             const auto& param = params89h[i];
                             argList89h += ", ";
@@ -2546,10 +2562,10 @@ void CCodeGen::visit(MemberAccessExpr& node) {
                         }
                         lastExpr_ = resolvedFn + "(" + argList89h + ")";
                     } else {
-                        lastExpr_ = resolvedFn + "(" + obj + ")";
+                        lastExpr_ = resolvedFn + "(" + obj090 + ")";
                     }
                 } else {
-                    lastExpr_ = resolvedFn + "(" + obj + ")";
+                    lastExpr_ = resolvedFn + "(" + obj090 + ")";
                 }
             } else {
                 // 非方法/属性 → 数据字段访问: obj->member
@@ -2575,10 +2591,10 @@ void CCodeGen::visit(MemberAccessExpr& node) {
                     }
                 }
                 if (isVoidPtr) {
-                    lastExpr_ = obj + "->" + cIdent(node.memberName)
+                    lastExpr_ = obj090 + "->" + cIdent(node.memberName)
                               + "  /* class var ." + node.memberName + " field voidptr */";
                 } else {
-                    lastExpr_ = obj + "->" + cIdent(node.memberName)
+                    lastExpr_ = obj090 + "->" + cIdent(node.memberName)
                               + "  /* class var ." + node.memberName + " field */";
                 }
             }
@@ -3942,6 +3958,26 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
             }
         }
     }
+    // Fix 090c: 类成员方法无实参调用 (obj.M() / Trim(obj.M())) — 若 callee 已被 MAE 生成
+    // 为完整调用 vb6_cls_X_M(obj) 且该方法声明有参数, 需拆分走 Optional padding 流程
+    // (见下方 return 判定与 4040 拆分条件).
+    bool needsSplitForMissingArgs = false;
+    if (!needsSplitForOptionalPad && node.callee
+        && node.callee->kind == ASTNodeKind::MemberAccessExpr
+        && node.positional.empty() && node.named.empty()) {
+        auto& maeFix090c = static_cast<MemberAccessExpr&>(*node.callee);
+        std::string clsFix090c =
+            maeFix090c.object ? inferClassTypeOfExpr(*maeFix090c.object) : "";
+        if (!clsFix090c.empty()) {
+            std::vector<ParameterInfo> ppFix090c;
+            bool ibFix090c = false;
+            if (findClassMemberCallParams(clsFix090c, maeFix090c.memberName,
+                                          ppFix090c, ibFix090c)
+                && !ppFix090c.empty() && !ibFix090c) {
+                needsSplitForMissingArgs = true;
+            }
+        }
+    }
 
     // 如果callee已经是func(args)形式(如类方法调用 vb6_Counter_GetCount(c)),
     // 且IndexOrCallExpr没有额外参数, 直接使用callee避免双重括号
@@ -3956,10 +3992,11 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
                 depth--;
             }
         }
-        if (isCompleteCall && !needsSplitForOptionalPad) {
+        if (isCompleteCall && !needsSplitForOptionalPad && !needsSplitForMissingArgs) {
             lastExpr_ = callee;
             return;
         }
+        // needsSplitForMissingArgs / needsSplitForOptionalPad: 需继续执行拆分+补齐流程
     }
 
     // 如果callee已经是func()形式(无参内置函数调用如vb6_Now())，
@@ -4001,7 +4038,8 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
     }
 
     if (callee.size() >= 2 && callee.back() == ')'
-        && ((!node.positional.empty() || !node.named.empty()) || needsSplitForOptionalPad)) {
+        && ((!node.positional.empty() || !node.named.empty())
+            || needsSplitForOptionalPad || needsSplitForMissingArgs)) {
         // 检查是否是完整的函数调用（以右括号结尾且匹配左括号）
         int depth = 0;
         int openPos = -1;
@@ -4159,7 +4197,6 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
                 }
             }
         }
-
         // Fix 042b: For method chains and complex object expressions (e.g.,
         // db.Table("t").OrderByDesc("id").Limit(10).Offset(20)), the object is
         // not a simple IdentifierExpr but an IndexOrCallExpr or MemberAccessExpr.
@@ -5646,7 +5683,9 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
     }
     // P8.4: Variant参数适配 — 如果目标函数不接受Variant但参数是Variant类型, 使用V后缀函数
     // CInt(Variant)→vb6_CIntV, CDbl(Variant)→vb6_CDblV, CLng(Variant)→vb6_CLngV
-    if (callee == "vb6_CInt" || callee == "vb6_CLng" || callee == "vb6_CDbl") {
+    // Fix 090d: 扩展覆盖 CByte/CSng/CBool (CByte("&H"&hex) 字符串实参同样需解析适配)
+    if (callee == "vb6_CInt" || callee == "vb6_CLng" || callee == "vb6_CDbl"
+        || callee == "vb6_CByte" || callee == "vb6_CSng" || callee == "vb6_CBool") {
         // 检查第一个参数是否为Variant变量
         bool firstArgIsVariant = false;
         bool firstArgIsBstr = false;
@@ -5672,6 +5711,9 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
             if (callee == "vb6_CInt") callee = "vb6_CIntV";
             else if (callee == "vb6_CLng") callee = "vb6_CLngV";
             else if (callee == "vb6_CDbl") callee = "vb6_CDblV";
+            else if (callee == "vb6_CByte") callee = "vb6_CByteV";
+            else if (callee == "vb6_CSng") callee = "vb6_CSngV";
+            else if (callee == "vb6_CBool") callee = "vb6_CBoolV";
             // Fix 084l: 撤销 Fix 038b-2 的 Variant→double 提前提取 (getRuntimeParamCType
             // 把 CLng/CDbl/CInt 形参当作 double, 已将 lRet 替换为 vb6_VariantToDouble(lRet)).
             // V 后缀函数直接接受 vb6_VARIANT — 保留提取会产生 vb6_CLngV(double) → C2440.
@@ -5692,7 +5734,9 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
                 }
             }
         }
-        // Fix 036: BSTR 参数 → vb6_Val 转换为 double (CInt/CLng/CDbl 接 double)
+        // Fix 036: BSTR 参数 → vb6_NumVal 转换为 double (CInt/CLng/CDbl/CByte/CSng/CBool
+        // 接 double). Fix 090d: vb6_Val 不识别 "&H" 前缀 (Val("&HFF")=0), 而 VB6 类型
+        // 转换函数解析 &H/&O → CByte("&H" & hex) 需 vb6_NumVal; 十进制语义不变.
         // Fix 084c: 扩展检测到字符串级 BSTR 表达式 (vb6_Trim/vb6_BSTR_Concat/vb6_CStr
         // /vb6_VariantToString 等), 不仅限于已知 BSTR 标识符 — 否则
         // vb6_CLng(vb6_Trim(vb6_VariantToString(...))) 触发 C2440 "BSTR → double".
@@ -5713,7 +5757,7 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
                 a0.find("VB6_SA_AT(BSTR,") != std::string::npos;
         }
         if (argIsBstrExpr && !args.empty()) {
-            args[0] = "vb6_Val(" + args[0] + ")";
+            args[0] = "vb6_NumVal(" + args[0] + ")";
             argList.clear();
             for (size_t i = 0; i < args.size(); i++) {
                 if (i > 0) argList += ", ";
