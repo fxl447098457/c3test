@@ -3323,7 +3323,45 @@ void CCodeGen::visit(ReDimStmt& node) {
         }
         std::string lower = checkName;
         std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
-        return knownVariantVars_.count(lower) > 0;
+        if (knownVariantVars_.count(lower) > 0) return true;
+        // Fix 090m: UDT 字段目标 — (*uFile).BufferArray / vb6_ret_X.BufferArray:
+        // 对象是 UDT (ByRef 参数/局部/返回变量), 字段声明 As Variant 时按
+        // Variant 数组处理 (cZipArchive pvVfsWrite: ReDim Preserve
+        // uFile.BufferArray(...) As Byte → C2440 直接把 VARIANT 当 SafeArray*).
+        size_t dotP090m = name.rfind('.');
+        size_t arrowP090m = name.rfind("->");
+        size_t sepP090m = (dotP090m == std::string::npos) ? arrowP090m
+                        : (arrowP090m == std::string::npos) ? dotP090m : std::max(dotP090m, arrowP090m);
+        if (sepP090m != std::string::npos && sepP090m + 1 < name.size()) {
+            std::string objTxt090m = name.substr(0, sepP090m);
+            std::string fieldTxt090m = name.substr(sepP090m + ((sepP090m >= 1 && name[sepP090m - 1] == '-') ? 2 : 1));
+            if (objTxt090m.size() > 2 && objTxt090m.rfind("(*", 0) == 0
+                && objTxt090m.back() == ')') {
+                objTxt090m = objTxt090m.substr(2, objTxt090m.size() - 3);
+            }
+            std::string objLower090m = objTxt090m;
+            std::transform(objLower090m.begin(), objLower090m.end(), objLower090m.begin(), ::tolower);
+            auto itUdt090m = knownUdtVars_.find(objLower090m);
+            if (itUdt090m != knownUdtVars_.end() && itUdt090m->second.rfind("vb6_type_", 0) == 0) {
+                std::string udtName090m = itUdt090m->second.substr(8);
+                // Fix 090m: knownUdtVars_ 值 = "vb6_type_" + cIdent(UDT名), cIdent 给
+                // 私有 UDT 名加前导 '_' (vb6_type__ZipVfsType) → lookupModule 前需去 _
+                if (udtName090m.size() > 1 && udtName090m[0] == '_') udtName090m = udtName090m.substr(1);
+                Symbol* udtSym090m = symTab_.lookupModule(udtName090m);
+                if (udtSym090m && udtSym090m->kind == SymbolKind::UserDefinedType) {
+                    std::string fieldLower090m = fieldTxt090m;
+                    std::transform(fieldLower090m.begin(), fieldLower090m.end(), fieldLower090m.begin(), ::tolower);
+                    for (auto& mi090m : udtSym090m->udtMembers) {
+                        std::string miLower090m = mi090m.name;
+                        std::transform(miLower090m.begin(), miLower090m.end(), miLower090m.begin(), ::tolower);
+                        if (miLower090m == fieldLower090m) {
+                            return mi090m.type == Vb6Type::Variant;
+                        }
+                    }
+                }
+            }
+        }
+        return false;
     };
 
     if (node.dimensions.empty()) return;

@@ -453,6 +453,17 @@ void CCodeGen::visit(FunctionDecl& node) {
     else if (retType == "void*") {
         knownObjectVars_.insert(funcRetLower);
     }
+    // Fix 090i: 函数返回 UDT → 注册返回值变量到 knownUdtVars_ (如 pvVfsOpen /
+    // pvVfsCreate / pvArrPtr 等 As ZipVfsType 的内部函数). 此前漏注册, 函数体内
+    // vb6_ret_X.Field 的字段类型推断失败 (inferExprType → inferUdtTypeOfExpr
+    // 查 knownUdtVars_ 落空 → 字段按 Unknown/Variant 处理), UDT 内 Variant/
+    // LongPtr 字段被误当 String (包装 .vt=VT_BSTR 复合字面量传 ByRef Variant
+    // 形参) / SafeArray (UBound/ReDim 直接把 VARIANT 字段传 SafeArray*) /
+    // Variant (VariantToLong 解包 LongPtr 字段) → C2440/C2198 (cZipArchive
+    // pvVfsOpen/pvVfsCreate 函数簇 22 错).
+    if (retType.rfind("vb6_type_", 0) == 0) {
+        knownUdtVars_[funcRetLower] = retType;
+    }
 
     if (hasGoSub_) {
         c_.emitLine("int vb6_gosub_stack[32];");

@@ -3025,9 +3025,17 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
             if (vpIsCall) {
                 lastExpr_ = "(intptr_t)&(void*){" + lastExpr_ + "}";
             } else if (!lastExpr_.empty() && (std::isdigit(static_cast<unsigned char>(lastExpr_[0])) || lastExpr_[0] == '(')) {
-                // Fix 086: VarPtr(常量) — 常量被内联为字面量 (或括号表达式), 不可取址.
-                // 用 int32_t 复合字面量承载 (VB6 语义: 取常量临时副本地址).
-                lastExpr_ = "(intptr_t)&(int32_t){" + lastExpr_ + "}";
+                if (lastExpr_.size() > 1 && lastExpr_[0] == '(' && lastExpr_[1] == '*') {
+                    // Fix 090h: (*name) / (*name).field / (*name)[idx] — ByRef 参数解引用是左值
+                    // (如 VarPtr(File) → (*File), File As ByRef Variant; VarPtr(uFile.BufferArray)
+                    // → (*uFile).BufferArray). 此前落入下方复合字面量分支, 生成
+                    // (intptr_t)&(int32_t){(*File)} → C2440 (vb6_VARIANT → int32_t 初始化失败).
+                    lastExpr_ = "(intptr_t)&(" + lastExpr_ + ")";
+                } else {
+                    // Fix 086: VarPtr(常量) — 常量被内联为字面量 (或括号表达式), 不可取址.
+                    // 用 int32_t 复合字面量承载 (VB6 语义: 取常量临时副本地址).
+                    lastExpr_ = "(intptr_t)&(int32_t){" + lastExpr_ + "}";
+                }
             } else {
                 lastExpr_ = "(intptr_t)&(" + lastExpr_ + ")";
             }
@@ -4449,8 +4457,33 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
                     // Fix 086: 宏常量/NULL 不是左值 — TLS_LOCAL_LEGACY_VERSION 是
                     // #define, &(宏) → C2101; NULL 同理.
                     bool isConstMacro = (argVal == "NULL") || isConstIdent(argVal);
+                    // Fix 090k: (*uFile).BufferArray / (*uFile)->field — ByRef UDT
+                    // 参数解引用的字段链也是左值 (As Any / CopyMemory 实参应取地址
+                    // &(field), 而非下方 else 的 (void*)(intptr_t)(expr) 强转 —
+                    // Variant 字段值强转指针 → C2440 "无法从 vb6_VARIANT 转 intptr_t").
+                    bool isDerefFieldChain = false;
+                    if (!argVal.empty() && argVal[0] == '(' && argVal.size() > 2 && argVal[1] == '*') {
+                        size_t depth090k = 0;
+                        for (size_t ci090k = 0; ci090k < argVal.size(); ci090k++) {
+                            char c090k = argVal[ci090k];
+                            if (c090k == '(') depth090k++;
+                            else if (c090k == ')') {
+                                depth090k--;
+                                if (depth090k == 0) {
+                                    if (ci090k + 1 < argVal.size() &&
+                                        (argVal[ci090k + 1] == '.' ||
+                                         (argVal[ci090k + 1] == '-' && ci090k + 2 < argVal.size()
+                                          && argVal[ci090k + 2] == '>'))) {
+                                        isDerefFieldChain = true;
+                                    }
+                                    break;
+                                }
+                            }
+                        }
+                    }
                     bool isLValue = (isSimpleIdent || isUdtFieldChain || isSaAt || argVal.find("me->") == 0
-                        || (argVal.size() > 4 && argVal[0] == '(' && argVal[1] == '*' && argVal.back() == ')'))
+                        || (argVal.size() > 4 && argVal[0] == '(' && argVal[1] == '*' && argVal.back() == ')')
+                        || isDerefFieldChain)
                         && !isConstMacro;
                     if (isLValue) {
                         // 左值: 变量名、数组元素、me->field、(*ptr) 解引用 — 可以取地址
@@ -5249,6 +5282,19 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
             }
 
         } else {
+
+            // Fix 090n: UBound/LBound 首参若是 Variant 数组表达式 (Variant 变量 /
+            // UDT 的 As Variant 字段如 vb6_ret_X.BufferArray), 需提取 SafeArray1D*:
+            // RTL 签名 vb6_UBound(vb6_SafeArray1D*, ...), 直接传 VARIANT → C2440
+            // (cZipArchive pvVfsCreate: UBound(pvVfsCreate.BufferArray, 1)).
+            if (!args.empty() && node.positional.size() >= 1
+                && args[0].find("vb6_VariantToSafeArray1D") != 0) {
+                bool arrFlag090n = false;
+                bool vFlag090n = isDefinitelyVariantExpr(*node.positional[0], &arrFlag090n);
+                if (vFlag090n) {
+                    args[0] = "vb6_VariantToSafeArray1D(&" + args[0] + ")";
+                }
+            }
 
             if (args.size() == 1) {
 

@@ -948,6 +948,14 @@ bool CCodeGen::isDefinitelyVariantExpr(Expr& expr, bool* isArrOut) const {
                     return false;
                 }
             }
+            // Fix 090l: UDT 字段访问 — 字段声明 As Variant (如 cZipArchive
+            // ZipVfsType.BufferArray / SourceFileInfo) 是明确 Variant 表达式.
+            // 此前 memSym==null (UDT 字段) 被一律视为非 Variant, 导致
+            // UBound(vb6_ret_X.BufferArray) 等不包装 vb6_VariantToSafeArray1D →
+            // C2440 (无法从 vb6_VARIANT 转 vb6_SafeArray1D*).
+            if (!inferUdtTypeOfExpr(*ma.object).empty()) {
+                return inferExprType(expr) == Vb6Type::Variant;
+            }
             // 符号表查找成员 (Property/Function)
             auto* memSym = symTab_.lookupModule(ma.memberName);
             // 关键差异: memSym==null (UDT 字段访问或外部类成员) 视为非 Variant
@@ -2155,6 +2163,19 @@ std::string CCodeGen::inferUdtTypeOfExpr(const ASTNode& expr) const {
             std::string lower = Symbol::toLower(id.name);
             auto it = knownUdtVars_.find(lower);
             if (it != knownUdtVars_.end()) return it->second;
+            // Fix 090j: 函数体内函数名标识符 = 本函数返回对象 (VB6: Function
+            // pvVfsOpen As ZipVfsType 内写 pvVfsOpen.BufferArray, 即返回 UDT 的
+            // 字段). 与发射层 Fix 084z-4/088d (函数名→类返回对象) 及注册层
+            // Fix 090i (vb6_ret_X → knownUdtVars_) 对称: 推断层必须把 "函数名"
+            // 映射到返回 UDT 类型, 否则字段类型推断落空 → 字段整体按 Unknown:
+            // Variant 字段被当函数 (SourceFileInfo(3) → C2064)、LongPtr 字段被
+            // Variant 化 (BufferPtr = BufferBase → VariantToLong → C2440),
+            // As Any 实参把 Variant 字段强转指针 (C2440) — cZipArchive VFS 簇.
+            if (currentProc_ && !currentReturnCType_.empty()
+                && currentReturnCType_.rfind("vb6_type_", 0) == 0
+                && lower == Symbol::toLower(currentProc_->name)) {
+                return currentReturnCType_;
+            }
             return "";
         }
         // Fix 081i: IndexOrCallExpr — UDT数组元素访问 arr(idx).field
