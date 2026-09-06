@@ -1,14 +1,14 @@
 # C3 编译器错误修复 — 任务交接文档
 
 > 用途：新会话恢复上下文用。新开会话后直接说「读取 C3_FIX_HANDOFF.md 并继续修复」。
-> 更新日期：2026-09-06（090a/c/d/e + P25b 系列完成验证：204 → 176）
+> 更新日期：2026-09-06（090f/g 跨模块同名误生成修复：176 → 165）
 
 ## 1. 项目与目标
 
 - **C3**：VB6→C 转换器（工作区 `c:/Users/vi/Desktop/c3.vb6.pro`）
 - **目标**：减少 `vbman/dist/c3-error.log` 中 MSVC 编译错误数
-- **进度**：777 → 588 → 552 → 216 → 204 → **176**（最新统计口径为 `: error C` 行数；C2440 95）
-- **当前状态**：cIni 模块全量清零（ReadLine Optional padding / As New 类字段 cast / 默认成员链式写）；剩余大头 C2440 x95 + C2198 x36 + C2039 x11；cToolsStr 剩 Add C2197/C2440、cCollection 剩 cJson.Items 属性 Let 参数少（跨模块 cJson/cCollection 生成缺陷，专项处理）
+- **进度**：777 → 588 → 552 → 216 → 204 → 176 → **165**（最新统计口径为 `: error C` 行数；C2440 91）
+- **当前状态**：cIni/cToolsStr/cCollection 模块全量清零（090f/g 消除跨模块同名冲突误生成）；剩余大头 C2440 x91 + C2198 x31 + C2039 x11；最大簇 cZipArchive x23 + Demo x21（COM/数组打包深层问题，专项处理）
 - **快速验证**：修复 C3 后不要直接全量编 vbman（2-3 分钟），先跑 `scripts/fix_tool.ps1` 裁剪出含错误模块的最小 vbp 工程（约 5-7 秒/簇）复现/验证，最后才全量回归。
 - **cluster 注意**：小工程缺依赖模块时部分跨模块代码分支不执行，可能零错但全量仍报（cCollection/cToolsStr 案例），须以全量回归为准。
 
@@ -34,7 +34,13 @@
 
 ## 3. 错误演进史
 
-777 → 774 → 748 → 723（VBA 子集常量）→ 700（VBA 全量 + 枚举）→ 638（ReDim/Erase + 枚举）→ 594（C2102 常量取址修复）→ 589 → 588（C2099 静态初始化清零）→ 216（088e-089h）→ 204（089i/j/k）→ **176（090a/c/d/e + P25b）**
+777 → 774 → 748 → 723（VBA 子集常量）→ 700（VBA 全量 + 枚举）→ 638（ReDim/Erase + 枚举）→ 594（C2102 常量取址修复）→ 589 → 588（C2099 静态初始化清零）→ 216（088e-089h）→ 204（089i/j/k）→ 176（090a/c/d/e + P25b）→ **165（090f/g）**
+
+### 最近修复摘要（090f/g 跨模块同名冲突误生成，176 → 165）
+
+- **090f（Function 返回赋值被误拦截为同名跨类 PropertyLet）**：cCollection.Items() 内 `Items = Array()` → 误生成 `vb6_cJson_prop_let_Items((void*)me, _arr_1)`（C2198 参数太少，Items() 无参却被按 2 参带参属性拼调用）。根因：cgen_stmt.cpp P6.11 裸标识符 PropertyLet/Set 分支的 `isAssigningReturnValue` 只覆盖 PropertyGet/Let/Set 过程内的同名赋值，漏普通 Function —— cJson.Items Property Let/Set（带参属性）与 cCollection.Items() 函数同名，`lookupModuleByKind` 全局命中即拦截。修复：返回赋值判定扩展到 `SymbolKind::Function`（VB6 函数体内 `FuncName = expr` 唯一语义即返回赋值，同参照 Keys() 正常路径）
+- **090g（函数名对象方法调用形参解析错类）**：cToolsStr.SplitLinesToCollection() As cCollection 内 `SplitLinesToCollection.Add Mid(...)` → 5 实参 `(this, (&(BSTR){Mid}), &(BSTR){empty}, &(int32_t){0}, 0)`（C2197 参数太多 + C2440）。根因：类感知形参解析（Fix 033/084z-3，cgen_expr.cpp ~4170）把函数名对象当模块名 → `findClassMemberCallParams` 失败 → 回退 `lookupModule(storageKey "add")` 命中跨类同名方法抢占的错误类，形参表错（Item 按 ByRef String 打包、多出 Optional int32）。修复：对象名 == 当前函数名时，经 Fix 088c 注册的 `knownClassVars_["vb6_ret_<fn>"]` 解析为返回类（cCollection），`findClassMemberCallParams` 命中正确形参表
+- **验证**：全量 176 → 165（C2197 x5→3、C2198 x36→31、C2440 x95→91）；cToolsStr/cCollection 清零。生成对照：`vb6_cCollection_Add((void*)vb6_ret_SplitLinesToCollection, vb6_VariantFromValue(vb6_Mid(...)), vb6_BSTR_FromStr(L""), 0)`、`vb6_ret_Items = _arr_1`（与 Keys() 对称）
 
 ### 最近修复摘要（090a/c/d/e + P25b 链式写，204 → 176）
 
