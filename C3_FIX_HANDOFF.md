@@ -1,14 +1,14 @@
 # C3 编译器错误修复 — 任务交接文档
 
 > 用途：新会话恢复上下文用。新开会话后直接说「读取 C3_FIX_HANDOFF.md 并继续修复」。
-> 更新日期：2026-09-06（090h-n UDT 字段类型推断链：165 → 155，cZipArchive 簇 23→6）
+> 更新日期：2026-09-06（090o-q：155 → 142，cZipArchive 簇 6 → 0 全清零）
 
 ## 1. 项目与目标
 
 - **C3**：VB6→C 转换器（工作区 `c:/Users/vi/Desktop/c3.vb6.pro`）
 - **目标**：减少 `vbman/dist/c3-error.log` 中 MSVC 编译错误数
-- **进度**：777 → 588 → 552 → 216 → 204 → 176 → 165 → **155**（最新统计口径为 `: error C` 行数；C2440 85）
-- **当前状态**：最大簇 Demo x21 + ToolsTlsThunks x9 + cTlsReMaster x8；cZipArchive 已从 23 降到 6（剩余：C2094 事件回调 goto 标签缺失 x1、Variant 字段取值未解包 x1、Erase UDT Variant 字段 x2、Declare FILETIME ByVal UDT 打包 x2）；COM/数组打包深层问题专项处理中
+- **进度**：777 → 588 → 552 → 216 → 204 → 176 → 165 → 155 → **142**（最新统计口径为 `: error C` 行数；C2440 79）
+- **当前状态**：最大簇 Demo x21 + ToolsTlsThunks x9 + cTlsReMaster x8；**cZipArchive 簇 6 → 0（全量回归确认 error C = 0）**；COM/数组打包深层问题专项处理中
 - **快速验证**：修复 C3 后不要直接全量编 vbman（2-3 分钟），先跑 `scripts/fix_tool.ps1` 裁剪出含错误模块的最小 vbp 工程（约 5-7 秒/簇）复现/验证，最后才全量回归。
 - **cluster 注意**：小工程缺依赖模块时部分跨模块代码分支不执行，可能零错但全量仍报（cCollection/cToolsStr 案例），须以全量回归为准。
 
@@ -34,7 +34,15 @@
 
 ## 3. 错误演进史
 
-777 → 774 → 748 → 723（VBA 子集常量）→ 700（VBA 全量 + 枚举）→ 638（ReDim/Erase + 枚举）→ 594（C2102 常量取址修复）→ 589 → 588（C2099 静态初始化清零）→ 216（088e-089h）→ 204（089i/j/k）→ 176（090a/c/d/e + P25b）→ **165（090f/g）→ 155（090h-n）**
+777 → 774 → 748 → 723（VBA 子集常量）→ 700（VBA 全量 + 枚举）→ 638（ReDim/Erase + 枚举）→ 594（C2102 常量取址修复）→ 589 → 588（C2099 静态初始化清零）→ 216（088e-089h）→ 204（089i/j/k）→ 176（090a/c/d/e + P25b）→ 165（090f/g）→ 155（090h-n）→ **142（090o-p）**
+
+### 最近修复摘要（090o-p cZipArchive 簇清零，155 → 142）
+
+- **验证**：全量 155 → 142（C2440 85→79）；cZipArchive 簇 6 → 0（全量 `cZipArchive error C: 0`）。
+- **090o**（cgen_stmt.cpp For/GoTo）：VB6 `For i = lo To hi` 方向拆分为两副本时，`GoTo 标签` 的后缀 `_dN` 仅在「目标标签定义于被拆分 For body 内」（两份副本各定义一次）时附加；目标在 body 外（函数级出口标签如 QH/EH，GoTo 跳出循环到过程尾）只定义一份 → 加后缀生成 `goto vb6_label_QH_d2` 指向不存在标签 → C2094（cZipArchive 事件取消出口 683）。新增 `forSplitLabelStack_`/`collectForBodyLabels` 收集 body 内标签集判定。
+- **090p**（cgen_stmt.cpp Erase）：Erase 对 UDT 的 `As Variant` 数组字段（`(*uFile).BufferArray`）生成裸 `vb6_SafeArrayDestroy1D((*uFile).BufferArray)` 把 VARIANT 当 SafeArray* → C2440；改 `vb6_VariantClear(&...);`（释放数组并置 VT_EMPTY）。把 090m 的 UDT 字段判定提炼为 `isVariantArrayTarget()`（ReDim 084a/090m 复用同判定，Erase 覆盖）。
+- **090r**（cgen_expr.cpp 参数提取）：Variant→double 参数提取分支补 `Vb6Type::Date`（OLE date = double）。`pvToFileTime(me, vb6_VariantArrayGet(&..SourceFileInfo, 6))`（形参 ByVal Date）此前不走 Currency/Double/Single 提取（缺 Date）→ VARIANT 裸传 double 形参 C2440（2439；同行 2437 Currency 有包装形成差异对照）。
+- **090q**（cgen_expr.cpp As Any 打包 + cgen_base/hpp pending 行）：Declare 的 ByVal/ByRef As Any 参数实参是「返回 UDT 的函数调用」（`SetFileTime ..., pvToFileTime(...)`，FILETIME）时：`(void*)(intptr_t)(struct 值)` → C2440；MSVC C 也不支持复合字面量 `(T){fnRetUdt()}` 内联初始化（报 C2440 "初始化…无法从 T 转换"）。修复：`generate()` 入口预扫模块 declarations 注册 `funcUdtRetCType_`（小写函数名→C 返回类型，类方法无 VB 顺序约束故不能等 emitFunctionDecl 逐函数注册）；As Any 打包命中时生成 `vb6_type_X _vb6_anytmpN = <call>;` 挂 `CodeEmitter::addPending`（新 pending 行机制），`emitLine`/`emitBlank` 前经 `flushPending` 先落地声明再输出引用行（表达式拼接期无法在行中插语句，声明恒先于引用）。
 
 ### 最近修复摘要（090h-n UDT 字段类型推断链，165 → 155）
 
@@ -47,11 +55,11 @@
 - **090n**（cgen_expr.cpp UBound/LBound）：首参是 Variant 数组表达式时包 `vb6_VariantToSafeArray1D(&arg)`（如 `UBound(vb6_ret_pvVfsCreate.BufferArray, 1)` → C2440）。
 - **090m**（cgen_stmt.cpp ReDim）：`isVariantArrayVar` 增加 UDT 字段目标判定——ByRef UDT 参数/返回 UDT 变量的 `As Variant` 字段（`(*uFile).BufferArray`）按 Variant 数组处理（`vb6_VariantToSafeArray1D` + `vb6_VariantFromValue` 回包）。注：`knownUdtVars_` 值为 `vb6_type_` + `cIdent()`（私有 UDT 名前导 `_`，如 `vb6_type__ZipVfsType`），`lookupModule` 前须 strip 前导 `_`。
 - **验证**：全量 165 → 155（C2440 91→85）；cZipArchive 簇 23 → 6。
-- **cZipArchive 残留 6 错**（下一轮专项）：
-  1. `cZipArchive.c(683)` C2094：事件回调内 `goto vb6_label_QH_d2` 标签未定义（On Error/GoTo 标签生成缺失）
-  2. `(2439)` C2440：`pvToFileTime(me, vb6_VariantArrayGet(&...SourceFileInfo, 6))` — Variant 数组取元素未解包 double（同行 2437 `pvFromInt64` 有 `vb6_VariantToDouble` 而 2439 无，形参类型推断差异）
-  3. `(2658)` C2440 x2：`Erase uFile.BufferArray`（BufferArray As Variant）生成裸 `vb6_SafeArrayDestroy1D((*uFile).BufferArray); (*uFile).BufferArray = NULL` — Erase 未走 090m 的 Variant 感知（ReDim 已修，Erase 分支未覆盖）
-  4. `(2672)` C2440+C2198：`SetFileTime hFile, 0, 0, pvToFileTime(...)` — Declare 的 FILETIME ByVal UDT 参数生成 `(void*)(intptr_t)(vb6_type_FILETIME 值)` 强转 → struct 不能转 intptr_t；应取结构体地址或按指针传
+- **cZipArchive 残留 6 错**（090o-p 专项已全部清零，见上节）：
+  1. ~~`cZipArchive.c(683)` C2094：事件回调内 `goto vb6_label_QH_d2` 标签未定义~~ → 090o（后缀仅当标签在 For 拆分 body 内时附加）
+  2. ~~`(2439)` C2440：Variant 数组取元素未解包 double~~ → 090r（参数提取补 Vb6Type::Date）
+  3. ~~`(2658)` C2440 x2：Erase uFile.BufferArray~~ → 090p（Erase 走 isVariantArrayTarget → vb6_VariantClear）
+  4. ~~`(2672)` C2440+C2198：Declare FILETIME ByVal UDT 参数强转 struct 值~~ → 090q（As Any 打包 UDT 调用实参 → pending 临时变量取址）
 
 ### 最近修复摘要（090f/g 跨模块同名冲突误生成，176 → 165）
 
