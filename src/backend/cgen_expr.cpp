@@ -4180,9 +4180,25 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
                     // 按属性名查找失败, 回退 lookupModule 命中 storageKey 同名冲突的
                     // 错误类 (SyncReceiveArray 按 cWinsock 12 参展开 → C2197).
                     className = idObj.name;
-                    std::string inferredClass = inferClassTypeOfExpr(*maExpr.object);
-                    if (!inferredClass.empty()) {
-                        className = inferredClass;
+                    // Fix 090g: 对象是当前函数名引用 (函数体内 FuncName.Add(...) —
+                    // 即本函数返回对象, Fix 088c 已把 vb6_ret_FuncName 注册进
+                    // knownClassVars_). 例 cToolsStr.SplitLinesToCollection As cCollection
+                    // → SplitLinesToCollection.Add Mid(...). 此前 fallthrough 到模块名
+                    // 路径, findClassMemberCallParams 失败后又回退 lookupModule(storageKey),
+                    // 命中跨类同名方法抢占的错误类 (Add → 其它类的 Add), 形参表错 →
+                    // C2197/C2440 (Item 按 ByRef String 打包, 多出 Optional int32).
+                    if (currentProc_ && nameLower == Symbol::toLower(currentProc_->name)) {
+                        std::string retVar090g = "vb6_ret_" + nameLower;
+                        auto itRet090g = knownClassVars_.find(retVar090g);
+                        if (itRet090g != knownClassVars_.end()) {
+                            className = itRet090g->second;
+                        }
+                    }
+                    if (className == idObj.name) {
+                        std::string inferredClass = inferClassTypeOfExpr(*maExpr.object);
+                        if (!inferredClass.empty()) {
+                            className = inferredClass;
+                        }
                     }
                 }
             }
