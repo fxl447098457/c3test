@@ -2144,6 +2144,29 @@ std::string CCodeGen::inferClassTypeOfExpr(const ASTNode& expr) const {
             if (withObjectInfoStack_.empty() || withObjectVars_.empty()) return "";
             const auto& info = withObjectInfoStack_.back();
             if (info.kind == WithObjKind::ClassInstance && !info.className.empty()) {
+                // Fix 090s: .X 若是 With 目标类的 typed 项目类字段 (如
+                // With HttpSvr: .Router.Reg → .Router 字段 As cHttpServerRouter),
+                // 返回字段的类, 供外层 .Reg/.Encode 等成员/方法按字段类解析
+                // (findClassMemberCallParams/resolveClassMemberCall 用对类, 否则
+                // 形参表空 → .Router.Reg "Test" 实参全丢 C2198). 与 MemberAccessExpr
+                // 分支 (classTypedFieldMap_ 查询) 对齐.
+                auto& wmRef = static_cast<const WithMemberExpr&>(expr);
+                if (classTypedFieldMap_) {
+                    auto it = classTypedFieldMap_->find(info.className);
+                    if (it != classTypedFieldMap_->end()) {
+                        std::string memLower = Symbol::toLower(wmRef.memberName);
+                        auto itF = it->second.find(memLower);
+                        if (itF != it->second.end()) {
+                            // COM:/void* 字段 (COM: 前缀) 不是项目类 → 返回空让外层
+                            // 走 COM dispatch; 项目类字段返回类名
+                            if (itF->second.compare(0, 4, "COM:") == 0) return "";
+                            return itF->second;
+                        }
+                    }
+                }
+                // .X 非数据字段 (方法/属性等) → 维持原行为: With 目标类自身
+                // (Fix 085b 在调用链推断处对 callee=WithMemberExpr 已按方法返回类
+                // 特判, 此处不做方法返回类型推断以免误伤 String/Long 属性场景)
                 return info.className;
             }
             return "";

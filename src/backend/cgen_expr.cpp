@@ -6183,7 +6183,14 @@ void CCodeGen::visit(WithMemberExpr& node) {
                         lastExpr_ = funcName + "(" + tempVar + ")";
                     }
                 } else {
-                    lastExpr_ = funcName + "(" + tempVar + ")";
+                    // Fix 090s: asCallCallee_ (CallStmt 无括号调用 / IndexOrCallExpr
+                    // 带括号调用) — 交付 this 给调用点补全用户实参与 Optional padding
+                    // (同 MAE Fix 015/088b 的 pendingChainObj_ 协议). 此前生成
+                    // funcName(tempVar) 完整调用文本 → CallStmt bare-call 分支因
+                    // callExpr 含 '(' 跳过参数补齐 → With 内无括号调用 .Start
+                    // (cHttpServer.Start 声明带 4 个 Optional 参) 只传 this → C2198.
+                    pendingChainObj_ = "(void*)" + tempVar;
+                    lastExpr_ = funcName;
                 }
                 return;
             }

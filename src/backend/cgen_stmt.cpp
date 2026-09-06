@@ -2714,6 +2714,41 @@ void CCodeGen::visit(WithStmt& node) {
             std::string memberLower = memExpr.memberName;
             std::transform(memberLower.begin(), memberLower.end(), memberLower.begin(), ::tolower);
 
+            // Fix 090s: MAE 目标是「宿主类的字段」时按宿主类查字段表 — With
+            // Http.RequestDataQuery (Http As cHttpClient, RequestDataQuery As New
+            // Dictionary = COM void* 字段): 此前成员不在 knownClassVars_ 后走
+            // memSym 全局查找, 捡到 Dictionary 符号按 ClassInstance +
+            // vb6_cls_Dictionary* 处理 → .Item("k")=v 生成结构体字段调用 C2039.
+            // 正确按宿主类 classVoidFieldMap_/classTypedFieldMap_ 分类: void*/
+            // COM: → WithObjKind::COMObject (COM dispatch), 项目类 → ClassInstance.
+            std::string hostCls90s = memExpr.object ? inferClassTypeOfExpr(*memExpr.object) : "";
+            if (!hostCls90s.empty()) {
+                if (classVoidFieldMap_) {
+                    auto itV90s = classVoidFieldMap_->find(hostCls90s);
+                    if (itV90s != classVoidFieldMap_->end() && itV90s->second.count(memberLower)) {
+                        withInfo.kind = WithObjKind::COMObject;
+                        withInfo.ctrlOrigName = hostCls90s;
+                    }
+                }
+                if (withInfo.kind == WithObjKind::Unknown && classTypedFieldMap_) {
+                    auto itT90s = classTypedFieldMap_->find(hostCls90s);
+                    if (itT90s != classTypedFieldMap_->end()) {
+                        auto itF90s = itT90s->second.find(memberLower);
+                        if (itF90s != itT90s->second.end()) {
+                            if (itF90s->second.rfind("COM:", 0) == 0) {
+                                withInfo.kind = WithObjKind::COMObject;
+                                withInfo.ctrlOrigName = hostCls90s;
+                            } else {
+                                withInfo.kind = WithObjKind::ClassInstance;
+                                withInfo.className = cIdent(itF90s->second);
+                                tempType = "vb6_cls_" + withInfo.className + "*";
+                                withInfo.ctrlOrigName = withInfo.className;
+                            }
+                        }
+                    }
+                }
+            }
+
             // 检查成员是否为类实例变量 (me.member As SomeClass)
             if (knownClassVars_.find(memberLower) != knownClassVars_.end()) {
                 withInfo.kind = WithObjKind::ClassInstance;
@@ -2734,7 +2769,12 @@ void CCodeGen::visit(WithStmt& node) {
                     knownUdtVars_[tempVar] = itUdt->second;
                     knownLocalVars_.insert(tempVar);
                 }
-            } else {
+            } else if (withInfo.kind == WithObjKind::Unknown) {
+                // Fix 090s: kind 已被上面 hostCls90s 字段表解析 (COMObject/ClassInstance)
+                // 时不再走 memSym 兜底 — 否则 With Http.RequestDataQuery (RequestDataQuery
+                // As New Dictionary = COM void* 字段, A1 已置 COMObject) 被
+                // lookup("RequestDataQuery") 捡到 Dictionary 符号 → 覆盖成 ClassInstance
+                // + vb6_cls_Dictionary* → .Item(k)=v 生成结构体字段调用 C2039.
                 // 尝试从符号表推断类型
                 Symbol* memSym = symTab_.lookupModule(memExpr.memberName);
                 if (!memSym) memSym = symTab_.lookup(memExpr.memberName);
@@ -3189,6 +3229,28 @@ void CCodeGen::visit(CallStmt& node) {
                                                       clsParams, clsBuiltin)) {
                             calleeParams = clsParams;
                             calleeIsBuiltin = clsBuiltin;
+                        }
+                    }
+                }
+            }
+            // Fix 090s: With 块内无括号类方法调用 (.Start — callee=WithMemberExpr,
+            // callExpr 裸函数名, 与 Fix 015 MAE 同协议). visit(WithMemberExpr)
+            // asCallCallee_ 已不再拼完整调用而是交付 pendingChainObj_ → 此处
+            // 解析形参表才能做 Optional padding, 否则 .Start 声明带 4 个
+            // Optional 参只传 this → C2198 参数太少.
+            else if (node.callee && node.callee->kind == ASTNodeKind::WithMemberExpr) {
+                auto& wmExpr90s = static_cast<WithMemberExpr&>(*node.callee);
+                if (!withObjectInfoStack_.empty()) {
+                    const auto& wmInfo90s = withObjectInfoStack_.back();
+                    if (wmInfo90s.kind == WithObjKind::ClassInstance
+                        && !wmInfo90s.className.empty()) {
+                        std::vector<ParameterInfo> wmParams90s;
+                        bool wmBuiltin90s = false;
+                        if (findClassMemberCallParams(wmInfo90s.className,
+                                                      wmExpr90s.memberName,
+                                                      wmParams90s, wmBuiltin90s)) {
+                            calleeParams = wmParams90s;
+                            calleeIsBuiltin = wmBuiltin90s;
                         }
                     }
                 }
