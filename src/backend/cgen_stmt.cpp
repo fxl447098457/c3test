@@ -608,15 +608,24 @@ void CCodeGen::visit(AssignmentStmt& node) {
             if (propSym) {
                 // 属性过程内部 PropertyName = value 是设置返回值, 不是PropertyLet调用
                 // (如 Property Get pvThunkGlobalData 内: pvThunkGlobalData = Val(...) → vb6_ret_xxx = ...)
+                // Fix 090f: 普通 Function 内 "FuncName = expr" 也是返回赋值 (VB6 允许,
+                // 如 cCollection.Items(): Items = Array()). 此前仅识别 Property 过程,
+                // 当全局属性符号与函数同名时 (cJson.Items Property Let/Set 存在,
+                // lookupModuleByKind 命中), 被误拦截生成 vb6_cJson_prop_let_Items(me,..)
+                // → C2198 参数太少 (Items() 无参却按 2 参带参属性拼调用).
                 bool isAssigningReturnValue = false;
-                if (currentProc_ && (currentProc_->kind == SymbolKind::PropertyGet ||
-                                     currentProc_->kind == SymbolKind::PropertyLet ||
-                                     currentProc_->kind == SymbolKind::PropertySet)) {
+                if (currentProc_) {
                     std::string curName = currentProc_->name;
                     std::transform(curName.begin(), curName.end(), curName.begin(), ::tolower);
                     std::string tgtName = tgtId.name;
                     std::transform(tgtName.begin(), tgtName.end(), tgtName.begin(), ::tolower);
-                    if (curName == tgtName) isAssigningReturnValue = true;
+                    if (curName == tgtName &&
+                        (currentProc_->kind == SymbolKind::Function ||
+                         currentProc_->kind == SymbolKind::PropertyGet ||
+                         currentProc_->kind == SymbolKind::PropertyLet ||
+                         currentProc_->kind == SymbolKind::PropertySet)) {
+                        isAssigningReturnValue = true;
+                    }
                 }
                 if (!isAssigningReturnValue) {
                     std::string prefix = (propSym->kind == SymbolKind::PropertySet) ? "prop_set_" : "prop_let_";
