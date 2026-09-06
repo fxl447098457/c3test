@@ -1,14 +1,14 @@
 # C3 编译器错误修复 — 任务交接文档
 
 > 用途：新会话恢复上下文用。新开会话后直接说「读取 C3_FIX_HANDOFF.md 并继续修复」。
-> 更新日期：2026-09-06（090o-q：155 → 142，cZipArchive 簇 6 → 0 全清零）
+> 更新日期：2026-09-06（090s/090t With 块成员链解析：142 → 132，Demo 21 → 15）
 
 ## 1. 项目与目标
 
 - **C3**：VB6→C 转换器（工作区 `c:/Users/vi/Desktop/c3.vb6.pro`）
 - **目标**：减少 `vbman/dist/c3-error.log` 中 MSVC 编译错误数
-- **进度**：777 → 588 → 552 → 216 → 204 → 176 → 165 → 155 → **142**（最新统计口径为 `: error C` 行数；C2440 79）
-- **当前状态**：最大簇 Demo x21 + ToolsTlsThunks x9 + cTlsReMaster x8；**cZipArchive 簇 6 → 0（全量回归确认 error C = 0）**；COM/数组打包深层问题专项处理中
+- **进度**：777 → 588 → 552 → 216 → 204 → 176 → 165 → 155 → 142 → **132**（最新统计口径为 `: error C` 行数；C2440 73）
+- **当前状态**：最大簇 Demo x15 + ToolsTlsThunks x9 + cTlsReMaster x8；**cZipArchive 簇 error C = 0、Demo With/COM 链 6 类错误清零（090s/090t）**；Demo 剩余 15 错为 Ini/Reg/Json 函数机制问题（见下节 090s residual）
 - **快速验证**：修复 C3 后不要直接全量编 vbman（2-3 分钟），先跑 `scripts/fix_tool.ps1` 裁剪出含错误模块的最小 vbp 工程（约 5-7 秒/簇）复现/验证，最后才全量回归。
 - **cluster 注意**：小工程缺依赖模块时部分跨模块代码分支不执行，可能零错但全量仍报（cCollection/cToolsStr 案例），须以全量回归为准。
 
@@ -34,7 +34,23 @@
 
 ## 3. 错误演进史
 
-777 → 774 → 748 → 723（VBA 子集常量）→ 700（VBA 全量 + 枚举）→ 638（ReDim/Erase + 枚举）→ 594（C2102 常量取址修复）→ 589 → 588（C2099 静态初始化清零）→ 216（088e-089h）→ 204（089i/j/k）→ 176（090a/c/d/e + P25b）→ 165（090f/g）→ 155（090h-n）→ **142（090o-p）**
+777 → 774 → 748 → 723（VBA 子集常量）→ 700（VBA 全量 + 枚举）→ 638（ReDim/Erase + 枚举）→ 594（C2102 常量取址修复）→ 589 → 588（C2099 静态初始化清零）→ 216（088e-089h）→ 204（089i/j/k）→ 176（090a/c/d/e + P25b）→ 165（090f/g）→ 155（090h-n）→ 142（090o-p）→ **132（090s/090t）**
+
+### 最近修复摘要（090s/090t With 块成员链解析，142 → 132）
+
+- **验证**：全量 142 → 132（C2440 79→73）；Demo 簇 21 → 15，修复 5 类 With/COM 链错误（99/104/142/144/502 行级全部清零）。
+- **090s**（cgen_util inferClassTypeOfExpr + cgen_stmt WithStmt + cgen_expr WithMemberExpr asCallCallee）三处协同：
+  1. WithMemberExpr 推断：`.X` 是 With 目标类的 typed 项目类字段时返回**字段类**（`.Router.Reg` → .Router As cHttpServerRouter），否则外层 findClassMemberCallParams 形参解析失败、实参全丢（C2198 `.Router.Reg "Test"`/`.CBC.Encode("x")`）。
+  2. WithStmt MAE 目标（`With Http.RequestDataQuery`）按宿主类字段表分类：RequestDataQuery As New Dictionary = COM void* 字段 → WithObjKind::COMObject；此前 memSym 全局查找捡 Dictionary 符号当 vb6_cls_Dictionary* 类实例 → `.Item(k)=v` 结构体字段调用 C2039（顺带激活 COM 参数化写路径 → vb6_ComSetPropArg）。memSym 兜底限 kind==Unknown。
+  3. WithMemberExpr asCallCallee_ 改为 pendingChainObj_ 协议（同 MAE Fix 015/088b）→ CallStmt 补 WithMemberExpr 形参解析 + Optional padding（`.Start` 4 个 Optional 参 → `vb6_cHttpServer_Start((void*)w, &(int32_t){80}, ...)`）。此前生成 funcName(this) 完整调用使 CallStmt bare-call 分支跳过补齐 → C2198。
+- **连带修复**：`.Root("data")("coatingWeight")` 嵌套 COM 链读（Fix 086 嵌套对象参数）因推断类修正自动正确。
+- **Demo residual 15**（Ini/Reg/Json 等函数，下轮专项候选）：
+  1. `Demo.c(513)` C2106：`With ini.Section("App")` 嵌套 With（Section 返回类实例）→ `.Item(k)=v` 误生成 vb6_cTimers_Item(...)=（void* With 目标 + 全局符号撞名 cTimers.Item）
+  2. `(534)(550)(600)(601)` C2440：MsgBox 类方法 String 返回被双包 VariantToString（cRegedit.FindFirst As String → BSTR 当 VARIANT）；UDT 数组元素字段 BSTR 写等
+  3. `(681)` C2440/C2198：Debug.Print 链
+  4. `(697)` C2166：左值指定 const（写只读？）
+  5. `(721)` C2198+C2039：`.Rs` 实参（cDataBase COM 字段传参）Decode 参数太少
+  6. `(778)(798)(869)(871)` C2440：double/int→VARIANT*（参数打包字面量、ToolsJsonVba.ConvertToJson 跨模块）
 
 ### 最近修复摘要（090o-p cZipArchive 簇清零，155 → 142）
 
