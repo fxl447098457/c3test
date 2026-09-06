@@ -4309,6 +4309,18 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
 
     std::vector<std::string> args;
     for (size_t i = 0; i < node.positional.size(); i++) {
+        // Fix 090q: 实参是「返回 UDT 的函数调用」→ Declare As Any ByRef 打包须传
+        // 临时 UDT 地址 (void*)&(vb6_type_X){...}; 否则强转 struct 值 → C2440
+        // (cZipArchive pvVfsSetEof: SetFileTime ..., pvToFileTime(...) As Any)
+        std::string argUdtRetCType090q;
+        if (node.positional[i] && node.positional[i]->kind == ASTNodeKind::IndexOrCallExpr) {
+            auto& nc090q = static_cast<IndexOrCallExpr&>(*node.positional[i]);
+            if (nc090q.callee && nc090q.callee->kind == ASTNodeKind::IdentifierExpr) {
+                auto& nid090q = static_cast<IdentifierExpr&>(*nc090q.callee);
+                auto it090q = funcUdtRetCType_.find(Symbol::toLower(nid090q.name));
+                if (it090q != funcUdtRetCType_.end()) argUdtRetCType090q = it090q->second;
+            }
+        }
         emitExpr(*node.positional[i]);
       // COM属性标记残留: MsgBox dic.Count 等场景 — 参数是COM属性读取但标记未被消费
         // 统一用后期绑定(IDispatch), 避免vtable签名不匹配问题
@@ -4488,6 +4500,19 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
                     if (isLValue) {
                         // 左值: 变量名、数组元素、me->field、(*ptr) 解引用 — 可以取地址
                         argVal = "(void*)&(" + argVal + ")";
+                    } else if (!argUdtRetCType090q.empty()) {
+                        // Fix 090q: 实参是返回 UDT 的函数调用 — VB6 把返回值拷入临时
+                        // UDT 再传址 (As Any ByRef). C 不能直接强转 struct 值
+                        // ((void*)(intptr_t)(struct) → C2440), 也不能用复合字面量
+                        // 内联初始化 ((T){fnRetUdt()} MSVC C 报 C2440 "初始化…无法从
+                        // T 转换") — 只能先求值到已声明临时再取址. 声明行挂 pending,
+                        // 在包含本实参的语句行输出前落地 (CodeEmitter::flushPending),
+                        // 保证 "声明先于引用". 例: cZipArchive pvVfsSetEof 内
+                        // SetFileTime(..., pvToFileTime(dLastWriteTime)) (FILETIME).
+                        std::string tmpAny090q = "_vb6_anytmp" + std::to_string(tempCounter_++);
+                        c_.addPending(argUdtRetCType090q + " " + tmpAny090q
+                                      + " = " + argVal + ";");
+                        argVal = "(void*)&" + tmpAny090q;
                     } else if (isConstMacro && argVal != "NULL") {
                         // Fix 086: 宏常量 → 用对应类型的复合字面量承载地址
                         std::string ccType = mapType(constIdentType(argVal));
@@ -4650,7 +4675,11 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
                            || paramBase == Vb6Type::Byte || paramBase == Vb6Type::Boolean) {
                     argVal = "vb6_VariantToLong(" + argVal + ")";
                 } else if (paramBase == Vb6Type::Double || paramBase == Vb6Type::Single
-                           || paramBase == Vb6Type::Currency) {
+                           || paramBase == Vb6Type::Currency || paramBase == Vb6Type::Date) {
+                    // Fix 090r: Date 形参 (OLE date = double) 与 Currency 同取
+                    // vb6_VariantToDouble — 缺 Date 导致实参是 Variant 数组元素
+                    // (vb6_VariantArrayGet) 时裸传 → C2440 VARIANT→double
+                    // (cZipArchive pvVfsOpen: pvToFileTime(me, arr(i)) 形参 ByVal Date)
                     argVal = "vb6_VariantToDouble(" + argVal + ")";
                 } else if (paramBase == Vb6Type::String) {
                     // Fix 049b: Skip extraction if the C expression is already BSTR

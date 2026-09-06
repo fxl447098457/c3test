@@ -33,6 +33,11 @@ public:
     // 输出空行
     void emitBlank();
 
+    // Fix 090q: 注册"下一行输出前须先落地的声明行"(如 As Any ByRef 实参的
+    // UDT 临时变量声明). 表达式拼接期无法在行中插语句, 故挂到下一个 emitLine
+    // 之前按当前缩进输出 — 表达式文本与该行同次 flush, 声明恒先于引用.
+    void addPending(const std::string& line) { pendingLines_.push_back(line); }
+
     // 缩进控制
     void indent() { indentLevel_++; }
     void dedent() { if (indentLevel_ > 0) indentLevel_--; }
@@ -46,6 +51,12 @@ public:
 private:
     std::ostringstream oss_;
     int indentLevel_ = 0;
+    // Fix 090q: 待"下一行前"输出的声明行(见 addPending 注释)
+    std::vector<std::string> pendingLines_;
+
+    // Fix 090q: 在下一行输出前先落地 pendingLines_ (flushPending 由 emitLine
+    // 调用; 在 flushPending 中把调用权交还 oss_ 直接写入, 避免递归)
+    void flushPending();
 };
 
 // ============================================================
@@ -407,6 +418,12 @@ private:
     // UDT变量名集合 (小写var名 → UDT类型C标识符, 如 "p" → "vb6_type_Point")
     // 用于成员访问时区分"p.X"(结构体字段) vs "Module1.X"(模块变量)
     std::unordered_map<std::string, std::string> knownUdtVars_;
+    // Fix 090q: 已 emit 声明、返回 UDT 的函数/方法 (小写函数名 → C 返回类型,
+    // 如 "pvtofiletime" → "vb6_type_FILETIME"). emitFunctionDecl 在函数体
+    // (含调用点) 之前注册; 供 Declare As Any ByRef 打包判断实参是否为
+    // "返回 UDT 的函数调用" — 需用临时 UDT 复合字面量取址传参, 不能强转
+    // struct 值 (cZipArchive pvVfsSetEof: SetFileTime ..., pvToFileTime(...)).
+    std::unordered_map<std::string, std::string> funcUdtRetCType_;
 
     // 定长字符串变量 (小写var名 → 长度表达式, 如 "a" → "10")
     // 用于LSet/RSet使用固定长度而非SysStringLen
@@ -714,6 +731,15 @@ private:
     std::unordered_set<std::string> knownFormModuleNames_;
     // Fix 086: For方向拆分的循环体副本索引 (0=首份, 1=第二份); Label/GoTo配对加后缀
     int labelCopyIdx_ = 0;
+    // Fix 090o: For方向拆分期间各被拆 body 内定义的标签名栈 (嵌套层)。
+    // GoTo 目标若定义在(某个被拆的) For body 内 → 第二份副本 goto 须加 _dN 后缀与
+    // 副本内 LabelStmt 配对; 若目标在 body 外 (函数级出口标签如 QH/EH/ErrHandler,
+    // VB6: GoTo 跳出循环到过程尾) 只在过程尾定义一份 → 盲目加后缀会 C2094 标签未定义。
+    std::vector<std::unordered_set<std::string>> forSplitLabelStack_;
+    void collectForBodyLabels(const StmtList& stmts, std::unordered_set<std::string>& out);
+    // Fix 090m/090p: ReDim/Erase 目标是 Variant 数组判定 (顶层 As Variant 变量 /
+    // UDT 的 As Variant 字段如 (*uFile).BufferArray)
+    bool isVariantArrayTarget(const std::string& name);
     // Fix 086: 各模块 Public 常量表 (driver预扫描填充, 本体归driver所有)
     const std::unordered_map<std::string,
         std::unordered_map<std::string, long long>>* modulePublicConsts_ = nullptr;

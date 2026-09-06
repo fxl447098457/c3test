@@ -2025,6 +2025,9 @@ void CCodeGen::visit(ForStmt& node) {
         || (forVarIsClassMember && classVariantMembers_.count(lower022))
         || cExprIsVariant(varAcc);
     if (forVarIsVariant) {
+        // Fix 090o: 收集本 For body 内定义的标签, 供 GoTo 后缀配对判定
+        forSplitLabelStack_.push_back({});
+        collectForBodyLabels(node.body, forSplitLabelStack_.back());
         c_.emitLine("{");
         c_.indent();
         c_.emitLine("int32_t " + var + "_end = " + end + ";");
@@ -2057,9 +2060,13 @@ void CCodeGen::visit(ForStmt& node) {
         c_.emitLine(exitLabel + ":;  /* Exit For target */");
 
         loopStack_.pop_back();
+        forSplitLabelStack_.pop_back();
         return;
     }
 
+    // Fix 090o: 收集本 For body 内定义的标签, 供 GoTo 后缀配对判定
+    forSplitLabelStack_.push_back({});
+    collectForBodyLabels(node.body, forSplitLabelStack_.back());
     c_.emitLine("{");
     c_.indent();
     c_.emitLine("int32_t " + var + "_end = " + end + ";");
@@ -2090,6 +2097,7 @@ void CCodeGen::visit(ForStmt& node) {
     c_.emitLine(exitLabel + ":;  /* Exit For target */");
 
     loopStack_.pop_back();
+    forSplitLabelStack_.pop_back();
 }
 
 void CCodeGen::visit(ForEachStmt& node) {
@@ -2865,7 +2873,20 @@ void CCodeGen::visit(WithStmt& node) {
 
 void CCodeGen::visit(GoToStmt& node) {
     // Fix 086: 与 LabelStmt 的方向副本后缀配对
-    std::string lblSuffix = (labelCopyIdx_ > 0) ? ("_d" + std::to_string(labelCopyIdx_ + 1)) : "";
+    // Fix 090o: 后缀仅在「目标标签定义在某个被方向拆分的 For body 内」时使用
+    // (该标签会被两份副本各定义一次, goto 需与所在副本的 _dN 定义配对)。
+    // 目标若在 body 外 (函数级出口标签如 QH/EH, VB6: GoTo 跳出循环到过程尾)
+    // 只定义一份, 加后缀会指向不存在的 vb6_label_X_dN → C2094 (cZipArchive 事件取消出口)。
+    std::string targetLower = Symbol::toLower(node.labelName);
+    bool targetInSplitBody = false;
+    for (auto& splitLabels : forSplitLabelStack_) {
+        if (splitLabels.count(targetLower)) {
+            targetInSplitBody = true;
+            break;
+        }
+    }
+    std::string lblSuffix =
+        (labelCopyIdx_ > 0 && targetInSplitBody) ? ("_d" + std::to_string(labelCopyIdx_ + 1)) : "";
     c_.emitLine("goto vb6_label_" + cIdent(node.labelName) + lblSuffix + ";");
 }
 
@@ -3311,58 +3332,8 @@ void CCodeGen::visit(ReDimStmt& node) {
     std::string udtCType = resolveArrayUdtElemCType(node.asType.get());
     bool isUdtArray = !udtCType.empty();
 
-    // Fix 084a: ReDim 目标若是 Variant 变量 (如 Dim vRetVal As Variant 后
-    // ReDim Preserve vRetVal(n)), 实参需从 Variant 提取 SafeArray1D*,
-    // 返回值需用 vb6_VariantFromValue 包装回 Variant, 否则触发 C2440.
-    auto isVariantArrayVar = [&](const std::string& name) -> bool {
-        std::string checkName = name;
-        if (checkName.substr(0, 4) == "me->") checkName = checkName.substr(4);
-        if (checkName.size() > 4 && checkName[0] == '(' && checkName[1] == '*'
-            && checkName.back() == ')') {
-            checkName = checkName.substr(2, checkName.size() - 3);
-        }
-        std::string lower = checkName;
-        std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
-        if (knownVariantVars_.count(lower) > 0) return true;
-        // Fix 090m: UDT 字段目标 — (*uFile).BufferArray / vb6_ret_X.BufferArray:
-        // 对象是 UDT (ByRef 参数/局部/返回变量), 字段声明 As Variant 时按
-        // Variant 数组处理 (cZipArchive pvVfsWrite: ReDim Preserve
-        // uFile.BufferArray(...) As Byte → C2440 直接把 VARIANT 当 SafeArray*).
-        size_t dotP090m = name.rfind('.');
-        size_t arrowP090m = name.rfind("->");
-        size_t sepP090m = (dotP090m == std::string::npos) ? arrowP090m
-                        : (arrowP090m == std::string::npos) ? dotP090m : std::max(dotP090m, arrowP090m);
-        if (sepP090m != std::string::npos && sepP090m + 1 < name.size()) {
-            std::string objTxt090m = name.substr(0, sepP090m);
-            std::string fieldTxt090m = name.substr(sepP090m + ((sepP090m >= 1 && name[sepP090m - 1] == '-') ? 2 : 1));
-            if (objTxt090m.size() > 2 && objTxt090m.rfind("(*", 0) == 0
-                && objTxt090m.back() == ')') {
-                objTxt090m = objTxt090m.substr(2, objTxt090m.size() - 3);
-            }
-            std::string objLower090m = objTxt090m;
-            std::transform(objLower090m.begin(), objLower090m.end(), objLower090m.begin(), ::tolower);
-            auto itUdt090m = knownUdtVars_.find(objLower090m);
-            if (itUdt090m != knownUdtVars_.end() && itUdt090m->second.rfind("vb6_type_", 0) == 0) {
-                std::string udtName090m = itUdt090m->second.substr(8);
-                // Fix 090m: knownUdtVars_ 值 = "vb6_type_" + cIdent(UDT名), cIdent 给
-                // 私有 UDT 名加前导 '_' (vb6_type__ZipVfsType) → lookupModule 前需去 _
-                if (udtName090m.size() > 1 && udtName090m[0] == '_') udtName090m = udtName090m.substr(1);
-                Symbol* udtSym090m = symTab_.lookupModule(udtName090m);
-                if (udtSym090m && udtSym090m->kind == SymbolKind::UserDefinedType) {
-                    std::string fieldLower090m = fieldTxt090m;
-                    std::transform(fieldLower090m.begin(), fieldLower090m.end(), fieldLower090m.begin(), ::tolower);
-                    for (auto& mi090m : udtSym090m->udtMembers) {
-                        std::string miLower090m = mi090m.name;
-                        std::transform(miLower090m.begin(), miLower090m.end(), miLower090m.begin(), ::tolower);
-                        if (miLower090m == fieldLower090m) {
-                            return mi090m.type == Vb6Type::Variant;
-                        }
-                    }
-                }
-            }
-        }
-        return false;
-    };
+    // Fix 084a/090m: ReDim 目标是否为 Variant 数组 — 逻辑见成员函数 isVariantArrayTarget
+    auto isVariantArrayVar = [&](const std::string& nm) -> bool { return isVariantArrayTarget(nm); };
 
     if (node.dimensions.empty()) return;
 
@@ -3473,6 +3444,13 @@ void CCodeGen::visit(EraseStmt& node) {
         std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
         if (isClassModule_ && classMemberVars_.count(lower) && !knownLocalVars_.count(lower)) {
             cName = "me->" + cName;
+        }
+        // Fix 090p: UDT 的 As Variant 数组字段 (如 (*uFile).BufferArray) Erase —
+        // 裸 vb6_SafeArrayDestroy1D((*uFile).BufferArray) 把 VARIANT 当 SafeArray* →
+        // C2440; 用 vb6_VariantClear 释放数组并置 VT_EMPTY (cZipArchive pvVfsSetEof)
+        if (isVariantArrayTarget(name)) {
+            c_.emitLine("vb6_VariantClear(&" + cName + ");");
+            continue;
         }
         // P8.1: 根据维度数选择1D/ND销毁
         auto it = arrayDimCounts_.find(lower);
@@ -4273,6 +4251,108 @@ void CCodeGen::collectLocalDeclStmts(StmtList& stmts, std::vector<LocalDeclStmt*
                 break;
         }
     }
+}
+
+// Fix 090o: 递归收集语句序列内定义的标签名 (VB6 过程内标签唯一; 用于判定
+// GoTo 目标是否在 For 方向拆分的 body 内, 决定第二份副本 goto 是否加 _dN 后缀)
+void CCodeGen::collectForBodyLabels(const StmtList& stmts, std::unordered_set<std::string>& out) {
+    for (auto& stmt : stmts) {
+        if (!stmt) continue;
+        switch (stmt->kind) {
+            case ASTNodeKind::LabelStmt:
+                out.insert(Symbol::toLower(static_cast<LabelStmt&>(*stmt).labelName));
+                break;
+            case ASTNodeKind::Block:
+                collectForBodyLabels(static_cast<Block&>(*stmt).stmts, out);
+                break;
+            case ASTNodeKind::IfStmt: {
+                auto& n = static_cast<IfStmt&>(*stmt);
+                collectForBodyLabels(n.thenBody, out);
+                for (auto& ei : n.elseIfs)
+                    if (ei) collectForBodyLabels(ei->body, out);
+                collectForBodyLabels(n.elseBody, out);
+                break;
+            }
+            case ASTNodeKind::ForStmt:
+                collectForBodyLabels(static_cast<ForStmt&>(*stmt).body, out);
+                break;
+            case ASTNodeKind::ForEachStmt:
+                collectForBodyLabels(static_cast<ForEachStmt&>(*stmt).body, out);
+                break;
+            case ASTNodeKind::DoLoopStmt:
+                collectForBodyLabels(static_cast<DoLoopStmt&>(*stmt).body, out);
+                break;
+            case ASTNodeKind::WhileWendStmt:
+                collectForBodyLabels(static_cast<WhileWendStmt&>(*stmt).body, out);
+                break;
+            case ASTNodeKind::SelectCaseStmt: {
+                auto& n = static_cast<SelectCaseStmt&>(*stmt);
+                for (auto& cc : n.cases)
+                    if (cc) collectForBodyLabels(cc->body, out);
+                collectForBodyLabels(n.elseCase, out);
+                break;
+            }
+            case ASTNodeKind::WithStmt:
+                collectForBodyLabels(static_cast<WithStmt&>(*stmt).body, out);
+                break;
+            default:
+                break;
+        }
+    }
+}
+
+// Fix 090m/090p: ReDim/Erase 目标是 Variant 数组判定 — 顶层 As Variant 变量
+// 或 UDT 的 As Variant 字段 ((*uFile).BufferArray / vb6_ret_X.BufferArray)。
+// 090m 修复 ReDim Preserve; 090p 使 Erase 复用同一判定 (cZipArchive pvVfsSetEof:
+// Erase uFile.BufferArray 生成了裸 SafeArrayDestroy1D((*uFile).BufferArray) → C2440)
+bool CCodeGen::isVariantArrayTarget(const std::string& name) {
+    std::string checkName = name;
+    if (checkName.substr(0, 4) == "me->") checkName = checkName.substr(4);
+    if (checkName.size() > 4 && checkName[0] == '(' && checkName[1] == '*'
+        && checkName.back() == ')') {
+        checkName = checkName.substr(2, checkName.size() - 3);
+    }
+    std::string lower = checkName;
+    std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+    if (knownVariantVars_.count(lower) > 0) return true;
+    // Fix 090m: UDT 字段目标 — (*uFile).BufferArray / vb6_ret_X.BufferArray:
+    // 对象是 UDT (ByRef 参数/局部/返回变量), 字段声明 As Variant 时按
+    // Variant 数组处理 (cZipArchive pvVfsWrite: ReDim Preserve
+    // uFile.BufferArray(...) As Byte → C2440 直接把 VARIANT 当 SafeArray*).
+    size_t dotP090m = name.rfind('.');
+    size_t arrowP090m = name.rfind("->");
+    size_t sepP090m = (dotP090m == std::string::npos) ? arrowP090m
+                    : (arrowP090m == std::string::npos) ? dotP090m : std::max(dotP090m, arrowP090m);
+    if (sepP090m != std::string::npos && sepP090m + 1 < name.size()) {
+        std::string objTxt090m = name.substr(0, sepP090m);
+        std::string fieldTxt090m = name.substr(sepP090m + ((sepP090m >= 1 && name[sepP090m - 1] == '-') ? 2 : 1));
+        if (objTxt090m.size() > 2 && objTxt090m.rfind("(*", 0) == 0
+            && objTxt090m.back() == ')') {
+            objTxt090m = objTxt090m.substr(2, objTxt090m.size() - 3);
+        }
+        std::string objLower090m = objTxt090m;
+        std::transform(objLower090m.begin(), objLower090m.end(), objLower090m.begin(), ::tolower);
+        auto itUdt090m = knownUdtVars_.find(objLower090m);
+        if (itUdt090m != knownUdtVars_.end() && itUdt090m->second.rfind("vb6_type_", 0) == 0) {
+            std::string udtName090m = itUdt090m->second.substr(8);
+            // Fix 090m: knownUdtVars_ 值 = "vb6_type_" + cIdent(UDT名), cIdent 给
+            // 私有 UDT 名加前导 '_' (vb6_type__ZipVfsType) → lookupModule 前需去 _
+            if (udtName090m.size() > 1 && udtName090m[0] == '_') udtName090m = udtName090m.substr(1);
+            Symbol* udtSym090m = symTab_.lookupModule(udtName090m);
+            if (udtSym090m && udtSym090m->kind == SymbolKind::UserDefinedType) {
+                std::string fieldLower090m = fieldTxt090m;
+                std::transform(fieldLower090m.begin(), fieldLower090m.end(), fieldLower090m.begin(), ::tolower);
+                for (auto& mi090m : udtSym090m->udtMembers) {
+                    std::string miLower090m = mi090m.name;
+                    std::transform(miLower090m.begin(), miLower090m.end(), miLower090m.begin(), ::tolower);
+                    if (miLower090m == fieldLower090m) {
+                        return mi090m.type == Vb6Type::Variant;
+                    }
+                }
+            }
+        }
+    }
+    return false;
 }
 
 void CCodeGen::hoistLocalDecls(StmtList& body) {

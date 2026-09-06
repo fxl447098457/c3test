@@ -38,6 +38,7 @@ FrmControlType controlTypeFromName(const std::string& name) {
 // ============================================================
 
 void CodeEmitter::emitLine(const std::string& line) {
+    flushPending();
     for (int i = 0; i < indentLevel_; i++) {
         oss_ << "    ";  // 4空格缩进
     }
@@ -49,7 +50,20 @@ void CodeEmitter::emit(const std::string& text) {
 }
 
 void CodeEmitter::emitBlank() {
+    flushPending();
     oss_ << "\n";
+}
+
+// Fix 090q: 落地待输出声明行(带当前缩进). 供 As Any ByRef 实参的 UDT 临时
+// 变量声明在表达式行之前落位 — 保证 "声明先于引用" (C 要求).
+void CodeEmitter::flushPending() {
+    for (auto& pl : pendingLines_) {
+        for (int i = 0; i < indentLevel_; i++) {
+            oss_ << "    ";  // 4空格缩进
+        }
+        oss_ << pl << "\n";
+    }
+    pendingLines_.clear();
 }
 
 // ============================================================
@@ -86,6 +100,35 @@ bool CCodeGen::generate(Module& module, const std::string& baseName,
     emittedSymbols_.clear();
     labelCounter_ = 0;
     tempCounter_ = 0;
+
+    // Fix 090q: 预扫模块内返回 UDT 的函数/方法 (小写名 → C 返回类型), 供
+    // Declare As Any ByRef 打包识别「实参是返回 UDT 的函数调用」→ 生成临时
+    // UDT 复合字面量取址 (void*)&(vb6_type_X){...}, 避免强转 struct 值 → C2440.
+    // 不能依赖 emitFunctionDecl 逐函数注册 — 类方法无 VB 顺序约束, 调用点
+    // (函数体) 可能先于被调函数的声明输出 (cZipArchive pvVfsSetEof 在
+    // pvToFileTime 定义之前调用 pvToFileTime(...) 作 SetFileTime 的 As Any 实参).
+    funcUdtRetCType_.clear();
+    for (auto& decl090q : module.declarations) {
+        ASTNode* retTy090q = nullptr;
+        std::string fName090q;
+        if (decl090q->kind == ASTNodeKind::FunctionDecl) {
+            auto& f090q = static_cast<FunctionDecl&>(*decl090q);
+            retTy090q = f090q.returnType.get();
+            fName090q = f090q.name;
+        } else if (decl090q->kind == ASTNodeKind::PropertyDecl) {
+            auto& p090q = static_cast<PropertyDecl&>(*decl090q);
+            if (p090q.propKind == ProcKind::PropertyGet) {
+                retTy090q = p090q.returnType.get();
+                fName090q = p090q.name;
+            }
+        }
+        if (!retTy090q || retTy090q->kind != ASTNodeKind::SimpleTypeRef
+            || fName090q.empty()) continue;
+        std::string retType090q = mapTypeRef(retTy090q);
+        if (retType090q.rfind("vb6_type_", 0) == 0) {
+            funcUdtRetCType_[Symbol::toLower(fName090q)] = retType090q;
+        }
+    }
 
     // P6.11: 类模块成员变量类型扫描 (用于方法体内的BSTR安全赋值)
     // 生成代码时类成员的C名格式为 m_Xxx (首字母大写), lowercase 后为 m_xxx
