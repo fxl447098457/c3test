@@ -1,14 +1,14 @@
 # C3 编译器错误修复 — 任务交接文档
 
 > 用途：新会话恢复上下文用。新开会话后直接说「读取 C3_FIX_HANDOFF.md 并继续修复」。
-> 更新日期：2026-09-06（090f/g 跨模块同名误生成修复：176 → 165）
+> 更新日期：2026-09-06（090h-n UDT 字段类型推断链：165 → 155，cZipArchive 簇 23→6）
 
 ## 1. 项目与目标
 
 - **C3**：VB6→C 转换器（工作区 `c:/Users/vi/Desktop/c3.vb6.pro`）
 - **目标**：减少 `vbman/dist/c3-error.log` 中 MSVC 编译错误数
-- **进度**：777 → 588 → 552 → 216 → 204 → 176 → **165**（最新统计口径为 `: error C` 行数；C2440 91）
-- **当前状态**：cIni/cToolsStr/cCollection 模块全量清零（090f/g 消除跨模块同名冲突误生成）；剩余大头 C2440 x91 + C2198 x31 + C2039 x11；最大簇 cZipArchive x23 + Demo x21（COM/数组打包深层问题，专项处理）
+- **进度**：777 → 588 → 552 → 216 → 204 → 176 → 165 → **155**（最新统计口径为 `: error C` 行数；C2440 85）
+- **当前状态**：最大簇 Demo x21 + ToolsTlsThunks x9 + cTlsReMaster x8；cZipArchive 已从 23 降到 6（剩余：C2094 事件回调 goto 标签缺失 x1、Variant 字段取值未解包 x1、Erase UDT Variant 字段 x2、Declare FILETIME ByVal UDT 打包 x2）；COM/数组打包深层问题专项处理中
 - **快速验证**：修复 C3 后不要直接全量编 vbman（2-3 分钟），先跑 `scripts/fix_tool.ps1` 裁剪出含错误模块的最小 vbp 工程（约 5-7 秒/簇）复现/验证，最后才全量回归。
 - **cluster 注意**：小工程缺依赖模块时部分跨模块代码分支不执行，可能零错但全量仍报（cCollection/cToolsStr 案例），须以全量回归为准。
 
@@ -34,7 +34,24 @@
 
 ## 3. 错误演进史
 
-777 → 774 → 748 → 723（VBA 子集常量）→ 700（VBA 全量 + 枚举）→ 638（ReDim/Erase + 枚举）→ 594（C2102 常量取址修复）→ 589 → 588（C2099 静态初始化清零）→ 216（088e-089h）→ 204（089i/j/k）→ 176（090a/c/d/e + P25b）→ **165（090f/g）**
+777 → 774 → 748 → 723（VBA 子集常量）→ 700（VBA 全量 + 枚举）→ 638（ReDim/Erase + 枚举）→ 594（C2102 常量取址修复）→ 589 → 588（C2099 静态初始化清零）→ 216（088e-089h）→ 204（089i/j/k）→ 176（090a/c/d/e + P25b）→ **165（090f/g）→ 155（090h-n）**
+
+### 最近修复摘要（090h-n UDT 字段类型推断链，165 → 155）
+
+- **根因链**：cZipArchive 的 VFS 系列函数（`pvVfsOpen`/`pvVfsCreate`/`pvVfsSetEof` 等，返回 UDT `ZipVfsType` 或 ByRef UDT 参数）里字段访问的类型推断失效：① 返回 UDT 的函数名/返回值变量（`vb6_ret_X`）未注册 `knownUdtVars_`；② 推断层 `inferUdtTypeOfExpr` 不认函数名对象；③ UDT 的 `As Variant` 字段（如 `BufferArray`/`SourceFileInfo`）不被识别为 Variant 表达式 → 被当 SafeArray/String/函数处理 → C2440/C2198/C2064 连锁（簇 23 错）。
+- **090i**（cgen_decl.cpp）：Function 返回类型 `vb6_type_*` 时注册 `knownUdtVars_[funcRetLower]=retType`（与 Fix 089c 的 `void*` 类对象注册并列）→ 函数体内 `vb6_ret_X.Field` 字段类型可推断。
+- **090j**（cgen_util.cpp `inferUdtTypeOfExpr`）：IdentifierExpr 分支增加「函数名 == 当前过程名且本函数返回 UDT」→ 返回 `currentReturnCType_`（与 090i 对称；发射层 084z-4/088d 已有同名机制）。
+- **090h**（cgen_expr.cpp VarPtr）：`lastExpr_` 以 `(*` 开头（ByRef 解引用）是左值 → `(intptr_t)&(expr)`，不走 `(int32_t){}` 常量复合字面量（`VarPtr(File)`/`VarPtr((*uFile).BufferArray)` → C2440）。
+- **090k**（cgen_expr.cpp As Any 打包）：`(*uFile).BufferArray` 这类「ByRef UDT 解引用 + 字段链」识别为左值取址，而非 `(void*)(intptr_t)(expr)` 值强转（Variant 字段值强转 → C2440）。
+- **090l**（cgen_util.cpp `isDefinitelyVariantExpr`）：MemberAccessExpr 分支，对象是 UDT 且字段声明 As Variant → 明确 Variant（`inferUdtTypeOfExpr` 命中 + `inferExprType==Variant`）。
+- **090n**（cgen_expr.cpp UBound/LBound）：首参是 Variant 数组表达式时包 `vb6_VariantToSafeArray1D(&arg)`（如 `UBound(vb6_ret_pvVfsCreate.BufferArray, 1)` → C2440）。
+- **090m**（cgen_stmt.cpp ReDim）：`isVariantArrayVar` 增加 UDT 字段目标判定——ByRef UDT 参数/返回 UDT 变量的 `As Variant` 字段（`(*uFile).BufferArray`）按 Variant 数组处理（`vb6_VariantToSafeArray1D` + `vb6_VariantFromValue` 回包）。注：`knownUdtVars_` 值为 `vb6_type_` + `cIdent()`（私有 UDT 名前导 `_`，如 `vb6_type__ZipVfsType`），`lookupModule` 前须 strip 前导 `_`。
+- **验证**：全量 165 → 155（C2440 91→85）；cZipArchive 簇 23 → 6。
+- **cZipArchive 残留 6 错**（下一轮专项）：
+  1. `cZipArchive.c(683)` C2094：事件回调内 `goto vb6_label_QH_d2` 标签未定义（On Error/GoTo 标签生成缺失）
+  2. `(2439)` C2440：`pvToFileTime(me, vb6_VariantArrayGet(&...SourceFileInfo, 6))` — Variant 数组取元素未解包 double（同行 2437 `pvFromInt64` 有 `vb6_VariantToDouble` 而 2439 无，形参类型推断差异）
+  3. `(2658)` C2440 x2：`Erase uFile.BufferArray`（BufferArray As Variant）生成裸 `vb6_SafeArrayDestroy1D((*uFile).BufferArray); (*uFile).BufferArray = NULL` — Erase 未走 090m 的 Variant 感知（ReDim 已修，Erase 分支未覆盖）
+  4. `(2672)` C2440+C2198：`SetFileTime hFile, 0, 0, pvToFileTime(...)` — Declare 的 FILETIME ByVal UDT 参数生成 `(void*)(intptr_t)(vb6_type_FILETIME 值)` 强转 → struct 不能转 intptr_t；应取结构体地址或按指针传
 
 ### 最近修复摘要（090f/g 跨模块同名冲突误生成，176 → 165）
 
