@@ -1561,6 +1561,116 @@ std::string CCodeGen::resolveComMarkerForPack(const std::string& packFnHint) {
 }
 
 // ============================================================
+// Fix 090ae: 链式 COM 默认属性索引赋值 (P25b helper, 原内联于 AssignmentStmt)
+// VB: dic(a)(b) = v 或  Set dic(a)(b) = v — 多层默认属性/Item 索引写.
+// emitExpr(target) 只支持链式读 (生成 vb6_VariantFromComResult(vb6_ComCall(...))
+// 的 rvalue, 作为 LHS 触发 C2440). 这里逐层把中间层结果解包为对象
+// (vb6_ComCallObject = ComCall+UnpackObject), 对最外层用 vb6_ComSetPropArg.
+// AssignmentStmt/SetStmt 共用.
+// ============================================================
+bool CCodeGen::tryEmitChainedComWrite(Expr* targetNode, Expr* valueNode) {
+    std::vector<IndexOrCallExpr*> chain;
+    Expr* cur = targetNode;
+    while (cur && cur->kind == ASTNodeKind::IndexOrCallExpr) {
+        chain.push_back(static_cast<IndexOrCallExpr*>(cur));
+        cur = static_cast<IndexOrCallExpr*>(cur)->callee.get();
+    }
+    if (chain.size() < 2 || !cur || cur->kind != ASTNodeKind::IdentifierExpr) {
+        return false;
+    }
+    auto& rootId25 = static_cast<IdentifierExpr&>(*cur);
+    std::string rootLower25 = Symbol::toLower(rootId25.name);
+    bool rootIsCom25 = knownObjectVars_.count(rootLower25)
+                    || knownVariantVars_.count(rootLower25)
+                    || knownTypedComVars_.count(rootLower25);
+    // Fix 090e: 根也可以是"模块默认成员属性" — PropertyGet 返回 COM 对象
+    // (如 cIni.Root 的 VB_UserMemId=0 默认成员, 返回 Dictionary) 时,
+    // Root(Section)(Key) = v 与 dic(Section)(Key) = v 同构. emitExpr(Root)
+    // 生成 vb6_cIni_prop_get_Root((void*)me) 调用文本作为链起点.
+    // 判定: 该返回类型符号带 comDefaultMemberName (Dictionary→Item).
+    Symbol* rootRtSym25 = nullptr;  // root 返回的 COM 类型符号 (默认成员名来源)
+    if (!rootIsCom25) {
+        Symbol* rootSym25 = symTab_.lookupModule(rootId25.name);
+        if (rootSym25 && rootSym25->kind == SymbolKind::PropertyGet
+            && !rootSym25->variableTypeName.empty()) {
+            rootRtSym25 = lookupDotted(rootSym25->variableTypeName);
+            if (rootRtSym25 && !rootRtSym25->comDefaultMemberName.empty()) {
+                rootIsCom25 = true;
+            }
+        }
+    }
+    // Fix 090ae: 根也可以是"当前类的 void* COM 字段" — me->Data 这类 COM 字段
+    // (Dim Data As New Dictionary) 的 Data(L)(C) = v 链式写. knownObjectVars_/
+    // knownTypedComVars_ 只注册局部/参数, 不含类字段; 类 void* 字段在
+    // classVoidFieldMap_ (driver 预扫描, 键=模块名, 集合=字段名小写含 m_ 变体).
+    if (!rootIsCom25 && isClassModule_ && classVoidFieldMap_) {
+        auto itV90ae = classVoidFieldMap_->find(moduleName_);
+        if (itV90ae != classVoidFieldMap_->end()
+            && (itV90ae->second.count(rootLower25)
+                || itV90ae->second.count("m_" + rootLower25))) {
+            rootIsCom25 = true;
+        }
+    }
+    if (!rootIsCom25) return false;
+
+    // 默认成员名: 优先 root 返回类型符号 (Dictionary→Item), 其次类型化 COM
+    // 变量注册, 回退 "Item"
+    std::string defMem25 = "Item";
+    if (rootRtSym25 && !rootRtSym25->comDefaultMemberName.empty()) {
+        defMem25 = rootRtSym25->comDefaultMemberRealName;
+    } else {
+        auto itTyped25 = knownTypedComVars_.find(rootLower25);
+        if (itTyped25 != knownTypedComVars_.end()
+            && !itTyped25->second->comDefaultMemberName.empty()) {
+            defMem25 = itTyped25->second->comDefaultMemberRealName;
+        }
+    }
+    std::string defMemLit25 = "L\"" + defMem25 + "\"";
+    // 打包某层索引参数为 (void*[]){pack(a),...} 字符串
+    auto packLayer25 = [&](IndexOrCallExpr& ic, std::vector<std::string>& out) -> int32_t {
+        for (size_t j = 0; j < ic.positional.size(); j++) {
+            std::string packFn25 = comPackExpr(*ic.positional[j]);
+            emitExpr(*ic.positional[j]);
+            { std::string r25 = resolveComMarkerForPack(packFn25); if (!r25.empty()) lastExpr_ = r25; }
+            out.push_back(packFn25 + "(" + lastExpr_ + ")");
+        }
+        return (int32_t)ic.positional.size();
+    };
+    emitExpr(*cur);  // 根对象表达式 (COM 变量 / me->Field / PropertyGet 调用)
+    std::string accExpr25 = std::move(lastExpr_);
+    // chain[0]=最外层索引, chain[last]=最内层索引. 先按最内→外取对象,
+    // 即逆序遍历 chain 深度层 (除最外层), 每层取默认成员对象
+    for (int32_t i = (int32_t)chain.size() - 1; i >= 1; i--) {
+        std::vector<std::string> packedMid;
+        int32_t argcMid = packLayer25(*chain[i], packedMid);
+        std::string arrMid = "(void*[]){";
+        for (size_t k = 0; k < packedMid.size(); k++) {
+            if (k > 0) arrMid += ", ";
+            arrMid += packedMid[k];
+        }
+        arrMid += "}";
+        accExpr25 = "vb6_ComCallObject(" + accExpr25 + ", " + defMemLit25
+                  + ", " + arrMid + ", " + std::to_string(argcMid) + ")";
+    }
+    // 最外层: 带索引属性 Put
+    std::vector<std::string> packedOut25;
+    int32_t argcOut25 = packLayer25(*chain[0], packedOut25);
+    std::string arrOut25 = "(void*[]){";
+    for (size_t k = 0; k < packedOut25.size(); k++) {
+        if (k > 0) arrOut25 += ", ";
+        arrOut25 += packedOut25[k];
+    }
+    arrOut25 += "}";
+    emitExpr(*valueNode);
+    std::string valExpr25 = std::move(lastExpr_);
+    std::string packVal25 = comPackExpr(*valueNode);
+    c_.emitLine("vb6_ComSetPropArg(" + accExpr25 + ", " + defMemLit25 + ", "
+                + arrOut25 + ", " + std::to_string(argcOut25) + ", "
+                + packVal25 + "(" + valExpr25 + "));  /* COM chained default-prop assign (P25b) */");
+    return true;
+}
+
+// ============================================================
 // Fix 010r-16: COM/Property-Get 左值重写辅助函数实现
 // ============================================================
 bool CCodeGen::tryRewriteCOMLvalue(const std::string& target, const std::string& value,

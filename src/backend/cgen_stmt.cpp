@@ -811,99 +811,10 @@ void CCodeGen::visit(AssignmentStmt& node) {
         }
     }
 
-    // ---- P25b: 链式 COM 默认属性索引赋值 ----
-    // VB: dic(a)(b) = v 或  dic.Item(a).Item(b) = v — 多层默认属性/Item 索引写.
-    // AST 形态: 多层 IndexOrCallExpr 嵌套, 最内层 callee 为 COM 对象标识符.
-    // emitExpr(target) 只支持链式读(生成 vb6_VariantFromComResult(vb6_ComCall(...))
-    // 的 rvalue, 作为 LHS 触发 C2440). 这里逐层把中间层结果解包为对象
-    // (vb6_ComCallObject = ComCall+UnpackObject), 对最外层用 vb6_ComSetPropArg.
-    {
-        std::vector<IndexOrCallExpr*> chain;
-        Expr* cur = node.target.get();
-        while (cur && cur->kind == ASTNodeKind::IndexOrCallExpr) {
-            chain.push_back(static_cast<IndexOrCallExpr*>(cur));
-            cur = static_cast<IndexOrCallExpr*>(cur)->callee.get();
-        }
-        if (chain.size() >= 2 && cur && cur->kind == ASTNodeKind::IdentifierExpr) {
-            auto& rootId25 = static_cast<IdentifierExpr&>(*cur);
-            std::string rootLower25 = Symbol::toLower(rootId25.name);
-            bool rootIsCom25 = knownObjectVars_.count(rootLower25)
-                            || knownVariantVars_.count(rootLower25)
-                            || knownTypedComVars_.count(rootLower25);
-            // Fix 090e: 根也可以是"模块默认成员属性" — PropertyGet 返回 COM 对象
-            // (如 cIni.Root 的 VB_UserMemId=0 默认成员, 返回 Dictionary) 时,
-            // Root(Section)(Key) = v 与 dic(Section)(Key) = v 同构. emitExpr(Root)
-            // 生成 vb6_cIni_prop_get_Root((void*)me) 调用文本作为链起点.
-            // 判定: 该返回类型符号带 comDefaultMemberName (Dictionary→Item).
-            Symbol* rootRtSym25 = nullptr;  // root 返回的 COM 类型符号 (默认成员名来源)
-            if (!rootIsCom25) {
-                Symbol* rootSym25 = symTab_.lookupModule(rootId25.name);
-                if (rootSym25 && rootSym25->kind == SymbolKind::PropertyGet
-                    && !rootSym25->variableTypeName.empty()) {
-                    rootRtSym25 = lookupDotted(rootSym25->variableTypeName);
-                    if (rootRtSym25 && !rootRtSym25->comDefaultMemberName.empty()) {
-                        rootIsCom25 = true;
-                    }
-                }
-            }
-            if (rootIsCom25) {
-                // 默认成员名: 优先 root 返回类型符号 (Dictionary→Item), 其次类型化 COM
-                // 变量注册, 回退 "Item"
-                std::string defMem25 = "Item";
-                if (rootRtSym25 && !rootRtSym25->comDefaultMemberName.empty()) {
-                    defMem25 = rootRtSym25->comDefaultMemberRealName;
-                } else {
-                    auto itTyped25 = knownTypedComVars_.find(rootLower25);
-                    if (itTyped25 != knownTypedComVars_.end()
-                        && !itTyped25->second->comDefaultMemberName.empty()) {
-                        defMem25 = itTyped25->second->comDefaultMemberRealName;
-                    }
-                }
-                std::string defMemLit25 = "L\"" + defMem25 + "\"";
-                // 打包某层索引参数为 (void*[]){pack(a),...} 字符串
-                auto packLayer25 = [&](IndexOrCallExpr& ic, std::vector<std::string>& out) -> int32_t {
-                    for (size_t j = 0; j < ic.positional.size(); j++) {
-                        std::string packFn25 = comPackExpr(*ic.positional[j]);
-                        emitExpr(*ic.positional[j]);
-                        { std::string r25 = resolveComMarkerForPack(packFn25); if (!r25.empty()) lastExpr_ = r25; }
-                        out.push_back(packFn25 + "(" + lastExpr_ + ")");
-                    }
-                    return (int32_t)ic.positional.size();
-                };
-                emitExpr(*cur);  // 根对象表达式 (COM 变量)
-                std::string accExpr25 = std::move(lastExpr_);
-                // chain[0]=最外层索引, chain[last]=最内层索引. 先按最内→外取对象,
-                // 即逆序遍历 chain 深度层 (除最外层), 每层取默认成员对象
-                for (int32_t i = (int32_t)chain.size() - 1; i >= 1; i--) {
-                    std::vector<std::string> packedMid;
-                    int32_t argcMid = packLayer25(*chain[i], packedMid);
-                    std::string arrMid = "(void*[]){";
-                    for (size_t k = 0; k < packedMid.size(); k++) {
-                        if (k > 0) arrMid += ", ";
-                        arrMid += packedMid[k];
-                    }
-                    arrMid += "}";
-                    accExpr25 = "vb6_ComCallObject(" + accExpr25 + ", " + defMemLit25
-                              + ", " + arrMid + ", " + std::to_string(argcMid) + ")";
-                }
-                // 最外层: 带索引属性 Put
-                std::vector<std::string> packedOut25;
-                int32_t argcOut25 = packLayer25(*chain[0], packedOut25);
-                std::string arrOut25 = "(void*[]){";
-                for (size_t k = 0; k < packedOut25.size(); k++) {
-                    if (k > 0) arrOut25 += ", ";
-                    arrOut25 += packedOut25[k];
-                }
-                arrOut25 += "}";
-                emitExpr(*node.value);
-                std::string valExpr25 = std::move(lastExpr_);
-                std::string packVal25 = comPackExpr(*node.value);
-                c_.emitLine("vb6_ComSetPropArg(" + accExpr25 + ", " + defMemLit25 + ", "
-                            + arrOut25 + ", " + std::to_string(argcOut25) + ", "
-                            + packVal25 + "(" + valExpr25 + "));  /* COM chained default-prop assign (P25b) */");
-                return;
-            }
-        }
+    // ---- P25b: 链式 COM 默认属性索引赋值 ---- (实现提取为
+    // tryEmitChainedComWrite, 090ae; AssignmentStmt/SetStmt 共用)
+    if (tryEmitChainedComWrite(node.target.get(), node.value.get())) {
+        return;
     }
 
     // P25: 参数化COM属性赋值检测: dic.Item(key) = value → vb6_ComSetPropArg
@@ -1397,6 +1308,14 @@ void CCodeGen::visit(SetStmt& node) {
         }
     }
 
+    // Fix 090ae: 链式 COM 默认属性索引写 (P25b helper) — SetStmt 原先缺失该分支,
+    // Set Data(Line)(Col) = Dat 的 LHS 被 emitExpr 按链式读生成
+    // vb6_VariantFromComResult(vb6_ComCall(...)) = value (非左值) → C2440.
+    // 此处分流为 vb6_ComSetPropArg(ComCallObject(...), ...) 链写.
+    if (tryEmitChainedComWrite(node.target.get(), node.value.get())) {
+        return;
+    }
+
     emitExpr(*node.target);
     std::string target = std::move(lastExpr_);
 
@@ -1538,10 +1457,36 @@ void CCodeGen::visit(SetStmt& node) {
         return;
     }
 
+    // Fix 038b-6 + 051 共用: 判定 LHS 是否是 Variant 容器
+    // (Variant 变量 / Variant 数组元素 / UDT Variant 字段). Set 到 Variant 容器
+    // 语义 = 把对象引用存进 Variant (拷贝/FromValue), 而非提取对象到 typed 指针.
+    std::string checkName = target;
+    if (checkName.substr(0, 4) == "me->") checkName = checkName.substr(4);
+    if (checkName.size() > 4 && checkName[0] == '(' && checkName[1] == '*'
+        && checkName.back() == ')') {
+        checkName = checkName.substr(2, checkName.size() - 3);
+    }
+    std::string targetLower = checkName;
+    std::transform(targetLower.begin(), targetLower.end(), targetLower.begin(), ::tolower);
+    bool targetIsVariant = knownVariantVars_.count(targetLower) > 0;
+    // Fix 090af: Variant 数组元素 (VB6_SA_AT(vb6_VARIANT, arr, i)) 也是 Variant 容器
+    if (!targetIsVariant && checkName.find("VB6_SA_AT(vb6_VARIANT,") == 0) {
+        targetIsVariant = true;
+    }
+    // Fix 084n: UDT 的 Variant 字段 (如 ZipFileInfo.SourceFile As Variant)
+    // Set .SourceFile = obj → 也需 vb6_VariantFromValue 包装对象指针 (void*→vb6_VARIANT C2440)
+    if (!targetIsVariant) {
+        targetIsVariant = (inferUdtFieldVb6Type(node.target.get()) == Vb6Type::Variant);
+    }
+
     // Fix 038b-6: Set 语句中 Variant 值 → 对象引用提取
     // 当 RHS 是 Variant (如 vb6_VariantFromStackVARIANT, vb6_VariantArrayGet,
     // Variant 变量等) 而 LHS 是 typed 对象指针时, 用 vb6_VariantToObjectVal 提取.
     // 使用 cExprIsVariant (C 字符串级) + knownVariantVars_ 检测.
+    // Fix 090af: LHS 是 Variant 容器时跳过本步 — Set d(0) = d(0).Root 的 RHS 是
+    // VariantFromComResult(ComGetProp(...)) (Variant 值), 应直接拷贝进容器
+    // (051 的 vb6_VariantFromValue _Generic Identity 安全处理), 而非先 ToObjectVal
+    // 提取 void* 再重包 (多余且二次语义).
     {
         bool valueIsVariant = cExprIsVariant(value);
         if (!valueIsVariant && node.value && node.value->kind == ASTNodeKind::IdentifierExpr) {
@@ -1550,7 +1495,8 @@ void CCodeGen::visit(SetStmt& node) {
             std::transform(idLower.begin(), idLower.end(), idLower.begin(), ::tolower);
             if (knownVariantVars_.count(idLower)) valueIsVariant = true;
         }
-        if (valueIsVariant && value.find("vb6_VariantToObjectVal") == std::string::npos) {
+        if (valueIsVariant && !targetIsVariant
+            && value.find("vb6_VariantToObjectVal") == std::string::npos) {
             value = "vb6_VariantToObjectVal(" + value + ")";
         }
     }
@@ -1562,26 +1508,11 @@ void CCodeGen::visit(SetStmt& node) {
     //   - void* → vb6_VariantObject (包装对象指针)
     //   - vb6_VARIANT → vb6_VariantIdentity (no-op, 安全)
     // 因此始终包装是安全的, 只需避免对已包装的表达式双重包装.
-    {
-        std::string checkName = target;
-        if (checkName.substr(0, 4) == "me->") checkName = checkName.substr(4);
-        if (checkName.size() > 4 && checkName[0] == '(' && checkName[1] == '*'
-            && checkName.back() == ')') {
-            checkName = checkName.substr(2, checkName.size() - 3);
-        }
-        std::string targetLower = checkName;
-        std::transform(targetLower.begin(), targetLower.end(), targetLower.begin(), ::tolower);
-        bool targetIsVariant = knownVariantVars_.count(targetLower) > 0;
-        // Fix 084n: UDT 的 Variant 字段 (如 ZipFileInfo.SourceFile As Variant)
-        // Set .SourceFile = obj → 也需 vb6_VariantFromValue 包装对象指针 (void*→vb6_VARIANT C2440)
-        if (!targetIsVariant) {
-            targetIsVariant = (inferUdtFieldVb6Type(node.target.get()) == Vb6Type::Variant);
-        }
-        if (targetIsVariant
-            && value.find("vb6_VariantFromValue(") != 0
-            && value.find("vb6_VariantFromComResult(") != 0) {
-            value = "vb6_VariantFromValue(" + value + ")";
-        }
+    // Fix 090af: targetIsVariant 判定上移共用 (含 Variant 数组元素 LHS).
+    if (targetIsVariant
+        && value.find("vb6_VariantFromValue(") != 0
+        && value.find("vb6_VariantFromComResult(") != 0) {
+        value = "vb6_VariantFromValue(" + value + ")";
     }
 
     c_.emitLine(target + " = " + value + ";  /* Set */");

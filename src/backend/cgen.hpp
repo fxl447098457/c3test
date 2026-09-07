@@ -775,6 +775,16 @@ private:
     bool tryRewriteCOMLvalue(const std::string& target, const std::string& value,
                              Expr* valueExpr, bool isSet);
 
+    // Fix 090ae: 链式 COM 默认属性索引赋值 (P25b 提取为可复用 helper)
+    // VB: dic(a)(b) = v / Set dic(a)(b) = v — 多层默认属性/Item 索引写.
+    // AST 形态: 多层 IndexOrCallExpr 嵌套, 最内层 callee 为 COM 变量/类 void*
+    // COM 字段 (IdentifierExpr) 或模块默认成员 PropertyGet. 中间层对象用
+    // vb6_ComCallObject 逐层解包, 最外层走 vb6_ComSetPropArg.
+    // AssignmentStmt/SetStmt 均调用 (090ae: SetStmt 原先缺失该分支 → LHS 被
+    // emitExpr 生成值语义 vb6_VariantFromComResult(...) = ... → C2440).
+    // 返回值: 若已识别并 emit, 返回 true; 否则 false (让调用者继续 fallback).
+    bool tryEmitChainedComWrite(Expr* targetNode, Expr* valueNode);
+
     // Fix 011r-1: 类实例成员调用解析辅助
     // 给定类名与成员名, 在当前作用域的模块级符号表中查找属于该类的方法/属性符号,
     // 返回构造的 C 函数名:

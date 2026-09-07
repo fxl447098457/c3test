@@ -2214,6 +2214,21 @@ void CCodeGen::visit(MemberAccessExpr& node) {
 
     std::string obj = std::move(lastExpr_);
 
+    // Fix 090af: Variant 数组元素 (VB6_SA_AT(vb6_VARIANT, arr, i)) 的对象成员访问.
+    // VB6: Dim d() As Variant ... If TypeOf d(0) Is cJson Then Set d(0) = d(0).Root
+    // d(0) 持有对象时 .member 是后期绑定调用 (同 knownVariantVars_ 标识符路径
+    // P24-04 1753). 此前落入通用 fallback 生成 VB6_SA_AT(...).member 结构体字段
+    // 访问 → C2039 (vb6_VARIANT 无该成员) + 级联 C2198/C2440.
+    if (obj.find("VB6_SA_AT(vb6_VARIANT,") == 0) {
+        std::string varRef = "&(" + obj + ")";
+        comObjExpr_ = "vb6_VariantToObject(" + varRef + ")";
+        comMemberName_ = node.memberName;
+        isComMarker_ = true;
+        lastExpr_ = "vb6_VariantFromComResult(vb6_ComGetProp(" + comObjExpr_
+                  + ", L\"" + node.memberName + "\"))";
+        return;
+    }
+
     // 链式COM检测2: object求值结果是COM对象表达式
     // (从IndexOrCallExpr产生的COM调用结果, 是void*类型的IDispatch*)
     if (obj.find("vb6_ComCallObject(") == 0 ||
