@@ -3008,16 +3008,19 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
             std::string index = "0";
             if (!node.positional.empty()) {
                 emitExpr(*node.positional[0]);
-                index = std::move(lastExpr_);
+                // Fix 090an: Variant 下标 (如 CopyMemory 中 baBuffer(maxLen),
+                // maxLen As Optional Variant ByRef) — VB6_SA_AT 宏内 [(idx)-lBound]
+                // 对 vb6_VARIANT 做减法 → C2088. 与 084o 一致转 Long.
+                index = toLongIfVariant(std::move(lastExpr_), node.positional[0].get());
             }
             lastExpr_ = "VB6_SA_AT(" + elemCType + ", " + arrName + ", " + index + ")";
         } else if (actualDimCount == 2 && node.positional.size() == 2) {
             // 二维访问: arr(i, j) -> VB6_SA_ND_AT2(type, (vb6_SafeArrayND*)arr, i, j)
             // Fix 056: 动态数组声明为vb6_SafeArray1D*但ReDim后可能是ND, 需要强转
             emitExpr(*node.positional[0]);
-            std::string idx0 = std::move(lastExpr_);
+            std::string idx0 = toLongIfVariant(std::move(lastExpr_), node.positional[0].get());
             emitExpr(*node.positional[1]);
-            std::string idx1 = std::move(lastExpr_);
+            std::string idx1 = toLongIfVariant(std::move(lastExpr_), node.positional[1].get());
             std::string ndArr = "(vb6_SafeArrayND*)" + arrName;
             lastExpr_ = "VB6_SA_ND_AT2(" + elemCType + ", " + ndArr + ", " + idx0 + ", " + idx1 + ")";
         } else if (actualDimCount == 3 && node.positional.size() == 3) {
