@@ -6454,6 +6454,26 @@ Vb6Type CCodeGen::resolveArrayElemType(ASTNode* typeRef) const {
         auto& simple = static_cast<SimpleTypeRef&>(*typeRef);
         Vb6Type t = typeSys_.resolveTypeName(simple.name);
         if (t != Vb6Type::Unknown) return t;
+        // Fix 090by: VB6 内置对象类型 (VBA 标准对象, 无 typelib 符号) —
+        // Collection/Forms/ErrObject/App/Screen/Printer/Clipboard.
+        // 与 semantic_analyzer.cpp vb6BuiltinObjTypes 一致, 处理为 Object.
+        // 若不识别, resolveTypeName/lookup 均 miss → 回落 Variant → 类字段
+        // (Private x As Collection) 被误注册 classVariantMembers_ → 类内
+        // m_Col(i) 生成 vb6_VariantArrayGet(&me->m_Col, i) (C2172 实参不是
+        // 指针), 而非 void* COM 字段的 vb6_ComCall(me->m_Col, L"Item", ...).
+        {
+            std::string nm0 = simple.name;
+            std::string nmLower0;
+            nmLower0.resize(nm0.size());
+            std::transform(nm0.begin(), nm0.end(), nmLower0.begin(), ::tolower);
+            if (nmLower0.size() > 4 && nmLower0.compare(0, 4, "vba.") == 0) {
+                nmLower0 = nmLower0.substr(4);
+            }
+            static const std::unordered_set<std::string> vb6BuiltinObjTypes = {
+                "collection", "forms", "errobject", "app", "screen", "printer", "clipboard"
+            };
+            if (vb6BuiltinObjTypes.count(nmLower0)) return Vb6Type::Object;
+        }
         // Fix 049b: 项目内 UDT/Enum/类名 需查符号表 (typeSys_ 只含内置类型)。
         // 否则 Dim x() As 某UDT (且该 UDT 声明位于 Dim 之后, Fix 049 预扫描已注册)
         // 的元素类型退回 Variant → arrayElemTypes_ 记录 Variant → 元素访问生成

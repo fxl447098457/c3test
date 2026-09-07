@@ -175,8 +175,29 @@ bool CCodeGen::generate(Module& module, const std::string& baseName,
                     // 应当 emit vb6_VariantArrayGet(&me->VarField, idx) 而非把 Variant
                     // 字段当函数调用 (C2064 term does not evaluate to a function).
                     else if (vtype == Vb6Type::Variant) {
-                        classVariantMembers_.insert(mLower);
-                        classVariantMembers_.insert(oLower);
+                        // Fix 090bx: 排除外部对象类型名 (As Collection / 未知
+                        // COM 类型等不在 typeSys_ 内置表且符号表无条目的名字).
+                        // resolveArrayElemType 对它们回落 Variant, 但 C 层字段是
+                        // void* COM 指针. 若误注册为 classVariantMembers_, 类内
+                        // m_Col(i) 会生成 vb6_VariantArrayGet(&me->m_Col, i)
+                        // (C2172 实参不是指针 / C2440), 应走 void* COM 字段路径
+                        // → vb6_ComCall(me->m_Col, L"Item", {ComPackInt(i)}, 1).
+                        // 仅内置 Variant/无符号简单名中的真正 Variant 才注册.
+                        bool realVariantField = true;
+                        if (var.asType->kind == ASTNodeKind::SimpleTypeRef) {
+                            auto& simpleV = static_cast<SimpleTypeRef&>(*var.asType);
+                            std::string nm = simpleV.name;
+                            std::transform(nm.begin(), nm.end(), nm.begin(), ::tolower);
+                            if (nm != "variant" && nm != "var" &&
+                                !symTab_.lookup(simpleV.name) &&
+                                !lookupDotted(simpleV.name)) {
+                                realVariantField = false;
+                            }
+                        }
+                        if (realVariantField) {
+                            classVariantMembers_.insert(mLower);
+                            classVariantMembers_.insert(oLower);
+                        }
                     }
                         // Fix 010n: 记录UDT类型成员变量 (用于With块类型检测)
                         if (var.asType->kind == ASTNodeKind::SimpleTypeRef) {
