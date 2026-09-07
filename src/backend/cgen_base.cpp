@@ -166,7 +166,7 @@ bool CCodeGen::generate(Module& module, const std::string& baseName,
                     } else if (vtype == Vb6Type::Long || vtype == Vb6Type::Integer || vtype == Vb6Type::Boolean) {
                         classLongMembers_.insert(mLower);
                         classLongMembers_.insert(oLower);
-                    } else if (vtype == Vb6Type::Double || vtype == Vb6Type::Single) {
+                    } else if (vtype == Vb6Type::Double || vtype == Vb6Type::Single || vtype == Vb6Type::Date) {
                         classDoubleMembers_.insert(mLower);
                         classDoubleMembers_.insert(oLower);
                     }
