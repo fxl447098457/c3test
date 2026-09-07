@@ -2247,6 +2247,12 @@ void CCodeGen::visit(ForEachStmt& node) {
             std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
             if (knownObjectVars_.count(lower) || knownTypedComVars_.count(lower)) {
                 c_.emitLine(varAcc + " = vb6_ComUnpackObject(&" + feVar + ");  /* P24-05: For Each Object: VARIANT→IDispatch* */");
+            } else if (knownClassVars_.count(lower)) {
+                // Fix 090aa: 项目类变量 (vb6_cls_X*) 作 For Each 元素 — 元素是
+                // COM VARIANT(IDispatch*), 提取后 cast 到类指针. 此前漏查 knownClassVars_
+                // → 走 Variant 分支 oClient = vb6_VARIANT → C2440.
+                c_.emitLine(varAcc + " = (vb6_cls_" + cIdent(knownClassVars_[lower])
+                            + "*)vb6_ComUnpackObject(&" + feVar + ");  /* P24-05: For Each 项目类: VARIANT→IDispatch*→类指针 */");
             } else {
                 c_.emitLine(varAcc + " = vb6_VariantFromStackVARIANT(&" + feVar + ");  /* P24-05: For Each Variant: VARIANT→vb6_VARIANT */");
             }
@@ -2828,12 +2834,20 @@ void CCodeGen::visit(WithStmt& node) {
             }
             // 函数返回值且仍为void* → 默认为类实例
             if (withInfo.kind == WithObjKind::Unknown && tempType == "void*") {
+                // Fix 090y: void* With 目标 (COM 方法返回对象, 如 cIni.Section As
+                // Dictionary) → COMObject (后期绑定 dispatch). 此前 ClassInstance
+                // (className 空) → WithMemberExpr 成员解析落入全局符号表撞名
+                // (cTimers.Item) → 左值错误 C2106. UDT 目标 tempType=vb6_type_*
+                // 不受影响; Variant-对象目标运行时 dispatch 也更贴合 COM 语义.
+                // TODO(090z): 先还原为 ClassInstance 定位崩溃 (0xC0000409)
                 withInfo.kind = WithObjKind::ClassInstance;
             }
         }
 
-        // --- 最终回退: void* 不支持 .member 访问 → 使用ClassInstance分发 ---
-        // Fix 054: 但如果 tempType 是 UDT struct (vb6_type_*), 保持 Unknown 让 struct.field 访问生效
+        // --- 最终回退: void* 不支持 .member 访问 → COM 后期绑定分发 ---
+        // Fix 090y: (同上方 Fix, 独立于 isClassModule_ 字段检测的最终兜底)
+        // UDT struct (vb6_type_*) 目标 tempType 非 void* → 不受影响.
+        // TODO(090z): 先还原为 ClassInstance 定位崩溃 (0xC0000409)
         if (withInfo.kind == WithObjKind::Unknown && tempType == "void*") {
             withInfo.kind = WithObjKind::ClassInstance;
         }
@@ -3062,7 +3076,7 @@ void CCodeGen::visit(CallStmt& node) {
                                 "vb6_Trim", "vb6_LTrim", "vb6_RTrim", "vb6_Chr",
                                 "vb6_Str", "vb6_CStr", "vb6_Format", "vb6_Hex", "vb6_Oct",
                                 "vb6_Replace", "vb6_Space", "vb6_String", "vb6_StrReverse",
-                                "vb6_BSTR_Concat", "vb6_BSTR_Empty", "vb6_App_Path", "vb6_App_EXEName", "vb6_Command", "vb6_CurDir", "vb6_Environ", "vb6_Dir", "vb6_IIfBSTR", "vb6_GetControlText", "vb6_GetControlCaption"
+                                "vb6_BSTR_Concat", "vb6_BSTR_Empty", "vb6_App_Path", "vb6_App_EXEName", "vb6_App_HelpFile", "vb6_Command", "vb6_CurDir", "vb6_Environ", "vb6_Dir", "vb6_IIfBSTR", "vb6_GetControlText", "vb6_GetControlCaption"
                             };
                             auto isBstrExpr = [&](const std::string& expr) -> bool {
                                 for (auto& prefix : bstrFuncs) {
@@ -3128,6 +3142,12 @@ void CCodeGen::visit(CallStmt& node) {
                                 } else if (isDoubleExpr(val)) {
                                     // 浮点数, 用DebugWriteDouble输出
                                     c_.emitLine("vb6_DebugWriteDouble((double)(" + val + "));");
+                                } else if (cExprIsVariant(val)) {
+                                    // Fix 090x: Debug.Print x (x As Variant 变量 /
+                                    // Variant 表达式) — 运行时值按字符串输出. 此前落入
+                                    // DebugWriteLong((int32_t)(x)) → C2440 (无法从
+                                    // vb6_VARIANT 转换 int32_t).
+                                    c_.emitLine("vb6_DebugWriteBSTR(vb6_VariantToString(" + val + "));");
                                 } else {
                                     // 整数/布尔值, 用DebugWriteLong输出
                                     c_.emitLine("vb6_DebugWriteLong((int32_t)(" + val + "));");
@@ -3580,7 +3600,7 @@ void CCodeGen::visit(PrintStmt& node) {
         "vb6_Trim", "vb6_LTrim", "vb6_RTrim", "vb6_Chr",
         "vb6_Str", "vb6_CStr", "vb6_Format", "vb6_Hex", "vb6_Oct",
         "vb6_Replace", "vb6_Space", "vb6_String", "vb6_StrReverse",
-        "vb6_BSTR_Concat", "vb6_BSTR_Empty", "vb6_App_Path", "vb6_App_EXEName", "vb6_Command", "vb6_CurDir", "vb6_Environ", "vb6_Dir", "vb6_IIfBSTR", "vb6_GetControlText", "vb6_GetControlCaption"
+        "vb6_BSTR_Concat", "vb6_BSTR_Empty", "vb6_App_Path", "vb6_App_EXEName", "vb6_App_HelpFile", "vb6_Command", "vb6_CurDir", "vb6_Environ", "vb6_Dir", "vb6_IIfBSTR", "vb6_GetControlText", "vb6_GetControlCaption"
     };
     auto isBstrExpr = [&](const std::string& expr) -> bool {
         for (auto& prefix : bstrFuncs) {
@@ -3643,7 +3663,7 @@ void CCodeGen::visit(WriteStmt& node) {
         "vb6_Trim", "vb6_LTrim", "vb6_RTrim", "vb6_Chr",
         "vb6_Str", "vb6_CStr", "vb6_Format", "vb6_Hex", "vb6_Oct",
         "vb6_Replace", "vb6_Space", "vb6_String", "vb6_StrReverse",
-        "vb6_BSTR_Concat", "vb6_BSTR_Empty", "vb6_App_Path", "vb6_App_EXEName", "vb6_Command", "vb6_CurDir", "vb6_Environ", "vb6_Dir", "vb6_IIfBSTR", "vb6_GetControlText", "vb6_GetControlCaption"
+        "vb6_BSTR_Concat", "vb6_BSTR_Empty", "vb6_App_Path", "vb6_App_EXEName", "vb6_App_HelpFile", "vb6_Command", "vb6_CurDir", "vb6_Environ", "vb6_Dir", "vb6_IIfBSTR", "vb6_GetControlText", "vb6_GetControlCaption"
     };
     auto isBstrExpr = [&](const std::string& expr) -> bool {
         for (auto& prefix : bstrFuncs) {

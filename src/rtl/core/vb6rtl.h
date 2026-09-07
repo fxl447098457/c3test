@@ -508,6 +508,7 @@ double vb6_TimeValue(BSTR timeStr);
 BSTR vb6_App_Path(void);     // App.Path - EXE所在目录
 BSTR vb6_App_EXEName(void);  // App.EXEName - EXE文件名(不含扩展名)
 int32_t vb6_App_hInstance(void); // App.hInstance - 模块实例句柄
+BSTR vb6_App_HelpFile(void); // App.HelpFile - 帮助文件名(无App COM对象, 返回空串)
 
 // P18-C: Clipboard 对象
 void   vb6_Clipboard_SetText(BSTR text);

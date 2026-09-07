@@ -936,6 +936,7 @@ std::string CCodeGen::wrapToBSTR(const std::string& expr, Expr& node) {
     if (expr.find("vb6_CurDir") != std::string::npos) return expr;
     if (expr.find("vb6_App_Path") != std::string::npos) return expr;
     if (expr.find("vb6_App_EXEName") != std::string::npos) return expr;
+    if (expr.find("vb6_App_HelpFile") != std::string::npos) return expr;
     // BSTR变量: 已知BSTR变量或者vb6_Module1_xxx 格式的BSTR
     // 简化: 如果以vb6_开头且非数值函数, 假定是BSTR
     if (expr.find("vb6_") == 0) {
@@ -1542,6 +1543,7 @@ void CCodeGen::visit(MemberAccessExpr& node) {
         if (objLower == "app") {
             if (memLower == "path") { lastExpr_ = "vb6_App_Path()"; return; }
             if (memLower == "exename") { lastExpr_ = "vb6_App_EXEName()"; return; }
+            if (memLower == "helpfile") { lastExpr_ = "vb6_App_HelpFile()"; return; }  // Fix 090ac: 此前落到 (void*)0.HelpFile → 语法错
             if (memLower == "hinstance") { lastExpr_ = "vb6_App_hInstance()"; return; }
             if (memLower == "hinstancehnd") { lastExpr_ = "vb6_App_hInstance()"; return; }  // VB6别名
             if (memLower == "title") { lastExpr_ = "vb6_App_EXEName()"; return; }  // 简化
@@ -2947,7 +2949,7 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
                     "vb6_UCase","vb6_LCase","vb6_Trim","vb6_LTrim","vb6_RTrim","vb6_Chr",
                     "vb6_Str","vb6_CStr","vb6_Format","vb6_Replace","vb6_Space","vb6_String",
                     "vb6_Command","vb6_CurDir","vb6_Environ","vb6_Dir",
-                    "vb6_IIfBSTR","vb6_InputBox","vb6_App_Path","vb6_App_EXEName",
+                    "vb6_IIfBSTR","vb6_InputBox","vb6_App_Path","vb6_App_EXEName","vb6_App_HelpFile",
                     "vb6_GetControlText","vb6_GetControlCaption",nullptr};
                 for (int i = 0; bstrPfx[i]; i++)
                     if (e.compare(0, strlen(bstrPfx[i]), bstrPfx[i]) == 0) return true;
@@ -5873,6 +5875,11 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
             } else if (firstArg.find("vb6_ComCall(") == 0) {
                 // P24-01: 后期绑定COM调用返回VARIANT*, 需解包转BSTR
                 firstArg = "vb6_VariantToString(vb6_VariantFromComResult(" + firstArg + "))";
+            } else if (firstArg.find("vb6_VariantToString(") == 0) {
+                // Fix 090u: 实参已是 VariantToString(...) (参数打包段对 Variant 实参
+                // 按 BSTR 形参已转换一次, 如 MsgBox .FindFirst(...) As Variant /
+                // MsgBox .Value(1,6) As Variant) — 再包一层 → VariantToString(BSTR)
+                // C2440 "BSTR→vb6_VARIANT". 此处保持一层.
             } else if (!node.positional.empty() && inferExprType(*node.positional[0]) == Vb6Type::Variant) {
                 // Variant类型变量/表达式: MsgBox v → vb6_VariantToString(v)
                 firstArg = "vb6_VariantToString(" + firstArg + ")";

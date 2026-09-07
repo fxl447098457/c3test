@@ -1925,6 +1925,12 @@ int32_t vb6_App_hInstance(void) {
     return (int32_t)(intptr_t)GetModuleHandleW(NULL);
 }
 
+/* App.HelpFile: 编译产物无 App COM 对象 → 返回空帮助文件名 (VB6默认同EXE名.hlp,
+ * 语义上仅作错误/事件参数传递, 空串可编译且运行等价于无帮助文件) */
+BSTR vb6_App_HelpFile(void) {
+    return vb6_BSTR_FromStr(L"");
+}
+
 // ============================================================
 // P18-C: Clipboard 对象
 // ============================================================
