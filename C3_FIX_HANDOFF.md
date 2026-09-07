@@ -1,7 +1,7 @@
 # C3 编译器错误修复 — 任务交接文档
 
 > 用途：新会话恢复上下文用。新开会话后直接说「读取 C3_FIX_HANDOFF.md 并继续修复」。
-> 更新日期：2026-09-07（090ag：ToolsJsonVba 3 错单模块清除——COM 类函数返回成员访问 + If Variant 条件）
+> 更新日期：2026-09-07（090ag：ToolsJsonVba 3 错；090ah cToolsArray 6 错已分析待修——多机制点+草稿代码语义存疑，优先级低）
 
 ## 1. 项目与目标
 
@@ -42,6 +42,18 @@
 - **C2039/C2037 x2（ParseObject 内 `json_ParseObject.Item(json_Key) = v`）**：`As Dictionary`（项目外 COM 类）函数返回的 C 类型是 `vb6_ComIface_IDictionary*`；MAE visit 的 089c2 分支只匹配 `currentReturnCType_ == "void*"`（As Collection/As Object），字典类型落入 UDT fallback → `vb6_ret_X.Item(...)` C2037（未定义结构 vb6_ComIface_IDictionary）。修复：089c2 条件加 `find("vb6_ComIface_") != npos`，comObjExpr_ 统一 `(void*)currentReturnVar_` → COM dispatch，与函数返回 COM 属性的既有形态（如 CompareMode 的 FnRetObj COM SetProp）对齐。
 - **C2083（ConvertToJson `If JsonValue Then`）**：ByVal As Variant 参数作 If 条件 → `if (JsonValue)`（vb6_VARIANT 结构不能直接 bool）。修复：visit(IfStmt) 在条件 emit 后若为 Variant 值（cExprIsVariant 或 knownVariantVars_ 标识符）包 `vb6_VariantToBool(x)`（VB6 真值判定语义）；已含前缀则跳过防重包。
 - **验证**：fix_tool 单模块 ToolsJsonVba.bas 3→0；cCsv 回归 0 error；cZipArchive/cJson 单编的错均裁剪缺依赖假错（vb6_type_ZipVfsType/FILETIME 类型定义与 ToolsList 模块缺失），非改动引入（全量基线 0 错）。提交 368d0ee。
+
+### 090ah 候选分析（cToolsArray 6 错，暂缓——多机制点 + 草稿代码语义存疑）
+
+cToolsArray.cls 的 6 错集中在三个草稿/边缘函数（Extend/DeArray/test，「未完待续」注释），涉及独立机制点（各需一处 cgen 改动 + rtl 语义决策），且 VB 源对 IsMissing 数组元素的用法在 VB6 是否合法存疑（非主线收益）：
+
+1. **C98/C107（Extend 内 `IsMissing(Vars(i)) = False Then Vars(i) = Value(i)`）**：vb6_IsMissing 形参是 SAFEARRAY*（ParamArray 用）；对 As Variant 数组元素（vb6_VariantArrayGet 返回 vb6_VARIANT）调用 → C2440。需 Variant 版 missing 判定（VB6 IsMissing 语义 ≈ 参数是否 Empty/未传）——rtl 无 Variant 版（vb6_IsMissing 只做 psa==NULL），要新增或内联 vt==VT_EMPTY（Optional 缺省 C3 表示另查）。
+2. **C130（test 内 `Extend(Array(A, C)) = Split(...)`）**：本类 Public Property Let（Vars, Value 双参）经 IdentifierExpr callee 的 LHS 属性赋值——生成 `Extend(&_arr_1, &(vb6_VARIANT){0}) = RHS`（C2106）。与 090ad 场景同族但对象是本类属性（非 COM），prop_let rewrite 未覆盖「callee 为裸标识符属性 Let」的 LHS。
+3. **C147（DeArray 内 `All = UBound(OutVars)`）**：ParamArray 形参（SAFEARRAY*）被当作 Variant 数组包了 vb6_VariantToSafeArray1D(OutVars) → C2440。ParamArray 参数体内使用时应直接 SAFEARRAY*（UBound(OutVars) → vb6_PA_UBound(OutVars)）。
+4. **C158/C167（DeArray 内 `IsMissing(OutVars(i)) / OutVars(i) = Arr(i)`）**：PA 元素被生成为 vb6_PA_GetLong(...) 作 LHS（C2106，rtl 无 PA_SetLong 形式的写——实际应 PA_SetVariant 或元素是 VARIANT 槽）；IsMissing(PA 元素) 语义存疑。
+5. 连带：vb6_PA_SetLong(_pa_0, 0, A) 传 BSTR（test 里 A/C 是 String）可能另报（错误数 6 外）。
+
+**建议**：此簇让位给更高收益错误（cAliyunCaptcha/cHttpServerResponse/依赖重模块多文件 fix）。若做，从 #3（UBound(ParamArray) 最小改动）切入。
 
 ### 最近修复摘要（090ae/090af cCsv COM 链写 + Variant 数组元素成员，107* → 103*）
 
