@@ -1,14 +1,15 @@
 # C3 编译器错误修复 — 任务交接文档
 
 > 用途：新会话恢复上下文用。新开会话后直接说「读取 C3_FIX_HANDOFF.md 并继续修复」。
-> 更新日期：2026-09-07（090u/v/w/x/y/aa/ab/ac：132 → 109）
+> 更新日期：2026-09-07（090ad：Dictionary prop_let_key C2197 x2 单模块清除）
 
 ## 1. 项目与目标
 
 - **C3**：VB6→C 转换器（工作区 `c:/Users/vi/Desktop/c3.vb6.pro`）
 - **目标**：减少 `vbman/dist/c3-error.log` 中 MSVC 编译错误数
-- **进度**：777 → 588 → 552 → 216 → 204 → 176 → 165 → 155 → 142 → 132 → **109**（最新统计口径为 `: error C` 行数；C2440 46）
-- **当前状态**：**cZipArchive 簇 error C = 0、Demo With/COM 链清零（090s/090t）**；090u/v/w/x/y/aa/ab/ac 再降 23（132→109，C2440 73→46），其中 UDT/项目类/App 属性/Variant 装箱方向大幅收窄（见下节 090u-ac 摘要）。残余错误分布极散：C2440 各类方向 30+ 处（每类 1-7 处）+「参数太少/太多」调用形态 18 处 + 成员不存在/SAFEARRAY 成员 10 处 + 若干语法级（C2197 Dictionary prop_let_key x2、cCollection prop_get_Item x1 等）。下轮候选：Dictionary/Collection 的 Key/Item 写路径参数形态、cHttpClient_Inst 事件回调 OnError/OnResponse* 实参提取。
+- **进度**：777 → 588 → 552 → 216 → 204 → 176 → 165 → 155 → 142 → 132 → 109 → **107***（090ad 单模块验证清除 Dictionary prop_let_key C2197 x2；`*`=全量回归被 C3 自身崩溃阻塞，107 为推断值，未全量跑通）
+- **当前状态**：**cZipArchive 簇 error C = 0、Demo With/COM 链清零（090s/090t）**；090u/v/w/x/y/aa/ab/ac 降 23（132→109）；**090ad 修 Dictionary.key(OldKey)=NewKey 只写属性 LHS 多传被 pad 的 value 实参（C2197 x2，单模块 0 错，附带激活 090w Variant 末参打包死代码——substr(5)→substr(4) bug）**。残余错误分布极散：C2440 各类方向 30+ 处（每类 1-7 处）+「参数太少/太多」调用形态 16 处 + 成员不存在/SAFEARRAY 成员 10 处（含 cCsv `d(0).Root` C2039 + VariantToObjectVal 实参、cAliyunCaptcha With .ReturnJson() 字段函数化、cHttpServerResponse VBMAN.Version/->socket 等）+ cCollection prop_get_Item x1。下轮候选：见「残留错误族明细」节。
+- **阻塞项（C3 自身崩溃）**：release `.build\C3.exe` 与 ASAN `.build-asan\C3.exe` 在全量 vbman 收尾/后段均崩溃（release 崩于 cVBMAN.c 生成前收尾、ASAN 崩点漂移 Dictionary 模块后 ↔ Form Picture1.Align 处理 → 内存损坏特征，无 ASAN report）。全量回归依赖修复该 bug（HANDOFF 090z TODO：With void* ClassInstance 0xC0000409；0x100EE/0xE2A72 偏移 map 解析命中 std::string 移动赋值，疑似未初始化读取/越界写）。修复前只能用 fix_tool 单模块/裁剪簇验证。
 - **快速验证**：修复 C3 后不要直接全量编 vbman（2-3 分钟），先跑 `scripts/fix_tool.ps1` 裁剪出含错误模块的最小 vbp 工程（约 5-7 秒/簇）复现/验证，最后才全量回归。
 - **cluster 注意**：小工程缺依赖模块时部分跨模块代码分支不执行，可能零错但全量仍报（cCollection/cToolsStr 案例），须以全量回归为准。
 
@@ -34,7 +35,15 @@
 
 ## 3. 错误演进史
 
-777 → 774 → 748 → 723（VBA 子集常量）→ 700（VBA 全量 + 枚举）→ 638（ReDim/Erase + 枚举）→ 594（C2102 常量取址修复）→ 589 → 588（C2099 静态初始化清零）→ 216（088e-089h）→ 204（089i/j/k）→ 176（090a/c/d/e + P25b）→ 165（090f/g）→ 155（090h-n）→ 142（090o-p）→ 132（090s/090t）→ **109（090u/v/w/x/y/aa/ab/ac）**
+777 → 774 → 748 → 723（VBA 子集常量）→ 700（VBA 全量 + 枚举）→ 638（ReDim/Erase + 枚举）→ 594（C2102 常量取址修复）→ 589 → 588（C2099 静态初始化清零）→ 216（088e-089h）→ 204（089i/j/k）→ 176（090a/c/d/e + P25b）→ 165（090f/g）→ 155（090h-n）→ 142（090o-p）→ 132（090s/090t）→ 109（090u/v/w/x/y/aa/ab/ac）→ **107***（090ad）
+
+### 最近修复摘要（090ad 只写属性 LHS 参数多传，109 → 107*）
+
+- **现象**：Dictionary.c(110/162) C2197 `vb6_Dictionary_prop_let_key(me->m_Dict, OldKey, vb6_BSTR_Empty(), NewKey)` —— VB `m_Dict.key(OldKey) = NewKey` 中 key 只有 `Property Let`（无 Get）。
+- **根因**：只写属性 LHS emit 时（resolveClassMemberCall 读上下文 fallback 到 Let），IndexOrCallExpr 参数补齐逻辑按 prop_let_key 形参 (OldKey, NewKey) 对缺失的 value 形参也 pad 默认值 `vb6_BSTR_Empty()`；随后 Pattern C/D2 rewrite（tryRewriteCOMLvalue）把 target 当 prop_get 形式**追加** RHS value → 4 实参 vs 3 形参。
+- **修复**（cgen_util.cpp Pattern C/D2）：matchedVerb != prop_get_ 时用 findClassMemberCallParams(cls, afterPg) 取业务形参表；若 target 括号实参顶层段数 == 形参数+1（对象+全形参=被 pad 完整），丢弃末段由真实 value 取代 → `prop_let_key(me->m_Dict, OldKey, NewKey)`。配套新增 splitTopLevelArgs 顶层逗号分割 lambda。
+- **附带修正**：090w/090ad 中 `prefix.substr(5)` → `substr(4)`（"vb6_" 仅 4 字符）。原 bug 使类名被截首字符（`vb6_Dictionary_`→`ictionary_`），findClassMemberCallParams 永远失败 → **090w 的 Variant 末参打包此前是死代码**。修正后激活：值实参走 `vb6_VariantFromValue`（_Generic：标量→Long/Double、BSTR→String、**vb6_VARIANT→Identity 不透传不二次包**），安全。
+- **验证**：fix_tool 单模块 Dictionary.cls → 0 error（生成 `prop_let_key(me->m_Dict, OldKey, NewKey)` 正确 3 参）。cCsv.cls 裁剪复现 4 错与全量基线同形（`d(0).Root` 等，属下一轮，非本修复引入）。**全量回归被 C3 崩溃阻塞**（见上「阻塞项」）。
 
 ### 最近修复摘要（090u/v/w/x/y/aa/ab/ac，132 → 109）
 
