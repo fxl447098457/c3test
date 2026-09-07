@@ -1,14 +1,14 @@
 # C3 编译器错误修复 — 任务交接文档
 
 > 用途：新会话恢复上下文用。新开会话后直接说「读取 C3_FIX_HANDOFF.md 并继续修复」。
-> 更新日期：2026-09-06（090s/090t With 块成员链解析：142 → 132，Demo 21 → 15）
+> 更新日期：2026-09-07（090u/v/w/x/y/aa/ab/ac：132 → 109）
 
 ## 1. 项目与目标
 
 - **C3**：VB6→C 转换器（工作区 `c:/Users/vi/Desktop/c3.vb6.pro`）
 - **目标**：减少 `vbman/dist/c3-error.log` 中 MSVC 编译错误数
-- **进度**：777 → 588 → 552 → 216 → 204 → 176 → 165 → 155 → 142 → **132**（最新统计口径为 `: error C` 行数；C2440 73）
-- **当前状态**：最大簇 Demo x15 + ToolsTlsThunks x9 + cTlsReMaster x8；**cZipArchive 簇 error C = 0、Demo With/COM 链 6 类错误清零（090s/090t）**；Demo 剩余 15 错为 Ini/Reg/Json 函数机制问题（见下节 090s residual）
+- **进度**：777 → 588 → 552 → 216 → 204 → 176 → 165 → 155 → 142 → 132 → **109**（最新统计口径为 `: error C` 行数；C2440 46）
+- **当前状态**：**cZipArchive 簇 error C = 0、Demo With/COM 链清零（090s/090t）**；090u/v/w/x/y/aa/ab/ac 再降 23（132→109，C2440 73→46），其中 UDT/项目类/App 属性/Variant 装箱方向大幅收窄（见下节 090u-ac 摘要）。残余错误分布极散：C2440 各类方向 30+ 处（每类 1-7 处）+「参数太少/太多」调用形态 18 处 + 成员不存在/SAFEARRAY 成员 10 处 + 若干语法级（C2197 Dictionary prop_let_key x2、cCollection prop_get_Item x1 等）。下轮候选：Dictionary/Collection 的 Key/Item 写路径参数形态、cHttpClient_Inst 事件回调 OnError/OnResponse* 实参提取。
 - **快速验证**：修复 C3 后不要直接全量编 vbman（2-3 分钟），先跑 `scripts/fix_tool.ps1` 裁剪出含错误模块的最小 vbp 工程（约 5-7 秒/簇）复现/验证，最后才全量回归。
 - **cluster 注意**：小工程缺依赖模块时部分跨模块代码分支不执行，可能零错但全量仍报（cCollection/cToolsStr 案例），须以全量回归为准。
 
@@ -34,7 +34,19 @@
 
 ## 3. 错误演进史
 
-777 → 774 → 748 → 723（VBA 子集常量）→ 700（VBA 全量 + 枚举）→ 638（ReDim/Erase + 枚举）→ 594（C2102 常量取址修复）→ 589 → 588（C2099 静态初始化清零）→ 216（088e-089h）→ 204（089i/j/k）→ 176（090a/c/d/e + P25b）→ 165（090f/g）→ 155（090h-n）→ 142（090o-p）→ **132（090s/090t）**
+777 → 774 → 748 → 723（VBA 子集常量）→ 700（VBA 全量 + 枚举）→ 638（ReDim/Erase + 枚举）→ 594（C2102 常量取址修复）→ 589 → 588（C2099 静态初始化清零）→ 216（088e-089h）→ 204（089i/j/k）→ 176（090a/c/d/e + P25b）→ 165（090f/g）→ 155（090h-n）→ 142（090o-p）→ 132（090s/090t）→ **109（090u/v/w/x/y/aa/ab/ac）**
+
+### 最近修复摘要（090u/v/w/x/y/aa/ab/ac，132 → 109）
+
+- **验证**：全量 132 → 109（C2440 73→46）；错误分布由「cZipArchive/Demo 大簇」转为「64 组零散 1-7 个」（根因分散，逐点反查 VB 源）。
+- **090ac**（cgen_expr + cgen_stmt + vb6rtl.c/h）：`App.HelpFile` 此前无 App 属性分支 → 生成 `(void*)0.HelpFile` 非法语法（C2059/C2198）。新增 rtl `vb6_App_HelpFile()`（返回空串 BSTR），MemberAccessExpr App 分支、wrapToBSTR 及 CallStmt/Print/Write/Debug 的 BSTR 前缀表全部登记，防二次装箱。
+- **090v**（cgen_decl.cpp + cgen.hpp）：模块/类级 `Dim As New` 变量持久注册 `moduleNewVars_`——`knownNewVars_` 在 Sub/Function/Property 入口清空，仅从 moduleNewVars_ 恢复，避免局部同名变量（如 cColl 内 `Dim A As New cCollection` vs JsonStr 内 `Const A`）残留导致 const 变量被注入 auto-instantiate（C2166）。
+- **090ab**（cgen_util inferExprType）：UDT 已确认但字段符号不可解析（跨模块 Public Type 符号不可达）时返回 `Unknown` 而非 `Variant`——否则 `COMSTAT.fBitFields` 等 int32 字段被 `isDefinitelyVariantExpr` 误判 Variant → 实参套 `vb6_VariantToLong(int32)` → C2440。
+- **090aa**（cgen_stmt ForEachStmt）：For Each 元素是项目类变量（`For Each oClient In colTimedOut`）时 cast `(vb6_cls_X*)vb6_ComUnpackObject(&feVar)`；此前漏查 knownClassVars_ → 走 Variant 分支 `oClient = vb6_VARIANT` → C2440。
+- **090u**（cgen_expr MsgBox/BSTR 形参）：实参已是 `vb6_VariantToString(...)`（参数打包段对 Variant 实参按 BSTR 形参已转一次，如 `MsgBox .FindFirst(...) As Variant`）时不再二次包裹 → 消除 `VariantToString(BSTR)` C2440。
+- **090x**（cgen_stmt Debug.Print）：Variant 表达式/变量 → `vb6_DebugWriteBSTR(vb6_VariantToString(x))`，此前落入 `DebugWriteLong((int32_t)(x))` → C2440。
+- **090w**（cgen_util tryRewriteCOMLvalue）：Property Let 末参 `As Variant`（cJson.Item Dat / cCsv.Value）经 Pattern C/D2 改写为 prop_let_ 时，标量值实参（double/int/BSTR）打包成 vb6_VARIANT（ByVal → `vb6_VariantFromValue`；ByRef → 复合字面量取址）。
+- **连带**：090y 注释厘清 With void* 兜底语义（COMObject 后期绑定更贴合 COM，TODO(090z) 还原 ClassInstance 定位崩溃）；Demo `Users.Decode .Rs` 加括号消除解析歧义。
 
 ### 最近修复摘要（090s/090t With 块成员链解析，142 → 132）
 
