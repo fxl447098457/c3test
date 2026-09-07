@@ -1585,6 +1585,30 @@ bool CCodeGen::tryRewriteCOMLvalue(const std::string& target, const std::string&
         }
         return {std::string::npos, std::string::npos};
     };
+    // 工具 lambda: 按顶层逗号分割调用实参 (跳过括号/方括号/花括号内的逗号), 每段 trim.
+    auto splitTopLevelArgs = [](const std::string& s) -> std::vector<std::string> {
+        std::vector<std::string> out;
+        if (s.empty()) return out;
+        int depth = 0;
+        size_t start = 0;
+        for (size_t i = 0; i < s.size(); ++i) {
+            char ch = s[i];
+            if (ch == '(' || ch == '[' || ch == '{') { depth++; }
+            else if (ch == ')' || ch == ']' || ch == '}') { if (depth > 0) depth--; }
+            else if (ch == ',' && depth == 0) {
+                out.push_back(s.substr(start, i - start));
+                start = i + 1;
+            }
+        }
+        out.push_back(s.substr(start));
+        for (auto& seg : out) {
+            size_t b = seg.find_first_not_of(" \t");
+            if (b == std::string::npos) { seg.clear(); continue; }
+            size_t e = seg.find_last_not_of(" \t");
+            seg = seg.substr(b, e - b + 1);
+        }
+        return out;
+    };
 
     // ---- Pattern A: vb6_ComCall(obj, L"Item", args, n) = value ----
     // vb6_ComCall 返回 VARIANT*, 不是左值. 改走 vb6_ComSetPropArg (内部
@@ -1662,7 +1686,7 @@ bool CCodeGen::tryRewriteCOMLvalue(const std::string& target, const std::string&
                 if (!isSet && newVerbs.find("prop_set_") == std::string::npos
                     && prefix.rfind("vb6_", 0) == 0 && !afterPg.empty()
                     && afterPg.find('(') == std::string::npos) {
-                    std::string cls90w = prefix.substr(5);  // 去 "vb6_" → "cCsv_"
+                    std::string cls90w = prefix.substr(4);  // 去 "vb6_" → "cCsv_"
                     if (!cls90w.empty() && cls90w.back() == '_') cls90w.pop_back();
                     std::vector<ParameterInfo> letParams90w;
                     bool letBuiltin90w = false;
@@ -1678,11 +1702,41 @@ bool CCodeGen::tryRewriteCOMLvalue(const std::string& target, const std::string&
                         }
                     }
                 }
+                // Fix 090ad: 只写属性 (无 Get, 如 Dictionary.key(OldKey)=NewKey) 的 LHS
+                // target — emitExpr 按 prop_let_/prop_set_ 完整调用生成时 (读上下文
+                // fallback 到 Let/Set), 对缺失的 value 形参也 pad 了默认值
+                // (vb6_BSTR_Empty()), 例如 prop_let_key(me->m_Dict, OldKey,
+                // vb6_BSTR_Empty()). 若括号实参顶层段数 == 业务形参数+1 (对象+全部
+                // 形参含 value), 末段即被 pad 的 value 位 → 丢弃, 由真实 RHS value
+                // 拼接补齐, 否则 C2197 参数太多 (Dictionary.c 110/162).
+                std::string finalArgs = argsStr;
+                if (matchedVerb != "prop_get_" && !argsStr.empty()
+                    && prefix.rfind("vb6_", 0) == 0 && !afterPg.empty()
+                    && afterPg.find('(') == std::string::npos) {
+                    std::string clsCd2 = prefix.substr(4);  // 去 "vb6_" → "cXx_"
+                    if (!clsCd2.empty() && clsCd2.back() == '_') clsCd2.pop_back();
+                    if (!clsCd2.empty()) {
+                        std::vector<ParameterInfo> paramsCd2;
+                        bool builtinCd2 = false;
+                        if (findClassMemberCallParams(clsCd2, afterPg, paramsCd2, builtinCd2)
+                            && !paramsCd2.empty()) {
+                            std::vector<std::string> topArgs = splitTopLevelArgs(argsStr);
+                            if (topArgs.size() == paramsCd2.size() + 1 && topArgs.size() > 1) {
+                                topArgs.pop_back();  // 移除被 pad 的 value 默认值
+                                finalArgs.clear();
+                                for (size_t i = 0; i < topArgs.size(); i++) {
+                                    if (i) finalArgs += ", ";
+                                    finalArgs += topArgs[i];
+                                }
+                            }
+                        }
+                    }
+                }
                 std::string newCall;
-                if (argsStr.empty()) {
+                if (finalArgs.empty()) {
                     newCall = prefix + newVerbs + afterPg + "(" + valArg + ")";
                 } else {
-                    newCall = prefix + newVerbs + afterPg + "(" + argsStr + ", " + valArg + ")";
+                    newCall = prefix + newVerbs + afterPg + "(" + finalArgs + ", " + valArg + ")";
                 }
                 std::string tag = isSet ? "Set" : "Let";
                 c_.emitLine(newCall + ";  /* Property " + tag + " via prop_get_ rewrite (Pattern C/D2) */");
