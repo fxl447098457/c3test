@@ -303,6 +303,11 @@ private:
 
     // P14.3.1: Dim As New自动实例化变量集合 (小写key → 类名C标识)
     std::unordered_map<std::string, std::string> knownNewVars_;
+    // Fix 090v: 模块/类级 As New 变量持久注册 (knownNewVars_ 在函数入口清理,
+    // 需从本表恢复; 局部 As New 由 LocalDeclStmt 每函数重注册) — 否则跨函数
+    // 同名局部变量 (如 cColl 的 Dim A As New cCollection vs JsonStr 的
+    // Const A) 残留 knownNewVars_ → const 变量被注入 auto-instantiate (C2166).
+    std::unordered_map<std::string, std::string> moduleNewVars_;
 
     // Fix 054: 模块级变量延迟初始化语句 (C2099: 文件作用域变量不能用运行时函数调用初始化)
     std::vector<std::string> moduleInitStmts_;

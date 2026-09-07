@@ -1,4 +1,4 @@
-﻿#include "backend/cgen.hpp"
+#include "backend/cgen.hpp"
 #include <algorithm>
 #include <cctype>
 #include <iostream>
@@ -72,6 +72,8 @@ void CCodeGen::visit(SubDecl& node) {
     knownFixedStringLen_.clear();
     // Fix 010o: 清空局部变量集合
     knownLocalVars_.clear();
+    knownNewVars_.clear();
+    knownNewVars_.insert(moduleNewVars_.begin(), moduleNewVars_.end());  // Fix 090v
     knownByRefParams_.clear();  // Fix 081g
     // Fix 010r/010r-10: 类模块中注册me到knownClassVars_ (使Me.Method()正确分发)
     // 改为map赋值: me → 当前模块名(类名)
@@ -303,6 +305,8 @@ void CCodeGen::visit(FunctionDecl& node) {
     knownFixedStringLen_.clear();
     // Fix 010o: 清空局部变量集合
     knownLocalVars_.clear();
+    knownNewVars_.clear();
+    knownNewVars_.insert(moduleNewVars_.begin(), moduleNewVars_.end());  // Fix 090v
     knownByRefParams_.clear();  // Fix 081g
     // Fix 010r/010r-10: 类模块中注册me到knownClassVars_ (使Me.Method()正确分发)
     // 改为map赋值: me → 当前模块名(类名)
@@ -931,7 +935,8 @@ void CCodeGen::visit(VariableDecl& node) {
                 knownClassVars_[lower] = clsSym->name;
                 // P14.3.1: Dim As New自动实例化 (模块级)
                 if (node.isNew) {
-                    knownNewVars_[lower] = cIdent(clsSym->name);
+                    knownNewVars_[lower] = cIdent(clsSym->name);  // Fix 090v reg
+                    moduleNewVars_[lower] = cIdent(clsSym->name);  // Fix 090v
                 }
             }
             // P6.5: WithEvents变量 → 注册到 knownWithEventsVars_
@@ -987,7 +992,8 @@ void CCodeGen::visit(VariableDecl& node) {
             knownObjectVars_.erase(lower);  // 优先前期绑定
             // Dim As New ComClass 自动实例化 (P14.3.1扩展)
             if (node.isNew && comSym->kind == SymbolKind::ComClass) {
-                knownNewVars_[lower] = cIdent(comSym->name);
+                knownNewVars_[lower] = cIdent(comSym->name);  // Fix 090v reg2
+                moduleNewVars_[lower] = cIdent(comSym->name);  // Fix 090v
             }
             // P13.23: ComClass WithEvents -> knownWithEventsVars_
             if (node.isWithEvents && comSym->kind == SymbolKind::ComClass && comSym->comHasSourceIface) {
@@ -1289,6 +1295,8 @@ void CCodeGen::visit(PropertyDecl& node) {
     knownFixedStringLen_.clear();
     // Fix 010o: 清空局部变量集合
     knownLocalVars_.clear();
+    knownNewVars_.clear();
+    knownNewVars_.insert(moduleNewVars_.begin(), moduleNewVars_.end());  // Fix 090v
     knownByRefParams_.clear();  // Fix 081g
     // Fix 010r/010r-10: 类模块中注册me到knownClassVars_ (使Me.Method()正确分发)
     // 改为map赋值: me → 当前模块名(类名)
