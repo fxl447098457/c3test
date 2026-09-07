@@ -543,6 +543,7 @@ void CCodeGen::emitComVtableSinks() {
         c_.emitLine("typedef struct " + sinkType + " {");
         c_.emitLine("    void** vtable;");
         c_.emitLine("    LONG refCount;");
+        c_.emitLine("    void* handler;");  // 宿主实例(类模块 WithEvents 时为 me)
         c_.emitLine("} " + sinkType + ";");
 
         // Forward declarations (used by QI before definition)
@@ -613,7 +614,18 @@ void CCodeGen::emitComVtableSinks() {
             c_.indent();
             std::string procCall = cProcName(handlerName, handlerSym->access,
                                              handlerSym->isExternal ? handlerSym->sourceModule : (isClassModule_ ? moduleName_ : ""));
-            c_.emitLine(procCall + callArgs + ";");
+            if (isClassModule_) {
+                // 类模块: 处理器是类方法(带 me 形参), 需补宿主实例 (sink->handler = me)
+                std::string argsInner = callArgs;
+                if (argsInner.size() >= 2 && argsInner.front() == '(' && argsInner.back() == ')') {
+                    argsInner = argsInner.substr(1, argsInner.size() - 2);
+                }
+                std::string callFull = procCall + "(((" + sinkType + "*)This)->handler";
+                if (!argsInner.empty()) callFull += ", " + argsInner;
+                c_.emitLine(callFull + ");");
+            } else {
+                c_.emitLine(procCall + callArgs + ";");
+            }
             c_.emitLine("return S_OK;");
             c_.dedent();
             c_.emitLine("}");
@@ -634,13 +646,14 @@ void CCodeGen::emitComVtableSinks() {
 
         // 6. create 函数
         c_.emitBlank();
-        c_.emitLine("void* " + sinkPrefix + "_create(void) {");
+        c_.emitLine("void* " + sinkPrefix + "_create(void* handler) {");
         c_.indent();
         c_.emitLine(sinkType + "* s = (" + sinkType + "*)CoTaskMemAlloc(sizeof(" + sinkType + "));");
         c_.emitLine("if (!s) return NULL;");
         c_.emitLine("memset(s, 0, sizeof(" + sinkType + "));");
         c_.emitLine("s->vtable = " + sinkPrefix + "_vtable;");
         c_.emitLine("s->refCount = 1;");
+        c_.emitLine("s->handler = handler;");
         c_.emitLine("return s;");
         c_.dedent();
         c_.emitLine("}");

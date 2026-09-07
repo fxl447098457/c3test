@@ -1626,7 +1626,8 @@ void CCodeGen::visit(SetStmt& node) {
                 } else {
                     // vtable source interface: use custom vtable sink
                     std::string sinkVar = targetLower + "_comsink";
-                    c_.emitLine("void* " + sinkVar + " = vb6_vsink_" + targetLower + "_create();");
+                    std::string sinkHandlerExpr = isClassModule_ ? "(void*)me" : "NULL";
+                    c_.emitLine("void* " + sinkVar + " = vb6_vsink_" + targetLower + "_create(" + sinkHandlerExpr + ");");
                     c_.emitLine("vb6_ComAdvise((IUnknown*)" + target + ", " + targetLower + "_evt_iid, " + sinkVar + ", &" + targetLower + "_evt_cookie);");
                 }
                 c_.dedent();
