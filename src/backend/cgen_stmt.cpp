@@ -2779,24 +2779,22 @@ void CCodeGen::visit(WithStmt& node) {
                     }
                 }
             }
-            // 函数返回值且仍为void* → 默认为类实例
+            // 函数返回值且仍为void* → 默认按 COM 后期绑定分发
             if (withInfo.kind == WithObjKind::Unknown && tempType == "void*") {
                 // Fix 090y: void* With 目标 (COM 方法返回对象, 如 cIni.Section As
                 // Dictionary) → COMObject (后期绑定 dispatch). 此前 ClassInstance
                 // (className 空) → WithMemberExpr 成员解析落入全局符号表撞名
                 // (cTimers.Item) → 左值错误 C2106. UDT 目标 tempType=vb6_type_*
                 // 不受影响; Variant-对象目标运行时 dispatch 也更贴合 COM 语义.
-                // TODO(090z): 先还原为 ClassInstance 定位崩溃 (0xC0000409)
-                withInfo.kind = WithObjKind::ClassInstance;
+                withInfo.kind = WithObjKind::COMObject;
             }
         }
 
         // --- 最终回退: void* 不支持 .member 访问 → COM 后期绑定分发 ---
         // Fix 090y: (同上方 Fix, 独立于 isClassModule_ 字段检测的最终兜底)
         // UDT struct (vb6_type_*) 目标 tempType 非 void* → 不受影响.
-        // TODO(090z): 先还原为 ClassInstance 定位崩溃 (0xC0000409)
         if (withInfo.kind == WithObjKind::Unknown && tempType == "void*") {
-            withInfo.kind = WithObjKind::ClassInstance;
+            withInfo.kind = WithObjKind::COMObject;
         }
         // Fix 054: tempType 已解析为 UDT struct (vb6_type_*) → 保持 Unknown, 用 struct.field 访问
         if (withInfo.kind == WithObjKind::ClassInstance && tempType.rfind("vb6_type_", 0) == 0) {
