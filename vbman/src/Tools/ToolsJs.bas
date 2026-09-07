@@ -17,7 +17,7 @@ End Function
 
 Public Function NewObj() As Object
     Call Init
-    Set NewArr = MSSC.Eval("{};")
+    Set NewObj = MSSC.Eval("{};")
 End Function
 
 
