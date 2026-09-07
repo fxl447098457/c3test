@@ -1,7 +1,7 @@
 # C3 编译器错误修复 — 任务交接文档
 
 > 用途：新会话恢复上下文用。新开会话后直接说「读取 C3_FIX_HANDOFF.md 并继续修复」。
-> 更新日期：2026-09-07 晚（090aj/090ak+090al+090am/090an：无窗体全量基线 84 错；窗体(FLayer) Release 崩溃已验证为既有阻塞项，含窗体即崩、ASAN 版不崩 → UB 特征）
+> 更新日期：2026-09-07 晚（090bx/by：无窗体 125 模块全量 84 → **79**；ToolsJs 源笔误 + With void* COMObject 恢复 + As Collection 内置对象类型识别。窗体(FLayer) Release 崩溃仍为既有阻塞项）
 
 ## 1. 项目与目标
 
@@ -37,7 +37,25 @@
 
 777 → 774 → 748 → 723（VBA 子集常量）→ 700（VBA 全量 + 枚举）→ 638（ReDim/Erase + 枚举）→ 594（C2102 常量取址修复）→ 589 → 588（C2099 静态初始化清零）→ 216（088e-089h）→ 204（089i/j/k）→ 176（090a/c/d/e + P25b）→ 165（090f/g）→ 155（090h-n）→ 142（090o-p）→ 132（090s/090t）→ 109（090u/v/w/x/y/aa/ab/ac）→ 107*（090ad）→ 103*（090ae/090af）→ **100***（090ag）
 
-### 最近修复摘要（090aj-090an：无窗体 125 模块基线 84 错；提交 090aj、090ak+090al+090am、36cd62c=090an）
+### 最近修复摘要（090bx/by：无窗体 125 模块基线 84 → **79**；提交 f3ed79c）
+
+- **ToolsJs 源修复（vbman）**：`NewObj` 函数体内误写 `Set NewArr = MSSC.Eval("{};")`（复制粘贴笔误，应 `Set NewObj = ...`）→ 清 ToolsJs.c(41) C2106+C2198。VB6 中跨函数名作赋值左侧非法，属源码 bug 非 cgen 问题。
+- **090bx（cgen_stmt.cpp）**：With 块 `void*` 目标恢复 COMObject 分发（090y 设计；090z 为定位 0xC0000409 崩溃临时还原 ClassInstance，现崩溃已定位到窗体主题）→ 清 Demo.c(509) `.Item("abc") = 123` C2106（此前 classInstance 撞名 cTimers.Item）。With 推断两处 `kind == Unknown && tempType == "void*"` → COMObject。
+- **090by（cgen_expr.cpp + cgen_base.cpp）**：`resolveArrayElemType` 对 VB6 内置对象类型（Collection/Forms/ErrObject/App/Screen/Printer/Clipboard，含 VBA. 前缀）返回 Variant 但 C 字段是 void* → 误注册 classVariantMembers_ → 类内 `m_Col(i)` 生成 `vb6_VariantArrayGet(&me->m_Col, i)`（C2172）。修复：cgen_expr 6447 SimpleTypeRef 分支加 vb6BuiltinObjTypes 集合（与 semantic_analyzer.cpp:587 一致）→ Object；cgen_base.cpp 177 分支加防御性排除（非内置名且符号表无条目不注册）。清 C2172 x2（cHttpServer.c 62 / cHttpServerSvr.c 160 的 `m_DefaultDocumentAdditions(i)` Collection Item 调用）。
+- **已知运行期缺陷（编译通过但语义错，未修）**：cHttpServer.c AddDefaultDocument 的 `For i = 1 To m_DefaultDocumentAdditions.count` 上界生成 `int32_t i_end = me->m_DefaultDocumentAdditions;`（.count 属性读被忽略）；正向 for 分支条件误用 ComCall("count") 包 Item 结果（d2 反向分支正确）→ 需 Collection `.count` 属性在整数上下文读（vb6_ComGetIntProp）与正向分支修正。
+
+### HttpServer 簇（cHttpServer/cHttpServerResponse/cHttpServerCookies，约 20 错，多独立深机制）
+
+当前 79 错分布：C2440 51 / C2198 8 / C2039 7 / C2065 5 / 单发 8 个码。HttpServer 簇含 5+ 独立机制，逐一深挖：
+1. **cHttpServer.c 804 State403 C2198（090ak 曾声称清过但语句调用上下文仍漏）**：`Response.State403` 是 Call 语句（非值上下文），Fix 083d 只覆盖值上下文无括号类方法引用；语句调用 Optional Say 未补参（C 签名 BSTR* Say + int _has_Say）。同族：cHttpServerResponse.c 508 TlsReMaster.SendData C2198、cHttpServer.c 374/821/913、cookies 65/168 的 Variant/COM 值转换。
+2. **cHttpServer.c 906 `Cookies.Cookie(x)` COM dispatch**：Cookies 是局部 `Dim As cHttpServerCookies`（项目类，早绑定应 vb6_cHttpServerCookies_prop_get_Cookie），生成却 `vb6_ComCall(Cookies, L"Cookie", ...)`——默认成员（VB_UserMemId=0）调用被 COM 化。致 908 `.Value =` C2039（With 对象 ClassInstance 但 cHttpServerCookieAttr.Value 是 Property 非字段，字段直写失败）。
+3. **Variant prop 值转换缺口**：cHttpServerCookieAttr.Expires As Variant——(a) cHttpServerCookies.c 168 `FormatHttpDate(CK.Expires)` ByRef double 参数需 `&(double){vb6_VariantToDouble(prop_get_Expires(CK))}`（当前 vb6_VARIANT 直接塞 double 复合字面量 C2440）；(b) cHttpServer.c 913 `.Expires = DateAdd(...)` prop_let Variant 参数需 vb6_VariantFromValue 打包。同族：cHttpServer.c 374 void*→double、cookies 65、response 152/153。
+4. **cHttpServer.c 821 `Request.Header.Exists(...)` C2037**：Header 被解析成 vb6_ComIface_IDictionary* 且 `->Exists` 结构体成员访问（应 vb6_ComCall 或类方法早绑定）。
+5. **cHttpServerResponse.c 452 VBMAN.Version C2198**：ComGlobalNs promoted 函数链生成 `vb6_cVBMAN_Version(&(void*){0}, 0)`（当静态模块函数）；应 CreateObject(sGlobal) + ComCall VBMAN + 晚绑定 .Version（cgen_expr 424 分支未命中）。
+6. **cHttpServer.c 372-374 With CI 内 `m_oServer.RemoteHostIP/RemotePort` 链式读错乱**：RHS 退化为 me->m_oServer（属性名丢失）、`.ConnectAt = Now()` 错配 COM RemotePort。With ClassInstance 字段写 RHS 含类字段链式属性读的路径缺陷。
+7. **cHttpServer.c 382 FireEvent 事件参数打包**：OnAccept(CI, IsDiss) 的 CI 生成 `vb6_BSTR_FromStr(CI)`（对象被当字符串打包，运行时错；编译无错故未计）。
+
+候选低垂：cHttpServerCookies.c 65/168（Variant↔对象/Date 转换，机制同 090ag 089c2/IsEmpty 修复，可先做）。
 
 - **验证基线变更**：用 `scripts/_tmp_bisect.ps1 -N 125`（FIX_bisect.vbp，Class/Module 125 个、无窗体——VBMAN.vbp 的 `Form=Layer\FLayer.frm` 行无分号，bisect 第 14 行正则 `^(Class|Module|Form)=[^;]+;.+$` 要求分号 → 窗体被排除）做快速全量验证，错误日志 `vbman/src/_fix/bisect/out/c3-error.log`。注意此基线与 HANDOFF 上方记录的不同窗口期（当前 84 错 = 无窗体全量）。
 - **090aj（cgen_base.cpp）**：Date 类型类字段归入浮点成员集 classDoubleMembers_（此前 UDT/字段映射遗漏 → 相关 C2440）。
