@@ -543,7 +543,7 @@ Sub Db2()
         .Connect Access, "D:\code\vi\vbmanlib\vbman-case\cs-auther\src-server\data.mdb"
         .Sql("select * from users").Fetch
         '        MsgBox .Rs.RecordCount
-        Users.Decode .Rs
+        Users.Decode (.Rs)
         MsgBox Users.RootItems.count
     End With
 End Sub
