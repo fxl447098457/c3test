@@ -812,12 +812,20 @@ Vb6Type CCodeGen::inferExprType(Expr& expr) const {
                                     return mi.type;  // 找到UDT字段，返回其Vb6Type
                                 }
                             }
-                            // Fix 084o-2: UDT 已确认但字段未找到 → 字段类型未知, 返回 Variant.
+                            // Fix 084o-2: UDT 已确认但字段未找到 → 字段类型未知, 返回 Unknown.
                             // 不要回退 lookupModule(memberName): 成员名是字段名而非模块符号,
                             // 可能误匹配模块级同名符号 (如 SourceFile 变量) 导致类型误判为 String.
-                            return Vb6Type::Variant;
+                            // Fix 090ab: 也不应返回 Variant — 否则 UDT 字段 (如 COMSTAT.fBitFields,
+                            // 跨模块 Type 符号缺失) 被 isDefinitelyVariantExpr 误判为 Variant,
+                            // 实参生成时套 vb6_VariantToLong(int32 字段) → C2440.
+                            return Vb6Type::Unknown;
                         }
                     }
+                    // Fix 090ab: UDT C 类型已知 (knownUdtVars_) 但符号不可解析 (跨模块
+                    // Public Type 在符号表注册表不可达) → 字段类型未知, 保守返回 Unknown,
+                    // 禁止回退到模块级同名符号或默认 Variant (否则 COMSTAT.fBitFields 等
+                    // 会被误判为 Variant 而错误套用 vb6_VariantToLong → C2440).
+                    return Vb6Type::Unknown;
                 }
             }
             // 查找成员函数/属性的返回类型
@@ -1645,11 +1653,36 @@ bool CCodeGen::tryRewriteCOMLvalue(const std::string& target, const std::string&
                                                     parens.second - parens.first - 1);
                 std::string newVerbs = (matchedVerb != "prop_get_") ? matchedVerb
                                       : (isSet ? "prop_set_" : "prop_let_");
+                // Fix 090w: Property Let 末参 As Variant (cJson.Item Dat As Variant
+                // ByRef / cCsv.Value ByVal Dat As Variant) — 值实参 (vb6_Now() double
+                // 666 int / BSTR) 需打包成 vb6_VARIANT, 否则 Pattern C/D2 裸拼 →
+                // C2440 "double/int/BSTR → vb6_VARIANT(/ *)". 仅当改写目标是
+                // prop_let_ (Let 语义) 且末形参解析为 Variant 时打包.
+                std::string valArg = value;
+                if (!isSet && newVerbs.find("prop_set_") == std::string::npos
+                    && prefix.rfind("vb6_", 0) == 0 && !afterPg.empty()
+                    && afterPg.find('(') == std::string::npos) {
+                    std::string cls90w = prefix.substr(5);  // 去 "vb6_" → "cCsv_"
+                    if (!cls90w.empty() && cls90w.back() == '_') cls90w.pop_back();
+                    std::vector<ParameterInfo> letParams90w;
+                    bool letBuiltin90w = false;
+                    if (findClassMemberCallParams(cls90w, afterPg, letParams90w, letBuiltin90w)
+                        && !letParams90w.empty()) {
+                        const auto& lastP90w = letParams90w.back();
+                        if (lastP90w.type == Vb6Type::Variant) {
+                            if (lastP90w.isByVal) {
+                                valArg = "vb6_VariantFromValue(" + value + ")";
+                            } else {
+                                valArg = "(&(vb6_VARIANT){vb6_VariantFromValue(" + value + ")})";
+                            }
+                        }
+                    }
+                }
                 std::string newCall;
                 if (argsStr.empty()) {
-                    newCall = prefix + newVerbs + afterPg + "(" + value + ")";
+                    newCall = prefix + newVerbs + afterPg + "(" + valArg + ")";
                 } else {
-                    newCall = prefix + newVerbs + afterPg + "(" + argsStr + ", " + value + ")";
+                    newCall = prefix + newVerbs + afterPg + "(" + argsStr + ", " + valArg + ")";
                 }
                 std::string tag = isSet ? "Set" : "Let";
                 c_.emitLine(newCall + ";  /* Property " + tag + " via prop_get_ rewrite (Pattern C/D2) */");
