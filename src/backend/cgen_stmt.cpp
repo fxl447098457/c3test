@@ -1865,6 +1865,21 @@ void CCodeGen::visit(LetStmt& node) {
 void CCodeGen::visit(IfStmt& node) {
     emitExpr(*node.condition);
     if (isComMarker_) resolveComValue("Int");  // If条件通常是Boolean/整数
+    // Fix 090ag: If <Variant 值> 条件 — VB6 将 Variant 按真值判定 (Empty/0/False 为假).
+    // 此前对 As Variant 参数/变量的裸标识符条件生成 if (JsonValue) → C2083 (vb6_VARIANT
+    // 结构体比较非法). 需显式 vb6_VariantToBool.
+    if (!isComMarker_) {
+        bool condIsVariant = cExprIsVariant(lastExpr_);
+        if (!condIsVariant && node.condition
+            && node.condition->kind == ASTNodeKind::IdentifierExpr) {
+            std::string cndLower =
+                Symbol::toLower(static_cast<IdentifierExpr&>(*node.condition).name);
+            if (knownVariantVars_.count(cndLower)) condIsVariant = true;
+        }
+        if (condIsVariant && lastExpr_.find("vb6_VariantToBool(") == std::string::npos) {
+            lastExpr_ = "vb6_VariantToBool(" + lastExpr_ + ")";
+        }
+    }
     c_.emitLine("if (" + lastExpr_ + ") {");
     c_.indent();
     emitStmtList(node.thenBody);

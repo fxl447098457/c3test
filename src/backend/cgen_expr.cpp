@@ -1837,7 +1837,8 @@ void CCodeGen::visit(MemberAccessExpr& node) {
                     }
                     // 类无此成员 → 公开数据字段 (RootItem 等)
                     lastExpr_ = currentReturnVar_ + "->" + cIdent(node.memberName);
-                } else if (currentReturnCType_ == "void*") {
+                } else if (currentReturnCType_ == "void*"
+                           || currentReturnCType_.find("vb6_ComIface_") != std::string::npos) {
                     // Fix 089c2: 当前函数返回内置 COM 对象 (As Collection / As Object →
                     // C void*) 时, 函数体内 FuncName.Add(...)/FuncName.Item(...) 走
                     // COM dispatch (vb6_ComCall) — 如 cZipArchive.pvEnumFiles As
@@ -1845,8 +1846,13 @@ void CCodeGen::visit(MemberAccessExpr& node) {
                     // appendUdtObjFieldMarker(void* 无字段) → 生成
                     // vb6_ret_X.Add(...) 结构成员调用 → C2224 (void* 上 .Add).
                     // 与 Fix 088d (类返回) / Fix 085 (UDT 返回) 对齐.
+                    // Fix 090ag: As Dictionary (项目外 COM 类, C 类型 vb6_ComIface_
+                    // IDictionary* 而非 void*) 的函数返回同样走 COM dispatch —
+                    // ToolsJsonVba json_ParseObject As Dictionary 体内
+                    // json_ParseObject.Item(Key) = v 此前生成
+                    // vb6_ret_X.Item(...) → C2037 (未定义结构 vb6_ComIface_IDictionary).
                     lastExpr_ = currentReturnVar_;
-                    comObjExpr_ = currentReturnVar_;   // void* Collection 对象表达式
+                    comObjExpr_ = "(void*)" + currentReturnVar_;  // 统一 void* 对象表达式
                     comMemberName_ = node.memberName;
                     isComMarker_ = true;
                     isEarlyBoundCom_ = false;
