@@ -1,7 +1,7 @@
 # C3 编译器错误修复 — 任务交接文档
 
 > 用途：新会话恢复上下文用。新开会话后直接说「读取 C3_FIX_HANDOFF.md 并继续修复」。
-> 更新日期：2026-09-07（090ag：ToolsJsonVba 3 错；090ah cToolsArray 6 错已分析待修——多机制点+草稿代码语义存疑，优先级低）
+> 更新日期：2026-09-07 晚（090aj/090ak+090al+090am/090an：无窗体全量基线 84 错；窗体(FLayer) Release 崩溃已验证为既有阻塞项，含窗体即崩、ASAN 版不崩 → UB 特征）
 
 ## 1. 项目与目标
 
@@ -36,6 +36,14 @@
 ## 3. 错误演进史
 
 777 → 774 → 748 → 723（VBA 子集常量）→ 700（VBA 全量 + 枚举）→ 638（ReDim/Erase + 枚举）→ 594（C2102 常量取址修复）→ 589 → 588（C2099 静态初始化清零）→ 216（088e-089h）→ 204（089i/j/k）→ 176（090a/c/d/e + P25b）→ 165（090f/g）→ 155（090h-n）→ 142（090o-p）→ 132（090s/090t）→ 109（090u/v/w/x/y/aa/ab/ac）→ 107*（090ad）→ 103*（090ae/090af）→ **100***（090ag）
+
+### 最近修复摘要（090aj-090an：无窗体 125 模块基线 84 错；提交 090aj、090ak+090al+090am、36cd62c=090an）
+
+- **验证基线变更**：用 `scripts/_tmp_bisect.ps1 -N 125`（FIX_bisect.vbp，Class/Module 125 个、无窗体——VBMAN.vbp 的 `Form=Layer\FLayer.frm` 行无分号，bisect 第 14 行正则 `^(Class|Module|Form)=[^;]+;.+$` 要求分号 → 窗体被排除）做快速全量验证，错误日志 `vbman/src/_fix/bisect/out/c3-error.log`。注意此基线与 HANDOFF 上方记录的不同窗口期（当前 84 错 = 无窗体全量）。
+- **090aj（cgen_base.cpp）**：Date 类型类字段归入浮点成员集 classDoubleMembers_（此前 UDT/字段映射遗漏 → 相关 C2440）。
+- **090ak+090al+090am（cgen_expr.cpp）**：值上下文无括号类方法引用补默认参数（C2198 参数太少）——清 cHttpServerSession 5 错（`If Db.Sql(s).Param(p).QueryParam Then` 链）+ cHttpServer.c(804) State403 + cHttpServerResponse.c(452) VBMAN.Version + cLayer cCsv_ShowTo 等。生效点是 **Fix 083d 分支**（cgen_expr 2189：`node.object->kind != IdentifierExpr && !asCallCallee_` 只发 this 单参）——按 findClassMemberCallParams 形参表补默认值（_prop_ 属性跳过）。090al（1899 段 knownClassVars_ 未命中 → inferClassTypeOfExpr emplace）与 090ak（Fix 088b typed 字段链补参）为同族防御性补丁。
+- **090an（36cd62c）**：数组下标为 Variant 时转 Long——`baBuffer(maxLen)`/`ReDim` 边界等生成 `VB6_SA_AT(type, arr, (*maxLen))`，宏内 `[(idx)-lBound]` 对 vb6_VARIANT 做减法 → C2088。修 cTlsReMaster.c(372) C2088+C2198（visit 一维/二维数组元素访问 + toLongIfVariant）。注意 ByRef Variant 参数以 `(*name)` 形态作下标时 toLongIfVariant 依赖 knownVariantVars_/cExprIsVariant 识别，未见漏网。
+- **窗体 Release 崩溃验证（既有阻塞项确认）**：VBMAN.vbp 有 4 窗体（FLayer/FLogs/FToastCenter/FToastDrawer），bisect 因正则从未含窗体 → 崩溃从未在回归面。修正正则含窗体后 release `.build\C3.exe` 崩溃（0xC0000005）最小批次 38 = **FLayer.frm**（VBMAN.vbp 顺序 index37）；**.build-asan 版同批次正常完成**（FLayer.c 只报 2 个截断依赖错 ToolsWindow）→ release 独崩 = 未初始化/UB。印证 HANDOFF 上方「ASAN 崩点漂移 ↔ release 崩 cVBMAN 收尾」内存损坏特征。**窗体方法/默认实例跨模块调用（cLayer FLayer.ShowTo 分发到 cCsv_ShowTo、cLogs FLogs.Visible 未声明）为窗体模块缺失的副作用，修复窗体崩溃后才可见真实错误面**。窗体崩溃定位建议：Debug 构建 + cdb 抓 FLayer 崩溃栈（ASAN 不崩无法用 report）。
 
 ### 最近修复摘要（090ag ToolsJsonVba 3 错，103* → 100*）
 
