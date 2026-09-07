@@ -1897,6 +1897,16 @@ void CCodeGen::visit(MemberAccessExpr& node) {
             // Fix 011r-1: 当obj在knownClassVars_中时, 优先用resolveClassMemberCall
             // 精确解析该类的方法/属性, 避免memSym捡错模块的同类同名方法/属性
             auto itClassVar = knownClassVars_.find(objLower);
+            if (itClassVar == knownClassVars_.end() && node.object) {
+                // Fix 090al: 链式对象 (Db.Sql(s).Param(p).QueryParam) 或局部类变量
+                // 未注册 knownClassVars_ → AST 推断类名再分发 (含值上下文补参),
+                // 否则无括号裸调用只发 this → C2198 参数太少.
+                std::string inferredCls = inferClassTypeOfExpr(*node.object);
+                if (!inferredCls.empty()
+                    && !resolveClassMemberCall(inferredCls, node.memberName).empty()) {
+                    itClassVar = knownClassVars_.emplace(objLower, inferredCls).first;
+                }
+            }
             if (itClassVar != knownClassVars_.end()) {
                 // 用对象的真实类名查找方法, 防止跨模块同名冲突
                 std::string resolvedFn = resolveClassMemberCall(itClassVar->second, node.memberName);
@@ -2183,7 +2193,51 @@ void CCodeGen::visit(MemberAccessExpr& node) {
             if (!resolvedFn.empty()) {
                 emitExpr(*node.object);
                 std::string objExpr = std::move(lastExpr_);
-                lastExpr_ = resolvedFn + "((void*)" + objExpr + ")";
+                // Fix 090am: 值上下文无括号方法引用 (If Db.Sql(s).Param(p).QueryParam Then)
+                // — object 是非标识符链式调用 → 本 Fix 083d 分支只发 this ((void*)obj)
+                // → C2198 参数太少 (QueryParam 声明5参传1参). 与 Fix 089h/090ak 同模板:
+                // 按 findClassMemberCallParams 形参表补默认值. 属性 (prop_get_/prop_let_)
+                // 不 pad (无括号属性读只发 this 即正确, pad 反致 C2197).
+                std::vector<ParameterInfo> params090am;
+                bool isB090am = false;
+                if (resolvedFn.find("_prop_") == std::string::npos
+                    && findClassMemberCallParams(className, node.memberName,
+                                                 params090am, isB090am)
+                    && !params090am.empty() && !isB090am) {
+                    std::string argList090am = "(void*)" + objExpr;
+                    for (size_t i = 0; i < params090am.size(); i++) {
+                        const auto& param = params090am[i];
+                        argList090am += ", ";
+                        std::string defVal090am;
+                        if (param.hasDefaultValue && !param.defaultValueExpr.empty()) {
+                            defVal090am = param.defaultValueExpr;
+                        } else {
+                            defVal090am = defaultValue(param.type);
+                        }
+                        if (param.isByVal) {
+                            argList090am += defVal090am;
+                        } else {
+                            std::string cType090am = mapType(param.type);
+                            if (param.type == Vb6Type::Variant
+                                || param.type == Vb6Type::Empty
+                                || param.type == Vb6Type::Null
+                                || param.type == Vb6Type::Object) {
+                                argList090am += "&(" + cType090am + "){0}";
+                            } else {
+                                argList090am += "&(" + cType090am + "){" + defVal090am + "}";
+                            }
+                        }
+                    }
+                    for (size_t i = 0; i < params090am.size(); i++) {
+                        const auto& param = params090am[i];
+                        if (param.isOptional && !param.isParamArray) {
+                            argList090am += ", 0";
+                        }
+                    }
+                    lastExpr_ = resolvedFn + "(" + argList090am + ")";
+                } else {
+                    lastExpr_ = resolvedFn + "((void*)" + objExpr + ")";
+                }
                 return;
             }
         }
@@ -2349,7 +2403,50 @@ void CCodeGen::visit(MemberAccessExpr& node) {
                     pendingChainObj_ = thisArg;
                     lastExpr_ = resolvedFn;
                 } else {
-                    lastExpr_ = resolvedFn + "(" + thisArg + ")";
+                    // Fix 090ak: 值上下文无括号裸调用 (If Db.Sql(s).Param(p).QueryParam Then) —
+                    // 对象链尾段方法经 Fix 088b typed 字段链分支 (此分支先于 Fix 015/089h
+                    // 命中) 到达此处, 只发 this 会 C2198 参数太少 (QueryParam 声明 5 参传 1 参).
+                    // 按形参表补 Optional 默认值 (同 Fix 089h 2404 分支模板).
+                    std::vector<ParameterInfo> params090;
+                    bool isB090 = false;
+                    if (resolvedFn.find("_prop_") == std::string::npos
+                        && findClassMemberCallParams(fieldCls, node.memberName,
+                                                     params090, isB090)
+                        && !params090.empty() && !isB090) {
+                        std::string argList090 = thisArg;
+                        for (size_t i = 0; i < params090.size(); i++) {
+                            const auto& param = params090[i];
+                            argList090 += ", ";
+                            std::string defVal090;
+                            if (param.hasDefaultValue && !param.defaultValueExpr.empty()) {
+                                defVal090 = param.defaultValueExpr;
+                            } else {
+                                defVal090 = defaultValue(param.type);
+                            }
+                            if (param.isByVal) {
+                                argList090 += defVal090;
+                            } else {
+                                std::string cType090 = mapType(param.type);
+                                if (param.type == Vb6Type::Variant
+                                    || param.type == Vb6Type::Empty
+                                    || param.type == Vb6Type::Null
+                                    || param.type == Vb6Type::Object) {
+                                    argList090 += "&(" + cType090 + "){0}";
+                                } else {
+                                    argList090 += "&(" + cType090 + "){" + defVal090 + "}";
+                                }
+                            }
+                        }
+                        for (size_t i = 0; i < params090.size(); i++) {
+                            const auto& param = params090[i];
+                            if (param.isOptional && !param.isParamArray) {
+                                argList090 += ", 0";
+                            }
+                        }
+                        lastExpr_ = resolvedFn + "(" + argList090 + ")";
+                    } else {
+                        lastExpr_ = resolvedFn + "(" + thisArg + ")";
+                    }
                 }
                 return;
             }
