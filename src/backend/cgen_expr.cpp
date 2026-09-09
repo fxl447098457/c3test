@@ -4795,9 +4795,9 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
                 // cLogs MakeLogContent: Join(CacheDatas(i), Span) 的 CacheDatas(i)
                 // = vb6_ComCall(...) → 原生成 VariantToSafeArray1D(ComCall) C2440.
                 bool isComResultVal2 =
-                    (argVal.compare(0, 13, "vb6_ComCall(") == 0)
-                    || (argVal.compare(0, 16, "vb6_ComGetProp(") == 0)
-                    || (argVal.compare(0, 21, "vb6_ComGetObjectProp(") == 0);
+                    (argVal.find("vb6_ComCall(") == 0)
+                    || (argVal.find("vb6_ComGetProp(") == 0)
+                    || (argVal.find("vb6_ComGetObjectProp(") == 0);
                 if (isComResultVal2) {
                     argVal = "vb6_VariantFromComResult(" + argVal + ")";
                 }
@@ -4932,9 +4932,9 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
                     // 精确前缀避免误伤 vb6_ComCallInt( (返回 int32) /
                     // vb6_ComGetStringProp( (返回 BSTR) / vb6_ComCallObject( (对象).
                     bool isComResultVal =
-                        (argVal.compare(0, 13, "vb6_ComCall(") == 0)
-                        || (argVal.compare(0, 16, "vb6_ComGetProp(") == 0)
-                        || (argVal.compare(0, 21, "vb6_ComGetObjectProp(") == 0);
+                        (argVal.find("vb6_ComCall(") == 0)
+                        || (argVal.find("vb6_ComGetProp(") == 0)
+                        || (argVal.find("vb6_ComGetObjectProp(") == 0);
                     if (isComResultVal) {
                         argVal = "vb6_VariantFromComResult(" + argVal + ")";
                     }
