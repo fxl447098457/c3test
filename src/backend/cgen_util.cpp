@@ -983,7 +983,7 @@ bool CCodeGen::isDefinitelyVariantExpr(Expr& expr, bool* isArrOut) const {
 // 包含已知返回 vb6_VARIANT 的函数调用时, 判定为 Variant.
 // 仅检查顶层表达式 (去除前导括号/空白后), 避免对子表达式误判.
 
-bool CCodeGen::cExprIsVariant(const std::string& cExpr) {
+bool CCodeGen::cExprIsVariant(const std::string& cExpr) const {
     // 去除前导空白和括号
     size_t start = 0;
     while (start < cExpr.size()) {
@@ -2968,6 +2968,17 @@ std::string CCodeGen::wrapVariantValue(ASTNode* valueNode, const std::string& cE
         if (lit.literalKind == LiteralKind::Boolean) {
             return std::string("vb6_VariantBool(") + cExpr + ")";
         }
+    }
+
+    // Fix 090d2: C 表达式顶层已是 vb6_VARIANT 时直接返回, 不再包装 —
+    // 原 2998 行的检查在 inferExprType switch 之后, 对符号表/推断层
+    // 认为是具体标量但实际生成 vb6_VARIANT 的表达式 (如 COM 属性
+    // fileInfo.Size 被推断为 Long, 实际生成
+    // vb6_VariantFromComResult(vb6_ComCall(...))) 会被 switch 抢先包装
+    // 成 vb6_VariantLong(vb6_VARIANT) → C2440 (cHttpServerResponse File
+    // 内 fileSize = fileInfo.Size, fileSize As Variant).
+    if (cExprIsVariant(cExpr)) {
+        return cExpr;
     }
     
     // 使用inferExprType推断表达式类型

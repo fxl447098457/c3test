@@ -2849,7 +2849,33 @@ void CCodeGen::visit(WithStmt& node) {
                 // Fix 084e: 若表达式实际是类对象 (如 Cookies("name") 返回
                 // vb6_cls_cHttpServerCookieAttr* 但被误判为 Variant), 则
                 // VariantToObjectVal(对象指针) 触发 C2440, 走下方 (void*) 直转.
-                c_.emitLine(tempType + " " + tempVar + " = vb6_VariantToObjectVal(" + lastExpr_ + ")  /* With object ref */;");
+                // Fix 090e: 符号表把项目类默认成员属性 (Property Get Cookie()
+                // As cHttpServerCookieAttr) 的返回类型误注册为 Variant 时,
+                // 生成的 C 表达式是 vb6_cHttpServerCookies_prop_get_Cookie(...)
+                // (返回 vb6_cls_cHttpServerCookieAttr*), 并非 vb6_VARIANT 值;
+                // 对类指针调 VariantToObjectVal → C2440 (cHttpServerCookies
+                // ExpireCookie: With Cookie(Key)). 仅当 C 级确认实参是
+                // vb6_VARIANT (cExprIsVariant / 已知 Variant 变量/字段) 时
+                // 走 VariantToObjectVal, 否则按对象指针 (void*) 直转.
+                bool withIsVariantVal090e = cExprIsVariant(lastExpr_);
+                if (!withIsVariantVal090e) {
+                    std::string lower090e = lastExpr_;
+                    std::transform(lower090e.begin(), lower090e.end(),
+                                   lower090e.begin(), ::tolower);
+                    if (knownVariantVars_.count(lower090e)) {
+                        withIsVariantVal090e = true;
+                    } else if (lower090e.compare(0, 4, "me->") == 0) {
+                        std::string mem090e = lower090e.substr(4);
+                        if (classVariantMembers_.count(mem090e)) {
+                            withIsVariantVal090e = true;
+                        }
+                    }
+                }
+                if (withIsVariantVal090e) {
+                    c_.emitLine(tempType + " " + tempVar + " = vb6_VariantToObjectVal(" + lastExpr_ + ")  /* With object ref */;");
+                } else {
+                    c_.emitLine(tempType + " " + tempVar + " = (" + tempType + ")" + lastExpr_ + "  /* With object ref */;");
+                }
             } else {
                 c_.emitLine(tempType + " " + tempVar + " = (" + tempType + ")" + lastExpr_ + "  /* With object ref */;");
             }

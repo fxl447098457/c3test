@@ -4743,6 +4743,31 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
                                 break;
                         }
                     } else {
+                        // Fix 090d: ByRef 具体类型形参 + 实参是 vb6_VARIANT 值 —
+                        // 复合字面量初始化 (&(double){vb6_VARIANT}) 触发 C2440
+                        // (vb6_VARIANT→double/BSTR/... 初始化失败). 按 cType 先提取.
+                        // 例: cHttpServerCookies Encode: FormatHttpDate(CK.Expires)
+                        //     (形参 ByRef Date, Expires As Variant 属性 →
+                        //     vb6_cHttpServerCookieAttr_prop_get_Expires 返回 vb6_VARIANT);
+                        //     cHttpServerResponse File: ComputeETag(fileInfo.DateLastModified,
+                        //     ...) (COM 属性 → vb6_VariantFromComResult(...) vb6_VARIANT).
+                        bool argIsVariant090d = isDefinitelyVariantExpr(*node.positional[i]);
+                        if (!argIsVariant090d) argIsVariant090d = cExprIsVariant(argVal);
+                        if (argIsVariant090d) {
+                            if (cType == "double" || cType == "float") {
+                                argVal = "vb6_VariantToDouble(" + argVal + ")";
+                            } else if (cType == "BSTR") {
+                                argVal = "vb6_VariantToString(" + argVal + ")";
+                            } else if (cType == "int32_t" || cType == "int16_t"
+                                       || cType == "uint8_t" || cType == "int64_t"
+                                       || cType == "LONG") {
+                                argVal = "vb6_VariantToLong(" + argVal + ")";
+                            } else if (cType == "vb6_SafeArray1D*") {
+                                argVal = "vb6_VariantToSafeArray1D(" + argVal + ")";
+                            } else if (cType == "void*") {
+                                argVal = "vb6_VariantToObjectVal(" + argVal + ")";
+                            }
+                        }
                         // Fix 027b: 同样加外层括号防止预处理器把复合字面量 `{a, b}` 内的逗号算成宏实参分隔符.
                         argVal = "(&(" + cType + "){" + argVal + "})";
                     }
