@@ -1020,6 +1020,10 @@ bool CCodeGen::cExprIsVariant(const std::string& cExpr) {
         "vb6_VariantFromDate(",
         "vb6_VariantFromUI1(",
         "vb6_VariantFromSafeArray(",
+        "vb6_VariantFromSafeArray1D(",
+        "vb6_LoadResData(",       // Fix 090bz: VBA LoadResData → vb6_VARIANT;
+                                 //   Dim D() As Byte: D = LoadResData(...) 赋值
+                                 //   需 VariantToSafeArray1D 提取 (cLang LoadData/LoadInfo C2440).
         "vb6_DispCallByVtbl(",  // Fix 068: DispCallByVtbl returns Variant
     };
     for (const auto& prefix : variantPrefixes) {
