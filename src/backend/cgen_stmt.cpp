@@ -3315,6 +3315,81 @@ void CCodeGen::visit(CallStmt& node) {
             callExpr += "(" + bareArgList + ")";
         }
 
+        // Fix 090g: fallback 合成 (visit MemberAccessExpr asCallCallee_ → func(obj)
+        // 完整调用) 产生的单 this 语句调用 — 无括号 MAE 语句 (如 Response.State403,
+        // State403 声明 (Optional Say As String) → C 签名 (me, BSTR*, int _has_Say)),
+        // callExpr 只含 this → C2198 参数太少. 检测括号内无顶层逗号 (单 this
+        // 实参, 用户实参由 IndexOrCallExpr 承载不会以 MAE 形态到此) 后按形参表
+        // 重建: this + 各形参默认值 + Optional _has_ 标志 (同 bare-call padding).
+        if (node.callee && node.callee->kind == ASTNodeKind::MemberAccessExpr) {
+            auto& maExpr090g = static_cast<MemberAccessExpr&>(*node.callee);
+            std::string cls090g = inferClassTypeOfExpr(*maExpr090g.object);
+            std::vector<ParameterInfo> params090g;
+            bool builtin090g = false;
+            if (!cls090g.empty()
+                && findClassMemberCallParams(cls090g, maExpr090g.memberName,
+                                             params090g, builtin090g)
+                && !params090g.empty() && !builtin090g) {
+                size_t p090g = callExpr.find('(');
+                if (p090g != std::string::npos && callExpr.size() >= 3
+                    && callExpr.back() == ')') {
+                    bool topComma090g = false;
+                    int depth090g = 0;
+                    for (size_t k090g = p090g; k090g < callExpr.size(); k090g++) {
+                        char ch090g = callExpr[k090g];
+                        if (ch090g == '(') depth090g++;
+                        else if (ch090g == ')') {
+                            depth090g--;
+                            if (depth090g == 0) break;
+                        } else if (ch090g == ',' && depth090g == 1) {
+                            topComma090g = true;
+                            break;
+                        }
+                    }
+                    if (!topComma090g) {
+                        std::string thisArg090g = callExpr.substr(p090g + 1,
+                                                                  callExpr.size() - p090g - 2);
+                        std::string fullArg090g = thisArg090g;
+                        bool anyPad090g = false;
+                        for (size_t i090g = 0; i090g < params090g.size(); i090g++) {
+                            const auto& prm090g = params090g[i090g];
+                            if (prm090g.isParamArray) continue;
+                            std::string defVal090g;
+                            if (prm090g.hasDefaultValue && !prm090g.defaultValueExpr.empty()) {
+                                defVal090g = prm090g.defaultValueExpr;
+                            } else {
+                                defVal090g = defaultValue(prm090g.type);
+                            }
+                            if (prm090g.isByVal) {
+                                fullArg090g += ", " + defVal090g;
+                            } else {
+                                std::string cT090g = mapType(prm090g.type);
+                                if (prm090g.type == Vb6Type::Variant
+                                    || prm090g.type == Vb6Type::Empty
+                                    || prm090g.type == Vb6Type::Null
+                                    || prm090g.type == Vb6Type::Object) {
+                                    fullArg090g += ", &(" + cT090g + "){0}";
+                                } else {
+                                    fullArg090g += ", &(" + cT090g + "){" + defVal090g + "}";
+                                }
+                            }
+                            anyPad090g = true;
+                        }
+                        for (size_t i090g = 0; i090g < params090g.size(); i090g++) {
+                            if (params090g[i090g].isOptional
+                                && !params090g[i090g].isParamArray) {
+                                fullArg090g += ", 0";
+                            }
+                        }
+                        if (anyPad090g) {
+                            callExpr = callExpr.substr(0, p090g) + "("
+                                       + fullArg090g + ")";
+                        }
+                    }
+                }
+            }
+        }
+
         if (callExpr.find("vb6_ComCall(") == 0) {
             // ComCall返回可能含对象的VARIANT*, 用VarFree避免Release对象
             c_.emitLine("vb6_ComVarFree((void*)" + callExpr + ");  /* COM call, discard result */");
