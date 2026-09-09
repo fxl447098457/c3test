@@ -4790,6 +4790,17 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
                 argIsVariant = cExprIsVariant(argVal);
             }
             if (argIsVariant || argIsVariantArr) {
+                // Fix 090c1: 实参顶层是 COM 结果 (void* 承载 Variant) 且判为
+                // Variant — 提取前先 vb6_VariantFromComResult (同 090c0).
+                // cLogs MakeLogContent: Join(CacheDatas(i), Span) 的 CacheDatas(i)
+                // = vb6_ComCall(...) → 原生成 VariantToSafeArray1D(ComCall) C2440.
+                bool isComResultVal2 =
+                    (argVal.compare(0, 13, "vb6_ComCall(") == 0)
+                    || (argVal.compare(0, 16, "vb6_ComGetProp(") == 0)
+                    || (argVal.compare(0, 21, "vb6_ComGetObjectProp(") == 0);
+                if (isComResultVal2) {
+                    argVal = "vb6_VariantFromComResult(" + argVal + ")";
+                }
                 if (paramIsArray && (paramBase == Vb6Type::Variant || paramBase == Vb6Type::Byte
                     || paramBase == Vb6Type::String || paramBase == Vb6Type::Long)) {
                     // 数组参数: 从 Variant 提取 SafeArray1D*
@@ -4911,6 +4922,22 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
                     }
                 }
                 if (argIsVariant) {
+                    // Fix 090c0: 实参是 COM 结果且被判定为 Variant —
+                    // vb6_ComCall/vb6_ComGetProp 返回 void* (COM Variant 承载),
+                    // 提取 (VariantToSafeArray1D 等期望 vb6_VARIANT 按值) 前需先
+                    // vb6_VariantFromComResult 转为 vb6_VARIANT. 如 cLogs
+                    // MakeLogContent: Join(CacheDatas(i), Span) — Collection 元素
+                    // 是 Variant 数组 → 原生成 VariantToSafeArray1D(vb6_ComCall(...))
+                    // → C2440 (无法从 void* 转换为 vb6_VARIANT).
+                    // 精确前缀避免误伤 vb6_ComCallInt( (返回 int32) /
+                    // vb6_ComGetStringProp( (返回 BSTR) / vb6_ComCallObject( (对象).
+                    bool isComResultVal =
+                        (argVal.compare(0, 13, "vb6_ComCall(") == 0)
+                        || (argVal.compare(0, 16, "vb6_ComGetProp(") == 0)
+                        || (argVal.compare(0, 21, "vb6_ComGetObjectProp(") == 0);
+                    if (isComResultVal) {
+                        argVal = "vb6_VariantFromComResult(" + argVal + ")";
+                    }
                     if (rtParamType == "int32_t" || rtParamType == "int16_t"
                         || rtParamType == "uint8_t" || rtParamType == "LONG") {
                         argVal = "vb6_VariantToLong(" + argVal + ")";
