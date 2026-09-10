@@ -575,6 +575,49 @@ void CCodeGen::visit(AssignmentStmt& node) {
                     std::string objExpr = std::move(lastExpr_);
                     emitExpr(*node.value);
                     std::string valExpr = std::move(lastExpr_);
+                    // Fix 091n: 按 Let/Set **写方向**参数表适配值实参 —
+                    //  · Variant 形参 ← 具体类型值 (Byte 数组/SafeArray1D* 等) 需
+                    //    packLetValueArg 打包 (cWinsock: oClient.UserData = baBuffer,
+                    //    实参 vb6_SafeArray1D* → C2440 "→ vb6_VARIANT");
+                    //  · BSTR 形参 ← Variant 值 (COM 属性结果) 需提取
+                    //    (cToolsList: Rs.Filter = <ComGetProp 结果>, C2440 "→ BSTR").
+                    // 注意不能用裸 propLetSym->params: lookupModuleByKind 会全局命中
+                    // 他类同名属性 (其 Variant 参数表) → 误打包 → 大规模 C2440
+                    // (cHttpServer/cDataBase/cJson 的 Rs.Status = 200 等).
+                    {
+                        std::vector<ParameterInfo> wp091n;
+                        bool isSet091n = (propLetSym->kind == SymbolKind::PropertySet);
+                        if (!sourceModule.empty()
+                            && findClassMemberWriteParams(sourceModule, maExpr.memberName,
+                                                          isSet091n, wp091n)
+                            && !wp091n.empty()) {
+                            const ParameterInfo& lastP091n = wp091n.back();
+                            if (lastP091n.type == Vb6Type::Variant) {
+                                // 仅打包"数组载体"值: 直接给具体类型标量 (如
+                                // Dictionary.CompareMode = 1, C 形参 int32_t)
+                                // 打包会 C2440 — 符号表 Variant 判定对 COM/后期
+                                // 绑定属性不可靠.
+                                bool arrCarrier091n = valExpr.find("vb6_SafeArray1D") != std::string::npos
+                                    || valExpr.rfind("_arr_", 0) == 0
+                                    || valExpr.find("vb6_Split(") == 0
+                                    || valExpr.find("vb6_ArrayCreate") == 0
+                                    || valExpr.find("vb6_VariantToSafeArray1D") == 0;
+                                if (!arrCarrier091n && node.value
+                                    && node.value->kind == ASTNodeKind::IdentifierExpr) {
+                                    std::string vLower091n = Symbol::toLower(
+                                        static_cast<IdentifierExpr&>(*node.value).name);
+                                    arrCarrier091n = knownArrays_.count(vLower091n) > 0
+                                                     || knownByteArrayVars_.count(vLower091n) > 0;
+                                }
+                                if (arrCarrier091n) {
+                                    valExpr = packLetValueArg(lastP091n, node.value.get(), valExpr);
+                                }
+                            } else if (lastP091n.type == Vb6Type::String
+                                       && cExprIsVariant(valExpr)) {
+                                valExpr = wrapToBSTR(valExpr, *node.value);
+                            }
+                        }
+                    }
                     c_.emitLine(funcName + "(" + objExpr + ", " + valExpr + ");  /* Property Let */");
                     return;
                 }
