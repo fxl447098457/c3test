@@ -1054,6 +1054,37 @@ void CCodeGen::visit(AssignmentStmt& node) {
         std::string wrappedValue = wrapVariantValue(node.value.get(), value);
         c_.emitLine("vb6_VariantClear(&" + target + ");");
         c_.emitLine(target + " = " + wrappedValue + ";");
+    } else if (target.compare(0, 10, "vb6_PA_Get") == 0) {
+        // Fix 091c: ParamArray 元素赋值 OutVars(i) = value — vb6_PA_GetXxx 是取值
+        // 函数 (右值), 直接赋值 → C2106 "左操作数必须为左值" (cToolsArray.c 130);
+        // 且 Variant RHS 传给具体类型 Set 形参需提取 → C2440 (cToolsArray.c 158/167).
+        // 改写为 vb6_PA_SetXxx(args, <按类型提取后的 value>).
+        size_t lp091c = target.find('(');
+        size_t rp091c = target.rfind(')');
+        if (lp091c != std::string::npos && rp091c != std::string::npos && rp091c > lp091c) {
+            std::string args091c = target.substr(lp091c + 1, rp091c - lp091c - 1);
+            std::string kind091c = target.substr(10, lp091c - 10);  // "Long"/"Double"/"BSTR"/...
+            bool valIsVar091c = cExprIsVariant(value);
+            if (!valIsVar091c && node.value && node.value->kind == ASTNodeKind::IdentifierExpr) {
+                auto& id091c = static_cast<IdentifierExpr&>(*node.value);
+                std::string idLower091c = id091c.name;
+                std::transform(idLower091c.begin(), idLower091c.end(), idLower091c.begin(), ::tolower);
+                if (knownVariantVars_.count(idLower091c)) valIsVar091c = true;
+            }
+            std::string conv091c = value;
+            if (valIsVar091c) {
+                if (kind091c == "Long" || kind091c == "LongPtr") {
+                    conv091c = "vb6_VariantToLong(" + value + ")";
+                } else if (kind091c == "Double") {
+                    conv091c = "vb6_VariantToDouble(" + value + ")";
+                } else if (kind091c == "BSTR") {
+                    conv091c = "vb6_VariantToString(" + value + ")";
+                }
+            }
+            c_.emitLine("vb6_PA_Set" + kind091c + "(" + args091c + ", " + conv091c + ");");
+        } else {
+            c_.emitLine(target + " = " + value + ";");
+        }
     } else if (target.find("vb6_VariantArrayGet(") == 0) {
         // Fix 038 Group 2: vb6_VariantArrayGet(&arr, idx) = value
         //   → vb6_VariantArraySet(&arr, idx, vb6_VariantFromValue(value))
