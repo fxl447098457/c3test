@@ -2131,6 +2131,11 @@ void CCodeGen::visit(ForEachStmt& node) {
     bool isCollArray = false;
     std::string collArrName;
     Vb6Type collElemType = Vb6Type::Variant;
+    // Fix 091f: 集合是返回 SafeArray1D* 的表达式 (Split/Filter 等) — 需先物化到
+    // 临时数组变量, 再走数组迭代路径. 此前一律走 COM 路径 →
+    // vb6_ForEach_Init(vb6_VariantToObjectVal(vb6_Split(...))) C2440
+    // (ToolsTlsThunks 754/2913/3182).
+    bool collArrIsExpr = false;
 
     if (node.collection->kind == ASTNodeKind::IdentifierExpr) {
         auto& ident = static_cast<IdentifierExpr&>(*node.collection);
@@ -2149,6 +2154,27 @@ void CCodeGen::visit(ForEachStmt& node) {
                 isCollArray = true;
                 collArrName = cIdent(ident.name);
                 collElemType = sym->type;
+            }
+        }
+    } else if (node.collection->kind == ASTNodeKind::IndexOrCallExpr) {
+        // Fix 091f: For Each 源为内置返回 String 数组的函数 (Split/Filter) →
+        // 数组迭代路径.
+        auto& call091f = static_cast<IndexOrCallExpr&>(*node.collection);
+        if (call091f.callee && call091f.callee->kind == ASTNodeKind::IdentifierExpr) {
+            std::string cn091f = static_cast<IdentifierExpr&>(*call091f.callee).name;
+            std::transform(cn091f.begin(), cn091f.end(), cn091f.begin(), ::tolower);
+            if (!cn091f.empty() && cn091f.back() == '$') cn091f.pop_back();
+            if (cn091f == "split" || cn091f == "filter") {
+                isCollArray = true;
+                collArrIsExpr = true;
+                collElemType = Vb6Type::String;
+            } else if (cn091f == "array") {
+                // Fix 091g: Array(...) → vb6_ArrayCreate 建 Variant 数组
+                // (元素为 vb6_VARIANT). For Each 源为 Array() 时此前走 COM 路径
+                // → vb6_VariantToObjectVal(_arr_N) C2440 (ToolsTlsThunks 3178).
+                isCollArray = true;
+                collArrIsExpr = true;
+                collElemType = Vb6Type::Variant;
             }
         }
     }
@@ -2186,8 +2212,17 @@ void CCodeGen::visit(ForEachStmt& node) {
         std::string lbVar = "_fe_lb" + std::to_string(tmpIdx);
         std::string ubVar = "_fe_ub" + std::to_string(tmpIdx);
         c_.emitLine("int32_t " + idxVar + ", " + lbVar + ", " + ubVar + ";");
-        c_.emitLine(lbVar + " = vb6_LBound(" + collArrName + ", 1);");
-        c_.emitLine(ubVar + " = vb6_UBound(" + collArrName + ", 1);");
+        // Fix 091f: 表达式集合物化 — 避免 LBound/UBound/元素取值重复调用
+        // Split/Filter (会每次重新分配数组).
+        std::string arrRef091f = collArrName;
+        if (collArrIsExpr) {
+            emitExpr(*node.collection);
+            std::string tmpArr091f = "_fe_arr" + std::to_string(tmpIdx);
+            c_.emitLine("vb6_SafeArray1D* " + tmpArr091f + " = " + lastExpr_ + ";");
+            arrRef091f = tmpArr091f;
+        }
+        c_.emitLine(lbVar + " = vb6_LBound(" + arrRef091f + ", 1);");
+        c_.emitLine(ubVar + " = vb6_UBound(" + arrRef091f + ", 1);");
         c_.emitLine("for (" + idxVar + " = " + lbVar + "; " + idxVar + " <= " + ubVar + "; " + idxVar + "++) {");
         c_.indent();
 
@@ -2200,9 +2235,9 @@ void CCodeGen::visit(ForEachStmt& node) {
             || cExprIsVariant(varAcc);
         if (feVarIsVariant) {
             c_.emitLine(varAcc + " = vb6_VariantFromValue(VB6_SA_AT(" + elemCType + ", "
-                        + collArrName + ", " + idxVar + "));");
+                        + arrRef091f + ", " + idxVar + "));");
         } else {
-            c_.emitLine(varAcc + " = VB6_SA_AT(" + elemCType + ", " + collArrName + ", " + idxVar + ");");
+            c_.emitLine(varAcc + " = VB6_SA_AT(" + elemCType + ", " + arrRef091f + ", " + idxVar + ");");
         }
 
         emitStmtList(node.body);

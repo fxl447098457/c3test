@@ -4897,7 +4897,14 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
         // 注意: 仅使用 cExprIsVariant (C 字符串级) 和 knownVariantVars_ 检测,
         // 不使用 isDefinitelyVariantExpr (AST 级), 因为符号表中的 Variant 返回类型
         // 可能与实际 C 函数返回类型不一致 (如 prop_get 返回 void* 而非 vb6_VARIANT).
-        if (!isByRef && i >= calleeParams.size()) {
+        // Fix 091e: 形参符号类型不可信 (无非空参数表, 或符号表把 builtin 形参登记为
+        // Variant/Empty — 如 LenB/Len 被推断为 Variant) 时同样查运行时表. 此前仅
+        // calleeParams 为空才查表, 导致 Variant 实参原样传给 BSTR 形参:
+        // cTlsSocket 200 vb6_LenB_BSTR(vb6_VariantFromComResult(ComGetProp(...))) C2440.
+        bool rtParamTypeUsable = (i >= calleeParams.size())
+            || calleeParams[i].type == Vb6Type::Variant
+            || calleeParams[i].type == Vb6Type::Empty;
+        if (!isByRef && rtParamTypeUsable) {
             std::string rtParamType = getRuntimeParamCType(callee, i);
             if (!rtParamType.empty() && rtParamType != "vb6_VARIANT"
                  && rtParamType != "vb6_VARIANT*") {

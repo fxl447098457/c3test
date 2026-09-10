@@ -1095,6 +1095,9 @@ std::string CCodeGen::getRuntimeParamCType(const std::string& funcName, size_t p
         {"vb6_UCase",           {"BSTR"}},
         {"vb6_LCase",           {"BSTR"}},
         {"vb6_Space",           {"int32_t"}},
+        // Fix 091e: StrConv(BSTR, int32_t, int32_t) — 实参为 Variant 时需
+        // vb6_VariantToString (cAesCBC.c 25 StrConv(LoadResData(...), 64, 0) C2440)
+        {"vb6_StrConv",         {"BSTR", "int32_t", "int32_t"}},
         {"vb6_String",          {"int32_t", "int32_t"}},
         {"vb6_Chr",             {"int32_t"}},
         {"vb6_Asc",             {"BSTR"}},
