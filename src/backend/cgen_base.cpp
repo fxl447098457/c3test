@@ -1619,7 +1619,27 @@ std::string CCodeGen::resolveArrayTargetIdent(const std::string& varName) {
         && !withObjectVars_.empty() && !withObjectInfoStack_.empty()) {
         const auto& info = withObjectInfoStack_.back();
         if (info.kind == WithObjKind::Unknown || info.kind == WithObjKind::ClassInstance) {
-            return withObjectVars_.back() + "->" + cIdent(varName.substr(1));
+            // Fix 092k: With 成员可能是多级路径 (.MessBuffer.Data) — cIdent 把
+            // '.' 替换为 '_' 会生成 MessBuffer_Data (ToolsTlsThunks 1780:
+            //   Erase .MessBuffer.Data → vb6_SafeArrayDestroy1D(_vb6_with_N->MessBuffer_Data)
+            //   C2039 "MessBuffer_Data 不是 vb6_type_UcsTlsContext 的成员").
+            // 逐段展开: 首段用 -> (With 对象是指针), 后续段保留 '.'.
+            std::string path = varName.substr(1);
+            std::string out = withObjectVars_.back();
+            size_t pos = 0;
+            bool firstSeg = true;
+            while (pos <= path.size()) {
+                size_t d = path.find('.', pos);
+                std::string seg = (d == std::string::npos)
+                    ? path.substr(pos) : path.substr(pos, d - pos);
+                if (!seg.empty()) {
+                    out += (firstSeg ? "->" : ".") + cIdent(seg);
+                    firstSeg = false;
+                }
+                if (d == std::string::npos) break;
+                pos = d + 1;
+            }
+            return out;
         }
     }
     size_t dot = varName.find('.');
