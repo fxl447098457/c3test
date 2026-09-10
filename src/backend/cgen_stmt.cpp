@@ -2326,6 +2326,22 @@ void CCodeGen::visit(ForEachStmt& node) {
         }
     }
 
+    // Fix 092q: For Each 遍历当前过程的 ParamArray 参数时, C 侧类型是 SAFEARRAY*
+    // (cgen 的参数映射), 而 vb6_LBound/vb6_UBound/VB6_SA_AT 都要求 vb6_SafeArray1D*
+    // (`(arr)->data` / `->lBound`) → 对 tagSAFEARRAY 报 C2039 且上下界取值语义错
+    // (mdTlsThunks.bas `For Each vElem In a` (a 是 ParamArray), ToolsTlsThunks 5468).
+    bool isPA092q = false;
+    if (node.collection && node.collection->kind == ASTNodeKind::IdentifierExpr && currentProc_) {
+        std::string paLower092q =
+            Symbol::toLower(static_cast<IdentifierExpr&>(*node.collection).name);
+        for (auto& p092q : currentProc_->params) {
+            if (Symbol::toLower(p092q.name) == paLower092q) {
+                isPA092q = p092q.isParamArray;
+                break;
+            }
+        }
+    }
+
     std::string var = cIdent(node.varName);
     int tmpIdx = tempCounter_++;
 
@@ -2359,6 +2375,12 @@ void CCodeGen::visit(ForEachStmt& node) {
         std::string lbVar = "_fe_lb" + std::to_string(tmpIdx);
         std::string ubVar = "_fe_ub" + std::to_string(tmpIdx);
         c_.emitLine("int32_t " + idxVar + ", " + lbVar + ", " + ubVar + ";");
+        if (isPA092q) {
+            // Fix 092q: ParamArray 取值是 Windows VARIANT (SafeArrayGetElement),
+            // 需经 vb6_VariantFromComResult 转成 vb6_VARIANT (ToolsTlsThunks 5468
+            // 曾因直接赋值报 C2440 "VARIANT" → "vb6_VARIANT").
+            c_.emitLine("VARIANT _pa_v" + std::to_string(tmpIdx) + " = {0};");
+        }
         // Fix 091f: 表达式集合物化 — 避免 LBound/UBound/元素取值重复调用
         // Split/Filter (会每次重新分配数组).
         std::string arrRef091f = collArrName;
@@ -2368,8 +2390,14 @@ void CCodeGen::visit(ForEachStmt& node) {
             c_.emitLine("vb6_SafeArray1D* " + tmpArr091f + " = " + lastExpr_ + ";");
             arrRef091f = tmpArr091f;
         }
-        c_.emitLine(lbVar + " = vb6_LBound(" + arrRef091f + ", 1);");
-        c_.emitLine(ubVar + " = vb6_UBound(" + arrRef091f + ", 1);");
+        if (isPA092q) {
+            // Fix 092q: ParamArray 用 PA 专用上下界 (SafeArrayGetElement 语义)
+            c_.emitLine(lbVar + " = vb6_PA_LBound(" + arrRef091f + ");");
+            c_.emitLine(ubVar + " = vb6_PA_UBound(" + arrRef091f + ");");
+        } else {
+            c_.emitLine(lbVar + " = vb6_LBound(" + arrRef091f + ", 1);");
+            c_.emitLine(ubVar + " = vb6_UBound(" + arrRef091f + ", 1);");
+        }
         c_.emitLine("for (" + idxVar + " = " + lbVar + "; " + idxVar + " <= " + ubVar + "; " + idxVar + "++) {");
         c_.indent();
 
@@ -2380,7 +2408,22 @@ void CCodeGen::visit(ForEachStmt& node) {
         bool feVarIsVariant = knownVariantVars_.count(lower022fe)
             || (forEachVarIsClassMember && classVariantMembers_.count(lower022fe))
             || cExprIsVariant(varAcc);
-        if (feVarIsVariant) {
+        if (isPA092q) {
+            // Fix 092q: ParamArray 元素用 SafeArrayGetElement 直取 (索引与
+            // vb6_PA_LBound/UBound 同域), 按循环变量/元素类型选择解包函数.
+            std::string paGet092q = "vb6_PA_GetVariant(" + arrRef091f + ", " + idxVar + ")";
+            std::string paTmp092q = "_pa_v" + std::to_string(tmpIdx);
+            if (feVarIsVariant) {
+                c_.emitLine(paTmp092q + " = " + paGet092q + ";");
+                c_.emitLine(varAcc + " = vb6_VariantFromComResult(&" + paTmp092q + ");");
+            } else if (elemCType == "BSTR") {
+                c_.emitLine(varAcc + " = vb6_PA_GetBSTR(" + arrRef091f + ", " + idxVar + ");");
+            } else if (elemCType == "double") {
+                c_.emitLine(varAcc + " = vb6_PA_GetDouble(" + arrRef091f + ", " + idxVar + ");");
+            } else {
+                c_.emitLine(varAcc + " = vb6_PA_GetLong(" + arrRef091f + ", " + idxVar + ");");
+            }
+        } else if (feVarIsVariant) {
             c_.emitLine(varAcc + " = vb6_VariantFromValue(VB6_SA_AT(" + elemCType + ", "
                         + arrRef091f + ", " + idxVar + "));");
         } else {
