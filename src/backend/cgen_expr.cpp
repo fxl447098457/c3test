@@ -5216,6 +5216,18 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
                 emitExpr(*named.value);
                 std::string argVal = std::move(lastExpr_);
                 applyByRef(argVal, pi);
+                // Fix 091o: 命名实参 (Name:=expr) 此前只做 ByRef 处理, 漏了 ByVal
+                // 形参类型适配 — ByVal Variant 形参收具体类型实参需
+                // vb6_VariantFromValue 打包 (_Generic 宏按实类型选 ctor).
+                // 例: oListenSocket.Accept(m_oSocket, UseTls:=bUseTls)
+                //     (Accept 第 4 参 Optional ByVal UseTls As Variant) →
+                //     C2440 int16_t→vb6_VARIANT (cWinsock.c 1604).
+                // 类对象实参保持指针直传 (同 4824 Fix 084d).
+                bool argIsClassObj091o = !inferClassTypeOfExpr(*named.value).empty();
+                if (pi < calleeParams.size() && calleeParams[pi].isByVal
+                    && calleeParams[pi].type == Vb6Type::Variant && !argIsClassObj091o) {
+                    argVal = "vb6_VariantFromValue(" + argVal + ")";
+                }
                 if (pi < orderedArgs.size()) {
                     orderedArgs[pi] = std::move(argVal);
                     filled[pi] = true;
