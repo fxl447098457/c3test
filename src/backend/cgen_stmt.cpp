@@ -3061,10 +3061,14 @@ void CCodeGen::visit(WithStmt& node) {
         }
     }
 
-    withObjectInfoStack_.push_back(withInfo);
+    // Fix 092o: 本帧 withInfo 延后到目标表达式生成之后再入栈 — 若提前入栈, 嵌套
+    // With 的目标表达式 (.ReturnJson()) 会以内层 className (cJson) 解析外层成员
+    // (实为 cHttpClient 的 ReturnJson) → 解析失败退化为数据字段访问 (cAliyunCaptcha
+    // 222: `_vb6_with_3->ReturnJson()` C2039 + 实参丢失). 见下方 emitExpr 之后的入栈.
 
     // Fix 010l: BuiltinObject 不需要临时变量 — 属性读写直接映射为RTL函数调用
     if (withInfo.kind == WithObjKind::BuiltinObject) {
+        withObjectInfoStack_.push_back(withInfo);  // Fix 092o: BuiltinObject 无目标表达式, 直接入栈
         // 推入占位符以保持 withObjectVars_ 与 withObjectInfoStack_ 同步
         withObjectVars_.push_back(withInfo.ctrlOrigName);
         c_.emitLine("{");
@@ -3086,6 +3090,10 @@ void CCodeGen::visit(WithStmt& node) {
     emitExpr(*node.object);
 
     suppressDefaultProp_ = prevSuppress;
+
+    // Fix 092o: 目标表达式已生成完毕 (期间保持外层栈顶), 现在把本帧 withInfo 入栈 —
+    // body 内的 .成员 解析与下方的 Menu 判定都依赖它.
+    withObjectInfoStack_.push_back(withInfo);
 
     if (!withObjectInfoStack_.empty() && withObjectInfoStack_.back().kind == WithObjKind::FormControl && withObjectInfoStack_.back().ctrlType == FrmControlType::Menu) {  // P20-36
         c_.emitLine("int " + tempVar + " = 0;  /* Menu: no HWND, props use (hmenu,menuId) */");
