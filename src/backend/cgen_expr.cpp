@@ -4744,6 +4744,14 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
                         Vb6Type pType = Vb6Type::Variant;
                         if (i < calleeParams.size()) pType = calleeParams[i].type;
                         argVal = wrapConstArgForByRef(argVal, pType);
+                    } else if (argVal == "NULL" || argVal == "nullptr") {
+                        // Fix 092l: NULL/nullptr 字面量不可取址 — &NULL 触发
+                        // C2101 "常量上的 &" (cTlsSocket 440:
+                        //   FireOnCertificate(me, &NULL) → 应为 (&(vb6_VARIANT){0})).
+                        // 按形参类型改用 C11 复合字面量.
+                        std::string ct092l = "vb6_VARIANT";
+                        if (i < calleeParams.size()) ct092l = mapType(calleeParams[i].type);
+                        argVal = "(&(" + ct092l + "){0})";
                     } else {
                         argVal = "&" + argVal;
                     }
