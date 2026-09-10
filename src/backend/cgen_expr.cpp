@@ -4918,15 +4918,29 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
                     // (cZipArchive pvVfsOpen: pvToFileTime(me, arr(i)) 形参 ByVal Date)
                     argVal = "vb6_VariantToDouble(" + argVal + ")";
                 } else if (paramBase == Vb6Type::String) {
-                    // Fix 049b: Skip extraction if the C expression is already BSTR
-                    // (e.g., VB6_SA_AT(BSTR, arr, idx) — isDefinitelyVariantExpr may
-                    // return true due to symbol table/actual type mismatch)
-                    // 注: 此正常形参路径保留子串判断 (089k 收紧只用于运行时函数
-                    // 超参分支 4622/4681) — MsgBox/Replace 等有符号形参的调用在
-                    // 本路径收紧会造成已由 MsgBox 专用逻辑/4622 分支转换过的
-                    // 表达式二次包装 → C2440 (BSTR→vb6_VARIANT).
-                    if (argVal.find("VB6_SA_AT(BSTR,") == std::string::npos
-                        && argVal.find("vb6_BSTR") == std::string::npos) {
+                    // Fix 049b/092a: 仅当 C 表达式**顶层**已是 BSTR 时跳过提取.
+                    // 旧实现用子串 find("vb6_BSTR") — 对"内部实参含
+                    // vb6_BSTR_FromStr(...)"的 Variant 表达式天然命中 → 整体跳过
+                    // 提取 → C2440 (vb6_VARIANT→BSTR):
+                    //   cAesCBC 25 StrConv(LoadResData("AES.CBC","JSCRIPT"), 64, 0)
+                    //   → argVal = vb6_LoadResData(vb6_BSTR_FromStr(..), ..) 含子串.
+                    // 改为与 5080 同源的**顶层前缀**判断 (只看表达式开头).
+                    // 注: 进入本分支的前提是实参已被判为 Variant
+                    // (isDefinitelyVariantExpr / cExprIsVariant), 顶层判断足以避免
+                    // 对 MsgBox 专用逻辑/4622 分支已转换结果的二次包装.
+                    static const char* bstrTopPrefixes092a[] = {
+                        "vb6_BSTR_",
+                        "VB6_SA_AT(BSTR,",
+                        "vb6_VariantToString(",
+                        "vb6_BSTR_FromStr("};
+                    bool topIsBstr092a = false;
+                    for (auto* bp092a : bstrTopPrefixes092a) {
+                        if (argVal.compare(0, strlen(bp092a), bp092a) == 0) {
+                            topIsBstr092a = true;
+                            break;
+                        }
+                    }
+                    if (!topIsBstr092a) {
                         argVal = "vb6_VariantToString(" + argVal + ")";
                     }
                 } else if (paramBase == Vb6Type::Object) {
