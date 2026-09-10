@@ -1053,7 +1053,27 @@ void CCodeGen::visit(BinaryExpr& node) {
 
     // P14.1.1: VB6 + 运算符 — 两端String时等同&拼接
     // VB6允许 "a" + "b" 作为字符串连接，语义与 & 相同
-    if (node.op == BinaryOp::Add && inferExprType(node) == Vb6Type::String) {
+    // Fix 092i: 右操作数是返回 BSTR 的内建调用 (Chr$/Mid/Trim/...) 时,
+    // inferExprType 无法把整个 Add 推断为 String → 退化为算术 + :
+    //   cToolsHttp 286 (源码 GB_UrlDecode + Chr$(d), GB_UrlDecode As String)
+    //   → 生成 (GB_UrlDecode + vb6_Chr(d)) 触发 C2110 指针相加 +
+    //     vb6_BSTR_Assign 参数太少; 而同处 288 的 GB_UrlDecode + c (c As String)
+    //     正常走 Concat. 左操作数为 String 且右侧是 BSTR 返回调用时按拼接处理.
+    bool addIsConcat092i = (inferExprType(node) == Vb6Type::String);
+    if (!addIsConcat092i && inferExprType(*node.left) == Vb6Type::String) {
+        static const char* bstrReturnCalls092i[] = {
+            "vb6_Chr(", "vb6_ChrW(", "vb6_Mid(", "vb6_Left(", "vb6_Right(",
+            "vb6_Trim(", "vb6_LTrim(", "vb6_RTrim(", "vb6_UCase(", "vb6_LCase(",
+            "vb6_Replace(", "vb6_String(", "vb6_Space(", "vb6_StrConv(",
+            "vb6_Format(", "vb6_VariantToString(", "vb6_BSTR_"};
+        for (auto* bcp092i : bstrReturnCalls092i) {
+            if (right.compare(0, strlen(bcp092i), bcp092i) == 0) {
+                addIsConcat092i = true;
+                break;
+            }
+        }
+    }
+    if (node.op == BinaryOp::Add && addIsConcat092i) {
         left = wrapToBSTR(left, *node.left);
         right = wrapToBSTR(right, *node.right);
         bool leftIsConcat = (left.find("vb6_BSTR_Concat") != std::string::npos);
