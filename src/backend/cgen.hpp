@@ -774,6 +774,15 @@ private:
     // unresolvedType: 期望的解封类型, 默认为BSTR (最通用)
     std::string resolveComValue(const std::string& unresolvedType = "BSTR");
 
+    // Fix 092m: With 块类字段写的 COM 解包 hint — 按目标类字段的 VB 类型名
+    // (Symbol::memberFieldTypes, 语义分析阶段填充 + driver 跨模块拷贝) 映射到
+    // resolveComValue 期望的解封类型:
+    //   String → "BSTR" / Long|Integer|Boolean|Byte → "Long" /
+    //   Single|Double|Date|Currency → "Double" / Object → "Object" /
+    //   Variant → "Variant" / 项目类|UDT → "Object" / 未登记 → "BSTR"(默认).
+    std::string classFieldComUnpackHint(const std::string& className,
+                                        const std::string& memberName) const;
+
     // Fix 010r-16: COM/Property-Get 左值重写辅助
     // 当赋值语句(Let/Set/Assignment fallback)的 LHS 是非常量 C 表达式(非左值)时,
     // 尝试重写为 COM SetProp/SetPropArg 或 Property Let/Set 调用.

@@ -118,6 +118,17 @@ bool SemanticAnalyzer::analyze(Module& module) {
         // 收集类成员名称
         for (auto& decl : module.declarations) {
             switch (decl->kind) {
+                // Fix 092m: 类数据字段类型表 — 供 cgen 的 With 块字段写按目标字段类型
+                // 选择 COM 解包函数 (见 Symbol::memberFieldTypes 注释). 仅记录
+                // As <简单类型名> 的字段; 其它 (数组/UDT/未声明) 由 cgen 回退默认.
+                case ASTNodeKind::VariableDecl: {
+                    auto& v092m = static_cast<VariableDecl&>(*decl);
+                    if (v092m.asType && v092m.asType->kind == ASTNodeKind::SimpleTypeRef) {
+                        classSym->memberFieldTypes[Symbol::toLower(v092m.name)] =
+                            static_cast<SimpleTypeRef*>(v092m.asType.get())->name;
+                    }
+                    break;
+                }
                 case ASTNodeKind::SubDecl: {
                     auto& s = static_cast<SubDecl&>(*decl);
                     classSym->memberNames.push_back(s.name);

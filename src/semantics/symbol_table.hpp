@@ -145,6 +145,14 @@ struct Symbol {
     // 胜出时同步更新 memberParams, 确保表中存储的是该类该成员读上下文优先级最高的参数表.
     // 用于 IndexOrCallExpr 中 Optional 参数 _has_ 标志计数匹配, 避免 C2197.
     std::unordered_map<std::string, std::vector<ParameterInfo>> memberParams;
+    // Fix 092m: 成员数据字段类型表 — 类模块顶层变量 (仅 As <简单类型> 字段).
+    // key=字段名小写, value=源码类型名 (原样, 如 "String"/"Long"/"Date"/"cTlsReMaster").
+    // 用途: With 块类字段写 `temp->field = <COM 属性读>` 需按目标字段类型选择 COM
+    // 解包函数 (String→ComGetStringProp / Long→ComGetIntProp / Date|Double→
+    // ComGetDoubleProp / Object→ComGetObjectProp). 此前无类型信息一律按默认 BSTR
+    // 解包 → int32_t 字段收到 BSTR 指针 (cHttpServer 373 `.Port = m_oServer.RemotePort`
+    // 编译通过但语义错); 且 COM 标记不消费会泄漏到下一条语句 (374 C2440).
+    std::unordered_map<std::string, std::string> memberFieldTypes;
     // Fix 091a: 成员写方向参数表 — memberParams 按读上下文优先级 (Get > Function >
     // Sub > Let > Set) 只存胜出者, 对「Get 有参 + Let 末参才是 value」的属性
     // (cJson.Item(key)/Let Item(key, Dat As Variant)) 会存成 Get 的 [key], 使

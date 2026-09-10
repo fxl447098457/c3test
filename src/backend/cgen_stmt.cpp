@@ -861,6 +861,19 @@ void CCodeGen::visit(AssignmentStmt& node) {
                 }
                 // 既无Let也无Set → 视为数据字段写: tempVar->member = value
                 emitExpr(*node.value);
+                // Fix 092m: RHS 是 COM/typed-COM 成员读时必须先消费 COM 标记 —
+                // 否则 lastExpr_ 只含对象本身 (cHttpServer 372/373:
+                //   .IP/.Port = me->m_oServer, 属性名整体丢失 = 编译通过但语义错),
+                // 且标记泄漏到下一条语句 (374: .ConnectAt = ... L"RemotePort" C2440).
+                // 无 hint 的 resolveComValue 在早期绑定签名可用时按 returnType 取
+                // ComGetStringProp/IntProp/DoubleProp, 否则回退 BSTR.
+                if (isComMarker_) {
+                    // Fix 092m: 按目标字段类型解包 (String→ComGetStringProp /
+                    // Long→ComGetIntProp / Date→ComGetDoubleProp). 目标类字段类型表
+                    // 由语义分析填充; 表缺失时 helper 回退 "BSTR".
+                    resolveComValue(classFieldComUnpackHint(info.className,
+                                                            wmExpr.memberName));
+                }
                 c_.emitLine(tempVar + "->" + cIdent(wmExpr.memberName) + " = " + lastExpr_
                             + ";  /* With class field write */");
                 return;

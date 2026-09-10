@@ -1457,6 +1457,33 @@ std::string CCodeGen::resolveComValue(const std::string& unpackType) {
     return lastExpr_;
 }
 
+// Fix 092m: 目标类字段类型 → COM 解包类型 hint (见 cgen.hpp 声明注释).
+// 从当前模块作用域的 Class 符号 (跨模块 external Class 已由 driver 拷贝该表) 取
+// memberFieldTypes[字段名] 并映射; 任何缺失都回退 "BSTR" (comGetStringProp 最通用,
+// 与 Fix 092m 之前的默认行为一致, 不引入回归).
+std::string CCodeGen::classFieldComUnpackHint(const std::string& className,
+                                              const std::string& memberName) const {
+    if (className.empty() || !symTab_.moduleScope()) return "BSTR";
+    const std::string want = Symbol::toLower(className);
+    const std::string fld = Symbol::toLower(memberName);
+    for (const auto& kv : symTab_.moduleScope()->symbols()) {
+        const Symbol* cs = kv.second.get();
+        if (!cs || cs->kind != SymbolKind::Class) continue;
+        if (Symbol::toLower(cs->name) != want) continue;
+        auto it = cs->memberFieldTypes.find(fld);
+        if (it == cs->memberFieldTypes.end()) return "BSTR";
+        const std::string tn = Symbol::toLower(it->second);
+        if (tn == "string") return "BSTR";
+        if (tn == "long" || tn == "integer" || tn == "boolean" || tn == "byte") return "Long";
+        if (tn == "single" || tn == "double" || tn == "date" || tn == "currency") return "Double";
+        if (tn == "object") return "Object";
+        if (tn == "variant" || tn == "var") return "Variant";
+        // 命名类型 (项目类/UDT) → 对象解包; 未知名字回退 BSTR
+        return symTab_.lookup(it->second) ? "Object" : "BSTR";
+    }
+    return "BSTR";
+}
+
 std::string CCodeGen::comPackExpr(Expr& expr) {
     // 根据表达式类型推断应该用的VARIANT封装函数
     Vb6Type vt = inferExprType(expr);
