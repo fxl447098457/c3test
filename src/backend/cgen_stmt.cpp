@@ -1209,6 +1209,31 @@ void CCodeGen::visit(AssignmentStmt& node) {
                        || target.find("VB6_SA_ND_AT2(double,") != std::string::npos
                        || target.find("VB6_SA_ND_AT2(float,") != std::string::npos) {
                 convertedValue = "vb6_VariantToDouble(" + value + ")";
+            } else if (!currentReturnVar_.empty() && target == currentReturnVar_
+                       && !currentReturnCType_.empty()) {
+                // Fix 092f: 赋值目标是当前过程的返回变量 → 按返回 C 类型提取 Variant
+                // 值. 返回变量不在 UDT 字段/数组元素判定内 (inferUdtFieldVb6Type
+                // 对 vb6_ret_X 返回 Unknown) → 之前直接赋值触发 C2440:
+                //   cHttpClient 399: Function ReturnBody() As Byte() 内
+                //     ReturnBody = Inst.ResponseBody
+                //     → vb6_ret_ReturnBody = vb6_VariantFromComResult(...)
+                //       (vb6_VARIANT → vb6_SafeArray1D*).
+                std::string retCt092f = currentReturnCType_;
+                retCt092f.erase(std::remove(retCt092f.begin(), retCt092f.end(), ' '),
+                                retCt092f.end());
+                if (retCt092f == "vb6_SafeArray1D*") {
+                    convertedValue = "vb6_VariantToSafeArray1D(" + value + ")";
+                } else if (retCt092f == "BSTR") {
+                    convertedValue = "vb6_VariantToString(" + value + ")";
+                } else if (retCt092f == "void*") {
+                    convertedValue = "vb6_VariantToObjectVal(" + value + ")";
+                } else if (retCt092f == "double" || retCt092f == "float") {
+                    convertedValue = "vb6_VariantToDouble(" + value + ")";
+                } else if (retCt092f == "int32_t" || retCt092f == "int16_t"
+                           || retCt092f == "uint8_t" || retCt092f == "LONG"
+                           || retCt092f == "int64_t") {
+                    convertedValue = "vb6_VariantToLong(" + value + ")";
+                }
             } else {
                 // Fix 084n: UDT 字段目标 — 按字段 Vb6Type 转换 Variant RHS
                 // (如 cZipArchive 的 .FileName As String ← vb6_VariantArrayGet(...)
