@@ -798,12 +798,27 @@ void CCodeGen::visit(ConstDecl& node) {
     }
 
     if (node.value) {
-        emitExpr(*node.value);
-        // 公共常量 → .h, 私有 → .c
-        if (node.access == AccessLevel::Public) {
-            h_.emitLine("#define " + cName + " (" + lastExpr_ + ")");
+        // Fix 091d: 整型常量表达式折叠 — 避免 Variant 语义包装操作数.
+        // 例: BIF_USENEWUI = BIF_RETURNONLYFSDIRS Or BIF_NEWDIALOGSTYLE →
+        // ((vb6_VariantToLong(64) | vb6_VariantToLong(16))) → C2440
+        // "int → vb6_VARIANT" (cDialog.c 36; 使用处报 532). 折叠为字面量后
+        // 与 VB6 常量语义一致 (整型位运算).
+        int64_t cv091d = 0;
+        if (tryEvalConstInt(node.value.get(), cv091d)) {
+            std::string folded = "(" + std::to_string(cv091d) + ")";
+            if (node.access == AccessLevel::Public) {
+                h_.emitLine("#define " + cName + " " + folded);
+            } else {
+                c_.emitLine("#define " + cName + " " + folded);
+            }
         } else {
-            c_.emitLine("#define " + cName + " (" + lastExpr_ + ")");
+            emitExpr(*node.value);
+            // 公共常量 → .h, 私有 → .c
+            if (node.access == AccessLevel::Public) {
+                h_.emitLine("#define " + cName + " (" + lastExpr_ + ")");
+            } else {
+                c_.emitLine("#define " + cName + " (" + lastExpr_ + ")");
+            }
         }
     }
 }

@@ -1436,15 +1436,14 @@ void SemanticAnalyzer::visit(LocalDeclStmt& node) {
             }
             case ASTNodeKind::ConstDecl: {
                 auto& constDecl = static_cast<ConstDecl&>(*node.decl);
-                auto sym = std::make_unique<Symbol>(
-                    SymbolKind::Constant, constDecl.name,
-                    resolveTypeOrDefault(constDecl.name, constDecl.asType.get()),
-                    constDecl.loc, constDecl.access
-                );
-                // 简化: 常量值推导 (与registerConstant类似)
-                if (sym->type == Vb6Type::Unknown || sym->type == Vb6Type::Empty)
-                    sym->type = Vb6Type::Variant;
-                symTab_.define(std::move(sym));
+                // Fix 091d: 复用 registerConstant 的完整值推导 (字面量/一元负号 →
+                // Integer/Long/Double/String/Boolean). 此前局部常量被简化为
+                // Variant → 生成 `const vb6_VARIANT SW_SHOWNORMAL = 1;` → C2440
+                // "int → const vb6_VARIANT" (cToolsSystem.c 11/13); 且 Variant 常量
+                // 参与位运算时被包装 vb6_VariantToLong(<字面量>) → C2440
+                // (cDialog.c 36 BIF_USENEWUI 宏). registerConstant 内部 define 到
+                // 当前 (局部) 作用域, 语义正确.
+                registerConstant(constDecl);
                 break;
             }
             default:

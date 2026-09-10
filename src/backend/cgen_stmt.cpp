@@ -4356,6 +4356,32 @@ void CCodeGen::emitLocalDeclCode(LocalDeclStmt& node) {
         case ASTNodeKind::ConstDecl: {
             auto& con = static_cast<ConstDecl&>(*node.decl);
             std::string cType = mapTypeRef(con.asType.get());
+            // Fix 091d: 无 As 类型常量按字面量推断 C 类型. 此前一律 vb6_VARIANT →
+            // `const vb6_VARIANT SW_SHOWNORMAL = 1;` 非法初始化 → C2440
+            // (cToolsSystem.c 11/13); 且 Variant 常量参与位运算时操作数被包装
+            // vb6_VariantToLong(<字面量>) → C2440 (cDialog.c 36 BIF_USENEWUI).
+            if (!con.asType && con.value
+                && con.value->kind == ASTNodeKind::LiteralExpr) {
+                auto& lit091d = static_cast<LiteralExpr&>(*con.value);
+                switch (lit091d.literalKind) {
+                    case LiteralKind::Integer:
+                    case LiteralKind::Long:
+                        cType = "int32_t";
+                        break;
+                    case LiteralKind::Single:
+                    case LiteralKind::Double:
+                        cType = "double";
+                        break;
+                    case LiteralKind::String:
+                        cType = "BSTR";
+                        break;
+                    case LiteralKind::Boolean:
+                        cType = "VBABOOL";
+                        break;
+                    default:
+                        break;
+                }
+            }
             std::string cName = cIdent(con.name);
             // Fix 010r-12c: Register local constant to knownLocalVars_
             {
