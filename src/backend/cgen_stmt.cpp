@@ -564,7 +564,19 @@ void CCodeGen::visit(AssignmentStmt& node) {
                     std::transform(objClassLower.begin(), objClassLower.end(), objClassLower.begin(), ::tolower);
                     objClassMatchesProp = (propModLower == objClassLower);
                 }
-                if (!knownUdtVars_.count(objLower) && objClassMatchesProp &&
+                // Fix 092b: objClass 无法推断且对象是 Object/COM 后期绑定变量时,
+                // 该属性写应走 COM 路径 (vb6_ComSetProp / tryEmitChainedComWrite) —
+                // 否则 lookupModuleByKind 全局命中他类同名 Property Let, 误生成
+                // 类属性调用 (cToolsList 25: Rs As Object 的 COM 属性写
+                // "Rs.Filter = ..." → vb6_cDialog_prop_let_Filter(Rs, ...),
+                // C2440 "vb6_VARIANT→BSTR" 并丢失 COM 后期绑定语义).
+                // Fix 084g-2 的"objClass 空 + isExternal 即生成"过宽, 此处收窄.
+                bool objIsComVar092b = false;
+                if (objClass.empty()) {
+                    objIsComVar092b = knownObjectVars_.count(objLower) > 0
+                                      || knownTypedComVars_.count(objLower) > 0;
+                }
+                if (!objIsComVar092b && !knownUdtVars_.count(objLower) && objClassMatchesProp &&
                     (!objClass.empty() || propLetSym->isExternal)) {
                     // 生成Property Let调用: vb6_prop_let_Name(obj, value)
                     std::string prefix = (propLetSym->kind == SymbolKind::PropertySet) ? "prop_set_" : "prop_let_";
