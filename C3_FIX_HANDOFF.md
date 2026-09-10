@@ -1,7 +1,7 @@
 # C3 编译器错误修复 — 任务交接文档
 
 > 用途：新会话恢复上下文用。新开会话后直接说「读取 C3_FIX_HANDOFF.md 并继续修复」。
-> 更新日期：2026-09-07 晚（090bx/by：无窗体 125 模块全量 84 → **79**；ToolsJs 源笔误 + With void* COMObject 恢复 + As Collection 内置对象类型识别。窗体(FLayer) Release 崩溃仍为既有阻塞项）
+> 更新日期：2026-09-10（090w 修正+090h/090x：无窗体 125 模块 bisect 基线 68 → **65**；提交 18c58eb/087e203。窗体 Release 崩溃仍为既有阻塞项，bisect 正则不含窗体）
 
 ## 1. 项目与目标
 
@@ -36,6 +36,15 @@
 ## 3. 错误演进史
 
 777 → 774 → 748 → 723（VBA 子集常量）→ 700（VBA 全量 + 枚举）→ 638（ReDim/Erase + 枚举）→ 594（C2102 常量取址修复）→ 589 → 588（C2099 静态初始化清零）→ 216（088e-089h）→ 204（089i/j/k）→ 176（090a/c/d/e + P25b）→ 165（090f/g）→ 155（090h-n）→ 142（090o-p）→ 132（090s/090t）→ 109（090u/v/w/x/y/aa/ab/ac）→ 107*（090ad）→ 103*（090ae/090af）→ **100***（090ag）
+
+### 最近修复摘要（090w 修正+090h/090x：无窗体 bisect 基线 68 → **65**；提交 18c58eb / 087e203，2026-09-10）
+
+- **090w 修正（cgen_util.cpp，ByRef Variant 值参字段式打包）**：旧实现 ByRef 分支生成 `(&(vb6_VARIANT){vb6_VariantFromValue(x)})` —— 结构体复合字面量不能用另一个结构值初始化，命中即 C2440「vb6_VARIANT→vb6_vartype」。激活后（substr(4) 修正使 classLower 匹配成功）cJson.Items 等案例爆 8 条此类新错。改为**字段式**（.vt=VT_BSTR/.bstrVal、VT_I4/.lVal、VT_UI1/.bVal、VT_R8/.dblVal、VT_BOOL/.boolVal，default 对齐 M22：变体表达式 vb6_VariantToString、其余按 BSTR 兜底），依据 `inferExprType(valueExpr)` 选字段。
+- **090x（cgen.hpp/cgen_util.cpp helper `packLetValueArg`）**：把 090w 打包逻辑抽成共享 helper，供两处使用——(a) cgen_util Pattern C/D2（prop_get_ LHS rewrite 追加 value 实参）；(b) cgen_stmt.cpp With 块 prop_let_ 调用（090x-With：With 循环记录 PropertyLet 符号，末参 Variant 时对 lastExpr_ 打包 → 清 cHttpServer.c 913 `.Expires = DateAdd(...)` C2440 double→vb6_VARIANT*）。
+- **090h（cgen_stmt.cpp，With 块类属性写识别）**：跨模块 storageKey 冲突（如 CookieAttr.Value 的 value$pl 被先注入的其它类同名属性覆盖）使 moduleScope 扫描漏 PropertyLet/Set → With 内 `.Value =` 误走数据字段写（`_vb6_with->Value`）→ C2039（CookieAttr 无 Value 字段）。补 findClassMemberCallParams（Class 符号 memberParams 精确到类）二次确认属性存在 → 生成 `vb6_cHttpServerCookieAttr_prop_let_Value(...)`。清 cHttpServer.c 908 C2039。
+- **净效果**：C2440 41→39（清 Demo 592、cHttpServer 913，修 cJson.Items 系列回归为合法字段式）、C2039 7→6，无新增回归。总 68 → 65。
+- **残留同类**：Demo 766/786（cJson.Item）与 cWinsock 1949 等——消费模块 moduleScope 中该类 PropertyLet 符号被跨模块同名($pl)冲突覆盖/缺失，Get 方向参数表（memberParams，Get>Func>Sub>Let>Set 单一 read 优先）无法给出 Let 末参签名 → 090w/090x 不打包仍 C2440。需语义层为属性写方向（Let/Set）提供完整签名（或跨模块符号按 sourceModule 多保留）——下一轮候选。
+- **注意**：090x 命名与 9/7 handoff「090x Debug.Print」重复，本会话 090x = Let 值参打包 helper，勿混淆。
 
 ### 最近修复摘要（090bx/by：无窗体 125 模块基线 84 → **79**；提交 f3ed79c）
 
