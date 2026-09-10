@@ -2126,15 +2126,24 @@ void CCodeGen::visit(ElseIfClause& node) {
 }
 
 void CCodeGen::visit(ForStmt& node) {
-    emitExpr(*node.start);
-    std::string start = std::move(lastExpr_);
-    emitExpr(*node.end);
-    std::string end = std::move(lastExpr_);
+    // Fix 092n: For 的三个子表达式相互独立 — 进入每个子表达式前清掉上游残留的
+    // COM 标记, 生成后立即按整数上下文消费本次产生的标记. 否则 `For i = .Count
+    // To 1 Step -1` (With 对象属性读) 会双重出错 (pvSubClass 708/709):
+    //   ① start 只得到对象本身 — `i = _vb6_with_2 /* With COM .Count */`;
+    //   ② 该标记残留到 Step, 被 UnaryExpr 内的 `if (isComMarker_) resolveComValue()`
+    //      消费 → `i_step = (-vb6_ComGetStringProp(_vb6_with_2, L"Count"))` (C2171).
+    auto emitForExpr092n = [&](Expr& e) -> std::string {
+        isComMarker_ = false;
+        emitExpr(e);
+        if (isComMarker_) resolveComValue("Long");
+        return std::move(lastExpr_);
+    };
+    std::string start = emitForExpr092n(*node.start);
+    std::string end = emitForExpr092n(*node.end);
 
     std::string step = "1";
     if (node.step) {
-        emitExpr(*node.step);
-        step = std::move(lastExpr_);
+        step = emitForExpr092n(*node.step);
     }
 
     std::string var = cIdent(node.varName);
