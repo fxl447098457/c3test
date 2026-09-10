@@ -1178,6 +1178,17 @@ void CCodeGen::visit(AssignmentStmt& node) {
             std::transform(rhsMember.begin(), rhsMember.end(), rhsMember.begin(), ::tolower);
             if (classVariantMembers_.count(rhsMember)) valueIsVariant = true;
         }
+        // Fix 092c: RHS 是当前过程的返回变量 (vb6_ret_<Proc>) 且过程返回类型为
+        // Variant (未声明返回类型 / As Variant) — cExprIsVariant 只认函数前缀,
+        // 裸返回变量名不命中 → 目标为具体类型时不做提取 → C2440:
+        //   cDialog 393: Function ShowOpen(...) As Variant 内
+        //     If VarType(ShowOpen) = vbString Then mData.mstrFileName = ShowOpen
+        //     → me->mData.mstrFileName = vb6_ret_ShowOpen (vb6_VARIANT→BSTR).
+        if (!valueIsVariant && !currentReturnVar_.empty()
+            && value == currentReturnVar_
+            && currentReturnCType_ == "vb6_VARIANT") {
+            valueIsVariant = true;
+        }
         if (valueIsVariant) {
             // 检查目标类型
             std::string convertedValue = value;
