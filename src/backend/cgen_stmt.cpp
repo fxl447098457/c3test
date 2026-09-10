@@ -3275,6 +3275,37 @@ void CCodeGen::visit(CallStmt& node) {
                                 return false;
                             };
 
+                            // Fix 091r: Debug.Print 参数是否为 Variant 值 —
+                            // cExprIsVariant 只认 C 表达式前缀, 不认"Variant 变量名"
+                            // (局部/模块级 knownVariantVars_ / 类字段 classVariantFields_).
+                            // Demo 671: For Each 循环变量 x As Variant 被赋
+                            // vb6_VariantFromStackVARIANT 后 Debug.Print x →
+                            // DebugWriteLong((int32_t)(x)) C2440 (vb6_VARIANT→int32_t).
+                            auto isVariantVal091r = [&](const std::string& e) -> bool {
+                                if (cExprIsVariant(e)) return true;
+                                std::string n091r = e;
+                                std::string suffix091r;
+                                size_t cmt091r = n091r.find("/*");
+                                if (cmt091r != std::string::npos) {
+                                    suffix091r = n091r.substr(cmt091r);
+                                    n091r = n091r.substr(0, cmt091r);
+                                }
+                                while (!n091r.empty() && (n091r.back() == ' ' || n091r.back() == '\t')) {
+                                    n091r.pop_back();
+                                }
+                                if (n091r.rfind("me->", 0) == 0) n091r = n091r.substr(4);
+                                else if (n091r.size() > 4 && n091r[0] == '(' && n091r[1] == '*'
+                                         && n091r.back() == ')') {
+                                    n091r = n091r.substr(2, n091r.size() - 3);
+                                }
+                                std::string ln091r = Symbol::toLower(n091r);
+                                if (knownVariantVars_.count(ln091r)
+                                    || classVariantFields_.count(ln091r)) {
+                                    return true;
+                                }
+                                return false;
+                            };
+
                             for (size_t j = 0; j < call.positional.size(); j++) {
                                 emitExpr(*call.positional[j]);
                                 std::string val = std::move(lastExpr_);
@@ -3302,11 +3333,13 @@ void CCodeGen::visit(CallStmt& node) {
                                 } else if (isDoubleExpr(val)) {
                                     // 浮点数, 用DebugWriteDouble输出
                                     c_.emitLine("vb6_DebugWriteDouble((double)(" + val + "));");
-                                } else if (cExprIsVariant(val)) {
+                                } else if (isVariantVal091r(val)) {
                                     // Fix 090x: Debug.Print x (x As Variant 变量 /
                                     // Variant 表达式) — 运行时值按字符串输出. 此前落入
                                     // DebugWriteLong((int32_t)(x)) → C2440 (无法从
                                     // vb6_VARIANT 转换 int32_t).
+                                    // Fix 091r: 判定改用 isVariantVal091r (含
+                                    // knownVariantVars_/类字段 兜底).
                                     c_.emitLine("vb6_DebugWriteBSTR(vb6_VariantToString(" + val + "));");
                                 } else {
                                     // 整数/布尔值, 用DebugWriteLong输出
