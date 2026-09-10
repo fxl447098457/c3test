@@ -153,6 +153,12 @@ struct Symbol {
     // 解包 → int32_t 字段收到 BSTR 指针 (cHttpServer 373 `.Port = m_oServer.RemotePort`
     // 编译通过但语义错); 且 COM 标记不消费会泄漏到下一条语句 (374 C2440).
     std::unordered_map<std::string, std::string> memberFieldTypes;
+    // Fix 092p: 成员数据字段的**声明原名**表 — key=字段名小写, value=声明时原样名
+    // (如 "Socket"). C 结构体成员名按声明生成, 而 VB6 大小写不敏感: 源码里写
+    // `.socket` (cHttpServerResponse 487 `Client.socket.SendData`) 也会指向同一字段,
+    // cgen 直接 cIdent(源码名) → `me->Client->socket` C2039. 字段访问生成点用
+    // canonicalClassFieldName() 规范化回声明名.
+    std::unordered_map<std::string, std::string> memberFieldNames;
     // Fix 091a: 成员写方向参数表 — memberParams 按读上下文优先级 (Get > Function >
     // Sub > Let > Set) 只存胜出者, 对「Get 有参 + Let 末参才是 value」的属性
     // (cJson.Item(key)/Let Item(key, Dat As Variant)) 会存成 Get 的 [key], 使

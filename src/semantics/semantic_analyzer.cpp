@@ -123,6 +123,9 @@ bool SemanticAnalyzer::analyze(Module& module) {
                 // As <简单类型名> 的字段; 其它 (数组/UDT/未声明) 由 cgen 回退默认.
                 case ASTNodeKind::VariableDecl: {
                     auto& v092m = static_cast<VariableDecl&>(*decl);
+                    // Fix 092p: 登记字段声明原名 — C 结构体成员名按声明生成, 访问点需
+                    // 把源码里的大小写变体 (.socket) 规范化回该名.
+                    classSym->memberFieldNames[Symbol::toLower(v092m.name)] = v092m.name;
                     if (v092m.asType && v092m.asType->kind == ASTNodeKind::SimpleTypeRef) {
                         classSym->memberFieldTypes[Symbol::toLower(v092m.name)] =
                             static_cast<SimpleTypeRef*>(v092m.asType.get())->name;

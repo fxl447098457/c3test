@@ -874,8 +874,10 @@ void CCodeGen::visit(AssignmentStmt& node) {
                     resolveComValue(classFieldComUnpackHint(info.className,
                                                             wmExpr.memberName));
                 }
-                c_.emitLine(tempVar + "->" + cIdent(wmExpr.memberName) + " = " + lastExpr_
-                            + ";  /* With class field write */");
+                c_.emitLine(tempVar + "->"
+                            + cIdent(canonicalClassFieldName(info.className,
+                                                             wmExpr.memberName))
+                            + " = " + lastExpr_ + ";  /* With class field write */");
                 return;
             }
 

@@ -1484,6 +1484,23 @@ std::string CCodeGen::classFieldComUnpackHint(const std::string& className,
     return "BSTR";
 }
 
+// Fix 092p: 类数据字段名规范化 (见 cgen.hpp 声明注释).
+std::string CCodeGen::canonicalClassFieldName(const std::string& className,
+                                              const std::string& memberName) const {
+    if (className.empty() || !symTab_.moduleScope()) return memberName;
+    const std::string want = Symbol::toLower(className);
+    const std::string fld = Symbol::toLower(memberName);
+    for (const auto& kv : symTab_.moduleScope()->symbols()) {
+        const Symbol* cs = kv.second.get();
+        if (!cs || cs->kind != SymbolKind::Class) continue;
+        if (Symbol::toLower(cs->name) != want
+            && Symbol::toLower(cs->sourceModule) != want) continue;
+        auto it = cs->memberFieldNames.find(fld);
+        return (it != cs->memberFieldNames.end()) ? it->second : memberName;
+    }
+    return memberName;
+}
+
 std::string CCodeGen::comPackExpr(Expr& expr) {
     // 根据表达式类型推断应该用的VARIANT封装函数
     Vb6Type vt = inferExprType(expr);

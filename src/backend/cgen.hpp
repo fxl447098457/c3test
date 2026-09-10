@@ -783,6 +783,13 @@ private:
     std::string classFieldComUnpackHint(const std::string& className,
                                         const std::string& memberName) const;
 
+    // Fix 092p: 类数据字段名规范化 — VB6 大小写不敏感, 源码 `.socket` 与声明
+    // `Socket` 是同一字段, 但 C 结构体成员名按声明原样生成. 访问点先经本函数换回
+    // 声明名 (Symbol::memberFieldNames), 避免 `me->Client->socket` C2039.
+    // 表中无此项 (方法/属性/非本类成员/未知类) 时原样返回.
+    std::string canonicalClassFieldName(const std::string& className,
+                                        const std::string& memberName) const;
+
     // Fix 010r-16: COM/Property-Get 左值重写辅助
     // 当赋值语句(Let/Set/Assignment fallback)的 LHS 是非常量 C 表达式(非左值)时,
     // 尝试重写为 COM SetProp/SetPropArg 或 Property Let/Set 调用.

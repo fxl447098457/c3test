@@ -2742,11 +2742,15 @@ void CCodeGen::visit(MemberAccessExpr& node) {
                         }
                     }
                 }
+                // Fix 092p: 字段名规范化回声明名 — VB6 大小写不敏感, 源码 `.socket`
+                // 与声明 `Socket` 是同一字段, 直接用源码拼写会生成 `...->socket` (C2039).
+                const std::string fldC092p =
+                    canonicalClassFieldName(itClassVar->second, node.memberName);
                 if (isVoidPtr) {
-                    lastExpr_ = obj090 + "->" + cIdent(node.memberName)
+                    lastExpr_ = obj090 + "->" + cIdent(fldC092p)
                               + "  /* class var ." + node.memberName + " field voidptr */";
                 } else {
-                    lastExpr_ = obj090 + "->" + cIdent(node.memberName)
+                    lastExpr_ = obj090 + "->" + cIdent(fldC092p)
                               + "  /* class var ." + node.memberName + " field */";
                 }
             }
@@ -6535,7 +6539,9 @@ void CCodeGen::visit(WithMemberExpr& node) {
             }
             // 未找到方法/属性 → 假设是数据字段: tempVar->member
             // (此时tempVar类型为 vb6_cls_<className>*, ->访问正确编译)
-            lastExpr_ = tempVar + "->" + cIdent(node.memberName)
+            // Fix 092p: 字段名规范化回声明名 (源码大小写变体 → C 结构体实际成员名)
+            lastExpr_ = tempVar + "->"
+                      + cIdent(canonicalClassFieldName(info.className, node.memberName))
                       + "  /* With class ." + node.memberName + " field */";
             return;
         }
