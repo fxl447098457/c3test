@@ -2346,9 +2346,16 @@ void CCodeGen::visit(ForEachStmt& node) {
             resolveComValue("Object");  // 集合必须是Object(IDispatch*), 生成ComGetObjectProp
         }
         std::string collExpr = lastExpr_;
+        // Fix 091q: vb6_ComCall/vb6_ComCallObject 已返回对象指针 (void*),
+        // vb6_ForEach_Init 直接接收. 不可再按 Variant 提取 — cLang 26:
+        // For Each x In me.LangInfo.Item("LangList") (COM Item 调用, 生成
+        // vb6_ComCall(...)) 曾被 isDefinitelyVariantExpr 判为 Variant →
+        // vb6_VariantToObjectVal(vb6_ComCall(...)) C2440 (void* → vb6_VARIANT).
+        bool collIsObjPtr091q = collExpr.rfind("vb6_ComCall(", 0) == 0
+                             || collExpr.rfind("vb6_ComCallObject(", 0) == 0;
         // Fix 040c: vb6_ForEach_Init expects void* (IDispatch*). If the collection
         // expression is a Variant (vb6_VARIANT struct), extract the object pointer.
-        if (cExprIsVariant(collExpr)) {
+        if (!collIsObjPtr091q && cExprIsVariant(collExpr)) {
             collExpr = "vb6_VariantToObjectVal(" + collExpr + ")";
         } else if (node.collection && node.collection->kind == ASTNodeKind::IdentifierExpr) {
             auto& ident = static_cast<IdentifierExpr&>(*node.collection);
@@ -2359,7 +2366,7 @@ void CCodeGen::visit(ForEachStmt& node) {
             }
         }
         // Fix 040c: fallback — project class methods returning Variant (e.g. Dictionary.Keys)
-        else if (node.collection && isDefinitelyVariantExpr(*node.collection)) {
+        else if (!collIsObjPtr091q && node.collection && isDefinitelyVariantExpr(*node.collection)) {
             collExpr = "vb6_VariantToObjectVal(" + collExpr + ")";
         }
         c_.emitLine("void* " + enumVar + " = vb6_ForEach_Init(" + collExpr + ");");
