@@ -1127,7 +1127,10 @@ std::string CCodeGen::getRuntimeParamCType(const std::string& funcName, size_t p
         {"vb6_ErrSource",       {}},
         {"vb6_ErrClear",        {}},
         // IsMissing
-        {"vb6_IsMissing",       {"vb6_VARIANT*"}},
+        // Fix 091k: RTL 实际签名 int32_t vb6_IsMissing(SAFEARRAY* psa) (ParamArray 专用,
+        // 判断是否未传实参). 原表项 vb6_VARIANT* 与 RTL 不符, 导致 IsMissing(<Variant>)
+        // 时表项无效, 裸传 Variant 值 → C2440.
+        {"vb6_IsMissing",       {"SAFEARRAY*"}},
         // Variant 提取
         {"vb6_VariantToLong",      {"vb6_VARIANT"}},
         {"vb6_VariantToDouble",    {"vb6_VARIANT"}},

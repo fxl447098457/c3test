@@ -2919,7 +2919,22 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
             emitExpr(*node.positional[0]);
             // Fix 084o: 索引为 Variant 时转 Long (vb6_VariantArrayGet 第二参是 int32_t)
             std::string vIndex = toLongIfVariant(std::move(lastExpr_), node.positional[0].get());
-            lastExpr_ = "vb6_VariantArrayGet(&" + cIdent(vIdent.name) + ", " + vIndex + ")";
+            // Fix 091k: ByRef Variant 参数在 C 侧已是 vb6_VARIANT* (cgen_util 参数映射
+            // ByRef→指针), 再取址会传 vb6_VARIANT** → C4047/C4024 warning 且语义错
+            // (cToolsArray prop_let_Extend/DeArray 的 Vars(i)/Arr(i)).
+            std::string vArg = "&" + cIdent(vIdent.name);
+            if (currentProc_) {
+                for (auto& p091k : currentProc_->params) {
+                    if (Symbol::toLower(p091k.name) != vLower) continue;
+                    bool paArr091k = (static_cast<uint16_t>(p091k.type)
+                                      & static_cast<uint16_t>(Vb6Type::Array)) != 0;
+                    if (!p091k.isByVal && !paArr091k && !p091k.isParamArray) {
+                        vArg = cIdent(vIdent.name);
+                    }
+                    break;
+                }
+            }
+            lastExpr_ = "vb6_VariantArrayGet(" + vArg + ", " + vIndex + ")";
             return;
         }
     // P24-10: COM默认属性调用 — obj(args) 其中obj是COM变量, 等价于 obj.DefaultMember(args)
@@ -3319,12 +3334,24 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
                             lastExpr_ = "(!_has_" + cIdent(p.name) + ")";
                             return;
                         }
+                        // Fix 091k: ParamArray 整体 — RTL vb6_IsMissing(SAFEARRAY*)
+                        // 语义为"未传任何实参" (psa == NULL).
+                        if (pLower == argLower && p.isParamArray) {
+                            lastExpr_ = "vb6_IsMissing(" + cIdent(p.name) + ")";
+                            return;
+                        }
                     }
                 }
                 // Not an Optional param - IsMissing returns False (0)
                 lastExpr_ = "(0)";
                 return;
             }
+            // Fix 091k: 实参是复合表达式 (数组元素 / ParamArray 元素 / 函数结果).
+            // VB6 IsMissing 仅对 Optional Variant 形参可能为 True, 其余恒 False;
+            // 而 RTL vb6_IsMissing 形参是 SAFEARRAY* (ParamArray 专用), 直接透传
+            // Variant 值会 C2440 (cToolsArray: IsMissing(Vars(i)), IsMissing(OutVars(i))).
+            lastExpr_ = "(0)";
+            return;
         }
     }
 
@@ -4838,7 +4865,24 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
                 if (isComResultVal2) {
                     argVal = "vb6_VariantFromComResult(" + argVal + ")";
                 }
-                if (paramIsArray && (paramBase == Vb6Type::Variant || paramBase == Vb6Type::Byte
+                // Fix 091k: 实参是当前过程的 ParamArray 参数时, C 侧已是 SAFEARRAY*
+                // (cgen 参数映射), 不能再按 Variant 数组提取 SafeArray1D* — 否则
+                // UBound(ParamArray) 生成 vb6_PA_UBound(vb6_VariantToSafeArray1D(OutVars))
+                // C2440 (cToolsArray DeArray).
+                bool argIsPA091k = false;
+                if (i < node.positional.size()
+                    && node.positional[i]->kind == ASTNodeKind::IdentifierExpr && currentProc_) {
+                    std::string paLower091k = Symbol::toLower(
+                        static_cast<IdentifierExpr&>(*node.positional[i]).name);
+                    for (auto& p091k : currentProc_->params) {
+                        if (Symbol::toLower(p091k.name) == paLower091k) {
+                            argIsPA091k = p091k.isParamArray;
+                            break;
+                        }
+                    }
+                }
+                if (paramIsArray && !argIsPA091k
+                    && (paramBase == Vb6Type::Variant || paramBase == Vb6Type::Byte
                     || paramBase == Vb6Type::String || paramBase == Vb6Type::Long)) {
                     // 数组参数: 从 Variant 提取 SafeArray1D*
                     argVal = "vb6_VariantToSafeArray1D(" + argVal + ")";
