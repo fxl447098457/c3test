@@ -1,7 +1,21 @@
 # C3 编译器错误修复 — 任务交接文档
 
 > 用途：新会话恢复上下文用。新开会话后直接说「读取 C3_FIX_HANDOFF.md 并继续修复」。
-> 更新日期：2026-09-10（091a/091c/091d：无窗体 125 模块 bisect 基线 65 → **58**；提交 aeaa95f/05793ac/ae72bf2。窗体 Release 崩溃仍为既有阻塞项，bisect 正则不含窗体）
+> 更新日期：2026-09-10（091a/091c/091d + 091e-i：无窗体 125 模块 bisect 基线 65 → **52**；提交 aeaa95f/05793ac/ae72bf2/d8f11aa。窗体 Release 崩溃仍为既有阻塞项，bisect 正则不含窗体）
+
+### 最近修复摘要（091e-i：无窗体 bisect 基线 58 → **52**；提交 d8f11aa 等，2026-09-10）
+
+- **091e（未观测到变化，保留）**：`rtParamTypeUsable = i >= calleeParams.size() || calleeParams[i].type 是 Variant/Empty`（此前仅参数表为空才查运行时参数类型表）+ 参数表补 `{"vb6_StrConv", {"BSTR","int32_t","int32_t"}}`。逻辑正确但单独验证 58→58。
+- **091f/091g（58→55→55）ForEach 数组源**：`For Each` 源为返回 `vb6_SafeArray1D*` 的内置调用时走**数组迭代路径**而非 COM 路径（此前生成 `vb6_ForEach_Init(vb6_VariantToObjectVal(vb6_Split(...)))` → C2440）。白名单：`Split/Filter`（元素 BSTR，`Vb6Type::String`）、`Array(...)`（vb6_ArrayCreate 建 **Variant 数组**，元素 `vb6_VARIANT`）。表达式集合先物化到 `_fe_arrN` 临时变量，避免 LBound/UBound/`VB6_SA_AT` 处重复求值（重新分配数组）。清 ToolsTlsThunks 754/2913/3178。
+- **091h（55→54）BSTR 判定前缀修正**：`bstrTopPrefixes` 移除 `"vb6_VariantFromComResult("` — 该函数返回 **vb6_VARIANT**（vb6rtl.h:918）而非 BSTR，旧前缀把 COM 属性结果误判为"已 BSTR"而跳过提取。清 cTlsSocket.c 200（`vb6_LenB(vb6_VariantFromComResult(ComGetProp(...)))`）。
+- **091i（54→52）wrapToBSTR 识别项目 Variant 返回函数**：`wrapToBSTR()` 的"其他 vb6_ 函数假定为 BSTR"直通分支前，增加 `variantReturnFuncs_` 检查（driver 预扫描，含 `vb6_<cls>_prop_get_<name>`）→ 命中则 `vb6_VariantToString(...)`。清 Demo_Database 310/678（`vb6_BSTR_Concat(L"...", vb6_cDataBase_LastInsertId(...))`）。
+- **残留（52 = C2440×26 + C2198×7 + C2039×6 + C2065×5 + 其它 8）**：
+  1) **形参为按值 Variant 的运行时函数**（表项类型 `"vb6_VARIANT"`，如 `vb6_VariantToLong/ObjectVal/CStr/CBool/CByte/CDate/CCur`、`vb6_IIfVariant`、`vb6_CLngV/CIntV`）实参为具体类型时未包装：`vb6_VariantToObjectVal(vb6_ComCall(...))`（cLang 26 void*）、`vb6_PA_UBound(vb6_VariantToSafeArray1D(...))`（cToolsArray 147 SAFEARRAY*，注意 PA_UBound 若要数组变体需 `vb6_VariantFromValue` 无法产生数组变体语义）、`vb6_Join(vb6_VariantToSafeArray1D(...))`（cPLI 56）、`vb6_cTlsSocket_Accept(..., bUseTls, ...)`（cWinsock 1604 int16_t）、`cWinsock 1949/1965`（baBuffer Byte 数组 → ByVal Variant）、`pvSubClass 543/544`（cls*）、`cDelay 74`（SAFEARRAY*）。注意 `vb6_CLngV/CIntV` 有 5993-6010 的反向剥离后处理，包装改动需与其对齐。
+  2) **赋值路径目标类型识别**：`EnumLevelNames = _arr_0`（ToolsLogs 44，Variant 目标 ← SafeArray1D*，疑 knownVariantVars_ 未注册）、`me->m_vUserData = vb6_VariantToObjectVal(Value)`（cWinsock 172）、cHttpClient 399/418、cLang 144、Demo 671、cTlsSocket 4093（Variant → 具体类型目标）。
+  3) **UDT 嵌套字段**：`me->mData.mstrFileName = vb6_ret_ShowOpen`（cDialog 393，嵌套 UDT 成员类型推断未覆盖）。
+  4) `Demo_Database 506`：`vb6_BSTR_Concat(L"...", vb6_cCollection_prop_get_Item(...))` — prop_get 返回 Variant 未被 091i 命中（需确认 cCollection.Item 的 returnType 与集合名是否一致）。
+  5) cAesCBC 25 / cToolsList 25（`vb6_StrConv(LoadResData(...))`、`prop_let_Filter(rs, ComGetProp(...))`）、cToolsArray 98/107（`vb6_IsMissing(Variant 值)`，RTL 形参是 SAFEARRAY*）。
+
 
 ## 1. 项目与目标
 
