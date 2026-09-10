@@ -1,9 +1,22 @@
 # C3 编译器错误修复 — 任务交接文档
 
 > 用途：新会话恢复上下文用。新开会话后直接说「读取 C3_FIX_HANDOFF.md 并继续修复」。
-> 更新日期：2026-09-10（091a-o：无窗体 125 模块 bisect 基线 65 → **42**；提交 aeaa95f/05793ac/ae72bf2/d8f11aa/e97a90d/02205f5/ad62a09/96d123a。窗体 Release 崩溃仍为既有阻塞项，bisect 正则不含窗体）
+> 更新日期：2026-09-10（091a-s：无窗体 125 模块 bisect 基线 65 → **36**；提交 aeaa95f/05793ac/ae72bf2/d8f11aa/e97a90d/02205f5/ad62a09/96d123a/7e58595/ac78b3c/36d83a3/1c8daf7/db139c9。窗体 Release 崩溃仍为既有阻塞项，bisect 正则不含窗体）
 
-### 最近修复摘要（091k-o：无窗体 bisect 基线 52 → **42**；提交 e97a90d/02205f5/ad62a09/96d123a，2026-09-10）
+### 最近修复摘要（091p-s：无窗体 bisect 基线 41 → **36**；提交 ac78b3c/36d83a3/1c8daf7/db139c9，2026-09-10）
+
+- **091p（42→41）类字段 Variant 判定**：`Set m_vUserData = Value`（cWinsock Property Set，字段 `Private m_vUserData As Variant`）被误判为 typed 目标 → 生成 `vb6_VariantToObjectVal(Value)` C2440。根因同 091m：`knownVariantVars_` 每过程 `clear()`，类字段不在其中；但字段访问带明确 `me->` 前缀，故新增 `classVariantFields_`（类模块字段声明时登记，**不回灌裸名集合**），Set 判定中按 `target.rfind("me->",0)==0` 单独查询。
+- **091q（41→40）ForEach COM 集合源**：`For Each x In me.LangInfo.Item("LangList")` 生成 `vb6_ForEach_Init(vb6_VariantToObjectVal(vb6_ComCall(...)))` C2440（void*→vb6_VARIANT）—— `vb6_ComCall/vb6_ComCallObject` 已返回对象指针，`isDefinitelyVariantExpr` 的 fallback 不该再提取。加 `collIsObjPtr091q` 前缀排除（两个分支都加）。
+- **091r（40→38）Debug.Print Variant 兜底**：`Debug.Print x`（x 是 Variant 循环变量）落入整数分支生成 `vb6_DebugWriteLong((int32_t)(x))` → C2440 + C2198。Debug 参数判定原来只查 `cExprIsVariant`（C 表达式级），新增 `isVariantVal091r` 兜底 `knownVariantVars_` / `classVariantFields_`（含 `me->`/`(*p)` 剥离与 `/* */` 注释后缀处理）。
+- **091s（38→36）ByVal Variant 收 Object 实参**：`ToolsJsonVba.ConvertToJson(Json)`（`Json As Object` → void*，形参 `ByVal JsonValue As Variant`）未打包 → C2440。Fix 084d 的跳过条件（`inferClassTypeOfExpr` 非空即跳过）过宽：① 收窄为**项目类**（`symTab_.lookup(类名)->kind == SymbolKind::Class`）；② 实参是 `knownObjectVars_/knownTypedComVars_` 的 Object/COM 变量时**强制打包**（`inferClassTypeOfExpr` 对 Object 变量可能返回内建 "Object" 类名）。
+- **残留（36 = C2440×12 + C2039×6 + C2198×6 + C2065×5 + 其它 7）**，下一步候选（按族）：
+  1) **少 me 的跨模块方法调用**（C2198×3）：`vb6_cLayer` 的 `vb6_cCsv_ShowTo(&Content, &(int32_t){800}, 0)`、`vb6_cTimeUse_Show(&(BSTR){...}, 0)`、`vb6_cVBMAN_Version(&(void*){0}, 0)` —— 调用点漏传对象指针 me（VB 里像 `cCsv.ShowTo ...` / `Me.Version` 这类限定写法），同时 cHttpServerResponse 508 把对象表达式错传为 `(void*)me->Client->socket`；
+  2) **窗体/全局对象引用**（C2065×5）：cLogs 的 `FLogs` / `vb6_FLogs_Visible`、cLayer 的 `FLayer` —— 窗体变量名未解析（应走全局单例或 `me->` 字段）；
+  3) **Variant → 具体类型提取仍缺**（C2440×6）：cDialog 393（`me->mData.mstrFileName = vb6_ret_ShowOpen`）、cAesCBC 25（`vb6_StrConv(vb6_LoadResData(...), 64, 0)`）、cToolsList 25（属性 Let 的 BSTR 形参，091n 未命中）、cHttpClient 399/418（函数返回 SafeArray1D*/uint8_t* ← `VariantFromComResult`）、Demo_Database 506（`cCollection_prop_get_Item` 参数个数）；
+  4) **BSTR 拼接误用指针算术**（C2110+C2198）：cToolsHttp 280 `vb6_BSTR_Assign(&GB_UrlDecode, (GB_UrlDecode + vb6_Chr(d)))` → 应 `vb6_BSTR_Concat`；
+  5) **RTL 签名不匹配**：ToolsTlsThunks 1780 `vb6_SafeArrayDestroy1D(_vb6_with_30->MessBuffer_Data)`（参数太少）＋ 1780/5468 的 C2039（`MessBuffer_Data`/`data`/`lBound` 成员不存在）；cTlsSocket 4093、cLang 144、cHttpServer 374、cHttpClient 418 的 void*/double 桥接。
+
+### 历史：091k-o 摘要（无窗体 bisect 基线 52 → **42**；提交 e97a90d/02205f5/ad62a09/96d123a，2026-09-10）
 
 - **091k（52→48）ParamArray/Variant 参数边界三处**：
   - 通用实参转换中实参是当前过程的 **ParamArray 参数**时不再按 Variant 数组提取（此前 `UBound(OutVars)` → `vb6_PA_UBound(vb6_VariantToSafeArray1D(OutVars))` C2440，cToolsArray DeArray）；
