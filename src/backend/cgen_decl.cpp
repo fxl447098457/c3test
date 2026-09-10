@@ -1067,8 +1067,15 @@ void CCodeGen::visit(VariableDecl& node) {
         knownVariantVars_.insert(lower);
         // Fix 091m: 模块级 (过程外) Variant 变量额外登记, 供过程体内回灌.
         // 类模块/窗体的成员变量不属此列 (方法体内须写 me->name, 回灌裸名会 C2065).
-        if (currentProc_ == nullptr && !isClassModule_) {
-            moduleVariantVars_.insert(lower);
+        if (currentProc_ == nullptr) {
+            if (isClassModule_) {
+                // Fix 091p: 类模块/窗体字段单独登记 — 供 me->field 形态判定
+                // (cWinsock.m_vUserData As Variant: Set m_vUserData = Value 需
+                // 走 Variant 容器分支, 而非 ToObjectVal 提取).
+                classVariantFields_.insert(lower);
+            } else {
+                moduleVariantVars_.insert(lower);
+            }
         }
     }
 

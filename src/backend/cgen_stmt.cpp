@@ -1611,6 +1611,15 @@ void CCodeGen::visit(SetStmt& node) {
     if (!targetIsVariant && checkName.find("VB6_SA_AT(vb6_VARIANT,") == 0) {
         targetIsVariant = true;
     }
+    // Fix 091p: 类字段 (me->field) 的 Variant 判定 — knownVariantVars_ 每过程
+    // clear(), 类模块字段不在其中 (091m 回灌只覆盖标准模块级变量) → Set
+    // m_vUserData = Value 被误判为 typed 目标 → VariantToObjectVal 提取 →
+    // C2440 (cWinsock 172: void* → vb6_VARIANT). 字段访问带 me-> 前缀,
+    // 用字段集合单独判定, 不污染裸名集合.
+    if (!targetIsVariant && target.rfind("me->", 0) == 0
+        && classVariantFields_.count(targetLower) > 0) {
+        targetIsVariant = true;
+    }
     // Fix 084n: UDT 的 Variant 字段 (如 ZipFileInfo.SourceFile As Variant)
     // Set .SourceFile = obj → 也需 vb6_VariantFromValue 包装对象指针 (void*→vb6_VARIANT C2440)
     if (!targetIsVariant) {

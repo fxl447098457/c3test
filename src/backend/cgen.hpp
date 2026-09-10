@@ -357,6 +357,11 @@ private:
     // 模块级声明时登记, 过程开始时回灌.
     std::unordered_set<std::string> moduleVariantVars_;
 
+    // Fix 091p: 类模块/窗体字段中的 Variant 名字集合 (小写). 类字段同样在过程
+    // 开始时不可见 (knownVariantVars_ 被 clear), 但字段访问形如 me->field,
+    // 前缀明确, 故单独成集合, 只在 me-> 形态下参与判定, 避免污染裸名判定.
+    std::unordered_set<std::string> classVariantFields_;
+
     // Fix 062: 已知Byte数组变量名集合 (小写) - 用于Variant→SafeArray1D*转换
     std::unordered_set<std::string> knownByteArrayVars_;
 
