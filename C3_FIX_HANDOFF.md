@@ -1,7 +1,7 @@
 # C3 编译器错误修复 — 任务交接文档
 
 > 用途：新会话恢复上下文用。新开会话后直接说「读取 C3_FIX_HANDOFF.md 并继续修复」。
-> 更新日期：2026-09-10（090w 修正+090h/090x：无窗体 125 模块 bisect 基线 68 → **65**；提交 18c58eb/087e203。窗体 Release 崩溃仍为既有阻塞项，bisect 正则不含窗体）
+> 更新日期：2026-09-10（091a/091c/091d：无窗体 125 模块 bisect 基线 65 → **58**；提交 aeaa95f/05793ac/ae72bf2。窗体 Release 崩溃仍为既有阻塞项，bisect 正则不含窗体）
 
 ## 1. 项目与目标
 
@@ -36,6 +36,20 @@
 ## 3. 错误演进史
 
 777 → 774 → 748 → 723（VBA 子集常量）→ 700（VBA 全量 + 枚举）→ 638（ReDim/Erase + 枚举）→ 594（C2102 常量取址修复）→ 589 → 588（C2099 静态初始化清零）→ 216（088e-089h）→ 204（089i/j/k）→ 176（090a/c/d/e + P25b）→ 165（090f/g）→ 155（090h-n）→ 142（090o-p）→ 132（090s/090t）→ 109（090u/v/w/x/y/aa/ab/ac）→ 107*（090ad）→ 103*（090ae/090af）→ **100***（090ag）
+
+### 最近修复摘要（091a/091c/091d：无窗体 bisect 基线 65 → **58**；提交 aeaa95f / 05793ac / ae72bf2，2026-09-10）
+
+- **091a（属性写方向签名表，65→63）**：`Symbol` 新增 `memberLetParams`/`memberSetParams`（Let/Set 各自唯一，无条件填充于 Pass1/Pass2；driver.cpp 跨模块拷贝）。新函数 `findClassMemberWriteParams(className, member, isSet, out)`（Phase A 模块作用域 Let/Set 符号 → Phase B Class 符号写方向表）。090w 的 C/D2 打包改用它 —— 修复 `memberParams` 读优先（Get > Func > Sub > Let > Set）对「Get 有参 + Let 末参才是 value」属性的遮蔽：`item$pl` 等跨模块 storageKey 冲突时 Phase A 找不到本类符号，旧逻辑回退 Get 的 `[key]` → 不打包 → C2440（Demo.c 766/786 `prop_let_Item(json, key, double)`，766/767/768 现均字段式打包 ✓）。
+- **091c（ParamArray 元素赋值，63→61）**：`OutVars(i) = value` 生成 `vb6_PA_GetLong(OutVars, i) = ...` → 取值函数作左值 C2106 + Variant 值传具体类型 Set 形参 C2440。cgen_stmt 赋值路径新增 `vb6_PA_Get*` 目标识别：改写为 `vb6_PA_SetLong/Double/BSTR(args, <按类型提取的 value>)`（Variant 值 → `vb6_VariantToLong/ToDouble/ToString`）。清 cToolsArray.c 158/167。
+- **091d（常量类型推断/整型折叠，61→58）**：
+  (a) semantic_analyzer `LocalDeclStmt` 的 ConstDecl 分支此前被"简化"为 Variant，现直接复用 `registerConstant`（完整字面量/一元负号推导，define 到局部作用域）；
+  (b) cgen_stmt 局部 ConstDecl 无 `As 类型` 时按字面量推断 C 类型（Integer/Long→int32_t、Single/Double→double、String→BSTR、Boolean→VBABOOL）—— 此前一律 `const vb6_VARIANT SW_SHOWNORMAL = 1;` → C2440 初始化（cToolsSystem.c 11/13）；
+  (c) cgen_decl 模块级 ConstDecl 生成前先 `tryEvalConstInt` 折叠整型表达式 → `#define BIF_USENEWUI (80)`，避免 Variant 语义把字面量操作数包装成 `vb6_VariantToLong(64)` → C2440（cDialog.c 36，报错在使用处 532）。
+- **未采用（已回退）091b**：对象属性赋值路径（cgen_stmt.cpp 578 `/* Property Let */`）值参打包。首版按 `propLetSym->params.back()` 无条件打包 → +36 C2440（`lookupModuleByKind` 全局同名属性命中错类）；改用 `findClassMemberWriteParams(objClass, ...)` 后回归消失，但 ByVal Variant 场景（cWinsock 1949/1965 `UserData Let(ByVal Value As Variant) ← baBuffer`）仍不生效：`inferExprType(baBuffer)` 与 `symTab_.lookup("baBuffer")` 均拿不到数组位（局部数组类型信息缺失）。且枚举类型（`Dictionary.CompareMode As CompareMethod`）在符号表被解析为 Variant 而 cgen 生成 int32_t 形参 → 打包即 C2440（Dictionary.c 9/27）。结论：该路径需要"实参 C 类型"与"符号表类型"一致性的前置条件，待后续。
+- **残留错误族（58 = C2440×32 + C2198×7 + C2039×6 + C2065×5 + 其它 8）**：
+  1) **X → Variant 实参/赋值包装缺失（约 14 处）**：`vb6_ForEach_Init(vb6_VariantToObjectVal(vb6_Split(...)))`（ToolsTlsThunks 754/2913/3182）、`vb6_ComCall` 结果直接传 VariantToObjectVal（cLang 26）、跨模块方法实参（cWinsock 1604 int16_t→Variant）、`EnumLevelNames = _arr_0`（ToolsLogs 44，SafeArray→Variant 目标，疑未注册 knownVariantVars_）、Set 属性对象→Variant 字段（cWinsock 172）、`vb6_PA_UBound(vb6_VariantToSafeArray1D(...))`（cToolsArray 147）、pvSubClass 543/544（cls*→Variant）。
+  2) **Variant → 具体类型提取缺失（约 7 处）**：内置/运行时函数实参（cTlsSocket 200、cAesCBC 25、cToolsList 25、Demo_Database 310/506/678 均为 `Variant → BSTR`；cDialog 393 UDT 嵌套字段）、cHttpClient 399/418、cLang 144、cToolsArray 98/107、Demo 671。
+  3) cToolsArray 130 `Extend(&_arr_1, &(vb6_VARIANT){0}) = vb6_Split(...)`（过程调用作赋值目标，C2106）、cHttpServer 374（void*→double）。
 
 ### 最近修复摘要（090w 修正+090h/090x：无窗体 bisect 基线 68 → **65**；提交 18c58eb / 087e203，2026-09-10）
 
