@@ -4915,7 +4915,13 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
                         }
                     }
                 }
-                if (paramIsArray && !argIsPA091k
+                // Fix 092g: 实参是字面量数组 (Array(...) → 匿名 _arr_N) — C 侧
+                // 本身已是 vb6_SafeArray1D* (由 vb6_ArraySetBSTR 逐个填充),
+                // 不能再按 Variant 数组提取 (提取函数形参是 vb6_VARIANT) → C2440:
+                //   cPLI 56: Cmd = Join(Array(a, b, c), " ")
+                //     → vb6_Join(vb6_VariantToSafeArray1D(_arr_0), ...).
+                bool argIsLiteralArr092g = (argVal.compare(0, 5, "_arr_") == 0);
+                if (paramIsArray && !argIsPA091k && !argIsLiteralArr092g
                     && (paramBase == Vb6Type::Variant || paramBase == Vb6Type::Byte
                     || paramBase == Vb6Type::String || paramBase == Vb6Type::Long)) {
                     // 数组参数: 从 Variant 提取 SafeArray1D*
