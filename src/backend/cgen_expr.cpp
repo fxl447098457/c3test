@@ -4733,6 +4733,18 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
                     std::string cType = "int32_t";
                     if (i < calleeParams.size()) {
                         cType = mapType(calleeParams[i].type);
+                        // Fix 092e: ByRef 数组形参 (如 cToolsUtf8.Decode(ByRef
+                        // Utf() As Byte)) 的 C 形参是 vb6_SafeArray1D** (Fix 078
+                        // rev2), 复合字面量类型必须一致 — mapType(Byte|Array)
+                        // 只给出 "uint8_t*" → (&(uint8_t*){Variant}) C2440
+                        // "无法从 vb6_VARIANT 转换为 uint8_t *"
+                        // (cHttpClient 418: ToolsUtf8.Decode(Inst.ResponseBody)).
+                        bool isArrP092e = (static_cast<uint16_t>(calleeParams[i].type)
+                                           & static_cast<uint16_t>(Vb6Type::Array)) != 0;
+                        if (isArrP092e && !calleeParams[i].isByVal
+                            && !calleeParams[i].isParamArray) {
+                            cType = "vb6_SafeArray1D**";
+                        }
                     }
                     // M22: VARIANT类型需要指定字段初始化 (.vt=VT_xxx, .field=value)
                     if (cType == "vb6_VARIANT") {
@@ -4801,7 +4813,8 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
                                        || cType == "uint8_t" || cType == "int64_t"
                                        || cType == "LONG") {
                                 argVal = "vb6_VariantToLong(" + argVal + ")";
-                            } else if (cType == "vb6_SafeArray1D*") {
+                            } else if (cType == "vb6_SafeArray1D*"
+                                       || cType == "vb6_SafeArray1D**") {
                                 argVal = "vb6_VariantToSafeArray1D(" + argVal + ")";
                             } else if (cType == "void*") {
                                 argVal = "vb6_VariantToObjectVal(" + argVal + ")";
