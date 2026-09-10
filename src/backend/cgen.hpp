@@ -775,6 +775,17 @@ private:
     bool tryRewriteCOMLvalue(const std::string& target, const std::string& value,
                              Expr* valueExpr, bool isSet);
 
+    // Fix 090w/090x: Property Let/Set 值实参打包 — Let 末形参 As Variant 时,
+    // Pattern C/D2 (prop_get_ LHS rewrite) 与 With 块 prop_let_ 调用追加的值实参
+    // (double/int/BSTR 等标量 C 表达式) 需按方向转换:
+    //   - ByVal Variant  → vb6_VariantFromValue(v)
+    //   - ByRef Variant  → 可寻址字段式复合字面量 (&(vb6_VARIANT){.vt=..., .xxx=v})
+    //     (按 valueExpr 推断的 VB 类型选字段; 与 cgen_expr M22 ByRef Variant 分支一致)
+    // 非法形态 (&(vb6_VARIANT){vb6_VariantFromValue(v)}) 会触发 C2440
+    // "vb6_VARIANT→vb6_vartype". lastP.type 非 Variant 时原样返回.
+    std::string packLetValueArg(const ParameterInfo& lastP, Expr* valueExpr,
+                                const std::string& val) const;
+
     // Fix 090ae: 链式 COM 默认属性索引赋值 (P25b 提取为可复用 helper)
     // VB: dic(a)(b) = v / Set dic(a)(b) = v — 多层默认属性/Item 索引写.
     // AST 形态: 多层 IndexOrCallExpr 嵌套, 最内层 callee 为 COM 变量/类 void*

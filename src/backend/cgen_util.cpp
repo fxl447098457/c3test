@@ -1792,28 +1792,59 @@ bool CCodeGen::tryRewriteCOMLvalue(const std::string& target, const std::string&
                 std::string newVerbs = (matchedVerb != "prop_get_") ? matchedVerb
                                       : (isSet ? "prop_set_" : "prop_let_");
                 // Fix 090w: Property Let 末参 As Variant (cJson.Item Dat As Variant
-                // ByRef / cCsv.Value ByVal Dat As Variant) — 值实参 (vb6_Now() double
-                // 666 int / BSTR) 需打包成 vb6_VARIANT, 否则 Pattern C/D2 裸拼 →
-                // C2440 "double/int/BSTR → vb6_VARIANT(/ *)". 仅当改写目标是
-                // prop_let_ (Let 语义) 且末形参解析为 Variant 时打包.
+                // ByRef / cCsv.Value ByVal Dat As Variant / cHttpServerCookieAttr.Expires
+                // Let(v As Variant) — Get 无参) — 值实参 (vb6_Now() double / 666 int /
+                // BSTR) 需打包成 vb6_VARIANT, 否则 Pattern C/D2 裸拼 → C2440
+                // "double/int/BSTR → vb6_VARIANT(/ *)". 仅当改写目标是 prop_let_/
+                // prop_set_ 且 **Let/Set 方向**末形参解析为 Variant 时打包 —
+                // findClassMemberCallParams 按 Get > Function > Sub > Let > Set 优先,
+                // 对 Get 有参/无参而 Let 末参才是 value 的属性 (Item(key),
+                // Expires) 会取错方向, 故直接查 PropertyLet/PropertySet 符号.
                 std::string valArg = value;
-                if (!isSet && newVerbs.find("prop_set_") == std::string::npos
+                if (!isSet && newVerbs.find("prop_get_") == std::string::npos
                     && prefix.rfind("vb6_", 0) == 0 && !afterPg.empty()
                     && afterPg.find('(') == std::string::npos) {
                     std::string cls90w = prefix.substr(4);  // 去 "vb6_" → "cCsv_"
                     if (!cls90w.empty() && cls90w.back() == '_') cls90w.pop_back();
-                    std::vector<ParameterInfo> letParams90w;
-                    bool letBuiltin90w = false;
-                    if (findClassMemberCallParams(cls90w, afterPg, letParams90w, letBuiltin90w)
-                        && !letParams90w.empty()) {
-                        const auto& lastP90w = letParams90w.back();
-                        if (lastP90w.type == Vb6Type::Variant) {
-                            if (lastP90w.isByVal) {
-                                valArg = "vb6_VariantFromValue(" + value + ")";
-                            } else {
-                                valArg = "(&(vb6_VARIANT){vb6_VariantFromValue(" + value + ")})";
+                    const Symbol* letSym90w = nullptr;
+                    if (!cls90w.empty() && symTab_.moduleScope()) {
+                        const std::string clsLow90w = Symbol::toLower(cls90w);
+                        const std::string memLow90w = Symbol::toLower(afterPg);
+                        for (const auto& [key90w, sym90w]
+                             : symTab_.moduleScope()->symbols()) {
+                            if (sym90w->lowerName != memLow90w) continue;
+                            bool m90w = false;
+                            if (sym90w->isExternal) {
+                                if (Symbol::toLower(sym90w->sourceModule) == clsLow90w) {
+                                    m90w = true;
+                                }
+                            } else if (isClassModule_
+                                       && Symbol::toLower(moduleName_) == clsLow90w) {
+                                m90w = true;
+                            }
+                            if (!m90w) continue;
+                            if (sym90w->kind == SymbolKind::PropertyLet) {
+                                letSym90w = sym90w.get();
+                                break;
                             }
                         }
+                    }
+                    const ParameterInfo* lastP90w = nullptr;
+                    if (letSym90w && !letSym90w->params.empty()) {
+                        lastP90w = &letSym90w->params.back();
+                    } else {
+                        // fallback: 无 Let 符号时沿用旧 findClassMemberCallParams
+                        // (Get 优先 — 可能取到 Get 方向参数, 此时保守不打包)
+                        std::vector<ParameterInfo> letParams90w;
+                        bool letBuiltin90w = false;
+                        if (findClassMemberCallParams(cls90w, afterPg, letParams90w,
+                                                      letBuiltin90w)
+                            && !letParams90w.empty()) {
+                            lastP90w = &letParams90w.back();
+                        }
+                    }
+                    if (lastP90w && lastP90w->type == Vb6Type::Variant) {
+                        valArg = packLetValueArg(*lastP90w, valueExpr, value);
                     }
                 }
                 // Fix 090ad: 只写属性 (无 Get, 如 Dictionary.key(OldKey)=NewKey) 的 LHS
@@ -1860,6 +1891,44 @@ bool CCodeGen::tryRewriteCOMLvalue(const std::string& target, const std::string&
     }
 
     return false;
+}
+
+// ============================================================
+// Fix 090w/090x: Property Let/Set 值实参打包 (声明见 cgen.hpp)
+// ============================================================
+std::string CCodeGen::packLetValueArg(const ParameterInfo& lastP, Expr* valueExpr,
+                                      const std::string& val) const {
+    if (lastP.type != Vb6Type::Variant) return val;
+    if (lastP.isByVal) return "vb6_VariantFromValue(" + val + ")";
+    // ByRef Variant 形参需要可寻址的 vb6_VARIANT*.
+    // (&(vb6_VARIANT){vb6_VariantFromValue(x)}) 是非法 C (结构体复合字面量
+    // 不能用另一个结构值初始化 → C2440 "vb6_VARIANT→vb6_vartype"), 必须按实参
+    // VB 类型字段式构造 (与 cgen_expr M22 ByRef Variant 参数分支一致).
+    Vb6Type vtT = valueExpr ? inferExprType(*valueExpr) : Vb6Type::Variant;
+    switch (vtT) {
+        case Vb6Type::String:
+            return "(&(vb6_VARIANT){.vt=VT_BSTR, .bstrVal=" + val + "})";
+        case Vb6Type::Long:
+        case Vb6Type::Integer:
+            return "(&(vb6_VARIANT){.vt=VT_I4, .lVal=(int32_t)(" + val + ")})";
+        case Vb6Type::Byte:
+            return "(&(vb6_VARIANT){.vt=VT_UI1, .bVal=(uint8_t)(" + val + ")})";
+        case Vb6Type::Double:
+        case Vb6Type::Single:
+        case Vb6Type::Date:
+        case Vb6Type::Currency:
+        case Vb6Type::Decimal:
+            return "(&(vb6_VARIANT){.vt=VT_R8, .dblVal=(double)(" + val + ")})";
+        case Vb6Type::Boolean:
+            return "(&(vb6_VARIANT){.vt=VT_BOOL, .boolVal=(int16_t)(" + val + ")})";
+        default:
+            // 与 M22 default 分支对齐: 变体表达式提取 BSTR, 其余未知按 BSTR 兜底
+            if (cExprIsVariant(val)) {
+                return "(&(vb6_VARIANT){.vt=VT_BSTR, .bstrVal=vb6_VariantToString("
+                       + val + ")})";
+            }
+            return "(&(vb6_VARIANT){.vt=VT_BSTR, .bstrVal=" + val + "})";
+    }
 }
 
 // ============================================================
