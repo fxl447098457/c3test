@@ -1,7 +1,26 @@
 # C3 编译器错误修复 — 任务交接文档
 
 > 用途：新会话恢复上下文用。新开会话后直接说「读取 C3_FIX_HANDOFF.md 并继续修复」。
-> 更新日期：2026-09-10（091a/091c/091d + 091e-i：无窗体 125 模块 bisect 基线 65 → **52**；提交 aeaa95f/05793ac/ae72bf2/d8f11aa。窗体 Release 崩溃仍为既有阻塞项，bisect 正则不含窗体）
+> 更新日期：2026-09-10（091a-o：无窗体 125 模块 bisect 基线 65 → **42**；提交 aeaa95f/05793ac/ae72bf2/d8f11aa/e97a90d/02205f5/ad62a09/96d123a。窗体 Release 崩溃仍为既有阻塞项，bisect 正则不含窗体）
+
+### 最近修复摘要（091k-o：无窗体 bisect 基线 52 → **42**；提交 e97a90d/02205f5/ad62a09/96d123a，2026-09-10）
+
+- **091k（52→48）ParamArray/Variant 参数边界三处**：
+  - 通用实参转换中实参是当前过程的 **ParamArray 参数**时不再按 Variant 数组提取（此前 `UBound(OutVars)` → `vb6_PA_UBound(vb6_VariantToSafeArray1D(OutVars))` C2440，cToolsArray DeArray）；
+  - **ByRef Variant 参数索引免取址**：`v(i)` 曾生成 `vb6_VariantArrayGet(&v, i)`，而 ByRef Variant 形参的 C 类型已是 `vb6_VARIANT*` → 改传裸名（cToolsArray prop_let_Extend/DeArray）；
+  - **IsMissing 语义/表项修正**：RTL `int32_t vb6_IsMissing(SAFEARRAY*)` 是 ParamArray 专用（判断是否未传实参），cgen 此前把任意 Variant 实参传给它 → 现：ParamArray 名 → `vb6_IsMissing(pa)`；其它复合表达式（数组/ParamArray 元素）→ 常量 `(0)`（VB6 IsMissing 仅对 Optional Variant 可能为真）。运行时表项 `vb6_VARIANT*` → `SAFEARRAY*`。
+- **091l/091m（48→46）Variant 目标赋值包装 + 模块级 Variant 回灌**：赋值 `Variant ← 具体类型值`（`Array(...)` 物化的 `_arr_N` SafeArray1D* 等）补 `vb6_VariantFromValue`；判定依赖 `knownVariantVars_`，而该集合在每个过程开始时被 `clear()` → 模块级 `Dim x As Variant` 在过程体内不可见 → 新增 `moduleVariantVars_`（模块级声明时登记，过程开始回灌，**必须排除类模块/窗体成员**——否则裸名生成 C2065，曾 +7 回归）。
+- **091n（46→44）属性 Let 值参按写方向末参类型适配**：`obj.Prop = value` 的 prop_let_ 调用此前完全不打包 → 用 091a 的 `findClassMemberWriteParams(类, 成员, isSet, out)` 取末参：Variant 形参 + **数组载体**值 → `packLetValueArg`；BSTR 形参 + Variant 值 → `wrapToBSTR`。**不能用裸 `propLetSym->params`**（`lookupModuleByKind` 全局同名命中他类属性 → 误打包 +36 C2440）；也不要 `Unknown` 类型兜底（同样 +36）；值形态未确认是数组载体时不打包（否则 COM 属性 `Dictionary.CompareMode = 1` 被误打包 → 大回归）。清 cWinsock 1949/1965。
+- **091o（44→42）命名实参 ByVal 适配**：`Name:=expr` 路径此前只做 `applyByRef`（ByRef 处理），漏了 ByVal 形参类型适配 → `oListenSocket.Accept(m_oSocket, UseTls:=bUseTls)`（第 4 参 `Optional ByVal UseTls As Variant`）C2440 int16_t→vb6_VARIANT。类对象实参保持指针直传（同 Fix 084d）。
+- **残留（42 = C2440×17 + C2198×7 + C2039×6 + C2065×5 + 其它 7）**，下一步候选：
+  1) ForEach COM 源 `vb6_VariantToObjectVal(vb6_ComCall(...))` → 应为 `vb6_VariantFromComResult`（cLang 26）；
+  2) `vb6_Join(vb6_VariantToSafeArray1D(_arr_N))` — 091g 物化的 `_arr_N` 临时未登记 knownArrays_（cPLI 56）；
+  3) 类 Variant 字段 `me->f = <void* COM 结果>`（cWinsock 172、Demo 857/859）；
+  4) COM 对象属性 Let 的 BSTR 提取（cToolsList 25，091n 未命中：写方向表对 COM 类的处理需确认）；
+  5) `vb6_cDialog_prop_let_Filter(rs, vb6_VariantFromComResult(...))` 类归属（cDialog 目标 vs rs 实际类）；
+  6) Debug 强转调用参数量（pvSubClass 543/544，C2198 族）。
+
+### 历史：091e-i 摘要（58 → 52，2026-09-10）
 
 ### 最近修复摘要（091e-i：无窗体 bisect 基线 58 → **52**；提交 d8f11aa 等，2026-09-10）
 
