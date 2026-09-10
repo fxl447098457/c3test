@@ -1218,6 +1218,29 @@ void CCodeGen::visit(AssignmentStmt& node) {
             }
             c_.emitLine(target + " = " + convertedValue + ";");
         } else {
+            // Fix 091l: Variant 目标 ← 具体类型值 (SafeArray1D*/数组载体/标量/COM 结果).
+            // C 侧目标是 vb6_VARIANT 结构体, 直接赋 SafeArray1D* 等 → C2440
+            // (ToolsLogs: Dim EnumLevelNames As Variant ← Array(...) 物化 _arr_0).
+            // vb6_VariantFromValue 是 _Generic 宏: 标量→Variant{Long,Int,Double,Bool,
+            // Byte}, BSTR→VariantString, SafeArray1D*→VariantArray, 指针→VariantObject.
+            std::string tgtKey091l = target;
+            if (tgtKey091l.compare(0, 4, "me->") == 0) {
+                tgtKey091l = tgtKey091l.substr(4);
+            } else if (tgtKey091l.size() > 4 && tgtKey091l[0] == '(' && tgtKey091l[1] == '*'
+                       && tgtKey091l.back() == ')') {
+                tgtKey091l = tgtKey091l.substr(2, tgtKey091l.size() - 3);
+            }
+            std::string tgtLower091l = tgtKey091l;
+            std::transform(tgtLower091l.begin(), tgtLower091l.end(),
+                           tgtLower091l.begin(), ::tolower);
+            bool tgtIsVariant091l = knownVariantVars_.count(tgtLower091l)
+                                    || classVariantMembers_.count(tgtLower091l);
+            if (!tgtIsVariant091l && !valueIsVariant) {
+                tgtIsVariant091l = cExprIsVariant(target);
+            }
+            if (tgtIsVariant091l && !valueIsVariant && !value.empty()) {
+                value = "vb6_VariantFromValue(" + value + ")";
+            }
             c_.emitLine(target + " = " + value + ";");
         }
     }

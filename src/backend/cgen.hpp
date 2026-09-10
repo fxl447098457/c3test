@@ -351,6 +351,12 @@ private:
     // P8.4: 已知Variant变量名集合 (小写) - 用于赋值时包装值
     std::unordered_set<std::string> knownVariantVars_;
 
+    // Fix 091m: 模块级 Variant 变量名集合 (小写). knownVariantVars_ 在每个过程
+    // 开始时 clear(), 模块级变量 (如 ToolsLogs: Dim EnumLevelNames As Variant)
+    // 因而在过程体内不可见 → 赋值时漏包装 (091l 的 Variant 目标判定失效).
+    // 模块级声明时登记, 过程开始时回灌.
+    std::unordered_set<std::string> moduleVariantVars_;
+
     // Fix 062: 已知Byte数组变量名集合 (小写) - 用于Variant→SafeArray1D*转换
     std::unordered_set<std::string> knownByteArrayVars_;
 

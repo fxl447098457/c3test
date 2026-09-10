@@ -74,6 +74,8 @@ void CCodeGen::visit(SubDecl& node) {
     knownLocalVars_.clear();
     knownNewVars_.clear();
     knownNewVars_.insert(moduleNewVars_.begin(), moduleNewVars_.end());  // Fix 090v
+    // Fix 091m: 回灌模块级 Variant 变量 (knownVariantVars_ 已被 clear)
+    knownVariantVars_.insert(moduleVariantVars_.begin(), moduleVariantVars_.end());
     knownByRefParams_.clear();  // Fix 081g
     // Fix 010r/010r-10: 类模块中注册me到knownClassVars_ (使Me.Method()正确分发)
     // 改为map赋值: me → 当前模块名(类名)
@@ -307,6 +309,8 @@ void CCodeGen::visit(FunctionDecl& node) {
     knownLocalVars_.clear();
     knownNewVars_.clear();
     knownNewVars_.insert(moduleNewVars_.begin(), moduleNewVars_.end());  // Fix 090v
+    // Fix 091m: 回灌模块级 Variant 变量 (knownVariantVars_ 已被 clear)
+    knownVariantVars_.insert(moduleVariantVars_.begin(), moduleVariantVars_.end());
     knownByRefParams_.clear();  // Fix 081g
     // Fix 010r/010r-10: 类模块中注册me到knownClassVars_ (使Me.Method()正确分发)
     // 改为map赋值: me → 当前模块名(类名)
@@ -1061,6 +1065,11 @@ void CCodeGen::visit(VariableDecl& node) {
         std::string lower = node.name;
         std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
         knownVariantVars_.insert(lower);
+        // Fix 091m: 模块级 (过程外) Variant 变量额外登记, 供过程体内回灌.
+        // 类模块/窗体的成员变量不属此列 (方法体内须写 me->name, 回灌裸名会 C2065).
+        if (currentProc_ == nullptr && !isClassModule_) {
+            moduleVariantVars_.insert(lower);
+        }
     }
 
     // Fix 010: 类模块tracking-only模式, 跳过变量声明生成(已在结构体中)
@@ -1312,6 +1321,8 @@ void CCodeGen::visit(PropertyDecl& node) {
     knownLocalVars_.clear();
     knownNewVars_.clear();
     knownNewVars_.insert(moduleNewVars_.begin(), moduleNewVars_.end());  // Fix 090v
+    // Fix 091m: 回灌模块级 Variant 变量 (knownVariantVars_ 已被 clear)
+    knownVariantVars_.insert(moduleVariantVars_.begin(), moduleVariantVars_.end());
     knownByRefParams_.clear();  // Fix 081g
     // Fix 010r/010r-10: 类模块中注册me到knownClassVars_ (使Me.Method()正确分发)
     // 改为map赋值: me → 当前模块名(类名)
