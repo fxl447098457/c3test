@@ -920,6 +920,13 @@ void SemanticAnalyzer::visit(PropertyDecl& node) {
                 if (wins) {
                     classSym->memberParams[lower] = sym->params;
                 }
+                // Fix 091a: 写方向参数表独立填充 — 同类内 Let/Set 各自唯一, 不受
+                // 读上下文优先级 (Get 有参遮蔽 Let 末参 value) 影响.
+                if (node.propKind == ProcKind::PropertyLet) {
+                    classSym->memberLetParams[lower] = sym->params;
+                } else if (node.propKind == ProcKind::PropertySet) {
+                    classSym->memberSetParams[lower] = sym->params;
+                }
             }
         }
 
@@ -972,6 +979,12 @@ void SemanticAnalyzer::visit(PropertyDecl& node) {
                     }
                     if (wins) {
                         classSym->memberParams[lower] = sym->params;
+                    }
+                    // Fix 091a: 写方向参数表同步 (Pass2 重解析后类型修正)
+                    if (node.propKind == ProcKind::PropertyLet) {
+                        classSym->memberLetParams[lower] = sym->params;
+                    } else if (node.propKind == ProcKind::PropertySet) {
+                        classSym->memberSetParams[lower] = sym->params;
                     }
                 }
             }

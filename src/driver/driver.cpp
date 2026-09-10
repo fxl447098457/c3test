@@ -1317,6 +1317,8 @@ bool Driver::runCrossModuleResolution() {
                 extSym->memberReturnTypes = srcSym->memberReturnTypes;  // Fix 015: 链式调用返回类型表
                 extSym->memberProcKinds = srcSym->memberProcKinds;       // Fix 016: 成员过程类型表
                 extSym->memberParams = srcSym->memberParams;             // Fix 033: 成员参数表 (calleeParams 跨模块精确查找)
+                extSym->memberLetParams = srcSym->memberLetParams;       // Fix 091a: Let 写方向参数表
+                extSym->memberSetParams = srcSym->memberSetParams;       // Fix 091a: Set 写方向参数表
                 extSym->isInterface = srcSym->isInterface;  // P6.4
                 extSym->implementsNames = srcSym->implementsNames;  // P6.4
                 extSym->interfaceMethodNames = srcSym->interfaceMethodNames;  // P6.4

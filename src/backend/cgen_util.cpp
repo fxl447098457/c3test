@@ -1806,34 +1806,17 @@ bool CCodeGen::tryRewriteCOMLvalue(const std::string& target, const std::string&
                     && afterPg.find('(') == std::string::npos) {
                     std::string cls90w = prefix.substr(4);  // 去 "vb6_" → "cCsv_"
                     if (!cls90w.empty() && cls90w.back() == '_') cls90w.pop_back();
-                    const Symbol* letSym90w = nullptr;
-                    if (!cls90w.empty() && symTab_.moduleScope()) {
-                        const std::string clsLow90w = Symbol::toLower(cls90w);
-                        const std::string memLow90w = Symbol::toLower(afterPg);
-                        for (const auto& [key90w, sym90w]
-                             : symTab_.moduleScope()->symbols()) {
-                            if (sym90w->lowerName != memLow90w) continue;
-                            bool m90w = false;
-                            if (sym90w->isExternal) {
-                                if (Symbol::toLower(sym90w->sourceModule) == clsLow90w) {
-                                    m90w = true;
-                                }
-                            } else if (isClassModule_
-                                       && Symbol::toLower(moduleName_) == clsLow90w) {
-                                m90w = true;
-                            }
-                            if (!m90w) continue;
-                            if (sym90w->kind == SymbolKind::PropertyLet) {
-                                letSym90w = sym90w.get();
-                                break;
-                            }
-                        }
-                    }
+                    // Fix 091a: 写方向参数查找 (Phase A 模块作用域 Let 符号;
+                    // Phase B Class 符号 memberLetParams — 覆盖 item$pl 等跨模块
+                    // storageKey 冲突场景, 此时读方向 memberParams 只有 Get 的
+                    // [key] 会取错方向).
                     const ParameterInfo* lastP90w = nullptr;
-                    if (letSym90w && !letSym90w->params.empty()) {
-                        lastP90w = &letSym90w->params.back();
+                    std::vector<ParameterInfo> writeP90w;
+                    if (findClassMemberWriteParams(cls90w, afterPg, isSet, writeP90w)
+                        && !writeP90w.empty()) {
+                        lastP90w = &writeP90w.back();
                     } else {
-                        // fallback: 无 Let 符号时沿用旧 findClassMemberCallParams
+                        // fallback: 写方向也查不到时沿用旧 findClassMemberCallParams
                         // (Get 优先 — 可能取到 Get 方向参数, 此时保守不打包)
                         std::vector<ParameterInfo> letParams90w;
                         bool letBuiltin90w = false;
@@ -2200,6 +2183,59 @@ bool CCodeGen::findClassMemberCallParams(const std::string& className,
         // 同 className 的 Class 符号在消费模块中可能注册了多个外部副本, 但都来自同一
         // producing 模块的 Class 符号 memberParams, 命中任一即可. 未命中时继续遍历
         // 后续同名 Class 符号 (理论上不应出现, 留作防御性).
+    }
+
+    return false;
+}
+
+// ============================================================
+// Fix 091a: 属性写方向 (Property Let/Set) 参数查找 (声明见 cgen.hpp)
+// ============================================================
+bool CCodeGen::findClassMemberWriteParams(const std::string& className,
+                                          const std::string& memberName,
+                                          bool isSet,
+                                          std::vector<ParameterInfo>& outParams) const {
+    outParams.clear();
+    if (className.empty() || memberName.empty() || !symTab_.moduleScope()) return false;
+
+    const std::string memberLower = Symbol::toLower(memberName);
+    const std::string classLower  = Symbol::toLower(className);
+    const SymbolKind wantKind = isSet ? SymbolKind::PropertySet : SymbolKind::PropertyLet;
+
+    // ---- Phase A: 模块作用域中的 PropertyLet/PropertySet 符号 ----
+    for (const auto& [key, sym] : symTab_.moduleScope()->symbols()) {
+        if (sym->kind != wantKind) continue;
+        if (sym->lowerName != memberLower) continue;
+        bool matches = false;
+        if (sym->isExternal) {
+            if (Symbol::toLower(sym->sourceModule) == classLower) matches = true;
+        } else if (isClassModule_ && Symbol::toLower(moduleName_) == classLower) {
+            matches = true;
+        }
+        if (!matches) continue;
+        outParams = sym->params;
+        return true;
+    }
+
+    // ---- Phase B: Class 符号自身 memberLetParams/memberSetParams ----
+    // Note: 跨模块同名属性 ($pl storageKey) 冲突时 Phase A 找不到本类符号, 此时
+    // 用 driver.cpp 从 producing 模块拷贝来的写方向表 (同类内 Let/Set 各自唯一,
+    // 不会被 Get 优先级遮蔽).
+    for (const auto& [ckey, csym] : symTab_.moduleScope()->symbols()) {
+        if (csym->kind != SymbolKind::Class) continue;
+        bool classMatches = false;
+        if (csym->isExternal) {
+            if (Symbol::toLower(csym->sourceModule) == classLower) classMatches = true;
+        } else if (isClassModule_ && Symbol::toLower(moduleName_) == classLower) {
+            classMatches = true;
+        }
+        if (!classMatches) continue;
+        const auto& tbl = isSet ? csym->memberSetParams : csym->memberLetParams;
+        auto it = tbl.find(memberLower);
+        if (it != tbl.end()) {
+            outParams = it->second;
+            return true;
+        }
     }
 
     return false;

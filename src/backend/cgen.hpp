@@ -825,6 +825,20 @@ private:
                                    std::vector<ParameterInfo>& outParams,
                                    bool& outIsBuiltin) const;
 
+    // ---- Fix 091a: 属性写方向 (Property Let/Set) 参数查找 ----
+    // Pattern C/D2 (prop_get_ LHS → prop_let_/prop_set_) 与 With 块属性写需要
+    // **写方向** 参数表来判定末参是否 As Variant (值实参打包). 读方向优先级的
+    // memberParams 对「Get 有参 + Let 末参才是 value」的属性 (cJson.Item(key) /
+    // Let Item(key, Dat As Variant)) 会取到 Get 的 [key] → 不打包 → C2440.
+    // Phase A: 模块作用域中 sourceModule 匹配 className 的 PropertyLet/PropertySet
+    //          符号 (跨模块 storageKey 冲突致其缺失时转 Phase B).
+    // Phase B: Class 符号自身的 memberLetParams/memberSetParams (driver.cpp 已跨
+    //          模块拷贝; 同类内 Let/Set 各自唯一, 不受 Get 优先级遮蔽).
+    bool findClassMemberWriteParams(const std::string& className,
+                                    const std::string& memberName,
+                                    bool isSet,
+                                    std::vector<ParameterInfo>& outParams) const;
+
     // ---- Fix 015: Method chaining 解析辅助 ----
     // 给定一个表达式 AST 节点, 推断其在运行时返回的类名 (如果它返回类实例)
     //  - IdentifierExpr: 查 knownClassVars_, 找到则返回该变量的声明类名

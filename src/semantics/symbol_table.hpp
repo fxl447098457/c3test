@@ -145,6 +145,14 @@ struct Symbol {
     // 胜出时同步更新 memberParams, 确保表中存储的是该类该成员读上下文优先级最高的参数表.
     // 用于 IndexOrCallExpr 中 Optional 参数 _has_ 标志计数匹配, 避免 C2197.
     std::unordered_map<std::string, std::vector<ParameterInfo>> memberParams;
+    // Fix 091a: 成员写方向参数表 — memberParams 按读上下文优先级 (Get > Function >
+    // Sub > Let > Set) 只存胜出者, 对「Get 有参 + Let 末参才是 value」的属性
+    // (cJson.Item(key)/Let Item(key, Dat As Variant)) 会存成 Get 的 [key], 使
+    // Pattern C/D2 属性赋值改写 (prop_get_ → prop_let_) 无法判定 Let 末参是否
+    // Variant → 值实参不打包 → C2440. 故独立记录 Let/Set 胜出者参数表 (同类内
+    // Let/Set 各自唯一, 无条件覆盖写入), 供 findClassMemberWriteParams 使用.
+    std::unordered_map<std::string, std::vector<ParameterInfo>> memberLetParams;
+    std::unordered_map<std::string, std::vector<ParameterInfo>> memberSetParams;
     bool isInterface = false;                          // 是否为接口类(纯抽象,无实现)
     std::vector<std::string> implementsNames;          // Implements列表: 该类实现的接口名
     // 接口方法(仅isInterface=true时有意义): 必须被实现类覆盖的方法签名
