@@ -1,9 +1,22 @@
 # C3 编译器错误修复 — 任务交接文档
 
 > 用途：新会话恢复上下文用。新开会话后直接说「读取 C3_FIX_HANDOFF.md 并继续修复」。
-> 更新日期：2026-09-10（091a-s：无窗体 125 模块 bisect 基线 65 → **36**；提交 aeaa95f/05793ac/ae72bf2/d8f11aa/e97a90d/02205f5/ad62a09/96d123a/7e58595/ac78b3c/36d83a3/1c8daf7/db139c9。窗体 Release 崩溃仍为既有阻塞项，bisect 正则不含窗体）
+> 更新日期：2026-09-10（091a-092e：无窗体 125 模块 bisect 基线 65 → **32**；提交 aeaa95f/05793ac/ae72bf2/d8f11aa/e97a90d/02205f5/ad62a09/96d123a/7e58595/ac78b3c/36d83a3/1c8daf7/db139c9/d5806d8/821e0ea/02e49a3/8a8eac2。窗体 Release 崩溃仍为既有阻塞项，bisect 正则不含窗体）
 
-### 最近修复摘要（091p-s：无窗体 bisect 基线 41 → **36**；提交 ac78b3c/36d83a3/1c8daf7/db139c9，2026-09-10）
+### 最近修复摘要（092a-e：无窗体 bisect 基线 36 → **32**；提交 d5806d8/821e0ea/02e49a3/8a8eac2，2026-09-10）
+
+- **092a（36→35）BSTR 形参提取跳过条件：子串 → 顶层**。`paramBase == String` 分支原用 `argVal.find("vb6_BSTR")` 子串判定"已是 BSTR"→ `StrConv(LoadResData("AES.CBC","JSCRIPT"), 64, 0)` 的实参内部含 `vb6_BSTR_FromStr(` → 整体跳过提取 → C2440（cAesCBC 25）。改为 4 项**顶层前缀**白名单（`vb6_BSTR_` / `VB6_SA_AT(BSTR,` / `vb6_VariantToString(` / `vb6_BSTR_FromStr(`），与 5080 处同源。
+- **092b（35→34）Object/COM 变量的属性写不再命中他类 Property Let**。`Rs As Object` 的 `Rs.Filter = <COM 属性>` 被全局 `lookupModuleByKind("Filter", PropertyLet)` 命中 cDialog.Filter，生成 `vb6_cDialog_prop_let_Filter(Rs, ...)`（C2440 + 丢 COM 语义）。在 cgen_stmt 的类属性写路径加 `objClass.empty()` 时的 Object/COM 变量判定（`knownObjectVars_` / `knownTypedComVars_`）→ 跳过，交回 COM 写路径（收窄 Fix 084g-2 的"isExternal 即生成"）。
+- **092c（34→33）RHS 为 Variant 返回变量**。`Function ShowOpen(...) As Variant` 内 `mData.mstrFileName = ShowOpen` 的 RHS 生成 `vb6_ret_ShowOpen`（裸返回变量名）—— `cExprIsVariant` 只认函数前缀、`knownVariantVars_` 只认 VB 名 → 未识别为 Variant → 不做提取（cDialog 393 C2440）。在赋值通用提取路径加"`value == currentReturnVar_ && currentReturnCType_ == "vb6_VARIANT"`"判定。
+- **092e（33→32）ByRef 数组形参的复合字面量类型**。`Decode(ByRef Utf() As Byte)` 的 C 形参是 `vb6_SafeArray1D**`（Fix 078 rev2），但调用点 `mapType(Byte|Array)` 给出 `uint8_t*` → `(&(uint8_t*){Variant})` C2440（cHttpClient 418）。ByRef 数组形参统一按 `vb6_SafeArray1D**` 生成复合字面量，并在 Variant 提取映射中补 `vb6_SafeArray1D** → vb6_VariantToSafeArray1D`。
+- **重要判读：cLogs/cLayer 的 7 个 C2065/C2198 是无窗体 bisect 假阳性**（`FLogs`/`FLayer` 是 `.frm` 窗体：`vb6_FLogs_Visible`、`vb6_cCsv_ShowTo(&Content, ...)` 漏 me 等），窗体模块本就不在 bisect 编译集，不应作为修复目标。
+- **残留 32 = C2440×8 + C2039×6 + C2198×6 + C2065×5 + 其它 7**，下一步候选：
+  1) **C2039×6（成员不存在）**：cHttpServer 821（`Exists` 左侧 `vb6_ComIface_IDictionary` 未定义结构）、cHttpServerResponse 508（`socket` 不是 `vb6_cls_cClientCallback` 成员）、cAliyunCaptcha 222（`ReturnJson` 不是 `vb6_cls_cHttpClient` 成员）、ToolsTlsThunks 1780×2（`MessBuffer_Data` 不是 `vb6_type_UcsTlsContext` 成员）、ToolsTlsThunks 5468×2（`data`/`lBound` 不是 `tagSAFEARRAY` 成员）；
+  2) **C2198×6（参数太少）**：ToolsTlsThunks 1780 `vb6_SafeArrayDestroy1D(...)`、cToolsHttp 280 `vb6_BSTR_Assign`、cHttpServerResponse 452/508、其余 2 处属窗体假阳性；
+  3) **C2440×8 剩余**：cTlsSocket 4093（Variant→void*）、cHttpServer 374（void*→double）、cHttpClient 399（Variant→SafeArray1D*，**返回变量赋值**，同 092c 思路可加 `currentReturnCType_` 分支）、cLang 144（Variant→void*）、cPLI 56（SafeArray1D*→Variant）、Demo_Database 506（C2197+C2440，`cCollection_prop_get_Item` 参数个数）、pvSubClass 543/544（cls*→Variant）；
+  4) 其它零散：cTlsSocket 440（C2101 常量取址）、cToolsHttp 280（C2110 指针相加 + BSTR 拼接应走 `vb6_BSTR_Concat`）、cToolsArray 130（C2106 左值）、pvSubClass 708（C2171 wchar_t* 相减）、ToolsTlsThunks 4733（C2186 void 赋值）。
+
+### 历史：091p-s 摘要（无窗体 bisect 基线 41 → **36**；提交 ac78b3c/36d83a3/1c8daf7/db139c9，2026-09-10）
 
 - **091p（42→41）类字段 Variant 判定**：`Set m_vUserData = Value`（cWinsock Property Set，字段 `Private m_vUserData As Variant`）被误判为 typed 目标 → 生成 `vb6_VariantToObjectVal(Value)` C2440。根因同 091m：`knownVariantVars_` 每过程 `clear()`，类字段不在其中；但字段访问带明确 `me->` 前缀，故新增 `classVariantFields_`（类模块字段声明时登记，**不回灌裸名集合**），Set 判定中按 `target.rfind("me->",0)==0` 单独查询。
 - **091q（41→40）ForEach COM 集合源**：`For Each x In me.LangInfo.Item("LangList")` 生成 `vb6_ForEach_Init(vb6_VariantToObjectVal(vb6_ComCall(...)))` C2440（void*→vb6_VARIANT）—— `vb6_ComCall/vb6_ComCallObject` 已返回对象指针，`isDefinitelyVariantExpr` 的 fallback 不该再提取。加 `collIsObjPtr091q` 前缀排除（两个分支都加）。
