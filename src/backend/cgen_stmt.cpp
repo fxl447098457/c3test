@@ -729,6 +729,8 @@ void CCodeGen::visit(AssignmentStmt& node) {
             // Fix 011r-1b: VB6 case-insensitive — 类名匹配与函数名输出均用规范类名 (来自符号表)
             if (!info.className.empty()) {
                 std::string letFn, setFn;
+                const Symbol* letPropSym = nullptr;  // Fix 090x: 记录 PropertyLet 符号以取末参方向
+                const Symbol* setPropSym = nullptr;
                 std::string canonicalClassName;  // 与struct定义一致的大小写
                 std::string classNameLower = Symbol::toLower(info.className);
                 if (symTab_.moduleScope()) {
@@ -748,13 +750,24 @@ void CCodeGen::visit(AssignmentStmt& node) {
                         if (!matches) continue;
                         if (sym->kind == SymbolKind::PropertyLet) {
                             letFn = "vb6_" + cIdent(canonicalClassName) + "_prop_let_" + cIdent(wmExpr.memberName);
+                            letPropSym = sym.get();
                         } else if (sym->kind == SymbolKind::PropertySet) {
                             setFn = "vb6_" + cIdent(canonicalClassName) + "_prop_set_" + cIdent(wmExpr.memberName);
+                            setPropSym = sym.get();
                         }
                     }
                 }
                 if (!letFn.empty()) {
                     emitExpr(*node.value);
+                    // Fix 090x: With 块 .Expires = vb6_DateAdd(...) — 属性
+                    // Property Let Expires(v As Variant) ByRef 值参是 vb6_VARIANT*,
+                    // double/BSTR/int 实参裸拼 → C2440 (cHttpServer.c 913). 与
+                    // Fix 090w (Pattern C/D2) 同款值参打包, 复用 packLetValueArg.
+                    if (letPropSym && !letPropSym->params.empty()
+                        && letPropSym->params.back().type == Vb6Type::Variant) {
+                        lastExpr_ = packLetValueArg(letPropSym->params.back(),
+                                                    node.value.get(), lastExpr_);
+                    }
                     c_.emitLine(letFn + "(" + tempVar + ", " + lastExpr_ + ");  /* With class prop_let_ */");
                     return;
                 }
@@ -762,6 +775,34 @@ void CCodeGen::visit(AssignmentStmt& node) {
                     emitExpr(*node.value);
                     c_.emitLine(setFn + "(" + tempVar + ", " + lastExpr_ + ");  /* With class prop_set_ (fallback) */");
                     return;
+                }
+                // Fix 090h: 跨模块 storageKey 冲突 (如 CookieAttr.Value 的 value$pl
+                // 被先注入的其它类同名属性覆盖, 消费模块作用域只留一个外部符号)
+                // 使上面 moduleScope 扫描漏掉 PropertyLet/Set → 误走字段写 →
+                // C2039 (CookieAttr 无 Value 数据字段, With 块 .Value= 生成
+                // _vb6_with_9->Value, cHttpServer.c 908). findClassMemberCallParams
+                // Phase B 从 Class 符号自身的 memberParams/memberProcKinds 确认
+                // 该类确实有该属性成员 → 生成 prop_let_ 调用.
+                if (letFn.empty() && setFn.empty() && !info.className.empty()) {
+                    std::vector<ParameterInfo> clsParams090h;
+                    bool clsBuiltin090h = false;
+                    std::string canonCls090h = info.className;
+                    if (symTab_.moduleScope()) {
+                        auto clsIt090h = symTab_.moduleScope()->symbols().find(
+                            Symbol::toLower(info.className));
+                        if (clsIt090h != symTab_.moduleScope()->symbols().end()
+                            && clsIt090h->second->kind == SymbolKind::Class) {
+                            canonCls090h = clsIt090h->second->name;
+                        }
+                    }
+                    if (findClassMemberCallParams(canonCls090h, wmExpr.memberName,
+                                                  clsParams090h, clsBuiltin090h)) {
+                        emitExpr(*node.value);
+                        c_.emitLine("vb6_" + cIdent(canonCls090h) + "_prop_let_"
+                                    + cIdent(wmExpr.memberName) + "(" + tempVar + ", "
+                                    + lastExpr_ + ");  /* With class prop_let_ (Fix 090h) */");
+                        return;
+                    }
                 }
                 // 既无Let也无Set → 视为数据字段写: tempVar->member = value
                 emitExpr(*node.value);
