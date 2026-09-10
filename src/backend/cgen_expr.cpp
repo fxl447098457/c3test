@@ -4827,10 +4827,31 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
             // 会触发 C2440 (如 cHttpServer.c LoadFromDatabase(..., me->Database)).
             bool argIsClassObj = false;
             if (i < node.positional.size()) {
-                argIsClassObj = !inferClassTypeOfExpr(*node.positional[i]).empty();
+                std::string acName091s = inferClassTypeOfExpr(*node.positional[i]);
+                if (!acName091s.empty()) {
+                    // Fix 091s: 只有"项目类"(SymbolKind::Class) 实参才跳过打包
+                    // (084d 的类指针直传语义). Object/COM 类实参 (void*) 传给
+                    // ByVal Variant 形参时仍需 vb6_VariantFromValue 包装 —
+                    // Demo 857/859: Debug.Print ToolsJsonVba.ConvertToJson(Json)
+                    // (Json As Object; ConvertToJson 第 1 参 ByVal JsonValue As
+                    // Variant) 原样传 void* → C2440 (void* → vb6_VARIANT).
+                    auto* acSym091s = symTab_.lookup(acName091s);
+                    argIsClassObj = (acSym091s && acSym091s->kind == SymbolKind::Class);
+                }
             }
             if (!argIsClassObj) {
                 argVal = "vb6_VariantFromValue(" + argVal + ")";
+            } else if (i < node.positional.size()
+                       && node.positional[i]->kind == ASTNodeKind::IdentifierExpr) {
+                // Fix 091s2: 实参是 Object/COM 变量 (void*) 而形参是 ByVal Variant
+                // → 仍需打包 (inferClassTypeOfExpr 对 Object 变量可能返回内建
+                // "Object" 类名而误判为项目类实参). Demo 857/859:
+                // ToolsJsonVba.ConvertToJson(Json) (Json As Object).
+                std::string on091s2 = Symbol::toLower(
+                    static_cast<IdentifierExpr&>(*node.positional[i]).name);
+                if (knownObjectVars_.count(on091s2) || knownTypedComVars_.count(on091s2)) {
+                    argVal = "vb6_VariantFromValue(" + argVal + ")";
+                }
             }
         }
         // Fix 029: 反向强制 — ByVal 具体类型参数 + 实参确定为 Variant: 自动调用提取函数.
