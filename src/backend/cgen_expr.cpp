@@ -969,6 +969,18 @@ std::string CCodeGen::wrapToBSTR(const std::string& expr, Expr& node) {
             expr.find("vb6_VarType") != std::string::npos) {
             return "vb6_CStrLong(" + expr + ")";
         }
+        // Fix 091i: 项目内返回 Variant 的函数 (driver 预扫描 variantReturnFuncs_,
+        // 含 vb6_<cls>_prop_get_<name>) 不能按"其他 vb6_ 函数假定为 BSTR"直通 —
+        // 需 vb6_VariantToString 提取. 此前字符串拼接 / BSTR 形参处生成
+        // vb6_BSTR_Concat(L"...", vb6_cDataBase_LastInsertId(...)) C2440
+        // (Demo_Database.c 310/506/678).
+        if (variantReturnFuncs_) {
+            size_t p091i = expr.find('(');
+            if (p091i != std::string::npos
+                && variantReturnFuncs_->count(expr.substr(0, p091i))) {
+                return "vb6_VariantToString(" + expr + ")";
+            }
+        }
         return expr;  // 其他vb6_函数假定为BSTR
     }
     // string literal L"..."
@@ -5006,11 +5018,13 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
                                 // 已由 vb6_VariantToString 转换的结果必为 BSTR,
                                 // 顶层识别避免二次包装 → C2440 (BSTR→vb6_VARIANT).
                                 "vb6_VariantToString(",
-                                // COM 链结果 vb6_VariantFromComResult(...) 已在
-                                // 链生成/MsgBox 专用逻辑转换为 BSTR, 顶层识别跳过
-                                // 二次包装 (与旧 049b 子串检查行为等价 — 链内必含
-                                // vb6_ComPackBSTR(vb6_BSTR_FromStr...) 被旧检查命中).
-                                "vb6_VariantFromComResult("};
+                                // Fix 091h: 移除 "vb6_VariantFromComResult(" —
+                                // 该函数返回 vb6_VARIANT (vb6rtl.h:918), 不是 BSTR.
+                                // 旧前缀把 COM 属性结果误判为"已 BSTR" → 跳过提取 →
+                                // C2440 "vb6_VARIANT → BSTR" (cTlsSocket 200 LenB,
+                                // cToolsList 25 prop_let_Filter, cAesCBC 25 StrConv,
+                                // Demo_Database 310/506/678 BSTR_Concat).
+                                "vb6_BSTR_FromStr("};
                             for (auto* bp : bstrTopPrefixes) {
                                 size_t bpl = strlen(bp);
                                 if (t.compare(0, bpl, bp) == 0) return true;
