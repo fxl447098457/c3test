@@ -3114,7 +3114,17 @@ void CCodeGen::visit(WithStmt& node) {
                     c_.emitLine(tempType + " " + tempVar + " = (" + tempType + ")" + lastExpr_ + "  /* With object ref */;");
                 }
             } else {
-                c_.emitLine(tempType + " " + tempVar + " = (" + tempType + ")" + lastExpr_ + "  /* With object ref */;");
+                // Fix 092j: inferClassTypeOfExpr 非空 (按 VB 声明推断出项目类) 但
+                // C 级表达式实际是 Variant 值 (COM 链结果) → 不能 (void*) 硬转:
+                //   cLang 144: With me->LangInfo.Item("LangList").Item(Idx+1)
+                //     → (void*)vb6_VariantFromComResult(vb6_ComCall(...)) C2440
+                //       "无法从 vb6_VARIANT 转换为 void *";
+                // 仅当 C 级确认是 vb6_VARIANT 时改用 VariantToObjectVal 提取.
+                if (cExprIsVariant(lastExpr_)) {
+                    c_.emitLine(tempType + " " + tempVar + " = vb6_VariantToObjectVal(" + lastExpr_ + ")  /* With object ref */;");
+                } else {
+                    c_.emitLine(tempType + " " + tempVar + " = (" + tempType + ")" + lastExpr_ + "  /* With object ref */;");
+                }
             }
         } else {
             c_.emitLine(tempType + " " + tempVar + " = (" + tempType + ")" + lastExpr_ + "  /* With object ref */;");
