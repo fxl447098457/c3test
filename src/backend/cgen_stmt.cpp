@@ -1882,7 +1882,7 @@ void CCodeGen::visit(SetStmt& node) {
                     std::string cbField = ".on" + cIdent(evtName) + " = ";
                     if (handlerSym) {
                         // 生成包装函数名: vb6_evt_<EventName>_wrap_<varName>
-                        std::string wrapperName = "vb6_evt_wrap_" + targetLower + "_" + cIdent(evtName);
+                        std::string wrapperName = evtWrapperName(targetLower, evtName);
                         cbField += wrapperName;
                     } else {
                         cbField += "NULL";
@@ -1928,7 +1928,7 @@ void CCodeGen::visit(SetStmt& node) {
                             auto itDispId = srcClsSym->comEventDispids.find(evtLower);
                             int dispid = (itDispId != srcClsSym->comEventDispids.end()) ? itDispId->second : 0;
                             dispids.push_back(std::to_string(dispid));
-                            callbacks.push_back("vb6_com_evt_" + targetLower + "_" + cIdent(evtName));
+                            callbacks.push_back(comEvtWrapperName(targetLower, evtName));
                         }
                     }
                     if (!dispids.empty()) {

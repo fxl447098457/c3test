@@ -609,7 +609,7 @@ bool CCodeGen::generate(Module& module, const std::string& baseName,
                     std::string handlerName = varName + "_" + evtName;
                     auto* handlerSym = symTab_.lookup(handlerName);
                     if (!handlerSym) continue;
-                    std::string wrapperName = "vb6_evt_wrap_" + varLower + "_" + cIdent(evtName);
+                    std::string wrapperName = evtWrapperName(varLower, evtName);
                     // 查找Event声明的参数
                     std::vector<ParameterInfo> evtParams;
                     std::vector<std::string> evtParamCTypes;
@@ -651,7 +651,7 @@ bool CCodeGen::generate(Module& module, const std::string& baseName,
                     std::string handlerName = varName + "_" + evtName;
                     auto* handlerSym = symTab_.lookup(handlerName);
                     if (!handlerSym) continue;
-                    std::string wrapperName = "vb6_com_evt_" + varLower + "_" + cIdent(evtName);
+                    std::string wrapperName = comEvtWrapperName(varLower, evtName);
                     std::string sig = "void " + wrapperName + "(void* handler, VARIANT* args, int argc, VARIANT* result)";
                     evtWrapperSigs.push_back(sig);
                 }
@@ -713,7 +713,7 @@ bool CCodeGen::generate(Module& module, const std::string& baseName,
                 if (!handlerSym) continue;
 
                 // 生成包装函数: void vb6_evt_wrap_<var>_<evt>(void* handler, params...)
-                std::string wrapperName = "vb6_evt_wrap_" + varLower + "_" + cIdent(evtName);
+                std::string wrapperName = evtWrapperName(varLower, evtName);
                 std::string sinkName = "vb6_events_" + cIdent(srcClassName);
 
                 // 查找Event声明的参数
@@ -808,7 +808,7 @@ bool CCodeGen::generate(Module& module, const std::string& baseName,
                 if (!handlerSym) continue;
 
                 // Generate: void vb6_com_evt_<var>_<evt>(void* handler, VARIANT* args, int argc, VARIANT* result)
-                std::string wrapperName = "vb6_com_evt_" + varLower + "_" + cIdent(evtName);
+                std::string wrapperName = comEvtWrapperName(varLower, evtName);
 
                 // Get event handler parameters from Sub declaration
                 // 每个参数记录: Vb6Type / ByRef标志 / mapTypeRef 值类型 (对象→vb6_ComIface_X*)

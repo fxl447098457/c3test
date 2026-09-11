@@ -106,6 +106,35 @@ public:
     void setModulePublicConsts(const std::unordered_map<std::string,
         std::unordered_map<std::string, long long>>* consts) { modulePublicConsts_ = consts; }
 
+    // Fix 093b: 跨模块同名模块级变量集合 (小写名), 由 driver 预扫描提供.
+    // 两个不同模块各自声明同名模块级变量时 (如 Tools.bas 与 mDelay.bas 都有
+    // Public Delay As New cDelay; FToastDrawer/FToastCenter 都有 Dim m_Theme /
+    // PosVal / m_ParentToast ...), C 语言下会生成同名全局符号 → LNK2005.
+    // 命中的名字改为 static 内部链接: VB6 语义下模块内引用绑定本模块副本,
+    // 跨模块引用必须写 "模块名.变量名" (不会与裸名撞), 故 static 不改变行为.
+    void setStaticModuleVarNames(const std::unordered_set<std::string>* names) {
+        staticModuleVarNames_ = names;
+    }
+    // 名字(大小写不敏感)是否命中"跨模块同名模块级变量"
+    bool isStaticForcedVarName(const std::string& vb6Name) const {
+        if (!staticModuleVarNames_) return false;
+        std::string lower;
+        lower.reserve(vb6Name.size());
+        for (char ch : vb6Name) {
+            lower += (ch >= 'A' && ch <= 'Z') ? (char)(ch - 'A' + 'a') : ch;
+        }
+        return staticModuleVarNames_->count(lower) != 0;
+    }
+    // 模块级变量: Public 且撞名 → 强制 static (内部链接)
+    bool isPublicModuleDecl(const VariableDecl& n) const {
+        if (n.access != AccessLevel::Public) return false;
+        return !isStaticForcedVarName(n.name);
+    }
+    // 模块级常量: 生成 #define 宏, 不产生符号, 不受撞名影响
+    bool isPublicModuleDecl(const ConstDecl& n) const {
+        return n.access == AccessLevel::Public;
+    }
+
     // P6.6: 单独生成ActiveX DLL入口文件 (dll_entry.c)
     // 当DLL工程只有类模块(无标准模块)时, 由Driver调用此方法生成DLL导出代码
     // progId: DLL的ProgID前缀
@@ -759,6 +788,21 @@ private:
     // Fix 086: 各模块 Public 常量表 (driver预扫描填充, 本体归driver所有)
     const std::unordered_map<std::string,
         std::unordered_map<std::string, long long>>* modulePublicConsts_ = nullptr;
+
+    // Fix 093b: 跨模块同名模块级变量集合(小写), 本体归 driver 所有
+    const std::unordered_set<std::string>* staticModuleVarNames_ = nullptr;
+
+    // Fix 093b: WithEvents 事件包装函数名 (带模块前缀).
+    // 不同模块里的同名 WithEvents 变量 (如各处的 m_ListenSocket / m_socket) 会生成
+    // 同名包装函数 → LNK2005; 包装函数只在本模块内使用 (sink 是 Set 处的函数内
+    // static 局部变量), 带模块前缀即可彻底消除撞名, 且不改变链接属性.
+    std::string evtWrapperName(const std::string& varLower, const std::string& evtName) const {
+        return "vb6_evt_wrap_" + cIdent(moduleName_) + "_" + varLower + "_" + cIdent(evtName);
+    }
+    // Fix 093b: COM 源接口事件包装函数名 (带模块前缀, 同上)
+    std::string comEvtWrapperName(const std::string& varLower, const std::string& evtName) const {
+        return "vb6_com_evt_" + cIdent(moduleName_) + "_" + varLower + "_" + cIdent(evtName);
+    }
 
     // ---- COM辅助 (P6.2) ----
     // 推断COM参数的封装函数: 根据表达式类型选择vb6_ComPackBSTR/Int/Double/Object

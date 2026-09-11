@@ -810,7 +810,7 @@ void CCodeGen::visit(ConstDecl& node) {
         int64_t cv091d = 0;
         if (tryEvalConstInt(node.value.get(), cv091d)) {
             std::string folded = "(" + std::to_string(cv091d) + ")";
-            if (node.access == AccessLevel::Public) {
+            if (isPublicModuleDecl(node)) {
                 h_.emitLine("#define " + cName + " " + folded);
             } else {
                 c_.emitLine("#define " + cName + " " + folded);
@@ -818,7 +818,7 @@ void CCodeGen::visit(ConstDecl& node) {
         } else {
             emitExpr(*node.value);
             // 公共常量 → .h, 私有 → .c
-            if (node.access == AccessLevel::Public) {
+            if (isPublicModuleDecl(node)) {
                 h_.emitLine("#define " + cName + " (" + lastExpr_ + ")");
             } else {
                 c_.emitLine("#define " + cName + " (" + lastExpr_ + ")");
@@ -839,7 +839,7 @@ void CCodeGen::visit(VariableDecl& node) {
 
         // 前向声明 -> .h
         if (!trackOnly_) {
-        if (node.access == AccessLevel::Public) {
+        if (isPublicModuleDecl(node)) {
             h_.emitLine("extern " + cType + " " + cName + ";");
         }
 
@@ -853,7 +853,7 @@ void CCodeGen::visit(VariableDecl& node) {
             std::string initCode = "vb6_SafeArrayCreate1D(" + saElemType + ", " + lBound + ", " + uBound + ")";
             // Fix 054: C语言文件作用域变量必须用常量表达式初始化 (C2099)
             // 改为先声明为NULL, 再在模块初始化函数中赋值
-            if (node.access == AccessLevel::Public) {
+            if (isPublicModuleDecl(node)) {
                 c_.emitLine(cType + " " + cName + " = NULL;");
                 moduleInitStmts_.push_back(cName + " = " + initCode + ";");
             } else {
@@ -879,7 +879,7 @@ void CCodeGen::visit(VariableDecl& node) {
             c_.emitLine("};");
             std::string initCode = "vb6_SafeArrayCreateND(" + saElemType + ", " + std::to_string(dimCount) + ", " + boundsVar + ")";
             // Fix 054: C语言文件作用域变量必须用常量表达式初始化 (C2099)
-            if (node.access == AccessLevel::Public) {
+            if (isPublicModuleDecl(node)) {
                 c_.emitLine(cType + " " + cName + " = NULL;");
                 moduleInitStmts_.push_back(cName + " = " + initCode + ";");
             } else {
@@ -912,7 +912,7 @@ void CCodeGen::visit(VariableDecl& node) {
         std::string cType = "vb6_SafeArray1D*";
 
         if (!trackOnly_) {
-        if (node.access == AccessLevel::Public) {
+        if (isPublicModuleDecl(node)) {
             h_.emitLine("extern " + cType + " " + cName + ";");
             c_.emitLine(cType + " " + cName + " = NULL;");
         } else {
@@ -1090,7 +1090,7 @@ void CCodeGen::visit(VariableDecl& node) {
     }
 
     // 前向声明 → .h, 定义 → .c
-    if (node.access == AccessLevel::Public) {
+    if (isPublicModuleDecl(node)) {
         h_.emitLine("extern " + cType + " " + cName + ";");
     }
 
@@ -1109,7 +1109,7 @@ void CCodeGen::visit(VariableDecl& node) {
 
     if (node.initializer) {
         emitExpr(*node.initializer);
-        if (node.access == AccessLevel::Public) {
+        if (isPublicModuleDecl(node)) {
             c_.emitLine(cType + " " + cName + " = " + lastExpr_ + ";");
         } else {
             c_.emitLine("static " + cType + " " + cName + " = " + lastExpr_ + ";");
@@ -1143,7 +1143,7 @@ void CCodeGen::visit(VariableDecl& node) {
         // Fix 084aa: 文件作用域Variant初始化不能用函数调用(vb6_VariantEmpty), 用{0}替代
         // ({0} 即 vt=0=VT_EMPTY, 与 vb6_VariantEmpty() 语义一致)
         if (initVal == "vb6_VariantEmpty()") initVal = "{0}";
-        if (node.access == AccessLevel::Public) {
+        if (isPublicModuleDecl(node)) {
             c_.emitLine(cType + " " + cName + " = " + initVal + ";");
         } else {
             c_.emitLine("static " + cType + " " + cName + " = " + initVal + ";");
