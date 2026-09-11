@@ -1,9 +1,9 @@
 # C3 编译器错误修复 — 任务交接文档
 
 > 用途：新会话恢复上下文用。新开会话后直接说「读取 C3_FIX_HANDOFF.md 并继续修复」。
-> 更新日期：2026-09-11（091a-092y：无窗体 125 模块 bisect 基线 65 → **7**；提交 aeaa95f/05793ac/ae72bf2/d8f11aa/e97a90d/02205f5/ad62a09/96d123a/7e58595/ac78b3c/36d83a3/1c8daf7/db139c9/d5806d8/821e0ea/02e49a3/8a8eac2/866e814/288c4ea/a29240f/504e86b/aa98df1/5c5bf65/53da196/7757dee/d6a4dcf/8217f5f/ff133f4/f799e55/b6ff125/7559ad2/50de9b7/bad7b27/ac69fc0/e0df780/ec7fa10。**剩余 7 全部为窗体假阳性**（cLogs/cLayer 引用的 `.frm` 不在 bisect 编译集）→ **真实代码缺陷 0、配置缺口 0，无窗体 bisect 面已完全收敛**；再降错误数只能靠让窗体参与编译，即先解窗体 Release 崩溃阻塞项）
+> 更新日期：2026-09-11（091a-092z：无窗体 125 模块 bisect 基线 65 → **7**、含窗体全量 129 条目 → **0**；提交 aeaa95f/05793ac/ae72bf2/d8f11aa/e97a90d/02205f5/ad62a09/96d123a/7e58595/ac78b3c/36d83a3/1c8daf7/db139c9/d5806d8/821e0ea/02e49a3/8a8eac2/866e814/288c4ea/a29240f/504e86b/aa98df1/5c5bf65/53da196/7757dee/d6a4dcf/8217f5f/ff133f4/f799e55/b6ff125/7559ad2/50de9b7/bad7b27/ac69fc0/e0df780/ec7fa10/4a03e23/97eb89c。**剩余 7 全部为窗体假阳性**（cLogs/cLayer 引用的 `.frm` 不在 bisect 编译集）→ 无窗体面已收敛。**092z 起新增「含窗体」窗口**：`-Forms` 开关 + 排除陈旧对象后，**含窗体全量（129 条目，含全部 4 个 `.frm`）error C = 0** —— 编译期全绿。**窗体 Release 崩溃「阻塞项」已解除**：根因并非未初始化/UB，而是 `.build` 的**陈旧对象**（`cmake --build .build --clean-first` 全量重建后该崩溃即消失）→ 不必再上 cdb 抓栈；下一步转入**链接期**（LNK2005 重定义 + `msvbvm60.lib` 缺失））
 
-### 最近修复摘要（092r-y：无窗体 bisect 基线 16 → **7**；提交 f799e55/b6ff125/7559ad2/50de9b7/bad7b27/ac69fc0/e0df780/ec7fa10，2026-09-11）
+### 最近修复摘要（092r-z：无窗体 bisect 基线 16 → **7**、含窗体全量 → **0**；提交 f799e55/b6ff125/7559ad2/50de9b7/bad7b27/ac69fc0/e0df780/ec7fa10/4a03e23/97eb89c，2026-09-11）
 
 - **092r（16→15）Debug.Assert 条件的顶层 `=` 不再被当赋值**。`Debug.Assert (a And &HFF&) = (&H201 And &HFF&)`：语句级 `parseExpression(9)` 已吃掉 `Debug.Assert (<cond>)`，随后的 `=` 被当赋值 → `vb6_DebugAssert(<cond>) = <rhs>` C2186（ToolsTlsThunks 4733）。修法：在赋值检测前识别 `IndexOrCallExpr(callee = Debug.Assert, 1 个实参)` + 当前 token 是 `=`，把 `=` 右侧并回断言条件（`BinaryExpr(Eq)` 作为唯一实参）。
 - **092s（15→14）UDT 数组成员元素类型 + VarPtr 左值宏白名单**。① `mapSaElemCType(UserDefinedType)` 退化 `vb6_VARIANT` → `uOutput.Buffer(i)`（`Buffer() As CERT_RDN_ATTR`）元素大小/取址全错（cTlsSocket 4086/4093，其中 4086 是**静默语义错**）；改用 `vb6_type_<UDT>`（`mi.typeRefName`），覆盖 MemberAccess 链与 With 两条生成点。② `VarPtr(uOutput.Buffer(0))` 生成 `(intptr_t)&(void*){VB6_SA_AT(...)}` C2440 — `VB6_SA_AT`/`VB6_SA_ND_ATn` 展开是**左值**，加入白名单走 `&(...)`（`vb6_VariantArrayGet` 按值返回，不入白名单）。
@@ -13,6 +13,8 @@
 - **092w（11→9）链式默认属性访问 `X(a)(b)` 走后期绑定**。Demo_Database 506 `TestDB.Rows(1)("score")`：外层 `("score")` 的实参被并入内层 `prop_get_Item` 调用（3 实参 vs 签名 2）→ C2197 + C2440。修法（cgen_expr.cpp `IndexOrCallExpr` 拆链 Fix 086 分支）：① 内层 `_prop_get_` 调用已自带实参（`classMethodObjArg` 顶层段数 ≥ 2，即 this + ≥1 实参）时判定内层自足，外层索引改走返回对象的默认成员 `Item` 后期绑定；② 内层函数在 `variantReturnFuncs_` 中（返回 `vb6_VARIANT`，如 `cCollection.prop_get_Item`）时先经 `vb6_VariantToObjectVal` 提取对象指针再传 `vb6_ComCall`（否则 Variant 直传 void* C2440）；③ `wrapToBSTR` 增 `vb6_VariantFromComResult(` 前缀识别（须在 `vb6_BSTR` 子串检查之前，实参可能含 `vb6_BSTR_FromStr`）。
 - **092x（9→8）COM 接口字段链式成员访问走后期绑定**。cHttpServer 821 `Request.Header.Exists("Cookie")`：`Header As Dictionary` 是 COM 接口字段，生成 `Request->Header->Exists(...)` 结构体成员访问 → C2037（`vb6_ComIface_IDictionary` 无结构定义）。根因：内层 MAE 值上下文字段访问仅查 `classVoidFieldMap_` 决定是否加 `voidptr` 标记，而 driver 预扫描把 COM 接口字段记入 `classTypedFieldMap_`（值前缀 `COM:<Interface>`）且**不入** `classVoidFieldMap_` → 无标记 → 外层 MAE Fix 088b `inferClassTypeOfExpr` 遇 `COM:` 前缀返回空串 → 落入 `obj->member`。修法：内层 MAE 追加 `voidptr` 标记时同时查 `classTypedFieldMap_` 的 `COM:` 前缀条目 → 外层 Fix 023 识别 → 生成 `vb6_ComCall(Request->Header, L"Exists", ...)`，与 `cSSE.c` `RootItem.Exists` 既有形态一致（注：`vb6_ComCall(...) == (-1)` 比较指针属**既有**架构形态，非本修复引入）。
 - **092y（8→7）模块限定调用前缀兜底取工程模块规范名**。cHttpServerResponse 440 `Common.Version()` 生成 `vb6_cVBMAN_Version(&(void*){0}, 0)`（缺 `me`）→ C2198。**根因（修正 092v 的判读）**：`Common` **不是**外部 ActiveX 引用，它就是 `VBMAN.vbp` 第 65 行的标准模块（`Module=Common; Common\Common4DLL.bas`，`Public Function Version(Optional HostApp As Object)`）。真实根因是 `storageKey(Function) == lowerName` → `Common.Version`/`Common.Path` 与 `cVBMAN.Version`/`cVBMAN.Path` **四个成员两两同键**，`defineExternal` 先到先得 → Common 的成员**全部**被丢弃 → 消费模块作用域内不存在任何 `sourceModule=="Common"` 的 external 符号 → 092v 的 external 扫描落空 → `sourceMod` 退回 `memSym->sourceModule`("cVBMAN")。修法（cgen_expr.cpp 模块限定调用前缀判定）：092v 扫描失败时**兜底查 `externalModules_`**（工程内除本模块外的全部模块名、规范大小写）→ 命中且 `symTab_.lookup(extMod)` 非 `SymbolKind::Class` 时采用其规范名（与既有 3 处 `toLower(extMod)` 比对惯例一致）。仅对非类模块生效，不改 `类名.成员` / `窗体名.成员` 语义。结果 `vb6_Common_Version(&(void*){0}, 0)` 与签名 `BSTR(void**, int)` 匹配。
+- **092z（含窗体全量 1→0）内置全局对象成员不再走同名项目成员形参兜底**。`FLogs.frm` 175 `Clipboard.SetText Text1.Text` 生成 `vb6_Clipboard_SetText(vb6_VariantFromValue(vb6_GetControlText(vb6_hwnd_Text1)))` → C2440（`vb6_VARIANT`→`BSTR`）。**根因**：`cQRcode.cls:34` 定义 `Public Function SetText(ByVal Content As Variant)`，IndexOrCallExpr 的 **class-unaware 兜底** `lookupModule("SetText")` 命中该 external 符号 → `calleeParams` 被填成 `[ByVal Variant]` → Fix 086 / Fix 024P2 把实参包装成 Variant；但 callee 早已由 `Clipboard` 硬编码分支解析为 RTL 函数 `vb6_Clipboard_SetText(BSTR)`，**根本不存在 VB 侧形参表**。修法：对象为 VB6 保留全局对象（`clipboard/screen/printer/forms/debug/err/app`）时跳过该兜底，`calleeParams` 保持为空。**教训：与 092y 同族 —— 「名字撞车」是本地最高频根因**（092y = `storageKey(Function)==lowerName` 使 `Common.Version` 与 `cVBMAN.Version` 撞键；092z = 跨类同名 `SetText` 撞车）。
+- **窗体 Release 崩溃「阻塞项」解除（重大纠正）**：此前 092v 记录的「release 独崩 0xC0000005、最小批次 38 = FLayer.frm、疑似未初始化/UB、建议上 cdb」**结论有误**。实测：`.build` 增量构建的二进制崩，而 ① `cmake --build .build --clean-first` 全量重建后**含窗体全量直接跑到 0 错**；② RelWithDebInfo（`/Ob1`）与 Release+PDB（`/O2 /Ob2 /Zi`）都不崩 —— 即崩因是**陈旧对象**（本文件「注意事项」第 344/385 行早有同类记录：增量构建产生陈旧对象 → 运行期 0xC0000409，clean-first 解决）。**因此不必再上 cdb**，含窗体回归可直接作为常规验证面。另：`--dump-frm` 单测 `FLayer.frm` 正常（exit 0）→ 窗体**解析**阶段无问题，崩点在其后。
 
 ### 历史：092m-q（无窗体 bisect 基线 23 → **16**；提交 53da196/7757dee/d6a4dcf/8217f5f/ff133f4，2026-09-10）
 
@@ -39,11 +41,11 @@
 - **092c（34→33）RHS 为 Variant 返回变量**。`Function ShowOpen(...) As Variant` 内 `mData.mstrFileName = ShowOpen` 的 RHS 生成 `vb6_ret_ShowOpen`（裸返回变量名）—— `cExprIsVariant` 只认函数前缀、`knownVariantVars_` 只认 VB 名 → 未识别为 Variant → 不做提取（cDialog 393 C2440）。在赋值通用提取路径加"`value == currentReturnVar_ && currentReturnCType_ == "vb6_VARIANT"`"判定。
 - **092e（33→32）ByRef 数组形参的复合字面量类型**。`Decode(ByRef Utf() As Byte)` 的 C 形参是 `vb6_SafeArray1D**`（Fix 078 rev2），但调用点 `mapType(Byte|Array)` 给出 `uint8_t*` → `(&(uint8_t*){Variant})` C2440（cHttpClient 418）。ByRef 数组形参统一按 `vb6_SafeArray1D**` 生成复合字面量，并在 Variant 提取映射中补 `vb6_SafeArray1D** → vb6_VariantToSafeArray1D`。
 - **重要判读：cLogs/cLayer 的 7 个 C2065/C2198 是无窗体 bisect 假阳性**（`FLogs`/`FLayer` 是 `.frm` 窗体：`vb6_FLogs_Visible`、`vb6_cCsv_ShowTo(&Content, ...)` 漏 me 等），窗体模块本就不在 bisect 编译集，不应作为修复目标。
-- **残留 7 = C2065×5 + C2198×2**（092y 后 **已无任何真实代码缺陷，也无配置缺口**）—— **7 个全部是 cLogs/cLayer 的窗体假阳性**：cLogs×5（`vb6_FLogs_Visible` 未声明 ×3、`FLogs` 未声明 ×1、`vb6_cTimeUse_Show` 参数少 ×1）、cLayer×2（`FLayer` 未声明、`vb6_cCsv_ShowTo` 参数少）。二者引用的 `FLogs`/`FLayer` 都是 `.frm` 窗体，**窗体模块不在无窗体 bisect 编译集内** → **无窗体 bisect 面已完全收敛**：继续压低错误数只能靠**让窗体参与编译**（前置条件：先解窗体 Release 崩溃阻塞项）：
+- **两个窗口的残留**：① **无窗体 125 = 7**（C2065×5 + C2198×2，092y 后已无真实代码缺陷）—— 7 个**全部**是 cLogs/cLayer 的窗体假阳性：cLogs×5（`vb6_FLogs_Visible` 未声明 ×3、`FLogs` 未声明 ×1、`vb6_cTimeUse_Show` 参数少 ×1）、cLayer×2（`FLayer` 未声明、`vb6_cCsv_ShowTo` 参数少）。二者引用的 `FLogs`/`FLayer` 都是 `.frm` 窗体，**窗体模块不在无窗体 bisect 编译集内** → 无窗体面已收敛，这 7 错**不必再修**（纳入窗体后自动消失）。② **含窗体全量 129 = 0 error C**（2026-09-11，092z 后）→ **编译期全绿**；继续推进应转向**链接期**：
   1) ~~**Demo_Database 506（C2440 + C2197）**：`TestDB.Rows(1)("score")` 连续索引（默认属性链）~~ → **已修（092w）**：外层索引不再并入内层 `prop_get_Item`，改为对返回 Variant 结果做 `vb6_ComCall(vb6_VariantToObjectVal(<inner>), L"Item", ...)` 后期绑定；
   2) ~~**cHttpServer 821（C2037）**：`Request->Header->Exists(...)` — `Header` 是 COM 接口字段，成员方法调用应走后期绑定~~ → **已修（092x）**：内层 MAE 追加 `voidptr` 标记时同时识别 `classTypedFieldMap_` 的 `COM:<Interface>` 条目 → 外层走 COM dispatch；
   3) ~~**cHttpServerResponse 452（C2198，原判为「配置缺口」）**：`Common.Version()`~~ → **已修（092y）**，且**原判读有误**：`Common` 并非外部 ActiveX 引用，而是 `VBMAN.vbp` 第 65 行的标准模块 `Module=Common; Common\Common4DLL.bas`；真实根因是 `storageKey(Function)==lowerName` 造成 `Common.{Version,Path}` 与 `cVBMAN.{Version,Path}` 全部同键、`defineExternal` 先到先得丢弃 Common 成员 → 092v 扫描落空。故**无需** Reference/TypeLib 级命名空间符号（`SymbolKind::ComModule`/`ComGlobalNs` 导入仍可作为独立可选项，但已不再是本错误的必要条件）；
-  4) **方法学提醒**：① 内建调用实参路径 ≠ 用户函数实参路径（092h 未生效即此因），先在 `typeNameMap` 等**内建识别分支**定位；② VB6 大小写不敏感 — 所有 `cIdent(成员名)` 都需按声明规范化，092p 只覆盖了 3 个生成点，其余 6 处 `->" + cIdent(node.memberName)` 仍是同类隐患；③ `isComMarker_` 是全局状态，语句/子表达式边界必须显式消费或清除（092m/n 已覆盖 With 字段写与 For，If/While/Select/Call 实参等边界待查）；④ 泛用的实参包装改动极易引发大面积回归（092h：30→81），务必先用小集合验证并用 `ParameterInfo` 上下文收窄；⑤ 改生成器前先加**一次性诊断打印**（`fprintf(stderr, "[DBG...]")` + bisect + grep `run.log`）—— 092o/092u/092v 都靠它一次定位路径，比反复读代码快得多；⑥ **判断某生成形态是否「既有可接受」时，先在生成产物目录（temp 的 `C3C\<pid>\*.c`，非仓库内、不受 .gitignore 影响）用 `search_content` 搜同类形态**——092w/092x 都靠搜到 `cSSE.c` 现有 `RootItem.Exists(...)`/`vb6_ComCall(...) == (-1)` 快速确认与既有行为一致、无需再扩大改动面。注意 `run.log`（C3.exe 输出）与 `c3-error.log`（cl.exe 错误）分属两个文件；⑦ **交接文档里的「根因」结论也要复核** —— 092v 把 cHttpServerResponse 452 记为「`Common` 不在任何 vbp 内的配置缺口」，实际它就写在 `VBMAN.vbp` 第 65 行；误判让该错误被搁置了整整一轮。凡「外部模块 / 配置缺口」类结论，归档前先用 `search_content` 在 `.vbp` 中核实条目，并优先怀疑「同名符号 storageKey 冲突」这类更常见的内部原因。
+  4) **方法学提醒**：① 内建调用实参路径 ≠ 用户函数实参路径（092h 未生效即此因），先在 `typeNameMap` 等**内建识别分支**定位；② VB6 大小写不敏感 — 所有 `cIdent(成员名)` 都需按声明规范化，092p 只覆盖了 3 个生成点，其余 6 处 `->" + cIdent(node.memberName)` 仍是同类隐患；③ `isComMarker_` 是全局状态，语句/子表达式边界必须显式消费或清除（092m/n 已覆盖 With 字段写与 For，If/While/Select/Call 实参等边界待查）；④ 泛用的实参包装改动极易引发大面积回归（092h：30→81），务必先用小集合验证并用 `ParameterInfo` 上下文收窄；⑤ 改生成器前先加**一次性诊断打印**（`fprintf(stderr, "[DBG...]")` + bisect + grep `run.log`）—— 092o/092u/092v 都靠它一次定位路径，比反复读代码快得多；⑥ **判断某生成形态是否「既有可接受」时，先在生成产物目录（temp 的 `C3C\<pid>\*.c`，非仓库内、不受 .gitignore 影响）用 `search_content` 搜同类形态**——092w/092x 都靠搜到 `cSSE.c` 现有 `RootItem.Exists(...)`/`vb6_ComCall(...) == (-1)` 快速确认与既有行为一致、无需再扩大改动面。注意 `run.log`（C3.exe 输出）与 `c3-error.log`（cl.exe 错误）分属两个文件；⑦ **交接文档里的「根因」结论也要复核** —— 092v 把 cHttpServerResponse 452 记为「`Common` 不在任何 vbp 内的配置缺口」，实际它就写在 `VBMAN.vbp` 第 65 行；误判让该错误被搁置了整整一轮。凡「外部模块 / 配置缺口」类结论，归档前先用 `search_content` 在 `.vbp` 中核实条目，并优先怀疑「同名符号 storageKey 冲突 / 跨类同名成员」这类更常见的内部原因；⑧ **任何「崩溃」结论落档前必须先排除陈旧对象** —— 本次「窗体 Release 崩溃（0xC0000005）」经查只是 `.build` 增量构建的陈旧对象，`--clean-first` 全量重建后含窗体回归直接跑到 0 错；092v 却把它当成「未初始化/UB」并计划上 cdb。规则：**见到 release-only 崩溃，先 `--clean-first` 全量重建再复现**，仍崩才考虑 UB。
 
 ### 历史：091p-s 摘要（无窗体 bisect 基线 41 → **36**；提交 ac78b3c/36d83a3/1c8daf7/db139c9，2026-09-10）
 
@@ -119,7 +121,10 @@
    - C3 失败时自动写 `vbman/dist/c3-error.log`
 3. `scripts/_tmp_count.ps1` — 统计错误总数
 4. 辅助脚本（按需重写）：`scripts/_tmp_grep.ps1`（模式统计）、`scripts/_tmp_peek.ps1`（看生成代码）
-5. **注意**：PowerShell 内联 `$_` 会被转义，复杂逻辑必须写进 .ps1 脚本文件再执行
+5. **含窗体回归（092z 起）**：`powershell -File scripts/_tmp_bisect.ps1 -N 999 -Forms` — 纳入 `VBMAN.vbp` 的 `Form=` 条目（默认不纳入，行为不变），产物 `vbman/src/FIX_bisectfrm.vbp` + `_fix/bisect/outfrm/c3-error.log`。**当前含窗体全量基线 = 0 error C**
+6. **改过 cgen/头文件后务必全量重建**：`cmake --build .build --clean-first`。增量构建会产生**陈旧对象** → release 二进制运行期崩溃（0xC0000005 / 0xC0000409），极易误判为 UB（本次「窗体 Release 崩溃」即此）
+7. **崩溃栈定位**：`set C3_CRASH_TRACE=1` + 带 PDB 的构建（`.build-rwdi` / Debug）→ 崩溃时 stderr 输出 `[C3-CRASH]` 异常码/地址 + 符号化调用栈（dbghelp；`c3` 目标已链接 dbghelp）
+8. **注意**：PowerShell 内联 `$_` 会被转义，复杂逻辑必须写进 .ps1 脚本文件再执行
 
 ## 3. 错误演进史
 
@@ -384,7 +389,20 @@ cToolsArray.cls 的 6 错集中在三个草稿/边缘函数（Extend/DeArray/tes
 - 修复按错误簇批量处理，每轮结束后更新本文档第 5/6 节
 - **改 cgen.hpp 后运行崩溃（0xC0000409）先怀疑陈旧对象 → `cmake --build .build --clean-first` 全量重建**
 
-## 9. 下一步调查：ToolsTlsThunks C2224 x37（COM 集合簇）+ SafeArray 簇
+## 10. 下一步：链接期（编译期全绿后的新前沿）
+
+`-Forms` 全量 129 条目已达 **error C = 0**，但同一次运行的**链接阶段**报出两类问题（`vbman/src/_fix/bisect/outfrm/c3-error.log` 末尾）：
+
+1. **LNK2005 重定义（疑似真实缺陷，值得修）** —— 同一符号在多个 `.obj` 中被定义：
+   - `FToastDrawer.obj : Sad / m_Theme / m_State / PosVal / TopVal / m_ParentToast / m_TagName 已经在 FToastCenter.obj 中定义`
+   - `mDelay.obj : Delay 已经在 Tools.obj 中定义`
+   - `cModbusTransportTCP.obj / cModbusSlave.obj : vb6_evt_wrap_m_socket_Connect / _CloseEvent / _DataArrival / _Error / m_listensocket_* 已经在 cWebSocketClient.obj / cWebSocketServer.obj 中定义`
+   → 指向两类生成问题：① **模块级私有变量未按模块前缀 mangle**（VB6 中各模块 `Private m_Theme` 互不冲突，C 侧必须消歧；`Delay` 同族）；② **事件包装函数 `vb6_evt_wrap_m_*` 被写进每个发送者模块**，应只在其事件源类模块定义、其它模块仅保留声明。
+2. **`LNK1104: 无法打开文件 msvbvm60.lib`**（bisect 工程配置缺口，非代码缺陷）：`--dll` 链接未带 VB6 运行时 shim 库；需确认全量 `vbman/build_vbman.bat` 路径是否同样缺。
+
+**建议顺序**：先确认这两簇 LNK2005 在 `vbman/build_vbman.bat` 全量链接下是否重现（bisect 是裁剪工程，需排除「裁剪导致的重复」），再按 ①/② 分别修。
+
+## 9. （历史，2026-09-05 遗留，已非当前下一步）ToolsTlsThunks C2224 x37（COM 集合簇）+ SafeArray 簇
 
 ### 症状（生成代码）
 1. **C2224 x37**：`_vb6_with_15->LocalCertificates.Item(lIdx)`、`(*uInput).Stack.Remove(1)` — `.Item`/`.Remove` 左侧非结构体
