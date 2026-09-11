@@ -3223,6 +3223,24 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
         }
     }
 
+    // Fix 092t: TypeName(Me) — Me 在 C 侧是类指针 (vb6_cls_pvSubClass*), 而
+    // vb6_TypeName 形参是 vb6_VARIANT → C2440 (pvSubClass 543/544,
+    // clsSubClass.cls 497/498: App.LogEvent TypeName(Me) & ...).
+    // 类名在编译期已知 (vbp 的 Class= 名 == moduleName_), 直接折叠为字符串字面量 —
+    // 这也是 VB6 语义上唯一正确的形态: TypeName(对象实例) 返回其实类的名字,
+    // 经 Variant 包装对象只会得到 "Object".
+    if (node.callee && node.callee->kind == ASTNodeKind::IdentifierExpr
+        && node.positional.size() == 1 && node.positional[0]
+        && node.positional[0]->kind == ASTNodeKind::MeExpr && isClassModule_) {
+        auto& tn092t = static_cast<IdentifierExpr&>(*node.callee);
+        std::string tnLower092t = tn092t.name;
+        std::transform(tnLower092t.begin(), tnLower092t.end(), tnLower092t.begin(), ::tolower);
+        if (tnLower092t == "typename") {
+            lastExpr_ = "vb6_BSTR_FromStr(L\"" + moduleName_ + "\")";
+            return;
+        }
+    }
+
 
     // P18-E: Choose special handling - nested ternary chain
     if (node.callee && node.callee->kind == ASTNodeKind::IdentifierExpr && !node.positional.empty()) {
