@@ -1215,8 +1215,30 @@ void CCodeGen::visit(DeclareDecl& node) {
         knownDeclareAnsi_.insert(funcLower);
     }
 
-    // 生成: #pragma comment(lib, "xxx.lib")
-    c_.emitLine("#pragma comment(lib, \"" + libName + ".lib\")");
+    // Fix 092z-2: VB6/VBA 运行时库 (msvbvm60 等) 不生成 #pragma comment(lib, ...)
+    //
+    // 原因:
+    //  1. 这些库只随 VB6/VBA 发行, Windows SDK / VS 均不携带 → 链接器报 fatal
+    //     LNK1104 "无法打开文件 msvbvm60.lib" (本机 SysWOW64 只有 32 位
+    //     msvbvm60.dll, x64 无导入库可链); VB6 运行时也只有 32 位。
+    //  2. Fix 076 之后 Declare 一律生成 `extern <ret> __stdcall vb6_di_<name>(...)`
+    //     + `#define <VB名> vb6_di_<name>`, 由 RTL 转发桩提供实现 —— 导入库这条路
+    //     对 Declare 早已废弃。且生成物引用的符号名是 C3 内部名, 即使补上真库也
+    //     解析不了 (MSVBVM60.DLL 导出的是 VarPtr / __vbaObjSetAddref / 序号)。
+    //  3. 这些符号的实现见 src/rtl/core/vb6_di_stubs.c (原生实现, 不做 LoadLibrary 转发)。
+    std::string libLower = libName;
+    std::transform(libLower.begin(), libLower.end(), libLower.begin(), ::tolower);
+    bool isVb6RuntimeLib = (libLower == "msvbvm60" || libLower == "msvbvm50" ||
+                            libLower == "vbe7" || libLower == "vbe6" ||
+                            libLower == "vba7" || libLower == "vba6");
+    // 另一类: Windows SDK 不提供导入库的 DLL。实测 cryptdlg.dll 只有 DLL,
+    // SDK 10.0.26100.0\um\x64 无 cryptdlg.lib → 同样不生成 pragma, 对应符号
+    // 由 RTL 动态加载实现 (LoadLibrary + GetProcAddress), 见 vb6_di_stubs.c
+    // 的 vb6_di_CertSelectCertificateW。
+    bool isNoImportLib = (libLower == "cryptdlg");
+    if (!isVb6RuntimeLib && !isNoImportLib) {
+        c_.emitLine("#pragma comment(lib, \"" + libName + ".lib\")");
+    }
 
     // Fix 010a: 避免与Windows SDK (windows.h) 声明冲突
     //

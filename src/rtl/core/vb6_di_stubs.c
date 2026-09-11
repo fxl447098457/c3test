@@ -94,3 +94,92 @@ void* __stdcall vb6_di_ord_12(void* a, intptr_t b) {
     if (pfn) return pfn(a, (int32_t)b);
     return NULL;
 }
+
+/* ============================================================
+ * Fix 092z-2: msvbvm60 (VB6 运行时) 原生实现
+ * ------------------------------------------------------------
+ * VBMAN 源码有 10 个模块 14 处 `Declare ... Lib "msvbvm60"`, 但:
+ *   1. VB6 运行时只有 32 位 (SysWOW64\msvbvm60.dll), x64 下无导入库可链;
+ *   2. C3 生成的引用名是内部名 vb6_di_<name>, MSVBVM60.DLL 导出表里是
+ *      VarPtr / __vbaObjSetAddref / 序号 —— 二者无法互相解析。
+ * 故这些符号一律在 RTL 原生实现, 不做 LoadLibrary 转发。
+ * 序号对照 (dumpbin /exports C:\Windows\SysWOW64\msvbvm60.dll):
+ *   644 = VarPtr             350 = __vbaObjSetAddref
+ * ============================================================ */
+
+/* ArrPtr: `Private Declare Function ArrPtr Lib "msvbvm60" Alias "VarPtr" (Ptr() As Any) As Long`
+ *
+ * VB6 语义: VarPtr(x) = &x —— 返回变量自身的地址。
+ * 数组 ByRef 传递时, C3 传给本函数的实参已经是数组变量指针的地址
+ * (生成声明为 vb6_SafeArray1D**), 即 VB6 的 &baBuffer, 故恒等返回即正确。
+ *
+ * 调用点语义核对 (mdTlsThunks.bas):
+ *   CopyMemory(lBufPtr, ByVal ArrPtr(baBuffer), LenB(lBufPtr))
+ *       -> 读出 SAFEARRAY* (数组未分配时为 0, 代码据此判断)
+ *   CopyMemory(ByVal ArrPtr(baBuffer), ByVal ArrPtr(baInput), 4)
+ *       -> 交换两个 SAFEARRAY*
+ * 两者都要求返回「数组变量地址」而非 SAFEARRAY* 本身, 恒等返回满足。 */
+intptr_t __stdcall vb6_di_VarPtr(void* Ptr) {
+    return (intptr_t)Ptr;
+}
+
+/* vbaObjSetAddref:
+ *   Private Declare Function vbaObjSetAddref Lib "msvbvm60" Alias "__vbaObjSetAddref"
+ *       (oDest As Any, ByVal lSrcPtr As Long) As Long
+ *
+ * VB6 运行时语义: if (psrc) psrc->AddRef(); *ppdst = psrc; 返回 HRESULT。
+ * 旧值不在此处 Release (原版 VB6 由调用侧处理), 保持同一行为以避免误 Release
+ * 非持有引用而崩溃; 代价是覆盖旧值时可能泄漏一次引用, 与原版一致。
+ * 调用点: vbaObjSetAddref((void*)&(oCallback), _vb6_with_60->ClientCertCallback) */
+intptr_t __stdcall vb6_di_vb6___vbaObjSetAddref(void* oDest, intptr_t lSrcPtr) {
+    if (lSrcPtr) {
+        IUnknown* pSrc = (IUnknown*)(uintptr_t)lSrcPtr;
+        pSrc->lpVtbl->AddRef(pSrc);
+    }
+    *(void**)oDest = (void*)(uintptr_t)lSrcPtr;
+    return 0; /* S_OK */
+}
+
+/* 序号 644 别名 (VBMAN cToolsArray.cls):
+ *   Private Declare Function SplitLongToBytes Lib "msvbvm60" Alias "#644"
+ *       (ByVal lngNum As Long) As longByteType
+ * 序号 644 实测就是 VarPtr。x86 下 VarPtr 直接把入参(此处即 Long 的值)当返回值放回 EAX,
+ * 而 VB6 对 4 字节 UDT 返回值同样取 EAX, 于是该声明成了「Long 按 4 字节位重解释」的技巧
+ * (小端: a1 = 最低字节)。x64 下按值返回同布局的 4 字节结构。
+ * 该符号在 VBMAN 中只声明未使用, 实现以保证链接并保持语义一致。 */
+typedef struct vb6_di_longByteType {
+    uint8_t a1;
+    uint8_t a2;
+    uint8_t a3;
+    uint8_t a4;
+} vb6_di_longByteType;
+
+vb6_di_longByteType __stdcall vb6_di_ord_644(intptr_t lngNum) {
+    vb6_di_longByteType r;
+    uint32_t v = (uint32_t)lngNum;
+
+    r.a1 = (uint8_t)(v & 0xFF);
+    r.a2 = (uint8_t)((v >> 8) & 0xFF);
+    r.a3 = (uint8_t)((v >> 16) & 0xFF);
+    r.a4 = (uint8_t)((v >> 24) & 0xFF);
+    return r;
+}
+
+/* cryptdlg.dll 无导入库 (Windows SDK 10.0.26100.0 实测不提供 cryptdlg.lib),
+ * 故本符号走动态加载, 不生成 #pragma comment(lib, ...) (见 cgen_decl.cpp)。
+ * 对应 VBMAN cTlsSocket.cls:
+ *   Private Declare Function CertSelectCertificate Lib "cryptdlg"
+ *       Alias "CertSelectCertificateW" (pCertSelectInfo As Any) As Long
+ * 原型: BOOL WINAPI CertSelectCertificateW(PCCERT_SELECT_STRUCT_W pCertSelectInfo)
+ * (dumpbin /exports C:\Windows\System32\cryptdlg.dll -> 15 CertSelectCertificateW) */
+intptr_t __stdcall vb6_di_CertSelectCertificateW(void* pCertSelectInfo) {
+    typedef BOOL(WINAPI* fnCertSelectCertificateW)(void*);
+    static fnCertSelectCertificateW pfn = NULL;
+    if (!pfn) {
+        HMODULE h = GetModuleHandleW(L"cryptdlg.dll");
+        if (!h) h = LoadLibraryW(L"cryptdlg.dll");
+        if (h) pfn = (fnCertSelectCertificateW)GetProcAddress(h, "CertSelectCertificateW");
+    }
+    if (pfn) return (intptr_t)pfn(pCertSelectInfo);
+    return 0;
+}
