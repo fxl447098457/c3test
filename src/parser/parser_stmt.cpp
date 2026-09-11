@@ -1086,6 +1086,33 @@ StmtPtr Parser::parseLabelOrAssignmentOrCall() {
     // 同时允许 +,-,*,/,& 等运算符在目标内出现 (如 arr(i+1))。
     auto expr = parseExpression(9);
 
+    // Fix 092r: Debug.Assert 的条件表达式可含顶层 '=' 比较:
+    //   Debug.Assert (lSig And &HFF&) = (&H201 And &HFF&)
+    // 上面 parseExpression(9) 已吃掉 `Debug.Assert (<cond>)`, 若这里再按赋值处理就会
+    // 生成 `vb6_DebugAssert(<cond>) = <rhs>` → C2186 ("=" 左侧是 void, ToolsTlsThunks 4733).
+    // 故先把 '=' 右侧并回断言条件, 再由调用路径生成 vb6_DebugAssert(<cond>)。
+    if (cur_.kind == TokenKind::Equals && expr->kind == ASTNodeKind::IndexOrCallExpr) {
+        auto& dba092r = static_cast<IndexOrCallExpr&>(*expr);
+        bool isDebugAssert092r = false;
+        if (dba092r.named.empty() && dba092r.positional.size() == 1 && dba092r.callee
+            && dba092r.callee->kind == ASTNodeKind::MemberAccessExpr) {
+            auto& dbaMa092r = static_cast<MemberAccessExpr&>(*dba092r.callee);
+            if (dbaMa092r.object && dbaMa092r.object->kind == ASTNodeKind::IdentifierExpr) {
+                auto& dbaObj092r = static_cast<IdentifierExpr&>(*dbaMa092r.object);
+                isDebugAssert092r = toLower(dbaObj092r.name) == "debug"
+                    && toLower(dbaMa092r.memberName) == "assert";
+            }
+        }
+        if (isDebugAssert092r) {
+            advance();  // consume '='
+            auto rhs092r = parseExpression();
+            auto cond092r = std::make_unique<BinaryExpr>(loc, BinaryOp::Eq,
+                std::move(dba092r.positional[0]), std::move(rhs092r));
+            dba092r.positional.clear();
+            dba092r.positional.push_back(std::move(cond092r));
+        }
+    }
+
     // 检查是否是赋值
     if (match(TokenKind::Equals)) {
         auto value = parseExpression();  // 右值: = 是比较, 完整解析
