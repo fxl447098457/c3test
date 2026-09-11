@@ -377,8 +377,14 @@ bool MsvcDriver::compileAndLink(const MsvcDriverOptions& options) {
         // P6.6: ActiveX DLL链接
         cmd << " /link /DLL";
         if (!options.rtlDir.empty()) {
+            // 092z-3: DLL 也要链 vb6rtl_gui.lib —— VB6 的 ActiveX DLL 允许包含窗体
+            // (VB6 支持在 ActiveX DLL 里放 Form/UserControl)，此时模块会引用窗体运行时
+            // (vb6_CreateFormWindow / vb6_DoEvents / vb6_SetControlText ...)，只链
+            // vb6rtl.lib 会在链接期报这 37 个符号未解析。
+            // 静态库是按需拉取的：不需要窗体运行时的 DLL 不会拉入 vb6forms.obj，无副作用。
             cmd << " \"" << options.rtlDir << "\\vb6rtl.lib\""
-                << " \"" << options.rtlDir << "\\vb6rtl_dll.lib\"";
+                << " \"" << options.rtlDir << "\\vb6rtl_dll.lib\""
+                << " \"" << options.rtlDir << "\\vb6rtl_gui.lib\"";
         }
         if (!options.typelibResFile.empty()) {
             cmd << " \"" << options.typelibResFile << "\"";
