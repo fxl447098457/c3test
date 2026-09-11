@@ -4556,10 +4556,27 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
             }
         }
 
+        // Fix 092z: 内置全局对象 (Clipboard/Screen/Printer/Forms/Debug/Err/App) 的成员
+        // 由 visit(MemberAccessExpr) 的硬编码分支解析为 RTL 函数 (如 Clipboard.SetText
+        // → vb6_Clipboard_SetText), VB 侧**不存在**形参表. 若此处仍用
+        // lookupModule(memberName) 兜底, 会命中项目中同名的类成员:
+        //   cQRcode.cls "Public Function SetText(ByVal Content As Variant) As cQRcode"
+        // 使 FLogs.frm "Clipboard.SetText Text1.Text" 的形参表被误当成 ByVal Variant
+        // → 实参被 Fix 086 / Fix 024P2 包装成 vb6_VariantFromValue(...) →
+        // vb6_Clipboard_SetText(vb6_VARIANT) C2440 (vb6_VARIANT→BSTR).
+        // 这几个名字是 VB6 保留的全局对象, 不可能被用户标识符占用, 直接跳过兜底.
+        bool builtinGlobalObj092z = false;
+        if (maExpr.object && maExpr.object->kind == ASTNodeKind::IdentifierExpr) {
+            static const std::unordered_set<std::string> builtinGlobalObjs092z = {
+                "clipboard", "screen", "printer", "forms", "debug", "err", "app"};
+            builtinGlobalObj092z = builtinGlobalObjs092z.count(
+                Symbol::toLower(static_cast<IdentifierExpr&>(*maExpr.object).name)) > 0;
+        }
+
         // Fix 033 回退: 类感知未命中 (对象为链式表达式 / className 找不到方法符号 /
         // 需要匹配 DeclareSub/DeclareFunc 等) → 用原 class-unaware lookupModule 兜底,
         // 保留旧行为兼容性.
-        if (!classAwareResolved) {
+        if (!classAwareResolved && !builtinGlobalObj092z) {
             Symbol* funcSym = symTab_.lookupModule(maExpr.memberName);
             // Fix 084y-7: VBA 内置函数 (VBA.Replace / VBA.Mid$ / VBA.Val 等) 注册在
             // 全局内置符号表, 不在模块作用域 — lookupModule 必然失败. 回退全表
