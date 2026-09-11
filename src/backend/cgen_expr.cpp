@@ -2086,7 +2086,29 @@ void CCodeGen::visit(MemberAccessExpr& node) {
             if (!isVarName) {
                 // 确定函数名的模块前缀
                 std::string sourceMod;
-                if (memSym->isExternal) {
+                // Fix 092v: `Common.Version()` — 限定符是**模块名**时以限定模块为准.
+                // Common4DLL.bas 与 cVBMAN.cls 都有 Version: lookupModule("Version")
+                // 命中 cVBMAN.Version → 前缀取 memSym->sourceModule = "cVBMAN" →
+                // vb6_cVBMAN_Version(...) 少了 me 参数 → C2198
+                // (cHttpServerResponse.cls 440; 实参已按 Common 版形参正确生成
+                // vb6_Common_Version(void**, int)). 这里改用限定符对应的规范模块名.
+                std::string modCanon092v;
+                {
+                    const std::string objL092v = Symbol::toLower(objIdent.name);
+                    if (symTab_.moduleScope()) {
+                        for (const auto& [k092v, s092v] : symTab_.moduleScope()->symbols()) {
+                            if (!s092v || !s092v->isExternal) continue;
+                            if (Symbol::toLower(s092v->sourceModule) == objL092v) {
+                                modCanon092v = s092v->sourceModule;
+                                break;
+                            }
+                        }
+                    }
+                }
+                if (!modCanon092v.empty()) {
+                    sourceMod = (Symbol::toLower(modCanon092v) == Symbol::toLower(moduleName_))
+                                ? "" : modCanon092v;
+                } else if (memSym->isExternal) {
                     sourceMod = memSym->sourceModule;
                 } else {
                     // 同模块调用也允许 Module.Method 语法
