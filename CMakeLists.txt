@@ -128,6 +128,10 @@ add_executable(c3
 )
 set_target_properties(c3 PROPERTIES OUTPUT_NAME C3)
 target_link_libraries(c3 PRIVATE vb6c3-core vb6c3-cgen)
+if(WIN32)
+    # 崩溃栈追踪 (C3_CRASH_TRACE=1) 需要 dbghelp
+    target_link_libraries(c3 PRIVATE dbghelp)
+endif()
 if(VB6C3_ENABLE_LLVM)
     target_link_libraries(c3 PRIVATE vb6c3-llvm)
 else()
