@@ -388,17 +388,20 @@ cToolsArray.cls 的 6 错集中在三个草稿/边缘函数（Extend/DeArray/tes
 - 不用内联 PowerShell `$_`，写 .ps1 脚本
 - 修复按错误簇批量处理，每轮结束后更新本文档第 5/6 节
 - **改 cgen.hpp 后运行崩溃（0xC0000409）先怀疑陈旧对象 → `cmake --build .build --clean-first` 全量重建**
+- **改了 RTL 源码/库后必须确认 `c3rtl.rc.res` 已重编**：否则 C3.exe 仍嵌旧库，症状是「桩明明补好了，链接期仍报未解析 `vb6_di_*`」——极具误导性（根因与修法见第 10 节 2.2）；改 RTL 后固定流程是 `scripts/build_rtl_libs.bat` → 重建 C3.exe。
 
-## 10. 下一步：链接期（编译期全绿后的新前沿）
+## 10. 链接期（编译期全绿后的新前沿）
 
-`-Forms` 全量 129 条目已达 **error C = 0**，但同一次运行的**链接阶段**报出两类问题（`vbman/src/_fix/bisect/outfrm/c3-error.log` 末尾）：
+`-Forms` 全量 129 条目已达 **error C = 0**。链接阶段原有两类问题，其中**第 2 项已于 2026-09-11 修复**（提交 `03de92f`、`460e621`，实施与验证见 2.1/2.2，历程见 `ai/开发历程/87-*`）。
+
+**当前链接期基线（2026-09-11，含窗体 125 模块 `--dll` x64 链接，日志 `vbman/src/_fix/bisect/outfrm/c3-error.log`）**：`LNK1104 = 0` / `LNK2005 = 27 条` / **未解析外部符号 443 条**（绝大多数是其它模块待补的 `vb6_di_*` 转发桩）—— 这两项即下一步入口。
 
 1. **LNK2005 重定义（疑似真实缺陷，值得修）** —— 同一符号在多个 `.obj` 中被定义：
    - `FToastDrawer.obj : Sad / m_Theme / m_State / PosVal / TopVal / m_ParentToast / m_TagName 已经在 FToastCenter.obj 中定义`
    - `mDelay.obj : Delay 已经在 Tools.obj 中定义`
    - `cModbusTransportTCP.obj / cModbusSlave.obj : vb6_evt_wrap_m_socket_Connect / _CloseEvent / _DataArrival / _Error / m_listensocket_* 已经在 cWebSocketClient.obj / cWebSocketServer.obj 中定义`
    → 指向两类生成问题：① **模块级私有变量未按模块前缀 mangle**（VB6 中各模块 `Private m_Theme` 互不冲突，C 侧必须消歧；`Delay` 同族）；② **事件包装函数 `vb6_evt_wrap_m_*` 被写进每个发送者模块**，应只在其事件源类模块定义、其它模块仅保留声明。
-2. **`LNK1104: 无法打开文件 msvbvm60.lib`** —— **不是配置缺口，而是生成器缺「`Lib "msvbvm60"` 特判」**（2026-09-11 核实，前一轮判读有误）：
+2. ~~**`LNK1104: 无法打开文件 msvbvm60.lib`**~~ —— **已修复（2026-09-11，提交 `03de92f` + `460e621`）**：不是配置缺口，而是生成器缺「无导入库 `Lib` 特判」（2026-09-11 核实，前一轮判读有误）。以下 2.0 为完整追根记录，最终实现与验证见 2.1/2.2。
    - **来源**：`cgen_decl.cpp:1219` 对**每条** VB6 `Declare ... Lib "X"` 都生成 `#pragma comment(lib, "X.lib")`；而 VBMAN 源码确有 **10 个模块 14 处** `Declare ... Lib "msvbvm60"`（`mdTlsThunks.bas:105/106`、`cAsyncSocket.cls:193/203`、`cTlsSocket.cls:160/161`、`mdTlsSodium.bas:77/79`、`mdTlsNative.bas:121/127`、`ToolsJsonUcs.bas:54`、`cHttpRequest.cls:120`、`cHttpDownload.cls:51`、`cToolsArray.cls:18`）→ 生成物中出现 `#pragma comment(lib, "msvbvm60.lib")`（`cAsyncSocket.c:45/55`、`cTlsSocket.c:101/102`、`ToolsTlsThunks.c:252/253`、`cToolsArray.c:5`），链接器遂去找该文件。
    - **只涉 3 类符号**：`Alias "VarPtr"`（源码名 `ArrPtr`，取数组/变量地址）、`Alias "__vbaObjSetAddref"`（对象赋值时的运行时 AddRef）、`Alias "#644"`（**按序号**导入的运行时内部函数，源码名 `SplitLongToBytes`）。
    - **x64 路线上无法「补」这个库**：本机 `C:\Windows\SysWOW64\msvbvm60.dll` 存在（32 位），但 `System32` 下**无** 64 位版本；Windows SDK / VS 安装目录里**不存在任何 `msvbvm60.lib`**。VB6 运行时只有 32 位 → `--arch x64` 没有可链接的导入库，且与 `ai/011`「静态链接 msvbvm60 ❌ 不采用、不支持 x64」及网站「零依赖部署」的定位冲突。
@@ -408,7 +411,23 @@ cToolsArray.cls 的 6 错集中在三个草稿/边缘函数（Extend/DeArray/tes
    - **可行方向**：① `cgen_decl.cpp:1219` 特判 `libName == "msvbvm60"`（不分大小写）→ 跳过 pragma；② `vb6_di_stubs.c` 补这 3 个桩，语义按 VBMAN 调用点实现（`ArrPtr` 取 SAFEARRAY 描述符、`__vbaObjSetAddref` = 写对象变量并 AddRef、`#644` = Long→4 字节 UDT）；**序号桩不能照抄 `ord_12` 的 `GetProcAddress`**，x64 下无 32 位 msvbvm60.dll 可加载。
    - `LNK1104` 是 **fatal**，它会挡在真正的「未解析外部符号」清单之前 → **必须先处理它才能看清链接期全貌**。
 
-**建议顺序**：先做第 2 项（fatal，挡住真相）；再确认第 1 项两簇 LNK2005 在 `vbman/build_vbman.bat` 全量链接下是否重现（bisect 是裁剪工程，需排除「裁剪导致的重复」），然后分别修。
+#### 2.1 已实施（2026-09-11，提交 `03de92f`）
+
+- **生成器**（`cgen_decl.cpp`）：对 VB6/VBA 运行时库（`msvbvm60`/`msvbvm50`/`vbe7`/`vbe6`/`vba7`/`vba6`）与 `cryptdlg` **不再生成** `#pragma comment(lib, ...)`；其余库照旧（实测其余 19 个库在 SDK 中均存在）。
+- **RTL**（`src/rtl/core/vb6_di_stubs.c`）新增 **4 个原生桩**（除 `cryptdlg` 外均不 LoadLibrary 转发）：
+  - `vb6_di_VarPtr`（`ArrPtr`）：`return (intptr_t)Ptr;` —— 数组 ByRef 传递时 C3 传入的实参**已经是**数组变量地址（生成声明 `vb6_SafeArray1D**`），即 VB6 的 `&baBuffer`，故恒等。调用点 `CopyMemory(ArrPtr(a), ArrPtr(b), 4)` 是交换两个 `SAFEARRAY*`，语义核对通过。
+  - `vb6_di_vb6___vbaObjSetAddref`：`if (src) src->AddRef(); *(void**)dst = src;` —— **不** Release 旧值，对齐原版 VB6 语义（避免误 Release 非持有引用）。
+  - `vb6_di_ord_644`（`SplitLongToBytes`）：**序号 644 经 `dumpbin /exports SysWOW64\msvbvm60.dll` 反查确认就是 `VarPtr`**（350 = `__vbaObjSetAddref`）。x86 下 VarPtr 把入参放回 EAX，而 VB6 对 4 字节 UDT 返回值同样取 EAX，遂成「Long → 4 字节小端位重解释」技巧 → 此处按小端拆字节返回 4 字节结构。
+  - `vb6_di_CertSelectCertificateW`：`cryptdlg.dll` **没有导入库**（SDK `10.0.26100.0\um\x64` 实测无 `cryptdlg.lib`），故走 `GetModuleHandleW`/`LoadLibraryW` + `GetProcAddress`（导出序号 15）动态加载。
+- **`scripts/build_rtl_libs.bat` 入库**：原脚本只在被 `.gitignore` 忽略的 `.temp\` 里，而 C3 链接依赖这些 `.lib`（经 `c3rtl.rc` 嵌入 C3.exe），必须可复现构建。**该 `.bat` 必须保持纯 ASCII** —— 中文注释在 cp936 控制台下会把命令行切碎（实测报 `'vb6rtl.obj' is not recognized ...`）。
+- **验证（含窗体 125 模块，`--dll` x64）**：`error C = 0`；`LNK1104 = 0`（msvbvm60 / cryptdlg 均不再出现）；**本次新增 4 符号 0 条未解析**；未解析外部符号总数 **451 → 443**。
+
+#### 2.2 陷阱：重建 RTL 库后 C3 仍嵌旧库（提交 `460e621` 修复）
+
+`c3rtl.rc` 以 RCDATA 嵌入 10 个文件（4 头 + 3×x64 库 + 3×x86 库），但 CMake 只把 `.rc` 自身当依赖 → **重建 `src/rtl/lib/*.lib` 后 `.res` 不重编**，C3.exe 继续嵌旧库。本次实测中招：`.res` 停留在 12:17 而新库是 19:45；C3 会话目录提取出的 `vb6rtl.lib` = 467468 字节（正好等于 HEAD 版大小，新库 470076），于是链接期仍报 `vb6_di_VarPtr` 等未解析 —— **看起来像桩没生效**，极易误判。
+修法：`CMakeLists.txt` 把这 10 个文件显式声明为 `c3rtl.rc` 的 `OBJECT_DEPENDS`（CMake 3.31 + Ninja 实测有效：重建库后 `.res` 时间戳刷新，C3.exe 体积随新库变化 3354624 → 3359744）。
+
+**建议顺序（2026-09-11 更新）**：第 2 项**已完成**（见 2.1/2.2），链接期已能看到全貌。下一步：① 对着新基线批量补 `vb6_di_*` 桩 —— 清单可从 `c3-error.log` 用 `Select-String -Pattern 'LNK(2019|2001)'` + 正则 `vb6_[A-Za-z0-9_]+` 去重导出（当前 443 条）；② 确认第 1 项两簇 LNK2005 在 `vbman/build_vbman.bat` 全量链接下是否重现（bisect 是裁剪工程，需排除「裁剪导致的重复」），然后分别修。
 
 ## 9. （历史，2026-09-05 遗留，已非当前下一步）ToolsTlsThunks C2224 x37（COM 集合簇）+ SafeArray 簇
 
