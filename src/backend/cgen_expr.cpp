@@ -2770,6 +2770,29 @@ void CCodeGen::visit(MemberAccessExpr& node) {
                         }
                     }
                 }
+                // Fix 092x: COM 接口字段 (如 cHttpServerRequest.Header As Dictionary)
+                // 由 driver 预扫描记入 classTypedFieldMap_, 值为 "COM:<Interface>" 前缀,
+                // 而 classVoidFieldMap_ 不含 (isVoidFieldType 为真时被 continue 跳过,
+                // 但内置 COM 类走 COM: 前缀分支). 此处一并视为 COM 指针字段并追加
+                // "voidptr" 标记, 供外层 MemberAccessExpr (Fix 023, line 2437) 切换为
+                // COM dispatch. 例: Request.Header.Exists("Cookie") — 此前无标记 →
+                // 外层 Fix 088b inferClassTypeOfExpr 遇 COM: 前缀返回空串 → 落入
+                // obj->member 结构体访问 → C2037 (cHttpServer.c 821).
+                if (!isVoidPtr && classTypedFieldMap_) {
+                    auto itT = classTypedFieldMap_->find(itClassVar->second);
+                    if (itT != classTypedFieldMap_->end()) {
+                        std::string memLower = node.memberName;
+                        std::transform(memLower.begin(), memLower.end(),
+                                       memLower.begin(),
+                                       [](unsigned char c) { return (char)std::tolower(c); });
+                        auto itF = itT->second.find(memLower);
+                        if (itF == itT->second.end()) itF = itT->second.find("m_" + memLower);
+                        if (itF != itT->second.end()
+                            && itF->second.compare(0, 4, "COM:") == 0) {
+                            isVoidPtr = true;
+                        }
+                    }
+                }
                 // Fix 092p: 字段名规范化回声明名 — VB6 大小写不敏感, 源码 `.socket`
                 // 与声明 `Socket` 是同一字段, 直接用源码拼写会生成 `...->socket` (C2039).
                 const std::string fldC092p =
