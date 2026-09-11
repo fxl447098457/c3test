@@ -1,9 +1,17 @@
 # C3 编译器错误修复 — 任务交接文档
 
 > 用途：新会话恢复上下文用。新开会话后直接说「读取 C3_FIX_HANDOFF.md 并继续修复」。
-> 更新日期：2026-09-10（091a-092q：无窗体 125 模块 bisect 基线 65 → **16**；提交 aeaa95f/05793ac/ae72bf2/d8f11aa/e97a90d/02205f5/ad62a09/96d123a/7e58595/ac78b3c/36d83a3/1c8daf7/db139c9/d5806d8/821e0ea/02e49a3/8a8eac2/866e814/288c4ea/a29240f/504e86b/aa98df1/5c5bf65/53da196/7757dee/d6a4dcf/8217f5f/ff133f4。窗体 Release 崩溃仍为既有阻塞项，bisect 正则不含窗体）
+> 更新日期：2026-09-11（091a-092v：无窗体 125 模块 bisect 基线 65 → **11**；提交 aeaa95f/05793ac/ae72bf2/d8f11aa/e97a90d/02205f5/ad62a09/96d123a/7e58595/ac78b3c/36d83a3/1c8daf7/db139c9/d5806d8/821e0ea/02e49a3/8a8eac2/866e814/288c4ea/a29240f/504e86b/aa98df1/5c5bf65/53da196/7757dee/d6a4dcf/8217f5f/ff133f4/f799e55/b6ff125/7559ad2/50de9b7/bad7b27。窗体 Release 崩溃仍为既有阻塞项，bisect 正则不含窗体）
 
-### 最近修复摘要（092m-q：无窗体 bisect 基线 23 → **16**；提交 53da196/7757dee/d6a4dcf/8217f5f/ff133f4，2026-09-10）
+### 最近修复摘要（092r-v：无窗体 bisect 基线 16 → **11**；提交 f799e55/b6ff125/7559ad2/50de9b7/bad7b27，2026-09-11）
+
+- **092r（16→15）Debug.Assert 条件的顶层 `=` 不再被当赋值**。`Debug.Assert (a And &HFF&) = (&H201 And &HFF&)`：语句级 `parseExpression(9)` 已吃掉 `Debug.Assert (<cond>)`，随后的 `=` 被当赋值 → `vb6_DebugAssert(<cond>) = <rhs>` C2186（ToolsTlsThunks 4733）。修法：在赋值检测前识别 `IndexOrCallExpr(callee = Debug.Assert, 1 个实参)` + 当前 token 是 `=`，把 `=` 右侧并回断言条件（`BinaryExpr(Eq)` 作为唯一实参）。
+- **092s（15→14）UDT 数组成员元素类型 + VarPtr 左值宏白名单**。① `mapSaElemCType(UserDefinedType)` 退化 `vb6_VARIANT` → `uOutput.Buffer(i)`（`Buffer() As CERT_RDN_ATTR`）元素大小/取址全错（cTlsSocket 4086/4093，其中 4086 是**静默语义错**）；改用 `vb6_type_<UDT>`（`mi.typeRefName`），覆盖 MemberAccess 链与 With 两条生成点。② `VarPtr(uOutput.Buffer(0))` 生成 `(intptr_t)&(void*){VB6_SA_AT(...)}` C2440 — `VB6_SA_AT`/`VB6_SA_ND_ATn` 展开是**左值**，加入白名单走 `&(...)`（`vb6_VariantArrayGet` 按值返回，不入白名单）。
+- **092t（14→12）TypeName(Me) 折叠为类名字面量**。`Me` 在 C 侧是 `vb6_cls_X*`，`vb6_TypeName` 形参是 `vb6_VARIANT` → C2440（pvSubClass 543/544）。类名编译期已知（vbp 的 `Class=` 名 == `moduleName_`）→ 生成 `vb6_BSTR_FromStr(L"pvSubClass")`；这也是语义上唯一正确形态（经 Variant 包装对象只会得到 `"Object"`）。
+- **092u（12→11）类内参数化 Property Let 赋值**。`Extend(Array(A, C)) = Split(...)`（cToolsArray.cls 97，隐式 me）此前落到通用路径：`emitExpr(target)` 生成裸名 + pad 的 value 占位 `Extend(&_arr_1, &(vb6_VARIANT){0})`，再拼 ` = <RHS>` → C2106。修法：AssignmentStmt 中识别「target 是 `Ident(args...)`、该名是**当前类**的写方向属性、形参数 == 实参数+1」→ 生成 `vb6_<Cls>_prop_let_<Name>((void*)me, &Vars, &Value)`（ByRef Variant 落栈变量取址；非左值 ByRef 也落栈变量以免 C2102）。**收窄条件**：含 Optional 形参时不走此路径（Optional 在 C 侧另有存在标志参数，cAsyncSocket 2611 曾因此 C2198）。
+- **092v（无回归）模块限定调用前缀以限定模块名为准**。`Mod.Member(...)` 的 `sourceMod` 原取 `memSym->sourceModule`；当限定名是模块而全局存在同名过程时会取错模块（命中 `cVBMAN.Version` 而非 `Common.Version`）。改为优先用「限定名对应的 external 符号所属模块规范名」。注意 cHttpServerResponse 452 的根因是 `Common`（外部 ActiveX 引用的模块）**不在任何 vbp 内**，符号表无该模块 → 属配置/缺口（见下）。
+
+### 历史：092m-q（无窗体 bisect 基线 23 → **16**；提交 53da196/7757dee/d6a4dcf/8217f5f/ff133f4，2026-09-10）
 
 - **092m（23→22）With 类字段写消费 COM 标记 + 类字段类型表**。`With CI` 内 `.IP = m_oServer.RemoteHostIP` 走「数据字段写」路径但**不消费** `isComMarker_` → `lastExpr_` 只含对象（`.IP = me->m_oServer`，静默丢属性）+ 标记泄漏到下一条语句（`.ConnectAt = ... L"RemotePort"` C2440，cHttpServer 372/373/374）。修法：字段写路径调 `resolveComValue(hint)`，hint 取自新增 `Symbol::memberFieldTypes`（语义分析登记类字段 VB 类型 + driver 跨模块拷贝）→ String→`ComGetStringProp` / Long→`ComGetIntProp` / Date→`ComGetDoubleProp`。
 - **092n（22→21）For 子表达式独立消费 COM 标记**。`For i = .Count To 1 Step -1`：start 只得到对象本身，且**残留标记被 Step 表达式里 UnaryExpr 的 `if (isComMarker_) resolveComValue()` 消费** → `i_step = (-vb6_ComGetStringProp(_vb6_with_2, L"Count"))` C2171（pvSubClass 708/709）。改为每个子表达式生成前清标记、生成后按 Long 消费。
@@ -28,11 +36,11 @@
 - **092c（34→33）RHS 为 Variant 返回变量**。`Function ShowOpen(...) As Variant` 内 `mData.mstrFileName = ShowOpen` 的 RHS 生成 `vb6_ret_ShowOpen`（裸返回变量名）—— `cExprIsVariant` 只认函数前缀、`knownVariantVars_` 只认 VB 名 → 未识别为 Variant → 不做提取（cDialog 393 C2440）。在赋值通用提取路径加"`value == currentReturnVar_ && currentReturnCType_ == "vb6_VARIANT"`"判定。
 - **092e（33→32）ByRef 数组形参的复合字面量类型**。`Decode(ByRef Utf() As Byte)` 的 C 形参是 `vb6_SafeArray1D**`（Fix 078 rev2），但调用点 `mapType(Byte|Array)` 给出 `uint8_t*` → `(&(uint8_t*){Variant})` C2440（cHttpClient 418）。ByRef 数组形参统一按 `vb6_SafeArray1D**` 生成复合字面量，并在 Variant 提取映射中补 `vb6_SafeArray1D** → vb6_VariantToSafeArray1D`。
 - **重要判读：cLogs/cLayer 的 7 个 C2065/C2198 是无窗体 bisect 假阳性**（`FLogs`/`FLayer` 是 `.frm` 窗体：`vb6_FLogs_Visible`、`vb6_cCsv_ShowTo(&Content, ...)` 漏 me 等），窗体模块本就不在 bisect 编译集，不应作为修复目标。
-- **残留 16 = C2065×5 + C2440×4 + C2198×3 + C2197/C2106/C2037/C2186 各 1**；其中 **7 个是窗体假阳性**（cLogs×5：`vb6_FLogs_Visible`/`FLogs` 未声明 + `vb6_cTimeUse_Show` 参数少；cLayer×2：`FLayer` 未声明 + `vb6_cCsv_ShowTo` 参数少）→ **真实目标 9**。下一步候选：
-  1) **C2440×4（转换）**：cTlsSocket 4093（`vb6_VARIANT` → `void*` 初始化）、Demo_Database 506（`vb6_cCollection_prop_get_Item(cls*, vb6_VARIANT)` 实参过多 + `vb6_VARIANT`→`BSTR` — 属性参数个数/`Item(key)` 语义待核）、pvSubClass 543/544（`TypeName(Me)`：`vb6_cls_pvSubClass*` → `vb6_VARIANT`，须在**内建调用实参生成点**加 `vb6_VariantFromValue`，见 092h 教训）；
-  2) **C2198×3（参数太少）**：cHttpServerResponse 452（`vb6_cVBMAN_Version(cls*, void**, int)` 缺第 3 参 — 类方法 Optional 未补齐；3660 已有 `isOptional → ", 0"` 逻辑，需查为何未覆盖该方法）、cLayer 23 / cLogs 19（窗体假阳性）；
-  3) **零散**：cHttpServer 821（C2037 `Request->Header->Exists(...)` — `vb6_ComIface_IDictionary` 未定义结构，COM 对象方法调用应走后期绑定）、ToolsTlsThunks 4733（C2186 `Debug.Assert a = b` 被解析成赋值）、cToolsArray 130（C2106 `Extend(Array(A,C)) = Split(...)` 是**参数化属性赋值**，应生成 `prop_let_Extend` 调用）、Demo_Database 506（C2197 同 C2440）；
-  4) **方法学提醒**：① 内建调用实参路径 ≠ 用户函数实参路径（092h 未生效即此因），先在 `typeNameMap` 等**内建识别分支**定位；② VB6 大小写不敏感 — 所有 `cIdent(成员名)` 都需按声明规范化，092p 只覆盖了 3 个生成点，其余 6 处 `->" + cIdent(node.memberName)` 仍是同类隐患；③ `isComMarker_` 是全局状态，语句/子表达式边界必须显式消费或清除（092m/n 已覆盖 With 字段写与 For，If/While/Select/Call 实参等边界待查）；④ 泛用的实参包装改动极易引发大面积回归（092h：30→81），务必先用小集合验证并用 `ParameterInfo` 上下文收窄。
+- **残留 11 = C2065×5 + C2198×3 + C2440/C2197/C2037 各 1**；其中 **7 个是窗体假阳性**（cLogs×5：`vb6_FLogs_Visible`/`FLogs` 未声明 + `vb6_cTimeUse_Show` 参数少；cLayer×2：`FLayer` 未声明 + `vb6_cCsv_ShowTo` 参数少）→ **真实 2 处 + 1 处配置缺口**：
+  1) **Demo_Database 506（C2440 + C2197）**：`TestDB.Rows(1)("score")` 连续索引（默认属性链）—— 外层 `("score")` 的实参被并入内层 `prop_get_Item` 调用（生成 3 个实参 vs 签名 2 个）。方向：`IndexOrCallExpr(callee = IndexOrCallExpr(...))` 时按**内层结果类型**生成，Variant 持 COM 对象 → `vb6_ComCall(vb6_VariantToObjectVal(<inner>), L"Item", ...)`（不要合并参数）；
+  2) **cHttpServer 821（C2037）**：`Request->Header->Exists(...)` — `Header` 是 COM 对象（`vb6_ComIface_IDictionary` 无结构定义），成员方法调用应走后期绑定；
+  3) **cHttpServerResponse 452（C2198，配置缺口）**：`Common.Version()` 的 `Common` 是**外部 ActiveX 引用**的模块（`Common4DLL.bas`/`Common4EXE.bas` 的 `VB_Name` 都是 `Common`，且不在 vbman 任何 vbp 内）→ 符号表无 `Common`（`lookup("Common")` = null，也无 `sourceModule == "Common"` 的 external 符号），解析借用全局同名的 `cVBMAN.Version(...)`（类方法需 me）→ 缺参。需要 Reference/TypeLib 级别的模块命名空间符号（`SymbolKind::ComModule`/`ComGlobalNs` 枚举已存在，缺导入）；
+  4) **方法学提醒**：① 内建调用实参路径 ≠ 用户函数实参路径（092h 未生效即此因），先在 `typeNameMap` 等**内建识别分支**定位；② VB6 大小写不敏感 — 所有 `cIdent(成员名)` 都需按声明规范化，092p 只覆盖了 3 个生成点，其余 6 处 `->" + cIdent(node.memberName)` 仍是同类隐患；③ `isComMarker_` 是全局状态，语句/子表达式边界必须显式消费或清除（092m/n 已覆盖 With 字段写与 For，If/While/Select/Call 实参等边界待查）；④ 泛用的实参包装改动极易引发大面积回归（092h：30→81），务必先用小集合验证并用 `ParameterInfo` 上下文收窄；⑤ 改生成器前先加**一次性诊断打印**（`fprintf(stderr, "[DBG...]")` + bisect + grep `run.log`）—— 092o/092u/092v 都靠它一次定位路径，比反复读代码快得多。
 
 ### 历史：091p-s 摘要（无窗体 bisect 基线 41 → **36**；提交 ac78b3c/36d83a3/1c8daf7/db139c9，2026-09-10）
 
