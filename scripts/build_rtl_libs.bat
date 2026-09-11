@@ -7,7 +7,7 @@ REM  but C3 links these .lib files and they are embedded into C3.exe via
 REM  c3rtl.rc, so the build must be reproducible).
 REM
 REM  Outputs:
-REM    src\rtl\lib\vb6rtl.lib      = vb6rtl + vb6com + vb6_di_stubs
+REM    src\rtl\lib\vb6rtl.lib      = vb6rtl + vb6com + vb6_di_stubs + vb6_di_win32_stubs
 REM    src\rtl\lib\vb6rtl_dll.lib  = vb6comserver
 REM    src\rtl\lib\vb6rtl_gui.lib  = vb6forms
 REM    src\rtl\lib\x86\*.lib       = same, 32-bit
@@ -34,7 +34,7 @@ if not exist "%OBJDIR%\x86" mkdir "%OBJDIR%\x86"
 set "VCVARS=C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvarsall.bat"
 
 set "COMMON_FLAGS=/c /O2 /W3 /utf-8 /DUNICODE /D_UNICODE /D_CRT_SECURE_NO_WARNINGS /D_CRT_NONSTDC_NO_WARNINGS /I"%RTLCORE%""
-set "SRCS=%RTLCORE%\vb6rtl.c %RTLCORE%\vb6com.c %RTLCORE%\vb6comserver.c %RTLCORE%\vb6forms.c %RTLCORE%\vb6_di_stubs.c"
+set "SRCS=%RTLCORE%\vb6rtl.c %RTLCORE%\vb6com.c %RTLCORE%\vb6comserver.c %RTLCORE%\vb6forms.c %RTLCORE%\vb6_di_stubs.c %RTLCORE%\vb6_di_win32_stubs.c"
 
 rem x64 - generated C code in this environment defaults to /MT (static CRT)
 call "%VCVARS%" x64 >nul 2>&1
@@ -47,7 +47,7 @@ if errorlevel 1 (
     echo ERROR: x64 RTL compilation failed.
     exit /b 1
 )
-lib /OUT:"%OUT64%\vb6rtl.lib" "%OBJDIR%\x64\vb6rtl.obj" "%OBJDIR%\x64\vb6com.obj" "%OBJDIR%\x64\vb6_di_stubs.obj"
+lib /OUT:"%OUT64%\vb6rtl.lib" "%OBJDIR%\x64\vb6rtl.obj" "%OBJDIR%\x64\vb6com.obj" "%OBJDIR%\x64\vb6_di_stubs.obj" "%OBJDIR%\x64\vb6_di_win32_stubs.obj"
 lib /OUT:"%OUT64%\vb6rtl_dll.lib" "%OBJDIR%\x64\vb6comserver.obj"
 lib /OUT:"%OUT64%\vb6rtl_gui.lib" "%OBJDIR%\x64\vb6forms.obj"
 if errorlevel 1 (
@@ -66,7 +66,7 @@ if errorlevel 1 (
     echo ERROR: x86 RTL compilation failed.
     exit /b 1
 )
-lib /OUT:"%OUT86%\vb6rtl.lib" "%OBJDIR%\x86\vb6rtl.obj" "%OBJDIR%\x86\vb6com.obj" "%OBJDIR%\x86\vb6_di_stubs.obj"
+lib /OUT:"%OUT86%\vb6rtl.lib" "%OBJDIR%\x86\vb6rtl.obj" "%OBJDIR%\x86\vb6com.obj" "%OBJDIR%\x86\vb6_di_stubs.obj" "%OBJDIR%\x86\vb6_di_win32_stubs.obj"
 lib /OUT:"%OUT86%\vb6rtl_dll.lib" "%OBJDIR%\x86\vb6comserver.obj"
 lib /OUT:"%OUT86%\vb6rtl_gui.lib" "%OBJDIR%\x86\vb6forms.obj"
 if errorlevel 1 (
