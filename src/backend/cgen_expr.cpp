@@ -2110,6 +2110,24 @@ void CCodeGen::visit(MemberAccessExpr& node) {
                             }
                         }
                     }
+                    // Fix 092y: 兜底 — 限定符本身就是工程内的**标准模块**名时, 直接
+                    // 采用其规范名. 当该模块的公开过程与其它类的成员**全部**同键冲突时
+                    // (Common 的 Version/Path 与 cVBMAN 的 Version/Path 同键,
+                    // storageKey(Function)=lowerName → defineExternal 先到先得, Common
+                    // 的两个成员全被丢弃), 本模块作用域内不存在任何
+                    // sourceModule=="Common" 的符号 → 上面的扫描落空 → sourceMod 误取
+                    // memSym->sourceModule ("cVBMAN") → vb6_cVBMAN_Version 少 me 参数 →
+                    // C2198 (cHttpServerResponse.cls 440 Common.Version()).
+                    // 仅对非类模块生效, 不改变 类名.成员 / 窗体名.成员 的现有语义.
+                    if (modCanon092v.empty()) {
+                        for (const auto& extMod092y : externalModules_) {
+                            if (Symbol::toLower(extMod092y) != objL092v) continue;
+                            Symbol* extSym092y = symTab_.lookup(extMod092y);
+                            if (extSym092y && extSym092y->kind == SymbolKind::Class) break;
+                            modCanon092v = extMod092y;
+                            break;
+                        }
+                    }
                 }
                 if (!modCanon092v.empty()) {
                     sourceMod = (Symbol::toLower(modCanon092v) == Symbol::toLower(moduleName_))
