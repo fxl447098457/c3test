@@ -95,6 +95,25 @@ void* __stdcall vb6_di_ord_12(void* a, intptr_t b) {
     return NULL;
 }
 
+/* Fix 093a: COMCTL32 ordinal #413 forwarding stub (DefSubclassProc).
+ * VB6: Declare Function DefSubclassProc Lib "comctl32" Alias "#413" (...)
+ * The SDK's comctl32.lib does not export DefSubclassProc by name, so resolve the
+ * ordinal at first use (falling back to the named export on newer comctl32). */
+intptr_t __stdcall vb6_di_ord_413(intptr_t hWnd, intptr_t wMsg, intptr_t wParam, intptr_t lParam) {
+    typedef intptr_t (WINAPI *fnDefSubclassProc)(intptr_t, intptr_t, intptr_t, intptr_t);
+    static fnDefSubclassProc pfn = NULL;
+    if (!pfn) {
+        HMODULE h = GetModuleHandleW(L"comctl32.dll");
+        if (!h) h = LoadLibraryW(L"comctl32.dll");
+        if (h) {
+            pfn = (fnDefSubclassProc)GetProcAddress(h, (LPCSTR)413);
+            if (!pfn) pfn = (fnDefSubclassProc)GetProcAddress(h, "DefSubclassProc");
+        }
+    }
+    if (pfn) return pfn(hWnd, wMsg, wParam, lParam);
+    return 0;
+}
+
 /* ============================================================
  * Fix 092z-2: msvbvm60 (VB6 运行时) 原生实现
  * ------------------------------------------------------------

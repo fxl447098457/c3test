@@ -311,6 +311,9 @@ vb6_VARIANT vb6_VariantArrayGetVal(vb6_VARIANT v, int32_t index);
 
 // Variant转基本类型
 int32_t vb6_VariantToLong(vb6_VARIANT v);
+// Fix 093a: Variant → Boolean (CBool 语义). 调用点 (ToolsJsonVba 等) 依赖符号名
+// vb6_VariantToBool; 此前缺失 → LNK2019.
+int16_t vb6_VariantToBool(vb6_VARIANT v);
 double vb6_VariantToDouble(vb6_VARIANT v);
 BSTR vb6_VariantToString(vb6_VARIANT v);
 // Fix 029: Variant → SafeArray extraction (variant holding array).
@@ -344,6 +347,9 @@ BSTR vb6_Left(BSTR s, int32_t n);
 BSTR vb6_Right(BSTR s, int32_t n);
 BSTR vb6_Mid(BSTR s, int32_t start, int32_t len);
 int32_t vb6_InStr(int32_t start, BSTR haystack, BSTR needle);
+// Fix 093a: InStrB — 字节版 InStr. 实参可为 Byte() 一维数组 (vb6_SafeArray1D*)
+// 或 BSTR; 返回 1 基字节位置 (0=未找到). 此前 RTL 无此符号 → LNK2019.
+int32_t vb6_InStrB(int32_t start, void* haystack, void* needle);
 BSTR vb6_UCase(BSTR s);
 BSTR vb6_LCase(BSTR s);
 BSTR vb6_Trim(BSTR s);

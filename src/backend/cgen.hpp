@@ -790,6 +790,17 @@ private:
     std::string canonicalClassFieldName(const std::string& className,
                                         const std::string& memberName) const;
 
+    // Fix 093a: 类成员(方法/属性)名规范化 — VB6 大小写不敏感, 调用点拼写 (count)
+    // 可能与类内声明 (Count) 不同; C 符号大小写敏感 → 生成的 vb6_<cls>_prop_get_<m>
+    // 与类定义不一致 → LNK2019. 以 Class 符号 memberNames 的声明拼写为准; 无此项
+    // (非本类成员/未知类) 时原样返回.
+    std::string canonicalClassMemberName(const std::string& className,
+                                         const std::string& memberName) const;
+
+    // Fix 093a: 当前类是否声明了同名成员字段 (裸标识符赋值时字段优先于外部同名
+    // Property Let/Set).
+    bool isOwnClassField(const std::string& memberName) const;
+
     // Fix 010r-16: COM/Property-Get 左值重写辅助
     // 当赋值语句(Let/Set/Assignment fallback)的 LHS 是非常量 C 表达式(非左值)时,
     // 尝试重写为 COM SetProp/SetPropArg 或 Property Let/Set 调用.

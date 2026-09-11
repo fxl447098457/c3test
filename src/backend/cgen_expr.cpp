@@ -591,6 +591,7 @@ void CCodeGen::visit(IdentifierExpr& node) {
         {"cdate",    "vb6_CDate"},
         {"cbyt",     "vb6_CByte"},
         {"instr",    "vb6_InStr"},
+        {"instrb",   "vb6_InStrB"},
         {"left",     "vb6_Left"},
         {"right",    "vb6_Right"},
         {"mid",      "vb6_Mid"},
@@ -1478,13 +1479,16 @@ void CCodeGen::visit(MemberAccessExpr& node) {
                     "now", "date", "time", "timer", "freefile", "command",
                     "curdir", "erl", "doevents"
                 };
-                std::string fnLower86 = Symbol::toLower(fnName);
+                // Fix 093a: 用符号表里的声明拼写 (VBA.varType → vb6_VarType). 此前用
+                // 源码拼写 → vb6_varType, 与 RTL/intrinsic 符号名不一致 → LNK2019.
+                std::string fnCanon = vbaFn->name.empty() ? fnName : vbaFn->name;
+                std::string fnLower86 = Symbol::toLower(fnCanon);
                 if (fnLower86 == "rnd") {
                     lastExpr_ = "vb6_Rnd(0)";
                 } else if (vbaZeroArgFns.count(fnLower86)) {
-                    lastExpr_ = "vb6_" + cIdent(fnName) + "()";
+                    lastExpr_ = "vb6_" + cIdent(fnCanon) + "()";
                 } else {
-                    lastExpr_ = "vb6_" + cIdent(fnName);
+                    lastExpr_ = "vb6_" + cIdent(fnCanon);
                 }
                 return;
             }
@@ -1605,6 +1609,14 @@ void CCodeGen::visit(MemberAccessExpr& node) {
         if (knownFormModuleNames_.count(objLower)
             && (!isFormModule_ || objLower != knownFormName_)) {
             std::string extFormHwnd = "vb6_form_hwnd_" + cIdent(objIdent.name) + "()";
+            // Fix 093a: 窗体默认实例方法 Show — VB6 的 `Frm.Show` 是窗体内置方法,
+            // 窗体外的调用此前落到通用的类成员/全局符号解析, 误命中同名用户函数
+            // (cLogs: `FLogs.Show` → vb6_FLogs_Show(<cTimeUse.Show 的默认实参>,0)
+            // → LNK2019). 转发到窗体自带的 vb6_form_show_<Form>(NULL).
+            if (memLower == "show") {
+                lastExpr_ = "vb6_form_show_" + cIdent(objIdent.name) + "(NULL)  /* external form show */";
+                return;
+            }
             std::string extReadFn = getControlPropReadFn(FrmControlType::Form, node.memberName);
             if (!extReadFn.empty()) {
                 lastExpr_ = extReadFn + "(" + extFormHwnd + ")  /* external form prop */";
@@ -5930,7 +5942,7 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
 
     }    // InStr: VB6允许2参数形式 InStr(string1, string2)
     // RTL: vb6_InStr(start, haystack, needle) → 2参数时补start=1
-    if (callee == "vb6_InStr") {
+    if (callee == "vb6_InStr" || callee == "vb6_InStrB") {
         if (args.size() == 2) {
             argList = "1, " + argList;
         }

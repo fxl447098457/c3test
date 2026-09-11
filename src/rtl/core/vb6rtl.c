@@ -121,6 +121,45 @@ int32_t vb6_InStr(int32_t start, BSTR haystack, BSTR needle) {
     return 0;
 }
 
+// Fix 093a: InStrB — VB6 字节版 InStr, 支持两种实参形态:
+//  · Byte() 一维数组 (vb6_SafeArray1D*) — VB6 允许 InStrB(ByteArray1, ByteArray2)
+//    做字节流查找 (类里常写成 `InStrB(a, b) = 1` 判两个字节数组相等);
+//  · BSTR — 返回字节偏移 (VB6 InStrB 语义: 宽字符下标 * 2 + 1).
+// 用 SafeArray1D 魔数 (0x5A1D) 区分两种载体, 避免在 RTL 里区分运行时指针类型.
+int32_t vb6_InStrB(int32_t start, void* haystack, void* needle) {
+    if (!haystack || !needle) return 0;
+    if (start < 1) start = 1;
+    {
+        const vb6_SafeArray1D* ha = (const vb6_SafeArray1D*)haystack;
+        const vb6_SafeArray1D* ne = (const vb6_SafeArray1D*)needle;
+        if (ha->signature == 0x5A1D && ne->signature == 0x5A1D) {
+            int32_t hlen = ha->count * ha->elemSize;
+            int32_t nlen = ne->count * ne->elemSize;
+            if (nlen == 0) return start;
+            if (!ha->data || !ne->data) return 0;
+            for (int32_t i = start - 1; i <= hlen - nlen; i++) {
+                if (memcmp((const uint8_t*)ha->data + i, ne->data, (size_t)nlen) == 0) {
+                    return i + 1;  // 1-based
+                }
+            }
+            return 0;
+        }
+    }
+    {
+        BSTR h = (BSTR)haystack;
+        BSTR n = (BSTR)needle;
+        int32_t hlen = vb6_BSTR_Len(h);
+        int32_t nlen = vb6_BSTR_Len(n);
+        if (nlen == 0) return start;
+        for (int32_t i = start - 1; i <= hlen - nlen; i++) {
+            if (memcmp(h + i, n, (size_t)nlen * sizeof(wchar_t)) == 0) {
+                return i * 2 + 1;  // 字节偏移
+            }
+        }
+        return 0;
+    }
+}
+
 BSTR vb6_UCase(BSTR s) {
     if (!s) return vb6_BSTR_Empty();
     int32_t len = vb6_BSTR_Len(s);
@@ -1473,6 +1512,27 @@ int32_t vb6_VariantToLong(vb6_VARIANT v) {
         case vb6_vtCurrency:return (int32_t)(v.cyVal / 10000);
         case vb6_vtBSTR:    return (int32_t)vb6_Val(v.bstrVal);
         default:            return 0;
+    }
+}
+
+// Fix 093a: Variant → Boolean (VB6 CBool 语义, True = -1). BSTR 先按
+// "True"/"False" 文本判断, 其余按数值 != 0 (VB6 CBool 对数字非零即 True).
+int16_t vb6_VariantToBool(vb6_VARIANT v) {
+    switch (v.vt) {
+        case vb6_vtBoolean:  return v.boolVal ? -1 : 0;
+        case vb6_vtByte:     return v.bVal ? -1 : 0;
+        case vb6_vtInteger:  return v.iVal ? -1 : 0;
+        case vb6_vtLong:     return v.lVal ? -1 : 0;
+        case vb6_vtSingle:   return v.fltVal != 0.0f ? -1 : 0;
+        case vb6_vtDouble:   return v.dblVal != 0.0 ? -1 : 0;
+        case vb6_vtCurrency: return v.cyVal ? -1 : 0;
+        case vb6_vtDispatch: return v.pdispVal ? -1 : 0;
+        case vb6_vtBSTR:
+            if (!v.bstrVal) return 0;
+            if (_wcsicmp(v.bstrVal, L"true") == 0) return -1;
+            if (_wcsicmp(v.bstrVal, L"false") == 0) return 0;
+            return vb6_Val(v.bstrVal) != 0.0 ? -1 : 0;
+        default:             return 0;  // Empty / Null / Error / 数组
     }
 }
 
@@ -5240,4 +5300,28 @@ void vb6_VariantArraySet(vb6_VARIANT* v, int32_t index, vb6_VARIANT val) {
 vb6_VARIANT vb6_LoadResData(int32_t resourceId, int32_t resourceType) {
     (void)resourceId; (void)resourceType;
     vb6_VARIANT v; memset(&v, 0, sizeof(v)); return v;  /* empty Variant */
+}
+
+// ============================================================
+// Fix 093a: P21-14 / P21-15 — SavePicture / Load 语句
+// (vb6rtl.h 早已声明, 但 RTL 里一直没有实现 → LNK2019)
+// ============================================================
+
+// SavePicture Picture, "file" — 把 StdPicture (运行时为 IPicture*/IDispatch) 按
+// 扩展名编码保存 (jpg/bmp/gif). 用 OLE 的 OleSavePictureFile: 它内部只通过 vtable
+// 槽 0 (QueryInterface) 取 IPersistStream, IPicture/IDispatch 的该槽布局相同,
+// 故直接强转 LPDISPATCH 安全 (该 API 不做接口专属的虚调用).
+void vb6_SavePicture(void* hBitmap, BSTR filename) {
+    if (!hBitmap || !filename) return;
+#ifdef _WIN32
+    OleSavePictureFile((LPDISPATCH)hBitmap, filename);
+#else
+    (void)hBitmap; (void)filename;
+#endif
+}
+
+// Load Form — 预加载窗体 (不显示). 本运行时的窗体默认实例由
+// vb6_form_show_<Form>() 首次调用时创建, 对象恒可用, 无独立预加载阶段.
+void vb6_LoadForm(void* hwnd) {
+    (void)hwnd;
 }

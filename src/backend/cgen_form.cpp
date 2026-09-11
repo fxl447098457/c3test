@@ -205,6 +205,8 @@ void CCodeGen::emitFormFramework(const FrmFormDesc& frmDesc, Module& module) {
     // FLogs.Visible / Unload FLogs 时通过 vb6_form_hwnd_<Form>() 获取窗体HWND
     h_.emitLine("void* vb6_form_hwnd_" + cIdent(formName) + "(void);");
     c_.emitLine("void* vb6_form_hwnd_" + cIdent(formName) + "(void) { return vb6_hwnd_" + cIdent(formName) + "; }");
+    // Fix 093a: 跨模块窗体默认实例 Show — 其他模块 `Frm.Show` 转发到本函数
+    h_.emitLine("void vb6_form_show_" + cIdent(formName) + "(void* hMDIClient);");
 
     // 控件句柄变量 (P7.6: 数组控件使用vb6_CtrlArr, 非数组使用void*)
     {

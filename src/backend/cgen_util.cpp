@@ -114,8 +114,15 @@ std::string CCodeGen::generateDllEntry(const std::string& progId, const std::vec
                 // Fix 053: 去重 memberNames — Event 和 Sub/Function 可能同名,
                 // memberNames 中会有重复条目, 导致 dispatch 函数被生成两次 (C2084)
                 std::set<std::string> seenMemberNames;
+                // Fix 093a: 事件名集合 (小写) — Event 无实现函数. 若被当作 Public
+                // 方法收集 (如 cTimer/cTimers 的 `Event Timer()` 与内置 Timer() 同名,
+                // lookupModule 命中内置符号) 会生成 vb6_disp_<cls>_<ev>_invoke 并
+                // extern 引用不存在的 vb6_<cls>_<ev> → LNK2019. 事件不进方法表.
+                std::set<std::string> eventNamesLower;
+                for (const auto& en : sym->eventNames) eventNamesLower.insert(Symbol::toLower(en));
                 for (auto& memberName : sym->memberNames) {
                     if (!seenMemberNames.insert(Symbol::toLower(memberName)).second) continue;
+                    if (eventNamesLower.count(Symbol::toLower(memberName))) continue;
                     // Try Sub/Function: 优先在类自身符号表搜索 (本类方法, 无碰撞)
                     Symbol* memSym = nullptr;
                     if (ownTab) memSym = ownTab->lookupModule(memberName);
@@ -130,7 +137,7 @@ std::string CCodeGen::generateDllEntry(const std::string& progId, const std::vec
                     // Fix 016b: 验证找到的符号属于当前类 (外部符号查 sourceModule;
                     // 本地符号只需 ownTab 命中即可, 因 ownTab 只含本类定义)
                     if (memSym && (memSym->kind == SymbolKind::Sub || memSym->kind == SymbolKind::Function)
-                        && memSym->access == AccessLevel::Public) {
+                        && memSym->access == AccessLevel::Public && !memSym->isBuiltin) {
                         bool belongs = false;
                         if (memSym->isExternal) {
                             belongs = (Symbol::toLower(memSym->sourceModule) == classNameLower);
@@ -1501,6 +1508,47 @@ std::string CCodeGen::canonicalClassFieldName(const std::string& className,
     return memberName;
 }
 
+// Fix 093a: 当前类是否声明了同名成员字段 — 裸标识符赋值 (`field = value`) 时,
+// 本类字段优先于从全局符号表捡到的外部同名 Property Let/Set (VB6 里同一类中
+// 字段与属性不可能同名). 典型: cClientCallback.cls 的 `recvBuffer = data`
+// (recvBuffer 是本类 Public 字段) 被误命中 cWinsock 的 Property Let RecvBuffer,
+// 生成 vb6_cWinsock_prop_let_recvBuffer((void*)me, ...) → LNK2019.
+bool CCodeGen::isOwnClassField(const std::string& memberName) const {
+    if (!isClassModule_ || moduleName_.empty() || !symTab_.moduleScope()) return false;
+    const std::string want = Symbol::toLower(moduleName_);
+    const std::string fld = Symbol::toLower(memberName);
+    for (const auto& kv : symTab_.moduleScope()->symbols()) {
+        const Symbol* cs = kv.second.get();
+        if (!cs || cs->kind != SymbolKind::Class) continue;
+        if (Symbol::toLower(cs->name) != want
+            && Symbol::toLower(cs->sourceModule) != want) continue;
+        return cs->memberFieldNames.count(fld) > 0;
+    }
+    return false;
+}
+
+// Fix 093a: 类成员(方法/属性)名规范化 — VB6 大小写不敏感, 类内声明与调用点拼写
+// 可能不同 (类里声明 `Count` 而调用点写 `count`; 或类里是 `test` 调用点写 `Test`),
+// 而 C 符号大小写敏感: 生成的函数名与类定义不一致 → LNK2019. 以 Class 符号
+// memberNames 中的声明拼写为准 (与 cIdent 规范化类名同理). 表中无此项时原样返回.
+std::string CCodeGen::canonicalClassMemberName(const std::string& className,
+                                               const std::string& memberName) const {
+    if (className.empty() || !symTab_.moduleScope()) return memberName;
+    const std::string want = Symbol::toLower(className);
+    const std::string mem = Symbol::toLower(memberName);
+    for (const auto& kv : symTab_.moduleScope()->symbols()) {
+        const Symbol* cs = kv.second.get();
+        if (!cs || cs->kind != SymbolKind::Class) continue;
+        if (Symbol::toLower(cs->name) != want
+            && Symbol::toLower(cs->sourceModule) != want) continue;
+        for (const auto& mn : cs->memberNames) {
+            if (Symbol::toLower(mn) == mem) return mn;
+        }
+        return memberName;
+    }
+    return memberName;
+}
+
 std::string CCodeGen::comPackExpr(Expr& expr) {
     // 根据表达式类型推断应该用的VARIANT封装函数
     Vb6Type vt = inferExprType(expr);
@@ -2013,6 +2061,11 @@ std::string CCodeGen::resolveClassMemberCall(const std::string& className,
         }
     }
 
+    // Fix 093a: 成员名大小写规范化 — 调用点拼写可能与类内声明不同 (VB6 大小写
+    // 不敏感), 直接用之会生成大小写不匹配的 C 符号 → LNK2019. 以声明拼写为准.
+    const std::string memberCanon = canonicalClassMemberName(
+        canonicalClassName.empty() ? className : canonicalClassName, memberName);
+
     // Fix 089g: 跨模块同名成员 storageKey 抢占 — 多个类有同名 Property Get 时
     // (如 cWebSocketClient / cWebSocketServerClient 都有 State), driver.cpp 的
     // globalPublicSyms 按 storageKey (state$pg) 只保留先分析模块的符号. 目标类的
@@ -2045,10 +2098,10 @@ std::string CCodeGen::resolveClassMemberCall(const std::string& className,
                 std::string canonFix = classCanonFix.empty() ? canonicalClassName : classCanonFix;
                 switch (itKindFix->second) {
                     case ProcKind::PropertyGet:
-                        return "vb6_" + cIdent(canonFix) + "_prop_get_" + cIdent(memberName);
+                        return "vb6_" + cIdent(canonFix) + "_prop_get_" + cIdent(memberCanon);
                     case ProcKind::Function:
                     case ProcKind::Sub:
-                        return "vb6_" + cIdent(canonFix) + "_" + cIdent(memberName);
+                        return "vb6_" + cIdent(canonFix) + "_" + cIdent(memberCanon);
                     default:
                         break;  // PropertyLet/PropertySet 为主 — 维持 scope 选择
                 }
@@ -2122,7 +2175,7 @@ std::string CCodeGen::resolveClassMemberCall(const std::string& className,
                             prefix = "prop_get_";
                         }
                     }
-                    return "vb6_" + cIdent(classCanonName) + "_" + prefix + cIdent(memberName);
+                    return "vb6_" + cIdent(classCanonName) + "_" + prefix + cIdent(mn);
                 }
             }
         }
@@ -2139,7 +2192,7 @@ std::string CCodeGen::resolveClassMemberCall(const std::string& className,
 
     // 强制使用规范类名 (来自符号表, 与类定义struct名一致),
     // 避免用户源代码大小写差异导致生成的函数名与定义不匹配
-    return "vb6_" + cIdent(canonicalClassName) + "_" + prefix + cIdent(memberName);
+    return "vb6_" + cIdent(canonicalClassName) + "_" + prefix + cIdent(memberCanon);
 }
 
 // ============================================================

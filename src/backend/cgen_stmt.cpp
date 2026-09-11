@@ -557,8 +557,16 @@ void CCodeGen::visit(AssignmentStmt& node) {
                 // (C2065 未声明 + C2440 参数类型错误). 必须跳过属性路径, 交给
                 // visit(MemberAccessExpr) 生成 oCallback->Socket = ... 字段赋值.
                 bool objClassMatchesProp = true;
-                if (!objClass.empty() && propLetSym->isExternal) {
-                    std::string propModLower = propLetSym->sourceModule;
+                // Fix 093a: 属性符号与对象类必须同类. 非 external 符号 (属性定义于
+                // 本模块) 的"所属类"即当前模块名 — 此前只在 isExternal 时校验, 导致
+                // `HttpSvr.MaxCacheFileSize = v` (MaxCacheFileSize 在本类 cHttpServer
+                // 是 Property, 而 HttpSvr 是 cHttpServerSvr, 该名在后者是公有字段)
+                // 误发 vb6_cHttpServerSvr_prop_let_MaxCacheFileSize → LNK2019
+                // (cSSEClient.RequestTimeOut / cHttpServerSvr.CacheTTLSeconds 同类).
+                if (!objClass.empty()) {
+                    std::string propModLower = propLetSym->isExternal
+                        ? propLetSym->sourceModule
+                        : (isClassModule_ ? moduleName_ : std::string());
                     std::transform(propModLower.begin(), propModLower.end(), propModLower.begin(), ::tolower);
                     std::string objClassLower = objClass;
                     std::transform(objClassLower.begin(), objClassLower.end(), objClassLower.begin(), ::tolower);
@@ -582,7 +590,11 @@ void CCodeGen::visit(AssignmentStmt& node) {
                     std::string prefix = (propLetSym->kind == SymbolKind::PropertySet) ? "prop_set_" : "prop_let_";
                     // Fix 010r-10: 使用map中的类名作为sourceModule
                     std::string sourceModule = propLetSym->isExternal ? propLetSym->sourceModule : objClass;
-                    std::string funcName = cProcName(prefix + maExpr.memberName, propLetSym->access, sourceModule);
+                    // Fix 093a: 成员名按类内声明拼写规范化 (VB6 大小写不敏感),
+                    // 避免调用点拼写与类定义不一致 → LNK2019.
+                    std::string funcName = cProcName(
+                        prefix + canonicalClassMemberName(sourceModule, maExpr.memberName),
+                        propLetSym->access, sourceModule);
                     emitExpr(*maExpr.object);
                     std::string objExpr = std::move(lastExpr_);
                     emitExpr(*node.value);
@@ -682,7 +694,11 @@ void CCodeGen::visit(AssignmentStmt& node) {
                         isAssigningReturnValue = true;
                     }
                 }
-                if (!isAssigningReturnValue) {
+                // Fix 093a: 本类成员字段优先 — `recvBuffer = data` (cClientCallback.cls,
+                // recvBuffer 是本类字段) 被全局符号表误命中 cWinsock 的 Property Let
+                // RecvBuffer → vb6_cWinsock_prop_let_recvBuffer((void*)me, ...) → LNK2019.
+                // 命中本类字段时不走属性路径, 交给下方通用赋值生成 me->recvBuffer = ...;
+                if (!isAssigningReturnValue && !isOwnClassField(tgtId.name)) {
                     std::string prefix = (propSym->kind == SymbolKind::PropertySet) ? "prop_set_" : "prop_let_";
                     std::string funcName = cProcName(prefix + tgtId.name, propSym->access,
                         propSym->isExternal ? propSym->sourceModule : (isClassModule_ ? moduleName_ : ""));
