@@ -1,7 +1,7 @@
 # C3 编译器错误修复 — 任务交接文档
 
 > 用途：新会话恢复上下文用。新开会话后直接说「读取 C3_FIX_HANDOFF.md 并继续修复」。
-> 更新日期：2026-09-11（091a-092z：无窗体 125 模块 bisect 基线 65 → **7**、含窗体全量 129 条目 → **0**；提交 aeaa95f/05793ac/ae72bf2/d8f11aa/e97a90d/02205f5/ad62a09/96d123a/7e58595/ac78b3c/36d83a3/1c8daf7/db139c9/d5806d8/821e0ea/02e49a3/8a8eac2/866e814/288c4ea/a29240f/504e86b/aa98df1/5c5bf65/53da196/7757dee/d6a4dcf/8217f5f/ff133f4/f799e55/b6ff125/7559ad2/50de9b7/bad7b27/ac69fc0/e0df780/ec7fa10/4a03e23/97eb89c。**剩余 7 全部为窗体假阳性**（cLogs/cLayer 引用的 `.frm` 不在 bisect 编译集）→ 无窗体面已收敛。**092z 起新增「含窗体」窗口**：`-Forms` 开关 + 排除陈旧对象后，**含窗体全量（129 条目，含全部 4 个 `.frm`）error C = 0** —— 编译期全绿。**窗体 Release 崩溃「阻塞项」已解除**：根因并非未初始化/UB，而是 `.build` 的**陈旧对象**（`cmake --build .build --clean-first` 全量重建后该崩溃即消失）→ 不必再上 cdb 抓栈；下一步转入**链接期**（LNK2005 重定义 + `msvbvm60.lib` 缺失））
+> 更新日期：2026-09-11（091a-092z：无窗体 125 模块 bisect 基线 65 → **7**、含窗体全量 129 条目 → **0**；提交 aeaa95f/05793ac/ae72bf2/d8f11aa/e97a90d/02205f5/ad62a09/96d123a/7e58595/ac78b3c/36d83a3/1c8daf7/db139c9/d5806d8/821e0ea/02e49a3/8a8eac2/866e814/288c4ea/a29240f/504e86b/aa98df1/5c5bf65/53da196/7757dee/d6a4dcf/8217f5f/ff133f4/f799e55/b6ff125/7559ad2/50de9b7/bad7b27/ac69fc0/e0df780/ec7fa10/4a03e23/97eb89c。**剩余 7 全部为窗体假阳性**（cLogs/cLayer 引用的 `.frm` 不在 bisect 编译集）→ 无窗体面已收敛。**092z 起新增「含窗体」窗口**：`-Forms` 开关 + 排除陈旧对象后，**含窗体全量（129 条目，含全部 4 个 `.frm`）error C = 0** —— 编译期全绿。**窗体 Release 崩溃「阻塞项」已解除**：根因并非未初始化/UB，而是 `.build` 的**陈旧对象**（`cmake --build .build --clean-first` 全量重建后该崩溃即消失）→ 不必再上 cdb 抓栈；下一步转入**链接期**（LNK2005 重定义 + 由源码 `Declare ... Lib "msvbvm60"` 生成的 `msvbvm60.lib` 引用；后者 x64 无库可补，须改道 RTL））
 
 ### 最近修复摘要（092r-z：无窗体 bisect 基线 16 → **7**、含窗体全量 → **0**；提交 f799e55/b6ff125/7559ad2/50de9b7/bad7b27/ac69fc0/e0df780/ec7fa10/4a03e23/97eb89c，2026-09-11）
 
@@ -398,9 +398,14 @@ cToolsArray.cls 的 6 错集中在三个草稿/边缘函数（Extend/DeArray/tes
    - `mDelay.obj : Delay 已经在 Tools.obj 中定义`
    - `cModbusTransportTCP.obj / cModbusSlave.obj : vb6_evt_wrap_m_socket_Connect / _CloseEvent / _DataArrival / _Error / m_listensocket_* 已经在 cWebSocketClient.obj / cWebSocketServer.obj 中定义`
    → 指向两类生成问题：① **模块级私有变量未按模块前缀 mangle**（VB6 中各模块 `Private m_Theme` 互不冲突，C 侧必须消歧；`Delay` 同族）；② **事件包装函数 `vb6_evt_wrap_m_*` 被写进每个发送者模块**，应只在其事件源类模块定义、其它模块仅保留声明。
-2. **`LNK1104: 无法打开文件 msvbvm60.lib`**（bisect 工程配置缺口，非代码缺陷）：`--dll` 链接未带 VB6 运行时 shim 库；需确认全量 `vbman/build_vbman.bat` 路径是否同样缺。
+2. **`LNK1104: 无法打开文件 msvbvm60.lib`** —— **不是配置缺口，而是生成器缺「`Lib "msvbvm60"` 特判」**（2026-09-11 核实，前一轮判读有误）：
+   - **来源**：`cgen_decl.cpp:1219` 对**每条** VB6 `Declare ... Lib "X"` 都生成 `#pragma comment(lib, "X.lib")`；而 VBMAN 源码确有 **10 个模块 14 处** `Declare ... Lib "msvbvm60"`（`mdTlsThunks.bas:105/106`、`cAsyncSocket.cls:193/203`、`cTlsSocket.cls:160/161`、`mdTlsSodium.bas:77/79`、`mdTlsNative.bas:121/127`、`ToolsJsonUcs.bas:54`、`cHttpRequest.cls:120`、`cHttpDownload.cls:51`、`cToolsArray.cls:18`）→ 生成物中出现 `#pragma comment(lib, "msvbvm60.lib")`（`cAsyncSocket.c:45/55`、`cTlsSocket.c:101/102`、`ToolsTlsThunks.c:252/253`、`cToolsArray.c:5`），链接器遂去找该文件。
+   - **只涉 3 类符号**：`Alias "VarPtr"`（源码名 `ArrPtr`，取数组/变量地址）、`Alias "__vbaObjSetAddref"`（对象赋值时的运行时 AddRef）、`Alias "#644"`（**按序号**导入的运行时内部函数，源码名 `SplitLongToBytes`）。
+   - **x64 路线上无法「补」这个库**：本机 `C:\Windows\SysWOW64\msvbvm60.dll` 存在（32 位），但 `System32` 下**无** 64 位版本；Windows SDK / VS 安装目录里**不存在任何 `msvbvm60.lib`**。VB6 运行时只有 32 位 → `--arch x64` 没有可链接的导入库，且与 `ai/011`「静态链接 msvbvm60 ❌ 不采用、不支持 x64」及网站「零依赖部署」的定位冲突。
+   - **可行方向**：`visit(DeclareDecl)` 特判 `Lib "msvbvm60"` → 不生成 `#pragma comment(lib, ...)`，把这 3 类符号改道 RTL（`VarPtr` 已有 P18-D 原生处理 `cgen_expr.cpp:3245`，只需让 `Alias=="VarPtr"` 的 Declare 也走该分支；`__vbaObjSetAddref` / `#644` RTL 暂无实现，需新增）。
+   - `LNK1104` 是 **fatal**，它会挡在真正的「未解析外部符号」清单之前 → **必须先处理它才能看清链接期全貌**。
 
-**建议顺序**：先确认这两簇 LNK2005 在 `vbman/build_vbman.bat` 全量链接下是否重现（bisect 是裁剪工程，需排除「裁剪导致的重复」），再按 ①/② 分别修。
+**建议顺序**：先做第 2 项（fatal，挡住真相）；再确认第 1 项两簇 LNK2005 在 `vbman/build_vbman.bat` 全量链接下是否重现（bisect 是裁剪工程，需排除「裁剪导致的重复」），然后分别修。
 
 ## 9. （历史，2026-09-05 遗留，已非当前下一步）ToolsTlsThunks C2224 x37（COM 集合簇）+ SafeArray 簇
 
