@@ -2881,6 +2881,7 @@ std::string CCodeGen::getControlPropReadFn(FrmControlType ctrlType, const std::s
         if (propLower == "caption") return "vb6_GetControlText";
         if (propLower == "visible") return "vb6_GetControlVisible";
         if (propLower == "enabled") return "vb6_GetControlEnabled";
+        if (propLower == "align") return "vb6_GetControlAlign";  // P13.5b: 停靠
         break;
     case FrmControlType::Label:
         if (propLower == "caption") return "vb6_GetControlText";
@@ -2933,6 +2934,7 @@ std::string CCodeGen::getControlPropReadFn(FrmControlType ctrlType, const std::s
         if (propLower == "caption") return "vb6_GetControlText";
         if (propLower == "picture") return "vb6_GetControlPicture";
         if (propLower == "autosize") return "vb6_GetPictureAutoSize";
+        if (propLower == "align") return "vb6_GetControlAlign";  // P13.5b: 停靠
         if (propLower == "visible") return "vb6_GetControlVisible";
         if (propLower == "enabled") return "vb6_GetControlEnabled";
         break;
@@ -3039,6 +3041,7 @@ std::string CCodeGen::getControlPropWriteFn(FrmControlType ctrlType, const std::
         if (propLower == "caption") return "vb6_SetControlText";
         if (propLower == "visible") return "vb6_SetControlVisible";
         if (propLower == "enabled") return "vb6_SetControlEnabled";
+        if (propLower == "align") return "vb6_SetControlAlign";  // P13.5b: 停靠
         break;
     case FrmControlType::Label:
         if (propLower == "caption") return "vb6_SetControlText";
@@ -3086,6 +3089,7 @@ std::string CCodeGen::getControlPropWriteFn(FrmControlType ctrlType, const std::
         if (propLower == "caption") return "vb6_SetControlText";
         if (propLower == "picture") return "vb6_SetControlPicture";
         if (propLower == "autosize") return "vb6_SetPictureAutoSize";
+        if (propLower == "align") return "vb6_SetControlAlign";  // P13.5b: Picture1.Align 停靠
         if (propLower == "visible") return "vb6_SetControlVisible";
         if (propLower == "enabled") return "vb6_SetControlEnabled";
         break;

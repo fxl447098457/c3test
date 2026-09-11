@@ -979,6 +979,42 @@ void vb6_SetAlignment(void* hwnd, int align) {
 }
 
 // ============================================================
+// P13.5b: Align (PictureBox/Frame 停靠)
+// ============================================================
+
+// 0=vbAlignNone, 1=vbAlignTop, 2=vbAlignBottom, 3=vbAlignLeft, 4=vbAlignRight
+// 停靠语义: 贴到父窗口客户区对应边; 固定维度(Left/Right 用宽, Top/Bottom 用高)
+// 保持不变, 伸展维度撑满客户区. (VB6 还会顶开其它控件, 此处不重排其它控件.)
+int vb6_GetControlAlign(void* hwnd) {
+    if (!hwnd) return 0;
+    return (int)(INT_PTR)GetPropW((HWND)hwnd, L"VB6_Align");
+}
+
+void vb6_SetControlAlign(void* hwnd, int align) {
+    if (!hwnd) return;
+    SetPropW((HWND)hwnd, L"VB6_Align", (HANDLE)(INT_PTR)align);
+    if (align < 1 || align > 4) return;  /* 0 = vbAlignNone: 不改变位置 */
+    HWND parent = GetParent((HWND)hwnd);
+    if (!parent) return;
+    RECT prc;
+    if (!GetClientRect(parent, &prc)) return;
+    int clientW = (int)(prc.right - prc.left);
+    int clientH = (int)(prc.bottom - prc.top);
+    RECT crc;
+    GetWindowRect((HWND)hwnd, &crc);
+    int x = 0, y = 0;
+    int w = (int)(crc.right - crc.left);
+    int h = (int)(crc.bottom - crc.top);
+    switch (align) {
+        case 1: w = clientW; break;                     /* Top: 撑满宽, 贴顶 */
+        case 2: y = clientH - h; w = clientW; break;    /* Bottom */
+        case 3: h = clientH; break;                     /* Left: 撑满高, 贴左 */
+        case 4: x = clientW - w; h = clientH; break;    /* Right */
+    }
+    SetWindowPos((HWND)hwnd, NULL, x, y, w, h, SWP_NOZORDER | SWP_NOACTIVATE);
+}
+
+// ============================================================
 // P13.6: TabIndex/TabStop
 // ============================================================
 

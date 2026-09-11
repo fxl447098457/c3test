@@ -252,6 +252,11 @@ void vb6_SetLocked(void* hwnd, int locked);
 int vb6_GetAlignment(void* hwnd);
 void vb6_SetAlignment(void* hwnd, int align);
 
+// P13.5b: Align (PictureBox/Frame 停靠到父窗体客户区边缘)
+// 0=vbAlignNone, 1=vbAlignTop, 2=vbAlignBottom, 3=vbAlignLeft, 4=vbAlignRight
+int vb6_GetControlAlign(void* hwnd);
+void vb6_SetControlAlign(void* hwnd, int align);
+
 // P13.6: TabIndex/TabStop
 int vb6_GetTabIndex(void* hwnd);
 void vb6_SetTabIndex(void* hwnd, int index);
