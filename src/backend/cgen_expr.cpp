@@ -3196,7 +3196,13 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
                     }
                 }
             }
-            if (vpIsCall) {
+            // Fix 092s: VB6_SA_AT / VB6_SA_ND_ATn 展开后是**左值** (SafeArray 元素),
+            // 不能按"调用结果非左值"走复合字面量 — VarPtr(uOutput.Buffer(0)) 曾生成
+            // (intptr_t)&(void*){VB6_SA_AT(...)} → C2440 (cTlsSocket 4093).
+            // 注意 vb6_VariantArrayGet 按值返回, 不在白名单内.
+            bool vpIsLvalue092s = lastExpr_.compare(0, 10, "VB6_SA_AT(") == 0
+                || lastExpr_.compare(0, 12, "VB6_SA_ND_AT") == 0;
+            if (vpIsCall && !vpIsLvalue092s) {
                 lastExpr_ = "(intptr_t)&(void*){" + lastExpr_ + "}";
             } else if (!lastExpr_.empty() && (std::isdigit(static_cast<unsigned char>(lastExpr_[0])) || lastExpr_[0] == '(')) {
                 if (lastExpr_.size() > 1 && lastExpr_[0] == '(' && lastExpr_[1] == '*') {
@@ -3623,7 +3629,13 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
                                     std::string fieldExpr = std::move(lastExpr_);
                                     emitExpr(*node.positional[0]);
                                     std::string idx = std::move(lastExpr_);
-                                    std::string elemCType = mapSaElemCType(mi.type);
+                                    // Fix 092s: UDT 元素类型成员数组须用 vb6_type_<UDT>
+                                    // (mapSaElemCType 对 UserDefinedType 退化为 vb6_VARIANT
+                                    // → 元素大小/取址全错, cTlsSocket 4086/4093)
+                                    std::string elemCType = (mi.type == Vb6Type::UserDefinedType
+                                                             && !mi.typeRefName.empty())
+                                        ? ("vb6_type_" + cIdent(mi.typeRefName))
+                                        : mapSaElemCType(mi.type);
                                     lastExpr_ = "VB6_SA_AT(" + elemCType + ", "
                                               + fieldExpr + ", " + idx + ")";
                                     handled = true;
@@ -3816,7 +3828,11 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
                                     // Fix 081j-2: With 块临时变量是指针，用 -> 访问成员
                                     emitExpr(*node.positional[0]);
                                     std::string idx = std::move(lastExpr_);
-                                    std::string elemCType = mapSaElemCType(mi.type);
+                                    // Fix 092s: 同 3626 — UDT 元素类型成员数组
+                                    std::string elemCType = (mi.type == Vb6Type::UserDefinedType
+                                                             && !mi.typeRefName.empty())
+                                        ? ("vb6_type_" + cIdent(mi.typeRefName))
+                                        : mapSaElemCType(mi.type);
                                     lastExpr_ = "VB6_SA_AT(" + elemCType + ", "
                                               + tempVar + "->" + cIdent(mi.name) + ", " + idx + ")";
                                     isHandled = true;
