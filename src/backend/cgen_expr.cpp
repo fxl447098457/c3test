@@ -904,6 +904,12 @@ std::string CCodeGen::wrapToBSTR(const std::string& expr, Expr& node) {
     if (expr.find("vb6_ComCall(") == 0) {
         return "vb6_VariantToString(vb6_VariantFromComResult(" + expr + "))";
     }
+    // Fix 092w: 链式默认属性访问结果 (vb6_VariantFromComResult(vb6_ComCall(...))) 是
+    // vb6_VARIANT — BSTR 上下文需提取为字符串, 否则 C2440 (Demo_Database 506)。
+    // 必须放在 vb6_BSTR 子串检查之前 (实参中可能含 vb6_BSTR_FromStr)。
+    if (expr.find("vb6_VariantFromComResult(") == 0) {
+        return "vb6_VariantToString(" + expr + ")";
+    }
     // P24-01: COM属性返回int/double, 需转BSTR
     if (expr.find("vb6_ComGetIntProp(") != std::string::npos ||
         expr.find("vb6_ComVtableGetInt(") != std::string::npos) {
@@ -4321,12 +4327,37 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
                     if (gp != std::string::npos) {
                         std::string propName = funcPart.substr(gp + 10);
                         Symbol* propSym86 = symTab_.lookupModuleByKind(propName, SymbolKind::PropertyGet);
-                        if (propSym86 && propSym86->params.empty()) innerIsChainedObj = true;
+                        if (propSym86 && propSym86->params.empty()) {
+                            innerIsChainedObj = true;
+                        } else {
+                            // Fix 092w: 内层 prop_get 调用已自带实参 (classMethodObjArg
+                            // 顶层段数 >= 2, 即 this + 至少 1 个实参) 说明内层调用已自足,
+                            // 外层索引是对其返回对象 (Variant/COM 对象) 的默认成员访问,
+                            // 不能并入内层参数表 (否则实参个数超出签名).
+                            // Demo_Database 506: TestDB.Rows(1)("score") — Rows 是 cCollection
+                            // 字段, (1) 取元素返回 Variant(Dictionary), ("score") 应在其结果上
+                            // 走默认成员 Item 的后期绑定调用.
+                            int topArgs092w = classMethodObjArg.empty() ? 0 : 1;
+                            int depth092w = 0;
+                            for (char ch092w : classMethodObjArg) {
+                                if (ch092w == '(' || ch092w == '[' || ch092w == '{') depth092w++;
+                                else if (ch092w == ')' || ch092w == ']' || ch092w == '}') depth092w--;
+                                else if (ch092w == ',' && depth092w == 0) topArgs092w++;
+                            }
+                            if (topArgs092w >= 2) innerIsChainedObj = true;
+                        }
                     }
                 }
             }
             if (innerIsChainedObj) {
                 std::string innerObj = funcPart + "(" + classMethodObjArg + ")";
+                // Fix 092w: 内层函数返回 vb6_VARIANT (如 cCollection.prop_get_Item) 时,
+                // vb6_ComCall 的 obj 形参是 void* — 需先经 vb6_VariantToObjectVal 提取
+                // 对象指针, 否则 vb6_VARIANT 直传 → C2440. (无参 prop_get 返回 void* 的
+                // 既有路径保持直传不变.)
+                if (variantReturnFuncs_ && variantReturnFuncs_->count(funcPart)) {
+                    innerObj = "vb6_VariantToObjectVal(" + innerObj + ")";
+                }
                 std::vector<std::string> packedArgs86;
                 for (size_t i = 0; i < node.positional.size(); i++) {
                     std::string packFn86 = comPackExpr(*node.positional[i]);
