@@ -90,3 +90,21 @@ powershell -File scripts/_tmp_bisect.ps1 -Forms     # 含窗体全量回归
 2. **`--emit-c`（不链接）不会输出诊断**：`=== C3 Diagnostics (linking) ===` 是链接阶段
    收集后写 `c3-error.log` 的，所以“`--emit-c` 里 VB4001=0”不能作为告警已清的证据；
    证据应是「生成的 C 代码不再走回退分支」+「全量回归 exit=0 且不再产生日志」。
+
+## 5. 里程碑基线 tag
+
+标记「首次成功编译链接出可注册的 VBMAN.dll」的状态：
+
+```powershell
+git tag -a v0.1.0-m33-vbman-dll     # 指向 5f4bed1（M33 收口）
+```
+
+| 项 | 值 |
+| --- | --- |
+| tag | `v0.1.0-m33-vbman-dll`（annotated，指向 `5f4bed1`） |
+| 状态 | 编译/链接通过，`regsvr32` 可注册；**运行期功能尚未对齐，使用中仍有错误** |
+| 产物 | `vbman/src/_fix/bisect/outfrm/VBMAN.dll` 2,566,144 字节（SHA256 前 16 位 `A38BF9F448D22E49`） |
+| 对照基线 | `vbman/VBMAN.dll`（VB6 原生编译，2026-07-15，2,310,144 字节） |
+| 关键指标 | C3 exit=0；LNK2019 18→0、LNK2005 23→0、VB4001 2→0 |
+
+tag 仅打本地，未 `push`（远端 `origin/main` 落后 2 个提交、无任何 tag）。
