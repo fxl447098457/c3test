@@ -1,14 +1,3 @@
----
-AIGC:
-  ContentProducer: '001191110102MAD55U9H0F10002'
-  ContentPropagator: '001191110102MAD55U9H0F10002'
-  Label: '1'
-  ProduceID: '9a77ac4f-9684-40ae-b5eb-7cba1d91fa82'
-  PropagateID: '9a77ac4f-9684-40ae-b5eb-7cba1d91fa82'
-  ReservedCode1: '60d4e16f-e92a-460a-b6c6-0973a6e40424'
-  ReservedCode2: '60d4e16f-e92a-460a-b6c6-0973a6e40424'
----
-
 # P24-08 Phase4: VB6标准错误号映射表扩展 (60→170+)
 
 日期: 2026-07-08
@@ -96,5 +85,3 @@ P24-08 Phase3 实现了 `vb6_StdErrorDesc()` 五级 fallback 错误描述，但�
 当前方案是 switch-case 硬编码，优势是零依赖、启动快。可考虑的改进：
 - **STRINGTABLE 资源嵌入 c3.exe**: 与现有 RC 资源嵌入架构一致，支持多语言，最接近 VB6 原版做法
 - **错误表完整性**: 当前 ~170 条已覆盖绝大多数常见场景，如需完整可后续补充
-
-> AI生成

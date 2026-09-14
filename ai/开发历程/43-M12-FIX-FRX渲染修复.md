@@ -1,5 +1,7 @@
 # M12-FIX: FRX资源渲染修复 + Graphical按钮样式
 
+> **历史说明**：本文涉及的 AIGC 零宽字符水印及其全部防御手段（`strip_zw` / `.temp/` 中转 / `CMakeLists_clean.txt` / `full_build.bat` / 强制 text-writer 纪律）已于 2026-09-14 撤销，注入源已不存在。以下为历史记录，请勿照做。
+
 ## 日期
 2026-07-02
 

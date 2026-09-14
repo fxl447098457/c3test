@@ -1,25 +1,3 @@
----
-AIGC:
-  ContentProducer: '001191110102MAD55U9H0F10002'
-  ContentPropagator: '001191110102MAD55U9H0F10002'
-  Label: '1'
-  ProduceID: 'adc75292-e31a-4361-896a-3a39be0adc6f'
-  PropagateID: 'adc75292-e31a-4361-896a-3a39be0adc6f'
-  ReservedCode1: '8d1e7170-e5d9-4871-8633-a7224e1caaac'
-  ReservedCode2: '8d1e7170-e5d9-4871-8633-a7224e1caaac'
----
-
----
-AIGC:
-  ContentProducer: '001191110102MAD55U9H0F10002'
-  ContentPropagator: '001191110102MAD55U9H0F10002'
-  Label: '1'
-  ProduceID: '09c84d7f-8e15-4370-9b60-ccdd0fa37431'
-  PropagateID: '09c84d7f-8e15-4370-9b60-ccdd0fa37431'
-  ReservedCode1: '3f33f23f-7d6d-4a52-9ad8-51d599892f56'
-  ReservedCode2: '3f33f23f-7d6d-4a52-9ad8-51d599892f56'
----
-
 # P24-08 补充: COM错误描述i18n + GUI错误弹窗
 
 日期: 2026-07-08
@@ -160,7 +138,3 @@ VB6应用级错误号用内置中文查表兜底, 后续可扩展为STRINGTABLE�
 | src/rtl/core/vb6rtl.c | vb6_RaiseError区分GUI/CLI; 新增user32/kernel32 pragma |
 | src/rtl/core/vb6com.c | vb6_StdErrorDesc中文查表(60+错误号); vb6_ComCheckError五级fallback; CreateObject Error 429增强 |
 | src/rtl/core/vb6forms.c | _vb6_forms_trace→fwprintf |
-
-> AI生成
-
-> AI生成

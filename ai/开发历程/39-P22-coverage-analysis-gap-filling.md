@@ -1,15 +1,4 @@
-﻿---
-AIGC:
-  ContentProducer: '001191110102MAD55U9H0F10002'
-  ContentPropagator: '001191110102MAD55U9H0F10002'
-  Label: '1'
-  ProduceID: '376d9e22-5439-453f-8a42-9179cf57bd43'
-  PropagateID: '376d9e22-5439-453f-8a42-9179cf57bd43'
-  ReservedCode1: '6995a3f7-57e5-475a-a73c-f13b6ce3eac6'
-  ReservedCode2: '6995a3f7-57e5-475a-a73c-f13b6ce3eac6'
----
-
-# 39-P22-VB6覆盖率综合分析与缝隙补全
+﻿# 39-P22-VB6覆盖率综合分析与缝隙补全
 
 > 日期: 2026-07-02
 > 提交: 待提交

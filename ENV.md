@@ -1,70 +1,4 @@
-﻿---
-AIGC:
-  ContentProducer: '001191110102MAD55U9H0F10002'
-  ContentPropagator: '001191110102MAD55U9H0F10002'
-  Label: '1'
-  ProduceID: 'a6499345-f045-4c0f-ae07-00a2db5343c3'
-  PropagateID: 'a6499345-f045-4c0f-ae07-00a2db5343c3'
-  ReservedCode1: '83b7fd64-2cb2-48db-8870-e37bfd30b8eb'
-  ReservedCode2: '83b7fd64-2cb2-48db-8870-e37bfd30b8eb'
----
-
----
-AIGC:
-  ContentProducer: '001191110102MAD55U9H0F10002'
-  ContentPropagator: '001191110102MAD55U9H0F10002'
-  Label: '1'
-  ProduceID: '467edccd-ffa7-4c56-9a0a-339cdf32796a'
-  PropagateID: '467edccd-ffa7-4c56-9a0a-339cdf32796a'
-  ReservedCode1: '568f2730-804d-4264-bf29-f0c2c6e904a7'
-  ReservedCode2: '568f2730-804d-4264-bf29-f0c2c6e904a7'
----
-
----
-AIGC:
-  ContentProducer: '001191110102MAD55U9H0F10002'
-  ContentPropagator: '001191110102MAD55U9H0F10002'
-  Label: '1'
-  ProduceID: '9b0e3305-592b-4c80-999a-c19fe31bf9b0'
-  PropagateID: '9b0e3305-592b-4c80-999a-c19fe31bf9b0'
-  ReservedCode1: '6d6f08bc-cc2c-4db6-b73c-6452be764845'
-  ReservedCode2: '6d6f08bc-cc2c-4db6-b73c-6452be764845'
----
-
----
-AIGC:
-  ContentProducer: '001191110102MAD55U9H0F10002'
-  ContentPropagator: '001191110102MAD55U9H0F10002'
-  Label: '1'
-  ProduceID: '96ea9b49-400d-4383-8347-626f1da41601'
-  PropagateID: '96ea9b49-400d-4383-8347-626f1da41601'
-  ReservedCode1: 'ec4d4d59-44ce-4cf1-bcd1-d758d33a49e3'
-  ReservedCode2: 'ec4d4d59-44ce-4cf1-bcd1-d758d33a49e3'
----
-
----
-AIGC:
-  ContentProducer: '001191110102MAD55U9H0F10002'
-  ContentPropagator: '001191110102MAD55U9H0F10002'
-  Label: '1'
-  ProduceID: '7b035d93-441f-4307-8cb1-7fc76f374ccb'
-  PropagateID: '7b035d93-441f-4307-8cb1-7fc76f374ccb'
-  ReservedCode1: 'ca1dc0a7-ba29-4396-8e9c-c0a71e991560'
-  ReservedCode2: 'ca1dc0a7-ba29-4396-8e9c-c0a71e991560'
----
-
----
-AIGC:
-  ContentProducer: '001191110102MAD55U9H0F10002'
-  ContentPropagator: '001191110102MAD55U9H0F10002'
-  Label: '1'
-  ProduceID: '5e968878-1d7b-4c43-8145-f4d5e8d3c68e'
-  PropagateID: '5e968878-1d7b-4c43-8145-f4d5e8d3c68e'
-  ReservedCode1: 'bd11dbed-fe9f-4042-8784-624f5e14a5e8'
-  ReservedCode2: 'bd11dbed-fe9f-4042-8784-624f5e14a5e8'
----
-
-# VB6编译器（C3）开发环境速查
+﻿# VB6编译器（C3）开发环境速查
 
 > 本文件是 AI Agent 每次会话的环境参考，避免重复试错。
 
@@ -72,8 +6,7 @@ AIGC:
 
 | 项目 | 路径 |
 |------|------|
-| 项目根目录 | `D:\开源项目\BASIC家族\vb6.pro` |
-| Junction 快捷路径 | `D:\vb6pro` → 项目根目录（两个路径等价） |
+| 项目根目录 | `D:\code\vi\c3.vb6.pro` |
 
 ## 构建工具链
 
@@ -88,100 +21,61 @@ AIGC:
 | 项目 | 路径 |
 |------|------|
 | vcvarsall.bat | `C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvarsall.bat` |
-| C3.exe | `.build\C3.exe`（项目根目录下，构建后直接在 .build 根目录） |
-| 构建目录 | `.build\`（CMake + Ninja 生成） |
-| 输出目录 | `output\`（编译生成的 .h/.c/.exe 中间产物） |
-| 测试目录 | `tests\`（57个.bas + 4个.vbp 测试文件） |
+| C3.exe | `.build\C3.exe`（构建后直接在 .build 根目录，**不在** `.build\Release\` 下） |
+| 构建目录 | `.build\`（CMake + Ninja 生成，可随时删除重建） |
+| 输出目录 | `output\`（编译生成的 .exe/.err/.out） |
+| 测试目录 | `tests\`（98 个 .bas + 13 个 .vbp） |
 | 文档目录 | `ai\`（进度表、开发历程、规划文档） |
-| text-writer MCP | `D:\code\_bin\text-writer-mcp\index.js` |
+| 临时目录 | `.temp\`（一次性排查脚本与日志，不是源码） |
 
-## 构建命令
-
-### AIGC 水印 hook 防御（关键！）
-
-AIGC 水印 hook 会在 **两次 tool call 之间** 对工作目录根目录文件注入 ~10KB 零宽字符。
-CMakeLists.txt 被注入后 CMake 无法解析。`scripts\build.bat` 也会触发（因为写入和编译不在同一个 cmd 进程）。
-
-**唯一可靠的构建方式：一次性 bat 脚本（copy + configure + build 同进程）**
-
-将干净 CMakeLists.txt 备份在 `.temp\CMakeLists_clean.txt`，构建时 bat 脚本先 copy 再 cmake，hook 无法在中间注入：
+## 构建
 
 ```bat
-REM .temp\full_build.bat — 推荐，每次构建都用这个
-@echo off
-copy /Y "D:\vb6pro\.temp\CMakeLists_clean.txt" "D:\vb6pro\CMakeLists.txt" >nul
-if exist "D:\vb6pro\.build" rd /s /q "D:\vb6pro\.build"
-call "C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvarsall.bat" x64 >nul 2>&1
-cd /d D:\vb6pro
-cmake -G Ninja -B .build -DCMAKE_BUILD_TYPE=Release
-if errorlevel 1 (echo CMAKE_CONFIGURE_FAILED & exit /b 1)
-cmake --build .build --config Release
-if errorlevel 1 (echo CMAKE_BUILD_FAILED & exit /b 1)
-echo BUILD_SUCCESS
+scripts\build            REM 增量构建
+scripts\build clean      REM 清理 .build 后完整构建
 ```
-
-**运行方式（PowerShell）：**
-```powershell
-Start-Process -FilePath "cmd.exe" -ArgumentList '/c D:\vb6pro\.temp\full_build.bat > D:\vb6pro\.temp\build_log.txt 2>&1' -NoNewWindow -Wait
-# 然后读取日志：text-writer_read_text D:\vb6pro\.temp\build_log.txt
-```
-
-### 何时更新 CMakeLists_clean.txt 备份
-
-每次修改 CMakeLists.txt 后，必须用 text-writer_write_text 写入 `.temp\CMakeLists_clean.txt`，
-然后从 `.temp\` 用 bat 的 `copy /Y` 复制到项目根目录。
-**绝不能直接写项目根目录的 CMakeLists.txt**（hook 会在下一次 tool call 前注入零宽字符）。
-
-### 增量构建（已 configure 过，CMakeLists.txt 未变）
-
-```bat
-cmd /c "call "C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvarsall.bat" x64 >nul 2>&1 && cd /d D:\vb6pro && cmake --build .build --config Release 2>&1"
-```
-
-### 运行 C3.exe
-
-```bat
-D:\vb6pro\.build\C3.exe <参数>
-```
-
-**C3.exe 就在 .build 根目录，不在 .build\Release\ 下！**
-
-### 运行自动化测试
 
 ```powershell
-# 需先构建，然后：
-D:\vb6pro\tests\run_tests.ps1
+# Agent 会话内一键构建 + 测试
+D:\code\vi\c3.vb6.pro\scripts\dev.ps1
+D:\code\vi\c3.vb6.pro\scripts\dev.ps1 -SkipTest     # 只构建
+D:\code\vi\c3.vb6.pro\scripts\dev.ps1 -SkipBuild    # 只跑测试
 ```
 
-## 文件写入纪律（红线）
+CMakeLists.txt 由 git 管理，直接改直接提交，不需要额外副本或中转。
+
+## 运行 C3.exe
+
+```bat
+.build\C3.exe <参数>
+```
+
+## 运行自动化测试
+
+```powershell
+D:\code\vi\c3.vb6.pro\tests\run_tests.ps1
+```
+
+## 文件编码与换行符约定
 
 | 规则 | 说明 |
 |------|------|
-| **禁止使用内置 write 工具** | 会在文件头注入 ~10KB 零宽字符（U+200B/U+200D），导致 CMake 解析失败 |
-| **禁止使用内置 edit 工具** | edit 也走内置写入路径，同样会注入零宽字符水印 |
-| **必须使用 text-writer_edit_text** | 无水印、自动编码检测与保持、支持 replaceAll |
-| **必须使用 text-writer_write_text** | 无水印、自动 CRLF、支持 GBK/UTF-8 |
-| **必须使用 text-writer_read_text** | 自动编码检测，无水印注入 |
-| **VB6 项目文件用 GBK 编码** | .frm/.bas/.cls/.vbp 必须指定 encoding=gbk |
-| **CMakeLists.txt 写入 .temp/ 再 copy** | hook 会在 tool call 间隙注入零宽字符，必须先写 .temp/ 再同进程 copy |
-
-### 零宽字符污染修复
-
-如果 .build 目录被污染（CMake 报错奇怪字符）：
-1. 删除 `.build` 目录
-2. 确保 `.temp\CMakeLists_clean.txt` 是最新版本
-3. 用 `.temp\full_build.bat` 重新构建（copy + configure + build 同进程）
+| 统一 CRLF | Windows 项目，避免出现混合换行符的文件 |
+| VB6 工程文件用 GBK | .frm/.bas/.cls/.vbp 必须 GBK，否则 VB6 IDE 显示乱码 |
+| C/C++ 源码用 UTF-8 | 与 CMake/MSVC 默认一致 |
+| 保留既有 BOM | 部分 .md 带 UTF-8 BOM，编辑时保持原样 |
 
 ## 脚本工具 (scripts/)
 
 | 脚本 | 用法 | 说明 |
 |------|------|------|
-| build.bat | build [clean] | 构建 C3.exe（clean=清理后完整构建）**注意：会被hook注入，推荐用 .temp\full_build.bat** |
+| build.bat | build [clean] | 构建 C3.exe（clean=清理后完整构建） |
 | test.bat | test [all\|run\|compile\|syntax] [verbose] | 运行回归测试 |
 | compile.bat | compile <source> [outdir] | 编译 .bas/.frm/.vbp（自动加载 MSVC+VB6RTL） |
 | run.bat | run <exename> [timeout] | 运行 output/ 下的 EXE |
 | dev.ps1 | dev [-SkipBuild] [-SkipTest] | 一键构建+测试（PowerShell，Agent 会话用） |
 | env.ps1 | . .\scripts\env.ps1 | 加载 MSVC 环境（dot-source） |
+| build_rtl_libs.bat | — | 生成 RTL .lib 并嵌入 C3.exe（链接依赖，勿删） |
 
 **命令行示例:**
 ```bat
@@ -217,4 +111,3 @@ src/
 - **P10 RTL内嵌与编译流程封闭** 基本完成
 - P9 已完成（72个测试零失败），M9达成
 - P10 核心完成：RTL 内嵌 RC 资源 + 会话目录 + c3-error.log
-- .temp\full_build.bat 是唯一推荐的构建方式

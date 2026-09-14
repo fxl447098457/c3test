@@ -1,14 +1,3 @@
----
-AIGC:
-  ContentProducer: '001191110102MAD55U9H0F10002'
-  ContentPropagator: '001191110102MAD55U9H0F10002'
-  Label: '1'
-  ProduceID: '7a19195c-a237-4ee8-89d7-a7235b40c8ce'
-  PropagateID: '7a19195c-a237-4ee8-89d7-a7235b40c8ce'
-  ReservedCode1: 'df999f9e-7146-4260-a7fd-e4be4934439b'
-  ReservedCode2: 'df999f9e-7146-4260-a7fd-e4be4934439b'
----
-
 # P24-05: vcvarsall x86跨架构修复 + 全部伪验证升级 + frxParse x86编译成功
 
 ## 日期
@@ -72,5 +61,3 @@ P24-05 完成三项关键工作: (1)修复vcvarsall x86跨架构编译 (2)全部
 - frxParse已能编译, 但运行时行为需要验证(它是GUI程序不输出到控制台)
 - P24-06: 外部COM WithEvents事件
 - P24-07: 早期绑定COM深度测试
-
-> AI生成

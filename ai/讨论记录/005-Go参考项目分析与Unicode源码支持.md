@@ -1,14 +1,3 @@
----
-AIGC:
-  ContentProducer: '001191110102MAD55U9H0F10002'
-  ContentPropagator: '001191110102MAD55U9H0F10002'
-  Label: '1'
-  ProduceID: 'ffaa5365-3b9b-48b7-8753-08f4b4002e0a'
-  PropagateID: 'ffaa5365-3b9b-48b7-8753-08f4b4002e0a'
-  ReservedCode1: 'd8151603-7c46-46e2-8763-d17f968ca5d6'
-  ReservedCode2: 'd8151603-7c46-46e2-8763-d17f968ca5d6'
----
-
 # 005. Go/VB 双线参考项目分析 + Unicode 源码支持设计
 
 > 分析 gobasic 系列文档、aspgo 参考项目（RustASP、Hulo），提炼对 vb6c 编译器的可借鉴设计，并规划 Unicode 源码支持方案

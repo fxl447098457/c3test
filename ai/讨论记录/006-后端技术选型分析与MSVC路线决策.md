@@ -1,14 +1,3 @@
----
-AIGC:
-  ContentProducer: '001191110102MAD55U9H0F10002'
-  ContentPropagator: '001191110102MAD55U9H0F10002'
-  Label: '1'
-  ProduceID: '48a1caa3-fc38-4db9-830e-eaff787a25d7'
-  PropagateID: '48a1caa3-fc38-4db9-830e-eaff787a25d7'
-  ReservedCode1: '27dd115a-b5d6-4b84-b485-bea5ee75cefc'
-  ReservedCode2: '27dd115a-b5d6-4b84-b485-bea5ee75cefc'
----
-
 # 006-后端技术选型分析与MSVC路线决策
 
 > 日期：2026-06-24

@@ -1,36 +1,3 @@
----
-AIGC:
-  ContentProducer: '001191110102MAD55U9H0F10002'
-  ContentPropagator: '001191110102MAD55U9H0F10002'
-  Label: '1'
-  ProduceID: 'da1892de-637a-4d9f-9ce4-2a69ecfbb891'
-  PropagateID: 'da1892de-637a-4d9f-9ce4-2a69ecfbb891'
-  ReservedCode1: 'bb5f3904-04c1-4627-9e20-58b26cbed6ab'
-  ReservedCode2: 'bb5f3904-04c1-4627-9e20-58b26cbed6ab'
----
-
----
-AIGC:
-  ContentProducer: '001191110102MAD55U9H0F10002'
-  ContentPropagator: '001191110102MAD55U9H0F10002'
-  Label: '1'
-  ProduceID: '169e3f99-ed98-4b6b-a204-01e59df67d5b'
-  PropagateID: '169e3f99-ed98-4b6b-a204-01e59df67d5b'
-  ReservedCode1: '8c158494-eddd-4311-8ee3-9074c4b1e6ce'
-  ReservedCode2: '8c158494-eddd-4311-8ee3-9074c4b1e6ce'
----
-
----
-AIGC:
-  ContentProducer: '001191110102MAD55U9H0F10002'
-  ContentPropagator: '001191110102MAD55U9H0F10002'
-  Label: '1'
-  ProduceID: 'a4ee9162-2d19-4659-b870-4af4df573e76'
-  PropagateID: 'a4ee9162-2d19-4659-b870-4af4df573e76'
-  ReservedCode1: 'b596a38f-d27d-44e7-abee-0ac53674459f'
-  ReservedCode2: 'b596a38f-d27d-44e7-abee-0ac53674459f'
----
-
 # P24-08: COM错误传播 — HRESULT→VB6 Err.Raise
 
 日期: 2026-07-07
@@ -100,9 +67,3 @@ COM的`IDispatch::Invoke`在方法失败时返回`DISP_E_EXCEPTION (0x80020009)`
 |------|------|
 | src/rtl/core/vb6com.c | 新增vb6_ComCheckError辅助函数; 7处FAILED(hr)替换为COM错误传播 |
 | ai/004-进度表.md | 新增P24-08行 |
-
-> AI生成
-
-> AI生成
-
-> AI生成

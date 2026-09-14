@@ -1,15 +1,4 @@
-﻿---
-AIGC:
-  ContentProducer: '001191110102MAD55U9H0F10002'
-  ContentPropagator: '001191110102MAD55U9H0F10002'
-  Label: '1'
-  ProduceID: 'b2b69a25-4aac-4b79-a4b5-f360a47dccf2'
-  PropagateID: 'b2b69a25-4aac-4b79-a4b5-f360a47dccf2'
-  ReservedCode1: '7bca1796-ea86-4fee-a702-7496f6400e0f'
-  ReservedCode2: '7bca1796-ea86-4fee-a702-7496f6400e0f'
----
-
-# M13-FIX4: 定长字符串 String*N + LSet 修复
+﻿# M13-FIX4: 定长字符串 String*N + LSet 修复
 
 **日期**: 2026-07-05
 **里程碑**: M13 (兼容性收尾)
@@ -112,5 +101,3 @@ vb6_BSTR_Assign(&a, vb6_LSet(vb6_BSTR_FromStr(L"等等"), 10));  // 使用固定
 
 - frxParse List1 正确显示"等等"+时间 ✓
 - 74/74 回归测试零失败 ✓
-
-> AI生成

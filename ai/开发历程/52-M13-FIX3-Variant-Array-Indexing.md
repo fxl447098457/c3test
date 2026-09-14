@@ -1,15 +1,6 @@
-﻿---
-AIGC:
-  ContentProducer: '001191110102MAD55U9H0F10002'
-  ContentPropagator: '001191110102MAD55U9H0F10002'
-  Label: '1'
-  ProduceID: '933da151-8eb6-4e83-8fd8-b738c4b6d81f'
-  PropagateID: '933da151-8eb6-4e83-8fd8-b738c4b6d81f'
-  ReservedCode1: '0b4fed97-107a-4570-af85-3f5c3da7d6e4'
-  ReservedCode2: '0b4fed97-107a-4570-af85-3f5c3da7d6e4'
----
+﻿# M13-FIX3: Variant数组索引修复
 
-# M13-FIX3: Variant数组索引修复
+> **历史说明**：本文涉及的 AIGC 零宽字符水印及其全部防御手段（`strip_zw` / `.temp/` 中转 / `CMakeLists_clean.txt` / `full_build.bat` / 强制 text-writer 纪律）已于 2026-09-14 撤销，注入源已不存在。以下为历史记录，请勿照做。
 
 **日期**: 2026-07-05
 **里程碑**: M13 (兼容性收尾)
@@ -133,5 +124,3 @@ vb6_MsgBox1(vb6_VariantToString(vb6_VariantArrayGet(&a, i)));  // 正确: Varian
 - dic.Keys() 返回SAFEARRAY包在VARIANT中，需要类似的解包机制
 - cgen_expr.cpp COM标记路径需要区分property get vs method call
 - vb6_VariantArraySet 写入功能尚未有测试用例
-
-> AI生成

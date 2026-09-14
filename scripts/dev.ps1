@@ -15,8 +15,8 @@ param(
 )
 
 $ErrorActionPreference = "Continue"
-$ProjectDir = "C:\Users\vi\Desktop\c3.vb6.pro"
-$VcVars = "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvarsall.bat"
+$ProjectDir = "D:\code\vi\c3.vb6.pro"
+$VcVars = "C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvarsall.bat"
 
 # --- 加载 MSVC 环境 ---
 Write-Host ""
