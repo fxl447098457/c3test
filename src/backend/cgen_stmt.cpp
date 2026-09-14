@@ -1538,7 +1538,12 @@ void CCodeGen::visit(SetStmt& node) {
                 }
             }
             std::string relObjTarget = isCallTarget ? "(&(void*){" + target + "})" : ("&" + target);
-            if (knownTypedComVars_.count(targetLower)) {
+            if (knownClassVars_.count(targetLower)) {
+                // 项目类实例 (Dim c As CCircle / Dim WithEvents s As EventSource) 不是 COM
+                // 对象, 没有引用计数: 调用 vb6_ReleaseObject 会对纯 C 结构体走 vtable
+                // Release → 运行期 0xC0000005. Set Nothing 只需断开引用.
+                c_.emitLine(target + " = NULL;  /* Set Nothing (项目类实例) */");
+            } else if (knownTypedComVars_.count(targetLower)) {
                 c_.emitLine("vb6_ComReleaseTyped((void**)" + relObjTarget + ");  /* Set Nothing (early bound) */");
             } else {
                 c_.emitLine("vb6_ReleaseObject((void**)" + relObjTarget + ");  /* Set Nothing */");
@@ -4636,7 +4641,21 @@ void CCodeGen::emitLocalDeclCode(LocalDeclStmt& node) {
             if (cType == "void*") {
                 std::string lower = var.name;
                 std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
-                knownObjectVars_.insert(lower);
+                // 项目类实例 (Dim b As Button / Dim WithEvents b As Button) 的 C 类型同样
+                // 是 void*, 但它不是 COM 后期绑定对象, 方法调用必须走直接分发
+                // (vb6_Button_DoClick(...)). 若误注册进 knownObjectVars_, cgen_expr 的
+                // "优先级1" 会把它当 IDispatch 处理, 生成 vb6_ComCall(b, L"DoClick", ...)
+                // → 对纯 C 结构体解引用 vtable → 运行期 0xC0000005.
+                // 注意: 本处先于下方 knownClassVars_ 注册, 故直接查类符号判断.
+                bool isProjectClassVar = false;
+                if (var.asType && var.asType->kind == ASTNodeKind::SimpleTypeRef) {
+                    auto& st = static_cast<SimpleTypeRef&>(*var.asType);
+                    auto* clsSym = lookupModuleDotted(st.name);
+                    if (clsSym && clsSym->kind == SymbolKind::Class) isProjectClassVar = true;
+                }
+                if (!isProjectClassVar) {
+                    knownObjectVars_.insert(lower);
+                }
             }
 
             // P6.3: 记录前期绑定COM变量 (Dim x As FileSystemObject)

@@ -761,6 +761,21 @@ bool Driver::runParser(const CompileOptions& options) {
             return false;
         }
     }
+
+    // 类模块必须先于标准模块做语义分析。
+    // 原因: 标准模块中引用项目类 (如 Dim WithEvents btn As Button) 时, 需要 Button
+    // 的类符号已经在符号表中; 若类模块尚未分析, 类型解析会把 btn 退化为 void*,
+    // 方法调用随之退化为 COM 后期绑定 (vb6_ComCall(btn, L"DoClick", ...)),
+    // 而项目类实例实际是纯 C 结构体 (vb6_cls_Button*) → 运行期解引用 vtable 崩溃
+    // (0xC0000005)。vbp 中 Module 完全可能排在 Class 之前 (如 test_events.vbp),
+    // 故在此把类模块稳定前移 (同类之间、Form 与标准模块之间的相对顺序保持不变)。
+    std::stable_sort(modules_.begin(), modules_.end(),
+                     [](const auto& a, const auto& b) {
+                         int rankA = a->isClassModule ? 0 : 1;
+                         int rankB = b->isClassModule ? 0 : 1;
+                         return rankA < rankB;
+                     });
+
     return !diag_->hasErrors();
 }
 

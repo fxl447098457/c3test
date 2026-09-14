@@ -990,7 +990,14 @@ void CCodeGen::visit(VariableDecl& node) {
     if (cType == "void*") {  // Object类型映射为void*
         std::string lower = node.name;
         std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
-        knownObjectVars_.insert(lower);
+        // 项目类实例 (Dim b As Button / Dim WithEvents b As Button) 的 C 类型同样是 void*,
+        // 但它并非 COM 后期绑定对象, 方法调用必须走直接分发 (vb6_Button_DoClick(...)).
+        // 若误注册进 knownObjectVars_, cgen_expr 的"优先级1"会把它当 IDispatch 处理,
+        // 生成 vb6_ComCall(b, L"DoClick", ...) → 对纯 C 结构体解引用 vtable → 运行期 0xC0000005.
+        if (knownClassVars_.find(lower) == knownClassVars_.end() &&
+            knownIfaceVars_.find(lower) == knownIfaceVars_.end()) {
+            knownObjectVars_.insert(lower);
+        }
     }
 
     // Fix 082: COM interface pointer types (vb6_ComIface_*) are pointer-sized on x64

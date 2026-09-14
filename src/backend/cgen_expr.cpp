@@ -1787,7 +1787,11 @@ void CCodeGen::visit(MemberAccessExpr& node) {
         // 优先级1: COM对象成员访问 (Object类型变量, 后期绑定)
         // COM对象的成员名不在符号表中, 需通过IDispatch::Invoke调用
         // 设置COM标记, 由IndexOrCallExpr/AssignmentStmt/SetStmt识别并处理
-        if (knownObjectVars_.count(objLower)) {
+        // 注意: 项目类实例 (Dim b As Button / Dim WithEvents b As Button) 的 C 类型也是
+        // void*, 可能被误注册进 knownObjectVars_, 但它不是 IDispatch — 类实例是纯 C
+        // 结构体 (vb6_cls_Button*), 用 vb6_ComCall 会解引用 vtable 崩溃 (0xC0000005).
+        // 已知是类实例时跳过 COM 晚绑定, 交给下面的"优先级2"做直接分发.
+        if (knownObjectVars_.count(objLower) && !knownClassVars_.count(objLower)) {
             emitExpr(*node.object);
             comObjExpr_ = lastExpr_;       // 保存对象表达式
             comMemberName_ = node.memberName;  // 保存成员名
