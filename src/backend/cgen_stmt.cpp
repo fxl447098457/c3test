@@ -1895,7 +1895,11 @@ void CCodeGen::visit(SetStmt& node) {
                 }
                 c_.dedent();
                 c_.emitLine("};");
-                c_.emitLine(target + "->events = &" + targetLower + "_sink;");
+                // WithEvents 变量在 C 侧声明为 void* (类实例统一用对象指针表示),
+                // 直接生成 "var->events" 会触发 C2223 ("->" 的左侧必须指向结构/联合)。
+                // 必须先 cast 回具体类结构体指针, 与 cgen_expr.cpp 中 void* 成员访问同机制。
+                c_.emitLine("((vb6_cls_" + cIdent(sourceClass) + "*)" + target + ")->events = &"
+                            + targetLower + "_sink;");
                 c_.dedent();
                 c_.emitLine("}");
             } else if (srcClsSym && srcClsSym->kind == SymbolKind::ComClass && srcClsSym->comHasSourceIface) {

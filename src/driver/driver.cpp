@@ -238,7 +238,9 @@ CompileResult Driver::compile(const CompileOptions& options) {
                 std::filesystem::path exePath(utf8ToPath(project.exeName));
                 projectBaseName_ = pathToUtf8(exePath.stem());
             } else {
-                std::filesystem::path vbpPath(srcFile);
+                // srcFile 是 UTF-8, 必须用 utf8ToPath 构造; 直接用 path(const char*)
+                // 会让 Windows 按 ACP 解释, 中文被破坏成 '?' -> 输出文件名非法 -> LNK1104
+                std::filesystem::path vbpPath(utf8ToPath(srcFile));
                 projectBaseName_ = pathToUtf8(vbpPath.stem());
             }
             // 注意: 不再设置effectiveOpts.outputFile, 让runLinker通过projectBaseName_统一处理
@@ -1643,7 +1645,7 @@ bool Driver::runCodeGeneration(const CompileOptions& options, const std::string&
         std::string baseName;
         if (modules_.size() == 1 && !options.outputFile.empty()) {
             // 单文件: 用输出文件名作为基名
-            std::filesystem::path p(options.outputFile);
+            std::filesystem::path p(utf8ToPath(options.outputFile));
             baseName = pathToUtf8(p.stem());
         } else {
             // Fix 013: 多文件: 用 module.moduleName (VB_Name) 作为基名
@@ -2058,7 +2060,7 @@ bool Driver::runLinker(const CompileOptions& options, const std::string& outputD
     for (size_t i = 0; i < modules_.size(); i++) {
         std::string baseName;
         if (modules_.size() == 1 && !options.outputFile.empty()) {
-            std::filesystem::path p(options.outputFile);
+            std::filesystem::path p(utf8ToPath(options.outputFile));
             baseName = pathToUtf8(p.stem());
         } else {
             // Fix 013: 用 module.moduleName (VB_Name) 作为基名, 与 runCodeGeneration 一致
