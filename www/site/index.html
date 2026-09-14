@@ -125,6 +125,9 @@
         <a href="#limitations" class="scroll-dot" data-section="limitations" aria-label="已知限制">
             <span class="scroll-dot-label">已知限制</span>
         </a>
+        <a href="#references" class="scroll-dot" data-section="references" aria-label="参考来源">
+            <span class="scroll-dot-label">参考来源</span>
+        </a>
     </nav>
 
     <!-- ========== 顶部导航 ========== -->
@@ -140,6 +143,7 @@
             <li><a href="#download">下载配置</a></li>
             <li><a href="#roadmap">开发路线</a></li>
             <li><a href="#limitations">已知限制</a></li>
+            <li><a href="#references">参考来源</a></li>
             <li><a href="https://gitcode.com/woeoio/c3.vb6.pro" target="_blank" rel="noopener"
                     class="nav-external">开源地址</a></li>
             <li><a href="http://qm.qq.com/cgi-bin/qm/qr?_wv=1027&k=i6FzaX8HERWYCbhNcPLOdJMt5TgpxBh4&authKey=FwbukNL9WDkJF7bSu1r6IflSu%2F0acN6R5OOHKBhI6ALzG7CL7EQIa3R4BA%2BnNpsM&noverify=0&group_code=788160802"
@@ -711,6 +715,86 @@
                             <li>不支持的语法必然报错，绝不静默误编</li>
                         </ul>
                     </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ========== Section 8: 参考来源 ========== -->
+        <section class="section references" id="references">
+            <div class="section-inner">
+                <div class="section-header">
+                    <span class="section-label">参考来源</span>
+                    <h2 class="section-title">站在这些项目肩上</h2>
+                    <p class="section-desc">C3 在语法规则核对、测试语料与实现思路上参考了以下开源项目，特此致谢。</p>
+                </div>
+                <div class="features-grid">
+                    <article class="glass-card feature-card animate-in">
+                        <div class="feature-icon blue">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2">
+                                <rect x="2" y="3" width="20" height="14" rx="2" />
+                                <path d="M8 21h8M12 17v4" />
+                            </svg>
+                        </div>
+                        <h3>vb6parse</h3>
+                        <p>Rust 实现的 VB6 解析器，覆盖工程 / 窗体 / 模块 / 控件，附 30+ 个真实 VB6 工程语料。MIT · v1.0.1 ·
+                            <a href="https://github.com/scriptandcompile/vb6parse" target="_blank"
+                                rel="noopener">GitHub &rarr;</a>
+                        </p>
+                    </article>
+                    <article class="glass-card feature-card animate-in">
+                        <div class="feature-icon purple">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2">
+                                <circle cx="12" cy="12" r="10" />
+                                <path
+                                    d="M2 12h20M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z" />
+                            </svg>
+                        </div>
+                        <h3>proleap-vb6</h3>
+                        <p>基于 ANTLR4 的 VB6 分析器与转换器，提供完整的 <code>VisualBasic6.g4</code> 语法与 AST / ASG。Java ·
+                            AGPL-3.0 · <a href="https://github.com/uwol/proleap-vb6-parser" target="_blank"
+                                rel="noopener">GitHub &rarr;</a></p>
+                    </article>
+                    <article class="glass-card feature-card animate-in">
+                        <div class="feature-icon cyan">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2">
+                                <path
+                                    d="M17 18a5 5 0 00-10 0M12 9V2M4.22 10.22l1.42 1.42M1 18h2M21 18h2M18.36 11.64l1.42-1.42M23 22H1M12 12a5 5 0 015 5" />
+                            </svg>
+                        </div>
+                        <h3>AvaloniaVisualBasic6</h3>
+                        <p>用 C# + Avalonia 复刻的经典 VB6 IDE 与语言，含可视化设计器与 VB6 兼容工程格式。C# · MIT ·
+                            <a href="https://github.com/BAndysc/AvaloniaVisualBasic6" target="_blank"
+                                rel="noopener">GitHub &rarr;</a>
+                        </p>
+                    </article>
+                    <article class="glass-card feature-card animate-in">
+                        <div class="feature-icon green">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2">
+                                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+                            </svg>
+                        </div>
+                        <h3>FreeBASIC (fbc)</h3>
+                        <p>成熟的 BASIC 编译器源码，C3 的 RTL 组织与代码生成策略参考。编译器 GPL-2.0+ / RTL LGPL-2.1+ · v1.20.0 ·
+                            <a href="https://github.com/freebasic/fbc" target="_blank" rel="noopener">GitHub &rarr;</a>
+                        </p>
+                    </article>
+                    <article class="glass-card feature-card animate-in">
+                        <div class="feature-icon amber">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2">
+                                <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />
+                                <path d="M14 2v6h6M16 13H8M16 17H8M10 9H8" />
+                            </svg>
+                        </div>
+                        <h3>vb6grammarfuzz</h3>
+                        <p>基于 <code>VisualBasic6.g4</code> 的 VB6 语法模糊测试器：随机生成 VB6 源码回灌解析器，定位未知语法节点并最小化复现用例。Rust
+                            · 仓库内本地工具 · <a href="https://github.com/uwol/proleap-vb6-parser" target="_blank"
+                                rel="noopener">语法来源 &rarr;</a></p>
+                    </article>
                 </div>
             </div>
         </section>

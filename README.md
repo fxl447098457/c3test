@@ -283,3 +283,19 @@ VBMAN 编译过程的问题日志见 `archive/vbman/c3log/001.md ~ 054.md`。
 6. **第二期方言** —— VBA / VBS / ASP（`ai/012`）
 
 详细规划与工期估算见 `ai/013-工具链与生态建设规划.md`。
+
+---
+
+## 十一、参考来源
+
+C3 在语法规则核对、测试语料与实现思路上参考了以下开源项目。源码副本放在 `reference/`（该目录已被 `.gitignore` 忽略，不入库）：
+
+| 项目 | 版本 | 许可 | 参考内容 |
+|------|------|------|----------|
+| [vb6parse](https://github.com/scriptandcompile/vb6parse) | 1.0.1 | MIT | Rust 实现的 VB6 解析器，覆盖工程 / 窗体 / 模块 / 控件，附 30+ 个真实 VB6 工程语料 |
+| [proleap-vb6](https://github.com/uwol/proleap-vb6-parser) | — | AGPL-3.0 | 基于 ANTLR4 的 VB6 分析器与转换器，提供完整 `VisualBasic6.g4` 语法 |
+| [AvaloniaVisualBasic6](https://github.com/BAndysc/AvaloniaVisualBasic6) | — | MIT | C# + Avalonia 复刻的 VB6 IDE 与语言，含可视化设计器与 VB6 兼容工程格式 |
+| [FreeBASIC (fbc)](https://github.com/freebasic/fbc) | 1.20.0 | 编译器 GPL-2.0+ / RTL LGPL-2.1+ | 成熟 BASIC 编译器源码，RTL 组织与代码生成策略 |
+| vb6grammarfuzz | 0.1.0 | — | 基于 `VisualBasic6.g4` 的 VB6 语法模糊测试器（仓库内本地工具，依赖 vb6parse，无公开地址） |
+
+> `reference/vba-gobasic-aspgo/gobasic/` 与 `reference/vba-gobasic-aspgo/ai/` 当前为空目录，无来源信息，暂未列入。
