@@ -122,7 +122,10 @@ function Test-Run {
     # 运行 (5秒超时)
     $runResult = $null
     try {
+        # 工作目录设为 output\: 部分测试用 Open ... For Output 写相对路径文件
+        # (scores.txt / test_output.txt / *.dat 等), 不指定就会落进仓库根目录。
         $proc = Start-Process -FilePath $exePath -NoNewWindow -Wait -PassThru `
+            -WorkingDirectory $OutDir `
             -RedirectStandardOutput "$OutDir\$baseName.out" `
             -RedirectStandardError "$OutDir\$baseName.err" `
             -ErrorAction Stop
@@ -205,7 +208,9 @@ function Test-Vbp {
 
     # 运行 (5秒超时)
     try {
+        # 同上: 工作目录设为 output\, 避免测试产物落进仓库根目录
         $proc = Start-Process -FilePath $exePath -NoNewWindow -Wait -PassThru `
+            -WorkingDirectory $OutDir `
             -RedirectStandardOutput "$OutDir\$baseName.out" `
             -RedirectStandardError "$OutDir\$baseName.err" `
             -ErrorAction Stop

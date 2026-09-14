@@ -40,14 +40,10 @@ deps/
 *.tli
 
 # ---------- 测试运行产物 ----------
-# tests/*.bas 用 Open ... For Output 写到 CWD (即仓库根目录), 是运行输出,
-# 不是源码。前导 / 限定只匹配根目录。
-/test_bin.dat
-/test_dbl.dat
-/test_rnd.dat
-/m6_test.txt
-/scores.txt
-/test_output.txt
+# tests/*.bas 用 Open ... For Output 写相对路径文件 (scores.txt / test_output.txt /
+# test_*.dat / m6_test.txt 等)。run_tests.ps1 运行测试时已把工作目录设为 output/,
+# 这些产物随之落入 output/ (第 9 行已整体忽略), 故这里不再逐个列举文件名 ——
+# 否则每新增一个写文件的测试, 根目录就多一个需要补丁的垃圾文件。
 
 # ---------- IDE / 编辑器 ----------
 .vs/
