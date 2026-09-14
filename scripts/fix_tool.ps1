@@ -4,13 +4,13 @@
 # 用法:
 #   powershell -File scripts/fix_tool.ps1 -Modules "Json\ToolsJsonVba.bas"
 #   powershell -File scripts/fix_tool.ps1 -Modules "Filesystem\ZipArchive\src\cZipArchive.cls","Common\Common4DLL.bas" -Name zip
-#   -Modules: 相对 vbman/src 的模块文件路径(可多个), 必须在 VBMAN.vbp 中出现
+#   -Modules: 相对 archive/vbman/src 的模块文件路径(可多个), 必须在 VBMAN.vbp 中出现
 #   -Name:    工程名 (默认取第一个模块的文件名主干)
 #   -Build:   是否立即编译 (默认 true)
 #   -Show:    编译后打印错误汇总 (默认 true)
 # 产物:
-#   vbman/src/FIX_<Name>.vbp            裁剪工程 (位于 vbman/src, 相对引用全部有效)
-#   vbman/src/_fix/<Name>/out/c3-error.log 本工程 MSVC 编译错误
+#   archive/vbman/src/FIX_<Name>.vbp            裁剪工程 (相对引用全部有效)
+#   archive/vbman/src/_fix/<Name>/out/c3-error.log 本工程 MSVC 编译错误
 param(
     [string[]]$Modules = @(''),
     [string]$Name = '',
@@ -23,8 +23,10 @@ if (-not $Modules -or $Modules.Count -lt 1 -or -not $Modules[0]) {
 }
 
 $ErrorActionPreference = 'Stop'
-$root = 'C:\Users\vi\Desktop\c3.vb6.pro'
-$src  = Join-Path $root 'vbman\src'
+# 脚本位于 <root>/scripts/, 根目录由脚本位置推导
+# (原硬编码 'C:\Users\vi\Desktop\c3.vb6.pro' 已失效; vbman 已移入 archive/)
+$root = Split-Path -Parent $PSScriptRoot
+$src  = Join-Path $root 'archive\vbman\src'
 $fix  = Join-Path $src '_fix'
 $vbpSrc = Join-Path $src 'VBMAN.vbp'
 if (-not (Test-Path $vbpSrc)) { throw "VBMAN.vbp not found: $vbpSrc" }

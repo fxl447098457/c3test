@@ -36,6 +36,18 @@ deps/
 *.rc（生成的）
 *.so
 *.dylib
+*.tlh
+*.tli
+
+# ---------- 测试运行产物 ----------
+# tests/*.bas 用 Open ... For Output 写到 CWD (即仓库根目录), 是运行输出,
+# 不是源码。前导 / 限定只匹配根目录。
+/test_bin.dat
+/test_dbl.dat
+/test_rnd.dat
+/m6_test.txt
+/scores.txt
+/test_output.txt
 
 # ---------- IDE / 编辑器 ----------
 .vs/
@@ -68,22 +80,35 @@ __pycache__/
 node_modules/
 
 # ---------- 参考项目源码（只保留 URL 书签）----------
-参考/freebasic/fbc/
-参考/AvaloniaVisualBasic6/AvaloniaVisualBasic6/
-参考/*/
-!参考/*.url
+reference/freebasic/fbc/
+reference/AvaloniaVisualBasic6/AvaloniaVisualBasic6/
+reference/*
+!reference/*.url
 
 
 .playwright-mcp
 
-vbman/
-
 publish/msvc
 
 _bak
+
+# ---------- 归档目录 (archive/) ----------
+# archive/ 存放已停止维护但需保留备查的代码 (如 VBMANLIB 的 vendored 副本)。
+# 注意: archive/vbman 仍在版本控制内, 不能再整体忽略 —— 之前 .gitignore 里的
+#       "vbman/" 不带前导斜杠, 会匹配任意层级的 vbman 目录, 导致 349 个
+#       已跟踪文件同时处于 ignored 状态, 此后新增文件无法入库。已删除该行。
+# 归档 = 完整快照, 其中的 dll/exp/res/log/_bak 产物一并保留, 故整体反忽略。
+!archive/**
+
+# ---------- 必须入库的构建产物 (反忽略, 勿删) ----------
+# RTL 预编译库: CMakeLists.txt 把 src/rtl/lib/*.lib 声明为 c3rtl.rc 的
+# OBJECT_DEPENDS (C3.exe 以 RCDATA 嵌入), 缺了 C3.exe 会链接失败。
+!src/rtl/lib/*.lib
+!src/rtl/lib/x86/*.lib
+
 # ---------- 专项修复小工程 (fix_tool.ps1) ----------
-vbman/src/_fix/
-vbman/src/FIX_*.vbp
+archive/vbman/src/_fix/
+archive/vbman/src/FIX_*.vbp
 scripts/_fix_run.cmd
 scripts/_fix_*.txt
 scripts/_fix_*.ps1

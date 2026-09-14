@@ -1,10 +1,10 @@
-# _tmp_bisect.ps1 - vbman 编译回归 bisect (FIX_bisect.vbp)
+﻿# _tmp_bisect.ps1 - vbman 编译回归 bisect (FIX_bisect.vbp)
 #   -N <n>     取 VBMAN.vbp 中前 n 个 Class/Module 条目
 #   -Forms     同时纳入 Form= 条目 (VBMAN.vbp 的 Form 行无分号, 默认正则要求分号故天然排除;
 #              含窗体后 38 个条目 = 以 FLayer.frm 结尾, 即历史「窗体 release 崩溃」最小批次)
 param([int]$N = 125, [switch]$Forms)
-$root = 'C:\Users\vi\Desktop\c3.vb6.pro'
-$src  = Join-Path $root 'vbman\src'
+$root = Split-Path -Parent $PSScriptRoot
+$src  = Join-Path $root 'archive\vbman\src'
 $fix  = Join-Path $src '_fix\bisect'
 $vbpSrc = Join-Path $src 'VBMAN.vbp'
 $text = [System.IO.File]::ReadAllText($vbpSrc)
