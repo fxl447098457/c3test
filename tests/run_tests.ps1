@@ -15,13 +15,15 @@ param(
 $ErrorActionPreference = "SilentlyContinue"
 
 # === 配置 ===
-$C3 = "D:\vb6pro\.build\C3.exe"
-$Tests = "D:\vb6pro\tests"
-$OutDir = "D:\vb6pro\output"
+# 路径全部由脚本自身位置推导, 不再硬编码仓库绝对路径 (旧值 D:\vb6pro 已不存在)
+$Root = Split-Path -Parent $PSScriptRoot
+$C3 = Join-Path $Root ".build\C3.exe"
+$Tests = $PSScriptRoot
+$OutDir = Join-Path $Root "output"
 $VcVars = "C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvarsall.bat"
 
 # === 设置VB6RTL目录 ===
-$env:VB6RTL_DIR = "D:\vb6pro\src\rtl\core"
+$env:VB6RTL_DIR = Join-Path $Root "src\rtl\core"
 
 # === 设置MSVC环境 ===
 $msvcOutput = cmd /c "call `"$VcVars`" x64 >nul 2>&1 && echo MSVC_OK" 2>&1
