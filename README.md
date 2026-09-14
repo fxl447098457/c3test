@@ -1,6 +1,6 @@
 # C3 — 现代化 VB6 编译器
 
-> 官网：<https://c3.vb6.pro> ｜ 仓库：<https://github.com/.../c3.vb6.pro>（本地路径 `D:\code\vi\c3.vb6.pro`）
+> 官网：<https://c3.vb6.pro> ｜ 仓库：<https://gitcode.com/woeoio/c3.vb6.pro>（本地路径 `D:\code\vi\c3.vb6.pro`）
 >
 > C3 把 VB6 工程（`.vbp` / `.bas` / `.cls` / `.frm` / `.frx`）直接编译为**原生 Windows x64 / x86 可执行文件或 ActiveX DLL**，
 > 源码无需任何修改，无运行时 DLL 依赖。
