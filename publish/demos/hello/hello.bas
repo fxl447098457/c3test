@@ -5,7 +5,7 @@ Option Explicit
 
 Public Sub Main()
     Dim name As String
-    name = "World"
+    name = "World " & time
     
     If Len(name) > 0 Then
         MsgBox "Hello, " & name & "!", vbOKOnly, "Greeting"
