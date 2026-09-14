@@ -50,6 +50,23 @@ $script:fail = 0
 $script:skip = 0
 $script:total = 0
 
+# === 外部 COM 依赖检测 ===
+# 部分测试依赖机器上注册的外部 COM 组件 (如 VBMANLIB)。组件未注册时运行必然失败
+# (VB6 运行期错误 429), 但这是环境缺失, 不是编译器缺陷, 应 SKIP 而非 FAIL。
+# 32 位程序 (Arch=x86) 受注册表重定向影响, 只能看到 WOW6432Node 视图。
+function Test-ComRegistered {
+    param([string]$ProgId, [string]$Arch)
+    if ($Arch -eq "x86") {
+        $paths = @("HKLM:\SOFTWARE\WOW6432Node\Classes\$ProgId")
+    } else {
+        $paths = @("HKLM:\SOFTWARE\Classes\$ProgId")
+    }
+    foreach ($p in $paths) {
+        if (Test-Path -Path $p) { return $true }
+    }
+    return $false
+}
+
 # === 编译测试 ===
 function Test-Compile {
     param([string]$Name, [string]$Source)
@@ -150,10 +167,19 @@ function Test-Vbp {
         [string]$Name,
         [string]$VbpFile,
         [string[]]$ExpectedOutputs,
-        [string]$Arch = ""            # 可选架构参数 (x86/x64)
+        [string]$Arch = "",           # 可选架构参数 (x86/x64)
+        [string]$RequiresCom = ""     # 依赖的外部 COM ProgId (未注册则 SKIP, 不计 FAIL)
     )
     $script:total++
     Write-Host -NoNewline "  [VBP] $Name ... "
+
+    # 外部 COM 依赖缺失 → SKIP (环境缺失, 非编译器缺陷)
+    if ($RequiresCom -and -not (Test-ComRegistered $RequiresCom $Arch)) {
+        $script:skip++
+        $view = if ($Arch -eq "x86") { "WOW6432Node (32-bit)" } else { "64-bit" }
+        Write-Host "SKIP (COM '$RequiresCom' 未注册于 $view 视图)" -ForegroundColor Yellow
+        return
+    }
 
     # 编译VBP工程
     if ($Arch) {
@@ -306,7 +332,8 @@ if ($Category -in @("all", "run")) {
     Write-Host "--- P24 COM Optimization Tests ---" -ForegroundColor Yellow
     
     Test-Run "test_p24" "$Tests\test_p24.bas" @("P24-01a:OK", "P24-01b:OK", "P24-01c:OK", "P24-03a:OK", "P24-03b:OK", "P24:5/5")
-    Test-Vbp "test_vbman" "$Tests\test_vbman\test_vbman.vbp" @("P24-04a:OK", "P24-04b:OK", "P24-04:2/2") -Arch "x86"
+    # test_vbman 依赖外部 COM 组件 VBMANLIB (x86 DLL, 需 32 位注册)
+    Test-Vbp "test_vbman" "$Tests\test_vbman\test_vbman.vbp" @("P24-04a:OK", "P24-04b:OK", "P24-04:2/2") -Arch "x86" -RequiresCom "VBMANLIB.cVBMAN"
     Test-Run "test_earlybound2" "$Tests\test_earlybound2.bas" @("EB2-1:OK", "EB2-7:DriveType=2", "EB2-8:OK", "EB2-10:OK", "EB2:10/10") -Arch "x86"
     Test-Run "test_not_com" "$Tests\test_not_com.bas" @("NOT-COM:OK", "NOT-COM2:OK", "NOT-COM:PASS") -Arch "x86"
     Test-Run "test_err_obj" "$Tests\test_err_obj.bas" @("ERR-1:OK", "ERR-6:OK", "ERR:6/6")
@@ -400,7 +427,7 @@ if ($Category -in @("all", "syntax")) {
 # 汇总
 # =============================================
 Write-Host "========================================" -ForegroundColor Cyan
-Write-Host "  Results: PASS=$script:pass FAIL=$script:fail TOTAL=$script:total" -ForegroundColor $(if ($script:fail -gt 0) { "Red" } else { "Green" })
+Write-Host "  Results: PASS=$script:pass FAIL=$script:fail SKIP=$script:skip TOTAL=$script:total" -ForegroundColor $(if ($script:fail -gt 0) { "Red" } else { "Green" })
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
 
