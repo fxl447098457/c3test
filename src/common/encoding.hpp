@@ -47,6 +47,22 @@ inline std::wstring utf8ToWide(const std::string& utf8) {
 #endif
 }
 
+// wide string → UTF-8 string
+// Windows: 用于把 GetCommandLineW() 得到的 Unicode 命令行参数转成内部统一的 UTF-8.
+inline std::string wideToUtf8(const std::wstring& wide) {
+#ifdef _WIN32
+    if (wide.empty()) return "";
+    int len = WideCharToMultiByte(CP_UTF8, 0, wide.c_str(), -1, nullptr, 0, nullptr, nullptr);
+    if (len <= 0) return "";
+    std::string utf8(len, '\0');
+    WideCharToMultiByte(CP_UTF8, 0, wide.c_str(), -1, &utf8[0], len, nullptr, nullptr);
+    while (!utf8.empty() && utf8.back() == '\0') utf8.pop_back();
+    return utf8;
+#else
+    return std::string(wide.begin(), wide.end());
+#endif
+}
+
 // UTF-8 string → filesystem::path (safe construction)
 // On Windows, uses wstring to avoid ACP reinterpretation of UTF-8 bytes.
 // On Linux/macOS, passes through directly (native UTF-8 filesystem).

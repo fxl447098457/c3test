@@ -1,7 +1,11 @@
 #include "driver/driver.hpp"
+#include "common/encoding.hpp"
+#include <string>
+#include <vector>
 
 #ifdef _WIN32
 #include <windows.h>
+#include <shellapi.h>  // CommandLineToArgvW
 #include <dbghelp.h>
 #include <cstdio>
 #include <cstdlib>
@@ -69,12 +73,9 @@ void installCrashTraceIfRequested() {
 }  // namespace
 #endif
 
-int main(int argc, char* argv[]) {
-#ifdef _WIN32
-    installCrashTraceIfRequested();
-#endif
+namespace {
 
-    vb6c3::Driver driver;
+int runCompile(vb6c3::Driver& driver, int argc, char* argv[]) {
     auto result = driver.compile(argc, argv);
 
     if (!result.success && result.errorCount == 0) {
@@ -83,4 +84,40 @@ int main(int argc, char* argv[]) {
     }
 
     return result.errorCount > 0 ? 1 : 0;
+}
+
+}  // namespace
+
+int main(int argc, char* argv[]) {
+#ifdef _WIN32
+    installCrashTraceIfRequested();
+#endif
+
+    vb6c3::Driver driver;
+
+#ifdef _WIN32
+    // Windows 上 main() 的 argv 是 ACP(中文系统为GBK) 编码, 而 C3 内部统一按 UTF-8
+    // 处理字符串。直接把 argv 交给 utf8ToPath() 会把 GBK 字节当作 UTF-8 解析,
+    // 中文路径因此损坏 -> 文件打不开 -> 报 ".vbp文件中没有源文件"。
+    // 这里改用 Unicode 命令行重新取参, 统一转成 UTF-8。
+    int wargc = 0;
+    LPWSTR* wargv = CommandLineToArgvW(GetCommandLineW(), &wargc);
+    if (wargv && wargc > 0) {
+        std::vector<std::string> utf8Args;
+        std::vector<char*> argvUtf8;
+        utf8Args.reserve(wargc);
+        argvUtf8.reserve(wargc);
+        for (int i = 0; i < wargc; ++i) {
+            utf8Args.push_back(vb6c3::wideToUtf8(wargv[i]));
+        }
+        for (auto& s : utf8Args) {
+            argvUtf8.push_back(&s[0]);
+        }
+        LocalFree(wargv);
+        return runCompile(driver, wargc, argvUtf8.data());
+    }
+    if (wargv) LocalFree(wargv);
+#endif
+
+    return runCompile(driver, argc, argv);
 }
