@@ -8,6 +8,7 @@
 | 成员 | 文件 |
 |------|------|
 | vi | [todo/vi.md](todo/vi.md) |
+| ferock | [todo/ferock.md](todo/ferock.md) |
 
 > 新成员加入时：在 `todo/` 下建 `<你的用户名>.md`，并把链接加进上表。
 
