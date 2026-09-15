@@ -1,0 +1,36 @@
+# C3 持续集成流水线 (GitCode Action)
+# 文档: https://docs.gitcode.com/docs/help/home/org_project/pipeline/quick-start/
+#
+# 触发时机: push 到 main / 目标为 main 的 PR
+# 合并门槛: 构建成功 + 回归测试 FAIL=0
+#
+# 注意:
+# 1. 若平台无公共 Windows Runner, 需在「仓库设置 -> 流水线 -> 资源池」接入
+#    自托管 Runner (在本机 Windows 上安装 Runner 并打 windows 标签即可)。
+# 2. build.bat / run_tests.ps1 已通过 vswhere 自动定位 VS, 无路径硬编码。
+
+name: C3 CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  build-and-test:
+    name: Build & Regression Test
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build C3.exe
+        shell: cmd
+        run: scripts\build.bat clean
+
+      - name: Run regression tests
+        shell: cmd
+        run: scripts\test.bat all

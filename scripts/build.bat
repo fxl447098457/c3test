@@ -1,51 +1,86 @@
-ï»¿@echo off
+@echo off
 REM ============================================================
-REM  build.bat - æ„å»º C3.exe
-REM  ç”¨æ³•: build [clean]
-REM    build       = å¢é‡æ„å»º
-REM    build clean = æ¸…ç†åå®Œæ•´æ„å»º
+REM  build.bat - ¹¹½¨ C3.exe
+REM  ÓÃ·¨: build [clean]
+REM    build       = ÔöÁ¿¹¹½¨
+REM    build clean = ÇåÀíºóÍêÕû¹¹½¨
+REM  ËµÃ÷: Í¨¹ı vswhere ×Ô¶¯¶¨Î»±¾»ú Visual Studio, ²»ÒÀÀµ¹Ì¶¨°²×°Â·¾¶,
+REM        ¿ÉÔÚÈÎÒâ¿ª·¢»ú / CI »·¾³Ê¹ÓÃ
 REM ============================================================
 
-call "C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvarsall.bat" x64 >nul 2>&1
+REM ---- ¶¨Î»ÏîÄ¿¸ùÄ¿Â¼ (ÓÉ½Å±¾×ÔÉíÎ»ÖÃÍÆµ¼, ²»ÒÀÀµ¹Ì¶¨ÅÌ·û) ----
+cd /d "%~dp0.."
 if errorlevel 1 (
-    echo [ERROR] vcvarsall.bat åŠ è½½å¤±è´¥
+    echo [ERROR] ÎŞ·¨½øÈëÏîÄ¿¸ùÄ¿Â¼
     exit /b 1
 )
 
-cd /d D:\code\vi\c3.vb6.pro
+REM ---- Í¨¹ı vswhere ¶¨Î» vcvarsall.bat (¼æÈİ Community/Professional/Enterprise/BuildTools) ----
+REM À¦°ó CMake/Ninja Ö»ËæÍêÕû IDE ·Ö·¢; Èô±¾»úÖ»×° BuildTools ÔòÔÚÁíÒ»¸öÊµÀıÀïÕÒ
+set "VSWHERE=%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe"
+set "VCVARSALL="
+set "VS_CMAKE_BIN="
+set "VS_NINJA_BIN="
+if exist "%VSWHERE%" (
+    for /f "usebackq tokens=*" %%i in (`"%VSWHERE%" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do (
+        if exist "%%i\VC\Auxiliary\Build\vcvarsall.bat" set "VCVARSALL=%%i\VC\Auxiliary\Build\vcvarsall.bat"
+    )
+    for /f "usebackq tokens=*" %%i in (`"%VSWHERE%" -all -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do (
+        if not defined VS_CMAKE_BIN if exist "%%i\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe" set "VS_CMAKE_BIN=%%i\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin"
+        if not defined VS_NINJA_BIN if exist "%%i\Common7\IDE\CommonExtensions\Microsoft\CMake\Ninja\ninja.exe" set "VS_NINJA_BIN=%%i\Common7\IDE\CommonExtensions\Microsoft\CMake\Ninja"
+    )
+)
+
+if "%VCVARSALL%"=="" (
+    echo [ERROR] Î´ÕÒµ½ Visual Studio 2022 µÄ vcvarsall.bat
+    echo         Çë°²×° VS2022 ²¢¹´Ñ¡ [Ê¹ÓÃ C++ µÄ×ÀÃæ¿ª·¢] ¹¤×÷¸ºÔØ
+    exit /b 1
+)
+
+call "%VCVARSALL%" x64 >nul 2>&1
+if errorlevel 1 (
+    echo [ERROR] vcvarsall.bat ¼ÓÔØÊ§°Ü
+    exit /b 1
+)
+
+REM ---- cmake/ninja ²»ÔÚ PATH Ê±, ²¹³ä VS À¦°óµÄ CMake/Ninja (C++ ¹¤×÷¸ºÔØ×Ô´ø) ----
+where cmake >nul 2>&1
+if errorlevel 1 if defined VS_CMAKE_BIN set "PATH=%PATH%;%VS_CMAKE_BIN%"
+where ninja >nul 2>&1
+if errorlevel 1 if defined VS_NINJA_BIN set "PATH=%PATH%;%VS_NINJA_BIN%"
 
 if "%1"=="clean" (
-    echo [INFO] æ¸…ç† .build ç›®å½•...
+    echo [INFO] ÇåÀí .build Ä¿Â¼...
     rmdir /s /q .build 2>nul
-    echo [INFO] é‡æ–° configure...
+    echo [INFO] ÖØĞÂ configure...
     cmake -B .build -G Ninja -DCMAKE_BUILD_TYPE=Release
     if errorlevel 1 (
-        echo [ERROR] CMake configure å¤±è´¥
+        echo [ERROR] CMake configure Ê§°Ü
         exit /b 1
     )
 )
 
-echo [INFO] æ„å»º C3.exe...
+echo [INFO] ¹¹½¨ C3.exe...
 cmake --build .build --config Release
 if errorlevel 1 (
-    echo [ERROR] æ„å»ºå¤±è´¥
+    echo [ERROR] ¹¹½¨Ê§°Ü
     exit /b 1
 )
 
-echo [OK] C3.exe æ„å»ºæˆåŠŸï¼Œè¾“å‡º .build\C3.exe
+echo [OK] C3.exe ¹¹½¨³É¹¦£¬Êä³ö .build\C3.exe
 
-REM ---- å¤åˆ¶ç¼–è¯‘äº§ç‰©åˆ°å‘å¸ƒç›®å½• (publish) ----
-set "PUBLISH_DIR=D:\code\vi\c3.vb6.pro\publish"
+REM ---- ¸´ÖÆ±àÒë²úÎïµ½·¢²¼Ä¿Â¼ (publish) ----
+set "PUBLISH_DIR=%~dp0..\publish"
 
 if not exist "%PUBLISH_DIR%" (
-    echo [INFO] åˆ›å»ºå‘å¸ƒç›®å½• %PUBLISH_DIR%
+    echo [INFO] ´´½¨·¢²¼Ä¿Â¼ %PUBLISH_DIR%
     mkdir "%PUBLISH_DIR%"
 )
 
-echo [INFO] å¤åˆ¶ C3.exe åˆ°å‘å¸ƒç›®å½•...
+echo [INFO] ¸´ÖÆ C3.exe µ½·¢²¼Ä¿Â¼...
 copy /y ".build\C3.exe" "%PUBLISH_DIR%\C3.exe" >nul
 if errorlevel 1 (
-    echo [ERROR] å¤åˆ¶ C3.exe å¤±è´¥
+    echo [ERROR] ¸´ÖÆ C3.exe Ê§°Ü
     exit /b 1
 )
 
@@ -53,6 +88,6 @@ if exist ".build\C3.pdb" (
     copy /y ".build\C3.pdb" "%PUBLISH_DIR%\C3.pdb" >nul
 )
 
-echo [OK] å·²å¤åˆ¶äº§ç‰©åˆ° %PUBLISH_DIR%\C3.exe
+echo [OK] ÒÑ¸´ÖÆ²úÎïµ½ publish\C3.exe
 
-REM åç»­å†’çƒŸéªŒè¯: è·‘ scripts\test.bat smoke (ç”¨ä¾‹ tests\smoke.bas, å…¨é“¾è·¯å¿«é€Ÿè‡ªæ£€)
+REM ºóĞøÃ°ÑÌÑéÖ¤: ÅÜ scripts\test.bat smoke (ÓÃÀı tests\smoke.bas, È«Á´Â·¿ìËÙ×Ô¼ì)
