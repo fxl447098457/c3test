@@ -6,8 +6,10 @@
 #  加载后可直接使用 cl.exe, cmake, ninja, C3.exe 等
 # ============================================================
 
-$VcVars = "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvarsall.bat"
-$ProjectDir = "C:\Users\vi\Desktop\c3.vb6.pro"
+# vcvarsall 路径: 环境变量 C3_VCVARSALL 优先, 未设置用默认 (VS2022 BuildTools). 详见 scripts\README.md
+$VcVars = if ($env:C3_VCVARSALL) { $env:C3_VCVARSALL } else { "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvarsall.bat" }
+# 项目根目录: 环境变量 C3_PROJECT_DIR 优先, 未设置取脚本所在目录的上一级. 详见 scripts\README.md
+$ProjectDir = if ($env:C3_PROJECT_DIR) { $env:C3_PROJECT_DIR } else { Split-Path -Parent $PSScriptRoot }
 
 Write-Host "[INFO] Loading MSVC environment..." -ForegroundColor Yellow
 

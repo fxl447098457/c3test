@@ -6,13 +6,17 @@ REM    build       = 增量构建
 REM    build clean = 清理后完整构建
 REM ============================================================
 
-call "C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvarsall.bat" x64 >nul 2>&1
+REM vcvarsall 路径: 环境变量 C3_VCVARSALL 优先, 未设置用默认 (VS2022 Community). 详见 scripts\README.md
+if not defined C3_VCVARSALL set "C3_VCVARSALL=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvarsall.bat"
+call "%C3_VCVARSALL%" x64 >nul 2>&1
 if errorlevel 1 (
     echo [ERROR] vcvarsall.bat 加载失败
     exit /b 1
 )
 
-cd /d D:\code\vi\c3.vb6.pro
+REM 项目根目录: 环境变量 C3_PROJECT_DIR 优先, 未设置取脚本所在目录的上一级. 详见 scripts\README.md
+if not defined C3_PROJECT_DIR set "C3_PROJECT_DIR=%~dp0.."
+cd /d "%C3_PROJECT_DIR%"
 
 if "%1"=="clean" (
     echo [INFO] 清理 .build 目录...
