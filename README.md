@@ -1,4 +1,4 @@
-﻿# C3 — 现代化 VB6 编译器
+﻿﻿# C3 — 现代化 VB6 编译器
 
 > 官网：<https://c3.vb6.pro> ｜ 仓库：<https://gitcode.com/woeoio/c3.vb6.pro>（本地路径 `D:\code\vi\c3.vb6.pro`）
 >
@@ -312,10 +312,10 @@ C3 在语法规则核对、测试语料与实现思路上参考了以下项目�
 | VisualBasic6.g4（随 [proleap-vb6](https://github.com/uwol/proleap-vb6-parser) 发布） | — | AGPL-3.0 | P1 语法规则 | 权威语法参考：50+ 语句、~130 个歧义关键字、14 级表达式优先级 |
 | [proleap-vb6](https://github.com/uwol/proleap-vb6-parser) | — | AGPL-3.0 | P1 AST 设计 | 基于 ANTLR4 的 VB6 分析器与转换器，AST / ASG 元模型类清单 |
 | vb6grammarfuzz | 0.1.0 | — | P2+ 质量保障 | 基于 `VisualBasic6.g4` 的 VB6 语法模糊测试器（仓库内本地工具，依赖 vb6parse，无公开地址） |
-| RustASP | — | — | P1.3 Pratt 解析器 · P2 作用域链 | Rust 实现的经典 ASP 服务器原型，Pratt 核心实现与作用域链设计参考（本地参考项目，无公开地址） |
+| [RustASP](https://github.com/ferocknew/rustasp) | — | — | P1.3 Pratt 解析器 · P2 作用域链 | Rust 实现的经典 ASP 服务器原型，Pratt 核心实现与作用域链设计参考 |
 | aspgo | — | — | P4 运行时设计 | Go 实现的经典 ASP 服务器（含 VBScript），Variant / COM / Error 运行时设计思路参考（本地参考项目，无公开地址） |
 | [FreeBASIC (fbc)](https://github.com/freebasic/fbc) | 1.20.0 | 编译器 GPL-2.0+ / RTL LGPL-2.1+ | 全局架构参考 | 成熟 BASIC 编译器源码，RTL 组织（IR_VTBL）、x64 调用约定与代码生成策略 |
 | [AvaloniaVisualBasic6](https://github.com/BAndysc/AvaloniaVisualBasic6) | — | MIT | P1 语法规则 | C# + Avalonia 复刻的 VB6 IDE 与语言，含可视化设计器与 VB6 兼容工程格式（VB6.g4 来源） |
 | [twinBASIC](https://twinbasic.com) | — | 闭源 | P5 兼容性验证 | VB6 兼容一体化 IDE，作为 C3 语义兼容性的对照基准 |
 
-> RustASP / aspgo / vb6grammarfuzz 为本地参考项目，无公开仓库地址；各参考项目的本地路径索引见 `ai/003-开发计划.md` 第七节。
+> aspgo / vb6grammarfuzz 为本地参考项目，无公开仓库地址；各参考项目的本地路径索引见 `ai/003-开发计划.md` 第七节。
