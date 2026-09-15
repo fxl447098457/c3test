@@ -20,7 +20,8 @@ $Root = Split-Path -Parent $PSScriptRoot
 $C3 = Join-Path $Root ".build\C3.exe"
 $Tests = $PSScriptRoot
 $OutDir = Join-Path $Root "output"
-$VcVars = "C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvarsall.bat"
+# vcvarsall 路径: 环境变量 C3_VCVARSALL 优先, 未设置用默认 (VS2022 Community). 详见 scripts\README.md
+$VcVars = if ($env:C3_VCVARSALL) { $env:C3_VCVARSALL } else { "C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvarsall.bat" }
 
 # === 设置MSVC环境 ===
 $msvcOutput = cmd /c "call `"$VcVars`" x64 >nul 2>&1 && echo MSVC_OK" 2>&1

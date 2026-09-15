@@ -8,7 +8,7 @@
 
 | 环境变量 | 作用 | 未设置时的默认值 |
 |----------|------|------------------|
-| `C3_VCVARSALL` | `vcvarsall.bat` 的完整路径（VS 安装位置与版本因机器而异） | `build.bat` 取 VS2022 Community 路径；`env.ps1` 取 VS2022 BuildTools 路径 |
+| `C3_VCVARSALL` | `vcvarsall.bat` 的完整路径（VS 安装位置与版本因机器而异） | `build.bat` / `tests\run_tests.ps1` 取 VS2022 Community 路径；`env.ps1` 取 VS2022 BuildTools 路径 |
 | `C3_PROJECT_DIR` | 项目根目录（含 `CMakeLists.txt` 的目录） | 脚本所在目录的上一级（`%~dp0..` / `Split-Path -Parent $PSScriptRoot`），一般无需设置 |
 
 ### 使用示例
