@@ -63,6 +63,7 @@
    - **Load/Unload 语句同系列机制（群友补充，详见 ai/胎神建议/004）**：走隐藏 dispinterface VBLoader（IID {E93AD7C1-C347-11D1-A3E2-00A0C90AEA82}），dispid 2=Load()、3=Unload()（无参，目标由语句指定）；Form/UserControl 均经此派发
      - C3：内置路径 Load=建实例+窗口句柄+触发 Initialize/Load（不显示，Show 隐式 Load、重复 Load 幂等）、Unload=QueryUnload(Cancel)→Unload(Cancel)→销毁（Cancel 拦截已支持，接上即可）；外部对象按 typelib dispid 2/3 Invoke，无 typelib 则 GetIDsOfNames 按名兜底；C3 自带 VBLoader 定义供 Implements 与 --dll 出口
      - 实现时与 PSet/Print 一并设计统一"语句目标解析器"框架（同名成员 + VBPrint/VBLoader 接口 QI/Invoke 三种派发入口共用），避免三套各写各的
+   - **For Each 同系列（群友补充，详见 ai/胎神建议/005）**：接口 = 标准 IEnumVARIANT（IID {00020404-0000-0000-C000-000000000046}，群友 tlb 里定义名 EnumVariant）。C3 消费侧已实现（P22-11：vb6_ForEach_Init 调 DISPID -4 取 _NewEnum → QI IID_IEnumVARIANT → Next，见 vb6com.c 1469-1601）；**缺口在生产侧**：`Implements IEnumVARIANT/EnumVariant` 通道、类模块 `_NewEnum` 成员（dispid -4）生成、`--dll` typelib 输出 `_NewEnum` 成员使 VB6 可 For Each C3 集合类。顺带清理 cgen_stmt.cpp:2406 过时注释
    - **Line 双重身份**：既是指令关键字也是控件类型名 → 必须上下文判定（语句起始 + 后随 `(` 坐标对或 `Step` 判为语句；否则按变量/控件/类型名走），不能简单注册为保留字
    - 实现路径分工：parser 新增 GraphicsStmt / PrintStmt 语句产生式（词法层不动，避免 Line 误杀）→ 语义解析目标对象（显式前缀 / 隐式 Me / Printer）→ **cgen 最终仍翻译为调用同名 RTL 函数**：vb6_PSet(obj,x,y,color) / vb6_Line(obj,x1,y1,x2,y2,color,bf) / vb6_Circle(obj,x,y,r,color,start,end,aspect) / vb6_Print(obj,...)。即"前端负责把关键字语法翻译成函数调用，后端只有函数没有语句"
    - Cls / PaintPicture / TextHeight / TextWidth 是普通方法调用形式，走第 2 条的方法调用表
