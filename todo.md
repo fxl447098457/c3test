@@ -49,15 +49,21 @@
      - `PSet [Step] (x, y), [color]` —— 坐标必须是括号对
      - `Line [Step] (x1,y1) [Step] -(x2,y2), [color], [B][F]` —— 独有的"坐标对连接"语法 + B/F 矩形/填充标志
      - `Circle [Step] (x, y), radius, [color], [start], [end], [aspect]`
+     - `Scale [(x1,y1)-(x2,y2)]` —— 设置/重置用户坐标系（也是关键字语句，此前遗漏；裸 `Scale` 恢复缇单位）
      - `Print expr[; expr][, expr][;]` —— `;` 连续输出 / `,` 制表位分区 / 结尾分号不换行
      - 可带对象前缀：`Picture1.Line ...`、`Printer.Print ...`；缺省对象 = 当前窗体
+   - **外部对象同样可作语句目标（群友案例：dxvbgraph）**：0xaa55 论坛帖（thread-26577）的 GraphWindow 类库把 DX 绘图封装成与 Form 参数**完全一致**的 PSet/Line/Circle/Print/Scale/Cls/PaintPicture/CurrentX/CurrentY 成员，VB6 中可对它直接用关键字写法：`dxgw.Line (10,10)-(100,100), vbBlue, BF`。证实这些语句本质是"特殊参数语法的成员调用"，目标不限于内置对象：
+     - 判定规则：前缀对象存在同名成员即可（编译期对后期绑定不查签名，运行时 IDispatch::Invoke；前期绑定靠 TypeLib——作者正是利用"TypeLib 里成员名不受 VB6 词法关键字限制"这一点实现的自定义类关键字成员）
+     - cgen 脱糖：内置 Form/PictureBox/Printer → vb6_* RTL 函数；外部 COM 对象 → 把坐标对/Step/B/F 语法脱糖成普通实参后走既有 COM 方法调用路径，无需专用代码
+     - **反向收益**：C3 的 `--dll` 用 CreateTypeLib2 生成 .tlb，成员名只是字符串、同样无关键字限制 → C3 编译出的 ActiveX DLL 也能定义 PSet/Line/Circle 成员供 VB6 关键字写法调用（与该群友库同款玩法），可作招牌 demo
+     - 该库还示范：`Point(x,y)` 读取是方法、写入是**参数化属性**（`dxgw.Point(x,y) = 颜色`）；Cls 带可选背景色；Print 支持 `Spc()/Tab()` —— 语法兼容生态有第三方先例，C3 支持"任意对象前缀"即自动兼容此类库
    - **Line 双重身份**：既是指令关键字也是控件类型名 → 必须上下文判定（语句起始 + 后随 `(` 坐标对或 `Step` 判为语句；否则按变量/控件/类型名走），不能简单注册为保留字
    - 实现路径分工：parser 新增 GraphicsStmt / PrintStmt 语句产生式（词法层不动，避免 Line 误杀）→ 语义解析目标对象（显式前缀 / 隐式 Me / Printer）→ **cgen 最终仍翻译为调用同名 RTL 函数**：vb6_PSet(obj,x,y,color) / vb6_Line(obj,x1,y1,x2,y2,color,bf) / vb6_Circle(obj,x,y,r,color,start,end,aspect) / vb6_Print(obj,...)。即"前端负责把关键字语法翻译成函数调用，后端只有函数没有语句"
    - Cls / PaintPicture / TextHeight / TextWidth 是普通方法调用形式，走第 2 条的方法调用表
    - 配套属性 DrawWidth / DrawStyle / DrawMode / FillColor / FillStyle / ScaleLeft / ScaleTop / ScaleMode，以及 CurrentX / CurrentY（Print 连续定位依赖）
    - 落笔载体直接用已实现的 vb6_SetAutoRedraw 内存 DC/位图（vb6forms.c 3017-3051），AutoRedraw=False 时走 GetDC 即时绘制 + 下一条线圈到窗体临时 DC
    - 注意坐标：VB6 图形方法单位=ScaleMode、`Step` 为相对当前 CurrentX/CurrentY 的增量，需统一 twip/px 换算入口，避免与现有 1 比 15 硬编码打架
-   - 回归测试需覆盖：语句/函数两种写法互不干扰（如自定义了名为 Line 的控件仍可用）、Step 相对坐标、B/F 标志、Print 的 `;`/`,` 分隔与结尾分号
+   - 回归测试需覆盖：语句/函数两种写法互不干扰（如自定义了名为 Line 的控件仍可用）、Step 相对坐标、B/F 标志、Scale 坐标系、Print 的 `;`/`,`/`Spc()`/`Tab()` 分隔与结尾分号、外部 COM 对象作语句目标（可用 C3 自产 ActiveX DLL 验证，一举两得）
 4. [P2] Data(DAO) 与 OLE 容器：明确边界
    - 结论倾向不实作 x64 DAO（MDAC 无 x64）；改为编译期/运行期明确诊断：遇到 VB.Data 或 VB.OLE 给出"不支持"的编译错误或运行时友好提示，杜绝"静默编过去但不显示"
    - 文档标注为已定义豁免项，并给出迁移建议（改 ADODB.Recordset 走 COM 路径）
