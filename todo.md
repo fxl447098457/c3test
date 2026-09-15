@@ -44,11 +44,20 @@
    - RTL 新增 vb6_SetFocus / vb6_MoveControl(Left,Top,Width,Height) / vb6_SetZOrder(pos) / vb6_RefreshControl / vb6_DragControl
    - cgen 侧补控件方法调用表（当前只有 AddItem/RemoveItem/Clear 三条路径），方法名大小写不敏感
    - SetFocus 优先用 SetFocus(hwnd) + SetForegroundWindow，注意 vb6_hwnd_ 为 NULL 时静默返回（Timer 等无窗口控件）
-3. [P1] 绘图方法与画布属性（PictureBox 画图类程序的死穴）
-   - 新增 PSet / Line / Circle / Cls / PaintPicture / PrintForm 六个方法
-   - 配套属性 DrawWidth / DrawStyle / DrawMode / FillColor / FillStyle / ScaleLeft / ScaleTop / ScaleMode 读写
+3. [P1] 绘图语句与画布属性（PictureBox 画图类程序的死穴）
+   - **语法形态警示（群友指正）**：PSet / Line / Circle / Print 在 VB6 里是**关键字语句**，调用写法与函数完全不同，不能走普通方法调用路径：
+     - `PSet [Step] (x, y), [color]` —— 坐标必须是括号对
+     - `Line [Step] (x1,y1) [Step] -(x2,y2), [color], [B][F]` —— 独有的"坐标对连接"语法 + B/F 矩形/填充标志
+     - `Circle [Step] (x, y), radius, [color], [start], [end], [aspect]`
+     - `Print expr[; expr][, expr][;]` —— `;` 连续输出 / `,` 制表位分区 / 结尾分号不换行
+     - 可带对象前缀：`Picture1.Line ...`、`Printer.Print ...`；缺省对象 = 当前窗体
+   - **Line 双重身份**：既是指令关键字也是控件类型名 → 必须上下文判定（语句起始 + 后随 `(` 坐标对或 `Step` 判为语句；否则按变量/控件/类型名走），不能简单注册为保留字
+   - 实现路径分工：parser 新增 GraphicsStmt / PrintStmt 语句产生式（词法层不动，避免 Line 误杀）→ 语义解析目标对象（显式前缀 / 隐式 Me / Printer）→ **cgen 最终仍翻译为调用同名 RTL 函数**：vb6_PSet(obj,x,y,color) / vb6_Line(obj,x1,y1,x2,y2,color,bf) / vb6_Circle(obj,x,y,r,color,start,end,aspect) / vb6_Print(obj,...)。即"前端负责把关键字语法翻译成函数调用，后端只有函数没有语句"
+   - Cls / PaintPicture / TextHeight / TextWidth 是普通方法调用形式，走第 2 条的方法调用表
+   - 配套属性 DrawWidth / DrawStyle / DrawMode / FillColor / FillStyle / ScaleLeft / ScaleTop / ScaleMode，以及 CurrentX / CurrentY（Print 连续定位依赖）
    - 落笔载体直接用已实现的 vb6_SetAutoRedraw 内存 DC/位图（vb6forms.c 3017-3051），AutoRedraw=False 时走 GetDC 即时绘制 + 下一条线圈到窗体临时 DC
-   - 注意坐标：VB6 图形方法单位=ScaleMode，需统一 twip/px 换算入口，避免与现有 1 比 15 硬编码打架
+   - 注意坐标：VB6 图形方法单位=ScaleMode、`Step` 为相对当前 CurrentX/CurrentY 的增量，需统一 twip/px 换算入口，避免与现有 1 比 15 硬编码打架
+   - 回归测试需覆盖：语句/函数两种写法互不干扰（如自定义了名为 Line 的控件仍可用）、Step 相对坐标、B/F 标志、Print 的 `;`/`,` 分隔与结尾分号
 4. [P2] Data(DAO) 与 OLE 容器：明确边界
    - 结论倾向不实作 x64 DAO（MDAC 无 x64）；改为编译期/运行期明确诊断：遇到 VB.Data 或 VB.OLE 给出"不支持"的编译错误或运行时友好提示，杜绝"静默编过去但不显示"
    - 文档标注为已定义豁免项，并给出迁移建议（改 ADODB.Recordset 走 COM 路径）

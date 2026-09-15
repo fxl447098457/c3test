@@ -239,7 +239,7 @@ CLI 仍保留 `--dump-ir` / `--emit-llvm` 开关，但没有消费方。
 - **半接线（RTL 与属性表已实现，缺 `controlTypeToWin32Class` 窗口类映射 → 编过能跑但运行时不可见）**：
   Shape / Line、DriveListBox / DirListBox / FileListBox —— 差一步接入，推进计划见 `todo.md`
 - **未实现**：Data / OLE（x64 无 DAO / MDAC 支撑，列为豁免但会明确报错）、SSTab、Toolbar / StatusBar、CommonDialog
-- **控件方法**：Move / SetFocus / ZOrder / Refresh / Drag 及绘图五件套（PSet / Line / Circle / Cls / PaintPicture）未实现
+- **控件方法**：Move / SetFocus / ZOrder / Refresh / Drag 未实现；绘图语句 PSet / Line / Circle / Print 为 VB6 **关键字语法**（非函数调用，需专用语句产生式），Cls / PaintPicture 同样未实现
 - **窗体相关**：Form_Click / Paint / DragDrop 事件、PictureBox 作容器、任意深度容器嵌套（当前仅 Frame 单层子控件）、per-monitor DPI（缇换算按 96 DPI 硬编码）
 - 多接口 `Implements IFoo, IBar`（已决策跳过）
 - 部分内置函数：注册表 4 函数（GetSetting / SaveSetting / GetAllSettings / DeleteSetting）、
@@ -290,7 +290,7 @@ VBMAN 编译过程的问题日志见 `archive/vbman/c3log/001.md ~ 054.md`。
 2. **内置函数补齐** —— DoEvents、FormatDateTime、CVErr、注册表 4 函数、GetAttr / SetAttr
 3. **控件补齐（67% → 100%）—— 当前首要方向**：定义「100%」= 21 类内置控件能创建 + 属性可读写 + 事件能分发 + 常用方法可调用
    - P0：接通 Shape / Line / Drive-Dir-FileListBox 五个半残控件的窗口类映射（≈ 67% → 90%）
-   - P1：控件方法 Move / SetFocus / ZOrder / Refresh / Drag，以及绘图五件套 + DrawWidth / ScaleLeft 等画布属性
+   - P1：控件方法 Move / SetFocus / ZOrder / Refresh / Drag，以及绘图语句（PSet / Line / Circle / Print 关键字语法 → 翻译为同名 RTL 函数）+ DrawWidth / ScaleLeft 等画布属性
    - P2：Data / OLE 明确报错边界、容器任意深度嵌套、PictureBox 作容器
    - P3：Form_Click / Paint / 拖放事件、per-monitor DPI
    - 详见 `todo.md`「下一步主方向：VB6 内置控件可用度 67% → 100%」
