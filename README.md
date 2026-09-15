@@ -182,6 +182,8 @@ c3.vb6.pro/
 | `dev.ps1` | `dev [-SkipBuild] [-SkipTest]` | 一键构建 + 测试 |
 | `env.ps1` | `. .\scripts\env.ps1` | dot-source 加载 MSVC 环境 |
 
+> **跨机器使用前必读**：`build.bat` / `env.ps1` 的路径配置（环境变量 `C3_VCVARSALL` / `C3_PROJECT_DIR`）说明见 [`scripts/README.md`](scripts/README.md)。
+
 ---
 
 ## 六、架构要点

@@ -1,13 +1,28 @@
-ï»¿#!/usr/bin/env powershell
+?#!/usr/bin/env powershell
 # ============================================================
-#  env.ps1 - åŠ è½½ MSVC ç¯å¢ƒå˜é‡
-#  ç”¨æ³•: . .\scripts\env.ps1  (æ³¨æ„å‰é¢çš„ç‚¹å· - dot-source)
-#  æ•ˆæœ: å½“å‰ PowerShell ä¼šè¯è·å¾— MSVC ç¼–è¯‘ç¯å¢ƒ
-#  åŠ è½½åå¯ç›´æ¥ä½¿ç”¨ cl.exe, cmake, ninja, C3.exe ç­‰
+#  env.ps1 - ¼ÓÔØ MSVC »·¾³±äÁ¿
+#  ÓÃ·¨: . .\scripts\env.ps1  (×¢ÒâÇ°ÃæµÄµãºÅ - dot-source)
+#  Ğ§¹û: µ±Ç° PowerShell »á»°»ñµÃ MSVC ±àÒë»·¾³
+#  ¼ÓÔØºó¿ÉÖ±½ÓÊ¹ÓÃ cl.exe, cmake, ninja, C3.exe µÈ
 # ============================================================
 
-$VcVars = "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvarsall.bat"
-$ProjectDir = "C:\Users\vi\Desktop\c3.vb6.pro"
+# vcvarsall Â·¾¶: »·¾³±äÁ¿ C3_VCVARSALL ÓÅÏÈ, Î´ÉèÖÃÊ± vswhere ×Ô¶¯Ì½²â
+# (¼æÈİ Community/Professional/Enterprise/BuildTools ¶àÊµÀı). Ïê¼û scripts\README.md
+$vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer\vswhere.exe"
+$VcVars = $env:C3_VCVARSALL
+if (-not $VcVars -and (Test-Path $vswhere)) {
+    $vsPath = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath 2>$null
+    if ($vsPath) {
+        $candidate = Join-Path $vsPath "VC\Auxiliary\Build\vcvarsall.bat"
+        if (Test-Path $candidate) { $VcVars = $candidate }
+    }
+}
+if (-not $VcVars) {
+    Write-Host "[ERROR] Î´ÕÒµ½ vcvarsall.bat, ÇëÉèÖÃ»·¾³±äÁ¿ C3_VCVARSALL Ö¸ÏòÆäÍêÕûÂ·¾¶" -ForegroundColor Red
+    return
+}
+# ÏîÄ¿¸ùÄ¿Â¼: »·¾³±äÁ¿ C3_PROJECT_DIR ÓÅÏÈ, Î´ÉèÖÃÈ¡½Å±¾ËùÔÚÄ¿Â¼µÄÉÏÒ»¼¶. Ïê¼û scripts\README.md
+$ProjectDir = if ($env:C3_PROJECT_DIR) { $env:C3_PROJECT_DIR } else { Split-Path -Parent $PSScriptRoot }
 
 Write-Host "[INFO] Loading MSVC environment..." -ForegroundColor Yellow
 
@@ -24,7 +39,7 @@ Remove-Item $tempBat -ErrorAction SilentlyContinue
 
 Write-Host "[OK] Loaded $count environment variables" -ForegroundColor Green
 
-# éªŒè¯
+# ÑéÖ¤
 $clOk = $null -ne (Get-Command cl.exe -ErrorAction SilentlyContinue)
 $cmakeOk = $null -ne (Get-Command cmake -ErrorAction SilentlyContinue)
 $c3Ok = Test-Path "$ProjectDir\.build\C3.exe"

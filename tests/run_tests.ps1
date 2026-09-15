@@ -21,10 +21,11 @@ $Root = Split-Path -Parent $PSScriptRoot
 $C3 = Join-Path $Root ".build\C3.exe"
 $Tests = $PSScriptRoot
 $OutDir = Join-Path $Root "output"
-# 通过 vswhere 自动定位 vcvarsall.bat (兼容 Community/Professional/Enterprise 及 CI 环境)
+# vcvarsall 路径: 环境变量 C3_VCVARSALL 优先, 未设置时 vswhere 自动探测
+# (兼容 Community/Professional/Enterprise/BuildTools 多实例及 CI 环境). 详见 scripts\README.md
 $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer\vswhere.exe"
-$VcVars = ""
-if (Test-Path $vswhere) {
+$VcVars = $env:C3_VCVARSALL
+if (-not $VcVars -and (Test-Path $vswhere)) {
     $vsPath = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath 2>$null
     if ($vsPath) {
         $candidate = Join-Path $vsPath "VC\Auxiliary\Build\vcvarsall.bat"
@@ -32,8 +33,9 @@ if (Test-Path $vswhere) {
     }
 }
 if (-not $VcVars) {
-    Write-Host "[ERROR] 未找到 Visual Studio 2022 的 vcvarsall.bat" -ForegroundColor Red
-    Write-Host "        请安装 VS2022 并勾选 [使用 C++ 的桌面开发] 工作负载" -ForegroundColor Red
+    Write-Host "[ERROR] 未找到 vcvarsall.bat" -ForegroundColor Red
+    Write-Host "        请安装 VS2022 并勾选 [使用 C++ 的桌面开发] 工作负载," -ForegroundColor Red
+    Write-Host "        或设置环境变量 C3_VCVARSALL 指向其完整路径 (详见 scripts\README.md)" -ForegroundColor Red
     exit 1
 }
 
