@@ -107,7 +107,7 @@ std::pair<CompileOptions, int> Driver::parseArgs(int argc, char* argv[]) {
             opts.trimIncludes = true;  // opt4: 裁剪未实际引用的跨模块include
         }
         else if (arg == "--keep-for-debug") {
-            opts.keepTemps = true;  // 隐藏参数: 保留中间文件便于调试
+            opts.keepTemps = true;  // 保留中间文件便于调试
         }
         else if (arg == "--syntax-only") {
             opts.syntaxOnly = true;
@@ -2423,10 +2423,15 @@ void Driver::printHelp() {
               << "  --compat-check     兼容性检查模式\n"
               << "\n"
               << "TypeLib/COM 选项:\n"
-              << "  --typelib <文件>   显式引用TypeLib\n"
-              << "  --no-auto-typelib  禁用自动TypeLib加载\n"
-              << "  --progid <前缀>    ActiveX DLL的ProgID前缀\n"
-              << "  --libid <字符串>   显式指定TypeLib的LibID\n"
+              << "  --typelib <文件>    显式引用TypeLib\n"
+              << "  --no-auto-typelib   禁用自动TypeLib加载\n"
+              << "  --progid <前缀>     ActiveX DLL的ProgID前缀\n"
+              << "  --libid <字符串>    显式指定TypeLib的LibID\n"
+              << "\n"
+              << "性能/杂项选项:\n"
+              << "  --incremental       增量编译 (obj级缓存, 跳过未变化的.c)\n"
+              << "  --trim-includes     裁剪未实际引用的跨模块include\n"
+              << "  --no-warn <ID列表>   抑制指定ID的警告 (逗号分隔, 如 3001,3003)\n"
               << "\n"
               << "示例:\n"
               << "  C3 hello.bas -o hello.exe\n"

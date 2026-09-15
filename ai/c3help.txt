@@ -32,8 +32,13 @@ C3 - Visual Basic 6.0 Compiler
 TypeLib/COM 选项:
   --typelib <文件>   显式引用TypeLib
   --no-auto-typelib  禁用自动TypeLib加载
-  --progid <前缀>    ActiveX DLL的ProgID前缀
-  --libid <字符串>   显式指定TypeLib的LibID
+  --progid <前缀>     ActiveX DLL的ProgID前缀
+  --libid <字符串>    显式指定TypeLib的LibID
+
+性能/杂项选项:
+  --incremental       增量编译 (obj级缓存, 跳过未变化的.c)
+  --trim-includes     裁剪未实际引用的跨模块include
+  --no-warn <ID列表>   抑制指定ID的警告 (逗号分隔, 如 3001,3003)
 
 示例:
   C3 hello.bas -o hello.exe
