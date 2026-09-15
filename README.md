@@ -75,7 +75,9 @@ scripts\build              REM 增量构建
 scripts\build clean        REM 清理 .build 后完整构建
 ```
 
-产物在 **`.build\C3.exe`**（注意：不在 `.build\Release\` 下）。
+产物在 **`.build\C3.exe`**（注意：不在 `.build\Release\` 下）；`build.bat` 会顺带把它复制到 `publish\C3.exe`。
+
+构建后建议先冒烟验证产物可用：`scripts\test smoke`（用例 `tests\smoke.bas`）。
 
 PowerShell 一键构建 + 测试（Agent 会话推荐）：
 
@@ -100,6 +102,7 @@ scripts\test               REM 全部
 scripts\test run           REM 仅运行测试
 scripts\test compile       REM 仅编译测试
 scripts\test syntax        REM 仅语法检查
+scripts\test smoke         REM 仅冒烟测试（构建后快速验证产物可用，见 tests\smoke.bas）
 ```
 
 ```bat
@@ -173,7 +176,7 @@ c3.vb6.pro/
 | 脚本 | 用法 | 说明 |
 |------|------|------|
 | `build.bat` | `build [clean]` | 构建 C3.exe |
-| `test.bat` | `test [all\|run\|compile\|syntax] [verbose]` | 回归测试 |
+| `test.bat` | `test [all\|run\|compile\|syntax\|smoke] [verbose]` | 回归测试（smoke = 冒烟） |
 | `compile.bat` | `compile <source> [outdir]` | 编译单个 .bas/.frm/.vbp |
 | `run.bat` | `run <exename> [timeout]` | 运行 output/ 下的 EXE |
 | `dev.ps1` | `dev [-SkipBuild] [-SkipTest]` | 一键构建 + 测试 |
@@ -221,15 +224,23 @@ CLI 仍保留 `--dump-ir` / `--emit-llvm` 开关，但没有消费方。
   GoSub/Return、With、For Each、On Error / Resume / Err 对象、默认属性解析、ParamArray / Optional / 命名参数
 - **COM**：CreateObject / GetObject、前期绑定（TypeLib 导入）与后期绑定（IDispatch）、Implements、WithEvents 事件
   （内部类 / 窗体控件 / 外部 COM 三条路径）、IEnumVARIANT 集合枚举、ActiveX DLL 产出（内建生成 .tlb）
-- **窗体**：`.frm` + `.frx` 二进制资源（图片 / 图标 / ImageList / 文本）、控件数组、MDI、菜单、Timer
-- **控件**：Form / MDIForm、CommandButton、TextBox、Label、CheckBox、OptionButton、ListBox、ComboBox、
+- **窗体**：`.frm` + `.frx` 二进制资源（图片 / 图标 / ImageList / 文本）、控件数组、MDI、菜单、Timer、缇↔像素换算
+- **控件**：VB6 工具箱 21 类内置控件中 **14 类全链路可用**（窗口创建 + 属性读写 + 事件分发）≈ 67%
+  —— Form / MDIForm、CommandButton、TextBox、Label、CheckBox、OptionButton、ListBox、ComboBox、
   Frame、PictureBox、HScrollBar / VScrollBar、Image、Timer、Menu、WebBrowser（WebView2）
+- **窗体实现形态**：RTL `vb6forms.c` 用 Win32 原生窗口类重实现（BUTTON / EDIT / STATIC / LISTBOX … + VB6_SHAPE / VB6_LINE 自绘），
+  不是复刻 VB6 运行时，因此产物零依赖、静态链接，且支持 VB6 自身不具备的 x64
+- **控件能力三档**：属性层最厚（50+ 双向读写含 Font 六件套 / Back&ForeColor / Alignment / TabIndex / ToolTipText / MousePointer…），
+  事件层次之（约 25 个含 KeyPress / Validate(Cancel) / QueryUnload(Cancel) / MouseEnter / Mouse Leave），**方法层近乎空白**（仅 AddItem / RemoveItem / Clear + Timer）
 - **运行时**：126 个 VB6 内置函数（字符串 / 数学 / 日期 / 转换 / 文件 I/O / 数组 / 财务 等），静态链接
 
 ### 尚未支持
 
-- 控件：Shape / Line、Data / OLE、DriveListBox / DirListBox / FileListBox、SSTab、Toolbar / StatusBar、CommonDialog
-- 控件数组之外的容器控件嵌套
+- **半接线（RTL 与属性表已实现，缺 `controlTypeToWin32Class` 窗口类映射 → 编过能跑但运行时不可见）**：
+  Shape / Line、DriveListBox / DirListBox / FileListBox —— 差一步接入，推进计划见 `todo.md`
+- **未实现**：Data / OLE（x64 无 DAO / MDAC 支撑，列为豁免但会明确报错）、SSTab、Toolbar / StatusBar、CommonDialog
+- **控件方法**：Move / SetFocus / ZOrder / Refresh / Drag 及绘图五件套（PSet / Line / Circle / Cls / PaintPicture）未实现
+- **窗体相关**：Form_Click / Paint / DragDrop 事件、PictureBox 作容器、任意深度容器嵌套（当前仅 Frame 单层子控件）、per-monitor DPI（缇换算按 96 DPI 硬编码）
 - 多接口 `Implements IFoo, IBar`（已决策跳过）
 - 部分内置函数：注册表 4 函数（GetSetting / SaveSetting / GetAllSettings / DeleteSetting）、
   FormatDateTime、CVErr、GetAttr / SetAttr、Erl / Tab / Spc 等，清单见 `ai/021`
@@ -277,7 +288,12 @@ VBMAN 编译过程的问题日志见 `archive/vbman/c3log/001.md ~ 054.md`。
 
 1. **VBMAN.dll 运行期行为对齐** —— 当前编译 / 链接 / 注册全通，下一步是运行期功能差异
 2. **内置函数补齐** —— DoEvents、FormatDateTime、CVErr、注册表 4 函数、GetAttr / SetAttr
-3. **控件补齐** —— SSTab、Toolbar / StatusBar、CommonDialog、Shape / Line
+3. **控件补齐（67% → 100%）—— 当前首要方向**：定义「100%」= 21 类内置控件能创建 + 属性可读写 + 事件能分发 + 常用方法可调用
+   - P0：接通 Shape / Line / Drive-Dir-FileListBox 五个半残控件的窗口类映射（≈ 67% → 90%）
+   - P1：控件方法 Move / SetFocus / ZOrder / Refresh / Drag，以及绘图五件套 + DrawWidth / ScaleLeft 等画布属性
+   - P2：Data / OLE 明确报错边界、容器任意深度嵌套、PictureBox 作容器
+   - P3：Form_Click / Paint / 拖放事件、per-monitor DPI
+   - 详见 `todo.md`「下一步主方向：VB6 内置控件可用度 67% → 100%」
 4. **c3-lsp 语言服务器 + VS Code 插件** —— P0 级生态组件（`ai/013`）
 5. **c3-dap 调试适配器** —— 依赖代码生成阶段输出 VB6 行号 ↔ C 行号映射
 6. **第二期方言** —— VBA / VBS / ASP（`ai/012`）

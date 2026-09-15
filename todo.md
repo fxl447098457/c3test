@@ -17,3 +17,48 @@
 ## 群友质询延展：问题与建议（2026-09-03 三轮）
 1. [问题] 缺少编译器身份标识常量：内置条件编译常量仅 win16/win32/win64/vba6/vba7/mac/win 七个平台与语言版本属性，无 C3 专属标识；且 vba6 与 vba7 同时为 True（C3 双兼容定位），用户无法用 #If VBA7 Then 区分"当前是 C3 还是原生 VB6/VBA7"环境
    [建议] preprocessor.cpp 内置注册 c3=True（小写键，与其他内置一致）；命名用 C3（条件编译符号表与运行时变量名空间独立，无冲突），保留 -d:C3=False 可覆盖以便测试原生分支；文档给出四分支标准写法：#If C3 / #ElseIf VBA7 And Win64 / #ElseIf VBA7 / #Else，配套回归测试
+
+## 群友质询：VB6 原生 GUI 兼容到了什么程度（2026-09-15 结论存档）
+
+0. [基线口径] 只谈 VB6 **内置**（工具箱 21 类 + Form/MDIForm + Menu），不含第三方 OCX。当前实测：
+   - 控件：14 类全链路可用（Form/MDIForm、PictureBox、Label、TextBox、Frame、CommandButton、CheckBox、OptionButton、ComboBox、ListBox、HScrollBar、VScrollBar、Timer、Image、Menu）→ 21 类里约 67%
+   - 属性：50+ 个双向读写（Left/Top/Width/Height/hWnd、Font 六件套、ForeColor/BackColor、Alignment、TabIndex/TabStop/CausesValidation、ToolTipText、Tag、MousePointer/MouseIcon、BorderStyle、Visible/Enabled + 各控件专有）
+   - 事件：约 25 个（Click/DblClick/Change/Scroll/KeyDown/Press/Up/MouseDown/Up/Move/Enter/Leave/GotFocus/LostFocus/Validate(Cancel) + 窗体 Load/Unload(Cancel)/QueryUnload(Cancel)/Activate/Deactivate/Resize/鼠标键 + Timer + Menu.Click）
+   - **方法：近乎空白**（仅 AddItem/RemoveItem/Clear + Timer 相关）→ 这是最短的一块板
+1. [结论] 属性层最厚、事件层够日常、**方法层和绘图层是主要欠账**。常规 CRUD/工具型界面（文本框+按钮+列表+下拉+复选/单选+Frame+图片+滚动条+菜单+定时器+MDI）能编译并原生跑起来；依赖运行时操纵控件（Move/SetFocus/ZOrder/Refresh）、自绘画图（PSet/Line/Circle/Cls/PaintPicture）、拖放、多层容器嵌套的老程序跑不通，需改源码
+2. [发现-关键] Shape/Line/DriveListBox/DirListBox/FileListBox 五类并非"没写"，而是**半接线**：RTL 已实现（vb6forms.c 里 Shape/Line 自绘 WndProc、文件系统控件的 Drive/Path/Pattern/FileName/Refresh 全有），属性读写表已登记、.frm 初值赋值也已生成，但 frm_parser.cpp 的 controlTypeToWin32Class 对这五类返回 nullptr → cgen_form.cpp 的创建循环不发 CreateWindow → vb6_hwnd_ 恒为 NULL → 编译零错但运行时看不见。**性价比最高，差一步**
+3. [发现-次要] Toolbar/StatusBar/CommonDialog/ImageList 走 ActiveX CoCreateInstance 生成 IDispatch*，但无属性/方法映射，且这些 OCX 是 32 位 → x64 进程根本 CoCreate 失败
+4. [发现-其他] 容器只遍历 Frame 单层子控件（PictureBox 当容器、多层嵌套不支持）；缇↔像素硬编码 1 比 15（96 DPI），无 per-monitor DPI；缺 Form_Click、Paint、DragDrop/DragOver 事件
+5. [结论-对外口径] GUI 是**Win32 原生重实现而非复刻 VB6 运行时**，"形似"可达成、"神似"（像素级渲染、字体度量、VB6 怪癖行为）需逐项对齐；这也是 VBMAN 运行期对齐的主战场
+
+## 下一步主方向：VB6 内置控件可用度 67% → 100%（2026-09-15 定）
+
+范围定义："100%" = VB6 工具箱 21 类控件 + Form/MDIForm + Menu，达成 **窗口能创建 + 属性可读写 + 事件能分发 + 常用方法可调用** 四项；Data/OLE 因 x64 无 DAO/MDAC 支撑列为豁免项（但要求给出明确诊断而非静默通过）
+
+1. [P0-第一步] 打通 5 个半残控件的最后一公里（做完约 67% → 90%）
+   - frm_parser.cpp:controlTypeToWin32Class 补 Shape→"VB6_SHAPE"、Line→"VB6_LINE"、DriveListBox→"COMBOBOX"、DirListBox/FileListBox→"LISTBOX"（对应 VB6 原生即这几个窗口类）
+   - 类名需与 vb6forms.c 的 vb6_RegisterShapeLineClasses 注册名严格一致（L"VB6_SHAPE"/L"VB6_LINE"），注意该函数只在 hasShape/hasLine 时生成调用，Drive/Dir/File 无需注册
+   - 确认创建后 Size 时机：Shape/Line 的属性初值已在 cgen_form.cpp 1652-1676 生成，但要在 CreateWindow 之后再落有一次 WM_PAINT 触发属性生效
+   - 补缺失属性到 cgen_util.cpp 属性表：DriveListBox.Drive、DirListBox.Path/ListIndex、FileListBox.Path/Pattern/FileName/ListIndex（RTL 侧已就绪：vb6_DriveListBoxDrive/SetDrive、vb6_*ListBoxPath/SetPath/SetPattern/FileName）
+2. [P1] 方法层补齐（最大短板，老 VB6 代码最常用）
+   - RTL 新增 vb6_SetFocus / vb6_MoveControl(Left,Top,Width,Height) / vb6_SetZOrder(pos) / vb6_RefreshControl / vb6_DragControl
+   - cgen 侧补控件方法调用表（当前只有 AddItem/RemoveItem/Clear 三条路径），方法名大小写不敏感
+   - SetFocus 优先用 SetFocus(hwnd) + SetForegroundWindow，注意 vb6_hwnd_ 为 NULL 时静默返回（Timer 等无窗口控件）
+3. [P1] 绘图方法与画布属性（PictureBox 画图类程序的死穴）
+   - 新增 PSet / Line / Circle / Cls / PaintPicture / PrintForm 六个方法
+   - 配套属性 DrawWidth / DrawStyle / DrawMode / FillColor / FillStyle / ScaleLeft / ScaleTop / ScaleMode 读写
+   - 落笔载体直接用已实现的 vb6_SetAutoRedraw 内存 DC/位图（vb6forms.c 3017-3051），AutoRedraw=False 时走 GetDC 即时绘制 + 下一条线圈到窗体临时 DC
+   - 注意坐标：VB6 图形方法单位=ScaleMode，需统一 twip/px 换算入口，避免与现有 1 比 15 硬编码打架
+4. [P2] Data(DAO) 与 OLE 容器：明确边界
+   - 结论倾向不实作 x64 DAO（MDAC 无 x64）；改为编译期/运行期明确诊断：遇到 VB.Data 或 VB.OLE 给出"不支持"的编译错误或运行时友好提示，杜绝"静默编过去但不显示"
+   - 文档标注为已定义豁免项，并给出迁移建议（改 ADODB.Recordset 走 COM 路径）
+5. [P2] 容器嵌套与运行时层级
+   - 当前只递归 Frame 一层（cgen_form.cpp 1783 起），改造为任意深度递归 + 记录 Parent
+   - 支持 PictureBox 作为容器（VB6 里它是容器控件）
+   - 缇偏移需按父容器累加，避免子控件坐标错乱
+6. [P3] 事件补齐与一致性：Form_Click、Paint、DragDrop/DragOver、OLEDrag* ；MouseHover 在 TrackMouseEvent 路径上的行为统一
+7. [P3] DPI：1 缇 = 1/15 像素硬编码改 per-monitor DPI-aware（至少 GetDpiForWindow 换算），避免高 DPI 屏上整体偏移
+8. [验证] 每类控件配一个最小 .frm 用例，要求"编译通过 + 真跑起来 + 属性/方法/事件触发"三档验证
+   - 现状痛点：GUI 只有编译和冒烟，tests 下 16 个 .frm 不做交互/渲染校验
+   - 目标：补一套可自动化的 GUI 回归（SendMessage 驱动控件 + 断言属性值/事件回调计数），至少覆盖 21 类控件的创建与核心属性
+9. [对外] 完成后同步更新 README 的"未支持 Shape/Line/Drive-Dir-FileListBox/Data/OLE"条目（该描述已过时：其中 5 类是半接线而非未实现）
