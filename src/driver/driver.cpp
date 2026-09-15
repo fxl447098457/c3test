@@ -43,6 +43,12 @@ std::pair<CompileOptions, int> Driver::parseArgs(int argc, char* argv[]) {
     CompileOptions opts;
     int resultCode = 0;
 
+    // 无任何参数时显示帮助 (等价于 -h), 而不是报"未指定源文件"
+    if (argc <= 1) {
+        printHelp();
+        return {opts, 0};
+    }
+
     for (int i = 1; i < argc; i++) {
         std::string arg = argv[i];
 
