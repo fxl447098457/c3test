@@ -133,6 +133,7 @@ dxgw.Refresh                                                                   '
 ### 3.3 对 C3 语义模型的意义
 
 - VB6 官方文档把这些语句称为 Form/PictureBox/Printer 的"图形方法"，但该案例证明**编译器并不特判目标类型**——判定规则就是"前缀对象存在同名成员"（后期绑定对象编译期不查签名，运行时 IDispatch::Invoke 按名字派发）。
+- **后续修正（2026-09-15 同日，见 003 存档）**：Print 的派发机制比"同名成员"更精确——优先走隐藏 COM 接口 **VBPrint**（IID {000204F0-0000-0000-C000-000000000046}，`Output(BSTR)` / `Cursor` 属性），同名成员是兜底路径；详见 `003-VBPrint隐藏COM接口——Print语句的真正实现机制（群友补充存档）.md`。
 - `Printer` 也是语句目标之一（`Printer.Print`），C3 实现 Printer 对象后同样受益。
 - 作者提到的 `UserControl` / `UserDocument` 是语句目标的另外两个宿主——对应 C3 尚未走窗体解析路径的 `.ctl` / `.pag` 文件（P31 计划），届时需一并支持。
 

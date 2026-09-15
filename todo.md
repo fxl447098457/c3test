@@ -57,13 +57,16 @@
      - cgen 脱糖：内置 Form/PictureBox/Printer → vb6_* RTL 函数；外部 COM 对象 → 把坐标对/Step/B/F 语法脱糖成普通实参后走既有 COM 方法调用路径，无需专用代码
      - **反向收益**：C3 的 `--dll` 用 CreateTypeLib2 生成 .tlb，成员名只是字符串、同样无关键字限制 → C3 编译出的 ActiveX DLL 也能定义 PSet/Line/Circle 成员供 VB6 关键字写法调用（与该群友库同款玩法），可作招牌 demo
      - 该库还示范：`Point(x,y)` 读取是方法、写入是**参数化属性**（`dxgw.Point(x,y) = 颜色`）；Cls 带可选背景色；Print 支持 `Spc()/Tab()` —— 语法兼容生态有第三方先例，C3 支持"任意对象前缀"即自动兼容此类库
+   - **Print 的真正机制 = 隐藏 COM 接口 VBPrint（群友补充，详见 ai/胎神建议/003）**：IID {000204F0-0000-0000-C000-000000000046}，"Visual Basic Print Interface"，继承 IUnknown：`Output(BSTR Text)` 文字绘制（BSTR → Unicode 天然支持）+ `Cursor` 属性光标位置（**字符位置单位**，与 CurrentX/CurrentY 的**绘图坐标单位**完全两码事，需同时维护两套状态）
+     - 派发策略：目标对象先 QI IID_VBPrint，成功调 Output/put_Cursor/get_Cursor；失败退回同名成员派发（002 机制）。stock msvbvm60.tlb 无此接口，C3 需自带接口定义（IID 逐字一致）
+     - 支持 `Implements VBPrint`：VB6 类模块实现 Output/Cursor 后其对象即可 Print（作者实测用例：控制台类 `con.Print`、TextBox 版 Print）→ C3 需注入该接口定义供 Implements，且 `--dll` 生成 .tlb 时为可 Print 类输出 VBPrint 接口定义，形成双向生态
    - **Line 双重身份**：既是指令关键字也是控件类型名 → 必须上下文判定（语句起始 + 后随 `(` 坐标对或 `Step` 判为语句；否则按变量/控件/类型名走），不能简单注册为保留字
    - 实现路径分工：parser 新增 GraphicsStmt / PrintStmt 语句产生式（词法层不动，避免 Line 误杀）→ 语义解析目标对象（显式前缀 / 隐式 Me / Printer）→ **cgen 最终仍翻译为调用同名 RTL 函数**：vb6_PSet(obj,x,y,color) / vb6_Line(obj,x1,y1,x2,y2,color,bf) / vb6_Circle(obj,x,y,r,color,start,end,aspect) / vb6_Print(obj,...)。即"前端负责把关键字语法翻译成函数调用，后端只有函数没有语句"
    - Cls / PaintPicture / TextHeight / TextWidth 是普通方法调用形式，走第 2 条的方法调用表
    - 配套属性 DrawWidth / DrawStyle / DrawMode / FillColor / FillStyle / ScaleLeft / ScaleTop / ScaleMode，以及 CurrentX / CurrentY（Print 连续定位依赖）
    - 落笔载体直接用已实现的 vb6_SetAutoRedraw 内存 DC/位图（vb6forms.c 3017-3051），AutoRedraw=False 时走 GetDC 即时绘制 + 下一条线圈到窗体临时 DC
    - 注意坐标：VB6 图形方法单位=ScaleMode、`Step` 为相对当前 CurrentX/CurrentY 的增量，需统一 twip/px 换算入口，避免与现有 1 比 15 硬编码打架
-   - 回归测试需覆盖：语句/函数两种写法互不干扰（如自定义了名为 Line 的控件仍可用）、Step 相对坐标、B/F 标志、Scale 坐标系、Print 的 `;`/`,`/`Spc()`/`Tab()` 分隔与结尾分号、外部 COM 对象作语句目标（可用 C3 自产 ActiveX DLL 验证，一举两得）
+   - 回归测试需覆盖：语句/函数两种写法互不干扰（如自定义了名为 Line 的控件仍可用）、Step 相对坐标、B/F 标志、Scale 坐标系、Print 的 `;`/`,`/`Spc()`/`Tab()` 分隔与结尾分号、外部 COM 对象作语句目标（可用 C3 自产 ActiveX DLL 验证，一举两得）、VBPrint 双路径（Implements VBPrint 的类实例 QI 命中 + 同名成员兜底）与 Unicode 输出不乱码、Cursor 字符单位与 CurrentX/CurrentY 绘图单位互不干扰
 4. [P2] Data(DAO) 与 OLE 容器：明确边界
    - 结论倾向不实作 x64 DAO（MDAC 无 x64）；改为编译期/运行期明确诊断：遇到 VB.Data 或 VB.OLE 给出"不支持"的编译错误或运行时友好提示，杜绝"静默编过去但不显示"
    - 文档标注为已定义豁免项，并给出迁移建议（改 ADODB.Recordset 走 COM 路径）
