@@ -71,6 +71,39 @@ void installCrashTraceIfRequested() {
 }
 
 }  // namespace
+
+// ---------------------------------------------------------------------------
+// 控制台代码页守卫
+//
+// C3 内部统一 UTF-8 (源文件读入即转 UTF-8, /utf-8 编译, argv 转 UTF-8),
+// std::cout 输出的是 UTF-8 字节, 而中文 cmd 默认代码页 936(GBK) 会显示乱码。
+// 进入时把控制台输入/输出代码页切到 UTF-8, 退出时恢复原值:
+//   1. 不需要用户手动 chcp 65001;
+//   2. 不污染用户会话 —— C3 退出后 cmd 恢复 GBK, 之后在同一 cmd 运行
+//      C3 编译出的 exe (vb6rtl 按 ACP 输出) 仍正常显示。
+// 输出重定向到文件/管道时写入的始终是原始 UTF-8 字节, 不受影响。
+// ---------------------------------------------------------------------------
+class ConsoleCodePageGuard {
+public:
+    ConsoleCodePageGuard() {
+        if (GetConsoleWindow() != nullptr) {  // 仅当实际附加到控制台时才切换
+            oldOut_ = GetConsoleOutputCP();
+            oldIn_ = GetConsoleCP();
+            SetConsoleOutputCP(CP_UTF8);
+            SetConsoleCP(CP_UTF8);
+        }
+    }
+    ~ConsoleCodePageGuard() {
+        if (oldOut_ != 0) SetConsoleOutputCP(oldOut_);
+        if (oldIn_ != 0) SetConsoleCP(oldIn_);
+    }
+    ConsoleCodePageGuard(const ConsoleCodePageGuard&) = delete;
+    ConsoleCodePageGuard& operator=(const ConsoleCodePageGuard&) = delete;
+
+private:
+    UINT oldOut_ = 0;
+    UINT oldIn_ = 0;
+};
 #endif
 
 namespace {
@@ -91,6 +124,7 @@ int runCompile(vb6c3::Driver& driver, int argc, char* argv[]) {
 int main(int argc, char* argv[]) {
 #ifdef _WIN32
     installCrashTraceIfRequested();
+    ConsoleCodePageGuard consoleCpGuard;  // 控制台切 UTF-8, 退出时恢复
 #endif
 
     vb6c3::Driver driver;
