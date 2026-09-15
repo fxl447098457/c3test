@@ -239,7 +239,7 @@ CLI 仍保留 `--dump-ir` / `--emit-llvm` 开关，但没有消费方。
 ### 尚未支持
 
 - **半接线（RTL 与属性表已实现，缺 `controlTypeToWin32Class` 窗口类映射 → 编过能跑但运行时不可见）**：
-  Shape / Line、DriveListBox / DirListBox / FileListBox —— 差一步接入，推进计划见 `todo.md`
+  Shape / Line、DriveListBox / DirListBox / FileListBox —— 差一步接入，推进计划见第十章路线图与仓库 Issues
 - **未实现**：Data / OLE（x64 无 DAO / MDAC 支撑，列为豁免但会明确报错）、SSTab、Toolbar / StatusBar、CommonDialog
 - **控件方法**：Move / SetFocus / ZOrder / Refresh / Drag 未实现；绘图语句 PSet / Line / Circle / Print 为 VB6 **关键字语法**（非函数调用，需专用语句产生式），Cls / PaintPicture 同样未实现
 - **窗体相关**：Form_Click / Paint / DragDrop 事件、PictureBox 作容器、任意深度容器嵌套（当前仅 Frame 单层子控件）、per-monitor DPI（缇换算按 96 DPI 硬编码）
@@ -296,7 +296,7 @@ VBMAN 编译过程的问题日志见 `archive/vbman/c3log/001.md ~ 054.md`。
    - P1：控件方法 Move / SetFocus / ZOrder / Refresh / Drag，以及绘图语句（PSet / Line / Circle / Print 关键字语法 → 翻译为同名 RTL 函数）+ DrawWidth / ScaleLeft 等画布属性
    - P2：Data / OLE 明确报错边界、容器任意深度嵌套、PictureBox 作容器
    - P3：Form_Click / Paint / 拖放事件、per-monitor DPI
-   - 详见 `todo.md`「下一步主方向：VB6 内置控件可用度 67% → 100%」
+   - 任务拆分与认领状态见仓库 Issues
 4. **c3-lsp 语言服务器 + VS Code 插件** —— P0 级生态组件（`ai/013`）
 5. **c3-dap 调试适配器** —— 依赖代码生成阶段输出 VB6 行号 ↔ C 行号映射
 6. **第二期方言** —— VBA / VBS / ASP（`ai/012`）
@@ -330,6 +330,6 @@ C3 在语法规则核对、测试语料与实现思路上参考了以下项目�
 欢迎参与 C3 开发！协作流程（分支模型 / PR 要求 / CI 门槛）、测试规范、代码风格与文件编码约定，请先阅读 **[CONTRIBUTING.md](CONTRIBUTING.md)**。
 
 - **核心信条**：不支持的语法必然报错，绝不静默误编——错编译比不编译更危险
-- **动手前**：先在 Issue 中认领任务，避免与他人撞车；当前主线任务见 [todo.md](todo.md)
+- **动手前**：先在仓库 Issues 中认领任务，避免与他人撞车；个人想法草稿见 [todo/](todo/) 目录（一人一文件）
 - **快速上手**：`scripts\build` 构建 → `scripts\test` 全量回归（PR 提交前必须全绿）
 - **外部贡献者**：fork 本仓库 → 在自己 fork 里开分支 → 向 `main` 发 PR
