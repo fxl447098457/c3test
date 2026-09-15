@@ -12,7 +12,7 @@
 #include <olectl.h>
 #include <stdint.h>
 
-// Use static CRT to match vb6rtl.lib
+// Use static CRT to match the generated code linkage
 #pragma comment(lib, "gdi32.lib")
 #pragma comment(lib, "oleaut32.lib")
 #pragma comment(lib, "shlwapi.lib")

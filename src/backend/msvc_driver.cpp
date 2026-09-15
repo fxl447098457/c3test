@@ -55,7 +55,9 @@ std::string hashFile(const std::string& path) {
 
 // 解析 .c 文件中的本地头文件 #include "xxx.h"，返回绝对路径列表
 // (opt3: 依赖跟踪 — 任一依赖头文件变化即触发该 .c 重编译)
-std::vector<std::string> collectLocalIncludes(const std::string& cPath, const std::string& srcDir) {
+// srcDir: 生成代码目录; rtlDir: RTL 源码目录 (释放的 vb6rtl.h 等)
+std::vector<std::string> collectLocalIncludes(const std::string& cPath, const std::string& srcDir,
+                                              const std::string& rtlDir) {
     std::vector<std::string> incs;
     std::ifstream f(cPath);
     if (!f) return incs;
@@ -70,8 +72,12 @@ std::vector<std::string> collectLocalIncludes(const std::string& cPath, const st
         std::string name = line.substr(q1 + 1, q2 - q1 - 1);
         if (name.size() < 3) continue;
         if (name.compare(name.size() - 2, 2, ".h") != 0) continue;
-        // 绝对路径 (srcDir 下)
-        incs.push_back(srcDir + "/" + name);
+        // 绝对路径: 优先 srcDir (生成代码头), 不存在则查 rtlDir (RTL 头)
+        std::string p = srcDir + "/" + name;
+        if (!std::filesystem::exists(utf8ToPath(p)) && !rtlDir.empty()) {
+            p = rtlDir + "/" + name;
+        }
+        incs.push_back(p);
     }
     return incs;
 }
@@ -339,6 +345,10 @@ bool MsvcDriver::compileAndLink(const MsvcDriverOptions& options) {
     // 警告级别
     cmd << " /W3";
 
+    // P10 恢复: RTL 源码与生成代码一起编译 (非 .lib 按需拉取),
+    // /Gy 启用函数级链接, 链接器 /OPT:REF 可按函数剔除未引用的 RTL 代码
+    cmd << " /Gy";
+
     // 性能优化: 多处理器并行编译 (cl.exe /MP, 默认进程数=CPU核心数)
     // 大型项目(如vbman 389个.c文件)串行编译耗时极长, /MP 让每个源文件
     // 由独立 cl 进程并行编译。注意 /MP 与 /GL、/Yc、/Yu 不兼容(本项目未使用)。
@@ -369,23 +379,12 @@ bool MsvcDriver::compileAndLink(const MsvcDriverOptions& options) {
         cmd << " \"" << src << "\"";
     }
 
-    // P11.3: RTL pre-compiled .lib files linked via /link (no .c source compilation)
-    // .lib paths are added to the /link section below
+    // P11.3 (reverted): RTL 以 .c 源码加入 sourceFiles 编译, 无 .lib 链接
 
     // 链接选项
     if (options.isDll) {
         // P6.6: ActiveX DLL链接
         cmd << " /link /DLL";
-        if (!options.rtlDir.empty()) {
-            // 092z-3: DLL 也要链 vb6rtl_gui.lib —— VB6 的 ActiveX DLL 允许包含窗体
-            // (VB6 支持在 ActiveX DLL 里放 Form/UserControl)，此时模块会引用窗体运行时
-            // (vb6_CreateFormWindow / vb6_DoEvents / vb6_SetControlText ...)，只链
-            // vb6rtl.lib 会在链接期报这 37 个符号未解析。
-            // 静态库是按需拉取的：不需要窗体运行时的 DLL 不会拉入 vb6forms.obj，无副作用。
-            cmd << " \"" << options.rtlDir << "\\vb6rtl.lib\""
-                << " \"" << options.rtlDir << "\\vb6rtl_dll.lib\""
-                << " \"" << options.rtlDir << "\\vb6rtl_gui.lib\"";
-        }
         if (!options.typelibResFile.empty()) {
             cmd << " \"" << options.typelibResFile << "\"";
         }
@@ -402,10 +401,6 @@ bool MsvcDriver::compileAndLink(const MsvcDriverOptions& options) {
     } else if (options.isGui) {
         // P7: GUI程序 (Win32窗口)
         cmd << " /link /SUBSYSTEM:WINDOWS";
-        if (!options.rtlDir.empty()) {
-            cmd << " \"" << options.rtlDir << "\\vb6rtl.lib\""
-                << " \"" << options.rtlDir << "\\vb6rtl_gui.lib\"";
-        }
         if (!options.typelibResFile.empty()) {
             cmd << " \"" << options.typelibResFile << "\"";
         }
@@ -419,9 +414,6 @@ bool MsvcDriver::compileAndLink(const MsvcDriverOptions& options) {
     } else {
         // 控制台程序
         cmd << " /link /SUBSYSTEM:CONSOLE";
-        if (!options.rtlDir.empty()) {
-            cmd << " \"" << options.rtlDir << "\\vb6rtl.lib\"";
-        }
         if (!options.typelibResFile.empty()) {
             cmd << " \"" << options.typelibResFile << "\"";
         }
@@ -573,6 +565,8 @@ bool MsvcDriver::compileAndLinkIncremental(const MsvcDriverOptions& options) {
     if (options.debugInfo) common << " /Zi";
     common << " /std:c11 /DUNICODE /D_UNICODE /utf-8 /D_CRT_SECURE_NO_WARNINGS /D_CRT_NONSTDC_NO_WARNINGS";
     common << " /W3";
+    // P10 恢复: RTL 源码直接编译, /Gy 函数级链接配合 /OPT:REF 剔除未引用 RTL 代码
+    common << " /Gy";
     if (options.arch == "x86") common << " /MT";
 
     // 增量判断
@@ -590,7 +584,7 @@ bool MsvcDriver::compileAndLinkIncremental(const MsvcDriverOptions& options) {
             newObjs.push_back(objDir + "/" + objName);
             continue;
         }
-        auto incs = collectLocalIncludes(src, options.srcDir);
+        auto incs = collectLocalIncludes(src, options.srcDir, options.rtlDir);
         std::string deps;
         for (auto& inc : incs) deps += hashFile(inc);
         std::string record = srcHash + " " + hashString(deps) + " " + optsFp;
@@ -699,26 +693,17 @@ bool MsvcDriver::compileAndLinkIncremental(const MsvcDriverOptions& options) {
     for (auto& o : reusedObjs) linkCmd << " \"" << o << "\"";
     for (auto& o : newObjs) linkCmd << " \"" << o << "\"";
     if (options.isDll) {
-        if (!options.rtlDir.empty()) {
-            linkCmd << " \"" << options.rtlDir << "\\vb6rtl.lib\""
-                    << " \"" << options.rtlDir << "\\vb6rtl_dll.lib\"";
-        }
         if (!options.typelibResFile.empty()) linkCmd << " \"" << options.typelibResFile << "\"";
         if (!options.versionInfoResFile.empty()) linkCmd << " \"" << options.versionInfoResFile << "\"";
         if (!options.userResFile.empty()) linkCmd << " \"" << options.userResFile << "\"";
         if (!options.defFile.empty()) linkCmd << " /DEF:\"" << options.defFile << "\"";
         linkCmd << " ole32.lib oleaut32.lib uuid.lib advapi32.lib user32.lib shell32.lib gdi32.lib";
     } else if (options.isGui) {
-        if (!options.rtlDir.empty()) {
-            linkCmd << " \"" << options.rtlDir << "\\vb6rtl.lib\""
-                    << " \"" << options.rtlDir << "\\vb6rtl_gui.lib\"";
-        }
         if (!options.typelibResFile.empty()) linkCmd << " \"" << options.typelibResFile << "\"";
         if (!options.versionInfoResFile.empty()) linkCmd << " \"" << options.versionInfoResFile << "\"";
         if (!options.userResFile.empty()) linkCmd << " \"" << options.userResFile << "\"";
         linkCmd << " user32.lib gdi32.lib shell32.lib ole32.lib oleaut32.lib uuid.lib advapi32.lib";
     } else {
-        if (!options.rtlDir.empty()) linkCmd << " \"" << options.rtlDir << "\\vb6rtl.lib\"";
         if (!options.typelibResFile.empty()) linkCmd << " \"" << options.typelibResFile << "\"";
         if (!options.versionInfoResFile.empty()) linkCmd << " \"" << options.versionInfoResFile << "\"";
         if (!options.userResFile.empty()) linkCmd << " \"" << options.userResFile << "\"";

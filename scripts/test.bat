@@ -15,9 +15,6 @@ if errorlevel 1 (
     exit /b 1
 )
 
-REM 设置VB6 RTL目录
-set "VB6RTL_DIR=%CD%\src\rtl\core"
-
 set "CAT=%1"
 if "%CAT%"=="" set "CAT=all"
 

@@ -1,7 +1,7 @@
-// P10/P11.3/DualArch: RTL runtime embedded resource management
-// Extract RTL .h headers + pre-compiled .lib from c3.exe RCDATA resources
-// P11.3: .c source replaced by .lib static libraries (source protection)
-// DualArch: x64 (IDs 110-112) and x86 (IDs 120-122) .lib variants
+// P10 (restored): RTL runtime embedded resource management
+// Extract RTL .h headers + .c sources from c3.exe RCDATA resources.
+// The P11.3 pre-compiled .lib scheme was reverted (c3 is open source);
+// RTL sources are compiled by MSVC together with the generated code.
 // Compiles and cleans up temp session dir automatically
 
 #ifndef VB6C3_RTL_EMBEDDED_HPP
@@ -16,17 +16,15 @@ namespace vb6c3 {
 enum RtlResourceID {
     // Headers (for #include in generated code) — arch-neutral
     RTL_VB6RTL_H        = 100,
+    RTL_VB6RTL_C        = 101,
     RTL_VB6COM_H        = 102,
+    RTL_VB6COM_C        = 103,
     RTL_VB6COMSERVER_H  = 104,
+    RTL_VB6COMSERVER_C  = 105,
     RTL_VB6FORMS_H      = 106,
-    // Pre-compiled static libraries — x64 (IDs 110-112)
-    RTL_VB6RTL_LIB      = 110,  // vb6rtl + vb6com (all programs)
-    RTL_VB6RTL_DLL_LIB  = 111,  // vb6comserver (ActiveX DLL only)
-    RTL_VB6RTL_GUI_LIB  = 112,  // vb6forms (GUI programs only)
-    // Pre-compiled static libraries — x86 (IDs 120-122)
-    RTL_VB6RTL_LIB_X86      = 120,  // vb6rtl + vb6com (all programs)
-    RTL_VB6RTL_DLL_LIB_X86  = 121,  // vb6comserver (ActiveX DLL only)
-    RTL_VB6RTL_GUI_LIB_X86  = 122,  // vb6forms (GUI programs only)
+    RTL_VB6FORMS_C      = 107,
+    RTL_VB6_DI_STUBS_C  = 108,
+    RTL_VB6_DI_WIN32_STUBS_C = 109,
 };
 
 // Session directory manager
@@ -36,11 +34,10 @@ public:
     SessionManager();
     ~SessionManager();
 
-    // Create new session directory and extract RTL files
-    // arch: "x64" (default) or "x86" — selects which .lib variant to extract
-    // Returns: RTL directory path (contains .h + .lib)
+    // Create new session directory and extract RTL files (.h + .c, arch-neutral)
+    // Returns: RTL directory path (contains .h + .c)
     // Empty string on failure
-    std::string create(const std::string& arch = "x64");
+    std::string create();
 
     // Get current session's RTL directory path
     const std::string& rtlDir() const { return rtlDir_; }

@@ -493,7 +493,7 @@ CompileResult Driver::compile(const CompileOptions& options) {
 
     // === P11.2: Create session for intermediates ===
     SessionManager session;
-    std::string rtlDir = session.create(effectiveOpts.arch);
+    std::string rtlDir = session.create();
     if (rtlDir.empty()) {
         std::cerr << "C3: error: failed to create session directory" << std::endl;
         result.errorCount = 1;
@@ -2128,6 +2128,21 @@ bool Driver::runLinker(const CompileOptions& options, const std::string& outputD
             break;
         }
     }
+
+    // RTL 源码编译 (P10 恢复): 会话目录释放的 RTL .c 与生成代码一起编译,
+    // 不再链接预编译 .lib —— 修改 RTL 源码后重编 C3.exe 即生效
+    msvcOpts.sourceFiles.push_back(rtlDir + "/vb6rtl.c");
+    msvcOpts.sourceFiles.push_back(rtlDir + "/vb6com.c");
+    msvcOpts.sourceFiles.push_back(rtlDir + "/vb6_di_stubs.c");
+    msvcOpts.sourceFiles.push_back(rtlDir + "/vb6_di_win32_stubs.c");
+    if (msvcOpts.isGui || msvcOpts.isDll) {
+        // 092z-3: ActiveX DLL 允许包含窗体 (Form/UserControl), 也要 vb6forms
+        msvcOpts.sourceFiles.push_back(rtlDir + "/vb6forms.c");
+    }
+    if (msvcOpts.isDll) {
+        msvcOpts.sourceFiles.push_back(rtlDir + "/vb6comserver.c");
+    }
+
     msvcOpts.verbose = options.verbose;
     msvcOpts.debugInfo = options.debugInfo;
     msvcOpts.optimizationLevel = options.optimizationLevel;

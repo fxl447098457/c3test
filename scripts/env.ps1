@@ -1,8 +1,8 @@
 ﻿#!/usr/bin/env powershell
 # ============================================================
-#  env.ps1 - 加载 MSVC + VB6RTL 环境变量
+#  env.ps1 - 加载 MSVC 环境变量
 #  用法: . .\scripts\env.ps1  (注意前面的点号 - dot-source)
-#  效果: 当前 PowerShell 会话获得 MSVC 编译环境和 VB6RTL_DIR
+#  效果: 当前 PowerShell 会话获得 MSVC 编译环境
 #  加载后可直接使用 cl.exe, cmake, ninja, C3.exe 等
 # ============================================================
 
@@ -22,10 +22,7 @@ Get-Content $tempBat | ForEach-Object {
 }
 Remove-Item $tempBat -ErrorAction SilentlyContinue
 
-$env:VB6RTL_DIR = "$ProjectDir\src\rtl\core"
-
 Write-Host "[OK] Loaded $count environment variables" -ForegroundColor Green
-Write-Host "[OK] VB6RTL_DIR = $env:VB6RTL_DIR" -ForegroundColor Green
 
 # 验证
 $clOk = $null -ne (Get-Command cl.exe -ErrorAction SilentlyContinue)

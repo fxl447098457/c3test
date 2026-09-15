@@ -22,9 +22,6 @@ $Tests = $PSScriptRoot
 $OutDir = Join-Path $Root "output"
 $VcVars = "C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvarsall.bat"
 
-# === 设置VB6RTL目录 ===
-$env:VB6RTL_DIR = Join-Path $Root "src\rtl\core"
-
 # === 设置MSVC环境 ===
 $msvcOutput = cmd /c "call `"$VcVars`" x64 >nul 2>&1 && echo MSVC_OK" 2>&1
 if ($msvcOutput -notcontains "MSVC_OK") {

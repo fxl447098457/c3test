@@ -10,7 +10,7 @@ namespace vb6c3 {
 struct MsvcDriverOptions {
     std::vector<std::string> sourceFiles;  // .c file paths
     std::string outputFile;                 // output .exe/.dll path
-    std::string rtlDir;                     // directory containing vb6rtl.h / .lib
+    std::string rtlDir;                     // directory containing vb6rtl.h / .c (RTL sources)
     bool verbose = false;
     bool debugInfo = false;
     int optimizationLevel = 0;

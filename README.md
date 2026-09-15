@@ -178,7 +178,6 @@ c3.vb6.pro/
 | `run.bat` | `run <exename> [timeout]` | 运行 output/ 下的 EXE |
 | `dev.ps1` | `dev [-SkipBuild] [-SkipTest]` | 一键构建 + 测试 |
 | `env.ps1` | `. .\scripts\env.ps1` | dot-source 加载 MSVC 环境 |
-| `build_rtl_libs.bat` | — | 重建 RTL 静态库并嵌入 C3.exe（改了 RTL 后必跑） |
 
 ---
 
@@ -196,10 +195,11 @@ CLI 仍保留 `--dump-ir` / `--emit-llvm` 开关，但没有消费方。
 | `vb6c3-cgen.lib` | C 代码生成后端 |
 | `C3.exe` | 薄 CLI 驱动（链接上述两个库） |
 
-**RTL 内嵌（P10）。** 4 个 RTL 头文件 + 6 个预编译静态库（x64/x86 各 3 个）以 `RCDATA` 资源嵌入 `C3.exe`
-（见 `src/driver/c3rtl.rc`），运行时由 `rtl_embedded.cpp` 解包到 `%TEMP%\C3C\<会话ID>\rtl\` 再交给 `cl.exe`。
+**RTL 内嵌（P10，源码级）。** 4 个 RTL 头文件 + 6 个 RTL `.c` **源码**以 `RCDATA` 资源嵌入 `C3.exe`
+（见 `src/driver/c3rtl.rc`），运行时由 `rtl_embedded.cpp` 解包到 `%TEMP%\C3C\<会话ID>\rtl\`，
+与生成的 C 代码一起交给 `cl.exe` 编译（`/Gy` + 链接器 `/OPT:REF` 自动剔除未引用的 RTL 代码）。
 因此**用户机器上不需要安装任何 VB6 运行时**，产物静态链接、零依赖。
-改动 `src/rtl/` 后必须执行 `scripts\build_rtl_libs.bat`，否则 C3.exe 里嵌的仍是旧库。
+改动 `src/rtl/` 后直接重编 C3.exe 即生效（`scripts\build.bat`），无需任何预编译步骤。
 
 **RTL 组成**（`src/rtl/core/`）：
 

@@ -119,7 +119,8 @@ target_compile_definitions(vb6c3-ir PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN
 target_link_libraries(vb6c3-ir PRIVATE vb6c3-core)
 
 # --- Compiler CLI: C3.exe ---
-# P10: c3rtl.rc embeds RTL .h/.c files as RCDATA resources
+# P10 (restored): c3rtl.rc embeds RTL .h/.c SOURCE files as RCDATA resources.
+# RTL is compiled by MSVC at user-program build time (no pre-compiled .lib).
 add_executable(c3
     src/driver/main.cpp
     src/driver/driver.cpp
@@ -128,21 +129,20 @@ add_executable(c3
 )
 set_target_properties(c3 PROPERTIES OUTPUT_NAME C3)
 
-# Fix 092z-2: c3rtl.rc 以 RCDATA 嵌入 RTL 头文件与预编译库 (.lib), 但 CMake 只把
-# .rc 自身当依赖 —— 重建了 src/rtl/lib/*.lib 之后 .res 不会重编, C3.exe 继续嵌入
-# 旧库, 症状是「改了 RTL 但链接期仍报未解析 vb6_di_* 符号」这类误导性结果。
-# 这里显式声明嵌入文件为 .rc 的依赖 (10 个资源: 4 头 + 3 x64 库 + 3 x86 库)。
+# Fix 092z-2: CMake 只把 .rc 自身当依赖 —— 改了 src/rtl/core 下的嵌入源之后
+# .res 不会重编, C3.exe 会继续嵌入旧文件。这里显式声明嵌入文件为 .rc 的依赖
+# (10 个资源: 4 头 + 6 源码, 全部架构无关)。
 set(C3RTL_EMBEDDED_FILES
     ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6rtl.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6rtl.c
     ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6com.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6com.c
     ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6comserver.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6comserver.c
     ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6forms.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/lib/vb6rtl.lib
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/lib/vb6rtl_dll.lib
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/lib/vb6rtl_gui.lib
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/lib/x86/vb6rtl.lib
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/lib/x86/vb6rtl_dll.lib
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/lib/x86/vb6rtl_gui.lib
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6forms.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6_di_stubs.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6_di_win32_stubs.c
 )
 set_source_files_properties(src/driver/c3rtl.rc PROPERTIES OBJECT_DEPENDS "${C3RTL_EMBEDDED_FILES}")
 target_link_libraries(c3 PRIVATE vb6c3-core vb6c3-cgen)

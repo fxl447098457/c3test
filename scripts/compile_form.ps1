@@ -27,8 +27,6 @@ Get-Content $tempBat | ForEach-Object {
 }
 Remove-Item $tempBat -ErrorAction SilentlyContinue
 
-$env:VB6RTL_DIR = "$ProjectDir\src\rtl\core"
-
 # 确保 .frm 路径
 if (-not (Test-Path $FormFile)) {
     $FormFile = Join-Path $ProjectDir $FormFile

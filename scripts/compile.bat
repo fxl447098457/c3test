@@ -26,9 +26,6 @@ if errorlevel 1 (
 
 cd /d C:\Users\vi\Desktop\c3.vb6.pro
 
-REM 设置VB6 RTL目录
-set VB6RTL_DIR=C:\Users\vi\Desktop\c3.vb6.pro\src\rtl\core
-
 REM 输出目录默认 output/
 set OUTDIR=output
 if not "%2"=="" set OUTDIR=%2

@@ -54,7 +54,6 @@ if (-not $SkipBuild) {
 # --- 测试 ---
 if (-not $SkipTest) {
     Write-Host "--- Test ($TestCategory) ---" -ForegroundColor Yellow
-    $env:VB6RTL_DIR = "$ProjectDir\src\rtl\core"
     & "$ProjectDir\tests\run_tests.ps1" -Category $TestCategory
     if ($LASTEXITCODE -ne 0) {
         Write-Host "[FAIL] Tests failed" -ForegroundColor Red

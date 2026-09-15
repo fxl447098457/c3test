@@ -75,7 +75,6 @@ D:\code\vi\c3.vb6.pro\tests\run_tests.ps1
 | run.bat | run <exename> [timeout] | 运行 output/ 下的 EXE |
 | dev.ps1 | dev [-SkipBuild] [-SkipTest] | 一键构建+测试（PowerShell，Agent 会话用） |
 | env.ps1 | . .\scripts\env.ps1 | 加载 MSVC 环境（dot-source） |
-| build_rtl_libs.bat | — | 生成 RTL .lib 并嵌入 C3.exe（链接依赖，勿删） |
 
 **命令行示例:**
 ```bat
