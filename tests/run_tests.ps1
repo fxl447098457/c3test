@@ -2,6 +2,7 @@
 # 用法: .\run_tests.ps1 [-Category <all|compile|run|syntax>] [-Verbose]
 #
 # 测试分类:
+#   smoke   - 冒烟测试 (编译+运行+输出校验, 快速验证 .build\C3.exe 可用)
 #   compile - 编译测试 (c3 .bas -> .exe, 不运行)
 #   run     - 运行测试 (编译+运行+校验输出)
 #   syntax  - 语法测试 (--syntax-only, 不生成代码)
@@ -272,6 +273,16 @@ Write-Host "  C3 Compiler Test Suite" -ForegroundColor Cyan
 Write-Host "  $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
+
+# --- 冒烟测试 ---
+# 重建 C3.exe 后先跑这个: 只验证 "解析 -> 生成C -> cl/link -> 运行" 全链路。
+# 用例见 tests\smoke.bas (文件头写了维护约束: 禁止 MsgBox 等阻塞语句)。
+if ($Category -in @("all", "smoke")) {
+    Write-Host "--- Smoke Test (C3.exe end-to-end) ---" -ForegroundColor Yellow
+
+    Test-Run "smoke" "$Tests\smoke.bas" @("SMOKE-1:OK", "SMOKE-2:OK", "SMOKE-3:OK", "SMOKE PASS")
+    Write-Host ""
+}
 
 # --- 回归测试 (必须始终通过) ---
 if ($Category -in @("all", "run")) {

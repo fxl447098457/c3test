@@ -5,6 +5,7 @@
 #    dev           = 构建 + 全部测试
 #    dev sb        = 跳过构建，只跑测试
 #    dev st        = 只构建，跳过测试
+#    dev -TestCategory smoke  = 只跑冒烟测试 (tests\smoke.bas)
 #  适用于 PowerShell 环境 (Agent 会话内)
 # ============================================================
 

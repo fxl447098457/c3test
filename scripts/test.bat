@@ -1,11 +1,12 @@
 @echo off
 REM ============================================================
 REM  test.bat - 运行回归测试
-REM  用法: test [all|run|compile|syntax] [verbose]
+REM  用法: test [all|run|compile|syntax|smoke] [verbose]
 REM    test          = 全部测试
 REM    test run      = 仅运行测试(编译+运行+输出校验)
 REM    test compile  = 仅编译测试
 REM    test syntax   = 仅语法测试
+REM    test smoke    = 仅冒烟测试(tests\smoke.bas, 构建后快速验证产物可用)
 REM ============================================================
 
 REM 路径由脚本自身位置推导, 不依赖固定盘符
