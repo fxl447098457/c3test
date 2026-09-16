@@ -910,6 +910,114 @@ code.accent {
     font-weight: 700;
 }
 
+/* ---------- 最新版本 / main 分支最新提交 ---------- */
+.release-meta {
+    padding: 16px 18px;
+    margin-bottom: 22px;
+    border-radius: var(--radius-md);
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    transition: opacity var(--transition);
+}
+
+.release-meta.is-loading {
+    opacity: 0.55;
+}
+
+.release-meta-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    font-size: 0.8rem;
+    padding-bottom: 14px;
+    margin-bottom: 14px;
+    border-bottom: 1px dashed rgba(255, 255, 255, 0.08);
+}
+
+.release-meta-label {
+    color: var(--text-tertiary);
+    letter-spacing: 0.04em;
+}
+
+.release-tag {
+    padding: 2px 10px;
+    border-radius: 999px;
+    font-family: var(--font-mono);
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: var(--accent-brand-light);
+    text-decoration: none;
+    background: rgba(18, 113, 255, 0.12);
+    border: 1px solid rgba(18, 113, 255, 0.25);
+}
+
+.release-tag:hover {
+    background: rgba(18, 113, 255, 0.22);
+}
+
+.release-meta-date {
+    font-family: var(--font-mono);
+    font-size: 0.74rem;
+    color: var(--text-tertiary);
+}
+
+.latest-commit-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+    font-size: 0.72rem;
+    letter-spacing: 0.05em;
+    color: var(--text-tertiary);
+}
+
+.latest-commit-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--accent-green);
+    box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.16);
+    animation: commitPulse 2.4s ease-in-out infinite;
+}
+
+.latest-commit-msg {
+    display: block;
+    font-size: 0.86rem;
+    line-height: 1.55;
+    color: var(--text-primary);
+    text-decoration: none;
+    word-break: break-word;
+}
+
+.latest-commit-msg:hover {
+    color: var(--accent-brand-light);
+}
+
+.latest-commit-meta {
+    display: block;
+    margin-top: 6px;
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    color: var(--text-tertiary);
+}
+
+.release-meta.is-failed .latest-commit {
+    display: none;
+}
+
+@keyframes commitPulse {
+
+    0%,
+    100% {
+        box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.16);
+    }
+
+    50% {
+        box-shadow: 0 0 0 6px rgba(16, 185, 129, 0.05);
+    }
+}
+
 /* 环境配置卡片 */
 .download-card-env h3 {
     margin-bottom: 16px;

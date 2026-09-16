@@ -164,7 +164,7 @@
                 <div class="hero-content">
                     <div class="hero-badge">
                         <span class="hero-badge-dot"></span>
-                        <span class="hero-badge-on">v1.0.0 Preview</span>
+                        <span class="hero-badge-on" id="heroVersion">v0.10.1</span>
                         <span>· 28 个里程碑全部达成 · 82 项测试零失败</span>
                     </div>
                     <h1 class="hero-title">
@@ -179,12 +179,12 @@
                     <p class="hero-tagline">x64 &middot; Unicode &middot; Multi-threaded &middot; COM &middot;
                         Zero-modification</p>
                     <div class="hero-actions">
-                        <a href="#download" class="btn btn-primary">
+                        <a href="#download" class="btn btn-primary" id="heroDownload">
                             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                                 stroke-width="2">
                                 <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3" />
                             </svg>
-                            下载 C3
+                            <span class="btn-label">下载 C3</span>
                         </a>
                         <a href="#features" class="btn btn-secondary">
                             了解详情 &rarr;
@@ -402,7 +402,8 @@
                             </svg>
                         </div>
                         <h3>下载 C3</h3>
-                        <p class="download-version">v1.0.0 Preview · Windows x64 · 内置多个演示示例</p>
+                        <p class="download-version" id="downloadVersion">v0.10.1 · Windows x64 · 内置多个演示示例
+                        </p>
                         <ul class="download-includes">
                             <li>包含 hello.bas、数组、文件 I/O 等测试源码</li>
                             <li>VBP 工程示例（多模块编译）</li>
@@ -411,13 +412,35 @@
                             <li>frxParse 实战工程编译演示</li>
                             <li>条件编译、Declare 语句示例</li>
                         </ul>
-                        <a href="https://gitcode.com/woeoio/c3-demos/releases/download/c3-publish/c3-publish.zip" target="_blank" rel="noopener"
-                            class="btn btn-primary btn-download">
+
+                        <!-- 最新版本 + main 分支最新提交 (assets/release.js 动态填充) -->
+                        <div class="release-meta" id="releaseMeta">
+                            <div class="release-meta-row">
+                                <span class="release-meta-label">最新版本</span>
+                                <a class="release-tag" id="releaseTag"
+                                    href="https://gitcode.com/woeoio/c3.vb6.pro/releases" target="_blank"
+                                    rel="noopener">获取中…</a>
+                                <span class="release-meta-date" id="releaseDate"></span>
+                            </div>
+                            <div class="latest-commit">
+                                <div class="latest-commit-head">
+                                    <span class="latest-commit-dot"></span>
+                                    <span>main 分支最新提交</span>
+                                </div>
+                                <a class="latest-commit-msg" id="commitMsg"
+                                    href="https://gitcode.com/woeoio/c3.vb6.pro/commits/main" target="_blank"
+                                    rel="noopener">获取中…</a>
+                                <span class="latest-commit-meta" id="commitMeta"></span>
+                            </div>
+                        </div>
+
+                        <a href="https://gitcode.com/woeoio/c3.vb6.pro/releases/download/v0.10.1/c3-v0.10.1-win-x64.zip"
+                            target="_blank" rel="noopener" class="btn btn-primary btn-download" id="downloadBtn">
                             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                                 stroke-width="2">
                                 <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3" />
                             </svg>
-                            下载 C3 公测版本
+                            <span class="btn-label">下载 C3 v0.10.1</span>
                         </a>
                     </div>
 
@@ -854,6 +877,7 @@
     </footer>
 
     <script src="assets/app.js?v=1"></script>
+    <script src="assets/release.js?v=1"></script>
     <script defer src="https://tj.a-vi.com/script.js" data-website-id="a3f0b7d8-79a8-4d9d-96e0-fe0d7fede71e"></script>
     <!-- Matomo -->
     <script>
