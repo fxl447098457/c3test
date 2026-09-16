@@ -16,8 +16,22 @@ param(
 )
 
 $ErrorActionPreference = "Continue"
-$ProjectDir = "D:\code\vi\c3.vb6.pro"
-$VcVars = "C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvarsall.bat"
+# 项目根目录: 环境变量优先, 缺省由脚本位置推导 (dev.ps1 位于 <root>\scripts\). 详见 scripts\README.md
+$ProjectDir = if ($env:C3_PROJECT_DIR) { $env:C3_PROJECT_DIR } else { Split-Path -Parent $PSScriptRoot }
+# vcvarsall 路径: C3_VCVARSALL 优先, 未设置时 vswhere 自动探测 (同 tests\run_tests.ps1, 支持 BuildTools/CI 环境)
+$vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer\vswhere.exe"
+$VcVars = $env:C3_VCVARSALL
+if (-not $VcVars -and (Test-Path $vswhere)) {
+    $vsPath = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath 2>$null
+    if ($vsPath) {
+        $candidate = Join-Path $vsPath "VC\Auxiliary\Build\vcvarsall.bat"
+        if (Test-Path $candidate) { $VcVars = $candidate }
+    }
+}
+if (-not $VcVars) {
+    Write-Host "[ERROR] 未找到 vcvarsall.bat, 请设置 C3_VCVARSALL 环境变量 (详见 scripts\README.md)" -ForegroundColor Red
+    exit 1
+}
 
 # --- 加载 MSVC 环境 ---
 Write-Host ""
