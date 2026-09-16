@@ -8,7 +8,8 @@ Public Sub Main()
     name = "World " & time
     
     If Len(name) > 0 Then
-        MsgBox "Hello, " & name & "!", vbOKOnly, "Greeting"
+        ' MsgBox "Hello, " & name & "!", vbOKOnly, "Greeting"  ' 注释掉: 弹窗会阻塞无人值守运行
+        Debug.Print "Hello, " & name & "!"
     Else
         Debug.Print "Name is empty"
     End If

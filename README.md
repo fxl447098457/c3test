@@ -1,4 +1,4 @@
-# C3 — 现代化 VB6 编译器
+﻿# C3 — 现代化 VB6 编译器
 
 > 官网：<https://c3.vb6.pro> ｜ 仓库：<https://gitcode.com/woeoio/c3.vb6.pro>（本地路径 `D:\code\vi\c3.vb6.pro`）
 >
@@ -75,7 +75,9 @@ scripts\build              REM 增量构建
 scripts\build clean        REM 清理 .build 后完整构建
 ```
 
-产物在 **`.build\C3.exe`**（注意：不在 `.build\Release\` 下）。
+产物在 **`.build\C3.exe`**（注意：不在 `.build\Release\` 下）；`build.bat` 会顺带把它复制到 `publish\C3.exe`。
+
+构建后建议先冒烟验证产物可用：`scripts\test smoke`（用例 `tests\smoke.bas`）。
 
 PowerShell 一键构建 + 测试（Agent 会话推荐）：
 
@@ -100,6 +102,7 @@ scripts\test               REM 全部
 scripts\test run           REM 仅运行测试
 scripts\test compile       REM 仅编译测试
 scripts\test syntax        REM 仅语法检查
+scripts\test smoke         REM 仅冒烟测试（构建后快速验证产物可用，见 tests\smoke.bas）
 ```
 
 ```bat
@@ -173,7 +176,7 @@ c3.vb6.pro/
 | 脚本 | 用法 | 说明 |
 |------|------|------|
 | `build.bat` | `build [clean]` | 构建 C3.exe |
-| `test.bat` | `test [all\|run\|compile\|syntax] [verbose]` | 回归测试 |
+| `test.bat` | `test [all\|run\|compile\|syntax\|smoke] [verbose]` | 回归测试（smoke = 冒烟） |
 | `compile.bat` | `compile <source> [outdir]` | 编译单个 .bas/.frm/.vbp |
 | `run.bat` | `run <exename> [timeout]` | 运行 output/ 下的 EXE |
 | `dev.ps1` | `dev [-SkipBuild] [-SkipTest]` | 一键构建 + 测试 |
@@ -223,15 +226,23 @@ CLI 仍保留 `--dump-ir` / `--emit-llvm` 开关，但没有消费方。
   GoSub/Return、With、For Each、On Error / Resume / Err 对象、默认属性解析、ParamArray / Optional / 命名参数
 - **COM**：CreateObject / GetObject、前期绑定（TypeLib 导入）与后期绑定（IDispatch）、Implements、WithEvents 事件
   （内部类 / 窗体控件 / 外部 COM 三条路径）、IEnumVARIANT 集合枚举、ActiveX DLL 产出（内建生成 .tlb）
-- **窗体**：`.frm` + `.frx` 二进制资源（图片 / 图标 / ImageList / 文本）、控件数组、MDI、菜单、Timer
-- **控件**：Form / MDIForm、CommandButton、TextBox、Label、CheckBox、OptionButton、ListBox、ComboBox、
+- **窗体**：`.frm` + `.frx` 二进制资源（图片 / 图标 / ImageList / 文本）、控件数组、MDI、菜单、Timer、缇↔像素换算
+- **控件**：VB6 工具箱 21 类内置控件中 **14 类全链路可用**（窗口创建 + 属性读写 + 事件分发）≈ 67%
+  —— Form / MDIForm、CommandButton、TextBox、Label、CheckBox、OptionButton、ListBox、ComboBox、
   Frame、PictureBox、HScrollBar / VScrollBar、Image、Timer、Menu、WebBrowser（WebView2）
+- **窗体实现形态**：RTL `vb6forms.c` 用 Win32 原生窗口类重实现（BUTTON / EDIT / STATIC / LISTBOX … + VB6_SHAPE / VB6_LINE 自绘），
+  不是复刻 VB6 运行时，因此产物零依赖、静态链接，且支持 VB6 自身不具备的 x64
+- **控件能力三档**：属性层最厚（50+ 双向读写含 Font 六件套 / Back&ForeColor / Alignment / TabIndex / ToolTipText / MousePointer…），
+  事件层次之（约 25 个含 KeyPress / Validate(Cancel) / QueryUnload(Cancel) / MouseEnter / Mouse Leave），**方法层近乎空白**（仅 AddItem / RemoveItem / Clear + Timer）
 - **运行时**：126 个 VB6 内置函数（字符串 / 数学 / 日期 / 转换 / 文件 I/O / 数组 / 财务 等），静态链接
 
 ### 尚未支持
 
-- 控件：Shape / Line、Data / OLE、DriveListBox / DirListBox / FileListBox、SSTab、Toolbar / StatusBar、CommonDialog
-- 控件数组之外的容器控件嵌套
+- **半接线（RTL 与属性表已实现，缺 `controlTypeToWin32Class` 窗口类映射 → 编过能跑但运行时不可见）**：
+  Shape / Line、DriveListBox / DirListBox / FileListBox —— 差一步接入，推进计划见第十章路线图与仓库 Issues
+- **未实现**：Data / OLE（x64 无 DAO / MDAC 支撑，列为豁免但会明确报错）、SSTab、Toolbar / StatusBar、CommonDialog
+- **控件方法**：Move / SetFocus / ZOrder / Refresh / Drag 未实现；绘图语句 PSet / Line / Circle / Print 为 VB6 **关键字语法**（非函数调用，需专用语句产生式），Cls / PaintPicture 同样未实现
+- **窗体相关**：Form_Click / Paint / DragDrop 事件、PictureBox 作容器、任意深度容器嵌套（当前仅 Frame 单层子控件）、per-monitor DPI（缇换算按 96 DPI 硬编码）
 - 多接口 `Implements IFoo, IBar`（已决策跳过）
 - 部分内置函数：注册表 4 函数（GetSetting / SaveSetting / GetAllSettings / DeleteSetting）、
   FormatDateTime、CVErr、GetAttr / SetAttr、Erl / Tab / Spc 等，清单见 `ai/021`
@@ -257,6 +268,7 @@ CLI 仍保留 `--dump-ir` / `--emit-llvm` 开关，但没有消费方。
 | `C3_FIX_HANDOFF.md` | **修复任务交接**：新会话直接读它继续修 bug |
 | `开发历程/` | 99 篇按阶段记录的修复与决策过程 |
 | `ENV.md`（根目录） | 开发环境速查：路径、脚本、编码约定 |
+| `CONTRIBUTING.md`（根目录） | **参与贡献指南**：协作流程 / PR 要求 / 测试规范 / 编码约定 |
 
 VBMAN 编译过程的问题日志见 `archive/vbman/c3log/001.md ~ 054.md`。
 
@@ -279,7 +291,12 @@ VBMAN 编译过程的问题日志见 `archive/vbman/c3log/001.md ~ 054.md`。
 
 1. **VBMAN.dll 运行期行为对齐** —— 当前编译 / 链接 / 注册全通，下一步是运行期功能差异
 2. **内置函数补齐** —— DoEvents、FormatDateTime、CVErr、注册表 4 函数、GetAttr / SetAttr
-3. **控件补齐** —— SSTab、Toolbar / StatusBar、CommonDialog、Shape / Line
+3. **控件补齐（67% → 100%）—— 当前首要方向**：定义「100%」= 21 类内置控件能创建 + 属性可读写 + 事件能分发 + 常用方法可调用
+   - P0：接通 Shape / Line / Drive-Dir-FileListBox 五个半残控件的窗口类映射（≈ 67% → 90%）
+   - P1：控件方法 Move / SetFocus / ZOrder / Refresh / Drag，以及绘图语句（PSet / Line / Circle / Print 关键字语法 → 翻译为同名 RTL 函数）+ DrawWidth / ScaleLeft 等画布属性
+   - P2：Data / OLE 明确报错边界、容器任意深度嵌套、PictureBox 作容器
+   - P3：Form_Click / Paint / 拖放事件、per-monitor DPI
+   - 任务拆分与认领状态见仓库 Issues
 4. **c3-lsp 语言服务器 + VS Code 插件** —— P0 级生态组件（`ai/013`）
 5. **c3-dap 调试适配器** —— 依赖代码生成阶段输出 VB6 行号 ↔ C 行号映射
 6. **第二期方言** —— VBA / VBS / ASP（`ai/012`）
@@ -290,14 +307,29 @@ VBMAN 编译过程的问题日志见 `archive/vbman/c3log/001.md ~ 054.md`。
 
 ## 十一、参考来源
 
-C3 在语法规则核对、测试语料与实现思路上参考了以下开源项目。源码副本放在 `reference/`（该目录已被 `.gitignore` 忽略，不入库）：
+C3 在语法规则核对、测试语料与实现思路上参考了以下项目（完整索引见 `ai/003-开发计划.md` 第七节）。源码副本放在 `reference/`（该目录已被 `.gitignore` 忽略，不入库）：
 
-| 项目 | 版本 | 许可 | 参考内容 |
-|------|------|------|----------|
-| [vb6parse](https://github.com/scriptandcompile/vb6parse) | 1.0.1 | MIT | Rust 实现的 VB6 解析器，覆盖工程 / 窗体 / 模块 / 控件，附 30+ 个真实 VB6 工程语料 |
-| [proleap-vb6](https://github.com/uwol/proleap-vb6-parser) | — | AGPL-3.0 | 基于 ANTLR4 的 VB6 分析器与转换器，提供完整 `VisualBasic6.g4` 语法 |
-| [AvaloniaVisualBasic6](https://github.com/BAndysc/AvaloniaVisualBasic6) | — | MIT | C# + Avalonia 复刻的 VB6 IDE 与语言，含可视化设计器与 VB6 兼容工程格式 |
-| [FreeBASIC (fbc)](https://github.com/freebasic/fbc) | 1.20.0 | 编译器 GPL-2.0+ / RTL LGPL-2.1+ | 成熟 BASIC 编译器源码，RTL 组织与代码生成策略 |
-| vb6grammarfuzz | 0.1.0 | — | 基于 `VisualBasic6.g4` 的 VB6 语法模糊测试器（仓库内本地工具，依赖 vb6parse，无公开地址） |
+| 项目 | 版本 | 许可 | 应用位置 | 参考内容 |
+|------|------|------|----------|----------|
+| [vb6parse](https://github.com/scriptandcompile/vb6parse) | 1.0.1 | MIT | P1 Lexer/Parser · P4 RTL 清单 | Rust 实现的 VB6 解析器，覆盖工程 / 窗体 / 模块 / 控件，附 30+ 个真实 VB6 工程语料；120+ Token、迭代式 Pratt、160+ 内置函数清单 |
+| VisualBasic6.g4（随 [proleap-vb6](https://github.com/uwol/proleap-vb6-parser) 发布） | — | AGPL-3.0 | P1 语法规则 | 权威语法参考：50+ 语句、~130 个歧义关键字、14 级表达式优先级 |
+| [proleap-vb6](https://github.com/uwol/proleap-vb6-parser) | — | AGPL-3.0 | P1 AST 设计 | 基于 ANTLR4 的 VB6 分析器与转换器，AST / ASG 元模型类清单 |
+| vb6grammarfuzz | 0.1.0 | — | P2+ 质量保障 | 基于 `VisualBasic6.g4` 的 VB6 语法模糊测试器（仓库内本地工具，依赖 vb6parse，无公开地址） |
+| [RustASP](https://github.com/ferocknew/rustasp) | — | — | P1.3 Pratt 解析器 · P2 作用域链 | Rust 实现的经典 ASP 服务器原型，Pratt 核心实现与作用域链设计参考 |
+| aspgo | — | — | P4 运行时设计 | Go 实现的经典 ASP 服务器（含 VBScript），Variant / COM / Error 运行时设计思路参考（本地参考项目，无公开地址） |
+| [FreeBASIC (fbc)](https://github.com/freebasic/fbc) | 1.20.0 | 编译器 GPL-2.0+ / RTL LGPL-2.1+ | 全局架构参考 | 成熟 BASIC 编译器源码，RTL 组织（IR_VTBL）、x64 调用约定与代码生成策略 |
+| [AvaloniaVisualBasic6](https://github.com/BAndysc/AvaloniaVisualBasic6) | — | MIT | P1 语法规则 | C# + Avalonia 复刻的 VB6 IDE 与语言，含可视化设计器与 VB6 兼容工程格式（VB6.g4 来源） |
+| [twinBASIC](https://twinbasic.com) | — | 闭源 | P5 兼容性验证 | VB6 兼容一体化 IDE，作为 C3 语义兼容性的对照基准 |
 
-> `reference/vba-gobasic-aspgo/gobasic/` 与 `reference/vba-gobasic-aspgo/ai/` 当前为空目录，无来源信息，暂未列入。
+> aspgo / vb6grammarfuzz 为本地参考项目，无公开仓库地址；各参考项目的本地路径索引见 `ai/003-开发计划.md` 第七节。
+
+---
+
+## 十二、参与贡献
+
+欢迎参与 C3 开发！协作流程（分支模型 / PR 要求 / CI 门槛）、测试规范、代码风格与文件编码约定，请先阅读 **[CONTRIBUTING.md](CONTRIBUTING.md)**。
+
+- **核心信条**：不支持的语法必然报错，绝不静默误编——错编译比不编译更危险
+- **动手前**：先在仓库 Issues 中认领任务，避免与他人撞车；个人想法草稿见根目录 [todo.md](todo.md) 索引
+- **快速上手**：`scripts\build` 构建 → `scripts\test` 全量回归（PR 提交前必须全绿）
+- **外部贡献者**：fork 本仓库 → 在自己 fork 里开分支 → 向 `main` 发 PR
