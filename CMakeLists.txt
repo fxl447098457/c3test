@@ -60,9 +60,14 @@ add_library(vb6c3-core STATIC
     src/common/source_manager.cpp
     src/common/encoding.cpp
     src/lexer/lexer.cpp
+    src/lexer/lexer_keywords.cpp
+    src/lexer/lexer_number.cpp
+    src/lexer/lexer_literal.cpp
     src/lexer/token.cpp
     src/preprocessor/preprocessor.cpp
     src/parser/parser.cpp
+    src/parser/parser_helpers.cpp
+    src/parser/parser_module.cpp
     src/parser/parser_expr.cpp
     src/parser/parser_stmt.cpp
     src/parser/parser_decl.cpp
@@ -103,6 +108,8 @@ add_library(vb6c3-cgen STATIC
     src/backend/cgen_form.cpp
     src/backend/cgen_util.cpp
     src/backend/msvc_driver.cpp
+    src/backend/msvc_driver_discovery.cpp
+    src/backend/msvc_driver_incremental.cpp
 )
 target_compile_definitions(vb6c3-cgen PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
 target_link_libraries(vb6c3-cgen PRIVATE vb6c3-core)
