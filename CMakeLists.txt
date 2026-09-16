@@ -84,6 +84,11 @@ add_library(vb6c3-core STATIC
     src/semantics/symbol_table.cpp
     src/semantics/type_system.cpp
     src/semantics/semantic_analyzer.cpp
+    src/semantics/semantic_analyzer_decl.cpp
+    src/semantics/semantic_analyzer_stmt.cpp
+    src/semantics/semantic_analyzer_expr.cpp
+    src/semantics/semantic_analyzer_util.cpp
+    src/semantics/semantic_analyzer_builtin.cpp
     src/project/vbp_parser.cpp
     src/project/frm_parser.cpp
     src/project/frx_reader.cpp
