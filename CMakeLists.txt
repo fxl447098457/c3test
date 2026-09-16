@@ -90,28 +90,32 @@ target_link_libraries(vb6c3-core PRIVATE ole32 oleaut32 uuid)
 # --- C code generation backend ---
 add_library(vb6c3-cgen STATIC
     src/backend/cgen_base.cpp
-    src/backend/cgen_expr.cpp
-    src/backend/cgen_expr_ident.cpp
-    src/backend/cgen_expr_member.cpp
-    src/backend/cgen_expr_call.cpp
-    src/backend/cgen_expr_binary.cpp
-    src/backend/cgen_expr_array.cpp
-    src/backend/cgen_expr_with.cpp
-    src/backend/cgen_stmt.cpp
-    src/backend/cgen_assign.cpp
-    src/backend/cgen_setlet.cpp
-    src/backend/cgen_control.cpp
-    src/backend/cgen_loop.cpp
-    src/backend/cgen_select.cpp
-    src/backend/cgen_with.cpp
-    src/backend/cgen_jumps.cpp
-    src/backend/cgen_localdecl.cpp
-    src/backend/cgen_call.cpp
-    src/backend/cgen_redim.cpp
-    src/backend/cgen_file_io.cpp
-    src/backend/cgen_decl.cpp
-    src/backend/cgen_com.cpp
-    src/backend/cgen_form.cpp
+    # 表达式家族
+    src/backend/expr/cgen_expr.cpp
+    src/backend/expr/cgen_expr_ident.cpp
+    src/backend/expr/cgen_expr_member.cpp
+    src/backend/expr/cgen_expr_call.cpp
+    src/backend/expr/cgen_expr_binary.cpp
+    src/backend/expr/cgen_expr_array.cpp
+    src/backend/expr/cgen_expr_with.cpp
+    # 语句家族
+    src/backend/stmt/cgen_stmt.cpp
+    src/backend/stmt/cgen_assign.cpp
+    src/backend/stmt/cgen_setlet.cpp
+    src/backend/stmt/cgen_control.cpp
+    src/backend/stmt/cgen_loop.cpp
+    src/backend/stmt/cgen_select.cpp
+    src/backend/stmt/cgen_with.cpp
+    src/backend/stmt/cgen_jumps.cpp
+    src/backend/stmt/cgen_call.cpp
+    src/backend/stmt/cgen_redim.cpp
+    src/backend/stmt/cgen_file_io.cpp
+    # 声明家族
+    src/backend/decl/cgen_decl.cpp
+    src/backend/decl/cgen_localdecl.cpp
+    # 模块级产物（COM 服务器 / 窗体）
+    src/backend/module/cgen_com.cpp
+    src/backend/module/cgen_form.cpp
     src/backend/cgen_util.cpp
     src/backend/msvc_driver.cpp
     src/backend/msvc_driver_discovery.cpp
