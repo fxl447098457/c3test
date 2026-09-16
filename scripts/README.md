@@ -46,3 +46,38 @@ setx C3_VCVARSALL "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTool
 ```bat
 set "PATH=%PATH%;C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin;C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\Ninja"
 ```
+
+## pr.bat —— 一键创建 Pull Request（只建不合）
+
+`main` 是保护分支，本地无法直接 `git push origin main`，必须走合并请求。
+`pr.bat` 把「推送 + 汇总提交 + 建 PR」做成一条命令，**只负责创建，绝不自动合并/审批**，
+必须由人在 GitCode 网页审核后手动点合并。
+
+| 参数 | 说明 |
+|------|------|
+| `-b 分支` | base 分支，默认 `main` |
+| `-s 分支` | head 分支，默认当前分支 |
+| `-t 标题` | PR 标题，默认取唯一提交的标题；多提交时为 `merge <head> into <base>` |
+| `-p, --push` | 创建前先 `git push -u origin <head>`（origin 与本地不同步时**必须**加） |
+| `-o, --open` | 创建后在浏览器打开 PR 页面 |
+| `-n, --dry-run` | 预演：只打印将生成的标题/正文，不调 API |
+| `-h, --help` | 帮助 |
+
+```bat
+scripts\pr.bat              REM 当前分支 -> main
+scripts\pr.bat -p -o        REM 先 push，建完自动打开浏览器
+scripts\pr.bat -n           REM 先看一眼会生成什么
+```
+
+行为约定：
+
+- 前置检查：head 不能等于 base；head 必须在 origin 上存在且与本地一致（否则提示加 `-p`）
+- 无新增提交（`base..head` 为空）直接报错，不建空 PR
+- 已存在同源同目标的 open PR 时，直接打印其链接并退出，不重复创建
+- 工作区有未提交改动只告警，不阻断（未提交内容不会进入 PR）
+
+令牌（`scripts\pr.ps1`）取值顺序：`GITCODE_TOKEN` 环境变量 → `scripts\.gitcode_token` 文件首行 →
+git 凭据管理器（`gitcode.com`，`oauth2` 用户）。
+
+> 坑记录：GitCode PR 接口不接受含非 ASCII 字节的请求体（报 `Parameter description field contains
+> invalid byte sequence`），`pr.ps1` 会把 JSON 中 > U+007F 的字符统一转义成 `\uXXXX` 后再发送。
