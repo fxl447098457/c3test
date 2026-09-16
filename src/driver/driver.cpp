@@ -2163,6 +2163,10 @@ bool Driver::runLinker(const CompileOptions& options, const std::string& outputD
     }
     if (msvcOpts.isDll) {
         msvcOpts.sourceFiles.push_back(rtlDir + "/vb6comserver.c");
+        msvcOpts.sourceFiles.push_back(rtlDir + "/vb6comserver_obj.c");
+        msvcOpts.sourceFiles.push_back(rtlDir + "/vb6comserver_factory.c");
+        msvcOpts.sourceFiles.push_back(rtlDir + "/vb6comserver_cp.c");
+        msvcOpts.sourceFiles.push_back(rtlDir + "/vb6comserver_pci.c");
     }
 
     msvcOpts.verbose = options.verbose;

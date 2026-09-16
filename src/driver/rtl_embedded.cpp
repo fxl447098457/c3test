@@ -1,5 +1,5 @@
 // P10 (restored): RTL runtime embedded resource management - implementation
-// Extract 4 .h headers + 6 .c sources from c3.exe RCDATA resources.
+// Extract 5 .h headers + 10 .c sources from c3.exe RCDATA resources.
 // The P11.3 pre-compiled .lib scheme was reverted (c3 is open source);
 // RTL sources are compiled by MSVC together with the generated code.
 
@@ -102,6 +102,11 @@ std::string SessionManager::create() {
         { RTL_VB6FORMS_C,           "vb6forms.c" },
         { RTL_VB6_DI_STUBS_C,       "vb6_di_stubs.c" },
         { RTL_VB6_DI_WIN32_STUBS_C, "vb6_di_win32_stubs.c" },
+        { RTL_VB6COMSERVER_INTERNAL_H, "vb6comserver_internal.h" },
+        { RTL_VB6COMSERVER_OBJ_C,      "vb6comserver_obj.c" },
+        { RTL_VB6COMSERVER_FACTORY_C,  "vb6comserver_factory.c" },
+        { RTL_VB6COMSERVER_CP_C,       "vb6comserver_cp.c" },
+        { RTL_VB6COMSERVER_PCI_C,      "vb6comserver_pci.c" },
     };
 
     for (auto& entry : files) {

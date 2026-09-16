@@ -25,6 +25,13 @@ enum RtlResourceID {
     RTL_VB6FORMS_C      = 107,
     RTL_VB6_DI_STUBS_C  = 108,
     RTL_VB6_DI_WIN32_STUBS_C = 109,
+
+    // vb6comserver 按 COM 接口家族拆分 (P6.6): 内部共享头 + 各族实现
+    RTL_VB6COMSERVER_INTERNAL_H = 110,
+    RTL_VB6COMSERVER_OBJ_C      = 111,
+    RTL_VB6COMSERVER_FACTORY_C  = 112,
+    RTL_VB6COMSERVER_CP_C       = 113,
+    RTL_VB6COMSERVER_PCI_C      = 114,
 };
 
 // Session directory manager
