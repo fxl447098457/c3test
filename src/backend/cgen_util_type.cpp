@@ -1,0 +1,488 @@
+#include "backend/cgen.hpp"
+#include <algorithm>
+#include <cctype>
+#include <iostream>
+#include <functional>
+
+namespace vb6c3 {
+
+// --- cgen_util_type.cpp: 表达式类型推断 + Variant 判定 + 运行时参数 C 类型 ---
+
+
+// ============================================================
+void CCodeGen::visit(SimpleTypeRef& node) {}
+void CCodeGen::visit(ArrayTypeRef& node) {}
+void CCodeGen::visit(FixedStringTypeRef& node) {}
+
+// ============================================================
+// 模块 visit (generate()已按类别分派, 此处为空)
+// ============================================================
+
+void CCodeGen::visit(Module& node) {}
+
+// ============================================================
+// 表达式类型推断 (简化版, 用于Select Case等场景)
+// ============================================================
+
+Vb6Type CCodeGen::inferExprType(Expr& expr) const {
+    switch (expr.kind) {
+        case ASTNodeKind::IdentifierExpr: {
+            auto& id = static_cast<IdentifierExpr&>(expr);
+            // 优先检查已知的变量类型集合 (局部变量在符号表中作用域可能不可达)
+            std::string lower = id.name;
+            std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+            if (knownBstrVars_.count(lower)) return Vb6Type::String;
+            if (knownDoubleVars_.count(lower)) return Vb6Type::Double;
+            if (knownLongVars_.count(lower)) return Vb6Type::Long;
+            if (knownLongPtrVars_.count(lower)) return Vb6Type::LongPtr;
+            if (knownVariantVars_.count(lower)) return Vb6Type::Variant;
+            // 检查符号表
+            auto* sym = symTab_.lookup(id.name);
+            if (!sym) sym = symTab_.lookupModule(id.name);
+            if (sym) return sym->type;
+            break;
+        }
+        case ASTNodeKind::LiteralExpr: {
+            auto& lit = static_cast<LiteralExpr&>(expr);
+            if (lit.literalKind == LiteralKind::String) return Vb6Type::String;
+            if (lit.literalKind == LiteralKind::Double || lit.literalKind == LiteralKind::Single
+                || lit.literalKind == LiteralKind::Currency || lit.literalKind == LiteralKind::Decimal)
+                return Vb6Type::Double;
+            if (lit.literalKind == LiteralKind::Boolean) return Vb6Type::Boolean;
+            if (lit.literalKind == LiteralKind::Date) return Vb6Type::Date;
+            return Vb6Type::Long;
+        }
+        case ASTNodeKind::BinaryExpr: {
+            auto& bin = static_cast<BinaryExpr&>(expr);
+            // 字符串连接运算符 → String
+            if (bin.op == BinaryOp::Concat) return Vb6Type::String;
+            // 比较运算符 → Boolean
+            if (bin.op == BinaryOp::Eq || bin.op == BinaryOp::Neq ||
+                bin.op == BinaryOp::Lt || bin.op == BinaryOp::Gt ||
+                bin.op == BinaryOp::Le || bin.op == BinaryOp::Ge ||
+                bin.op == BinaryOp::Like || bin.op == BinaryOp::Is)
+                return Vb6Type::Boolean;
+            // 逻辑运算符 → Boolean (VB6中)
+            if (bin.op == BinaryOp::And || bin.op == BinaryOp::Or || bin.op == BinaryOp::Xor)
+                return Vb6Type::Boolean;
+            // 浮点除法 → Double
+            if (bin.op == BinaryOp::Div) return Vb6Type::Double;
+
+            // 算术运算符: 提升左右类型
+            {
+                Vb6Type lt = inferExprType(*bin.left);
+                Vb6Type rt = inferExprType(*bin.right);
+                return TypeSystem::promote(lt, rt);
+            }
+        }
+        case ASTNodeKind::UnaryExpr: {
+            auto& un = static_cast<UnaryExpr&>(expr);
+            if (un.op == UnaryOp::Not) return Vb6Type::Boolean;
+            return inferExprType(*un.operand);
+        }
+        case ASTNodeKind::IndexOrCallExpr: {
+            // 函数调用: 返回函数返回类型
+            auto& call = static_cast<IndexOrCallExpr&>(expr);
+            if (call.callee && call.callee->kind == ASTNodeKind::IdentifierExpr) {
+                auto& id = static_cast<IdentifierExpr&>(*call.callee);
+                auto* sym = symTab_.lookup(id.name);
+                if (!sym) sym = symTab_.lookupModule(id.name);
+                if (sym) return sym->type;
+            }
+            // P26: 类实例方法调用 a.Method(args) → callee是MemberAccessExpr
+            // 需要查询成员函数的返回类型, 而非直接fallback到Variant
+            if (call.callee && call.callee->kind == ASTNodeKind::MemberAccessExpr) {
+                return inferExprType(*call.callee);
+            }
+            break;
+        }
+        case ASTNodeKind::MemberAccessExpr: {
+            auto& ma = static_cast<MemberAccessExpr&>(expr);
+            // P24-12: Err对象特殊处理
+            if (ma.object && ma.object->kind == ASTNodeKind::IdentifierExpr) {
+                auto& objId = static_cast<IdentifierExpr&>(*ma.object);
+                std::string objLower = objId.name;
+                std::transform(objLower.begin(), objLower.end(), objLower.begin(), ::tolower);
+                if (objLower == "err") {
+                    std::string memLower = ma.memberName;
+                    std::transform(memLower.begin(), memLower.end(), memLower.begin(), ::tolower);
+                    if (memLower == "number") return Vb6Type::Long;
+                    if (memLower == "description" || memLower == "source") return Vb6Type::String;
+                    if (memLower == "helppath" || memLower == "helpfile" || memLower == "helpcontext") return Vb6Type::String;
+                    if (memLower == "lastdllerror") return Vb6Type::Long;
+                }
+            }
+            // Fix 081i: UDT字段访问 — 先查找UDT成员类型，避免lookupModule
+            // 匹配到内置函数(如Left→String)导致类型推断错误
+            {
+                std::string udtCType = inferUdtTypeOfExpr(*ma.object);
+                if (!udtCType.empty()) {
+                    const std::string prefix = "vb6_type_";
+                    if (udtCType.size() > prefix.size()
+                        && udtCType.compare(0, prefix.size(), prefix) == 0) {
+                        std::string udtName = udtCType.substr(prefix.size());
+                        Symbol* udtSym = symTab_.lookupModule(udtName);
+                        if (udtSym && udtSym->kind == SymbolKind::UserDefinedType) {
+                            std::string memLower = ma.memberName;
+                            std::transform(memLower.begin(), memLower.end(), memLower.begin(), ::tolower);
+                            for (auto& mi : udtSym->udtMembers) {
+                                std::string miLower = mi.name;
+                                std::transform(miLower.begin(), miLower.end(), miLower.begin(), ::tolower);
+                                if (miLower == memLower) {
+                                    return mi.type;  // 找到UDT字段，返回其Vb6Type
+                                }
+                            }
+                            // Fix 084o-2: UDT 已确认但字段未找到 → 字段类型未知, 返回 Unknown.
+                            // 不要回退 lookupModule(memberName): 成员名是字段名而非模块符号,
+                            // 可能误匹配模块级同名符号 (如 SourceFile 变量) 导致类型误判为 String.
+                            // Fix 090ab: 也不应返回 Variant — 否则 UDT 字段 (如 COMSTAT.fBitFields,
+                            // 跨模块 Type 符号缺失) 被 isDefinitelyVariantExpr 误判为 Variant,
+                            // 实参生成时套 vb6_VariantToLong(int32 字段) → C2440.
+                            return Vb6Type::Unknown;
+                        }
+                    }
+                    // Fix 090ab: UDT C 类型已知 (knownUdtVars_) 但符号不可解析 (跨模块
+                    // Public Type 在符号表注册表不可达) → 字段类型未知, 保守返回 Unknown,
+                    // 禁止回退到模块级同名符号或默认 Variant (否则 COMSTAT.fBitFields 等
+                    // 会被误判为 Variant 而错误套用 vb6_VariantToLong → C2440).
+                    return Vb6Type::Unknown;
+                }
+            }
+            // 查找成员函数/属性的返回类型
+            auto* memSym = symTab_.lookupModule(ma.memberName);
+            if (memSym) return memSym->type;
+            break;
+        }
+        // Fix 084o-2: With 块内 UDT 字段访问 (.SourceFile 等) 的类型推断.
+        // WithMemberExpr 由 With 语句展开 (_vb6_with_N->field), 必须按 UDT 字段查
+        // udtMembers, 且不能回退 lookupModule(memberName) — 与 MemberAccessExpr 同理.
+        case ASTNodeKind::WithMemberExpr: {
+            auto& wm = static_cast<WithMemberExpr&>(expr);
+            if (withObjectInfoStack_.empty() || withObjectVars_.empty()) return Vb6Type::Variant;
+            const auto& winfo = withObjectInfoStack_.back();
+            if (winfo.kind != WithObjKind::Unknown) {
+                // 非 UDT With (类实例/COM 对象): memberName 是属性/方法 → 查成员符号
+                auto* memSym2 = symTab_.lookupModule(wm.memberName);
+                if (memSym2) return memSym2->type;
+                return Vb6Type::Variant;
+            }
+            std::string tempLower = Symbol::toLower(withObjectVars_.back());
+            auto it = knownUdtVars_.find(tempLower);
+            if (it == knownUdtVars_.end()) return Vb6Type::Variant;
+            const std::string prefix = "vb6_type_";
+            const std::string& udtCType = it->second;
+            if (udtCType.size() <= prefix.size()
+                || udtCType.compare(0, prefix.size(), prefix) != 0) return Vb6Type::Variant;
+            std::string udtName = udtCType.substr(prefix.size());
+            Symbol* udtSym = symTab_.lookupModule(udtName);
+            if (udtSym && udtSym->kind == SymbolKind::UserDefinedType) {
+                std::string memLower = Symbol::toLower(wm.memberName);
+                for (auto& mi : udtSym->udtMembers) {
+                    if (Symbol::toLower(mi.name) == memLower) return mi.type;
+                }
+            }
+            return Vb6Type::Variant;
+        }
+        default:
+            break;
+    }
+    return Vb6Type::Variant;
+}
+
+
+// Fix 029: 严格 Variant 推断. 仅当表达式明确为 Variant 时返回 true.
+// 与 inferExprType 的差异: 内置函数 (sym==null) 与 UDT 字段访问 (lookupModule 失败) 等
+// 通过 fallback 返回 Variant 的情形, 此处视为非 Variant, 避免对 int/BSTR 等实参误包装.
+bool CCodeGen::isDefinitelyVariantExpr(Expr& expr, bool* isArrOut) const {
+    if (isArrOut) *isArrOut = false;
+    uint16_t variantArrRaw = static_cast<uint16_t>(Vb6Type::Variant)
+                           | static_cast<uint16_t>(Vb6Type::Array);
+
+    // 多态内置函数 denylist: symTab 注册为 Variant, 但 codegen 按上下文
+    // 发出类型化版本 (vb6_IIfBSTR/Long/Double, Choose 嵌套三元, Switch 嵌套三元),
+    // 实际 C 返回类型不是 vb6_VARIANT. 视为非 Variant 以避免错误包装.
+    auto isPolymorphicBuiltin = [](const std::string& name) -> bool {
+        std::string lower = name;
+        std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+        return lower == "iif" || lower == "choose" || lower == "switch";
+    };
+
+    auto checkSym = [&](Symbol* sym) -> bool {
+        if (!sym) return false;
+        if (sym->type == Vb6Type::Variant) return true;
+        if (static_cast<uint16_t>(sym->type) == variantArrRaw) {
+            if (isArrOut) *isArrOut = true;
+            return true;
+        }
+        return false;
+    };
+
+    switch (expr.kind) {
+        case ASTNodeKind::IdentifierExpr: {
+            auto& id = static_cast<IdentifierExpr&>(expr);
+            std::string lower = id.name;
+            std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+            // 已知数组变量: C 类型已是 vb6_SafeArray1D* (元素为具体类型或 VARIANT),
+            // 不是 vb6_VARIANT. 防止 symTab_ lookupModule 回退命中其他模块同名
+            // Variant 符号, 导致 UBound(arr) 被错误包装成 vb6_VariantToSafeArray1D(arr)
+            // (C2440: 无法从 vb6_SafeArray1D* 转换为 vb6_VARIANT, 如 cDataBase WhereIn).
+            if (knownArrays_.count(lower)) {
+                return false;
+            }
+            // 已知 Variant 局部变量集合
+            if (knownVariantVars_.count(lower)) {
+                // 无法区分 Variant 与 Variant(), 视作普通 Variant
+                return true;
+            }
+            // Fix 049b: 如果已知为非 Variant 具体类型 (BSTR/Long/Double),
+            // 不应回退到符号表查找 (可能命中其他模块的同名 Variant 符号)
+            if (knownBstrVars_.count(lower) || knownLongVars_.count(lower)
+                || knownDoubleVars_.count(lower)) {
+                return false;
+            }
+            // 符号表查询
+            auto* sym = symTab_.lookup(id.name);
+            if (!sym) sym = symTab_.lookupModule(id.name);
+            return checkSym(sym);
+        }
+        case ASTNodeKind::IndexOrCallExpr: {
+            auto& call = static_cast<IndexOrCallExpr&>(expr);
+            if (call.callee && call.callee->kind == ASTNodeKind::IdentifierExpr) {
+                auto& cid = static_cast<IdentifierExpr&>(*call.callee);
+                // 多态内置函数: 实际返回类型与 symTab 注册不同, 不视为 Variant
+                if (isPolymorphicBuiltin(cid.name)) return false;
+                auto* sym = symTab_.lookup(cid.name);
+                if (!sym) sym = symTab_.lookupModule(cid.name);
+                // 关键差异: sym==null (内置函数) 视为非 Variant
+                return checkSym(sym);
+            }
+            // 类方法调用 a.Method(): 递归推断 callee 类型
+            if (call.callee && call.callee->kind == ASTNodeKind::MemberAccessExpr) {
+                bool arr = false;
+                bool v = isDefinitelyVariantExpr(*call.callee, &arr);
+                if (v && isArrOut) *isArrOut = arr;
+                return v;
+            }
+            return false;
+        }
+        case ASTNodeKind::MemberAccessExpr: {
+            auto& ma = static_cast<MemberAccessExpr&>(expr);
+            // Err 对象特殊处理 (与 inferExprType 一致)
+            if (ma.object && ma.object->kind == ASTNodeKind::IdentifierExpr) {
+                auto& objId = static_cast<IdentifierExpr&>(*ma.object);
+                std::string objLower = objId.name;
+                std::transform(objLower.begin(), objLower.end(), objLower.begin(), ::tolower);
+                if (objLower == "err") {
+                    // Err.* 的具体类型见 inferExprType, 均为具体类型 (Long/String), 非 Variant
+                    return false;
+                }
+            }
+            // Fix 090l: UDT 字段访问 — 字段声明 As Variant (如 cZipArchive
+            // ZipVfsType.BufferArray / SourceFileInfo) 是明确 Variant 表达式.
+            // 此前 memSym==null (UDT 字段) 被一律视为非 Variant, 导致
+            // UBound(vb6_ret_X.BufferArray) 等不包装 vb6_VariantToSafeArray1D →
+            // C2440 (无法从 vb6_VARIANT 转 vb6_SafeArray1D*).
+            if (!inferUdtTypeOfExpr(*ma.object).empty()) {
+                return inferExprType(expr) == Vb6Type::Variant;
+            }
+            // 符号表查找成员 (Property/Function)
+            auto* memSym = symTab_.lookupModule(ma.memberName);
+            // 关键差异: memSym==null (UDT 字段访问或外部类成员) 视为非 Variant
+            return checkSym(memSym);
+        }
+        default:
+            // 其他表达式 (BinaryExpr/UnaryExpr/LiteralExpr 等) 不会明确返回 Variant,
+            // 除非其子表达式明确为 Variant. 此处不递归, 保持严格性.
+            return false;
+    }
+}
+
+
+// ============================================================
+// Fix 038b-1: 基于 C 表达式字符串的 Variant 检测
+// ============================================================
+// 补充 isDefinitelyVariantExpr 的 AST 级检测. 当 codegen 生成的 C 表达式
+// 包含已知返回 vb6_VARIANT 的函数调用时, 判定为 Variant.
+// 仅检查顶层表达式 (去除前导括号/空白后), 避免对子表达式误判.
+
+bool CCodeGen::cExprIsVariant(const std::string& cExpr) const {
+    // 去除前导空白和括号
+    size_t start = 0;
+    while (start < cExpr.size()) {
+        char c = cExpr[start];
+        if (c == '(' || c == ' ' || c == '\t' || c == '\n' || c == '\r') {
+            start++;
+        } else {
+            break;
+        }
+    }
+    if (start >= cExpr.size()) return false;
+
+    // 已知返回 vb6_VARIANT 的函数前缀
+    static const std::vector<std::string> variantPrefixes = {
+        "vb6_VariantArrayGet(",
+        "vb6_VariantFromComResult(",
+        "vb6_VariantFromStackVARIANT(",
+        "vb6_VariantFromValue(",
+        "vb6_VariantEmpty(",
+        "vb6_VariantLong(",
+        "vb6_VariantDouble(",
+        "vb6_VariantString(",
+        "vb6_VariantBool(",
+        "vb6_VariantArray(",
+        "vb6_VariantObject(",
+        "vb6_VariantNull(",
+        "vb6_VariantNothing(",
+        "vb6_VariantFromI2(",
+        "vb6_VariantFromI4(",
+        "vb6_VariantFromR4(",
+        "vb6_VariantFromR8(",
+        "vb6_VariantFromBSTR(",
+        "vb6_VariantFromBool(",
+        "vb6_VariantFromDate(",
+        "vb6_VariantFromUI1(",
+        "vb6_VariantFromSafeArray(",
+        "vb6_VariantFromSafeArray1D(",
+        "vb6_LoadResData(",       // Fix 090bz: VBA LoadResData → vb6_VARIANT;
+                                 //   Dim D() As Byte: D = LoadResData(...) 赋值
+                                 //   需 VariantToSafeArray1D 提取 (cLang LoadData/LoadInfo C2440).
+        "vb6_DispCallByVtbl(",  // Fix 068: DispCallByVtbl returns Variant
+    };
+    for (const auto& prefix : variantPrefixes) {
+        if (cExpr.compare(start, prefix.size(), prefix) == 0) return true;
+    }
+
+    // Fix 040b: VB6_SA_AT(vb6_VARIANT, arr, idx) expands to an array element
+    // of type vb6_VARIANT — also a Variant expression.
+    if (cExpr.compare(start, 21, "VB6_SA_AT(vb6_VARIANT") == 0) return true;
+
+    // Fix 045: 检查项目函数是否返回 Variant — 通过 driver.cpp 预扫描构建的
+    // C 函数名集合. 提取 C 表达式中的函数名 (从 start 到第一个 '(') 并查集合.
+    if (variantReturnFuncs_) {
+        size_t parenPos = cExpr.find('(', start);
+        if (parenPos != std::string::npos) {
+            std::string funcName = cExpr.substr(start, parenPos - start);
+            if (variantReturnFuncs_->count(funcName)) return true;
+        }
+    }
+
+    // 检查 (&(vb6_VARIANT){...}) 复合字面量 — 也是 VARIANT 类型
+    // 但这种形式通常作为 ByRef 参数传递, 不需要再转换, 故不检测.
+
+    return false;
+}
+
+
+// ============================================================
+// Fix 038b-5: 运行时函数参数 C 类型查找表
+// ============================================================
+// 当 calleeParams 为空 (运行时/内置函数) 时, 通过函数名和参数索引查找
+// 期望的 C 类型. 返回空字符串表示未知.
+
+std::string CCodeGen::getRuntimeParamCType(const std::string& funcName, size_t paramIdx) {
+    static const std::unordered_map<std::string, std::vector<std::string>> table = {
+        // Array 创建/设置
+        {"vb6_ArraySetLong",    {"vb6_SafeArray1D*", "int32_t", "int32_t"}},
+        {"vb6_ArraySetBSTR",    {"vb6_SafeArray1D*", "int32_t", "BSTR"}},
+        {"vb6_ArraySetDouble",  {"vb6_SafeArray1D*", "int32_t", "double"}},
+        {"vb6_ArraySetVariant", {"vb6_SafeArray1D*", "int32_t", "vb6_VARIANT"}},
+        {"vb6_ArrayGetLong",    {"vb6_SafeArray1D*", "int32_t"}},
+        {"vb6_ArrayGetBSTR",    {"vb6_SafeArray1D*", "int32_t"}},
+        {"vb6_ArrayGetDouble",  {"vb6_SafeArray1D*", "int32_t"}},
+        {"vb6_ArrayGetVariant", {"vb6_SafeArray1D*", "int32_t"}},
+        // BSTR 操作
+        {"vb6_BSTR_Assign",     {"BSTR*", "BSTR"}},
+        {"vb6_BSTR_Concat",     {"BSTR", "BSTR"}},
+        {"vb6_BSTR_ConcatFree", {"BSTR", "BSTR"}},
+        {"vb6_BSTR_FromStr",    {"const wchar_t*"}},
+        {"vb6_BSTR_Empty",      {}},
+        {"vb6_BSTR_ToANSI",     {"BSTR"}},
+        {"vb6_BSTR_Free",       {"BSTR*"}},
+        {"vb6_BSTR_Clone",      {"BSTR"}},
+        // 字符串比较/操作
+        {"vb6_StrCmp",          {"BSTR", "BSTR"}},
+        {"vb6_StrComp",         {"BSTR", "BSTR", "int32_t"}},
+        {"vb6_Val",             {"BSTR"}},
+        {"vb6_Trim",            {"BSTR"}},
+        {"vb6_LTrim",           {"BSTR"}},
+        {"vb6_RTrim",           {"BSTR"}},
+        {"vb6_Left",            {"BSTR", "int32_t"}},
+        {"vb6_Right",           {"BSTR", "int32_t"}},
+        {"vb6_Mid",             {"BSTR", "int32_t", "int32_t"}},
+        {"vb6_Len",             {"BSTR"}},
+        {"vb6_LenB",            {"BSTR"}},
+        {"vb6_InStr",           {"BSTR", "BSTR"}},
+        {"vb6_Replace",         {"BSTR", "BSTR", "BSTR"}},
+        {"vb6_Split",           {"BSTR", "BSTR"}},
+        {"vb6_Join",            {"vb6_SafeArray1D*", "BSTR"}},
+        {"vb6_UCase",           {"BSTR"}},
+        {"vb6_LCase",           {"BSTR"}},
+        {"vb6_Space",           {"int32_t"}},
+        // Fix 091e: StrConv(BSTR, int32_t, int32_t) — 实参为 Variant 时需
+        // vb6_VariantToString (cAesCBC.c 25 StrConv(LoadResData(...), 64, 0) C2440)
+        {"vb6_StrConv",         {"BSTR", "int32_t", "int32_t"}},
+        {"vb6_String",          {"int32_t", "int32_t"}},
+        {"vb6_Chr",             {"int32_t"}},
+        {"vb6_Asc",             {"BSTR"}},
+        {"vb6_Hex",             {"int32_t"}},
+        {"vb6_Oct",             {"int32_t"}},
+        // 类型转换
+        {"vb6_CStr",            {"vb6_VARIANT"}},
+        {"vb6_CLng",            {"double"}},
+        {"vb6_CInt",            {"double"}},
+        {"vb6_CDbl",            {"double"}},
+        {"vb6_CSng",            {"double"}},
+        {"vb6_CBool",           {"vb6_VARIANT"}},
+        {"vb6_CByte",           {"vb6_VARIANT"}},
+        {"vb6_CDate",           {"vb6_VARIANT"}},
+        {"vb6_CCur",            {"vb6_VARIANT"}},
+        // 数组操作
+        {"vb6_UBound",          {"vb6_SafeArray1D*", "int32_t"}},
+        {"vb6_LBound",          {"vb6_SafeArray1D*", "int32_t"}},
+        {"vb6_ArrayCreate",     {"int32_t"}},
+        // 消息框
+        {"vb6_MsgBox",          {"BSTR"}},
+        {"vb6_MsgBox1",         {"BSTR"}},
+        // 错误处理
+        {"vb6_ErrRaise",        {"int32_t", "BSTR", "BSTR"}},
+        {"vb6_ErrNumber",       {}},
+        {"vb6_ErrDescription",  {}},
+        {"vb6_ErrSource",       {}},
+        {"vb6_ErrClear",        {}},
+        // IsMissing
+        // Fix 091k: RTL 实际签名 int32_t vb6_IsMissing(SAFEARRAY* psa) (ParamArray 专用,
+        // 判断是否未传实参). 原表项 vb6_VARIANT* 与 RTL 不符, 导致 IsMissing(<Variant>)
+        // 时表项无效, 裸传 Variant 值 → C2440.
+        {"vb6_IsMissing",       {"SAFEARRAY*"}},
+        // Variant 提取
+        {"vb6_VariantToLong",      {"vb6_VARIANT"}},
+        {"vb6_VariantToDouble",    {"vb6_VARIANT"}},
+        {"vb6_VariantToString",    {"vb6_VARIANT"}},
+        {"vb6_VariantToBool",      {"vb6_VARIANT"}},
+        {"vb6_VariantToSafeArray1D", {"vb6_VARIANT"}},
+        {"vb6_VariantToObjectVal", {"vb6_VARIANT"}},
+        // Fix 046: IIf family + Variant-aware conversion functions
+        {"vb6_IIfBSTR",         {"int32_t", "BSTR", "BSTR"}},
+        {"vb6_IIfLong",         {"int32_t", "int32_t", "int32_t"}},
+        {"vb6_IIfDouble",       {"int32_t", "double", "double"}},
+        {"vb6_IIfVariant",      {"int32_t", "vb6_VARIANT", "vb6_VARIANT"}},
+        {"vb6_CLngV",           {"vb6_VARIANT"}},
+        {"vb6_CIntV",           {"vb6_VARIANT"}},
+        {"vb6_IntDiv",          {"int32_t", "int32_t"}},
+        // Debug
+        {"vb6_DebugPrint",      {"BSTR"}},
+        {"vb6_DebugWriteLong",  {"int32_t"}},
+        // 对象操作
+        {"vb6_StrPtr",          {"BSTR"}},   // Fix 084o-7: StrPtr(Variant) → vb6_VariantToString 先行
+        {"vb6_ObjPtr",          {"uintptr_t"}},
+        {"vb6_ReleaseObject",   {"void**"}},
+        {"vb6_NewObject",       {"const wchar_t*"}},
+        {"vb6_CallByName",      {"void*", "BSTR", "int32_t"}},
+    };
+    auto it = table.find(funcName);
+    if (it != table.end() && paramIdx < it->second.size()) {
+        return it->second[paramIdx];
+    }
+    return "";
+}
+} // namespace vb6c3

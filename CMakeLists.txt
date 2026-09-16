@@ -130,6 +130,13 @@ add_library(vb6c3-cgen STATIC
     src/backend/module/cgen_com.cpp
     src/backend/module/cgen_form.cpp
     src/backend/cgen_util.cpp
+    src/backend/cgen_util_type.cpp
+    src/backend/cgen_util_scan.cpp
+    src/backend/cgen_util_com.cpp
+    src/backend/cgen_util_comwrite.cpp
+    src/backend/cgen_util_classcall.cpp
+    src/backend/cgen_util_classtype.cpp
+    src/backend/cgen_util_ctrl.cpp
     src/backend/msvc_driver.cpp
     src/backend/msvc_driver_discovery.cpp
     src/backend/msvc_driver_incremental.cpp
