@@ -91,6 +91,12 @@ target_link_libraries(vb6c3-core PRIVATE ole32 oleaut32 uuid)
 add_library(vb6c3-cgen STATIC
     src/backend/cgen_base.cpp
     src/backend/cgen_expr.cpp
+    src/backend/cgen_expr_ident.cpp
+    src/backend/cgen_expr_member.cpp
+    src/backend/cgen_expr_call.cpp
+    src/backend/cgen_expr_binary.cpp
+    src/backend/cgen_expr_array.cpp
+    src/backend/cgen_expr_with.cpp
     src/backend/cgen_stmt.cpp
     src/backend/cgen_assign.cpp
     src/backend/cgen_setlet.cpp
