@@ -65,12 +65,19 @@ add_library(vb6c3-core STATIC
     src/lexer/lexer_literal.cpp
     src/lexer/token.cpp
     src/preprocessor/preprocessor.cpp
+    src/preprocessor/preprocessor_cond.cpp
+    src/preprocessor/preprocessor_expr.cpp
     src/parser/parser.cpp
     src/parser/parser_helpers.cpp
     src/parser/parser_module.cpp
     src/parser/parser_expr.cpp
-    src/parser/parser_stmt.cpp
     src/parser/parser_decl.cpp
+    # 语句解析家族
+    src/parser/stmt/parser_stmt.cpp
+    src/parser/stmt/parser_stmt_control.cpp
+    src/parser/stmt/parser_stmt_jump.cpp
+    src/parser/stmt/parser_stmt_assign.cpp
+    src/parser/stmt/parser_stmt_io.cpp
     src/ast/ast.cpp
     src/ast/ast_visitor.cpp
     src/ast/ast_printer.cpp
@@ -81,6 +88,8 @@ add_library(vb6c3-core STATIC
     src/project/frm_parser.cpp
     src/project/frx_reader.cpp
     src/com/typelib_parser.cpp
+    src/com/typelib_parser_parse.cpp
+    src/com/typelib_parser_desc.cpp
     src/typelib/typelib_builder.cpp
 )
 target_compile_definitions(vb6c3-core PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
@@ -112,6 +121,10 @@ add_library(vb6c3-cgen STATIC
     src/backend/stmt/cgen_file_io.cpp
     # 声明家族
     src/backend/decl/cgen_decl.cpp
+    src/backend/decl/cgen_decl_proc.cpp
+    src/backend/decl/cgen_decl_var.cpp
+    src/backend/decl/cgen_decl_api.cpp
+    src/backend/decl/cgen_decl_prop.cpp
     src/backend/decl/cgen_localdecl.cpp
     # 模块级产物（COM 服务器 / 窗体）
     src/backend/module/cgen_com.cpp
