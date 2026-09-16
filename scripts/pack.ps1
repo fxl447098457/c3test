@@ -30,11 +30,16 @@ if ($files.Count -eq 0) { throw "no files found under: $src" }
 if (Test-Path -LiteralPath $Out) { Remove-Item -LiteralPath $Out -Force }
 
 $zip = [System.IO.Compression.ZipFile]::Open($Out, [System.IO.Compression.ZipArchiveMode]::Create)
+$totalMB = [math]::Round(($files | Measure-Object -Property Length -Sum).Sum / 1MB, 1)
+Write-Output "packing $($files.Count) files ($totalMB MB) ..."
 try {
+    $done = 0
     foreach ($f in $files) {
         $rel = $f.FullName.Substring($src.Length + 1).Replace('\', '/')
         $null = [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile(
             $zip, $f.FullName, $rel, [System.IO.Compression.CompressionLevel]::Optimal)
+        $done++
+        if ($done % 20 -eq 0) { Write-Output ("  {0}/{1}" -f $done, $files.Count) }
     }
 }
 finally { $zip.Dispose() }
