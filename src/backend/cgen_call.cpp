@@ -1,0 +1,615 @@
+#include "backend/cgen.hpp"
+#include <algorithm>
+#include <cctype>
+#include <iostream>
+#include <functional>
+
+namespace vb6c3 {
+
+// --- cgen_call.cpp: 调用与数组语句生成 (Call / ReDim / Erase) ---
+
+void CCodeGen::visit(CallStmt& node) {
+    if (node.callee) {
+        // 检测 Debug.Print 调用: 特殊处理多参数输出
+        if (node.callee->kind == ASTNodeKind::IndexOrCallExpr) {
+            auto& call = static_cast<IndexOrCallExpr&>(*node.callee);
+            if (call.callee && call.callee->kind == ASTNodeKind::MemberAccessExpr) {
+                auto& member = static_cast<MemberAccessExpr&>(*call.callee);
+                if (member.object && member.object->kind == ASTNodeKind::IdentifierExpr) {
+                    auto& objIdent = static_cast<IdentifierExpr&>(*member.object);
+                    std::string objLower = objIdent.name;
+                    std::transform(objLower.begin(), objLower.end(), objLower.begin(), ::tolower);
+                    std::string memLower = member.memberName;
+                    std::transform(memLower.begin(), memLower.end(), memLower.begin(), ::tolower);
+
+                    if (objLower == "debug" && memLower == "print") {
+                        // Debug.Print: 逐参数输出, 最后换行
+                        // 每个参数转为BSTR后用vb6_DebugWriteBSTR输出
+                        if (call.positional.empty()) {
+                            c_.emitLine("vb6_DebugWriteNewline();");
+                        } else {
+                            // 已知返回BSTR的内置函数前缀
+                            static const std::vector<std::string> bstrFuncs = {
+                                "vb6_BSTR_FromStr", "vb6_Left", "vb6_Right", "vb6_Mid",
+                                "vb6_UCase", "vb6_LCase", "vb6_UCase_str", "vb6_LCase_str",
+                                "vb6_Trim", "vb6_LTrim", "vb6_RTrim", "vb6_Chr",
+                                "vb6_Str", "vb6_CStr", "vb6_Format", "vb6_Hex", "vb6_Oct",
+                                "vb6_Replace", "vb6_Space", "vb6_String", "vb6_StrReverse",
+                                "vb6_BSTR_Concat", "vb6_BSTR_Empty", "vb6_App_Path", "vb6_App_EXEName", "vb6_App_HelpFile", "vb6_Command", "vb6_CurDir", "vb6_Environ", "vb6_Dir", "vb6_IIfBSTR", "vb6_GetControlText", "vb6_GetControlCaption"
+                            };
+                            auto isBstrExpr = [&](const std::string& expr) -> bool {
+                                for (auto& prefix : bstrFuncs) {
+                                    if (expr.compare(0, prefix.size(), prefix) == 0) return true;
+                                }
+                                // vb6_BSTR_ 开头的都是 BSTR
+                                if (expr.compare(0, 8, "vb6_BSTR") == 0) return true;
+                                // VB6_SA_AT(BSTR, ...) 也是 BSTR
+                                if (expr.find("VB6_SA_AT(BSTR,") != std::string::npos) return true;
+                                // 已知BSTR变量名 (小写匹配)
+                                std::string lower = expr;
+                                std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+                                if (knownBstrVars_.count(lower)) return true;
+                                return false;
+                            };
+
+                            // 已知返回double的内置函数前缀
+                            static const std::vector<std::string> doubleFuncs = {
+                                "vb6_Sin", "vb6_Cos", "vb6_Tan", "vb6_Atn",
+                                "vb6_Log", "vb6_Exp", "vb6_Sqr", "vb6_Rnd",
+                                "vb6_Round", "vb6_Fix", "vb6_Int",
+                                "vb6_CDbl", "vb6_CSng", "vb6_Val",
+                                "vb6_Abs"
+                            };
+                            auto isDoubleExpr = [&](const std::string& expr) -> bool {
+                                for (auto& prefix : doubleFuncs) {
+                                    if (expr.compare(0, prefix.size(), prefix) == 0) return true;
+                                }
+                                // 已知double变量名 (小写匹配)
+                                std::string lower = expr;
+                                std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+                                if (knownDoubleVars_.count(lower)) return true;
+                                // 包含浮点字面量 (如 3.14)
+                                // 检查是否包含小数点且不是函数调用
+                                if (expr.find('.') != std::string::npos && expr.find('(') == std::string::npos) return true;
+                                return false;
+                            };
+
+                            // Fix 091r: Debug.Print 参数是否为 Variant 值 —
+                            // cExprIsVariant 只认 C 表达式前缀, 不认"Variant 变量名"
+                            // (局部/模块级 knownVariantVars_ / 类字段 classVariantFields_).
+                            // Demo 671: For Each 循环变量 x As Variant 被赋
+                            // vb6_VariantFromStackVARIANT 后 Debug.Print x →
+                            // DebugWriteLong((int32_t)(x)) C2440 (vb6_VARIANT→int32_t).
+                            auto isVariantVal091r = [&](const std::string& e) -> bool {
+                                if (cExprIsVariant(e)) return true;
+                                std::string n091r = e;
+                                std::string suffix091r;
+                                size_t cmt091r = n091r.find("/*");
+                                if (cmt091r != std::string::npos) {
+                                    suffix091r = n091r.substr(cmt091r);
+                                    n091r = n091r.substr(0, cmt091r);
+                                }
+                                while (!n091r.empty() && (n091r.back() == ' ' || n091r.back() == '\t')) {
+                                    n091r.pop_back();
+                                }
+                                if (n091r.rfind("me->", 0) == 0) n091r = n091r.substr(4);
+                                else if (n091r.size() > 4 && n091r[0] == '(' && n091r[1] == '*'
+                                         && n091r.back() == ')') {
+                                    n091r = n091r.substr(2, n091r.size() - 3);
+                                }
+                                std::string ln091r = Symbol::toLower(n091r);
+                                if (knownVariantVars_.count(ln091r)
+                                    || classVariantFields_.count(ln091r)) {
+                                    return true;
+                                }
+                                return false;
+                            };
+
+                            for (size_t j = 0; j < call.positional.size(); j++) {
+                                emitExpr(*call.positional[j]);
+                                std::string val = std::move(lastExpr_);
+
+                                // COM属性读取 (P6.2): isComMarker_标志
+                                if (isComMarker_) {
+                                    isComMarker_ = false;
+                                    // 使用一体化函数, 内部处理VARIANT清理
+                                    std::string comPropCall = "vb6_ComGetStringProp(" + comObjExpr_ + ", L\"" + comMemberName_ + "\")";
+                                    c_.emitLine("{");
+                                    c_.indent();
+                                    c_.emitLine("wchar_t* _dbg_com_bstr = " + comPropCall + ";");
+                                    c_.emitLine("vb6_DebugWriteBSTR(_dbg_com_bstr);");
+                                    c_.emitLine("vb6_BSTR_Free(_dbg_com_bstr);");
+                                    c_.dedent();
+                                    c_.emitLine("}");
+                                    comObjExpr_.clear();
+                                    comMemberName_.clear();
+                                    continue;
+                                }
+
+                                if (isBstrExpr(val)) {
+                                    // 已经是BSTR, 直接输出
+                                    c_.emitLine("vb6_DebugWriteBSTR(" + val + ");");
+                                } else if (isDoubleExpr(val)) {
+                                    // 浮点数, 用DebugWriteDouble输出
+                                    c_.emitLine("vb6_DebugWriteDouble((double)(" + val + "));");
+                                } else if (isVariantVal091r(val)) {
+                                    // Fix 090x: Debug.Print x (x As Variant 变量 /
+                                    // Variant 表达式) — 运行时值按字符串输出. 此前落入
+                                    // DebugWriteLong((int32_t)(x)) → C2440 (无法从
+                                    // vb6_VARIANT 转换 int32_t).
+                                    // Fix 091r: 判定改用 isVariantVal091r (含
+                                    // knownVariantVars_/类字段 兜底).
+                                    c_.emitLine("vb6_DebugWriteBSTR(vb6_VariantToString(" + val + "));");
+                                } else {
+                                    // 整数/布尔值, 用DebugWriteLong输出
+                                    c_.emitLine("vb6_DebugWriteLong((int32_t)(" + val + "));");
+                                }
+                            }
+                            c_.emitLine("vb6_DebugWriteNewline();");
+                        }
+                        return;
+                    }
+            }
+        }
+    }
+
+        // Fix 015: 标记 callee 上下文, 让 visit(MemberAccessExpr) 的 Fix 015 路径
+        // 把链式对象参数通过 pendingChainObj_ 交付, 而不是直接合成 func(wrappedObj)
+        // (那样会让下面的 bare-call 判定 callExpr.find('(') != npos 错过 padding).
+        pendingChainObj_.clear();
+        bool savedAsCallCallee = asCallCallee_;
+        asCallCallee_ = true;
+        emitExpr(*node.callee);
+        asCallCallee_ = savedAsCallCallee;
+        // 语句级调用: 确保表达式被求值(即使是void调用)
+        // 如果结果是函数名(不含括号), 自动添加()调用
+        std::string callExpr = lastExpr_;
+
+        // COM调用检测 (P6.2): isComMarker_标志
+        if (isComMarker_) {
+            isComMarker_ = false;
+            // Fix 086: 无括号的控件方法调用 (List1.Clear) — 与 IndexOrCallExpr
+            // 的 P13.3 处理一致, 生成 vb6_ClearList(vb6_hwnd_Listx), 而非
+            // vb6_ComCall(list1,...) 裸控制名 (C2065).
+            auto itCtrlCS = knownFormControls_.find(comObjExpr_);
+            if (itCtrlCS != knownFormControls_.end()
+                && (itCtrlCS->second == FrmControlType::ListBox
+                    || itCtrlCS->second == FrmControlType::ComboBox)
+                && Symbol::toLower(comMemberName_) == "clear") {
+                std::string ctrlNameCS = cIdent(knownFormControlOriginalNames_.count(comObjExpr_)
+                    ? knownFormControlOriginalNames_[comObjExpr_] : comObjExpr_);
+                comObjExpr_.clear();
+                comMemberName_.clear();
+                c_.emitLine("vb6_ClearList((void*)vb6_hwnd_" + ctrlNameCS + ");  /* ListBox.Clear */");
+                return;
+            }
+            // 无括号的COM方法调用: obj.Method → vb6_ComCall(obj, L"Method", NULL, 0)
+            callExpr = "vb6_ComCall(" + comObjExpr_ + ", L\"" + comMemberName_ + "\", NULL, 0)";
+            comObjExpr_.clear();
+            comMemberName_.clear();
+        } else if (callExpr == "0") {
+            // M22: void function call returned 0 (no-value), discard entire statement
+            return;
+        } else if (callExpr.find('(') == std::string::npos) {
+            // Fix 010m: Bare call (no parentheses) — build complete arg list
+            // Handle: me-prepend for class methods, ParamArray, Optional padding, _has_ flags
+            bool calleeHasPA = false;
+            std::vector<ParameterInfo> calleeParams;
+            // Fix 030b: 跟踪 builtin 状态 — builtin 跳过 padding/IsMissing 尾叜
+            bool calleeIsBuiltin = false;
+
+            if (node.callee && node.callee->kind == ASTNodeKind::IdentifierExpr) {
+                auto& idExpr = static_cast<IdentifierExpr&>(*node.callee);
+                Symbol* sym = symTab_.lookupModule(idExpr.name);
+                if (!sym || (sym->kind != SymbolKind::Sub && sym->kind != SymbolKind::Function
+                    && sym->kind != SymbolKind::PropertyGet && sym->kind != SymbolKind::PropertyLet
+                    && sym->kind != SymbolKind::PropertySet)) {
+                    sym = symTab_.lookup(idExpr.name);
+                }
+                if (sym && (sym->kind == SymbolKind::Sub || sym->kind == SymbolKind::Function
+                    || sym->kind == SymbolKind::PropertyGet || sym->kind == SymbolKind::PropertyLet
+                    || sym->kind == SymbolKind::PropertySet)) {
+                    calleeParams = sym->params;
+                    calleeIsBuiltin = sym->isBuiltin;
+                }
+            }
+            // Fix 015: Call X.Y(args).Z (无尾括号) 形态下 node.callee 是 .Z MemberAccessExpr.
+            // 此时 Fix 015 emit 出的 lastExpr_ 是裸函数名 "vb6_cDataBase_Exec",
+            // 对象参数通过 pendingChainObj_ 传递. 这里需要按成员名查找参数签名,
+            // 才能正确填充 Optional 默认参数.
+            else if (node.callee && node.callee->kind == ASTNodeKind::MemberAccessExpr) {
+                auto& maExpr = static_cast<MemberAccessExpr&>(*node.callee);
+                Symbol* sym = symTab_.lookupModule(maExpr.memberName);
+                if (sym && (sym->kind == SymbolKind::Sub || sym->kind == SymbolKind::Function
+                    || sym->kind == SymbolKind::PropertyGet || sym->kind == SymbolKind::PropertyLet
+                    || sym->kind == SymbolKind::PropertySet)) {
+                    calleeParams = sym->params;
+                    calleeIsBuiltin = sym->isBuiltin;
+                }
+                // Fix 084y-3: 链式调用对象方法时 (X.Y(args).Z), .Z 是类方法而非
+                // 模块成员, lookupModule 必然失败 → calleeParams 为空 → 不填充
+                // Optional 默认值 → C2198 参数太少 (如 Exec(Optional RecordsAffected,
+                // Optional Options As Long = -1) 声明5参却只传对象1参).
+                // 用 inferClassTypeOfExpr 推断对象类 (X.Y(args) → cDataBase),
+                // 再按类方法签名取形参表.
+                if (calleeParams.empty() && maExpr.object) {
+                    std::string chainClass = inferClassTypeOfExpr(*maExpr.object);
+                    if (!chainClass.empty()) {
+                        std::vector<ParameterInfo> clsParams;
+                        bool clsBuiltin = false;
+                        if (findClassMemberCallParams(chainClass, maExpr.memberName,
+                                                      clsParams, clsBuiltin)) {
+                            calleeParams = clsParams;
+                            calleeIsBuiltin = clsBuiltin;
+                        }
+                    }
+                }
+            }
+            // Fix 090s: With 块内无括号类方法调用 (.Start — callee=WithMemberExpr,
+            // callExpr 裸函数名, 与 Fix 015 MAE 同协议). visit(WithMemberExpr)
+            // asCallCallee_ 已不再拼完整调用而是交付 pendingChainObj_ → 此处
+            // 解析形参表才能做 Optional padding, 否则 .Start 声明带 4 个
+            // Optional 参只传 this → C2198 参数太少.
+            else if (node.callee && node.callee->kind == ASTNodeKind::WithMemberExpr) {
+                auto& wmExpr90s = static_cast<WithMemberExpr&>(*node.callee);
+                if (!withObjectInfoStack_.empty()) {
+                    const auto& wmInfo90s = withObjectInfoStack_.back();
+                    if (wmInfo90s.kind == WithObjKind::ClassInstance
+                        && !wmInfo90s.className.empty()) {
+                        std::vector<ParameterInfo> wmParams90s;
+                        bool wmBuiltin90s = false;
+                        if (findClassMemberCallParams(wmInfo90s.className,
+                                                      wmExpr90s.memberName,
+                                                      wmParams90s, wmBuiltin90s)) {
+                            calleeParams = wmParams90s;
+                            calleeIsBuiltin = wmBuiltin90s;
+                        }
+                    }
+                }
+            }
+
+            // Check for ParamArray
+            int paIndex = -1;
+            for (size_t i = 0; i < calleeParams.size(); i++) {
+                if (calleeParams[i].isParamArray) { paIndex = (int)i; calleeHasPA = true; break; }
+            }
+
+            // P6.6: 类模块中调用同类方法, 需要自动添加me作为第一个参数
+            std::string bareArgList;
+            if (isClassModule_ && currentProc_) {
+                std::string modPrefix = "vb6_" + cIdent(moduleName_) + "_";
+                if (callExpr.find(modPrefix) == 0) {
+                    bareArgList = "(void*)me";
+                }
+            }
+
+            // Fix 015: 链式调用对象参数前置 — 由 visit(MemberAccessExpr).Fix015 交付
+            if (!pendingChainObj_.empty()) {
+                if (!bareArgList.empty()) bareArgList += ", ";
+                bareArgList += pendingChainObj_;
+                pendingChainObj_.clear();
+            }
+
+            if (calleeHasPA) {
+                // ParamArray: pass NULL SAFEARRAY*
+                if (!bareArgList.empty()) bareArgList += ", ";
+                bareArgList += "NULL";
+            } else if (calleeParams.size() > 0 && !calleeIsBuiltin) {
+                // Pad all params with default values (bare call = 0 args)
+                // Fix 030b: builtin 跳过 padding/IsMissing 路径 (RTL C 签名不接受尾叜)
+                for (size_t i = 0; i < calleeParams.size(); i++) {
+                    const auto& param = calleeParams[i];
+                    if (!bareArgList.empty()) bareArgList += ", ";
+                    std::string defVal;
+                    if (param.hasDefaultValue && !param.defaultValueExpr.empty()) {
+                        defVal = param.defaultValueExpr;
+                    } else {
+                        defVal = defaultValue(param.type);
+                    }
+                    if (param.isByVal) {
+                        bareArgList += defVal;
+                    } else {
+                        // ByRef: pass address of compound literal
+                        std::string cType = mapType(param.type);
+                        if (param.type == Vb6Type::Variant || param.type == Vb6Type::Empty ||
+                            param.type == Vb6Type::Null || param.type == Vb6Type::Object) {
+                            bareArgList += "&(" + cType + "){0}";
+                        } else {
+                            bareArgList += "&(" + cType + "){" + defVal + "}";
+                        }
+                    }
+                }
+                // Append _has_ flags for Optional params (all 0 since none passed)
+                for (size_t i = 0; i < calleeParams.size(); i++) {
+                    if (calleeParams[i].isOptional && !calleeParams[i].isParamArray) {
+                        if (!bareArgList.empty()) bareArgList += ", ";
+                        bareArgList += "0";
+                    }
+                }
+            }
+            // Fix 034: Builtin Sub statements with Optional ByVal 参 — 硬编码补默认值.
+            // calleeParams 未注册的 builtin (如 Randomize), bare-call 无参时补默认值.
+            // Randomize([seed]) — RTL vb6_Randomize(double seed); 不传参时 seed=0.0.
+            if (callExpr == "vb6_Randomize" && bareArgList.empty()) {
+                bareArgList = "0.0";
+            }
+            callExpr += "(" + bareArgList + ")";
+        }
+
+        // Fix 090g: fallback 合成 (visit MemberAccessExpr asCallCallee_ → func(obj)
+        // 完整调用) 产生的单 this 语句调用 — 无括号 MAE 语句 (如 Response.State403,
+        // State403 声明 (Optional Say As String) → C 签名 (me, BSTR*, int _has_Say)),
+        // callExpr 只含 this → C2198 参数太少. 检测括号内无顶层逗号 (单 this
+        // 实参, 用户实参由 IndexOrCallExpr 承载不会以 MAE 形态到此) 后按形参表
+        // 重建: this + 各形参默认值 + Optional _has_ 标志 (同 bare-call padding).
+        if (node.callee && node.callee->kind == ASTNodeKind::MemberAccessExpr) {
+            auto& maExpr090g = static_cast<MemberAccessExpr&>(*node.callee);
+            std::string cls090g = inferClassTypeOfExpr(*maExpr090g.object);
+            std::vector<ParameterInfo> params090g;
+            bool builtin090g = false;
+            if (!cls090g.empty()
+                && findClassMemberCallParams(cls090g, maExpr090g.memberName,
+                                             params090g, builtin090g)
+                && !params090g.empty() && !builtin090g) {
+                size_t p090g = callExpr.find('(');
+                if (p090g != std::string::npos && callExpr.size() >= 3
+                    && callExpr.back() == ')') {
+                    bool topComma090g = false;
+                    int depth090g = 0;
+                    for (size_t k090g = p090g; k090g < callExpr.size(); k090g++) {
+                        char ch090g = callExpr[k090g];
+                        if (ch090g == '(') depth090g++;
+                        else if (ch090g == ')') {
+                            depth090g--;
+                            if (depth090g == 0) break;
+                        } else if (ch090g == ',' && depth090g == 1) {
+                            topComma090g = true;
+                            break;
+                        }
+                    }
+                    if (!topComma090g) {
+                        std::string thisArg090g = callExpr.substr(p090g + 1,
+                                                                  callExpr.size() - p090g - 2);
+                        std::string fullArg090g = thisArg090g;
+                        bool anyPad090g = false;
+                        for (size_t i090g = 0; i090g < params090g.size(); i090g++) {
+                            const auto& prm090g = params090g[i090g];
+                            if (prm090g.isParamArray) continue;
+                            std::string defVal090g;
+                            if (prm090g.hasDefaultValue && !prm090g.defaultValueExpr.empty()) {
+                                defVal090g = prm090g.defaultValueExpr;
+                            } else {
+                                defVal090g = defaultValue(prm090g.type);
+                            }
+                            if (prm090g.isByVal) {
+                                fullArg090g += ", " + defVal090g;
+                            } else {
+                                std::string cT090g = mapType(prm090g.type);
+                                if (prm090g.type == Vb6Type::Variant
+                                    || prm090g.type == Vb6Type::Empty
+                                    || prm090g.type == Vb6Type::Null
+                                    || prm090g.type == Vb6Type::Object) {
+                                    fullArg090g += ", &(" + cT090g + "){0}";
+                                } else {
+                                    fullArg090g += ", &(" + cT090g + "){" + defVal090g + "}";
+                                }
+                            }
+                            anyPad090g = true;
+                        }
+                        for (size_t i090g = 0; i090g < params090g.size(); i090g++) {
+                            if (params090g[i090g].isOptional
+                                && !params090g[i090g].isParamArray) {
+                                fullArg090g += ", 0";
+                            }
+                        }
+                        if (anyPad090g) {
+                            callExpr = callExpr.substr(0, p090g) + "("
+                                       + fullArg090g + ")";
+                        }
+                    }
+                }
+            }
+        }
+
+        if (callExpr.find("vb6_ComCall(") == 0) {
+            // ComCall返回可能含对象的VARIANT*, 用VarFree避免Release对象
+            c_.emitLine("vb6_ComVarFree((void*)" + callExpr + ");  /* COM call, discard result */");
+        } else if (callExpr.find("vb6_ComGetProp(") == 0) {
+            c_.emitLine("vb6_ComVarClear((void*)" + callExpr + ");  /* COM prop get, discard result */");
+        } else {
+            c_.emitLine(callExpr + ";");
+        }
+
+        // M22: ANSI临时变量释放由emitStmtList统一处理, 此处不再单独清理
+    }
+}
+
+void CCodeGen::visit(ReDimStmt& node) {
+    // Fix 084y-5: ReDim 目标含成员访问 (ByRef UDT 参数数组字段 uOutput.Buffer,
+    // With 块成员 .Field) 时按成员访问展开, 避免 cIdent 把 '.' 替换成 '_'
+    std::string cName = resolveArrayTargetIdent(node.varName);
+    // Fix 010r: Add me-> prefix for class member arrays
+    std::string lowerVar = node.varName;
+    std::transform(lowerVar.begin(), lowerVar.end(), lowerVar.begin(), ::tolower);
+    // Fix 086: ReDim 目标是当前 Function/PropertyGet 自身名 → 返回值变量
+    // (VB6: 数组返回函数内 ReDim Preserve FuncName(...) 重设返回数组.
+    //  此前生成裸函数名 → C2065, 如 cMemoryStream.Contents / cImage.PictureToBytes)
+    if (currentProc_ && !currentReturnVar_.empty()
+        && (currentProc_->kind == SymbolKind::Function
+            || currentProc_->kind == SymbolKind::PropertyGet)
+        && Symbol::toLower(currentProc_->name) == lowerVar
+        && !knownLocalVars_.count(lowerVar)) {
+        cName = currentReturnVar_;
+        lowerVar = currentReturnVar_;
+    }
+    if (isClassModule_ && classMemberVars_.count(lowerVar) && !knownLocalVars_.count(lowerVar)) {
+        cName = "me->" + cName;
+    }
+    // Fix 010r-6 rev2: ByRef array param in ReDim needs (*name) since it's vb6_SafeArray1D**
+    // Fix 084o-6: ByRef Variant 参数也是 vb6_VARIANT*, 同样需要 (*name)
+    // (VB6 允许 As Variant 参数后接 ReDim 变数组, 如 cZipArchive.Extract 的
+    // OutputTarget As Variant → ReDim OutputTarget(...) As Byte)
+    if (currentProc_) {
+        for (auto& param : currentProc_->params) {
+            std::string paramLower = param.name;
+            std::transform(paramLower.begin(), paramLower.end(), paramLower.begin(), ::tolower);
+            if (paramLower == lowerVar && !param.isByVal
+                && ((static_cast<uint16_t>(param.type) & static_cast<uint16_t>(Vb6Type::Array))
+                    || param.type == Vb6Type::Variant)) {
+                cName = "(*" + cName + ")";
+                break;
+            }
+        }
+    }
+    // Fix 061: With块内 ReDim .Data(...) → _vb6_with_N.Data
+    // parser 在 varName 前加了 '.' 前缀表示 With 成员引用 (e.g. ".Data")
+    if (node.varName.size() > 1 && node.varName[0] == '.'
+        && !withObjectVars_.empty() && !withObjectInfoStack_.empty()) {
+        std::string memberName = node.varName.substr(1);  // strip leading '.'
+        const auto& info = withObjectInfoStack_.back();
+        if (info.kind == WithObjKind::Unknown) {
+            // Fix 081j-2: UDT With block 临时变量是指针，用 -> 访问成员
+            cName = withObjectVars_.back() + "->" + cIdent(memberName);
+        } else if (info.kind == WithObjKind::ClassInstance) {
+            // Class With block: _vb6_with_N->member
+            cName = withObjectVars_.back() + "->" + cIdent(memberName);
+        }
+    }
+    Vb6Type elemType = resolveArrayElemType(node.asType.get());
+    std::string saElemType = mapSaElemType(elemType);
+    // Bug4-Fix: UDT数组需使用vb6_SafeArrayReDim1D_Udt
+    std::string udtCType = resolveArrayUdtElemCType(node.asType.get());
+    bool isUdtArray = !udtCType.empty();
+
+    // Fix 084a/090m: ReDim 目标是否为 Variant 数组 — 逻辑见成员函数 isVariantArrayTarget
+    auto isVariantArrayVar = [&](const std::string& nm) -> bool { return isVariantArrayTarget(nm); };
+
+    if (node.dimensions.empty()) return;
+
+    int dimCount = (int)node.dimensions.size();
+
+    if (dimCount == 1) {
+        // 涓€缁?ReDim (淇濇寔鍘熸湁1D浠ｇ爜)
+        auto& dim = node.dimensions[0];
+        std::string lBound = "0";
+        std::string uBound = "0";
+        if (dim.lower) {
+            emitExpr(*dim.lower);
+            lBound = std::move(lastExpr_);
+        }
+        if (dim.upper) {
+            emitExpr(*dim.upper);
+            uBound = std::move(lastExpr_);
+        }
+
+        if (node.preserve) {
+            // Fix 084a: Variant 数组 ReDim Preserve — 实参提取 SafeArray, 结果包装回 Variant
+            std::string callArg = cName;
+            std::string assignVal;
+            if (isVariantArrayVar(cName)) {
+                callArg = "vb6_VariantToSafeArray1D(" + cName + ")";
+                assignVal = "vb6_VariantFromValue(vb6_SafeArrayReDimPreserve1D(" + callArg + ", " + lBound + ", " + uBound + "))";
+            } else {
+                assignVal = "vb6_SafeArrayReDimPreserve1D(" + callArg + ", " + lBound + ", " + uBound + ")";
+            }
+            c_.emitLine(cName + " = " + assignVal + ";");
+        } else {
+            // Fix 084a: Variant 数组非 preserve ReDim — 先销毁提取出的 SafeArray, 再包装新数组回 Variant
+            std::string destroyArg = cName;
+            if (isVariantArrayVar(cName)) destroyArg = "vb6_VariantToSafeArray1D(" + cName + ")";
+            c_.emitLine("vb6_SafeArrayDestroy1D(" + destroyArg + ");");
+            std::string newVal;
+            if (isUdtArray) {
+                // Bug4-Fix: UDT数组使用_Udt版本，传入sizeof(UDT类型)
+                newVal = "vb6_SafeArrayReDim1D_Udt((int32_t)sizeof(" + udtCType + "), " + lBound + ", " + uBound + ")";
+            } else {
+                newVal = "vb6_SafeArrayReDim1D(" + saElemType + ", " + lBound + ", " + uBound + ")";
+            }
+            if (isVariantArrayVar(cName)) newVal = "vb6_VariantFromValue(" + newVal + ")";
+            c_.emitLine(cName + " = " + newVal + ";");
+        }
+    } else {
+        // P8.1: 多维 ReDim
+        // Use raw variable name for boundsVar (must be a valid C identifier)
+        std::string rawCName = cIdent(node.varName);
+        if (isClassModule_ && classMemberVars_.count(lowerVar) && !knownLocalVars_.count(lowerVar)) {
+            rawCName = "me_" + rawCName;
+        }
+        std::string boundsVar = "_redim_bounds_" + rawCName;
+        c_.emitLine("vb6_SafeArrayBound " + boundsVar + "[] = {");
+        c_.indent();
+        for (int d = 0; d < dimCount; d++) {
+            auto& dim = node.dimensions[d];
+            std::string lb = "0", ub = "0";
+            if (dim.lower) { emitExpr(*dim.lower); lb = std::move(lastExpr_); }
+            if (dim.upper) { emitExpr(*dim.upper); ub = std::move(lastExpr_); }
+            std::string trailing = (d < dimCount - 1) ? "," : "";
+            // vb6_SafeArrayBound = {lLbound, cElements}
+            // cElements = uBound - lBound + 1 (VB6 "0 To 3" has 4 elements)
+            c_.emitLine("{" + lb + ", (" + ub + " - " + lb + " + 1)}" + trailing);
+        }
+        c_.dedent();
+        c_.emitLine("};");
+        // Fix 084a: Variant 多维数组 ReDim — 实参提取 SafeArray, 结果包装回 Variant
+        std::string redimArg = cName;
+        std::string wrapBack = "";
+        if (isVariantArrayVar(cName)) {
+            redimArg = "vb6_VariantToSafeArray1D(" + cName + ")";
+            wrapBack = "vb6_VariantFromValue(";
+        }
+        if (node.preserve) {
+            std::string res = "vb6_SafeArrayReDimPreserveND((vb6_SafeArrayND*)" + redimArg + ", " + std::to_string(dimCount) + ", " + boundsVar + ")";
+            if (!wrapBack.empty()) res = wrapBack + res + ")";
+            c_.emitLine(cName + " = (vb6_SafeArray1D*)" + res + ";");
+        } else {
+            std::string destroyArg = redimArg;
+            c_.emitLine("vb6_SafeArrayDestroyND((vb6_SafeArrayND*)" + destroyArg + ");");
+            std::string newVal;
+            if (isUdtArray) {
+                // Bug4-Fix: UDT多维数组使用_Udt版本，传入sizeof(UDT类型)
+                newVal = "vb6_SafeArrayReDimND_Udt((int32_t)sizeof(" + udtCType + "), " + std::to_string(dimCount) + ", " + boundsVar + ")";
+            } else {
+                newVal = "vb6_SafeArrayReDimND(" + saElemType + ", " + std::to_string(dimCount) + ", " + boundsVar + ")";
+            }
+            if (!wrapBack.empty()) newVal = wrapBack + newVal + ")";
+            c_.emitLine(cName + " = (vb6_SafeArray1D*)" + newVal + ";");
+        }
+
+        // 鏇存柊鏁扮粍缁村害淇℃伅
+        std::string lower = node.varName;
+        std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+        arrayDimCounts_[lower] = dimCount;
+    }
+}
+
+void CCodeGen::visit(EraseStmt& node) {
+    for (auto& name : node.varNames) {
+        // Fix 084y-5: Erase 目标含成员访问 (With 块成员 .Field, ByRef UDT 参数
+        // 数组字段) 时按成员访问展开, 避免 cIdent 把 '.' 替换成 '_' 生成
+        // 未声明的单标识符 (_RemoteLegacyNextTrafficKey / uOutput_Buffer → C2065)
+        std::string cName = resolveArrayTargetIdent(name);
+        // Fix 010r: Add me-> prefix for class member arrays
+        std::string lower = name;
+        std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+        if (isClassModule_ && classMemberVars_.count(lower) && !knownLocalVars_.count(lower)) {
+            cName = "me->" + cName;
+        }
+        // Fix 090p: UDT 的 As Variant 数组字段 (如 (*uFile).BufferArray) Erase —
+        // 裸 vb6_SafeArrayDestroy1D((*uFile).BufferArray) 把 VARIANT 当 SafeArray* →
+        // C2440; 用 vb6_VariantClear 释放数组并置 VT_EMPTY (cZipArchive pvVfsSetEof)
+        if (isVariantArrayTarget(name)) {
+            c_.emitLine("vb6_VariantClear(&" + cName + ");");
+            continue;
+        }
+        // P8.1: 根据维度数选择1D/ND销毁
+        auto it = arrayDimCounts_.find(lower);
+        if (it != arrayDimCounts_.end() && it->second > 1) {
+            c_.emitLine("vb6_SafeArrayDestroyND((vb6_SafeArrayND*)" + cName + "); " + cName + " = NULL;");
+        } else {
+            c_.emitLine("vb6_SafeArrayDestroy1D(" + cName + "); " + cName + " = NULL;");
+        }
+    }
+}
+
+
+} // namespace vb6c3

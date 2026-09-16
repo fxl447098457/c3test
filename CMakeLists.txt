@@ -87,6 +87,9 @@ add_library(vb6c3-cgen STATIC
     src/backend/cgen_base.cpp
     src/backend/cgen_expr.cpp
     src/backend/cgen_stmt.cpp
+    src/backend/cgen_assign.cpp
+    src/backend/cgen_call.cpp
+    src/backend/cgen_file_io.cpp
     src/backend/cgen_decl.cpp
     src/backend/cgen_com.cpp
     src/backend/cgen_form.cpp
