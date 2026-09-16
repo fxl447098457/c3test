@@ -1379,6 +1379,19 @@ void CCodeGen::visit(UnaryExpr& node) {
             // Fix 067: vb6_ComGetObjectProp 返回 void*, 不能直接取反
             if (operand.find("vb6_ComGetObjectProp(") == 0) {
                 lastExpr_ = "(-(intptr_t)(" + operand + "))";
+            } else if (operand.find("vb6_ComGetStringProp(") == 0) {
+                // Fix 092r: COM 对象属性默认按字符串读取 (属性类型未知回退
+                // BSTR) 且一元取负 → 生成 -BSTR (C2171). 改为按 Long 数值属性
+                // 重读再取负. 例: QRCodegenResizePicture 中 -pPicture.Height.
+                // substr 剥离 "vb6_ComGetStringProp(" 前缀, 保留 "obj, L\"Prop\""
+                // 实参串给签名一致的 vb6_ComGetIntProp.
+                std::string inner092r = operand.substr(std::strlen("vb6_ComGetStringProp("));
+                if (!inner092r.empty() && inner092r.back() == ')') inner092r.pop_back();
+                lastExpr_ = "(-vb6_ComGetIntProp(" + inner092r + "))";
+            } else if (operand.find("vb6_VariantFromComResult(") == 0) {
+                // Fix 092r: 晚绑定 COM 属性读取结果 (vb6_VARIANT) 取负 →
+                // -(vb6_VARIANT) C2440. 先转数值再取负.
+                lastExpr_ = "(-vb6_VariantToDouble(" + operand + "))";
             } else {
                 lastExpr_ = "(-" + operand + ")";
             }
@@ -5120,7 +5133,11 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
                     // 数组参数: 从 Variant 提取 SafeArray1D*
                     argVal = "vb6_VariantToSafeArray1D(" + argVal + ")";
                 } else if (paramBase == Vb6Type::Long || paramBase == Vb6Type::Integer
-                           || paramBase == Vb6Type::Byte || paramBase == Vb6Type::Boolean) {
+                           || paramBase == Vb6Type::Byte || paramBase == Vb6Type::Boolean
+                           || paramBase == Vb6Type::LongPtr || paramBase == Vb6Type::ULong) {
+                    // Fix 092q: LongPtr (intptr_t) / ULong ByVal 形参接收 COM 属性
+                    // Variant 时也需提取为数值 — 缺此项导致 C2440
+                    // (vb6_VARIANT → intptr_t), 如 SelectObject(hDC, pPicture.Handle).
                     argVal = "vb6_VariantToLong(" + argVal + ")";
                 } else if (paramBase == Vb6Type::Double || paramBase == Vb6Type::Single
                            || paramBase == Vb6Type::Currency || paramBase == Vb6Type::Date) {
