@@ -1852,6 +1852,47 @@ void CCodeGen::visit(SetStmt& node) {
         value = "vb6_VariantFromValue(" + value + ")";
     }
 
+    // Fix 098: Set 左值是函数调用表达式 → 非左值 (C2106), 且多半缺参 (C2198).
+    // VB6 语义: Set FnName = obj 在 FnName 不是当前函数自身时, 是对**别的函数
+    // 返回值变量**的误写, VB6 编译器接受但赋值不改变本函数返回值. 等效生成:
+    // 求值 RHS 后丢弃 (语义 = 该 Set 不影响任何可见状态).
+    // 来源: ToolsJs.NewObj 内 "Set NewArr = MSSC.Eval(\"{};\")" (vbman 源码
+    // 疑似笔误, NewArr 是 ParamArray 函数, 生成为 vb6_ToolsJs_NewArr() = ...)
+    // → C2198+C2106 (ToolsJs.c:45).
+    // 注: 左值 = 当前函数名时 M22 判定已在 emitExpr(IdentifierExpr) 转为
+    // currentReturnVar_ (vb6_ret_NewObj), 不会落入本分支.
+    {
+        bool targetIsCallExpr = !target.empty() && target.back() == ')'
+            && target.find('(') != std::string::npos
+            && target.compare(0, 4, "me->") != 0
+            && target.find("->") == std::string::npos
+            && target.find(".") == std::string::npos
+            && target.find("[") == std::string::npos
+            && target.find("VB6_SA_AT(") != 0
+            && target.find("vb6_VariantArrayGet(") != 0
+            && target.find("vb6_PA_Get") != 0
+            && target.find("prop_get_") == std::string::npos
+            && target.find("prop_let_") == std::string::npos
+            && target.find("prop_set_") == std::string::npos;
+        if (targetIsCallExpr) {
+            // 左括号前必须全是标识符字符 (排除 wb6_ComCall(...) 等包装调用已
+            // 由前面的 tryRewriteCOMLvalue/链式写分支处理的情况兜底)
+            size_t lp = target.find('(');
+            bool isPlainFn = true;
+            for (size_t ci = 0; ci < lp; ci++) {
+                char ch = target[ci];
+                if (!std::isalnum(static_cast<unsigned char>(ch)) && ch != '_') {
+                    isPlainFn = false;
+                    break;
+                }
+            }
+            if (isPlainFn && lp > 0 && target.compare(0, 4, "vb6_") == 0) {
+                c_.emitLine("(void)(" + value + ");  /* Set to non-lvalue function ref (Fix 098, VB6 no-op) */");
+                return;
+            }
+        }
+    }
+
     c_.emitLine(target + " = " + value + ";  /* Set */");
 
     // P6.5: WithEvents变量事件连接
