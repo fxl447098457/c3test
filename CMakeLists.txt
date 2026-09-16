@@ -88,7 +88,15 @@ add_library(vb6c3-cgen STATIC
     src/backend/cgen_expr.cpp
     src/backend/cgen_stmt.cpp
     src/backend/cgen_assign.cpp
+    src/backend/cgen_setlet.cpp
+    src/backend/cgen_control.cpp
+    src/backend/cgen_loop.cpp
+    src/backend/cgen_select.cpp
+    src/backend/cgen_with.cpp
+    src/backend/cgen_jumps.cpp
+    src/backend/cgen_localdecl.cpp
     src/backend/cgen_call.cpp
+    src/backend/cgen_redim.cpp
     src/backend/cgen_file_io.cpp
     src/backend/cgen_decl.cpp
     src/backend/cgen_com.cpp
