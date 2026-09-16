@@ -1173,7 +1173,13 @@ void CCodeGen::visit(BinaryExpr& node) {
                 case BinaryOp::Ge:cmpOp = ">= 0"; break;
                 default: cmpOp = "== 0"; break;
             }
-            lastExpr_ = "(vb6_StrCmp(" + left + ", " + right + ") " + cmpOp + ")";
+            // Fix 092v: VB6 比较运算结果是 Boolean (-1/0), 不是 C 的 0/1.
+            // `(vb6_StrCmp(...) == 0)` 是 C 关系比较 → 0/1; 取负转 -1/0,
+            // 保证上层 `Not`(位反) 与 And/Xor 等与 VB6 一致.
+            // 例: pvApplyMask 的 If Not pvGetModuleBounded(...) (返回 0/1 的
+            // Boolean) 在功能模块上 ~1 = -2 恒真 → 错误 mask. 转 -1/0 后
+            // ~(-1) = 0 正确跳过.
+            lastExpr_ = "(-(vb6_StrCmp(" + left + ", " + right + ") " + cmpOp + "))";
             return;
         }
     }
@@ -1231,7 +1237,8 @@ void CCodeGen::visit(BinaryExpr& node) {
                 case BinaryOp::Ge:  op = ">="; break;
                 default: op = "=="; break;
             }
-            lastExpr_ = "(" + left + " " + op + " " + right + ")";
+            // Fix 092v: LongPtr 关系比较同样产生 C 的 0/1 → 转 -1/0 (VB6 Boolean)
+            lastExpr_ = "(-(" + left + " " + op + " " + right + "))";
             return;
         }
         if (lt == Vb6Type::Variant || rt == Vb6Type::Variant) {
@@ -1366,7 +1373,17 @@ void CCodeGen::visit(BinaryExpr& node) {
 
     // VB6的And/Or/Not是逻辑运算也是位运算（取决于操作数类型）
     // 简化处理: 直接映射为C位运算, VB6语义兼容
-    lastExpr_ = "(" + left + " " + op + " " + right + ")";
+    // Fix 092v: VB6 关系比较 (=,<>,<,>,<=,>=,Is) 结果是 Boolean(-1/0),
+    // 而 C 原生比较得 0/1. 取负转 -1/0, 使上层 Not(位反)/And/Xor/算术
+    // 与 VB6 一致. 只有关系运算符需要转; 算术(+-*/等)保持原样.
+    static const std::unordered_set<std::string> relOps092v = {
+        "==", "!=", "<", ">", "<=", ">="
+    };
+    if (relOps092v.count(op)) {
+        lastExpr_ = "(-(" + left + " " + op + " " + right + "))";
+    } else {
+        lastExpr_ = "(" + left + " " + op + " " + right + ")";
+    }
 }
 
 void CCodeGen::visit(UnaryExpr& node) {
@@ -4930,12 +4947,86 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
                         std::string ct092l = "vb6_VARIANT";
                         if (i < calleeParams.size()) ct092l = mapType(calleeParams[i].type);
                         argVal = "(&(" + ct092l + "){0})";
+                    } else if (i < calleeParams.size()
+                               && !calleeParams[i].isByVal && !calleeParams[i].isParamArray
+                               && calleeParams[i].type == Vb6Type::Variant) {
+                        // Fix 092y: ByRef Variant 形参 + 简单标识符实参.
+                        // C 签名是 vb6_VARIANT*, 直接 &(BSTR) 会把字符串当 Variant
+                        // 解析 → 字段错位 → lDataLen=0、QR 段为空 (mdQRTest2_url).
+                        // 与 4972 M22 分支一致: 按实参 VB 类型构造字段式复合字面量.
+                        Vb6Type argVbType92y = inferExprType(*node.positional[i]);
+                        switch (argVbType92y) {
+                            case Vb6Type::String:
+                                argVal = "(&(vb6_VARIANT){.vt=VT_BSTR, .bstrVal=" + argVal + "})";
+                                break;
+                            case Vb6Type::Long:
+                            case Vb6Type::Integer:
+                                argVal = "(&(vb6_VARIANT){.vt=VT_I4, .lVal=(int32_t)(" + argVal + ")})";
+                                break;
+                            case Vb6Type::Double:
+                            case Vb6Type::Single:
+                                argVal = "(&(vb6_VARIANT){.vt=VT_R8, .dblVal=(double)(" + argVal + ")})";
+                                break;
+                            case Vb6Type::Boolean:
+                                argVal = "(&(vb6_VARIANT){.vt=VT_BOOL, .boolVal=(int16_t)(" + argVal + ")})";
+                                break;
+                            case Vb6Type::Byte:
+                                argVal = "(&(vb6_VARIANT){.vt=VT_UI1, .bVal=(uint8_t)(" + argVal + ")})";
+                                break;
+                            case Vb6Type::Date:
+                                argVal = "(&(vb6_VARIANT){.vt=VT_DATE, .dblVal=(double)(" + argVal + ")})";
+                                break;
+                            default:
+                                // Variant 变量 / UDT 字段 / 未知类型: 保持原样取址,
+                                // 值已是 vb6_VARIANT 且可寻址 &x 语义正确.
+                                argVal = "&" + argVal;
+                                break;
+                        }
                     } else {
                         argVal = "&" + argVal;
                     }
                 } else {
                     // 字面量或复杂表达式: 使用C11复合字面量
                     // &(int32_t){10} 或 &(double){3.14}
+                    // Fix 092z: 左值字段链 (With对象 _vb6_with_N->字段 / me->字段 /
+                    // 虚UDT字段) 也是可寻址左值 — 生成 &(字段链) 而非复合字面量.
+                    // With内 ByRef Long 字段 (QRCodegenMakeAlphanumeric 里
+                    // pvAppendBitsToBuffer ..., .Data, .BitLength) 若走复合字面量
+                    // 会复制字段值到临时 int32, 被调方 (*lBitLen)++ 只改临时体 →
+                    // 字段永不增长 → 位写入偏移全错 (HELLO WORLD 无法解码).
+                    bool isLvChain092z = !argVal.empty() && (std::isalpha(static_cast<unsigned char>(argVal[0])) || argVal[0] == '_');
+                    if (!isLvChain092z && argVal.size() > 2 && argVal[0] == '(' && argVal[1] == '*') {
+                        // Fix 090k: (*ptr)->field / (*ptr).field 解引用字段链也是左值
+                        int depth092z = 0;
+                        for (size_t ci092z = 0; ci092z < argVal.size(); ci092z++) {
+                            char c092z = argVal[ci092z];
+                            if (c092z == '(') depth092z++;
+                            else if (c092z == ')') {
+                                depth092z--;
+                                if (depth092z == 0) {
+                                    if (ci092z + 1 < argVal.size() &&
+                                        (argVal[ci092z + 1] == '.' ||
+                                         (argVal[ci092z + 1] == '-' && ci092z + 2 < argVal.size()
+                                          && argVal[ci092z + 2] == '>'))) {
+                                        isLvChain092z = true;
+                                    }
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    if (isLvChain092z) {
+                        for (size_t ci092z = 0; ci092z < argVal.size(); ci092z++) {
+                            char c092z = argVal[ci092z];
+                            if (std::isalnum(static_cast<unsigned char>(c092z)) || c092z == '_' || c092z == '.') continue;
+                            if (c092z == '-' && ci092z + 1 < argVal.size() && argVal[ci092z + 1] == '>') { ci092z++; continue; }
+                            isLvChain092z = false;
+                            break;
+                        }
+                    }
+                    if (isLvChain092z) {
+                        argVal = "&(" + argVal + ")";
+                    } else {
                     std::string cType = "int32_t";
                     if (i < calleeParams.size()) {
                         cType = mapType(calleeParams[i].type);
@@ -5029,6 +5120,7 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
                         // Fix 027b: 同样加外层括号防止预处理器把复合字面量 `{a, b}` 内的逗号算成宏实参分隔符.
                         argVal = "(&(" + cType + "){" + argVal + "})";
                     }
+                }
                 }
                 } // end Fix 072b else (As Any ByVal override)
                     } // end Fix 064 else

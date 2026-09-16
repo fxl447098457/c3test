@@ -4037,7 +4037,9 @@ static int32_t vb6_VarIsString(vb6_VARIANT* v) {
 
 int32_t vb6_VarCmpEq(vb6_VARIANT* a, vb6_VARIANT* b) {
     if (vb6_VarIsString(a) && vb6_VarIsString(b)) {
-        return (a->bstrVal && b->bstrVal) ? (wcscmp(a->bstrVal, b->bstrVal) == 0) : (a->bstrVal == b->bstrVal);
+        // Fix 092v: 字符串 Variant 比较统一返回 VB6 Boolean (-1/0), 与数值分支一致.
+        int eq = (a->bstrVal && b->bstrVal) ? (wcscmp(a->bstrVal, b->bstrVal) == 0) : (a->bstrVal == b->bstrVal);
+        return eq ? -1 : 0;
     }
     double da = vb6_VarToDouble_internal(a);
     double db = vb6_VarToDouble_internal(b);
@@ -4045,7 +4047,8 @@ int32_t vb6_VarCmpEq(vb6_VARIANT* a, vb6_VARIANT* b) {
 }
 int32_t vb6_VarCmpNe(vb6_VARIANT* a, vb6_VARIANT* b) {
     if (vb6_VarIsString(a) && vb6_VarIsString(b)) {
-        return (a->bstrVal && b->bstrVal) ? (wcscmp(a->bstrVal, b->bstrVal) != 0) : (a->bstrVal != b->bstrVal);
+        int ne = (a->bstrVal && b->bstrVal) ? (wcscmp(a->bstrVal, b->bstrVal) != 0) : (a->bstrVal != b->bstrVal);
+        return ne ? -1 : 0;
     }
     double da = vb6_VarToDouble_internal(a);
     double db = vb6_VarToDouble_internal(b);
@@ -4053,25 +4056,29 @@ int32_t vb6_VarCmpNe(vb6_VARIANT* a, vb6_VARIANT* b) {
 }
 int32_t vb6_VarCmpLt(vb6_VARIANT* a, vb6_VARIANT* b) {
     if (vb6_VarIsString(a) && vb6_VarIsString(b)) {
-        return (a->bstrVal && b->bstrVal) ? (wcscmp(a->bstrVal, b->bstrVal) < 0) : 0;
+        int lt = (a->bstrVal && b->bstrVal) ? (wcscmp(a->bstrVal, b->bstrVal) < 0) : 0;
+        return lt ? -1 : 0;
     }
     return (vb6_VarToDouble_internal(a) < vb6_VarToDouble_internal(b)) ? -1 : 0;
 }
 int32_t vb6_VarCmpGt(vb6_VARIANT* a, vb6_VARIANT* b) {
     if (vb6_VarIsString(a) && vb6_VarIsString(b)) {
-        return (a->bstrVal && b->bstrVal) ? (wcscmp(a->bstrVal, b->bstrVal) > 0) : 0;
+        int gt = (a->bstrVal && b->bstrVal) ? (wcscmp(a->bstrVal, b->bstrVal) > 0) : 0;
+        return gt ? -1 : 0;
     }
     return (vb6_VarToDouble_internal(a) > vb6_VarToDouble_internal(b)) ? -1 : 0;
 }
 int32_t vb6_VarCmpLe(vb6_VARIANT* a, vb6_VARIANT* b) {
     if (vb6_VarIsString(a) && vb6_VarIsString(b)) {
-        return (a->bstrVal && b->bstrVal) ? (wcscmp(a->bstrVal, b->bstrVal) <= 0) : 0;
+        int le = (a->bstrVal && b->bstrVal) ? (wcscmp(a->bstrVal, b->bstrVal) <= 0) : 0;
+        return le ? -1 : 0;
     }
     return (vb6_VarToDouble_internal(a) <= vb6_VarToDouble_internal(b)) ? -1 : 0;
 }
 int32_t vb6_VarCmpGe(vb6_VARIANT* a, vb6_VARIANT* b) {
     if (vb6_VarIsString(a) && vb6_VarIsString(b)) {
-        return (a->bstrVal && b->bstrVal) ? (wcscmp(a->bstrVal, b->bstrVal) >= 0) : 0;
+        int ge = (a->bstrVal && b->bstrVal) ? (wcscmp(a->bstrVal, b->bstrVal) >= 0) : 0;
+        return ge ? -1 : 0;
     }
     return (vb6_VarToDouble_internal(a) >= vb6_VarToDouble_internal(b)) ? -1 : 0;
 }
