@@ -2,7 +2,7 @@
 // P10 (restored): RTL is embedded as .c/.h SOURCE and compiled by MSVC
 // at user-program build time. The P11.3 pre-compiled .lib scheme was
 // reverted: c3 is open source, no source protection needed.
-// 6 .h headers + 15 .c sources (all arch-neutral) = 21 resources.
+// 7 .h headers + 25 .c sources (all arch-neutral) = 32 resources.
 // Runtime: FindResource/LoadResource extract to temp session directory
 // Paths relative to this RC file's location (src/driver/)
 
@@ -35,3 +35,16 @@
 118 RCDATA "../rtl/core/vb6com_wrap.c"
 119 RCDATA "../rtl/core/vb6com_sink.c"
 120 RCDATA "../rtl/core/vb6com_foreach.c"
+
+// vb6forms 按控件/窗体功能家族拆分 (P7): 内部共享头 + 各家族实现
+121 RCDATA "../rtl/core/vb6forms_internal.h"
+122 RCDATA "../rtl/core/vb6forms_ctrl.c"
+123 RCDATA "../rtl/core/vb6forms_list.c"
+124 RCDATA "../rtl/core/vb6forms_style.c"
+125 RCDATA "../rtl/core/vb6forms_scroll.c"
+126 RCDATA "../rtl/core/vb6forms_picture.c"
+127 RCDATA "../rtl/core/vb6forms_ctrlarr.c"
+128 RCDATA "../rtl/core/vb6forms_webview.c"
+129 RCDATA "../rtl/core/vb6forms_widget.c"
+130 RCDATA "../rtl/core/vb6forms_shape.c"
+131 RCDATA "../rtl/core/vb6forms_axsite.c"

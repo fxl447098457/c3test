@@ -1,5 +1,5 @@
 // P10 (restored): RTL runtime embedded resource management - implementation
-// Extract 6 .h headers + 15 .c sources from c3.exe RCDATA resources.
+// Extract 7 .h headers + 25 .c sources from c3.exe RCDATA resources.
 // The P11.3 pre-compiled .lib scheme was reverted (c3 is open source);
 // RTL sources are compiled by MSVC together with the generated code.
 
@@ -113,6 +113,17 @@ std::string SessionManager::create() {
         { RTL_VB6COM_WRAP_C,           "vb6com_wrap.c" },
         { RTL_VB6COM_SINK_C,           "vb6com_sink.c" },
         { RTL_VB6COM_FOREACH_C,        "vb6com_foreach.c" },
+        { RTL_VB6FORMS_INTERNAL_H,     "vb6forms_internal.h" },
+        { RTL_VB6FORMS_CTRL_C,         "vb6forms_ctrl.c" },
+        { RTL_VB6FORMS_LIST_C,         "vb6forms_list.c" },
+        { RTL_VB6FORMS_STYLE_C,        "vb6forms_style.c" },
+        { RTL_VB6FORMS_SCROLL_C,       "vb6forms_scroll.c" },
+        { RTL_VB6FORMS_PICTURE_C,      "vb6forms_picture.c" },
+        { RTL_VB6FORMS_CTRLARR_C,      "vb6forms_ctrlarr.c" },
+        { RTL_VB6FORMS_WEBVIEW_C,      "vb6forms_webview.c" },
+        { RTL_VB6FORMS_WIDGET_C,       "vb6forms_widget.c" },
+        { RTL_VB6FORMS_SHAPE_C,        "vb6forms_shape.c" },
+        { RTL_VB6FORMS_AXSITE_C,       "vb6forms_axsite.c" },
     };
 
     for (auto& entry : files) {

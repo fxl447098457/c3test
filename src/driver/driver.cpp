@@ -2165,6 +2165,16 @@ bool Driver::runLinker(const CompileOptions& options, const std::string& outputD
     if (msvcOpts.isGui || msvcOpts.isDll) {
         // 092z-3: ActiveX DLL 允许包含窗体 (Form/UserControl), 也要 vb6forms
         msvcOpts.sourceFiles.push_back(rtlDir + "/vb6forms.c");
+        msvcOpts.sourceFiles.push_back(rtlDir + "/vb6forms_ctrl.c");
+        msvcOpts.sourceFiles.push_back(rtlDir + "/vb6forms_list.c");
+        msvcOpts.sourceFiles.push_back(rtlDir + "/vb6forms_style.c");
+        msvcOpts.sourceFiles.push_back(rtlDir + "/vb6forms_scroll.c");
+        msvcOpts.sourceFiles.push_back(rtlDir + "/vb6forms_picture.c");
+        msvcOpts.sourceFiles.push_back(rtlDir + "/vb6forms_ctrlarr.c");
+        msvcOpts.sourceFiles.push_back(rtlDir + "/vb6forms_webview.c");
+        msvcOpts.sourceFiles.push_back(rtlDir + "/vb6forms_widget.c");
+        msvcOpts.sourceFiles.push_back(rtlDir + "/vb6forms_shape.c");
+        msvcOpts.sourceFiles.push_back(rtlDir + "/vb6forms_axsite.c");
     }
     if (msvcOpts.isDll) {
         msvcOpts.sourceFiles.push_back(rtlDir + "/vb6comserver.c");
