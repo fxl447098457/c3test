@@ -586,6 +586,11 @@ void CCodeGen::emitComVtableSinks() {
         c_.emitLine("}");
 
         // 4. Source interface 方法
+        // Fix 096: 未实现的事件也要生成空 stub — vtable 数组引用全部事件名,
+        // 而 VB6 语义允许 WithEvents 只实现感兴趣的事件 (其余静默).
+        // 此前 if(!handlerSym) continue 跳过函数体生成, vtable 引用悬空
+        // → C2065 (cHttpClient.c 684/685 OnResponseStart/OnResponseDataAvailable)
+        // 及关联 C2099 (vtable 初始化器不是常量).
         for (auto& evtName : srcClsSym->eventNames) {
             std::string evtLower = Symbol::toLower(evtName);
             auto itSig = srcClsSym->comSourceMethods.find(evtLower);
@@ -594,7 +599,6 @@ void CCodeGen::emitComVtableSinks() {
 
             std::string handlerName = varName + "_" + evtName;
             auto* handlerSym = symTab_.lookup(handlerName);
-            if (!handlerSym) continue;
 
             std::string methodName = sinkPrefix + "_" + cIdent(evtName);
             std::string methodSig = "static HRESULT __stdcall " + methodName + "(void* This";
@@ -612,6 +616,14 @@ void CCodeGen::emitComVtableSinks() {
             c_.emitBlank();
             c_.emitLine(methodSig + " {");
             c_.indent();
+            if (!handlerSym) {
+                // Fix 096: 未实现的事件 → 空 stub, 仅保持 sink 接口完整
+                c_.emitLine("(void)This;  /* event not implemented by user (VB6 semantics) */");
+                c_.emitLine("return S_OK;");
+                c_.dedent();
+                c_.emitLine("}");
+                continue;
+            }
             std::string procCall = cProcName(handlerName, handlerSym->access,
                                              handlerSym->isExternal ? handlerSym->sourceModule : (isClassModule_ ? moduleName_ : ""));
             if (isClassModule_) {

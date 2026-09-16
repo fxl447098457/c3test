@@ -6867,6 +6867,15 @@ Vb6Type CCodeGen::resolveArrayElemType(ASTNode* typeRef) const {
                 return Vb6Type::Object;
             }
         }
+        // Fix 097: 无 vb 前缀的 VBA 枚举别名 — CompareMethod 是 Long
+        // (与 type_system.cpp resolveTypeName 的 Fix 097 对齐, 否则字段声明
+        // 映射 int32_t 而此处回落 Variant, 类工厂初始化生成
+        // me->m_CompareMode = vb6_VariantEmpty() → C2440, Dictionary.cls:45).
+        {
+            std::string nm097 = simple.name;
+            std::transform(nm097.begin(), nm097.end(), nm097.begin(), ::tolower);
+            if (nm097 == "comparemethod") return Vb6Type::Long;
+        }
         return Vb6Type::Variant;
     }
     return Vb6Type::Variant;
