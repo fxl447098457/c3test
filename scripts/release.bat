@@ -115,8 +115,8 @@ if not exist "publish\C3.exe" (
     popd
     exit /b 1
 )
-if not exist "%SystemRoot%\System32\tar.exe" (
-    echo [ERROR] 未找到 Windows 自带 tar.exe
+if not exist "%SCRIPTDIR%pack.ps1" (
+    echo [ERROR] 未找到 scripts\pack.ps1
     popd
     exit /b 1
 )
@@ -158,7 +158,8 @@ REM ---- 打包 ----
 echo [1/4] 打包 publish 目录 ...
 if not exist "%DIST%" mkdir "%DIST%"
 if exist "%ZIPPATH%" del /f /q "%ZIPPATH%"
-"%SystemRoot%\System32\tar.exe" -a -c -f "%ZIPPATH%" -C publish .
+REM 注意- 不能用 tar.exe 打 zip, 它写入中文名不带 UTF-8 标志, 解压会乱码
+powershell -NoProfile -ExecutionPolicy Bypass -File "%SCRIPTDIR%pack.ps1" -Source "%ROOT%\publish" -Out "%ZIPPATH%"
 if errorlevel 1 (
     echo [ERROR] 打包失败
     popd
