@@ -2155,6 +2155,11 @@ bool Driver::runLinker(const CompileOptions& options, const std::string& outputD
     // 不再链接预编译 .lib —— 修改 RTL 源码后重编 C3.exe 即生效
     msvcOpts.sourceFiles.push_back(rtlDir + "/vb6rtl.c");
     msvcOpts.sourceFiles.push_back(rtlDir + "/vb6com.c");
+    msvcOpts.sourceFiles.push_back(rtlDir + "/vb6com_invoke.c");
+    msvcOpts.sourceFiles.push_back(rtlDir + "/vb6com_pack.c");
+    msvcOpts.sourceFiles.push_back(rtlDir + "/vb6com_wrap.c");
+    msvcOpts.sourceFiles.push_back(rtlDir + "/vb6com_sink.c");
+    msvcOpts.sourceFiles.push_back(rtlDir + "/vb6com_foreach.c");
     msvcOpts.sourceFiles.push_back(rtlDir + "/vb6_di_stubs.c");
     msvcOpts.sourceFiles.push_back(rtlDir + "/vb6_di_win32_stubs.c");
     if (msvcOpts.isGui || msvcOpts.isDll) {
