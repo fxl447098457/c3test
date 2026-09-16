@@ -122,7 +122,7 @@ function ConvertTo-AsciiJson([hashtable]$Object) {
 }
 
 function Invoke-Api {
-    param([string]$Method, [string]$Path, [hashtable]$Payload)
+    param([string]$Method, [string]$Path, [hashtable]$Payload, [switch]$Soft)
     $headers = @{
         'PRIVATE-TOKEN' = $script:Token
         'User-Agent'    = 'c3-pr-script'
@@ -141,8 +141,25 @@ function Invoke-Api {
     catch {
         $detail = $_.Exception.Message
         if ($_.ErrorDetails.Message) { $detail = $detail + ' / ' + $_.ErrorDetails.Message }
+        $code = 0
+        if ($_.Exception.Response) { $code = [int]$_.Exception.Response.StatusCode.value__ }
+        if ($Soft) {
+            Warn ('API {0} {1} failed (HTTP {2}) -> {3}' -f $Method, $Path, $code, $detail)
+            return $null
+        }
         Fail ('API {0} {1} failed -> {2}' -f $Method, $Path, $detail)
     }
+}
+
+# Find an already-open PR from <head> into <base>. NOTE: GitCode expects the
+# plain branch name in the head filter -- the GitHub style "owner:branch" form
+# silently matches nothing.
+function Find-OpenPr {
+    param([string]$HeadBranch, [string]$BaseBranch)
+    $list = Invoke-Api -Method GET -Soft `
+        -Path ('/repos/{0}/pulls?state=open&head={1}&base={2}' -f $Repo, [Uri]::EscapeDataString($HeadBranch), [Uri]::EscapeDataString($BaseBranch))
+    if ($list) { return @($list)[0] }
+    return $null
 }
 
 # ---------------------------------------------------------------- preflight
@@ -230,14 +247,12 @@ if (-not $script:Token) {
     Fail 'no GitCode token found (set GITCODE_TOKEN, write scripts/.gitcode_token, or store it with git credential manager)'
 }
 
-$owner = ($Repo -split '/')[0]
-$existing = Invoke-Api -Method GET -Path ('/repos/{0}/pulls?state=open&head={1}&base={2}' -f $Repo, [Uri]::EscapeDataString("$owner`:$Head"), [Uri]::EscapeDataString($Base))
+$existing = Find-OpenPr -HeadBranch $Head -BaseBranch $Base
 if ($existing) {
-    $hit = @($existing)[0]
     Write-Host ''
-    Write-Host ('PR already open -> {0}' -f $hit.web_url) -ForegroundColor Green
-    Info ('#{0} {1}' -f $hit.iid, $hit.title)
-    if ($Open) { Start-Process $hit.web_url | Out-Null }
+    Write-Host ('PR already open -> {0}' -f $existing.web_url) -ForegroundColor Green
+    Info ('#{0} {1}' -f $existing.iid, $existing.title)
+    if ($Open) { Start-Process $existing.web_url | Out-Null }
     exit 0
 }
 
@@ -248,8 +263,20 @@ $payload = @{
     base  = $Base
     body  = $Body
 }
-$pr = Invoke-Api -Method POST -Path ('/repos/{0}/pulls' -f $Repo) -Payload $payload
-if (-not $pr) { Fail 'PR creation returned nothing' }
+$pr = Invoke-Api -Method POST -Path ('/repos/{0}/pulls' -f $Repo) -Payload $payload -Soft
+if (-not $pr) {
+    # Race / stale cache: the server may already have an open PR for this pair.
+    # Re-list and surface the URL instead of pretending we created one.
+    $existing = Find-OpenPr -HeadBranch $Head -BaseBranch $Base
+    if ($existing) {
+        Write-Host ''
+        Write-Host ('PR already open -> {0}' -f $existing.web_url) -ForegroundColor Green
+        Info ('#{0} {1}' -f $existing.iid, $existing.title)
+        if ($Open) { Start-Process $existing.web_url | Out-Null }
+        exit 0
+    }
+    Fail 'PR creation failed and no existing open PR was found'
+}
 
 Write-Host ''
 Write-Host ('PR created -> {0}' -f $pr.web_url) -ForegroundColor Green
