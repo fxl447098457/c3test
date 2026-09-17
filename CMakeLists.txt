@@ -123,6 +123,9 @@ target_link_libraries(vb6c3-core PRIVATE ole32 oleaut32 uuid)
 # --- C code generation backend ---
 add_library(vb6c3-cgen STATIC
     src/backend/cgen_base.cpp
+    # base 家族（2026-09-17 纯搬移自 cgen_base.cpp）
+    src/backend/cgen_base_type.cpp
+    src/backend/cgen_base_naming.cpp
     # 表达式家族
     src/backend/expr/cgen_expr.cpp
     src/backend/expr/cgen_expr_ident.cpp
