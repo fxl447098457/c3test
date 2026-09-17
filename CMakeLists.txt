@@ -86,6 +86,9 @@ add_library(vb6c3-core STATIC
     src/semantics/symbol_table.cpp
     src/semantics/type_system.cpp
     src/semantics/semantic_analyzer.cpp
+    src/semantics/semantic_analyzer_dispatch.cpp
+    src/semantics/semantic_analyzer_register.cpp
+    src/semantics/semantic_analyzer_typeref.cpp
     src/semantics/semantic_analyzer_decl.cpp
     src/semantics/semantic_analyzer_decl_type.cpp
     src/semantics/semantic_analyzer_stmt.cpp

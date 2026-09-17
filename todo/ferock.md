@@ -14,13 +14,14 @@
 
 ### 0.10.2
 
-
-
-###  0.10.1
+- 2026-09-17（版本）：三处版本号统一为 0.10.2 —— VERSION / driver.cpp 的 `C3 version` / CMakeLists.txt 的 `project(... VERSION ...)`（此前 0.10.1 / 0.10.0 / 0.1.0 三处不一致）
+- 2026-09-17 源码拆分（纯搬移）：semantic_analyzer.cpp 666→主 317 + dispatch 95 + register 177 + typeref 114，分派辅助 / 注册声明（Pass1）/ 类型引用解析各成一家；保留行 + 三区间拼回与原文件一致（仅丢 2 处多余空行）；重建 99/99 + e2e 2/2 + 回归 82/0/1/83。src 下 ≥500 行文件 14 → 13
 - 2026-09-17 源码拆分（函数级抽取首例）：semantic_analyzer_builtin.cpp 795（registerBuiltins 单函数 780）→ 26 行伞文件 + src/semantics/builtin/ 3 个「函数体片段」（consts 289 / consts_ext 211 / funcs 295），片段在函数体内 #include、局部 lambda 与 kVariantArray 原样不动 → 零重构零行为改动；三片段拼回与原文件逐行一致；重建 96/96 + e2e 2/2 + 回归 82/0/1/83。src 下 ≥500 行文件 15 → 14
 - 2026-09-17 源码拆分（RTL）：vb6forms_picture.c 528→275+274、vb6forms_widget.c 502→231+291，主文件逐字节不动；RTL 5 处管线全同步（rc 139/140 + 枚举 + files[] + driver sourceFiles + CMake），四处清单计数核对 41 一致；重建 96/96 + e2e 2/2 + 回归 82/0/1/83。src 下 ≥500 行文件 17 → 15
 - 2026-09-17 源码拆分（续）：再拆 5 个「单函数主导但主导函数 <500 行」的文件 —— cgen_com 682→257+439、parser_decl 655→274+390、parser_expr 590→402+199、typelib_builder 527→345+203、frm_parser 516→320+209；主文件逐字节不动，5 个新文件登记 CMakeLists；重建 96/96 + 回归 82/0/1/83 零变化。src 下 ≥500 行文件 26 → 17
 - 2026-09-17 源码拆分（② 组）：4 个「单函数主导但主导函数 <500 行」的文件纯搬移拆净 —— cgen_localdecl 552→375+191、cgen_decl_proc 552→256+309、semantic_analyzer_decl 551→387+178、cgen_expr_binary 514→356+172；主文件逐字节不动，4 个新文件登记 CMakeLists；重建 91/91 + 回归 82/0/1/83 零变化。同时修正台账口径：单函数主导 ≠ 必须函数级抽取
+
+###  0.10.1
 - 2026-09-17 cgen 头拆分：cgen.hpp（996 行单类头）拆为伞头 54 行 + cgen_emitter.hpp（CodeEmitter 独立成头）+ detail/ 3 个类体片段（api 203 / state 342 / helpers 382），类内 #include 片段、逐行零重排，36 处引用路径不变；回归 82/0/1/83 零变化
 - 2026-09-17 AST 头拆分：ast.hpp（1459 行）拆为伞头 18 行 + src/ast/detail/ 8 子头（enums/fwd/base/expr/stmt/stmt_io/decl/util，最大 366 行），按类边界切、零重排，6 处引用路径不变；回归 82/0/1/83 零变化
 - 2026-09-17（ai/003-开发计划）：补「实现说明」——P4~P8 的 rtl/*.hpp/cpp 规划名是早期 C++ 路线，实际走 C 侧 RTL，相关文件名已不存在；原计划文本不改写
