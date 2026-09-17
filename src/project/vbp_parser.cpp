@@ -267,6 +267,8 @@ VbpProject VbpParser::parseString(const std::string& content, const std::string&
 VbpProjectType VbpParser::parseProjectType(const std::string& value) {
     if (value == "Exe") return VbpProjectType::StandardExe;
     if (value == "OLE Exe") return VbpProjectType::ActiveXExe;
+    // 真 VB6 保存 ActiveX DLL 工程时写的是 "OleDll" (无空格连写), 兼容旧写法 "DLL"
+    if (value == "OleDll") return VbpProjectType::ActiveXDLL;
     if (value == "DLL") return VbpProjectType::ActiveXDLL;
     if (value == "Control") return VbpProjectType::ActiveXControl;
     return VbpProjectType::Unknown;
