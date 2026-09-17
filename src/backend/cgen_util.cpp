@@ -18,9 +18,9 @@ namespace vb6c3 {
 // 它们不是独立编译单元，单独 include 会编译不过。片段局部 lambda 与 CoClassInfo 原样不动，逐行未改 → 零行为改动。
 
 std::string CCodeGen::generateDllEntry(const std::string& progId, const std::vector<SymbolTable*>& allSymTabs) {
-#include "backend/detail/cgen_util_dllentry_prelude.inc"
-#include "backend/detail/cgen_util_dllentry_collect.inc"
-#include "backend/detail/cgen_util_dllentry_tables.inc"
-#include "backend/detail/cgen_util_dllentry_exports.inc"
+#include "backend/detail/util/cgen_util_dllentry_prelude.inc"
+#include "backend/detail/util/cgen_util_dllentry_collect.inc"
+#include "backend/detail/util/cgen_util_dllentry_tables.inc"
+#include "backend/detail/util/cgen_util_dllentry_exports.inc"
 }
 } // namespace vb6c3

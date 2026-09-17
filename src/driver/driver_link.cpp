@@ -92,6 +92,20 @@ bool Driver::runLinker(const CompileOptions& options, const std::string& outputD
     // RTL 源码编译 (P10 恢复): 会话目录释放的 RTL .c 与生成代码一起编译,
     // 不再链接预编译 .lib —— 修改 RTL 源码后重编 C3.exe 即生效
     msvcOpts.sourceFiles.push_back(rtlDir + "/vb6rtl.c");
+    // vb6rtl.c 按家族拆分 (2026-09-17): 13 个族实现与主文件同批编译
+    msvcOpts.sourceFiles.push_back(rtlDir + "/vb6rtl_string.c");
+    msvcOpts.sourceFiles.push_back(rtlDir + "/vb6rtl_format.c");
+    msvcOpts.sourceFiles.push_back(rtlDir + "/vb6rtl_conv.c");
+    msvcOpts.sourceFiles.push_back(rtlDir + "/vb6rtl_misc.c");
+    msvcOpts.sourceFiles.push_back(rtlDir + "/vb6rtl_system.c");
+    msvcOpts.sourceFiles.push_back(rtlDir + "/vb6rtl_compat.c");
+    msvcOpts.sourceFiles.push_back(rtlDir + "/vb6rtl_date.c");
+    msvcOpts.sourceFiles.push_back(rtlDir + "/vb6rtl_array.c");
+    msvcOpts.sourceFiles.push_back(rtlDir + "/vb6rtl_file.c");
+    msvcOpts.sourceFiles.push_back(rtlDir + "/vb6rtl_paramarray.c");
+    msvcOpts.sourceFiles.push_back(rtlDir + "/vb6rtl_financial.c");
+    msvcOpts.sourceFiles.push_back(rtlDir + "/vb6rtl_com.c");
+    msvcOpts.sourceFiles.push_back(rtlDir + "/vb6rtl_registry.c");
     msvcOpts.sourceFiles.push_back(rtlDir + "/vb6com.c");
     msvcOpts.sourceFiles.push_back(rtlDir + "/vb6com_invoke.c");
     msvcOpts.sourceFiles.push_back(rtlDir + "/vb6com_pack.c");

@@ -16,8 +16,8 @@ namespace vb6c3 {
 // 它们不是独立编译单元，单独 include 会编译不过。片段局部变量原样不动，逐行未改 → 零行为改动。
 
 void CCodeGen::visit(SetStmt& node) {
-#include "backend/detail/cgen_setlet_set_prop.inc"
-#include "backend/detail/cgen_setlet_set_rhs.inc"
+#include "backend/detail/stmt/cgen_setlet_set_prop.inc"
+#include "backend/detail/stmt/cgen_setlet_set_rhs.inc"
 }
 
 void CCodeGen::visit(LetStmt& node) {

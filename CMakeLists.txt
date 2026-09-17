@@ -217,7 +217,7 @@ set_target_properties(c3 PROPERTIES OUTPUT_NAME C3)
 
 # Fix 092z-2: CMake 只把 .rc 自身当依赖 —— 改了 src/rtl/core 下的嵌入源之后
 # .res 不会重编, C3.exe 会继续嵌入旧文件。这里显式声明嵌入文件为 .rc 的依赖
-# (39 个资源: 14 头 + 25 源码, 全部架构无关；与 c3rtl.rc 一一对应)。
+# (75 个资源: 23 头 + 46 源 + 6 片段, 全部架构无关；与 c3rtl.rc 一一对应)。
 set(C3RTL_EMBEDDED_FILES
     # vb6rtl
     ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6rtl/vb6rtl.h
@@ -229,6 +229,26 @@ set(C3RTL_EMBEDDED_FILES
     ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6rtl/vb6rtl_array.h
     ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6rtl/vb6rtl_class_com.h
     ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6rtl/vb6rtl_runtime.h
+    # vb6rtl.c 按家族拆分 (2026-09-17): 13 个族实现 + format 的 6 个函数体片段
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6rtl/vb6rtl_string.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6rtl/vb6rtl_format.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6rtl/detail/vb6rtl_format_extract.inc
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6rtl/detail/vb6rtl_format_parse.inc
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6rtl/detail/vb6rtl_format_numeric_pre.inc
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6rtl/detail/vb6rtl_format_numeric_body.inc
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6rtl/detail/vb6rtl_format_numeric_tail.inc
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6rtl/detail/vb6rtl_format_string.inc
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6rtl/vb6rtl_conv.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6rtl/vb6rtl_misc.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6rtl/vb6rtl_system.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6rtl/vb6rtl_compat.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6rtl/vb6rtl_date.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6rtl/vb6rtl_array.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6rtl/vb6rtl_file.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6rtl/vb6rtl_paramarray.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6rtl/vb6rtl_financial.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6rtl/vb6rtl_com.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6rtl/vb6rtl_registry.c
     # vb6com
     ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6com/vb6com.h
     ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6com/vb6com.c

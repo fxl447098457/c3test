@@ -22,14 +22,14 @@ namespace vb6c3 {
 // 它们不是独立编译单元，单独 include 会编译不过。片段内容逐行未改（含原缩进层级）→ 零行为改动。
 
 void CCodeGen::visit(MemberAccessExpr& node) {
-#include "backend/detail/cgen_expr_member_precheck.inc"
-#include "backend/detail/cgen_expr_member_form_builtin.inc"
-#include "backend/detail/cgen_expr_member_obj_dispatch.inc"
-#include "backend/detail/cgen_expr_member_class_module.inc"
-#include "backend/detail/cgen_expr_member_m22_module.inc"
-#include "backend/detail/cgen_expr_member_generic_access.inc"
-#include "backend/detail/cgen_expr_member_voidptr_com.inc"
-#include "backend/detail/cgen_expr_member_class_fallback.inc"
+#include "backend/detail/expr/cgen_expr_member_precheck.inc"
+#include "backend/detail/expr/cgen_expr_member_form_builtin.inc"
+#include "backend/detail/expr/cgen_expr_member_obj_dispatch.inc"
+#include "backend/detail/expr/cgen_expr_member_class_module.inc"
+#include "backend/detail/expr/cgen_expr_member_m22_module.inc"
+#include "backend/detail/expr/cgen_expr_member_generic_access.inc"
+#include "backend/detail/expr/cgen_expr_member_voidptr_com.inc"
+#include "backend/detail/expr/cgen_expr_member_class_fallback.inc"
 }
 
 } // namespace vb6c3
