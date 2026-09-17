@@ -17,9 +17,9 @@ namespace vb6c3 {
 // 它们不是独立编译单元，单独 include 会编译不过。片段局部变量/静态表原样留在片段内，逐行未改 → 零行为改动。
 
 void CCodeGen::visit(IdentifierExpr& node) {
-#include "backend/detail/cgen_expr_ident_dispatch.inc"
-#include "backend/detail/cgen_expr_ident_symbol.inc"
-#include "backend/detail/cgen_expr_ident_builtin.inc"
+#include "backend/detail/expr/cgen_expr_ident_dispatch.inc"
+#include "backend/detail/expr/cgen_expr_ident_symbol.inc"
+#include "backend/detail/expr/cgen_expr_ident_builtin.inc"
 }
 
 } // namespace vb6c3

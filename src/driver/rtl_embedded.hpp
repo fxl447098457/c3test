@@ -85,6 +85,28 @@ enum RtlResourceID {
     RTL_VB6FORMS_MDI_H         = 153,
     RTL_VB6FORMS_WEBVIEW_H     = 154,
     RTL_VB6FORMS_CONTROLS_H    = 155,
+
+    // vb6rtl.c 按家族拆分 (2026-09-17): 主文件 + 13 个族实现
+    RTL_VB6RTL_STRING_C        = 156,
+    RTL_VB6RTL_FORMAT_C        = 157,
+    // format 族按函数体片段拆: 6 个 .inc（不单独编译, 由 format.c include）
+    RTL_VB6RTL_FORMAT_EXTRACT_INC      = 158,
+    RTL_VB6RTL_FORMAT_PARSE_INC        = 159,
+    RTL_VB6RTL_FORMAT_NUMERIC_PRE_INC  = 160,
+    RTL_VB6RTL_FORMAT_NUMERIC_BODY_INC = 161,
+    RTL_VB6RTL_FORMAT_NUMERIC_TAIL_INC = 162,
+    RTL_VB6RTL_FORMAT_STRING_INC       = 163,
+    RTL_VB6RTL_CONV_C          = 164,
+    RTL_VB6RTL_MISC_C          = 165,
+    RTL_VB6RTL_SYSTEM_C        = 166,
+    RTL_VB6RTL_COMPAT_C        = 167,
+    RTL_VB6RTL_DATE_C          = 168,
+    RTL_VB6RTL_ARRAY_C         = 169,
+    RTL_VB6RTL_FILE_C          = 170,
+    RTL_VB6RTL_PARAMARRAY_C    = 171,
+    RTL_VB6RTL_FINANCIAL_C     = 172,
+    RTL_VB6RTL_COM_C           = 173,
+    RTL_VB6RTL_REGISTRY_C      = 174,
 };
 
 // Session directory manager

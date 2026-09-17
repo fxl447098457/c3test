@@ -154,6 +154,27 @@ std::string SessionManager::create() {
         { RTL_VB6FORMS_MDI_H,                 "vb6forms_mdi.h" },
         { RTL_VB6FORMS_WEBVIEW_H,             "vb6forms_webview.h" },
         { RTL_VB6FORMS_CONTROLS_H,            "vb6forms_controls.h" },
+
+        // vb6rtl.c 按家族拆分 (2026-09-17)
+        { RTL_VB6RTL_STRING_C,                "vb6rtl_string.c" },
+        { RTL_VB6RTL_FORMAT_C,                "vb6rtl_format.c" },
+        { RTL_VB6RTL_FORMAT_EXTRACT_INC,      "vb6rtl_format_extract.inc" },
+        { RTL_VB6RTL_FORMAT_PARSE_INC,        "vb6rtl_format_parse.inc" },
+        { RTL_VB6RTL_FORMAT_NUMERIC_PRE_INC,  "vb6rtl_format_numeric_pre.inc" },
+        { RTL_VB6RTL_FORMAT_NUMERIC_BODY_INC, "vb6rtl_format_numeric_body.inc" },
+        { RTL_VB6RTL_FORMAT_NUMERIC_TAIL_INC, "vb6rtl_format_numeric_tail.inc" },
+        { RTL_VB6RTL_FORMAT_STRING_INC,       "vb6rtl_format_string.inc" },
+        { RTL_VB6RTL_CONV_C,                  "vb6rtl_conv.c" },
+        { RTL_VB6RTL_MISC_C,                  "vb6rtl_misc.c" },
+        { RTL_VB6RTL_SYSTEM_C,                "vb6rtl_system.c" },
+        { RTL_VB6RTL_COMPAT_C,                "vb6rtl_compat.c" },
+        { RTL_VB6RTL_DATE_C,                  "vb6rtl_date.c" },
+        { RTL_VB6RTL_ARRAY_C,                 "vb6rtl_array.c" },
+        { RTL_VB6RTL_FILE_C,                  "vb6rtl_file.c" },
+        { RTL_VB6RTL_PARAMARRAY_C,            "vb6rtl_paramarray.c" },
+        { RTL_VB6RTL_FINANCIAL_C,             "vb6rtl_financial.c" },
+        { RTL_VB6RTL_COM_C,                   "vb6rtl_com.c" },
+        { RTL_VB6RTL_REGISTRY_C,              "vb6rtl_registry.c" },
     };
 
     for (auto& entry : files) {

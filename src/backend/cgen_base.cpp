@@ -103,17 +103,17 @@ bool CCodeGen::generate(Module& module, const std::string& baseName,
                          const std::unordered_set<std::string>& externalModules,
                          bool isDll, const std::string& dllProgId,
                          const FrmFormDesc* frmDesc) {
-#include "backend/detail/cgen_base_generate_prologue.inc"
-#include "backend/detail/cgen_base_generate_state_scan.inc"
-#include "backend/detail/cgen_base_generate_header_open.inc"
-#include "backend/detail/cgen_base_generate_crossmod.inc"
-#include "backend/detail/cgen_base_generate_c_open.inc"
-#include "backend/detail/cgen_base_generate_decl_pass.inc"
-#include "backend/detail/cgen_base_generate_evt_decl.inc"
-#include "backend/detail/cgen_base_generate_body_pass.inc"
-#include "backend/detail/cgen_base_generate_evt_impl.inc"
-#include "backend/detail/cgen_base_generate_entry.inc"
-#include "backend/detail/cgen_base_generate_epilogue.inc"
+#include "backend/detail/base/cgen_base_generate_prologue.inc"
+#include "backend/detail/base/cgen_base_generate_state_scan.inc"
+#include "backend/detail/base/cgen_base_generate_header_open.inc"
+#include "backend/detail/base/cgen_base_generate_crossmod.inc"
+#include "backend/detail/base/cgen_base_generate_c_open.inc"
+#include "backend/detail/base/cgen_base_generate_decl_pass.inc"
+#include "backend/detail/base/cgen_base_generate_evt_decl.inc"
+#include "backend/detail/base/cgen_base_generate_body_pass.inc"
+#include "backend/detail/base/cgen_base_generate_evt_impl.inc"
+#include "backend/detail/base/cgen_base_generate_entry.inc"
+#include "backend/detail/base/cgen_base_generate_epilogue.inc"
 }
 
 // ============================================================

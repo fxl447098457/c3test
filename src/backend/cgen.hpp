@@ -44,11 +44,11 @@ namespace vb6c3 {
 
 class CCodeGen : public ASTVisitor {
 public:
-#include "backend/detail/cgen_api.inc"
+#include "backend/detail/util/cgen_api.inc"
 
 private:
-#include "backend/detail/cgen_state.inc"
-#include "backend/detail/cgen_helpers.inc"
+#include "backend/detail/util/cgen_state.inc"
+#include "backend/detail/util/cgen_helpers.inc"
 };
 
 } // namespace vb6c3

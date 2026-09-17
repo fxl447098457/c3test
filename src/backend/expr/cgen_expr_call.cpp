@@ -28,18 +28,18 @@ namespace vb6c3 {
 // 单看片段自身不闭合，但头 + 全部片段 + 尾拼回后与原文件逐行一致、语义等价。
 
 void CCodeGen::visit(IndexOrCallExpr& node) {
-#include "backend/detail/cgen_expr_call_prelude.inc"
-#include "backend/detail/cgen_expr_call_builtin_pre.inc"
-#include "backend/detail/cgen_expr_call_callee_ident.inc"
-#include "backend/detail/cgen_expr_call_callee_member.inc"
-#include "backend/detail/cgen_expr_call_callee_withm.inc"
-#include "backend/detail/cgen_expr_call_com_bind.inc"
-#include "backend/detail/cgen_expr_call_callee_params.inc"
-#include "backend/detail/cgen_expr_call_arg_emit.inc"
-#include "backend/detail/cgen_expr_call_arg_variant.inc"
-#include "backend/detail/cgen_expr_call_named_args.inc"
-#include "backend/detail/cgen_expr_call_builtin_fixup.inc"
-#include "backend/detail/cgen_expr_call_pad_conv.inc"
+#include "backend/detail/expr/cgen_expr_call_prelude.inc"
+#include "backend/detail/expr/cgen_expr_call_builtin_pre.inc"
+#include "backend/detail/expr/cgen_expr_call_callee_ident.inc"
+#include "backend/detail/expr/cgen_expr_call_callee_member.inc"
+#include "backend/detail/expr/cgen_expr_call_callee_withm.inc"
+#include "backend/detail/expr/cgen_expr_call_com_bind.inc"
+#include "backend/detail/expr/cgen_expr_call_callee_params.inc"
+#include "backend/detail/expr/cgen_expr_call_arg_emit.inc"
+#include "backend/detail/expr/cgen_expr_call_arg_variant.inc"
+#include "backend/detail/expr/cgen_expr_call_named_args.inc"
+#include "backend/detail/expr/cgen_expr_call_builtin_fixup.inc"
+#include "backend/detail/expr/cgen_expr_call_pad_conv.inc"
 }
 
 } // namespace vb6c3

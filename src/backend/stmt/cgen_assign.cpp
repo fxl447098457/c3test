@@ -17,10 +17,10 @@ namespace vb6c3 {
 // 它们不是独立编译单元，单独 include 会编译不过。片段局部变量原样不动，逐行未改 → 零行为改动。
 
 void CCodeGen::visit(AssignmentStmt& node) {
-#include "backend/detail/cgen_assign_stmt_special.inc"
-#include "backend/detail/cgen_assign_prop_write.inc"
-#include "backend/detail/cgen_assign_com_prop.inc"
-#include "backend/detail/cgen_assign_value_sem.inc"
+#include "backend/detail/stmt/cgen_assign_stmt_special.inc"
+#include "backend/detail/stmt/cgen_assign_prop_write.inc"
+#include "backend/detail/stmt/cgen_assign_com_prop.inc"
+#include "backend/detail/stmt/cgen_assign_value_sem.inc"
 }
 
 

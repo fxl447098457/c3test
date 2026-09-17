@@ -2,7 +2,7 @@
 // P10 (restored): RTL is embedded as .c/.h SOURCE and compiled by MSVC
 // at user-program build time. The P11.3 pre-compiled .lib scheme was
 // reverted: c3 is open source, no source protection needed.
-// 23 .h headers + 33 .c sources (all arch-neutral) = 56 resources.
+// 23 .h headers + 46 .c sources + 6 .inc fragments (all arch-neutral) = 75 resources.
 // 2026-09-17 源文件按家族分目录: core/vb6rtl|vb6com|vb6comserver|vb6forms|di/,
 // 解包后仍是平铺目录（RTL 内部 include 一律 basename，不受源目录影响）。
 // Runtime: FindResource/LoadResource extract to temp session directory
@@ -83,3 +83,25 @@
 153 RCDATA "../rtl/core/vb6forms/vb6forms_mdi.h"
 154 RCDATA "../rtl/core/vb6forms/vb6forms_webview.h"
 155 RCDATA "../rtl/core/vb6forms/vb6forms_controls.h"
+
+// vb6rtl.c 按家族拆分 (2026-09-17): 5327 行 → 主文件 418 + 13 个族实现
+// format 族再按函数体片段拆: 6 个 .inc 由 vb6rtl_format.c #include（basename）
+156 RCDATA "../rtl/core/vb6rtl/vb6rtl_string.c"
+157 RCDATA "../rtl/core/vb6rtl/vb6rtl_format.c"
+158 RCDATA "../rtl/core/vb6rtl/detail/vb6rtl_format_extract.inc"
+159 RCDATA "../rtl/core/vb6rtl/detail/vb6rtl_format_parse.inc"
+160 RCDATA "../rtl/core/vb6rtl/detail/vb6rtl_format_numeric_pre.inc"
+161 RCDATA "../rtl/core/vb6rtl/detail/vb6rtl_format_numeric_body.inc"
+162 RCDATA "../rtl/core/vb6rtl/detail/vb6rtl_format_numeric_tail.inc"
+163 RCDATA "../rtl/core/vb6rtl/detail/vb6rtl_format_string.inc"
+164 RCDATA "../rtl/core/vb6rtl/vb6rtl_conv.c"
+165 RCDATA "../rtl/core/vb6rtl/vb6rtl_misc.c"
+166 RCDATA "../rtl/core/vb6rtl/vb6rtl_system.c"
+167 RCDATA "../rtl/core/vb6rtl/vb6rtl_compat.c"
+168 RCDATA "../rtl/core/vb6rtl/vb6rtl_date.c"
+169 RCDATA "../rtl/core/vb6rtl/vb6rtl_array.c"
+170 RCDATA "../rtl/core/vb6rtl/vb6rtl_file.c"
+171 RCDATA "../rtl/core/vb6rtl/vb6rtl_paramarray.c"
+172 RCDATA "../rtl/core/vb6rtl/vb6rtl_financial.c"
+173 RCDATA "../rtl/core/vb6rtl/vb6rtl_com.c"
+174 RCDATA "../rtl/core/vb6rtl/vb6rtl_registry.c"

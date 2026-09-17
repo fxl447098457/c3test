@@ -66,14 +66,15 @@ static std::string escapeCString(const std::string& s) {
 // 逐行未改 → 零行为改动；切点全落在原函数体的分节注释处（相对花括号深度 0）。
 
 void CCodeGen::emitFormFramework(const FrmFormDesc& frmDesc, Module& module) {
-#include "backend/detail/cgen_form_prelude.inc"
-#include "backend/detail/cgen_form_ctrl_registry.inc"
-#include "backend/detail/cgen_form_wndproc_subclass.inc"
-#include "backend/detail/cgen_form_wndproc_create.inc"
-#include "backend/detail/cgen_form_wndproc_dispatch.inc"
-#include "backend/detail/cgen_form_create_controls.inc"
-#include "backend/detail/cgen_form_frame_menu.inc"
-#include "backend/detail/cgen_form_show.inc"
+#include "backend/detail/module/cgen_form_prelude.inc"
+#include "backend/detail/module/cgen_form_ctrl_registry.inc"
+#include "backend/detail/module/cgen_form_wndproc_subclass.inc"
+#include "backend/detail/module/cgen_form_wndproc_create.inc"
+#include "backend/detail/module/cgen_form_wndproc_dispatch.inc"
+#include "backend/detail/module/cgen_form_create_controls.inc"
+#include "backend/detail/module/cgen_form_ctrl_style_apply.inc"
+#include "backend/detail/module/cgen_form_frame_menu.inc"
+#include "backend/detail/module/cgen_form_show.inc"
 }
 
 // ============================================================
