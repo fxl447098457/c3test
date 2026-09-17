@@ -218,6 +218,26 @@
     // 用户定义的过程: 加vb6_前缀
     // 查找模块级符号
     Symbol* sym = symTab_.lookupModule(node.name);
+    // Fix 110u: 裸标识符不得解析为「其它类/设计器模块的公开成员」.
+    // VB6 中类模块 (含 .ctl/.pag) 的 Public 过程/属性只能经对象限定访问
+    // (Obj.Member); 无 Option Explicit 时未声明的裸名是隐式 Variant 局部.
+    // C3 的跨模块注入 (driver 的 globalPublicSyms → defineExternal) 会把别模块
+    // 的全部 Public 成员注入本模块作用域, 于是裸名误命中 — Charts 2020
+    // ucProgressCircular.ctl:949
+    //   If hBrush = 0 Or Count = 0 Then Exit Function   (Count 是 lCount 的笔误)
+    // 命中了 ucPieChart 的 `Public Property Get Count` →
+    // vb6_ucPieChart_prop_get_Count() 缺 me 实参 → C2198.
+    // 标准模块 (Module1.x / ToolsIDE.IsIDE 等) 的公开过程/变量/属性保持可见
+    // (VB6 允许跨模块裸名访问), 因此仅当来源模块本身是 Class 类模块时拦截.
+    bool leakedClassMember110u = false;
+    if (sym && sym->isExternal && !sym->sourceModule.empty()
+        && Symbol::toLower(sym->sourceModule) != Symbol::toLower(moduleName_)) {
+        Symbol* srcModSym = symTab_.lookupModule(sym->sourceModule);
+        if (srcModSym && srcModSym->kind == SymbolKind::Class) {
+            leakedClassMember110u = true;
+            sym = nullptr;
+        }
+    }
     if (sym && (sym->kind == SymbolKind::Sub || sym->kind == SymbolKind::Function
              || sym->kind == SymbolKind::DeclareSub || sym->kind == SymbolKind::DeclareFunc)) {
         // M22: VB6语义 — 在函数体内引用自身函数名等同于引用返回值变量
@@ -327,4 +347,58 @@
             return;
         }
     }
+    // Fix 110f: UserControl/PropertyPage 模块内对宿主内建成员的非限定引用.
+    // VB6 允许在控件自身的代码里直接写 `hDC`(等价于 UserControl.hDC) —— 该名字既
+    // 不是过程局部变量也不在符号表中, 之前发射裸标识符 `hDC` → C2065
+    // (Charts 2020: ucChartArea/ucChartBar/ucPieChart/ucTreeMaps 的 Draw 里
+    // `If GdipCreateFromHDC(hDC, hGraphics) Then Exit Sub`).
+    // 映射到 RTL 宿主符号 (rtl/core/vb6rtl/vb6rtl_userctl.h 的 vb6_UserControl_* /
+    // vb6_PropertyPage_*). 只在 sym == nullptr (模块作用域无同名符号) 且不是已知
+    // 过程局部变量时生效, 因此 `Dim hDC As Long` 的真实局部用法 (DrawText /
+    // GetWindowsDPI) 不受影响; 表外的名字维持原样 (仍留 C2065, 不引入新错误).
+    if (isDesignerModule_ && !sym && !knownLocalVars_.count(lower)) {
+        static const std::unordered_map<std::string, std::string> kUserControlHostMembers = {
+            {"hdc", "hDC"},
+            {"scalewidth", "ScaleWidth"},
+            {"scaleheight", "ScaleHeight"},
+            {"scalemode", "ScaleMode"},
+            {"containerhwnd", "ContainerHwnd"},
+            {"enabled", "Enabled"},
+            // Fix 111: UserControl 的方法在 .ctl 里也常以裸名书写
+            // (VB6 中它们隐式属于 UserControl 对象):
+            //   ScaleX(Extender.Left, vbContainerSize, UserControl.ScaleMode)
+            //   Call AsyncRead(sUrl, vbAsyncTypeByteArray, "URL", ...)
+            //   PropertyChanged "PictureColorize"
+            // 此前落到未解析兜底 → 裸符号 ScaleX/AsyncRead/PropertyChanged
+            // → LNK2019 (Charts 2020 LabelPlus/ucChartArea/... ).
+            {"scalex", "ScaleX"},
+            {"scaley", "ScaleY"},
+            {"asyncread", "AsyncRead"},
+            {"propertychanged", "PropertyChanged"},
+        };
+        static const std::unordered_map<std::string, std::string> kPropertyPageHostMembers = {
+            {"hwnd", "hWnd"},
+            {"changed", "Changed"},
+            {"scalemode", "ScaleMode"},
+            {"scaleheight", "ScaleHeight"},
+        };
+        const auto& hostMembers = isPropertyPageDesigner_ ? kPropertyPageHostMembers
+                                                          : kUserControlHostMembers;
+        auto itHost = hostMembers.find(lower);
+        if (itHost != hostMembers.end()) {
+            lastExpr_ = (isPropertyPageDesigner_ ? "vb6_PropertyPage_" : "vb6_UserControl_")
+                        + itHost->second;
+            return;
+        }
+    }
+
+    // Fix 110u (续): 隐式 Variant 局部 (VB6 无 Option Explicit 时的未声明裸名).
+    // 上方已把来自其它类模块的"泄漏"符号清空; 这里发射运行期 Empty 值
+    // (Charts 2020 ucProgressCircular.ctl:949 的 Count — 语义等价于 VB6 的隐式
+    // Variant = Empty, 与 0 比较为真). 用 vb6_VariantEmpty() 而非裸名, 避免 C2065.
+    if (leakedClassMember110u) {
+        lastExpr_ = "vb6_VariantEmpty()";
+        return;
+    }
+
     lastExpr_ = cName;

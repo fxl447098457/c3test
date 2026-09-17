@@ -17,7 +17,8 @@
     h_.emitLine("#include <stdbool.h>");
     h_.emitLine("#include <wchar.h>");
     // P7: 窗体模式下windows.h必须在vb6rtl.h之前, 避免VARIANT重定义冲突
-    if (module.isFormModule) {
+    // Fix 110: .ctl/.pag 也需要 vb6forms.h — 设计期子控件数组用 vb6_CtrlArr.
+    if (module.isFormModule || isDesignerModule_) {
         h_.emitLine("#include <windows.h>");
         h_.emitLine("#include \"vb6forms.h\"");
     }

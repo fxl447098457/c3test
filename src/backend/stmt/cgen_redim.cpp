@@ -9,6 +9,14 @@ namespace vb6c3 {
 // --- cgen_redim.cpp: ReDim/Erase 数组语句生成 ---
 
 void CCodeGen::visit(ReDimStmt& node) {
+    // Fix 100: 复杂目标 (带下标的成员链, 如 ReDim m_Serie(i).PT(n))。
+    // node.targetExpr 非空时直接发射左值表达式 (VB6_SA_AT(vb6_type_tSerie, m_Serie, i).PT),
+    // 元素类型改由末段成员的 UDT 成员信息解析 — 不走下面的 varName 字符串展开,
+    // 因为 cIdent 会把 '.' 替换为 '_' 且无法表达下标。
+    if (node.targetExpr) {
+        emitReDimComplexTarget(node);
+        return;
+    }
     // Fix 084y-5: ReDim 目标含成员访问 (ByRef UDT 参数数组字段 uOutput.Buffer,
     // With 块成员 .Field) 时按成员访问展开, 避免 cIdent 把 '.' 替换成 '_'
     std::string cName = resolveArrayTargetIdent(node.varName);
@@ -163,6 +171,117 @@ void CCodeGen::visit(ReDimStmt& node) {
         std::string lower = node.varName;
         std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
         arrayDimCounts_[lower] = dimCount;
+    }
+}
+
+// Fix 100: 解析 ReDim 复杂目标 (arr(i).Field) 的元素类型。
+// targetExpr 的末段必须是 MemberAccessExpr; 其 object 的 UDT C 类型由
+// inferUdtTypeOfExpr 推断 (UDT 数组元素 arr(idx) 走 arrayUdtElemTypes_),
+// 再在 udtMembers 中查该成员的标量与 typeRefName — 与 cgen_expr_call.cpp
+// Pattern B (动态数组成员元素访问 VB6_SA_AT) 使用同一来源, 保证二者一致。
+void CCodeGen::resolveReDimComplexElemType(const ReDimStmt& node, Vb6Type& outType,
+                                           std::string& outUdtCType) const {
+    outType = Vb6Type::Variant;
+    outUdtCType.clear();
+    if (!node.targetExpr) return;
+    if (node.targetExpr->kind != ASTNodeKind::MemberAccessExpr) return;
+    auto& ma = static_cast<const MemberAccessExpr&>(*node.targetExpr);
+    if (!ma.object) return;
+
+    std::string ownerCType = inferUdtTypeOfExpr(*ma.object);
+    const std::string prefix = "vb6_type_";
+    if (ownerCType.size() <= prefix.size()
+        || ownerCType.compare(0, prefix.size(), prefix) != 0) return;
+    std::string udtName = ownerCType.substr(prefix.size());
+
+    Symbol* udtSym = symTab_.lookupModule(udtName);
+    if (!udtSym) udtSym = symTab_.lookup(udtName);
+    if (!udtSym || udtSym->kind != SymbolKind::UserDefinedType) return;
+
+    std::string memLower = Symbol::toLower(ma.memberName);
+    std::string memLowerM = "m_" + memLower;
+    for (auto& mi : udtSym->udtMembers) {
+        std::string miLower = Symbol::toLower(mi.name);
+        if (miLower != memLower && miLower != memLowerM) continue;
+        outType = mi.type;
+        if (mi.type == Vb6Type::UserDefinedType && !mi.typeRefName.empty()) {
+            outUdtCType = "vb6_type_" + cIdent(mi.typeRefName);
+        }
+        return;
+    }
+}
+
+// Fix 100: 发射 ReDim 复杂目标 — ReDim arr(i).Field(dims) / obj.List(j).Field(dims)。
+// 目标左值直接由 emitExpr(*targetExpr) 发射: UDT 数组元素 arr(i) 生成
+// VB6_SA_AT(vb6_type_<UDT>, arr, i), 再串接 .Field。
+// UDT 动态数组成员在 C 结构体中就是 vb6_SafeArray1D* (cgen_decl.cpp TypeDecl),
+// 因此可直接对它做 Destroy/ReDim 赋值, 无需 Variant 包装分支。
+void CCodeGen::emitReDimComplexTarget(ReDimStmt& node) {
+    emitExpr(*node.targetExpr);
+    std::string cName = std::move(lastExpr_);
+
+    Vb6Type elemType = Vb6Type::Variant;
+    std::string udtCType;
+    resolveReDimComplexElemType(node, elemType, udtCType);
+    // 目标显式写了 As Type 时以 As 子句为准
+    if (node.asType) {
+        elemType = resolveArrayElemType(node.asType.get());
+        udtCType = resolveArrayUdtElemCType(node.asType.get());
+    }
+    if (udtCType.empty() && elemType == Vb6Type::UserDefinedType) {
+        // 推断不到 UDT 的 C 类型名: 回落 Variant 分配 (VB6_SA_AT 只用 data/lBound,
+        // Variant 元素尺寸最大 → 过分配不会越界), 避免 sizeof(未定义类型)
+        elemType = Vb6Type::Variant;
+    }
+    std::string saElemType = mapSaElemType(elemType);
+    bool isUdtArray = !udtCType.empty();
+
+    if (node.dimensions.empty()) return;
+    int dimCount = (int)node.dimensions.size();
+
+    if (dimCount == 1) {
+        auto& dim = node.dimensions[0];
+        std::string lBound = "0";
+        std::string uBound = "0";
+        if (dim.lower) { emitExpr(*dim.lower); lBound = std::move(lastExpr_); }
+        if (dim.upper) { emitExpr(*dim.upper); uBound = std::move(lastExpr_); }
+
+        if (node.preserve) {
+            c_.emitLine(cName + " = vb6_SafeArrayReDimPreserve1D(" + cName + ", "
+                      + lBound + ", " + uBound + ");");
+        } else {
+            c_.emitLine("vb6_SafeArrayDestroy1D(" + cName + ");");
+            std::string newVal = isUdtArray
+                ? ("vb6_SafeArrayReDim1D_Udt((int32_t)sizeof(" + udtCType + "), "
+                   + lBound + ", " + uBound + ")")
+                : ("vb6_SafeArrayReDim1D(" + saElemType + ", " + lBound + ", " + uBound + ")");
+            c_.emitLine(cName + " = " + newVal + ";");
+        }
+    } else {
+        // 多维 ReDim: bounds 局部数组名由目标左值净化得到 (仅需 C 标识符合法)
+        std::string boundsVar = "_redim_bounds";
+        for (char ch : cName) {
+            if (isalnum((unsigned char)ch) || ch == '_') boundsVar += ch;
+        }
+        c_.emitLine("vb6_SafeArrayBound " + boundsVar + "[] = {");
+        c_.indent();
+        for (int d = 0; d < dimCount; d++) {
+            auto& dim = node.dimensions[d];
+            std::string lb = "0", ub = "0";
+            if (dim.lower) { emitExpr(*dim.lower); lb = std::move(lastExpr_); }
+            if (dim.upper) { emitExpr(*dim.upper); ub = std::move(lastExpr_); }
+            std::string trailing = (d < dimCount - 1) ? "," : "";
+            c_.emitLine("{" + lb + ", (" + ub + " - " + lb + " + 1)}" + trailing);
+        }
+        c_.dedent();
+        c_.emitLine("};");
+        c_.emitLine("vb6_SafeArrayDestroyND((vb6_SafeArrayND*)" + cName + ");");
+        std::string newVal = isUdtArray
+            ? ("vb6_SafeArrayReDimND_Udt((int32_t)sizeof(" + udtCType + "), "
+               + std::to_string(dimCount) + ", " + boundsVar + ")")
+            : ("vb6_SafeArrayReDimND(" + saElemType + ", " + std::to_string(dimCount)
+               + ", " + boundsVar + ")");
+        c_.emitLine(cName + " = (vb6_SafeArray1D*)" + newVal + ";");
     }
 }
 

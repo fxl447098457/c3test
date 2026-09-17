@@ -380,3 +380,21 @@
     Vb6Type resolveArrayElemType(ASTNode* typeRef) const;
     // Fix 055: 从ArrayTypeRef获取UDT元素C类型名 (如"vb6_type_RECT"), 非UDT返回空串
     std::string resolveArrayUdtElemCType(ASTNode* typeRef) const;
+
+    // Fix 100: ReDim complex target (member chain with subscript)
+    void emitReDimComplexTarget(ReDimStmt& node);
+    // Fix 100: resolve element type of a complex ReDim target
+    void resolveReDimComplexElemType(const ReDimStmt& node, Vb6Type& outType,
+                                     std::string& outUdtCType) const;
+    // P6.4+: class-module default instance singleton
+    void emitClassDefaultInstance(Module& module);
+    // Fix 110: emit symbol support for .ctl/.pag designer sub-controls
+    void emitDesignerControlDecls(const FrmFormDesc& frmDesc);
+    // Fix 110: recursively emit designer control handle/array/COM declarations
+    void emitControlHandleDecls(const FrmFormDesc& frmDesc);
+    // Fix 107: lookup type-category symbol (Class/UDT/Enum/COM), ignoring proc/var
+    Symbol* lookupTypeSymbol(const std::string& name) const;
+    // Fix 112: find .ctl designer spec by control type name
+    const FrmFile* findUserControlSpec(const std::string& controlTypeName) const;
+    // Fix 092w: rewrite RHS assigned to a Byte array into byte-array semantics
+    std::string rewriteByteArrayValue(const std::string& value) const;

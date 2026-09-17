@@ -177,6 +177,20 @@
         }
 
         
+        // Image.Stretch from .frm (default=False; only set when explicitly True)
+        if (ctrl.controlType == FrmControlType::Image) {
+            auto stIt = ctrl.properties.find("Stretch");
+            if (stIt != ctrl.properties.end() && stIt->second.intValue != 0) {
+                std::string stNameLower = ctrl.controlName;
+                std::transform(stNameLower.begin(), stNameLower.end(), stNameLower.begin(), ::tolower);
+                std::string stHwnd = knownControlArrays_.count(stNameLower) ?
+                    ("vb6_CtrlArr_GetAt(&vb6_arr_" + cIdent(ctrl.controlName) + ", " +
+                     std::to_string(ctrl.index >= 0 ? ctrl.index : 0) + ")") :
+                    ("vb6_hwnd_" + cIdent(ctrl.controlName));
+                c_.emitLine("vb6_SetImageStretch((void*)" + stHwnd + ", 1);");
+            }
+        }
+
         // P20-35: Shape/Line属性初始化 (从.frm属性设置)
         if (ctrl.controlType == FrmControlType::Shape) {
             std::string shw = "vb6_hwnd_" + cIdent(ctrl.controlName);

@@ -105,3 +105,7 @@
 172 RCDATA "../rtl/core/vb6rtl/vb6rtl_financial.c"
 173 RCDATA "../rtl/core/vb6rtl/vb6rtl_com.c"
 174 RCDATA "../rtl/core/vb6rtl/vb6rtl_registry.c"
+
+// Fix 112/Fix 105: 工程内 UserControl 实例宿主 + UserControl/Ambient/Extender/PropertyPage 宿主头
+175 RCDATA "../rtl/core/vb6forms/vb6forms_uc.c"
+176 RCDATA "../rtl/core/vb6rtl/vb6rtl_userctl.h"

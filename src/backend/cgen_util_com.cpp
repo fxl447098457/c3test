@@ -89,6 +89,24 @@ std::string CCodeGen::resolveComValue(const std::string& unpackType) {
 // 与 Fix 092m 之前的默认行为一致, 不引入回归).
 std::string CCodeGen::classFieldComUnpackHint(const std::string& className,
                                               const std::string& memberName) const {
+    // Fix 110g: RTL 宿主 Font 结构 (vb6_ComIface_Font / vb6_cls_StdFont, 见
+    // rtl/core/vb6rtl/vb6rtl_userctl.h) 不在符号表里 —— `With UserControl.Font`
+    // 的字段写 (Charts 2020 各 UserControl 的 Property Set Font) 走本 helper 时
+    // 全部回退 "BSTR" → `.Size = vb6_ComGetStringProp(...)` 把 wchar_t* 赋给
+    // float (C2440), `.Bold` 同理. 按该结构的真实成员类型给出解包类型.
+    {
+        const std::string cls = Symbol::toLower(className);
+        if (cls == "stdfont" || cls == "font" || cls == "vb6_cls_stdfont"
+            || cls == "vb6_comiface_font") {
+            const std::string fld = Symbol::toLower(memberName);
+            if (fld == "name") return "BSTR";
+            if (fld == "size") return "Double";
+            if (fld == "bold" || fld == "italic" || fld == "underline"
+                || fld == "strikethrough" || fld == "weight" || fld == "charset") {
+                return "Long";
+            }
+        }
+    }
     if (className.empty() || !symTab_.moduleScope()) return "BSTR";
     const std::string want = Symbol::toLower(className);
     const std::string fld = Symbol::toLower(memberName);
@@ -173,6 +191,27 @@ std::string CCodeGen::canonicalClassMemberName(const std::string& className,
 
 
 std::string CCodeGen::comPackExpr(Expr& expr) {
+    // Fix 110p: 标识符的 C 层跟踪集合优先于 inferExprType. 声明为 Collection/Object
+    // 的变量 (C 类型 void*) 会被 inferExprType 误判为 Double → 生成
+    // vb6_ComPackDouble(void*) → C2440. 实测 Charts 2020 Form2.frm 524:
+    //   ucTreeMaps1.AddLineSeries vbNullString, vbBlue, Value, Lables
+    //   (Value / Lables As Collection) → vb6_ComPackDouble(Value) 等.
+    if (expr.kind == ASTNodeKind::IdentifierExpr) {
+        auto& id = static_cast<IdentifierExpr&>(expr);
+        std::string lower = id.name;
+        std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+        // Fix 110v: knownVariantVars_ 先于 knownObjectVars_ 判定. `Dim Value As Variant`
+        // 的局部变量在 For Each 语境下同时被登记进 knownObjectVars_ (旧代码把
+        // For-Each 元素一律当对象), 使 Variant 变量走 vb6_ComPackObject →
+        // C2172 "实参不是指针" (Form2.c 375: NewCollection.Add Value).
+        // vb6_ComPackValue 是 _Generic 路由宏 (VARIANT→identity / void*→Object),
+        // 对两种情况都正确, 因此优先它是安全的.
+        if (knownVariantVars_.count(lower)) return "vb6_ComPackValue";
+        if (knownObjectVars_.count(lower)) return "vb6_ComPackObject";
+        if (knownBstrVars_.count(lower)) return "vb6_ComPackBSTR";
+        if (knownDoubleVars_.count(lower)) return "vb6_ComPackDouble";
+        if (knownLongVars_.count(lower)) return "vb6_ComPackInt";
+    }
     // 根据表达式类型推断应该用的VARIANT封装函数
     Vb6Type vt = inferExprType(expr);
     switch (vt) {

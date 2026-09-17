@@ -201,3 +201,40 @@
         }
         return sym;
     }
+
+    // P6.4+: 接口 → 唯一实现类名 映射 (小写接口名 → 实现类规范名), 由 driver 预扫描提供.
+    void setInterfaceImplementers(const std::map<std::string, std::string>* m) {
+        interfaceImplementers_ = m;
+    }
+    // 查询接口唯一实现类名 (空串 = 无映射/多实现类, 不可用)
+    std::string singleImplementationClass(const std::string& ifaceName) const {
+        if (!interfaceImplementers_) return "";
+        std::string lower = ifaceName;
+        for (auto& ch : lower) {
+            if (ch >= 'A' && ch <= 'Z') ch = (char)(ch - 'A' + 'a');
+        }
+        auto it = interfaceImplementers_->find(lower);
+        if (it == interfaceImplementers_->end()) return "";
+        return it->second;
+    }
+
+    // P6.4+: 类模块默认实例 (VB_PredeclaredId=True), 小写类名 → 类规范名.
+    void setDefaultInstanceClasses(const std::map<std::string, std::string>* m) {
+        defaultInstanceClasses_ = m;
+    }
+    // 查询默认实例类名 (大小写不敏感); 非默认实例类返回空串
+    std::string defaultInstanceClassName(const std::string& name) const {
+        if (!defaultInstanceClasses_) return "";
+        std::string lower = name;
+        for (auto& ch : lower) {
+            if (ch >= 'A' && ch <= 'Z') ch = (char)(ch - 'A' + 'a');
+        }
+        auto it = defaultInstanceClasses_->find(lower);
+        if (it == defaultInstanceClasses_->end()) return "";
+        return it->second;
+    }
+    // 若 name 是默认实例类, 注册到 knownClassVars_, 返回类规范名; 否则返回空串.
+    std::string registerDefaultInstanceClass(const std::string& name);
+
+    // Fix 112: 工程内 UserControl (.ctl) 模块的设计器描述 (模块名小写 → FrmFile).
+    void setDesignerFiles(const std::map<std::string, FrmFile>* m) { designerFiles_ = m; }

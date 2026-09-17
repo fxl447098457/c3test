@@ -38,6 +38,12 @@
     // 窗体模块需要: WndProc声明、控件句柄变量、控件创建函数
     if (module.isFormModule && frmDesc) {
         emitFormFramework(*frmDesc, module);
+    } else if (frmDesc) {
+        // Fix 110: .ctl/.pag — 只发射设计期子控件符号 (Timer/PictureBox 等).
+        // 不发射窗体窗口框架: UserControl/PropertyPage 对外是类, 其可见内容由
+        // 代码绘制到 UserControl.hDC; 但 `Timer1.Interval = 100` /
+        // `Picture1.ScaleWidth` 这类设计期子控件成员必须能解析.
+        emitDesignerControlDecls(*frmDesc);
     }
 
     // 5. Declare (外部函数声明)

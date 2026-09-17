@@ -126,3 +126,19 @@ intptr_t __stdcall vb6_di_SystemTimeToVariantTime(void* lpSystemTime, double* pv
 intptr_t __stdcall vb6_di_VariantTimeToSystemTime(double vTime, void* lpSystemTime) {
     return ((intptr_t (WINAPI *)(double, void*))VariantTimeToSystemTime)(vTime, lpSystemTime);
 }
+
+/* Fix 111b: ChooseColorA (Charts 2020 ppProgressCircular) 需要 comdlg32.lib */
+#pragma comment(lib, "comdlg32.lib")
+intptr_t __stdcall vb6_di_ChooseColorA(void* pChoosecolor) {
+    return ((intptr_t (WINAPI *)(void*))ChooseColorA)(pChoosecolor);
+}
+
+/* CreateCompatibleBitmap */
+
+intptr_t __stdcall vb6_di_OleTranslateColor(intptr_t lOleColor, intptr_t lHPalette, intptr_t lColorRef) {
+    return ((intptr_t (WINAPI *)(intptr_t, intptr_t, intptr_t))OleTranslateColor)(lOleColor, lHPalette, lColorRef);
+}
+
+/* PtInRect */
+
+

@@ -21,6 +21,7 @@
     // === 类模块: 生成工厂函数 ===
     if (isClassModule_ && !currentClassIsInterface) {  // P6.4: 接口类不生成工厂/析构函数
         emitClassFactory(module);
+        emitClassDefaultInstance(module);  // P6.4+: VB_PredeclaredId=True 默认实例单例
     }
 
     // === P6.5: 生成事件处理器包装函数 ===

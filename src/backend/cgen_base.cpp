@@ -52,10 +52,42 @@ FrmControlType controlTypeFromName(const std::string& name) {
 // CodeEmitter
 // ============================================================
 
+// Fix 109: 生成 C 里 `UserControl.Font` 的成员访问基址改写.
+// VB6 中 UserControl.Font 是对象, 生成代码写作 `vb6_UserControl_Font.<成员>`
+// (VB6 点语法). RTL 里该宿主对象是 vb6_ComIface_Font* 指针, 指针 + '.' 触发 C2224.
+// 生成端散落在读/写两处, 这里在写出前统一修正: 仅当该标识符后面紧跟 '.' 时
+// 改写为 '->', 不触碰其它表达式与注释.
+static void fixupAmbientFontMemberAccess(std::string& line) {
+    static const char kBase[] = "vb6_UserControl_Font";
+    const size_t kLen = sizeof(kBase) - 1;
+    size_t pos = 0;
+    while ((pos = line.find(kBase, pos)) != std::string::npos) {
+        size_t after = pos + kLen;
+        // 排除更长标识符 (如 vb6_UserControl_FontObj)
+        bool longer = (after < line.size()) &&
+                      (std::isalnum(static_cast<unsigned char>(line[after])) || line[after] == '_');
+        bool prevOk = (pos == 0) ||
+                      !(std::isalnum(static_cast<unsigned char>(line[pos - 1])) || line[pos - 1] == '_');
+        if (!longer && prevOk && after < line.size() && line[after] == '.') {
+            line.replace(after, 1, "->");
+            pos = after + 2;
+        } else {
+            pos = after;
+        }
+    }
+}
+
 void CodeEmitter::emitLine(const std::string& line) {
     flushPending();
     for (int i = 0; i < indentLevel_; i++) {
         oss_ << "    ";  // 4空格缩进
+    }
+    if (line.find("vb6_UserControl_Font") != std::string::npos) {
+        // Fix 109: 仅在该标识符出现时做一次修正 (见上).
+        std::string fixed = line;
+        fixupAmbientFontMemberAccess(fixed);
+        oss_ << fixed << "\n";
+        return;
     }
     oss_ << line << "\n";
 }

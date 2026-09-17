@@ -119,31 +119,100 @@ std::unique_ptr<ReDimStmt> Parser::parseReDimStmt() {
             break;
         }
     }
+    // Fix 100: 复杂目标 (带下标的成员链) — ReDim m_Serie(i).PT(n)
+    // 解析策略 (无回溯): 先按原逻辑取点链名, 再解析 '(' ... ')'。
+    // 若该 ')' 之后紧跟 '.', 说明刚才解析到的其实是「下标」而非 ReDim 维度 →
+    // 把它包装成 IndexOrCallExpr 作为目标的一部分, 继续解析 .Member 与后续括号,
+    // 直到某个 ')' 之后不是 '.' 为止, 那一组括号才是真正的 ReDim 维度。
+    //
+    // 返回: 括号内的维度/下标列表。To 语法在维度中表示下界, 在下标中非法
+    // (仍解析, 复杂路径取 upper)。
+    auto parseParenList = [this]() -> std::vector<ReDimStmt::Dimension> {
+        std::vector<ReDimStmt::Dimension> list;
+        do {
+            ReDimStmt::Dimension dim;
+            dim.lower = nullptr;
+            dim.upper = parseExpression();
+            if (match(TokenKind::To)) {
+                dim.lower = std::move(dim.upper);
+                dim.upper = parseExpression();
+            }
+            list.push_back(std::move(dim));
+        } while (match(TokenKind::Comma));
+        return list;
+    };
+
+    // 由点链字符串构造表达式 (复用于复杂目标的基名)。
+    // 前置 '.' 表示 With 块成员 (WithMemberExpr), 其余逐段构造 MemberAccessExpr。
+    auto buildNameExpr = [&](const std::string& nm, SourceLocation l) -> ExprPtr {
+        if (!nm.empty() && nm[0] == '.') {
+            return std::make_unique<WithMemberExpr>(l, nm.substr(1));
+        }
+        ExprPtr e;
+        size_t pos = 0;
+        for (;;) {
+            size_t d = nm.find('.', pos);
+            std::string seg = (d == std::string::npos) ? nm.substr(pos)
+                                                       : nm.substr(pos, d - pos);
+            if (!e) e = std::make_unique<IdentifierExpr>(l, seg);
+            else e = std::make_unique<MemberAccessExpr>(l, std::move(e), seg);
+            if (d == std::string::npos) break;
+            pos = d + 1;
+        }
+        return e;
+    };
+
+    // 把一组下标维度包装为 IndexOrCallExpr(base[i, j])
+    auto wrapIndex = [](ExprPtr base, std::vector<ReDimStmt::Dimension>& idxList,
+                        SourceLocation l) -> ExprPtr {
+        auto call = std::make_unique<IndexOrCallExpr>(l, std::move(base));
+        for (auto& d : idxList) {
+            call->positional.push_back(d.lower ? std::move(d.lower) : std::move(d.upper));
+        }
+        return call;
+    };
+
     expect(TokenKind::LeftParen, DiagnosticID::ParseExpectedToken,
            "expected '(' after ReDim variable");
 
-    std::vector<ReDimStmt::Dimension> dims;
-    do {
-        ReDimStmt::Dimension dim;
-        dim.lower = nullptr;
-        dim.upper = parseExpression();
-        if (match(TokenKind::To)) {
-            dim.lower = std::move(dim.upper);
-            dim.upper = parseExpression();
-        }
-        dims.push_back(std::move(dim));
-    } while (match(TokenKind::Comma));
+    std::vector<ReDimStmt::Dimension> dims = parseParenList();
 
     expect(TokenKind::RightParen, DiagnosticID::ParseExpectedToken,
            "expected ')' after ReDim dimensions");
+
+    ExprPtr targetExpr;
+    if (cur_.kind == TokenKind::Dot) {
+        // 上一步解析到的 '(' ... ')' 实为下标 → 转入复杂目标路径
+        targetExpr = wrapIndex(buildNameExpr(varName, loc), dims, loc);
+        for (;;) {
+            expect(TokenKind::Dot, DiagnosticID::ParseExpectedToken,
+                   "expected '.' in ReDim target");
+            Token memTok = expectName("expected member name in ReDim target");
+            targetExpr = std::make_unique<MemberAccessExpr>(
+                loc, std::move(targetExpr), memTok.text);
+            if (cur_.kind != TokenKind::LeftParen) break;
+            advance();  // consume '('
+            auto next = parseParenList();
+            expect(TokenKind::RightParen, DiagnosticID::ParseExpectedToken,
+                   "expected ')' in ReDim target");
+            if (cur_.kind == TokenKind::Dot) {
+                targetExpr = wrapIndex(std::move(targetExpr), next, loc);
+                continue;
+            }
+            dims = std::move(next);  // 这才是真正的 ReDim 维度
+            break;
+        }
+    }
 
     TypeRefPtr asType;
     if (match(TokenKind::As)) {
         asType = parseTypeRef();
     }
 
-    return std::make_unique<ReDimStmt>(loc, preserve, varName,
+    auto stmt = std::make_unique<ReDimStmt>(loc, preserve, varName,
         std::move(dims), std::move(asType));
+    stmt->targetExpr = std::move(targetExpr);
+    return stmt;
 }
 
 StmtPtr Parser::parseConstStmtInBody() {
@@ -262,6 +331,25 @@ StmtPtr Parser::parseLabelOrAssignmentOrCall() {
     // 同时允许 +,-,*,/,& 等运算符在目标内出现 (如 arr(i+1))。
     auto expr = parseExpression(9);
 
+    // Fix 101: parseExpression 允许在无法构造表达式时返回 nullptr (例如 With 块外的
+    //   '.Member'、一元 '-'/'Not' 后缺操作数、语句起始出现无法作为表达式前缀的 token)。
+    //   此前该 nullptr 会一路传到本函数末尾被当作左值解引用 (expr->kind / ma.object->kind),
+    //   在 Charts 2020 的 ppProgressCircular.pag 上触发 0xC0000005 解析期崩溃。
+    //   这里先判空: parseExpression 已报过具体错误, 只需消费掉本行剩余 token,
+    //   返回 nullptr (parseStatement 的调用方均能处理空语句) 即可安全恢复。
+    if (!expr) {
+        diag_.error(DiagnosticID::ParseExpectedExpression, loc,
+            "无法解析语句起始的表达式 (token='" + cur_.text + "', kind=" +
+            std::string(Token::kindToString(cur_.kind)) + "), 跳过该行");
+        while (cur_.kind != TokenKind::NewLine && cur_.kind != TokenKind::Colon &&
+               cur_.kind != TokenKind::EndOfFile && cur_.kind != TokenKind::End &&
+               cur_.kind != TokenKind::Next && cur_.kind != TokenKind::Loop &&
+               cur_.kind != TokenKind::Wend) {
+            advance();
+        }
+        return nullptr;
+    }
+
     // Fix 092r: Debug.Assert 的条件表达式可含顶层 '=' 比较:
     //   Debug.Assert (lSig And &HFF&) = (&H201 And &HFF&)
     // 上面 parseExpression(9) 已吃掉 `Debug.Assert (<cond>)`, 若这里再按赋值处理就会
@@ -313,6 +401,38 @@ StmtPtr Parser::parseLabelOrAssignmentOrCall() {
         }
     }
 
+    // Fix 110y: VB6 语句级「带括号调用 vs 无括号调用」歧义回退.
+    // VB6 中在**语句**上下文里 `obj.Method (a) * b, (c)` 按**无括号调用**解析:
+    // 第一个实参是完整表达式 `(a) * b`. 但表达式解析器见到 `Method (` 一律当作
+    // 带括号调用, 于是语句变成 `BinOp(调用结果, b)` 后面再跟 `, (c)` → 生成
+    //   (f((a)) * b)((c))
+    // 这种畸形 C (Charts 2020 LabelPlus.ctl:1371
+    //   UserControl.Size (lWidth + 1) * Screen.TwipsPerPixelX, (lHeight + 1) * Screen.TwipsPerPixelY
+    //   → C2064 "项不会计算为接受 347 个参数的函数").
+    // 这里在语句级按形状回退: 若最左叶是「obj.Member(恰好 1 个实参)」的调用,
+    // 且语句在逗号后还要继续 (无括号调用的第二个实参), 则把该调用折叠回其实参,
+    // 并以 obj.Member 作为真正的 callee.
+    // 仅当外层确实是二元运算 (即"调用结果参与运算") 时回退, 避免影响正常的
+    // `x = f(a) * b` 之外的单实参调用语句 (`obj.M (a)` 单独成句仍是合法调用).
+    ExprPtr calleeOverride110y;
+    ExprPtr leadingArg110y;
+    if (cur_.kind == TokenKind::Comma && expr->kind == ASTNodeKind::BinaryExpr) {
+        ExprPtr* leafSlot = &expr;
+        while ((*leafSlot)->kind == ASTNodeKind::BinaryExpr) {
+            leafSlot = &static_cast<BinaryExpr&>(**leafSlot).left;
+        }
+        if ((*leafSlot)->kind == ASTNodeKind::IndexOrCallExpr) {
+            auto& inner = static_cast<IndexOrCallExpr&>(**leafSlot);
+            if (inner.callee && inner.callee->kind == ASTNodeKind::MemberAccessExpr
+                && inner.named.empty() && inner.positional.size() == 1) {
+                calleeOverride110y = std::move(inner.callee);
+                ExprPtr innerArg = std::move(inner.positional[0]);
+                *leafSlot = std::move(innerArg);
+                leadingArg110y = std::move(expr);
+            }
+        }
+    }
+
     // VB6 无括号调用: Sub arg1, arg2 / Debug.Print "text"
     // 如果表达式后还有同一行的 token (非 NewLine/Colon/EndOfFile),
     // 且不是中缀运算符 (但前缀运算符如 - 可开始新参数), 则视为无括号调用的参数列表
@@ -320,7 +440,10 @@ StmtPtr Parser::parseLabelOrAssignmentOrCall() {
         cur_.kind != TokenKind::EndOfFile && 
         (!isInfixOperator(cur_.kind) || isPrefixOperator(cur_.kind) || isDebugPrint)) {
         // 将表达式包装为 IndexOrCallExpr, 追加参数
-        auto call = std::make_unique<IndexOrCallExpr>(loc, std::move(expr));
+        auto call = std::make_unique<IndexOrCallExpr>(loc,
+            calleeOverride110y ? std::move(calleeOverride110y) : std::move(expr));
+        // Fix 110y: 折叠出来的第一个实参 (见上方歧义回退)
+        if (leadingArg110y) call->positional.push_back(std::move(leadingArg110y));
 
         // 解析参数列表
         // VB6 中逗号和分号都分隔参数 (分号是 Print 的位置修饰符)

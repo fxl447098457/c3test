@@ -2,6 +2,8 @@
 #include <algorithm>
 #include <cctype>
 #include <iostream>
+#include <cstdio>
+#include <cstdlib>
 #include <functional>
 
 namespace vb6c3 {
@@ -17,6 +19,12 @@ std::string CCodeGen::inferClassTypeOfExpr(const ASTNode& expr) const {
             std::string lower = Symbol::toLower(id.name);
             auto it = knownClassVars_.find(lower);
             if (it != knownClassVars_.end()) return it->second;
+            if (std::getenv("C3_DBG110") && lower == "usercontrol") {
+                const Symbol* s2 = symTab_.lookup(id.name);
+                std::fprintf(stderr, "[DBG110] inferClassTypeOfExpr(UserControl) mod=%s sym=%p kind=%d vtn=%s\n",
+                             moduleName_.c_str(), (const void*)s2, s2 ? (int)s2->kind : -1,
+                             s2 ? s2->variableTypeName.c_str() : "<null>");
+            }
             // Fix 084g: 局部变量/参数声明为 As ClassName (如 Dim Response As cHttpServerResponse)
             // 不在 knownClassVars_ (跨模块类变量表) 中, 从符号表 variableTypeName 推断类名
             const Symbol* sym = symTab_.lookup(id.name);
@@ -185,6 +193,23 @@ std::string CCodeGen::inferUdtTypeOfExpr(const ASTNode& expr) const {
                 std::string lower = Symbol::toLower(id.name);
                 auto it = arrayUdtElemTypes_.find(lower);
                 if (it != arrayUdtElemTypes_.end()) return it->second;
+            }
+            // Fix 110c: UDT 数组的**成员**数组 — m_Serie(i).Rects(j).
+            // callee 是 MemberAccessExpr(父对象, 成员名), 成员本身是 UDT 数组
+            // (如 tSerie.Rects() As RectL) → 元素类型 = 成员的 UDT 类型.
+            // 递归推断 callee 的 UDT 类型即可 (tSerie → Rects → RectL).
+            if (call.callee && call.callee->kind == ASTNodeKind::MemberAccessExpr) {
+                std::string elemUdt = inferUdtTypeOfExpr(*call.callee);
+                if (!elemUdt.empty()) return elemUdt;
+            }
+            // Fix 110s: With 块内的成员 UDT 数组 — With .Rects(j).
+            // callee 是 WithMemberExpr (当前 With 对象的字段), 字段本身是 UDT 数组
+            // (如 tSerie.Rects() As RectF) → 元素类型 = 字段的 UDT 类型.
+            // 此前只处理 MemberAccessExpr, WithMemberExpr 落空 → With 临时变量退化为
+            // void* → `(void*)VB6_SA_AT(vb6_type_RectF, ...)` C2440 (ucTreeMaps.c 1878).
+            if (call.callee && call.callee->kind == ASTNodeKind::WithMemberExpr) {
+                std::string elemUdt = inferUdtTypeOfExpr(*call.callee);
+                if (!elemUdt.empty()) return elemUdt;
             }
             return "";
         }

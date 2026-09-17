@@ -102,6 +102,10 @@
         // 类工厂函数声明
         h_.emitLine(clsStruct + "* " + clsStruct + "_New(void);");
         h_.emitLine("void " + clsStruct + "_Destroy(" + clsStruct + "* me);");
+        // P6.4+: 默认实例 (VB_PredeclaredId=True) 惰性单例访问器, 跨模块可见
+        if (!defaultInstanceClassName(moduleName_).empty()) {
+            h_.emitLine(clsStruct + "* " + clsStruct + "_Default(void);");
+        }
         h_.emitBlank();
 
         // P6.4: 生成接口vtable结构体 + 包装类型 + 全局vtable实例

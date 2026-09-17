@@ -150,35 +150,35 @@ bool Driver::runParser(const CompileOptions& options) {
         // 根据文件扩展名判断模块类型
         bool isClassModule = false;
         bool isFormModule = false;
-        FrmFile frmDesc;  // P7: 窗体描述 (仅.frm有效)
+        bool isControlModule = false;
+        bool isPropertyPageModule = false;
+        FrmFile frmDesc;  // Designer metadata for .frm/.ctl/.pag
         if (filePath.size() >= 4) {
             std::string ext = filePath.substr(filePath.size() - 4);
             for (auto& c : ext) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-            isClassModule = (ext == ".cls");
+            isControlModule = (ext == ".ctl");
+            isPropertyPageModule = (ext == ".pag");
+            isClassModule = (ext == ".cls" || isControlModule || isPropertyPageModule);
             isFormModule = (ext == ".frm");  // P7: 窗体模块
         }
 
         // M22: 统一编码处理 — .frm经由FrmParser读取(已含编码转换+代码段提取),
         // .bas/.cls经由SourceBuffer::fromFile读取(含编码转换)
         std::unique_ptr<SourceBuffer> buffer;
-        if (isFormModule) {
-            // P7: 解析.frm窗体描述, 提取VB代码段
+        if (isFormModule || isControlModule || isPropertyPageModule) {
+            // Designer headers are not VB statements; extract the code section.
             // M22: FrmParser.parse已使用readAndConvertToUtf8, 返回的codeSection是UTF-8
             frmDesc = FrmParser::parse(filePath);
             // P24: 设置 .frx 文件路径 (与 .frm 同目录同名)
             {
                 auto frxPath = frmDesc.frmFilePath;
-                frxPath.replace_extension(".frx");
+                frxPath.replace_extension(isControlModule ? ".ctx" : (isPropertyPageModule ? ".pgx" : ".frx"));
                 if (std::filesystem::exists(frxPath)) {
                     frmDesc.form.frxFilePath = frxPath;
                 }
             }
-            if (!frmDesc.codeSection.empty()) {
-                buffer = SourceBuffer::fromString(filePath, frmDesc.codeSection);
-            } else {
-                // 无代码段的.frm: 用fromFile读取完整内容
-                buffer = SourceBuffer::fromFile(filePath);
-            }
+            // Empty designer code is valid; do not feed the header to the VB parser.
+            buffer = SourceBuffer::fromString(filePath, frmDesc.codeSection);
         } else {
             buffer = SourceBuffer::fromFile(filePath);
         }
@@ -229,7 +229,14 @@ bool Driver::runParser(const CompileOptions& options) {
                 module->moduleName = pathToUtf8(p.stem());
             }
             // P7: 保存窗体描述 (此时moduleName已从Attribute VB_Name或文件名确定)
-            if (isFormModule && module->isFormModule) {
+            // Fix 110: .ctl/.pag 与 .frm 同样需要设计期子控件元数据.
+            // 背景: VB6 的 UserControl/PropertyPage 可放置设计期子控件
+            // (Begin VB.Timer Timer1 / Begin VB.PictureBox Picture1 ...), 代码里
+            // `Timer1.Interval = 100` 必须走"控件属性"路径
+            // (vb6_SetTimerInterval(vb6_hwnd_Timer1, 100)). 若缺元数据,
+            // knownFormControls_ 为空 → 落入 cgen_assign/cgen_expr_member 的
+            // "Module.member" 回退 → vb6_Timer1_Interval 未声明标识符 (C2065).
+            if (isFormModule || isControlModule || isPropertyPageModule) {
                 frmFiles_[module->moduleName] = std::move(frmDesc);
             }
 

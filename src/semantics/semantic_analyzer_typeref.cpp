@@ -48,7 +48,13 @@ Vb6Type SemanticAnalyzer::resolveTypeRef(ASTNode* typeRef) {
                 // 若返回 Variant, 则 ByVal Collection 参数会被 Fix 024 P2 错误地用
                 // vb6_VariantFromValue() 包装 void* 指针 → C2172 (实参不是指针).
                 static const std::unordered_set<std::string> vb6BuiltinObjTypes = {
-                    "Collection", "Forms", "ErrObject", "App", "Screen", "Printer", "Clipboard"
+                    "Collection", "Forms", "ErrObject", "App", "Screen", "Printer", "Clipboard",
+                    // VB6 内建对象类型: 通用控件/窗体都是对象引用 (void*).
+                    // 未识别会被宽松回退为 Variant, 与 cgen_base mapTypeRef 的
+                    // "未知类型 → void*" 兜底不一致 → ByRef 对象实参被误包成
+                    // VARIANT 复合字面量 (BalloonTooltips cTT.CreateToolTip
+                    // ParentControl As Control → *objControl 读到 vt).
+                    "Control", "Form"
                 };
                 // Fix 040a: strip VBA. prefix (e.g. VBA.ErrObject → ErrObject)
                 std::string typeName = simple.name;

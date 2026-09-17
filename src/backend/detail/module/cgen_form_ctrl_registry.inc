@@ -20,12 +20,25 @@
             std::string ctrlNameLower = ctrl.controlName;
             std::transform(ctrlNameLower.begin(), ctrlNameLower.end(), ctrlNameLower.begin(), ::tolower);
             if (!ctrlNameLower.empty()) {
-                if (!ctrlArraySeen.insert(ctrlNameLower).second) {
-                    // 同名控件出现多次 = 控件数组
+                const bool duplicateName = !ctrlArraySeen.insert(ctrlNameLower).second;
+                if (ctrl.index >= 0 || duplicateName) {
+                    // 单元控件 Index=7 也必须生成数组句柄及带 Index 的事件分发.
                     knownControlArrays_[ctrlNameLower] = true;
                 }
                 knownFormControls_[ctrlNameLower] = ctrl.controlType;
                 knownFormControlOriginalNames_[ctrlNameLower] = ctrl.controlName;
+                // Fix 112: 工程内 UserControl 子控件 (Begin Proyecto1.ucChartBar ucChartBar1)
+                // — 记录 控件名 → .ctl 模块名, 使 `ucChartBar1.AddSerie(...)` 走类成员
+                // 直接调用 (vb6_ucChartBar_AddSerie) 而非按 HWND 走 COM 晚绑定.
+                if (const FrmFile* ucSpec = findUserControlSpec(ctrl.controlTypeName)) {
+                    // 保留 VB_Name 原大小写: 生成 vb6_cls_ucChartBar (与类结构体一致)
+                    if (!ucSpec->form.formName.empty()) {
+                        knownUserControlCtrlVars_[ctrlNameLower] = ucSpec->form.formName;
+                        // 同时登记为类实例变量: 使 IndexOrCallExpr 的可选参数补全
+                        // (Fix 090c/Fix 042b) 能按该类形参表展开.
+                        knownClassVars_[ctrlNameLower] = ucSpec->form.formName;
+                    }
+                }
             }
             for (const auto& child : ctrl.children) {
                 registerCtrlRec(child);
@@ -69,45 +82,15 @@
     h_.emitLine("void vb6_form_show_" + cIdent(formName) + "(void* hMDIClient);");
 
     // 控件句柄变量 (P7.6: 数组控件使用vb6_CtrlArr, 非数组使用void*)
-    {
-        std::unordered_set<std::string> emitted;
-        for (const auto& ctrl : frmDesc.formControl.children) {
-            std::string ctrlNameLower = ctrl.controlName;
-            std::transform(ctrlNameLower.begin(), ctrlNameLower.end(), ctrlNameLower.begin(), ::tolower);
-            if (emitted.count(ctrlNameLower)) continue;
-            if (!FrmParser::controlTypeToWin32Class(ctrl.controlType)) {
-                // P7.9: WebBrowser needs HWND declaration though no Win32 class
-                if (ctrl.controlType == FrmControlType::WebBrowser) {
-                    c_.emitLine("static void* vb6_hwnd_" + cIdent(ctrl.controlName) + " = NULL;");
-                    emitted.insert(ctrlNameLower);
-                }
-                // Fix 086: Timer控件无Win32窗口, 但窗体代码引用 vb6_hwnd_<Timer>
-                // (Timer1.Enabled/Interval 走控件属性路径). 声明为NULL静态变量,
-                // RTL 的 vb6_SetTimerEnabled/vb6_SetTimerInterval 对 NULL 是安全空操作.
-                if (ctrl.controlType == FrmControlType::Timer) {
-                    c_.emitLine("static void* vb6_hwnd_" + cIdent(ctrl.controlName) + " = NULL;");
-                    emitted.insert(ctrlNameLower);
-                }
-                // ActiveX控件 (ImageList等): 生成IDispatch*变量, 运行时CoCreateInstance
-                if (ctrl.controlType == FrmControlType::ImageList ||
-                    ctrl.controlType == FrmControlType::Toolbar ||
-                    ctrl.controlType == FrmControlType::StatusBar ||
-                    ctrl.controlType == FrmControlType::CommonDialog) {
-                    c_.emitLine("static void* vb6_com_" + cIdent(ctrl.controlName) + " = NULL;  /* IDispatch* */");
-                    emitted.insert(ctrlNameLower);
-                }
-                continue;
-            }
-            if (knownControlArrays_.count(ctrlNameLower)) {
-                c_.emitLine("static vb6_CtrlArr vb6_arr_" + cIdent(ctrl.controlName) + ";");
-            } else {
-                c_.emitLine("static void* vb6_hwnd_" + cIdent(ctrl.controlName) + " = NULL;");
-            }
-            emitted.insert(ctrlNameLower);
-        }
-    }
+    // Fix 110: 递归到嵌套容器 (Frame 内的 Picture/TextBox), 并为所有设计期
+    // 控件 (含工程内 UserControl 实例 / 第三方 ActiveX / 未知类型) 发射符号 —
+    // 此前对 controlTypeToWin32Class()==nullptr 的类型直接 continue, 导致
+    // Form2 上的 vb6_hwnd_ucPieChart1 等未声明 (C2065).
+    emitControlHandleDecls(frmDesc);
 
     c_.emitLine("static int vb6_formLoading_" + cIdent(formName) + " = 0;");
+    // Fix 112: Form_Load 是否已执行 (首次 Form_Resize 必须晚于 Form_Load)
+    c_.emitLine("static int vb6_formLoaded_" + cIdent(formName) + " = 0;");
 
     c_.emitBlank();
 

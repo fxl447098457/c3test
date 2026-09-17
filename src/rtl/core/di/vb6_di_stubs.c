@@ -69,6 +69,30 @@ intptr_t __stdcall vb6_di_FillRect(intptr_t a, RECT* b, intptr_t c) {
     return (intptr_t)FillRect((HDC)(uintptr_t)a, b, (HBRUSH)(uintptr_t)c);
 }
 
+/* P6.4c: BalloonTooltips 需要的 user32 转发 (声明省略 LPARAM 名字, 按 C3 生成的
+ * intptr_t 签名逐一转发). Fix 082f: 与生成头文件 vb6_di_ 原型逐参一致. */
+intptr_t __stdcall vb6_di_CreateWindowExW(intptr_t dwExStyle, intptr_t lpClassName, intptr_t lpWindowName, intptr_t dwStyle, intptr_t X, intptr_t Y, intptr_t nWidth, intptr_t nHeight, intptr_t hWndParent, intptr_t hMenu, intptr_t hInstance, void* lpParam) {
+    return (intptr_t)(uintptr_t)CreateWindowExW((DWORD)dwExStyle, (LPCWSTR)(uintptr_t)lpClassName, (LPCWSTR)(uintptr_t)lpWindowName, (DWORD)dwStyle, (int)X, (int)Y, (int)nWidth, (int)nHeight, (HWND)(uintptr_t)hWndParent, (HMENU)(uintptr_t)hMenu, (HINSTANCE)(uintptr_t)hInstance, lpParam);
+}
+intptr_t __stdcall vb6_di_GetWindowLongW(intptr_t hWnd, intptr_t nIndex) {
+    return (intptr_t)(uintptr_t)GetWindowLongW((HWND)(uintptr_t)hWnd, (int)nIndex);
+}
+intptr_t __stdcall vb6_di_TrackMouseEvent(intptr_t lpEventTrack) {
+    return (intptr_t)TrackMouseEvent((LPTRACKMOUSEEVENT)(uintptr_t)lpEventTrack);
+}
+/* SetWindowTheme 在 uxtheme.dll (无 user32 导出), 动态解析避免引入 uxtheme.lib. */
+intptr_t __stdcall vb6_di_SetWindowTheme(intptr_t hWnd, intptr_t pszSubAppName, intptr_t pszSubIdList) {
+    typedef intptr_t(WINAPI* fnSetWindowTheme)(intptr_t, intptr_t, intptr_t);
+    static fnSetWindowTheme pfn = NULL;
+    if (!pfn) {
+        HMODULE h = GetModuleHandleW(L"uxtheme.dll");
+        if (!h) h = LoadLibraryW(L"uxtheme.dll");
+        if (h) pfn = (fnSetWindowTheme)GetProcAddress(h, "SetWindowTheme");
+    }
+    if (pfn) return pfn(hWnd, pszSubAppName, pszSubIdList);
+    return 0;
+}
+
 /* KERNEL32 forwarding stubs */
 intptr_t __stdcall vb6_di_WideCharToMultiByte(intptr_t a, intptr_t b, intptr_t c, intptr_t d, void* e, intptr_t f, intptr_t g, intptr_t h) {
     return (intptr_t)WideCharToMultiByte((UINT)a, (DWORD)b, (LPCWSTR)(uintptr_t)c, (int)d, (LPSTR)(uintptr_t)e, (int)f, (LPCSTR)(uintptr_t)g, (LPBOOL)(uintptr_t)h);
@@ -111,6 +135,51 @@ intptr_t __stdcall vb6_di_ord_413(intptr_t hWnd, intptr_t wMsg, intptr_t wParam,
         }
     }
     if (pfn) return pfn(hWnd, wMsg, wParam, lParam);
+    return 0;
+}
+
+/* P6.4c: COMCTL32 ordinal #410/#411/#412 (SetWindowSubclass/GetWindowSubclass/
+ * RemoveWindowSubclass). 同类序数优先 + 导出名兜底的动态解析. */
+intptr_t __stdcall vb6_di_ord_410(intptr_t hWnd, intptr_t pfnSubclass, intptr_t uIdSubclass, intptr_t dwRefData) {
+    typedef intptr_t (WINAPI *fnSetWindowSubclass)(intptr_t, intptr_t, intptr_t, intptr_t);
+    static fnSetWindowSubclass pfn = NULL;
+    if (!pfn) {
+        HMODULE h = GetModuleHandleW(L"comctl32.dll");
+        if (!h) h = LoadLibraryW(L"comctl32.dll");
+        if (h) {
+            pfn = (fnSetWindowSubclass)GetProcAddress(h, (LPCSTR)410);
+            if (!pfn) pfn = (fnSetWindowSubclass)GetProcAddress(h, "SetWindowSubclass");
+        }
+    }
+    if (pfn) return pfn(hWnd, pfnSubclass, uIdSubclass, dwRefData);
+    return 0;
+}
+intptr_t __stdcall vb6_di_ord_411(intptr_t hWnd, intptr_t pfnSubclass, intptr_t uIdSubclass, int32_t* pdwRefData) {
+    typedef intptr_t (WINAPI *fnGetWindowSubclass)(intptr_t, intptr_t, intptr_t, DWORD*);
+    static fnGetWindowSubclass pfn = NULL;
+    if (!pfn) {
+        HMODULE h = GetModuleHandleW(L"comctl32.dll");
+        if (!h) h = LoadLibraryW(L"comctl32.dll");
+        if (h) {
+            pfn = (fnGetWindowSubclass)GetProcAddress(h, (LPCSTR)411);
+            if (!pfn) pfn = (fnGetWindowSubclass)GetProcAddress(h, "GetWindowSubclass");
+        }
+    }
+    if (pfn) return pfn(hWnd, pfnSubclass, uIdSubclass, pdwRefData);
+    return 0;
+}
+intptr_t __stdcall vb6_di_ord_412(intptr_t hWnd, intptr_t pfnSubclass, intptr_t uIdSubclass) {
+    typedef intptr_t (WINAPI *fnRemoveWindowSubclass)(intptr_t, intptr_t, intptr_t);
+    static fnRemoveWindowSubclass pfn = NULL;
+    if (!pfn) {
+        HMODULE h = GetModuleHandleW(L"comctl32.dll");
+        if (!h) h = LoadLibraryW(L"comctl32.dll");
+        if (h) {
+            pfn = (fnRemoveWindowSubclass)GetProcAddress(h, (LPCSTR)412);
+            if (!pfn) pfn = (fnRemoveWindowSubclass)GetProcAddress(h, "RemoveWindowSubclass");
+        }
+    }
+    if (pfn) return pfn(hWnd, pfnSubclass, uIdSubclass);
     return 0;
 }
 

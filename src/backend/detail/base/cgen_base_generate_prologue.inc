@@ -9,6 +9,10 @@
     externalModules_ = externalModules;  // M22: 保存外部模块集合
     isClassModule_ = module.isClassModule;
     isFormModule_ = module.isFormModule;
+    // Fix 110: .ctl/.pag 的设计期子控件模块 (非 .frm 但有设计器描述).
+    // 这些模块的可见内容由代码绘制, 但 `Timer1.Interval` / `Picture1.ScaleWidth`
+    // 等设计期子控件成员仍需句柄符号与控件名映射.
+    isDesignerModule_ = (frmDesc != nullptr) && !module.isFormModule;
     isDll_ = isDll;  // P6.6
     dllProgId_ = dllProgId;  // P6.6
     emittedSymbols_.clear();

@@ -187,7 +187,23 @@
         }
 
         auto* memSym = symTab_.lookupModule(node.memberName);
-        if (memSym && (memSym->kind == SymbolKind::Sub || memSym->kind == SymbolKind::Function
+        // Fix 110e: VB6 宿主伪对象 UserControl / Ambient / Extender / PropertyPage 之
+        // 后的成员不是"别的模块的同名成员". 它们是宿主状态符号, 由
+        // rtl/core/vb6rtl/vb6rtl_userctl.h 提供 (vb6_UserControl_* / vb6_Ambient_* /
+        // vb6_Extender_* / vb6_PropertyPage_*), 生成名 = vb6_<伪对象名>_<成员>
+        // (即下方 M22 分支的形式).
+        // 若在此按"模块名.成员"解析, 成员会命中别处注入的同名外部符号 →
+        //   UserControl.Enabled    → 命中 LabelPlus 的 Property Get Enabled
+        //                            → vb6_LabelPlus_Enabled   (C2065)   ← 实测
+        //   Ambient.ForeColor      → vb6_LabelPlus_ForeColor      (C2065)   ← 实测
+        // (在 LabelPlus 模块内恰好回退到 sourceMod = "UserControl" 才碰巧正确,
+        //  这也是同一表达式在不同模块生成不同符号名、仅部分模块报错的原因.)
+        // 跳过本块, 交由 M22 分支以对象名作前缀生成正确的宿主标识符.
+        const bool hostPseudoObj110e =
+            objLower == "usercontrol" || objLower == "ambient" ||
+            objLower == "extender" || objLower == "propertypage";
+        if (!hostPseudoObj110e && memSym
+            && (memSym->kind == SymbolKind::Sub || memSym->kind == SymbolKind::Function
                     || memSym->kind == SymbolKind::PropertyGet
                     || memSym->kind == SymbolKind::PropertyLet
                     || memSym->kind == SymbolKind::PropertySet)) {

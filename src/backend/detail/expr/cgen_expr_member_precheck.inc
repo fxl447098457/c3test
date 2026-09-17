@@ -91,6 +91,33 @@
         }
     }
 
+    // Fix 110n: CallByName(...).成员 — RTL 的 vb6_CallByName 返回 vb6_VARIANT, 其值
+    // 可能是对象 (VbGet 取到 Font 等对象属性). 对 VARIANT 结构体取成员在 C 里非法:
+    //   CallByName(oCtrl, PropFont, VbGet).Size
+    //     → vb6_CallByName(...).Size  C2039 ("Size" 不是 "vb6_VARIANT" 的成员)
+    // 赋值时更会退化成 "<struct> = <double>" C2088. 必须走 COM 晚绑定: 先从 VARIANT
+    // 取出对象 (vb6_VariantToObjectVal) 再 vb6_ComGetXxxProp / ComSetProp.
+    // 读上下文由外层 (BinaryExpr/赋值) 的 resolveComValue 消费 marker;
+    // 写上下文由 AssignmentStmt 的 COM SetProp 分支消费.
+    // 实测: Charts 2020 ClsResizer.cls 107/147.
+    if (node.object && node.object->kind == ASTNodeKind::IndexOrCallExpr) {
+        auto& cbCall = static_cast<IndexOrCallExpr&>(*node.object);
+        if (cbCall.callee && cbCall.callee->kind == ASTNodeKind::IdentifierExpr) {
+            auto& cbId = static_cast<IdentifierExpr&>(*cbCall.callee);
+            if (Symbol::toLower(cbId.name) == "callbyname") {
+                emitExpr(*node.object);
+                std::string cbObjExpr = std::move(lastExpr_);
+                comObjExpr_ = "vb6_VariantToObjectVal(" + cbObjExpr + ")";
+                comMemberName_ = node.memberName;
+                isComMarker_ = true;
+                isEarlyBoundCom_ = false;
+                earlyBoundSym_ = nullptr;
+                lastExpr_ = comObjExpr_;
+                return;
+            }
+        }
+    }
+
     // P7.6: 控件数组属性读取 ctrlArr(idx).Property
     // 必须在IdentifierExpr分支前检查, 因为cmdBtn(0)的object是IndexOrCallExpr
     if (node.object && node.object->kind == ASTNodeKind::IndexOrCallExpr) {

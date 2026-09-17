@@ -125,6 +125,14 @@
         c_.emitLine("case 0x7FF0: {");
         c_.indent();
         c_.emitLine("{ /* Form_Load (deferred from WM_CREATE) */ extern void " + formLoadFn + "(); " + formLoadFn + "(); }");
+        // Fix 112: Load 完成后再触发首次 Form_Resize (与 VB6 的 Load→Resize 顺序一致)
+        c_.emitLine("vb6_formLoaded_" + cIdent(formName) + " = 1;");
+        {
+            std::string resizeFnLoad = cProcName("Form_Resize", AccessLevel::Private);
+            if (symTab_.lookup(formName + "_Resize") || symTab_.lookup("Form_Resize")) {
+                c_.emitLine("{ extern void " + resizeFnLoad + "(); " + resizeFnLoad + "(); }");
+            }
+        }
         c_.emitLine("break;");
         c_.dedent();
         c_.emitLine("}");

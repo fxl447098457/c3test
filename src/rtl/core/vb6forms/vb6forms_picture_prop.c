@@ -22,13 +22,27 @@
 
 void* vb6_GetControlPicture(void* hwnd) {
     if (!hwnd) return NULL;
-    HANDLE hProp = GetPropW((HWND)hwnd, L"VB6_Picture");
+    HWND hw = (HWND)hwnd;
+    /* If a COM IPicture was stored via SetControlPictureFromCom, return the
+     * borrowed COM pointer so callers (e.g. Clipboard.SetData) can QI/use it.
+     * The caller must NOT Release this borrowed reference. */
+    IPicture* pPic = (IPicture*)GetPropW(hw, L"VB6_IPicture");
+    if (pPic) return (void*)pPic;
+    HANDLE hProp = GetPropW(hw, L"VB6_Picture");
     return hProp;  // HBITMAP/HICON handle
 }
 
 void vb6_SetControlPicture(void* hwnd, void* hPicture) {
     if (!hwnd) return;
     HWND hw = (HWND)hwnd;
+    /* A raw handle is replacing any COM IPicture set earlier via
+     * SetControlPictureFromCom. Release the retained COM reference so it
+     * doesn't leak and won't be used by the subclass. */
+    IPicture* pOldCom = (IPicture*)GetPropW(hw, L"VB6_IPicture");
+    if (pOldCom) {
+        pOldCom->lpVtbl->Release(pOldCom);
+        RemovePropW(hw, L"VB6_IPicture");
+    }
     /* Store the picture handle and type (default=bitmap) */
     SetPropW(hw, L"VB6_Picture", (HANDLE)hPicture);
     SetPropW(hw, L"VB6_PictureType", (HANDLE)1);  /* default: bitmap */
@@ -73,8 +87,28 @@ void vb6_SetControlPicture(void* hwnd, void* hPicture) {
 
 // Set Picture from COM IPictureDisp object (e.g. ImageList1.ListImages(i).Picture)
 // IPictureDisp::get_Handle returns OLE_HANDLE (HBITMAP for bitmap type)
+//
+// All COM picture types are rendered directly via the retained IPicture COM
+// pointer in the Image subclass (vb6_ImageSubclassProc). We do NOT convert
+// metafiles to bitmaps here — that was the broken "control -> bitmap" path.
+// VB6_Picture still keeps the native handle for legacy raw-handle callers.
 void vb6_SetControlPictureFromCom(void* hwnd, void* pPictureDisp) {
-    if (!hwnd || !pPictureDisp) return;
+    if (!hwnd) return;
+    HWND hw = (HWND)hwnd;
+
+    /* NULL COM setter clears the picture (release COM ref + clear props). */
+    if (!pPictureDisp) {
+        IPicture* pOld = (IPicture*)GetPropW(hw, L"VB6_IPicture");
+        if (pOld) {
+            pOld->lpVtbl->Release(pOld);
+            RemovePropW(hw, L"VB6_IPicture");
+        }
+        SetPropW(hw, L"VB6_Picture", (HANDLE)NULL);
+        SetPropW(hw, L"VB6_PictureType", (HANDLE)0);
+        InvalidateRect(hw, NULL, TRUE);
+        return;
+    }
+
     HRESULT hr;
     /* IPictureDisp and IPicture are separate interfaces.
      * IPictureDisp inherits IDispatch, IPicture inherits IUnknown.
@@ -83,77 +117,40 @@ void vb6_SetControlPictureFromCom(void* hwnd, void* pPictureDisp) {
     IUnknown* pUnk = (IUnknown*)pPictureDisp;
     hr = pUnk->lpVtbl->QueryInterface(pUnk, &IID_IPicture, (void**)&pPic);
     if (FAILED(hr) || !pPic) return;
+
     OLE_HANDLE hOle = 0;
     SHORT nType = 0;
-    // Get picture type: 1=Bitmap, 2=Metafile, 3=Icon
+    // Get picture type: 1=Bitmap, 2=Metafile, 3=Icon, 4=Enhanced Metafile
     hr = pPic->lpVtbl->get_Type(pPic, &nType);
     if (FAILED(hr)) { pPic->lpVtbl->Release(pPic); return; }
     hr = pPic->lpVtbl->get_Handle(pPic, &hOle);
-    if (FAILED(hr) || !hOle) { pPic->lpVtbl->Release(pPic); return; }
-    if (nType == 1) {
-        // Bitmap: OLE_HANDLE is HBITMAP (use UINT_PTR to avoid C4312 truncation warning)
-        vb6_SetControlPicture(hwnd, (void*)(UINT_PTR)hOle);
-    } else if (nType == 3) {
-        // Icon: OLE_HANDLE is HICON - set as icon on STATIC
-        HWND hw = (HWND)hwnd;
-        SetPropW(hw, L"VB6_Picture", (HANDLE)(UINT_PTR)hOle);
-        SetPropW(hw, L"VB6_PictureType", (HANDLE)(INT_PTR)nType);
-        LONG style = GetWindowLongW(hw, GWL_STYLE);
-        style &= ~(SS_BITMAP | SS_ICON | SS_ENHMETAFILE);
-        style |= SS_ICON | SS_CENTERIMAGE;
-        SetWindowLongW(hw, GWL_STYLE, style);
-        SendMessageW(hw, STM_SETIMAGE, (WPARAM)IMAGE_ICON, (LPARAM)(UINT_PTR)hOle);
-        InvalidateRect(hw, NULL, TRUE);
-    } else if (nType == 4 || nType == 2) {
-        // Enhanced Metafile (nType==4) or regular Metafile (nType==2)
-        // Convert to bitmap for reliable rendering on STATIC control
-        HWND hw = (HWND)hwnd;
-        // Use IPicture's HIMETRIC dimensions to determine pixel size
-        OLE_XSIZE_HIMETRIC hmW = 0;
-        OLE_YSIZE_HIMETRIC hmH = 0;
-        pPic->lpVtbl->get_Width(pPic, &hmW);
-        pPic->lpVtbl->get_Height(pPic, &hmH);
-        int cxPx, cyPx;
-        if (hmW > 0 && hmH > 0) {
-            cxPx = MulDiv((int)hmW, 96, 2540);  // HIMETRIC to pixels at 96 DPI
-            cyPx = MulDiv((int)hmH, 96, 2540);
-        } else {
-            cxPx = 200; cyPx = 200;
-        }
-        if (cxPx <= 0) cxPx = 200;
-        if (cyPx <= 0) cyPx = 200;
-        // Render to a bitmap using IPicture::Render
-        HDC hdcScreen = GetDC(NULL);
-        HDC memDC = CreateCompatibleDC(hdcScreen);
-        HBITMAP hBmp = CreateCompatibleBitmap(hdcScreen, cxPx, cyPx);
-        HBITMAP oldBmp = (HBITMAP)SelectObject(memDC, hBmp);
-        RECT rcRender = { 0, 0, cxPx, cyPx };
-        // Fill white background
-        HBRUSH hWhite = (HBRUSH)GetStockObject(WHITE_BRUSH);
-        FillRect(memDC, &rcRender, hWhite);
-        // Use IPicture::Render to draw onto the memory DC
-        pPic->lpVtbl->Render(pPic, memDC, 0, 0, cxPx, cyPx,
-                                           0, 0, hmW, hmH, NULL);
-        SelectObject(memDC, oldBmp);
-        DeleteDC(memDC);
-        ReleaseDC(NULL, hdcScreen);
-        // Store the rendered bitmap in VB6_Picture and enable Stretch for display
-        SetPropW(hw, L"VB6_Picture", (HANDLE)hBmp);
-        SetPropW(hw, L"VB6_PictureType", (HANDLE)1);  /* bitmap */
-        SetPropW(hw, L"VB6_Stretch", (HANDLE)1);  /* enable stretch to fit */
-        // Remove any icon/emf style, set bitmap style
-        LONG style = GetWindowLongW(hw, GWL_STYLE);
-        style &= ~(SS_ICON | SS_ENHMETAFILE);
-        style |= SS_BITMAP;
-        SetWindowLongW(hw, GWL_STYLE, style);
-        // Install paint subclass for StretchBlt rendering
-        vb6_InstallImageSubclass(hwnd);
-        InvalidateRect(hw, NULL, TRUE);
-    } else {
-        // Regular metafile (nType==2) or other - try as bitmap (use UINT_PTR to avoid C4312)
-        vb6_SetControlPicture(hwnd, (void*)(UINT_PTR)hOle);
+    if (FAILED(hr)) { pPic->lpVtbl->Release(pPic); return; }
+
+    /* QI already acquired the new reference, including self-assignment.
+     * Transfer that reference to the control and release exactly one old ref. */
+    IPicture* pOld = (IPicture*)GetPropW(hw, L"VB6_IPicture");
+    if (!SetPropW(hw, L"VB6_IPicture", (HANDLE)pPic)) {
+        pPic->lpVtbl->Release(pPic);
+        return;
     }
-    pPic->lpVtbl->Release(pPic);
+    if (pOld) pOld->lpVtbl->Release(pOld);
+
+    /* Keep the native handle for legacy raw-handle callers (GetControlPicture
+     * falls back to this when no COM pointer is stored). */
+    SetPropW(hw, L"VB6_Picture", (HANDLE)(UINT_PTR)hOle);
+    SetPropW(hw, L"VB6_PictureType", (HANDLE)(INT_PTR)nType);
+
+    /* The retained QI reference keeps the native handle alive for painting. */
+
+    /* All COM picture types route through the Image subclass for rendering.
+     * Remove the default STATIC bitmap/icon/emf rendering styles so WM_PAINT is
+     * fully owned by our subclass. */
+    LONG style = GetWindowLongW(hw, GWL_STYLE);
+    style &= ~(SS_BITMAP | SS_ICON | SS_ENHMETAFILE | SS_CENTERIMAGE);
+    SetWindowLongW(hw, GWL_STYLE, style);
+
+    vb6_InstallImageSubclass(hwnd);
+    InvalidateRect(hw, NULL, TRUE);
 }
 int vb6_GetPictureAutoSize(void* hwnd) {
     if (!hwnd) return 0;
@@ -186,79 +183,120 @@ void vb6_SetImageStretch(void* hwnd, int stretch) {
     InvalidateRect(hw, NULL, TRUE);
 }
 
-/* Image control subclass WndProc for WM_PAINT (IPicture::Render / StretchBlt rendering) */
+/* Shared painting for WM_PAINT and WM_PRINTCLIENT.
+ * Draws the retained COM IPicture (metafile/bitmap/icon) or a raw
+ * HBITMAP/HICON/HENHMETAFILE handle, honoring the Stretch property.
+ * hdc is the paint DC (from BeginPaint) or the DC supplied by WM_PRINTCLIENT. */
+static void vb6_ImagePaintHelper(HWND hwnd, HDC hdc) {
+    RECT rc;
+    GetClientRect(hwnd, &rc);
+
+    int stretch = (int)(INT_PTR)GetPropW(hwnd, L"VB6_Stretch");
+
+    /* Default background: system button face (control background). */
+    HBRUSH hBg = (HBRUSH)GetSysColorBrush(COLOR_BTNFACE);
+    FillRect(hdc, &rc, hBg);
+
+    /* Preferred path: retained COM IPicture (from SetControlPictureFromCom).
+     * Works for bitmap, icon, and metafile uniformly via IPicture::Render. */
+    IPicture* pPic = (IPicture*)GetPropW(hwnd, L"VB6_IPicture");
+    if (pPic) {
+        OLE_XSIZE_HIMETRIC hmW = 0;
+        OLE_YSIZE_HIMETRIC hmH = 0;
+        pPic->lpVtbl->get_Width(pPic, &hmW);
+        pPic->lpVtbl->get_Height(pPic, &hmH);
+
+        /* Metafiles / QR codes typically expect a white background. */
+        FillRect(hdc, &rc, (HBRUSH)GetStockObject(WHITE_BRUSH));
+
+        int dstW, dstH;
+        if (stretch) {
+            /* Stretch fills the whole client area. */
+            dstW = rc.right;
+            dstH = rc.bottom;
+        } else {
+            /* Non-stretch: draw at the picture's natural pixel size, converting
+             * HIMETRIC (2540 HIMETRIC per logical inch) using the DC's DPI. */
+            int dpiX = GetDeviceCaps(hdc, LOGPIXELSX);
+            int dpiY = GetDeviceCaps(hdc, LOGPIXELSY);
+            dstW = MulDiv((int)hmW, dpiX, 2540);
+            dstH = MulDiv((int)hmH, dpiY, 2540);
+            if (dstW <= 0) dstW = rc.right;
+            if (dstH <= 0) dstH = rc.bottom;
+        }
+        /* HIMETRIC y points up, so flip the source rect: (0, hmH, hmW, -hmH). */
+        pPic->lpVtbl->Render(pPic, hdc, 0, 0, dstW, dstH,
+                             0, hmH, hmW, -hmH, NULL);
+        return;
+    }
+
+    HANDLE hPict = GetPropW(hwnd, L"VB6_Picture");
+    int picType = (int)(INT_PTR)GetPropW(hwnd, L"VB6_PictureType");
+    if (!hPict) return;
+
+    DWORD objType = GetObjectType((HGDIOBJ)hPict);
+    if (objType == OBJ_ENHMETAFILE) {
+        PlayEnhMetaFile(hdc, (HENHMETAFILE)hPict, &rc);
+        return;
+    }
+    if (objType == OBJ_BITMAP) {
+        HDC memDC = CreateCompatibleDC(hdc);
+        HBITMAP hBmp = (HBITMAP)hPict;
+        BITMAP bm;
+        GetObjectW(hBmp, sizeof(bm), &bm);
+        HBITMAP oldBmp = (HBITMAP)SelectObject(memDC, hBmp);
+        if (stretch) {
+            SetStretchBltMode(hdc, HALFTONE);
+            SetBrushOrgEx(hdc, 0, 0, NULL);
+            StretchBlt(hdc, 0, 0, rc.right, rc.bottom,
+                       memDC, 0, 0, bm.bmWidth, bm.bmHeight, SRCCOPY);
+        } else {
+            BitBlt(hdc, 0, 0, bm.bmWidth, bm.bmHeight, memDC, 0, 0, SRCCOPY);
+        }
+        SelectObject(memDC, oldBmp);
+        DeleteDC(memDC);
+        return;
+    }
+    if (picType == 3) {
+        DrawIconEx(hdc, 0, 0, (HICON)hPict, 0, 0, 0, NULL, DI_NORMAL);
+        return;
+    }
+}
+
+/* Image control subclass WndProc for WM_PAINT / WM_PRINTCLIENT rendering. */
 static LRESULT CALLBACK vb6_ImageSubclassProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     if (msg == WM_PAINT) {
-        /* Check for stored IPicture COM pointer (EMF/Metafile from SetControlPictureFromCom) */
-        IPicture* pPic = (IPicture*)GetPropW(hwnd, L"VB6_IPicture");
-        if (pPic) {
-            PAINTSTRUCT ps;
-            HDC hdc = BeginPaint(hwnd, &ps);
-            RECT rc;
-            GetClientRect(hwnd, &rc);
-            OLE_XSIZE_HIMETRIC hmW = 0;
-            OLE_YSIZE_HIMETRIC hmH = 0;
-            pPic->lpVtbl->get_Width(pPic, &hmW);
-            pPic->lpVtbl->get_Height(pPic, &hmH);
-            pPic->lpVtbl->Render(pPic, hdc, 0, 0, rc.right, rc.bottom,
-                                  0, 0, hmW, hmH, NULL);
+        PAINTSTRUCT ps;
+        HDC hdc = BeginPaint(hwnd, &ps);
+        if (hdc) {
+            vb6_ImagePaintHelper(hwnd, hdc);
             EndPaint(hwnd, &ps);
-            return 0;
         }
-        int stretch = (int)(INT_PTR)GetPropW(hwnd, L"VB6_Stretch");
-        HANDLE hPict = GetPropW(hwnd, L"VB6_Picture");
-        int picType = (int)(INT_PTR)GetPropW(hwnd, L"VB6_PictureType");
-        if (hPict) {
-            if (picType == 4 || GetObjectType((HGDIOBJ)hPict) == OBJ_ENHMETAFILE) {
-                /* Enhanced Metafile: use PlayEnhMetaFile (always stretch to fit) */
-                PAINTSTRUCT ps;
-                HDC hdc = BeginPaint(hwnd, &ps);
-                RECT rc;
-                GetClientRect(hwnd, &rc);
-                HENHMETAFILE hEmf = (HENHMETAFILE)hPict;
-                PlayEnhMetaFile(hdc, hEmf, &rc);
-                EndPaint(hwnd, &ps);
-                return 0;
-            } else if (stretch && GetObjectType((HGDIOBJ)hPict) == OBJ_BITMAP) {
-                /* Bitmap with stretch: use StretchBlt */
-                PAINTSTRUCT ps;
-                HDC hdc = BeginPaint(hwnd, &ps);
-                RECT rc;
-                GetClientRect(hwnd, &rc);
-                
-                HDC memDC = CreateCompatibleDC(hdc);
-                HBITMAP hBmp = (HBITMAP)hPict;
-                BITMAP bm;
-                GetObjectW(hBmp, sizeof(bm), &bm);
-                HBITMAP oldBmp = (HBITMAP)SelectObject(memDC, hBmp);
-                
-                SetStretchBltMode(hdc, HALFTONE);
-                SetBrushOrgEx(hdc, 0, 0, NULL);
-                StretchBlt(hdc, 0, 0, rc.right, rc.bottom,
-                           memDC, 0, 0, bm.bmWidth, bm.bmHeight, SRCCOPY);
-                
-                SelectObject(memDC, oldBmp);
-                DeleteDC(memDC);
-                EndPaint(hwnd, &ps);
-                return 0;
-            }
-            /* For icons: fall through to original STATIC proc (no stretch) */
-        }
+        return 0;
+    } else if (msg == WM_PRINTCLIENT) {
+        /* Printing / theming asks us to render into the provided DC. */
+        HDC hdc = (HDC)wp;
+        if (hdc) vb6_ImagePaintHelper(hwnd, hdc);
+        return 0;
     } else if (msg == WM_DESTROY) {
-        /* Release stored IPicture COM pointer */
+        /* Capture the original WndProc BEFORE removing props, then forward the
+         * message to it. The old code removed the prop and then looked it up
+         * again at the fall-through, so WM_DESTROY was lost to DefWindowProc. */
+        WNDPROC origProc = (WNDPROC)GetPropW(hwnd, L"VB6_OrigProc");
+
         IPicture* pPic = (IPicture*)GetPropW(hwnd, L"VB6_IPicture");
         if (pPic) {
             pPic->lpVtbl->Release(pPic);
             RemovePropW(hwnd, L"VB6_IPicture");
         }
-        /* Remove subclass on destroy */
-        WNDPROC origProc = (WNDPROC)GetPropW(hwnd, L"VB6_OrigProc");
         if (origProc) {
             SetWindowLongPtrW(hwnd, GWLP_WNDPROC, (LONG_PTR)origProc);
             RemovePropW(hwnd, L"VB6_OrigProc");
+            return CallWindowProcW(origProc, hwnd, msg, wp, lp);
         }
+        return DefWindowProcW(hwnd, msg, wp, lp);
     }
-    /* Fall through to original STATIC WndProc */
+    /* Fall through to original STATIC WndProc for all other messages. */
     WNDPROC origProc = (WNDPROC)GetPropW(hwnd, L"VB6_OrigProc");
     if (origProc) return CallWindowProcW(origProc, hwnd, msg, wp, lp);
     return DefWindowProcW(hwnd, msg, wp, lp);

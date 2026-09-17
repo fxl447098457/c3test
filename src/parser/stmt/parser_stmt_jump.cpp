@@ -2,6 +2,8 @@
 // VB6 块语句 + 单行语句
 
 #include "parser/parser.hpp"
+#include <algorithm>
+#include <cctype>
 
 namespace vb6c3 {
 
@@ -14,7 +16,11 @@ namespace vb6c3 {
 
 StmtPtr Parser::parseOnStmt() {
     // On Error GoTo | On Error Resume Next | On x GoTo | On x GoSub
-    if (next_.kind == TokenKind::Error) {
+    std::string modifier = next_.text;
+    std::transform(modifier.begin(), modifier.end(), modifier.begin(),
+        [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    if (next_.kind == TokenKind::Error ||
+        (next_.kind == TokenKind::Identifier && modifier == "local")) {
         return parseOnErrorStmt();
     }
     if (next_.kind == TokenKind::GoTo) {
@@ -33,7 +39,10 @@ StmtPtr Parser::parseOnStmt() {
 std::unique_ptr<OnErrorStmt> Parser::parseOnErrorStmt() {
     auto loc = currentLoc();
     advance(); // consume 'On'
-    advance(); // consume 'Error'
+    // VB6 accepts Local as an optional modifier; handlers are procedure-local.
+    if (cur_.kind == TokenKind::Identifier) advance(); // Local (checked by caller)
+    expect(TokenKind::Error, DiagnosticID::ParseExpectedToken,
+           "expected 'Error' after 'On [Local]'");
 
     if (match(TokenKind::Resume)) {
         expect(TokenKind::Next, DiagnosticID::ParseExpectedToken,

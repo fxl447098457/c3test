@@ -47,7 +47,7 @@ $families = @(
     @{ name = 'user32';  libs = @('user32', 'gdi32') },
     @{ name = 'gdiplus'; libs = @('gdiplus') },
     @{ name = 'crypto';  libs = @('crypt32', 'bcrypt', 'ncrypt') },
-    @{ name = 'com';     libs = @('ole32', 'oleaut32', 'advapi32') },
+    @{ name = 'com';     libs = @('ole32', 'oleaut32', 'advapi32', 'comdlg32') },
     @{ name = 'net';     libs = @('ws2_32', 'iphlpapi') },
     @{ name = 'shell';   libs = @('shell32', 'shlwapi', 'imagehlp') }
 )
@@ -263,6 +263,9 @@ function New-Banner([string]$family, [string[]]$libs, [bool]$needDynamic, [int]$
     $b += '/* Import libs for the DLLs below. Adding one that is not needed is harmless:'
     $b += ' * a static import lib is only pulled when a symbol from it is referenced. */'
     foreach ($l in $libs) { $b += ('#pragma comment(lib, "' + $l + '.lib")') }
+    # Fix 111b: ChooseColorA (Charts 2020 ppProgressCircular) needs comdlg32.lib;
+    # without it any project not otherwise referencing comdlg32 gets LNK2019 __imp_ChooseColorA.
+    $b += '#pragma comment(lib, "comdlg32.lib")'
     $b += ''
     if ($needDynamic) {
         $b += '/* GDI+ flat API lives in gdiplus.dll but its header is C++-only, so the'

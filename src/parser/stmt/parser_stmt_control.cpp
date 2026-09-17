@@ -120,6 +120,25 @@ std::unique_ptr<ForStmt> Parser::parseForStmt() {
         step = parseExpression();
     }
 
+    // 单行 For: For i = 1 To 10: stmt1: stmt2: Next i
+    if (cur_.kind == TokenKind::Colon) {
+        StmtList body;
+        while (cur_.kind == TokenKind::Colon) {
+            advance(); // consume ':'
+            if (cur_.kind == TokenKind::Next) break;
+            auto stmt = parseStatement();
+            if (stmt) body.push_back(std::move(stmt));
+        }
+        expect(TokenKind::Next, DiagnosticID::ParseMismatchedBlock,
+               "expected 'Next' to close For loop");
+        if (canBeName(cur_.kind) && cur_.kind != TokenKind::NewLine &&
+            cur_.kind != TokenKind::Colon && cur_.kind != TokenKind::EndOfFile) {
+            advance();
+        }
+        return std::make_unique<ForStmt>(loc, varTok.text,
+            std::move(start), std::move(end), std::move(step), std::move(body));
+    }
+
     skipNewLines();
     auto body = parseBlockUntil({TokenKind::Next});
 
@@ -144,6 +163,25 @@ std::unique_ptr<ForEachStmt> Parser::parseForEachStmt() {
     expect(TokenKind::In, DiagnosticID::ParseInvalidFor,
            "expected 'In' in For Each statement");
     auto collection = parseExpression();
+
+    // 单行 For Each: For Each x In col: stmt1: stmt2: Next x
+    if (cur_.kind == TokenKind::Colon) {
+        StmtList body;
+        while (cur_.kind == TokenKind::Colon) {
+            advance(); // consume ':'
+            if (cur_.kind == TokenKind::Next) break;
+            auto stmt = parseStatement();
+            if (stmt) body.push_back(std::move(stmt));
+        }
+        expect(TokenKind::Next, DiagnosticID::ParseMismatchedBlock,
+               "expected 'Next'");
+        if (canBeName(cur_.kind) && cur_.kind != TokenKind::NewLine &&
+            cur_.kind != TokenKind::Colon && cur_.kind != TokenKind::EndOfFile) {
+            advance();
+        }
+        return std::make_unique<ForEachStmt>(loc, varTok.text,
+            std::move(collection), std::move(body));
+    }
 
     skipNewLines();
     auto body = parseBlockUntil({TokenKind::Next});
@@ -279,6 +317,25 @@ std::unique_ptr<WithStmt> Parser::parseWithStmt() {
     auto loc = currentLoc();
     advance(); // consume 'With'
     auto object = parseExpression();
+
+    // 单行 With: With x: .a = 1: .b = 2: End With
+    if (cur_.kind == TokenKind::Colon) {
+        withDepth_++;
+        StmtList body;
+        while (cur_.kind == TokenKind::Colon) {
+            advance(); // consume ':'
+            if (cur_.kind == TokenKind::End && isEndBlock()) break;
+            auto stmt = parseStatement();
+            if (stmt) body.push_back(std::move(stmt));
+        }
+        withDepth_--;
+        expect(TokenKind::End, DiagnosticID::ParseMismatchedBlock,
+               "expected 'End With'");
+        expect(TokenKind::With, DiagnosticID::ParseMismatchedBlock,
+               "expected 'End With'");
+        return std::make_unique<WithStmt>(loc, std::move(object), std::move(body));
+    }
+
     skipNewLines();
 
     withDepth_++;

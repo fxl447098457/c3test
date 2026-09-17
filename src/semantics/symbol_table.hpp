@@ -312,7 +312,9 @@ public:
         : kind_(kind), parent_(parent) {}
 
     // 定义符号, 返回false如果已存在同名符号(Property Get/Let/Set允许同名共存)
-    bool define(std::unique_ptr<Symbol> sym);
+    // keyOverride: 显式存储键. 仅用于 Fix 103 的 Type/过程同名共存场景
+    //              (类型符号改用 <name>$ty), 留空时按 Symbol::storageKey() 推导.
+    bool define(std::unique_ptr<Symbol> sym, const std::string& keyOverride = std::string());
 
     // 按名称查找 (本作用域, 不递归) - 返回第一个匹配
     Symbol* lookupLocal(const std::string& name) const;

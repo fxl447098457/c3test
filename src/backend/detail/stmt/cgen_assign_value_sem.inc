@@ -306,6 +306,10 @@
             if (tgtIsVariant091l && !valueIsVariant && !value.empty()) {
                 value = "vb6_VariantFromValue(" + value + ")";
             }
+            // Fix 092w: Byte 数组目标 + 具体值 (StrConv/字符串) → 字节数组语义
+            if (tgtIsByteArray092w && !tgtIsVariant091l && !value.empty()) {
+                value = rewriteByteArrayValue(value);
+            }
             c_.emitLine(target + " = " + value + ";");
         }
     }

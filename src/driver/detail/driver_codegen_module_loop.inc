@@ -39,7 +39,10 @@
                       &classVoidFieldMap, &classTypedFieldMap, &variantReturnFuncs, options.verbose);
         cgen.setFormModuleNames(formModuleNames);  // Fix 086: 跨模块窗体默认实例引用
         cgen.setModulePublicConsts(&modulePublicConsts);  // Fix 086: 跨模块常量内联
+        cgen.setDesignerFiles(&frmFiles_);  // Fix 112: 工程内 UserControl 设计器描述
         cgen.setStaticModuleVarNames(&dupModuleVarNames);  // Fix 093b: 撞名模块级变量转 static
+        cgen.setInterfaceImplementers(&ifaceImplementersMap);  // P6.4+: 接口唯一实现类映射
+        cgen.setDefaultInstanceClasses(&defaultInstanceClasses);  // P6.4+: 类模块默认实例
         cgen.setTrimIncludes(options.trimIncludes);  // opt4: 裁剪未实际引用的跨模块include
         if (options.trimIncludes) {
             // opt4: 基于AST实际引用收集外部模块, 供 include 裁剪

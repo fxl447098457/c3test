@@ -113,6 +113,35 @@ std::string CCodeGen::emitGuidInitializer(const std::string& iidStr) const {
     return std::string(buf);
 }
 
+// Fix 107: 按"类型类别"查找符号, 忽略同名的过程/变量.
+// Fix 103 允许类型与过程同名; 冲突时类型符号改存 <name>$ty (见 Scope::define /
+// SymbolTable::define), 此时通用 symTab_.lookup() 只命中过程符号, 类型判定
+// (Class/UDT/Enum/COM) 全部落空 → 回落 "void*"/Variant.
+Symbol* CCodeGen::lookupTypeSymbol(const std::string& name) const {
+    auto isTypeKind = [](SymbolKind k) {
+        return k == SymbolKind::Class || k == SymbolKind::UserDefinedType ||
+               k == SymbolKind::EnumType || k == SymbolKind::ComClass ||
+               k == SymbolKind::ComInterface || k == SymbolKind::ComModule ||
+               k == SymbolKind::ComGlobalNs;
+    };
+    if (auto* s = symTab_.lookup(name)) {
+        if (isTypeKind(s->kind)) return s;
+    }
+    // 模块作用域优先 (类型声明通常是模块级的), lookupLocalByKind 内含 $ty 回退.
+    static const SymbolKind typeKinds[] = {
+        SymbolKind::UserDefinedType, SymbolKind::EnumType, SymbolKind::Class,
+        SymbolKind::ComClass, SymbolKind::ComInterface,
+        SymbolKind::ComModule, SymbolKind::ComGlobalNs,
+    };
+    for (SymbolKind k : typeKinds) {
+        if (auto* m = symTab_.lookupModuleByKind(name, k)) return m;
+    }
+    for (SymbolKind k : typeKinds) {
+        if (auto* l = symTab_.lookupLocalByKind(name, k)) return l;
+    }
+    return nullptr;
+}
+
 std::string CCodeGen::mapTypeRef(ASTNode* typeRef) {
     if (!typeRef) return "vb6_VARIANT";  // 未指定类型 = Variant
 
@@ -150,7 +179,8 @@ std::string CCodeGen::mapTypeRef(ASTNode* typeRef) {
                 if (dotSym) lookupName = shortName;
             }
             // 检查是否是类名 → 映射为类结构体指针
-            auto* clsSym = symTab_.lookupModule(lookupName);
+            // Fix 107: 用 lookupTypeSymbol (含 $ty 回退), 否则同名过程会遮蔽类型.
+            auto* clsSym = lookupTypeSymbol(lookupName);
             if (clsSym && clsSym->kind == SymbolKind::Class) {
                 // P6.4: 接口类 → vb6_iface_<Name> 包装类型 (非指针)
                 if (clsSym->isInterface) {
@@ -174,7 +204,8 @@ std::string CCodeGen::mapTypeRef(ASTNode* typeRef) {
                 return "vb6_ComIface_" + cIfaceName + "*";
             }
             // 检查是否是用户定义类型 (UDT) → vb6_type_<Name>
-            auto* udtSym = symTab_.lookup(lookupName);
+            // Fix 107: 同 clsSym, 用类型感知查找避免同名过程遮蔽.
+            auto* udtSym = lookupTypeSymbol(lookupName);
             if (udtSym && udtSym->kind == SymbolKind::UserDefinedType) {
                 // Fix 010: 收集UDT类型名用于前向声明
                 usedUdtTypes_.insert(cIdent(simple.name));
@@ -282,11 +313,10 @@ bool CCodeGen::tryEvalConstInt(ASTNode* expr, int64_t& result) {
             result = lit->boolValue ? 1 : 0;
             return true;
         case LiteralKind::Double:
-            result = (int64_t)lit->doubleValue;
-            return true;
         case LiteralKind::Single:
-            result = (int64_t)lit->floatValue;
-            return true;
+            // Integer-only folding must not truncate floating operands.
+            // E.g. PI / 2 must remain a floating expression, not 3 / 2 == 1.
+            return false;
         default:
             return false;
         }
@@ -315,8 +345,8 @@ bool CCodeGen::tryEvalConstInt(ASTNode* expr, int64_t& result) {
         case BinaryOp::Sub: result = l - r; return true;
         case BinaryOp::Mul: result = l * r; return true;
         case BinaryOp::Div:
-            if (r == 0) return false;
-            result = l / r; return true;
+            // VB6 '/' is floating division even when both operands are integers.
+            return false;
         case BinaryOp::IntDiv:
             if (r == 0) return false;
             result = l / r; return true;
