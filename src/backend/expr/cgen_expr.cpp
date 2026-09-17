@@ -4,8 +4,21 @@
 #include <iostream>
 #include <functional>
 #include <cstdio>
+#include <iomanip>
+#include <limits>
+#include <locale>
+#include <sstream>
 
 namespace vb6c3 {
+
+static std::string floatingLiteral(double value, int precision) {
+    std::ostringstream out;
+    out.imbue(std::locale::classic());
+    out << std::setprecision(precision) << value;
+    std::string text = out.str();
+    if (text.find_first_of(".eE") == std::string::npos) text += ".0";
+    return text;
+}
 
 // --- cgen_expr.cpp: emitExpr 分发 + 字面量/一元/字典访问/New/TypeOf/AddressOf/Me 表达式 ---
 
@@ -50,12 +63,12 @@ void CCodeGen::visit(LiteralExpr& node) {
             lastExpr_ = std::to_string(node.longValue) + "L";
             break;
         case LiteralKind::Single:
-            lastExpr_ = std::to_string(node.floatValue) + "f";
+            lastExpr_ = floatingLiteral(node.floatValue, std::numeric_limits<float>::max_digits10) + "f";
             break;
         case LiteralKind::Double:
         case LiteralKind::Currency:
         case LiteralKind::Decimal:
-            lastExpr_ = std::to_string(node.doubleValue);
+            lastExpr_ = floatingLiteral(node.doubleValue, std::numeric_limits<double>::max_digits10);
             break;
         case LiteralKind::String: {
             // VB6字符串 → C宽字符串字面量 L"..."
@@ -155,7 +168,7 @@ void CCodeGen::visit(LiteralExpr& node) {
             lastExpr_ = "vb6_VariantNull()";
             break;
         case LiteralKind::Date:
-            lastExpr_ = std::to_string(node.doubleValue);  // OLE date as double
+            lastExpr_ = floatingLiteral(node.doubleValue, std::numeric_limits<double>::max_digits10);  // OLE date as double
             break;
     }
 }

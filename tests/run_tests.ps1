@@ -10,7 +10,8 @@
 
 param(
     [string]$Category = "all",
-    [switch]$Verbose
+    [switch]$Verbose,
+    [string]$OutputDirectory = ""
 )
 
 $ErrorActionPreference = "SilentlyContinue"
@@ -20,7 +21,7 @@ $ErrorActionPreference = "SilentlyContinue"
 $Root = Split-Path -Parent $PSScriptRoot
 $C3 = Join-Path $Root ".build\C3.exe"
 $Tests = $PSScriptRoot
-$OutDir = Join-Path $Root "output"
+$OutDir = if ($OutputDirectory) { $OutputDirectory } else { Join-Path $Root "output" }
 # vcvarsall 路径: 环境变量 C3_VCVARSALL 优先, 未设置时 vswhere 自动探测
 # (兼容 Community/Professional/Enterprise/BuildTools 多实例及 CI 环境). 详见 scripts\README.md
 $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer\vswhere.exe"
@@ -138,11 +139,24 @@ function Test-Run {
     try {
         # 工作目录设为 output\: 部分测试用 Open ... For Output 写相对路径文件
         # (scores.txt / test_output.txt / *.dat 等), 不指定就会落进仓库根目录。
-        $proc = Start-Process -FilePath $exePath -NoNewWindow -Wait -PassThru `
+        $proc = Start-Process -FilePath $exePath -NoNewWindow -PassThru `
             -WorkingDirectory $OutDir `
             -RedirectStandardOutput "$OutDir\$baseName.out" `
             -RedirectStandardError "$OutDir\$baseName.err" `
             -ErrorAction Stop
+        if (-not $proc.WaitForExit(5000)) {
+            $proc.Kill()
+            $proc.WaitForExit()
+            $script:fail++
+            Write-Host "FAIL (run timeout: 5s)" -ForegroundColor Red
+            return
+        }
+        $proc.Refresh()
+        if ($proc.ExitCode -ne 0) {
+            $script:fail++
+            Write-Host "FAIL (exit code $($proc.ExitCode))" -ForegroundColor Red
+            return
+        }
         $runOutput = Get-Content "$OutDir\$baseName.out" -ErrorAction SilentlyContinue
     } catch {
         $script:fail++
@@ -223,11 +237,24 @@ function Test-Vbp {
     # 运行 (5秒超时)
     try {
         # 同上: 工作目录设为 output\, 避免测试产物落进仓库根目录
-        $proc = Start-Process -FilePath $exePath -NoNewWindow -Wait -PassThru `
+        $proc = Start-Process -FilePath $exePath -NoNewWindow -PassThru `
             -WorkingDirectory $OutDir `
             -RedirectStandardOutput "$OutDir\$baseName.out" `
             -RedirectStandardError "$OutDir\$baseName.err" `
             -ErrorAction Stop
+        if (-not $proc.WaitForExit(5000)) {
+            $proc.Kill()
+            $proc.WaitForExit()
+            $script:fail++
+            Write-Host "FAIL (run timeout: 5s)" -ForegroundColor Red
+            return
+        }
+        $proc.Refresh()
+        if ($proc.ExitCode -ne 0) {
+            $script:fail++
+            Write-Host "FAIL (exit code $($proc.ExitCode))" -ForegroundColor Red
+            return
+        }
         $runOutput = Get-Content "$OutDir\$baseName.out" -ErrorAction SilentlyContinue
     } catch {
         $script:fail++
@@ -259,6 +286,48 @@ function Test-Vbp {
     } else {
         $script:pass++
         Write-Host "PASS" -ForegroundColor Green
+    }
+}
+
+# GUI smoke: require a visible main window, then close only the process we launch.
+# This checks startup, not screenshot correctness or QR decoding.
+function Test-GuiVbp {
+    param([string]$Name, [string]$VbpFile)
+    $script:total++
+    Write-Host -NoNewline "  [GUI] $Name ... "
+    $guiOut = Join-Path $OutDir $Name
+    New-Item -ItemType Directory -Path $guiOut -Force | Out-Null
+    $compileResult = & $C3 $VbpFile --output-dir $guiOut 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        $script:fail++
+        Write-Host "FAIL (compile)" -ForegroundColor Red
+        if ($Verbose) { Write-Host ($compileResult | Out-String) }
+        return
+    }
+    $exe = Join-Path $guiOut ([IO.Path]::GetFileNameWithoutExtension($VbpFile) + ".exe")
+    $proc = $null
+    try {
+        $proc = Start-Process -FilePath $exe -WorkingDirectory $guiOut -PassThru -ErrorAction Stop
+        $watch = [Diagnostics.Stopwatch]::StartNew()
+        $windowSeen = $false
+        while ($watch.ElapsedMilliseconds -lt 5000) {
+            $proc.Refresh()
+            if ($proc.HasExited) { break }
+            if ($proc.MainWindowHandle -ne [IntPtr]::Zero) { $windowSeen = $true; break }
+            Start-Sleep -Milliseconds 100
+        }
+        if (-not $windowSeen) { throw "Main window not available within 5s" }
+        if (-not $proc.CloseMainWindow()) { throw "Main window refused close" }
+        if (-not $proc.WaitForExit(2000)) { throw "Application did not exit after close" }
+        $proc.Refresh()
+        if ($proc.ExitCode -ne 0) { throw "Exit code $($proc.ExitCode)" }
+        $script:pass++
+        Write-Host "PASS (compile, window, clean exit)" -ForegroundColor Green
+    } catch {
+        $script:fail++
+        Write-Host "FAIL ($($_.Exception.Message))" -ForegroundColor Red
+    } finally {
+        if ($proc -and -not $proc.HasExited) { $proc.Kill(); $proc.WaitForExit() }
     }
 }
 
@@ -343,6 +412,9 @@ if ($Category -in @("all", "run")) {
 
     Test-Vbp "M6Test" "$Tests\M6Test.vbp" @("M6A:OK", "M6B:OK", "M6C:OK", "M6D:OK", "M6 PASSED")
     Test-Vbp "modulemethod" "$Tests\test_modulemethod.vbp" @("30", "21")
+
+    # QR code project (tests\VbQRCodegen-master): form loads, sets Image1.Picture via Stretch
+    Test-GuiVbp "VbQRCodegen" "$Tests\VbQRCodegen-master\test\Project1.vbp"
     Write-Host ""
     
     # --- P6 COM 测试 ---

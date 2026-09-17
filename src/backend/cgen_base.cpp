@@ -1422,11 +1422,10 @@ bool CCodeGen::tryEvalConstInt(ASTNode* expr, int64_t& result) {
             result = lit->boolValue ? 1 : 0;
             return true;
         case LiteralKind::Double:
-            result = (int64_t)lit->doubleValue;
-            return true;
         case LiteralKind::Single:
-            result = (int64_t)lit->floatValue;
-            return true;
+            // Integer-only folding must not truncate floating operands.
+            // E.g. PI / 2 must remain a floating expression, not 3 / 2 == 1.
+            return false;
         default:
             return false;
         }
@@ -1455,8 +1454,8 @@ bool CCodeGen::tryEvalConstInt(ASTNode* expr, int64_t& result) {
         case BinaryOp::Sub: result = l - r; return true;
         case BinaryOp::Mul: result = l * r; return true;
         case BinaryOp::Div:
-            if (r == 0) return false;
-            result = l / r; return true;
+            // VB6 '/' is floating division even when both operands are integers.
+            return false;
         case BinaryOp::IntDiv:
             if (r == 0) return false;
             result = l / r; return true;
