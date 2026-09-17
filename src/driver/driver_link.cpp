@@ -15,6 +15,23 @@
 
 namespace vb6c3 {
 
+// vb6forms RTL 源文件集 (Fix 096 从 runLinker 内联清单抽出复用)
+static void addFormsSources(MsvcDriverOptions& opts, const std::string& rtlDir) {
+    opts.sourceFiles.push_back(rtlDir + "/vb6forms.c");
+    opts.sourceFiles.push_back(rtlDir + "/vb6forms_ctrl.c");
+    opts.sourceFiles.push_back(rtlDir + "/vb6forms_list.c");
+    opts.sourceFiles.push_back(rtlDir + "/vb6forms_style.c");
+    opts.sourceFiles.push_back(rtlDir + "/vb6forms_scroll.c");
+    opts.sourceFiles.push_back(rtlDir + "/vb6forms_picture.c");
+    opts.sourceFiles.push_back(rtlDir + "/vb6forms_picture_prop.c");
+    opts.sourceFiles.push_back(rtlDir + "/vb6forms_ctrlarr.c");
+    opts.sourceFiles.push_back(rtlDir + "/vb6forms_webview.c");
+    opts.sourceFiles.push_back(rtlDir + "/vb6forms_widget.c");
+    opts.sourceFiles.push_back(rtlDir + "/vb6forms_widget_prop.c");
+    opts.sourceFiles.push_back(rtlDir + "/vb6forms_shape.c");
+    opts.sourceFiles.push_back(rtlDir + "/vb6forms_axsite.c");
+}
+
 bool Driver::runLinker(const CompileOptions& options, const std::string& outputDir,
                        const std::string& intermediatesDir, SessionManager& session) {
     // --emit-c mode: no linking needed
@@ -122,19 +139,27 @@ bool Driver::runLinker(const CompileOptions& options, const std::string& outputD
     msvcOpts.sourceFiles.push_back(rtlDir + "/vb6_di_shell_stubs.c");
     if (msvcOpts.isGui || msvcOpts.isDll) {
         // 092z-3: ActiveX DLL 允许包含窗体 (Form/UserControl), 也要 vb6forms
-        msvcOpts.sourceFiles.push_back(rtlDir + "/vb6forms.c");
-        msvcOpts.sourceFiles.push_back(rtlDir + "/vb6forms_ctrl.c");
-        msvcOpts.sourceFiles.push_back(rtlDir + "/vb6forms_list.c");
-        msvcOpts.sourceFiles.push_back(rtlDir + "/vb6forms_style.c");
-        msvcOpts.sourceFiles.push_back(rtlDir + "/vb6forms_scroll.c");
-        msvcOpts.sourceFiles.push_back(rtlDir + "/vb6forms_picture.c");
-        msvcOpts.sourceFiles.push_back(rtlDir + "/vb6forms_picture_prop.c");
-        msvcOpts.sourceFiles.push_back(rtlDir + "/vb6forms_ctrlarr.c");
-        msvcOpts.sourceFiles.push_back(rtlDir + "/vb6forms_webview.c");
-        msvcOpts.sourceFiles.push_back(rtlDir + "/vb6forms_widget.c");
-        msvcOpts.sourceFiles.push_back(rtlDir + "/vb6forms_widget_prop.c");
-        msvcOpts.sourceFiles.push_back(rtlDir + "/vb6forms_shape.c");
-        msvcOpts.sourceFiles.push_back(rtlDir + "/vb6forms_axsite.c");
+        addFormsSources(msvcOpts, rtlDir);
+    } else {
+        // Fix 096: 非 GUI 工程也可能引用 vb6forms RTL —— 标准模块裸 Print
+        // 生成 vb6_Form_Print(NULL, ...) (C3 扩展语义), 之前不链 vb6forms
+        // 报 LNK2019。扫描生成的 .c 源码, 引用了 vb6_Form_ 符号即补链。
+        bool usesFormsRtl = false;
+        for (auto& sf : msvcOpts.sourceFiles) {
+            std::ifstream f(utf8ToPath(sf));
+            if (!f) continue;
+            std::string line;
+            while (std::getline(f, line)) {
+                if (line.find("vb6_Form_") != std::string::npos) {
+                    usesFormsRtl = true;
+                    break;
+                }
+            }
+            if (usesFormsRtl) break;
+        }
+        if (usesFormsRtl) {
+            addFormsSources(msvcOpts, rtlDir);
+        }
     }
     if (msvcOpts.isDll) {
         msvcOpts.sourceFiles.push_back(rtlDir + "/vb6comserver.c");

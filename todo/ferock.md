@@ -12,7 +12,14 @@
 
 ## changelog
 
-### 0.10.5
+### 0.10.6
+
+- 2026-09-17（版本起手）：分支 `ferock/0.10.6` 从 `ferock/0.10.5`（`3817c67`）起；VERSION → ` 0.10.6`（唯一权威源，行首空格 + CRLF 保持）
+- 2026-09-17 修复 3 项既有缺陷（0.10.5 对照回归 `tests/regress_all.ps1` 实测揪出，全部与源码拆分无关）：
+  1. **vb6_CurDir 0 参调用 C2198**（test_sysfunc）：`cgen_expr_ident_builtin.inc` 的 `zeroArgBuiltinFuncs` 路径对 `curdir` 直接拼 `vb6_CurDir()`，而 RTL 签名是 `vb6_CurDir(BSTR drive)`——ident 路径不经过 call 路径的 P14.2.2 fixup（`Dir` 之所以正常是因其不在该集合）。修复：ident 路径特判 `curdir` → `vb6_CurDir(NULL)`（RTL 的 else 分支本就健壮处理 NULL=当前驱动器）；同集合其余函数（now/date/time/command/timer 等）签名逐一核对均无此问题
+  2. **vb6_vsink_http_create C2197**（test_com_events_winhttp）：`cgen_com_events.cpp` `emitComVtableSinkDecls` 生成声明 `void* vb6_vsink_<var>_create(void)`，而定义（`emitComVtableSinks`）与调用是 `void* handler` 带参——声明与定义不一致。修复：声明改为 `(void* handler)`
+  3. **标准模块裸 Print LNK2019**（test_concat_leak/stress、test_p613_typelib）：C3 扩展语义接受非 GUI 工程裸 `Print`（生成 `vb6_Form_Print(NULL, ...)`），但 `driver_link.cpp` 仅在 `isGui||isDll` 时链 vb6forms 系列 → LNK2019。修复：forms 源清单抽成 `addFormsSources()`，非 GUI/DLL 时扫描生成的 .c 源码、命中 `vb6_Form_` 前缀即补链（真 VB6 拒绝该语法，判定仍属 C3-EXT，但 C3 自己生成的代码必须能链接）
+- 2026-09-17 验证：构建 0 错误；5 个目标用例全过（test_sysfunc 编+跑 rc=0/0 输出正常、concat_leak/stress、p613_typelib 编+跑 rc=0/0、winhttp 编译 rc=0）；全量回归 **82/0/1/83** 与基线一致（修复零回归）
 
 - 2026-09-17（版本起手）：分支 `ferock/0.10.5` 从 main（`66b2791`）起；按 README「版本号唯一权威源」只改根目录 `VERSION`（保持行首空格 + CRLF）→ ` 0.10.5`，其余使用方（CMake `file(READ)` / 编译期宏 / `release.bat`）自动跟随；重建后 `C3 --version` = 0.10.5。6 项静态自检全过
 - 2026-09-17 源码拆分（第 3 个「纯搬移 + 函数体片段」两步法）：driver.cpp 2494→主 121 —— ① 纯搬移 9 个函数共 1713 行到 6 个新编译单元（均已登记 CMakeLists）：driver_args 232（parseArgs / compile(int,char**) / writeErrorLog / printHelp / VB6C3_VERSION_STRING 兜底宏 + printVersion）、driver_compile 384（compile(int,char**) + compile(CompileOptions)）、driver_frontend 340（runLexer / runPreprocess / runParser / runTypeLibImport）、driver_semantics 339（runSemanticAnalysis）、driver_crossmod 169（runCrossModuleResolution）、driver_link 358（runLinker）；`class ExternalRefCollector` **留原文件**（被 runCodeGeneration 内使用，须同编译单元）。② runCodeGeneration 函数体 678 行按既有 Fix/P6.x/M29 分节注释切 9 片段到 `src/driver/detail/`（prelude 5 / voidfield_scan 88 / typedfield_scan 84 / variant_funcs 70 / dup_module_vars 29 / module_loop 92 / dll_typelib 236 / dll_sync 55 / dll_entry 19），其中 dll_* 三段位于 `if (options.isDll …)` 块内（相对花括号深度 1，片段自身不闭合但拼接后逐行一致）；9 个 .inc 不登记 CMakeLists。验证：① 搬移三重断言（非空行全覆盖不重叠 / 回读比对 / 新 driver.cpp 非空行序列一致，仅空行分隔归一）；② 片段**独立复算**（用拆分前备份，不依赖拆分脚本自身断言）：9 片段去头后与原文区间逐行一致 + 伞文件结构（16 行说明 + 原文前 94 行 + 9 include + 原文尾 3 行）；③ 增量构建零错误（首轮 3 个新单元报 `C2027 使用了未定义类型 Module / SemanticAnalyzer` → 补 `ast/ast.hpp`、`semantics/semantic_analyzer.hpp`；第 2 步只重编 driver.cpp + 链接，无新增编译单元）；④ **生成代码对照：拆分前后各对 100 个样例（92 .bas + 8 .frm）跑 --emit-c，12635 行逐字节一致（100/100，diff -rq 无输出、退出码序列一致、stderr 全空）**；⑤ 回归 82/0/1/83。src 下 ≥500 行文件 2 → 1（仅剩 vb6rtl.c 5327）

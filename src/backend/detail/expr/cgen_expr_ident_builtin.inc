@@ -200,6 +200,12 @@
             // Fix 041: Rnd() requires 1 arg (int32_t seed). Emit vb6_Rnd(0) not vb6_Rnd().
             if (lower == "rnd") {
                 lastExpr_ = "vb6_Rnd(0)";
+            // Fix 094: CurDir 的 RTL 签名是 vb6_CurDir(BSTR drive)，0 参调用必须补
+            // NULL (当前驱动器)，否则 C2198 参数太少。与 call 路径 fixup
+            // (cgen_expr_call_builtin_fixup.inc P14.2.2) 同语义；ident 路径
+            // (无括号引用 / 0 参) 不经过该 fixup，需在此处补。
+            } else if (lower == "curdir") {
+                lastExpr_ = "vb6_CurDir(NULL)";
             } else {
                 lastExpr_ = it->second + "()";
             }
