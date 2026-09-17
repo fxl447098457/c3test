@@ -15,7 +15,9 @@
 ### 0.10.3
 
 - 2026-09-17 源码拆分（函数体片段推广，600+ 行口径）：4 个单巨函数文件一次拆净 —— cgen_expr_ident 744→主 26 + detail/ 3 片段（224/190/323）、cgen_util 699→主 26 + 4 片段（64/328/229/76）、cgen_setlet 809→主 264 + 2 片段（313/247）、cgen_assign 1367→主 28 + 4 片段（397/426/230/310）；切点全部取函数体内既有的顶层语义分节注释（零重排），每例断言「head + 片段 + tail 拼回原文件逐行一致」；13 个 .inc 不需登记 CMakeLists（不是编译单元）；全量构建增量通过。src 下 ≥500 行文件 12 → 8
-- 2026-09-17（环境注记）：受限会话里 run_tests.ps1 报 FAIL=39 全部是假阴性 —— 均为 Start-Process 启动被会话安全策略阻断（exe 已正常生成、.out/.err 为 0 字节），同批 37 个测试产物手动运行全部输出正确通过标记、0 含 FAIL；reg.exe 被程序黑名单拦截导致 vcvarsall 缺 Windows SDK 路径（C1083 crtdbg.h / winsock2.h），规避办法是把 C3_VCVARSALL 指向只 set INCLUDE/LIB/PATH 的替身 bat
+- 2026-09-17 回归运行器修复（tests/run_tests.ps1）：新增 `Invoke-TestExe` 统一启动出口 —— 路径 A（.NET `ProcessStartInfo` + `ReadToEndAsync` 管道捕获）优先、路径 B（`Start-Process -Redirect*`）后备，两条都失败才算 FAIL 并**打印异常原文**（旧实现 catch 只写 `FAIL (run error)`，把环境问题伪装成测试失败）；`Test-Run` / `Test-Vbp` 两处重复逻辑收敛到该函数。`.out`/`.err` 仍按原样落盘供人工复查；不改测试语义、不动 CMake。修复后 `test smoke` PASS、全量 `test all` 回到基线 `PASS=82 FAIL=0 SKIP=1 TOTAL=83`
+- 2026-09-17（修正上一版归因）：把「FAIL=39 全假阴性」归因为「Start-Process 被会话安全策略阻断」**不成立** —— 复测 `Start-Process -NoNewWindow -Wait -RedirectStandardOutput` 本机可用，HEAD 版原文在相同调用方式（bat → `powershell -File`，含 bash 管道）下 3/3 通过，**无法稳定复现**；当时唯一可复现的缺陷是运行器吞异常。事件特征留档：39 个 FAIL 恰等于全部可运行 run 用例数，`.out`/`.err` 存在但 0 字节（进程没起来）
+- 2026-09-17（环境注记，仍然有效）：`reg.exe` 被程序黑名单拦截 → vcvarsall 拿不到 Windows SDK 路径（`C1083 crtdbg.h` / `winsock2.h`），规避办法是把 `C3_VCVARSALL` 指向只 set `INCLUDE`/`LIB`/`PATH` 的替身 bat
 
 ### 0.10.2
 
