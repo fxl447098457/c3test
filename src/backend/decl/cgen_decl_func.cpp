@@ -6,23 +6,17 @@
 
 namespace vb6c3 {
 
-// --- cgen_decl_proc.cpp: 过程声明生成（SubDecl / FunctionDecl） ---
+// --- cgen_decl_func.cpp: FunctionDecl 声明生成 ---
+// 由 src/backend/decl/cgen_decl_proc.cpp 拆出（2026-09-17），纯搬移、零行为改动。
 
 
-// ============================================================
-// 声明 visit 方法
-// ============================================================
-
-void CCodeGen::visit(SubDecl& node) {
+void CCodeGen::visit(FunctionDecl& node) {
     std::string sig = makeProcSignature(node);
 
     // Fix 055: Form事件处理函数不能为static, 因为wndproc用extern引用它们
-    bool isFormEventProc = isFormModule_ && node.name.find("Form_") == 0;
-    // Fix 089e: 仅 Private 成员编译为 static — Friend 成员跨模块调用
-    // (VB6 Friend = 工程内可见, 如 cHttpServer.OnDataArrival 被
-    // cClientCallback 调用 / cSerialConfig.BuildTimeouts 被 cSerialPort
-    // 调用), 若 static 则调用方 TU 中"声明但未定义" → C2129.
-    if (node.access == AccessLevel::Private && !isFormEventProc) {
+    bool isFormEventFunc = isFormModule_ && node.name.find("Form_") == 0;
+    // Fix 089e: 仅 Private 成员编译为 static (Friend/Public 跨模块可调用)
+    if (node.access == AccessLevel::Private && !isFormEventFunc) {
         c_.emitLine("static " + sig + " {");
     } else {
         c_.emitLine(sig + " {");
@@ -33,8 +27,6 @@ void CCodeGen::visit(SubDecl& node) {
     // 查找符号获取参数信息
     auto* sym = symTab_.lookupModule(node.name);
     currentProc_ = sym;
-    currentReturnVar_ = "";
-    currentReturnCType_ = "";  // Fix 054
 
     // Fix 056b: 清理局部数组注册 (模块级/类成员数组跨过程保留)
     clearProcArrayTracking();
@@ -67,6 +59,7 @@ void CCodeGen::visit(SubDecl& node) {
     // Fix 010n (扩展): 恢复普通模块模块级UDT变量 (同 classUdtMembers_ 机制)
     knownUdtVars_.insert(moduleUdtMembers_.begin(), moduleUdtMembers_.end());
 
+    // M22-fix: 注册参数中的UDT/类/接口变量到跟踪集合
     for (auto& p : node.params) {
         // Fix 081g: Register ByRef params for For-loop dereference fix
         if (!p->isByVal) {
@@ -87,6 +80,7 @@ void CCodeGen::visit(SubDecl& node) {
             std::string pLower = p->name;
             std::transform(pLower.begin(), pLower.end(), pLower.begin(), ::tolower);
             auto* pSym = symTab_.lookupModule(simpleP.name);
+
             if (pSym && pSym->kind == SymbolKind::UserDefinedType) {
                 knownUdtVars_[pLower] = "vb6_type_" + cIdent(simpleP.name);
             } else if (pSym && pSym->kind == SymbolKind::Class) {
@@ -94,7 +88,6 @@ void CCodeGen::visit(SubDecl& node) {
             } else if (pSym && (pSym->kind == SymbolKind::ComClass || pSym->kind == SymbolKind::ComInterface)) {
                 knownTypedComVars_[pLower] = pSym;
             }
-            // 接口类型的参数
             auto* pSym2 = symTab_.lookup(simpleP.name);
             if (pSym2 && pSym2->kind == SymbolKind::Class && pSym2->isInterface) {
                 knownIfaceVars_[pLower] = pSym2->name;
@@ -146,26 +139,79 @@ void CCodeGen::visit(SubDecl& node) {
             arrayDimCounts_[pLower] = 1;
             // Fix 055: 注册UDT数组元素C类型
             std::string udtCType = resolveArrayUdtElemCType(p->asType.get());
-            if (!udtCType.empty()) {
-                arrayUdtElemTypes_[pLower] = udtCType;
-            }
+            if (!udtCType.empty()) arrayUdtElemTypes_[pLower] = udtCType;
             knownLocalVars_.insert(pLower);
         }
     }
 
-    // VB6 Static Sub: 过程内所有局部变量都是static
+    // VB6 Static Function: 过程内所有局部变量都是static
     inStaticProc_ = node.isStatic;
 
     // 检测GoSub并声明返回地址栈
     hasGoSub_ = hasGoSubInStmts(node.body);
     gosubReturnCounter_ = 0;
+
+    // Bug #1 fix (082h): 预扫描UBound/LBound(arr,N>1)收集ND数组名
+    scanNDArraysInStmts(node.body);
+
+    // Function返回值变量
+    std::string retType = mapTypeRef(node.returnType.get());
+    currentReturnVar_ = "vb6_ret_" + cIdent(node.name);
+    currentReturnCType_ = retType;  // Fix 054: 保存返回类型C名称, 供With块UDT检测
+    Vb6Type funcRetVb6Type = node.returnType ? typeSys_.resolveTypeName(static_cast<SimpleTypeRef*>(node.returnType.get())->name) : Vb6Type::Variant;
+    // Fix 038/054: UDT 返回值不能用 = 0 初始化 (C2440), 改用 {0} 零初始化
+    // 修复: 仅检查 C 类型名前缀即可 (typeSys 可能将 UDT 解析为 Unknown/Variant)
+    {
+        std::string initVal = defaultValue(funcRetVb6Type);
+        if (retType.rfind("vb6_type_", 0) == 0) {
+            initVal = "{0}";
+        }
+        c_.emitLine(retType + " " + currentReturnVar_ + " = " + initVal + ";");
+    }
+    // P6.11: 注册返回值变量类型 (用于BSTR安全赋值)
+    std::string funcRetLower = currentReturnVar_;
+    std::transform(funcRetLower.begin(), funcRetLower.end(), funcRetLower.begin(), ::tolower);
+    if (funcRetVb6Type == Vb6Type::String) knownBstrVars_.insert(funcRetLower);
+    else if (funcRetVb6Type == Vb6Type::Double) knownDoubleVars_.insert(funcRetLower);
+    else if (funcRetVb6Type == Vb6Type::Long || funcRetVb6Type == Vb6Type::Integer || funcRetVb6Type == Vb6Type::Boolean) knownLongVars_.insert(funcRetLower);
+    // Bug #2 fix: LongPtr 返回值变量注册到独立集合
+    else if (funcRetVb6Type == Vb6Type::LongPtr) knownLongPtrVars_.insert(funcRetLower);
+    // Fix 035: Variant 返回值变量也要注册, 否则 `Foo = concrete_expr` 赋值不会触发
+    // wrapVariantValue 包装, 导致 C2440 (BSTR/int32_t → vb6_VARIANT).
+    else if (funcRetVb6Type == Vb6Type::Variant) knownVariantVars_.insert(funcRetLower);
+    // Fix 088c: 函数返回类实例 → 注册返回值变量 (vb6_ret_X) 到 knownClassVars_,
+    // 使函数体内 FuncName.Method(...)/FuncName.Field 走类成员分发.
+    // 此前该变量未注册, MemberAccessExpr 主 fallback 找不到 → 生成
+    // vb6_ret_X->Method (C2039: Method 不是 vb6_cls_X 的成员).
+    if (retType.rfind("vb6_cls_", 0) == 0) {
+        std::string clsName088c = retType.substr(8);  // strip "vb6_cls_" (8 chars)
+        if (!clsName088c.empty() && clsName088c.back() == '*') clsName088c.pop_back();
+        knownClassVars_[funcRetLower] = clsName088c;
+    }
+    // Fix 089c: 函数返回内置 COM 对象 (As Collection / As Object → C void*)
+    // 时注册返回值变量到 knownObjectVars_, 使函数体内 FuncName.Add(...)/
+    // FuncName.Remove(...) 走 COM dispatch (vb6_ComCall) 而非结构成员调用
+    // (C2224: vb6_ret_json_ParseArray.Add — json_ParseArray As Collection).
+    // 与变量注册 (941-946: cType=="void*" → knownObjectVars_) 对齐.
+    else if (retType == "void*") {
+        knownObjectVars_.insert(funcRetLower);
+    }
+    // Fix 090i: 函数返回 UDT → 注册返回值变量到 knownUdtVars_ (如 pvVfsOpen /
+    // pvVfsCreate / pvArrPtr 等 As ZipVfsType 的内部函数). 此前漏注册, 函数体内
+    // vb6_ret_X.Field 的字段类型推断失败 (inferExprType → inferUdtTypeOfExpr
+    // 查 knownUdtVars_ 落空 → 字段按 Unknown/Variant 处理), UDT 内 Variant/
+    // LongPtr 字段被误当 String (包装 .vt=VT_BSTR 复合字面量传 ByRef Variant
+    // 形参) / SafeArray (UBound/ReDim 直接把 VARIANT 字段传 SafeArray*) /
+    // Variant (VariantToLong 解包 LongPtr 字段) → C2440/C2198 (cZipArchive
+    // pvVfsOpen/pvVfsCreate 函数簇 22 错).
+    if (retType.rfind("vb6_type_", 0) == 0) {
+        knownUdtVars_[funcRetLower] = retType;
+    }
+
     if (hasGoSub_) {
         c_.emitLine("int vb6_gosub_stack[32];");
         c_.emitLine("int vb6_gosub_sp = 0;");
     }
-
-    // Bug #1 fix (082h): 预扫描UBound/LBound(arr,N>1)收集ND数组名
-    scanNDArraysInStmts(node.body);
 
     // Fix 081: Apply default values for Optional parameters when not passed
     // VB6: Optional ByVal Ecl As Long = 1  →  if (!_has_Ecl) Ecl = 1;
@@ -179,6 +225,8 @@ void CCodeGen::visit(SubDecl& node) {
                 if (pi.isByVal) {
                     c_.emitLine("if (!" + hasFlag + ") " + pName + " = " + pi.defaultValueExpr + ";");
                 } else {
+                    // ByRef Optional: dereference then assign default
+                    // E.g. if (!_has_sText) (*sText) = vb6_BSTR_FromStr(L"");
                     std::string cType = mapType(pi.type);
                     if (pi.type == Vb6Type::String) {
                         c_.emitLine("if (!" + hasFlag + ") vb6_BSTR_Assign(" + pName + ", " + pi.defaultValueExpr + ");");
@@ -209,6 +257,7 @@ void CCodeGen::visit(SubDecl& node) {
         c_.emitLine("vb6_SaveErrState();");
     }
 
+
     // 生成过程体 (P14.1.2: 传入hasResume_以启用resume点生成)
     // Fix 086: 先将块内 Dim/Const 提升到过程顶部 (VB6 局部声明是过程级作用域)
     hoistLocalDecls(node.body);
@@ -225,10 +274,10 @@ void CCodeGen::visit(SubDecl& node) {
     }
     ansiTempsToFree_.clear();
 
-    // 正常退出守卫 - 防止落入dispatch switch
-    c_.emitLine("return;");
+    // 返回值
+    c_.emitLine("return " + currentReturnVar_ + ";");
 
-    // P14.1.2: Resume dispatch switch - 仅通过goto可达
+    // P14.1.2: Resume dispatch switch - 仅通过goto可达 (在return之后)
     if (hasResume_ && !dispatchPoints_.empty()) {
         c_.emitLine("vb6_err_dispatch_switch:;");
         c_.emitLine("switch(vb6_err_dispatch) {");
@@ -241,6 +290,10 @@ void CCodeGen::visit(SubDecl& node) {
     }
 
     currentProc_ = nullptr;
+
+    currentProc_ = nullptr;
+    currentReturnVar_ = "";
+    currentReturnCType_ = "";  // Fix 054
     inStaticProc_ = false;
     hasGoSub_ = false;
     hasOnError_ = false;

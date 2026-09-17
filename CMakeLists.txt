@@ -85,6 +85,7 @@ add_library(vb6c3-core STATIC
     src/semantics/type_system.cpp
     src/semantics/semantic_analyzer.cpp
     src/semantics/semantic_analyzer_decl.cpp
+    src/semantics/semantic_analyzer_decl_type.cpp
     src/semantics/semantic_analyzer_stmt.cpp
     src/semantics/semantic_analyzer_expr.cpp
     src/semantics/semantic_analyzer_util.cpp
@@ -110,6 +111,7 @@ add_library(vb6c3-cgen STATIC
     src/backend/expr/cgen_expr_member.cpp
     src/backend/expr/cgen_expr_call.cpp
     src/backend/expr/cgen_expr_binary.cpp
+    src/backend/expr/cgen_expr_binary_util.cpp
     src/backend/expr/cgen_expr_array.cpp
     src/backend/expr/cgen_expr_with.cpp
     # 语句家族
@@ -127,10 +129,12 @@ add_library(vb6c3-cgen STATIC
     # 声明家族
     src/backend/decl/cgen_decl.cpp
     src/backend/decl/cgen_decl_proc.cpp
+    src/backend/decl/cgen_decl_func.cpp
     src/backend/decl/cgen_decl_var.cpp
     src/backend/decl/cgen_decl_api.cpp
     src/backend/decl/cgen_decl_prop.cpp
     src/backend/decl/cgen_localdecl.cpp
+    src/backend/decl/cgen_localdecl_hoist.cpp
     # 模块级产物（COM 服务器 / 窗体）
     src/backend/module/cgen_com.cpp
     src/backend/module/cgen_form.cpp
