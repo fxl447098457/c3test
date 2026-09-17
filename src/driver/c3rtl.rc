@@ -3,6 +3,8 @@
 // at user-program build time. The P11.3 pre-compiled .lib scheme was
 // reverted: c3 is open source, no source protection needed.
 // 14 .h headers + 25 .c sources (all arch-neutral) = 39 resources.
+// 2026-09-17 源文件按家族分目录: core/vb6rtl|vb6com|vb6comserver|vb6forms/,
+// 解包后仍是平铺目录（RTL 内部 include 一律 basename，不受源目录影响）。
 // Runtime: FindResource/LoadResource extract to temp session directory
 // Paths relative to this RC file's location (src/driver/)
 
@@ -10,50 +12,50 @@
 1 ICON "c3.ico"
 
 // Headers (needed for #include in generated code) + sources — arch-neutral
-100 RCDATA "../rtl/core/vb6rtl.h"
-101 RCDATA "../rtl/core/vb6rtl.c"
-102 RCDATA "../rtl/core/vb6com.h"
-103 RCDATA "../rtl/core/vb6com.c"
-104 RCDATA "../rtl/core/vb6comserver.h"
-105 RCDATA "../rtl/core/vb6comserver.c"
-106 RCDATA "../rtl/core/vb6forms.h"
-107 RCDATA "../rtl/core/vb6forms.c"
+100 RCDATA "../rtl/core/vb6rtl/vb6rtl.h"
+101 RCDATA "../rtl/core/vb6rtl/vb6rtl.c"
+102 RCDATA "../rtl/core/vb6com/vb6com.h"
+103 RCDATA "../rtl/core/vb6com/vb6com.c"
+104 RCDATA "../rtl/core/vb6comserver/vb6comserver.h"
+105 RCDATA "../rtl/core/vb6comserver/vb6comserver.c"
+106 RCDATA "../rtl/core/vb6forms/vb6forms.h"
+107 RCDATA "../rtl/core/vb6forms/vb6forms.c"
 108 RCDATA "../rtl/core/vb6_di_stubs.c"
 109 RCDATA "../rtl/core/vb6_di_win32_stubs.c"
 
 // vb6comserver 按 COM 接口家族拆分 (P6.6): 内部共享头 + 各族实现
-110 RCDATA "../rtl/core/vb6comserver_internal.h"
-111 RCDATA "../rtl/core/vb6comserver_obj.c"
-112 RCDATA "../rtl/core/vb6comserver_factory.c"
-113 RCDATA "../rtl/core/vb6comserver_cp.c"
-114 RCDATA "../rtl/core/vb6comserver_pci.c"
+110 RCDATA "../rtl/core/vb6comserver/vb6comserver_internal.h"
+111 RCDATA "../rtl/core/vb6comserver/vb6comserver_obj.c"
+112 RCDATA "../rtl/core/vb6comserver/vb6comserver_factory.c"
+113 RCDATA "../rtl/core/vb6comserver/vb6comserver_cp.c"
+114 RCDATA "../rtl/core/vb6comserver/vb6comserver_pci.c"
 
 // vb6com 按 COM 调用层次拆分 (P6): 内部共享头 + 各层实现
-115 RCDATA "../rtl/core/vb6com_internal.h"
-116 RCDATA "../rtl/core/vb6com_invoke.c"
-117 RCDATA "../rtl/core/vb6com_pack.c"
-118 RCDATA "../rtl/core/vb6com_wrap.c"
-119 RCDATA "../rtl/core/vb6com_sink.c"
-120 RCDATA "../rtl/core/vb6com_foreach.c"
+115 RCDATA "../rtl/core/vb6com/vb6com_internal.h"
+116 RCDATA "../rtl/core/vb6com/vb6com_invoke.c"
+117 RCDATA "../rtl/core/vb6com/vb6com_pack.c"
+118 RCDATA "../rtl/core/vb6com/vb6com_wrap.c"
+119 RCDATA "../rtl/core/vb6com/vb6com_sink.c"
+120 RCDATA "../rtl/core/vb6com/vb6com_foreach.c"
 
 // vb6forms 按控件/窗体功能家族拆分 (P7): 内部共享头 + 各家族实现
-121 RCDATA "../rtl/core/vb6forms_internal.h"
-122 RCDATA "../rtl/core/vb6forms_ctrl.c"
-123 RCDATA "../rtl/core/vb6forms_list.c"
-124 RCDATA "../rtl/core/vb6forms_style.c"
-125 RCDATA "../rtl/core/vb6forms_scroll.c"
-126 RCDATA "../rtl/core/vb6forms_picture.c"
-127 RCDATA "../rtl/core/vb6forms_ctrlarr.c"
-128 RCDATA "../rtl/core/vb6forms_webview.c"
-129 RCDATA "../rtl/core/vb6forms_widget.c"
-130 RCDATA "../rtl/core/vb6forms_shape.c"
-131 RCDATA "../rtl/core/vb6forms_axsite.c"
+121 RCDATA "../rtl/core/vb6forms/vb6forms_internal.h"
+122 RCDATA "../rtl/core/vb6forms/vb6forms_ctrl.c"
+123 RCDATA "../rtl/core/vb6forms/vb6forms_list.c"
+124 RCDATA "../rtl/core/vb6forms/vb6forms_style.c"
+125 RCDATA "../rtl/core/vb6forms/vb6forms_scroll.c"
+126 RCDATA "../rtl/core/vb6forms/vb6forms_picture.c"
+127 RCDATA "../rtl/core/vb6forms/vb6forms_ctrlarr.c"
+128 RCDATA "../rtl/core/vb6forms/vb6forms_webview.c"
+129 RCDATA "../rtl/core/vb6forms/vb6forms_widget.c"
+130 RCDATA "../rtl/core/vb6forms/vb6forms_shape.c"
+131 RCDATA "../rtl/core/vb6forms/vb6forms_axsite.c"
 
 // vb6rtl.h 按家族拆分 (2026-09-17): 伞头 + 7 个子头
-132 RCDATA "../rtl/core/vb6rtl_base.h"
-133 RCDATA "../rtl/core/vb6rtl_bstr.h"
-134 RCDATA "../rtl/core/vb6rtl_variant.h"
-135 RCDATA "../rtl/core/vb6rtl_builtin.h"
-136 RCDATA "../rtl/core/vb6rtl_array.h"
-137 RCDATA "../rtl/core/vb6rtl_class_com.h"
-138 RCDATA "../rtl/core/vb6rtl_runtime.h"
+132 RCDATA "../rtl/core/vb6rtl/vb6rtl_base.h"
+133 RCDATA "../rtl/core/vb6rtl/vb6rtl_bstr.h"
+134 RCDATA "../rtl/core/vb6rtl/vb6rtl_variant.h"
+135 RCDATA "../rtl/core/vb6rtl/vb6rtl_builtin.h"
+136 RCDATA "../rtl/core/vb6rtl/vb6rtl_array.h"
+137 RCDATA "../rtl/core/vb6rtl/vb6rtl_class_com.h"
+138 RCDATA "../rtl/core/vb6rtl/vb6rtl_runtime.h"

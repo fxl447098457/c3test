@@ -549,7 +549,7 @@ void SemanticAnalyzer::registerBuiltins() {
     // Fix 034: 字符串/转换/数值/类型检查/数学/文件/日期等内置函数补全参数签名 —
     // 让 IndexOrCallExpr 的 calleeParams 查找命中, 触发 Fix 024 P2 (ByVal Variant 正向包装) 和
     // Fix 029 (ByVal 具体类型反向提取), 消除大量 C2440 (函数实参 → VARIANT/BSTR/double 等).
-    // RTL C 签名参考 src/rtl/core/vb6rtl.h. VB6 Optional 参数标记 isOptional=true (语义保留),
+    // RTL C 签名参考 src/rtl/core/vb6rtl/vb6rtl.h. VB6 Optional 参数标记 isOptional=true (语义保留),
     // 但 RTL C 函数不接受 Optional padding 和 IsMissing _has_ 尾叜 — cgen 用硬编码补默认值
     // (见 cgen_expr.cpp line 3140+ 和 line 3263+).
     // 字符串函数 (RTL 签名: vb6_Len/Left/Right/Mid/InStr/InStrRev 等均接受 BSTR)

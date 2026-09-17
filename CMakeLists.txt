@@ -184,23 +184,50 @@ set_target_properties(c3 PROPERTIES OUTPUT_NAME C3)
 
 # Fix 092z-2: CMake 只把 .rc 自身当依赖 —— 改了 src/rtl/core 下的嵌入源之后
 # .res 不会重编, C3.exe 会继续嵌入旧文件。这里显式声明嵌入文件为 .rc 的依赖
-# (17 个资源: 11 头 + 6 源码, 全部架构无关)。
+# (39 个资源: 14 头 + 25 源码, 全部架构无关；与 c3rtl.rc 一一对应)。
 set(C3RTL_EMBEDDED_FILES
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6rtl.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6rtl_base.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6rtl_bstr.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6rtl_variant.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6rtl_builtin.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6rtl_array.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6rtl_class_com.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6rtl_runtime.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6rtl.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6com.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6com.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6comserver.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6comserver.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6forms.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6forms.c
+    # vb6rtl
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6rtl/vb6rtl.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6rtl/vb6rtl.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6rtl/vb6rtl_base.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6rtl/vb6rtl_bstr.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6rtl/vb6rtl_variant.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6rtl/vb6rtl_builtin.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6rtl/vb6rtl_array.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6rtl/vb6rtl_class_com.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6rtl/vb6rtl_runtime.h
+    # vb6com
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6com/vb6com.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6com/vb6com.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6com/vb6com_internal.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6com/vb6com_invoke.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6com/vb6com_pack.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6com/vb6com_wrap.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6com/vb6com_sink.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6com/vb6com_foreach.c
+    # vb6comserver
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6comserver/vb6comserver.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6comserver/vb6comserver.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6comserver/vb6comserver_internal.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6comserver/vb6comserver_obj.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6comserver/vb6comserver_factory.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6comserver/vb6comserver_cp.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6comserver/vb6comserver_pci.c
+    # vb6forms
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6forms/vb6forms.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6forms/vb6forms.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6forms/vb6forms_internal.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6forms/vb6forms_ctrl.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6forms/vb6forms_list.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6forms/vb6forms_style.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6forms/vb6forms_scroll.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6forms/vb6forms_picture.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6forms/vb6forms_ctrlarr.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6forms/vb6forms_webview.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6forms/vb6forms_widget.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6forms/vb6forms_shape.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6forms/vb6forms_axsite.c
+    # 平铺（不属于任何家族）
     ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6_di_stubs.c
     ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6_di_win32_stubs.c
 )
