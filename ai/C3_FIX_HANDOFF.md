@@ -406,7 +406,7 @@ cToolsArray.cls 的 6 错集中在三个草稿/边缘函数（Extend/DeArray/tes
    - **只涉 3 类符号**：`Alias "VarPtr"`（源码名 `ArrPtr`，取数组/变量地址）、`Alias "__vbaObjSetAddref"`（对象赋值时的运行时 AddRef）、`Alias "#644"`（**按序号**导入的运行时内部函数，源码名 `SplitLongToBytes`）。
    - **x64 路线上无法「补」这个库**：本机 `C:\Windows\SysWOW64\msvbvm60.dll` 存在（32 位），但 `System32` 下**无** 64 位版本；Windows SDK / VS 安装目录里**不存在任何 `msvbvm60.lib`**。VB6 运行时只有 32 位 → `--arch x64` 没有可链接的导入库，且与 `ai/011`「静态链接 msvbvm60 ❌ 不采用、不支持 x64」及网站「零依赖部署」的定位冲突。
    - **该库无法提供、且提供也无用**（2026-09-11 二次核实）：工程内 / `C:\Windows` / `Program Files*` / 用户目录**均无** `msvbvm60.lib`；VB6 未安装（无 `VB98`）；Windows SDK / VS 均不携带 —— 该文件只随 VB6/VS6 发行，无法凭空取得。
-   - **决定性事实（Fix 076）**：Declare 早已不走导入库路线 —— 生成物里 `__declspec(dllimport)` 出现 **0 次**，改为 `extern <ret> __stdcall vb6_di_<name>(...)` + `#define <VB名> vb6_di_<name>`，由 `src/rtl/core/vb6_di_stubs.c` 提供转发桩（`vb6_di_ord_12` 即先例，走 `GetProcAddress(shlwapi, 12)`）。因此 `#pragma comment(lib, "msvbvm60.lib")`（`cgen_decl.cpp:1218-1219` 无条件生成）是**纯残留**：唯一后果是制造 fatal `LNK1104`；**即使补上真库也只消 LNK1104、随即变 `LNK2019`**，因为需要的符号是 C3 内部名，MSVBVM60.DLL 导出表里根本没有。
+   - **决定性事实（Fix 076）**：Declare 早已不走导入库路线 —— 生成物里 `__declspec(dllimport)` 出现 **0 次**，改为 `extern <ret> __stdcall vb6_di_<name>(...)` + `#define <VB名> vb6_di_<name>`，由 `src/rtl/core/di/vb6_di_stubs.c` 提供转发桩（`vb6_di_ord_12` 即先例，走 `GetProcAddress(shlwapi, 12)`）。因此 `#pragma comment(lib, "msvbvm60.lib")`（`cgen_decl.cpp:1218-1219` 无条件生成）是**纯残留**：唯一后果是制造 fatal `LNK1104`；**即使补上真库也只消 LNK1104、随即变 `LNK2019`**，因为需要的符号是 C3 内部名，MSVBVM60.DLL 导出表里根本没有。
    - **实测待补 RTL 桩 3 个**（`vb6_di_stubs.c` 87 行内目前 0 个 msvbvm60 桩）：`vb6_di_VarPtr`（源码 `ArrPtr`，`cAsyncSocket.h:460` `extern intptr_t __stdcall vb6_di_VarPtr(vb6_SafeArray1D** Ptr)`）、`vb6_di_vb6___vbaObjSetAddref`（源码 `vbaObjSetAddref`，用法 `vbaObjSetAddref((void*)&(oCallback), _vb6_with_60->ClientCertCallback)`）、`vb6_di_ord_644`（源码 `SplitLongToBytes`，`cToolsArray.h:215`，返回 `vb6_type_longByteType`）。
    - **可行方向**：① `cgen_decl.cpp:1219` 特判 `libName == "msvbvm60"`（不分大小写）→ 跳过 pragma；② `vb6_di_stubs.c` 补这 3 个桩，语义按 VBMAN 调用点实现（`ArrPtr` 取 SAFEARRAY 描述符、`__vbaObjSetAddref` = 写对象变量并 AddRef、`#644` = Long→4 字节 UDT）；**序号桩不能照抄 `ord_12` 的 `GetProcAddress`**，x64 下无 32 位 msvbvm60.dll 可加载。
    - `LNK1104` 是 **fatal**，它会挡在真正的「未解析外部符号」清单之前 → **必须先处理它才能看清链接期全貌**。
@@ -414,7 +414,7 @@ cToolsArray.cls 的 6 错集中在三个草稿/边缘函数（Extend/DeArray/tes
 #### 2.1 已实施（2026-09-11，提交 `03de92f`）
 
 - **生成器**（`cgen_decl.cpp`）：对 VB6/VBA 运行时库（`msvbvm60`/`msvbvm50`/`vbe7`/`vbe6`/`vba7`/`vba6`）与 `cryptdlg` **不再生成** `#pragma comment(lib, ...)`；其余库照旧（实测其余 19 个库在 SDK 中均存在）。
-- **RTL**（`src/rtl/core/vb6_di_stubs.c`）新增 **4 个原生桩**（除 `cryptdlg` 外均不 LoadLibrary 转发）：
+- **RTL**（`src/rtl/core/di/vb6_di_stubs.c`）新增 **4 个原生桩**（除 `cryptdlg` 外均不 LoadLibrary 转发）：
   - `vb6_di_VarPtr`（`ArrPtr`）：`return (intptr_t)Ptr;` —— 数组 ByRef 传递时 C3 传入的实参**已经是**数组变量地址（生成声明 `vb6_SafeArray1D**`），即 VB6 的 `&baBuffer`，故恒等。调用点 `CopyMemory(ArrPtr(a), ArrPtr(b), 4)` 是交换两个 `SAFEARRAY*`，语义核对通过。
   - `vb6_di_vb6___vbaObjSetAddref`：`if (src) src->AddRef(); *(void**)dst = src;` —— **不** Release 旧值，对齐原版 VB6 语义（避免误 Release 非持有引用）。
   - `vb6_di_ord_644`（`SplitLongToBytes`）：**序号 644 经 `dumpbin /exports SysWOW64\msvbvm60.dll` 反查确认就是 `VarPtr`**（350 = `__vbaObjSetAddref`）。x86 下 VarPtr 把入参放回 EAX，而 VB6 对 4 字节 UDT 返回值同样取 EAX，遂成「Long → 4 字节小端位重解释」技巧 → 此处按小端拆字节返回 4 字节结构。

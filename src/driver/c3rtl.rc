@@ -2,8 +2,8 @@
 // P10 (restored): RTL is embedded as .c/.h SOURCE and compiled by MSVC
 // at user-program build time. The P11.3 pre-compiled .lib scheme was
 // reverted: c3 is open source, no source protection needed.
-// 14 .h headers + 25 .c sources (all arch-neutral) = 39 resources.
-// 2026-09-17 源文件按家族分目录: core/vb6rtl|vb6com|vb6comserver|vb6forms/,
+// 14 .h headers + 33 .c sources (all arch-neutral) = 47 resources.
+// 2026-09-17 源文件按家族分目录: core/vb6rtl|vb6com|vb6comserver|vb6forms|di/,
 // 解包后仍是平铺目录（RTL 内部 include 一律 basename，不受源目录影响）。
 // Runtime: FindResource/LoadResource extract to temp session directory
 // Paths relative to this RC file's location (src/driver/)
@@ -20,8 +20,8 @@
 105 RCDATA "../rtl/core/vb6comserver/vb6comserver.c"
 106 RCDATA "../rtl/core/vb6forms/vb6forms.h"
 107 RCDATA "../rtl/core/vb6forms/vb6forms.c"
-108 RCDATA "../rtl/core/vb6_di_stubs.c"
-109 RCDATA "../rtl/core/vb6_di_win32_stubs.c"
+108 RCDATA "../rtl/core/di/vb6_di_stubs.c"
+109 RCDATA "../rtl/core/di/vb6_di_win32_stubs.c"
 
 // vb6comserver 按 COM 接口家族拆分 (P6.6): 内部共享头 + 各族实现
 110 RCDATA "../rtl/core/vb6comserver/vb6comserver_internal.h"
@@ -59,3 +59,16 @@
 136 RCDATA "../rtl/core/vb6rtl/vb6rtl_array.h"
 137 RCDATA "../rtl/core/vb6rtl/vb6rtl_class_com.h"
 138 RCDATA "../rtl/core/vb6rtl/vb6rtl_runtime.h"
+
+// vb6forms 家族再细分 (2026-09-17): Picture 属性 / Widget 属性
+139 RCDATA "../rtl/core/vb6forms/vb6forms_picture_prop.c"
+140 RCDATA "../rtl/core/vb6forms/vb6forms_widget_prop.c"
+
+// DI 转发桩按 Lib 家族拆分 (2026-09-17): 由 scripts/gen_di_stubs.ps1 生成
+// 每个文件对应一组 DLL 家族, 由 C3 生成头里的 `/* vb6_di_lib: <lib> */` 标记驱动
+141 RCDATA "../rtl/core/di/vb6_di_user32_stubs.c"
+142 RCDATA "../rtl/core/di/vb6_di_gdiplus_stubs.c"
+143 RCDATA "../rtl/core/di/vb6_di_crypto_stubs.c"
+144 RCDATA "../rtl/core/di/vb6_di_com_stubs.c"
+145 RCDATA "../rtl/core/di/vb6_di_net_stubs.c"
+146 RCDATA "../rtl/core/di/vb6_di_shell_stubs.c"

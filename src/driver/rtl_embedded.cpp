@@ -102,6 +102,12 @@ std::string SessionManager::create() {
         { RTL_VB6FORMS_C,           "vb6forms.c" },
         { RTL_VB6_DI_STUBS_C,       "vb6_di_stubs.c" },
         { RTL_VB6_DI_WIN32_STUBS_C, "vb6_di_win32_stubs.c" },
+        { RTL_VB6_DI_USER32_STUBS_C,   "vb6_di_user32_stubs.c" },
+        { RTL_VB6_DI_GDIPLUS_STUBS_C,  "vb6_di_gdiplus_stubs.c" },
+        { RTL_VB6_DI_CRYPTO_STUBS_C,   "vb6_di_crypto_stubs.c" },
+        { RTL_VB6_DI_COM_STUBS_C,      "vb6_di_com_stubs.c" },
+        { RTL_VB6_DI_NET_STUBS_C,      "vb6_di_net_stubs.c" },
+        { RTL_VB6_DI_SHELL_STUBS_C,    "vb6_di_shell_stubs.c" },
         { RTL_VB6COMSERVER_INTERNAL_H, "vb6comserver_internal.h" },
         { RTL_VB6COMSERVER_OBJ_C,      "vb6comserver_obj.c" },
         { RTL_VB6COMSERVER_FACTORY_C,  "vb6comserver_factory.c" },
@@ -133,6 +139,10 @@ std::string SessionManager::create() {
         { RTL_VB6RTL_ARRAY_H,                 "vb6rtl_array.h" },
         { RTL_VB6RTL_CLASS_COM_H,             "vb6rtl_class_com.h" },
         { RTL_VB6RTL_RUNTIME_H,               "vb6rtl_runtime.h" },
+
+        // vb6forms 家族再细分 (2026-09-17)
+        { RTL_VB6FORMS_PICTURE_PROP_C,        "vb6forms_picture_prop.c" },
+        { RTL_VB6FORMS_WIDGET_PROP_C,         "vb6forms_widget_prop.c" },
     };
 
     for (auto& entry : files) {

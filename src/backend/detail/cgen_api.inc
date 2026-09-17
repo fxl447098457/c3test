@@ -1,0 +1,203 @@
+// cgen_api.inc - CCodeGen 的 public 接口段（类体片段）
+// 由 src/backend/cgen.hpp 拆出（2026-09-17），在类体内被 #include，非独立头文件。
+// 内容 = 原 cgen.hpp 第 77~275 行，逐行未改；`public:` 由伞头给出。
+
+    CCodeGen(Diagnostics& diag, const SymbolTable& symTab,
+             const TypeSystem& typeSys,
+             const std::unordered_map<std::string, std::set<std::string>>* classVoidFieldMap = nullptr,
+              const std::unordered_map<std::string, std::unordered_map<std::string, std::string>>* classTypedFieldMap = nullptr,
+              const std::unordered_set<std::string>* variantReturnFuncs = nullptr,
+              bool verbose = false);
+
+    // 主入口: 生成C代码，返回是否成功
+    // externalModules: 当前模块引用的外部模块基名列表 (用于生成 #include)
+    // isDll: P6.6 ActiveX DLL模式, 生成COM服务端代码
+    // dllProgId: P6.6 DLL的ProgID前缀
+    // frmDesc: P7 窗体描述 (仅.frm有效, nullptr=非窗体模块)
+    bool generate(Module& module, const std::string& baseName,
+                  const std::unordered_set<std::string>& externalModules = {},
+                  bool isDll = false, const std::string& dllProgId = "",
+                  const FrmFormDesc* frmDesc = nullptr);
+
+    // opt4: 裁剪标准模块.c中未实际引用的跨模块#include (降低预处理量, 加速cl编译)
+    void setTrimIncludes(bool b) { trimIncludes_ = b; }
+    // opt4: 设置"当前模块实际引用的外部模块"集合(小写), 由driver通过AST扫描提供
+    void setTrimModules(const std::unordered_set<std::string>& m) { trimModules_ = m; }
+
+    // Fix 086: 设置工程内全部窗体模块名集合(小写), 由driver预扫描提供.
+    // 跨模块窗体默认实例引用 (cLogs 里 FLogs.Visible / Unload FLogs) 需要知道
+    // FLogs 是窗体, 才能生成 vb6_form_hwnd_FLogs() 访问器调用而非裸标识符.
+    void setFormModuleNames(const std::unordered_set<std::string>& names) { knownFormModuleNames_ = names; }
+    // Fix 086: 各模块 Public 常量表 (小写模块名 → 小写常量名 → 整数值).
+    // 本地同名过程符号会阻止跨模块常量注入 (如 cSerialPort.Sub SetDTR 与
+    // modSerialPortAPI.Const SETDTR), 此表兜底内联数值.
+    void setModulePublicConsts(const std::unordered_map<std::string,
+        std::unordered_map<std::string, long long>>* consts) { modulePublicConsts_ = consts; }
+
+    // Fix 093b: 跨模块同名模块级变量集合 (小写名), 由 driver 预扫描提供.
+    // 两个不同模块各自声明同名模块级变量时 (如 Tools.bas 与 mDelay.bas 都有
+    // Public Delay As New cDelay; FToastDrawer/FToastCenter 都有 Dim m_Theme /
+    // PosVal / m_ParentToast ...), C 语言下会生成同名全局符号 → LNK2005.
+    // 命中的名字改为 static 内部链接: VB6 语义下模块内引用绑定本模块副本,
+    // 跨模块引用必须写 "模块名.变量名" (不会与裸名撞), 故 static 不改变行为.
+    void setStaticModuleVarNames(const std::unordered_set<std::string>* names) {
+        staticModuleVarNames_ = names;
+    }
+    // 名字(大小写不敏感)是否命中"跨模块同名模块级变量"
+    bool isStaticForcedVarName(const std::string& vb6Name) const {
+        if (!staticModuleVarNames_) return false;
+        std::string lower;
+        lower.reserve(vb6Name.size());
+        for (char ch : vb6Name) {
+            lower += (ch >= 'A' && ch <= 'Z') ? (char)(ch - 'A' + 'a') : ch;
+        }
+        return staticModuleVarNames_->count(lower) != 0;
+    }
+    // 模块级变量: Public 且撞名 → 强制 static (内部链接)
+    bool isPublicModuleDecl(const VariableDecl& n) const {
+        if (n.access != AccessLevel::Public) return false;
+        return !isStaticForcedVarName(n.name);
+    }
+    // 模块级常量: 生成 #define 宏, 不产生符号, 不受撞名影响
+    bool isPublicModuleDecl(const ConstDecl& n) const {
+        return n.access == AccessLevel::Public;
+    }
+
+    // P6.6: 单独生成ActiveX DLL入口文件 (dll_entry.c)
+    // 当DLL工程只有类模块(无标准模块)时, 由Driver调用此方法生成DLL导出代码
+    // progId: DLL的ProgID前缀
+    // 返回: 生成的dll_entry.c文件内容
+    std::string generateDllEntry(const std::string& progId,
+                                  const std::vector<SymbolTable*>& allSymTabs = {});
+
+    // 获取生成的代码
+    const std::string& headerCode() const { return header_; }
+    const std::string& sourceCode() const { return source_; }
+
+    // --- 声明 ---
+    void visit(SubDecl& node) override;
+    void visit(FunctionDecl& node) override;
+    void visit(PropertyDecl& node) override;
+    void visit(TypeDecl& node) override;
+    void visit(TypeMember& node) override;
+    void visit(EnumDecl& node) override;
+    void visit(EnumMember& node) override;
+    void visit(DeclareDecl& node) override;
+    void visit(EventDecl& node) override;
+    void visit(ConstDecl& node) override;
+    void visit(VariableDecl& node) override;
+    void visit(ParameterDecl& node) override;
+
+    // --- 语句 ---
+    void visit(Block& node) override;
+    void visit(AssignmentStmt& node) override;
+    void visit(SetStmt& node) override;
+    void visit(LetStmt& node) override;
+    void visit(IfStmt& node) override;
+    void visit(ElseIfClause& node) override;
+    void visit(ForStmt& node) override;
+    void visit(ForEachStmt& node) override;
+    void visit(DoLoopStmt& node) override;
+    void visit(WhileWendStmt& node) override;
+    void visit(SelectCaseStmt& node) override;
+    void visit(CaseClause& node) override;
+    void visit(WithStmt& node) override;
+    void visit(GoToStmt& node) override;
+    void visit(GoSubStmt& node) override;
+    void visit(OnGoSubStmt& node) override;  // P17.4
+    void visit(OnGoToStmt& node) override;  // P18-A
+    void visit(MidStmt& node) override;  // P18-A
+    void visit(OnErrorStmt& node) override;
+    void visit(ResumeStmt& node) override;
+    void visit(ErrorStmt& node) override;
+    void visit(ExitStmt& node) override;
+    void visit(CallStmt& node) override;
+    void visit(ReDimStmt& node) override;
+    void visit(EraseStmt& node) override;
+    // Fix 084y-5: ReDim/Erase 目标的 C 标识符解析 — 处理成员访问形态
+    // (.Field With块成员 → _vb6_with_N->Field; obj.Field UDT成员 →
+    // (*obj).Field 或 obj.Field), 避免 cIdent 把 '.' 替换成 '_' 生成
+    // 未声明的单标识符 (uOutput.Buffer → uOutput_Buffer → C2065)
+    std::string resolveArrayTargetIdent(const std::string& varName);
+    // Fix 084aa: 判断标识符是否引用 String 类型常量 (#define 宏, 不可取址)
+    bool isStringConstIdent(const std::string& name) const;
+    // Fix 084aa: 查找常量符号 (Constant kind), 无则返回 nullptr
+    Symbol* lookupConstSym(const std::string& name) const;
+    // Fix 084aa: 判断标识符是否引用任何类型的常量 (#define 宏)
+    bool isConstIdent(const std::string& name) const;
+    // Fix 084aa: 获取常量标识符的 VB6 类型
+    Vb6Type constIdentType(const std::string& name) const;
+    // Fix 084aa: 常量宏作为 ByRef 实参 → 生成可寻址复合字面量包装
+    std::string wrapConstArgForByRef(const std::string& argVal, Vb6Type paramVb6Type) const;
+    void visit(OpenStmt& node) override;
+    void visit(CloseStmt& node) override;
+    void visit(PrintStmt& node) override;
+    void visit(WriteStmt& node) override;
+    void visit(LineInputStmt& node) override;
+    void visit(InputStmt& node) override;
+    void visit(GetStmt& node) override;
+    void visit(PutStmt& node) override;
+    void visit(SeekStmt& node) override;
+    void visit(LockStmt& node) override;
+    void visit(UnlockStmt& node) override;
+    void visit(ResetStmt& node) override;
+    void visit(WidthStmt& node) override;
+    void visit(KillStmt& node) override;
+    void visit(NameStmt& node) override;
+    void visit(MkDirStmt& node) override;
+    void visit(RmDirStmt& node) override;
+    void visit(ChDirStmt& node) override;
+    void visit(ChDriveStmt& node) override;
+    void visit(FileCopyStmt& node) override;
+    void visit(LabelStmt& node) override;
+    void visit(OptionStmt& node) override;
+    void visit(LocalDeclStmt& node) override;
+    // Fix 086: LocalDeclStmt 的实际声明发射代码 (visit 判重后调用; 提升阶段也直接调用)
+    void emitLocalDeclCode(LocalDeclStmt& node);
+    void visit(RaiseEventStmt& node) override;
+    void visit(BeepStmt& node) override;
+    void visit(DoEventsStmt& node) override;
+
+    // --- 表达式 (返回C表达式字符串) ---
+    void visit(BinaryExpr& node) override;
+    void visit(UnaryExpr& node) override;
+    void visit(LiteralExpr& node) override;
+    void visit(IdentifierExpr& node) override;
+    void visit(MemberAccessExpr& node) override;
+    void visit(DictionaryAccessExpr& node) override;
+    void visit(IndexOrCallExpr& node) override;
+    void visit(NewExpr& node) override;
+    void visit(TypeOfExpr& node) override;
+    void visit(AddressOfExpr& node) override;
+    void visit(MeExpr& node) override;
+    void visit(WithMemberExpr& node) override;
+
+    // --- 类型引用 ---
+    void visit(SimpleTypeRef& node) override;
+    void visit(ArrayTypeRef& node) override;
+    void visit(FixedStringTypeRef& node) override;
+
+    // --- 模块 ---
+    void visit(Module& node) override;
+
+    // 限定类型名符号查找: "Scripting.Dictionary" → 先查全名，失败则查短名 "Dictionary"
+    Symbol* lookupModuleDotted(const std::string& name) const {
+        auto* sym = symTab_.lookupModule(name);
+        if (!sym) {
+            size_t dot = name.find('.');
+            if (dot != std::string::npos) {
+                sym = symTab_.lookupModule(name.substr(dot + 1));
+            }
+        }
+        return sym;
+    }
+    Symbol* lookupDotted(const std::string& name) const {
+        auto* sym = symTab_.lookup(name);
+        if (!sym) {
+            size_t dot = name.find('.');
+            if (dot != std::string::npos) {
+                sym = symTab_.lookup(name.substr(dot + 1));
+            }
+        }
+        return sym;
+    }
