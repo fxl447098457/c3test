@@ -146,6 +146,7 @@ add_library(vb6c3-cgen STATIC
     src/backend/module/cgen_com.cpp
     src/backend/module/cgen_com_events.cpp
     src/backend/module/cgen_form.cpp
+    src/backend/module/cgen_form_menu.cpp
     src/backend/cgen_util.cpp
     src/backend/cgen_util_type.cpp
     src/backend/cgen_util_scan.cpp

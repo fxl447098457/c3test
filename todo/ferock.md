@@ -12,6 +12,11 @@
 
 ## changelog
 
+### 0.10.4
+
+- 2026-09-17 源码拆分（首个「纯搬移 + 函数体片段」两步法）：cgen_form 2222→主 86 —— ① 纯搬移 4 个 CCodeGen 成员函数到新编译单元 backend/module/cgen_form_menu.cpp（228 行，已登记 CMakeLists）：emitMenuItem 68 / emitMenuClickDispatch 81 / escapeWideCString 46 / CCodeGen::escapeCString 15；② 余下 emitFormFramework（单函数 1945）的函数体按既有分节注释切 8 个片段到 backend/detail/（prelude 91 / ctrl_registry 117 / wndproc_subclass 336 / wndproc_create 324 / wndproc_dispatch 351 / create_controls 500 / frame_menu 165 / show 59），切点全在「相对花括号深度 0」。两个文件级 static（bytesToHexArray / 旧 escapeCString）留在原位（内部链接、调用点全在本函数内）。验证：搬移与切片各断言「拼回原文件逐行一致」；增量构建零错误；回归 82/0/1/83（8 个 .frm 编译用例全 PASS）；--dump-ast 18 样例逐字节一致 18/18；另做生成代码对照 —— 拆分前（HEAD 版）C3 与拆分后 C3 对 8 个 .frm 跑 --emit-c，1769 行逐字节一致 8/8。src 下 ≥500 行文件 6 → 5
+- 2026-09-17（验证手法，新）：`--emit-c` 只把生成的 C 代码打到 stdout、不调 cl.exe，可用于「拆分前后生成代码对照」，且不受本机 reg.exe 黑名单影响；注意 `git show HEAD:<file>` 输出是 LF，写回工作区前要 `sed 's/$/\r/'` 补 CRLF
+
 ### 0.10.3
 
 - 2026-09-17 源码拆分（函数体片段推广，600+ 行口径）：4 个单巨函数文件一次拆净 —— cgen_expr_ident 744→主 26 + detail/ 3 片段（224/190/323）、cgen_util 699→主 26 + 4 片段（64/328/229/76）、cgen_setlet 809→主 264 + 2 片段（313/247）、cgen_assign 1367→主 28 + 4 片段（397/426/230/310）；切点全部取函数体内既有的顶层语义分节注释（零重排），每例断言「head + 片段 + tail 拼回原文件逐行一致」；13 个 .inc 不需登记 CMakeLists（不是编译单元）；全量构建增量通过。src 下 ≥500 行文件 12 → 8
