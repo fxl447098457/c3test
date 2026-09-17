@@ -110,6 +110,34 @@ scripts\compile tests\hello.bas        REM 单文件编译（自动带 MSVC + RT
 scripts\run hello                      REM 运行 output\hello.exe
 ```
 
+### 3.5 全量对照回归（C3 vs 真 VB6）
+
+`tests\regress_all.ps1` 把 `tests\` 下除 `vbman` 外的全部用例（vbp / bas / frm / aux，当前 118 个）与**微软真 VB6**（本机 `VB6Mini`，命令行 `/make` 编译）逐个对照：双方各自编译、运行，按矩阵判定，结果增量写入 `tests\_vb6ref\report-*.csv`（含每个用例的双方编译结果、退出码与失败备注）。
+
+```powershell
+# 前置：先构建 C3（scripts\build），MSVC 环境同 run_tests.ps1（设 C3_VCVARSALL 或让脚本经 vswhere 探测）
+
+.\tests\regress_all.ps1                 REM 全量（约 25 分钟）
+.\tests\regress_all.ps1 -Filter test_iif*   REM 只跑匹配用例
+.\tests\regress_all.ps1 -List           REM 枚举用例，不执行
+.\tests\regress_all.ps1 -CompileOnly    REM 只比编译，不运行
+```
+
+可选覆盖：参数 `-C3 <路径>` / `-VB6 <路径>`，或环境变量 `C3_EXE` / `VB6_EXE` / `C3_TESTS_WORKROOT`。
+
+判定矩阵：
+
+| 判定 | 含义 |
+| ---- | ---- |
+| PASS | 双方编译 OK，运行退出码一致（双方都有输出时还比内容） |
+| REG-C3 | 真 VB6 可编译而 C3 失败 —— **可疑回归，需排查** |
+| C3-EXT | C3 可编译、真 VB6 不支持（C3 扩展语法/能力） |
+| BOTH-FAIL | 双方都失败（注意：tests 里有故意的负例用例，属预期） |
+| RUN-DIFF / RUN-TIMEOUT | 编译都过但运行行为不一致 / 一方超时 |
+| SKIP-AUX | 辅助模块（非独立用例），跳过 |
+
+备注：真 VB6 编译需 `VB6.EXE` 可无界面运行且其链接器对工作目录可写（本仓库约定工作目录 `tests\_vb6ref\`，该目录已 gitignore，运行产物不进库）。
+
 ---
 
 ## 四、命令行参数
