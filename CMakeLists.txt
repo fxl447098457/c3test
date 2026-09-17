@@ -1,5 +1,16 @@
 cmake_minimum_required(VERSION 3.20)
-project(vb6c3 VERSION 0.10.2 LANGUAGES CXX)
+
+# Version single source of truth: VERSION file at the repo root (stripped).
+file(READ "${CMAKE_CURRENT_LIST_DIR}/VERSION" VB6C3_VERSION_RAW)
+string(STRIP "${VB6C3_VERSION_RAW}" VB6C3_VERSION)
+if(VB6C3_VERSION STREQUAL "")
+    message(FATAL_ERROR "VERSION file is empty: ${CMAKE_CURRENT_LIST_DIR}/VERSION")
+endif()
+
+project(vb6c3 VERSION ${VB6C3_VERSION} LANGUAGES CXX)
+
+# Re-run CMake automatically when VERSION changes, so the injected macro stays in sync.
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_CURRENT_LIST_DIR}/VERSION")
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -264,3 +275,5 @@ else()
     target_compile_definitions(c3 PRIVATE VB6C3_NO_LLVM)
 endif()
 target_compile_definitions(c3 PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
+# Version string injected into driver.cpp (source: VERSION file, do not hardcode here).
+target_compile_definitions(c3 PRIVATE VB6C3_VERSION_STRING="${VB6C3_VERSION}")

@@ -2483,8 +2483,13 @@ void Driver::printHelp() {
 }
 
 
+// 版本号由 CMake 从根目录 VERSION 文件读出、经编译期宏注入，勿在此硬编码。
+#ifndef VB6C3_VERSION_STRING
+#define VB6C3_VERSION_STRING "(unknown)"
+#endif
+
 void Driver::printVersion() {
-    std::cout << "C3 version 0.10.2 (vb6.pro project)" << std::endl;
+    std::cout << "C3 version " VB6C3_VERSION_STRING " (vb6.pro project)" << std::endl;
 }
 
 } // namespace vb6c3
