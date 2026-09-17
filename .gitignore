@@ -9,6 +9,12 @@ out/
 output/
 cmake-build-*/
 
+# ---------- 发布产物 (scripts\release.bat 打包输出) ----------
+dist/
+
+# ---------- GitCode 发布令牌 (仅本机) ----------
+scripts/.gitcode_token
+
 # ---------- CMake 生成物 ----------
 CMakeCache.txt
 CMakeFiles/

@@ -1,0 +1,4 @@
+[submodule "tests/vbman"]
+	path = tests/vbman
+	url = git@gitcode.com:woeoio/vbman.git
+	branch = master

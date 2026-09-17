@@ -66,7 +66,7 @@ doc/<内容>             例: doc/rtl-api
 | 语义分析 | `src/semantics/` | 符号表 + 类型系统 |
 | C 代码生成 | `src/backend/cgen_*.cpp` | VB6 → C |
 | MSVC 驱动 | `src/backend/msvc_driver.cpp` | shell-out cl.exe / link.exe |
-| RTL 运行时 | `src/rtl/core/` | C 运行时 (vb6rtl / vb6forms / vb6com) |
+| RTL 运行时 | `src/rtl/core/` | C 运行时，按家族分目录 (vb6rtl / vb6com / vb6comserver / vb6forms) |
 | 工程解析 | `src/project/` | .vbp / .frm / .frx |
 | CLI 驱动 | `src/driver/` | main + RTL 内嵌 |
 

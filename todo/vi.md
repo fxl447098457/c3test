@@ -28,14 +28,19 @@
    - 控件：14 类全链路可用（Form/MDIForm、PictureBox、Label、TextBox、Frame、CommandButton、CheckBox、OptionButton、ComboBox、ListBox、HScrollBar、VScrollBar、Timer、Image、Menu）→ 21 类里约 67%
    - 属性：50+ 个双向读写（Left/Top/Width/Height/hWnd、Font 六件套、ForeColor/BackColor、Alignment、TabIndex/TabStop/CausesValidation、ToolTipText、Tag、MousePointer/MouseIcon、BorderStyle、Visible/Enabled + 各控件专有）
    - 事件：约 25 个（Click/DblClick/Change/Scroll/KeyDown/Press/Up/MouseDown/Up/Move/Enter/Leave/GotFocus/LostFocus/Validate(Cancel) + 窗体 Load/Unload(Cancel)/QueryUnload(Cancel)/Activate/Deactivate/Resize/鼠标键 + Timer + Menu.Click）
-   - **方法：近乎空白**（仅 AddItem/RemoveItem/Clear + Timer 相关）→ 这是最短的一块板
+   - **方法：近乎空白**（仅 AddItem/RemoveItem/Clear + Timer 相关）→ 这是最短的一块板，欠账已转 [#2](https://gitcode.com/woeoio/c3.vb6.pro/issues/2)
 1. [结论] 属性层最厚、事件层够日常、**方法层和绘图层是主要欠账**。常规 CRUD/工具型界面（文本框+按钮+列表+下拉+复选/单选+Frame+图片+滚动条+菜单+定时器+MDI）能编译并原生跑起来；依赖运行时操纵控件（Move/SetFocus/ZOrder/Refresh）、自绘画图（PSet/Line/Circle/Cls/PaintPicture）、拖放、多层容器嵌套的老程序跑不通，需改源码
-2. [发现-关键] Shape/Line/DriveListBox/DirListBox/FileListBox 五类并非"没写"，而是**半接线**：RTL 已实现（vb6forms.c 里 Shape/Line 自绘 WndProc、文件系统控件的 Drive/Path/Pattern/FileName/Refresh 全有），属性读写表已登记、.frm 初值赋值也已生成，但 frm_parser.cpp 的 controlTypeToWin32Class 对这五类返回 nullptr → cgen_form.cpp 的创建循环不发 CreateWindow → vb6_hwnd_ 恒为 NULL → 编译零错但运行时看不见。**性价比最高，差一步**
+2. [发现-关键，已转 #1] Shape/Line/DriveListBox/DirListBox/FileListBox 五类并非"没写"，而是**半接线**：RTL 已实现（vb6forms.c 里 Shape/Line 自绘 WndProc、文件系统控件的 Drive/Path/Pattern/FileName/Refresh 全有），属性读写表已登记、.frm 初值赋值也已生成，但 frm_parser.cpp 的 controlTypeToWin32Class 对这五类返回 nullptr → cgen_form.cpp 的创建循环不发 CreateWindow → vb6_hwnd_ 恒为 NULL → 编译零错但运行时看不见。**性价比最高，差一步** → 细节与验收见 [#1](https://gitcode.com/woeoio/c3.vb6.pro/issues/1)（已认领 woeoio）
 3. [发现-次要] Toolbar/StatusBar/CommonDialog/ImageList 走 ActiveX CoCreateInstance 生成 IDispatch*，但无属性/方法映射，且这些 OCX 是 32 位 → x64 进程根本 CoCreate 失败
-4. [发现-其他] 容器只遍历 Frame 单层子控件（PictureBox 当容器、多层嵌套不支持）；缇↔像素硬编码 1 比 15（96 DPI），无 per-monitor DPI；缺 Form_Click、Paint、DragDrop/DragOver 事件
+4. [发现-其他，已转 #4/#5] 容器只遍历 Frame 单层子控件（PictureBox 当容器、多层嵌套不支持）；缇↔像素硬编码 1 比 15（96 DPI），无 per-monitor DPI；缺 Form_Click、Paint、DragDrop/DragOver 事件（容器问题 → [#4](https://gitcode.com/woeoio/c3.vb6.pro/issues/4)；DPI 与事件 → [#5](https://gitcode.com/woeoio/c3.vb6.pro/issues/5)）
 5. [结论-对外口径] GUI 是**Win32 原生重实现而非复刻 VB6 运行时**，"形似"可达成、"神似"（像素级渲染、字体度量、VB6 怪癖行为）需逐项对齐；这也是 VBMAN 运行期对齐的主战场
 
-> 「控件 67% → 100%」主方向已提升为正式任务，拆分与认领状态见仓库 Issues，路线图摘要见 README 第十章。
+> **「控件 67% → 100%」主方向已全部转为正式 Issue，本文件只留指向不再重复记录**：
+> [#1 P0 五类半接线（已认领 woeoio）](https://gitcode.com/woeoio/c3.vb6.pro/issues/1) ·
+> [#2 P1 控件方法层](https://gitcode.com/woeoio/c3.vb6.pro/issues/2) ·
+> [#3 P1 绘图语句与画布](https://gitcode.com/woeoio/c3.vb6.pro/issues/3) ·
+> [#4 P2 容器嵌套与 Data/OLE 报错边界](https://gitcode.com/woeoio/c3.vb6.pro/issues/4) ·
+> [#5 P3 Form_Click/Paint 事件与 DPI](https://gitcode.com/woeoio/c3.vb6.pro/issues/5)；路线图摘要见 README 第十章。
 
 ## 群友建议：字符串连接现代语法（Fan XiaoLei，2026-09-15）
 

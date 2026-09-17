@@ -371,11 +371,11 @@ cToolsArray.cls 的 6 错集中在三个草稿/边缘函数（Extend/DeArray/tes
 
 | 文件 | 职责 |
 |---|---|
-| `src/backend/cgen_expr.cpp` | 表达式生成：IndexOrCallExpr、M22 fallback、ByRef 实参、VarCmp、VarPtr、枚举分支 |
-| `src/backend/cgen_stmt.cpp` | 语句生成：With 分类、属性 Let/Set、ReDim/Erase、静态局部 |
-| `src/backend/cgen_decl.cpp` | 声明生成：模块级变量 + knownUdtVars_ 注册（903-912） |
+| `src/backend/expr/cgen_expr.cpp` | 表达式生成：IndexOrCallExpr、M22 fallback、ByRef 实参、VarCmp、VarPtr、枚举分支（同目录另有 `_array`/`_binary`/`_call`/`_ident`/`_member`/`_with`） |
+| `src/backend/stmt/cgen_stmt.cpp` | 语句生成：With 分类、属性 Let/Set、ReDim/Erase、静态局部（同目录另有 `_assign`/`_call`/`_control`/`_file_io`/`_jumps`/`_loop`/`_redim`/`_select`/`_setlet`/`_with`） |
+| `src/backend/decl/cgen_decl.cpp` | 声明生成：模块级变量 + knownUdtVars_ 注册（`decl/cgen_decl_var.cpp` 的 `visit(VariableDecl&)`，152-160 行；同目录另有 `_api`/`_proc`/`_prop`、`cgen_localdecl.cpp`） |
 | `src/backend/cgen_base.cpp` | 辅助：lookupConstSym/wrapConstArgForByRef/resolveArrayTargetIdent/inferClassTypeOfExpr |
-| `src/backend/cgen_util.cpp` | inferClassTypeOfExpr、inferUdtTypeOfExpr（2076+） |
+| `src/backend/cgen_util.cpp` | inferClassTypeOfExpr、inferUdtTypeOfExpr（已按职责拆为 8 文件：主文件 + `_type`/`_scan`/`_com`/`_comwrite`/`_classcall`/`_classtype`/`_ctrl`） |
 | `src/backend/cgen.hpp` | 声明 |
 | `src/driver/driver.cpp` | 跨模块注入（1094-1128，仅 Public） |
 | `src/semantics/symbol_table.cpp` | lookup/lookupModule 作用域链 |

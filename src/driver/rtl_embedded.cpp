@@ -1,5 +1,5 @@
 // P10 (restored): RTL runtime embedded resource management - implementation
-// Extract 4 .h headers + 6 .c sources from c3.exe RCDATA resources.
+// Extract 7 .h headers + 25 .c sources from c3.exe RCDATA resources.
 // The P11.3 pre-compiled .lib scheme was reverted (c3 is open source);
 // RTL sources are compiled by MSVC together with the generated code.
 
@@ -102,6 +102,37 @@ std::string SessionManager::create() {
         { RTL_VB6FORMS_C,           "vb6forms.c" },
         { RTL_VB6_DI_STUBS_C,       "vb6_di_stubs.c" },
         { RTL_VB6_DI_WIN32_STUBS_C, "vb6_di_win32_stubs.c" },
+        { RTL_VB6COMSERVER_INTERNAL_H, "vb6comserver_internal.h" },
+        { RTL_VB6COMSERVER_OBJ_C,      "vb6comserver_obj.c" },
+        { RTL_VB6COMSERVER_FACTORY_C,  "vb6comserver_factory.c" },
+        { RTL_VB6COMSERVER_CP_C,       "vb6comserver_cp.c" },
+        { RTL_VB6COMSERVER_PCI_C,      "vb6comserver_pci.c" },
+        { RTL_VB6COM_INTERNAL_H,       "vb6com_internal.h" },
+        { RTL_VB6COM_INVOKE_C,         "vb6com_invoke.c" },
+        { RTL_VB6COM_PACK_C,           "vb6com_pack.c" },
+        { RTL_VB6COM_WRAP_C,           "vb6com_wrap.c" },
+        { RTL_VB6COM_SINK_C,           "vb6com_sink.c" },
+        { RTL_VB6COM_FOREACH_C,        "vb6com_foreach.c" },
+        { RTL_VB6FORMS_INTERNAL_H,     "vb6forms_internal.h" },
+        { RTL_VB6FORMS_CTRL_C,         "vb6forms_ctrl.c" },
+        { RTL_VB6FORMS_LIST_C,         "vb6forms_list.c" },
+        { RTL_VB6FORMS_STYLE_C,        "vb6forms_style.c" },
+        { RTL_VB6FORMS_SCROLL_C,       "vb6forms_scroll.c" },
+        { RTL_VB6FORMS_PICTURE_C,      "vb6forms_picture.c" },
+        { RTL_VB6FORMS_CTRLARR_C,      "vb6forms_ctrlarr.c" },
+        { RTL_VB6FORMS_WEBVIEW_C,      "vb6forms_webview.c" },
+        { RTL_VB6FORMS_WIDGET_C,       "vb6forms_widget.c" },
+        { RTL_VB6FORMS_SHAPE_C,        "vb6forms_shape.c" },
+        { RTL_VB6FORMS_AXSITE_C,       "vb6forms_axsite.c" },
+
+        // vb6rtl.h 按家族拆分 (2026-09-17)
+        { RTL_VB6RTL_BASE_H,                  "vb6rtl_base.h" },
+        { RTL_VB6RTL_BSTR_H,                  "vb6rtl_bstr.h" },
+        { RTL_VB6RTL_VARIANT_H,               "vb6rtl_variant.h" },
+        { RTL_VB6RTL_BUILTIN_H,               "vb6rtl_builtin.h" },
+        { RTL_VB6RTL_ARRAY_H,                 "vb6rtl_array.h" },
+        { RTL_VB6RTL_CLASS_COM_H,             "vb6rtl_class_com.h" },
+        { RTL_VB6RTL_RUNTIME_H,               "vb6rtl_runtime.h" },
     };
 
     for (auto& entry : files) {
