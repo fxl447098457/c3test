@@ -71,7 +71,9 @@ add_library(vb6c3-core STATIC
     src/parser/parser_helpers.cpp
     src/parser/parser_module.cpp
     src/parser/parser_expr.cpp
+    src/parser/parser_expr_postfix.cpp
     src/parser/parser_decl.cpp
+    src/parser/parser_decl_var.cpp
     # 语句解析家族
     src/parser/stmt/parser_stmt.cpp
     src/parser/stmt/parser_stmt_control.cpp
@@ -92,11 +94,13 @@ add_library(vb6c3-core STATIC
     src/semantics/semantic_analyzer_builtin.cpp
     src/project/vbp_parser.cpp
     src/project/frm_parser.cpp
+    src/project/frm_parser_util.cpp
     src/project/frx_reader.cpp
     src/com/typelib_parser.cpp
     src/com/typelib_parser_parse.cpp
     src/com/typelib_parser_desc.cpp
     src/typelib/typelib_builder.cpp
+    src/typelib/typelib_builder_coclass.cpp
 )
 target_compile_definitions(vb6c3-core PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
 # TypeLib parser needs ole32/oleaut32 (COM API)
@@ -137,6 +141,7 @@ add_library(vb6c3-cgen STATIC
     src/backend/decl/cgen_localdecl_hoist.cpp
     # 模块级产物（COM 服务器 / 窗体）
     src/backend/module/cgen_com.cpp
+    src/backend/module/cgen_com_events.cpp
     src/backend/module/cgen_form.cpp
     src/backend/cgen_util.cpp
     src/backend/cgen_util_type.cpp
