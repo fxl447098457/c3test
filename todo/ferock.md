@@ -11,6 +11,7 @@
   - 待用户后续提供 vbman 单元测试
 
 ## changelog
+- 2026-09-17 AST 头拆分：ast.hpp（1459 行）拆为伞头 18 行 + src/ast/detail/ 8 子头（enums/fwd/base/expr/stmt/stmt_io/decl/util，最大 366 行），按类边界切、零重排，6 处引用路径不变；回归 82/0/1/83 零变化
 - 2026-09-17（ai/003-开发计划）：补「实现说明」——P4~P8 的 rtl/*.hpp/cpp 规划名是早期 C++ 路线，实际走 C 侧 RTL，相关文件名已不存在；原计划文本不改写
 - 2026-09-17（src/rtl/core）：41 个平铺文件按家族分 4 个子目录（vb6rtl 9 / vb6com 8 / vb6comserver 7 / vb6forms 13），根下只留 2 个 DI 桩 + bstring；同步 rc / CMake 路径，CMake 嵌入依赖由 17 项补齐为 39 项
 - 2026-09-17 RTL 头拆分：vb6rtl.h（1007 行）拆为伞头 16 行 + 7 子头（base/bstr/variant/builtin/array/class_com/runtime），同步 4 处嵌入管线，回归 82/0/1/83 零变化
