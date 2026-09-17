@@ -2478,7 +2478,7 @@ void Driver::printHelp() {
 
 
 void Driver::printVersion() {
-    std::cout << "C3 version 0.10.0 (vb6.pro project)" << std::endl;
+    std::cout << "C3 version 0.10.2 (vb6.pro project)" << std::endl;
 }
 
 } // namespace vb6c3
