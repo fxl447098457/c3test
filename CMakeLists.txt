@@ -184,9 +184,16 @@ set_target_properties(c3 PROPERTIES OUTPUT_NAME C3)
 
 # Fix 092z-2: CMake 只把 .rc 自身当依赖 —— 改了 src/rtl/core 下的嵌入源之后
 # .res 不会重编, C3.exe 会继续嵌入旧文件。这里显式声明嵌入文件为 .rc 的依赖
-# (10 个资源: 4 头 + 6 源码, 全部架构无关)。
+# (17 个资源: 11 头 + 6 源码, 全部架构无关)。
 set(C3RTL_EMBEDDED_FILES
     ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6rtl.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6rtl_base.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6rtl_bstr.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6rtl_variant.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6rtl_builtin.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6rtl_array.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6rtl_class_com.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6rtl_runtime.h
     ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6rtl.c
     ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6com.h
     ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6com.c

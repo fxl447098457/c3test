@@ -53,6 +53,15 @@ enum RtlResourceID {
     RTL_VB6FORMS_WIDGET_C   = 129,
     RTL_VB6FORMS_SHAPE_C    = 130,
     RTL_VB6FORMS_AXSITE_C   = 131,
+
+    // vb6rtl.h 按家族拆分 (2026-09-17): 伞头 + 7 个子头
+    RTL_VB6RTL_BASE_H = 132,
+    RTL_VB6RTL_BSTR_H = 133,
+    RTL_VB6RTL_VARIANT_H = 134,
+    RTL_VB6RTL_BUILTIN_H = 135,
+    RTL_VB6RTL_ARRAY_H = 136,
+    RTL_VB6RTL_CLASS_COM_H = 137,
+    RTL_VB6RTL_RUNTIME_H = 138,
 };
 
 // Session directory manager

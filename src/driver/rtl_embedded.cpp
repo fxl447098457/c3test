@@ -124,6 +124,15 @@ std::string SessionManager::create() {
         { RTL_VB6FORMS_WIDGET_C,       "vb6forms_widget.c" },
         { RTL_VB6FORMS_SHAPE_C,        "vb6forms_shape.c" },
         { RTL_VB6FORMS_AXSITE_C,       "vb6forms_axsite.c" },
+
+        // vb6rtl.h 按家族拆分 (2026-09-17)
+        { RTL_VB6RTL_BASE_H,                  "vb6rtl_base.h" },
+        { RTL_VB6RTL_BSTR_H,                  "vb6rtl_bstr.h" },
+        { RTL_VB6RTL_VARIANT_H,               "vb6rtl_variant.h" },
+        { RTL_VB6RTL_BUILTIN_H,               "vb6rtl_builtin.h" },
+        { RTL_VB6RTL_ARRAY_H,                 "vb6rtl_array.h" },
+        { RTL_VB6RTL_CLASS_COM_H,             "vb6rtl_class_com.h" },
+        { RTL_VB6RTL_RUNTIME_H,               "vb6rtl_runtime.h" },
     };
 
     for (auto& entry : files) {
