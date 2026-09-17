@@ -41,7 +41,7 @@ VB6 源码 (.bas/.cls/.frm/.frx + .vbp)
 
 | 项目 | 状态 |
 |------|------|
-| 版本 | `C3 --version` → `0.10.0` |
+| 版本 | 权威值见根目录 `VERSION` 文件（`C3 --version` 的输出需手工同步，见第九章「版本号约定」） |
 | 里程碑 | M1 ~ M33 全部达成 |
 | 最新基线 tag | `v0.1.0-m33-vbman-dll`（提交 `5f4bed1`） |
 | 编译期 | 大型真实工程（VBMAN，125 模块含 4 个窗体）**error C = 0**，链接期 LNK2019 / LNK2005 / LNK1104 均已清零 |
@@ -289,6 +289,38 @@ VBMAN 编译过程的问题日志见 `archive/vbman/c3log/001.md ~ 054.md`。
 | 部分 `.md` 带 UTF-8 BOM | 编辑时保持原样 |
 | 构建目录 | `.build\` 可随时删除重建；遇 release-only 崩溃先 `--clean-first` 全量重建再复现 |
 | 崩溃追踪 | 设环境变量 `C3_CRASH_TRACE=1` 启用 dbghelp 栈追踪 |
+
+### 版本号约定（唯一权威源 + 同步清单）
+
+**权威源只有一处：根目录 `VERSION` 文件。** 内容形如 ` 0.10.4`（允许前后带空格，发布脚本会自动剔除），`scripts\release.bat` 读它作为发布版本号，用于生成发布目录名与发布包文件名。
+
+但版本号在仓库里**出现多处**，其余几处是**手工硬编码的副本，不会跟随 `VERSION` 自动变化**：
+
+| 位置 | 形式 | 用途 |
+|------|------|------|
+| `VERSION`（根目录） | ` 0.10.4` | **权威源**，发布脚本的唯一依据 |
+| `CMakeLists.txt` 第 2 行 | `project(vb6c3 VERSION <版本> LANGUAGES CXX)` | CMake 工程版本元数据 |
+| `src/driver/driver.cpp` 的 `Driver::printVersion()` | `std::cout << "C3 version <版本> (vb6.pro project)"` | `C3 --version` / `-V` 的输出字符串 |
+| 本文件第二章「当前状态」表 | 版本行 | 文档展示值 |
+
+**升版本 = 同步上面全部位置，不是只改 `VERSION`。** 只改 `VERSION` 会让「`VERSION` 里的版本号 / `--version` 输出的版本号 / 文档里的版本号」互相矛盾。
+
+改完自检（在子模块根目录执行，四处应指向同一个版本号）：
+
+```bash
+cat VERSION
+grep -n "project(vb6c3 VERSION" CMakeLists.txt
+grep -n "C3 version" src/driver/driver.cpp
+grep -n "权威值见根目录" README.md
+```
+
+**同一问题已发生两次，不要再有第三次**：
+
+| 时间 | 提交 | 情况 |
+|------|------|------|
+| 2026-09-17 | `afbea7d` | 首次统一为 0.10.2 —— 此前三处各不相同（`VERSION` 0.10.1 / `driver.cpp` 0.10.0 / `CMakeLists.txt` 0.1.0） |
+| 2026-09-17 | `0569942` | 升到 0.10.3 时**只改了 `VERSION`**，另两处仍停在 0.10.2 |
+| 2026-09-17 | `368dc69` | 升到 0.10.4 时**仍只改了 `VERSION`**，`README` 甚至停留在 0.10.0 |
 
 ---
 

@@ -1,0 +1,65 @@
+// cgen_util_dllentry_prelude.inc - generateDllEntry 函数体片段：局部结构体 CoClassInfo 与哈希/格式化辅助 lambda
+// 由 src/backend/cgen_util.cpp 拆出（2026-09-17），在函数体内被 #include，非独立编译单元。
+// 内容 = 原文件第 12~72 行，逐行未改。
+
+    CodeEmitter entry;
+    dllProgId_ = progId;
+
+    // 收集所有instancing >= PublicNotCreatable的类模块
+    struct CoClassInfo {
+        std::string moduleName;
+        std::string clsidStr;
+        std::string progId;
+        std::vector<std::string> publicMethodNames;
+        std::vector<Symbol*> publicMethodSyms;
+        std::vector<std::string> implementsNames;  // P12.1: Implements接口列表
+        // P6.6.4: 事件源信息
+        std::vector<std::string> eventNames;       // 事件名称列表
+        std::string defaultIfaceIid;              // 默认dispinterface IID (用于早绑定QI)
+        std::string sourceIfaceIid;               // source dispinterface IID
+    };
+    std::vector<CoClassInfo> coClasses;
+
+    // P12.1: Hex格式化辅助 (IID常量生成用)
+    auto StringFormatHex2 = [](uint8_t v) -> std::string {
+        char buf[4]; snprintf(buf, sizeof(buf), "%02X", v); return buf;
+    };
+    auto StringFormatHex4 = [](uint16_t v) -> std::string {
+        char buf[6]; snprintf(buf, sizeof(buf), "%04X", v); return buf;
+    };
+    auto StringFormatHex8 = [](uint32_t v) -> std::string {
+        char buf[10]; snprintf(buf, sizeof(buf), "%08X", v); return buf;
+    };
+
+    auto generateClsid = [](const std::string& name) -> std::string {
+        uint32_t h1 = 0x811c9dc5, h2 = 0x01000193, h3 = 0xabcd1234, h4 = 0x5678ef01;
+        for (char c : name) {
+            h1 ^= (uint32_t)(unsigned char)c; h1 *= 0x01000193;
+            h2 ^= (uint32_t)(unsigned char)c; h2 *= 0x01000193;
+            h3 ^= (uint32_t)(unsigned char)c; h3 *= 0x01000193;
+            h4 ^= (uint32_t)(unsigned char)c; h4 *= 0x01000193;
+        }
+        char buf[64];
+        snprintf(buf, sizeof(buf), "{%08X-%04X-%04X-%04X-%04X%08X}",
+                 h1, (h2 >> 16) & 0xFFFF, h2 & 0xFFFF | 0x4000,
+                 (h3 >> 16) & 0xFFFF | 0x8000,
+                 h3 & 0xFFFF, h4);
+        return std::string(buf);
+    };
+
+    // IID/CLSID generation helpers
+    auto generateIid = [](const std::string& name) -> std::string {
+        uint32_t h1 = 0xa1b2c3d4, h2 = 0xe5f60718, h3 = 0x9a0b1c2d, h4 = 0x3e4f5061;
+        for (char c : name) {
+            h1 ^= (uint32_t)(unsigned char)c; h1 *= 0x01000193;
+            h2 ^= (uint32_t)(unsigned char)c; h2 *= 0x01000193;
+            h3 ^= (uint32_t)(unsigned char)c; h3 *= 0x01000193;
+            h4 ^= (uint32_t)(unsigned char)c; h4 *= 0x01000193;
+        }
+        char buf[64];
+        snprintf(buf, sizeof(buf), "{%08X-%04X-%04X-%04X-%04X%08X}",
+                 h1, (h2 >> 16) & 0xFFFF, (h2 & 0xFFFF) | 0x4000,
+                 (h3 >> 16) & 0xFFFF | 0x8000,
+                 h3 & 0xFFFF, h4);
+        return std::string(buf);
+    };

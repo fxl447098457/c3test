@@ -12,6 +12,20 @@
 
 ## changelog
 
+### 0.10.4
+
+- 2026-09-17 源码拆分（首个「纯搬移 + 函数体片段」两步法）：cgen_form 2222→主 86 —— ① 纯搬移 4 个 CCodeGen 成员函数到新编译单元 backend/module/cgen_form_menu.cpp（228 行，已登记 CMakeLists）：emitMenuItem 68 / emitMenuClickDispatch 81 / escapeWideCString 46 / CCodeGen::escapeCString 15；② 余下 emitFormFramework（单函数 1945）的函数体按既有分节注释切 8 个片段到 backend/detail/（prelude 91 / ctrl_registry 117 / wndproc_subclass 336 / wndproc_create 324 / wndproc_dispatch 351 / create_controls 500 / frame_menu 165 / show 59），切点全在「相对花括号深度 0」。两个文件级 static（bytesToHexArray / 旧 escapeCString）留在原位（内部链接、调用点全在本函数内）。验证：搬移与切片各断言「拼回原文件逐行一致」；增量构建零错误；回归 82/0/1/83（8 个 .frm 编译用例全 PASS）；--dump-ast 18 样例逐字节一致 18/18；另做生成代码对照 —— 拆分前（HEAD 版）C3 与拆分后 C3 对 8 个 .frm 跑 --emit-c，1769 行逐字节一致 8/8。src 下 ≥500 行文件 6 → 5
+- 2026-09-17（验证手法，新）：`--emit-c` 只把生成的 C 代码打到 stdout、不调 cl.exe，可用于「拆分前后生成代码对照」，且不受本机 reg.exe 黑名单影响；注意 `git show HEAD:<file>` 输出是 LF，写回工作区前要 `sed 's/$/\r/'` 补 CRLF
+
+### 0.10.3
+
+- 2026-09-17 源码拆分（函数体片段推广，600+ 行口径）：4 个单巨函数文件一次拆净 —— cgen_expr_ident 744→主 26 + detail/ 3 片段（224/190/323）、cgen_util 699→主 26 + 4 片段（64/328/229/76）、cgen_setlet 809→主 264 + 2 片段（313/247）、cgen_assign 1367→主 28 + 4 片段（397/426/230/310）；切点全部取函数体内既有的顶层语义分节注释（零重排），每例断言「head + 片段 + tail 拼回原文件逐行一致」；13 个 .inc 不需登记 CMakeLists（不是编译单元）；全量构建增量通过。src 下 ≥500 行文件 12 → 8
+- 2026-09-17 回归运行器修复（tests/run_tests.ps1）：新增 `Invoke-TestExe` 统一启动出口 —— 路径 A（.NET `ProcessStartInfo` + `ReadToEndAsync` 管道捕获）优先、路径 B（`Start-Process -Redirect*`）后备，两条都失败才算 FAIL 并**打印异常原文**（旧实现 catch 只写 `FAIL (run error)`，把环境问题伪装成测试失败）；`Test-Run` / `Test-Vbp` 两处重复逻辑收敛到该函数。`.out`/`.err` 仍按原样落盘供人工复查；不改测试语义、不动 CMake。修复后 `test smoke` PASS、全量 `test all` 回到基线 `PASS=82 FAIL=0 SKIP=1 TOTAL=83`
+- 2026-09-17（修正上一版归因）：把「FAIL=39 全假阴性」归因为「Start-Process 被会话安全策略阻断」**不成立** —— 复测 `Start-Process -NoNewWindow -Wait -RedirectStandardOutput` 本机可用，HEAD 版原文在相同调用方式（bat → `powershell -File`，含 bash 管道）下 3/3 通过，**无法稳定复现**；当时唯一可复现的缺陷是运行器吞异常。事件特征留档：39 个 FAIL 恰等于全部可运行 run 用例数，`.out`/`.err` 存在但 0 字节（进程没起来）
+- 2026-09-17（环境注记，仍然有效）：`reg.exe` 被程序黑名单拦截 → vcvarsall 拿不到 Windows SDK 路径（`C1083 crtdbg.h` / `winsock2.h`），规避办法是把 `C3_VCVARSALL` 指向只 set `INCLUDE`/`LIB`/`PATH` 的替身 bat
+- 2026-09-17 源码拆分（函数体片段 + 类体片段）：cgen_expr_member 1496→主 36 + detail/ 8 片段（precheck 119 / form_builtin 231 / obj_dispatch 190 / class_module 222 / m22_module 169 / generic_access 120 / voidptr_com 191 / class_fallback 239），首次在「相对花括号深度 1」处切分（原 173~773 行是一个 `if(IdentifierExpr)` 巨块，深度 0 只有 2 个点），片段自身不闭合但拼接后逐行一致；ast_printer 581→主 47 + ast/detail/ 5 个类体片段（entry 13 / decl 93 / stmt 222 / expr 93 / support 128），在 `class PrintVisitor` 类体内 `#include`（继 cgen.hpp 之后第二次用类体片段）。拆前存 `--dump-ast` 基线（18 样例 / 464 行），拆后逐字节一致 18/18；增量构建零错误；回归 82/0/1/83。src 下 ≥500 行文件 8 → 6
+- 2026-09-17（环境注记，x86 路径）：`--arch x86` 时 C3 内部会 `call vcvarsall.bat x86`（msvc_driver_discovery.cpp 的 buildVcvarsPrefix），而 reg.exe 被拦 → `C1083 windows.h`，表现为回归里恰好 2 个 `FAIL (compile)`（test_earlybound2 / test_not_com，run_tests.ps1 里唯一的 -Arch x86 用例）—— 不是代码回归。规避：把 `VCINSTALLDIR` 指向伪 VS 目录 `%TEMP%\c3_fake_vc`，其下放按 %1 切 x64/x86 的 `Auxiliary\Build\vcvarsall.bat` 替身；配 `C3_VCVARSALL=%TEMP%\wb_vcvarsall_fake.bat` 后回归回到 82/0/1/83
+
 ### 0.10.2
 
 - 2026-09-17 源码拆分（生成物）：vb6_di_win32_stubs.c 1184→di/ 下 7 个按 Lib 家族生成的桩文件（最大 377 行）+ 手写 vb6_di_stubs.c 204；先改 cgen_decl_api.cpp 写 vb6_di_lib 标记，再改 gen_di_stubs.ps1 摆脱 unresolved_syms.txt 并支持重跑；RTL 管线 41→47，重建 99/99 + e2e 2/2 + 回归 82/0/1/83。

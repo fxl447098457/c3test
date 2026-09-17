@@ -1,0 +1,123 @@
+// cgen_expr_member_generic_access.inc - 函数体片段：通用成员访问 + 链式 COM 检测 / Variant 数组元素 / UDT 字段链
+// 由 src/backend/expr/cgen_expr_member.cpp 拆出（2026-09-17），在函数体内被 #include，非独立编译单元。
+// 内容 = 原文件第 944~1063 行，逐行未改。
+
+    // 通用成员访问 (结构体字段 / 链式COM访问)
+    emitExpr(*node.object);
+
+    // 链式COM调用检测: 如果object求值产生COM标记, 先resolve为对象值
+    // (fso.GetFolder("x") → vb6_ComCallObject → 返回IDispatch*)
+    // 然后在新对象上访问成员 → 设置新的COM标记
+    if (isComMarker_) {
+        // object是COM属性访问, 解析为对象值
+        resolveComValue("Object");
+        // 检查resolveComValue后的结果是否是对象表达式 (ComCallObject/ComGetObjectProp)
+        // 如果是, 说明这是一个链式COM对象访问, 设置新的COM标记
+        std::string objExpr = lastExpr_;
+        // 检测是否是COM对象表达式 (由ComCallObject/ComGetObjectProp返回的void*)
+        // 这些都是void*类型, 可以作为COM对象继续访问成员
+        if (objExpr.find("vb6_ComCallObject(") == 0 ||
+            objExpr.find("vb6_ComGetObjectProp(") == 0 ||
+            objExpr.find("vb6_CreateObject(") == 0) {
+            // 链式COM: 设置COM标记, objExpr是中间对象表达式
+            comObjExpr_ = objExpr;
+            comMemberName_ = node.memberName;
+            isComMarker_ = true;
+            lastExpr_ = objExpr;  // 保持对象表达式
+            return;
+        }
+        // 非COM对象值, 按结构体字段处理
+        lastExpr_ = objExpr + "." + cIdent(node.memberName);
+        return;
+    }
+
+    std::string obj = std::move(lastExpr_);
+
+    // Fix 090af: Variant 数组元素 (VB6_SA_AT(vb6_VARIANT, arr, i)) 的对象成员访问.
+    // VB6: Dim d() As Variant ... If TypeOf d(0) Is cJson Then Set d(0) = d(0).Root
+    // d(0) 持有对象时 .member 是后期绑定调用 (同 knownVariantVars_ 标识符路径
+    // P24-04 1753). 此前落入通用 fallback 生成 VB6_SA_AT(...).member 结构体字段
+    // 访问 → C2039 (vb6_VARIANT 无该成员) + 级联 C2198/C2440.
+    if (obj.find("VB6_SA_AT(vb6_VARIANT,") == 0) {
+        std::string varRef = "&(" + obj + ")";
+        comObjExpr_ = "vb6_VariantToObject(" + varRef + ")";
+        comMemberName_ = node.memberName;
+        isComMarker_ = true;
+        lastExpr_ = "vb6_VariantFromComResult(vb6_ComGetProp(" + comObjExpr_
+                  + ", L\"" + node.memberName + "\"))";
+        return;
+    }
+
+    // 链式COM检测2: object求值结果是COM对象表达式
+    // (从IndexOrCallExpr产生的COM调用结果, 是void*类型的IDispatch*)
+    if (obj.find("vb6_ComCallObject(") == 0 ||
+        obj.find("vb6_ComGetObjectProp(") == 0 ||
+        obj.find("vb6_ComCall(") == 0 ||
+        obj.find("vb6_ComGetProp(") == 0) {
+        // 对于vb6_ComCall/vb6_ComGetProp, 需要先解封为对象
+        // 链式调用: ComCall返回VARIANT*, 需ComCallObject才能拿到IDispatch*
+        std::string resolvedObj = obj;
+        if (obj.find("vb6_ComCall(") == 0) {
+            // vb6_ComCall → vb6_ComCallObject (同一参数, 返回void*而非VARIANT*)
+            resolvedObj = "vb6_ComCallObject" + obj.substr(strlen("vb6_ComCall"));
+        } else if (obj.find("vb6_ComGetProp(") == 0) {
+            // vb6_ComGetProp → vb6_ComGetObjectProp
+            resolvedObj = "vb6_ComGetObjectProp" + obj.substr(strlen("vb6_ComGetProp"));
+        }
+        comObjExpr_ = resolvedObj;
+        comMemberName_ = node.memberName;
+        isComMarker_ = true;
+        lastExpr_ = resolvedObj;
+        return;
+    }
+
+    // Fix 085: UDT 对象字段链的成员访问.
+    // 内层 UDT 字段访问 (Fix 031 / Fix 084z-4 / WithMemberExpr / 通用 fallback) 在
+    // 检测到字段是对象 (项目类 vb6_cls_X* / Collection·COM void*) 时, 于生成的访问
+    // 文本后追加 "/* udt objfield <CType> */" 注释标记. 此处外层 MemberAccessExpr
+    // 消费该标记:
+    //   - vb6_cls_X* (项目类)  → 类方法/属性/数据字段: vb6_cZipArchive_frCopyCompressed
+    //   - void* (Collection/COM)→ COM dispatch marker (同 Fix 023 机制)
+    // 例: uFile.SourceArchive.frCopyCompressed(...)  (uFile.SourceArchive As cZipArchive)
+    //     → vb6_cZipArchive_frCopyCompressed((void*)(uFile.SourceArchive), ...)
+    //   withCtx.LocalCertificates.Item(lIdx)  (As Collection)
+    //     → vb6_ComCall...(withCtx->LocalCertificates, L"Item", ...)
+    if (obj.find("  /* udt objfield ") != std::string::npos) {
+        size_t mkPos = obj.find("  /* udt objfield ");
+        std::string objExpr = obj.substr(0, mkPos);
+        std::string fldType = obj.substr(mkPos + 18);  // 跳过 "  /* udt objfield "
+        size_t endMark = fldType.find(" */");
+        if (endMark != std::string::npos) fldType = fldType.substr(0, endMark);
+        if (fldType.rfind("vb6_cls_", 0) == 0) {
+            // 项目类对象字段 (early bound): obj.Field.Method → vb6_Class_Method((void*)obj)
+            // 注意: "vb6_cls_" 为 8 字符, 类名紧随其后 (vb6_cls_cZipArchive* → cZipArchive).
+            std::string clsName = fldType.substr(8);
+            if (!clsName.empty() && clsName.back() == '*') clsName.pop_back();
+            std::string resolvedFn = resolveClassMemberCall(clsName, node.memberName);
+            if (!resolvedFn.empty()) {
+                std::string thisArg = "(void*)" + objExpr;
+                if (asCallCallee_) {
+                    // 由外层 IndexOrCallExpr 把 thisArg 前置到参数首 (同 Fix 015)
+                    pendingChainObj_ = thisArg;
+                    lastExpr_ = resolvedFn;
+                } else {
+                    lastExpr_ = resolvedFn + "(" + thisArg + ")";
+                }
+                return;
+            }
+            // 类中无此方法/属性 → 类数据字段 (Public Field): objExpr->field
+            lastExpr_ = objExpr + "->" + cIdent(node.memberName);
+            return;
+        }
+        if (fldType == "void*") {
+            // Collection/COM 对象字段 → 下游 IndexOrCallExpr/BinaryExpr 走 COM dispatch
+            comObjExpr_ = objExpr;
+            comMemberName_ = node.memberName;
+            isComMarker_ = true;
+            lastExpr_ = objExpr;
+            return;
+        }
+        // 兜底 (嵌套 UDT 等非对象标记不应出现) → 普通字段
+        lastExpr_ = objExpr + "." + cIdent(node.memberName);
+        return;
+    }

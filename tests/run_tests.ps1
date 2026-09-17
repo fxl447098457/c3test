@@ -100,6 +100,87 @@ function Test-Compile {
     }
 }
 
+# === 运行被编译出的 exe (统一出口) ===
+# 返回 @{ Ok; ExitCode; Output; Detail }
+#
+# 为什么要有这个函数: 启动外部进程这件事在不同宿主会话下可靠性不同。
+# Start-Process 的 -RedirectStandardOutput 依赖宿主允许子进程继承控制台重定向,
+# 个别会话里会抛异常 (此时 .out/.err 是 0 字节, 原实现只报 "FAIL (run error)",
+# 把环境问题伪装成测试失败 —— 假阴性)。这里按两条路径依次尝试:
+#   路径 A: .NET Process + 管道捕获 (只依赖 CreateProcess, 不依赖宿主重定向)
+#   路径 B: Start-Process -Redirect* (保留原行为作为后备)
+# 两条都失败才算真失败, 并把异常原文一并输出, 避免"失败但不说为什么"。
+function Invoke-TestExe {
+    param(
+        [string]$ExePath,
+        [string]$WorkDir,
+        [string]$Name
+    )
+
+    # 工作目录统一设为 output\: 部分测试用 Open ... For Output 写相对路径文件
+    # (scores.txt / test_output.txt / *.dat 等), 不指定就会落进仓库根目录。
+    $stdoutFile = Join-Path $WorkDir "$Name.out"
+    $stderrFile = Join-Path $WorkDir "$Name.err"
+    Remove-Item $stdoutFile, $stderrFile -ErrorAction SilentlyContinue
+
+    $errors = @()
+
+    # --- 路径 A: .NET Process + 管道 ---
+    try {
+        $psi = New-Object System.Diagnostics.ProcessStartInfo
+        $psi.FileName = $ExePath
+        $psi.WorkingDirectory = $WorkDir
+        $psi.UseShellExecute = $false
+        $psi.CreateNoWindow = $false
+        $psi.RedirectStandardOutput = $true
+        $psi.RedirectStandardError = $true
+
+        $proc = [System.Diagnostics.Process]::Start($psi)
+        $soTask = $proc.StandardOutput.ReadToEndAsync()
+        $seTask = $proc.StandardError.ReadToEndAsync()
+        $proc.WaitForExit()
+        $stdout = $soTask.Result
+        $stderr = $seTask.Result
+
+        # 落盘保留产物, 供人工复查 (编码与系统 ANSI 一致, 中文输出不乱码)
+        [System.IO.File]::WriteAllText($stdoutFile, [string]$stdout, [System.Text.Encoding]::Default)
+        [System.IO.File]::WriteAllText($stderrFile, [string]$stderr, [System.Text.Encoding]::Default)
+
+        return @{
+            Ok       = $true
+            ExitCode = $proc.ExitCode
+            Output   = (Get-Content $stdoutFile -ErrorAction SilentlyContinue)
+            Detail   = "dotnet"
+        }
+    } catch {
+        $errors += ("[dotnet] " + $_.Exception.Message)
+    }
+
+    # --- 路径 B: Start-Process (原实现, 后备) ---
+    try {
+        $proc = Start-Process -FilePath $ExePath -NoNewWindow -Wait -PassThru `
+            -WorkingDirectory $WorkDir `
+            -RedirectStandardOutput $stdoutFile `
+            -RedirectStandardError $stderrFile `
+            -ErrorAction Stop
+        return @{
+            Ok       = $true
+            ExitCode = $proc.ExitCode
+            Output   = (Get-Content $stdoutFile -ErrorAction SilentlyContinue)
+            Detail   = "start-process"
+        }
+    } catch {
+        $errors += ("[start-process] " + $_.Exception.Message)
+    }
+
+    return @{
+        Ok       = $false
+        ExitCode = $null
+        Output   = @()
+        Detail   = ($errors -join " | ")
+    }
+}
+
 # === 运行测试 (编译+运行+输出校验) ===
 function Test-Run {
     param(
@@ -133,22 +214,15 @@ function Test-Run {
         return
     }
     
-    # 运行 (5秒超时)
-    $runResult = $null
-    try {
-        # 工作目录设为 output\: 部分测试用 Open ... For Output 写相对路径文件
-        # (scores.txt / test_output.txt / *.dat 等), 不指定就会落进仓库根目录。
-        $proc = Start-Process -FilePath $exePath -NoNewWindow -Wait -PassThru `
-            -WorkingDirectory $OutDir `
-            -RedirectStandardOutput "$OutDir\$baseName.out" `
-            -RedirectStandardError "$OutDir\$baseName.err" `
-            -ErrorAction Stop
-        $runOutput = Get-Content "$OutDir\$baseName.out" -ErrorAction SilentlyContinue
-    } catch {
+    # 运行 (等待至结束)
+    $run = Invoke-TestExe -ExePath $exePath -WorkDir $OutDir -Name $baseName
+    if (-not $run.Ok) {
         $script:fail++
         Write-Host "FAIL (run error)" -ForegroundColor Red
+        Write-Host ("    " + $run.Detail) -ForegroundColor Red
         return
     }
+    $runOutput = $run.Output
     
     # 校验输出
     if ($ExpectedOutputs -and $ExpectedOutputs.Count -gt 0) {
@@ -220,20 +294,15 @@ function Test-Vbp {
         return
     }
 
-    # 运行 (5秒超时)
-    try {
-        # 同上: 工作目录设为 output\, 避免测试产物落进仓库根目录
-        $proc = Start-Process -FilePath $exePath -NoNewWindow -Wait -PassThru `
-            -WorkingDirectory $OutDir `
-            -RedirectStandardOutput "$OutDir\$baseName.out" `
-            -RedirectStandardError "$OutDir\$baseName.err" `
-            -ErrorAction Stop
-        $runOutput = Get-Content "$OutDir\$baseName.out" -ErrorAction SilentlyContinue
-    } catch {
+    # 运行 (等待至结束)
+    $run = Invoke-TestExe -ExePath $exePath -WorkDir $OutDir -Name $baseName
+    if (-not $run.Ok) {
         $script:fail++
         Write-Host "FAIL (run error)" -ForegroundColor Red
+        Write-Host ("    " + $run.Detail) -ForegroundColor Red
         return
     }
+    $runOutput = $run.Output
 
     # 校验输出
     if ($ExpectedOutputs -and $ExpectedOutputs.Count -gt 0) {
