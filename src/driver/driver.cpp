@@ -1277,15 +1277,31 @@ bool Driver::runCrossModuleResolution() {
             if (itExisting == globalPublicSyms.end()) {
                 globalPublicSyms[sKey] = {i, sym};
             } else {
-                // Fix 086: Property Get 优先于 Let/Set — 跨模块注入每个名字只保留
-                // 一个符号, 若保留 Let (声明顺序在前), 读上下文 (oClient.State == 1)
-                // 会误生成 prop_let_ 调用 (void 返回) → C2186.
-                // 写上下文由 tryRewriteCOMLvalue 的 prop_get_→prop_let_ 改写兜底.
+                // Fix 095: 标准模块过程优先于类成员 — 撞名时保留 .bas 版.
+                // VB6 语义: 类 Public 成员不可裸调 (VB_PredeclaredId=False 时),
+                // 裸名引用 (GenerateWebSocketKey()) 只能解析到标准模块的 Public
+                // 过程. 先到先得规则在 mWebSocketUtils.bas 与 cWebSocketUtils.cls
+                // 同名双定义 (GenerateWebSocketKey/StringToUTF8/UTF8ToString/
+                // ComputeAcceptKey/GetHeaderValue/GetCloseCodeDescription) 时
+                // 可能保留类版符号 → 裸调生成 vb6_<Class>_<Proc>() 缺 me 首参
+                // → C2198 (cWebSocketClient.c 81 等 13 处).
+                // 类版成员仍经 memberParams/memberProcKinds 表走显式限定调用
+                // (obj.Method), 此处不丢失其任何信息.
                 const Symbol* existing = itExisting->second.second;
                 bool existingIsSetter = (existing->kind == SymbolKind::PropertyLet
                                          || existing->kind == SymbolKind::PropertySet);
                 if (existingIsSetter && sym->kind == SymbolKind::PropertyGet) {
                     globalPublicSyms[sKey] = {i, sym};
+                }
+                // Fix 095: 过程符号撞名 — 类版已在, 标准 .bas 版到来时切换
+                else if ((sym->kind == SymbolKind::Sub || sym->kind == SymbolKind::Function)
+                         && (existing->kind == SymbolKind::Sub || existing->kind == SymbolKind::Function)) {
+                    size_t curIdx = itExisting->second.first;
+                    bool curIsClass = modules_[curIdx]->isClassModule;
+                    bool newIsClass = modules_[i]->isClassModule;
+                    if (curIsClass && !newIsClass) {
+                        globalPublicSyms[sKey] = {i, sym};
+                    }
                 }
             }
         }
@@ -2139,14 +2155,33 @@ bool Driver::runLinker(const CompileOptions& options, const std::string& outputD
     // 不再链接预编译 .lib —— 修改 RTL 源码后重编 C3.exe 即生效
     msvcOpts.sourceFiles.push_back(rtlDir + "/vb6rtl.c");
     msvcOpts.sourceFiles.push_back(rtlDir + "/vb6com.c");
+    msvcOpts.sourceFiles.push_back(rtlDir + "/vb6com_invoke.c");
+    msvcOpts.sourceFiles.push_back(rtlDir + "/vb6com_pack.c");
+    msvcOpts.sourceFiles.push_back(rtlDir + "/vb6com_wrap.c");
+    msvcOpts.sourceFiles.push_back(rtlDir + "/vb6com_sink.c");
+    msvcOpts.sourceFiles.push_back(rtlDir + "/vb6com_foreach.c");
     msvcOpts.sourceFiles.push_back(rtlDir + "/vb6_di_stubs.c");
     msvcOpts.sourceFiles.push_back(rtlDir + "/vb6_di_win32_stubs.c");
     if (msvcOpts.isGui || msvcOpts.isDll) {
         // 092z-3: ActiveX DLL 允许包含窗体 (Form/UserControl), 也要 vb6forms
         msvcOpts.sourceFiles.push_back(rtlDir + "/vb6forms.c");
+        msvcOpts.sourceFiles.push_back(rtlDir + "/vb6forms_ctrl.c");
+        msvcOpts.sourceFiles.push_back(rtlDir + "/vb6forms_list.c");
+        msvcOpts.sourceFiles.push_back(rtlDir + "/vb6forms_style.c");
+        msvcOpts.sourceFiles.push_back(rtlDir + "/vb6forms_scroll.c");
+        msvcOpts.sourceFiles.push_back(rtlDir + "/vb6forms_picture.c");
+        msvcOpts.sourceFiles.push_back(rtlDir + "/vb6forms_ctrlarr.c");
+        msvcOpts.sourceFiles.push_back(rtlDir + "/vb6forms_webview.c");
+        msvcOpts.sourceFiles.push_back(rtlDir + "/vb6forms_widget.c");
+        msvcOpts.sourceFiles.push_back(rtlDir + "/vb6forms_shape.c");
+        msvcOpts.sourceFiles.push_back(rtlDir + "/vb6forms_axsite.c");
     }
     if (msvcOpts.isDll) {
         msvcOpts.sourceFiles.push_back(rtlDir + "/vb6comserver.c");
+        msvcOpts.sourceFiles.push_back(rtlDir + "/vb6comserver_obj.c");
+        msvcOpts.sourceFiles.push_back(rtlDir + "/vb6comserver_factory.c");
+        msvcOpts.sourceFiles.push_back(rtlDir + "/vb6comserver_cp.c");
+        msvcOpts.sourceFiles.push_back(rtlDir + "/vb6comserver_pci.c");
     }
 
     msvcOpts.verbose = options.verbose;

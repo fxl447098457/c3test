@@ -440,6 +440,19 @@ ExprPtr Parser::parsePostfix(ExprPtr expr) {
             prevTok_.column + prevTok_.length < cur_.column) {
             return expr;  // space detected — .XXX is a With-member argument, not member access
         }
+        // Fix 099: 同 Fix 077, 扩展到无括号方法调用形态 "obj.Method .Field" —
+        // obj.Method 后空格跟 .Field 时, .Field 是该调用的 With 块实参
+        // (VB6 sub 风格调用: 实参不带括号, 以空格分隔), 而非成员链
+        // obj.Method.Rs. 否则 "Users.Decode .Rs" 被解析成
+        // MemberAccessExpr(MemberAccessExpr(U,Decode),Rs) → cgen 生成
+        // ComCall(ComGetObjectProp(U,L"Decode"), L"Rs", ...) — .Rs 变成
+        // 对 Decode 结果的链式 COM 调用且实参丢失 → C2198+C2039
+        // (Demo.bas Db2: Users.Decode .Rs, VB6 实际语义 = Users.Decode(.Rs)).
+        if (withDepth_ > 0 && expr->kind == ASTNodeKind::MemberAccessExpr &&
+            prevTok_.line == cur_.line &&
+            prevTok_.column + prevTok_.length < cur_.column) {
+            return expr;  // space detected — .Field is a With-member argument to the obj.Method call
+        }
         advance(); // consume '.'
         // VB6 允许关键字作为成员名: obj.Type, obj.Loop, etc.
         // expectName 只接受 Identifier 和软关键字, 这里扩展为接受所有带文本的 token

@@ -61,6 +61,14 @@ Vb6Type TypeSystem::resolveTypeName(const std::string& name) const {
         lower != "boolean" && lower != "byte") {
         return Vb6Type::Long;
     }
+    // Fix 097: 无 vb 前缀的 VBA 枚举别名 — CompareMethod (VbCompareMethod 的
+    // 公开别名, VB6 类型库两个名字都可见). 与 vb 前缀规则同理视为 Long,
+    // 否则 cgen 的 resolveArrayElemType 回落 Variant 而字段声明映射 int32_t,
+    // 两处不一致 → 类工厂生成 me->m_CompareMode = vb6_VariantEmpty() → C2440
+    // (Dictionary.cls:45 "Private m_CompareMode As CompareMethod").
+    if (lower == "comparemethod") {
+        return Vb6Type::Long;
+    }
     // 用户自定义类型 (Type/Enum)
     return Vb6Type::Unknown;
 }
