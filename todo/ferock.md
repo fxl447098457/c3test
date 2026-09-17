@@ -17,6 +17,7 @@
 
 
 ###  0.10.1
+- 2026-09-17 源码拆分（RTL）：vb6forms_picture.c 528→275+274、vb6forms_widget.c 502→231+291，主文件逐字节不动；RTL 5 处管线全同步（rc 139/140 + 枚举 + files[] + driver sourceFiles + CMake），四处清单计数核对 41 一致；重建 96/96 + e2e 2/2 + 回归 82/0/1/83。src 下 ≥500 行文件 17 → 15
 - 2026-09-17 源码拆分（续）：再拆 5 个「单函数主导但主导函数 <500 行」的文件 —— cgen_com 682→257+439、parser_decl 655→274+390、parser_expr 590→402+199、typelib_builder 527→345+203、frm_parser 516→320+209；主文件逐字节不动，5 个新文件登记 CMakeLists；重建 96/96 + 回归 82/0/1/83 零变化。src 下 ≥500 行文件 26 → 17
 - 2026-09-17 源码拆分（② 组）：4 个「单函数主导但主导函数 <500 行」的文件纯搬移拆净 —— cgen_localdecl 552→375+191、cgen_decl_proc 552→256+309、semantic_analyzer_decl 551→387+178、cgen_expr_binary 514→356+172；主文件逐字节不动，4 个新文件登记 CMakeLists；重建 91/91 + 回归 82/0/1/83 零变化。同时修正台账口径：单函数主导 ≠ 必须函数级抽取
 - 2026-09-17 cgen 头拆分：cgen.hpp（996 行单类头）拆为伞头 54 行 + cgen_emitter.hpp（CodeEmitter 独立成头）+ detail/ 3 个类体片段（api 203 / state 342 / helpers 382），类内 #include 片段、逐行零重排，36 处引用路径不变；回归 82/0/1/83 零变化

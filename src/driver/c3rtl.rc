@@ -2,7 +2,7 @@
 // P10 (restored): RTL is embedded as .c/.h SOURCE and compiled by MSVC
 // at user-program build time. The P11.3 pre-compiled .lib scheme was
 // reverted: c3 is open source, no source protection needed.
-// 14 .h headers + 25 .c sources (all arch-neutral) = 39 resources.
+// 14 .h headers + 27 .c sources (all arch-neutral) = 41 resources.
 // 2026-09-17 源文件按家族分目录: core/vb6rtl|vb6com|vb6comserver|vb6forms/,
 // 解包后仍是平铺目录（RTL 内部 include 一律 basename，不受源目录影响）。
 // Runtime: FindResource/LoadResource extract to temp session directory
@@ -59,3 +59,7 @@
 136 RCDATA "../rtl/core/vb6rtl/vb6rtl_array.h"
 137 RCDATA "../rtl/core/vb6rtl/vb6rtl_class_com.h"
 138 RCDATA "../rtl/core/vb6rtl/vb6rtl_runtime.h"
+
+// vb6forms 家族再细分 (2026-09-17): Picture 属性 / Widget 属性
+139 RCDATA "../rtl/core/vb6forms/vb6forms_picture_prop.c"
+140 RCDATA "../rtl/core/vb6forms/vb6forms_widget_prop.c"

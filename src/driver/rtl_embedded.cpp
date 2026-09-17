@@ -133,6 +133,10 @@ std::string SessionManager::create() {
         { RTL_VB6RTL_ARRAY_H,                 "vb6rtl_array.h" },
         { RTL_VB6RTL_CLASS_COM_H,             "vb6rtl_class_com.h" },
         { RTL_VB6RTL_RUNTIME_H,               "vb6rtl_runtime.h" },
+
+        // vb6forms 家族再细分 (2026-09-17)
+        { RTL_VB6FORMS_PICTURE_PROP_C,        "vb6forms_picture_prop.c" },
+        { RTL_VB6FORMS_WIDGET_PROP_C,         "vb6forms_widget_prop.c" },
     };
 
     for (auto& entry : files) {

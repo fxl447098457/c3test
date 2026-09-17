@@ -231,9 +231,11 @@ set(C3RTL_EMBEDDED_FILES
     ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6forms/vb6forms_style.c
     ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6forms/vb6forms_scroll.c
     ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6forms/vb6forms_picture.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6forms/vb6forms_picture_prop.c
     ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6forms/vb6forms_ctrlarr.c
     ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6forms/vb6forms_webview.c
     ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6forms/vb6forms_widget.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6forms/vb6forms_widget_prop.c
     ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6forms/vb6forms_shape.c
     ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6forms/vb6forms_axsite.c
     # 平铺（不属于任何家族）

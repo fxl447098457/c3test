@@ -2170,9 +2170,11 @@ bool Driver::runLinker(const CompileOptions& options, const std::string& outputD
         msvcOpts.sourceFiles.push_back(rtlDir + "/vb6forms_style.c");
         msvcOpts.sourceFiles.push_back(rtlDir + "/vb6forms_scroll.c");
         msvcOpts.sourceFiles.push_back(rtlDir + "/vb6forms_picture.c");
+        msvcOpts.sourceFiles.push_back(rtlDir + "/vb6forms_picture_prop.c");
         msvcOpts.sourceFiles.push_back(rtlDir + "/vb6forms_ctrlarr.c");
         msvcOpts.sourceFiles.push_back(rtlDir + "/vb6forms_webview.c");
         msvcOpts.sourceFiles.push_back(rtlDir + "/vb6forms_widget.c");
+        msvcOpts.sourceFiles.push_back(rtlDir + "/vb6forms_widget_prop.c");
         msvcOpts.sourceFiles.push_back(rtlDir + "/vb6forms_shape.c");
         msvcOpts.sourceFiles.push_back(rtlDir + "/vb6forms_axsite.c");
     }
