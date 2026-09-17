@@ -1,12 +1,12 @@
-# c3 ±àÒëÆ÷¼¯³É²âÊÔ¿ò¼Ü
-# ÓÃ·¨: .\run_tests.ps1 [-Category <all|compile|run|syntax>] [-Verbose]
+# c3 ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½É²ï¿½ï¿½Ô¿ï¿½ï¿½
+# ï¿½Ã·ï¿½: .\run_tests.ps1 [-Category <all|compile|run|syntax>] [-Verbose]
 #
-# ²âÊÔ·ÖÀà:
-#   smoke   - Ã°ÑÌ²âÊÔ (±àÒë+ÔËÐÐ+Êä³öÐ£Ñé, ¿ìËÙÑéÖ¤ .build\C3.exe ¿ÉÓÃ)
-#   compile - ±àÒë²âÊÔ (c3 .bas -> .exe, ²»ÔËÐÐ)
-#   run     - ÔËÐÐ²âÊÔ (±àÒë+ÔËÐÐ+Ð£ÑéÊä³ö)
-#   syntax  - Óï·¨²âÊÔ (--syntax-only, ²»Éú³É´úÂë)
-#   all     - È«²¿ (Ä¬ÈÏ)
+# ï¿½ï¿½ï¿½Ô·ï¿½ï¿½ï¿½:
+#   smoke   - Ã°ï¿½Ì²ï¿½ï¿½ï¿½ (ï¿½ï¿½ï¿½ï¿½+ï¿½ï¿½ï¿½ï¿½+ï¿½ï¿½ï¿½Ð£ï¿½ï¿½, ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ö¤ .build\C3.exe ï¿½ï¿½ï¿½ï¿½)
+#   compile - ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ (c3 .bas -> .exe, ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½)
+#   run     - ï¿½ï¿½ï¿½Ð²ï¿½ï¿½ï¿½ (ï¿½ï¿½ï¿½ï¿½+ï¿½ï¿½ï¿½ï¿½+Ð£ï¿½ï¿½ï¿½ï¿½ï¿½)
+#   syntax  - ï¿½ï·¨ï¿½ï¿½ï¿½ï¿½ (--syntax-only, ï¿½ï¿½ï¿½ï¿½ï¿½É´ï¿½ï¿½ï¿½)
+#   all     - È«ï¿½ï¿½ (Ä¬ï¿½ï¿½)
 
 param(
     [string]$Category = "all",
@@ -16,14 +16,14 @@ param(
 
 $ErrorActionPreference = "SilentlyContinue"
 
-# === ÅäÖÃ ===
-# Â·¾¶È«²¿ÓÉ½Å±¾×ÔÉíÎ»ÖÃÍÆµ¼, ²»ÔÙÓ²±àÂë²Ö¿â¾ø¶ÔÂ·¾¶ (¾ÉÖµ D:\vb6pro ÒÑ²»´æÔÚ)
+# === ï¿½ï¿½ï¿½ï¿½ ===
+# Â·ï¿½ï¿½È«ï¿½ï¿½ï¿½É½Å±ï¿½ï¿½ï¿½ï¿½ï¿½Î»ï¿½ï¿½ï¿½Æµï¿½, ï¿½ï¿½ï¿½ï¿½Ó²ï¿½ï¿½ï¿½ï¿½Ö¿ï¿½ï¿½ï¿½ï¿½Â·ï¿½ï¿½ (ï¿½ï¿½Öµ D:\vb6pro ï¿½Ñ²ï¿½ï¿½ï¿½ï¿½ï¿½)
 $Root = Split-Path -Parent $PSScriptRoot
 $C3 = Join-Path $Root ".build\C3.exe"
 $Tests = $PSScriptRoot
 $OutDir = if ($OutputDirectory) { $OutputDirectory } else { Join-Path $Root "output" }
-# vcvarsall Â·¾¶: »·¾³±äÁ¿ C3_VCVARSALL ÓÅÏÈ, Î´ÉèÖÃÊ± vswhere ×Ô¶¯Ì½²â
-# (¼æÈÝ Community/Professional/Enterprise/BuildTools ¶àÊµÀý¼° CI »·¾³). Ïê¼û scripts\README.md
+# vcvarsall Â·ï¿½ï¿½: ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ C3_VCVARSALL ï¿½ï¿½ï¿½ï¿½, Î´ï¿½ï¿½ï¿½ï¿½Ê± vswhere ï¿½Ô¶ï¿½Ì½ï¿½ï¿½
+# (ï¿½ï¿½ï¿½ï¿½ Community/Professional/Enterprise/BuildTools ï¿½ï¿½Êµï¿½ï¿½ï¿½ï¿½ CI ï¿½ï¿½ï¿½ï¿½). ï¿½ï¿½ï¿½ scripts\README.md
 $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer\vswhere.exe"
 $VcVars = $env:C3_VCVARSALL
 if (-not $VcVars -and (Test-Path $vswhere)) {
@@ -34,20 +34,20 @@ if (-not $VcVars -and (Test-Path $vswhere)) {
     }
 }
 if (-not $VcVars) {
-    Write-Host "[ERROR] Î´ÕÒµ½ vcvarsall.bat" -ForegroundColor Red
-    Write-Host "        Çë°²×° VS2022 ²¢¹´Ñ¡ [Ê¹ÓÃ C++ µÄ×ÀÃæ¿ª·¢] ¹¤×÷¸ºÔØ," -ForegroundColor Red
-    Write-Host "        »òÉèÖÃ»·¾³±äÁ¿ C3_VCVARSALL Ö¸ÏòÆäÍêÕûÂ·¾¶ (Ïê¼û scripts\README.md)" -ForegroundColor Red
+    Write-Host "[ERROR] Î´ï¿½Òµï¿½ vcvarsall.bat" -ForegroundColor Red
+    Write-Host "        ï¿½ë°²×° VS2022 ï¿½ï¿½ï¿½ï¿½Ñ¡ [Ê¹ï¿½ï¿½ C++ ï¿½ï¿½ï¿½ï¿½ï¿½æ¿ªï¿½ï¿½] ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½," -ForegroundColor Red
+    Write-Host "        ï¿½ï¿½ï¿½ï¿½ï¿½Ã»ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ C3_VCVARSALL Ö¸ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Â·ï¿½ï¿½ (ï¿½ï¿½ï¿½ scripts\README.md)" -ForegroundColor Red
     exit 1
 }
 
-# === ÉèÖÃMSVC»·¾³ ===
+# === ï¿½ï¿½ï¿½ï¿½MSVCï¿½ï¿½ï¿½ï¿½ ===
 $msvcOutput = cmd /c "call `"$VcVars`" x64 >nul 2>&1 && echo MSVC_OK" 2>&1
 if ($msvcOutput -notcontains "MSVC_OK") {
-    Write-Host "[ERROR] ÎÞ·¨³õÊ¼»¯MSVC»·¾³" -ForegroundColor Red
+    Write-Host "[ERROR] ï¿½Þ·ï¿½ï¿½ï¿½Ê¼ï¿½ï¿½MSVCï¿½ï¿½ï¿½ï¿½" -ForegroundColor Red
     exit 1
 }
 
-# ÉèÖÃMSVC»·¾³±äÁ¿ (Í¨¹ýÁÙÊ±batµ¼³ö)
+# ï¿½ï¿½ï¿½ï¿½MSVCï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ (Í¨ï¿½ï¿½ï¿½ï¿½Ê±batï¿½ï¿½ï¿½ï¿½)
 $tempBat = "$env:TEMP\vcvars_env.bat"
 cmd /c "call `"$VcVars`" x64 >nul 2>&1 && set" | Out-File $tempBat -Encoding ASCII
 Get-Content $tempBat | ForEach-Object {
@@ -59,16 +59,16 @@ Remove-Item $tempBat -ErrorAction SilentlyContinue
 
 if (-not (Test-Path $OutDir)) { New-Item -ItemType Directory -Path $OutDir | Out-Null }
 
-# === ²âÊÔ¼ÆÊý ===
+# === ï¿½ï¿½ï¿½Ô¼ï¿½ï¿½ï¿½ ===
 $script:pass = 0
 $script:fail = 0
 $script:skip = 0
 $script:total = 0
 
-# === Íâ²¿ COM ÒÀÀµ¼ì²â ===
-# ²¿·Ö²âÊÔÒÀÀµ»úÆ÷ÉÏ×¢²áµÄÍâ²¿ COM ×é¼þ (Èç VBMANLIB)¡£×é¼þÎ´×¢²áÊ±ÔËÐÐ±ØÈ»Ê§°Ü
-# (VB6 ÔËÐÐÆÚ´íÎó 429), µ«ÕâÊÇ»·¾³È±Ê§, ²»ÊÇ±àÒëÆ÷È±ÏÝ, Ó¦ SKIP ¶ø·Ç FAIL¡£
-# 32 Î»³ÌÐò (Arch=x86) ÊÜ×¢²á±íÖØ¶¨ÏòÓ°Ïì, Ö»ÄÜ¿´µ½ WOW6432Node ÊÓÍ¼¡£
+# === ï¿½â²¿ COM ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ===
+# ï¿½ï¿½ï¿½Ö²ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½×¢ï¿½ï¿½ï¿½ï¿½â²¿ COM ï¿½ï¿½ï¿½ (ï¿½ï¿½ VBMANLIB)ï¿½ï¿½ï¿½ï¿½ï¿½Î´×¢ï¿½ï¿½Ê±ï¿½ï¿½ï¿½Ð±ï¿½È»Ê§ï¿½ï¿½
+# (VB6 ï¿½ï¿½ï¿½ï¿½ï¿½Ú´ï¿½ï¿½ï¿½ 429), ï¿½ï¿½ï¿½ï¿½ï¿½Ç»ï¿½ï¿½ï¿½È±Ê§, ï¿½ï¿½ï¿½Ç±ï¿½ï¿½ï¿½ï¿½ï¿½È±ï¿½ï¿½, Ó¦ SKIP ï¿½ï¿½ï¿½ï¿½ FAILï¿½ï¿½
+# 32 Î»ï¿½ï¿½ï¿½ï¿½ (Arch=x86) ï¿½ï¿½×¢ï¿½ï¿½ï¿½ï¿½Ø¶ï¿½ï¿½ï¿½Ó°ï¿½ï¿½, Ö»ï¿½Ü¿ï¿½ï¿½ï¿½ WOW6432Node ï¿½ï¿½Í¼ï¿½ï¿½
 function Test-ComRegistered {
     param([string]$ProgId, [string]$Arch)
     if ($Arch -eq "x86") {
@@ -82,7 +82,7 @@ function Test-ComRegistered {
     return $false
 }
 
-# === ±àÒë²âÊÔ ===
+# === ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ===
 function Test-Compile {
     param([string]$Name, [string]$Source)
     $script:total++
@@ -101,191 +101,93 @@ function Test-Compile {
     }
 }
 
-# === ÔËÐÐ²âÊÔ (±àÒë+ÔËÐÐ+Êä³öÐ£Ñé) ===
-function Test-Run {
+# === ï¿½ï¿½ï¿½Ð±ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ exe (Í³Ò»ï¿½ï¿½ï¿½ï¿½) ===
+# ï¿½ï¿½ï¿½ï¿½ @{ Ok; ExitCode; Output; Detail }
+#
+# ÎªÊ²Ã´Òªï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½: ï¿½ï¿½ï¿½ï¿½ï¿½â²¿ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ú²ï¿½Í¬ï¿½ï¿½ï¿½ï¿½ï¿½á»°ï¿½Â¿É¿ï¿½ï¿½Ô²ï¿½Í¬ï¿½ï¿½
+# Start-Process ï¿½ï¿½ -RedirectStandardOutput ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ó½ï¿½ï¿½Ì¼Ì³Ð¿ï¿½ï¿½ï¿½Ì¨ï¿½Ø¶ï¿½ï¿½ï¿½,
+# ï¿½ï¿½ï¿½ï¿½á»°ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ì³£ (ï¿½ï¿½Ê± .out/.err ï¿½ï¿½ 0 ï¿½Ö½ï¿½, Ô­Êµï¿½ï¿½Ö»ï¿½ï¿½ "FAIL (run error)",
+# ï¿½Ñ»ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Î±×°ï¿½É²ï¿½ï¿½ï¿½Ê§ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½)ï¿½ï¿½ï¿½ï¿½ï¿½ï°´ï¿½ï¿½ï¿½ï¿½Â·ï¿½ï¿½ï¿½ï¿½ï¿½Î³ï¿½ï¿½ï¿½:
+#   Â·ï¿½ï¿½ A: .NET Process + ï¿½Üµï¿½ï¿½ï¿½ï¿½ï¿½ (Ö»ï¿½ï¿½ï¿½ï¿½ CreateProcess, ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ø¶ï¿½ï¿½ï¿½)
+#   Â·ï¿½ï¿½ B: Start-Process -Redirect* (ï¿½ï¿½ï¿½ï¿½Ô­ï¿½ï¿½Îªï¿½ï¿½Îªï¿½ï¿½)
+# ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ê§ï¿½Ü²ï¿½ï¿½ï¿½ï¿½ï¿½Ê§ï¿½ï¿½, ï¿½ï¿½ï¿½ï¿½ï¿½ì³£Ô­ï¿½ï¿½Ò»ï¿½ï¿½ï¿½ï¿½ï¿½, ï¿½ï¿½ï¿½ï¿½"Ê§ï¿½Üµï¿½ï¿½ï¿½ËµÎªÊ²Ã´"ï¿½ï¿½
+function Invoke-TestExe {
     param(
-        [string]$Name, 
-        [string]$Source,
-        [string[]]$ExpectedOutputs,  # Ô¤ÆÚÊä³öÐÐ
-        [string]$Arch = ""            # ¿ÉÑ¡¼Ü¹¹²ÎÊý (x86/x64)
+        [string]$ExePath,
+        [string]$WorkDir,
+        [string]$Name
     )
-    $script:total++
-    Write-Host -NoNewline "  [RUN] $Name ... "
-    
-    # ±àÒë
-    if ($Arch) {
-        $compileResult = & $C3 $Source --arch $Arch --output-dir $OutDir 2>&1
-    } else {
-        $compileResult = & $C3 $Source --output-dir $OutDir 2>&1
-    }
-    if ($LASTEXITCODE -ne 0) {
-        $script:fail++
-        Write-Host "FAIL (compile)" -ForegroundColor Red
-        if ($Verbose) { Write-Host ($compileResult | Out-String) }
-        return
-    }
-    
-    # È·¶¨exeÂ·¾¶
-    $baseName = [System.IO.Path]::GetFileNameWithoutExtension($Source)
-    $exePath = Join-Path $OutDir "$baseName.exe"
-    if (-not (Test-Path $exePath)) {
-        $script:fail++
-        Write-Host "FAIL (no exe)" -ForegroundColor Red
-        return
-    }
-    
-    # ÔËÐÐ (5Ãë³¬Ê±)
-    $runResult = $null
+
+    # ï¿½ï¿½ï¿½ï¿½Ä¿Â¼Í³Ò»ï¿½ï¿½Îª output\: ï¿½ï¿½ï¿½Ö²ï¿½ï¿½ï¿½ï¿½ï¿½ Open ... For Output Ð´ï¿½ï¿½ï¿½Â·ï¿½ï¿½ï¿½Ä¼ï¿½
+    # (scores.txt / test_output.txt / *.dat ï¿½ï¿½), ï¿½ï¿½Ö¸ï¿½ï¿½ï¿½Í»ï¿½ï¿½ï¿½ï¿½ï¿½Ö¿ï¿½ï¿½Ä¿Â¼ï¿½ï¿½
+    $stdoutFile = Join-Path $WorkDir "$Name.out"
+    $stderrFile = Join-Path $WorkDir "$Name.err"
+    Remove-Item $stdoutFile, $stderrFile -ErrorAction SilentlyContinue
+
+    $errors = @()
+
+    # --- Â·ï¿½ï¿½ A: .NET Process + ï¿½Üµï¿½ ---
     try {
-        # ¹¤×÷Ä¿Â¼ÉèÎª output\: ²¿·Ö²âÊÔÓÃ Open ... For Output Ð´Ïà¶ÔÂ·¾¶ÎÄ¼þ
-        # (scores.txt / test_output.txt / *.dat µÈ), ²»Ö¸¶¨¾Í»áÂä½ø²Ö¿â¸ùÄ¿Â¼¡£
-        $proc = Start-Process -FilePath $exePath -NoNewWindow -PassThru `
-            -WorkingDirectory $OutDir `
-            -RedirectStandardOutput "$OutDir\$baseName.out" `
-            -RedirectStandardError "$OutDir\$baseName.err" `
-            -ErrorAction Stop
+        $psi = New-Object System.Diagnostics.ProcessStartInfo
+        $psi.FileName = $ExePath
+        $psi.WorkingDirectory = $WorkDir
+        $psi.UseShellExecute = $false
+        $psi.CreateNoWindow = $false
+        $psi.RedirectStandardOutput = $true
+        $psi.RedirectStandardError = $true
+
+        $proc = [System.Diagnostics.Process]::Start($psi)
+        $soTask = $proc.StandardOutput.ReadToEndAsync()
+        $seTask = $proc.StandardError.ReadToEndAsync()
         if (-not $proc.WaitForExit(5000)) {
-            $proc.Kill()
+            try { $proc.Kill() } catch { }
             $proc.WaitForExit()
-            $script:fail++
-            Write-Host "FAIL (run timeout: 5s)" -ForegroundColor Red
-            return
+            return @{
+                Ok       = $false
+                ExitCode = $null
+                Output   = @()
+                Detail   = "run timeout: 5s"
+            }
         }
-        $proc.Refresh()
-        if ($proc.ExitCode -ne 0) {
-            $script:fail++
-            Write-Host "FAIL (exit code $($proc.ExitCode))" -ForegroundColor Red
-            return
+        $stdout = $soTask.Result
+        $stderr = $seTask.Result
+
+        # ï¿½ï¿½ï¿½Ì±ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½, ï¿½ï¿½ï¿½Ë¹ï¿½ï¿½ï¿½ï¿½ï¿½ (ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ÏµÍ³ ANSI Ò»ï¿½ï¿½, ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½)
+        [System.IO.File]::WriteAllText($stdoutFile, [string]$stdout, [System.Text.Encoding]::Default)
+        [System.IO.File]::WriteAllText($stderrFile, [string]$stderr, [System.Text.Encoding]::Default)
+
+        return @{
+            Ok       = $true
+            ExitCode = $proc.ExitCode
+            Output   = (Get-Content $stdoutFile -ErrorAction SilentlyContinue)
+            Detail   = "dotnet"
         }
-        $runOutput = Get-Content "$OutDir\$baseName.out" -ErrorAction SilentlyContinue
     } catch {
-        $script:fail++
-        Write-Host "FAIL (run error)" -ForegroundColor Red
-        return
-    }
-    
-    # Ð£ÑéÊä³ö
-    if ($ExpectedOutputs -and $ExpectedOutputs.Count -gt 0) {
-        $allMatch = $true
-        foreach ($expected in $ExpectedOutputs) {
-            $found = $runOutput | Where-Object { $_ -like "*$expected*" }
-            if (-not $found) {
-                $allMatch = $false
-                break
-            }
-        }
-        if ($allMatch) {
-            $script:pass++
-            Write-Host "PASS" -ForegroundColor Green
-        } else {
-            $script:fail++
-            Write-Host "FAIL (output mismatch)" -ForegroundColor Red
-            if ($Verbose) {
-                Write-Host "  Expected: $($ExpectedOutputs -join ', ')"
-                Write-Host "  Got: $($runOutput -join '`n')"
-            }
-        }
-    } else {
-        # ÎÞÔ¤ÆÚÊä³ö£¬Ö»Òª²»±ÀÀ£¾ÍËãÍ¨¹ý
-        $script:pass++
-        Write-Host "PASS" -ForegroundColor Green
-    }
-}
-
-# === VBP¹¤³Ì²âÊÔ (±àÒë+ÔËÐÐ+Êä³öÐ£Ñé) ===
-function Test-Vbp {
-    param(
-        [string]$Name,
-        [string]$VbpFile,
-        [string[]]$ExpectedOutputs,
-        [string]$Arch = "",           # ¿ÉÑ¡¼Ü¹¹²ÎÊý (x86/x64)
-        [string]$RequiresCom = ""     # ÒÀÀµµÄÍâ²¿ COM ProgId (Î´×¢²áÔò SKIP, ²»¼Æ FAIL)
-    )
-    $script:total++
-    Write-Host -NoNewline "  [VBP] $Name ... "
-
-    # Íâ²¿ COM ÒÀÀµÈ±Ê§ ¡ú SKIP (»·¾³È±Ê§, ·Ç±àÒëÆ÷È±ÏÝ)
-    if ($RequiresCom -and -not (Test-ComRegistered $RequiresCom $Arch)) {
-        $script:skip++
-        $view = if ($Arch -eq "x86") { "WOW6432Node (32-bit)" } else { "64-bit" }
-        Write-Host "SKIP (COM '$RequiresCom' Î´×¢²áÓÚ $view ÊÓÍ¼)" -ForegroundColor Yellow
-        return
+        $errors += ("[dotnet] " + $_.Exception.Message)
     }
 
-    # ±àÒëVBP¹¤³Ì
-    if ($Arch) {
-        $compileResult = & $C3 $VbpFile --arch $Arch --output-dir $OutDir 2>&1
-    } else {
-        $compileResult = & $C3 $VbpFile --output-dir $OutDir 2>&1
-    }
-    if ($LASTEXITCODE -ne 0) {
-        $script:fail++
-        Write-Host "FAIL (compile)" -ForegroundColor Red
-        if ($Verbose) { Write-Host ($compileResult | Out-String) }
-        return
-    }
-
-    # ´ÓVBPÎÄ¼þÃûÍÆµ¼exeÂ·¾¶
-    $baseName = [System.IO.Path]::GetFileNameWithoutExtension($VbpFile)
-    $exePath = Join-Path $OutDir "$baseName.exe"
-    if (-not (Test-Path $exePath)) {
-        $script:fail++
-        Write-Host "FAIL (no exe)" -ForegroundColor Red
-        return
-    }
-
-    # ÔËÐÐ (5Ãë³¬Ê±)
+    # --- Â·ï¿½ï¿½ B: Start-Process (Ô­Êµï¿½ï¿½, ï¿½ï¿½) ---
     try {
-        # Í¬ÉÏ: ¹¤×÷Ä¿Â¼ÉèÎª output\, ±ÜÃâ²âÊÔ²úÎïÂä½ø²Ö¿â¸ùÄ¿Â¼
-        $proc = Start-Process -FilePath $exePath -NoNewWindow -PassThru `
-            -WorkingDirectory $OutDir `
-            -RedirectStandardOutput "$OutDir\$baseName.out" `
-            -RedirectStandardError "$OutDir\$baseName.err" `
+        $proc = Start-Process -FilePath $ExePath -NoNewWindow -Wait -PassThru `
+            -WorkingDirectory $WorkDir `
+            -RedirectStandardOutput $stdoutFile `
+            -RedirectStandardError $stderrFile `
             -ErrorAction Stop
-        if (-not $proc.WaitForExit(5000)) {
-            $proc.Kill()
-            $proc.WaitForExit()
-            $script:fail++
-            Write-Host "FAIL (run timeout: 5s)" -ForegroundColor Red
-            return
+        return @{
+            Ok       = $true
+            ExitCode = $proc.ExitCode
+            Output   = (Get-Content $stdoutFile -ErrorAction SilentlyContinue)
+            Detail   = "start-process"
         }
-        $proc.Refresh()
-        if ($proc.ExitCode -ne 0) {
-            $script:fail++
-            Write-Host "FAIL (exit code $($proc.ExitCode))" -ForegroundColor Red
-            return
-        }
-        $runOutput = Get-Content "$OutDir\$baseName.out" -ErrorAction SilentlyContinue
     } catch {
-        $script:fail++
-        Write-Host "FAIL (run error)" -ForegroundColor Red
-        return
+        $errors += ("[start-process] " + $_.Exception.Message)
     }
 
-    # Ð£ÑéÊä³ö
-    if ($ExpectedOutputs -and $ExpectedOutputs.Count -gt 0) {
-        $allMatch = $true
-        foreach ($expected in $ExpectedOutputs) {
-            $found = $runOutput | Where-Object { $_ -like "*$expected*" }
-            if (-not $found) {
-                $allMatch = $false
-                break
-            }
-        }
-        if ($allMatch) {
-            $script:pass++
-            Write-Host "PASS" -ForegroundColor Green
-        } else {
-            $script:fail++
-            Write-Host "FAIL (output mismatch)" -ForegroundColor Red
-            if ($Verbose) {
-                Write-Host "  Expected: $($ExpectedOutputs -join ', ')"
-                Write-Host "  Got: $($runOutput -join '`n')"
-            }
-        }
-    } else {
-        $script:pass++
-        Write-Host "PASS" -ForegroundColor Green
+    return @{
+        Ok       = $false
+        ExitCode = $null
+        Output   = @()
+        Detail   = ($errors -join " | ")
     }
 }
 
@@ -331,7 +233,157 @@ function Test-GuiVbp {
     }
 }
 
-# === Óï·¨²âÊÔ ===
+# === ï¿½ï¿½ï¿½Ð²ï¿½ï¿½ï¿½ (ï¿½ï¿½ï¿½ï¿½+ï¿½ï¿½ï¿½ï¿½+ï¿½ï¿½ï¿½Ð£ï¿½ï¿½) ===
+function Test-Run {
+    param(
+        [string]$Name, 
+        [string]$Source,
+        [string[]]$ExpectedOutputs,  # Ô¤ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
+        [string]$Arch = ""            # ï¿½ï¿½Ñ¡ï¿½Ü¹ï¿½ï¿½ï¿½ï¿½ï¿½ (x86/x64)
+    )
+    $script:total++
+    Write-Host -NoNewline "  [RUN] $Name ... "
+    
+    # ï¿½ï¿½ï¿½ï¿½
+    if ($Arch) {
+        $compileResult = & $C3 $Source --arch $Arch --output-dir $OutDir 2>&1
+    } else {
+        $compileResult = & $C3 $Source --output-dir $OutDir 2>&1
+    }
+    if ($LASTEXITCODE -ne 0) {
+        $script:fail++
+        Write-Host "FAIL (compile)" -ForegroundColor Red
+        if ($Verbose) { Write-Host ($compileResult | Out-String) }
+        return
+    }
+    
+    # È·ï¿½ï¿½exeÂ·ï¿½ï¿½
+    $baseName = [System.IO.Path]::GetFileNameWithoutExtension($Source)
+    $exePath = Join-Path $OutDir "$baseName.exe"
+    if (-not (Test-Path $exePath)) {
+        $script:fail++
+        Write-Host "FAIL (no exe)" -ForegroundColor Red
+        return
+    }
+    
+    # ï¿½ï¿½ï¿½ï¿½ (ï¿½È´ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½)
+    $run = Invoke-TestExe -ExePath $exePath -WorkDir $OutDir -Name $baseName
+    if (-not $run.Ok) {
+        $script:fail++
+        Write-Host "FAIL (run error)" -ForegroundColor Red
+        Write-Host ("    " + $run.Detail) -ForegroundColor Red
+        return
+    }
+    $runOutput = $run.Output
+    
+    # Ð£ï¿½ï¿½ï¿½ï¿½ï¿½
+    if ($ExpectedOutputs -and $ExpectedOutputs.Count -gt 0) {
+        $allMatch = $true
+        foreach ($expected in $ExpectedOutputs) {
+            $found = $runOutput | Where-Object { $_ -like "*$expected*" }
+            if (-not $found) {
+                $allMatch = $false
+                break
+            }
+        }
+        if ($allMatch) {
+            $script:pass++
+            Write-Host "PASS" -ForegroundColor Green
+        } else {
+            $script:fail++
+            Write-Host "FAIL (output mismatch)" -ForegroundColor Red
+            if ($Verbose) {
+                Write-Host "  Expected: $($ExpectedOutputs -join ', ')"
+                Write-Host "  Got: $($runOutput -join '`n')"
+            }
+        }
+    } else {
+        # ï¿½ï¿½Ô¤ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ö»Òªï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Í¨ï¿½ï¿½
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    }
+}
+
+# === VBPï¿½ï¿½ï¿½Ì²ï¿½ï¿½ï¿½ (ï¿½ï¿½ï¿½ï¿½+ï¿½ï¿½ï¿½ï¿½+ï¿½ï¿½ï¿½Ð£ï¿½ï¿½) ===
+function Test-Vbp {
+    param(
+        [string]$Name,
+        [string]$VbpFile,
+        [string[]]$ExpectedOutputs,
+        [string]$Arch = "",           # ï¿½ï¿½Ñ¡ï¿½Ü¹ï¿½ï¿½ï¿½ï¿½ï¿½ (x86/x64)
+        [string]$RequiresCom = ""     # ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½â²¿ COM ProgId (Î´×¢ï¿½ï¿½ï¿½ï¿½ SKIP, ï¿½ï¿½ï¿½ï¿½ FAIL)
+    )
+    $script:total++
+    Write-Host -NoNewline "  [VBP] $Name ... "
+
+    # ï¿½â²¿ COM ï¿½ï¿½ï¿½ï¿½È±Ê§ ï¿½ï¿½ SKIP (ï¿½ï¿½ï¿½ï¿½È±Ê§, ï¿½Ç±ï¿½ï¿½ï¿½ï¿½ï¿½È±ï¿½ï¿½)
+    if ($RequiresCom -and -not (Test-ComRegistered $RequiresCom $Arch)) {
+        $script:skip++
+        $view = if ($Arch -eq "x86") { "WOW6432Node (32-bit)" } else { "64-bit" }
+        Write-Host "SKIP (COM '$RequiresCom' Î´×¢ï¿½ï¿½ï¿½ï¿½ $view ï¿½ï¿½Í¼)" -ForegroundColor Yellow
+        return
+    }
+
+    # ï¿½ï¿½ï¿½ï¿½VBPï¿½ï¿½ï¿½ï¿½
+    if ($Arch) {
+        $compileResult = & $C3 $VbpFile --arch $Arch --output-dir $OutDir 2>&1
+    } else {
+        $compileResult = & $C3 $VbpFile --output-dir $OutDir 2>&1
+    }
+    if ($LASTEXITCODE -ne 0) {
+        $script:fail++
+        Write-Host "FAIL (compile)" -ForegroundColor Red
+        if ($Verbose) { Write-Host ($compileResult | Out-String) }
+        return
+    }
+
+    # ï¿½ï¿½VBPï¿½Ä¼ï¿½ï¿½ï¿½ï¿½Æµï¿½exeÂ·ï¿½ï¿½
+    $baseName = [System.IO.Path]::GetFileNameWithoutExtension($VbpFile)
+    $exePath = Join-Path $OutDir "$baseName.exe"
+    if (-not (Test-Path $exePath)) {
+        $script:fail++
+        Write-Host "FAIL (no exe)" -ForegroundColor Red
+        return
+    }
+
+    # ï¿½ï¿½ï¿½ï¿½ (ï¿½È´ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½)
+    $run = Invoke-TestExe -ExePath $exePath -WorkDir $OutDir -Name $baseName
+    if (-not $run.Ok) {
+        $script:fail++
+        Write-Host "FAIL (run error)" -ForegroundColor Red
+        Write-Host ("    " + $run.Detail) -ForegroundColor Red
+        return
+    }
+    $runOutput = $run.Output
+
+    # Ð£ï¿½ï¿½ï¿½ï¿½ï¿½
+    if ($ExpectedOutputs -and $ExpectedOutputs.Count -gt 0) {
+        $allMatch = $true
+        foreach ($expected in $ExpectedOutputs) {
+            $found = $runOutput | Where-Object { $_ -like "*$expected*" }
+            if (-not $found) {
+                $allMatch = $false
+                break
+            }
+        }
+        if ($allMatch) {
+            $script:pass++
+            Write-Host "PASS" -ForegroundColor Green
+        } else {
+            $script:fail++
+            Write-Host "FAIL (output mismatch)" -ForegroundColor Red
+            if ($Verbose) {
+                Write-Host "  Expected: $($ExpectedOutputs -join ', ')"
+                Write-Host "  Got: $($runOutput -join '`n')"
+            }
+        }
+    } else {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    }
+}
+
+# === ï¿½ï·¨ï¿½ï¿½ï¿½ï¿½ ===
 function Test-Syntax {
     param([string]$Name, [string]$Source)
     $script:total++
@@ -349,7 +401,7 @@ function Test-Syntax {
 }
 
 # =============================================
-# ÔËÐÐ²âÊÔ
+# ï¿½ï¿½ï¿½Ð²ï¿½ï¿½ï¿½
 # =============================================
 
 Write-Host ""
@@ -359,9 +411,9 @@ Write-Host "  $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
 
-# --- Ã°ÑÌ²âÊÔ ---
-# ÖØ½¨ C3.exe ºóÏÈÅÜÕâ¸ö: Ö»ÑéÖ¤ "½âÎö -> Éú³ÉC -> cl/link -> ÔËÐÐ" È«Á´Â·¡£
-# ÓÃÀý¼û tests\smoke.bas (ÎÄ¼þÍ·Ð´ÁËÎ¬»¤Ô¼Êø: ½ûÖ¹ MsgBox µÈ×èÈûÓï¾ä)¡£
+# --- Ã°ï¿½Ì²ï¿½ï¿½ï¿½ ---
+# ï¿½Ø½ï¿½ C3.exe ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½: Ö»ï¿½ï¿½Ö¤ "ï¿½ï¿½ï¿½ï¿½ -> ï¿½ï¿½ï¿½ï¿½C -> cl/link -> ï¿½ï¿½ï¿½ï¿½" È«ï¿½ï¿½Â·ï¿½ï¿½
+# ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ tests\smoke.bas (ï¿½Ä¼ï¿½Í·Ð´ï¿½ï¿½Î¬ï¿½ï¿½Ô¼ï¿½ï¿½: ï¿½ï¿½Ö¹ MsgBox ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½)ï¿½ï¿½
 if ($Category -in @("all", "smoke")) {
     Write-Host "--- Smoke Test (C3.exe end-to-end) ---" -ForegroundColor Yellow
 
@@ -369,7 +421,7 @@ if ($Category -in @("all", "smoke")) {
     Write-Host ""
 }
 
-# --- »Ø¹é²âÊÔ (±ØÐëÊ¼ÖÕÍ¨¹ý) ---
+# --- ï¿½Ø¹ï¿½ï¿½ï¿½ï¿½ (ï¿½ï¿½ï¿½ï¿½Ê¼ï¿½ï¿½Í¨ï¿½ï¿½) ---
 if ($Category -in @("all", "run")) {
     Write-Host "--- Regression (Compile+Run) ---" -ForegroundColor Yellow
     
@@ -390,7 +442,7 @@ if ($Category -in @("all", "run")) {
     Test-Run "test_variant" "$Tests\test_variant.bas" @("PASS1a", "PASS1c", "PASS5", "Done")
     Write-Host ""
     
-    # --- P5.5 ¼æÈÝÐÔ²âÊÔ ---
+    # --- P5.5 ï¿½ï¿½ï¿½ï¿½ï¿½Ô²ï¿½ï¿½ï¿½ ---
     Write-Host "--- Compat Tests (P5.5) ---" -ForegroundColor Yellow
     
     Test-Run "test_compat" "$Tests\test_compat.bas"
@@ -399,13 +451,13 @@ if ($Category -in @("all", "run")) {
     Test-Run "test_declare" "$Tests\test_declare.bas"
     Write-Host ""
     
-    # --- P5.7 ÒÑÖªÏÞÖÆÐÞ¸´²âÊÔ ---
+    # --- P5.7 ï¿½ï¿½Öªï¿½ï¿½ï¿½ï¿½ï¿½Þ¸ï¿½ï¿½ï¿½ï¿½ï¿½ ---
     Write-Host "--- Bugfix Tests (P5.7) ---" -ForegroundColor Yellow
     
     Test-Run "test_fixes" "$Tests\test_fixes.bas" @("FIX1:OK", "FIX2:OK", "FIX3:OK", "All fixes passed!")
     Write-Host ""
     
-    # --- VBP¹¤³Ì²âÊÔ (P5) ---
+    # --- VBPï¿½ï¿½ï¿½Ì²ï¿½ï¿½ï¿½ (P5) ---
     Write-Host "--- VBP Project Tests (P5) ---" -ForegroundColor Yellow
     
     Test-Vbp "test_class" "$Tests\test_class.vbp" @("3", "0")
@@ -417,7 +469,7 @@ if ($Category -in @("all", "run")) {
     Test-GuiVbp "VbQRCodegen" "$Tests\VbQRCodegen-master\test\Project1.vbp"
     Write-Host ""
     
-    # --- P6 COM ²âÊÔ ---
+    # --- P6 COM ï¿½ï¿½ï¿½ï¿½ ---
     Write-Host "--- COM Tests (P6) ---" -ForegroundColor Yellow
     
     Test-Run "test_com" "$Tests\test_com.bas" @("COM-1:OK", "COM-2:OK", "COM-3:OK", "COM:3/3")
@@ -429,11 +481,11 @@ if ($Category -in @("all", "run")) {
     Test-Vbp "test_events" "$Tests\test_events\test_events.vbp" @("Events test PASSED")
     Test-Vbp "M7Test" "$Tests\m7_test\M7Test.vbp" @("4/4 PASSED")
     
-    # --- P24 COMÓÅ»¯×¨Ïî²âÊÔ ---
+    # --- P24 COMï¿½Å»ï¿½×¨ï¿½ï¿½ï¿½ï¿½ï¿½ ---
     Write-Host "--- P24 COM Optimization Tests ---" -ForegroundColor Yellow
     
     Test-Run "test_p24" "$Tests\test_p24.bas" @("P24-01a:OK", "P24-01b:OK", "P24-01c:OK", "P24-03a:OK", "P24-03b:OK", "P24:5/5")
-    # test_vbman ÒÀÀµÍâ²¿ COM ×é¼þ VBMANLIB (x86 DLL, Ðè 32 Î»×¢²á)
+    # test_vbman ï¿½ï¿½ï¿½ï¿½ï¿½â²¿ COM ï¿½ï¿½ï¿½ VBMANLIB (x86 DLL, ï¿½ï¿½ 32 Î»×¢ï¿½ï¿½)
     Test-Vbp "test_vbman" "$Tests\test_vbman\test_vbman.vbp" @("P24-04a:OK", "P24-04b:OK", "P24-04:2/2") -Arch "x86" -RequiresCom "VBMANLIB.cVBMAN"
     Test-Run "test_earlybound2" "$Tests\test_earlybound2.bas" @("EB2-1:OK", "EB2-7:DriveType=2", "EB2-8:OK", "EB2-10:OK", "EB2:10/10") -Arch "x86"
     Test-Run "test_not_com" "$Tests\test_not_com.bas" @("NOT-COM:OK", "NOT-COM2:OK", "NOT-COM:PASS") -Arch "x86"
@@ -445,14 +497,14 @@ if ($Category -in @("all", "run")) {
 }
 
 if ($Category -in @("all", "compile")) {
-    # --- ×ÛºÏ±àÒë²âÊÔ (ÄÜ±àÒëµ«²»Ò»¶¨ÓÐMain) ---
+    # --- ï¿½ÛºÏ±ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ (ï¿½Ü±ï¿½ï¿½ëµ«ï¿½ï¿½Ò»ï¿½ï¿½ï¿½ï¿½Main) ---
     Write-Host "--- Compile Tests ---" -ForegroundColor Yellow
     
     Test-Compile "test_comprehensive" "$Tests\test_comprehensive.bas"
     Test-Compile "test_comprehensive2" "$Tests\test_comprehensive2.bas"
     Write-Host ""
     
-    # --- P7 ´°Ìå±àÒë²âÊÔ (GUI³ÌÐòÖ»ÑéÖ¤±àÒëÍ¨¹ý) ---
+    # --- P7 ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ (GUIï¿½ï¿½ï¿½ï¿½Ö»ï¿½ï¿½Ö¤ï¿½ï¿½ï¿½ï¿½Í¨ï¿½ï¿½) ---
     Write-Host "--- Form Compile Tests (P7) ---" -ForegroundColor Yellow
     
     $formTests = @(
@@ -477,7 +529,7 @@ if ($Category -in @("all", "compile")) {
 }
 
 if ($Category -in @("all", "syntax")) {
-    # --- Óï·¨/ÓïÒå²âÊÔ ---
+    # --- ï¿½ï·¨/ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ---
     Write-Host "--- Syntax/Semantic Tests ---" -ForegroundColor Yellow
     
     $syntaxTests = @(
@@ -501,7 +553,7 @@ if ($Category -in @("all", "syntax")) {
     }
     Write-Host ""
     
-    # --- Ô¤´¦ÀíÆ÷²âÊÔ ---
+    # --- Ô¤ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ---
     Write-Host "--- Preprocessor Tests ---" -ForegroundColor Yellow
     
     $ppTests = @(
@@ -525,7 +577,7 @@ if ($Category -in @("all", "syntax")) {
 }
 
 # =============================================
-# »ã×Ü
+# ï¿½ï¿½ï¿½ï¿½
 # =============================================
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host "  Results: PASS=$script:pass FAIL=$script:fail SKIP=$script:skip TOTAL=$script:total" -ForegroundColor $(if ($script:fail -gt 0) { "Red" } else { "Green" })

@@ -102,6 +102,12 @@ std::string SessionManager::create() {
         { RTL_VB6FORMS_C,           "vb6forms.c" },
         { RTL_VB6_DI_STUBS_C,       "vb6_di_stubs.c" },
         { RTL_VB6_DI_WIN32_STUBS_C, "vb6_di_win32_stubs.c" },
+        { RTL_VB6_DI_USER32_STUBS_C,   "vb6_di_user32_stubs.c" },
+        { RTL_VB6_DI_GDIPLUS_STUBS_C,  "vb6_di_gdiplus_stubs.c" },
+        { RTL_VB6_DI_CRYPTO_STUBS_C,   "vb6_di_crypto_stubs.c" },
+        { RTL_VB6_DI_COM_STUBS_C,      "vb6_di_com_stubs.c" },
+        { RTL_VB6_DI_NET_STUBS_C,      "vb6_di_net_stubs.c" },
+        { RTL_VB6_DI_SHELL_STUBS_C,    "vb6_di_shell_stubs.c" },
         { RTL_VB6COMSERVER_INTERNAL_H, "vb6comserver_internal.h" },
         { RTL_VB6COMSERVER_OBJ_C,      "vb6comserver_obj.c" },
         { RTL_VB6COMSERVER_FACTORY_C,  "vb6comserver_factory.c" },
@@ -134,6 +140,42 @@ std::string SessionManager::create() {
         { RTL_VB6RTL_ARRAY_H,                 "vb6rtl_array.h" },
         { RTL_VB6RTL_CLASS_COM_H,             "vb6rtl_class_com.h" },
         { RTL_VB6RTL_RUNTIME_H,               "vb6rtl_runtime.h" },
+
+        // vb6forms 家族再细分 (2026-09-17)
+        { RTL_VB6FORMS_PICTURE_PROP_C,        "vb6forms_picture_prop.c" },
+        { RTL_VB6FORMS_WIDGET_PROP_C,         "vb6forms_widget_prop.c" },
+
+        // vb6forms.h 按功能域拆分 (2026-09-17)
+        { RTL_VB6FORMS_WINDOW_H,              "vb6forms_window.h" },
+        { RTL_VB6FORMS_PROP_H,                "vb6forms_prop.h" },
+        { RTL_VB6FORMS_PROP_CTRL_H,           "vb6forms_prop_ctrl.h" },
+        { RTL_VB6FORMS_PROP_PIC_H,            "vb6forms_prop_pic.h" },
+        { RTL_VB6FORMS_PROP_FORM_H,           "vb6forms_prop_form.h" },
+        { RTL_VB6FORMS_CTRLARR_H,             "vb6forms_ctrlarr.h" },
+        { RTL_VB6FORMS_MDI_H,                 "vb6forms_mdi.h" },
+        { RTL_VB6FORMS_WEBVIEW_H,             "vb6forms_webview.h" },
+        { RTL_VB6FORMS_CONTROLS_H,            "vb6forms_controls.h" },
+
+        // vb6rtl.c 按家族拆分 (2026-09-17)
+        { RTL_VB6RTL_STRING_C,                "vb6rtl_string.c" },
+        { RTL_VB6RTL_FORMAT_C,                "vb6rtl_format.c" },
+        { RTL_VB6RTL_FORMAT_EXTRACT_INC,      "vb6rtl_format_extract.inc" },
+        { RTL_VB6RTL_FORMAT_PARSE_INC,        "vb6rtl_format_parse.inc" },
+        { RTL_VB6RTL_FORMAT_NUMERIC_PRE_INC,  "vb6rtl_format_numeric_pre.inc" },
+        { RTL_VB6RTL_FORMAT_NUMERIC_BODY_INC, "vb6rtl_format_numeric_body.inc" },
+        { RTL_VB6RTL_FORMAT_NUMERIC_TAIL_INC, "vb6rtl_format_numeric_tail.inc" },
+        { RTL_VB6RTL_FORMAT_STRING_INC,       "vb6rtl_format_string.inc" },
+        { RTL_VB6RTL_CONV_C,                  "vb6rtl_conv.c" },
+        { RTL_VB6RTL_MISC_C,                  "vb6rtl_misc.c" },
+        { RTL_VB6RTL_SYSTEM_C,                "vb6rtl_system.c" },
+        { RTL_VB6RTL_COMPAT_C,                "vb6rtl_compat.c" },
+        { RTL_VB6RTL_DATE_C,                  "vb6rtl_date.c" },
+        { RTL_VB6RTL_ARRAY_C,                 "vb6rtl_array.c" },
+        { RTL_VB6RTL_FILE_C,                  "vb6rtl_file.c" },
+        { RTL_VB6RTL_PARAMARRAY_C,            "vb6rtl_paramarray.c" },
+        { RTL_VB6RTL_FINANCIAL_C,             "vb6rtl_financial.c" },
+        { RTL_VB6RTL_COM_C,                   "vb6rtl_com.c" },
+        { RTL_VB6RTL_REGISTRY_C,              "vb6rtl_registry.c" },
         { RTL_VB6RTL_USERCTL_H,               "vb6rtl_userctl.h" },  // Fix 105
     };
 

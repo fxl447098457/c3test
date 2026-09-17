@@ -53,7 +53,7 @@ enum RtlResourceID {
     RTL_VB6FORMS_WIDGET_C   = 129,
     RTL_VB6FORMS_SHAPE_C    = 130,
     RTL_VB6FORMS_AXSITE_C   = 131,
-    RTL_VB6FORMS_UC_C       = 140,  // Fix 112: 工程内 UserControl 实例宿主
+    RTL_VB6FORMS_UC_C       = 175,  // Fix 112: 工程内 UserControl 实例宿主
 
     // vb6rtl.h 按家族拆分 (2026-09-17): 伞头 + 7 个子头
     RTL_VB6RTL_BASE_H = 132,
@@ -63,7 +63,52 @@ enum RtlResourceID {
     RTL_VB6RTL_ARRAY_H = 136,
     RTL_VB6RTL_CLASS_COM_H = 137,
     RTL_VB6RTL_RUNTIME_H = 138,
-    RTL_VB6RTL_USERCTL_H = 139,  // Fix 105: UserControl/Ambient/Extender/PropertyPage 宿主
+
+    // vb6forms 家族再细分 (2026-09-17)
+    RTL_VB6FORMS_PICTURE_PROP_C = 139,
+    RTL_VB6FORMS_WIDGET_PROP_C  = 140,
+
+    // DI 转发桩按 Lib 家族拆分 (2026-09-17)
+    RTL_VB6_DI_USER32_STUBS_C    = 141,
+    RTL_VB6_DI_GDIPLUS_STUBS_C   = 142,
+    RTL_VB6_DI_CRYPTO_STUBS_C    = 143,
+    RTL_VB6_DI_COM_STUBS_C       = 144,
+    RTL_VB6_DI_NET_STUBS_C       = 145,
+    RTL_VB6_DI_SHELL_STUBS_C     = 146,
+
+    // vb6forms.h 按功能域拆分 (2026-09-17): 伞头 + 9 个子头
+    RTL_VB6FORMS_WINDOW_H      = 147,
+    RTL_VB6FORMS_PROP_H        = 148,
+    RTL_VB6FORMS_PROP_CTRL_H   = 149,
+    RTL_VB6FORMS_PROP_PIC_H    = 150,
+    RTL_VB6FORMS_PROP_FORM_H   = 151,
+    RTL_VB6FORMS_CTRLARR_H     = 152,
+    RTL_VB6FORMS_MDI_H         = 153,
+    RTL_VB6FORMS_WEBVIEW_H     = 154,
+    RTL_VB6FORMS_CONTROLS_H    = 155,
+
+    // vb6rtl.c 按家族拆分 (2026-09-17): 主文件 + 13 个族实现
+    RTL_VB6RTL_STRING_C        = 156,
+    RTL_VB6RTL_FORMAT_C        = 157,
+    // format 族按函数体片段拆: 6 个 .inc（不单独编译, 由 format.c include）
+    RTL_VB6RTL_FORMAT_EXTRACT_INC      = 158,
+    RTL_VB6RTL_FORMAT_PARSE_INC        = 159,
+    RTL_VB6RTL_FORMAT_NUMERIC_PRE_INC  = 160,
+    RTL_VB6RTL_FORMAT_NUMERIC_BODY_INC = 161,
+    RTL_VB6RTL_FORMAT_NUMERIC_TAIL_INC = 162,
+    RTL_VB6RTL_FORMAT_STRING_INC       = 163,
+    RTL_VB6RTL_CONV_C          = 164,
+    RTL_VB6RTL_MISC_C          = 165,
+    RTL_VB6RTL_SYSTEM_C        = 166,
+    RTL_VB6RTL_COMPAT_C        = 167,
+    RTL_VB6RTL_DATE_C          = 168,
+    RTL_VB6RTL_ARRAY_C         = 169,
+    RTL_VB6RTL_FILE_C          = 170,
+    RTL_VB6RTL_PARAMARRAY_C    = 171,
+    RTL_VB6RTL_FINANCIAL_C     = 172,
+    RTL_VB6RTL_COM_C           = 173,
+    RTL_VB6RTL_REGISTRY_C      = 174,
+    RTL_VB6RTL_USERCTL_H       = 176,  // Fix 105: UserControl/Ambient/Extender/PropertyPage 宿主
 };
 
 // Session directory manager

@@ -2,8 +2,8 @@
 // P10 (restored): RTL is embedded as .c/.h SOURCE and compiled by MSVC
 // at user-program build time. The P11.3 pre-compiled .lib scheme was
 // reverted: c3 is open source, no source protection needed.
-// 14 .h headers + 25 .c sources (all arch-neutral) = 39 resources.
-// 2026-09-17 源文件按家族分目录: core/vb6rtl|vb6com|vb6comserver|vb6forms/,
+// 23 .h headers + 46 .c sources + 6 .inc fragments (all arch-neutral) = 75 resources.
+// 2026-09-17 源文件按家族分目录: core/vb6rtl|vb6com|vb6comserver|vb6forms|di/,
 // 解包后仍是平铺目录（RTL 内部 include 一律 basename，不受源目录影响）。
 // Runtime: FindResource/LoadResource extract to temp session directory
 // Paths relative to this RC file's location (src/driver/)
@@ -20,8 +20,8 @@
 105 RCDATA "../rtl/core/vb6comserver/vb6comserver.c"
 106 RCDATA "../rtl/core/vb6forms/vb6forms.h"
 107 RCDATA "../rtl/core/vb6forms/vb6forms.c"
-108 RCDATA "../rtl/core/vb6_di_stubs.c"
-109 RCDATA "../rtl/core/vb6_di_win32_stubs.c"
+108 RCDATA "../rtl/core/di/vb6_di_stubs.c"
+109 RCDATA "../rtl/core/di/vb6_di_win32_stubs.c"
 
 // vb6comserver 按 COM 接口家族拆分 (P6.6): 内部共享头 + 各族实现
 110 RCDATA "../rtl/core/vb6comserver/vb6comserver_internal.h"
@@ -50,7 +50,6 @@
 129 RCDATA "../rtl/core/vb6forms/vb6forms_widget.c"
 130 RCDATA "../rtl/core/vb6forms/vb6forms_shape.c"
 131 RCDATA "../rtl/core/vb6forms/vb6forms_axsite.c"
-140 RCDATA "../rtl/core/vb6forms/vb6forms_uc.c"
 
 // vb6rtl.h 按家族拆分 (2026-09-17): 伞头 + 7 个子头
 132 RCDATA "../rtl/core/vb6rtl/vb6rtl_base.h"
@@ -60,4 +59,53 @@
 136 RCDATA "../rtl/core/vb6rtl/vb6rtl_array.h"
 137 RCDATA "../rtl/core/vb6rtl/vb6rtl_class_com.h"
 138 RCDATA "../rtl/core/vb6rtl/vb6rtl_runtime.h"
-139 RCDATA "../rtl/core/vb6rtl/vb6rtl_userctl.h"
+
+// vb6forms 家族再细分 (2026-09-17): Picture 属性 / Widget 属性
+139 RCDATA "../rtl/core/vb6forms/vb6forms_picture_prop.c"
+140 RCDATA "../rtl/core/vb6forms/vb6forms_widget_prop.c"
+
+// DI 转发桩按 Lib 家族拆分 (2026-09-17): 由 scripts/gen_di_stubs.ps1 生成
+// 每个文件对应一组 DLL 家族, 由 C3 生成头里的 `/* vb6_di_lib: <lib> */` 标记驱动
+141 RCDATA "../rtl/core/di/vb6_di_user32_stubs.c"
+142 RCDATA "../rtl/core/di/vb6_di_gdiplus_stubs.c"
+143 RCDATA "../rtl/core/di/vb6_di_crypto_stubs.c"
+144 RCDATA "../rtl/core/di/vb6_di_com_stubs.c"
+145 RCDATA "../rtl/core/di/vb6_di_net_stubs.c"
+146 RCDATA "../rtl/core/di/vb6_di_shell_stubs.c"
+
+// vb6forms.h 按功能域拆分 (2026-09-17): 伞头 + 9 个子头
+147 RCDATA "../rtl/core/vb6forms/vb6forms_window.h"
+148 RCDATA "../rtl/core/vb6forms/vb6forms_prop.h"
+149 RCDATA "../rtl/core/vb6forms/vb6forms_prop_ctrl.h"
+150 RCDATA "../rtl/core/vb6forms/vb6forms_prop_pic.h"
+151 RCDATA "../rtl/core/vb6forms/vb6forms_prop_form.h"
+152 RCDATA "../rtl/core/vb6forms/vb6forms_ctrlarr.h"
+153 RCDATA "../rtl/core/vb6forms/vb6forms_mdi.h"
+154 RCDATA "../rtl/core/vb6forms/vb6forms_webview.h"
+155 RCDATA "../rtl/core/vb6forms/vb6forms_controls.h"
+
+// vb6rtl.c 按家族拆分 (2026-09-17): 5327 行 → 主文件 418 + 13 个族实现
+// format 族再按函数体片段拆: 6 个 .inc 由 vb6rtl_format.c #include（basename）
+156 RCDATA "../rtl/core/vb6rtl/vb6rtl_string.c"
+157 RCDATA "../rtl/core/vb6rtl/vb6rtl_format.c"
+158 RCDATA "../rtl/core/vb6rtl/detail/vb6rtl_format_extract.inc"
+159 RCDATA "../rtl/core/vb6rtl/detail/vb6rtl_format_parse.inc"
+160 RCDATA "../rtl/core/vb6rtl/detail/vb6rtl_format_numeric_pre.inc"
+161 RCDATA "../rtl/core/vb6rtl/detail/vb6rtl_format_numeric_body.inc"
+162 RCDATA "../rtl/core/vb6rtl/detail/vb6rtl_format_numeric_tail.inc"
+163 RCDATA "../rtl/core/vb6rtl/detail/vb6rtl_format_string.inc"
+164 RCDATA "../rtl/core/vb6rtl/vb6rtl_conv.c"
+165 RCDATA "../rtl/core/vb6rtl/vb6rtl_misc.c"
+166 RCDATA "../rtl/core/vb6rtl/vb6rtl_system.c"
+167 RCDATA "../rtl/core/vb6rtl/vb6rtl_compat.c"
+168 RCDATA "../rtl/core/vb6rtl/vb6rtl_date.c"
+169 RCDATA "../rtl/core/vb6rtl/vb6rtl_array.c"
+170 RCDATA "../rtl/core/vb6rtl/vb6rtl_file.c"
+171 RCDATA "../rtl/core/vb6rtl/vb6rtl_paramarray.c"
+172 RCDATA "../rtl/core/vb6rtl/vb6rtl_financial.c"
+173 RCDATA "../rtl/core/vb6rtl/vb6rtl_com.c"
+174 RCDATA "../rtl/core/vb6rtl/vb6rtl_registry.c"
+
+// Fix 112/Fix 105: 工程内 UserControl 实例宿主 + UserControl/Ambient/Extender/PropertyPage 宿主头
+175 RCDATA "../rtl/core/vb6forms/vb6forms_uc.c"
+176 RCDATA "../rtl/core/vb6rtl/vb6rtl_userctl.h"

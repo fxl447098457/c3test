@@ -114,3 +114,6 @@ archive/vbman/src/FIX_*.vbp
 scripts/_fix_run.cmd
 scripts/_fix_*.txt
 scripts/_fix_*.ps1
+
+# tests 对照回归工作目录 (regress_all.ps1 运行产物)
+tests/_vb6ref*/

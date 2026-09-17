@@ -41,7 +41,7 @@ VB6 源码 (.bas/.cls/.frm/.frx + .vbp)
 
 | 项目 | 状态 |
 |------|------|
-| 版本 | `C3 --version` → `0.10.0` |
+| 版本 | 权威值见根目录 `VERSION` 文件（`C3 --version` 与 CMake 工程版本均由它自动派生） |
 | 里程碑 | M1 ~ M33 全部达成 |
 | 最新基线 tag | `v0.1.0-m33-vbman-dll`（提交 `5f4bed1`） |
 | 编译期 | 大型真实工程（VBMAN，125 模块含 4 个窗体）**error C = 0**，链接期 LNK2019 / LNK2005 / LNK1104 均已清零 |
@@ -109,6 +109,34 @@ scripts\test smoke         REM 仅冒烟测试（构建后快速验证产物可�
 scripts\compile tests\hello.bas        REM 单文件编译（自动带 MSVC + RTL 环境）
 scripts\run hello                      REM 运行 output\hello.exe
 ```
+
+### 3.5 全量对照回归（C3 vs 真 VB6）
+
+`tests\regress_all.ps1` 把 `tests\` 下除 `vbman` 外的全部用例（vbp / bas / frm / aux，当前 118 个）与**微软真 VB6**（本机 `VB6Mini`，命令行 `/make` 编译）逐个对照：双方各自编译、运行，按矩阵判定，结果增量写入 `tests\_vb6ref\report-*.csv`（含每个用例的双方编译结果、退出码与失败备注）。
+
+```powershell
+# 前置：先构建 C3（scripts\build），MSVC 环境同 run_tests.ps1（设 C3_VCVARSALL 或让脚本经 vswhere 探测）
+
+.\tests\regress_all.ps1                 REM 全量（约 25 分钟）
+.\tests\regress_all.ps1 -Filter test_iif*   REM 只跑匹配用例
+.\tests\regress_all.ps1 -List           REM 枚举用例，不执行
+.\tests\regress_all.ps1 -CompileOnly    REM 只比编译，不运行
+```
+
+可选覆盖：参数 `-C3 <路径>` / `-VB6 <路径>`，或环境变量 `C3_EXE` / `VB6_EXE` / `C3_TESTS_WORKROOT`。
+
+判定矩阵：
+
+| 判定 | 含义 |
+| ---- | ---- |
+| PASS | 双方编译 OK，运行退出码一致（双方都有输出时还比内容） |
+| REG-C3 | 真 VB6 可编译而 C3 失败 —— **可疑回归，需排查** |
+| C3-EXT | C3 可编译、真 VB6 不支持（C3 扩展语法/能力） |
+| BOTH-FAIL | 双方都失败（注意：tests 里有故意的负例用例，属预期） |
+| RUN-DIFF / RUN-TIMEOUT | 编译都过但运行行为不一致 / 一方超时 |
+| SKIP-AUX | 辅助模块（非独立用例），跳过 |
+
+备注：真 VB6 编译需 `VB6.EXE` 可无界面运行且其链接器对工作目录可写（本仓库约定工作目录 `tests\_vb6ref\`，该目录已 gitignore，运行产物不进库）。
 
 ---
 
@@ -214,9 +242,9 @@ CLI 仍保留 `--dump-ir` / `--emit-llvm` 开关，但没有消费方。
 | `vb6forms/` | 13 | `vb6forms.h` / `.c` + 10 个实现 + 内部头：Win32 窗体与控件（缇↔像素 1/15）、消息循环、菜单 |
 | `vb6com/` | 8 | `vb6com.h` / `.c` + 5 个实现 + 内部头：COM 客户端 CreateObject / GetObject / IDispatch 后期绑定 / VARIANT 封送 |
 | `vb6comserver/` | 7 | `vb6comserver.h` / `.c` + 4 个实现 + 内部头：COM 服务端类工厂、DllGetClassObject / DllRegisterServer |
-| （平铺） | 2 | `vb6_di_stubs.c` / `vb6_di_win32_stubs.c`：Win32 API 转发桩（解决 x64 下 msvbvm60 等无导入库的问题） |
+| `di/` | 8 | `vb6_di_stubs.c`（手写：序号 / msvbvm60 运行时 / 动态加载）+ 7 个按 Lib 家族生成的转发桩（win32 / user32 / gdiplus / crypto / net / com / shell）：Win32 API `Declare` 转发（解决 x64 下 msvbvm60 等无导入库的问题）。生成物由 `scripts/gen_di_stubs.ps1` 产出，家族来自 C3 生成头里的 `/* vb6_di_lib: <lib> */` 标记 |
 
-子目录只影响**源码树可读性**：39 个文件解包到同一个平铺临时目录，RTL 内部 `#include` 一律按 basename，
+子目录只影响**源码树可读性**：47 个文件解包到同一个平铺临时目录，RTL 内部 `#include` 一律按 basename，
 且各家族之间**无交叉 include**，因此编译路径与拆分前完全一致。
 新增 / 重命名 / 删除 RTL 文件需同步 **5 处**（`c3rtl.rc` / `rtl_embedded.hpp` / `rtl_embedded.cpp` /
 `driver.cpp` / `CMakeLists.txt`），详见 [`ai/022-源码拆分进度表.md`](ai/022-源码拆分进度表.md)。
@@ -289,6 +317,41 @@ VBMAN 编译过程的问题日志见 `archive/vbman/c3log/001.md ~ 054.md`。
 | 部分 `.md` 带 UTF-8 BOM | 编辑时保持原样 |
 | 构建目录 | `.build\` 可随时删除重建；遇 release-only 崩溃先 `--clean-first` 全量重建再复现 |
 | 崩溃追踪 | 设环境变量 `C3_CRASH_TRACE=1` 启用 dbghelp 栈追踪 |
+
+### 版本号约定（唯一权威源）
+
+**权威源只有一处：根目录 `VERSION` 文件**，内容形如 ` 0.10.4`（允许前后带空格，读取方会自动剔除）。
+
+自 2026-09-17 起，原有各处副本已改为**从该文件自动派生**，不再需要手工同步：
+
+| 使用方 | 取值方式 | 用途 |
+|--------|----------|------|
+| `scripts\release.bat` | 直接读 `VERSION` 文件并剔除前后空格 | 发布目录名与发布包名 |
+| `CMakeLists.txt` 的 `project(vb6c3 VERSION ...)` | `file(READ "${CMAKE_CURRENT_LIST_DIR}/VERSION")` + `string(STRIP)` | CMake 工程版本元数据 |
+| `src/driver/driver.cpp` 的 `Driver::printVersion()` | CMake 经 `target_compile_definitions` 注入编译期宏 `VB6C3_VERSION_STRING` | `C3 --version` / `-V` 的输出 |
+| 本文件第二章「当前状态」表 | 指向本文件，不写死具体值 | 文档展示 |
+
+**升版本只需改 `VERSION` 一处**，CMake 工程版本与 `--version` 输出会自动跟随。
+
+自检（在子模块根目录执行）：
+
+```bash
+cat VERSION                                       # 权威值，升版本只改这里
+grep -n "file(READ" CMakeLists.txt                # CMake 从文件读取
+grep -n "VB6C3_VERSION_STRING" CMakeLists.txt     # 宏注入给 c3 目标
+grep -n "CMAKE_CONFIGURE_DEPENDS" CMakeLists.txt  # 改 VERSION 会自动触发重配置
+grep -c '0\.10\.' src/driver/driver.cpp           # 应为 0：driver 内无硬编码版本
+./publish/C3.exe --version                        # 应与 VERSION 一致
+```
+
+**历史事故（同一问题发生过三次，现已从机制上消除）**：
+
+| 时间 | 提交 | 情况 |
+|------|------|------|
+| 2026-09-17 | `afbea7d` | 首次统一为 0.10.2 —— 此前三处各不相同（`VERSION` 0.10.1 / `driver.cpp` 0.10.0 / `CMakeLists.txt` 0.1.0） |
+| 2026-09-17 | `0569942` | 升到 0.10.3 时**只改了 `VERSION`**，另两处仍停在 0.10.2 |
+| 2026-09-17 | `368dc69` | 升到 0.10.4 时**仍只改了 `VERSION`**，`README` 甚至停留在 0.10.0 |
+| 2026-09-17 | 本次提交 | 根治：`CMakeLists.txt` 改为从 `VERSION` 读取、`driver.cpp` 改用编译期宏，三处副本降为一处 |
 
 ---
 

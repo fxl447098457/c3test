@@ -1,5 +1,16 @@
 cmake_minimum_required(VERSION 3.20)
-project(vb6c3 VERSION 0.1.0 LANGUAGES CXX)
+
+# Version single source of truth: VERSION file at the repo root (stripped).
+file(READ "${CMAKE_CURRENT_LIST_DIR}/VERSION" VB6C3_VERSION_RAW)
+string(STRIP "${VB6C3_VERSION_RAW}" VB6C3_VERSION)
+if(VB6C3_VERSION STREQUAL "")
+    message(FATAL_ERROR "VERSION file is empty: ${CMAKE_CURRENT_LIST_DIR}/VERSION")
+endif()
+
+project(vb6c3 VERSION ${VB6C3_VERSION} LANGUAGES CXX)
+
+# Re-run CMake automatically when VERSION changes, so the injected macro stays in sync.
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_CURRENT_LIST_DIR}/VERSION")
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -71,7 +82,9 @@ add_library(vb6c3-core STATIC
     src/parser/parser_helpers.cpp
     src/parser/parser_module.cpp
     src/parser/parser_expr.cpp
+    src/parser/parser_expr_postfix.cpp
     src/parser/parser_decl.cpp
+    src/parser/parser_decl_var.cpp
     # 语句解析家族
     src/parser/stmt/parser_stmt.cpp
     src/parser/stmt/parser_stmt_control.cpp
@@ -84,18 +97,24 @@ add_library(vb6c3-core STATIC
     src/semantics/symbol_table.cpp
     src/semantics/type_system.cpp
     src/semantics/semantic_analyzer.cpp
+    src/semantics/semantic_analyzer_dispatch.cpp
+    src/semantics/semantic_analyzer_register.cpp
+    src/semantics/semantic_analyzer_typeref.cpp
     src/semantics/semantic_analyzer_decl.cpp
+    src/semantics/semantic_analyzer_decl_type.cpp
     src/semantics/semantic_analyzer_stmt.cpp
     src/semantics/semantic_analyzer_expr.cpp
     src/semantics/semantic_analyzer_util.cpp
     src/semantics/semantic_analyzer_builtin.cpp
     src/project/vbp_parser.cpp
     src/project/frm_parser.cpp
+    src/project/frm_parser_util.cpp
     src/project/frx_reader.cpp
     src/com/typelib_parser.cpp
     src/com/typelib_parser_parse.cpp
     src/com/typelib_parser_desc.cpp
     src/typelib/typelib_builder.cpp
+    src/typelib/typelib_builder_coclass.cpp
 )
 target_compile_definitions(vb6c3-core PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
 # TypeLib parser needs ole32/oleaut32 (COM API)
@@ -104,12 +123,16 @@ target_link_libraries(vb6c3-core PRIVATE ole32 oleaut32 uuid)
 # --- C code generation backend ---
 add_library(vb6c3-cgen STATIC
     src/backend/cgen_base.cpp
+    # base 家族（2026-09-17 纯搬移自 cgen_base.cpp）
+    src/backend/cgen_base_type.cpp
+    src/backend/cgen_base_naming.cpp
     # 表达式家族
     src/backend/expr/cgen_expr.cpp
     src/backend/expr/cgen_expr_ident.cpp
     src/backend/expr/cgen_expr_member.cpp
     src/backend/expr/cgen_expr_call.cpp
     src/backend/expr/cgen_expr_binary.cpp
+    src/backend/expr/cgen_expr_binary_util.cpp
     src/backend/expr/cgen_expr_array.cpp
     src/backend/expr/cgen_expr_with.cpp
     # 语句家族
@@ -127,13 +150,17 @@ add_library(vb6c3-cgen STATIC
     # 声明家族
     src/backend/decl/cgen_decl.cpp
     src/backend/decl/cgen_decl_proc.cpp
+    src/backend/decl/cgen_decl_func.cpp
     src/backend/decl/cgen_decl_var.cpp
     src/backend/decl/cgen_decl_api.cpp
     src/backend/decl/cgen_decl_prop.cpp
     src/backend/decl/cgen_localdecl.cpp
+    src/backend/decl/cgen_localdecl_hoist.cpp
     # 模块级产物（COM 服务器 / 窗体）
     src/backend/module/cgen_com.cpp
+    src/backend/module/cgen_com_events.cpp
     src/backend/module/cgen_form.cpp
+    src/backend/module/cgen_form_menu.cpp
     src/backend/cgen_util.cpp
     src/backend/cgen_util_type.cpp
     src/backend/cgen_util_scan.cpp
@@ -177,6 +204,12 @@ target_link_libraries(vb6c3-ir PRIVATE vb6c3-core)
 add_executable(c3
     src/driver/main.cpp
     src/driver/driver.cpp
+    src/driver/driver_args.cpp
+    src/driver/driver_compile.cpp
+    src/driver/driver_frontend.cpp
+    src/driver/driver_semantics.cpp
+    src/driver/driver_crossmod.cpp
+    src/driver/driver_link.cpp
     src/driver/rtl_embedded.cpp
     src/driver/c3rtl.rc
 )
@@ -184,7 +217,7 @@ set_target_properties(c3 PROPERTIES OUTPUT_NAME C3)
 
 # Fix 092z-2: CMake 只把 .rc 自身当依赖 —— 改了 src/rtl/core 下的嵌入源之后
 # .res 不会重编, C3.exe 会继续嵌入旧文件。这里显式声明嵌入文件为 .rc 的依赖
-# (39 个资源: 14 头 + 25 源码, 全部架构无关；与 c3rtl.rc 一一对应)。
+# (75 个资源: 23 头 + 46 源 + 6 片段, 全部架构无关；与 c3rtl.rc 一一对应)。
 set(C3RTL_EMBEDDED_FILES
     # vb6rtl
     ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6rtl/vb6rtl.h
@@ -196,6 +229,26 @@ set(C3RTL_EMBEDDED_FILES
     ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6rtl/vb6rtl_array.h
     ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6rtl/vb6rtl_class_com.h
     ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6rtl/vb6rtl_runtime.h
+    # vb6rtl.c 按家族拆分 (2026-09-17): 13 个族实现 + format 的 6 个函数体片段
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6rtl/vb6rtl_string.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6rtl/vb6rtl_format.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6rtl/detail/vb6rtl_format_extract.inc
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6rtl/detail/vb6rtl_format_parse.inc
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6rtl/detail/vb6rtl_format_numeric_pre.inc
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6rtl/detail/vb6rtl_format_numeric_body.inc
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6rtl/detail/vb6rtl_format_numeric_tail.inc
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6rtl/detail/vb6rtl_format_string.inc
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6rtl/vb6rtl_conv.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6rtl/vb6rtl_misc.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6rtl/vb6rtl_system.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6rtl/vb6rtl_compat.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6rtl/vb6rtl_date.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6rtl/vb6rtl_array.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6rtl/vb6rtl_file.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6rtl/vb6rtl_paramarray.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6rtl/vb6rtl_financial.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6rtl/vb6rtl_com.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6rtl/vb6rtl_registry.c
     # vb6com
     ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6com/vb6com.h
     ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6com/vb6com.c
@@ -223,14 +276,32 @@ set(C3RTL_EMBEDDED_FILES
     ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6forms/vb6forms_style.c
     ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6forms/vb6forms_scroll.c
     ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6forms/vb6forms_picture.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6forms/vb6forms_picture_prop.c
     ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6forms/vb6forms_ctrlarr.c
     ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6forms/vb6forms_webview.c
     ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6forms/vb6forms_widget.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6forms/vb6forms_widget_prop.c
     ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6forms/vb6forms_shape.c
     ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6forms/vb6forms_axsite.c
-    # 平铺（不属于任何家族）
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6_di_stubs.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6_di_win32_stubs.c
+    # vb6forms.h 按功能域拆分 (2026-09-17): 伞头 + 9 个子头
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6forms/vb6forms_window.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6forms/vb6forms_prop.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6forms/vb6forms_prop_ctrl.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6forms/vb6forms_prop_pic.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6forms/vb6forms_prop_form.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6forms/vb6forms_ctrlarr.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6forms/vb6forms_mdi.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6forms/vb6forms_webview.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6forms/vb6forms_controls.h
+    # DI 转发桩家族（手写桩 + 按 Lib 家族生成的转发桩）
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/di/vb6_di_stubs.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/di/vb6_di_win32_stubs.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/di/vb6_di_user32_stubs.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/di/vb6_di_gdiplus_stubs.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/di/vb6_di_crypto_stubs.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/di/vb6_di_com_stubs.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/di/vb6_di_net_stubs.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/di/vb6_di_shell_stubs.c
 )
 set_source_files_properties(src/driver/c3rtl.rc PROPERTIES OBJECT_DEPENDS "${C3RTL_EMBEDDED_FILES}")
 target_link_libraries(c3 PRIVATE vb6c3-core vb6c3-cgen)
@@ -244,3 +315,5 @@ else()
     target_compile_definitions(c3 PRIVATE VB6C3_NO_LLVM)
 endif()
 target_compile_definitions(c3 PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
+# Version string injected into driver.cpp (source: VERSION file, do not hardcode here).
+target_compile_definitions(c3 PRIVATE VB6C3_VERSION_STRING="${VB6C3_VERSION}")
