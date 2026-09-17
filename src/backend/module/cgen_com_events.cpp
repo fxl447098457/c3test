@@ -256,7 +256,9 @@ void CCodeGen::emitComVtableSinkDecls() {
         if (srcClsSym->comSourceMethods.empty()) continue;
         if (srcClsSym->comSourceIfaceIid.empty()) continue;
         std::string createFn = "vb6_vsink_" + varLower + "_create";
-        h_.emitLine("void* " + createFn + "(void);");
+        // Fix 095: 声明须与定义/调用一致 (void* handler)。原声明 (void) 导致
+        // 调用点 (传 handler) 报 C2197 参数太多。
+        h_.emitLine("void* " + createFn + "(void* handler);");
         h_.emitBlank();
     }
 }
