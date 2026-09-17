@@ -204,6 +204,12 @@ target_link_libraries(vb6c3-ir PRIVATE vb6c3-core)
 add_executable(c3
     src/driver/main.cpp
     src/driver/driver.cpp
+    src/driver/driver_args.cpp
+    src/driver/driver_compile.cpp
+    src/driver/driver_frontend.cpp
+    src/driver/driver_semantics.cpp
+    src/driver/driver_crossmod.cpp
+    src/driver/driver_link.cpp
     src/driver/rtl_embedded.cpp
     src/driver/c3rtl.rc
 )
