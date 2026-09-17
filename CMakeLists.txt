@@ -1,5 +1,16 @@
 cmake_minimum_required(VERSION 3.20)
-project(vb6c3 VERSION 0.10.2 LANGUAGES CXX)
+
+# Version single source of truth: VERSION file at the repo root (stripped).
+file(READ "${CMAKE_CURRENT_LIST_DIR}/VERSION" VB6C3_VERSION_RAW)
+string(STRIP "${VB6C3_VERSION_RAW}" VB6C3_VERSION)
+if(VB6C3_VERSION STREQUAL "")
+    message(FATAL_ERROR "VERSION file is empty: ${CMAKE_CURRENT_LIST_DIR}/VERSION")
+endif()
+
+project(vb6c3 VERSION ${VB6C3_VERSION} LANGUAGES CXX)
+
+# Re-run CMake automatically when VERSION changes, so the injected macro stays in sync.
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_CURRENT_LIST_DIR}/VERSION")
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -112,6 +123,9 @@ target_link_libraries(vb6c3-core PRIVATE ole32 oleaut32 uuid)
 # --- C code generation backend ---
 add_library(vb6c3-cgen STATIC
     src/backend/cgen_base.cpp
+    # base 家族（2026-09-17 纯搬移自 cgen_base.cpp）
+    src/backend/cgen_base_type.cpp
+    src/backend/cgen_base_naming.cpp
     # 表达式家族
     src/backend/expr/cgen_expr.cpp
     src/backend/expr/cgen_expr_ident.cpp
@@ -242,6 +256,16 @@ set(C3RTL_EMBEDDED_FILES
     ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6forms/vb6forms_widget_prop.c
     ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6forms/vb6forms_shape.c
     ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6forms/vb6forms_axsite.c
+    # vb6forms.h 按功能域拆分 (2026-09-17): 伞头 + 9 个子头
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6forms/vb6forms_window.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6forms/vb6forms_prop.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6forms/vb6forms_prop_ctrl.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6forms/vb6forms_prop_pic.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6forms/vb6forms_prop_form.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6forms/vb6forms_ctrlarr.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6forms/vb6forms_mdi.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6forms/vb6forms_webview.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6forms/vb6forms_controls.h
     # DI 转发桩家族（手写桩 + 按 Lib 家族生成的转发桩）
     ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/di/vb6_di_stubs.c
     ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/di/vb6_di_win32_stubs.c
@@ -264,3 +288,5 @@ else()
     target_compile_definitions(c3 PRIVATE VB6C3_NO_LLVM)
 endif()
 target_compile_definitions(c3 PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
+# Version string injected into driver.cpp (source: VERSION file, do not hardcode here).
+target_compile_definitions(c3 PRIVATE VB6C3_VERSION_STRING="${VB6C3_VERSION}")

@@ -143,6 +143,17 @@ std::string SessionManager::create() {
         // vb6forms 家族再细分 (2026-09-17)
         { RTL_VB6FORMS_PICTURE_PROP_C,        "vb6forms_picture_prop.c" },
         { RTL_VB6FORMS_WIDGET_PROP_C,         "vb6forms_widget_prop.c" },
+
+        // vb6forms.h 按功能域拆分 (2026-09-17)
+        { RTL_VB6FORMS_WINDOW_H,              "vb6forms_window.h" },
+        { RTL_VB6FORMS_PROP_H,                "vb6forms_prop.h" },
+        { RTL_VB6FORMS_PROP_CTRL_H,           "vb6forms_prop_ctrl.h" },
+        { RTL_VB6FORMS_PROP_PIC_H,            "vb6forms_prop_pic.h" },
+        { RTL_VB6FORMS_PROP_FORM_H,           "vb6forms_prop_form.h" },
+        { RTL_VB6FORMS_CTRLARR_H,             "vb6forms_ctrlarr.h" },
+        { RTL_VB6FORMS_MDI_H,                 "vb6forms_mdi.h" },
+        { RTL_VB6FORMS_WEBVIEW_H,             "vb6forms_webview.h" },
+        { RTL_VB6FORMS_CONTROLS_H,            "vb6forms_controls.h" },
     };
 
     for (auto& entry : files) {

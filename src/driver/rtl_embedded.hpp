@@ -74,6 +74,17 @@ enum RtlResourceID {
     RTL_VB6_DI_COM_STUBS_C       = 144,
     RTL_VB6_DI_NET_STUBS_C       = 145,
     RTL_VB6_DI_SHELL_STUBS_C     = 146,
+
+    // vb6forms.h 按功能域拆分 (2026-09-17): 伞头 + 9 个子头
+    RTL_VB6FORMS_WINDOW_H      = 147,
+    RTL_VB6FORMS_PROP_H        = 148,
+    RTL_VB6FORMS_PROP_CTRL_H   = 149,
+    RTL_VB6FORMS_PROP_PIC_H    = 150,
+    RTL_VB6FORMS_PROP_FORM_H   = 151,
+    RTL_VB6FORMS_CTRLARR_H     = 152,
+    RTL_VB6FORMS_MDI_H         = 153,
+    RTL_VB6FORMS_WEBVIEW_H     = 154,
+    RTL_VB6FORMS_CONTROLS_H    = 155,
 };
 
 // Session directory manager

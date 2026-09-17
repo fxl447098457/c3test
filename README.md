@@ -41,7 +41,7 @@ VB6 源码 (.bas/.cls/.frm/.frx + .vbp)
 
 | 项目 | 状态 |
 |------|------|
-| 版本 | 权威值见根目录 `VERSION` 文件（`C3 --version` 的输出需手工同步，见第九章「版本号约定」） |
+| 版本 | 权威值见根目录 `VERSION` 文件（`C3 --version` 与 CMake 工程版本均由它自动派生） |
 | 里程碑 | M1 ~ M33 全部达成 |
 | 最新基线 tag | `v0.1.0-m33-vbman-dll`（提交 `5f4bed1`） |
 | 编译期 | 大型真实工程（VBMAN，125 模块含 4 个窗体）**error C = 0**，链接期 LNK2019 / LNK2005 / LNK1104 均已清零 |
@@ -290,37 +290,40 @@ VBMAN 编译过程的问题日志见 `archive/vbman/c3log/001.md ~ 054.md`。
 | 构建目录 | `.build\` 可随时删除重建；遇 release-only 崩溃先 `--clean-first` 全量重建再复现 |
 | 崩溃追踪 | 设环境变量 `C3_CRASH_TRACE=1` 启用 dbghelp 栈追踪 |
 
-### 版本号约定（唯一权威源 + 同步清单）
+### 版本号约定（唯一权威源）
 
-**权威源只有一处：根目录 `VERSION` 文件。** 内容形如 ` 0.10.4`（允许前后带空格，发布脚本会自动剔除），`scripts\release.bat` 读它作为发布版本号，用于生成发布目录名与发布包文件名。
+**权威源只有一处：根目录 `VERSION` 文件**，内容形如 ` 0.10.4`（允许前后带空格，读取方会自动剔除）。
 
-但版本号在仓库里**出现多处**，其余几处是**手工硬编码的副本，不会跟随 `VERSION` 自动变化**：
+自 2026-09-17 起，原有各处副本已改为**从该文件自动派生**，不再需要手工同步：
 
-| 位置 | 形式 | 用途 |
-|------|------|------|
-| `VERSION`（根目录） | ` 0.10.4` | **权威源**，发布脚本的唯一依据 |
-| `CMakeLists.txt` 第 2 行 | `project(vb6c3 VERSION <版本> LANGUAGES CXX)` | CMake 工程版本元数据 |
-| `src/driver/driver.cpp` 的 `Driver::printVersion()` | `std::cout << "C3 version <版本> (vb6.pro project)"` | `C3 --version` / `-V` 的输出字符串 |
-| 本文件第二章「当前状态」表 | 版本行 | 文档展示值 |
+| 使用方 | 取值方式 | 用途 |
+|--------|----------|------|
+| `scripts\release.bat` | 直接读 `VERSION` 文件并剔除前后空格 | 发布目录名与发布包名 |
+| `CMakeLists.txt` 的 `project(vb6c3 VERSION ...)` | `file(READ "${CMAKE_CURRENT_LIST_DIR}/VERSION")` + `string(STRIP)` | CMake 工程版本元数据 |
+| `src/driver/driver.cpp` 的 `Driver::printVersion()` | CMake 经 `target_compile_definitions` 注入编译期宏 `VB6C3_VERSION_STRING` | `C3 --version` / `-V` 的输出 |
+| 本文件第二章「当前状态」表 | 指向本文件，不写死具体值 | 文档展示 |
 
-**升版本 = 同步上面全部位置，不是只改 `VERSION`。** 只改 `VERSION` 会让「`VERSION` 里的版本号 / `--version` 输出的版本号 / 文档里的版本号」互相矛盾。
+**升版本只需改 `VERSION` 一处**，CMake 工程版本与 `--version` 输出会自动跟随。
 
-改完自检（在子模块根目录执行，四处应指向同一个版本号）：
+自检（在子模块根目录执行）：
 
 ```bash
-cat VERSION
-grep -n "project(vb6c3 VERSION" CMakeLists.txt
-grep -n "C3 version" src/driver/driver.cpp
-grep -n "权威值见根目录" README.md
+cat VERSION                                       # 权威值，升版本只改这里
+grep -n "file(READ" CMakeLists.txt                # CMake 从文件读取
+grep -n "VB6C3_VERSION_STRING" CMakeLists.txt     # 宏注入给 c3 目标
+grep -n "CMAKE_CONFIGURE_DEPENDS" CMakeLists.txt  # 改 VERSION 会自动触发重配置
+grep -c '0\.10\.' src/driver/driver.cpp           # 应为 0：driver 内无硬编码版本
+./publish/C3.exe --version                        # 应与 VERSION 一致
 ```
 
-**同一问题已发生两次，不要再有第三次**：
+**历史事故（同一问题发生过三次，现已从机制上消除）**：
 
 | 时间 | 提交 | 情况 |
 |------|------|------|
 | 2026-09-17 | `afbea7d` | 首次统一为 0.10.2 —— 此前三处各不相同（`VERSION` 0.10.1 / `driver.cpp` 0.10.0 / `CMakeLists.txt` 0.1.0） |
 | 2026-09-17 | `0569942` | 升到 0.10.3 时**只改了 `VERSION`**，另两处仍停在 0.10.2 |
 | 2026-09-17 | `368dc69` | 升到 0.10.4 时**仍只改了 `VERSION`**，`README` 甚至停留在 0.10.0 |
+| 2026-09-17 | 本次提交 | 根治：`CMakeLists.txt` 改为从 `VERSION` 读取、`driver.cpp` 改用编译期宏，三处副本降为一处 |
 
 ---
 

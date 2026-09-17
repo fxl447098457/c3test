@@ -2,7 +2,7 @@
 // P10 (restored): RTL is embedded as .c/.h SOURCE and compiled by MSVC
 // at user-program build time. The P11.3 pre-compiled .lib scheme was
 // reverted: c3 is open source, no source protection needed.
-// 14 .h headers + 33 .c sources (all arch-neutral) = 47 resources.
+// 23 .h headers + 33 .c sources (all arch-neutral) = 56 resources.
 // 2026-09-17 源文件按家族分目录: core/vb6rtl|vb6com|vb6comserver|vb6forms|di/,
 // 解包后仍是平铺目录（RTL 内部 include 一律 basename，不受源目录影响）。
 // Runtime: FindResource/LoadResource extract to temp session directory
@@ -72,3 +72,14 @@
 144 RCDATA "../rtl/core/di/vb6_di_com_stubs.c"
 145 RCDATA "../rtl/core/di/vb6_di_net_stubs.c"
 146 RCDATA "../rtl/core/di/vb6_di_shell_stubs.c"
+
+// vb6forms.h 按功能域拆分 (2026-09-17): 伞头 + 9 个子头
+147 RCDATA "../rtl/core/vb6forms/vb6forms_window.h"
+148 RCDATA "../rtl/core/vb6forms/vb6forms_prop.h"
+149 RCDATA "../rtl/core/vb6forms/vb6forms_prop_ctrl.h"
+150 RCDATA "../rtl/core/vb6forms/vb6forms_prop_pic.h"
+151 RCDATA "../rtl/core/vb6forms/vb6forms_prop_form.h"
+152 RCDATA "../rtl/core/vb6forms/vb6forms_ctrlarr.h"
+153 RCDATA "../rtl/core/vb6forms/vb6forms_mdi.h"
+154 RCDATA "../rtl/core/vb6forms/vb6forms_webview.h"
+155 RCDATA "../rtl/core/vb6forms/vb6forms_controls.h"
