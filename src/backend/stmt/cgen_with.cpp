@@ -396,6 +396,22 @@ void CCodeGen::visit(WithStmt& node) {
 
     suppressDefaultProp_ = prevSuppress;
 
+    // Fix 110c: With <UDT 数组元素 / UDT 嵌套字段> — 形如 m_Serie(i).Rects(j)、
+    // m_Item(i).LegendRect 等. 这类目标在 C 里是**结构体值**, 若 tempType 仍是
+    // void*, 下方会发射 `(void*)<结构体>` → C2440 ("无法从 vb6_type_RectL 转换
+    // 为 void *"), 或对 void* 目标做 ->members 访问 → C2224/C2039.
+    // 用已有的 UDT 类型推断 (走 arrayUdtElemTypes_ + udtMembers 成员表) 得到
+    // 精确的 vb6_type_X, 让 With 体按 struct 字段访问 (_vb6_with_N->Left).
+    if (tempType == "void*") {
+        std::string withUdt = inferUdtTypeOfExpr(*node.object);
+        if (!withUdt.empty() && withUdt.rfind("vb6_type_", 0) == 0) {
+            tempType = withUdt;
+            withInfo.kind = WithObjKind::Unknown;  // Fix 054: UDT struct → 字段访问
+            knownUdtVars_[tempVar] = withUdt;
+            knownLocalVars_.insert(tempVar);
+        }
+    }
+
     // Fix 092o: 目标表达式已生成完毕 (期间保持外层栈顶), 现在把本帧 withInfo 入栈 —
     // body 内的 .成员 解析与下方的 Menu 判定都依赖它.
     withObjectInfoStack_.push_back(withInfo);

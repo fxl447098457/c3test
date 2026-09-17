@@ -347,6 +347,11 @@ bool CCodeGen::cExprIsVariant(const std::string& cExpr) const {
                                  //   Dim D() As Byte: D = LoadResData(...) 赋值
                                  //   需 VariantToSafeArray1D 提取 (cLang LoadData/LoadInfo C2440).
         "vb6_DispCallByVtbl(",  // Fix 068: DispCallByVtbl returns Variant
+        // Fix 110w: VB6 CallByName 返回 vb6_VARIANT (见 vb6rtl_class_com.h) —
+        // 参与算术/关系运算或需 BSTR 时必须按 Variant 处理, 否则 C2088
+        // ("*" 对于 struct 非法; Charts 2020 ClsResizer.cls:142/148
+        //  CallByName(oCtrl, ..., VbGet) * 100).
+        "vb6_CallByName(",
     };
     for (const auto& prefix : variantPrefixes) {
         if (cExpr.compare(start, prefix.size(), prefix) == 0) return true;

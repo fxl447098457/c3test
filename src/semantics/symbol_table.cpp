@@ -7,9 +7,10 @@ namespace vb6c3 {
 // Scope
 // ============================================================
 
-bool Scope::define(std::unique_ptr<Symbol> sym) {
+bool Scope::define(std::unique_ptr<Symbol> sym, const std::string& keyOverride) {
     // 使用storageKey作为键: Property Get/Let/Set加后缀区分同名共存
-    std::string key = sym->storageKey();
+    // Fix 103: Type/Enum 与过程同名时由 SymbolTable::define 传入 "<name>$ty" 覆盖键.
+    std::string key = keyOverride.empty() ? sym->storageKey() : keyOverride;
     auto it = symbols_.find(key);
     if (it != symbols_.end()) {
         return false;  // 重定义
@@ -40,6 +41,11 @@ Symbol* Scope::lookupLocal(const std::string& name) const {
     if (it != symbols_.end()) {
         return it->second.get();
     }
+    // Fix 103: Type/Enum 与过程同名时的类型符号 (key == lowerName + "$ty")
+    it = symbols_.find(lower + "$ty");
+    if (it != symbols_.end()) {
+        return it->second.get();
+    }
     return nullptr;
 }
 
@@ -64,6 +70,11 @@ Symbol* Scope::lookupLocalByKind(const std::string& name, SymbolKind kind) const
     auto it = symbols_.find(lower);
     if (it != symbols_.end() && it->second->kind == kind) {
         return it->second.get();
+    }
+    // Fix 103: 同名过程占用了裸键时, Type/Enum 符号存放在 <name>$ty 下
+    auto itTy = symbols_.find(lower + "$ty");
+    if (itTy != symbols_.end() && itTy->second->kind == kind) {
+        return itTy->second.get();
     }
     return nullptr;
 }
@@ -177,7 +188,44 @@ bool SymbolTable::define(std::unique_ptr<Symbol> sym) {
     // Property Get/Let/Set允许同名共存 (VB6合法: Property Get Name + Property Let Name)
     // Scope::define已用storageKey区分, 这里只需确认不报错即可
 
-    if (!current_->define(std::move(sym))) {
+    // Fix 103: Type/Enum 与过程同名共存 — VB6 合法 (类型名与过程名属不同命名空间).
+    // 实例 (Charts 2020 ucProgressCircular/ppProgressCircular.pag):
+    //   Private Declare Function CHOOSECOLOR Lib "comdlg32.dll" Alias "ChooseColorA" _
+    //       (pChoosecolor As CHOOSECOLOR) As Long
+    //   Private Type CHOOSECOLOR ... End Type
+    // 二者 lowerName 相同, 原先触发 SemDuplicateDeclaration 直接中止编译.
+    // 处理: 恰好一方是类型 (UserDefinedType/EnumType)、另一方是过程时, 类型符号改用
+    // "<name>$ty" 存储键; 查找侧见 Scope::lookupLocal / lookupLocalByKind 的 $ty 回退.
+    // 仅在该冲突真实存在时改写键, 无冲突的模块行为完全不变.
+    std::string keyOverride;
+    {
+        const bool newIsType = (sym->kind == SymbolKind::UserDefinedType ||
+                                sym->kind == SymbolKind::EnumType);
+        auto isTypeKind = [](SymbolKind k) {
+            return k == SymbolKind::UserDefinedType || k == SymbolKind::EnumType;
+        };
+        auto* existingBare = current_->lookupLocal(lowerName);
+        // lookupLocal 已含 $ty 回退; 这里只关心裸键上的占用者
+        auto itBare = current_->symbols_.find(lowerName);
+        Symbol* bareOwner = (itBare != current_->symbols_.end())
+                                ? itBare->second.get() : nullptr;
+        (void)existingBare;
+        const std::string tyKey = lowerName + "$ty";
+        const bool tyKeyFree = current_->symbols_.find(tyKey) == current_->symbols_.end();
+        if (bareOwner && tyKeyFree && isTypeKind(bareOwner->kind) != newIsType) {
+            // 裸键被"另一类"符号占用 → 类型符号让位到 $ty
+            if (newIsType) {
+                keyOverride = tyKey;
+            } else {
+                // 已有类型占用裸键, 新来的是过程: 把类型搬到 $ty, 过程占裸键
+                auto moved = std::move(current_->symbols_[lowerName]);
+                current_->symbols_.erase(lowerName);
+                current_->symbols_[tyKey] = std::move(moved);
+            }
+        }
+    }
+
+    if (!current_->define(std::move(sym), keyOverride)) {
         diag_.error(DiagnosticID::SemDuplicateDeclaration, loc,
             "重复声明: \x27" + lowerName + "\x27");
         return false;
@@ -240,6 +288,14 @@ void SymbolTable::defineExternal(std::unique_ptr<Symbol> sym) {
     // 如果已存在同名符号（本地已有定义），跳过不覆盖
     if (!moduleScope_) return;
     std::string key = sym->storageKey();
+    // Fix 103: 同名过程占用了裸键时, 外部 Type/Enum 改注入 "<name>$ty"
+    // (与 SymbolTable::define 的冲突处理一致), 避免跨模块 Public Type
+    // 与本地同名过程冲突后类型彻底不可见.
+    if (sym->kind == SymbolKind::UserDefinedType || sym->kind == SymbolKind::EnumType) {
+        if (moduleScope_->symbols_.find(key) != moduleScope_->symbols_.end()) {
+            key = sym->lowerName + "$ty";
+        }
+    }
     auto it = moduleScope_->symbols_.find(key);
     if (it != moduleScope_->symbols_.end()) {
         // 本地已有定义，不注入外部符号

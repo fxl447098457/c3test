@@ -967,7 +967,7 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
                                         std::vector<std::string> packedArgs;
                                         for (size_t i = 0; i < node.positional.size(); i++) {
                                             std::string packFn = comPackExpr(*node.positional[i]);
-                                            emitExpr(*node.positional[i]);
+
                                             { std::string resolved = resolveComMarkerForPack(packFn);
                                               if (!resolved.empty()) lastExpr_ = resolved; }
                                             packedArgs.push_back(packFn + "(" + lastExpr_ + ")");
@@ -1058,6 +1058,70 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
                             }
                         }
                     }
+                }
+            }
+        }
+    }
+
+    // Fix 110b: 控件数组元素默认属性读取 — VB6 里 `TxtARGB(0)` 等价于
+    // `TxtARGB(0).Text` (TextBox 控件数组元素的默认属性).
+    // 不处理时 callee 的 IdentifierExpr 会先展开成默认属性读取
+    // `vb6_GetControlText(vb6_hwnd_TxtARGB)`, 再被拼上 `(0)` →
+    // `vb6_GetControlText(vb6_hwnd_TxtARGB)(0)` (C2064 / C2106).
+    if (node.callee && node.callee->kind == ASTNodeKind::IdentifierExpr
+        && !node.positional.empty()) {
+        auto& caId110 = static_cast<IdentifierExpr&>(*node.callee);
+        std::string caLower110 = caId110.name;
+        std::transform(caLower110.begin(), caLower110.end(), caLower110.begin(), ::tolower);
+        if (knownControlArrays_.count(caLower110)) {
+            auto itCtrl110 = knownFormControls_.find(caLower110);
+            if (itCtrl110 != knownFormControls_.end()) {
+                const char* defProp110 = getDefaultPropertyName(itCtrl110->second);
+                std::string readFn110 = defProp110
+                    ? getControlPropReadFn(itCtrl110->second, defProp110) : std::string();
+                if (!readFn110.empty()) {
+                    emitExpr(*node.positional[0]);
+                    std::string idxArg110 = std::move(lastExpr_);
+                    std::string orig110 = knownFormControlOriginalNames_.count(caLower110)
+                        ? knownFormControlOriginalNames_[caLower110] : caId110.name;
+                    lastExpr_ = readFn110 + "(vb6_CtrlArr_GetAt(&vb6_arr_" + cIdent(orig110)
+                              + ", " + idxArg110 + "))  /* ctrl array default prop */";
+                    return;
+                }
+            }
+        }
+    }
+
+    // P13.3b: 控件可索引属性读取 — cmbBalloonTooltip.List(0) / .Selected(0) / .ItemData(0).
+    // callee 是 MemberAccessExpr(控件, 属性) 且带索引实参时, RTL 读函数需要 hwnd + idx
+    // 两个实参; 若走通用路径, 先发 vb6_GetListItem(vb6_hwnd_X) 再拼 (0) →
+    // vb6_GetListItem(hwnd)(0) (C2064 把索引当函数调用). 与 Fix 110b 控件数组
+    // 默认属性读取同位拦截: 直接生成 vb6_GetListItem((void*)vb6_hwnd_X, idx).
+    if (node.callee && node.callee->kind == ASTNodeKind::MemberAccessExpr
+        && !node.positional.empty()) {
+        auto& maC131 = static_cast<MemberAccessExpr&>(*node.callee);
+        if (maC131.object && maC131.object->kind == ASTNodeKind::IdentifierExpr) {
+            auto& mcId131 = static_cast<IdentifierExpr&>(*maC131.object);
+            std::string mcLower131 = mcId131.name;
+            std::transform(mcLower131.begin(), mcLower131.end(), mcLower131.begin(), ::tolower);
+            auto itCtrl131 = knownFormControls_.find(mcLower131);
+            if (itCtrl131 != knownFormControls_.end()
+                && (itCtrl131->second == FrmControlType::ListBox
+                    || itCtrl131->second == FrmControlType::ComboBox)) {
+                std::string prop131 = maC131.memberName;
+                std::transform(prop131.begin(), prop131.end(), prop131.begin(), ::tolower);
+                const char* fn131 = nullptr;
+                if (prop131 == "list") fn131 = "vb6_GetListItem";
+                else if (prop131 == "selected") fn131 = "vb6_GetSelected";
+                else if (prop131 == "itemdata") fn131 = "vb6_GetItemData";
+                if (fn131) {
+                    std::string orig131 = knownFormControlOriginalNames_.count(mcLower131)
+                        ? knownFormControlOriginalNames_[mcLower131] : mcId131.name;
+                    emitExpr(*node.positional[0]);
+                    std::string idx131 = std::move(lastExpr_);
+                    lastExpr_ = std::string(fn131) + "((void*)vb6_hwnd_" + cIdent(orig131)
+                              + ", " + idx131 + ")  /* indexed ctrl prop */";
+                    return;
                 }
             }
         }
@@ -1781,7 +1845,23 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
                 if (it090q != funcUdtRetCType_.end()) argUdtRetCType090q = it090q->second;
             }
         }
+        // 形参是对象类型 (Object/Control) 且实参是窗体控件标识符时, 抑制默认属性
+        // 解析: VB6 把控件作为对象引用传递, 而非默认属性值. 否则 ByRef Object
+        // 实参生成默认属性 (BSTR) 指针, 被调方 *objControl 读到 VARIANT.vt
+        // (如 VT_BSTR=8) → 运行期崩溃 (BalloonTooltips cTT.CreateToolTip).
+        bool savedSuppressProp = suppressDefaultProp_;
+        if (i < calleeParams.size()
+            && static_cast<Vb6Type>(static_cast<uint16_t>(calleeParams[i].type)
+                 & ~static_cast<uint16_t>(Vb6Type::Array)) == Vb6Type::Object
+            && node.positional[i] && node.positional[i]->kind == ASTNodeKind::IdentifierExpr) {
+            std::string idLower = Symbol::toLower(
+                static_cast<IdentifierExpr&>(*node.positional[i]).name);
+            if (knownFormControls_.count(idLower) || knownWithEventsCtrlVars_.count(idLower)) {
+                suppressDefaultProp_ = true;
+            }
+        }
         emitExpr(*node.positional[i]);
+        suppressDefaultProp_ = savedSuppressProp;
       // COM属性标记残留: MsgBox dic.Count 等场景 — 参数是COM属性读取但标记未被消费
         // 统一用后期绑定(IDispatch), 避免vtable签名不匹配问题
         if (isComMarker_) {
@@ -1823,6 +1903,13 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
         if (isDeclareAnsiCall && i < calleeParams.size() && calleeParams[i].isByVal
             && calleeParams[i].type == Vb6Type::String) {
             std::string ansiVar = "_ansi_" + std::to_string(ansiCounter_++);
+            // Fix 110x: BSTR 形参的实参若是 Variant 表达式 (后期绑定控件属性读
+            // vb6_VariantFromComResult(vb6_ComGetProp(...)) 等), 直接交给
+            // vb6_BSTR_ToANSI(BSTR) → C2440 "无法从 vb6_VARIANT 转换为 BSTR"
+            // (Charts 2020 PropPagLP.c 256: CreateWindowEx(..., LabelPlus1.Caption, ...)).
+            if (cExprIsVariant(argVal)) {
+                argVal = "vb6_VariantToString(" + argVal + ")";
+            }
             c_.emitLine("char* " + ansiVar + " = vb6_BSTR_ToANSI(" + argVal + ");");
             ansiTempsToFree_.push_back(ansiVar);
             argVal = ansiVar;
@@ -3223,6 +3310,26 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
         }
     }
 
+    // Fix 110l: InputBox(prompt[, title[, default[, xpos[, ypos[, helpfile[, context]]]]]]])
+    // RTL: vb6_InputBox(prompt, title, defaultstr, xpos, ypos, helpfile, context) — 7 参.
+    // VB6 允许只写前 1~3 个实参 (Charts 2020 ppProgressCircular.pag 351:
+    //   InputBox("...", , 100) → vb6_InputBox(prompt, 0L, 100) → C2198 参数太少).
+    if (callee == "vb6_InputBox") {
+        static const char* kInputBoxDefaults[7] = {
+            nullptr,                 // prompt (必填)
+            "vb6_BSTR_Empty()",      // title
+            "vb6_BSTR_Empty()",      // defaultstr
+            "0",                     // xpos
+            "0",                     // ypos
+            "vb6_BSTR_Empty()",      // helpfile
+            "0",                     // context
+        };
+        for (size_t i = args.size(); i < 7; i++) {
+            argList += ", ";
+            argList += kInputBoxDefaults[i];
+        }
+    }
+
     // P21-10: FormatDateTime(date[, namedFormat]) - default namedFormat=0 (vbGeneralDate)
     if (callee == "vb6_FormatDateTime") {
         if (args.size() == 1) {
@@ -3715,6 +3822,115 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
             }
         }
     }
+    // Fix 108c: 内建函数实参的类型适配 (走到此处说明没有专门分支处理).
+    //  (a) 数值型内建函数收到"无类型 COM 调用结果" (vb6_ComCall → void*, 指向
+    //      VARIANT) 时先解包为数值, 否则 void* 传入 double 形参报 C2440
+    //      (Charts 2020 ucChartBar SumSerieValues: vb6_Abs(vb6_ComCall(...))).
+    //  (b) 形参为 String 的内建函数收到数值实参时按 VB6 隐式转换转 BSTR,
+    //      否则 float 传入 BSTR 形参报 C2440
+    //      (Charts 2020 ucChartArea: vb6_Replace(m_LabelsFormats, "{V}", yRange)) .
+    {
+        static const std::unordered_set<std::string> numericBuiltins108c = {
+            "vb6_Abs", "vb6_Int", "vb6_Fix", "vb6_Sgn", "vb6_Sqr", "vb6_Sin",
+            "vb6_Cos", "vb6_Tan", "vb6_Atn", "vb6_Log", "vb6_Exp", "vb6_Round",
+            "vb6_CDbl", "vb6_CSng", "vb6_CInt", "vb6_CLng", "vb6_CByte",
+            "vb6_CBool", "vb6_Hex", "vb6_Oct",
+        };
+        static const std::unordered_map<std::string, std::vector<size_t>> strArgPos108c = {
+            {"vb6_Replace",    {0, 1, 2}},
+            {"vb6_StrComp",    {0, 1}},
+            {"vb6_StrReverse", {0}},
+            {"vb6_Trim",       {0}},
+            {"vb6_LTrim",      {0}},
+            {"vb6_RTrim",      {0}},
+            {"vb6_UCase",      {0}},
+            {"vb6_LCase",      {0}},
+            {"vb6_StrConv",    {0}},
+        };
+        bool argsFixed108c = false;
+        // argList 在更早处已按 args 拼好, 其后还有"补默认参数"分支向 argList 追加
+        // (如 vb6_Replace 的 ", 1, -1, 0"). 因此不能整体重建 argList —— 只能就地把
+        // 被改写的实参文本替换掉, 否则会丢掉默认参数 (曾导致 vb6_Replace 只剩 3 参).
+        size_t searchFrom108c = 0;
+        auto replaceInArgList108c = [&](const std::string& oldVal,
+                                        const std::string& newVal) {
+            size_t p = argList.find(oldVal, searchFrom108c);
+            if (p == std::string::npos) return;
+            argList.replace(p, oldVal.size(), newVal);
+            searchFrom108c = p + newVal.size();
+        };
+        if (numericBuiltins108c.count(callee)) {
+            for (auto& a : args) {
+                if (a.compare(0, 12, "vb6_ComCall(") == 0) {
+                    std::string wrapped =
+                        "vb6_VariantToDouble(vb6_VariantFromComResult(" + a + "))";
+                    replaceInArgList108c(a, wrapped);
+                    a = wrapped;
+                    argsFixed108c = true;
+                }
+            }
+        }
+        // Fix 108c-2: vb6_Val 形参为 BSTR, 收到"无类型 COM 调用结果"
+        // (vb6_ComCall → void*, 指向 VARIANT) 时解包为字符串, 而非数值 —
+        // 若走 numericBuiltins108c 的 vb6_VariantToDouble 包裹, double 传入
+        // BSTR 形参报 C2440 (BalloonTooltips cTT.cls: Val(colTooltips(sKey))).
+        if (callee == "vb6_Val") {
+            for (auto& a : args) {
+                bool isComResult = (a.compare(0, 12, "vb6_ComCall(") == 0
+                                    || a.compare(0, 12, "vb6_ComGetProp(") == 0);
+                if (isComResult) {
+                    std::string wrapped =
+                        "vb6_VariantToString(vb6_VariantFromComResult(" + a + "))";
+                    replaceInArgList108c(a, wrapped);
+                    a = wrapped;
+                    argsFixed108c = true;
+                }
+            }
+        }
+        auto itStrPos = strArgPos108c.find(callee);
+        if (itStrPos != strArgPos108c.end()) {
+            for (size_t pos : itStrPos->second) {
+                if (pos >= args.size() || pos >= node.positional.size()) continue;
+                if (!node.positional[pos]) continue;
+                Vb6Type at108c = inferExprType(*node.positional[pos]);
+                if (at108c != Vb6Type::Single && at108c != Vb6Type::Double &&
+                    at108c != Vb6Type::Long && at108c != Vb6Type::Integer &&
+                    at108c != Vb6Type::Currency && at108c != Vb6Type::Decimal &&
+                    at108c != Vb6Type::Boolean) {
+                    continue;  // 已是字符串/对象等, 不介入
+                }
+                if (args[pos].find("vb6_CStr") != std::string::npos) continue;
+                std::string wrapped108c;
+                if (at108c == Vb6Type::Long || at108c == Vb6Type::Integer ||
+                    at108c == Vb6Type::Boolean) {
+                    wrapped108c = "vb6_CStrLong((int32_t)(" + args[pos] + "))";
+                } else {
+                    wrapped108c = "vb6_CStrDbl((double)(" + args[pos] + "))";
+                }
+                replaceInArgList108c(args[pos], wrapped108c);
+                args[pos] = wrapped108c;
+                argsFixed108c = true;
+            }
+        }
+
+        // Fix 108c-3: vb6_ObjPtr(ifaceVar) — 接口引用是值结构体, 不能直接作为
+        // uintptr_t 实参 (C2172). 对象指针位于 .obj 字段: 改写为 (<var>).obj.
+        // mdlSubclass.bas: vb6_ObjPtr(Subclass) → vb6_ObjPtr((Subclass).obj).
+        // 仅精确匹配裸接口变量名, 不触碰其它形式 (LongPtr 变量等走别处转换).
+        if (callee == "vb6_ObjPtr" && !args.empty() && !node.positional.empty()
+            && node.positional[0] && node.positional[0]->kind == ASTNodeKind::IdentifierExpr) {
+            std::string aLower = args[0];
+            std::transform(aLower.begin(), aLower.end(), aLower.begin(), ::tolower);
+            if (knownIfaceVars_.count(aLower)) {
+                std::string newVal = "(" + args[0] + ").obj";
+                replaceInArgList108c(args[0], newVal);
+                args[0] = newVal;
+                argsFixed108c = true;
+            }
+        }
+        (void)argsFixed108c;
+    }
+
     lastExpr_ = callee + "(" + argList + ")";
 }
 

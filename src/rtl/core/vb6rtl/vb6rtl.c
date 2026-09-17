@@ -2,6 +2,7 @@
 // 仅支持 hello.bas 等简单程序运行
 
 #include "vb6rtl.h"
+#include "vb6forms.h"   /* Fix 112: 宿主对象模型 (窗体/控件/集合/字体) */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -1306,6 +1307,11 @@ int32_t vb6_VarType(vb6_VARIANT v) { return (int32_t)v.vt; }
 // P8.4: TypeName - 返回Variant类型的VB6类型名
 BSTR vb6_TypeName(vb6_VARIANT v) {
     const wchar_t* name = L"Empty";
+    /* Fix 112: 宿主对象 (窗体/控件 HWND, Controls 集合, Font) 返回 VB6 类型名 */
+    if (v.vt == vb6_vtDispatch && v.pdispVal) {
+        const wchar_t* hostName = vb6_Host_TypeNameOf(v.pdispVal);
+        if (hostName) return vb6_BSTR_FromStr(hostName);
+    }
     switch (v.vt) {
         case vb6_vtEmpty:    name = L"Empty"; break;
         case vb6_vtNull:     name = L"Null"; break;
@@ -1357,6 +1363,14 @@ void vb6_Debug_PrintDouble(double d) {
 // ============================================================
 
 void* vb6_NewObject(const wchar_t* className) {
+    // Fix 112c: Collection 是 VB6 内建类, 不能走 CLSIDFromProgID (必失败 → 429 弹窗)
+    if (className && _wcsicmp(className, L"Collection") == 0) {
+        return vb6_Collection_New();
+    }
+    // Fix 112: StdFont → RTL 内建字体对象 (With m_TitleFont: .Size/.Bold 直接写结构体)
+    if (className && _wcsicmp(className, L"StdFont") == 0) {
+        return vb6_UC_NewFont();
+    }
     // 对于未知类名，尝试通过COM创建 (Dim x As New ClassName，className不在已知类中)
     // VB6中如果className不是项目内的类模块，则尝试COM创建
     return vb6_CreateObject(className);
@@ -2215,6 +2229,8 @@ static int g_formCount = 0;
 
 void vb6_Forms_Register(void* hwnd_) {
     if (g_formCount < VB6_MAX_FORMS) { g_formList[g_formCount++] = (HWND)hwnd_; }
+    /* Fix 112: 窗体 HWND 也是宿主对象 (Me.ScaleWidth / Me.Controls / Me.hwnd) */
+    vb6_HostObj_Register(hwnd_, NULL, "Form", 1, -1);
 }
 void vb6_Forms_Unregister(void* hwnd_) {
     HWND hwnd = (HWND)hwnd_;
@@ -4432,6 +4448,22 @@ vb6_VARIANT vb6_CallByName(void* obj, const wchar_t* procName, int32_t callType,
 
     if (!obj || !procName) return result;
 
+    /* Fix 112: 宿主对象 (窗体/控件 HWND, Font 代理) 用 Win32 语义应答 CallByName */
+    if (vb6_Host_IsHostObject(obj)) {
+        if (callType == 3) {           /* VbGet */
+            vb6_Host_GetProp(obj, procName, &result);
+        } else if (callType == 1) {    /* VbLet: 首个实参即要写入的值 */
+            void** a = (void**)args;
+            if (argc >= 1 && a && a[0]) {
+                char hv[64];
+                vb6_Host_FromWinVariant(a[0], hv);
+                vb6_Host_SetProp(obj, procName, hv);
+                vb6_Host_ClearVariant(hv);
+            }
+        }
+        return result;
+    }
+
     IDispatch* disp = (IDispatch*)obj;
     DISPID dispid = 0;
     HRESULT hr;
@@ -5424,4 +5456,147 @@ void vb6_SavePicture(void* hBitmap, BSTR filename) {
 // vb6_form_show_<Form>() 首次调用时创建, 对象恒可用, 无独立预加载阶段.
 void vb6_LoadForm(void* hwnd) {
     (void)hwnd;
+}
+
+// ============================================================
+// Fix 105: UserControl/PropertyPage 宿主内建对象
+// 生成 C 把 UserControl.* / Ambient.* / Extender.* / PropertyPage.* 发射为
+// 裸全局标识符 (vb6_UserControl_ScaleWidth 等), 此前无定义 → C2065。
+// 这里提供每进程单实例的宿主状态与默认实现; 单窗体多实例共享一份状态,
+// 实例化宿主是后续特性块。
+// ============================================================
+#include <windows.h>
+#include "vb6rtl_userctl.h"
+
+// --- Font 对象实体 (环境字体; 控件 Font 未显式设置时的取值来源) ---
+vb6_ComIface_Font g_vb6_UserControl_FontObj = { NULL, 8.0f, 0, 0, 0, 0, 400, 0 };
+
+// --- UserControl 宿主状态 ---
+int32_t vb6_UserControl_ScaleWidth  = 0;
+int32_t vb6_UserControl_ScaleHeight = 0;
+int32_t vb6_UserControl_ScaleMode   = 1;     // Twip (VB6 默认)
+void*   vb6_UserControl_hDC          = NULL;
+int32_t vb6_UserControl_ContainerHwnd = 0;
+int16_t vb6_UserControl_Enabled     = -1;
+int32_t vb6_UserControl_MousePointer = 0;
+void*   vb6_UserControl_MouseIcon   = NULL;
+int32_t vb6_UserControl_OLEDropMode = 0;
+vb6_ComIface_Font* vb6_UserControl_Font = &g_vb6_UserControl_FontObj;
+struct vb6_UserControl_Ambient_Type vb6_UserControl_Ambient = { &g_vb6_UserControl_FontObj };
+
+// --- Ambient 宿主环境 ---
+vb6_ComIface_Font* vb6_Ambient_Font = &g_vb6_UserControl_FontObj;
+int16_t vb6_Ambient_UserMode   = -1;         // 编译产物即运行期
+BSTR    vb6_Ambient_DisplayName = NULL;     // 运行时置为控件实例名
+int32_t vb6_Ambient_ForeColor  = 0;          // 黑
+int32_t vb6_Ambient_BackColor  = 0x8000000F; // BTNFACE (VB6 默认)
+
+// --- Extender ---
+int32_t vb6_Extender_Left = 0;
+int32_t vb6_Extender_Top  = 0;
+
+// --- PropertyPage ---
+void*   vb6_PropertyPage_hwnd        = NULL;
+void*   vb6_PropertyPage_hWnd        = NULL;  // 两种拼写指向同一概念
+int32_t vb6_PropertyPage_ScaleMode   = 1;
+int32_t vb6_PropertyPage_ScaleHeight = 0;
+int16_t vb6_PropertyPage_Changed     = 0;
+
+// --- PropertyPage 内建 Changed 属性 (Fix 108d) ---
+int16_t Changed = 0;
+
+// --- Picture.Line 模式常量 ---
+const int32_t B  = 1;
+const int32_t BF = 2;
+
+// VB6 UserControl.TextWidth/TextHeight: 按当前 Font 用 GDI 测量 (单位=ScaleMode,
+// 这里简化为像素; Twip 差异待实例化宿主后统一处理)
+int32_t vb6_UserControl_TextWidth(BSTR text) {
+    if (!text) return 0;
+    HDC hdc = GetDC(NULL);
+    SIZE sz = {0, 0};
+    int len = SysStringLen(text);
+    if (hdc && len) GetTextExtentPoint32W(hdc, text, len, &sz);
+    if (hdc) ReleaseDC(NULL, hdc);
+    return sz.cx;
+}
+
+int32_t vb6_UserControl_TextHeight(BSTR text) {
+    if (!text) return 0;
+    HDC hdc = GetDC(NULL);
+    SIZE sz = {0, 0};
+    int len = SysStringLen(text);
+    if (hdc && len) GetTextExtentPoint32W(hdc, text, len, &sz);
+    if (hdc) ReleaseDC(NULL, hdc);
+    return sz.cy;
+}
+
+// UserControl.Size: VB6 中 `UserControl.Size width, height` 设置控件尺寸
+// (单位同 ScaleMode). 编译形态下 Windowless 控件由容器决定实际尺寸, 这里更新
+// 宿主状态 (vb6_UserControl_ScaleWidth/ScaleHeight) 并让容器重绘 —— 与
+// ScaleWidth/ScaleHeight 这两个宿主变量保持自洽, 不产生额外副作用.
+// Charts 2020 LabelPlus.ctl:1371 依赖它 (此前无声明 → C2065).
+void vb6_UserControl_Size(double width, double height) {
+    if (!(width != width))  vb6_UserControl_ScaleWidth  = (int32_t)width;
+    if (!(height != height)) vb6_UserControl_ScaleHeight = (int32_t)height;
+    vb6_UserControl_Refresh();
+}
+
+// UserControl.Refresh: Windowless 控件在编译形态下无独立窗口, 交由容器重绘;
+// 当前无实例注册表, 安全空操作。
+void vb6_UserControl_Refresh(void) {
+    vb6_UC_RefreshCurrent();   /* Fix 112: 刷新最近进入的 UserControl 宿主窗口 */
+}
+
+// UserControl.CancelAsyncRead: 异步读取未实现, 空操作。
+void vb6_UserControl_CancelAsyncRead(BSTR propName) {
+    (void)propName;
+}
+
+// Fix 111: UserControl 内建方法 (实现在此, 声明见 vb6rtl_userctl.h)。
+//
+// ScaleX/ScaleY: 把 x 从 fromScale 单位换算到 toScale 单位 (VB6 ScaleMode 常量).
+// 以 96dpi 为基准: Twip = 1/15 px, Point = 96/72 px, Inch = 96 px …
+// User(0)/ContainerPosition(8)/ContainerSize(9,10)/未知 一律按像素处理 — 与
+// Charts 2020 的实际用法一致 (Extender.Left 已是容器像素坐标,
+// 目标 UserControl.ScaleMode = 3 = Pixel → 恒等换算)。
+static double vb6_ucScaleToPixels(int32_t mode) {
+    switch (mode) {
+        case 1: return 1.0 / 15.0;      /* Twips */
+        case 2: return 96.0 / 72.0;     /* Points */
+        case 3: return 1.0;             /* Pixels */
+        case 4: return 1.0;             /* Characters (近似) */
+        case 5: return 96.0;            /* Inches */
+        case 6: return 96.0 / 25.4;     /* Millimeters */
+        case 7: return 96.0 / 2.54;     /* Centimeters */
+        default: return 1.0;            /* User / Container* / 未知 */
+    }
+}
+
+double vb6_UserControl_ScaleX(double x, int32_t fromScale, int32_t toScale) {
+    double px = x * vb6_ucScaleToPixels(fromScale);
+    double f = vb6_ucScaleToPixels(toScale);
+    return (f == 0.0) ? x : (px / f);
+}
+
+double vb6_UserControl_ScaleY(double y, int32_t fromScale, int32_t toScale) {
+    double px = y * vb6_ucScaleToPixels(fromScale);
+    double f = vb6_ucScaleToPixels(toScale);
+    return (f == 0.0) ? y : (px / f);
+}
+
+// UserControl.AsyncRead: 编译形态下没有容器/异步消息泵, 真实异步读取不可用,
+// 记录为无操作 (与 CancelAsyncRead 对称)。调用点的后续逻辑依赖
+// UserControl_AsyncReadComplete 回调, 该回调不会触发 —— 即图片异步加载被跳过,
+// 不影响控件其余功能。
+void vb6_UserControl_AsyncRead(BSTR url, int32_t asyncType, BSTR propertyName,
+                               int32_t flags) {
+    (void)url; (void)asyncType; (void)propertyName; (void)flags;
+}
+
+// UserControl.PropertyChanged: 通知容器"属性已变"。编译形态下没有容器回调注册表,
+// 与内建 Changed (见 vb6_PropertyPage_Changed / 裸 Changed) 同为空操作, 仅保持
+// 状态一致, 不产生副作用。
+void vb6_UserControl_PropertyChanged(BSTR propName) {
+    (void)propName;
 }

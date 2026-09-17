@@ -69,7 +69,8 @@ Vb6Type CCodeGen::resolveArrayElemType(ASTNode* typeRef) const {
                 nmLower0 = nmLower0.substr(4);
             }
             static const std::unordered_set<std::string> vb6BuiltinObjTypes = {
-                "collection", "forms", "errobject", "app", "screen", "printer", "clipboard"
+                "collection", "forms", "errobject", "app", "screen", "printer", "clipboard",
+                "control", "form"
             };
             if (vb6BuiltinObjTypes.count(nmLower0)) return Vb6Type::Object;
         }
@@ -79,7 +80,10 @@ Vb6Type CCodeGen::resolveArrayElemType(ASTNode* typeRef) const {
         // VB6_SA_AT(vb6_VARIANT, ...).字段 (C2039/C2223) → With 对象类型也变 Variant,
         // 成员解析退化为跨模块类查找 (如 .Pos 误解析到 cToast.Pos, C2198)。
         // 与 resolveArrayUdtElemCType (Fix 055b) 的符号表回退保持一致。
-        if (auto* sym = symTab_.lookup(simple.name)) {
+        // Fix 107: 用 lookupTypeSymbol — 类型与过程同名时 (Fix 103 把类型存到
+        // <name>$ty), 通用 lookup 命中过程符号 → 枚举/UDT 字段回落 Variant,
+        // 与 mapTypeRef 的 int32_t/vb6_type_x 不一致 → C2440.
+        if (auto* sym = lookupTypeSymbol(simple.name)) {
             if (sym->kind == SymbolKind::UserDefinedType) return Vb6Type::UserDefinedType;
             if (sym->kind == SymbolKind::EnumType) return Vb6Type::Long;
             if (sym->kind == SymbolKind::Class || sym->kind == SymbolKind::ComClass ||

@@ -577,6 +577,67 @@ void vb6_Form_SetDispatch(void* hwnd, void* pDispatch);
 // 等价于 VB6: Set ctrl = Me.Controls.Add("WMPlayer.OCX", "WMP1")
 void* vb6_Form_ControlsAdd(void* hwnd, const wchar_t* progId, const wchar_t* ctrlName);
 
+// ============================================================
+// Fix 112: 工程内 UserControl (.ctl) 实例宿主 + 窗体/控件宿主对象模型
+// ============================================================
+
+// UserControl 宿主描述 — 生成代码为每个 .ctl 模块发射一份并调用 vb6_UC_Register
+typedef struct vb6_UserControlDesc {
+    const char* typeName;             // VB6 控件类型名, 如 "ucChartBar"
+    int32_t     scaleMode;            // .ctl 设计期 ScaleMode (1=Twip 3=Pixel)
+    void*     (*create)(void);        // vb6_cls_X_New()
+    void      (*init)(void* me);      // UserControl_Initialize
+    void      (*paint)(void* me);     // UserControl_Paint
+    void      (*resize)(void* me);    // UserControl_Resize (无则 NULL)
+    void      (*show)(void* me);      // UserControl_Show (无则 NULL)
+    void      (*terminate)(void* me); // UserControl_Terminate / vb6_cls_X_Destroy
+} vb6_UserControlDesc;
+
+// .ctl 模块自注册 (类型名大小写不敏感, 重复注册忽略)
+void vb6_UC_Register(const vb6_UserControlDesc* desc);
+
+// 在窗体上创建一个 UserControl 实例的宿主子窗口
+// left/top/width/height 为缇; ctrlName 为控件实例名 (供 Controls 枚举 / Name)
+// 返回宿主子窗口 HWND (NULL=未注册该类型)
+void* vb6_UC_HostCreate(const char* typeName, int32_t left, int32_t top,
+                        int32_t width, int32_t height, void* hParent, void* hInstance,
+                        const char* ctrlName, int32_t index);
+
+// 宿主 HWND → 控件实例 (vb6_cls_X*); 非宿主窗口返回 NULL
+void* vb6_UC_InstanceOf(void* hwnd);
+// 控件实例 → 宿主 HWND; 未知返回 NULL
+void* vb6_UC_HwndOf(void* instance);
+int32_t vb6_UC_IsHostHwnd(void* hwnd);
+
+// 换入某实例的宿主状态 (vb6_UserControl_*) — 窗体代码直接调用控件公开方法前使用。
+// 有意不弹栈: "当前实例" = 最近进入者, 使 UserControl.Refresh/PropertyChange 生效。
+void vb6_UC_Enter(void* hwnd);
+void vb6_UC_RefreshCurrent(void);
+
+// ---- 宿主对象模型 (窗体/控件 HWND, Controls 集合, Font 对象) ----
+// vb6_com_* / vb6_CallByName / vb6_TypeName 在触碰 lpVtbl 之前先询问这里。
+void vb6_HostObj_Register(void* hwnd, const char* name, const char* vbTypeName,
+                          int32_t isForm, int32_t index);
+int32_t vb6_Host_IsHostObject(void* obj);
+const wchar_t* vb6_Host_TypeNameOf(void* obj);
+int32_t vb6_Host_GetProp(void* obj, const wchar_t* name, void* outVariant);
+int32_t vb6_Host_SetProp(void* obj, const wchar_t* name, const void* inVariant);
+int32_t vb6_Host_Call(void* obj, const wchar_t* name, int32_t argc,
+                      void** argv, void* outVariant);
+void* vb6_UC_NewFont(void);
+int32_t vb6_UC_ControlsIsCollection(void* p);
+// Fix 112c: RTL 内建 Collection (New Collection 不走 COM)
+void* vb6_Collection_New(void);
+int32_t vb6_Collection_IsCollection(void* p);
+int32_t vb6_UC_ControlsCount(void* coll);
+void* vb6_UC_ControlsItem(void* coll, int32_t index);
+void* vb6_UC_ControlsEnumInit(void* coll);
+int32_t vb6_UC_ControlsEnumNext(void* enumPtr, void* outVariant);
+// Windows VARIANT ↔ vb6_VARIANT 转换 + 清理 (vb6com_* 挂接点内部使用)
+void vb6_Host_ToWinVariant(const void* inV, void* outV);
+void vb6_Host_FromWinVariant(const void* inV, void* outV);
+void vb6_Host_ClearVariant(void* v);
+
 #ifdef __cplusplus
 }
 #endif

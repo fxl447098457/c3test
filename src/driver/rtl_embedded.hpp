@@ -53,6 +53,7 @@ enum RtlResourceID {
     RTL_VB6FORMS_WIDGET_C   = 129,
     RTL_VB6FORMS_SHAPE_C    = 130,
     RTL_VB6FORMS_AXSITE_C   = 131,
+    RTL_VB6FORMS_UC_C       = 140,  // Fix 112: 工程内 UserControl 实例宿主
 
     // vb6rtl.h 按家族拆分 (2026-09-17): 伞头 + 7 个子头
     RTL_VB6RTL_BASE_H = 132,
@@ -62,6 +63,7 @@ enum RtlResourceID {
     RTL_VB6RTL_ARRAY_H = 136,
     RTL_VB6RTL_CLASS_COM_H = 137,
     RTL_VB6RTL_RUNTIME_H = 138,
+    RTL_VB6RTL_USERCTL_H = 139,  // Fix 105: UserControl/Ambient/Extender/PropertyPage 宿主
 };
 
 // Session directory manager

@@ -1,4 +1,6 @@
 #include "backend/cgen.hpp"
+#include <cstdio>
+#include <cstdlib>
 #include "project/frx_reader.hpp"
 #include <algorithm>
 #include <cctype>
@@ -150,7 +152,7 @@ void CCodeGen::emitFormFramework(const FrmFormDesc& frmDesc, Module& module) {
         knownFormControls_[formNameLower] = FrmControlType::Form;
         knownFormControlOriginalNames_[formNameLower] = formName;
 
-        // P7.6: 先扫描控件数组 (同名控件出现多次 = 数组)
+        // 显式 Index 即表示控件数组，包括只有一个设计期元素的情况。
         // Fix 086: 递归注册嵌套控件 (Menu子项如 Window > WindowTopMost).
         // 此前仅注册顶层控件, 嵌套菜单成员访问 (.Checked 等) 误判为
         // Module.X → 生成 vb6_<菜单名>_<属性> 未声明标识符 (C2065).
@@ -160,12 +162,25 @@ void CCodeGen::emitFormFramework(const FrmFormDesc& frmDesc, Module& module) {
             std::string ctrlNameLower = ctrl.controlName;
             std::transform(ctrlNameLower.begin(), ctrlNameLower.end(), ctrlNameLower.begin(), ::tolower);
             if (!ctrlNameLower.empty()) {
-                if (!ctrlArraySeen.insert(ctrlNameLower).second) {
-                    // 同名控件出现多次 = 控件数组
+                const bool duplicateName = !ctrlArraySeen.insert(ctrlNameLower).second;
+                if (ctrl.index >= 0 || duplicateName) {
+                    // 单元素 Index=7 也必须生成数组句柄及带 Index 的事件分发。
                     knownControlArrays_[ctrlNameLower] = true;
                 }
                 knownFormControls_[ctrlNameLower] = ctrl.controlType;
                 knownFormControlOriginalNames_[ctrlNameLower] = ctrl.controlName;
+                // Fix 112: 工程内 UserControl 子控件 (Begin Proyecto1.ucChartBar ucChartBar1)
+                // → 记录 控件名 → .ctl 模块名, 使 `ucChartBar1.AddSerie(...)` 走类成员
+                // 直接调用 (vb6_ucChartBar_AddSerie) 而非对 HWND 的 COM 晚绑定.
+                if (const FrmFile* ucSpec = findUserControlSpec(ctrl.controlTypeName)) {
+                    // 保留 VB_Name 原大小写: 生成 vb6_cls_ucChartBar (与类结构体一致)
+                    if (!ucSpec->form.formName.empty()) {
+                        knownUserControlCtrlVars_[ctrlNameLower] = ucSpec->form.formName;
+                        // 同时登记为类实例变量: 让 IndexOrCallExpr 的可选参数补齐
+                        // (Fix 090c/Fix 042b) 能按该类形参表展开.
+                        knownClassVars_[ctrlNameLower] = ucSpec->form.formName;
+                    }
+                }
             }
             for (const auto& child : ctrl.children) {
                 registerCtrlRec(child);
@@ -209,45 +224,15 @@ void CCodeGen::emitFormFramework(const FrmFormDesc& frmDesc, Module& module) {
     h_.emitLine("void vb6_form_show_" + cIdent(formName) + "(void* hMDIClient);");
 
     // 控件句柄变量 (P7.6: 数组控件使用vb6_CtrlArr, 非数组使用void*)
-    {
-        std::unordered_set<std::string> emitted;
-        for (const auto& ctrl : frmDesc.formControl.children) {
-            std::string ctrlNameLower = ctrl.controlName;
-            std::transform(ctrlNameLower.begin(), ctrlNameLower.end(), ctrlNameLower.begin(), ::tolower);
-            if (emitted.count(ctrlNameLower)) continue;
-            if (!FrmParser::controlTypeToWin32Class(ctrl.controlType)) {
-                // P7.9: WebBrowser needs HWND declaration though no Win32 class
-                if (ctrl.controlType == FrmControlType::WebBrowser) {
-                    c_.emitLine("static void* vb6_hwnd_" + cIdent(ctrl.controlName) + " = NULL;");
-                    emitted.insert(ctrlNameLower);
-                }
-                // Fix 086: Timer控件无Win32窗口, 但窗体代码引用 vb6_hwnd_<Timer>
-                // (Timer1.Enabled/Interval 走控件属性路径). 声明为NULL静态变量,
-                // RTL 的 vb6_SetTimerEnabled/vb6_SetTimerInterval 对 NULL 是安全空操作.
-                if (ctrl.controlType == FrmControlType::Timer) {
-                    c_.emitLine("static void* vb6_hwnd_" + cIdent(ctrl.controlName) + " = NULL;");
-                    emitted.insert(ctrlNameLower);
-                }
-                // ActiveX控件 (ImageList等): 生成IDispatch*变量, 运行时CoCreateInstance
-                if (ctrl.controlType == FrmControlType::ImageList ||
-                    ctrl.controlType == FrmControlType::Toolbar ||
-                    ctrl.controlType == FrmControlType::StatusBar ||
-                    ctrl.controlType == FrmControlType::CommonDialog) {
-                    c_.emitLine("static void* vb6_com_" + cIdent(ctrl.controlName) + " = NULL;  /* IDispatch* */");
-                    emitted.insert(ctrlNameLower);
-                }
-                continue;
-            }
-            if (knownControlArrays_.count(ctrlNameLower)) {
-                c_.emitLine("static vb6_CtrlArr vb6_arr_" + cIdent(ctrl.controlName) + ";");
-            } else {
-                c_.emitLine("static void* vb6_hwnd_" + cIdent(ctrl.controlName) + " = NULL;");
-            }
-            emitted.insert(ctrlNameLower);
-        }
-    }
+    // Fix 110: 递归到嵌套容器 (Frame 内的 Picture/TextBox), 并为所有设计期
+    // 控件 (含工程内 UserControl 实例 / 第三方 ActiveX / 未知类型) 发射符号 —
+    // 此前对 controlTypeToWin32Class()==nullptr 的类型直接 continue, 导致
+    // Form2 上的 vb6_hwnd_ucPieChart1 等未声明 (C2065).
+    emitControlHandleDecls(frmDesc);
 
     c_.emitLine("static int vb6_formLoading_" + cIdent(formName) + " = 0;");
+    // Fix 112: Form_Load 是否已执行 (首次 Form_Resize 必须晚于 Form_Load)
+    c_.emitLine("static int vb6_formLoaded_" + cIdent(formName) + " = 0;");
 
     c_.emitBlank();
 
@@ -718,6 +703,14 @@ void CCodeGen::emitFormFramework(const FrmFormDesc& frmDesc, Module& module) {
         c_.emitLine("case 0x7FF0: {");
         c_.indent();
         c_.emitLine("{ /* Form_Load (deferred from WM_CREATE) */ extern void " + formLoadFn + "(); " + formLoadFn + "(); }");
+        // Fix 112: Load 完成后再触发首次 Form_Resize (与 VB6 的 Load→Resize 顺序一致)
+        c_.emitLine("vb6_formLoaded_" + cIdent(formName) + " = 1;");
+        {
+            std::string resizeFnLoad = cProcName("Form_Resize", AccessLevel::Private);
+            if (symTab_.lookup(formName + "_Resize") || symTab_.lookup("Form_Resize")) {
+                c_.emitLine("{ extern void " + resizeFnLoad + "(); " + resizeFnLoad + "(); }");
+            }
+        }
         c_.emitLine("break;");
         c_.dedent();
         c_.emitLine("}");
@@ -1117,6 +1110,11 @@ void CCodeGen::emitFormFramework(const FrmFormDesc& frmDesc, Module& module) {
         if (symTab_.lookup(formName + "_Resize") || symTab_.lookup("Form_Resize")) {
             c_.emitLine("case WM_SIZE: {");
             c_.indent();
+            // Fix 112: Form_Load 经 PostMessage 延迟执行, 而首次 WM_SIZE 在
+            // CreateWindow 期间就到达 —— 若照搬 VB6 的 Load→Resize 顺序, 这里会
+            // 在 Form_Load 之前触发 Form_Resize, 模块级对象 (如 cResizer) 还是
+            // Nothing → 空指针. 故 Load 完成前跳过, 由 0x7FF0 分支补一次 Resize.
+            c_.emitLine("if (!vb6_formLoaded_" + cIdent(formName) + ") break;");
             c_.emitLine("{ extern void " + resizeFn + "(); " + resizeFn + "(); }");
             c_.emitLine("break;");
             c_.dedent();
@@ -1306,6 +1304,79 @@ void CCodeGen::emitFormFramework(const FrmFormDesc& frmDesc, Module& module) {
     // 为每个控件生成CreateWindow调用
     ctrlId = 100;
     for (const auto& ctrl : frmDesc.formControl.children) {
+        // Fix 112: 工程内 UserControl (.ctl) 子控件 → 实例化到宿主子窗口.
+        // 此前这类 controlTypeToWin32Class()==nullptr 的非 ActiveX 类型直接 continue,
+        // Form2 上的 ucChartBar1 等从未创建 → vb6_ComCall(NULL,...) 被丢弃 → 白板窗体.
+        if (findUserControlSpec(ctrl.controlTypeName)) {
+            std::string ctlClass = knownUserControlCtrlVars_[Symbol::toLower(ctrl.controlName)];
+            // 该 .ctl 模块的宿主描述必须先注册 (跨 TU: extern 声明 + 直接调用)
+            c_.emitLine("{ extern void vb6_" + cIdent(ctlClass) + "_RegisterHost(void);"
+                      + " vb6_" + cIdent(ctlClass) + "_RegisterHost(); }");
+            int ucL = 0, ucT = 0, ucW = 1000, ucH = 300;
+            auto ucP = ctrl.properties.find("Left");
+            if (ucP != ctrl.properties.end()) ucL = (int)ucP->second.intValue;
+            ucP = ctrl.properties.find("Top");
+            if (ucP != ctrl.properties.end()) ucT = (int)ucP->second.intValue;
+            ucP = ctrl.properties.find("Width");
+            if (ucP != ctrl.properties.end()) ucW = (int)ucP->second.intValue;
+            ucP = ctrl.properties.find("Height");
+            if (ucP != ctrl.properties.end()) ucH = (int)ucP->second.intValue;
+
+            std::string ctlLower = Symbol::toLower(ctrl.controlName);
+            bool ucIsArr = knownControlArrays_.count(ctlLower) != 0;
+            std::string hwndExpr;
+            if (ucIsArr) {
+                int idx = ctrl.index >= 0 ? ctrl.index : 0;
+                c_.emitLine("{ void* vb6_uc_h = vb6_UC_HostCreate(\"" + ctlClass + "\", "
+                    + std::to_string(ucL) + ", " + std::to_string(ucT) + ", "
+                    + std::to_string(ucW) + ", " + std::to_string(ucH)
+                    + ", hwnd, hInstance, \"" + cIdent(ctrl.controlName) + "_" + std::to_string(idx)
+                    + "\", " + std::to_string(idx) + ");");
+                c_.emitLine("  vb6_CtrlArr_SetAt(&vb6_arr_" + cIdent(ctrl.controlName) + ", "
+                           + std::to_string(idx) + ", vb6_uc_h); }");
+                hwndExpr = "vb6_CtrlArr_GetAt(&vb6_arr_" + cIdent(ctrl.controlName) + ", "
+                         + std::to_string(idx) + ")";
+            } else {
+                c_.emitLine("vb6_hwnd_" + cIdent(ctrl.controlName) + " = vb6_UC_HostCreate(\""
+                    + ctlClass + "\", " + std::to_string(ucL) + ", " + std::to_string(ucT) + ", "
+                    + std::to_string(ucW) + ", " + std::to_string(ucH)
+                    + ", hwnd, hInstance, \"" + ctrl.controlName + "\", -1);");
+                hwndExpr = "vb6_hwnd_" + cIdent(ctrl.controlName);
+            }
+
+            // 设计期持久化的 UserControl 公共属性 (Value=30 / PB_Color1=... / Caption2="...")
+            // → 逐个调用该 .ctl 的 prop_let_ (跳过几何/Tab 等标准属性).
+            {
+                static const char* kSkip[] = {"Left", "Top", "Width", "Height", "Index",
+                    "TabIndex", "TabStop", "Visible", "Enabled", "Name", "_ExtentX",
+                    "_ExtentY", "Tag", "ToolTipText", "WhatisThis", "HelpContextID"};
+                c_.emitLine("vb6_UC_Enter(" + hwndExpr + ");  /* Fix 112: 换入宿主状态 */");
+                for (const auto& kv : ctrl.properties) {
+                    const std::string& pn = kv.first;
+                    bool skip = false;
+                    for (const char* sk : kSkip) if (_stricmp(pn.c_str(), sk) == 0) { skip = true; break; }
+                    if (skip) continue;
+                    std::string pnLower = Symbol::toLower(pn);
+                    Symbol* letSym = symTab_.lookupModule(pn);
+                    if (!letSym || letSym->kind != SymbolKind::PropertyLet) continue;
+                    std::string setter = "vb6_" + cIdent(ctlClass) + "_prop_let_" + cIdent(pn);
+                    std::string valExpr;
+                    if (kv.second.type == FrmValueType::String) {
+                        std::string raw = kv.second.rawText;
+                        if (raw.size() >= 2 && raw.front() == '"' && raw.back() == '"')
+                            raw = raw.substr(1, raw.size() - 2);
+                        valExpr = "vb6_BSTR_FromStr(L\"" + escapeWideCString(raw) + "\")";
+                    } else {
+                        valExpr = kv.second.rawText.empty()
+                                ? std::to_string(kv.second.intValue) : kv.second.rawText;
+                    }
+                    c_.emitLine(setter + "((vb6_cls_" + cIdent(ctlClass) + "*)vb6_UC_InstanceOf("
+                              + hwndExpr + "), " + valExpr + ");");
+                }
+            }
+            ctrlId++;
+            continue;
+        }
         const char* win32Class = FrmParser::controlTypeToWin32Class(ctrl.controlType);
         if (!win32Class) {
             // P7.9: WebBrowser控件用vb6_CreateWebView创建
@@ -2008,6 +2079,179 @@ ctrlId++;
     c_.dedent();
     c_.emitLine("}");  // Show
     c_.emitBlank();
+}
+
+// ============================================================
+// Fix 110: 设计期子控件句柄变量声明 (窗体 / UserControl / PropertyPage 共用)
+// ============================================================
+// 规则 (与 .frm 旧行为兼容, 并补上旧行为漏掉的类型):
+//   - ActiveX 控件 (ImageList/Toolbar/StatusBar/CommonDialog) → vb6_com_<name> (IDispatch*)
+//   - 同名控件在设计器出现多次, 或带 Index= → 控件数组 vb6_arr_<name> (vb6_CtrlArr)
+//   - 其余 (含 Timer / WebBrowser / 工程内 UserControl 实例 / Unknown) → vb6_hwnd_<name>
+//
+// 旧实现有三个缺口, 均导致生成代码里出现未声明的 vb6_<ctrl>_<prop> (C2065):
+//   1) 只遍历顶层 children, 不递归 → Frame 内的 Picture2/TxtARGB 等没有符号;
+//   2) controlTypeToWin32Class()==nullptr 且不属于 Timer/WebBrowser/ActiveX 时
+//      直接 continue → 工程内 UserControl 实例 (ucPieChart1 等) 没有符号;
+//   3) 早期版本 Timer 也被跳过.
+void CCodeGen::emitControlHandleDecls(const FrmFormDesc& frmDesc) {
+    std::unordered_set<std::string> emitted;
+    std::function<void(const FrmControl&)> emitRec = [&](const FrmControl& ctrl) {
+        std::string ctrlLower = ctrl.controlName;
+        std::transform(ctrlLower.begin(), ctrlLower.end(), ctrlLower.begin(), ::tolower);
+        if (!ctrlLower.empty() && emitted.insert(ctrlLower).second) {
+            if (ctrl.controlType == FrmControlType::ImageList ||
+                ctrl.controlType == FrmControlType::Toolbar ||
+                ctrl.controlType == FrmControlType::StatusBar ||
+                ctrl.controlType == FrmControlType::CommonDialog) {
+                c_.emitLine("static void* vb6_com_" + cIdent(ctrl.controlName) + " = NULL;  /* IDispatch* */");
+            } else if (knownControlArrays_.count(ctrlLower)) {
+                c_.emitLine("static vb6_CtrlArr vb6_arr_" + cIdent(ctrl.controlName) + ";");
+            } else {
+                c_.emitLine("static void* vb6_hwnd_" + cIdent(ctrl.controlName) + " = NULL;");
+            }
+        }
+        for (const auto& child : ctrl.children) emitRec(child);
+    };
+    for (const auto& ctrl : frmDesc.formControl.children) emitRec(ctrl);
+}
+
+// ============================================================
+// Fix 110: .ctl / .pag 设计期子控件符号支撑
+// ============================================================
+// VB6 的 UserControl/PropertyPage 可以在设计器里放子控件 (Begin VB.Timer Timer1,
+// Begin VB.PictureBox Picture2, ...). 模块代码里 `Timer1.Interval = 100` /
+// `Picture1.ScaleWidth` 在 VB6 语义上是"访问设计期控件的属性".
+//
+// 若这些子控件没有注册进 knownFormControls_, cgen 的两处回退会把它当作
+// "模块名.成员" 处理:
+//   - 读:  vb6_<Ctrl>_<Prop>              (cgen_expr_member.cpp 优先级4)
+//   - 写:  vb6_<Ctrl>_<Prop> = ...        (cgen_assign.cpp Module.member)
+// 这些标识符在生成代码与 RTL 中都不存在 → C2065.
+//
+// 这里登记控件名 + 发射句柄变量声明. 不发射窗体窗口框架: UserControl /
+// PropertyPage 对外是类, 其可见内容由代码绘制到 UserControl.hDC / hwnd,
+// 子控件句柄保持 NULL (RTL 的属性 setter 对 NULL 句柄是安全空操作).
+void CCodeGen::emitDesignerControlDecls(const FrmFormDesc& frmDesc) {
+    // Fix 110f: 记录设计器种类 (.pag 的 PropertyPage 与 .ctl 的 UserControl 在宿主
+    // 内建成员前缀上不同: vb6_PropertyPage_* / vb6_UserControl_*).
+    isPropertyPageDesigner_ =
+        frmDesc.formControl.controlTypeName.find("PropertyPage") != std::string::npos;
+    // 1) 登记控件名映射 (与 emitFormFramework 的 P7.5/P7.6 块保持一致)
+    std::string ownerLower = frmDesc.formName;
+    std::transform(ownerLower.begin(), ownerLower.end(), ownerLower.begin(), ::tolower);
+    if (!ownerLower.empty()) {
+        knownFormControlOriginalNames_[ownerLower] = frmDesc.formName;
+    }
+    std::unordered_set<std::string> ctrlArraySeen;
+    std::function<void(const FrmControl&)> registerCtrlRec = [&](const FrmControl& ctrl) {
+        std::string ctrlLower = ctrl.controlName;
+        std::transform(ctrlLower.begin(), ctrlLower.end(), ctrlLower.begin(), ::tolower);
+        if (!ctrlLower.empty()) {
+            const bool duplicateName = !ctrlArraySeen.insert(ctrlLower).second;
+            if (ctrl.index >= 0 || duplicateName) {
+                knownControlArrays_[ctrlLower] = true;
+            }
+            knownFormControls_[ctrlLower] = ctrl.controlType;
+            knownFormControlOriginalNames_[ctrlLower] = ctrl.controlName;
+        }
+        for (const auto& child : ctrl.children) registerCtrlRec(child);
+    };
+    for (const auto& ctrl : frmDesc.formControl.children) registerCtrlRec(ctrl);
+
+    // 2) 发射句柄/数组/COM 变量声明
+    emitControlHandleDecls(frmDesc);
+    c_.emitBlank();
+
+    // 3) Fix 112: UserControl (.ctl) 宿主描述 — 让窗体可以把本控件实例挂到子窗口上.
+    //    PropertyPage 是设计期窗体, 不是可实例化控件, 跳过.
+    if (!isPropertyPageDesigner_) {
+        std::string ctl = cIdent(moduleName_);
+        // 生命周期处理器是否存在 (Private Sub UserControl_Initialize/Paint/...)
+        auto hasProc = [&](const char* n) -> bool {
+            Symbol* sym = symTab_.lookupModule(n);
+            return sym && (sym->kind == SymbolKind::Sub || sym->kind == SymbolKind::Function);
+        };
+        const bool hasInit = hasProc("UserControl_Initialize");
+        const bool hasPaint = hasProc("UserControl_Paint");
+        const bool hasShow = hasProc("UserControl_Show");
+        const bool hasResize = hasProc("UserControl_Resize");
+        // Fix 112d: InitProperties 负责成员数组的 ReDim/默认值 (如 ucProgressCircular
+        // 的 m_PF_Colors)。运行期没有 PropertyBag, 按 VB6 语义 InitProperties 是
+        // "无持久化数据时的属性初始化", 归入 init 链, 否则 Draw 读未分配数组 → AV。
+        const bool hasInitProps = hasProc("UserControl_InitProperties");
+
+        c_.emitLine("// === Fix 112: UserControl 宿主描述 (供窗体宿主子窗口驱动) ===");
+        // 前置声明 (定义在本文件后面, static 内部链接)
+        if (hasInit)   c_.emitLine("static void vb6_" + ctl + "_UserControl_Initialize(vb6_cls_" + ctl + "* me);");
+        if (hasPaint)  c_.emitLine("static void vb6_" + ctl + "_UserControl_Paint(vb6_cls_" + ctl + "* me);");
+        if (hasShow)   c_.emitLine("static void vb6_" + ctl + "_UserControl_Show(vb6_cls_" + ctl + "* me);");
+        if (hasResize) c_.emitLine("static void vb6_" + ctl + "_UserControl_Resize(vb6_cls_" + ctl + "* me);");
+        if (hasInitProps) c_.emitLine("static void vb6_" + ctl + "_UserControl_InitProperties(vb6_cls_" + ctl + "* me);");
+        c_.emitLine("static void vb6_" + ctl + "_ucHostInit(void* me) {");
+        if (hasInit) c_.emitLine("    vb6_" + ctl + "_UserControl_Initialize((vb6_cls_" + ctl + "*)me);");
+        if (hasInitProps) c_.emitLine("    vb6_" + ctl + "_UserControl_InitProperties((vb6_cls_" + ctl + "*)me);");
+        c_.emitLine("}");
+        c_.emitLine("static void vb6_" + ctl + "_ucHostPaint(void* me) {");
+        if (hasPaint) c_.emitLine("    vb6_" + ctl + "_UserControl_Paint((vb6_cls_" + ctl + "*)me);");
+        c_.emitLine("}");
+        c_.emitLine("static void vb6_" + ctl + "_ucHostShow(void* me) {");
+        if (hasShow) c_.emitLine("    vb6_" + ctl + "_UserControl_Show((vb6_cls_" + ctl + "*)me);");
+        c_.emitLine("}");
+        c_.emitLine("static void vb6_" + ctl + "_ucHostResize(void* me) {");
+        if (hasResize) c_.emitLine("    vb6_" + ctl + "_UserControl_Resize((vb6_cls_" + ctl + "*)me);");
+        c_.emitLine("}");
+        c_.emitLine("static void vb6_" + ctl + "_ucHostTerminate(void* me) {");
+        c_.emitLine("    vb6_cls_" + ctl + "_Destroy((vb6_cls_" + ctl + "*)me);");
+        c_.emitLine("}");
+
+        int ucScaleMode = 1;
+        auto smIt = frmDesc.formControl.properties.find("ScaleMode");
+        if (smIt != frmDesc.formControl.properties.end()) ucScaleMode = (int)smIt->second.intValue;
+
+        c_.emitLine("static const vb6_UserControlDesc vb6_" + ctl + "_ucHostDesc = {");
+        c_.emitLine("    \"" + moduleName_ + "\", " + std::to_string(ucScaleMode) + ",");
+        c_.emitLine("    (void* (*)(void))vb6_cls_" + ctl + "_New,");
+        c_.emitLine("    vb6_" + ctl + "_ucHostInit, vb6_" + ctl + "_ucHostPaint,");
+        c_.emitLine("    vb6_" + ctl + "_ucHostResize, vb6_" + ctl + "_ucHostShow, vb6_" + ctl + "_ucHostTerminate");
+        c_.emitLine("};");
+        c_.emitLine("void vb6_" + ctl + "_RegisterHost(void) { vb6_UC_Register(&vb6_" + ctl + "_ucHostDesc); }");
+        c_.emitBlank();
+
+        h_.emitLine("// Fix 112: UserControl 宿主描述注册 (窗体创建子控件前调用)");
+        h_.emitLine("void vb6_" + ctl + "_RegisterHost(void);");
+    }
+}
+
+// Fix 112: "Proyecto1.ucChartBar" → 该类是否为工程内 .ctl UserControl 模块.
+// 命中返回该模块的设计器描述, 否则 nullptr.
+const FrmFile* CCodeGen::findUserControlSpec(const std::string& controlTypeName) const {
+    static int dbg = -1;
+    if (dbg < 0) {
+        const char* e = std::getenv("C3_DBG112");
+        dbg = e ? 1 : 0;
+        if (dbg && designerFiles_) {
+            for (const auto& kv : *designerFiles_) {
+                std::fprintf(stderr, "[DBG112] key='%s' form='%s'\n",
+                             kv.first.c_str(), kv.second.form.formName.c_str());
+            }
+        }
+    }
+    if (dbg) std::fprintf(stderr, "[DBG112] spec query='%s' map=%s\n",
+                          controlTypeName.c_str(), designerFiles_ ? "set" : "null");
+    if (!designerFiles_ || designerFiles_->empty()) return nullptr;
+    std::string cls = controlTypeName;
+    size_t dot = cls.rfind('.');
+    if (dot != std::string::npos) cls = cls.substr(dot + 1);
+    if (cls.empty()) return nullptr;
+    cls = Symbol::toLower(cls);   // Fix 112: VB6 大小写不敏感
+    // 键是 module.moduleName (VB_Name, 保留原大小写), 按 VB6 大小写不敏感比较
+    const FrmFile* hit = nullptr;
+    for (const auto& kv : *designerFiles_) {
+        if (Symbol::toLower(kv.first) == cls) { hit = &kv.second; break; }
+    }
+    if (dbg) std::fprintf(stderr, "[DBG112]   -> %s\n", hit ? "HIT" : "miss");
+    return hit;
 }
 
 // P7.8: 递归生成菜单项

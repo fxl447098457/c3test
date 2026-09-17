@@ -67,7 +67,12 @@ void* vb6_SafeArrayGetPtr(vb6_SafeArray1D* arr, int32_t index);
 void  vb6_SafeArrayPutElem(vb6_SafeArray1D* arr, int32_t index, void* value);
 
 // 便捷宏: 按类型访问元素
-#define VB6_SA_AT(type, arr, idx) (((type*)((arr)->data))[(idx) - (arr)->lBound])
+// Fix 106: VB6 允许用非整型表达式做数组下标 (如 Dim i As Single 后 arr(i)),
+// 由 VB6 隐式转换为 Long。这里把下标差值显式转 int32_t, 否则 C 端
+// float/double 下标直接报 C2108 (Charts 2020 ucChartArea: 202 处),
+// 且级联出 C2198 等二次错误。Variant 下标仍由生成端 toLongIfVariant 处理。
+#define VB6_SA_AT(type, arr, idx) \
+    (((type*)((arr)->data))[(int32_t)((idx) - (arr)->lBound)])
 
 // UBound/LBound (替换旧stub)
 int32_t vb6_UBound(vb6_SafeArray1D* safeArray, int32_t dimension);
@@ -113,20 +118,21 @@ void* vb6_SafeArrayND_GetPtr(vb6_SafeArrayND* arr, ...);
 int32_t vb6_UBoundND(vb6_SafeArrayND* arr, int32_t dimension);
 int32_t vb6_LBoundND(vb6_SafeArrayND* arr, int32_t dimension);
 
+// Fix 106: 同 VB6_SA_AT, 多维下标也显式转 int32_t (VB6 隐式 CLng).
 #define VB6_SA_ND_AT1(elemType, arr, i) \
     (*((elemType*)((arr)->data) + \
-       ((i) - (arr)->bounds[0].lBound)))
+       ((int32_t)((i) - (arr)->bounds[0].lBound))))
 
 #define VB6_SA_ND_AT2(elemType, arr, i, j) \
     (*((elemType*)((arr)->data) + \
-       (((i) - (arr)->bounds[0].lBound) + \
-        ((j) - (arr)->bounds[1].lBound) * (arr)->bounds[0].cElements)))
+       (((int32_t)((i) - (arr)->bounds[0].lBound)) + \
+        ((int32_t)((j) - (arr)->bounds[1].lBound)) * (arr)->bounds[0].cElements)))
 
 #define VB6_SA_ND_AT3(elemType, arr, i, j, k) \
     (*((elemType*)((arr)->data) + \
-       (((i) - (arr)->bounds[0].lBound) + \
-        ((j) - (arr)->bounds[1].lBound) * (arr)->bounds[0].cElements + \
-        ((k) - (arr)->bounds[2].lBound) * (arr)->bounds[0].cElements * (arr)->bounds[1].cElements)))
+       (((int32_t)((i) - (arr)->bounds[0].lBound)) + \
+        ((int32_t)((j) - (arr)->bounds[1].lBound)) * (arr)->bounds[0].cElements + \
+        ((int32_t)((k) - (arr)->bounds[2].lBound)) * (arr)->bounds[0].cElements * (arr)->bounds[1].cElements)))
 
 // 文件 I/O
 int32_t vb6_FreeFile(void);

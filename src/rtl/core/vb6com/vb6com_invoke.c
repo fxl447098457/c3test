@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "vb6com_internal.h"
+#include "vb6forms.h"   /* Fix 112: 宿主对象分派 */
 
 
 // ============================================================
@@ -57,6 +58,19 @@ void* vb6_ComCall(void* disp, const wchar_t* methodName,
                   void* args_void, int32_t argc) {
     VARIANT** args = (VARIANT**)args_void;
     if (!disp) return NULL;
+    /* Fix 112: 宿主对象 (窗体/控件 HWND, Controls 集合, Font 代理) 不是 IDispatch,
+     * 直接解引用 lpVtbl 会 AV. 用 Win32 语义的宿主分派应答. */
+    if (vb6_Host_IsHostObject(disp)) {
+        char hout[64];   /* vb6_VARIANT (vb6com 单元用 Windows VARIANT, 不见 vb6_VARIANT 类型) */
+        vb6_Host_Call(disp, methodName, argc, args_void, hout);
+        if (args) {
+            for (int32_t hi = 0; hi < argc; hi++) { if (args[hi]) free(args[hi]); }
+        }
+        VARIANT* hres = (VARIANT*)calloc(1, sizeof(VARIANT));
+        vb6_Host_ToWinVariant(&hout, hres);
+        vb6_Host_ClearVariant(&hout);
+        return (void*)hres;
+    }
     IDispatch* pDisp = (IDispatch*)disp;
 
     DISPID dispid = vb6_getDispid(pDisp, methodName);
@@ -173,6 +187,15 @@ void* vb6_ComCallByDispid(void* disp, int32_t dispid,
 // COM属性Get (返回VARIANT*)
 void* vb6_ComGetProp(void* disp, const wchar_t* propName) {
     if (!disp) return NULL;
+    /* Fix 112: 宿主对象分派 (见 vb6_ComCall 注释) */
+    if (vb6_Host_IsHostObject(disp)) {
+        char hout[64];
+        vb6_Host_GetProp(disp, propName, hout);
+        VARIANT* hres = (VARIANT*)calloc(1, sizeof(VARIANT));
+        vb6_Host_ToWinVariant(&hout, hres);
+        vb6_Host_ClearVariant(&hout);
+        return (void*)hres;
+    }
     IDispatch* pDisp = (IDispatch*)disp;
 
     DISPID dispid = vb6_getDispid(pDisp, propName);
@@ -261,6 +284,15 @@ void* vb6_ComGetPropArg(void* disp, const wchar_t* propName,
 // COM属性Set (值类型)
 // COM属性Set (值类型)
 void vb6_ComSetProp(void* disp, const wchar_t* propName, void* value_void) {
+    /* Fix 112: 宿主对象分派 (见 vb6_ComCall 注释) */
+    if (disp && vb6_Host_IsHostObject(disp)) {
+        char hin[64];
+        vb6_Host_FromWinVariant(value_void, hin);
+        vb6_Host_SetProp(disp, propName, hin);
+        vb6_Host_ClearVariant(hin);
+        return;
+    }
+
     VARIANT value;
     VariantInit(&value);
     // 简化: 假设value是已打包的VARIANT; MVP阶段由cgen直接传递

@@ -22,6 +22,7 @@
 #include <filesystem>
 #include <cstdlib>
 #include <set>
+#include <functional>
 #include <unordered_map>
 #include <unordered_set>
 #include <cctype>
@@ -677,35 +678,35 @@ bool Driver::runParser(const CompileOptions& options) {
         // 根据文件扩展名判断模块类型
         bool isClassModule = false;
         bool isFormModule = false;
-        FrmFile frmDesc;  // P7: 窗体描述 (仅.frm有效)
+        bool isControlModule = false;
+        bool isPropertyPageModule = false;
+        FrmFile frmDesc;  // Designer metadata for .frm/.ctl/.pag
         if (filePath.size() >= 4) {
             std::string ext = filePath.substr(filePath.size() - 4);
             for (auto& c : ext) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-            isClassModule = (ext == ".cls");
+            isControlModule = (ext == ".ctl");
+            isPropertyPageModule = (ext == ".pag");
+            isClassModule = (ext == ".cls" || isControlModule || isPropertyPageModule);
             isFormModule = (ext == ".frm");  // P7: 窗体模块
         }
 
         // M22: 统一编码处理 — .frm经由FrmParser读取(已含编码转换+代码段提取),
         // .bas/.cls经由SourceBuffer::fromFile读取(含编码转换)
         std::unique_ptr<SourceBuffer> buffer;
-        if (isFormModule) {
-            // P7: 解析.frm窗体描述, 提取VB代码段
+        if (isFormModule || isControlModule || isPropertyPageModule) {
+            // Designer headers are not VB statements; extract the code section.
             // M22: FrmParser.parse已使用readAndConvertToUtf8, 返回的codeSection是UTF-8
             frmDesc = FrmParser::parse(filePath);
             // P24: 设置 .frx 文件路径 (与 .frm 同目录同名)
             {
                 auto frxPath = frmDesc.frmFilePath;
-                frxPath.replace_extension(".frx");
+                frxPath.replace_extension(isControlModule ? ".ctx" : (isPropertyPageModule ? ".pgx" : ".frx"));
                 if (std::filesystem::exists(frxPath)) {
                     frmDesc.form.frxFilePath = frxPath;
                 }
             }
-            if (!frmDesc.codeSection.empty()) {
-                buffer = SourceBuffer::fromString(filePath, frmDesc.codeSection);
-            } else {
-                // 无代码段的.frm: 用fromFile读取完整内容
-                buffer = SourceBuffer::fromFile(filePath);
-            }
+            // Empty designer code is valid; do not feed the header to the VB parser.
+            buffer = SourceBuffer::fromString(filePath, frmDesc.codeSection);
         } else {
             buffer = SourceBuffer::fromFile(filePath);
         }
@@ -756,7 +757,14 @@ bool Driver::runParser(const CompileOptions& options) {
                 module->moduleName = pathToUtf8(p.stem());
             }
             // P7: 保存窗体描述 (此时moduleName已从Attribute VB_Name或文件名确定)
-            if (isFormModule && module->isFormModule) {
+            // Fix 110: .ctl/.pag 与 .frm 同样需要设计期子控件元数据.
+            // 背景: VB6 的 UserControl/PropertyPage 可放置设计期子控件
+            // (Begin VB.Timer Timer1 / Begin VB.PictureBox Picture1 ...), 代码里
+            // `Timer1.Interval = 100` 必须走"控件属性"路径
+            // (vb6_SetTimerInterval(vb6_hwnd_Timer1, 100)). 若缺元数据,
+            // knownFormControls_ 为空 → 落入 cgen_assign/cgen_expr_member 的
+            // "Module.member" 回退 → vb6_Timer1_Interval 未声明标识符 (C2065).
+            if (isFormModule || isControlModule || isPropertyPageModule) {
                 frmFiles_[module->moduleName] = std::move(frmDesc);
             }
 
@@ -1114,7 +1122,10 @@ bool Driver::runSemanticAnalysis(const CompileOptions& options) {
         if (frmIt != frmFiles_.end()) {
             const auto& frmDesc = frmIt->second.form;
             // 注册窗体名本身 (Form1.Caption 访问)
-            {
+            // Fix 110: 仅 .frm 需要 — .ctl/.pag 的模块名已经是 Class 符号,
+            // 再定义为 Object 变量会把类符号覆盖掉 (Dim x As New ucChartArea
+            // 随之退化为 Object/void*, 方法调用全部变成 COM 晚绑定).
+            if (module->isFormModule) {
                 auto sym = std::make_unique<Symbol>(
                     SymbolKind::Variable, module->moduleName, Vb6Type::Object,
                     SourceLocation{}, AccessLevel::Public);
@@ -1122,17 +1133,35 @@ bool Driver::runSemanticAnalysis(const CompileOptions& options) {
                 analyzer->symbolTable().define(std::move(sym));
             }
             // 注册控件名 (去重: 控件数组只注册一次)
+            // Fix 110: 递归注册嵌套控件 (Frame 内的子控件也要注册).
             std::unordered_set<std::string> registeredCtrls;
+            std::function<void(const FrmControl&)> registerCtrlsRec =
+                [&](const FrmControl& ctrl) {
+                    std::string ctrlLower = ctrl.controlName;
+                    for (auto& c : ctrlLower) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+                    if (!ctrlLower.empty() && registeredCtrls.insert(ctrlLower).second) {
+                        // Fix 110: 已存在的同名类型符号 (工程类/UDT/COM 类, 如
+                        // PropertyPage 上的 LabelPlus1 与工程类同名) 不覆盖 —
+                        // 否则类符号被 Object 变量顶掉, 方法调用退化为 COM 晚绑定.
+                        Symbol* exist = analyzer->symbolTable().lookupModule(ctrl.controlName);
+                        const bool isTypeSym = exist &&
+                            (exist->kind == SymbolKind::Class ||
+                             exist->kind == SymbolKind::UserDefinedType ||
+                             exist->kind == SymbolKind::EnumType ||
+                             exist->kind == SymbolKind::ComClass ||
+                             exist->kind == SymbolKind::ComInterface);
+                        if (!isTypeSym) {
+                            auto sym = std::make_unique<Symbol>(
+                                SymbolKind::Variable, ctrl.controlName, Vb6Type::Object,
+                                SourceLocation{}, AccessLevel::Public);
+                            sym->isBuiltin = true;
+                            analyzer->symbolTable().define(std::move(sym));
+                        }
+                    }
+                    for (const auto& child : ctrl.children) registerCtrlsRec(child);
+                };
             for (const auto& ctrl : frmDesc.formControl.children) {
-                std::string ctrlLower = ctrl.controlName;
-                for (auto& c : ctrlLower) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-                if (registeredCtrls.count(ctrlLower)) continue;
-                registeredCtrls.insert(ctrlLower);
-                auto sym = std::make_unique<Symbol>(
-                    SymbolKind::Variable, ctrl.controlName, Vb6Type::Object,
-                    SourceLocation{}, AccessLevel::Public);
-                sym->isBuiltin = true;
-                analyzer->symbolTable().define(std::move(sym));
+                registerCtrlsRec(ctrl);
             }
         }
 
@@ -1644,6 +1673,55 @@ bool Driver::runCodeGeneration(const CompileOptions& options, const std::string&
         }
     }
 
+    // P6.4+: 预扫描 — 构建 接口 → 唯一实现类名 映射.
+    // 遍历所有类模块的 Class 符号的 implementsNames, 反向记录每个接口被哪些
+    // 类实现. 恰好一个实现类 → 记录其规范名; 多于一个 → 置空 (cgen 依赖唯一
+    // 实现类的场景报错而非静默误编). 供 Set 接口引用赋值类型转换与 ByVal
+    // 接口形参回调重建 (SUBCLASSPROC ABI) 使用.
+    std::map<std::string, std::string> ifaceImplementersMap;
+    for (size_t i = 0; i < modules_.size(); i++) {
+        if (!modules_[i]->isClassModule) continue;
+        Symbol* clsSym = analyzers_[i]->symbolTable().lookupModule(modules_[i]->moduleName);
+        if (!clsSym || clsSym->kind != SymbolKind::Class) continue;
+        if (clsSym->implementsNames.empty()) continue;
+        for (const auto& iface : clsSym->implementsNames) {
+            std::string ifLower = iface;
+            std::transform(ifLower.begin(), ifLower.end(), ifLower.begin(), ::tolower);
+            auto it = ifaceImplementersMap.find(ifLower);
+            if (it == ifaceImplementersMap.end()) {
+                ifaceImplementersMap[ifLower] = clsSym->name;
+            } else if (it->second != clsSym->name) {
+                it->second.clear();  // 多实现类 → 不可推断
+            }
+        }
+    }
+
+    // P6.4+: 预扫描 — 类模块默认实例 (Attribute VB_PredeclaredId = True).
+    // VB6 会为这类类模块生成隐藏的全局默认实例, frm 里裸写 cTT.CreateToolTip(...)
+    // 就是调用它. 记录 小写类名 → 类规范名, 供 cgen 解析裸类名成员访问并生成
+    // vb6_cls_X_Default() 惰性单例访问器.
+    std::map<std::string, std::string> defaultInstanceClasses;
+    for (size_t i = 0; i < modules_.size(); i++) {
+        if (!modules_[i]->isClassModule) continue;
+        for (const auto& attr : modules_[i]->attributes) {
+            std::string aName = attr->attrName;
+            std::transform(aName.begin(), aName.end(), aName.begin(), ::tolower);
+            if (aName != "vb_predeclaredid") continue;
+            bool isTrue = false;
+            if (attr->value && attr->value->kind == ASTNodeKind::LiteralExpr) {
+                auto& lit = static_cast<const LiteralExpr&>(*attr->value);
+                if (lit.literalKind == LiteralKind::Boolean) isTrue = lit.boolValue;
+                else if (lit.literalKind == LiteralKind::Integer) isTrue = (lit.intValue != 0);
+            }
+            if (isTrue) {
+                std::string lower = modules_[i]->moduleName;
+                std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+                defaultInstanceClasses[lower] = modules_[i]->moduleName;
+            }
+            break;
+        }
+    }
+
     // Fix 093b: 预扫描 — 找出"跨模块同名模块级变量".
     // VB6 允许不同模块各自声明同名模块级变量 (模块内引用绑定自身副本, 跨模块引用
     // 必须写 "模块名.变量名"), 但 C 语言下两个模块会生成同名全局符号 → LNK2005.
@@ -1710,7 +1788,10 @@ bool Driver::runCodeGeneration(const CompileOptions& options, const std::string&
                       &classVoidFieldMap, &classTypedFieldMap, &variantReturnFuncs, options.verbose);
         cgen.setFormModuleNames(formModuleNames);  // Fix 086: 跨模块窗体默认实例引用
         cgen.setModulePublicConsts(&modulePublicConsts);  // Fix 086: 跨模块常量内联
+        cgen.setDesignerFiles(&frmFiles_);  // Fix 112: 工程内 UserControl 设计器描述
         cgen.setStaticModuleVarNames(&dupModuleVarNames);  // Fix 093b: 撞名模块级变量转 static
+        cgen.setInterfaceImplementers(&ifaceImplementersMap);  // P6.4+: 接口唯一实现类映射
+        cgen.setDefaultInstanceClasses(&defaultInstanceClasses);  // P6.4+: 类模块默认实例
         cgen.setTrimIncludes(options.trimIncludes);  // opt4: 裁剪未实际引用的跨模块include
         if (options.trimIncludes) {
             // opt4: 基于AST实际引用收集外部模块, 供 include 裁剪
@@ -1777,7 +1858,10 @@ bool Driver::runCodeGeneration(const CompileOptions& options, const std::string&
                          &classVoidFieldMap, &classTypedFieldMap, &variantReturnFuncs, options.verbose);
         dllCgen.setFormModuleNames(formModuleNames);  // Fix 086
         dllCgen.setModulePublicConsts(&modulePublicConsts);  // Fix 086
+        dllCgen.setDesignerFiles(&frmFiles_);  // Fix 112
         dllCgen.setStaticModuleVarNames(&dupModuleVarNames);  // Fix 093b: 撞名模块级变量转 static
+        dllCgen.setInterfaceImplementers(&ifaceImplementersMap);  // P6.4+: 接口唯一实现类映射
+        dllCgen.setDefaultInstanceClasses(&defaultInstanceClasses);  // P6.4+: 类模块默认实例
         // Collect all symbol tables for cross-module Property lookup
         std::vector<SymbolTable*> allSymTabs;
         for (auto& analyzer : analyzers_) {
@@ -2162,7 +2246,9 @@ bool Driver::runLinker(const CompileOptions& options, const std::string& outputD
     msvcOpts.sourceFiles.push_back(rtlDir + "/vb6com_foreach.c");
     msvcOpts.sourceFiles.push_back(rtlDir + "/vb6_di_stubs.c");
     msvcOpts.sourceFiles.push_back(rtlDir + "/vb6_di_win32_stubs.c");
-    if (msvcOpts.isGui || msvcOpts.isDll) {
+    // 092z-3 + Fix 112: vb6forms 组对**所有**工程类型都链接 —— vb6rtl/vb6com 的
+    // 宿主对象分派挂接点 (vb6_Host_*) 引用 vb6forms_uc, 不能只在 GUI/DLL 下链接.
+    {
         // 092z-3: ActiveX DLL 允许包含窗体 (Form/UserControl), 也要 vb6forms
         msvcOpts.sourceFiles.push_back(rtlDir + "/vb6forms.c");
         msvcOpts.sourceFiles.push_back(rtlDir + "/vb6forms_ctrl.c");
@@ -2175,6 +2261,7 @@ bool Driver::runLinker(const CompileOptions& options, const std::string& outputD
         msvcOpts.sourceFiles.push_back(rtlDir + "/vb6forms_widget.c");
         msvcOpts.sourceFiles.push_back(rtlDir + "/vb6forms_shape.c");
         msvcOpts.sourceFiles.push_back(rtlDir + "/vb6forms_axsite.c");
+        msvcOpts.sourceFiles.push_back(rtlDir + "/vb6forms_uc.c");   // Fix 112
     }
     if (msvcOpts.isDll) {
         msvcOpts.sourceFiles.push_back(rtlDir + "/vb6comserver.c");

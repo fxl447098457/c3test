@@ -244,6 +244,21 @@ void CCodeGen::emitLocalDeclCode(LocalDeclStmt& node) {
                 }
             }
 
+            // Fix 110j: cType 已是 UDT 结构类型名 (vb6_type_X) 但符号表 lookupDotted
+            // 未命中时, 仍按 UDT 处理. 否则:
+            //   初始化 → `vb6_type_CHOOSECOLOR CC = 0;`      C2440 (int → struct)
+            //   未注册 knownUdtVars_ → `With CC` 生成
+            //                `void* w = (void*)CC;`           C2440 (struct → void*)
+            // 实测: ppProgressCircular.pag 的 `Private Type CHOOSECOLOR` + ShowColor 的
+            // `Dim CC As CHOOSECOLOR` / `With CC`.
+            if (!isLocalUdtType && cType.rfind("vb6_type_", 0) == 0
+                && cType.find('*') == std::string::npos) {
+                isLocalUdtType = true;
+                std::string udtLower = var.name;
+                std::transform(udtLower.begin(), udtLower.end(), udtLower.begin(), ::tolower);
+                knownUdtVars_[udtLower] = cType;
+            }
+
             // VB6 Static变量: 跨调用持久化 → C static局部变量
             // 包括: 显式Static声明 或 Static Sub/Function内的所有局部变量
             std::string storageClass = (var.isStatic || inStaticProc_) ? "static " : "";
@@ -330,6 +345,26 @@ void CCodeGen::emitLocalDeclCode(LocalDeclStmt& node) {
                     default:
                         break;
                 }
+            }
+            // Fix 110k: 无 As 类型常量且值是**算术/比较表达式** (非字面量, Fix 091d
+            // 不覆盖) 时, cType 仍是 vb6_VARIANT →
+            //   `const vb6_VARIANT PItoRAD = ((double)3.141592 / (double)180);`  C2440
+            // (Charts 2020 ucPieChart.ctl:1187 `Const PItoRAD = 3.141592 / 180`).
+            // VB6 无类型常量取表达式结果类型, 算术式 → Double. 字符串拼接 (&) 与
+            // 比较式除外 (后者少见, 维持原 Variant 行为不变).
+            if (!con.asType && con.value) {
+                bool numeric110k = false;
+                if (con.value->kind == ASTNodeKind::BinaryExpr) {
+                    auto& be110k = static_cast<BinaryExpr&>(*con.value);
+                    numeric110k = (be110k.op != BinaryOp::Concat
+                                   && be110k.op != BinaryOp::Eq && be110k.op != BinaryOp::Neq
+                                   && be110k.op != BinaryOp::Lt && be110k.op != BinaryOp::Gt
+                                   && be110k.op != BinaryOp::Le && be110k.op != BinaryOp::Ge
+                                   && be110k.op != BinaryOp::Is && be110k.op != BinaryOp::Like);
+                } else if (con.value->kind == ASTNodeKind::UnaryExpr) {
+                    numeric110k = true;
+                }
+                if (numeric110k) cType = "double";
             }
             std::string cName = cIdent(con.name);
             // Fix 010r-12c: Register local constant to knownLocalVars_

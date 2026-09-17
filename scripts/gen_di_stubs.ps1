@@ -225,6 +225,9 @@ $banner += '#pragma comment(lib, "crypt32.lib")'
 $banner += '#pragma comment(lib, "bcrypt.lib")'
 $banner += '#pragma comment(lib, "ncrypt.lib")'
 $banner += '#pragma comment(lib, "uuid.lib")'
+# Fix 111b: ChooseColorA 桩需要 comdlg32.lib; 本文件是固定 RTL 单元, 每个工程都会
+# 编译它 —— 缺这条会让不引用 comdlg32 的工程 LNK2019 __imp_ChooseColorA.
+$banner += '#pragma comment(lib, "comdlg32.lib")'
 $banner += ''
 
 if ($hasDynamic) {

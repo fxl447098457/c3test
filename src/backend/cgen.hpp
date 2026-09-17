@@ -115,6 +115,54 @@ public:
     void setStaticModuleVarNames(const std::unordered_set<std::string>* names) {
         staticModuleVarNames_ = names;
     }
+
+    // P6.4+: 接口 → 唯一实现类名 映射 (小写接口名 → 实现类规范名), 由 driver 预扫描提供.
+    // 项目里某接口只有唯一实现类时, cgen 可安全做类型转换:
+    //   - Set ifaceVar = Variant → vb6_iface_IFoo_wrap((vb6_cls_Impl*)...)
+    //   - ByVal 接口形参回调 ABI 重建 (SUBCLASSPROC uId 只带对象指针)
+    // 多实现类时该项置空, cgen 对依赖唯一实现类的场景报编译错误而非静默误编.
+    void setInterfaceImplementers(const std::map<std::string, std::string>* m) {
+        interfaceImplementers_ = m;
+    }
+    // 查询接口唯一实现类名 (空串 = 无映射/多实现类, 不可用)
+    std::string singleImplementationClass(const std::string& ifaceName) const {
+        if (!interfaceImplementers_) return "";
+        std::string lower = ifaceName;
+        for (auto& ch : lower) {
+            if (ch >= 'A' && ch <= 'Z') ch = (char)(ch - 'A' + 'a');
+        }
+        auto it = interfaceImplementers_->find(lower);
+        if (it == interfaceImplementers_->end()) return "";
+        return it->second;
+    }
+
+    // P6.4+: 类模块默认实例 (VB_PredeclaredId=True), 小写类名 → 类规范名.
+    // VB6 为 PredeclaredId 类模块生成隐藏全局实例 (如 BalloonTooltips 的 cTT),
+    // frm 里裸写 cTT.CreateToolTip(...) 就是调用它. C3 生成惰性单例访问器
+    // vb6_cls_cTT_Default(), frm 侧把裸类名解析成该访问器调用 + 按类实例精确
+    // 解析成员 (注入 me 首参, 按类型化形参传参).
+    void setDefaultInstanceClasses(const std::map<std::string, std::string>* m) {
+        defaultInstanceClasses_ = m;
+    }
+    // 查询默认实例类名 (小写大小写不敏感); 非默认实例类返回空串
+    std::string defaultInstanceClassName(const std::string& name) const {
+        if (!defaultInstanceClasses_) return "";
+        std::string lower = name;
+        for (auto& ch : lower) {
+            if (ch >= 'A' && ch <= 'Z') ch = (char)(ch - 'A' + 'a');
+        }
+        auto it = defaultInstanceClasses_->find(lower);
+        if (it == defaultInstanceClasses_->end()) return "";
+        return it->second;
+    }
+    // 若 name 是默认实例类, 注册到 knownClassVars_ (供按类实例精确解析成员),
+    // 并返回类规范名 (用于 vb6_cls_X_Default() 对象表达式); 否则返回空串.
+    std::string registerDefaultInstanceClass(const std::string& name);
+
+    // Fix 112: 工程内 UserControl (.ctl) 模块的设计器描述 (模块名小写 → FrmFile).
+    // 窗体上的 `Begin Proyecto1.ucChartBar ucChartBar1` 需要据此识别为工程 UserControl
+    // 并实例化到宿主子窗口; .ctl 自身也要发射宿主描述 (vb6_UC_Register).
+    void setDesignerFiles(const std::map<std::string, FrmFile>* m) { designerFiles_ = m; }
     // 名字(大小写不敏感)是否命中"跨模块同名模块级变量"
     bool isStaticForcedVarName(const std::string& vb6Name) const {
         if (!staticModuleVarNames_) return false;
@@ -191,6 +239,12 @@ public:
     // (*obj).Field 或 obj.Field), 避免 cIdent 把 '.' 替换成 '_' 生成
     // 未声明的单标识符 (uOutput.Buffer → uOutput_Buffer → C2065)
     std::string resolveArrayTargetIdent(const std::string& varName);
+    // Fix 100: ReDim 复杂目标 (带下标的成员链, ReDim arr(i).Field(dims))
+    void emitReDimComplexTarget(ReDimStmt& node);
+    // Fix 100: 解析复杂目标的元素类型 — 取 targetExpr 末段成员在 UDT 符号表
+    // udtMembers 中的类型; 解析不到时回落 Variant/Variant 数组 (过分配, 不越界)
+    void resolveReDimComplexElemType(const ReDimStmt& node, Vb6Type& outType,
+                                     std::string& outUdtCType) const;
     // Fix 084aa: 判断标识符是否引用 String 类型常量 (#define 宏, 不可取址)
     bool isStringConstIdent(const std::string& name) const;
     // Fix 084aa: 查找常量符号 (Constant kind), 无则返回 nullptr
@@ -551,6 +605,12 @@ private:
     // 类模块标志
     bool isClassModule_ = false;
     bool isFormModule_ = false;
+    // Fix 110: true = .ctl/.pag 设计期子控件模块 (有设计器描述但非 .frm)
+    bool isDesignerModule_ = false;
+    // Fix 110f: true = 该设计器模块是 PropertyPage (.pag, 设计头 Begin VB.PropertyPage),
+    // false = UserControl (.ctl, Begin VB.UserControl). 决定宿主内建成员的非限定
+    // 引用前缀 (vb6_PropertyPage_* / vb6_UserControl_*).
+    bool isPropertyPageDesigner_ = false;
 
     // Fix 010: 类模块变量注册模式 — 只填充tracking set, 不生成变量声明(已在结构体中)
     bool trackOnly_ = false;
@@ -559,6 +619,12 @@ private:
     // P6.4: Implements 接口引用变量 (小写变量名 → 接口名)
     // Dim x As IFoo → knownIfaceVars_["x"] = "IFoo"
     std::unordered_map<std::string, std::string> knownIfaceVars_;
+
+    // P6.4+: 接口 → 唯一实现类 映射 (由 driver 预扫描注入, 见 setInterfaceImplementers)
+    const std::map<std::string, std::string>* interfaceImplementers_ = nullptr;
+
+    // P6.4+: 类模块默认实例 (VB_PredeclaredId=True) 小写类名 → 类规范名
+    const std::map<std::string, std::string>* defaultInstanceClasses_ = nullptr;
 
     // VB6 Static Sub/Function标志: 过程内所有局部变量都应生成C static
     bool inStaticProc_ = false;
@@ -683,6 +749,7 @@ private:
 
     // 生成类工厂函数 (New/Destroy)
     void emitClassFactory(Module& module);
+    void emitClassDefaultInstance(Module& module);  // P6.4+: 类模块默认实例单例
     void emitInterfaceVtable(Module& module);
     void emitEventSink(Module& module);
     void emitComVtableSinkDecls();  // .h 前向声明
@@ -692,6 +759,15 @@ private:
 
     // P7: 生成Win32窗体框架代码 (WndProc + 控件创建 + 消息映射)
     void emitFormFramework(const FrmFormDesc& frmDesc, Module& module);
+
+    // Fix 110: 生成 .ctl/.pag 设计期子控件的符号支撑 (句柄变量 + 控件名映射).
+    // 不生成窗体窗口框架 — UserControl/PropertyPage 的可见部分由代码直接
+    // 绘制到 UserControl.hDC, 这里只保证 `Timer1.Interval` 之类的
+    // 控件成员访问能解析到 vb6_hwnd_<ctrl> 而不是未声明的 vb6_<ctrl>_<prop>.
+    void emitDesignerControlDecls(const FrmFormDesc& frmDesc);
+
+    // Fix 110: 递归发射设计期控件的句柄/数组/COM 变量声明 (窗体与设计器模块共用)
+    void emitControlHandleDecls(const FrmFormDesc& frmDesc);
 
     // P7.8: 递归生成菜单项 (VB.Menu子项)
     void emitMenuItem(const std::string& parentVar, const FrmControl& menuCtrl, int& menuId);
@@ -734,6 +810,13 @@ private:
     // ---- 表达式类型推断 ----
     // 推断表达式的Vb6Type（简化版，用于Select Case等需要类型判断的场景）
     Vb6Type inferExprType(Expr& expr) const;
+
+    // Fix 107: 按"类型类别"查找符号 (Class/UDT/Enum/COM 类型), 忽略同名的过程/变量.
+    // 背景: Fix 103 允许类型与过程同名 (VB6 合法), 冲突时类型符号被改存 <name>$ty.
+    // 通用 lookup 会命中占用裸键的过程符号 → 类型判定全部失败并回落 "void*" /
+    // Variant (Charts 2020 ucChartBar 的 `Dim m_ChartStyle As ChartStyle` +
+    // `Property Get/Let ChartStyle` 同名 → 字段变 void*、75 处 C2440).
+    Symbol* lookupTypeSymbol(const std::string& name) const;
 
     // Fix 029: 严格 Variant 推断 — 仅当表达式"明确"为 Variant/Variant 数组时返回 true.
     // 与 inferExprType 不同: inferExprType 对内置函数/Udt 字段访问等无法识别的情况
@@ -791,6 +874,13 @@ private:
 
     // Fix 093b: 跨模块同名模块级变量集合(小写), 本体归 driver 所有
     const std::unordered_set<std::string>* staticModuleVarNames_ = nullptr;
+
+    // Fix 112: 工程内 UserControl (.ctl) 设计器描述表 (模块名小写 → FrmFile)
+    const std::map<std::string, FrmFile>* designerFiles_ = nullptr;
+    // Fix 112: 窗体上类型为工程 UserControl 的子控件 (控件名小写 → .ctl 模块名)
+    std::unordered_map<std::string, std::string> knownUserControlCtrlVars_;
+    // Fix 112: 按 controlTypeName ("Proyecto1.ucChartBar") 查找 .ctl 设计器描述
+    const FrmFile* findUserControlSpec(const std::string& controlTypeName) const;
 
     // Fix 093b: WithEvents 事件包装函数名 (带模块前缀).
     // 不同模块里的同名 WithEvents 变量 (如各处的 m_ListenSocket / m_socket) 会生成

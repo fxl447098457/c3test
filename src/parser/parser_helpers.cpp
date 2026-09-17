@@ -52,7 +52,7 @@ bool Parser::isSoftKeyword(TokenKind kind) const {
         // 上下文关键字
         case TokenKind::Compare:   case TokenKind::Base:     case TokenKind::Text:
         case TokenKind::Binary2:   case TokenKind::Explicit: case TokenKind::Private2:
-        case TokenKind::Attribute: case TokenKind::Begin:
+        case TokenKind::Attribute: case TokenKind::Begin: case TokenKind::Default:
         // 其他
         case TokenKind::Resume:    case TokenKind::Stop:
         case TokenKind::Let:       case TokenKind::Set:

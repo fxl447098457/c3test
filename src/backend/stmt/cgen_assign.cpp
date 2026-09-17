@@ -67,6 +67,44 @@ void CCodeGen::visit(AssignmentStmt& node) {
             }
         }
     }
+    // Fix 110b: 控件数组元素默认属性写入 — VB6 里 `TxtARGB(0) = v` 等价于
+    // `TxtARGB(0).Text = v` (TextBox 控件数组元素的默认属性写入).
+    // 不处理时 LHS 会被展开为 `vb6_GetControlText(vb6_hwnd_TxtARGB)(0)` →
+    // C2064/C2106. 正确形态: vb6_SetControlText(vb6_CtrlArr_GetAt(&vb6_arr_X, i), v).
+    if (node.target->kind == ASTNodeKind::IndexOrCallExpr) {
+        auto& caP = static_cast<IndexOrCallExpr&>(*node.target);
+        if (caP.callee && caP.callee->kind == ASTNodeKind::IdentifierExpr
+            && !caP.positional.empty()) {
+            auto& caId = static_cast<IdentifierExpr&>(*caP.callee);
+            std::string caLower = caId.name;
+            std::transform(caLower.begin(), caLower.end(), caLower.begin(), ::tolower);
+            if (knownControlArrays_.count(caLower)) {
+                auto itCtrl = knownFormControls_.find(caLower);
+                if (itCtrl != knownFormControls_.end()) {
+                    const char* defProp = getDefaultPropertyName(itCtrl->second);
+                    std::string writeFn = defProp
+                        ? getControlPropWriteFn(itCtrl->second, defProp) : std::string();
+                    if (!writeFn.empty()) {
+                        emitExpr(*caP.positional[0]);
+                        std::string idxArg = std::move(lastExpr_);
+                        emitExpr(*node.value);
+                        std::string valExpr = std::move(lastExpr_);
+                        if (writeFn.find("SetControlText") != std::string::npos
+                            || writeFn.find("SetMenuCaption") != std::string::npos) {
+                            valExpr = wrapToBSTR(valExpr, *node.value);
+                        }
+                        std::string origName = knownFormControlOriginalNames_.count(caLower)
+                            ? knownFormControlOriginalNames_[caLower] : caId.name;
+                        c_.emitLine(writeFn + "(vb6_CtrlArr_GetAt(&vb6_arr_" + cIdent(origName)
+                                    + ", " + idxArg + "), " + valExpr
+                                    + ");  /* ctrl array default prop write */");
+                        return;
+                    }
+                }
+            }
+        }
+    }
+
     // P22: LSet/RSet statement (LSet strVar = expr / RSet strVar = expr)
     if (node.isLSet || node.isRSet) {
         if (node.target->kind == ASTNodeKind::IdentifierExpr) {
@@ -986,6 +1024,117 @@ void CCodeGen::visit(AssignmentStmt& node) {
         }
     }
 
+    // P6.4+: 类模块对象 (默认实例或类变量) 的 **参数化** Property Let/Set 赋值:
+    //   cTT.EnableTooltips(cmdButtonInPic) = Not cTT.EnableTooltips(cmdButtonInPic)
+    // target 是 IndexOrCallExpr{callee=MemberAccess(obj, Prop), args}. 通用路径会
+    // 先按 prop_get 生成读调用再拼 " = value" → C2106 (非左值). 这里按**写方向**
+    // 形参表直接生成 vb6_cX_prop_let_Prop(<obj>, <形参...>, <value>, <has标志...>).
+    if (node.target->kind == ASTNodeKind::IndexOrCallExpr) {
+        auto& plCallDef = static_cast<IndexOrCallExpr&>(*node.target);
+        if (plCallDef.callee && plCallDef.callee->kind == ASTNodeKind::MemberAccessExpr
+            && !plCallDef.positional.empty()) {
+            auto& plMaDef = static_cast<MemberAccessExpr&>(*plCallDef.callee);
+            if (plMaDef.object && plMaDef.object->kind == ASTNodeKind::IdentifierExpr) {
+                auto& plObjDef = static_cast<IdentifierExpr&>(*plMaDef.object);
+                const std::string plObjLowerDef = Symbol::toLower(plObjDef.name);
+                // 类解析: 默认实例 (裸类名) → 注册 + 访问器; 已知类变量 → 类名
+                std::string plClsDef = registerDefaultInstanceClass(plObjDef.name);
+                if (plClsDef.empty()) {
+                    auto itClsDef = knownClassVars_.find(plObjLowerDef);
+                    if (itClsDef != knownClassVars_.end()) plClsDef = itClsDef->second;
+                }
+                if (!plClsDef.empty()) {
+                    // 写方向形参表 (Let 优先, Set 兜底)
+                    std::vector<ParameterInfo> wpDef;
+                    bool isSetDef = false;
+                    Symbol* plSymDef = nullptr;
+                    if (findClassMemberWriteParams(plClsDef, plMaDef.memberName, false, wpDef)) {
+                        plSymDef = symTab_.lookupModuleByKind(plMaDef.memberName, SymbolKind::PropertyLet);
+                    } else if (findClassMemberWriteParams(plClsDef, plMaDef.memberName, true, wpDef)) {
+                        isSetDef = true;
+                        plSymDef = symTab_.lookupModuleByKind(plMaDef.memberName, SymbolKind::PropertySet);
+                    }
+                    bool plOwnsDef = false;
+                    if (plSymDef) {
+                        std::string propModDef = plSymDef->isExternal ? plSymDef->sourceModule : plClsDef;
+                        std::string propModLowerDef = Symbol::toLower(propModDef);
+                        std::string clsLowerDef = Symbol::toLower(plClsDef);
+                        plOwnsDef = (propModLowerDef == clsLowerDef);
+                    }
+                    if (plOwnsDef && wpDef.size() == plCallDef.positional.size() + 1) {
+                        // 函数名 (按类内声明拼写规范化)
+                        std::string srcModDef = plSymDef->isExternal ? plSymDef->sourceModule : plClsDef;
+                        std::string fnDef = cProcName(
+                            (isSetDef ? "prop_set_" : "prop_let_")
+                                + canonicalClassMemberName(srcModDef, plMaDef.memberName),
+                            plSymDef->access, srcModDef);
+                        std::string objDef;
+                        if (!defaultInstanceClassName(plObjDef.name).empty()) {
+                            objDef = "vb6_cls_" + cIdent(plClsDef) + "_Default()";
+                        } else {
+                            emitExpr(*plMaDef.object);
+                            objDef = std::move(lastExpr_);
+                        }
+                        // 逐形参打包 (含末参 value), 与 Fix 092u pushArg092u 规则一致
+                        const std::string tmpDef = "_pv" + std::to_string(tempCounter_++) + "_";
+                        std::string argsDef = objDef;
+                        int slotDef = 0;
+                        auto pushArgDef = [&](Expr* argNode, const ParameterInfo& pi) {
+                            emitExpr(*argNode);
+                            std::string argExpr = std::move(lastExpr_);
+                            std::string oneDef;
+                            if (pi.type == Vb6Type::Variant) {
+                                if (pi.isByVal) {
+                                    oneDef = "vb6_VariantFromValue(" + argExpr + ")";
+                                } else {
+                                    std::string tv = tmpDef + std::to_string(slotDef++);
+                                    c_.emitLine("vb6_VARIANT " + tv + " = vb6_VariantFromValue("
+                                                + argExpr + ");");
+                                    oneDef = "&" + tv;
+                                }
+                            } else if (pi.type == Vb6Type::String && cExprIsVariant(argExpr)) {
+                                oneDef = wrapToBSTR(argExpr, *argNode);
+                            } else if (!pi.isByVal) {
+                                bool simpleDef = !argExpr.empty()
+                                    && ((argExpr[0] >= 'a' && argExpr[0] <= 'z')
+                                        || (argExpr[0] >= 'A' && argExpr[0] <= 'Z')
+                                        || argExpr[0] == '_')
+                                    && argExpr.find('(') == std::string::npos
+                                    && argExpr.find("->") == std::string::npos
+                                    && argExpr.find('.') == std::string::npos
+                                    && argExpr.find(' ') == std::string::npos;
+                                if (simpleDef) {
+                                    oneDef = "&" + argExpr;
+                                } else {
+                                    std::string tv = tmpDef + std::to_string(slotDef++);
+                                    c_.emitLine(mapType(pi.type) + " " + tv + " = " + argExpr + ";");
+                                    oneDef = "&" + tv;
+                                }
+                            } else {
+                                oneDef = argExpr;
+                            }
+                            argsDef += ", " + oneDef;
+                        };
+                        for (size_t ai = 0; ai < plCallDef.positional.size(); ai++) {
+                            pushArgDef(plCallDef.positional[ai].get(), wpDef[ai]);
+                        }
+                        pushArgDef(node.value.get(), wpDef.back());
+                        // _has_ 标志: 可选形参逐一追加 (出现在括号实参中 → 1, 否则 0)
+                        for (size_t oi = 0; oi < wpDef.size(); oi++) {
+                            const auto& poDef = wpDef[oi];
+                            if (!poDef.isOptional) continue;
+                            int hasFlagDef = (oi < plCallDef.positional.size()) ? 1 : 0;
+                            if (oi + 1 == wpDef.size()) hasFlagDef = 1;  // value 形参必提供
+                            argsDef += ", " + std::to_string(hasFlagDef);
+                        }
+                        c_.emitLine(fnDef + "(" + argsDef + ");  /* class prop_let_ (default-instance/class obj) */");
+                        return;
+                    }
+                }
+            }
+        }
+    }
+
     emitExpr(*node.target);
     std::string target = std::move(lastExpr_);
 
@@ -997,6 +1146,21 @@ void CCodeGen::visit(AssignmentStmt& node) {
         emitExpr(*node.value);
         std::string valExpr = std::move(lastExpr_);
         std::string packFn = comPackExpr(*node.value);
+        // Fix 110i: 右侧本身也是 COM 属性读 (obj.Prop = other.Prop) 时, emitExpr 只
+        // 留下对象表达式, 成员名还挂在 comMemberName_ 上 — 不消费就整体丢失
+        // (Value = oPC.Min → vb6_ComPackDouble(me->oPC)). 按 packer 反推解封类型后
+        // 调用 resolveComValue 生成 vb6_ComGetXxxProp (Charts 2020
+        // ppProgressCircular.Timer1_Timer: oPC.Value = oPC.Max / oPC.Min).
+        if (isComMarker_) {
+            std::string hint = "BSTR";
+            if (packFn == "vb6_ComPackDouble") hint = "Double";
+            else if (packFn == "vb6_ComPackInt") hint = "Long";
+            else if (packFn == "vb6_ComPackBSTR") hint = "BSTR";
+            else if (packFn == "vb6_ComPackObject") hint = "Object";
+            else if (packFn == "vb6_ComPackValue") hint = "Variant";
+            resolveComValue(hint);
+            valExpr = std::move(lastExpr_);
+        }
         c_.emitLine("vb6_ComSetProp(" + objExpr + ", L\"" + memberName + "\", " +
                      packFn + "(" + valExpr + "));  /* COM SetProp */");
         return;
@@ -1017,6 +1181,24 @@ void CCodeGen::visit(AssignmentStmt& node) {
             else if (knownObjectVars_.count(lower)) unpackHint = "Object";
             else if (knownBstrVars_.count(lower)) unpackHint = "BSTR";
             else if (knownVariantVars_.count(lower)) unpackHint = "Variant";
+        }
+        // Fix 110d: 目标是数组/UDT 字段元素 (VB6_SA_AT(<C类型>, ...)) 时,
+        // 从生成的目标表达式文本推断元素 C 类型 — 否则裸 vb6_ComCall (void*)
+        // 会直接赋给 float/int32_t/BSTR 元素 → C2440.
+        // 例: Values(i - 1) = cValues.Item(i) (ucTreeMaps.ctl)
+        //   → VB6_SA_AT(float, _vb6_with_0->Values, ...) = vb6_ComCall(...) C2440
+        // Fix 110r: 前缀长度修正 — "VB6_SA_AT(" 是 10 字符 (此前误写 11),
+        // 导致本块实际从未命中 (out-v13 ucTreeMaps.c 326/336 残留 C2440).
+        if (unpackHint.empty() && target.compare(0, 10, "VB6_SA_AT(") == 0) {
+            const size_t comma = target.find(',');
+            if (comma != std::string::npos && comma > 10) {
+                std::string elemC = target.substr(10, comma - 10);
+                while (!elemC.empty() && elemC.back() == ' ') elemC.pop_back();
+                if (elemC == "float" || elemC == "double") unpackHint = "Double";
+                else if (elemC == "BSTR") unpackHint = "BSTR";
+                else if (elemC == "int16_t" || elemC == "int32_t" || elemC == "uint8_t"
+                         || elemC == "LONG") unpackHint = "Long";
+            }
         }
         resolveComValue(unpackHint);
     }
@@ -1052,6 +1234,21 @@ void CCodeGen::visit(AssignmentStmt& node) {
             else if (knownDoubleVars_.count(lower)) comCallType = "Double";
             else if (knownBstrVars_.count(lower)) comCallType = "BSTR";
             else if (knownObjectVars_.count(lower)) comCallType = "Object";
+        }
+        // Fix 110h: 目标是数组/UDT 字段元素 (VB6_SA_AT(<C类型>, ...)) 时, 从目标
+        // 表达式文本推断元素 C 类型 —— 否则裸 vb6_ComCall (void*) 直接赋给
+        // float/BSTR 元素 → C2440 (ucTreeMaps.ctl 415-418:
+        //   .Values(i - 1) = cValues(i) → VB6_SA_AT(float, ...) = vb6_ComCall(...)).
+        if (comCallType.empty() && target.compare(0, 10, "VB6_SA_AT(") == 0) {
+            const size_t comma = target.find(',');
+            if (comma != std::string::npos && comma > 10) {
+                std::string elemC = target.substr(10, comma - 10);
+                while (!elemC.empty() && elemC.back() == ' ') elemC.pop_back();
+                if (elemC == "float" || elemC == "double") comCallType = "Double";
+                else if (elemC == "BSTR") comCallType = "BSTR";
+                else if (elemC == "int16_t" || elemC == "int32_t" || elemC == "uint8_t"
+                         || elemC == "LONG" || elemC == "int64_t") comCallType = "Int";
+            }
         }
         if (!comCallType.empty()) {
             value = "vb6_ComCall" + comCallType + callArgs;

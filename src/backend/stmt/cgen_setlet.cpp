@@ -307,6 +307,34 @@ void CCodeGen::visit(SetStmt& node) {
                 std::transform(valLower.begin(), valLower.end(), valLower.begin(), ::tolower);
                 if (knownClassVars_.find(valLower) != knownClassVars_.end()) {
                     value = ifaceType + "_wrap(" + value + ")";
+                } else {
+                    // P6.4+: RHS 是 Variant (ByRef 参数/表达式), 只含对象引用.
+                    // 需唯一实现类才能安全 cast:
+                    //   vb6_iface_IFoo_wrap((vb6_cls_Impl*)vb6_VariantToObjectVal(<var>))
+                    // 生成的串已含 "vb6_VariantToObjectVal", Fix 038b-6 下方守卫会跳过,
+                    // 不会二次转换. 无唯一实现类时无法推断 → 报编译错误 (绝不静默误编).
+                    bool rhsIsVariant = cExprIsVariant(value);
+                    // ByRef Variant 参数解引用形式 "(*vName)": cExprIsVariant 剥掉前导
+                    // '(' 检测不到 ("*vName)" 无前缀命中). 用 AST 标识符兜底判定.
+                    if (!rhsIsVariant && node.value
+                        && node.value->kind == ASTNodeKind::IdentifierExpr) {
+                        auto& idv = static_cast<IdentifierExpr&>(*node.value);
+                        std::string vl = idv.name;
+                        std::transform(vl.begin(), vl.end(), vl.begin(), ::tolower);
+                        if (knownVariantVars_.count(vl)) rhsIsVariant = true;
+                    }
+                    if (rhsIsVariant) {
+                        const std::string impl = singleImplementationClass(ifaceName);
+                        if (impl.empty()) {
+                            diag_.error(DiagnosticID::CodeGenUnsupportedFeature, SourceLocation{},
+                                "P6.4: Set <interface> = Variant 需要接口 '" + ifaceName +
+                                "' 在全项目有唯一实现类, 当前无法推断转换类型; "
+                                "可将 RHS 改为 objptr/类型化对象变量后重试");
+                        } else {
+                            value = ifaceType + "_wrap((vb6_cls_" + cIdent(impl) +
+                                    "*)vb6_VariantToObjectVal(" + value + "))";
+                        }
+                    }
                 }
             }
         }

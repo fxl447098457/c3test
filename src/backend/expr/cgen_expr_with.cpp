@@ -23,6 +23,19 @@ void CCodeGen::visit(WithMemberExpr& node) {
 
     switch (info.kind) {
     case WithObjKind::FormControl: {
+        // Fix 110a: Unknown 类型控件 (工程内 UserControl 实例 / 第三方 ActiveX)
+        // 没有 Win32 属性表 → 走 COM 晚绑定 (与 cgen_expr_member 的
+        // `itCtrl->second != Menu` 分支一致). 否则会发射 tempVar.member →
+        // C2039 ("BackColorOpacity": 不是 "HWND__" 的成员).
+        if (info.ctrlType == FrmControlType::Unknown) {
+            comObjExpr_ = tempVar;
+            comMemberName_ = node.memberName;
+            isComMarker_ = true;
+            isEarlyBoundCom_ = false;
+            earlyBoundSym_ = nullptr;
+            lastExpr_ = tempVar + "  /* With COM ." + node.memberName + " */";
+            return;
+        }
         // .Property → vb6_GetControlXxx(tempVar) or Menu prop
         std::string readFn = getControlPropReadFn(info.ctrlType, node.memberName);
         if (!readFn.empty()) {
@@ -204,6 +217,23 @@ void CCodeGen::visit(WithMemberExpr& node) {
             std::string tvLower = Symbol::toLower(tempVar);
             std::string udtCType =
                 knownUdtVars_.count(tvLower) ? knownUdtVars_[tvLower] : "";
+            // Fix 110t: With 块 UDT 对象的**对象字段** (Collection/COM → void*) 作为
+            // 调用 callee 时 (With m_Serie(i) 内 `.CustomColors(j + 1)`), 只追加
+            // "/* udt objfield void* */" 注释标记不够 — 外层节点是 IndexOrCallExpr
+            // 而非 MemberAccessExpr, 标记无人消费, 直接拼接实参 → 畸形调用
+            // `_vb6_with_19->CustomColors((j + 1))` C2064 (ucTreeMaps.c 1864/1911/...).
+            // 此处改设 COM marker, 由 IndexOrCallExpr 的后期绑定通道生成
+            // vb6_ComCall(field, L"Item", args, argc).
+            if (asCallCallee_ && !udtCType.empty()
+                && udtFieldObjCType(udtCType, Symbol::toLower(node.memberName)) == "void*") {
+                comObjExpr_ = tempVar + "->" + cIdent(node.memberName);
+                comMemberName_ = node.memberName;
+                isComMarker_ = true;
+                isEarlyBoundCom_ = false;
+                earlyBoundSym_ = nullptr;
+                lastExpr_ = comObjExpr_;
+                return;
+            }
             lastExpr_ = appendUdtObjFieldMarker(tempVar, udtCType, node.memberName, "->");
         }
         return;

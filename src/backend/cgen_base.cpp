@@ -37,10 +37,44 @@ FrmControlType controlTypeFromName(const std::string& name) {
 // CodeEmitter
 // ============================================================
 
+// Fix 109: 生成 C 里 `UserControl.Font` 的成员访问基址改写.
+// VB6 中 UserControl.Font 是对象, 生成代码写作 `vb6_UserControl_Font.<成员>`
+// (VB6 点语法). RTL 里该宿主对象是 vb6_ComIface_Font* 指针 (它同时必须以裸名
+// 作为 vb6_ComIface_Font* 实参传给控件绘制函数, 181 处), 指针 + '.' 触发 C2224.
+// 生成端散落在读/写两处 (MemberAccessExpr / AssignStmt), 这里在写出前统一修正:
+// 仅当该标识符后面**紧跟** '.' 时改写为 '->', 不触碰其它表达式与注释.
+static void fixupAmbientFontMemberAccess(std::string& line) {
+    static const char kBase[] = "vb6_UserControl_Font";
+    const size_t kLen = sizeof(kBase) - 1;
+    size_t pos = 0;
+    while ((pos = line.find(kBase, pos)) != std::string::npos) {
+        size_t after = pos + kLen;
+        // 排除更长标识符 (如 vb6_UserControl_FontObj)
+        bool longer = (after < line.size()) &&
+                      (std::isalnum(static_cast<unsigned char>(line[after])) || line[after] == '_');
+        bool prevOk = (pos == 0) ||
+                      !(std::isalnum(static_cast<unsigned char>(line[pos - 1])) || line[pos - 1] == '_');
+        if (!longer && prevOk && after < line.size() && line[after] == '.') {
+            line.replace(after, 1, "->");
+            pos = after + 2;
+        } else {
+            pos = after;
+        }
+    }
+}
+
 void CodeEmitter::emitLine(const std::string& line) {
     flushPending();
     for (int i = 0; i < indentLevel_; i++) {
         oss_ << "    ";  // 4空格缩进
+    }
+    if (line.find("vb6_UserControl_Font") != std::string::npos) {
+        // Fix 109: 仅在该标识符出现时做一次修正 (见上). 声明头不会含此文本,
+        // 故对 h_ 写出器无影响.
+        std::string fixed = line;
+        fixupAmbientFontMemberAccess(fixed);
+        oss_ << fixed << "\n";
+        return;
     }
     oss_ << line << "\n";
 }
@@ -95,6 +129,10 @@ bool CCodeGen::generate(Module& module, const std::string& baseName,
     externalModules_ = externalModules;  // M22: 保存外部模块集合
     isClassModule_ = module.isClassModule;
     isFormModule_ = module.isFormModule;
+    // Fix 110: .ctl/.pag 的设计期子控件模块 (非 .frm 但有设计器描述).
+    // 这些模块的可见内容由代码绘制, 但 `Timer1.Interval` / `Picture1.ScaleWidth`
+    // 等设计期子控件成员仍需句柄符号与控件名映射.
+    isDesignerModule_ = (frmDesc != nullptr) && !module.isFormModule;
     isDll_ = isDll;  // P6.6
     dllProgId_ = dllProgId;  // P6.6
     emittedSymbols_.clear();
@@ -190,6 +228,7 @@ bool CCodeGen::generate(Module& module, const std::string& baseName,
                             std::transform(nm.begin(), nm.end(), nm.begin(), ::tolower);
                             if (nm != "variant" && nm != "var" &&
                                 !symTab_.lookup(simpleV.name) &&
+                                !lookupTypeSymbol(simpleV.name) &&
                                 !lookupDotted(simpleV.name)) {
                                 realVariantField = false;
                             }
@@ -268,7 +307,8 @@ bool CCodeGen::generate(Module& module, const std::string& baseName,
     h_.emitLine("#include <stdbool.h>");
     h_.emitLine("#include <wchar.h>");
     // P7: 窗体模式下windows.h必须在vb6rtl.h之前, 避免VARIANT重定义冲突
-    if (module.isFormModule) {
+    // Fix 110: .ctl/.pag 也需要 vb6forms.h — 设计期子控件数组用 vb6_CtrlArr.
+    if (module.isFormModule || isDesignerModule_) {
         h_.emitLine("#include <windows.h>");
         h_.emitLine("#include \"vb6forms.h\"");
     }
@@ -482,6 +522,10 @@ bool CCodeGen::generate(Module& module, const std::string& baseName,
         // 类工厂函数声明
         h_.emitLine(clsStruct + "* " + clsStruct + "_New(void);");
         h_.emitLine("void " + clsStruct + "_Destroy(" + clsStruct + "* me);");
+        // P6.4+: 默认实例 (VB_PredeclaredId=True) 惰性单例访问器, 跨模块可见
+        if (!defaultInstanceClassName(moduleName_).empty()) {
+            h_.emitLine(clsStruct + "* " + clsStruct + "_Default(void);");
+        }
         h_.emitBlank();
 
         // P6.4: 生成接口vtable结构体 + 包装类型 + 全局vtable实例
@@ -531,6 +575,12 @@ bool CCodeGen::generate(Module& module, const std::string& baseName,
     // 窗体模块需要: WndProc声明、控件句柄变量、控件创建函数
     if (module.isFormModule && frmDesc) {
         emitFormFramework(*frmDesc, module);
+    } else if (frmDesc) {
+        // Fix 110: .ctl/.pag — 只发射设计期子控件符号 (Timer/PictureBox 等).
+        // 不发射窗体窗口框架: UserControl/PropertyPage 对外是类, 其可见内容由
+        // 代码绘制到 UserControl.hDC; 但 `Timer1.Interval = 100` /
+        // `Picture1.ScaleWidth` 这类设计期子控件成员必须能解析.
+        emitDesignerControlDecls(*frmDesc);
     }
 
     // 5. Declare (外部函数声明)
@@ -689,6 +739,7 @@ bool CCodeGen::generate(Module& module, const std::string& baseName,
     // === 类模块: 生成工厂函数 ===
     if (isClassModule_ && !currentClassIsInterface) {  // P6.4: 接口类不生成工厂/析构函数
         emitClassFactory(module);
+        emitClassDefaultInstance(module);  // P6.4+: VB_PredeclaredId=True 默认实例单例
     }
 
     // === P6.5: 生成事件处理器包装函数 ===
@@ -1253,6 +1304,35 @@ std::string CCodeGen::emitGuidInitializer(const std::string& iidStr) const {
     return std::string(buf);
 }
 
+// Fix 107: 按"类型类别"查找符号, 忽略同名的过程/变量.
+// Fix 103 允许类型与过程同名; 冲突时类型符号改存 <name>$ty (见 Scope::define /
+// SymbolTable::define), 此时通用 symTab_.lookup() 只命中过程符号, 类型判定
+// (Class/UDT/Enum/COM) 全部落空 → 回落 "void*"/Variant.
+Symbol* CCodeGen::lookupTypeSymbol(const std::string& name) const {
+    auto isTypeKind = [](SymbolKind k) {
+        return k == SymbolKind::Class || k == SymbolKind::UserDefinedType ||
+               k == SymbolKind::EnumType || k == SymbolKind::ComClass ||
+               k == SymbolKind::ComInterface || k == SymbolKind::ComModule ||
+               k == SymbolKind::ComGlobalNs;
+    };
+    if (auto* s = symTab_.lookup(name)) {
+        if (isTypeKind(s->kind)) return s;
+    }
+    // 模块作用域优先 (类型声明通常是模块级的), lookupLocalByKind 内含 $ty 回退.
+    static const SymbolKind typeKinds[] = {
+        SymbolKind::UserDefinedType, SymbolKind::EnumType, SymbolKind::Class,
+        SymbolKind::ComClass, SymbolKind::ComInterface,
+        SymbolKind::ComModule, SymbolKind::ComGlobalNs,
+    };
+    for (SymbolKind k : typeKinds) {
+        if (auto* m = symTab_.lookupModuleByKind(name, k)) return m;
+    }
+    for (SymbolKind k : typeKinds) {
+        if (auto* l = symTab_.lookupLocalByKind(name, k)) return l;
+    }
+    return nullptr;
+}
+
 std::string CCodeGen::mapTypeRef(ASTNode* typeRef) {
     if (!typeRef) return "vb6_VARIANT";  // 未指定类型 = Variant
 
@@ -1290,7 +1370,8 @@ std::string CCodeGen::mapTypeRef(ASTNode* typeRef) {
                 if (dotSym) lookupName = shortName;
             }
             // 检查是否是类名 → 映射为类结构体指针
-            auto* clsSym = symTab_.lookupModule(lookupName);
+            // Fix 107: 用 lookupTypeSymbol (含 $ty 回退), 否则同名过程会遮蔽类型.
+            auto* clsSym = lookupTypeSymbol(lookupName);
             if (clsSym && clsSym->kind == SymbolKind::Class) {
                 // P6.4: 接口类 → vb6_iface_<Name> 包装类型 (非指针)
                 if (clsSym->isInterface) {
@@ -1314,7 +1395,8 @@ std::string CCodeGen::mapTypeRef(ASTNode* typeRef) {
                 return "vb6_ComIface_" + cIfaceName + "*";
             }
             // 检查是否是用户定义类型 (UDT) → vb6_type_<Name>
-            auto* udtSym = symTab_.lookup(lookupName);
+            // Fix 107: 同 clsSym, 用类型感知查找避免同名过程遮蔽.
+            auto* udtSym = lookupTypeSymbol(lookupName);
             if (udtSym && udtSym->kind == SymbolKind::UserDefinedType) {
                 // Fix 010: 收集UDT类型名用于前向声明
                 usedUdtTypes_.insert(cIdent(simple.name));

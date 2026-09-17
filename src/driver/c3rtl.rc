@@ -50,6 +50,7 @@
 129 RCDATA "../rtl/core/vb6forms/vb6forms_widget.c"
 130 RCDATA "../rtl/core/vb6forms/vb6forms_shape.c"
 131 RCDATA "../rtl/core/vb6forms/vb6forms_axsite.c"
+140 RCDATA "../rtl/core/vb6forms/vb6forms_uc.c"
 
 // vb6rtl.h 按家族拆分 (2026-09-17): 伞头 + 7 个子头
 132 RCDATA "../rtl/core/vb6rtl/vb6rtl_base.h"
@@ -59,3 +60,4 @@
 136 RCDATA "../rtl/core/vb6rtl/vb6rtl_array.h"
 137 RCDATA "../rtl/core/vb6rtl/vb6rtl_class_com.h"
 138 RCDATA "../rtl/core/vb6rtl/vb6rtl_runtime.h"
+139 RCDATA "../rtl/core/vb6rtl/vb6rtl_userctl.h"

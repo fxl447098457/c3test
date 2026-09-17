@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <cctype>
 #include <iostream>
+#include <cstdlib>
 #include <functional>
 #include <cstdio>
 
@@ -94,6 +95,33 @@ void CCodeGen::visit(MemberAccessExpr& node) {
                 } else {
                     lastExpr_ = "vb6_" + cIdent(fnCanon);
                 }
+                return;
+            }
+        }
+    }
+
+    // Fix 110n: CallByName(...).成员 — RTL 的 vb6_CallByName 返回 vb6_VARIANT, 其值
+    // 可能是对象 (VbGet 取到 Font 等对象属性). 对 VARIANT 结构体取成员在 C 里非法:
+    //   CallByName(oCtrl, PropFont, VbGet).Size
+    //     → vb6_CallByName(...).Size  C2039 ("Size" 不是 "vb6_VARIANT" 的成员)
+    // 赋值时更会退化成 "<struct> = <double>" C2088. 必须走 COM 晚绑定: 先从 VARIANT
+    // 取出对象 (vb6_VariantToObjectVal) 再 vb6_ComGetXxxProp / ComSetProp.
+    // 读上下文由外层 (BinaryExpr/赋值) 的 resolveComValue 消费 marker;
+    // 写上下文由 AssignmentStmt 的 COM SetProp 分支消费.
+    // 实测: Charts 2020 ClsResizer.cls 107/147.
+    if (node.object && node.object->kind == ASTNodeKind::IndexOrCallExpr) {
+        auto& cbCall = static_cast<IndexOrCallExpr&>(*node.object);
+        if (cbCall.callee && cbCall.callee->kind == ASTNodeKind::IdentifierExpr) {
+            auto& cbId = static_cast<IdentifierExpr&>(*cbCall.callee);
+            if (Symbol::toLower(cbId.name) == "callbyname") {
+                emitExpr(*node.object);
+                std::string cbObjExpr = std::move(lastExpr_);
+                comObjExpr_ = "vb6_VariantToObjectVal(" + cbObjExpr + ")";
+                comMemberName_ = node.memberName;
+                isComMarker_ = true;
+                isEarlyBoundCom_ = false;
+                earlyBoundSym_ = nullptr;
+                lastExpr_ = comObjExpr_;
                 return;
             }
         }
@@ -285,6 +313,55 @@ void CCodeGen::visit(MemberAccessExpr& node) {
             // P7.5: 非数组控件属性读取
             auto itCtrl = knownFormControls_.find(objLower);
             if (itCtrl != knownFormControls_.end()) {
+                // Fix 112: 工程内 UserControl 子控件 → 类成员直接调用.
+                // `ucChartBar1.AddSerie(Value)` 此前落 COM 晚绑定
+                // `vb6_ComCall(vb6_hwnd_ucChartBar1, L"AddSerie", ...)`, 而 HWND 不是
+                // IDispatch. 这里按 .ctl 模块解析成员, this 取宿主窗口的实例.
+                auto itUC = knownUserControlCtrlVars_.find(objLower);
+                if (itUC != knownUserControlCtrlVars_.end()) {
+                    std::string resolvedFn = resolveClassMemberCall(itUC->second, node.memberName);
+                    if (!resolvedFn.empty()) {
+                        std::string hwndArg = makeCtrlHwndArg(objLower, itCtrl->second);
+                        std::string thisArg =
+                            "(vb6_cls_" + cIdent(itUC->second) + "*)vb6_UC_InstanceOf(" + hwndArg + ")";
+                        if (asCallCallee_) {
+                            pendingChainObj_ = thisArg;
+                            lastExpr_ = resolvedFn;
+                        } else {
+                            // 值上下文无括号调用: 按形参表补 Optional 默认值 (同 Fix 089h)
+                            std::vector<ParameterInfo> paramsUC;
+                            bool isBuiltinUC = false;
+                            if (resolvedFn.find("_prop_") == std::string::npos
+                                && findClassMemberCallParams(itUC->second, node.memberName,
+                                                             paramsUC, isBuiltinUC)
+                                && !paramsUC.empty() && !isBuiltinUC) {
+                                std::string argListUC = thisArg;
+                                for (size_t i = 0; i < paramsUC.size(); i++) {
+                                    const auto& pm = paramsUC[i];
+                                    argListUC += ", ";
+                                    std::string defV = (pm.hasDefaultValue && !pm.defaultValueExpr.empty())
+                                                     ? pm.defaultValueExpr : defaultValue(pm.type);
+                                    if (pm.isByVal) argListUC += defV;
+                                    else {
+                                        std::string ct = mapType(pm.type);
+                                        if (pm.type == Vb6Type::Variant || pm.type == Vb6Type::Empty
+                                            || pm.type == Vb6Type::Null || pm.type == Vb6Type::Object)
+                                            argListUC += "&(" + ct + "){0}";
+                                        else argListUC += "&(" + ct + "){" + defV + "}";
+                                    }
+                                }
+                                for (size_t i = 0; i < paramsUC.size(); i++) {
+                                    if (paramsUC[i].isOptional && !paramsUC[i].isParamArray)
+                                        argListUC += ", 0";
+                                }
+                                lastExpr_ = resolvedFn + "(" + argListUC + ")";
+                            } else {
+                                lastExpr_ = resolvedFn + "(" + thisArg + ")";
+                            }
+                        }
+                        return;
+                    }
+                }
                 std::string readFn = getControlPropReadFn(itCtrl->second, node.memberName);
                 if (!readFn.empty()) {
                     lastExpr_ = readFn + "(" + makeCtrlHwndArg(objLower, itCtrl->second) + ")  /* ctrl prop read */";
@@ -545,7 +622,23 @@ void CCodeGen::visit(MemberAccessExpr& node) {
         }
 
         auto* memSym = symTab_.lookupModule(node.memberName);
-        if (memSym && (memSym->kind == SymbolKind::Sub || memSym->kind == SymbolKind::Function
+        // Fix 110e: VB6 宿主伪对象 UserControl / Ambient / Extender / PropertyPage 之
+        // 后的成员**不是**"别的模块的同名成员". 它们是宿主状态符号, 由
+        // rtl/core/vb6rtl/vb6rtl_userctl.h 提供 (vb6_UserControl_* / vb6_Ambient_* /
+        // vb6_Extender_* / vb6_PropertyPage_*), 生成名 = vb6_<伪对象名>_<成员>
+        // (即下方 M22 分支的形式).
+        // 若在此按"模块名.成员"解析, 成员会命中别处注入的同名外部符号 →
+        //   UserControl.Enabled    → 命中 LabelPlus 的 Property Get Enabled
+        //                            → vb6_LabelPlus_Enabled   (C2065)   ← 实测
+        //   Ambient.ForeColor      → vb6_LabelPlus_ForeColor      (C2065)   ← 实测
+        // (在 LabelPlus 模块内恰好回退到 sourceMod = "UserControl" 才碰巧正确,
+        //  这也是同一表达式在不同模块生成不同符号名、仅部分模块报错的原因.)
+        // 跳过本块, 交由 M22 分支以对象名作前缀生成正确的宿主标识符.
+        const bool hostPseudoObj110e =
+            objLower == "usercontrol" || objLower == "ambient" ||
+            objLower == "extender" || objLower == "propertypage";
+        if (!hostPseudoObj110e && memSym
+            && (memSym->kind == SymbolKind::Sub || memSym->kind == SymbolKind::Function
                     || memSym->kind == SymbolKind::PropertyGet
                     || memSym->kind == SymbolKind::PropertyLet
                     || memSym->kind == SymbolKind::PropertySet)) {
@@ -554,6 +647,10 @@ void CCodeGen::visit(MemberAccessExpr& node) {
             // Fix 010r-10: 使用map查找, 可获取类名用于方法分发
             // Fix 011r-1: 当obj在knownClassVars_中时, 优先用resolveClassMemberCall
             // 精确解析该类的方法/属性, 避免memSym捡错模块的同类同名方法/属性
+            // P6.4+: 类模块默认实例 (VB_PredeclaredId=True) 的裸类名 (cTT.CreateToolTip
+            // / cTT.EnableTooltips(...) 在 frm 里) — 注册为"类实例变量"并按类精确
+            // 解析成员 (注入 me 首参与类型化形参), 对象表达式用 vb6_cls_X_Default().
+            std::string defaultInstCls = registerDefaultInstanceClass(objLower);
             auto itClassVar = knownClassVars_.find(objLower);
             if (itClassVar == knownClassVars_.end() && node.object) {
                 // Fix 090al: 链式对象 (Db.Sql(s).Param(p).QueryParam) 或局部类变量
@@ -569,8 +666,13 @@ void CCodeGen::visit(MemberAccessExpr& node) {
                 // 用对象的真实类名查找方法, 防止跨模块同名冲突
                 std::string resolvedFn = resolveClassMemberCall(itClassVar->second, node.memberName);
                 if (!resolvedFn.empty()) {
-                    emitExpr(*node.object);
-                    std::string objExpr = std::move(lastExpr_);
+                    std::string objExpr;
+                    if (!defaultInstCls.empty()) {
+                        objExpr = "vb6_cls_" + cIdent(defaultInstCls) + "_Default()";
+                    } else {
+                        emitExpr(*node.object);
+                        objExpr = std::move(lastExpr_);
+                    }
                     // Fix 089h: 值上下文无括号方法引用 (Trim(FileStream.ReadLine)
                     // → vb6_cToolsStream_ReadLine(me->FileStream) 只发 this) —
                     // C2198 参数太少. 补默认参数 (Optional/必选), 与链式值上下文

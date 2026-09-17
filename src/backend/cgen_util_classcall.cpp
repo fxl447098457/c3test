@@ -3,6 +3,8 @@
 #include <cctype>
 #include <iostream>
 #include <functional>
+#include <cstdio>
+#include <cstdlib>
 
 namespace vb6c3 {
 
@@ -18,6 +20,10 @@ std::string CCodeGen::resolveClassMemberCall(const std::string& className,
     if (!symTab_.moduleScope()) return "";
 
     const std::string memberLower = Symbol::toLower(memberName);
+    if (std::getenv("C3_DBG110") && memberLower == "enabled") {
+        std::fprintf(stderr, "[DBG110] resolveClassMemberCall cls=%s member=%s mod=%s\n",
+                     className.c_str(), memberName.c_str(), moduleName_.c_str());
+    }
     // Fix 011r-1b: VB6 case-insensitive — compare class name ignoring case
     // (用户源代码可能写 "cWinsock", 但struct定义用的是文件名大小写 "cWinSock")
     const std::string classNameLower = Symbol::toLower(className);

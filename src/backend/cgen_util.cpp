@@ -8,6 +8,18 @@ namespace vb6c3 {
 
 // --- cgen_util.cpp: ActiveX DLL 入口代码生成 (generateDllEntry) ---
 
+// P6.4+: 默认实例类注册 (见 cgen.hpp 声明). 若 name 是 VB_PredeclaredId=True 的类
+// 模块名, 把 objLower 注册到 knownClassVars_ 使其按"类实例"精确解析成员, 返回类
+// 规范名供生成 vb6_cls_X_Default() 对象表达式; 非默认实例类返回空串.
+std::string CCodeGen::registerDefaultInstanceClass(const std::string& name) {
+    std::string cls = defaultInstanceClassName(name);
+    if (cls.empty()) return "";
+    std::string lower = name;
+    std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+    knownClassVars_[lower] = cls;
+    return cls;
+}
+
 std::string CCodeGen::generateDllEntry(const std::string& progId, const std::vector<SymbolTable*>& allSymTabs) {
     CodeEmitter entry;
     dllProgId_ = progId;
