@@ -11,6 +11,7 @@
   - 待用户后续提供 vbman 单元测试
 
 ## changelog
+- 2026-09-17（src/rtl/core）：41 个平铺文件按家族分 4 个子目录（vb6rtl 9 / vb6com 8 / vb6comserver 7 / vb6forms 13），根下只留 2 个 DI 桩 + bstring；同步 rc / CMake 路径，CMake 嵌入依赖由 17 项补齐为 39 项
 - 2026-09-17 RTL 头拆分：vb6rtl.h（1007 行）拆为伞头 16 行 + 7 子头（base/bstr/variant/builtin/array/class_com/runtime），同步 4 处嵌入管线，回归 82/0/1/83 零变化
 - 2026-09-17 清理：删 20 个纯占位空文件；同步 ai 文档旧路径；更新外壳 README / CLAUDE
 - 2026-09-16 源码拆分专题：巨型文件按家族拆到约 500 行/文件（RTL 3 个 + C++ 6 个，另含 backend 目录重组）
