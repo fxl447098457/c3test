@@ -157,7 +157,7 @@ c3.vb6.pro/
 │   ├── typelib/           CreateTypeLib2 内建生成 .tlb
 │   ├── backend/           C 代码生成（cgen_expr/stmt/decl/com/form/util）+ MSVC 驱动
 │   ├── driver/            CLI 入口、编译流水线编排、RTL 资源解包
-│   ├── rtl/               VB6 运行时：core/*.h|*.c + lib/ 预编译静态库（x64/x86）
+│   ├── rtl/core/          VB6 运行时：4 个家族子目录（vb6rtl / vb6com / vb6comserver / vb6forms）
 │   └── ir/                历史遗留空壳（已停用，不参与构建产物）
 ├── tests/                 回归测试：98 个 .bas + 13 个 .vbp + 多模块/COM/窗体用例
 ├── scripts/               构建、测试、编译、运行脚本（见下）
@@ -200,21 +200,26 @@ CLI 仍保留 `--dump-ir` / `--emit-llvm` 开关，但没有消费方。
 | `vb6c3-cgen.lib` | C 代码生成后端 |
 | `C3.exe` | 薄 CLI 驱动（链接上述两个库） |
 
-**RTL 内嵌（P10，源码级）。** 4 个 RTL 头文件 + 6 个 RTL `.c` **源码**以 `RCDATA` 资源嵌入 `C3.exe`
+**RTL 内嵌（P10，源码级）。** 14 个 RTL 头文件 + 25 个 RTL `.c` **源码**（共 39 项）以 `RCDATA` 资源嵌入 `C3.exe`
 （见 `src/driver/c3rtl.rc`），运行时由 `rtl_embedded.cpp` 解包到 `%TEMP%\C3C\<会话ID>\rtl\`，
 与生成的 C 代码一起交给 `cl.exe` 编译（`/Gy` + 链接器 `/OPT:REF` 自动剔除未引用的 RTL 代码）。
 因此**用户机器上不需要安装任何 VB6 运行时**，产物静态链接、零依赖。
 改动 `src/rtl/` 后直接重编 C3.exe 即生效（`scripts\build.bat`），无需任何预编译步骤。
 
-**RTL 组成**（`src/rtl/core/`）：
+**RTL 组成**（`src/rtl/core/`，按家族分目录）：
 
-| 文件 | 职责 |
-|------|------|
-| `vb6rtl.h/.c` | BSTR 字符串、VARIANT、SAFEARRAY、数学、转换、日期、文件 I/O、Err 对象、Format |
-| `vb6forms.h/.c` | Win32 窗体与控件实现（缇↔像素 1/15）、消息循环、菜单 |
-| `vb6com.h/.c` | COM 客户端：CreateObject / GetObject / IDispatch 后期绑定 / VARIANT 封送 |
-| `vb6comserver.h/.c` | COM 服务端：类工厂、DllGetClassObject / DllRegisterServer |
-| `vb6_di_*.c` | Win32 API 转发桩（解决 x64 下 msvbvm60 等无导入库的问题） |
+| 目录 | 文件数 | 职责 |
+|------|--------|------|
+| `vb6rtl/` | 9 | `vb6rtl.h`（伞头）+ 7 个子头 + `vb6rtl.c`：BSTR 字符串、VARIANT、SAFEARRAY、数学、转换、日期、文件 I/O、Err 对象、Format |
+| `vb6forms/` | 13 | `vb6forms.h` / `.c` + 10 个实现 + 内部头：Win32 窗体与控件（缇↔像素 1/15）、消息循环、菜单 |
+| `vb6com/` | 8 | `vb6com.h` / `.c` + 5 个实现 + 内部头：COM 客户端 CreateObject / GetObject / IDispatch 后期绑定 / VARIANT 封送 |
+| `vb6comserver/` | 7 | `vb6comserver.h` / `.c` + 4 个实现 + 内部头：COM 服务端类工厂、DllGetClassObject / DllRegisterServer |
+| （平铺） | 2 | `vb6_di_stubs.c` / `vb6_di_win32_stubs.c`：Win32 API 转发桩（解决 x64 下 msvbvm60 等无导入库的问题） |
+
+子目录只影响**源码树可读性**：39 个文件解包到同一个平铺临时目录，RTL 内部 `#include` 一律按 basename，
+且各家族之间**无交叉 include**，因此编译路径与拆分前完全一致。
+新增 / 重命名 / 删除 RTL 文件需同步 **5 处**（`c3rtl.rc` / `rtl_embedded.hpp` / `rtl_embedded.cpp` /
+`driver.cpp` / `CMakeLists.txt`），详见 [`ai/022-源码拆分进度表.md`](ai/022-源码拆分进度表.md)。
 
 ---
 

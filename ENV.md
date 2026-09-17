@@ -96,7 +96,7 @@ src/
 ├── backend/        # C代码生成器
 ├── driver/         # CLI + MSVC驱动
 ├── ir/             # 中间表示
-├── rtl/            # VB6运行时 (vb6rtl.h/c)
+├── rtl/core/       # VB6运行时 (按家族分: vb6rtl / vb6com / vb6comserver / vb6forms)
 ├── com/            # COM客户端+服务端运行时
 ├── typelib/        # TypeLib内建生成器 (CreateTypeLib2)
 ├── common/         # 公共工具
