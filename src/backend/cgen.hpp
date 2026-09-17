@@ -857,6 +857,12 @@ private:
     bool tryRewriteCOMLvalue(const std::string& target, const std::string& value,
                              Expr* valueExpr, bool isSet);
 
+    // Fix 092w: 将赋值给 Byte 数组 (vb6_SafeArray1D*) 的右侧表达式改写为字节数组语义:
+    //   vb6_StrConv(s, conv, loc)[64/128] -> vb6_StrConvToByteArray(s, conv, loc)
+    //   其他字符串表达式 (vb6_BSTR_FromStr / BSTR 变量等) -> vb6_StringToByteArray(...)
+    // 若右侧已是数组表达式 (含 vb6_SafeArray / 数组变量) 则原样返回.
+    std::string rewriteByteArrayValue(const std::string& value) const;
+
     // Fix 090w/090x: Property Let/Set 值实参打包 — Let 末形参 As Variant 时,
     // Pattern C/D2 (prop_get_ LHS rewrite) 与 With 块 prop_let_ 调用追加的值实参
     // (double/int/BSTR 等标量 C 表达式) 需按方向转换:

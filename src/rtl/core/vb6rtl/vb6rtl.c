@@ -2345,6 +2345,99 @@ strconv_unicode:
     return SysAllocStringLen(text, len);
 }
 
+/* ============================================================
+ * StrConv -> Byte() 语义 (twinbasic 兼容)
+ * ============================================================ */
+
+/* String -> Byte(): 复制 BSTR 原始 UTF-16LE 内存字节。
+ * 例: "一二" (U+4E00, U+4E8C) -> 00 4E 8C 4E */
+struct vb6_SafeArray1D* vb6_StringToByteArray(BSTR text) {
+    if (!text) return NULL;
+    int32_t wlen = (int32_t)SysStringLen(text);
+    if (wlen <= 0) return NULL;
+    int32_t byteCount = wlen * 2;
+    struct vb6_SafeArray1D* arr = vb6_SafeArrayCreate1D(vb6_sa_byte, 0, byteCount - 1);
+    if (!arr || !arr->data) return arr;
+    memcpy(arr->data, text, (size_t)byteCount);
+    return arr;
+}
+
+/* StrConv(s, conversion) -> Byte() */
+struct vb6_SafeArray1D* vb6_StrConvToByteArray(BSTR text, int32_t conversion, int32_t localeID) {
+    if (!text) return NULL;
+    int32_t wlen = (int32_t)SysStringLen(text);
+    if (wlen <= 0) return NULL;
+
+    if (conversion == 128) {
+        /* vbFromUnicode: Unicode -> 系统 ANSI/GBK 字节。
+         * 例: "一二" -> D2 BB B6 FE */
+        int ansiLen = WideCharToMultiByte(CP_ACP, 0, text, wlen, NULL, 0, NULL, NULL);
+        if (ansiLen <= 0) return NULL;
+        struct vb6_SafeArray1D* arr = vb6_SafeArrayCreate1D(vb6_sa_byte, 0, ansiLen - 1);
+        if (!arr || !arr->data) return arr;
+        WideCharToMultiByte(CP_ACP, 0, text, wlen, (char*)arr->data, ansiLen, NULL, NULL);
+        return arr;
+    }
+
+    if (conversion == 64) {
+        /* vbUnicode: 怪癖 -- 把 BSTR 的原始内存字节当成 ANSI/GBK 文本解码,
+         * 再重建 UTF-16LE 字节。例: 原始 00 4E 8C 4E -> 00 00 4E 00 68 5B */
+        int rawBytes = wlen * 2;
+        char* raw = (char*)malloc((size_t)rawBytes);
+        if (!raw) return NULL;
+        memcpy(raw, text, (size_t)rawBytes);
+        int wcCount = MultiByteToWideChar(CP_ACP, 0, raw, rawBytes, NULL, 0);
+        if (wcCount <= 0) { free(raw); return NULL; }
+        struct vb6_SafeArray1D* arr = vb6_SafeArrayCreate1D(vb6_sa_byte, 0, wcCount * 2 - 1);
+        if (!arr || !arr->data) { free(raw); return arr; }
+        MultiByteToWideChar(CP_ACP, 0, raw, rawBytes, (wchar_t*)arr->data, wcCount);
+        free(raw);
+        return arr;
+    }
+
+    (void)localeID;
+    /* 其他转换模式退化为原始内存复制 */
+    return vb6_StringToByteArray(text);
+}
+
+/* Byte() -> BSTR: 反向转换, 供 s = StrConv(ba, vbUnicode) */
+BSTR vb6_StrConvFromByteArray(struct vb6_SafeArray1D* arr, int32_t conversion, int32_t localeID) {
+    if (!arr || !arr->data || arr->count <= 0) return vb6_BSTR_Empty();
+    (void)localeID;
+
+    if (conversion == 64) {
+        /* vbUnicode: ANSI/GBK 字节 -> Unicode BSTR */
+        const char* bytes = (const char*)arr->data;
+        int byteCount = arr->count;
+        int wcCount = MultiByteToWideChar(CP_ACP, 0, bytes, byteCount, NULL, 0);
+        if (wcCount <= 0) return vb6_BSTR_Empty();
+        BSTR result = SysAllocStringLen(NULL, wcCount);
+        if (!result) return vb6_BSTR_Empty();
+        MultiByteToWideChar(CP_ACP, 0, bytes, byteCount, result, wcCount);
+        return result;
+    }
+
+    if (conversion == 128) {
+        /* vbFromUnicode: UTF-16LE 字节 -> ANSI/GBK 字节串 (以 BSTR 承载单字节) */
+        int wcCount = arr->count / 2;
+        if (wcCount <= 0) return vb6_BSTR_Empty();
+        int ansiLen = WideCharToMultiByte(CP_ACP, 0, (const wchar_t*)arr->data, wcCount,
+                                          NULL, 0, NULL, NULL);
+        if (ansiLen <= 0) return vb6_BSTR_Empty();
+        char* ansi = (char*)malloc((size_t)ansiLen);
+        if (!ansi) return vb6_BSTR_Empty();
+        WideCharToMultiByte(CP_ACP, 0, (const wchar_t*)arr->data, wcCount,
+                            ansi, ansiLen, NULL, NULL);
+        BSTR result = SysAllocStringLen(NULL, ansiLen);
+        if (!result) { free(ansi); return vb6_BSTR_Empty(); }
+        for (int i = 0; i < ansiLen; i++) result[i] = (wchar_t)(unsigned char)ansi[i];
+        free(ansi);
+        return result;
+    }
+
+    return vb6_BSTR_Empty();
+}
+
 
 struct vb6_SafeArray1D* vb6_Filter(struct vb6_SafeArray1D* source, BSTR match, int32_t include, int32_t compare) {
     (void)compare;

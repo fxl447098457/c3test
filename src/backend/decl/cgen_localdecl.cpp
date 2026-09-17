@@ -104,7 +104,15 @@ void CCodeGen::emitLocalDeclCode(LocalDeclStmt& node) {
                 // #define K (vb6_BSTR_FromStr(...))), 同名局部变量声明会被宏展开破坏.
                 // 局部变量总是遮蔽模块常量, #undef 是安全且正确的.
                 c_.emitLine("#undef " + cName);
-                c_.emitLine("vb6_SafeArray1D* " + cName + " = NULL;");
+                // Fix 092w: Dim arr() As Byte = <初始化表达式> — twinbasic 兼容.
+                // 动态数组初值来自字符串/StrConv 时改用字节数组 helper 生成内容,
+                // 否则保持 NULL 待 ReDim/赋值.
+                std::string dynInit = "NULL";
+                if (var.initializer && elemType == Vb6Type::Byte) {
+                    emitExpr(*var.initializer);
+                    dynInit = rewriteByteArrayValue(lastExpr_);
+                }
+                c_.emitLine("vb6_SafeArray1D* " + cName + " = " + dynInit + ";");
 
                 // 注册到已知数组集合
                 std::string lower = var.name;

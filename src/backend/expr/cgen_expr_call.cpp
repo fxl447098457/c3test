@@ -3278,6 +3278,22 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
             argList += "0";
         }
     }
+    // Fix 092w: StrConv(Byte数组, vbUnicode) → vb6_StrConvFromByteArray
+    // 反向转换: Byte() -> String. 第一实参为已知 Byte 数组变量 (vb6_SafeArray1D*)
+    // 时, RTL vb6_StrConv 期望 BSTR 会类型不匹配; 改用返回 BSTR 的 helper.
+    if (callee == "vb6_StrConv" && !args.empty()) {
+        std::string arg0name = args[0];
+        if (arg0name.compare(0, 4, "me->") == 0) arg0name = arg0name.substr(4);
+        if (arg0name.size() > 4 && arg0name[0] == '(' && arg0name[1] == '*'
+            && arg0name.back() == ')') {
+            arg0name = arg0name.substr(2, arg0name.size() - 3);
+        }
+        std::string lower = arg0name;
+        std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+        if (knownByteArrayVars_.count(lower)) {
+            callee = "vb6_StrConvFromByteArray";
+        }
+    }
     if (callee == "vb6_FormatNumber" && args.size() < 5) {
         while (args.size() < 5) {
             args.push_back("-1");  // -1 = vbUseDefault for optional args

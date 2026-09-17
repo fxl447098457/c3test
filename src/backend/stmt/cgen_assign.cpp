@@ -1022,6 +1022,21 @@ void CCodeGen::visit(AssignmentStmt& node) {
     }
     std::string value = std::move(lastExpr_);
 
+    // Fix 092w: 目标是否为已知 Byte 数组变量 (vb6_SafeArray1D*) — 赋值右侧为
+    // StrConv(...)/字符串构造字节数组内容时需改写 helper.
+    bool tgtIsByteArray092w = false;
+    {
+        std::string tname = target;
+        if (tname.compare(0, 4, "me->") == 0) tname = tname.substr(4);
+        if (tname.size() > 4 && tname[0] == '(' && tname[1] == '*'
+            && tname.back() == ')') {
+            tname = tname.substr(2, tname.size() - 3);
+        }
+        std::string tlower = tname;
+        std::transform(tlower.begin(), tlower.end(), tlower.begin(), ::tolower);
+        if (knownByteArrayVars_.count(tlower)) tgtIsByteArray092w = true;
+    }
+
     // P6.12: COM方法调用返回值类型化解封
     // vb6_ComCall 返回 VARIANT* (void*), 赋值给typed变量时需用对应解封函数
     // vb6_ComCall(obj, L"Method", args, argc) → vb6_ComCallInt/Double/BSTR/Object(...)
@@ -1356,6 +1371,10 @@ void CCodeGen::visit(AssignmentStmt& node) {
             }
             if (tgtIsVariant091l && !valueIsVariant && !value.empty()) {
                 value = "vb6_VariantFromValue(" + value + ")";
+            }
+            // Fix 092w: Byte 数组目标 + 具体值 (StrConv/字符串) → 字节数组语义
+            if (tgtIsByteArray092w && !tgtIsVariant091l && !value.empty()) {
+                value = rewriteByteArrayValue(value);
             }
             c_.emitLine(target + " = " + value + ";");
         }

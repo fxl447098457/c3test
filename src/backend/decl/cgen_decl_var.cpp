@@ -103,6 +103,13 @@ void CCodeGen::visit(VariableDecl& node) {
         } else {
             c_.emitLine("static " + cType + " " + cName + " = NULL;");
         }
+        // Fix 092w: Dim arr() As Byte = <初始化表达式> (twinbasic 兼容) — 文件作用域
+        // 必须用常量初始化 (C2099), 故声明为 NULL, 初始化表达式放到模块初始化函数中,
+        // 与 Fix 054 静态数组的 moduleInitStmts_ 模式一致.
+        if (node.initializer && elemType == Vb6Type::Byte) {
+            emitExpr(*node.initializer);
+            moduleInitStmts_.push_back(cName + " = " + rewriteByteArrayValue(lastExpr_) + ";");
+        }
         } // end if (!trackOnly_)
 
         // 注册到已知数组集合

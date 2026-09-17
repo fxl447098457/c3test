@@ -485,4 +485,43 @@ std::string CCodeGen::getRuntimeParamCType(const std::string& funcName, size_t p
     }
     return "";
 }
+
+// ============================================================
+// Fix 092w: Byte 数组赋值右侧改写
+// ============================================================
+// VB6/twinbasic 允许 Dim ba() As Byte = "..." 或 = StrConv(s, 64/128), 语义为
+// 生成含字节内容的动态数组. RTL 的 vb6_StrConv 返回 BSTR, 不能直接赋给
+// vb6_SafeArray1D*. 此处在编译期改用返回字节数组的 RTL helper.
+std::string CCodeGen::rewriteByteArrayValue(const std::string& value) const {
+    if (value.empty() || value == "NULL") return value;
+
+    // StrConv(...) 用于构造字节数组 → 改用 vb6_StrConvToByteArray(...)
+    if (value.compare(0, 12, "vb6_StrConv(") == 0) {
+        return "vb6_StrConvToByteArray" + value.substr(11);
+    }
+    // 已经是字节数组/数组表达式 → 原样返回
+    if (value.find("vb6_StrConvToByteArray(") != std::string::npos ||
+        value.find("vb6_StringToByteArray(") != std::string::npos ||
+        value.compare(0, 14, "vb6_SafeArray") == 0 ||
+        value.compare(0, 25, "vb6_VariantToSafeArray1D") == 0) {
+        return value;
+    }
+    // 字符串/BSTR 表达式 → 复制为字节数组 (原始 UTF-16LE 字节)
+    bool isBstrExpr = value.compare(0, 9, "vb6_BSTR_") == 0 ||
+                      value.compare(0, 20, "vb6_VariantToString(") == 0;
+    if (!isBstrExpr) {
+        // 裸变量名: 若为已知 BSTR 变量则包装
+        std::string name = value;
+        if (name.compare(0, 4, "me->") == 0) name = name.substr(4);
+        if (name.find_first_of("( .") == std::string::npos) {
+            std::string lower = name;
+            std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+            if (knownBstrVars_.count(lower)) {
+                return "vb6_StringToByteArray(" + value + ")";
+            }
+        }
+        return value;
+    }
+    return "vb6_StringToByteArray(" + value + ")";
+}
 } // namespace vb6c3
