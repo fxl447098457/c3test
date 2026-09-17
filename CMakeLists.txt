@@ -241,9 +241,15 @@ set(C3RTL_EMBEDDED_FILES
     ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6forms/vb6forms_widget_prop.c
     ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6forms/vb6forms_shape.c
     ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6forms/vb6forms_axsite.c
-    # 平铺（不属于任何家族）
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6_di_stubs.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6_di_win32_stubs.c
+    # DI 转发桩家族（手写桩 + 按 Lib 家族生成的转发桩）
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/di/vb6_di_stubs.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/di/vb6_di_win32_stubs.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/di/vb6_di_user32_stubs.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/di/vb6_di_gdiplus_stubs.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/di/vb6_di_crypto_stubs.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/di/vb6_di_com_stubs.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/di/vb6_di_net_stubs.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/di/vb6_di_shell_stubs.c
 )
 set_source_files_properties(src/driver/c3rtl.rc PROPERTIES OBJECT_DEPENDS "${C3RTL_EMBEDDED_FILES}")
 target_link_libraries(c3 PRIVATE vb6c3-core vb6c3-cgen)

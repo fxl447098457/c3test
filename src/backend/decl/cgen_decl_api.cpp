@@ -141,6 +141,13 @@ void CCodeGen::visit(DeclareDecl& node) {
     }
     std::string cExportedIdent = "vb6_di_" + sanitizedExport;
 
+    // 2026-09-17: 把 Lib 家族写进生成头, 供 scripts/gen_di_stubs.ps1 按 DLL 家族
+    // 把转发桩拆成多个文件。此前生成器只能靠外部的"未解析符号清单"决定要产出哪些
+    // 桩, 而那份清单(.temp/unresolved_syms.txt)早已不存在 → 生成器无法重跑。
+    // 格式固定为单行 `/* vb6_di_lib: <libName> */`, 紧邻其后的 vb6_di_* 原型即属该家族。
+    // libName 已去引号、去 .dll 后缀 (见上文), 无 Lib 时为空串, 生成器按 unknown 处理。
+    h_.emitLine("/* vb6_di_lib: " + libName + " */");
+
     // Fix 010i: 同一Declare函数可能出现在多个VB6模块中 (如CoTaskMemFree)
     // 用#ifndef guard防止__declspec(dllimport)声明重定义 (C2371)
     std::string diGuard = "VB6_DI_" + sanitizedExport + "_DEFINED";

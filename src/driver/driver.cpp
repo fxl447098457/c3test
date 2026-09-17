@@ -2162,6 +2162,12 @@ bool Driver::runLinker(const CompileOptions& options, const std::string& outputD
     msvcOpts.sourceFiles.push_back(rtlDir + "/vb6com_foreach.c");
     msvcOpts.sourceFiles.push_back(rtlDir + "/vb6_di_stubs.c");
     msvcOpts.sourceFiles.push_back(rtlDir + "/vb6_di_win32_stubs.c");
+    msvcOpts.sourceFiles.push_back(rtlDir + "/vb6_di_user32_stubs.c");
+    msvcOpts.sourceFiles.push_back(rtlDir + "/vb6_di_gdiplus_stubs.c");
+    msvcOpts.sourceFiles.push_back(rtlDir + "/vb6_di_crypto_stubs.c");
+    msvcOpts.sourceFiles.push_back(rtlDir + "/vb6_di_com_stubs.c");
+    msvcOpts.sourceFiles.push_back(rtlDir + "/vb6_di_net_stubs.c");
+    msvcOpts.sourceFiles.push_back(rtlDir + "/vb6_di_shell_stubs.c");
     if (msvcOpts.isGui || msvcOpts.isDll) {
         // 092z-3: ActiveX DLL 允许包含窗体 (Form/UserControl), 也要 vb6forms
         msvcOpts.sourceFiles.push_back(rtlDir + "/vb6forms.c");

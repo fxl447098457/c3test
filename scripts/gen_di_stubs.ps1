@@ -1,20 +1,29 @@
-# gen_di_stubs.ps1 - generate Win32 forwarding stubs for `Declare` symbols.
+# gen_di_stubs.ps1 - generate Win32 forwarding stubs for `Declare` symbols, one file per Lib family.
 #
 # Why: C3 maps every `Declare ... Lib "x"` to `extern <ret> __stdcall vb6_di_<alias>(...)`
 # (Fix 076) and the RTL must provide the implementation. Hand-writing them one by one is
 # what kept the link phase red, so this tool derives each stub from C3's own generated
 # header prototype (which is the ABI the caller actually uses) and forwards 1:1.
 #
+# Family-aware + re-runnable (2026-09-17):
+#   C3 now emits `/* vb6_di_lib: <lib> */` immediately before every generated `vb6_di_*`
+#   prototype, so this tool groups the stubs by DLL family and writes one .c per family
+#   (vb6_di_<family>_stubs.c). It no longer needs the external unresolved-symbol list
+#   (.temp/unresolved_syms.txt, long gone) -- the input is the generated header set
+#   itself, so a re-run only needs a session dir. Symbols already implemented by hand in
+#   vb6_di_stubs.c are detected and skipped, and stale generated files are removed.
+#
 # Usage:
-#   powershell -File scripts\gen_di_stubs.ps1 [-SessionDir <dir>] [-SymFile <txt>] [-OutFile <c>]
+#   powershell -File scripts\gen_di_stubs.ps1 [-SessionDir <dir>] [-OutDir <dir>] [-HandFile <c>]
 #   -SessionDir defaults to the newest %TEMP%\C3C\<id> (where C3 puts generated .c/.h)
-#   -SymFile    defaults to .temp\unresolved_syms.txt (from _tmp_unresolved.ps1)
+#   -OutDir     defaults to src\rtl\core\di
+#   -HandFile   defaults to <OutDir>\vb6_di_stubs.c (hand-written stubs, skipped here)
 #
 # ASCII-only file (PowerShell 5.1 reads .ps1 as ANSI without BOM).
 param(
     [string]$SessionDir = '',
-    [string]$SymFile = '',
-    [string]$OutFile = ''
+    [string]$OutDir = '',
+    [string]$HandFile = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -27,19 +36,42 @@ if ($SessionDir -eq '') {
     $SessionDir = (Get-ChildItem $base -Directory | Sort-Object LastWriteTime -Descending |
         Select-Object -First 1).FullName
 }
-if ($SymFile -eq '') { $SymFile = Join-Path $root '.temp\unresolved_syms.txt' }
-if ($OutFile -eq '') { $OutFile = Join-Path $root 'src\rtl\core\vb6_di_win32_stubs.c' }
+if ($OutDir -eq '') { $OutDir = Join-Path $root 'src\rtl\core\di' }
+if ($HandFile -eq '') { $HandFile = Join-Path $OutDir 'vb6_di_stubs.c' }
+
+# ---------- 0. family table: one output file vb6_di_<name>_stubs.c per family ----------
+# Grouping follows the DLL the VB6 `Declare` actually targets. Libs that are too small to
+# carry a file of their own are merged into the closest domain family (documented above).
+$families = @(
+    @{ name = 'win32';   libs = @('kernel32', 'winmm') },
+    @{ name = 'user32';  libs = @('user32', 'gdi32') },
+    @{ name = 'gdiplus'; libs = @('gdiplus') },
+    @{ name = 'crypto';  libs = @('crypt32', 'bcrypt', 'ncrypt') },
+    @{ name = 'com';     libs = @('ole32', 'oleaut32', 'advapi32') },
+    @{ name = 'net';     libs = @('ws2_32', 'iphlpapi') },
+    @{ name = 'shell';   libs = @('shell32', 'shlwapi', 'imagehlp') }
+)
+$libToFamily = @{}
+foreach ($fam in $families) { foreach ($l in $fam.libs) { $libToFamily[$l] = $fam.name } }
 
 Write-Output "session: $SessionDir"
-Write-Output "symbols: $SymFile"
+Write-Output "outdir : $OutDir"
 
-# ---------- 1. index prototypes from generated headers ----------
+# ---------- 1. index prototypes (+ their Lib family) from generated headers ----------
 $protos = @{}
+$order = New-Object System.Collections.Generic.List[string]
+$noLib = New-Object System.Collections.Generic.List[string]
 $headers = Get-ChildItem $SessionDir -File | Where-Object { $_.Extension -eq '.h' }
 foreach ($f in $headers) {
     $ls = [System.IO.File]::ReadAllLines($f.FullName, $utf8)
+    $curLib = ''
     for ($i = 0; $i -lt $ls.Count; $i++) {
         $l = $ls[$i]
+        if ($l -match 'vb6_di_lib:\s*([^\s*]*)\s*\*/') {
+            $curLib = $matches[1].ToLower()
+            if ($curLib.EndsWith('.dll')) { $curLib = $curLib.Substring(0, $curLib.Length - 4) }
+            continue
+        }
         if ($l -notmatch '^\s*extern\b') { continue }
         if ($l -notmatch 'vb6_di_') { continue }
         $buf = $l.Trim()
@@ -59,17 +91,22 @@ foreach ($f in $headers) {
         if ($pOpen -lt 0 -or $pClose -le $pOpen) { continue }
         $params = $buf.Substring($pOpen + 1, $pClose - $pOpen - 1).Trim()
         if ($params -eq 'void') { $params = '' }
-        $protos[$name] = @{ ret = $ret; params = $params }
+        if ($curLib -eq '') { $noLib.Add($name) }
+        $protos[$name] = @{ ret = $ret; params = $params; lib = $curLib }
+        $order.Add($name)
     }
 }
 Write-Output ("prototypes found: " + $protos.Count)
 
-# ---------- 2. read unresolved symbol list ----------
-$syms = @()
-foreach ($ln in [System.IO.File]::ReadAllLines($SymFile, $utf8)) {
-    $t = ($ln -replace '^\s*\d+\s+', '').Trim()
-    if ($t -ne '') { $syms += $t }
+# ---------- 2. symbols already implemented by hand (must not be emitted again) ----------
+$hand = @{}
+if (Test-Path $HandFile) {
+    foreach ($ln in [System.IO.File]::ReadAllLines($HandFile, $utf8)) {
+        $m = [regex]::Match($ln, '\b(vb6_di_[A-Za-z0-9_]+)\s*\(')
+        if ($m.Success) { $hand[$m.Groups[1].Value] = 1 }
+    }
 }
+Write-Output ("hand-written symbols skipped: " + $hand.Count)
 
 # ---------- 3. split parameter list on top-level commas ----------
 function Split-Params([string]$p) {
@@ -87,22 +124,31 @@ function Split-Params([string]$p) {
     return $out
 }
 
-# ---------- 4. emit ----------
-$bodies = New-Object System.Collections.Generic.List[string]
+# ---------- 4. emit one body list per family ----------
+$bodies = @{}
+$usedLibs = @{}
+foreach ($fam in $families) {
+    $bodies[$fam.name] = New-Object System.Collections.Generic.List[string]
+    $usedLibs[$fam.name] = @{}
+}
+$bodies['unknown'] = New-Object System.Collections.Generic.List[string]
+$usedLibs['unknown'] = @{}
 $skipped = New-Object System.Collections.Generic.List[string]
 $noProto = New-Object System.Collections.Generic.List[string]
 $badUdt = New-Object System.Collections.Generic.List[string]
 $seen = @{}
-$hasDynamic = $false
+$counts = @{}
 
-foreach ($s in $syms) {
-    if (-not $s.StartsWith('vb6_di_')) { continue }
+foreach ($s in $order) {
     if ($seen.ContainsKey($s)) { continue }
     $seen[$s] = 1
-    if (-not $protos.ContainsKey($s)) { $noProto.Add($s); continue }
-
     $api = $s.Substring(7)
     if ($api -like 'ord_*') { $skipped.Add($s + '  (ordinal import)'); continue }
+    if ($hand.ContainsKey($s)) { $skipped.Add($s + '  (hand-written in vb6_di_stubs.c)'); continue }
+
+    $famName = $libToFamily[$protos[$s].lib]
+    if (-not $famName) { $famName = 'unknown' }
+    if (-not $counts.ContainsKey($famName)) { $counts[$famName] = 0 }
 
     $ret = $protos[$s].ret
     $paramList = Split-Params $protos[$s].params
@@ -142,113 +188,137 @@ foreach ($s in $syms) {
 
     # gdiplus: no C header in the SDK, so resolve the flat API lazily by name.
     $dyn = ($api -match '^(Gdip|Gdiplus)')
-    if ($dyn) { $hasDynamic = $true }
+    if ($dyn) { $usedLibs[$famName]['__dynamic__'] = 1 }
+    if ($protos[$s].lib -ne '') { $usedLibs[$famName][$protos[$s].lib] = 1 }
 
-    $bodies.Add('/* ' + ($s -replace '^vb6_di_', '') + ' */')
+    $out = $bodies[$famName]
+    $out.Add('/* ' + ($s -replace '^vb6_di_', '') + ' */')
     if ($dyn) {
         if ($ret -eq 'void') {
-            $bodies.Add('void __stdcall ' + $s + '(' + $decl + ') {')
-            $bodies.Add('    void (WINAPI *fn)(' + $types + ') = (void (WINAPI *)(' + $types + '))vb6_di_gdiplus_proc("' + $api + '");')
-            $bodies.Add('    if (fn != NULL) { fn(' + $args + '); }')
-            $bodies.Add('}')
+            $out.Add('void __stdcall ' + $s + '(' + $decl + ') {')
+            $out.Add('    void (WINAPI *fn)(' + $types + ') = (void (WINAPI *)(' + $types + '))vb6_di_gdiplus_proc("' + $api + '");')
+            $out.Add('    if (fn != NULL) { fn(' + $args + '); }')
+            $out.Add('}')
         } else {
-            $bodies.Add($ret + ' __stdcall ' + $s + '(' + $decl + ') {')
-            $bodies.Add('    ' + $ret + ' (WINAPI *fn)(' + $types + ') = (' + $ret + ' (WINAPI *)(' + $types + '))vb6_di_gdiplus_proc("' + $api + '");')
-            $bodies.Add('    if (fn == NULL) { return (' + $ret + ')2; /* GpStatus InvalidParameter */ }')
-            $bodies.Add('    return fn(' + $args + ');')
-            $bodies.Add('}')
+            $out.Add($ret + ' __stdcall ' + $s + '(' + $decl + ') {')
+            $out.Add('    ' + $ret + ' (WINAPI *fn)(' + $types + ') = (' + $ret + ' (WINAPI *)(' + $types + '))vb6_di_gdiplus_proc("' + $api + '");')
+            $out.Add('    if (fn == NULL) { return (' + $ret + ')2; /* GpStatus InvalidParameter */ }')
+            $out.Add('    return fn(' + $args + ');')
+            $out.Add('}')
         }
     } elseif ($ret -eq 'void') {
-        $bodies.Add('void __stdcall ' + $s + '(' + $decl + ') {')
-        $bodies.Add('    ((void (WINAPI *)(' + $types + '))' + $api + ')(' + $args + ');')
-        $bodies.Add('}')
+        $out.Add('void __stdcall ' + $s + '(' + $decl + ') {')
+        $out.Add('    ((void (WINAPI *)(' + $types + '))' + $api + ')(' + $args + ');')
+        $out.Add('}')
     } else {
-        $bodies.Add($ret + ' __stdcall ' + $s + '(' + $decl + ') {')
-        $bodies.Add('    return ((' + $ret + ' (WINAPI *)(' + $types + '))' + $api + ')(' + $args + ');')
-        $bodies.Add('}')
+        $out.Add($ret + ' __stdcall ' + $s + '(' + $decl + ') {')
+        $out.Add('    return ((' + $ret + ' (WINAPI *)(' + $types + '))' + $api + ')(' + $args + ');')
+        $out.Add('}')
     }
-    $bodies.Add('')
+    $out.Add('')
+    $counts[$famName]++
 }
 
-$banner = @()
-$banner += '// vb6_di_win32_stubs.c - generated by scripts/gen_di_stubs.ps1'
-$banner += '//'
-$banner += '// Win32 forwarding stubs for VB6 `Declare ... Lib "x"` (Fix 076 scheme: C3 emits'
-$banner += '// `extern <ret> __stdcall vb6_di_<alias>(...)` and the RTL implements it).'
-$banner += '//'
-$banner += '// Each stub reproduces C3''s own generated prototype verbatim (that is the ABI the'
-$banner += '// caller uses: ByVal Long is widened to intptr_t, ByVal Single stays float, ByRef'
-$banner += '// Long stays int32_t*) and forwards 1:1 to the real API through a function-pointer'
-$banner += '// cast. The cast keeps the compiler from complaining about unrelated API parameter'
-$banner += '// types while preserving the register/memory passing class of every argument.'
-$banner += '//'
-$banner += ('// generated from: ' + $SessionDir)
-$banner += ('// date: ' + (Get-Date -Format 'yyyy-MM-dd HH:mm'))
-$banner += '//'
-$banner += '// Hand-maintained special cases stay in vb6_di_stubs.c (ordinals, msvbvm60 runtime,'
-$banner += '// dynamically loaded DLLs). Re-run the generator after a build exposes new symbols.'
-$banner += ''
-$banner += '/* VB6 code uses the classic winsock names (gethostbyname, inet_addr, ...) */'
-$banner += '#define _WINSOCK_DEPRECATED_NO_WARNINGS'
-$banner += '/* winsock2.h must come before windows.h */'
-$banner += '#include <winsock2.h>'
-$banner += '#include <windows.h>'
-$banner += '#include <stdint.h>'
-$banner += '#include <shlwapi.h>'
-$banner += '#include <shlobj.h>'
-$banner += '#include <mmsystem.h>'
-$banner += '#include <dbghelp.h>'
-$banner += '#include <iphlpapi.h>'
-$banner += '#include <bcrypt.h>'
-$banner += '#include <ncrypt.h>'
-$banner += '#include <ole2.h>'
-$banner += '#include <oleauto.h>'
-$banner += '#include <olectl.h>'
-$banner += '/* NOTE: gdiplus.h is C++-only (class Gdiplus...). The GDI+ flat API is'
-$banner += ' * resolved with GetProcAddress instead - see below. */'
-$banner += ''
-$banner += '/* Import libs for the DLLs below. Adding one that is not needed is harmless:'
-$banner += ' * a static import lib is only pulled when a symbol from it is referenced. */'
-$banner += '#pragma comment(lib, "user32.lib")'
-$banner += '#pragma comment(lib, "gdi32.lib")'
-$banner += '#pragma comment(lib, "kernel32.lib")'
-$banner += '#pragma comment(lib, "advapi32.lib")'
-$banner += '#pragma comment(lib, "ole32.lib")'
-$banner += '#pragma comment(lib, "oleaut32.lib")'
-$banner += '#pragma comment(lib, "shell32.lib")'
-$banner += '#pragma comment(lib, "shlwapi.lib")'
-$banner += '#pragma comment(lib, "winmm.lib")'
-$banner += '#pragma comment(lib, "ws2_32.lib")'
-$banner += '#pragma comment(lib, "iphlpapi.lib")'
-$banner += '#pragma comment(lib, "dbghelp.lib")'
-$banner += '#pragma comment(lib, "crypt32.lib")'
-$banner += '#pragma comment(lib, "bcrypt.lib")'
-$banner += '#pragma comment(lib, "ncrypt.lib")'
-$banner += '#pragma comment(lib, "uuid.lib")'
-$banner += ''
-
-if ($hasDynamic) {
-    $banner += '/* GDI+ flat API lives in gdiplus.dll but its header is C++-only, so the'
-    $banner += ' * symbols below are resolved by name at first use. */'
-    $banner += 'static void* vb6_di_gdiplus_proc(const char* name) {'
-    $banner += '    static HMODULE mod = NULL;'
-    $banner += '    if (mod == NULL) { mod = LoadLibraryA("gdiplus.dll"); }'
-    $banner += '    return (mod != NULL) ? (void*)GetProcAddress(mod, name) : NULL;'
-    $banner += '}'
-    $banner += ''
+# ---------- 5. write one file per family ----------
+function New-Banner([string]$family, [string[]]$libs, [bool]$needDynamic, [int]$stubs) {
+    $b = @()
+    $b += ('// vb6_di_' + $family + '_stubs.c - generated by scripts/gen_di_stubs.ps1')
+    $b += '//'
+    $b += '// Win32 forwarding stubs for VB6 `Declare ... Lib "x"` (Fix 076 scheme: C3 emits'
+    $b += '// `extern <ret> __stdcall vb6_di_<alias>(...)` and the RTL implements it).'
+    $b += '//'
+    $b += ('// Family: ' + $family + '   (libs: ' + ($libs -join ', ') + ')   stubs: ' + $stubs)
+    $b += '//'
+    $b += '// Each stub reproduces C3''s own generated prototype verbatim (that is the ABI the'
+    $b += '// caller uses: ByVal Long is widened to intptr_t, ByVal Single stays float, ByRef'
+    $b += '// Long stays int32_t*) and forwards 1:1 to the real API through a function-pointer'
+    $b += '// cast. The cast keeps the compiler from complaining about unrelated API parameter'
+    $b += '// types while preserving the register/memory passing class of every argument.'
+    $b += '//'
+    $b += ('// generated from: ' + $SessionDir)
+    $b += ('// date: ' + (Get-Date -Format 'yyyy-MM-dd HH:mm'))
+    $b += '//'
+    $b += '// Hand-maintained special cases stay in vb6_di_stubs.c (ordinals, msvbvm60 runtime,'
+    $b += '// dynamically loaded DLLs). Re-run the generator after a build exposes new symbols.'
+    $b += ''
+    $b += '/* VB6 code uses the classic winsock names (gethostbyname, inet_addr, ...) */'
+    $b += '#define _WINSOCK_DEPRECATED_NO_WARNINGS'
+    $b += '/* winsock2.h must come before windows.h */'
+    $b += '#include <winsock2.h>'
+    $b += '#include <windows.h>'
+    $b += '#include <stdint.h>'
+    $b += '#include <shlwapi.h>'
+    $b += '#include <shlobj.h>'
+    $b += '#include <mmsystem.h>'
+    $b += '#include <dbghelp.h>'
+    $b += '#include <iphlpapi.h>'
+    $b += '#include <bcrypt.h>'
+    $b += '#include <ncrypt.h>'
+    $b += '#include <ole2.h>'
+    $b += '#include <oleauto.h>'
+    $b += '#include <olectl.h>'
+    $b += '/* NOTE: gdiplus.h is C++-only (class Gdiplus...). The GDI+ flat API is'
+    $b += ' * resolved with GetProcAddress instead - see below. */'
+    $b += ''
+    $b += '/* Import libs for the DLLs below. Adding one that is not needed is harmless:'
+    $b += ' * a static import lib is only pulled when a symbol from it is referenced. */'
+    foreach ($l in $libs) { $b += ('#pragma comment(lib, "' + $l + '.lib")') }
+    $b += ''
+    if ($needDynamic) {
+        $b += '/* GDI+ flat API lives in gdiplus.dll but its header is C++-only, so the'
+        $b += ' * symbols below are resolved by name at first use. */'
+        $b += 'static void* vb6_di_gdiplus_proc(const char* name) {'
+        $b += '    static HMODULE mod = NULL;'
+        $b += '    if (mod == NULL) { mod = LoadLibraryA("gdiplus.dll"); }'
+        $b += '    return (mod != NULL) ? (void*)GetProcAddress(mod, name) : NULL;'
+        $b += '}'
+        $b += ''
+    }
+    return $b
 }
 
-$content = ($banner + $bodies) -join "`r`n"
-[System.IO.File]::WriteAllText($OutFile, $content, (New-Object System.Text.UTF8Encoding($false)))
+if (-not (Test-Path $OutDir)) { New-Item -ItemType Directory -Path $OutDir | Out-Null }
 
-Write-Output ("stubs emitted: " + ($bodies | Where-Object { $_ -like '*/' }).Count)
-Write-Output ("written: " + $OutFile)
+$written = New-Object System.Collections.Generic.List[string]
+foreach ($fam in $families) {
+    $name = $fam.name
+    if ($bodies[$name].Count -eq 0) { continue }
+    $libs = @()
+    foreach ($l in $fam.libs) { if ($usedLibs[$name].ContainsKey($l)) { $libs += $l } }
+    $needDynamic = $usedLibs[$name].ContainsKey('__dynamic__')
+    $path = Join-Path $OutDir ('vb6_di_' + $name + '_stubs.c')
+    $content = ((New-Banner $name $libs $needDynamic $counts[$name]) + $bodies[$name]) -join "`r`n"
+    [System.IO.File]::WriteAllText($path, $content, (New-Object System.Text.UTF8Encoding($false)))
+    $written.Add($path)
+    Write-Output ('  ' + $name.PadRight(9) + ' -> ' + (Split-Path $path -Leaf) +
+                  '   stubs ' + $counts[$name] + '   libs ' + ($libs -join ','))
+}
+
+if ($bodies['unknown'].Count -gt 0) {
+    $path = Join-Path $OutDir 'vb6_di_unknown_stubs.c'
+    $content = ((New-Banner 'unknown' @() $false $counts['unknown']) + $bodies['unknown']) -join "`r`n"
+    [System.IO.File]::WriteAllText($path, $content, (New-Object System.Text.UTF8Encoding($false)))
+    $written.Add($path)
+    Write-Output ('  unknown   -> vb6_di_unknown_stubs.c   stubs ' + $counts['unknown'] + '   !!! no vb6_di_lib marker')
+}
+
+# ---------- 6. drop stale generated files ----------
+$produced = @{}
+foreach ($p in $written) { $produced[(Split-Path $p -Leaf)] = 1 }
+foreach ($f in Get-ChildItem $OutDir -File -Filter 'vb6_di_*_stubs.c') {
+    if (-not $produced.ContainsKey($f.Name)) {
+        Remove-Item $f.FullName
+        Write-Output ('  removed stale: ' + $f.Name)
+    }
+}
+
+Write-Output ("files written: " + $written.Count)
 Write-Output ''
-Write-Output '=== skipped (need hand-written stub) ==='
+Write-Output '=== skipped (hand-written or ordinal) ==='
 $skipped | ForEach-Object { Write-Output ('  ' + $_) }
 Write-Output ''
-Write-Output '=== vb6_di_* without generated prototype ==='
-$noProto | ForEach-Object { Write-Output ('  ' + $_) }
+Write-Output '=== vb6_di_* prototype without a vb6_di_lib marker ==='
+$noLib | ForEach-Object { Write-Output ('  ' + $_) }
 Write-Output ''
 Write-Output '=== skipped: by-value VB UDT parameter ==='
 $badUdt | ForEach-Object { Write-Output ('  ' + $_) }
