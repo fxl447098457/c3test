@@ -11,6 +11,7 @@
   - 待用户后续提供 vbman 单元测试
 
 ## changelog
+- 2026-09-17 RTL 头拆分：vb6rtl.h（1007 行）拆为伞头 16 行 + 7 子头（base/bstr/variant/builtin/array/class_com/runtime），同步 4 处嵌入管线，回归 82/0/1/83 零变化
 - 2026-09-17 清理：删 20 个纯占位空文件；同步 ai 文档旧路径；更新外壳 README / CLAUDE
 - 2026-09-16 源码拆分专题：巨型文件按家族拆到约 500 行/文件（RTL 3 个 + C++ 6 个，另含 backend 目录重组）
 - 2026-09-16 Fix 099（parser_expr.cpp）：归因过程中最大反转——诊断打印 0 命中证明问题根本不在 cgen，而在 parser：With 块内 Users.Decode .Rs 被误解析成链式成员访问而非“实参 .Rs”。Fix 077 的空格检测扩展到 obj.Method .Field 形态。-2
