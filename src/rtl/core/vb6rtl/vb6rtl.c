@@ -144,6 +144,12 @@ intptr_t vb6_VariantToLongPtr(vb6_VARIANT v) {
         case vb6_vtDouble:  return (intptr_t)round(v.dblVal);
         case vb6_vtCurrency:return (intptr_t)(v.cyVal / 10000);
         case vb6_vtBSTR:    return (intptr_t)vb6_Val(v.bstrVal);
+        case VT_I8:         return (intptr_t)v.llVal;
+        case VT_UI8: {      /* 位模式按无符号解释 */
+            uint64_t uv;
+            memcpy(&uv, &v.llVal, sizeof(uv));
+            return (intptr_t)uv;
+        }
         default:            return 0;
     }
 }

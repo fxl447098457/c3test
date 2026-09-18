@@ -483,6 +483,15 @@ std::string CCodeGen::getRuntimeParamCType(const std::string& funcName, size_t p
         {"vb6_ReleaseObject",   {"void**"}},
         {"vb6_NewObject",       {"const wchar_t*"}},
         {"vb6_CallByName",      {"void*", "BSTR", "int32_t"}},
+        // Fix 113: UserControl 宿主内建方法 (vb6rtl_userctl.h) — 裸名书写,
+        // cgen 映射为 vb6_UserControl_<Member> (cgen_expr_ident_builtin.inc).
+        // 此前不在运行时参数表, 实参为 vb6_ComCall(...) 等 COM Variant 时缺 BSTR
+        // 提取 → 传入 GetTextExtentPoint32W/字符串 API 崩溃. 注册 BSTR 形参.
+        {"vb6_UserControl_TextWidth",      {"BSTR"}},
+        {"vb6_UserControl_TextHeight",     {"BSTR"}},
+        {"vb6_UserControl_AsyncRead",      {"BSTR", "int32_t", "BSTR", "int32_t"}},
+        {"vb6_UserControl_PropertyChanged", {"BSTR"}},
+        {"vb6_UserControl_CancelAsyncRead", {"BSTR"}},
     };
     auto it = table.find(funcName);
     if (it != table.end() && paramIdx < it->second.size()) {

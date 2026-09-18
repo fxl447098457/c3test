@@ -91,8 +91,13 @@
                 emitExpr(*firstArg);
                 return;
             }
+            // Fix 117c: 参数是Single(float)变量 → vt_R4 语义 (必须优先于 Double 判定,
+            // 因为 Single 变量同时登记在 knownDoubleVars_ 里以复用既有取值路径)
+            if (knownSingleVars_.count(argLower)) {
+                callee = "vb6_CStrSingle";
+            }
             // 参数是int32_t/Long变量 → 用vb6_CStrLong
-            if (knownLongVars_.count(argLower)) {
+            else if (knownLongVars_.count(argLower)) {
                 callee = "vb6_CStrLong";
             }
             // 参数是double变量 → 用vb6_CStrDbl
@@ -114,7 +119,9 @@
             }
             if (argType == Vb6Type::Long || argType == Vb6Type::Integer) {
                 callee = "vb6_CStrLong";
-            } else if (argType == Vb6Type::Double || argType == Vb6Type::Single) {
+            } else if (argType == Vb6Type::Single) {
+                callee = "vb6_CStrSingle";   // Fix 117c: VT_R4 语义
+            } else if (argType == Vb6Type::Double) {
                 callee = "vb6_CStrDbl";
             }
             // P25: COM属性取值已在args[0]中, 根据取值函数选择CStr变体或跳过
@@ -135,7 +142,20 @@
         // (如 CStr((int32_t)GetCurrentThreadId()) / CStr(模块级Long变量) →
         //  vb6_CStr(vb6_VariantFromValue(x)), 由 _Generic 按实参类型自动包装, 消除 C2440)
         if (callee == "vb6_CStr" && !args.empty()) {
-            lastExpr_ = "vb6_CStr(vb6_VariantFromValue(" + args[0] + "))";
+            // Fix 121: 实参是**裸 COM 结果** (vb6_ComCall/ComGetProp/ComGetObjectProp
+            // 返回 void*, 承载 COM VARIANT*) 时必须用 vb6_VariantFromComResult 解引用 —
+            // vb6_VariantFromValue 会按 _Generic 匹配 void* → 得到空 Variant, 于是
+            // CStr(Collection.Item(i)) 打印空串; 图表把系列值读成空/噪声 →
+            // 坐标轴量级完全错 (Charts 2020 柱图/面积图 Y 轴数字大 100 倍)。
+            const std::string& a0 = args[0];
+            bool comRes121 = (a0.compare(0, 12, "vb6_ComCall(") == 0)
+                || (a0.compare(0, 15, "vb6_ComGetProp(") == 0)
+                || (a0.compare(0, 21, "vb6_ComGetObjectProp(") == 0);
+            if (comRes121) {
+                lastExpr_ = "vb6_CStr(vb6_VariantFromComResult(" + a0 + "))";
+            } else {
+                lastExpr_ = "vb6_CStr(vb6_VariantFromValue(" + a0 + "))";
+            }
             return;
         }
     }
@@ -313,7 +333,14 @@
             argIsDefVariant = cExprIsVariant(args[0]);
         }
         if (!argIsDefVariant) {
-            args[0] = "vb6_VariantFromValue(" + args[0] + ")";
+            // Fix 121b: 同 Fix 121 — 裸 COM 结果必须解引用 (VariantFromComResult),
+            // 否则 _Generic 按 void* 包装得到空 Variant。
+            bool comRes121b = (args[0].compare(0, 12, "vb6_ComCall(") == 0)
+                || (args[0].compare(0, 15, "vb6_ComGetProp(") == 0)
+                || (args[0].compare(0, 21, "vb6_ComGetObjectProp(") == 0);
+            args[0] = comRes121b
+                ? "vb6_VariantFromComResult(" + args[0] + ")"
+                : "vb6_VariantFromValue(" + args[0] + ")";
             argList.clear();
             for (size_t i = 0; i < args.size(); i++) {
                 if (i > 0) argList += ", ";

@@ -36,6 +36,10 @@
         case vb6_vtCurrency:
             numVal = expr.cyVal / 10000.0; isNumeric = 1; break;
         case vb6_vtDate: {
+            // Fix 118: 带日期/时间格式串时走日期格式化 (此前落进数值分支 →
+            // Format(DateSerial(2020,1,1),"mmm") 输出 "43831")
+            if (fmt && vb6_BSTR_Len(fmt) > 0 && vb6_fmtIsDateFormat(fmt))
+                return vb6_fmtDateSerial(expr.dblVal, fmt);
             if (!fmt) {
                 SYSTEMTIME st;
                 if (VariantTimeToSystemTime(expr.dblVal, &st)) {

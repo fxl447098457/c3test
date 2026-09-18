@@ -255,6 +255,12 @@ bool MsvcDriver::compileAndLink(const MsvcDriverOptions& options) {
         cmd << " ole32.lib oleaut32.lib uuid.lib advapi32.lib user32.lib shell32.lib gdi32.lib";
     }
 
+    // P-debug: 调试构建顺带输出 .map, 便于 crashctx.py 符号化崩溃现场
+    // 注: 不可用 /MAPINFO:LINES — 本工程 link.exe (14.29.30159) 仅支持
+    //     /MAPINFO:{EXPORTS|PDATA}, 加了会 LNK1117 syntax error.
+    //     精确到"生成 C 行号"请改用 dbghelp+PDB 或 cl /FAcs 反汇编清单.
+    if (options.debugInfo) cmd << " /MAP";
+
     // DualArch: /MACHINE flag for x86 target (x64 is default, no explicit flag needed)
     if (options.arch == "x86") {
         cmd << " /MACHINE:X86";

@@ -61,6 +61,26 @@
             if (!argIsVariant && !argIsVariantArr) {
                 argIsVariant = cExprIsVariant(argVal);
             }
+            // Fix 113i: 形参是**具体类型** (String/数值/对象) 而实参是**裸 COM 结果**
+            // (vb6_ComCall / vb6_ComGetProp / vb6_ComGetObjectProp 返回 void*,
+            // 承载一个 COM VARIANT*) — 语义即 Variant, 必须判为 Variant 才能触发
+            // 下方按 paramBase 的提取 (VariantToString / VariantToLong ...).
+            // 否则 void* 被裸传给 BSTR 形参, GDI+ 把垃圾指针当字符串 → 全落空,
+            // 渲染成一排"豆腐块"空框.
+            //   Charts 2020 ucChartBar.DrawVertical X 轴月份标签:
+            //     DrawText hGraphics, cAxisItem.Item(i), ... (第 2 参 ByVal As String)
+            //     → 原生成 vb6_ucChartBar_DrawText((void*)me, hGraphics,
+            //        vb6_ComCall(me->cAxisItem, L"Item", ..., 1), ...) 乱码.
+            // 与 Fix 113c(运行时/内置函数参数分支) 同一检测; Fix 113 把
+            // vb6_ComCall( 从 cExprIsVariant 前缀表回退后, 需要在两条实参发射
+            // 路径上都补回该判断 —— 本条补的是"已知形参类型"这条路径.
+            if (!argIsVariant && !argIsVariantArr) {
+                bool argIsComRes113i =
+                    (argVal.compare(0, 12, "vb6_ComCall(") == 0)
+                    || (argVal.compare(0, 15, "vb6_ComGetProp(") == 0)
+                    || (argVal.compare(0, 21, "vb6_ComGetObjectProp(") == 0);
+                if (argIsComRes113i) argIsVariant = true;
+            }
             if (argIsVariant || argIsVariantArr) {
                 // Fix 090c1: 实参顶层是 COM 结果 (void* 承载 Variant) 且判为
                 // Variant — 提取前先 vb6_VariantFromComResult (同 090c0).
@@ -101,12 +121,18 @@
                     // 数组参数: 从 Variant 提取 SafeArray1D*
                     argVal = "vb6_VariantToSafeArray1D(" + argVal + ")";
                 } else if (paramBase == Vb6Type::Long || paramBase == Vb6Type::Integer
-                           || paramBase == Vb6Type::Byte || paramBase == Vb6Type::Boolean
-                           || paramBase == Vb6Type::LongPtr || paramBase == Vb6Type::ULong) {
-                    // Fix 092q: LongPtr (intptr_t) / ULong ByVal 形参接收 COM 属性
-                    // Variant 时也需提取为数值; 缺此项导致 C2440
-                    // (vb6_VARIANT 转 intptr_t), 如 SelectObject(hDC, pPicture.Handle).
+                           || paramBase == Vb6Type::Byte || paramBase == Vb6Type::Boolean) {
+                    // Fix 092q: Long/Integer/Byte/Boolean ByVal 形参接收 Variant →
+                    // vb6_VariantToLong (int32 提取).
                     argVal = "vb6_VariantToLong(" + argVal + ")";
+                } else if (paramBase == Vb6Type::LongPtr || paramBase == Vb6Type::ULong) {
+                    // Fix 092r (Charts 2020 x64): LongPtr/ULong ByVal 形参接收 Variant
+                    // 实参 (如 GetTextSize 里 Dim hFont 无类型 = Variant, 存 GDI+ Font
+                    // 对象指针), 必须用 vb6_VariantToLongPtr (intptr_t, 完整64位指针) —
+                    // 原生成 vb6_VariantToLong 把 GDI+ 对象指针截断成 32 位 → 绘图时
+                    // GdipMeasureString 内解引用坏指针 → 0xC0000005 (x86 下 LongPtr=32
+                    // 位无截断, 故仅 x64 崩溃).
+                    argVal = "vb6_VariantToLongPtr(" + argVal + ")";
                 } else if (paramBase == Vb6Type::Double || paramBase == Vb6Type::Single
                            || paramBase == Vb6Type::Currency || paramBase == Vb6Type::Date) {
                     // Fix 090r: Date 形参 (OLE date = double) 与 Currency 同取
@@ -197,6 +223,24 @@
             if (!rtParamType.empty() && rtParamType != "vb6_VARIANT"
                  && rtParamType != "vb6_VARIANT*") {
                 bool argIsVariant = cExprIsVariant(argVal);
+                // Fix 113c: 实参是裸 COM 结果 (void* 承载 COM VARIANT*) 时, 语义即
+                // Variant — 必须判为 Variant 才能触发下方 Variant→具体类型提取
+                // (vb6_VariantFromComResult + 按 rtParamType 提取). 否则 void* 裸传
+                // 给 BSTR/String 形参 (如 UserControl.TextWidth(cAxisItem.Item(i)))
+                // 在 C 层 void*→BSTR 隐式转换, 运行时把垃圾指针喂给
+                // GetTextExtentPoint32W 崩溃 (Charts 2020 ucChartBar_DrawVertical).
+                // 注意: 仅裸 vb6_ComCall/ComGetProp/ComGetObjectProp (返回 void*);
+                // vb6_ComCallInt/BSTR/Double/Object 返回具体类型, 前缀不会匹配.
+                // 此检测刻意不进 cExprIsVariant (Fix 113 已回退): 那样会让
+                // vb6_ComCall 在 ByVal Variant 打包分支 (Fix 086) 被误判为"已装箱
+                // vb6_VARIANT", 跳过 vb6_VariantFromValue 导致 void*→vb6_VARIANT C2440.
+                if (!argIsVariant) {
+                    bool argIsComRes113 =
+                        (argVal.compare(0, 12, "vb6_ComCall(") == 0)
+                        || (argVal.compare(0, 15, "vb6_ComGetProp(") == 0)
+                        || (argVal.compare(0, 21, "vb6_ComGetObjectProp(") == 0);
+                    if (argIsComRes113) argIsVariant = true;
+                }
                 // 也检查已知 Variant 变量
                 if (!argIsVariant && node.positional[i]->kind == ASTNodeKind::IdentifierExpr) {
                     auto& idArg = static_cast<IdentifierExpr&>(*node.positional[i]);
@@ -219,6 +263,27 @@
                             static_cast<IdentifierExpr&>(*callNode89i.callee).name;
                         std::transform(calleeLower89i.begin(), calleeLower89i.end(),
                                        calleeLower89i.begin(), ::tolower);
+                        // Fix 113d: 多态内置 IIf 的符号类型登记为 Variant
+                        // (semantic_analyzer builtin_funcs.inc: addBuiltinFunc("IIf",
+                        // Vb6Type::Variant)), 但 codegen 已按上下文发出**具体类型**
+                        // 版本 vb6_IIfLong/vb6_IIfDouble/vb6_IIfBSTR — 三者 C 返回
+                        // 类型分别是 int32_t/double/BSTR, 均**不是** vb6_VARIANT.
+                        // 此处若仍按符号类型判为 Variant, 会对具体类型结果二次套
+                        // vb6_VariantToLong/String 提取 → C2440
+                        // (int32_t/double/BSTR → vb6_VARIANT). Charts 2020
+                        // LabelPlus.PictureFromURL:
+                        //   UserControl.AsyncRead sUrl, vbAsyncTypeByteArray, "URL",
+                        //       IIf(UseCache, 0, vbAsyncReadForceUpdate)
+                        //   → 原生成 vb6_VariantToLong(vb6_IIfLong(...)) C2440.
+                        // 注: vb6_IIfVariant( 才是真正的 vb6_VARIANT, 仍需按符号
+                        // 判为 Variant (用于 Variant→BSTR/数值 提取).
+                        // 语义与 isDefinitelyVariantExpr 的 isPolymorphicBuiltin
+                        // 一致 (iif/choose/switch), 此处仅针对已发射的 IIf 具体形态.
+                        bool emittedConcretePoly89i =
+                            argVal.rfind("vb6_IIfLong(", 0) == 0
+                            || argVal.rfind("vb6_IIfDouble(", 0) == 0
+                            || argVal.rfind("vb6_IIfBSTR(", 0) == 0;
+                        if (!emittedConcretePoly89i)
                         for (const auto& [k89i, s89i] : symTab_.moduleScope()->symbols()) {
                             if (s89i->kind != SymbolKind::Function
                                 && s89i->kind != SymbolKind::PropertyGet) continue;
@@ -316,6 +381,37 @@
                         argVal = "vb6_VariantToSafeArray1D(" + argVal + ")";
                     }
                 }
+            }
+        }
+        // Fix 113j: ByRef **Variant** 形参 + 具体类型左值实参归一.
+        // 很多 .ctl 的辅助函数写成 `text As Variant` (无 ByVal → ByRef), C 形参
+        // 是 vb6_VARIANT*. 若实参是 BSTR/Long/Double 之类**具体的左值**
+        // (UDT 字段 / me->字段 / VB6_SA_AT(...).field), 前面 ByRef 链只发出
+        // &(左值) → 类型是 BSTR*/int32_t*, 被调方按 VARIANT 解析 → vt 与数据字段
+        // 全部错位 → 文本渲染成一排"豆腐块"空框.
+        //   Charts 2020 ucTreeMaps.DrawText(text As Variant):
+        //     DrawText hGraphics, m_Serie(i).SerieName, ...
+        //   原生成 vb6_ucTreeMaps_DrawText(..., &(VB6_SA_AT(...).SerieName), ...)
+        //   = BSTR* 传进 vb6_VARIANT* 形参.
+        // 这里按实参 VB 类型改发字段式 VARIANT 复合字面量.
+        // 实参本身就是 Variant 左值时 inferExprType 返回 Variant → 不匹配任何
+        // 分支, 保持原 &(x) 不变 (这是正确的, 不能破坏).
+        if (isByRef && i < calleeParams.size()
+            && calleeParams[i].type == Vb6Type::Variant
+            && argVal.size() > 3 && argVal.compare(0, 2, "&(") == 0
+            && argVal.back() == ')') {
+            Vb6Type argT113j = inferExprType(*node.positional[i]);
+            std::string inner113j = argVal.substr(2, argVal.size() - 3);
+            if (argT113j == Vb6Type::String) {
+                argVal = "(&(vb6_VARIANT){.vt=VT_BSTR, .bstrVal=" + inner113j + "})";
+            } else if (argT113j == Vb6Type::Long || argT113j == Vb6Type::Integer
+                       || argT113j == Vb6Type::Byte) {
+                argVal = "(&(vb6_VARIANT){.vt=VT_I4, .lVal=(int32_t)(" + inner113j + ")})";
+            } else if (argT113j == Vb6Type::Double || argT113j == Vb6Type::Single
+                       || argT113j == Vb6Type::Currency || argT113j == Vb6Type::Date) {
+                argVal = "(&(vb6_VARIANT){.vt=VT_R8, .dblVal=(double)(" + inner113j + ")})";
+            } else if (argT113j == Vb6Type::Boolean) {
+                argVal = "(&(vb6_VARIANT){.vt=VT_BOOL, .boolVal=(int16_t)(" + inner113j + ")})";
             }
         }
         args.push_back(std::move(argVal));

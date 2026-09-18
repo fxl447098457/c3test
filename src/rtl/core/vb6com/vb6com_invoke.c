@@ -187,6 +187,23 @@ void* vb6_ComCallByDispid(void* disp, int32_t dispid,
 // COM属性Get (返回VARIANT*)
 void* vb6_ComGetProp(void* disp, const wchar_t* propName) {
     if (!disp) return NULL;
+    /* Fix 125: 字体结构体 (非 COM 对象) 直接读字段 — 生成代码把 `With <font>.Name`
+       编译成 COM 读, 对结构体做 Invoke 会崩。 */
+    if (vb6_UC_IsFont(disp)) {
+        int32_t kind = -1;
+        void* fp = vb6_UC_FontField(disp, propName, &kind);
+        VARIANT* res = (VARIANT*)calloc(1, sizeof(VARIANT));
+        if (!res) return NULL;
+        if (fp) {
+            switch (kind) {
+                case 0: res->vt = VT_BSTR; res->bstrVal = SysAllocString(*(BSTR*)fp); break;
+                case 1: res->vt = VT_R4;   res->fltVal = *(float*)fp; break;
+                case 2: res->vt = VT_I2;   res->iVal = *(int16_t*)fp; break;
+                default: res->vt = VT_I4;  res->lVal = *(int32_t*)fp; break;
+            }
+        }
+        return (void*)res;
+    }
     /* Fix 112: 宿主对象分派 (见 vb6_ComCall 注释) */
     if (vb6_Host_IsHostObject(disp)) {
         char hout[64];
@@ -284,6 +301,24 @@ void* vb6_ComGetPropArg(void* disp, const wchar_t* propName,
 // COM属性Set (值类型)
 // COM属性Set (值类型)
 void vb6_ComSetProp(void* disp, const wchar_t* propName, void* value_void) {
+    /* Fix 125: 字体结构体 (非 COM 对象) 直接写字段 —— 这是 `Property Set X_Font` 里
+       `With m_X_Font: .Name = New_Font.Name ...` 的实现路径; 走 Invoke 必崩。 */
+    if (disp && vb6_UC_IsFont(disp)) {
+        int32_t kind = -1;
+        void* fp = vb6_UC_FontField(disp, propName, &kind);
+        if (fp && value_void) {
+            VARIANT v = *(VARIANT*)value_void;
+            switch (kind) {
+                case 0: *(BSTR*)fp = (v.vt == VT_BSTR && v.bstrVal)
+                                     ? SysAllocString(v.bstrVal) : NULL; break;
+                case 1: *(float*)fp = (float)vb6_VariantToDouble(v); break;
+                case 2: *(int16_t*)fp = (int16_t)vb6_VariantToDouble(v); break;
+                default: *(int32_t*)fp = (int32_t)vb6_VariantToDouble(v); break;
+            }
+        }
+        free(value_void);
+        return;
+    }
     /* Fix 112: 宿主对象分派 (见 vb6_ComCall 注释) */
     if (disp && vb6_Host_IsHostObject(disp)) {
         char hin[64];

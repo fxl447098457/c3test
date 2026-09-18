@@ -256,7 +256,9 @@ void CCodeGen::visit(ConstDecl& node) {
             knownBstrVars_.insert(lower);
         } else if (cType == "int32_t" || cType == "int16_t" || cType == "VBABOOL") {
             knownLongVars_.insert(lower);
-        } else if (cType == "double" || cType == "float") {
+        } else if (cType == "float") {
+            knownSingleVars_.insert(lower); knownDoubleVars_.insert(lower);   // Fix 117c: VT_R4
+        } else if (cType == "double") {
             knownDoubleVars_.insert(lower);
         } else if (cType == "vb6_VARIANT") {
             knownVariantVars_.insert(lower);

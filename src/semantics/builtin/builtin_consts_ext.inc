@@ -26,8 +26,10 @@
     addConst("vbWindowBackground", Vb6Type::Long, -2147483643LL);
     addConst("vbWindowFrame", Vb6Type::Long, -2147483642LL);
     addConst("vbMenuText", Vb6Type::Long, -2147483641LL);
-    addConst("vbWindowText", Vb6Type::Long, -2147483640LL);
     addConst("vbTitleBarText", Vb6Type::Long, -2147483639LL);
+    // Fix 131: vbWindowTitle (0x80000008) 缺失, vbWindowText 原误为 ...640
+    addConst("vbWindowTitle", Vb6Type::Long, -2147483640LL);
+    addConst("vbWindowText", Vb6Type::Long, -2147483639LL);
     addConst("vbActiveBorder", Vb6Type::Long, -2147483638LL);
     addConst("vbInactiveBorder", Vb6Type::Long, -2147483637LL);
     addConst("vbApplicationWorkspace", Vb6Type::Long, -2147483636LL);
@@ -41,8 +43,13 @@
     addConst("vb3DHighlight", Vb6Type::Long, -2147483628LL);
     addConst("vb3DDKShadow", Vb6Type::Long, -2147483627LL);
     addConst("vb3DLight", Vb6Type::Long, -2147483626LL);
-    addConst("vb3DFace", Vb6Type::Long, -2147483625LL);
-    addConst("vb3DShadow", Vb6Type::Long, -2147483624LL);
+    // Fix 131: 原表 vb3DFace=-2147483625 / vb3DShadow=-2147483624 整体错位 ——
+    // 那两个值其实是 vbInfoText/vbInfoBackground (淡黄), 导致仪表 Caption2
+    // "Band/Visitors/Volume" 渲染成淡黄色而非 vb3DShadow 深灰。
+    addConst("vbInfoText", Vb6Type::Long, -2147483625LL);       // 0x80000017
+    addConst("vbInfoBackground", Vb6Type::Long, -2147483624LL); // 0x80000018
+    addConst("vb3DFace", Vb6Type::Long, -2147483633LL);         // 0x8000000F = vbButtonFace
+    addConst("vb3DShadow", Vb6Type::Long, -2147483632LL);       // 0x80000010 = vbButtonShadow
     // P22: IME status constants
     addConst("vbIMEModeNoControl", Vb6Type::Long, 0);
     addConst("vbIMEModeOn", Vb6Type::Long, 1);

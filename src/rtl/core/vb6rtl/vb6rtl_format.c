@@ -34,6 +34,126 @@
 #pragma comment(lib, "user32.lib")
 #pragma comment(lib, "kernel32.lib")
 
+// ============================================================
+// Fix 118: VB6 用户自定义日期/时间格式串 (mmm / mmmm / yyyy / dd / dddd / hh:nn:ss ...)
+// ============================================================
+// 此前 VT_DATE + 格式串一律落入"数值格式化"分支, 于是
+//   Format(DateSerial(2020,1,1), "mmm") → "43831" (日期序列号)
+// Charts 2020 的 ucChartBar X 轴月份标签 (Form2: Format(DateSerial(2020,i,1),"mmm"))
+// 因此变成一串数字, 旋转后看成了乱码。
+static int vb6_fmtIsNamedFormat(BSTR fmt) {
+    static const wchar_t* kNames[] = {
+        L"general number", L"currency", L"fixed", L"standard", L"percent",
+        L"scientific", L"yes/no", L"true/false", L"on/off",
+        L"long date", L"short date", L"long time", L"short time"};
+    int n = fmt ? SysStringLen(fmt) : 0;
+    if (n <= 0 || n >= 63) return 0;
+    wchar_t buf[64];
+    for (int i = 0; i < n; i++) buf[i] = towlower(fmt[i]);
+    buf[n] = 0;
+    for (size_t k = 0; k < sizeof(kNames) / sizeof(kNames[0]); k++)
+        if (wcscmp(buf, kNames[k]) == 0) return 1;
+    return 0;
+}
+
+static int vb6_fmtIsDateFormat(BSTR fmt) {
+    int n = fmt ? SysStringLen(fmt) : 0;
+    if (n <= 0) return 0;
+    if (vb6_fmtIsNamedFormat(fmt)) return 0;   // 命名格式走既有分支
+    int hasY = 0, hasD = 0, hasH = 0, hasM = 0, hasS = 0, hasN = 0;
+    for (int i = 0; i < n; i++) {
+        switch (towlower(fmt[i])) {
+            case L'y': hasY = 1; break;
+            case L'd': hasD = 1; break;
+            case L'h': hasH = 1; break;
+            case L'm': hasM = 1; break;   // m 在日期格式里=月, 时间格式里=分 (见下方 prevHour)
+            case L's': hasS = 1; break;
+            case L'n': hasN = 1; break;
+        }
+    }
+    return hasY || hasD || hasH || hasS || hasN || hasM;
+}
+
+static void vb6_fmtAppendW(wchar_t* out, size_t cap, size_t* o, const wchar_t* s) {
+    size_t l = s ? wcslen(s) : 0;
+    if (*o + l < cap - 1) { wcscpy(out + *o, s); *o += l; }
+}
+static void vb6_fmtAppendN(wchar_t* out, size_t cap, size_t* o, int value, int digits) {
+    wchar_t tmp[16];
+    if (digits == 2) swprintf(tmp, 16, L"%02d", value);
+    else if (digits == 4) swprintf(tmp, 16, L"%04d", value);
+    else swprintf(tmp, 16, L"%d", value);
+    vb6_fmtAppendW(out, cap, o, tmp);
+}
+
+static BSTR vb6_fmtDateSerial(double serial, BSTR fmt) {
+    SYSTEMTIME st;
+    if (!VariantTimeToSystemTime(serial, &st)) return vb6_BSTR_FromStr(L"");
+    static const wchar_t* kMonLong[12] = {L"January", L"February", L"March", L"April",
+        L"May", L"June", L"July", L"August", L"September", L"October", L"November", L"December"};
+    static const wchar_t* kMonShort[12] = {L"Jan", L"Feb", L"Mar", L"Apr", L"May", L"Jun",
+        L"Jul", L"Aug", L"Sep", L"Oct", L"Nov", L"Dec"};
+    static const wchar_t* kDayLong[7] = {L"Sunday", L"Monday", L"Tuesday", L"Wednesday",
+        L"Thursday", L"Friday", L"Saturday"};
+    static const wchar_t* kDayShort[7] = {L"Sun", L"Mon", L"Tue", L"Wed", L"Thu", L"Fri", L"Sat"};
+
+    int month = st.wMonth, day = st.wDay, year = st.wYear;
+    if (month < 1) month = 1; if (month > 12) month = 12;
+    if (day < 1) day = 1; if (day > 31) day = 31;
+    int dow = st.wDayOfWeek; if (dow < 0 || dow > 6) dow = 0;
+
+    wchar_t out[256]; out[0] = 0; size_t o = 0;
+    int n = SysStringLen(fmt);
+    int prevHour = 0;   // 紧邻 t 的 m 视为分钟 (VB6: "hh:mm" 的 mm 是分)
+    for (int i = 0; i < n; ) {
+        wchar_t c = fmt[i];
+        int j = i; while (j < n && fmt[j] == c) j++;
+        int cnt = j - i;
+        wchar_t lc = towlower(c);
+        switch (lc) {
+            case L'y':
+                if (cnt >= 4) vb6_fmtAppendN(out, 256, &o, year, 4);
+                else          vb6_fmtAppendN(out, 256, &o, year % 100, 2);
+                prevHour = 0;
+                break;
+            case L'm':
+                if (prevHour && cnt <= 2)   vb6_fmtAppendN(out, 256, &o, st.wMinute, cnt == 2 ? 2 : 1);
+                else if (cnt >= 4)          vb6_fmtAppendW(out, 256, &o, kMonLong[month - 1]);
+                else if (cnt == 3)          vb6_fmtAppendW(out, 256, &o, kMonShort[month - 1]);
+                else                        vb6_fmtAppendN(out, 256, &o, month, cnt == 2 ? 2 : 1);
+                break;
+            case L'd':
+                if (cnt >= 4)     vb6_fmtAppendW(out, 256, &o, kDayLong[dow]);
+                else if (cnt == 3) vb6_fmtAppendW(out, 256, &o, kDayShort[dow]);
+                else if (cnt == 2) vb6_fmtAppendN(out, 256, &o, day, 2);
+                else               vb6_fmtAppendN(out, 256, &o, day, 1);
+                prevHour = 0;
+                break;
+            case L'h': {
+                int h = st.wHour % 12; if (h == 0) h = 12;
+                vb6_fmtAppendN(out, 256, &o, h, cnt == 2 ? 2 : 1);
+                prevHour = 1;
+                break;
+            }
+            case L'n':
+                vb6_fmtAppendN(out, 256, &o, st.wMinute, cnt == 2 ? 2 : 1);
+                prevHour = 0;
+                break;
+            case L's':
+                vb6_fmtAppendN(out, 256, &o, st.wSecond, cnt == 2 ? 2 : 1);
+                prevHour = 0;
+                break;
+            default:
+                for (int k = 0; k < cnt; k++)
+                    if (o < 254) { out[o++] = c; out[o] = 0; }
+                if (lc != L':' && lc != L' ') prevHour = 0;
+                break;
+        }
+        i = j;
+    }
+    return vb6_BSTR_FromStr(out);
+}
+
 BSTR vb6_Format(vb6_VARIANT expr, BSTR fmt) {
 #include "vb6rtl_format_extract.inc"
 #include "vb6rtl_format_parse.inc"

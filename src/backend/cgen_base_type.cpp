@@ -32,7 +32,12 @@ std::string CCodeGen::mapType(Vb6Type type) const {
         case Vb6Type::LongPtr: cType = "intptr_t"; break;   // Fix 081e: architecture-width integer
         case Vb6Type::Single:   cType = "float"; break;
         case Vb6Type::Double:   cType = "double"; break;
-        case Vb6Type::Currency: cType = "int64_t"; break;   // scaled integer
+        // Fix 126: Currency = 64bit/10000 (4 位小数) 的**值** —— 与 Date 一样按值语义
+        // 映射为 double。此前映射 int64_t(存放大整数), 而表达式与 VARIANT 打包都按
+        // 值使用, 于是 `yRange = yRange + CCur(step)` 每步被放大 10000 倍
+        // (Charts 2020 坐标轴数字与柱高严重不符)。放大整数只存在于 VT_CY 变体里,
+        // 由读取侧除回来 (rtl: vb6_VariantToDouble / vb6_Format 的 vtCurrency 分支)。
+        case Vb6Type::Currency: cType = "double"; break;
         case Vb6Type::Date:     cType = "double"; break;    // OLE date
         case Vb6Type::String:   cType = "BSTR"; break;      // wchar_t* wrapper
         case Vb6Type::Object:   cType = "void*"; break;     // IDispatch* → void* for now
@@ -71,7 +76,7 @@ std::string CCodeGen::mapComType(Vb6Type type) const {
         case Vb6Type::Long:     return "int32_t";
         case Vb6Type::LongPtr: return "intptr_t";  // Fix 081e        case Vb6Type::Single:   return "float";
         case Vb6Type::Double:   return "double";
-        case Vb6Type::Currency: return "int64_t";
+        case Vb6Type::Currency: return "double";   // Fix 126: 值语义
         case Vb6Type::Date:     return "double";
         case Vb6Type::String:   return "BSTR";
         case Vb6Type::Object:   return "IUnknown*";

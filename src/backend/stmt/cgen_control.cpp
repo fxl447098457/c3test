@@ -297,7 +297,11 @@ void CCodeGen::visit(ForEachStmt& node) {
             std::string paTmp092q = "_pa_v" + std::to_string(tmpIdx);
             if (feVarIsVariant) {
                 c_.emitLine(paTmp092q + " = " + paGet092q + ";");
-                c_.emitLine(varAcc + " = vb6_VariantFromComResult(&" + paTmp092q + ");");
+                // Fix 176: ParamArray 的 For Each 元素在栈上 (VARIANT 槽位),
+                // vb6_VariantFromComResult 尾部会 free(pv) 释放堆宿主 VARIANT,
+                // 对栈地址 free → 堆损坏 (0xC0000374). 栈上源用
+                // vb6_VariantFromStackVARIANT (P24-03, 不释放源).
+                c_.emitLine(varAcc + " = vb6_VariantFromStackVARIANT(&" + paTmp092q + ");");
             } else if (elemCType == "BSTR") {
                 c_.emitLine(varAcc + " = vb6_PA_GetBSTR(" + arrRef091f + ", " + idxVar + ");");
             } else if (elemCType == "double") {

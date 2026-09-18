@@ -37,6 +37,67 @@
     }
     // 为每个控件生成CreateWindow调用
     ctrlId = 100;
+
+    // Fix 127/128: Property Set 型字体属性 —— 走 Fix 128 的"Get + 原地覆写字段"通道
+    // (不调用 Set, 因其实现体末尾的 Refresh 会在 CreateWorks 阶段把图表置空)。
+    // 环境变量 C3_FONT_SET=1 可临时打开旧的直接调用路径以便对照。
+    const bool kApplyFontSet127 = ([] {
+        const char* e = std::getenv("C3_FONT_SET");
+        return e && *e && *e != '0';
+    })();
+    (void)kApplyFontSet127;
+
+    // Fix 119: .frm 的 BeginProperty Font 块 → 构造 vb6_ComIface_Font 对象。
+    // VB6 里每个控件实例都持有自己的 Font 对象, 且控件 InitProperties 常以
+    // UserControl.Font 为基准 (如 TitleFont.Size = Font.Size + 8); 此前字体块被
+    // 整体跳过, 所有控件都退回默认字体 → 字号/文字测量/整体布局全错。
+    auto emitFrmFontObj = [&](const FrmPropertyBlock& blk, const std::string& varName) {
+        std::string nm = "MS Sans Serif";
+        double sz = 8.25;
+        long weight = 400, charset = 0;
+        long bBold = 0, bItalic = 0, bUnder = 0, bStrike = 0;
+        auto it = blk.properties.find("Name");
+        if (it != blk.properties.end()) {
+            nm = it->second.rawText;
+            if (nm.size() >= 2 && nm.front() == '"' && nm.back() == '"')
+                nm = nm.substr(1, nm.size() - 2);
+        }
+        it = blk.properties.find("Size");
+        if (it != blk.properties.end())
+            sz = (it->second.type == FrmValueType::Float) ? it->second.floatValue
+                                                          : (double)it->second.intValue;
+        it = blk.properties.find("Weight");
+        if (it != blk.properties.end()) weight = (long)it->second.intValue;
+        it = blk.properties.find("Charset");
+        if (it != blk.properties.end()) charset = (long)it->second.intValue;
+        it = blk.properties.find("Bold");
+        if (it != blk.properties.end()) bBold = (long)it->second.intValue;
+        it = blk.properties.find("Italic");
+        if (it != blk.properties.end()) bItalic = (long)it->second.intValue;
+        it = blk.properties.find("Underline");
+        if (it != blk.properties.end()) bUnder = (long)it->second.intValue;
+        it = blk.properties.find("Strikethrough");
+        if (it != blk.properties.end()) bStrike = (long)it->second.intValue;
+        // 常规字重(400) 时 VB6 的 Bold 由 Weight>=700 推导
+        if (weight >= 700) bBold = -1;
+
+        c_.emitLine("{ vb6_ComIface_Font* " + varName
+                  + " = (vb6_ComIface_Font*)vb6_UC_NewFont();");
+        c_.emitLine("  if (" + varName + ") {");
+        c_.emitLine("    " + varName + "->Name = vb6_BSTR_FromStr(L\"" + escapeWideCString(nm) + "\");");
+        {
+            char szBuf[64];
+            snprintf(szBuf, sizeof(szBuf), "%.4g", sz);
+            c_.emitLine("    " + varName + "->Size = " + std::string(szBuf) + "f;");
+        }
+        c_.emitLine("    " + varName + "->Weight = " + std::to_string(weight) + ";");
+        c_.emitLine("    " + varName + "->Charset = " + std::to_string(charset) + ";");
+        c_.emitLine("    " + varName + "->Bold = " + std::to_string(bBold) + ";");
+        c_.emitLine("    " + varName + "->Italic = " + std::to_string(bItalic) + ";");
+        c_.emitLine("    " + varName + "->Underline = " + std::to_string(bUnder) + ";");
+        c_.emitLine("    " + varName + "->Strikethrough = " + std::to_string(bStrike) + ";");
+    };
+
     for (const auto& ctrl : frmDesc.formControl.children) {
         // Fix 112: 工程内 UserControl (.ctl) 子控件 — 实例化到宿主子窗口.
         // 此前这类 controlTypeToWin32Class()==nullptr 的非 ActiveX 类型直接 continue,
@@ -57,6 +118,14 @@
             if (ucP != ctrl.properties.end()) ucH = (int)ucP->second.intValue;
 
             std::string ctlLower = Symbol::toLower(ctrl.controlName);
+            // Fix 119: 实例字体 (BeginProperty Font) 必须在 HostCreate 之前设定 —
+            // 控件的 InitProperties 会以 UserControl.Font 为默认字体基准。
+            for (const auto& blk : ctrl.propertyBlocks) {
+                if (_stricmp(blk.blockName.c_str(), "Font") != 0) continue;
+                emitFrmFontObj(blk, "_vb6_f119");
+                c_.emitLine("    vb6_UC_SetPendingFont(_vb6_f119);");
+                c_.emitLine("  } }");
+            }
             bool ucIsArr = knownControlArrays_.count(ctlLower) != 0;
             std::string hwndExpr;
             if (ucIsArr) {
@@ -78,34 +147,126 @@
                 hwndExpr = "vb6_hwnd_" + cIdent(ctrl.controlName);
             }
 
-            // 设计期持久化的 UserControl 公共属性 (Value=30 / PB_Color1=... / Caption2="...")
+            // Fix 112/114: 设计期持久化的 UserControl 公共属性
+            // (Caption=... / Value=30 / PB_Color1=... / Caption2="..." / ChartStyle=1 ...)
             // — 逐个调用该 .ctl 的 prop_let_ (跳过几何/Tab 等标准属性).
+            // Fix 114: 原来用 symTab_.lookupModule(pn) 判断属性是否为 Property Let,
+            // 但 lookupModule 只查**当前模块**(Form2)作用域, 而 Property Let 符号属于
+            // 被引用 .ctl 模块 → 恒为 nullptr → 所有设计期属性一个都没发射, 导致
+            // 三个 ucProgressCircular 只剩默认 50% 蓝环 / LabelPlus 无标题与底色 /
+            // 饼图 ChartStyle、LabelsVisible 等全部丢失。改为跨模块查类写方向形参表。
             {
                 static const char* kSkip[] = {"Left", "Top", "Width", "Height", "Index",
                     "TabIndex", "TabStop", "Visible", "Enabled", "Name", "_ExtentX",
-                    "_ExtentY", "Tag", "ToolTipText", "WhatisThis", "HelpContextID"};
+                    "_ExtentY", "Tag", "ToolTipText", "WhatisThis", "HelpContextID",
+                    // BeginProperty 复合块由 propertyBlocks 单独处理, 不应作为简单属性发射
+                    "Font", "IconFont", "TitleFont", "Caption1_Font", "Caption2_Font",
+                    "Images", "ListImages", "MouseIcon"};
                 c_.emitLine("vb6_UC_Enter(" + hwndExpr + ");  /* Fix 112: 换入宿主状态 */");
+                // Fix 119: 字体类复合属性块 (Caption1_Font / Caption2_Font / TitleFont /
+                // IconFont / Font ...) — 若 .ctl 有同名属性写方向, 构造字体对象后调用之。
+                // 例: 三个 ucProgressCircular 的 Caption1_Font=14.25 此前完全没生效。
+                for (const auto& blk : ctrl.propertyBlocks) {
+                    // Fix 119/125: 字体类块 → 构造字体对象后调用 .ctl 的同名写属性。
+                    // · Property Let (ByVal StdFont)  → vb6_ComIface_Font*  直接传
+                    // · Property Set (ByRef StdFont)  → vb6_ComIface_Font** 传 &变量
+                    //   这类实现体是 `With m_X_Font: .Name = New_Font.Name ...`, 由
+                    //   vb6_ComSetProp 落到"字体结构体直写字段"快路径 (Fix 125), 不再崩。
+                    std::vector<ParameterInfo> fp119;
+                    bool isSet119 = false;
+                    if (findClassMemberWriteParams(ctlClass, blk.blockName, false, fp119)
+                        && !fp119.empty()) {
+                        isSet119 = false;
+                    // Fix 130: Property **Set** 型字体属性 (ucProgressCircular.Caption1_Font /
+                    // Caption2_Font, LabelPlus.Font) 走 vb6_UC_FontAssign 安全通道:
+                    // 用该控件自己的 Property Get 拿到内部字体对象后**直写字段**,
+                    // 不调用其 Set 实现体 (内含 Refresh, 会在 CreateControls 阶段
+                    // 数据未就绪时刷新并把图表永久置空 —— Fix 127 实测)。
+                    // 若不应用, InitProperties 的 `Set m_X_Font = Ambient.Font` 会把
+                    // 宿主共享字体当成员用, 后续 COM 读写把它打坏 (实测 Size 变 1,
+                    // 仪表 50%/30%/70% 与 Band/Visitors/Volume 缩成一点)。
+                    } else if (findClassMemberWriteParams(ctlClass, blk.blockName, true, fp119)
+                               && !fp119.empty()) {
+                        isSet119 = true;
+                    } else {
+                        continue;
+                    }
+                    // 字体类块命名惯例: Font / TitleFont / Caption1_Font / IconFont ...
+                    bool fontName119 = false;
+                    {
+                        std::string bn = Symbol::toLower(blk.blockName);
+                        if (bn == "font" || bn.size() >= 4
+                            && bn.compare(bn.size() - 4, 4, "font") == 0)
+                            fontName119 = true;
+                    }
+                    if (!fontName119) continue;
+                    std::string canonF = canonicalClassMemberName(ctlClass, blk.blockName);
+                    if (canonF.empty()) canonF = blk.blockName;
+                    std::string setterF = "vb6_" + cIdent(ctlClass)
+                                        + (isSet119 ? "_prop_set_" : "_prop_let_") + cIdent(canonF);
+                    emitFrmFontObj(blk, "_vb6_f119");
+                    if (isSet119) {
+                        // Fix 128: Property Set 型**不调用**其 Set 实现体 (内含 Refresh,
+                        // 会在数据未就绪时刷新并把图表永久置空)。改用该控件自己的
+                        // Property Get 取到内部字体对象, 原地覆写字段。
+                        std::string getterF = "vb6_" + cIdent(ctlClass)
+                                            + "_prop_get_" + cIdent(canonF);
+                        c_.emitLine("    vb6_UC_FontAssign((void*)" + getterF
+                                  + "((vb6_cls_" + cIdent(ctlClass) + "*)vb6_UC_InstanceOf("
+                                  + hwndExpr + ")), _vb6_f119);");
+                    } else {
+                        c_.emitLine("    " + setterF + "((vb6_cls_" + cIdent(ctlClass)
+                                  + "*)vb6_UC_InstanceOf(" + hwndExpr + "), _vb6_f119);");
+                    }
+                    c_.emitLine("  } }");
+                }
                 for (const auto& kv : ctrl.properties) {
                     const std::string& pn = kv.first;
                     bool skip = false;
                     for (const char* sk : kSkip) if (_stricmp(pn.c_str(), sk) == 0) { skip = true; break; }
                     if (skip) continue;
-                    std::string pnLower = Symbol::toLower(pn);
-                    Symbol* letSym = symTab_.lookupModule(pn);
-                    if (!letSym || letSym->kind != SymbolKind::PropertyLet) continue;
-                    std::string setter = "vb6_" + cIdent(ctlClass) + "_prop_let_" + cIdent(pn);
-                    std::string valExpr;
+                    // Fix 114: 跨模块查询 .ctl 类的 Property Let 形参表 (driver 已注入
+                    // 外部 Class 符号 → Phase B 可命中 memberLetParams).
+                    std::vector<ParameterInfo> wp114;
+                    if (!findClassMemberWriteParams(ctlClass, pn, false, wp114) || wp114.empty())
+                        continue;
+                    // 属性名拼写按 .ctl 内声明规范化 (VB6 大小写不敏感), 否则 LNK2019
+                    std::string canonPn = canonicalClassMemberName(ctlClass, pn);
+                    if (canonPn.empty()) canonPn = pn;
+                    std::string setter = "vb6_" + cIdent(ctlClass) + "_prop_let_" + cIdent(canonPn);
+                    const ParameterInfo& p114 = wp114.back();
+                    std::string meExpr = "(vb6_cls_" + cIdent(ctlClass)
+                                       + "*)vb6_UC_InstanceOf(" + hwndExpr + ")";
+
+                    // 解析字符串值 (含 .frx 属性包持久化引用, 如 Caption="Form2.frx":006E)
+                    std::string textVal;
+                    bool isStr = false;
                     if (kv.second.type == FrmValueType::String) {
-                        std::string raw = kv.second.rawText;
-                        if (raw.size() >= 2 && raw.front() == '"' && raw.back() == '"')
-                            raw = raw.substr(1, raw.size() - 2);
-                        valExpr = "vb6_BSTR_FromStr(L\"" + escapeWideCString(raw) + "\")";
-                    } else {
-                        valExpr = kv.second.rawText.empty()
-                                ? std::to_string(kv.second.intValue) : kv.second.rawText;
+                        isStr = true;
+                        textVal = kv.second.rawText;
+                    } else if (kv.second.type == FrmValueType::FrxReference) {
+                        if (frxLoaded) {
+                            FrxTextData ds114 = FrxReader::readDocString(kv.second.frxOffset);
+                            if (!ds114.text.empty()) { isStr = true; textVal = ds114.text; }
+                        }
+                        if (!isStr) continue;   // 无法解析则跳过, 避免发射非法字面量
                     }
-                    c_.emitLine(setter + "((vb6_cls_" + cIdent(ctlClass) + "*)vb6_UC_InstanceOf("
-                              + hwndExpr + "), " + valExpr + ");");
+                    if (isStr) {
+                        if (textVal.size() >= 2 && textVal.front() == '"' && textVal.back() == '"')
+                            textVal = textVal.substr(1, textVal.size() - 2);
+                        std::string lit = "vb6_BSTR_FromStr(L\"" + escapeWideCString(textVal) + "\")";
+                        if (p114.isByVal) {
+                            c_.emitLine(setter + "(" + meExpr + ", " + lit + ");");
+                        } else {
+                            // ByRef New_X As String → C 形参为 BSTR*, 需可寻址临时量
+                            c_.emitLine("{ BSTR _lp114 = " + lit + "; "
+                                      + setter + "(" + meExpr + ", &_lp114); }");
+                        }
+                    } else {
+                        std::string valExpr = kv.second.rawText.empty()
+                                ? std::to_string(kv.second.intValue) : kv.second.rawText;
+                        c_.emitLine(setter + "(" + meExpr + ", " + valExpr + ");");
+                    }
                 }
             }
             ctrlId++;

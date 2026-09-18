@@ -28,9 +28,10 @@
 // P18: Missing RTL functions (CCur/RGB/QBColor/FileDateTime/FileLen/SendKeys/AppActivate)
 // ============================================================
 
-int64_t vb6_CCur(double v) {
-    /* CCur: convert to Currency (int64_t scaled by 10000) */
-    return (int64_t)(v * 10000.0);
+// Fix 126: CCur 返回 Currency 的**值** (生成代码里 Currency 按 double 承载, 与 Date
+// 一致), 保留 4 位小数精度。放大整数 (值×10000) 只出现在 VT_CY 变体的 cyVal 里。
+double vb6_CCur(double v) {
+    return round(v * 10000.0) / 10000.0;
 }
 
 long vb6_RGB(int32_t r, int32_t g, int32_t b) {
@@ -397,4 +398,20 @@ BSTR vb6_InputBox(BSTR prompt, BSTR title, BSTR defaultstr, int32_t xpos, int32_
     /* 读取失败则返回默认值 */
     if (defaultstr) return vb6_BSTR_FromStr(defaultstr);
     return vb6_BSTR_Empty();
+}
+
+// Fix 133: 把 int32 写回 Variant 变量 (Declare 标量 ByRef 出参回写用)
+void vb6_VariantSetI4(vb6_VARIANT* v, int32_t x) {
+    if (!v) return;
+    v->vt = (vb6_vartype)VT_I4;
+    v->lVal = x;
+}
+
+// Fix 133x: 把 intptr_t (LongPtr 64位指针/句柄) 写回 Variant 变量,
+// 存为 VT_I8 保持 64 位完整 (Charts 2020 x64: GdipCreateFont ByRef mFont
+// As LongPtr 出参, 变体 hFont = GDI+ Font 对象指针不能截断为 32 位).
+void vb6_VariantSetI8(vb6_VARIANT* v, intptr_t x) {
+    if (!v) return;
+    v->vt = (vb6_vartype)VT_I8;
+    v->llVal = (int64_t)x;
 }

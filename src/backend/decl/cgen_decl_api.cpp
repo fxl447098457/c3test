@@ -94,8 +94,15 @@ void CCodeGen::visit(DeclareDecl& node) {
     // 由 RTL 动态加载实现 (LoadLibrary + GetProcAddress), 见 vb6_di_stubs.c
     // 的 vb6_di_CertSelectCertificateW。
     bool isNoImportLib = (libLower == "cryptdlg");
+    // olepro32.dll 是 32 位遗留库, SDK 只在 x86 目录提供 olepro32.lib (x64 SDK 无);
+    // 而 OleCreatePictureIndirect / OleLoadPicture 等实际由 oleaut32.dll 在 x86/x64 上导出,
+    // 故把 olepro32 的链接映射到 oleaut32, 保证 32/64 位都能链接。
+    std::string libForLink = libName;
+    if (libLower == "olepro32") {
+        libForLink = "oleaut32";
+    }
     if (!isVb6RuntimeLib && !isNoImportLib) {
-        c_.emitLine("#pragma comment(lib, \"" + libName + ".lib\")");
+        c_.emitLine("#pragma comment(lib, \"" + libForLink + ".lib\")");
     }
 
     // Fix 010a: 避免与Windows SDK (windows.h) 声明冲突

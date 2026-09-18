@@ -43,6 +43,7 @@ void CCodeGen::visit(PropertyDecl& node) {
     ansiCounter_ = 0;
     knownBstrVars_.clear();
     knownDoubleVars_.clear();
+    knownSingleVars_.clear();
     knownLongVars_.clear();
     knownLongPtrVars_.clear();  // Bug #2 fix: 也清空LongPtr集合
     knownVariantVars_.clear();

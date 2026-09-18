@@ -97,6 +97,9 @@
 
     // 已知double变量名集合 (小写) - 用于Debug.Print区分整数/浮点输出
     std::unordered_set<std::string> knownDoubleVars_;
+    // Fix 117c: Single(float) 变量独立登记 — CStr 需要 VT_R4 语义 (7 位有效数字),
+    // 否则 CSng(21.1) 会按 Double 打印成 21.1000003814697。
+    std::unordered_set<std::string> knownSingleVars_;
 
     // 已知Long/Integer/Boolean变量名集合 (小写) - 用于COM值解封类型推断
     std::unordered_set<std::string> knownLongVars_;

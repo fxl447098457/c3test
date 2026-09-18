@@ -59,6 +59,10 @@ vb6_SafeArray1D* vb6_SafeArrayReDim1D_Udt(int32_t elemSize,
 vb6_SafeArray1D* vb6_SafeArrayReDimPreserve1D(vb6_SafeArray1D* arr,
     int32_t newLBound, int32_t newUBound);
 
+// UDT版ReDim Preserve: elemSize由调用方提供 (用于UDT动态数组)
+vb6_SafeArray1D* vb6_SafeArrayReDimPreserve1D_Udt(int32_t elemSize,
+    vb6_SafeArray1D* arr, int32_t newLBound, int32_t newUBound);
+
 // 销毁数组 (释放内存)
 void vb6_SafeArrayDestroy1D(vb6_SafeArray1D* arr);
 
@@ -111,6 +115,10 @@ vb6_SafeArrayND* vb6_SafeArrayReDimND_Udt(int32_t elemSize,
     int32_t dimCount, vb6_SafeArrayBound bounds[]);
 vb6_SafeArrayND* vb6_SafeArrayReDimPreserveND(vb6_SafeArrayND* arr,
     int32_t dimCount, vb6_SafeArrayBound newBounds[]);
+
+// UDT版ReDim Preserve(多维): elemSize由调用方提供
+vb6_SafeArrayND* vb6_SafeArrayReDimPreserveND_Udt(int32_t elemSize,
+    vb6_SafeArrayND* arr, int32_t dimCount, vb6_SafeArrayBound newBounds[]);
 
 int32_t vb6_SafeArrayND_Offset(vb6_SafeArrayND* arr, int32_t dimCount, int32_t indices[]);
 void* vb6_SafeArrayND_GetPtr(vb6_SafeArrayND* arr, ...);

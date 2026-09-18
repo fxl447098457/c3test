@@ -132,6 +132,48 @@ vb6_SafeArray1D* vb6_SafeArrayReDimPreserve1D(vb6_SafeArray1D* arr,
     return arr;
 }
 
+// UDT版ReDim Preserve: 元素尺寸由调用方提供 (sizeof(UDT))。
+// 关键修复: 当 arr==NULL 时, 不能回落 vb6_sa_empty(4字节), 否则 UDT 元素写入越界。
+// 若 arr 已存在但 elemSize 与本次不符 (曾用错误尺寸分配), 则丢弃旧数据按正确尺寸重建。
+vb6_SafeArray1D* vb6_SafeArrayReDimPreserve1D_Udt(int32_t elemSize,
+    vb6_SafeArray1D* arr, int32_t newLBound, int32_t newUBound) {
+    if (!arr) return vb6_SafeArrayReDim1D_Udt(elemSize, newLBound, newUBound);
+
+    if (arr->elemSize != elemSize) {
+        // 旧数组用错误元素尺寸分配 (如历史 4 字节), 数据不可保留, 直接重建
+        vb6_SafeArrayDestroy1D(arr);
+        return vb6_SafeArrayReDim1D_Udt(elemSize, newLBound, newUBound);
+    }
+
+    int32_t newCount = newUBound - newLBound + 1;
+    if (newCount <= 0) {
+        vb6_SafeArrayDestroy1D(arr);
+        return NULL;
+    }
+
+    void* newData = calloc((size_t)newCount, (size_t)elemSize);
+    if (!newData) return arr;  // 分配失败, 返回原数组
+
+    int32_t copyStart = (arr->lBound > newLBound) ? arr->lBound : newLBound;
+    int32_t copyEnd   = (arr->uBound < newUBound) ? arr->uBound : newUBound;
+    if (copyStart <= copyEnd) {
+        int32_t srcOff = copyStart - arr->lBound;
+        int32_t dstOff = copyStart - newLBound;
+        int32_t copyLen = (copyEnd - copyStart + 1) * elemSize;
+        memcpy((char*)newData + dstOff * elemSize,
+               (char*)arr->data + srcOff * elemSize,
+               (size_t)copyLen);
+    }
+
+    free(arr->data);
+    arr->data = newData;
+    arr->elemSize = elemSize;
+    arr->lBound = newLBound;
+    arr->uBound = newUBound;
+    arr->count = newCount;
+    return arr;
+}
+
 void vb6_SafeArrayDestroy1D(vb6_SafeArray1D* arr) {
     if (!arr) return;
     // BSTR元素: 逐个释放
@@ -438,6 +480,97 @@ vb6_SafeArrayND* vb6_SafeArrayReDimPreserveND(vb6_SafeArrayND* arr,
     if (arr->data) free(arr->data);
     arr->data = newData;
     arr->dimCount = dimCount;
+    arr->totalElements = newTotal;
+    for (int32_t d = 0; d < dimCount; d++)
+        arr->bounds[d] = newBounds[d];
+    for (int32_t d = dimCount; d < 16; d++) {
+        arr->bounds[d].lBound = 0;
+        arr->bounds[d].cElements = 0;
+    }
+
+    return arr;
+}
+
+// UDT版ReDim Preserve(多维): 元素尺寸由调用方提供 (sizeof(UDT))。
+// NULL 初值不再回落 vb6_sa_empty(4字节), 避免 UDT 多维数组写入越界。
+vb6_SafeArrayND* vb6_SafeArrayReDimPreserveND_Udt(int32_t elemSize,
+    vb6_SafeArrayND* arr, int32_t dimCount, vb6_SafeArrayBound newBounds[]) {
+    if (!arr) return vb6_SafeArrayReDimND_Udt(elemSize, dimCount, newBounds);
+
+    if (arr->elemSize != elemSize) {
+        vb6_SafeArrayDestroyND(arr);
+        return vb6_SafeArrayReDimND_Udt(elemSize, dimCount, newBounds);
+    }
+
+    int32_t newTotal = 1;
+    for (int32_t d = 0; d < dimCount; d++) {
+        if (newBounds[d].cElements <= 0) {
+            vb6_SafeArrayDestroyND(arr);
+            return NULL;
+        }
+        newTotal *= newBounds[d].cElements;
+    }
+
+    void* newData = calloc((size_t)newTotal, (size_t)elemSize);
+    if (!newData) return arr;
+
+    if (arr->data && arr->totalElements > 0) {
+        int32_t minDims = (dimCount < arr->dimCount) ? dimCount : arr->dimCount;
+
+        int32_t copyCounts[16];
+        int32_t oldCounts[16];
+        int32_t newCounts[16];
+        int32_t oldStrides[16];
+        int32_t newStrides[16];
+
+        for (int32_t d = 0; d < dimCount; d++)
+            newCounts[d] = newBounds[d].cElements;
+        for (int32_t d = 0; d < minDims; d++)
+            oldCounts[d] = arr->bounds[d].cElements;
+        for (int32_t d = minDims; d < 16; d++)
+            oldCounts[d] = 0;
+
+        for (int32_t d = 0; d < dimCount; d++)
+            copyCounts[d] = (oldCounts[d] < newCounts[d]) ? oldCounts[d] : newCounts[d];
+
+        oldStrides[minDims - 1] = 1;
+        for (int32_t d = minDims - 2; d >= 0; d--)
+            oldStrides[d] = oldStrides[d + 1] * arr->bounds[d + 1].cElements;
+
+        newStrides[dimCount - 1] = 1;
+        for (int32_t d = dimCount - 2; d >= 0; d--)
+            newStrides[d] = newStrides[d + 1] * newBounds[d + 1].cElements;
+
+        int32_t iterMax = 1;
+        for (int32_t d = 0; d < minDims; d++)
+            iterMax *= copyCounts[d];
+
+        for (int32_t linear = 0; linear < iterMax; linear++) {
+            int32_t tmp = linear;
+            int32_t oldOff = 0, newOff = 0;
+            int32_t bounds_check = 1;
+            for (int32_t d = minDims - 1; d >= 0; d--) {
+                int32_t idx = tmp % copyCounts[d];
+                tmp /= copyCounts[d];
+                if (idx >= oldCounts[d] || idx >= newCounts[d]) {
+                    bounds_check = 0;
+                    break;
+                }
+                oldOff += idx * oldStrides[d];
+                newOff += idx * newStrides[d];
+            }
+            if (bounds_check) {
+                memcpy((char*)newData + newOff * elemSize,
+                       (char*)arr->data + oldOff * elemSize,
+                       (size_t)elemSize);
+            }
+        }
+    }
+
+    if (arr->data) free(arr->data);
+    arr->data = newData;
+    arr->dimCount = dimCount;
+    arr->elemSize = elemSize;
     arr->totalElements = newTotal;
     for (int32_t d = 0; d < dimCount; d++)
         arr->bounds[d] = newBounds[d];

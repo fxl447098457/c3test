@@ -283,7 +283,7 @@ bool MsvcDriver::compileAndLinkIncremental(const MsvcDriverOptions& options) {
         linkCmd << " ole32.lib oleaut32.lib uuid.lib advapi32.lib user32.lib shell32.lib gdi32.lib";
     }
     if (options.arch == "x86") linkCmd << " /MACHINE:X86";
-    if (options.debugInfo) linkCmd << " /DEBUG";
+    if (options.debugInfo) linkCmd << " /DEBUG /MAP";
 
     std::string linkRsp = objDir + "/_c3_link_args.rsp";
     {

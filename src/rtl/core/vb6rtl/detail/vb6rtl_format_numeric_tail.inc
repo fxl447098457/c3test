@@ -96,9 +96,8 @@
     // === Step 8: Fallback ===
     free(fmtStr);
     if (isNumeric) {
-        wchar_t buf[64];
-        swprintf(buf, 64, L"%.15g", numVal);
-        return vb6_BSTR_FromStr(buf);
+        /* Fix 117: VB6 默认数值格式 (Single 7 位有效数字, 最短往返) */
+        return vb6_NumToBSTRDefault(numVal, expr.vt == vb6_vtSingle);
     }
     if (isString && strVal) return vb6_BSTR_FromBSTR(strVal);
     return vb6_BSTR_FromStr(L"");

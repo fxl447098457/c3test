@@ -416,7 +416,8 @@ StmtPtr Parser::parseLabelOrAssignmentOrCall() {
     // `x = f(a) * b` 之外的单实参调用语句 (`obj.M (a)` 单独成句仍是合法调用).
     ExprPtr calleeOverride110y;
     ExprPtr leadingArg110y;
-    if (cur_.kind == TokenKind::Comma && expr->kind == ASTNodeKind::BinaryExpr) {
+    bool debugPrintCollapse110y = false;
+    if (expr->kind == ASTNodeKind::BinaryExpr) {
         ExprPtr* leafSlot = &expr;
         while ((*leafSlot)->kind == ASTNodeKind::BinaryExpr) {
             leafSlot = &static_cast<BinaryExpr&>(**leafSlot).left;
@@ -425,12 +426,38 @@ StmtPtr Parser::parseLabelOrAssignmentOrCall() {
             auto& inner = static_cast<IndexOrCallExpr&>(**leafSlot);
             if (inner.callee && inner.callee->kind == ASTNodeKind::MemberAccessExpr
                 && inner.named.empty() && inner.positional.size() == 1) {
-                calleeOverride110y = std::move(inner.callee);
-                ExprPtr innerArg = std::move(inner.positional[0]);
-                *leafSlot = std::move(innerArg);
-                leadingArg110y = std::move(expr);
+                // Fix 110y2: 语句级 Debug.Print (expr1) & (expr2) — 首参括号被
+                // 表达式解析器当成带括号调用 (Debug.Print((expr1))), 于是整句成为
+                // BinOp(Concat, DebugPrint((expr1)), (expr2)) → vb6_DebugPrint
+                // (void) 被当作 BSTR 拼进 ConcatFree → C2095. 与 Fix 110y 同源:
+                // 最左叶是 obj.Member(1实参) 且其后要按表达式继续运算时, 把调用
+                // 折叠回实参, 以 obj.Member 作为真正的 callee, 整个二元表达式作为
+                // 无括号调用的首参 (VB6: Debug.Print (a & b) & (c & d) 打印
+                // "((a&b)&(c&d))" 一个参数).
+                auto& innerMa110y = static_cast<MemberAccessExpr&>(*inner.callee);
+                bool innerLeafDebugPrint110y = false;
+                if (innerMa110y.object && innerMa110y.object->kind == ASTNodeKind::IdentifierExpr) {
+                    auto& innerObj110y = static_cast<IdentifierExpr&>(*innerMa110y.object);
+                    innerLeafDebugPrint110y = toLower(innerObj110y.name) == "debug"
+                        && toLower(innerMa110y.memberName) == "print";
+                }
+                if (cur_.kind == TokenKind::Comma || innerLeafDebugPrint110y) {
+                    calleeOverride110y = std::move(inner.callee);
+                    ExprPtr innerArg = std::move(inner.positional[0]);
+                    *leafSlot = std::move(innerArg);
+                    leadingArg110y = std::move(expr);
+                    debugPrintCollapse110y = innerLeafDebugPrint110y;
+                }
             }
         }
+    }
+    // Fix 110y2: Debug.Print 尾随中缀 (非逗号) 的折叠 — 直接构造无括号调用,
+    // 折叠结果作为其唯一参数, 不会落入下方 isDebugPrint 判定 (此时 expr 已是
+    // BinaryExpr, 而 isDebugPrint 要求 expr 是 MemberAccessExpr).
+    if (debugPrintCollapse110y) {
+        auto call = std::make_unique<IndexOrCallExpr>(loc, std::move(calleeOverride110y));
+        call->positional.push_back(std::move(leadingArg110y));
+        return std::make_unique<CallStmt>(loc, std::move(call));
     }
 
     // VB6 无括号调用: Sub arg1, arg2 / Debug.Print "text"
@@ -483,8 +510,10 @@ StmtPtr Parser::parseLabelOrAssignmentOrCall() {
             } else {
                 call->positional.push_back(parseExpression());
             }
-        } else if (cur_.kind == TokenKind::Comma) {
+        } else if (call->positional.empty() && cur_.kind == TokenKind::Comma) {
             // Fix 142: 省略首个位置实参 (Foo , x) — 保留槽位并记录索引
+            // Fix 110y 补充: 若已折叠出 leadingArg (positional 非空), 则该逗号是
+            //   实参分隔符, 由下方 while 循环的 match(Comma) 处理, 不能当成省略首参.
             call->omittedArgs.insert(call->positional.size());
             call->positional.push_back(std::make_unique<LiteralExpr>(
                 currentLoc(), LiteralKind::Empty, "Empty"));

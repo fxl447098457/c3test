@@ -216,6 +216,16 @@ std::string CCodeGen::comPackExpr(Expr& expr) {
         if (knownDoubleVars_.count(lower)) return "vb6_ComPackDouble";
         if (knownLongVars_.count(lower)) return "vb6_ComPackInt";
     }
+    // Fix: Empty/Null 字面量语义上是 Variant 子类型 (VT_EMPTY/VT_NULL),
+    // 但 inferExprType 缺省把它们当作 Long (LiteralExpr 分支 return Vb6Type::Long),
+    // 于是省略实参 (parser 填 LiteralKind::Empty) 在晚绑定 COM 调用里生成
+    // vb6_ComPackInt(vb6_VariantEmpty()) → C2440 (vb6_VARIANT 无法转 int32_t).
+    // 例: Charts 2020 ucTreeMaps.ctl `cValues.Add vTemp, , i` 的省略 Key.
+    if (expr.kind == ASTNodeKind::LiteralExpr) {
+        auto& lit = static_cast<LiteralExpr&>(expr);
+        if (lit.literalKind == LiteralKind::Empty || lit.literalKind == LiteralKind::Null)
+            return "vb6_ComPackValue";
+    }
     // 根据表达式类型推断应该用的VARIANT封装函数
     Vb6Type vt = inferExprType(expr);
     switch (vt) {

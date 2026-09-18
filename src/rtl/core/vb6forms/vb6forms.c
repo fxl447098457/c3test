@@ -94,7 +94,10 @@ void* vb6_CreateFormWindow(const char* className, const char* formName,
 
     // 创建窗口, 使用WS_OVERLAPPEDWINDOW样式 (VB6标准窗口)
     // Fix 081k: Do NOT add WS_VISIBLE here; ShowWindow is called by vb6_ShowForm after Form_Load.
-    DWORD style = WS_OVERLAPPEDWINDOW;
+    // Fix 124: WS_CLIPCHILDREN —— 窗体自身重绘(背景填充)时必须把子控件区域裁剪掉,
+    // 否则窗体重绘会把已经画好的子控件整片覆盖 (表现为"控件时有时无/干脆看不见",
+    // 而离屏 dump 一切正常)。
+    DWORD style = WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN;
     DWORD exStyle = 0;
 
     // 调整窗口大小使客户区匹配指定大小
@@ -283,8 +286,45 @@ void vb6_SetAppInstance(void* hInstance) {
 
 void vb6_ShowForm(void* hwnd, int modal) {
     if (!hwnd) return;
+
+    // Fix 115: 恢复 VB6 的 "先 Form_Load, 后 Show" 顺序。
+    // 编译器把 Form_Load 用 PostMessageA(hwnd, 0x7FF0, 0, 0) 延迟到消息队列
+    // (见 cgen_form_wndproc_create.inc 的 WM_CREATE 处理), 而这里的
+    // ShowWindow/UpdateWindow 会在队列消息派发**之前**强制首次 WM_PAINT。
+    // 于是 UserControl 的 Draw 会在"Form_Load 尚未添加数据系列"的状态下执行,
+    // 对空数组取 m_Serie(0) → 空指针崩溃 (Charts 2020 ucChartArea 在
+    // LegendAlign=LA_TOP 时必经该分支)。先把挂起的延迟 Form_Load 派发掉。
+    {
+        const UINT kDeferredFormLoad = 0x7FF0;   // 编译器生成的"延迟 Form_Load"消息
+        MSG msg;
+        while (PeekMessageA(&msg, (HWND)hwnd, kDeferredFormLoad, kDeferredFormLoad, PM_REMOVE)) {
+            TranslateMessage(&msg);
+            DispatchMessageA(&msg);
+        }
+    }
+
     ShowWindow((HWND)hwnd, SW_SHOWDEFAULT);
     UpdateWindow((HWND)hwnd);
+
+    // Fix 137: VB6 启动的窗体会出现在最前并获得焦点; 我们只 ShowWindow 的话
+    // 窗口常落在已有窗口后面 (双击 exe 时尤甚 —— 没有前台权限继承)。
+    // 显式提到顶层并请求前台 (SetForegroundWindow 受系统限制时 BringWindowToTop
+    // 至少保证同 Z 序应用内最前)。
+    BringWindowToTop((HWND)hwnd);
+    if (SetForegroundWindow((HWND)hwnd) == 0) {
+        /* 前台锁: 挂到当前前台线程的输入队列再试一次 (经典 workaround) */
+        HWND fg = GetForegroundWindow();
+        DWORD fgTid = fg ? GetWindowThreadProcessId(fg, NULL) : 0;
+        DWORD myTid = GetCurrentThreadId();
+        if (fgTid && fgTid != myTid &&
+            AttachThreadInput(myTid, fgTid, TRUE)) {
+            BringWindowToTop((HWND)hwnd);
+            SetForegroundWindow((HWND)hwnd);
+            SetFocus((HWND)hwnd);
+            AttachThreadInput(myTid, fgTid, FALSE);
+        }
+    }
+    SetActiveWindow((HWND)hwnd);
 
     if (modal) {
         // 模态窗体: 禁用所有者, 进入本地消息循环
