@@ -28,15 +28,21 @@
     entry.emitLine("wchar_t dllPath[MAX_PATH];");
     entry.emitLine("HRESULT hr = vb6_GetDllPath(dllPath, MAX_PATH);");
     entry.emitLine("if (FAILED(hr)) return hr;");
+    // Fix 098: 单个 coclass 注册失败不得中断整轮注册 (原先首个失败即 return,
+    // 实测 104 个 coclass 只注册进 13 个, 且 vb6_RegisterTypeLib 从未执行 ——
+    // TypeLib 完全缺失, 客户端 CLSIDFromProgID / 早绑定全部失效).
+    // 改为累计失败数, 循环跑完, TypeLib 注册无条件执行.
+    entry.emitLine("int failed = 0;");
+    entry.emitLine("HRESULT firstFail = S_OK;");
     entry.emitLine("for (int i = 0; i < g_vb6_coclassCount; i++) {");
     entry.indent();
     entry.emitLine("hr = vb6_RegisterCoClass(&g_vb6_coclasses[i], dllPath);");
-    entry.emitLine("if (FAILED(hr)) return hr;");
+    entry.emitLine("if (FAILED(hr)) { if (failed == 0) firstFail = hr; failed++; }");
     entry.dedent();
     entry.emitLine("}");
-    entry.emitLine("// P6.13: Register embedded TypeLib");
+    entry.emitLine("// P6.13: Register embedded TypeLib (无论 coclass 注册是否有失败都要执行)");
     entry.emitLine("vb6_RegisterTypeLib(dllPath);");
-    entry.emitLine("return S_OK;");
+    entry.emitLine("return failed ? firstFail : S_OK;");
     entry.dedent();
     entry.emitLine("}");
     entry.emitBlank();

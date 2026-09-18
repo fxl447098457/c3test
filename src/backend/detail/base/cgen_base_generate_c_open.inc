@@ -15,15 +15,15 @@
             }
         }
     }
-    // P6.6.3: ActiveX DLL classes with events need vb6comserver.h for vb6_FireEvent
+    // P6.6.3: ActiveX DLL 类模块需要 vb6comserver.h
+    //   - 有事件: vb6_FireEvent
+    //   - Fix 099: 有显式 Public 字段: vb6_ComObject_FromInstance / vb6_FindCoClassDesc
+    //     (字段读写访问器生成在类模块自身的 .c 里, 见 cgen_com.cpp emitClassFieldAccessors).
+    //     原先只在"有事件"时才 include, 会让无事件的 DLL 类模块拿到隐式声明 ——
+    //     C 下隐式声明的返回值按 int 截断, 指针会被砍成 32 位 (x64 必崩);
+    //     改为 DLL 类模块一律 include.
     if (isDll_ && isClassModule_) {
-        bool _hasEvts = false;
-        for (auto& _d : module.declarations) {
-            if (_d->kind == ASTNodeKind::EventDecl) { _hasEvts = true; break; }
-        }
-        if (_hasEvts) {
-            c_.emitLine("#include \"vb6comserver.h\"");
-        }
+        c_.emitLine("#include \"vb6comserver.h\"");
     }
     // P8.7 + Fix 010r-12: 标准模块之间的#include放在.c文件，避免.h循环依赖
     // 类模块引用标准模块 → .h (见上方); 标准模块引用标准模块 → .c

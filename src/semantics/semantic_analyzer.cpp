@@ -48,6 +48,17 @@ bool SemanticAnalyzer::analyze(Module& module) {
                         classSym->memberFieldTypes[Symbol::toLower(v092m.name)] =
                             static_cast<SimpleTypeRef*>(v092m.asType.get())->name;
                     }
+                    // Fix 099: 显式 Public 字段 → COM 暴露清单 (见 Symbol::publicFieldNames).
+                    // 只认 AccessLevel::Public: 类模块的 `Dim x` 被解析为
+                    // AccessLevel::Default (=Public), 但真 VB6 中 Dim 等价 Private,
+                    // 不能当成对外可见的字段. 数组/WithEvents/As New 不暴露.
+                    if (v092m.access == AccessLevel::Public
+                        && !v092m.isWithEvents
+                        && !v092m.isNew
+                        && !v092m.isDynamicArray
+                        && v092m.dimensions.empty()) {
+                        classSym->publicFieldNames.push_back(v092m.name);
+                    }
                     break;
                 }
                 case ASTNodeKind::SubDecl: {

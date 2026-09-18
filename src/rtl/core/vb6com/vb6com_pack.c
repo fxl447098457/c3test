@@ -64,6 +64,18 @@ void* vb6_ComPackObject(void* obj) {
     return (void*)pv;
 }
 
+// Fix 104: 将"省略的实参"封装为 VARIANT (VT_ERROR + DISP_E_PARAMNOTFOUND).
+// VB6 对 IDispatch 调用省略实参时 (obj.Method a, , c) 传的正是该值, 接收方据此
+// 把"未提供"与"显式传 0/空串"区分开. 直接丢弃省略实参会让后续实参前移 (参数错位).
+void* vb6_ComPackMissing(void) {
+    VARIANT* pv = (VARIANT*)calloc(1, sizeof(VARIANT));
+    if (!pv) return NULL;
+    VariantInit(pv);
+    pv->vt = VT_ERROR;
+    pv->scode = DISP_E_PARAMNOTFOUND;   /* 0x80020004 */
+    return (void*)pv;
+}
+
 // 从VARIANT*解封BSTR (返回BSTR, 调用方需vb6_BSTR_Free释放)
 wchar_t* vb6_ComUnpackBSTR(void* variant) {
     if (!variant) return NULL;

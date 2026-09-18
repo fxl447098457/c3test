@@ -154,9 +154,43 @@ void CCodeGen::visit(LiteralExpr& node) {
         case LiteralKind::Null:
             lastExpr_ = "vb6_VariantNull()";
             break;
+        // Fix 104: 省略实参占位. 非 COM 调用路径沿用原先占位语义 (整型 0), 保证零回归;
+        // COM 调用路径 (cgen_expr_call_com_bind.inc) 会改写成 vb6_ComPackMissing().
+        case LiteralKind::Missing:
+            lastExpr_ = "0";
+            break;
         case LiteralKind::Date:
             lastExpr_ = std::to_string(node.doubleValue);  // OLE date as double
             break;
+    }
+}
+
+// Fix 100: 比较类表达式 (及 TypeOf) 在生成码里落在 C 的 0/1 上, 而 VB6 布尔是
+// -1/0. 对这类布尔结果直接按位取反 (C: ~) 只会得到 -1 (0 → ~0) 或 -2 (1 → ~1),
+// 两者都非零 → `Not X Is Nothing` / `Not (a = b)` 恒为真.
+// 实例: cHttpServer.StopMe 的 `If Not m_oServer Is Nothing Then m_oServer.CloseSck`
+// 恒进分支, 对未赋值的 m_oServer 调用 CloseSck(NULL) → 释放对象时段错误.
+static bool exprYieldsVbBoolean(const Expr& e) {
+    switch (e.kind) {
+        case ASTNodeKind::TypeOfExpr:
+            return true;   // vb6_TypeOf() 返回 0/1
+        case ASTNodeKind::BinaryExpr: {
+            const auto& b = static_cast<const BinaryExpr&>(e);
+            switch (b.op) {
+                case BinaryOp::Eq:  case BinaryOp::Neq:
+                case BinaryOp::Lt:  case BinaryOp::Gt:
+                case BinaryOp::Le:  case BinaryOp::Ge:
+                case BinaryOp::Like: case BinaryOp::Is:
+                    return true;
+                default:
+                    return false;
+            }
+        }
+        case ASTNodeKind::UnaryExpr:
+            // 修正后 Not 自身产出标准 VB6 布尔 (-1/0), 嵌套 Not 同样按布尔处理
+            return static_cast<const UnaryExpr&>(e).op == UnaryOp::Not;
+        default:
+            return false;
     }
 }
 
@@ -175,6 +209,12 @@ void CCodeGen::visit(UnaryExpr& node) {
             }
             break;
         case UnaryOp::Not:
+            // Fix 100: 布尔型操作数必须用逻辑取反 —— VB6 Not True = False(0),
+            // Not False = True(-1). 理由见 exprYieldsVbBoolean() 注释.
+            if (node.operand && exprYieldsVbBoolean(*node.operand)) {
+                lastExpr_ = "((((int32_t)(" + operand + ")) != 0) ? 0 : -1)";
+                break;
+            }
             // Fix 039: VB6 Not = 位取反 (C: ~), cast to int32_t for non-integer
             // operands (double from vb6_Pow, pointer from BSTR/void*/SafeArray*)
             // Fix 039b: For Variant operands, use vb6_VariantToLong() instead.
@@ -209,7 +249,17 @@ void CCodeGen::visit(NewExpr& node) {
     std::transform(clsLower.begin(), clsLower.end(), clsLower.begin(), ::tolower);
 
     // 尝试在符号表中查找类符号
-    auto* clsSym = symTab_.lookupModule(node.className);
+    // Fix 102: 用 lookupModuleDotted 而非裸 lookupModule —— 源码里的早绑定类型常写
+    // 「类型库名.coclass名」(WinHttp.WinHttpRequest / Scripting.Dictionary / ADODB.Stream),
+    // 而类型库解析后 coclass 是按**裸名**(WinHttpRequest / Dictionary) 登记的.
+    // 裸 lookupModule 按全名查 key "winhttp.winhttprequest" 必然落空 → 落下方 else 分支,
+    // 把源码限定名当 ProgID 传给 vb6_NewObject → 运行期 CLSIDFromProgID 失败 → 429
+    // (WinHttp 只注册了版本化的 "WinHttp.WinHttpRequest.5.1", 裸名无注册, 实测
+    // CLSIDFromProgID("WinHttp.WinHttpRequest") = 0x800401F3).
+    // 修好后命中 ComClass 分支, 用类型库 ProgIDFromCLSID 反查到的真实 ProgID.
+    // 与 cgen_with.cpp 的 NewExpr 处理 (lookupModuleDotted) 及声明路径
+    // (cgen_decl_var.cpp:198 knownTypedComVars_ 注册) 保持一致.
+    auto* clsSym = lookupModuleDotted(node.className);
     if (clsSym && clsSym->kind == SymbolKind::Class) {
         // 本工程类: 调用类工厂函数
         std::string clsStruct = "vb6_cls_" + cIdent(clsSym->name);

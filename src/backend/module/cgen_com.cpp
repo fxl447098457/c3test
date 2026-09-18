@@ -127,6 +127,142 @@ void CCodeGen::emitClassFactory(Module& module) {
 }
 
 // ============================================================
+// Fix 099: Public 字段的 COM 读写访问器 (ActiveX DLL)
+// ============================================================
+// 真 VB6 把类模块的 `Public X As T` 暴露为 property get/let 对 (TypeLib 里同为
+// Property). 此前 C3 完全不暴露: cHttpServer 的 Router/RouteBefore/RouteAfter/
+// SSE/Database/Statistics 等 Public 字段既不进 IDispatch 方法表也不进 TypeLib,
+// 客户端 GetIDsOfNames("Router") 直接失败 → vb6_ComGetProp 返回 NULL → 调用方
+// 拿 NULL 当对象解引用 → 0xC0000005 (段错误).
+//
+// 访问器必须生成在**类模块自己的 .c** 里: dll_entry.c 只有 `struct vb6_cls_X;`
+// 前向声明, 属不完整类型, 无法 `me->Fld`. 命名 vb6_cls_<cls>_field_get_<fld> /
+// _field_let_<fld>, 由 dll_entry.c 的字段桥接 extern 调用.
+//
+// 只暴露能直接映射到 vb6_VARIANT 的字段类型; Variant / UDT / 数组 / 外部 COM
+// 接口指针字段一律不生成 (宁缺勿错 —— 暴露了但类型映射不对会写出编译不过或
+// 语义错误的 C). 收集条件与 semantic_analyzer 的 publicFieldNames 严格一致.
+void CCodeGen::emitClassFieldAccessors(Module& module) {
+    if (!isDll_ || !isClassModule_) return;
+
+    const std::string clsStruct = "vb6_cls_" + cIdent(moduleName_);
+
+    struct FieldEmit {
+        std::string name;                    // 声明原名
+        std::vector<std::string> getLines;   // getter 体 (写 r)
+        std::vector<std::string> letLines;   // setter 体 (读 value 写 me->fld)
+    };
+    std::vector<FieldEmit> fields;
+
+    for (auto& decl : module.declarations) {
+        if (decl->kind != ASTNodeKind::VariableDecl) continue;
+        auto& var = static_cast<VariableDecl&>(*decl);
+        // 与 semantic_analyzer.cpp 的 publicFieldNames 收集条件一致
+        if (var.access != AccessLevel::Public) continue;
+        if (var.isWithEvents || var.isNew || var.isDynamicArray || !var.dimensions.empty()) continue;
+
+        const std::string fld = cIdent(var.name);
+        const std::string fieldCT = mapTypeRef(var.asType.get());
+        const Vb6Type fvt = var.asType ? resolveArrayElemType(var.asType.get()) : Vb6Type::Variant;
+
+        FieldEmit fe;
+        fe.name = var.name;
+
+        const bool isClassPtr = fieldCT.size() > 9
+            && fieldCT.compare(0, 8, "vb6_cls_") == 0
+            && fieldCT[fieldCT.size() - 1] == '*';
+
+        if (isClassPtr) {
+            // (a) 工程类实例指针字段 → VT_DISPATCH: 裸实例交 RTL 包装成 IDispatch
+            std::string target = (var.asType && var.asType->kind == ASTNodeKind::SimpleTypeRef)
+                ? static_cast<SimpleTypeRef*>(var.asType.get())->name : std::string();
+            size_t dot = target.find_last_of('.');
+            if (dot != std::string::npos) target = target.substr(dot + 1);
+            if (target.empty()) continue;
+            fe.getLines.push_back("r = vb6_VariantObject(vb6_ComObject_FromInstance("
+                                  "vb6_FindCoClassDesc(\"" + target + "\"), (void*)me->" + fld + "));");
+            fe.letLines.push_back("me->" + fld + " = (" + fieldCT + ")("
+                                  "(value.vt == vb6_vtDispatch) ? "
+                                  "vb6_ComObject_GetInstance(value.pdispVal) : NULL);");
+        } else if (fvt == Vb6Type::String) {
+            // (b) 字符串 → VT_BSTR, 必须深拷贝 (BSTR 所有权归实例)
+            fe.getLines.push_back("vb6_BSTR_Assign(&r.bstrVal, me->" + fld + ");");
+            fe.getLines.push_back("r.vt = vb6_vtBSTR;");
+            fe.letLines.push_back("vb6_BSTR_Assign(&me->" + fld + ", "
+                                  "(value.vt == vb6_vtBSTR) ? value.bstrVal : NULL);");
+        } else if (fvt == Vb6Type::Boolean) {
+            // (c) 布尔 → VT_BOOL (VB6 True = -1)
+            fe.getLines.push_back("r = vb6_VariantBool(me->" + fld + " ? -1 : 0);");
+            fe.letLines.push_back("me->" + fld + " = (value.lVal != 0) ? -1 : 0;");
+        } else if (fvt == Vb6Type::Integer) {
+            fe.getLines.push_back("r = vb6_VariantInt(me->" + fld + ");");
+            fe.letLines.push_back("me->" + fld + " = (int16_t)value.lVal;");
+        } else if (fvt == Vb6Type::Byte) {
+            fe.getLines.push_back("r = vb6_VariantByte(me->" + fld + ");");
+            fe.letLines.push_back("me->" + fld + " = (uint8_t)value.lVal;");
+        } else if (fvt == Vb6Type::Long || fieldCT == "int32_t") {
+            // (d) Long / 枚举 (mapTypeRef 对 EnumType 返回 int32_t, 底层即 Long)
+            fe.getLines.push_back("r = vb6_VariantLong(me->" + fld + ");");
+            fe.letLines.push_back("me->" + fld + " = (int32_t)value.lVal;");
+        } else if (fvt == Vb6Type::Double) {
+            fe.getLines.push_back("r = vb6_VariantDouble(me->" + fld + ");");
+            fe.letLines.push_back("me->" + fld + " = (double)value.dblVal;");
+        } else if (fvt == Vb6Type::Single) {
+            fe.getLines.push_back("r.vt = vb6_vtSingle;");
+            fe.getLines.push_back("r.fltVal = me->" + fld + ";");
+            fe.letLines.push_back("me->" + fld + " = (float)value.dblVal;");
+        } else if (fvt == Vb6Type::Date) {
+            fe.getLines.push_back("r.vt = vb6_vtDate;");
+            fe.getLines.push_back("r.dblVal = me->" + fld + ";");
+            fe.letLines.push_back("me->" + fld + " = (double)value.dblVal;");
+        } else if (fvt == Vb6Type::Currency) {
+            fe.getLines.push_back("r.vt = vb6_vtCurrency;");
+            fe.getLines.push_back("r.cyVal = me->" + fld + ";");
+            fe.letLines.push_back("me->" + fld + " = (int64_t)value.cyVal;");
+        } else if (fvt == Vb6Type::Object || fieldCT == "void*") {
+            // (e) 外部 COM 对象 / As Object 字段 → VT_DISPATCH. 字段里存的就是接口
+            //     指针 (Dictionary/Collection 等), 直接传出, 不做包装.
+            fe.getLines.push_back("r = vb6_VariantObject((void*)me->" + fld + ");");
+            fe.letLines.push_back("me->" + fld + " = (value.vt == vb6_vtDispatch) ? value.pdispVal : NULL;");
+        }
+        // 说明: 判不出可映射 C 类型的字段 (UDT / 接口值类型 / Variant / 未知外部类型)
+        // 不跳过, 而是生成**空体存根** —— getter 返回 r 的初值 (Empty), setter 忽略
+        // 写入. 必须生成定义的原因: dll_entry.c 在另一个编译单元里为 publicFieldNames
+        // 无条件建桥接 (那边看不到这里的类型判定), 少一个定义就是 LNK2019 (实测 96 个).
+        fields.push_back(fe);
+    }
+
+    if (fields.empty()) return;
+
+    c_.emitBlank();
+    c_.emitLine("// === Fix 099: Public 字段的 COM 访问器 (Property Get/Let) ===");
+    c_.emitBlank();
+
+    for (auto& fe : fields) {
+        const std::string fldId = cIdent(fe.name);
+
+        // getter: 返回 vb6_VARIANT (与 dll_entry.c 桥接的 result 缓冲布局兼容)
+        c_.emitLine("vb6_VARIANT " + clsStruct + "_field_get_" + fldId + "(" + clsStruct + "* me) {");
+        c_.indent();
+        c_.emitLine("vb6_VARIANT r = vb6_VariantEmpty();");
+        c_.emitLine("if (!me) return r;");
+        for (auto& ln : fe.getLines) c_.emitLine(ln);
+        c_.emitLine("return r;");
+        c_.dedent();
+        c_.emitLine("}");
+
+        // setter: 从 vb6_VARIANT 取值写入字段
+        c_.emitLine("void " + clsStruct + "_field_let_" + fldId + "(" + clsStruct + "* me, vb6_VARIANT value) {");
+        c_.indent();
+        c_.emitLine("if (!me) return;");
+        for (auto& ln : fe.letLines) c_.emitLine(ln);
+        c_.dedent();
+        c_.emitLine("}");
+        c_.emitBlank();
+    }
+}
+
+// ============================================================
 // P6.4: 接口 vtable + 包装类型生成 (Implements 代码生成)
 // ============================================================
 

@@ -25,7 +25,8 @@ extern int32_t vb6_err_resume_next;
 //   - 窗体/控件/扩展错误: ID部分直接对应错误号, 部分需对照Microsoft文档
 // 翻译策略: 中文描述为主, 英文原文保留在注释中供参考
 // 注: 735/744/746 和 485/486/487 都是合法的VB6错误号, 不可互相替代
-static const wchar_t* vb6_StdErrorDesc(int32_t errNum) {
+// 非 static: vb6com_collection.c 的内建 Collection 也要用它填 EXCEPINFO.bstrDescription
+const wchar_t* vb6_StdErrorDesc(int32_t errNum) {
     switch (errNum) {
     // ---- VB6 经典运行时错误 (ErrNum 3~94) ----
     // 来源: Microsoft官方Trappable Errors + DLL STRINGTABLE ID 10000~10039

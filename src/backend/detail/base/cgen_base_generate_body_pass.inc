@@ -21,6 +21,9 @@
     // === 类模块: 生成工厂函数 ===
     if (isClassModule_ && !currentClassIsInterface) {  // P6.4: 接口类不生成工厂/析构函数
         emitClassFactory(module);
+        // Fix 099: Public 字段的 COM 读写访问器 (必须生成在类模块自身 .c:
+        // dll_entry.c 只有结构体前向声明, 不完整类型无法访问字段)
+        emitClassFieldAccessors(module);
     }
 
     // === P6.5: 生成事件处理器包装函数 ===

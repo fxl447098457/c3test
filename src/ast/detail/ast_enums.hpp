@@ -55,6 +55,7 @@ enum class LiteralKind : uint8_t {
     Integer, Long, Single, Double, Currency, Decimal,
     String, Date, Boolean,
     Nothing, Empty, Null,
+    Missing,   // Fix 104: 调用实参省略占位 (obj.Method a, , c 中的空位)
 };
 
 // 语句块类型

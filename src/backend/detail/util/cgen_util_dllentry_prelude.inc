@@ -12,6 +12,11 @@
         std::string progId;
         std::vector<std::string> publicMethodNames;
         std::vector<Symbol*> publicMethodSyms;
+        // Fix 099: 显式 Public 数据字段 (真 VB6 暴露为 Property Get/Let).
+        // 与 publicMethodNames 分开存: 字段不是 Symbol, 只有名字 + dispid,
+        // 其读写访问器由类模块自身 .c 提供 (见 cgen_com.cpp emitClassFieldAccessors).
+        std::vector<std::string> publicFields;
+        std::vector<int32_t> publicFieldDispids;  // 与 publicFields 平行; 0=未分配
         std::vector<std::string> implementsNames;  // P12.1: Implements接口列表
         // P6.6.4: 事件源信息
         std::vector<std::string> eventNames;       // 事件名称列表

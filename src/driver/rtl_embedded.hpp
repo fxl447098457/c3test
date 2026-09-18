@@ -107,6 +107,10 @@ enum RtlResourceID {
     RTL_VB6RTL_FINANCIAL_C     = 172,
     RTL_VB6RTL_COM_C           = 173,
     RTL_VB6RTL_REGISTRY_C      = 174,
+
+    // Fix 103: VB6 内建对象 Collection 的 C 实现 (IDispatch + IEnumVARIANT)
+    RTL_VB6COM_COLLECTION_C    = 175,
+    RTL_VB6COM_COLLECTION_ENUM_C = 176,
 };
 
 // Session directory manager

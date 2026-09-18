@@ -159,6 +159,24 @@ struct Symbol {
     // cgen 直接 cIdent(源码名) → `me->Client->socket` C2039. 字段访问生成点用
     // canonicalClassFieldName() 规范化回声明名.
     std::unordered_map<std::string, std::string> memberFieldNames;
+    // Fix 099: 类模块**显式 Public** 数据字段清单 (ActiveX DLL 的 COM 暴露用).
+    // 真 VB6 把类的 Public 字段暴露成 Property Get/Let 对; 此前 C3 只把
+    // Sub/Function/Property 收进 memberNames, Public 字段完全不进 IDispatch 表
+    // → 客户端 GetIDsOfNames("Router") 失败 → vb6_ComGetProp 返回 NULL → 调用方
+    // 拿 NULL 当对象用即崩. 此处独立成表 (不并入 memberNames) 是因为
+    // resolveClassMemberCall 用 memberNames 判定"成员访问是否为属性调用",
+    // 并入会把字段访问改写成 prop_get_ 调用, 破坏 `Foo(obj.Field)` 的 ByRef 语义.
+    // 只收 access==AccessLevel::Public 的显式 Public 关键字: 类模块里的 `Dim x`
+    // 在本编译器被解析成 AccessLevel::Default (=Public), 而真 VB6 中 Dim 等价
+    // Private, 故必须排除 Default — 否则 cHttpServer 的 `Dim m_Sessions As ...`
+    // 这类内部字段会被误暴露. 数组/WithEvents/As New 不暴露 (VB6 亦然).
+    // 存声明原名, 保持声明顺序 (生成的表项顺序稳定).
+    std::vector<std::string> publicFieldNames;
+    // Fix 099: Public 字段的 TypeLib DISPID (driver 在 TypeLib 阶段回写).
+    // key=字段名小写, 0/缺省=尚未分配. dll_entry.c 的字段表读它, 保证与
+    // TypeLib 中同名字段的 dispid 一致 (否则早绑定客户端按 TypeLib 的 dispid
+    // 调 Invoke 会命中错项).
+    std::unordered_map<std::string, int32_t> memberFieldDispids;
     // Fix 091a: 成员写方向参数表 — memberParams 按读上下文优先级 (Get > Function >
     // Sub > Let > Set) 只存胜出者, 对「Get 有参 + Let 末参才是 value」的属性
     // (cJson.Item(key)/Let Item(key, Dat As Variant)) 会存成 Get 的 [key], 使

@@ -161,6 +161,43 @@
                             }
                         }
 
+                        // Fix 099: 显式 Public 字段 —— 真 VB6 把类模块的 `Public X As T`
+                        // 在 TypeLib 里暴露为 Property Get/Let 对 (共享同一 dispid).
+                        // 不生成会有两处后果: ① 早绑定客户端在类型库里找不到该属性;
+                        // ② dll_entry.c 的字段表取不到 dispid, 只能走防御分支, 与 TypeLib
+                        // 错位 (Invoke 按 dispid 线性匹配会命中错误表项).
+                        // 这里只分配 dispid 并回写到 Class 符号; 运行期读写由 cgen 生成的
+                        // vb6_cls_<cls>_field_get_/_let_<fld> 提供 (见 cgen_com.cpp).
+                        // 字段类型统一按 Variant 声明 —— 不在这里做类型解析 (避免解析失败
+                        // 导致整个 TypeLib 构建出错), 早绑定客户端可隐式转换 Variant.
+                        {
+                            std::unordered_set<std::string> seenFields;
+                            for (auto& fname : clsSym.publicFieldNames) {
+                                if (!seenFields.insert(Symbol::toLower(fname)).second) continue;
+                                int32_t fieldDispid = dispidCounter++;
+                                TypeLibBuilder::MethodInfo fGet;
+                                fGet.name = fname;
+                                fGet.dispid = fieldDispid;
+                                fGet.returnType = Vb6Type::Variant;
+                                fGet.isPropertyGet = true;
+                                methods.push_back(fGet);
+
+                                TypeLibBuilder::MethodInfo fPut;
+                                fPut.name = fname;
+                                fPut.dispid = fieldDispid;
+                                fPut.returnType = Vb6Type::Void;
+                                fPut.isPropertyPut = true;
+                                ParameterInfo fieldValueParam;
+                                fieldValueParam.name = "Value";
+                                fieldValueParam.type = Vb6Type::Variant;
+                                fieldValueParam.isByVal = true;
+                                fPut.params.push_back(fieldValueParam);
+                                methods.push_back(fPut);
+
+                                clsSym.memberFieldDispids[Symbol::toLower(fname)] = fieldDispid;
+                            }
+                        }
+
                         std::string iid = TypeLibBuilder::generateUuid("_" + clsSym.name);
                         std::string ifaceName = "_" + clsSym.name;
                         bool ifaceOk = tlbBuilder.addDispInterface(ifaceName, iid, methods);

@@ -156,6 +156,7 @@ const char* literalKindToString(LiteralKind k) {
     case LiteralKind::Nothing:  return "Nothing";
     case LiteralKind::Empty:    return "Empty";
     case LiteralKind::Null:     return "Null";
+    case LiteralKind::Missing:  return "Missing";  // Fix 104: 省略实参占位
     default:                    return "Unknown";
     }
 }

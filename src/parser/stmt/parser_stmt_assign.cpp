@@ -359,6 +359,10 @@ StmtPtr Parser::parseLabelOrAssignmentOrCall() {
             } else {
                 call->positional.push_back(parseExpression());
             }
+        } else {
+            // Fix 104: 首位实参省略 (Call obj.M , x) —— 记录形参位置, 不往 positional
+            // 塞假值, 以免改变普通函数调用的参数个数 (COM 路径据此补 vb6_ComPackMissing).
+            call->omittedArgs.insert(stmtArgIndex);
         }
         stmtArgIndex++;
 
@@ -389,6 +393,10 @@ StmtPtr Parser::parseLabelOrAssignmentOrCall() {
                     } else {
                         call->positional.push_back(parseExpression());
                     }
+                } else {
+                    // Fix 104: 连续逗号 = 省略该形参 (obj.M a, , c). 记录位置而不塞假值,
+                    // 保证后续实参不前移; COM 调用路径按位置补 vb6_ComPackMissing.
+                    call->omittedArgs.insert(stmtArgIndex);
                 }
                 stmtArgIndex++;
                 continue;

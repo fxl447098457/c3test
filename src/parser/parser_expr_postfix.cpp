@@ -117,8 +117,9 @@ ExprPtr Parser::parsePostfix(ExprPtr expr) {
                             call->named.push_back({nameTok.text, std::move(val)});
                         } else if (cur_.kind == TokenKind::Comma || cur_.kind == TokenKind::RightParen) {
                             // M22: 空参数占位 - VB6允许 MsgBox("hi", , "title")
-                            auto _ph = std::make_unique<LiteralExpr>(currentLoc(), LiteralKind::Long, "0");
-                            _ph->longValue = 0;  // Union与intValue共享内存, 必须显式设置longValue
+                            // Fix 104: 用 LiteralKind::Missing 标识"省略", 而非整型 0 ——
+                            // COM 调用据此传 VT_ERROR/DISP_E_PARAMNOTFOUND, 非 COM 路径仍按 0 生成.
+                            auto _ph = std::make_unique<LiteralExpr>(currentLoc(), LiteralKind::Missing, "");
                             call->positional.push_back(std::move(_ph));
                         } else {
                             // 位置参数

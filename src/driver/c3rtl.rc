@@ -2,7 +2,7 @@
 // P10 (restored): RTL is embedded as .c/.h SOURCE and compiled by MSVC
 // at user-program build time. The P11.3 pre-compiled .lib scheme was
 // reverted: c3 is open source, no source protection needed.
-// 23 .h headers + 46 .c sources + 6 .inc fragments (all arch-neutral) = 75 resources.
+// 23 .h headers + 47 .c sources + 6 .inc fragments (all arch-neutral) = 76 resources.
 // 2026-09-17 源文件按家族分目录: core/vb6rtl|vb6com|vb6comserver|vb6forms|di/,
 // 解包后仍是平铺目录（RTL 内部 include 一律 basename，不受源目录影响）。
 // Runtime: FindResource/LoadResource extract to temp session directory
@@ -105,3 +105,8 @@
 172 RCDATA "../rtl/core/vb6rtl/vb6rtl_financial.c"
 173 RCDATA "../rtl/core/vb6rtl/vb6rtl_com.c"
 174 RCDATA "../rtl/core/vb6rtl/vb6rtl_registry.c"
+
+// Fix 103: VB6 内建对象 Collection 的 C 实现 (New Collection 原报 429)
+// 分两个编译单元: 容器 + IDispatch / _NewEnum 的 IEnumVARIANT
+175 RCDATA "../rtl/core/vb6com/vb6com_collection.c"
+176 RCDATA "../rtl/core/vb6com/vb6com_collection_enum.c"
