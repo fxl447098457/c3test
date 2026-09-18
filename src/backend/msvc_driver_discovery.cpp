@@ -18,7 +18,8 @@ bool MsvcDriver::isMsvcAvailable() {
         return true;
     }
     // 2. Try running cl.exe directly (might be in PATH from other setup)
-    int ret = std::system("cl.exe >nul 2>&1");
+    //    走 executeCommand (CREATE_NO_WINDOW) 而不是 std::system, 避免弹 cmd 窗口
+    int ret = executeCommand("cl.exe >nul 2>&1");
     if (ret == 0) return true;
     // 3. P11.4: Check if vswhere can find VS installation
     std::string vcvars = findVcvarsallBat();
@@ -36,15 +37,9 @@ std::string MsvcDriver::findVsInstallPath() {
         // Run vswhere to get installation path
         // -products * : include BuildTools (not just full VS editions)
         std::string cmd = "\"" + vswhere + "\" -all -latest -products * -property installationPath";
-        // Use _popen to capture output
-        FILE* pipe = _popen(cmd.c_str(), "r");
-        if (pipe) {
-            char buffer[512];
-            std::string result;
-            while (fgets(buffer, sizeof(buffer), pipe)) {
-                result += buffer;
-            }
-            _pclose(pipe);
+        // 隐藏窗口执行并回读 stdout (原来的 _popen 会弹 cmd 窗口)
+        std::string result;
+        if (executeCommandCapture(cmd, result) == 0) {
             // Trim whitespace
             while (!result.empty() && (result.back() == '\n' || result.back() == '\r' || result.back() == ' '))
                 result.pop_back();
