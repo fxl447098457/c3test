@@ -122,6 +122,8 @@ wchar_t* vb6_ComGetStringProp(void* disp, const wchar_t* propName);
 int32_t vb6_ComGetIntProp(void* disp, const wchar_t* propName);
 double vb6_ComGetDoubleProp(void* disp, const wchar_t* propName);
 void* vb6_ComGetObjectProp(void* disp, const wchar_t* propName);
+// COM属性Get→intptr_t (LongPtr: 句柄/指针). 兼容 32/64 位整数变体, 避免 x64 截断.
+intptr_t vb6_ComGetLongPtrProp(void* disp, const wchar_t* propName);
 // COM调用结果→vb6_VARIANT (后期绑定, 如dic.Item(key))
 vb6_VARIANT vb6_VariantFromComResult(void* variant_ptr);
 vb6_VARIANT vb6_VariantFromStackVARIANT(VARIANT* pv);  /* P24-03: 栈上VARIANT转换(不释放) */

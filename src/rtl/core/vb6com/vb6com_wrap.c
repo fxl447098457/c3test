@@ -85,6 +85,18 @@ int32_t vb6_ComGetIntProp(void* disp, const wchar_t* propName) {
     return result;
 }
 
+// COM属性Get, 返回intptr_t (LongPtr: 句柄/指针) — 兼容 32/64 位整数变体
+intptr_t vb6_ComGetLongPtrProp(void* disp, const wchar_t* propName) {
+    VARIANT* pv = (VARIANT*)vb6_ComGetProp(disp, propName);
+    if (!pv) return 0;
+    intptr_t result;
+    if (pv->vt == VT_I8) result = (intptr_t)pv->llVal;
+    else if (pv->vt == VT_UI8) result = (intptr_t)pv->ullVal;
+    else result = (intptr_t)vb6_ComUnpackInt(pv);
+    vb6_ComVarClear(pv);
+    return result;
+}
+
 // COM属性Get, 返回double — 内部完成Unpack+VarClear
 double vb6_ComGetDoubleProp(void* disp, const wchar_t* propName) {
     VARIANT* pv = (VARIANT*)vb6_ComGetProp(disp, propName);

@@ -184,6 +184,9 @@ vb6_VARIANT vb6_VariantArrayGetVal(vb6_VARIANT v, int32_t index);
 
 // Variant转基本类型
 int32_t vb6_VariantToLong(vb6_VARIANT v);
+// Variant → LongPtr (指针/句柄语义): 与 vb6_VariantToLong 数值提取一致,
+// 但返回 intptr_t, 避免 x64 下 64 位句柄/指针被截断.
+intptr_t vb6_VariantToLongPtr(vb6_VARIANT v);
 // Fix 093a: Variant → Boolean (CBool 语义). 调用点 (ToolsJsonVba 等) 依赖符号名
 // vb6_VariantToBool; 此前缺失 → LNK2019.
 int16_t vb6_VariantToBool(vb6_VARIANT v);
