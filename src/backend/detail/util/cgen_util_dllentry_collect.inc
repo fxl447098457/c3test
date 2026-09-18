@@ -236,50 +236,89 @@
 
             // Fix 052: 构建实参列表 (不含me的类型, 只有表达式)
             // 注意: args[i] 是 VARIANT* (来自DISPPARAMS.rgvarg), 需用VARIANT字段提取值
+            // Fix 093: 参数缺失守卫 —— 调用方可能少传参数 (VB6 Optional 未提供, 或
+            //   脚本引擎只传前 N 个), 此时 argc < 声明参数个数, args 为 NULL (argc==0)
+            //   或 args[i] 越界, 直接解引用即 0xC0000005. 实测 cVBMAN.Version
+            //   (Optional HostApp As Object, ByRef) 被零参 vm.Version() 晚绑定调用时
+            //   必崩于 &((VARIANT*)NULL)->lVal. 现为每个参数生成 (argc > i) 三元:
+            //   已提供取 VARIANT 字段, 未提供取零值哑元 (复合字面量, 同 Fix 089h 手法).
             std::string callArgs = "me";
             for (int i = 0; i < (int)methodSym->params.size(); i++) {
-                callArgs += ", ";
-                Vb6Type pType = methodSym->params[i].type;
-                if (methodSym->params[i].isByVal) {
+                const ParameterInfo& prm = methodSym->params[i];
+                Vb6Type pType = prm.type;
+                const std::string idx = std::to_string(i);
+                const std::string guard = "(argc > " + idx + ")";
+                std::string provided;
+                std::string missing;
+                if (prm.isByVal) {
                     // 从VARIANT中提取ByVal值
                     if (pType == Vb6Type::Long || pType == Vb6Type::Integer ||
                         pType == Vb6Type::Byte) {
-                        callArgs += "((VARIANT*)args[" + std::to_string(i) + "])->lVal";
+                        provided = "((VARIANT*)args[" + idx + "])->lVal";
+                        missing = "0";
                     } else if (pType == Vb6Type::Boolean) {
-                        callArgs += "(((VARIANT*)args[" + std::to_string(i) + "])->vt == VT_BOOL ? (((VARIANT*)args[" + std::to_string(i) + "])->boolVal == VARIANT_TRUE ? -1 : 0) : ((VARIANT*)args[" + std::to_string(i) + "])->lVal)";
+                        provided = "(((VARIANT*)args[" + idx + "])->vt == VT_BOOL ? (((VARIANT*)args[" + idx + "])->boolVal == VARIANT_TRUE ? -1 : 0) : ((VARIANT*)args[" + idx + "])->lVal)";
+                        missing = "0";
                     } else if (pType == Vb6Type::Double || pType == Vb6Type::Single) {
-                        callArgs += "((VARIANT*)args[" + std::to_string(i) + "])->dblVal";
+                        provided = "((VARIANT*)args[" + idx + "])->dblVal";
+                        missing = "0.0";
                     } else if (pType == Vb6Type::String) {
-                        callArgs += "((VARIANT*)args[" + std::to_string(i) + "])->bstrVal";
+                        provided = "((VARIANT*)args[" + idx + "])->bstrVal";
+                        missing = "(BSTR)NULL";
                     } else if (pType == Vb6Type::Variant) {
                         // Fix 051: ByVal Variant — 传递整个 VARIANT 结构 (vb6_VARIANT 与 Windows VARIANT 布局兼容)
-                        callArgs += "*(vb6_VARIANT*)args[" + std::to_string(i) + "]";
+                        provided = "*(vb6_VARIANT*)args[" + idx + "]";
+                        missing = "(vb6_VARIANT){0}";
+                    } else if (pType == Vb6Type::Object) {
+                        // Fix 093: 对象 ByVal — 直接传 IDispatch* 本身, 不能取 lVal.
+                        // lVal 是 LONG (4 字节), x86 下与 void* 同宽恰好可用,
+                        // x64 下指针被截断成低 32 位 → 无效指针.
+                        provided = "((VARIANT*)args[" + idx + "])->pdispVal";
+                        missing = "NULL";
                     } else {
-                        callArgs += "((VARIANT*)args[" + std::to_string(i) + "])->lVal";
+                        provided = "((VARIANT*)args[" + idx + "])->lVal";
+                        missing = "0";
                     }
                 } else {
                     // ByRef: 传递VARIANT中的值指针
                     if (pType == Vb6Type::Long || pType == Vb6Type::Integer ||
                         pType == Vb6Type::Byte) {
-                        callArgs += "&((VARIANT*)args[" + std::to_string(i) + "])->lVal";
+                        provided = "&((VARIANT*)args[" + idx + "])->lVal";
+                        missing = "&(int32_t){0}";
                     } else if (pType == Vb6Type::Boolean) {
-                        callArgs += "&((VARIANT*)args[" + std::to_string(i) + "])->lVal";  /* ByRef Boolean: same as Long, VB6 uses int32_t */
+                        provided = "&((VARIANT*)args[" + idx + "])->lVal";  /* ByRef Boolean: same as Long, VB6 uses int32_t */
+                        missing = "&(int32_t){0}";
                     } else if (pType == Vb6Type::Double || pType == Vb6Type::Single) {
-                        callArgs += "&((VARIANT*)args[" + std::to_string(i) + "])->dblVal";
+                        provided = "&((VARIANT*)args[" + idx + "])->dblVal";
+                        missing = "&(double){0.0}";
                     } else if (pType == Vb6Type::Variant) {
                         // Fix 051: ByRef Variant — 传递 VARIANT 指针
-                        callArgs += "(vb6_VARIANT*)args[" + std::to_string(i) + "]";
+                        provided = "(vb6_VARIANT*)args[" + idx + "]";
+                        missing = "&(vb6_VARIANT){0}";
                     } else if (pType == Vb6Type::String) {
-                        callArgs += "&((VARIANT*)args[" + std::to_string(i) + "])->bstrVal";
+                        provided = "&((VARIANT*)args[" + idx + "])->bstrVal";
+                        missing = "&(BSTR){NULL}";
+                    } else if (pType == Vb6Type::Object) {
+                        // Fix 093: 对象 ByRef — 必须传"指针字段的地址"(void**),
+                        // 不能取 &lVal (LONG*, 4 字节): x86 下与 void* 同宽巧合可用,
+                        // x64 下被当 void** 解引用会读 8 字节越过该字段 → 读到栈垃圾
+                        // 当 IDispatch* → 0xC0000005 (实测 cVBMAN.Version 的
+                        // Optional HostApp As Object 在 x64 崩、x86 侥幸通过).
+                        provided = "(void*)&((VARIANT*)args[" + idx + "])->pdispVal";
+                        missing = "(void*)&(void*){0}";
                     } else {
-                        callArgs += "(void*)&((VARIANT*)args[" + std::to_string(i) + "])->lVal";
+                        provided = "(void*)&((VARIANT*)args[" + idx + "])->lVal";
+                        missing = "(void*)&(int32_t){0}";
                     }
                 }
+                callArgs += ", (" + guard + " ? (" + provided + ") : (" + missing + "))";
             }
-            // Fix 052: Optional 参数的 _has_ 标志 (COM dispatch 中所有参数都已提供)
-            for (auto& p : methodSym->params) {
+            // Fix 052: Optional 参数的 _has_ 标志
+            // Fix 093: 改按实际实参个数判定 (此前恒为 1, 少传参数时被调方误以为收到了实参)
+            for (int i = 0; i < (int)methodSym->params.size(); i++) {
+                const ParameterInfo& p = methodSym->params[i];
                 if (p.isOptional && !p.isParamArray) {
-                    callArgs += ", 1";
+                    callArgs += ", ((argc > " + std::to_string(i) + ") ? 1 : 0)";
                 }
             }
 

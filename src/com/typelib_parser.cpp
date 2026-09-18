@@ -171,6 +171,12 @@ std::unique_ptr<TypeLibResult> TypeLibParser::loadByClsid(const std::string& cls
     std::wstring keyPath = L"CLSID\\" + guidW + L"\\TypeLib";
     HKEY hKey;
     if (RegOpenKeyExW(HKEY_CLASSES_ROOT, keyPath.c_str(), 0, KEY_READ, &hKey) != ERROR_SUCCESS) {
+        // P24-04 续: GUID 既不在 HKCR\TypeLib (尝试1) 也不在 HKCR\CLSID (尝试2),
+        // 说明该类型库未注册到本机. 此处原为静默返回, 会让早绑定 / GlobalNameSpace
+        // 语法退化成"模块名.成员"并生成未定义符号 (实测 tests/test_vbman 的
+        // VBMAN.Version → vb6_VBMAN_Version → LNK2019), 故给出明确诊断.
+        diag_.warn(DiagnosticID::CodeGenUnsupportedFeature, SourceLocation{},
+                   "TypeLib not registered for CLSID/LibID: " + clsidStr);
         return nullptr;
     }
     wchar_t tlbidStr[64];
@@ -206,7 +212,16 @@ std::unique_ptr<TypeLibResult> TypeLibParser::loadByClsid(const std::string& cls
     }
     RegCloseKey(hTlbKey2);
 
-    if (latestPath2.empty()) return nullptr;
+    if (latestPath2.empty()) {
+        // P24-04 续: 显式引用的 TypeLib GUID/LibID 未在注册表登记时此处静默返回,
+        // 会让 GlobalNameSpace / 早绑定语法 (如 VBMAN.Version) 退化成"模块名.成员",
+        // 生成未定义符号 vb6_VBMAN_Version, 直到链接期才以 LNK2019 暴露,
+        // 把排查引向错误方向 (实测 tests/test_vbman). 这里给出明确诊断,
+        // 指向"类型库未注册且未提供有效路径"这一实际原因.
+        diag_.warn(DiagnosticID::CodeGenUnsupportedFeature, SourceLocation{},
+                   "TypeLib not registered for CLSID/LibID: " + clsidStr);
+        return nullptr;
+    }
 
     std::string pathStr2(latestPath2.begin(), latestPath2.end());
     return loadByPath(pathStr2);
