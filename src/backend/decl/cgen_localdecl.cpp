@@ -226,6 +226,16 @@ void CCodeGen::emitLocalDeclCode(LocalDeclStmt& node) {
                         }
                     }
                 }
+                // As New 内建宿主类 Collection (无 Class 符号) → 惰性实例化
+                if (var.isNew) {
+                    std::string tn = simple.name;
+                    std::transform(tn.begin(), tn.end(), tn.begin(), ::tolower);
+                    if (tn == "collection") {
+                        std::string lower = var.name;
+                        std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+                        knownNewVars_[lower] = "Collection";
+                    }
+                }
                 if (clsSym && (clsSym->kind == SymbolKind::ComClass || clsSym->kind == SymbolKind::ComInterface)) {
                     isLocalComIfaceType = true;
                 }

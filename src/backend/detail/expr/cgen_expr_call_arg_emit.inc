@@ -3,6 +3,30 @@
 // 内容 = 原文件第 1771~2136 行，逐行未改。
 
     for (size_t i = 0; i < node.positional.size(); i++) {
+        // Fix 142: 省略的位置实参 (VB6 Foo a, , c) — 按形参缺省值填充, 不发射
+        // 占位表达式 (占位 0/Empty 会覆盖缺省值, 且 _has_ 标志会被误判为已传).
+        if (!calleeIsBuiltin && !calleeIsDeclare && i < calleeParams.size()
+            && node.omittedArgs.count(i)) {
+            const auto& op142 = calleeParams[i];
+            std::string odefVal142;
+            if (op142.hasDefaultValue && !op142.defaultValueExpr.empty()) {
+                odefVal142 = op142.defaultValueExpr;
+            } else {
+                odefVal142 = defaultValue(op142.type);
+            }
+            if (op142.isByVal || op142.isParamArray) {
+                args.push_back(odefVal142);
+            } else {
+                std::string ocType142 = mapType(op142.type);
+                if (op142.type == Vb6Type::Variant || op142.type == Vb6Type::Empty
+                    || op142.type == Vb6Type::Null || op142.type == Vb6Type::Object) {
+                    args.push_back("&(" + ocType142 + "){0}");
+                } else {
+                    args.push_back("&(" + ocType142 + "){" + odefVal142 + "}");
+                }
+            }
+            continue;
+        }
         // Fix 090q: 实参是「返回 UDT 的函数调用」→ Declare As Any ByRef 打包须传
         // 临时 UDT 地址 (void*)&(vb6_type_X){...}; 否则强转 struct 值 → C2440
         // (cZipArchive pvVfsSetEof: SetFileTime ..., pvToFileTime(...) As Any)

@@ -103,6 +103,7 @@ public:
     std::vector<ExprPtr> positional;   // 位置参数
     std::vector<NamedArg> named;       // 命名参数
     std::set<size_t> byvalOverrides;  // Fix 072: ByVal 覆盖的参数索引 (VB6 允许 ByVal x 覆盖 ByRef 声明)
+    std::set<size_t> omittedArgs;     // Fix 142: 省略的位置实参索引 (VB6 a, , b) — 保留槽位, 代码生成按缺省值/IsMissing 处理
 
     IndexOrCallExpr(SourceLocation loc, ExprPtr callee)
         : Expr(ASTNodeKind::IndexOrCallExpr, loc),

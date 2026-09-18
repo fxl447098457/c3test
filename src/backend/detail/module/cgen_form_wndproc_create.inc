@@ -146,8 +146,9 @@
     c_.emitLine("int code = HIWORD(wParam);");
 
     // 为每个CommandButton/CheckBox/OptionButton生成WM_COMMAND处理
-    ctrlId = 100;
-    for (const auto& ctrl : frmDesc.formControl.children) {
+    // Fix 142: 抽为 lambda, 顶层控件(ID 100+)与容器内子控件(ID 200+)共用同一派发逻辑
+    auto emitCommandDispatch142 = [&](const FrmControl& ctrl, int cid) {
+        ctrlId = cid;
         std::string ctrlNameLower = ctrl.controlName;
         std::transform(ctrlNameLower.begin(), ctrlNameLower.end(), ctrlNameLower.begin(), ::tolower);
         bool isArrayCtrl = knownControlArrays_.count(ctrlNameLower) > 0;
@@ -237,7 +238,38 @@
                 c_.emitLine("}");
             }
         }
+    };
+
+    ctrlId = 100;
+    for (const auto& ctrl : frmDesc.formControl.children) {
+        emitCommandDispatch142(ctrl, ctrlId);
         ctrlId++;
+    }
+    // Fix 142: 容器(Frame/PictureBox)内子控件 — ID 从 200 起, DFS 顺序与
+    // cgen_form_frame_menu.inc 的创建循环完全一致 (跳过 Menu 与无 Win32 类控件).
+    {
+        int childCmdId142 = 200;
+        auto walkCmdChildren142 = [&](auto&& self, const FrmControl& container) -> void {
+            for (const auto& child : container.children) {
+                if (child.controlType == FrmControlType::Menu) continue;
+                const char* childClass142 = FrmParser::controlTypeToWin32Class(child.controlType);
+                if (!childClass142) continue;
+                emitCommandDispatch142(child, childCmdId142);
+                childCmdId142++;
+                if (!child.children.empty() &&
+                    (child.controlType == FrmControlType::Frame ||
+                     child.controlType == FrmControlType::PictureBox)) {
+                    self(self, child);
+                }
+            }
+        };
+        for (const auto& ctrl : frmDesc.formControl.children) {
+            if (!ctrl.children.empty() &&
+                (ctrl.controlType == FrmControlType::Frame ||
+                 ctrl.controlType == FrmControlType::PictureBox)) {
+                walkCmdChildren142(walkCmdChildren142, ctrl);
+            }
+        }
     }
 
     // P16: WithEvents控件事件分发 (按HWND匹配, 在标准命名handler之后)

@@ -53,7 +53,8 @@
                 if (!actuallyPassedParams.empty() && i < actuallyPassedParams.size()) {
                     argList += actuallyPassedParams[i] ? "1" : "0";
                 } else {
-                    argList += (i < args.size()) ? "1" : "0";
+                    // Fix 142: 省略的位置实参 (node.omittedArgs) 视为未传 → _has_=0
+                    argList += (i < args.size() && !node.omittedArgs.count(i)) ? "1" : "0";
                 }
             }
         }

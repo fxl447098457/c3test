@@ -14,6 +14,10 @@ extern "C" {
 void* vb6_Alloc(size_t size);
 void vb6_Free(void* ptr);
 
+// As New Collection 自动实例化: cgen 生成 vb6_cls_<Name>_New(), 内建 Collection
+// 无项目类名, 由 RTL 提供别名桥接到 vb6_Collection_New() (定义在 vb6forms_uc.c)。
+void* vb6_cls_Collection_New(void);
+
 // P21-14: SavePicture — save picture to file (GDI+ BMP save)
 void vb6_SavePicture(void* hBitmap, BSTR filename);
 
