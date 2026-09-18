@@ -230,8 +230,12 @@ bool Driver::runLinker(const CompileOptions& options, const std::string& outputD
                 if (options.verbose) {
                     std::cout << "C3: RC: " << rcArgs.str() << std::endl;
                 }
-                std::string rcFullCmd = std::string("cmd /c \"") + rcArgs.str() + "\"";
-                int rcRet = std::system(rcFullCmd.c_str());
+                // executeCommand 内部拼的是 "cmd.exe /c <cmd>", 且带 CREATE_NO_WINDOW (不弹窗口)。
+                // 必须再包一层引号: cmd 在「/c 之后首字符是引号」时会剥掉首尾各一个引号。
+                // rcArgs 本身以 "<rc.exe 路径>" 开头 (路径含空格), 少这层外层引号时 cmd 会把
+                // rc 路径剥成 C:\...\rc.exe" -> 找不到命令 -> rcRet != 0 被静默跳过,
+                // TypeLib 资源不再嵌入 (实测 DLL 少 141KB)。多包一层让 cmd 剥外层、留下 rc 自己的引号。
+                int rcRet = MsvcDriver::executeCommand("\"" + rcArgs.str() + "\"");
                 if (rcRet == 0 && std::filesystem::exists(resPath)) {
                     msvcOpts.typelibResFile = resPath;
                     if (options.verbose) {
@@ -350,8 +354,8 @@ bool Driver::runLinker(const CompileOptions& options, const std::string& outputD
             if (options.verbose) {
                 std::cout << "C3: RC (version): " << verRcArgs.str() << std::endl;
             }
-            std::string verRcFullCmd = std::string("cmd /c \"") + verRcArgs.str() + "\"";
-            int verRcRet = std::system(verRcFullCmd.c_str());
+            // 同 rcArgs: 必须多包一层引号, 否则 cmd 剥引号后 rc 路径被破坏 (见上文注释)
+            int verRcRet = MsvcDriver::executeCommand("\"" + verRcArgs.str() + "\"");
             if (verRcRet == 0 && std::filesystem::exists(verResPath)) {
                 msvcOpts.versionInfoResFile = verResPath;
                 if (options.verbose) {

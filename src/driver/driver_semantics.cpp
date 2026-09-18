@@ -12,6 +12,27 @@
 
 namespace vb6c3 {
 
+namespace {
+
+// get/put 同名冲突保护 (2026-09-18): 类型库里 VB6 的公开字段与读写属性是
+// get_X + put_X 一对 FUNCDESC (同 memid、同名字), 而 comMethods 按小写名索引 ——
+// 后写入的 put/putref 会覆盖 getter 的签名: returnType 退化成 Empty (VT_VOID),
+// isPropertyGet 变 false。于是 obj.Prop.Method() 这类链式访问被判成"标量取值",
+// 再对 int16_t 拼 C 结构体成员访问 → C2224 (vbman-demo 的 ctx.Request.QueryString)。
+// 读取路径只认 getter; 属性写入走名字化的晚绑定, 不查 comMethods, 故让 getter 优先。
+void insertComMethod(Symbol& sym, const std::string& key, Symbol::ComMethodSig sig,
+                     ComMemberKind kind) {
+    bool incomingSetter = (kind == ComMemberKind::PropertyPut
+                        || kind == ComMemberKind::PropertyPutRef);
+    auto it = sym.comMethods.find(key);
+    if (incomingSetter && it != sym.comMethods.end() && it->second.isPropertyGet) {
+        return;  // 已有 getter, setter 不得覆盖
+    }
+    sym.comMethods[key] = std::move(sig);
+}
+
+} // namespace
+
 bool Driver::runSemanticAnalysis(const CompileOptions& options) {
     analyzers_.clear();
     for (auto& module : modules_) {
@@ -57,7 +78,7 @@ bool Driver::runSemanticAnalysis(const CompileOptions& options) {
                                 pi.isOptional = param.isOptional;
                                 sig.params.push_back(std::move(pi));
                             }
-                            sym->comMethods[member.name] = std::move(sig);
+                            insertComMethod(*sym, member.name, std::move(sig), member.kind);
                         }
                         // 填充memberNames (类成员名列表, 兼容现有逻辑)
                         for (auto& member : cc->defaultIface->members) {
@@ -122,7 +143,7 @@ bool Driver::runSemanticAnalysis(const CompileOptions& options) {
                             pi.isOptional = param.isOptional;
                             sig.params.push_back(std::move(pi));
                         }
-                        sym->comMethods[member.name] = std::move(sig);
+                        insertComMethod(*sym, member.name, std::move(sig), member.kind);
                     }
 
                     analyzer->symbolTable().define(std::move(sym));
@@ -218,11 +239,20 @@ bool Driver::runSemanticAnalysis(const CompileOptions& options) {
             for (auto& tl : typelibParser_->cachedResults()) {
                 for (auto& cc : tl->coclasses) {
                     if (!cc->isGlobalNamespace || !cc->defaultIface) continue;
-                    // 只提升非标准方法 (排除IUnknown/IDispatch的7个标准方法)
-                    // IDispatch dispatch接口: 前7个是IUnknown(3)+IDispatch(4)标准方法
-                    size_t standardMethods = cc->defaultIface->isDispatch ? 7 : 3;
-                    for (size_t mi = standardMethods; mi < cc->defaultIface->members.size(); mi++) {
+                    // 只提升非标准方法 (排除 IUnknown/IDispatch 的标准方法)
+                    // Fix 094: 改为按名过滤, 不再"跳过前 N 个". 接口 members 是否包含
+                    // 标准方法取决于 TypeLib 的生成方 —— 真 VB6 生成的含(7 个),
+                    // C3 自产的只含业务方法. 原先假设"前 7 个是标准方法"会让 C3 自产
+                    // TypeLib 在 members.size() < 7 时整个循环不执行, 一个全局方法都
+                    // 提升不了 (实测 sGlobal._sGlobal members=1 只有 VBMAN, 于是
+                    // VBMAN.Version() 退化成 vb6_VBMAN_Version() → LNK2019).
+                    static const std::unordered_set<std::string> stdMethodNames = {
+                        "QueryInterface", "AddRef", "Release",
+                        "GetTypeInfoCount", "GetTypeInfo", "GetIDsOfNames", "Invoke"
+                    };
+                    for (size_t mi = 0; mi < cc->defaultIface->members.size(); mi++) {
                         auto& member = cc->defaultIface->members[mi];
+                        if (stdMethodNames.count(member.realName)) continue;
                         // 每个promoted方法注册为独立的ComGlobalNs符号
                         auto sym = std::make_unique<Symbol>(
                             SymbolKind::ComGlobalNs, member.realName, member.returnType,
@@ -252,7 +282,7 @@ bool Driver::runSemanticAnalysis(const CompileOptions& options) {
                             pi.isOptional = param.isOptional;
                             sig.params.push_back(std::move(pi));
                         }
-                        sym->comMethods[member.name] = std::move(sig);
+                        insertComMethod(*sym, member.name, std::move(sig), member.kind);
                         analyzer->symbolTable().define(std::move(sym));
                     }
                 }

@@ -138,6 +138,26 @@ scripts\run hello                      REM 运行 output\hello.exe
 
 备注：真 VB6 编译需 `VB6.EXE` 可无界面运行且其链接器对工作目录可写（本仓库约定工作目录 `tests\_vb6ref\`，该目录已 gitignore，运行产物不进库）。
 
+### 3.6 vbman 专项对照回归（只测 vbman）
+
+`tests\regress_vbman.ps1` 是 3.5 的补集：只对 `tests\vbman` 的权威工程（`src\VBMAN.vbp`，`Type=OleDll`，129 模块）做 C3 vs 真 VB6 对照。OleDll 无运行阶段，改用**导出表比对**替代运行比对（需 MSVC 环境的 `dumpbin`）。
+
+```powershell
+.\tests\regress_vbman.ps1                  REM 完整对照（C3 全量编译 + VB6 /make）
+.\tests\regress_vbman.ps1 -SyntaxOnly      REM 只跑 C3 前端（秒级，不调 cl、不用 VB6）
+.\tests\regress_vbman.ps1 -List            REM 枚举目标，不执行
+.\tests\regress_vbman.ps1 -Target VBMAN_EXE.vbp   REM 换目标（src 下的 vbp）
+```
+
+判定矩阵：PASS / REG-C3 / C3-EXT / BOTH-FAIL（含义同 3.5）、`EXPORT-DIFF`（C3 缺 VB6 的导出符号）、`DLL-MISSING`（报成功但无产物）。报告落 `tests\_vb6ref_vbman\report-*.csv`。
+
+与 3.5 的两点差异：
+
+- VB6 侧在 `tests\vbman` 的**副本**里编译，因此不改写 `src\VBMAN.vbp` 的 Reference 路径、也不覆盖 `dist\` 下产物 —— 无需事后 `git checkout` 恢复子模块
+- 导出表按「VB6 的导出被 C3 全覆盖」判定，C3 多导的符号（如 `DllMain`）只记入备注，不算差异
+
+可选覆盖：参数 `-C3` / `-VB6` / `-Arch`，或环境变量 `C3_EXE` / `VB6_EXE` / `C3_VBMAN_WORKROOT`。
+
 ---
 
 ## 四、命令行参数

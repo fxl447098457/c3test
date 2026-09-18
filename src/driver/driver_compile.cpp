@@ -126,6 +126,13 @@ CompileResult Driver::compile(const CompileOptions& options) {
                     auto resolvedPath = project.resolvePath(ref.path);
                     if (std::filesystem::exists(resolvedPath)) {
                         effectiveOpts.typelibRefs.push_back(resolvedPath.u8string());
+                    } else {
+                        // P24-04 续: VBP 里写死的类型库路径在本机不存在时原为静默丢弃,
+                        // 只留 GUID 去查注册表; 两者都失败就完全没有该类型库信息,
+                        // 早绑定 / GlobalNameSpace 语法随即退化成未定义符号 (LNK2019).
+                        // 明确提示路径无效, 便于判断是否需先注册该类型库.
+                        diag_->warn(DiagnosticID::CodeGenUnsupportedFeature, SourceLocation{},
+                                    "TypeLib reference path not found: " + resolvedPath.u8string());
                     }
                 }
             }

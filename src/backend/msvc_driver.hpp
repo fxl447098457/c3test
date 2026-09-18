@@ -44,6 +44,14 @@ public:
     // P11.4: Get vcvarsall.bat path (empty if not found)
     static std::string findVcvarsallBat();
 
+    // 以**隐藏窗口**(CREATE_NO_WINDOW + SW_HIDE)执行命令行, 返回退出码。
+    // 公开且 static: isMsvcAvailable 的 cl 探测、driver 层的 rc.exe 调用都要复用,
+    // 避免各自 std::system 弹 cmd 窗口。
+    static int executeCommand(const std::string& cmd);
+
+    // 同上, 但把子进程 stdout 收进 out (用于 vswhere 这类需要回读输出的命令)
+    static int executeCommandCapture(const std::string& cmd, std::string& out);
+
 private:
     // Find cl.exe path
     std::string findClExe() const;
@@ -53,9 +61,6 @@ private:
 
     // Build vcvarsall setup prefix for cl.exe command
     std::string buildVcvarsPrefix(const std::string& arch = "x64") const;
-
-    // Execute command line
-    int executeCommand(const std::string& cmd) const;
 
     // opt3: 增量编译 — 基于内容哈希跳过未变化的 .c 编译
     bool compileAndLinkIncremental(const MsvcDriverOptions& options);

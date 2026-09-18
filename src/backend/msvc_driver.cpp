@@ -18,7 +18,10 @@ namespace vb6c3 {
 MsvcDriver::MsvcDriver() {}
 MsvcDriver::~MsvcDriver() = default;
 
-int MsvcDriver::executeCommand(const std::string& cmd) const {
+// 以隐藏窗口执行命令行, 返回退出码。
+// 必须隐藏: C3 常被从**无控制台**的宿主拉起 (Git Bash/mintty、GUI 启动器),
+// 这种父进程下 cmd.exe 子进程会被分配一个新的可见控制台 -> 屏幕上连闪黑框。
+int MsvcDriver::executeCommand(const std::string& cmd) {
 #ifdef _WIN32
     // M22-IssueB: Use CreateProcessW to pass UTF-16 command line to cmd.exe
     // This preserves Chinese/Unicode characters in file paths (e.g. /Fe"工程1.exe")
@@ -35,6 +38,9 @@ int MsvcDriver::executeCommand(const std::string& cmd) const {
     std::wstring fullCmd = L"cmd.exe /c " + wcmd;
     
     STARTUPINFOW si = { sizeof(si) };
+    // 隐藏窗口: 不设这两项时, 无控制台宿主下的 cmd.exe 会新建可见控制台窗口
+    si.dwFlags = STARTF_USESHOWWINDOW;
+    si.wShowWindow = SW_HIDE;
     PROCESS_INFORMATION pi = {};
     
     // CreateProcessW requires mutable command line buffer
@@ -46,7 +52,7 @@ int MsvcDriver::executeCommand(const std::string& cmd) const {
         nullptr,                // process security
         nullptr,                // thread security
         FALSE,                  // inherit handles
-        0,                      // creation flags
+        CREATE_NO_WINDOW,       // 不分配控制台窗口 (见函数头注释)
         nullptr,                // environment
         nullptr,                // current directory
         &si,                    // startup info
@@ -67,6 +73,59 @@ int MsvcDriver::executeCommand(const std::string& cmd) const {
     return static_cast<int>(exitCode);
 #else
     return std::system(cmd.c_str());
+#endif
+}
+
+// 同 executeCommand, 但把子进程 stdout 收进 out。
+// vswhere 这类「跑一下读输出」的探测用它, 替换原来的 _popen (同样会弹 cmd 窗口)。
+int MsvcDriver::executeCommandCapture(const std::string& cmd, std::string& out) {
+    out.clear();
+#ifdef _WIN32
+    int wlen = MultiByteToWideChar(CP_UTF8, 0, cmd.c_str(), -1, nullptr, 0);
+    if (wlen <= 0) return -1;
+    std::wstring wcmd(wlen, L'\0');
+    MultiByteToWideChar(CP_UTF8, 0, cmd.c_str(), -1, &wcmd[0], wlen);
+    wcmd.pop_back();
+
+    SECURITY_ATTRIBUTES sa = {};
+    sa.nLength = sizeof(sa);
+    sa.bInheritHandle = TRUE;
+    HANDLE hRead = nullptr, hWrite = nullptr;
+    if (!CreatePipe(&hRead, &hWrite, &sa, 0)) return -1;
+    SetHandleInformation(hRead, HANDLE_FLAG_INHERIT, 0);
+
+    STARTUPINFOW si = { sizeof(si) };
+    si.dwFlags = STARTF_USESHOWWINDOW | STARTF_USESTDHANDLES;
+    si.wShowWindow = SW_HIDE;
+    si.hStdOutput = hWrite;
+    si.hStdError = hWrite;
+
+    PROCESS_INFORMATION pi = {};
+    std::wstring mutableCmd = L"cmd.exe /c " + wcmd;
+    BOOL ok = CreateProcessW(nullptr, &mutableCmd[0], nullptr, nullptr, TRUE,
+                             CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi);
+    // 父进程必须关掉写端, 否则子进程退出后 ReadFile 也等不到 EOF
+    CloseHandle(hWrite);
+    if (!ok) { CloseHandle(hRead); return -1; }
+
+    char buf[512];
+    DWORD n = 0;
+    while (ReadFile(hRead, buf, sizeof(buf), &n, nullptr) && n > 0) {
+        out.append(buf, n);
+    }
+    CloseHandle(hRead);
+    WaitForSingleObject(pi.hProcess, INFINITE);
+    DWORD ec = 1;
+    GetExitCodeProcess(pi.hProcess, &ec);
+    CloseHandle(pi.hProcess);
+    CloseHandle(pi.hThread);
+    return static_cast<int>(ec);
+#else
+    FILE* pipe = popen((cmd + " 2>&1").c_str(), "r");
+    if (!pipe) return -1;
+    char buf[512];
+    while (fgets(buf, sizeof(buf), pipe)) out += buf;
+    return pclose(pipe);
 #endif
 }
 
