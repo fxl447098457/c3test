@@ -41,6 +41,8 @@ bool TypeLibParser::parseTypeLib(void* pTypeLib, TypeLibResult& result) {
 
     // P24-04: 捕获TypeLib项目名 (VB6 ActiveX DLL的Name=属性, 如"VBMANLIB")
     result.typeLibProjectName = result.name;
+    // Fix 098: 供 parseCoClass 在 ProgIDFromCLSID 反查失败时拼 ProgID 前缀
+    currentProjectName_ = result.name;
 
     // 枚举所有类型
     UINT count = pTL->GetTypeInfoCount();
@@ -322,7 +324,13 @@ std::unique_ptr<ComCoClassInfo> TypeLibParser::parseCoClass(void* pTypeInfo,
             cc->progId = progIdStr;
             CoTaskMemFree(progIdW);
         } else {
-            cc->progId = name;  // fallback: 使用coclass短名
+            // Fix 098: 反查失败时不能退化成裸类名 —— VB6 约定 ProgID = <TypeLib库名>.<coclass名>
+            // (实测: VBMAN.dll→"VBMANLIB", stdole2.tlb→"stdole", msado28.tlb→"ADODB", 全部符合).
+            // 裸类名会让运行期 CLSIDFromProgID 查不到 → CreateObject 报 429 / 0x800401F3.
+            // 反查失败在「组件未注册」或「32 位组件 + 64 位宿主进程」下是常态, 属预期路径.
+            cc->progId = currentProjectName_.empty()
+                ? name
+                : (currentProjectName_ + "." + name);
         }
     }
 

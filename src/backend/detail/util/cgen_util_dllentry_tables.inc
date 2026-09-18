@@ -7,8 +7,9 @@
         std::string clsId = cIdent(cc.moduleName);
         std::string methodsVar = "g_vb6_disp_" + clsId + "Methods";
 
-        if (cc.publicMethodNames.empty()) {
-            continue;  // No public methods - skip method table
+        // Fix 099: 有 Public 字段 (无方法) 时也要生成表 —— 字段被暴露为 Property Get/Let
+        if (cc.publicMethodNames.empty() && cc.publicFields.empty()) {
+            continue;  // No public methods/fields - skip method table
         }
 
         // M29: dispid取自methodSym->comDispid (来自driver TypeLib全局连续分配), nextDispid仅作fallback
@@ -57,6 +58,24 @@ std::string wideName = "L\"" + bareName + "\"";
 
             entry.emitLine("{ " + wideName + ", " + std::to_string((int32_t)dispid) +
                         ", " + std::to_string(invkind) + ", " + invokeName + " },");
+        }
+
+        // Fix 099: Public 字段条目 —— 每字段两条 (invkind 2=PropertyGet / 4=PropertyPut),
+        // 共享同一 dispid (COM 约定: 同名 Property 的 Get/Let 同 dispid, TypeLib 侧亦然).
+        for (size_t fi = 0; fi < cc.publicFields.size(); fi++) {
+            const std::string& fname = cc.publicFields[fi];
+            int32_t fdispid = (fi < cc.publicFieldDispids.size()) ? cc.publicFieldDispids[fi] : 0;
+            if (fdispid == 0) {
+                // 防御: TypeLib 阶段未回写 (理论上不应发生). 用高位段避开方法区
+                // 的连续 dispid (TypeLib 从 1 开始分配), 否则 Invoke 按 dispid
+                // 线性匹配会命中错误的表项.
+                fdispid = 9000 + (int32_t)fi;
+            }
+            std::string fInvoke = "vb6_disp_" + clsId + "_" + cIdent(fname);
+            entry.emitLine("{ L\"" + fname + "\", " + std::to_string(fdispid) +
+                           ", 2, " + fInvoke + "_get_invoke },");
+            entry.emitLine("{ L\"" + fname + "\", " + std::to_string(fdispid) +
+                           ", 4, " + fInvoke + "_let_invoke },");
         }
 
         entry.dedent();
@@ -190,11 +209,14 @@ std::string wideName = "L\"" + bareName + "\"";
         entry.emitLine("(void*(*)(void))" + clsStruct + "_New,  /* factoryFunc */");
         entry.emitLine("(void(*)(void*))" + clsStruct + "_Destroy,  /* destroyFunc */");
         entry.emitLine("NULL,  /* dispatchVtable */");
-        if (cc.publicMethodNames.empty()) {
+        // Fix 099: Public 字段占 2 条 (Get + Let), methodCount 要把它们算进去 —
+        // GetIDsOfNames / Invoke 都是遍历 methods[0..methodCount) 匹配的.
+        if (cc.publicMethodNames.empty() && cc.publicFields.empty()) {
             entry.emitLine("0,  /* methodCount */");
             entry.emitLine("NULL,  /* methods */");
         } else {
-            entry.emitLine(std::to_string(cc.publicMethodNames.size()) + ",  /* methodCount */");
+            size_t totalMethodEntries = cc.publicMethodNames.size() + cc.publicFields.size() * 2;
+            entry.emitLine(std::to_string(totalMethodEntries) + ",  /* methodCount */");
             entry.emitLine("g_vb6_disp_" + clsId + "Methods,  /* methods */");
         }
         // P12.1: Implements interface IIDs

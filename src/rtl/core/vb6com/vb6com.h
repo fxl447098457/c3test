@@ -53,6 +53,12 @@ void* vb6_ComPackDouble(double val);
 // 将void*(IDispatch*)封装为VARIANT (用于对象参数)
 void* vb6_ComPackObject(void* obj);
 
+// Fix 104: 将"省略的实参"封装为 VARIANT (VT_ERROR + DISP_E_PARAMNOTFOUND).
+// VB6 遇到 obj.Method a, , c 这类省略实参时, 对该形参位置传的正是这个值 ——
+// 接收方 (IDispatch 实现) 据此把"未提供"与"显式传 0/空串"区分开.
+// 直接丢弃省略实参会让后续实参前移 (a, , c 被当成 a, c), 即参数错位.
+void* vb6_ComPackMissing(void);
+
 // 从VARIANT*解封BSTR (返回BSTR, 需vb6_BSTR_Free释放)
 wchar_t* vb6_ComUnpackBSTR(void* variant);
 

@@ -72,6 +72,8 @@
 
     // 生成类工厂函数 (New/Destroy)
     void emitClassFactory(Module& module);
+    // Fix 099: 生成 Public 字段的 COM 读写访问器 (ActiveX DLL 专用, 见 cgen_com.cpp)
+    void emitClassFieldAccessors(Module& module);
     void emitInterfaceVtable(Module& module);
     void emitEventSink(Module& module);
     void emitComVtableSinkDecls();  // .h 前向声明

@@ -172,20 +172,29 @@
         }
         isEarlyBoundCom_ = false;
 
-        if (!node.positional.empty() || !node.named.empty()) {
+        if (!node.positional.empty() || !node.named.empty() || !node.omittedArgs.empty()) {
             // 有参数: obj.Method(args) → vb6_ComCall(obj, L"Method", variantArgs, argc)
+            // Fix 104: 省略实参必须在该形参位置传 VT_ERROR/DISP_E_PARAMNOTFOUND, 否则后续
+            // 实参前移 (c.Add "x", , , 1 的 1 会被当成第 2 个形参 Key 而非第 4 个 After).
+            // 解析器 (Fix 142 口径) 为每个形参位置保留槽位, 并把省略位下标记入 omittedArgs
+            // (带括号 obj.M(a, , c) 与无括号 obj.M a, , c 两条路径一致),
+            // 故这里只需按 positional 下标对齐形参表, 省略位补 vb6_ComPackMissing().
             std::vector<std::string> packedArgs;
-            for (size_t i = 0; i < node.positional.size(); i++) {
-                std::string packFn = comPackExpr(*node.positional[i]);
-                emitExpr(*node.positional[i]);
+            auto emitComArg = [&](const ExprPtr& argExpr) {
+                std::string packFn = comPackExpr(*argExpr);
+                emitExpr(*argExpr);
                 { std::string resolved = resolveComMarkerForPack(packFn); if (!resolved.empty()) lastExpr_ = resolved; }
                 packedArgs.push_back(packFn + "(" + lastExpr_ + ")");
+            };
+            for (size_t pos = 0; pos < node.positional.size(); pos++) {
+                if (node.omittedArgs.count(pos)) {
+                    packedArgs.push_back("vb6_ComPackMissing()");
+                    continue;
+                }
+                emitComArg(node.positional[pos]);
             }
             for (auto& named : node.named) {
-                std::string packFn = comPackExpr(*named.value);
-                emitExpr(*named.value);
-                { std::string resolved = resolveComMarkerForPack(packFn); if (!resolved.empty()) lastExpr_ = resolved; }
-                packedArgs.push_back(packFn + "(" + lastExpr_ + ")");
+                emitComArg(named.value);
             }
 
             int32_t argc = (int32_t)packedArgs.size();

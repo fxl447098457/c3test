@@ -102,6 +102,10 @@ void* vb6_ComPackInt(int32_t val);
 void* vb6_ComPackBool(int32_t val);
 void* vb6_ComPackDouble(double val);
 void* vb6_ComPackObject(void* obj);
+// Fix 104: 省略实参占位 (VT_ERROR + DISP_E_PARAMNOTFOUND) — cgen 对有省略实参的
+// COM 调用按形参位置插入. 必须在此声明: 缺声明会被 C 编译器按隐式 int 返回处理,
+// x64 下返回值截断成 32 位 → 立即访问违例.
+void* vb6_ComPackMissing(void);
 wchar_t* vb6_ComUnpackBSTR(void* variant);
 int32_t vb6_ComUnpackInt(void* variant);
 double vb6_ComUnpackDouble(void* variant);

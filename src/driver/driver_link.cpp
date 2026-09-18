@@ -130,6 +130,8 @@ bool Driver::runLinker(const CompileOptions& options, const std::string& outputD
     msvcOpts.sourceFiles.push_back(rtlDir + "/vb6com_wrap.c");
     msvcOpts.sourceFiles.push_back(rtlDir + "/vb6com_sink.c");
     msvcOpts.sourceFiles.push_back(rtlDir + "/vb6com_foreach.c");
+    msvcOpts.sourceFiles.push_back(rtlDir + "/vb6com_collection.c");
+    msvcOpts.sourceFiles.push_back(rtlDir + "/vb6com_collection_enum.c");
     msvcOpts.sourceFiles.push_back(rtlDir + "/vb6_di_stubs.c");
     msvcOpts.sourceFiles.push_back(rtlDir + "/vb6_di_win32_stubs.c");
     msvcOpts.sourceFiles.push_back(rtlDir + "/vb6_di_user32_stubs.c");

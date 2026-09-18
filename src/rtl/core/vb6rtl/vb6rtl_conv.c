@@ -34,6 +34,7 @@
 // COM互操作前向声明 (实现在vb6com.c中，避免vb6_VARIANT类型冲突)
 // ============================================================
 extern void* vb6_CreateObject(const wchar_t* progId);
+extern void* vb6_NewBuiltinObject(const wchar_t* className);
 extern void* vb6_GetObject(const wchar_t* pathName, const wchar_t* progId);
 extern int32_t vb6_IsNothing(void* obj);
 extern void vb6_ReleaseObject(void** objPtr);
@@ -265,6 +266,11 @@ void* vb6_NewObject(const wchar_t* className) {
     }
     // 对于未知类名，尝试通过COM创建 (Dim x As New ClassName，className不在已知类中)
     // VB6中如果className不是项目内的类模块，则尝试COM创建
+    // Fix 103: VB6 内建对象 (Collection 等) 实现于运行时内部, 不注册 ProgID —— 直接查
+    // 注册表必然失败并抛 429 (实测 New Collection: ProgID: Collection, 0x800401F3)。
+    // 先探测 C3 运行时自带的内建实现, 未命中才回退到 COM 注册表。
+    void* builtin = vb6_NewBuiltinObject(className);
+    if (builtin) return builtin;
     return vb6_CreateObject(className);
 }
 
