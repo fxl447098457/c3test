@@ -45,6 +45,8 @@ std::string CCodeGen::resolveComValue(const std::string& unpackType) {
                 // P24-07: 未知返回类型(如Enum→UserDefinedType) → 按目标变量类型选择
                 if (unpackType == "BSTR") {
                     lastExpr_ = "vb6_ComGetStringProp(" + getPropArgs + ")";
+                } else if (unpackType == "LongPtr") {
+                    lastExpr_ = "vb6_ComGetLongPtrProp(" + getPropArgs + ")";
                 } else if (unpackType == "Int" || unpackType == "Long" || unpackType == "Boolean") {
                     lastExpr_ = "vb6_ComGetIntProp(" + getPropArgs + ")";
                 } else if (unpackType == "Double" || unpackType == "Single") {
@@ -66,6 +68,8 @@ std::string CCodeGen::resolveComValue(const std::string& unpackType) {
 
     if (unpackType == "BSTR") {
         lastExpr_ = "vb6_ComGetStringProp(" + getPropArgs + ")";
+    } else if (unpackType == "LongPtr") {
+        lastExpr_ = "vb6_ComGetLongPtrProp(" + getPropArgs + ")";
     } else if (unpackType == "Int" || unpackType == "Long" || unpackType == "Boolean") {
         lastExpr_ = "vb6_ComGetIntProp(" + getPropArgs + ")";
     } else if (unpackType == "Double" || unpackType == "Single") {

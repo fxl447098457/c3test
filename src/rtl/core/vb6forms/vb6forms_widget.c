@@ -64,6 +64,56 @@ void vb6_StartMouseTracking(void* hwnd) {
 }
 
 // ============================================================
+// Fix 142: 容器控件把子控件的 WM_COMMAND 转发到窗体 WndProc
+// ------------------------------------------------------------
+// 子控件(按钮/复选框/文本框等)的通知消息发往其「直接父窗口」(即容器),
+// 而生成的窗体 WndProc 只处理自己收到的 WM_COMMAND, 因此容器内子控件的
+// Click/Change 事件永远不会派发 (cmdButtonInPic_Click 形同虚设).
+// 这里用 comctl32 的 SetWindowSubclass 叠加安装一个转发子类: 收到
+// WM_COMMAND 时把消息原样 SendMessage 给顶层窗口(窗体), 由窗体 WndProc
+// 按控件 ID 派发. SetWindowSubclass 支持在同一 HWND 上叠加多个子类,
+// 与生成代码使用的 vb6_InstallControlSubclass (SetWindowLongPtr 单实例)
+// 互不冲突, 且可链式调用原始过程.
+// ============================================================
+typedef LRESULT (CALLBACK *VB6_SUBCLASSPROC_142)(HWND, UINT, WPARAM, LPARAM, UINT_PTR, DWORD_PTR);
+typedef BOOL    (WINAPI   *VB6_SETWNDSUBCLASS_142)(HWND, VB6_SUBCLASSPROC_142, UINT_PTR, DWORD_PTR);
+typedef LRESULT (WINAPI   *VB6_DEFSUBCLASSPROC_142)(HWND, UINT, WPARAM, LPARAM);
+
+static VB6_DEFSUBCLASSPROC_142 g_defSubclassProc142 = NULL;
+static VB6_SETWNDSUBCLASS_142  g_setWindowSubclass142 = NULL;
+
+static LRESULT CALLBACK vb6_CmdForwardSubclass142(HWND hwnd, UINT msg, WPARAM wp,
+                                                  LPARAM lp, UINT_PTR idSub,
+                                                  DWORD_PTR refData) {
+    (void)idSub; (void)refData;
+    if (msg == WM_COMMAND) {
+        HWND root = GetAncestor(hwnd, GA_ROOT);
+        if (root && root != hwnd) {
+            SendMessageW(root, WM_COMMAND, wp, lp);
+        }
+    }
+    if (g_defSubclassProc142) return g_defSubclassProc142(hwnd, msg, wp, lp);
+    return DefWindowProcW(hwnd, msg, wp, lp);
+}
+
+void vb6_ForwardChildCommands(void* containerHwnd) {
+    if (!containerHwnd) return;
+    if (!g_setWindowSubclass142) {
+        HMODULE h = GetModuleHandleW(L"comctl32.dll");
+        if (!h) h = LoadLibraryW(L"comctl32.dll");
+        if (!h) return;
+        g_setWindowSubclass142 = (VB6_SETWNDSUBCLASS_142)GetProcAddress(h, (LPCSTR)410);
+        if (!g_setWindowSubclass142)
+            g_setWindowSubclass142 = (VB6_SETWNDSUBCLASS_142)GetProcAddress(h, "SetWindowSubclass");
+        g_defSubclassProc142 = (VB6_DEFSUBCLASSPROC_142)GetProcAddress(h, (LPCSTR)413);
+        if (!g_defSubclassProc142)
+            g_defSubclassProc142 = (VB6_DEFSUBCLASSPROC_142)GetProcAddress(h, "DefSubclassProc");
+    }
+    if (g_setWindowSubclass142)
+        g_setWindowSubclass142((HWND)containerHwnd, vb6_CmdForwardSubclass142, 0x56424346, 0);
+}
+
+// ============================================================
 // P20-40: Form属性 (KeyPreview/WindowState/ControlBox/MaxButton/MinButton)
 // ============================================================
 

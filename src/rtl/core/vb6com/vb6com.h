@@ -90,6 +90,8 @@ double vb6_ComCallDouble(void* disp, const wchar_t* methodName,
 wchar_t* vb6_ComGetStringProp(void* disp, const wchar_t* propName);
 // COM属性Get→int32_t (内部UnpackInt+VarClear)
 int32_t vb6_ComGetIntProp(void* disp, const wchar_t* propName);
+// COM属性Get→intptr_t (LongPtr: 句柄/指针; 兼容 32/64 位整数变体)
+intptr_t vb6_ComGetLongPtrProp(void* disp, const wchar_t* propName);
 // COM属性Get→double (内部UnpackDouble+VarClear)
 double vb6_ComGetDoubleProp(void* disp, const wchar_t* propName);
 // COM属性Get→对象 (内部UnpackObject+VarFree)

@@ -161,6 +161,11 @@
 
         // Fix 081c: Save which params were actually passed (before gap-filling set all to true)
         actuallyPassedParams = filled;
+        // Fix 142: 省略的位置实参不算真正传入 (_has_ 标志须为 0), 但其缺省值
+        // 已由上方实参发射阶段处理并写入 orderedArgs/args, 这里只改标志.
+        for (size_t oi142 : node.omittedArgs) {
+            if (oi142 < actuallyPassedParams.size()) actuallyPassedParams[oi142] = false;
+        }
 
         args = std::move(orderedArgs);
     } else {
@@ -379,7 +384,8 @@
             const auto& param = calleeParams[i];
             if (param.isOptional && !param.isParamArray) {
                 if (!argList.empty()) argList += ", ";
-                argList += (i < (int)args.size()) ? "1" : "0";
+                // Fix 142: 省略的位置实参视为未传 → _has_=0
+                argList += (i < (int)args.size() && !node.omittedArgs.count((size_t)i)) ? "1" : "0";
             }
         }
 

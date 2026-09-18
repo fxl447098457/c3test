@@ -331,6 +331,135 @@ std::string CCodeGen::getControlPropWriteFn(FrmControlType ctrlType, const std::
     return "";  // 未知属性
 }
 
+// 应用 .frm 设计期样式属性 (BorderStyle / Alignment)。
+// 说明: 这些属性不会改变窗口类默认外观，必须在控件创建后调用对应 RTL setter；
+//       顶层控件与容器(Frame/PictureBox)子控件都需要应用。
+void CCodeGen::emitDesignerStyleProps(const FrmControl& ctrl, const std::string& hwndExpr) {
+    std::string hw = "(void*)" + hwndExpr;
+
+    auto bsIt = ctrl.properties.find("BorderStyle");
+    if (bsIt != ctrl.properties.end()) {
+        switch (ctrl.controlType) {
+        case FrmControlType::Label:
+        case FrmControlType::Frame:
+        case FrmControlType::PictureBox:
+        case FrmControlType::Image:
+        case FrmControlType::TextBox:
+            c_.emitLine("vb6_SetBorderStyle(" + hw + ", " + std::to_string((int)bsIt->second.intValue) + ");");
+            break;
+        default:
+            break;
+        }
+    }
+
+    auto alIt = ctrl.properties.find("Alignment");
+    if (alIt != ctrl.properties.end() &&
+        (ctrl.controlType == FrmControlType::Label || ctrl.controlType == FrmControlType::TextBox)) {
+        c_.emitLine("vb6_SetAlignment(" + hw + ", " + std::to_string((int)alIt->second.intValue) + ");");
+    }
+}
+
+// 控件类型的 Win32 样式位。取值与 cgen_form_ctrl_style_apply.inc 保持一致。
+// 顶层控件与容器子控件共用，避免容器内子控件缺失类型样式。
+long CCodeGen::controlTypeStyleBits(const FrmControl& ctrl) const {
+    constexpr long kWsBorder   = 0x00800000L;
+    constexpr long kBsPush     = 0x00000000L;
+    constexpr long kBsAutoChk  = 0x00000003L;
+    constexpr long kBsAutoRad  = 0x00000009L;
+    constexpr long kBsGroupBox = 0x00000007L;
+    constexpr long kSsLeft     = 0x00000000L;
+    constexpr long kSsNotify   = 0x00000100L;  // SS_NOTIFY: Label 接收鼠标消息 (tooltip/Click)
+    constexpr long kEsAutoH    = 0x00000080L;
+    constexpr long kLbsNotify  = 0x00000001L;
+    constexpr long kCbsDrop    = 0x00000002L;
+    constexpr long kSsBitmap   = 0x0000000EL;
+    constexpr long kSsCenterImg= 0x00000200L;
+    constexpr long kBsPushLike = 0x00001000L;
+    constexpr long kEsMulti    = 0x00000004L;
+    constexpr long kEsAutoV    = 0x00000040L;
+    constexpr long kWsHscroll  = 0x00100000L;
+    constexpr long kWsVscroll  = 0x00200000L;
+
+    long style = 0;
+    switch (ctrl.controlType) {
+        case FrmControlType::CommandButton: {
+            style |= kBsPush;
+            auto it = ctrl.properties.find("Style");
+            if (it != ctrl.properties.end() && it->second.intValue == 1) style |= kBsPushLike;
+            break;
+        }
+        case FrmControlType::TextBox: {
+            style |= kWsBorder | kEsAutoH;
+            auto mlIt = ctrl.properties.find("MultiLine");
+            if (mlIt != ctrl.properties.end() && mlIt->second.intValue != 0) style |= kEsMulti | kEsAutoV;
+            auto sbIt = ctrl.properties.find("ScrollBars");
+            if (sbIt != ctrl.properties.end()) {
+                int sb = (int)sbIt->second.intValue;
+                if (sb == 1 || sb == 3) style |= kWsVscroll;
+                if (sb == 2 || sb == 3) style |= kWsHscroll;
+            }
+            break;
+        }
+        case FrmControlType::Label:
+            style |= kSsLeft | kSsNotify;
+            break;
+        case FrmControlType::CheckBox: {
+            style |= kBsAutoChk;
+            auto it = ctrl.properties.find("Style");
+            if (it != ctrl.properties.end() && it->second.intValue == 1) style |= kBsPushLike;
+            break;
+        }
+        case FrmControlType::OptionButton: {
+            style |= kBsAutoRad;
+            auto it = ctrl.properties.find("Style");
+            if (it != ctrl.properties.end() && it->second.intValue == 1) style |= kBsPushLike;
+            break;
+        }
+        case FrmControlType::Frame:
+            style |= kBsGroupBox;
+            break;
+        case FrmControlType::ListBox: {
+            style |= kLbsNotify | kWsBorder | kWsVscroll;
+            auto sortIt = ctrl.properties.find("Sorted");
+            if (sortIt != ctrl.properties.end() && sortIt->second.intValue != 0) style |= 0x0002L;
+            auto msIt = ctrl.properties.find("MultiSelect");
+            if (msIt != ctrl.properties.end()) {
+                if (msIt->second.intValue == 1) style |= 0x0008L;
+                else if (msIt->second.intValue == 2) style |= 0x0800L;
+            }
+            break;
+        }
+        case FrmControlType::ComboBox: {
+            auto stIt = ctrl.properties.find("Style");
+            if (stIt != ctrl.properties.end()) {
+                if (stIt->second.intValue == 1) style |= 0x0001L;       // CBS_SIMPLE
+                else if (stIt->second.intValue == 2) style |= 0x0003L;  // CBS_DROPDOWNLIST
+                else style |= kCbsDrop;
+            } else {
+                style |= kCbsDrop;
+            }
+            style |= kWsBorder;
+            auto sortIt = ctrl.properties.find("Sorted");
+            if (sortIt != ctrl.properties.end() && sortIt->second.intValue != 0) style |= 0x0100L;
+            break;
+        }
+        case FrmControlType::PictureBox:
+            style |= kSsBitmap | kSsCenterImg | kWsBorder;
+            break;
+        case FrmControlType::Image:
+            style |= kSsBitmap | kSsCenterImg;
+            break;
+        default:
+            break;
+    }
+    return style;
+}
+
+bool CCodeGen::controlTypeClearsCaption(const FrmControl& ctrl) const {
+    return ctrl.controlType == FrmControlType::PictureBox ||
+           ctrl.controlType == FrmControlType::Image;
+}
+
 // P20-36: 生成控件属性访问的HWND参数 (Menu控件用GetMenu+menuId)
 std::string CCodeGen::makeCtrlHwndArg(const std::string& ctrlNameLower, FrmControlType ctrlType) const {
     if (ctrlType == FrmControlType::Menu) {

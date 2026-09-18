@@ -683,6 +683,7 @@ static vb6_ComIface_Font* vb6_uc_fontOf(void* p) {
 typedef struct vb6_CollRec {
     int32_t tag;          // 0xC01C01C0
     void*   items;        // vb6_VARIANT[] (RTL 简化布局)
+    wchar_t** keys;       // BSTR[] 与 items 平行; 可为 NULL (无键集合)
     int32_t count;
     int32_t cap;
 } vb6_CollRec;
@@ -701,16 +702,23 @@ void* vb6_Collection_New(void) {
 
 int32_t vb6_Collection_IsCollection(void* p) { return vb6_uc_isColl(p); }
 
-static void vb6_coll_push(void* coll, const vb6_VARIANT* v) {
+static void vb6_coll_push(void* coll, const vb6_VARIANT* v, const wchar_t* key) {
     vb6_CollRec* c = (vb6_CollRec*)coll;
     if (!vb6_uc_isColl(c) || !v) return;
     if (c->count >= c->cap) {
         int32_t nc = c->cap ? c->cap * 2 : 8;
         vb6_VARIANT* ni = (vb6_VARIANT*)realloc(c->items, sizeof(vb6_VARIANT) * (size_t)nc);
         if (!ni) return;
-        c->items = ni; c->cap = nc;
+        c->items = ni;
+        wchar_t** nk = (wchar_t**)realloc(c->keys, sizeof(wchar_t*) * (size_t)nc);
+        if (!nk) return;
+        c->keys = nk;
+        c->cap = nc;
     }
-    vb6_VARIANT* dst = &((vb6_VARIANT*)c->items)[c->count++];
+    if (!c->keys) {
+        c->keys = (wchar_t**)calloc((size_t)(c->cap ? c->cap : 8), sizeof(wchar_t*));
+    }
+    vb6_VARIANT* dst = &((vb6_VARIANT*)c->items)[c->count];
     memset(dst, 0, sizeof(*dst));
     if (v->vt == vb6_vtBSTR) {
         dst->vt = vb6_vtBSTR;
@@ -718,13 +726,32 @@ static void vb6_coll_push(void* coll, const vb6_VARIANT* v) {
     } else {
         *dst = *v;
     }
+    if (c->keys) c->keys[c->count] = key ? SysAllocString(key) : NULL;
+    c->count++;
 }
 
 // 实参是 Windows VARIANT* (vb6_ComPackXxx 打包), 转成 RTL 形式后存入
 void vb6_Collection_Add(void* coll, const void* winVar) {
     vb6_VARIANT hv;
     vb6_Host_FromWinVariant(winVar, &hv);
-    vb6_coll_push(coll, &hv);
+    vb6_coll_push(coll, &hv, NULL);
+    vb6_Host_ClearVariant(&hv);
+}
+
+// 带键 Add (VB6: 集合.Add Item, Key); 键重复时报 457
+void vb6_Collection_AddKeyed(void* coll, const void* winVar, const wchar_t* key) {
+    vb6_CollRec* c = (vb6_CollRec*)coll;
+    if (vb6_uc_isColl(c) && key && c->keys) {
+        for (int32_t i = 0; i < c->count; i++) {
+            if (c->keys[i] && _wcsicmp(c->keys[i], key) == 0) {
+                vb6_ErrRaiseNumber(457);
+                return;
+            }
+        }
+    }
+    vb6_VARIANT hv;
+    vb6_Host_FromWinVariant(winVar, &hv);
+    vb6_coll_push(coll, &hv, key);
     vb6_Host_ClearVariant(&hv);
 }
 
@@ -738,8 +765,24 @@ void vb6_Collection_Remove(void* coll, int32_t idx1) {
     vb6_VARIANT* items = (vb6_VARIANT*)c->items;
     vb6_VARIANT* v = &items[idx1 - 1];
     if (v->vt == vb6_vtBSTR && v->bstrVal) { SysFreeString(v->bstrVal); }
+    if (c->keys) {
+        if (c->keys[idx1 - 1]) SysFreeString(c->keys[idx1 - 1]);
+        memmove(&c->keys[idx1 - 1], &c->keys[idx1], sizeof(wchar_t*) * (size_t)(c->count - idx1));
+    }
     memmove(&items[idx1 - 1], &items[idx1], sizeof(vb6_VARIANT) * (size_t)(c->count - idx1));
     c->count--;
+}
+
+// 按键删除 (VB6: 集合.Remove Key)
+void vb6_Collection_RemoveByKey(void* coll, const wchar_t* key) {
+    vb6_CollRec* c = (vb6_CollRec*)coll;
+    if (!vb6_uc_isColl(c) || !key || !c->keys) return;
+    for (int32_t i = 0; i < c->count; i++) {
+        if (c->keys[i] && _wcsicmp(c->keys[i], key) == 0) {
+            vb6_Collection_Remove(coll, i + 1);
+            return;
+        }
+    }
 }
 
 // Item(i): 1-based; BSTR 需复制 (宿主管道的 ClearVariant 会 SysFreeString)
@@ -762,6 +805,27 @@ void vb6_Collection_Item(void* coll, int32_t idx1, void* outV) {
     }
     vb6_coll_itemCopy(&((const vb6_VARIANT*)c->items)[idx1 - 1], out);
 }
+
+// 按键查找 (VB6: 集合(Key)); 未找到时报错 5 (供 On Error Resume Next + Err 判定)
+int32_t vb6_Collection_ItemByKey(void* coll, const wchar_t* key, void* outV) {
+    vb6_VARIANT* out = (vb6_VARIANT*)outV;
+    vb6_CollRec* c = (vb6_CollRec*)coll;
+    if (vb6_uc_isColl(c) && key && c->keys) {
+        for (int32_t i = 0; i < c->count; i++) {
+            if (c->keys[i] && _wcsicmp(c->keys[i], key) == 0) {
+                vb6_coll_itemCopy(&((const vb6_VARIANT*)c->items)[i], out);
+                return 1;
+            }
+        }
+    }
+    vb6_ho_setVariantEmpty(out);
+    vb6_ErrRaiseNumber(5);   // 无效的过程调用或参数 (键不存在)
+    return 0;
+}
+
+// cgen 对 `As New Collection` 生成 vb6_cls_<Name>_New(); 内建 Collection 无项目类,
+// 以此别名桥接 (见 cgen_decl_var.cpp / cgen_localdecl.cpp 的 Collection 注册).
+void* vb6_cls_Collection_New(void) { return vb6_Collection_New(); }
 
 // For Each 枚举器: {coll, nextIdx} 两元素句柄, 语义同 Controls 枚举
 void* vb6_Collection_EnumInit(void* coll) {
@@ -1024,12 +1088,19 @@ int32_t vb6_Host_Call(void* obj, const wchar_t* name, int32_t argc, void** argv,
     if (vb6_uc_isFont(obj)) return 1;
     if (vb6_uc_isColl(obj)) {   // Fix 112c: Collection 方法
         if (_wcsicmp(name, L"Add") == 0 && argc >= 1) {
-            vb6_Collection_Add(obj, argv[0]);
+            BSTR k = (argc >= 2) ? vb6_ho_variantToBstr((vb6_VARIANT*)argv[1]) : NULL;
+            if (k) vb6_Collection_AddKeyed(obj, argv[0], k);
+            else   vb6_Collection_Add(obj, argv[0]);
         } else if (_wcsicmp(name, L"Item") == 0 && argc >= 1) {
             vb6_VARIANT* a = (vb6_VARIANT*)argv[0];
-            vb6_Collection_Item(obj, vb6_ho_variantToLong(a), out);
+            BSTR k = vb6_ho_variantToBstr(a);
+            if (k) vb6_Collection_ItemByKey(obj, k, out);
+            else   vb6_Collection_Item(obj, vb6_ho_variantToLong(a), out);
         } else if (_wcsicmp(name, L"Remove") == 0 && argc >= 1) {
-            vb6_Collection_Remove(obj, vb6_ho_variantToLong((vb6_VARIANT*)argv[0]));
+            vb6_VARIANT* a = (vb6_VARIANT*)argv[0];
+            BSTR k = vb6_ho_variantToBstr(a);
+            if (k) vb6_Collection_RemoveByKey(obj, k);
+            else   vb6_Collection_Remove(obj, vb6_ho_variantToLong(a));
         }
         return 1;
     }

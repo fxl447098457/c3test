@@ -117,9 +117,11 @@ ExprPtr Parser::parsePostfix(ExprPtr expr) {
                             call->named.push_back({nameTok.text, std::move(val)});
                         } else if (cur_.kind == TokenKind::Comma || cur_.kind == TokenKind::RightParen) {
                             // M22: 空参数占位 - VB6允许 MsgBox("hi", , "title")
+                            // Fix 142: 同时记录省略索引, 供代码生成按形参缺省值填充
                             auto _ph = std::make_unique<LiteralExpr>(currentLoc(), LiteralKind::Long, "0");
                             _ph->longValue = 0;  // Union与intValue共享内存, 必须显式设置longValue
                             call->positional.push_back(std::move(_ph));
+                            call->omittedArgs.insert(argIndex);
                         } else {
                             // 位置参数
                             auto arg = parseExpression();

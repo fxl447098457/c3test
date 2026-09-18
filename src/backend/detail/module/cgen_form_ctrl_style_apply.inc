@@ -15,6 +15,7 @@
         constexpr long kBsAutoRad  = 0x00000009L;
         constexpr long kBsGroupBox = 0x00000007L;
         constexpr long kSsLeft     = 0x00000000L;
+        constexpr long kSsNotify   = 0x00000100L;  // SS_NOTIFY: Label 接收鼠标消息 (VB6 语义 + tooltip 需要)
         constexpr long kEsAutoH    = 0x00000080L;
         constexpr long kLbsNotify  = 0x00000001L;
         constexpr long kCbsDrop    = 0x00000002L;
@@ -57,7 +58,9 @@
                 }
                 break;
             case FrmControlType::Label:
-                style |= kSsLeft;
+                // VB6 Label 有 Click/MouseDown 事件且是 tooltip 目标, 必须 SS_NOTIFY,
+                // 否则 STATIC 对鼠标返回 HTTRANSPARENT, TTF_SUBCLASS 的 tooltip 永远不弹。
+                style |= kSsLeft | kSsNotify;
                 break;
             case FrmControlType::CheckBox:
                 style |= kBsAutoChk;
@@ -151,6 +154,17 @@
             } else {
                 c_.emitLine("vb6_hwnd_" + cIdent(ctrl.controlName) + " = vb6_tmp_hwnd; }");
             }
+        }
+
+        // 设计期 BorderStyle / Alignment (顶层控件)
+        {
+            std::string dsNameLower = ctrl.controlName;
+            std::transform(dsNameLower.begin(), dsNameLower.end(), dsNameLower.begin(), ::tolower);
+            std::string dsHwnd = knownControlArrays_.count(dsNameLower) ?
+                ("vb6_CtrlArr_GetAt(&vb6_arr_" + cIdent(ctrl.controlName) + ", " +
+                 std::to_string(ctrl.index >= 0 ? ctrl.index : 0) + ")") :
+                ("vb6_hwnd_" + cIdent(ctrl.controlName));
+            emitDesignerStyleProps(ctrl, dsHwnd);
         }
 
         // Bug3-Fix: 延迟设置 TextBox/ComboBox 的初始文本（在句柄赋值之后）

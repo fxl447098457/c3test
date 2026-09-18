@@ -218,7 +218,25 @@
                         std::string argsDef = objDef;
                         int slotDef = 0;
                         auto pushArgDef = [&](Expr* argNode, const ParameterInfo& pi) {
+                            // Fix 143: 形参是对象类型 (Object/Control) 且实参是窗体控件
+                            // 标识符时, 抑制默认属性解析, 传控件句柄引用而非默认属性值.
+                            // 否则 ByRef Object 实参 (如 cTT.EnableTooltips(cmdButtonInPic))
+                            // 会取到 Caption BSTR 指针, 被调方 *objControl 读到字符串指针
+                            // 当对象 → 访问 hWnd 崩溃 (0xC000041D). 与 arg_emit.inc 的
+                            // Fix 090q 同源.
+                            bool savedSuppressDef143 = suppressDefaultProp_;
+                            if (static_cast<Vb6Type>(static_cast<uint16_t>(pi.type)
+                                    & ~static_cast<uint16_t>(Vb6Type::Array)) == Vb6Type::Object
+                                && argNode && argNode->kind == ASTNodeKind::IdentifierExpr) {
+                                std::string idLower143 = Symbol::toLower(
+                                    static_cast<IdentifierExpr&>(*argNode).name);
+                                if (knownFormControls_.count(idLower143)
+                                    || knownWithEventsCtrlVars_.count(idLower143)) {
+                                    suppressDefaultProp_ = true;
+                                }
+                            }
                             emitExpr(*argNode);
+                            suppressDefaultProp_ = savedSuppressDef143;
                             std::string argExpr = std::move(lastExpr_);
                             std::string oneDef;
                             if (pi.type == Vb6Type::Variant) {
@@ -314,7 +332,8 @@
             std::string lower = idExpr.name;
             std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
             // 从已知变量集合推断类型
-            if (knownLongVars_.count(lower)) unpackHint = "Long";
+            if (knownLongPtrVars_.count(lower)) unpackHint = "LongPtr";
+            else if (knownLongVars_.count(lower)) unpackHint = "Long";
             else if (knownDoubleVars_.count(lower)) unpackHint = "Double";
             else if (knownObjectVars_.count(lower)) unpackHint = "Object";
             else if (knownBstrVars_.count(lower)) unpackHint = "BSTR";

@@ -29,7 +29,10 @@
     // Fix 010c: VB6全局Err对象 — 不能用me->ERR访问
     // Err是全局内置对象, 不是类成员
     if (lower == "err") {
-        lastExpr_ = "(void*)0";  // Err对象本身作为值无意义, 属性访问由MemberAccessExpr处理
+        // Err 的默认属性是 Number: `Err = 0` / `If Err Then` 都应读写错误号,
+        // 否则会编译成恒真的 `(void*)0 == 0`(实测 BalloonTooltips 的
+        // ToolTipExists 因此恒返回 True, tooltip 永不创建)。
+        lastExpr_ = "vb6_ErrNumber()";  // Err.Number; 属性访问仍由 MemberAccessExpr 处理
         return;
     }
 

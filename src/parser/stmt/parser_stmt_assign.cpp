@@ -465,10 +465,11 @@ StmtPtr Parser::parseLabelOrAssignmentOrCall() {
         // 第一个参数
         // Fix 073: 无括号调用路径也需记录 ByVal 覆盖到 byvalOverrides,
         // 与 parser_expr.cpp 带括号调用路径一致.
-        size_t stmtArgIndex = 0;
+        // Fix 142: 索引以 call->positional.size() 为准 (含 Fix 110y 折叠出的
+        // leadingArg 占用的槽位), 不再用独立计数器, 否则省略实参时槽位错位.
         if (cur_.kind == TokenKind::ByVal || cur_.kind == TokenKind::ByRef) {
             if (cur_.kind == TokenKind::ByVal) {
-                call->byvalOverrides.insert(stmtArgIndex);
+                call->byvalOverrides.insert(call->positional.size());
             }
             advance(); // 消费 ByVal/ByRef
         }
@@ -482,8 +483,12 @@ StmtPtr Parser::parseLabelOrAssignmentOrCall() {
             } else {
                 call->positional.push_back(parseExpression());
             }
+        } else if (cur_.kind == TokenKind::Comma) {
+            // Fix 142: 省略首个位置实参 (Foo , x) — 保留槽位并记录索引
+            call->omittedArgs.insert(call->positional.size());
+            call->positional.push_back(std::make_unique<LiteralExpr>(
+                currentLoc(), LiteralKind::Empty, "Empty"));
         }
-        stmtArgIndex++;
 
         // 后续参数: 逗号或分号后继续
         while (true) {
@@ -498,7 +503,7 @@ StmtPtr Parser::parseLabelOrAssignmentOrCall() {
                 // ByVal/ByRef 前缀
                 if (cur_.kind == TokenKind::ByVal || cur_.kind == TokenKind::ByRef) {
                     if (cur_.kind == TokenKind::ByVal) {
-                        call->byvalOverrides.insert(stmtArgIndex);
+                        call->byvalOverrides.insert(call->positional.size());
                     }
                     advance();
                 }
@@ -512,8 +517,13 @@ StmtPtr Parser::parseLabelOrAssignmentOrCall() {
                     } else {
                         call->positional.push_back(parseExpression());
                     }
+                } else if (cur_.kind == TokenKind::Comma) {
+                    // Fix 142: 省略的位置实参 (连续逗号) — 保留槽位并记录索引,
+                    // 代码生成按形参缺省值填充, _has_ 标志置 0.
+                    call->omittedArgs.insert(call->positional.size());
+                    call->positional.push_back(std::make_unique<LiteralExpr>(
+                        currentLoc(), LiteralKind::Empty, "Empty"));
                 }
-                stmtArgIndex++;
                 continue;
             }
             // 分号后跟着表达式 -> 作为下一个参数

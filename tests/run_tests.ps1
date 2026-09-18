@@ -194,7 +194,7 @@ function Invoke-TestExe {
 # GUI smoke: require a visible main window, then close only the process we launch.
 # This checks startup, not screenshot correctness or QR decoding.
 function Test-GuiVbp {
-    param([string]$Name, [string]$VbpFile)
+    param([string]$Name, [string]$VbpFile, [string]$ExeName = "")
     $script:total++
     Write-Host -NoNewline "  [GUI] $Name ... "
     $guiOut = Join-Path $OutDir $Name
@@ -206,7 +206,9 @@ function Test-GuiVbp {
         if ($Verbose) { Write-Host ($compileResult | Out-String) }
         return
     }
-    $exe = Join-Path $guiOut ([IO.Path]::GetFileNameWithoutExtension($VbpFile) + ".exe")
+    # VBP ExeName32 may differ from the vbp file name; pass -ExeName to override.
+    $exeBase = if ($ExeName) { $ExeName } else { [IO.Path]::GetFileNameWithoutExtension($VbpFile) }
+    $exe = Join-Path $guiOut ($exeBase + ".exe")
     $proc = $null
     try {
         $proc = Start-Process -FilePath $exe -WorkingDirectory $guiOut -PassThru -ErrorAction Stop
@@ -467,6 +469,8 @@ if ($Category -in @("all", "run")) {
 
     # QR code project (tests\VbQRCodegen-master): form loads, sets Image1.Picture via Stretch
     Test-GuiVbp "VbQRCodegen" "$Tests\VbQRCodegen-master\test\Project1.vbp"
+    # BalloonTooltips: form loads with controls + creates its common-controls tooltip windows (x64).
+    Test-GuiVbp "BalloonTooltips" "$Tests\BalloonTooltips\prjBalloonTooltips.vbp" -ExeName "BalloonTooltips"
     Write-Host ""
     
     # --- P6 COM ���� ---

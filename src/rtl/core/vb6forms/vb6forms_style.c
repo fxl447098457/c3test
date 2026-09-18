@@ -323,6 +323,19 @@ void vb6_SetBorderStyle(void* hwnd, int style) {
         SetWindowLongW(hw, GWL_EXSTYLE, exStyle);
         SetWindowPos(hw, NULL, 0, 0, 0, 0,
             SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER);
+    } else if (wcsicmp(className, L"Static") == 0) {
+        // Label (STATIC): 0=None, 1=Fixed Single → 切换 WS_BORDER
+        LONG gstyle = GetWindowLongW(hw, GWL_STYLE);
+        if (style == 0) {
+            gstyle &= ~WS_BORDER;
+        } else {
+            gstyle |= WS_BORDER;
+        }
+        SetWindowLongW(hw, GWL_STYLE, gstyle);
+        SetWindowPos(hw, NULL, 0, 0, 0, 0,
+            SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER);
+        SetPropW(hw, L"VB6_BorderStyle", (HANDLE)(INT_PTR)style);
+        InvalidateRect(hw, NULL, TRUE);
     } else {
         // Store as property for other controls
         SetPropW(hw, L"VB6_BorderStyle", (HANDLE)(INT_PTR)style);

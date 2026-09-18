@@ -155,6 +155,19 @@ void CCodeGen::visit(VariableDecl& node) {
                 knownWithEventsVars_[lower] = clsSym->name;
             }
         }
+        // As New 内建宿主类 Collection: 无 Class 符号, 但需按 VB6 语义惰性实例化
+        // (否则 colTooltips 恒为 NULL, On Error Resume Next + Err 的
+        //  "集合项是否存在" 判断全部走错分支)。
+        if (node.isNew) {
+            std::string tn = simple.name;
+            std::transform(tn.begin(), tn.end(), tn.begin(), ::tolower);
+            if (tn == "collection") {
+                std::string lower = node.name;
+                std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+                knownNewVars_[lower] = "Collection";
+                moduleNewVars_[lower] = "Collection";
+            }
+        }
     }
 
     // 检查是否是UDT类型变量 → 注册到 knownUdtVars_
