@@ -2,3 +2,7 @@
 	path = tests/vbman
 	url = git@gitcode.com:woeoio/vbman.git
 	branch = master
+[submodule "tests/vbman-demo"]
+	path = tests/vbman-demo
+	url = git@gitcode.com:woeoio/vbman-demo.git
+	branch = master
