@@ -194,7 +194,11 @@ void CCodeGen::emitLocalDeclCode(LocalDeclStmt& node) {
             }
 
             // 记录double/single类型变量名 (用于Debug.Print浮点输出)
-            if (cType == "double" || cType == "float") {
+            if (cType == "float") {
+                std::string lower = var.name;
+                std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+                knownSingleVars_.insert(lower); knownDoubleVars_.insert(lower);   // Fix 117c: VT_R4
+            } else if (cType == "double") {
                 std::string lower = var.name;
                 std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
                 knownDoubleVars_.insert(lower);
@@ -400,7 +404,9 @@ void CCodeGen::emitLocalDeclCode(LocalDeclStmt& node) {
                 } else if (cType.find("vb6_ComIface_") != std::string::npos) {
                     // Fix 082: COM interface pointer types are pointer-sized on x64
                     knownLongPtrVars_.insert(lower);
-                } else if (cType == "double" || cType == "float") {
+                } else if (cType == "float") {
+                    knownSingleVars_.insert(lower); knownDoubleVars_.insert(lower);   // Fix 117c: VT_R4
+                } else if (cType == "double") {
                     knownDoubleVars_.insert(lower);
                 } else if (cType == "vb6_VARIANT") {
                     knownVariantVars_.insert(lower);

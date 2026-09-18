@@ -8,6 +8,7 @@
         // BS_GROUPBOX=7, SS_LEFT=0, ES_AUTOHSCROLL=0x80
         // LBS_NOTIFY=1, CBS_DROPDOWN=2
         constexpr long kWsChild    = 0x40000000L;
+        constexpr long kWsClipSib  = 0x04000000L;  // WS_CLIPSIBLINGS (Fix 124)
         constexpr long kWsVisible  = 0x10000000L;
         constexpr long kWsBorder   = 0x00800000L;
         constexpr long kBsPush     = 0x00000000L;
@@ -28,7 +29,9 @@
         constexpr long kWsHscroll  = 0x00100000L;  // WS_HSCROLL
         constexpr long kWsVscroll  = 0x00200000L;  // WS_VSCROLL
 
-        long style = kWsChild | kWsVisible;
+        // Fix 124: WS_CLIPSIBLINGS —— 标准控件与 UC 宿主同层叠放时,
+        // 重绘不得画到上层兄弟控件上 (否则出现"控件被其他控件擦掉")。
+        long style = kWsChild | kWsVisible | kWsClipSib;
         long exStyle = 0;
         std::string createCaption = ctrlCaption;
 

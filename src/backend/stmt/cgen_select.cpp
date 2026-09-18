@@ -28,7 +28,12 @@ void CCodeGen::visit(SelectCaseStmt& node) {
     if (isStringSelect) {
         tempType = "BSTR";
     } else if (isFloatSelect) {
-        tempType = "double";
+        // Fix 136: Single 测试必须按 **float** 承载并参与 Case 比较。
+        // 之前临时变量用 double: `Select Case iStep: Case Is = 0.2 * nDec`
+        // (ucChartBar 轴步长) 左边 0.2f=0.20000000298…, 右边 double 0.2 →
+        // 永不相等 → Case 永不命中 → nDec 循环 26 万次不退出 (白屏死循环)。
+        // VB6 两边都是 Single, 相等。Case 侧表达式也 cast (float)。
+        tempType = "float";
     } else {
         tempType = "int32_t";
     }
@@ -78,6 +83,9 @@ void CCodeGen::visit(SelectCaseStmt& node) {
                     if (isStringSelect) {
                         // 字符串比较: vb6_StrCmp(tempVar, rightVal) op 0
                         cond = "vb6_StrCmp(" + tempVar + ", " + rightVal + ") " + mapBinaryOp(binExpr.op) + " 0";
+                    } else if (isFloatSelect) {
+                        // Fix 136: Single 语义 — Case 侧也按 float 求值
+                        cond = "(float)" + tempVar + " " + mapBinaryOp(binExpr.op) + " (float)(" + rightVal + ")";
                     } else {
                         cond = tempVar + " " + mapBinaryOp(binExpr.op) + " " + rightVal;
                     }
@@ -98,6 +106,9 @@ void CCodeGen::visit(SelectCaseStmt& node) {
                 if (isStringSelect) {
                     // 字符串范围比较: wcscmp >= lo && wcscmp <= hi
                     cond = "vb6_StrCmp(" + tempVar + ", " + lo + ") >= 0 && vb6_StrCmp(" + tempVar + ", " + hi + ") <= 0";
+                } else if (isFloatSelect) {
+                    // Fix 136: Single 语义范围比较
+                    cond = "(float)" + tempVar + " >= (float)(" + lo + ") && (float)" + tempVar + " <= (float)(" + hi + ")";
                 } else {
                     cond = tempVar + " >= " + lo + " && " + tempVar + " <= " + hi;
                 }
@@ -106,6 +117,9 @@ void CCodeGen::visit(SelectCaseStmt& node) {
                 emitExpr(*cv.value);
                 if (isStringSelect) {
                     cond = "vb6_StrCmp(" + tempVar + ", " + lastExpr_ + ") == 0";
+                } else if (isFloatSelect) {
+                    // Fix 136: Single 语义精确匹配
+                    cond = "(float)" + tempVar + " == (float)(" + lastExpr_ + ")";
                 } else {
                     cond = tempVar + " == " + lastExpr_;
                 }
@@ -142,6 +156,6 @@ void CCodeGen::visit(SelectCaseStmt& node) {
 
 void CCodeGen::visit(CaseClause& node) {
     // 由SelectCaseStmt内部处理
-}
+}
 
 } // namespace vb6c3

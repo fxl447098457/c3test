@@ -260,7 +260,11 @@ void CCodeGen::visit(VariableDecl& node) {
         }
     }
 // 记录变量类型集合 (用于Debug.Print和COM解封类型推断)
-    if (cType == "double" || cType == "float") {
+    if (cType == "float") {
+        std::string lower = node.name;
+        std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+        knownSingleVars_.insert(lower); knownDoubleVars_.insert(lower);   // Fix 117c: VT_R4
+    } else if (cType == "double") {
         std::string lower = node.name;
         std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
         knownDoubleVars_.insert(lower);

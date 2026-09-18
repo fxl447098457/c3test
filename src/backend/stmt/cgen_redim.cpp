@@ -71,6 +71,12 @@ void CCodeGen::visit(ReDimStmt& node) {
     std::string saElemType = mapSaElemType(elemType);
     // Bug4-Fix: UDT数组需使用vb6_SafeArrayReDim1D_Udt
     std::string udtCType = resolveArrayUdtElemCType(node.asType.get());
+    if (udtCType.empty() && !lowerVar.empty()) {
+        // ReDim Preserve arr(n) 不带 As 子句时, 元素类型由声明决定
+        // (Dim arr() As UDT)。不回退则回落 vb6_sa_empty(4字节) → UDT 越界写入。
+        auto it = arrayUdtElemTypes_.find(lowerVar);
+        if (it != arrayUdtElemTypes_.end()) udtCType = it->second;
+    }
     bool isUdtArray = !udtCType.empty();
 
     // Fix 084a/090m: ReDim 目标是否为 Variant 数组 — 逻辑见成员函数 isVariantArrayTarget
@@ -101,6 +107,9 @@ void CCodeGen::visit(ReDimStmt& node) {
             if (isVariantArrayVar(cName)) {
                 callArg = "vb6_VariantToSafeArray1D(" + cName + ")";
                 assignVal = "vb6_VariantFromValue(vb6_SafeArrayReDimPreserve1D(" + callArg + ", " + lBound + ", " + uBound + "))";
+            } else if (isUdtArray) {
+                // Bug4-Fix Udt Preserve: 传入 UDT 元素尺寸, 避免 NULL 初值回落 4 字节导致越界
+                assignVal = "vb6_SafeArrayReDimPreserve1D_Udt((int32_t)sizeof(" + udtCType + "), " + callArg + ", " + lBound + ", " + uBound + ")";
             } else {
                 assignVal = "vb6_SafeArrayReDimPreserve1D(" + callArg + ", " + lBound + ", " + uBound + ")";
             }
@@ -150,7 +159,13 @@ void CCodeGen::visit(ReDimStmt& node) {
             wrapBack = "vb6_VariantFromValue(";
         }
         if (node.preserve) {
-            std::string res = "vb6_SafeArrayReDimPreserveND((vb6_SafeArrayND*)" + redimArg + ", " + std::to_string(dimCount) + ", " + boundsVar + ")";
+            std::string res;
+            if (isUdtArray) {
+                // Bug4-Fix Udt Preserve: 多维 UDT 数组传入元素尺寸
+                res = "vb6_SafeArrayReDimPreserveND_Udt((int32_t)sizeof(" + udtCType + "), (vb6_SafeArrayND*)" + redimArg + ", " + std::to_string(dimCount) + ", " + boundsVar + ")";
+            } else {
+                res = "vb6_SafeArrayReDimPreserveND((vb6_SafeArrayND*)" + redimArg + ", " + std::to_string(dimCount) + ", " + boundsVar + ")";
+            }
             if (!wrapBack.empty()) res = wrapBack + res + ")";
             c_.emitLine(cName + " = (vb6_SafeArray1D*)" + res + ";");
         } else {
@@ -228,6 +243,12 @@ void CCodeGen::emitReDimComplexTarget(ReDimStmt& node) {
         elemType = resolveArrayElemType(node.asType.get());
         udtCType = resolveArrayUdtElemCType(node.asType.get());
     }
+    if (udtCType.empty() && !node.varName.empty()) {
+        std::string cv = node.varName;
+        std::transform(cv.begin(), cv.end(), cv.begin(), ::tolower);
+        auto it = arrayUdtElemTypes_.find(cv);
+        if (it != arrayUdtElemTypes_.end()) udtCType = it->second;
+    }
     if (udtCType.empty() && elemType == Vb6Type::UserDefinedType) {
         // 推断不到 UDT 的 C 类型名: 回落 Variant 分配 (VB6_SA_AT 只用 data/lBound,
         // Variant 元素尺寸最大 → 过分配不会越界), 避免 sizeof(未定义类型)
@@ -247,8 +268,14 @@ void CCodeGen::emitReDimComplexTarget(ReDimStmt& node) {
         if (dim.upper) { emitExpr(*dim.upper); uBound = std::move(lastExpr_); }
 
         if (node.preserve) {
-            c_.emitLine(cName + " = vb6_SafeArrayReDimPreserve1D(" + cName + ", "
-                      + lBound + ", " + uBound + ");");
+            if (isUdtArray) {
+                // Bug4-Fix Udt Preserve: 传入 UDT 元素尺寸
+                c_.emitLine(cName + " = vb6_SafeArrayReDimPreserve1D_Udt((int32_t)sizeof(" + udtCType + "), " + cName + ", "
+                          + lBound + ", " + uBound + ");");
+            } else {
+                c_.emitLine(cName + " = vb6_SafeArrayReDimPreserve1D(" + cName + ", "
+                          + lBound + ", " + uBound + ");");
+            }
         } else {
             c_.emitLine("vb6_SafeArrayDestroy1D(" + cName + ");");
             std::string newVal = isUdtArray

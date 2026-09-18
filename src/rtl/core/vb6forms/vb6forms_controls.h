@@ -68,6 +68,14 @@ int32_t vb6_Host_SetProp(void* obj, const wchar_t* name, const void* inVariant);
 int32_t vb6_Host_Call(void* obj, const wchar_t* name, int32_t argc,
                       void** argv, void* outVariant);
 void* vb6_UC_NewFont(void);
+// Fix 119: 在 vb6_UC_HostCreate 之前设定该实例的字体 (.frm BeginProperty Font 块)
+void  vb6_UC_SetPendingFont(void* f);
+// Fix 125: 字体对象身份判定 + 字段定位 (供 COM 属性读写层直接操作字体字段)
+int32_t vb6_UC_IsFont(const void* p);
+void*   vb6_UC_FontField(void* p, const wchar_t* name, int32_t* kind);
+// Fix 128: 原地把 src 字体的字段拷进 dst 字体 (用于 Property Set 型字体属性,
+// 避免调用其 Set 实现体里的 Refresh 破坏图表状态)
+void    vb6_UC_FontAssign(void* dst, void* src);
 int32_t vb6_UC_ControlsIsCollection(void* p);
 // Fix 112c: built-in Collection (New Collection does not go through COM)
 void* vb6_Collection_New(void);

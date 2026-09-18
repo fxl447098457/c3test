@@ -66,9 +66,60 @@ double vb6_Round(double x, int32_t decimals) {
     double factor = pow(10.0, (double)decimals);
     return round(x * factor) / factor;
 }
+
+// Fix 117: VB6 默认「数值 → 字符串」(CStr(x) / Format(x, "") 无格式串) 语义。
+// VB6 打印的是**最短且能往返解析**的十进制表示, 且 Single 最多 7 位有效数字:
+//   CStr(21.1!)  = "21.1"      (而非 "21.1000003814697")
+//   CStr(32.7!)  = "32.7"
+//   CStr(0.1#)   = "0.1"
+// 此前一律用 "%.15g" 打印 double, 于是 Single 的二进制误差被完整暴露 ——
+// Charts 2020 的 ucPieChart 标签 ("{P}%" ← Percent As Single) 因此显示成
+// 21.100000381 / 32.700000763。
+BSTR vb6_NumToBSTRDefault(double v, int isSingle) {
+    if (v != v) return vb6_BSTR_FromStr(L"");   // NaN → 空串 (VB6 不会出现 NaN)
+    // Fix 117d: Double 若恰好是 Single 精度值 (由 Single 运算/赋值/Round 提升而来),
+    // 按 VB6 的 Single 规则打印 7 位有效数字。否则 Round(v!, 1)/Single 除法等会把
+    // float 二进制噪声整个暴露出来 (如 "10.3999996185"、"36.9000015")。
+    if (!isSingle && v == (double)(float)v) isSingle = 1;
+    int maxPrec = isSingle ? 7 : 15;
+    char nbuf[64] = "0";
+    double av = fabs(v);
+    // VB6 只在极大/极小时用指数记法; 其余一律定点 (CStr(30!) = "30" 而非 "3e+01")
+    int useExp = (av >= 1e15) || (av != 0.0 && av < 1e-4);
+    for (int prec = 1; prec <= maxPrec; prec++) {
+        snprintf(nbuf, sizeof(nbuf), "%.*g", prec, v);
+        if (!useExp && (strchr(nbuf, 'e') || strchr(nbuf, 'E'))) {
+            // "%.*g" 选了指数 → 换算成对应的定点小数位再试
+            int exp10 = (av > 0.0) ? (int)floor(log10(av)) : 0;
+            int dec = prec - 1 - exp10;
+            if (dec < 0) dec = 0;
+            if (dec > 20) dec = 20;
+            snprintf(nbuf, sizeof(nbuf), "%.*f", dec, v);
+        }
+        double back = strtod(nbuf, NULL);
+        if (isSingle) { if ((float)back == (float)v) break; }
+        else          { if (back == v) break; }
+    }
+    wchar_t wbuf[64];
+    MultiByteToWideChar(CP_ACP, 0, nbuf, -1, wbuf, 64);
+    return vb6_BSTR_FromStr(wbuf);
+}
+// Fix 135: VB6 Rnd 的真实算法 —— 24-bit LCG (与 VBA 一致):
+//   state = (state * 1140671485 + 12820163) Mod 2^24
+//   Rnd   = state / 2^24
+// 初值 (未 Randomize) = 0x50000。序列与 VB6 逐值一致, 图表 demo 的数据
+// (Charts 2020 各控件 Random(Min,Max)) 因此与 VB6 参考图完全相同。
+// 此前用 C rand(): 序列不同 → 柱高/饼图占比/TreeMaps 布局全都对不上参考图。
+static int32_t g_rndState135 = 0x50000;
+
 float vb6_Rnd(int32_t seed) {
-    (void)seed;
-    return (float)rand() / (float)RAND_MAX;
+    if (seed < 0) {
+        g_rndState135 = (int32_t)(seed & 0xFFFFFF);   /* 负参: 重播种 */
+    } else if (seed == 0) {
+        return (float)g_rndState135 / 16777216.0f;    /* 0: 重复上一个 */
+    }
+    g_rndState135 = (int32_t)(((int64_t)g_rndState135 * 1140671485LL + 12820163LL) & 0xFFFFFF);
+    return (float)g_rndState135 / 16777216.0f;
 }
 
 // ============================================================
@@ -92,6 +143,12 @@ BSTR vb6_CStrLong(int32_t x) {
 }
 BSTR vb6_CStrDbl(double x) {
     vb6_VARIANT v; memset(&v, 0, sizeof(v)); v.vt = (vb6_vartype)VT_R8; v.dblVal = x;
+    return vb6_Format(v, NULL);
+}
+// Fix 117c: Single → String 必须保留 VT_R4 (7 位有效数字 + 最短往返), 否则
+// CSng(21.1) 会像 Double 一样打印成 "21.1000003814697"。
+BSTR vb6_CStrSingle(float x) {
+    vb6_VARIANT v; memset(&v, 0, sizeof(v)); v.vt = (vb6_vartype)VT_R4; v.fltVal = x;
     return vb6_Format(v, NULL);
 }
 BSTR vb6_CStrBool(int16_t x) {
@@ -304,20 +361,17 @@ double vb6_Fix(double x) { return (x >= 0) ? floor(x) : ceil(x); }
 double vb6_Int(double x) { return floor(x); }
 
 void vb6_Randomize(double seed) {
+    /* Fix 135: VB6 Randomize 用 Timer 计时值作种 (省略参数时)。 */
     if (seed == 0.0) {
-        srand((unsigned int)time(NULL));
+        g_rndState135 = (int32_t)((unsigned)(GetTickCount() & 0xFFFFFF));
     } else {
-        srand((unsigned int)seed);
+        g_rndState135 = (int32_t)((unsigned)(int32_t)seed & 0xFFFFFF);
     }
 }
 
 float vb6_Rnd_Full(int32_t seed) {
-    if (seed < 0) {
-        srand((unsigned int)seed);
-    }
-    // seed > 0 或省略: 返回下一个随机数
-    // seed == 0: 返回上一个随机数 (简化: 仍返回新值)
-    return (float)rand() / (float)RAND_MAX;
+    /* Fix 135: 与 vb6_Rnd 同一 LCG。 */
+    return vb6_Rnd(seed);
 }
 
 // 类型转换 (补充)

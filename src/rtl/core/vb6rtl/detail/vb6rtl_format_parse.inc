@@ -7,8 +7,8 @@
         if (isNull) return vb6_BSTR_FromStr(L"");
         if (isNumeric) {
             wchar_t buf[64];
-            swprintf(buf, 64, L"%.15g", numVal);
-            return vb6_BSTR_FromStr(buf);
+            /* Fix 117: VB6 默认数值格式 (Single 7 位有效数字, 最短往返) */
+            return vb6_NumToBSTRDefault(numVal, expr.vt == vb6_vtSingle);
         }
         if (isString && strVal) return vb6_BSTR_FromBSTR(strVal);
         return vb6_BSTR_FromStr(L"");
@@ -27,12 +27,20 @@
     fmtLower[fmtLen < 127 ? fmtLen : 127] = '\0';
 
     if (isNumeric) {
+        // Fix 118b: 数值 + 日期/时间格式串 → 按日期序列号格式化。
+        // (VB6 把数值当日期序列号; 且本 RTL 的 DateSerial 返回 VT_R8, 故不能只靠
+        //  extract.inc 里的 VT_DATE 分支。Charts 2020 的 X 轴月份标签即此场景:)
+        //   Format(DateSerial(2020,1,1), "mmm") 期望 "Jan")
+        if (vb6_fmtIsDateFormat(fmt)) {
+            free(fmtStr);
+            return vb6_fmtDateSerial(numVal, fmt);
+        }
         // Named numeric formats
         if (strcmp(fmtLower, "general number") == 0) {
             free(fmtStr);
             wchar_t buf[64];
-            swprintf(buf, 64, L"%.15g", numVal);
-            return vb6_BSTR_FromStr(buf);
+            /* Fix 117: VB6 默认数值格式 (Single 7 位有效数字, 最短往返) */
+            return vb6_NumToBSTRDefault(numVal, expr.vt == vb6_vtSingle);
         }
         if (strcmp(fmtLower, "currency") == 0) {
             free(fmtStr);

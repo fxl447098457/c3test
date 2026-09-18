@@ -87,9 +87,18 @@ void CodeEmitter::emitLine(const std::string& line) {
         std::string fixed = line;
         fixupAmbientFontMemberAccess(fixed);
         oss_ << fixed << "\n";
-        return;
+    } else {
+        oss_ << line << "\n";
     }
-    oss_ << line << "\n";
+    // Fix 133: 落地"本语句之后须回写"的行 (Variant 实参传 Declare 标量 ByRef
+    // 出参: 先拷临时、调用后写回 Variant). 见 addPostLine 注释.
+    for (auto& pl : postLines_) {
+        for (int i = 0; i < indentLevel_; i++) {
+            oss_ << "    ";
+        }
+        oss_ << pl << "\n";
+    }
+    postLines_.clear();
 }
 
 void CodeEmitter::emit(const std::string& text) {

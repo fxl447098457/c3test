@@ -409,7 +409,7 @@
     if (callee == "vb6_Shell" && args.size() == 1) {
         argList += ", 2";
     }
-    // Rnd([seed]) — seed default = 0 (Rnd with no arg uses last seed or random)
+    // Fix 135b: 无参 Rnd 语义 = Rnd(1) (取下一个随机数); 0 才是"重复上一值"
     // Randomize([seed]) — handled as Sub bare-call; see cgen_stmt.cpp Randomize dispatch
     if (callee == "vb6_Rnd" && args.empty()) {
         argList = "0";

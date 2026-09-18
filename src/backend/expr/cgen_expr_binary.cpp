@@ -42,6 +42,50 @@ void CCodeGen::visit(BinaryExpr& node) {
         return;
     }
 
+    // Fix 113g: VB6 `+` 语义 — 一侧是 String 而另一侧是**数值**时, VB6 把字符串
+    // 按数值解释后做**数值加法** (经典陷阱: "2000" + i 得 2005 而非 "2000i"),
+    // 结果再在目标上下文按需转字符串.
+    // 原实现只覆盖 String+String 与 String+<BSTR返回调用>(Fix 092i), 数值侧直接
+    // 落到下面的算术 '+', 生成 `vb6_BSTR_FromStr(L"2000") + i` = **指针算术** →
+    // 垃圾 BSTR → SysStringLen/GetTextExtentPoint32W 读越界崩溃.
+    //   Charts 2020 Form2.frm:506
+    //     ucPieChart1.AddItem "2000" + i, Random(10, 30), CLng(cPalette(i + 1))
+    //   i=0 侥幸正确, i>=1 → 0xC0000005 @ _vb6_UserControl_TextHeight (标签测量).
+    // 生成 vb6_CStrDbl(vb6_Val(<str>) + (double)(<num>)) — VB6 数值语义且直接得 BSTR.
+    // (vb6_Val 对非数字串返回 0; VB6 本会报错 13, 此处宽松处理, 不视为致命.)
+    // 注: 本形态若被用于**数值**上下文 (如 "1"+x > 5) 会得到 BSTR → 编译期 C2440,
+    // 属"响亮的失败"而非静默错误; 该写法在真实 VB6 代码中几乎只出现在 String 上下文.
+    if (node.op == BinaryOp::Add) {
+        auto isBstrCExpr113g = [](const std::string& e) -> bool {
+            return e.rfind("vb6_BSTR_", 0) == 0 || e.rfind("vb6_CStr", 0) == 0
+                || e.rfind("vb6_Chr(", 0) == 0 || e.rfind("vb6_Trim", 0) == 0
+                || (e.size() >= 2 && e[0] == 'L' && e[1] == '"');
+        };
+        auto isNumericType113g = [](Vb6Type t) -> bool {
+            return t == Vb6Type::Long || t == Vb6Type::Integer
+                || t == Vb6Type::Byte || t == Vb6Type::Boolean
+                || t == Vb6Type::Double || t == Vb6Type::Single
+                || t == Vb6Type::Currency || t == Vb6Type::LongPtr
+                || t == Vb6Type::ULong;
+        };
+        bool leftStr113g = (inferExprType(*node.left) == Vb6Type::String
+                            || isBstrCExpr113g(left));
+        bool rightStr113g = (inferExprType(*node.right) == Vb6Type::String
+                             || isBstrCExpr113g(right));
+        bool leftNum113g = isNumericType113g(inferExprType(*node.left));
+        bool rightNum113g = isNumericType113g(inferExprType(*node.right));
+        bool mixStrNum113g =
+            (!leftStr113g && rightStr113g && leftNum113g)
+            || (leftStr113g && !rightStr113g && rightNum113g);
+        if (mixStrNum113g) {
+            std::string strSide = leftStr113g ? left : right;
+            std::string numSide = leftStr113g ? right : left;
+            lastExpr_ = "vb6_CStrDbl(vb6_Val(" + strSide + ") + (double)("
+                      + numSide + "))";
+            return;
+        }
+    }
+
     // P14.1.1: VB6 + 运算符 — 两端String时等同&拼接
     // VB6允许 "a" + "b" 作为字符串连接，语义与 & 相同
     // Fix 092i: 右操作数是返回 BSTR 的内建调用 (Chr$/Mid/Trim/...) 时,
@@ -255,7 +299,11 @@ void CCodeGen::visit(BinaryExpr& node) {
                         std::string tmp = "_vcmp_" + std::to_string(vcmpCounter_++);
                         // Fix 024: left 被 inferExprType 误判为 Variant, 但实际标量 (LenB/Asc/int 等).
                         // 用 vb6_VariantFromValue 在编译期按实类型选择 variant 构造函数, 消除 C2440.
-                        c_.emitLine("vb6_VARIANT " + tmp + " = vb6_VariantFromValue(" + left + ");");
+                        // Fix 132: 裸 COM 结果必须走 VariantFromComResult (见下方说明)。
+                        std::string wrapL = (left.find("vb6_ComCall(") != std::string::npos
+                                             && left.find("vb6_VariantFromComResult(") == std::string::npos)
+                                            ? ("vb6_VariantFromComResult(" + left + ")") : ("vb6_VariantFromValue(" + left + ")");
+                        c_.emitLine("vb6_VARIANT " + tmp + " = " + wrapL + ";");
                         lastExpr_ = "(vb6_VarCmpLong" + cmpFn + "(&" + tmp + ", " + right + "))";
                     }
                     return;
@@ -281,7 +329,11 @@ void CCodeGen::visit(BinaryExpr& node) {
                     } else {
                         std::string tmp = "_vcmp_" + std::to_string(vcmpCounter_++);
                         // Fix 024: right 被 inferExprType 误判为 Variant, 但实际标量. 用 FromValue 包装.
-                        c_.emitLine("vb6_VARIANT " + tmp + " = vb6_VariantFromValue(" + right + ");");
+                        // Fix 132: 裸 COM 结果必须走 VariantFromComResult。
+                        std::string wrapR = (right.find("vb6_ComCall(") != std::string::npos
+                                             && right.find("vb6_VariantFromComResult(") == std::string::npos)
+                                            ? ("vb6_VariantFromComResult(" + right + ")") : ("vb6_VariantFromValue(" + right + ")");
+                        c_.emitLine("vb6_VARIANT " + tmp + " = " + wrapR + ";");
                         lastExpr_ = "(vb6_VarCmpLong" + revCmpFn + "(&" + tmp + ", " + left + "))";
                     }
                     return;
@@ -297,8 +349,21 @@ void CCodeGen::visit(BinaryExpr& node) {
                 for (char c : s) { if (!std::isalnum(static_cast<unsigned char>(c)) && c != '_') return false; }
                 return true;
             };
-            std::string leftAddr = isLvalue(left) ? ("&" + left) : ([&]{ std::string tmp = "_vcmp_" + std::to_string(vcmpCounter_++); c_.emitLine("vb6_VARIANT " + tmp + " = vb6_VariantFromValue(" + left + ");"); return "&" + tmp; }());
-            std::string rightAddr = isLvalue(right) ? ("&" + right) : ([&]{ std::string tmp = "_vcmp_" + std::to_string(vcmpCounter_++); c_.emitLine("vb6_VARIANT " + tmp + " = vb6_VariantFromValue(" + right + ");"); return "&" + tmp; }());
+            // Fix 132: 裸 COM 调用结果 (vb6_ComCall 返回 VARIANT*) 不能用
+            // vb6_VariantFromValue 包装 —— 它按"值指针"解释 void* 得 VT_EMPTY,
+            // 使 `If coll.Item(i) <= 0` 恒真 (TreeMaps 所有值被判 <=0 而写成 0.0001,
+            // 蓝色梯度消失)。COM 结果必须走 vb6_VariantFromComResult 解引用。
+            auto wrapOperand132 = [&](const std::string& e) -> std::string {
+                if (e.find("vb6_ComCall(") != std::string::npos
+                    && e.find("vb6_VariantFromComResult(") == std::string::npos)
+                    return "vb6_VariantFromComResult(" + e + ")";
+                if (e.find("vb6_VariantFromComResult(") != std::string::npos
+                    || e.find("vb6_VariantFromValue(") != std::string::npos)
+                    return e;
+                return "vb6_VariantFromValue(" + e + ")";
+            };
+            std::string leftAddr = isLvalue(left) ? ("&" + left) : ([&]{ std::string tmp = "_vcmp_" + std::to_string(vcmpCounter_++); c_.emitLine("vb6_VARIANT " + tmp + " = " + wrapOperand132(left) + ";"); return "&" + tmp; }());
+            std::string rightAddr = isLvalue(right) ? ("&" + right) : ([&]{ std::string tmp = "_vcmp_" + std::to_string(vcmpCounter_++); c_.emitLine("vb6_VARIANT " + tmp + " = " + wrapOperand132(right) + ";"); return "&" + tmp; }());
             lastExpr_ = "(vb6_VarCmp" + cmpFn + "(" + leftAddr + ", " + rightAddr + "))";
             return;
         }
@@ -390,6 +455,13 @@ void CCodeGen::visit(BinaryExpr& node) {
         left = unwrapBareComCall108(left);
         right = unwrapBareComCall108(right);
     }
+
+    // Fix 126 (rev2): Currency 现在与 Date 一样按**值语义**映射为 double
+    // (见 cgen_base_type.cpp), 因此混合运算无需任何缩放 —— 两侧已经是数值。
+    // 早前的"Currency 一侧 /10000.0"补丁必须移除, 否则会二次缩放 (图形坐标/颜色
+    // 被除到近 0, 表现为"整个图表只剩文字").
+    // 放大整数 (cyVal = 值×10000) 只存在于 VT_CY 的 VARIANT 里, 由读取侧除回来
+    // (rtl: vb6_VariantToDouble / vb6_Format 的 vb6_vtCurrency 分支)。
 
     // Fix 108b: VB6 Mod 的语义是"操作数先转 Long 再取余"; C 的 % 不接受浮点
     // 操作数 (C2296). 这里显式取整, 与 VB6 一致.

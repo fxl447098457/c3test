@@ -547,24 +547,56 @@ const int32_t BF = 2;
 
 // VB6 UserControl.TextWidth/TextHeight: measure with GDI using current Font
 // (unit = ScaleMode; simplified to pixels here; Twip handled once hosting lands)
-int32_t vb6_UserControl_TextWidth(BSTR text) {
+//
+// Fix 113k 已回退: 曾尝试按 vb6_UserControl_Font 建 HFONT 选入 DC 再测, 更"正确",
+// 但实测使 Charts 2020 整体布局**更差** —— 本实现里 ScaleWidth/ScaleHeight 是
+// 像素, 而 .ctl 的布局常数(PT16=(SW+SH)*2.5/100 等)是按 VB6 的 TWIP 语义推的,
+// 两者本就不同源; 换成更大的字体度量后饼图被图例挤没、柱图 X 轴标签裁切更重
+// (见离屏 dump ucPieChart/ucChartBar). 故保留原"默认 DC 字体测量"行为.
+static int32_t vb6_uc_measureText(BSTR text, int wantWidth) {
     if (!text) return 0;
     HDC hdc = GetDC(NULL);
-    SIZE sz = {0, 0};
+    if (!hdc) return 0;
+    SIZE sz = { 0, 0 };
     int len = SysStringLen(text);
-    if (hdc && len) GetTextExtentPoint32W(hdc, text, len, &sz);
-    if (hdc) ReleaseDC(NULL, hdc);
-    return sz.cx;
+
+    // Fix 129: VB6 的 UserControl.TextWidth/TextHeight 用**控件自身的 Font** 度量。
+    // 此前直接用 GetDC(NULL) 的默认字体 → 控件内部的文字/标题/图例排版全部算错:
+    // 标题预留高度(TopHeader)不足 → 图例压在标题上; 轴标签宽度不对 → 文字裁切。
+    HFONT hOld = NULL, hNew = NULL;
+    if (len) {
+        vb6_ComIface_Font* f = (vb6_ComIface_Font*)vb6_UserControl_Font;
+        LOGFONTW lf;
+        memset(&lf, 0, sizeof(lf));
+        double pt = (f && f->Size > 0) ? (double)f->Size : 8.25;
+        lf.lfHeight = -(int)(pt * 96.0 / 72.0 + 0.5);          // 磅 → 像素 @96dpi
+        lf.lfWeight = (f && f->Weight) ? f->Weight : ((f && f->Bold) ? 700 : 400);
+        lf.lfItalic = (BYTE)((f && f->Italic) ? 1 : 0);
+        lf.lfUnderline = (BYTE)((f && f->Underline) ? 1 : 0);
+        lf.lfStrikeOut = (BYTE)((f && f->Strikethrough) ? 1 : 0);
+        lf.lfCharSet = (BYTE)((f && f->Charset) ? f->Charset : DEFAULT_CHARSET);
+        if (f && f->Name) {
+            size_t n = wcslen(f->Name);
+            if (n > 31) n = 31;
+            memcpy(lf.lfFaceName, f->Name, n * sizeof(wchar_t));
+        } else {
+            wcscpy(lf.lfFaceName, L"MS Sans Serif");
+        }
+        hNew = CreateFontIndirectW(&lf);
+        if (hNew) hOld = (HFONT)SelectObject(hdc, hNew);
+    }
+    if (len) GetTextExtentPoint32W(hdc, text, len, &sz);
+    if (hNew) { SelectObject(hdc, hOld); DeleteObject(hNew); }
+    ReleaseDC(NULL, hdc);
+    return wantWidth ? sz.cx : sz.cy;
+}
+
+int32_t vb6_UserControl_TextWidth(BSTR text) {
+    return vb6_uc_measureText(text, 1);
 }
 
 int32_t vb6_UserControl_TextHeight(BSTR text) {
-    if (!text) return 0;
-    HDC hdc = GetDC(NULL);
-    SIZE sz = {0, 0};
-    int len = SysStringLen(text);
-    if (hdc && len) GetTextExtentPoint32W(hdc, text, len, &sz);
-    if (hdc) ReleaseDC(NULL, hdc);
-    return sz.cy;
+    return vb6_uc_measureText(text, 0);
 }
 
 // UserControl.Size: VB6 `UserControl.Size width, height` (unit = ScaleMode).

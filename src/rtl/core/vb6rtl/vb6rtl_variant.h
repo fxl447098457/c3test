@@ -44,6 +44,7 @@ typedef struct vb6_VARIANT {
         int16_t boolVal;
         uint8_t bVal;
         int64_t cyVal;
+        int64_t llVal;  /* Fix 133x: VT_I8 (LongPtr 64位指针/句柄) 存回用 */
         struct vb6_SafeArray1D* parray;  /* P20-37: array pointer for GetAllSettings etc */
         struct { uint16_t wReserved1; uint8_t scale; uint8_t sign; uint32_t Hi32; uint32_t Lo32; uint32_t Mid32; } decVal;
     };
@@ -191,6 +192,8 @@ intptr_t vb6_VariantToLongPtr(vb6_VARIANT v);
 // vb6_VariantToBool; 此前缺失 → LNK2019.
 int16_t vb6_VariantToBool(vb6_VARIANT v);
 double vb6_VariantToDouble(vb6_VARIANT v);
+void vb6_VariantSetI4(vb6_VARIANT* v, int32_t x);   // Fix 133: Declare 标量 ByRef 出参回写
+void vb6_VariantSetI8(vb6_VARIANT* v, intptr_t x);  // Fix 133x: LongPtr 出参回写 (VT_I8, x64 指针不截断)
 BSTR vb6_VariantToString(vb6_VARIANT v);
 // Fix 029: Variant → SafeArray extraction (variant holding array).
 // 用于调用点反向强制: callee 期望 vb6_SafeArray1D* 但实参是 vb6_VARIANT.

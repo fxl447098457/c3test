@@ -346,6 +346,40 @@
                                 argVal = "&" + argVal;
                                 break;
                         }
+                    } else if (calleeIsDeclare && i < calleeParams.size()
+                               && !calleeParams[i].isByVal && !calleeParams[i].isParamArray
+                               && calleeParams[i].type != Vb6Type::Variant
+                               && calleeParams[i].type != Vb6Type::Unknown
+                               && calleeParams[i].type != Vb6Type::UserDefinedType
+                               && !(static_cast<uint16_t>(calleeParams[i].type) & static_cast<uint16_t>(Vb6Type::Array))
+                               && argVal.size() > 1 && argVal[0] != '_'
+                               && (std::isalpha(static_cast<unsigned char>(argVal[0])))
+                               && (cExprIsVariant(argVal)
+                                   || knownVariantVars_.count(Symbol::toLower(argVal)) > 0)) {
+                        // Fix 133: Variant 变量作为 Declare 标量 ByRef 出参
+                        // (Dim hFont: GdipCreateFont(..., hFont), hFont 是 Variant)。
+                        // C 签名是 int32_t*, 直接 &hFont 会把字体句柄写进 VARIANT.vt
+                        // → 出参永远读不回来 (Charts 2020: GdipMeasureString rc=2,
+                        // 标题高度 0 → 标题与绘图区重叠)。
+                        // VB6 语义: 传临时标量, 调用后回写 Variant。
+                        // Fix 133x: ByRef LongPtr 形参时临时变量必须是 intptr_t,
+                        // 否则 GdipCreateFont 把 64 位 GDI+ Font 指针写进 int32 → 截断,
+                        // 后续 GdipMeasureString 解引用坏指针 → x64 下 0xC0000005
+                        // (Charts 2020 ucChartArea/ucPieChart GetTextSize, 标题文字崩溃)。
+                        bool isLp133x = (i < calleeParams.size()
+                                        && (calleeParams[i].type == Vb6Type::LongPtr
+                                            || calleeParams[i].type == Vb6Type::ULong));
+                        std::string vref = "_vbvref" + std::to_string(tempCounter_++);
+                        if (isLp133x) {
+                            c_.addPending("intptr_t " + vref
+                                          + " = vb6_VariantToLongPtr(" + argVal + ");");
+                            c_.addPostLine("vb6_VariantSetI8(&" + argVal + ", " + vref + ");");
+                        } else {
+                            c_.addPending("int32_t " + vref
+                                          + " = (int32_t)vb6_VariantToDouble(" + argVal + ");");
+                            c_.addPostLine("vb6_VariantSetI4(&" + argVal + ", " + vref + ");");
+                        }
+                        argVal = "&" + vref;
                     } else {
                         argVal = "&" + argVal;
                     }
@@ -377,7 +411,43 @@
                             }
                         }
                     }
-                    if (isLvChain092z) {
+                    // Fix 113f: VB6_SA_AT(TYPE, arr, idx).field / ->field — UDT 数组
+                    // 元素字段访问也是**可寻址左值** (VB6_SA_AT 是 RTL 中唯一产出左值
+                    // 的函数式宏, 展开为 ((T*)arr->data)[idx - arr->lBound] 元素).
+                    // 必须生成 &(expr) 而非复合字面量**副本**: 否则被调方对 ByRef 数组
+                    // 形参 ReDim/写回只改临时副本, 调用方字段永不更新.
+                    // Charts 2020 ucTreeMaps.Draw: Squarified m_Serie(i).Values,
+                    //   m_Serie(i).Rects, ... 内部 ReDim Rects(...) 写 (*Rects) →
+                    //   原走 (&(vb6_SafeArray1D**){...Rects}) 临时副本 →
+                    //   me->m_Serie[i].Rects 仍为 NULL → 随后绘制循环
+                    //   VB6_SA_AT(vb6_type_RectF, _vb6_with_N->Rects, j) 空指针崩溃
+                    //   (0xC0000005 @ ucTreeMaps_Draw, edx=0).
+                    // 括号配对后须紧跟 '.' 或 '->' 才算字段链; 且**必须跳过**下方的
+                    // 简单字符扫描 — 该扫描不认括号, 会把本形态又判回非左值 (曾因此
+                    // 使本 Fix 首次落地无效, 生成代码未变而困惑).
+                    bool isSaAtField113f = false;
+                    if (argVal.rfind("VB6_SA_AT(", 0) == 0) {
+                        int depth113f = 1;
+                        for (size_t ci113f = 10; ci113f < argVal.size(); ci113f++) {
+                            char c113f = argVal[ci113f];
+                            if (c113f == '(') depth113f++;
+                            else if (c113f == ')') {
+                                depth113f--;
+                                if (depth113f == 0) {
+                                    if (ci113f + 1 < argVal.size()
+                                        && (argVal[ci113f + 1] == '.'
+                                            || (argVal[ci113f + 1] == '-'
+                                                && ci113f + 2 < argVal.size()
+                                                && argVal[ci113f + 2] == '>'))) {
+                                        isSaAtField113f = true;
+                                    }
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    if (isSaAtField113f) isLvChain092z = true;
+                    if (isLvChain092z && !isSaAtField113f) {
                         for (size_t ci092z = 0; ci092z < argVal.size(); ci092z++) {
                             char c092z = argVal[ci092z];
                             if (std::isalnum(static_cast<unsigned char>(c092z)) || c092z == '_' || c092z == '.') continue;
@@ -405,6 +475,28 @@
                         if (isArrP092e && !calleeParams[i].isByVal
                             && !calleeParams[i].isParamArray) {
                             cType = "vb6_SafeArray1D**";
+                        }
+                    }
+                    // Fix 120: ByRef 具体数值形参 ← 裸 COM 结果 (void* 承载 COM VARIANT*)
+                    // 不能把指针直接截断成数值 —— 取到的是指针低位, 于是颜色/数值全成噪声:
+                    //   Charts 2020 ucChartArea.AddLineSeries(..., ByRef SerieColor As OLE_COLOR)
+                    //   调用处 cPalette(j) 是 vb6_ComCall(...) → 生成
+                    //   &(int32_t){vb6_ComCall(...)} → 面积图系列变成洋红/紫随机色.
+                    // 先解出 Variant 的值再放进复合字面量 (Fix 029 只覆盖 ByVal 路径).
+                    {
+                        bool comRes120 = (argVal.compare(0, 12, "vb6_ComCall(") == 0)
+                            || (argVal.compare(0, 15, "vb6_ComGetProp(") == 0)
+                            || (argVal.compare(0, 21, "vb6_ComGetObjectProp(") == 0);
+                        if (comRes120) {
+                            std::string ex120 = "vb6_VariantFromComResult(" + argVal + ")";
+                            if (cType == "int32_t")
+                                argVal = "(int32_t)vb6_VariantToDouble(" + ex120 + ")";
+                            else if (cType == "int16_t")
+                                argVal = "(int16_t)vb6_VariantToDouble(" + ex120 + ")";
+                            else if (cType == "double")
+                                argVal = "vb6_VariantToDouble(" + ex120 + ")";
+                            else if (cType == "float")
+                                argVal = "(float)vb6_VariantToDouble(" + ex120 + ")";
                         }
                     }
                     // M22: VARIANT类型需要指定字段初始化 (.vt=VT_xxx, .field=value)
@@ -449,6 +541,21 @@
                                     argVal = "&(" + argVal + ")";
                                 } else if (cExprIsVariant(argVal)) {
                                     argVal = "(&(vb6_VARIANT){.vt=VT_BSTR, .bstrVal=vb6_VariantToString(" + argVal + ")})";
+                                } else if (argVal.compare(0, 12, "vb6_ComCall(") == 0
+                                           || argVal.compare(0, 15, "vb6_ComGetProp(") == 0
+                                           || argVal.compare(0, 21, "vb6_ComGetObjectProp(") == 0) {
+                                    // Fix 113l: **裸 COM 结果** (void*, 承载 COM
+                                    // VARIANT*) 填入 VT_BSTR 槽时必须先
+                                    // vb6_VariantFromComResult 再 vb6_VariantToString;
+                                    // 原样把 void* 塞进 .bstrVal 会让 GDI+ 把垃圾当
+                                    // 字符串 → 渲染成一排"豆腐块"空框.
+                                    //   Charts 2020 ucTreeMaps 项名标签:
+                                    //     DrawText(..., Labels.Item(j), ...) (text As Variant)
+                                    //   → 原生成 (&(vb6_VARIANT){.vt=VT_BSTR,
+                                    //       .bstrVal=vb6_ComCall(...Labels..., L"Item", ...)}).
+                                    argVal = "(&(vb6_VARIANT){.vt=VT_BSTR, .bstrVal="
+                                           + std::string("vb6_VariantToString(vb6_VariantFromComResult(")
+                                           + argVal + "))})";
                                 } else {
                                     argVal = "(&(vb6_VARIANT){.vt=VT_BSTR, .bstrVal=" + argVal + "})";
                                 }

@@ -80,7 +80,7 @@
                 std::string fnCanon = vbaFn->name.empty() ? fnName : vbaFn->name;
                 std::string fnLower86 = Symbol::toLower(fnCanon);
                 if (fnLower86 == "rnd") {
-                    lastExpr_ = "vb6_Rnd(0)";
+                    lastExpr_ = "vb6_Rnd(1)";
                 } else if (vbaZeroArgFns.count(fnLower86)) {
                     lastExpr_ = "vb6_" + cIdent(fnCanon) + "()";
                 } else {

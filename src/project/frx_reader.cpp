@@ -241,6 +241,68 @@ FrxIntListData FrxReader::readIntList(size_t offset) {
 }
 
 // ============================================================
+// Fix 114: 读取"属性包"持久化字符串
+// ============================================================
+// VB6 .frm/.ctl 中形如 `Caption = "Form2.frx":006E` 的字符串属性以属性包
+// (DocProperty) 形式存入 .frx。实测布局 (Charts 2020/Form2.frx):
+//   [GUID 16B] [word 0x0011] [word 0x0001] [dword cbBytes] [3B 填充] [UTF-16LE]
+// 例: 偏移 0x00 -> "USD $532.00", 0x36 -> "Venta diaria", 0x6E -> "LabelPlus1"。
+// 由于不同 VB6 版本填充字节数可能不同, 这里在 offset 起 64 字节范围内扫描
+// 首个"长度 dword + 全部可打印 UTF-16"的合法组合, 兼顾偏移前导结构差异。
+FrxTextData FrxReader::readDocString(size_t offset) {
+    FrxTextData result;
+    if (fileData_.empty()) {
+        lastError_ = ".frx file not loaded";
+        return result;
+    }
+    if (offset >= fileData_.size()) {
+        lastError_ = "DocString offset out of range";
+        return result;
+    }
+
+    const size_t kScanWindow = 64;
+    const size_t kMaxLen = 0x4000;   // 16KB 上限, 防御性
+    size_t scanEnd = std::min(fileData_.size(), offset + kScanWindow);
+
+    // 以"数据起点"为主循环: 长度 dword 位于数据起点前 (4+pad) 字节 (pad=0..8),
+    // 兼容 VB6 不同版本的填充差异 (实测 pad=3)。
+    for (size_t ds = offset; ds + 2 <= scanEnd; ++ds) {
+        if ((ds & 1) != 0) continue;   // UTF-16 数据必为偶偏移
+        for (size_t pad = 0; pad <= 8; ++pad) {
+            if (ds < offset + 4 + pad) break;
+            size_t lp = ds - (4 + pad);
+            uint32_t nBytes = readLE32(fileData_.data() + lp);
+            if (nBytes < 2 || nBytes > kMaxLen || (nBytes & 1) != 0) continue;
+            if (ds + nBytes > fileData_.size()) continue;
+            const uint8_t* s = fileData_.data() + ds;
+            // 校验: 每个 UTF-16 码元都必须是可打印字符 (>= 0x20) 或常见空白
+            bool ok = true;
+            for (uint32_t i = 0; i < nBytes; i += 2) {
+                uint32_t cp = (uint32_t)s[i] | ((uint32_t)s[i + 1] << 8);
+                if (cp == 0x0009 || cp == 0x000A || cp == 0x000D) continue;
+                if (cp < 0x0020) { ok = false; break; }
+            }
+            if (!ok) continue;
+#ifdef _WIN32
+            int wlen = (int)(nBytes / 2);
+            std::wstring wstr((const wchar_t*)s, wlen);
+            int ulen = WideCharToMultiByte(CP_UTF8, 0, wstr.c_str(), wlen, NULL, 0, NULL, NULL);
+            if (ulen <= 0) continue;
+            std::string utf8(ulen, 0);
+            WideCharToMultiByte(CP_UTF8, 0, wstr.c_str(), wlen, &utf8[0], ulen, NULL, NULL);
+            result.text = utf8;
+#else
+            result.text.assign((const char*)s, nBytes);  // 非 Windows 下退化为原始字节
+#endif
+            return result;
+        }
+    }
+
+    lastError_ = "No valid DocString at offset";
+    return result;
+}
+
+// ============================================================
 // GBK -> UTF-8 转换
 // ============================================================
 std::string FrxReader::gbkToUtf8(const std::string& gbk) {

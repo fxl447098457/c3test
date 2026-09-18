@@ -104,11 +104,37 @@
             auto _setItCtrl = knownFormControls_.find(_setObjLower);
             if (_setItCtrl != knownFormControls_.end()) {
                 std::string _setWriteFn = getControlPropWriteFn(_setItCtrl->second, _setMa.memberName);
+                std::string _writeFnRaw = _setWriteFn;
                 if (!_setWriteFn.empty()) {
+                    // Fix 110z8: Set ctrl.Picture = <StdPicture 变量> — RHS 是局部
+                    // StdPicture/IPictureDisp 变量时也应走 FromCom (此前仅识别函数调用
+                    // 返回值, 局部变量走 vb6_SetControlPicture 把 COM 指针截断成句柄值,
+                    // 导致 Image1.Picture 赋值时把无效句柄当 HBITMAP → 0xC0000005).
+                    bool _rhsRhsIsComPicture = false;
+                    std::string _rhsRawName;
+                    if (node.value->kind == ASTNodeKind::IdentifierExpr) {
+                        auto& _rhsId = static_cast<IdentifierExpr&>(*node.value);
+                        _rhsRawName = _rhsId.name;
+                        const Symbol* _rhsSym = symTab_.lookup(_rhsId.name);
+                        if (_rhsSym && !_rhsSym->variableTypeName.empty()) {
+                            std::string _rhsT = _rhsSym->variableTypeName;
+                            std::transform(_rhsT.begin(), _rhsT.end(), _rhsT.begin(), ::tolower);
+                            if (_rhsT == "stdpicture" || _rhsT == "ipicturedisp" || _rhsT == "picture")
+                                _rhsRhsIsComPicture = true;
+                        }
+                    }
+                    // Fix 110z9: 局部 StdPicture 变量 (符号表作用域不可达, rhsSym=null)
+                    // 且 SetControlPicture write 函数时, 直接按 COM 指针变量传给 FromCom,
+                    // 避免 emitExpr 把 StdPicture 变量误当 .Width/默认属性 (生成
+                    // vb6_ComGetIntProp(pic, L"Width") 截断句柄 → 崩溃).
+                    if (_setWriteFn.find("SetControlPicture") != std::string::npos
+                        && !_rhsRawName.empty()) {
+                        _rhsRhsIsComPicture = true;
+                    }
                     emitExpr(*node.value);
                     // Resolve COM marker on RHS
                     // Bug #3 fix: also detect vb6_ComIface_Picture* function return
-                    bool _rhsIsComPicture = false;
+                    bool _rhsIsComPicture = _rhsRhsIsComPicture;
                     if (isComMarker_) {
                         if (comMemberName_ == "Picture" || comMemberName_ == "picture") {
                             _rhsIsComPicture = true;
@@ -121,6 +147,12 @@
                         lastExprIsComPicture_ = false;  // consume the flag
                     }
                     std::string _setValExpr = std::move(lastExpr_);
+                    // Fix 110z9: RHS 是标识符变量时直接用变量名作 COM 指针,
+                    // 避免 emitExpr 把 StdPicture 变量误当 .Width/默认属性
+                    // (生成 vb6_ComGetIntProp(pic, L"Width") 截断句柄 → 崩溃).
+                    if (!_rhsRawName.empty() && _writeFnRaw.find("SetControlPicture") != std::string::npos) {
+                        _setValExpr = _rhsRawName;
+                    }
                     // Use SetControlPictureFromCom for COM IPictureDisp
                     if (_rhsIsComPicture && _setWriteFn.find("SetControlPicture") != std::string::npos) {
                         _setWriteFn = "vb6_SetControlPictureFromCom";

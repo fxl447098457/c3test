@@ -194,12 +194,16 @@ function Invoke-TestExe {
 # GUI smoke: require a visible main window, then close only the process we launch.
 # This checks startup, not screenshot correctness or QR decoding.
 function Test-GuiVbp {
-    param([string]$Name, [string]$VbpFile, [string]$ExeName = "")
+    param([string]$Name, [string]$VbpFile, [string]$ExeName = "", [string]$Arch = "", [int]$AutoExitSec = 0)
     $script:total++
     Write-Host -NoNewline "  [GUI] $Name ... "
     $guiOut = Join-Path $OutDir $Name
     New-Item -ItemType Directory -Path $guiOut -Force | Out-Null
-    $compileResult = & $C3 $VbpFile --output-dir $guiOut 2>&1
+    if ($Arch) {
+        $compileResult = & $C3 $VbpFile --arch $Arch --output-dir $guiOut 2>&1
+    } else {
+        $compileResult = & $C3 $VbpFile --output-dir $guiOut 2>&1
+    }
     if ($LASTEXITCODE -ne 0) {
         $script:fail++
         Write-Host "FAIL (compile)" -ForegroundColor Red
@@ -221,12 +225,26 @@ function Test-GuiVbp {
             Start-Sleep -Milliseconds 100
         }
         if (-not $windowSeen) { throw "Main window not available within 5s" }
-        if (-not $proc.CloseMainWindow()) { throw "Main window refused close" }
-        if (-not $proc.WaitForExit(2000)) { throw "Application did not exit after close" }
-        $proc.Refresh()
-        if ($proc.ExitCode -ne 0) { throw "Exit code $($proc.ExitCode)" }
-        $script:pass++
-        Write-Host "PASS (compile, window, clean exit)" -ForegroundColor Green
+        if ($AutoExitSec -gt 0) {
+            # GUI demo with no clean-exit contract: window shown is enough;
+            # auto-kill after the timeout so the suite never hangs.
+            $watch = [Diagnostics.Stopwatch]::StartNew()
+            while ($watch.ElapsedMilliseconds -lt $AutoExitSec * 1000) {
+                $proc.Refresh()
+                if ($proc.HasExited) { break }
+                Start-Sleep -Milliseconds 100
+            }
+            if (-not $proc.HasExited) { $proc.Kill(); $proc.WaitForExit(5000) | Out-Null }
+            $script:pass++
+            Write-Host "PASS (compile, window, auto-exit after ${AutoExitSec}s)" -ForegroundColor Green
+        } else {
+            if (-not $proc.CloseMainWindow()) { throw "Main window refused close" }
+            if (-not $proc.WaitForExit(2000)) { throw "Application did not exit after close" }
+            $proc.Refresh()
+            if ($proc.ExitCode -ne 0) { throw "Exit code $($proc.ExitCode)" }
+            $script:pass++
+            Write-Host "PASS (compile, window, clean exit)" -ForegroundColor Green
+        }
     } catch {
         $script:fail++
         Write-Host "FAIL ($($_.Exception.Message))" -ForegroundColor Red
@@ -471,6 +489,9 @@ if ($Category -in @("all", "run")) {
     Test-GuiVbp "VbQRCodegen" "$Tests\VbQRCodegen-master\test\Project1.vbp"
     # BalloonTooltips: form loads with controls + creates its common-controls tooltip windows (x64).
     Test-GuiVbp "BalloonTooltips" "$Tests\BalloonTooltips\prjBalloonTooltips.vbp" -ExeName "BalloonTooltips"
+    # Charts 2020 demo (3rd-party UserControl charts): windowless chart controls (x86 first;
+    # x64 after LongPtr port of API pointers/handles in the .ctl/.cls sources).
+    Test-GuiVbp "Charts2020" "$Tests\Charts 2020\Proyecto1.vbp" -Arch "x86" -AutoExitSec 5
     Write-Host ""
     
     # --- P6 COM ���� ---

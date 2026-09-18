@@ -67,6 +67,7 @@ typedef struct vb6_UCRec {
     int32_t extTop;
     int32_t index;        // 控件数组下标, -1=非数组
     wchar_t ctrlName[VB6_UC_NAME_LEN];
+    BSTR    displayNameBstr;   // Fix 116: Ambient.DisplayName 缓存 (控件实例名)
 } vb6_UCRec;
 
 static vb6_UCRec g_uc_recs[VB6_UC_MAX_INST];
@@ -82,6 +83,35 @@ static void vb6_uc_trace(const char* phase, const char* type, void* me) {
 }
 
 static vb6_UCRec* g_uc_current = NULL;   // 最近一次进入的实例 (供 Refresh/PropertyChange)
+
+// Fix 119: 待应用的实例字体。VB6 里每个控件实例有独立的 Font 对象(.frm 的
+// BeginProperty Font 块), 且控件会在 InitProperties 里以 UserControl.Font 为
+// 默认字体基准 (如 m_TitleFont.Size = UserControl.Font.Size + 8)。因此字体必须在
+// 实例初始化**之前**就位 —— cgen 在 vb6_UC_HostCreate 之前调用
+// vb6_UC_SetPendingFont(), HostCreate 把它装进 r->font, push 时既成为
+// vb6_UserControl_Font 也成为 Ambient.Font。
+static vb6_ComIface_Font* g_uc_pendingFont = NULL;
+
+void vb6_UC_SetPendingFont(void* f) {
+    g_uc_pendingFont = (vb6_ComIface_Font*)f;
+}
+
+// Fix 122: VB6 的 z 序规则 —— .frm 中**先声明**的控件在**最上层**。
+// cgen 按 .frm 顺序创建子窗口, 而 Win32 是"后创建者在上" → 顺序恰好相反:
+// Form2 里 LabelPlus1 (最后声明) 于是盖住了先声明的三个 ucProgressCircular 圆环,
+// 用户看到的就是"圆环不见了"。这里把每个新宿主插到"上一个宿主"**之下**, 使先声明者
+// 保持在上 (同父窗口内才处理, 避免跨容器错插)。
+static HWND g_uc_lastHost = NULL;
+static HWND g_uc_lastHostParent = NULL;
+
+static void vb6_uc_fixZOrder(HWND hwnd) {
+    HWND parent = GetParent(hwnd);
+    if (g_uc_lastHost && g_uc_lastHostParent == parent && IsWindow(g_uc_lastHost))
+        SetWindowPos(hwnd, g_uc_lastHost, 0, 0, 0, 0,
+                     SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER);
+    g_uc_lastHost = hwnd;
+    g_uc_lastHostParent = parent;
+}
 
 // ============================================================
 // 宿主对象登记表: hwnd → VB6 名 / 类型名
@@ -183,6 +213,7 @@ typedef struct vb6_UCSaved {
     void*   ambientFont;
     int32_t extLeft, extTop;
     vb6_UCRec* current;
+    void*   displayName;      // Fix 116: Ambient.DisplayName (BSTR)
 } vb6_UCSaved;
 
 static void vb6_uc_defaultFont(void) {
@@ -208,6 +239,7 @@ static void vb6_uc_push(vb6_UCRec* r, vb6_UCSaved* saved) {
     saved->extLeft = vb6_Extender_Left;
     saved->extTop = vb6_Extender_Top;
     saved->current = g_uc_current;
+    saved->displayName = (void*)vb6_Ambient_DisplayName;
 
     vb6_uc_defaultFont();
     vb6_UserControl_ScaleWidth = r->scaleWidth;
@@ -223,6 +255,15 @@ static void vb6_uc_push(vb6_UCRec* r, vb6_UCSaved* saved) {
     vb6_Extender_Left = r->extLeft;
     vb6_Extender_Top = r->extTop;
     g_uc_current = r;
+
+    // Fix 116: Ambient.DisplayName = 控件实例名 (VB6 语义)。
+    // 控件内常见用法: m_Title = .ReadProperty("Title", Ambient.DisplayName)
+    // → 此前恒为 NULL, 于是 ucChartArea1 / ucPieChart1 / ucTreeMaps1 等标题全空。
+    // 名字在实例创建时写入 r->ctrlName, 这里惰性缓存成 BSTR 复用, 避免每次
+    // push 都分配 (push 在每次绘制/事件都会发生)。
+    if (!r->displayNameBstr && r->ctrlName[0])
+        r->displayNameBstr = SysAllocString(r->ctrlName);
+    vb6_Ambient_DisplayName = r->displayNameBstr;
 }
 
 static void vb6_uc_pop(const vb6_UCSaved* saved) {
@@ -237,6 +278,7 @@ static void vb6_uc_pop(const vb6_UCSaved* saved) {
     vb6_Extender_Left = saved->extLeft;
     vb6_Extender_Top = saved->extTop;
     g_uc_current = saved->current;
+    vb6_Ambient_DisplayName = (BSTR)saved->displayName;   // Fix 116
 }
 
 // 仅换入不换出 — 供「窗体代码直接调用控件公开方法」路径使用
@@ -253,6 +295,165 @@ void vb6_UC_RefreshCurrent(void) {
         InvalidateRect(g_uc_current->hwnd, NULL, FALSE);
         UpdateWindow(g_uc_current->hwnd);
     }
+}
+
+// ============================================================
+// Fix 113h: 离屏 DIB 绘制捕获 (调试用, 环境变量 C3_UC_DUMPDIR 启用)
+// ============================================================
+// 背景: 在无交互桌面 / RDP 断连的会话里, 屏幕位图 (GetDC(0) BitBlt / PrintWindow)
+// 全部读回黑色 (实测连标准 MessageBox 也是黑的), 无法用截图客观验证"图表到底画
+// 没有画出来". 这里让宿主把控件改为绘制到**内存 DIB**, 再把 DIB 转存为 BMP,
+// 完全不依赖桌面表面, 因而在任何会话下都能拿到真实绘制结果.
+// 未设置 C3_UC_DUMPDIR 时行为与原来完全一致 (直接画到窗口 DC).
+typedef struct vb6_UCDib {
+    HDC     memDC;
+    HBITMAP bmp;
+    HBITMAP oldBmp;
+    void*   bits;
+    int32_t w, h, stride;
+} vb6_UCDib;
+
+static int32_t g_uc_dumpSeq = 0;
+
+static void vb6_uc_dibCreate(vb6_UCDib* d, HDC refDC, int32_t w, int32_t h) {
+    BITMAPINFO bi;
+    memset(d, 0, sizeof(*d));
+    d->w = w;
+    d->h = h;
+    d->stride = ((w * 3 + 3) & ~3);
+    d->memDC = CreateCompatibleDC(refDC);
+    memset(&bi, 0, sizeof(bi));
+    bi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    bi.bmiHeader.biWidth = w;
+    bi.bmiHeader.biHeight = h;   /* bottom-up: 与 BMP 默认行序一致, 可直接转存 */
+    bi.bmiHeader.biPlanes = 1;
+    bi.bmiHeader.biBitCount = 24;
+    bi.bmiHeader.biCompression = BI_RGB;
+    bi.bmiHeader.biSizeImage = (DWORD)(d->stride * h);
+    d->bmp = CreateDIBSection(refDC, &bi, DIB_RGB_COLORS, &d->bits, NULL, 0);
+    if (d->bmp) d->oldBmp = (HBITMAP)SelectObject(d->memDC, d->bmp);
+}
+
+static void vb6_uc_dibSaveBmp(const vb6_UCDib* d, const char* path) {
+    if (!d->bits) return;
+    FILE* f = fopen(path, "wb");
+    if (!f) return;
+    uint32_t imgSize = (uint32_t)(d->stride * d->h);
+    unsigned char hdr[54];
+    memset(hdr, 0, sizeof(hdr));
+    hdr[0] = 'B'; hdr[1] = 'M';
+    uint32_t fileSize = 54u + imgSize;
+    memcpy(hdr + 2, &fileSize, 4);
+    uint32_t offBits = 54u;
+    memcpy(hdr + 10, &offBits, 4);
+    uint32_t hdrSize = 40u;
+    memcpy(hdr + 14, &hdrSize, 4);
+    int32_t W = d->w, H = d->h;
+    memcpy(hdr + 18, &W, 4);
+    memcpy(hdr + 22, &H, 4);
+    uint16_t planes = 1, bpp = 24;
+    memcpy(hdr + 26, &planes, 2);
+    memcpy(hdr + 28, &bpp, 2);
+    memcpy(hdr + 34, &imgSize, 4);
+    fwrite(hdr, 1, 54, f);
+    fwrite(d->bits, 1, (size_t)imgSize, f);
+    fclose(f);
+}
+
+static void vb6_uc_dibDestroy(vb6_UCDib* d) {
+    if (d->memDC) {
+        if (d->oldBmp) SelectObject(d->memDC, d->oldBmp);
+        DeleteDC(d->memDC);
+    }
+    if (d->bmp) DeleteObject(d->bmp);
+}
+
+// ============================================================
+// Fix 123: 整窗合成 dump (调试用)
+// ============================================================
+// 逐个控件 dump 只能看到"控件自己画了什么", 看不到**叠放次序**(z 序) 与相对位置。
+// VB6 的 z 序规则是"先声明者在上", 而 Win32 默认"后创建者在上"(见 Fix 122),
+// 一旦反了就会出现"圆环被 LabelPlus 白面板盖住"这类问题而单控件 dump 一切正常。
+// 这里按窗口管理器的真实 z 序 (自下而上) 把本级所有 UserControl 宿主依次绘制并
+// 贴进一张窗体大小的 DIB, 输出 FORM_*.bmp —— 即在无桌面会话下也能看到"用户所见"。
+static void vb6_uc_dumpFormComposite(HWND root, const char* dumpDir) {
+    if (!root || !dumpDir || !*dumpDir) return;
+    RECT crc;
+    if (!GetClientRect(root, &crc)) return;
+    int cw = (int)(crc.right - crc.left), ch = (int)(crc.bottom - crc.top);
+    if (cw <= 0 || ch <= 0 || cw > 4096 || ch > 4096) return;
+
+    HDC refDC = GetDC(root);
+    vb6_UCDib form;
+    vb6_uc_dibCreate(&form, refDC, cw, ch);
+    if (refDC) ReleaseDC(root, refDC);
+    if (!form.memDC || !form.bits) { vb6_uc_dibDestroy(&form); return; }
+    RECT full = { 0, 0, cw, ch };
+    HBRUSH bg = CreateSolidBrush(RGB(229, 229, 229));   // Form2 BackColor = &H00E5E5E5
+    FillRect(form.memDC, &full, bg);
+    DeleteObject(bg);
+
+    // 收集本级所有 UserControl 宿主 (窗口 z 序: GW_CHILD = 最上层)
+    HWND kids[VB6_UC_MAX_INST];
+    int nk = 0;
+    for (HWND h = GetWindow(root, GW_CHILD); h && nk < VB6_UC_MAX_INST;
+         h = GetWindow(h, GW_HWNDNEXT)) {
+        kids[nk++] = h;
+    }
+    // 自下而上绘制 (数组尾部 = 最下层)
+    for (int i = nk - 1; i >= 0; i--) {
+        vb6_UCRec* r = vb6_uc_findByHwnd((void*)kids[i]);
+        if (!r || !r->ready || !r->desc || !r->desc->paint) continue;
+        RECT kc;
+        GetClientRect(kids[i], &kc);
+        int kw = (int)(kc.right - kc.left), kh = (int)(kc.bottom - kc.top);
+        if (kw <= 0 || kh <= 0) continue;
+        POINT pt = { 0, 0 };
+        MapWindowPoints(kids[i], root, &pt, 1);
+
+        vb6_UCDib cd;
+        vb6_uc_dibCreate(&cd, form.memDC, kw, kh);
+        if (!cd.memDC || !cd.bits) { vb6_uc_dibDestroy(&cd); continue; }
+        RECT kfull = { 0, 0, kw, kh };
+        HBRUSH wb = CreateSolidBrush(RGB(255, 255, 255));
+        FillRect(cd.memDC, &kfull, wb);
+        DeleteObject(wb);
+
+        r->hdc = cd.memDC;
+        vb6_UCSaved saved;
+        vb6_uc_push(r, &saved);
+        r->desc->paint(r->me);
+        vb6_uc_pop(&saved);
+        r->hdc = NULL;
+
+        // 手动"白=透明"合并 (避免额外链接 msimg32): 与 VB6 windowless 控件一致 —
+        // 控件未绘制之处露出容器底色 (例如三个圆环之间的 LabelPlus 白面板)。
+        {
+            unsigned char* cd8 = (unsigned char*)cd.bits;
+            for (int y = 0; y < kh; y++) {
+                int dy = pt.y + y;
+                if (dy < 0 || dy >= form.h) continue;
+                // DIB 为 bottom-up: 内存行 = h-1-y
+                unsigned char* frow = (unsigned char*)form.bits
+                                    + (size_t)(form.h - 1 - dy) * form.stride;
+                unsigned char* crow = cd8 + (size_t)(cd.h - 1 - y) * cd.stride;
+                for (int x = 0; x < kw; x++) {
+                    int dx = pt.x + x;
+                    if (dx < 0 || dx >= form.w) continue;
+                    unsigned char b = crow[x * 3], g = crow[x * 3 + 1], rr = crow[x * 3 + 2];
+                    if (rr >= 250 && g >= 250 && b >= 250) continue;   // 近白 → 透明
+                    frow[dx * 3] = b; frow[dx * 3 + 1] = g; frow[dx * 3 + 2] = rr;
+                }
+            }
+        }
+        vb6_uc_dibDestroy(&cd);
+    }
+
+    char path[1024];
+    _snprintf(path, sizeof(path), "%s\\FORM_%p.bmp", dumpDir, root);
+    path[sizeof(path) - 1] = '\0';
+    vb6_uc_dibSaveBmp(&form, path);
+    vb6_uc_dibDestroy(&form);
 }
 
 // ============================================================
@@ -297,13 +498,45 @@ static LRESULT CALLBACK vb6_uc_wndproc(HWND hwnd, UINT msg, WPARAM wParam, LPARA
             if (!r->desc || !r->desc->paint) break;
             PAINTSTRUCT ps;
             HDC hdc = BeginPaint(hwnd, &ps);
-            r->hdc = hdc;
+            // Fix 113h: 调试捕获 (见上方 vb6_UCDib 说明) — C3_UC_DUMPDIR 未设置时
+            // 走原路径 (直接绘制到窗口 DC).
+            const char* dumpDir113h = getenv("C3_UC_DUMPDIR");
+            vb6_UCDib dib113h;
+            int useDib113h = 0;
+            if (dumpDir113h && *dumpDir113h) {
+                RECT crc;
+                GetClientRect(hwnd, &crc);
+                int cw113h = (int)(crc.right - crc.left);
+                int ch113h = (int)(crc.bottom - crc.top);
+                if (cw113h > 0 && ch113h > 0) {
+                    vb6_uc_dibCreate(&dib113h, hdc, cw113h, ch113h);
+                    if (dib113h.memDC && dib113h.bits) {
+                        RECT full113h = { 0, 0, cw113h, ch113h };
+                        HBRUSH wb113h = CreateSolidBrush(RGB(255, 255, 255));
+                        FillRect(dib113h.memDC, &full113h, wb113h);
+                        DeleteObject(wb113h);
+                        useDib113h = 1;
+                    }
+                }
+            }
+            r->hdc = useDib113h ? dib113h.memDC : hdc;
             vb6_UCSaved saved;
             vb6_uc_push(r, &saved);
             vb6_uc_trace("paint.begin", r->desc->typeName, r->me);
             r->desc->paint(r->me);
             vb6_uc_trace("paint.end", r->desc->typeName, r->me);
             vb6_uc_pop(&saved);
+            if (useDib113h) {
+                BitBlt(hdc, 0, 0, dib113h.w, dib113h.h, dib113h.memDC, 0, 0, SRCCOPY);
+                char path113h[1024];
+                _snprintf(path113h, sizeof(path113h), "%s\\%s_%d_%p.bmp", dumpDir113h,
+                          r->desc->typeName, (int)++g_uc_dumpSeq, hwnd);
+                path113h[sizeof(path113h) - 1] = '\0';
+                vb6_uc_dibSaveBmp(&dib113h, path113h);
+                vb6_uc_dibDestroy(&dib113h);
+                // Fix 123: 同步输出整窗合成图 (含 z 序/相对位置)
+                vb6_uc_dumpFormComposite((HWND)GetAncestor(hwnd, GA_ROOT), dumpDir113h);
+            }
             r->hdc = NULL;
             EndPaint(hwnd, &ps);
             return 0;
@@ -412,6 +645,11 @@ void* vb6_UC_HostCreate(const char* typeName, int32_t left, int32_t top,
     r->parent = (HWND)hParent;
     r->enabled = -1;
     r->index = index;
+    // Fix 119: 装入 cgen 预先设定的实例字体 (.frm BeginProperty Font)
+    if (g_uc_pendingFont) {
+        r->font = g_uc_pendingFont;
+        g_uc_pendingFont = NULL;
+    }
     r->scaleWidth = vb6_TwipToX(width);
     r->scaleHeight = vb6_TwipToY(height);
     r->extLeft = left;
@@ -424,7 +662,13 @@ void* vb6_UC_HostCreate(const char* typeName, int32_t left, int32_t top,
     }
 
     HWND hwnd = CreateWindowExW(0, L"VB6_UserControlHost", L"",
-                                WS_CHILD | WS_VISIBLE | WS_CLIPCHILDREN,
+                                // Fix 124: WS_CLIPSIBLINGS 必不可少 —— 没有它, 一个窗口
+                                // 重绘时会画到同层兄弟控件上, 于是 z 序在下的不透明面板
+                                // (Charts 2020 的 LabelPlus1 白底) 每次重绘都会把上层控件
+                                // (三个 ucProgressCircular 圆环) 擦掉。离屏 dump 是各控件
+                                // 单独画进自己的 DIB 再合成, 体现不出这个裁剪问题 ——
+                                // 这就是"dump 里有、软件里看不到"的根因。
+                                WS_CHILD | WS_VISIBLE | WS_CLIPCHILDREN | WS_CLIPSIBLINGS,
                                 vb6_TwipToX(left), vb6_TwipToY(top),
                                 vb6_TwipToX(width), vb6_TwipToY(height),
                                 (HWND)hParent, NULL, (HINSTANCE)hInstance, r);
@@ -432,6 +676,9 @@ void* vb6_UC_HostCreate(const char* typeName, int32_t left, int32_t top,
     if (!hwnd) return NULL;
     r->hwnd = hwnd;
     g_uc_recCount++;
+
+    // Fix 122: 修正 VB6 z 序 (先声明者在上)
+    vb6_uc_fixZOrder(hwnd);
 
     // 登记: 供 Controls 枚举 / TypeName / 宿主对象分派
     if (g_hoCount < VB6_UC_MAX_OBJ) {
@@ -670,6 +917,50 @@ static vb6_ComIface_Font* vb6_uc_fontOf(void* p) {
     return NULL;
 }
 
+// Fix 125: 字体对象不是 COM 对象, 但生成代码会把 `With <font>: .Name = x` 编译成
+// vb6_ComSetProp(字体指针, L"Name", ...) —— 对普通结构体做 IDispatch::Invoke 会走
+// 垃圾 vtable 直接崩 (LabelPlus 的 `Property Set Font` 就是这么崩的), 于是
+// ucProgressCircular 的 Caption1_Font/Caption2_Font (14.25/8.25) 一直无法应用。
+// 这里向 COM 层暴露"身份判定 + 字段定位", 由 vb6com_invoke.c 直接读写字段。
+int32_t vb6_UC_IsFont(const void* p) {
+    return vb6_uc_fontOf((void*)p) != NULL;
+}
+
+// 返回字段地址; *kind: 0=BSTR, 1=float, 2=int16, 3=int32; 未命中返回 NULL
+void* vb6_UC_FontField(void* p, const wchar_t* name, int32_t* kind) {
+    vb6_ComIface_Font* f = vb6_uc_fontOf(p);
+    if (!f || !name || !kind) return NULL;
+    if (_wcsicmp(name, L"Name") == 0)          { *kind = 0; return &f->Name; }
+    if (_wcsicmp(name, L"Size") == 0)          { *kind = 1; return &f->Size; }
+    if (_wcsicmp(name, L"Bold") == 0)          { *kind = 2; return &f->Bold; }
+    if (_wcsicmp(name, L"Italic") == 0)        { *kind = 2; return &f->Italic; }
+    if (_wcsicmp(name, L"Underline") == 0)     { *kind = 2; return &f->Underline; }
+    if (_wcsicmp(name, L"Strikethrough") == 0) { *kind = 2; return &f->Strikethrough; }
+    if (_wcsicmp(name, L"Weight") == 0)        { *kind = 3; return &f->Weight; }
+    if (_wcsicmp(name, L"Charset") == 0)       { *kind = 3; return &f->Charset; }
+    return NULL;
+}
+
+// Fix 128: 把 src 字体的 8 个字段拷进 dst 字体对象 (原地覆写)。
+// 用途: .frm 的 `BeginProperty Caption1_Font` 这类**Property Set** 型字体属性,
+// 其 Set 实现体是 `With m_X_Font: .Name = New_Font.Name ... : Refresh` —— 直接调用
+// 会在 CreateControls 阶段(Form_Load 尚未填数据)触发 Refresh, 使图表永久停在空状态
+// (实测柱/面积/树/饼 只剩标题: 彩色像素 0.3~3%, 关闭后 10~59%)。
+// 因此改为: 用该控件自己的 Property Get 取到内部字体对象, 直接覆写字段, 不触发 Set/Refresh。
+void vb6_UC_FontAssign(void* dst, void* src) {
+    vb6_ComIface_Font* d = vb6_uc_fontOf(dst);
+    vb6_ComIface_Font* s = vb6_uc_fontOf(src);
+    if (!d || !s || d == s) return;
+    if (s->Name) d->Name = SysAllocString(s->Name);
+    d->Size = s->Size;
+    d->Bold = s->Bold;
+    d->Italic = s->Italic;
+    d->Underline = s->Underline;
+    d->Strikethrough = s->Strikethrough;
+    d->Weight = s->Weight;
+    d->Charset = s->Charset;
+}
+
 // ============================================================
 // Fix 112c: RTL 内建 Collection (VB6 内建类)
 // ============================================================
@@ -758,6 +1049,52 @@ void vb6_Collection_AddKeyed(void* coll, const void* winVar, const wchar_t* key)
 
 int32_t vb6_Collection_Count(void* coll) {
     return vb6_uc_isColl(coll) ? ((vb6_CollRec*)coll)->count : 0;
+}
+
+// Fix 134: VB6 Collection.Add 的 Before/After 位置插入。
+// Charts 2020 ucTreeMaps.AddLineSeries 用 `cValues.Remove j : cValues.Add v, , i`
+// 做降序排序 —— 此前 Add 忽略 Before, 排序不生效, Squarified 布局顺序与 VB6 不符。
+// before1/after1 为 1 基序号; before1 使新元素占据第 before1 位, after1 插到其后。
+void vb6_Collection_AddAt(void* coll, const void* winVar, int32_t pos1) {
+    vb6_CollRec* c = (vb6_CollRec*)coll;
+    if (!vb6_uc_isColl(c) || !winVar) return;
+    vb6_Collection_Add(coll, winVar);           // 先追加到尾部
+    int32_t n = c->count;
+    if (n <= 1) return;
+    if (pos1 < 1) pos1 = 1;
+    if (pos1 > n) pos1 = n;
+    vb6_VARIANT* items = (vb6_VARIANT*)c->items;
+    vb6_VARIANT tmp = items[n - 1];             // 刚追加的元素
+    memmove(&items[pos1 - 1 + 1], &items[pos1 - 1],
+            sizeof(vb6_VARIANT) * (size_t)(n - pos1));
+    items[pos1 - 1] = tmp;
+    if (c->keys) {
+        wchar_t* kt = c->keys[n - 1];
+        memmove(&c->keys[pos1 - 1 + 1], &c->keys[pos1 - 1],
+                sizeof(wchar_t*) * (size_t)(n - pos1));
+        c->keys[pos1 - 1] = kt;
+    }
+}
+
+void vb6_Collection_AddKeyedAt(void* coll, const void* winVar, const wchar_t* key, int32_t pos1) {
+    vb6_CollRec* c = (vb6_CollRec*)coll;
+    if (!vb6_uc_isColl(c) || !winVar) return;
+    vb6_Collection_AddKeyed(coll, winVar, key);  // 先追加 (含键重复检查)
+    int32_t n = c->count;
+    if (n <= 1) return;
+    if (pos1 < 1) pos1 = 1;
+    if (pos1 > n) pos1 = n;
+    vb6_VARIANT* items = (vb6_VARIANT*)c->items;
+    vb6_VARIANT tmp = items[n - 1];
+    memmove(&items[pos1 - 1 + 1], &items[pos1 - 1],
+            sizeof(vb6_VARIANT) * (size_t)(n - pos1));
+    items[pos1 - 1] = tmp;
+    if (c->keys) {
+        wchar_t* kt = c->keys[n - 1];
+        memmove(&c->keys[pos1 - 1 + 1], &c->keys[pos1 - 1],
+                sizeof(wchar_t*) * (size_t)(n - pos1));
+        c->keys[pos1 - 1] = kt;
+    }
 }
 
 void vb6_Collection_Remove(void* coll, int32_t idx1) {
@@ -1092,6 +1429,25 @@ int32_t vb6_Host_Call(void* obj, const wchar_t* name, int32_t argc, void** argv,
     if (vb6_uc_isColl(obj)) {   // Fix 112c: Collection 方法
         if (_wcsicmp(name, L"Add") == 0 && argc >= 1) {
             BSTR k = (argc >= 2) ? vb6_ho_variantToBstr((vb6_VARIANT*)argv[1]) : NULL;
+            /* Fix 134: VB6 Add(Item[, Key, Before, After]) 的位置插入 */
+            if (argc >= 3 && argv[2]) {
+                vb6_VARIANT* b = (vb6_VARIANT*)argv[2];
+                if (b->vt != vb6_vtEmpty) {
+                    int32_t pos = vb6_ho_variantToLong(b);
+                    if (k) { vb6_Collection_AddKeyedAt(obj, argv[0], k, pos); }
+                    else   { vb6_Collection_AddAt(obj, argv[0], pos); }
+                    return 1;
+                }
+            }
+            if (argc >= 4 && argv[3]) {
+                vb6_VARIANT* a = (vb6_VARIANT*)argv[3];
+                if (a->vt != vb6_vtEmpty) {
+                    int32_t pos = vb6_ho_variantToLong(a) + 1;
+                    if (k) { vb6_Collection_AddKeyedAt(obj, argv[0], k, pos); }
+                    else   { vb6_Collection_AddAt(obj, argv[0], pos); }
+                    return 1;
+                }
+            }
             if (k) vb6_Collection_AddKeyed(obj, argv[0], k);
             else   vb6_Collection_Add(obj, argv[0]);
         } else if (_wcsicmp(name, L"Item") == 0 && argc >= 1) {

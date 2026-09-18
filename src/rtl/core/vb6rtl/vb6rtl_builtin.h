@@ -53,6 +53,8 @@ double vb6_Abs(double x);
 int32_t vb6_Sgn(double x);
 double vb6_Sqr(double x);
 double vb6_Round(double x, int32_t decimals);
+// Fix 117: VB6 默认数值→字符串 (最短往返表示; Single 最多 7 位有效数字)
+BSTR vb6_NumToBSTRDefault(double v, int isSingle);
 float vb6_Rnd(int32_t seed);
 
 // 转换函数
@@ -63,6 +65,8 @@ BSTR vb6_CStr(vb6_VARIANT x);
 // M22: typed CStr overloads
 BSTR vb6_CStrLong(int32_t x);
 BSTR vb6_CStrDbl(double x);
+// Fix 117c: Single 专用 (VT_R4, 7 位有效数字 + 最短往返)
+BSTR vb6_CStrSingle(float x);
 BSTR vb6_CStrBool(int16_t x);
 BSTR vb6_CStrByte(uint8_t x);
 BSTR vb6_CStrDate(double x);
@@ -244,7 +248,7 @@ BSTR vb6_Hex(int32_t n);
 BSTR vb6_Oct(int32_t n);
 
 // P18-A: 兼容性填平 — 新增RTL函数
-int64_t vb6_CCur(double v);            // CCur: value * 10000
+double vb6_CCur(double v);             // Fix 126: CCur 值语义 (4 位小数)
 vb6_VARIANT vb6_CDec(vb6_VARIANT v);     // P20-07: CDec返回真实DECIMAL (vt=14)
 long vb6_RGB(int32_t r, int32_t g, int32_t b);  // RGB: OLE color
 long vb6_QBColor(int32_t n);        // QBColor: 16-color lookup

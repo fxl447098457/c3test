@@ -66,6 +66,13 @@ public:
     // 读取多行文本 (TextBox.Text)
     static FrxTextData readText(size_t offset);
 
+    // Fix 114: 读取"属性包"持久化字符串 (.frm/.ctl 中 `Xxx = "Form2.frx":006E`)
+    //   VB6 属性包 DocProperty 编码: [GUID 16B][word 0x0011][word 0x0001]
+    //                               [dword cbBytes][3B 填充][UTF-16LE 文本]
+    //   实测于 Charts 2020/Form2.frx: LabelPlus1/2/3 的 Caption 即此格式。
+    //   为稳健起见在 offset 起 64 字节内扫描首个合法的"长度+UTF-16 文本"组合。
+    static FrxTextData readDocString(size_t offset);
+
     // 读取字符串列表 (ListBox.List)
     static FrxListData readStringList(size_t offset);
 

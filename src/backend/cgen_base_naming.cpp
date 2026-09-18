@@ -25,7 +25,7 @@ std::string CCodeGen::defaultValue(Vb6Type type) const {
         case Vb6Type::Date:
             return "0.0";
         case Vb6Type::Currency:
-            return "0LL";
+            return "0.0";   // Fix 126: Currency 值语义 (double)
         case Vb6Type::String:
             return "vb6_BSTR_Empty()";
         case Vb6Type::Object:
