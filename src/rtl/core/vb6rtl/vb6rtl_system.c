@@ -8,6 +8,7 @@
 //   原第 2209~2236 行
 
 #include "vb6rtl.h"
+#include "vb6forms.h"   /* Fix 112: 宿主对象模型 (窗体/控件/集合/字体) */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -456,6 +457,8 @@ static int g_formCount = 0;
 
 void vb6_Forms_Register(void* hwnd_) {
     if (g_formCount < VB6_MAX_FORMS) { g_formList[g_formCount++] = (HWND)hwnd_; }
+    /* Fix 112: 窗体 HWND 也是宿主对象 (Me.ScaleWidth / Me.Controls / Me.hwnd) */
+    vb6_HostObj_Register(hwnd_, NULL, "Form", 1, -1);
 }
 void vb6_Forms_Unregister(void* hwnd_) {
     HWND hwnd = (HWND)hwnd_;

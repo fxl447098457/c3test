@@ -2,17 +2,15 @@
 // 由 src/backend/module/cgen_form.cpp 拆出（2026-09-17），在函数体内被 #include，非独立编译单元。
 // 内容 = 原文件第 1773~1937 行，逐行未改。
 
-    // P14.4.2: Frame容器 - 创建Frame的子控件(以Frame HWND为父窗口)
-    for (const auto& ctrl : frmDesc.formControl.children) {
-        if (ctrl.controlType == FrmControlType::Frame && !ctrl.children.empty()) {
-            int frameLeft = 0, frameTop = 0;
-            auto lIt = ctrl.properties.find("Left");
-            if (lIt != ctrl.properties.end()) frameLeft = (int)lIt->second.intValue;
-            auto tIt = ctrl.properties.find("Top");
-            if (tIt != ctrl.properties.end()) frameTop = (int)tIt->second.intValue;
-            std::string frameHwnd = "vb6_hwnd_" + cIdent(ctrl.controlName);
-            int childCtrlId = 200;  // Frame子控件ID起始值(避免与顶层冲突)
-            for (const auto& child : ctrl.children) {
+    // P14.4.2: 容器控件(Frame/PictureBox) - 创建容器的子控件(以容器 HWND 为父窗口)
+    // 关键: .frm 中子控件坐标已是"相对容器的缇值", 且 vb6_CreateControl 内部会做缇→像素换算,
+    //       因此这里必须直传原始缇值 —— 既不能减去容器偏移, 也不能再乘 15/10.
+    {
+        int childCtrlId = 200;  // 容器子控件ID起始值(避免与顶层 100-199 冲突)
+        auto emitChildControls = [&](auto&& self, const FrmControl& container,
+                                     const std::string& containerHwnd) -> void {
+            for (const auto& child : container.children) {
+                if (child.controlType == FrmControlType::Menu) continue;
                 const char* childClass = FrmParser::controlTypeToWin32Class(child.controlType);
                 if (!childClass) continue;
                 int cLeft = 0, cTop = 0, cWidth = 2000, cHeight = 300;
@@ -24,12 +22,8 @@
                 if (cwIt != child.properties.end()) cWidth = (int)cwIt->second.intValue;
                 auto chIt = child.properties.find("Height");
                 if (chIt != child.properties.end()) cHeight = (int)chIt->second.intValue;
-                // 位置相对于Frame(缇→像素, 减去Frame偏移)
-                int pxLeft = (cLeft - frameLeft) * 15 / 10;
-                int pxTop = (cTop - frameTop) * 15 / 10;
-                int pxWidth = cWidth * 15 / 10;
-                int pxHeight = cHeight * 15 / 10;
                 long childStyle = 0x40000000L | 0x10000000L;  // WS_CHILD | WS_VISIBLE
+                childStyle |= controlTypeStyleBits(child);  // 类型样式与顶层控件一致 (SS_NOTIFY/BS_GROUPBOX 等)
                 std::string childCaption = child.controlName;
                 auto ccIt = child.properties.find("Caption");
                 if (ccIt != child.properties.end() && ccIt->second.type == FrmValueType::String) {
@@ -41,12 +35,15 @@
                     std::string raw = ctIt2->second.rawText;
                     if (raw.size() >= 2 && raw.front() == 0x22 && raw.back() == 0x22) childCaption = raw.substr(1, raw.size() - 2);
                 }
+                if (controlTypeClearsCaption(child)) childCaption = "";
                 c_.emitLine("vb6_hwnd_" + cIdent(child.controlName) + " = vb6_CreateControl("
                     + "\"" + std::string(childClass) + "\", \"" + childCaption + "\","
                     + std::to_string(childStyle) + "L, 0L,"
-                    + std::to_string(pxLeft) + ", " + std::to_string(pxTop) + ", "
-                    + std::to_string(pxWidth) + ", " + std::to_string(pxHeight) + ","
-                    + std::to_string(childCtrlId) + ", " + frameHwnd + ", hInstance);");
+                    + std::to_string(cLeft) + ", " + std::to_string(cTop) + ", "
+                    + std::to_string(cWidth) + ", " + std::to_string(cHeight) + ","
+                    + std::to_string(childCtrlId) + ", " + containerHwnd + ", hInstance);");
+                // 设计期 BorderStyle / Alignment (容器子控件)
+                emitDesignerStyleProps(child, "vb6_hwnd_" + cIdent(child.controlName));
                 // 注册控件名到knownFormControls_(供属性访问)
                 {
                     std::string childNameLower = child.controlName;
@@ -55,7 +52,19 @@
                     knownFormControlOriginalNames_[childNameLower] = child.controlName;
                 }
                 childCtrlId++;
+                // 递归处理多层容器(Frame/PictureBox 内再嵌容器)
+                if (!child.children.empty() &&
+                    (child.controlType == FrmControlType::Frame ||
+                     child.controlType == FrmControlType::PictureBox)) {
+                    self(self, child, "vb6_hwnd_" + cIdent(child.controlName));
+                }
             }
+        };
+        for (const auto& ctrl : frmDesc.formControl.children) {
+            if (ctrl.children.empty()) continue;
+            if (ctrl.controlType != FrmControlType::Frame &&
+                ctrl.controlType != FrmControlType::PictureBox) continue;
+            emitChildControls(emitChildControls, ctrl, "vb6_hwnd_" + cIdent(ctrl.controlName));
         }
     }
 
@@ -98,19 +107,52 @@
                 c_.emitLine("vb6_InstallControlSubclass((void*)vb6_hwnd_" + cIdent(ctrl.controlName) + ", (void*)" + subProcName + ");");
             }
         }
-        // P0-5修复: Frame容器内的子控件
-        for (const auto& ctrl : frmDesc.formControl.children) {
-            if (ctrl.controlType == FrmControlType::Frame) {
-                for (const auto& child : ctrl.children) {
+        // P0-5修复: 容器(Frame/PictureBox)内的子控件 (含多层嵌套)
+        {
+            auto subclassContainerChildren = [&](auto&& self, const FrmControl& container) -> void {
+                for (const auto& child : container.children) {
                     std::string childNameLower = child.controlName;
                     std::transform(childNameLower.begin(), childNameLower.end(), childNameLower.begin(), ::tolower);
-                    if (subEmitted.count(childNameLower)) continue;
-                    subEmitted.insert(childNameLower);
-                    if (!needsSubclass(child)) continue;
-                    std::string subProcName = "vb6_ctrl_subproc_" + cIdent(child.controlName);
-                    c_.emitLine("vb6_InstallControlSubclass((void*)vb6_hwnd_" + cIdent(child.controlName) + ", (void*)" + subProcName + ");");
+                    if (!subEmitted.count(childNameLower)) {
+                        subEmitted.insert(childNameLower);
+                        if (needsSubclass(child)) {
+                            std::string subProcName = "vb6_ctrl_subproc_" + cIdent(child.controlName);
+                            c_.emitLine("vb6_InstallControlSubclass((void*)vb6_hwnd_" + cIdent(child.controlName) + ", (void*)" + subProcName + ");");
+                        }
+                    }
+                    if (!child.children.empty() &&
+                        (child.controlType == FrmControlType::Frame ||
+                         child.controlType == FrmControlType::PictureBox)) {
+                        self(self, child);
+                    }
+                }
+            };
+            for (const auto& ctrl : frmDesc.formControl.children) {
+                if (!ctrl.children.empty() &&
+                    (ctrl.controlType == FrmControlType::Frame ||
+                     ctrl.controlType == FrmControlType::PictureBox)) {
+                    subclassContainerChildren(subclassContainerChildren, ctrl);
                 }
             }
+        }
+    }
+
+    // Fix 142: 容器控件转发子控件 WM_COMMAND 到窗体 WndProc.
+    // 顶层与嵌套 Frame/PictureBox 均安装 (含仅作为容器的控件).
+    {
+        auto emitForward142 = [&](auto&& self, const FrmControl& ctrl) -> void {
+            if ((ctrl.controlType == FrmControlType::Frame ||
+                 ctrl.controlType == FrmControlType::PictureBox) && !ctrl.children.empty()) {
+                std::string nmLower = ctrl.controlName;
+                std::transform(nmLower.begin(), nmLower.end(), nmLower.begin(), ::tolower);
+                if (!knownControlArrays_.count(nmLower)) {
+                    c_.emitLine("vb6_ForwardChildCommands((void*)vb6_hwnd_" + cIdent(ctrl.controlName) + ");");
+                }
+            }
+            for (const auto& child : ctrl.children) self(self, child);
+        };
+        for (const auto& ctrl : frmDesc.formControl.children) {
+            emitForward142(emitForward142, ctrl);
         }
     }
 

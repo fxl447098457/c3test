@@ -3,6 +3,7 @@
 //   原第 4182~4430 行
 
 #include "vb6rtl.h"
+#include "vb6forms.h"   /* Fix 112: 宿主对象模型 (窗体/控件/集合/字体) */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -190,6 +191,22 @@ vb6_VARIANT vb6_CallByName(void* obj, const wchar_t* procName, int32_t callType,
     result.vt = (vb6_vartype)VT_EMPTY;
 
     if (!obj || !procName) return result;
+
+    /* Fix 112: 宿主对象 (窗体/控件 HWND, Font 代理) 用 Win32 语义应答 CallByName */
+    if (vb6_Host_IsHostObject(obj)) {
+        if (callType == 3) {           /* VbGet */
+            vb6_Host_GetProp(obj, procName, &result);
+        } else if (callType == 1) {    /* VbLet: 首个实参即要写入的值 */
+            void** a = (void**)args;
+            if (argc >= 1 && a && a[0]) {
+                char hv[64];
+                vb6_Host_FromWinVariant(a[0], hv);
+                vb6_Host_SetProp(obj, procName, hv);
+                vb6_Host_ClearVariant(hv);
+            }
+        }
+        return result;
+    }
 
     IDispatch* disp = (IDispatch*)obj;
     DISPID dispid = 0;

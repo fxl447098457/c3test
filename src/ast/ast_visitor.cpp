@@ -195,6 +195,8 @@ void traverseStmt(Stmt& stmt, ASTVisitor& visitor) {
     case ASTNodeKind::ReDimStmt: {
         auto& s = static_cast<ReDimStmt&>(stmt);
         visitor.visit(s);
+        // Fix 100: 复杂目标 (arr(i).Field) 表达式内的标识符同样需要遍历
+        if (s.targetExpr) traverseExpr(*s.targetExpr, visitor);
         for (auto& d : s.dimensions) {
             if (d.lower) traverseExpr(*d.lower, visitor);
             if (d.upper) traverseExpr(*d.upper, visitor);

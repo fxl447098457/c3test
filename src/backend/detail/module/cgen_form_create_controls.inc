@@ -38,6 +38,79 @@
     // 为每个控件生成CreateWindow调用
     ctrlId = 100;
     for (const auto& ctrl : frmDesc.formControl.children) {
+        // Fix 112: 工程内 UserControl (.ctl) 子控件 — 实例化到宿主子窗口.
+        // 此前这类 controlTypeToWin32Class()==nullptr 的非 ActiveX 类型直接 continue,
+        // Form2 上的 ucChartBar1 等从未创建 → vb6_ComCall(NULL,...) 被丢弃 → 白板窗体.
+        if (findUserControlSpec(ctrl.controlTypeName)) {
+            std::string ctlClass = knownUserControlCtrlVars_[Symbol::toLower(ctrl.controlName)];
+            // 该 .ctl 模块的宿主描述必须先注册 (无 TU: extern 声明 + 直接调用)
+            c_.emitLine("{ extern void vb6_" + cIdent(ctlClass) + "_RegisterHost(void);"
+                      + " vb6_" + cIdent(ctlClass) + "_RegisterHost(); }");
+            int ucL = 0, ucT = 0, ucW = 1000, ucH = 300;
+            auto ucP = ctrl.properties.find("Left");
+            if (ucP != ctrl.properties.end()) ucL = (int)ucP->second.intValue;
+            ucP = ctrl.properties.find("Top");
+            if (ucP != ctrl.properties.end()) ucT = (int)ucP->second.intValue;
+            ucP = ctrl.properties.find("Width");
+            if (ucP != ctrl.properties.end()) ucW = (int)ucP->second.intValue;
+            ucP = ctrl.properties.find("Height");
+            if (ucP != ctrl.properties.end()) ucH = (int)ucP->second.intValue;
+
+            std::string ctlLower = Symbol::toLower(ctrl.controlName);
+            bool ucIsArr = knownControlArrays_.count(ctlLower) != 0;
+            std::string hwndExpr;
+            if (ucIsArr) {
+                int idx = ctrl.index >= 0 ? ctrl.index : 0;
+                c_.emitLine("{ void* vb6_uc_h = vb6_UC_HostCreate(\"" + ctlClass + "\", "
+                    + std::to_string(ucL) + ", " + std::to_string(ucT) + ", "
+                    + std::to_string(ucW) + ", " + std::to_string(ucH)
+                    + ", hwnd, hInstance, \"" + cIdent(ctrl.controlName) + "_" + std::to_string(idx)
+                    + "\", " + std::to_string(idx) + ");");
+                c_.emitLine("  vb6_CtrlArr_SetAt(&vb6_arr_" + cIdent(ctrl.controlName) + ", "
+                           + std::to_string(idx) + ", vb6_uc_h); }");
+                hwndExpr = "vb6_CtrlArr_GetAt(&vb6_arr_" + cIdent(ctrl.controlName) + ", "
+                         + std::to_string(idx) + ")";
+            } else {
+                c_.emitLine("vb6_hwnd_" + cIdent(ctrl.controlName) + " = vb6_UC_HostCreate(\""
+                    + ctlClass + "\", " + std::to_string(ucL) + ", " + std::to_string(ucT) + ", "
+                    + std::to_string(ucW) + ", " + std::to_string(ucH)
+                    + ", hwnd, hInstance, \"" + ctrl.controlName + "\", -1);");
+                hwndExpr = "vb6_hwnd_" + cIdent(ctrl.controlName);
+            }
+
+            // 设计期持久化的 UserControl 公共属性 (Value=30 / PB_Color1=... / Caption2="...")
+            // — 逐个调用该 .ctl 的 prop_let_ (跳过几何/Tab 等标准属性).
+            {
+                static const char* kSkip[] = {"Left", "Top", "Width", "Height", "Index",
+                    "TabIndex", "TabStop", "Visible", "Enabled", "Name", "_ExtentX",
+                    "_ExtentY", "Tag", "ToolTipText", "WhatisThis", "HelpContextID"};
+                c_.emitLine("vb6_UC_Enter(" + hwndExpr + ");  /* Fix 112: 换入宿主状态 */");
+                for (const auto& kv : ctrl.properties) {
+                    const std::string& pn = kv.first;
+                    bool skip = false;
+                    for (const char* sk : kSkip) if (_stricmp(pn.c_str(), sk) == 0) { skip = true; break; }
+                    if (skip) continue;
+                    std::string pnLower = Symbol::toLower(pn);
+                    Symbol* letSym = symTab_.lookupModule(pn);
+                    if (!letSym || letSym->kind != SymbolKind::PropertyLet) continue;
+                    std::string setter = "vb6_" + cIdent(ctlClass) + "_prop_let_" + cIdent(pn);
+                    std::string valExpr;
+                    if (kv.second.type == FrmValueType::String) {
+                        std::string raw = kv.second.rawText;
+                        if (raw.size() >= 2 && raw.front() == '"' && raw.back() == '"')
+                            raw = raw.substr(1, raw.size() - 2);
+                        valExpr = "vb6_BSTR_FromStr(L\"" + escapeWideCString(raw) + "\")";
+                    } else {
+                        valExpr = kv.second.rawText.empty()
+                                ? std::to_string(kv.second.intValue) : kv.second.rawText;
+                    }
+                    c_.emitLine(setter + "((vb6_cls_" + cIdent(ctlClass) + "*)vb6_UC_InstanceOf("
+                              + hwndExpr + "), " + valExpr + ");");
+                }
+            }
+            ctrlId++;
+            continue;
+        }
         const char* win32Class = FrmParser::controlTypeToWin32Class(ctrl.controlType);
         if (!win32Class) {
             // P7.9: WebBrowser控件用vb6_CreateWebView创建

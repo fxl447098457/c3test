@@ -117,10 +117,11 @@ ExprPtr Parser::parsePostfix(ExprPtr expr) {
                             call->named.push_back({nameTok.text, std::move(val)});
                         } else if (cur_.kind == TokenKind::Comma || cur_.kind == TokenKind::RightParen) {
                             // M22: 空参数占位 - VB6允许 MsgBox("hi", , "title")
-                            // Fix 104: 用 LiteralKind::Missing 标识"省略", 而非整型 0 ——
-                            // COM 调用据此传 VT_ERROR/DISP_E_PARAMNOTFOUND, 非 COM 路径仍按 0 生成.
-                            auto _ph = std::make_unique<LiteralExpr>(currentLoc(), LiteralKind::Missing, "");
+                            // Fix 142: 同时记录省略索引, 供代码生成按形参缺省值填充
+                            auto _ph = std::make_unique<LiteralExpr>(currentLoc(), LiteralKind::Long, "0");
+                            _ph->longValue = 0;  // Union与intValue共享内存, 必须显式设置longValue
                             call->positional.push_back(std::move(_ph));
+                            call->omittedArgs.insert(argIndex);
                         } else {
                             // 位置参数
                             auto arg = parseExpression();
@@ -139,6 +140,44 @@ ExprPtr Parser::parsePostfix(ExprPtr expr) {
 
                 expect(TokenKind::RightParen, DiagnosticID::ParseExpectedToken,
                        "expected ')'");
+
+                // Fix 102: VB6 图形方法坐标语法
+                //   obj.Line (x1, y1)-(x2, y2)[, color][, BF | B | F]
+                // `(x1, y1)` 已按普通实参表解析完毕; 紧随的 `-(x2, y2)` 必须在此吸收,
+                // 否则外层 parseExpression 会把它当作中缀减法, 而右操作数 `(x2, y2)`
+                // 的括号内含逗号 → "expected ')'", 整行解析崩坏并连锁破坏其后的
+                // If/End If 配对 (Charts 2020 ppProgressCircular.pag 297/299/474).
+                // 吸收后统一为 IndexOrCallExpr(callee=obj.Line,
+                // 实参 = x1, y1, x2, y2[, color][, fillMode]), 由后端按控件类型发射。
+                if (cur_.kind == TokenKind::Minus && next_.kind == TokenKind::LeftParen) {
+                    bool isLineCall = false;
+                    if (call->callee && call->callee->kind == ASTNodeKind::MemberAccessExpr) {
+                        auto& maLine = static_cast<MemberAccessExpr&>(*call->callee);
+                        isLineCall = toLower(maLine.memberName) == "line";
+                    }
+                    if (isLineCall) {
+                        advance();  // 消费 '-'
+                        advance();  // 消费 '('
+                        auto x2 = parseExpression();
+                        expect(TokenKind::Comma, DiagnosticID::ParseExpectedToken,
+                               "expected ',' in Line (x1,y1)-(x2,y2)");
+                        auto y2 = parseExpression();
+                        expect(TokenKind::RightParen, DiagnosticID::ParseExpectedToken,
+                               "expected ')' in Line (x1,y1)-(x2,y2)");
+                        call->positional.push_back(std::move(x2));
+                        call->positional.push_back(std::move(y2));
+                        // 可选后续参数: ", color" / ", color, BF|B|F"
+                        while (match(TokenKind::Comma)) {
+                            if (cur_.kind == TokenKind::NewLine ||
+                                cur_.kind == TokenKind::Colon ||
+                                cur_.kind == TokenKind::EndOfFile) {
+                                break;
+                            }
+                            call->positional.push_back(parseExpression());
+                        }
+                    }
+                }
+
                 expr = std::move(call);
                 break;
             }

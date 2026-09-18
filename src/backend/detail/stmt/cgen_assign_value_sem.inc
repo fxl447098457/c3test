@@ -203,6 +203,8 @@
                     convertedValue = "vb6_VariantToObjectVal(" + value + ")";
                 } else if (retCt092f == "double" || retCt092f == "float") {
                     convertedValue = "vb6_VariantToDouble(" + value + ")";
+                } else if (retCt092f == "intptr_t") {
+                    convertedValue = "vb6_VariantToLongPtr(" + value + ")";
                 } else if (retCt092f == "int32_t" || retCt092f == "int16_t"
                            || retCt092f == "uint8_t" || retCt092f == "LONG"
                            || retCt092f == "int64_t") {
@@ -215,9 +217,11 @@
                 Vb6Type udtFieldT = inferUdtFieldVb6Type(node.target.get());
                 if (udtFieldT == Vb6Type::String) {
                     convertedValue = "vb6_VariantToString(" + value + ")";
+                } else if (udtFieldT == Vb6Type::LongPtr) {
+                    convertedValue = "vb6_VariantToLongPtr(" + value + ")";
                 } else if (udtFieldT == Vb6Type::Long || udtFieldT == Vb6Type::Integer
                            || udtFieldT == Vb6Type::Byte || udtFieldT == Vb6Type::Boolean
-                           || udtFieldT == Vb6Type::ULong || udtFieldT == Vb6Type::LongPtr) {
+                           || udtFieldT == Vb6Type::ULong) {
                     convertedValue = "vb6_VariantToLong(" + value + ")";
                 } else if (udtFieldT == Vb6Type::Double || udtFieldT == Vb6Type::Single
                            || udtFieldT == Vb6Type::Currency || udtFieldT == Vb6Type::Date) {
@@ -241,7 +245,9 @@
                 }
                 std::string lower = checkName;
                 std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
-                if (knownLongVars_.count(lower)) {
+                if (knownLongPtrVars_.count(lower)) {
+                    convertedValue = "vb6_VariantToLongPtr(" + value + ")";
+                } else if (knownLongVars_.count(lower)) {
                     convertedValue = "vb6_VariantToLong(" + value + ")";
                 } else if (knownDoubleVars_.count(lower)) {
                     convertedValue = "vb6_VariantToDouble(" + value + ")";
@@ -262,7 +268,9 @@
                     auto& id = static_cast<IdentifierExpr&>(*node.target);
                     std::string idLower = id.name;
                     std::transform(idLower.begin(), idLower.end(), idLower.begin(), ::tolower);
-                    if (knownLongVars_.count(idLower)) {
+                    if (knownLongPtrVars_.count(idLower)) {
+                        convertedValue = "vb6_VariantToLongPtr(" + value + ")";
+                    } else if (knownLongVars_.count(idLower)) {
                         convertedValue = "vb6_VariantToLong(" + value + ")";
                     } else if (knownDoubleVars_.count(idLower)) {
                         convertedValue = "vb6_VariantToDouble(" + value + ")";
@@ -305,6 +313,10 @@
             }
             if (tgtIsVariant091l && !valueIsVariant && !value.empty()) {
                 value = "vb6_VariantFromValue(" + value + ")";
+            }
+            // Fix 092w: Byte 数组目标 + 具体值 (StrConv/字符串) → 字节数组语义
+            if (tgtIsByteArray092w && !tgtIsVariant091l && !value.empty()) {
+                value = rewriteByteArrayValue(value);
             }
             c_.emitLine(target + " = " + value + ";");
         }

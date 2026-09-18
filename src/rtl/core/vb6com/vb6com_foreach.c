@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "vb6com_internal.h"
+#include "vb6forms.h"   /* Fix 112: 宿主 Controls 集合枚举 */
 
 
 // ============================================================
@@ -29,6 +30,15 @@ typedef struct vb6_ForEachState {
 // Returns vb6_ForEachState* (or NULL on failure)
 void* vb6_ForEach_Init(void* disp) {
     if (!disp) return NULL;
+    /* Fix 112: 宿主 Controls 集合 (vb6_ComGetObjectProp(Me,"Controls") 的合成对象)
+     * 不是 IDispatch, 用原生枚举器迭代窗体子控件. */
+    if (vb6_UC_ControlsIsCollection(disp)) {
+        return vb6_UC_ControlsEnumInit(disp);
+    }
+    /* Fix 112c: RTL 内建 Collection (New Collection 的产物) */
+    if (vb6_Collection_IsCollection(disp)) {
+        return vb6_Collection_EnumInit(disp);
+    }
     IDispatch* pDisp = (IDispatch*)disp;
 
     // Read Count property for safety limit
@@ -114,6 +124,26 @@ void* vb6_ForEach_Init(void* disp) {
 // P25-fix4: enforce Count limit (buggy IEnumVARIANT may never terminate)
 int32_t vb6_ForEach_Next(void* enumPtr, VARIANT* outVar) {
     if (!enumPtr || !outVar) return 0;
+    /* Fix 112: 宿主 Controls 集合的原生枚举器 (vb6_ForEach_Init 的宿主分支) */
+    if (vb6_UC_ControlsIsCollection(*((void**)enumPtr))) {
+        char hv[64];
+        int32_t got = vb6_UC_ControlsEnumNext(enumPtr, hv);
+        VariantInit(outVar);
+        if (!got) return 0;
+        vb6_Host_ToWinVariant(&hv, outVar);
+        vb6_Host_ClearVariant(hv);
+        return 1;
+    }
+    /* Fix 112c: RTL 内建 Collection 的原生枚举器 */
+    if (vb6_Collection_IsCollection(*((void**)enumPtr))) {
+        char hv[64];
+        int32_t got = vb6_Collection_EnumNext(enumPtr, hv);
+        VariantInit(outVar);
+        if (!got) return 0;
+        vb6_Host_ToWinVariant(&hv, outVar);
+        vb6_Host_ClearVariant(hv);
+        return 1;
+    }
     vb6_ForEachState* state = (vb6_ForEachState*)enumPtr;
     IEnumVARIANT* pEnum = state->pEnum;
 
@@ -144,6 +174,14 @@ int32_t vb6_ForEach_Next(void* enumPtr, VARIANT* outVar) {
 // For Each Release: Release IEnumVARIANT and free wrapper
 void vb6_ForEach_Release(void* enumPtr) {
     if (!enumPtr) return;
+    /* Fix 112/112c: 宿主枚举句柄 (Controls 集合 / 内建 Collection) 不是 vb6_ForEachState
+     * —— 首元素是集合指针而非 IEnumVARIANT*, 当 state->pEnum 解引用会取到结构体自身
+     * 的字节当 vtable → 0xC0000005. 宿主句柄没有需要 Release 的 COM 接口, 直接释放. */
+    if (vb6_UC_ControlsIsCollection(*((void**)enumPtr)) ||
+        vb6_Collection_IsCollection(*((void**)enumPtr))) {
+        free(enumPtr);
+        return;
+    }
     vb6_ForEachState* state = (vb6_ForEachState*)enumPtr;
     state->pEnum->lpVtbl->Release(state->pEnum);
     free(state);

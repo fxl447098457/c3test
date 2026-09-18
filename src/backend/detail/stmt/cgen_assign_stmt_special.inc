@@ -60,6 +60,44 @@
             }
         }
     }
+    // Fix 110b: 控件数组元素默认属性写入 — VB6 里 `TxtARGB(0) = v` 等价于
+    // `TxtARGB(0).Text = v` (TextBox 控件数组元素的默认属性写入).
+    // 不处理时 LHS 会被展开为 `vb6_GetControlText(vb6_hwnd_TxtARGB)(0)` →
+    // C2064/C2106. 正确形态: vb6_SetControlText(vb6_CtrlArr_GetAt(&vb6_arr_X, i), v).
+    if (node.target->kind == ASTNodeKind::IndexOrCallExpr) {
+        auto& caP = static_cast<IndexOrCallExpr&>(*node.target);
+        if (caP.callee && caP.callee->kind == ASTNodeKind::IdentifierExpr
+            && !caP.positional.empty()) {
+            auto& caId = static_cast<IdentifierExpr&>(*caP.callee);
+            std::string caLower = caId.name;
+            std::transform(caLower.begin(), caLower.end(), caLower.begin(), ::tolower);
+            if (knownControlArrays_.count(caLower)) {
+                auto itCtrl = knownFormControls_.find(caLower);
+                if (itCtrl != knownFormControls_.end()) {
+                    const char* defProp = getDefaultPropertyName(itCtrl->second);
+                    std::string writeFn = defProp
+                        ? getControlPropWriteFn(itCtrl->second, defProp) : std::string();
+                    if (!writeFn.empty()) {
+                        emitExpr(*caP.positional[0]);
+                        std::string idxArg = std::move(lastExpr_);
+                        emitExpr(*node.value);
+                        std::string valExpr = std::move(lastExpr_);
+                        if (writeFn.find("SetControlText") != std::string::npos
+                            || writeFn.find("SetMenuCaption") != std::string::npos) {
+                            valExpr = wrapToBSTR(valExpr, *node.value);
+                        }
+                        std::string origName = knownFormControlOriginalNames_.count(caLower)
+                            ? knownFormControlOriginalNames_[caLower] : caId.name;
+                        c_.emitLine(writeFn + "(vb6_CtrlArr_GetAt(&vb6_arr_" + cIdent(origName)
+                                    + ", " + idxArg + "), " + valExpr
+                                    + ");  /* ctrl array default prop write */");
+                        return;
+                    }
+                }
+            }
+        }
+    }
+
     // P22: LSet/RSet statement (LSet strVar = expr / RSet strVar = expr)
     if (node.isLSet || node.isRSet) {
         if (node.target->kind == ASTNodeKind::IdentifierExpr) {

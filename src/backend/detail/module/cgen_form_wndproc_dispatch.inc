@@ -200,6 +200,11 @@
         if (symTab_.lookup(formName + "_Resize") || symTab_.lookup("Form_Resize")) {
             c_.emitLine("case WM_SIZE: {");
             c_.indent();
+            // Fix 112: Form_Load 由 PostMessage 延迟执行, 而首次 WM_SIZE 在
+            // CreateWindow 期间就到 — 若照搬 VB6 的 Load→Resize 顺序, 这里会在
+            // Form_Load 之前触发 Form_Resize, 模块级对象 (如 cResizer) 还是
+            // Nothing (空指针) · 故 Load 完成前跳过, 由 0x7FF0 分支补一次 Resize.
+            c_.emitLine("if (!vb6_formLoaded_" + cIdent(formName) + ") break;");
             c_.emitLine("{ extern void " + resizeFn + "(); " + resizeFn + "(); }");
             c_.emitLine("break;");
             c_.dedent();

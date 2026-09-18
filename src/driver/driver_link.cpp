@@ -30,6 +30,7 @@ static void addFormsSources(MsvcDriverOptions& opts, const std::string& rtlDir) 
     opts.sourceFiles.push_back(rtlDir + "/vb6forms_widget_prop.c");
     opts.sourceFiles.push_back(rtlDir + "/vb6forms_shape.c");
     opts.sourceFiles.push_back(rtlDir + "/vb6forms_axsite.c");
+    opts.sourceFiles.push_back(rtlDir + "/vb6forms_uc.c");   // Fix 112
 }
 
 bool Driver::runLinker(const CompileOptions& options, const std::string& outputDir,
@@ -139,30 +140,10 @@ bool Driver::runLinker(const CompileOptions& options, const std::string& outputD
     msvcOpts.sourceFiles.push_back(rtlDir + "/vb6_di_com_stubs.c");
     msvcOpts.sourceFiles.push_back(rtlDir + "/vb6_di_net_stubs.c");
     msvcOpts.sourceFiles.push_back(rtlDir + "/vb6_di_shell_stubs.c");
-    if (msvcOpts.isGui || msvcOpts.isDll) {
-        // 092z-3: ActiveX DLL 允许包含窗体 (Form/UserControl), 也要 vb6forms
-        addFormsSources(msvcOpts, rtlDir);
-    } else {
-        // Fix 096: 非 GUI 工程也可能引用 vb6forms RTL —— 标准模块裸 Print
-        // 生成 vb6_Form_Print(NULL, ...) (C3 扩展语义), 之前不链 vb6forms
-        // 报 LNK2019。扫描生成的 .c 源码, 引用了 vb6_Form_ 符号即补链。
-        bool usesFormsRtl = false;
-        for (auto& sf : msvcOpts.sourceFiles) {
-            std::ifstream f(utf8ToPath(sf));
-            if (!f) continue;
-            std::string line;
-            while (std::getline(f, line)) {
-                if (line.find("vb6_Form_") != std::string::npos) {
-                    usesFormsRtl = true;
-                    break;
-                }
-            }
-            if (usesFormsRtl) break;
-        }
-        if (usesFormsRtl) {
-            addFormsSources(msvcOpts, rtlDir);
-        }
-    }
+    // 092z-3 + Fix 112: vb6forms 组对**所有**工程类型都链接 —— vb6rtl/vb6com 的
+    // 宿主对象分派挂接点 (vb6_Host_*) 引用 vb6forms_uc, 不能只在 GUI/DLL 下链接.
+    // (原先 Fix 096 的按需扫描已不需要: 一律链接.)
+    addFormsSources(msvcOpts, rtlDir);
     if (msvcOpts.isDll) {
         msvcOpts.sourceFiles.push_back(rtlDir + "/vb6comserver.c");
         msvcOpts.sourceFiles.push_back(rtlDir + "/vb6comserver_obj.c");

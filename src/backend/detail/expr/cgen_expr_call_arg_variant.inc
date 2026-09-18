@@ -101,7 +101,11 @@
                     // 数组参数: 从 Variant 提取 SafeArray1D*
                     argVal = "vb6_VariantToSafeArray1D(" + argVal + ")";
                 } else if (paramBase == Vb6Type::Long || paramBase == Vb6Type::Integer
-                           || paramBase == Vb6Type::Byte || paramBase == Vb6Type::Boolean) {
+                           || paramBase == Vb6Type::Byte || paramBase == Vb6Type::Boolean
+                           || paramBase == Vb6Type::LongPtr || paramBase == Vb6Type::ULong) {
+                    // Fix 092q: LongPtr (intptr_t) / ULong ByVal 形参接收 COM 属性
+                    // Variant 时也需提取为数值; 缺此项导致 C2440
+                    // (vb6_VARIANT 转 intptr_t), 如 SelectObject(hDC, pPicture.Handle).
                     argVal = "vb6_VariantToLong(" + argVal + ")";
                 } else if (paramBase == Vb6Type::Double || paramBase == Vb6Type::Single
                            || paramBase == Vb6Type::Currency || paramBase == Vb6Type::Date) {

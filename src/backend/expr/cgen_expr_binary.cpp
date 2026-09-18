@@ -157,7 +157,7 @@ void CCodeGen::visit(BinaryExpr& node) {
                 case BinaryOp::Ge:cmpOp = ">= 0"; break;
                 default: cmpOp = "== 0"; break;
             }
-            lastExpr_ = "(vb6_StrCmp(" + left + ", " + right + ") " + cmpOp + ")";
+            lastExpr_ = "(-(vb6_StrCmp(" + left + ", " + right + ") " + cmpOp + "))";
             return;
         }
     }
@@ -182,6 +182,16 @@ void CCodeGen::visit(BinaryExpr& node) {
             else if (right.find("vb6_ComGetStringProp") == 0) rt = Vb6Type::String;
             else if (right.find("vb6_ComGetObjectProp") == 0) rt = Vb6Type::Object;
         }
+        // Fix 110aa: 与上面相反方向的修正 — inferExprType 给出具体类型, 但**实际发射
+        // 的 C 表达式**是 Variant 值 (vb6_VariantEmpty() / vb6_VariantFromComResult(...)
+        // / vb6_CallByName(...) 等). 此时原生 C 比较作用于结构体 → C2088
+        // ("==" 对于 struct 非法). 按 C 表达式判定, 把该侧提升为 Variant 走
+        // vb6_VarCmp* 通道. Charts 2020 ucProgressCircular.ctl:949
+        //   If hBrush = 0 Or Count = 0            (Count = 隐式 Variant 局部)
+        //   → (vb6_VariantEmpty() == 0) C2088.
+        // 类型化 getter (vb6_ComGetIntProp 等) 不在 cExprIsVariant 前缀表内, 不受影响.
+        if (lt != Vb6Type::Variant && cExprIsVariant(left)) lt = Vb6Type::Variant;
+        if (rt != Vb6Type::Variant && cExprIsVariant(right)) rt = Vb6Type::Variant;
         // Bug #2 fix: also check knownLongVars_/knownLongPtrVars_ for simple variable names
         // because inferExprType may return Variant for optional params or out-of-scope variables
         auto isSimpleIdent = [](const std::string& s) -> bool {
@@ -215,7 +225,8 @@ void CCodeGen::visit(BinaryExpr& node) {
                 case BinaryOp::Ge:  op = ">="; break;
                 default: op = "=="; break;
             }
-            lastExpr_ = "(" + left + " " + op + " " + right + ")";
+            // Fix 092v: LongPtr 关系比较同样产生 C 的 0/1 → 取负为 -1/0 (VB6 Boolean)
+            lastExpr_ = "(-(" + left + " " + op + " " + right + "))";
             return;
         }
         if (lt == Vb6Type::Variant || rt == Vb6Type::Variant) {
@@ -303,11 +314,25 @@ void CCodeGen::visit(BinaryExpr& node) {
     if (node.op == BinaryOp::And || node.op == BinaryOp::Or || node.op == BinaryOp::Xor) {
         auto castBitwise = [&](const std::string& cExpr, const Expr* astExpr) -> std::string {
             if (cExprIsVariant(cExpr)) return "vb6_VariantToLong(" + cExpr + ")";
+            // Fix 110m: 本函数返回变量 (vb6_ret_X, C 类型 vb6_VARIANT) 参与位运算.
+            // VB6 中函数名即返回变量, 且返回值是 Variant —
+            //   Function ARGB(...): ARGB = ARGB Or CLng(Red) * &H10000 Or ...
+            // 里读 ARGB 得到 Variant. VARIANT 结构体不能直接做 | (C2440 "无法从
+            // vb6_VARIANT 转换为 int32_t", 且会使外层 vb6_VariantBool 报 C2198).
+            // (Charts 2020 ppProgressCircular.pag 550)
+            if (!currentReturnVar_.empty() && cExpr == currentReturnVar_
+                && currentReturnCType_ == "vb6_VARIANT") {
+                return "vb6_VariantToLong(" + cExpr + ")";
+            }
             if (astExpr && astExpr->kind == ASTNodeKind::IdentifierExpr) {
                 auto& ident = static_cast<IdentifierExpr&>(const_cast<Expr&>(*astExpr));
                 std::string lower = ident.name;
                 std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
                 if (knownVariantVars_.count(lower)) return "vb6_VariantToLong(" + cExpr + ")";
+                if (currentProc_ && Symbol::toLower(currentProc_->name) == lower
+                    && currentReturnCType_ == "vb6_VARIANT") {
+                    return "vb6_VariantToLong(" + cExpr + ")";
+                }
             }
             return "(int32_t)(" + cExpr + ")";
         };
@@ -348,9 +373,44 @@ void CCodeGen::visit(BinaryExpr& node) {
         extractVar86(right, node.right.get());
     }
 
+    // Fix 108: 走到这里说明左右操作数都将按 C 原生运算符发射 (类型特化分支都未命中).
+    // 无类型 COM 调用 (vb6_ComCall) 的静态 C 类型是 void* (指向 VARIANT),
+    // 直接参与算术/关系运算会报 C2440 (void* 与 float/int 比较) 或 C2111
+    // (指针 +/-). 实例: Charts 2020 ucChartBar GetMax
+    //   `If M < m_Serie(i).Values(j) Then` → `M < vb6_ComCall(...)`
+    // 这里补一次显式数值解包. 仅识别无类型形式, vb6_ComCallInt/Double/BSTR/
+    // Object 前缀不同, 不受影响; `Is` (对象引用比较) 排除在外.
+    if (node.op != BinaryOp::Is) {
+        auto unwrapBareComCall108 = [](const std::string& cExpr) -> std::string {
+            if (cExpr.compare(0, 12, "vb6_ComCall(") == 0) {
+                return "vb6_VariantToDouble(vb6_VariantFromComResult(" + cExpr + "))";
+            }
+            return cExpr;
+        };
+        left = unwrapBareComCall108(left);
+        right = unwrapBareComCall108(right);
+    }
+
+    // Fix 108b: VB6 Mod 的语义是"操作数先转 Long 再取余"; C 的 % 不接受浮点
+    // 操作数 (C2296). 这里显式取整, 与 VB6 一致.
+    if (node.op == BinaryOp::Mod) {
+        lastExpr_ = "((int32_t)(" + left + ") % (int32_t)(" + right + "))";
+        return;
+    }
+
     // VB6的And/Or/Not是逻辑运算也是位运算（取决于操作数类型）
     // 简化处理: 直接映射为C位运算, VB6语义兼容
-    lastExpr_ = "(" + left + " " + op + " " + right + ")";
+    // Fix 092v: VB6 关系比较 (=,<>,<,>,<=,>=,Is) 结果为 Boolean(-1/0),
+    // 而 C 原生比较为 0/1. 取负转 -1/0, 使上层 Not(位反)/And/Xor/算术
+    // 与 VB6 一致. 只有关系运算符需要转; 算术(+-*/等)保持原样.
+    static const std::unordered_set<std::string> relOps092v = {
+        "==", "!=", "<", ">", "<=", ">="
+    };
+    if (relOps092v.count(op)) {
+        lastExpr_ = "(-(" + left + " " + op + " " + right + "))";
+    } else {
+        lastExpr_ = "(" + left + " " + op + " " + right + ")";
+    }
 }
 
 } // namespace vb6c3

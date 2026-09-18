@@ -492,3 +492,145 @@ void vb6_SavePicture(void* hBitmap, BSTR filename) {
 void vb6_LoadForm(void* hwnd) {
     (void)hwnd;
 }
+
+// ============================================================
+// Fix 105: UserControl/PropertyPage host built-in objects
+// Generated C emits UserControl.* / Ambient.* / Extender.* / PropertyPage.* as
+// bare global identifiers (e.g. vb6_UserControl_ScaleWidth); previously
+// undefined -> C2065. Provide per-process single-instance host state here;
+// multi-instance hosting is a later feature block.
+// ============================================================
+#include <windows.h>
+#include "vb6rtl_userctl.h"
+#include "vb6forms.h"
+
+// --- Font object instance (ambient font; source for control Font when unset) ---
+vb6_ComIface_Font g_vb6_UserControl_FontObj = { NULL, 8.0f, 0, 0, 0, 0, 400, 0 };
+
+// --- UserControl host state ---
+int32_t vb6_UserControl_ScaleWidth  = 0;
+int32_t vb6_UserControl_ScaleHeight = 0;
+int32_t vb6_UserControl_ScaleMode   = 1;     // Twip (VB6 default)
+void*   vb6_UserControl_hDC          = NULL;
+int32_t vb6_UserControl_ContainerHwnd = 0;
+int16_t vb6_UserControl_Enabled     = -1;
+int32_t vb6_UserControl_MousePointer = 0;
+void*   vb6_UserControl_MouseIcon   = NULL;
+int32_t vb6_UserControl_OLEDropMode = 0;
+vb6_ComIface_Font* vb6_UserControl_Font = &g_vb6_UserControl_FontObj;
+struct vb6_UserControl_Ambient_Type vb6_UserControl_Ambient = { &g_vb6_UserControl_FontObj };
+
+// --- Ambient host environment ---
+vb6_ComIface_Font* vb6_Ambient_Font = &g_vb6_UserControl_FontObj;
+int16_t vb6_Ambient_UserMode   = -1;         // compiled output is runtime
+BSTR    vb6_Ambient_DisplayName = NULL;     // set to control instance name at runtime
+int32_t vb6_Ambient_ForeColor  = 0;          // black
+int32_t vb6_Ambient_BackColor  = 0x8000000F; // BTNFACE (VB6 default)
+
+// --- Extender ---
+int32_t vb6_Extender_Left = 0;
+int32_t vb6_Extender_Top  = 0;
+
+// --- PropertyPage ---
+void*   vb6_PropertyPage_hwnd        = NULL;
+void*   vb6_PropertyPage_hWnd        = NULL;  // both spellings denote the same concept
+int32_t vb6_PropertyPage_ScaleMode   = 1;
+int32_t vb6_PropertyPage_ScaleHeight = 0;
+int16_t vb6_PropertyPage_Changed     = 0;
+
+// --- PropertyPage built-in Changed property (Fix 108d) ---
+int16_t Changed = 0;
+
+// --- Picture.Line mode constants ---
+const int32_t B  = 1;
+const int32_t BF = 2;
+
+// VB6 UserControl.TextWidth/TextHeight: measure with GDI using current Font
+// (unit = ScaleMode; simplified to pixels here; Twip handled once hosting lands)
+int32_t vb6_UserControl_TextWidth(BSTR text) {
+    if (!text) return 0;
+    HDC hdc = GetDC(NULL);
+    SIZE sz = {0, 0};
+    int len = SysStringLen(text);
+    if (hdc && len) GetTextExtentPoint32W(hdc, text, len, &sz);
+    if (hdc) ReleaseDC(NULL, hdc);
+    return sz.cx;
+}
+
+int32_t vb6_UserControl_TextHeight(BSTR text) {
+    if (!text) return 0;
+    HDC hdc = GetDC(NULL);
+    SIZE sz = {0, 0};
+    int len = SysStringLen(text);
+    if (hdc && len) GetTextExtentPoint32W(hdc, text, len, &sz);
+    if (hdc) ReleaseDC(NULL, hdc);
+    return sz.cy;
+}
+
+// UserControl.Size: VB6 `UserControl.Size width, height` (unit = ScaleMode).
+// Windowless controls take their size from the container; update host state and
+// refresh the container so ScaleWidth/ScaleHeight stay self-consistent.
+void vb6_UserControl_Size(double width, double height) {
+    if (!(width != width))  vb6_UserControl_ScaleWidth  = (int32_t)width;
+    if (!(height != height)) vb6_UserControl_ScaleHeight = (int32_t)height;
+    vb6_UserControl_Refresh();
+}
+
+// UserControl.Refresh: windowless controls have no own window; refresh the
+// most recently entered UserControl host window (see Fix 112).
+void vb6_UserControl_Refresh(void) {
+    vb6_UC_RefreshCurrent();
+}
+
+// UserControl.CancelAsyncRead: async read unimplemented, no-op.
+void vb6_UserControl_CancelAsyncRead(BSTR propName) {
+    (void)propName;
+}
+
+// Fix 111: UserControl built-in methods (declared in vb6rtl_userctl.h).
+//
+// ScaleX/ScaleY: convert x from fromScale to toScale (VB6 ScaleMode constants).
+// 96dpi baseline: Twip = 1/15 px, Point = 96/72 px, Inch = 96 px ...
+// User(0)/ContainerPosition(8)/ContainerSize(9,10)/unknown are treated as
+// pixels -- matching Charts 2020 usage (Extender.Left is already container
+// pixels; target UserControl.ScaleMode = 3 = Pixel -> identity).
+static double vb6_ucScaleToPixels(int32_t mode) {
+    switch (mode) {
+        case 1: return 1.0 / 15.0;      /* Twips */
+        case 2: return 96.0 / 72.0;     /* Points */
+        case 3: return 1.0;             /* Pixels */
+        case 4: return 1.0;             /* Characters (approx) */
+        case 5: return 96.0;            /* Inches */
+        case 6: return 96.0 / 25.4;     /* Millimeters */
+        case 7: return 96.0 / 2.54;     /* Centimeters */
+        default: return 1.0;            /* User / Container* / unknown */
+    }
+}
+
+double vb6_UserControl_ScaleX(double x, int32_t fromScale, int32_t toScale) {
+    double px = x * vb6_ucScaleToPixels(fromScale);
+    double f = vb6_ucScaleToPixels(toScale);
+    return (f == 0.0) ? x : (px / f);
+}
+
+double vb6_UserControl_ScaleY(double y, int32_t fromScale, int32_t toScale) {
+    double px = y * vb6_ucScaleToPixels(fromScale);
+    double f = vb6_ucScaleToPixels(toScale);
+    return (f == 0.0) ? y : (px / f);
+}
+
+// UserControl.AsyncRead: no container/async message pump in compiled form, so
+// real async reads are unavailable; record as no-op (symmetric with
+// CancelAsyncRead). Callers depending on UserControl_AsyncReadComplete simply
+// skip the async image load; the rest of the control is unaffected.
+void vb6_UserControl_AsyncRead(BSTR url, int32_t asyncType, BSTR propertyName,
+                               int32_t flags) {
+    (void)url; (void)asyncType; (void)propertyName; (void)flags;
+}
+
+// UserControl.PropertyChanged: notify container "property changed". No container
+// callback registry in compiled form; no-op, consistent with the built-in
+// Changed (vb6_PropertyPage_Changed / bare Changed).
+void vb6_UserControl_PropertyChanged(BSTR propName) {
+    (void)propName;
+}

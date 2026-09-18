@@ -59,6 +59,8 @@ void* vb6_GetOriginalWndProc(void* hwnd);
 void vb6_RemoveControlSubclass(void* hwnd);
 // 启动鼠标跟踪 (TrackMouseEvent封装, 用于MouseEnter/MouseLeave)
 void vb6_StartMouseTracking(void* hwnd);
+// Fix 142: forward child-control WM_COMMAND to the form WndProc
+void vb6_ForwardChildCommands(void* containerHwnd);
 
 #ifdef __cplusplus
 }

@@ -263,6 +263,15 @@ BSTR   vb6_ChrB(int32_t code);      // ChrB: single-byte string
 double  vb6_Timer(void);            // Timer: seconds since midnight (fractional)
 BSTR   vb6_StrConv(BSTR text, int32_t conversion, int32_t localeID); // StrConv
 struct vb6_SafeArray1D; // forward declaration
+// StrConv 字节数组语义 (twinbasic 兼容):
+//   vb6_StringToByteArray    : String -> Byte()，复制 BSTR 原始 UTF-16LE 内存字节
+//   vb6_StrConvToByteArray   : StrConv(s, 128/64) -> Byte()
+//                               128 (vbFromUnicode): Unicode -> 系统 ANSI/GBK 字节
+//                               64  (vbUnicode)    : 原始 BSTR 内存按 ANSI 解码后重建 UTF-16LE 字节
+//   vb6_StrConvFromByteArray : 反向, Byte() -> BSTR (供 s = StrConv(ba, vbUnicode))
+struct vb6_SafeArray1D* vb6_StringToByteArray(BSTR text);
+struct vb6_SafeArray1D* vb6_StrConvToByteArray(BSTR text, int32_t conversion, int32_t localeID);
+BSTR   vb6_StrConvFromByteArray(struct vb6_SafeArray1D* arr, int32_t conversion, int32_t localeID);
 struct vb6_SafeArray1D* vb6_Filter(struct vb6_SafeArray1D* source, BSTR match, int32_t include, int32_t compare);
 void*    vb6_StrPtr(BSTR s);          // StrPtr: address of string data
 uintptr_t vb6_ObjPtr(void* obj);       // ObjPtr: address of object

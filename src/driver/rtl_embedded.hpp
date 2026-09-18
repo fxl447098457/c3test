@@ -53,6 +53,7 @@ enum RtlResourceID {
     RTL_VB6FORMS_WIDGET_C   = 129,
     RTL_VB6FORMS_SHAPE_C    = 130,
     RTL_VB6FORMS_AXSITE_C   = 131,
+    RTL_VB6FORMS_UC_C       = 175,  // Fix 112: 工程内 UserControl 实例宿主
 
     // vb6rtl.h 按家族拆分 (2026-09-17): 伞头 + 7 个子头
     RTL_VB6RTL_BASE_H = 132,
@@ -108,9 +109,11 @@ enum RtlResourceID {
     RTL_VB6RTL_COM_C           = 173,
     RTL_VB6RTL_REGISTRY_C      = 174,
 
+    RTL_VB6RTL_USERCTL_H       = 176,  // Fix 105: UserControl/Ambient/Extender/PropertyPage 宿主
+
     // Fix 103: VB6 内建对象 Collection 的 C 实现 (IDispatch + IEnumVARIANT)
-    RTL_VB6COM_COLLECTION_C    = 175,
-    RTL_VB6COM_COLLECTION_ENUM_C = 176,
+    RTL_VB6COM_COLLECTION_C    = 177,
+    RTL_VB6COM_COLLECTION_ENUM_C = 178,
 };
 
 // Session directory manager

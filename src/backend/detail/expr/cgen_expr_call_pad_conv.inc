@@ -53,7 +53,8 @@
                 if (!actuallyPassedParams.empty() && i < actuallyPassedParams.size()) {
                     argList += actuallyPassedParams[i] ? "1" : "0";
                 } else {
-                    argList += (i < args.size()) ? "1" : "0";
+                    // Fix 142: 省略的位置实参 (node.omittedArgs) 视为未传 → _has_=0
+                    argList += (i < args.size() && !node.omittedArgs.count(i)) ? "1" : "0";
                 }
             }
         }
@@ -134,6 +135,19 @@
         // (如 CStr((int32_t)GetCurrentThreadId()) / CStr(模块级Long变量) →
         //  vb6_CStr(vb6_VariantFromValue(x)), 由 _Generic 按实参类型自动包装, 消除 C2440)
         if (callee == "vb6_CStr" && !args.empty()) {
+            // 裸 COM 取值 (vb6_ComCall/ComCallByDispid/ComGetProp) 的返回类型是 void*
+            // —— 实际指向 Windows VARIANT. 直接交给 _Generic vb6_VariantFromValue 会落到
+            // default: vb6_VariantObject, 被当成 VT_DISPATCH 对象指针, CStr 得到空串.
+            // 实测: `"B=[" & CStr(c.Item(1)) & "]"` → B=[] (c.Item 走 ComCall),
+            // 而同值的 `s = c.Item(1)` 赋值路径正常 (那条路径已自行解包).
+            // 这三个函数都返回 VARIANT*, 先经 vb6_VariantFromComResult 解成 vb6_VARIANT.
+            if (args[0].compare(0, 12, "vb6_ComCall(") == 0 ||
+                args[0].compare(0, 21, "vb6_ComCallByDispid(") == 0 ||
+                args[0].compare(0, 15, "vb6_ComGetProp(") == 0) {
+                lastExpr_ = "vb6_CStr(vb6_VariantFromValue(vb6_VariantFromComResult("
+                            + args[0] + ")))";
+                return;
+            }
             lastExpr_ = "vb6_CStr(vb6_VariantFromValue(" + args[0] + "))";
             return;
         }
@@ -374,4 +388,113 @@
             }
         }
     }
+    // Fix 108c: 内建函数实参的类型适配 (走到此处说明没有专门分支处理).
+    //  (a) 数值型内建函数收到"无类型 COM 调用结果" (vb6_ComCall → void*, 指向
+    //      VARIANT) 时先解包为数值, 否则 void* 传入 double 形参报 C2440
+    //      (Charts 2020 ucChartBar SumSerieValues: vb6_Abs(vb6_ComCall(...))).
+    //  (b) 形参为 String 的内建函数收到数值实参时按 VB6 隐式转换转 BSTR,
+    //      否则 float 传入 BSTR 形参报 C2440
+    //      (Charts 2020 ucChartArea: vb6_Replace(m_LabelsFormats, "{V}", yRange)) .
+    {
+        static const std::unordered_set<std::string> numericBuiltins108c = {
+            "vb6_Abs", "vb6_Int", "vb6_Fix", "vb6_Sgn", "vb6_Sqr", "vb6_Sin",
+            "vb6_Cos", "vb6_Tan", "vb6_Atn", "vb6_Log", "vb6_Exp", "vb6_Round",
+            "vb6_CDbl", "vb6_CSng", "vb6_CInt", "vb6_CLng", "vb6_CByte",
+            "vb6_CBool", "vb6_Hex", "vb6_Oct",
+        };
+        static const std::unordered_map<std::string, std::vector<size_t>> strArgPos108c = {
+            {"vb6_Replace",    {0, 1, 2}},
+            {"vb6_StrComp",    {0, 1}},
+            {"vb6_StrReverse", {0}},
+            {"vb6_Trim",       {0}},
+            {"vb6_LTrim",      {0}},
+            {"vb6_RTrim",      {0}},
+            {"vb6_UCase",      {0}},
+            {"vb6_LCase",      {0}},
+            {"vb6_StrConv",    {0}},
+        };
+        bool argsFixed108c = false;
+        // argList 在更早处已按 args 拼好, 其后还有"补默认参数"分支向 argList 追加
+        // (如 vb6_Replace 的 ", 1, -1, 0"). 因此不能整体重建 argList —— 只能就地把
+        // 被改写的实参文本替换掉, 否则会丢掉默认参数 (曾导致 vb6_Replace 只剩 3 参).
+        size_t searchFrom108c = 0;
+        auto replaceInArgList108c = [&](const std::string& oldVal,
+                                        const std::string& newVal) {
+            size_t p = argList.find(oldVal, searchFrom108c);
+            if (p == std::string::npos) return;
+            argList.replace(p, oldVal.size(), newVal);
+            searchFrom108c = p + newVal.size();
+        };
+        if (numericBuiltins108c.count(callee)) {
+            for (auto& a : args) {
+                if (a.compare(0, 12, "vb6_ComCall(") == 0) {
+                    std::string wrapped =
+                        "vb6_VariantToDouble(vb6_VariantFromComResult(" + a + "))";
+                    replaceInArgList108c(a, wrapped);
+                    a = wrapped;
+                    argsFixed108c = true;
+                }
+            }
+        }
+        // Fix 108c-2: vb6_Val 形参为 BSTR, 收到"无类型 COM 调用结果"
+        // (vb6_ComCall → void*, 指向 VARIANT) 时解包为字符串, 而非数值 —
+        // 若走 numericBuiltins108c 的 vb6_VariantToDouble 包裹, double 传入
+        // BSTR 形参报 C2440 (BalloonTooltips cTT.cls: Val(colTooltips(sKey))).
+        if (callee == "vb6_Val") {
+            for (auto& a : args) {
+                bool isComResult = (a.compare(0, 12, "vb6_ComCall(") == 0
+                                    || a.compare(0, 12, "vb6_ComGetProp(") == 0);
+                if (isComResult) {
+                    std::string wrapped =
+                        "vb6_VariantToString(vb6_VariantFromComResult(" + a + "))";
+                    replaceInArgList108c(a, wrapped);
+                    a = wrapped;
+                    argsFixed108c = true;
+                }
+            }
+        }
+        auto itStrPos = strArgPos108c.find(callee);
+        if (itStrPos != strArgPos108c.end()) {
+            for (size_t pos : itStrPos->second) {
+                if (pos >= args.size() || pos >= node.positional.size()) continue;
+                if (!node.positional[pos]) continue;
+                Vb6Type at108c = inferExprType(*node.positional[pos]);
+                if (at108c != Vb6Type::Single && at108c != Vb6Type::Double &&
+                    at108c != Vb6Type::Long && at108c != Vb6Type::Integer &&
+                    at108c != Vb6Type::Currency && at108c != Vb6Type::Decimal &&
+                    at108c != Vb6Type::Boolean) {
+                    continue;  // 已是字符串/对象等, 不介入
+                }
+                if (args[pos].find("vb6_CStr") != std::string::npos) continue;
+                std::string wrapped108c;
+                if (at108c == Vb6Type::Long || at108c == Vb6Type::Integer ||
+                    at108c == Vb6Type::Boolean) {
+                    wrapped108c = "vb6_CStrLong((int32_t)(" + args[pos] + "))";
+                } else {
+                    wrapped108c = "vb6_CStrDbl((double)(" + args[pos] + "))";
+                }
+                replaceInArgList108c(args[pos], wrapped108c);
+                args[pos] = wrapped108c;
+                argsFixed108c = true;
+            }
+        }
+
+        // Fix 108c-3: vb6_ObjPtr(ifaceVar) — 接口引用是值结构体, 不能直接作为
+        // uintptr_t 实参 (C2172). 对象指针位于 .obj 字段: 改写为 (<var>).obj.
+        // mdlSubclass.bas: vb6_ObjPtr(Subclass) → vb6_ObjPtr((Subclass).obj).
+        // 仅精确匹配裸接口变量名, 不触碰其它形式 (LongPtr 变量等走别处转换).
+        if (callee == "vb6_ObjPtr" && !args.empty() && !node.positional.empty()
+            && node.positional[0] && node.positional[0]->kind == ASTNodeKind::IdentifierExpr) {
+            std::string aLower = args[0];
+            std::transform(aLower.begin(), aLower.end(), aLower.begin(), ::tolower);
+            if (knownIfaceVars_.count(aLower)) {
+                std::string newVal = "(" + args[0] + ").obj";
+                replaceInArgList108c(args[0], newVal);
+                args[0] = newVal;
+                argsFixed108c = true;
+            }
+        }
+        (void)argsFixed108c;
+    }
+
     lastExpr_ = callee + "(" + argList + ")";

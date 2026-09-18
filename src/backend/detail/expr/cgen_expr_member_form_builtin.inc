@@ -158,6 +158,55 @@
             // P7.5: 非数组控件属性读取
             auto itCtrl = knownFormControls_.find(objLower);
             if (itCtrl != knownFormControls_.end()) {
+                // Fix 112: 工程内 UserControl 子控件 → 类成员直接调用.
+                // `ucChartBar1.AddSerie(Value)` 此前落 COM 晚绑定
+                // `vb6_ComCall(vb6_hwnd_ucChartBar1, L"AddSerie", ...)`, 而 HWND 不是
+                // IDispatch. 这里按 .ctl 模块解析成员, this 取宿主窗口的实例.
+                auto itUC = knownUserControlCtrlVars_.find(objLower);
+                if (itUC != knownUserControlCtrlVars_.end()) {
+                    std::string resolvedFn = resolveClassMemberCall(itUC->second, node.memberName);
+                    if (!resolvedFn.empty()) {
+                        std::string hwndArg = makeCtrlHwndArg(objLower, itCtrl->second);
+                        std::string thisArg =
+                            "(vb6_cls_" + cIdent(itUC->second) + "*)vb6_UC_InstanceOf(" + hwndArg + ")";
+                        if (asCallCallee_) {
+                            pendingChainObj_ = thisArg;
+                            lastExpr_ = resolvedFn;
+                        } else {
+                            // 值上下文无括号调用: 按形参表补 Optional 默认值 (同 Fix 089h)
+                            std::vector<ParameterInfo> paramsUC;
+                            bool isBuiltinUC = false;
+                            if (resolvedFn.find("_prop_") == std::string::npos
+                                && findClassMemberCallParams(itUC->second, node.memberName,
+                                                             paramsUC, isBuiltinUC)
+                                && !paramsUC.empty() && !isBuiltinUC) {
+                                std::string argListUC = thisArg;
+                                for (size_t i = 0; i < paramsUC.size(); i++) {
+                                    const auto& pm = paramsUC[i];
+                                    argListUC += ", ";
+                                    std::string defV = (pm.hasDefaultValue && !pm.defaultValueExpr.empty())
+                                                     ? pm.defaultValueExpr : defaultValue(pm.type);
+                                    if (pm.isByVal) argListUC += defV;
+                                    else {
+                                        std::string ct = mapType(pm.type);
+                                        if (pm.type == Vb6Type::Variant || pm.type == Vb6Type::Empty
+                                            || pm.type == Vb6Type::Null || pm.type == Vb6Type::Object)
+                                            argListUC += "&(" + ct + "){0}";
+                                        else argListUC += "&(" + ct + "){" + defV + "}";
+                                    }
+                                }
+                                for (size_t i = 0; i < paramsUC.size(); i++) {
+                                    if (paramsUC[i].isOptional && !paramsUC[i].isParamArray)
+                                        argListUC += ", 0";
+                                }
+                                lastExpr_ = resolvedFn + "(" + argListUC + ")";
+                            } else {
+                                lastExpr_ = resolvedFn + "(" + thisArg + ")";
+                            }
+                        }
+                        return;
+                    }
+                }
                 std::string readFn = getControlPropReadFn(itCtrl->second, node.memberName);
                 if (!readFn.empty()) {
                     lastExpr_ = readFn + "(" + makeCtrlHwndArg(objLower, itCtrl->second) + ")  /* ctrl prop read */";

@@ -375,3 +375,15 @@ intptr_t __stdcall vb6_di_WaitForSingleObject(intptr_t hHandle, intptr_t dwMilli
 intptr_t __stdcall vb6_di_WriteFile(intptr_t hFile, void* lpBuffer, intptr_t nNumberOfBytesToWrite, int32_t* lpNumberOfBytesWritten, intptr_t lpOverlapped) {
     return ((intptr_t (WINAPI *)(intptr_t, void*, intptr_t, int32_t*, intptr_t))WriteFile)(hFile, lpBuffer, nNumberOfBytesToWrite, lpNumberOfBytesWritten, lpOverlapped);
 }
+
+intptr_t __stdcall vb6_di_MulDiv(intptr_t nNumber, intptr_t nNumerator, intptr_t nDenominator) {
+    return ((intptr_t (WINAPI *)(intptr_t, intptr_t, intptr_t))MulDiv)(nNumber, nNumerator, nDenominator);
+}
+
+/* OleTranslateColor */
+
+intptr_t __stdcall vb6_di_TlsGetValue(intptr_t dwTlsIndex) {
+    return (intptr_t)TlsGetValue((DWORD)dwTlsIndex);
+}
+
+

@@ -7,6 +7,7 @@
 #include "semantics/semantic_analyzer.hpp"
 #include <iostream>
 #include <algorithm>
+#include <functional>
 #include <unordered_set>
 
 namespace vb6c3 {
@@ -291,7 +292,10 @@ bool Driver::runSemanticAnalysis(const CompileOptions& options) {
         if (frmIt != frmFiles_.end()) {
             const auto& frmDesc = frmIt->second.form;
             // 注册窗体名本身 (Form1.Caption 访问)
-            {
+            // Fix 110: 仅 .frm 需要 — .ctl/.pag 的模块名已经是 Class 符号,
+            // 再定义为 Object 变量会把类符号覆盖掉 (Dim x As New ucChartArea
+            // 随之退化为 Object/void*, 方法调用全部变成 COM 晚绑定).
+            if (module->isFormModule) {
                 auto sym = std::make_unique<Symbol>(
                     SymbolKind::Variable, module->moduleName, Vb6Type::Object,
                     SourceLocation{}, AccessLevel::Public);
@@ -299,17 +303,35 @@ bool Driver::runSemanticAnalysis(const CompileOptions& options) {
                 analyzer->symbolTable().define(std::move(sym));
             }
             // 注册控件名 (去重: 控件数组只注册一次)
+            // Fix 110: 递归注册嵌套控件 (Frame 内的子控件也要注册).
             std::unordered_set<std::string> registeredCtrls;
+            std::function<void(const FrmControl&)> registerCtrlsRec =
+                [&](const FrmControl& ctrl) {
+                    std::string ctrlLower = ctrl.controlName;
+                    for (auto& c : ctrlLower) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+                    if (!ctrlLower.empty() && registeredCtrls.insert(ctrlLower).second) {
+                        // Fix 110: 已存在的同名类型符号 (工程类/UDT/COM 类, 如
+                        // PropertyPage 上的 LabelPlus1 与工程类同名) 不覆盖 —
+                        // 否则类符号被 Object 变量顶掉, 方法调用退化为 COM 晚绑定.
+                        Symbol* exist = analyzer->symbolTable().lookupModule(ctrl.controlName);
+                        const bool isTypeSym = exist &&
+                            (exist->kind == SymbolKind::Class ||
+                             exist->kind == SymbolKind::UserDefinedType ||
+                             exist->kind == SymbolKind::EnumType ||
+                             exist->kind == SymbolKind::ComClass ||
+                             exist->kind == SymbolKind::ComInterface);
+                        if (!isTypeSym) {
+                            auto sym = std::make_unique<Symbol>(
+                                SymbolKind::Variable, ctrl.controlName, Vb6Type::Object,
+                                SourceLocation{}, AccessLevel::Public);
+                            sym->isBuiltin = true;
+                            analyzer->symbolTable().define(std::move(sym));
+                        }
+                    }
+                    for (const auto& child : ctrl.children) registerCtrlsRec(child);
+                };
             for (const auto& ctrl : frmDesc.formControl.children) {
-                std::string ctrlLower = ctrl.controlName;
-                for (auto& c : ctrlLower) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-                if (registeredCtrls.count(ctrlLower)) continue;
-                registeredCtrls.insert(ctrlLower);
-                auto sym = std::make_unique<Symbol>(
-                    SymbolKind::Variable, ctrl.controlName, Vb6Type::Object,
-                    SourceLocation{}, AccessLevel::Public);
-                sym->isBuiltin = true;
-                analyzer->symbolTable().define(std::move(sym));
+                registerCtrlsRec(ctrl);
             }
         }
 

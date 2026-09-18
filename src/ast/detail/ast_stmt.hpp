@@ -326,6 +326,16 @@ public:
     };
     std::vector<Dimension> dimensions;
     TypeRefPtr asType;  // As Type (可为nullptr)
+    // Fix 100: 「带下标的成员链」目标 (ReDim 语句本体的左值).
+    // 仅当目标是 UDT 数组元素的数组成员等复杂形态时非空, 例:
+    //   ReDim m_Serie(i).PT(n)  → targetExpr = m_Serie(i).PT, varName = "m_Serie",
+    //                             dimensions = {n}
+    //   ReDim obj.List(j).Buf(n) → targetExpr = obj.List(j).Buf, varName = "obj.List"
+    // 为 nullptr 时沿用 varName 字符串展开 (原路径, 覆盖 ReDim x()/obj.field()/
+    // With 块 .field()/ByRef UDT 参数 arr.Field() 等).
+    // 后端用 emitExpr(*targetExpr) 发射左值 → VB6_SA_AT(...).Field, 元素类型由
+    // 末段成员的 UDT 成员信息解析 (cgen_redim.cpp resolveReDimComplexElemType).
+    ExprPtr targetExpr;
 
     ReDimStmt(SourceLocation loc, bool pres, std::string var,
               std::vector<Dimension> dims, TypeRefPtr type)

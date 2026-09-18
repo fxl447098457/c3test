@@ -176,9 +176,9 @@
             // 有参数: obj.Method(args) → vb6_ComCall(obj, L"Method", variantArgs, argc)
             // Fix 104: 省略实参必须在该形参位置传 VT_ERROR/DISP_E_PARAMNOTFOUND, 否则后续
             // 实参前移 (c.Add "x", , , 1 的 1 会被当成第 2 个形参 Key 而非第 4 个 After).
-            // 两种来源:
-            //   (a) 带括号调用 obj.M(a, , c) —— positional 内是 LiteralKind::Missing 占位;
-            //   (b) 无括号调用 obj.M a, , c —— positional 只装真实实参, omittedArgs 记形参位置.
+            // 解析器 (Fix 142 口径) 为每个形参位置保留槽位, 并把省略位下标记入 omittedArgs
+            // (带括号 obj.M(a, , c) 与无括号 obj.M a, , c 两条路径一致),
+            // 故这里只需按 positional 下标对齐形参表, 省略位补 vb6_ComPackMissing().
             std::vector<std::string> packedArgs;
             auto emitComArg = [&](const ExprPtr& argExpr) {
                 std::string packFn = comPackExpr(*argExpr);
@@ -186,28 +186,12 @@
                 { std::string resolved = resolveComMarkerForPack(packFn); if (!resolved.empty()) lastExpr_ = resolved; }
                 packedArgs.push_back(packFn + "(" + lastExpr_ + ")");
             };
-            auto isOmittedArg = [](const ExprPtr& e) -> bool {
-                if (!e || e->kind != ASTNodeKind::LiteralExpr) return false;
-                return static_cast<const LiteralExpr&>(*e).literalKind == LiteralKind::Missing;
-            };
-            if (!node.omittedArgs.empty()) {
-                size_t next = 0;
-                size_t slots = node.positional.size() + node.omittedArgs.size();
-                for (size_t pos = 0; pos < slots; pos++) {
-                    if (node.omittedArgs.count(pos)) {
-                        packedArgs.push_back("vb6_ComPackMissing()");
-                    } else if (next < node.positional.size()) {
-                        emitComArg(node.positional[next++]);
-                    }
+            for (size_t pos = 0; pos < node.positional.size(); pos++) {
+                if (node.omittedArgs.count(pos)) {
+                    packedArgs.push_back("vb6_ComPackMissing()");
+                    continue;
                 }
-            } else {
-                for (size_t i = 0; i < node.positional.size(); i++) {
-                    if (isOmittedArg(node.positional[i])) {
-                        packedArgs.push_back("vb6_ComPackMissing()");  // 形式 (a)
-                        continue;
-                    }
-                    emitComArg(node.positional[i]);
-                }
+                emitComArg(node.positional[pos]);
             }
             for (auto& named : node.named) {
                 emitComArg(named.value);

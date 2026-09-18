@@ -103,6 +103,13 @@ void CCodeGen::visit(VariableDecl& node) {
         } else {
             c_.emitLine("static " + cType + " " + cName + " = NULL;");
         }
+        // Fix 092w: Dim arr() As Byte = <初始化表达式> (twinbasic 兼容) — 文件作用域
+        // 必须用常量初始化 (C2099), 故声明为 NULL, 初始化表达式放到模块初始化函数中,
+        // 与 Fix 054 静态数组的 moduleInitStmts_ 模式一致.
+        if (node.initializer && elemType == Vb6Type::Byte) {
+            emitExpr(*node.initializer);
+            moduleInitStmts_.push_back(cName + " = " + rewriteByteArrayValue(lastExpr_) + ";");
+        }
         } // end if (!trackOnly_)
 
         // 注册到已知数组集合
@@ -146,6 +153,19 @@ void CCodeGen::visit(VariableDecl& node) {
             // P6.5: WithEvents变量 → 注册到 knownWithEventsVars_
             if (node.isWithEvents) {
                 knownWithEventsVars_[lower] = clsSym->name;
+            }
+        }
+        // As New 内建宿主类 Collection: 无 Class 符号, 但需按 VB6 语义惰性实例化
+        // (否则 colTooltips 恒为 NULL, On Error Resume Next + Err 的
+        //  "集合项是否存在" 判断全部走错分支)。
+        if (node.isNew) {
+            std::string tn = simple.name;
+            std::transform(tn.begin(), tn.end(), tn.begin(), ::tolower);
+            if (tn == "collection") {
+                std::string lower = node.name;
+                std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+                knownNewVars_[lower] = "Collection";
+                moduleNewVars_[lower] = "Collection";
             }
         }
     }

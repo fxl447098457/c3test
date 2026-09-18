@@ -48,6 +48,13 @@ Vb6Type TypeSystem::resolveTypeName(const std::string& name) const {
     if (lower.size() > 4 && lower.compare(lower.size() - 4, 4, "enum") == 0) {
         return Vb6Type::Long;
     }
+    // Fix 098: VB6 标准库枚举 (XxxConstants, 如 ColorConstants/ScaleModeConstants/
+    // KeyCodeConstants) 的底层类型是 Long。若视为 Unknown 会退化成 Variant,
+    // 使 `Optional lColor As ColorConstants = -1` 生成 Variant** 参数并把指针
+    // 当作 COLORREF 传给 TTM_SETTIPBKCOLOR/TTM_SETTIPTEXTCOLOR → 控件全黑。
+    if (lower.size() > 9 && lower.compare(lower.size() - 9, 9, "constants") == 0) {
+        return Vb6Type::Long;
+    }
     // Fix 050b: VB6 类型别名 — 这些类型在 mapTypeRef() 中被映射为 int32_t,
     // 但 resolveTypeName() 返回 Unknown, 导致 resolveTypeRef() 回退到 Variant,
     // 与代码生成器的 int32_t 不一致, 产生 vb6_VARIANT→int32_t C2440 错误。

@@ -127,6 +127,30 @@ static inline vb6_VARIANT vb6_VariantIdentity(vb6_VARIANT v) { return v; }
 //   用途: 当 C3 的 inferExprType 把标量/LenB(...)误判为 Variant 时,
 //         temp 变量声明 "vb6_VARIANT _vcmp_N = scalar;" 会触发 C2440.
 //         改用 vb6_VariantFromValue(scalar) 让编译器按实类型自动包装, 消除 C2440.
+#ifdef _MSC_VER
+// Fix 092u: MSVC 中 char 默认等价于 signed char, _Generic 关联列表同时出现
+// char:/signed char: 被视为重复关联 (error C7700, "char 与之前的 char 不兼容").
+// MSVC 下仅保留 char: (已覆盖 signed char); 其他编译器保留标准的三态区分.
+#define vb6_VariantFromValue(x) _Generic((x), \
+    _Bool:                vb6_VariantBool, \
+    char:                 vb6_VariantLong, \
+    unsigned char:        vb6_VariantByte, \
+    short:                vb6_VariantInt, \
+    int:                  vb6_VariantLong, \
+    unsigned int:         vb6_VariantLong, \
+    long:                 vb6_VariantLong, \
+    unsigned long:        vb6_VariantLong, \
+    long long:            vb6_VariantLong, \
+    unsigned long long:   vb6_VariantLong, \
+    wchar_t:              vb6_VariantLong, \
+    float:                vb6_VariantDouble, \
+    double:               vb6_VariantDouble, \
+    wchar_t*:             vb6_VariantString, \
+    struct vb6_SafeArray1D*: vb6_VariantArray, \
+    vb6_VARIANT:          vb6_VariantIdentity, \
+    default:              vb6_VariantObject \
+)((x))
+#else
 #define vb6_VariantFromValue(x) _Generic((x), \
     _Bool:                vb6_VariantBool, \
     char:                 vb6_VariantLong, \
@@ -147,6 +171,7 @@ static inline vb6_VARIANT vb6_VariantIdentity(vb6_VARIANT v) { return v; }
     vb6_VARIANT:          vb6_VariantIdentity, \
     default:              vb6_VariantObject \
 )((x))
+#endif
 
 // Index into a Variant that holds an array -- returns element as vb6_VARIANT
 vb6_VARIANT vb6_VariantArrayGet(vb6_VARIANT* v, int32_t index);
@@ -159,6 +184,9 @@ vb6_VARIANT vb6_VariantArrayGetVal(vb6_VARIANT v, int32_t index);
 
 // Variant转基本类型
 int32_t vb6_VariantToLong(vb6_VARIANT v);
+// Variant → LongPtr (指针/句柄语义): 与 vb6_VariantToLong 数值提取一致,
+// 但返回 intptr_t, 避免 x64 下 64 位句柄/指针被截断.
+intptr_t vb6_VariantToLongPtr(vb6_VARIANT v);
 // Fix 093a: Variant → Boolean (CBool 语义). 调用点 (ToolsJsonVba 等) 依赖符号名
 // vb6_VariantToBool; 此前缺失 → LNK2019.
 int16_t vb6_VariantToBool(vb6_VARIANT v);

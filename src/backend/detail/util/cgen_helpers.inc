@@ -108,6 +108,18 @@
     // P20-36: 生成控件属性访问的HWND参数 (Menu控件用GetMenu+menuId)
     std::string makeCtrlHwndArg(const std::string& ctrlNameLower, FrmControlType ctrlType) const;
 
+    // 应用 .frm 设计期样式属性 (BorderStyle / Alignment)。顶层控件与容器子控件共用，
+    // hwndExpr 为控件句柄表达式 (如 "vb6_hwnd_Foo")。
+    void emitDesignerStyleProps(const FrmControl& ctrl, const std::string& hwndExpr);
+
+    // 返回控件类型相关的 Win32 样式位 (BS_*/SS_*/ES_*/CBS_*/LBS_*/WS_BORDER...)。
+    // 顶层控件与容器(Frame/PictureBox)子控件必须使用同一套逻辑，否则子控件缺
+    // SS_NOTIFY/BS_GROUPBOX 等样式会导致外观/交互 (含 tooltip) 异常。
+    long controlTypeStyleBits(const FrmControl& ctrl) const;
+
+    // VB6 PictureBox/Image 的 STATIC 控件不显示 Caption (标题在创建时应清空)。
+    bool controlTypeClearsCaption(const FrmControl& ctrl) const;
+
     // P11.7: 返回控件类型的默认属性名 (如 TextBox->"Text", Label->"Caption")
     // 空字符串表示该控件类型无默认属性
     static const char* getDefaultPropertyName(FrmControlType ctrlType);
@@ -382,3 +394,21 @@
     Vb6Type resolveArrayElemType(ASTNode* typeRef) const;
     // Fix 055: 从ArrayTypeRef获取UDT元素C类型名 (如"vb6_type_RECT"), 非UDT返回空串
     std::string resolveArrayUdtElemCType(ASTNode* typeRef) const;
+
+    // Fix 100: ReDim complex target (member chain with subscript)
+    void emitReDimComplexTarget(ReDimStmt& node);
+    // Fix 100: resolve element type of a complex ReDim target
+    void resolveReDimComplexElemType(const ReDimStmt& node, Vb6Type& outType,
+                                     std::string& outUdtCType) const;
+    // P6.4+: class-module default instance singleton
+    void emitClassDefaultInstance(Module& module);
+    // Fix 110: emit symbol support for .ctl/.pag designer sub-controls
+    void emitDesignerControlDecls(const FrmFormDesc& frmDesc);
+    // Fix 110: recursively emit designer control handle/array/COM declarations
+    void emitControlHandleDecls(const FrmFormDesc& frmDesc);
+    // Fix 107: lookup type-category symbol (Class/UDT/Enum/COM), ignoring proc/var
+    Symbol* lookupTypeSymbol(const std::string& name) const;
+    // Fix 112: find .ctl designer spec by control type name
+    const FrmFile* findUserControlSpec(const std::string& controlTypeName) const;
+    // Fix 092w: rewrite RHS assigned to a Byte array into byte-array semantics
+    std::string rewriteByteArrayValue(const std::string& value) const;

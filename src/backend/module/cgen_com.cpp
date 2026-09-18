@@ -126,6 +126,27 @@ void CCodeGen::emitClassFactory(Module& module) {
     c_.emitLine("}");
 }
 
+// P6.4+: 类模块默认实例 (VB_PredeclaredId=True) 惰性单例访问器.
+// VB6 为 PredeclaredId 类生成隐藏的全局默认实例, frm 里裸类名成员访问经过
+// knownClassVars_ 解析, 对象表达式生成 vb6_cls_X_Default() 调用. 这里生成:
+//   static vb6_cls_cTT* g_p_vb6_cls_cTT_Default = NULL;
+//   vb6_cls_cTT* vb6_cls_cTT_Default(void) { ... _New() on demand ... }
+void CCodeGen::emitClassDefaultInstance(Module& module) {
+    if (defaultInstanceClassName(moduleName_).empty()) return;
+    std::string clsStruct = "vb6_cls_" + cIdent(moduleName_);
+    c_.emitBlank();
+    c_.emitLine("// 默认实例 (VB_PredeclaredId=True): 惰性创建共享单例");
+    c_.emitLine("static " + clsStruct + "* g_p_" + clsStruct + "_Default = NULL;");
+    c_.emitLine(clsStruct + "* " + clsStruct + "_Default(void) {");
+    c_.indent();
+    c_.emitLine("if (!g_p_" + clsStruct + "_Default)");
+    c_.emitLine("    g_p_" + clsStruct + "_Default = " + clsStruct + "_New();");
+    c_.emitLine("return g_p_" + clsStruct + "_Default;");
+    c_.dedent();
+    c_.emitLine("}");
+    c_.emitBlank();
+}
+
 // ============================================================
 // Fix 099: Public 字段的 COM 读写访问器 (ActiveX DLL)
 // ============================================================

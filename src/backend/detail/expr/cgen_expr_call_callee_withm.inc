@@ -58,6 +58,70 @@
         }
     }
 
+    // Fix 110b: 控件数组元素默认属性读取 — VB6 里 `TxtARGB(0)` 等价于
+    // `TxtARGB(0).Text` (TextBox 控件数组元素的默认属性).
+    // 不处理时 callee 的 IdentifierExpr 会先展开成默认属性读取
+    // `vb6_GetControlText(vb6_hwnd_TxtARGB)`, 再被拼上 `(0)` →
+    // `vb6_GetControlText(vb6_hwnd_TxtARGB)(0)` (C2064 / C2106).
+    if (node.callee && node.callee->kind == ASTNodeKind::IdentifierExpr
+        && !node.positional.empty()) {
+        auto& caId110 = static_cast<IdentifierExpr&>(*node.callee);
+        std::string caLower110 = caId110.name;
+        std::transform(caLower110.begin(), caLower110.end(), caLower110.begin(), ::tolower);
+        if (knownControlArrays_.count(caLower110)) {
+            auto itCtrl110 = knownFormControls_.find(caLower110);
+            if (itCtrl110 != knownFormControls_.end()) {
+                const char* defProp110 = getDefaultPropertyName(itCtrl110->second);
+                std::string readFn110 = defProp110
+                    ? getControlPropReadFn(itCtrl110->second, defProp110) : std::string();
+                if (!readFn110.empty()) {
+                    emitExpr(*node.positional[0]);
+                    std::string idxArg110 = std::move(lastExpr_);
+                    std::string orig110 = knownFormControlOriginalNames_.count(caLower110)
+                        ? knownFormControlOriginalNames_[caLower110] : caId110.name;
+                    lastExpr_ = readFn110 + "(vb6_CtrlArr_GetAt(&vb6_arr_" + cIdent(orig110)
+                              + ", " + idxArg110 + "))  /* ctrl array default prop */";
+                    return;
+                }
+            }
+        }
+    }
+
+    // P13.3b: 控件可索引属性读取 — cmbBalloonTooltip.List(0) / .Selected(0) / .ItemData(0).
+    // callee 是 MemberAccessExpr(控件, 属性) 且带索引实参时, RTL 读函数需要 hwnd + idx
+    // 两个实参; 若走通用路径, 先发 vb6_GetListItem(vb6_hwnd_X) 再拼 (0) →
+    // vb6_GetListItem(hwnd)(0) (C2064 把索引当函数调用). 与 Fix 110b 控件数组
+    // 默认属性读取同位拦截: 直接生成 vb6_GetListItem((void*)vb6_hwnd_X, idx).
+    if (node.callee && node.callee->kind == ASTNodeKind::MemberAccessExpr
+        && !node.positional.empty()) {
+        auto& maC131 = static_cast<MemberAccessExpr&>(*node.callee);
+        if (maC131.object && maC131.object->kind == ASTNodeKind::IdentifierExpr) {
+            auto& mcId131 = static_cast<IdentifierExpr&>(*maC131.object);
+            std::string mcLower131 = mcId131.name;
+            std::transform(mcLower131.begin(), mcLower131.end(), mcLower131.begin(), ::tolower);
+            auto itCtrl131 = knownFormControls_.find(mcLower131);
+            if (itCtrl131 != knownFormControls_.end()
+                && (itCtrl131->second == FrmControlType::ListBox
+                    || itCtrl131->second == FrmControlType::ComboBox)) {
+                std::string prop131 = maC131.memberName;
+                std::transform(prop131.begin(), prop131.end(), prop131.begin(), ::tolower);
+                const char* fn131 = nullptr;
+                if (prop131 == "list") fn131 = "vb6_GetListItem";
+                else if (prop131 == "selected") fn131 = "vb6_GetSelected";
+                else if (prop131 == "itemdata") fn131 = "vb6_GetItemData";
+                if (fn131) {
+                    std::string orig131 = knownFormControlOriginalNames_.count(mcLower131)
+                        ? knownFormControlOriginalNames_[mcLower131] : mcId131.name;
+                    emitExpr(*node.positional[0]);
+                    std::string idx131 = std::move(lastExpr_);
+                    lastExpr_ = std::string(fn131) + "((void*)vb6_hwnd_" + cIdent(orig131)
+                              + ", " + idx131 + ")  /* indexed ctrl prop */";
+                    return;
+                }
+            }
+        }
+    }
+
     // M22: 设置asCallCallee_标志, 让IdentifierExpr知道当前是函数调用callee上下文
     // 这确保递归调用时(如 Factorial(n-1))返回函数名而非返回值变量
     // Fix 015: 加 save/restore. 原代码硬编码 `asCallCallee_=false` 会丢失嵌套 callee

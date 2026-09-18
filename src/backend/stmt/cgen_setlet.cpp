@@ -141,7 +141,8 @@ void CCodeGen::visit(LetStmt& node) {
             auto& idExpr = static_cast<IdentifierExpr&>(*node.target);
             std::string lower = idExpr.name;
             std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
-            if (knownLongVars_.count(lower)) unpackHint = "Long";
+            if (knownLongPtrVars_.count(lower)) unpackHint = "LongPtr";
+            else if (knownLongVars_.count(lower)) unpackHint = "Long";
             else if (knownDoubleVars_.count(lower)) unpackHint = "Double";
             else if (knownObjectVars_.count(lower)) unpackHint = "Object";
             else if (knownBstrVars_.count(lower)) unpackHint = "BSTR";

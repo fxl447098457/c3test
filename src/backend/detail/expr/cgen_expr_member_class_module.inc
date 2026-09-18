@@ -6,6 +6,10 @@
             // Fix 010r-10: 使用map查找, 可获取类名用于方法分发
             // Fix 011r-1: 当obj在knownClassVars_中时, 优先用resolveClassMemberCall
             // 精确解析该类的方法/属性, 避免memSym捡错模块的同类同名方法/属性
+            // P6.4+: 类模块默认实例 (VB_PredeclaredId=True) 的裸类名 (cTT.CreateToolTip
+            // / cTT.EnableTooltips(...) 在 frm 里) — 注册为"类实例变量"并按类精确
+            // 解析成员 (注入 me 首参与类型化形参), 对象表达式用 vb6_cls_X_Default().
+            std::string defaultInstCls = registerDefaultInstanceClass(objLower);
             auto itClassVar = knownClassVars_.find(objLower);
             if (itClassVar == knownClassVars_.end() && node.object) {
                 // Fix 090al: 链式对象 (Db.Sql(s).Param(p).QueryParam) 或局部类变量
@@ -21,8 +25,13 @@
                 // 用对象的真实类名查找方法, 防止跨模块同名冲突
                 std::string resolvedFn = resolveClassMemberCall(itClassVar->second, node.memberName);
                 if (!resolvedFn.empty()) {
-                    emitExpr(*node.object);
-                    std::string objExpr = std::move(lastExpr_);
+                    std::string objExpr;
+                    if (!defaultInstCls.empty()) {
+                        objExpr = "vb6_cls_" + cIdent(defaultInstCls) + "_Default()";
+                    } else {
+                        emitExpr(*node.object);
+                        objExpr = std::move(lastExpr_);
+                    }
                     // Fix 089h: 值上下文无括号方法引用 (Trim(FileStream.ReadLine)
                     // → vb6_cToolsStream_ReadLine(me->FileStream) 只发 this) —
                     // C2198 参数太少. 补默认参数 (Optional/必选), 与链式值上下文

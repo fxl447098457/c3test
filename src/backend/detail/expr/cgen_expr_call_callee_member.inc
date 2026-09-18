@@ -166,7 +166,7 @@
                                         std::vector<std::string> packedArgs;
                                         for (size_t i = 0; i < node.positional.size(); i++) {
                                             std::string packFn = comPackExpr(*node.positional[i]);
-                                            emitExpr(*node.positional[i]);
+
                                             { std::string resolved = resolveComMarkerForPack(packFn);
                                               if (!resolved.empty()) lastExpr_ = resolved; }
                                             packedArgs.push_back(packFn + "(" + lastExpr_ + ")");

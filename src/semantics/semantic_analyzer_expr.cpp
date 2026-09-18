@@ -110,8 +110,6 @@ void SemanticAnalyzer::visit(LiteralExpr& node) {
         case LiteralKind::Nothing:  lastExprType_ = Vb6Type::Object; break;
         case LiteralKind::Empty:    lastExprType_ = Vb6Type::Empty; break;
         case LiteralKind::Null:     lastExprType_ = Vb6Type::Null; break;
-        // Fix 104: 省略实参占位 — 按 Variant 处理 (COM 调用会传 VT_ERROR/DISP_E_PARAMNOTFOUND)
-        case LiteralKind::Missing:  lastExprType_ = Vb6Type::Variant; break;
     }
 }
 

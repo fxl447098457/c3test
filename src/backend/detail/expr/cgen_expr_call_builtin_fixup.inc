@@ -288,6 +288,26 @@
         }
     }
 
+    // Fix 110l: InputBox(prompt[, title[, default[, xpos[, ypos[, helpfile[, context]]]]]]])
+    // RTL: vb6_InputBox(prompt, title, defaultstr, xpos, ypos, helpfile, context) — 7 参.
+    // VB6 允许只写前 1~3 个实参 (Charts 2020 ppProgressCircular.pag 351:
+    //   InputBox("...", , 100) → vb6_InputBox(prompt, 0L, 100) → C2198 参数太少).
+    if (callee == "vb6_InputBox") {
+        static const char* kInputBoxDefaults[7] = {
+            nullptr,                 // prompt (必填)
+            "vb6_BSTR_Empty()",      // title
+            "vb6_BSTR_Empty()",      // defaultstr
+            "0",                     // xpos
+            "0",                     // ypos
+            "vb6_BSTR_Empty()",      // helpfile
+            "0",                     // context
+        };
+        for (size_t i = args.size(); i < 7; i++) {
+            argList += ", ";
+            argList += kInputBoxDefaults[i];
+        }
+    }
+
     // P21-10: FormatDateTime(date[, namedFormat]) - default namedFormat=0 (vbGeneralDate)
     if (callee == "vb6_FormatDateTime") {
         if (args.size() == 1) {
@@ -348,6 +368,22 @@
             args.push_back("-1");  // -1 = vbUseDefault for optional args
             if (!argList.empty()) argList += ", ";
             argList += "-1";
+        }
+    }
+    // Fix 092w: StrConv(Byte数组, vbUnicode) → vb6_StrConvFromByteArray
+    // 反向转换: Byte() -> String. 第一实参为已知 Byte 数组变量 (vb6_SafeArray1D*)
+    // 时, RTL vb6_StrConv 期望 BSTR 会类型不匹配; 改用返回 BSTR 的 helper.
+    if (callee == "vb6_StrConv" && !args.empty()) {
+        std::string arg0name = args[0];
+        if (arg0name.compare(0, 4, "me->") == 0) arg0name = arg0name.substr(4);
+        if (arg0name.size() > 4 && arg0name[0] == '(' && arg0name[1] == '*'
+            && arg0name.back() == ')') {
+            arg0name = arg0name.substr(2, arg0name.size() - 3);
+        }
+        std::string lower = arg0name;
+        std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+        if (knownByteArrayVars_.count(lower)) {
+            callee = "vb6_StrConvFromByteArray";
         }
     }
     // Fix 034: Builtin RTL functions with Optional params — pad to required C RTL arg count.

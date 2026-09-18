@@ -3,6 +3,30 @@
 // 内容 = 原文件第 1771~2136 行，逐行未改。
 
     for (size_t i = 0; i < node.positional.size(); i++) {
+        // Fix 142: 省略的位置实参 (VB6 Foo a, , c) — 按形参缺省值填充, 不发射
+        // 占位表达式 (占位 0/Empty 会覆盖缺省值, 且 _has_ 标志会被误判为已传).
+        if (!calleeIsBuiltin && !calleeIsDeclare && i < calleeParams.size()
+            && node.omittedArgs.count(i)) {
+            const auto& op142 = calleeParams[i];
+            std::string odefVal142;
+            if (op142.hasDefaultValue && !op142.defaultValueExpr.empty()) {
+                odefVal142 = op142.defaultValueExpr;
+            } else {
+                odefVal142 = defaultValue(op142.type);
+            }
+            if (op142.isByVal || op142.isParamArray) {
+                args.push_back(odefVal142);
+            } else {
+                std::string ocType142 = mapType(op142.type);
+                if (op142.type == Vb6Type::Variant || op142.type == Vb6Type::Empty
+                    || op142.type == Vb6Type::Null || op142.type == Vb6Type::Object) {
+                    args.push_back("&(" + ocType142 + "){0}");
+                } else {
+                    args.push_back("&(" + ocType142 + "){" + odefVal142 + "}");
+                }
+            }
+            continue;
+        }
         // Fix 090q: 实参是「返回 UDT 的函数调用」→ Declare As Any ByRef 打包须传
         // 临时 UDT 地址 (void*)&(vb6_type_X){...}; 否则强转 struct 值 → C2440
         // (cZipArchive pvVfsSetEof: SetFileTime ..., pvToFileTime(...) As Any)
@@ -15,7 +39,23 @@
                 if (it090q != funcUdtRetCType_.end()) argUdtRetCType090q = it090q->second;
             }
         }
+        // 形参是对象类型 (Object/Control) 且实参是窗体控件标识符时, 抑制默认属性
+        // 解析: VB6 把控件作为对象引用传递, 而非默认属性值. 否则 ByRef Object
+        // 实参生成默认属性 (BSTR) 指针, 被调方 *objControl 读到 VARIANT.vt
+        // (如 VT_BSTR=8) → 运行期崩溃 (BalloonTooltips cTT.CreateToolTip).
+        bool savedSuppressProp = suppressDefaultProp_;
+        if (i < calleeParams.size()
+            && static_cast<Vb6Type>(static_cast<uint16_t>(calleeParams[i].type)
+                 & ~static_cast<uint16_t>(Vb6Type::Array)) == Vb6Type::Object
+            && node.positional[i] && node.positional[i]->kind == ASTNodeKind::IdentifierExpr) {
+            std::string idLower = Symbol::toLower(
+                static_cast<IdentifierExpr&>(*node.positional[i]).name);
+            if (knownFormControls_.count(idLower) || knownWithEventsCtrlVars_.count(idLower)) {
+                suppressDefaultProp_ = true;
+            }
+        }
         emitExpr(*node.positional[i]);
+        suppressDefaultProp_ = savedSuppressProp;
       // COM属性标记残留: MsgBox dic.Count 等场景 — 参数是COM属性读取但标记未被消费
         // 统一用后期绑定(IDispatch), 避免vtable签名不匹配问题
         if (isComMarker_) {
@@ -57,6 +97,13 @@
         if (isDeclareAnsiCall && i < calleeParams.size() && calleeParams[i].isByVal
             && calleeParams[i].type == Vb6Type::String) {
             std::string ansiVar = "_ansi_" + std::to_string(ansiCounter_++);
+            // Fix 110x: BSTR 形参的实参若是 Variant 表达式 (后期绑定控件属性读
+            // vb6_VariantFromComResult(vb6_ComGetProp(...)) 等), 直接交给
+            // vb6_BSTR_ToANSI(BSTR) → C2440 "无法从 vb6_VARIANT 转换为 BSTR"
+            // (Charts 2020 PropPagLP.c 256: CreateWindowEx(..., LabelPlus1.Caption, ...)).
+            if (cExprIsVariant(argVal)) {
+                argVal = "vb6_VariantToString(" + argVal + ")";
+            }
             c_.emitLine("char* " + ansiVar + " = vb6_BSTR_ToANSI(" + argVal + ");");
             ansiTempsToFree_.push_back(ansiVar);
             argVal = ansiVar;
@@ -264,10 +311,84 @@
                         std::string ct092l = "vb6_VARIANT";
                         if (i < calleeParams.size()) ct092l = mapType(calleeParams[i].type);
                         argVal = "(&(" + ct092l + "){0})";
+                    } else if (i < calleeParams.size()
+                               && !calleeParams[i].isByVal && !calleeParams[i].isParamArray
+                               && calleeParams[i].type == Vb6Type::Variant) {
+                        // Fix 092y: ByRef Variant 形参 + 简单标识符实参.
+                        // C 签名为 vb6_VARIANT*, 直接 &(BSTR) 会把字符串当 Variant
+                        // 解析 → 字段错位 → lDataLen=0、QR 段为空 (mdQRTest2_url).
+                        // 与 2039 M22 分支一致: 按实参 VB 类型构造字段式复合字面量.
+                        Vb6Type argVbType92y = inferExprType(*node.positional[i]);
+                        switch (argVbType92y) {
+                            case Vb6Type::String:
+                                argVal = "(&(vb6_VARIANT){.vt=VT_BSTR, .bstrVal=" + argVal + "})";
+                                break;
+                            case Vb6Type::Long:
+                            case Vb6Type::Integer:
+                                argVal = "(&(vb6_VARIANT){.vt=VT_I4, .lVal=(int32_t)(" + argVal + ")})";
+                                break;
+                            case Vb6Type::Double:
+                            case Vb6Type::Single:
+                                argVal = "(&(vb6_VARIANT){.vt=VT_R8, .dblVal=(double)(" + argVal + ")})";
+                                break;
+                            case Vb6Type::Boolean:
+                                argVal = "(&(vb6_VARIANT){.vt=VT_BOOL, .boolVal=(int16_t)(" + argVal + ")})";
+                                break;
+                            case Vb6Type::Byte:
+                                argVal = "(&(vb6_VARIANT){.vt=VT_UI1, .bVal=(uint8_t)(" + argVal + ")})";
+                                break;
+                            case Vb6Type::Date:
+                                argVal = "(&(vb6_VARIANT){.vt=VT_DATE, .dblVal=(double)(" + argVal + ")})";
+                                break;
+                            default:
+                                // Variant 变量 / UDT 字段 / 未知类型: 保持原样取址,
+                                // 值已是 vb6_VARIANT 且可寻址 &x 语义正确.
+                                argVal = "&" + argVal;
+                                break;
+                        }
                     } else {
                         argVal = "&" + argVal;
                     }
                 } else {
+                    // Fix 092z: 左值字段链 (With对象 _vb6_with_N->字段 / me->字段 /
+                    // 虚UDT字段) 也是可寻址左值 → 生成 &(字段) 而非复合字面量.
+                    // With 前 ByRef Long 字段 (QRCodegenMakeAlphanumeric →
+                    // pvAppendBitsToBuffer ..., .Data, .BitLength) 若走复合字面量
+                    // 会复制字段值到临时 int32, 被调方 (*lBitLen)++ 只改临时值 →
+                    // 字段永不增长 → 位写入偏移全零 (HELLO WORLD 无法解码).
+                    bool isLvChain092z = !argVal.empty() && (std::isalpha(static_cast<unsigned char>(argVal[0])) || argVal[0] == '_');
+                    if (!isLvChain092z && argVal.size() > 2 && argVal[0] == '(' && argVal[1] == '*') {
+                        // Fix 090k: (*ptr)->field / (*ptr).field 解引用字段链也是左值
+                        int depth092z = 0;
+                        for (size_t ci092z = 0; ci092z < argVal.size(); ci092z++) {
+                            char c092z = argVal[ci092z];
+                            if (c092z == '(') depth092z++;
+                            else if (c092z == ')') {
+                                depth092z--;
+                                if (depth092z == 0) {
+                                    if (ci092z + 1 < argVal.size() &&
+                                        (argVal[ci092z + 1] == '.' ||
+                                         (argVal[ci092z + 1] == '-' && ci092z + 2 < argVal.size()
+                                          && argVal[ci092z + 2] == '>'))) {
+                                        isLvChain092z = true;
+                                    }
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    if (isLvChain092z) {
+                        for (size_t ci092z = 0; ci092z < argVal.size(); ci092z++) {
+                            char c092z = argVal[ci092z];
+                            if (std::isalnum(static_cast<unsigned char>(c092z)) || c092z == '_' || c092z == '.') continue;
+                            if (c092z == '-' && ci092z + 1 < argVal.size() && argVal[ci092z + 1] == '>') { ci092z++; continue; }
+                            isLvChain092z = false;
+                            break;
+                        }
+                    }
+                    if (isLvChain092z) {
+                        argVal = "&(" + argVal + ")";
+                    } else {
                     // 字面量或复杂表达式: 使用C11复合字面量
                     // &(int32_t){10} 或 &(double){3.14}
                     std::string cType = "int32_t";
@@ -362,6 +483,7 @@
                         }
                         // Fix 027b: 同样加外层括号防止预处理器把复合字面量 `{a, b}` 内的逗号算成宏实参分隔符.
                         argVal = "(&(" + cType + "){" + argVal + "})";
+                    }
                     }
                 }
                 } // end Fix 072b else (As Any ByVal override)

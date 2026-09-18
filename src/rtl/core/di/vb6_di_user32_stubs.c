@@ -200,3 +200,51 @@ intptr_t __stdcall vb6_di_TranslateMessage(void* lpMsg) {
 intptr_t __stdcall vb6_di_UpdateLayeredWindow(intptr_t hwnd, intptr_t hdcDst, void* pptDst, void* psize, intptr_t hdcSrc, void* pptSrc, intptr_t crKey, void* pblend, intptr_t dwFlags) {
     return ((intptr_t (WINAPI *)(intptr_t, intptr_t, void*, void*, intptr_t, void*, intptr_t, void*, intptr_t))UpdateLayeredWindow)(hwnd, hdcDst, pptDst, psize, hdcSrc, pptSrc, crKey, pblend, dwFlags);
 }
+
+intptr_t __stdcall vb6_di_CreateCompatibleBitmap(intptr_t hDC, intptr_t nWidth, intptr_t nHeight) {
+    return ((intptr_t (WINAPI *)(intptr_t, intptr_t, intptr_t))CreateCompatibleBitmap)(hDC, nWidth, nHeight);
+}
+
+/* DestroyCursor */
+
+intptr_t __stdcall vb6_di_DestroyCursor(intptr_t hCursor) {
+    return ((intptr_t (WINAPI *)(intptr_t))DestroyCursor)(hCursor);
+}
+
+/* GdipAddPathEllipseI */
+
+intptr_t __stdcall vb6_di_GetCursorPos(void* lpPoint) {
+    return ((intptr_t (WINAPI *)(void*))GetCursorPos)(lpPoint);
+}
+
+/* MulDiv */
+
+intptr_t __stdcall vb6_di_PtInRect(void* lpRect, intptr_t X, intptr_t Y) {
+    return ((intptr_t (WINAPI *)(void*, intptr_t, intptr_t))PtInRect)(lpRect, X, Y);
+}
+
+/* RedrawWindow */
+
+intptr_t __stdcall vb6_di_RedrawWindow(intptr_t hwnd, void* lprcUpdate, intptr_t hrgnUpdate, intptr_t fuRedraw) {
+    return ((intptr_t (WINAPI *)(intptr_t, void*, intptr_t, intptr_t))RedrawWindow)(hwnd, lprcUpdate, hrgnUpdate, fuRedraw);
+}
+
+/* ---- Fix 112: Charts 2020 鍥捐〃缁樺埗璺緞鏆撮湶鐨勮ˉ鍏呮々 (gen_di_stubs.ps1) ---- */
+
+/* GdipAddPathArc */
+
+intptr_t __stdcall vb6_di_CreateWindowExA(intptr_t dwExStyle, const char* lpClassName, const char* lpWindowName, intptr_t dwStyle, intptr_t X, intptr_t Y, intptr_t nWidth, intptr_t nHeight, intptr_t hWndParent, intptr_t hMenu, intptr_t hInstance, void* lpParam) {
+    return (intptr_t)CreateWindowExA((DWORD)dwExStyle, lpClassName, lpWindowName,
+                                     (DWORD)dwStyle, (int)X, (int)Y, (int)nWidth, (int)nHeight,
+                                     (HWND)hWndParent, (HMENU)hMenu, (HINSTANCE)hInstance, lpParam);
+}
+
+/* GetWindow (user32) */
+
+intptr_t __stdcall vb6_di_GetWindow(intptr_t hwnd, intptr_t wCmd) {
+    return (intptr_t)GetWindow((HWND)hwnd, (UINT)wCmd);
+}
+
+/* TlsGetValue (kernel32): GetLastError 璇箟淇濇寔鍘熸牱 (VB6 浠ｇ爜鍙仛鎸囬拡姣旇緝) */
+
+

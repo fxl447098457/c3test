@@ -160,7 +160,10 @@
     }
 
     void visit(ReDimStmt& node) override {
-        out() << "ReDim " << (node.preserve ? "Preserve " : "") << node.varName << "\n";
+        out() << "ReDim " << (node.preserve ? "Preserve " : "") << node.varName;
+        // Fix 100: 复杂目标 (arr(i).Field) 附加标记, 完整左值见 targetExpr 子树
+        if (node.targetExpr) out() << "(target-expr)";
+        out() << "\n";
     }
 
     void visit(EraseStmt& node) override {

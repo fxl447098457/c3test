@@ -9,6 +9,7 @@
 //   原第 3149~3182 行
 
 #include "vb6rtl.h"
+#include "vb6forms.h"   /* Fix 112: 宿主对象模型 (窗体/控件/集合/字体) */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -142,6 +143,11 @@ int32_t vb6_VarType(vb6_VARIANT v) { return (int32_t)v.vt; }
 // P8.4: TypeName - 返回Variant类型的VB6类型名
 BSTR vb6_TypeName(vb6_VARIANT v) {
     const wchar_t* name = L"Empty";
+    /* Fix 112: 宿主对象 (窗体/控件 HWND, Controls 集合, Font) 返回 VB6 类型名 */
+    if (v.vt == vb6_vtDispatch && v.pdispVal) {
+        const wchar_t* hostName = vb6_Host_TypeNameOf(v.pdispVal);
+        if (hostName) return vb6_BSTR_FromStr(hostName);
+    }
     switch (v.vt) {
         case vb6_vtEmpty:    name = L"Empty"; break;
         case vb6_vtNull:     name = L"Null"; break;
@@ -193,6 +199,14 @@ void vb6_Debug_PrintDouble(double d) {
 // ============================================================
 
 void* vb6_NewObject(const wchar_t* className) {
+    // Fix 112c: Collection 是 VB6 内建类, 不能走 CLSIDFromProgID (必失败 → 429 弹窗)
+    if (className && _wcsicmp(className, L"Collection") == 0) {
+        return vb6_Collection_New();
+    }
+    // Fix 112: StdFont → RTL 内建字体对象 (With m_TitleFont: .Size/.Bold 直接写结构体)
+    if (className && _wcsicmp(className, L"StdFont") == 0) {
+        return vb6_UC_NewFont();
+    }
     // 对于未知类名，尝试通过COM创建 (Dim x As New ClassName，className不在已知类中)
     // VB6中如果className不是项目内的类模块，则尝试COM创建
     // Fix 103: VB6 内建对象 (Collection 等) 实现于运行时内部, 不注册 ProgID —— 直接查

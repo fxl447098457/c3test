@@ -4,8 +4,21 @@
 #include <iostream>
 #include <functional>
 #include <cstdio>
+#include <iomanip>
+#include <limits>
+#include <locale>
+#include <sstream>
 
 namespace vb6c3 {
+
+static std::string floatingLiteral(double value, int precision) {
+    std::ostringstream out;
+    out.imbue(std::locale::classic());
+    out << std::setprecision(precision) << value;
+    std::string text = out.str();
+    if (text.find_first_of(".eE") == std::string::npos) text += ".0";
+    return text;
+}
 
 // --- cgen_expr.cpp: emitExpr 分发 + 字面量/一元/字典访问/New/TypeOf/AddressOf/Me 表达式 ---
 
@@ -50,12 +63,12 @@ void CCodeGen::visit(LiteralExpr& node) {
             lastExpr_ = std::to_string(node.longValue) + "L";
             break;
         case LiteralKind::Single:
-            lastExpr_ = std::to_string(node.floatValue) + "f";
+            lastExpr_ = floatingLiteral(node.floatValue, std::numeric_limits<float>::max_digits10) + "f";
             break;
         case LiteralKind::Double:
         case LiteralKind::Currency:
         case LiteralKind::Decimal:
-            lastExpr_ = std::to_string(node.doubleValue);
+            lastExpr_ = floatingLiteral(node.doubleValue, std::numeric_limits<double>::max_digits10);
             break;
         case LiteralKind::String: {
             // VB6字符串 → C宽字符串字面量 L"..."
@@ -154,13 +167,8 @@ void CCodeGen::visit(LiteralExpr& node) {
         case LiteralKind::Null:
             lastExpr_ = "vb6_VariantNull()";
             break;
-        // Fix 104: 省略实参占位. 非 COM 调用路径沿用原先占位语义 (整型 0), 保证零回归;
-        // COM 调用路径 (cgen_expr_call_com_bind.inc) 会改写成 vb6_ComPackMissing().
-        case LiteralKind::Missing:
-            lastExpr_ = "0";
-            break;
         case LiteralKind::Date:
-            lastExpr_ = std::to_string(node.doubleValue);  // OLE date as double
+            lastExpr_ = floatingLiteral(node.doubleValue, std::numeric_limits<double>::max_digits10);  // OLE date as double
             break;
     }
 }
@@ -204,6 +212,19 @@ void CCodeGen::visit(UnaryExpr& node) {
             // Fix 067: vb6_ComGetObjectProp 返回 void*, 不能直接取反
             if (operand.find("vb6_ComGetObjectProp(") == 0) {
                 lastExpr_ = "(-(intptr_t)(" + operand + "))";
+            } else if (operand.find("vb6_ComGetStringProp(") == 0) {
+                // Fix 092r: COM 对象属性默认按字符串读取 (属性类型未知回退
+                // BSTR) 且一元取负 → 生成 -BSTR (C2171). 改为按 Long 数值属性
+                // 重读再取负. 例: QRCodegenResizePicture → -pPicture.Height.
+                // substr 剥离 "vb6_ComGetStringProp(" 前缀, 保留 "obj, L\"Prop\""
+                // 实参串给签名一致的 vb6_ComGetIntProp.
+                std::string inner092r = operand.substr(std::strlen("vb6_ComGetStringProp("));
+                if (!inner092r.empty() && inner092r.back() == ')') inner092r.pop_back();
+                lastExpr_ = "(-vb6_ComGetIntProp(" + inner092r + "))";
+            } else if (operand.find("vb6_VariantFromComResult(") == 0) {
+                // Fix 092r: 晚绑定 COM 属性读取结果 (vb6_VARIANT) 取负 →
+                // -(vb6_VARIANT) C2440. 先转数值再取负.
+                lastExpr_ = "(-vb6_VariantToDouble(" + operand + "))";
             } else {
                 lastExpr_ = "(-" + operand + ")";
             }

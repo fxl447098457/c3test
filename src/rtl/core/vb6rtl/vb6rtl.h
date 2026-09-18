@@ -14,3 +14,4 @@
 #include "vb6rtl_array.h"
 #include "vb6rtl_class_com.h"
 #include "vb6rtl_runtime.h"
+#include "vb6rtl_userctl.h"  // Fix 105: UserControl/Ambient/Extender/PropertyPage 宿主

@@ -63,6 +63,7 @@
                             std::transform(nm.begin(), nm.end(), nm.begin(), ::tolower);
                             if (nm != "variant" && nm != "var" &&
                                 !symTab_.lookup(simpleV.name) &&
+                                !lookupTypeSymbol(simpleV.name) &&
                                 !lookupDotted(simpleV.name)) {
                                 realVariantField = false;
                             }

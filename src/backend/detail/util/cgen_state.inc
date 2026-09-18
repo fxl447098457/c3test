@@ -338,5 +338,22 @@
 
     // P6.6: ActiveX DLL模式
     bool isDll_ = false;                    // 编译为ActiveX DLL
-    std::string dllProgId_;                  // DLL的ProgID前缀
+    std::string dllProgId_;
+
+    // Fix 110: true = .ctl/.pag designer sub-control module (has designer desc, not .frm)
+    bool isDesignerModule_ = false;
+    // Fix 110f: true = PropertyPage (.pag), false = UserControl (.ctl)
+    bool isPropertyPageDesigner_ = false;
+
+    // P6.4+: interface -> single implementer map (injected by driver)
+    const std::map<std::string, std::string>* interfaceImplementers_ = nullptr;
+
+    // P6.4+: class-module default instance (VB_PredeclaredId=True) lowercase name -> canonical
+    const std::map<std::string, std::string>* defaultInstanceClasses_ = nullptr;
+
+    // Fix 112: in-project UserControl (.ctl) designer spec table (lowercase module -> FrmFile)
+    const std::map<std::string, FrmFile>* designerFiles_ = nullptr;
+    // Fix 112: sub-controls on a form whose type is an in-project UserControl
+    std::unordered_map<std::string, std::string> knownUserControlCtrlVars_;
+                  // DLL的ProgID前缀
 

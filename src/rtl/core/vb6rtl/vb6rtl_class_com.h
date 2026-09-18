@@ -14,6 +14,10 @@ extern "C" {
 void* vb6_Alloc(size_t size);
 void vb6_Free(void* ptr);
 
+// As New Collection 自动实例化: cgen 生成 vb6_cls_<Name>_New(), 内建 Collection
+// 无项目类名, 由 RTL 提供别名桥接到 vb6_Collection_New() (定义在 vb6forms_uc.c)。
+void* vb6_cls_Collection_New(void);
+
 // P21-14: SavePicture — save picture to file (GDI+ BMP save)
 void vb6_SavePicture(void* hBitmap, BSTR filename);
 
@@ -122,6 +126,8 @@ wchar_t* vb6_ComGetStringProp(void* disp, const wchar_t* propName);
 int32_t vb6_ComGetIntProp(void* disp, const wchar_t* propName);
 double vb6_ComGetDoubleProp(void* disp, const wchar_t* propName);
 void* vb6_ComGetObjectProp(void* disp, const wchar_t* propName);
+// COM属性Get→intptr_t (LongPtr: 句柄/指针). 兼容 32/64 位整数变体, 避免 x64 截断.
+intptr_t vb6_ComGetLongPtrProp(void* disp, const wchar_t* propName);
 // COM调用结果→vb6_VARIANT (后期绑定, 如dic.Item(key))
 vb6_VARIANT vb6_VariantFromComResult(void* variant_ptr);
 vb6_VARIANT vb6_VariantFromStackVARIANT(VARIANT* pv);  /* P24-03: 栈上VARIANT转换(不释放) */

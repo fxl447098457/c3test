@@ -80,16 +80,18 @@ void vb6_SetControlEnabled(void* hwnd, int enabled) {
     if (!hwnd) return;
     EnableWindow((HWND)hwnd, enabled ? TRUE : FALSE);
 }
-// P11.8: Position/Size attributes (pixels for Get, twips for Set in VB6 semantics)
-// Note: C3 compiler currently generates code that multiplies Get results by 15 (pixels→twips)
-// and divides Set parameters by 15 (twips→pixels). So Get returns pixels, Set accepts twips.
+// Position/size properties use twips on both reads and writes.
+// Codegen calls these getters directly without pixel-to-twip conversion.
+// Match the existing vb6_TwipToX/Y setters (15 twips per logical pixel).
+// Returning pixels here makes Form_Resize mix ScaleWidth/Height twips with
+// pixel margins, pushing stretched Image controls outside the parent client.
 int vb6_GetControlLeft(void* hwnd) {
     if (!hwnd) return 0;
     RECT rc;
     GetWindowRect((HWND)hwnd, &rc);
     POINT pt = { rc.left, rc.top };
     ScreenToClient(GetParent((HWND)hwnd), &pt);
-    return pt.x;
+    return pt.x * 15;
 }
 
 void vb6_SetControlLeft(void* hwnd, int left) {
@@ -107,7 +109,7 @@ int vb6_GetControlTop(void* hwnd) {
     GetWindowRect((HWND)hwnd, &rc);
     POINT pt = { rc.left, rc.top };
     ScreenToClient(GetParent((HWND)hwnd), &pt);
-    return pt.y;
+    return pt.y * 15;
 }
 
 void vb6_SetControlTop(void* hwnd, int top) {
@@ -123,7 +125,7 @@ int vb6_GetControlWidth(void* hwnd) {
     if (!hwnd) return 0;
     RECT rc;
     GetWindowRect((HWND)hwnd, &rc);
-    return rc.right - rc.left;
+    return (rc.right - rc.left) * 15;
 }
 
 void vb6_SetControlWidth(void* hwnd, int width) {
@@ -137,7 +139,7 @@ int vb6_GetControlHeight(void* hwnd) {
     if (!hwnd) return 0;
     RECT rc;
     GetWindowRect((HWND)hwnd, &rc);
-    return rc.bottom - rc.top;
+    return (rc.bottom - rc.top) * 15;
 }
 
 void vb6_SetControlHeight(void* hwnd, int height) {
