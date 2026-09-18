@@ -65,7 +65,21 @@
                 }
             }
             std::string relObjTarget = isCallTarget ? "(&(void*){" + target + "})" : ("&" + target);
-            if (knownClassVars_.count(targetLower)) {
+            // Fix 101: 项目类实例判定补上「类类型推断」— 原 knownClassVars_ 只按
+            // 裸变量名登记, 类模块内的目标形如 me-><字段> (如 cHttpServer.SSE
+            // As cSSE, 已在 classTypedFieldMap_ 登记为项目类), 永不命中 →
+            // 落到 vb6_ReleaseObject, 把纯 C 结构体当 IUnknown* 解引用其首成员
+            // __comObj (恒 NULL) → 释放实例时 0xC0000005
+            // (cHttpServer / cRedisClient 的 Class_Terminate 首条语句).
+            // inferClassTypeOfExpr 递归覆盖 MeExpr / me->字段 / With 成员 /
+            // 方法返回类, 且对 COM 字段 (classTypedFieldMap_ 的 "COM:" 标记) 与
+            // COM 类型化类 (SymbolKind::ComClass) 一律返回空串, 不误伤本应走
+            // vb6_ComReleaseTyped / vb6_ReleaseObject 的目标.
+            // 函数调用形态 (isCallTarget) 排除: 其求值非左值, 生成 "<call> = NULL"
+            // 会 C2106/C2440.
+            std::string targetCls101 = isCallTarget ? std::string()
+                                                    : inferClassTypeOfExpr(*node.target);
+            if (!targetCls101.empty() || knownClassVars_.count(targetLower)) {
                 // 项目类实例 (Dim c As CCircle / Dim WithEvents s As EventSource) 不是 COM
                 // 对象, 没有引用计数: 调用 vb6_ReleaseObject 会对纯 C 结构体走 vtable
                 // Release → 运行期 0xC0000005. Set Nothing 只需断开引用.

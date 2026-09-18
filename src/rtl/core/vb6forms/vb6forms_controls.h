@@ -72,6 +72,10 @@ int32_t vb6_UC_ControlsIsCollection(void* p);
 // Fix 112c: built-in Collection (New Collection does not go through COM)
 void* vb6_Collection_New(void);
 int32_t vb6_Collection_IsCollection(void* p);
+// 必须在此声明: 调用方是另一个编译单元 vb6com_foreach.c, 缺声明会被隐式当作返回
+// int, 返回的枚举句柄指针在 x64 下被截断 → For Each 解引用即 0xC0000005.
+void* vb6_Collection_EnumInit(void* coll);
+int32_t vb6_Collection_EnumNext(void* enumPtr, void* outVariant);
 int32_t vb6_UC_ControlsCount(void* coll);
 void* vb6_UC_ControlsItem(void* coll, int32_t index);
 void* vb6_UC_ControlsEnumInit(void* coll);

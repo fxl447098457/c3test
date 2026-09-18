@@ -119,6 +119,8 @@ std::string SessionManager::create() {
         { RTL_VB6COM_WRAP_C,           "vb6com_wrap.c" },
         { RTL_VB6COM_SINK_C,           "vb6com_sink.c" },
         { RTL_VB6COM_FOREACH_C,        "vb6com_foreach.c" },
+        { RTL_VB6COM_COLLECTION_C,     "vb6com_collection.c" },
+        { RTL_VB6COM_COLLECTION_ENUM_C, "vb6com_collection_enum.c" },
         { RTL_VB6FORMS_INTERNAL_H,     "vb6forms_internal.h" },
         { RTL_VB6FORMS_CTRL_C,         "vb6forms_ctrl.c" },
         { RTL_VB6FORMS_LIST_C,         "vb6forms_list.c" },

@@ -110,6 +110,25 @@
                 }
                 // P12.1: 收集 Implements 接口列表
                 info.implementsNames = sym->implementsNames;
+                // Fix 099: 收集显式 Public 字段 (semantic_analyzer 填的 publicFieldNames).
+                // 真 VB6 把类的 Public 字段暴露为 Property Get/Let; 此前 C3 完全不进
+                // IDispatch 表 → 客户端 GetIDsOfNames("Router") 失败 → vb6_ComGetProp
+                // 返回 NULL → 调用方按对象解引用即崩.
+                // dispid 必须从该类**宿主符号表**里的符号读: driver 在 TypeLib 阶段把
+                // dispid 回写到宿主符号, 而本函数用的 symTab_ 是最后一个模块的表, 其中
+                // 的类可能是 driver_crossmod 在 TypeLib **之前**注入的 external 副本 —
+                // 那份副本的 memberFieldDispids 永远是空的 (实测 cHttpServer 等落到
+                // 防御段 9000+), 而 TypeLib 里是真的连续 dispid, 两边错位会让早绑定
+                // 客户端按 TypeLib 的 dispid 调 Invoke 命中错误表项.
+                Symbol* hostClsSym = ownTab ? ownTab->lookupModule(sym->name) : nullptr;
+                const Symbol* dispidSym = (hostClsSym && hostClsSym->kind == SymbolKind::Class)
+                    ? hostClsSym : sym.get();
+                for (auto& fname : sym->publicFieldNames) {
+                    info.publicFields.push_back(fname);
+                    auto itFd = dispidSym->memberFieldDispids.find(Symbol::toLower(fname));
+                    info.publicFieldDispids.push_back(
+                        (itFd != dispidSym->memberFieldDispids.end()) ? itFd->second : 0);
+                }
                 // P6.6.4: 收集事件信息
                 if (!sym->eventNames.empty()) {
                     info.eventNames = sym->eventNames;
@@ -363,5 +382,61 @@
             entry.dedent();
             entry.emitLine("}");
             entry.emitBlank();
+        }
+    }
+
+    // Fix 099: Public 字段的 IDispatch 桥接 (Property Get/Let)
+    // getter/setter 实体 (vb6_cls_<cls>_field_get_/_let_<fld>) 定义在**类模块自身**
+    // 的 .c 里 (cgen_com.cpp emitClassFieldAccessors) —— dll_entry.c 只有结构体的
+    // 前向声明 (不完整类型), 无法直接 `me->Fld`, 只能 extern 调用.
+    // Get/Let 共享同一 dispid (COM 约定, 与 TypeLib 里的同名 Property 一致).
+    {
+        bool anyFieldBridges = false;
+        for (auto& cc : coClasses) {
+            if (!cc.publicFields.empty()) { anyFieldBridges = true; break; }
+        }
+        if (anyFieldBridges) {
+            for (auto& cc : coClasses) {
+                if (cc.publicFields.empty()) continue;
+                std::string fClsId = cIdent(cc.moduleName);
+                std::string fClsStruct = "vb6_cls_" + fClsId;
+                for (auto& fname : cc.publicFields) {
+                    std::string fId = cIdent(fname);
+                    entry.emitLine("extern vb6_VARIANT " + fClsStruct + "_field_get_" + fId
+                                   + "(struct " + fClsStruct + "*);");
+                    entry.emitLine("extern void " + fClsStruct + "_field_let_" + fId
+                                   + "(struct " + fClsStruct + "*, vb6_VARIANT);");
+                }
+                entry.emitBlank();
+                for (auto& fname : cc.publicFields) {
+                    std::string fId = cIdent(fname);
+                    entry.emitLine("static void vb6_disp_" + fClsId + "_" + fId
+                                   + "_get_invoke(void* instance, void** args, int32_t argc, void* result) {");
+                    entry.indent();
+                    entry.emitLine("(void)args; (void)argc;");
+                    entry.emitLine("if (!result) return;");
+                    entry.emitLine("{");
+                    entry.indent();
+                    entry.emitLine("vb6_VARIANT _r = " + fClsStruct + "_field_get_" + fId
+                                   + "((struct " + fClsStruct + "*)instance);");
+                    entry.emitLine("memcpy(result, &_r, sizeof(vb6_VARIANT));");
+                    entry.dedent();
+                    entry.emitLine("}");
+                    entry.dedent();
+                    entry.emitLine("}");
+                    entry.emitBlank();
+
+                    entry.emitLine("static void vb6_disp_" + fClsId + "_" + fId
+                                   + "_let_invoke(void* instance, void** args, int32_t argc, void* result) {");
+                    entry.indent();
+                    entry.emitLine("(void)result;");
+                    entry.emitLine("vb6_VARIANT _v = (argc > 0 && args) ? *(vb6_VARIANT*)args[0] : vb6_VariantEmpty();");
+                    entry.emitLine(fClsStruct + "_field_let_" + fId
+                                   + "((struct " + fClsStruct + "*)instance, _v);");
+                    entry.dedent();
+                    entry.emitLine("}");
+                    entry.emitBlank();
+                }
+            }
         }
     }

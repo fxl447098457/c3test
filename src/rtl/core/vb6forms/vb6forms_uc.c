@@ -621,17 +621,18 @@ void* vb6_UC_ControlsItem(void* coll, int32_t index) {
     return kids[index - 1];
 }
 
+// 句柄首元素存指针, 必须用 intptr_t —— x64 下按 int32_t 存会截断高 32 位 (同 Collection 枚举器)
 void* vb6_UC_ControlsEnumInit(void* coll) {
-    int32_t* e = (int32_t*)malloc(sizeof(int32_t) * 2);
-    if (e) { e[0] = (int32_t)(intptr_t)coll; e[1] = 0; }
+    intptr_t* e = (intptr_t*)malloc(sizeof(intptr_t) * 2);
+    if (e) { e[0] = (intptr_t)coll; e[1] = 0; }
     return e;
 }
 
 int32_t vb6_UC_ControlsEnumNext(void* enumPtr, void* outV) {
     vb6_VARIANT* out = (vb6_VARIANT*)outV;
-    int32_t* e = (int32_t*)enumPtr;
+    intptr_t* e = (intptr_t*)enumPtr;
     if (!e) return 0;
-    void* coll = (void*)(intptr_t)e[0];
+    void* coll = (void*)e[0];
     void* kids[VB6_UC_MAX_OBJ];
     int32_t n = vb6_uc_collectChildren(vb6_uc_controlsForm(coll), kids, VB6_UC_MAX_OBJ);
     if (e[1] >= n) return 0;
@@ -828,17 +829,19 @@ int32_t vb6_Collection_ItemByKey(void* coll, const wchar_t* key, void* outV) {
 void* vb6_cls_Collection_New(void) { return vb6_Collection_New(); }
 
 // For Each 枚举器: {coll, nextIdx} 两元素句柄, 语义同 Controls 枚举
+// 注意: 句柄首元素存的是指针, 必须用 intptr_t 存储 —— x64 下按 int32_t 存会
+// 截断高 32 位, vb6_ForEach_Next 里再当指针解引用即 0xC0000005.
 void* vb6_Collection_EnumInit(void* coll) {
-    int32_t* e = (int32_t*)malloc(sizeof(int32_t) * 2);
-    if (e) { e[0] = (int32_t)(intptr_t)coll; e[1] = 0; }
+    intptr_t* e = (intptr_t*)malloc(sizeof(intptr_t) * 2);
+    if (e) { e[0] = (intptr_t)coll; e[1] = 0; }
     return e;
 }
 
 int32_t vb6_Collection_EnumNext(void* enumPtr, void* outV) {
     vb6_VARIANT* out = (vb6_VARIANT*)outV;
-    int32_t* e = (int32_t*)enumPtr;
+    intptr_t* e = (intptr_t*)enumPtr;
     if (!e) return 0;
-    vb6_CollRec* c = (vb6_CollRec*)(intptr_t)e[0];
+    vb6_CollRec* c = (vb6_CollRec*)e[0];
     if (!vb6_uc_isColl(c) || e[1] >= c->count) return 0;
     vb6_coll_itemCopy(&((const vb6_VARIANT*)c->items)[e[1]++], out);
     return 1;

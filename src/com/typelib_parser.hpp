@@ -279,6 +279,11 @@ private:
 
     // ProgID → CLSID → TypeLib路径 (从注册表查找)
     std::string findTypeLibPathForProgId(const std::string& progId);
+
+    // Fix 098: 当前正在解析的 TypeLib 库名 (= VB6 工程 Name=, 如 "VBMANLIB").
+    // parseCoClass 里 ProgIDFromCLSID 反查失败时用它拼 "<库名>.<coclass名>".
+    // 由 parseTypeLib 在枚举类型前设置.
+    std::string currentProjectName_;
 };
 
 } // namespace vb6c3

@@ -174,6 +174,14 @@ int32_t vb6_ForEach_Next(void* enumPtr, VARIANT* outVar) {
 // For Each Release: Release IEnumVARIANT and free wrapper
 void vb6_ForEach_Release(void* enumPtr) {
     if (!enumPtr) return;
+    /* Fix 112/112c: 宿主枚举句柄 (Controls 集合 / 内建 Collection) 不是 vb6_ForEachState
+     * —— 首元素是集合指针而非 IEnumVARIANT*, 当 state->pEnum 解引用会取到结构体自身
+     * 的字节当 vtable → 0xC0000005. 宿主句柄没有需要 Release 的 COM 接口, 直接释放. */
+    if (vb6_UC_ControlsIsCollection(*((void**)enumPtr)) ||
+        vb6_Collection_IsCollection(*((void**)enumPtr))) {
+        free(enumPtr);
+        return;
+    }
     vb6_ForEachState* state = (vb6_ForEachState*)enumPtr;
     state->pEnum->lpVtbl->Release(state->pEnum);
     free(state);

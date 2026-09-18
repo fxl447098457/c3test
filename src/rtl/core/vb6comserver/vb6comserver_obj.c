@@ -278,3 +278,71 @@ vb6_ComObject* vb6_ComObject_Create(const vb6_CoClassDesc* desc) {
     InterlockedIncrement(&g_vb6_cRef);
     return obj;
 }
+
+// ============================================================
+// Fix 099: 包装已存在的 VB6 类实例 (Public 对象字段的 COM 暴露)
+// ============================================================
+// ActiveX DLL 里 `Public Router As cHttpServerRouter` 这类字段的实例, 是在类
+// 内部 (Class_Initialize 的 `Set Router = New ...`) 创建的裸结构体指针, 其
+// __comObj 仍为 NULL. COM 客户端读该字段 (Property Get) 时必须拿到一个能继续
+// 调用方法的 IDispatch —— 直接返回裸指针冒充 VT_DISPATCH, 客户端首次 Invoke
+// 就会把结构体当 IDispatch 解引用 vtable → 0xC0000005.
+//
+// 复用规则: 实例首个字段 __comObj 已指向包装对象时直接 AddRef 复用 (同一实例
+// 每次读出返回同一 IDispatch, 引用计数正确), 否则新建包装并回填 __comObj.
+// 前置条件: 实例所在类的结构体首字段必须是 __comObj —— cgen 仅在 ActiveX DLL
+// 工程 (isDll_) 的类结构体里生成该字段, 故本函数只能用于 DLL 侧的字段 getter.
+vb6_ComObject* vb6_ComObject_FromInstance(const vb6_CoClassDesc* desc, void* instance) {
+    void** ppComObj;
+    vb6_ComObject* existing;
+    vb6_ComObject* obj;
+    if (!desc || !instance) return NULL;
+
+    ppComObj = (void**)instance;
+    existing = (vb6_ComObject*)*ppComObj;
+    if (existing) {
+        existing->vtable->AddRef(existing);
+        return existing;
+    }
+
+    obj = (vb6_ComObject*)CoTaskMemAlloc(sizeof(vb6_ComObject));
+    if (!obj) return NULL;
+
+    obj->vtable = &g_ComObjectVtable;
+    obj->refCount = 1;
+    obj->desc = desc;
+    obj->vb6Instance = instance;
+    obj->cpc = NULL;
+    obj->pci = NULL;
+    *ppComObj = obj;  /* 回填 __comObj, 后续复用 */
+
+    InterlockedIncrement(&g_vb6_cRef);
+    return obj;
+}
+
+// Fix 099: 按类变量名 (VB6 模块名, 如 "cHttpServerRouter") 查 coclass 描述.
+// 供 dll_entry.c 的 Public 对象字段 getter 使用 (包装实例需要 desc).
+// 只命中 coclass 表内的类 (cgen 仅收 MultiUse/SingleUse); 未命中返回 NULL,
+// 此时 getter 返回 NULL dispatch — 客户端拿到 Nothing, 不会崩.
+const vb6_CoClassDesc* vb6_FindCoClassDesc(const char* classVariable) {
+    int i;
+    if (!classVariable) return NULL;
+    for (i = 0; i < g_vb6_coclassCount; i++) {
+        if (g_vb6_coclasses[i].classVariable &&
+            _stricmp(g_vb6_coclasses[i].classVariable, classVariable) == 0) {
+            return &g_vb6_coclasses[i];
+        }
+    }
+    return NULL;
+}
+
+// Fix 099: 从 IDispatch 取回其 VB6 类实例裸指针 (Public 对象字段的 Property Let/Set
+// 桥接用: 把客户端传来的对象写进字段). 只认本 RTL 产出的 vb6_ComObject (用自身
+// vtable 指针判定), 外部 COM 对象/非对象返回 NULL (字段置空, 与 VB6 传 Nothing 等效).
+void* vb6_ComObject_GetInstance(void* pdisp) {
+    vb6_ComObject* obj;
+    if (!pdisp) return NULL;
+    obj = (vb6_ComObject*)pdisp;
+    if (obj->vtable != &g_ComObjectVtable) return NULL;
+    return obj->vb6Instance;
+}

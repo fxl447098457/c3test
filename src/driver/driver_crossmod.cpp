@@ -128,6 +128,8 @@ bool Driver::runCrossModuleResolution() {
                 extSym->memberParams = srcSym->memberParams;             // Fix 033: 成员参数表 (calleeParams 跨模块精确查找)
                 extSym->memberFieldTypes = srcSym->memberFieldTypes;     // Fix 092m: 字段类型表 (With 字段写 COM 解包)
                 extSym->memberFieldNames = srcSym->memberFieldNames;     // Fix 092p: 字段声明原名表 (访问点大小写规范化)
+                extSym->publicFieldNames = srcSym->publicFieldNames;     // Fix 099: 显式 Public 字段清单 (COM 暴露)
+                extSym->memberFieldDispids = srcSym->memberFieldDispids; // Fix 099: Public 字段 TypeLib DISPID
                 extSym->memberLetParams = srcSym->memberLetParams;       // Fix 091a: Let 写方向参数表
                 extSym->memberSetParams = srcSym->memberSetParams;       // Fix 091a: Set 写方向参数表
                 extSym->isInterface = srcSym->isInterface;  // P6.4

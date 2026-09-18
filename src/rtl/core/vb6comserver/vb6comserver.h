@@ -69,7 +69,7 @@ typedef struct vb6_CoClassDesc {
     const struct vb6_DispMethodDesc* methods;
     // P12.1: Implements接口IID表 (QI时遍历匹配)
     int ifaceCount;                       // 实现的接口数量 (Implements语句)
-    const IID* const* ifaceIids;          // 接口IID指针数组 (每个元素指向一个静态IID)
+    const IID* const* ifaceIids;          // 接口IID指针数组 (每个元素指向一个静态IID)
     // P6.6: 事件源接口 (IConnectionPointContainer)
     const IID* defaultIfaceIid;            // 默认dispinterface IID (指向静态常量, 早绑定QI用)
     const char* sourceIfaceIid;           // source dispinterface IID字符串字符串 (NULL=无事件)
@@ -121,6 +121,18 @@ typedef struct vb6_IDispatchVtable {
 
 // 创建VB6 COM对象 (包装VB6实例为IDispatch)
 vb6_ComObject* vb6_ComObject_Create(const vb6_CoClassDesc* desc);
+
+// Fix 099: 包装一个**已存在**的 VB6 类实例 (不调 factoryFunc).
+// 用于 ActiveX DLL 的 Public 对象字段 getter —— 字段实例在类内部创建, 是裸
+// 结构体指针. 实例 __comObj 已置则 AddRef 复用, 否则新建包装并回填.
+// 前置条件: 实例所在类的结构体首字段是 __comObj (仅 ActiveX DLL 工程的类有).
+vb6_ComObject* vb6_ComObject_FromInstance(const vb6_CoClassDesc* desc, void* instance);
+
+// Fix 099: 按类变量名 (VB6 模块名) 在 g_vb6_coclasses[] 中查描述, 未命中返回 NULL.
+const vb6_CoClassDesc* vb6_FindCoClassDesc(const char* classVariable);
+
+// Fix 099: 从 IDispatch 取回 VB6 实例裸指针; 非本 RTL 产出的对象返回 NULL.
+void* vb6_ComObject_GetInstance(void* pdisp);
 
 // ============================================================
 // Class Factory (IClassFactory实现)
