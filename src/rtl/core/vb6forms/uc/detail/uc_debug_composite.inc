@@ -1,6 +1,7 @@
 // vb6forms_uc 拆分片段 uc_debug_composite (函数体)
-// 内容 = 拆分前 vb6forms_uc.c 第 371~457 行，逐行未改
+// 内容 = 拆分前 vb6forms_uc.c 第 371~457 行，逐行未改（static 除外）
 // 在函数体内 #include；路径一律用 basename
+// 注: vb6_uc_dumpFormComposite 已去 static 供跨单元使用
 
 // ============================================================
 // Fix 123: 整窗合成 dump (调试用)
@@ -10,7 +11,7 @@
 // 一旦反了就会出现"圆环被 LabelPlus 白面板盖住"这类问题而单控件 dump 一切正常。
 // 这里按窗口管理器的真实 z 序 (自下而上) 把本级所有 UserControl 宿主依次绘制并
 // 贴进一张窗体大小的 DIB, 输出 FORM_*.bmp —— 即在无桌面会话下也能看到"用户所见"。
-static void vb6_uc_dumpFormComposite(HWND root, const char* dumpDir) {
+void vb6_uc_dumpFormComposite(HWND root, const char* dumpDir) {
     if (!root || !dumpDir || !*dumpDir) return;
     RECT crc;
     if (!GetClientRect(root, &crc)) return;

@@ -128,7 +128,7 @@ typedef struct vb6_GdiplusStartupInput {
     int32_t  SuppressExternalCodecs;
 } vb6_GdiplusStartupInput;
 
-static void vb6_uc_gdiplusInit(void) {
+void vb6_uc_gdiplusInit(void) {
     static int done = 0;
     if (done) return;
     done = 1;
@@ -144,7 +144,7 @@ static void vb6_uc_gdiplusInit(void) {
     pStartup(&token, &si, NULL);   /* 常驻 token, 不配对 Shutdown */
 }
 
-static void vb6_uc_registerClass(HINSTANCE hInst) {
+void vb6_uc_registerClass(HINSTANCE hInst) {
     static int done = 0;
     if (done) return;
     WNDCLASSW wc;

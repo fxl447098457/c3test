@@ -148,6 +148,14 @@ extern vb6_ComIface_Font g_vb6_UserControl_FontObj;
 void vb6_uc_trace(const char* phase, const char* type, void* me);
 vb6_UCRec* vb6_uc_findByHwnd(const void* hwnd);
 vb6_UCRec* vb6_uc_findByInstance(const void* inst);
+void vb6_uc_push(vb6_UCRec* r, vb6_UCSaved* saved);
+void vb6_uc_pop(const vb6_UCSaved* saved);
+
+// --- uc_host_window.c ---
+// wndproc 内的每个 WM_PAINT/事件分支都要 push/pop 宿主状态，dumpFormComposite
+// 与 HostCreate 也复用同一对函数，故这两个窗口族符号同样要外部链接。
+void vb6_uc_gdiplusInit(void);
+void vb6_uc_registerClass(HINSTANCE hInst);
 
 // --- uc_hostmodel.c ---
 vb6_HostObjRec* vb6_ho_find(const void* hwnd);
