@@ -11,8 +11,8 @@
 // cast. The cast keeps the compiler from complaining about unrelated API parameter
 // types while preserving the register/memory passing class of every argument.
 //
-// generated from: C:\Users\Administrator\AppData\Local\Temp\C3C\merged_stubgen
-// date: 2026-09-19 13:59
+// generated from: C:\Users\Administrator\AppData\Local\Temp\C3C\merged_stubgen_czui
+// date: 2026-09-19 18:17
 //
 // Hand-maintained special cases stay in vb6_di_stubs.c (ordinals, msvbvm60 runtime,
 // dynamically loaded DLLs). Re-run the generator after a build exposes new symbols.
@@ -53,6 +53,21 @@ void WINAPI RtlZeroMemory(void*, size_t);
 #pragma comment(lib, "comctl32.lib")
 #pragma comment(lib, "uxtheme.lib")
 #pragma comment(lib, "comdlg32.lib")
+
+/* DestroyWindow */
+intptr_t __stdcall vb6_di_DestroyWindow(intptr_t hWnd) {
+    return ((intptr_t (WINAPI *)(intptr_t))DestroyWindow)(hWnd);
+}
+
+/* SendMessageW */
+intptr_t __stdcall vb6_di_SendMessageW(intptr_t hWnd, intptr_t wMsg, intptr_t wParam, intptr_t lParam) {
+    return ((intptr_t (WINAPI *)(intptr_t, intptr_t, intptr_t, intptr_t))SendMessageW)(hWnd, wMsg, wParam, lParam);
+}
+
+/* SetWindowLongW */
+intptr_t __stdcall vb6_di_SetWindowLongW(intptr_t hWnd, intptr_t nIndex, intptr_t dwNewLong) {
+    return ((intptr_t (WINAPI *)(intptr_t, intptr_t, intptr_t))SetWindowLongW)(hWnd, nIndex, dwNewLong);
+}
 
 /* SendMessageA */
 intptr_t __stdcall vb6_di_SendMessageA(intptr_t hwnd, intptr_t wMsg, intptr_t wParam, void* lParam) {
@@ -167,21 +182,6 @@ intptr_t __stdcall vb6_di_GetSysColor(intptr_t nIndex) {
 /* GetWindowLongA */
 intptr_t __stdcall vb6_di_GetWindowLongA(intptr_t hwnd, intptr_t nIndex) {
     return ((intptr_t (WINAPI *)(intptr_t, intptr_t))GetWindowLongA)(hwnd, nIndex);
-}
-
-/* SendMessageW */
-intptr_t __stdcall vb6_di_SendMessageW(intptr_t hwnd, intptr_t wMsg, intptr_t wParam, void* lParam) {
-    return ((intptr_t (WINAPI *)(intptr_t, intptr_t, intptr_t, void*))SendMessageW)(hwnd, wMsg, wParam, lParam);
-}
-
-/* SetWindowLongW */
-intptr_t __stdcall vb6_di_SetWindowLongW(intptr_t hwnd, intptr_t nIndex, intptr_t dwNewLong) {
-    return ((intptr_t (WINAPI *)(intptr_t, intptr_t, intptr_t))SetWindowLongW)(hwnd, nIndex, dwNewLong);
-}
-
-/* DestroyWindow */
-intptr_t __stdcall vb6_di_DestroyWindow(intptr_t hwnd) {
-    return ((intptr_t (WINAPI *)(intptr_t))DestroyWindow)(hwnd);
 }
 
 /* IsWindowUnicode */
