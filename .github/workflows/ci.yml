@@ -74,8 +74,8 @@ jobs:
         shell: pwsh
     strategy:
       fail-fast: false
-matrix:
-      category: [bas, vbp, compile, syntax]
+      matrix:
+        category: [bas, vbp, compile, syntax]
     env:
       C3_VCVARSALL: ""
     steps:
