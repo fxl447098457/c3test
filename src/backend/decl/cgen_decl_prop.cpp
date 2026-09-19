@@ -104,7 +104,15 @@ void CCodeGen::visit(PropertyDecl& node) {
             // 注册BSTR/Double/Long类型参数到类型跟踪集合
             Vb6Type paramType = typeSys_.resolveTypeName(simpleP.name);
             if (paramType == Vb6Type::String) knownBstrVars_.insert(pLower);
-            else if (paramType == Vb6Type::Double) knownDoubleVars_.insert(pLower);
+            // Fix 123b: Currency/Single/Date 形参同属 C double 组 — 此前漏注册,
+            // inferExprType(形参) 落符号表查找 (129 模块工程里同名符号撞车) 或
+            // Variant → RaiseEvent 实参打包误走 BSTR 分支 (cZipArchive
+            // frFireProgress 的 Current/Total As Currency → vb6_BSTR_FromStr(double)
+            // C2440, cZipArchive.c 2341/2343). 与 cgen_decl_func.cpp /
+            // cgen_decl_proc.cpp 同步 (三处副本必须一致).
+            else if (paramType == Vb6Type::Double || paramType == Vb6Type::Currency
+                     || paramType == Vb6Type::Single || paramType == Vb6Type::Date)
+                knownDoubleVars_.insert(pLower);
             else if (paramType == Vb6Type::Long || paramType == Vb6Type::Integer || paramType == Vb6Type::Boolean) knownLongVars_.insert(pLower);
             // Bug #2 fix: LongPtr 参数注册到独立集合
             else if (paramType == Vb6Type::LongPtr) knownLongPtrVars_.insert(pLower);

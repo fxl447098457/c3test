@@ -230,6 +230,19 @@
 
                 if (argIdx < (int)args.size()) {
 
+                    // Fix 122: ParamArray 省略实参位 (DeArray x, A, , C 的空位) 在上方
+                    // 缺省值填充阶段被填成 defaultValue(Variant)=vb6_VariantEmpty(),
+                    // 此处按 PA_SetLong 发射 → PA_SetLong(pa, i, vb6_VARIANT) C2440
+                    // (cToolsArray.c 123). VB6 语义: ParamArray 省略位 = Missing
+                    // (VT_ERROR/DISP_E_PARAMNOTFOUND), IsMissing(OutVars(i)) 才为真.
+                    // 复用 vb6_ComPackMissing() (返回堆上 VARIANT*, SafeArrayPutElement
+                    // 会复制内容), 发射后立即释放.
+                    if (node.omittedArgs.count((size_t)argIdx)) {
+                        c_.emitLine("{ void* _pa_missing_" + std::to_string(tempCounter_) + " = vb6_ComPackMissing(); vb6_PA_SetVariant(" + paVar + ", " + std::to_string(i) + ", (VARIANT*)_pa_missing_" + std::to_string(tempCounter_) + "); vb6_ComVarFree(_pa_missing_" + std::to_string(tempCounter_) + "); }");
+                        tempCounter_++;
+                        continue;
+                    }
+
                     std::string paArgExpr = args[argIdx];
 
                     bool isLongArg = false;

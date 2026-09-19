@@ -25,7 +25,12 @@
         c_.emitLine("hInst);");
         c_.dedent();
     } else if (isMDIChild) {
-        c_.emitLine("vb6_RegisterFormClass(\"" + clsName + "\", (void*)" + wndProc + ", hInst, 0);");
+        if (formBackColor >= 0) {
+            // czUI fix: 窗体级 BackColor → 类背景刷 + Ambient.BackColor
+            c_.emitLine("vb6_RegisterFormClassBg(\"" + clsName + "\", (void*)" + wndProc + ", hInst, 0, " + std::to_string(formBackColor) + ");");
+        } else {
+            c_.emitLine("vb6_RegisterFormClass(\"" + clsName + "\", (void*)" + wndProc + ", hInst, 0);");
+        }
         c_.emitLine("vb6_hwnd_" + cIdent(formName) + " = vb6_CreateMDIChildWindow(");
         c_.indent();
         c_.emitLine("\"" + clsName + "\", \"" + caption + "\",");
@@ -41,8 +46,13 @@
         c_.emitLine("hMDIClient, hInst);");
         c_.dedent();
     } else {
-        c_.emitLine("vb6_RegisterFormClass(\"" + clsName + "\", (void*)" + wndProc + ", hInst, 0);");
-        c_.emitLine("vb6_hwnd_" + cIdent(formName) + " = vb6_CreateFormWindow(");
+        if (formBackColor >= 0) {
+            // czUI fix: 窗体级 BackColor → 类背景刷 + Ambient.BackColor
+            c_.emitLine("vb6_RegisterFormClassBg(\"" + clsName + "\", (void*)" + wndProc + ", hInst, 0, " + std::to_string(formBackColor) + ");");
+        } else {
+            c_.emitLine("vb6_RegisterFormClass(\"" + clsName + "\", (void*)" + wndProc + ", hInst, 0);");
+        }
+        c_.emitLine("vb6_hwnd_" + cIdent(formName) + " = vb6_CreateFormWindowB(");
         c_.indent();
         c_.emitLine("\"" + clsName + "\", \"" + caption + "\",");
         if (startupPos == 2) {
@@ -54,7 +64,7 @@
             c_.emitLine("0, 0,");
         }
         c_.emitLine(std::to_string(clientWidth) + ", " + std::to_string(clientHeight) + ",");
-        c_.emitLine("hInst, NULL);");
+        c_.emitLine("hInst, NULL, " + std::to_string(formBorderStyle) + ");");
         c_.dedent();
     }
     c_.emitLine("vb6_ShowForm(vb6_hwnd_" + cIdent(formName) + ", 0);");

@@ -111,7 +111,13 @@ void CCodeGen::visit(RaiseEventStmt& node) {
                     c_.emitLine("__evt_args[" + idx + "].vt = VT_I4; __evt_args[" + idx + "].lVal = (int32_t)(" + lastExpr_ + ");");
                 } else if (argType == Vb6Type::Single) {
                     c_.emitLine("__evt_args[" + idx + "].vt = VT_R4; __evt_args[" + idx + "].lVal = *(int32_t*)&(float){" + lastExpr_ + "};");
-                } else if (argType == Vb6Type::Double) {
+                } else if (argType == Vb6Type::Double
+                           || argType == Vb6Type::Currency
+                           || argType == Vb6Type::Date) {
+                    // Fix 123: Currency/Date 实参此前落 else → VBSTR 打包
+                    // vb6_BSTR_FromStr(double) C2440 (cZipArchive RaiseEvent
+                    // Progress(lIdx, uLocal.Ext.USize, .Size, ...) 的 18 处).
+                    // 事件形参 As Currency 的 sink typedef 是 double, 统一 VT_R8.
                     c_.emitLine("__evt_args[" + idx + "].vt = VT_R8; __evt_args[" + idx + "].dblVal = (double)(" + lastExpr_ + ");");
                 } else if (argType == Vb6Type::Object) {
                     c_.emitLine("__evt_args[" + idx + "].vt = VT_DISPATCH; __evt_args[" + idx + "].pdispVal = (IDispatch*)(" + lastExpr_ + ");");

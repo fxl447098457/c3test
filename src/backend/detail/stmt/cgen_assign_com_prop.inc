@@ -373,7 +373,12 @@
         }
         std::string tlower = tname;
         std::transform(tlower.begin(), tlower.end(), tlower.begin(), ::tolower);
-        if (knownByteArrayVars_.count(tlower)) tgtIsByteArray092w = true;
+        // Fix 140: 类成员 Byte() 数组 (me->m_Caption) 亦须走 Byte 数组改写路径 —
+        // knownByteArrayVars_ 已在过程入口 copy classByteArrayMembers_, 此处再显式
+        // 兜底判定一次 (防止类字段在非类过程上下文被 clear 后漏判).
+        if (knownByteArrayVars_.count(tlower) || classByteArrayMembers_.count(tlower)) {
+            tgtIsByteArray092w = true;
+        }
     }
 
     // P6.12: COM方法调用返回值类型化解封
@@ -406,6 +411,15 @@
                 else if (elemC == "int16_t" || elemC == "int32_t" || elemC == "uint8_t"
                          || elemC == "LONG" || elemC == "int64_t") comCallType = "Int";
             }
+        }
+        // Fix 140: 目标为 Byte() 数组 (类成员 m_Caption / me->m_Xxx) — COM 结果
+        // 需解封为字节数组: BSTR → vb6_StringToByteArray, SAFEARRAY → parray.
+        // 场景: LabelPlus.ctl ReadProperties 里
+        //   m_Caption = .ReadProperty("Caption", Ambient.DisplayName)
+        // PropertyBag 存的是字符串, 旧路径把裸 void* (VARIANT*) 直接赋给
+        // vb6_SafeArray1D* 字段 → UBound/StrPtr 读不到 → 右侧 KPI 卡片空白.
+        if (comCallType.empty() && tgtIsByteArray092w) {
+            comCallType = "ByteArray";
         }
         if (!comCallType.empty()) {
             value = "vb6_ComCall" + comCallType + callArgs;

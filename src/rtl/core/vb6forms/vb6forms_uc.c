@@ -52,11 +52,16 @@ extern "C" {
 static const vb6_UserControlDesc* g_uc_descs[VB6_UC_MAX_DESC];
 static int32_t g_uc_descCount = 0;
 
+#define VB6_UC_DESIGN_SLOTS 8
+typedef struct Vb6UcDesignSlot { char name[64]; void* value; } Vb6UcDesignSlot;
+
 typedef struct vb6_UCRec {
     const vb6_UserControlDesc* desc;
     void*  me;
     int32_t ready;        // Initialize 完成前禁止窗口消息进入 VB6 实例方法
     HWND   hwnd;
+    Vb6UcDesignSlot design[VB6_UC_DESIGN_SLOTS];  // czUI fix: 设计器子控件按实例存取
+    int32_t designCount;
     HWND   parent;
     int32_t scaleWidth;   // ScaleMode 单位
     int32_t scaleHeight;
@@ -149,6 +154,8 @@ static int32_t vb6_uc_isColl(const void* p);
 
 // Fix 112c: 前置声明 (定义在宿主分派节, Collection 实现会用到)
 static void vb6_ho_setVariantEmpty(vb6_VARIANT* out);
+void* vb6_UC_UnwrapHost(void* obj);  // czUI fix: 前置声明 (定义在文件末尾的包装器区)
+void* vb6_UC_WrapHostObject(void* obj);
 
 // 安全解引用守卫: 控件/窗体对象以 HWND 形式传入, 而 HWND 是内核句柄而非用户指针;
 // 直接按 tag 结构解引用会触发 0xC0000005. 解引用 tag 前先校验目标地址可读.
@@ -212,8 +219,11 @@ typedef struct vb6_UCSaved {
     void*   font;
     void*   ambientFont;
     int32_t extLeft, extTop;
+    void*   hWnd;                 // Fix 133u: UserControl.hWnd
+    int16_t autoRedraw;           // Fix 133u: UserControl.AutoRedraw
+    struct vb6_UserControl_Extender_Type ext; // Fix 133u: Extender.Visible/Height
     vb6_UCRec* current;
-    void*   displayName;      // Fix 116: Ambient.DisplayName (BSTR)
+    void*   displayName;          // Fix 116: Ambient.DisplayName (BSTR)
 } vb6_UCSaved;
 
 static void vb6_uc_defaultFont(void) {
@@ -238,6 +248,9 @@ static void vb6_uc_push(vb6_UCRec* r, vb6_UCSaved* saved) {
     saved->ambientFont = vb6_Ambient_Font;
     saved->extLeft = vb6_Extender_Left;
     saved->extTop = vb6_Extender_Top;
+    saved->hWnd = vb6_UserControl_hWnd;
+    saved->autoRedraw = vb6_UserControl_AutoRedraw;
+    saved->ext = vb6_UserControl_Extender;
     saved->current = g_uc_current;
     saved->displayName = (void*)vb6_Ambient_DisplayName;
 
@@ -254,6 +267,10 @@ static void vb6_uc_push(vb6_UCRec* r, vb6_UCSaved* saved) {
     }
     vb6_Extender_Left = r->extLeft;
     vb6_Extender_Top = r->extTop;
+    vb6_UserControl_hWnd = r->hwnd;                 // Fix 133u
+    vb6_UserControl_AutoRedraw = 1;                 // Fix 133u: 事件驱动重绘
+    vb6_UserControl_Extender.Visible = -1;          // Fix 133u: 默认可见
+    vb6_UserControl_Extender.Height = r->scaleHeight; // Fix 133u
     g_uc_current = r;
 
     // Fix 116: Ambient.DisplayName = 控件实例名 (VB6 语义)。
@@ -277,6 +294,9 @@ static void vb6_uc_pop(const vb6_UCSaved* saved) {
     vb6_Ambient_Font = (vb6_ComIface_Font*)saved->ambientFont;
     vb6_Extender_Left = saved->extLeft;
     vb6_Extender_Top = saved->extTop;
+    vb6_UserControl_hWnd = saved->hWnd;              // Fix 133u
+    vb6_UserControl_AutoRedraw = saved->autoRedraw;  // Fix 133u
+    vb6_UserControl_Extender = saved->ext;           // Fix 133u
     g_uc_current = saved->current;
     vb6_Ambient_DisplayName = (BSTR)saved->displayName;   // Fix 116
 }
@@ -291,10 +311,57 @@ void vb6_UC_Enter(void* hwnd) {
 }
 
 void vb6_UC_RefreshCurrent(void) {
-    if (g_uc_current && g_uc_current->hwnd) {
-        InvalidateRect(g_uc_current->hwnd, NULL, FALSE);
-        UpdateWindow(g_uc_current->hwnd);
-    }
+    // czUI fix: 不能 invalidate+update — UserControl_Paint/RedrawControl 末尾的
+    // `If AutoRedraw Then UserControl.Refresh` 会在 WM_PAINT 内强制同步重绘,
+    // 形成 PAINT→Refresh→PAINT 无限循环 (czFormDemo 顶部 ~110fps 闪烁)。
+    // RTL 绘制是立即模式 (直接画到窗口 DC, 无 AutoRedraw 离屏位图),
+    // WM_PAINT 本身已完成全量绘制, Refresh 在此架构下无事可做。
+    (void)0;
+}
+
+// Fix 133u: UserControl.Cls — 清空控件的客户区背景, 下一轮 WM_PAINT 重绘.
+// .ctl 里控件重绘是事件驱动 (InvalidateRect → UserControl_Paint → GDI+ 绘制),
+// 此处置位背景即可, 具体清空效果由绘制路径自然覆盖.
+void vb6_UserControl_Cls(void) {
+    // czUI fix: 不能用 InvalidateRect 实现 — 控件在 RedrawControl 开头调用 Cls,
+    // 而 RedrawControl 又由 WM_PAINT 驱动, invalidate 会造成
+    // "PAINT→Cls→invalidate→PAINT" 无限重绘循环 (czFormDemo ~90fps 闪烁)。
+    // RTL 的 WM_PAINT 每次 BeginPaint 后都是全新表面, 且控件随后会完整重绘,
+    // 因此 Cls 在本架构下等价于空操作。
+}
+
+// Fix 133u: UserControl.Parent (容器窗体对象).
+//   czUI.ctl 用它做全屏/恢复: Parent.hWnd / Parent.Icon.Handle 读取窗体,
+//   Parent.Move 移动窗体, With Parent 内 .Left/.Top/.Width/.Height 经
+//   vb6_ComGetIntProp(hwnd, ...) 由"宿主对象 → 属性"解析 (vb6forms_uc.c).
+//   这里以控件的容器窗口为起点, GetAncestor(GA_ROOT) 找到顶层窗体窗口.
+static HWND vb6_uc_ParentHwndRaw(void) {
+    if (!g_uc_current) return NULL;
+    HWND ctrl = g_uc_current->hwnd ? g_uc_current->hwnd
+               : (HWND)(intptr_t)g_uc_current->parent;
+    if (!ctrl) return NULL;
+    HWND root = GetAncestor(ctrl, GA_ROOT);
+    HWND parent = g_uc_current->parent;
+    if (parent && root && parent != root)
+        return root;              // 顶层窗体窗口
+    return parent ? parent : root;
+}
+
+void* vb6_UC_ParentObject(void)     { return (void*)vb6_uc_ParentHwndRaw(); }
+void* vb6_UC_ParentHwnd(void)       { return (void*)vb6_uc_ParentHwndRaw(); }
+
+void* vb6_UC_ParentIconHandle(void) {
+    HWND fw = vb6_uc_ParentHwndRaw();
+    if (!fw) return NULL;
+    HANDLE icon = (HANDLE)SendMessageW(fw, WM_GETICON, ICON_BIG, 0);
+    if (!icon)
+        icon = (HANDLE)(LONG_PTR)GetClassLongPtrW(fw, GCLP_HICON);
+    return (void*)icon;
+}
+
+void vb6_UC_ParentMove(int32_t left, int32_t top, int32_t width, int32_t height) {
+    HWND fw = vb6_uc_ParentHwndRaw();
+    if (fw) MoveWindow(fw, left, top, width, height, TRUE);
 }
 
 // ============================================================
@@ -493,6 +560,44 @@ static LRESULT CALLBACK vb6_uc_wndproc(HWND hwnd, UINT msg, WPARAM wParam, LPARA
                 vb6_uc_pop(&saved);
             }
             return 0;
+        case WM_LBUTTONDOWN:
+        case WM_RBUTTONDOWN:
+        case WM_LBUTTONUP:
+        case WM_RBUTTONUP:
+        case WM_MOUSEMOVE: {
+            // czUI fix: 把宿主窗口收到的鼠标消息转成 UserControl_MouseDown/Up/Move
+            // (此前完全没有转发, 控件无法点击/拖动 — czUI 标题栏拖动、按钮、开关全死)。
+            if (!r || !r->ready || !r->desc || !r->me) break;
+            void (*hook)(void*, int32_t, int32_t, float, float) = NULL;
+            int32_t button = 0;
+            switch (msg) {
+                case WM_LBUTTONDOWN: hook = r->desc->mouseDown;  button = 1; break;
+                case WM_RBUTTONDOWN: hook = r->desc->mouseDown;  button = 2; break;
+                case WM_LBUTTONUP:   hook = r->desc->mouseUp;    button = 1; break;
+                case WM_RBUTTONUP:   hook = r->desc->mouseUp;    button = 2; break;
+                case WM_MOUSEMOVE:   hook = r->desc->mouseMove;  button = 0; break;
+            }
+            if (!hook) break;
+            // 捕获鼠标, 保证按下后拖出窗口仍能收到 UP/MOVE (VB6 隐式行为)
+            if (msg == WM_LBUTTONDOWN || msg == WM_RBUTTONDOWN) SetCapture(hwnd);
+            else if (msg == WM_LBUTTONUP || msg == WM_RBUTTONUP) ReleaseCapture();
+            float sx = (float)(short)LOWORD(lParam);
+            float sy = (float)(short)HIWORD(lParam);
+            // 坐标换算到控件当前 ScaleMode (1=Twip 3=Pixel, 其他按像素)
+            if (vb6_UserControl_ScaleMode == 1) { sx *= 15.0f; sy *= 15.0f; }
+            vb6_UCSaved saved;
+            vb6_uc_push(r, &saved);
+            // czUI fix: 回调只更新状态; 视觉刷新统一走 WM_PAINT 双缓冲
+            // (直接 GetDC 画屏幕与擦除/重绘交错会造成闪烁)
+            vb6_UserControl_hDC = NULL;
+            hook(r->me, button, 0, sx, sy);
+            vb6_uc_pop(&saved);
+            InvalidateRect(hwnd, NULL, FALSE);
+            UpdateWindow(hwnd);
+            return 0;
+        }
+        case WM_CAPTURECHANGED:
+            break;
         case WM_PAINT: {
             if (!r || !r->ready) break;
             if (!r->desc || !r->desc->paint) break;
@@ -503,7 +608,7 @@ static LRESULT CALLBACK vb6_uc_wndproc(HWND hwnd, UINT msg, WPARAM wParam, LPARA
             const char* dumpDir113h = getenv("C3_UC_DUMPDIR");
             vb6_UCDib dib113h;
             int useDib113h = 0;
-            if (dumpDir113h && *dumpDir113h) {
+            if (1) { /* czUI fix: 始终离屏双缓冲, 一次 BitBlt 上屏 (消闪烁) */
                 RECT crc;
                 GetClientRect(hwnd, &crc);
                 int cw113h = (int)(crc.right - crc.left);
@@ -512,7 +617,10 @@ static LRESULT CALLBACK vb6_uc_wndproc(HWND hwnd, UINT msg, WPARAM wParam, LPARA
                     vb6_uc_dibCreate(&dib113h, hdc, cw113h, ch113h);
                     if (dib113h.memDC && dib113h.bits) {
                         RECT full113h = { 0, 0, cw113h, ch113h };
-                        HBRUSH wb113h = CreateSolidBrush(RGB(255, 255, 255));
+                        COLORREF crefFill = (vb6_Ambient_BackColor & 0x80000000L)
+                            ? GetSysColor(vb6_Ambient_BackColor & 0xFF)
+                            : (COLORREF)vb6_Ambient_BackColor;
+                        HBRUSH wb113h = CreateSolidBrush(crefFill);
                         FillRect(dib113h.memDC, &full113h, wb113h);
                         DeleteObject(wb113h);
                         useDib113h = 1;
@@ -529,13 +637,17 @@ static LRESULT CALLBACK vb6_uc_wndproc(HWND hwnd, UINT msg, WPARAM wParam, LPARA
             if (useDib113h) {
                 BitBlt(hdc, 0, 0, dib113h.w, dib113h.h, dib113h.memDC, 0, 0, SRCCOPY);
                 char path113h[1024];
+                const int doDump = (dumpDir113h && *dumpDir113h);
+                (void)doDump;
                 _snprintf(path113h, sizeof(path113h), "%s\\%s_%d_%p.bmp", dumpDir113h,
                           r->desc->typeName, (int)++g_uc_dumpSeq, hwnd);
                 path113h[sizeof(path113h) - 1] = '\0';
-                vb6_uc_dibSaveBmp(&dib113h, path113h);
+                if (doDump) {
+                    vb6_uc_dibSaveBmp(&dib113h, path113h);
+                    // Fix 123: 同步输出整窗合成图 (含 z 序/相对位置)
+                    vb6_uc_dumpFormComposite((HWND)GetAncestor(hwnd, GA_ROOT), dumpDir113h);
+                }
                 vb6_uc_dibDestroy(&dib113h);
-                // Fix 123: 同步输出整窗合成图 (含 z 序/相对位置)
-                vb6_uc_dumpFormComposite((HWND)GetAncestor(hwnd, GA_ROOT), dumpDir113h);
             }
             r->hdc = NULL;
             EndPaint(hwnd, &ps);
@@ -543,13 +655,37 @@ static LRESULT CALLBACK vb6_uc_wndproc(HWND hwnd, UINT msg, WPARAM wParam, LPARA
         }
         case WM_ERASEBKGND:
             if (r && r->ready) {
-                // 用控件 BackColor 填充, 避免闪烁/黑底
+                // 用容器底色填充, 避免重绘闪烁 (固定白色会在深色 UI 上闪白)
                 RECT rc; GetClientRect(hwnd, &rc);
-                HBRUSH b = CreateSolidBrush(RGB(255, 255, 255));
+                COLORREF cref = (vb6_Ambient_BackColor & 0x80000000L)
+                                    ? GetSysColor(vb6_Ambient_BackColor & 0xFF)
+                                    : (COLORREF)vb6_Ambient_BackColor;
+                HBRUSH b = CreateSolidBrush(cref);
                 FillRect((HDC)wParam, &rc, b);
                 DeleteObject(b);
             }
             return 1;
+        case WM_CTLCOLOREDIT:
+        case WM_CTLCOLORSTATIC: {
+            // czUI fix: 设计器子控件 (txtEmbed 等) 的 BackColor/ForeColor 落在
+            // VB6_BackColor/ForeColor 窗口属性上 (vb6_SetControlBackColor), 这里
+            // 应用之 — 否则深色 UI 上子编辑框是默认白底黑字。
+            HWND child = (HWND)lParam;
+            if (!child) break;
+            HDC hdc = (HDC)wParam;
+            COLORREF fg = (COLORREF)vb6_GetControlForeColor((void*)child);
+            COLORREF bg = (COLORREF)vb6_GetControlBackColor((void*)child);
+            if (bg & 0x80000000L) bg = GetSysColor(bg & 0xFF);
+            SetTextColor(hdc, fg);
+            SetBkColor(hdc, bg);
+            // 刷子缓存进窗口属性, 避免每条消息泄漏 GDI 句柄
+            HBRUSH br = (HBRUSH)GetPropW(child, L"VB6_BgBrush");
+            if (!br) {
+                br = CreateSolidBrush(bg);
+                SetPropW(child, L"VB6_BgBrush", (HANDLE)br);
+            }
+            return (LRESULT)br;
+        }
         case WM_DESTROY:
             if (r && r->desc && r->desc->terminate) {
                 vb6_UCSaved saved;
@@ -579,6 +715,10 @@ static void vb6_uc_gdiplusInit(void) {
     static int done = 0;
     if (done) return;
     done = 1;
+    // czUI fix: 环境字体默认名 — Bag 重放 ReadProperty("Font", Ambient.Font)
+    // 会把此对象设为控件字体; Name=NULL 时所有 GDI+ 文字静默消失
+    if (!g_vb6_UserControl_FontObj.Name)
+        g_vb6_UserControl_FontObj.Name = SysAllocString(L"Segoe UI");
     HMODULE mod = LoadLibraryA("gdiplus.dll");
     if (!mod) return;
     long (__stdcall *pStartup)(ULONG_PTR*, const void*, void*) =
@@ -596,7 +736,7 @@ static void vb6_uc_registerClass(HINSTANCE hInst) {
     if (done) return;
     WNDCLASSW wc;
     memset(&wc, 0, sizeof(wc));
-    wc.style = CS_HREDRAW | CS_VREDRAW;
+    wc.style = CS_HREDRAW | CS_VREDRAW | CS_DBLCLKS;  // czUI fix: UserControl_DblClick 需要
     wc.lpfnWndProc = vb6_uc_wndproc;
     wc.hInstance = hInst;
     wc.hCursor = LoadCursorW(NULL, (LPCWSTR)IDC_ARROW);
@@ -635,6 +775,17 @@ void* vb6_UC_HostCreate(const char* typeName, int32_t left, int32_t top,
     const vb6_UserControlDesc* desc = vb6_uc_findDesc(typeName);
     if (!desc) return NULL;
     if (g_uc_recCount >= VB6_UC_MAX_INST) return NULL;
+
+    // czUI fix: Ambient.BackColor 应反映容器窗体的 BackColor (VB6 语义)。
+    // 控件 RedrawControl 用它做底色填充, 取不到就落到 BTNFACE 灰/系统色,
+    // 深色窗体上圆角周围会出现灰圈。
+    {
+        char parentClass[128] = {0};
+        if (hParent && GetClassNameA((HWND)hParent, parentClass, (int)sizeof(parentClass) - 1) > 0) {
+            int bg = vb6_Forms_QueryClassBg(parentClass);
+            if (bg >= 0) vb6_Ambient_BackColor = bg;
+        }
+    }
 
     vb6_uc_registerClass((HINSTANCE)hInstance);
     vb6_uc_gdiplusInit();
@@ -784,8 +935,16 @@ static vb6_HostObjRec* vb6_ho_findWindow(const void* hwnd) {
     return vb6_ho_find(hwnd);
 }
 
+typedef struct Vb6WrapPair { void* wrap; void* target; } Vb6WrapPair;
+static Vb6WrapPair* g_uc_wraps = NULL;
+static int g_uc_wrapCount = 0, g_uc_wrapCap = 0;
+
 int32_t vb6_Host_IsHostObject(void* obj) {
     if (!obj) return 0;
+    {   // czUI fix: 包装器视为宿主对象 (含内部透明解包)
+        for (int i = 0; i < g_uc_wrapCount; i++)
+            if (g_uc_wraps[i].wrap == obj) return 1;
+    }
     // 真实窗口 (窗体/标准控件) HWND: IsWindow 仅查句柄表, 不解引用, 对任意指针安全
     if (IsWindow((HWND)obj)) return 1;
     if (vb6_uc_isControls(obj)) return 1;
@@ -1301,6 +1460,7 @@ static int32_t vb6_ho_putFontMember(void* fontProxy, const wchar_t* name, const 
 
 // 窗体/控件/字体 的属性读取. 返回 1=已处理
 int32_t vb6_Host_GetProp(void* obj, const wchar_t* name, void* outV) {
+    obj = vb6_UC_UnwrapHost(obj);  // czUI fix: 包装器透明解包
     vb6_VARIANT* out = (vb6_VARIANT*)outV;
     if (!obj || !name) return 0;
     vb6_ho_setVariantEmpty(out);
@@ -1389,6 +1549,7 @@ int32_t vb6_Host_GetProp(void* obj, const wchar_t* name, void* outV) {
 
 // 窗体/控件/字体 的属性写入. 返回 1=已处理
 int32_t vb6_Host_SetProp(void* obj, const wchar_t* name, const void* inV) {
+    obj = vb6_UC_UnwrapHost(obj);  // czUI fix: 包装器透明解包
     const vb6_VARIANT* v = (const vb6_VARIANT*)inV;
     if (!obj || !name) return 0;
     if (vb6_uc_isFont(obj)) return vb6_ho_putFontMember(obj, name, v);
@@ -1421,6 +1582,7 @@ int32_t vb6_Host_SetProp(void* obj, const wchar_t* name, const void* inV) {
 
 // 窗体/控件 的方法调用. argv 为已打包 VARIANT 指针数组. 返回 1=已处理
 int32_t vb6_Host_Call(void* obj, const wchar_t* name, int32_t argc, void** argv, void* outV) {
+    obj = vb6_UC_UnwrapHost(obj);  // czUI fix: 包装器透明解包
     vb6_VARIANT* out = (vb6_VARIANT*)outV;
     (void)argc;
     if (!obj || !name) return 0;
@@ -1544,3 +1706,411 @@ void vb6_Host_ClearVariant(void* v) {
 #ifdef __cplusplus
 } // extern "C"
 #endif
+
+// ============================================================
+// czUI fix: 轻量 PropertyBag (IDispatch) — 运行期读取设计期持久化属性
+// 生成的 UserControl_ReadProperties 通过 vb6_ComCall(bag, "ReadProperty", ...)
+// late-bound 调用本实现; 只有 .ctl 内部的读取后同步逻辑能借此执行
+// (czUI.ctl:478 `If m_Checked Then m_AnimPos = 1!` → 开关初始 ON)。
+// ============================================================
+typedef struct Vb6BagItem {
+    BSTR    name;
+    VARIANT val;
+} Vb6BagItem;
+
+typedef struct Vb6PropBag {
+    IDispatch   disp;          // lpVtbl 在首字段
+    ULONG       refs;
+    Vb6BagItem* items;
+    int32_t     count;
+    int32_t     cap;
+} Vb6PropBag;
+
+static HRESULT STDMETHODCALLTYPE Vb6Bag_QI(IDispatch* self, REFIID riid, void** out) {
+    if (!out) return E_POINTER;
+    *out = NULL;
+    if (IsEqualIID(riid, &IID_IUnknown) || IsEqualIID(riid, &IID_IDispatch)) {
+        *out = self;
+        self->lpVtbl->AddRef(self);
+        return S_OK;
+    }
+    return E_NOINTERFACE;
+}
+static ULONG STDMETHODCALLTYPE Vb6Bag_AddRef(IDispatch* self) { return 1; }
+static ULONG STDMETHODCALLTYPE Vb6Bag_Release(IDispatch* self) { return 1; }
+static HRESULT STDMETHODCALLTYPE Vb6Bag_GetTypeInfoCount(IDispatch* self, UINT* n) {
+    if (n) *n = 0; return S_OK;
+}
+static HRESULT STDMETHODCALLTYPE Vb6Bag_GetTypeInfo(IDispatch* self, UINT i, LCID l, ITypeInfo** t) {
+    (void)t; return E_NOTIMPL;
+}
+static HRESULT STDMETHODCALLTYPE Vb6Bag_GetIDsOfNames(IDispatch* self, REFIID riid,
+        LPOLESTR* names, UINT cNames, LCID lcid, DISPID* out) {
+    (void)self; (void)riid; (void)lcid;
+    if (!out || !cNames || !names || !names[0]) return E_POINTER;
+    wchar_t buf[64];
+    int i = 0;
+    for (; names[0][i] && i < 63; i++) buf[i] = towlower(names[0][i]);
+    buf[i] = 0;
+    if (wcscmp(buf, L"readproperty") == 0)  { *out = 1; return S_OK; }
+    if (wcscmp(buf, L"writeproperty") == 0) { *out = 2; return S_OK; }
+    return DISP_E_UNKNOWNNAME;
+}
+static Vb6BagItem* Vb6Bag_Find(Vb6PropBag* bag, const wchar_t* name) {
+    for (int32_t i = 0; i < bag->count; i++) {
+        if (_wcsicmp(bag->items[i].name, name) == 0) return &bag->items[i];
+    }
+    return NULL;
+}
+static HRESULT STDMETHODCALLTYPE Vb6Bag_Invoke(IDispatch* self, DISPID id, REFIID riid, LCID lcid,
+        WORD flags, DISPPARAMS* pd, VARIANT* result, EXCEPINFO* ei, UINT* argErr) {
+    (void)riid; (void)lcid; (void)flags; (void)ei; (void)argErr;
+    Vb6PropBag* bag = (Vb6PropBag*)self;
+    if (!pd) return E_POINTER;
+    if (id == 1) { /* ReadProperty(name[, default]) — rgvarg 逆序 */
+        int c = (int)pd->cArgs;
+        if (c < 1) return DISP_E_BADPARAMCOUNT;
+        VARIANT* vDefault = (c >= 2) ? &pd->rgvarg[0] : NULL;
+        VARIANT* vName   = &pd->rgvarg[c - 1];
+        if (vName->vt != VT_BSTR || !vName->bstrVal) return DISP_E_TYPEMISMATCH;
+        Vb6BagItem* it = Vb6Bag_Find(bag, vName->bstrVal);
+        if (!result) return S_OK;
+        VariantInit(result);
+        if (it) return VariantCopy(result, &it->val);
+        if (vDefault) return VariantCopy(result, vDefault);
+        return S_OK;
+    }
+    if (id == 2) { /* WriteProperty(name, value) */
+        int c = (int)pd->cArgs;
+        if (c < 2) return DISP_E_BADPARAMCOUNT;
+        VARIANT* vValue = &pd->rgvarg[0];
+        VARIANT* vName  = &pd->rgvarg[1];
+        if (vName->vt != VT_BSTR || !vName->bstrVal) return DISP_E_TYPEMISMATCH;
+        Vb6BagItem* it = Vb6Bag_Find(bag, vName->bstrVal);
+        if (!it) {
+            if (bag->count >= bag->cap) {
+                int32_t ncap = bag->cap ? bag->cap * 2 : 8;
+                Vb6BagItem* ni = (Vb6BagItem*)realloc(bag->items, sizeof(Vb6BagItem) * ncap);
+                if (!ni) return E_OUTOFMEMORY;
+                bag->items = ni; bag->cap = ncap;
+            }
+            it = &bag->items[bag->count++];
+            memset(it, 0, sizeof(*it));
+            it->name = SysAllocString(vName->bstrVal);
+        } else {
+            VariantClear(&it->val);
+        }
+        VariantInit(&it->val);
+        VariantCopy(&it->val, (VARIANT*)vValue);
+        return S_OK;
+    }
+    return DISP_E_MEMBERNOTFOUND;
+}
+
+static IDispatchVtbl g_vb6BagVtbl = {
+    Vb6Bag_QI, Vb6Bag_AddRef, Vb6Bag_Release,
+    Vb6Bag_GetTypeInfoCount, Vb6Bag_GetTypeInfo, Vb6Bag_GetIDsOfNames, Vb6Bag_Invoke
+};
+
+void* vb6_UC_PropBagCreate(void) {
+    Vb6PropBag* bag = (Vb6PropBag*)calloc(1, sizeof(Vb6PropBag));
+    if (!bag) return NULL;
+    bag->disp.lpVtbl = &g_vb6BagVtbl;
+    bag->refs = 1;
+    return bag;
+}
+
+void vb6_UC_PropBagFree(void* bagPtr) {
+    Vb6PropBag* bag = (Vb6PropBag*)bagPtr;
+    if (!bag) return;
+    for (int32_t i = 0; i < bag->count; i++) {
+        if (bag->items[i].name) SysFreeString(bag->items[i].name);
+        VariantClear(&bag->items[i].val);
+    }
+    free(bag->items);
+    free(bag);
+}
+
+static void vb6_BagPut(Vb6PropBag* bag, const wchar_t* name, const VARIANT* v) {
+    Vb6BagItem* it = Vb6Bag_Find(bag, name);
+    if (!it) {
+        if (bag->count >= bag->cap) {
+            int32_t ncap = bag->cap ? bag->cap * 2 : 8;
+            Vb6BagItem* ni = (Vb6BagItem*)realloc(bag->items, sizeof(Vb6BagItem) * ncap);
+            if (!ni) return;
+            bag->items = ni; bag->cap = ncap;
+        }
+        it = &bag->items[bag->count++];
+        memset(it, 0, sizeof(*it));
+        it->name = SysAllocString(name);
+    } else {
+        VariantClear(&it->val);
+    }
+    VariantInit(&it->val);
+    VariantCopy(&it->val, (VARIANT*)v);
+}
+
+void vb6_UC_BagPutStr(void* bag, const wchar_t* name, const wchar_t* value) {
+    if (!bag || !name) return;
+    VARIANT v; VariantInit(&v);
+    v.vt = VT_BSTR; v.bstrVal = SysAllocString(value ? value : L"");
+    vb6_BagPut((Vb6PropBag*)bag, name, &v);
+    VariantClear(&v);
+}
+void vb6_UC_BagPutInt(void* bag, const wchar_t* name, int32_t value) {
+    if (!bag || !name) return;
+    VARIANT v; VariantInit(&v);
+    v.vt = VT_I4; v.lVal = value;
+    vb6_BagPut((Vb6PropBag*)bag, name, &v);
+    VariantClear(&v);
+}
+void vb6_UC_BagPutDbl(void* bag, const wchar_t* name, double value) {
+    if (!bag || !name) return;
+    VARIANT v; VariantInit(&v);
+    v.vt = VT_R8; v.dblVal = value;
+    vb6_BagPut((Vb6PropBag*)bag, name, &v);
+    VariantClear(&v);
+}
+void vb6_UC_BagPutBool(void* bag, const wchar_t* name, int32_t value) {
+    if (!bag || !name) return;
+    VARIANT v; VariantInit(&v);
+    v.vt = VT_BOOL; v.boolVal = value ? VARIANT_TRUE : VARIANT_FALSE;
+    vb6_BagPut((Vb6PropBag*)bag, name, &v);
+    VariantClear(&v);
+}
+
+// ---- 设计器子控件: .ctl 设计面上的 TextBox → 每实例一个真实 EDIT 子窗口 ----
+void* vb6_UC_CreateDesignEdit(int32_t left, int32_t top, int32_t width, int32_t height) {
+    HWND parent = (HWND)vb6_UserControl_hWnd;
+    if (!parent) return NULL;
+    HINSTANCE hInst = (HINSTANCE)GetWindowLongPtrW(parent, GWLP_HINSTANCE);
+    HWND edit = CreateWindowExW(0, L"EDIT", L"",
+                                WS_CHILD | ES_AUTOHSCROLL,  /* 初始隐藏, 由控件代码控制 Visible */
+                                vb6_TwipToX(left), vb6_TwipToY(top),
+                                vb6_TwipToX(width), vb6_TwipToY(height),
+                                parent, NULL, hInst, NULL);
+    if (edit) {
+        HFONT f = (HFONT)GetStockObject(DEFAULT_GUI_FONT);
+        SendMessageW(edit, WM_SETFONT, (WPARAM)f, TRUE);
+    }
+    return edit;
+}
+
+// ---- czUI fix: 设计器 Timer (.ctl 设计面上的 VB.Timer) 逐实例实例化 ----
+// 隐藏窗口 + 真实 SetTimer; WM_TIMER 时按 VB6_TimerEnabled/Interval 属性决定
+// 是否回调 (vb6_SetTimerEnabled/Interval 已把这些值写进窗口属性)。
+// 这让 czUI 的 toggle 滑动动画 / 全屏自动隐藏标题栏真正运转起来。
+int vb6_uc_timersStarted = 0;  // czUI fix: 消息循环启动后设计器 Timer 才触发
+
+static LRESULT CALLBACK vb6_uc_timerProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
+    if (msg == WM_TIMER) {
+        void (*cb)(void*) = (void (*)(void*))GetPropW(h, L"VB6_TimerCb");
+        void* ctx = GetPropW(h, L"VB6_TimerCtx");
+        if (!cb) return 0;
+        if (!vb6_uc_timersStarted) return 0;
+        if (getenv("C3_NO_TIMER_CB")) return 0;  /* bisect */
+        if (!vb6_GetTimerEnabled(h)) return 0;
+        // Interval 属性变化时重设 SetTimer 周期
+        INT_PTR want = (INT_PTR)vb6_GetTimerInterval(h);
+        INT_PTR cur = (INT_PTR)GetPropW(h, L"VB6_TimerCur");
+        if (want > 0 && want != cur) {
+            SetTimer(h, 1, (UINT)want, NULL);
+            SetPropW(h, L"VB6_TimerCur", (HANDLE)want);
+        }
+        // czUI fix: 回调前换入归属实例的宿主上下文 (tmrTrack_Timer 读
+        // ScaleWidth/hWnd 等按当前实例; 全局句柄已被最后创建的实例覆盖)
+        vb6_UCRec* rec = NULL;
+        for (int i = 0; i < g_uc_recCount; i++) {
+            if (g_uc_recs[i].me == ctx) { rec = &g_uc_recs[i]; break; }
+        }
+        if (rec && !rec->ready) return 0;
+        if (rec) {
+            vb6_UCSaved saved;
+            vb6_uc_push(rec, &saved);
+            // czUI fix: 非 WM_PAINT 路径没有 DC, RedrawControl 的
+            // GdipCreateFromHDC(NULL) 会静默失败 (开关动画不动的根因) —
+            // push 已把 rec->hdc 拷进全局 vb6_UserControl_hDC, 这里直接
+            // 用 GetDC 覆盖全局, pop 时恢复旧值
+            vb6_UserControl_hDC = NULL;
+            cb(ctx);
+            vb6_uc_pop(&saved);
+            InvalidateRect(rec->hwnd, NULL, FALSE);
+            UpdateWindow(rec->hwnd);
+        } else {
+            cb(ctx);
+        }
+        return 0;
+    }
+    return DefWindowProcW(h, msg, wp, lp);
+}
+
+// czUI fix: 设计器子控件槽位 — 按当前 UC 上下文存取, 替代被多实例共享的
+// 全局句柄变量 (11 个实例只有最后一个的 timer/textbox 生效的根因)。
+// 用法: cgen 把设计器子控件句柄变量 emit 成
+//   #define vb6_hwnd_txtEmbed (*vb6_UC_DesignSlot("txtEmbed"))
+// 无上下文时指向孤儿槽 (NULL), 行为与旧全局一致。
+void** vb6_UC_DesignSlot(const char* name) {
+    static void* orphan = NULL;
+    if (!g_uc_current) return &orphan;
+    for (int i = 0; i < g_uc_current->designCount; i++) {
+        if (strcmp(g_uc_current->design[i].name, name) == 0)
+            return &g_uc_current->design[i].value;
+    }
+    if (g_uc_current->designCount < VB6_UC_DESIGN_SLOTS) {
+        Vb6UcDesignSlot* sl = &g_uc_current->design[g_uc_current->designCount++];
+        snprintf(sl->name, sizeof(sl->name), "%s", name);
+        sl->value = NULL;
+        return &sl->value;
+    }
+    return &orphan;
+}
+
+void* vb6_UC_CreateDesignTimer(void (*cb)(void*), void* ctx) {
+    static int clsRegistered = 0;
+    if (!clsRegistered) {
+        WNDCLASSW wc = {0};
+        wc.lpfnWndProc = vb6_uc_timerProc;
+        wc.hInstance = GetModuleHandleW(NULL);
+        wc.lpszClassName = L"VB6_UC_DesignTimer";
+        RegisterClassW(&wc);
+        clsRegistered = 1;
+    }
+    // 消息专用窗口 (不显示), 定时器属性沿用 VB6_TimerEnabled/Interval
+    HWND h = CreateWindowExW(0, L"VB6_UC_DesignTimer", L"", WS_OVERLAPPED,
+                             0, 0, 0, 0, HWND_MESSAGE, NULL, GetModuleHandleW(NULL), NULL);
+    if (!h) return NULL;
+    SetPropW(h, L"VB6_TimerCb", (HANDLE)cb);
+    SetPropW(h, L"VB6_TimerCtx", (HANDLE)ctx);
+    SetTimer(h, 1, 50, NULL);   // 默认 50ms; Interval 属性变化时由 proc 重设
+    return h;
+}
+
+// ============================================================
+// czUI fix: 宿主对象的 IDispatch 包装 — vb6_ComPackObject 对宿主对象
+// (HWND/UC 实例/集合/字体) 直接走 ((IDispatch*)obj)->lpVtbl->AddRef,
+// 会把结构体首字段当 vtable → AV (Charts2020 ClsResizer 实测)。
+// 包装成真实 COM 对象: AddRef/Release 引用计数安全, 晚绑定转发到
+// vb6_Host_Call/GetProp/SetProp。真实 COM/ActiveX 对象不走包装
+// (vb6_Host_IsHostObject 排除), 仍按原 AddRef/Release。
+// ============================================================
+typedef struct Vb6HostWrap {
+    IDispatch disp;
+    ULONG refs;
+    void* target;
+    wchar_t names[24][64];
+    int nameCount;
+} Vb6HostWrap;
+
+static HRESULT STDMETHODCALLTYPE HW_QI(IDispatch* self, REFIID riid, void** out) {
+    if (!out) return E_POINTER;
+    *out = NULL;
+    if (IsEqualIID(riid, &IID_IUnknown) || IsEqualIID(riid, &IID_IDispatch)) {
+        *out = self; self->lpVtbl->AddRef(self); return S_OK;
+    }
+    return E_NOINTERFACE;
+}
+static ULONG STDMETHODCALLTYPE HW_AddRef(IDispatch* self) {
+    Vb6HostWrap* w = (Vb6HostWrap*)self; return ++w->refs;
+}
+static ULONG STDMETHODCALLTYPE HW_Release(IDispatch* self) {
+    Vb6HostWrap* w = (Vb6HostWrap*)self;
+    ULONG r = --w->refs;
+    if (r == 0) free(w);
+    return r;
+}
+static HRESULT STDMETHODCALLTYPE HW_GetTypeInfoCount(IDispatch* self, UINT* n) {
+    if (n) *n = 0; return S_OK;
+}
+static HRESULT STDMETHODCALLTYPE HW_GetTypeInfo(IDispatch* self, UINT i, LCID l, ITypeInfo** t) {
+    (void)t; return E_NOTIMPL;
+}
+static HRESULT STDMETHODCALLTYPE HW_GetIDsOfNames(IDispatch* self, REFIID riid,
+        LPOLESTR* names, UINT cNames, LCID lcid, DISPID* out) {
+    (void)riid; (void)lcid;
+    Vb6HostWrap* w = (Vb6HostWrap*)self;
+    if (!out || !cNames || !names || !names[0]) return E_POINTER;
+    for (UINT k = 0; k < cNames; k++) {
+        int found = -1;
+        for (int i = 0; i < w->nameCount; i++)
+            if (_wcsicmp(w->names[i], names[k]) == 0) { found = i; break; }
+        if (found < 0 && w->nameCount < 24) {
+            _snwprintf(w->names[w->nameCount], 63, L"%s", names[k]);
+            found = w->nameCount++;
+        }
+        if (found < 0) return DISP_E_UNKNOWNNAME;
+        out[k] = found + 1;
+    }
+    return S_OK;
+}
+static HRESULT STDMETHODCALLTYPE HW_Invoke(IDispatch* self, DISPID id, REFIID riid, LCID lcid,
+        WORD flags, DISPPARAMS* pd, VARIANT* result, EXCEPINFO* ei, UINT* argErr) {
+    (void)riid; (void)lcid; (void)ei; (void)argErr;
+    Vb6HostWrap* w = (Vb6HostWrap*)self;
+    int idx = (int)id - 1;
+    if (idx < 0 || idx >= w->nameCount || !pd) return DISP_E_MEMBERNOTFOUND;
+    wchar_t* name = w->names[idx];
+    if (flags & (DISPATCH_PROPERTYPUT | DISPATCH_PROPERTYPUTREF)) {
+        if (pd->cArgs < 1) return DISP_E_BADPARAMCOUNT;
+        vb6_VARIANT hv; vb6_ho_setVariantEmpty(&hv);
+        vb6_Host_FromWinVariant(&pd->rgvarg[0], &hv);
+        vb6_Host_SetProp(w->target, name, &hv);
+        return S_OK;
+    }
+    // 方法/属性读取: DISPPARAMS 逆序 → RTL 正序变体数组
+    vb6_VARIANT* hargs = NULL;
+    if (pd->cArgs > 0) {
+        hargs = (vb6_VARIANT*)calloc((size_t)pd->cArgs, sizeof(vb6_VARIANT));
+        for (int i = 0; i < pd->cArgs; i++)
+            vb6_Host_FromWinVariant(&pd->rgvarg[pd->cArgs - 1 - i], &hargs[i]);
+    }
+    vb6_VARIANT out; vb6_ho_setVariantEmpty(&out);
+    int handled = vb6_Host_Call(w->target, name, pd->cArgs, (void**)hargs, &out);
+    if (!handled && (flags & DISPATCH_PROPERTYGET))
+        handled = vb6_Host_GetProp(w->target, name, &out);
+    if (hargs) {
+        for (int i = 0; i < pd->cArgs; i++) vb6_Host_ClearVariant(&hargs[i]);
+        free(hargs);
+    }
+    if (handled && result) {
+        VariantInit(result);
+        vb6_Host_ToWinVariant(&out, result);
+    }
+    vb6_Host_ClearVariant(&out);
+    return S_OK;
+}
+
+static IDispatchVtbl g_vb6HostWrapVtbl = {
+    HW_QI, HW_AddRef, HW_Release,
+    HW_GetTypeInfoCount, HW_GetTypeInfo, HW_GetIDsOfNames, HW_Invoke
+};
+
+void* vb6_UC_WrapHostObject(void* obj) {
+    Vb6HostWrap* w = (Vb6HostWrap*)calloc(1, sizeof(Vb6HostWrap));
+    if (!w) return NULL;
+    w->disp.lpVtbl = &g_vb6HostWrapVtbl;
+    w->refs = 1;
+    w->target = obj;
+    // 注册包装器 → 原对象 映射, 供 IsHostObject/Host_* 解包 (透明性)
+    // Fix 126: 容量不足(或尚未分配)时扩容 —— 旧逻辑 `g_uc_wrapCount < g_uc_wrapCap`
+    // 在 g_uc_wrapCap==0 时恒为 false, 导致 g_uc_wraps 永不分配、任何宿主对象都
+    // 不被登记, vb6_UC_UnwrapHost 永远返回包装器本身而非原对象 → 字体/集合经
+    // ReadProperty 默认路径取回后变成 Vb6HostWrap 而非真实结构体, 图表标题/百分比
+    // 文字全部缺失 (Charts 2020 实测)。改为"满则扩容"。
+    if (g_uc_wrapCount >= g_uc_wrapCap) {
+        int32_t ncap = g_uc_wrapCap ? g_uc_wrapCap * 2 : 32;
+        Vb6WrapPair* ng = (Vb6WrapPair*)realloc(g_uc_wraps, sizeof(Vb6WrapPair) * ncap);
+        if (ng) { g_uc_wraps = ng; g_uc_wrapCap = ncap; }
+    }
+    if (g_uc_wraps) {
+        g_uc_wraps[g_uc_wrapCount].wrap = w;
+        g_uc_wraps[g_uc_wrapCount].target = obj;
+        g_uc_wrapCount++;
+    }
+    return w;
+}
+
+void* vb6_UC_UnwrapHost(void* obj) {
+    for (int i = 0; i < g_uc_wrapCount; i++)
+        if (g_uc_wraps[i].wrap == obj) return g_uc_wraps[i].target;
+    return obj;
+}

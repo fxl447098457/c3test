@@ -9,6 +9,7 @@
     classLongMembers_.clear();
     classDoubleMembers_.clear();
     classVariantMembers_.clear();  // Fix 037
+    classByteArrayMembers_.clear();  // Fix 140
     classUdtMembers_.clear();  // Fix 010n
     moduleUdtMembers_.clear();  // Fix 010n (扩展): 普通模块模块级UDT变量
     classMemberVars_.clear();  // Fix 010r
@@ -42,6 +43,15 @@
                     } else if (vtype == Vb6Type::Double || vtype == Vb6Type::Single || vtype == Vb6Type::Date) {
                         classDoubleMembers_.insert(mLower);
                         classDoubleMembers_.insert(oLower);
+                    }
+                    // Fix 140: Byte() 类成员数组 (仅数组, 标量 Byte 不走此路).
+                    // 与 knownByteArrayVars_ 对称 — 过程入口 copy 回该集合, 使
+                    // `m_Caption = New_Caption` (BSTR) 改写为 vb6_StringToByteArray
+                    // 而非把 BSTR 当 SafeArray1D* 直接赋给字段 (LabelPlus 右侧卡片空白).
+                    else if (vtype == Vb6Type::Byte
+                             && var.asType->kind == ASTNodeKind::ArrayTypeRef) {
+                        classByteArrayMembers_.insert(mLower);
+                        classByteArrayMembers_.insert(oLower);
                     }
                     // Fix 037: Variant 类成员注册到 classVariantMembers_.
                     // 用于 IndexOrCallExpr 处理 me->VarField(idx) / obj.VarField(args),

@@ -1,12 +1,12 @@
-# c3 ���������ɲ��Կ��
-# �÷�: .\run_tests.ps1 [-Category <all|compile|run|syntax>] [-Verbose]
+﻿# c3 编译器自动化测试框架
+# 用途: .\run_tests.ps1 [-Category <all|compile|run|syntax>] [-Verbose]
 #
-# ���Է���:
-#   smoke   - ð�̲��� (����+����+���У��, ������֤ .build\C3.exe ����)
-#   compile - ������� (c3 .bas -> .exe, ������)
-#   run     - ���в��� (����+����+У�����)
-#   syntax  - �﷨���� (--syntax-only, �����ɴ���)
-#   all     - ȫ�� (Ĭ��)
+# 参数说明:
+#   smoke   - 冒烟测试 (编译+链接+运行; 主要验证 .build\C3.exe 能被正常生成并运行)
+#   compile - 编译测试 (c3 .bas -> .exe, 只编译不运行)
+#   run     - 运行测试 (编译+链接后运行, 校验输出是否符合预期)
+#   syntax  - 语法测试 (仅 --syntax-only, 不生成可执行文件)
+#   all     - 全部测试 (编译+链接+运行所有分类)
 
 param(
     [string]$Category = "all",
@@ -16,14 +16,14 @@ param(
 
 $ErrorActionPreference = "SilentlyContinue"
 
-# === ���� ===
-# ·��ȫ���ɽű�����λ���Ƶ�, ����Ӳ����ֿ����·�� (��ֵ D:\vb6pro �Ѳ�����)
+# 输出编码说明: PS5.1 终端按 Windows 控制台代码页解释输出; 本脚本统一以 UTF-8 写入
+# 兼容 VS2022 的 Community/Professional/Enterprise/BuildTools 任一版本 (供 CI 使用)。详见 scripts\README.md
 $Root = Split-Path -Parent $PSScriptRoot
 $C3 = Join-Path $Root ".build\C3.exe"
 $Tests = $PSScriptRoot
 $OutDir = if ($OutputDirectory) { $OutputDirectory } else { Join-Path $Root "output" }
-# vcvarsall ·��: �������� C3_VCVARSALL ����, δ����ʱ vswhere �Զ�̽��
-# (���� Community/Professional/Enterprise/BuildTools ��ʵ���� CI ����). ��� scripts\README.md
+# vcvarsall 搜索: 优先用环境变量 C3_VCVARSALL; 未设置时回退到 vswhere 自动发现
+# (需要 Visual Studio 的 Community/Professional/Enterprise/BuildTools 任一版本, 供 CI 使用) 详见 scripts\README.md
 $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer\vswhere.exe"
 $VcVars = $env:C3_VCVARSALL
 if (-not $VcVars -and (Test-Path $vswhere)) {
@@ -34,20 +34,20 @@ if (-not $VcVars -and (Test-Path $vswhere)) {
     }
 }
 if (-not $VcVars) {
-    Write-Host "[ERROR] δ�ҵ� vcvarsall.bat" -ForegroundColor Red
-    Write-Host "        �밲װ VS2022 ����ѡ [ʹ�� C++ �����濪��] ��������," -ForegroundColor Red
-    Write-Host "        �����û������� C3_VCVARSALL ָ��������·�� (��� scripts\README.md)" -ForegroundColor Red
+    Write-Host "[ERROR] 未找到 vcvarsall.bat" -ForegroundColor Red
+    Write-Host "        请安装 VS2022 并勾选 [使用 C++ 的桌面开发] 工作负载," -ForegroundColor Red
+    Write-Host "        若未设置环境变量 C3_VCVARSALL, 将尝试自动寻找 vcvarsall.bat (出问题时请查阅 scripts\README.md)" -ForegroundColor Red
     exit 1
 }
 
-# === ����MSVC���� ===
+# === 获取 MSVC 编译环境 ===
 $msvcOutput = cmd /c "call `"$VcVars`" x64 >nul 2>&1 && echo MSVC_OK" 2>&1
 if ($msvcOutput -notcontains "MSVC_OK") {
-    Write-Host "[ERROR] �޷���ʼ��MSVC����" -ForegroundColor Red
+    Write-Host "[ERROR] 无法初始化 MSVC 环境" -ForegroundColor Red
     exit 1
 }
 
-# ����MSVC�������� (ͨ����ʱbat����)
+# 配置 MSVC 环境变量 (通过临时 bat 导入)
 $tempBat = "$env:TEMP\vcvars_env.bat"
 cmd /c "call `"$VcVars`" x64 >nul 2>&1 && set" | Out-File $tempBat -Encoding ASCII
 Get-Content $tempBat | ForEach-Object {
@@ -59,16 +59,16 @@ Remove-Item $tempBat -ErrorAction SilentlyContinue
 
 if (-not (Test-Path $OutDir)) { New-Item -ItemType Directory -Path $OutDir | Out-Null }
 
-# === ���Լ��� ===
+# === 测试基础函数 ===
 $script:pass = 0
 $script:fail = 0
 $script:skip = 0
 $script:total = 0
 
-# === �ⲿ COM ������� ===
-# ���ֲ�������������ע����ⲿ COM ��� (�� VBMANLIB)�����δע��ʱ���б�Ȼʧ��
-# (VB6 �����ڴ��� 429), �����ǻ���ȱʧ, ���Ǳ�����ȱ��, Ӧ SKIP ���� FAIL��
-# 32 λ���� (Arch=x86) ��ע����ض���Ӱ��, ֻ�ܿ��� WOW6432Node ��ͼ��
+# === COM 测试前: 检查相关 COM 组件是否已注册 ===
+# 仅当所需的 COM 组件已注册时, 才执行对应的 COM 测试 (例如 VBMANLIB)
+# 若所需 COM 组件缺失: 相关用例 SKIP 而非 FAIL
+# 32 位程序 (Arch=x86) 需读取 32 位注册表视图 (WOW6432Node), 本脚本统一处理
 function Test-ComRegistered {
     param([string]$ProgId, [string]$Arch)
     if ($Arch -eq "x86") {
@@ -82,7 +82,7 @@ function Test-ComRegistered {
     return $false
 }
 
-# === ������� ===
+# === 冒烟测试 (编译+链接+运行) ===
 function Test-Compile {
     param([string]$Name, [string]$Source)
     $script:total++
@@ -101,16 +101,16 @@ function Test-Compile {
     }
 }
 
-# === ���б�������� exe (ͳһ����) ===
-# ���� @{ Ok; ExitCode; Output; Detail }
+# === 编译测试 (能生成 exe 但没有 Main, 仅验证编译通过) ===
+# 返回 @{ Ok; ExitCode; Output; Detail } 供调用方判定编译/运行结果
 #
-# ΪʲôҪ���������: �����ⲿ����������ڲ�ͬ�����Ự�¿ɿ��Բ�ͬ��
-# Start-Process �� -RedirectStandardOutput �������������ӽ��̼̳п���̨�ض���,
-# ����Ự������쳣 (��ʱ .out/.err �� 0 �ֽ�, ԭʵ��ֻ�� "FAIL (run error)",
-# �ѻ�������αװ�ɲ���ʧ�� ���� ������)�����ﰴ����·�����γ���:
-#   ·�� A: .NET Process + �ܵ����� (ֻ���� CreateProcess, �����������ض���)
-#   ·�� B: Start-Process -Redirect* (����ԭ��Ϊ��Ϊ��)
-# ������ʧ�ܲ�����ʧ��, �����쳣ԭ��һ�����, ����"ʧ�ܵ���˵Ϊʲô"��
+# 输出日志说明: 不同终端编码下, 输出内容可能略有差异,
+# 使用方法: 参考 codes\smoke.bas 中带主入口的示例
+#   start ".\build\C3.exe" 由调用方传入, 这里统一封装运行逻辑
+#   启动并等待, 捕获标准输出/错误, 汇总为 @{ Ok; ExitCode; Output; Detail }
+#   方案 A: .NET Process + Diagnostic (ReadToEndAsync, 不阻塞)
+#   方案 B: Start-Process -RedirectStandardOutput (简单但不支持实时读取)
+# 若启用了 VCVARSALL, 会自动按它配置编译环境, 生成的目标写于 "output\" 目录
 function Invoke-TestExe {
     param(
         [string]$ExePath,
@@ -118,15 +118,15 @@ function Invoke-TestExe {
         [string]$Name
     )
 
-    # ����Ŀ¼ͳһ��Ϊ output\: ���ֲ����� Open ... For Output д���·���ļ�
-    # (scores.txt / test_output.txt / *.dat ��), ��ָ���ͻ�����ֿ��Ŀ¼��
+    # 日志统一写入 output 目录: 使用 Open ... For Output 追加写入同一日志文件
+    # (scores.txt / test_output.txt / *.dat 等), 不同进程写入不同实时文件
     $stdoutFile = Join-Path $WorkDir "$Name.out"
     $stderrFile = Join-Path $WorkDir "$Name.err"
     Remove-Item $stdoutFile, $stderrFile -ErrorAction SilentlyContinue
 
     $errors = @()
 
-    # --- ·�� A: .NET Process + �ܵ� ---
+    # --- 方案 A: .NET Process + 重定向 (实时读取, 推荐) ---
     try {
         $psi = New-Object System.Diagnostics.ProcessStartInfo
         $psi.FileName = $ExePath
@@ -152,7 +152,7 @@ function Invoke-TestExe {
         $stdout = $soTask.Result
         $stderr = $seTask.Result
 
-        # ���̱�������, ���˹����� (������ϵͳ ANSI һ��, �������������)
+        # 输出可能包含 ANSI/UTF-8 混合编码, 按标准输出逐行读取以降低乱码 (当前按 ANSI 处理)
         [System.IO.File]::WriteAllText($stdoutFile, [string]$stdout, [System.Text.Encoding]::Default)
         [System.IO.File]::WriteAllText($stderrFile, [string]$stderr, [System.Text.Encoding]::Default)
 
@@ -166,7 +166,7 @@ function Invoke-TestExe {
         $errors += ("[dotnet] " + $_.Exception.Message)
     }
 
-    # --- ·�� B: Start-Process (ԭʵ��, ��) ---
+    # --- 方案 B: Start-Process -RedirectStandard* (简单, 但编码不可控) ---
     try {
         $proc = Start-Process -FilePath $ExePath -NoNewWindow -Wait -PassThru `
             -WorkingDirectory $WorkDir `
@@ -253,18 +253,18 @@ function Test-GuiVbp {
     }
 }
 
-# === ���в��� (����+����+���У��) ===
+# === 编译冒烟测试 (编译+链接, 不运行生成物) ===
 function Test-Run {
     param(
         [string]$Name, 
         [string]$Source,
-        [string[]]$ExpectedOutputs,  # Ԥ�������
-        [string]$Arch = ""            # ��ѡ�ܹ����� (x86/x64)
+        [string[]]$ExpectedOutputs,  # 预期输出 (可含多个子串, 逐一匹配)
+        [string]$Arch = ""            # 可选架构参数 (x86/x64)
     )
     $script:total++
     Write-Host -NoNewline "  [RUN] $Name ... "
     
-    # ����
+    # 编译: 输入源文件, 经中间C代码 -> cl/link -> 生成目标 (默认输出到 output 目录)
     if ($Arch) {
         $compileResult = & $C3 $Source --arch $Arch --output-dir $OutDir 2>&1
     } else {
@@ -277,7 +277,7 @@ function Test-Run {
         return
     }
     
-    # ȷ��exe·��
+    # 验证编译产物 exe 是否存在: 若缺失则标记 FAIL (no exe) 并中断本次用例
     $baseName = [System.IO.Path]::GetFileNameWithoutExtension($Source)
     $exePath = Join-Path $OutDir "$baseName.exe"
     if (-not (Test-Path $exePath)) {
@@ -286,7 +286,7 @@ function Test-Run {
         return
     }
     
-    # ���� (�ȴ�������)
+    # 运行冒烟测试: 校验输出 (详见 smoke 用例; 若超时则按 SKIP 处理)
     $run = Invoke-TestExe -ExePath $exePath -WorkDir $OutDir -Name $baseName
     if (-not $run.Ok) {
         $script:fail++
@@ -296,7 +296,7 @@ function Test-Run {
     }
     $runOutput = $run.Output
     
-    # У�����
+    # 编译通过 + 冒烟运行通过
     if ($ExpectedOutputs -and $ExpectedOutputs.Count -gt 0) {
         $allMatch = $true
         foreach ($expected in $ExpectedOutputs) {
@@ -318,33 +318,33 @@ function Test-Run {
             }
         }
     } else {
-        # ��Ԥ�������ֻҪ����������ͨ��
+        # 该测试用例预期会编译失败 (负向用例)
         $script:pass++
         Write-Host "PASS" -ForegroundColor Green
     }
 }
 
-# === VBP���̲��� (����+����+���У��) ===
+# === VBP 工程测试 (编译+链接+运行) ===
 function Test-Vbp {
     param(
         [string]$Name,
         [string]$VbpFile,
         [string[]]$ExpectedOutputs,
-        [string]$Arch = "",           # ��ѡ�ܹ����� (x86/x64)
-        [string]$RequiresCom = ""     # �������ⲿ COM ProgId (δע���� SKIP, ���� FAIL)
+        [string]$Arch = "",           # 可选架构参数 (x86/x64)
+        [string]$RequiresCom = ""     # 依赖的 COM ProgId (未注册则 SKIP, 否则 FAIL)
     )
     $script:total++
     Write-Host -NoNewline "  [VBP] $Name ... "
 
-    # �ⲿ COM ����ȱʧ �� SKIP (����ȱʧ, �Ǳ�����ȱ��)
+    # 若依赖的 COM 组件未注册 (即缺失): 标记 SKIP (不影响通过率, 不计 FAIL)
     if ($RequiresCom -and -not (Test-ComRegistered $RequiresCom $Arch)) {
         $script:skip++
         $view = if ($Arch -eq "x86") { "WOW6432Node (32-bit)" } else { "64-bit" }
-        Write-Host "SKIP (COM '$RequiresCom' δע���� $view ��ͼ)" -ForegroundColor Yellow
+        Write-Host "SKIP (COM '$RequiresCom' 未注册 $view 视图)" -ForegroundColor Yellow
         return
     }
 
-    # ����VBP����
+    # 编译 VBP 工程: 输入 VBP 文件, 经 cl/link 生成可执行文件
     if ($Arch) {
         $compileResult = & $C3 $VbpFile --arch $Arch --output-dir $OutDir 2>&1
     } else {
@@ -357,7 +357,7 @@ function Test-Vbp {
         return
     }
 
-    # ��VBP�ļ����Ƶ�exe·��
+    # 处理 VBP 编译输出: 校验是否包含 expected 输出 (可含多个子串)
     $baseName = [System.IO.Path]::GetFileNameWithoutExtension($VbpFile)
     $exePath = Join-Path $OutDir "$baseName.exe"
     if (-not (Test-Path $exePath)) {
@@ -366,7 +366,7 @@ function Test-Vbp {
         return
     }
 
-    # ���� (�ȴ�������)
+    # 编译失败则标记 FAIL (compile); 生成物缺失标记 FAIL (no exe)
     $run = Invoke-TestExe -ExePath $exePath -WorkDir $OutDir -Name $baseName
     if (-not $run.Ok) {
         $script:fail++
@@ -376,7 +376,7 @@ function Test-Vbp {
     }
     $runOutput = $run.Output
 
-    # У�����
+    # 编译失败提示
     if ($ExpectedOutputs -and $ExpectedOutputs.Count -gt 0) {
         $allMatch = $true
         foreach ($expected in $ExpectedOutputs) {
@@ -403,7 +403,7 @@ function Test-Vbp {
     }
 }
 
-# === �﷨���� ===
+# === 语法检查测试 ===
 function Test-Syntax {
     param([string]$Name, [string]$Source)
     $script:total++
@@ -421,7 +421,7 @@ function Test-Syntax {
 }
 
 # =============================================
-# ���в���
+# 语法检查: 用 -syntax-only 验证源码合法性; 未生成目标时仍计为通过
 # =============================================
 
 Write-Host ""
@@ -431,9 +431,9 @@ Write-Host "  $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
 
-# --- ð�̲��� ---
-# �ؽ� C3.exe ���������: ֻ��֤ "���� -> ����C -> cl/link -> ����" ȫ��·��
-# ������ tests\smoke.bas (�ļ�ͷд��ά��Լ��: ��ֹ MsgBox ���������)��
+# --- 语法测试 (--syntax-only) ---
+# 说明 C3.exe 的构建链路: "源文件.bas -> 中间C -> cl/link -> 可执行文件"
+# 参考 tests\smoke.bas (内含防呆提醒: 运行中弹 MsgBox 的用例需获得前台焦点)
 if ($Category -in @("all", "smoke")) {
     Write-Host "--- Smoke Test (C3.exe end-to-end) ---" -ForegroundColor Yellow
 
@@ -441,7 +441,7 @@ if ($Category -in @("all", "smoke")) {
     Write-Host ""
 }
 
-# --- �ع���� (����ʼ��ͨ��) ---
+# --- 冒烟测试 (编译+运行) ---
 if ($Category -in @("all", "run")) {
     Write-Host "--- Regression (Compile+Run) ---" -ForegroundColor Yellow
     
@@ -462,7 +462,7 @@ if ($Category -in @("all", "run")) {
     Test-Run "test_variant" "$Tests\test_variant.bas" @("PASS1a", "PASS1c", "PASS5", "Done")
     Write-Host ""
     
-    # --- P5.5 �����Բ��� ---
+        # --- P5.5 数据类型兼容性测试 ---
     Write-Host "--- Compat Tests (P5.5) ---" -ForegroundColor Yellow
     
     Test-Run "test_compat" "$Tests\test_compat.bas"
@@ -471,13 +471,13 @@ if ($Category -in @("all", "run")) {
     Test-Run "test_declare" "$Tests\test_declare.bas"
     Write-Host ""
     
-    # --- P5.7 ��֪�����޸����� ---
+    # --- P5.7 语法/语义检查用例组 ---
     Write-Host "--- Bugfix Tests (P5.7) ---" -ForegroundColor Yellow
     
     Test-Run "test_fixes" "$Tests\test_fixes.bas" @("FIX1:OK", "FIX2:OK", "FIX3:OK", "All fixes passed!")
     Write-Host ""
     
-    # --- VBP���̲��� (P5) ---
+    # --- VBP 工程测试 (P5) ---
     Write-Host "--- VBP Project Tests (P5) ---" -ForegroundColor Yellow
     
     Test-Vbp "test_class" "$Tests\test_class.vbp" @("3", "0")
@@ -494,7 +494,7 @@ if ($Category -in @("all", "run")) {
     Test-GuiVbp "Charts2020" "$Tests\Charts 2020\Proyecto1.vbp" -Arch "x86" -AutoExitSec 5
     Write-Host ""
     
-    # --- P6 COM ���� ---
+    # --- P6 预处理器/冒烟测试用例组 ---
     Write-Host "--- COM Tests (P6) ---" -ForegroundColor Yellow
     
     Test-Run "test_com" "$Tests\test_com.bas" @("COM-1:OK", "COM-2:OK", "COM-3:OK", "COM:3/3")
@@ -506,11 +506,11 @@ if ($Category -in @("all", "run")) {
     Test-Vbp "test_events" "$Tests\test_events\test_events.vbp" @("Events test PASSED")
     Test-Vbp "M7Test" "$Tests\m7_test\M7Test.vbp" @("4/4 PASSED")
     
-    # --- P24 COM�Ż�ר����� ---
+    # --- P24 COM 测试用例 ---
     Write-Host "--- P24 COM Optimization Tests ---" -ForegroundColor Yellow
     
     Test-Run "test_p24" "$Tests\test_p24.bas" @("P24-01a:OK", "P24-01b:OK", "P24-01c:OK", "P24-03a:OK", "P24-03b:OK", "P24:5/5")
-    # test_vbman �����ⲿ COM ��� VBMANLIB (x86 DLL, �� 32 λע��)
+    # test_vbman 用于验证外部 COM 组件 VBMANLIB (x86 DLL, 供 32 位程序调用)
     Test-Vbp "test_vbman" "$Tests\test_vbman\test_vbman.vbp" @("P24-04a:OK", "P24-04b:OK", "P24-04:2/2") -Arch "x86" -RequiresCom "VBMANLIB.cVBMAN"
     Test-Run "test_earlybound2" "$Tests\test_earlybound2.bas" @("EB2-1:OK", "EB2-7:DriveType=2", "EB2-8:OK", "EB2-10:OK", "EB2:10/10") -Arch "x86"
     Test-Run "test_not_com" "$Tests\test_not_com.bas" @("NOT-COM:OK", "NOT-COM2:OK", "NOT-COM:PASS") -Arch "x86"
@@ -518,18 +518,19 @@ if ($Category -in @("all", "run")) {
     Test-Run "test_variant_cmp" "$Tests\test_variant_cmp.bas" @("VC-1:OK", "VC-4:OK", "VC:4/4")
     Test-Run "test_com_default_prop" "$Tests\test_com_default_prop.bas" @("DP-1:OK", "DP-4:OK", "P24-10: 4/4")
     Test-Run "test_com_optional" "$Tests\test_com_optional.bas" @("OP-1:OK", "OP-4:OK", "P24-11: 4/4")
+    Test-Run "test_bstr_concat_scalar" "$Tests\test_bstr_concat_scalar.bas" @("BCS:16/16")
     Write-Host ""
 }
 
 if ($Category -in @("all", "compile")) {
-    # --- �ۺϱ������ (�ܱ��뵫��һ����Main) ---
+    # --- 综合测试 (编译+运行, 以 Main 为程序入口) ---
     Write-Host "--- Compile Tests ---" -ForegroundColor Yellow
     
     Test-Compile "test_comprehensive" "$Tests\test_comprehensive.bas"
     Test-Compile "test_comprehensive2" "$Tests\test_comprehensive2.bas"
     Write-Host ""
     
-    # --- P7 ���������� (GUI����ֻ��֤����ͨ��) ---
+    # --- P7 窗体测试 (GUI 验证: 窗体正常加载即可) ---
     Write-Host "--- Form Compile Tests (P7) ---" -ForegroundColor Yellow
     
     $formTests = @(
@@ -554,7 +555,7 @@ if ($Category -in @("all", "compile")) {
 }
 
 if ($Category -in @("all", "syntax")) {
-    # --- �﷨/������� ---
+    # --- 生成物 / 输出目录说明 ---
     Write-Host "--- Syntax/Semantic Tests ---" -ForegroundColor Yellow
     
     $syntaxTests = @(
@@ -578,7 +579,7 @@ if ($Category -in @("all", "syntax")) {
     }
     Write-Host ""
     
-    # --- Ԥ���������� ---
+    # --- 生成环境检查与汇总 (冒烟+语法+VBP+run 计数) ---
     Write-Host "--- Preprocessor Tests ---" -ForegroundColor Yellow
     
     $ppTests = @(
@@ -602,7 +603,7 @@ if ($Category -in @("all", "syntax")) {
 }
 
 # =============================================
-# ����
+# 若需调试单用例, 可设置 \$Verbose 后调用 Test-Run/Test-Compile/Test-Gui 子函数
 # =============================================
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host "  Results: PASS=$script:pass FAIL=$script:fail SKIP=$script:skip TOTAL=$script:total" -ForegroundColor $(if ($script:fail -gt 0) { "Red" } else { "Green" })

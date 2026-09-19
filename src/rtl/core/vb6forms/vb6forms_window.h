@@ -20,6 +20,10 @@ extern "C" {
 // iconResId: 图标资源ID (0=默认)
 // 返回: 0=成功, -1=失败
 int vb6_RegisterFormClass(const char* className, void* wndProc, void* hInstance, int iconResId);
+// czUI fix: 窗体级 .frm BackColor 支持 (bg<0 = 未指定走 VB6 默认)
+int vb6_RegisterFormClassBg(const char* className, void* wndProc, void* hInstance, int iconResId, int backColor);
+// 查询已登记窗体类的背景色 (无登记返回 -1); 供 UserControl Ambient.BackColor 使用
+int vb6_Forms_QueryClassBg(const char* className);
 
 // 创建窗体窗口
 // className: 已注册的窗口类名
@@ -31,6 +35,10 @@ int vb6_RegisterFormClass(const char* className, void* wndProc, void* hInstance,
 // 返回: 窗口句柄 (HWND)
 void* vb6_CreateFormWindow(const char* className, const char* formName,
     int x, int y, int width, int height, void* hInstance, void* userData);
+// czUI fix: 带 BorderStyle 的窗体创建 (0=None 1=FixedSingle 2=Sizable 3=FixedDialog 4/5=ToolWindow)
+void* vb6_CreateFormWindowB(const char* className, const char* formName,
+    int x, int y, int width, int height, void* hInstance, void* userData,
+    int borderStyle);
 
 // VB6缇(Twip)转像素
 // VB6坐标单位: 1英寸=1440缇, 1像素=15缇 (96DPI标准)

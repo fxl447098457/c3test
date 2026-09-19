@@ -3,7 +3,7 @@
 // Win32 forwarding stubs for VB6 `Declare ... Lib "x"` (Fix 076 scheme: C3 emits
 // `extern <ret> __stdcall vb6_di_<alias>(...)` and the RTL implements it).
 //
-// Family: user32   (libs: user32, gdi32)   stubs: 32
+// Family: user32   (libs: user32, gdi32, dwmapi, comctl32, uxtheme)   stubs: 42
 //
 // Each stub reproduces C3's own generated prototype verbatim (that is the ABI the
 // caller uses: ByVal Long is widened to intptr_t, ByVal Single stays float, ByRef
@@ -11,8 +11,8 @@
 // cast. The cast keeps the compiler from complaining about unrelated API parameter
 // types while preserving the register/memory passing class of every argument.
 //
-// generated from: C:\Users\user\AppData\Local\Temp\di_migrate_session
-// date: 2026-09-17 11:07
+// generated from: C:\Users\Administrator\AppData\Local\Temp\C3C\merged_stubgen_czui
+// date: 2026-09-19 18:17
 //
 // Hand-maintained special cases stay in vb6_di_stubs.c (ordinals, msvbvm60 runtime,
 // dynamically loaded DLLs). Re-run the generator after a build exposes new symbols.
@@ -22,6 +22,15 @@
 /* winsock2.h must come before windows.h */
 #include <winsock2.h>
 #include <windows.h>
+#include <dwmapi.h>
+#undef RtlMoveMemory
+#undef RtlCopyMemory
+#undef RtlFillMemory
+#undef RtlZeroMemory
+void WINAPI RtlMoveMemory(void*, const void*, size_t);
+void WINAPI RtlCopyMemory(void*, const void*, size_t);
+void WINAPI RtlFillMemory(void*, size_t, unsigned char);
+void WINAPI RtlZeroMemory(void*, size_t);
 #include <stdint.h>
 #include <shlwapi.h>
 #include <shlobj.h>
@@ -40,135 +49,19 @@
  * a static import lib is only pulled when a symbol from it is referenced. */
 #pragma comment(lib, "user32.lib")
 #pragma comment(lib, "gdi32.lib")
-
-/* BitBlt */
-intptr_t __stdcall vb6_di_BitBlt(intptr_t hDestDC, intptr_t x, intptr_t y, intptr_t nWidth, intptr_t nHeight, intptr_t hSrcDC, intptr_t xSrc, intptr_t ySrc, intptr_t dwRop) {
-    return ((intptr_t (WINAPI *)(intptr_t, intptr_t, intptr_t, intptr_t, intptr_t, intptr_t, intptr_t, intptr_t, intptr_t))BitBlt)(hDestDC, x, y, nWidth, nHeight, hSrcDC, xSrc, ySrc, dwRop);
-}
-
-/* CallWindowProcW */
-intptr_t __stdcall vb6_di_CallWindowProcW(intptr_t lpPrevWndFunc, intptr_t hWnd, intptr_t wMsg, intptr_t wParam, intptr_t lParam) {
-    return ((intptr_t (WINAPI *)(intptr_t, intptr_t, intptr_t, intptr_t, intptr_t))CallWindowProcW)(lpPrevWndFunc, hWnd, wMsg, wParam, lParam);
-}
-
-/* ClientToScreen */
-intptr_t __stdcall vb6_di_ClientToScreen(intptr_t hwnd, void* lpPoint) {
-    return ((intptr_t (WINAPI *)(intptr_t, void*))ClientToScreen)(hwnd, lpPoint);
-}
-
-/* CreateRectRgn */
-intptr_t __stdcall vb6_di_CreateRectRgn(intptr_t X1, intptr_t Y1, intptr_t X2, intptr_t Y2) {
-    return ((intptr_t (WINAPI *)(intptr_t, intptr_t, intptr_t, intptr_t))CreateRectRgn)(X1, Y1, X2, Y2);
-}
+#pragma comment(lib, "dwmapi.lib")
+#pragma comment(lib, "comctl32.lib")
+#pragma comment(lib, "uxtheme.lib")
+#pragma comment(lib, "comdlg32.lib")
 
 /* DestroyWindow */
-intptr_t __stdcall vb6_di_DestroyWindow(intptr_t hwnd) {
-    return ((intptr_t (WINAPI *)(intptr_t))DestroyWindow)(hwnd);
-}
-
-/* GetBkColor */
-intptr_t __stdcall vb6_di_GetBkColor(intptr_t hdc) {
-    return ((intptr_t (WINAPI *)(intptr_t))GetBkColor)(hdc);
-}
-
-/* GetDC */
-intptr_t __stdcall vb6_di_GetDC(intptr_t hwnd) {
-    return ((intptr_t (WINAPI *)(intptr_t))GetDC)(hwnd);
-}
-
-/* GetParent */
-intptr_t __stdcall vb6_di_GetParent(intptr_t hwnd) {
-    return ((intptr_t (WINAPI *)(intptr_t))GetParent)(hwnd);
-}
-
-/* GetSysColor */
-intptr_t __stdcall vb6_di_GetSysColor(intptr_t nIndex) {
-    return ((intptr_t (WINAPI *)(intptr_t))GetSysColor)(nIndex);
-}
-
-/* GetWindowRect */
-intptr_t __stdcall vb6_di_GetWindowRect(intptr_t hwnd, void* lpRect) {
-    return ((intptr_t (WINAPI *)(intptr_t, void*))GetWindowRect)(hwnd, lpRect);
-}
-
-/* GetWindowRgn */
-intptr_t __stdcall vb6_di_GetWindowRgn(intptr_t hwnd, intptr_t hRgn) {
-    return ((intptr_t (WINAPI *)(intptr_t, intptr_t))GetWindowRgn)(hwnd, hRgn);
-}
-
-/* GetWindowThreadProcessId */
-intptr_t __stdcall vb6_di_GetWindowThreadProcessId(intptr_t hWnd, int32_t* lpdwProcessId) {
-    return ((intptr_t (WINAPI *)(intptr_t, int32_t*))GetWindowThreadProcessId)(hWnd, lpdwProcessId);
-}
-
-/* IsWindow */
-intptr_t __stdcall vb6_di_IsWindow(intptr_t hWnd) {
-    return ((intptr_t (WINAPI *)(intptr_t))IsWindow)(hWnd);
-}
-
-/* IsWindowUnicode */
-intptr_t __stdcall vb6_di_IsWindowUnicode(intptr_t hWnd) {
-    return ((intptr_t (WINAPI *)(intptr_t))IsWindowUnicode)(hWnd);
-}
-
-/* keybd_event */
-intptr_t __stdcall vb6_di_keybd_event(uint8_t bVk, uint8_t bScan, intptr_t dwFlags, intptr_t dwExtraInfo) {
-    return ((intptr_t (WINAPI *)(uint8_t, uint8_t, intptr_t, intptr_t))keybd_event)(bVk, bScan, dwFlags, dwExtraInfo);
-}
-
-/* KillTimer */
-intptr_t __stdcall vb6_di_KillTimer(intptr_t hWnd, intptr_t nIDEvent) {
-    return ((intptr_t (WINAPI *)(intptr_t, intptr_t))KillTimer)(hWnd, nIDEvent);
-}
-
-/* OffsetRgn */
-intptr_t __stdcall vb6_di_OffsetRgn(intptr_t hRgn, intptr_t x, intptr_t y) {
-    return ((intptr_t (WINAPI *)(intptr_t, intptr_t, intptr_t))OffsetRgn)(hRgn, x, y);
-}
-
-/* ReleaseDC */
-intptr_t __stdcall vb6_di_ReleaseDC(intptr_t hwnd, intptr_t hdc) {
-    return ((intptr_t (WINAPI *)(intptr_t, intptr_t))ReleaseDC)(hwnd, hdc);
-}
-
-/* ScreenToClient */
-intptr_t __stdcall vb6_di_ScreenToClient(intptr_t hwnd, void* lpPoint) {
-    return ((intptr_t (WINAPI *)(intptr_t, void*))ScreenToClient)(hwnd, lpPoint);
-}
-
-/* SendMessageA */
-intptr_t __stdcall vb6_di_SendMessageA(intptr_t hWnd, intptr_t wMsg, intptr_t wParam, void* lParam) {
-    return ((intptr_t (WINAPI *)(intptr_t, intptr_t, intptr_t, void*))SendMessageA)(hWnd, wMsg, wParam, lParam);
+intptr_t __stdcall vb6_di_DestroyWindow(intptr_t hWnd) {
+    return ((intptr_t (WINAPI *)(intptr_t))DestroyWindow)(hWnd);
 }
 
 /* SendMessageW */
-intptr_t __stdcall vb6_di_SendMessageW(intptr_t hWnd, intptr_t wMsg, intptr_t wParam, void* lParam) {
-    return ((intptr_t (WINAPI *)(intptr_t, intptr_t, intptr_t, void*))SendMessageW)(hWnd, wMsg, wParam, lParam);
-}
-
-/* SetForegroundWindow */
-intptr_t __stdcall vb6_di_SetForegroundWindow(intptr_t hWnd) {
-    return ((intptr_t (WINAPI *)(intptr_t))SetForegroundWindow)(hWnd);
-}
-
-/* SetParent */
-intptr_t __stdcall vb6_di_SetParent(intptr_t hWndChild, intptr_t hWndNewParent) {
-    return ((intptr_t (WINAPI *)(intptr_t, intptr_t))SetParent)(hWndChild, hWndNewParent);
-}
-
-/* SetRect */
-intptr_t __stdcall vb6_di_SetRect(void* lpRect, intptr_t X1, intptr_t Y1, intptr_t X2, intptr_t Y2) {
-    return ((intptr_t (WINAPI *)(void*, intptr_t, intptr_t, intptr_t, intptr_t))SetRect)(lpRect, X1, Y1, X2, Y2);
-}
-
-/* SetTimer */
-intptr_t __stdcall vb6_di_SetTimer(intptr_t hWnd, intptr_t nIDEvent, intptr_t uElapse, intptr_t lpTimerFunc) {
-    return ((intptr_t (WINAPI *)(intptr_t, intptr_t, intptr_t, intptr_t))SetTimer)(hWnd, nIDEvent, uElapse, lpTimerFunc);
-}
-
-/* SetWindowLongA */
-intptr_t __stdcall vb6_di_SetWindowLongA(intptr_t hwnd, intptr_t nIndex, intptr_t dwNewLong) {
-    return ((intptr_t (WINAPI *)(intptr_t, intptr_t, intptr_t))SetWindowLongA)(hwnd, nIndex, dwNewLong);
+intptr_t __stdcall vb6_di_SendMessageW(intptr_t hWnd, intptr_t wMsg, intptr_t wParam, intptr_t lParam) {
+    return ((intptr_t (WINAPI *)(intptr_t, intptr_t, intptr_t, intptr_t))SendMessageW)(hWnd, wMsg, wParam, lParam);
 }
 
 /* SetWindowLongW */
@@ -176,75 +69,197 @@ intptr_t __stdcall vb6_di_SetWindowLongW(intptr_t hWnd, intptr_t nIndex, intptr_
     return ((intptr_t (WINAPI *)(intptr_t, intptr_t, intptr_t))SetWindowLongW)(hWnd, nIndex, dwNewLong);
 }
 
-/* SetWindowPos */
-intptr_t __stdcall vb6_di_SetWindowPos(intptr_t hwnd, intptr_t hWndInsertAfter, intptr_t x, intptr_t y, intptr_t cx, intptr_t cy, intptr_t wFlags) {
-    return ((intptr_t (WINAPI *)(intptr_t, intptr_t, intptr_t, intptr_t, intptr_t, intptr_t, intptr_t))SetWindowPos)(hwnd, hWndInsertAfter, x, y, cx, cy, wFlags);
-}
-
-/* ShowWindow */
-intptr_t __stdcall vb6_di_ShowWindow(intptr_t hwnd, intptr_t nCmdShow) {
-    return ((intptr_t (WINAPI *)(intptr_t, intptr_t))ShowWindow)(hwnd, nCmdShow);
-}
-
-/* SwitchToThisWindow */
-intptr_t __stdcall vb6_di_SwitchToThisWindow(intptr_t hWnd, intptr_t fAltTab) {
-    return ((intptr_t (WINAPI *)(intptr_t, intptr_t))SwitchToThisWindow)(hWnd, fAltTab);
-}
-
-/* TranslateMessage */
-intptr_t __stdcall vb6_di_TranslateMessage(void* lpMsg) {
-    return ((intptr_t (WINAPI *)(void*))TranslateMessage)(lpMsg);
-}
-
-/* UpdateLayeredWindow */
-intptr_t __stdcall vb6_di_UpdateLayeredWindow(intptr_t hwnd, intptr_t hdcDst, void* pptDst, void* psize, intptr_t hdcSrc, void* pptSrc, intptr_t crKey, void* pblend, intptr_t dwFlags) {
-    return ((intptr_t (WINAPI *)(intptr_t, intptr_t, void*, void*, intptr_t, void*, intptr_t, void*, intptr_t))UpdateLayeredWindow)(hwnd, hdcDst, pptDst, psize, hdcSrc, pptSrc, crKey, pblend, dwFlags);
-}
-
-intptr_t __stdcall vb6_di_CreateCompatibleBitmap(intptr_t hDC, intptr_t nWidth, intptr_t nHeight) {
-    return ((intptr_t (WINAPI *)(intptr_t, intptr_t, intptr_t))CreateCompatibleBitmap)(hDC, nWidth, nHeight);
-}
-
-/* DestroyCursor */
-
-intptr_t __stdcall vb6_di_DestroyCursor(intptr_t hCursor) {
-    return ((intptr_t (WINAPI *)(intptr_t))DestroyCursor)(hCursor);
-}
-
-/* GdipAddPathEllipseI */
-
-intptr_t __stdcall vb6_di_GetCursorPos(void* lpPoint) {
-    return ((intptr_t (WINAPI *)(void*))GetCursorPos)(lpPoint);
-}
-
-/* MulDiv */
-
-intptr_t __stdcall vb6_di_PtInRect(void* lpRect, intptr_t X, intptr_t Y) {
-    return ((intptr_t (WINAPI *)(void*, intptr_t, intptr_t))PtInRect)(lpRect, X, Y);
+/* SendMessageA */
+intptr_t __stdcall vb6_di_SendMessageA(intptr_t hwnd, intptr_t wMsg, intptr_t wParam, void* lParam) {
+    return ((intptr_t (WINAPI *)(intptr_t, intptr_t, intptr_t, void*))SendMessageA)(hwnd, wMsg, wParam, lParam);
 }
 
 /* RedrawWindow */
-
 intptr_t __stdcall vb6_di_RedrawWindow(intptr_t hwnd, void* lprcUpdate, intptr_t hrgnUpdate, intptr_t fuRedraw) {
     return ((intptr_t (WINAPI *)(intptr_t, void*, intptr_t, intptr_t))RedrawWindow)(hwnd, lprcUpdate, hrgnUpdate, fuRedraw);
 }
 
-/* ---- Fix 112: Charts 2020 鍥捐〃缁樺埗璺緞鏆撮湶鐨勮ˉ鍏呮々 (gen_di_stubs.ps1) ---- */
-
-/* GdipAddPathArc */
-
-intptr_t __stdcall vb6_di_CreateWindowExA(intptr_t dwExStyle, const char* lpClassName, const char* lpWindowName, intptr_t dwStyle, intptr_t X, intptr_t Y, intptr_t nWidth, intptr_t nHeight, intptr_t hWndParent, intptr_t hMenu, intptr_t hInstance, void* lpParam) {
-    return (intptr_t)CreateWindowExA((DWORD)dwExStyle, lpClassName, lpWindowName,
-                                     (DWORD)dwStyle, (int)X, (int)Y, (int)nWidth, (int)nHeight,
-                                     (HWND)hWndParent, (HMENU)hMenu, (HINSTANCE)hInstance, lpParam);
+/* GetDesktopWindow */
+intptr_t __stdcall vb6_di_GetDesktopWindow() {
+    return ((intptr_t (WINAPI *)(void))GetDesktopWindow)();
 }
 
-/* GetWindow (user32) */
+/* UpdateWindow */
+intptr_t __stdcall vb6_di_UpdateWindow(intptr_t hwnd) {
+    return ((intptr_t (WINAPI *)(intptr_t))UpdateWindow)(hwnd);
+}
 
+/* CreateWindowExA */
+intptr_t __stdcall vb6_di_CreateWindowExA(intptr_t dwExStyle, BSTR lpClassName, BSTR lpWindowName, intptr_t dwStyle, intptr_t X, intptr_t Y, intptr_t nWidth, intptr_t nHeight, intptr_t hWndParent, intptr_t hMenu, intptr_t hInstance, void* lpParam) {
+    return ((intptr_t (WINAPI *)(intptr_t, BSTR, BSTR, intptr_t, intptr_t, intptr_t, intptr_t, intptr_t, intptr_t, intptr_t, intptr_t, void*))CreateWindowExA)(dwExStyle, lpClassName, lpWindowName, dwStyle, X, Y, nWidth, nHeight, hWndParent, hMenu, hInstance, lpParam);
+}
+
+/* SetWindowLongA */
+intptr_t __stdcall vb6_di_SetWindowLongA(intptr_t hwnd, intptr_t nIndex, intptr_t dwNewLong) {
+    return ((intptr_t (WINAPI *)(intptr_t, intptr_t, intptr_t))SetWindowLongA)(hwnd, nIndex, dwNewLong);
+}
+
+/* GetParent */
+intptr_t __stdcall vb6_di_GetParent(intptr_t hwnd) {
+    return ((intptr_t (WINAPI *)(intptr_t))GetParent)(hwnd);
+}
+
+/* GetWindow */
 intptr_t __stdcall vb6_di_GetWindow(intptr_t hwnd, intptr_t wCmd) {
-    return (intptr_t)GetWindow((HWND)hwnd, (UINT)wCmd);
+    return ((intptr_t (WINAPI *)(intptr_t, intptr_t))GetWindow)(hwnd, wCmd);
 }
 
-/* TlsGetValue (kernel32): GetLastError 璇箟淇濇寔鍘熸牱 (VB6 浠ｇ爜鍙仛鎸囬拡姣旇緝) */
+/* FindWindowExA */
+intptr_t __stdcall vb6_di_FindWindowExA(intptr_t hWnd1, intptr_t hWnd2, BSTR lpsz1, BSTR lpsz2) {
+    return ((intptr_t (WINAPI *)(intptr_t, intptr_t, BSTR, BSTR))FindWindowExA)(hWnd1, hWnd2, lpsz1, lpsz2);
+}
 
+/* WindowFromPoint */
+intptr_t __stdcall vb6_di_WindowFromPoint(intptr_t xPoint, intptr_t yPoint) {
+    return ((intptr_t (WINAPI *)(intptr_t, intptr_t))WindowFromPoint)(xPoint, yPoint);
+}
 
+/* GetCursorPos */
+intptr_t __stdcall vb6_di_GetCursorPos(void* lpPoint) {
+    return ((intptr_t (WINAPI *)(void*))GetCursorPos)(lpPoint);
+}
+
+/* PtInRect */
+intptr_t __stdcall vb6_di_PtInRect(void* lpRect, intptr_t X, intptr_t Y) {
+    return ((intptr_t (WINAPI *)(void*, intptr_t, intptr_t))PtInRect)(lpRect, X, Y);
+}
+
+/* ScreenToClient */
+intptr_t __stdcall vb6_di_ScreenToClient(intptr_t hwnd, void* lpPoint) {
+    return ((intptr_t (WINAPI *)(intptr_t, void*))ScreenToClient)(hwnd, lpPoint);
+}
+
+/* SetRect */
+intptr_t __stdcall vb6_di_SetRect(void* lpRect, intptr_t x1, intptr_t y1, intptr_t x2, intptr_t y2) {
+    return ((intptr_t (WINAPI *)(void*, intptr_t, intptr_t, intptr_t, intptr_t))SetRect)(lpRect, x1, y1, x2, y2);
+}
+
+/* LoadCursorA */
+intptr_t __stdcall vb6_di_LoadCursorA(intptr_t hInstance, intptr_t lpCursorName) {
+    return ((intptr_t (WINAPI *)(intptr_t, intptr_t))LoadCursorA)(hInstance, lpCursorName);
+}
+
+/* DestroyCursor */
+intptr_t __stdcall vb6_di_DestroyCursor(intptr_t hCursor) {
+    return ((intptr_t (WINAPI *)(intptr_t))DestroyCursor)(hCursor);
+}
+
+/* SetCursor */
+intptr_t __stdcall vb6_di_SetCursor(intptr_t hCursor) {
+    return ((intptr_t (WINAPI *)(intptr_t))SetCursor)(hCursor);
+}
+
+/* GetDC */
+intptr_t __stdcall vb6_di_GetDC(intptr_t hwnd) {
+    return ((intptr_t (WINAPI *)(intptr_t))GetDC)(hwnd);
+}
+
+/* ReleaseDC */
+intptr_t __stdcall vb6_di_ReleaseDC(intptr_t hwnd, intptr_t hDC) {
+    return ((intptr_t (WINAPI *)(intptr_t, intptr_t))ReleaseDC)(hwnd, hDC);
+}
+
+/* BitBlt */
+intptr_t __stdcall vb6_di_BitBlt(intptr_t hDestDC, intptr_t X, intptr_t Y, intptr_t nWidth, intptr_t nHeight, intptr_t hSrcDC, intptr_t xSrc, intptr_t ySrc, intptr_t dwRop) {
+    return ((intptr_t (WINAPI *)(intptr_t, intptr_t, intptr_t, intptr_t, intptr_t, intptr_t, intptr_t, intptr_t, intptr_t))BitBlt)(hDestDC, X, Y, nWidth, nHeight, hSrcDC, xSrc, ySrc, dwRop);
+}
+
+/* CreateCompatibleBitmap */
+intptr_t __stdcall vb6_di_CreateCompatibleBitmap(intptr_t hDC, intptr_t nWidth, intptr_t nHeight) {
+    return ((intptr_t (WINAPI *)(intptr_t, intptr_t, intptr_t))CreateCompatibleBitmap)(hDC, nWidth, nHeight);
+}
+
+/* GetSysColor */
+intptr_t __stdcall vb6_di_GetSysColor(intptr_t nIndex) {
+    return ((intptr_t (WINAPI *)(intptr_t))GetSysColor)(nIndex);
+}
+
+/* GetWindowLongA */
+intptr_t __stdcall vb6_di_GetWindowLongA(intptr_t hwnd, intptr_t nIndex) {
+    return ((intptr_t (WINAPI *)(intptr_t, intptr_t))GetWindowLongA)(hwnd, nIndex);
+}
+
+/* IsWindowUnicode */
+intptr_t __stdcall vb6_di_IsWindowUnicode(intptr_t hwnd) {
+    return ((intptr_t (WINAPI *)(intptr_t))IsWindowUnicode)(hwnd);
+}
+
+/* SetFocus */
+intptr_t __stdcall vb6_di_SetFocus(intptr_t hwnd) {
+    return ((intptr_t (WINAPI *)(intptr_t))SetFocus)(hwnd);
+}
+
+/* GetPropA */
+intptr_t __stdcall vb6_di_GetPropA(intptr_t hWnd, BSTR lpString) {
+    return ((intptr_t (WINAPI *)(intptr_t, BSTR))GetPropA)(hWnd, lpString);
+}
+
+/* SetPropA */
+intptr_t __stdcall vb6_di_SetPropA(intptr_t hWnd, BSTR lpString, intptr_t hData) {
+    return ((intptr_t (WINAPI *)(intptr_t, BSTR, intptr_t))SetPropA)(hWnd, lpString, hData);
+}
+
+/* RemovePropA */
+intptr_t __stdcall vb6_di_RemovePropA(intptr_t hWnd, BSTR lpString) {
+    return ((intptr_t (WINAPI *)(intptr_t, BSTR))RemovePropA)(hWnd, lpString);
+}
+
+/* ReleaseCapture */
+intptr_t __stdcall vb6_di_ReleaseCapture() {
+    return ((intptr_t (WINAPI *)(void))ReleaseCapture)();
+}
+
+/* DrawIconEx */
+intptr_t __stdcall vb6_di_DrawIconEx(intptr_t hDC, intptr_t xLeft, intptr_t yTop, intptr_t hIcon, intptr_t cxWidth, intptr_t cyWidth, intptr_t istepIfAniCur, intptr_t hbrFlickerFreeDraw, intptr_t diFlags) {
+    return ((intptr_t (WINAPI *)(intptr_t, intptr_t, intptr_t, intptr_t, intptr_t, intptr_t, intptr_t, intptr_t, intptr_t))DrawIconEx)(hDC, xLeft, yTop, hIcon, cxWidth, cyWidth, istepIfAniCur, hbrFlickerFreeDraw, diFlags);
+}
+
+/* SetWindowPos */
+intptr_t __stdcall vb6_di_SetWindowPos(intptr_t hWnd, intptr_t hWndInsertAfter, intptr_t X, intptr_t Y, intptr_t cx, intptr_t cy, intptr_t uFlags) {
+    return ((intptr_t (WINAPI *)(intptr_t, intptr_t, intptr_t, intptr_t, intptr_t, intptr_t, intptr_t))SetWindowPos)(hWnd, hWndInsertAfter, X, Y, cx, cy, uFlags);
+}
+
+/* PostMessageA */
+intptr_t __stdcall vb6_di_PostMessageA(intptr_t hWnd, intptr_t wMsg, intptr_t wParam, intptr_t lParam) {
+    return ((intptr_t (WINAPI *)(intptr_t, intptr_t, intptr_t, intptr_t))PostMessageA)(hWnd, wMsg, wParam, lParam);
+}
+
+/* CopyImage */
+intptr_t __stdcall vb6_di_CopyImage(intptr_t hImage, intptr_t uType, intptr_t cxDesired, intptr_t cyDesired, intptr_t fuFlags) {
+    return ((intptr_t (WINAPI *)(intptr_t, intptr_t, intptr_t, intptr_t, intptr_t))CopyImage)(hImage, uType, cxDesired, cyDesired, fuFlags);
+}
+
+/* DestroyIcon */
+intptr_t __stdcall vb6_di_DestroyIcon(intptr_t hIcon) {
+    return ((intptr_t (WINAPI *)(intptr_t))DestroyIcon)(hIcon);
+}
+
+/* IsZoomed */
+intptr_t __stdcall vb6_di_IsZoomed(intptr_t hWnd) {
+    return ((intptr_t (WINAPI *)(intptr_t))IsZoomed)(hWnd);
+}
+
+/* DwmSetWindowAttribute */
+intptr_t __stdcall vb6_di_DwmSetWindowAttribute(intptr_t hWnd, intptr_t dwAttribute, int32_t* pvAttribute, intptr_t cbAttribute) {
+    return ((intptr_t (WINAPI *)(intptr_t, intptr_t, int32_t*, intptr_t))DwmSetWindowAttribute)(hWnd, dwAttribute, pvAttribute, cbAttribute);
+}
+
+/* CreateRoundRectRgn */
+intptr_t __stdcall vb6_di_CreateRoundRectRgn(intptr_t X1, intptr_t Y1, intptr_t X2, intptr_t Y2, intptr_t X3, intptr_t Y3) {
+    return ((intptr_t (WINAPI *)(intptr_t, intptr_t, intptr_t, intptr_t, intptr_t, intptr_t))CreateRoundRectRgn)(X1, Y1, X2, Y2, X3, Y3);
+}
+
+/* SetWindowRgn */
+intptr_t __stdcall vb6_di_SetWindowRgn(intptr_t hWnd, intptr_t hRgn, intptr_t bRedraw) {
+    return ((intptr_t (WINAPI *)(intptr_t, intptr_t, intptr_t))SetWindowRgn)(hWnd, hRgn, bRedraw);
+}
+
+/* GetClientRect */
+intptr_t __stdcall vb6_di_GetClientRect(intptr_t hWnd, void* lpRect) {
+    return ((intptr_t (WINAPI *)(intptr_t, void*))GetClientRect)(hWnd, lpRect);
+}

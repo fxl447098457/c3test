@@ -35,6 +35,13 @@ typedef struct vb6_UserControlDesc {
     void      (*resize)(void* me);    // UserControl_Resize (NULL if absent)
     void      (*show)(void* me);      // UserControl_Show (NULL if absent)
     void      (*terminate)(void* me); // UserControl_Terminate / vb6_cls_X_Destroy
+    // ---- czUI fix: 鼠标事件转发 (全部可为 NULL) ----
+    // VB6 运行时会把宿主窗口收到的鼠标消息转成 UserControl_MouseDown/Up/Move;
+    // X/Y 已换算为控件当前 ScaleMode 单位。button: 1=左 2=右; shift: VB6 Shift。
+    void      (*mouseDown)(void* me, int32_t button, int32_t shift, float x, float y);
+    void      (*mouseUp)(void* me, int32_t button, int32_t shift, float x, float y);
+    void      (*mouseMove)(void* me, int32_t button, int32_t shift, float x, float y);
+    void      (*dblClick)(void* me);
 } vb6_UserControlDesc;
 
 // .ctl module self-registration (type name case-insensitive, duplicate ignored)
@@ -70,6 +77,21 @@ int32_t vb6_Host_Call(void* obj, const wchar_t* name, int32_t argc,
 void* vb6_UC_NewFont(void);
 // Fix 119: 在 vb6_UC_HostCreate 之前设定该实例的字体 (.frm BeginProperty Font 块)
 void  vb6_UC_SetPendingFont(void* f);
+// ---- czUI fix: 设计器子控件实例化 (.ctl 设计面上的 TextBox 等属于每个实例) ----
+// 在 ucHostInit (宿主实例初始化) 期间调用, 以当前 UC 宿主窗口为父创建真实子窗口。
+// left/top/width/height 单位为缇。返回子窗口句柄 (NULL = 失败)。
+void* vb6_UC_CreateDesignEdit(int32_t left, int32_t top, int32_t width, int32_t height);
+// 设计器 Timer: cb(ctx) 在每次 WM_TIMER 触发 (受 vb6_SetTimerEnabled/Interval 属性控制)
+void* vb6_UC_CreateDesignTimer(void (*cb)(void*), void* ctx);
+// ---- czUI fix: 轻量 PropertyBag (IDispatch) ----
+// 供生成的 UserControl_ReadProperties 在运行期以 VB6 语义读取设计期持久化属性,
+// 使 .ctl 内部"读取后同步"逻辑 (如 toggle 的 m_AnimPos 与 Checked 同步) 得以执行。
+void* vb6_UC_PropBagCreate(void);
+void  vb6_UC_PropBagFree(void* bag);
+void  vb6_UC_BagPutStr(void* bag, const wchar_t* name, const wchar_t* value);
+void  vb6_UC_BagPutInt(void* bag, const wchar_t* name, int32_t value);
+void  vb6_UC_BagPutDbl(void* bag, const wchar_t* name, double value);
+void  vb6_UC_BagPutBool(void* bag, const wchar_t* name, int32_t value);
 // Fix 125: 字体对象身份判定 + 字段定位 (供 COM 属性读写层直接操作字体字段)
 int32_t vb6_UC_IsFont(const void* p);
 void*   vb6_UC_FontField(void* p, const wchar_t* name, int32_t* kind);

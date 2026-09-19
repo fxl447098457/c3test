@@ -10,6 +10,30 @@ namespace vb6c3 {
 // --- cgen_expr_binary_util.cpp: BSTR 包装 + 二元运算符映射 ---
 // 由 src/backend/expr/cgen_expr_binary.cpp 拆出（2026-09-17），纯搬移、零行为改动。
 
+// Fix 100a: 返回 BSTR 的内建"顶层"清单 — 表达式以此开头即为已是 BSTR, 无需包装.
+// 这是 092a 修法的同族应用: 用**顶层前缀**替代旧的**未锚定子串**判定.
+// 数组有序按最长前缀优先匹配无影响 (全部互不为前缀).
+static const char* kBstrReturningCalls[] = {
+    "vb6_BSTR_",            // vb6_BSTR_FromStr / vb6_BSTR_Empty / vb6_BSTR_Concat ... 全族
+    "vb6_CStr",             // vb6_CStr / vb6_CStrLong / vb6_CStrDbl / vb6_CStrBool ...
+    "vb6_ChrW(", "vb6_Chr(",
+    "vb6_Mid(", "vb6_Left(", "vb6_Right(", "vb6_LTrim(", "vb6_RTrim(", "vb6_Trim(",
+    "vb6_UCase(", "vb6_LCase(",
+    "vb6_Format(", "vb6_StrConv(", "vb6_Str(", "vb6_String(", "vb6_Space(",
+    "vb6_Replace(",
+    "vb6_Dir(", "vb6_Command(", "vb6_Environ(", "vb6_CurDir(", "vb6_InputBox(",
+    "vb6_ErrDescription(", "vb6_ErrSource(",
+    "vb6_App_Path(", "vb6_App_EXEName(", "vb6_App_HelpFile(",
+    "vb6_GetControlText(", "vb6_GetControlCaption(",
+};
+
+bool CCodeGen::isBstrReturningCall(const std::string& expr) {
+    for (const char* pfx : kBstrReturningCalls) {
+        if (expr.compare(0, strlen(pfx), pfx) == 0) return true;
+    }
+    return false;
+}
+
 std::string CCodeGen::wrapToBSTR(const std::string& expr, Expr& node) {
     // P24-01: 后期绑定COM调用返回VARIANT*, 需解包为BSTR(必须在vb6_BSTR检查之前)
     // P24-02: Variant数组索引返回vb6_VARIANT, 需转BSTR
@@ -34,60 +58,42 @@ std::string CCodeGen::wrapToBSTR(const std::string& expr, Expr& node) {
         expr.find("vb6_ComVtableGetDouble(") != std::string::npos) {
         return "vb6_CStrDbl(" + expr + ")";
     }
-    if (expr.find("vb6_BSTR") != std::string::npos) return expr;
-    if (expr.find("vb6_CStr") != std::string::npos) return expr;
-    if (expr.find("vb6_GetControlText") != std::string::npos) return expr;
-    if (expr.find("vb6_GetControlCaption") != std::string::npos) return expr;
+    // Fix 100a (原 092a 同族): 此处原为 expr.find("vb6_BSTR") != npos 的**未锚定子串**
+    // 检查, 实参中含 vb6_BSTR_FromStr 就会整体命中 → vb6_Len("abc") / vb6_InStr(...) /
+    // vb6_Val(...) / vb6_Asc(...) 等"带字符串实参的标量函数"被判为"已是 BSTR"直通,
+    // 绕过后面的数值清单与类型推断 (整数型静默误编→0xC0000005, 浮点型 C2440)。
+    // 判定改为**顶层前缀**: 只有表达式本身就是 BSTR 返回函数调用才直通 (092a 的修法)。
+    if (isBstrReturningCall(expr)) return expr;
     // Fix 049a: VB6_SA_AT(BSTR, arr, idx) returns BSTR — no wrapping needed
-    if (expr.find("VB6_SA_AT(BSTR,") != std::string::npos) return expr;
+    if (expr.compare(0, 16, "VB6_SA_AT(BSTR,") == 0) return expr;
     // vb6_Now() returns double (Date), NOT BSTR — removed early return
     // vb6_Now will fall through to inferExprType → Vb6Type::Date → vb6_CStrDate()
-    if (expr.find("vb6_Left") != std::string::npos) return expr;
-    if (expr.find("vb6_Right") != std::string::npos) return expr;
-    if (expr.find("vb6_Mid") != std::string::npos) return expr;
-    if (expr.find("vb6_Format") != std::string::npos) return expr;
-    if (expr.find("vb6_Str") != std::string::npos) return expr;
-    if (expr.find("vb6_Chr") != std::string::npos) return expr;
-    if (expr.find("vb6_Replace") != std::string::npos) return expr;
-    if (expr.find("vb6_Space") != std::string::npos) return expr;
-    if (expr.find("vb6_InputBox") != std::string::npos) return expr;
-    if (expr.find("vb6_Dir") != std::string::npos) return expr;
-    if (expr.find("vb6_Command") != std::string::npos) return expr;
-    if (expr.find("vb6_Environ") != std::string::npos) return expr;
-    if (expr.find("vb6_CurDir") != std::string::npos) return expr;
-    if (expr.find("vb6_App_Path") != std::string::npos) return expr;
-    if (expr.find("vb6_App_EXEName") != std::string::npos) return expr;
-    if (expr.find("vb6_App_HelpFile") != std::string::npos) return expr;
     // BSTR变量: 已知BSTR变量或者vb6_Module1_xxx 格式的BSTR
     // 简化: 如果以vb6_开头且非数值函数, 假定是BSTR
-    if (expr.find("vb6_") == 0) {
-        // 数值/日期函数需要包装为BSTR
+    if (expr.compare(0, 4, "vb6_") == 0) {
+        // Fix 100c (B3): 取顶层函数名精确匹配, 替换原未锚定 find() ——
+        // 原 `expr.find("vb6_Time")` 会把 vb6_Timer 吞进 CStrDate 分支;
+        // 数值清单同样未锚定且一律归 vb6_CStrLong, 导致 Sqr/Abs/CDbl/CSng/
+        // Timer/Rnd/Fix/Int/Val 的 double/float 返回值被截断 (MSVC C4244,
+        // "x=" & Sqr(2) 输出 "1" 而非 "1.4142135623731"). 按 src/rtl 真实
+        // 返回类型拆成 CStrDbl / CStrLong 两组.
+        const size_t pfn = expr.find('(');
+        const std::string fn = (pfn != std::string::npos) ? expr.substr(0, pfn) : expr;
         // Date类: vb6_Now/vb6_Date/vb6_Time 返回double(Date)
-        if (expr.find("vb6_Now") != std::string::npos ||
-            expr.find("vb6_Date") != std::string::npos ||
-            expr.find("vb6_Time") != std::string::npos) {
+        if (fn == "vb6_Now" || fn == "vb6_Date" || fn == "vb6_Time") {
             return "vb6_CStrDate(" + expr + ")";
         }
-        // 数值函数: 返回int/double等
-        if (expr.find("vb6_CLng") != std::string::npos ||
-            expr.find("vb6_CInt") != std::string::npos ||
-            expr.find("vb6_CDbl") != std::string::npos ||
-            expr.find("vb6_CSng") != std::string::npos ||
-            expr.find("vb6_CBool") != std::string::npos ||
-            expr.find("vb6_CByte") != std::string::npos ||
-            expr.find("vb6_Abs") != std::string::npos ||
-            expr.find("vb6_Len") != std::string::npos ||
-            expr.find("vb6_LenB") != std::string::npos ||
-            expr.find("vb6_InStr") != std::string::npos ||
-            expr.find("vb6_InStrRev") != std::string::npos ||
-            expr.find("vb6_Timer") != std::string::npos ||
-            expr.find("vb6_Rnd") != std::string::npos ||
-            expr.find("vb6_Sqr") != std::string::npos ||
-            expr.find("vb6_Sgn") != std::string::npos ||
-            expr.find("vb6_Fix") != std::string::npos ||
-            expr.find("vb6_Int") != std::string::npos ||
-            expr.find("vb6_Val") != std::string::npos ||
-            expr.find("vb6_VarType") != std::string::npos) {
+        // 数值函数: RTL 返回 double/float → vb6_CStrDbl
+        if (fn == "vb6_Abs" || fn == "vb6_CDbl" || fn == "vb6_CSng" ||
+            fn == "vb6_Timer" || fn == "vb6_Rnd" || fn == "vb6_Sqr" ||
+            fn == "vb6_Fix" || fn == "vb6_Int" || fn == "vb6_Val") {
+            return "vb6_CStrDbl(" + expr + ")";
+        }
+        // 数值函数: RTL 返回整数 → vb6_CStrLong
+        if (fn == "vb6_CLng" || fn == "vb6_CInt" || fn == "vb6_CBool" ||
+            fn == "vb6_CByte" || fn == "vb6_Len" || fn == "vb6_LenB" ||
+            fn == "vb6_InStr" || fn == "vb6_InStrRev" || fn == "vb6_Sgn" ||
+            fn == "vb6_VarType") {
             return "vb6_CStrLong(" + expr + ")";
         }
         // Fix 091i: 项目内返回 Variant 的函数 (driver 预扫描 variantReturnFuncs_,
@@ -102,36 +108,28 @@ std::string CCodeGen::wrapToBSTR(const std::string& expr, Expr& node) {
                 return "vb6_VariantToString(" + expr + ")";
             }
         }
-        // Fix 118j: 其余 vb6_ 前缀的自定义函数不能一律假定返回 BSTR —
-        // 项目内函数 vb6_Triple1(m) 返回 int16_t, 直通后生成
-        //   vb6_BSTR_Concat(L"val=", vb6_Triple1(m))
-        // 把 int16_t 当作 BSTR 指针解引用 → 0xC0000005 (Debug.Print "val=" & F(x)).
-        // 用 inferExprType 查符号表拿函数返回类型, 数值/Date/Boolean/Byte/LongPtr
-        // 按类型转换; String / Variant / 未知 保持原直通行为.
-        switch (inferExprType(node)) {
-            case Vb6Type::Integer:
-            case Vb6Type::Long:    return "vb6_CStrLong(" + expr + ")";
-            case Vb6Type::Single:  return "vb6_CStrSingle(" + expr + ")";
-            case Vb6Type::Double:  return "vb6_CStrDbl(" + expr + ")";
-            case Vb6Type::Boolean: return "vb6_CStrBool(" + expr + ")";
-            case Vb6Type::Byte:    return "vb6_CStrByte(" + expr + ")";
-            case Vb6Type::Date:    return "vb6_CStrDate(" + expr + ")";
-            // LongPtr (intptr_t): 无 vb6_CStrLongPtr, 走 Variant 通用路径
-            // (Fix 084 同思路: _Generic 自动包装 → vb6_CStr 统一转 BSTR)
-            case Vb6Type::LongPtr:
-            case Vb6Type::ULong:   return "vb6_CStr(vb6_VariantFromValue(" + expr + "))";
-            default:               return expr;  // String / Variant / 未知 → 假定BSTR
-        }
+        // Fix 100b: 原为 `return expr; // 其他vb6_函数假定为BSTR` —— 清单外且无字符串
+        // 实参的标量返回函数 (vb6_ErrNumber / vb6_UBound / vb6_Screen_Width 等) 被
+        // 直接当 BSTR 直通: 整数型只报 C4047 警告→运行期把整数当指针 0xC0000005,
+        // 浮点型 C2440 编译失败. 兜底不再假定 BSTR, 落到下方 inferExprType(node):
+        //   识别出具体类型 → 对应 vb6_CStrXxx (Err.Number 已由 cgen_util_type.cpp:109
+        //                    判为 Vb6Type::Long);
+        //   识别不出 → Variant → vb6_CStr(vb6_VariantFromValue(expr)), 由 _Generic
+        //              按实参 C 类型分派, 对 BSTR 返回同样安全.
+        // 即不再存在"静默传标量", 风险从"猜错就 UB"变为"多套一层转换".
     }
-    // string literal L"..."
-    if (expr.find("vb6_BSTR_FromStr(") != std::string::npos) return expr;
+    // string literal L"..." —— 必须**顶层前缀**判定 (Fix 100d, B1-A1 同族收尾):
+    // 原为未锚定 find(), 实参含字符串字面量的标量函数 (vb6_Asc(vb6_BSTR_FromStr(L"A")))
+    // 会整体命中而直通, 绕过数值清单与 inferExprType → 整数当指针传, 运行期 0xC0000005
+    // (与 Fix 100a 同一处缺陷类, A-1 只改了前者, 此处的未锚定检查当时被漏掉).
+    if (expr.compare(0, 17, "vb6_BSTR_FromStr(") == 0) return expr;
     // 推断类型
     Vb6Type t = inferExprType(node);
     switch (t) {
         case Vb6Type::String: return expr;
         case Vb6Type::Integer:
         case Vb6Type::Long:   return "vb6_CStrLong(" + expr + ")";
-        case Vb6Type::Single: return "vb6_CStrSingle(" + expr + ")";   // Fix 117c: VT_R4
+        case Vb6Type::Single:
         case Vb6Type::Double: return "vb6_CStrDbl(" + expr + ")";
         case Vb6Type::Boolean: return "vb6_CStrBool(" + expr + ")";
         case Vb6Type::Byte:   return "vb6_CStrByte(" + expr + ")";

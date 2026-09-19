@@ -198,6 +198,12 @@ BSTR vb6_VariantToString(vb6_VARIANT v);
 // Fix 029: Variant → SafeArray extraction (variant holding array).
 // 用于调用点反向强制: callee 期望 vb6_SafeArray1D* 但实参是 vb6_VARIANT.
 struct vb6_SafeArray1D* vb6_VariantToSafeArray1D(vb6_VARIANT v);
+// Fix 140: Variant → Byte() 数组. Variant 持数组时返回其 parray; 持 BSTR 时
+// 按 VB6 语义把字符串转成字节数组 (vb6_StringToByteArray). 用于 Byte() 字段
+// 从字符串 Variant 赋值 (LabelPlus.ctl `m_Caption = .ReadProperty("Caption", ...)`
+// — PropertyBag 里 Caption 存的是字符串, 旧路径 vb6_VariantToSafeArray1D 对
+// 字符串 Variant 返回 NULL, 把 caption 清空 → 右侧 KPI 卡片空白).
+struct vb6_SafeArray1D* vb6_VariantToByteArray(vb6_VARIANT v);
 // Fix 029: Variant → void* (按值传入, 避免调用点包装时的左值问题).
 // 与 vb6_VariantToObject(vb6_VARIANT*) 互补; 后者要求实参是左值 (取地址),
 // 但 IndexOrCallExpr 调用点包装的实参可能是函数返回的右值, 无法取址.

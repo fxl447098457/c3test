@@ -52,6 +52,29 @@ FrmValue FrmParser::parseValue(const std::string& s) {
         return FrmValue::fromString(t);
     }
 
+    // VB6 十六进制/八进制整数字面量: &H00FF8021&, &HFF& (尾随 &/%%/@ 为类型符)
+    if (t.size() > 3 && (t[0] == '&' || t[0] == '#') &&
+        (t[1] == 'H' || t[1] == 'h' || t[1] == 'O' || t[1] == 'o')) {
+        int base = (t[1] == 'H' || t[1] == 'h') ? 16 : 8;
+        size_t b = 2, e = t.size();
+        // 去掉尾随类型符 & / % / @ / ! / # 以及行内注释
+        while (e > b && (t[e-1] == '&' || t[e-1] == '%' || t[e-1] == '@'
+                         || t[e-1] == '!' || t[e-1] == '#')) e--;
+        std::string hex = t.substr(b, e - b);
+        bool validHex = !hex.empty();
+        for (char c : hex) {
+            if (base == 16 ? !std::isxdigit(static_cast<unsigned char>(c))
+                           : (c < '0' || c > '7')) { validHex = false; break; }
+        }
+        if (validHex) {
+            long long v = (long long)std::stoull(hex, nullptr, base);
+            // &H80000000 及以上是 32 位负数 (VB6 Long)
+            if (v > 0xFFFFFFFFLL) v &= 0xFFFFFFFFLL;
+            return FrmValue::fromInt(v, t);
+        }
+        return FrmValue::fromInt(0, t);
+    }
+
     // 负数
     bool negative = false;
     size_t numStart = 0;

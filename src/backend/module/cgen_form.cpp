@@ -165,6 +165,15 @@ void CCodeGen::emitDesignerControlDecls(const FrmFormDesc& frmDesc) {
 
     // 2) 发射句柄/数组/COM 变量声明
     emitControlHandleDecls(frmDesc);
+    // czUI fix: 设计器子控件句柄改为按实例槽位 — 全局句柄被最后创建的实例覆盖,
+    // 导致 11 个实例只有最后一个的 timer/textbox 生效 (开关动画死、文本框错乱)。
+    c_.emitLine("extern void** vb6_UC_DesignSlot(const char* name);");
+    for (const auto& child : frmDesc.formControl.children) {
+        std::string n114 = cIdent(child.controlName);
+        c_.emitLine("#undef vb6_hwnd_" + n114);
+        c_.emitLine("#define vb6_hwnd_" + n114
+                  + " (*vb6_UC_DesignSlot(\"" + child.controlName + "\"))");
+    }
     c_.emitBlank();
 
     // 3) Fix 112: UserControl (.ctl) 宿主描述 — 让窗体可以把本控件实例挂到子窗口.
@@ -191,7 +200,40 @@ void CCodeGen::emitDesignerControlDecls(const FrmFormDesc& frmDesc) {
         if (hasShow)   c_.emitLine("static void vb6_" + ctl + "_UserControl_Show(vb6_cls_" + ctl + "* me);");
         if (hasResize) c_.emitLine("static void vb6_" + ctl + "_UserControl_Resize(vb6_cls_" + ctl + "* me);");
         if (hasInitProps) c_.emitLine("static void vb6_" + ctl + "_UserControl_InitProperties(vb6_cls_" + ctl + "* me);");
+        // czUI fix: 设计器 Timer 子控件 — 前向声明其 Timer 事件处理器并生成
+        // thunk, 供 RTL 设计器定时器逐实例回调 (tmrTrack 驱动 toggle 动画等)。
+        for (const auto& child : frmDesc.formControl.children) {
+            if (child.controlType == FrmControlType::Timer) {
+                std::string cn = cIdent(child.controlName);
+                c_.emitLine("static void vb6_" + ctl + "_" + cn + "_Timer(vb6_cls_" + ctl + "* me);");
+                c_.emitLine("static void vb6_" + ctl + "_ucTimerThunk_" + cn + "(void* ctx) {");
+                c_.emitLine("    vb6_" + ctl + "_" + cn + "_Timer((vb6_cls_" + ctl + "*)ctx);");
+                c_.emitLine("}");
+            }
+        }
         c_.emitLine("static void vb6_" + ctl + "_ucHostInit(void* me) {");
+        // czUI fix: 设计器子控件 (.ctl 设计面上的 TextBox 等) 属于每个实例 —
+        // 逐实例创建真实子窗口 (此前 vb6_hwnd_txtEmbed 恒为 NULL, TextBox 内容
+        // 与占位文本全部丢失)。必须在 Initialize/InitProperties **之前**创建:
+        // VB6 语义是设计器控件先于一切生命周期代码存在; 否则后创建实例的
+        // InitProperties→ConfigureForType(Case Else 隐藏 txtEmbed) 会通过全局
+        // 句柄把上一个实例的 edit 隐藏掉 (czTextBox1 空白的根因)。
+        // Timer 等暂不实例化 (相关 API 对 NULL 安全)。
+        const bool noKids = getenv("C3_NO_DESIGNKIDS") != nullptr;
+        for (const auto& child : frmDesc.formControl.children) {
+            if (!noKids && child.controlType == FrmControlType::TextBox) {
+                auto iprop = [&](const char* k, int defv) -> int {
+                    auto itc = child.properties.find(k);
+                    return itc != child.properties.end() ? (int)itc->second.intValue : defv;
+                };
+                c_.emitLine("    vb6_hwnd_" + cIdent(child.controlName) + " = vb6_UC_CreateDesignEdit("
+                    + std::to_string(iprop("Left", 0)) + ", " + std::to_string(iprop("Top", 0)) + ", "
+                    + std::to_string(iprop("Width", 2000)) + ", " + std::to_string(iprop("Height", 400)) + ");");
+            } else if (!noKids && child.controlType == FrmControlType::Timer) {
+                c_.emitLine("    vb6_hwnd_" + cIdent(child.controlName) + " = vb6_UC_CreateDesignTimer("
+                    + "vb6_" + ctl + "_ucTimerThunk_" + cIdent(child.controlName) + ", me);");
+            }
+        }
         if (hasInit) c_.emitLine("    vb6_" + ctl + "_UserControl_Initialize((vb6_cls_" + ctl + "*)me);");
         if (hasInitProps) c_.emitLine("    vb6_" + ctl + "_UserControl_InitProperties((vb6_cls_" + ctl + "*)me);");
         c_.emitLine("}");
@@ -212,13 +254,52 @@ void CCodeGen::emitDesignerControlDecls(const FrmFormDesc& frmDesc) {
         auto smIt = frmDesc.formControl.properties.find("ScaleMode");
         if (smIt != frmDesc.formControl.properties.end()) ucScaleMode = (int)smIt->second.intValue;
 
+        // czUI fix: 鼠标事件封装 — 宿主 wndproc 收到鼠标消息后经由 desc 钩子
+        // 调用 UserControl_MouseDown/Up/Move/DblClick (此前无转发, 控件无法交互)。
+        // 注意生成的处理器的 Integer/Single 形参按指针发射。
+        const bool hasMouseDown = hasProc("UserControl_MouseDown");
+        const bool hasMouseUp   = hasProc("UserControl_MouseUp");
+        const bool hasMouseMove = hasProc("UserControl_MouseMove");
+        const bool hasDblClick  = hasProc("UserControl_DblClick");
+        std::string clsShort = "vb6_cls_" + ctl;
+        auto emitMouseWrapper = [&](const char* proc, const char* wrap) {
+            c_.emitLine("static void vb6_" + ctl + "_" + wrap + "(void* me, int32_t button, int32_t shift, float x, float y) {");
+            c_.emitLine("    int16_t b = (int16_t)button, sh = (int16_t)shift;");
+            c_.emitLine("    float fx = x, fy = y;");
+            c_.emitLine("    vb6_" + ctl + "_" + proc + "((" + clsShort + "*)me, &b, &sh, &fx, &fy);");
+            c_.emitLine("}");
+        };
+        if (hasMouseDown) emitMouseWrapper("UserControl_MouseDown", "ucHostMouseDown");
+        else c_.emitLine("static void vb6_" + ctl + "_ucHostMouseDown(void* me, int32_t b, int32_t sh, float x, float y) { (void)me;(void)b;(void)sh;(void)x;(void)y; }");
+        if (hasMouseUp) emitMouseWrapper("UserControl_MouseUp", "ucHostMouseUp");
+        else c_.emitLine("static void vb6_" + ctl + "_ucHostMouseUp(void* me, int32_t b, int32_t sh, float x, float y) { (void)me;(void)b;(void)sh;(void)x;(void)y; }");
+        if (hasMouseMove) emitMouseWrapper("UserControl_MouseMove", "ucHostMouseMove");
+        else c_.emitLine("static void vb6_" + ctl + "_ucHostMouseMove(void* me, int32_t b, int32_t sh, float x, float y) { (void)me;(void)b;(void)sh;(void)x;(void)y; }");
+        if (hasDblClick) {
+            c_.emitLine("static void vb6_" + ctl + "_ucHostDblClick(void* me) {");
+            c_.emitLine("    vb6_" + ctl + "_UserControl_DblClick((" + clsShort + "*)me);");
+            c_.emitLine("}");
+        } else {
+            c_.emitLine("static void vb6_" + ctl + "_ucHostDblClick(void* me) { (void)me; }");
+        }
+
         c_.emitLine("static const vb6_UserControlDesc vb6_" + ctl + "_ucHostDesc = {");
         c_.emitLine("    \"" + moduleName_ + "\", " + std::to_string(ucScaleMode) + ",");
         c_.emitLine("    (void* (*)(void))vb6_cls_" + ctl + "_New,");
         c_.emitLine("    vb6_" + ctl + "_ucHostInit, vb6_" + ctl + "_ucHostPaint,");
-        c_.emitLine("    vb6_" + ctl + "_ucHostResize, vb6_" + ctl + "_ucHostShow, vb6_" + ctl + "_ucHostTerminate");
+        c_.emitLine("    vb6_" + ctl + "_ucHostResize, vb6_" + ctl + "_ucHostShow, vb6_" + ctl + "_ucHostTerminate,");
+        c_.emitLine("    vb6_" + ctl + "_ucHostMouseDown, vb6_" + ctl + "_ucHostMouseUp,");
+        c_.emitLine("    vb6_" + ctl + "_ucHostMouseMove, vb6_" + ctl + "_ucHostDblClick");
         c_.emitLine("};");
         c_.emitLine("void vb6_" + ctl + "_RegisterHost(void) { vb6_UC_Register(&vb6_" + ctl + "_ucHostDesc); }");
+        // czUI fix: 暴露 UserControl_ReadProperties — 窗体侧在设计期属性直赋后
+        // 以 PropertyBag 重放一次读取, 复现 .ctl 内部"读取后同步"逻辑
+        if (hasProc("UserControl_ReadProperties")) {
+            c_.emitLine("static void vb6_" + ctl + "_UserControl_ReadProperties(vb6_cls_" + ctl + "* me, void** PropBag);");
+            c_.emitLine("void vb6_" + ctl + "_UC_ReadProps(void* me, void** PropBag) {");
+            c_.emitLine("    vb6_" + ctl + "_UserControl_ReadProperties((vb6_cls_" + ctl + "*)me, PropBag);");
+            c_.emitLine("}");
+        }
         c_.emitBlank();
 
         h_.emitLine("// Fix 112: UserControl 宿主描述注册 (窗体创建子控件前调用)");

@@ -63,22 +63,36 @@ int vb6_TwipToY(int twips) {
 // 窗体框架
 // ============================================================
 
-int vb6_RegisterFormClass(const char* className, void* wndProc, void* hInstance, int iconResId) {
+static void vb6_formClassBg_set(const char* className, int bg);
+
+int vb6_RegisterFormClassBg(const char* className, void* wndProc, void* hInstance,
+                            int iconResId, int backColor) {
     WNDCLASSEXA wc = {0};
     wc.cbSize = sizeof(WNDCLASSEXA);
     wc.style = CS_HREDRAW | CS_VREDRAW | CS_DBLCLKS;  // 支持双击
     wc.lpfnWndProc = (WNDPROC)wndProc;
     wc.hInstance = (HINSTANCE)hInstance;
     wc.hCursor = LoadCursorA(NULL, (LPCSTR)IDC_ARROW);
-    wc.hbrBackground = (HBRUSH)(COLOR_BTNFACE + 1);  // VB6默认灰色背景
+    // czUI fix: .frm 的窗体级 BackColor — 用 .frm 颜色做类背景刷, 否则窗体永远
+    // 是 BTNFACE 灰 (czForm Demo 深蓝底变灰底). backColor<0 = 未指定, 走 VB6 默认.
+    if (backColor >= 0) {
+        COLORREF cref = (backColor & 0x80000000L)
+                            ? GetSysColor(backColor & 0xFF)
+                            : (COLORREF)backColor;
+        wc.hbrBackground = CreateSolidBrush(cref);
+        vb6_formClassBg_set(className, (int)cref);
+    } else {
+        wc.hbrBackground = (HBRUSH)(COLOR_BTNFACE + 1);  // VB6默认灰色背景
+    }
     wc.lpszClassName = className;
 
+    // czUI fix: 未指定图标时不再回退到 IDI_APPLICATION — VB6 窗体没有 Icon 属性时
+    // 标题栏就是没有图标 (UserControl.Parent.Icon = Nothing, czUI 自绘标题栏因此
+    // 不画图标); 类图标留空, 系统在任务栏等处自动用默认图标, 行为一致。
     if (iconResId > 0) {
         wc.hIcon = LoadIconA((HINSTANCE)hInstance, (LPCSTR)MAKEINTRESOURCEA(iconResId));
-    } else {
-        wc.hIcon = LoadIconA(NULL, (LPCSTR)IDI_APPLICATION);
+        wc.hIconSm = wc.hIcon;
     }
-    wc.hIconSm = wc.hIcon;
 
     if (!RegisterClassExA(&wc)) {
         return -1;
@@ -86,19 +100,74 @@ int vb6_RegisterFormClass(const char* className, void* wndProc, void* hInstance,
     return 0;
 }
 
+int vb6_RegisterFormClass(const char* className, void* wndProc, void* hInstance, int iconResId) {
+    return vb6_RegisterFormClassBg(className, wndProc, hInstance, iconResId, -1);
+}
+
+// ---- 窗体类背景色登记 (供 UserControl Ambient.BackColor 查询) ----
+#define VB6_FORMBG_MAX 64
+static struct { char className[128]; int bg; } g_formBg[VB6_FORMBG_MAX];
+static int g_formBgCount = 0;
+
+static void vb6_formClassBg_set(const char* className, int bg) {
+    for (int i = 0; i < g_formBgCount; i++) {
+        if (strcmp(g_formBg[i].className, className) == 0) { g_formBg[i].bg = bg; return; }
+    }
+    if (g_formBgCount < VB6_FORMBG_MAX) {
+        snprintf(g_formBg[g_formBgCount].className, sizeof(g_formBg[0].className), "%s", className);
+        g_formBg[g_formBgCount].bg = bg;
+        g_formBgCount++;
+    }
+}
+
+int vb6_Forms_QueryClassBg(const char* className) {
+    for (int i = 0; i < g_formBgCount; i++) {
+        if (strcmp(g_formBg[i].className, className) == 0) return g_formBg[i].bg;
+    }
+    return -1;
+}
+
+void* vb6_CreateFormWindowB(const char* className, const char* formName,
+    int x, int y, int width, int height, void* hInstance, void* userData,
+    int borderStyle);
+
 void* vb6_CreateFormWindow(const char* className, const char* formName,
     int x, int y, int width, int height, void* hInstance, void* userData) {
+    return vb6_CreateFormWindowB(className, formName, x, y, width, height,
+                                 hInstance, userData, 2 /* Sizable */);
+}
+
+void* vb6_CreateFormWindowB(const char* className, const char* formName,
+    int x, int y, int width, int height, void* hInstance, void* userData,
+    int borderStyle) {
     // VB6坐标是缇, 转为像素
     int pw = vb6_TwipToX(width);
     int ph = vb6_TwipToY(height);
 
-    // 创建窗口, 使用WS_OVERLAPPEDWINDOW样式 (VB6标准窗口)
+    // 创建窗口。
+    // czUI fix: 尊重 .frm 的 BorderStyle — BorderStyle=0 (None) 是无系统标题栏
+    // 的无边框窗口 (czUI 自绘标题栏此前叠在系统标题栏下面, 顶部多出一截)。
     // Fix 081k: Do NOT add WS_VISIBLE here; ShowWindow is called by vb6_ShowForm after Form_Load.
     // Fix 124: WS_CLIPCHILDREN —— 窗体自身重绘(背景填充)时必须把子控件区域裁剪掉,
     // 否则窗体重绘会把已经画好的子控件整片覆盖 (表现为"控件时有时无/干脆看不见",
     // 而离屏 dump 一切正常)。
-    DWORD style = WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN;
+    DWORD style;
     DWORD exStyle = 0;
+    switch (borderStyle) {
+        case 0:  /* None */
+            style = WS_POPUP | WS_CLIPCHILDREN;
+            exStyle = WS_EX_APPWINDOW;   /* 仍在任务栏显示 */
+            break;
+        case 1: case 3:  /* Fixed Single / Fixed Dialog */
+            style = WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX | WS_CLIPCHILDREN;
+            break;
+        case 4: case 5:  /* ToolWindow */
+            style = WS_CAPTION | WS_SYSMENU | WS_CLIPCHILDREN;
+            break;
+        default:         /* 2 = Sizable (VB6 标准) */
+            style = WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN;
+            break;
+    }
 
     // 调整窗口大小使客户区匹配指定大小
     RECT rc = {0, 0, pw, ph};
@@ -238,6 +307,10 @@ void vb6_DispatchTimer(int timerId) {
 
 int vb6_MessageLoop(void) {
     MSG msg;
+    // czUI fix: 消息循环启动后设计器 Timer 才允许触发 (VB6 语义: Timer 事件
+    // 排队等消息循环; 否则处理器在 Form_Load 前对未就绪实例运行 → AV)
+    extern int vb6_uc_timersStarted;  // czUI fix (定义在 vb6forms_uc.c)
+    vb6_uc_timersStarted = 1;
     while (GetMessage(&msg, NULL, 0, 0)) {
         // P24-Timer: WM_TIMER现在由WndProc分发, 消息循环不再拦截
         TranslateMessage(&msg);

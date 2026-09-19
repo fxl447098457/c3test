@@ -122,6 +122,13 @@ int32_t vb6_ComCallInt(void* disp, const wchar_t* methodName,
                        void* args, int32_t argc);
 double vb6_ComCallDouble(void* disp, const wchar_t* methodName,
                          void* args, int32_t argc);
+// Fix 140: COM调用结果→Byte() 数组. 结果持 BSTR 时按 VB6 语义转字节数组
+// (vb6_StringToByteArray); 持 SAFEARRAY 时转内部 SafeArray1D. 用于 Byte() 字段
+// 从 COM/PropertyBag 结果赋值 — LabelPlus.ctl ReadProperties 的
+//   m_Caption = .ReadProperty("Caption", Ambient.DisplayName)
+// PropertyBag 里是字符串, 直接赋裸 void* 会让 caption 读不到 (右侧卡片空白).
+struct vb6_SafeArray1D* vb6_ComCallByteArray(void* disp, const wchar_t* methodName,
+                                             void* args, int32_t argc);
 wchar_t* vb6_ComGetStringProp(void* disp, const wchar_t* propName);
 int32_t vb6_ComGetIntProp(void* disp, const wchar_t* propName);
 double vb6_ComGetDoubleProp(void* disp, const wchar_t* propName);

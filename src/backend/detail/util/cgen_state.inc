@@ -107,6 +107,7 @@
     // Bug #2 fix: 已知LongPtr/intptr_t变量名集合 (小写) - 用于直接比较而非VarCmpLong
     std::unordered_set<std::string> knownLongPtrVars_;
 
+
     // P8.4: 已知Variant变量名集合 (小写) - 用于赋值时包装值
     std::unordered_set<std::string> knownVariantVars_;
 
@@ -123,6 +124,15 @@
 
     // Fix 062: 已知Byte数组变量名集合 (小写) - 用于Variant→SafeArray1D*转换
     std::unordered_set<std::string> knownByteArrayVars_;
+
+    // Fix 140: 类模块/窗体字段中的 Byte() 数组成员集合 (小写, 含 m_ 前缀).
+    // 与 knownByteArrayVars_ (过程局部变量) 对称: 类字段在过程开头 knownByteArrayVars_
+    // 被 clear 后不可见, 故单独持久化, 每个过程入口再 copy 回 knownByteArrayVars_.
+    // 用途: LabelPlus.ctl 的 `Dim m_Caption() As Byte` — `Property Let Caption` 内
+    // `m_Caption = New_Caption` 需按"字符串→字节数组"改写 (vb6_StringToByteArray),
+    // 否则直接把 BSTR 当 SafeArray1D* 赋给字段 → UBound/StrPtr 读到的 caption 为空,
+    // 右侧 KPI 卡片 (Venta diaria / USD $532.00) 空白 (Charts 2020 实测).
+    std::unordered_set<std::string> classByteArrayMembers_;
 
 
     // P6.11: 类模块成员变量类型集合 (小写, 含m_前缀格式)
@@ -355,6 +365,8 @@
     const std::map<std::string, std::string>* defaultInstanceClasses_ = nullptr;
 
     // Fix 112: in-project UserControl (.ctl) designer spec table (lowercase module -> FrmFile)
+    // czUI fix: UC 事件 attach 行 (文件作用域 thunk/sink 在 prelude 生成)
+    std::map<std::string, std::vector<std::string>> ucEventAttach_;
     const std::map<std::string, FrmFile>* designerFiles_ = nullptr;
     // Fix 112: sub-controls on a form whose type is an in-project UserControl
     std::unordered_map<std::string, std::string> knownUserControlCtrlVars_;

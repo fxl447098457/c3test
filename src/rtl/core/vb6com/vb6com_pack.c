@@ -60,7 +60,21 @@ void* vb6_ComPackObject(void* obj) {
     VariantInit(pv);
     pv->vt = VT_DISPATCH;
     pv->pdispVal = (IDispatch*)obj;
-    if (obj) ((IDispatch*)obj)->lpVtbl->AddRef((IDispatch*)obj);  /* AddRef: VariantClear will Release */
+    if (obj) {
+        // czUI fix: RTL 宿主对象 (HWND/UC 实例/集合/字体) 不是真实 COM,
+        // 直接 AddRef/Release 会把结构体首字段当 vtable → AV
+        // (Charts2020 ClsResizer For-Each Controls 实测)。
+        // 宿主对象包一层真实 IDispatch (引用计数 + 晚绑定转发);
+        // 真实 COM/ActiveX 对象保持原 AddRef/Release 路径。
+        extern int32_t vb6_Host_IsHostObject(void* obj);
+        extern void* vb6_UC_WrapHostObject(void* obj);
+        if (vb6_Host_IsHostObject(obj)) {
+            pv->pdispVal = (IDispatch*)vb6_UC_WrapHostObject(obj);
+            pv->vt = VT_DISPATCH;
+        } else {
+            ((IDispatch*)obj)->lpVtbl->AddRef((IDispatch*)obj);
+        }
+    }
     return (void*)pv;
 }
 
@@ -143,7 +157,14 @@ double vb6_ComUnpackDouble(void* variant) {
 void* vb6_ComUnpackObject(void* variant) {
     if (!variant) return NULL;
     VARIANT* pv = (VARIANT*)variant;
-    if (pv->vt == VT_DISPATCH) return (void*)pv->pdispVal;
+    if (pv->vt == VT_DISPATCH) {
+        // czUI fix: Pack 侧对 RTL 宿主对象 (字体/集合/UC 实例) 包了一层
+        // IDispatch 包装器; 解包时必须还原原始对象 — 生成的 ctl 代码对字体
+        // 等伪对象按结构体字段直接访问 (vb6_ComIface_Font*), 拿到包装器会
+        // 全部失效 (Charts2020 图表标题/百分比文字缺失的根因)
+        extern void* vb6_UC_UnwrapHost(void* obj);
+        return vb6_UC_UnwrapHost((void*)pv->pdispVal);
+    }
     if (pv->vt == VT_UNKNOWN) return (void*)pv->punkVal;
     return NULL;
 }

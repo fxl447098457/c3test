@@ -77,6 +77,25 @@
         if (valueIsVariant) {
             value = "vb6_VariantToString(" + value + ")";
         }
+        // Fix 140: RHS 是 Byte() 数组 (类成员 m_Caption 或已知字节数组变量) 且目标是
+        // BSTR → 按 UTF-16LE 字节还原为字符串. 不能把数组指针当 BSTR 交给
+        // vb6_BSTR_Assign (SysStringLen 会读数组前的堆元数据当长度 → 堆损坏).
+        // 场景: LabelPlus.ctl `Property Get Caption() As String: Caption = m_Caption`.
+        if (!valueIsVariant) {
+            std::string rhs140 = value;
+            if (rhs140.compare(0, 4, "me->") == 0) rhs140 = rhs140.substr(4);
+            if (rhs140.size() > 4 && rhs140[0] == '(' && rhs140[1] == '*'
+                && rhs140.back() == ')') {
+                rhs140 = rhs140.substr(2, rhs140.size() - 3);
+            }
+            std::string rhs140l = rhs140;
+            std::transform(rhs140l.begin(), rhs140l.end(), rhs140l.begin(), ::tolower);
+            if (rhs140.find_first_of("( .") == std::string::npos
+                && (knownByteArrayVars_.count(rhs140l)
+                    || classByteArrayMembers_.count(rhs140l))) {
+                value = "vb6_ByteArrayToString(" + value + ")";
+            }
+        }
         c_.emitLine("vb6_BSTR_Assign(&" + target + ", " + value + ");");
     } else if (targetIsVariant) {
         // P8.4: 包装值为vb6_VARIANT, 先释放旧BSTR
@@ -162,6 +181,56 @@
             && value == currentReturnVar_
             && currentReturnCType_ == "vb6_VARIANT") {
             valueIsVariant = true;
+        }
+        // Fix 124: RHS 是裸 COM 调用结果 (vb6_ComCall* / ComGet*Prop 返回 void*,
+        // 承载 VARIANT*) 且目标是具体类型标量 — 直接赋值 → void*→double/int32_t
+        // C2440 (cZipArchive: pvVfsSeek = uFile.Stream.VfsSetFilePointer(...) →
+        // vb6_ret_pvVfsSeek = vb6_ComCall(...) 2630). 按目标 C 类型解封:
+        // VariantFromComResult 把 void* 包回 vb6_VARIANT, 再 VariantToXxx 提取.
+        bool valueIsBareComResult = (value.compare(0, 12, "vb6_ComCall(") == 0
+            || value.compare(0, 17, "vb6_ComCallObject(") == 0
+            || value.compare(0, 15, "vb6_ComCallBSTR(") == 0
+            || value.compare(0, 14, "vb6_ComCallInt(") == 0
+            || value.compare(0, 17, "vb6_ComCallDouble(") == 0
+            || value.compare(0, 14, "vb6_ComGetProp(") == 0
+            || value.compare(0, 19, "vb6_ComGetObjectProp(") == 0
+            || value.compare(0, 18, "vb6_ComGetStringProp(") == 0
+            || value.compare(0, 15, "vb6_ComGetIntProp(") == 0
+            || value.compare(0, 18, "vb6_ComGetDoubleProp(") == 0);
+        if (valueIsBareComResult) {
+            std::string unwrapped = "vb6_VariantFromComResult(" + value + ")";
+            std::string tgtCt124;
+            if (!currentReturnVar_.empty() && target == currentReturnVar_
+                && !currentReturnCType_.empty()) {
+                tgtCt124 = currentReturnCType_;      // 函数名赋值: 按返回类型
+            } else {
+                // 按目标名查已知变量类型 (与 Fix 084n 已知变量集合同口径)
+                std::string chk124 = target;
+                if (chk124.compare(0, 4, "me->") == 0) chk124 = chk124.substr(4);
+                if (chk124.size() > 4 && chk124[0] == '(' && chk124[1] == '*'
+                    && chk124.back() == ')') {
+                    chk124 = chk124.substr(2, chk124.size() - 3);
+                }
+                std::string lo124 = chk124;
+                std::transform(lo124.begin(), lo124.end(), lo124.begin(), ::tolower);
+                if (knownDoubleVars_.count(lo124)) tgtCt124 = "double";
+                else if (knownLongVars_.count(lo124)) tgtCt124 = "int32_t";
+                else if (knownBstrVars_.count(lo124)) tgtCt124 = "BSTR";
+            }
+            if (tgtCt124 == "double" || tgtCt124 == "float") {
+                c_.emitLine(target + " = vb6_VariantToDouble(" + unwrapped + ");");
+                return;
+            }
+            if (tgtCt124 == "int32_t" || tgtCt124 == "int16_t" || tgtCt124 == "uint8_t"
+                || tgtCt124 == "int64_t" || tgtCt124 == "LONG") {
+                c_.emitLine(target + " = vb6_VariantToLong(" + unwrapped + ");");
+                return;
+            }
+            if (tgtCt124 == "BSTR") {
+                c_.emitLine(target + " = vb6_VariantToString(" + unwrapped + ");");
+                return;
+            }
+            // 目标类型未知 (void*/对象等) → 不动, 维持原赋值路径.
         }
         if (valueIsVariant) {
             // 检查目标类型
@@ -254,9 +323,13 @@
                 } else if (knownObjectVars_.count(lower)) {
                     // Fix 045: Object (void*) target + Variant value → extract object
                     convertedValue = "vb6_VariantToObjectVal(" + value + ")";
-                } else if (knownByteArrayVars_.count(lower)) {
+                } else if (knownByteArrayVars_.count(lower)
+                           || classByteArrayMembers_.count(lower)) {
                     // Fix 062: Byte array target + Variant value → extract SafeArray1D*
-                    convertedValue = "vb6_VariantToSafeArray1D(" + value + ")";
+                    // Fix 140: 改用 vb6_VariantToByteArray — Variant 持字符串时按
+                    // VB6 语义转字节数组 (旧 SafeArray1D 版本对字符串返回 NULL,
+                    // 会清空 m_Caption → 右侧卡片空白).
+                    convertedValue = "vb6_VariantToByteArray(" + value + ")";
                 } else if (knownClassVars_.count(lower)) {
                     // Fix 086: 类类型目标 (vb6_cls_X*) + Variant值 → 提取对象指针
                     convertedValue = "(vb6_cls_" + cIdent(knownClassVars_[lower])
@@ -276,8 +349,10 @@
                         convertedValue = "vb6_VariantToDouble(" + value + ")";
                     } else if (knownObjectVars_.count(idLower)) {
                         convertedValue = "vb6_VariantToObjectVal(" + value + ")";
-                    } else if (knownByteArrayVars_.count(idLower)) {
-                        convertedValue = "vb6_VariantToSafeArray1D(" + value + ")";
+                    } else if (knownByteArrayVars_.count(idLower)
+                               || classByteArrayMembers_.count(idLower)) {
+                        // Fix 140: 同前 — 字符串 Variant 需转字节数组.
+                        convertedValue = "vb6_VariantToByteArray(" + value + ")";
                     } else if (knownClassVars_.count(idLower)) {
                         // Fix 086: 类类型目标 (vb6_cls_X*) + Variant值
                         convertedValue = "(vb6_cls_" + cIdent(knownClassVars_[idLower])
