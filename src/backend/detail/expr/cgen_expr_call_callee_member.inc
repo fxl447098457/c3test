@@ -166,6 +166,7 @@
                                         std::vector<std::string> packedArgs;
                                         for (size_t i = 0; i < node.positional.size(); i++) {
                                             std::string packFn = comPackExpr(*node.positional[i]);
+                                            emitExpr(*node.positional[i]);  // Fix: Pattern K 实参丢失 (漏 emit 致 vb6_ComPackXxx() 零实参), 与 Pattern D 对齐
 
                                             { std::string resolved = resolveComMarkerForPack(packFn);
                                               if (!resolved.empty()) lastExpr_ = resolved; }
