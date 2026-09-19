@@ -148,8 +148,64 @@ struct vb6_SafeArray1D* vb6_StringToByteArray(BSTR text) {
     int32_t byteCount = wlen * 2;
     struct vb6_SafeArray1D* arr = vb6_SafeArrayCreate1D(vb6_sa_byte, 0, byteCount - 1);
     if (!arr || !arr->data) return arr;
+    /* Fix 140: 逻辑长度不变 (count = byteCount), 但数据缓冲多分配 2 字节并清零,
+     * 使 StrPtr(arr) 可当 null 结尾宽字符串使用 —— LabelPlus.ctl 用
+     * GdipMeasureString/GdipAddPathString(StrPtr(m_Caption), -1, ...). */
+    void* grown = realloc(arr->data, (size_t)byteCount + 2);
+    if (grown) arr->data = grown;
     memcpy(arr->data, text, (size_t)byteCount);
+    if (grown) memset((char*)arr->data + byteCount, 0, 2);
     return arr;
+}
+
+/* Fix 140: Byte() -> BSTR — 把数组数据当作 UTF-16LE 宽字符串还原.
+ * 与 vb6_StringToByteArray 互逆 (原始内存字节, 不做 ANSI 转码). */
+BSTR vb6_ByteArrayToString(struct vb6_SafeArray1D* arr) {
+    if (!arr || !arr->data || arr->count <= 0) return vb6_BSTR_Empty();
+    int32_t wcCount = arr->count / 2;
+    const wchar_t* p = (const wchar_t*)arr->data;
+    while (wcCount > 0 && p[wcCount - 1] == 0) wcCount--;   /* 去掉 0 结尾 */
+    if (wcCount <= 0) return vb6_BSTR_Empty();
+    BSTR result = SysAllocStringLen(NULL, (UINT)wcCount);
+    if (!result) return vb6_BSTR_Empty();
+    memcpy(result, arr->data, (size_t)wcCount * sizeof(wchar_t));
+    return result;
+}
+
+/* Fix 140: StrPtr(Byte()) — 返回数组数据指针 (而非 SafeArray1D* 结构体指针). */
+void* vb6_SafeArrayDataPtr(struct vb6_SafeArray1D* arr) {
+    return arr ? arr->data : NULL;
+}
+
+/* Fix 140: Variant -> Byte() 数组.
+ * Variant 持数组       -> 直接返回其 parray (与 vb6_VariantToSafeArray1D 同);
+ * Variant 持字符串 BSTR -> 按 VB6 语义复制为字节数组 (原始 UTF-16LE 字节);
+ * 其余 (Empty/Null/标量) -> NULL.
+ * 场景: LabelPlus.ctl `m_Caption = .ReadProperty("Caption", Ambient.DisplayName)`
+ * — PropertyBag 中 Caption 存的是字符串, 必须转成字节数组, 否则 UBound/StrPtr
+ * 读不到内容, 右侧 "Venta diaria"/"USD $532.00" 卡片空白. */
+struct vb6_SafeArray1D* vb6_VariantToByteArray(vb6_VARIANT v) {
+    if ((v.vt & vb6_vtArray) && v.parray) {
+        return v.parray;
+    }
+    if (v.vt == vb6_vtBSTR && v.bstrVal) {
+        return vb6_StringToByteArray(v.bstrVal);
+    }
+    return NULL;
+}
+
+/* Fix 140: COM调用结果 -> Byte() 数组.
+ * vb6_ComCall 返回 Windows VARIANT*; 用 vb6_VariantFromComResult 深转换并把
+ * 内容所有权转移走 (BSTR/SAFEARRAY), 然后按 Byte() 语义解封. */
+struct vb6_SafeArray1D* vb6_ComCallByteArray(void* disp, const wchar_t* methodName,
+                                             void* args, int32_t argc) {
+    void* pv = vb6_ComCall(disp, methodName, args, argc);
+    if (!pv) return NULL;
+    /* 注意: vb6_VariantFromComResult 内部已 VariantClear(pv) + free(pv)
+     * (它"消耗" VARIANT* 所有权 — 见 vb6rtl_com.c)，此处绝不能再 free(pv),
+     * 否则 double-free → STATUS_HEAP_CORRUPTION。 */
+    vb6_VARIANT v = vb6_VariantFromComResult(pv);
+    return vb6_VariantToByteArray(v);
 }
 
 /* StrConv(s, conversion) -> Byte() */

@@ -276,6 +276,12 @@ struct vb6_SafeArray1D; // forward declaration
 struct vb6_SafeArray1D* vb6_StringToByteArray(BSTR text);
 struct vb6_SafeArray1D* vb6_StrConvToByteArray(BSTR text, int32_t conversion, int32_t localeID);
 BSTR   vb6_StrConvFromByteArray(struct vb6_SafeArray1D* arr, int32_t conversion, int32_t localeID);
+// Fix 140: Byte() -> BSTR (UTF-16LE 字节直读) 与 Byte() 数据指针.
+//   vb6_ByteArrayToString(arr): 把 arr->data 当作 UTF-16LE 宽字符串还原为 BSTR.
+//     与 vb6_StringToByteArray 互逆 (原始内存字节, 非 ANSI 转码).
+//   vb6_SafeArrayDataPtr(arr) : StrPtr(Byte()) 语义 — 返回 arr->data (非结构体指针).
+BSTR   vb6_ByteArrayToString(struct vb6_SafeArray1D* arr);
+void*  vb6_SafeArrayDataPtr(struct vb6_SafeArray1D* arr);
 struct vb6_SafeArray1D* vb6_Filter(struct vb6_SafeArray1D* source, BSTR match, int32_t include, int32_t compare);
 void*    vb6_StrPtr(BSTR s);          // StrPtr: address of string data
 uintptr_t vb6_ObjPtr(void* obj);       // ObjPtr: address of object

@@ -88,7 +88,8 @@ BSTR vb6_Mid(BSTR s, int32_t start, int32_t len) {
     int32_t slen = vb6_BSTR_Len(s);
     int32_t offset = start - 1;  // VB6是1-based
     if (offset >= slen) return vb6_BSTR_Empty();
-    if (offset + len > slen) len = slen - offset;
+    // len < 0 是 cgen 对省略 length 参数 (Mid$(s, n)) 的哨兵 — 取到结尾
+    if (len < 0 || offset + len > slen) len = slen - offset;
     wchar_t* buf = (wchar_t*)malloc((len + 1) * sizeof(wchar_t));
     memcpy(buf, s + offset, len * sizeof(wchar_t));
     buf[len] = L'\0';
@@ -229,6 +230,28 @@ double vb6_Val(BSTR s) {
     if (len > 255) len = 255;
     for (size_t i = 0; i < len; i++) narrow[i] = (char)s[i];
     narrow[len] = '\0';
+    // czUI fix: VB6 的 Val 同样支持 &H十六进制 / &O八进制 字面量
+    // (HexToColor 用 Val("&H" & hex) 解析 "#RRGGBB"; strtod 对 "&H" 返回 0,
+    //  曾导致所有字符串颜色变纯黑 — 标题栏/面板/文本框全黑)
+    const char* pv = narrow;
+    while (*pv == ' ' || *pv == '\t') pv++;
+    if (pv[0] == '&' && (pv[1] == 'H' || pv[1] == 'h')) {
+        unsigned long long hv = 0;
+        const char* q = pv + 2;
+        while (isxdigit((unsigned char)*q)) {
+            char c = *q;
+            int d = (c <= '9') ? (c - '0') : ((c | 0x20) - 'a' + 10);
+            hv = hv * 16 + (unsigned)d;
+            q++;
+        }
+        return (double)hv;
+    }
+    if (pv[0] == '&' && (pv[1] == 'O' || pv[1] == 'o')) {
+        unsigned long long ov = 0;
+        const char* q = pv + 2;
+        while (*q >= '0' && *q <= '7') { ov = ov * 8 + (unsigned)(*q - '0'); q++; }
+        return (double)ov;
+    }
     return strtod(narrow, NULL);
 }
 

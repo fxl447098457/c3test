@@ -1629,7 +1629,7 @@ End Sub
 
 Private Sub RoundRect(ByVal hGraphics As LongPtr, Rect As RectF, ByVal BackColor As Long, ByVal BorderColor As Long, ByVal Round As Single, Optional bBorder As Boolean = True)
     Dim hPen As LongPtr, hBrush As LongPtr
-    Dim mPath As Long
+    Dim mPath As LongPtr
     
     GdipCreateSolidFill BackColor, hBrush
     If bBorder Then GdipCreatePen1 BorderColor, 1 * nScale, &H2, hPen

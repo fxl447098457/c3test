@@ -1,0 +1,74 @@
+name: VB6 C3 Regression
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  regression:
+    name: Run-Tests (all)
+    runs-on: windows-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      # 交给脚本的 vswhere 自动发现 vcvarsall (无需显式设置)
+      C3_VCVARSALL: ""
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Sanity — required dev tools (MSVC)
+        shell: pwsh
+        run: |
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer\vswhere.exe"
+          if (-not (Test-Path $vswhere)) { throw "vswhere missing (VS installer absent)" }
+          $vsPath = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath 2>$null
+          if (-not $vsPath) { throw "No MSVC C++ tools found (needs VS C++ workload)" }
+          Write-Host "MSVC install: $vsPath"
+          cmake --version
+          ninja --version
+
+      - name: Build C3.exe from source (never ship a vendored binary)
+        shell: pwsh
+        run: |
+          # MSVC 官方只保证从 vcvarsall 拿到的环境有效; 这里在子进程里导出后注入当前进程。
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer\vswhere.exe"
+          $vsPath = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath 2>$null
+          if (-not $vsPath) { throw "No MSVC install" }
+          $vcvars = Join-Path $vsPath "VC\Auxiliary\Build\vcvarsall.bat"
+          $envLines = & cmd /c "call `"$vcvars`" x64 >nul 2>&1 && set" 2>$null
+          foreach ($line in $envLines) {
+            if ($line -match '^([^=]+)=(.*)$') {
+              [Environment]::SetEnvironmentVariable($matches[1], $matches[2], "Process")
+            }
+          }
+          $buildDir = Join-Path $env:RUNNER_TEMP "c3build"
+          cmake -S . -B $buildDir -G Ninja -DVB6C3_ENABLE_LLVM=OFF -DCMAKE_BUILD_TYPE=Release
+          if ($LASTEXITCODE -ne 0) { throw "cmake configure failed" }
+          cmake --build $buildDir
+          if ($LASTEXITCODE -ne 0) { throw "cmake build failed" }
+          New-Item -ItemType Directory -Force -Path .build | Out-Null
+          Copy-Item (Join-Path $buildDir "C3.exe") .build\C3.exe -Force
+          & .build\C3.exe --version
+          if ($LASTEXITCODE -ne 0) { throw "built C3.exe smoke check failed" }
+
+      - name: Run full regression
+        run: powershell -ExecutionPolicy Bypass -File tests/run_tests.ps1 -Category all -Verbose
+
+      - name: Upload test logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-logs
+          path: |
+            tests/output/**/*.out
+            tests/output/**/*.err
+            tests/output/**/*.txt
+            tests/output/**/*.dat
+            tests/output/**/scores.txt
+          if-no-files-found: warn
+          retention-days: 14

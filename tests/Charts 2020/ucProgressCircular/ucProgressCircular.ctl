@@ -203,7 +203,7 @@ Dim c_lhWnd As LongPtr
 Dim nScale As Single
 Dim StartAngleAnimation As Single
 Dim PF_ColorsCount As Long
-Dim m_PenGradient As Long
+Dim m_PenGradient As LongPtr
 Dim m_Caption1 As String
 Dim m_Caption1_ForeColor As OLE_COLOR
 Dim m_Caption1_Font As StdFont
@@ -907,7 +907,7 @@ Public Function DrawGradientArc(ByVal hGraphics As LongPtr, _
                                 ByVal mStartAngle As Single, ByVal mSweepAngle As Single) As Boolean
   
 
-    Dim mPath As Long
+    Dim mPath As LongPtr
     Dim hBrush As LongPtr
     Dim hPen As LongPtr
     Dim pColors() As Long

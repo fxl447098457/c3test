@@ -19,7 +19,10 @@ void* vb6_ComCallObject(void* disp, const wchar_t* methodName,
     if (!pv) return NULL;
     void* obj = NULL;
     if (pv->vt == VT_DISPATCH) {
-        obj = (void*)pv->pdispVal;  // 转移引用所有权
+        // czUI fix: Pack 侧可能包了宿主包装器 (字体/集合等 RTL 伪对象),
+        // 解包还原原始对象 — ctl 代码按结构体字段直接访问
+        extern void* vb6_UC_UnwrapHost(void* obj);
+        obj = vb6_UC_UnwrapHost((void*)pv->pdispVal);  // 转移引用所有权
     } else if (pv->vt == VT_UNKNOWN) {
         pv->punkVal->lpVtbl->QueryInterface(pv->punkVal, &IID_IDispatch, &obj);
         // QueryInterface增加了refcount, 需要Release原引用
