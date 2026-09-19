@@ -11,7 +11,8 @@
 param(
     [string]$Category = "all",
     [switch]$Verbose,
-    [string]$OutputDirectory = ""
+    [string]$OutputDirectory = "",
+    [int]$Jobs = 1          # >1 时并行运行纯 .bas 用例 (每 worker 独立输出目录); GUI/VBP 始终串行
 )
 
 $ErrorActionPreference = "SilentlyContinue"
@@ -324,6 +325,104 @@ function Test-Run {
     }
 }
 
+# === 纯 .bas 用例串行执行 (默认路径; 与 Tests 逐个调用 Test-Run 等价) ===
+function Invoke-BasSetSerial {
+    param([object[]]$Items)
+    foreach ($it in $Items) {
+        Test-Run $it.Name $it.Source $it.Expected $it.Arch
+    }
+}
+
+# === 纯 .bas 用例并行执行 (多个 C3 实例同时编译+运行) ===
+# 每个 worker 独立输出目录 (避免 exe/日志文件互相覆盖); 仅限 PowerShell 7+
+# (ForEach-Object -Parallel); 每个 worker 返回汇总对象, 由调用方合并计数.
+function Invoke-BasSetParallel {
+    param([object[]]$Items, [int]$Jobs)
+    if ($Items.Count -eq 0) { return }
+
+    # 均分 (按遍历顺序切片, 每片尽可能均匀)
+    $per = [int][Math]::Ceiling($Items.Count / [double]$Jobs)
+    $shards = @()
+    for ($i = 0; $i -lt $Items.Count; $i += $per) {
+        $end = [Math]::Min($i + $per - 1, $Items.Count - 1)
+        $shards += ,@(@( $Items[$i..$end] ), (Join-Path $OutDir ("job" + $shards.Count)))
+    }
+    if ($shards.Count -eq 0) { return }
+
+    $results = $shards | ForEach-Object -Parallel {
+        $shardItems = $_[0]
+        $workDir    = $_[1]
+        New-Item -ItemType Directory -Path $workDir -Force | Out-Null
+        $c3 = $using:C3
+        $p = 0; $f = 0; $details = @()
+        foreach ($it in $shardItems) {
+            if ($it.Arch) {
+                $cr = & $c3 $it.Source --arch $it.Arch --output-dir $workDir 2>&1
+            } else {
+                $cr = & $c3 $it.Source --output-dir $workDir 2>&1
+            }
+            $ec = $LASTEXITCODE
+            if ($ec -ne 0) { $f++; $details += "$($it.Name): compile FAIL"; continue }
+
+            $baseName = [IO.Path]::GetFileNameWithoutExtension($it.Source)
+            $exePath = Join-Path $workDir "$baseName.exe"
+            if (-not (Test-Path $exePath)) { $f++; $details += "$($it.Name): no exe"; continue }
+
+            # --- 运行 (语义与 Invoke-TestExe 一致; 5s 超时) ---
+            $stdoutFile = Join-Path $workDir "$($it.Name).out"
+            $stderrFile = Join-Path $workDir "$($it.Name).err"
+            $runOk = $false
+            try {
+                $psi = New-Object System.Diagnostics.ProcessStartInfo
+                $psi.FileName = $exePath
+                $psi.WorkingDirectory = $workDir
+                $psi.UseShellExecute = $false
+                $psi.CreateNoWindow = $false
+                $psi.RedirectStandardOutput = $true
+                $psi.RedirectStandardError = $true
+                $proc = [System.Diagnostics.Process]::Start($psi)
+                $soTask = $proc.StandardOutput.ReadToEndAsync()
+                $seTask = $proc.StandardError.ReadToEndAsync()
+                if (-not $proc.WaitForExit(5000)) {
+                    try { $proc.Kill() } catch { }
+                    $proc.WaitForExit()
+                    $f++; $details += "$($it.Name): run timeout 5s"; continue
+                }
+                [IO.File]::WriteAllText($stdoutFile, [string]$soTask.Result, [Text.Encoding]::Default)
+                [IO.File]::WriteAllText($stderrFile, [string]$seTask.Result, [Text.Encoding]::Default)
+                $runOk = $true
+            } catch {
+                $f++; $details += "$($it.Name): run error ($($_.Exception.Message))"; continue
+            }
+
+            if ($it.Expected -and $it.Expected.Count -gt 0 -and $runOk) {
+                $runOut = @(Get-Content $stdoutFile -ErrorAction SilentlyContinue)
+                $allMatch = $true
+                foreach ($exp in $it.Expected) {
+                    $found = $runOut | Where-Object { $_ -like "*$exp*" }
+                    if (-not $found) { $allMatch = $false; break }
+                }
+                if ($allMatch) { $p++ } else { $f++; $details += "$($it.Name): output mismatch" }
+            } else {
+                $p++
+            }
+        }
+        [pscustomobject]@{ Pass = $p; Fail = $f; Details = $details }
+    } -ThrottleLimit $Jobs
+
+    foreach ($r in $results) {
+        $script:pass += $r.Pass
+        $script:fail += $r.Fail
+        $script:total += ($r.Pass + $r.Fail)
+        foreach ($d in $r.Details) {
+            Write-Host "  [RUN] $d" -ForegroundColor Red
+        }
+    }
+    $sumPass = ($results | Measure-Object -Property Pass -Sum).Sum
+    $sumFail = ($results | Measure-Object -Property Fail -Sum).Sum
+    Write-Host "  (parallel: $($results.Count) worker(s), pass=$sumPass fail=$sumFail)"
+}
+
 # === VBP 工程测试 (编译+链接+运行) ===
 function Test-Vbp {
     param(
@@ -443,43 +542,91 @@ if ($Category -in @("all", "smoke")) {
 
 # --- 冒烟测试 (编译+运行) ---
 if ($Category -in @("all", "run")) {
+    # 纯 .bas 用例统一入队; VBP/GUI 用例保持串行 (窗口校验无法并行确认效果)
+    $basQueue = @()
+    function Add-BasTest {
+        param([string]$Name, [string]$Source, $Expected = @(), [string]$Arch = "")
+        $script:basQueue += @{
+            Name     = $Name
+            Source   = $Source
+            Expected = @($Expected)
+            Arch     = $Arch
+        }
+    }
+
     Write-Host "--- Regression (Compile+Run) ---" -ForegroundColor Yellow
-    
-    Test-Run "hello" "$Tests\hello.bas"
-    Test-Run "test_m5" "$Tests\test_m5.bas"
-    Test-Run "test_rtl" "$Tests\test_rtl.bas"
-    Test-Run "test_array" "$Tests\test_array.bas"
-    Test-Run "test_fileio" "$Tests\test_fileio.bas"
-    Test-Run "test_error" "$Tests\test_error.bas"
-    Test-Run "test_now" "$Tests\test_now.bas"
-    Test-Run "test_getput" "$Tests\test_getput.bas" @("PASS1a", "PASS1b", "PASS1c", "PASS2", "PASS3", "PASS4")
-    Test-Run "test_onerror" "$Tests\test_onerror.bas" @("PASS1", "PASS2", "PASS3a", "PASS3b", "Done")
-    Test-Run "test_ndarray" "$Tests\test_ndarray.bas" @("2D sum=270", "P8.1 ALL TESTS DONE")
-    Test-Run "test_foreach" "$Tests\test_foreach4.bas" @("Long For Each: 150", "String For Each: Hello World")
-    Test-Run "test_softkeyword" "$Tests\test_softkeyword.bas" @("Get=42", "Step=5", "Name=test")
-    Test-Run "test_date" "$Tests\test_date.bas" @("PASS_Year", "PASS_Month", "PASS_Day", "PASS_NowYear", "Done")
-    Test-Run "test_colon" "$Tests\test_colon.bas" @("PASS1", "PASS2", "PASS3", "Done")
-    Test-Run "test_variant" "$Tests\test_variant.bas" @("PASS1a", "PASS1c", "PASS5", "Done")
+
+    Add-BasTest "hello" "$Tests\hello.bas"
+    Add-BasTest "test_m5" "$Tests\test_m5.bas"
+    Add-BasTest "test_rtl" "$Tests\test_rtl.bas"
+    Add-BasTest "test_array" "$Tests\test_array.bas"
+    Add-BasTest "test_fileio" "$Tests\test_fileio.bas"
+    Add-BasTest "test_error" "$Tests\test_error.bas"
+    Add-BasTest "test_now" "$Tests\test_now.bas"
+    Add-BasTest "test_getput" "$Tests\test_getput.bas" @("PASS1a", "PASS1b", "PASS1c", "PASS2", "PASS3", "PASS4")
+    Add-BasTest "test_onerror" "$Tests\test_onerror.bas" @("PASS1", "PASS2", "PASS3a", "PASS3b", "Done")
+    Add-BasTest "test_ndarray" "$Tests\test_ndarray.bas" @("2D sum=270", "P8.1 ALL TESTS DONE")
+    Add-BasTest "test_foreach" "$Tests\test_foreach4.bas" @("Long For Each: 150", "String For Each: Hello World")
+    Add-BasTest "test_softkeyword" "$Tests\test_softkeyword.bas" @("Get=42", "Step=5", "Name=test")
+    Add-BasTest "test_date" "$Tests\test_date.bas" @("PASS_Year", "PASS_Month", "PASS_Day", "PASS_NowYear", "Done")
+    Add-BasTest "test_colon" "$Tests\test_colon.bas" @("PASS1", "PASS2", "PASS3", "Done")
+    Add-BasTest "test_variant" "$Tests\test_variant.bas" @("PASS1a", "PASS1c", "PASS5", "Done")
     Write-Host ""
-    
+
         # --- P5.5 数据类型兼容性测试 ---
     Write-Host "--- Compat Tests (P5.5) ---" -ForegroundColor Yellow
-    
-    Test-Run "test_compat" "$Tests\test_compat.bas"
-    Test-Run "test_types" "$Tests\test_types.bas"
-    Test-Run "test_control" "$Tests\test_control.bas"
-    Test-Run "test_declare" "$Tests\test_declare.bas"
+
+    Add-BasTest "test_compat" "$Tests\test_compat.bas"
+    Add-BasTest "test_types" "$Tests\test_types.bas"
+    Add-BasTest "test_control" "$Tests\test_control.bas"
+    Add-BasTest "test_declare" "$Tests\test_declare.bas"
     Write-Host ""
-    
+
     # --- P5.7 语法/语义检查用例组 ---
     Write-Host "--- Bugfix Tests (P5.7) ---" -ForegroundColor Yellow
-    
-    Test-Run "test_fixes" "$Tests\test_fixes.bas" @("FIX1:OK", "FIX2:OK", "FIX3:OK", "All fixes passed!")
+
+    Add-BasTest "test_fixes" "$Tests\test_fixes.bas" @("FIX1:OK", "FIX2:OK", "FIX3:OK", "All fixes passed!")
     Write-Host ""
-    
-    # --- VBP 工程测试 (P5) ---
+
+    # --- P6 预处理器/冒烟测试用例组 ---
+    Write-Host "--- COM Tests (P6) ---" -ForegroundColor Yellow
+
+    Add-BasTest "test_com" "$Tests\test_com.bas" @("COM-1:OK", "COM-2:OK", "COM-3:OK", "COM:3/3")
+    Add-BasTest "test_com2" "$Tests\test_com2.bas" @("Users")
+    Add-BasTest "test_com3" "$Tests\test_com3.bas" @("COM3-1:OK", "COM3-2:OK", "COM3-3:OK", "COM3-4:OK", "COM3:4/4")
+    Add-BasTest "test_earlybound" "$Tests\test_earlybound.bas" @("EB-1:OK", "EB-2:OK", "EB:2/2")
+    Add-BasTest "test_p1324" "$Tests\test_p1324.bas" @("P13-1:OK", "P13-3:OK", "P13-5:OK", "P13:8/8")
+
+    # --- P24 COM 测试用例 ---
+    Write-Host "--- P24 COM Optimization Tests ---" -ForegroundColor Yellow
+
+    Add-BasTest "test_p24" "$Tests\test_p24.bas" @("P24-01a:OK", "P24-01b:OK", "P24-01c:OK", "P24-03a:OK", "P24-03b:OK", "P24:5/5")
+    Add-BasTest "test_earlybound2" "$Tests\test_earlybound2.bas" @("EB2-1:OK", "EB2-7:DriveType=2", "EB2-8:OK", "EB2-10:OK", "EB2:10/10") -Arch "x86"
+    Add-BasTest "test_not_com" "$Tests\test_not_com.bas" @("NOT-COM:OK", "NOT-COM2:OK", "NOT-COM:PASS") -Arch "x86"
+    Add-BasTest "test_err_obj" "$Tests\test_err_obj.bas" @("ERR-1:OK", "ERR-6:OK", "ERR:6/6")
+    Add-BasTest "test_variant_cmp" "$Tests\test_variant_cmp.bas" @("VC-1:OK", "VC-4:OK", "VC:4/4")
+    Add-BasTest "test_com_default_prop" "$Tests\test_com_default_prop.bas" @("DP-1:OK", "DP-4:OK", "P24-10: 4/4")
+    Add-BasTest "test_com_optional" "$Tests\test_com_optional.bas" @("OP-1:OK", "OP-4:OK", "P24-11: 4/4")
+    Add-BasTest "test_bstr_concat_scalar" "$Tests\test_bstr_concat_scalar.bas" @("BCS:16/16")
+
+    # 执行纯 .bas 用例 (串行或并行)
+    $basSw = [Diagnostics.Stopwatch]::StartNew()
+    if ($Jobs -gt 1 -and $PSVersionTable.PSVersion.Major -ge 7) {
+        Write-Host "--- Bas Tests (parallel, jobs=$Jobs) ---" -ForegroundColor Yellow
+        Invoke-BasSetParallel -Items $basQueue -Jobs $Jobs
+    } else {
+        if ($Jobs -gt 1) {
+            Write-Host "[WARN] -Jobs>1 需要 PowerShell 7+, 当前 $($PSVersionTable.PSVersion) 回退串行" -ForegroundColor Yellow
+        }
+        Invoke-BasSetSerial -Items $basQueue
+    }
+    $basSw.Stop()
+    Write-Host "  (bas tests took $([Math]::Round($basSw.Elapsed.TotalSeconds))s)"
+
+    # --- VBP 工程测试 (P5) --- (串行; GUI 窗口校验无法并行)
     Write-Host "--- VBP Project Tests (P5) ---" -ForegroundColor Yellow
-    
+    $vbpSw = [Diagnostics.Stopwatch]::StartNew()
+
     Test-Vbp "test_class" "$Tests\test_class.vbp" @("3", "0")
 
     Test-Vbp "M6Test" "$Tests\M6Test.vbp" @("M6A:OK", "M6B:OK", "M6C:OK", "M6D:OK", "M6 PASSED")
@@ -493,32 +640,15 @@ if ($Category -in @("all", "run")) {
     # x64 after LongPtr port of API pointers/handles in the .ctl/.cls sources).
     Test-GuiVbp "Charts2020" "$Tests\Charts 2020\Proyecto1.vbp" -Arch "x86" -AutoExitSec 5
     Write-Host ""
-    
-    # --- P6 预处理器/冒烟测试用例组 ---
-    Write-Host "--- COM Tests (P6) ---" -ForegroundColor Yellow
-    
-    Test-Run "test_com" "$Tests\test_com.bas" @("COM-1:OK", "COM-2:OK", "COM-3:OK", "COM:3/3")
-    Test-Run "test_com2" "$Tests\test_com2.bas" @("Users")
-    Test-Run "test_com3" "$Tests\test_com3.bas" @("COM3-1:OK", "COM3-2:OK", "COM3-3:OK", "COM3-4:OK", "COM3:4/4")
-    Test-Run "test_earlybound" "$Tests\test_earlybound.bas" @("EB-1:OK", "EB-2:OK", "EB:2/2")
-    Test-Run "test_p1324" "$Tests\test_p1324.bas" @("P13-1:OK", "P13-3:OK", "P13-5:OK", "P13:8/8")
+
     Test-Vbp "test_implements" "$Tests\test_implements.vbp" @("IMPL1:OK", "IMPL2:OK", "Implements test PASSED")
     Test-Vbp "test_events" "$Tests\test_events\test_events.vbp" @("Events test PASSED")
     Test-Vbp "M7Test" "$Tests\m7_test\M7Test.vbp" @("4/4 PASSED")
-    
-    # --- P24 COM 测试用例 ---
-    Write-Host "--- P24 COM Optimization Tests ---" -ForegroundColor Yellow
-    
-    Test-Run "test_p24" "$Tests\test_p24.bas" @("P24-01a:OK", "P24-01b:OK", "P24-01c:OK", "P24-03a:OK", "P24-03b:OK", "P24:5/5")
+
     # test_vbman 用于验证外部 COM 组件 VBMANLIB (x86 DLL, 供 32 位程序调用)
     Test-Vbp "test_vbman" "$Tests\test_vbman\test_vbman.vbp" @("P24-04a:OK", "P24-04b:OK", "P24-04:2/2") -Arch "x86" -RequiresCom "VBMANLIB.cVBMAN"
-    Test-Run "test_earlybound2" "$Tests\test_earlybound2.bas" @("EB2-1:OK", "EB2-7:DriveType=2", "EB2-8:OK", "EB2-10:OK", "EB2:10/10") -Arch "x86"
-    Test-Run "test_not_com" "$Tests\test_not_com.bas" @("NOT-COM:OK", "NOT-COM2:OK", "NOT-COM:PASS") -Arch "x86"
-    Test-Run "test_err_obj" "$Tests\test_err_obj.bas" @("ERR-1:OK", "ERR-6:OK", "ERR:6/6")
-    Test-Run "test_variant_cmp" "$Tests\test_variant_cmp.bas" @("VC-1:OK", "VC-4:OK", "VC:4/4")
-    Test-Run "test_com_default_prop" "$Tests\test_com_default_prop.bas" @("DP-1:OK", "DP-4:OK", "P24-10: 4/4")
-    Test-Run "test_com_optional" "$Tests\test_com_optional.bas" @("OP-1:OK", "OP-4:OK", "P24-11: 4/4")
-    Test-Run "test_bstr_concat_scalar" "$Tests\test_bstr_concat_scalar.bas" @("BCS:16/16")
+    $vbpSw.Stop()
+    Write-Host "  (vbp/gui tests took $([Math]::Round($vbpSw.Elapsed.TotalSeconds))s)"
     Write-Host ""
 }
 

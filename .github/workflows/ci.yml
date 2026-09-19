@@ -8,8 +8,8 @@ on:
   workflow_dispatch:
 
 jobs:
-  regression:
-    name: Run-Tests (all)
+  build:
+    name: Build C3.exe
     runs-on: windows-latest
     timeout-minutes: 45
     defaults:
@@ -56,19 +56,58 @@ jobs:
           & .build\C3.exe --version
           if ($LASTEXITCODE -ne 0) { throw "built C3.exe smoke check failed" }
 
-      - name: Run full regression
-        run: powershell -ExecutionPolicy Bypass -File tests/run_tests.ps1 -Category all -Verbose
+      - name: Upload C3.exe artifact (shared by all test jobs)
+        uses: actions/upload-artifact@v4
+        with:
+          name: c3-exe
+          path: .build/C3.exe
+          if-no-files-found: error
+          retention-days: 1
+
+  regression:
+    name: Tests (${{ matrix.category }})
+    needs: build
+    runs-on: windows-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: pwsh
+    strategy:
+      fail-fast: false
+      matrix:
+        category: [run, compile, syntax]
+    env:
+      C3_VCVARSALL: ""
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download C3.exe artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: c3-exe
+          path: .build/
+
+      - name: Smoke check downloaded C3.exe
+        run: |
+          & .build\C3.exe --version
+          if ($LASTEXITCODE -ne 0) { throw "downloaded C3.exe broken" }
+
+      # run_tests.ps1 内: 纯 .bas 用例支持 -Jobs 并行 (每个 worker 独立输出目录),
+      # VBP/GUI 用例始终串行 (GUI 窗口效果无法通过自动校验并行确认).
+      - name: Run regression (${{ matrix.category }})
+        shell: pwsh
+        run: pwsh -NoProfile -ExecutionPolicy Bypass -File tests/run_tests.ps1 -Category ${{ matrix.category }} -Jobs 20 -Verbose
 
       - name: Upload test logs
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: test-logs
+          name: test-logs-${{ matrix.category }}
           path: |
-            tests/output/**/*.out
-            tests/output/**/*.err
-            tests/output/**/*.txt
-            tests/output/**/*.dat
-            tests/output/**/scores.txt
+            output/**/*.out
+            output/**/*.err
+            output/**/*.txt
+            output/**/*.dat
+            output/**/scores.txt
           if-no-files-found: warn
           retention-days: 14
