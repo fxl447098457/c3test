@@ -12,7 +12,9 @@ param(
     [string]$Category = "all",
     [switch]$Verbose,
     [string]$OutputDirectory = "",
-    [int]$Jobs = 1          # >1 时并行运行纯 .bas 用例 (每 worker 独立输出目录); GUI/VBP 始终串行
+    [int]$Jobs = 1,          # >1 时并行运行纯 .bas 用例 (每 worker 独立输出目录); GUI/VBP 始终串行
+    [int]$BasShard = 0,      # bas 分片当前编号 (1..BasShardTotal); 0=不分片整队跑
+    [int]$BasShardTotal = 1  # bas 分片总数 (供 CI 用多 runner 并行跑 bas 用例)
 )
 
 $ErrorActionPreference = "SilentlyContinue"
@@ -608,6 +610,18 @@ if ($Category -in @("all", "run", "bas")) {
     Add-BasTest "test_com_default_prop" "$Tests\test_com_default_prop.bas" @("DP-1:OK", "DP-4:OK", "P24-10: 4/4")
     Add-BasTest "test_com_optional" "$Tests\test_com_optional.bas" @("OP-1:OK", "OP-4:OK", "P24-11: 4/4")
     Add-BasTest "test_bstr_concat_scalar" "$Tests\test_bstr_concat_scalar.bas" @("BCS:16/16")
+
+    # 分片: CI 用多 runner 并行跑 bas 用例时, 各 runner 只取第 BasShard 片
+    if ($BasShardTotal -gt 1) {
+        if ($BasShard -lt 1 -or $BasShard -gt $BasShardTotal) {
+            Write-Host "[ERROR] BasShard 需在 1..BasShardTotal" -ForegroundColor Red
+            exit 1
+        }
+        $shardLen = [Math]::Ceiling($basQueue.Count / $BasShardTotal)
+        $shardStart = ($BasShard - 1) * $shardLen
+        $basQueue = @($basQueue[$shardStart..([Math]::Min($shardStart + $shardLen - 1, $basQueue.Count - 1))])
+        Write-Host "  (bas shard ${BasShard}/${BasShardTotal}: $($basQueue.Count) tests)" -ForegroundColor Cyan
+    }
 
     # 执行纯 .bas 用例 (串行或并行)
     $basSw = [Diagnostics.Stopwatch]::StartNew()

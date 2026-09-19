@@ -32,6 +32,13 @@ jobs:
           cmake --version
           ninja --version
 
+      - name: Cache C3.exe build dir (fast path when src/ untouched)
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/c3build
+          key: c3build-${{ hashFiles('src/**', 'CMakeLists.txt', 'cmake/**') }}
+          restore-keys: c3build-
+
       - name: Build C3.exe from source (never ship a vendored binary)
         shell: pwsh
         run: |
@@ -65,7 +72,7 @@ jobs:
           retention-days: 1
 
   regression:
-    name: Tests (${{ matrix.category }})
+    name: Tests (${{ matrix.category }}${{ matrix.shard && format(' #{0}', matrix.shard) || '' }})
     needs: build
     runs-on: windows-latest
     timeout-minutes: 45
@@ -75,7 +82,14 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        category: [bas, vbp, compile, syntax]
+        include:
+          - category: bas
+            shard: 1
+          - category: bas
+            shard: 2
+          - category: vbp
+          - category: compile
+          - category: syntax
     env:
       C3_VCVARSALL: ""
     steps:
@@ -92,17 +106,18 @@ jobs:
           & .build\C3.exe --version
           if ($LASTEXITCODE -ne 0) { throw "downloaded C3.exe broken" }
 
-      # run_tests.ps1 内: 纯 .bas 用例支持 -Jobs 并行 (每个 worker 独立输出目录),
-      # VBP/GUI 用例始终串行 (GUI 窗口效果无法通过自动校验并行确认).
-      - name: Run regression (${{ matrix.category }})
+      # run_tests.ps1 内: 纯 .bas 用例支持 -Jobs 并行 (每个 worker 独立输出目录) 与
+      # -BasShard 分片 (CI 用多 runner 并行跑 bas 用例); VBP/GUI 用例始终串行
+      # (GUI 窗口效果无法通过自动校验并行确认).
+      - name: Run regression (${{ matrix.category }}${{ matrix.shard && format(' #{0}', matrix.shard) || '' }})
         shell: pwsh
-        run: pwsh -NoProfile -ExecutionPolicy Bypass -File tests/run_tests.ps1 -Category ${{ matrix.category }} -Jobs 20 -Verbose
+        run: pwsh -NoProfile -ExecutionPolicy Bypass -File tests/run_tests.ps1 -Category ${{ matrix.category }} -Jobs 20 ${{ matrix.category == 'bas' && format('-BasShard {0} -BasShardTotal 2', matrix.shard) || '' }} -Verbose
 
       - name: Upload test logs
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: test-logs-${{ matrix.category }}
+          name: test-logs-${{ matrix.category }}${{ matrix.shard && format('-{0}', matrix.shard) || '' }}
           path: |
             output/**/*.out
             output/**/*.err
