@@ -109,6 +109,15 @@ typedef struct vb6_UCFontRec {
     struct vb6_UCFontRec* next;
 } vb6_UCFontRec;
 
+// Fix 113h: 离屏 DIB（定义在 uc_debug.c，uc_host_window.c 的 WM_PAINT 调试路径也要用）
+typedef struct vb6_UCDib {
+    HDC     memDC;
+    HBITMAP bmp;
+    HBITMAP oldBmp;
+    void*   bits;
+    int32_t w, h, stride;
+} vb6_UCDib;
+
 // ============================================================
 // 跨族共享状态（定义在各族 .c，原为文件级 static）
 // ============================================================
@@ -162,6 +171,14 @@ void vb6_ho_setVariantDispatch(vb6_VARIANT* out, void* p);
 int32_t vb6_ho_variantToLong(const vb6_VARIANT* v);
 double vb6_ho_variantToDouble(const vb6_VARIANT* v);
 BSTR vb6_ho_variantToBstr(const vb6_VARIANT* v);
+
+// --- Fix 113h/Fix 123 调试辅助（uc_debug.c 定义，uc_host_window.c 的 WM_PAINT 依赖）---
+// 离屏 DIB 工具 + 整窗合成 dump；未设环境变量 C3_UC_DUMPDIR 时不会被调用。
+void vb6_uc_dibCreate(vb6_UCDib* d, HDC refDC, int32_t w, int32_t h);
+void vb6_uc_dibSaveBmp(const vb6_UCDib* d, const char* path);
+void vb6_uc_dibDestroy(vb6_UCDib* d);
+void vb6_uc_dumpFormComposite(HWND root, const char* dumpDir);
+extern int32_t g_uc_dumpSeq;   // dump 文件序号
 
 #ifdef __cplusplus
 } // extern "C"

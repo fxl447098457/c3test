@@ -1,18 +1,11 @@
 // vb6forms_uc 拆分片段 uc_debug_dib (函数体)
 // 内容 = 拆分前 vb6forms_uc.c 第 308~369 行，逐行未改
 // 在函数体内 #include；路径一律用 basename
+// 注: vb6_UCDib 结构体已上移到 vb6forms_uc_internal.h（uc_host_window.c 也要用）
 
-typedef struct vb6_UCDib {
-    HDC     memDC;
-    HBITMAP bmp;
-    HBITMAP oldBmp;
-    void*   bits;
-    int32_t w, h, stride;
-} vb6_UCDib;
+int32_t g_uc_dumpSeq = 0;
 
-static int32_t g_uc_dumpSeq = 0;
-
-static void vb6_uc_dibCreate(vb6_UCDib* d, HDC refDC, int32_t w, int32_t h) {
+void vb6_uc_dibCreate(vb6_UCDib* d, HDC refDC, int32_t w, int32_t h) {
     BITMAPINFO bi;
     memset(d, 0, sizeof(*d));
     d->w = w;
@@ -31,7 +24,7 @@ static void vb6_uc_dibCreate(vb6_UCDib* d, HDC refDC, int32_t w, int32_t h) {
     if (d->bmp) d->oldBmp = (HBITMAP)SelectObject(d->memDC, d->bmp);
 }
 
-static void vb6_uc_dibSaveBmp(const vb6_UCDib* d, const char* path) {
+void vb6_uc_dibSaveBmp(const vb6_UCDib* d, const char* path) {
     if (!d->bits) return;
     FILE* f = fopen(path, "wb");
     if (!f) return;
@@ -57,7 +50,7 @@ static void vb6_uc_dibSaveBmp(const vb6_UCDib* d, const char* path) {
     fclose(f);
 }
 
-static void vb6_uc_dibDestroy(vb6_UCDib* d) {
+void vb6_uc_dibDestroy(vb6_UCDib* d) {
     if (d->memDC) {
         if (d->oldBmp) SelectObject(d->memDC, d->oldBmp);
         DeleteDC(d->memDC);
