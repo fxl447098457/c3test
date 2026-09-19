@@ -21,11 +21,18 @@ namespace vb6c3 {
 //   detail/cgen_expr_call_arg_variant.inc       —— 位置实参发射（二）：ByVal Variant 包装 / Variant 提取（原 2137~2453 行）
 //   detail/cgen_expr_call_named_args.inc        —— named 实参（含 Optional 空位填充）+ argList 组装 + ParamArray 展开（原 2454~2860 行）
 //   detail/cgen_expr_call_builtin_fixup.inc     —— 内置函数调用点修正：UBound/LBound、字符串/日期/财务函数、实参个数（原 2861~3250 行）
-//   detail/cgen_expr_call_pad_conv.inc          —— Optional 参数补齐 + 返回/实参类型修正链与收口（原 3251~3623 行）
-// 12 个 .inc 是「函数体片段」，在 visit(IndexOrCallExpr&) 的函数体内被 #include（C++ 允许），故不用 .cpp/.hpp 后缀 ——
+//   detail/cgen_expr_call_opt_pad.inc           —— Optional 参数补齐 + IsMissing _has_ 标志 + 隐式 me 实参（原 pad_conv 5~81 行）
+//   detail/cgen_expr_call_conv_cstr.inc         —— CStr 家族适配：按实参类型选 CStr/CStrSingle/CStrLong/CStrDbl（原 pad_conv 82~164 行）
+//   detail/cgen_expr_call_conv_numeric.inc      —— 数值转换函数适配：CInt/CLng/CDbl/CByte/CSng/CBool（原 pad_conv 165~248 行）
+//   detail/cgen_expr_call_conv_output.inc       —— 输出侧适配：MsgBox / Format 首参包装 + CStr 兜底（原 pad_conv 249~353 行）
+//   detail/cgen_expr_call_conv_varargs_lenb.inc —— CallByName 变参打包 + LenB 类型分派（原 pad_conv 354~436 行）
+//   detail/cgen_expr_call_builtin_argtype.inc   —— 内建函数实参类型适配 Fix 108c（原 pad_conv 437~546 行）
+// 16 个 .inc 是「函数体片段」，在 visit(IndexOrCallExpr&) 的函数体内被 #include（C++ 允许），故不用 .cpp/.hpp 后缀 ——
 // 它们不是独立编译单元，单独 include 会编译不过。片段内局部变量与 Pattern 拦截分支原样不动，逐行未改 → 零行为改动。
 // 其中 arg_emit / arg_variant 两段位于 1771 行那个遍历位置实参的 for 循环内部（相对花括号深度 1），
 // 单看片段自身不闭合，但头 + 全部片段 + 尾拼回后与原文件逐行一致、语义等价。
+// 2026-09-19：原 pad_conv.inc（545 行）按函数体内既有的顶层分节注释再切 6 段（全部自身花括号平衡），
+// 切分脚本对「片段按序拼回 == 拆分前原文件对应区间」做逐字节断言。
 
 void CCodeGen::visit(IndexOrCallExpr& node) {
 #include "backend/detail/expr/cgen_expr_call_prelude.inc"
@@ -39,7 +46,12 @@ void CCodeGen::visit(IndexOrCallExpr& node) {
 #include "backend/detail/expr/cgen_expr_call_arg_variant.inc"
 #include "backend/detail/expr/cgen_expr_call_named_args.inc"
 #include "backend/detail/expr/cgen_expr_call_builtin_fixup.inc"
-#include "backend/detail/expr/cgen_expr_call_pad_conv.inc"
+#include "backend/detail/expr/cgen_expr_call_opt_pad.inc"
+#include "backend/detail/expr/cgen_expr_call_conv_cstr.inc"
+#include "backend/detail/expr/cgen_expr_call_conv_numeric.inc"
+#include "backend/detail/expr/cgen_expr_call_conv_output.inc"
+#include "backend/detail/expr/cgen_expr_call_conv_varargs_lenb.inc"
+#include "backend/detail/expr/cgen_expr_call_builtin_argtype.inc"
 }
 
 } // namespace vb6c3

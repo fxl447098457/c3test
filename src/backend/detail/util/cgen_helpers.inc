@@ -96,6 +96,11 @@
     // M22: 将非BSTR表达式包装为BSTR (用于字符串连接运算)
     std::string wrapToBSTR(const std::string& expr, Expr& node);
 
+    // Fix 100a: 判断表达式本身是否为"返回 BSTR 的调用" (顶层前缀判定, 非子串判定).
+    // 用于 wrapToBSTR 的 BSTR 直通分支 — 实参中含 vb6_BSTR_FromStr 的标量函数
+    // (vb6_Len("abc") 等) 不得因未锚定子串检查被判为已是 BSTR.
+    static bool isBstrReturningCall(const std::string& expr);
+
     // P7.8: 转义C字符串中的特殊字符
     static std::string escapeCString(const std::string& s);
 

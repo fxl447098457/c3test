@@ -182,6 +182,56 @@
             && currentReturnCType_ == "vb6_VARIANT") {
             valueIsVariant = true;
         }
+        // Fix 124: RHS 是裸 COM 调用结果 (vb6_ComCall* / ComGet*Prop 返回 void*,
+        // 承载 VARIANT*) 且目标是具体类型标量 — 直接赋值 → void*→double/int32_t
+        // C2440 (cZipArchive: pvVfsSeek = uFile.Stream.VfsSetFilePointer(...) →
+        // vb6_ret_pvVfsSeek = vb6_ComCall(...) 2630). 按目标 C 类型解封:
+        // VariantFromComResult 把 void* 包回 vb6_VARIANT, 再 VariantToXxx 提取.
+        bool valueIsBareComResult = (value.compare(0, 12, "vb6_ComCall(") == 0
+            || value.compare(0, 17, "vb6_ComCallObject(") == 0
+            || value.compare(0, 15, "vb6_ComCallBSTR(") == 0
+            || value.compare(0, 14, "vb6_ComCallInt(") == 0
+            || value.compare(0, 17, "vb6_ComCallDouble(") == 0
+            || value.compare(0, 14, "vb6_ComGetProp(") == 0
+            || value.compare(0, 19, "vb6_ComGetObjectProp(") == 0
+            || value.compare(0, 18, "vb6_ComGetStringProp(") == 0
+            || value.compare(0, 15, "vb6_ComGetIntProp(") == 0
+            || value.compare(0, 18, "vb6_ComGetDoubleProp(") == 0);
+        if (valueIsBareComResult) {
+            std::string unwrapped = "vb6_VariantFromComResult(" + value + ")";
+            std::string tgtCt124;
+            if (!currentReturnVar_.empty() && target == currentReturnVar_
+                && !currentReturnCType_.empty()) {
+                tgtCt124 = currentReturnCType_;      // 函数名赋值: 按返回类型
+            } else {
+                // 按目标名查已知变量类型 (与 Fix 084n 已知变量集合同口径)
+                std::string chk124 = target;
+                if (chk124.compare(0, 4, "me->") == 0) chk124 = chk124.substr(4);
+                if (chk124.size() > 4 && chk124[0] == '(' && chk124[1] == '*'
+                    && chk124.back() == ')') {
+                    chk124 = chk124.substr(2, chk124.size() - 3);
+                }
+                std::string lo124 = chk124;
+                std::transform(lo124.begin(), lo124.end(), lo124.begin(), ::tolower);
+                if (knownDoubleVars_.count(lo124)) tgtCt124 = "double";
+                else if (knownLongVars_.count(lo124)) tgtCt124 = "int32_t";
+                else if (knownBstrVars_.count(lo124)) tgtCt124 = "BSTR";
+            }
+            if (tgtCt124 == "double" || tgtCt124 == "float") {
+                c_.emitLine(target + " = vb6_VariantToDouble(" + unwrapped + ");");
+                return;
+            }
+            if (tgtCt124 == "int32_t" || tgtCt124 == "int16_t" || tgtCt124 == "uint8_t"
+                || tgtCt124 == "int64_t" || tgtCt124 == "LONG") {
+                c_.emitLine(target + " = vb6_VariantToLong(" + unwrapped + ");");
+                return;
+            }
+            if (tgtCt124 == "BSTR") {
+                c_.emitLine(target + " = vb6_VariantToString(" + unwrapped + ");");
+                return;
+            }
+            // 目标类型未知 (void*/对象等) → 不动, 维持原赋值路径.
+        }
         if (valueIsVariant) {
             // 检查目标类型
             std::string convertedValue = value;
