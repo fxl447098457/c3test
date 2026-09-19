@@ -655,7 +655,7 @@ if ($Category -in @("all", "run", "vbp")) {
     Test-GuiVbp "BalloonTooltips" "$Tests\BalloonTooltips\prjBalloonTooltips.vbp" -ExeName "BalloonTooltips"
     # Charts 2020 demo (3rd-party UserControl charts): windowless chart controls (x86 first;
     # x64 after LongPtr port of API pointers/handles in the .ctl/.cls sources).
-    Test-GuiVbp "Charts2020" "$Tests\Charts 2020\Proyecto1.vbp" -Arch "x86" -AutoExitSec 5
+    Test-GuiVbp "Charts2020" "$Tests\Charts 2020\Proyecto1.vbp" -Arch "x86" -AutoExitSec 3
     Write-Host ""
 
     Test-Vbp "test_implements" "$Tests\test_implements.vbp" @("IMPL1:OK", "IMPL2:OK", "Implements test PASSED")

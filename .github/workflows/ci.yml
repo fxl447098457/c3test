@@ -72,7 +72,7 @@ jobs:
           retention-days: 1
 
   regression:
-    name: Tests (${{ matrix.category }}${{ matrix.shard && format(' #{0}', matrix.shard) || '' }})
+    name: "Tests (${{ matrix.category }}${{ matrix.shard && format(' #{0}', matrix.shard) || '' }})"
     needs: build
     runs-on: windows-latest
     timeout-minutes: 45
@@ -109,7 +109,7 @@ jobs:
       # run_tests.ps1 内: 纯 .bas 用例支持 -Jobs 并行 (每个 worker 独立输出目录) 与
       # -BasShard 分片 (CI 用多 runner 并行跑 bas 用例); VBP/GUI 用例始终串行
       # (GUI 窗口效果无法通过自动校验并行确认).
-      - name: Run regression (${{ matrix.category }}${{ matrix.shard && format(' #{0}', matrix.shard) || '' }})
+      - name: "Run regression (${{ matrix.category }}${{ matrix.shard && format(' #{0}', matrix.shard) || '' }})"
         shell: pwsh
         run: pwsh -NoProfile -ExecutionPolicy Bypass -File tests/run_tests.ps1 -Category ${{ matrix.category }} -Jobs 20 ${{ matrix.category == 'bas' && format('-BasShard {0} -BasShardTotal 2', matrix.shard) || '' }} -Verbose
 
@@ -117,7 +117,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: test-logs-${{ matrix.category }}${{ matrix.shard && format('-{0}', matrix.shard) || '' }}
+          name: "test-logs-${{ matrix.category }}${{ matrix.shard && format('-{0}', matrix.shard) || '' }}"
           path: |
             output/**/*.out
             output/**/*.err
