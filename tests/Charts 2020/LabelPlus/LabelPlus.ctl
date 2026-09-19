@@ -1013,7 +1013,7 @@ Private Sub DrawAcrylicBlur(hGraphics As LongPtr, hPath As LongPtr)
     Dim hBrush As LongPtr
     Dim hImage As LongPtr
     Dim hGraphics2 As LongPtr, hImage2 As LongPtr
-    Dim lEffect As Long
+    Dim lEffect As LongPtr
     Dim bp As BlurParams
     Dim rcSource As RectF
 

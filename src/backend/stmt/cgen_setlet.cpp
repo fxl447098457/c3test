@@ -98,6 +98,46 @@ void CCodeGen::visit(LetStmt& node) {
                     c_.emitLine(writeFn + "(" + makeCtrlHwndArg(objLower, itCtrl->second) + ", " + valExpr + ");  /* Let Control Property */");
                     return;
                 }
+                // Fix 133y: 工程内 UserControl 子控件属性写入
+                // (`czLabel3.Caption = "..."` / `ucChartBar1.Value = 30`)。
+                // builtin 控件 readFn/writeFn 只在表单代码访问标准属性时生效;
+                // 自定义 UserControl 属性 (Caption/Value/ChartStyle...) 落在
+                // getControlPropWriteFn default → 空 → 此前 "Unknown control
+                // property write" 警告 + struct field access (裸标识符, C2065)。
+                // 这里与读取路径 (cgen_expr_member_form_builtin.inc 的
+                // resolveClassMemberCall) 对称: 按 .ctl 类查 Property Let 形参表,
+                // this 取宿主窗口的实例。
+                auto itUC132 = knownUserControlCtrlVars_.find(objLower);
+                if (itUC132 != knownUserControlCtrlVars_.end()) {
+                    std::vector<ParameterInfo> wp132;
+                    if (findClassMemberWriteParams(itUC132->second, maExpr.memberName, false, wp132)
+                        && !wp132.empty()) {
+                        std::string canon132 = canonicalClassMemberName(itUC132->second, maExpr.memberName);
+                        if (canon132.empty()) canon132 = maExpr.memberName;
+                        std::string setter132 = "vb6_" + cIdent(itUC132->second)
+                                              + "_prop_let_" + cIdent(canon132);
+                        std::string hwndArg132 = makeCtrlHwndArg(objLower, itCtrl->second);
+                        std::string meExpr132 = "(vb6_cls_" + cIdent(itUC132->second)
+                                              + "*)vb6_UC_InstanceOf(" + hwndArg132 + ")";
+                        const ParameterInfo& p132 = wp132.back();
+                        emitExpr(*node.value);
+                        std::string val132 = std::move(lastExpr_);
+                        // 形参是 String (ByVal BSTR) 时, 值表达式需是 BSTR。
+                        // 其余按 QI (inferExprType) 标量直传。
+                        if (p132.type == Vb6Type::String) {
+                            val132 = wrapToBSTR(val132, *node.value);
+                        } else if (p132.type == Vb6Type::Boolean) {
+                            val132 = "(" + val132 + " ? (int16_t)-1 : (int16_t)0)";
+                        }
+                        if (p132.isByVal) {
+                            c_.emitLine(setter132 + "(" + meExpr132 + ", " + val132 + ");  /* Let UserControl Property */");
+                        } else {
+                            c_.emitLine("{ " + mapType(p132.type) + " _uc132 = " + val132 + "; "
+                                      + setter132 + "(" + meExpr132 + ", &_uc132); }");
+                        }
+                        return;
+                    }
+                }
             }
         }
     }

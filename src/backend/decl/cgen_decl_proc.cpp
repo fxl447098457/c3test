@@ -63,6 +63,8 @@ void CCodeGen::visit(SubDecl& node) {
     knownBstrVars_.insert(classBstrMembers_.begin(), classBstrMembers_.end());
     knownDoubleVars_.insert(classDoubleMembers_.begin(), classDoubleMembers_.end());
     knownLongVars_.insert(classLongMembers_.begin(), classLongMembers_.end());
+    // Fix 140: 恢复类模块 Byte() 数组成员 (knownByteArrayVars_ 被 clear 后需恢复).
+    knownByteArrayVars_.insert(classByteArrayMembers_.begin(), classByteArrayMembers_.end());
     // Fix 010n: 恢复类模块UDT成员变量 (knownUdtVars_被clear后需要从classUdtMembers_恢复)
     knownUdtVars_.insert(classUdtMembers_.begin(), classUdtMembers_.end());
     // Fix 010n (扩展): 恢复普通模块模块级UDT变量 (同 classUdtMembers_ 机制)
@@ -104,6 +106,9 @@ void CCodeGen::visit(SubDecl& node) {
             Vb6Type paramType = typeSys_.resolveTypeName(simpleP.name);
             if (paramType == Vb6Type::String) knownBstrVars_.insert(pLower);
             else if (paramType == Vb6Type::Double) knownDoubleVars_.insert(pLower);
+            // czUI fix: Single 参数也要登记, 否则被当成 Variant 走 VarCmpLong 通道
+            // (把 float* 当 vb6_VARIANT* 解引用, 比较结果为垃圾 — FontSize 钳成 1px)
+            else if (paramType == Vb6Type::Single) knownSingleVars_.insert(pLower);
             else if (paramType == Vb6Type::Long || paramType == Vb6Type::Integer || paramType == Vb6Type::Boolean) knownLongVars_.insert(pLower);
             // Bug #2 fix: LongPtr 参数注册到独立集合
             else if (paramType == Vb6Type::LongPtr) knownLongPtrVars_.insert(pLower);

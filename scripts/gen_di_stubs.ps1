@@ -44,7 +44,7 @@ if ($HandFile -eq '') { $HandFile = Join-Path $OutDir 'vb6_di_stubs.c' }
 # carry a file of their own are merged into the closest domain family (documented above).
 $families = @(
     @{ name = 'win32';   libs = @('kernel32', 'winmm') },
-    @{ name = 'user32';  libs = @('user32', 'gdi32') },
+    @{ name = 'user32';  libs = @('user32', 'gdi32', 'dwmapi', 'comctl32', 'uxtheme') },
     @{ name = 'gdiplus'; libs = @('gdiplus') },
     @{ name = 'crypto';  libs = @('crypt32', 'bcrypt', 'ncrypt') },
     @{ name = 'com';     libs = @('ole32', 'oleaut32', 'advapi32', 'comdlg32') },
@@ -246,6 +246,18 @@ function New-Banner([string]$family, [string[]]$libs, [bool]$needDynamic, [int]$
     $b += '/* winsock2.h must come before windows.h */'
     $b += '#include <winsock2.h>'
     $b += '#include <windows.h>'
+    # dwmapi family: windows.h does not declare Dwm*WindowAttribute (e.g. czUI)
+    $b += '#include <dwmapi.h>'
+    # Rtl*Memory are function-like macros in winnt.h; C3's cast-call stops macro
+    # expansion, so drop the macros and declare the real kernel32 exports instead.
+    $b += '#undef RtlMoveMemory'
+    $b += '#undef RtlCopyMemory'
+    $b += '#undef RtlFillMemory'
+    $b += '#undef RtlZeroMemory'
+    $b += 'void WINAPI RtlMoveMemory(void*, const void*, size_t);'
+    $b += 'void WINAPI RtlCopyMemory(void*, const void*, size_t);'
+    $b += 'void WINAPI RtlFillMemory(void*, size_t, unsigned char);'
+    $b += 'void WINAPI RtlZeroMemory(void*, size_t);'
     $b += '#include <stdint.h>'
     $b += '#include <shlwapi.h>'
     $b += '#include <shlobj.h>'
@@ -287,7 +299,9 @@ foreach ($fam in $families) {
     $name = $fam.name
     if ($bodies[$name].Count -eq 0) { continue }
     $libs = @()
-    foreach ($l in $fam.libs) { if ($usedLibs[$name].ContainsKey($l)) { $libs += $l } }
+    # czUI fix: 始终包含全族 lib (会话没引用的 lib 里的 API 也可能被 stub 直接调用,
+    # 如 dwmapi 的 DwmSetWindowAttribute — 按需裁剪会漏 lib 导致 LNK2019)
+    foreach ($l in $fam.libs) { $libs += $l }
     $needDynamic = $usedLibs[$name].ContainsKey('__dynamic__')
     $path = Join-Path $OutDir ('vb6_di_' + $name + '_stubs.c')
     $content = ((New-Banner $name $libs $needDynamic $counts[$name]) + $bodies[$name]) -join "`r`n"

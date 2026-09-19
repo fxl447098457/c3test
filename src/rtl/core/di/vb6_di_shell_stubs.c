@@ -11,8 +11,8 @@
 // cast. The cast keeps the compiler from complaining about unrelated API parameter
 // types while preserving the register/memory passing class of every argument.
 //
-// generated from: C:\Users\user\AppData\Local\Temp\di_migrate_session
-// date: 2026-09-17 11:07
+// generated from: C:\Users\Administrator\AppData\Local\Temp\C3C\merged_stubgen
+// date: 2026-09-19 13:59
 //
 // Hand-maintained special cases stay in vb6_di_stubs.c (ordinals, msvbvm60 runtime,
 // dynamically loaded DLLs). Re-run the generator after a build exposes new symbols.
@@ -22,6 +22,15 @@
 /* winsock2.h must come before windows.h */
 #include <winsock2.h>
 #include <windows.h>
+#include <dwmapi.h>
+#undef RtlMoveMemory
+#undef RtlCopyMemory
+#undef RtlFillMemory
+#undef RtlZeroMemory
+void WINAPI RtlMoveMemory(void*, const void*, size_t);
+void WINAPI RtlCopyMemory(void*, const void*, size_t);
+void WINAPI RtlFillMemory(void*, size_t, unsigned char);
+void WINAPI RtlZeroMemory(void*, size_t);
 #include <stdint.h>
 #include <shlwapi.h>
 #include <shlobj.h>
@@ -41,6 +50,7 @@
 #pragma comment(lib, "shell32.lib")
 #pragma comment(lib, "shlwapi.lib")
 #pragma comment(lib, "imagehlp.lib")
+#pragma comment(lib, "comdlg32.lib")
 
 /* MakeSureDirectoryPathExists */
 intptr_t __stdcall vb6_di_MakeSureDirectoryPathExists(BSTR DirPath) {

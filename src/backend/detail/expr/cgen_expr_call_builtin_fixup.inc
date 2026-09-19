@@ -350,10 +350,13 @@
     // Fix 010r: Builtin RTL functions with optional parameters — pad to required arg count
     // VB6 allows omitting optional args; C RTL functions require all args
     if (callee == "vb6_Mid" && args.size() < 3) {
+        // czUI fix: 省略的 length 参数用 -1 哨兵 (RTL 按"取到结尾"处理),
+        // 不能补 0 — 那是字面长度 0 (VB6 返回空串), 曾让 HexToColor("#243447")
+        // 解析成 0 (纯黑), 整个 czUI demo 颜色全错。
         while (args.size() < 3) {
-            args.push_back("0");
+            args.push_back("-1");
             if (!argList.empty()) argList += ", ";
-            argList += "0";
+            argList += "-1";
         }
     }
     if (callee == "vb6_StrConv" && args.size() < 3) {
@@ -384,6 +387,23 @@
         std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
         if (knownByteArrayVars_.count(lower)) {
             callee = "vb6_StrConvFromByteArray";
+        }
+    }
+    // Fix 140: StrPtr(Byte数组) → 数组数据指针 (而非 SafeArray1D* 结构体指针).
+    // 场景: LabelPlus.ctl GdipMeasureString/GdipAddPathString(StrPtr(m_Caption), -1, ...)
+    // — m_Caption 是 Byte() 数组, 但 GDI+ 需要 UTF-16 字符指针, 必须取 arr->data.
+    if (callee == "vb6_StrPtr" && !args.empty()) {
+        std::string a140 = args[0];
+        if (a140.compare(0, 4, "me->") == 0) a140 = a140.substr(4);
+        if (a140.size() > 4 && a140[0] == '(' && a140[1] == '*'
+            && a140.back() == ')') {
+            a140 = a140.substr(2, a140.size() - 3);
+        }
+        std::string l140 = a140;
+        std::transform(l140.begin(), l140.end(), l140.begin(), ::tolower);
+        if (a140.find_first_of("( .") == std::string::npos
+            && (knownByteArrayVars_.count(l140) || classByteArrayMembers_.count(l140))) {
+            callee = "vb6_SafeArrayDataPtr";
         }
     }
     // Fix 034: Builtin RTL functions with Optional params — pad to required C RTL arg count.

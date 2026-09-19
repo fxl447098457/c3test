@@ -77,6 +77,25 @@
         if (valueIsVariant) {
             value = "vb6_VariantToString(" + value + ")";
         }
+        // Fix 140: RHS 是 Byte() 数组 (类成员 m_Caption 或已知字节数组变量) 且目标是
+        // BSTR → 按 UTF-16LE 字节还原为字符串. 不能把数组指针当 BSTR 交给
+        // vb6_BSTR_Assign (SysStringLen 会读数组前的堆元数据当长度 → 堆损坏).
+        // 场景: LabelPlus.ctl `Property Get Caption() As String: Caption = m_Caption`.
+        if (!valueIsVariant) {
+            std::string rhs140 = value;
+            if (rhs140.compare(0, 4, "me->") == 0) rhs140 = rhs140.substr(4);
+            if (rhs140.size() > 4 && rhs140[0] == '(' && rhs140[1] == '*'
+                && rhs140.back() == ')') {
+                rhs140 = rhs140.substr(2, rhs140.size() - 3);
+            }
+            std::string rhs140l = rhs140;
+            std::transform(rhs140l.begin(), rhs140l.end(), rhs140l.begin(), ::tolower);
+            if (rhs140.find_first_of("( .") == std::string::npos
+                && (knownByteArrayVars_.count(rhs140l)
+                    || classByteArrayMembers_.count(rhs140l))) {
+                value = "vb6_ByteArrayToString(" + value + ")";
+            }
+        }
         c_.emitLine("vb6_BSTR_Assign(&" + target + ", " + value + ");");
     } else if (targetIsVariant) {
         // P8.4: 包装值为vb6_VARIANT, 先释放旧BSTR
@@ -254,9 +273,13 @@
                 } else if (knownObjectVars_.count(lower)) {
                     // Fix 045: Object (void*) target + Variant value → extract object
                     convertedValue = "vb6_VariantToObjectVal(" + value + ")";
-                } else if (knownByteArrayVars_.count(lower)) {
+                } else if (knownByteArrayVars_.count(lower)
+                           || classByteArrayMembers_.count(lower)) {
                     // Fix 062: Byte array target + Variant value → extract SafeArray1D*
-                    convertedValue = "vb6_VariantToSafeArray1D(" + value + ")";
+                    // Fix 140: 改用 vb6_VariantToByteArray — Variant 持字符串时按
+                    // VB6 语义转字节数组 (旧 SafeArray1D 版本对字符串返回 NULL,
+                    // 会清空 m_Caption → 右侧卡片空白).
+                    convertedValue = "vb6_VariantToByteArray(" + value + ")";
                 } else if (knownClassVars_.count(lower)) {
                     // Fix 086: 类类型目标 (vb6_cls_X*) + Variant值 → 提取对象指针
                     convertedValue = "(vb6_cls_" + cIdent(knownClassVars_[lower])
@@ -276,8 +299,10 @@
                         convertedValue = "vb6_VariantToDouble(" + value + ")";
                     } else if (knownObjectVars_.count(idLower)) {
                         convertedValue = "vb6_VariantToObjectVal(" + value + ")";
-                    } else if (knownByteArrayVars_.count(idLower)) {
-                        convertedValue = "vb6_VariantToSafeArray1D(" + value + ")";
+                    } else if (knownByteArrayVars_.count(idLower)
+                               || classByteArrayMembers_.count(idLower)) {
+                        // Fix 140: 同前 — 字符串 Variant 需转字节数组.
+                        convertedValue = "vb6_VariantToByteArray(" + value + ")";
                     } else if (knownClassVars_.count(idLower)) {
                         // Fix 086: 类类型目标 (vb6_cls_X*) + Variant值
                         convertedValue = "(vb6_cls_" + cIdent(knownClassVars_[idLower])

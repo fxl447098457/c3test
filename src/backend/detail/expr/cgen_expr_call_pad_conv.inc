@@ -142,7 +142,6 @@
         // (如 CStr((int32_t)GetCurrentThreadId()) / CStr(模块级Long变量) →
         //  vb6_CStr(vb6_VariantFromValue(x)), 由 _Generic 按实参类型自动包装, 消除 C2440)
         if (callee == "vb6_CStr" && !args.empty()) {
-<<<<<<< HEAD
             // Fix 121: 实参是**裸 COM 结果** (vb6_ComCall/ComCallByDispid/ComGetProp/
             // ComGetObjectProp 返回 void*, 承载 COM VARIANT*) 时必须先用
             // vb6_VariantFromComResult 解引用成 vb6_VARIANT — vb6_VariantFromValue
@@ -160,22 +159,6 @@
             } else {
                 lastExpr_ = "vb6_CStr(vb6_VariantFromValue(" + a0 + "))";
             }
-=======
-            // 裸 COM 取值 (vb6_ComCall/ComCallByDispid/ComGetProp) 的返回类型是 void*
-            // —— 实际指向 Windows VARIANT. 直接交给 _Generic vb6_VariantFromValue 会落到
-            // default: vb6_VariantObject, 被当成 VT_DISPATCH 对象指针, CStr 得到空串.
-            // 实测: `"B=[" & CStr(c.Item(1)) & "]"` → B=[] (c.Item 走 ComCall),
-            // 而同值的 `s = c.Item(1)` 赋值路径正常 (那条路径已自行解包).
-            // 这三个函数都返回 VARIANT*, 先经 vb6_VariantFromComResult 解成 vb6_VARIANT.
-            if (args[0].compare(0, 12, "vb6_ComCall(") == 0 ||
-                args[0].compare(0, 21, "vb6_ComCallByDispid(") == 0 ||
-                args[0].compare(0, 15, "vb6_ComGetProp(") == 0) {
-                lastExpr_ = "vb6_CStr(vb6_VariantFromValue(vb6_VariantFromComResult("
-                            + args[0] + ")))";
-                return;
-            }
-            lastExpr_ = "vb6_CStr(vb6_VariantFromValue(" + args[0] + "))";
->>>>>>> origin/main
             return;
         }
     }
