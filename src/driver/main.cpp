@@ -111,8 +111,10 @@ namespace {
 int runCompile(vb6c3::Driver& driver, int argc, char* argv[]) {
     auto result = driver.compile(argc, argv);
 
+    // success=false 且 errorCount=0 = 编译未成功却无错误计数 (如 GUI 工程链接未产出
+    // exe) — 必须判为失败. -h/--help/--version 走的是 compile() 里 success=true 的
+    // "正常退出" 分支, 不会落到这里, 因此脚本里 c3 --version 退出码为 0.
     if (!result.success && result.errorCount == 0) {
-        // 命令行解析阶段已经输出了错误信息
         return 1;
     }
 

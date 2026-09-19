@@ -21,8 +21,15 @@ namespace vb6c3 {
 
 CompileResult Driver::compile(int argc, char* argv[]) {
     auto [opts, code] = parseArgs(argc, argv);
-    if (code != 0 || opts.sourceFiles.empty()) {
-        return {false, "", 1, 0};
+    if (code != 0) {
+        return {false, "", 1, 0};          // 参数错误 (未知选项 / 未指定源文件)
+    }
+    if (opts.sourceFiles.empty()) {
+        // -h / --help / --version: 已显示帮助或版本, 属"正常退出"而非失败.
+        // success=true 是这里的必要标记: 真正的编译失败也会给出
+        // success=false 且 errorCount=0 (如 GUI 工程链接未产出 exe), main.cpp 正是
+        // 依据 success 区分两者 — 若此处留 false 则帮助/版本会被判为失败 (退出码 1).
+        return {true, "", 0, 0};
     }
     return compile(opts);
 }
