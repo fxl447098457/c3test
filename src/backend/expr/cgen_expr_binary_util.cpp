@@ -102,26 +102,7 @@ std::string CCodeGen::wrapToBSTR(const std::string& expr, Expr& node) {
                 return "vb6_VariantToString(" + expr + ")";
             }
         }
-        // Fix 118j: 其余 vb6_ 前缀的自定义函数不能一律假定返回 BSTR —
-        // 项目内函数 vb6_Triple1(m) 返回 int16_t, 直通后生成
-        //   vb6_BSTR_Concat(L"val=", vb6_Triple1(m))
-        // 把 int16_t 当作 BSTR 指针解引用 → 0xC0000005 (Debug.Print "val=" & F(x)).
-        // 用 inferExprType 查符号表拿函数返回类型, 数值/Date/Boolean/Byte/LongPtr
-        // 按类型转换; String / Variant / 未知 保持原直通行为.
-        switch (inferExprType(node)) {
-            case Vb6Type::Integer:
-            case Vb6Type::Long:    return "vb6_CStrLong(" + expr + ")";
-            case Vb6Type::Single:  return "vb6_CStrSingle(" + expr + ")";
-            case Vb6Type::Double:  return "vb6_CStrDbl(" + expr + ")";
-            case Vb6Type::Boolean: return "vb6_CStrBool(" + expr + ")";
-            case Vb6Type::Byte:    return "vb6_CStrByte(" + expr + ")";
-            case Vb6Type::Date:    return "vb6_CStrDate(" + expr + ")";
-            // LongPtr (intptr_t): 无 vb6_CStrLongPtr, 走 Variant 通用路径
-            // (Fix 084 同思路: _Generic 自动包装 → vb6_CStr 统一转 BSTR)
-            case Vb6Type::LongPtr:
-            case Vb6Type::ULong:   return "vb6_CStr(vb6_VariantFromValue(" + expr + "))";
-            default:               return expr;  // String / Variant / 未知 → 假定BSTR
-        }
+        return expr;  // 其他vb6_函数假定为BSTR
     }
     // string literal L"..."
     if (expr.find("vb6_BSTR_FromStr(") != std::string::npos) return expr;
@@ -131,7 +112,7 @@ std::string CCodeGen::wrapToBSTR(const std::string& expr, Expr& node) {
         case Vb6Type::String: return expr;
         case Vb6Type::Integer:
         case Vb6Type::Long:   return "vb6_CStrLong(" + expr + ")";
-        case Vb6Type::Single: return "vb6_CStrSingle(" + expr + ")";   // Fix 117c: VT_R4
+        case Vb6Type::Single:
         case Vb6Type::Double: return "vb6_CStrDbl(" + expr + ")";
         case Vb6Type::Boolean: return "vb6_CStrBool(" + expr + ")";
         case Vb6Type::Byte:   return "vb6_CStrByte(" + expr + ")";
