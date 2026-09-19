@@ -540,9 +540,9 @@ if ($Category -in @("all", "smoke")) {
     Write-Host ""
 }
 
-# --- 冒烟测试 (编译+运行) ---
-if ($Category -in @("all", "run")) {
-    # 纯 .bas 用例统一入队; VBP/GUI 用例保持串行 (窗口校验无法并行确认效果)
+# --- 纯 .bas 用例 (编译+运行; 支持 -Jobs 并行) ---
+if ($Category -in @("all", "run", "bas")) {
+    # 纯 .bas 用例统一入队; VBP/GUI 用例在独立分类 (vbp) 中保持串行
     $basQueue = @()
     function Add-BasTest {
         param([string]$Name, [string]$Source, $Expected = @(), [string]$Arch = "")
@@ -622,8 +622,11 @@ if ($Category -in @("all", "run")) {
     }
     $basSw.Stop()
     Write-Host "  (bas tests took $([Math]::Round($basSw.Elapsed.TotalSeconds))s)"
+}
 
-    # --- VBP 工程测试 (P5) --- (串行; GUI 窗口校验无法并行)
+# --- VBP 工程测试 (串行; GUI 窗口效果无法通过自动校验并行确认) ---
+if ($Category -in @("all", "run", "vbp")) {
+    # --- VBP 工程测试 (P5) --- (串行)
     Write-Host "--- VBP Project Tests (P5) ---" -ForegroundColor Yellow
     $vbpSw = [Diagnostics.Stopwatch]::StartNew()
 
