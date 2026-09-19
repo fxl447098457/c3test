@@ -30,7 +30,14 @@ static void addFormsSources(MsvcDriverOptions& opts, const std::string& rtlDir) 
     opts.sourceFiles.push_back(rtlDir + "/vb6forms_widget_prop.c");
     opts.sourceFiles.push_back(rtlDir + "/vb6forms_shape.c");
     opts.sourceFiles.push_back(rtlDir + "/vb6forms_axsite.c");
-    opts.sourceFiles.push_back(rtlDir + "/vb6forms_uc.c");   // Fix 112
+    // Fix 112: 工程内 UserControl 实例宿主 + 宿主对象模型 (2026-09-19 按族拆 6 单元)
+    // 注意: uc/ 下的 .c 解包后是平铺目录，故这里写 basename 而非带子目录路径
+    opts.sourceFiles.push_back(rtlDir + "/uc_host.c");
+    opts.sourceFiles.push_back(rtlDir + "/uc_host_window.c");
+    opts.sourceFiles.push_back(rtlDir + "/uc_hostmodel.c");
+    opts.sourceFiles.push_back(rtlDir + "/uc_controls.c");
+    opts.sourceFiles.push_back(rtlDir + "/uc_collection.c");
+    opts.sourceFiles.push_back(rtlDir + "/uc_debug.c");
 }
 
 bool Driver::runLinker(const CompileOptions& options, const std::string& outputDir,

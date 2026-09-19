@@ -2,7 +2,7 @@
 // P10 (restored): RTL is embedded as .c/.h SOURCE and compiled by MSVC
 // at user-program build time. The P11.3 pre-compiled .lib scheme was
 // reverted: c3 is open source, no source protection needed.
-// 24 .h headers + 49 .c sources + 6 .inc fragments (all arch-neutral) = 79 resources.
+// 25 .h headers + 55 .c sources + 13 .inc fragments (all arch-neutral) = 93 resources.
 // 2026-09-17 源文件按家族分目录: core/vb6rtl|vb6com|vb6comserver|vb6forms|di/,
 // 解包后仍是平铺目录（RTL 内部 include 一律 basename，不受源目录影响）。
 // Runtime: FindResource/LoadResource extract to temp session directory
@@ -113,3 +113,19 @@
 // 分两个编译单元: 容器 + IDispatch / _NewEnum 的 IEnumVARIANT
 177 RCDATA "../rtl/core/vb6com/vb6com_collection.c"
 178 RCDATA "../rtl/core/vb6com/vb6com_collection_enum.c"
+// vb6forms_uc.c 按族细分 (2026-09-19): 内部头 + 6 个族编译单元 + 7 个函数体片段
+// 原单文件 1546 行 → 主文件仅作入口；uc/ 下为独立编译单元，uc/detail/ 为片段
+179 RCDATA "../rtl/core/vb6forms/vb6forms_uc_internal.h"
+180 RCDATA "../rtl/core/vb6forms/uc/uc_host.c"
+181 RCDATA "../rtl/core/vb6forms/uc/uc_host_window.c"
+182 RCDATA "../rtl/core/vb6forms/uc/uc_hostmodel.c"
+183 RCDATA "../rtl/core/vb6forms/uc/uc_controls.c"
+184 RCDATA "../rtl/core/vb6forms/uc/uc_collection.c"
+185 RCDATA "../rtl/core/vb6forms/uc/uc_debug.c"
+186 RCDATA "../rtl/core/vb6forms/uc/detail/uc_host_create.inc"
+187 RCDATA "../rtl/core/vb6forms/uc/detail/uc_hostmodel_getprop.inc"
+188 RCDATA "../rtl/core/vb6forms/uc/detail/uc_hostmodel_setprop.inc"
+189 RCDATA "../rtl/core/vb6forms/uc/detail/uc_hostmodel_call.inc"
+190 RCDATA "../rtl/core/vb6forms/uc/detail/uc_collection_api.inc"
+191 RCDATA "../rtl/core/vb6forms/uc/detail/uc_debug_dib.inc"
+192 RCDATA "../rtl/core/vb6forms/uc/detail/uc_debug_composite.inc"

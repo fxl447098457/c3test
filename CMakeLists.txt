@@ -249,6 +249,7 @@ set(C3RTL_EMBEDDED_FILES
     ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6rtl/vb6rtl_financial.c
     ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6rtl/vb6rtl_com.c
     ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6rtl/vb6rtl_registry.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6rtl/vb6rtl_userctl.h   # Fix 105 (补登记)
     # vb6com
     ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6com/vb6com.h
     ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6com/vb6com.c
@@ -285,6 +286,21 @@ set(C3RTL_EMBEDDED_FILES
     ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6forms/vb6forms_widget_prop.c
     ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6forms/vb6forms_shape.c
     ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6forms/vb6forms_axsite.c
+    # vb6forms_uc 按族细分 (2026-09-19): 内部头 + 6 族编译单元 + 7 个函数体片段
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6forms/vb6forms_uc_internal.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6forms/uc/uc_host.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6forms/uc/uc_host_window.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6forms/uc/uc_hostmodel.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6forms/uc/uc_controls.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6forms/uc/uc_collection.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6forms/uc/uc_debug.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6forms/uc/detail/uc_host_create.inc
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6forms/uc/detail/uc_hostmodel_getprop.inc
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6forms/uc/detail/uc_hostmodel_setprop.inc
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6forms/uc/detail/uc_hostmodel_call.inc
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6forms/uc/detail/uc_collection_api.inc
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6forms/uc/detail/uc_debug_dib.inc
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6forms/uc/detail/uc_debug_composite.inc
     # vb6forms.h 按功能域拆分 (2026-09-17): 伞头 + 9 个子头
     ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6forms/vb6forms_window.h
     ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6forms/vb6forms_prop.h

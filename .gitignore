@@ -8,6 +8,7 @@ build/
 out/
 output/
 cmake-build-*/
+tmp
 
 # ---------- 发布产物 (scripts\release.bat 打包输出) ----------
 dist/
