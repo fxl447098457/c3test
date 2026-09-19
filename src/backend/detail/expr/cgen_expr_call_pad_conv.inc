@@ -404,6 +404,35 @@
                 }
             }
         }
+        // Fix 125: LenB(数值实参) — vb6_LenB 的 _Generic 宏在 MSVC 下对**所有**
+        // 关联分支都做实参→形参的隐式转换检查 (double→BSTR 非法 → C2440, 即使
+        // 该分支未被选中; 独立最小复现在 cl /std:c11 下确认). 数值/日期/Currency
+        // 实参 (VB6 LenB 语义 = 该类型栈宽度) 必须在生成器侧直接生成 sizeof,
+        // 不能落入 _Generic 宏. 例: cZipArchive LenB(uHdr.Ext.CSize) (Currency).
+        if (!node.positional.empty()) {
+            Vb6Type tLenB125 = inferExprType(*node.positional[0]);
+            switch (tLenB125) {
+                case Vb6Type::Currency:
+                case Vb6Type::Double:
+                case Vb6Type::Date:
+                    lastExpr_ = "(int32_t)sizeof(double)";
+                    return;
+                case Vb6Type::Single:
+                    lastExpr_ = "(int32_t)sizeof(float)";
+                    return;
+                case Vb6Type::Long:
+                case Vb6Type::Integer:
+                case Vb6Type::Boolean:
+                case Vb6Type::Error:
+                    lastExpr_ = "(int32_t)sizeof(int32_t)";
+                    return;
+                case Vb6Type::Byte:
+                    lastExpr_ = "(int32_t)sizeof(uint8_t)";
+                    return;
+                default:
+                    break;  // BSTR/Variant/UDT/未知 → 走既有路径
+            }
+        }
     }
     // Fix 108c: 内建函数实参的类型适配 (走到此处说明没有专门分支处理).
     //  (a) 数值型内建函数收到"无类型 COM 调用结果" (vb6_ComCall → void*, 指向
