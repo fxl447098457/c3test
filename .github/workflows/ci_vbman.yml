@@ -101,8 +101,9 @@ jobs:
             }
           }
           New-Item -ItemType Directory -Force -Path tests\vbman\dist\DLL | Out-Null
-          & .build\C3.exe tests\vbman\src\VBMAN.vbp --output-dir tests\vbman\dist\DLL --verbose *> _vbman_compile.log
-          Get-Content _vbman_compile.log | Write-Host
+          # 不带 --verbose: verbose 的 AST 遍历+未使用警告占日志 98% (18 万行), 错误正文靠 c3-error.log 回显
+          & .build\C3.exe tests\vbman\src\VBMAN.vbp --output-dir tests\vbman\dist\DLL *> _vbman_compile.log
+          Get-Content _vbman_compile.log | Select-Object -Last 50 | Write-Host
           if ($LASTEXITCODE -ne 0) {
             # cl.exe 的错误正文由 C3 落到 --output-dir 下的 c3-error.log, 回显到 step 输出
             if (Test-Path "tests\vbman\dist\DLL\c3-error.log") {
