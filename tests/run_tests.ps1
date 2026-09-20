@@ -27,40 +27,91 @@ $Tests = $PSScriptRoot
 # T0 拆分 (2026-09-20): 语法/冒烟用例 git mv 至 tests_github\t0_cases\, 跨目录引用同一份文件 (无副本)
 $GHTests = Join-Path $Tests "..\tests_github\t0_cases"
 $OutDir = if ($OutputDirectory) { $OutputDirectory } else { Join-Path $Root "output" }
-# vcvarsall 搜索: 优先用环境变量 C3_VCVARSALL; 未设置时回退到 vswhere 自动发现
-# (需要 Visual Studio 的 Community/Professional/Enterprise/BuildTools 任一版本, 供 CI 使用) 详见 scripts\README.md
-$vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer\vswhere.exe"
-$VcVars = $env:C3_VCVARSALL
-if (-not $VcVars -and (Test-Path $vswhere)) {
-    $vsPath = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath 2>$null
-    if ($vsPath) {
-        $candidate = Join-Path $vsPath "VC\Auxiliary\Build\vcvarsall.bat"
-        if (Test-Path $candidate) { $VcVars = $candidate }
+# === 获取 MSVC 编译环境 (通用) ===
+# 设计原则: 不依赖 cmd.exe / vcvarsall 解析 (易因安全策略/编码/PATH 大小写失效),
+# 不硬编码 VS 版本 (2019/2022/2026 均可) 与 Windows SDK 版本号 (动态发现)。
+# 优先用环境变量 C3_VCVARSALL 指向的 vcvarsall.bat 推导 VS 根; 否则用 vswhere 取最新已装 VS。
+function Get-MsvcToolset {
+    # 返回 @{ VsRoot; ToolVer; SdkVer; BinX64; BinX86; Include; LibX64; LibX86 }
+    # 1) C3_VCVARSALL -> 上溯 4 级 (...\<Edition>\VC\Auxiliary\Build\vcvarsall.bat) 得 VS 根目录
+    $vsRoot = $null
+    if ($env:C3_VCVARSALL -and (Test-Path $env:C3_VCVARSALL)) {
+        $p = $env:C3_VCVARSALL
+        for ($i = 0; $i -lt 4; $i++) { $p = Split-Path -Parent $p }
+        $vsRoot = $p
     }
-}
-if (-not $VcVars) {
-    Write-Host "[ERROR] 未找到 vcvarsall.bat" -ForegroundColor Red
-    Write-Host "        请安装 VS2022 并勾选 [使用 C++ 的桌面开发] 工作负载," -ForegroundColor Red
-    Write-Host "        若未设置环境变量 C3_VCVARSALL, 将尝试自动寻找 vcvarsall.bat (出问题时请查阅 scripts\README.md)" -ForegroundColor Red
-    exit 1
+    # 2) 否则 vswhere 探测已安装的最新 VS (Community/Pro/Enterprise/BuildTools 任一版本)
+    if (-not $vsRoot) {
+        $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer\vswhere.exe"
+        if (Test-Path $vswhere) {
+            $vsPath = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath 2>$null
+            if ($vsPath) { $vsRoot = $vsPath }
+        }
+    }
+    if (-not $vsRoot -or -not (Test-Path $vsRoot)) {
+        Write-Host "[ERROR] 未找到 Visual Studio (含 VC.Tools 工作负载)" -ForegroundColor Red
+        Write-Host "        请安装任意版本 VS 并勾选 [使用 C++ 的桌面开发], 或设置环境变量 C3_VCVARSALL 指向 vcvarsall.bat" -ForegroundColor Red
+        exit 1
+    }
+    # 3) 动态发现 MSVC toolset 版本 (VC\Tools\MSVC\<ver>) -- 不硬编码
+    $msvcRoot = Join-Path $vsRoot "VC\Tools\MSVC"
+    $toolVer = Get-ChildItem $msvcRoot -Directory -ErrorAction SilentlyContinue |
+        Sort-Object Name -Descending | Select-Object -First 1 -ExpandProperty Name
+    if (-not $toolVer) { Write-Host "[ERROR] 未找到 MSVC toolset ($msvcRoot)" -ForegroundColor Red; exit 1 }
+    # 4) 动态发现 Windows SDK 根 (Windows Kits\10) -- 不硬编码盘符/版本
+    #    优先读注册表 KitsRoot10 (vcvarsall 自身定位方式), 其次标准 Program Files 位置,
+    #    再回退扫描常见盘符。
+    $kitRoot = $null
+    foreach ($base in @(${env:ProgramFiles(x86)}, $env:ProgramFiles)) {
+        if ($base -and (Test-Path (Join-Path $base "Windows Kits\10\Include"))) {
+            $kitRoot = Join-Path $base "Windows Kits\10"; break
+        }
+    }
+    if (-not $kitRoot) {
+        foreach ($rp in @("HKLM:\SOFTWARE\Microsoft\Windows Kits\Installed Roots",
+                          "HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows Kits\Installed Roots")) {
+            if (Test-Path $rp) {
+                $kr = (Get-ItemProperty -Path $rp -ErrorAction SilentlyContinue).KitsRoot10
+                if ($kr) {
+                    $kr = $kr.TrimEnd('\')
+                    if (Test-Path (Join-Path $kr "Include")) { $kitRoot = $kr; break }
+                }
+            }
+        }
+    }
+    if (-not $kitRoot) {
+        foreach ($d in @("D:","E:","F:")) {
+            $cand = Join-Path $d "Windows Kits\10"
+            if (Test-Path (Join-Path $cand "Include")) { $kitRoot = $cand; break }
+        }
+    }
+    if (-not $kitRoot) { Write-Host "[ERROR] 未找到 Windows SDK (Windows Kits\10\Include)" -ForegroundColor Red; exit 1 }
+    $sdkVer = Get-ChildItem (Join-Path $kitRoot "Include") -Directory -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -match '^\d+\.\d+\.\d+\.\d+$' } |
+        Sort-Object Name -Descending | Select-Object -First 1 -ExpandProperty Name
+    if (-not $sdkVer) { Write-Host "[ERROR] 未找到 Windows SDK Include 版本 ($kitRoot\Include)" -ForegroundColor Red; exit 1 }
+
+    $tool   = Join-Path $msvcRoot $toolVer
+    $binX64 = Join-Path $tool "bin\Hostx64\x64"
+    $binX86 = Join-Path $tool "bin\Hostx64\x86"
+    $incDir = Join-Path $kitRoot "Include"
+    $libDir = Join-Path $kitRoot "Lib"
+    $Include = "$tool\include;$(Join-Path $incDir $sdkVer um);$(Join-Path $incDir $sdkVer ucrt);$(Join-Path $incDir $sdkVer shared);$(Join-Path $incDir $sdkVer winrt);$(Join-Path $incDir $sdkVer cppwinrt)"
+    $LibX64  = "$(Join-Path $tool lib x64);$(Join-Path $libDir $sdkVer um x64);$(Join-Path $libDir $sdkVer ucrt x64)"
+    $LibX86  = "$(Join-Path $tool lib x86);$(Join-Path $libDir $sdkVer um x86);$(Join-Path $libDir $sdkVer ucrt x86)"
+    return [pscustomobject]@{ VsRoot=$vsRoot; ToolVer=$toolVer; SdkVer=$sdkVer;
+        BinX64=$binX64; BinX86=$binX86; Include=$Include; LibX64=$LibX64; LibX86=$LibX86 }
 }
 
-# === 获取 MSVC 编译环境 ===
-$msvcOutput = cmd /c "call `"$VcVars`" x64 >nul 2>&1 && echo MSVC_OK" 2>&1
-if ($msvcOutput -notcontains "MSVC_OK") {
-    Write-Host "[ERROR] 无法初始化 MSVC 环境" -ForegroundColor Red
-    exit 1
-}
-
-# 配置 MSVC 环境变量 (通过临时 bat 导入)
-$tempBat = "$env:TEMP\vcvars_env.bat"
-cmd /c "call `"$VcVars`" x64 >nul 2>&1 && set" | Out-File $tempBat -Encoding ASCII
-Get-Content $tempBat | ForEach-Object {
-    if ($_ -match '^([^=]+)=(.*)$') {
-        [Environment]::SetEnvironmentVariable($matches[1], $matches[2], "Process")
-    }
-}
-Remove-Item $tempBat -ErrorAction SilentlyContinue
+$msvc = Get-MsvcToolset
+# 原生 $env: 赋值: 子进程(含 C3 启动的 cl/link)可靠继承; 同时含 x64 与 x86 交叉工具链
+$env:PATH    = "$($msvc.BinX64);$($msvc.BinX86);$env:PATH"
+$env:INCLUDE = $msvc.Include
+$env:LIB     = "$($msvc.LibX64);$($msvc.LibX86)"
+$clCmd = Get-Command cl.exe -ErrorAction SilentlyContinue
+if (-not $clCmd) { Write-Host "[ERROR] 设置 MSVC 环境后仍找不到 cl.exe (PATH 前段=$($msvc.BinX64))" -ForegroundColor Red; exit 1 }
+Write-Host ("  MSVC 环境: VS=$($msvc.VsRoot)  toolset=$($msvc.ToolVer)  SDK=$($msvc.SdkVer)") -ForegroundColor Gray
+Write-Host ("  cl.exe: $($clCmd.Source)") -ForegroundColor Gray
 
 if (-not (Test-Path $OutDir)) { New-Item -ItemType Directory -Path $OutDir | Out-Null }
 
@@ -214,6 +265,14 @@ function Test-GuiVbp {
         Write-Host "FAIL (compile)" -ForegroundColor Red
         if ($Verbose) { Write-Host ($compileResult | Out-String) }
         return
+    }
+    # 自动把工程目录下的原生依赖 (OCX/DLL/TLB) 复制到 exe 所在目录 (与产物同目录),
+    # 以支持免注册便携部署: 如第三方 OCX 控件无需本机注册即可 LoadLibrary 加载
+    $srcDir = Split-Path $VbpFile -Parent
+    if (Test-Path $srcDir) {
+        Get-ChildItem $srcDir -File | Where-Object { $_.Extension -match '\.(ocx|dll|tlb)$' } | ForEach-Object {
+            Copy-Item -Force $_.FullName $guiOut | Out-Null
+        }
     }
     # VBP ExeName32 may differ from the vbp file name; pass -ExeName to override.
     $exeBase = if ($ExeName) { $ExeName } else { [IO.Path]::GetFileNameWithoutExtension($VbpFile) }
@@ -658,6 +717,11 @@ if ($Category -in @("all", "run", "vbp")) {
     # Charts 2020 demo (3rd-party UserControl charts): windowless chart controls (x86 first;
     # x64 after LongPtr port of API pointers/handles in the .ctl/.cls sources).
     Test-GuiVbp "Charts2020" "$Tests\Charts 2020\Proyecto1.vbp" -Arch "x86" -AutoExitSec 3
+    # czUI (czForm): 自定义 GDI+ UserControl (.ctl) 无边框窗体 demo, 需 -Arch x86 (32 位)
+    Test-GuiVbp "czUI" "$Tests\czUI-main\czFormDemo.vbp" -Arch "x86" -AutoExitSec 3
+    # NewTab: 第三方 OCX 控件 (NewTab01.ocx, 32 位) 真宿主验证. 免注册便携部署 (OCX 在工程目录, 由 harness 复制到 exe 旁, 不依赖本机注册);
+    # 无边框窗体无关闭按钮/无自动退出逻辑, 用 -AutoExitSec 3 收尾避免阻塞后续测试
+    Test-GuiVbp "NewTab" "$Tests\NewTab-test\Test.vbp" -Arch "x86" -AutoExitSec 3
     Write-Host ""
 
     Test-Vbp "test_implements" "$Tests\test_implements.vbp" @("IMPL1:OK", "IMPL2:OK", "Implements test PASSED")

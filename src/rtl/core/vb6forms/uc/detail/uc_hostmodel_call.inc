@@ -67,6 +67,24 @@
         return 1;
     }
     if (_wcsicmp(name, L"SetFocus") == 0) { SetFocus((HWND)obj); return 1; }
+    /* Fix 143: 原生列表控件经 COM 晚绑定调用 AddItem/RemoveItem/Clear.
+     * VB6 里 ComboBox/ListBox 的 AddItem 是方法, cgen 生成
+     * vb6_ComCall(vb6_hwnd_cboThemes, L"AddItem", args, 1), 而 HWND 不是 IDispatch.
+     * 此前这些名字落进 line "未知方法一律空实现" → 调用被静默丢弃:
+     * NewTab 示例 frmMain 的 `cboThemes.AddItem iTheme.Name` 一条都没进来,
+     * 主题下拉框只剩创建时那 1 个空条目. */
+    if (_wcsicmp(name, L"AddItem") == 0 && argc >= 1) {
+        BSTR s = vb6_ho_variantToBstr((vb6_VARIANT*)argv[0]);
+        if (GetEnvironmentVariableW(L"C3_OCX_TRACE", NULL, 0) > 0)
+            fprintf(stderr, "[C3_HOST] AddItem hwnd=%p text='%ls'\n", obj, s ? s : L"(null)");
+        vb6_AddItem(obj, s);
+        return 1;
+    }
+    if (_wcsicmp(name, L"RemoveItem") == 0 && argc >= 1) {
+        vb6_RemoveItem(obj, vb6_ho_variantToLong((vb6_VARIANT*)argv[0]));
+        return 1;
+    }
+    if (_wcsicmp(name, L"Clear") == 0) { vb6_ClearList(obj); return 1; }
     if (_wcsicmp(name, L"ZOrder") == 0 || _wcsicmp(name, L"Move") == 0 ||
         _wcsicmp(name, L"Show") == 0 || _wcsicmp(name, L"Hide") == 0 ||
         _wcsicmp(name, L"Print") == 0 || _wcsicmp(name, L"Line") == 0) {

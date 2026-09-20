@@ -231,6 +231,7 @@ int32_t vb6_Forms_Count(void);
 void*  vb6_Forms_Item(int32_t index);  // 0-based
 void   vb6_Forms_Register(void* hwnd);   // 窗体创建时注册
 void   vb6_Forms_Unregister(void* hwnd); // 窗体销毁时注销
+void*  vb6_Forms_GetActive(void);        // Fix 146: 当前活动窗体 (Screen.ActiveForm)
 
 // P14.2.4: IIf / InputBox
 BSTR vb6_IIfBSTR(int32_t cond, BSTR truepart, BSTR falsepart);

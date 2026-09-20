@@ -58,9 +58,14 @@ void CCodeGen::visit(LetStmt& node) {
                                 emitExpr(*idxExpr.positional[0]);
                                 idxArg = std::move(lastExpr_);
                                 emitExpr(*node.value);
+                                // Fix 142: 同 cgen_assign_stmt_special — 展开 RHS 的
+                                // COM 属性读 marker (NewTab1(c).Theme).
+                                if (isComMarker_) resolveComValue();
                                 valExpr = std::move(lastExpr_);
                             } else {
                                 idxArg = "0";
+                                if (isComMarker_) resolveComValue();
+                                valExpr = std::move(lastExpr_);
                             }
                             c_.emitLine(writeFn + "(vb6_CtrlArr_GetAt(&vb6_arr_" + cIdent(arrId.name) + ", " + idxArg + "), " + valExpr + ");  /* Let Control Array Property */");
                             return;

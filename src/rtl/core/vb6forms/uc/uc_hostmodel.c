@@ -4,6 +4,7 @@
 // 跨族共享符号见 vb6forms_uc_internal.h
 
 #include "vb6forms_uc_internal.h"
+#include "vb6forms_prop_ctrl.h"   // Fix 143: vb6_AddItem/RemoveItem/ClearList (原生列表 COM 晚绑定)
 
 #ifdef __cplusplus
 extern "C" {
@@ -35,6 +36,25 @@ void vb6_HostObj_Register(void* hwnd, const char* name, const char* vbTypeName,
         if (n >= VB6_UC_NAME_LEN) n = VB6_UC_NAME_LEN - 1;
         for (size_t i = 0; i < n; i++) h->typeName[i] = (wchar_t)vbTypeName[i];
     }
+}
+
+// Fix 148: 宿主对象登记表只读访问器 —— 供容器/控件对象模型使用 (axcontainer.c 调用)
+int32_t vb6_HostObj_GetIndex(void* hwnd) {
+    vb6_HostObjRec* r = vb6_ho_find(hwnd);
+    return r ? r->index : -1;
+}
+const wchar_t* vb6_HostObj_GetTypeName(void* hwnd) {
+    vb6_HostObjRec* r = vb6_ho_find(hwnd);
+    return r ? r->typeName : L"";
+}
+const wchar_t* vb6_HostObj_GetName(void* hwnd) {
+    vb6_HostObjRec* r = vb6_ho_find(hwnd);
+    return r ? r->name : L"";
+}
+int32_t vb6_HostObj_Count(void) { return g_hoCount; }
+void* vb6_HostObj_At(int32_t i) {
+    if (i < 0 || i >= g_hoCount) return NULL;
+    return g_ho[i].hwnd;
 }
 
 vb6_HostObjRec* vb6_ho_findWindow(const void* hwnd) {

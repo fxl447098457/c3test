@@ -481,6 +481,197 @@
                 ctrlId++;
                 continue;
             }
+            // Fix 143: 其他第三方 OCX 控件 (NewTabCtl.NewTab 等) → vb6_OcxHost_Create 真宿主.
+            // 之前 Unknown 控件什么都不生成: vb6_hwnd_<name> 恒 NULL, 全部 COM 属性/方法
+            // 调用静默无效 → 控件不渲染、集合为空 (NewTab1.Themes 枚举不出).
+            // 现路径: CLSID 从 typelib ComClass 符号取; ocx 文件从 vbp Object= 表取;
+            // 设计期属性走 IPersistPropertyBag. IDispatch* 存入 vb6_hwnd_<name>,
+            // 使 vb6_ComCall/ComSetProp(vb6_hwnd_<name>, ...) 走真实 IDispatch.
+            {
+                Symbol* comSym143 = lookupDotted(ctrl.controlTypeName);
+                if (!comSym143 || comSym143->kind != SymbolKind::ComClass) {
+                    size_t dot143 = ctrl.controlTypeName.find('.');
+                    if (dot143 != std::string::npos)
+                        comSym143 = symTab_.lookup(ctrl.controlTypeName.substr(dot143 + 1));
+                }
+                if (comSym143 && comSym143->kind == SymbolKind::ComClass
+                    && !comSym143->comClsidStr.empty()) {
+                    // Fix 143b: 控件实例化 CLSID 优先用 typelib 的 coclass GUID (它来自
+                    // OCX 文件本身, 是真实类); vbp Object= 的 GUID 作备用 — 实测工程里
+                    // 两者不一致 (vbp 写的是旧 GUID, OCX 的 DllGetClassObject 不认它,
+                    // 而 typelib GUID 已注册可用). 两个都交给 RTL 依次尝试.
+                    auto normGuid = [](const std::string& g) {
+                        std::string r;
+                        for (char ch : g) {
+                            if (ch == '{' || ch == '}') continue;
+                            r += (ch >= 'A' && ch <= 'Z') ? (char)(ch - 'A' + 'a') : ch;
+                        }
+                        return r;
+                    };
+                    std::string tlKey143 = normGuid(comSym143->comClsidStr);
+                    std::string clsid143 = comSym143->comClsidStr;
+                    std::string altClsid143;
+                    std::string ocxPath143;
+                    if (ocxRefs_ && !ocxRefs_->empty()) {
+                        for (const auto& ref143 : *ocxRefs_) {
+                            if (ref143.first == tlKey143) {
+                                // typelib GUID 命中: 只用它, 路径取该条
+                                ocxPath143 = ref143.second;
+                                break;
+                            }
+                        }
+                        if (ocxPath143.empty()) {
+                            // 不命中: vbp 的 GUID 作备用 CLSID, 路径取第一条 (单 OCX 工程)
+                            // Fix 148: 必须先判空 — 之前直接 front() 在 vbp 的 OCX 文件
+                            // 不存在 (ocxRefs_ 为空) 时是 UB, 实测段错误 (SIGSEGV).
+                            altClsid143 = "{" + ocxRefs_->front().first + "}";
+                            if (ocxRefs_->size() == 1) ocxPath143 = ocxRefs_->front().second;
+                        }
+                    }
+                    if (ocxPath143.empty() && ocxFiles_) {
+                        auto itOcx143 = ocxFiles_->find(tlKey143);
+                        if (itOcx143 != ocxFiles_->end()) ocxPath143 = itOcx143->second;
+                    }
+                    std::string ocxArg143 = ocxPath143.empty()
+                        ? std::string("NULL")
+                        : "L\"" + escapeWideCString(ocxPath143) + "\"";
+                    std::string altArg143 = altClsid143.empty()
+                        ? std::string("NULL")
+                        : "L\"" + escapeWideCString(altClsid143) + "\"";
+
+                    // 几何 (缇→像素)
+                    int l143 = 0, t143 = 0, w143 = 3000, h143 = 1500;
+                    auto pIt143 = ctrl.properties.find("Left");
+                    if (pIt143 != ctrl.properties.end()) l143 = (int)pIt143->second.intValue;
+                    pIt143 = ctrl.properties.find("Top");
+                    if (pIt143 != ctrl.properties.end()) t143 = (int)pIt143->second.intValue;
+                    pIt143 = ctrl.properties.find("Width");
+                    if (pIt143 != ctrl.properties.end()) w143 = (int)pIt143->second.intValue;
+                    pIt143 = ctrl.properties.find("Height");
+                    if (pIt143 != ctrl.properties.end()) h143 = (int)pIt143->second.intValue;
+
+                    // 设计期属性包: 简单属性 (跳过几何/_Extent/Index 与 .frx 引用)
+                    static const char* kBagSkip[] = {"Left", "Top", "Width", "Height", "Index",
+                        "_ExtentX", "_ExtentY", "Name", "Tag", "TabIndex", "TabStop",
+                        "Visible", "Enabled", "WhatsThisHelp", "HelpContextID"};
+                    std::vector<std::string> bagLines143;
+                    // Fix 148 诊断: C3_OCX_PROPS_MAX=N 只发前 N 个属性 (二分定位崩因)
+                    int propsMax143 = 100000;
+                    if (const char* pm = std::getenv("C3_OCX_PROPS_MAX")) { int v = atoi(pm); if (v > 0) propsMax143 = v; }
+                    for (const auto& kv143 : ctrl.properties) {
+                        if ((int)bagLines143.size() >= propsMax143) break;
+                        const std::string& pn143 = kv143.first;
+                        bool skip143 = false;
+                        for (const char* sk : kBagSkip)
+                            if (_stricmp(pn143.c_str(), sk) == 0) { skip143 = true; break; }
+                        if (skip143) continue;
+                        const FrmValue& fv143 = kv143.second;
+                        if (fv143.type == FrmValueType::Integer) {
+                            bagLines143.push_back("{L\"" + escapeWideCString(pn143) + "\", 3/*VT_I4*/, "
+                                + std::to_string(fv143.intValue) + ", 0, NULL, NULL, 0.0f, 0, 0, 0}");
+                        } else if (fv143.type == FrmValueType::Float) {
+                            bagLines143.push_back("{L\"" + escapeWideCString(pn143) + "\", 4/*VT_R4*/, 0, "
+                                + std::to_string(fv143.floatValue) + "f, NULL, NULL, 0.0f, 0, 0, 0}");
+                        } else if (fv143.type == FrmValueType::String) {
+                            std::string sv143 = fv143.rawText;
+                            if (sv143.size() >= 2 && sv143.front() == '"' && sv143.back() == '"')
+                                sv143 = sv143.substr(1, sv143.size() - 2);
+                            bagLines143.push_back("{L\"" + escapeWideCString(pn143) + "\", 8/*VT_BSTR*/, 0, 0, L\""
+                                + escapeWideCString(sv143) + "\", NULL, 0.0f, 0, 0, 0}");
+                        }
+                        /* Identifier / FrxReference: 跳过 (枚举常量/.frx 二进制, 后续支持) */
+                    }
+                    /* Fix 149: BeginProperty 字体块 (Font / IconFont(n)) → 设计期 IFont.
+                     * stdole 的 IFontDisp 类型库 GUID. VB6 控件的 ReadProperties 会
+                     * 直接解引用字体对象 (ctlNewTab.ctl:
+                     * `If mTabData(c).IconFontName <> mTabData(c).IconFont.Name`),
+                     * 只给默认 Nothing 会空指针解引用 → 异常逃逸 (0xC000041D). */
+                    {
+                        static const char* kFontGuid143 = "{0BE35203-8F91-11CE-9DE3-00AA004BB851}";
+                        for (const auto& blk143 : ctrl.propertyBlocks) {
+                            bool isFont143 = false;
+                            if (!blk143.blockGuid.empty()) {
+                                std::string g143 = blk143.blockGuid;
+                                for (auto& ch : g143) ch = (char)toupper((unsigned char)ch);
+                                std::string want143 = kFontGuid143;
+                                for (auto& ch : want143) ch = (char)toupper((unsigned char)ch);
+                                if (g143 == want143) isFont143 = true;
+                            }
+                            if (!isFont143 && _stricmp(blk143.blockName.c_str(), "Font") == 0) isFont143 = true;
+                            if (!isFont143) continue;
+
+                            std::string fName143 = "Tahoma";
+                            double fSize143 = 9.0;
+                            long fWeight143 = 400, fCharset143 = 0, fFlags143 = 0;
+                            auto bit143 = blk143.properties.find("Name");
+                            if (bit143 != blk143.properties.end() && bit143->second.type == FrmValueType::String) {
+                                std::string s143 = bit143->second.rawText;
+                                if (s143.size() >= 2 && s143.front() == '"' && s143.back() == '"')
+                                    s143 = s143.substr(1, s143.size() - 2);
+                                if (!s143.empty()) fName143 = s143;
+                            }
+                            bit143 = blk143.properties.find("Size");
+                            if (bit143 != blk143.properties.end()) {
+                                if (bit143->second.type == FrmValueType::Float) fSize143 = bit143->second.floatValue;
+                                else fSize143 = (double)bit143->second.intValue;
+                                if (fSize143 <= 0) fSize143 = 9.0;
+                            }
+                            bit143 = blk143.properties.find("Weight");
+                            if (bit143 != blk143.properties.end() && bit143->second.intValue > 0)
+                                fWeight143 = (long)bit143->second.intValue;
+                            bit143 = blk143.properties.find("Charset");
+                            if (bit143 != blk143.properties.end()) fCharset143 = (long)bit143->second.intValue;
+                            bit143 = blk143.properties.find("Italic");
+                            if (bit143 != blk143.properties.end() && bit143->second.intValue) fFlags143 |= 1;
+                            bit143 = blk143.properties.find("Underline");
+                            if (bit143 != blk143.properties.end() && bit143->second.intValue) fFlags143 |= 2;
+                            bit143 = blk143.properties.find("Strikethrough");
+                            if (bit143 != blk143.properties.end() && bit143->second.intValue) fFlags143 |= 4;
+
+                            bagLines143.push_back("{L\"" + escapeWideCString(blk143.blockName)
+                                + "\", 9/*VT_DISPATCH(IFont)*/, 0, 0, NULL, L\""
+                                + escapeWideCString(fName143) + "\", "
+                                + std::to_string(fSize143) + "f, "
+                                + std::to_string(fWeight143) + ", "
+                                + std::to_string(fCharset143) + ", "
+                                + std::to_string(fFlags143) + "}");
+                        }
+                    }
+                    std::string bagArr143 = "NULL";
+                    std::string bagCnt143 = "0";
+                    if (!bagLines143.empty()) {
+                        // 控件数组: 每实例属性不同 → 数组名带索引后缀防重定义
+                        bool ocxIsArr143 = knownControlArrays_.count(Symbol::toLower(ctrl.controlName)) != 0;
+                        std::string arrName143 = "vb6_ocxprops_" + cIdent(ctrl.controlName);
+                        if (ocxIsArr143)
+                            arrName143 += "_" + std::to_string(ctrl.index >= 0 ? ctrl.index : 0);
+                        c_.emitLine("static const Vb6OcxProp " + arrName143 + "[] = {");
+                        c_.indent();
+                        for (auto& bl : bagLines143) c_.emitLine(bl + ",");
+                        c_.dedent();
+                        c_.emitLine("};");
+                        bagArr143 = arrName143;
+                        bagCnt143 = std::to_string(bagLines143.size());
+                    }
+                    std::string call143 = "vb6_OcxHost_Create((void*)hwnd, L\"" + clsid143
+                              + "\", " + altArg143 + ", " + ocxArg143 + ", "
+                              + std::to_string(l143 / 15) + ", " + std::to_string(t143 / 15) + ", "
+                              + std::to_string(w143 / 15) + ", " + std::to_string(h143 / 15)
+                              + ", L\"" + escapeWideCString(ctrl.controlName) + "\", "
+                              + bagArr143 + ", " + bagCnt143 + ")";
+                    if (knownControlArrays_.count(Symbol::toLower(ctrl.controlName))) {
+                        int idx143 = ctrl.index >= 0 ? ctrl.index : 0;
+                        c_.emitLine("{ void* vb6_ocx_h = " + call143 + ";");
+                        c_.emitLine("  vb6_CtrlArr_SetAt(&vb6_arr_" + cIdent(ctrl.controlName) + ", "
+                                  + std::to_string(idx143) + ", vb6_ocx_h); }  /* Fix 143: OCX 真宿主 (数组) */");
+                    } else {
+                        c_.emitLine("vb6_hwnd_" + cIdent(ctrl.controlName) + " = " + call143
+                                  + ";  /* Fix 143: OCX 真宿主 */");
+                    }
+                    ctrlId++;
+                    continue;
+                }
+            }
             // 不可见控件 (Timer等) 跳过
             ctrlId++;
             continue;

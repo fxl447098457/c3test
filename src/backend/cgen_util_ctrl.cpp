@@ -438,6 +438,10 @@ long CCodeGen::controlTypeStyleBits(const FrmControl& ctrl) const {
             } else {
                 style |= kCbsDrop;
             }
+            // Fix 147: VB6 的 ComboBox 下拉列表带垂直滚动条 — 项数超过可见区时
+            // 靠它滚动查看全部项. 此前漏了 WS_VSCROLL, 下拉只能看到前几项,
+            // 用户以为"选项不全" (实测 32 个主题只能看到 9 个且无法滚动).
+            style |= kWsVscroll;
             style |= kWsBorder;
             auto sortIt = ctrl.properties.find("Sorted");
             if (sortIt != ctrl.properties.end() && sortIt->second.intValue != 0) style |= 0x0100L;

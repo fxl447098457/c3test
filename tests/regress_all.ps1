@@ -169,36 +169,81 @@ if ($List) {
 # 显式传env 可规避个别机器上进程环境块存在重复 PATH 条目 (PATH/Path) 导致
 # 子进程解析到旧值的问题 (实测 cl.exe 找不到)。
 $script:MsvcEnv = @{}
-$VcVars = $env:C3_VCVARSALL
-if (-not $VcVars) {
-    $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer\vswhere.exe"
-    if (Test-Path $vswhere) {
-        $vsPath = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath 2>$null
-        if ($vsPath) {
-            $cand = Join-Path $vsPath "VC\Auxiliary\Build\vcvarsall.bat"
-            if (Test-Path $cand) { $VcVars = $cand }
+# 通用 MSVC 环境解析 (不依赖 cmd.exe / vcvarsall 解析, 不硬编码 VS/SDK 版本)
+# 优先 C3_VCVARSALL 推导 VS 根; 否则 vswhere 取最新已装 VS; toolset 与 SDK 版本动态发现。
+# 解析结果存入 $script:MsvcEnv (供 Invoke-Proc 显式传给子进程) 并同步设置进程环境。
+function Get-MsvcToolset {
+    $vsRoot = $null
+    if ($env:C3_VCVARSALL -and (Test-Path $env:C3_VCVARSALL)) {
+        $p = $env:C3_VCVARSALL
+        for ($i = 0; $i -lt 4; $i++) { $p = Split-Path -Parent $p }
+        $vsRoot = $p
+    }
+    if (-not $vsRoot) {
+        $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer\vswhere.exe"
+        if (Test-Path $vswhere) {
+            $vsPath = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath 2>$null
+            if ($vsPath) { $vsRoot = $vsPath }
         }
     }
-}
-if ($VcVars -and (Test-Path $VcVars)) {
-    $tempBat = Join-Path $env:TEMP "regress_vcvars_env.bat"
-    cmd /c "call `"$VcVars`" x64 >nul 2>&1 && set" | Out-File $tempBat -Encoding ASCII
-    Get-Content $tempBat | ForEach-Object {
-        if ($_ -match '^([^=]+)=(.*)$') {
-            $name = $matches[1]
-            if ($name -ieq "path") { $name = "Path" }   # 统一大小写, 防止重复条目
-            # 个别机器环境块同时存在 PATH/Path 两条, 同名时保留更长(vcvars 展开后)的那份
-            if (-not $script:MsvcEnv.ContainsKey($name) -or $script:MsvcEnv[$name].Length -lt $matches[2].Length) {
-                $script:MsvcEnv[$name] = $matches[2]
+    if (-not $vsRoot -or -not (Test-Path $vsRoot)) {
+        Write-Host "[WARN] 未找到 Visual Studio (含 VC.Tools), 编译可能失败; 可设置 C3_VCVARSALL" -ForegroundColor Yellow
+        return $null
+    }
+    $msvcRoot = Join-Path $vsRoot "VC\Tools\MSVC"
+    $toolVer = Get-ChildItem $msvcRoot -Directory -ErrorAction SilentlyContinue |
+        Sort-Object Name -Descending | Select-Object -First 1 -ExpandProperty Name
+    if (-not $toolVer) { Write-Host "[WARN] 未找到 MSVC toolset ($msvcRoot)" -ForegroundColor Yellow; return $null }
+    $kitRoot = $null
+    foreach ($base in @(${env:ProgramFiles(x86)}, $env:ProgramFiles)) {
+        if ($base -and (Test-Path (Join-Path $base "Windows Kits\10\Include"))) { $kitRoot = Join-Path $base "Windows Kits\10"; break }
+    }
+    if (-not $kitRoot) {
+        foreach ($rp in @("HKLM:\SOFTWARE\Microsoft\Windows Kits\Installed Roots",
+                          "HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows Kits\Installed Roots")) {
+            if (Test-Path $rp) {
+                $kr = (Get-ItemProperty -Path $rp -ErrorAction SilentlyContinue).KitsRoot10
+                if ($kr) { $kr = $kr.TrimEnd('\'); if (Test-Path (Join-Path $kr "Include")) { $kitRoot = $kr; break } }
             }
-            [Environment]::SetEnvironmentVariable($name, $script:MsvcEnv[$name], "Process")
         }
     }
-    Remove-Item $tempBat -ErrorAction SilentlyContinue
-} elseif (-not $env:INCLUDE) {
-    Write-Host "[WARN] 无 C3_VCVARSALL 且未探测到 VS, 若 C3 编译失败请先设置 (同 run_tests.ps1)" -ForegroundColor Yellow
+    if (-not $kitRoot) {
+        foreach ($d in @("D:","E:","F:")) {
+            $cand = Join-Path $d "Windows Kits\10"
+            if (Test-Path (Join-Path $cand "Include")) { $kitRoot = $cand; break }
+        }
+    }
+    if (-not $kitRoot) { Write-Host "[WARN] 未找到 Windows SDK (Windows Kits\10\Include)" -ForegroundColor Yellow; return $null }
+    $sdkVer = Get-ChildItem (Join-Path $kitRoot "Include") -Directory -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -match '^\d+\.\d+\.\d+\.\d+$' } |
+        Sort-Object Name -Descending | Select-Object -First 1 -ExpandProperty Name
+    if (-not $sdkVer) { Write-Host "[WARN] 未找到 Windows SDK Include 版本 ($kitRoot\Include)" -ForegroundColor Yellow; return $null }
+
+    $tool   = Join-Path $msvcRoot $toolVer
+    $binX64 = Join-Path $tool "bin\Hostx64\x64"
+    $binX86 = Join-Path $tool "bin\Hostx64\x86"
+    $incDir = Join-Path $kitRoot "Include"
+    $libDir = Join-Path $kitRoot "Lib"
+    $Include = "$tool\include;$(Join-Path $incDir $sdkVer um);$(Join-Path $incDir $sdkVer ucrt);$(Join-Path $incDir $sdkVer shared);$(Join-Path $incDir $sdkVer winrt);$(Join-Path $incDir $sdkVer cppwinrt)"
+    $LibX64  = "$(Join-Path $tool lib x64);$(Join-Path $libDir $sdkVer um x64);$(Join-Path $libDir $sdkVer ucrt x64)"
+    $LibX86  = "$(Join-Path $tool lib x86);$(Join-Path $libDir $sdkVer um x86);$(Join-Path $libDir $sdkVer ucrt x86)"
+    return [pscustomobject]@{ VsRoot=$vsRoot; ToolVer=$toolVer; SdkVer=$sdkVer;
+        BinX64=$binX64; BinX86=$binX86; Include=$Include; LibX64=$LibX64; LibX86=$LibX86 }
 }
-Write-Host ("  MSVC 环境: INCLUDE={0} cl-in-PATH={1}" -f [bool]$env:INCLUDE, ($script:MsvcEnv["Path"] -match "Hostx64"))
+
+$msvc = Get-MsvcToolset
+if ($msvc) {
+    $script:MsvcEnv["PATH"]    = "$($msvc.BinX64);$($msvc.BinX86);$env:PATH"
+    $script:MsvcEnv["INCLUDE"] = $msvc.Include
+    $script:MsvcEnv["LIB"]     = "$($msvc.LibX64);$($msvc.LibX86)"
+    $env:PATH    = $script:MsvcEnv["PATH"]
+    $env:INCLUDE = $script:MsvcEnv["INCLUDE"]
+    $env:LIB     = $script:MsvcEnv["LIB"]
+    $clCmd = Get-Command cl.exe -ErrorAction SilentlyContinue
+    Write-Host ("  MSVC 环境: VS=$($msvc.VsRoot) toolset=$($msvc.ToolVer) SDK=$($msvc.SdkVer) cl={0}" -f $clCmd.Source) -ForegroundColor Gray
+} else {
+    Write-Host "[WARN] 未成功配置 MSVC 环境, 编译可能失败" -ForegroundColor Yellow
+}
 
 # === 工具函数 ===
 # 带超时运行进程, 返回 @{ ExitCode; Stdout; TimedOut }
