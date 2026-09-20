@@ -122,10 +122,10 @@ jobs:
 
       # T1 自包含 (2026-09-20): 用例 cp 自 tests\ 至 tests_github\t1_cases\, 驱动为
       # tests_github/run_t1.ps1 (自带清单与引擎) —— 方向是 tests_github 独立、后续废弃 tests\。
-      #   bas 类 = 33 个 (编译+运行+输出断言, -Jobs 20 并行)
+      #   bas 类 = 33 用例 x64+x86 双跑 = 64 任务 (-Jobs 20 并行)
       #   compile 类 = 10 个 (comprehensive x2 + 8 个 frm, 只编译)
       # vbp/GUI 用例不进 T1 (窗口校验依赖本机环境, 留给后续夜间全量层)
-      - name: 运行 T1 门禁（tests_github/run_t1.ps1：bas 33 并行 + compile 10）
+      - name: 运行 T1 门禁（run_t1.ps1：bas 33 用例 x64+x86=64 并行 + compile 10）
         shell: pwsh
         run: pwsh -NoProfile -ExecutionPolicy Bypass -File tests_github/run_t1.ps1 -Jobs 20 -Verbose
 
