@@ -140,6 +140,14 @@ enum RtlResourceID {
     // Fix 148: VB6 容器对象模型 (Extender/Container/Controls) — OCX 真宿主 (axcontainer.c)
     // 注意: 179~197 已被 vb6forms_uc 拆分 + gdiplus 拆分占满, 故顺延到 198 避免 ID 冲突
     RTL_VB6FORMS_AXCONTAINER_C = 198,
+
+    // vb6forms_axsite.c 按功能家族拆分 (2026-09-20): 内部头 + 5 个族编译单元
+    RTL_VB6FORMS_AXSITE_INTERNAL_H         = 199,
+    RTL_AX_SITE_C                          = 200,
+    RTL_AX_SITE_EXT_C                      = 201,
+    RTL_AX_PROPBAG_C                       = 202,
+    RTL_AX_LOAD_C                          = 203,
+    RTL_AX_HOST_C                          = 204,
 };
 
 // Session directory manager

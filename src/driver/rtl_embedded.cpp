@@ -137,6 +137,14 @@ std::string SessionManager::create() {
         { RTL_VB6FORMS_SHAPE_C,        "vb6forms_shape.c" },
         { RTL_VB6FORMS_AXSITE_C,       "vb6forms_axsite.c" },
         { RTL_VB6FORMS_AXCONTAINER_C,  "vb6forms_axcontainer.c" },
+        // vb6forms_axsite.c 按功能家族拆分 (2026-09-20): 内部头 + axsite/ 下 5 个族编译单元
+        // 注意: 解包后是平铺目录, files[] 记的是解包后的 basename, 与源码树子目录无关
+        { RTL_VB6FORMS_AXSITE_INTERNAL_H, "vb6forms_axsite_internal.h" },
+        { RTL_AX_SITE_C,                  "ax_site.c" },
+        { RTL_AX_SITE_EXT_C,              "ax_site_ext.c" },
+        { RTL_AX_PROPBAG_C,               "ax_propbag.c" },
+        { RTL_AX_LOAD_C,                  "ax_load.c" },
+        { RTL_AX_HOST_C,                  "ax_host.c" },
         { RTL_VB6FORMS_UC_C,           "vb6forms_uc.c" },
 
         // vb6rtl.h 按家族拆分 (2026-09-17)

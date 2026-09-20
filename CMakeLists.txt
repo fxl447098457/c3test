@@ -286,6 +286,14 @@ set(C3RTL_EMBEDDED_FILES
     ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6forms/vb6forms_widget_prop.c
     ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6forms/vb6forms_shape.c
     ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6forms/vb6forms_axsite.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6forms/vb6forms_axcontainer.c   # Fix 148 (补登记: 此前漏登记, 改此文件不会触发 .rc 重编)
+    # vb6forms_axsite 按族细分 (2026-09-20): 内部头 + axsite/ 下 5 个族编译单元
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6forms/vb6forms_axsite_internal.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6forms/axsite/ax_site.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6forms/axsite/ax_site_ext.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6forms/axsite/ax_propbag.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6forms/axsite/ax_load.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6forms/axsite/ax_host.c
     # vb6forms_uc 按族细分 (2026-09-19): 内部头 + 6 族编译单元 + 7 个函数体片段
     ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6forms/vb6forms_uc_internal.h
     ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6forms/uc/uc_host.c
