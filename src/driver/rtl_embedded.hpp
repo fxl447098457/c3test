@@ -165,6 +165,13 @@ public:
     // Get current session's RTL directory path
     const std::string& rtlDir() const { return rtlDir_; }
 
+    // 校验会话 rtl/ 下每个 RTL 文件是否存在且非空, 缺失的当场重新解包.
+    // 用途: 编译前调用. 兄弟进程的 cleanupOldSessions 可能已把本会话目录里的
+    // 部分文件删掉 (见 cleanupOldSessions 注释), 此时 cl 会对尚未编译的源文件报
+    // C1083 —— 这里自愈, 而不是让整次编译失败.
+    // 返回: 所有文件最终齐备 -> true
+    bool restoreMissing();
+
     // P11.2: session root dir (for intermediates .c/.h/.obj)
     const std::string& sessionDir() const { return sessionDir_; }
 
@@ -174,7 +181,7 @@ public:
     // Release session without cleanup (keep intermediates for debugging)
     void release() { sessionDir_.clear(); rtlDir_.clear(); }
 
-    // Clean up old session dirs (>300 seconds)
+    // Clean up old session dirs (owner process already gone + idle > 30 min)
     // Auto-called on each create()
     static void cleanupOldSessions();
 
