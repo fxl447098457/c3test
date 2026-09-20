@@ -5,14 +5,19 @@
 #   git tag github-test-001
 #   git push <github 远端> github-test-001
 # 内容: t0 job 构建 C3.exe + run_t0.ps1 门禁; t1 job 复用产物跑 run_t1.ps1 最小回归
-#   (bas 33 并行 + compile 10; 用例 cp 自 tests/, tests_github 自包含, 见两脚本头注释)
+#   (bas 33 用例 x64+x86 双架构 64 任务 + compile 10); t2 job 复用产物跑 run_t2.ps1
+#   全量回归 (vbp 7 执行断言 + GUI 3 只编译)。用例均 cp 自 tests/, tests_github 自包含。
+# 触发: tag github-test-* / 夜间 cron / 手动 dispatch, 见 on: 块。
 
-name: GitHub Tests T0+T1
+name: GitHub Tests T0+T1+T2
 
 on:
   push:
     tags:
       - 'github-test-*'
+  schedule:
+    - cron: '7 19 * * *'   # UTC 19:07 = 北京 03:07, 夜间全链健康检查
+  workflow_dispatch:
 
 jobs:
   t0:
@@ -139,5 +144,46 @@ jobs:
             output/**/*.err
             output/**/*.txt
             output/**/scores.txt
+          if-no-files-found: warn
+          retention-days: 14
+
+  t2:
+    name: T2 全量回归（vbp 执行断言 + GUI 只编译）
+    needs: t1
+    runs-on: windows-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      # 交给脚本的 vswhere 自动发现 vcvarsall (无需显式设置)
+      C3_VCVARSALL: ""
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v5
+
+      - name: 下载 C3.exe 产物（来自 T0）
+        uses: actions/download-artifact@v8
+        with:
+          name: c3-exe
+          path: .build/
+
+      - name: 校验下载的 C3.exe
+        run: |
+          & .build\C3.exe --version
+          if ($LASTEXITCODE -ne 0) { throw "downloaded C3.exe broken" }
+
+      - name: 运行 T2 门禁（run_t2.ps1：vbp 7 执行断言 + GUI 3 只编译）
+        shell: pwsh
+        run: pwsh -NoProfile -ExecutionPolicy Bypass -File tests_github/run_t2.ps1 -Verbose
+
+      - name: 上传 T2 日志
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: t2-logs
+          path: |
+            output/**/*.out
+            output/**/*.err
           if-no-files-found: warn
           retention-days: 14
