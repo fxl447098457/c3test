@@ -187,3 +187,80 @@ double vb6_NPV(double rate, struct vb6_SafeArray1D* values) {
     return npv;
 }
 
+// 财务家族公共: 取 SafeArray1D 第 i 个元素为 double (元素分派与 vb6_NPV 一致)
+static double vb6_fin_elem(const struct vb6_SafeArray1D* values, int32_t i) {
+    switch (values->elemType) {
+        case 6: return ((double*)values->data)[i];          /* vb6_sa_double */
+        case 5: return (double)((float*)values->data)[i];   /* vb6_sa_single */
+        case 4: return (double)((int32_t*)values->data)[i]; /* vb6_sa_long */
+        case 3: return (double)((int16_t*)values->data)[i]; /* vb6_sa_int */
+        case 2: return (double)((uint8_t*)values->data)[i]; /* vb6_sa_byte */
+        case 8: return vb6_VariantToDouble(((vb6_VARIANT*)values->data)[i]);
+        default: return 0.0;
+    }
+}
+
+// P21-16: NPer — 期数 (由 FV 公式反解)
+// 声明见 vb6rtl_class_com.h. 此前只有声明没有定义 → 用到即 LNK2019.
+double vb6_NPer(double rate, double pmt, double pv, double fv, int32_t type_) {
+    if (rate == 0.0) {
+        if (pmt == 0.0) return 0.0;
+        return -(pv + fv) / pmt;
+    }
+    // fv + pv*(1+r)^n + pmt*(1+r*type)*((1+r)^n-1)/r = 0
+    //   → (1+r)^n = (k - fv) / (pv + k), k = pmt*(1+r*type)/r
+    double k = pmt * (1.0 + rate * (double)type_) / rate;
+    double den = pv + k;
+    double ratio = (den == 0.0) ? 0.0 : (k - fv) / den;
+    if (ratio <= 0.0) return 0.0;
+    return log(ratio) / log(1.0 + rate);
+}
+
+// P21-19: IRR — 内部收益率 (周期 0 起始: values[0] 不打折), Newton 迭代
+double vb6_IRR(void* valuesArray, double guess) {
+    struct vb6_SafeArray1D* values = (struct vb6_SafeArray1D*)valuesArray;
+    if (!values || !values->data || values->count < 2) return 0.0;
+
+    double rate = guess;
+    if (rate <= -0.999999) rate = 0.1;
+
+    for (int iter = 0; iter < 100; iter++) {
+        double f = 0.0;       // NPV(rate) = Σ v_i/(1+r)^i
+        double df = 0.0;      // dNPV/dr   = Σ -i*v_i/(1+r)^(i+1)
+        double factor = 1.0;  // (1+r)^i
+        for (int32_t i = 0; i < values->count; i++) {
+            if (i > 0) factor *= (1.0 + rate);
+            double v = vb6_fin_elem(values, i);
+            f += v / factor;
+            if (i > 0) df -= (double)i * v / (factor * (1.0 + rate));
+        }
+        if (fabs(df) < 1e-15) break;
+        double next = rate - f / df;
+        if (next <= -0.999999) break;  // 迭代发散, 保留当前值
+        if (fabs(next - rate) < 1e-10) { rate = next; break; }
+        rate = next;
+    }
+    return rate;
+}
+
+// P21-20: MIRR — 修正内部收益率
+// MIRR = (正现金流按 reinvestRate 复利到期末的终值 / |负现金流按 financeRate 折现到
+// 期初的现值|) ^ (1/(n-1)) - 1, 与 Excel/VB6 同公式 (n = 数组元素个数)
+double vb6_MIRR(void* valuesArray, double financeRate, double reinvestRate) {
+    struct vb6_SafeArray1D* values = (struct vb6_SafeArray1D*)valuesArray;
+    if (!values || !values->data || values->count < 2) return 0.0;
+
+    int32_t n = values->count;
+    double fvPos = 0.0;  // 正现金流终值
+    double pvNeg = 0.0;  // 负现金流现值 (负值)
+    for (int32_t i = 0; i < n; i++) {
+        double v = vb6_fin_elem(values, i);
+        if (v > 0.0) fvPos += v * pow(1.0 + reinvestRate, (double)(n - 1 - i));
+        else if (v < 0.0) pvNeg += v / pow(1.0 + financeRate, (double)i);
+    }
+    if (fvPos == 0.0 || pvNeg == 0.0) return 0.0;
+    double base = fvPos / -pvNeg;
+    if (base <= 0.0) return 0.0;
+    return pow(base, 1.0 / (double)(n - 1)) - 1.0;
+}
+

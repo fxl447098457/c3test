@@ -315,6 +315,12 @@ int32_t vb6_ErrNumber(void) { return vb6_err.number; }
 BSTR vb6_ErrDescription(void) { return vb6_err.description; }
 void vb6_ErrClear(void) { vb6_err.number = 0; vb6_err.description = NULL; vb6_err.source = NULL; }
 
+// P21-27: Erl — 出错行号 (声明见 vb6rtl_class_com.h)
+// 行号嵌入机制未实现 (cgen 不生成 VB 行号标签), 按 VB6 语义返回 0 —— VB6 中源码
+// 不带行号时 Erl 同样返回 0。此前只有声明没有定义: 任何用到 Erl 的工程都会在
+// 链接期报 LNK2019: unresolved external symbol vb6_Erl (CI vbman demo 实证)。
+int32_t vb6_Erl(void) { return 0; }
+
 BSTR vb6_ErrSource(void) { return vb6_err.source; }
 
 void vb6_ErrRaise(int32_t errNum, BSTR source, BSTR description) {
