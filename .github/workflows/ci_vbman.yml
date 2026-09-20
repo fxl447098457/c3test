@@ -245,7 +245,41 @@ jobs:
           Write-Host ("VBMAN.dll PE machine: 0x{0:X4} ({1})" -f $machine, $archName)
           if ($machine -ne 0x8664) { throw "VBMAN.dll 不是 x64 (machine=0x$($machine.ToString('X4')))" }
           & "$env:SystemRoot\System32\regsvr32.exe" /s "$dllPath"
-          if ($LASTEXITCODE -ne 0) { throw "regsvr32 failed" }
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "regsvr32 failed (exit $LASTEXITCODE: 2=LoadLibrary败 3=无导出 4=DllRegisterServer败), probe..."
+            # P/Invoke 探测: 区分缺依赖 / 导出缺失 / DllRegisterServer 返回错误
+            Add-Type -TypeDefinition @'
+          using System;
+          using System.Runtime.InteropServices;
+          public static class RegProbe {
+              [DllImport("kernel32", SetLastError=true, CharSet=CharSet.Unicode)]
+              public static extern IntPtr LoadLibrary(string path);
+              [DllImport("kernel32", SetLastError=true, CharSet=CharSet.Ansi)]
+              public static extern IntPtr GetProcAddress(IntPtr h, string name);
+              [DllImport("kernel32")] public static extern bool FreeLibrary(IntPtr h);
+              [UnmanagedFunctionPointer(CallingConvention.StdCall)] public delegate int RegFn();
+              public static IntPtr FindExport(IntPtr h, string name) { return GetProcAddress(h, name); }
+              public static int CallReg(IntPtr h) {
+                  IntPtr p = GetProcAddress(h, "DllRegisterServer");
+                  return ((RegFn)Marshal.GetDelegateForFunctionPointer(p, typeof(RegFn)))();
+              }
+          }
+          '@
+            $h = [RegProbe]::LoadLibrary((Resolve-Path $dllPath).Path)
+            if ($h -eq [IntPtr]::Zero) {
+              $err = [Runtime.InteropServices.Marshal]::GetLastWin32Error()
+              throw "probe: LoadLibrary FAILED (Win32Error=$err; 126=缺依赖模块)"
+            }
+            Write-Host "probe: LoadLibrary OK"
+            foreach ($e in 'DllRegisterServer','DllUnregisterServer','DllGetClassObject','DllCanUnloadNow') {
+              $present = [RegProbe]::FindExport($h, $e) -ne [IntPtr]::Zero
+              Write-Host ("probe: export {0} = {1}" -f $e, $(if ($present) { 'present' } else { 'MISSING' }))
+            }
+            $hr = [RegProbe]::CallReg($h)
+            Write-Host ("probe: DllRegisterServer HRESULT = 0x{0:X8} (0=S_OK; 80070005=注册表权限)" -f $hr)
+            [RegProbe]::FreeLibrary($h) | Out-Null
+            throw "regsvr32 failed (probe 结论见上)"
+          }
           Write-Host "VBMAN.dll registered (HKCR\VBMANLIB)"
 
       - name: 编译 Helloworld demo（引用 ..\..\..\vbman\dist\DLL\VBMAN.dll）
