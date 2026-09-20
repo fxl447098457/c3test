@@ -265,6 +265,15 @@
             }
         }
         if (isCompleteCall && !needsSplitForOptionalPad && !needsSplitForMissingArgs) {
+            // Fix 146 回归 (vbman cLogs C2198 / T2 ExtShow): external form show 转发
+            // (cgen_expr_member_form_builtin.inc) 只交付 vb6_form_show_<Form>(NULL),
+            // modal 实参原本只由本文件的"有参拆包"路径追加; 无参调用 (Frm.Show) 走
+            // 这里直接复用 callee, 会缺 modal 形参 -> C2198. 无参即补默认 modal=0
+            // (VB6 语义: 无参 Show = modeless).
+            if (callee.compare(0, 14, "vb6_form_show_") == 0) {
+                lastExpr_ = callee.substr(0, callee.size() - 1) + ", 0)";
+                return;
+            }
             lastExpr_ = callee;
             return;
         }

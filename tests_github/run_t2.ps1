@@ -204,7 +204,10 @@ function Test-Vbp {
     if ($LASTEXITCODE -ne 0) {
         $script:fail++
         Write-Host "FAIL (compile)" -ForegroundColor Red
-        if ($Verbose) { Write-Host ($compileResult | Out-String) }
+        # 可观测性约定: FAIL 必须带错误输出, 不依赖 -Verbose
+        $compileResult | Select-Object -Last 25 | ForEach-Object { Write-Host "  $_" }
+        $c3err = Join-Path $OutDir "c3-error.log"
+        if (Test-Path $c3err) { Get-Content $c3err -Tail 25 | ForEach-Object { Write-Host "  $_" } }
         return
     }
 
@@ -213,6 +216,7 @@ function Test-Vbp {
     if (-not (Test-Path $exePath)) {
         $script:fail++
         Write-Host "FAIL (no exe)" -ForegroundColor Red
+        $compileResult | Select-Object -Last 15 | ForEach-Object { Write-Host "  $_" }
         return
     }
 
@@ -231,10 +235,9 @@ function Test-Vbp {
         } else {
             $script:fail++
             Write-Host "FAIL (output mismatch)" -ForegroundColor Red
-            if ($Verbose) {
-                Write-Host "  Expected: $($It.Expected -join ', ')"
-                Write-Host "  Got: $($run.Output -join ' | ')"
-            }
+            # 可观测性约定: 断言失败必须带期望与实际输出
+            Write-Host "  Expected: $($It.Expected -join ', ')"
+            Write-Host "  Got: $($run.Output -join ' | ')"
         }
     } else {
         $script:pass++
@@ -295,7 +298,10 @@ function Test-GuiCompileOnly {
     } else {
         $script:fail++
         Write-Host "FAIL" -ForegroundColor Red
-        if ($Verbose) { Write-Host ($result | Out-String) }
+        # 可观测性约定: FAIL 必须带错误输出, 不依赖 -Verbose
+        $result | Select-Object -Last 25 | ForEach-Object { Write-Host "  $_" }
+        $c3err = Join-Path $OutDir "c3-error.log"
+        if (Test-Path $c3err) { Get-Content $c3err -Tail 25 | ForEach-Object { Write-Host "  $_" } }
     }
 }
 

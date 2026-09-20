@@ -184,11 +184,21 @@ function Invoke-BasSetParallel {
                 $cr = & $c3 $it.Source --output-dir $workDir 2>&1
             }
             $ec = $LASTEXITCODE
-            if ($ec -ne 0) { $f++; $details += "$($it.Name): compile FAIL"; continue }
+            if ($ec -ne 0) {
+                # 可观测性约定: FAIL 必须带错误输出 (C3 输出尾部 + c3-error.log 尾部)
+                $tail = ($cr | Select-Object -Last 20) -join "`n"
+                $c3err = Join-Path $workDir "c3-error.log"
+                if (Test-Path $c3err) {
+                    $tail += "`n--- c3-error.log (tail 25) ---`n" + ((Get-Content $c3err -Tail 25) -join "`n")
+                }
+                $f++; $details += "$($it.Name): compile FAIL`n$tail"; continue
+            }
 
             $baseName = [IO.Path]::GetFileNameWithoutExtension($it.Source)
             $exePath = Join-Path $workDir "$baseName.exe"
-            if (-not (Test-Path $exePath)) { $f++; $details += "$($it.Name): no exe"; continue }
+            if (-not (Test-Path $exePath)) {
+                $f++; $details += "$($it.Name): no exe`nC3 tail: " + (($cr | Select-Object -Last 15) -join "`n"); continue
+            }
 
             # --- 运行 (.NET Process + 5s 超时; 语义对齐 run_tests.ps1 Invoke-TestExe) ---
             $stdoutFile = Join-Path $workDir "$($it.Name).out"
@@ -224,7 +234,11 @@ function Invoke-BasSetParallel {
                     $found = $runOut | Where-Object { $_ -like "*$exp*" }
                     if (-not $found) { $allMatch = $false; break }
                 }
-                if ($allMatch) { $p++ } else { $f++; $details += "$($it.Name): output mismatch" }
+                if ($allMatch) { $p++ } else {
+                    # 可观测性约定: 输出断言失败必须带实际输出
+                    $actual = (Get-Content $stdoutFile -ErrorAction SilentlyContinue | Select-Object -First 20) -join "`n"
+                    $f++; $details += "$($it.Name): output mismatch`nexpected: $($it.Expected -join ', ')`nactual:`n$actual"
+                }
             } else {
                 $p++
             }
@@ -262,7 +276,10 @@ function Test-Compile {
     } else {
         $script:fail++
         Write-Host "FAIL" -ForegroundColor Red
-        if ($Verbose) { Write-Host ($result | Out-String) }
+        # 可观测性约定: FAIL 必须带错误输出, 不依赖 -Verbose
+        $result | Select-Object -Last 25 | ForEach-Object { Write-Host "  $_" }
+        $c3err = Join-Path $OutDir "c3-error.log"
+        if (Test-Path $c3err) { Get-Content $c3err -Tail 25 | ForEach-Object { Write-Host "  $_" } }
     }
 }
 
