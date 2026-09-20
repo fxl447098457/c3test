@@ -246,7 +246,7 @@ jobs:
           if ($machine -ne 0x8664) { throw "VBMAN.dll 不是 x64 (machine=0x$($machine.ToString('X4')))" }
           & "$env:SystemRoot\System32\regsvr32.exe" /s "$dllPath"
           if ($LASTEXITCODE -ne 0) {
-            Write-Host "regsvr32 failed (exit $LASTEXITCODE: 2=LoadLibrary败 3=无导出 4=DllRegisterServer败), probe..."
+            Write-Host "regsvr32 failed (exit ${LASTEXITCODE}: 2=LoadLibrary败 3=无导出 4=DllRegisterServer败), probe..."
             # P/Invoke 探测: 区分缺依赖 / 导出缺失 / DllRegisterServer 返回错误
             Add-Type -TypeDefinition @'
           using System;
