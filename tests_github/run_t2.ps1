@@ -4,7 +4,7 @@
 # 内容两类 (口径 2026-09-20 与用户对齐: 有交互的 GUI 不做自动化, GUI 用例只编译):
 #   1. vbp 控制台工程 7 个: 编译 + 运行 + 输出断言 (无 GUI, 纯 stdout; 串行)
 #      test_vbman 依赖外部 COM (VBMANLIB), 未注册环境自动 SKIP
-#   2. GUI vbp 工程 3 个: 只编译不运行 (窗体验证留给本机 T3/L1-L3 体系)
+#   2. GUI vbp 工程 4 个: 只编译不运行 (窗体验证留给本机 T3/L1-L3 体系)
 # 与 tests\run_tests.ps1 的关系: 用例 2026-09-20 cp 自 tests\ (复制而非引用) ——
 #   方向是 tests_github 自包含、后续废弃 tests\; 本脚本自带清单与引擎。
 # 环境: 环境变量 C3_VCVARSALL 优先 (vcvarsall.bat 完整路径), 缺省 vswhere 自动发现,
@@ -204,7 +204,10 @@ function Test-Vbp {
     if ($LASTEXITCODE -ne 0) {
         $script:fail++
         Write-Host "FAIL (compile)" -ForegroundColor Red
-        if ($Verbose) { Write-Host ($compileResult | Out-String) }
+        # 可观测性约定: FAIL 必须带错误输出, 不依赖 -Verbose
+        $compileResult | Select-Object -Last 25 | ForEach-Object { Write-Host "  $_" }
+        $c3err = Join-Path $OutDir "c3-error.log"
+        if (Test-Path $c3err) { Get-Content $c3err -Tail 25 | ForEach-Object { Write-Host "  $_" } }
         return
     }
 
@@ -213,6 +216,7 @@ function Test-Vbp {
     if (-not (Test-Path $exePath)) {
         $script:fail++
         Write-Host "FAIL (no exe)" -ForegroundColor Red
+        $compileResult | Select-Object -Last 15 | ForEach-Object { Write-Host "  $_" }
         return
     }
 
@@ -231,10 +235,9 @@ function Test-Vbp {
         } else {
             $script:fail++
             Write-Host "FAIL (output mismatch)" -ForegroundColor Red
-            if ($Verbose) {
-                Write-Host "  Expected: $($It.Expected -join ', ')"
-                Write-Host "  Got: $($run.Output -join ' | ')"
-            }
+            # 可观测性约定: 断言失败必须带期望与实际输出
+            Write-Host "  Expected: $($It.Expected -join ', ')"
+            Write-Host "  Got: $($run.Output -join ' | ')"
         }
     } else {
         $script:pass++
@@ -266,9 +269,12 @@ function Add-GuiCompileTest {
 Add-GuiCompileTest "VbQRCodegen" "VbQRCodegen-master\test\Project1.vbp"
 Add-GuiCompileTest "BalloonTooltips" "BalloonTooltips\prjBalloonTooltips.vbp"
 Add-GuiCompileTest "Charts2020" "Charts 2020\Proyecto1.vbp" -Arch "x86"
+# ExtShow: 跨模块窗体默认实例"无参" Show (Fix 146 回归靶, 2026-09-20 vbman C2198):
+# .bas caller 调 Form2.Show, 定义侧签名 (hMDIClient, modal) 后调用侧须补 modal=0
+Add-GuiCompileTest "ExtShow" "ext_show_test\test_ext_show.vbp"
 
-if ($script:guiQueue.Count -ne 3) {
-    Write-Host "[ERROR] GUI 编译清单数量异常: $($script:guiQueue.Count) (应为 3)" -ForegroundColor Red
+if ($script:guiQueue.Count -ne 4) {
+    Write-Host "[ERROR] GUI 编译清单数量异常: $($script:guiQueue.Count) (应为 4)" -ForegroundColor Red
     exit 1
 }
 $missingGui = @($script:guiQueue | Where-Object { -not (Test-Path $_.VbpFile) })
@@ -292,14 +298,17 @@ function Test-GuiCompileOnly {
     } else {
         $script:fail++
         Write-Host "FAIL" -ForegroundColor Red
-        if ($Verbose) { Write-Host ($result | Out-String) }
+        # 可观测性约定: FAIL 必须带错误输出, 不依赖 -Verbose
+        $result | Select-Object -Last 25 | ForEach-Object { Write-Host "  $_" }
+        $c3err = Join-Path $OutDir "c3-error.log"
+        if (Test-Path $c3err) { Get-Content $c3err -Tail 25 | ForEach-Object { Write-Host "  $_" } }
     }
 }
 
 foreach ($it in $script:guiQueue) { Test-GuiCompileOnly $it }
 Write-Host ""
 
-# === 汇总 (vbp 7 + gui 只编译 3 = 10) ===
+# === 汇总 (vbp 7 + gui 只编译 4 = 11) ===
 $total = $script:pass + $script:fail + $script:skip
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host "  T2 Results: PASS=$($script:pass) FAIL=$($script:fail) SKIP=$($script:skip) TOTAL=$total" -ForegroundColor $(if ($script:fail -gt 0) { "Red" } else { "Green" })

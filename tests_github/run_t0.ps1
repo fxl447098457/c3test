@@ -92,7 +92,8 @@ foreach ($c in $cases) {
     } else {
         $script:fail++
         Write-Host "FAIL" -ForegroundColor Red
-        if ($Verbose) { Write-Host ($result | Out-String) }
+        # 可观测性约定: FAIL 必须带错误输出, 不依赖 -Verbose
+        $result | Select-Object -Last 30 | ForEach-Object { Write-Host "  $_" }
     }
 }
 Write-Host ""
@@ -105,10 +106,18 @@ if (-not $VcVars) {
     Write-Host "  [SKIP] smoke (无 MSVC 环境)" -ForegroundColor Yellow
 } else {
     Write-Host -NoNewline "  [SMOKE] compile ... "
-    & $C3Path $smokeSrc --output-dir $OutDir 2>&1 | Out-Null
+    $smokeOut = & $C3Path $smokeSrc --output-dir $OutDir 2>&1
     if ($LASTEXITCODE -ne 0) {
         $script:fail++
         Write-Host "FAIL (compile)" -ForegroundColor Red
+        # 失败时回显 C3 输出尾部与 c3-error.log (cl.exe 错误正文), 否则是黑盒
+        Write-Host "  === C3 output (tail 40) ==="
+        $smokeOut | Select-Object -Last 40 | ForEach-Object { Write-Host "  $_" }
+        $c3Err = Join-Path $OutDir "c3-error.log"
+        if (Test-Path $c3Err) {
+            Write-Host "  === c3-error.log (tail 30) ==="
+            Get-Content $c3Err | Select-Object -Last 30 | ForEach-Object { Write-Host "  $_" }
+        }
     } else {
         $smokeExe = Join-Path $OutDir "smoke.exe"
         if (-not (Test-Path $smokeExe)) {
