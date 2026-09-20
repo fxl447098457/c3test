@@ -362,6 +362,11 @@ jobs:
       - name: 运行 demo + HTTP 环回断言（finally 注销 DLL）
         shell: pwsh
         run: |
+          # 崩溃诊断: C3_CRASH_TRACE=1 让生成的 exe 装未处理异常过滤器,
+          # 崩溃时写 CWD(c3_crash.txt): 异常码 + 触发模块 + 48 帧。
+          # 0xC0000005 不会被 VB6 的 On Error 捕获 (探针文件写不出来), 这是唯一能拿到的现场。
+          $env:C3_CRASH_TRACE = "1"
+          Remove-Item "output\demo\c3_crash.txt" -ErrorAction SilentlyContinue
           $proc = Start-Process -FilePath "output\demo\VBMAN_DEMO.exe" -WorkingDirectory "output\demo" -PassThru
           $ok = $false; $lastErr = ""
           try {
@@ -433,6 +438,15 @@ jobs:
             }
           } finally {
             if ($proc -and -not $proc.HasExited) { $proc.Kill() }
+            # 崩溃现场回显 (Start-Process 子进程继承 $env:C3_CRASH_TRACE)
+            $crash = "output\demo\c3_crash.txt"
+            if (Test-Path $crash) {
+              Write-Host "===== c3_crash.txt (C3_CRASH_TRACE) ====="
+              Get-Content $crash | ForEach-Object { Write-Host $_ }
+              Write-Host "===== end c3_crash.txt ====="
+            } else {
+              Write-Host "[crash trace] no c3_crash.txt (未崩溃, 或崩溃发生在过滤器安装之前)"
+            }
             $unreg = Start-Process -FilePath "$env:SystemRoot\System32\regsvr32.exe" -ArgumentList '/u', '/s', "tests\vbman\dist\DLL\VBMAN.dll" -Wait -PassThru
             Write-Host "regsvr32 /u exit code: $($unreg.ExitCode) (洁净约定: 用完即注销)"
           }
