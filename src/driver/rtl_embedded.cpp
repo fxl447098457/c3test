@@ -76,8 +76,12 @@ std::string SessionManager::create() {
 
     // 2. Create unique session directory
     auto now = std::chrono::steady_clock::now().time_since_epoch().count();
+    // 并行编译竞态防护 (T1 CI 16 worker 实证): 多个 C3 进程同时启动时 steady_clock
+    // 可能同 tick 撞值 -> 共享同一 %TEMP%\C3C 目录互相删对方文件 (D8022 rsp 消失).
+    // 目录名追加当前进程 PID 天然唯一; cleanupOldSessions 的 stoll 只取前缀数字, 兼容.
+    DWORD pid = GetCurrentProcessId();
     std::string root = getSessionRoot();
-    sessionDir_ = root + "\\" + std::to_string(now);
+    sessionDir_ = root + "\\" + std::to_string(now) + "_" + std::to_string(pid);
     rtlDir_ = sessionDir_ + "\\rtl";
 
     std::error_code ec;
