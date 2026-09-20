@@ -22,7 +22,7 @@
 #   RUN-TIMEOUT     : 运行超时被杀 (单侧或双侧)
 #   SKIP-AUX        : 非独立程序 (无 Sub Main 的模块/被 vbp 引用的成员文件)
 #
-# 已知既有差异 (非本次拆分引入, 见 ai/022 与工作日志):
+# 已知既有差异 (非本次拆分引入, 见工作日志):
 #   test_concat_leak / test_concat_stress / test_p613_typelib (C3 侧
 #   LNK2019 vb6_Form_Print), test_sysfunc (vb6_CurDir 签名), winhttp
 #   (vb6_vsink_http_create), test_implements_qi / vbp_project\TestVBP
