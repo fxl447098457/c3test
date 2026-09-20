@@ -114,6 +114,23 @@ enum RtlResourceID {
     // Fix 103: VB6 内建对象 Collection 的 C 实现 (IDispatch + IEnumVARIANT)
     RTL_VB6COM_COLLECTION_C    = 177,
     RTL_VB6COM_COLLECTION_ENUM_C = 178,
+
+    // vb6forms_uc 按族细分 (2026-09-19): 内部头 + 6 族编译单元 + 7 个函数体片段
+    RTL_VB6FORMS_UC_INTERNAL_H             = 179,
+    RTL_UC_HOST_C                          = 180,
+    RTL_UC_HOST_WINDOW_C                   = 181,
+    RTL_UC_HOSTMODEL_C                     = 182,
+    RTL_UC_CONTROLS_C                      = 183,
+    RTL_UC_COLLECTION_C                    = 184,
+    RTL_UC_DEBUG_C                         = 185,
+    RTL_UC_HOST_CREATE_INC                 = 186,
+    RTL_UC_HOSTMODEL_GETPROP_INC           = 187,
+    RTL_UC_HOSTMODEL_SETPROP_INC           = 188,
+    RTL_UC_HOSTMODEL_CALL_INC              = 189,
+    RTL_UC_COLLECTION_API_INC              = 190,
+    RTL_UC_DEBUG_DIB_INC                   = 191,
+    RTL_UC_DEBUG_COMPOSITE_INC             = 192,
+    RTL_UC_PROPBAG_C                       = 193,
 };
 
 // Session directory manager
