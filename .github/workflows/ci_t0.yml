@@ -4,11 +4,10 @@
 # 触发方式: 打 tag github-test-* 推送到 GitHub, 例如:
 #   git tag github-test-001
 #   git push <github 远端> github-test-001
-# 内容: 构建 C3.exe -> tests_github/run_t0.ps1
-#   (C3.exe 版本冒烟 + tests_github/t0_cases/*.bas 全量 --syntax-only + smoke.bas 编译运行断言)
-# 用例与 tests/ 的关系见 tests_github/run_t0.ps1 头注释。
+# 内容: t0 job 构建 C3.exe + run_t0.ps1 门禁; t1 job 复用产物跑 run_t1.ps1 最小回归
+#   (bas 33 并行 + compile 10; 用例 cp 自 tests/, tests_github 自包含, 见两脚本头注释)
 
-name: GitHub Tests T0
+name: GitHub Tests T0+T1
 
 on:
   push:
@@ -17,7 +16,7 @@ on:
 
 jobs:
   t0:
-    name: T0 minimal gate (build + syntax + smoke)
+    name: T0 最小编译门禁（构建 + 语法 + 冒烟）
     runs-on: windows-latest
     timeout-minutes: 30
     defaults:
@@ -27,9 +26,10 @@ jobs:
       # 交给脚本的 vswhere 自动发现 vcvarsall (无需显式设置)
       C3_VCVARSALL: ""
     steps:
-      - uses: actions/checkout@v4
+      - name: 检出代码
+        uses: actions/checkout@v5
 
-      - name: Sanity — required dev tools (MSVC)
+      - name: 环境自检（MSVC 工具链）
         shell: pwsh
         run: |
           $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer\vswhere.exe"
@@ -40,14 +40,14 @@ jobs:
           cmake --version
           ninja --version
 
-      - name: Cache C3.exe build dir (fast path when src/ untouched)
-        uses: actions/cache@v4
+      - name: 缓存构建目录（src/ 未变时走快速路径）
+        uses: actions/cache@v6
         with:
           path: ${{ runner.temp }}/c3build
           key: c3build-${{ hashFiles('src/**', 'CMakeLists.txt', 'cmake/**') }}
           restore-keys: c3build-
 
-      - name: Build C3.exe from source (never ship a vendored binary)
+      - name: 从源码构建 C3.exe（绝不携带预编译二进制）
         shell: pwsh
         run: |
           # MSVC 官方只保证从 vcvarsall 拿到的环境有效; 这里在子进程里导出后注入当前进程。
@@ -71,17 +71,73 @@ jobs:
           & .build\C3.exe --version
           if ($LASTEXITCODE -ne 0) { throw "built C3.exe smoke check failed" }
 
-      - name: Run T0 gate (tests_github/run_t0.ps1)
+      - name: 上传 C3.exe 产物（T1 复用，不重复构建）
+        uses: actions/upload-artifact@v7
+        with:
+          name: c3-exe
+          path: .build/C3.exe
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: 运行 T0 门禁（tests_github/run_t0.ps1）
         shell: pwsh
         run: pwsh -NoProfile -ExecutionPolicy Bypass -File tests_github/run_t0.ps1 -Verbose
 
-      - name: Upload T0 logs
+      - name: 上传 T0 日志
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: t0-logs
           path: |
             output/**/*.out
             output/**/*.err
+          if-no-files-found: warn
+          retention-days: 14
+
+  t1:
+    name: T1 最小回归（编译 + 运行 + 输出断言）
+    needs: t0
+    runs-on: windows-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      # 交给脚本的 vswhere 自动发现 vcvarsall (无需显式设置)
+      C3_VCVARSALL: ""
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v5
+
+      - name: 下载 C3.exe 产物（来自 T0）
+        uses: actions/download-artifact@v8
+        with:
+          name: c3-exe
+          path: .build/
+
+      - name: 校验下载的 C3.exe
+        run: |
+          & .build\C3.exe --version
+          if ($LASTEXITCODE -ne 0) { throw "downloaded C3.exe broken" }
+
+      # T1 自包含 (2026-09-20): 用例 cp 自 tests\ 至 tests_github\t1_cases\, 驱动为
+      # tests_github/run_t1.ps1 (自带清单与引擎) —— 方向是 tests_github 独立、后续废弃 tests\。
+      #   bas 类 = 33 个 (编译+运行+输出断言, -Jobs 20 并行)
+      #   compile 类 = 10 个 (comprehensive x2 + 8 个 frm, 只编译)
+      # vbp/GUI 用例不进 T1 (窗口校验依赖本机环境, 留给后续夜间全量层)
+      - name: 运行 T1 门禁（tests_github/run_t1.ps1：bas 33 并行 + compile 10）
+        shell: pwsh
+        run: pwsh -NoProfile -ExecutionPolicy Bypass -File tests_github/run_t1.ps1 -Jobs 20 -Verbose
+
+      - name: 上传 T1 日志
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: t1-logs
+          path: |
+            output/**/*.out
+            output/**/*.err
+            output/**/*.txt
+            output/**/scores.txt
           if-no-files-found: warn
           retention-days: 14
