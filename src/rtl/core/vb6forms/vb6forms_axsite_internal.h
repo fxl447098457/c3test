@@ -9,9 +9,31 @@
 #ifndef VB6C3_VB6FORMS_AXSITE_INTERNAL_H
 #define VB6C3_VB6FORMS_AXSITE_INTERNAL_H
 
+// 平台与 COM 头：与拆分前 vb6forms_axsite.c 的文件头保持一致（勿删）。
+// 本头的 Vb6AxSite / Vb6PropBag 直接使用 OLE 接口 vtable 类型
+// （IOleClientSiteVtbl / IOleInPlaceSiteVtbl / IOleControlSiteVtbl /
+//  IOleInPlaceSiteWindowlessVtbl / IDispatchVtbl / IPropertyBagVtbl），
+// 这些类型由 <olectl.h> 提供 —— 只 include vb6forms.h 不够（它只带
+// <windows.h>，而 WIN32_LEAN_AND_MEAN 下 windows.h 不含 OLE 头）。
+// 缺了这几行的后果实测过：本头整段解析失败，下游 ax_host.c 级联报
+// C2065 'bag' undeclared / C2223 直到 C1003 error count exceeds 100。
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#include <windows.h>
+#include <shellapi.h>
+#include <commctrl.h>
+#endif
+
 #include "vb6forms.h"
 #include "vb6forms_internal.h"
+
+#include <stdio.h>
+#include <stdarg.h>
+#include <stdlib.h>   /* calloc / free */
 #include <stddef.h>   /* offsetof */
+#include <oleauto.h>  /* SysAllocString, BSTR */
+#include <olectl.h>   /* IPicture / OLE 接口 vtable */
 
 // ===== 原 34~71 行: 站点对象结构 + 接口指针反推宏 =====
 
