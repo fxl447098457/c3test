@@ -85,6 +85,17 @@ jobs:
       - name: 编译 VBMAN.vbp（129 模块, 输出到 dist\DLL 供 demo 相对引用）
         shell: pwsh
         run: |
+          # 每 step 独立进程: 编译前重新注入 MSVC 环境 (x64 链接完全依赖继承环境)
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer\vswhere.exe"
+          $vsPath = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath 2>$null
+          if (-not $vsPath) { throw "No MSVC install" }
+          $vcvars = Join-Path $vsPath "VC\Auxiliary\Build\vcvarsall.bat"
+          $envLines = & cmd /c "call `"$vcvars`" x64 >nul 2>&1 && set" 2>$null
+          foreach ($line in $envLines) {
+            if ($line -match '^([^=]+)=(.*)$') {
+              [Environment]::SetEnvironmentVariable($matches[1], $matches[2], "Process")
+            }
+          }
           New-Item -ItemType Directory -Force -Path tests\vbman\dist\DLL | Out-Null
           & .build\C3.exe tests\vbman\src\VBMAN.vbp --output-dir tests\vbman\dist\DLL -Verbose
           if ($LASTEXITCODE -ne 0) { throw "VBMAN.vbp compile failed" }
@@ -148,6 +159,17 @@ jobs:
       - name: 编译 Helloworld demo（引用 ..\..\..\vbman\dist\DLL\VBMAN.dll）
         shell: pwsh
         run: |
+          # 每 step 独立进程: 编译前重新注入 MSVC 环境
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer\vswhere.exe"
+          $vsPath = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath 2>$null
+          if (-not $vsPath) { throw "No MSVC install" }
+          $vcvars = Join-Path $vsPath "VC\Auxiliary\Build\vcvarsall.bat"
+          $envLines = & cmd /c "call `"$vcvars`" x64 >nul 2>&1 && set" 2>$null
+          foreach ($line in $envLines) {
+            if ($line -match '^([^=]+)=(.*)$') {
+              [Environment]::SetEnvironmentVariable($matches[1], $matches[2], "Process")
+            }
+          }
           New-Item -ItemType Directory -Force -Path output\demo | Out-Null
           & .build\C3.exe tests\vbman-demo\demos\Helloworld\VBMAN_DEMO.vbp --output-dir output\demo -Verbose
           if ($LASTEXITCODE -ne 0) { throw "VBMAN_DEMO.vbp compile failed" }
