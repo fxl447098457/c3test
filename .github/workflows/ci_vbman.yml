@@ -115,6 +115,10 @@ jobs:
             Write-Host "first pass OK"
           }
           Add-Content -Path $env:GITHUB_ENV -Value "VBMAN_COMPILE_EXIT=$LASTEXITCODE"
+          # GH 的 pwsh 包装在脚本收尾自动 exit $LASTEXITCODE, C3 失败会把本 step 染红,
+          # 而后续自定义 if 步骤会被隐式 success() 拦下 -> 显式 exit 0, 真实状态走
+          # GITHUB_ENV 传给自愈步, 编译成败的最终门禁是"校验 VBMAN.dll"步
+          exit 0
 
       - name: 桩自愈（vb6_di_* LNK2019 → 重生成 → 重建 C3 → 重编）
         if: env.VBMAN_COMPILE_EXIT != '0'
