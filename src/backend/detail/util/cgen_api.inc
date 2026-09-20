@@ -24,6 +24,11 @@
     // opt4: 设置"当前模块实际引用的外部模块"集合(小写), 由driver通过AST扫描提供
     void setTrimModules(const std::unordered_set<std::string>& m) { trimModules_ = m; }
 
+    // Fix 142: 设置 VBP 的 Startup= 启动对象 ("Sub Main" 或窗体模块名).
+    // 多模块工程下仅该模块生成进程入口点 (WinMain/main), 其余模块不生成,
+    // 否则每个窗体模块各出一个 WinMain → LNK2005.
+    void setStartupObject(const std::string& s) { startupObject_ = s; }
+
     // Fix 086: 设置工程内全部窗体模块名集合(小写), 由driver预扫描提供.
     // 跨模块窗体默认实例引用 (cLogs 里 FLogs.Visible / Unload FLogs) 需要知道
     // FLogs 是窗体, 才能生成 vb6_form_hwnd_FLogs() 访问器调用而非裸标识符.
@@ -238,3 +243,14 @@
 
     // Fix 112: 工程内 UserControl (.ctl) 模块的设计器描述 (模块名小写 → FrmFile).
     void setDesignerFiles(const std::map<std::string, FrmFile>* m) { designerFiles_ = m; }
+
+    // Fix 143: vbp Object= 的 OCX 文件表 (CLSID 小写去花括号 → ocx 绝对路径).
+    // 供 vb6_OcxHost_Create 免注册 LoadLibrary 实例化第三方 OCX 控件.
+    void setOcxFiles(const std::map<std::string, std::string>* m) { ocxFiles_ = m; }
+
+    // Fix 143b: vbp Object= 的原始引用列表 (CLSID 小写去花括号, ocx 绝对路径).
+    // 控件的实例化 CLSID 是 vbp Object= 里的 GUID (OCX 的 DllGetClassObject 只认它),
+    // 而 typelib 的 coclass GUID 是类型信息 ID, 两者在 VB6 UserControl 上**不同** —
+    // 用 typelib GUID 会实例化出错误/失败的对象. 命中规则:
+    //   typelib CLSID 在列表里 → 用它; 否则列表恰有一条 → 直接用 (单 OCX 工程).
+    void setOcxRefs(const std::vector<std::pair<std::string, std::string>>* v) { ocxRefs_ = v; }

@@ -1027,6 +1027,62 @@ void* vb6_UC_ControlsItem(void* coll, int32_t index) {
     return kids[index - 1];
 }
 
+/* Fix 148: 按 VB6 名查找控件 — 容器 Controls("txtDoc(0)") 语义.
+ * VB6 控件 (如 NewTab 的 TDIMode) 通过 UserControl.Parent.Controls(name, tabIdx)
+ * 拿到宿主窗体上的控件 (用于 SetParent 重新父化到 Tab 页).
+ * name 支持 "Name" 与 "Name(idx)" 两种写法; tabIdx<0 表示不限.
+ * 返回控件 hwnd (未找到 NULL). */
+void* vb6_UC_ControlsItemByName(void* coll, const wchar_t* name, int32_t tabIdx) {
+    (void)tabIdx;
+    if (!name || !*name) return NULL;
+    wchar_t base[VB6_UC_NAME_LEN];
+    int wantIdx = -1;
+    /* 拆 "Name(idx)" */
+    const wchar_t* lp = wcschr(name, L'(');
+    if (lp) {
+        size_t n = (size_t)(lp - name);
+        if (n >= VB6_UC_NAME_LEN) n = VB6_UC_NAME_LEN - 1;
+        wcsncpy(base, name, n); base[n] = 0;
+        wantIdx = _wtoi(lp + 1);
+    } else {
+        wcsncpy(base, name, VB6_UC_NAME_LEN - 1); base[VB6_UC_NAME_LEN - 1] = 0;
+    }
+    HWND formHwnd = (coll && vb6_uc_isControls(coll)) ? (HWND)vb6_uc_controlsForm(coll) : NULL;
+    /* 优先在已注册宿主对象表里找 (名字精确, 不受父窗口层级影响) */
+    for (int32_t i = 0; i < g_hoCount; i++) {
+        vb6_HostObjRec* r = &g_ho[i];
+        if (r->isForm || !r->hwnd) continue;
+        if (formHwnd && GetAncestor((HWND)r->hwnd, GA_ROOT) != formHwnd
+            && !IsChild(formHwnd, (HWND)r->hwnd)) {
+            /* 不在该窗体下 (可能是别的窗体的同名控件) — 跳过 */
+            if (!IsWindow((HWND)r->hwnd)) continue;
+        }
+        if (_wcsicmp(r->name, base) != 0) continue;
+        if (wantIdx >= 0 && r->index != wantIdx) continue;
+        return r->hwnd;
+    }
+    return NULL;
+}
+
+/* Fix 148: 宿主对象属性读取补充 - 供容器/控件对象模型使用 */
+int32_t vb6_HostObj_GetIndex(void* hwnd) {
+    vb6_HostObjRec* r = vb6_ho_find(hwnd);
+    return r ? r->index : -1;
+}
+const wchar_t* vb6_HostObj_GetTypeName(void* hwnd) {
+    vb6_HostObjRec* r = vb6_ho_find(hwnd);
+    return r ? r->typeName : L"";
+}
+const wchar_t* vb6_HostObj_GetName(void* hwnd) {
+    vb6_HostObjRec* r = vb6_ho_find(hwnd);
+    return r ? r->name : L"";
+}
+int32_t vb6_HostObj_Count(void) { return g_hoCount; }
+void* vb6_HostObj_At(int32_t i) {
+    if (i < 0 || i >= g_hoCount) return NULL;
+    return g_ho[i].hwnd;
+}
+
 // 句柄首元素存指针, 必须用 intptr_t —— x64 下按 int32_t 存会截断高 32 位 (同 Collection 枚举器)
 void* vb6_UC_ControlsEnumInit(void* coll) {
     intptr_t* e = (intptr_t*)malloc(sizeof(intptr_t) * 2);
@@ -1647,6 +1703,24 @@ int32_t vb6_Host_Call(void* obj, const wchar_t* name, int32_t argc, void** argv,
         return 1;
     }
     if (_wcsicmp(name, L"SetFocus") == 0) { SetFocus((HWND)obj); return 1; }
+    /* Fix 143: 原生列表控件经 COM 晚绑定调用 AddItem/RemoveItem/Clear.
+     * VB6 里 ComboBox/ListBox 的 AddItem 是方法, cgen 生成
+     * vb6_ComCall(vb6_hwnd_cboThemes, L"AddItem", args, 1), 而 HWND 不是 IDispatch.
+     * 此前这些名字落进 line "未知方法一律空实现" → 调用被静默丢弃:
+     * NewTab 示例 frmMain 的 `cboThemes.AddItem iTheme.Name` 一条都没进来,
+     * 主题下拉框只剩创建时那 1 个空条目. */
+    if (_wcsicmp(name, L"AddItem") == 0 && argc >= 1) {
+        BSTR s = vb6_ho_variantToBstr((vb6_VARIANT*)argv[0]);
+        if (GetEnvironmentVariableW(L"C3_OCX_TRACE", NULL, 0) > 0)
+            fprintf(stderr, "[C3_HOST] AddItem hwnd=%p text='%ls'\n", obj, s ? s : L"(null)");
+        vb6_AddItem(obj, s);
+        return 1;
+    }
+    if (_wcsicmp(name, L"RemoveItem") == 0 && argc >= 1) {
+        vb6_RemoveItem(obj, vb6_ho_variantToLong((vb6_VARIANT*)argv[0]));
+        return 1;
+    }
+    if (_wcsicmp(name, L"Clear") == 0) { vb6_ClearList(obj); return 1; }
     if (_wcsicmp(name, L"ZOrder") == 0 || _wcsicmp(name, L"Move") == 0 ||
         _wcsicmp(name, L"Show") == 0 || _wcsicmp(name, L"Hide") == 0 ||
         _wcsicmp(name, L"Print") == 0 || _wcsicmp(name, L"Line") == 0) {

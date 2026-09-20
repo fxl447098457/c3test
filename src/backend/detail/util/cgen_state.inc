@@ -271,6 +271,11 @@
     // 多模块项目标志 (影响Public函数命名: vb6_<Module>_<Proc> vs vb6_<Proc>)
     bool isMultiModule_ = false;
 
+    // Fix 142: VBP 的 Startup= 启动对象 ("Sub Main" 或窗体模块名).
+    // 多模块工程里每个窗体模块此前都生成 WinMain → LNK2005 多重定义.
+    // 只有启动对象所在模块可以生成进程入口点.
+    std::string startupObject_;
+
     // M22: 外部模块名称集合 (用于跨模块变量解析时判断模块是否已#include)
     std::unordered_set<std::string> externalModules_;
 
@@ -368,6 +373,12 @@
     // czUI fix: UC 事件 attach 行 (文件作用域 thunk/sink 在 prelude 生成)
     std::map<std::string, std::vector<std::string>> ucEventAttach_;
     const std::map<std::string, FrmFile>* designerFiles_ = nullptr;
+
+    // Fix 143: vbp Object= 的 OCX 文件表 (CLSID 小写去花括号 → ocx 绝对路径)
+    const std::map<std::string, std::string>* ocxFiles_ = nullptr;
+
+    // Fix 143b: vbp Object= 原始引用列表 (CLSID 小写去花括号, ocx 绝对路径)
+    const std::vector<std::pair<std::string, std::string>>* ocxRefs_ = nullptr;
     // Fix 112: sub-controls on a form whose type is an in-project UserControl
     std::unordered_map<std::string, std::string> knownUserControlCtrlVars_;
                   // DLL的ProgID前缀

@@ -122,6 +122,18 @@ private:
     std::string projectBaseName_;
     std::string projectPath32_;    // P11.1: VBP Path32 field (output dir)
 
+    // Fix 142: VBP 的 Startup= 启动对象 ("Sub Main" 或窗体模块名).
+    // 决定多模块工程中哪个模块生成进程入口点 (WinMain/main).
+    std::string startupObject_;
+
+    // Fix 143: vbp Object= 的 OCX 文件表 (CLSID 小写去花括号 → ocx 绝对路径).
+    // 第三方 OCX 控件免注册加载用.
+    std::map<std::string, std::string> ocxFiles_;
+
+    // Fix 143b: vbp Object= 原始引用列表 (CLSID 小写去花括号, ocx 绝对路径).
+    // 控件实例化 CLSID 以此为准 (typelib coclass GUID ≠ 实例 CLSID).
+    std::vector<std::pair<std::string, std::string>> ocxRefs_;
+
     // P23-05: VBP version info (for VS_VERSION_INFO resource)
     int verMajor_ = 1;
     int verMinor_ = 0;

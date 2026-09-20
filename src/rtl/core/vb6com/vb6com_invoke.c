@@ -104,6 +104,10 @@ void* vb6_ComCall(void* disp, const wchar_t* methodName,
     HRESULT hr = pDisp->lpVtbl->Invoke(pDisp, dispid, &IID_NULL,
         LOCALE_USER_DEFAULT, DISPATCH_METHOD | DISPATCH_PROPERTYGET, &dp, result, &excep, &argErr);
 
+    if (GetEnvironmentVariableW(L"C3_OCX_TRACE", NULL, 0) > 0)
+        fprintf(stderr, "[C3_COM] Call '%ls' hr=0x%08lX vt=%d\n",
+                methodName, (unsigned long)hr, result ? result->vt : -1);
+
     if (FAILED(hr)) {
         vb6_ComCheckError(hr, &excep, L"ComCall");
         // On Error Resume Next: continue with NULL result
@@ -233,6 +237,10 @@ void* vb6_ComGetProp(void* disp, const wchar_t* propName) {
 
     HRESULT hr = pDisp->lpVtbl->Invoke(pDisp, dispid, &IID_NULL,
         LOCALE_USER_DEFAULT, (DISPATCH_METHOD | DISPATCH_PROPERTYGET), &dp, result, &excep, &argErr);
+
+    if (GetEnvironmentVariableW(L"C3_OCX_TRACE", NULL, 0) > 0)
+        fprintf(stderr, "[C3_COM] GetProp '%ls' hr=0x%08lX vt=%d\n",
+                propName, (unsigned long)hr, result ? result->vt : -1);
 
     if (FAILED(hr)) {
         vb6_ComCheckError(hr, &excep, L"ComGetProp");

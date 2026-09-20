@@ -30,6 +30,7 @@ static void addFormsSources(MsvcDriverOptions& opts, const std::string& rtlDir) 
     opts.sourceFiles.push_back(rtlDir + "/vb6forms_widget_prop.c");
     opts.sourceFiles.push_back(rtlDir + "/vb6forms_shape.c");
     opts.sourceFiles.push_back(rtlDir + "/vb6forms_axsite.c");
+    opts.sourceFiles.push_back(rtlDir + "/vb6forms_axcontainer.c");
     opts.sourceFiles.push_back(rtlDir + "/vb6forms_uc.c");   // Fix 112
 }
 

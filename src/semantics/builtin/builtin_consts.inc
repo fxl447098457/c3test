@@ -41,6 +41,10 @@
     addConst("vbApplicationModal", Vb6Type::Long, 0);
     addConst("vbSystemModal", Vb6Type::Long, 4096);
 
+    // Form.Show 方法窗口模式常量
+    addConst("vbModal", Vb6Type::Long, 1);
+    addConst("vbModeless", Vb6Type::Long, 0);
+
     // 颜色常量
     addConst("vbBlack", Vb6Type::Long, 0);
     addConst("vbRed", Vb6Type::Long, 255);

@@ -202,9 +202,16 @@
                                 idxArg = std::move(lastExpr_);
                                 // Re-emit value because we just clobbered lastExpr_
                                 emitExpr(*node.value);
+                                // Fix 142: RHS 是 COM 属性读 (OCX 控件数组元素属性,
+                                // 如 Label1(c).Caption = NewTab1(c).Theme) — 必须展开
+                                // marker, 否则 lastExpr_ 停在 vb6_CtrlArr_GetAt(...) 的
+                                // HWND 上, .Theme 被静默丢弃 (Caption 拿到句柄数字).
+                                if (isComMarker_) resolveComValue();
                                 valExpr = std::move(lastExpr_);
                             } else {
                                 idxArg = "0";
+                                if (isComMarker_) resolveComValue();
+                                valExpr = std::move(lastExpr_);
                             }
                             c_.emitLine(writeFn + "(vb6_CtrlArr_GetAt(&vb6_arr_" + cIdent(arrId.name) + ", " + idxArg + "), " + valExpr + ");  /* Control Array Property */");
                             return;

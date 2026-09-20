@@ -110,6 +110,9 @@
                     } else {
                         style |= kCbsDrop;
                     }
+                    // Fix 147: 同 cgen_util_ctrl.cpp — ComboBox 下拉列表需要
+                    // WS_VSCROLL 才能滚动查看全部项 (否则只能看到前几项)
+                    style |= kWsVscroll;
                     style |= kWsBorder;
                     // Sorted: CBS_SORT = 0x0100
                     auto sortIt = ctrl.properties.find("Sorted");

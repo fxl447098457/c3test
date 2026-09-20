@@ -22,10 +22,31 @@
                 }
             }
         }
+        // Fix 142: 多模块工程中只有启动对象所在模块能生成进程入口点.
+        // 此前四个窗体模块各生成一个 WinMain → LNK2005 "WinMain 已经在 X.obj 中定义".
+        // 判定:
+        //   Startup="Sub Main"  → 只有含 Public Sub Main 的模块 (hasMain) 生成;
+        //   Startup="frmMain"   → 只有该窗体模块生成 (moduleName 或窗体名匹配);
+        //   无 Startup 信息     → 单模块照旧; 多模块由 driver 兜底取第一个窗体.
+        bool isStartupModule = true;
+        if (isMultiModule_ && !startupObject_.empty()) {
+            std::string so = startupObject_;
+            std::transform(so.begin(), so.end(), so.begin(), ::tolower);
+            if (so == "sub main") {
+                isStartupModule = hasMain;
+            } else {
+                std::string modLower = module.moduleName;
+                std::transform(modLower.begin(), modLower.end(), modLower.begin(), ::tolower);
+                std::string frmLower = frmDesc ? frmDesc->formName : std::string();
+                std::transform(frmLower.begin(), frmLower.end(), frmLower.begin(), ::tolower);
+                isStartupModule = (so == modLower || (!frmLower.empty() && so == frmLower));
+            }
+        }
+
         // 单模块: 允许用第一个Public Sub作为入口
-        // 多模块: 只有Sub Main模块才生成main
-        bool shouldGenMain = hasMain;
-        if (!shouldGenMain && !isMultiModule_) {
+        // 多模块: 只有启动模块 (Sub Main / 启动窗体) 才生成main
+        bool shouldGenMain = hasMain && isStartupModule;
+        if (!shouldGenMain && (!isMultiModule_ || isStartupModule)) {
             // 单模块模式: 无Sub Main时自动找首个Public Sub
     for (auto& decl : module.declarations) {
         if (currentClassIsInterface) continue;  // P6.4: 接口类不生成方法实现体
@@ -50,7 +71,7 @@
                 }
             }
             c_.emitLine("vb6_SetAppInstance((void*)hInst);");
-            c_.emitLine("vb6_form_show_" + cIdent(formName) + "(NULL);  /* Show form modeless, NULL=hMDIClient */");
+            c_.emitLine("vb6_form_show_" + cIdent(formName) + "(NULL, 0);  /* Show form modeless, NULL=hMDIClient */");
                             c_.emitLine("int ret = vb6_MessageLoop();");
                             c_.emitLine("vb6_Exit();");
                             c_.emitLine("return ret;");
@@ -120,7 +141,8 @@
                 c_.emitLine("}");
             }
         } else if (!shouldGenMain) {
-            if (module.isFormModule && frmDesc) {
+            // Fix 142: 非启动模块不生成入口点 (否则多窗体工程 LNK2005)
+            if (isStartupModule && module.isFormModule && frmDesc) {
                 // P7: 空窗体也要生成WinMain, 自动显示窗体
                 std::string formName = frmDesc->formName;
                 c_.emitLine("int WINAPI WinMain(HINSTANCE hInst, HINSTANCE hPrevInst, LPSTR lpCmdLine, int nCmdShow) {");
@@ -136,7 +158,7 @@
                     }
                 }
                 c_.emitLine("vb6_SetAppInstance((void*)hInst);");
-                c_.emitLine("vb6_form_show_" + cIdent(formName) + "(NULL);  /* Show form modeless, NULL=hMDIClient */");
+                c_.emitLine("vb6_form_show_" + cIdent(formName) + "(NULL, 0);  /* Show form modeless, NULL=hMDIClient */");
                 c_.emitLine("int ret = vb6_MessageLoop();");
                 c_.emitLine("vb6_Exit();");
                 c_.emitLine("return ret;");

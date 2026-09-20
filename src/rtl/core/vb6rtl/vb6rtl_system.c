@@ -477,4 +477,17 @@ void* vb6_Forms_Item(int32_t index) {
     return NULL;
 }
 
+/* Fix 146: 当前活动窗体 (VB6 Screen.ActiveForm 语义).
+ * 用途: 给 Show 出来的子窗体指定 Owner. Owner 为 NULL 时模态窗体无法禁用
+ * 调用者 — 主窗体仍可点击, 于是能在模态循环中重入打开第二个模态窗体
+ * (实测: 在 preset themes 模态窗打开时再点子窗体按钮 → 嵌套创建 → 崩溃). */
+void* vb6_Forms_GetActive(void) {
+    for (int i = g_formCount - 1; i >= 0; i--) {
+        if (g_formList[i] && IsWindow(g_formList[i]) && IsWindowVisible(g_formList[i]))
+            return (void*)g_formList[i];
+    }
+    if (g_formCount > 0) return (void*)g_formList[g_formCount - 1];
+    return NULL;
+}
+
 

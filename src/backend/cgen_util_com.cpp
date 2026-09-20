@@ -335,6 +335,11 @@ std::string CCodeGen::resolveComMarkerForPack(const std::string& packFnHint) {
             lastExpr_.find("vb6_ComCallObject(") == 0) {
             return "vb6_VariantFromComResult(" + lastExpr_ + ")";
         }
+        // Fix 143: 裸 marker (实参是 obj.Prop 形态, emitExpr 后 lastExpr_ 停在
+        // 对象表达式上) — 不能把对象本身当值打包, 否则
+        //   cboThemes.AddItem iTheme.Name → AddItem(iTheme)
+        // 列表条目全变成指针值 ("???" 乱码). 按通用路径生成属性读取再转 VARIANT.
+        return "vb6_VariantFromComResult(vb6_ComGetProp(" + objExpr + ", L\"" + memName + "\"))";
     }
     return "";
 }

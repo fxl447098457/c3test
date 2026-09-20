@@ -91,7 +91,12 @@
             // (cLogs: `FLogs.Show` → vb6_FLogs_Show(<cTimeUse.Show 的默认实参>,0)
             // → LNK2019). 转发到窗体自带的 vb6_form_show_<Form>(NULL).
             if (memLower == "show") {
-                lastExpr_ = "vb6_form_show_" + cIdent(objIdent.name) + "(NULL)  /* external form show */";
+                // 转发到窗体自带的 vb6_form_show_<Form>(hMDIClient, modal).
+                // 注意: 此处只交付 callee 对象段 (NULL), 窗口模式实参 (vbModal等)
+                // 由上层 com_bind 拆分追加; 不可带尾注释, 否则 callee 不以 ')' 结尾,
+                // com_bind 的拆包判定 (callee.back()==')') 会失效并生成
+                // "vb6_form_show_x(NULL)(vbModal)" 造成 C2064/C2065.
+                lastExpr_ = "vb6_form_show_" + cIdent(objIdent.name) + "(NULL)";
                 return;
             }
             std::string extReadFn = getControlPropReadFn(FrmControlType::Form, node.memberName);
@@ -208,6 +213,21 @@
                     }
                 }
                 std::string readFn = getControlPropReadFn(itCtrl->second, node.memberName);
+                // Fix 0xx: 控件数组级操作 — VB6 中 `ctrlArr.LBound` / `ctrlArr.UBound`
+                // 返回数组下界/上界 (VB2001 For 循环常用), 不是 OCX 的 COM 属性.
+                // 此前裸标识符落到 COM 派发 → vb6_ComGetIntProp(vb6_hwnd_ctrl, L"LBound"),
+                // 而数组控件没有单个 vb6_hwnd_ 变量 (C2065). 数组级属性走 RTL 的
+                // vb6_CtrlArr_LBound/UBound(&vb6_arr_<Name>) (P7.6).
+                if (readFn.empty() && knownControlArrays_.count(objLower)) {
+                    if (memLower == "lbound") {
+                        lastExpr_ = "vb6_CtrlArr_LBound(&vb6_arr_" + cIdent(objIdent.name) + ")  /* ctrl array LBound */";
+                        return;
+                    }
+                    if (memLower == "ubound") {
+                        lastExpr_ = "vb6_CtrlArr_UBound(&vb6_arr_" + cIdent(objIdent.name) + ")  /* ctrl array UBound */";
+                        return;
+                    }
+                }
                 if (!readFn.empty()) {
                     lastExpr_ = readFn + "(" + makeCtrlHwndArg(objLower, itCtrl->second) + ")  /* ctrl prop read */";
                     return;

@@ -22,6 +22,64 @@ void vb6_Form_SetDispatch(void* hwnd, void* pDispatch);
 void* vb6_Form_ControlsAdd(void* hwnd, const wchar_t* progId, const wchar_t* ctrlName);
 
 // ============================================================
+// Fix 143: 第三方 OCX 控件真宿主 (设计期 Begin NewTabCtl.NewTab 等)
+// ============================================================
+
+// 设计期属性包条目 (生成代码从 .frm 的 Begin <CoClass> 块收集)
+//
+// Fix 149: vt == 9 (VT_DISPATCH) 时表示该属性是**设计期字体**
+// (BeginProperty Font / IconFont(n) 块), 用 font* 字段描述, Read 时经
+// OleCreateFontIndirect 造一个真正的 IFont 返回.
+// 背景: VB6 控件的 ReadProperties 里直接解引用字体对象
+// (ctlNewTab.ctl: `If mTabData(c).IconFontName <> mTabData(c).IconFont.Name`),
+// 返回 E_INVALIDARG → 默认 Nothing → 空指针解引用, 异常从窗口回调逃逸 (0xC000041D).
+typedef struct Vb6OcxProp {
+    const wchar_t* name;    // 属性名, 带下标原样 ("TabCaption(0)")
+    unsigned short  vt;     // VARTYPE: VT_I4(3) / VT_BSTR(8) / VT_BOOL(11) / VT_R4(4) / VT_DISPATCH(9)
+    long            iVal;   // VT_I4 / VT_BOOL (0/-1)
+    float           fVal;   // VT_R4
+    const wchar_t* sVal;    // VT_BSTR
+    // --- vt == 9 (设计期字体) 字段 ---
+    const wchar_t* fontName;   // 字体名 "Tahoma" / "Segoe MDL2 Assets"
+    float          fontSize;   // 字号 (pt)
+    long           fontWeight; // 400 / 700
+    long           fontCharset;
+    long           fontFlags;  // bit0 Italic, bit1 Underline, bit2 Strikethrough
+} Vb6OcxProp;
+
+// 创建并原地激活一个第三方 OCX 控件, 返回其 IDispatch* (失败返回 NULL).
+//   hwndForm  宿主窗体 HWND
+//   clsidStr  "{XXXXXXXX-...}" 形式的 CLSID — 首选 (来自 OCX typelib 的 coclass)
+//   altClsidStr 备用 CLSID (来自 vbp Object=, 可能指向旧版本) — 首参失败时尝试; 可为 NULL
+//   ocxPath   OCX 文件绝对路径 (可 NULL → 仅 CoCreateInstance, 需已注册)
+//   x/y/w/h   像素矩形
+//   ctrlName  控件实例名 (调试/Extender.Name 用)
+//   props     设计期属性表 (经 IPersistPropertyBag::Load 灌入; 可 NULL)
+// 加载顺序: <exe目录>\<文件名> (便携) → ocxPath (绝对) → CoCreateInstance (已注册) → 裸文件名.
+// 激活: SetClientSite → SetExtent → PropertyBag → DoVerb(INPLACEACTIVATE|SHOW) → SetObjectRects.
+void* vb6_OcxHost_Create(void* hwndForm, const wchar_t* clsidStr, const wchar_t* altClsidStr,
+                         const wchar_t* ocxPath, int x, int y, int w, int h,
+                         const wchar_t* ctrlName, const Vb6OcxProp* props, int propCount);
+
+// Fix 143d: 把窗体消息转发给该窗体上的无窗口 OCX 控件 (WM_PAINT/鼠标/键盘).
+// 返回 1 = 有控件处理 (调用方用 *plResult 作为 WndProc 返回值).
+// 生成的窗体 WndProc 默认分支应调用它, 否则 windowless 控件永不绘制.
+int32_t vb6_OcxHost_ForwardMessage(void* hwndForm, unsigned int msg,
+                                   uintptr_t wParam, intptr_t lParam, intptr_t* plResult);
+
+// 让该窗体上的无窗口 OCX 控件重绘 (窗体首次呈现 / 尺寸变化后调用)
+void vb6_OcxHost_InvalidateAll(void* hwndForm);
+
+// Fix 148: VB6 容器对象模型 (Extender / Container / Controls)
+//   UserControl.Extender -> 本对象的 Extender; .Container 返回容器窗体对象;
+//   容器 .Controls 返回控件集合, Controls("Name(idx)", tabIdx) 定位宿主控件.
+void* vb6_AxContainer_CreateExtender(void* hwndForm, const wchar_t* ctrlName);
+
+// Fix 143d: 把窗体上所有 OCX 控件画到给定 DC — 在 WM_PAINT 的
+// BeginPaint/EndPaint 之间调用 (IViewObject::Draw).
+void vb6_OcxHost_PaintAll(void* hwndForm, void* hdc);
+
+// ============================================================
 // Fix 112: in-project UserControl (.ctl) instance host + form/control host object model
 // ============================================================
 

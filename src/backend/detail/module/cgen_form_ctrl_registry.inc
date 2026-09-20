@@ -79,7 +79,7 @@
     h_.emitLine("void* vb6_form_hwnd_" + cIdent(formName) + "(void);");
     c_.emitLine("void* vb6_form_hwnd_" + cIdent(formName) + "(void) { return vb6_hwnd_" + cIdent(formName) + "; }");
     // Fix 093a: 跨模块窗体默认实例 Show — 其他模块 `Frm.Show` 转发到本函数
-    h_.emitLine("void vb6_form_show_" + cIdent(formName) + "(void* hMDIClient);");
+    h_.emitLine("void vb6_form_show_" + cIdent(formName) + "(void* hMDIClient, int modal);");
 
     // 控件句柄变量 (P7.6: 数组控件使用vb6_CtrlArr, 非数组使用void*)
     // Fix 110: 递归到嵌套容器 (Frame 内的 Picture/TextBox), 并为所有设计期
@@ -99,5 +99,5 @@
     // 创建函数前向声明
     h_.emitLine("void " + createFn + "(void* hwnd, void* hInstance);");
     // Show函数前向声明
-    h_.emitLine("void " + showFn + "(void* hMDIClient);");
+    h_.emitLine("void " + showFn + "(void* hMDIClient, int modal);");
     h_.emitBlank();

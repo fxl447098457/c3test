@@ -132,6 +132,7 @@ std::string SessionManager::create() {
         { RTL_VB6FORMS_WIDGET_C,       "vb6forms_widget.c" },
         { RTL_VB6FORMS_SHAPE_C,        "vb6forms_shape.c" },
         { RTL_VB6FORMS_AXSITE_C,       "vb6forms_axsite.c" },
+        { RTL_VB6FORMS_AXCONTAINER_C,  "vb6forms_axcontainer.c" },
         { RTL_VB6FORMS_UC_C,           "vb6forms_uc.c" },
 
         // vb6rtl.h 按家族拆分 (2026-09-17)

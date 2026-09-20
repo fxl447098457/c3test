@@ -101,6 +101,9 @@ CompileResult Driver::compile(const CompileOptions& options) {
                 projectPath32_ = pathToUtf8(project.resolvePath(project.outputPath));
             }
 
+            // Fix 142: 保存 Startup= 启动对象, 供代码生成阶段决定哪个模块生成入口点
+            startupObject_ = project.startupObject;
+
 
             // P6.6: 从VBP工程类型推断是否为ActiveX DLL
             if (!effectiveOpts.isDll && project.projectType == VbpProjectType::ActiveXDLL) {
@@ -147,6 +150,23 @@ CompileResult Driver::compile(const CompileOptions& options) {
             for (const auto& obj : project.objects) {
                 if (!obj.guid.empty()) {
                     effectiveOpts.typelibRefs.push_back(obj.guid);
+                    // Fix 143: 记录 OCX 文件路径, 供运行时 LoadLibrary+DllGetClassObject 免注册实例化第三方 OCX 控件.
+                    // 注意区分两种路径:
+                    //   - typelibRefs(下方) 用【绝对】路径: 那是【编译期】读取 OCX 类型库用, 必须在构建机找得到;
+                    //   - ocxFiles_/ocxRefs_(下方) 烘焙【相对 exe】的路径: 那是【运行期】用, 支持把 OCX 放进
+                    //     exe 旁的子目录 (如 bin\) 后在任意机器免注册加载, 不依赖构建机的绝对目录.
+                    if (!obj.fileName.empty()) {
+                        auto ocxPath = project.resolvePath(obj.fileName);
+                        if (std::filesystem::exists(ocxPath)) {
+                            effectiveOpts.typelibRefs.push_back(pathToUtf8(std::filesystem::absolute(ocxPath)));
+                            std::string g143 = obj.guid;
+                            std::transform(g143.begin(), g143.end(), g143.begin(), ::tolower);
+                            g143.erase(std::remove(g143.begin(), g143.end(), '{'), g143.end());
+                            g143.erase(std::remove(g143.begin(), g143.end(), '}'), g143.end());
+                            ocxFiles_[g143] = obj.fileName;   // 相对 exe 的路径 (如 "bin\\NewTab01.ocx")
+                            ocxRefs_.push_back({g143, obj.fileName});
+                        }
+                    }
                 }
             }
 

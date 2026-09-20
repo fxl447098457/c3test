@@ -130,17 +130,29 @@
                 auto itCtrl = knownFormControls_.find(arrNameLower);
                 if (itCtrl != knownFormControls_.end()) {
                     std::string readFn = getControlPropReadFn(itCtrl->second, node.memberName);
+                    std::string idxArg;
+                    if (!idxExpr.positional.empty()) {
+                        emitExpr(*idxExpr.positional[0]);
+                        idxArg = std::move(lastExpr_);
+                    } else {
+                        idxArg = "0";
+                    }
                     if (!readFn.empty()) {
-                        std::string idxArg;
-                        if (!idxExpr.positional.empty()) {
-                            emitExpr(*idxExpr.positional[0]);
-                            idxArg = std::move(lastExpr_);
-                        } else {
-                            idxArg = "0";
-                        }
                         lastExpr_ = readFn + "(vb6_CtrlArr_GetAt(&vb6_arr_" + cIdent(arrIdent.name) + ", " + idxArg + "))";
                         return;
                     }
+                    // Fix 0xx: OCX 控件数组元素属性 (如 NewTab1(c).Theme) — 内置 readFn
+                    // 匹配不到 (第三方 ActiveX 特有属性), 走 COM 后期绑定读属性. 此前未
+                    // 拦截, `NewTab1(c).Theme` 原样输出到 C → C2224. 数组元素取
+                    // vb6_CtrlArr_GetAt 的 HWND 后按属性读取 (Theme 等返回 BSTR).
+                    std::string ctrlHwndArr = "vb6_CtrlArr_GetAt(&vb6_arr_" + cIdent(arrIdent.name) + ", " + idxArg + ")";
+                    comObjExpr_ = ctrlHwndArr;
+                    comMemberName_ = node.memberName;
+                    isComMarker_ = true;
+                    isEarlyBoundCom_ = false;
+                    earlyBoundSym_ = nullptr;
+                    lastExpr_ = ctrlHwndArr;
+                    return;
                 }
             }
         }
