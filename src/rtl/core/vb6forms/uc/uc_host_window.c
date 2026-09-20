@@ -46,6 +46,44 @@ static LRESULT CALLBACK vb6_uc_wndproc(HWND hwnd, UINT msg, WPARAM wParam, LPARA
                 vb6_uc_pop(&saved);
             }
             return 0;
+        case WM_LBUTTONDOWN:
+        case WM_RBUTTONDOWN:
+        case WM_LBUTTONUP:
+        case WM_RBUTTONUP:
+        case WM_MOUSEMOVE: {
+            // czUI fix: 把宿主窗口收到的鼠标消息转成 UserControl_MouseDown/Up/Move
+            // (此前完全没有转发, 控件无法点击/拖动 — czUI 标题栏拖动、按钮、开关全死)。
+            if (!r || !r->ready || !r->desc || !r->me) break;
+            void (*hook)(void*, int32_t, int32_t, float, float) = NULL;
+            int32_t button = 0;
+            switch (msg) {
+                case WM_LBUTTONDOWN: hook = r->desc->mouseDown;  button = 1; break;
+                case WM_RBUTTONDOWN: hook = r->desc->mouseDown;  button = 2; break;
+                case WM_LBUTTONUP:   hook = r->desc->mouseUp;    button = 1; break;
+                case WM_RBUTTONUP:   hook = r->desc->mouseUp;    button = 2; break;
+                case WM_MOUSEMOVE:   hook = r->desc->mouseMove;  button = 0; break;
+            }
+            if (!hook) break;
+            // 捕获鼠标, 保证按下后拖出窗口仍能收到 UP/MOVE (VB6 隐式行为)
+            if (msg == WM_LBUTTONDOWN || msg == WM_RBUTTONDOWN) SetCapture(hwnd);
+            else if (msg == WM_LBUTTONUP || msg == WM_RBUTTONUP) ReleaseCapture();
+            float sx = (float)(short)LOWORD(lParam);
+            float sy = (float)(short)HIWORD(lParam);
+            // 坐标换算到控件当前 ScaleMode (1=Twip 3=Pixel, 其他按像素)
+            if (vb6_UserControl_ScaleMode == 1) { sx *= 15.0f; sy *= 15.0f; }
+            vb6_UCSaved saved;
+            vb6_uc_push(r, &saved);
+            // czUI fix: 回调只更新状态; 视觉刷新统一走 WM_PAINT 双缓冲
+            // (直接 GetDC 画屏幕与擦除/重绘交错会造成闪烁)
+            vb6_UserControl_hDC = NULL;
+            hook(r->me, button, 0, sx, sy);
+            vb6_uc_pop(&saved);
+            InvalidateRect(hwnd, NULL, FALSE);
+            UpdateWindow(hwnd);
+            return 0;
+        }
+        case WM_CAPTURECHANGED:
+            break;
         case WM_PAINT: {
             if (!r || !r->ready) break;
             if (!r->desc || !r->desc->paint) break;
@@ -56,7 +94,7 @@ static LRESULT CALLBACK vb6_uc_wndproc(HWND hwnd, UINT msg, WPARAM wParam, LPARA
             const char* dumpDir113h = getenv("C3_UC_DUMPDIR");
             vb6_UCDib dib113h;
             int useDib113h = 0;
-            if (dumpDir113h && *dumpDir113h) {
+            if (1) { /* czUI fix: 始终离屏双缓冲, 一次 BitBlt 上屏 (消闪烁) */
                 RECT crc;
                 GetClientRect(hwnd, &crc);
                 int cw113h = (int)(crc.right - crc.left);
@@ -65,7 +103,10 @@ static LRESULT CALLBACK vb6_uc_wndproc(HWND hwnd, UINT msg, WPARAM wParam, LPARA
                     vb6_uc_dibCreate(&dib113h, hdc, cw113h, ch113h);
                     if (dib113h.memDC && dib113h.bits) {
                         RECT full113h = { 0, 0, cw113h, ch113h };
-                        HBRUSH wb113h = CreateSolidBrush(RGB(255, 255, 255));
+                        COLORREF crefFill = (vb6_Ambient_BackColor & 0x80000000L)
+                            ? GetSysColor(vb6_Ambient_BackColor & 0xFF)
+                            : (COLORREF)vb6_Ambient_BackColor;
+                        HBRUSH wb113h = CreateSolidBrush(crefFill);
                         FillRect(dib113h.memDC, &full113h, wb113h);
                         DeleteObject(wb113h);
                         useDib113h = 1;
@@ -82,13 +123,17 @@ static LRESULT CALLBACK vb6_uc_wndproc(HWND hwnd, UINT msg, WPARAM wParam, LPARA
             if (useDib113h) {
                 BitBlt(hdc, 0, 0, dib113h.w, dib113h.h, dib113h.memDC, 0, 0, SRCCOPY);
                 char path113h[1024];
+                const int doDump = (dumpDir113h && *dumpDir113h);
+                (void)doDump;
                 _snprintf(path113h, sizeof(path113h), "%s\\%s_%d_%p.bmp", dumpDir113h,
                           r->desc->typeName, (int)++g_uc_dumpSeq, hwnd);
                 path113h[sizeof(path113h) - 1] = '\0';
-                vb6_uc_dibSaveBmp(&dib113h, path113h);
+                if (doDump) {
+                    vb6_uc_dibSaveBmp(&dib113h, path113h);
+                    // Fix 123: 同步输出整窗合成图 (含 z 序/相对位置)
+                    vb6_uc_dumpFormComposite((HWND)GetAncestor(hwnd, GA_ROOT), dumpDir113h);
+                }
                 vb6_uc_dibDestroy(&dib113h);
-                // Fix 123: 同步输出整窗合成图 (含 z 序/相对位置)
-                vb6_uc_dumpFormComposite((HWND)GetAncestor(hwnd, GA_ROOT), dumpDir113h);
             }
             r->hdc = NULL;
             EndPaint(hwnd, &ps);
@@ -96,13 +141,37 @@ static LRESULT CALLBACK vb6_uc_wndproc(HWND hwnd, UINT msg, WPARAM wParam, LPARA
         }
         case WM_ERASEBKGND:
             if (r && r->ready) {
-                // 用控件 BackColor 填充, 避免闪烁/黑底
+                // 用容器底色填充, 避免重绘闪烁 (固定白色会在深色 UI 上闪白)
                 RECT rc; GetClientRect(hwnd, &rc);
-                HBRUSH b = CreateSolidBrush(RGB(255, 255, 255));
+                COLORREF cref = (vb6_Ambient_BackColor & 0x80000000L)
+                                    ? GetSysColor(vb6_Ambient_BackColor & 0xFF)
+                                    : (COLORREF)vb6_Ambient_BackColor;
+                HBRUSH b = CreateSolidBrush(cref);
                 FillRect((HDC)wParam, &rc, b);
                 DeleteObject(b);
             }
             return 1;
+        case WM_CTLCOLOREDIT:
+        case WM_CTLCOLORSTATIC: {
+            // czUI fix: 设计器子控件 (txtEmbed 等) 的 BackColor/ForeColor 落在
+            // VB6_BackColor/ForeColor 窗口属性上 (vb6_SetControlBackColor), 这里
+            // 应用之 — 否则深色 UI 上子编辑框是默认白底黑字。
+            HWND child = (HWND)lParam;
+            if (!child) break;
+            HDC hdc = (HDC)wParam;
+            COLORREF fg = (COLORREF)vb6_GetControlForeColor((void*)child);
+            COLORREF bg = (COLORREF)vb6_GetControlBackColor((void*)child);
+            if (bg & 0x80000000L) bg = GetSysColor(bg & 0xFF);
+            SetTextColor(hdc, fg);
+            SetBkColor(hdc, bg);
+            // 刷子缓存进窗口属性, 避免每条消息泄漏 GDI 句柄
+            HBRUSH br = (HBRUSH)GetPropW(child, L"VB6_BgBrush");
+            if (!br) {
+                br = CreateSolidBrush(bg);
+                SetPropW(child, L"VB6_BgBrush", (HANDLE)br);
+            }
+            return (LRESULT)br;
+        }
         case WM_DESTROY:
             if (r && r->desc && r->desc->terminate) {
                 vb6_UCSaved saved;
@@ -132,6 +201,10 @@ void vb6_uc_gdiplusInit(void) {
     static int done = 0;
     if (done) return;
     done = 1;
+    // czUI fix: 环境字体默认名 — Bag 重放 ReadProperty("Font", Ambient.Font)
+    // 会把此对象设为控件字体; Name=NULL 时所有 GDI+ 文字静默消失
+    if (!g_vb6_UserControl_FontObj.Name)
+        g_vb6_UserControl_FontObj.Name = SysAllocString(L"Segoe UI");
     HMODULE mod = LoadLibraryA("gdiplus.dll");
     if (!mod) return;
     long (__stdcall *pStartup)(ULONG_PTR*, const void*, void*) =
@@ -149,7 +222,7 @@ void vb6_uc_registerClass(HINSTANCE hInst) {
     if (done) return;
     WNDCLASSW wc;
     memset(&wc, 0, sizeof(wc));
-    wc.style = CS_HREDRAW | CS_VREDRAW;
+    wc.style = CS_HREDRAW | CS_VREDRAW | CS_DBLCLKS;  // czUI fix: UserControl_DblClick 需要
     wc.lpfnWndProc = vb6_uc_wndproc;
     wc.hInstance = hInst;
     wc.hCursor = LoadCursorW(NULL, (LPCWSTR)IDC_ARROW);

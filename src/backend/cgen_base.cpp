@@ -77,6 +77,48 @@ static void fixupAmbientFontMemberAccess(std::string& line) {
     }
 }
 
+// Fix 133u: UserControl.Parent 链改写 (czUI.ctl).
+// VB6 UserControl.Parent 是容器窗体对象; cgen 按 "对象成员" 生成
+//   `vb6_UserControl_Parent.hWnd` / `.Move(...)` / `.Icon.Handle` /
+//   `(void*)vb6_UserControl_Parent` — RTL 不提供该结构 (窗体运行时对象),
+//   而是提供语义等价的函数. 这里在写出前把生成文本改写为函数调用:
+//    .Icon.Handle  → vb6_UC_ParentIconHandle()
+//    .hWnd         → vb6_UC_ParentHwnd()
+//    .Move(        → vb6_UC_ParentMove(
+//    其余裸符号   → vb6_UC_ParentObject()  (With 绑定 / 对象引用)
+// 顺序: 先长匹配 (.Icon.Handle) 再短 (.hWnd), 最后剩余裸引用.
+static void fixupUserControlParentChain(std::string& line) {
+    static const char kBase[] = "vb6_UserControl_Parent";
+    const size_t kLen = sizeof(kBase) - 1;
+    bool hit = false;
+    size_t pos = 0;
+    while ((pos = line.find(kBase, pos)) != std::string::npos) {
+        size_t after = pos + kLen;
+        bool longer = (after < line.size()) &&
+                      (std::isalnum(static_cast<unsigned char>(line[after])) || line[after] == '_');
+        bool prevOk = (pos == 0) ||
+                      !(std::isalnum(static_cast<unsigned char>(line[pos - 1])) || line[pos - 1] == '_');
+        if (longer || !prevOk) { pos = after; continue; }
+        if (line.compare(after, 12, ".Icon.Handle") == 0) {
+            line.replace(pos, kLen + 12, "vb6_UC_ParentIconHandle()");
+            pos += 27;
+        } else if (line.compare(after, 5, ".hWnd") == 0
+                   && (after + 5 >= line.size() ||
+                       !(line[after + 5] == '.'))) {
+            line.replace(pos, kLen + 5, "vb6_UC_ParentHwnd()");
+            pos += 20;
+        } else if (line.compare(after, 6, ".Move(") == 0) {
+            line.replace(pos, kLen + 6, "vb6_UC_ParentMove(");
+            pos += 20;
+        } else {
+            line.replace(pos, kLen, "vb6_UC_ParentObject()");
+            pos += 22;
+        }
+        hit = true;
+    }
+    (void)hit;
+}
+
 void CodeEmitter::emitLine(const std::string& line) {
     flushPending();
     for (int i = 0; i < indentLevel_; i++) {
@@ -86,6 +128,11 @@ void CodeEmitter::emitLine(const std::string& line) {
         // Fix 109: 仅在该标识符出现时做一次修正 (见上).
         std::string fixed = line;
         fixupAmbientFontMemberAccess(fixed);
+        oss_ << fixed << "\n";
+    } else if (line.find("vb6_UserControl_Parent") != std::string::npos) {
+        // Fix 133u: UserControl.Parent 链改写 (见上).
+        std::string fixed = line;
+        fixupUserControlParentChain(fixed);
         oss_ << fixed << "\n";
     } else {
         oss_ << line << "\n";

@@ -7,6 +7,17 @@
     if (!desc) return NULL;
     if (g_uc_recCount >= VB6_UC_MAX_INST) return NULL;
 
+    // czUI fix: Ambient.BackColor 应反映容器窗体的 BackColor (VB6 语义)。
+    // 控件 RedrawControl 用它做底色填充, 取不到就落到 BTNFACE 灰/系统色,
+    // 深色窗体上圆角周围会出现灰圈。
+    {
+        char parentClass[128] = {0};
+        if (hParent && GetClassNameA((HWND)hParent, parentClass, (int)sizeof(parentClass) - 1) > 0) {
+            int bg = vb6_Forms_QueryClassBg(parentClass);
+            if (bg >= 0) vb6_Ambient_BackColor = bg;
+        }
+    }
+
     vb6_uc_registerClass((HINSTANCE)hInstance);
     vb6_uc_gdiplusInit();
 

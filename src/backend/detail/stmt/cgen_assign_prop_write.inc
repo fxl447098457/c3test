@@ -84,6 +84,20 @@
                         propLetSym->access, sourceModule);
                     emitExpr(*maExpr.object);
                     std::string objExpr = std::move(lastExpr_);
+                    // Fix 133y: 目标是工程内 UserControl 子控件 (czUI:czLabel3.Caption,
+                    // ucChartBar1.ChartStyle 等)。对象在 knownUserControlCtrlVars_
+                    // (Fix 112 已登记), 裸 emitExpr 输出控件名标识符 (无声明) →
+                    // C2065。this 应取宿主窗口的 UserControl 实例 (与读取路径
+                    // cgen_expr_member_form_builtin.inc 一致)。
+                    auto itUC133y = knownUserControlCtrlVars_.find(objLower);
+                    if (itUC133y != knownUserControlCtrlVars_.end()) {
+                        auto itCtrl133y = knownFormControls_.find(objLower);
+                        std::string hwndArg133y = (itCtrl133y != knownFormControls_.end())
+                            ? makeCtrlHwndArg(objLower, itCtrl133y->second)
+                            : ("vb6_hwnd_" + cIdent(objId.name));
+                        objExpr = "(vb6_cls_" + cIdent(itUC133y->second)
+                                + "*)vb6_UC_InstanceOf(" + hwndArg133y + ")";
+                    }
                     emitExpr(*node.value);
                     std::string valExpr = std::move(lastExpr_);
                     // Fix 091n: 按 Let/Set **写方向**参数表适配值实参 —

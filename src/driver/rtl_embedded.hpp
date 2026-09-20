@@ -130,6 +130,7 @@ enum RtlResourceID {
     RTL_UC_COLLECTION_API_INC              = 190,
     RTL_UC_DEBUG_DIB_INC                   = 191,
     RTL_UC_DEBUG_COMPOSITE_INC             = 192,
+    RTL_UC_PROPBAG_C                       = 193,
 };
 
 // Session directory manager

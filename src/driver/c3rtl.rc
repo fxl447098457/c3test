@@ -2,7 +2,7 @@
 // P10 (restored): RTL is embedded as .c/.h SOURCE and compiled by MSVC
 // at user-program build time. The P11.3 pre-compiled .lib scheme was
 // reverted: c3 is open source, no source protection needed.
-// 25 .h headers + 55 .c sources + 13 .inc fragments (all arch-neutral) = 93 resources.
+// 25 .h headers + 56 .c sources + 13 .inc fragments (all arch-neutral) = 94 resources.
 // 2026-09-17 源文件按家族分目录: core/vb6rtl|vb6com|vb6comserver|vb6forms|di/,
 // 解包后仍是平铺目录（RTL 内部 include 一律 basename，不受源目录影响）。
 // Runtime: FindResource/LoadResource extract to temp session directory
@@ -129,3 +129,5 @@
 190 RCDATA "../rtl/core/vb6forms/uc/detail/uc_collection_api.inc"
 191 RCDATA "../rtl/core/vb6forms/uc/detail/uc_debug_dib.inc"
 192 RCDATA "../rtl/core/vb6forms/uc/detail/uc_debug_composite.inc"
+// Fix 120-141 移植 (2026-09-20): PropertyBag (IDispatch) 编译单元
+193 RCDATA "../rtl/core/vb6forms/uc/uc_propbag.c"

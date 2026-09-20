@@ -38,6 +38,8 @@ static void addFormsSources(MsvcDriverOptions& opts, const std::string& rtlDir) 
     opts.sourceFiles.push_back(rtlDir + "/uc_controls.c");
     opts.sourceFiles.push_back(rtlDir + "/uc_collection.c");
     opts.sourceFiles.push_back(rtlDir + "/uc_debug.c");
+    // Fix 120-141 移植 (2026-09-20): PropertyBag (IDispatch) 编译单元
+    opts.sourceFiles.push_back(rtlDir + "/uc_propbag.c");
 }
 
 bool Driver::runLinker(const CompileOptions& options, const std::string& outputDir,

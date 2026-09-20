@@ -505,7 +505,10 @@ void vb6_LoadForm(void* hwnd) {
 #include "vb6forms.h"
 
 // --- Font object instance (ambient font; source for control Font when unset) ---
-vb6_ComIface_Font g_vb6_UserControl_FontObj = { NULL, 8.0f, 0, 0, 0, 0, 400, 0 };
+// czUI fix: 环境字体必须有有效 Name — Bag 重放路径 ReadProperty("Font",
+// Ambient.Font) 会把此对象设为控件字体; Name=NULL 时 GdipCreateFontFamily
+// 失败 → 所有 GDI+ 文字静默消失 (Charts2020 图表标题/百分比实测)
+vb6_ComIface_Font g_vb6_UserControl_FontObj = { NULL, 8.25f, 0, 0, 0, 0, 400, 0 };
 
 // --- UserControl host state ---
 int32_t vb6_UserControl_ScaleWidth  = 0;
@@ -530,6 +533,13 @@ int32_t vb6_Ambient_BackColor  = 0x8000000F; // BTNFACE (VB6 default)
 // --- Extender ---
 int32_t vb6_Extender_Left = 0;
 int32_t vb6_Extender_Top  = 0;
+
+// --- Fix 133u: Extender.Visible/Height (czUI.ctl) ---
+struct vb6_UserControl_Extender_Type vb6_UserControl_Extender = { -1, 0 };
+
+// --- Fix 133u: UserControl.hWnd / AutoRedraw (czUI.ctl) ---
+void*   vb6_UserControl_hWnd = NULL;
+int16_t vb6_UserControl_AutoRedraw = 1;
 
 // --- PropertyPage ---
 void*   vb6_PropertyPage_hwnd        = NULL;

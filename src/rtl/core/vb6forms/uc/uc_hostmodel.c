@@ -41,8 +41,16 @@ vb6_HostObjRec* vb6_ho_findWindow(const void* hwnd) {
     return vb6_ho_find(hwnd);
 }
 
+typedef struct Vb6WrapPair { void* wrap; void* target; } Vb6WrapPair;
+static Vb6WrapPair* g_uc_wraps = NULL;
+static int g_uc_wrapCount = 0, g_uc_wrapCap = 0;
+
 int32_t vb6_Host_IsHostObject(void* obj) {
     if (!obj) return 0;
+    {   // czUI fix: 包装器视为宿主对象 (含内部透明解包)
+        for (int i = 0; i < g_uc_wrapCount; i++)
+            if (g_uc_wraps[i].wrap == obj) return 1;
+    }
     // 真实窗口 (窗体/标准控件) HWND: IsWindow 仅查句柄表, 不解引用, 对任意指针安全
     if (IsWindow((HWND)obj)) return 1;
     if (vb6_uc_isControls(obj)) return 1;
@@ -250,6 +258,136 @@ void vb6_Host_ClearVariant(void* v) {
     if (p->vt == vb6_vtBSTR && p->bstrVal) { SysFreeString(p->bstrVal); }
     memset(p, 0, sizeof(*p));
     p->vt = vb6_vtEmpty;
+}
+
+// ============================================================
+// czUI fix: 宿主对象的 IDispatch 包装 — vb6_ComPackObject 对宿主对象
+// (HWND/UC 实例/集合/字体) 直接走 ((IDispatch*)obj)->lpVtbl->AddRef,
+// 会把结构体首字段当 vtable → AV (Charts2020 ClsResizer 实测)。
+// 包装成真实 COM 对象: AddRef/Release 引用计数安全, 晚绑定转发到
+// vb6_Host_Call/GetProp/SetProp。真实 COM/ActiveX 对象不走包装
+// (vb6_Host_IsHostObject 排除), 仍按原 AddRef/Release。
+// ============================================================
+typedef struct Vb6HostWrap {
+    IDispatch disp;
+    ULONG refs;
+    void* target;
+    wchar_t names[24][64];
+    int nameCount;
+} Vb6HostWrap;
+
+static HRESULT STDMETHODCALLTYPE HW_QI(IDispatch* self, REFIID riid, void** out) {
+    if (!out) return E_POINTER;
+    *out = NULL;
+    if (IsEqualIID(riid, &IID_IUnknown) || IsEqualIID(riid, &IID_IDispatch)) {
+        *out = self; self->lpVtbl->AddRef(self); return S_OK;
+    }
+    return E_NOINTERFACE;
+}
+static ULONG STDMETHODCALLTYPE HW_AddRef(IDispatch* self) {
+    Vb6HostWrap* w = (Vb6HostWrap*)self; return ++w->refs;
+}
+static ULONG STDMETHODCALLTYPE HW_Release(IDispatch* self) {
+    Vb6HostWrap* w = (Vb6HostWrap*)self;
+    ULONG r = --w->refs;
+    if (r == 0) free(w);
+    return r;
+}
+static HRESULT STDMETHODCALLTYPE HW_GetTypeInfoCount(IDispatch* self, UINT* n) {
+    if (n) *n = 0; return S_OK;
+}
+static HRESULT STDMETHODCALLTYPE HW_GetTypeInfo(IDispatch* self, UINT i, LCID l, ITypeInfo** t) {
+    (void)t; return E_NOTIMPL;
+}
+static HRESULT STDMETHODCALLTYPE HW_GetIDsOfNames(IDispatch* self, REFIID riid,
+        LPOLESTR* names, UINT cNames, LCID lcid, DISPID* out) {
+    (void)riid; (void)lcid;
+    Vb6HostWrap* w = (Vb6HostWrap*)self;
+    if (!out || !cNames || !names || !names[0]) return E_POINTER;
+    for (UINT k = 0; k < cNames; k++) {
+        int found = -1;
+        for (int i = 0; i < w->nameCount; i++)
+            if (_wcsicmp(w->names[i], names[k]) == 0) { found = i; break; }
+        if (found < 0 && w->nameCount < 24) {
+            _snwprintf(w->names[w->nameCount], 63, L"%s", names[k]);
+            found = w->nameCount++;
+        }
+        if (found < 0) return DISP_E_UNKNOWNNAME;
+        out[k] = found + 1;
+    }
+    return S_OK;
+}
+static HRESULT STDMETHODCALLTYPE HW_Invoke(IDispatch* self, DISPID id, REFIID riid, LCID lcid,
+        WORD flags, DISPPARAMS* pd, VARIANT* result, EXCEPINFO* ei, UINT* argErr) {
+    (void)riid; (void)lcid; (void)ei; (void)argErr;
+    Vb6HostWrap* w = (Vb6HostWrap*)self;
+    int idx = (int)id - 1;
+    if (idx < 0 || idx >= w->nameCount || !pd) return DISP_E_MEMBERNOTFOUND;
+    wchar_t* name = w->names[idx];
+    if (flags & (DISPATCH_PROPERTYPUT | DISPATCH_PROPERTYPUTREF)) {
+        if (pd->cArgs < 1) return DISP_E_BADPARAMCOUNT;
+        vb6_VARIANT hv; vb6_ho_setVariantEmpty(&hv);
+        vb6_Host_FromWinVariant(&pd->rgvarg[0], &hv);
+        vb6_Host_SetProp(w->target, name, &hv);
+        return S_OK;
+    }
+    // 方法/属性读取: DISPPARAMS 逆序 → RTL 正序变体数组
+    vb6_VARIANT* hargs = NULL;
+    if (pd->cArgs > 0) {
+        hargs = (vb6_VARIANT*)calloc((size_t)pd->cArgs, sizeof(vb6_VARIANT));
+        for (int i = 0; i < pd->cArgs; i++)
+            vb6_Host_FromWinVariant(&pd->rgvarg[pd->cArgs - 1 - i], &hargs[i]);
+    }
+    vb6_VARIANT out; vb6_ho_setVariantEmpty(&out);
+    int handled = vb6_Host_Call(w->target, name, pd->cArgs, (void**)hargs, &out);
+    if (!handled && (flags & DISPATCH_PROPERTYGET))
+        handled = vb6_Host_GetProp(w->target, name, &out);
+    if (hargs) {
+        for (int i = 0; i < pd->cArgs; i++) vb6_Host_ClearVariant(&hargs[i]);
+        free(hargs);
+    }
+    if (handled && result) {
+        VariantInit(result);
+        vb6_Host_ToWinVariant(&out, result);
+    }
+    vb6_Host_ClearVariant(&out);
+    return S_OK;
+}
+
+static IDispatchVtbl g_vb6HostWrapVtbl = {
+    HW_QI, HW_AddRef, HW_Release,
+    HW_GetTypeInfoCount, HW_GetTypeInfo, HW_GetIDsOfNames, HW_Invoke
+};
+
+void* vb6_UC_WrapHostObject(void* obj) {
+    Vb6HostWrap* w = (Vb6HostWrap*)calloc(1, sizeof(Vb6HostWrap));
+    if (!w) return NULL;
+    w->disp.lpVtbl = &g_vb6HostWrapVtbl;
+    w->refs = 1;
+    w->target = obj;
+    // 注册包装器 → 原对象 映射, 供 IsHostObject/Host_* 解包 (透明性)
+    // Fix 126: 容量不足(或尚未分配)时扩容 —— 旧逻辑 `g_uc_wrapCount < g_uc_wrapCap`
+    // 在 g_uc_wrapCap==0 时恒为 false, 导致 g_uc_wraps 永不分配、任何宿主对象都
+    // 不被登记, vb6_UC_UnwrapHost 永远返回包装器本身而非原对象 → 字体/集合经
+    // ReadProperty 默认路径取回后变成 Vb6HostWrap 而非真实结构体, 图表标题/百分比
+    // 文字全部缺失 (Charts 2020 实测)。改为"满则扩容"。
+    if (g_uc_wrapCount >= g_uc_wrapCap) {
+        int32_t ncap = g_uc_wrapCap ? g_uc_wrapCap * 2 : 32;
+        Vb6WrapPair* ng = (Vb6WrapPair*)realloc(g_uc_wraps, sizeof(Vb6WrapPair) * ncap);
+        if (ng) { g_uc_wraps = ng; g_uc_wrapCap = ncap; }
+    }
+    if (g_uc_wraps) {
+        g_uc_wraps[g_uc_wrapCount].wrap = w;
+        g_uc_wraps[g_uc_wrapCount].target = obj;
+        g_uc_wrapCount++;
+    }
+    return w;
+}
+
+void* vb6_UC_UnwrapHost(void* obj) {
+    for (int i = 0; i < g_uc_wrapCount; i++)
+        if (g_uc_wraps[i].wrap == obj) return g_uc_wraps[i].target;
+    return obj;
 }
 
 #ifdef __cplusplus

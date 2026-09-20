@@ -294,6 +294,7 @@ set(C3RTL_EMBEDDED_FILES
     ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6forms/uc/uc_controls.c
     ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6forms/uc/uc_collection.c
     ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6forms/uc/uc_debug.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6forms/uc/uc_propbag.c
     ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6forms/uc/detail/uc_host_create.inc
     ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6forms/uc/detail/uc_hostmodel_getprop.inc
     ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6forms/uc/detail/uc_hostmodel_setprop.inc

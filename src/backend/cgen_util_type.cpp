@@ -32,6 +32,7 @@ Vb6Type CCodeGen::inferExprType(Expr& expr) const {
             std::string lower = id.name;
             std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
             if (knownBstrVars_.count(lower)) return Vb6Type::String;
+            if (knownSingleVars_.count(lower)) return Vb6Type::Single;
             if (knownDoubleVars_.count(lower)) return Vb6Type::Double;
             if (knownLongVars_.count(lower)) return Vb6Type::Long;
             if (knownLongPtrVars_.count(lower)) return Vb6Type::LongPtr;
@@ -110,6 +111,25 @@ Vb6Type CCodeGen::inferExprType(Expr& expr) const {
                     if (memLower == "description" || memLower == "source") return Vb6Type::String;
                     if (memLower == "helppath" || memLower == "helpfile" || memLower == "helpcontext") return Vb6Type::String;
                     if (memLower == "lastdllerror") return Vb6Type::Long;
+                }
+            }
+            // czUI fix: 宿主伪对象成员类型 — UserControl.ScaleWidth/Height 等
+            // 是 RTL int32_t 全局 (vb6rtl_userctl.h)。此前推断为 Variant,
+            // 比较时被取地址当 vb6_VARIANT* 读垃圾值 (MouseUp 里
+            // X < ScaleWidth 恒假 → RaiseEvent Click 永不触发 → Connect 无响应)。
+            if (ma.object && ma.object->kind == ASTNodeKind::IdentifierExpr) {
+                auto& objIdCz = static_cast<IdentifierExpr&>(*ma.object);
+                std::string objLowerCz = objIdCz.name;
+                std::transform(objLowerCz.begin(), objLowerCz.end(), objLowerCz.begin(), ::tolower);
+                if (objLowerCz == "usercontrol" || objLowerCz == "propertypage") {
+                    std::string memLowerCz = ma.memberName;
+                    std::transform(memLowerCz.begin(), memLowerCz.end(), memLowerCz.begin(), ::tolower);
+                    if (memLowerCz == "scalewidth" || memLowerCz == "scaleheight"
+                        || memLowerCz == "left" || memLowerCz == "top"
+                        || memLowerCz == "width" || memLowerCz == "height"
+                        || memLowerCz == "enabled") {
+                        return Vb6Type::Long;
+                    }
                 }
             }
             // Fix 081i: UDT字段访问 — 先查找UDT成员类型，避免lookupModule
@@ -237,7 +257,7 @@ bool CCodeGen::isDefinitelyVariantExpr(Expr& expr, bool* isArrOut) const {
             // Fix 049b: 如果已知为非 Variant 具体类型 (BSTR/Long/Double),
             // 不应回退到符号表查找 (可能命中其他模块的同名 Variant 符号)
             if (knownBstrVars_.count(lower) || knownLongVars_.count(lower)
-                || knownDoubleVars_.count(lower)) {
+                || knownDoubleVars_.count(lower) || knownSingleVars_.count(lower)) {
                 return false;
             }
             // 符号表查询
@@ -517,18 +537,31 @@ std::string CCodeGen::rewriteByteArrayValue(const std::string& value) const {
     if (value.find("vb6_StrConvToByteArray(") != std::string::npos ||
         value.find("vb6_StringToByteArray(") != std::string::npos ||
         value.compare(0, 14, "vb6_SafeArray") == 0 ||
+        value.compare(0, 22, "vb6_VariantToByteArray") == 0 ||
         value.compare(0, 25, "vb6_VariantToSafeArray1D") == 0) {
         return value;
     }
     // 字符串/BSTR 表达式 → 复制为字节数组 (原始 UTF-16LE 字节)
+    // Fix 140: 补充 Ambient.DisplayName (BSTR) — LabelPlus.ctl UserControl_InitProperties
+    // 里 `m_Caption = Ambient.DisplayName` 生成 `me->m_Caption = vb6_Ambient_DisplayName`,
+    // 是 BSTR 赋给 Byte() 字段, 需同样改写成字节数组.
     bool isBstrExpr = value.compare(0, 9, "vb6_BSTR_") == 0 ||
-                      value.compare(0, 20, "vb6_VariantToString(") == 0;
-    if (!isBstrExpr) {
-        // 裸变量名: 若为已知 BSTR 变量则包装
-        std::string name = value;
-        if (name.compare(0, 4, "me->") == 0) name = name.substr(4);
-        if (name.find_first_of("( .") == std::string::npos) {
-            std::string lower = name;
+                      value.compare(0, 20, "vb6_VariantToString(") == 0 ||
+                      value == "vb6_Ambient_DisplayName";
+    if (isBstrExpr) {
+        return "vb6_StringToByteArray(" + value + ")";
+    }
+    // Fix 140: ByRef 解引用形态 `(*Param)` — 形参 C 类型为 BSTR* (ByRef String),
+    // `(*Param)` 即真实 BSTR. 若内层名字是已知 BSTR 变量则按"字符串→字节数组"
+    // 改写. 场景: LabelPlus.ctl `Property Let Caption(ByRef New_Caption As String)`
+    // 内 `m_Caption = New_Caption` 生成 `me->m_Caption = (*New_Caption)`, 若不改写
+    // 会把 BSTR 当 SafeArray1D* 赋给 Byte() 字段 → caption 读不到, 卡片空白.
+    if (value.size() > 4 && value[0] == '(' && value[1] == '*'
+        && value[value.size() - 1] == ')') {
+        std::string inner = value.substr(2, value.size() - 3);
+        if (inner.compare(0, 4, "me->") == 0) inner = inner.substr(4);
+        if (inner.find_first_of("( .->") == std::string::npos) {
+            std::string lower = inner;
             std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
             if (knownBstrVars_.count(lower)) {
                 return "vb6_StringToByteArray(" + value + ")";
@@ -536,6 +569,16 @@ std::string CCodeGen::rewriteByteArrayValue(const std::string& value) const {
         }
         return value;
     }
-    return "vb6_StringToByteArray(" + value + ")";
+    // 裸变量名: 若为已知 BSTR 变量则包装
+    std::string name = value;
+    if (name.compare(0, 4, "me->") == 0) name = name.substr(4);
+    if (name.find_first_of("( .") == std::string::npos) {
+        std::string lower = name;
+        std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+        if (knownBstrVars_.count(lower)) {
+            return "vb6_StringToByteArray(" + value + ")";
+        }
+    }
+    return value;
 }
 } // namespace vb6c3

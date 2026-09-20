@@ -73,6 +73,28 @@ void   vb6_UserControl_AsyncRead(BSTR url, int32_t asyncType, BSTR propertyName,
                                  int32_t flags);
 void   vb6_UserControl_PropertyChanged(BSTR propName);
 
+// Fix 133u: czUI.ctl 用到的其余 UserControl 宿主成员.
+//   UserControl.hWnd    → extern void*  (控件自身窗口句柄, push 时填充)
+//   UserControl.AutoRedraw → extern int16_t (重绘模式; czUI 仅判断)
+//   UserControl.Cls()   → 清空控件客户区背景 (下轮 WM_PAINT 重绘)
+extern void*   vb6_UserControl_hWnd;
+extern int16_t vb6_UserControl_AutoRedraw;
+void   vb6_UserControl_Cls(void);
+
+// Fix 133u: UserControl.Parent (容器窗体对象). czUI.ctl 用它做全屏/恢复窗体:
+//   UserControl.Parent.hWnd       → vb6_UC_ParentHwnd(void)
+//   UserControl.Parent.Icon.Handle→ vb6_UC_ParentIconHandle(void)
+//   UserControl.Parent.Move l,t,w,h → vb6_UC_ParentMove(l,t,w,h)
+//   With UserControl.Parent       → vb6_UC_ParentObject(void) (返回窗体 HWND,
+//                                   With 内 .Left/.Top/.Width/.Height 经
+//                                   vb6_ComGetIntProp 以窗体 HWND 解析)
+// 由 cgen 生成端文本重写 (CodeEmitter::emitLine, Fix 133u) 把生成 C 里的
+// "vb6_UserControl_Parent.<成员>" 链改写为这些函数 — 见 cgen_base.cpp.
+void*   vb6_UC_ParentObject(void);
+void*   vb6_UC_ParentHwnd(void);
+void*   vb6_UC_ParentIconHandle(void);
+void    vb6_UC_ParentMove(int32_t left, int32_t top, int32_t width, int32_t height);
+
 // --- Ambient 宿主环境 ---
 extern vb6_ComIface_Font* vb6_Ambient_Font;  // 容器默认 Font
 extern int16_t vb6_Ambient_UserMode;         // -1=运行期 0=设计期
@@ -83,6 +105,17 @@ extern int32_t vb6_Ambient_BackColor;
 // --- Extender (容器提供的扩展对象) ---
 extern int32_t vb6_Extender_Left;
 extern int32_t vb6_Extender_Top;
+
+// Fix 133u: czUI.ctl 用到 Extender 的 Visible / Height
+//   (UserControl.Extender.Visible 赋值 + 判断, .Height 读取).
+//   生成 C 是结构体字段访问 `vb6_UserControl_Extender.Visible`, 故提供该结构体.
+//   注意: 不能命名为 extern 单独变量, 因为 cgen 会把 Extender 当作对象,
+//   `.Visible` 作为字段追加. 结构体字段与生成代码天然吻合.
+struct vb6_UserControl_Extender_Type {
+    int16_t Visible;   // -1=可见 0=隐藏 (czUI 置位保存; 实际由宿主/property 配合)
+    int32_t Height;    // 容器提供的控件外接高度 (twips/pixels 随 ScaleMode)
+};
+extern struct vb6_UserControl_Extender_Type vb6_UserControl_Extender;
 
 // --- PropertyPage 设计器页 ---
 extern void*   vb6_PropertyPage_hwnd;

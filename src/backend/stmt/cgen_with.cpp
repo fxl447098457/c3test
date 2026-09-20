@@ -308,6 +308,21 @@ void CCodeGen::visit(WithStmt& node) {
                         }
                     }
                 }
+                // czUI fix: 宿主伪对象的属性 (UserControl.Parent / Extender.X 等)
+                // 是容器窗体对象 — 运行时只有 HWND, 没有项目类。落到下面的
+                // ClassInstance 兜底会让 .Left 等成员撞上 VB 内置函数符号
+                // (Left$) 被解析成 vb6_<类>_Left(withObj) → LNK2019
+                // (czUI.ctl ToggleFullScreen 实测)。转 COMObject 晚绑定,
+                // .Left/.Top/.Width/.Height 走 vb6_ComGetIntProp。
+                if (withInfo.kind == WithObjKind::Unknown && memExpr.object &&
+                    memExpr.object->kind == ASTNodeKind::IdentifierExpr) {
+                    auto& objId133w = static_cast<IdentifierExpr&>(*memExpr.object);
+                    std::string objLower133w = Symbol::toLower(objId133w.name);
+                    if (objLower133w == "usercontrol" || objLower133w == "ambient" ||
+                        objLower133w == "extender" || objLower133w == "propertypage") {
+                        withInfo.kind = WithObjKind::COMObject;
+                    }
+                }
                 // 无法确定类型时默认为类实例 (void*不支持.member访问)
                 if (withInfo.kind == WithObjKind::Unknown && tempType == "void*") {
                     withInfo.kind = WithObjKind::ClassInstance;

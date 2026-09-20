@@ -2,6 +2,7 @@
 // 内容 = 拆分前 vb6forms_uc.c 第 1424~1493 行，逐行未改
 // 在函数体内 #include；路径一律用 basename
 
+    obj = vb6_UC_UnwrapHost(obj);  // czUI fix: 包装器透明解包
     vb6_VARIANT* out = (vb6_VARIANT*)outV;
     (void)argc;
     if (!obj || !name) return 0;

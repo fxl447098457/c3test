@@ -2,6 +2,7 @@
 // 内容 = 拆分前 vb6forms_uc.c 第 1392~1419 行，逐行未改
 // 在函数体内 #include；路径一律用 basename
 
+    obj = vb6_UC_UnwrapHost(obj);  // czUI fix: 包装器透明解包
     const vb6_VARIANT* v = (const vb6_VARIANT*)inV;
     if (!obj || !name) return 0;
     if (vb6_uc_isFont(obj)) return vb6_ho_putFontMember(obj, name, v);

@@ -67,6 +67,118 @@
     if (it != frmDesc.formControl.properties.end()) clientWidth = (int)it->second.intValue;
     it = frmDesc.formControl.properties.find("StartUpPosition");
     if (it != frmDesc.formControl.properties.end()) startupPos = (int)it->second.intValue;
+    // czUI fix: 窗体级 BackColor (OLE &H00BBGGRR) — 交给 RTL 做类背景刷 +
+    // Ambient.BackColor, 未指定时保持 -1 (VB6 默认 BTNFACE)
+    int formBackColor = -1;
+    it = frmDesc.formControl.properties.find("BackColor");
+    if (it != frmDesc.formControl.properties.end()) formBackColor = (int)it->second.intValue;
+    // czUI fix: BorderStyle (默认 2=Sizable)。0=None 时 RTL 创建无边框窗口,
+    // 否则自绘标题栏 (BorderStyle=None 的 .ctl 窗体) 会叠在系统标题栏下面。
+    int formBorderStyle = 2;
+    it = frmDesc.formControl.properties.find("BorderStyle");
+    if (it != frmDesc.formControl.properties.end()) formBorderStyle = (int)it->second.intValue;
+
+    // czUI fix: UC 事件接线 (文件作用域) — 对每个工程内 UserControl 实例:
+    // 解析 .ctl 的 Public Event 声明, 若窗体代码定义了 <实例>_<事件> 处理器,
+    // 则发射 处理器前向声明 + thunk + sink 表 (文件作用域, 函数体内不能定义函数),
+    // attach 行存入 ucEventAttach_ 供 CreateControls 挂接。
+    {
+        std::string frmLowCode;
+        if (designerFiles_) {
+            for (const auto& kvFrm : *designerFiles_) {
+                if (Symbol::toLower(kvFrm.first) == Symbol::toLower(formName)) {
+                    frmLowCode = Symbol::toLower(kvFrm.second.codeSection);
+                    break;
+                }
+            }
+        }
+        for (const auto& child : frmDesc.formControl.children) {
+            const FrmFile* ucSpecEvt = findUserControlSpec(child.controlTypeName);
+            if (!ucSpecEvt) continue;
+            // 解析 Public Event 声明
+            struct UcEvtPre { std::string name; std::string lowName; std::vector<std::string> ptypes; };
+            std::vector<UcEvtPre> ucEventsPre;
+            {
+                std::string lowCode = Symbol::toLower(ucSpecEvt->codeSection);
+                static const char* kTypeMapPre[][2] = {
+                    {"boolean", "int16_t"}, {"string", "BSTR"},
+                    {"integer", "int32_t"}, {"long", "int32_t"},
+                    {"single", "float"}, {"double", "double"}, {nullptr, nullptr} };
+                size_t pos = 0;
+                while (true) {
+                    size_t e = lowCode.find("public event ", pos);
+                    if (e == std::string::npos) break;
+                    size_t nameStart = e + 13;
+                    size_t lp = lowCode.find('(', nameStart);
+                    size_t eol = lowCode.find('\n', nameStart);
+                    if (lp == std::string::npos || (eol != std::string::npos && lp > eol)) { pos = nameStart; continue; }
+                    UcEvtPre ev;
+                    ev.name = ucSpecEvt->codeSection.substr(nameStart, lp - nameStart);
+                    ev.lowName = Symbol::toLower(ev.name);
+                    size_t rp = lowCode.find(')', lp);
+                    if (rp != std::string::npos && (eol == std::string::npos || rp < eol)) {
+                        std::string args = ucSpecEvt->codeSection.substr(lp + 1, rp - lp - 1);
+                        std::string argsLow = Symbol::toLower(args);
+                        size_t pcur = 0;
+                        while (true) {
+                            size_t asPos = argsLow.find(" as ", pcur);
+                            if (asPos == std::string::npos) break;
+                            size_t tStart = asPos + 4;
+                            size_t tEnd = tStart;
+                            while (tEnd < args.size() && args[tEnd] != ',') tEnd++;
+                            std::string ty = args.substr(tStart, tEnd - tStart);
+                            while (!ty.empty() && ty.front() == ' ') ty.erase(ty.begin());
+                            while (!ty.empty() && (ty.back() == ' ' || ty.back() == '\r')) ty.pop_back();
+                            std::string cty = "int32_t";
+                            std::string tyLowPre = Symbol::toLower(ty);
+                            for (int k = 0; kTypeMapPre[k][0]; k++)
+                                if (tyLowPre == kTypeMapPre[k][0]) { cty = kTypeMapPre[k][1]; break; }
+                            ev.ptypes.push_back(cty);
+                            pcur = tEnd;
+                        }
+                    }
+                    bool dup = false;
+                    for (const auto& prev : ucEventsPre)
+                        if (prev.lowName == ev.lowName) { dup = true; break; }
+                    if (!dup && !ev.name.empty()) ucEventsPre.push_back(ev);
+                    pos = nameStart;
+                }
+            }
+            if (ucEventsPre.empty()) continue;
+            std::string ucShort = child.controlTypeName;
+            size_t dotUc = ucShort.rfind('.');
+            if (dotUc != std::string::npos) ucShort = ucShort.substr(dotUc + 1);
+            std::string evtPrefixType = "vb6_events_" + cIdent(ucShort);
+            std::string sinkVar = "_sink_" + cIdent(child.controlName);
+            bool anyHandler = false;
+            std::vector<std::string> attachLines;
+            for (const auto& ev : ucEventsPre) {
+                std::string handlerLower = Symbol::toLower(child.controlName + "_" + ev.name);
+                if (frmLowCode.find("sub " + handlerLower) == std::string::npos) continue;
+                anyHandler = true;
+                std::string fnOrig = cIdent(child.controlName) + "_" + cIdent(ev.name);
+                std::string frmPrefix = "vb6_" + cIdent(formName) + "_";
+                std::string thunkName = frmPrefix + "evtThunk_" + fnOrig;
+                std::string sig = "";
+                for (size_t i = 0; i < ev.ptypes.size(); i++)
+                    sig += (i ? ", " : "") + ev.ptypes[i] + " arg" + std::to_string(i);
+                c_.emitLine("static void " + frmPrefix + fnOrig + "(" + sig + ");");
+                std::string thunkSig = "void* handler";
+                for (size_t i = 0; i < ev.ptypes.size(); i++)
+                    thunkSig += ", " + ev.ptypes[i] + " a" + std::to_string(i);
+                std::string callArgs = "";
+                for (size_t i = 0; i < ev.ptypes.size(); i++)
+                    callArgs += (i ? ", " : "") + std::string("a") + std::to_string(i);
+                c_.emitLine("static void " + thunkName + "(" + thunkSig + ") { " + frmPrefix + fnOrig + "(" + callArgs + "); }");
+                std::string evtCbType = "vb6_evt_" + cIdent(ucShort) + "_" + cIdent(ev.name) + "_cb";
+                attachLines.push_back(sinkVar + ".on" + cIdent(ev.name) + " = (" + evtCbType + ")" + thunkName + ";");
+            }
+            if (anyHandler) {
+                c_.emitLine("static " + evtPrefixType + " " + sinkVar + ";");
+                ucEventAttach_[Symbol::toLower(child.controlName)] = attachLines;
+            }
+        }
+    }
 
     // P24: Form.Icon from .frx
     {

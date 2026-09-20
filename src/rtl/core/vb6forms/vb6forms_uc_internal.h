@@ -55,11 +55,16 @@ extern "C" {
 // ============================================================
 
 // UserControl 实例记录（uc_host.c 持有实例表）
+#define VB6_UC_DESIGN_SLOTS 8
+typedef struct Vb6UcDesignSlot { char name[64]; void* value; } Vb6UcDesignSlot;
+
 typedef struct vb6_UCRec {
     const vb6_UserControlDesc* desc;
     void*  me;
     int32_t ready;        // Initialize 完成前禁止窗口消息进入 VB6 实例方法
     HWND   hwnd;
+    Vb6UcDesignSlot design[VB6_UC_DESIGN_SLOTS];  // czUI fix: 设计器子控件按实例存取
+    int32_t designCount;
     HWND   parent;
     int32_t scaleWidth;   // ScaleMode 单位
     int32_t scaleHeight;
@@ -82,8 +87,11 @@ typedef struct vb6_UCSaved {
     void*   font;
     void*   ambientFont;
     int32_t extLeft, extTop;
+    void*   hWnd;                 // Fix 133u: UserControl.hWnd
+    int16_t autoRedraw;           // Fix 133u: UserControl.AutoRedraw
+    struct vb6_UserControl_Extender_Type ext; // Fix 133u: Extender.Visible/Height
     vb6_UCRec* current;
-    void*   displayName;      // Fix 116: Ambient.DisplayName (BSTR)
+    void*   displayName;          // Fix 116: Ambient.DisplayName (BSTR)
 } vb6_UCSaved;
 
 // 宿主对象登记记录（uc_hostmodel.c 持有登记表）
@@ -159,6 +167,10 @@ void vb6_uc_registerClass(HINSTANCE hInst);
 
 // --- uc_hostmodel.c ---
 vb6_HostObjRec* vb6_ho_find(const void* hwnd);
+// czUI fix: 宿主对象 IDispatch 包装器（定义在 uc_hostmodel.c；
+// WrapHostObject 由生成代码调用，UnwrapHost 供 GetProp/SetProp/Call 透明解包）
+void* vb6_UC_WrapHostObject(void* obj);
+void* vb6_UC_UnwrapHost(void* obj);
 
 // --- 判定辅助（uc_controls.c / uc_collection.c 提供）---
 int32_t vb6_uc_ptrReadable(const void* p, size_t n);

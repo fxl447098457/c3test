@@ -268,6 +268,82 @@
                         c_.emitLine(setter + "(" + meExpr + ", " + valExpr + ");");
                     }
                 }
+
+                // czUI fix: UC 事件接线 — thunk/sink 已在文件作用域 (prelude) 生成,
+                // 这里按实例挂接 (attach 行由 prelude 存入 ucEventAttach_)。
+                {
+                    auto itAtt114 = ucEventAttach_.find(Symbol::toLower(ctrl.controlName));
+                    if (itAtt114 != ucEventAttach_.end() && !getenv("C3_NO_EVENTS")) {
+                        std::string shortCls114 = ctlClass;
+                        size_t dotCls114 = shortCls114.rfind('.');
+                        if (dotCls114 != std::string::npos) shortCls114 = shortCls114.substr(dotCls114 + 1);
+                        c_.emitLine("{ /* UC events */");
+                        for (const auto& al : itAtt114->second) c_.emitLine("  " + al);
+                        c_.emitLine("  ((vb6_cls_" + cIdent(shortCls114) + "*)vb6_UC_InstanceOf(" + hwndExpr + "))->events = &_sink_" + cIdent(ctrl.controlName) + ";");
+                        c_.emitLine("}");
+                    }
+                }
+
+                // czUI fix: 设计期属性除 prop_let 直赋外, 再经轻量 PropertyBag 重放一次
+                // UserControl_ReadProperties — 复现 .ctl 内部"读取后同步"逻辑
+                // (czUI.ctl: `If m_Checked Then m_AnimPos = 1!` → toggle 初始 ON;
+                //  这类语句只在 ReadProperties 里, prop_let 直赋路径会绕过它)。
+                {
+                    // ctlClass 可能是 "czFormDemo.czControl" 带命名空间 —
+                    // 用设计器描述 + 代码段文本探测 .ctl 是否定义了
+                    // UserControl_ReadProperties (CCodeGen 每模块重建, 不能用
+                    // 跨模块 state; 类符号只存可调用成员, Private Sub 不在其中)
+                    const FrmFile* ucSpec114 = findUserControlSpec(ctlClass);
+                    bool hasReadProps114 = false;
+                    if (ucSpec114) {
+                        std::string lowerCode = Symbol::toLower(ucSpec114->codeSection);
+                        hasReadProps114 =
+                            lowerCode.find("sub usercontrol_readproperties") != std::string::npos;
+                    }
+                    static const char* noBagCls = getenv("C3_NO_BAG_CLS");
+                    static const char* onlyBagCls = getenv("C3_ONLY_BAG_CLS");
+                    bool bagBlocked = (noBagCls && strstr(noBagCls, Symbol::toLower(ctlClass).c_str()))
+                        || (onlyBagCls && strstr(onlyBagCls, Symbol::toLower(ctlClass).c_str()) == nullptr);
+                    if (hasReadProps114 && !getenv("C3_NO_BAG") && !bagBlocked) {
+                        c_.emitLine("extern void vb6_" + cIdent(ctlClass) + "_UC_ReadProps(void* me, void** PropBag);");
+                        c_.emitLine("{ void* _bag = vb6_UC_PropBagCreate();");
+                        for (const auto& kvb : ctrl.properties) {
+                            const std::string& pn114 = kvb.first;
+                            bool skip114 = false;
+                            for (const char* sk : kSkip) if (_stricmp(pn114.c_str(), sk) == 0) { skip114 = true; break; }
+                            if (skip114) continue;
+                            std::string litName = "L\"" + escapeWideCString(pn114) + "\"";
+                            if (kvb.second.type == FrmValueType::Integer) {
+                                c_.emitLine("vb6_UC_BagPutInt(_bag, " + litName + ", " + std::to_string((int)kvb.second.intValue) + ");");
+                            } else if (kvb.second.type == FrmValueType::Float) {
+                                c_.emitLine("vb6_UC_BagPutDbl(_bag, " + litName + ", " + std::to_string(kvb.second.floatValue) + ");");
+                            } else if (kvb.second.type == FrmValueType::String) {
+                                std::string tv = kvb.second.rawText;
+                                if (tv.size() >= 2 && tv.front() == '"' && tv.back() == '"')
+                                    tv = tv.substr(1, tv.size() - 2);
+                                c_.emitLine("vb6_UC_BagPutStr(_bag, " + litName + ", L\"" + escapeWideCString(tv) + "\");");
+                            } else if (kvb.second.type == FrmValueType::Identifier) {
+                                std::string idl = Symbol::toLower(kvb.second.rawText);
+                                if (idl == "true")  c_.emitLine("vb6_UC_BagPutBool(_bag, " + litName + ", -1);");
+                                else if (idl == "false") c_.emitLine("vb6_UC_BagPutBool(_bag, " + litName + ", 0);");
+                            } else if (kvb.second.type == FrmValueType::FrxReference && frxLoaded) {
+                                // czUI fix: Caption 等字符串常存于 .frx (如 "Form2.frx":006E) —
+                                // 跳过会让 ReadProperty 返回默认空串, 把 prop_let 设置好的
+                                // 标题清空 (Charts2020 所有 LabelPlus 标题消失的根因)
+                                FrxTextData dsB114 = FrxReader::readDocString(kvb.second.frxOffset);
+                                if (!dsB114.text.empty()) {
+                                    std::string tvB = dsB114.text;
+                                    if (tvB.size() >= 2 && tvB.front() == '"' && tvB.back() == '"')
+                                        tvB = tvB.substr(1, tvB.size() - 2);
+                                    c_.emitLine("vb6_UC_BagPutStr(_bag, " + litName + ", L\"" + escapeWideCString(tvB) + "\");");
+                                }
+                            }
+                        }
+                        c_.emitLine("vb6_" + cIdent(ctlClass) + "_UC_ReadProps((vb6_cls_" + cIdent(ctlClass)
+                                  + "*)vb6_UC_InstanceOf(" + hwndExpr + "), &_bag);");
+                        c_.emitLine("vb6_UC_PropBagFree(_bag); }");
+                    }
+                }
             }
             ctrlId++;
             continue;

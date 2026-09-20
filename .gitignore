@@ -46,6 +46,9 @@ deps/
 *.tlh
 *.tli
 
+# ---------- CI 关注脚本(仅本机) ----------
+scripts/watch-gh-actions.ps1
+
 # ---------- 测试运行产物 ----------
 # tests/*.bas 用 Open ... For Output 写相对路径文件 (scores.txt / test_output.txt /
 # test_*.dat / m6_test.txt 等)。run_tests.ps1 运行测试时已把工作目录设为 output/,

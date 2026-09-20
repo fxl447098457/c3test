@@ -195,6 +195,7 @@ std::string SessionManager::create() {
         { RTL_UC_COLLECTION_API_INC,          "uc_collection_api.inc" },
         { RTL_UC_DEBUG_DIB_INC,               "uc_debug_dib.inc" },
         { RTL_UC_DEBUG_COMPOSITE_INC,         "uc_debug_composite.inc" },
+        { RTL_UC_PROPBAG_C,                   "uc_propbag.c" },
     };
 
     for (auto& entry : files) {

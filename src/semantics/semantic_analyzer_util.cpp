@@ -1,6 +1,7 @@
 #include "semantics/semantic_analyzer.hpp"
 #include <algorithm>
 #include <cctype>
+#include <cstdio>
 #include <tuple>
 #include <initializer_list>
 #include "semantics/semantic_analyzer_internal.h"
@@ -137,9 +138,37 @@ std::string SemanticAnalyzer::evalOptionalDefault(ASTNode* defaultValue, Vb6Type
             case LiteralKind::Integer:
             case LiteralKind::Long:
                 return lit->rawText;  // "10", "-1" 等
-            case LiteralKind::Single:
-            case LiteralKind::Double:
-                return lit->rawText;  // "3.14" 等
+            case LiteralKind::Single: {
+                // Fix 133z: 单精度默认值 `1!` → C 浮点字面量 `1.0000000f`.
+                // 原样返回 rawText ("1!") 会写进生成 C → 语法错误
+                // (czUI.ctl: `Optional ByVal penWidth As Single = 1!` →
+                // `if (!_has_penWidth) penWidth = 1!;` → C2059).
+                float fv = lit->floatValue;
+                std::ostringstream oss133z;
+                char buf133z[64];
+                snprintf(buf133z, sizeof(buf133z), "%.9g", (double)fv);
+                oss133z << buf133z;
+                if (strchr(buf133z, '.') == nullptr && strchr(buf133z, 'e') == nullptr
+                    && strchr(buf133z, 'E') == nullptr)
+                    oss133z << ".0";
+                oss133z << "f";
+                return oss133z.str();
+            }
+            case LiteralKind::Double: {
+                // Fix 133z: parser 无 Single 字面量kind, `1!`/`0!` 以 Double 存储,
+                // rawText 带 VB 后缀 ("1!"). 原样返回会写进生成 C → C2059
+                // (czUI.ctl: `Optional ByVal penWidth As Single = 1!` →
+                // `if (!_has_penWidth) penWidth = 1!;`). 剥掉 `!`/`#` 尾缀并
+                // 保证是合法 C 浮点字面量 (整数形态补 `.0`).
+                std::string dt = lit->rawText;
+                while (!dt.empty() && (dt.back() == '!' || dt.back() == '#'))
+                    dt.pop_back();
+                if (dt.find('.') == std::string::npos
+                    && dt.find('e') == std::string::npos
+                    && dt.find('E') == std::string::npos)
+                    dt += ".0";
+                return dt;
+            }
             case LiteralKind::String:
                 // VB6 "hello" -> C vb6_BSTR_FromStr(L"hello")
                 {

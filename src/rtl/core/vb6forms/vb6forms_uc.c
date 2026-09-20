@@ -52,7 +52,7 @@
 //
 // 说明：本文件本身**不参与编译**（不登记 driver_link.cpp 的 sourceFiles），
 // 仅作为模块入口与上述映射表的载体 —— 与 vb6rtl_format.c 的伞文件定位一致。
-// 若需编译本模块，请登记 uc/ 下 6 个 .c。
+// 若需编译本模块，请登记 uc/ 下 7 个 .c（含 Fix 120-141 移植新增的 uc_propbag.c）。
 
 #include "vb6forms_uc_internal.h"
 
