@@ -122,10 +122,10 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "downloaded C3.exe broken" }
 
       # 复用 tests/run_tests.ps1 现有引擎与用例清单 (与 T0 同源, 无副本):
-      #   bas 类 = 35 个纯 .bas 用例, 编译+运行+输出断言, PS7 下 -Jobs 20 并行
+      #   bas 类 = 33 个纯 .bas 用例, 编译+运行+输出断言, PS7 下 -Jobs 20 并行
       #   compile 类 = 10 个只编译用例 (comprehensive x2 + 8 个 frm)
       # vbp/GUI 用例不进 T1 (窗口校验依赖本机环境, 留给后续夜间全量层)
-      - name: "T1a：bas 类 35 个（并行）"
+      - name: "T1a：bas 类 33 个（并行）"
         shell: pwsh
         run: pwsh -NoProfile -ExecutionPolicy Bypass -File tests/run_tests.ps1 -Category bas -Jobs 20 -Verbose
 
