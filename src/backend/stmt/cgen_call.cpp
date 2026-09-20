@@ -165,6 +165,19 @@ void CCodeGen::visit(CallStmt& node) {
         // 如果结果是函数名(不含括号), 自动添加()调用
         std::string callExpr = lastExpr_;
 
+        // Fix 150 (Fix 146 回归补全 / T2 ExtShow): 无括号无参语句 `Frm.Show` —
+        // parser 对行尾无参数的成员调用直接交付 CallStmt(callee=MemberAccessExpr)
+        // (parser_stmt_assign 收尾), 不经过 IndexOrCallExpr; 而 form_builtin 的
+        // external form show 转发只交付 vb6_form_show_<Form>(NULL) 半成品
+        // (modal 实参由 com_bind 拆包路径追加), 语句形态原样 emit → 1 参调用
+        // 对 Fix 146 的 2 参签名 (void* hMDIClient, int modal) → C2198.
+        // 无参 Show 即 modeless, 此处补默认 modal=0.
+        if (callExpr.size() > 6
+            && callExpr.compare(0, 14, "vb6_form_show_") == 0
+            && callExpr.compare(callExpr.size() - 6, 6, "(NULL)") == 0) {
+            callExpr = callExpr.substr(0, callExpr.size() - 1) + ", 0)";
+        }
+
         // COM调用检测 (P6.2): isComMarker_标志
         if (isComMarker_) {
             isComMarker_ = false;
