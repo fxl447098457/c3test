@@ -231,6 +231,45 @@ jobs:
           git clone --depth 1 https://gitcode.com/woeoio/vbman.git tests/vbman
           git clone --depth 1 https://gitcode.com/woeoio/vbman-demo.git tests/vbman-demo
 
+      - name: 注入 Form_Load 错误探针（仅 CI 工作副本, 不改上游 vbman-demo）
+        run: |
+          # 实证: demo exe 卡死在 "VB6 Runtime Error" 弹窗 (session 0 不可见),
+          # 窗口 API (WM_GETTEXT) 拿不到错误正文 -> 源码级探针: Form_Load 包
+          # On Error, 错误号/描述/Erl 写 _formload_err.txt, 断言步读取打印.
+          # GBK 编码读写; LF 归一后逐字符匹配, 找不到即 throw 防静默漏注入.
+          $f = "tests/vbman-demo/demos/Helloworld/Form1.frm"
+          $gbk = [System.Text.Encoding]::GetEncoding(936)
+          $src = [System.IO.File]::ReadAllText($f, $gbk).Replace("`r`n", "`n")
+          $old = @'
+          Private Sub Form_Load()
+              With HttpServer
+                  .Router.Reg "Demo", New bHello
+                  '        .Router.Reg "Menus", New bMenus
+                  '.Router.AutoRoute = True
+                  .Start 800
+              End With
+              VBMAN.HttpClient.ShowPage "http://127.0.0.1:800/demo/hello?id=215879458"
+          End Sub
+          '@
+          $new = @'
+          Private Sub Form_Load()
+              On Error GoTo FLEH
+              With HttpServer
+                  .Router.Reg "Demo", New bHello
+                  .Start 800
+              End With
+              VBMAN.HttpClient.ShowPage "http://127.0.0.1:800/demo/hello?id=215879458"
+              Exit Sub
+          FLEH:
+              Open App.Path & "\_formload_err.txt" For Output As #1
+              Print #1, "ERR " & Err.Number & ": " & Err.Description & " (line " & Erl & ")"
+              Close #1
+          End Sub
+          '@
+          if (-not $src.Contains($old)) { throw "Form_Load 块未匹配, vbman-demo 上游源码可能已变, 探针未注入" }
+          [System.IO.File]::WriteAllText($f, $src.Replace($old, $new), $gbk)
+          Write-Host "Form_Load error probe injected"
+
       - name: 注册 VBMAN.dll（x64 dll 用 System32 regsvr32）
         run: |
           # C3 默认 --arch x64, VBMAN.dll 是 64 位; 曾误用 SysWOW64(32 位) regsvr32
@@ -375,6 +414,13 @@ jobs:
                 $dump = [WinProbe]::Dump()
                 Write-Host "[probe $i] dialog text: $(if ($dump) { $dump } else { '(no VB6 Runtime Error dialog)' })"
               }
+            }
+            # Form_Load 探针产物: 有文件说明 On Error 捕获到了 Form_Load 内错误
+            $flErr = "output\demo\_formload_err.txt"
+            if (Test-Path $flErr) {
+              Write-Host "[FormLoad probe] $((Get-Content $flErr -Raw).Trim())"
+            } else {
+              Write-Host "[FormLoad probe] no error file (Form_Load 未捕获错误或探针未生效)"
             }
             if ($ok) {
               Write-Host "DEMO PASS: HTTP 200 + 'hello vbman' confirmed (COM 注册/调用/HTTP 环回全链路活)"
