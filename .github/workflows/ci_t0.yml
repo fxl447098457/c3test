@@ -8,7 +8,7 @@
 #   (C3.exe 版本冒烟 + tests_github/t0_cases/*.bas 全量 --syntax-only + smoke.bas 编译运行断言)
 # 用例与 tests/ 的关系见 tests_github/run_t0.ps1 头注释。
 
-name: GitHub Tests T0
+name: GitHub Tests T0+T1
 
 on:
   push:
@@ -71,6 +71,14 @@ jobs:
           & .build\C3.exe --version
           if ($LASTEXITCODE -ne 0) { throw "built C3.exe smoke check failed" }
 
+      - name: Upload C3.exe artifact (T1 job 复用, 不重复构建)
+        uses: actions/upload-artifact@v4
+        with:
+          name: c3-exe
+          path: .build/C3.exe
+          if-no-files-found: error
+          retention-days: 1
+
       - name: Run T0 gate (tests_github/run_t0.ps1)
         shell: pwsh
         run: pwsh -NoProfile -ExecutionPolicy Bypass -File tests_github/run_t0.ps1 -Verbose
@@ -83,5 +91,55 @@ jobs:
           path: |
             output/**/*.out
             output/**/*.err
+          if-no-files-found: warn
+          retention-days: 14
+
+  t1:
+    name: T1 最小回归（编译 + 运行 + 输出断言）
+    needs: t0
+    runs-on: windows-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      # 交给脚本的 vswhere 自动发现 vcvarsall (无需显式设置)
+      C3_VCVARSALL: ""
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download C3.exe (T0 构建产物)
+        uses: actions/download-artifact@v4
+        with:
+          name: c3-exe
+          path: .build/
+
+      - name: Smoke check downloaded C3.exe
+        run: |
+          & .build\C3.exe --version
+          if ($LASTEXITCODE -ne 0) { throw "downloaded C3.exe broken" }
+
+      # 复用 tests/run_tests.ps1 现有引擎与用例清单 (与 T0 同源, 无副本):
+      #   bas 类 = 35 个纯 .bas 用例, 编译+运行+输出断言, PS7 下 -Jobs 20 并行
+      #   compile 类 = 10 个只编译用例 (comprehensive x2 + 8 个 frm)
+      # vbp/GUI 用例不进 T1 (窗口校验依赖本机环境, 留给后续夜间全量层)
+      - name: "T1a bas 类 (35 个, 并行)"
+        shell: pwsh
+        run: pwsh -NoProfile -ExecutionPolicy Bypass -File tests/run_tests.ps1 -Category bas -Jobs 20 -Verbose
+
+      - name: "T1b compile 类 (10 个)"
+        shell: pwsh
+        run: pwsh -NoProfile -ExecutionPolicy Bypass -File tests/run_tests.ps1 -Category compile -Verbose
+
+      - name: Upload T1 logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: t1-logs
+          path: |
+            output/**/*.out
+            output/**/*.err
+            output/**/*.txt
+            output/**/scores.txt
           if-no-files-found: warn
           retention-days: 14
