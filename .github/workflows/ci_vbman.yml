@@ -1,0 +1,356 @@
+# ci_vbman.yml - VBMAN 链路验证 (真实大工程: 编译 + 注册 + demo 执行)
+#
+# 与 ci_t0.yml (T0+T1+T2 测试链) 的关系 (方案 A, workflow_run 联动):
+#   - 测试链跑成功后自动触发本 workflow, download-artifact@v8 以 run-id 跨 run
+#     下载 T0 的 c3-exe (零重复构建);
+#   - 另支持 tag github-vbman-* / 手动 dispatch (此两类触发拿不到上游 artifact,
+#     会自建 C3.exe, 构建缓存 cache key c3build-* 与测试链共享)。
+# 注意: workflow_run 触发仅当本文件位于默认分支时生效; 分支期用 tag 验证。
+#
+# 链路 (两个 job):
+#   vbman      : clone gitcode vbman -> C3 编译 VBMAN.vbp (129 模块 OleDll)
+#                -> 校验 VBMAN.dll -> 上传 vbman-dll + c3-exe (供 demo job)
+#   vbman-demo : clone vbman + vbman-demo (demo vbp 以 ..\..\..\vbman\dist\DLL
+#                相对路径引用 VBMAN.dll) -> System32 regsvr32 注册 (C3 默认产 x64 dll)
+#                -> C3 编译 demos/Helloworld -> 运行产物 (Form_Load 启动内嵌
+#                HTTP 服务器 127.0.0.1:800 并调用 VBMAN COM) -> HTTP 环回请求
+#                断言响应含 "hello vbman" -> finally 杀进程 + regsvr32 /u 注销
+#                (环境洁净约定: 注册的 COM 组件用完必须注销)
+#   桩自愈      : vbman 首编 LNK2019 (外部仓库新增 Declare 的转发桩未入库) 时,
+#                用失败会话跑 scripts/gen_di_stubs.ps1 (add-only) 补桩 -> 增量重建
+#                C3.exe -> 重编; 产出的 src/rtl/core/di/** 进 vbman-compile-logs,
+#                应回 commit 固化。
+
+name: VBMAN 链路验证
+
+on:
+  workflow_run:
+    workflows: ["GitHub Tests T0+T1+T2"]
+    types: [completed]
+  push:
+    tags:
+      - 'github-vbman-*'
+  workflow_dispatch:
+
+jobs:
+  vbman:
+    name: vbman 编译（129 模块 ActiveX DLL）
+    if: ${{ github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success' }}
+    runs-on: windows-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      C3_VCVARSALL: ""
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v5
+
+      - name: 下载 T0 的 C3.exe 产物（workflow_run 联动，零重复构建）
+        if: github.event_name == 'workflow_run'
+        uses: actions/download-artifact@v8
+        with:
+          name: c3-exe
+          path: .build/
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 自建 C3.exe（tag/dispatch 触发时的回退路径）
+        if: github.event_name != 'workflow_run'
+        shell: pwsh
+        run: |
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer\vswhere.exe"
+          $vsPath = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath 2>$null
+          if (-not $vsPath) { throw "No MSVC install" }
+          $vcvars = Join-Path $vsPath "VC\Auxiliary\Build\vcvarsall.bat"
+          $envLines = & cmd /c "call `"$vcvars`" x64 >nul 2>&1 && set" 2>$null
+          foreach ($line in $envLines) {
+            if ($line -match '^([^=]+)=(.*)$') {
+              [Environment]::SetEnvironmentVariable($matches[1], $matches[2], "Process")
+            }
+          }
+          $buildDir = Join-Path $env:RUNNER_TEMP "c3build"
+          cmake -S . -B $buildDir -G Ninja -DVB6C3_ENABLE_LLVM=OFF -DCMAKE_BUILD_TYPE=Release
+          if ($LASTEXITCODE -ne 0) { throw "cmake configure failed" }
+          cmake --build $buildDir
+          if ($LASTEXITCODE -ne 0) { throw "cmake build failed" }
+          New-Item -ItemType Directory -Force -Path .build | Out-Null
+          Copy-Item (Join-Path $buildDir "C3.exe") .build\C3.exe -Force
+
+      - name: 校验 C3.exe
+        run: |
+          & .build\C3.exe --version
+          if ($LASTEXITCODE -ne 0) { throw "C3.exe broken" }
+
+      - name: clone vbman（gitcode 匿名 HTTPS）
+        run: git clone --depth 1 https://gitcode.com/woeoio/vbman.git tests/vbman
+
+      - name: 编译 VBMAN.vbp（129 模块, 输出到 dist\DLL 供 demo 相对引用）
+        shell: pwsh
+        run: |
+          # 每 step 独立进程: 编译前重新注入 MSVC 环境 (x64 链接完全依赖继承环境)
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer\vswhere.exe"
+          $vsPath = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath 2>$null
+          if (-not $vsPath) { throw "No MSVC install" }
+          $vcvars = Join-Path $vsPath "VC\Auxiliary\Build\vcvarsall.bat"
+          $envLines = & cmd /c "call `"$vcvars`" x64 >nul 2>&1 && set" 2>$null
+          foreach ($line in $envLines) {
+            if ($line -match '^([^=]+)=(.*)$') {
+              [Environment]::SetEnvironmentVariable($matches[1], $matches[2], "Process")
+            }
+          }
+          New-Item -ItemType Directory -Force -Path tests\vbman\dist\DLL | Out-Null
+          # 不带 --verbose: verbose 的 AST 遍历+未使用警告占日志 98% (18 万行), 错误正文靠 c3-error.log 回显
+          & .build\C3.exe tests\vbman\src\VBMAN.vbp --output-dir tests\vbman\dist\DLL *> _vbman_compile.log
+          Get-Content _vbman_compile.log | Select-Object -Last 50 | Write-Host
+          if ($LASTEXITCODE -ne 0) {
+            # cl.exe 的错误正文由 C3 落到 --output-dir 下的 c3-error.log, 回显到 step 输出
+            if (Test-Path "tests\vbman\dist\DLL\c3-error.log") {
+              Write-Host "=== c3-error.log ==="
+              Get-Content "tests\vbman\dist\DLL\c3-error.log" | Write-Host
+            }
+            Write-Host "first pass failed; stub heal step will regenerate and recompile"
+          } else {
+            Write-Host "first pass OK"
+          }
+          Add-Content -Path $env:GITHUB_ENV -Value "VBMAN_COMPILE_EXIT=$LASTEXITCODE"
+          # GH 的 pwsh 包装在脚本收尾自动 exit $LASTEXITCODE, C3 失败会把本 step 染红,
+          # 而后续自定义 if 步骤会被隐式 success() 拦下 -> 显式 exit 0, 真实状态走
+          # GITHUB_ENV 传给自愈步, 编译成败的最终门禁是"校验 VBMAN.dll"步
+          exit 0
+
+      - name: 桩自愈（vb6_di_* LNK2019 → 重生成 → 重建 C3 → 重编）
+        if: env.VBMAN_COMPILE_EXIT != '0'
+        shell: pwsh
+        run: |
+          # vbman 是外部演进仓库, 新增 Declare 的转发桩可能尚未入库 (09-19 重生成曾把
+          # 桩集清到 czUI 子集, 90 个符号 LNK2019)。生成器已改 add-only: 以失败会话的
+          # 生成头补齐缺失桩且不清存量, 重建 C3.exe (新桩重新嵌入 RTL 资源) 后重编。
+          # 自愈产出的 src/rtl/core/di/** 会进 vbman-compile-logs artifact, 应回 commit。
+          $c3c = Join-Path $env:TEMP 'C3C'
+          if (-not (Test-Path $c3c)) { $c3c = Join-Path $env:LOCALAPPDATA 'Temp\C3C' }
+          $session = Get-ChildItem $c3c -Directory -ErrorAction SilentlyContinue |
+            Sort-Object LastWriteTime -Descending | Select-Object -First 1
+          if (-not $session) { throw "heal: no C3C session dir found" }
+          Write-Host "heal: session $($session.FullName)"
+          pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/gen_di_stubs.ps1 -SessionDir $session.FullName
+          if ($LASTEXITCODE -ne 0) { throw "heal: gen_di_stubs.ps1 failed" }
+          # 每 step 独立进程: 重新注入 MSVC 环境
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer\vswhere.exe"
+          $vsPath = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath 2>$null
+          if (-not $vsPath) { throw "No MSVC install" }
+          $vcvars = Join-Path $vsPath "VC\Auxiliary\Build\vcvarsall.bat"
+          $envLines = & cmd /c "call `"$vcvars`" x64 >nul 2>&1 && set" 2>$null
+          foreach ($line in $envLines) {
+            if ($line -match '^([^=]+)=(.*)$') {
+              [Environment]::SetEnvironmentVariable($matches[1], $matches[2], "Process")
+            }
+          }
+          # 重建 C3.exe: c3rtl.rc 依赖桩文件, ninja 增量重嵌资源并重链
+          $buildDir = Join-Path $env:RUNNER_TEMP "c3build"
+          if (Test-Path (Join-Path $buildDir "build.ninja")) {
+            cmake --build $buildDir
+          } else {
+            cmake -S . -B $buildDir -G Ninja -DVB6C3_ENABLE_LLVM=OFF -DCMAKE_BUILD_TYPE=Release
+            if ($LASTEXITCODE -ne 0) { throw "heal: cmake configure failed" }
+            cmake --build $buildDir
+          }
+          if ($LASTEXITCODE -ne 0) { throw "heal: cmake build failed" }
+          Copy-Item (Join-Path $buildDir "C3.exe") .build\C3.exe -Force
+          & .build\C3.exe tests\vbman\src\VBMAN.vbp --output-dir tests\vbman\dist\DLL --verbose *> _vbman_recompile.log
+          Get-Content _vbman_recompile.log | Select-Object -Last 30 | Write-Host
+          if ($LASTEXITCODE -ne 0) { throw "heal: recompile still failed (看 _vbman_recompile.log 与 c3-error.log)" }
+          Write-Host "heal: recompile OK"
+
+      - name: 上传编译日志（失败诊断用）
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: vbman-compile-logs
+          path: |
+            _vbman_compile.log
+            _vbman_recompile.log
+            tests/vbman/dist/DLL/c3-error.log
+            src/rtl/core/di/**
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: 校验 VBMAN.dll
+        shell: pwsh
+        run: |
+          $dll = "tests\vbman\dist\DLL\VBMAN.dll"
+          if (-not (Test-Path $dll)) { throw "VBMAN.dll missing" }
+          $len = (Get-Item $dll).Length
+          Write-Host "VBMAN.dll: $len bytes"
+          if ($len -lt 1MB) { throw "VBMAN.dll too small ($len bytes)" }
+
+      - name: 上传 vbman-dll 与 c3-exe（供 demo job 复用）
+        uses: actions/upload-artifact@v7
+        with:
+          name: vbman-dll
+          path: |
+            tests/vbman/dist/DLL/VBMAN.dll
+            .build/C3.exe
+          if-no-files-found: error
+          retention-days: 1
+
+  vbman-demo:
+    name: vbman demo 执行（注册 + HTTP 环回断言）
+    needs: vbman
+    runs-on: windows-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      C3_VCVARSALL: ""
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v5
+
+      - name: 下载 VBMAN.dll 与 C3.exe（来自 vbman job）
+        uses: actions/download-artifact@v8
+        with:
+          name: vbman-dll
+          path: _dl/
+
+      - name: 归位产物（dll -> vbman\dist\DLL, C3.exe -> .build）
+        run: |
+          # download-artifact 保留 artifact 内部目录结构 (上传时的 tests\... 与
+          # .build\... 嵌套在 _dl 下), 递归定位两个文件, 不依赖具体层级
+          New-Item -ItemType Directory -Force -Path tests\vbman\dist\DLL, .build | Out-Null
+          $dll = Get-ChildItem _dl -Recurse -Filter VBMAN.dll | Select-Object -First 1
+          $exe = Get-ChildItem _dl -Recurse -Filter C3.exe | Select-Object -First 1
+          if (-not $dll -or -not $exe) { throw "artifact 内容缺失: VBMAN.dll / C3.exe" }
+          Move-Item $dll.FullName tests\vbman\dist\DLL\VBMAN.dll -Force
+          Move-Item $exe.FullName .build\C3.exe -Force
+
+      - name: clone vbman 与 vbman-demo（gitcode 匿名 HTTPS, 目录平级）
+        run: |
+          git clone --depth 1 https://gitcode.com/woeoio/vbman.git tests/vbman
+          git clone --depth 1 https://gitcode.com/woeoio/vbman-demo.git tests/vbman-demo
+
+      - name: 注册 VBMAN.dll（x64 dll 用 System32 regsvr32）
+        run: |
+          # C3 默认 --arch x64, VBMAN.dll 是 64 位; 曾误用 SysWOW64(32 位) regsvr32
+          # LoadLibrary 失败。先打 PE machine 字段自检架构再注册
+          $dllPath = "tests\vbman\dist\DLL\VBMAN.dll"
+          $fs = [System.IO.File]::OpenRead($dllPath)
+          $br = New-Object System.IO.BinaryReader($fs)
+          $null = $fs.Seek(0x3C, 'Begin'); $peOff = $br.ReadInt32()
+          $null = $fs.Seek($peOff + 4, 'Begin'); $machine = $br.ReadUInt16()
+          $br.Close(); $fs.Close()
+          $archName = switch ($machine) { 0x8664 { 'x64' } 0x014C { 'x86' } default { '?' } }
+          Write-Host ("VBMAN.dll PE machine: 0x{0:X4} ({1})" -f $machine, $archName)
+          if ($machine -ne 0x8664) { throw "VBMAN.dll 不是 x64 (machine=0x$($machine.ToString('X4')))" }
+          # regsvr32 是 GUI 子系统程序, pwsh 的 & 调用不等待, $LASTEXITCODE 保持
+          # null 会被 -ne 0 误判失败 (010 实测: probe 调 DllRegisterServer 返回
+          # S_OK 而 $LASTEXITCODE 为空) -> Start-Process -Wait 拿真实退出码
+          $reg = Start-Process -FilePath "$env:SystemRoot\System32\regsvr32.exe" -ArgumentList '/s', $dllPath -Wait -PassThru
+          Write-Host "regsvr32 exit code: $($reg.ExitCode)"
+          if ($reg.ExitCode -ne 0) {
+            Write-Host "regsvr32 failed (2=LoadLibrary败 3=无导出 4=DllRegisterServer败), probe..."
+            # P/Invoke 探测: 区分缺依赖 / 导出缺失 / DllRegisterServer 返回错误
+            Add-Type -TypeDefinition @'
+          using System;
+          using System.Runtime.InteropServices;
+          public static class RegProbe {
+              [DllImport("kernel32", SetLastError=true, CharSet=CharSet.Unicode)]
+              public static extern IntPtr LoadLibrary(string path);
+              [DllImport("kernel32", SetLastError=true, CharSet=CharSet.Ansi)]
+              public static extern IntPtr GetProcAddress(IntPtr h, string name);
+              [DllImport("kernel32")] public static extern bool FreeLibrary(IntPtr h);
+              [UnmanagedFunctionPointer(CallingConvention.StdCall)] public delegate int RegFn();
+              public static IntPtr FindExport(IntPtr h, string name) { return GetProcAddress(h, name); }
+              public static int CallReg(IntPtr h) {
+                  IntPtr p = GetProcAddress(h, "DllRegisterServer");
+                  return ((RegFn)Marshal.GetDelegateForFunctionPointer(p, typeof(RegFn)))();
+              }
+          }
+          '@
+            $h = [RegProbe]::LoadLibrary((Resolve-Path $dllPath).Path)
+            if ($h -eq [IntPtr]::Zero) {
+              $err = [Runtime.InteropServices.Marshal]::GetLastWin32Error()
+              throw "probe: LoadLibrary FAILED (Win32Error=$err; 126=缺依赖模块)"
+            }
+            Write-Host "probe: LoadLibrary OK"
+            foreach ($e in 'DllRegisterServer','DllUnregisterServer','DllGetClassObject','DllCanUnloadNow') {
+              $present = [RegProbe]::FindExport($h, $e) -ne [IntPtr]::Zero
+              Write-Host ("probe: export {0} = {1}" -f $e, $(if ($present) { 'present' } else { 'MISSING' }))
+            }
+            $hr = [RegProbe]::CallReg($h)
+            Write-Host ("probe: DllRegisterServer HRESULT = 0x{0:X8} (0=S_OK; 80070005=注册表权限)" -f $hr)
+            [RegProbe]::FreeLibrary($h) | Out-Null
+            throw "regsvr32 failed (probe 结论见上)"
+          }
+          # 注册落地确认: ProgId 必须真实存在, 拿证据说话
+          if (-not (Test-Path 'Registry::HKEY_CLASSES_ROOT\VBMANLIB.cVBMAN')) {
+            throw "ProgId VBMANLIB.cVBMAN 未落地, 注册无效"
+          }
+          Write-Host "VBMAN.dll registered (HKCR\VBMANLIB.cVBMAN)"
+
+      - name: 编译 Helloworld demo（引用 ..\..\..\vbman\dist\DLL\VBMAN.dll）
+        shell: pwsh
+        run: |
+          # 每 step 独立进程: 编译前重新注入 MSVC 环境
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer\vswhere.exe"
+          $vsPath = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath 2>$null
+          if (-not $vsPath) { throw "No MSVC install" }
+          $vcvars = Join-Path $vsPath "VC\Auxiliary\Build\vcvarsall.bat"
+          $envLines = & cmd /c "call `"$vcvars`" x64 >nul 2>&1 && set" 2>$null
+          foreach ($line in $envLines) {
+            if ($line -match '^([^=]+)=(.*)$') {
+              [Environment]::SetEnvironmentVariable($matches[1], $matches[2], "Process")
+            }
+          }
+          New-Item -ItemType Directory -Force -Path output\demo | Out-Null
+          & .build\C3.exe tests\vbman-demo\demos\Helloworld\VBMAN_DEMO.vbp --output-dir output\demo --verbose *> _demo_compile.log
+          Get-Content _demo_compile.log | Write-Host
+          if ($LASTEXITCODE -ne 0) {
+            if (Test-Path "output\demo\c3-error.log") {
+              Write-Host "=== c3-error.log ==="
+              Get-Content "output\demo\c3-error.log" | Write-Host
+            }
+            throw "VBMAN_DEMO.vbp compile failed"
+          }
+          if (-not (Test-Path "output\demo\VBMAN_DEMO.exe")) { throw "VBMAN_DEMO.exe missing" }
+
+      - name: 运行 demo + HTTP 环回断言（finally 注销 DLL）
+        shell: pwsh
+        run: |
+          $proc = Start-Process -FilePath "output\demo\VBMAN_DEMO.exe" -WorkingDirectory "output\demo" -PassThru
+          $ok = $false; $lastErr = ""
+          try {
+            # Form_Load 启动内嵌 HTTP 服务器 (127.0.0.1:800); 轮询请求直到响应命中
+            foreach ($i in 1..10) {
+              Start-Sleep -Seconds 2
+              if ($proc.HasExited) { throw "demo exited early (code $($proc.ExitCode))" }
+              try {
+                $resp = Invoke-WebRequest -Uri "http://127.0.0.1:800/demo/hello?id=42" -UseBasicParsing -TimeoutSec 5
+                if ("$($resp.Content)" -match "hello vbman") { $ok = $true; break }
+                $lastErr = "unexpected content: $([string]$resp.Content)"
+                if ($lastErr.Length -gt 160) { $lastErr = $lastErr.Substring(0, 160) }
+              } catch { $lastErr = $_.Exception.Message }
+            }
+            if ($ok) {
+              Write-Host "DEMO PASS: HTTP 200 + 'hello vbman' confirmed (COM 注册/调用/HTTP 环回全链路活)"
+            } else {
+              throw "HTTP assert failed: $lastErr"
+            }
+          } finally {
+            if ($proc -and -not $proc.HasExited) { $proc.Kill() }
+            $unreg = Start-Process -FilePath "$env:SystemRoot\System32\regsvr32.exe" -ArgumentList '/u', '/s', "tests\vbman\dist\DLL\VBMAN.dll" -Wait -PassThru
+            Write-Host "regsvr32 /u exit code: $($unreg.ExitCode) (洁净约定: 用完即注销)"
+          }
+
+      - name: 上传 demo 产物与日志
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: vbman-demo-logs
+          path: |
+            output/demo/**
+            _demo_compile.log
+          if-no-files-found: warn
+          retention-days: 14

@@ -267,7 +267,7 @@ CLI 仍保留 `--dump-ir` / `--emit-llvm` 开关，但没有消费方。
 子目录只影响**源码树可读性**：47 个文件解包到同一个平铺临时目录，RTL 内部 `#include` 一律按 basename，
 且各家族之间**无交叉 include**，因此编译路径与拆分前完全一致。
 新增 / 重命名 / 删除 RTL 文件需同步 **5 处**（`c3rtl.rc` / `rtl_embedded.hpp` / `rtl_embedded.cpp` /
-`driver.cpp` / `CMakeLists.txt`），详见 [`ai/022-源码拆分进度表.md`](ai/022-源码拆分进度表.md)。
+`driver.cpp` / `CMakeLists.txt`）。
 
 ---
 

@@ -253,7 +253,7 @@ function New-Banner([string]$family, [string[]]$libs, [bool]$needDynamic, [int]$
     $b += '// cast. The cast keeps the compiler from complaining about unrelated API parameter'
     $b += '// types while preserving the register/memory passing class of every argument.'
     $b += '//'
-    $b += ('// generated from: ' + $SessionDir)
+    $b += '// generated from: a C3 compile session (pass -SessionDir to regenerate)'
     $b += ('// date: ' + (Get-Date -Format 'yyyy-MM-dd HH:mm'))
     $b += '//'
     $b += '// Hand-maintained special cases stay in vb6_di_stubs.c (ordinals, msvbvm60 runtime,'
@@ -339,6 +339,53 @@ function New-GdiplusBanner([string]$sub, [int]$stubs) {
     return $b
 }
 
+# ---------- 2c. carry-over helpers (2026-09-20): regeneration is add-only ----------
+# Wipe-on-regen bit us once: the 2026-09-19 czUI re-run replaced the accumulated
+# 213-stub set with czUI's own subset, and the vbman DLL then failed on CI with ~90
+# LNK2019 (its Declare stubs were gone with the uncommitted 09-18 state). A stub is a
+# pure forwarder: an extra one is a few hundred bytes of dead code, a missing one is a
+# link failure in any project that declares it. So family files are now merged:
+# stubs present in the old file but not produced by the current session are carried
+# over verbatim, appended after the fresh ones.
+function Get-ExistingStubBlocks([string]$path) {
+    $blocks = @{}
+    if (-not (Test-Path $path)) { return $blocks }
+    $lines = [System.IO.File]::ReadAllLines($path)
+    $i = 0
+    while ($i -lt $lines.Count) {
+        # block header is a lone `/* <API name> */` line; banner comments never match
+        if ($lines[$i] -match '^/\* ([A-Za-z0-9_#]+) \*/\s*$') {
+            $nm = $Matches[1]
+            $end = $i + 1
+            while ($end -lt $lines.Count -and $lines[$end] -ne '}') { $end++ }
+            if ($end -lt $lines.Count) {
+                $blocks[$nm] = $lines[$i..$end]
+                $i = $end + 1
+                continue
+            }
+        }
+        $i++
+    }
+    return $blocks
+}
+
+function Get-StubNamesFromLines([string[]]$lines) {
+    $names = @{}
+    foreach ($ln in $lines) {
+        if ($ln -match '__stdcall vb6_di_([A-Za-z0-9_]+)\(') { $names[$Matches[1]] = $true }
+    }
+    return $names
+}
+
+# names produced by the current session across ALL families (+ hand file): a carried
+# stub must not duplicate any of them (two definitions of one symbol = LNK2005)
+$freshAll = @{}
+foreach ($k in $bodies.Keys) {
+    $freshNames = Get-StubNamesFromLines $bodies[$k]
+    foreach ($nm in $freshNames.Keys) { $freshAll[$nm] = $true }
+}
+foreach ($nm in $hand.Keys) { $freshAll[$nm] = $true }
+
 if (-not (Test-Path $OutDir)) { New-Item -ItemType Directory -Path $OutDir | Out-Null }
 
 $written = New-Object System.Collections.Generic.List[string]
@@ -355,7 +402,15 @@ foreach ($fam in $families) {
             $key = 'gdiplus_' + $sub
             if ($bodies[$key].Count -eq 0) { continue }
             $path = Join-Path $gdir ('vb6_di_' + $key + '_stubs.c')
-            $content = ((New-GdiplusBanner $sub $counts[$key]) + $bodies[$key]) -join "`r`n"
+            $carried = @()
+            $oldBlocks = Get-ExistingStubBlocks $path
+            foreach ($nm in ($oldBlocks.Keys | Sort-Object)) {
+                if (-not $freshAll.ContainsKey($nm)) { $carried += $oldBlocks[$nm] }
+            }
+            if ($carried.Count -gt 0) {
+                Write-Output ('  ' + $key.PadRight(14) + '    carried over ' + $carried.Count + ' stub(s) from previous file')
+            }
+            $content = ((New-GdiplusBanner $sub ($counts[$key] + $carried.Count)) + $bodies[$key] + $carried) -join "`r`n"
             [System.IO.File]::WriteAllText($path, $content, (New-Object System.Text.UTF8Encoding($false)))
             $written.Add($path)
             Write-Output ('  ' + $key.PadRight(14) + ' -> gdiplus\' + (Split-Path $path -Leaf) +
@@ -369,7 +424,15 @@ foreach ($fam in $families) {
     foreach ($l in $fam.libs) { $libs += $l }
     $needDynamic = $usedLibs[$name].ContainsKey('__dynamic__')
     $path = Join-Path $OutDir ('vb6_di_' + $name + '_stubs.c')
-    $content = ((New-Banner $name $libs $needDynamic $counts[$name]) + $bodies[$name]) -join "`r`n"
+    $carried = @()
+    $oldBlocks = Get-ExistingStubBlocks $path
+    foreach ($nm in ($oldBlocks.Keys | Sort-Object)) {
+        if (-not $freshAll.ContainsKey($nm)) { $carried += $oldBlocks[$nm] }
+    }
+    if ($carried.Count -gt 0) {
+        Write-Output ('  ' + $name.PadRight(9) + '    carried over ' + $carried.Count + ' stub(s) from previous file')
+    }
+    $content = ((New-Banner $name $libs $needDynamic ($counts[$name] + $carried.Count)) + $bodies[$name] + $carried) -join "`r`n"
     [System.IO.File]::WriteAllText($path, $content, (New-Object System.Text.UTF8Encoding($false)))
     $written.Add($path)
     Write-Output ('  ' + $name.PadRight(9) + ' -> ' + (Split-Path $path -Leaf) +
@@ -378,31 +441,23 @@ foreach ($fam in $families) {
 
 if ($bodies['unknown'].Count -gt 0) {
     $path = Join-Path $OutDir 'vb6_di_unknown_stubs.c'
-    $content = ((New-Banner 'unknown' @() $false $counts['unknown']) + $bodies['unknown']) -join "`r`n"
+    $carried = @()
+    $oldBlocks = Get-ExistingStubBlocks $path
+    foreach ($nm in ($oldBlocks.Keys | Sort-Object)) {
+        if (-not $freshAll.ContainsKey($nm)) { $carried += $oldBlocks[$nm] }
+    }
+    $content = ((New-Banner 'unknown' @() $false ($counts['unknown'] + $carried.Count)) + $bodies['unknown'] + $carried) -join "`r`n"
     [System.IO.File]::WriteAllText($path, $content, (New-Object System.Text.UTF8Encoding($false)))
     $written.Add($path)
     Write-Output ('  unknown   -> vb6_di_unknown_stubs.c   stubs ' + $counts['unknown'] + '   !!! no vb6_di_lib marker')
 }
 
-# ---------- 6. drop stale generated files ----------
-$produced = @{}
-foreach ($p in $written) { $produced[(Split-Path $p -Leaf)] = 1 }
-foreach ($f in Get-ChildItem $OutDir -File -Filter 'vb6_di_*_stubs.c') {
-    if (-not $produced.ContainsKey($f.Name)) {
-        Remove-Item $f.FullName
-        Write-Output ('  removed stale: ' + $f.Name)
-    }
-}
-# gdiplus 子目录同样清理
-$gdir = Join-Path $OutDir 'gdiplus'
-if (Test-Path $gdir) {
-    foreach ($f in Get-ChildItem $gdir -File -Filter 'vb6_di_gdiplus_*_stubs.c') {
-        if (-not $produced.ContainsKey($f.Name)) {
-            Remove-Item $f.FullName
-            Write-Output ('  removed stale: gdiplus\' + $f.Name)
-        }
-    }
-}
+# ---------- 6. (retired 2026-09-20) stale-file removal ----------
+# This section used to delete any vb6_di_*_stubs.c not produced by the current run.
+# Together with whole-file rewrites that made every re-run able to silently shrink the
+# stub set (see carry-over note above). Removal is retired: a family file left over
+# from an earlier run keeps its stubs and merges on the next run that produces it.
+# If a file truly needs to go away, delete it by hand with git rm.
 
 Write-Output ("files written: " + $written.Count)
 Write-Output ''

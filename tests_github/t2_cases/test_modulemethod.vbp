@@ -1,0 +1,5 @@
+Type=Exe
+Reference=*\G{00020430-0000-0000-C000-000000000046}#2.0#0#C:\Windows\SysWOW64\stdole2.tlb#OLE Automation
+Module=m6_main2; m6_main2.bas
+Module=m6_math2; m6_math2.bas
+Startup="Sub Main"

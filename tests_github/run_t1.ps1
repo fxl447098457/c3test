@@ -2,7 +2,8 @@
 #
 # 触发: .github/workflows/ci_t0.yml 的 t1 job (needs: t0, 复用 T0 构建的 C3.exe artifact)
 # 内容两段:
-#   1. bas 类 33 个: 编译 + 运行 + 输出断言 (-Jobs 并行, PS7 ForEach-Object -Parallel, 5s 超时)
+#   1. bas 类 33 个: 编译 + 运行 + 输出断言; x64/x86 双架构 (31 个双跑 + 2 个原生 x86
+#      专用项 = 64 任务; -Jobs 并行, PS7 ForEach-Object -Parallel, 5s 超时)
 #   2. compile 类 10 个: 只编译不运行 (comprehensive x2 + 8 个窗体 .frm)
 # 与 tests\run_tests.ps1 的关系: 用例 2026-09-20 cp 自 tests\ (复制而非引用) ——
 #   方向是 tests_github 自包含、后续废弃 tests\; 因此本脚本自带清单与引擎,
@@ -69,7 +70,7 @@ Write-Host ""
 # ============================================================
 # 段 1: bas 类 33 个 (编译+运行+输出断言, -Jobs 并行)
 # ============================================================
-Write-Host "--- Bas Tests (parallel, jobs=$Jobs) ---" -ForegroundColor Yellow
+Write-Host "--- Bas Tests x64+x86 (parallel, jobs=$Jobs) ---" -ForegroundColor Yellow
 
 $script:basQueue = @()
 function Add-BasTest {
@@ -122,10 +123,37 @@ if ($script:basQueue.Count -ne 33) {
     exit 1
 }
 
-# 缺文件守卫: 清单引用的源文件必须都存在
-$missing = @($script:basQueue | Where-Object { -not (Test-Path $_.Source) })
+# === 双架构展开 (2026-09-20 用户决策: VB6 生态以 32 位为主, 33 个用例全量双跑) ===
+# 31 个用例 x64+x86 各一遍 (x86 任务 Name 加 _x86 后缀); test_earlybound2 / test_not_com
+# 原生只登记 x86, 保持不跑 x64 (该组合从未验证过, 不贸然进门禁) => 31*2 + 2 = 64 任务
+$fullQueue = @()
+foreach ($it in $script:basQueue) {
+    if ($it.Arch -eq "x86") {
+        $fullQueue += $it
+    } else {
+        $fullQueue += @{
+            Name     = $it.Name
+            Source   = $it.Source
+            Expected = $it.Expected
+            Arch     = ""
+        }
+        $fullQueue += @{
+            Name     = "$($it.Name)_x86"
+            Source   = $it.Source
+            Expected = $it.Expected
+            Arch     = "x86"
+        }
+    }
+}
+if ($fullQueue.Count -ne 64) {
+    Write-Host "[ERROR] 双架构任务数异常: $($fullQueue.Count) (应为 64)" -ForegroundColor Red
+    exit 1
+}
+
+# 缺文件守卫: 队列引用的源文件必须都存在
+$missing = @($fullQueue | Where-Object { -not (Test-Path $_.Source) })
 if ($missing.Count -gt 0) {
-    Write-Host "[ERROR] 清单引用了不存在的用例文件:" -ForegroundColor Red
+    Write-Host "[ERROR] 队列引用了不存在的用例文件:" -ForegroundColor Red
     foreach ($m in $missing) { Write-Host "    $($m.Source)" -ForegroundColor Red }
     exit 1
 }
@@ -216,7 +244,7 @@ function Invoke-BasSetParallel {
     Write-Host "  (parallel: $($results.Count) worker(s), pass=$sumPass fail=$sumFail)"
 }
 
-Invoke-BasSetParallel -Items $script:basQueue -Jobs $Jobs
+Invoke-BasSetParallel -Items $fullQueue -Jobs $Jobs
 Write-Host ""
 
 # ============================================================
@@ -256,7 +284,7 @@ foreach ($t in $formTests) {
 }
 Write-Host ""
 
-# === 汇总 (bas 33 + compile 10 = 43) ===
+# === 汇总 (bas 64 任务 = 33 用例双架构 + compile 10 = 74) ===
 $total = $script:pass + $script:fail
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host "  T1 Results: PASS=$($script:pass) FAIL=$($script:fail) TOTAL=$total" -ForegroundColor $(if ($script:fail -gt 0) { "Red" } else { "Green" })

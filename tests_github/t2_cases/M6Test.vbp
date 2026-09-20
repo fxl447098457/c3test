@@ -1,0 +1,6 @@
+Type=Exe
+Module=MathHelper; m6_math.bas
+Module=MainApp; m6_main.bas
+Startup="Sub Main"
+Name="M6Test"
+ExeName32="M6Test.exe"

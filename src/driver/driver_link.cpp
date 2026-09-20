@@ -29,7 +29,13 @@ static void addFormsSources(MsvcDriverOptions& opts, const std::string& rtlDir) 
     opts.sourceFiles.push_back(rtlDir + "/vb6forms_widget.c");
     opts.sourceFiles.push_back(rtlDir + "/vb6forms_widget_prop.c");
     opts.sourceFiles.push_back(rtlDir + "/vb6forms_shape.c");
-    opts.sourceFiles.push_back(rtlDir + "/vb6forms_axsite.c");
+    // vb6forms_axsite.c 按功能家族拆 5 个编译单元 (2026-09-20): 伞文件本身不参与编译
+    // 注意: axsite/ 下的 .c 解包后是平铺目录, 故这里写 basename 而非带子目录路径
+    opts.sourceFiles.push_back(rtlDir + "/ax_site.c");
+    opts.sourceFiles.push_back(rtlDir + "/ax_site_ext.c");
+    opts.sourceFiles.push_back(rtlDir + "/ax_propbag.c");
+    opts.sourceFiles.push_back(rtlDir + "/ax_load.c");
+    opts.sourceFiles.push_back(rtlDir + "/ax_host.c");
     // Fix 112: 工程内 UserControl 实例宿主 + 宿主对象模型 (2026-09-19 按族拆 6 单元)
     // 注意: uc/ 下的 .c 解包后是平铺目录，故这里写 basename 而非带子目录路径
     opts.sourceFiles.push_back(rtlDir + "/uc_host.c");
