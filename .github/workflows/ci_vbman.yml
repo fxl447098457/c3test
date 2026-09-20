@@ -266,7 +266,11 @@ jobs:
               Close #1
           End Sub
           '@
-          if (-not $src.Contains($old)) { throw "Form_Load 块未匹配, vbman-demo 上游源码可能已变, 探针未注入" }
+          # 注意: GitHub 生成的临时 .ps1 是 CRLF 行尾, 单引号 here-string 会原样带上 CR;
+          # $src 已归一到 LF, 故 $old/$new 也必须归一, 否则 Contains 恒 false (vbman-011 实证)。
+          $old = $old.Replace("`r`n", "`n")
+          $new = $new.Replace("`r`n", "`n")
+          if (-not $src.Contains($old)) { throw "Form_Load 块未匹配: oldLen=$($old.Length) srcLen=$($src.Length), vbman-demo 上游源码可能已变, 探针未注入" }
           [System.IO.File]::WriteAllText($f, $src.Replace($old, $new), $gbk)
           Write-Host "Form_Load error probe injected"
 
