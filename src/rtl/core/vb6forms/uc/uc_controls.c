@@ -59,6 +59,43 @@ void* vb6_UC_ControlsItem(void* coll, int32_t index) {
     return kids[index - 1];
 }
 
+/* Fix 148: 按 VB6 名查找控件 — 容器 Controls("txtDoc(0)") 语义.
+ * VB6 控件 (如 NewTab 的 TDIMode) 通过 UserControl.Parent.Controls(name, tabIdx)
+ * 拿到宿主窗体上的控件 (用于 SetParent 重新父化到 Tab 页).
+ * name 支持 "Name" 与 "Name(idx)" 两种写法; tabIdx<0 表示不限.
+ * 返回控件 hwnd (未找到 NULL). */
+void* vb6_UC_ControlsItemByName(void* coll, const wchar_t* name, int32_t tabIdx) {
+    (void)tabIdx;
+    if (!name || !*name) return NULL;
+    wchar_t base[VB6_UC_NAME_LEN];
+    int wantIdx = -1;
+    /* 拆 "Name(idx)" */
+    const wchar_t* lp = wcschr(name, L'(');
+    if (lp) {
+        size_t n = (size_t)(lp - name);
+        if (n >= VB6_UC_NAME_LEN) n = VB6_UC_NAME_LEN - 1;
+        wcsncpy(base, name, n); base[n] = 0;
+        wantIdx = _wtoi(lp + 1);
+    } else {
+        wcsncpy(base, name, VB6_UC_NAME_LEN - 1); base[VB6_UC_NAME_LEN - 1] = 0;
+    }
+    HWND formHwnd = (coll && vb6_uc_isControls(coll)) ? (HWND)vb6_uc_controlsForm(coll) : NULL;
+    /* 优先在已注册宿主对象表里找 (名字精确, 不受父窗口层级影响) */
+    for (int32_t i = 0; i < g_hoCount; i++) {
+        vb6_HostObjRec* r = &g_ho[i];
+        if (r->isForm || !r->hwnd) continue;
+        if (formHwnd && GetAncestor((HWND)r->hwnd, GA_ROOT) != formHwnd
+            && !IsChild(formHwnd, (HWND)r->hwnd)) {
+            /* 不在该窗体下 (可能是别的窗体的同名控件) — 跳过 */
+            if (!IsWindow((HWND)r->hwnd)) continue;
+        }
+        if (_wcsicmp(r->name, base) != 0) continue;
+        if (wantIdx >= 0 && r->index != wantIdx) continue;
+        return r->hwnd;
+    }
+    return NULL;
+}
+
 // 句柄首元素存指针, 必须用 intptr_t —— x64 下按 int32_t 存会截断高 32 位 (同 Collection 枚举器)
 void* vb6_UC_ControlsEnumInit(void* coll) {
     intptr_t* e = (intptr_t*)malloc(sizeof(intptr_t) * 2);

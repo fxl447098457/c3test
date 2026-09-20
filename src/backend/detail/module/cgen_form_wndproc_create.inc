@@ -8,6 +8,28 @@
     c_.indent();
     c_.emitLine("switch (msg) {");
 
+    // Fix 143d: WM_PAINT — 无窗口 (windowless) OCX 控件不会自己收 WM_PAINT,
+    // 必须由宿主在 BeginPaint/EndPaint 之间调用 IViewObject::Draw 让控件绘制.
+    // 不生成这个 case 时, 第三方 OCX (如 NewTab01.ocx) 激活成功但窗体上空白.
+    c_.indent();
+    c_.emitLine("case WM_PAINT: {");
+    c_.indent();
+    c_.emitLine("PAINTSTRUCT _vb6_ps;");
+    c_.emitLine("HDC _vb6_hdc = BeginPaint(hwnd, &_vb6_ps);");
+    if (std::getenv("C3_OCX_NO_PAINT") == nullptr) {
+        c_.emitLine("vb6_OcxHost_PaintAll((void*)hwnd, (void*)_vb6_hdc);  /* Fix 143d: 无窗口/窗口化 OCX 绘制 */");
+    }
+    // Form_Paint 事件 (若有)
+    if (symTab_.lookup(formName + "_Paint")) {
+        c_.emitLine("{ extern void " + cProcName(formName + "_Paint", AccessLevel::Private) + "(); "
+                    + cProcName(formName + "_Paint", AccessLevel::Private) + "(); }");
+    }
+    c_.emitLine("EndPaint(hwnd, &_vb6_ps);");
+    c_.emitLine("break;");
+    c_.dedent();
+    c_.emitLine("}");
+    c_.dedent();
+
     // WM_CREATE: 创建控件
     c_.indent();
     c_.emitLine("case WM_CREATE: {");

@@ -3,6 +3,23 @@
 // 内容 = 原文件第 371~462 行，逐行未改。
 
 
+    // Fix 142: 确定启动对象 (决定哪个模块生成进程入口点).
+    // VBP 未写 Startup= 时按 VB6 语义取工程中的第一个窗体模块作为启动窗体;
+    // 全无窗体则留空 (此时只有含 Public Sub Main 的模块生成 main).
+    std::string startupObject = startupObject_;
+    if (startupObject.empty() && modules_.size() > 1) {
+        for (size_t k = 0; k < modules_.size(); k++) {
+            if (frmFiles_.count(modules_[k]->moduleName)) {
+                startupObject = modules_[k]->moduleName;
+                break;
+            }
+        }
+    }
+
+    // Fix 143: OCX 文件表 (vbp Object= 收集, CLSID → ocx 绝对路径)
+    const std::map<std::string, std::string>& ocxFiles = ocxFiles_;
+    const std::vector<std::pair<std::string, std::string>>& ocxRefs = ocxRefs_;
+
     for (size_t i = 0; i < modules_.size(); i++) {
         auto& module = modules_[i];
         auto& analyzer = analyzers_[i];
@@ -38,8 +55,11 @@
         CCodeGen cgen(*diag_, analyzer->symbolTable(), analyzer->typeSystem(),
                       &classVoidFieldMap, &classTypedFieldMap, &variantReturnFuncs, options.verbose);
         cgen.setFormModuleNames(formModuleNames);  // Fix 086: 跨模块窗体默认实例引用
+        cgen.setStartupObject(startupObject);      // Fix 142: 启动对象 (入口点归属模块)
         cgen.setModulePublicConsts(&modulePublicConsts);  // Fix 086: 跨模块常量内联
         cgen.setDesignerFiles(&frmFiles_);  // Fix 112: 工程内 UserControl 设计器描述
+        cgen.setOcxFiles(&ocxFiles);        // Fix 143: vbp Object= 的 ocx 路径表
+        cgen.setOcxRefs(&ocxRefs);          // Fix 143b: 实例化 CLSID 以 vbp Object= 为准
         cgen.setStaticModuleVarNames(&dupModuleVarNames);  // Fix 093b: 撞名模块级变量转 static
         cgen.setInterfaceImplementers(&ifaceImplementersMap);  // P6.4+: 接口唯一实现类映射
         cgen.setDefaultInstanceClasses(&defaultInstanceClasses);  // P6.4+: 类模块默认实例

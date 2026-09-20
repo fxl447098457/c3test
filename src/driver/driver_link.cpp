@@ -40,6 +40,8 @@ static void addFormsSources(MsvcDriverOptions& opts, const std::string& rtlDir) 
     opts.sourceFiles.push_back(rtlDir + "/uc_debug.c");
     // Fix 120-141 移植 (2026-09-20): PropertyBag (IDispatch) 编译单元
     opts.sourceFiles.push_back(rtlDir + "/uc_propbag.c");
+    // Fix 148: OCX 真宿主 (免注册 LoadLibrary + DllGetClassObject) —— NewTab 等第三方 32 位 OCX
+    opts.sourceFiles.push_back(rtlDir + "/vb6forms_axcontainer.c");
 }
 
 bool Driver::runLinker(const CompileOptions& options, const std::string& outputDir,

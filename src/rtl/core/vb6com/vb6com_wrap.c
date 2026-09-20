@@ -73,8 +73,15 @@ double vb6_ComCallDouble(void* disp, const wchar_t* methodName,
 // COM属性Get, 返回BSTR — 内部完成Unpack+VarClear
 wchar_t* vb6_ComGetStringProp(void* disp, const wchar_t* propName) {
     VARIANT* pv = (VARIANT*)vb6_ComGetProp(disp, propName);
-    if (!pv) return NULL;
+    if (!pv) {
+        if (GetEnvironmentVariableW(L"C3_OCX_TRACE", NULL, 0) > 0)
+            fprintf(stderr, "[C3_GSPROP] '%ls' -> NULL (调用失败)\n", propName ? propName : L"?");
+        return NULL;
+    }
     BSTR result = vb6_ComUnpackBSTR(pv);
+    if (GetEnvironmentVariableW(L"C3_OCX_TRACE", NULL, 0) > 0)
+        fprintf(stderr, "[C3_GSPROP] '%ls' srcVT=%d -> '%ls'\n", propName ? propName : L"?",
+                (int)pv->vt, result ? result : L"(null)");
     vb6_ComVarClear(pv);  // 安全: UnpackBSTR已复制字符串内容
     return result;
 }

@@ -240,6 +240,28 @@ void* vb6_CreateControl(const char* win32Class, const char* controlName,
             );
         }
         SendMessage(hwnd, WM_SETFONT, (WPARAM)hFont, MAKELPARAM(FALSE, 0));
+
+        /* Fix 145: ComboBox 下拉列表高度.
+         * Win32 的 ComboBox 窗口高度 = 显示行 + 下拉列表高度; 而 .frm 里
+         * ComboBox.Height 只是**显示区**的一行高度 (VB6 语义: 下拉部分由系统
+         * 默认项数决定). 直接拿 .frm 高度当窗口高度会让下拉区 ≈ 0 —
+         * 实测下拉弹出窗口只有 2px, 用户拉开只看到第一项.
+         * 这里补足到 VB6 的观感: 下拉约显示 9~10 项 (VB6 ThunderRT6ComboBox
+         * 实测下拉区 114px; 本机 itemH=12px → 10 项 ≈ 120px). */
+        if (_stricmp(win32Class, "COMBOBOX") == 0) {
+            int itemH = (int)SendMessage(hwnd, CB_GETITEMHEIGHT, 0, 0);
+            if (itemH <= 0) itemH = (int)SendMessage(hwnd, CB_GETITEMHEIGHT, (WPARAM)-1, 0);
+            if (itemH <= 0) itemH = 16;
+            int listPx = ph - itemH;              /* .frm 高度里减去一行 = 下拉区 */
+            if (listPx < itemH * 4) listPx = itemH * 10;  /* 不足则用 VB6 观感项数 */
+            SetWindowPos(hwnd, NULL, 0, 0, pw, itemH + listPx,
+                         SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+            if (GetEnvironmentVariableW(L"C3_OCX_TRACE", NULL, 0) > 0) {
+                RECT rr; GetWindowRect(hwnd, &rr);
+                fprintf(stderr, "[C3_FIX] ComboBox itemH=%d frmH(px)=%d setH=%d actualH=%d\n",
+                        itemH, ph, itemH + listPx, (int)(rr.bottom - rr.top));
+            }
+        }
     }
 
     return (void*)hwnd;
@@ -316,6 +338,9 @@ int vb6_MessageLoop(void) {
         TranslateMessage(&msg);
         DispatchMessage(&msg);
     }
+    if (GetEnvironmentVariableW(L"C3_OCX_TRACE", NULL, 0) > 0)
+        fprintf(stderr, "[C3_MODAL] 主消息循环结束: msg=0x%04X hwnd=%p\n",
+                msg.message, (void*)msg.hwnd);
     return (int)msg.wParam;
 }
 
@@ -357,7 +382,71 @@ void vb6_SetAppInstance(void* hInstance) {
     g_hInstance = (HINSTANCE)hInstance;
 }
 
+// Fix 149 诊断: C3_CRASH_TRACE=1 时安装未处理异常过滤器, 把崩溃栈各帧的
+// 「模块+偏移」写进 c3_crash.txt。没有调试器也能一眼看出异常是从
+// Test.exe 自己的代码抛的, 还是逃出第三方 OCX (NewTab01.ocx) 的 VB6 代码。
+static LONG WINAPI vb6_crashFilter(EXCEPTION_POINTERS* ep) {
+    FILE* f = fopen("c3_crash.txt", "a");
+    if (!f) return EXCEPTION_EXECUTE_HANDLER;
+    fprintf(f, "=== EXCEPTION code=0x%08lX addr=%p ===\n",
+            (unsigned long)ep->ExceptionRecord->ExceptionCode,
+            ep->ExceptionRecord->ExceptionAddress);
+    {   /* 触发地址所在模块 */
+        HMODULE hm = NULL;
+        wchar_t wp[MAX_PATH] = {0};
+        char nm[80] = "?";
+        if (GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+                               GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                               (LPCWSTR)ep->ExceptionRecord->ExceptionAddress, &hm) && hm) {
+            GetModuleFileNameW(hm, wp, MAX_PATH);
+            { const wchar_t* b = wcsrchr(wp, L'\\');
+              WideCharToMultiByte(CP_ACP, 0, b ? b + 1 : wp, -1, nm, sizeof(nm), NULL, NULL); }
+            fprintf(f, "  FAULT %s+0x%llX\n", nm,
+                    (unsigned long long)((const char*)ep->ExceptionRecord->ExceptionAddress
+                                         - (const char*)hm));
+        } else {
+            fprintf(f, "  FAULT (unknown module) %p\n", ep->ExceptionRecord->ExceptionAddress);
+        }
+    }
+    {   void* frames[48];
+        USHORT n = RtlCaptureStackBackTrace(0, 48, frames, NULL), i;
+        for (i = 0; i < n; i++) {
+            HMODULE hm = NULL;
+            wchar_t wp[MAX_PATH] = {0};
+            char nm[80] = "?";
+            if (GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+                                   GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                                   (LPCWSTR)frames[i], &hm) && hm) {
+                GetModuleFileNameW(hm, wp, MAX_PATH);
+                { const wchar_t* b = wcsrchr(wp, L'\\');
+                  WideCharToMultiByte(CP_ACP, 0, b ? b + 1 : wp, -1, nm, sizeof(nm), NULL, NULL); }
+                fprintf(f, "  #%02d 0x%p  %s+0x%llX\n", i, frames[i], nm,
+                        (unsigned long long)((const char*)frames[i] - (const char*)hm));
+            } else {
+                fprintf(f, "  #%02d 0x%p  (unknown)\n", i, frames[i]);
+            }
+        }
+    }
+    fflush(f);
+    fclose(f);
+    return EXCEPTION_EXECUTE_HANDLER;
+}
+
+static void vb6_installCrashTrace(void) {
+    static int done = 0;
+    if (done) return;
+    done = 1;
+    if (GetEnvironmentVariableW(L"C3_CRASH_TRACE", NULL, 0) > 0)
+        SetUnhandledExceptionFilter(vb6_crashFilter);
+}
+
 void vb6_ShowForm(void* hwnd, int modal) {
+    vb6_installCrashTrace();
+    if (GetEnvironmentVariableW(L"C3_OCX_TRACE", NULL, 0) > 0) {
+        char cap[160] = {0};
+        GetWindowTextA((HWND)hwnd, cap, 159);
+        fprintf(stderr, "[C3_MODAL] ShowForm hwnd=%p modal=%d cap='%s'\n", hwnd, modal, cap);
+    }
     if (!hwnd) return;
 
     // Fix 115: 恢复 VB6 的 "先 Form_Load, 后 Show" 顺序。
@@ -400,6 +489,7 @@ void vb6_ShowForm(void* hwnd, int modal) {
     SetActiveWindow((HWND)hwnd);
 
     if (modal) {
+        int traceModal = (GetEnvironmentVariableW(L"C3_OCX_TRACE", NULL, 0) > 0);
         // 模态窗体: 禁用所有者, 进入本地消息循环
         HWND owner = GetWindow((HWND)hwnd, GW_OWNER);
         if (owner) {
@@ -409,14 +499,33 @@ void vb6_ShowForm(void* hwnd, int modal) {
 
         // 本地消息循环 (直到窗体被销毁)
         MSG msg;
+        int traceMsg = traceModal;
+        int msgCount = 0;
+        /* Fix 144b: IsDialogMessageA 会吞掉非对话框窗口的键盘/命令消息, 可用
+         * C3_OCX_NO_DLGMSG=1 关闭 (对照实验/排障). */
+        int useDlgMsg = (GetEnvironmentVariableW(L"C3_OCX_NO_DLGMSG", NULL, 0) <= 0);
         while (IsWindow((HWND)hwnd) && GetMessage(&msg, NULL, 0, 0)) {
+            if (traceMsg && msgCount < 80) {
+                wchar_t cap[128] = {0};
+                GetWindowTextW((HWND)hwnd, cap, 128);
+                fprintf(stderr, "[C3_MODAL] msg[%d] 0x%04X hwnd=%p wp=%p lp=%p | ownerWin alive=%d cap='%ls'\n",
+                        msgCount, msg.message, (void*)msg.hwnd,
+                        (void*)msg.wParam, (void*)msg.lParam,
+                        IsWindow((HWND)hwnd) ? 1 : 0, cap);
+            }
+            msgCount++;
             // P24-Timer: WM_TIMER现在由WndProc分发, 模态循环不再拦截
             // 模态Tab键导航 (IsDialogMessage处理对话框键盘导航)
-            if (!IsDialogMessageA((HWND)hwnd, &msg)) {
+            if (!useDlgMsg || !IsDialogMessageA((HWND)hwnd, &msg)) {
                 TranslateMessage(&msg);
                 DispatchMessage(&msg);
             }
+            if (msg.message == WM_QUIT && traceModal)
+                fprintf(stderr, "[C3_MODAL] 收到 WM_QUIT, 模态循环结束 (hwnd=%p)\n", hwnd);
         }
+        if (traceModal)
+            fprintf(stderr, "[C3_MODAL] 模态循环退出: IsWindow=%d (hwnd=%p, owner=%p)\n",
+                    IsWindow((HWND)hwnd) ? 1 : 0, hwnd, owner);
 
         // 恢复所有者窗口
         if (g_modalOwner) {
@@ -429,6 +538,8 @@ void vb6_ShowForm(void* hwnd, int modal) {
 
 void vb6_UnloadForm(void* hwnd) {
     if (!hwnd) return;
+    if (GetEnvironmentVariableW(L"C3_OCX_TRACE", NULL, 0) > 0)
+        fprintf(stderr, "[C3_MODAL] UnloadForm hwnd=%p\n", hwnd);
     DestroyWindow((HWND)hwnd);
 }
 

@@ -192,6 +192,16 @@ int32_t vb6_ho_variantToLong(const vb6_VARIANT* v);
 double vb6_ho_variantToDouble(const vb6_VARIANT* v);
 BSTR vb6_ho_variantToBstr(const vb6_VARIANT* v);
 
+// --- Fix 148: OCX 真宿主辅助 (vb6forms_axcontainer.c 调用；实现分散在各 uc 族) ---
+// 按 VB6 名查找控件: Controls("txtDoc(0)") 语义, 供容器/控件对象模型 SetParent 重新父化
+void* vb6_UC_ControlsItemByName(void* coll, const wchar_t* name, int32_t tabIdx);  // uc_controls.c
+// 宿主对象登记表只读访问器 (uc_hostmodel.c)
+int32_t vb6_HostObj_GetIndex(void* hwnd);
+const wchar_t* vb6_HostObj_GetTypeName(void* hwnd);
+const wchar_t* vb6_HostObj_GetName(void* hwnd);
+int32_t vb6_HostObj_Count(void);
+void* vb6_HostObj_At(int32_t i);
+
 // --- Fix 113h/Fix 123 调试辅助（uc_debug.c 定义，uc_host_window.c 的 WM_PAINT 依赖）---
 // 离屏 DIB 工具 + 整窗合成 dump；未设环境变量 C3_UC_DUMPDIR 时不会被调用。
 void vb6_uc_dibCreate(vb6_UCDib* d, HDC refDC, int32_t w, int32_t h);

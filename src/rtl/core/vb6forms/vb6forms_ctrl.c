@@ -23,7 +23,7 @@
 // 控件属性读写 (P7.5)
 // ============================================================
 
-void* vb6_GetControlText(void* hwnd) {
+wchar_t* vb6_GetControlText(void* hwnd) {
     if (!hwnd) return NULL;
     HWND h = (HWND)hwnd;
     int len = GetWindowTextLengthW(h);

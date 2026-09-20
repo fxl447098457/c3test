@@ -194,7 +194,26 @@
                 std::string itemArg = "0";
                 if (!node.positional.empty()) {
                     emitExpr(*node.positional[0]);
-                    itemArg = std::move(lastExpr_);
+                    // Fix 143: 实参是 COM 属性读 (cboThemes.AddItem iTheme.Name) —
+                    // 必须在此消费 COM marker, 否则 lastExpr_ 停在对象表达式上
+                    // (vb6_AddItem(hwnd, iTheme) 把 IDispatch 指针当字符串塞进列表,
+                    // 条目显示成 "???" 乱码), 且残留 marker 会被上层当成独立语句
+                    // 发射 (vb6_ComVarFree(ComCall(iTheme,"Name"))) → 结果丢弃.
+                    if (isComMarker_) {
+                        // 直接生成字符串属性读 (AddItem 形参是字符串);
+                        // resolveComValue 会按属性类型给出 BSTR/vb6_VARIANT 两种形态,
+                        // 这里要的是 BSTR, 故显式用 vb6_ComGetStringProp.
+                        isComMarker_ = false;
+                        isEarlyBoundCom_ = false;
+                        earlyBoundSym_ = nullptr;
+                        std::string objM = std::move(comObjExpr_);
+                        std::string memM = std::move(comMemberName_);
+                        comObjExpr_.clear();
+                        comMemberName_.clear();
+                        itemArg = "vb6_ComGetStringProp(" + objM + ", L\"" + memM + "\")";
+                    } else {
+                        itemArg = std::move(lastExpr_);
+                    }
                 }
                 c_.emitLine("vb6_AddItem((void*)vb6_hwnd_" + ctrlName + ", " + itemArg + ");  /* ListBox.AddItem */");
                 lastExpr_ = "0";

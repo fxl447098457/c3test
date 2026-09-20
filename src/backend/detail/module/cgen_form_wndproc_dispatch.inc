@@ -139,7 +139,23 @@
             c_.emitLine("  if (vb6_ico) DestroyIcon((HICON)vb6_ico); }");
         }
     }
-    c_.emitLine("PostQuitMessage(0);");
+    // Fix 144: 只有**启动窗体**的 WM_DESTROY 才 PostQuitMessage.
+    // 此前无条件投 WM_QUIT: 用 Show vbModal 打开的子窗体一旦销毁就把主消息循环
+    // 一起结束掉 — 症状是"点按钮打开子窗体后整个程序退出" (退出码 0).
+    // Startup="Sub Main" 时由 main 返回结束进程, 窗体都不投.
+    {
+        bool postQuit = true;
+        if (!startupObject_.empty()) {
+            std::string so = Symbol::toLower(startupObject_);
+            std::string fn = Symbol::toLower(formName);
+            std::string modLower = Symbol::toLower(moduleName_);
+            postQuit = (so == fn || so == modLower);
+            if (so == "sub main") postQuit = false;
+        }
+        if (postQuit) {
+            c_.emitLine("PostQuitMessage(0);  /* Fix 144: 仅启动窗体结束消息循环 */");
+        }
+    }
     c_.emitLine("break;");
     c_.dedent();
     c_.emitLine("}");

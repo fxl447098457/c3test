@@ -89,10 +89,13 @@ void vb6_AddItem(void* hwnd, void* bstrItem) {
     if (!bs) {
         bs = SysAllocString(L"");
     }
-    if (vb6_IsListBox(hwnd)) {
-        SendMessageW((HWND)hwnd, LB_ADDSTRING, 0, (LPARAM)bs);
-    } else {
-        SendMessageW((HWND)hwnd, CB_ADDSTRING, 0, (LPARAM)bs);
+    int isLB = vb6_IsListBox(hwnd);
+    LRESULT idx = isLB ? SendMessageW((HWND)hwnd, LB_ADDSTRING, 0, (LPARAM)bs)
+                       : SendMessageW((HWND)hwnd, CB_ADDSTRING, 0, (LPARAM)bs);
+    if (GetEnvironmentVariableW(L"C3_OCX_TRACE", NULL, 0) > 0) {
+        int after = (int)SendMessageW((HWND)hwnd, isLB ? LB_GETCOUNT : CB_GETCOUNT, 0, 0);
+        fprintf(stderr, "[C3_LIST] AddItem hwnd=%p isLB=%d ret=%ld countAfter=%d text='%ls'\n",
+                hwnd, isLB, (long)idx, after, bs ? bs : L"(null)");
     }
     if (bstrItem == NULL) {
         SysFreeString(bs);
