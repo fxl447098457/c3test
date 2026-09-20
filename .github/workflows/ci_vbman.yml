@@ -99,14 +99,23 @@ jobs:
           New-Item -ItemType Directory -Force -Path tests\vbman\dist\DLL | Out-Null
           & .build\C3.exe tests\vbman\src\VBMAN.vbp --output-dir tests\vbman\dist\DLL --verbose *> _vbman_compile.log
           Get-Content _vbman_compile.log | Write-Host
-          if ($LASTEXITCODE -ne 0) { throw "VBMAN.vbp compile failed" }
+          if ($LASTEXITCODE -ne 0) {
+            # cl.exe 的错误正文由 C3 落到 --output-dir 下的 c3-error.log, 回显到 step 输出
+            if (Test-Path "tests\vbman\dist\DLL\c3-error.log") {
+              Write-Host "=== c3-error.log ==="
+              Get-Content "tests\vbman\dist\DLL\c3-error.log" | Write-Host
+            }
+            throw "VBMAN.vbp compile failed"
+          }
 
       - name: 上传编译日志（失败诊断用）
         if: always()
         uses: actions/upload-artifact@v7
         with:
           name: vbman-compile-logs
-          path: _vbman_compile.log
+          path: |
+            _vbman_compile.log
+            tests/vbman/dist/DLL/c3-error.log
           if-no-files-found: warn
           retention-days: 14
 
@@ -183,7 +192,13 @@ jobs:
           New-Item -ItemType Directory -Force -Path output\demo | Out-Null
           & .build\C3.exe tests\vbman-demo\demos\Helloworld\VBMAN_DEMO.vbp --output-dir output\demo --verbose *> _demo_compile.log
           Get-Content _demo_compile.log | Write-Host
-          if ($LASTEXITCODE -ne 0) { throw "VBMAN_DEMO.vbp compile failed" }
+          if ($LASTEXITCODE -ne 0) {
+            if (Test-Path "output\demo\c3-error.log") {
+              Write-Host "=== c3-error.log ==="
+              Get-Content "output\demo\c3-error.log" | Write-Host
+            }
+            throw "VBMAN_DEMO.vbp compile failed"
+          }
           if (-not (Test-Path "output\demo\VBMAN_DEMO.exe")) { throw "VBMAN_DEMO.exe missing" }
 
       - name: 运行 demo + HTTP 环回断言（finally 注销 DLL）
@@ -221,6 +236,5 @@ jobs:
           name: vbman-demo-logs
           path: |
             output/demo/**
-            _demo_compile.log
-          if-no-files-found: warn
+            _demo_compile.log          if-no-files-found: warn
           retention-days: 14
