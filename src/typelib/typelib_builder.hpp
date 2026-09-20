@@ -19,7 +19,7 @@ namespace vb6c3 {
 //
 // 使用流程:
 //   TypeLibBuilder builder;
-//   builder.beginLib("MyLib.TypeLib", libIdStr, "MyLib");
+//   builder.beginLib("output/MyLib.tlb", libIdStr, "MyLib TypeLib", "MyLib");
 //   builder.addDispInterface("_Calc", iidStr, methods...);
 //   builder.addCoClass("Calc", clsidStr, "_Calc");
 //   builder.endLib("output/MyLib.tlb");
@@ -35,7 +35,8 @@ public:
     // --- 生命周期 ---
 
     /// 开始构建 TypeLib
-    /// @param name      类型库内部名 (如 "MyLib.TypeLib")
+    /// @param name      类型库内部名 (VB6 约定 = 工程名, 如 "MyLib"; 客户端按
+    ///                  "<类型库名>.<coclass名>" 拼 ProgID, 因此不可加 .TypeLib 之类后缀)
     /// @param libidStr  LibID UUID 字符串 (如 "{...}"), 空则自动生成
     /// @param helpString 帮助字符串
     /// @return true=成功

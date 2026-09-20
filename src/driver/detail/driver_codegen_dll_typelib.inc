@@ -46,7 +46,13 @@
                 ? TypeLibBuilder::generateUuid(options.dllProgId + ".TypeLib")
                 : options.libidStr;
 
-            if (tlbBuilder.beginLib(tlbPath, libId, options.dllProgId + " TypeLib", options.dllProgId + ".TypeLib")) {
+            // 类型库内部名 = 工程名 (= ProgID 前缀)。真 VB6 的 ActiveX DLL 就是这样: 实测
+            // VBMAN.dll 的库名是 "VBMANLIB" (工程 Name=), 不是 "VBMANLIB.TypeLib"。
+            // 客户端导入类型库后, coclass 的 ProgID 靠注册表反查 (ProgIDFromCLSID), 反查
+            // 不到时退化成 "<库名>.<类名>" —— 库名多一段后缀就会拼出 CLSIDFromProgID 查不
+            // 到的 ProgID, 运行期 New 报 429 (0x800401F3)。
+            // LIBID 种子保持不变: 改它会给已构建产物换一套 GUID, 与本次修复无关。
+            if (tlbBuilder.beginLib(tlbPath, libId, options.dllProgId + " TypeLib", options.dllProgId)) {
                 int dispidCounter = 1;
                 std::set<std::string> processedClasses;
                 for (auto* symTab : allSymTabs) {
