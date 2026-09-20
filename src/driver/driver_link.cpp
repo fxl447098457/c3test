@@ -400,6 +400,12 @@ bool Driver::runLinker(const CompileOptions& options, const std::string& outputD
     }
 
     MsvcDriver msvc;
+    // 编译前自愈: 会话 rtl/ 下的 RTL 源文件可能已被兄弟进程的 cleanupOldSessions
+    // 误删 (并发编译下 cl /MP 尚未处理的那些源文件会报 C1083). 缺什么补什么.
+    if (!session.restoreMissing()) {
+        std::cerr << "C3: error: RTL sources incomplete before compile (" << rtlDir << ")" << std::endl;
+        return false;
+    }
     return msvc.compileAndLink(msvcOpts);
 }
 
