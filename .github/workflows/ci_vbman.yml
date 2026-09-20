@@ -217,9 +217,14 @@ jobs:
 
       - name: 归位产物（dll -> vbman\dist\DLL, C3.exe -> .build）
         run: |
+          # download-artifact 保留 artifact 内部目录结构 (上传时的 tests\... 与
+          # .build\... 嵌套在 _dl 下), 递归定位两个文件, 不依赖具体层级
           New-Item -ItemType Directory -Force -Path tests\vbman\dist\DLL, .build | Out-Null
-          Move-Item _dl\VBMAN.dll tests\vbman\dist\DLL\VBMAN.dll -Force
-          Move-Item _dl\C3.exe .build\C3.exe -Force
+          $dll = Get-ChildItem _dl -Recurse -Filter VBMAN.dll | Select-Object -First 1
+          $exe = Get-ChildItem _dl -Recurse -Filter C3.exe | Select-Object -First 1
+          if (-not $dll -or -not $exe) { throw "artifact 内容缺失: VBMAN.dll / C3.exe" }
+          Move-Item $dll.FullName tests\vbman\dist\DLL\VBMAN.dll -Force
+          Move-Item $exe.FullName .build\C3.exe -Force
 
       - name: clone vbman 与 vbman-demo（gitcode 匿名 HTTPS, 目录平级）
         run: |
@@ -293,5 +298,6 @@ jobs:
           name: vbman-demo-logs
           path: |
             output/demo/**
-            _demo_compile.log          if-no-files-found: warn
+            _demo_compile.log
+          if-no-files-found: warn
           retention-days: 14

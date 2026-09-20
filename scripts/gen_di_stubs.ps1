@@ -253,7 +253,7 @@ function New-Banner([string]$family, [string[]]$libs, [bool]$needDynamic, [int]$
     $b += '// cast. The cast keeps the compiler from complaining about unrelated API parameter'
     $b += '// types while preserving the register/memory passing class of every argument.'
     $b += '//'
-    $b += ('// generated from: ' + $SessionDir)
+    $b += '// generated from: a C3 compile session (pass -SessionDir to regenerate)'
     $b += ('// date: ' + (Get-Date -Format 'yyyy-MM-dd HH:mm'))
     $b += '//'
     $b += '// Hand-maintained special cases stay in vb6_di_stubs.c (ordinals, msvbvm60 runtime,'

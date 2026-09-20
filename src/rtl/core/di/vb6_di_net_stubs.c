@@ -11,8 +11,8 @@
 // cast. The cast keeps the compiler from complaining about unrelated API parameter
 // types while preserving the register/memory passing class of every argument.
 //
-// generated from: C:\Users\Administrator\AppData\Local\Temp\C3C\merged_stubgen_czui
-// date: 2026-09-19 18:17
+// generated from: a C3 compile session (pass -SessionDir to regenerate)
+// date: 2026-09-20 07:16
 //
 // Hand-maintained special cases stay in vb6_di_stubs.c (ordinals, msvbvm60 runtime,
 // dynamically loaded DLLs). Re-run the generator after a build exposes new symbols.
@@ -51,34 +51,9 @@ void WINAPI RtlZeroMemory(void*, size_t);
 #pragma comment(lib, "iphlpapi.lib")
 #pragma comment(lib, "comdlg32.lib")
 
-/* accept */
-intptr_t __stdcall vb6_di_accept(intptr_t lSocket, void* lpAddr, void* lpAddrLen) {
-    return ((intptr_t (WINAPI *)(intptr_t, void*, void*))accept)(lSocket, lpAddr, lpAddrLen);
-}
-
-/* bind */
-intptr_t __stdcall vb6_di_bind(intptr_t lSocket, void* uName, intptr_t lNameLen) {
-    return ((intptr_t (WINAPI *)(intptr_t, void*, intptr_t))bind)(lSocket, uName, lNameLen);
-}
-
-/* connect */
-intptr_t __stdcall vb6_di_connect(intptr_t lSocket, void* uName, intptr_t lNameLen) {
-    return ((intptr_t (WINAPI *)(intptr_t, void*, intptr_t))connect)(lSocket, uName, lNameLen);
-}
-
 /* GetAdaptersInfo */
 intptr_t __stdcall vb6_di_GetAdaptersInfo(void* lpAdapterInfo, int32_t* lpSize) {
     return ((intptr_t (WINAPI *)(void*, int32_t*))GetAdaptersInfo)(lpAdapterInfo, lpSize);
-}
-
-/* gethostbyname */
-intptr_t __stdcall vb6_di_gethostbyname(BSTR sHostName) {
-    return ((intptr_t (WINAPI *)(BSTR))gethostbyname)(sHostName);
-}
-
-/* gethostname */
-intptr_t __stdcall vb6_di_gethostname(BSTR sHostName, intptr_t lNameLen) {
-    return ((intptr_t (WINAPI *)(BSTR, intptr_t))gethostname)(sHostName, lNameLen);
 }
 
 /* GetIpForwardTable */
@@ -86,19 +61,44 @@ intptr_t __stdcall vb6_di_GetIpForwardTable(void* pIpForwardTable, int32_t* pdwS
     return ((intptr_t (WINAPI *)(void*, int32_t*, intptr_t))GetIpForwardTable)(pIpForwardTable, pdwSize, bOrder);
 }
 
-/* getpeername */
-intptr_t __stdcall vb6_di_getpeername(intptr_t lSocket, void* uName, int32_t* lpNameLen) {
-    return ((intptr_t (WINAPI *)(intptr_t, void*, int32_t*))getpeername)(lSocket, uName, lpNameLen);
+/* WSAStartup */
+intptr_t __stdcall vb6_di_WSAStartup(intptr_t wVersionRequired, void* lpWSAData) {
+    return ((intptr_t (WINAPI *)(intptr_t, void*))WSAStartup)(wVersionRequired, lpWSAData);
 }
 
-/* getsockname */
-intptr_t __stdcall vb6_di_getsockname(intptr_t lSocket, void* uName, int32_t* lpNameLen) {
-    return ((intptr_t (WINAPI *)(intptr_t, void*, int32_t*))getsockname)(lSocket, uName, lpNameLen);
+/* WSACleanup */
+intptr_t __stdcall vb6_di_WSACleanup() {
+    return ((intptr_t (WINAPI *)(void))WSACleanup)();
 }
 
-/* getsockopt */
-intptr_t __stdcall vb6_di_getsockopt(intptr_t lSocket, intptr_t lLevel, intptr_t lOptName, void* lpOptVal, int32_t* lpOptLen) {
-    return ((intptr_t (WINAPI *)(intptr_t, intptr_t, intptr_t, void*, int32_t*))getsockopt)(lSocket, lLevel, lOptName, lpOptVal, lpOptLen);
+/* WSAAsyncGetHostByName */
+intptr_t __stdcall vb6_di_WSAAsyncGetHostByName(intptr_t hWnd, intptr_t wMsg, BSTR strHostName, void* lpBuf, intptr_t lBufLen) {
+    return ((intptr_t (WINAPI *)(intptr_t, intptr_t, BSTR, void*, intptr_t))WSAAsyncGetHostByName)(hWnd, wMsg, strHostName, lpBuf, lBufLen);
+}
+
+/* WSAAsyncSelect */
+intptr_t __stdcall vb6_di_WSAAsyncSelect(intptr_t lSocket, intptr_t hWnd, intptr_t wMsg, intptr_t lEvent) {
+    return ((intptr_t (WINAPI *)(intptr_t, intptr_t, intptr_t, intptr_t))WSAAsyncSelect)(lSocket, hWnd, wMsg, lEvent);
+}
+
+/* WSACancelAsyncRequest */
+intptr_t __stdcall vb6_di_WSACancelAsyncRequest(intptr_t hAsyncTaskHandle) {
+    return ((intptr_t (WINAPI *)(intptr_t))WSACancelAsyncRequest)(hAsyncTaskHandle);
+}
+
+/* WSASocketW */
+intptr_t __stdcall vb6_di_WSASocketW(intptr_t lAf, intptr_t lType, intptr_t lProtocol, intptr_t lpProtocolInfo, intptr_t lGroup, intptr_t dwFlags) {
+    return ((intptr_t (WINAPI *)(intptr_t, intptr_t, intptr_t, intptr_t, intptr_t, intptr_t))WSASocketW)(lAf, lType, lProtocol, lpProtocolInfo, lGroup, dwFlags);
+}
+
+/* connect */
+intptr_t __stdcall vb6_di_connect(intptr_t lSocket, void* uName, intptr_t lNameLen) {
+    return ((intptr_t (WINAPI *)(intptr_t, void*, intptr_t))connect)(lSocket, uName, lNameLen);
+}
+
+/* bind */
+intptr_t __stdcall vb6_di_bind(intptr_t lSocket, void* uName, intptr_t lNameLen) {
+    return ((intptr_t (WINAPI *)(intptr_t, void*, intptr_t))bind)(lSocket, uName, lNameLen);
 }
 
 /* htonl */
@@ -111,29 +111,14 @@ int16_t __stdcall vb6_di_htons(intptr_t lHostShort) {
     return ((int16_t (WINAPI *)(intptr_t))htons)(lHostShort);
 }
 
-/* inet_addr */
-intptr_t __stdcall vb6_di_inet_addr(BSTR sAddr) {
-    return ((intptr_t (WINAPI *)(BSTR))inet_addr)(sAddr);
+/* ntohs */
+int16_t __stdcall vb6_di_ntohs(intptr_t lNetShort) {
+    return ((int16_t (WINAPI *)(intptr_t))ntohs)(lNetShort);
 }
 
 /* inet_ntoa */
 intptr_t __stdcall vb6_di_inet_ntoa(intptr_t lIn) {
     return ((intptr_t (WINAPI *)(intptr_t))inet_ntoa)(lIn);
-}
-
-/* ioctlsocket */
-intptr_t __stdcall vb6_di_ioctlsocket(intptr_t lSocket, intptr_t lCmd, int32_t* lpArg) {
-    return ((intptr_t (WINAPI *)(intptr_t, intptr_t, int32_t*))ioctlsocket)(lSocket, lCmd, lpArg);
-}
-
-/* listen */
-intptr_t __stdcall vb6_di_listen(intptr_t lSocket, intptr_t lBackLog) {
-    return ((intptr_t (WINAPI *)(intptr_t, intptr_t))listen)(lSocket, lBackLog);
-}
-
-/* ntohs */
-int16_t __stdcall vb6_di_ntohs(intptr_t lNetShort) {
-    return ((int16_t (WINAPI *)(intptr_t))ntohs)(lNetShort);
 }
 
 /* recv */
@@ -156,9 +141,14 @@ intptr_t __stdcall vb6_di_sendto(intptr_t lSocket, void* lpBuf, intptr_t lBufLen
     return ((intptr_t (WINAPI *)(intptr_t, void*, intptr_t, intptr_t, void*, intptr_t))sendto)(lSocket, lpBuf, lBufLen, dwFlags, uTo, lToLen);
 }
 
-/* setsockopt */
-intptr_t __stdcall vb6_di_setsockopt(intptr_t lSocket, intptr_t lLevel, intptr_t lOptName, void* lpOptVal, intptr_t lOptLen) {
-    return ((intptr_t (WINAPI *)(intptr_t, intptr_t, intptr_t, void*, intptr_t))setsockopt)(lSocket, lLevel, lOptName, lpOptVal, lOptLen);
+/* getpeername */
+intptr_t __stdcall vb6_di_getpeername(intptr_t lSocket, void* uName, int32_t* lpNameLen) {
+    return ((intptr_t (WINAPI *)(intptr_t, void*, int32_t*))getpeername)(lSocket, uName, lpNameLen);
+}
+
+/* getsockname */
+intptr_t __stdcall vb6_di_getsockname(intptr_t lSocket, void* uName, int32_t* lpNameLen) {
+    return ((intptr_t (WINAPI *)(intptr_t, void*, int32_t*))getsockname)(lSocket, uName, lpNameLen);
 }
 
 /* shutdown */
@@ -166,32 +156,42 @@ intptr_t __stdcall vb6_di_shutdown(intptr_t lSocket, intptr_t lHow) {
     return ((intptr_t (WINAPI *)(intptr_t, intptr_t))shutdown)(lSocket, lHow);
 }
 
-/* WSAAsyncGetHostByName */
-intptr_t __stdcall vb6_di_WSAAsyncGetHostByName(intptr_t hWnd, intptr_t wMsg, BSTR strHostName, void* lpBuf, intptr_t lBufLen) {
-    return ((intptr_t (WINAPI *)(intptr_t, intptr_t, BSTR, void*, intptr_t))WSAAsyncGetHostByName)(hWnd, wMsg, strHostName, lpBuf, lBufLen);
+/* listen */
+intptr_t __stdcall vb6_di_listen(intptr_t lSocket, intptr_t lBackLog) {
+    return ((intptr_t (WINAPI *)(intptr_t, intptr_t))listen)(lSocket, lBackLog);
 }
 
-/* WSAAsyncSelect */
-intptr_t __stdcall vb6_di_WSAAsyncSelect(intptr_t lSocket, intptr_t hWnd, intptr_t wMsg, intptr_t lEvent) {
-    return ((intptr_t (WINAPI *)(intptr_t, intptr_t, intptr_t, intptr_t))WSAAsyncSelect)(lSocket, hWnd, wMsg, lEvent);
+/* accept */
+intptr_t __stdcall vb6_di_accept(intptr_t lSocket, void* lpAddr, void* lpAddrLen) {
+    return ((intptr_t (WINAPI *)(intptr_t, void*, void*))accept)(lSocket, lpAddr, lpAddrLen);
 }
 
-/* WSACancelAsyncRequest */
-intptr_t __stdcall vb6_di_WSACancelAsyncRequest(intptr_t hAsyncTaskHandle) {
-    return ((intptr_t (WINAPI *)(intptr_t))WSACancelAsyncRequest)(hAsyncTaskHandle);
+/* ioctlsocket */
+intptr_t __stdcall vb6_di_ioctlsocket(intptr_t lSocket, intptr_t lCmd, int32_t* lpArg) {
+    return ((intptr_t (WINAPI *)(intptr_t, intptr_t, int32_t*))ioctlsocket)(lSocket, lCmd, lpArg);
 }
 
-/* WSACleanup */
-intptr_t __stdcall vb6_di_WSACleanup() {
-    return ((intptr_t (WINAPI *)(void))WSACleanup)();
+/* getsockopt */
+intptr_t __stdcall vb6_di_getsockopt(intptr_t lSocket, intptr_t lLevel, intptr_t lOptName, void* lpOptVal, int32_t* lpOptLen) {
+    return ((intptr_t (WINAPI *)(intptr_t, intptr_t, intptr_t, void*, int32_t*))getsockopt)(lSocket, lLevel, lOptName, lpOptVal, lpOptLen);
 }
 
-/* WSASocketW */
-intptr_t __stdcall vb6_di_WSASocketW(intptr_t lAf, intptr_t lType, intptr_t lProtocol, intptr_t lpProtocolInfo, intptr_t lGroup, intptr_t dwFlags) {
-    return ((intptr_t (WINAPI *)(intptr_t, intptr_t, intptr_t, intptr_t, intptr_t, intptr_t))WSASocketW)(lAf, lType, lProtocol, lpProtocolInfo, lGroup, dwFlags);
+/* setsockopt */
+intptr_t __stdcall vb6_di_setsockopt(intptr_t lSocket, intptr_t lLevel, intptr_t lOptName, void* lpOptVal, intptr_t lOptLen) {
+    return ((intptr_t (WINAPI *)(intptr_t, intptr_t, intptr_t, void*, intptr_t))setsockopt)(lSocket, lLevel, lOptName, lpOptVal, lOptLen);
 }
 
-/* WSAStartup */
-intptr_t __stdcall vb6_di_WSAStartup(intptr_t wVersionRequired, void* lpWSAData) {
-    return ((intptr_t (WINAPI *)(intptr_t, void*))WSAStartup)(wVersionRequired, lpWSAData);
+/* inet_addr */
+intptr_t __stdcall vb6_di_inet_addr(BSTR sAddr) {
+    return ((intptr_t (WINAPI *)(BSTR))inet_addr)(sAddr);
+}
+
+/* gethostbyname */
+intptr_t __stdcall vb6_di_gethostbyname(BSTR sHostName) {
+    return ((intptr_t (WINAPI *)(BSTR))gethostbyname)(sHostName);
+}
+
+/* gethostname */
+intptr_t __stdcall vb6_di_gethostname(BSTR sHostName, intptr_t lNameLen) {
+    return ((intptr_t (WINAPI *)(BSTR, intptr_t))gethostname)(sHostName, lNameLen);
 }

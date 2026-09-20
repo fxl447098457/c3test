@@ -2,14 +2,13 @@
 //
 // Win32 forwarding stubs for VB6 `Declare ... Lib "gdiplus"` (Fix 076 scheme).
 //
-// Family: gdiplus/path   (routed by object domain, see Get-GdiplusSub)   stubs: 21
+// Family: gdiplus/path   (routed by object domain, see Get-GdiplusSub)   stubs: 91
 //
 // Each stub reproduces C3's own generated prototype verbatim and forwards 1:1 to
 // the real flat API through a function-pointer cast (gdiplus.h is C++-only, so the
 // flat API is resolved by name at first use via the loader below).
 //
-// date: 2026-09-20
-// split from vb6_di_gdiplus_stubs.c with the same router as Get-GdiplusSub.
+// date: 2026-09-20 07:16
 
 #include <windows.h>
 #include <stdint.h>
@@ -19,27 +18,6 @@ static void* vb6_di_gdiplus_proc(const char* name) {
     static HMODULE mod = NULL;
     if (mod == NULL) { mod = LoadLibraryA("gdiplus.dll"); }
     return (mod != NULL) ? (void*)GetProcAddress(mod, name) : NULL;
-}
-
-/* GdipAddPathArcI */
-intptr_t __stdcall vb6_di_GdipAddPathArcI(intptr_t mpath, intptr_t mX, intptr_t mY, intptr_t mWidth, intptr_t mHeight, float mStartAngle, float mSweepAngle) {
-    intptr_t (WINAPI *fn)(intptr_t, intptr_t, intptr_t, intptr_t, intptr_t, float, float) = (intptr_t (WINAPI *)(intptr_t, intptr_t, intptr_t, intptr_t, intptr_t, float, float))vb6_di_gdiplus_proc("GdipAddPathArcI");
-    if (fn == NULL) { return (intptr_t)2; /* GpStatus InvalidParameter */ }
-    return fn(mpath, mX, mY, mWidth, mHeight, mStartAngle, mSweepAngle);
-}
-
-/* GdipAddPathRectangleI */
-intptr_t __stdcall vb6_di_GdipAddPathRectangleI(intptr_t mpath, intptr_t mX, intptr_t mY, intptr_t mWidth, intptr_t mHeight) {
-    intptr_t (WINAPI *fn)(intptr_t, intptr_t, intptr_t, intptr_t, intptr_t) = (intptr_t (WINAPI *)(intptr_t, intptr_t, intptr_t, intptr_t, intptr_t))vb6_di_gdiplus_proc("GdipAddPathRectangleI");
-    if (fn == NULL) { return (intptr_t)2; /* GpStatus InvalidParameter */ }
-    return fn(mpath, mX, mY, mWidth, mHeight);
-}
-
-/* GdipClosePathFigure */
-intptr_t __stdcall vb6_di_GdipClosePathFigure(intptr_t mpath) {
-    intptr_t (WINAPI *fn)(intptr_t) = (intptr_t (WINAPI *)(intptr_t))vb6_di_gdiplus_proc("GdipClosePathFigure");
-    if (fn == NULL) { return (intptr_t)2; /* GpStatus InvalidParameter */ }
-    return fn(mpath);
 }
 
 /* GdipCreatePath */
@@ -70,46 +48,25 @@ intptr_t __stdcall vb6_di_GdipFillPath(intptr_t mGraphics, intptr_t mBrush, intp
     return fn(mGraphics, mBrush, mpath);
 }
 
-/* GdipAddPathEllipseI */
-intptr_t __stdcall vb6_di_GdipAddPathEllipseI(intptr_t mPath, intptr_t mX, intptr_t mY, intptr_t mWidth, intptr_t mHeight) {
-    intptr_t (WINAPI *fn)(intptr_t, intptr_t, intptr_t, intptr_t, intptr_t) = (intptr_t (WINAPI *)(intptr_t, intptr_t, intptr_t, intptr_t, intptr_t))vb6_di_gdiplus_proc("GdipAddPathEllipseI");
+/* GdipAddPathArcI */
+intptr_t __stdcall vb6_di_GdipAddPathArcI(intptr_t mpath, intptr_t mX, intptr_t mY, intptr_t mWidth, intptr_t mHeight, float mStartAngle, float mSweepAngle) {
+    intptr_t (WINAPI *fn)(intptr_t, intptr_t, intptr_t, intptr_t, intptr_t, float, float) = (intptr_t (WINAPI *)(intptr_t, intptr_t, intptr_t, intptr_t, intptr_t, float, float))vb6_di_gdiplus_proc("GdipAddPathArcI");
     if (fn == NULL) { return (intptr_t)2; /* GpStatus InvalidParameter */ }
-    return fn(mPath, mX, mY, mWidth, mHeight);
+    return fn(mpath, mX, mY, mWidth, mHeight, mStartAngle, mSweepAngle);
 }
 
-/* GdipAddPathLineI */
-intptr_t __stdcall vb6_di_GdipAddPathLineI(intptr_t mPath, intptr_t mX1, intptr_t mY1, intptr_t mX2, intptr_t mY2) {
-    intptr_t (WINAPI *fn)(intptr_t, intptr_t, intptr_t, intptr_t, intptr_t) = (intptr_t (WINAPI *)(intptr_t, intptr_t, intptr_t, intptr_t, intptr_t))vb6_di_gdiplus_proc("GdipAddPathLineI");
+/* GdipClosePathFigure */
+intptr_t __stdcall vb6_di_GdipClosePathFigure(intptr_t mpath) {
+    intptr_t (WINAPI *fn)(intptr_t) = (intptr_t (WINAPI *)(intptr_t))vb6_di_gdiplus_proc("GdipClosePathFigure");
     if (fn == NULL) { return (intptr_t)2; /* GpStatus InvalidParameter */ }
-    return fn(mPath, mX1, mY1, mX2, mY2);
+    return fn(mpath);
 }
 
-/* GdipClosePathFigures */
-intptr_t __stdcall vb6_di_GdipClosePathFigures(intptr_t mPath) {
-    intptr_t (WINAPI *fn)(intptr_t) = (intptr_t (WINAPI *)(intptr_t))vb6_di_gdiplus_proc("GdipClosePathFigures");
+/* GdipAddPathRectangleI */
+intptr_t __stdcall vb6_di_GdipAddPathRectangleI(intptr_t mpath, intptr_t mX, intptr_t mY, intptr_t mWidth, intptr_t mHeight) {
+    intptr_t (WINAPI *fn)(intptr_t, intptr_t, intptr_t, intptr_t, intptr_t) = (intptr_t (WINAPI *)(intptr_t, intptr_t, intptr_t, intptr_t, intptr_t))vb6_di_gdiplus_proc("GdipAddPathRectangleI");
     if (fn == NULL) { return (intptr_t)2; /* GpStatus InvalidParameter */ }
-    return fn(mPath);
-}
-
-/* GdipFlattenPath */
-intptr_t __stdcall vb6_di_GdipFlattenPath(intptr_t mPath, intptr_t mMatrix, float mFlatness) {
-    intptr_t (WINAPI *fn)(intptr_t, intptr_t, float) = (intptr_t (WINAPI *)(intptr_t, intptr_t, float))vb6_di_gdiplus_proc("GdipFlattenPath");
-    if (fn == NULL) { return (intptr_t)2; /* GpStatus InvalidParameter */ }
-    return fn(mPath, mMatrix, mFlatness);
-}
-
-/* GdipGetPointCount */
-intptr_t __stdcall vb6_di_GdipGetPointCount(intptr_t mPath, int32_t* mCount) {
-    intptr_t (WINAPI *fn)(intptr_t, int32_t*) = (intptr_t (WINAPI *)(intptr_t, int32_t*))vb6_di_gdiplus_proc("GdipGetPointCount");
-    if (fn == NULL) { return (intptr_t)2; /* GpStatus InvalidParameter */ }
-    return fn(mPath, mCount);
-}
-
-/* GdipResetPath */
-intptr_t __stdcall vb6_di_GdipResetPath(intptr_t mPath) {
-    intptr_t (WINAPI *fn)(intptr_t) = (intptr_t (WINAPI *)(intptr_t))vb6_di_gdiplus_proc("GdipResetPath");
-    if (fn == NULL) { return (intptr_t)2; /* GpStatus InvalidParameter */ }
-    return fn(mPath);
+    return fn(mpath, mX, mY, mWidth, mHeight);
 }
 
 /* GdipAddPathArc */
@@ -118,52 +75,81 @@ intptr_t __stdcall vb6_di_GdipAddPathArc(intptr_t path, float X, float Y, float 
     if (fn == NULL) { return (intptr_t)2; /* GpStatus InvalidParameter */ }
     return fn(path, X, Y, Width, Height, StartAngle, sweepAngle);
 }
-
-/* GdipAddPathCurveI */
-intptr_t __stdcall vb6_di_GdipAddPathCurveI(intptr_t mPath, void* mPoints, intptr_t mCount) {
-    intptr_t (WINAPI *fn)(intptr_t, void*, intptr_t) = (intptr_t (WINAPI *)(intptr_t, void*, intptr_t))vb6_di_gdiplus_proc("GdipAddPathCurveI");
-    if (fn == NULL) { return (intptr_t)2; /* GpStatus InvalidParameter */ }
-    return fn(mPath, mPoints, mCount);
-}
-
-/* GdipAddPathLine2I */
-intptr_t __stdcall vb6_di_GdipAddPathLine2I(intptr_t mPath, void* mPoints, intptr_t mCount) {
-    intptr_t (WINAPI *fn)(intptr_t, void*, intptr_t) = (intptr_t (WINAPI *)(intptr_t, void*, intptr_t))vb6_di_gdiplus_proc("GdipAddPathLine2I");
-    if (fn == NULL) { return (intptr_t)2; /* GpStatus InvalidParameter */ }
-    return fn(mPath, mPoints, mCount);
-}
-
-/* GdipAddPathPie */
-intptr_t __stdcall vb6_di_GdipAddPathPie(intptr_t path, float X, float Y, float Width, float Height, float StartAngle, float sweepAngle) {
-    intptr_t (WINAPI *fn)(intptr_t, float, float, float, float, float, float) = (intptr_t (WINAPI *)(intptr_t, float, float, float, float, float, float))vb6_di_gdiplus_proc("GdipAddPathPie");
-    if (fn == NULL) { return (intptr_t)2; /* GpStatus InvalidParameter */ }
-    return fn(path, X, Y, Width, Height, StartAngle, sweepAngle);
-}
-
-/* GdipGetPathLastPoint */
-intptr_t __stdcall vb6_di_GdipGetPathLastPoint(intptr_t path, void* lastPoint) {
-    intptr_t (WINAPI *fn)(intptr_t, void*) = (intptr_t (WINAPI *)(intptr_t, void*))vb6_di_gdiplus_proc("GdipGetPathLastPoint");
-    if (fn == NULL) { return (intptr_t)2; /* GpStatus InvalidParameter */ }
-    return fn(path, lastPoint);
-}
-
 /* GdipAddPathCurve2I */
 intptr_t __stdcall vb6_di_GdipAddPathCurve2I(intptr_t mPath, void* mPoints, intptr_t mCount, float mTension) {
     intptr_t (WINAPI *fn)(intptr_t, void*, intptr_t, float) = (intptr_t (WINAPI *)(intptr_t, void*, intptr_t, float))vb6_di_gdiplus_proc("GdipAddPathCurve2I");
     if (fn == NULL) { return (intptr_t)2; /* GpStatus InvalidParameter */ }
     return fn(mPath, mPoints, mCount, mTension);
 }
-
+/* GdipAddPathCurveI */
+intptr_t __stdcall vb6_di_GdipAddPathCurveI(intptr_t mPath, void* mPoints, intptr_t mCount) {
+    intptr_t (WINAPI *fn)(intptr_t, void*, intptr_t) = (intptr_t (WINAPI *)(intptr_t, void*, intptr_t))vb6_di_gdiplus_proc("GdipAddPathCurveI");
+    if (fn == NULL) { return (intptr_t)2; /* GpStatus InvalidParameter */ }
+    return fn(mPath, mPoints, mCount);
+}
+/* GdipAddPathEllipseI */
+intptr_t __stdcall vb6_di_GdipAddPathEllipseI(intptr_t mPath, intptr_t mX, intptr_t mY, intptr_t mWidth, intptr_t mHeight) {
+    intptr_t (WINAPI *fn)(intptr_t, intptr_t, intptr_t, intptr_t, intptr_t) = (intptr_t (WINAPI *)(intptr_t, intptr_t, intptr_t, intptr_t, intptr_t))vb6_di_gdiplus_proc("GdipAddPathEllipseI");
+    if (fn == NULL) { return (intptr_t)2; /* GpStatus InvalidParameter */ }
+    return fn(mPath, mX, mY, mWidth, mHeight);
+}
+/* GdipAddPathLine */
+intptr_t __stdcall vb6_di_GdipAddPathLine(intptr_t path, float X1, float Y1, float X2, float Y2) {
+    intptr_t (WINAPI *fn)(intptr_t, float, float, float, float) = (intptr_t (WINAPI *)(intptr_t, float, float, float, float))vb6_di_gdiplus_proc("GdipAddPathLine");
+    if (fn == NULL) { return (intptr_t)2; /* GpStatus InvalidParameter */ }
+    return fn(path, X1, Y1, X2, Y2);
+}
+/* GdipAddPathLine2I */
+intptr_t __stdcall vb6_di_GdipAddPathLine2I(intptr_t mPath, void* mPoints, intptr_t mCount) {
+    intptr_t (WINAPI *fn)(intptr_t, void*, intptr_t) = (intptr_t (WINAPI *)(intptr_t, void*, intptr_t))vb6_di_gdiplus_proc("GdipAddPathLine2I");
+    if (fn == NULL) { return (intptr_t)2; /* GpStatus InvalidParameter */ }
+    return fn(mPath, mPoints, mCount);
+}
+/* GdipAddPathLineI */
+intptr_t __stdcall vb6_di_GdipAddPathLineI(intptr_t mPath, intptr_t mX1, intptr_t mY1, intptr_t mX2, intptr_t mY2) {
+    intptr_t (WINAPI *fn)(intptr_t, intptr_t, intptr_t, intptr_t, intptr_t) = (intptr_t (WINAPI *)(intptr_t, intptr_t, intptr_t, intptr_t, intptr_t))vb6_di_gdiplus_proc("GdipAddPathLineI");
+    if (fn == NULL) { return (intptr_t)2; /* GpStatus InvalidParameter */ }
+    return fn(mPath, mX1, mY1, mX2, mY2);
+}
+/* GdipAddPathPie */
+intptr_t __stdcall vb6_di_GdipAddPathPie(intptr_t path, float X, float Y, float Width, float Height, float StartAngle, float sweepAngle) {
+    intptr_t (WINAPI *fn)(intptr_t, float, float, float, float, float, float) = (intptr_t (WINAPI *)(intptr_t, float, float, float, float, float, float))vb6_di_gdiplus_proc("GdipAddPathPie");
+    if (fn == NULL) { return (intptr_t)2; /* GpStatus InvalidParameter */ }
+    return fn(path, X, Y, Width, Height, StartAngle, sweepAngle);
+}
+/* GdipClosePathFigures */
+intptr_t __stdcall vb6_di_GdipClosePathFigures(intptr_t mPath) {
+    intptr_t (WINAPI *fn)(intptr_t) = (intptr_t (WINAPI *)(intptr_t))vb6_di_gdiplus_proc("GdipClosePathFigures");
+    if (fn == NULL) { return (intptr_t)2; /* GpStatus InvalidParameter */ }
+    return fn(mPath);
+}
+/* GdipFlattenPath */
+intptr_t __stdcall vb6_di_GdipFlattenPath(intptr_t mPath, intptr_t mMatrix, float mFlatness) {
+    intptr_t (WINAPI *fn)(intptr_t, intptr_t, float) = (intptr_t (WINAPI *)(intptr_t, intptr_t, float))vb6_di_gdiplus_proc("GdipFlattenPath");
+    if (fn == NULL) { return (intptr_t)2; /* GpStatus InvalidParameter */ }
+    return fn(mPath, mMatrix, mFlatness);
+}
+/* GdipGetPathLastPoint */
+intptr_t __stdcall vb6_di_GdipGetPathLastPoint(intptr_t path, void* lastPoint) {
+    intptr_t (WINAPI *fn)(intptr_t, void*) = (intptr_t (WINAPI *)(intptr_t, void*))vb6_di_gdiplus_proc("GdipGetPathLastPoint");
+    if (fn == NULL) { return (intptr_t)2; /* GpStatus InvalidParameter */ }
+    return fn(path, lastPoint);
+}
+/* GdipGetPointCount */
+intptr_t __stdcall vb6_di_GdipGetPointCount(intptr_t mPath, int32_t* mCount) {
+    intptr_t (WINAPI *fn)(intptr_t, int32_t*) = (intptr_t (WINAPI *)(intptr_t, int32_t*))vb6_di_gdiplus_proc("GdipGetPointCount");
+    if (fn == NULL) { return (intptr_t)2; /* GpStatus InvalidParameter */ }
+    return fn(mPath, mCount);
+}
 /* GdipIsVisiblePathPoint */
 intptr_t __stdcall vb6_di_GdipIsVisiblePathPoint(intptr_t path, float X, float Y, intptr_t graphics, int32_t* result) {
     intptr_t (WINAPI *fn)(intptr_t, float, float, intptr_t, int32_t*) = (intptr_t (WINAPI *)(intptr_t, float, float, intptr_t, int32_t*))vb6_di_gdiplus_proc("GdipIsVisiblePathPoint");
     if (fn == NULL) { return (intptr_t)2; /* GpStatus InvalidParameter */ }
     return fn(path, X, Y, graphics, result);
 }
-
-/* GdipAddPathLine */
-intptr_t __stdcall vb6_di_GdipAddPathLine(intptr_t path, float X1, float Y1, float X2, float Y2) {
-    intptr_t (WINAPI *fn)(intptr_t, float, float, float, float) = (intptr_t (WINAPI *)(intptr_t, float, float, float, float))vb6_di_gdiplus_proc("GdipAddPathLine");
+/* GdipResetPath */
+intptr_t __stdcall vb6_di_GdipResetPath(intptr_t mPath) {
+    intptr_t (WINAPI *fn)(intptr_t) = (intptr_t (WINAPI *)(intptr_t))vb6_di_gdiplus_proc("GdipResetPath");
     if (fn == NULL) { return (intptr_t)2; /* GpStatus InvalidParameter */ }
-    return fn(path, X1, Y1, X2, Y2);
+    return fn(mPath);
 }

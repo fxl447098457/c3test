@@ -3,7 +3,7 @@
 // Win32 forwarding stubs for VB6 `Declare ... Lib "x"` (Fix 076 scheme: C3 emits
 // `extern <ret> __stdcall vb6_di_<alias>(...)` and the RTL implements it).
 //
-// Family: shell   (libs: shell32, shlwapi, imagehlp)   stubs: 4
+// Family: shell   (libs: shell32, shlwapi, imagehlp)   stubs: 5
 //
 // Each stub reproduces C3's own generated prototype verbatim (that is the ABI the
 // caller uses: ByVal Long is widened to intptr_t, ByVal Single stays float, ByRef
@@ -11,8 +11,8 @@
 // cast. The cast keeps the compiler from complaining about unrelated API parameter
 // types while preserving the register/memory passing class of every argument.
 //
-// generated from: C:\Users\Administrator\AppData\Local\Temp\C3C\merged_stubgen_czui
-// date: 2026-09-19 18:17
+// generated from: a C3 compile session (pass -SessionDir to regenerate)
+// date: 2026-09-20 07:16
 //
 // Hand-maintained special cases stay in vb6_di_stubs.c (ordinals, msvbvm60 runtime,
 // dynamically loaded DLLs). Re-run the generator after a build exposes new symbols.
@@ -52,16 +52,6 @@ void WINAPI RtlZeroMemory(void*, size_t);
 #pragma comment(lib, "imagehlp.lib")
 #pragma comment(lib, "comdlg32.lib")
 
-/* MakeSureDirectoryPathExists */
-intptr_t __stdcall vb6_di_MakeSureDirectoryPathExists(BSTR DirPath) {
-    return ((intptr_t (WINAPI *)(BSTR))MakeSureDirectoryPathExists)(DirPath);
-}
-
-/* PathMatchSpecW */
-intptr_t __stdcall vb6_di_PathMatchSpecW(intptr_t pszFileParam, intptr_t pszSpec) {
-    return ((intptr_t (WINAPI *)(intptr_t, intptr_t))PathMatchSpecW)(pszFileParam, pszSpec);
-}
-
 /* SHBrowseForFolder */
 intptr_t __stdcall vb6_di_SHBrowseForFolder(void* lpbi) {
     return ((intptr_t (WINAPI *)(void*))SHBrowseForFolder)(lpbi);
@@ -70,4 +60,19 @@ intptr_t __stdcall vb6_di_SHBrowseForFolder(void* lpbi) {
 /* SHGetPathFromIDListA */
 intptr_t __stdcall vb6_di_SHGetPathFromIDListA(intptr_t pidl, BSTR pszPath) {
     return ((intptr_t (WINAPI *)(intptr_t, BSTR))SHGetPathFromIDListA)(pidl, pszPath);
+}
+
+/* ShellExecuteA */
+intptr_t __stdcall vb6_di_ShellExecuteA(intptr_t hwnd, BSTR lpOperation, BSTR lpFile, BSTR lpParameters, BSTR lpDirectory, intptr_t nShowCmd) {
+    return ((intptr_t (WINAPI *)(intptr_t, BSTR, BSTR, BSTR, BSTR, intptr_t))ShellExecuteA)(hwnd, lpOperation, lpFile, lpParameters, lpDirectory, nShowCmd);
+}
+
+/* MakeSureDirectoryPathExists */
+intptr_t __stdcall vb6_di_MakeSureDirectoryPathExists(BSTR DirPath) {
+    return ((intptr_t (WINAPI *)(BSTR))MakeSureDirectoryPathExists)(DirPath);
+}
+
+/* PathMatchSpecW */
+intptr_t __stdcall vb6_di_PathMatchSpecW(intptr_t pszFileParam, intptr_t pszSpec) {
+    return ((intptr_t (WINAPI *)(intptr_t, intptr_t))PathMatchSpecW)(pszFileParam, pszSpec);
 }
