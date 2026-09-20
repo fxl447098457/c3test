@@ -16,6 +16,10 @@
 #                HTTP 服务器 127.0.0.1:800 并调用 VBMAN COM) -> HTTP 环回请求
 #                断言响应含 "hello vbman" -> finally 杀进程 + regsvr32 /u 注销
 #                (环境洁净约定: 注册的 COM 组件用完必须注销)
+#   桩自愈      : vbman 首编 LNK2019 (外部仓库新增 Declare 的转发桩未入库) 时,
+#                用失败会话跑 scripts/gen_di_stubs.ps1 (add-only) 补桩 -> 增量重建
+#                C3.exe -> 重编; 产出的 src/rtl/core/di/** 进 vbman-compile-logs,
+#                应回 commit 固化。
 
 name: VBMAN 链路验证
 
@@ -105,8 +109,54 @@ jobs:
               Write-Host "=== c3-error.log ==="
               Get-Content "tests\vbman\dist\DLL\c3-error.log" | Write-Host
             }
-            throw "VBMAN.vbp compile failed"
+            Write-Host "first pass failed; stub heal step will regenerate and recompile"
+          } else {
+            Write-Host "first pass OK"
           }
+          Add-Content -Path $env:GITHUB_ENV -Value "VBMAN_COMPILE_EXIT=$LASTEXITCODE"
+
+      - name: 桩自愈（vb6_di_* LNK2019 → 重生成 → 重建 C3 → 重编）
+        if: env.VBMAN_COMPILE_EXIT != '0'
+        shell: pwsh
+        run: |
+          # vbman 是外部演进仓库, 新增 Declare 的转发桩可能尚未入库 (09-19 重生成曾把
+          # 桩集清到 czUI 子集, 90 个符号 LNK2019)。生成器已改 add-only: 以失败会话的
+          # 生成头补齐缺失桩且不清存量, 重建 C3.exe (新桩重新嵌入 RTL 资源) 后重编。
+          # 自愈产出的 src/rtl/core/di/** 会进 vbman-compile-logs artifact, 应回 commit。
+          $c3c = Join-Path $env:TEMP 'C3C'
+          if (-not (Test-Path $c3c)) { $c3c = Join-Path $env:LOCALAPPDATA 'Temp\C3C' }
+          $session = Get-ChildItem $c3c -Directory -ErrorAction SilentlyContinue |
+            Sort-Object LastWriteTime -Descending | Select-Object -First 1
+          if (-not $session) { throw "heal: no C3C session dir found" }
+          Write-Host "heal: session $($session.FullName)"
+          pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/gen_di_stubs.ps1 -SessionDir $session.FullName
+          if ($LASTEXITCODE -ne 0) { throw "heal: gen_di_stubs.ps1 failed" }
+          # 每 step 独立进程: 重新注入 MSVC 环境
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer\vswhere.exe"
+          $vsPath = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath 2>$null
+          if (-not $vsPath) { throw "No MSVC install" }
+          $vcvars = Join-Path $vsPath "VC\Auxiliary\Build\vcvarsall.bat"
+          $envLines = & cmd /c "call `"$vcvars`" x64 >nul 2>&1 && set" 2>$null
+          foreach ($line in $envLines) {
+            if ($line -match '^([^=]+)=(.*)$') {
+              [Environment]::SetEnvironmentVariable($matches[1], $matches[2], "Process")
+            }
+          }
+          # 重建 C3.exe: c3rtl.rc 依赖桩文件, ninja 增量重嵌资源并重链
+          $buildDir = Join-Path $env:RUNNER_TEMP "c3build"
+          if (Test-Path (Join-Path $buildDir "build.ninja")) {
+            cmake --build $buildDir
+          } else {
+            cmake -S . -B $buildDir -G Ninja -DVB6C3_ENABLE_LLVM=OFF -DCMAKE_BUILD_TYPE=Release
+            if ($LASTEXITCODE -ne 0) { throw "heal: cmake configure failed" }
+            cmake --build $buildDir
+          }
+          if ($LASTEXITCODE -ne 0) { throw "heal: cmake build failed" }
+          Copy-Item (Join-Path $buildDir "C3.exe") .build\C3.exe -Force
+          & .build\C3.exe tests\vbman\src\VBMAN.vbp --output-dir tests\vbman\dist\DLL --verbose *> _vbman_recompile.log
+          Get-Content _vbman_recompile.log | Select-Object -Last 30 | Write-Host
+          if ($LASTEXITCODE -ne 0) { throw "heal: recompile still failed (看 _vbman_recompile.log 与 c3-error.log)" }
+          Write-Host "heal: recompile OK"
 
       - name: 上传编译日志（失败诊断用）
         if: always()
@@ -115,7 +165,9 @@ jobs:
           name: vbman-compile-logs
           path: |
             _vbman_compile.log
+            _vbman_recompile.log
             tests/vbman/dist/DLL/c3-error.log
+            src/rtl/core/di/**
           if-no-files-found: warn
           retention-days: 14
 
