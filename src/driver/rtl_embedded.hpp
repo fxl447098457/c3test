@@ -68,9 +68,9 @@ enum RtlResourceID {
     RTL_VB6FORMS_PICTURE_PROP_C = 139,
     RTL_VB6FORMS_WIDGET_PROP_C  = 140,
 
-    // DI 转发桩按 Lib 家族拆分 (2026-09-17)
+    // DI 转发桩按 Lib 家族拆分 (2026-09-17); gdiplus 2026-09-20 再按对象域拆 5 份 (di/gdiplus/)
     RTL_VB6_DI_USER32_STUBS_C    = 141,
-    RTL_VB6_DI_GDIPLUS_STUBS_C   = 142,
+    RTL_VB6_DI_GDIPLUS_DRAW_STUBS_C = 142,
     RTL_VB6_DI_CRYPTO_STUBS_C    = 143,
     RTL_VB6_DI_COM_STUBS_C       = 144,
     RTL_VB6_DI_NET_STUBS_C       = 145,
@@ -131,6 +131,12 @@ enum RtlResourceID {
     RTL_UC_DEBUG_DIB_INC                   = 191,
     RTL_UC_DEBUG_COMPOSITE_INC             = 192,
     RTL_UC_PROPBAG_C                       = 193,
+
+    // DI gdiplus 二级拆分 (2026-09-20): text/image/brush/path (draw 见 142)
+    RTL_VB6_DI_GDIPLUS_TEXT_STUBS_C        = 194,
+    RTL_VB6_DI_GDIPLUS_IMAGE_STUBS_C       = 195,
+    RTL_VB6_DI_GDIPLUS_BRUSH_STUBS_C       = 196,
+    RTL_VB6_DI_GDIPLUS_PATH_STUBS_C        = 197,
 };
 
 // Session directory manager

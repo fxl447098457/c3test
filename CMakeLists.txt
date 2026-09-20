@@ -316,7 +316,11 @@ set(C3RTL_EMBEDDED_FILES
     ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/di/vb6_di_stubs.c
     ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/di/vb6_di_win32_stubs.c
     ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/di/vb6_di_user32_stubs.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/di/vb6_di_gdiplus_stubs.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/di/gdiplus/vb6_di_gdiplus_draw_stubs.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/di/gdiplus/vb6_di_gdiplus_text_stubs.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/di/gdiplus/vb6_di_gdiplus_image_stubs.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/di/gdiplus/vb6_di_gdiplus_brush_stubs.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/di/gdiplus/vb6_di_gdiplus_path_stubs.c
     ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/di/vb6_di_crypto_stubs.c
     ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/di/vb6_di_com_stubs.c
     ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/di/vb6_di_net_stubs.c

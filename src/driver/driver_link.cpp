@@ -144,7 +144,12 @@ bool Driver::runLinker(const CompileOptions& options, const std::string& outputD
     msvcOpts.sourceFiles.push_back(rtlDir + "/vb6_di_stubs.c");
     msvcOpts.sourceFiles.push_back(rtlDir + "/vb6_di_win32_stubs.c");
     msvcOpts.sourceFiles.push_back(rtlDir + "/vb6_di_user32_stubs.c");
-    msvcOpts.sourceFiles.push_back(rtlDir + "/vb6_di_gdiplus_stubs.c");
+    // gdiplus 二级拆分 (2026-09-20): 解包后是平铺目录, 故写 basename
+    msvcOpts.sourceFiles.push_back(rtlDir + "/vb6_di_gdiplus_draw_stubs.c");
+    msvcOpts.sourceFiles.push_back(rtlDir + "/vb6_di_gdiplus_text_stubs.c");
+    msvcOpts.sourceFiles.push_back(rtlDir + "/vb6_di_gdiplus_image_stubs.c");
+    msvcOpts.sourceFiles.push_back(rtlDir + "/vb6_di_gdiplus_brush_stubs.c");
+    msvcOpts.sourceFiles.push_back(rtlDir + "/vb6_di_gdiplus_path_stubs.c");
     msvcOpts.sourceFiles.push_back(rtlDir + "/vb6_di_crypto_stubs.c");
     msvcOpts.sourceFiles.push_back(rtlDir + "/vb6_di_com_stubs.c");
     msvcOpts.sourceFiles.push_back(rtlDir + "/vb6_di_net_stubs.c");
