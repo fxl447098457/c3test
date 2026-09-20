@@ -1,0 +1,89 @@
+# ci_t2.yml - T2 全量回归 (夜间层)
+#
+# 与 ci_t0.yml (tag github-test-* 触发的 T0+T1) 完全独立:
+#   - 夜间定时 (UTC 19:07 = 北京 03:07) + 手动 dispatch + tag github-t2-* 首跑验证
+#   - GitHub 跨 workflow run 不共享 artifact, 故此处自建 C3.exe (cache 复用, src 未变时秒级恢复)
+# 口径 (2026-09-20): vbp 控制台工程编译+运行+断言; GUI 工程只编译不运行
+#   (有交互的 GUI 不做自动化); 用例 cp 自 tests/, tests_github 自包含。
+
+name: GitHub Tests T2（夜间全量）
+
+on:
+  schedule:
+    - cron: '7 19 * * *'   # UTC 19:07 = 北京 03:07, 每日夜间
+  workflow_dispatch:
+  push:
+    tags:
+      - 'github-t2-*'
+
+jobs:
+  t2:
+    name: T2 全量回归（vbp 执行断言 + GUI 只编译）
+    runs-on: windows-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      # 交给脚本的 vswhere 自动发现 vcvarsall (无需显式设置)
+      C3_VCVARSALL: ""
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v5
+
+      - name: 环境自检（MSVC 工具链）
+        shell: pwsh
+        run: |
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer\vswhere.exe"
+          if (-not (Test-Path $vswhere)) { throw "vswhere missing (VS installer absent)" }
+          $vsPath = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath 2>$null
+          if (-not $vsPath) { throw "No MSVC C++ tools found (needs VS C++ workload)" }
+          Write-Host "MSVC install: $vsPath"
+          cmake --version
+          ninja --version
+
+      - name: 缓存构建目录（src/ 未变时走快速路径）
+        uses: actions/cache@v6
+        with:
+          path: ${{ runner.temp }}/c3build
+          key: c3build-${{ hashFiles('src/**', 'CMakeLists.txt', 'cmake/**') }}
+          restore-keys: c3build-
+
+      - name: 从源码构建 C3.exe（绝不携带预编译二进制）
+        shell: pwsh
+        run: |
+          # MSVC 官方只保证从 vcvarsall 拿到的环境有效; 这里在子进程里导出后注入当前进程。
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer\vswhere.exe"
+          $vsPath = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath 2>$null
+          if (-not $vsPath) { throw "No MSVC install" }
+          $vcvars = Join-Path $vsPath "VC\Auxiliary\Build\vcvarsall.bat"
+          $envLines = & cmd /c "call `"$vcvars`" x64 >nul 2>&1 && set" 2>$null
+          foreach ($line in $envLines) {
+            if ($line -match '^([^=]+)=(.*)$') {
+              [Environment]::SetEnvironmentVariable($matches[1], $matches[2], "Process")
+            }
+          }
+          $buildDir = Join-Path $env:RUNNER_TEMP "c3build"
+          cmake -S . -B $buildDir -G Ninja -DVB6C3_ENABLE_LLVM=OFF -DCMAKE_BUILD_TYPE=Release
+          if ($LASTEXITCODE -ne 0) { throw "cmake configure failed" }
+          cmake --build $buildDir
+          if ($LASTEXITCODE -ne 0) { throw "cmake build failed" }
+          New-Item -ItemType Directory -Force -Path .build | Out-Null
+          Copy-Item (Join-Path $buildDir "C3.exe") .build\C3.exe -Force
+          & .build\C3.exe --version
+          if ($LASTEXITCODE -ne 0) { throw "built C3.exe smoke check failed" }
+
+      - name: 运行 T2 门禁（run_t2.ps1：vbp 7 执行断言 + GUI 3 只编译）
+        shell: pwsh
+        run: pwsh -NoProfile -ExecutionPolicy Bypass -File tests_github/run_t2.ps1 -Verbose
+
+      - name: 上传 T2 日志
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: t2-logs
+          path: |
+            output/**/*.out
+            output/**/*.err
+          if-no-files-found: warn
+          retention-days: 14
