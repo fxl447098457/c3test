@@ -97,7 +97,7 @@ jobs:
             }
           }
           New-Item -ItemType Directory -Force -Path tests\vbman\dist\DLL | Out-Null
-          & .build\C3.exe tests\vbman\src\VBMAN.vbp --output-dir tests\vbman\dist\DLL -Verbose
+          & .build\C3.exe tests\vbman\src\VBMAN.vbp --output-dir tests\vbman\dist\DLL --verbose
           if ($LASTEXITCODE -ne 0) { throw "VBMAN.vbp compile failed" }
 
       - name: 校验 VBMAN.dll
@@ -171,7 +171,7 @@ jobs:
             }
           }
           New-Item -ItemType Directory -Force -Path output\demo | Out-Null
-          & .build\C3.exe tests\vbman-demo\demos\Helloworld\VBMAN_DEMO.vbp --output-dir output\demo -Verbose
+          & .build\C3.exe tests\vbman-demo\demos\Helloworld\VBMAN_DEMO.vbp --output-dir output\demo --verbose
           if ($LASTEXITCODE -ne 0) { throw "VBMAN_DEMO.vbp compile failed" }
           if (-not (Test-Path "output\demo\VBMAN_DEMO.exe")) { throw "VBMAN_DEMO.exe missing" }
 
