@@ -244,9 +244,13 @@ jobs:
           $archName = switch ($machine) { 0x8664 { 'x64' } 0x014C { 'x86' } default { '?' } }
           Write-Host ("VBMAN.dll PE machine: 0x{0:X4} ({1})" -f $machine, $archName)
           if ($machine -ne 0x8664) { throw "VBMAN.dll 不是 x64 (machine=0x$($machine.ToString('X4')))" }
-          & "$env:SystemRoot\System32\regsvr32.exe" /s "$dllPath"
-          if ($LASTEXITCODE -ne 0) {
-            Write-Host "regsvr32 failed (exit ${LASTEXITCODE}: 2=LoadLibrary败 3=无导出 4=DllRegisterServer败), probe..."
+          # regsvr32 是 GUI 子系统程序, pwsh 的 & 调用不等待, $LASTEXITCODE 保持
+          # null 会被 -ne 0 误判失败 (010 实测: probe 调 DllRegisterServer 返回
+          # S_OK 而 $LASTEXITCODE 为空) -> Start-Process -Wait 拿真实退出码
+          $reg = Start-Process -FilePath "$env:SystemRoot\System32\regsvr32.exe" -ArgumentList '/s', $dllPath -Wait -PassThru
+          Write-Host "regsvr32 exit code: $($reg.ExitCode)"
+          if ($reg.ExitCode -ne 0) {
+            Write-Host "regsvr32 failed (2=LoadLibrary败 3=无导出 4=DllRegisterServer败), probe..."
             # P/Invoke 探测: 区分缺依赖 / 导出缺失 / DllRegisterServer 返回错误
             Add-Type -TypeDefinition @'
           using System;
@@ -280,7 +284,11 @@ jobs:
             [RegProbe]::FreeLibrary($h) | Out-Null
             throw "regsvr32 failed (probe 结论见上)"
           }
-          Write-Host "VBMAN.dll registered (HKCR\VBMANLIB)"
+          # 注册落地确认: ProgId 必须真实存在, 拿证据说话
+          if (-not (Test-Path 'Registry::HKEY_CLASSES_ROOT\VBMANLIB.cVBMAN')) {
+            throw "ProgId VBMANLIB.cVBMAN 未落地, 注册无效"
+          }
+          Write-Host "VBMAN.dll registered (HKCR\VBMANLIB.cVBMAN)"
 
       - name: 编译 Helloworld demo（引用 ..\..\..\vbman\dist\DLL\VBMAN.dll）
         shell: pwsh
@@ -332,8 +340,8 @@ jobs:
             }
           } finally {
             if ($proc -and -not $proc.HasExited) { $proc.Kill() }
-            & "$env:SystemRoot\System32\regsvr32.exe" /u /s "tests\vbman\dist\DLL\VBMAN.dll"
-            Write-Host "VBMAN.dll unregistered (洁净约定: 用完即注销)"
+            $unreg = Start-Process -FilePath "$env:SystemRoot\System32\regsvr32.exe" -ArgumentList '/u', '/s', "tests\vbman\dist\DLL\VBMAN.dll" -Wait -PassThru
+            Write-Host "regsvr32 /u exit code: $($unreg.ExitCode) (洁净约定: 用完即注销)"
           }
 
       - name: 上传 demo 产物与日志
