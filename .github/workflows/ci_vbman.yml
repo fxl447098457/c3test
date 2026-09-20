@@ -97,8 +97,18 @@ jobs:
             }
           }
           New-Item -ItemType Directory -Force -Path tests\vbman\dist\DLL | Out-Null
-          & .build\C3.exe tests\vbman\src\VBMAN.vbp --output-dir tests\vbman\dist\DLL --verbose
+          & .build\C3.exe tests\vbman\src\VBMAN.vbp --output-dir tests\vbman\dist\DLL --verbose *> _vbman_compile.log
+          Get-Content _vbman_compile.log | Write-Host
           if ($LASTEXITCODE -ne 0) { throw "VBMAN.vbp compile failed" }
+
+      - name: 上传编译日志（失败诊断用）
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: vbman-compile-logs
+          path: _vbman_compile.log
+          if-no-files-found: warn
+          retention-days: 14
 
       - name: 校验 VBMAN.dll
         shell: pwsh
@@ -171,7 +181,8 @@ jobs:
             }
           }
           New-Item -ItemType Directory -Force -Path output\demo | Out-Null
-          & .build\C3.exe tests\vbman-demo\demos\Helloworld\VBMAN_DEMO.vbp --output-dir output\demo --verbose
+          & .build\C3.exe tests\vbman-demo\demos\Helloworld\VBMAN_DEMO.vbp --output-dir output\demo --verbose *> _demo_compile.log
+          Get-Content _demo_compile.log | Write-Host
           if ($LASTEXITCODE -ne 0) { throw "VBMAN_DEMO.vbp compile failed" }
           if (-not (Test-Path "output\demo\VBMAN_DEMO.exe")) { throw "VBMAN_DEMO.exe missing" }
 
@@ -210,5 +221,6 @@ jobs:
           name: vbman-demo-logs
           path: |
             output/demo/**
+            _demo_compile.log
           if-no-files-found: warn
           retention-days: 14
