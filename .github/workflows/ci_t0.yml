@@ -17,7 +17,7 @@ on:
 
 jobs:
   t0:
-    name: T0 minimal gate (build + syntax + smoke)
+    name: T0 最小编译门禁（构建 + 语法 + 冒烟）
     runs-on: windows-latest
     timeout-minutes: 30
     defaults:
