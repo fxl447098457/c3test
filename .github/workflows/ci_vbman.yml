@@ -11,7 +11,7 @@
 #   vbman      : clone gitcode vbman -> C3 编译 VBMAN.vbp (129 模块 OleDll)
 #                -> 校验 VBMAN.dll -> 上传 vbman-dll + c3-exe (供 demo job)
 #   vbman-demo : clone vbman + vbman-demo (demo vbp 以 ..\..\..\vbman\dist\DLL
-#                相对路径引用 VBMAN.dll) -> SysWOW64 regsvr32 注册 (32 位 dll)
+#                相对路径引用 VBMAN.dll) -> System32 regsvr32 注册 (C3 默认产 x64 dll)
 #                -> C3 编译 demos/Helloworld -> 运行产物 (Form_Load 启动内嵌
 #                HTTP 服务器 127.0.0.1:800 并调用 VBMAN COM) -> HTTP 环回请求
 #                断言响应含 "hello vbman" -> finally 杀进程 + regsvr32 /u 注销
@@ -231,9 +231,20 @@ jobs:
           git clone --depth 1 https://gitcode.com/woeoio/vbman.git tests/vbman
           git clone --depth 1 https://gitcode.com/woeoio/vbman-demo.git tests/vbman-demo
 
-      - name: 注册 VBMAN.dll（32 位 dll 用 SysWOW64 regsvr32）
+      - name: 注册 VBMAN.dll（x64 dll 用 System32 regsvr32）
         run: |
-          & "$env:SystemRoot\SysWOW64\regsvr32.exe" /s "tests\vbman\dist\DLL\VBMAN.dll"
+          # C3 默认 --arch x64, VBMAN.dll 是 64 位; 曾误用 SysWOW64(32 位) regsvr32
+          # LoadLibrary 失败。先打 PE machine 字段自检架构再注册
+          $dllPath = "tests\vbman\dist\DLL\VBMAN.dll"
+          $fs = [System.IO.File]::OpenRead($dllPath)
+          $br = New-Object System.IO.BinaryReader($fs)
+          $null = $fs.Seek(0x3C, 'Begin'); $peOff = $br.ReadInt32()
+          $null = $fs.Seek($peOff + 4, 'Begin'); $machine = $br.ReadUInt16()
+          $br.Close(); $fs.Close()
+          $archName = switch ($machine) { 0x8664 { 'x64' } 0x014C { 'x86' } default { '?' } }
+          Write-Host ("VBMAN.dll PE machine: 0x{0:X4} ({1})" -f $machine, $archName)
+          if ($machine -ne 0x8664) { throw "VBMAN.dll 不是 x64 (machine=0x$($machine.ToString('X4')))" }
+          & "$env:SystemRoot\System32\regsvr32.exe" /s "$dllPath"
           if ($LASTEXITCODE -ne 0) { throw "regsvr32 failed" }
           Write-Host "VBMAN.dll registered (HKCR\VBMANLIB)"
 
@@ -287,7 +298,7 @@ jobs:
             }
           } finally {
             if ($proc -and -not $proc.HasExited) { $proc.Kill() }
-            & "$env:SystemRoot\SysWOW64\regsvr32.exe" /u /s "tests\vbman\dist\DLL\VBMAN.dll"
+            & "$env:SystemRoot\System32\regsvr32.exe" /u /s "tests\vbman\dist\DLL\VBMAN.dll"
             Write-Host "VBMAN.dll unregistered (洁净约定: 用完即注销)"
           }
 
