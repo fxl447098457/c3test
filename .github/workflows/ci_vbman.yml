@@ -332,16 +332,48 @@ jobs:
                 $lastErr = "unexpected content: $([string]$resp.Content)"
                 if ($lastErr.Length -gt 160) { $lastErr = $lastErr.Substring(0, 160) }
               } catch { $lastErr = $_.Exception.Message }
-              # 可观测性: probe 3/8 时输出端口监听与进程窗口状态 (GUI exe 运行链
-              # 首次 CI 验证; "活着但不监听"需黑盒外证据定位——典型嫌疑: Form_Load
-              # 内 COM/Start 失败弹运行时错误对话框, 进程卡死在 session 0 弹窗上)
+              # 可观测性: probe 3/8 时输出端口监听状态 + VB6 运行时错误框正文.
+              # 实证 (探针轮 35504416672): 进程卡死在 "VB6 Runtime Error" 弹窗
+              # (session 0 不可见), 端口未监听 -> 需拿弹窗正文错误号定位 Form_Load
+              # 出错点. WM_GETTEXT 枚举子控件文本 (GetWindowText 跨进程拿不到控件文本).
               if ($i -eq 3 -or $i -eq 8) {
                 $proc.Refresh()
                 $nstat = netstat -ano | Select-String ":800\s" | Select-Object -First 2
                 Write-Host "[probe $i] port800: $(if ($nstat) { $nstat -join ' | ' } else { 'NOT LISTENING' })"
                 Write-Host "[probe $i] proc alive=$(-not $proc.HasExited) mainWin='$($proc.MainWindowTitle)'"
-                $tasklist = tasklist /v /fi "PID eq $($proc.Id)" /fo csv 2>$null | Select-Object -Last 1
-                Write-Host "[probe $i] tasklist: $tasklist"
+                if (-not ('WinProbe' -as [type])) {
+                  Add-Type @"
+          using System;
+          using System.Text;
+          using System.Runtime.InteropServices;
+          public class WinProbe {
+              delegate bool EnumProc(IntPtr h, IntPtr lp);
+              [DllImport("user32.dll")] static extern bool EnumWindows(EnumProc cb, IntPtr lp);
+              [DllImport("user32.dll")] static extern bool EnumChildWindows(IntPtr h, EnumProc cb, IntPtr lp);
+              [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetWindowText(IntPtr h, StringBuilder sb, int max);
+              [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern IntPtr SendMessage(IntPtr h, uint msg, IntPtr w, StringBuilder l);
+              public static string Dump() {
+                  var all = new StringBuilder();
+                  EnumWindows((top, lp) => {
+                      var t = new StringBuilder(256); GetWindowText(top, t, 256);
+                      if (t.ToString().Contains("VB6 Runtime Error")) {
+                          all.AppendLine("=== dialog: " + t + " ===");
+                          EnumChildWindows(top, (c, lp2) => {
+                              var ct = new StringBuilder(512);
+                              SendMessage(c, 0x000D, (IntPtr)512, ct);
+                              if (ct.Length > 0) all.AppendLine("  " + ct.ToString().Replace("\r\n", " / "));
+                              return true;
+                          }, IntPtr.Zero);
+                      }
+                      return true;
+                  }, IntPtr.Zero);
+                  return all.ToString();
+              }
+          }
+          "@
+                }
+                $dump = [WinProbe]::Dump()
+                Write-Host "[probe $i] dialog text: $(if ($dump) { $dump } else { '(no VB6 Runtime Error dialog)' })"
               }
             }
             if ($ok) {
