@@ -332,6 +332,17 @@ jobs:
                 $lastErr = "unexpected content: $([string]$resp.Content)"
                 if ($lastErr.Length -gt 160) { $lastErr = $lastErr.Substring(0, 160) }
               } catch { $lastErr = $_.Exception.Message }
+              # 可观测性: probe 3/8 时输出端口监听与进程窗口状态 (GUI exe 运行链
+              # 首次 CI 验证; "活着但不监听"需黑盒外证据定位——典型嫌疑: Form_Load
+              # 内 COM/Start 失败弹运行时错误对话框, 进程卡死在 session 0 弹窗上)
+              if ($i -eq 3 -or $i -eq 8) {
+                $proc.Refresh()
+                $nstat = netstat -ano | Select-String ":800\s" | Select-Object -First 2
+                Write-Host "[probe $i] port800: $(if ($nstat) { $nstat -join ' | ' } else { 'NOT LISTENING' })"
+                Write-Host "[probe $i] proc alive=$(-not $proc.HasExited) mainWin='$($proc.MainWindowTitle)'"
+                $tasklist = tasklist /v /fi "PID eq $($proc.Id)" /fo csv 2>$null | Select-Object -Last 1
+                Write-Host "[probe $i] tasklist: $tasklist"
+              }
             }
             if ($ok) {
               Write-Host "DEMO PASS: HTTP 200 + 'hello vbman' confirmed (COM 注册/调用/HTTP 环回全链路活)"
