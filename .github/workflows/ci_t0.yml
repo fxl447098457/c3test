@@ -28,7 +28,7 @@ jobs:
       C3_VCVARSALL: ""
     steps:
       - name: 检出代码
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: 环境自检（MSVC 工具链）
         shell: pwsh
@@ -42,7 +42,7 @@ jobs:
           ninja --version
 
       - name: 缓存构建目录（src/ 未变时走快速路径）
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ${{ runner.temp }}/c3build
           key: c3build-${{ hashFiles('src/**', 'CMakeLists.txt', 'cmake/**') }}
@@ -73,7 +73,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "built C3.exe smoke check failed" }
 
       - name: 上传 C3.exe 产物（T1 复用，不重复构建）
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: c3-exe
           path: .build/C3.exe
@@ -86,7 +86,7 @@ jobs:
 
       - name: 上传 T0 日志
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: t0-logs
           path: |
@@ -108,10 +108,10 @@ jobs:
       C3_VCVARSALL: ""
     steps:
       - name: 检出代码
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: 下载 C3.exe 产物（来自 T0）
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: c3-exe
           path: .build/
@@ -135,7 +135,7 @@ jobs:
 
       - name: 上传 T1 日志
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: t1-logs
           path: |
