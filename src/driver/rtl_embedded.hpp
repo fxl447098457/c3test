@@ -68,9 +68,9 @@ enum RtlResourceID {
     RTL_VB6FORMS_PICTURE_PROP_C = 139,
     RTL_VB6FORMS_WIDGET_PROP_C  = 140,
 
-    // DI 转发桩按 Lib 家族拆分 (2026-09-17)
+    // DI 转发桩按 Lib 家族拆分 (2026-09-17); gdiplus 2026-09-20 再按对象域拆 5 份 (di/gdiplus/)
     RTL_VB6_DI_USER32_STUBS_C    = 141,
-    RTL_VB6_DI_GDIPLUS_STUBS_C   = 142,
+    RTL_VB6_DI_GDIPLUS_DRAW_STUBS_C = 142,
     RTL_VB6_DI_CRYPTO_STUBS_C    = 143,
     RTL_VB6_DI_COM_STUBS_C       = 144,
     RTL_VB6_DI_NET_STUBS_C       = 145,
@@ -114,7 +114,32 @@ enum RtlResourceID {
     // Fix 103: VB6 内建对象 Collection 的 C 实现 (IDispatch + IEnumVARIANT)
     RTL_VB6COM_COLLECTION_C    = 177,
     RTL_VB6COM_COLLECTION_ENUM_C = 178,
-    RTL_VB6FORMS_AXCONTAINER_C = 179,  // Fix 148: VB6 容器对象模型 (Extender/Container/Controls)
+    // vb6forms_uc 按族细分 (2026-09-19): 内部头 + 6 族编译单元 + 7 个函数体片段
+    RTL_VB6FORMS_UC_INTERNAL_H             = 179,
+    RTL_UC_HOST_C                          = 180,
+    RTL_UC_HOST_WINDOW_C                   = 181,
+    RTL_UC_HOSTMODEL_C                     = 182,
+    RTL_UC_CONTROLS_C                      = 183,
+    RTL_UC_COLLECTION_C                    = 184,
+    RTL_UC_DEBUG_C                         = 185,
+    RTL_UC_HOST_CREATE_INC                 = 186,
+    RTL_UC_HOSTMODEL_GETPROP_INC           = 187,
+    RTL_UC_HOSTMODEL_SETPROP_INC           = 188,
+    RTL_UC_HOSTMODEL_CALL_INC              = 189,
+    RTL_UC_COLLECTION_API_INC              = 190,
+    RTL_UC_DEBUG_DIB_INC                   = 191,
+    RTL_UC_DEBUG_COMPOSITE_INC             = 192,
+    RTL_UC_PROPBAG_C                       = 193,
+
+    // DI gdiplus 二级拆分 (2026-09-20): text/image/brush/path (draw 见 142)
+    RTL_VB6_DI_GDIPLUS_TEXT_STUBS_C        = 194,
+    RTL_VB6_DI_GDIPLUS_IMAGE_STUBS_C       = 195,
+    RTL_VB6_DI_GDIPLUS_BRUSH_STUBS_C       = 196,
+    RTL_VB6_DI_GDIPLUS_PATH_STUBS_C        = 197,
+
+    // Fix 148: VB6 容器对象模型 (Extender/Container/Controls) — OCX 真宿主 (axcontainer.c)
+    // 注意: 179~197 已被 vb6forms_uc 拆分 + gdiplus 拆分占满, 故顺延到 198 避免 ID 冲突
+    RTL_VB6FORMS_AXCONTAINER_C = 198,
 };
 
 // Session directory manager

@@ -103,7 +103,11 @@ std::string SessionManager::create() {
         { RTL_VB6_DI_STUBS_C,       "vb6_di_stubs.c" },
         { RTL_VB6_DI_WIN32_STUBS_C, "vb6_di_win32_stubs.c" },
         { RTL_VB6_DI_USER32_STUBS_C,   "vb6_di_user32_stubs.c" },
-        { RTL_VB6_DI_GDIPLUS_STUBS_C,  "vb6_di_gdiplus_stubs.c" },
+        { RTL_VB6_DI_GDIPLUS_DRAW_STUBS_C,  "vb6_di_gdiplus_draw_stubs.c" },
+        { RTL_VB6_DI_GDIPLUS_TEXT_STUBS_C,  "vb6_di_gdiplus_text_stubs.c" },
+        { RTL_VB6_DI_GDIPLUS_IMAGE_STUBS_C, "vb6_di_gdiplus_image_stubs.c" },
+        { RTL_VB6_DI_GDIPLUS_BRUSH_STUBS_C, "vb6_di_gdiplus_brush_stubs.c" },
+        { RTL_VB6_DI_GDIPLUS_PATH_STUBS_C,  "vb6_di_gdiplus_path_stubs.c" },
         { RTL_VB6_DI_CRYPTO_STUBS_C,   "vb6_di_crypto_stubs.c" },
         { RTL_VB6_DI_COM_STUBS_C,      "vb6_di_com_stubs.c" },
         { RTL_VB6_DI_NET_STUBS_C,      "vb6_di_net_stubs.c" },
@@ -180,6 +184,23 @@ std::string SessionManager::create() {
         { RTL_VB6RTL_COM_C,                   "vb6rtl_com.c" },
         { RTL_VB6RTL_REGISTRY_C,              "vb6rtl_registry.c" },
         { RTL_VB6RTL_USERCTL_H,               "vb6rtl_userctl.h" },  // Fix 105
+
+        // vb6forms_uc 按族细分 (2026-09-19): 内部头 + 6 族编译单元 + 7 个片段
+        { RTL_VB6FORMS_UC_INTERNAL_H,         "vb6forms_uc_internal.h" },
+        { RTL_UC_HOST_C,                      "uc_host.c" },
+        { RTL_UC_HOST_WINDOW_C,               "uc_host_window.c" },
+        { RTL_UC_HOSTMODEL_C,                 "uc_hostmodel.c" },
+        { RTL_UC_CONTROLS_C,                  "uc_controls.c" },
+        { RTL_UC_COLLECTION_C,                "uc_collection.c" },
+        { RTL_UC_DEBUG_C,                     "uc_debug.c" },
+        { RTL_UC_HOST_CREATE_INC,             "uc_host_create.inc" },
+        { RTL_UC_HOSTMODEL_GETPROP_INC,       "uc_hostmodel_getprop.inc" },
+        { RTL_UC_HOSTMODEL_SETPROP_INC,       "uc_hostmodel_setprop.inc" },
+        { RTL_UC_HOSTMODEL_CALL_INC,          "uc_hostmodel_call.inc" },
+        { RTL_UC_COLLECTION_API_INC,          "uc_collection_api.inc" },
+        { RTL_UC_DEBUG_DIB_INC,               "uc_debug_dib.inc" },
+        { RTL_UC_DEBUG_COMPOSITE_INC,         "uc_debug_composite.inc" },
+        { RTL_UC_PROPBAG_C,                   "uc_propbag.c" },
     };
 
     for (auto& entry : files) {

@@ -24,6 +24,8 @@ $ErrorActionPreference = "SilentlyContinue"
 $Root = Split-Path -Parent $PSScriptRoot
 $C3 = Join-Path $Root ".build\C3.exe"
 $Tests = $PSScriptRoot
+# T0 拆分 (2026-09-20): 语法/冒烟用例 git mv 至 tests_github\t0_cases\, 跨目录引用同一份文件 (无副本)
+$GHTests = Join-Path $Tests "..\tests_github\t0_cases"
 $OutDir = if ($OutputDirectory) { $OutputDirectory } else { Join-Path $Root "output" }
 # === 获取 MSVC 编译环境 (通用) ===
 # 设计原则: 不依赖 cmd.exe / vcvarsall 解析 (易因安全策略/编码/PATH 大小写失效),
@@ -593,11 +595,11 @@ Write-Host ""
 
 # --- 语法测试 (--syntax-only) ---
 # 说明 C3.exe 的构建链路: "源文件.bas -> 中间C -> cl/link -> 可执行文件"
-# 参考 tests\smoke.bas (内含防呆提醒: 运行中弹 MsgBox 的用例需获得前台焦点)
+# 参考 tests_github\t0_cases\smoke.bas (内含防呆提醒: 运行中弹 MsgBox 的用例需获得前台焦点)
 if ($Category -in @("all", "smoke")) {
     Write-Host "--- Smoke Test (C3.exe end-to-end) ---" -ForegroundColor Yellow
 
-    Test-Run "smoke" "$Tests\smoke.bas" @("SMOKE-1:OK", "SMOKE-2:OK", "SMOKE-3:OK", "SMOKE PASS")
+    Test-Run "smoke" "$GHTests\smoke.bas" @("SMOKE-1:OK", "SMOKE-2:OK", "SMOKE-3:OK", "SMOKE PASS")
     Write-Host ""
 }
 
@@ -769,20 +771,21 @@ if ($Category -in @("all", "syntax")) {
     # --- 生成物 / 输出目录说明 ---
     Write-Host "--- Syntax/Semantic Tests ---" -ForegroundColor Yellow
     
+    # T0 拆分: 13 个用例移入 tests_github\t0_cases\; test_onerror 留 tests\ (run 类双登记, 不可挪)
     $syntaxTests = @(
-        "test_basic.bas",
-        "test_for.bas", "test_for2.bas",
-        "test_goto.bas", "test_gosub.bas",
-        "test_select.bas",
-        "test_onerror.bas",
-        "test_redim.bas",
-        "test_setlet.bas", "test_setonly.bas",
-        "test_assign.bas",
-        "test_sem_minimal.bas", "test_sem_proc.bas", "test_semantic.bas"
+        "$GHTests\test_basic.bas",
+        "$GHTests\test_for.bas", "$GHTests\test_for2.bas",
+        "$GHTests\test_goto.bas", "$GHTests\test_gosub.bas",
+        "$GHTests\test_select.bas",
+        "$Tests\test_onerror.bas",
+        "$GHTests\test_redim.bas",
+        "$GHTests\test_setlet.bas", "$GHTests\test_setonly.bas",
+        "$GHTests\test_assign.bas",
+        "$GHTests\test_sem_minimal.bas", "$GHTests\test_sem_proc.bas", "$GHTests\test_semantic.bas"
     )
-    
+
     foreach ($t in $syntaxTests) {
-        $path = Join-Path $Tests $t
+        $path = $t
         if (Test-Path $path) {
             $name = [System.IO.Path]::GetFileNameWithoutExtension($t)
             Test-Syntax $name $path
@@ -793,18 +796,19 @@ if ($Category -in @("all", "syntax")) {
     # --- 生成环境检查与汇总 (冒烟+语法+VBP+run 计数) ---
     Write-Host "--- Preprocessor Tests ---" -ForegroundColor Yellow
     
+    # T0 拆分: pp 系列全部移入 tests_github\t0_cases\, 跨目录引用
     $ppTests = @(
-        "test_preprocess.bas",
-        "test_pp_minimal.bas",
-        "test_pp2.bas", "test_pp3.bas", "test_pp4.bas", "test_pp5.bas",
-        "test_pp6.bas", "test_pp7.bas", "test_pp8.bas", "test_pp9.bas",
-        "test_pp10.bas", "test_pp11.bas", "test_pp12.bas", "test_pp13.bas",
-        "test_pp14.bas", "test_pp15.bas", "test_pp16.bas", "test_pp17.bas",
-        "test_pp18.bas"
+        "$GHTests\test_preprocess.bas",
+        "$GHTests\test_pp_minimal.bas",
+        "$GHTests\test_pp2.bas", "$GHTests\test_pp3.bas", "$GHTests\test_pp4.bas", "$GHTests\test_pp5.bas",
+        "$GHTests\test_pp6.bas", "$GHTests\test_pp7.bas", "$GHTests\test_pp8.bas", "$GHTests\test_pp9.bas",
+        "$GHTests\test_pp10.bas", "$GHTests\test_pp11.bas", "$GHTests\test_pp12.bas", "$GHTests\test_pp13.bas",
+        "$GHTests\test_pp14.bas", "$GHTests\test_pp15.bas", "$GHTests\test_pp16.bas", "$GHTests\test_pp17.bas",
+        "$GHTests\test_pp18.bas"
     )
-    
+
     foreach ($t in $ppTests) {
-        $path = Join-Path $Tests $t
+        $path = $t
         if (Test-Path $path) {
             $name = [System.IO.Path]::GetFileNameWithoutExtension($t)
             Test-Syntax $name $path

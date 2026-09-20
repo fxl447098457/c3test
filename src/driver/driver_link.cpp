@@ -30,8 +30,18 @@ static void addFormsSources(MsvcDriverOptions& opts, const std::string& rtlDir) 
     opts.sourceFiles.push_back(rtlDir + "/vb6forms_widget_prop.c");
     opts.sourceFiles.push_back(rtlDir + "/vb6forms_shape.c");
     opts.sourceFiles.push_back(rtlDir + "/vb6forms_axsite.c");
+    // Fix 112: 工程内 UserControl 实例宿主 + 宿主对象模型 (2026-09-19 按族拆 6 单元)
+    // 注意: uc/ 下的 .c 解包后是平铺目录，故这里写 basename 而非带子目录路径
+    opts.sourceFiles.push_back(rtlDir + "/uc_host.c");
+    opts.sourceFiles.push_back(rtlDir + "/uc_host_window.c");
+    opts.sourceFiles.push_back(rtlDir + "/uc_hostmodel.c");
+    opts.sourceFiles.push_back(rtlDir + "/uc_controls.c");
+    opts.sourceFiles.push_back(rtlDir + "/uc_collection.c");
+    opts.sourceFiles.push_back(rtlDir + "/uc_debug.c");
+    // Fix 120-141 移植 (2026-09-20): PropertyBag (IDispatch) 编译单元
+    opts.sourceFiles.push_back(rtlDir + "/uc_propbag.c");
+    // Fix 148: OCX 真宿主 (免注册 LoadLibrary + DllGetClassObject) —— NewTab 等第三方 32 位 OCX
     opts.sourceFiles.push_back(rtlDir + "/vb6forms_axcontainer.c");
-    opts.sourceFiles.push_back(rtlDir + "/vb6forms_uc.c");   // Fix 112
 }
 
 bool Driver::runLinker(const CompileOptions& options, const std::string& outputDir,
@@ -136,7 +146,12 @@ bool Driver::runLinker(const CompileOptions& options, const std::string& outputD
     msvcOpts.sourceFiles.push_back(rtlDir + "/vb6_di_stubs.c");
     msvcOpts.sourceFiles.push_back(rtlDir + "/vb6_di_win32_stubs.c");
     msvcOpts.sourceFiles.push_back(rtlDir + "/vb6_di_user32_stubs.c");
-    msvcOpts.sourceFiles.push_back(rtlDir + "/vb6_di_gdiplus_stubs.c");
+    // gdiplus 二级拆分 (2026-09-20): 解包后是平铺目录, 故写 basename
+    msvcOpts.sourceFiles.push_back(rtlDir + "/vb6_di_gdiplus_draw_stubs.c");
+    msvcOpts.sourceFiles.push_back(rtlDir + "/vb6_di_gdiplus_text_stubs.c");
+    msvcOpts.sourceFiles.push_back(rtlDir + "/vb6_di_gdiplus_image_stubs.c");
+    msvcOpts.sourceFiles.push_back(rtlDir + "/vb6_di_gdiplus_brush_stubs.c");
+    msvcOpts.sourceFiles.push_back(rtlDir + "/vb6_di_gdiplus_path_stubs.c");
     msvcOpts.sourceFiles.push_back(rtlDir + "/vb6_di_crypto_stubs.c");
     msvcOpts.sourceFiles.push_back(rtlDir + "/vb6_di_com_stubs.c");
     msvcOpts.sourceFiles.push_back(rtlDir + "/vb6_di_net_stubs.c");
