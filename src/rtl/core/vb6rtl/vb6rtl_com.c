@@ -369,7 +369,10 @@ void* vb6_VariantToObject(vb6_VARIANT* v) {
 /* P24-04: Pack vb6_VARIANT (by value) into Windows VARIANT for COM call args */
 /* Used when Variant-typed variable member access result is passed as COM arg */
 void* vb6_ComPackVariant(vb6_VARIANT v) {
-    VARIANT* pv = (VARIANT*)CoTaskMemAlloc(sizeof(VARIANT));
+    /* Fix 150: 必须用 malloc —— 所有消费方 (vb6_ComSetProp/ComSetPropArg/ComCall)
+       都用 free() 释放打包 VARIANT。此前用 CoTaskMemAlloc 而 free() 释放,
+       跨分配器释放损坏堆, 表现为 OLEAUT32.dll 内 0xC0000005 (NewTab Theme 赋值实测) */
+    VARIANT* pv = (VARIANT*)malloc(sizeof(VARIANT));
     if (!pv) return NULL;
     VariantInit(pv);
     switch (v.vt) {

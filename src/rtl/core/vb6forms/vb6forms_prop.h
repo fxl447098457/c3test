@@ -15,7 +15,12 @@ extern "C" {
 
 // Text/Caption属性 (TextBox/Label/CommandButton/Form)
 // 返回BSTR (调用者负责vb6_SysFreeString释放, 或直接传给函数)
-void* vb6_GetControlText(void* hwnd);
+// Fix 150: 返回类型必须是 wchar_t* 而非 void* —— 代码生成的
+// vb6_ComPackValue 走 C11 _Generic, void* 会落入 default 分支被当成
+// 对象指针打包成 VT_DISPATCH, OLEAUT32 解引用假接口指针即崩
+// (NewTab 主题下拉选择 0xC0000005 实测)。wchar_t* 才会命中
+// VariantString 分支打包为 VT_BSTR。
+wchar_t* vb6_GetControlText(void* hwnd);
 void vb6_SetControlText(void* hwnd, void* bstr);
 
 // Value属性 (CheckBox/OptionButton: 0=Unchecked, 1=Checked, 2=Grayed)
