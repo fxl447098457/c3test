@@ -1,25 +1,13 @@
-# ci_vbman.yml - VBMAN 链路验证 (真实大工程: 编译 + 注册 + demo 执行)
+# ci_vbman.yml - VBMAN 链路验证 (编译 129 模块 OleDll + 注册 + demo HTTP 环回断言)
 #
-# 与 ci_t0.yml (T0+T1+T2 测试链) 的关系 (方案 A, workflow_run 联动):
-#   - 测试链跑成功后自动触发本 workflow, download-artifact@v8 以 run-id 跨 run
-#     下载 T0 的 c3-exe (零重复构建);
-#   - 另支持 tag github-vbman-* / 手动 dispatch (此两类触发拿不到上游 artifact,
-#     会自建 C3.exe, 构建缓存 cache key c3build-* 与测试链共享)。
-# 注意: workflow_run 触发仅当本文件位于默认分支时生效; 分支期用 tag 验证。
-#
-# 链路 (两个 job):
-#   vbman      : clone gitcode vbman -> C3 编译 VBMAN.vbp (129 模块 OleDll)
-#                -> 校验 VBMAN.dll -> 上传 vbman-dll + c3-exe (供 demo job)
-#   vbman-demo : clone vbman + vbman-demo (demo vbp 以 ..\..\..\vbman\dist\DLL
-#                相对路径引用 VBMAN.dll) -> System32 regsvr32 注册 (C3 默认产 x64 dll)
-#                -> C3 编译 demos/Helloworld -> 运行产物 (Form_Load 启动内嵌
-#                HTTP 服务器 127.0.0.1:800 并调用 VBMAN COM) -> HTTP 环回请求
-#                断言响应含 "hello vbman" -> finally 杀进程 + regsvr32 /u 注销
-#                (环境洁净约定: 注册的 COM 组件用完必须注销)
-#   桩自愈      : vbman 首编 LNK2019 (外部仓库新增 Declare 的转发桩未入库) 时,
-#                用失败会话跑 scripts/gen_di_stubs.ps1 (add-only) 补桩 -> 增量重建
-#                C3.exe -> 重编; 产出的 src/rtl/core/di/** 进 vbman-compile-logs,
-#                应回 commit 固化。
+# 触发: ci_t0 成功后 workflow_run 联动 (跨 run 下载 c3-exe, 零重复构建);
+#       tag github-vbman-* / dispatch 触发时自建 C3.exe。
+#       workflow_run 仅当本文件位于默认分支时生效; 分支期用 tag 验证。
+# 链路: vbman (clone gitcode vbman -> C3 编译 -> 校验 dll -> 上传产物)
+#       vbman-demo (clone vbman + vbman-demo -> 注册 -> 编译运行 demo ->
+#       HTTP 断言 -> finally 杀进程 + 注销, 洁净约定)
+# 桩自愈: vbman 首编 LNK2019 时跑 gen_di_stubs.ps1 (add-only) 补桩 ->
+#       重建 C3 -> 重编; 产出的 src/rtl/core/di/** 应回 commit 固化。
 
 name: VBMAN 链路验证
 
@@ -101,11 +89,11 @@ jobs:
             }
           }
           New-Item -ItemType Directory -Force -Path tests_github\vbman\dist\DLL | Out-Null
-          # 不带 --verbose: verbose 的 AST 遍历+未使用警告占日志 98% (18 万行), 错误正文靠 c3-error.log 回显
+          # 不带 --verbose: verbose 日志 98% 是 AST 遍历+未使用警告 (18 万行), 错误正文看 c3-error.log
           & .build\C3.exe tests_github\vbman\src\VBMAN.vbp --output-dir tests_github\vbman\dist\DLL *> _vbman_compile.log
           Get-Content _vbman_compile.log | Select-Object -Last 50 | Write-Host
           if ($LASTEXITCODE -ne 0) {
-            # cl.exe 的错误正文由 C3 落到 --output-dir 下的 c3-error.log, 回显到 step 输出
+            # cl 错误正文由 C3 落到 --output-dir 下 c3-error.log
             if (Test-Path "tests_github\vbman\dist\DLL\c3-error.log") {
               Write-Host "=== c3-error.log ==="
               Get-Content "tests_github\vbman\dist\DLL\c3-error.log" | Write-Host
@@ -115,19 +103,12 @@ jobs:
             Write-Host "first pass OK"
           }
           Add-Content -Path $env:GITHUB_ENV -Value "VBMAN_COMPILE_EXIT=$LASTEXITCODE"
-          # GH 的 pwsh 包装在脚本收尾自动 exit $LASTEXITCODE, C3 失败会把本 step 染红,
-          # 而后续自定义 if 步骤会被隐式 success() 拦下 -> 显式 exit 0, 真实状态走
-          # GITHUB_ENV 传给自愈步, 编译成败的最终门禁是"校验 VBMAN.dll"步
           exit 0
 
       - name: 桩自愈（vb6_di_* LNK2019 → 重生成 → 重建 C3 → 重编）
         if: env.VBMAN_COMPILE_EXIT != '0'
         shell: pwsh
         run: |
-          # vbman 是外部演进仓库, 新增 Declare 的转发桩可能尚未入库 (09-19 重生成曾把
-          # 桩集清到 czUI 子集, 90 个符号 LNK2019)。生成器已改 add-only: 以失败会话的
-          # 生成头补齐缺失桩且不清存量, 重建 C3.exe (新桩重新嵌入 RTL 资源) 后重编。
-          # 自愈产出的 src/rtl/core/di/** 会进 vbman-compile-logs artifact, 应回 commit。
           $c3c = Join-Path $env:TEMP 'C3C'
           if (-not (Test-Path $c3c)) { $c3c = Join-Path $env:LOCALAPPDATA 'Temp\C3C' }
           $session = Get-ChildItem $c3c -Directory -ErrorAction SilentlyContinue |
@@ -136,7 +117,6 @@ jobs:
           Write-Host "heal: session $($session.FullName)"
           pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/gen_di_stubs.ps1 -SessionDir $session.FullName
           if ($LASTEXITCODE -ne 0) { throw "heal: gen_di_stubs.ps1 failed" }
-          # 每 step 独立进程: 重新注入 MSVC 环境
           $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer\vswhere.exe"
           $vsPath = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath 2>$null
           if (-not $vsPath) { throw "No MSVC install" }
@@ -147,7 +127,6 @@ jobs:
               [Environment]::SetEnvironmentVariable($matches[1], $matches[2], "Process")
             }
           }
-          # 重建 C3.exe: c3rtl.rc 依赖桩文件, ninja 增量重嵌资源并重链
           $buildDir = Join-Path $env:RUNNER_TEMP "c3build"
           if (Test-Path (Join-Path $buildDir "build.ninja")) {
             cmake --build $buildDir
@@ -217,8 +196,6 @@ jobs:
 
       - name: 归位产物（dll -> vbman\dist\DLL, C3.exe -> .build）
         run: |
-          # download-artifact 保留 artifact 内部目录结构 (上传时的 tests_github\... 与
-          # .build\... 嵌套在 _dl 下), 递归定位两个文件, 不依赖具体层级
           New-Item -ItemType Directory -Force -Path tests_github\vbman\dist\DLL, .build | Out-Null
           $dll = Get-ChildItem _dl -Recurse -Filter VBMAN.dll | Select-Object -First 1
           $exe = Get-ChildItem _dl -Recurse -Filter C3.exe | Select-Object -First 1
@@ -233,10 +210,10 @@ jobs:
 
       - name: 注入 Form_Load 错误探针（仅 CI 工作副本, 不改上游 vbman-demo）
         run: |
-          # 实证: demo exe 卡死在 "VB6 Runtime Error" 弹窗 (session 0 不可见),
-          # 窗口 API (WM_GETTEXT) 拿不到错误正文 -> 源码级探针: Form_Load 包
-          # On Error, 错误号/描述/Erl 写 _formload_err.txt, 断言步读取打印.
-          # GBK 编码读写; LF 归一后逐字符匹配, 找不到即 throw 防静默漏注入.
+          # session 0 弹窗不可见, 窗口 API 拿不到错误正文 -> 源码级探针:
+          # Form_Load 包 On Error, 错误号写 _formload_err.txt, 断言步读取打印。
+          # GBK 读写; $old/$new 与 $src 都要归一成 LF (GH 临时 .ps1 是 CRLF,
+          # here-string 会带 CR, 不归一则 Contains 恒 false, vbman-011 实证)。
           $f = "tests_github/vbman-demo/demos/Helloworld/Form1.frm"
           $gbk = [System.Text.Encoding]::GetEncoding(936)
           $src = [System.IO.File]::ReadAllText($f, $gbk).Replace("`r`n", "`n")
@@ -266,8 +243,6 @@ jobs:
               Close #1
           End Sub
           '@
-          # 注意: GitHub 生成的临时 .ps1 是 CRLF 行尾, 单引号 here-string 会原样带上 CR;
-          # $src 已归一到 LF, 故 $old/$new 也必须归一, 否则 Contains 恒 false (vbman-011 实证)。
           $old = $old.Replace("`r`n", "`n")
           $new = $new.Replace("`r`n", "`n")
           if (-not $src.Contains($old)) { throw "Form_Load 块未匹配: oldLen=$($old.Length) srcLen=$($src.Length), vbman-demo 上游源码可能已变, 探针未注入" }
@@ -276,8 +251,8 @@ jobs:
 
       - name: 注册 VBMAN.dll（x64 dll 用 System32 regsvr32）
         run: |
-          # C3 默认 --arch x64, VBMAN.dll 是 64 位; 曾误用 SysWOW64(32 位) regsvr32
-          # LoadLibrary 失败。先打 PE machine 字段自检架构再注册
+          # 先校验 PE machine 字段确认 x64, 再用 System32 regsvr32;
+          # regsvr32 是 GUI 程序, 必须 Start-Process -Wait 拿真实退出码。
           $dllPath = "tests_github\vbman\dist\DLL\VBMAN.dll"
           $fs = [System.IO.File]::OpenRead($dllPath)
           $br = New-Object System.IO.BinaryReader($fs)
@@ -287,14 +262,10 @@ jobs:
           $archName = switch ($machine) { 0x8664 { 'x64' } 0x014C { 'x86' } default { '?' } }
           Write-Host ("VBMAN.dll PE machine: 0x{0:X4} ({1})" -f $machine, $archName)
           if ($machine -ne 0x8664) { throw "VBMAN.dll 不是 x64 (machine=0x$($machine.ToString('X4')))" }
-          # regsvr32 是 GUI 子系统程序, pwsh 的 & 调用不等待, $LASTEXITCODE 保持
-          # null 会被 -ne 0 误判失败 (010 实测: probe 调 DllRegisterServer 返回
-          # S_OK 而 $LASTEXITCODE 为空) -> Start-Process -Wait 拿真实退出码
           $reg = Start-Process -FilePath "$env:SystemRoot\System32\regsvr32.exe" -ArgumentList '/s', $dllPath -Wait -PassThru
           Write-Host "regsvr32 exit code: $($reg.ExitCode)"
           if ($reg.ExitCode -ne 0) {
             Write-Host "regsvr32 failed (2=LoadLibrary败 3=无导出 4=DllRegisterServer败), probe..."
-            # P/Invoke 探测: 区分缺依赖 / 导出缺失 / DllRegisterServer 返回错误
             Add-Type -TypeDefinition @'
           using System;
           using System.Runtime.InteropServices;
@@ -327,7 +298,6 @@ jobs:
             [RegProbe]::FreeLibrary($h) | Out-Null
             throw "regsvr32 failed (probe 结论见上)"
           }
-          # 注册落地确认: ProgId 必须真实存在, 拿证据说话
           if (-not (Test-Path 'Registry::HKEY_CLASSES_ROOT\VBMANLIB.cVBMAN')) {
             throw "ProgId VBMANLIB.cVBMAN 未落地, 注册无效"
           }
@@ -336,7 +306,6 @@ jobs:
       - name: 编译 Helloworld demo（引用 ..\..\..\vbman\dist\DLL\VBMAN.dll）
         shell: pwsh
         run: |
-          # 每 step 独立进程: 编译前重新注入 MSVC 环境
           $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer\vswhere.exe"
           $vsPath = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath 2>$null
           if (-not $vsPath) { throw "No MSVC install" }
@@ -362,15 +331,14 @@ jobs:
       - name: 运行 demo + HTTP 环回断言（finally 注销 DLL）
         shell: pwsh
         run: |
-          # 崩溃诊断: C3_CRASH_TRACE=1 让生成的 exe 装未处理异常过滤器,
-          # 崩溃时写 CWD(c3_crash.txt): 异常码 + 触发模块 + 48 帧。
-          # 0xC0000005 不会被 VB6 的 On Error 捕获 (探针文件写不出来), 这是唯一能拿到的现场。
+          # C3_CRASH_TRACE=1: 生成的 exe 装未处理异常过滤器, 崩溃时写
+          # CWD\c3_crash.txt (异常码 + 触发模块 + 48 帧)。0xC0000005 不会被
+          # VB6 On Error 捕获 (探针文件写不出来), 这是唯一能拿到的现场。
           $env:C3_CRASH_TRACE = "1"
           Remove-Item "output\demo\c3_crash.txt" -ErrorAction SilentlyContinue
           $proc = Start-Process -FilePath "output\demo\VBMAN_DEMO.exe" -WorkingDirectory "output\demo" -PassThru
           $ok = $false; $lastErr = ""
           try {
-            # Form_Load 启动内嵌 HTTP 服务器 (127.0.0.1:800); 轮询请求直到响应命中
             foreach ($i in 1..10) {
               Start-Sleep -Seconds 2
               if ($proc.HasExited) { throw "demo exited early (code $($proc.ExitCode))" }
@@ -380,10 +348,8 @@ jobs:
                 $lastErr = "unexpected content: $([string]$resp.Content)"
                 if ($lastErr.Length -gt 160) { $lastErr = $lastErr.Substring(0, 160) }
               } catch { $lastErr = $_.Exception.Message }
-              # 可观测性: probe 3/8 时输出端口监听状态 + VB6 运行时错误框正文.
-              # 实证 (探针轮 35504416672): 进程卡死在 "VB6 Runtime Error" 弹窗
-              # (session 0 不可见), 端口未监听 -> 需拿弹窗正文错误号定位 Form_Load
-              # 出错点. WM_GETTEXT 枚举子控件文本 (GetWindowText 跨进程拿不到控件文本).
+              # probe 3/8: 输出端口监听状态 + "VB6 Runtime Error" 弹窗正文
+              # (session 0 不可见, WM_GETTEXT 枚举子控件文本拿错误号)
               if ($i -eq 3 -or $i -eq 8) {
                 $proc.Refresh()
                 $nstat = netstat -ano | Select-String ":800\s" | Select-Object -First 2
@@ -424,7 +390,6 @@ jobs:
                 Write-Host "[probe $i] dialog text: $(if ($dump) { $dump } else { '(no VB6 Runtime Error dialog)' })"
               }
             }
-            # Form_Load 探针产物: 有文件说明 On Error 捕获到了 Form_Load 内错误
             $flErr = "output\demo\_formload_err.txt"
             if (Test-Path $flErr) {
               Write-Host "[FormLoad probe] $((Get-Content $flErr -Raw).Trim())"
@@ -438,7 +403,6 @@ jobs:
             }
           } finally {
             if ($proc -and -not $proc.HasExited) { $proc.Kill() }
-            # 崩溃现场回显 (Start-Process 子进程继承 $env:C3_CRASH_TRACE)
             $crash = "output\demo\c3_crash.txt"
             if (Test-Path $crash) {
               Write-Host "===== c3_crash.txt (C3_CRASH_TRACE) ====="
