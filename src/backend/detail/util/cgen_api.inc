@@ -71,9 +71,12 @@
     // P6.6: 单独生成ActiveX DLL入口文件 (dll_entry.c)
     // 当DLL工程只有类模块(无标准模块)时, 由Driver调用此方法生成DLL导出代码
     // progId: DLL的ProgID前缀
+    // ExeComBridge 01: includeDllExports=false 时只生成 coclass 表 (EXE 工程的
+    //   com_entry.c), 跳过 DllGetClassObject/DllMain 等 DLL 导出段.
     // 返回: 生成的dll_entry.c文件内容
     std::string generateDllEntry(const std::string& progId,
-                                  const std::vector<SymbolTable*>& allSymTabs = {});
+                                  const std::vector<SymbolTable*>& allSymTabs = {},
+                                  bool includeDllExports = true);
 
     // 获取生成的代码
     const std::string& headerCode() const { return header_; }

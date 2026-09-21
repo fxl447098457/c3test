@@ -20,9 +20,10 @@ void CCodeGen::emitClassFactory(Module& module) {
     c_.indent();
     c_.emitLine(clsStruct + "* me = (" + clsStruct + "*)vb6_Alloc(sizeof(" + clsStruct + "));");
     c_.emitLine("if (!me) return NULL;");
-    if (isDll_) {
-        c_.emitLine("me->__comObj = NULL;  /* P6.6.3: no COM wrapper yet */");
-    }
+    // ExeComBridge 01: 无条件初始化 (原先仅 DLL). __comObj 现在是所有类模块
+    //   结构体的首字段 (见 cgen_base_generate_c_open.inc), EXE 的 _New() 与
+    //   DLL 侧保持一致; 纯 EXE 下无人写读, 恒 NULL, 行为零变化.
+    c_.emitLine("me->__comObj = NULL;  /* P6.6.3: no COM wrapper yet */");
 
     // 初始化所有字段为默认值
     // 同时注册BSTR/Long类型成员到knownBstrVars_/knownLongVars_ (用于赋值时BSTR安全处理)
@@ -164,7 +165,13 @@ void CCodeGen::emitClassDefaultInstance(Module& module) {
 // 接口指针字段一律不生成 (宁缺勿错 —— 暴露了但类型映射不对会写出编译不过或
 // 语义错误的 C). 收集条件与 semantic_analyzer 的 publicFieldNames 严格一致.
 void CCodeGen::emitClassFieldAccessors(Module& module) {
-    if (!isDll_ || !isClassModule_) return;
+    // ExeComBridge 01: 放开 EXE (原先 if (!isDll_ || ...) return).
+    //   EXE 工程也生成 com_entry.c (driver_codegen_dll_entry.inc), 其字段桥接
+    //   extern 引用 _field_get_/_let_ —— 访问器实体必须无条件生成, 否则
+    //   Instancing 非 Private 且有 Public 字段的 EXE 类 LNK2019.
+    //   依赖的 RTL 符号 (vb6_ComObject_FromInstance 等) 由 vb6comserver_obj.c
+    //   提供, driver_link.cpp 已无条件链入; 无 COM 引用时为死代码, 链接器剔除.
+    if (!isClassModule_) return;
 
     const std::string clsStruct = "vb6_cls_" + cIdent(moduleName_);
 
