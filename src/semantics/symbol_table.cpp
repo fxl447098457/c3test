@@ -304,6 +304,18 @@ void SymbolTable::defineExternal(std::unique_ptr<Symbol> sym) {
     moduleScope_->symbols_[key] = std::move(sym);
 }
 
+// Fix 177: 移除模块级作用域中的同名符号 (工程内定义遮蔽引用类型库同名类型时用)。
+// 只删裸名键: builtin ComClass/ComInterface 的 storageKey 就是 lowerName,
+// 不带 Property($pg/$pl/$ps) 或 Type($ty) 后缀, 故裸名查找即可命中。
+bool SymbolTable::eraseModuleSymbol(const std::string& name) {
+    if (!moduleScope_) return false;
+    std::string lower = Symbol::toLower(name);
+    auto it = moduleScope_->symbols_.find(lower);
+    if (it == moduleScope_->symbols_.end()) return false;
+    moduleScope_->symbols_.erase(it);
+    return true;
+}
+
 std::vector<const Symbol*> SymbolTable::getPublicSymbols() const {
     std::vector<const Symbol*> result;
     if (!moduleScope_) return result;

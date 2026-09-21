@@ -411,6 +411,12 @@ public:
     // 在模块级作用域定义一个isExternal=true的符号
     void defineExternal(std::unique_ptr<Symbol> sym);
 
+    // Fix 177: 移除模块级作用域中的同名符号。
+    // 用途: 工程内定义的类与引用类型库的同名 coclass/interface 冲突时, 先移除被
+    // 遮蔽的 builtin 类型库符号, 再注入工程类符号 (VB6 语义: 工程内定义优先于
+    // 引用库)。返回是否真的移除了符号。
+    bool eraseModuleSymbol(const std::string& name);
+
     // 获取所有模块级Public符号（供其他模块链接用）
     // 返回 name → Symbol* 的映射（仅Sub/Function/Variable/Constant, Public访问级别）
     std::vector<const Symbol*> getPublicSymbols() const;
