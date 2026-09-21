@@ -14,6 +14,8 @@
 
 ### 0.10.7
 
+- 2026-09-21（.github/workflows/ci_vbman.yml）：VBMAN/demo 编译步加 -g（/Zi /DEBUG /MAP，优化仍 /Od 不变），VBMAN.map 纳入 vbman-dll artifact —— 下一轮 CI 崩溃时 map 与 DLL 同源同布局，VBMAN.dll+0x1AC151 等崩溃偏移可直接符号化到函数名。
+
 - 2026-09-21（.github/workflows/ci_vbman.yml）：精简过程性注释（净 -35 行），删历史实证/轮次叙事，仅保留当前有效的坑点约定（pwsh 包装自动 exit 的门禁、探针 CRLF 归一、System32 regsvr32 + Start-Process -Wait、洁净注销）；步骤与逻辑零改动，PyYAML 校验通过、结构不变（vbman 10 步 / demo 9 步）。
 
 - 2026-09-21（src/driver/driver_crossmod.cpp、src/semantics/symbol_table.{hpp,cpp}、src/backend/cgen_util_com.cpp、src/backend/detail/util/cgen_helpers.inc、src/backend/expr/cgen_expr.cpp、src/backend/detail/expr/cgen_expr_ident_symbol.inc、cgen_expr_ident_dispatch.inc）：**Fix 177b：工程类遮蔽 coclass 改「创建点替换」而非「符号替换」** —— 上一版（b06e1f7）把 builtin ComClass 从模块作用域移除、让工程类符号占位，结果整条 coclass 晚绑定通路（VARIANT 表示 / comDefaultMemberName / ComCall 打包 / 返回值解包）被大面积改写成工程类早绑定代码，VBMAN 87 处 cl 编译错误（C2063 未定义标识符 `Dic(...)` / C2440 `vb6_cls_Dictionary*` ? `vb6_VARIANT` 互转 / C2106…），首编与 heal 重编同样失败。本版回退符号移除（eraseModuleSymbol 删除），改为：跨模块注入时在 builtin ComClass 上记 `Symbol::comProjectImplClass = <工程类名>`（符号保留，`As Dictionary` 仍是 coclass 晚绑定，生成代码除创建点外零变化）；新增 `CCodeGen::comNewExprFor(sym)`，创建点（`visit(NewExpr)` ComClass 分支 + 4 处 Dim As New 自动实例化）命中遮蔽标记时改发射 `vb6_ComPack_<类>(vb6_cls_<类>_New())`——复用 ExeComBridge 03 的 IDispatch 包装通路，返回 void*(堆 VARIANT* VT_DISPATCH) 与 `vb6_NewObject` 表示一致，运行期对象即工程类实例，自有成员 `Count()/Exists()` 经包装器 GetIDsOfNames 正常分发。b06e1f7 的 `vb6_HresultToErrNum` 错误号映射保留（对真·缺成员仍是正确语义）。验证（本机 emit-c + cl 编译，非运行期）：VBMAN.vbp 编译 exit=0（此前 87 错误）、无 c3-error.log，产出 VBMAN.dll；生成代码 `vb6_NewObject(L"Scripting.Dictionary")` 残留 0、创建点已见 `vb6_ComPack_Dictionary((vb6_cls_Dictionary_New()))`；限定名 `New Scripting.FileSystemObject` 等不受影响。

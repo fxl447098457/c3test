@@ -89,8 +89,9 @@ jobs:
             }
           }
           New-Item -ItemType Directory -Force -Path tests_github\vbman\dist\DLL | Out-Null
-          # 不带 --verbose: verbose 日志 98% 是 AST 遍历+未使用警告 (18 万行), 错误正文看 c3-error.log
-          & .build\C3.exe tests_github\vbman\src\VBMAN.vbp --output-dir tests_github\vbman\dist\DLL *> _vbman_compile.log
+          # 不带 --verbose: 日志 98% 是 AST 遍历+未使用警告 (18 万行), 错误正文看 c3-error.log
+          # -g: 链接器出 VBMAN.map, 与本 DLL 同源同布局, 崩溃偏移可直接符号化
+          & .build\C3.exe tests_github\vbman\src\VBMAN.vbp --output-dir tests_github\vbman\dist\DLL -g *> _vbman_compile.log
           Get-Content _vbman_compile.log | Select-Object -Last 50 | Write-Host
           if ($LASTEXITCODE -ne 0) {
             # cl 错误正文由 C3 落到 --output-dir 下 c3-error.log
@@ -317,7 +318,8 @@ jobs:
             }
           }
           New-Item -ItemType Directory -Force -Path output\demo | Out-Null
-          & .build\C3.exe tests_github\vbman-demo\demos\Helloworld\VBMAN_DEMO.vbp --output-dir output\demo --verbose *> _demo_compile.log
+          # -g: demo exe 也出 map, 崩溃栈里的 exe 偏移同样可符号化
+          & .build\C3.exe tests_github\vbman-demo\demos\Helloworld\VBMAN_DEMO.vbp --output-dir output\demo -g --verbose *> _demo_compile.log
           Get-Content _demo_compile.log | Write-Host
           if ($LASTEXITCODE -ne 0) {
             if (Test-Path "output\demo\c3-error.log") {
