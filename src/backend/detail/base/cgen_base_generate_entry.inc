@@ -13,6 +13,25 @@
             c_.emitBlank();
             c_.emitLine("// === 入口点 ===");
             bool hasMain = false;
+            // Fix 160: ComLib= 免注册组件表烘焙 — 在 vb6_Init() 之前发出.
+            // vb6_ComLibRegister 只填一张静态表, 与 vb6_Init 无顺序依赖, 但必须在任何
+            // 用户代码 (vb6_CreateObject) 之前完成; 放入口点最前保证首次调用即就绪.
+            // 表空 (未声明 ComLib=) 时一行不发 → 产物与改动前逐字节一致, 零回归.
+            auto emitComLibReg = [&]() {
+                if (!comLibRefs_ || comLibRefs_->empty()) return;
+                c_.emitBlank();
+                c_.emitLine("/* Fix 160: ComLib= 免注册组件表 (vbp 声明; 路径相对 exe) */");
+                c_.emitLine("static const Vb6ComLib c3_com_libs[] = {");
+                for (const auto& e : *comLibRefs_) {
+                    // Vb6ComLib 四字段全是 const wchar_t* → 必须发宽字符串字面量
+                    c_.emitLine("    { L\"" + escapeWideCString(e[0]) + "\", L\""
+                                + escapeWideCString(e[1]) + "\", L\"" + escapeWideCString(e[2])
+                                + "\", L\"" + escapeWideCString(e[3]) + "\" },");
+                }
+                c_.emitLine("};");
+                c_.emitLine("vb6_ComLibRegister(c3_com_libs, "
+                            + std::to_string(comLibRefs_->size()) + ");");
+            };
         for (auto& decl : module.declarations) {
             if (decl->kind == ASTNodeKind::SubDecl) {
                 auto& sub = static_cast<SubDecl&>(*decl);
@@ -61,6 +80,7 @@
                             c_.emitLine("int WINAPI WinMain(HINSTANCE hInst, HINSTANCE hPrevInst, LPSTR lpCmdLine, int nCmdShow) {");
                             c_.indent();
                             c_.emitLine("(void)hPrevInst; (void)lpCmdLine; (void)nCmdShow;");
+            emitComLibReg();
             c_.emitLine("vb6_Init();");
             if (!modInitFuncName.empty()) c_.emitLine(modInitFuncName + "();");
             // Fix 080: 多模块工程中, 调用所有外部模块的初始化函数
@@ -80,6 +100,7 @@
                         } else {
                             c_.emitLine("int main(int argc, char* argv[]) {");
                             c_.indent();
+            emitComLibReg();
             c_.emitLine("vb6_Init();");
             if (!modInitFuncName.empty()) c_.emitLine(modInitFuncName + "();");
             // Fix 080: 多模块工程中, 调用所有外部模块的初始化函数
@@ -90,6 +111,9 @@
                 }
             }
             c_.emitLine(cProcName(sub.name, sub.access) + "();");
+            // Fix 167: VB6 的 Sub Main 返回后进程要继续驻留 (运行时自己泵消息),
+            // 直到所有窗体关闭。此处不补循环 → modeless Load 的窗体一返回就退出。
+            c_.emitLine("if (vb6_AnyThreadWindowVisible()) vb6_MessageLoop();");
             c_.emitLine("vb6_Exit();");
                             c_.emitLine("return 0;");
                             c_.dedent();
@@ -106,6 +130,7 @@
                 c_.emitLine("int WINAPI WinMain(HINSTANCE hInst, HINSTANCE hPrevInst, LPSTR lpCmdLine, int nCmdShow) {");
                 c_.indent();
                 c_.emitLine("(void)hPrevInst; (void)lpCmdLine; (void)nCmdShow;");
+                emitComLibReg();
                 c_.emitLine("vb6_Init();");
                 // Fix 080: 多模块工程中, 调用所有外部模块的初始化函数
                 if (isMultiModule_) {
@@ -125,6 +150,7 @@
             } else {
                 c_.emitLine("int main(int argc, char* argv[]) {");
                 c_.indent();
+            emitComLibReg();
             c_.emitLine("vb6_Init();");
             if (!modInitFuncName.empty()) c_.emitLine(modInitFuncName + "();");
             // Fix 080: 多模块工程中, 调用所有外部模块的初始化函数
@@ -135,6 +161,8 @@
                 }
             }
             c_.emitLine(cProcName("Main", AccessLevel::Public) + "();");
+                // Fix 167: 同上方 main 模板 — Sub Main 返回后仍要驻留 (VB6 语义)
+                c_.emitLine("if (vb6_AnyThreadWindowVisible()) vb6_MessageLoop();");
                 c_.emitLine("vb6_Exit();");
                 c_.emitLine("return 0;");
                 c_.dedent();
@@ -148,6 +176,7 @@
                 c_.emitLine("int WINAPI WinMain(HINSTANCE hInst, HINSTANCE hPrevInst, LPSTR lpCmdLine, int nCmdShow) {");
                 c_.indent();
                 c_.emitLine("(void)hPrevInst; (void)lpCmdLine; (void)nCmdShow;");
+                emitComLibReg();
                 c_.emitLine("vb6_Init();");
                 if (!modInitFuncName.empty()) c_.emitLine(modInitFuncName + "();");
                 // Fix 080: 多模块工程中, 调用所有外部模块的初始化函数

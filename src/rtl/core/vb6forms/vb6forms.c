@@ -324,6 +324,28 @@ void vb6_DispatchTimer(int timerId) {
 }
 
 // ============================================================
+// Sub Main 驻留判据 (Fix 167)
+// ============================================================
+// VB6 语义: `Sub Main` 返回后进程**不退出**, 运行时继续泵消息, 直到所有窗体关闭
+// (或显式 End)。此前 codegen 的 Sub Main 入口模板调完 Main 直接 vb6_Exit()+return,
+// 于是 `Load` 出 modeless 窗体的工程一返回就干净退出 (退出码 0) —— 表现为
+// "窗口闪一下就没了", VBFlexGridDemo 正是如此。
+// 判据用"本线程有没有可见窗口", 而不是另建窗体注册表: 窗体是本 RTL 在
+// vb6_CreateFormWindowB 里以 RegisterClass("VB6_Form_<X>") 建的普通窗口, 归本线程所有;
+// 而 `App.PrevInstance` 那一支 (激活前一个实例后返回) 只操作**别的进程**的 hwnd,
+// 本线程没有窗口 → 不会误驻留。纯 .bas 控制台工程同样没有可见窗口 → 不受影响。
+static BOOL CALLBACK vb6_EnumAnyVisibleWindow(HWND hwnd, LPARAM lParam) {
+    if (IsWindowVisible(hwnd)) { *(int*)lParam = 1; return FALSE; }
+    return TRUE;
+}
+
+int vb6_AnyThreadWindowVisible(void) {
+    int found = 0;
+    EnumThreadWindows(GetCurrentThreadId(), vb6_EnumAnyVisibleWindow, (LPARAM)&found);
+    return found;
+}
+
+// ============================================================
 // 消息循环
 // ============================================================
 

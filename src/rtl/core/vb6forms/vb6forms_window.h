@@ -94,6 +94,8 @@ void vb6_DispatchTimer(int timerId);
 // 同时处理WM_TIMER回调分发
 // 返回: WM_QUIT的wParam值
 int vb6_MessageLoop(void);
+// Fix 167: Sub Main 返回后是否应继续驻留 (本线程仍有可见窗口)
+int vb6_AnyThreadWindowVisible(void);
 
 // DoEvents — 处理消息队列中的待处理消息
 // 包括WM_TIMER回调分发

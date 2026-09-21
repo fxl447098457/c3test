@@ -445,3 +445,526 @@ cToolsArray.cls 的 6 错集中在三个草稿/边缘函数（Extend/DeArray/tes
 - 在 MemberAccessExpr/IndexOrCallExpr 生成时，若接收者表达式推断为 `void*`（COM 指针，如 UDT 内嵌 Collection/类字段），成员访问走 COM 调用路径（`vb6_ComGetIntProp(obj, L"Item")` 等）
 - 需先梳理 cgen_expr.cpp 中 COM 调用判定条件（knownObjectVars_/knownTypedComVars_ 等），确定「UDT 字段类型为 void*」的识别点
 - C2039/C2198/C2440（SafeArray 簇）独立，涉及 `MessBuffer_Data` 字段缺失与 SafeArray 参数包装，可另起一轮
+
+## 10. 已完成：VBFlexGridDemo 修复（Fix 158a–160-G，2026-09~，236 → 31）
+
+VB 源码：`D:\vb_yqt4qPac\VBFLXGRD-master\Standard EXE Version\VBFlexGridDemo.vbp`。
+复检流程：`vcvars_env2.bat` 逐行 `^([A-Za-z_][A-Za-z0-9_]*)=(.*)$`（**无 `set ` 前缀**）导入 env → `cmake --build .build --config Release` → 重新生成 → 按 `output_vbflex\c3-error.log` 分组统计。
+当前状态：**C2440:102 + C2065:43 + C2172:2 = 147**（C2088/C2198/C2101/C2059 均 0）。
+
+### 158a/b/c
+空括号成员表达式（`f()` on property）、ByRef 数组实参改写、With 空括号数组字段。
+
+### 158d
+`vb6_UserControl_ParentControls(...)` 链式 COM 识别（C2224 清零）。
+
+### 158e + Pattern M
+`vb6_Forms_Item(i).Name/.Caption` → `vb6_GetControlText`；无前缀 `forms(i)` → `vb6_Forms_Item`；链式 COM 前缀扩充（`vb6_Common_PtrToObj(`/`vb6_CreateObject(`）。C2224 7→0、C2064 12→0。
+
+### 158f（RTL + 参数发射）
+新增 `vb6_VariantArrayElemPtr(vb6_VARIANT*, int32_t)`（`vb6rtl_com.c` 实现、`vb6rtl_variant.h` 声明，仅 `vb6_sa_variant` 返回槽位指针）。`cgen_expr_call_arg_emit.inc` As-Any ByRef 非左值分支：`vb6_VariantArrayGet(`（前缀长 20）改写为 `vb6_VariantArrayElemPtr(...)`。修复 VTableHandle.c:258/262 `VariantCopy ArgListRev(i), ArgList(UBound-i)`。
+
+### 158g
+同分支对 Variant 型非左值实参发 `(&(vb6_VARIANT){argVal})`。修复 VBFlexGrid.c:22603 `VariantCopy Cell, .CellTag(...)`。
+
+### 158h
+`cgen_assign_prop_write.inc`：Property Let/Set 写路径对入口参数（`findClassMemberWriteParams` 结果非 1 时）pad 默认值 + `_has_` 标志（`padArgs158h`）。修复 `prop_let_InsertMark` C2198（`VBFlexGrid.ctl:9212`）。
+
+### 158j
+`cgen_expr_call_builtin_fixup.inc`：`vb6_AppActivate` 单参补 `, 0`。修复 Startup.c:30。
+
+### 158k
+RTL `vb6_App_PrevInstance()`（`vb6rtl_system.c`：命名互斥 `VB6_C3_SingleInstance_<exe>`）+ `cgen_expr_member_form_builtin.inc` App 分支映射。修复 Startup.c:24 `(void*)0.PrevInstance` C2059。
+
+### 158l
+`cgen_base_naming.cpp` `isConstIdent` 增加 `kRtlConstMacros158l`（vbPicType*/vbAsyncType*/vbAsyncRead*，#define 宏取址 → `&3` C2101×7 清零）。
+
+### 158m / 158m-2（`cgen_expr_binary.cpp`）
+Fix 110aa 升级处加 `isVariantOperand158m`（`cExprIsVariant(c) || isDefinitelyVariantExpr(node.left/right.get())`）；VarCmpLong 标量侧裸 `NULL` 包 `(int32_t)(...)`。C2172 24→4。
+
+### 158n / 158o / 158p（本会话重点，Variant 比较 C2088×14 → 0）
+- **158n**：`BinaryOp::Is` 加 Variant 分支（此前仅 Eq/Neq/Lt/Gt/Le/Ge 进块，`Is` 映射为裸 `==` 于 cgen_expr_binary_util.cpp:177 → 结构体 C2088×14）：
+  - 双 Variant（`If Buffer Is Value`，FindTag VT=vbObject 分支）→ `vb6_VarCmpEq(&L,&R)`
+  - Variant vs NULL/0（`If Value Is Nothing`）→ `vb6_IsNothing(vb6_VariantToObject(&X))`
+  - 变体 vs 其它标量 → `vb6_VarCmpLongEq(&X,(int32_t)(y))`
+  - `variantAddr158n`：左值标识符/成员/`VB6_SA_AT(` 直接 `&`；其余 rvalue 存 `_vcmp_N` 临时再取址。
+- **158o**：LongPtr 快速路径加 `lt != Variant && rt != Variant` 门（VTableHandle.bas `If VTableIPAO(0) = NULL_PTR`，LongPtr 数组元素被误发为 `VB6_SA_AT(vb6_VARIANT,...)`，rt=LongPtr 曾抢先裸比较）；Variant-vs-LongPtr 的 VarCmpLong 标量侧列表加入 LongPtr。
+- **158p**：`Is` 分支 AST 判定的类门 —— 对非标识符（MemberAccess 等），`isDefinitelyVariantExpr` 为真但 `inferClassTypeOfExpr` 非空（`VBFlexGridFlexDataSource As IVBFlexDataSource` 被符号表误报 Variant）→ 走对象 `(X == NULL)`，避免把对象取址塞 vb6_VARIANT（C2440）。**标识符（`As Variant` 局部/形参）不套类门**（否则 combo 的 Variant 形参误回对象路径 → C2088）。
+- 实证：repro2（`VTableIPAO() As Variant` + `Const NULL_PTR=0`）确认多态内置数组元素在 Fix 158o 前正确走 VarCmpLong（未走其数）。**158n/158o/158p 的发射行复检：无任何一条进入 c3-error.log**（无隐性回归）。
+
+### ⚠ 事故记录（2026-09-21）：`vb6rtl_builtin.h` 被 Edit 连带删掉 171 行
+某次 Edit 把 `src/rtl/core/vb6rtl/vb6rtl_builtin.h` 从 315 行改成 144 行（原型批量丢失）
+并重复定义 `vb6_CCurV` → **RTL 内嵌在 C3.exe 里，于是全量回归 89 项 FAIL(compile)**，
+`C2084: 已有主体` + `C4013: vb6_CurDir/DebugPrintStr/FormatCurrency/CCur`。
+处置：备份 `.temp/bak158/` → `git checkout` 该文件 → 只重贴自洽的 158q 块（放在头文件
+**所有**同名声明之后，避免宏改写后续声明）。
+**自检命令**：`git diff --numstat | awk '$2 > $1+5'`（删除数远超新增数即可疑）。
+回归一旦「全绿变全红」，先怀疑工具链/RTL 被改坏，而不是被测代码。
+
+### 158q / 158r（RTL `_Generic`：转换函数的 Variant/BSTR 实参分派）
+- 仿 `vb6_LenB`(Fix 048) 先例：`vb6rtl_builtin.h` 末尾（全部声明之后）加
+  `#define vb6_CStrLong/CLng/CDbl/CInt/CCur(x) _Generic((x), vb6_VARIANT: …V, BSTR: …BSTR, default: …)((x))`，
+  `#ifndef __cplusplus` 包裹；各 `.c` 定义处 `#undef`（`vb6rtl_conv.c` / `vb6rtl_misc.c`）。
+- 新增 `vb6_CLngBSTR/CDblBSTR/CIntBSTR/CCurBSTR`（走 `vb6_Val`）与 `vb6_CStrLongFromVariant`。
+- 消掉 C2440 子簇 ①（`vb6_CStrLong(vb6_VariantFromComResult(vb6_ComGetProp(...)))` 等）17 条。
+
+### 158s（RTL `_Generic`：`vb6_InStr` 的 needle 是 Variant）
+`vb6_InStrVar(int32_t, BSTR, vb6_VARIANT)` = `vb6_VariantToString` + 标准 InStr + `vb6_BSTR_Free`；
+头内 `_Generic` 按第 3 参分派，`vb6rtl_string.c` 定义处 `#undef vb6_InStr`。
+宏 arity 安全已核：2 参 `InStr` 由 `cgen_expr_call_builtin_fixup.inc:206` 补成 `1, …` 后再进宏。
+
+### 158t（codegen：`Mid$/Left$/Right$` 首参收数值/日期）
+`MainForm.frm:386 DecStr = Mid$(1.1, 2, 1)`（取本地小数点分隔符的惯用写法）→
+`cgen_expr_call_builtin_argtype.inc` 的 `strArgPos108c` 加 `vb6_Mid/vb6_Left/vb6_Right {0}`，
+并让类型白名单接受 `Date` → `vb6_CStrDate`（数值仍 `CStrLong/CStrDbl`）。
+
+### 159-A（codegen：Property Let 的 Value 实参槽位）
+VB6 把被赋的值放在**声明末尾的业务形参**，而 C 签名把 `int _has_*` 标志追加在所有业务参数
+之后 → Value 并非最后一个 C 形参。`tryRewriteCOMLvalue`（Pattern C/D2）此前一律把 valArg 拼在
+最后，于是 Value 落进 `_has_Row` 槽、4 个标志整体前移（`MainForm.c` 5 处成对
+C2440「int→vb6_VARIANT」+「vb6_VARIANT→int」）。修正：解析到写方向参数表
+（`findClassMemberWriteParams`）时，把尾部恰好等于 Optional 形参个数、且全为数字字面量的那几段
+摘出，将 valArg 插到业务参数末尾、标志之前；090ad 已弹掉占位 Value 时不介入。
+例：`VBFlexGrid1.Cell(FlexCellToolTipText, i, j) = "…"` →
+`prop_let_Cell(me, 8, i, j, -1, -1, VariantFromValue(…), 1, 1, 0, 0)` ✓
+
+### 159-B（codegen：ByVal String 形参收日期/数值实参 → VB6 隐式 CStr）
+新增 `CCodeGen::isScalarImplicitStr159(Vb6Type)`（Date/Double/Single/Long/Integer/Byte/Boolean/Currency）；
+两处使用：`cgen_assign_com_prop.inc` 的 `class prop_let_` 实参发射、
+`tryRewriteCOMLvalue` 的 Pattern C/D2。此前只在实参是 `vb6_VARIANT` 时才 `wrapToBSTR`，
+标量/日期裸拼 → C2440「double→BSTR」9 条 → 1 条（`TextMatrix(i,3)=DateAdd(...)`、
+`EditText = ComboCalendarValue`、`EditText = DateSerial(...)`）。
+
+### 159-C / 159-E（已实施已测）
+- **159-C**：`VarPtr(Variant(i))` → `vb6_VariantArrayGet` 按值返回结构体，
+  `cgen_expr_call_builtin_pre.inc` 的 `&(void*){…}` 复合字面量把 Variant 塞进 `void*` 槽
+  （C2440×7：VTableHandle.c 181/187/267、VBFlexGrid.c 18504~18645）。改为改名调用
+  158f 的 `vb6_VariantArrayElemPtr(vb6_VARIANT*, int32_t)`（同参数形态，返回真左值地址）。
+- **159-E**：`cgen_setlet_set_prop.inc` 的 Set 实参包装 —— **只在实参确实是 vb6_VARIANT 时**
+  才介入（形参也判 Variant → 直传；否则 → `vb6_VariantToObjectVal`）。
+  消掉 VBFlexGrid.c 22824/22827 的 `&(void*){Value}`（void**→VARIANT 与 (void*){vb6_VARIANT} 两条）。
+  **教训**：第一版还额外按 `_psSym->params.back().type == Variant` 给非 Variant 实参补
+  `vb6_VariantFromValue`，结果 `prop_set_DataSource(me, void* Value)` 被塞进结构体 →
+  **新出 3 条 C2172「实参不是指针」**。原因：`_psSym` 可能因跨模块 storageKey 冲突命中同名
+  别符号，其 `params` 不可信；C 形参真值看 `.h` 里的 `void* Value`。凡"根据符号表补包装"的
+  分支，都要以只读实参形态为准，不要主动新增包装。
+
+### 159-F（codegen：`Form.hWnd` 这类"过程级变量的成员"被当成"模块.成员"）
+根因（`cgen_expr_member_class_module.inc` 优先级3）：`isVarName` 只查 `symTab_`（**模块作用域**），
+当前过程的**形参/局部**看不见 → 走"模块.成员"分支 → `memSym` 命中 VBFlexGrid.ctl 的 `hWnd`
+属性 → 发出全局 `vb6_VBFlexGrid_hWnd`（C2065×17）。
+修正：对象标识符落在 `knownLongVars_/knownObjectVars_/knownVariantVars_/knownLongPtrVars_`
+且**不在** `knownClassVars_`、成员是 `hWnd` 时，直接取该变量的值：
+`lastExpr_ = "(intptr_t)(" + emitExpr(object) + ")"`。
+依据是运行时的对象表示约定 —— **窗体/控件"对象值"本身就是它的 HWND**：
+`vb6_Forms_Register(void* hwnd)`、`Me` → `vb6_hwnd_MainForm`、类实例经
+`vb6_UC_InstanceOf(vb6_hwnd_VBFlexGrid1)` 反查。这条约定是本项目最省力的落点，别再回到
+"给每个 Form/Control 变量建对象盒"的思路。
+定位手段：`C3_DBG159=1` 钩子（`resolveClassMemberCall` 的 enter/089g/014fallback/scopeSym/
+nomatch 五条返回路径 + 159-F 命中打印）。实测该 17 条**不走** `resolveClassMemberCall`，
+所以钩子当时没输出 —— 靠"复现件（无类项目）发出 `vb6_Form_hWnd`、demo 发出
+`vb6_VBFlexGrid_hWnd`"两者对比，才锁定是优先级3 的 `memSym->sourceModule` 前缀。
+效果：**62 → 45**（C2065 43→26）。
+**同一根因还剩 11 条 C2065**（`Form.Controls` / `Form.ScaleMode` / `CurrControl.Style` /
+`VBFlexGrid.Name` / `.BorderStyle` / `.Enabled` / `UserControl.Width·Height` /
+`Control.Index`）—— 单纯"拦截"只会把 `vb6_VBFlexGrid_Name` 换成 `vb6_Form_Name`，仍是
+C2065；要真消掉得给这些 Extender 属性配运行时访问器（见任务清单）。
+
+### Fix 160-A（LSet 目标漏 `me->` 前缀）：45 → **41**（C2065 26→22），回归进行中
+`cgen_assign_stmt_special.inc` 的 LSet/RSet 分支**手写**目标名 `cIdent(tgtId.name)`，绕过了
+标识符发射器 `cgen_expr_ident_symbol.inc:109-114` 的类模块字段规则。于是类私有模块级 UDT
+（存储在 `vb6_cls_<T>` 结构体内）作为 LSet 目标时丢了 `me->`：
+`LSet VBFlexGridComboBoxRect = RC` → `memcpy(&VBFlexGridComboBoxRect, ...)` = C2065。
+**源侧**走 `emitExpr` 所以自带前缀，故只有目标侧报错。修复=在目标侧复刻同一条规则
+（`isClassModule_ && currentProc_` + 非 external `Variable` + 不在 `knownLocalVars_` +
+`lookupLocal` 不是 `Parameter`），顺带覆盖字符串 LSet/RSet 分支。
+> **纠正前判**：这 4 条曾被记成"跨模块枚举可见性"（`VBFlexGridDefaultCols` 等）。它们
+> 不是枚举成员，是模块级 UDT 变量；`VBFlexGrid.h:1566/1596/1644` 就在类结构体里声明。
+
+### Fix 160-B（`vbSizeWE` 常量名拼错）：41 → **39**（C2065 22→20）
+不是"常量值不可猜"的反例，而是**名字**错：语义表 `builtin_consts_ext.inc:175` 把它登记成
+`vbSizeEW`，值 9 早已确定 —— RTL `vb6forms_style.c:227` 有 `case 9: return IDC_SIZEWE;`
+与之互相印证（VB6 真实常量名是 vbSize**WE**，West-East）。全仓只有该表与此注释用到
+`vbSizeEW`，无测试/VB 源码依赖 → 直接改名，不留别名。清掉 `vbSizeWE`×2。
+
+### Fix 160-C（LSet 目标是**函数返回值**时名字与类型双错）：39 → **37**（C2065 −1、C2172 −1）
+与 160-A 同根：LSet/RSet 目标手写 `cIdent(名)`。VB 里"给函数名赋值"即给返回值赋值，其 C
+存储是本函数局部 `vb6_ret_<Fn>`；而 `knownUdtVars_` 是按 **`vb6_ret_<fn>` 的 lower** 注册的
+（`decl/cgen_decl_func.cpp:215-217`），用裸函数名查不到 → 连类型也判错，从 UDT 分支掉进
+字符串分支：
+```vb
+Private Function GetAppVersionInfo() As VS_FIXEDFILEINFO
+    LSet GetAppVersionInfo = Value          ' Common.bas:754
+```
+→ `vb6_BSTR_Assign(&GetAppVersionInfo, vb6_LSet(vb6_CStr(…), SysStringLen(…)))` = C2065 **+** C2172
+→ 修复后 `memcpy(&vb6_ret_GetAppVersionInfo, &Value, sizeof(vb6_type_VS_FIXEDFILEINFO));` ✔
+
+### Fix 160-E（Set/Let 属性写的 `me` 实参漏了 UserControl 实例反查）：37 → **36**（C2065 18）
+`cgen_setlet_set_prop.inc` 的对象实参是裸 `emitExpr(*_ma.object)`，对**放置在窗体上的
+UserControl 实例**只会发出控件名（C 里根本没有这个变量）→ C2065：
+```vb
+VBFlexGrid1.CellPicture = Picture1.Picture        ' MainForm.frm Command1_Click
+```
+→ `vb6_VBFlexGrid_prop_set_CellPicture(VBFlexGrid1, …)` ✘，而**同函数下一行**的 Let 属性写
+却是正确的 `(vb6_cls_VBFlexGrid*)vb6_UC_InstanceOf(vb6_hwnd_VBFlexGrid1)`。
+根因：`cgen_assign_com_prop.inc:249-266`（Fix 152c）早已为"参数化属性写"实现了这条
+`knownUserControlCtrlVars_` → `vb6_UC_InstanceOf(hwnd)` 规则，但 Set/Let 分支没套用。
+修复=在 Set/Let 分支复用同一套映射与 `makeCtrlHwndArg`，不新造机制。
+
+### Fix 160-F（Property Get 补设 `currentReturnCType_`）——**已重新实施，回滚理由确认为误判**
+诊断本身是对的：`cgen_decl_prop.cpp:171` 只设 `currentReturnVar_`，**从不设
+`currentReturnCType_`**（只有 `cgen_decl_func.cpp:168` 设）。而返回槽的 VARIANT→标量换算
+按该字段判型（`cgen_assign_value_sem.inc` Fix 092f:265-291 / Fix 124:213-242），所以任何
+Property Get 内 `X = <返回 Variant 的表达式>` 都不换算：
+`CellFontSize = PropFont.Size` → `vb6_ret_CellFontSize = vb6_VariantFromComResult(…)`
+→ 补上后**确实**干净地消掉了 VBFlexGrid.c 32210/32212 两条 `VARIANT→float`。
+
+随后回归 **PASS=33 FAIL=55**，我把它归因于 160-F 并当场回滚。**该归因错误**：
+回滚 + 重建 + 重跑，**失败集完全相同**（33/55，逐名比对一致），真因是
+`src/rtl/core/vb6forms/vb6forms_axsite.c:449` 的 `ERROR_NOENTRY`（未定义常量）把
+**内嵌 RTL 整个编译不过**，连 `hello` 都是 `FAIL (compile)` → 见下一节。
+2026-09-21 在 RTL 修好、回归重新 **PASS=88 FAIL=0 SKIP=1** 之后单独重试：一行
+`currentReturnCType_ = retType;`（放在 `mapTypeRef` 之后，与 `cgen_decl_func.cpp:168` 同型）。
+**结论：净收益，保留。** VBFlexGrid.c 32210/32212 两条 `VARIANT→float` 如期消失。
+读取方共 6 处（`cgen_util_classtype.cpp:180`、`cgen_with.cpp:214`、
+`cgen_expr_member_obj_dispatch.inc:117/141`、`cgen_expr_binary.cpp:530/539`、
+`cgen_assign_value_sem.inc:192/214/266`）逐一核过，**全部带前缀/等值守卫**，
+补设只是让 Property Get 与 Function 同权，不存在"无条件生效"的读取方。
+副作用当场暴露一条：`void*` 返回的 Property Get（`Prop Get DataMember() As MSDATASRC.DataMember`）
+经 092f 被套上 `vb6_VariantToObjectVal(...)`，而实参 `me->PropDataMember` 的 C 存储当时是
+`void*` → 反向 C2440。这不是 160-F 该回滚的理由，而是它**揭出了一处真实的两侧类型不一致** → 160-G。
+
+> 归因方法的教训仍然成立：一次改动后大规模失败，先做"回滚后是否仍失败"的对照，
+> 再下因果结论；只 diff 失败集就能当场推翻假设。
+
+### Fix 160-G（`MSDATASRC.DataSource/DataMember` 是 String 别名）：单点修在 `TypeSystem::resolveTypeName`
+`semantic_analyzer_typeref.cpp` 与 `cgen_base_type.cpp::mapTypeRef` 两层对"未识别类型名"的
+兜底**方向相反**（语义 → `Variant`，codegen → `void*`，见后者末尾 return）。同名字段于是
+一半按 Variant 记账、一半按 void* 声明：
+`VBFlexGrid.h:1685 void* PropDataMember;` + `me->PropDataMember = vb6_VariantFromValue(Value)`
+→ `C2440 VARIANT→void*`。Fix 157 的注释早已写明"两侧必须一致"，但当时只补了 Object 侧。
+做法：在**两层共同的上游** `TypeSystem::resolveTypeName` 里把这两个限定名判为
+`Vb6Type::String`（MSDATASRC.tlb 里 `DataSource`/`DataMember` 就是 LPWSTR typedef，
+VB6 侧即 String），一次覆盖两层，无需在两处各写一遍集合。
+收益不止消错误 —— 整条链改为按 String 走，语义同步转正：
+`BSTR PropDataMember` + `vb6_BSTR_Assign` + `vb6_ComPackBSTR(me->PropDataMember)`
++ `vb6_StrPtr(me->PropDataMember)`（原先 `.ReadProperty/.WriteProperty/StrPtr` 三处用法全错位）。
+只匹配 `msdatasrc.` 限定形式；本函数检查发生在符号表查找**之前**，收录裸
+`DataSource`/`DataMember` 会遮蔽工程里的同名 ComInterface 符号。
+合计 160-F + 160-G：**36 → 31**（C2440 17→12）。
+
+> **踩坑记录（值得复看）**：首版写成 `lower.compare(0, 11, "msdatasrc.")` —— `"msdatasrc."`
+> 只有 **10** 个字符，长度写错使条件永不成立，改动"编进去了却毫无效果"。当时先用
+> `--dump-symbols` 看到 `PropDataMember : Variant` 才排除掉"没重编"的猜测，定位到这个 off-by-one。
+> 改用 `lower.rfind("msdatasrc.", 0) == 0`（仓库既有惯用法）可根除这类手数偏移。
+> 另：`grep -c <字面量> .build/C3.exe` 判断"改动是否进了二进制"并不可靠（会误命中）；
+> 判据应是 **`.obj`/`.exe` 的 mtime 对比 + 构建日志里是否真的编译**。本次就撞上
+> `dev.ps1` 报 `[OK] Build succeeded` 而日志实为 `ninja: no work to do`。
+
+### 已修 RTL 中断（`vb6forms_axsite.c:449` `ERROR_NOENTRY`）——**曾使全仓 55/89 编译失败**
+`ERROR_NOENTRY` 不是任何 SDK 里的常量，全仓也只有这一处使用 + 一处注释引用它。
+经 `git show HEAD:… | grep -c` 确认 **HEAD 里没有**，是工作区**未提交改动**带进来的
+（`+` 行）；它此前一直没被编进 `C3.exe`（RTL 内嵌在 exe 里，需重建才生效），是我为了
+160-F 的那次重建才让它生效 → 于是 `hello`/`smoke` 这类最简工程全部 `FAIL (compile)`。
+按 413 行注释的本意（`LoadLibrary` 成功但 `GetProcAddress(hMod,"DllGetClassObject")` 取不到
+导出），正解是真实常量 **`ERROR_PROC_NOT_FOUND`(127) —— "模块已加载但找不到该函数"**，
+语义精确且保持原 `HRESULT_FROM_WIN32(...)` 结构，不臆造新的失败码；注释同步改掉。
+`tests/hello.bas` 编到独立 output-dir 验证：EXIT=0 且产出 `hello.exe`。
+
+
+### Fix 161（`VB.`/`VBA.` 库限定名被降级成 Long）：**30 → 16**，一次消掉 12 条
+160-F/G/H 各清 1–3 条之后, 剩余 C2065 被记为"14 条 extender 簇, 需要先造
+HWND→设计期属性注册表子系统"。**该定性是错的**, 真因只有一行启发式:
+`type_system.cpp` 的"Vb 前缀 ⇒ 枚举 ⇒ Long" (`lower.compare(0,2,"vb")==0`)
+把 **`VB.Control` / `VB.Form` / `VB.UserControl` / `VB.MDIForm`** 一起吞了 ——
+库限定名的头两个字母恰好就是 `vb`。于是
+`Dim CurrControl As VB.Control` → `int32_t`, `ByVal Form As VB.Form` → `int32_t`;
+而 `resolveTypeName` 是**语义层与 codegen 的共同上游** (codegen `mapTypeRef` 在
+返回非 Unknown 时直接 `mapType` 短路, 不再走它自己那条 Vb 兜底), 所以两层一致地错,
+表现为"类型对得上、只是成员访问找不到符号"的假象。
+标量上的成员访问于是走 M22 降级成不存在的全局名 `vb6_Form_Controls` /
+`vb6_CurrControl_Style` / `vb6_Control_Index` / `vb6_VBFlexGrid_Name` ... → C2065;
+`CurrControl = <For Each 取到的 Variant>` → C2440 VARIANT→int32_t。
+修法: 在 `resolveTypeName` 里把这 4 个已核实为对象类型的末段判 `Vb6Type::Object`
+(demo 里 `VB.`/`VBA.` 限定的全部取值就这 4 个, 测试语料 0 命中)。判 Object 后
+`mapType=void*`, 成员访问自然回到 `vb6_ComGet*Prop` —— 而 `Name/Index/Style/
+Enabled/hWnd/Controls` **宿主模型本来就实现了**, 所以不需要任何新子系统。
+语义收益(逐条核对过生成码, 不是只消错误):
+`Form.Controls` → `vb6_ComGetObjectProp(Form, L"Controls")`;
+For Each 变量 → `vb6_ComUnpackObject`; `CurrControl.hWnd/.Style/.Enabled` →
+`vb6_ComGet*Prop`; `ProperControlName` 的 `.Index/.Name` 同理。VisualStyles 的
+整条启用/禁用路径由此真正接通。
+
+> **踩坑: 规则顺序是承重的。** 首版把新规则放在 `comparemethod` 那条之后, 也就
+> 放在它本该抢跑的"Vb 前缀 ⇒ Long"**后面** → 测量 **30→30 毫无变化**。诊断没错、
+> 代码也没错, 纯粹是放置位置。碰到"改了没反应"先查顺序/是否生效, 别急着回头怀疑诊断。
+> 另注: 残留同类隐患 —— 末段不在白名单的库限定名 (如 `VBA.Collection`) 仍会命中
+> codegen 自己在 `cgen_base_type.cpp` 里的 `Vb` 前缀兜底。本 demo 无此类取值, 未动。
+
+### Fix 162（`Extender/UserControl` 的 Width/Height 从无赋值）：16 → **14**
+`vb6_Extender_Width/Height` 在 `vb6rtl_com.c:556-557` 只有定义, **全仓无赋值 → 恒 0**,
+注释还写着"设计期对象, 运行期恒不活动 → 初值随意"。该判断是错的:
+`VBFlexGrid.ctl:28728` 在运行期用它做命中测试 ——
+`If (X >= 0 And X <= UserControl.Width) And (Y >= 0 And Y <= UserControl.Height) Then RaiseEvent Click`
+→ 命中测试恒假 → **Click 事件永不触发** (活体静默误编); 而 `UserControl.Width/Height`
+连声明都没有 → 2 条 C2065。
+两条命名事实: cgen 对宿主伪对象按 `<对象名>_<成员>` 发射, 所以 `UserControl.Width` 与
+`Extender.Width` 是**两个不同标识符、同一个 VB 语义值**, 得一起填。
+数据来源是精确值而非近似: `uc_host_create.inc` 的 `width/height` 形参本来就是**缇**
+(同函数用 `vb6_TwipToX(width)` 换 scaleWidth), 故直接存进 `vb6_UCRec.extWidth/extHeight`,
+在 `vb6_uc_push` 同步四处、`vb6_uc_pop` 对称还原 (沿用该文件既有的
+save/restore 快照约定, 与 Fix 133u 的 `Extender.Height` 同一手法)。
+
+### Fix 163（`vb6forms_axcontainer.c` 无原型调用返回 `void*` 的跨单元函数）
+`vb6_HostObj_At`（返回 `void*`）与 `vb6_UC_ControlsItemByName`（返回 `void*`）在本文件
+315/332 被调用, 但该文件没 include 它们的声明头 → C4013 + **MSVC 按隐式 `int` 编译**。
+x64 下返回值被截成 32 位, 于是 `Form.Controls("txtDoc(0)", idx)` 拿到的控件句柄高位丢失。
+这不是错误数问题（它只有警告）, 是活体静默误编 —— 与 162 同类。
+修法：补 `#include "vb6forms_uc_internal.h"`。已随 15:11 的构建进 exe, 待 demo 复测确认
+那 3 条 C4013 消失。
+
+### Fix 164（DI `unknown` 族缺导入库 → 全套测试 64 例链接失败）
+`output/yqt_regress25.log` = **PASS=24 FAIL=64**, 全量红。逐条 `FAIL (compile)` 但**不是**
+代码生成回归：`C3.exe` 退出码非 0 的原因是 `LNK2019`×14 + `LNK1120`。
+根因链（两处, 都是 160y 新增 `unknown` 族时带进来的）：
+1. `src/rtl/core/di/vb6_di_unknown_stubs.c`（**未跟踪新文件**）被 `driver_link.cpp:160`
+   **无条件**加入链接, 桩体转发的是**真实** Win32 API, 而 `scripts/gen_di_stubs.ps1:405`
+   给 `New-Banner` 传的是**空** libs（`$usedLibs['unknown']` 恒空 —— 该族就是"没有
+   `vb6_di_lib` 标记"的兜底桶, 桶里没有库名）→ `Imm*`×10、`GetFileVersionInfo*`×2、
+   `VerQueryValueW`、`TransparentBlt` 共 14 个符号没有导入库。
+   修：在收集阶段按 API 名前缀补 `imm32`/`version`/`msimg32`, 并把 `$usedLibs['unknown']`
+   传给 `New-Banner`; 已生成的文件同步手工补 3 条 `#pragma comment(lib, ...)`。
+2. **更要紧的工具链坑**：`CMakeLists.txt` 的 `C3RTL_EMBEDDED_FILES`（= `c3rtl.rc` 的
+   `OBJECT_DEPENDS`）**漏了** `vb6_di_unknown_stubs.c`（100 个 RCDATA 对 99 个依赖）。
+   后果：**改这个 RTL 文件不会重新内嵌**, 而 `dev.ps1` 照样打印 `[OK] Build succeeded`
+   —— 这正是那条"[OK] 可能配 `ninja: no work to do`"记录的**成因**, 现已补进列表。
+   任何人再遇"改了 RTL 但行为没变", 第一嫌疑就是这里没登记。
+   验证方式仍是 `.build/C3.exe` 的 mtime, 不是日志里的 `[OK]`。
+
+### Fix 166（`&(void*){...}` 包装多给一层间接 → demo 启动即 AV；**已修**）
+**定位手法（可复用，本次全靠它）**：`.temp/yqt_demo_g.bat` ＝ `yqt_demo.bat` 加 `-g`
+（C3 的 `-g` 会带 `/MAP` + `/DEBUG`，见 `msvc_driver.cpp:264`）→ 产出 `VBFlexGridDemo.map`；
+跑 exe 从 WER 拿"异常代码/故障偏移"，再 `grep 1403xxxxx VBFlexGridDemo.map` 反查符号
+（x64 默认基址 `0x140000000`）。**另一条更快**：RTL 里 `vb6com_invoke.c:199/222` 有 gated
+trace，带 `C3_COM_TRACE=1` + `Start-Process -RedirectStandardError` 跑，最后一条日志直接点名。
+本次实测：WER 偏移 `0x3327b0` 落在 **`.data`**（map 里 section `0003` = .data，`0001` 才是 .text）
+的 `g_vb6_UserControl_FontObj` 上 = **执行了数据页**；trace 最后一条是
+`GetProp entry: disp=<栈地址> isFont=0 name=hFont` → `fallback to IDispatch`。
+**根因**：`cgen_setlet_set_prop.inc:244` 对 `Set obj.Prop = objRef` 无条件套复合字面量
+`&(void*){值}`（该写法只对 **ByRef 对象槽 / C 形参 `void**`** 正确）。于是
+`VBFlexGrid.c:2082 prop_let_Font → prop_set_Font(me, &(void*){NewFont})` 让
+`me->PropFont` 存成**复合字面量的地址**，其首 8 字节才是真字体指针
+（恰好 `== &g_vb6_UserControl_FontObj`）→ 后续 `vb6_ComGetObjectProp(Font, L"hFont")`
+把该栈地址当 `IDispatch*`、把首字段当 vtable → 跳进 .data。
+**为什么编译期完全看不出来**：C 允许 `void**` 传给 `vb6_ComIface_Font*`，只有指针不匹配
+**警告**；而 C3 只在**有 error 时**才落 `_c3_msvc_out.txt` —— demo 是"零错误"构建，
+所以 0 错误 + 链接成功 + 一跑就崩。**推论：demo 报"0 错误"绝不能当成"没问题"。**
+**改法**：用 `ParameterInfo::isByVal` 判别 —— 被调方形参是 ByVal 就不套包装
+（`VBFlexGrid.ctl:3258` 确证 `Property Set Font(ByVal NewFont As StdFont)`）。
+效果：demo 里 `&(void*){` 18 → 8（剩下 8 处是真正的 ByRef 槽），仍 0 错误、仍链接通过，
+**AV 消失（退出码从 `0xC0000005` 变成 0）**。
+**下一步（新线索，未查）**：现在进程**跑起来了但 8 秒内正常退出**，不再崩；
+trace 里出现新的可疑接收者 `GetProp entry: disp=0x140332800 isFont=0 isHost=0 name=Height`
+—— `0x140332800` 是 **`vb6rtl_com.obj` 的 .data 全局区**（`g_vb6_UserControl_FontObj` 是
+`0x1403327b0`，+0x50），即"把某个 vb6rtl_com 全局的地址当对象用"，和 Fix 166 同族但
+**是另一处发射**（disp 来自 .data 而非栈）。另外 `GetObjectProp obj: disp=...3327B0
+prop=hFont vt=0 -> obj=0` 说明 `hFont` 这条路现在走到"字体对象没有 hFont 字段"→
+返回 NULL（RTL 侧 Fix 125 的字体表只认 Name/Size/Weight/…，`hFont` 需要按
+Name/Size/Weight 现造 HFONT 并缓存，否则 GDI 字体度量仍不等价于 VB6）。
+
+### Fix 167（Sub Main 缺 VB6 驻留语义 → 进程秒退；**已修**）
+demo 链接通过后"跑起来又立刻自己退出"（退出码 0，不是崩）：`Startup.c` 的入口模板是
+`vb6_Init → 各模块 init → vb6_Startup_Main() → vb6_Exit() → return 0`，
+**全仓生成码里 `vb6_MessageLoop` 出现 0 次**（只有 WinMain 分支会发它）。
+而 Sub Main 体内是 `vb6_form_show_MainForm(NULL, 0)`（modeless）→ 一返回进程就走完。
+VB6 语义是 Sub Main 返回后运行时继续泵消息直到所有窗体关闭。
+改法：RTL 加 `int vb6_AnyThreadWindowVisible(void)`（`vb6forms.c`，
+`EnumThreadWindows` + `IsWindowVisible`，**不建窗体注册表**；声明在 `vb6forms_window.h`），
+两处 main 模板（`cgen_base_generate_entry.inc` 的 ~113「首个 Public Sub」支与
+~160「Public Sub Main」支）在调用后插 `if (vb6_AnyThreadWindowVisible()) vb6_MessageLoop();`。
+判据选择的原因（务必别改成无条件进循环）：`App.PrevInstance` 那一支只操作**别的进程**的
+hwnd，本线程没有窗口 → 自然不驻留；纯 .bas 控制台也没有可见窗口 → 行为不变。
+**结果**：不再秒退，但崩在消息循环里的**下一处**（`0xC0000409`），线索即上方
+`disp=0x140332800 name=Height` —— **属进展，不是回退**。
+
+### Fix 165（GUI 入口点写死 + 生成器丢桩 → regress26 仍 14 例红）
+`yqt_regress26.log` = **PASS=74 FAIL=14**（164 把 64→14）。这 14 例**全是链接阶段**，
+分两个根因，都在未提交的 160y 系列里，**与 160-F/G/H、161、162、163 无关**：
+
+**① 13 例：`/ENTRY:mainCRTStartup` 被写死**（`msvc_driver.cpp:232`、
+`msvc_driver_incremental.cpp:261`，均为本次未提交新增）。
+`/SUBSYSTEM:WINDOWS` 的默认入口是 `WinMainCRTStartup`（找 `WinMain`），加上该 flag 后
+变成找 `main` → 所有**窗体启动**工程 `LNK2019: main`。
+但不能简单回退：`VBFlexGridDemo.vbp` 是 `Startup="Sub Main"`，codegen 按
+`cgen_base_generate_entry.inc:124` 发的是 `int main()`，它**恰恰需要**这个 flag；
+而 5 个 GUI 测试工程（Project1/BalloonTooltips/czFormDemo/Test/NewTab）全是
+`Startup=<窗体名>` → 发 `WinMain`。**结论：入口点必须跟着启动对象走**，写死任何一边
+都会让另一边全红。
+修法：`MsvcDriverOptions` 加 `entryIsMain`，`driver_link.cpp` 用与
+`cgen_base_generate_entry.inc:54` **同一判定**（`tolower(startupObject_)=="sub main"`）
+填它，两处链接命令按该字段决定加不加 `/ENTRY:mainCRTStartup`。
+**该判定有两份、必须同改**，已在两边都留了交叉引用注释。
+
+**② 1 例：`test_declare` 缺 `vb6_di_GetTickCount`。** 这不是孤例 —— 与 HEAD 对比，
+`gen_di_stubs.ps1` 本次重生成**净增 190 个桩、同时删掉了 39 个原有桩**。
+根因是设计性的：生成器只扫**一个编译会话**目录里的 `.h`，本会话没声明到的符号就不在
+输出里，而它**整文件覆盖**族文件 → 没被扫到的桩静默消失。
+39 个名单（已恢复，记录在此以免下次丢失时无从比对）：
+`ChooseColorA CopyImage CreateRoundRectRgn CreateWindowExA DestroyCursor
+DwmSetWindowAttribute FindWindowExA GetDesktopWindow GetFileTitleA GetModuleHandleA
+GetOpenFileNameA GetParent GetPropA GetTickCount GetWindow GetWindowLongA
+IsWindowUnicode IsZoomed LoadCursorA LoadLibraryA MakeSureDirectoryPathExists
+PathMatchSpecW PostMessageA PtInRect RemovePropA RtlFillMemory SHBrowseForFolder
+SHGetPathFromIDListA SendMessageA SetPropA SetWindowLongA SetWindowRgn TlsAlloc
+TlsFree TlsGetValue TlsSetValue VirtualAlloc VirtualFree lstrlenA`
+比对方法（可复用，下次再丢一签就能立刻查出来）：
+`grep -hoE '^[A-Za-z_][A-Za-z0-9_ ]*\**__stdcall vb6_di_[A-Za-z0-9_]+\(' 目录 | sort -u`
+与 `git grep -hoE` 同一模式跑 HEAD，再 `comm -13`。
+**注意**：`\w` 在 `[]` 括号类里不是字符类，写 `[\w ]` 会匹配不到东西、得到假的"全丢"。
+**已把这 39 个恢复进手写文件 `vb6_di_stubs.c`** —— 那里是安全位置：
+生成器 `:162` 的 `$hand` 会跳过本文件已定义的名字，所以再重生成也不会丢。
+补桩需要同时补头文件与导入库：新增 `<shlwapi.h> <shlobj.h> <dwmapi.h> <imagehlp.h>`
+和 `shell32/dwmapi/imagehlp/comdlg32` 四条 pragma。
+- **坑（第一版就踩）**：`RtlFillMemory` 在 `winbase.h` 里只有**函数式宏**、没有声明，
+  而桩体写的是 `(void (WINAPI *)(...))RtlFillMemory)` —— 后面没有 `(` 故宏不展开 →
+  **C2065 未声明标识符**。RTL 编译失败会连带让**所有**工程链接不过，看起来像全局回归，
+  实际只有一条错误。手法同 `vb6_di_unknown_stubs.c` 顶部：`#undef` + 自己声明。
+- **待办（尚未做，建议由 160y 的作者定夺）**：把生成器改成**非破坏式** —— 每个族的
+  现有文件先解析成"已知桩"再合并，而不是整文件覆盖；否则下次重生成仍会再丢一批。
+
+### 待做 160-D（`With <返回 UDT 的函数>()`，3 条 C2440 + **又一处静默误编**）
+
+
+`Common.bas:698/708/718` 的 `With GetAppVersionInfo()` → `Common.c:617/630/643`：
+```c
+void* _vb6_with_3 = (void*)vb6_Common_GetAppVersionInfo()  /* With object ref */;  C2440
+vb6_ret_AppMajor = vb6_ComGetStringProp(_vb6_with_3, L"dwFileVersionMSHi");        ← 误编
+```
+`.dwFileVersionMSHi` 是 **UDT 字段**，却被降成 COM 字符串属性读取，还把 BSTR 指针赋给
+`int16_t` 返回值 —— 第二个错是第一个错的**连带**后果：`cgen_with.cpp:425-432` 只在
+`tempType=="void*"` 且 `inferUdtTypeOfExpr` 命中时才切到结构体分支，而
+`inferUdtTypeOfExpr`（`cgen_util_classtype.cpp:165+`）覆盖了 IdentifierExpr（含本函数名，
+Fix 090j）与 IndexOrCallExpr 的**数组元素**，唯独没有"调用一个返回 UDT 的函数"。
+修好类型推断即可同时消掉两错。**两个必须注意的坑**：
+1. `cgen_with.cpp:448` 的 UDT 分支发的是 `&(<expr>)`，对**函数调用（右值）非法** →
+   需要"值临时 + 取其指针"两条语句（VB 语义上 With 绑定的就是返回的临时值，改不回原对象）。
+2. 注册表**不能**在 codegen 函数声明时才填：`AppMajor`(697) 在 `GetAppVersionInfo`(726)
+   **之前**，按生成顺序取会落空 → 必须走符号表或声明预扫描。模块级 Function 符号当前只存
+   `Vb6Type returnType`，命名类型名仅 Class 符号有（`symbol_table.hpp:114-121`
+   `memberReturnTypes`），需确认/补齐模块函数的返回类型名可读性。
+
+### 遗留缺陷 160-W（With/StrPtr **跨过程发射泄漏**，优先级高于错误数，见任务 #13）
+
+MainForm.c 两处证据（`.frm` 为 `MainForm.frm:519/527`）：
+1. `Command5_Click`: `.Prompt = "Text for Cell R" & VBFlexGrid1.Row & ...`
+   → `MainForm.c:617` 首个拼接操作数变成 `vb6_ComGetStringProp(_vb6_with_14, L"Result")`，
+   字面量 `"Text for Cell R"` **消失**；而 `_vb6_with_14` 属于**上一个过程** `Command13_Click`。
+2. `Command10_Click` 体内只有一句 `VBFlexGrid1.CellEnsureVisible FlexVisibilityCompleteOnly`
+   → `MainForm.c:628` 整句变成 `vb6_ComVarFree((void*)vb6_ComCall(_vb6_with_15, L"Result", …))`，
+   真正的语句没了。
+已排除：`src/backend` 内**没有**按 `ASTNode*` 为键的 memo（grep 无命中）；
+`cgen_with.cpp` 的 `withObjectVars_`/`withObjectInfoStack_` 在 437/505 入栈、513/514 出栈，
+437→514 之间**无早退**，看起来是平衡的 → 需要最小 `.frm` 复现 + 插桩才能定位，不能靠读码猜。
+
+### 进度：236 → 147 →（修复工具链后重测）91 → 80 → 72 → 62 → 45 → 41 → 39 → 37 → 36 →
+### 31 → 30 → **16** → **14**（160-F/G 与 161 已过回归门禁；160-H/162 见下）。
+### 分布（162 状态）：C2065×4 + C2440×9 + C2172×1。
+### 回归：158q..159-B、159-C/159-E、159-F、160-A、160-B+160-C、**160-E**、回滚 160-F 后
+### (＝RTL 修好)、**160-F+160-G**、**160-H**、**161**、**162+163+164+165（含用户 160y 全套）**
+### 均 **PASS=88 FAIL=0 SKIP=1**；
+### 当时 160-F 的 **PASS=33 FAIL=55** 实为内嵌 RTL 的 `ERROR_NOENTRY` 所致，**非 160-F**（见上）；
+### regress25 = **24/64**（unknown 族缺导入库，Fix 164）、regress26 = **74/14**
+### （入口点写死 + 39 桩被删，Fix 165）、regress27 = **88/0/1** ← 当前基线。
+### 教训：**全量红先分"编译期 vs 链接期"** —— 25/26 两次的红一例代码生成回归都没有，
+### 14/64 条全在链接阶段；若只盯错误数会误判成 codegen 塌方。
+### **166**（codegen 改动）→ regress28 = **88/0/1**，无回归，当前基线。
+### ⚠ 即使 C2440/C2065 清零也仍**链接不过**：有 6 个符号**全仓库无定义**，于是链接期 LNK2019：`vb6_Choose`×3、`vb6_PropertyPage_ValidateControls`×3、`vb6_UserControl_OLEDrag`、
+`vb6_Extender_Drag`、`vb6_Extender_SetFocus`、`vb6_Extender_ZOrder`。
+（更正记录：先前此处写作"C4013 链接期会变成错误"是**含糊且不准确**的 ——
+C4013 本身从不产生链接错误，只要符号**有定义**就能链接通过；真正决定成败的是
+"有没有定义"。C4013 的危害是另一回事且**更隐蔽**：无原型时按 `int` 假设返回值，
+x64 下 64 位指针被截成 32 位、`double` 被读成 `int` —— 链接通过、运行期错乱。
+已确诊一例：`vb6forms_axcontainer.c` 调 `vb6_HostObj_At`/`vb6_UC_ControlsItemByName`
+（均返回 `void*`）无原型 → `Form.Controls(name)` 句柄截断，见 Fix 163。）
+出 exe 前必须先处理无定义这一族。
+### 测量产物：生成码已固化到 `.temp/gen/*.c|h`（C3C 临时目录会被后续编译清掉，别依赖它）；
+### 一步完成"编译+快照+分族计数"的脚本：`bash .temp/measure.sh`。
+
+### ★ 里程碑（2026-09-21 17:05）：VBFlexGridDemo **编译 + 链接全通过**
+`cmd //c .temp\yqt_demo.bat` → **`C3_EXIT=0`**，产物 `D:\c3.vb6.pro\VBFlexGridDemo.exe`（1.73 MB）。
+会话目录里**没有 `_c3_msvc_out.txt`** = MSVC 零诊断；生成码 14 个 `.c`。
+**所以：下面这份"遗留 14 条"清单连同整个"消减 MSVC 错误"的框架已经作废**（多半是
+160y/161/162/163/164/165 这一批一起把它推过了终点，未逐条归因），保留仅作历史参考。
+**新前沿是运行期崩溃**：exe 启动即死。我们看到的退出码是 `0xC0000409`（fastfail），
+而 WER 记录的首因是 **`0xc0000005` 访问违例，faulting module 是 exe 自身，RVA `0x199928`**
+（不是系统 DLL → 十有八九是生成码或 RTL 的问题，不是 Win32 用法问题）。
+exe **没有 PDB/.map** → 下一步要么给链接行加 `/MAP`（或 `/Zi`）把 RVA 映射回源码，
+要么在 `vb6_Init` / 启动窗体 `Form_Load` 路径插桩。
+**动手前先看任务 #19**：另一名作者当时正在同一工程目录跑 `bisect1..7.vbp`
+（17:43–17:46，按模块子集二分）做同一件事，先分工别撞车。
+
+### 遗留（14，162 状态）—— 逐条定位，旧清单见其后的"历史明细"
+- **C2065×4**：`_vb6_with_14`/`_vb6_with_15`（MainForm.c 617/628）= **160-W 跨过程发射泄漏**，
+  不是命名问题（任务 #13）；`UserControl`（VBFlexGrid.c:1552）= **裸标识符**
+  `With UserControl` 的对象值位置没有 C 符号 —— `cgen_with.cpp:322` 的宿主伪对象特判
+  只覆盖**成员访问**对象（`With UserControl.Parent`），不覆盖裸标识符；
+  `vb6_ctrl_subproc_Picture2`（MainForm.c:281）= **功能缺口**，`Picture2` 是带
+  `_Paint/_MouseDown/_MouseMove/_MouseUp` 事件的 VB.PictureBox，codegen 装了子类化过程
+  却从未发射它。
+- **C2440×9**：`VS_FIXEDFILEINFO→void*`×3（Common.c 617/630/643）= **160-D**（任务 #14）；
+  `vb6_UserControl_Extender_Type→void*`（VBFlexGrid.c:1521）= `With UserControl.Extender`
+  取的是**结构体值**而非指针，与上一条同源；`VARIANT→BSTR`（Common.c:530）；
+  `Font*→float`（MainForm.c:346）；`double→BSTR`（UserEditingForm.c:588）；
+  `BITMAPINFOHEADER→BSTR`（VBFlexGrid.c:55327）；`HANDLE→double`（VisualStyles.c:411）。
+- **C2172×1**：MainForm.c:697 `OleCreatePropertyFrame` 实参不是指针。
+- 另有 3 个 Extender 方法（`vb6_Extender_Drag/ZOrder/SetFocus`）在生成码里是 implicit-extern
+  警告（C4013），但**根因是无定义**而非缺原型 → 链接期 LNK2019，见上方 ⚠ 的更正说明。
+
+### 历史明细（161 之前的 31 条定性，多数已被 161/162 消掉，保留以免重复调查）
+- **C2065×18**：三个小包。① **同 159-F 根因、成员不是 hWnd 的 14 条**：`vb6_Form_Controls`×2、
+  `vb6_Form_ScaleMode`×2、`vb6_CurrControl_Style`×2、`vb6_VBFlexGrid_Name`×2、
+  `vb6_VBFlexGrid_BorderStyle`×2、`vb6_VBFlexGrid_Enabled`×1、`vb6_UserControl_Width`/`Height`、
+  `vb6_Control_Index` → 任务 #12。
+  **① 的可行性已摸清（子代理核查）**：发射点是 M22 `cgen_expr_member_m22_module.inc:103`
+  （把对象名当模块前缀）与 `cgen_expr_member_obj_dispatch.inc:206` 之后的"成员命中别处
+  注入的同名外部符号"路径（Fix 110e 注释已记载该失效模式）→ `CurrControl.Enabled` 撞到
+  VBFlexGrid 的 `Property Get Enabled`。运行时侧 `vb6_ComGetProp` 已经把宿主对象转发给
+  `vb6_Host_GetProp`（`vb6com_invoke.c:212`），且 `vb6_Host_IsHostObject` 用 `IsWindow`
+  认裸 HWND（`uc_hostmodel.c:75`）→ **路由是安全的、且不需要新子系统**。
+  但 `uc_hostmodel_getprop.inc` 只实现 `Name/Index/Enabled/ScaleMode/Controls/Width/Height/
+  hwnd/Caption/Text/Font/hDC/Visible`；**`Style`、`BorderStyle` 没有实现**，而子代理确认
+  **不存在 HWND→设计期属性 的持久注册表**（`vb6_HostObj_Register` 只存 name/typeName/index/
+  isForm/instance；PropBag 只对 `.ctl` 创建且随即释放；窗体的 ScaleMode 在 getprop.inc:25
+  对 `.frm` 硬编码为 1）→ 把 `Style`/`BorderStyle`/`Form.ScaleMode` 路由过去会**编得过但
+  值恒为 Empty/1**，属静默误编，必须先补设计期属性注册表，不能只改名。
+  ③ `vbSizeWE`×2 → 已由 160-B 解决。④ 杂项 4 条，逐个定性：
+  `_vb6_with_14`/`_vb6_with_15`（MainForm.c 617/628）= **160-W 误编**，不是命名问题；
+  `UserControl`（VBFlexGrid.c:1554）= 宿主伪对象 `UserControl` 出现在**对象值位置**
+  （`With UserControl` → `(void*)UserControl`），没有对应 C 符号；其 `.Width/.Height`
+  （:60194 两条 `vb6_UserControl_Width/Height`）按 M22 发成全局，而头文件里只有
+  `vb6_Extender_Width/Height`（`vb6rtl_userctl.h:122-123`）→ 同一簇需一起定夺；
+  `vb6_ctrl_subproc_Picture2`（MainForm.c:281）= **功能缺口**，`Picture2` 是带
+  `_Paint/_MouseDown/_MouseMove/_MouseUp` 事件的 VB.PictureBox，codegen 装了子类化过程
+  却从未发射它。**常量值不可猜**（猜错即静默误编）。
+
+
+- **C2440×12**：剩余都是小包，按族：
+  **更正一处旧定性**：VBFlexGrid.c 960/1086/2071 的 `VARIANT→void*`×3 曾被记成
+  "Ambient 属性赋给对象字段"，实际全部是 `PropDataMember`（`MSDATASRC.DataMember`）
+  的两层类型不一致 → 已由 **160-G** 一并解决（Ambient 簇因此根本不存在）。
+  `VARIANT→float`×2（VBFlexGrid 32210/32212）已由 **160-F** 解决。剩下 12 条：
+  `vb6_type_VS_FIXEDFILEINFO→void*`×3（Common.c 617/630/643）= **上面已单列的 160-D，定性为
+  `With <返回 UDT 的函数>()`，与 LSet 无关**，
+  `VARIANT→int32_t`×2（VisualStyles 149/184，
+  `CurrControl.Style`/`.hWnd` 系）、`VARIANT→vb6_vartype`（VBFlexGrid 22606，
+  `&(vb6_VARIANT){<void* 表达式>}` 复合字面量把 `prop_get_CellTag` 的 `void*` 返回值
+  当首个成员 `.vt` 初始化 → 应走 `vb6_VariantFromValue`，是包装选择 bug 而非缺类型信息）、
+  `VARIANT→BSTR`（Common 530）、
+  `BITMAPINFOHEADER→BSTR`（55326）、`UserControl_Extender_Type→void*`（1521）、
+  `Font*→float`（MainForm 346）、`HANDLE→double`（VisualStyles 411）、
+  `double→BSTR`×1（UserEditingForm 588，`ComboCalendarValue` 的返回类型未被识别为 Date →
+  159-B 白名单没命中，需查 `getClassMethodReturnType`）。
+- **C2172×1**（原 ×2）：MainForm.c:697 `OleCreatePropertyFrame` 实参不是指针。另一条
+  Common.c `vb6_CStr(vb6_VariantFromValue(UDT))` 已由 **160-C** 顺带消除（它本就走错了
+  字符串 LSet 分支）。
+- 3 个 Extender 方法（`vb6_Extender_Drag/ZOrder/SetFocus`）目前是 implicit-extern 警告，链接期会变成错误。
