@@ -110,7 +110,86 @@
         }
     }
 
-    c_.emitLine(target + " = " + value + ";  /* Set */");
+    // Fix 179a: Set <Object(void*)目标> = New <工程类> → 创建点包成 IDispatch.
+    // 177b 的非遮蔽扩展 (裸结构体指针进 void* 后 ComCall 把首字段当 vtable → AV,
+    // 2026-09-21 CI VBMAN cTlsSocket 实证). void* 目标的表示是 IDispatch*
+    // (vb6_ComCall 解 lpVtbl / vb6_ReleaseObject Release), 不是 VARIANT*;
+    // 不能用 vb6_ComPack_<X>() (返回 VARIANT*, 仅作 COM 实参).
+    // 仅 void* 目标包装; typed 目标保持裸指针; Variant 走上方 _Generic 路径.
+    bool fix179bUnwrapped = false;
+    {
+        // value 形如 "(vb6_cls_<X>_New())"
+        std::string bare179;
+        if (value.size() > 16 && value.compare(0, 9, "(vb6_cls_") == 0
+            && value.compare(value.size() - 7, 7, "_New())") == 0) {
+            bare179 = value.substr(9, value.size() - 16);
+        }
+        if (!bare179.empty()
+            && bare179.find_first_not_of(
+                   "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_")
+                   == std::string::npos
+            && !targetIsVariant) {
+            bool targetIsCom179 = false;
+            if (target.rfind("me->", 0) == 0) {
+                if (classVoidFieldMap_) {
+                    auto itV179 = classVoidFieldMap_->find(moduleName_);
+                    if (itV179 != classVoidFieldMap_->end()
+                        && itV179->second.count(targetLower)) {
+                        targetIsCom179 = true;
+                    }
+                }
+            } else {
+                targetIsCom179 = knownObjectVars_.count(targetLower) > 0;
+            }
+            if (targetIsCom179) {
+                value = "(void*)vb6_ComObject_FromInstance(vb6_FindCoClassDesc(\""
+                      + bare179 + "\"), (void*)" + value.substr(1, value.size() - 2) + ")";
+                wrappedComVars_.insert(targetLower);
+            }
+        }
+        // Fix 179b: Set <typed工程类目标> = <179a包装的Object变量> → 解包回裸实例
+        // (仅 wrappedComVars_ 登记的变量; 限类模块, .bas 不 include vb6comserver.h)
+        std::string src179 = value;
+        if (src179.size() >= 2 && src179.front() == '(' && src179.back() == ')') {
+            src179 = src179.substr(1, src179.size() - 2);
+        }
+        if (isClassModule_ && target.rfind("me->", 0) == 0
+            && !src179.empty()
+            && src179.find_first_of(" ()+*/,") == std::string::npos
+            && !targetIsVariant) {
+            std::string srcLower179 = src179;
+            std::transform(srcLower179.begin(), srcLower179.end(), srcLower179.begin(), ::tolower);
+            std::string srcField179 = srcLower179;
+            if (srcField179.rfind("me->", 0) == 0) srcField179 = srcField179.substr(4);
+            if (wrappedComVars_.count(srcField179)) {
+                std::string tgtClass179;
+                if (classTypedFieldMap_) {
+                    auto itT179 = classTypedFieldMap_->find(moduleName_);
+                    if (itT179 != classTypedFieldMap_->end()) {
+                        auto itF179 = itT179->second.find(targetLower);
+                        if (itF179 != itT179->second.end()
+                            && itF179->second.rfind("COM:", 0) != 0) {
+                            tgtClass179 = itF179->second;
+                        }
+                    }
+                }
+                if (!tgtClass179.empty()) {
+                    c_.emitLine(target + " = (vb6_cls_" + cIdent(tgtClass179)
+                        + "*)vb6_ComObject_GetInstance((void*)" + src179
+                        + ");  /* Set (Fix 179b: wrapped Object -> typed instance) */");
+                    fix179bUnwrapped = true;
+                }
+            }
+        }
+        // Set Nothing 清除跟踪
+        if (value == "NULL" || value == "0") {
+            wrappedComVars_.erase(targetLower);
+        }
+    }
+
+    if (!fix179bUnwrapped) {
+        c_.emitLine(target + " = " + value + ";  /* Set */");
+    }
 
     // P6.5: WithEvents变量事件连接
     // Set obj = newInst -> 如果obj是WithEvents变量, 设置事件接收器
