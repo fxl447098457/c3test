@@ -218,13 +218,36 @@ const wchar_t* vb6_StdErrorDesc(int32_t errNum) {
 // hr: Invoke返回的HRESULT
 // excep: EXCEPINFO结构 (可能包含scode/bstrDescription)
 // context: 调用上下文 (用于默认错误描述, 如L"ComCall" / L"ComSetProp")
-void vb6_ComCheckError(HRESULT hr, EXCEPINFO* excep, const wchar_t* context) {
-    int32_t errNum = (int32_t)(hr & 0xFFFF);  // VB6错误号 = HRESULT低16位
-    if (errNum == 0) errNum = (int32_t)hr;  // 非标准HRESULT直接用整个值
+// Fix 177: HRESULT → VB6 错误号。
+// "低16位即VB6错误号" 只对 0x8004xxxx (标准 COM) 与 0x800Axxxx (VB6 运行时) 成立,
+// 对 DISP_E_* 系列 (0x8002xxxx) 不成立 —— 其低16位落在 DISPID 子码空间: 例如
+// DISP_E_MEMBERNOTFOUND (0x80020003) 的低16位 = 3, 会被当成 VB6 错误 3
+// "没有GoSub时的Return", 与真实原因 (对象不支持该属性/方法) 毫无关系。
+// 实测: VBMAN 对 Scripting.Dictionary 调自有扩展 API 时即报出这个假象,
+// 把排查方向引到 GoSub/Return 上。此处显式映射 DISP_E_* 到 VB6 官方错误号
+// (描述表 vb6_StdErrorDesc 中 438/449/450/451 均已有条目)。
+static int32_t vb6_HresultToErrNum(long hr) {
+    switch ((unsigned long)hr) {
+    case 0x80020003UL: return 438;  // DISP_E_MEMBERNOTFOUND → 对象不支持此属性或方法
+    case 0x80020006UL: return 438;  // DISP_E_UNKNOWNNAME    → 同上
+    case 0x80020005UL: return 13;   // DISP_E_TYPEMISMATCH   → 类型不匹配
+    case 0x8002000EUL: return 450;  // DISP_E_BADPARAMCOUNT  → 参数个数错误
+    case 0x8002000FUL: return 449;  // DISP_E_PARAMNOTOPTIONAL → 参数不是可选的
+    case 0x8002000BUL: return 451;  // DISP_E_BADINDEX       → 对象不是集合
+    default: {
+        int32_t errNum = (int32_t)((unsigned long)hr & 0xFFFF);  // VB6错误号 = HRESULT低16位
+        if (errNum == 0) errNum = (int32_t)hr;  // 非标准HRESULT直接用整个值
+        return errNum;
+    }
+    }
+}
 
-    // 优先使用EXCEPINFO中的scode (OLE自动化错误码的低16位 = VB6错误号)
+void vb6_ComCheckError(HRESULT hr, EXCEPINFO* excep, const wchar_t* context) {
+    int32_t errNum = vb6_HresultToErrNum((long)hr);
+
+    // 优先使用EXCEPINFO中的scode (OLE自动化错误码; DISP_E_EXCEPTION 时携带真实错误号)
     if (excep && excep->scode) {
-        errNum = (int32_t)(excep->scode & 0xFFFF);
+        errNum = vb6_HresultToErrNum((long)excep->scode);
     }
 
     // 构造错误描述BSTR — 四级fallback:

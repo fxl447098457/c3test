@@ -108,7 +108,27 @@ bool Driver::runCrossModuleResolution() {
             } else {
                 localSym = symTab.lookupModule(srcSym->name);
             }
-            if (localSym) continue;  // 已有本地定义，不需要外部符号
+            if (localSym) {
+                // Fix 177: 引用类型库的同名 coclass/interface 不算"本地定义"。
+                // VB6 语义: 工程内定义优先于引用库 —— 同名时工程类遮蔽类型库类型。
+                // 场景: VBMAN.vbp 定义 Class=Dictionary, 同时引用 Microsoft Scripting
+                // Runtime (含 Scripting.Dictionary)。类型库符号由 driver_semantics 在
+                // 各模块 analyze 之前注入为 builtin ComClass, 故此处 lookupModule 命中
+                // 它; 原先直接 continue, 导致工程类 Dictionary 永远进不了模块作用域 →
+                // "As Dictionary" 被判为 COM 对象 (vb6_NewObject(L"Scripting.Dictionary")
+                // + 晚绑定调用) → 调用自有扩展 API (Count() / Exists(Key, CompareCase))
+                // 时返回 DISP_E_MEMBERNOTFOUND (0x80020003), 其低 16 位 = 3 → 被
+                // vb6_ComCheckError 误报为 VB6 错误 3 "没有GoSub时的Return"
+                // (VBMAN demo 弹框、800 端口不起)。
+                const bool shadowableComType =
+                    (srcSym->kind == SymbolKind::Class)
+                    && localSym->isBuiltin
+                    && (localSym->kind == SymbolKind::ComClass
+                        || localSym->kind == SymbolKind::ComInterface);
+                if (!shadowableComType) continue;  // 已有本地定义，不需要外部符号
+                // 移除被遮蔽的类型库符号, 让工程内类符号占位
+                symTab.eraseModuleSymbol(localSym->name);
+            }
 
             // 注入外部符号
             auto extSym = std::make_unique<Symbol>(
