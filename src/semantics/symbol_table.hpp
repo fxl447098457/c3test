@@ -231,6 +231,16 @@ struct Symbol {
     std::string comDefaultMemberName;       // 小写, 用于查找
     std::string comDefaultMemberRealName;   // 原始大小写, 用于代码生成
 
+    // Fix 177b: 被本工程同名类模块遮蔽的类型库 coclass.
+    // VB6 语义: 工程内定义优先于引用库, 故 `Dim x As Dictionary` / `New Dictionary`
+    // 应当得到工程内那个类. 但引用库的同名 coclass 由类型解析先注入 (builtin),
+    // 代码生成期整条晚绑定通路都建立在它上面 (comDefaultMemberName/comMethods 等).
+    // 这里只记下"运行期该 coclass 其实由本工程类实现", 供创建点 (comNewExprFor)
+    // 改走工程类工厂 + vb6_ComPackVB6InstanceRaw 包装, 其余路径保持不变, 避免
+    // 工程类走早绑定通路时大面积替换生成代码.
+    // 值为工程类名 (VB_Name, 即 C 侧 vb6_cls_<name> 的 <name>); 空 = 未被遮蔽.
+    std::string comProjectImplClass;
+
     // --- P24-04: COM Module全局函数 (SymbolKind::ComModule) ---
     std::string comModuleDllPath;    // 源DLL路径 (用于LoadLibrary)
     std::unordered_map<std::string, ComMethodSig> comModuleFunctions;  // key=小写函数名
@@ -410,12 +420,6 @@ public:
     // 注入一个跨模块外部符号（由Driver在跨模块解析pass中调用）
     // 在模块级作用域定义一个isExternal=true的符号
     void defineExternal(std::unique_ptr<Symbol> sym);
-
-    // Fix 177: 移除模块级作用域中的同名符号。
-    // 用途: 工程内定义的类与引用类型库的同名 coclass/interface 冲突时, 先移除被
-    // 遮蔽的 builtin 类型库符号, 再注入工程类符号 (VB6 语义: 工程内定义优先于
-    // 引用库)。返回是否真的移除了符号。
-    bool eraseModuleSymbol(const std::string& name);
 
     // 获取所有模块级Public符号（供其他模块链接用）
     // 返回 name → Symbol* 的映射（仅Sub/Function/Variable/Constant, Public访问级别）

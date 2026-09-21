@@ -288,7 +288,13 @@ void CCodeGen::visit(NewExpr& node) {
     } else if (clsSym && clsSym->kind == SymbolKind::ComClass) {
         // P24-11: COM early-bound class: use real ProgID from TypeLib, not the raw class name
         std::string progId = clsSym->comProgId.empty() ? node.className : clsSym->comProgId;
-        lastExpr_ = "(void*)vb6_NewObject(L\"" + progId + "\")";
+        // Fix 177b: coclass 被本工程同名类遮蔽时, 创建点改走工程类工厂 + IDispatch 包装
+        std::string projNew = comNewExprFor(clsSym);
+        if (!projNew.empty()) {
+            lastExpr_ = projNew;
+        } else {
+            lastExpr_ = "(void*)vb6_NewObject(L\"" + progId + "\")";
+        }
     } else {
         // 外部/COM对象: 回退到运行时
         lastExpr_ = "vb6_NewObject(L\"" + node.className + "\")";

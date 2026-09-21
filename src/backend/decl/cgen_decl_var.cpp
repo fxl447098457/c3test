@@ -247,15 +247,35 @@ void CCodeGen::visit(VariableDecl& node) {
             knownObjectVars_.erase(lower16);  // 移除可能的void*标记
             knownVariantVars_.erase(lower16);  // 移除可能的Variant标记
         } else {
-            // Fix 056a: 非标准控件的WithEvents变量(如VBControlExtender)当作COM对象
-            // cType可能是int32_t(mapTypeRef默认值), 必须改为void*
-            std::string lower16 = node.name;
-            std::transform(lower16.begin(), lower16.end(), lower16.begin(), ::tolower);
-            if (cType != "void*") {
-                cType = "void*";
-                knownObjectVars_.insert(lower16);
-                knownVariantVars_.erase(lower16);
-                knownLongVars_.erase(lower16);
+            // Fix 178: 非标准控件的 WithEvents 变量若解析为工程类 (如 cHttpServer 的
+            // Private WithEvents m_oServer As cTlsReMaster), 必须保持 knownClassVars_
+            // 早绑定路径, 不能按 Fix 056a 强转 void* + knownObjectVars_ — 否则
+            // With m_oServer 在 cgen_with 的检测序 (knownObjectVars_ 先于
+            // knownClassVars_) 中被判 COMObject, 块内 .Protocol = 0 / .Bind 生成
+            // vb6_ComSetProp/vb6_ComCall(裸结构体, ...) → vb6_getDispid 把
+            // __comObj 首字段当 vtable 解引用 → 运行期 0xC0000005
+            // (VBMAN_DEMO Form_Load → cHttpServer.Start, 2026-09-21 CI 实证)。
+            // 工程类实例不是 COM 对象; 未解析类型 (VBControlExtender 等) 不受影响。
+            // 守卫条件与上方 void* 分支 (knownClassVars_/knownIfaceVars_ 排除) 对齐。
+            bool weProjectClass = false;
+            if (node.asType->kind == ASTNodeKind::SimpleTypeRef) {
+                auto* weClsSym = lookupModuleDotted(simple16.name);
+                if (weClsSym && weClsSym->kind == SymbolKind::Class
+                    && !weClsSym->isInterface) {
+                    weProjectClass = true;
+                }
+            }
+            if (!weProjectClass) {
+                // Fix 056a: 非标准控件的WithEvents变量(如VBControlExtender)当作COM对象
+                // cType可能是int32_t(mapTypeRef默认值), 必须改为void*
+                std::string lower16 = node.name;
+                std::transform(lower16.begin(), lower16.end(), lower16.begin(), ::tolower);
+                if (cType != "void*") {
+                    cType = "void*";
+                    knownObjectVars_.insert(lower16);
+                    knownVariantVars_.erase(lower16);
+                    knownLongVars_.erase(lower16);
+                }
             }
         }
     }

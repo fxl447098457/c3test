@@ -216,6 +216,15 @@
     // 推断COM参数的封装函数: 根据表达式类型选择vb6_ComPackBSTR/Int/Double/Object
     std::string comPackExpr(Expr& expr);
 
+    // Fix 177b: 创建 coclass 实例的表达式 (New / Dim As New 自动实例化共用).
+    // 默认 vb6_NewObject(L"<ProgID>") — 运行期按 ProgID 走 CoCreateInstance.
+    // 但若该 coclass 被本工程的同名类模块遮蔽 (Symbol::comProjectImplClass 非空,
+    // 如 VBMAN.vbp 的 Class=Dictionary vs Microsoft Scripting Runtime 的
+    // Scripting.Dictionary), ProgID 仍解析到引用库的实现 → 拿到的对象缺少工程类
+    // 自有成员 → DISP_E_MEMBERNOTFOUND. 此时改为直接创建工程类实例, 再经
+    // vb6_ComPackVB6InstanceRaw 包装成真 IDispatch (与 ExeComBridge 03 同一通路).
+    std::string comNewExprFor(const Symbol* comSym);
+
     // P25: 解析COM标记为类型化属性取值, 用于COM调用参数打包
     // 当isComMarker_为true时调用, 根据packFnHint选择ComGetObjectProp/GetIntProp/GetStringProp等
     // packFnHint: comPackExpr返回的封装函数名, 用于推断所需属性类型
