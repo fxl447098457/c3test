@@ -14,6 +14,8 @@
 
 ### 0.10.7
 
+- 2026-09-21（src/backend/detail/stmt/cgen_setlet_set_rhs.inc、src/backend/detail/util/cgen_state.inc、src/driver/detail/driver_codegen_voidfield_scan.inc）：**Fix 179：Set <Object> = New <工程类> 创建点包成 IDispatch 包装器**——void* 目标的表示是 IDispatch*（vb6_ComCall 解 lpVtbl / vb6_ReleaseObject 直接 Release），不能用 vb6_ComPack_<X>（返回 VARIANT*，仅作 COM 实参）；179b：包装值再赋 typed 工程类目标时用 vb6_ComObject_GetInstance 解包；voidfield 扫描补 Object→void*（As Object 字段此前漏进 void 表，179a 目标判定失效）。修 VBMAN cTlsSocket Set m_oSocket = New cAsyncSocket → Bind 内 ComCall 0xC0000005（Fix 178 后 stack 前进的第二处）
+
 - 2026-09-21（src/backend/decl/cgen_decl_var.cpp）：**Fix 178：WithEvents 工程类字段保持早绑定，不再被 Fix 056a 强转 COM 对象** — cHttpServer 的 Private WithEvents m_oServer As cTlsReMaster 被误判进 knownObjectVars_，With m_oServer 块内 .Protocol/.Bind 生成 vb6_ComSetProp/vb6_ComCall(裸结构体) → vb6_getDispid 解引用 __comObj → 运行期 0xC0000005（VBMAN_DEMO Form_Load，2026-09-21 CI 三轮实证，崩溃点 VBMAN.dll+0x1AC151/+0x28F1B1 符号化确认）。修法：056a 分支加工程类守卫（lookupModuleDotted 命中 SymbolKind::Class 且非接口则跳过强转），未解析类型（VBControlExtender 等）行为不变。
 
 - 2026-09-21（.github/workflows/ci_vbman.yml）：VBMAN/demo 编译步加 -g（/Zi /DEBUG /MAP，优化仍 /Od 不变），VBMAN.map 纳入 vbman-dll artifact —— 下一轮 CI 崩溃时 map 与 DLL 同源同布局，VBMAN.dll+0x1AC151 等崩溃偏移可直接符号化到函数名。

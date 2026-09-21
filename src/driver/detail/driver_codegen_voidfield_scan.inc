@@ -26,6 +26,9 @@
             "Collection", "Forms", "ErrObject", "App", "Screen", "Printer", "Clipboard"
         };
         if (vb6BuiltinObj.count(typeName)) return true;
+        // Fix 179: As Object 字段也是 void* (mapTypeRef 同映射), 必须进 void 表
+        // (原先漏列, resolveTypeName 可解析走了非 void* 分支, 179a 目标判定失效)
+        if (typeName == "Object" || typeName == "object") return true;
         Vb6Type t = typeSys.resolveTypeName(typeName);
         if (t != Vb6Type::Unknown) return false;  // 基础类型可解析 → 非 void*
         std::string lookupName = typeName;

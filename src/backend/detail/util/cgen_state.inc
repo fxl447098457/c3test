@@ -122,6 +122,10 @@
     // 前缀明确, 故单独成集合, 只在 me-> 形态下参与判定, 避免污染裸名判定.
     std::unordered_set<std::string> classVariantFields_;
 
+    // Fix 179: 持有 IDispatch 包装器 (vb6_ComObject*) 的变量/字段名 (小写).
+    // 179a 创建点登记; 179b 该值再赋给 typed 工程类目标时解包. 每模块新实例, 模块级作用域.
+    std::unordered_set<std::string> wrappedComVars_;
+
     // Fix 062: 已知Byte数组变量名集合 (小写) - 用于Variant→SafeArray1D*转换
     std::unordered_set<std::string> knownByteArrayVars_;
 
