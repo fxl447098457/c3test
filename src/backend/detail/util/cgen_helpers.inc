@@ -352,13 +352,18 @@
     // ---- Fix 085: UDT 对象字段类型推断 ----
     // 给定 UDT C 类型标识符 (如 "vb6_type_tZipFileItem") 与字段名(小写), 返回该字段
     // 的对象类别 C 类型:
-    //   - ""                          → 非对象字段 (标量/字符串/数组等)
+    //   - ""                          → 非对象字段 (标量/数组等)
     //   - "vb6_type_Y"                → 嵌套 UDT 字段 (非对象, 供链式推断)
     //   - "vb6_cls_X*"                → 项目类对象字段 (X=类名, 走类方法调用)
     //   - "void*"                     → Collection/COM/接口 对象字段 (走 COM dispatch)
+    //   - "BSTR"                      → String 字段 (Fix 177, 赋值须深拷贝)
     // 依据语义阶段 TypeDecl 在 udtMembers 中登记的 type/typeRefName.
     std::string udtFieldObjCType(const std::string& udtCType,
                                  const std::string& memberLower) const;
+
+    // Fix 177: 目标已是**生成的 C 串**时, 判断它是否为 UDT 动态数组元素上的 String
+    // 字段 (`VB6_SA_AT(vb6_type_TCELL, ...).Text`) → 赋值必须走 vb6_BSTR_Assign。
+    bool udtFieldIsBstrInCTarget(const std::string& target) const;
 
     // Fix 085: 在 UDT 字段访问拼接处追加对象字段注释标记 (供外层 MemberAccessExpr
     // 消费): obj.field 追加 "  /* udt objfield <CType> */"; 非对象字段原样返回.

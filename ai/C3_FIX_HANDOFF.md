@@ -947,6 +947,161 @@ exe **没有 PDB/.map** → 下一步要么给链接行加 `/MAP`（或 `/Zi`）
   `_Paint/_MouseDown/_MouseMove/_MouseUp` 事件的 VB.PictureBox，codegen 装了子类化过程
   却从未发射它。**常量值不可猜**（猜错即静默误编）。
 
+## 15. 2026-09-22 凌晨：Fix 177 —— 单元格存的是**悬垂 BSTR**（推翻"存储已排除"）
+
+**取证方式（可复用）**：把整个 demo 工程 `cp -r` 到 `.temp/proj_probe/`，在
+`Form_Load` 填表之后插一段 `Open App.Path & "\probe.txt" For Output` + `Print #1`
+回读探针，用 `.temp/yqt_probe.bat` 编副本（**不碰用户原工程**），跑完读 dump。
+这比读生成 C 可靠得多 —— 一次就把问题从"绘制"翻案到"存储"。
+
+**第 14 节的结论是错的**：`GetTextDisplay`/`DrawCell`/`DrawFixedCell` 的 `iRow`
+传递**全部正确**（已逐行核对生成 C 与 `VBFlexGrid.ctl` 原文）。真正现象是
+`TextMatrix` **读回**就已经错：
+
+```
+R0|149|A|B|C   R1|1|46023|1.2|1.3   R2..R12|149|A|B|C
+W35=1115914680      <- 写 "ZZZ" 再读回, 拿到的是指针数值
+BADROWS=148         <- 第 2..149 行无一正确
+```
+
+**根因**：`SetCellText` 里 `Cells.Rows(iRow).Cols(iCol).Text = TextIn` 发射成
+**裸指针赋值** `...TCELL...).Text = (*TextIn);`。`TextIn` 是调用方
+（`prop_let_TextMatrix`）的临时 BSTR，**过程返回即被释放** → 每个单元格里存的是
+悬垂指针，读回的是"回收后被复用的内存"，于是整表塌到最后一个写入值。
+`GetCellText` 那侧本来就是 `vb6_BSTR_Assign`（深拷贝），**读写不对称**。
+
+**为什么 `test_nested_udt_array` 没抓到**：它写"变量里的字符串"并立刻读回，
+临时量尚未被回收，别名恰好一致 —— 覆盖的是结构，不是 BSTR 所有权。
+
+**修法（3 文件）**：
+- `src/backend/cgen_util_classtype.cpp`：新增 `udtFieldIsBstrInCTarget(C 目标串)`，
+  直接从**已生成的 C 串**解析 `VB6_SA_AT(vb6_type_TCELL, ...).Text` 的元素 UDT +
+  成员名；`udtFieldObjCType` 对 `String` 字段新增返回 `"BSTR"`（另一调用方
+  `appendUdtObjFieldMarker` 只认 `void*`/`vb6_cls_*`，不受影响）。
+- `src/backend/detail/stmt/cgen_assign_value_sem.inc`：`targetIsBstr` 判定补这一路
+  → 走既有 `vb6_BSTR_Assign(&target, value)`（释放旧值 + 深拷贝）。
+
+**为什么走 C 串解析而不是 AST 链**：`inferUdtTypeOfExpr` 的 `IdentifierExpr` 分支只查
+`knownUdtVars_`（仅登记参数/局部/返回/With 临时量），**类字段不在其中**；且
+`Cols() As TCELL` 的 `mi.type` 带 Array 标志、`typeRefName` 为空，链在第二跳就断。
+先试过改这两处，实测**均无效**，已回滚，只保留 C 串方案。
+
+**踩到的两个字符串坑（各烧一轮构建）**：
+1. `s.compare(0, 10, "vb6_type_")` 在 MSVC 的 STL 下对**明明相等的前缀**返回 1，
+   改成 `rfind(prefix, 0) == 0` 才对（memory 里记过，这次又中）。
+2. 解析嵌套 `VB6_SA_AT` 时，`rfind(macro, dot)` 的第二个实参是"允许的最大**起始**
+   位置"而非搜索终点，取到的是**外层**宏；外层第一个逗号又落在内层实参②里
+   （`VB6_SA_AT(T, VB6_SA_AT(U, a, i).Cols, j)`），于是元素类型误取成 `TCOLS`。
+   最终：正向按 `cand + macro.size()` 枚举候选，取"闭合括号紧贴 `.`"的那个，
+   深度初值 **1**（宏名自带的 `(` 已被 `macro.size()` 跳过）。
+
+**修复后实测**：`MIN=A1,...`（写 A1 读回 A1）、`COL12` 第 1 行 = `C1` 正确。
+
+---
+
+## 16. Fix 178（新发现，未修）：行 >=2 的存储仍别名到第 0 行
+
+Fix 177 消除了悬垂指针，但**行别名**仍在，且它才是截图上"整表显示第 0 行"的直接原因：
+
+```
+写 col12 的第 1..10 行 = C1..C10, 整列读回:
+  0:C10  1:C1  2:C10  3:C10 ... 12:C10
+```
+
+即 **行 1 独立且正确；行 0 与所有行 >=2 共用同一份存储**（该份存储里是最后写入的
+`C10`）。`EraseFlexGridCells` 的 `Erase Rows()` 生成正确（`Destroy + NULL + Init=0`），
+`InitFlexGridCells` 的 `ReDim ... 0 To PropRows-1` 也正确，`PropRows=150` 已实测确认。
+⇒ 下一轮应从**运行期 `UBound(VBFlexGridCells.Rows)`** 切入（怀疑载体元素数远小于
+150，行 >=2 越界踩到行 0/1 之后的内存），而不是再读生成 C。
+
+**注意**：`Print #1, "x="; <返回 String 的用户 Function>` 仍会把字符串打成 int32
+（Fix 176 只修了 `Debug.Print` 分派表）。探针里凡用 `;` 打印函数返回字符串的地方，
+改成 `&` 拼接，否则读数会被误读成"还是指针"。
+
+**下一轮探针设计（Fix 178 用，纯只读准备）**：`InitFlexGridCells` 的分配数学与
+`With Rows(i)` 绑定经核对**均正确**（`count = uBound-lBound+1 = 150`，`_vb6_with_411`
+在循环体内重绑），故"载体只分配了 2 个元素"的猜测不成立。当前证据
+（行 1 独立正确、行 0 与行 >=2 共用一份存储）更像**读侧索引**问题。下一轮在
+`proj_probe` 里做**读/写分离映射**：
+1. 全新列（如 col 13）逐行写 `W0..W5`，**先整列读回**记录映射；
+2. 再对该列**一次都不写**，直接读 `TextMatrix(i,14)` 全行 —— 若仍出现"多行同值"，
+   即读侧别名坐实；
+3. 同时读 `RowHeight(i)`（走另一个数组但同类型索引路径）作对照。
+
+---
+
+## 17. Fix 175 精确定位（只读分析，下一轮直接照此改）
+
+RTL 侧**早就有** `vb6_CStrDate(double)`（`vb6rtl_conv.c:187`：打 `VT_DATE` 后走
+`vb6_Format(v, NULL)`），且 `wrapToBSTR` 已按 `Vb6Type::Date` 分派到它
+（`cgen_expr_binary_util.cpp:151`）。所以 `46023` **不是缺函数**，而是**类型推断层
+根本不知道谁是 Date**：
+
+- C 后端里 `As Date` 与 `As Double` 都 emit 成 `double`（`cgen_base_type.cpp:41`），
+  注册表按 **C 类型串**分派（`cgen_decl.cpp:258-264`、`cgen_localdecl.cpp:214/218/425/427`），
+  于是 `Dim StartDate As Date` 被登记进 `knownDoubleVars_`；
+- `inferExprType(IdentifierExpr)` 只有 `knownDoubleVars_` 一路（`cgen_util_type.cpp:36`），
+  没有 Date 一路；
+- `BinaryExpr` 算术走 `TypeSystem::promote(lt, rt)`，`Date` 不在数值阶梯
+  （`type_system.cpp:220-227` 只到 Decimal）里，故即使认得 Date 也会退化成 Double。
+
+⇒ `StartDate + (i - 1)` 判成 Double → `vb6_CStrDbl` → 打印序列号。
+
+**改法（4 处，一次可完成）**：
+1. `cgen_state.inc` 加 `std::unordered_set<std::string> knownDateVars_;`
+   （紧邻 `knownLongVars_` 第 111 行），并在各过程的 `clear()` 处一并清
+   （见 `cgen_decl_func.cpp:36` 一片）。
+2. 注册处：`cgen_localdecl.cpp:214/218/425/427` 与 `cgen_decl.cpp:262/264` ——
+   **在 double 分支之前**先看 `resolveTypeRef(node.asType)` 是否 `Vb6Type::Date`，
+   是则入 `knownDateVars_`（不能再靠 `cType=="double"` 区分）。
+3. `cgen_util_type.cpp` `IdentifierExpr` 分支补
+   `if (knownDateVars_.count(lower)) return Vb6Type::Date;`。
+4. `cgen_util_type.cpp` `BinaryExpr` 算术分支：`+`/`-` 且一侧为 `Date` → 返回
+   `Date`（VB6 语义：日期±数字仍是日期）；`*`/`/` 含 Date → `Double`
+   （日期乘除无意义，按数值处理即可）。
+
+**验证口径**：不用等 demo —— 写 `.bas` 用例
+`Dim d As Date: d = DateSerial(2026,1,1): Print "x=" & (d + 1)`，
+期望 `2026/1/2`；当前会打出 `46024`。这条同时覆盖 Fix 175 的
+"Sub 的 ByVal String 形参收 Date 实参"（`cgen_expr_call_arg_emit.inc` 已有
+`Vb6Type::Date` 分支，类型一修好就会走对）。
+
+---
+
+## 18. 问题 3（面板标题截断）定位：**不是几何，是字体**
+
+逐项算过：`Command13`（Caption `ToolTipText`）设计器 `Width = 1215` 缇，
+生成 C 原样传 `vb6_CreateControl(..., 2760, 240, 1215, 315, ...)`
+（`MainForm.c:302`），而 `vb6_TwipToX = twips/15`（`vb6forms.c:52`，96 DPI 正确）
+→ **81 px**。81 px 放下 11 个字符只可能是 **8 pt** 字体；但
+`vb6_CreateControl` 给控件设的是 `GetStockObject(DEFAULT_GUI_FONT)`
+（`vb6forms.c:234`），现代 Windows 上它是 **Segoe UI 9pt**，明显宽于 VB6 的
+`MS Sans Serif 8.25pt` → 于是 `ToolTipText` 打成 `oolTipTex`、`Sort Desc` 打成
+`ort Des.`。**几何与 DPI 数学都没错，错在字体选择**（截断在两侧控件上均匀出现，
+也印证是字号而非坐标偏移）。
+
+**改法**：`vb6forms.c` 控件默认字体改为按 VB6 口径创建
+`MS Sans Serif` 8.25pt（`lfHeight = -11` @96DPI、`DEFAULT_CHARSET`），
+拿不到再退回现有 `DEFAULT_GUI_FONT`；同一处 `CreateFontA` 兜底用的是
+`"MS Shell Dlg"`，也应换成 `"MS Sans Serif"`。注意这是 **RTL 改动**，会重嵌入
+`C3.exe`（`C3RTL_EMBEDDED_FILES` 已含该文件，正常重建即生效），且窗体/分组框
+标题字体可能各自另有设置，需一并核对，否则会出现"按钮变小、标签没变"的不一致。
+
+## 19. 问题 4（CellPicture 预览图空白）待查线索
+
+参考图里 `Set` 按钮左侧有一个彩色图标（VB6 里是 `Image` 控件 + `.frx` 位图）。
+本轮未定位。下一步先查 `MainForm.frm` 里该 Image 控件的 `Picture = ...frx:`
+设计器行，以及 C3 是否解析 `.frx`（若整条路径缺失，属于"需要新子系统"级，
+优先级应排在 177/178/175/字体之后）。
+
+**已坐实（问题 4 根因）**：`FrxReader` 只在 `cgen_form_prelude.inc:188-192` 被用于
+**Form.Icon** 一处；控制级 `Picture = "MainForm.frx":0000` 从未被应用到控件 ——
+生成的 `MainForm.c` 里 `Picture1` 只有 `vb6_CreateControl("STATIC", "", ...)`
+（第 309 行），**全文件搜不到任何 frx/LoadPicture 调用**。而 `Form_Load` 末尾
+`CellPicture = vb6_GetControlPicture(vb6_hwnd_Picture1)`（第 667 行）因此取到空图。
+⇒ 修法：在控件创建处识别 `FrxReference` 属性值并加载位图（STATIC 需 `SS_BITMAP`
++ `STM_SETIMAGE`，或走控件自有 image 槽），属**新增能力**而非一行修正，
+建议排在 177/178/175/字体之后。
 
 - **C2440×12**：剩余都是小包，按族：
   **更正一处旧定性**：VBFlexGrid.c 960/1086/2071 的 `VARIANT→void*`×3 曾被记成

@@ -372,10 +372,65 @@ std::string CCodeGen::udtFieldObjCType(const std::string& udtCType,
             // Collection/COM/接口 等对象字段 → COM dispatch
             return "void*";
         }
-        // 标量/字符串/数组等非对象字段
+        // Fix 177: String 字段 → "BSTR"。调用方 appendUdtObjFieldMarker 只对
+        // "void*"/"vb6_cls_*" 追加对象标记, 故新增此返回不影响既有分派;
+        // 供 udtFieldIsBstrInCTarget 判定"该字段赋值必须走 vb6_BSTR_Assign 深拷贝"。
+        if (mi.type == Vb6Type::String) return "BSTR";
+        // 标量/数组等非对象字段
         return "";
     }
     return "";
+}
+
+
+// Fix 177: 从**已生成的 C 目标串**判断"UDT 字段是否为 String"。
+// 场景: `VBFlexGridCells.Rows(iRow).Cols(iCol).Text = TextIn` 发射成
+//   `VB6_SA_AT(vb6_type_TCELL, VB6_SA_AT(vb6_type_TCOLS, me->..Rows, iRow).Cols, iCol).Text`
+// 这类两层 UDT 数组链在 AST 侧解析不出来 (类字段不在 knownUdtVars_, 且
+// `Cols() As TCELL` 的成员类型带 Array 标志), 于是 String 字段退化成
+// **裸指针赋值** → 存进去的是调用方临时 BSTR 的地址, 返回即悬垂
+// (demo 表现: 除前两行外整表读到同一个/垃圾值)。
+// 这里改为直接读宏的第一个实参 (元素 UDT 名) + 宏右部的成员名。
+bool CCodeGen::udtFieldIsBstrInCTarget(const std::string& target) const {
+    // 目标形如 `VB6_SA_AT(vb6_type_TCELL, VB6_SA_AT(vb6_type_TCOLS, me->..Rows,
+    // iRow).Cols, iCol).Text`。成员名 = 末尾的 `.Name`; 元素 UDT = **外层**宏的
+    // 第一个实参 —— 不能用"第一个逗号", 因为外层实参②自身含嵌套宏的逗号,
+    // 必须按括号深度配平后再取逗号。
+    size_t dot = target.rfind('.');
+    if (dot == std::string::npos || dot + 1 >= target.size()) return false;
+    size_t nameEnd = dot + 1;
+    while (nameEnd < target.size() &&
+           (isalnum((unsigned char)target[nameEnd]) || target[nameEnd] == '_')) ++nameEnd;
+    if (nameEnd != target.size() || nameEnd == dot + 1) return false;
+    if (target[dot - 1] != ')') return false;
+    std::string member = target.substr(dot + 1, nameEnd - dot - 1);
+
+    // 成员所属的宏 = 闭合括号**紧贴** `.` 的那个候选 (即最内层)。逐候选按宏起始
+    // 位置推进 (find(macro, cand+1) 会跳过宏名本身从而漏掉嵌套内层); 也不能取
+    // "第一个能配平的候选" —— 外层的深度 0 收尾同样合法, 会把元素类型误取成外层
+    // 的 TCOLS 而非内层的 TCELL。
+    static const std::string macro = "VB6_SA_AT(";
+    size_t open = std::string::npos;
+    size_t close = std::string::npos;
+    for (size_t cand = target.find(macro); cand != std::string::npos && cand < dot;
+         cand = target.find(macro, cand + macro.size())) {
+        int depth = 1;                       // 宏名自带的 '(' 已被跳过, 未计入
+        for (size_t k = cand + macro.size(); k < dot; ++k) {
+            if (target[k] == '(') ++depth;
+            else if (target[k] == ')' && --depth == 0) {
+                if (k + 1 == dot) { open = cand; close = k; }
+                break;
+            }
+        }
+    }
+    if (open == std::string::npos) return false;
+    size_t args = open + macro.size();
+    size_t comma = target.find(',', args);
+    if (comma == std::string::npos || comma >= close) return false;
+    std::string elemCType = target.substr(args, comma - args);
+    while (!elemCType.empty() && isspace((unsigned char)elemCType.back())) elemCType.pop_back();
+    if (elemCType.rfind("vb6_type_", 0) != 0) return false;
+    return udtFieldObjCType(elemCType, Symbol::toLower(member)) == "BSTR";
 }
 
 

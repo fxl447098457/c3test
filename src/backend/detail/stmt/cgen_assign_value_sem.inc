@@ -32,6 +32,12 @@
             std::transform(idLower.begin(), idLower.end(), idLower.begin(), ::tolower);
             if (knownBstrVars_.count(idLower)) targetIsBstr = true;
         }
+        // Fix 177: UDT 动态数组元素上的 String 字段 (`...Cols(j).Text = TextIn`)。
+        // 裸名集合捡不到这种目标, 原先落到最底下的 `target = value;` 裸赋值 →
+        // 存进单元格的是**调用方临时 BSTR 的地址**, 过程返回即悬垂: VBFlexGridDemo
+        // 里 148/148 行读到同一个 "149"/列头, 写 "ZZZ" 后读回是指针数值。
+        // 交给下方 targetIsBstr 分支 → vb6_BSTR_Assign (释放旧值 + 深拷贝)。
+        if (!targetIsBstr && udtFieldIsBstrInCTarget(target)) targetIsBstr = true;
     }
     // P8.4: Variant赋值检测 - 如果目标是Variant变量, 用Variant构造函数包装值
     bool targetIsVariant = false;
