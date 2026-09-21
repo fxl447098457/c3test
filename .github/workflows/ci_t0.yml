@@ -6,7 +6,7 @@
 #   git push <github 远端> github-test-001
 # 内容: t0 job 构建 C3.exe + run_t0.ps1 门禁; t1 job 复用产物跑 run_t1.ps1 最小回归
 #   (bas 33 用例 x64+x86 双架构 64 任务 + compile 10); t2 job 复用产物跑 run_t2.ps1
-#   全量回归 (vbp 7 执行断言 + GUI 3 只编译)。用例均 cp 自 tests/, tests_github 自包含。
+#   全量回归 (vbp 8 执行断言 + GUI 4 只编译)。用例均 cp 自 tests/, tests_github 自包含。
 # 触发: tag github-test-* / 夜间 cron / 手动 dispatch, 见 on: 块。
 
 name: GitHub Tests T0+T1+T2
@@ -173,7 +173,7 @@ jobs:
           & .build\C3.exe --version
           if ($LASTEXITCODE -ne 0) { throw "downloaded C3.exe broken" }
 
-      - name: 运行 T2 门禁（run_t2.ps1：vbp 7 执行断言 + GUI 3 只编译）
+      - name: 运行 T2 门禁（run_t2.ps1：vbp 8 执行断言 + GUI 4 只编译）
         shell: pwsh
         run: pwsh -NoProfile -ExecutionPolicy Bypass -File tests_github/run_t2.ps1 -Verbose
 

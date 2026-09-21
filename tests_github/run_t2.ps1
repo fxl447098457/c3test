@@ -1,9 +1,9 @@
 ﻿# tests_github/run_t2.ps1 - T2 全量回归 (GitHub CI 专用, 自包含, 夜间层)
 #
-# 触发: .github/workflows/ci_t2.yml (夜间 cron + 手动 dispatch + tag github-t2-*)
+# 触发: .github/workflows/ci_t0.yml 的 t2 job (tag github-test-* / 夜间 cron / 手动 dispatch)
 # 内容两类 (口径 2026-09-20 与用户对齐: 有交互的 GUI 不做自动化, GUI 用例只编译):
-#   1. vbp 控制台工程 7 个: 编译 + 运行 + 输出断言 (无 GUI, 纯 stdout; 串行)
-#      test_vbman 依赖外部 COM (VBMANLIB), 未注册环境自动 SKIP
+#   1. vbp 控制台工程 8 个: 编译 + 运行 + 输出断言 (无 GUI, 纯 stdout; 串行)
+#      test_vbman (VBMANLIB) / test_exe_com_bridge (Scripting.Dictionary) 依赖外部 COM, 未注册自动 SKIP
 #   2. GUI vbp 工程 4 个: 只编译不运行 (窗体验证留给本机 T3/L1-L3 体系)
 # 与 tests\run_tests.ps1 的关系: 用例 2026-09-20 cp 自 tests\ (复制而非引用) ——
 #   方向是 tests_github 自包含、后续废弃 tests\; 本脚本自带清单与引擎。
@@ -173,9 +173,12 @@ Add-VbpTest "test_implements" "test_implements.vbp" @("IMPL1:OK", "IMPL2:OK", "I
 Add-VbpTest "test_events" "test_events\test_events.vbp" @("Events test PASSED")
 Add-VbpTest "M7Test" "m7_test\M7Test.vbp" @("4/4 PASSED")
 Add-VbpTest "test_vbman" "test_vbman\test_vbman.vbp" @("P24-04a:OK", "P24-04b:OK", "P24-04:2/2") -Arch "x86" -RequiresCom "VBMANLIB.cVBMAN"
+# ExeComBridge 03 回归: EXE 工程类实例过 COM 边界 (New bHello 作 Add 的 Variant 实参,
+#   对端 CallByName 晚绑定调用). 修复前在 Add 处 0xC0000005, 修复后 PING-OK + Echo 往返.
+Add-VbpTest "test_exe_com_bridge" "test_exe_com_bridge\test_exe_com_bridge.vbp" @("PING-OK", "EXEB:2/2", "EXE-COM-BRIDGE PASSED") -RequiresCom "Scripting.Dictionary"
 
-if ($script:vbpQueue.Count -ne 7) {
-    Write-Host "[ERROR] vbp 清单数量异常: $($script:vbpQueue.Count) (应为 7)" -ForegroundColor Red
+if ($script:vbpQueue.Count -ne 8) {
+    Write-Host "[ERROR] vbp 清单数量异常: $($script:vbpQueue.Count) (应为 8)" -ForegroundColor Red
     exit 1
 }
 $missing = @($script:vbpQueue | Where-Object { -not (Test-Path $_.VbpFile) })

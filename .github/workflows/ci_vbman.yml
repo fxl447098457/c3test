@@ -84,7 +84,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "C3.exe broken" }
 
       - name: clone vbman（gitcode 匿名 HTTPS）
-        run: git clone --depth 1 https://gitcode.com/woeoio/vbman.git tests/vbman
+        run: git clone --depth 1 https://gitcode.com/woeoio/vbman.git tests_github/vbman
 
       - name: 编译 VBMAN.vbp（129 模块, 输出到 dist\DLL 供 demo 相对引用）
         shell: pwsh
@@ -100,15 +100,15 @@ jobs:
               [Environment]::SetEnvironmentVariable($matches[1], $matches[2], "Process")
             }
           }
-          New-Item -ItemType Directory -Force -Path tests\vbman\dist\DLL | Out-Null
+          New-Item -ItemType Directory -Force -Path tests_github\vbman\dist\DLL | Out-Null
           # 不带 --verbose: verbose 的 AST 遍历+未使用警告占日志 98% (18 万行), 错误正文靠 c3-error.log 回显
-          & .build\C3.exe tests\vbman\src\VBMAN.vbp --output-dir tests\vbman\dist\DLL *> _vbman_compile.log
+          & .build\C3.exe tests_github\vbman\src\VBMAN.vbp --output-dir tests_github\vbman\dist\DLL *> _vbman_compile.log
           Get-Content _vbman_compile.log | Select-Object -Last 50 | Write-Host
           if ($LASTEXITCODE -ne 0) {
             # cl.exe 的错误正文由 C3 落到 --output-dir 下的 c3-error.log, 回显到 step 输出
-            if (Test-Path "tests\vbman\dist\DLL\c3-error.log") {
+            if (Test-Path "tests_github\vbman\dist\DLL\c3-error.log") {
               Write-Host "=== c3-error.log ==="
-              Get-Content "tests\vbman\dist\DLL\c3-error.log" | Write-Host
+              Get-Content "tests_github\vbman\dist\DLL\c3-error.log" | Write-Host
             }
             Write-Host "first pass failed; stub heal step will regenerate and recompile"
           } else {
@@ -158,7 +158,7 @@ jobs:
           }
           if ($LASTEXITCODE -ne 0) { throw "heal: cmake build failed" }
           Copy-Item (Join-Path $buildDir "C3.exe") .build\C3.exe -Force
-          & .build\C3.exe tests\vbman\src\VBMAN.vbp --output-dir tests\vbman\dist\DLL --verbose *> _vbman_recompile.log
+          & .build\C3.exe tests_github\vbman\src\VBMAN.vbp --output-dir tests_github\vbman\dist\DLL --verbose *> _vbman_recompile.log
           Get-Content _vbman_recompile.log | Select-Object -Last 30 | Write-Host
           if ($LASTEXITCODE -ne 0) { throw "heal: recompile still failed (看 _vbman_recompile.log 与 c3-error.log)" }
           Write-Host "heal: recompile OK"
@@ -171,7 +171,7 @@ jobs:
           path: |
             _vbman_compile.log
             _vbman_recompile.log
-            tests/vbman/dist/DLL/c3-error.log
+            tests_github/vbman/dist/DLL/c3-error.log
             src/rtl/core/di/**
           if-no-files-found: warn
           retention-days: 14
@@ -179,7 +179,7 @@ jobs:
       - name: 校验 VBMAN.dll
         shell: pwsh
         run: |
-          $dll = "tests\vbman\dist\DLL\VBMAN.dll"
+          $dll = "tests_github\vbman\dist\DLL\VBMAN.dll"
           if (-not (Test-Path $dll)) { throw "VBMAN.dll missing" }
           $len = (Get-Item $dll).Length
           Write-Host "VBMAN.dll: $len bytes"
@@ -190,7 +190,7 @@ jobs:
         with:
           name: vbman-dll
           path: |
-            tests/vbman/dist/DLL/VBMAN.dll
+            tests_github/vbman/dist/DLL/VBMAN.dll
             .build/C3.exe
           if-no-files-found: error
           retention-days: 1
@@ -217,19 +217,19 @@ jobs:
 
       - name: 归位产物（dll -> vbman\dist\DLL, C3.exe -> .build）
         run: |
-          # download-artifact 保留 artifact 内部目录结构 (上传时的 tests\... 与
+          # download-artifact 保留 artifact 内部目录结构 (上传时的 tests_github\... 与
           # .build\... 嵌套在 _dl 下), 递归定位两个文件, 不依赖具体层级
-          New-Item -ItemType Directory -Force -Path tests\vbman\dist\DLL, .build | Out-Null
+          New-Item -ItemType Directory -Force -Path tests_github\vbman\dist\DLL, .build | Out-Null
           $dll = Get-ChildItem _dl -Recurse -Filter VBMAN.dll | Select-Object -First 1
           $exe = Get-ChildItem _dl -Recurse -Filter C3.exe | Select-Object -First 1
           if (-not $dll -or -not $exe) { throw "artifact 内容缺失: VBMAN.dll / C3.exe" }
-          Move-Item $dll.FullName tests\vbman\dist\DLL\VBMAN.dll -Force
+          Move-Item $dll.FullName tests_github\vbman\dist\DLL\VBMAN.dll -Force
           Move-Item $exe.FullName .build\C3.exe -Force
 
       - name: clone vbman 与 vbman-demo（gitcode 匿名 HTTPS, 目录平级）
         run: |
-          git clone --depth 1 https://gitcode.com/woeoio/vbman.git tests/vbman
-          git clone --depth 1 https://gitcode.com/woeoio/vbman-demo.git tests/vbman-demo
+          git clone --depth 1 https://gitcode.com/woeoio/vbman.git tests_github/vbman
+          git clone --depth 1 https://gitcode.com/woeoio/vbman-demo.git tests_github/vbman-demo
 
       - name: 注入 Form_Load 错误探针（仅 CI 工作副本, 不改上游 vbman-demo）
         run: |
@@ -237,7 +237,7 @@ jobs:
           # 窗口 API (WM_GETTEXT) 拿不到错误正文 -> 源码级探针: Form_Load 包
           # On Error, 错误号/描述/Erl 写 _formload_err.txt, 断言步读取打印.
           # GBK 编码读写; LF 归一后逐字符匹配, 找不到即 throw 防静默漏注入.
-          $f = "tests/vbman-demo/demos/Helloworld/Form1.frm"
+          $f = "tests_github/vbman-demo/demos/Helloworld/Form1.frm"
           $gbk = [System.Text.Encoding]::GetEncoding(936)
           $src = [System.IO.File]::ReadAllText($f, $gbk).Replace("`r`n", "`n")
           $old = @'
@@ -278,7 +278,7 @@ jobs:
         run: |
           # C3 默认 --arch x64, VBMAN.dll 是 64 位; 曾误用 SysWOW64(32 位) regsvr32
           # LoadLibrary 失败。先打 PE machine 字段自检架构再注册
-          $dllPath = "tests\vbman\dist\DLL\VBMAN.dll"
+          $dllPath = "tests_github\vbman\dist\DLL\VBMAN.dll"
           $fs = [System.IO.File]::OpenRead($dllPath)
           $br = New-Object System.IO.BinaryReader($fs)
           $null = $fs.Seek(0x3C, 'Begin'); $peOff = $br.ReadInt32()
@@ -348,7 +348,7 @@ jobs:
             }
           }
           New-Item -ItemType Directory -Force -Path output\demo | Out-Null
-          & .build\C3.exe tests\vbman-demo\demos\Helloworld\VBMAN_DEMO.vbp --output-dir output\demo --verbose *> _demo_compile.log
+          & .build\C3.exe tests_github\vbman-demo\demos\Helloworld\VBMAN_DEMO.vbp --output-dir output\demo --verbose *> _demo_compile.log
           Get-Content _demo_compile.log | Write-Host
           if ($LASTEXITCODE -ne 0) {
             if (Test-Path "output\demo\c3-error.log") {
@@ -447,7 +447,7 @@ jobs:
             } else {
               Write-Host "[crash trace] no c3_crash.txt (未崩溃, 或崩溃发生在过滤器安装之前)"
             }
-            $unreg = Start-Process -FilePath "$env:SystemRoot\System32\regsvr32.exe" -ArgumentList '/u', '/s', "tests\vbman\dist\DLL\VBMAN.dll" -Wait -PassThru
+            $unreg = Start-Process -FilePath "$env:SystemRoot\System32\regsvr32.exe" -ArgumentList '/u', '/s', "tests_github\vbman\dist\DLL\VBMAN.dll" -Wait -PassThru
             Write-Host "regsvr32 /u exit code: $($unreg.ExitCode) (洁净约定: 用完即注销)"
           }
 
