@@ -286,6 +286,16 @@ std::string CCodeGen::comPackExpr(Expr& expr) {
 }
 
 
+// Fix 177b: coclass 创建点表达式. 见 comProjectImplClass 字段注释与
+// driver_crossmod.cpp Fix 177b 块. 返回空串 = 未被遮蔽, 调用方走原 vb6_NewObject.
+// 生成的 vb6_ComPack_<类>(vb6_cls_<类>_New()) 返回 void* (堆上 VARIANT*,
+// VT_DISPATCH), 与 vb6_NewObject 的返回表示一致, 下游晚绑定路径零改动.
+std::string CCodeGen::comNewExprFor(const Symbol* comSym) {
+    if (!comSym || comSym->comProjectImplClass.empty()) return "";
+    std::string impl = cIdent(comSym->comProjectImplClass);
+    return "vb6_ComPack_" + impl + "(vb6_cls_" + impl + "_New())";
+}
+
 // P25: 解析COM标记为类型化属性取值, 用于COM调用参数打包
 // 当isComMarker_为true时, 根据packFnHint选择对应类型的COM属性取值函数
 // 如果isComMarker_为false, 返回空串

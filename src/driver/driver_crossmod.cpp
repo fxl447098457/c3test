@@ -109,25 +109,26 @@ bool Driver::runCrossModuleResolution() {
                 localSym = symTab.lookupModule(srcSym->name);
             }
             if (localSym) {
-                // Fix 177: 引用类型库的同名 coclass/interface 不算"本地定义"。
-                // VB6 语义: 工程内定义优先于引用库 —— 同名时工程类遮蔽类型库类型。
-                // 场景: VBMAN.vbp 定义 Class=Dictionary, 同时引用 Microsoft Scripting
-                // Runtime (含 Scripting.Dictionary)。类型库符号由 driver_semantics 在
-                // 各模块 analyze 之前注入为 builtin ComClass, 故此处 lookupModule 命中
-                // 它; 原先直接 continue, 导致工程类 Dictionary 永远进不了模块作用域 →
-                // "As Dictionary" 被判为 COM 对象 (vb6_NewObject(L"Scripting.Dictionary")
-                // + 晚绑定调用) → 调用自有扩展 API (Count() / Exists(Key, CompareCase))
-                // 时返回 DISP_E_MEMBERNOTFOUND (0x80020003), 其低 16 位 = 3 → 被
-                // vb6_ComCheckError 误报为 VB6 错误 3 "没有GoSub时的Return"
-                // (VBMAN demo 弹框、800 端口不起)。
-                const bool shadowableComType =
-                    (srcSym->kind == SymbolKind::Class)
+                // Fix 177b: 引用类型库的同名 coclass 被本工程同名类模块遮蔽时,
+                // **不替换符号**, 只在 builtin ComClass 上记下工程实现类名.
+                // VB6 语义: 工程内定义优先于引用库 (VBMAN.vbp 定义 Class=Dictionary,
+                // 同时引用 Microsoft Scripting Runtime 的 Scripting.Dictionary).
+                // 为什么不整体替换 (Fix 177 首版): 代码生成期整条 coclass 晚绑定通路
+                // (VARIANT 表示 / comDefaultMemberName / ComCall 参数打包 / 返回值
+                // 解包) 都建立在类型库符号上, 换成工程类走早绑定通路会大面积改写
+                // 生成代码, 87 处 cl 编译错误 (C2063/C2440/C2065...).
+                // 现方案: `As Dictionary` 保持 coclass 类型 (晚绑定), 仅创建点
+                // (New / Dim As New) 由 CCodeGen::comNewExprFor 改走工程类工厂
+                // vb6_ComPack_<类>(vb6_cls_<类>_New()) → 真 IDispatch 包装 (ExeComBridge
+                // 03 同通路), 运行期对象即工程类实例, 自有扩展成员 (Count/Exists)
+                // 经包装器 GetIDsOfNames 正常分发, DISP_E_MEMBERNOTFOUND 不再出现.
+                if (srcSym->kind == SymbolKind::Class
                     && localSym->isBuiltin
                     && (localSym->kind == SymbolKind::ComClass
-                        || localSym->kind == SymbolKind::ComInterface);
-                if (!shadowableComType) continue;  // 已有本地定义，不需要外部符号
-                // 移除被遮蔽的类型库符号, 让工程内类符号占位
-                symTab.eraseModuleSymbol(localSym->name);
+                        || localSym->kind == SymbolKind::ComInterface)) {
+                    localSym->comProjectImplClass = srcSym->name;
+                }
+                continue;  // 已有本地定义，不需要外部符号
             }
 
             // 注入外部符号
