@@ -109,6 +109,10 @@
         // 类工厂函数声明
         h_.emitLine(clsStruct + "* " + clsStruct + "_New(void);");
         h_.emitLine("void " + clsStruct + "_Destroy(" + clsStruct + "* me);");
+        // ExeComBridge 03: COM 实参打包函数 (实现在本类 .c, 见 cgen_com.cpp
+        // emitClassFactory). 声明必须跨模块可见 —— `New <该类>` 的调用点通常
+        // 在别的模块 (VBMAN_DEMO 的 Form1.frm), 缺声明就是隐式 int 截断指针.
+        h_.emitLine("void* vb6_ComPack_" + cIdent(moduleName_) + "(void* instance);");
         // P6.4+: 默认实例 (VB_PredeclaredId=True) 惰性单例访问器, 跨模块可见
         if (!defaultInstanceClassName(moduleName_).empty()) {
             h_.emitLine(clsStruct + "* " + clsStruct + "_Default(void);");

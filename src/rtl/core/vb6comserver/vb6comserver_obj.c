@@ -2,6 +2,7 @@
 // 由 vb6comserver.c 按 COM 接口家族拆分而来 (纯搬移, 零行为改动)
 
 #include <string.h>
+#include <stdlib.h>
 #define COBJMACROS  /* Enable C COM macros (ITypeLib_Release etc.) */
 #include "vb6comserver.h"
 #include "vb6comserver_internal.h"
@@ -345,4 +346,39 @@ void* vb6_ComObject_GetInstance(void* pdisp) {
     obj = (vb6_ComObject*)pdisp;
     if (obj->vtable != &g_ComObjectVtable) return NULL;
     return obj->vb6Instance;
+}
+
+// ============================================================
+// ExeComBridge 03: 工程类实例 → COM 调用实参 (VT_DISPATCH VARIANT*)
+// ============================================================
+// 触发场景: EXE/DLL 里 `New <本工程类>` 直接作为 COM 调用的实参
+//   (VBMAN_DEMO: .Router.Reg "Demo", New bHello)
+// cgen 原先对它生成通用打包 vb6_ComPackValue(vb6_cls_bHello_New()) —— 裸结构体
+// 指针被当成 VT_DISPATCH 传出, 对端 (Dictionary 赋值 / Property Set) 取值或释放
+// 时 AddRef, 把结构体首字段当 vtable 解引用 → 0xC0000005.
+// 这里先经 vb6_ComObject_FromInstance 包装成真 IDispatch, 再转成 cgen 侧约定的
+// VARIANT*. 引用计数: FromInstance 交给我们的 1 个引用直接转移给 VARIANT, 不额外
+// AddRef —— VariantClear/Release 时正好归零, 包装器与实例随之释放.
+void* vb6_ComPackVB6InstanceRaw(const char* classVariable, void* instance) {
+    const vb6_CoClassDesc* desc;
+    vb6_ComObject* obj;
+    VARIANT* pv;
+
+    if (!instance) return NULL;
+    desc = vb6_FindCoClassDesc(classVariable);
+    // 未进 coclass 表 (Private / 非 MultiUse|SingleUse) 的类没有 IDispatch 方法表,
+    // 包装也无从应答 GetIDsOfNames → 返回 NULL (等效 VB6 传 Nothing), 不冒充对象.
+    if (!desc) return NULL;
+
+    pv = (VARIANT*)calloc(1, sizeof(VARIANT));
+    if (!pv) return NULL;
+    obj = vb6_ComObject_FromInstance(desc, instance);
+    if (!obj) {
+        free(pv);
+        return NULL;
+    }
+    VariantInit(pv);
+    pv->vt = VT_DISPATCH;
+    pv->pdispVal = (IDispatch*)obj;  /* 引用已由 FromInstance 提供, 所有权转移给 VARIANT */
+    return (void*)pv;
 }

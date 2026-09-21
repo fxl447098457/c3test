@@ -125,6 +125,22 @@ void CCodeGen::emitClassFactory(Module& module) {
     c_.emitLine("vb6_Free(me);");
     c_.dedent();
     c_.emitLine("}");
+
+    // ExeComBridge 03: COM 实参打包函数 (每个类模块一个).
+    //   `New <本工程类>` 出现在 COM 调用实参位置时 (cgen_util_com.cpp comPackExpr),
+    //   通用打包 vb6_ComPackValue 会把裸 vb6_cls_X* 当 VT_DISPATCH 传出去, 对端
+    //   AddRef 时把结构体首字段当 vtable → 0xC0000005
+    //   (VBMAN_DEMO: .Router.Reg "Demo", New bHello).
+    //   本函数先经 __comObj 包装成真 IDispatch 再转 VARIANT (RTL:
+    //   vb6_ComPackVB6InstanceRaw). 类名用原始名 —— desc 表的 classVariable 即
+    //   VB_Name (cgen_util_dllentry_collect.inc), 查找按 _stricmp 大小写不敏感.
+    c_.emitBlank();
+    c_.emitLine("// ExeComBridge 03: 工程类实例 → COM 实参 (先包装成 IDispatch 再转 VARIANT)");
+    c_.emitLine("void* vb6_ComPack_" + cIdent(moduleName_) + "(void* instance) {");
+    c_.indent();
+    c_.emitLine("return vb6_ComPackVB6InstanceRaw(\"" + moduleName_ + "\", instance);");
+    c_.dedent();
+    c_.emitLine("}");
 }
 
 // P6.4+: 类模块默认实例 (VB_PredeclaredId=True) 惰性单例访问器.

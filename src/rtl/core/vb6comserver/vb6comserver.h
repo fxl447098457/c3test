@@ -123,9 +123,10 @@ typedef struct vb6_IDispatchVtable {
 vb6_ComObject* vb6_ComObject_Create(const vb6_CoClassDesc* desc);
 
 // Fix 099: 包装一个**已存在**的 VB6 类实例 (不调 factoryFunc).
-// 用于 ActiveX DLL 的 Public 对象字段 getter —— 字段实例在类内部创建, 是裸
-// 结构体指针. 实例 __comObj 已置则 AddRef 复用, 否则新建包装并回填.
-// 前置条件: 实例所在类的结构体首字段是 __comObj (仅 ActiveX DLL 工程的类有).
+// 用于 Public 对象字段 getter —— 字段实例在类内部创建, 是裸结构体指针.
+// 实例 __comObj 已置则 AddRef 复用, 否则新建包装并回填.
+// 前置条件: 实例所在类的结构体首字段是 __comObj (ExeComBridge 01 起所有类模块
+// 都有该字段, DLL 与 EXE 工程一致).
 vb6_ComObject* vb6_ComObject_FromInstance(const vb6_CoClassDesc* desc, void* instance);
 
 // Fix 099: 按类变量名 (VB6 模块名) 在 g_vb6_coclasses[] 中查描述, 未命中返回 NULL.
@@ -133,6 +134,17 @@ const vb6_CoClassDesc* vb6_FindCoClassDesc(const char* classVariable);
 
 // Fix 099: 从 IDispatch 取回 VB6 实例裸指针; 非本 RTL 产出的对象返回 NULL.
 void* vb6_ComObject_GetInstance(void* pdisp);
+
+// ExeComBridge 03: 把工程类实例包成"COM 调用实参格式"的 VARIANT* (VT_DISPATCH).
+// cgen 为每个类模块生成 vb6_ComPack_<类名>(void* instance) 包一层本函数; 触发场景
+// 是 `New <本工程类>` 出现在 COM 调用实参位置
+// (VBMAN_DEMO: `.Router.Reg "Demo", New bHello`). 原先裸 vb6_cls_X* 被直接塞进
+// VT_DISPATCH, 对端取值/释放 AddRef 时把结构体首字段当 vtable → 0xC0000005.
+// 这里先经 FromInstance 包装成真 IDispatch 再转 VARIANT.
+// 引用计数: FromInstance 给出的 1 个引用直接转移给 VARIANT, 不再额外 AddRef
+// (额外 AddRef 会让包装器与实例永不释放). 实例所在类未进 coclass 表
+// (Private / 非 MultiUse|SingleUse) 时返回 NULL, 等效 VB6 的 Nothing.
+void* vb6_ComPackVB6InstanceRaw(const char* classVariable, void* instance);
 
 // ============================================================
 // Class Factory (IClassFactory实现)
