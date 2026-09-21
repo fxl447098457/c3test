@@ -216,6 +216,22 @@ std::string CCodeGen::comPackExpr(Expr& expr) {
         if (knownDoubleVars_.count(lower)) return "vb6_ComPackDouble";
         if (knownLongVars_.count(lower)) return "vb6_ComPackInt";
     }
+    // ExeComBridge 03: 本工程类的 `New <类>` 实参.
+    //   cgen_expr.cpp visit(NewExpr) 对它生成裸实例指针 (vb6_cls_X_New()); 通用
+    //   打包 (vb6_ComPackValue → vb6_VariantFromValue) 会把它当 VT_DISPATCH 原样
+    //   传出, 对端取值/释放时 AddRef, 结构体首字段被当 vtable → 0xC0000005
+    //   (VBMAN_DEMO: .Router.Reg "Demo", New bHello).
+    //   改走按类生成的 vb6_ComPack_<类> (先经 __comObj 包装成真 IDispatch 再转
+    //   VARIANT, 见 cgen_com.cpp emitClassFactory / RTL vb6_ComPackVB6InstanceRaw).
+    //   只作用于本工程类: ComClass 分支走 vb6_NewObject, 拿到的本来就是真
+    //   IDispatch, 保持原路径不动 (收窄原则 —— 泛用实参包装改动曾致回归 30→81).
+    if (expr.kind == ASTNodeKind::NewExpr) {
+        auto& ne = static_cast<NewExpr&>(expr);
+        Symbol* neCls = lookupModuleDotted(ne.className);
+        if (neCls && neCls->kind == SymbolKind::Class) {
+            return "vb6_ComPack_" + cIdent(neCls->name);
+        }
+    }
     // Fix: Empty/Null 字面量语义上是 Variant 子类型 (VT_EMPTY/VT_NULL),
     // 但 inferExprType 缺省把它们当作 Long (LiteralExpr 分支 return Vb6Type::Long),
     // 于是省略实参 (parser 填 LiteralKind::Empty) 在晚绑定 COM 调用里生成

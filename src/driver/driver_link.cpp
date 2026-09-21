@@ -166,12 +166,21 @@ bool Driver::runLinker(const CompileOptions& options, const std::string& outputD
     // 宿主对象分派挂接点 (vb6_Host_*) 引用 vb6forms_uc, 不能只在 GUI/DLL 下链接.
     // (原先 Fix 096 的按需扫描已不需要: 一律链接.)
     addFormsSources(msvcOpts, rtlDir);
-    if (msvcOpts.isDll) {
-        msvcOpts.sourceFiles.push_back(rtlDir + "/vb6comserver.c");
-        msvcOpts.sourceFiles.push_back(rtlDir + "/vb6comserver_obj.c");
-        msvcOpts.sourceFiles.push_back(rtlDir + "/vb6comserver_factory.c");
-        msvcOpts.sourceFiles.push_back(rtlDir + "/vb6comserver_cp.c");
-        msvcOpts.sourceFiles.push_back(rtlDir + "/vb6comserver_pci.c");
+    // ExeComBridge 01: vb6comserver 组无条件链入 (原先仅 DLL).
+    //   EXE 的工程类实例也要能被包装成 IDispatch (vb6_ComObject_FromInstance /
+    //   vb6_FindCoClassDesc 定义在 vb6comserver_obj.c); 纯 EXE 下无调用方,
+    //   不产生新的外部库依赖 (advapi32.lib 三种链接分支本就都带).
+    msvcOpts.sourceFiles.push_back(rtlDir + "/vb6comserver.c");
+    msvcOpts.sourceFiles.push_back(rtlDir + "/vb6comserver_obj.c");
+    msvcOpts.sourceFiles.push_back(rtlDir + "/vb6comserver_factory.c");
+    msvcOpts.sourceFiles.push_back(rtlDir + "/vb6comserver_cp.c");
+    msvcOpts.sourceFiles.push_back(rtlDir + "/vb6comserver_pci.c");
+    // ExeComBridge 01: com_entry.c = EXE 模式的 coclass 表 (driver_codegen_dll_entry.inc
+    //   生成于中间目录), 提供 g_vb6_coclasses / g_vb6_coclassCount (vb6comserver_obj.c
+    //   的 vb6_FindCoClassDesc 引用). DLL 模式由 dll_entry.c 提供同名符号且不生成
+    //   com_entry.c → 仅 EXE 链入, 无条件加会让 DLL 的 cl 报 C1083.
+    if (!msvcOpts.isDll) {
+        msvcOpts.sourceFiles.push_back(intermediatesDir + "/com_entry.c");
     }
 
     msvcOpts.verbose = options.verbose;

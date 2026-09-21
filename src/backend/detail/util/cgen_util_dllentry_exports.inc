@@ -5,6 +5,12 @@
     entry.emitLine("const int g_vb6_coclassCount = " + std::to_string(coClasses.size()) + ";");
     entry.emitBlank();
 
+    // ExeComBridge 01: includeDllExports=false (EXE 工程的 com_entry.c) 时只生成
+    //   coclass 表, 跳过 DLL 导出函数段 —— EXE 无 .def 导出表, 也不需要 DllMain.
+    //   g_vb6_coclassCount / g_vb6_coclasses 必须无条件生成: vb6comserver_obj.c
+    //   的 vb6_FindCoClassDesc 引用它们 (DLL 下由 dll_entry.c 提供, EXE 下由
+    //   com_entry.c 提供).
+    if (includeDllExports) {
     // 4. DLL导出函数
     entry.emitLine("// === DLL Export Functions ===");
     entry.emitBlank();
@@ -79,5 +85,6 @@
     entry.dedent();
     entry.emitLine("}");
     entry.emitBlank();
+    }  // ExeComBridge 01: end if (includeDllExports)
 
     return entry.str();

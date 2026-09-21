@@ -29,7 +29,7 @@ std::string CCodeGen::registerDefaultInstanceClass(const std::string& name) {
     return cls;
 }
 
-std::string CCodeGen::generateDllEntry(const std::string& progId, const std::vector<SymbolTable*>& allSymTabs) {
+std::string CCodeGen::generateDllEntry(const std::string& progId, const std::vector<SymbolTable*>& allSymTabs, bool includeDllExports) {
 #include "backend/detail/util/cgen_util_dllentry_prelude.inc"
 #include "backend/detail/util/cgen_util_dllentry_collect.inc"
 #include "backend/detail/util/cgen_util_dllentry_tables.inc"
