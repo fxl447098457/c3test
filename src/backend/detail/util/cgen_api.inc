@@ -127,6 +127,9 @@
     // (*obj).Field 或 obj.Field), 避免 cIdent 把 '.' 替换成 '_' 生成
     // 未声明的单标识符 (uOutput.Buffer → uOutput_Buffer → C2065)
     std::string resolveArrayTargetIdent(const std::string& varName);
+    // Fix 180: ReDim/Erase 的"owner 不带下标的点号链"目标 (h1.Items) 的元素 UDT C 类型。
+    // 入参是小写后的 node.varName; 解析不到返回空串, 由调用方保持原有 Variant 回落。
+    std::string resolveUdtMemberArrayCType(const std::string& lowerVar) const;
     // Fix 084aa: 判断标识符是否引用 String 类型常量 (#define 宏, 不可取址)
     bool isStringConstIdent(const std::string& name) const;
     // Fix 084aa: 查找常量符号 (Constant kind), 无则返回 nullptr

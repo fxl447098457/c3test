@@ -8,6 +8,28 @@ namespace vb6c3 {
 
 // --- cgen_redim.cpp: ReDim/Erase 数组语句生成 ---
 
+// Fix 180: `ReDim h1.Items(0 To 1)`（owner 不带下标的点号链）此前**两头落空** ——
+// 既不进 Fix 100 的 targetExpr 通道（那条只在链上带下标时才有 targetExpr），而
+// 下面 :74-79 的裸名回退按 `arrayUdtElemTypes_` 查，键是裸变量名，"h1.items" 永远
+// 捡不到 → isUdtArray=false → 发 vb6_SafeArrayReDim1D(vb6_sa_variant, …) 按 16 字节
+// 元素分配，读写侧却用 VB6_SA_AT(vb6_type_TOwned, …) → 步长不符越界（现象：整棵
+// 子树别名 + 字符串为空）。
+// owner 的 C 类型名由 knownUdtVars_ 提供（`Dim h1 As THost` 在 cgen_decl_var.cpp /
+// cgen_localdecl.cpp 登记），成员类型复用现成的 udtFieldObjCType —— 它看
+// `mi.type == UserDefinedType` + `typeRefName`，不看 isArrayDynamic，正合
+// `Items() As TOwned` 的形态（数组性记在 arraySize/isArrayDynamic 上，As 后面是
+// 普通 SimpleTypeRef，所以 typeRefName 是有记录的）。
+// 边界：owner 是类字段（me->Foo.Items）或 With 成员（.Items）时 knownUdtVars_ 里没有
+// owner，返回空串让调用方**按原样回落 Variant**（Variant 元素尺寸最大 → 过分配不会
+// 越界），不去猜。
+std::string CCodeGen::resolveUdtMemberArrayCType(const std::string& lowerVar) const {
+    size_t dot = lowerVar.rfind('.');
+    if (dot == std::string::npos || dot == 0 || dot + 1 >= lowerVar.size()) return "";
+    auto it = knownUdtVars_.find(lowerVar.substr(0, dot));
+    if (it == knownUdtVars_.end()) return "";
+    return udtFieldObjCType(it->second, lowerVar.substr(dot + 1));
+}
+
 void CCodeGen::visit(ReDimStmt& node) {
     // Fix 100: 复杂目标 (带下标的成员链, 如 ReDim m_Serie(i).PT(n))。
     // node.targetExpr 非空时直接发射左值表达式 (VB6_SA_AT(vb6_type_tSerie, m_Serie, i).PT),
@@ -76,6 +98,10 @@ void CCodeGen::visit(ReDimStmt& node) {
         // (Dim arr() As UDT)。不回退则回落 vb6_sa_empty(4字节) → UDT 越界写入。
         auto it = arrayUdtElemTypes_.find(lowerVar);
         if (it != arrayUdtElemTypes_.end()) udtCType = it->second;
+    }
+    if (udtCType.empty()) {
+        // Fix 180: 裸名回退漏掉的点号链目标 (ReDim h1.Items(0 To 1) 不带 As)
+        udtCType = resolveUdtMemberArrayCType(lowerVar);
     }
     bool isUdtArray = !udtCType.empty();
 
@@ -248,6 +274,8 @@ void CCodeGen::emitReDimComplexTarget(ReDimStmt& node) {
         std::transform(cv.begin(), cv.end(), cv.begin(), ::tolower);
         auto it = arrayUdtElemTypes_.find(cv);
         if (it != arrayUdtElemTypes_.end()) udtCType = it->second;
+        // Fix 180: 与 visit(ReDimStmt&) 共用同一套点号链解析，避免第三份实现
+        if (udtCType.empty()) udtCType = resolveUdtMemberArrayCType(cv);
     }
     if (udtCType.empty() && elemType == Vb6Type::UserDefinedType) {
         // 推断不到 UDT 的 C 类型名: 回落 Variant 分配 (VB6_SA_AT 只用 data/lBound,
