@@ -796,6 +796,8 @@ if ($Category -in @("all", "run", "vbp")) {
     Test-Vbp "test_implements" "$Tests\test_implements.vbp" @("IMPL1:OK", "IMPL2:OK", "Implements test PASSED")
     Test-Vbp "test_events" "$Tests\test_events\test_events.vbp" @("Events test PASSED")
     Test-Vbp "M7Test" "$Tests\m7_test\M7Test.vbp" @("4/4 PASSED")
+    # ai/022 B03: cross-module new-style contract reached through an Interface head-line host
+    Test-Vbp "itf_xmod_writer" "$Tests\itf_xmod\XWriter.vbp" @("XMOD1:OK", "XMOD2:OK")
 
     # test_vbman 用于验证外部 COM 组件 VBMANLIB (x86 DLL, 供 32 位程序调用)
     Test-Vbp "test_vbman" "$Tests\test_vbman\test_vbman.vbp" @("P24-04a:OK", "P24-04b:OK", "P24-04:2/2") -Arch "x86" -RequiresCom "VBMANLIB.cVBMAN"
@@ -882,7 +884,9 @@ if ($Category -in @("all", "syntax")) {
         @("itf_n16_clause_in_bas", "$Tests\itf_neg\n16_clause_in_bas.bas", "only valid in a class module"),
         @("itf_n17_clause_unqualified", "$Tests\itf_neg\n17_clause_unqualified.bas", "needs a qualified name"),
         @("itf_n18_clause_sig_mismatch", "$Tests\itf_neg\n18_clause_sig_mismatch.cls", "signature mismatch"),
-        @("itf_n19_iface_in_generic", "$Tests\itf_neg\n19_iface_in_generic.cls", "not allowed inside a generic class template")
+        @("itf_n19_iface_in_generic", "$Tests\itf_neg\n19_iface_in_generic.cls", "not allowed inside a generic class template"),
+        # ai/022 B03: Interface head-line host form (.cls named after its single block)
+        @("itf_n20_host_extra_decl", "$Tests\itf_neg\n20_host_extra_decl.cls", "may contain only the Interface block")
     )
     foreach ($c in $itfNeg) {
         if (Test-Path $c[1]) { Test-SyntaxFail $c[0] $c[1] $c[2] }
@@ -894,6 +898,8 @@ if ($Category -in @("all", "syntax")) {
     # ai/022 B02b positive guard: explicit clause binding (cross-interface slot, inherited
     # slot named via child interface, property tri-slot keys, arbitrary member names).
     if (Test-Path "$Tests\itf_pos\p02_clause_binding.cls") { Test-Syntax "itf_p02_clause_binding" "$Tests\itf_pos\p02_clause_binding.cls" }
+    # ai/022 B03 positive guard: a host module name is no longer a name collision.
+    if (Test-Path "$Tests\itf_pos\p03_headline_host.cls") { Test-Syntax "itf_p03_headline_host" "$Tests\itf_pos\p03_headline_host.cls" }
     Write-Host ""
     
     # --- 生成环境检查与汇总 (冒烟+语法+VBP+run 计数) ---

@@ -331,6 +331,11 @@ public:
     // 模块类别
     bool isClassModule = false;     // true = .cls类模块, false = .bas标准模块/.frm窗体模块
     bool isFormModule = false;      // true = .frm窗体模块 (P7)
+    // Interface 头行宿主 (tB 扩展, ai/022 D1/B03): VB6 "一文件一接口" 的 `.cls` 写法 —
+    // 文件自身就叫 IFoo.cls, 体内唯一的 Interface 块与模块同名. 由 stage 2.7 识别置位
+    // (模块名要到 driver_frontend 才定得下来), 供"接口名与模块名不算撞车"的放行与
+    // 后续发码 (B04: 宿主不发类实例) 使用. 普通 `.bas` 里的接口块恒为 false.
+    bool isInterfaceModule = false;
     VBInstancing instancing = VBInstancing::Private;  // 类Instancing属性 (仅类模块)
     // 泛型类模板 (tB 扩展, G4): .cls 头行 `Class Name(Of T[,U])` 的类型参数名表.
     // 非空 = 该类是"泛型模板类" — 不进符号表/不发码; 泛型器按使用点克隆整个

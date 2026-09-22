@@ -155,6 +155,7 @@
 - [GoTo 语句](02-语句/GoTo%20语句.md)
 - [If...Then...Else 语句](02-语句/If...Then...Else%20语句.md)
 - [Implements 语句](02-语句/Implements%20语句.md)
+- [Interface 语句](02-语句/Interface%20语句.md)
 - [Input # 语句](02-语句/Input%20#%20语句.md)
 - [Kill 语句](02-语句/Kill%20语句.md)
 - [LSet 语句](02-语句/LSet%20语句.md)

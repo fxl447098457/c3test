@@ -37,11 +37,28 @@ bool Driver::runInterfacePrepass() {
                 mod->moduleName + ")");
             continue;
         }
+        // 头行宿主识别 (B03, D17): VB6 "一文件一接口" 写成 `IFoo.cls` + 体内唯一的
+        // `Interface IFoo … End Interface`. 模块名要到 driver_frontend 才定得下来,
+        // 所以识别放在这里而不是 parser 里.
+        if (mod->isClassModule && mod->interfaces.size() == 1 && mod->interfaces.front() &&
+            ifaceLower(mod->interfaces.front()->name) == ifaceLower(mod->moduleName)) {
+            mod->isInterfaceModule = true;
+            for (const auto& d : mod->declarations) {
+                if (!d) continue;
+                diag_->error(DiagnosticID::SemInterfaceNotSupported, d->loc,
+                    "Interface host module '" + mod->moduleName +
+                    "' may contain only the Interface block (declaration here is not allowed)");
+                break;  // 一条宿主违规只报一次
+            }
+        }
         for (auto& d : mod->interfaces) {
             if (!d) continue;
             const std::string key = ifaceLower(d->name);
             if (key.empty()) continue;  // 无名 = parse 阶段已报错, 不再级联
-            if (moduleKeys.count(key)) {
+            // 头行宿主的接口名天然等于它自己的模块名, 这不是撞车 (B03)
+            const bool hostOwnName =
+                mod->isInterfaceModule && d.get() == mod->interfaces.front().get();
+            if (moduleKeys.count(key) && !hostOwnName) {
                 diag_->error(DiagnosticID::SemDuplicateDeclaration, d->loc,
                     "Interface name '" + d->name +
                     "' collides with a module of the same name (module names and "
