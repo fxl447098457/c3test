@@ -166,6 +166,9 @@ bool Driver::runCrossModuleResolution() {
             // 对其它 kind 该字段为空, 无副作用. 原先把此赋值放在 Variable-only 分支内,
             // 导致 Function/PropertyGet 外部符号丢失返回类型名, 链式调用解析失败.
             extSym->variableTypeName = srcSym->variableTypeName;
+            // Fix 183: 复制 As New 标志 — 外部模块级 As New 变量在消费模块中
+            // 同样需要惰性实例化守卫 (否则全局对象恒为 NULL).
+            extSym->isNewVar = srcSym->isNewVar;
             // Fix 017: 复制常量值 (EnumMember / Constant 跨模块注入后需保留值).
             // 外部 EnumMember 若 hasConstValue=false, cgen 会发出裸标识符 (如
             // HASH_ALG_SHA256) 而非数值 → C2065. 此前外部符号构造只复制

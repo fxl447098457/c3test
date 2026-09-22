@@ -378,15 +378,53 @@
                             argVal = "(&(vb6_VARIANT){" + argVal + "})";
                         }
                     } else {
-                        // Fix 160w: Variant 值 (COM 属性读取 vb6_VariantFromComResult 等)
-                        // 作为 As Any ByRef 实参的非左值兜底 — (void*)(intptr_t)(struct)
-                        // → C2440, 裸传 → C2172 (MainForm.c OleCreatePropertyFrame 参 8
-                        // ByVal Pages.pElems: Web 后端该 Variant 的整型载荷即指针值).
-                        // 用 vb6_VariantToLongPtr 取整型载荷再按值压回指针形参.
-                        if (cExprIsVariant(argVal)) {
+                        // 合并口径: 本 else 兜底两侧各自加了判别, 两者互斥可共存 ——
+                        // 数值字面量取复合字面量地址 (上游 Fix 182), Variant 值取整型
+                        // 载荷 (我们的 Fix 160w), 其余维持裸强转。
+                        // Fix 182: As Any ByRef 的实参是数值字面量时, VB6 先把字面量求值到
+                        // 临时存储, 再把该存储的地址传给形参. 直接强转 (void*)(intptr_t)(v)
+                        // 是把数值本身当成指针 — cAsyncSocket 的
+                        // ws_setsockopt(m_hSocket, ucsSolTCP, ucsSsoNoDelay, 1&, 4)
+                        // 形参为 int32_t*, 收到地址 0x1 → WSAEFAULT(10014),
+                        // Create 失败并关闭 socket, 后续 Bind 报 WSAENOTSOCK.
+                        // 实测对照: optval=(char*)1 → ret=-1 wsaerr=10014;
+                        //           optval=&(int32_t){1} → ret=0.
+                        // 0 保持原有 (void*)0 行为 (Fix 069b 场景需要 NULL 指针),
+                        // 其余复杂表达式维持原样, 控制影响面.
+                        std::string litBody = argVal;
+                        char litSuffix = 0;
+                        if (!litBody.empty() && (litBody.back() == 'L' || litBody.back() == 'l'
+                                                 || litBody.back() == 'f' || litBody.back() == 'F')) {
+                            litSuffix = litBody.back();
+                            litBody.pop_back();
+                        }
+                        bool isNumericLiteral = !litBody.empty();
+                        for (char c : litBody) {
+                            if (!std::isdigit(static_cast<unsigned char>(c))
+                                && c != '.' && c != 'e' && c != 'E') {
+                                isNumericLiteral = false;
+                                break;
+                            }
+                        }
+                        if (isNumericLiteral && litBody != "0") {
+                            std::string ccType = "int32_t";
+                            if (litBody.find('.') != std::string::npos
+                                || litBody.find('e') != std::string::npos
+                                || litBody.find('E') != std::string::npos) {
+                                ccType = "double";
+                            } else if (litSuffix == 'f' || litSuffix == 'F') {
+                                ccType = "float";
+                            }
+                            argVal = "(void*)&(" + ccType + "){" + argVal + "}";
+                        } else if (cExprIsVariant(argVal)) {
+                            // Fix 160w: Variant 值 (COM 属性读取 vb6_VariantFromComResult 等)
+                            // 作为 As Any ByRef 实参的非左值兜底 — (void*)(intptr_t)(struct)
+                            // → C2440, 裸传 → C2172 (MainForm.c OleCreatePropertyFrame 参 8
+                            // ByVal Pages.pElems: Web 后端该 Variant 的整型载荷即指针值).
+                            // 用 vb6_VariantToLongPtr 取整型载荷再按值压回指针形参.
                             argVal = "(void*)(intptr_t)vb6_VariantToLongPtr(" + argVal + ")";
                         } else {
-                            // 非左值: 字面量或复杂表达式 — 直接强转为 void*
+                            // 非左值: 0 或复杂表达式 — 直接强转为 void*
                             argVal = "(void*)(intptr_t)(" + argVal + ")";
                         }
                     }

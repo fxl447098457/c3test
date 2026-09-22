@@ -473,8 +473,39 @@ bool CCodeGen::tryRewriteCOMLvalue(const std::string& target, const std::string&
 // Fix 090w/090x: Property Let/Set 值实参打包 (声明见 cgen.hpp)
 // ============================================================
 std::string CCodeGen::packLetValueArg(const ParameterInfo& lastP, Expr* valueExpr,
-                                      const std::string& val) const {
-    if (lastP.type != Vb6Type::Variant) return val;
+                                      const std::string& val) {
+    if (lastP.type != Vb6Type::Variant) {
+        // Fix 185: ByRef 值类型形参 (Property Let v As String/Boolean/Long/...)
+        // 的 C 侧是 <T>* (BSTR* / int16_t* / int32_t*) — VB6 默认 ByRef.
+        // 原先实参只传"值", 被调用方把该值当地址解引用: BSTR 值被当 BSTR* 使用
+        // 时读到字符串头 4 字节当指针 → 非确定 0xC0000005 / 堆破坏
+        // (cHttpServerSvr.c prop_let_WebRoot; cHttpServer.c CookieAttr.Path/HttpOnly
+        //  /SameSite, m_oServer_ConnectionRequest). 用 C99 标量复合字面量取临时
+        // 对象地址, 同时兼容非常量左值实参 (常量 (-1)、函数返回值
+        // vb6_BSTR_FromStr(L"/")、prop_get_xxx()). 未列出的类型 (Object/UDT/
+        // 数组/Date/Currency) 保持原样, 不改变既有行为.
+        if (lastP.isByVal) return val;
+        switch (lastP.type) {
+            case Vb6Type::String:
+                if (valueExpr && cExprIsVariant(val)) {
+                    return "(&(BSTR){(" + wrapToBSTR(val, *valueExpr) + ")})";
+                }
+                return "(&(BSTR){(" + val + ")})";
+            case Vb6Type::Integer:
+            case Vb6Type::Boolean:
+                return "(&(int16_t){(" + val + ")})";
+            case Vb6Type::Long:
+                return "(&(int32_t){(" + val + ")})";
+            case Vb6Type::Byte:
+                return "(&(uint8_t){(" + val + ")})";
+            case Vb6Type::Single:
+                return "(&(float){(" + val + ")})";
+            case Vb6Type::Double:
+                return "(&(double){(" + val + ")})";
+            default:
+                return val;
+        }
+    }
     if (lastP.isByVal) return "vb6_VariantFromValue(" + val + ")";
     // ByRef Variant 形参需要可寻址的 vb6_VARIANT*.
     // (&(vb6_VARIANT){vb6_VariantFromValue(x)}) 是非法 C (结构体复合字面量

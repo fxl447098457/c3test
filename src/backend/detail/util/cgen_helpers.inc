@@ -282,8 +282,9 @@
     //     (按 valueExpr 推断的 VB 类型选字段; 与 cgen_expr M22 ByRef Variant 分支一致)
     // 非法形态 (&(vb6_VARIANT){vb6_VariantFromValue(v)}) 会触发 C2440
     // "vb6_VARIANT→vb6_vartype". lastP.type 非 Variant 时原样返回.
+    // Fix 185: 非 const — String 分支复用 wrapToBSTR (非 const 成员).
     std::string packLetValueArg(const ParameterInfo& lastP, Expr* valueExpr,
-                                const std::string& val) const;
+                                const std::string& val);
 
     // Fix 159-B: VB6 隐式 CStr 的实参类型清单 — 日期/数值标量赋给 ByVal String 形参
     // 时按 CStr 转换 (vb6_CStrDate/CStrDbl/CStrLong), 见 wrapToBSTR.

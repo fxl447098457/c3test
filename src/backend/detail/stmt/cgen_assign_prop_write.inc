@@ -430,8 +430,12 @@
                     // Property Let Expires(v As Variant) ByRef 值参是 vb6_VARIANT*,
                     // double/BSTR/int 实参裸拼 → C2440 (cHttpServer.c 913). 与
                     // Fix 090w (Pattern C/D2) 同款值参打包, 复用 packLetValueArg.
+                    // Fix 185: 除 Variant 外, ByRef 值类型形参 (String/Boolean/
+                    // Integer/Long/...) 的 C 形参同样是 <T>* (VB6 默认 ByRef),
+                    // 实参裸传值会被当地址解引用 → 非确定 AV/堆破坏.
                     if (letPropSym && !letPropSym->params.empty()
-                        && letPropSym->params.back().type == Vb6Type::Variant) {
+                        && (letPropSym->params.back().type == Vb6Type::Variant
+                            || !letPropSym->params.back().isByVal)) {
                         lastExpr_ = packLetValueArg(letPropSym->params.back(),
                                                     node.value.get(), lastExpr_);
                     }
@@ -465,9 +469,17 @@
                     if (findClassMemberCallParams(canonCls090h, wmExpr.memberName,
                                                   clsParams090h, clsBuiltin090h)) {
                         emitExpr(*node.value);
+                        // Fix 185: 与主路径一致 — ByRef 值类型形参需打包成 <T>*.
+                        std::string val090h = lastExpr_;
+                        if (!clsParams090h.empty()
+                            && (clsParams090h.back().type == Vb6Type::Variant
+                                || !clsParams090h.back().isByVal)) {
+                            val090h = packLetValueArg(clsParams090h.back(),
+                                                      node.value.get(), val090h);
+                        }
                         c_.emitLine("vb6_" + cIdent(canonCls090h) + "_prop_let_"
                                     + cIdent(wmExpr.memberName) + "(" + tempVar + ", "
-                                    + lastExpr_ + ");  /* With class prop_let_ (Fix 090h) */");
+                                    + val090h + ");  /* With class prop_let_ (Fix 090h) */");
                         return;
                     }
                 }

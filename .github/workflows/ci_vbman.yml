@@ -8,6 +8,9 @@
 #       HTTP 断言 -> finally 杀进程 + 注销, 洁净约定)
 # 桩自愈: vbman 首编 LNK2019 时跑 gen_di_stubs.ps1 (add-only) 补桩 ->
 #       重建 C3 -> 重编; 产出的 src/rtl/core/di/** 应回 commit 固化。
+#
+# 目标架构 = x86: VBMAN 是 32 位 VB6 源码资产。C3 调用带 --arch x86, MSVC 环境走
+#   vcvarsall x86, 注册/注销用 SysWOW64\regsvr32。例外: C3.exe 自身保持 x64 (构建工具)。
 
 name: VBMAN 链路验证
 
@@ -22,7 +25,7 @@ on:
 
 jobs:
   vbman:
-    name: vbman 编译（129 模块 ActiveX DLL）
+    name: vbman 编译（129 模块 ActiveX DLL, x86 目标）
     if: ${{ github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: windows-latest
     timeout-minutes: 45
@@ -44,10 +47,11 @@ jobs:
           run-id: ${{ github.event.workflow_run.id }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: 自建 C3.exe（tag/dispatch 触发时的回退路径）
+      - name: 自建 C3.exe（tag/dispatch 触发时的回退路径, x64 构建工具）
         if: github.event_name != 'workflow_run'
         shell: pwsh
         run: |
+          # 刻意保留 x64: C3.exe 是构建工具, 位数与被编译目标无关 (T0 下载的 c3-exe 也是 x64)。
           $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer\vswhere.exe"
           $vsPath = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath 2>$null
           if (-not $vsPath) { throw "No MSVC install" }
@@ -77,12 +81,13 @@ jobs:
       - name: 编译 VBMAN.vbp（129 模块, 输出到 dist\DLL 供 demo 相对引用）
         shell: pwsh
         run: |
-          # 每 step 独立进程: 编译前重新注入 MSVC 环境 (x64 链接完全依赖继承环境)
+          # 每 step 独立进程: 编译前重新注入 MSVC 环境 (链接完全依赖继承环境)
+          # vcvarsall x86: Hostx64\x86 交叉编译器 + lib\x86 + SDK x86 库, 与 --arch x86 配对。
           $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer\vswhere.exe"
           $vsPath = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath 2>$null
           if (-not $vsPath) { throw "No MSVC install" }
           $vcvars = Join-Path $vsPath "VC\Auxiliary\Build\vcvarsall.bat"
-          $envLines = & cmd /c "call `"$vcvars`" x64 >nul 2>&1 && set" 2>$null
+          $envLines = & cmd /c "call `"$vcvars`" x86 >nul 2>&1 && set" 2>$null
           foreach ($line in $envLines) {
             if ($line -match '^([^=]+)=(.*)$') {
               [Environment]::SetEnvironmentVariable($matches[1], $matches[2], "Process")
@@ -91,7 +96,7 @@ jobs:
           New-Item -ItemType Directory -Force -Path tests_github\vbman\dist\DLL | Out-Null
           # 不带 --verbose: 日志 98% 是 AST 遍历+未使用警告 (18 万行), 错误正文看 c3-error.log
           # -g: 链接器出 VBMAN.map, 与本 DLL 同源同布局, 崩溃偏移可直接符号化
-          & .build\C3.exe tests_github\vbman\src\VBMAN.vbp --output-dir tests_github\vbman\dist\DLL -g *> _vbman_compile.log
+          & .build\C3.exe tests_github\vbman\src\VBMAN.vbp --arch x86 --output-dir tests_github\vbman\dist\DLL -g *> _vbman_compile.log
           Get-Content _vbman_compile.log | Select-Object -Last 50 | Write-Host
           if ($LASTEXITCODE -ne 0) {
             # cl 错误正文由 C3 落到 --output-dir 下 c3-error.log
@@ -138,7 +143,14 @@ jobs:
           }
           if ($LASTEXITCODE -ne 0) { throw "heal: cmake build failed" }
           Copy-Item (Join-Path $buildDir "C3.exe") .build\C3.exe -Force
-          & .build\C3.exe tests_github\vbman\src\VBMAN.vbp --output-dir tests_github\vbman\dist\DLL --verbose *> _vbman_recompile.log
+          # 上面重建 C3.exe 沿用 x64 工具链(构建工具); 重编 VBMAN.vbp 必须切回 x86 目标环境
+          $envLines = & cmd /c "call `"$vcvars`" x86 >nul 2>&1 && set" 2>$null
+          foreach ($line in $envLines) {
+            if ($line -match '^([^=]+)=(.*)$') {
+              [Environment]::SetEnvironmentVariable($matches[1], $matches[2], "Process")
+            }
+          }
+          & .build\C3.exe tests_github\vbman\src\VBMAN.vbp --arch x86 --output-dir tests_github\vbman\dist\DLL --verbose *> _vbman_recompile.log
           Get-Content _vbman_recompile.log | Select-Object -Last 30 | Write-Host
           if ($LASTEXITCODE -ne 0) { throw "heal: recompile still failed (看 _vbman_recompile.log 与 c3-error.log)" }
           Write-Host "heal: recompile OK"
@@ -177,7 +189,7 @@ jobs:
           retention-days: 1
 
   vbman-demo:
-    name: vbman demo 执行（注册 + HTTP 环回断言）
+    name: vbman demo 执行（x86 注册 + HTTP 环回断言）
     needs: vbman
     runs-on: windows-latest
     timeout-minutes: 30
@@ -251,9 +263,9 @@ jobs:
           [System.IO.File]::WriteAllText($f, $src.Replace($old, $new), $gbk)
           Write-Host "Form_Load error probe injected"
 
-      - name: 注册 VBMAN.dll（x64 dll 用 System32 regsvr32）
+      - name: 注册 VBMAN.dll（x86 dll 用 SysWOW64 regsvr32）
         run: |
-          # 先校验 PE machine 字段确认 x64, 再用 System32 regsvr32;
+          # x86: 校验 PE machine=0x014C, 用 SysWOW64\regsvr32 (32 位注册器)。
           # regsvr32 是 GUI 程序, 必须 Start-Process -Wait 拿真实退出码。
           $dllPath = "tests_github\vbman\dist\DLL\VBMAN.dll"
           $fs = [System.IO.File]::OpenRead($dllPath)
@@ -263,8 +275,8 @@ jobs:
           $br.Close(); $fs.Close()
           $archName = switch ($machine) { 0x8664 { 'x64' } 0x014C { 'x86' } default { '?' } }
           Write-Host ("VBMAN.dll PE machine: 0x{0:X4} ({1})" -f $machine, $archName)
-          if ($machine -ne 0x8664) { throw "VBMAN.dll 不是 x64 (machine=0x$($machine.ToString('X4')))" }
-          $reg = Start-Process -FilePath "$env:SystemRoot\System32\regsvr32.exe" -ArgumentList '/s', $dllPath -Wait -PassThru
+          if ($machine -ne 0x014C) { throw "VBMAN.dll 不是 x86 (machine=0x$($machine.ToString('X4')))" }
+          $reg = Start-Process -FilePath "$env:SystemRoot\SysWOW64\regsvr32.exe" -ArgumentList '/s', $dllPath -Wait -PassThru
           Write-Host "regsvr32 exit code: $($reg.ExitCode)"
           if ($reg.ExitCode -ne 0) {
             Write-Host "regsvr32 failed (2=LoadLibrary败 3=无导出 4=DllRegisterServer败), probe..."
@@ -300,19 +312,30 @@ jobs:
             [RegProbe]::FreeLibrary($h) | Out-Null
             throw "regsvr32 failed (probe 结论见上)"
           }
-          if (-not (Test-Path 'Registry::HKEY_CLASSES_ROOT\VBMANLIB.cVBMAN')) {
-            throw "ProgId VBMANLIB.cVBMAN 未落地, 注册无效"
+          $progId = 'VBMANLIB.cVBMAN'
+          $progKey = "Registry::HKEY_CLASSES_ROOT\$progId"
+          if (-not (Test-Path $progKey)) {
+            throw "ProgId $progId 未落地 (共享视图 HKCR\$progId), 注册无效"
           }
-          Write-Host "VBMAN.dll registered (HKCR\VBMANLIB.cVBMAN)"
+          $clsid = (Get-Item $progKey).GetValue('')
+          Write-Host "ProgId $progId -> CLSID $clsid"
+          $inprocPath = "Registry::HKEY_CLASSES_ROOT\WOW6432Node\CLSID\$clsid\InprocServer32"
+          if (-not (Test-Path $inprocPath)) {
+            throw "InprocServer32 未落到 32 位视图 ($inprocPath), x86 注册无效"
+          }
+          $registered = (Get-Item $inprocPath).GetValue('')
+          Write-Host "registered InprocServer32 = $registered"
+          if (-not (Test-Path $registered)) { throw "注册表中的 DLL 路径不存在: $registered" }
+          Write-Host "VBMAN.dll registered (HKCR\$progId + HKCR\WOW6432Node\CLSID\$clsid\InprocServer32)"
 
-      - name: 编译 Helloworld demo（引用 ..\..\..\vbman\dist\DLL\VBMAN.dll）
+      - name: 编译 Helloworld demo（引用 ..\..\..\vbman\dist\DLL\VBMAN.dll, x86）
         shell: pwsh
         run: |
           $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer\vswhere.exe"
           $vsPath = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath 2>$null
           if (-not $vsPath) { throw "No MSVC install" }
           $vcvars = Join-Path $vsPath "VC\Auxiliary\Build\vcvarsall.bat"
-          $envLines = & cmd /c "call `"$vcvars`" x64 >nul 2>&1 && set" 2>$null
+          $envLines = & cmd /c "call `"$vcvars`" x86 >nul 2>&1 && set" 2>$null
           foreach ($line in $envLines) {
             if ($line -match '^([^=]+)=(.*)$') {
               [Environment]::SetEnvironmentVariable($matches[1], $matches[2], "Process")
@@ -320,7 +343,7 @@ jobs:
           }
           New-Item -ItemType Directory -Force -Path output\demo | Out-Null
           # -g: demo exe 也出 map, 崩溃栈里的 exe 偏移同样可符号化
-          & .build\C3.exe tests_github\vbman-demo\demos\Helloworld\VBMAN_DEMO.vbp --output-dir output\demo -g --verbose *> _demo_compile.log
+          & .build\C3.exe tests_github\vbman-demo\demos\Helloworld\VBMAN_DEMO.vbp --arch x86 --output-dir output\demo -g --verbose *> _demo_compile.log
           Get-Content _demo_compile.log | Write-Host
           if ($LASTEXITCODE -ne 0) {
             if (Test-Path "output\demo\c3-error.log") {
@@ -414,7 +437,7 @@ jobs:
             } else {
               Write-Host "[crash trace] no c3_crash.txt (未崩溃, 或崩溃发生在过滤器安装之前)"
             }
-            $unreg = Start-Process -FilePath "$env:SystemRoot\System32\regsvr32.exe" -ArgumentList '/u', '/s', "tests_github\vbman\dist\DLL\VBMAN.dll" -Wait -PassThru
+            $unreg = Start-Process -FilePath "$env:SystemRoot\SysWOW64\regsvr32.exe" -ArgumentList '/u', '/s', "tests_github\vbman\dist\DLL\VBMAN.dll" -Wait -PassThru
             Write-Host "regsvr32 /u exit code: $($unreg.ExitCode) (洁净约定: 用完即注销)"
           }
 

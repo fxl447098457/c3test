@@ -107,6 +107,10 @@ struct Symbol {
     // 仅对 SymbolKind::Variable 有效 — 当变量声明为 As ClassName 时存储类名
     // 用于跨模块解析时传递类类型信息到 consuming 模块的 cgen
     std::string variableTypeName;
+    // Fix 183: 该变量声明为 As New (模块级 Public As New ClassName).
+    // 跨模块注入时必须随 Symbol 复制, 否则消费模块不知道需要惰性实例化,
+    // 导致 As New 全局对象运行期恒为 NULL → 解引用 0xC0000005.
+    bool isNewVar = false;
 
     // --- 类相关 (仅SymbolKind::Class) ---
     VBInstancing instancing = VBInstancing::Private;  // Instancing属性
