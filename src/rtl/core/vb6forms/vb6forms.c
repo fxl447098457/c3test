@@ -45,6 +45,36 @@ static struct {
 } g_timerTable[VB6_MAX_TIMERS];
 static int g_timerCount = 0;
 
+// Fix 181: VB6 控件的默认字体是 **MS Sans Serif 8.25pt**，而现代 Windows 的
+// DEFAULT_GUI_FONT 是 Segoe UI 9pt —— 明显更宽，于是 .frm 里按 VB6 字体排好的
+// 固定宽度控件被截字 (demo: "ToolTipText"→"oolTipTex"、"Sort Desc."→"ort Des.")。
+// 几何与 DPI 换算本身没错 (1215 缇 = 81px 正好放得下 VB6 字体的 11 个字符)，
+// 错的是字体选择，所以只换字体、不动尺寸。
+// ⚠ **必须每控件一份，不能进程内缓存共享**：`vb6forms_ctrl.c` 的
+// vb6_SetControlFontFromLogFont 换字体后无条件 `DeleteObject(hOldFont)` (它只把
+// stock 对象算作安全的 no-op)。共享自建字体一旦被某个改 Font 属性的控件删掉，
+// 其余仍在用它的控件就拿着已销毁的 GDI 句柄 (句柄还会被复用 → 别的控件拿到同一
+// 数值)，表现为跨控件随机换字形，极难归因。失败时退回 stock 对象同样安全。
+static HFONT vb6_Vb6DefaultGuiFont(void) {
+    LOGFONTA lf = {0};
+    HDC hdc = GetDC(NULL);
+    int dpiY = hdc ? GetDeviceCaps(hdc, LOGPIXELSY) : 96;
+    HFONT hFont;
+    if (hdc) ReleaseDC(NULL, hdc);
+    lf.lfHeight = -MulDiv(825, dpiY, 7200);   /* 8.25pt → 像素 */
+    lf.lfWeight = FW_NORMAL;
+    lf.lfCharSet = DEFAULT_CHARSET;
+    lf.lfOutPrecision = OUT_DEFAULT_PRECIS;
+    lf.lfClipPrecision = CLIP_DEFAULT_PRECIS;
+    // VB6 的 MS Sans Serif 是点阵字体, 从不抗锯齿; 开了 ClearType 会比参考图更宽更糊
+    lf.lfQuality = NONANTIALIASED_QUALITY;
+    lf.lfPitchAndFamily = DEFAULT_PITCH | FF_DONTCARE;
+    lstrcpyA(lf.lfFaceName, "MS Sans Serif");
+    hFont = CreateFontIndirectA(&lf);
+    if (!hFont) hFont = (HFONT)GetStockObject(DEFAULT_GUI_FONT);
+    return hFont;
+}
+
 // ============================================================
 // 缇(Twip)转换
 // ============================================================
@@ -52,12 +82,43 @@ static int g_timerCount = 0;
 int vb6_TwipToX(int twips) {
     // 1缇 = 1/15像素 (96 DPI标准)
     // Screen.TwipsPerPixelX 通常=15
-    return twips / 15;
+    return MulDiv(twips, vb6_DpiX(), 1440);
 }
 
 int vb6_TwipToY(int twips) {
-    return twips / 15;
+    return MulDiv(twips, vb6_DpiY(), 1440);
 }
+
+// Fix 184: 缇/像素换算必须走**真实 DPI**。此前 TwipToX 写死 /15 (96DPI)，
+// 而 vb6_GetScaleWidth / vb6_Screen_TwipsPerPixelX 用 GetDeviceCaps(LOGPIXELSX)，
+// 于是在 dpiAware=true 的工程里两套口径混用：Form_Resize 拿到
+// ScaleWidth = 客户区像素*12 (120DPI)，再交给 TwipToX 按 /15 落成像素，
+// 控件被缩小 20% (VBFlexGridDemo: 网格 906x385 -> 729x291，可见行 23 -> 13)。
+// 现在所有换算共用下面这一对 DPI 源。
+int vb6_DpiX(void) {
+    static int s_dpi = 0;
+    if (!s_dpi) {
+        HDC hdc = GetDC(NULL);
+        s_dpi = hdc ? GetDeviceCaps(hdc, LOGPIXELSX) : 96;
+        if (hdc) ReleaseDC(NULL, hdc);
+        if (s_dpi <= 0) s_dpi = 96;
+    }
+    return s_dpi;
+}
+
+int vb6_DpiY(void) {
+    static int s_dpi = 0;
+    if (!s_dpi) {
+        HDC hdc = GetDC(NULL);
+        s_dpi = hdc ? GetDeviceCaps(hdc, LOGPIXELSY) : 96;
+        if (hdc) ReleaseDC(NULL, hdc);
+        if (s_dpi <= 0) s_dpi = 96;
+    }
+    return s_dpi;
+}
+
+int vb6_XToTwipX(int px) { return MulDiv(px, 1440, vb6_DpiX()); }
+int vb6_YToTwipY(int px) { return MulDiv(px, 1440, vb6_DpiY()); }
 
 // ============================================================
 // 窗体框架
@@ -231,12 +292,14 @@ void* vb6_CreateControl(const char* win32Class, const char* controlName,
 
     // 设置默认字体 (VB6使用MS Sans Serif 8.25pt)
     if (hwnd) {
-        HFONT hFont = (HFONT)GetStockObject(DEFAULT_GUI_FONT);
+        // Fix 181: 原先直接用 GetStockObject(DEFAULT_GUI_FONT) —— 现代 Windows 上
+        // 那是 Segoe UI 9pt, 比 VB6 的 MS Sans Serif 8.25pt 宽, 控件标题被截字。
+        HFONT hFont = vb6_Vb6DefaultGuiFont();
         if (!hFont) {
             hFont = CreateFontA(
                 -11, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
                 DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-                DEFAULT_QUALITY, FF_DONTCARE, "MS Shell Dlg"
+                DEFAULT_QUALITY, FF_DONTCARE, "MS Sans Serif"
             );
         }
         SendMessage(hwnd, WM_SETFONT, (WPARAM)hFont, MAKELPARAM(FALSE, 0));
@@ -324,6 +387,33 @@ void vb6_DispatchTimer(int timerId) {
 }
 
 // ============================================================
+// Sub Main 驻留判据 (Fix 167)
+// ============================================================
+// VB6 语义: `Sub Main` 返回后进程**不退出**, 运行时继续泵消息, 直到所有窗体关闭
+// (或显式 End)。此前 codegen 的 Sub Main 入口模板调完 Main 直接 vb6_Exit()+return,
+// 于是 `Load` 出 modeless 窗体的工程一返回就干净退出 (退出码 0) —— 表现为
+// "窗口闪一下就没了", VBFlexGridDemo 正是如此。
+// 判据用"本线程有没有可见窗口", 而不是另建窗体注册表: 窗体是本 RTL 在
+// vb6_CreateFormWindowB 里以 RegisterClass("VB6_Form_<X>") 建的普通窗口, 归本线程所有;
+// 而 `App.PrevInstance` 那一支 (激活前一个实例后返回) 只操作**别的进程**的 hwnd,
+// 本线程没有窗口 → 不会误驻留。纯 .bas 控制台工程同样没有可见窗口 → 不受影响。
+static BOOL CALLBACK vb6_EnumAnyVisibleWindow(HWND hwnd, LPARAM lParam) {
+    if (IsWindowVisible(hwnd)) { *(int*)lParam = 1; return FALSE; }
+    return TRUE;
+}
+
+int vb6_AnyThreadWindowVisible(void) {
+    int found = 0;
+    EnumThreadWindows(GetCurrentThreadId(), vb6_EnumAnyVisibleWindow, (LPARAM)&found);
+    if (GetEnvironmentVariableA("C3_COM_TRACE", NULL, 0) > 0) {
+        fprintf(stderr, "[C3_FSM] AnyThreadWindowVisible=%d tid=%lu\n",
+                found, (unsigned long)GetCurrentThreadId());
+        fflush(stderr);
+    }
+    return found;
+}
+
+// ============================================================
 // 消息循环
 // ============================================================
 
@@ -333,11 +423,17 @@ int vb6_MessageLoop(void) {
     // 排队等消息循环; 否则处理器在 Form_Load 前对未就绪实例运行 → AV)
     extern int vb6_uc_timersStarted;  // czUI fix (定义在 vb6forms_uc.c)
     vb6_uc_timersStarted = 1;
+    extern void vb6_Forms_LoopDepth(int delta);   // Fix 188 (定义在 vb6rtl_system.c)
+    vb6_Forms_LoopDepth(1);
+    if (GetEnvironmentVariableA("C3_COM_TRACE", NULL, 0) > 0) {
+        fprintf(stderr, "[C3_FSM] MessageLoop enter\n"); fflush(stderr);
+    }
     while (GetMessage(&msg, NULL, 0, 0)) {
         // P24-Timer: WM_TIMER现在由WndProc分发, 消息循环不再拦截
         TranslateMessage(&msg);
         DispatchMessage(&msg);
     }
+    vb6_Forms_LoopDepth(-1);   // Fix 188
     if (GetEnvironmentVariableW(L"C3_OCX_TRACE", NULL, 0) > 0)
         fprintf(stderr, "[C3_MODAL] 主消息循环结束: msg=0x%04X hwnd=%p\n",
                 msg.message, (void*)msg.hwnd);

@@ -32,6 +32,12 @@
             std::transform(idLower.begin(), idLower.end(), idLower.begin(), ::tolower);
             if (knownBstrVars_.count(idLower)) targetIsBstr = true;
         }
+        // Fix 177: UDT 动态数组元素上的 String 字段 (`...Cols(j).Text = TextIn`)。
+        // 裸名集合捡不到这种目标, 原先落到最底下的 `target = value;` 裸赋值 →
+        // 存进单元格的是**调用方临时 BSTR 的地址**, 过程返回即悬垂: VBFlexGridDemo
+        // 里 148/148 行读到同一个 "149"/列头, 写 "ZZZ" 后读回是指针数值。
+        // 交给下方 targetIsBstr 分支 → vb6_BSTR_Assign (释放旧值 + 深拷贝)。
+        if (!targetIsBstr && udtFieldIsBstrInCTarget(target)) targetIsBstr = true;
     }
     // P8.4: Variant赋值检测 - 如果目标是Variant变量, 用Variant构造函数包装值
     bool targetIsVariant = false;
@@ -54,6 +60,16 @@
             std::string idLower = id.name;
             std::transform(idLower.begin(), idLower.end(), idLower.begin(), ::tolower);
             if (knownVariantVars_.count(idLower)) targetIsVariant = true;
+        }
+        // Fix 154: VARIANT 数组元素赋值 — 目标 emit 后是 `VB6_SA_AT(vb6_VARIANT, ...)`
+        // / `VB6_SA_ND_AT2(vb6_VARIANT, ...)` 等下标宏 (返回 vb6_VARIANT 左值引用).
+        // 裸名 knownVariantVars_ 检测捡不到它, RHS 若是裸 BSTR/int32/double → 直接
+        // `elem = Buffer` → C2440 "无法从 BSTR 转换为 vb6_VARIANT" (VBFlexGrid 二维
+        // Variant 表数组写入). 按 VARIANT 元素处理, 交给下方 wrapVariantValue 包装;
+        // vb6_VariantClear(&elem) 与 elem = wrapped 对宏返回的引用均合法.
+        if (!targetIsVariant && target.compare(0, 7, "VB6_SA_") == 0
+            && target.find("(vb6_VARIANT,") != std::string::npos) {
+            targetIsVariant = true;
         }
     }
     if (targetIsBstr) {
@@ -151,6 +167,12 @@
         //   vb6_VariantFromValue 对已存在的 VARIANT 是 identity (no-op), 安全.
         c_.emitLine(target + " = vb6_VariantFromValue(" + value + ");");
     } else {
+        // Fix 178: 两端是同一「含所有权成员 UDT」(如 `Rows(i) = VBFlexGridDefaultCols`)
+        // → C 结构体赋值/memcpy 都是浅拷贝, 成员会被两侧共享; 换生成的深拷贝函数。
+        {
+            std::string deep = udtDeepCopyAssign(*node.target, target, node.value.get(), value);
+            if (!deep.empty()) { c_.emitLine(deep); return; }
+        }
         // Fix 038b-6/045: 具体类型目标 + Variant 值 → 自动提取
         // 覆盖: TimeOut = obj.Method() (Method 返回 Variant, TimeOut 是 Long)
         //       VB6_SA_AT(BSTR, arr, i) = func() (func 返回 Variant)
@@ -364,6 +386,9 @@
                 }
                 }
             }
+            // Fix 170: 整体数组目标 (`A() = expr`) 右侧若非新建载体则深拷贝, 不制造别名
+            if (tgtIsWholeArray170)
+                convertedValue = wrapWholeArrayAssign(target, convertedValue, node.target.get());
             c_.emitLine(target + " = " + convertedValue + ";");
         } else {
             // Fix 091l: Variant 目标 ← 具体类型值 (SafeArray1D*/数组载体/标量/COM 结果).
@@ -393,6 +418,9 @@
             if (tgtIsByteArray092w && !tgtIsVariant091l && !value.empty()) {
                 value = rewriteByteArrayValue(value);
             }
+            // Fix 170: 整体数组目标 (`A() = expr`) 右侧若非新建载体则深拷贝, 不制造别名
+            if (tgtIsWholeArray170 && !value.empty())
+                value = wrapWholeArrayAssign(target, value, node.target.get());
             c_.emitLine(target + " = " + value + ";");
         }
     }

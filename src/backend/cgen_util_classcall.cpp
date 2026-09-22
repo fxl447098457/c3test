@@ -20,6 +20,17 @@ std::string CCodeGen::resolveClassMemberCall(const std::string& className,
     if (!symTab_.moduleScope()) return "";
 
     const std::string memberLower = Symbol::toLower(memberName);
+    // 调试钩子 (任务 #7): `Form.hWnd` / `CurrControl.hWnd` 这类 Extender 成员被解析成
+    // vb6_VBFlexGrid_hWnd 全局 (C2065×17) —— 打印进入时的类名与最终命中的返回路径,
+    // 定位 className 是在哪一步变成 VBFlexGrid 的。用法: C3_DBG159=1
+    const bool dbg159 = std::getenv("C3_DBG159") != nullptr
+        && (memberLower == "hwnd" || memberLower == "name"
+            || memberLower == "enabled" || memberLower == "borderstyle");
+    if (dbg159) {
+        std::fprintf(stderr, "[DBG159] enter cls=%s member=%s mod=%s isClassMod=%d\n",
+                     className.c_str(), memberName.c_str(), moduleName_.c_str(),
+                     isClassModule_ ? 1 : 0);
+    }
     if (std::getenv("C3_DBG110") && memberLower == "enabled") {
         std::fprintf(stderr, "[DBG110] resolveClassMemberCall cls=%s member=%s mod=%s\n",
                      className.c_str(), memberName.c_str(), moduleName_.c_str());
@@ -178,9 +189,18 @@ std::string CCodeGen::resolveClassMemberCall(const std::string& className,
                             prefix = "prop_get_";
                         }
                     }
-                    return "vb6_" + cIdent(classCanonName) + "_" + prefix + cIdent(mn);
-                }
+                    if (dbg159) {
+                        std::fprintf(stderr,
+                            "[DBG159] 014fallback -> vb6_%s_%s%s (memberNames hit)\n",
+                            cIdent(classCanonName).c_str(), prefix.c_str(),
+                            cIdent(mn).c_str());
+                    }
+                    return "vb6_" + cIdent(classCanonName) + "_" + prefix + cIdent(mn);                }
             }
+        }
+        if (dbg159) {
+            std::fprintf(stderr, "[DBG159] nomatch cls=%s member=%s -> \"\"\n",
+                         className.c_str(), memberName.c_str());
         }
         return "";  // 非方法/属性 → 视为数据字段访问
     }
@@ -195,6 +215,11 @@ std::string CCodeGen::resolveClassMemberCall(const std::string& className,
 
     // 强制使用规范类名 (来自符号表, 与类定义struct名一致),
     // 避免用户源代码大小写差异导致生成的函数名与定义不匹配
+    if (dbg159) {
+        std::fprintf(stderr, "[DBG159] scopeSym -> vb6_%s_%s%s (kind=%d)\n",
+                     cIdent(canonicalClassName).c_str(), prefix.c_str(),
+                     cIdent(memberCanon).c_str(), (int)chosen->kind);
+    }
     return "vb6_" + cIdent(canonicalClassName) + "_" + prefix + cIdent(memberCanon);
 }
 

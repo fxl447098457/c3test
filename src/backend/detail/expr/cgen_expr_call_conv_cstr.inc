@@ -14,9 +14,14 @@
                 emitExpr(*firstArg);
                 return;
             }
+            // Fix 175: Date 变量 → vb6_CStrDate (必须先判, Date 同时登记在
+            // knownDoubleVars_ 里, 否则 CStr(d) 会按 double 打成序列号)
+            if (knownDateVars_.count(argLower)) {
+                callee = "vb6_CStrDate";
+            }
             // Fix 117c: 参数是Single(float)变量 → vt_R4 语义 (必须优先于 Double 判定,
             // 因为 Single 变量同时登记在 knownDoubleVars_ 里以复用既有取值路径)
-            if (knownSingleVars_.count(argLower)) {
+            else if (knownSingleVars_.count(argLower)) {
                 callee = "vb6_CStrSingle";
             }
             // 参数是int32_t/Long变量 → 用vb6_CStrLong
@@ -42,6 +47,8 @@
             }
             if (argType == Vb6Type::Long || argType == Vb6Type::Integer) {
                 callee = "vb6_CStrLong";
+            } else if (argType == Vb6Type::Date) {
+                callee = "vb6_CStrDate";   // Fix 175: 日期按 VB6 短日期串输出
             } else if (argType == Vb6Type::Single) {
                 callee = "vb6_CStrSingle";   // Fix 117c: VT_R4 语义
             } else if (argType == Vb6Type::Double) {

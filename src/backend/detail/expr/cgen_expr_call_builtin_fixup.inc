@@ -429,6 +429,12 @@
     if (callee == "vb6_Shell" && args.size() == 1) {
         argList += ", 2";
     }
+    // Fix 158j: AppActivate(title[, wait]) — RTL 签名 vb6_AppActivate(BSTR, int32_t wait),
+    // VB6 允许省略 wait (Startup.bas: AppActivate "VBFlexGrid Demo" → 只传 1 参
+    // → C2198 参数太少). 缺省值 0 (不等待).
+    if (callee == "vb6_AppActivate" && args.size() == 1) {
+        argList += ", 0";
+    }
     // Fix 135b: 无参 Rnd 语义 = Rnd(1) (取下一个随机数); 0 才是"重复上一值"
     // Randomize([seed]) — handled as Sub bare-call; see cgen_stmt.cpp Randomize dispatch
     if (callee == "vb6_Rnd" && args.empty()) {

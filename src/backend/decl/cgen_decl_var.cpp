@@ -288,6 +288,10 @@ void CCodeGen::visit(VariableDecl& node) {
         std::string lower = node.name;
         std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
         knownDoubleVars_.insert(lower);
+        // Fix 175: 模块级 `Private d As Date` 与 Double 同型, 需另登记才能被
+        // inferExprType 认成 Date (口径同 cgen_localdecl.cpp 的 Dim 分支)。
+        if (resolveArrayElemType(node.asType.get()) == Vb6Type::Date)
+            knownDateVars_.insert(lower);
     } else if (cType == "BSTR") {
         std::string lower = node.name;
         std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);

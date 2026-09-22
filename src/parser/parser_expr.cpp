@@ -72,6 +72,7 @@ ExprPtr Parser::parseNullDenotation() {
         // --- 字面量 ---
         case TokenKind::IntegerLiteral:
         case TokenKind::LongLiteral:
+        case TokenKind::LongPtrLiteral:
         case TokenKind::FloatLiteral:
         case TokenKind::DecimalLiteral:
         case TokenKind::StringLiteral:
@@ -262,6 +263,11 @@ ExprPtr Parser::parseLiteral() {
         }
         case TokenKind::LongLiteral: {
             auto expr = std::make_unique<LiteralExpr>(loc, LiteralKind::Long, tok.text);
+            expr->longValue = tok.longValue;
+            return expr;
+        }
+        case TokenKind::LongPtrLiteral: {
+            auto expr = std::make_unique<LiteralExpr>(loc, LiteralKind::LongPtr, tok.text);
             expr->longValue = tok.longValue;
             return expr;
         }

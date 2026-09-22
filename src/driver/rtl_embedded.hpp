@@ -148,6 +148,10 @@ enum RtlResourceID {
     RTL_AX_PROPBAG_C                       = 202,
     RTL_AX_LOAD_C                          = 203,
     RTL_AX_HOST_C                          = 204,
+
+    // Fix 160y: DI 转发桩未带 vb6_di_lib 标记的杂项符号 (Imm 输入法 / version /
+    // TransparentBlt / msvbvm60 运行时) — gen_di_stubs.ps1 归入 unknown 族
+    RTL_VB6_DI_UNKNOWN_STUBS_C             = 205,
 };
 
 // Session directory manager

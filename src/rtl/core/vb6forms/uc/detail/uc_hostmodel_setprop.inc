@@ -27,7 +27,7 @@
         if (_wcsicmp(name, L"Top") == 0)    t = vb6_ho_variantToLong(v);
         if (_wcsicmp(name, L"Width") == 0)  w = vb6_ho_variantToLong(v);
         if (_wcsicmp(name, L"Height") == 0) hh = vb6_ho_variantToLong(v);
-        MoveWindow((HWND)obj, l / 15, t / 15, w / 15, hh / 15, TRUE);
+        MoveWindow((HWND)obj, vb6_TwipToX(l), vb6_TwipToY(t), vb6_TwipToX(w), vb6_TwipToY(hh), TRUE);
         return 1;
     }
     return 1;   // 宿主对象: 未知属性写入一律忽略

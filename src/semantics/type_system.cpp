@@ -41,6 +41,31 @@ Vb6Type TypeSystem::resolveTypeName(const std::string& name) const {
     if (it != builtinTypes_.end()) {
         return it->second;
     }
+    // Fix 161: `VB.` / `VBA.` 是 VB6 **自身类型库的限定前缀** (末段才是类型名),
+    // 与下方"Vb 前缀 ⇒ 枚举 ⇒ Long"的启发式不是一回事, 但那句
+    // `lower.compare(0, 2, "vb") == 0` 会把 `vb.control` 一并吞掉 → 返回 Long。
+    // 本函数是两层共同上游 (codegen mapTypeRef 在返回非 Unknown 时直接 mapType
+    // 短路, 不再走它自己的 Vb 前缀兜底), 所以判错会**两层一致地**降级成标量:
+    //   VisualStyles.bas 229/232:
+    //     SetupVisualStylesFixes(ByVal Form As VB.Form) / Dim CurrControl As VB.Control
+    //   → VisualStyles.c 135/137: int32_t Form, int32_t CurrControl
+    //   → Form.Controls / CurrControl.Style 是**标量的成员**, 走 M22 降级成全局名
+    //     vb6_Form_Controls / vb6_CurrControl_Style           → C2065 ×4
+    //   → CurrControl = <For Each 取到的 Variant>              → C2440 ×2
+    //   → ProperControlName(ByVal Control As VB.Control) 同理影响 Common.c 813/815/817
+    // 判 Object 后 mapType=void*, 成员访问回到 COM 属性读取路径。
+    // 只收这 4 个已核实为对象类型的末段 (demo 里 VB./VBA. 限定的全部取值)。
+    // **必须放在本函数最前 (仅次于 builtinTypes_)**: 下方的 Enum/Constants 后缀
+    // 与 "Vb"/"OLE_" 前缀启发式都会抢先命中 `vb.xxx` (首版就因此毫无效果)。
+    if (lower.size() > 3) {
+        std::string leaf161;
+        if (lower.compare(0, 3, "vb.") == 0) leaf161 = lower.substr(3);
+        else if (lower.compare(0, 4, "vba.") == 0) leaf161 = lower.substr(4);
+        if (leaf161 == "control" || leaf161 == "form" || leaf161 == "usercontrol"
+            || leaf161 == "mdiform") {
+            return Vb6Type::Object;
+        }
+    }
     // Fix 050: COM 枚举类型 (如 DataTypeEnum, CursorTypeEnum, LockTypeEnum)
     // 来自引用的 COM 类型库, 不在项目符号表中。VB6 枚举底层是 Long。
     // 以 "Enum" 结尾的类型名视为 Long, 使 resolveTypeRef 和 cgen_decl 中的
@@ -75,6 +100,22 @@ Vb6Type TypeSystem::resolveTypeName(const std::string& name) const {
     // (Dictionary.cls:45 "Private m_CompareMode As CompareMethod").
     if (lower == "comparemethod") {
         return Vb6Type::Long;
+    }
+    // Fix 160-G: MSDATASRC 库限定的 String 别名。MSDATASRC.tlb (Data Binding
+    // Collection) 里 DataSource / DataMember 都是 LPWSTR 的 typedef, VB6 中即
+    // String。整串限定名两层都查不到 → 语义层回退 Variant (本函数调用方),
+    // 而 mapTypeRef 兜底是 "未知类型 → void*" (cgen_base_type.cpp 末尾) —
+    // 两侧不一致使同一字段一半按 Variant 记账、一半按 void* 声明:
+    //   VBFlexGrid.ctl 2030: Private PropDataMember As MSDATASRC.DataMember
+    //   → VBFlexGrid.h 1685 字段 void*, 而 prop_let 发
+    //     me->PropDataMember = vb6_VariantFromValue(Value)  → C2440 VARIANT→void*
+    //   → prop_get 内 DataMember = PropDataMember 经 092f 又套
+    //     vb6_VariantToObjectVal(void*)                       → 反向 C2440
+    // 只匹配 `msdatasrc.` 限定形式, 不收录裸 DataSource/DataMember, 以免遮蔽
+    // 工程自定义同名符号 (本函数的检查发生在符号表查找之前)。
+    if (lower.rfind("msdatasrc.", 0) == 0) {
+        std::string leaf = lower.substr(10);
+        if (leaf == "datasource" || leaf == "datamember") return Vb6Type::String;
     }
     // 用户自定义类型 (Type/Enum)
     return Vb6Type::Unknown;

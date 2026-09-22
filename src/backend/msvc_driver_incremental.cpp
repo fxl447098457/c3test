@@ -258,7 +258,9 @@ bool MsvcDriver::compileAndLinkIncremental(const MsvcDriverOptions& options) {
     if (options.isDll) {
         linkCmd << " /DLL";
     } else if (options.isGui) {
+        // Fix 165: 与 msvc_driver.cpp 同步 — /ENTRY 取决于实际生成的入口函数
         linkCmd << " /SUBSYSTEM:WINDOWS";
+        if (options.entryIsMain) linkCmd << " /ENTRY:mainCRTStartup";
     } else {
         linkCmd << " /SUBSYSTEM:CONSOLE";
     }

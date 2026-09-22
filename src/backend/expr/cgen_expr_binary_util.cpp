@@ -34,6 +34,21 @@ bool CCodeGen::isBstrReturningCall(const std::string& expr) {
     return false;
 }
 
+// Fix 159-B (声明见 cgen.hpp / cgen_helpers.inc)
+bool CCodeGen::isScalarImplicitStr159(Vb6Type t) {
+    switch (t) {
+        case Vb6Type::Date:
+        case Vb6Type::Double:
+        case Vb6Type::Single:
+        case Vb6Type::Long:
+        case Vb6Type::Integer:
+        case Vb6Type::Byte:
+        case Vb6Type::Boolean:
+        case Vb6Type::Currency:  return true;
+        default:                 return false;
+    }
+}
+
 std::string CCodeGen::wrapToBSTR(const std::string& expr, Expr& node) {
     // P24-01: 后期绑定COM调用返回VARIANT*, 需解包为BSTR(必须在vb6_BSTR检查之前)
     // P24-02: Variant数组索引返回vb6_VARIANT, 需转BSTR

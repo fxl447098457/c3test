@@ -138,6 +138,24 @@ std::string SemanticAnalyzer::evalOptionalDefault(ASTNode* defaultValue, Vb6Type
             case LiteralKind::Integer:
             case LiteralKind::Long:
                 return lit->rawText;  // "10", "-1" 等
+            case LiteralKind::LongPtr: {
+                // Fix 082: rawText 带 VB 后缀 ("&H80000000^"), 原样返回会写进生成 C →
+                // C2059. 与 cgen_expr.cpp 的 LongPtr 分支同规则: LongPtr 是平台相关宽度
+                // (32/64 位机分别 4/8 字节) → intptr_t; 十六进制无符号形式避免十进制
+                // INT64_MIN 字面量溢出.
+                std::string t = lit->rawText;
+                if (!t.empty() && t.back() == '^') t.pop_back();
+                if (t.size() >= 2 && t[0] == '&' && (t[1] == 'H' || t[1] == 'h')) {
+                    return "((intptr_t)0x" + t.substr(2) + "ULL)";
+                }
+                if (t.size() >= 2 && t[0] == '&' && (t[1] == 'O' || t[1] == 'o')) {
+                    return "((intptr_t)0" + t.substr(2) + "ULL)";
+                }
+                if (t.size() >= 2 && t[0] == '&' && (t[1] == 'B' || t[1] == 'b')) {
+                    return "((intptr_t)0b" + t.substr(2) + "ULL)";
+                }
+                return "((intptr_t)" + t + "ULL)";
+            }
             case LiteralKind::Single: {
                 // Fix 133z: 单精度默认值 `1!` → C 浮点字面量 `1.0000000f`.
                 // 原样返回 rawText ("1!") 会写进生成 C → 语法错误

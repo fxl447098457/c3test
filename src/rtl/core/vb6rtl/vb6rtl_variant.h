@@ -182,6 +182,13 @@ void vb6_VariantArraySet(vb6_VARIANT* v, int32_t index, vb6_VARIANT val);
 // vb6_VariantArrayGet(&vGateway, lIdx) 返回 vb6_VARIANT 值(非左值无法取地址),
 // 此函数按值接收后再按索引取元素, 替代非法的 (vb6_VARIANT){...} 复合字面量.
 vb6_VARIANT vb6_VariantArrayGetVal(vb6_VARIANT v, int32_t index);
+// Fix 158f: Variant 数组元素的取址访问 — Declare As Any ByRef 调用把
+// Variant 数组元素当指针传 (VTableHandle.bas: VariantCopy ArgListRev(i),
+// ArgList(UBound(ArgList) - i)). vb6_VariantArrayGet 返回值(右值)无法取址,
+// 此前生成 (void*)(intptr_t)(vb6_VariantArrayGet(...)) → C2440 (vb6_VARIANT→
+// intptr_t). 此函数返回底层 SafeArray 元素槽位的地址 (仅 vb6_sa_variant 支持,
+// 其余类型返回 NULL — 非 Variant 数组槽位不是 VARIANT 布局).
+vb6_VARIANT* vb6_VariantArrayElemPtr(vb6_VARIANT* v, int32_t index);
 
 // Variant转基本类型
 int32_t vb6_VariantToLong(vb6_VARIANT v);

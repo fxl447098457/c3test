@@ -222,9 +222,36 @@ BSTR vb6_App_EXEName(void) {
     return vb6_BSTR_FromStr(fname);
 }
 
-/* App.hInstance: 返回模块实例句柄 */
-int32_t vb6_App_hInstance(void) {
-    return (int32_t)(intptr_t)GetModuleHandleW(NULL);
+/* App.hInstance: 返回模块实例句柄
+ * Fix 179: 返回类型必须是**指针宽度**。此前返回 int32_t, 把 64 位镜像基址
+ * (如 0x7FF7A6580000) 截成 0xA6580000, 写进 WNDCLASSEX.hInstance / CreateWindowEx
+ * 的 HINSTANCE 形参时又被符号扩展成 0xFFFFFFFFA6580000 —— user32 在校验
+ * hInstance (RtlImageNtHeader) 时裸读该地址 → 启动期 0xC0000005。
+ * VB6 里 App.hInstance 声明为 Long 只是因为 VB6 只有 32 位。 */
+intptr_t vb6_App_hInstance(void) {
+    return (intptr_t)(uintptr_t)GetModuleHandleW(NULL);
+}
+
+/* Fix 158k: App.PrevInstance - 是否已有另一实例运行.
+ * 经典单实例检测: 以 EXEName 命名互斥体, CreateMutexW 首次成功,
+ * 已有实例则 GetLastError() == ERROR_ALREADY_EXISTS → 返回 True.
+ * (VB6 的默认单实例机制兼容语义; 互斥体句柄随进程退出自动释放.)
+ */
+int32_t vb6_App_PrevInstance(void) {
+    wchar_t buf[1024];
+    DWORD len = GetModuleFileNameW(NULL, buf, 1024);
+    if (len == 0) return 0;
+    wchar_t* fname = buf;
+    for (DWORD i = 0; i < len; i++) {
+        if (buf[i] == L'\\' || buf[i] == L'/') fname = &buf[i+1];
+    }
+    wchar_t mutexName[1100];
+    wsprintfW(mutexName, L"VB6_C3_SingleInstance_%s", fname);
+    HANDLE hMutex = CreateMutexW(NULL, TRUE, mutexName);
+    if (!hMutex) return 0;
+    DWORD err = GetLastError();
+    if (err == ERROR_ALREADY_EXISTS) return -1;  /* VB6 True */
+    return 0;
 }
 
 /* App.HelpFile: 编译产物无 App COM 对象 → 返回空帮助文件名 (VB6默认同EXE名.hlp,
@@ -454,6 +481,9 @@ void vb6_Printer_SetCurrentY(int32_t y) { g_printerCurrentY = y; }
 #define VB6_MAX_FORMS 64
 static HWND g_formList[VB6_MAX_FORMS] = {0};
 static int g_formCount = 0;
+static int g_msgLoopDepth = 0;   // Fix 188: 正在运行的消息循环层数 (含模态嵌套)
+
+void vb6_Forms_LoopDepth(int delta) { g_msgLoopDepth += delta; }  // Fix 188
 
 void vb6_Forms_Register(void* hwnd_) {
     if (g_formCount < VB6_MAX_FORMS) { g_formList[g_formCount++] = (HWND)hwnd_; }
@@ -466,6 +496,13 @@ void vb6_Forms_Unregister(void* hwnd_) {
         if (g_formList[i] == hwnd) {
             g_formList[i] = g_formList[--g_formCount];
             g_formList[g_formCount] = NULL;
+            // Fix 188: VB6 语义是"最后一个窗体卸载 ⇒ 程序结束"。后端 Fix 144 只在
+            // **启动窗体**的 WM_DESTROY 里发 PostQuitMessage, 而 `Startup = Sub Main`
+            // 的工程没有启动窗体 ⇒ 没人投递 WM_QUIT, 关窗后 GetMessage 永久阻塞,
+            // 进程带着存活线程驻留 (VBFlexGridDemo 实测: 窗口已销毁但 20s 后仍 6 线程)。
+            // 必须限定"消息循环真在跑": 否则 Sub Main 里先 Load/Unload 再 Show 的工程
+            // 会被这条提前投递的 WM_QUIT 判死。
+            if (g_formCount == 0 && g_msgLoopDepth > 0) PostQuitMessage(0);
             return;
         }
     }

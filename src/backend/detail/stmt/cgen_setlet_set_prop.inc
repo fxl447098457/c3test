@@ -194,13 +194,68 @@
                 std::string _fn = cProcName(_verb + _ma.memberName, _psSym->access, _src);
                 emitExpr(*_ma.object);
                 std::string _objE = std::move(lastExpr_);
+                // Fix 160-E: 与 cgen_assign_com_prop.inc:249-266 (Fix 152c) 同一条规则,
+                // 但 Set/Let 属性写分支此前**没有**套用。放在窗体上的 UserControl 实例
+                // (VBFlexGrid1) 裸 emitExpr 只发出控件名, C 里无此声明 → C2065:
+                //   VBFlexGrid1.CellPicture = Picture1.Picture
+                //     → vb6_VBFlexGrid_prop_set_CellPicture(VBFlexGrid1, …)
+                //   同函数下一行的 Let 却是 (vb6_cls_VBFlexGrid*)vb6_UC_InstanceOf(…)
+                // this 是宿主窗口实例, 必须经 InstanceOf 反查:
+                if (_ma.object && _ma.object->kind == ASTNodeKind::IdentifierExpr) {
+                    auto& _oid160 = static_cast<IdentifierExpr&>(*_ma.object);
+                    std::string _oidLower160 = Symbol::toLower(_oid160.name);
+                    auto itUC160 = knownUserControlCtrlVars_.find(_oidLower160);
+                    if (itUC160 != knownUserControlCtrlVars_.end()) {
+                        auto itCtrl160 = knownFormControls_.find(_oidLower160);
+                        std::string hwnd160 = (itCtrl160 != knownFormControls_.end())
+                            ? makeCtrlHwndArg(_oidLower160, itCtrl160->second)
+                            : ("vb6_hwnd_" + cIdent(_oid160.name));
+                        _objE = "(vb6_cls_" + cIdent(itUC160->second)
+                              + "*)vb6_UC_InstanceOf(" + hwnd160 + ")";
+                    }
+                }
                 emitExpr(*node.value);
                 std::string _valE = std::move(lastExpr_);
                 // Object 形参 (void** ByRef 槽): 对象指针实参包装为 &(void*){...}
                 // 复合字面量, 与 cgen_expr 的 ByRef 实参规则一致.
                 std::string _arg2 = _valE;
-                if (_arg2 != "NULL" && _arg2 != "0" && _arg2[0] != '&'
-                    && _arg2.find("vb6_ComPack") == std::string::npos) {
+                // Fix 159-E: 实参已是 vb6_VARIANT 时按 value 形参类型解包/直传,
+                // 不再无条件套 &(void*){...} 复合字面量。
+                //   VBFlexGrid.ctl `Select Case VarType(Value)` 里的
+                //   prop_set_CellPicture/CellTag(me, Value) 曾被发成 &(void*){Value}
+                //   → VBFlexGrid.c 22824/22827 两条 C2440 (void**→VARIANT 与
+                //   (void*){vb6_VARIANT})。
+                // 实参**不是** Variant 时维持原发射 (不新增包装): _psSym 可能因跨模块
+                // storageKey 命中到别的同名符号, 其 params.back().type 不可信 —
+                // prop_set_DataSource(me, void* Value) 曾被误包成
+                // vb6_VariantFromValue(Value) → C2172 实参不是指针 ×3。
+                bool _valIsVar159 = cExprIsVariant(_valE)
+                    || (node.value && node.value->kind == ASTNodeKind::IdentifierExpr
+                        && knownVariantVars_.count(Symbol::toLower(
+                               static_cast<IdentifierExpr&>(*node.value).name)));
+                bool _psValVariant159 = !_psSym->params.empty()
+                    && _psSym->params.back().type == Vb6Type::Variant;
+                // Fix 166: 被调方形参是 **ByVal** 对象时, 其 C 形参就是单个指针
+                // (VBFlexGrid.ctl:3258 `Property Set Font(ByVal NewFont As StdFont)` →
+                // `prop_set_Font(vb6_cls_VBFlexGrid*, vb6_ComIface_Font* NewFont)`),
+                // 此时再套 &(void*){...} 等于传"指针的指针"。
+                // 只有 ByRef 对象槽 (C 形参 void**) 才需要那层复合字面量。
+                // 现场后果 (demo 启动即 0xC0000005, 全靠 /MAP 才查出来):
+                //   VBFlexGrid.c:2082 prop_let_Font → prop_set_Font(me, &(void*){NewFont})
+                //   → me->PropFont = 复合字面量地址(栈) → 2099 CreateGDIFontFromOLEFont
+                //   → Common.c:1068 vb6_ComGetObjectProp(Font, L"hFont") 的 disp 是栈地址、
+                //   其首 8 字节恰为 &g_vb6_UserControl_FontObj → 当成 vtable 调用 →
+                //   RIP 落进 .data。**C 里 void** 传成 vb6_ComIface_Font* 只是指针不匹配
+                //   警告, 所以编译期全绿、错误数为 0 也照样崩。**别再加回无条件包装。**
+                bool _psValByVal166 = !_psSym->params.empty()
+                    && _psSym->params.back().isByVal;
+                if (_valIsVar159 && _psValVariant159) {
+                    _arg2 = _valE;
+                } else if (_valIsVar159) {
+                    _arg2 = "vb6_VariantToObjectVal(" + _valE + ")";
+                } else if (_arg2 != "NULL" && _arg2 != "0" && _arg2[0] != '&'
+                           && _arg2.find("vb6_ComPack") == std::string::npos
+                           && !_psValByVal166) {
                     _arg2 = "&(void*){" + _valE + "}";
                 }
                 c_.emitLine(_fn + "(" + _objE + ", " + _arg2 + ");  /* Set Property */");

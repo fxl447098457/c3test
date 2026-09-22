@@ -44,6 +44,7 @@
                     + std::to_string(childCtrlId) + ", " + containerHwnd + ", hInstance);");
                 // 设计期 BorderStyle / Alignment (容器子控件)
                 emitDesignerStyleProps(child, "vb6_hwnd_" + cIdent(child.controlName));
+                emitControlFrxProps(child);  // Fix 182: 容器子控件同样加载 .frx 设计期图片/文本/列表
                 // 注册控件名到knownFormControls_(供属性访问)
                 {
                     std::string childNameLower = child.controlName;

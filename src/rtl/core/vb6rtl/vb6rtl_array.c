@@ -196,6 +196,66 @@ void vb6_SafeArrayDestroy1D(vb6_SafeArray1D* arr) {
     free(arr);
 }
 
+// Fix 170: VB6 整体数组赋值 `A() = B()` —— 返回 src 的**深拷贝**新载体, 并销毁原 dst。
+// 不能直接把 src 的指针赋给 dst: 两个名字会指向同一个 vb6_SafeArray1D, 作用域结束时
+// 各自 vb6_SafeArrayDestroy1D → double free (且一侧 ReDim 会神秘改变另一侧内容)。
+// dst==src 时同样安全 (先建副本再销毁 dst)。
+vb6_SafeArray1D* vb6_ArrayAssign1D(vb6_SafeArray1D* dst, vb6_SafeArray1D* src) {
+    return vb6_ArrayAssign1D_Cb(dst, src, NULL);
+}
+
+// Fix 178: 见 vb6rtl_array.h 的注释 —— cb 非空时逐元素深拷贝 (vb6_sa_udt 载体)。
+vb6_SafeArray1D* vb6_ArrayAssign1D_Cb(vb6_SafeArray1D* dst, vb6_SafeArray1D* src,
+                                      vb6_udt_elem_copy cb) {
+    vb6_SafeArray1D* res = NULL;
+    // 两个名字已共用同一载体 (Fix 178 之前的旧别名) 时: 克隆一份且**不销毁** dst,
+    // 否则 src 侧会跟着悬垂。
+    int32_t sameCarrier = (dst != NULL && dst == src);
+    if (src) {
+        res = (vb6_SafeArray1D*)calloc(1, sizeof(vb6_SafeArray1D));
+        if (!res) { return dst; }
+        res->signature = 0x5A1D;  /* 与 Create1D/ReDim1D_Udt 同魔数 (Fix 082g) */
+        res->elemType = src->elemType;
+        res->elemSize = src->elemSize;
+        res->lBound   = src->lBound;
+        res->uBound   = src->uBound;
+        res->count    = src->count;
+        res->isDynamic = src->isDynamic;
+        if (src->count > 0 && src->data && src->elemSize > 0) {
+            size_t bytes = (size_t)src->count * (size_t)src->elemSize;
+            res->data = malloc(bytes);
+            if (!res->data) { free(res); return dst; }
+            memcpy(res->data, src->data, bytes);
+            // 持有所有权的元素类型: memcpy 后每个槽位仍指向 src 的对象, 需逐个复制
+            if (res->elemType == vb6_sa_bstr) {
+                for (int32_t i = 0; i < res->count; i++) {
+                    BSTR* slot = (BSTR*)((char*)res->data + (size_t)i * res->elemSize);
+                    if (*slot) *slot = SysAllocString(*slot);
+                }
+            } else if (res->elemType == vb6_sa_variant) {
+                for (int32_t i = 0; i < res->count; i++) {
+                    vb6_VARIANT* d = (vb6_VARIANT*)((char*)res->data + (size_t)i * res->elemSize);
+                    vb6_VARIANT* s = (vb6_VARIANT*)((char*)src->data + (size_t)i * src->elemSize);
+                    // 裸 memcpy 让 d 与 src 共享 BSTR/对象指针: 必须**清空**(而非 Clear)
+                    // 后再 VariantCopy, 否则会把 src 仍持有的对象释放掉。
+                    memset(d, 0, sizeof(vb6_VARIANT));
+                    vb6_VariantCopy(d, s);
+                }
+            } else if (cb) {
+                // Fix 178: UDT 元素 —— 槽位刚被 memcpy 成 src 元素的位拷贝, 交给
+                // 生成的 vb6_udtcpy_<T> 逐成员建立新副本 (String/子数组/Variant)。
+                for (int32_t i = 0; i < res->count; i++) {
+                    void* d = (char*)res->data + (size_t)i * res->elemSize;
+                    const void* s = (const char*)src->data + (size_t)i * src->elemSize;
+                    cb(d, s);
+                }
+            }
+        }
+    }
+    if (dst && !sameCarrier) vb6_SafeArrayDestroy1D(dst);
+    return res;
+}
+
 void* vb6_SafeArrayGetPtr(vb6_SafeArray1D* arr, int32_t index) {
     if (!arr || index < arr->lBound || index > arr->uBound) return NULL;
     return (char*)arr->data + (index - arr->lBound) * arr->elemSize;

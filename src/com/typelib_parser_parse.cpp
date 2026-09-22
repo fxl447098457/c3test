@@ -311,18 +311,49 @@ std::unique_ptr<ComCoClassInfo> TypeLibParser::parseCoClass(void* pTypeInfo,
         pImplTI->Release();
     }
 
-    // ProgID: 从CLSID反查注册表获取真实ProgID
+    // ProgID: 三级解析 (Fix 160)
+    //   ① 类型库二进制里的 coclass `progid` 属性 — 免注册, 权威值
+    //   ② 注册表反查 ProgIDFromCLSID — 已注册场景
+    //   ③ <TypeLib库名>.<coclass名> 合成兜底 (Fix 098)
+    //
+    // 旧实现只有 ②→③ 两级。② 依赖注册表, 而「组件未注册」和「32 位组件 + 64 位宿主」
+    // 下反查必失败 → 落 ③, 而 ③ 对真实组件已知是错的 (cgen_form_create_controls.inc
+    // 记录 MSComctlLib.ImageList ≠ ImageListCtrl)。① 在 typelib 二进制里, 与注册表
+    // 无关, 补齐后免注册场景也能拿到真 ProgID。
     {
+        // ① coclass 类型属性: MIDL 把 coclass 的 `progid` 属性编码为类型库自定义属性,
+        //   其 Guid 为 {B54F3741-5B07-11CF-A4B0-00AA004A55E8}。通过 ITypeInfo2::GetCustData
+        //   读取 (返回 VT_BSTR)。1.x 版本类型库无自定义属性 → QI 失败或取空, 落到 ②/③。
+        std::string progIdAttr;
+        ITypeInfo2* pTI2 = nullptr;
+        if (SUCCEEDED(pTI->QueryInterface(IID_ITypeInfo2, (void**)&pTI2)) && pTI2) {
+            static const GUID kProgIdAttrGuid = { 0xB54F3741, 0x5B07, 0x11CF,
+                                                  { 0xA4, 0xB0, 0x00, 0xAA, 0x00, 0x4A, 0x55, 0xE8 } };
+            VARIANT val;
+            VariantInit(&val);
+            if (SUCCEEDED(pTI2->GetCustData(kProgIdAttrGuid, &val)) && val.vt == VT_BSTR && val.bstrVal) {
+                for (ULONG j = 0; j < SysStringLen(val.bstrVal); j++) progIdAttr += (char)val.bstrVal[j];
+            }
+            VariantClear(&val);
+            pTI2->Release();
+        }
+
+        // ② 注册表反查
         CLSID clsid = pTypeAttr->guid;
         LPOLESTR progIdW = nullptr;
         HRESULT progHr = ProgIDFromCLSID(clsid, &progIdW);
+        std::string regProgId;
         if (SUCCEEDED(progHr) && progIdW) {
-            std::string progIdStr;
             for (const wchar_t* p = progIdW; *p; p++) {
-                progIdStr += (char)*p;
+                regProgId += (char)*p;
             }
-            cc->progId = progIdStr;
             CoTaskMemFree(progIdW);
+        }
+
+        if (!progIdAttr.empty()) {
+            cc->progId = progIdAttr;
+        } else if (!regProgId.empty()) {
+            cc->progId = regProgId;
         } else {
             // Fix 098: 反查失败时不能退化成裸类名 —— VB6 约定 ProgID = <TypeLib库名>.<coclass名>
             // (实测: VBMAN.dll→"VBMANLIB", stdole2.tlb→"stdole", msado28.tlb→"ADODB", 全部符合).

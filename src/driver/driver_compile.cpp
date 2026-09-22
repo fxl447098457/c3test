@@ -169,6 +169,34 @@ CompileResult Driver::compile(const CompileOptions& options) {
                     }
                 }
             }
+            // Fix 160: ComLib=<相对 exe 的组件 DLL 路径> — 免注册 COM (与 Object= 控件同款机制)
+            //   编译期: 绝对路径压入 typelibRefs → loadByPath → LoadTypeLibEx(REGKIND_NONE),
+            //           读取 DLL 内嵌类型库的全部 coclass (CLSID 来自 TYPEATTR->guid,
+            //           ProgID 来自 coclass 的 progid 类型属性, 都不查注册表);
+            //   运行期: runTypeLibImport 收集成 {ProgID, CLSID, coclass名, 相对exe路径} 表,
+            //           cgen 烘焙进产物, vb6_CreateObject 按 ProgID 命中后走
+            //           LoadLibrary+DllGetClassObject 免注册激活.
+            //   路径语义与 Object= 一致: typelibRefs 用【绝对】路径 (构建机读类型库用),
+            //   烘焙进产物的用【相对 exe】路径 (便携分发, 不依赖构建机目录).
+            for (const auto& libRaw : project.comLibs) {
+                auto libPath = project.resolvePath(libRaw);
+                if (!std::filesystem::exists(libPath)) {
+                    // 与 Reference= 缺失同款提示 (上方 P24-04 续), 不静默丢弃
+                    diag_->warn(DiagnosticID::CodeGenUnsupportedFeature, SourceLocation{},
+                                "ComLib path not found: " + pathToUtf8(libPath));
+                    continue;
+                }
+                std::string absLib = pathToUtf8(std::filesystem::absolute(libPath));
+                effectiveOpts.typelibRefs.push_back(absLib);
+                // canonical 键: 小写 + 统一分隔符, 与 loadByPath 的 canonPath 归一方式一致
+                // (loadByPath 额外做 GetLongPathNameW 短路径展开, 反查时两条都试)
+                std::string canon = absLib;
+                for (char& c : canon) {
+                    if (c >= 'A' && c <= 'Z') c = (char)(c - 'A' + 'a');
+                    else if (c == '\\') c = '/';
+                }
+                comLibCanonMap_[canon] = libRaw;   // 同路径去重: 重复 ComLib= 只留一条
+            }
 
             // P23-05: Collect version info from VBP for VS_VERSION_INFO resource
             verMajor_ = project.majorVer;

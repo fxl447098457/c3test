@@ -146,6 +146,7 @@ const char* literalKindToString(LiteralKind k) {
     switch (k) {
     case LiteralKind::Integer:  return "Integer";
     case LiteralKind::Long:     return "Long";
+    case LiteralKind::LongPtr:  return "LongPtr";
     case LiteralKind::Single:   return "Single";
     case LiteralKind::Double:   return "Double";
     case LiteralKind::Currency: return "Currency";

@@ -9,6 +9,42 @@
     //   - 类 void* 字段持有 COM 对象    — Pattern D → vb6_ComCall(obj->member, L"Item", args, argc)
     // 若 member 是该类的方法/属性, resolveClassMemberCall 返回非空 → 不拦截 (正常函数调用路径).
     // 不拦截则 fallback path (line ~2158) 把 field 误当函数调用 → C2064.
+
+    // ---- Fix 158a: MemberAccessExpr callee 带 **空括号** — UDT 动态/固定数组成员
+    // 整体引用 obj.member() → 裸数组表达式 obj.member (不带调用括号).
+    // 此前 fallback 把它当函数调用 emit 成 obj.member() → C2064 (项不会计算为接受
+    // N 参数的函数), 或作为 ByRef 数组实参被包裹成 &(obj.member()) (VBFlexGrid.ctl
+    // SortGrid: Call MergeSortRec(..., VBFlexGridCells.Rows(), Sort) — ByRef
+    // Data() As TCOLS, C 形参 vb6_SafeArray1D**). 与 Pattern A/B 相同判定
+    // (inferUdtTypeOfExpr + udtMembers + isArrayDynamic / arraySize>0), 但空括号
+    // 不消费 positional. 固定数组成员 (Pattern A) 空括号引用同样走这里:
+    // C 侧固定数组字段是静态数组 obj.member[], 整体引用即裸名 obj.member.
+    if (node.callee && node.callee->kind == ASTNodeKind::MemberAccessExpr
+        && node.positional.empty() && node.named.empty()) {
+        auto& maExpr158 = static_cast<MemberAccessExpr&>(*node.callee);
+        std::string memLower158 = Symbol::toLower(maExpr158.memberName);
+        if (maExpr158.object) {
+            std::string udtCType158 = inferUdtTypeOfExpr(*maExpr158.object);
+            const std::string prefix158 = "vb6_type_";
+            if (udtCType158.size() > prefix158.size()
+                && udtCType158.compare(0, prefix158.size(), prefix158) == 0) {
+                std::string udtName158 = udtCType158.substr(prefix158.size());
+                Symbol* udtSym158 = symTab_.lookupModule(udtName158);
+                if (udtSym158 && udtSym158->kind == SymbolKind::UserDefinedType) {
+                    for (auto& mi158 : udtSym158->udtMembers) {
+                        if (Symbol::toLower(mi158.name) == memLower158) {
+                            if (mi158.isArrayDynamic || mi158.arraySize > 0) {
+                                emitExpr(*node.callee);
+                                return;
+                            }
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     if (node.callee && node.callee->kind == ASTNodeKind::MemberAccessExpr
         && !node.positional.empty() && node.named.empty()) {
         auto& maExpr = static_cast<MemberAccessExpr&>(*node.callee);

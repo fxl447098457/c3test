@@ -82,6 +82,8 @@ private:
     bool isSoftKeyword(TokenKind kind) const;
     bool canBeName(TokenKind kind) const;
     Token expectName(const std::string& msg);
+    // 标签目标: 命名标签 或 VB6 **行号标签** (`GoTo 100` / `Resume 200` / `On Error GoTo 300`)
+    std::string expectLabelTarget(const std::string& msg);
 
     // 获取当前源码位置
     SourceLocation currentLoc() const;
@@ -130,6 +132,9 @@ private:
     StmtPtr parseForOrForEach();
     std::unique_ptr<ForStmt> parseForStmt();
     std::unique_ptr<ForEachStmt> parseForEachStmt();
+    // `Next a, b, c` 逗号列表: 真实 Next 归当前循环, 多余变量排队供外层消费
+    void consumeNextClause(const std::string& loopVar);
+    std::vector<std::string> pendingNextVars_;
     std::unique_ptr<DoLoopStmt> parseDoLoopStmt();
     std::unique_ptr<WhileWendStmt> parseWhileWendStmt();
     std::unique_ptr<SelectCaseStmt> parseSelectCaseStmt();

@@ -2,6 +2,20 @@
 // 由 src/backend/expr/cgen_expr_call.cpp 拆出（2026-09-17），在函数体内被 #include，非独立编译单元。
 // 内容 = 原文件第 2137~2453 行，逐行未改。
 
+        // Fix 160w: Declare 形参 As Any (type==Unknown) 且调用处 ByVal 覆盖
+        // (如 OleCreatePropertyFrame ..., ByVal Pages.pElems, ...) — 声明里 As Any
+        // 没有 ByVal 关键字, 故 calleeParams[i].isByVal==false, 上方 ByVal Variant
+        // 分支与 Fix 029 都不匹配 → 实参 (vb6_VariantFromComResult(...) 等 COM
+        // 属性读取的 vb6_VARIANT 值) 会裸传 → C2172 "实参不是函数" (参 8).
+        // VB6 语义: As Any ByVal 即按值传整型载荷; Variant 的整型载荷
+        // (LongPtr/Long 指针值, 如 pElems 存 IFontDisp** 数组头) 用
+        // vb6_VariantToLongPtr 提取再压回 void* 实参.
+        if (!isByRef && i < calleeParams.size()
+            && calleeParams[i].type == Vb6Type::Unknown
+            && argHasByValOverride && cExprIsVariant(argVal)) {
+            argVal = "(void*)(intptr_t)vb6_VariantToLongPtr(" + argVal + ")";
+        }
+
         // 处理 callee 声明 "ByVal x As Variant" 而实参是标量/BSTR/SafeArray/class ptr 等情形.
         // _Generic 在编译期按实类型选择 ctor: 标量->VariantLong/Int/Double, BSTR->String,
         // SafeArray1D*->Array, void*/class ptr->Object, vb6_VARIANT->Identity(no-op).

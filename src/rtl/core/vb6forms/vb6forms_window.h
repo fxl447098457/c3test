@@ -44,6 +44,12 @@ void* vb6_CreateFormWindowB(const char* className, const char* formName,
 // VB6坐标单位: 1英寸=1440缇, 1像素=15缇 (96DPI标准)
 int vb6_TwipToX(int twips);
 int vb6_TwipToY(int twips);
+// Fix 184: 唯一 DPI 源 + 反向换算 (像素 -> 缇)。RTL 内任何 px/缇 转换都必须
+// 走这四个入口，禁止再写死 15。
+int vb6_DpiX(void);
+int vb6_DpiY(void);
+int vb6_XToTwipX(int px);
+int vb6_YToTwipY(int px);
 
 // ============================================================
 // 控件创建
@@ -94,6 +100,8 @@ void vb6_DispatchTimer(int timerId);
 // 同时处理WM_TIMER回调分发
 // 返回: WM_QUIT的wParam值
 int vb6_MessageLoop(void);
+// Fix 167: Sub Main 返回后是否应继续驻留 (本线程仍有可见窗口)
+int vb6_AnyThreadWindowVisible(void);
 
 // DoEvents — 处理消息队列中的待处理消息
 // 包括WM_TIMER回调分发

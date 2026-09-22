@@ -6,10 +6,12 @@
 #include "semantics/type_system.hpp"
 #include "com/typelib_parser.hpp"
 #include "project/frm_parser.hpp"
+#include <array>
 #include <string>
 #include <vector>
 #include <memory>
 #include <map>
+#include <unordered_map>
 
 namespace vb6c3 {
 
@@ -133,6 +135,16 @@ private:
     // Fix 143b: vbp Object= 原始引用列表 (CLSID 小写去花括号, ocx 绝对路径).
     // 控件实例化 CLSID 以此为准 (typelib coclass GUID ≠ 实例 CLSID).
     std::vector<std::pair<std::string, std::string>> ocxRefs_;
+
+    // Fix 160: vbp ComLib= 声明的组件 DLL (canonical 小写绝对路径 → 相对 exe 路径).
+    // driver_compile 填, runTypeLibImport 按 TypeLibResult 路径反查:
+    // 命中者其全部 coclass 进免注册表, 未命中者 (普通 Reference= / auto-typelib) 不进,
+    // 运行期对未声明组件零变化.
+    std::unordered_map<std::string, std::string> comLibCanonMap_;
+
+    // Fix 160: ComLib= 组件表 {ProgID, CLSID, coclass名, 相对exe路径},
+    // runTypeLibImport 收集, cgen 烘焙进产物入口点 (vb6_ComLibRegister).
+    std::vector<std::array<std::string, 4>> comLibRefs_;
 
     // P23-05: VBP version info (for VS_VERSION_INFO resource)
     int verMajor_ = 1;

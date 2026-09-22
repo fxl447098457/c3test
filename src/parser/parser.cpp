@@ -21,15 +21,21 @@ Parser::Parser(std::shared_ptr<SourceBuffer> buffer, Diagnostics& diag,
 }
 
 void Parser::initBindingPowers() {
-    // VB6 优先级表 (14 级, 按绑定力递增)
-    // 左结合: l_bp < r_bp
-    // 右结合: l_bp > r_bp (仅 ^ 幂运算)
+    // VB6 优先级表 (按绑定力递增)。三大类: 算术 > 比较 > 逻辑 (逻辑最低)。
+    // 同级的比较运算符优先级相同, 按源码从左到右计算 (即左结合)。
+    //
+    // 分组规则 (见 parser_expr.cpp::parseExpression 循环): 对 `a OP1 b OP2 c`,
+    // OP2 会并入 OP1 的右操作数 当且仅当 l_bp(OP2) >= r_bp(OP1)。因此
+    //   - 左结合要求 r_bp = l_bp + 1 (同级 l_bp 相等, 故不相并入)
+    //   - 相邻两级必须满足 下一级 l_bp >= 上一级 r_bp (更紧的运算符要能并入)
+    // 这也意味着相邻两级的 l_bp 只能相差 1 或 2, 且 r_bp 必须 >= 1。
     //
     // 级别 | 运算符              | l_bp | r_bp | 结合性
     // -----|--------------------|------|------|-------
-    //  1   | Or, Xor            |  2   |  3   | 左
-    //  2   | And                |  4   |  5   | 左
-    //  3   | Not (一元前缀)     |  -   |  5   | 前缀
+    //  1   | Or                 |  2   |  3   | 左
+    //  2   | Xor                |  3   |  4   | 左
+    //  3   | And                |  4   |  5   | 左
+    //      | Not (一元前缀)     |  -   |  5   | 前缀
     //  4   | Eqv, Imp           |  6   |  7   | 左
     //  5   | =, <>, <, >, <=, >=|  8   |  9   | 左
     //  6   | & (Concat)         | 10   | 11   | 左
@@ -45,10 +51,15 @@ void Parser::initBindingPowers() {
     // 中缀运算符 → BindingPower
     struct OpBp { TokenKind kind; int l; int r; };
     OpBp ops[] = {
-        // 级1: Or, Xor
+        // 级1: Or (逻辑运算符中最低)
         { TokenKind::Or,    2,  3 },
-        { TokenKind::Xor,   2,  3 },
-        // 级2: And
+        // 级2: Xor — 比 Or 紧。Fix 082: 原先 Or/Xor 同为 (2,3), 导致
+        // `a Or b Xor c` 误分组成 (a Or b) Xor c (探针 probe_prec3.bas 实测:
+        // `1 Or 2 Xor 3` 输出 ((1|2)^3)=0, 真值 1 Or (2 Xor 3)=1)。
+        // 取 (3,4) 使 Xor 的 l_bp(3) >= Or 的 r_bp(3) 而 Xor 的 r_bp(4) 又
+        // 等于 And 的 l_bp(4) —— 这样无需改动 And/Not/一元负号等任何其它绑定力。
+        { TokenKind::Xor,   3,  4 },
+        // 级3: And
         { TokenKind::And,   4,  5 },
         // 级4: Eqv, Imp
         { TokenKind::Eqv,   6,  7 },

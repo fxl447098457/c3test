@@ -121,3 +121,15 @@ scripts/_fix_*.ps1
 
 # tests 对照回归工作目录 (regress_all.ps1 运行产物)
 tests/_vb6ref*/
+
+# ---------- 运行期掉落物 / 一次性分析脚本 (2026-09-22) ----------
+# 崩溃转储与探针输出: 每次跑 GUI 用例都会重新生成, 不进版本库
+c3_crash.txt
+probe.txt
+# 链接器 /MAP 产物 (VBFlexGridDemo.map 等)
+*.map
+# 会话/工具临时目录与临时批处理
+.workbuddy/
+scripts/_tmp_*.bat
+# VB6 工程工作区文件 (IDE 状态, 每人不同)
+*.vbw

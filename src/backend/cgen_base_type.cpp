@@ -170,11 +170,6 @@ std::string CCodeGen::mapTypeRef(ASTNode* typeRef) {
             if (vb6BuiltinObjTypes.count(typeName)) {
                 return "void*";
             }
-            // 尝试从类型系统解析
-            Vb6Type t = typeSys_.resolveTypeName(typeName);
-            if (t != Vb6Type::Unknown) {
-                return mapType(t);
-            }
             // 限定类型名 (如 Scripting.Dictionary): 用最后一部分查找符号
             std::string lookupName = typeName;
             size_t dotPos = typeName.find('.');
@@ -183,6 +178,13 @@ std::string CCodeGen::mapTypeRef(ASTNode* typeRef) {
                 auto* dotSym = symTab_.lookupModule(shortName);
                 if (dotSym) lookupName = shortName;
             }
+            // Fix 164z: 项目符号查找必须**先于** typeSys_.resolveTypeName。
+            // 原来 resolveTypeName 在前, 其 "vb" 前缀 ⇒ 枚举 ⇒ Long 启发式会抢先
+            // 命中项目类名, 如 `Dim This As VBFlexGrid` → resolveTypeName("VBFlexGrid")
+            // 首两字母 "vb" 命中 type_system.cpp 的启发式 → Long(int32_t) → 类实例
+            // 被声明成 4 字节标量: VBFlexGridBase.bas 的 FlexWindowProc/FlexReaderModeScroll
+            // 里 `Dim This As VBFlexGrid` + FlexObjSetAddRef(ObjPtr(Me)) 把 8 字节
+            // 对象指针写进 int32_t → 截断 + 后续 AddRef 把类结构体当 COM 解引用 → 0xC0000005.
             // 检查是否是类名 → 映射为类结构体指针
             // Fix 107: 用 lookupTypeSymbol (含 $ty 回退), 否则同名过程会遮蔽类型.
             auto* clsSym = lookupTypeSymbol(lookupName);
@@ -219,6 +221,13 @@ std::string CCodeGen::mapTypeRef(ASTNode* typeRef) {
             // 检查是否是枚举类型 → 基础类型int32_t (VB6枚举底层是Long)
             if (udtSym && udtSym->kind == SymbolKind::EnumType) {
                 return "int32_t";
+            }
+            // Fix 164z: 项目符号 (类/COM/UDT/枚举) 全部查空后才允许走类型系统启发式。
+            // 理由见上方 Fix 164z 注释。VB./VBA. 限定的对象末段 (Control/Form 等) 在
+            // type_system.cpp 最前单独处理 (返回 Object), 不受本次移位影响。
+            Vb6Type t = typeSys_.resolveTypeName(typeName);
+            if (t != Vb6Type::Unknown) {
+                return mapType(t);
             }
             // Fix 010b: VB6标准库与外部COM库的类型映射
             // 以下类型不在项目符号表中, 但均为VB6/COM标准类型
@@ -312,6 +321,9 @@ bool CCodeGen::tryEvalConstInt(ASTNode* expr, int64_t& result) {
             result = lit->intValue;
             return true;
         case LiteralKind::Long:
+            result = lit->longValue;
+            return true;
+        case LiteralKind::LongPtr:  // Fix 082: ^ 后缀 (VBA7)
             result = lit->longValue;
             return true;
         case LiteralKind::Boolean:

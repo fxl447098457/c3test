@@ -217,7 +217,7 @@ set_target_properties(c3 PROPERTIES OUTPUT_NAME C3)
 
 # Fix 092z-2: CMake 只把 .rc 自身当依赖 —— 改了 src/rtl/core 下的嵌入源之后
 # .res 不会重编, C3.exe 会继续嵌入旧文件。这里显式声明嵌入文件为 .rc 的依赖
-# (76 个资源: 23 头 + 47 源 + 6 片段, 全部架构无关；与 c3rtl.rc 一一对应)。
+# (99 个资源: 25 头 + 61 源 + 13 片段, 全部架构无关；与 c3rtl.rc 一一对应)。
 set(C3RTL_EMBEDDED_FILES
     # vb6rtl
     ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6rtl/vb6rtl.h
@@ -286,7 +286,7 @@ set(C3RTL_EMBEDDED_FILES
     ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6forms/vb6forms_widget_prop.c
     ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6forms/vb6forms_shape.c
     ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6forms/vb6forms_axsite.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6forms/vb6forms_axcontainer.c   # Fix 148 (补登记: 此前漏登记, 改此文件不会触发 .rc 重编)
+${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6forms/vb6forms_axcontainer.c   # Fix 148/160 补登记 (遗漏, 改它不会触发 .rc 重编)
     # vb6forms_axsite 按族细分 (2026-09-20): 内部头 + axsite/ 下 5 个族编译单元
     ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6forms/vb6forms_axsite_internal.h
     ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/vb6forms/axsite/ax_site.c
@@ -333,6 +333,11 @@ set(C3RTL_EMBEDDED_FILES
     ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/di/vb6_di_com_stubs.c
     ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/di/vb6_di_net_stubs.c
     ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/di/vb6_di_shell_stubs.c
+    # Fix 164: 此列表是 c3rtl.rc 的 OBJECT_DEPENDS —— 漏项 = 改该 RTL 源文件**不会**重新
+    # 内嵌, ninja 报 "no work to do" 却仍打印 [OK] Build succeeded, 于是一边改桩体一边
+    # 用着旧 exe。unknown 族 (c3rtl.rc 资源 199) 是 160y 新增时只加了 .rc 条目忘了这里,
+    # 现共 100 个 RCDATA / 99 个依赖。
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rtl/core/di/vb6_di_unknown_stubs.c
 )
 set_source_files_properties(src/driver/c3rtl.rc PROPERTIES OBJECT_DEPENDS "${C3RTL_EMBEDDED_FILES}")
 target_link_libraries(c3 PRIVATE vb6c3-core vb6c3-cgen)

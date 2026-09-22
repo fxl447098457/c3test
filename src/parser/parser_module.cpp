@@ -190,7 +190,19 @@ std::unique_ptr<ImplementsStmt> Parser::parseImplements() {
     auto loc = currentLoc();
     advance(); // consume 'Implements'
     auto nameTok = expectName("expected interface name");
-    return std::make_unique<ImplementsStmt>(loc, nameTok.text);
+    // Fix 083: VB6 允许点号限定的库/工程名 — `Implements OLEGuids.IObjectSafety`、
+    // `Implements Project.IfaceName`。样例工程 VBFlexGrid.ctl(1896-1898) 三处均为
+    // 此形式: 原先只吃一个标识符, expectEndOfStatement() 撞到 '.' → VB2003, 接口名
+    // 再落到模块级默认分支 → VB2002 "unexpected token at module level"。
+    // 用 canBeName(peek2()) 而非裸 while(Dot), 避免 `A..B` 这类畸形输入无限追加。
+    // 裸名路径完全不变 (无 '.' 时不进循环)。严格超集。
+    std::string fullName = nameTok.text;
+    while (cur_.kind == TokenKind::Dot && canBeName(peek2().kind)) {
+        advance(); // consume '.'
+        auto part = expectName("expected interface name after '.'");
+        fullName += "." + part.text;
+    }
+    return std::make_unique<ImplementsStmt>(loc, fullName);
 }
 
 std::unique_ptr<DefTypeStmt> Parser::parseDefType() {

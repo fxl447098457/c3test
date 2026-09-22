@@ -54,7 +54,26 @@ Vb6Type SemanticAnalyzer::resolveTypeRef(ASTNode* typeRef) {
                     // "未知类型 → void*" 兜底不一致 → ByRef 对象实参被误包成
                     // VARIANT 复合字面量 (BalloonTooltips cTT.CreateToolTip
                     // ParentControl As Control → *objControl 读到 vt).
-                    "Control", "Form"
+                    "Control", "Form",
+                    // Fix 157: stdole / OLE 自动化**智能指针式接口类型** (Picture/Font 系列).
+                    // 语义层对未识别类型名回退 Variant, 而 codegen 侧 cgen_base_type.cpp
+                    // mapTypeRef 的兜底是 "未知类型 → void*" (见其末尾 return) —— 两侧不一致
+                    // 就会方向相反地误包装: Fix 086 见形参 Variant 便把实参套
+                    // vb6_VariantFromValue (→ vb6_VARIANT 结构体), 再传给 C 形参 void*
+                    // → C2172 "实参不是指针".
+                    //   VisualStyles.bas 527:
+                    //     Private Function CoalescePicture(ByVal Picture As IPictureDisp,
+                    //                                      ByVal DefaultPicture As IPictureDisp)
+                    //   → static void* vb6_VisualStyles_CoalescePicture(void*, void*)
+                    //   → 调用点 CoalescePicture(vb6_VariantFromValue(vb6_VariantFromComResult
+                    //     (vb6_ComGetProp(Button, L"DisabledPicture"))), ...) C2172 参数1/2.
+                    // 判为 Object 后改走 Fix 029 的 Variant→Object 提取
+                    // (vb6_VariantToObjectVal 返回 void*), 与 C 签名同向.
+                    // 只收录**带 I/Std/Disp 前后缀**的 COM 接口拼写: 裸 "Picture"/"Font"
+                    // 可能是工程自定义类名, 且本集合的检查发生在符号表查找**之前**,
+                    // 收录裸名会遮蔽用户类 → 刻意不加.
+                    "IPicture", "IPictureDisp", "StdPicture", "PictureDisp",
+                    "IFont", "IFontDisp", "StdFont", "FontDisp"
                 };
                 // Fix 040a: strip VBA. prefix (e.g. VBA.ErrObject → ErrObject)
                 std::string typeName = simple.name;
@@ -62,6 +81,14 @@ Vb6Type SemanticAnalyzer::resolveTypeRef(ASTNode* typeRef) {
                     typeName = typeName.substr(4);
                 }
                 if (vb6BuiltinObjTypes.count(typeName)) {
+                    return Vb6Type::Object;
+                }
+                // Fix 157: 库限定类型名 (stdole.IPictureDisp / ole.IFontDisp) 用末段再查一次.
+                // 下方既有的 dot 分支只处理"末段能在符号表找到类/ComClass"的情形;
+                // 未注册进类型库的 stdole 接口会整串落到 Variant 兜底 → 与本集合不一致.
+                size_t typeNameDot = typeName.find('.');
+                if (typeNameDot != std::string::npos
+                    && vb6BuiltinObjTypes.count(typeName.substr(typeNameDot + 1))) {
                     return Vb6Type::Object;
                 }
                                 // 可能是用户自定义类型 -> 在符号表中查找

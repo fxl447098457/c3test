@@ -229,7 +229,9 @@ bool MsvcDriver::compileAndLink(const MsvcDriverOptions& options) {
         cmd << " ole32.lib oleaut32.lib uuid.lib advapi32.lib user32.lib shell32.lib gdi32.lib";
     } else if (options.isGui) {
         // P7: GUI程序 (Win32窗口)
+        // Fix 165: /ENTRY 取决于代码生成实际发出的入口 (窗体启动=WinMain / Sub Main=main)
         cmd << " /link /SUBSYSTEM:WINDOWS";
+        if (options.entryIsMain) cmd << " /ENTRY:mainCRTStartup";
         if (!options.typelibResFile.empty()) {
             cmd << " \"" << options.typelibResFile << "\"";
         }

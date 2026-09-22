@@ -219,13 +219,65 @@ intptr_t __stdcall vb6_di_VarPtr(void* Ptr) {
  * 旧值不在此处 Release (原版 VB6 由调用侧处理), 保持同一行为以避免误 Release
  * 非持有引用而崩溃; 代价是覆盖旧值时可能泄漏一次引用, 与原版一致。
  * 调用点: vbaObjSetAddref((void*)&(oCallback), _vb6_with_60->ClientCertCallback) */
+/* Fix 164x2 (fan/dev 移植): 只在来源是**真实 COM 对象**时才调用 AddRef。
+ * VB6 运行时的 psrc 永远是带 lpVtbl 的 IUnknown; 但 C3 编译的类实例 (vb6_cls_*)
+ * 是纯 C 结构体, 没有 vtable (VBFlexGridBase.bas 把 ObjPtr(Me) 即类结构体地址经
+ * FlexObjSetAddRef 存进对象变量)。若无条件 AddRef, 会对结构体首 qword (常是窗口
+ * 句柄) 解引用当 vtable 调 [vtbl+8] -> 0xC0000005。用 VirtualQuery 守卫: 仅当
+ * vtable 指针落在已提交可读页且第 2 槽 (AddRef) 指向可执行代码时才视为 COM。
+ * 真 COM (StdPicture 等) 的 AddRef 语义原样保留。 */
+static int vb6_di_IsRealComObject(const void* p) {
+    if (!p) return 0;
+    const void* vtbl = *((void* const*)p);
+    if (!vtbl) return 0;
+    MEMORY_BASIC_INFORMATION mbi;
+    if (VirtualQuery(vtbl, &mbi, sizeof(mbi)) != sizeof(mbi)) return 0;
+    if (mbi.State != MEM_COMMIT) return 0;
+    if (mbi.Protect & (PAGE_NOACCESS | PAGE_GUARD)) return 0;
+    const void* addref = *((void* const*)vtbl + 1);
+    if (!addref) return 0;
+    if (VirtualQuery(addref, &mbi, sizeof(mbi)) != sizeof(mbi)) return 0;
+    if (mbi.State != MEM_COMMIT) return 0;
+    DWORD prot = mbi.Protect & 0xFF;  /* 剥离 PAGE_GUARD/NOCACHE/WRITECOMBINE 修饰位 */
+    return (prot == PAGE_EXECUTE || prot == PAGE_EXECUTE_READ
+            || prot == PAGE_EXECUTE_READWRITE || prot == PAGE_EXECUTE_WRITECOPY);
+}
 intptr_t __stdcall vb6_di_vb6___vbaObjSetAddref(void* oDest, intptr_t lSrcPtr) {
-    if (lSrcPtr) {
+    if (lSrcPtr && vb6_di_IsRealComObject((const void*)(uintptr_t)lSrcPtr)) {
         IUnknown* pSrc = (IUnknown*)(uintptr_t)lSrcPtr;
         pSrc->lpVtbl->AddRef(pSrc);
     }
     *(void**)oDest = (void*)(uintptr_t)lSrcPtr;
     return 0; /* S_OK */
+}
+
+/* Fix 160z (fan/dev 移植): msvbvm60 运行时 __vbaObjAddref / __vbaObjSet
+ * (VBFlexGridBase 声明)。
+ * __vbaObjAddref: 对已持有引用加一次引用并返回 S_OK (与 SetAddref 的存储部分
+ * 不同, 本符号只增加引用, 不写回目标)。
+ * __vbaObjSet: 把对象指针写入目标空位, 不加引用 (调用侧已接管所有权的场合)。 */
+intptr_t __stdcall vb6_di_vb6___vbaObjAddref(intptr_t lpObject) {
+    if (lpObject && vb6_di_IsRealComObject((const void*)(uintptr_t)lpObject)) {
+        IUnknown* pObj = (IUnknown*)(uintptr_t)lpObject;
+        pObj->lpVtbl->AddRef(pObj);
+    }
+    return 0; /* S_OK */
+}
+intptr_t __stdcall vb6_di_vb6___vbaObjSet(void* Destination, intptr_t lpObject) {
+    *(void**)Destination = (void*)(uintptr_t)lpObject;
+    return 0; /* S_OK */
+}
+
+/* Fix 160z-2 (fan/dev 移植): HtmlHelpW 由 hhctrl.ocx 导出, x64 SDK 无该导入库,
+ * 故按名动态解析 (isNoImportLib 只防链接, 这里提供真实现)。 */
+intptr_t __stdcall vb6_di_HtmlHelpW(intptr_t hWndCaller, intptr_t lpszFile, intptr_t uCommand, intptr_t dwData) {
+    static void (WINAPI* fnHtmlHelp)() = NULL;
+    if (fnHtmlHelp == NULL) {
+        HMODULE m = LoadLibraryA("hhctrl.ocx");
+        if (m != NULL) { fnHtmlHelp = (void (WINAPI*)())GetProcAddress(m, "HtmlHelpW"); }
+    }
+    if (fnHtmlHelp == NULL) { return 0; }
+    return (intptr_t)((intptr_t (WINAPI*)(intptr_t, intptr_t, intptr_t, intptr_t))fnHtmlHelp)(hWndCaller, lpszFile, uCommand, dwData);
 }
 
 /* 序号 644 别名 (VBMAN cToolsArray.cls):
@@ -270,4 +322,30 @@ intptr_t __stdcall vb6_di_CertSelectCertificateW(void* pCertSelectInfo) {
     }
     if (pfn) return (intptr_t)pfn(pCertSelectInfo);
     return 0;
+}
+
+/* Fix 174 (fan/dev 移植): COMCTL32 ordinal #383 forwarding stub (VBFlexGridBase.bas:
+ *   Declare Sub DoReaderMode Lib "comctl32" Alias "#383" (lpRMI As READERMODEINFO)
+ *   -> vb6_di_ord_383(vb6_type_READERMODEINFO*), C3 生成代码以
+ *   `#define DoReaderMode vb6_di_ord_383` 映射 (VBFlexGridBase.h:205).
+ * Standard EXE 运行期无 ReaderMode 宿主, ordinal 解析失败时安全 no-op.
+ * 结构与 C3 生成的 VB6_TYPE_READERMODEINFO_DEFINED 一致. */
+typedef struct vb6_di_READERMODEINFO {
+    int32_t cbSize;
+    intptr_t hWnd;
+    int32_t dwFlags;
+    intptr_t lpRC;
+    intptr_t lpfnScroll;
+    intptr_t lpfnDispatch;
+    intptr_t lParam;
+} vb6_di_READERMODEINFO;
+void __stdcall vb6_di_ord_383(vb6_di_READERMODEINFO* lpRMI) {
+    typedef void (WINAPI* fnDoReaderMode)(vb6_di_READERMODEINFO*);
+    static fnDoReaderMode pfn = NULL;
+    if (!pfn) {
+        HMODULE h = GetModuleHandleW(L"comctl32.dll");
+        if (!h) h = LoadLibraryW(L"comctl32.dll");
+        if (h) pfn = (fnDoReaderMode)GetProcAddress(h, (LPCSTR)383);
+    }
+    if (pfn) pfn(lpRMI);
 }

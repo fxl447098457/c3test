@@ -36,5 +36,29 @@ Public Sub Main()
     names(2) = "Charlie"
     Debug.Print "names(1)="; names(1)
     
+    ' Fix 170: VB6 **整体数组引用** `A()` (空括号) —— 左值赋整个数组, 右值取整个数组
+    ' 原缺一维空括号 = VB6_SA_AT(elem, A, 0): 未 ReDim 时 data==NULL → 写 0 号元素
+    ' 就是解引用 NULL (VBFlexGridDemo Common.bas:1479 `B() = Text` 启动崩溃)。
+    Dim src() As Long
+    ReDim src(1 To 3)
+    src(1) = 11
+    src(2) = 22
+    src(3) = 33
+    Dim dst() As Long
+    dst() = src()
+    src(2) = 999          ' 深拷贝: 之后改 src 不应影响 dst
+    Debug.Print "wa-clone="; dst(2)
+    Debug.Print "wa-ub="; UBound(dst())
+    Dim s As String
+    s = "AB"
+    Dim bb() As Byte
+    bb() = s              ' String -> Byte() (原始 UTF-16LE 字节)
+    Debug.Print "wa-str="; bb(0)
+    Dim v As Variant
+    v = bb()              ' Byte() -> Variant (持有整个数组)
+    Dim bb2() As Byte
+    bb2() = v             ' Variant -> Byte()
+    Debug.Print "wa-rt="; bb2(0)
+
     Debug.Print "=== Array Tests PASSED ==="
 End Sub

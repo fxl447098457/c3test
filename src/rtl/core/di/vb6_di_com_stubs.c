@@ -184,3 +184,83 @@ intptr_t __stdcall vb6_di_GetOpenFileNameA(void* file) {
 intptr_t __stdcall vb6_di_OleTranslateColor(intptr_t lOleColor, intptr_t lHPalette, intptr_t lColorRef) {
     return ((intptr_t (WINAPI *)(intptr_t, intptr_t, intptr_t))OleTranslateColor)(lOleColor, lHPalette, lColorRef);
 }
+// FATAL-HANDOFF merge: added back from fan/dev vb6_di_com_stubs.c (missing in origin/main family)
+/* SysReAllocString */
+intptr_t __stdcall vb6_di_SysReAllocString(intptr_t pbString, intptr_t pszStrPtr) {
+    return ((intptr_t (WINAPI *)(intptr_t, intptr_t))SysReAllocString)(pbString, pszStrPtr);
+}
+
+/* VarDecFromI8 */
+intptr_t __stdcall vb6_di_VarDecFromI8(double i64In, void* pDecOut) {
+    return ((intptr_t (WINAPI *)(double, void*))VarDecFromI8)(i64In, pDecOut);
+}
+
+/* OleLoadPicturePath */
+intptr_t __stdcall vb6_di_OleLoadPicturePath(intptr_t lpszPath, intptr_t pUnkCaller, intptr_t dwReserved, intptr_t ClrReserved, void* riid, void** pIPicture) {
+    return ((intptr_t (WINAPI *)(intptr_t, intptr_t, intptr_t, intptr_t, void*, void**))OleLoadPicturePath)(lpszPath, pUnkCaller, dwReserved, ClrReserved, riid, pIPicture);
+}
+
+/* OleCreatePropertyFrame */
+intptr_t __stdcall vb6_di_OleCreatePropertyFrame(intptr_t hWndOwner, intptr_t X, intptr_t Y, intptr_t lpszCaption, intptr_t cObjects, void** pUnk, intptr_t cPages, void* pPageCLSID, intptr_t LCID, intptr_t dwReserved, intptr_t pvReserved) {
+    return ((intptr_t (WINAPI *)(intptr_t, intptr_t, intptr_t, intptr_t, intptr_t, void**, intptr_t, void*, intptr_t, intptr_t, intptr_t))OleCreatePropertyFrame)(hWndOwner, X, Y, lpszCaption, cObjects, pUnk, cPages, pPageCLSID, LCID, dwReserved, pvReserved);
+}
+
+/* CLSIDFromString */
+intptr_t __stdcall vb6_di_CLSIDFromString(intptr_t lpszProgID, void* pCLSID) {
+    return ((intptr_t (WINAPI *)(intptr_t, void*))CLSIDFromString)(lpszProgID, pCLSID);
+}
+
+/* ChooseColorW */
+intptr_t __stdcall vb6_di_ChooseColorW(void* lpChooseColor) {
+    return ((intptr_t (WINAPI *)(void*))ChooseColorW)(lpChooseColor);
+}
+
+/* VariantInit */
+void __stdcall vb6_di_VariantInit(void* pvarg) {
+    ((void (WINAPI *)(void*))VariantInit)(pvarg);
+}
+
+/* VariantClear */
+intptr_t __stdcall vb6_di_VariantClear(void* pvarg) {
+    return ((intptr_t (WINAPI *)(void*))VariantClear)(pvarg);
+}
+
+/* VariantCopy */
+intptr_t __stdcall vb6_di_VariantCopy(void* pvargDest, void* pvargSrc) {
+    return ((intptr_t (WINAPI *)(void*, void*))VariantCopy)(pvargDest, pvargSrc);
+}
+
+/* VarCmp */
+intptr_t __stdcall vb6_di_VarCmp(void* pvargLeft, void* pvargRight, intptr_t LCID, intptr_t dwFlags) {
+    return ((intptr_t (WINAPI *)(void*, void*, intptr_t, intptr_t))VarCmp)(pvargLeft, pvargRight, LCID, dwFlags);
+}
+
+/* VarI8FromDec */
+intptr_t __stdcall vb6_di_VarI8FromDec(void* pDecIn, double* i64Out) {
+    return ((intptr_t (WINAPI *)(void*, double*))VarI8FromDec)(pDecIn, i64Out);
+}
+
+/* VarI8FromR8 */
+intptr_t __stdcall vb6_di_VarI8FromR8(double DblIn, double* i64Out) {
+    return ((intptr_t (WINAPI *)(double, double*))VarI8FromR8)(DblIn, i64Out);
+}
+
+/* VarI8FromStr */
+intptr_t __stdcall vb6_di_VarI8FromStr(intptr_t lpStrIn, intptr_t LCID, intptr_t dwFlags, double* i64Out) {
+    return ((intptr_t (WINAPI *)(intptr_t, intptr_t, intptr_t, double*))VarI8FromStr)(lpStrIn, LCID, dwFlags, i64Out);
+}
+
+/* SysAllocString */
+intptr_t __stdcall vb6_di_SysAllocString(intptr_t lpString) {
+    return ((intptr_t (WINAPI *)(intptr_t))SysAllocString)(lpString);
+}
+
+/* SysFreeString */
+intptr_t __stdcall vb6_di_SysFreeString(intptr_t lpString) {
+    return ((intptr_t (WINAPI *)(intptr_t))SysFreeString)(lpString);
+}
+
+/* CoTaskMemAlloc */
+intptr_t __stdcall vb6_di_CoTaskMemAlloc(intptr_t cBytes) {
+    return ((intptr_t (WINAPI *)(intptr_t))CoTaskMemAlloc)(cBytes);
+}

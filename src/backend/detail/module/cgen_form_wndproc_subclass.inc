@@ -105,7 +105,12 @@
 
         // P0-5修复: 扫描Frame容器内的子控件
         for (const auto& ctrl : frmDesc.formControl.children) {
-            if (ctrl.controlType != FrmControlType::Frame) continue;
+            if (ctrl.controlType != FrmControlType::Frame &&
+                ctrl.controlType != FrmControlType::PictureBox) continue;
+            // Fix 160w: PictureBox 也可作为容器 (MainForm.frm Picture2 容器内
+            // 有设置了 GotFocus/MouseDown 的子控件; 原来只扫 Frame → 子控件已
+            // 在 cgen_form_frame_menu.inc 注册 install 但这里未生成子类化定义/
+            // 转发 → MainForm.c:281 C2065 vb6_ctrl_subproc_Picture2).
             for (const auto& child : ctrl.children) {
                 std::string childNameLower = child.controlName;
                 std::transform(childNameLower.begin(), childNameLower.end(), childNameLower.begin(), ::tolower);

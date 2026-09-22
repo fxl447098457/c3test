@@ -58,6 +58,7 @@ bool Token::isLiteral() const {
     switch (kind) {
         case TokenKind::IntegerLiteral:
         case TokenKind::LongLiteral:
+        case TokenKind::LongPtrLiteral:
         case TokenKind::FloatLiteral:
         case TokenKind::DecimalLiteral:
         case TokenKind::StringLiteral:
@@ -139,6 +140,7 @@ const char* Token::kindToString(TokenKind kind) {
         case TokenKind::Identifier:      return "Identifier";
         case TokenKind::IntegerLiteral:  return "IntLit";
         case TokenKind::LongLiteral:     return "LongLit";
+        case TokenKind::LongPtrLiteral:  return "LongPtrLit";
         case TokenKind::FloatLiteral:    return "FloatLit";
         case TokenKind::DecimalLiteral:  return "DecLit";
         case TokenKind::StringLiteral:   return "StrLit";

@@ -126,9 +126,21 @@ void CCodeGen::visit(CallStmt& node) {
                                     continue;
                                 }
 
-                                if (isBstrExpr(val)) {
+                                if (isBstrExpr(val)
+                                    || inferExprType(*call.positional[j]) == Vb6Type::String) {
                                     // 已经是BSTR, 直接输出
+                                    // Fix 176: 前缀表只认内置函数名, **用户 Function 返回
+                                    // String** (Debug.Print "x="; MyFunc()) 捡不到 → 落到
+                                    // 下面的 DebugWriteLong((int32_t)(BSTR)) → 指针截断成
+                                    // int32, 打印出 -150012728 这类垃圾数 (不是崩溃, 静默错)。
+                                    // 补一条按 AST 的返回类型判定 (inferExprType 会查
+                                    // symTab_ 里 Function 符号的返回类型)。
                                     c_.emitLine("vb6_DebugWriteBSTR(" + val + ");");
+                                } else if (inferExprType(*call.positional[j]) == Vb6Type::Date) {
+                                    // Fix 175: Debug.Print d (d As Date) —— Date 变量同时
+                                    // 登记在 knownDoubleVars_, isDoubleExpr 会抢先命中并
+                                    // 打成序列号 46023; 按 VB6 应是短日期串。
+                                    c_.emitLine("vb6_DebugWriteBSTR(vb6_CStrDate((double)(" + val + ")));");
                                 } else if (isDoubleExpr(val)) {
                                     // 浮点数, 用DebugWriteDouble输出
                                     c_.emitLine("vb6_DebugWriteDouble((double)(" + val + "));");

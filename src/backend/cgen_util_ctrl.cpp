@@ -527,6 +527,14 @@ std::string CCodeGen::wrapVariantValue(ASTNode* valueNode, const std::string& cE
     if (cExprIsVariant(cExpr)) {
         return cExpr;
     }
+
+    // Fix 170: 右侧是 VB6 整体数组引用 `A()` (空括号) → 装箱成持有数组的 Variant。
+    // 必须先于下面的 inferExprType switch: 它对 `A()` 可能给回**元素**类型 (Byte/Long),
+    // 于是 vb6_VariantLong(载体指针) → C 侧只是警告, 指针被截断成 int32, 运行期才炸。
+    if (valueNode->kind == ASTNodeKind::IndexOrCallExpr
+        && isWholeArrayRef(static_cast<const Expr*>(valueNode))) {
+        return "vb6_VariantArray((void*)" + cExpr + ")";
+    }
     
     // 使用inferExprType推断表达式类型
     if (valueNode->kind == ASTNodeKind::BinaryExpr ||

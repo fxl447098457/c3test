@@ -286,6 +286,11 @@
     std::string packLetValueArg(const ParameterInfo& lastP, Expr* valueExpr,
                                 const std::string& val);
 
+    // Fix 159-B: VB6 隐式 CStr 的实参类型清单 — 日期/数值标量赋给 ByVal String 形参
+    // 时按 CStr 转换 (vb6_CStrDate/CStrDbl/CStrLong), 见 wrapToBSTR.
+    // String/Variant/Object/未知 返回 false (不介入, 维持既有发射).
+    static bool isScalarImplicitStr159(Vb6Type t);
+
     // Fix 090ae: 链式 COM 默认属性索引赋值 (P25b 提取为可复用 helper)
     // VB: dic(a)(b) = v / Set dic(a)(b) = v — 多层默认属性/Item 索引写.
     // AST 形态: 多层 IndexOrCallExpr 嵌套, 最内层 callee 为 COM 变量/类 void*
@@ -362,13 +367,18 @@
     // ---- Fix 085: UDT 对象字段类型推断 ----
     // 给定 UDT C 类型标识符 (如 "vb6_type_tZipFileItem") 与字段名(小写), 返回该字段
     // 的对象类别 C 类型:
-    //   - ""                          → 非对象字段 (标量/字符串/数组等)
+    //   - ""                          → 非对象字段 (标量/数组等)
     //   - "vb6_type_Y"                → 嵌套 UDT 字段 (非对象, 供链式推断)
     //   - "vb6_cls_X*"                → 项目类对象字段 (X=类名, 走类方法调用)
     //   - "void*"                     → Collection/COM/接口 对象字段 (走 COM dispatch)
+    //   - "BSTR"                      → String 字段 (Fix 177, 赋值须深拷贝)
     // 依据语义阶段 TypeDecl 在 udtMembers 中登记的 type/typeRefName.
     std::string udtFieldObjCType(const std::string& udtCType,
                                  const std::string& memberLower) const;
+
+    // Fix 177: 目标已是**生成的 C 串**时, 判断它是否为 UDT 动态数组元素上的 String
+    // 字段 (`VB6_SA_AT(vb6_type_TCELL, ...).Text`) → 赋值必须走 vb6_BSTR_Assign。
+    bool udtFieldIsBstrInCTarget(const std::string& target) const;
 
     // Fix 085: 在 UDT 字段访问拼接处追加对象字段注释标记 (供外层 MemberAccessExpr
     // 消费): obj.field 追加 "  /* udt objfield <CType> */"; 非对象字段原样返回.
@@ -388,6 +398,11 @@
     // 整除运算符 \ 的操作数、vb6_VariantArrayGet/GetVal 的索引、For 循环 Variant
     // 控制变量的比较/步进等. astExpr 可为 nullptr.
     std::string toLongIfVariant(const std::string& cExpr, const Expr* astExpr);
+
+    // Fix 156: toLongIfVariant 的 double 版 — 用于浮点除法 `/` 的
+    // `(double)(x) / (double)(y)`. x/y 是 vb6_VARIANT 结构体时 C 强转非法
+    // (C2440 "无法从 vb6_VARIANT 转换为 double"), 改走 vb6_VariantToDouble.
+    std::string toDoubleIfVariant(const std::string& cExpr, const Expr* astExpr);
 
     // 给定类名与成员名, 在当前模块作用域符号表中查找属于该类的 Function/PropertyGet 符号,
     // 若其返回类型为 Object 且记录了 variableTypeName (Fix 015), 返回经 canonicalClassName
@@ -427,3 +442,26 @@
     const FrmFile* findUserControlSpec(const std::string& controlTypeName) const;
     // Fix 092w: rewrite RHS assigned to a Byte array into byte-array semantics
     std::string rewriteByteArrayValue(const std::string& value) const;
+    // Fix 170: `A()` 空括号整体数组引用判定 (无实参 + callee 是已知/模块级数组变量)
+    bool isWholeArrayRef(const Expr* e) const;
+    // Fix 178: callee 是 UDT 的动态数组成员 (`.Cols()`) 时为 true, 顺带取元素 UDT
+    bool isDynamicArrayMemberCallee(const Expr* callee, std::string* elemUdt) const;
+    // Fix 170: 整体数组赋值右侧收口 —— 新建载体直接赋, 其余深拷贝避免别名
+    std::string wrapWholeArrayAssign(const std::string& target,
+                                     const std::string& rhs,
+                                     const Expr* targetNode = nullptr) const;
+
+    // ---- Fix 178: 含所有权成员 (String/动态数组/Variant/嵌套 UDT) 的 UDT 深拷贝 ----
+    // VB6 运行时按类型描述符对这类 UDT 的赋值与 LSet 做深拷贝; C 端 `d = s` /
+    // `memcpy` 是浅拷贝 → 成员指针被多行共享 (VBFlexGridDemo 行 0 与行 >=2 同格)。
+    // 命中所有权的 UDT 拷贝点调用 requestUdtCopy, 模块出口 (generate epilogue) 统一
+    // 生成 static vb6_udtcpy_<T>() 并插到 .c 的 #include 之后。
+    bool udtHasOwnedMembers(const std::string& udtCType) const;
+    void requestUdtCopy(const std::string& udtCType, bool needVoidPtrWrapper) const;
+    std::string emitUdtCopyBlock() const;
+    // 赋值两端都是同一"含所有权成员 UDT" 时返回 vb6_udtcpy_X(&t, &v); 否则空串。
+    std::string udtDeepCopyAssign(const Expr& targetNode, const std::string& target,
+                                  const Expr* valueNode, const std::string& value) const;
+    // 递归版 (stack 防自引用); needVoidPtrWrapper 的传递闭包在 emitUdtCopyBlock 里重算。
+    bool udtHasOwnedMembersR(const std::string& udtCType,
+                             std::vector<std::string>& stack) const;

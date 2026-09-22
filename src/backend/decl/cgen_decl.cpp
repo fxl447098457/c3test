@@ -168,12 +168,14 @@ void CCodeGen::visit(EnumDecl& node) {
                 h_.emitLine("vb6_enum_" + memName + " = " + lastExpr_ + ",");
                 nextVal = 0;
                 if (auto* lit = dynamic_cast<LiteralExpr*>(member->value.get())) {
-                    if (lit->literalKind == LiteralKind::Long) nextVal = lit->longValue;
+                    if (lit->literalKind == LiteralKind::Long ||
+                        lit->literalKind == LiteralKind::LongPtr) nextVal = lit->longValue;
                     else if (lit->literalKind == LiteralKind::Integer) nextVal = lit->intValue;
                 } else if (auto* unary = dynamic_cast<UnaryExpr*>(member->value.get())) {
                     if (auto* inner = dynamic_cast<LiteralExpr*>(unary->operand.get())) {
                         int64_t v = 0;
-                        if (inner->literalKind == LiteralKind::Long) v = inner->longValue;
+                        if (inner->literalKind == LiteralKind::Long ||
+                            inner->literalKind == LiteralKind::LongPtr) v = inner->longValue;
                         else if (inner->literalKind == LiteralKind::Integer) v = inner->intValue;
                         nextVal = (unary->op == UnaryOp::Negate) ? -v : v;
                     }

@@ -28,6 +28,20 @@ void CCodeGen::emitLocalDeclCode(LocalDeclStmt& node) {
     if (!node.decl) return;
 
     switch (node.decl->kind) {
+        case ASTNodeKind::MultiDecl: {
+            // Fix 152d: 过程体内逗号声明 (`Static hFindFile As LongPtr,
+            // AttributesCache As VbFileAttribute` / `Dim a, b As Long` 等) 由
+            // parseVariableDeclList 返回 MultiDecl。模块级 MultiDecl 在 parseModule
+            // 已展平, 但体级 LocalDeclStmt 仍携 MultiDecl → 原 switch 无此分支 →
+            // "unhandled" → 变量从不声明 → 后续引用 C2065。逐子声明展开。
+            auto& md = static_cast<MultiDecl&>(*node.decl);
+            for (auto& child : md.declarations) {
+                if (!child) continue;
+                LocalDeclStmt sub(md.loc, std::move(child));
+                emitLocalDeclCode(sub);
+            }
+            return;
+        }
         case ASTNodeKind::VariableDecl: {
             auto& var = static_cast<VariableDecl&>(*node.decl);
             std::string cName = cIdent(var.name);
@@ -202,6 +216,10 @@ void CCodeGen::emitLocalDeclCode(LocalDeclStmt& node) {
                 std::string lower = var.name;
                 std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
                 knownDoubleVars_.insert(lower);
+                // Fix 175: `Dim d As Date` 在 C 层同为 double, 只按 C 类型串登记时
+                // inferExprType 只会回 Double → Print/拼接走 vb6_CStrDbl → 打出序列号。
+                if (resolveArrayElemType(var.asType.get()) == Vb6Type::Date)
+                    knownDateVars_.insert(lower);
             }
 
             // 记录类类型变量名, 默认值用NULL
@@ -345,6 +363,9 @@ void CCodeGen::emitLocalDeclCode(LocalDeclStmt& node) {
                     case LiteralKind::Integer:
                     case LiteralKind::Long:
                         cType = "int32_t";
+                        break;
+                    case LiteralKind::LongPtr:  // Fix 082: ^ 后缀 -> 指针宽度
+                        cType = "intptr_t";
                         break;
                     case LiteralKind::Single:
                     case LiteralKind::Double:

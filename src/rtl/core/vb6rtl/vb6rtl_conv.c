@@ -126,20 +126,45 @@ float vb6_Rnd(int32_t seed) {
 // 转换函数
 // ============================================================
 
+#ifdef vb6_CInt
+#undef vb6_CInt      // vb6rtl_builtin.h 的 _Generic 宏在定义处必须关闭
+#endif
 int16_t vb6_CInt(double x) { return (int16_t)round(x); }
+#ifdef vb6_CLng
+#undef vb6_CLng
+#endif
 int32_t vb6_CLng(double x) { return (int32_t)round(x); }
+#ifdef vb6_CDbl
+#undef vb6_CDbl
+#endif
 double vb6_CDbl(double x) {
     return x;
 }
+// Fix 158r: CLng 的 BSTR 实参 (UDT 单元格 .Text 等) 需先 vb6_Val 解析为 double
+int32_t vb6_CLngBSTR(BSTR s) { return (int32_t)round(vb6_Val(s)); }
+// Fix 158q: CDbl/CInt/CCur 的 BSTR 实参 (UDT 单元格 .Text 等) —— 同 CLngBSTR.
+double  vb6_CDblBSTR(BSTR s) { return vb6_Val(s); }
+int16_t vb6_CIntBSTR(BSTR s) { return (int16_t)round(vb6_Val(s)); }
+double  vb6_CCurBSTR(BSTR s) { double d = vb6_Val(s); return round(d * 10000.0) / 10000.0; }
 
 BSTR vb6_CStr(vb6_VARIANT x) {
     return vb6_Format(x, NULL);
 }
 
 // M22: typed CStr overloads (C has no overloading, use suffix)
+#ifdef vb6_CStrLong
+#undef vb6_CStrLong   // vb6rtl_builtin.h 的 _Generic 宏在这里必须关闭, 否则函数定义被宏改写
+#endif
 BSTR vb6_CStrLong(int32_t x) {
     vb6_VARIANT v; memset(&v, 0, sizeof(v)); v.vt = (vb6_vartype)VT_I4; v.lVal = x;
     return vb6_Format(v, NULL);
+}
+// Fix 158q: 生成代码可能产出 vb6_CStrLong(<vb6_VARIANT 表达式>) —— With 后端 COM 属性
+// (vb6_VariantFromComResult(vb6_ComGetProp(...))) 原生返回 VARIANT 却被当 Long 转 BSTR
+// (VBFlexGridDemo PPVBFlexGridGeneral.c). msbuild_vs C2440 (无法从 vb6_VARIANT 转换到
+// int32_t). vb6rtl_builtin.h 的 _Generic 直通到这里先解包.
+BSTR vb6_CStrLongFromVariant(vb6_VARIANT v) {
+    return vb6_CStrLong(vb6_VariantToLong(v));
 }
 BSTR vb6_CStrDbl(double x) {
     vb6_VARIANT v; memset(&v, 0, sizeof(v)); v.vt = (vb6_vartype)VT_R8; v.dblVal = x;
@@ -160,6 +185,20 @@ BSTR vb6_CStrByte(uint8_t x) {
     return vb6_Format(v, NULL);
 }
 BSTR vb6_CStrDate(double x) {
+    // Fix 175: VB6 的 CStr(Date) 在**时间分量为 0** 时只给短日期, 而共享的
+    // vb6_Format(VT_DATE, NULL) 无条件拼 "短日期 + 空格 + 时间"
+    // (detail/vb6rtl_format_extract.inc 的 !fmt 分支) → demo 的日期列会变成
+    // "2026/1/1 0:00:00"。Format 有自己的语义, 故只在这里分叉。
+    double frac = x - floor(x);
+    if (frac < 0) frac = -frac;
+    if (frac < 1e-9) {
+        SYSTEMTIME st;
+        wchar_t dateBuf[64];
+        if (VariantTimeToSystemTime(x, &st)
+            && GetDateFormatW(LOCALE_USER_DEFAULT, DATE_SHORTDATE, &st, NULL, dateBuf, 64) > 0) {
+            return vb6_BSTR_FromStr(dateBuf);
+        }
+    }
     vb6_VARIANT v; memset(&v, 0, sizeof(v)); v.vt = (vb6_vartype)VT_DATE; v.dblVal = x;
     return vb6_Format(v, NULL);
 }

@@ -183,6 +183,61 @@
     addConst("vbRightButton", Vb6Type::Long, 2);
     addConst("vbMiddleButton", Vb6Type::Long, 4);
 
+    // Fix 152b: VB6 全局枚举常量 (Align/BorderStyle/Orientation/OLEDrop/
+    // ParentControlsType/ButtonAppearance/Appearance)。VBFlexGrid 项目大量引用,
+    // 缺失 → 每个引用点 C2065 未声明。值取自 VB6 对象库。
+
+    // AlignConstants (控件 Align 属性)
+    addConst("vbAlignNone", Vb6Type::Long, 0);
+    addConst("vbAlignTop", Vb6Type::Long, 1);
+    addConst("vbAlignBottom", Vb6Type::Long, 2);
+    addConst("vbAlignLeft", Vb6Type::Long, 3);
+    addConst("vbAlignRight", Vb6Type::Long, 4);
+
+    // BorderStyleConstants (窗体/控件 BorderStyle)
+    addConst("vbFixedSingle", Vb6Type::Long, 1);
+    addConst("vbSizable", Vb6Type::Long, 2);
+    addConst("vbFixedDialog", Vb6Type::Long, 3);
+    addConst("vbSizableToolWindow", Vb6Type::Long, 4);
+    addConst("vbFixedToolWindow", Vb6Type::Long, 5);
+
+    // OrientationConstants (滚动条/拆分块方向)
+    addConst("vbHorizontal", Vb6Type::Long, 0);
+    addConst("vbVertical", Vb6Type::Long, 1);
+    addConst("vbBoth", Vb6Type::Long, 3);
+
+    // OLEDropModeConstants (控件 OLEDropMode)
+    addConst("vbOLEDropNone", Vb6Type::Long, 0);
+    addConst("vbOLEDropManual", Vb6Type::Long, 1);
+    addConst("vbOLEDropDefault", Vb6Type::Long, 0);
+
+    // OLEDragEffectsConstants (OLEDragOver/OLEDrop 效果掩码)
+    addConst("vbDropEffectNone", Vb6Type::Long, 0);
+    addConst("vbDropEffectCopy", Vb6Type::Long, 1);
+    addConst("vbDropEffectMove", Vb6Type::Long, 2);
+
+    // OLEDragOver State constants (State 参数)
+    addConst("vbEnter", Vb6Type::Long, 0);
+    addConst("vbLeave", Vb6Type::Long, 1);
+    addConst("vbOver", Vb6Type::Long, 2);
+
+    // RasterOpConstants (PatBlt 光栅操作码, VB6 对象库)
+    addConst("vbPatCopy", Vb6Type::Long, 0xF00021);
+    addConst("vbPatInvert", Vb6Type::Long, 0x5A0049);
+
+    // ParentControlsTypeConstants (Extender.ParentControls.ParentControlsType)
+    addConst("vbNoParentControls", Vb6Type::Long, 0);
+    addConst("vbExtender", Vb6Type::Long, 1);
+    addConst("vbNoExtender", Vb6Type::Long, 2);
+
+    // ButtonAppearanceConstants (CommandButton.Style)
+    addConst("vbButtonStandard", Vb6Type::Long, 0);
+    addConst("vbButtonGraphical", Vb6Type::Long, 1);
+
+    // AppearanceConstants (控件 Appearance)
+    addConst("vbAppearanceFlat", Vb6Type::Long, 0);
+    addConst("vbAppearance3D", Vb6Type::Long, 1);
+
     // Key code constants (commonly used)
     addConst("vbKeyLButton", Vb6Type::Long, 1);
     addConst("vbKeyRButton", Vb6Type::Long, 2);
@@ -215,6 +270,7 @@
     addConst("vbKeyDelete", Vb6Type::Long, 46);
     addConst("vbKeyHelp", Vb6Type::Long, 47);
     addConst("vbKeyNumlock", Vb6Type::Long, 144);
+    addConst("vbKeyScrollLock", Vb6Type::Long, 145);
 
     // Number key constants
     addConst("vbKey0", Vb6Type::Long, 48);

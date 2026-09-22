@@ -62,6 +62,25 @@ void CCodeGen::visit(LiteralExpr& node) {
         case LiteralKind::Long:
             lastExpr_ = std::to_string(node.longValue) + "L";
             break;
+        case LiteralKind::LongPtr:
+            // Fix 082: VBA7 ^ 后缀. LongPtr 是平台相关宽度 (32 位机 4 字节, 64 位机 8 字节),
+            // 与 Vb6Type::LongPtr -> intptr_t 的映射一致. 以十六进制无符号形式输出,
+            // 避免十进制 INT64_MIN (-9223372036854775808) 因 C 中一元负作用于
+            // INT64_MAX+1 而溢出 (只有 9223372036854775808ULL 才合法).
+            {
+                std::string t = node.rawText;
+                if (!t.empty() && t.back() == '^') t.pop_back();
+                if (t.size() >= 2 && t[0] == '&' && (t[1] == 'H' || t[1] == 'h')) {
+                    lastExpr_ = "((intptr_t)0x" + t.substr(2) + "ULL)";
+                } else if (t.size() >= 2 && t[0] == '&' && (t[1] == 'O' || t[1] == 'o')) {
+                    lastExpr_ = "((intptr_t)0" + t.substr(2) + "ULL)";
+                } else if (t.size() >= 2 && t[0] == '&' && (t[1] == 'B' || t[1] == 'b')) {
+                    lastExpr_ = "((intptr_t)0b" + t.substr(2) + "ULL)";
+                } else {
+                    lastExpr_ = "((intptr_t)" + t + "ULL)";
+                }
+            }
+            break;
         case LiteralKind::Single:
             lastExpr_ = floatingLiteral(node.floatValue, std::numeric_limits<float>::max_digits10) + "f";
             break;

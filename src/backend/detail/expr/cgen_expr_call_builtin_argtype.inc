@@ -26,6 +26,12 @@
             {"vb6_UCase",      {0}},
             {"vb6_LCase",      {0}},
             {"vb6_StrConv",    {0}},
+            // Fix 158t: Mid$/Left$/Right$ 的首参是 String, VB6 允许直接喂数值
+            // (隐式 CStr). MainForm.frm:386 `DecStr = Mid$(1.1, 2, 1)` 取本地小数点
+            // 分隔符是惯用写法 → 裸发 vb6_Mid(1.1, 2, 1) 报 C2440 "double→BSTR".
+            {"vb6_Mid",        {0}},
+            {"vb6_Left",       {0}},
+            {"vb6_Right",      {0}},
         };
         bool argsFixed108c = false;
         // argList 在更早处已按 args 拼好, 其后还有"补默认参数"分支向 argList 追加
@@ -73,16 +79,20 @@
                 if (pos >= args.size() || pos >= node.positional.size()) continue;
                 if (!node.positional[pos]) continue;
                 Vb6Type at108c = inferExprType(*node.positional[pos]);
+                // Fix 158t: Date 也纳入 (Mid$(StartDate, ...) 之类) — CStr(Date)
+                // 与 CStr(数值) 不同, 需走 vb6_CStrDate 才能得本地日期字符串.
                 if (at108c != Vb6Type::Single && at108c != Vb6Type::Double &&
                     at108c != Vb6Type::Long && at108c != Vb6Type::Integer &&
                     at108c != Vb6Type::Currency && at108c != Vb6Type::Decimal &&
-                    at108c != Vb6Type::Boolean) {
+                    at108c != Vb6Type::Boolean && at108c != Vb6Type::Date) {
                     continue;  // 已是字符串/对象等, 不介入
                 }
                 if (args[pos].find("vb6_CStr") != std::string::npos) continue;
                 std::string wrapped108c;
-                if (at108c == Vb6Type::Long || at108c == Vb6Type::Integer ||
-                    at108c == Vb6Type::Boolean) {
+                if (at108c == Vb6Type::Date) {
+                    wrapped108c = "vb6_CStrDate((double)(" + args[pos] + "))";
+                } else if (at108c == Vb6Type::Long || at108c == Vb6Type::Integer ||
+                           at108c == Vb6Type::Boolean) {
                     wrapped108c = "vb6_CStrLong((int32_t)(" + args[pos] + "))";
                 } else {
                     wrapped108c = "vb6_CStrDbl((double)(" + args[pos] + "))";

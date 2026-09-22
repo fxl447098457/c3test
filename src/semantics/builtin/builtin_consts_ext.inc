@@ -172,7 +172,7 @@
     addConst("vbSizeNESW", Vb6Type::Long, 6);
     addConst("vbSizeNS", Vb6Type::Long, 7);
     addConst("vbSizeNWSE", Vb6Type::Long, 8);
-    addConst("vbSizeEW", Vb6Type::Long, 9);
+    addConst("vbSizeWE", Vb6Type::Long, 9);
     addConst("vbUpArrow", Vb6Type::Long, 10);
     addConst("vbHourglass", Vb6Type::Long, 11);
     addConst("vbNoDrop", Vb6Type::Long, 12);

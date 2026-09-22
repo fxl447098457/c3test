@@ -36,6 +36,8 @@
     r->scaleHeight = vb6_TwipToY(height);
     r->extLeft = left;
     r->extTop = top;
+    r->extWidth = width;    // Fix 162: 外框尺寸 (缇), 供 Extender/UserControl
+    r->extHeight = height;  //          的 Width/Height 读取
     if (ctrlName) {
         size_t n = strlen(ctrlName);
         if (n >= VB6_UC_NAME_LEN) n = VB6_UC_NAME_LEN - 1;
@@ -86,8 +88,11 @@
     {
         vb6_UCSaved saved;
         vb6_uc_push(r, &saved);
-        r->me = desc->create ? desc->create() : NULL;
-        if (r->me && desc->init) desc->init(r->me);
+if (GetEnvironmentVariableW(L"C3_COM_TRACE", NULL, 0) > 0) { fprintf(stderr, "[C3_UC] HostCreate stage=create type=%s\n", typeName); fflush(stderr); }
+    r->me = desc->create ? desc->create() : NULL;
+    if (GetEnvironmentVariableW(L"C3_COM_TRACE", NULL, 0) > 0) { fprintf(stderr, "[C3_UC] HostCreate stage=init type=%s me=%p\n", typeName, r->me); fflush(stderr); }
+    if (r->me && desc->init) desc->init(r->me);
+    if (GetEnvironmentVariableW(L"C3_COM_TRACE", NULL, 0) > 0) { fprintf(stderr, "[C3_UC] HostCreate stage=init-done type=%s\n", typeName); fflush(stderr); }
         r->ready = 1;   // Fix 112: 之后窗口消息 (Resize/Show/Paint) 才允许进入实例
         vb6_uc_trace("instance.ready", desc->typeName, r->me);
         vb6_uc_pop(&saved);

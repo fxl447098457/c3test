@@ -73,6 +73,13 @@ typedef struct vb6_UCRec {
     void*  font;          // vb6_ComIface_Font*
     int32_t extLeft;      // Extender.Left/Top (容器坐标, 缇)
     int32_t extTop;
+    // Fix 162: Extender/UserControl 的 Width/Height (控件外框, 容器坐标缇)。
+    // 创建入口 (uc_host_create.inc) 的 width/height 形参本就是缇 (它用
+    // vb6_TwipToX 换成 scaleWidth), 故此处是精确值而非像素近似。
+    // 此前 vb6_Extender_Width/Height 在 vb6rtl_com.c 有定义但**从无赋值** →
+    // `Extender.Width` 恒为 0; UserControl.Width/Height 则连声明都没有 → C2065。
+    int32_t extWidth;
+    int32_t extHeight;
     int32_t index;        // 控件数组下标, -1=非数组
     wchar_t ctrlName[VB6_UC_NAME_LEN];
     BSTR    displayNameBstr;   // Fix 116: Ambient.DisplayName 缓存 (控件实例名)
@@ -87,6 +94,7 @@ typedef struct vb6_UCSaved {
     void*   font;
     void*   ambientFont;
     int32_t extLeft, extTop;
+    int32_t extWidth, extHeight;  // Fix 162
     void*   hWnd;                 // Fix 133u: UserControl.hWnd
     int16_t autoRedraw;           // Fix 133u: UserControl.AutoRedraw
     struct vb6_UserControl_Extender_Type ext; // Fix 133u: Extender.Visible/Height
