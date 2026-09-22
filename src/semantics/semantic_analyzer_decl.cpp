@@ -19,6 +19,8 @@ void SemanticAnalyzer::visit(Module& node) {
 }
 
 void SemanticAnalyzer::visit(SubDecl& node) {
+    // 泛型模板 (tB, G2/G3): 模板本体不进符号表 (泛型器注入特化副本)
+    if (!node.typeParams.empty()) return;
     if (pass_ == 1) {
         // Pass1: 注册Sub符号
         auto sym = std::make_unique<Symbol>(
@@ -122,6 +124,8 @@ void SemanticAnalyzer::visit(SubDecl& node) {
 }
 
 void SemanticAnalyzer::visit(FunctionDecl& node) {
+    // 泛型模板 (tB, G2/G3): 见 visit(SubDecl) 同注释
+    if (!node.typeParams.empty()) return;
     if (pass_ == 1) {
         // Pass1: 注册Function符号
         Vb6Type retType = resolveTypeOrDefault(node.name, node.returnType.get());
@@ -233,6 +237,8 @@ void SemanticAnalyzer::visit(FunctionDecl& node) {
 }
 
 void SemanticAnalyzer::visit(PropertyDecl& node) {
+    // 泛型模板 (tB, G2/G3): 见 visit(SubDecl) 同注释
+    if (!node.typeParams.empty()) return;
     if (pass_ == 1) {
         SymbolKind sk;
         switch (node.propKind) {

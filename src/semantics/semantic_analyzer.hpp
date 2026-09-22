@@ -6,6 +6,7 @@
 #include "ast/ast_visitor.hpp"
 #include "semantics/symbol_table.hpp"
 #include "semantics/type_system.hpp"
+#include "semantics/generics_registry.hpp"
 #include "common/diagnostics.hpp"
 #include <string>
 #include <vector>
@@ -113,6 +114,23 @@ public:
     // 的点原样放过 (维持旧行为).
     void resolveDeferredCrossModuleOverloads();
 
+    // 泛型 (tB, G3): 模板登记表只读视图 (driver 在逐模块分析前注入).
+    void setGenericRegistry(const GenRegistry* reg) { genReg_ = reg; }
+    // 推断成功的实例化请求 (驱动 fixpoint 物化) — 取空语义.
+    struct GenInstRequest {
+        std::string flat;                  // 小写扁名
+        std::string base;                  // 模板名 (原大小写)
+        std::vector<std::string> args;     // 类型实参名 (扁名)
+    };
+    std::vector<GenInstRequest> takeGenericRequests() {
+        std::vector<GenInstRequest> out;
+        out.swap(genericRequests_);
+        return out;
+    }
+    // 物化器注入的特化过程增量分析 (模块常规分析已结束时的补注册路径):
+    // 对给定声明按 pass1 注册 + pass2 体分析 走一遍 (与 visit(Module) 同构).
+    void analyzeExtraDecls(const std::vector<Decl*>& decls);
+
 private:
     Diagnostics& diag_;
     SymbolTable symTab_;
@@ -191,9 +209,18 @@ private:
         IndexOrCallExpr* node;
         std::string identName;
         std::vector<Vb6Type> argTypes;
+        // 泛型 (tB, G3): 逐位置实参"是否数组"标记 — 记录时局部作用域尚在,
+        // 可靠查得数组符号 (argTypes 里数组变量只带**元素类型**不带 Array 位,
+        // 且延后绑定期局部作用域已弹出无法回查). 专供 T() 形参位推断, 不污染
+        // argTypes (后者兼作已发货的跨模块重载打分输入).
+        std::vector<bool> argIsArray;
         SourceLocation loc;
     };
     std::vector<DeferredXmodCallSite> deferredXmodCalls_;
+    // 泛型 (tB, G3): 调用点推断 (从模板登记表 AST 形参 + 延后点实参类型绑定)
+    const GenRegistry* genReg_ = nullptr;
+    std::vector<GenInstRequest> genericRequests_;
+    bool tryBindGenericCall(DeferredXmodCallSite& site, GenInstRequest& reqOut);
     // 若 valueExpr 是 AddressOf 且 typeName 是委托: 解析目标过程、签名校验,
     // 通过则在 AddressOfExpr 上打委托标记并登记 cgen 桩生成需求.
     void bindDelegateAddressOf(const std::string& typeName, Expr& valueExpr, SourceLocation loc);

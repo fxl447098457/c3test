@@ -11,6 +11,8 @@ namespace vb6c3 {
 
 
 void CCodeGen::visit(FunctionDecl& node) {
+    // 泛型模板 (tB, G2/G3): 模板本体不发码 (泛型器注入特化副本)
+    if (!node.typeParams.empty()) return;
     std::string sig = makeProcSignature(node);
 
     // Fix 055: Form事件处理函数不能为static, 因为wndproc用extern引用它们

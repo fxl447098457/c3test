@@ -2,6 +2,7 @@
 // 由 src/parser/parser_decl.cpp 拆出（2026-09-17），纯搬移、零行为改动。
 
 #include "parser/parser.hpp"
+#include "semantics/generics_registry.hpp"
 
 namespace vb6c3 {
 
@@ -387,6 +388,15 @@ TypeRefPtr Parser::parseTypeRef() {
             typeRef = std::make_unique<SimpleTypeRef>(loc, qualified);
         }
 
+        // 泛型使用点 (tB): As Foo(Of Long) —— 在数组下标判定之前拦截.
+        // 守卫 (下一 token 必须是 Identifier "Of") 使 T()/T(10) 数组形态不受影响.
+        {
+            std::string baseName = static_cast<SimpleTypeRef*>(typeRef.get())->name;
+            if (tryFlattenGenericName(baseName)) {
+                typeRef = std::make_unique<SimpleTypeRef>(loc, baseName);
+            }
+        }
+
         // 数组类型: Long(), String(10)
         if (match(TokenKind::LeftParen)) {
             std::vector<ArrayTypeRef::Dimension> dims;
@@ -429,6 +439,119 @@ TypeRefPtr Parser::parseTypeRef() {
     diag_.error(DiagnosticID::ParseExpectedToken, currentLoc(),
         "expected type name");
     return std::make_unique<SimpleTypeRef>(loc, "Variant");
+}
+
+// ============================================================
+// 泛型 (tB 扩展, G1) — 声明侧类型参数表 + 使用侧扁名化
+// ============================================================
+// 设计 (与用户确认的计划冻结版一致):
+//   - "Of" 非词法关键字 (避免动关键字表影响存量), 以 Identifier 文本上下文
+//     识别; 触发形态唯一: '(' 后紧跟 Identifier "Of" (大小写无关), 与调用
+//     实参表 (x) / 数组 T() / T(10) 天然无歧义.
+//   - 使用点 Foo(Of Long) 在 parse 期即改写为扁名 (编码见 makeFlatGenericName),
+//     下游 (语义/跨模块/cgen) 只见普通名字, 泛型仅活在泛型器 (G2) 视角内.
+//   - $ 不是合法 VB 标识符字符 → 扁名不可能撞真实名 (cIdent 统一转 '_').
+
+std::string Parser::makeFlatGenericName(const std::string& base,
+                                        const std::vector<std::string>& args) {
+    // 纯下划线编码 (G2 调试结论): '$' 方案会让符号键与 cIdent 产物两种形态在
+    // 各按名查找点系统性错位. 单一实现见 semantics/generics_registry.hpp
+    // (driver 物化器 / analyzer 推断共用).
+    return genMakeFlat(base, args);
+}
+
+std::vector<std::string> Parser::parseTypeParams() {
+    std::vector<std::string> out;
+    // 起点 = 类模块类型参数 (泛型类成员体内仍可见 T, 供 Box(Of T) 护栏命中);
+    // .bas/普通类模块 outerTypeParams_ 恒空 → 与原清空行为逐字节等价.
+    curTypeParams_ = outerTypeParams_;
+    if (!check(TokenKind::LeftParen)) return out;
+    if (peek2().kind != TokenKind::Identifier || toLower(peek2().text) != "of")
+        return out;
+    advance(); // '('
+    advance(); // 'Of'
+    do {
+        auto t = expectName("expected type parameter name");
+        curTypeParams_.push_back(toLower(t.text));
+        out.push_back(t.text);
+    } while (match(TokenKind::Comma));
+    expect(TokenKind::RightParen, DiagnosticID::ParseExpectedToken,
+           "expected ')' after type parameters");
+    return out;
+}
+
+std::string Parser::parseGenericArgFlat() {
+    // 泛型实参 = 类型名 (与 parseTypeRef 同一接受集, 含关键字类型 Long/String…)
+    // + 可选点号限定 + 可选嵌套 (Of …) 递归扁平. 数组实参 (T()) v1 不支持.
+    if (!(cur_.kind == TokenKind::Identifier || cur_.kind == TokenKind::Boolean ||
+          cur_.kind == TokenKind::Byte || cur_.kind == TokenKind::Integer ||
+          cur_.kind == TokenKind::Long || cur_.kind == TokenKind::LongLong ||
+          cur_.kind == TokenKind::LongPtr || cur_.kind == TokenKind::Single ||
+          cur_.kind == TokenKind::Double || cur_.kind == TokenKind::Currency ||
+          cur_.kind == TokenKind::Decimal || cur_.kind == TokenKind::Date ||
+          cur_.kind == TokenKind::Object || cur_.kind == TokenKind::String ||
+          cur_.kind == TokenKind::Variant)) {
+        diag_.error(DiagnosticID::ParseExpectedToken, currentLoc(),
+            "expected type name in generic type argument list");
+        return "";
+    }
+    std::string name = advance().text;
+    while (cur_.kind == TokenKind::Dot) {
+        advance();
+        auto nextTok = expectName("expected qualified type name");
+        name += "." + nextTok.text;
+    }
+    tryFlattenGenericName(name);  // 嵌套: Bar(Of Long) → Bar$gen1$Long
+    return name;
+}
+
+bool Parser::tryFlattenGenericName(std::string& ioName) {
+    if (!check(TokenKind::LeftParen)) return false;
+    if (peek2().kind != TokenKind::Identifier || toLower(peek2().text) != "of")
+        return false;
+    auto loc = currentLoc();
+    (void)loc;
+    advance(); // '('
+    advance(); // 'Of'
+    std::vector<std::string> args;
+    do {
+        std::string a = parseGenericArgFlat();
+        if (a.empty()) {  // 出错恢复: 跳到 ')'
+            while (!check(TokenKind::RightParen) &&
+                   !check(TokenKind::EndOfFile) && !check(TokenKind::NewLine))
+                advance();
+            match(TokenKind::RightParen);
+            return false;
+        }
+        args.push_back(a);
+    } while (match(TokenKind::Comma));
+    expect(TokenKind::RightParen, DiagnosticID::ParseExpectedToken,
+           "expected ')' after generic type arguments");
+
+    // v1 护栏: 模板体内把类型参数当泛型实参 (Box(Of T)) 明确拒绝 — 使用点在
+    // parse 期即折成扁名, T 已被折进串里, 克隆期的 subst (作用于 AST 类型
+    // 引用) 再也替换不到它; 放行会静默产出对不存在类型的引用.
+    for (auto& a : args) {
+        for (auto& tp : curTypeParams_) {
+            if (toLower(a) == tp) {
+                diag_.error(DiagnosticID::ParseExpectedToken, currentLoc(),
+                    "泛型模板体内不能以类型参数 '" + a + "' 作泛型类型实参 (v1 不支持)");
+                return false;
+            }
+        }
+    }
+
+    std::string flat = makeFlatGenericName(ioName, args);
+    // 扁名整体小写化: VB 名字大小写不敏感, C 名大小写敏感 — 保留书写大小写会
+    // 把同一实例化特化成两个类型 (Box_G1_Long vs box_g1_long, C2079 实测).
+    // 小写扁名天然按"同一实例化"去重; 与用户名的撞车由泛型器物化时显式检测.
+    flat = toLower(flat);
+    GenericUse use;
+    use.base = ioName;
+    use.args = args;
+    flatGenerics_[flat] = std::move(use);
+    ioName = flat;
+    return true;
 }
 
 } // namespace vb6c3

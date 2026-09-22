@@ -37,6 +37,8 @@ bool Driver::runSemanticAnalysis(const CompileOptions& options) {
     analyzers_.clear();
     for (auto& module : modules_) {
         auto analyzer = std::make_unique<SemanticAnalyzer>(*diag_, options.verbose);
+        // 泛型 (tB, G3): 调用点推断需要模板只读视图 (runGenericsPrepass 已构建)
+        analyzer->setGenericRegistry(&genView_);
 
         // P6.3: 如果有TypeLib解析结果, 注入COM类型信息到符号表
         if (typelibParser_) {
@@ -342,6 +344,8 @@ bool Driver::runSemanticAnalysis(const CompileOptions& options) {
         // causing false-positive vb6_VariantFromValue() wrapping at call sites → C2440.
         for (auto& otherModule : modules_) {
             if (otherModule.get() == module.get()) continue;
+            // 泛型模板类 (G4): 本体声明不外泄 (特化副本另有扁名, 各自正常预注册)
+            if (!otherModule->classTypeParams.empty()) continue;
             for (auto& decl : otherModule->declarations) {
                 if (decl->kind == ASTNodeKind::EnumDecl) {
                     auto& enumDecl = static_cast<EnumDecl&>(*decl);
@@ -360,7 +364,10 @@ bool Driver::runSemanticAnalysis(const CompileOptions& options) {
                     }
                 } else if (decl->kind == ASTNodeKind::TypeDecl) {
                     auto& typeDecl = static_cast<TypeDecl&>(*decl);
-                    if (typeDecl.access != AccessLevel::Private) {
+                    // 泛型模板 (tB, G2): 不预注册 (泛型器已把特化副本注入声明表,
+                    // 预注册走的就是这条 AST 扫描, 特化副本 typeParams 为空自然通过)
+                    if (typeDecl.typeParams.empty() &&
+                        typeDecl.access != AccessLevel::Private) {
                         std::string lower = Symbol::toLower(typeDecl.name);
                         if (!analyzer->symbolTable().lookupModule(lower)) {
                             auto sym = std::make_unique<Symbol>(

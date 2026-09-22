@@ -4,6 +4,8 @@
 #include <cstdio>
 #include <tuple>
 #include <initializer_list>
+#include <map>
+#include <vector>
 #include "semantics/semantic_analyzer_internal.h"
 
 namespace vb6c3 {
@@ -112,8 +114,19 @@ Symbol* SemanticAnalyzer::resolveOverload(Symbol* head, const std::vector<Vb6Typ
 void SemanticAnalyzer::resolveDeferredCrossModuleOverloads() {
     for (auto& site : deferredXmodCalls_) {
         Symbol* head = symTab_.lookupModule(site.identName);
+        // 普通 (非组) 跨模块过程在场: 调用点归它, 泛型模板不得抢占
+        // (tB 优先级 非泛型 > 泛型; 模板注册符号, 与真实过程同名时只可能
+        //  是模板未发符号的共存)
+        bool plainHead = head && head->isExternal && head->ovlCount == 0 &&
+            (head->kind == SymbolKind::Function || head->kind == SymbolKind::Sub);
         if (!head || !head->isExternal || head->ovlCount == 0 ||
             (head->kind != SymbolKind::Function && head->kind != SymbolKind::Sub)) {
+            // 泛型 (tB, G3): 非跨模组 → 试模板推断绑定 (成功则改写 callee 扁名
+            // 并登记实例化请求; 失败自带诊断, 站点一次性消费不重试)
+            if (!plainHead) {
+                GenInstRequest req;
+                if (tryBindGenericCall(site, req)) genericRequests_.push_back(std::move(req));
+            }
             continue;  // 未注入成组 (单模块裸调/内置/本地) → 旧行为
         }
         std::string suffix;
@@ -122,6 +135,111 @@ void SemanticAnalyzer::resolveDeferredCrossModuleOverloads() {
         if (w) w->isReferenced = true;
     }
     deferredXmodCalls_.clear();
+}
+
+// ============================================================
+// 泛型调用点推断 (tB 扩展, G3)
+// ============================================================
+// 绑定规则 (计划冻结版, 跟 tB 口径): 形参位为类型参数 P (或 P()) 时从对应
+// 实参类型绑定 P; 具体形参只做宽松兼容; 全部 P 未绑齐 → 报"需显式 (Of …)".
+// v1 边界 (文档化): 推断支持标量实参 (含标量数组的 T()); UDT/Object/多维数组
+// 实参要求显式 (Of). 同一 P 多处绑定必须一致.
+bool SemanticAnalyzer::tryBindGenericCall(DeferredXmodCallSite& site,
+                                          GenInstRequest& reqOut) {
+    if (!genReg_ || !site.node) return false;
+    auto it = genReg_->find(Symbol::toLower(site.identName));
+    if (it == genReg_->end()) return false;   // 非模板名: 静默放过 (旧行为)
+    const GenTemplateView& tv = it->second;
+
+    std::vector<std::unique_ptr<ParameterDecl>>* fparams = nullptr;
+    switch (tv.decl->kind) {
+    case ASTNodeKind::SubDecl:
+        fparams = &static_cast<SubDecl*>(tv.decl)->params; break;
+    case ASTNodeKind::FunctionDecl:
+        fparams = &static_cast<FunctionDecl*>(tv.decl)->params; break;
+    case ASTNodeKind::PropertyDecl:
+        fparams = &static_cast<PropertyDecl*>(tv.decl)->params; break;
+    default:
+        return false;  // UDT 模板不经常规调用位实例化 (As 位置显式路径)
+    }
+
+    auto needExplicit = [&](const std::string& why) {
+        diag_.error(DiagnosticID::SemTypeMismatch, site.loc,
+            "无法推断泛型 '" + site.identName + "' 的类型实参: " + why +
+            " (请用 (Of ...) 显式给出)");
+        return false;
+    };
+
+    if (site.argTypes.size() != fparams->size())
+        return needExplicit("实参个数与模板形参不符");
+
+    std::map<std::string, Vb6Type> bound;  // lower(P) → 绑定类型 (已剥数组位)
+    // 数组实参判定读记录期捕获的标记 (见 DeferredXmodCallSite::argIsArray):
+    // 延后绑定期局部作用域已弹出, 现场回查符号不可靠.
+    auto argIsArray = [&](size_t i) -> bool {
+        return i < site.argIsArray.size() && site.argIsArray[i];
+    };
+    for (size_t i = 0; i < site.argTypes.size(); i++) {
+        ParameterDecl* fp = (*fparams)[i].get();
+        const ASTNode* el = fp->asType.get();
+        bool formalArr = false;
+        if (el && el->kind == ASTNodeKind::ArrayTypeRef) {
+            auto& ar = static_cast<const ArrayTypeRef&>(*el);
+            // 0 维 = 形参动态数组 arr() (rank 未定, v1 视作标量元素 T 的数组);
+            // 1 维 = 定长 T(n). 两者都按 T() 位绑定; >1 维才拒 (v1 不支持).
+            if (ar.dimensions.size() > 1)
+                return needExplicit("多维数组形参 (v1 不支持)");
+            el = ar.elementType.get();
+            formalArr = true;
+        }
+        std::string tvar;
+        if (el && el->kind == ASTNodeKind::SimpleTypeRef) {
+            auto& sr = static_cast<const SimpleTypeRef&>(*el);
+            for (auto& tp : tv.typeParams) {
+                if (genLower(tp) == genLower(sr.name)) { tvar = genLower(tp); break; }
+            }
+        }
+        Vb6Type at = site.argTypes[i];
+        if (!tvar.empty()) {
+            if (formalArr) {
+                if (!argIsArray(i))
+                    return needExplicit("形参为 T() 而实参不是数组");
+                uint16_t bits = static_cast<uint16_t>(at);
+                at = static_cast<Vb6Type>(bits & ~static_cast<uint16_t>(Vb6Type::Array));
+            }
+            if (at == Vb6Type::UserDefinedType || at == Vb6Type::Object ||
+                at == Vb6Type::Variant || at == Vb6Type::Unknown ||
+                (static_cast<uint16_t>(at) & static_cast<uint16_t>(Vb6Type::Array)))
+                return needExplicit("实参类型 v1 不可推断 (UDT/Object/Variant/嵌套数组)");
+            auto prev = bound.find(tvar);
+            if (prev == bound.end()) bound[tvar] = at;
+            else if (prev->second != at)
+                return needExplicit("同一类型参数多处绑定不一致");
+        } else {
+            // 具体形参: 宽松兼容判定 (拒显式不可转; 其余交给物化后的既有校验)
+            Vb6Type ft = resolveTypeRef(fp->asType.get());
+            if (ft != Vb6Type::Variant && at != Vb6Type::Variant &&
+                at != Vb6Type::Unknown && ft != at &&
+                !TypeSystem::canImplicitConvert(at, ft))
+                return needExplicit("实参与具体形参类型不符");
+        }
+    }
+
+    std::vector<std::string> argNames;
+    for (auto& tp : tv.typeParams) {
+        auto b = bound.find(genLower(tp));
+        if (b == bound.end())
+            return needExplicit("类型参数只出现在无法推断的位置");
+        argNames.push_back(TypeSystem::typeToString(b->second));
+    }
+
+    auto* id = dynamic_cast<IdentifierExpr*>(site.node->callee.get());
+    if (!id) return needExplicit("调用目标不是标识符形态");
+    reqOut.flat = genMakeFlatLower(site.identName, argNames);
+    reqOut.base = site.identName;
+    reqOut.args = argNames;
+    id->name = reqOut.flat;   // 改写调用点: 下游按普通过程名解析
+    return true;
 }
 
 void SemanticAnalyzer::checkCallArgs(Symbol* procSym, IndexOrCallExpr& callNode) {

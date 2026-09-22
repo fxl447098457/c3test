@@ -69,6 +69,7 @@ std::unique_ptr<SubDecl> Parser::parseSubDecl(AccessLevel access, bool isStatic)
     advance(); // consume 'Sub'
 
     auto nameTok = expectName("expected Sub name");
+    auto typeParams = parseTypeParams();   // 泛型 (tB): Sub Foo(Of T)
     auto params = parseParameterList();
     expectEndOfStatement();
 
@@ -79,8 +80,11 @@ std::unique_ptr<SubDecl> Parser::parseSubDecl(AccessLevel access, bool isStatic)
     expect(TokenKind::Sub, DiagnosticID::ParseMismatchedBlock,
            "expected 'End Sub'");
 
-    return std::make_unique<SubDecl>(loc, access, nameTok.text,
+    auto d = std::make_unique<SubDecl>(loc, access, nameTok.text,
         std::move(params), std::move(body), isStatic);
+    d->typeParams = std::move(typeParams);
+    curTypeParams_.clear();  // G3 护栏窗口只覆盖本模板 params+body
+    return d;
 }
 
 // ============================================================
@@ -92,6 +96,7 @@ std::unique_ptr<FunctionDecl> Parser::parseFunctionDecl(AccessLevel access, bool
     advance(); // consume 'Function'
 
     auto nameTok = expectName("expected Function name");
+    auto typeParams = parseTypeParams();   // 泛型 (tB): Function Foo(Of T)
     auto params = parseParameterList();
 
     TypeRefPtr returnType;
@@ -107,8 +112,11 @@ std::unique_ptr<FunctionDecl> Parser::parseFunctionDecl(AccessLevel access, bool
     expect(TokenKind::Function, DiagnosticID::ParseMismatchedBlock,
            "expected 'End Function'");
 
-    return std::make_unique<FunctionDecl>(loc, access, nameTok.text,
+    auto d = std::make_unique<FunctionDecl>(loc, access, nameTok.text,
         std::move(params), std::move(returnType), std::move(body), isStatic);
+    d->typeParams = std::move(typeParams);
+    curTypeParams_.clear();  // G3 护栏窗口只覆盖本模板 params+As+body
+    return d;
 }
 
 // ============================================================
@@ -133,6 +141,7 @@ std::unique_ptr<PropertyDecl> Parser::parsePropertyDecl(AccessLevel access) {
     }
 
     auto nameTok = expectName("expected Property name");
+    auto typeParams = parseTypeParams();   // 泛型 (tB): Property Get Foo(Of T)
     auto params = parseParameterList();
 
     TypeRefPtr returnType;
@@ -148,8 +157,11 @@ std::unique_ptr<PropertyDecl> Parser::parsePropertyDecl(AccessLevel access) {
     expect(TokenKind::Property, DiagnosticID::ParseMismatchedBlock,
            "expected 'End Property'");
 
-    return std::make_unique<PropertyDecl>(loc, access, propKind,
+    auto d = std::make_unique<PropertyDecl>(loc, access, propKind,
         nameTok.text, std::move(params), std::move(returnType), std::move(body));
+    d->typeParams = std::move(typeParams);
+    curTypeParams_.clear();  // G3 护栏窗口只覆盖本模板 params+As+body
+    return d;
 }
 
 // ============================================================
@@ -160,6 +172,7 @@ std::unique_ptr<TypeDecl> Parser::parseTypeDecl(AccessLevel access) {
     auto loc = currentLoc();
     advance(); // consume 'Type'
     auto nameTok = expectName("expected Type name");
+    auto typeParams = parseTypeParams();   // 泛型 (tB): Type Foo(Of T)
     expectEndOfStatement();
 
     std::vector<std::unique_ptr<TypeMember>> members;
@@ -234,7 +247,10 @@ std::unique_ptr<TypeDecl> Parser::parseTypeDecl(AccessLevel access) {
     expect(TokenKind::Type, DiagnosticID::ParseMismatchedBlock,
            "expected 'End Type'");
 
-    return std::make_unique<TypeDecl>(loc, access, nameTok.text, std::move(members));
+    auto d = std::make_unique<TypeDecl>(loc, access, nameTok.text, std::move(members));
+    d->typeParams = std::move(typeParams);
+    curTypeParams_.clear();  // G3 护栏窗口只覆盖本模板成员类型
+    return d;
 }
 
 // ============================================================

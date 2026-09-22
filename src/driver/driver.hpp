@@ -2,10 +2,12 @@
 // 编译器驱动 - 命令行解析 + 编译流程编排
 
 #include "preprocessor/preprocessor.hpp"
+#include "ast/ast.hpp"              // 泛型 (G2): Decl/Module AST 类型
 #include "semantics/symbol_table.hpp"
 #include "semantics/type_system.hpp"
 #include "com/typelib_parser.hpp"
 #include "project/frm_parser.hpp"
+#include "semantics/generics_registry.hpp"
 #include <array>
 #include <string>
 #include <vector>
@@ -117,6 +119,30 @@ private:
     // 窗体描述 (P7, .frm文件解析结果, 按模块名索引)
     std::map<std::string, FrmFile> frmFiles_;
 
+    // ============================================================
+    // 泛型 (tB 扩展, G2) — 单态化前端
+    // ============================================================
+    // 使用点登记表 (parse 期由 Parser 记录, runParser 合并到这里):
+    //   key = 扁名小写 (Foo$gen1$Long), value = {模板基名, 实参扁名表}
+    struct GenericUseRec { std::string base; std::vector<std::string> args; };
+    std::unordered_map<std::string, GenericUseRec> genericUses_;
+    // 模板登记表: lower(模板名) → 模板声明 + 宿主模块 + 类型参数名表
+    struct GenericTemplateInfo {
+        Module* module = nullptr;
+        Decl* decl = nullptr;          // TypeDecl / SubDecl / FunctionDecl / PropertyDecl
+        std::vector<std::string> typeParams;
+    };
+    std::unordered_map<std::string, GenericTemplateInfo> genericTemplates_;
+    // 泛型类模板 (G4): lower(类名) → 模板 .cls 模块 (本体不发码, 特化=整模块克隆)
+    std::unordered_map<std::string, Module*> genericClassTemplates_;
+    // 模板只读视图 (analyzer 推断用; 与 genericTemplates_ 同步构建)
+    GenRegistry genView_;
+    // 已物化扁名 (fixpoint 去重; 值为 true 即"已注入为普通声明")
+    std::unordered_map<std::string, bool> genericMaterialized_;
+    // cap 护栏 (计划冻结版): 总量 ≤1024, 单名嵌套深度 ≤16
+    static constexpr size_t kGenericMaxInstances = 1024;
+    static constexpr size_t kGenericMaxDepth = 16;
+
     // P6.8: VBP指定的类CLSID映射 (模块名小写 -> CLSID字符串)
     std::unordered_map<std::string, std::string> classClsidMap_;
 
@@ -169,6 +195,11 @@ private:
     bool runParser(const CompileOptions& options);
     bool runTypeLibImport(const CompileOptions& options);  // P6.3: 加载TypeLib+注册COM类型
     bool runSemanticAnalysis(const CompileOptions& options);
+    bool runGenericsPrepass();  // 泛型 (tB): 模板登记 + 使用点物化 (G2)
+    // fixpoint 单轮物化: 消费 genericUses_ 中未物化项; freshOut 收特化副本
+    bool materializeGenerics(std::vector<std::pair<Module*, Decl*>>* freshOut);
+    // 泛型推断 fixpoint (G3): 收请求→物化→增量分析→再跨模块, 至收敛
+    bool runGenericsFixpoint();
     bool runCrossModuleResolution();  // 跨模块符号链接
     bool runCodeGeneration(const CompileOptions& options, const std::string& outputDir);
     void writeErrorLog(const std::string& logPath, const std::string& stage);

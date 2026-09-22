@@ -4,9 +4,23 @@
 
     // --- 声明 ---
 
+    // 泛型 (tB, G1): dump-ast 可见性辅助 — 声明位 typeParams / As 位扁名
+    void printGenTypeParams(const std::vector<std::string>& tp) {
+        if (tp.empty()) return;
+        os_ << " (Of";
+        for (size_t i = 0; i < tp.size(); i++) os_ << (i ? ", " : " ") << tp[i];
+        os_ << ")";
+    }
+    void printGenAsType(const TypeRefPtr& t) {
+        if (!t) return;
+        if (auto* s = dynamic_cast<SimpleTypeRef*>(t.get())) os_ << " As " << s->name;
+        else os_ << " As ...";
+    }
+
     void visit(SubDecl& node) override {
         out() << "Sub " << node.name
               << " (access=" << accessStr(node.access) << ")";
+        printGenTypeParams(node.typeParams);
         if (node.isStatic) os_ << " Static";
         os_ << "\n";
         indent_++;
@@ -18,6 +32,7 @@
     void visit(FunctionDecl& node) override {
         out() << "Function " << node.name
               << " (access=" << accessStr(node.access) << ")";
+        printGenTypeParams(node.typeParams);
         if (node.isStatic) os_ << " Static";
         os_ << "\n";
         indent_++;
@@ -29,7 +44,9 @@
     void visit(PropertyDecl& node) override {
         out() << "Property " << procKindToString(node.propKind)
               << " " << node.name
-              << " (access=" << accessStr(node.access) << ")\n";
+              << " (access=" << accessStr(node.access) << ")";
+        printGenTypeParams(node.typeParams);
+        os_ << "\n";
         indent_++;
         for (auto& p : node.params) visitDeclHelper(*p);
         for (auto& s : node.body) visitStmtHelper(*s);
@@ -38,14 +55,18 @@
 
     void visit(TypeDecl& node) override {
         out() << "Type " << node.name
-              << " (access=" << accessStr(node.access) << ")\n";
+              << " (access=" << accessStr(node.access) << ")";
+        printGenTypeParams(node.typeParams);
+        os_ << "\n";
         indent_++;
         for (auto& m : node.members) visitDeclHelper(*m);
         indent_--;
     }
 
     void visit(TypeMember& node) override {
-        out() << node.name << " As ...";
+        out() << node.name;
+        printGenAsType(node.type);
+        if (!node.type) os_ << " As ...";
         os_ << "\n";
     }
 
@@ -89,6 +110,7 @@
     void visit(VariableDecl& node) override {
         out() << "Dim " << node.name
               << " (access=" << accessStr(node.access) << ")";
+        printGenAsType(node.asType);
         if (!node.dimensions.empty()) os_ << " [array]";
         os_ << "\n";
     }
@@ -99,5 +121,6 @@
         else os_ << " ByRef";
         if (node.isOptional) os_ << " Optional";
         if (node.isParamArray) os_ << " ParamArray";
+        printGenAsType(node.asType);
         os_ << "\n";
     }

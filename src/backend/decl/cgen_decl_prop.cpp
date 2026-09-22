@@ -10,6 +10,8 @@ namespace vb6c3 {
 
 
 void CCodeGen::visit(PropertyDecl& node) {
+    // 泛型模板 (tB, G2/G3): 模板本体不发码 (泛型器注入特化副本)
+    if (!node.typeParams.empty()) return;
     // Property Get/Let/Set → C函数
     // 类模块: 第一个参数为 me 指针
     std::string sig = makePropertySignature(node);

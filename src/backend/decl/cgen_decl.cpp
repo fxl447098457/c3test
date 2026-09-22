@@ -201,6 +201,8 @@ void CCodeGen::visit(EnumMember& node) {
 }
 
 void CCodeGen::visit(TypeDecl& node) {
+    // 泛型模板 (tB, G2): 模板本体不发码 (特化副本由泛型器注入, 是普通 TypeDecl)
+    if (!node.typeParams.empty()) return;
     std::string typeName = cIdent(node.name);
 
     // Fix 010b: 多个VB6模块可能定义同名UDT (如SYSTEMTIME, FILETIME), 用#ifndef防止C2011重定义

@@ -21,6 +21,11 @@ SemanticAnalyzer::SemanticAnalyzer(Diagnostics& diag, bool verbose)
 // ============================================================
 
 bool SemanticAnalyzer::analyze(Module& module) {
+    // 泛型模板类 (tB, G4): 模板本体不进符号表 (类符号/成员/字段全部不注册),
+    // 由泛型器把整模块特化克隆注入 modules_ 走完整管线. 空分析器保持
+    // modules_/analyzers_ 1:1 对齐.
+    if (module.isClassModule && !module.classTypeParams.empty()) return true;
+
     currentModule_ = &module;
 
     // 注册内置对象、函数和常量
@@ -268,6 +273,26 @@ bool SemanticAnalyzer::analyze(Module& module) {
     }
 
     return !diag_.hasErrors();
+}
+
+// 泛型 (tB, G3): 物化器在模块常规分析结束后注入特化副本的增量两遍分析.
+// 与 analyze() 的声明表处理同构 (TypeDecl 预扫 → pass1 注册 → pass2 体分析),
+// 但不重复 builtins/类符号/DefType/options (模块本体已处理完).
+void SemanticAnalyzer::analyzeExtraDecls(const std::vector<Decl*>& decls) {
+    pass_ = 1;
+    for (auto* d : decls) {
+        if (d->kind == ASTNodeKind::TypeDecl || d->kind == ASTNodeKind::EnumDecl ||
+            d->kind == ASTNodeKind::DelegateDecl) {
+            dispatchDecl(*d, *this);
+        }
+    }
+    for (auto* d : decls) {
+        registerDecl(*d);
+    }
+    pass_ = 2;
+    for (auto* d : decls) {
+        dispatchDecl(*d, *this);
+    }
 }
 
 void SemanticAnalyzer::dumpSymbols(std::ostream& os) const {

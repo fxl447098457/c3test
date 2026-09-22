@@ -83,6 +83,32 @@ void Parser::parseModuleBody(Module& mod) {
         skipNewLines();
         if (cur_.kind == TokenKind::EndOfFile) break;
 
+        // 泛型类 (tB 扩展, G4): 类模块可选头行 `Class Name(Of T[,U])`.
+        // VB6 语言不存在语句位置的 Class 关键字 → 存量 .cls 零误伤;
+        // 类型参数经 outerTypeParams_ 贯穿整个模块体 (护栏 + 特化克隆).
+        if (mod.isClassModule && cur_.kind == TokenKind::Class &&
+            peek2().kind == TokenKind::Identifier && mod.classTypeParams.empty()) {
+            advance(); // 'Class'
+            auto nameTok = advance(); // 类名
+            auto tp = parseTypeParams();
+            if (tp.empty()) {
+                diag_.error(DiagnosticID::ParseExpectedToken, currentLoc(),
+                    "泛型类头行需要 (Of T[,U]) 类型参数表: Class " + nameTok.text);
+            }
+            mod.classTypeParams = tp;
+            if (mod.moduleName.empty()) mod.moduleName = nameTok.text;
+            outerTypeParams_ = curTypeParams_;  // 提升到模块层
+            classHeaderSeen_ = true;
+            expectEndOfStatement();
+            continue;
+        }
+        if (classHeaderSeen_ && mod.isClassModule &&
+            cur_.kind == TokenKind::End && peek2().kind == TokenKind::Class) {
+            advance(); advance();  // 'End Class'
+            expectEndOfStatement();
+            continue;
+        }
+
         // Option 语句 (必须在最前面)
         if (cur_.kind == TokenKind::Option) {
             mod.options.push_back(parseOption());

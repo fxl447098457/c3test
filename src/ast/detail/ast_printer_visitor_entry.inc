@@ -6,6 +6,14 @@
 
     void print(Module& module) {
         os_ << "Module: " << module.filename << "\n";
+        if (!module.classTypeParams.empty()) {
+            os_ << "  [generic class template, typeParams=";
+            for (size_t i = 0; i < module.classTypeParams.size(); i++) {
+                if (i) os_ << ",";
+                os_ << module.classTypeParams[i];
+            }
+            os_ << "]\n";
+        }
         indent_++;
         for (auto& opt : module.options) visitStmtHelper(*opt);
         for (auto& imp : module.implements) visitStmtHelper(*imp);

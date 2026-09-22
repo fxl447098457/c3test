@@ -12,6 +12,9 @@ namespace vb6c3 {
 
 
 void SemanticAnalyzer::visit(TypeDecl& node) {
+    // 泛型模板 (tB, G2): 不进符号表 —— 泛型器已按使用点注入特化副本,
+    // 模板本体对下游不存在 (未实例化即被引用会在符号查找处自然失败).
+    if (!node.typeParams.empty()) return;
     if (pass_ == 1) {
         auto sym = std::make_unique<Symbol>(
             SymbolKind::UserDefinedType, node.name,

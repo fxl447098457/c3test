@@ -311,7 +311,11 @@ ExprPtr Parser::parseLiteral() {
 ExprPtr Parser::parseIdentifierOrCall() {
     auto loc = currentLoc();
     auto nameTok = advance();
-    auto expr = std::make_unique<IdentifierExpr>(loc, nameTok.text);
+    std::string name = nameTok.text;
+    // 泛型使用点 (tB): Foo(Of Long)(x) —— 先把 (Of …) 尾巴扁进名字,
+    // 剩下的 (...) 才由 parsePostfix 当作真正的实参表.
+    tryFlattenGenericName(name);
+    auto expr = std::make_unique<IdentifierExpr>(loc, name);
 
     // 后缀处理: 可能是函数调用 arr(i) 或 func(x,y)
     return parsePostfix(std::move(expr));
@@ -340,6 +344,8 @@ ExprPtr Parser::parseNewExpr() {
         auto nextTok = expectName("expected class name after '.'");
         className += "." + nextTok.text;
     }
+    // 泛型使用点 (tB): New Foo(Of Long) — 扁名化, 泛型器据此特化类模块
+    tryFlattenGenericName(className);
     return std::make_unique<NewExpr>(loc, className);
 }
 
