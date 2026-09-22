@@ -645,6 +645,7 @@ std::unique_ptr<SubDecl> ASTCloner::cloneSubDecl(const SubDecl& d,
     if (failed_) return nullptr;
     auto out = std::make_unique<SubDecl>(d.loc, d.access, newName, std::move(params),
                                          std::move(body), d.isStatic);
+    out->implementsClauses = d.implementsClauses;
     return out;
 }
 
@@ -660,8 +661,10 @@ std::unique_ptr<FunctionDecl> ASTCloner::cloneFunctionDecl(const FunctionDecl& d
     if (d.returnType && !ret) { failed_ = true; return nullptr; }
     auto body = cloneStmtList(d.body);
     if (failed_) return nullptr;
-    return std::make_unique<FunctionDecl>(d.loc, d.access, newName, std::move(params),
-                                          std::move(ret), std::move(body), d.isStatic);
+    auto out = std::make_unique<FunctionDecl>(d.loc, d.access, newName, std::move(params),
+                                              std::move(ret), std::move(body), d.isStatic);
+    out->implementsClauses = d.implementsClauses;
+    return out;
 }
 
 std::unique_ptr<PropertyDecl> ASTCloner::clonePropertyDecl(const PropertyDecl& d,
@@ -679,6 +682,7 @@ std::unique_ptr<PropertyDecl> ASTCloner::clonePropertyDecl(const PropertyDecl& d
     auto out = std::make_unique<PropertyDecl>(d.loc, d.access, d.propKind, newName,
                                               std::move(params), std::move(ret), std::move(body));
     out->isDefault = d.isDefault;
+    out->implementsClauses = d.implementsClauses;
     return out;
 }
 

@@ -10,10 +10,16 @@
 #include "semantics/interfaces_registry.hpp"
 #include "common/diagnostics.hpp"
 #include <string>
+#include <set>
+#include <utility>
 #include <vector>
 #include <iostream>
 
 namespace vb6c3 {
+
+// 成员级 `Implements I.M[, I.N]` 尾子句的定位键 (tB 扩展, ai/022 B02b):
+// (所属过程声明节点, 子句在该声明尾部列表中的序号).
+using IfaceClauseRef = std::pair<const Decl*, size_t>;
 
 // ============================================================
 // 语义分析器
@@ -166,7 +172,12 @@ private:
     // 同一套 ifaceSlotKey/ifaceSigFromDecl 规范函数取名 (源码签名口径).
     // 与 legacy VB6 Implements (warn 级 + IFace_M 命名约定) 互斥, 见 analyze() 分叉.
     void checkNewStyleInterface(const Module& module, const IfaceView& view,
-                                const std::string& writtenName, const SourceLocation& loc);
+                                const std::string& writtenName, const SourceLocation& loc,
+                                std::set<IfaceClauseRef>& boundClauses);
+    // 成员级 `Implements I.M[, I.N]` 子句 (tB, B02b) 的兜底诊断: 每条子句都必须被某个
+    // 新式契约比对接纳, 否则它就是静默失效的摆设; 非类模块里的子句一并在此报错.
+    void checkMemberImplementsClauses(const Module& module,
+                                      const std::set<IfaceClauseRef>& boundClauses);
         std::vector<std::pair<std::string, SourceLocation>> gosubTargetLabels_;  // P12.5: GoSub引用的标签+位置
 
     // ---- 内部辅助 ----

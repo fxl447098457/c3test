@@ -33,6 +33,16 @@ public:
           defaultValue(std::move(defVal)) {}
 };
 
+// 成员级 Implements 尾子句 (tB 扩展; ai/022 D5, 批次 B02b):
+//   Private Sub OpenFile(s As String) Implements IStorage.Open, IStream.Read
+// 一个成员可同时绑定多个接口槽 (逗号列表), ifaceName/memberName 均留原样大小写,
+// 由语义层按小写键解到具体槽. 只有 Sub/Function/Property 三种节点持有该列表.
+struct ImplementsClause {
+    std::string ifaceName;
+    std::string memberName;
+    SourceLocation loc;
+};
+
 // Sub 声明: [Public|Private] Sub name(params) ... End Sub
 class SubDecl : public Decl {
 public:
@@ -44,6 +54,7 @@ public:
     // 泛型 (tB 扩展): 非空 = 泛型模板 (声明位 (Of T[,U]) 的类型参数名表).
     // 模板声明不进符号表, 由泛型器 (driver_generics) 按使用点特化克隆.
     std::vector<std::string> typeParams;
+    std::vector<ImplementsClause> implementsClauses;  // B02b, 空 = 无显式绑定
 
     SubDecl(SourceLocation loc, AccessLevel acc, std::string n,
             std::vector<std::unique_ptr<ParameterDecl>> p, StmtList b,
@@ -64,6 +75,7 @@ public:
     bool isStatic = false;
     // 泛型 (tB 扩展): 见 SubDecl::typeParams 注释
     std::vector<std::string> typeParams;
+    std::vector<ImplementsClause> implementsClauses;  // B02b, 见 SubDecl
 
     FunctionDecl(SourceLocation loc, AccessLevel acc, std::string n,
                  std::vector<std::unique_ptr<ParameterDecl>> p,
@@ -85,6 +97,7 @@ public:
     bool isDefault = false;  // 是否为默认属性
     // 泛型 (tB 扩展): 见 SubDecl::typeParams
     std::vector<std::string> typeParams;
+    std::vector<ImplementsClause> implementsClauses;  // B02b, 见 SubDecl
 
     PropertyDecl(SourceLocation loc, AccessLevel acc, ProcKind kind,
                  std::string n, std::vector<std::unique_ptr<ParameterDecl>> p,

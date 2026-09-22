@@ -134,6 +134,9 @@ private:
     // pendingAttrs = 声明上方累积的 [Xxx] 属性行 (由 parseModuleBody 交出)
     std::unique_ptr<InterfaceDecl> parseInterfaceDecl(std::vector<InterfaceAttr>& pendingAttrs);
     DeclPtr parseInterfaceMemberDecl();
+    // 成员级 `Implements I.M[, I.N]` 尾子句 (tB 扩展, ai/022 D5, B02b):
+    // 在过程签名之后、行尾之前调用; 无 Implements 时不消费任何 token.
+    void parseTrailingImplementsClauses(std::vector<ImplementsClause>& out);
     bool atBracketAttrLine() const;
     bool parseBracketAttrLine(InterfaceAttr& out);
     std::unique_ptr<ConstDecl> parseConstDecl(AccessLevel access);

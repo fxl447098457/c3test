@@ -230,6 +230,8 @@ bool SemanticAnalyzer::analyze(Module& module) {
     }
 
     // Pass 2 结束后，验证 Implements 语句
+    // 成员级 `Implements I.M` 子句 (B02b) 由新式比对逐条认领, 认领不到的在下面兜底报错
+    std::set<IfaceClauseRef> boundClauses;
     if (module.isClassModule && !module.implements.empty()) {
         auto* classSym = symTab_.lookupModule(module.moduleName);
         if (classSym && classSym->kind == SymbolKind::Class) {
@@ -240,7 +242,8 @@ bool SemanticAnalyzer::analyze(Module& module) {
                 if (ifaceReg_) {
                     auto found = ifaceReg_->find(Symbol::toLower(ifaceName));
                     if (found != ifaceReg_->end()) {
-                        checkNewStyleInterface(module, found->second, ifaceName, impl->loc);
+                        checkNewStyleInterface(module, found->second, ifaceName, impl->loc,
+                                               boundClauses);
                         continue;
                     }
                 }
@@ -280,6 +283,7 @@ bool SemanticAnalyzer::analyze(Module& module) {
             }
         }
     }
+    checkMemberImplementsClauses(module, boundClauses);
 
     return !diag_.hasErrors();
 }

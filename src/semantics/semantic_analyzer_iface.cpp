@@ -13,7 +13,9 @@
 #include "semantics/interfaces_registry.hpp"
 
 #include <map>
+#include <set>
 #include <string>
+#include <vector>
 
 namespace vb6c3 {
 namespace {
@@ -29,11 +31,75 @@ std::string ifaceBareName(const std::string& slotKey) {
     return slotKey;
 }
 
+// 过程声明尾部的成员级 Implements 子句 (B02b); 非过程声明 = nullptr
+const std::vector<ImplementsClause>* procImplementsClauses(const Decl& d) {
+    switch (d.kind) {
+        case ASTNodeKind::SubDecl:
+            return &static_cast<const SubDecl&>(d).implementsClauses;
+        case ASTNodeKind::FunctionDecl:
+            return &static_cast<const FunctionDecl&>(d).implementsClauses;
+        case ASTNodeKind::PropertyDecl:
+            return &static_cast<const PropertyDecl&>(d).implementsClauses;
+        default:
+            return nullptr;
+    }
+}
+
+// 属性成员槽键的前缀 (Sub/Function = 空), 与 ifaceSlotKey 同一套 COM 惯例 (D2)
+std::string procSlotPrefix(const Decl& d) {
+    if (d.kind != ASTNodeKind::PropertyDecl) return std::string();
+    switch (static_cast<const PropertyDecl&>(d).propKind) {
+        case ProcKind::PropertyGet: return "get_";
+        case ProcKind::PropertyLet: return "put_";
+        case ProcKind::PropertySet: return "putref_";
+        default:                    return std::string();
+    }
+}
+
+// `Project.IFoo` 式限定名的末段 (与模块级 parseImplements 的点号拼接对称, Fix 083)
+std::string ifaceLastSegment(const std::string& s) {
+    size_t p = s.rfind('.');
+    return p == std::string::npos ? s : s.substr(p + 1);
+}
+
+bool ifaceNameMatches(const std::string& written, const std::string& name) {
+    const std::string lower = ifaceLower(name);
+    return ifaceLower(written) == lower || ifaceLower(ifaceLastSegment(written)) == lower;
+}
+
+// 子句 `I.M` 在 view 展平槽表里对应的槽 (B02b)。两个自由度都要覆盖:
+//   - M 写成员名 (`I.Name`) → 按实现成员的 procKind 补 get_/put_/putref_ 前缀;
+//     同时允许直接写槽名 (`I.get_Name`)。
+//   - I 写链上任一接口名 (`Extends` 继承来的槽也算), 见 IfaceSlotView::ownerIface。
+const IfaceSlotView* findClauseSlot(const IfaceView& view, const std::string& writtenIface,
+                                    const Decl& implDecl, const std::string& memberName) {
+    const std::string bare = ifaceLower(memberName);
+    const std::string prefixed = procSlotPrefix(implDecl) + bare;
+    for (const std::string& key : {prefixed, bare}) {
+        for (const auto& slot : view.slots) {
+            if (slot.key != key) continue;
+            if (ifaceNameMatches(writtenIface, slot.ownerIface) ||
+                ifaceNameMatches(writtenIface, view.name)) {
+                return &slot;
+            }
+        }
+    }
+    return nullptr;
+}
+
+const IfaceView* lookupWrittenIface(const IfaceRegistry* reg, const std::string& written) {
+    if (!reg) return nullptr;
+    auto it = reg->find(ifaceLower(written));
+    if (it == reg->end()) it = reg->find(ifaceLower(ifaceLastSegment(written)));
+    return it == reg->end() ? nullptr : &it->second;
+}
+
 } // namespace
 
 void SemanticAnalyzer::checkNewStyleInterface(const Module& module, const IfaceView& view,
                                               const std::string& writtenName,
-                                              const SourceLocation& loc) {
+                                              const SourceLocation& loc,
+                                              std::set<IfaceClauseRef>& boundClauses) {
     // D11 v1 边界: 泛型类不得实现接口 (泛型器已拒 Implements, 这里兜住新式路径)
     if (!module.classTypeParams.empty()) {
         diag_.error(DiagnosticID::SemInterfaceNotImplemented, loc,
@@ -43,19 +109,42 @@ void SemanticAnalyzer::checkNewStyleInterface(const Module& module, const IfaceV
     }
     if (view.chainBroken) return;  // 建表阶段 (stage 2.7) 已就该接口报过错, 不再级联
 
-    // 实现侧成员表: 槽键 → 签名 (同名多成员映射到同一槽 = 契约歧义, 报错)
+    // 实现侧成员表: 槽键 → 签名 (两席争同一槽 = 契约歧义, 报错)
     std::map<std::string, IfaceProcSig> impl;
-    for (const auto& d : module.declarations) {
-        if (!d) continue;
-        IfaceProcSig sig;
-        if (!ifaceSigFromDecl(*d, sig)) continue;
-        const std::string key = sig.slotKey;  // emplace 会移空 sig, 诊断文本先留一份
-        auto res = impl.emplace(key, std::move(sig));
+    auto bindSlot = [&](const std::string& key, const IfaceProcSig& sig,
+                        const SourceLocation& where) {
+        auto res = impl.emplace(key, sig);
         if (!res.second) {
-            diag_.error(DiagnosticID::SemInterfaceSignatureMismatch, d->loc,
+            diag_.error(DiagnosticID::SemInterfaceSignatureMismatch, where,
                 "Class '" + module.moduleName + "' has two members bound to interface '" +
                 view.name + "' slot '" + key + "'");
         }
+    };
+
+    // --- 显式绑定 (B02b): 写了子句的成员**只**按子句入座, 不再参与同名隐式匹配 ---
+    std::set<const Decl*> explicitDecls;
+    for (const auto& d : module.declarations) {
+        if (!d) continue;
+        const std::vector<ImplementsClause>* clauses = procImplementsClauses(*d);
+        if (!clauses || clauses->empty()) continue;
+        explicitDecls.insert(d.get());
+        IfaceProcSig sig;
+        if (!ifaceSigFromDecl(*d, sig)) continue;
+        for (size_t i = 0; i < clauses->size(); i++) {
+            const ImplementsClause& c = (*clauses)[i];
+            const IfaceSlotView* slot = findClauseSlot(view, c.ifaceName, *d, c.memberName);
+            if (!slot) continue;  // 不属于本接口: 留给别的接口认领, 都没认领则由兜底诊断报错
+            boundClauses.insert(IfaceClauseRef(d.get(), i));
+            bindSlot(slot->key, sig, d->loc);
+        }
+    }
+
+    // --- 隐式匹配: 同名即入席 (大小写不敏感, 含属性三槽) ---
+    for (const auto& d : module.declarations) {
+        if (!d || explicitDecls.count(d.get())) continue;
+        IfaceProcSig sig;
+        if (!ifaceSigFromDecl(*d, sig)) continue;
+        bindSlot(sig.slotKey, sig, d->loc);
     }
 
     for (const auto& slot : view.slots) {
@@ -78,6 +167,63 @@ void SemanticAnalyzer::checkNewStyleInterface(const Module& module, const IfaceV
                 "Implements " + writtenName + ": member '" + member +
                 "' signature mismatch (interface: " + want.text + ", class: " +
                 it->second.text + ")");
+        }
+    }
+}
+
+// ============================================================
+// 成员级 Implements 子句的兜底诊断 (B02b)
+// ============================================================
+//
+// 子句只有在"本类确实实现了那个接口"时才有意义。checkNewStyleInterface 每处理一个
+// 新式接口就把认领掉的子句记进 boundClauses; 这里剩下的就是永远不会生效的写法,
+// 三种成因分开给一句话, 免得使用者猜: 宿主不是类模块 / 接口名不存在或是 legacy
+// 类 / 类没实现该接口 / 接口里没有这个成员。
+void SemanticAnalyzer::checkMemberImplementsClauses(
+        const Module& module, const std::set<IfaceClauseRef>& boundClauses) {
+    // 泛型宿主: D11 边界已由契约比对报过错, 不再级联
+    if (!module.classTypeParams.empty()) return;
+
+    // 本类模块级 Implements 命中的新式接口集合 (按登记表节点身份比对, 规避大小写/限定名)
+    std::set<const IfaceView*> implemented;
+    for (const auto& impl : module.implements) {
+        if (!impl) continue;
+        if (const IfaceView* v = lookupWrittenIface(ifaceReg_, impl->interfaceName)) {
+            implemented.insert(v);
+        }
+    }
+
+    for (const auto& d : module.declarations) {
+        if (!d) continue;
+        const std::vector<ImplementsClause>* clauses = procImplementsClauses(*d);
+        if (!clauses || clauses->empty()) continue;
+        IfaceProcSig sig;
+        if (!ifaceSigFromDecl(*d, sig)) continue;
+        for (size_t i = 0; i < clauses->size(); i++) {
+            const ImplementsClause& c = (*clauses)[i];
+            if (!module.isClassModule) {
+                diag_.error(DiagnosticID::SemInterfaceClauseUnbound, c.loc,
+                    "Member-level Implements is only valid in a class module (found one on " +
+                    sig.text + ")");
+                continue;
+            }
+            if (boundClauses.count(IfaceClauseRef(d.get(), i))) continue;
+            const IfaceView* tgt = lookupWrittenIface(ifaceReg_, c.ifaceName);
+            std::string msg;
+            if (!tgt) {
+                Symbol* legacy = symTab_.lookupModule(ifaceLastSegment(c.ifaceName));
+                msg = (legacy && legacy->kind == SymbolKind::Class)
+                    ? "Member-level Implements cannot bind to class '" + c.ifaceName +
+                      "' (only Interface declarations carry a checked contract)"
+                    : "Member-level Implements: interface '" + c.ifaceName + "' not found";
+            } else if (!implemented.count(tgt)) {
+                msg = "Member-level Implements: class '" + module.moduleName +
+                      "' does not implement interface '" + c.ifaceName + "'";
+            } else {
+                msg = "Member-level Implements: interface '" + c.ifaceName + "' has no member '" +
+                      c.memberName + "' for " + sig.procKind + " '" + sig.memberName + "'";
+            }
+            diag_.error(DiagnosticID::SemInterfaceClauseUnbound, c.loc, msg);
         }
     }
 }

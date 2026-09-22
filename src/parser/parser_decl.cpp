@@ -61,6 +61,61 @@ DeclPtr Parser::parseDeclaration() {
 }
 
 // ============================================================
+// 成员级 Implements 尾子句 (tB 扩展, ai/022 D5, 批次 B02b)
+// ============================================================
+//
+//   Private Sub OpenFile(s As String) Implements IStorage.Open, IStream.Read
+//
+// VB6 里"过程签名后跟 Implements"必然在 expectEndOfStatement() 处报 VB2003, 因此本
+// 子句属"错误→可解析"的安全新增 (同 B01 属性行手法). 解出的 iface/member 名不在此处
+// 校验语义, 由 checkNewStyleInterface 按登记表小写键解析.
+//
+// 点号拼接口径与模块级 parseImplements (Fix 083) 一致: `A.B.C` 的接口名取 `A.B`
+// (工程/库限定), 成员名取末段.
+void Parser::parseTrailingImplementsClauses(std::vector<ImplementsClause>& out) {
+    if (cur_.kind != TokenKind::Implements) return;
+    advance(); // 'Implements'
+
+    // 畸形输入只报一条诊断: 留在行尾 NewLine 上让调用方的 expectEndOfStatement 正常通过.
+    auto skipRestOfLine = [&]() {
+        while (cur_.kind != TokenKind::NewLine && cur_.kind != TokenKind::EndOfFile) {
+            advance();
+        }
+    };
+
+    for (;;) {
+        if (!canBeName(cur_.kind)) {
+            diag_.error(DiagnosticID::ParseExpectedToken, currentLoc(),
+                "expected interface member name after 'Implements'");
+            skipRestOfLine();
+            return;
+        }
+        ImplementsClause c;
+        c.loc = currentLoc();
+        std::vector<std::string> parts;
+        parts.push_back(advance().text);
+        while (cur_.kind == TokenKind::Dot && canBeName(peek2().kind)) {
+            advance(); // '.'
+            parts.push_back(advance().text);
+        }
+        if (parts.size() < 2) {
+            diag_.error(DiagnosticID::ParseInvalidInterfaceMember, c.loc,
+                "Member-level Implements needs a qualified name: Implements <Interface>.<Member> (got " +
+                parts.front() + ")");
+        } else {
+            for (size_t i = 0; i + 1 < parts.size(); i++) {
+                if (i) c.ifaceName += ".";
+                c.ifaceName += parts[i];
+            }
+            c.memberName = parts.back();
+            out.push_back(std::move(c));   // 畸形子句不入列表: 语义层不再二次报错
+        }
+        if (cur_.kind != TokenKind::Comma) break;
+        advance(); // ','
+    }
+}
+
+// ============================================================
 // Sub 声明
 // ============================================================
 
@@ -71,6 +126,8 @@ std::unique_ptr<SubDecl> Parser::parseSubDecl(AccessLevel access, bool isStatic)
     auto nameTok = expectName("expected Sub name");
     auto typeParams = parseTypeParams();   // 泛型 (tB): Sub Foo(Of T)
     auto params = parseParameterList();
+    std::vector<ImplementsClause> clauses;
+    parseTrailingImplementsClauses(clauses);   // B02b
     expectEndOfStatement();
 
     auto body = parseBlockUntil({TokenKind::End});
@@ -83,6 +140,7 @@ std::unique_ptr<SubDecl> Parser::parseSubDecl(AccessLevel access, bool isStatic)
     auto d = std::make_unique<SubDecl>(loc, access, nameTok.text,
         std::move(params), std::move(body), isStatic);
     d->typeParams = std::move(typeParams);
+    d->implementsClauses = std::move(clauses);   // B02b
     curTypeParams_.clear();  // G3 护栏窗口只覆盖本模板 params+body
     return d;
 }
@@ -103,6 +161,8 @@ std::unique_ptr<FunctionDecl> Parser::parseFunctionDecl(AccessLevel access, bool
     if (match(TokenKind::As)) {
         returnType = parseTypeRef();
     }
+    std::vector<ImplementsClause> clauses;
+    parseTrailingImplementsClauses(clauses);   // B02b: 子句写在 `As Type` 之后
     expectEndOfStatement();
 
     auto body = parseBlockUntil({TokenKind::End});
@@ -115,6 +175,7 @@ std::unique_ptr<FunctionDecl> Parser::parseFunctionDecl(AccessLevel access, bool
     auto d = std::make_unique<FunctionDecl>(loc, access, nameTok.text,
         std::move(params), std::move(returnType), std::move(body), isStatic);
     d->typeParams = std::move(typeParams);
+    d->implementsClauses = std::move(clauses);   // B02b
     curTypeParams_.clear();  // G3 护栏窗口只覆盖本模板 params+As+body
     return d;
 }
@@ -148,6 +209,8 @@ std::unique_ptr<PropertyDecl> Parser::parsePropertyDecl(AccessLevel access) {
     if (match(TokenKind::As)) {
         returnType = parseTypeRef();
     }
+    std::vector<ImplementsClause> clauses;
+    parseTrailingImplementsClauses(clauses);   // B02b: 子句写在 `As Type` 之后
     expectEndOfStatement();
 
     auto body = parseBlockUntil({TokenKind::End});
@@ -160,6 +223,7 @@ std::unique_ptr<PropertyDecl> Parser::parsePropertyDecl(AccessLevel access) {
     auto d = std::make_unique<PropertyDecl>(loc, access, propKind,
         nameTok.text, std::move(params), std::move(returnType), std::move(body));
     d->typeParams = std::move(typeParams);
+    d->implementsClauses = std::move(clauses);   // B02b
     curTypeParams_.clear();  // G3 护栏窗口只覆盖本模板 params+As+body
     return d;
 }

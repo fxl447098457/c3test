@@ -78,6 +78,7 @@ enum class DiagnosticID : uint16_t {
     SemInterfaceSlotConflict = 3016,       // 链上槽名冲突 / 接口内同名重载
     SemInterfaceSignatureMismatch = 3017,  // 实现成员签名与接口槽不符
     SemInterfaceNotSupported = 3018,       // v1 边界: 该处的 Interface 用法尚不支持
+    SemInterfaceClauseUnbound = 3019,      // 成员级 Implements 子句没被任何契约比对接纳 (B02b)
 
     // 代码生成 (4xxx)
     CodeGenUnsupportedFeature = 4001,
