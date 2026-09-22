@@ -26,6 +26,15 @@
     // VB6默认值 → C表达式
     std::string defaultValue(Vb6Type type) const;
 
+    // Fix 190: Optional 形参省略时, 按形参传值方式给出缺省实参表达式.
+    // ByVal 形参直接给值; ByRef 形参 (C 形参是 T*) 必须给 &(T){缺省值} —— 否则把
+    // T 值当 T* 交给被调方, 被调方解引用 (如 String 的 (*p)) 会把 T 的数据首几字节
+    // 当指针用: Optional ByRef String 交 vb6_BSTR_Empty() 的 BSTR 值 → 被调方读到
+    // BSTR 数据首 4 字节 (L"" 之后的未初始化堆字节) → 在 OLEAUT32 里 AV.
+    // explicitDefault 非空时优先用它 (形参自带 `= 常量` 缺省).
+    std::string defaultArgForParam(Vb6Type type, bool isByVal,
+                                   const std::string& explicitDefault) const;
+
     // ---- 标识符命名 ----
 
     // VB6标识符 → 安全C标识符 (处理关键字冲突、特殊字符)

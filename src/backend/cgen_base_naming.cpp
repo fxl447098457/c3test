@@ -1,6 +1,6 @@
 // cgen_base_naming.cpp - C3 代码生成: 默认值 / 标识符转换 / 常量查询 / 过程名
 // 2026-09-17 从 src/backend/cgen_base.cpp 纯搬移（原第 1538~1746 行，逐行未改）。
-// 函数: defaultValue / cIdent / resolveArrayTargetIdent / lookupConstSym / isStringConstIdent / isConstIdent / constIdentType / wrapConstArgForByRef / cProcName
+// 函数: defaultValue / cIdent / resolveArrayTargetIdent / lookupConstSym / isStringConstIdent / isConstIdent / constIdentType / wrapConstArgForByRef / wrapByRefVariantParamArg / cProcName
 
 #include "backend/cgen.hpp"
 #include <algorithm>
@@ -40,6 +40,26 @@ std::string CCodeGen::defaultValue(Vb6Type type) const {
         default:
             return "0";  // Fix 010q: safe default instead of vb6_VariantEmpty()
     }
+}
+
+// Fix 190: Optional 形参省略时的缺省实参表达式 (按传值方式包装).
+// 位置实参补齐路径 (cgen_expr_call_opt_pad.inc / cgen_expr_call_arg_emit.inc 的
+// Fix 142 分支) 早已做此包装, 命名实参补齐路径 (cgen_expr_call_named_args.inc)
+// 漏了 —— 于 `m_oSocket.Create SocketType:=x` 这类命名调用上爆发:
+// Optional ByRef String 形参被填成 vb6_BSTR_Empty() 的 BSTR **值**, 传到声明为
+// BSTR* 的 C 形参后, 被调方 (*SocketAddress) 把 BSTR 数据首 4 字节当 BSTR 指针,
+// 在 OLEAUT32 里对 0xBAAD0000 (L"" 之后的未初始化堆字节) 解引用 → 0xC0000005.
+std::string CCodeGen::defaultArgForParam(Vb6Type type, bool isByVal,
+                                        const std::string& explicitDefault) const {
+    std::string defVal = (explicitDefault.empty() ? defaultValue(type) : explicitDefault);
+    if (isByVal) return defVal;
+    std::string cType = mapType(type);
+    // P20-36: Variant/struct 类型不能用 {函数调用} 复合字面量
+    if (type == Vb6Type::Variant || type == Vb6Type::Empty
+        || type == Vb6Type::Null || type == Vb6Type::Object) {
+        return "&(" + cType + "){0}";
+    }
+    return "&(" + cType + "){" + defVal + "}";
 }
 
 // ============================================================
@@ -244,6 +264,40 @@ std::string CCodeGen::wrapConstArgForByRef(const std::string& argVal, Vb6Type pa
     std::string cType = mapType(paramVb6Type);
     if (cType.empty()) cType = "int32_t";
     return "(&(" + cType + "){" + argVal + "})";
+}
+
+// Fix 189: 当前函数的 ByRef 具体类型形参 (C 形参是 T*, 如 int32_t*/BSTR*) 作为
+// **ByRef Variant** 形参的实参时, 不能把 T* 直接当 vb6_VARIANT* 交出去 ——
+// 被调方 `vb6_VariantFromValue((*p))` 会把 T 的字节当 VARIANT.vt 解析
+// (vt 取到端口号 800 / BSTR 指针低位), 后续按 vt 取字段 → 解引用垃圾 BSTR →
+// 0xC0000005 (OLEAUT32). 按当前形参的 VB 类型生成字段式 VARIANT 复合字面量,
+// 取址后作为实参. 返回空串 = 该类型不适用 (Variant/Object/UDT/未知),
+// 调用方保持原「直传」行为不变.
+std::string CCodeGen::wrapByRefVariantParamArg(const std::string& paramName,
+                                               Vb6Type curParamType) const {
+    const std::string src = "(*" + paramName + ")";
+    switch (curParamType) {
+        case Vb6Type::String:
+            return "(&(vb6_VARIANT){.vt=VT_BSTR, .bstrVal=" + src + "})";
+        case Vb6Type::Long:
+        case Vb6Type::Integer:
+            return "(&(vb6_VARIANT){.vt=VT_I4, .lVal=(int32_t)(" + src + ")})";
+        case Vb6Type::Byte:
+            return "(&(vb6_VARIANT){.vt=VT_UI1, .bVal=(uint8_t)(" + src + ")})";
+        case Vb6Type::Boolean:
+            return "(&(vb6_VARIANT){.vt=VT_BOOL, .boolVal=(int16_t)(" + src + ")})";
+        case Vb6Type::Double:
+        case Vb6Type::Single:
+        case Vb6Type::Currency:
+            return "(&(vb6_VARIANT){.vt=VT_R8, .dblVal=(double)(" + src + ")})";
+        case Vb6Type::Date:
+            return "(&(vb6_VARIANT){.vt=VT_DATE, .dblVal=(double)(" + src + ")})";
+        case Vb6Type::LongPtr:
+        case Vb6Type::ULong:
+            return "(&(vb6_VARIANT){.vt=VT_I8, .llVal=(int64_t)(" + src + ")})";
+        default:
+            return std::string();
+    }
 }
 
 std::string CCodeGen::cProcName(const std::string& procName, AccessLevel access,

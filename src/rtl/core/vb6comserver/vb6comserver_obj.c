@@ -7,6 +7,16 @@
 #include "vb6comserver.h"
 #include "vb6comserver_internal.h"
 
+/* [PROBE189] 临时探针: 包装器引用计数轨迹 (C3_COM_RC_TRACE=1 时输出到 stderr) */
+#include <stdio.h>
+static int probe189_on(void) {
+    static int v = -1;
+    if (v < 0) v = (getenv("C3_COM_RC_TRACE") != NULL);
+    return v;
+}
+#define P189(...) do { if (probe189_on()) { fprintf(stderr, __VA_ARGS__); fflush(stderr); } } while (0)
+/* [/PROBE189] */
+
 #ifndef CONNECT_E_NOCONNECTION
 #define CONNECT_E_NOCONNECTION 0x80040200
 #endif
@@ -73,17 +83,30 @@ static HRESULT STDMETHODCALLTYPE ComObj_QueryInterface(vb6_ComObject* self, REFI
 
 static ULONG STDMETHODCALLTYPE ComObj_AddRef(vb6_ComObject* self) {
     ULONG count = InterlockedIncrement(&self->refCount);
+    P189("[189] ADDREF W=%p cnt=%u\n", (void*)self, (unsigned)count);
     InterlockedIncrement(&g_vb6_cRef);
     return count;
 }
 
 static ULONG STDMETHODCALLTYPE ComObj_Release(vb6_ComObject* self) {
     ULONG count = InterlockedDecrement(&self->refCount);
+    P189("[189] RELEASE W=%p cnt=%u owns=%d inst=%p\n", (void*)self, (unsigned)count,
+         self->ownsInstance, (void*)self->vb6Instance);
     InterlockedDecrement(&g_vb6_cRef);
     if (count == 0) {
-        // Call VB6 Class_Terminate + Destroy
-        if (self->desc && self->desc->destroyFunc && self->vb6Instance) {
-            self->desc->destroyFunc(self->vb6Instance);
+        // Fix 188: 只有"拥有实例"的包装器 (CoCreateInstance / Set x = New cY) 才在
+        // 释放归零时销毁 VB6 实例. 借用型包装 (Public 对象字段 getter / 方法返回的
+        // 工程类实例) 的实例生命周期归宿主 (字段/全局变量/集合), 客户端释放只回收
+        // 包装器; 否则宿主字段变悬垂指针, 之后宿主再用/再销毁即 0xC0000374
+        // (实测 VBMAN x86 demo: `VBMAN.HttpClient.ShowPage` 后客户端释放包装器,
+        //  把 cVBMAN 字段里的 cHttpClient 实例销毁掉).
+        if (self->ownsInstance) {
+            if (self->desc && self->desc->destroyFunc && self->vb6Instance) {
+                self->desc->destroyFunc(self->vb6Instance);
+            }
+        } else if (self->vb6Instance) {
+            // 清掉实例上的 __comObj 回填, 避免下次 getter 复用已释放的包装器
+            *(void**)self->vb6Instance = NULL;
         }
         self->vb6Instance = NULL;
         // Release PCI
@@ -184,59 +207,62 @@ static HRESULT STDMETHODCALLTYPE ComObj_Invoke(vb6_ComObject* self, DISPID dispI
         }
     }
     if (!method) return DISP_E_MEMBERNOTFOUND;
-    
+    P189("[189] INVOKE W=%p cls=%s mem=%ls argc=%d\n", (void*)self,
+         (self->desc && self->desc->classVariable) ? self->desc->classVariable : "?",
+         method->name ? method->name : L"?", (int)(pDispParams ? pDispParams->cArgs : 0));
+
     // Collect arguments
     // Note: Script engines like VBScript may pass VT_I2 etc.,
     // while bridge functions expect VT_I4 (via lVal). Coerce each param to VT_I4.
+    // invokeFunc 的实参/返回槽在适配器里按 vb6_VARIANT (x86 24B: vt 4B +
+    // pad 4B + union 16B) 布局访问; 前 16 字节与 OLE VARIANT 内容一致。
+    typedef struct { uint64_t v[3]; } vb6_VarSlot;
     int argc = pDispParams ? (int)pDispParams->cArgs : 0;
     void** args = NULL;
-    VARIANT* coercedArgs = NULL;
-    
+    void* coercedArgs = NULL;   /* 槽阵列, 每槽 vb6_VarSlot */
+
     if (argc > 0) {
         args = (void**)CoTaskMemAlloc(argc * sizeof(void*));
-        coercedArgs = (VARIANT*)CoTaskMemAlloc(argc * sizeof(VARIANT));
+        coercedArgs = (void*)CoTaskMemAlloc(argc * sizeof(vb6_VarSlot));
         if (!args || !coercedArgs) {
             if (args) CoTaskMemFree(args);
             if (coercedArgs) CoTaskMemFree(coercedArgs);
             return E_OUTOFMEMORY;
         }
-        // DISPPARAMS args are in reverse order
+        // 适配器按 vb6_VARIANT (24B) 布局访问实参与返回槽, 而 COM 边界的
+        // OLE VARIANT 是 16B。每个实参先整复制进 24B 槽, 再按需数值强转。
         for (int i = 0; i < argc; i++) {
             VARIANT* src = &pDispParams->rgvarg[argc - 1 - i];
+            vb6_VarSlot* slot = &((vb6_VarSlot*)coercedArgs)[i];
+            memset(slot, 0, sizeof(*slot));
+            memcpy(slot, src, sizeof(VARIANT));
+            args[i] = slot;
+        }
+        for (int i = 0; i < argc; i++) {
+            VARIANT* src = &pDispParams->rgvarg[argc - 1 - i];
+            VARIANT* dst = (VARIANT*)&((vb6_VarSlot*)coercedArgs)[i];
             // Coerce numeric types to VT_I4 (bridge functions use lVal)
             if (src->vt == VT_I2 || src->vt == VT_I1 || src->vt == VT_UI1 ||
                 src->vt == VT_UI2 || src->vt == VT_BOOL || src->vt == VT_EMPTY) {
-                VariantInit(&coercedArgs[i]);
-                HRESULT hr2 = VariantChangeType(&coercedArgs[i], src, 0, VT_I4);
-                if (SUCCEEDED(hr2)) {
-                    args[i] = &coercedArgs[i];
-                } else {
-                    args[i] = src;
-                }
+                VariantChangeType(dst, src, 0, VT_I4);
             } else if (src->vt == VT_R4) {
                 // Float -> Double for dblVal access
-                VariantInit(&coercedArgs[i]);
-                HRESULT hr2 = VariantChangeType(&coercedArgs[i], src, 0, VT_R8);
-                if (SUCCEEDED(hr2)) {
-                    args[i] = &coercedArgs[i];
-                } else {
-                    args[i] = src;
-                }
-            } else {
-                args[i] = src;  // VT_I4, VT_R8, VT_BSTR, etc. pass through
+                VariantChangeType(dst, src, 0, VT_R8);
             }
         }
     }
-    
+
     // Call VB6 method
     if (method->invokeFunc) {
-        method->invokeFunc(self->vb6Instance, args, argc, pVarResult);
+        vb6_VarSlot tmpRet;
+        memset(&tmpRet, 0, sizeof(tmpRet));
+        method->invokeFunc(self->vb6Instance, args, argc, &tmpRet);
+        if (pVarResult)
+            memcpy(pVarResult, &tmpRet, sizeof(VARIANT));
     }
-    
-    if (coercedArgs) {
-        for (int i = 0; i < argc; i++) VariantClear(&coercedArgs[i]);
-        CoTaskMemFree(coercedArgs);
-    }
+
+    // 槽内是调用方 VARIANT 的副本, 资源仍归调用方, 不得 VariantClear
+    if (coercedArgs) CoTaskMemFree(coercedArgs);
     if (args) CoTaskMemFree(args);
     return S_OK;
 }
@@ -263,6 +289,9 @@ vb6_ComObject* vb6_ComObject_Create(const vb6_CoClassDesc* desc) {
     obj->refCount = 1;
     obj->desc = desc;
     obj->vb6Instance = desc->factoryFunc();  // Call vb6_cls_<Name>_New()
+    P189("[189] CREATE W=%p inst=%p cls=%s\n", (void*)obj, (void*)obj->vb6Instance,
+         desc->classVariable ? desc->classVariable : "?");
+    obj->ownsInstance = 1;  // Fix 188: 类工厂创建的实例归客户端所有
     obj->cpc = NULL;  // Lazy init CPC
     obj->pci = NULL;  // Lazy init PCI
     // Set back-pointer for event support (first field of VB6 class struct = __comObj)
@@ -313,9 +342,45 @@ vb6_ComObject* vb6_ComObject_FromInstance(const vb6_CoClassDesc* desc, void* ins
     obj->refCount = 1;
     obj->desc = desc;
     obj->vb6Instance = instance;
+    obj->ownsInstance = 1;  /* Fix 188: 调用方把新实例的所有权交给包装器 */
+    P189("[189] FROM-INST W=%p inst=%p cls=%s\n", (void*)obj, (void*)instance,
+         desc->classVariable ? desc->classVariable : "?");
     obj->cpc = NULL;
     obj->pci = NULL;
     *ppComObj = obj;  /* 回填 __comObj, 后续复用 */
+
+    InterlockedIncrement(&g_vb6_cRef);
+    return obj;
+}
+
+// Fix 188: 包装"宿主已拥有"的实例 —— 见 vb6comserver.h 声明. 释放到 0 时只回收
+// 包装器并清空 __comObj 回填, 不调用 destroyFunc.
+vb6_ComObject* vb6_ComObject_FromBorrowedInstance(const vb6_CoClassDesc* desc, void* instance) {
+    void** ppComObj;
+    vb6_ComObject* existing;
+    vb6_ComObject* obj;
+    if (!desc || !instance) return NULL;
+
+    ppComObj = (void**)instance;
+    existing = (vb6_ComObject*)*ppComObj;
+    if (existing) {
+        existing->vtable->AddRef(existing);
+        return existing;
+    }
+
+    obj = (vb6_ComObject*)CoTaskMemAlloc(sizeof(vb6_ComObject));
+    if (!obj) return NULL;
+
+    obj->vtable = &g_ComObjectVtable;
+    obj->refCount = 1;
+    obj->desc = desc;
+    obj->vb6Instance = instance;
+    obj->ownsInstance = 0;
+    P189("[189] FROM-BORROW W=%p inst=%p cls=%s\n", (void*)obj, (void*)instance,
+         desc->classVariable ? desc->classVariable : "?");
+    obj->cpc = NULL;
+    obj->pci = NULL;
+    *ppComObj = obj;
 
     InterlockedIncrement(&g_vb6_cRef);
     return obj;
@@ -366,6 +431,7 @@ void* vb6_ComPackVB6InstanceRaw(const char* classVariable, void* instance) {
 
     if (!instance) return NULL;
     desc = vb6_FindCoClassDesc(classVariable);
+    P189("[189] PACKRAW cls=%s inst=%p desc=%p\n", classVariable, instance, (void*)desc);
     // 未进 coclass 表 (Private / 非 MultiUse|SingleUse) 的类没有 IDispatch 方法表,
     // 包装也无从应答 GetIDsOfNames → 返回 NULL (等效 VB6 传 Nothing), 不冒充对象.
     if (!desc) return NULL;
