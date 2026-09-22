@@ -39,6 +39,8 @@ bool Driver::runSemanticAnalysis(const CompileOptions& options) {
         auto analyzer = std::make_unique<SemanticAnalyzer>(*diag_, options.verbose);
         // 泛型 (tB, G3): 调用点推断需要模板只读视图 (runGenericsPrepass 已构建)
         analyzer->setGenericRegistry(&genView_);
+        // Interface 契约 (tB, B02): stage 2.7 建好的只读登记表
+        analyzer->setInterfaceRegistry(&ifaces_);
 
         // P6.3: 如果有TypeLib解析结果, 注入COM类型信息到符号表
         if (typelibParser_) {

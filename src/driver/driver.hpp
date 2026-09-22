@@ -8,6 +8,7 @@
 #include "com/typelib_parser.hpp"
 #include "project/frm_parser.hpp"
 #include "semantics/generics_registry.hpp"
+#include "semantics/interfaces_registry.hpp"  // Interface 契约 (tB, B02)
 #include <array>
 #include <string>
 #include <vector>
@@ -137,6 +138,10 @@ private:
     std::unordered_map<std::string, Module*> genericClassTemplates_;
     // 模板只读视图 (analyzer 推断用; 与 genericTemplates_ 同步构建)
     GenRegistry genView_;
+    // Interface 契约 (tB, B02): stage 2.7 建好的只读登记表 (小写接口名 → 展平槽表).
+    // 挂 Driver 而非某个符号表: 每模块一张符号表, 而接口名是工程级唯一的.
+    IfaceRegistry ifaces_;
+    std::vector<std::string> ifaceOrder_;  // 登记序, 保证诊断输出确定性
     // 已物化扁名 (fixpoint 去重; 值为 true 即"已注入为普通声明")
     std::unordered_map<std::string, bool> genericMaterialized_;
     // cap 护栏 (计划冻结版): 总量 ≤1024, 单名嵌套深度 ≤16
@@ -196,6 +201,8 @@ private:
     bool runTypeLibImport(const CompileOptions& options);  // P6.3: 加载TypeLib+注册COM类型
     bool runSemanticAnalysis(const CompileOptions& options);
     bool runGenericsPrepass();  // 泛型 (tB): 模板登记 + 使用点物化 (G2)
+    // Interface (tB, B02): stage 2.7 建接口契约登记表 (名字/Extends 链/展平槽表)
+    bool runInterfacePrepass();
     // fixpoint 单轮物化: 消费 genericUses_ 中未物化项; freshOut 收特化副本
     bool materializeGenerics(std::vector<std::pair<Module*, Decl*>>* freshOut);
     // 泛型推断 fixpoint (G3): 收请求→物化→增量分析→再跨模块, 至收敛

@@ -102,6 +102,7 @@ add_library(vb6c3-core STATIC
     src/semantics/semantic_analyzer_dispatch.cpp
     src/semantics/semantic_analyzer_register.cpp
     src/semantics/semantic_analyzer_typeref.cpp
+    src/semantics/semantic_analyzer_iface.cpp
     src/semantics/semantic_analyzer_decl.cpp
     src/semantics/semantic_analyzer_decl_type.cpp
     src/semantics/semantic_analyzer_stmt.cpp
@@ -212,6 +213,7 @@ add_executable(c3
     src/driver/driver_frontend.cpp
     src/driver/driver_semantics.cpp
     src/driver/driver_generics.cpp
+    src/driver/driver_interface.cpp
     src/driver/driver_crossmod.cpp
     src/driver/driver_link.cpp
     src/driver/rtl_embedded.cpp

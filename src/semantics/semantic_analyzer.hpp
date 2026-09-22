@@ -7,6 +7,7 @@
 #include "semantics/symbol_table.hpp"
 #include "semantics/type_system.hpp"
 #include "semantics/generics_registry.hpp"
+#include "semantics/interfaces_registry.hpp"
 #include "common/diagnostics.hpp"
 #include <string>
 #include <vector>
@@ -116,6 +117,8 @@ public:
 
     // 泛型 (tB, G3): 模板登记表只读视图 (driver 在逐模块分析前注入).
     void setGenericRegistry(const GenRegistry* reg) { genReg_ = reg; }
+    // Interface 契约 (tB, B02): stage 2.7 建好的只读登记表, 供 Implements 分叉判定.
+    void setInterfaceRegistry(const IfaceRegistry* reg) { ifaceReg_ = reg; }
     // 推断成功的实例化请求 (驱动 fixpoint 物化) — 取空语义.
     struct GenInstRequest {
         std::string flat;                  // 小写扁名
@@ -157,6 +160,13 @@ private:
 
     // 已声明的标签 (用于GoTo检查)
     std::vector<std::string> declaredLabels_;
+
+    // --- Interface 契约 (tB, B02) ---
+    // 新式接口的严格契约比对 (error 级): 槽表来自 stage 2.7 登记表, 实现侧按
+    // 同一套 ifaceSlotKey/ifaceSigFromDecl 规范函数取名 (源码签名口径).
+    // 与 legacy VB6 Implements (warn 级 + IFace_M 命名约定) 互斥, 见 analyze() 分叉.
+    void checkNewStyleInterface(const Module& module, const IfaceView& view,
+                                const std::string& writtenName, const SourceLocation& loc);
         std::vector<std::pair<std::string, SourceLocation>> gosubTargetLabels_;  // P12.5: GoSub引用的标签+位置
 
     // ---- 内部辅助 ----
@@ -219,6 +229,7 @@ private:
     std::vector<DeferredXmodCallSite> deferredXmodCalls_;
     // 泛型 (tB, G3): 调用点推断 (从模板登记表 AST 形参 + 延后点实参类型绑定)
     const GenRegistry* genReg_ = nullptr;
+    const IfaceRegistry* ifaceReg_ = nullptr;  // Interface 契约 (tB, B02)
     std::vector<GenInstRequest> genericRequests_;
     bool tryBindGenericCall(DeferredXmodCallSite& site, GenInstRequest& reqOut);
     // 若 valueExpr 是 AddressOf 且 typeName 是委托: 解析目标过程、签名校验,

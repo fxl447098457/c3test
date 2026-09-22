@@ -235,6 +235,15 @@ bool SemanticAnalyzer::analyze(Module& module) {
         if (classSym && classSym->kind == SymbolKind::Class) {
             for (auto& impl : module.implements) {
                 const std::string& ifaceName = impl->interfaceName;
+                // Interface 契约 (tB, B02): 名字命中新式接口登记表 → 严格比对 (error 级),
+                // 不再走下面的 legacy 路径 (D5 分叉); 未命中 → legacy 逻辑一行不动.
+                if (ifaceReg_) {
+                    auto found = ifaceReg_->find(Symbol::toLower(ifaceName));
+                    if (found != ifaceReg_->end()) {
+                        checkNewStyleInterface(module, found->second, ifaceName, impl->loc);
+                        continue;
+                    }
+                }
                 // 查找接口类符号
                 auto* ifaceSym = symTab_.lookupModule(ifaceName);
                 if (!ifaceSym || ifaceSym->kind != SymbolKind::Class) {

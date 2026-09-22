@@ -73,6 +73,11 @@ enum class DiagnosticID : uint16_t {
     SemInterfaceNotImplemented = 3012,
     SemCircularDependency = 3013,
     SemVariantOverflow = 3014,
+    // Interface 契约 (tB 扩展, ai/022 B02). 文案一律 ASCII (D12).
+    SemInterfaceUnknownParent = 3015,      // Extends 的父接口不存在
+    SemInterfaceSlotConflict = 3016,       // 链上槽名冲突 / 接口内同名重载
+    SemInterfaceSignatureMismatch = 3017,  // 实现成员签名与接口槽不符
+    SemInterfaceNotSupported = 3018,       // v1 边界: 该处的 Interface 用法尚不支持
 
     // 代码生成 (4xxx)
     CodeGenUnsupportedFeature = 4001,

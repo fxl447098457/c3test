@@ -860,7 +860,6 @@ if ($Category -in @("all", "syntax")) {
             Test-Syntax $name $path
         }
     }
-    Write-Host "MARKER-BEFORE-ITFNEG"
     # tB extension (ai/022 B01): Interface contract-block diagnostics must fire.
     $itfNeg = @(
         @("itf_n01_member_body", "$Tests\itf_neg\n01_member_body.bas", "must not contain an implementation body"),
@@ -869,12 +868,22 @@ if ($Category -in @("all", "syntax")) {
         @("itf_n04_missing_end", "$Tests\itf_neg\n04_missing_end.bas", "expected 'End Interface'"),
         @("itf_n05_unknown_attr", "$Tests\itf_neg\n05_unknown_attr.bas", "Unrecognized attribute line [NotAnAttr]"),
         @("itf_n06_attr_no_target", "$Tests\itf_neg\n06_attr_no_target.bas", "Attribute line must precede an Interface declaration"),
-        @("itf_n07_generic", "$Tests\itf_neg\n07_generic.bas", "does not support generic type parameters")
+        @("itf_n07_generic", "$Tests\itf_neg\n07_generic.bas", "does not support generic type parameters"),
+        # ai/022 B02 (semantic layer): stage 2.7 contract registry + Implements checks
+        @("itf_n08_missing_slot", "$Tests\itf_neg\n08_missing_slot.cls", "is not implemented by class"),
+        @("itf_n09_sig_mismatch", "$Tests\itf_neg\n09_sig_mismatch.cls", "signature mismatch"),
+        @("itf_n10_unknown_parent", "$Tests\itf_neg\n10_unknown_parent.bas", "extends unknown interface"),
+        @("itf_n11_extends_cycle", "$Tests\itf_neg\n11_extends_cycle.bas", "Circular Extends chain"),
+        @("itf_n12_dup_member", "$Tests\itf_neg\n12_dup_member.bas", "cannot be overloaded"),
+        @("itf_n13_module_collision", "$Tests\itf_neg\n13_module_collision.bas", "collides with a module of the same name")
     )
     foreach ($c in $itfNeg) {
         if (Test-Path $c[1]) { Test-SyntaxFail $c[0] $c[1] $c[2] }
         else { Write-Host "  [SYNTAX-FAIL] $($c[0]) ... SKIP (missing case file)" -ForegroundColor DarkGray }
     }
+    # Positive guard (ai/022 B02): a class satisfying a new-style contract (
+    # Extends-inherited slot + property tri-slot keys) must stay silent.
+    if (Test-Path "$Tests\itf_pos\p01_contract_ok.cls") { Test-Syntax "itf_p01_contract_ok" "$Tests\itf_pos\p01_contract_ok.cls" }
     Write-Host ""
     
     # --- 生成环境检查与汇总 (冒烟+语法+VBP+run 计数) ---
