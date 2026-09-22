@@ -8,24 +8,20 @@
 
 ```
 STATUS: IDLE               # NOT_STARTED | DESIGN | BUSY | IDLE | ALL_DONE
-LAST_RUN: 2026-09-23T04:32:00+08:00   # 本轮 B02 主体过门并提交。开工核查（03:07）：HEAD=3add1ce（B01 已真实入库、
-               # 工作树 clean）、无源文件比当时 C3.exe(01:18, md5 5e9eb1cf) 新、无 C3/cl/link/ninja 进程 → 树内容
-               # 与 02:30–02:59 那次 111/0/1/112 的过门态同源，按 D14「无他人改动直接量基线」未重复跑基线回归。
-               # 03:30 首门 118/0/1/119 → 复核源码时补两处护栏（见 D15-6 与运行日志）→ 04:02 终门，exe md5 全程一致。
-LAST_COMMIT: 本轮 `Interface:` 提交（B02 主体，哈希见 git log；总表与代码同提交故此处不重复记哈希）；此前 B01 = 3add1ce
-CURRENT_BATCH: **B02b**（B02 未完项，先于 B03）：① 成员级 `Implements I.M[, I.N]` 尾子句 ——
-               `parser_decl.cpp` 签名解析完成后、`expectEndOfStatement` 前加可选逗号列表，存进
-               Sub/Function/Property Decl 新字段，`checkNewStyleInterface` 里显式绑定优先于同名隐式
-               匹配（用例照旧走单 `.cls` + `Test-SyntaxFail`，见 D15-5）；② 泛型模板内 Interface 的
-               拒绝分支目前无用例（需 `Class X(Of T)` 工程），补一条；③ legacy 交互债：新式接口名仍
-               进 `classSym->implementsNames`，ActiveX DLL 的 `cgen_util_dllentry_tables.inc:88-130`
-               会按旧口径 mint IID（EXE 工程无影响，B13/B16 接线时必须分叉，见 D15-8）。
-               之后才是 B03（`.cls` 头行 `Interface IFoo … End Interface` + `Module::isInterfaceModule`
-               子标记 + 语法手册索引）。开工前照例先核 `git log`/`git status`/`.build/C3.exe` 的
-               mtime+md5，判断要不要重量基线（上一轮曾出现"总表已 IDLE 但 commit 尚未落盘"的 4 分钟窗口）。
-GATE_BASELINE: Results: PASS=118 FAIL=0 SKIP=1 TOTAL=119   # exe md5 13e99638…（.build/gate_B02F.log，04:02–04:24
-               全程无插队重建，跑前后 md5 一致；SKIP=已知 test_vbman 环境项）。上一基线 111/0/1/112（B01）
-               → 本轮新增 7 条用例（itf_n08..n13 + itf_p01）全绿、零新增失败。
+LAST_RUN: 2026-09-23T05:56:00+08:00   # 本轮 B02b 过门并提交 dde7c32。开工按 D15-10 的硬检查等到 04:44
+               # 才确认上一轮收线（它 04:35 落代码后又于 04:37/04:40 追加两个 docs 提交）。
+               # 首门（exe 1f387137，05:01–05:24）125/0/1/126 零失败，但门后又改了两处源码 →
+               # 按 D15-9 该次不作提交依据：05:24 重建 cdac040f、05:25–05:48 复跑终门同数。
+LAST_COMMIT: dde7c32（B02b：成员级 Implements 子句 + itf_n14..n19/itf_p02 用例）；其前 beb75a7 = B02 主体
+CURRENT_BATCH: **B03**（P1 收尾）——`.cls` 头行宿主形式 `Interface IFoo … End Interface` +
+               `Module::isInterfaceModule` 子标记 + 语法手册页/索引。**本轮实测已把 B03 的真实工作量
+               缩小并核实，见 D17 开工地图**：头行形式在 B01 的块解析器下已经能解析（不需要新语法），
+               真正的卡点是 stage 2.7 Pass A 的"接口名与模块同名 → VB3002 重名错"（探针已复现），
+               故 B03 = 宿主识别 + 该处按宿主放行 + 手册文档 + 用例。
+GATE_BASELINE: Results: PASS=125 FAIL=0 SKIP=1 TOTAL=126   # exe md5 cdac040f（.build/gate_B02bF.log，
+               # 05:25–05:48 无插队重建，跑前后 md5 一致；SKIP=已知 test_vbman 环境项）。上一基线
+               # 118/0/1/119（B02）→ 本轮 +7 条用例（itf_n14..n19 + itf_p02）全绿、零新增失败，
+               # legacy `test_implements` 仍 PASS（旧路径未被牵动）。
 ```
 
 > 重入保护：若运行开始时 STATUS=BUSY 且 LAST_RUN 距今不足 55 分钟，说明上一次运行可能仍在进行——本次**立即结束，不做任何修改**。
@@ -62,7 +58,8 @@ GATE_BASELINE: Results: PASS=118 FAIL=0 SKIP=1 TOTAL=119   # exe md5 13e99638…
 |---|---|---|---|---|---|
 | B00 | P0 | 设计细化并写入本文件 | ☑ | 74ae1e7 | 纯文档批次，未构建（理由见运行日志） |
 | B01 | P1 | 词法/AST/语法：`Interface…End Interface` 块 + `Extends` + 成员签名 + 无实现体检查 + 方括号属性行 | ☑ | 3add1ce | `Results: PASS=111 FAIL=0 SKIP=1 TOTAL=112`（gate_B01.log 全量）+ 7 条负例全绿 + x64/x86 双跑 + 8 文件（6 .bas/2 .vbp）emit-c 对无 B01 基线 exe 逐字节全同 |
-| B02 | P1 | 语义：接口符号注册 + Extends 链 prepass(2.7) + 槽位表 + Implements 契约完整性/签名比对 + 成员级 `Implements I.M` 子句 | ◐ | 本轮 `Interface:` 提交（见 git log） | `Results: PASS=118 FAIL=0 SKIP=1 TOTAL=119`（gate_B02F.log；exe md5 13e99638 跑前后一致）+ 新增 7 条用例全绿 + legacy `test_implements` 仍 PASS。**已交付**：stage 2.7 `runInterfacePrepass`/`IfaceRegistry`/Extends 链与槽表/五类诊断 + `checkNewStyleInterface` 严格契约比对（D15 记 1/2/3/4/5/6）。**未完（→ B02b）**：成员级 `Implements I.M` 子句；`SymbolKind::Interface` 按 D15-2 推迟到 B04 与消费点同批 |
+| B02 | P1 | 语义：接口符号注册 + Extends 链 prepass(2.7) + 槽位表 + Implements 契约完整性/签名比对 | ☑ | beb75a7 | `Results: PASS=118 FAIL=0 SKIP=1 TOTAL=119`（gate_B02F.log；exe md5 13e99638 跑前后一致）+ 新增 7 条用例全绿 + legacy `test_implements` 仍 PASS。交付：stage 2.7 `runInterfacePrepass`/`IfaceRegistry`/Extends 链与槽表/五类诊断 + `checkNewStyleInterface` 严格契约比对（D15 记 1–6）。`SymbolKind::Interface` 按 D15-2 推迟到 B04。成员级子句拆给 B02b |
+| B02b | P1 | 成员级 `Implements I.M[, I.N]` 尾子句（显式绑定优先于同名隐式匹配）+ 泛型模板内 Interface 的 3018 用例 | ☑ | dde7c32 | `Results: PASS=125 FAIL=0 SKIP=1 TOTAL=126`（gate_B02bF.log；exe md5 cdac040f 跑前后一致）+ 7 条新用例（itf_n14..n19 + itf_p02）全绿 + legacy `test_implements` 仍 PASS。交付：`parseTrailingImplementsClauses` + 三个过程节点的 `implementsClauses`（含克隆路径）+ 槽键兼容 `I.Name`/`I.get_Name` 与链上任一接口名 + `checkMemberImplementsClauses` 兜底（新 ID 3019）。详见 D16 |
 | B03 | P1 | `.cls` 头行宿主形式 `Interface IFoo … End Interface`（1 文件 1 接口）+ 语法手册索引 | ☐ | | |
 | B04 | P2 | 接口值代码生成：`vb6_ivtbl_<I>` COM 形态槽表 + 类侧实例 + 薄指针表示 + `As <Iface>` 变量登记 + 派发 | ☐ | | |
 | B05 | P2 | 生命周期：实现类结构前置 vtbl 指针数组 + refcount 头 + AddRef/Release + Set/Nothing/作用域释放 | ☐ | | |
@@ -267,6 +264,73 @@ dispinterface 定义；`[Default, Source]` 连接点实现；泛型类实现新�
     总表没有"我先写就是我的"这回事**。安全做法 = 本轮结束时把状态头**重写**一遍（本轮即如此），
     并且只用"批是否打勾 + CURRENT_BATCH 文本"判断进度，别用 LAST_COMMIT/STATUS 的字面值。
 
+### D16 B02b（成员级 Implements 子句）实施记录与设计校正（2026-09-23）
+
+1. **子句的语法位置**：`Sub` 在参数表之后、`Function/Property` 在 `As Type` 之后（tB 口径），
+   三处共用 `Parser::parseTrailingImplementsClauses`（`parser_decl.cpp`）。接口块成员签名走
+   `parseInterfaceMemberDecl`，**不调用**该函数 → 在 Interface 块里写子句仍然 VB2003，
+   与"契约上不该有绑定"一致。畸形子句（只写 `Implements I`）在 parse 期报 2011 且**不入列表**，
+   避免语义层再补一条级联诊断。
+2. **显式绑定排斥隐式同名**（tB 口径，D5 的"显式优先"具体化）：写了任意子句的成员只按子句入座，
+   不再参与同名隐式匹配（`checkNewStyleInterface` 里的 `explicitDecls` 集合）。否则一个成员会
+   既按子句进 A 槽、又按同名被 B 接口认领，形成没人能预期的隐式双重认领。
+3. **槽键解析要兼容两种写法 + 链上任一接口名**：`I.Name` 按实现成员的 Get/Let/Set 前缀推
+   `get_/put_/putref_name`，同时也允许直接写槽名 `I.get_Name`；接口名可写 Extends 链上任意一层
+   （`IfaceSlotView::ownerIface` 已带归属接口，父槽用父名或子名都能解）。属性 Set 槽 = `putref_`。
+4. **"认领不到的子句"必须报错**，否则子句写成摆设还全绿：`checkNewStyleInterface` 每处理一个新式
+   接口就把认领的子句记进 `boundClauses`（键 = (过程节点, 子句序号)），`analyze()` 末尾交给
+   `checkMemberImplementsClauses` 兜底。四种成因分别给一句话（宿主非类模块 / 接口名不存在或是
+   legacy 类 / 类未实现该接口 / 接口里没有这个成员）。新诊断 ID `SemInterfaceClauseUnbound=3019`。
+   兜底同样落在 stage 3：子句解析只需工程级登记表 + 本模块成员表（D15-1 的结论对子句成立，
+   不需要 3.5c）。
+5. **单文件 `--syntax-only` 通路继续够用**（D15-5 第三次验证）：6 负 + 1 正全部 ASCII，无需 vbp。
+   泛型模板内 Interface 的 3018 分支本轮补了用例 `itf_neg/n19_iface_in_generic.cls`（B02b-②）。
+6. **`tests/run_tests.ps1` 是 UTF-8 无 BOM + CRLF**（4899 个非 ASCII 字节，`lf_only=0`），不是 D9
+   写的 GBK。PowerShell 仍按 ANSI 码页读它 → 中文注释无害、中文字符串字面量必乱码（D12 的根因，
+   本轮实测复现）。改它只能走二进制插入：写完核对 ①非 ASCII 字节数不变 ②`lf_only` 仍为 0
+   ③`git diff --numstat` 只有预期的 +N/-1。本轮插入 11 行、n13 行加逗号。
+7. **AST 新字段的克隆路径**：`SubDecl/FunctionDecl/PropertyDecl` 各加 `implementsClauses`，
+   `ast_clone.cpp` 的 `cloneSubDecl/cloneFunctionDecl/clonePropertyDecl` 必须逐个补拷贝——
+   泛型特化走的就是这三个函数，漏拷会让特化副本静默丢掉绑定（v1 已拒泛型实现接口，但克隆路径
+   仍然要正确）。
+8. **过门纪律的具体踩法**：本轮首门（05:01 起，exe 1f387137）跑到一半时又改了两处源码
+   （去掉 `IfaceClauseRef` 的重复声明、畸形子句不入列表）→ 那次 125/0/1/126 只能当"存量项无回归"
+   的参考，**不能作为提交依据**；必须重建 + 复跑全量门（D15-9 的再验证：门与二进制一一绑定）。
+9. **已知不一致（留给 B03/B13，不在本批动）**：模块级 `Implements` 的分叉点用的是
+   `ifaceReg_->find(Symbol::toLower(全名))`，即 `Implements Proj.IFoo` 这种带库/工程限定的写法
+   **不会**命中新式路径（会掉进 legacy 分支）；成员级子句这边则接受限定名（末段回退，
+   `ifaceLastSegment`）。二者对限定名的宽容度不对称。B03 起若要支持工程级接口引用，
+   应把分叉点也改成同一套 `lookupWrittenIface`，并顺手补一条正例用例。
+
+### D17 B03 开工地图（2026-09-23 B02b 收尾轮产出，行号为 dde7c32 上实测）
+
+- **头行形式其实已经能解析**（探针实测，省掉一整块语法工作）：`.build/probe_itfhead.cls` =
+  `VERSION/BEGIN…END/Attribute VB_Name = "IFoo"/Option Explicit` + `Interface IFoo … End Interface`，
+  用 B02b 二进制跑 `--syntax-only` **只**报一条错误：
+  `error VB3002: Interface name 'IFoo' collides with a module of the same name`
+  （`src/driver/driver_interface.cpp:44-50`，moduleKeys 在 :26-27 预建）。也就是说 B01 的块解析器
+  已经天然吃得下"一文件一接口"的头行写法，**B03 不是新语法批次，而是"宿主识别 + 重名放行"**。
+- 三步落地：
+  1. **宿主标记**：`Module` 加 `isInterfaceModule`（接缝就在 `src/ast/detail/ast_decl.hpp:332-333`
+     的 `isClassModule`/`isFormModule` 旁，D1 早已点名这里丢子标记）。置位条件建议：
+     `mod.isClassModule && mod.interfaces.size()==1 && ifaceLower(块名)==ifaceLower(mod.moduleName)`，
+     在 `parseModuleBody` 的 Interface 块分支尾部扫一遍即可（`src/parser/parser_module.cpp:126-151`）。
+     若要"整文件即该块"（块外不得再有声明），参照 Class 头行的 `classHeaderSeen_` 记法
+     （`parser_module.cpp:89-104`）加一条收尾校验，报错文案保持 ASCII。
+  2. **重名放行**：`runInterfacePrepass` Pass A 的 moduleKeys 集合把"宿主自己的模块名"剔除
+     （只豁免它自己声明的那一个接口名；与其它模块/其它接口重名仍照旧报错）。
+  3. **确认 legacy 侧不受污染**：头行宿主的成员是**签名节点**、不进 `mod.declarations`，所以它的
+     Class 符号 `memberNames` 为空。别的模块写 `Implements IFoo` 时，分叉点
+     （`semantic_analyzer.cpp:240-246`）会先命中登记表走新式路径——需要**实测**跨模块场景：
+     `tests/itf_xmod/`（D9 已规划）建一个 vbp 工程 = 宿主 `IFoo.cls` + 实现类 `Foo.cls`，
+     断言只有新式诊断、没有 legacy 的 `IFace_M` 命名约定警告。这一步也是 B04 发码的前置。
+- **手册**：新增 `docs/vb6-manual/02-语句/Interface 语句.md`（模板 = 同目录 `Implements 语句.md`，
+  UTF-8），并在 `docs/vb6-manual/README.md` 的语句清单第 157 行（`- [Implements 语句](…)`）之后插
+  `- [Interface 语句](02-语句/Interface%20语句.md)`（注意 `%20` 转义；字母序 Implements < Interface < Input）。
+- 门：基线 `125/0/1/126`。建议用例 = 1 正（宿主 .cls 单文件 `Test-Syntax`）+ 1 负（宿主名与另一
+  接口冲突 → 仍 VB3002）+ 1 个 `itf_xmod` vbp 工程（`Test-Vbp`）。**逐字节护栏**：B03 不动发码，
+  但改了 `Module` 结构与 prepass，按 D9 仍跑一次 `--emit-c` 对比（沿用 B01 的 8 文件清单）。
+
 ## 运行日志
 
 - 2026-09-23 建表：范围确认（含完整COM）、规范文档 018 入库、现状盘点完成。
@@ -288,3 +352,22 @@ dispinterface 定义；`[Default, Source]` 连接点实现；泛型类实现新�
   （md5 13e99638）、04:02 重跑全量终门（04:24 完成）：`Results: PASS=118 FAIL=0 SKIP=1 TOTAL=119`，
   跑前后 md5 一致、legacy `test_implements` 仍 PASS → 记为 GATE_BASELINE。成员级
   `Implements I.M` 子句未开工，登记为 B02b（详见 CURRENT_BATCH 与 D15）。
+- 2026-09-23 04:42–05:56 **B02b（成员级 `Implements I.M` 子句 + 泛型 3018 用例）过门并提交 dde7c32**：
+  开工按 D15-10 的硬检查等到 04:44 才确认上一轮收线（它 04:35 落代码后 04:37/04:40 还在追加 docs 提交）。
+  改动 9 文件：`parser_decl.cpp` 新增 `parseTrailingImplementsClauses`（Sub 在参数表后、Function/Property 在
+  `As Type` 后；点号拼接与模块级 Fix 083 对称，`A.B.C` → 接口 `A.B` + 成员 `C`）、`ast_decl.hpp` 加
+  `ImplementsClause` 结构 + 三个过程节点的 `implementsClauses`、`ast_clone.cpp` 三个 clone 函数补拷贝
+  （泛型特化走这条路，漏拷会静默丢绑定）、`semantic_analyzer_iface.cpp` 显式绑定入席（槽键兼容 `I.Name`
+  与 `I.get_Name` 两种写法、Extends 链上父/子接口名任一；写了子句的成员**不再**参与同名隐式匹配）+ 新
+  `checkMemberImplementsClauses` 兜底未认领子句（四种成因各给一句话，新 ID `SemInterfaceClauseUnbound=3019`）、
+  `run_tests.ps1` 二进制插 11 行（该文件实为 **UTF-8 无 BOM + CRLF**、4899 个非 ASCII 字节，与 D9 写的
+  GBK 不符，见 D16-6；改完核对非 ASCII 字节数不变 + `lf_only=0` + numstat 只 +11/-1）。用例 6 负
+  （n14 无此成员 / n15 类未实现该接口 / n16 宿主非类模块 / n17 子句未限定 / n18 显式绑定下签名不符 /
+  n19 = B02b-② 泛型模板内 Interface 的 3018 分支）+ 1 正（p02 覆盖"一成员认领两接口同名槽""继承槽用
+  父名或子名""属性三槽 Get/Let""成员名与槽名完全无关"）。**首门（exe 1f387137，05:01–05:24）已
+  125/0/1/126 零失败，但门后又改两处源码（去掉重复的 `IfaceClauseRef` 声明、畸形子句不入列表）→
+  按 D15-9 那次测量不作提交依据**：05:24 重建（cdac040f）、单文件复验 7 条行为不变、05:25–05:48 复跑
+  全量终门 `Results: PASS=125 FAIL=0 SKIP=1 TOTAL=126`（跑前后 md5 一致、legacy `test_implements` 仍
+  PASS）→ 记为 GATE_BASELINE，B02/B02b 收口。未开 B03（余下时间不足一个"构建+25 分钟门"周期），
+  改为产出 **D17 开工地图**：探针实测已把 B03 从"新语法批"降格为"宿主识别 + VB3002 重名放行 + 手册页"，
+  并给出全部锚点行号与 legacy 污染待核点。
