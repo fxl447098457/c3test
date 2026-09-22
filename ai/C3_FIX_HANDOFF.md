@@ -947,6 +947,241 @@ exe **没有 PDB/.map** → 下一步要么给链接行加 `/MAP`（或 `/Zi`）
   `_Paint/_MouseDown/_MouseMove/_MouseUp` 事件的 VB.PictureBox，codegen 装了子类化过程
   却从未发射它。**常量值不可猜**（猜错即静默误编）。
 
+
+- **C2440×12**：剩余都是小包，按族：
+  **更正一处旧定性**：VBFlexGrid.c 960/1086/2071 的 `VARIANT→void*`×3 曾被记成
+  "Ambient 属性赋给对象字段"，实际全部是 `PropDataMember`（`MSDATASRC.DataMember`）
+  的两层类型不一致 → 已由 **160-G** 一并解决（Ambient 簇因此根本不存在）。
+  `VARIANT→float`×2（VBFlexGrid 32210/32212）已由 **160-F** 解决。剩下 12 条：
+  `vb6_type_VS_FIXEDFILEINFO→void*`×3（Common.c 617/630/643）= **上面已单列的 160-D，定性为
+  `With <返回 UDT 的函数>()`，与 LSet 无关**，
+  `VARIANT→int32_t`×2（VisualStyles 149/184，
+  `CurrControl.Style`/`.hWnd` 系）、`VARIANT→vb6_vartype`（VBFlexGrid 22606，
+  `&(vb6_VARIANT){<void* 表达式>}` 复合字面量把 `prop_get_CellTag` 的 `void*` 返回值
+  当首个成员 `.vt` 初始化 → 应走 `vb6_VariantFromValue`，是包装选择 bug 而非缺类型信息）、
+  `VARIANT→BSTR`（Common 530）、
+  `BITMAPINFOHEADER→BSTR`（55326）、`UserControl_Extender_Type→void*`（1521）、
+  `Font*→float`（MainForm 346）、`HANDLE→double`（VisualStyles 411）、
+  `double→BSTR`×1（UserEditingForm 588，`ComboCalendarValue` 的返回类型未被识别为 Date →
+  159-B 白名单没命中，需查 `getClassMethodReturnType`）。
+- **C2172×1**（原 ×2）：MainForm.c:697 `OleCreatePropertyFrame` 实参不是指针。另一条
+  Common.c `vb6_CStr(vb6_VariantFromValue(UDT))` 已由 **160-C** 顺带消除（它本就走错了
+  字符串 LSet 分支）。
+- 3 个 Extender 方法（`vb6_Extender_Drag/ZOrder/SetFocus`）目前是 implicit-extern 警告，链接期会变成错误。
+
+---
+
+## 12. 2026-09-21 晚：Fix 168 / 169（demo 已进消息循环）+ 下一个 blocker 170
+
+### Fix 168（`UserControl.Extender` 被当 IDispatch → 启动 AV；**已修**，RTL 侧）
+`With UserControl.Extender: .Width/.Height/.Align`（VBFlexGrid.ctl `UserControl_Resize`）编成
+`vb6_ComGetProp(&vb6_UserControl_Extender, L"Height")` —— 那是普通结构体（`vb6rtl_com.c:580`，
+仅 Visible/Height 两字段），对它做 `lpVtbl->GetIDsOfNames` 即跳进 `.data` → 0xC0000005。
+与 Fix 125（字体）、Fix 166 同族（**C 层"结构体指针当对象"只会告警，错误数指标不出来**）。
+修法照 Fix 125 样式：`vb6_UC_IsExtender`/`vb6_UC_ExtenderField`（`uc_controls.c`，声明放
+`vb6forms_controls.h` —— vb6com 单元 include 它，不需要手写 extern）+ `vb6_ComGetProp`/
+`vb6_ComSetProp` 各一个守卫分支。**成员映射到 `vb6_Extender_*` 全局槽位**（Fix 162 起由
+`vb6_uc_push` 按实例同步的真实存储），而不是结构体字段 —— 后者是 Fix 133u 给"直接字段访问"
+用的兼容壳，读它会拿到恒 0 的假值。`GetIntProp/GetDoubleProp/GetStringProp/GetObjectProp`
+都是 `vb6_ComGetProp` 的薄封装（`vb6com_wrap.c`），一处守卫全覆盖。
+
+### Fix 169（Pattern C/D2 把 COM 的 `VARIANT*` 裸拼给具体类型 Let 形参 → 未处理 Err 380；**已修**）
+Fix 167 让 demo 进了消息循环后，进程改为 `Unhandled error 380` 退出。链路：
+`UserControl_ReadProperties` 的 `OLEDropMode = PBag.ReadProperty("OLEDropMode", 0)` 走
+`cgen_util_comwrite.cpp` 的 **Pattern C/D2 字符串级改写**，把 `vb6_ComCall(...)` 的返回值
+（**Windows `VARIANT*`，即 `void*`**）直接拼进 `prop_let_OLEDropMode(me, int32_t Value)`
+→ C 只做指针→整数截断（不是错误）→ `.ctl` 的 `Select Case` 落 `Case Else` → `Err.Raise 380`
+→ 该链无处理器 → `vb6_ErrRaise` 打印后 `ExitProcess(380)`。既有 156-B 分支专治此类，但它的
+判定 `cExprIsVariant()` 只认**返回 vb6_VARIANT** 的前缀，`vb6_ComCall(`/`vb6_ComGetProp(`
+不在表内（它们返回 `void*`），于是漏网。修法：在该分支里先把 COM 结果用既有惯用法
+`vb6_VariantFromComResult(...)` 归一成 vb6_VARIANT，再走同一条 `ext156` 提取链。
+demo 内 **202 处**受益；380 消失，`vb6_AnyThreadWindowVisible` 之前不再被错误打断。
+`vb6_ComCallObject`/`vb6_ComGetObjectProp` **不能**进这个白名单（它们已解包成对象指针）。
+
+### Fix 170（下一个 blocker：`B() = Text` 整数组赋值被当成 0 号元素写；**未修**）
+Common.bas:1474 `StrToVar` / :1484 `VarToStr`：
+```vb
+Dim B() As Byte
+B() = Text        ' VB6: 整数组赋值 —— 按字符串原始内存(Unicode, 2*Len 字节)建 Byte()
+StrToVar = B()    ' VB6: Byte() → Variant (VT_ARRAY|VT_UI1)
+```
+现编成 `VB6_SA_AT(uint8_t, B, 0) = Text;`，而 `B` 是 `vb6_SafeArray1D* B = NULL;`
+→ **对 NULL 数组第 0 元素赋值** → 0xC0000005（WER 故障偏移 0x21a6f6 → `Common.c:1753`，
+`VarToStr` 的同一行号族）。它坐在 `UserControl_ReadProperties` → `VarToStr(ReadProperty(…))`
+路径上，**启动必经**，所以这是当前唯一挡住"进消息循环"的缺陷。
+需要四个方向（`arr()` 空下标 = 整数组，不是 index 0）：
+① `B() = <String>`（建数组，注意是 **Unicode 原始字节**，`vb6_StringToByteArray` 是
+StrConv(vbFromUnicode) 的 ANSI 语义，**不能直接用**，需新 helper 或复用 `LenB` 语义）；
+② `B() = <Variant(array)>`（数组赋值/引用）；③ `<Variant> = B()`（包成 VT_ARRAY|VT_UI1）；
+④ `<String> = B()`（字节按 Unicode 重解释成 BSTR）。
+发射点在"空下标 ArrayAccess"的 LValue/RValue 生成处（`indices.empty()` 目前无特判，
+`src/backend/` 全局搜不到 `whole array` 相关处理），正落在用户 175 系列的活跃改动区。
+
+### 工具升级：用 PDB 行号符号化取代 .map RVA（`.temp/sym2.cs` + `.temp/sym3.ps1`）
+`/MAP` 的 "Publics by Value" **不含 file-static 函数**，VBFlexGrid.obj 里生成的过程多为静态
+→ 按 map 找"最近前驱公共符号"会给出 `+0xCC6E` 这种废位移（本会话因此一度把 380 错定位到
+`prop_get_Clip`）。改走 dbghelp：`SymLoadModuleEx(h, NULL, exe, NULL, 0x140000000, 0, …)`
++ **经典 `SymGetSymFromAddr64`/`SymGetLineFromAddr64`**（`SYMBOL_INFO` 那条现代 API 一直
+返回 win32=87，经典 API 直接给出 `Common.c:1753` 级别的精确行号）。
+配套：① WER 的"故障偏移"就是 RVA，直接 `0x140000000 + RVA`；② 若要符号化 `stderr` 里打印的
+**运行时**地址，基址不能假设（本会话按 0x...0000 猜错过一次 0x90000），用 trace 里已知全局的
+地址反推：`base = disp(实测) − Rva+Base(map)`，例如 `vb6_UserControl_Extender` → 0x140333840。
+③ `vb6_ErrRaise` 在 `C3_COM_TRACE` 下打印 `_ReturnAddress()`（未处理错误的调用点），
+配合上面两条即可"错误号 → 生成的 .c 行号"。
+
+### Fix 171（VB6 **数字行号标签**：声明 + `GoTo`/`GoSub`/`Resume`/`On Error GoTo` 引用；**已修**）
+VB6 里行号就是标签（`100: x = 1`，冒号可省 → `100 x = 1`，行号 <65536），可被
+`GoTo 100` / `GoSub 100` + `Return` / `Resume 100` / `On Error GoTo 100` 引用。
+C3 原先只认**命名标签**：标签识别要求 `canBeName(cur_.kind)`，`parseGoToStmt` 走
+`expectName`，于是语句开头的整数落到 `parseStatement` 的 `default:` →
+`VB2002 unexpected token in statement: 100`。
+**改动全在 parser 一层**（这点值得记住）：AST 的 `LabelStmt/GoToStmt/...` 只存
+`labelName` 字符串，语义层 `declaredLabels_`/`gosubTargetLabels_` 是纯字符串比对，
+后端发的是 `"vb6_label_" + cIdent(name)` —— 数字拼上前缀天然是合法 C 标签。所以：
+① `parser.hpp`/`parser_helpers.cpp` 新增 `expectLabelTarget()`（整数字面量或名字都收）；
+② `parser_stmt.cpp` 的 `parseStatement` 加 `case TokenKind::IntegerLiteral:` →
+`parseLabelOrAssignmentOrCall()`（语句起始处只可能是行号：赋值/调用左值必须是名字）；
+③ `parser_stmt_assign.cpp` 在命名标签分支后加数字标签分支（冒号可选，且沿用
+`inSingleLineIf_` 守卫 —— 单行 If 内冒号是分隔符不是标签）；
+④ `parser_stmt_jump.cpp` 的 GoTo/GoSub/Resume/OnError/OnGoTo/OnGoSub 目标改走
+`expectLabelTarget`。
+用例落在 `tests_github/t0_cases/`（按语义拆开，取代我先前那个 `tests/test_line_labels.bas`）：
+`test_goto.bas` = 命名标签前向 GoTo、`200:` 带冒号行号、`100` 省略冒号 + 后向 GoTo 循环、
+`On Error GoTo <命名>` + `Resume 400`、`On Error GoTo 500` + `Resume Next`（注意落点是**出错句
+的下一句**）、单行 `If … Then a = a + 1: a = a + 1` 里冒号是分隔符、`GoTo` 跳出 `For` 到过程尾标签；
+`test_gosub.bas` = `GoSub <命名>` + `Return`、`GoSub 300`、循环内 `GoSub`。
+**注册方式变更**：这两个文件原先在 `$syntaxTests`（只跑 `--syntax-only`，退出码判定，测不出运行期
+语义），现改为一边从语法队列移除、一边加 `Add-BasTest`（编译 + 运行 + 输出串比对）。
+用例总数不变，仍是 **89**（新增 1 个跑用例、少 1 个纯语法用例，净增 0；我中途加的
+`test_line_labels` 已删）。
+**顺带发现但未修（先前就在的缺口，非本次引入）**：`On <expr> GoTo 100, 200` 的**入口分发**
+不通 —— `parseOnStmt` 只在 `next_` 是 `Error`/`GoTo`/`GoSub` 时才分派，`On k GoTo …`
+里 `next_` 是标识符 `k` → 直接报 "expected 'Error GoTo'…"，`parseOnGoToStmt` 实际不可达
+（`parser.hpp` 有 `peek()/peek2()`，要补就是 6 行）。全仓库 `.bas` 用例零使用，
+所以此前无人踩到；本次只把它的标签目标改成了 `expectLabelTarget`（等分发修好即生效）。
+
+### 教训：harness 的 Read/grep 会给**陈旧视图**，盘上真相用 bash 复验
+本会话两次踩到：① `vb6com_invoke.c` 的 Read 返回了 Fix 168 之前的版本，据此误判"用户回退了
+我的改动"；② `cgen_decl_prop.cpp` 的 Read 是用户拆分成 .inc **之前**的 49KB 版本，据此做的
+Edit 报"成功"但**盘上没落**（该文件仍是用户的 17632 字节版本）。凡"我的改动在不在盘上"
+"用户是不是回退了"这类判断，一律 `git diff` / bash `grep` 复验；对用户活跃改动的文件
+（`src/backend/decl/*`、`src/frontend/*`）不要基于工具快照下结论。
+
+## 13. 2026-09-21 深夜：Fix 170 / 172 / 173 —— demo 第一次真正跑起来（有窗口、进消息循环）
+
+### Fix 170：VB6 **整体数组引用 `A()`**（空括号）以前被当成 0 号元素
+`Common.bas:1479` `StrToVar` 里 `Dim B() As Byte: B() = Text` —— 一维空括号走
+`cgen_expr_call_prelude.inc` 的 first 分支生成 `VB6_SA_AT(uint8_t, B, 0)`：未 ReDim 的
+动态数组 `data==NULL`，写 0 号元素 = 解引用 NULL → 启动 AV（就是 168/169 之后剩下的那一个
+blocker）。右值同口径也是错的：`StrToVar = B()` 只搬走第一个字节、`UBound(B())` 拿到的是
+字节而不是载体。改动：
+① `cgen_state.inc` 加 `wholeArrayLvalue_`（只在 emit `node.target` 那一瞬为 true）；
+② `cgen_assign_com_prop.inc:362` emit 目标前置位该标记 + 记局部 `tgtIsWholeArray170`；
+③ prelude：`positional.empty()` 且（左值上下文 **或** 一维）→ `lastExpr_ = arrName`
+（数组载体本身，左值合法）；2D+ 右值仍保留 Fix 152 的 `vb6_VariantArray` 装箱；
+④ `cgen_util_type.cpp` 新增 `isWholeArrayRef()`（口径与 prelude 的 isArrayAccess 一致：
+先 `knownArrays_` 再 `symTab_.lookupModule()->isArray`，所以 `GetTickCount()` 这类零参
+调用不会误判）与 `wrapWholeArrayAssign()`；
+⑤ `cgen_assign_value_sem.inc` 两处 emit 收口：整体数组目标右侧若非"必然新建载体"的
+helper，一律 `vb6_ArrayAssign1D(dst, src)` 深拷贝；
+⑥ `cgen_util_ctrl.cpp:wrapVariantValue` 在 `inferExprType` switch **之前**拦整体数组
+→ `vb6_VariantArray((void*)arr)`；不拦的话 `A()` 可能被推断成**元素**类型而生成
+`vb6_VariantLong(载体指针)`，C 侧只是警告、指针截断成 int32，运行期才炸；
+⑦ RTL 新增 `vb6_ArrayAssign1D`（`vb6rtl_array.c`，紧挨 `vb6_SafeArrayDestroy1D`）：
+深拷贝 + 先建副本再销毁 dst（`dst==src` 安全）；BSTR 元素逐槽 `SysAllocString`，
+VARIANT 元素 **memset 清空后** `vb6_VariantCopy`（不能 `VariantClear`，那会把 src 仍
+持有的对象释放掉）。
+`freshCarrier` 白名单**不含** `vb6_VariantToByteArray(` / `vb6_VariantToSafeArray1D(`：
+这俩在 Variant 持数组时 `return v.parray`（`vb6rtl_compat.c:187`、`vb6rtl.c:199`）是
+**别名**而非新建，必须再拷一份。
+验证：`tests/test_array.bas` 追加 4 行断言（`wa-clone=22` 深拷贝、`wa-ub=3` 整体右值、
+`wa-str=65` String→Byte()、`wa-rt=65` Byte()→Variant→Byte()），并把该用例从"只跑不比对"
+改成带 `Add-BasTest` 预期串。
+**遗留（Fix 170b）**：`vb6_VariantArray()` 固定打 `VT_ARRAY|VT_VARIANT`，所以
+`VarType(b) = vbArray + vbByte` 这类判定仍不成立（载体自己有 `elemType`，可据此推出
+元素 VT 来装箱）；`Erase`/`ReDim` 走名字解析不经过本路径，未受影响。
+
+### Fix 172（工具，不是 bug）：RTL 里的崩溃回溯钩子
+`vb6rtl.c` 新增 `vb6_CrashTraceVEH`，`vb6_Init` 里按 `C3_COM_TRACE` / `C3_CRASH_TRACE`
+安装：AV/非法指令/除零/栈溢出时把异常码、故障地址、**读写目标**和最多 24 帧栈按 **RVA**
+打到 stderr。用法：`rva + 0x140000000` 喂 `.temp/sym3.ps1` 直接得到生成的 `.c` 行号
+（x64 `/Od` 下 `CaptureStackBackTrace` 会混进栈扫描假帧 —— RVA 明显超出镜像大小的那些
+丢掉即可）。这一次就是靠它把 `wcscmp` 的调用者定位到 `VBFlexGrid.c:47215`
+（`GetTextDisplay`）的，之前只有 WER 的单个"故障偏移"。
+配套：`.temp/gate.ps1 -Tag regressNN`（跑 `tests/run_tests.ps1 -Category all`，日志
+`output/yqt_regressNN.log`，UTF-8）；`.temp/yqt_shot.ps1`（起 exe → 截主窗口 → 存 PNG，
+用 Read 直接看渲染结果，是唯一能"看到"GUI 用例的手段）。
+
+### Fix 173：未赋值的 String 是 **NULL BSTR**，比较函数不能直接喂 wcscmp
+`vb6_StrCmp`（`vb6rtl.c`，`=`/`<>` 的字符串入口）原本 `wcscmp(a,b)` 裸调；UDT 里从未赋值的
+`As String` 字段是 calloc 出来的 NULL → 读 0x0 → AV。踩到点：
+`VBFlexGrid.ctl:20425` `If Not VBFlexGridColsInfo(iCol).Format = vbNullString Then`。
+修成 `if (!a) a = L"";`（VB6 语义下 NULL BSTR ≡ `vbNullString` ≡ `""`，比较相等）。
+同口径把 `vb6_StrComp`（`vb6rtl_string.c:401`）的单边 NULL 提前返回 ±1 也改成归一成
+`L""` 再按长度比，否则 `StrComp("", vbNullString)` 报"不等"。
+
+### demo 现状（Fix 170+173 之后，已达成）
+`VBFlexGridDemo.exe` 启动 → 标题 `VBFlexGrid Demo` 的 940x553 窗口 → `[C3_FSM]
+MessageLoop enter` 驻留，无 AV、无 unhandled Err。截图 `.temp/demo_shot.png`。
+肉眼可见的**新缺陷**（下一批的输入）：
+① 行头列每行都画 `149`（应为 1..N），左上角固定格也是 `149`；
+② 第 1 行 A 列是 `46023`（= 2026-01-01 的日期序列号）而不是 `1.1`，B..I 列的
+   `1.2 … 1.9` 正常 → `1.1` 被按日期解析了，怀疑是 `Format$`/单元格数据类型推断
+   （`SortType = Generic` 那条下拉）把 `x.y` 认成日期；
+③ 下方选项面板的控件标题被裁字（`CellPictureAlignme`、`oolTipTex`、`ort Des.`、
+   `ow Property Page`）→ 设计期控件位置/宽度（Extender Left/Width，Fix 168 那批）
+   或字体 DPI 换算不对。
+
+
+
+## 14. 2026-09-21 深夜续：对照用户给的参考图后的定位（Fix 174/175/176）
+
+参考图（VB6 真身）与我们的截图逐列比对后，缺陷① 的**范围收窄成"只有 col 0 与 col 1 塌了"**：
+col≥2 的 `TextMatrix(i,j) = i & "." & j` 逐行全对；col 0 每行都是 `149`（= 最后一次
+`TextMatrix(i,0) = i` 的值）、col 1 每行都是 `A`（= 之后 `TextMatrix(0,1) = Chr(64+1)` 的值）。
+即这两列**读写都固定在第 0 行**。
+
+已排除的：
+- `MainForm.c` 三处调用点参数正确（`prop_let_TextMatrix(obj, i, j, vb6_CStrLong(i))` /
+  `vb6_CStrDbl(StartDate + (i-1))` / `vb6_Chr(64+j)`），Long/Date→String 的隐式转换在
+  **参数化属性 Let** 这条路上是有的；
+- `prop_let_TextMatrix` → `SetCellText` 的存储式子
+  `VB6_SA_AT(TCELL, VB6_SA_AT(TCOLS, Cells.Rows, iRow).Cols, iCol).Text` 正确，
+  `VB6_SA_AT` 是干净的双参数宏，嵌套传参不会被预处理器切错；
+- 每行的 `.Cols` 确实各自分配了（`VBFlexGridCellsInit` 里 `With Rows(i): ReDim .Cols(...)`
+  的 With 绑定在循环体内，生成的 C 逐行 `ReDim1D_Udt`）；
+- **嵌套 UDT 动态数组本身没问题** —— 新用例 `tests/test_nested_udt_array.bas` 用
+  `Rows(i).Cols(j).Text` + `With Rows(i): ReDim .Cols(...)` + `LSet` 完整复刻了 VBFlexGrid
+  的存储结构，并按 demo 的写入次序（先填 j、再填行头列、最后填列头行）跑，逐行读回全对
+  （已注册进 bas 队列，预期串 `NA1=1;NB1=D0;NC1=1.2` / `HDR@ABC`）。
+⇒ 剩下的唯一嫌疑是**绘制路径**（固定列/行表头那一段的画法），要重编 demo 拿
+`GetTextDisplay` 调用方的循环再定（**Fix 174 未修**）。
+
+### Fix 175（未修，写复现用例时撞上的）：Sub/Function 的 String 形参不做实参转换
+`test_nested_udt_array.bas` 第一版按 demo 原样写 `SetCell i, j, StartDate + (i-1)` 与
+`SetCell i, 0, i`（`ByVal v As String` 形参），生成的是
+`vb6_SetCell(i, j, (StartDate + (i - 1)))` / `vb6_SetCell(i, 0, i)`：
+Date → **error C2440**（响的），Long → **只有 warning C4047**，把整数当 BSTR 指针传进去
+（静默错，和 Fix 166/169 同一类）。参数化属性 Let 那条路会插 `vb6_CStrLong/vb6_CStrDbl`，
+普通 Sub/Function 调用点不会 → 补的口径就是"按形参类型包一层 CStr"。
+（同一处把 `Date` 转成 `vb6_CStrDbl` 也是错的：它输出序列号 `46023`，而 VB6 的
+`CStr(Date)` 是本地日期串 —— 参考图里 B 列正是 `2026/1/1`。这就是最初记的"缺陷②"。）
+
+### Fix 176（已修）：`Debug.Print <用户 Function 返回 String>` 被当 int32 打印
+`cgen_call.cpp` 的 Debug.Print 分派只靠 `bstrFuncs` **前缀表** + `knownBstrVars_`，
+用户自定义 Function 的调用结果两个都捡不到 → 落到兜底
+`vb6_DebugWriteLong((int32_t)(BSTR))` → 指针截断，打印出 `-150012728` 这种垃圾数
+（**不崩，纯静默错**，会污染所有 `Debug.Print "x="; MyFunc()` 形式的用例输出）。
+修法：判定里补一条按 AST 的返回类型 —— `inferExprType(*call.positional[j]) ==
+Vb6Type::String`（`inferExprType` 的 `IndexOrCallExpr` 分支本来就会查
+`symTab_.lookup(name)->type`，现成的）。
+实测：探针 `.temp/probe_print.bas` 的 `B=` 从 `-150012728` 变成 `FN!`；
+`test_nested_udt_array` 的 `HDR@ABC` 也从四个截断数变成正确的串。
+同类未修的：返回 Date 的用户 Function 仍会落进 `DebugWriteLong` 兜底（该走日期串）。
+
+
+---
+
 ## 15. 2026-09-22 凌晨：Fix 177 —— 单元格存的是**悬垂 BSTR**（推翻"存储已排除"）
 
 **取证方式（可复用）**：把整个 demo 工程 `cp -r` 到 `.temp/proj_probe/`，在
@@ -996,6 +1231,8 @@ BADROWS=148         <- 第 2..149 行无一正确
    深度初值 **1**（宏名自带的 `(` 已被 `macro.size()` 跳过）。
 
 **修复后实测**：`MIN=A1,...`（写 A1 读回 A1）、`COL12` 第 1 行 = `C1` 正确。
+
+**本轮收尾**：门禁 regress35 PASS=89 FAIL=0 SKIP=1 TOTAL=90；已提交 `477c90f`（只暂存 Fix 177 的 hunk + 本节§15～19；同文件里其他批次的 Fix 154/156/159/170 未提交改动保持原样）。
 
 ---
 
@@ -1103,23 +1340,1425 @@ RTL 侧**早就有** `vb6_CStrDate(double)`（`vb6rtl_conv.c:187`：打 `VT_DATE
 + `STM_SETIMAGE`，或走控件自有 image 槽），属**新增能力**而非一行修正，
 建议排在 177/178/175/字体之后。
 
-- **C2440×12**：剩余都是小包，按族：
-  **更正一处旧定性**：VBFlexGrid.c 960/1086/2071 的 `VARIANT→void*`×3 曾被记成
-  "Ambient 属性赋给对象字段"，实际全部是 `PropDataMember`（`MSDATASRC.DataMember`）
-  的两层类型不一致 → 已由 **160-G** 一并解决（Ambient 簇因此根本不存在）。
-  `VARIANT→float`×2（VBFlexGrid 32210/32212）已由 **160-F** 解决。剩下 12 条：
-  `vb6_type_VS_FIXEDFILEINFO→void*`×3（Common.c 617/630/643）= **上面已单列的 160-D，定性为
-  `With <返回 UDT 的函数>()`，与 LSet 无关**，
-  `VARIANT→int32_t`×2（VisualStyles 149/184，
-  `CurrControl.Style`/`.hWnd` 系）、`VARIANT→vb6_vartype`（VBFlexGrid 22606，
-  `&(vb6_VARIANT){<void* 表达式>}` 复合字面量把 `prop_get_CellTag` 的 `void*` 返回值
-  当首个成员 `.vt` 初始化 → 应走 `vb6_VariantFromValue`，是包装选择 bug 而非缺类型信息）、
-  `VARIANT→BSTR`（Common 530）、
-  `BITMAPINFOHEADER→BSTR`（55326）、`UserControl_Extender_Type→void*`（1521）、
-  `Font*→float`（MainForm 346）、`HANDLE→double`（VisualStyles 411）、
-  `double→BSTR`×1（UserEditingForm 588，`ComboCalendarValue` 的返回类型未被识别为 Date →
-  159-B 白名单没命中，需查 `getClassMethodReturnType`）。
-- **C2172×1**（原 ×2）：MainForm.c:697 `OleCreatePropertyFrame` 实参不是指针。另一条
-  Common.c `vb6_CStr(vb6_VariantFromValue(UDT))` 已由 **160-C** 顺带消除（它本就走错了
-  字符串 LSet 分支）。
-- 3 个 Extender 方法（`vb6_Extender_Drag/ZOrder/SetFocus`）目前是 implicit-extern 警告，链接期会变成错误。
+## 20. 2026-09-22 01:5x：Fix 178 **根因已钉死**（推翻 §16 的"读侧别名"猜测）
+
+探针 `.temp/proj_probe/MainForm.frm`（`FIX178-PROBE` 块，全部用 `&` 拼接以避开
+`Print ;` 的 int32 分派）实测：
+
+```
+COL13=0:W5 1:1.13 2:W5 3:W5 ... 12:W5        (往行 2..7 写 W0..W5, 整列读回)
+COL14-NEVERWRITTEN=0:N 1:1.14 2:N ... 12:N   (一次都没写过的列)
+W9THEN=NINE|NINE|NINE|NINE                   (写 (9,15) 后读 0/2/9/11)
+RH4-THEN=285|285|765|285                     (RowHeight(4)=777 只影响行 4)
+MIN=A1,A3,A3   BADROWS=148   AGAIN-COL0=149|1|149|149
+```
+
+三条结论：
+1. **行 1 独立且始终正确；行 0 与所有行 ≥2 共用同一份 `.Cols`**（不是"读侧"，
+   因为写一行会同时改到所有行 —— `W9THEN` 四格同值）。
+2. `Rows(i)` 的**下标本身没问题**：`RowHeight(4)` 走同一个 `Rows(i)` 数组的
+   `.RowInfo` 字段，改行 4 只有行 4 变 → 每行的 TCOLS 元素是各自独立的。
+   ⇒ §16 怀疑的"读侧行下标别名"排除。
+3. 塌的是每行的 **`Cols` 指针**。
+
+### 根因（生成 C 直接可指）
+```
+VBFlexGrid.ctl:16392  LSet VBFlexGridDefaultCols = VBFlexGridCells.Rows(0)
+   → VBFlexGrid.c:38122  memcpy(&me->VBFlexGridDefaultCols, &Rows(0), sizeof(TCOLS));  /* LSet UDT */
+VBFlexGrid.ctl:4146/8008  LSet VBFlexGridCells.Rows(i) = VBFlexGridDefaultCols
+   → VBFlexGrid.c:3375/3379/13666  VB6_SA_AT(vb6_type_TCOLS, Rows, i) = me->VBFlexGridDefaultCols;
+```
+即 `PropRows Let` 增长时 `ReDim Preserve Rows(0 To Value-1)` 后，用**模板**逐行
+`LSet` 填新行；而模板里存的是**行 0 的 `Cols` 载体指针**。C 侧无论是 `memcpy` 还是
+结构体赋值都是**浅拷贝** → 新增的行 2..149 全部别名到行 0。设计期 `Rows=2` 时
+`InitFlexGridCells` 给行 0、行 1 各自 ReDim 过 `Cols`，所以**只有行 1 是独立的那一个**
+（与实测完全吻合）。`_vb6_with_133->Cols = me->VBFlexGridDefaultCols.Cols`（14367 等）
+是同一形态的显式数组成员赋值。
+
+VB6 运行时对含动态数组/字符串成员的 UDT 赋值与 `LSet` 走类型描述符**深拷贝**，
+所以真身不会出现这个别名。
+
+### 修法（下一轮实现，设计已定；⚠ 本轮未动代码）
+需要"**含所有权成员的 UDT 拷贝**"能力，两处调用点 + 一个 RTL 回调版克隆：
+
+1. RTL（`vb6rtl_array.c/.h`）：
+   `typedef void (*vb6_udt_elem_copy)(void* dst, const void* src);`
+   `vb6_SafeArray1D* vb6_ArrayAssign1D_Cb(vb6_SafeArray1D* dst, vb6_SafeArray1D* src, vb6_udt_elem_copy cb);`
+   —— Fix 170 的 `vb6_ArrayAssign1D` 加回调参数（`cb==NULL` 时保持现在的整块 memcpy；
+   `cb!=NULL` 时目标槽先清零再逐元素 `cb`，因为 `TCELL` 里有 `Text As String`）。
+2. 代码生成：按 `Symbol::udtMembers`（`cgen_decl.cpp:207` 的 typedef 同一份元数据）
+   递归判定 `udtHasOwnedMembers(vb6_type_X)`（成员是 String / 动态数组 / 嵌套 UDT 且其
+   自身含所有权成员），命中则**惰性生成**一个模块级静态函数并登记避免重复：
+   ```c
+   static void vb6_udtcpy_TCOLS(vb6_type_TCOLS* d, const vb6_type_TCOLS* s) {
+       if (d == s) return;
+       vb6_SafeArray1D* _old_Cols = d->Cols;      /* owned 成员: 先存旧值 */
+       memcpy(d, s, sizeof(*d));                  /* 标量/内联嵌套按位 */
+       d->Cols = vb6_ArrayAssign1D_Cb(_old_Cols, s->Cols,
+                                      (vb6_udt_elem_copy)vb6_udtcpy_TCELL);
+   }
+   static void vb6_udtcpy_TCELL(vb6_type_TCELL* d, const vb6_type_TCELL* s) {
+       if (d == s) return;
+       BSTR _old_Text = d->Text;
+       memcpy(d, s, sizeof(*d));
+       vb6_BSTR_Free(_old_Text);
+       d->Text = s->Text ? SysAllocString(s->Text) : NULL;
+   }
+   ```
+   注意递归顺序：元素类型的拷贝函数要先有**前向声明**（`static void vb6_udtcpy_TCELL(void*, const void*);`
+   形态的 cast 需要真实原型，建议统一生成 `(vb6_type_X*, const vb6_type_X*)` 原型 + 一个
+   `void*` 版薄封装，避免直接 cast 触发 C4113）。
+3. 调用点改两处即可（都用现成的类型信息，不必再走 Fix 177 那种"从 C 串反推"）：
+   - `cgen_assign_stmt_special.inc:150` 的 `memcpy(...) /* LSet UDT */`；
+   - `cgen_assign_value_sem.inc` 末端 `target = value`：当 target 是
+     `VB6_SA_AT(vb6_type_X, ...)` 或已知 UDT 变量、且 value 推断为同一 `vb6_type_X` 时，
+     发 `vb6_udtcpy_X(&target, &value);`。
+   另外 `_vb6_with_133->Cols = ...Cols`（数组成员直接赋值）应并入 Fix 170 的
+   `wrapWholeArrayAssign` 口径（那里已有 `vb6_ArrayAssign1D`，补 `cb` 版即可）。
+4. 验证口径（不用等 demo）：小 `.bas` 用例 —— `Type T: A() As Long: S As String: End Type`，
+   `ReDim x.A(3): x.S = "1": y = x: y.A(0) = 9: y.S = "2"` 后断言 `x.A(0)=1 / x.S="1"`
+   （当前会打出 9 / "2"，即别名+共享 BSTR）。demo 侧复跑 `FIX178-PROBE` 期望
+   `COL13=…2:W0 3:W1 …7:W5`、`W9THEN=NINE` 只出现在第 9 行、`MIN=A1,A2,A3`。
+
+**风险**：这是 codegen 级新能力，触及 `cgen_assign_*` 与 LSet 主干，必须单独一轮 +
+全量门禁（Charts2020/czUI/NewTab 里有大量 `LSet`/UDT 赋值）。本轮**未动任何 src 代码**，
+只加了 `.temp/proj_probe` 的探针块（gitignore 区内）。
+
+---
+
+## 21. 2026-09-22 02:0x：本轮被并发防护跳过（只读分析）—— Fix 175 配方**补全**：`CStr(Date)` 还缺"无时间分量→只给日期"
+
+**并发状态**：`tasklist` 无 C3/cl/link/ninja，但会话 14a01034 `runtimeState: running`
+（01:58 仍在 streaming），且它已把 **Fix 178 根因钉死并写了 §20 修法**，正在动手。
+⇒ 本轮不启动任何编译/测量/回归，也不改 `src/`（改 src 会污染它正在跑的构建归因）。
+Fix 178 归它，本轮只做 Fix 175 的只读定位。
+
+### 一、§17 的 4 步配方经复核**站点没漂移**（当前树行号）
+- `cgen_base_type.cpp:41` 与 `:80`：`case Vb6Type::Date: → "double"`（Date/Double 在 C 层同型）。
+- 登记处（按 **C 类型串** 为键，所以 Date 落进 double 集合）：
+  `cgen_localdecl.cpp:214/218`、`:425/427`，模块级 `cgen_decl.cpp:262/264`。
+- 推断处缺 Date 分支：`cgen_util_type.cpp:36` `if (knownDoubleVars_.count(lower)) return Vb6Type::Double;`
+  （字面量 `#...#` 已在 `:53` 返回 Date，所以只有**变量**看不见）。
+- `TypeSystem::promote` 在 `type_system.cpp:204`，数值阶梯里无 Date。
+- 出口侧**已就绪**：`cgen_expr_binary_util.cpp:99` 与 `:151` 都有 `case Vb6Type::Date → vb6_CStrDate(...)`；
+  实参侧 `cgen_assign_prop_write.inc:181`、内建函数 `cgen_expr_call_builtin_argtype.inc:93` 同。
+
+### 二、新发现（§17 漏了，会让 Fix 175 改完仍不对参考图）
+`vb6_CStrDate` (`vb6rtl_conv.c:187`) 只是 `vb6_Format(VT_DATE, NULL)`，而 `NULL` 分支
+(`detail/vb6rtl_format_extract.inc:39-55`) **无条件拼 "短日期 + 空格 + 时间"**：
+
+```c
+GetDateFormatW(LOCALE_USER_DEFAULT, DATE_SHORTDATE, &st, NULL, dateBuf, 64);
+GetTimeFormatW(LOCALE_USER_DEFAULT, 0, &st, NULL, timeBuf, 64);   // ← 0:00:00 也照打
+swprintf(fullBuf, 128, L"%s %s", dateBuf, timeBuf);
+```
+
+VB6 的 `CStr(Date)` 规则是：**时间分量为 0 → 只给短日期**；整数分量为 0（纯时间）→ 只给时间；
+否则才"日期 时间"。demo 日期列写的是整数序列号（46023 = 2026/1/1），参考图 B 列逐行是
+`2026/1/1 … 2026/1/23`（已直接目视确认参考图，无时间尾巴）。⇒ 只补类型可见性的话，
+单元格会变成 `2026/1/1 0:00:00`，**仍与参考图不符**。
+
+**最小改法（下一轮与 §17 四步同批或紧随其后）**：只动 `vb6_CStrDate`，不碰共享的
+`Format(..., NULL)`（`Format` 有自己的语义与用例）。在 `vb6_CStrDate` 里先判
+`frac = x - floor(x)`（容差 `1e-9`，序列号是精确整数所以安全）；`frac≈0` 时只返回
+`GetDateFormatW(LOCALE_USER_DEFAULT, DATE_SHORTDATE, ...)`，否则原样委托 `vb6_Format`。
+已核对：**没有任何用例钉住 `CStr(Date)` 的输出**（`tests/*.bas` 里 `CStr(` 只出现在
+`test_err`/`test_variant`/`diff_smoke`，均非 Date；`test_date.bas` 故意用 `Dim d As Double`），
+所以这条改动不会翻既有 golden。
+
+### 三、与 Fix 178 批次的文件冲突预检（避免互相吞改动）
+- 它（§20）预计改：`vb6rtl_array.c/.h`、`cgen_assign_stmt_special.inc:150`（LSet memcpy）、
+  可能新增 codegen 辅助（声明大概率落在 `cgen_helpers.inc`）。
+- Fix 175 预计改：`cgen_state.inc`、`cgen_decl.cpp`、`cgen_localdecl.cpp`、`cgen_util_type.cpp`、
+  `type_system.cpp`、`vb6rtl_conv.c`。
+- **唯一重叠面 = `cgen_helpers.inc`**（两边都可能加声明）。提交时一律按 hunk 暂存
+  （`git apply --cached --recount`，见 §20 之后的实践记录），别整文件 add。
+
+### 四、参考图复核（本轮直接目视）
+A 列行头 = 1..23 本行行号；B 列 = `2026/1/1`…`2026/1/23`；C..M 数据格 = `行.列`（C 列是 `.3`，
+即 B 被日期占用）；下方面板里 **"Partial Scr…" 在参考图里本身就是截断的** ⇒ 问题 3 的验收标准是
+"与参考图一致"，不是"零截断"，别为了消除截断去改控件尺寸（几何本来就没问题）。
+
+
+---
+
+## 22. 2026-09-22 02:4x：Fix 178 **已实现并验证**（§20 设计落地 + 第 3 个别名点）
+
+实现（与 §20 一致，另加 §20 未预见的第三个别名点）：
+
+1. **RTL**（`vb6rtl_array.h/.c`）：新增 `typedef void (*vb6_udt_elem_copy)(void*, const void*)`
+   与 `vb6_ArrayAssign1D_Cb(dst, src, cb)`；Fix 170 的 `vb6_ArrayAssign1D` 收为
+   `_Cb(..., NULL)` 薄封装。`cb` 非空时对 `vb6_sa_udt` 载体逐元素回调深拷贝。
+   **`dst == src` 保护**：两个名字已共用同一载体时改为"克隆且不销毁 dst"（销毁会让
+   src 侧悬垂），顺带把旧别名**打破**。
+2. **代码生成**（`cgen_util_classtype.cpp` 末段）：`udtHasOwnedMembers`（按符号表
+   `udtMembers` 递归；String / Variant / 动态数组 / 含所有权成员的嵌套 UDT 记为有所有权，
+   **对象成员维持按位**，以免给全局引入 AddRef/Release 失衡）、`requestUdtCopy`、
+   `emitUdtCopyBlock`（依赖闭包 → 前向声明 → 定义）。**逐成员赋值，不 memcpy**：
+   先 memcpy 再修补的写法会让嵌套成员的"旧值"其实是 src 的指针，递归释放时把源毁掉。
+   生成的两个典型成员语句：
+   ```c
+   { BSTR _o = d->Text; d->Text = s->Text ? SysAllocString(s->Text) : NULL;
+     if (_o && _o != s->Text) vb6_BSTR_Free(_o); }
+   { vb6_SafeArray1D* _o = d->Cols;
+     d->Cols = vb6_ArrayAssign1D_Cb(NULL, s->Cols, vb6_udtcpy_TCELL_v);
+     if (_o && _o != s->Cols) vb6_SafeArrayDestroy1D(_o); }
+   ```
+   `_o != s->X` 的判据是"两侧本来就共享同一对象时不能释放"（BSTR 非引用计数）。
+3. **落地时机**：请求点在 body pass，而 C 要求先定义后使用 → 记进
+   `mutable std::map<std::string,bool> udtCopyRequested_`（值=是否需要 `void*` 薄封装），
+   在 `cgen_base_generate_epilogue.inc` 把整块 **static** 函数插到 .c 自身
+   `#include "<Base>.h"` 之后（static：每 .c 一份，跨模块同名不冲突）。
+4. **三个调用点**：
+   - `cgen_assign_stmt_special.inc`：LSet 标识符目标（原 `memcpy`）；
+   - `cgen_assign_value_sem.inc` 末端 `else`：`Rows(i) = VBFlexGridDefaultCols`（demo 主因）；
+   - **`isWholeArrayRef` 原先只认裸数组变量** → `VBFlexGrid.ctl:8409`
+     `.Cols() = VBFlexGridDefaultCols.Cols()` 退化成载体指针直赋。补
+     `isDynamicArrayMemberCallee`，并把元素 UDT 透传给 `wrapWholeArrayAssign`
+     → `vb6_ArrayAssign1D_Cb(target, rhs, vb6_udtcpy_TCELL_v)`。
+   ⚠ 坑：`inferUdtTypeOfExpr` 对动态数组成员返回的是**元素** UDT 类型，所以
+   `udtDeepCopyAssign` 必须先排除 `isWholeArrayRef` 两端，否则会把载体指针当结构体拷。
+
+**验证**
+- 新用例 `tests/test_udt_assign.bas`（第 91 例）：`y = x`、`LSet z = x`、
+  `arr(1) = arr(0)`、嵌套 `h2 = h1`（`THost{Items() As TOwned}`）四种形态均
+  "改副本不影响原件"。标记 `A1=1;S1=hello;N1=42` / `A2=99;S2=world;N2=7` /
+  `H1=11;HS1=alpha` / `E1=5;ES1=five` / `L1=2;LS1=hello` / `UDT-ASSIGN-DONE`。
+- demo 探针（同一 `FIX178-PROBE` 块，与 §20 逐条对照，括号为 §20 的旧值）：
+  ```
+  COL13=0:M 1:1.13 2:W0 3:W1 4:W2 5:W3 6:W4 7:W5 8:8.13 …   (旧: 2..12 全 W5)
+  COL14-NEVERWRITTEN=0:N 1:1.14 2:2.14 3:3.14 …              (旧: 全 N)
+  W9THEN=O|2.15|NINE|11.15                                    (旧: 四格同 NINE)
+  MIN=A1,A2,A3   CHAIN=A2x   SAMECOL=B5,B6   CELLPROP=A2      (旧: A1,A3,A3)
+  COL12=0:L 1:C1 … 10:C10 11:11.12                            (旧: 0:C10 1:C1 2:C10…)
+  BADROWS=1                                                    (旧: 148；1=第 149 行本身)
+  ```
+- 生成 C：`Fix 178` 标注 74 处；`Rows, i) = me->VBFlexGridDefaultCols;` 与
+  `_with_N->Cols = me->VBFlexGridDefaultCols.Cols;` 两种裸别名赋值**归零**。
+
+**新发现（未修，记作 Fix 180）**：`ReDim <UDT 动态数组成员>` 不带 `As` 时生成
+`h1.Items = vb6_SafeArrayReDim1D(vb6_sa_variant, 0, 1)` —— 元素类型按 Variant 定，
+而读写侧用 `VB6_SA_AT(vb6_type_TOwned, …)`，**步长不符** → 越界踩内存（现象：整棵
+子树别名+字符串为空）。带 `As TOwned` 才走 `vb6_SafeArrayReDim1D_Udt(sizeof(...))`。
+VBFlexGrid.ctl 全部带 `As`，故 demo 不受影响；测试用例已按带 `As` 的写法固化。
+入口：ReDim 生成处选 `_Udt` 版的条件（`arrayUdtElemTypes_` 只登记裸数组变量，
+UDT 成员数组没进去）。
+
+---
+
+## 23. 2026-09-22 03:0x：本轮再次被并发防护跳过（只读）—— 问题 3（字体）定位到**可照抄的改法** + 一个 GDI 生命周期陷阱
+
+**并发状态**：`tasklist` 有 6 个存活构建进程（`C3.exe` 11772 + 5×`cl.exe`），
+`.build/C3.exe` 02:57:10 刚重建，`output/yqt_regress37.log` 03:00:51 正在写（另一会话的
+门禁，目前全 PASS）。⇒ 本轮不编译、不测量、不起 regress38、不改 `src/`。
+**Fix 178 已由另一会话实现并验证（§22）**，本会话不再碰；`BADROWS 148→1`、`COL13/COL14` 逐格归位。
+
+### 一、§21 的 Fix 175 站点复核：行号**一字未漂**（Fix 178 没碰这些文件）
+`cgen_util_type.cpp:36` / `cgen_localdecl.cpp:214,218` / `cgen_decl.cpp:262,264` /
+`type_system.cpp:204` 逐行 `sed -n` 复验一致。下一轮可直接照 §17+§21 动手。
+
+### 二、问题 3（面板标题截断）根因**再确认**并给出改法
+`src/rtl/core/vb6forms/vb6forms.c:232-242`（`vb6_CreateControl` 末尾，所有控件类的唯一漏斗）：
+
+```c
+// 设置默认字体 (VB6使用MS Sans Serif 8.25pt)      ← 注释写对了
+HFONT hFont = (HFONT)GetStockObject(DEFAULT_GUI_FONT);   // ← 代码给的是 Segoe UI 9pt
+if (!hFont) { ... CreateFontA(-11, ..., "MS Shell Dlg") }  // ← 兜底永不执行
+```
+
+即：**代码与自己的注释不符**。Segoe UI 9pt 比 MS Sans Serif 8.25pt 既高又宽，
+按钮/标签文字装不进原几何（几何本身是对的：`Command13` 宽 1215 twips → 81px）。
+
+**改法（待定编号，建议 Fix 179）**：把那段换成"每控件建一份"的 8.25pt MS Sans Serif：
+
+```c
+HDC  hDC   = GetDC(hwnd);
+int  dpiY  = GetDeviceCaps(hDC, LOGPIXELSY);
+ReleaseDC(hwnd, hDC);
+LOGFONTA lf; memset(&lf, 0, sizeof lf);
+lf.lfHeight = -MulDiv(825, dpiY, 7200);      /* 8.25pt @96dpi = -11 */
+lf.lfWeight = FW_NORMAL;
+lf.lfCharSet = DEFAULT_CHARSET;
+lf.lfQuality = NONANTIALIASED_QUALITY;       /* VB6 位图字体观感，别开 ClearType */
+strcpy(lf.lfFaceName, "MS Sans Serif");
+HFONT hFont = CreateFontIndirectA(&lf);
+if (!hFont) hFont = (HFONT)GetStockObject(DEFAULT_GUI_FONT);
+```
+
+**⚠ 必须"每控件一份"，不要做模块级缓存**（这是本轮只读分析的主要产出）：
+`vb6forms_ctrl.c:169-184` 的 `vb6_SetControlFontFromLogFont` 在替换字体后会
+`DeleteObject(hOldFont)`，其注释说"stock 字体 DeleteObject 是 no-op 所以安全" ——
+对今天的 `DEFAULT_GUI_FONT` 成立，但**对自建 HFONT 不成立**。若缓存一份共享，
+第一个改 `Font` 的控件就会把别的控件在用的字体销毁掉（GDI 句号复用 → 别处
+随机换字形/句柄失效），且这种破坏是**跨控件、非确定性**的，极难归因。
+每控件一份则与既有 delete 语义天然自洽（控件数几十个，GDI 开销可忽略）。
+
+**配套核对点（改时顺手看一眼，不必动）**：
+- `vb6forms_ctrlarr.c:104` 控件数组从原型控件 `WM_GETFONT` 复制字体 → 与新默认兼容；
+- `vb6forms_ctrl.c:202/259/281/303/325` 的 `lfHeight = -13`（"Default ~10pt"）是
+  **Font 属性 getter** 的兜底，与默认渲染无关，但说明"读回 Size"路径也硬编码，
+  若 demo 里有 `Font.Size` 读取会另行偏大；
+- `uc_host.c:334`（UserControl 内嵌 edit）同样用 `DEFAULT_GUI_FONT`，属同类问题，
+  本 demo 不经过，留作后续；
+- 显式设过 `Font` 的控件走 `vb6forms_ctrl.c` 的 setter，不受默认值影响。
+
+**验收标准（重要，别做过头）**：参考图里 **"Partial Scr…" 本身就是截断的**，
+`Printscreen to Clipboard` 是**两行**显示。所以目标是"与参考图一致"，
+不是"零截断" —— 不要为此去改控件宽高（§18 已证几何/DPI 全对）。
+
+### 三、下一轮次序建议（避免与另一会话撞车）
+1. 先只看 `output/yqt_regress37.log` 的 `Results:` 行确认 Fix 178 批次的门禁结论
+   （若它已提交，本会话直接在其之上做，不要重复提交同批 hunk）；
+2. 树空闲后：**先重编 demo + 截图**，看 §22 之后与参考图还剩几项差异（很可能行头/数据格已好，
+   只剩日期列与字体）；
+3. 一次只改一件事：优先 **Fix 175（Date 可见性 + §21 的 `CStr(Date)` 只给日期）**，
+   字体（本节改法）紧随其后 —— 字体是 RTL 单点、验证成本低，适合当"稳一手"的间隔项。
+
+
+---
+
+## 24. 2026-09-22 03:4x：Fix 175 **已落地**（Date 可见性 + CStr(Date) 口径 + String 形参转换）
+
+§17 的 4 步配方 + §21 补的 CStrDate 一条，实现时又冒出**第三半**（§17 只把它当"顺带"）：
+
+### A. Date 在类型推断层可见
+C 后端 `As Date` 与 `As Double` 同为 `double`，注册表按 **C 类型串**分派 → Date 被
+`knownDoubleVars_` 吞掉。新增 `knownDateVars_`，与 double **并存**登记（照 Fix 117c 的
+Single 双登记口径：既有 double 消费者一个都不能少），消费点一律**先判 Date**：
+- 登记：`cgen_localdecl.cpp`（Dim）、`cgen_decl_var.cpp`（模块级变量）、
+  `cgen_decl_func/proc/prop.cpp` 三处形参链（把 `if/else if` 的单语句体改成 `{}` 体，
+  内加 `if (paramType == Vb6Type::Date) knownDateVars_.insert(pLower)`）；
+  判据用 `resolveArrayElemType(asType.get()) == Vb6Type::Date`（codegen 侧没有
+  `resolveTypeRef`，那是 SemanticAnalyzer 的成员）。
+- 清理：三处过程入口 `knownSingleVars_.clear()` 之后。
+- 推断：`cgen_util_type.cpp` `IdentifierExpr` 分支在 Single 之后、Double 之前插入 Date。
+- 算术：`BinaryExpr` 算术分支显式处理 —— `Date ± 数值 → Date`、`Date - Date → Double`、
+  其余含 Date → Double。必须单独写，因为 `TypeSystem::isNumeric(Date) == false`
+  （`type_system.cpp:148`），交给 `promote` 会掉出数值阶梯；`rank()` 里的
+  `Date: 5` 那一行因此从来没生效过。
+- 出口：`vb6_CStr` 家族适配（`cgen_expr_call_conv_cstr.inc`）标识符与非标识符两条链
+  各加 Date → `vb6_CStrDate`；`Debug.Print` 分派（`cgen_call.cpp`）在 `isDoubleExpr`
+  **之前**加 Date 分支（否则 Date 变量被 `knownDoubleVars_` 抢先命中打成序列号）。
+
+### B. `vb6_CStrDate` 不再带时间尾巴（§21 那条）
+`vb6rtl_conv.c:187`：`frac = x - floor(x)`（容差 1e-9）时直接
+`GetDateFormatW(LOCALE_USER_DEFAULT, DATE_SHORTDATE, ...)`，否则原样委托 `vb6_Format`。
+**没碰共享的 `Format(v, NULL)`** —— 它自己有无条件拼"日期+时间"的语义与用例。
+
+### C. 新发现：用户过程的 **ByVal String 形参**不做实参转换
+`ShowStr(d)`（`Private Function ShowStr(ByVal s As String)`，实参 Date）生成
+`vb6_ShowStr(d)` → **C2440 double→BSTR**；`ShowStr(n)`（Long）更阴：MSVC 只报
+C4047 警告，运行期把整数当指针解引用。补在 `cgen_expr_call_arg_emit.inc` 的
+`argVal` 落地处（ANSI-Declare 块之后、ByRef 块之前）：形参是 `ByVal String`
+且实参非 Variant、AST 类型属于数值/日期族 → `wrapToBSTR(argVal, *node.positional[i])`
+（`wrapToBSTR` 的 Date/Long/Double 分支在 `cgen_expr_binary_util.cpp:143-151` 早就齐了）。
+⇒ 这一条不是 Fix 175 的附属品：它是"静默把整数当字符串指针"这一**整类**缺陷的收口点。
+
+### 验证
+- 新用例 `tests/test_date_display.bas`（门禁第 92 例）10 条断言全 Y：
+  `D1-noserial / D2-year / D2b-notime / D3-nextday / D4-nextyear / D5-diff0 /
+  D6-param / D7-longparam / D8-cstr / D9-format`。短日期串形态随系统 locale 变，
+  所以断言只问"有没有裸序列号 / 有没有 `:` / 有没有 2026"，不钉死分隔符。
+- demo 截图 `.temp/demo_after175.png`：B 列 `2026/1/1 … 2026/1/13`，与参考图一致
+  （无 `0:00:00` 尾巴）；A 列行头、C..N 的 `行.列` 与参考图一致（Fix 178 的效果保留）。
+- demo 重新编译 0 error 0 LNK。
+
+### 已知缺口（本轮**故意**不做，避免把 12 处登记一次铺开）
+1. **类模块的 Date 字段**：`classDoubleMembers_` 由 `cgen_base_generate_state_scan.inc:44`
+   填充，要支持 `Private d As Date` 需平行加一个 `classDateMembers_` + 三处
+   `knownDateVars_.insert(...)` 恢复。demo 无此写法。
+2. 局部 `Const X As Date`（`cgen_localdecl.cpp:425` 一带的 cType 链）未登记。
+3. **纯时间** Date（`x < 1`，如 `CStr(0.5)`）仍走 `Format` → "1899/12/30 12:00:00"；
+   VB6 应只给 "12:00:00"。B 项只处理了"时间分量为 0"这一侧。
+
+
+---
+
+## 25. 2026-09-22 04:1x：Fix 181 控件默认字体（面板标题截断）**已落地**；顺带纠正 §18 的一处误判
+
+### 改了什么
+`vb6forms.c`：新增进程内缓存的 `vb6_Vb6DefaultGuiFont()` ——
+`LOGFONTA{ lfHeight = -MulDiv(825, dpiY, 7200), "MS Sans Serif", DEFAULT_CHARSET }`
+（8.25pt 按实际 DPI 换算，不是硬编码 -11），拿不到再退回 `DEFAULT_GUI_FONT`；
+`vb6_CreateControl` 的 `GetStockObject(DEFAULT_GUI_FONT)` 换成它，同处
+`CreateFontA` 兜底的字体名 `"MS Shell Dlg"` → `"MS Sans Serif"`。
+RTL 改动 ⇒ 必须重建 `C3.exe`（`C3RTL_EMBEDDED_FILES` 已含该文件）。
+`LOGFONTA lf = {0}` 而非 `memset`：`vb6forms.c` 没有 include `<string.h>`。
+
+### 效果（`.temp/demo_after181.png`）
+`oolTipTex→ToolTipText`、`ort Des.→Sort Desc`、`sureVisib→EnsureVisible`、
+`learConten→ClearContent`、`ow Property Page→Show Property Pages`、
+`tscreen to Clipb→Printscreen to Clipboard`、`en UserEditing De→Open UserEditing Demo`。
+与 §18 的判断一致：**几何与 DPI 数学本来没错**（`Command13` 设计期 1215 缇 = 81px，
+`vb6_TwipToX = twips/15` 在 96dpi 正确），错的是字体宽度。
+按 §21 的验收口径：参考图里 `"Partial Scr…"` 本身就截断，所以目标是"与参考图一致"，
+**没有**动任何控件尺寸。
+
+### 纠正一处旧结论（重要，会误导后续轮次）
+本会话早前记的"**窗体零子窗口，所有控件自绘**"是**错的**。实测
+`.temp/yqt_children.ps1` 枚举主窗口的子 HWND = **35 个**（`Button`/`Static`/`ComboBox`/
+`VB6_UserControlHost`/`VBFlexGridWndClass`…）。当时大概是查错了句柄。
+⇒ 控件是真窗口，`WM_SETFONT` 有效（这也是本条改动能生效的原因）；
+交互仍应走 `PostMessage`，但**可以**按子窗口自己的 rect 定位，不必全靠自绘坐标推算。
+
+### 新发现：第 5 项视觉差异（用户提示过"可能还有"）
+demo 网格只画到 **第 13 行**，参考图到 23 行。已核对：
+- 设计期 `MainForm.frm:286` `VBFlexGrid1 = 120,120, 13575 x 5655` 缇 = **905 x 377 px**；
+- 生成 C 的参数正确：`.temp/gen/MainForm.c:244`
+  `vb6_UC_HostCreate("VBFlexGrid", 120, 120, 13575, 5655, ...)`；
+- RTL 也按缇换算：`uc_host_create.inc:57` `vb6_TwipToX(width), vb6_TwipToY(height)`；
+- 但运行时量到 `VB6_UserControlHost` / `VBFlexGridWndClass` = **583 x 233**，
+  而截图上网格右缘约 737px、下缘约 287px —— **两个数不自洽**，说明量法或时机有问题
+  （宿主与内层窗口同 rect，可能是 UC 内部又按 `_ExtentX/_ExtentY` 重算过一次尺寸）。
+- 窗体本身尺寸是对的（客户区 922x506 = 设计 13830x7590 缇）。
+⇒ 登记为任务 #28。下一步先在同一进程里同时打印宿主 `GetWindowRect`、宿主 `GetClientRect`
+与 UC 自绘用的 `r->scaleWidth/scaleHeight`，再判断是宿主尺寸错还是行数/行高错。
+
+### 门禁
+`regress39` 覆盖 Fix 181（Fix 175 已由 `regress38` = PASS=91 FAIL=0 SKIP=1 TOTAL=92 覆盖）。
+
+---
+
+## 26. 2026-09-22 04:1x：本轮又被并发防护跳过（只读）—— 问题 4（CellPicture 预览空白）**根因改判**：容器子控件走的是第二条精简发射路径
+
+**并发状态**：`tasklist` 无存活构建进程，但 `.build/C3.exe` 03:58:58 刚重建、`output/yqt_full1.log`
+03:59:59 刚写、会话 14a01034 `runtimeState: running`（正在 "rebuilding to pick up the font fix"）。
+⇒ 本轮不编译、不测量、不起门禁、不改 `src/`。
+**编号说明**：台账里现在有**两个 §23**（本会话的字体分析在 1549 行，另一会话的 Fix 175 落地记录在
+1620 行）。本会话后续只追加、不重排；引用时用"§23(字体)"/"§23(Fix175)"区分。
+另一会话进度：Fix 178 → regress36/37 `PASS=90 FAIL=0 SKIP=1 TOTAL=91`；Fix 175 → regress38
+`PASS=91 FAIL=0 SKIP=1 TOTAL=92`（新增 `test_date_display`），且 B 列已实测 `2026/1/1…2026/1/13`。
+
+### 一、§19 的旧结论**作废**（本轮读码推翻）
+§19 说"`FrxReader` 只接在 Form.Icon 上，控件级 `Picture` 从未应用" —— **不对**。
+控件级 frx 早就有完整实现：`cgen_form_ctrl_style_apply.inc:252-296`（P24）覆盖
+CommandButton / OptionButton / CheckBox / **PictureBox** / Image，命中后
+`FrxReader::readPicture(offset,false)` → `bytesToHexArray` 进 .h →
+`vb6_LoadPictureFromMemory` + `vb6_SetControlPicture`（图形按钮走 `BM_SETIMAGE`）。
+RTL 侧也齐：`vb6forms_picture_prop.c` 会置 `SS_BITMAP|SS_CENTERIMAGE` 并 `STM_SETIMAGE`。
+
+### 二、真实根因（纯静态即可钉死，不需要构建）
+`Picture1` 在 .frm 里是 **Frame1 的子控件**，生成结果 `MainForm.c:309` 的调用形态是
+`vb6_CreateControl("STATIC", "", <style>L, 0L, 120,240,495,375, 230, vb6_hwnd_Frame1, hInstance)`
+—— 10 参、第 4 参 `0L`、控件 ID=230（≥200）。这正是
+`cgen_form_frame_menu.inc:12-60` 的 `emitChildControls` lambda 的产物（容器子控件 ID 从 200 起）。
+
+而 **P24 的 frx 块不在那个 lambda 里**：容器子控件路径只做了
+`vb6_CreateControl` + `emitDesignerStyleProps`（BorderStyle/Alignment）+ 控件名注册，
+主控件路径（`create_controls.inc` → `style_apply.inc`）独有的东西**全部缺失**：
+
+| 主路径有、容器子控件路径没有 | 位置 |
+|---|---|
+| P24 `.frx` Picture / TextBox.Text / ListBox.List+ItemData | `style_apply.inc:252-320` |
+| P20-12 `CausesValidation` | `:187` |
+| P20-35 Shape/Line 属性初始化 | `:214` |
+| P20-37 三个文件列表控件初始填充 | `:241` |
+| Fix 145/147 ComboBox 下拉高度 | `create_controls.inc` 内 |
+
+⇒ **问题 4 的修复点不是"给 PictureBox 加 frx 支持"，而是"容器子控件不该有第二条路径"。**
+受影响面也远不止图片：任何放在 Frame/PictureBox 里的控件都拿不到这些设计期属性。
+
+### 三、下一轮的最小改法（按代价从小到大，二选一）
+1. **保守**：把 `style_apply.inc:252-320` 的 P24 块抽成一个成员函数
+   `emitControlFrxProps(const FrmControl& ctrl, const std::string& hwndVar)`，
+   主路径与 `emitChildControls` 各调一次（`emitChildControls` 已有 `child` 与
+   `"vb6_hwnd_"+cIdent(child.controlName)`，直接传即可）。改动局限在 2 个 .inc + 1 个声明，
+   风险最低，正好解掉参考图的 CellPicture 项。
+2. **彻底**：让 `emitChildControls` 复用主循环的"创建后应用"整段（含上表全部），
+   消除双路径漂移。代价是要核对主循环里对 `ctrlId`/`hwnd` 变量名的依赖，回归面大，
+   建议单独一轮做，且必须先有覆盖"Frame 内 ComboBox/图形按钮"的用例。
+
+### 四、顺手记的两个事实
+- **`FrxReader::load` 失败是静默的**：`lastError_` 在 `src/` 里除 frx_reader 自身外**无任何消费者**
+  （已 grep 确认），所以"frx 没生效"这类问题将来仍会零线索。改法①落地时建议顺带在
+  `load` 失败处发一条 warning（不影响门禁输出，因为门禁比对的是运行输出）。
+- **MainForm.frx 的两个条目已手工解码验证**（864B）：`0x0000` = `[4B total=832][4B 'lt'][4B img=824]["BM"...]`
+  → `readPicture(0,false)` 的 `headerSize=12 / imgSize=base+8` 口径**完全正确**，能拿到 824 字节 BMP；
+  `0x0344`（VBFlexGrid 的 `WallPaper`）是另一种布局 `[4B size][16B GUID(StdPicture)][…]`，
+  用 `headerSize=12` 会读出垃圾 `imgSize` → 越界保护会返回空（不会崩，但也不会显示）。
+  参考图里网格无壁纸，故 WallPaper 这条**不影响验收**，但 `FormatString = "UserEditingForm.frx":0000`
+  之类"字符串存 frx"的形态目前只有 `readDocString` 路径支持，遇到 GUID 头仍需另案。
+
+---
+
+## 27. 2026-09-22 04:2x：⚠ Fix 181 落地版有一个**悬垂 HFONT**隐患（只读复核，未动代码）
+
+另一会话的 §25(Fix181) 把默认字体做成了**进程内缓存**：
+
+```c
+/* vb6forms.c:53-75 */  static HFONT vb6_Vb6DefaultGuiFont(void) {
+    static HFONT s_hFont = NULL; static int s_tried = 0; ... s_hFont = CreateFontIndirectA(&lf); ... }
+/* vb6forms.c:265 */    HFONT hFont = vb6_Vb6DefaultGuiFont();  →  WM_SETFONT 给**每一个**控件
+```
+
+而换字体的路径仍然无条件删旧字体（**本轮复核确认它没被同步改**）：
+
+```c
+/* vb6forms_ctrl.c:171-185 */  vb6_SetControlFontFromLogFont():
+    HFONT hOldFont = SendMessageW(hwnd, WM_GETFONT, ...);
+    ... WM_SETFONT(new) ...
+    if (hOldFont && GetObjectType(hOldFont) == OBJ_FONT) DeleteObject(hOldFont);
+```
+
+那段注释的前提是"旧字体是 stock 对象，`DeleteObject` 是 no-op"。Fix 181 之后旧字体是
+**我们自建的共享对象** → 前提失效：任何一个控件第一次在运行期写 `Font.Name/Size/Bold/
+Italic/Underline/Strikethrough`（`vb6forms_ctrl.c:214/245/267/289/311/333` 六个 setter 全部
+走这条），共享默认字体就被销毁，而**其余所有控件仍把它选在 DC 上** → GDI 句柄可被复用，
+表现为别处随机换字形/绘制异常。这类破坏是跨控件、非确定性、且与"哪个控件先改字体"
+有关，事后极难归因。（§23(字体) 里"必须每控件一份"的理由就是这一条。）
+
+**demo 现状**：`MainForm.frm` 只有 `PropCellFont.Name/.Size`（CommonDialog 的 Font 对象，
+行 373-374）与一处 Font 比较（行 545），**没有** `Label1.Font.X = ...` 这类控件字体写入
+⇒ 本 demo 大概率不会触发，所以这**不是**回归阻塞项；但它是整个工程集（以及任何后续
+用 VB6 字体对话框给控件设字体的代码）都会踩的雷。
+
+**两种收口，任选其一即可（都很小）**：
+1. 尊重现有删除语义：默认字体**每控件建一份**（去掉 `static`，`vb6_CreateControl` 内
+   `CreateFontIndirectA`），控件数几十个，GDI 开销可忽略；
+2. 保留缓存但加判据：`vb6forms_ctrl.c:180` 改成
+   `if (hOldFont && hOldFont != vb6_Vb6DefaultGuiFont() && GetObjectType(...) == OBJ_FONT)`
+   —— 需要把该 helper 从 `static` 暴露给 `vb6forms_ctrl.c`（或加一个
+   `int vb6_IsVb6DefaultGuiFont(HFONT)`）。顺带 `NONANTIALIASED_QUALITY` 若想要 VB6 位图观感
+   也在这两处一起定（当前用的是 `DEFAULT_QUALITY`，实测观感他们已验收，不强求）。
+
+另：`uc_host.c:334`（UserControl 内嵌 edit）仍用 `DEFAULT_GUI_FONT`，与本条无关，留档。
+
+
+---
+
+## 28. 2026-09-22 04:4x：§27 的悬垂 HFONT **已按方案 1 收口**（Fix 181 更正）+ 台账编号重排
+
+### 改了什么（`vb6forms.c:48-77`）
+`vb6_Vb6DefaultGuiFont()` 去掉 `static HFONT` 进程内缓存，改为**每次调用新建一份**
+（`vb6_CreateControl` 每控件一份），并采纳 §23 的 `NONANTIALIASED_QUALITY`
+（VB6 的 MS Sans Serif 是点阵字体，从不抗锯齿）。失败仍退回 `GetStockObject(DEFAULT_GUI_FONT)`
+—— stock 对象被 `DeleteObject` 是 no-op，与 `vb6forms_ctrl.c:171-185` 的删除语义自洽。
+
+### 为什么必须每控件一份（写死在这里，免得后人再"优化"成缓存）
+`vb6_SetControlFontFromLogFont` 换字体后**无条件** `DeleteObject(hOldFont)`，只用
+`GetObjectType()==OBJ_FONT` 判"可删"。共享自建字体也是 `OBJ_FONT`，所以任何一个控件
+第一次在运行期写 `Font.Name/Size/Bold/...`（那六个 setter 全走这条路）就会把**别的控件
+正在用的**字体销毁；GDI 句号还会被复用 → 表现为跨控件随机换字形，事后无法归因。
+代价：几十个 GDI 对象，可忽略。
+
+### 验收
+`.temp/demo_after181b.png` 与缓存版 `.temp/demo_after181.png` 目视一致（面板标题全部
+完整、B 列 `2026/1/1…2026/1/13`）⇒ 语义修正没有改变观感。
+门禁：`regress40`（本会话第 4 次；基线 regress35 PASS=89 → 现在 92 例）。
+
+### 台账编号重排（本条之前有重复号）
+按文件出现顺序统一为 20…27，并把 §27 内文对"另一会话 §24(Fix181)"的引用改指 §25：
+| 号 | 内容 | 作者侧 |
+|---|---|---|
+| §21 | Fix 175 配方补全（CStr(Date) 无时间分量） | 只读 |
+| §22 | Fix 178 已实现并验证 | 实现 |
+| §23 | 字体改法 + GDI 生命周期陷阱 | 只读 |
+| §24 | Fix 175 已实现并验证 | 实现 |
+| §25 | Fix 181 已实现并验证（原双号 §24 之一） | 实现 |
+| §26 | 问题 4 根因改判：容器子控件第二条发射路径 | 只读 |
+| §27 | 悬垂 HFONT 隐患（原 §25） | 只读 |
+| §28 | 本条：隐患收口 | 实现 |
+
+### 与参考图还剩的差异（更新后的清单）
+1. **第 5 项（新）**：网格只画到第 13 行，参考图 23 行 —— 任务 #28，根因已收窄到
+   `Form_Resize` 的单位口径（期望 903x382，实测量到 583x233，且两轴比例不一致、
+   与截图目测也不自洽 ⇒ 先复测量法）。
+2. 问题 4：CellPicture 预览空白 —— 任务 #29（Fix 182，按 §26 的最小改法）。
+3. Fix 179：点击网格即 AV —— 任务 #25（需按当前构建重新取栈）。
+4. Fix 180：`ReDim <UDT 成员数组>` 不带 `As` 时载体步长错 —— 任务 #26（demo 不经过）。
+
+
+---
+
+## 29. 2026-09-22 05:2x：`regress40` 绿（§28 的字体生命周期收口）+ #28 的**决定性证据**
+
+### 门禁
+`output/yqt_regress40.log` → `Results: PASS=91 FAIL=0 SKIP=1 TOTAL=92`、`GATE-EXIT=0`、
+`[FAIL]` 计数 0、无存活构建进程。⇒ §28 的"每控件一份字体 + NONANTIALIASED_QUALITY"
+在无回归前提下落地。本会话四次门禁：regress36/37（Fix 178，90/91 例）、
+regress38（Fix 175，92 例）、regress40（Fix 181 + 更正，92 例）。基线 regress35 = 90 例。
+
+### #28（网格只画到 13 行）根因**从假设升级为可指认**
+容器侧读控件几何**本来就有正确通道**：`cgen_util_ctrl.cpp:23-24`
+（`width → vb6_GetControlWidth`、`height → vb6_GetControlHeight`），
+同一条 `Form_Resize` 里 `PicturePanel.Height` 就是走它（`.temp/gen/MainForm.c:631`），
+单位自洽。**但 UserControl 实例被更早的"类成员"分支截走了** ——
+`VBFlexGrid1.Left` 解析成 `vb6_VBFlexGrid_prop_get_Left(vb6_UC_InstanceOf(hwnd))`，
+其函数体是 `vb6_ret_Left = vb6_Extender_Left;`（`VBFlexGrid.c:1638-1643`），
+而 `vb6_Extender_Left` 是**进程级单变量**（`vb6rtl_com.c:553`），只在
+`vb6_uc_push/pop`（`uc_host.c:154/175/208`）期间才代表"当前实例"。
+从窗体侧直调不 push ⇒ 读到的是别的 UC 留下的残值 → 减掉一个大脏数 → 网格被缩。
+
+### 修法（下一轮，二选一；都需要构建）
+1. **贴近 VB6 语义**：容器侧 `ucInst.Left/Top/Width/Height` 一律走 Extender 访问器
+   （`vb6_GetControlLeft/Top/Width/Height`，RTL 已有），即让"控件 Extender 属性"的判定
+   **先于**"类实例成员"的判定命中 UserControl 宿主。
+2. 或者让 `vb6_UC_InstanceOf` 直调路径也 push/pop 宿主状态 —— 改动更小，但把
+   "全局当实例状态"的既有隐患保留下来了。
+先做①，并顺手确认 `ScaleX/ScaleY` 的 COM 调用有没有实现（`vb6forms*` 里 grep 不到，
+可能恒返回 0/垃圾；它只贡献 ~160 缇，不是主因，但同一处要一起看）。
+
+---
+
+## 30. 2026-09-22 05:0x：本轮第三次被并发防护跳过（只读）—— Fix 180（`ReDim <UDT 成员数组>` 不带 `As`）根因收窄到**一行判定**，且现成解析器可直接复用
+
+**并发状态**：`tasklist` 无存活构建进程，但会话 14a01034 `runtimeState: running`
+（04:59:42 收到我的小结后正在流式执行），`.build/C3.exe` 04:28:35、`yqt_regress40.log` 04:51:13。
+⇒ 不编译、不测量、不起门禁、不改 `src/`、**也不往 `tests/` 落文件**（对方门禁会枚举用例目录，
+中途加 .bas 会改 TOTAL）。Fix 180 归本会话（§29 清单里它是任务 #26，另一会话未动）。
+
+### 一、根因（纯静态，已指到行）
+§22 记的是现象（`h1.Items = vb6_SafeArrayReDim1D(vb6_sa_variant, 0, 1)` → 元素按 16B VARIANT 分配，
+读写侧却用 `VB6_SA_AT(vb6_type_TOwned, …)` → 步长不符越界），并猜"入口是 `arrayUdtElemTypes_`
+只登记裸数组变量"。**这个猜测方向对，但真正的分叉点在更早的地方**：
+
+```cpp
+// cgen_redim.cpp:12-18  visit(ReDimStmt&)
+if (node.targetExpr) { emitReDimComplexTarget(node); return; }   // ← Fix 100 的复杂目标通道
+...
+std::string cName = resolveArrayTargetIdent(node.varName);        // "h1.Items" → h1.Items
+std::string lowerVar = node.varName;  → "h1.items"
+// :74-79  不带 As 时唯一的回退
+auto it = arrayUdtElemTypes_.find(lowerVar);                      // 键是**裸变量名**，永远捡不到 "h1.items"
+```
+
+⇒ `ReDim h1.Items(0 To 1)`（owner **不带下标**的简单点号链）根本没进 `targetExpr` 通道
+（Fix 100 的 `targetExpr` 只在链上带下标时才有，如 `m_Serie(i).PT(n)`），落到裸名回退 →
+`arrayUdtElemTypes_` 键不匹配 → `isUdtArray=false` → 发 Variant 版。
+多维分支（`:282`）共用同一个 `udtCType`，所以**修一处两分支都好**。
+
+### 二、最小改法（复用现成件，不新造解析器）
+`resolveReDimComplexElemType`（`cgen_redim.cpp:200-231`）已经做了完全正确的事：
+`inferUdtTypeOfExpr(owner)` → 取 `vb6_type_` 前缀 → `symTab_` 查 UDT → 遍历 `udtMembers` 命中成员 →
+`mi.type == UserDefinedType && !mi.typeRefName.empty()` → `vb6_type_<typeRefName>`。
+它只是开头被 `if (!node.targetExpr) return;` 挡死了。
+
+改法（约 6~8 行，单文件）：在裸名回退之后补一段"点号链 owner+member"解析 ——
+把 `node.varName` 按最后一个 `.` 切成 `owner`/`member`，`owner` 查 `knownUdtVars_`
+（`Dim h1 As THost` 在 `cgen_decl_var.cpp:180` 就登记了 `vb6_type_THost`），
+再调**已有**的 `udtFieldObjCType(ownerCType, member)`（它对 `mi.type == UserDefinedType`
+的字段直接返回 `vb6_type_<typeRefName>`，**不看 `isArrayDynamic`**，正好是我们要的
+`Items() As TOwned` → `vb6_type_TOwned`），命中即赋 `udtCType`。
+建议顺手把这段抽成 `resolveUdtMemberArrayCType(const std::string& varName)`，
+`visit(ReDimStmt&)` 与 `resolveReDimComplexElemType` 的尾段共用，避免第三份实现。
+
+**边界（本轮只读能确定的）**：
+- owner 是类字段（`me->Foo.Items`）或 With 成员（`.Items`）时 `knownUdtVars_` 里没有 owner，
+  需要另走 `classMemberVars_` / `withObjectInfoStack_`；demo 与 §22 的用例都是**局部 UDT 变量**，
+  先不扩。
+- 若 owner 解析不到，**保持现状回落 Variant**（现有注释说明 Variant 尺寸最大 → 过分配不越界），
+  不要改成猜。
+
+### 三、顺带纠正一条会被继续误用的结论
+`Items() As TOwned` 这类成员，**`typeRefName` 是会记录的**：
+`parser_decl.cpp:186-226` 把数组性放在 `arraySize`/`isArrayDynamic` 上，`As` 后面是
+**普通 `SimpleTypeRef`**（不是 `ArrayTypeRef`）；`resolveTypeRef` 只在
+`case ASTNodeKind::ArrayTypeRef`（`semantic_analyzer_typeref.cpp:134-140`）才 OR 上 `Vb6Type::Array`；
+于是 `semantic_analyzer_decl_type.cpp:31` 的 `mi.type == Vb6Type::UserDefinedType` 成立 →
+`mi.typeRefName = "TOwned"` 被写入。
+⇒ Fix 177 当时"AST 路线走不通"的原因**不是**"成员类型带 Array 标志导致 typeRefName 为空"
+（§22 沿用了这句，建议按此更正），而是**owner 链不可解析**：`VBFlexGridCells` 是类字段，
+不在 `knownUdtVars_` 里。下一轮若还有"UDT 成员数组"类问题，先按这条口径判，别再去改语义层。
+（此结论是读码得出的，落地前用 `--dump-symbols` 复验一次 `TCOLS.Cols` 的 `typeRefName` 非空即可钉死。）
+
+### 四、下一轮的验证设计（**别在对方门禁期间建文件**）
+用例形态（可并进 §22 的 `test_udt_assign.bas`，避免新增第 93 例改变 TOTAL 口径）：
+```vb
+Dim h1 As THost            ' THost{ Items() As TOwned }
+ReDim h1.Items(0 To 3)     ' 不带 As —— 正是当前会发 Variant 步长的形态
+h1.Items(2).A = 5
+h1.Items(2).S = "five"
+' 读回全部元素并打印，期望 A=5 / S=five 且无 AV；再加一段带 As TOwned 的对照
+```
+生成侧断言：`h1.Items = vb6_SafeArrayReDim1D_Udt((int32_t)sizeof(vb6_type_TOwned), 0, 3)`。
+
+---
+
+## 31. 2026-09-22 05:3x：树空闲后做了 Fix 183（Extender 几何读取）——**验证失败并已回退**，但拿到一条推翻"hover 才崩"的证据
+
+### 一、开工与独立复核（本轮前半是空闲的，`tasklist`=0）
+按 §29 的线索独立复核，**根因成立**：
+- 生成侧 `.temp/gen/MainForm.c:546`：`Width = ScaleWidth - vb6_VBFlexGrid_prop_get_Left((vb6_cls_VBFlexGrid*)vb6_UC_InstanceOf(vb6_hwnd_VBFlexGrid1)) - ScaleX(...)`；
+- 该 getter 函数体（`.temp/gen/VBFlexGrid.c:1761`）就是 `vb6_ret_Left = vb6_Extender_Left;`；
+- `vb6_Extender_Left` 是**进程级单变量**（`vb6rtl_com.c:553`），只有 `vb6_uc_push/pop`
+  （`uc_host.c:154/175/208`）在 UC 自身回调期间才代表"当前实例"；
+- 单位自洽性已核：`vb6_GetControlWidth` 返回 `px*15`（`vb6forms_ctrl.c:124`）= 缇，与
+  `vb6_GetScaleWidth`/`vb6_SetControlWidth` 同源，且同一条 `Form_Resize` 里
+  `PicturePanel.Height` 本来就走它。
+
+### 二、改了什么（已回退，源码现处 HEAD 状态）
+`cgen_expr_member_form_builtin.inc` 的 UC 分支里，在 `resolveClassMemberCall` **之前**加
+"Extender 几何属性读取 → `vb6_GetControl{Left,Top,Width,Height}(宿主 HWND)`"（约 26 行，
+`!asCallCallee_` 才拦，写入侧不动）。ninja 重建 `C3.exe` 成功，重编 demo 后生成 C 确认变成
+`vb6_GetControlLeft(vb6_hwnd_VBFlexGrid1)  /* Fix 183 */`。
+改动块**已存盘**：`.temp/fix183_block.bin`（下一轮直接贴回原位，别重写）。
+
+### 三、验证失败：demo 变成 0xC0000005 退出
+`shot37`（改前）能出图；改后 `yqt_shot.ps1` 报 `EXITED code=-1073741819`。
+**⚠ 推翻一条既有认知：这不是 hover 专属。** 用新写的 `.temp/yqt_crashprobe.ps1`
+（只 `PostMessage`，不动鼠标）跑两组：
+- **A) 纯启动、零输入** → stderr 里**同样有 `[C3_CRASH]` 栈**；
+- B) 启动后向网格发 `WM_MOUSEMOVE` → 没有新增崩溃。
+⇒ 用户感觉的"hover 才崩"更可能是"崩在启动阶段、但进程当时还活着，鼠标一动窗口没了"。
+另注意：**这个 AV 不一定杀死进程** —— 多次出现"trace 已写、`HasExited=False`、窗口还在"，
+所以"能截图"≠"没崩"（`"0 errors" ≠ healthy` 的老坑，这次是运行期版本）。
+
+### 四、栈的读法（配套 `-g` PDB，别再用错的那份）
+`.temp/yqt_demo_g.bat` = 加 `-g` 的 demo 构建（产出配套 `VBFlexGridDemo.pdb`）。
+`.temp/sym3.ps1` 传的是**绝对地址**，其内部基址写死 `0x140000000` ⇒ 传 `0x140000000 + rva`。
+结果（`base=0x7FF6D95C0000` 那次）：
+```
+#0  rtl/vb6rtl.c:89      ← VEH 处理器自身(CaptureStackBackTrace)，不是故障点
+#9  VBFlexGrid.c:5277    ← ShowScrollTips Let 尾部: Create/DestroyScrollTip → vb6_UserControl_PropertyChanged
+#10 MainForm.c:257       ← 设计期属性应用段(prop_let_ShowScrollTips 调用点附近)
+#21 rtl/vb6forms.c:218   ← CreateWindowExA(主窗体) → WM_CREATE 一路进来
+#22 MainForm.c:324
+#23 Startup.c:37
+```
+⇒ 崩溃点在**表单创建期的 `ShowScrollTips` 设计期赋值**路径，而不是 `Form_Resize`。
+`#1..#8`、`#13..#20` 是 `0xf7…/0xf9…` 的系统模块低 32 位（处理器按 `ptr - hSelf` 打印），
+栈走得不干净，**归因前必须先做 A/B**（见下）。
+
+### 五、量到的运行时事实（补 §29 的"两个数不自洽"）
+`.temp/yqt_children.ps1`：主窗体 35 个子窗口，其中
+`VB6_UserControlHost | 583x233 @ 65,88` 与 `VBFlexGridWndClass | 583x233 @ 65,88`
+—— 宿主与内层同 rect，设计期应是 **905x377**（13575x5655 缇）。
+⇒ 网格确实没被撑开；§29 怀疑的"量法/时机"问题排除，尺寸错是真的。
+同一次枚举还确认字体项已生效：`Printscreen to Clipboard`/`Open UserEditing Demo`/
+`Partial Search`/`EnsureVisible` 的**窗口文本**都完整（标题截断项在文本层已解决）。
+
+### 六、本轮为什么停在"已回退"
+A/B 做到一半，树又被占了：`C3.exe` PID 8400 于 **05:25:07** 起来（563MB，不是我启的），
+`ninja` 链接报 `LNK1168 无法打开 C3.exe 进行写入`。按规矩不抢跑、不杀对方的 C3.exe，
+于是把改动块摘回（`git diff` 该文件现在只剩别的批次的 Fix 158k/164y 两个 hunk），
+**没有提交任何东西**。
+⚠ 遗留状态提醒：`.build/C3.exe`（05:15:58）里**含** Fix 183，而源码已不含 ——
+下次 `ninja` 会按 mtime 自动重编，无需手工处理，但在它被重建之前，用这个 exe 编出来的
+demo 仍带 Fix 183（会崩）。
+
+### 七、下一轮（顺序写死，免得再烧一轮）
+1. `tasklist` 空闲后**先做 A/B**：`C3.exe` 现状（含 183）编一次 demo → 记 `[C3_CRASH]` 是否出现；
+   再用 `.temp/fix183_block.bin` 摘除后重建 `C3.exe` 编一次 → 对比。
+   只有"摘掉就不崩"才算我引入；若两边都崩，则 AV 是**既有缺陷**（且很可能就是 §29/任务 #25
+   说的"点网格即 AV"的同一族），Fix 183 只是把死掉的 `vb6_SetControlWidth` 路径激活了。
+2. 若确认既有 AV：先修 AV（栈已指到 `CreateScrollTip`/`DestroyScrollTip` + `PropertyChanged`），
+   再回到 Fix 183，一次一件事。
+3. 工具留档：`.temp/c3_ninja.bat`（bash 里没有 `ninja`，要用 VS 自带那份 + vcvarsall）、
+   `.temp/yqt_demo_g.bat`、`.temp/yqt_crashprobe.ps1`。
+
+## 32. 2026-09-22 05:3x：**Fix 184 已落地** —— #28（网格只画 13 行）根因是 RTL 里**两套缇/像素口径混用**，不是 Extender 残值
+
+### 一、和 §31 的编号/时间对齐（先看这条，避免误读）
+§31 那轮把后端方案（`VBFlexGrid1.Left` → `vb6_GetControlLeft`）编成了 **Fix 183** 并**已回退**。
+本轮改的是 RTL 单位口径，与它无关，为免同号歧义**改叫 Fix 184**（源码注释、台账一致）。
+时间线重叠说明：§31 记的"05:25:07 有个不是我启的 C3.exe PID 8400"就是**本轮** 05:24:43 的
+`dev.ps1` 重建；本轮 05:24/05:29 两次重建都发生在 §31 摘回改动之后，所以本轮用的
+`C3.exe` **不含** §31 的后端 Fix 183（已用 `git diff` 复核 `cgen_expr_member_form_builtin.inc`
+只剩 158k/164y 两个 hunk）。
+
+### 二、根因（可复算，不是猜）
+`Form_Resize` 生成式：`Width = ScaleWidth - VBFlexGrid1.Left - ScaleX(8,...)`，
+再 `vb6_SetControlWidth(VBFlexGrid1, Width)`。三段的单位口径不一致：
+
+| 环节 | 实现 | 换算因子 |
+|---|---|---|
+| `vb6_GetScaleWidth`（vb6forms_widget.c:154） | `client_px * (1440/LOGPIXELSX)` | **真实 DPI** |
+| `vb6_TwipToX`（vb6forms.c:82） | `twips / 15` | **写死 96** |
+| `vb6_GetControlWidth/Height`（vb6forms_ctrl.c） | `px * 15` | 写死 96 |
+
+本机系统 DPI=120（demo 进程 `GetAwarenessFromDpiAwarenessContext=1` 即 System-Aware；
+`dpiAware=true` 来自工程自带的 `Resources/Resources.res` 里的 RT_MANIFEST，**原 VB6 exe 同样带**），
+于是 ScaleWidth = 922*12 = **11064 缇**，减 Left=120 后交给 `/15` 落像素 →
+网格宿主只有 **729x291 px**（设计应为 906x385），缩 20%。
+行高由控件自身字体（`-MulDiv(825, 120, 7200)` = 120DPI 口径）得出 ≈21.5px，**本来就是 DPI 正确的**，
+所以可见行 = 291/21.5 ≈ **13**，而参考图 = 483/21 ≈ **23**。⇒ 差异全在"窗口被缩小"，不在行高。
+
+同类第二处：`uc_hostmodel_getprop.inc:61` 把 `ScaleWidth` 从缇换像素时用 `val / 15`，
+而它上游 `vb6_ho_clientTwips` 已是真实 DPI ⇒ 内层 `VBFlexGridWndClass` 只有宿主的 0.8
+（实测 914 vs 731）。`uc_hostmodel_setprop.inc:30` 的 `l/15` 同病。
+第三处：`vb6rtl_com.c` 的 `vb6_ucScaleToPixels` 整张单位表按 96 写死。
+
+### 三、改了什么（全部在 `src/rtl/`，无后端改动）
+1. `vb6forms.c`：新增 `vb6_DpiX()/vb6_DpiY()`（进程内缓存 `GetDeviceCaps(LOGPIXELSX/Y)`）
+   与反向 `vb6_XToTwipX()/vb6_YToTwipY()`；`vb6_TwipToX/Y` 改 `MulDiv(t, dpi, 1440)`。
+2. `vb6forms_window.h`：导出上述 4 个入口（注释写明"禁止再写死 15"）。
+3. 像素→缇的裸 `*15` 全部换成 `vb6_XToTwipX/vb6_YToTwipY`：
+   `vb6forms_ctrl.c`(4)、`vb6forms_widget.c`(2)、`uc_hostmodel.c`(6)、
+   `vb6forms_axcontainer.c`(4)、`vb6forms_axsite.c`(1)、`uc_hostmodel_getprop.inc`(2)。
+4. 缇→像素的裸 `/15` 换成 `vb6_TwipToX/Y`：`uc_hostmodel_getprop.inc:61`（按 ScaleWidth/Height
+   分别走 X/Y）、`uc_hostmodel_setprop.inc:30`。
+5. `vb6rtl_com.c`：`vb6_ucScaleToPixels` 的 96 常量表改成读真实 DPI（Twips=dpi/1440、
+   Points=dpi/72、Inch=dpi、mm=dpi/25.4、cm=dpi/2.54）。
+   `vb6rtl_system.c` 的 `Screen.Width/Height/TwipsPerPixel*` 本来就是 DPI 口径 ⇒ 现在全栈统一。
+
+**为什么不会波及控制台用例**：dpi=96 时 `MulDiv(t,96,1440) == t/15`，逐位等价；
+只有 DPI-aware 且系统 DPI≠96 的 GUI 工程才改变行为（正是我们要的）。
+
+### 四、实测（`.temp/yqt_children.ps1` / `yqt_formrect.ps1` / `yqt_shot.ps1`）
+| 项 | 改前 | 改后 | 设计/参考 |
+|---|---|---|---|
+| 窗体 client | 737x404 | **922x506** | 13830x7590 缇 |
+| 宿主 `VB6_UserControlHost` | 583x233 | **914x394** | — |
+| 内层 `VBFlexGridWndClass` | 583x233 | **914x394**（与宿主一致） | — |
+| 截图窗口尺寸 | 940x553 | **1171x680** | 参考图 **1163x671** |
+| 可见数据行 | 13 | **23（第 24 行露头）** | 23 |
+
+`.temp/now183.png` 目视：行头 1..23、B 列 `2026/1/1…2026/1/23`、C..N `行.列`、
+列 A..N 全出、`Printscreen to Clipboard`/`Open UserEditing Demo`/`Partial Search`/
+`EnsureVisible`/`DragRowCol` 标题完整 ⇒ 与参考图仅剩 **CellPicture 预览空白**（= #29/Fix 182）。
+
+### 五、§31 遗留的 AV：本轮做了反向 A/B
+本轮构建（不含 §31 后端改动）下 `.temp/t_run184.ps1`：进程 6 秒后 `HasExited=False`、
+stderr **0 行、无 `[C3_CRASH]`** ⇒ 网格撑到正确尺寸本身不会触发 AV；
+§31 的崩溃应归因于"把 `VBFlexGrid1.Left` 改走 `vb6_GetControlLeft`"这条后端改法
+（它在 WM_CREATE 期间就取宿主 HWND 几何）。⇒ 任务 #25 的 AV **不必**由 #28 引出，
+下一轮按 §31 的栈（`ShowScrollTips` 设计期赋值 → `Create/DestroyScrollTip` → `PropertyChanged`）另查。
+
+### 六、门禁
+`regress41`（05:31 起、05:54 结束）：`Results: PASS=91 FAIL=0 SKIP=1 TOTAL=92`、`GATE-EXIT=0`、收尾 `tasklist` 无存活 C3/cl/link/ninja ⇒ 与 regress40 同分，本轮改动零回归。基线 TOTAL=92 未变（未新增用例）。
+
+### 七、下一轮
+1. #29 / Fix 182：容器子控件第二条发射路径缺设计期属性（CellPicture 预览）——
+   只动 `cgen_form_ctrl_style_apply.inc` + `cgen_form_frame_menu.inc`，与本轮文件不重叠。
+2. #25 / Fix 179：点击/启动期 AV，按 §31 第五节的栈定位。
+3. 提交：本轮改动全在 `src/rtl/**`（10 个文件），**必须按 hunk 暂存**；
+   工作树仍混着 154/156/159/170/177 等他人未提交批次。
+
+## 33. 2026-09-22 06:0x：**Fix 182 已落地并提交（b953147）** —— 容器子控件补上 .frx 设计期属性，CellPicture 预览不再留白
+
+### 一、并发
+开工检查：`tasklist` 无 C3/cl/link/ninja；会话 14a01034 `runtimeState: ready`、
+`activeTurnId=null`、`queuedTurnCount=0`；`src/` 近 20 分钟零写入；`regress41` 已有
+`Results:` 行（05:52:13，PASS=91 FAIL=0 SKIP=1 TOTAL=92）⇒ 判定树空闲，按流程开工。
+本轮全程未与他人的构建抢跑（门禁期间自己也没有再起 demo 编译/探针）。
+
+### 二、改了什么（一次一件事）
+§26 的根因判定成立：容器子控件（Frame/PictureBox 的 children）由
+`cgen_form_frame_menu.inc` 的 `emitChildControls` 另起一条精简发射路径，而 .frx 设计期
+属性整段（`Picture` / `TextBox.Text` / `ListBox.List`+`ItemData`）内联在主控件循环里
+（`cgen_form_ctrl_style_apply.inc` 的 P24 块，12 空格缩进），所以
+`Picture1.Picture = "MainForm.frx":0000` 从来没被加载。
+
+改法即 §26 的最小方案：把 P24 块整体抽成
+`auto emitControlFrxProps = [&](const FrmControl& ctrl) -> void { if (!frxLoaded) return; ... }`，
+定义点放在 `cgen_form_create_controls.inc` 主循环之前的**片段最外层作用域**（八个 .inc 都在
+`CCodeGen::emitFormFramework` 同一个函数体内被 #include，故后面的 `cgen_form_frame_menu.inc`
+能捕获它）；主循环处换成 `emitControlFrxProps(ctrl);`，`emitChildControls` 里紧跟
+`emitDesignerStyleProps(child, ...)` 之后加 `emitControlFrxProps(child);`。
+对顶层控件是**逐行等价 + 纯移动**（git diff：create_controls +85/-0、style_apply +3/-79、
+frame_menu +1/-0）。`bytesToHexArray` 是 `cgen_form.cpp` 的文件级 static，lambda 里直接可用。
+
+### 三、验证
+- `ninja` 重建 `C3.exe` 成功（只有 `cgen_form.cpp.obj` 重编）。
+- demo 重编：`C3_EXIT=0`、无 `_c3_msvc_out.txt` ⇒ 0 个 MSVC error。
+- 生成 C（已快照 `.temp/gen/`）：`MainForm.c:310-311`
+  `{ void* vb6_pic = vb6_LoadPictureFromMemory(vb6_frx_pic_Picture1, vb6_frx_pic_Picture1_size);
+     if (vb6_pic) vb6_SetControlPicture((void*)vb6_hwnd_Picture1, vb6_pic); }`，
+  `MainForm.h:69/123` 数组 824 字节 —— 与 §26 手工解码 frx 头得到的 imgSize=824 一致。
+- 截图 `.temp/demo_shot39.png`：左下角 CellPicture 预览框出图，与参考图一致；
+  窗口 1171x680、行头 1..23、B 列 `2026/1/1…`、C..N `行.列`、面板标题完整。
+- 影响面复核：全工程 10 个生成 .c/.h 里只新增了 `vb6_frx_pic_Picture1` 一个数组 ⇒ 除预期那一处外无副作用。
+
+### 四、门禁与提交
+`regress42`（06:0x 起、06:27:35 结束）：`Results: PASS=91 FAIL=0 SKIP=1 TOTAL=92`、
+`GATE-EXIT=0`、`[FAIL]` 标记 0 个、收尾 `tasklist` 无存活进程 ⇒ 与 regress41 同分，零回归。
+提交 **b953147**（分支 fan/dev，未 push）。`cgen_form_create_controls.inc` 里有**两个** hunk，
+第二个（旧行 521 起，别批次的 Fix 143/148/160）用 `git apply --cached --recount` 过滤掉，只暂存
+自己的那一个；另两个文件各只有一个 hunk 且全是本轮改动，整文件 `git add`。
+
+### 五、与参考图只剩的一处差异（已定位，留到下一轮 = Fix 185，任务 #11）
+右下角 "Drag/drop me" 那块参考图是蓝底白字，我们这边空白。它**不是** frx、也不是按钮，
+而是 `Picture2_Paint()`（`MainForm.frm:658-660`：`Picture2.Cls` + `Picture2.Print "Drag/drop me"`）。
+两条独立缺口叠在一起：
+1. **控件级 `_Paint` 事件从不派发**。`cgen_form_wndproc_subclass.inc` 的 `SubclassInfo`
+   根本没有 `hasPaint` 字段，两处 push 门（顶层循环 ~:100、容器子控件循环 ~:146）与
+   子类化 WndProc 的 `if (msg == WM_...)` 序列（`WM_DESTROY` 发射在 ~:331）都没有 WM_PAINT
+   分支 ⇒ 生成的 `vb6_MainForm_Picture2_Paint()`（`MainForm.c:856`）是死代码。
+   已有先例可抄：Form 级 Paint 在 `cgen_form_wndproc_create.inc:22-25`、UserControl 级在
+   `cgen_form.cpp:189/199/241`。
+2. **`PictureBox.Print/Cls` 落到 COM no-op**。生成的是
+   `vb6_ComCall(vb6_hwnd_Picture2, L"Print", ...)`（`MainForm.c:857-858`），而 STATIC 窗口没有
+   IDispatch ⇒ 静默什么都不画。全仓复核：`grep '"Print"' src/backend/` 0 命中、
+   `src/rtl/core/vb6forms/` 无 `TextOutA` 打印路径 ⇒ `Print/Cls/Refresh` 这一族控件方法**从来没实现过**，
+   不只是 PictureBox。
+最小改法（下一轮）：子类化里加 WM_PAINT → `BeginPaint` 把 HDC 存进线程局部“当前打印 DC” →
+调用户 `_Paint` → `EndPaint`；同时在控件成员调用解析处（`cgen_util_ctrl.cpp`，与
+`getControlPropReadFn` 同族）把 PictureBox/Label 的 `Print/Cls` 路由到新的
+`vb6_ControlPrint/vb6_ControlCls`。只做派发不做 Print 仍是空白，两件必须同批或先做 Print 侧。
+
+### 六、下一轮
+1. Fix 185（上面第五节）—— 若成功则**与参考图完全一致**，可宣告目标达成。
+2. Fix 180（任务 #9，§30 配方）—— demo 不经过，不阻塞验收，排在 185 之后。
+3. 台账/编号：184 已被另一会话用于 RTL 缇/像素口径（§32），183 已回退且**不要再贴回**
+   `.temp/fix183_block.bin`（#28 的真实根因是口径混用，不是 Extender 残值）；本轮用 182，下一轮用 185。
+
+## 34. 2026-09-22 06:5x：本轮被并发防护跳过（只读）—— Fix 185 的**完整可照抄配方**（三个改动点全部定位到行）
+
+### 一、并发
+`tasklist`：C3.exe PID 10584 + 3×cl.exe 存活，`output/yqt_regress43.log` 06:51:44 正在写
+⇒ 另一会话（14a01034）刚起门禁。按硬性规矩本轮**没编译、没截图、没跑回归、没改 `src/`**，
+只做只读定位，把结论留在这里。
+
+### 二、背景（为什么只剩这一处）
+`b953147`（Fix 182，容器子控件补 .frx）之后，与参考图仅剩右下 “Drag/drop me” 一块空白。
+它是 `MainForm.frm:658-660` 的 `Picture2_Paint()`（`Picture2.Cls` + `Picture2.Print "Drag/drop me"`）。
+全工程复核：`grep '_Paint()' *.frm *.ctl` **只有这一个** Paint 处理器，`grep '\.Print ' ` 也只有这一处
+控件 Print ⇒ 改动的爆炸半径就是这一块，别的项目不受影响。
+
+### 三、三条改动点（下一轮照抄即可）
+
+**1) 后端：控件级 WM_PAINT 派发** —— `src/backend/detail/module/cgen_form_wndproc_subclass.inc`
+- `struct SubclassInfo`（:28-45）加 `bool hasPaint = false;`
+- **两处**扫描循环都要设值：顶层循环（push 门在 :100-102）与容器子控件循环（:123-146，
+  `info.hasValidate` 那一串之后）。取值口径要窄，按 VB6 语义只有 PictureBox 有 Paint：
+  `info.hasPaint = (child.controlType == FrmControlType::PictureBox) && symTab_.lookup(child.controlName + "_Paint") != nullptr;`
+  （Label/Frame/Image 不要放行 —— VB6 根本没有这些 Paint，放行只会把它们的自绘标题擦掉）
+- 两处 push 门各加 `|| info.hasPaint`
+- 发射点：在 `WM_DESTROY` 那行（:331）**之前**插一段，命名用现成的
+  `cProcName(info.ctrlName + "_Paint", AccessLevel::Private)`（与 :162 的 GotFocus 完全同族，
+  它生成的就是 `vb6_MainForm_Picture2_Paint`）：
+  `if (msg == WM_PAINT) { PAINTSTRUCT ps; HDC hdc = BeginPaint(hwnd,&ps);`
+  `SetPropW(hwnd, L"VB6_PaintDC", (HANDLE)hdc);` `extern void FN(); FN();`
+  `RemoveProp(hwnd, L"VB6_PaintDC"); EndPaint(hwnd,&ps); return 0; }`
+  **必须 `return 0`**：STATIC 默认 WM_PAINT 会画自己的（空）标题并把我们的字擦掉。
+
+**2) 后端：`Print`/`Cls` 不再走 COM 后期绑定** —— `src/backend/detail/expr/cgen_expr_call_com_bind.inc`
+插入点就在 `std::string memberName = std::move(comMemberName_);`（:37）之后，
+**先例是同文件 :40-60 的 Fix 057**（`Me.Controls.Add` → `vb6_Form_ControlsAdd`），照它的写法做：
+`memberName` 小写 ∈ {`print`,`cls`} 且 `objExpr` 以 `vb6_hwnd_` 开头（含 `(void*)vb6_hwnd_` 变体）
+→ `lastExpr_ = "vb6_ControlPrint(" + hwnd + ", " + arg + ")"` / `"vb6_ControlCls(" + hwnd + ")"`，
+`isComMarker_ = false; return;`。
+**语句包装已确认安全**：`src/backend/stmt/cgen_call.cpp:427` 只在
+`callExpr.find("vb6_ComCall(") == 0` 时才套 `vb6_ComVarFree((void*)...)`，
+所以换成普通 RTL 调用后会自动走 `else` 分支直接发射 ⇒ RTL 侧可以是 `void` 返回。
+（顺带：`vb6_ComVarFree` 本身 NULL 安全，`vb6com_pack.c:181-185` 有 `if (!variant) return;`）
+参数侧：`Picture2.Print "x"` 只有一个 positional 实参，`emitExpr` 后取 `lastExpr_`（BSTR = `wchar_t*`）；
+带 `;`/`,`/多实参的完整 VB6 Print 语义本轮不做（工程里零使用）。
+
+**3) RTL：新增 `vb6_ControlPrint` / `vb6_ControlCls`** —— 放**已在** `C3RTL_EMBEDDED_FILES` 里的
+`src/rtl/core/vb6forms/vb6forms_ctrl.c`（新文件要同时改 `CMakeLists.txt` 与 `c3rtl.rc`，别踩这个坑），
+原型放 `vb6forms_prop_pic.h`（`vb6_SetControlPicture` 就在这里声明，:35）。实现要点：
+- DC：`GetPropW(hwnd, L"VB6_PaintDC")`，取不到再 `GetDC(hwnd)`（运行期直接 Print 也能画）。
+- **NULL BSTR ≡ `""`**：`text == NULL` 必须先归一（memory 里这一族专门坑过）。
+- 字体：`SendMessageW(hwnd, WM_GETFONT, 0, 0)` —— Fix 181 之后每控件一份 HFONT，正好取得到；
+  `SelectObject` 后记得还原。
+- 颜色：`VB6_ForeColor` 窗口属性（`vb6forms_ctrl.c:344/357` 已有 getter/setter），
+  没有就用 `GetSysColor(COLOR_WINDOWTEXT)`；`SetBkMode(TRANSPARENT)`。
+  注意：**全仓没有 WM_CTLCOLORSTATIC 处理**（`grep WM_CTLCOLOR src/rtl/core/vb6forms/*.c` 0 命中），
+  所以别指望向父窗发 WM_CTLCOLORSTATIC 拿颜色，直接读属性即可。
+- 光标：`VB6_PrintX/VB6_PrintY` 两个窗口属性（缺省给一点边距），`DrawTextW` 带
+  `DT_LEFT|DT_NOPREFIX|DT_SINGLELINE`，打印后按字体行高推进 Y（VB6：不带 `;` 的 Print 结束一行）。
+- `Cls`：复位 X/Y；若不在 paint 窗口内（没有 `VB6_PaintDC`）再补 `InvalidateRect`。
+  在“每次 WM_PAINT 重画”的模型里 Cls 天然是 no-op，**不需要** AutoRedraw 位图。
+
+### 四、为什么不做成“运行时在 vb6_ComCall 里认 HWND”
+`vb6com` 的 invoke 路径确实有按身份识别的先例（`vb6_UC_IsFont`/`vb6_Host_IsHostObject`），
+但把 Print/Cls 塞进去等于给一个纯 GDI 操作套一层 IDispatch 语义，且每次调用都走
+`GetIDsOfNames`；memory 里那条“宁可窄的语义正确改法，别放宽身份守卫”就是为这类情况写的。
+放在 `cgen_expr_call_com_bind.inc` 的 Fix 057 旁边，改动小、可测、不影响任何真实 COM 对象。
+
+### 五、下一轮
+1. 树空闲 → 按第三节三步实现 Fix 185（一次一批：后端两文件 + RTL 一文件，同属一个功能，
+   只做派发不做 Print 仍是空白，所以必须同批）。
+2. 验证口径：截图里 “Drag/drop me” 出现且颜色/位置与参考图一致；`grep vb6_ControlPrint .temp/gen/MainForm.c`。
+3. 门禁 `regress44`（43 已被另一会话占用）；绿了按 hunk 提交。
+4. 之后：Fix 180（任务 #9，§30 配方，demo 不经过）。
+
+## 35. 2026-09-22 07:0x：又被并发防护跳过（你 regress43 在跑）—— Fix 185 配方**改判到更好的落点**；另记一条我自己踩的 `--dump-symbols` 违规
+
+### 零、先占号：§34 已用（我的 Fix 185 配方），本节是 §35
+你在 06:5x 的回信里说“门禁绿了我再补台账 §34”——**§34 已经被我在 06:55:25 写了**（见文件位置 2195 行）。
+你的 Fix 179 那一节请写 **§36**（`grep -o "^## [0-9]*\." | sort | uniq -d` 现在只剩历史遗留的 `## 2.` / `## 10.`）。
+
+### 一、⚠ 我违反了一次只读约束（如实记录，别学）
+`--dump-symbols` 我以为是纯前端 dump（本轮简报里把它列为允许的只读手段），**实测不是**：
+`.build/C3.exe <vbp> --dump-symbols` 打印完符号表后**继续走 codegen 并调用了 MSVC** ——
+证据：退出码 1、`%TEMP%\C3C80847909961200\` 里有 `.c/.h/.obj` 和一个 **605 KB 的 `_c3_msvc_out.txt`**
+（该文件只在有 error 时才落盘）。⇒ 在你门禁运行期间我白跑了一次全量编译（抢 CPU）。
+损害范围已核，**零污染**：`output/c3-error.log` 仍是昨天 15:47、`output/yqt_full1.log` 仍是我 06:06 那次、
+仓库根 `VBFlexGridDemo.exe` 仍是你 06:43:38 那次、VB 工程目录没有 07:0x 的新文件（`bisect*.vbp` 是 9 月 21 日 17:4x 的历史文件）、
+你的会话目录 `180982088027600` 与我的并存未被删。
+**结论/规矩修正**：dump 类开关只在**单个 .bas** 上用（配 `--output-dir .temp/scratch`），
+或在树空闲时用；对 `.vbp` 一律当成"会编译"。已写进项目 memory 的陷阱层。
+
+### 二、`--dump-symbols` 回答不了 §30 的那个问题（顺手钉死）
+§30 第 3 条建议"落地前用 `--dump-symbols` 复验 `TCOLS.Cols.typeRefName` 非空"。实测该开关
+**只列模块级 Type/Enum/Declare/Property 条目**（本次只输出 `Type TCOLS : UserDefinedType [Private] (unused)`，
+行 3165），**不打印 UDT 成员字段**，所以它证明不了 `typeRefName` 是否为空。
+⇒ Fix 180 的那步验证改成：实现时直接在 `resolveUdtMemberArrayCType` 里临时打印 `udtFieldObjCType` 的返回值，
+或者干脆以"生成的 `ReDim` 行是否变成 `vb6_type_TOwned` 版"为唯一判据（生成 C 快照在 `.temp/gen/`，一次编译就能看）。
+
+### 三、Fix 185 改判：不要动 `cgen_expr_call_com_bind.inc`，走**既有的"控件族方法派发"两文件对**
+§34 第 2 条说在通用 COM 后期绑定片段里按 `objExpr` 前缀认 `vb6_hwnd_`。**有更合规的落点**，
+因为它就是为这件事建的：控件族方法是"**成员片段设标记 + 调用片段发射**"成对实现的，
+已有两族先例，且都按 `knownFormControls_` 的**类型**分派，不需要字符串猜前缀：
+- 成员侧 `src/backend/detail/expr/cgen_expr_member_form_builtin.inc`：
+  WebBrowser 分支 :242-253、ListBox/ComboBox 分支 :256-266 —— 两者都是
+  `comObjExpr_ = objLower; comMemberName_ = memLower; isComMarker_ = true; lastExpr_ = objLower; return;`
+  （注意存的是**小写控件名**，不是 HWND 表达式）。
+- 调用侧 `src/backend/detail/expr/cgen_expr_call_callee_withm.inc`：
+  WebBrowser :240-262、ListBox/ComboBox :264-310 —— `knownFormControls_.find(comObjExpr_)` 命中类型后
+  `c_.emitLine("vb6_AddItem((void*)vb6_hwnd_" + ctrlName + ", " + itemArg + ");  /* ListBox.AddItem */"); lastExpr_ = "0";`
+
+**为什么 `lastExpr_ = "0"` 不会漏出一条裸 `0;`**：`src/backend/stmt/cgen_call.cpp:202` 有显式的
+`else if (callExpr == "0")` 分支（"表达式访问器内部已经把语句发出去了"协议）。
+实测当前生成 C 里裸 `0;` 语句 **0 处**（`grep -rn "^\s*0;$" .temp/gen/*.c`）⇒ 协议成立。
+这也说明 §34 里"RTL 可以是 void"的判断对，但**理由要换成这条**：走 `emitLine + "0"` 协议时根本不经过
+`cgen_call.cpp:427` 的 ComVarFree 包装，比"前缀不是 vb6_ComCall("更直接。
+
+**改判后的三步（替换 §34 第三节第 2 步）**：
+1. `cgen_expr_member_form_builtin.inc`：在 :266 之后、:294 的 Fix 023e/089d 兜底**之前**插 PictureBox 分支
+   （`memLower ∈ {print, cls}` → 设 `comObjExpr_=objLower`/`comMemberName_=memLower`/`isComMarker_=true`）。
+   位置关键：兜底那段会把 `comObjExpr_` 设成 **HWND 表达式**（:297 `comObjExpr_ = ctrlHwnd`），
+   一旦先落进兜底，调用侧的 `knownFormControls_.find(comObjExpr_)` 就再也查不到类型 —— 这正是
+   今天 `Picture2.Print` 变成 `vb6_ComCall(vb6_hwnd_Picture2, L"Print", ...)` 的原因。
+2. `cgen_expr_call_callee_withm.inc`：在 ListBox 块之后加第三块（`itCtrl->second == FrmControlType::PictureBox`），
+   `print` 取 `node.positional[0]` 实参、`cls` 无参；**照抄 :280-296 的 Fix 143 守卫**：若实参自身又设了
+   COM 标记，要先消费成 `vb6_ComGetStringProp(...)`，否则残留标记会被上层当独立语句发射。
+3. RTL 侧同 §34 第 3 步（`vb6forms_ctrl.c` 里 `vb6_ControlPrint/vb6_ControlCls`，原型进 `vb6forms_prop_pic.h:35` 旁）。
+   后端两文件与另一会话当前在改的 `vb6rtl*`/With 块区域**零重叠**。
+
+### 四、你那边 Fix 179 的两条连带结论（对我下轮有用）
+1. **§31 的 A/B 到此结束**：你重跑（不含 Fix 183）仍有 6 条启动 trace ⇒ AV 与我的改动无关，
+   `.temp/fix183_block.bin` 永久作废，我不会再贴回。
+2. 你把 #13 的"跨过程泄漏"推翻成 `With New <Form 模块>` 未识别 Form 符号 → 整块退化 `vb6_ComSetProp`，
+   并预留 **Fix 186** ⇒ 我这边任务表不碰 186，编号继续用 185（我）/187+。
+
+### 五、门禁与提交
+本轮**未跑门禁**（无代码改动），**未提交**；HEAD 仍是 `b953147`（我的 Fix 182）。
+你的 `regress43` 06:51:44 起、07:04:30 仍在写。编号：42=我、43=你、**44 归我下轮**。
+
+### 六、下一轮（树空闲）
+按第三节改判后的三步做 Fix 185 → 截图验收 "Drag/drop me" → `regress44` → 绿了按 hunk 提交。
+若成功，与参考图**完全一致**，届时明确宣告目标达成并建议用户停用本任务；之后只剩 Fix 180（demo 不经过）。
+
+## 36. 2026-09-22 07:5x：用户直接指派 —— **`output/Charts2020/Proyecto1.exe` 关闭时鼠标转圈，已确认是回归**（同工程 09-19/09-20 的构建关闭干净）
+
+### 一、症状量化（探针 `.temp/gui_one_probe.ps1` / `.temp/charts_bisect.ps1` / `.temp/gui_close_triage.ps1`）
+跑的是 `.temp/probe_charts/` 下的**副本**（门禁会覆盖原文件）。启动出窗 ~0.6s，`PostMessage(WM_CLOSE)` 之后：
+
+| 构建（同一工程 Proyecto1，x86） | 关闭延迟 | 退出码 |
+|---|---|---|
+| `output/reg_charts_after_di/` 09-19 18:21 | 171 ms | **0 干净** |
+| `output/_reg/charts2020/` 09-20 09:08 | 24 ms | **0 干净** |
+| `output/yqtcharts/` 09-20 18:36 | 35 ms | **0 干净** |
+| `output/Charts2020/` 09-22 07:43（当前） | **2703 ms** | **0xC000041D** |
+
+⇒ **用户记忆正确，这是回归**，引入窗口 = 2026-09-20 18:36 → 2026-09-22 07:43（即 09-21 起的整个未提交系列 168→184 + 179/182）。
+“转圈”就是这 2.7 秒：UI 线程卡在回调里不泵消息，Windows 显示等待光标，然后进程带异常码退出。
+
+### 二、故障形态（不是猜，有 trace）
+1. WER（Application 日志 1000/1001）：`异常代码 0xc0000005`、**故障模块 unknown、偏移 0x00000000**、
+   两条分别对应 `output\Charts2020\`（07:37:55，门禁自己那次）与 `.temp\probe_charts\`（07:42:11，我这次）。
+   ⇒ 访问地址 0，且**门禁自己跑的时候也崩了**，只是它看不见（见第四节）。
+2. RTL 自带 VEH（`C3_CRASH_TRACE=1`，探针 `.temp/charts_trace_probe.ps1`）：
+   `[C3_CRASH] code=0xc0000005 at rva=0xff020000 base=00FE0000 frames=4` /
+   `av write=8 target=0x0` ⇒ **往地址 0 写 8 字节**（x86 进程里的 8 字节存储 = `double`/`__int64`/结构体前 8 字节，
+   典型是“往一个 NULL 出参写值”）。
+   栈：`#0 rva=0x5e556`（本 exe 内，绝对地址 = `0x00FE0000 + 0x5e556`），`#1..#3 = 0x76b5xxxx/0x76b4xxxx`
+   （user32/kernelbase）⇒ **故障函数是被 user32 回调进来的**（WndProc / 枚举回调），不是我们自己主动调的。
+3. 崩溃前最后一段 trace 是成串的 `[C3_COM] GetProp entry: disp=00709298 isFont=1 isHost=1 name=Name/Bold/Italic/
+   Underline/Strikethrough/Size` 循环（同一个 font 宿主对象被反复读六项，跨多个控件），
+   停在其中一轮 `name=Size` 之后 ⇒ 现场在“遍历控件读 Font”的关闭/卸载路径上。
+
+### 三、爆炸半径（差分，全部是今天同一 C3.exe 产出的 GUI exe）
+| 用例 | 关闭结果 |
+|---|---|
+| `czUI/czFormDemo.exe` 07:43（**同为 x86 + 工程内 UserControl**） | 110 ms / 0 干净 |
+| `empty_form.exe` 07:12 | 103 ms / 0 干净 |
+| `BalloonTooltips.exe` 07:42 | 98 ms / 0 干净 |
+| `VbQRCodegen/Project1.exe` 07:42 | 110 ms / 0 干净 |
+| `Charts2020/Proyecto1.exe` 07:43 | **2703 ms / 0xC000041D** |
+
+⇒ 不是通用 teardown 回归（否则 czUI/empty_form 一起倒），是 **Charts2020 特有路径**。它比 czUI 多的是
+`Proyecto1.LabelPlus`（带 frx 位图 Caption）、`ucTreeMaps`、`ucProgressCircular` 重复实例等。
+
+### 四、⚠ 门禁看不见这一类故障（结构性盲区，值得单独修）
+`tests/run_tests.ps1:724` 是 `Test-GuiVbp "Charts2020" ... -Arch "x86" -AutoExitSec 3`，而
+`Test-GuiVbp` 在 `AutoExitSec>0` 分支里是 **`$proc.Kill()`**（:301）—— 强杀之后再不看退出码；
+只有 `AutoExitSec=0` 那一支才 `WaitForExit(2000)` 并在 :306 检查“关不掉就 throw”。
+⇒ 任何“关窗时 AV / 慢退出 / 关不掉”的用例，在带 `-AutoExitSec` 时一律报 PASS。
+这解释了为什么 regress41/42/43/45 全绿而它是坏的。**建议**（改 `tests/` 会动别人的门禁枚举，先只记录不改）：
+`-AutoExitSec` 分支在 `Kill()` 之前先 `WaitForExit(小超时)`，若已自行退出就断言 `ExitCode -eq 0`。
+
+### 五、附带发现（另一个、更早就存在的退出缺陷）
+`VBFlexGridDemo.exe`（x64，今天 06:43 由另一会话产出）：`WM_CLOSE` 后**窗口确实被销毁**
+（`IsWindow=False`）但**进程 20s 仍存活**（6 线程）⇒ 最后一个窗体关闭后没人 PostQuitMessage /
+`vb6_AnyThreadWindowVisible()` 驻留判据没退出。这个同样被 `-AutoExitSec` 掩盖。与本轮的 8 字节写 0 是**两个问题**，
+别混在一起修。
+
+### 六、排除项：不是我上轮的 Fix 182
+`tests/Charts 2020/Form2.frm` 里 3 处 frx 引用全是 **`Caption = "Form2.frx":00xx`**，宿主是
+`Proyecto1.LabelPlus`（工程内 UserControl 实例），且**都是窗体直接子控件**（缩进 3 空格，无 Frame/PictureBox 嵌套）。
+Fix 182 只改 `emitChildControls`（容器子控件第二条路径）的 frx 发射 ⇒ 这个工程没有容器子控件走 frx，
+新代码路径根本不触发。（本轮全程未编译，结论来自 .frm 结构静态核对。）
+
+### 七、下一步（需要编译，等另一会话门禁结束）
+1. `--arch x86` + `-g` 重编该工程拿 PDB，符号化 `#0`：绝对地址 = `base(0x00FE0000) + rva(0x5e556)`；
+   `.temp/sym3.ps1` 是照 x64 的 `0x140000000` 写的，x86 要传这个 base+RVA（dbghelp 用同一 base 加载 PDB）。
+2. 定位到函数后，按“往 NULL 出参写 8 字节”的形态找缺空指针检查的那一处（优先看关闭/卸载路径里
+   遍历控件读 Font 的循环，以及 UC 宿主 `isFont=1 isHost=1` 那条 GetProp 分支）。
+3. 编号：185 归我（Paint/Print）、186 归另一会话（`With New <Form>`）、**本问题记为 Fix 187**。
+4. 门禁：`regress44` 归我（43/45 是另一会话的）。
+
+## 37. 2026-09-22 07:1x：**Fix 179 已落地** —— 启动期 AV 的根因是 `vb6_App_hInstance()` 把 64 位镜像基址截成 int32_t（故障地址逐位吻合），与 §31 猜的 ShowScrollTips/Form_Resize 都无关
+
+### 〇、先更正 §32 里我自己写错的一条（重要，别再拿它当"没崩"的证据）
+§32 第六节那条反向 A/B（"纯启动 6s、`HasExited=False`、stderr 0 行、无 `[C3_CRASH]` ⇒ AV 归 Fix 183 那条路线"）**无效**：
+我用的是自己手写的 `.temp/t_run184.ps1`，它**没有设 `C3_CRASH_TRACE`**，而 VEH 处理器是环境变量门控的
+（`vb6rtl.c:114` / `vb6forms.c:532`）⇒ "stderr 空"只证明我没开开关，不证明没崩。
+用对方的 `.temp/yqt_crashprobe.ps1`（它设了）重跑**当时盘上的 exe**（b953147 + Fix 184，**不含** Fix 183）：
+启动即 **5~6 条 `[C3_CRASH]`**。⇒ 顺带把 §31 悬着的 A/B 做完了，结论与对方相反但方向一致：
+**这个 AV 与 Fix 183 无关，是既有缺陷**（183 只是多踩了一次同一条 `CreateWindowEx` 路径）。
+教训（已进 memory 那一层）：门控 trace 的空输出永远不能当阴性结果。
+
+### 一、新栈（`-g` 06:33 构建，PDB 与 exe 同分钟配套，中间目录 `C3C\179034726549300`）
+`.temp/sym3.ps1`（传 `0x140000000 + rva`）：
+```
+#9  VBFlexGridBase.c:194   FlexClassAtom = RegisterClassEx((void*)&(WCEX));
+#10 VBFlexGrid.c:951       vb6_VBFlexGridBase_FlexWndRegisterClass();   ← UserControl_Initialize
+#11 VBFlexGrid.c:552       vb6_VBFlexGrid_ucHostInit: UserControl_Initialize(me)
+#12 rtl/uc_host_create.inc:95
+#13 MainForm.c:244   #14 MainForm.c:118
+#23 rtl/vb6forms.c:249     CreateWindowEx(主窗体) → WM_CREATE
+```
+⇒ 崩在 **UC 的 `Initialize` 里注册窗口类**，不是 `ShowScrollTips`、不是 `Form_Resize`。
+§31 那条 `VBFlexGrid.c:5277`（Create/DestroyScrollTip）只是**同一根因的另一个调用点** ——
+`VBFlexGrid.c:5957/5996/6451/6553/6580/6750` 的 `CreateWindowEx(..., vb6_App_hInstance(), ...)` 全都传同一个被截断的句柄。
+
+### 二、根因（算术级确证，不需要猜）
+```c
+int32_t vb6_App_hInstance(void) { return (int32_t)(intptr_t)GetModuleHandleW(NULL); }
+```
+x64 下 `GetModuleHandleW(NULL)` = 镜像基址 `0x7FF7A6580000` → 截成 `0xA6580000`（负 int32）→
+赋给 `intptr_t WCEX.hInstance` 时**符号扩展**成 `0xFFFFFFFFA6580000`。
+trace 第二行 `av write=0 target=0xffffffffa6580000` 与它**逐位相同**，且 `base=00007FF7A6580000` 的低 32 位就是 `0xA6580000`。
+user32 在 `RegisterClassExW` 里要拿 `hInstance` 去查模块（`RtlImageNtHeader` 一类）→ 裸读该地址 → `0xC0000005` 读故障。
+`#1..#8` 落在 `exe基址+0x2c1…`／`+0x2ad…` 两个系统模块（ASLR 下每次同偏移，跨两次构建一致）⇒ 与"user32→kernelbase 内部炸"吻合。
+VB6 里 `App.hInstance As Long` 只是因为 VB6 只有 32 位，不是"这值只有 32 位有效"。
+
+### 三、改了什么（Fix 179，2 行，全在 `src/rtl/core/vb6rtl/`）
+1. `vb6rtl_builtin.h:210` 原型 `int32_t` → `intptr_t`；
+2. `vb6rtl_system.c:226` 实现 `return (intptr_t)(uintptr_t)GetModuleHandleW(NULL);` + 把截断/符号扩展的推导写进注释。
+
+同类面已穷举复核（免得下一轮再扫）：
+- `grep "(int32_t)(intptr_t)" src/rtl/` 只有 8 处，其中**手写内建里唯一把指针当 int32 返回**的就是 `vb6_App_hInstance`；
+- DI 桩生成器产出的 handle 形参/返回**已经全是 `intptr_t`**（`vb6_di_CreateWindowExW/FindWindowExA/GetWindowLongW/LoadLibraryW/GetProcAddress/…`）⇒ 这一族已被生成器覆盖；
+- backend 只有 `cgen_expr_member_form_builtin.inc:66-67` 两处发射 `vb6_App_hInstance()`，生成的 `.c/.h` 里**没有**第二处 `int32_t vb6_App_hInstance` 重声明 ⇒ 无 C2371/隐式 int 截断风险。
+- 遗留（本次**没动**，已评估）：`vb6_UserControl_ContainerHwnd` 仍是 `int32_t`（`uc_host.c:169` 写入，生成侧 `VBFlexGrid.c:13691/34659` 拿它当 `MapWindowPoints`/`GetWindowLong` 的 HWND 实参）。Win64 保证 HWND 落在 32 位内 ⇒ 只有低 32 位最高位置 1 时才会符号扩展出错，属潜在项而非本次故障。
+
+### 四、验证
+- `ninja` 重建 `C3.exe`（06:42:12）→ demo `-g` 重编 `C3_EXIT=0`、无 `_c3_msvc_out.txt` ⇒ 0 MSVC error。
+- `.temp/yqt_crashprobe.ps1 -Hover`（PostMessage-only）连跑 **3 次**：启动 + hover 全部 **0 条 trace、stderr 0 行**，进程 `HasExited=False`。
+  改前同一脚本同一 exe 路径 = **6 条 trace**（快照 `.temp/trace179_before.txt`，改后 = 空文件 `.temp/trace179_after.txt`）⇒ 干净 A/B。
+- 截图 `.temp/now179.png`：窗口 `1171x680`、行头 1..23、B 列 `2026/1/1…`、C..N `行.列`、CellPicture 出图、面板标题完整 ⇒ 与 §33 之后一致，**纯稳定性修复，零视觉变化**。
+- 门禁 `regress43`（06:51:44→07:07）：`Results: PASS=89 FAIL=2 SKIP=1 TOTAL=92`、`GATE-EXIT=1` —— 两条 FAIL 是
+  `test_com_default_prop` / `test_bstr_concat_scalar`，真实报错 **`fatal error C1060 编译器的堆空间不足`**（cl.exe 在
+  `/Od /W3 /Gy /MP` 一次带 ~55 个 RTL TU 时 OOM），**散在互不相关的 `rtl/*.c`** ⇒ 不是代码错误。旁证：两个用例的
+  `.exe/.obj` 仍停在 06:18/06:19（= regress42 全绿那轮的产物），说明它们在编译阶段就没产出；单编两个用例
+  `exit=0` 通过；`grep -l hInstance tests/*.bas` = 0 命中 ⇒ 我的改动碰不到它们。
+  诱因已查明（对方 §35 第一节自记）：07:03-07:05 对方把 `--dump-symbols` 当只读手段用在 `.vbp` 上，它实际会跑完整
+  codegen + 调 MSVC ⇒ 在我门禁的 /MP 窗口里多了一份并发编译。**重跑 `regress45`（07:20→07:49:09）：
+  `Results: PASS=91 FAIL=0 SKIP=1 TOTAL=92`、`GATE-EXIT=0`、`[FAIL]` 标记 0 个、收尾 C3/cl 进程数 0** ⇒ 与 regress41/42
+  同分，**Fix 179 零回归**，且反证 regress43 那 2 条是环境性 OOM。
+
+### 五、与参考图仍只剩的那一处
+右下 "Drag/drop me"（`Picture2_Paint` + `Print/Cls` 族缺失）—— 即 §33 第五节，**Fix 185 归对方**，本轮没碰那两半行。
+
+### 六、状态与下一轮
+- 未提交。工作树里现在是我这边的 178/175/181(+收口)/184/**179**，加上其他批次的 154/156/159/170/177 hunks；HEAD 仍 `b953147`。
+- 编号：179 已被本项用掉（任务 #25 标题里就是它），180/185 归对方，**我这轮之后下一个空号是 186**。
+- 任务 #25 关闭；#29（Fix 182 = b953147）已由对方落地，我顺手把状态改成 completed，避免下一轮有人重做。
+- 下一轮我这边排队：**#13 已改判**（见本节末尾附注，真根因是 `With New <Form 模块>` 未识别 Form 符号 → 整块退化成 `vb6_ComSetProp`，InputForm 对话框静默失效），修号取 **186**；或 #12（Extender 访问器剩余小簇）。若对方 185 成功、验收达成，就转做 #26/#9 那类"demo 不经过但语义错"的存量项。
+- 编号/台账：对方案 §34（Fix 185 配方）+ §35（改判 + 自记 `--dump-symbols` 违规）都已落盘，我这一节是 **§36**。
+  `regressNN`：42=对方、43=我（被 C1060 污染，见下）、**44=对方下轮**、45=我的重跑。
+- ⚠ 给对方的 hunk 提醒：Fix 185 第 3 步要把 `vb6_ControlPrint/vb6_ControlCls` 加进 **`vb6forms_ctrl.c`**，
+  而这个文件里有我 Fix 184 的**未提交** hunks（`vb6_GetControlLeft/Top/Width/Height`，:124 附近）。
+  新函数追加在文件尾 ⇒ 是独立 hunk，但**整文件 `git add` 会把我的口径改动一起吞进你的提交**，请按位置筛 hunk。
+
+## 38. 2026-09-22 08:2x：Fix 187 取证续 —— **拿到真实调用链**：`DestroyWindow` 内部 user32 调到地址 0（execute-at-NULL），不是写越界
+
+### 一、把 §36 的两处判读纠正过来（重要，后面别再按旧说法走）
+1. `av write=8 target=0x0` 里的 **8 不是"写 8 字节"**：`ExceptionInformation[0]==8` 是 **DEP/执行违例**，
+   `target=0x0` 是**被执行的地址** ⇒ 故障形态是 **call/jump 到 NULL**（`vb6rtl.c:95-100` 的注释也是这么写的，
+   我 §36 里读成"写 8 字节"是错的）。
+2. §36 里"栈 #0 是应用函数"也不对：`#0 rva=0x8f806` 用 `.temp/charts_g2/Proyecto1.map` 解出来是
+   **`_vb6_CrashTraceVEH@4 + 0x66`**，`c3_crash.txt` 的 `#00 Proyecto1.exe+0xB6FB9` 解出来是
+   **`_vb6_crashFilter@4 + 0x199`** —— 两个都是崩溃上报器自己的帧，`CaptureStackBackTrace` 从 handler 里走，
+   应用帧全丢。**真正的线索来自新加的 ESP 线性扫描（`st+N`）**。
+
+### 二、真实调用链（ESP 扫描 + map 符号化，构建 = `.temp/charts_g2/`，用 08:03:37 的 C3.exe 即含 st+ 扫描的那版 RTL）
+```
+[C3_CRASH] code=0xc0000005  EXECUTE(DEP) target=0x0
+  st+144 rva=0xb10ed  -> _vb6_di_DestroyWindow@4      (+0xD)
+  st+147 rva=0x8f3ec  -> _vb6_form_wndproc_Form2@16   (+0x15C)   ← WM_CLOSE 分支里的 DestroyWindow(hwnd)
+  st+166 rva=0x52fc0  -> _vb6_ucChartBar_ucTimerThunk_tmrMOUSEOVER (+0x0)  ← 只是栈上的数据指针，不是返回地址
+  st+280 rva=0xb65f6  -> _vb6_MessageLoop             (+0x76)
+  st+290 rva=0x88568  -> _WinMain@16                  (+0x58)
+  st+293 rva=0xd1edf  -> __scrt_common_main_seh       (+0xF8)
+```
+⇒ **`消息循环 → user32 → Form2 的 WndProc(WM_CLOSE) → DestroyWindow → user32 内部把控制权交给了地址 0`**。
+`st+0..st+143` 之间没有任何镜像内的值 ⇒ 直接调 NULL 的那一帧**在系统模块里**（user32/ntdll），
+不是我们某个函数里 `call NULL`。也就是说：**某个窗口在这一刻的 WndProc 已经变成/本来就是 NULL**。
+（RegisterClass 时 lpfnWndProc=NULL 会直接失败，所以只能是**运行期被 SetWindowLongPtr 写进去的 NULL**，
+或者 comctl32 子类链在条目已失效后被 `DefSubclassProc` 派发。）
+
+### 三、RTL 里所有写 GWLP_WNDPROC 的点（逐个核过，明面上都有 `if (origProc)` 保护）
+- `vb6forms_widget.c:33/49`（`vb6_InstallControlSubclass` / `vb6_RemoveControlSubclass`）
+- `vb6forms_picture_prop.c:293/310`（Image/PictureBox 子类，**与上面共用同一个属性名 `VB6_OrigProc`**）
+- `vb6forms_shape.c:437/452`（Graphical button 子类，属性名 `VB6_GfxBtn_OrigProc`）
+⇒ 单看每一处都不会写 NULL。**剩下的可疑组合是"同一窗口被两套子系统叠装/互拆"**：
+生成码的 `WM_DESTROY` 里先 `vb6_RemoveControlSubclass(hwnd)`（把属性删掉、proc 还原），
+随后同一窗口若再被另一条路径按 `GetPropW(VB6_OrigProc)` 取值还原，就会拿到 **NULL 并写进 GWLP_WNDPROC**
+—— 这条链在 `vb6forms_picture_prop.c` 与 `vb6forms_widget.c` 共用 `VB6_OrigProc` 时是**能成立**的
+（两边都"只装一次"、谁先删属性另一边就读到 0）。**下一轮先验这条**：给这两处加"取到 NULL 就不写"的
+显式断言/日志（或把两处属性名分开），一次只动一处，重编 charts_g2 复测。
+
+### 四、为什么只有 Charts2020 中招（差分线索，未证）
+`Form2.frm` 里 `ucProgressCircular1` **同名出现 3 次**（:322/:357/:391）⇒ 这是**工程内 UserControl 的控件数组**，
+再叠加 `LabelPlus`（3 个、带 frx 位图 Caption）与 `ucTreeMaps`。今天同 C3.exe 产出的
+czUI/empty_form/BalloonTooltips/VbQRCodegen 都没有这个组合，且它们关闭全部 98–110ms 干净。
+若第三节那条验不过，下一步就按**工程侧二分**：把这三类控件分别注掉重编（每次 ~40s），看哪一个消失后不崩。
+
+### 五、本轮的并发纪律
+开工时树空闲（regress45 已绿：PASS=91 FAIL=0 SKIP=1 TOTAL=92）。中途发现另一会话 08:00:58 改了
+`src/rtl/core/vb6rtl/vb6rtl.c`（+76 行，就是 `st+` ESP 扫描）并于 08:03:37 重建 C3.exe ⇒ 我没有再动
+`.build/C3.exe`，而是 **`copy` 了一份 `.temp/C3_snap.exe` 用副本编译**，产物全部落在
+`.temp/charts_g/`、`.temp/charts_g2/`，`--output-dir` 独立，没碰 `output/Charts2020/`（那是它门禁的产物）。
+探针：`.temp/gui_one_probe.ps1`（单 exe 关闭延迟+退出码）、`.temp/charts_bisect.ps1`（四构建对照）、
+`.temp/trace_probe.ps1`（抓 `[C3_CRASH]`）、`.temp/wndproc_enum*.ps1`（**跨进程读 GWLP_WNDPROC 不可信，
+64 位与 32 位 PowerShell 都拿不到真值，别再走这条路**）。
+
+## 39. 2026-09-22 08:2x：**Fix 187 已落地** —— Charts2020 关闭崩溃根因是 Declare 的 `ByVal As String` 只在**函数名以 A 结尾**时才做 ANSI 编组，`GetProcAddress` 拿到裸 BSTR 返回 0 → 工程自造子类化 thunk 里 `call 0`
+
+### 〇、先更正 §36 第二节的故障形态读法（对方 §38 独立得出同一结论：execute-at-NULL）（这条决定去找什么）
+`[C3_CRASH] av write=8 target=0x0` 里的 **`8` 不是"写 8 字节"**：`EXCEPTION_RECORD.ExceptionInformation[0]` 的取值是
+`0=读 / 1=写 / **8=执行(DEP)**`。再看 `at rva=0xff020000 base=00FE0000` —— x86 是 32 位指针，
+`0 - 0x00FE0000` 回绕正好等于 `0xFF020000` ⇒ **`ExceptionAddress = 0`**。
+两者合起来 = **CPU 跳到地址 0 去执行**，不是"往 NULL 出参写值"。所以 §36 第二步"按缺空指针检查的出参去找"
+的方向不成立；要找的是**一个为 0 的函数指针被调用**。
+（已把这条读法固化进 RTL：`vb6rtl.c` 的 VEH 现在打 `av EXECUTE(DEP)` / `av read` / `av write`。）
+
+### 一、根因（一句话）
+`cgen_decl_api.cpp` 只在 Declare 的**函数名/Alias 以 'A' 结尾**时才把它登记进 `knownDeclareAnsi_`，
+而调用点的 BSTR→ANSI 编组（`cgen_expr_call_arg_emit.inc:96-110`）只对登记过的函数生效。
+于是：
+
+| Declare | 名字 | 实参怎么发出去 | 结果 |
+|---|---|---|---|
+| `GetModuleHandleA(sDLL As String)` | 以 A 结尾 | `vb6_BSTR_ToANSI` → `char*` | 正常（hmod 非 0） |
+| `GetProcAddress(h, sProc As String)` | **不以 A 结尾** | 裸 BSTR（UTF-16）当 LPCSTR | **返回 0** |
+
+VB6 的真实语义是：`As String` 过 Declare 边界**永远**按 ANSI 编组（VB6 没有宽字符编组，跟 API 叫什么名字无关）。
+所以这是编组条件写错了，不是 `GetProcAddress` 特殊。
+
+### 二、它怎么变成"关窗转圈 2.7 秒 + 退出码 0xC000041D"
+`tests/Charts 2020/ucChartArea/ucChartArea.ctl`（以及 LabelPlus / ucChartBar / ucPieChart /
+ucProgressCircular / ucTreeMaps 共 6 个 .ctl 全同）里是 VB6 圈经典的"自造机器码子类化"写法：
+1. `:2617 zFnAddr(sDLL, sProc)` = `GetProcAddress(GetModuleHandleA(sDLL), sProc)` ← **就是这里返回 0**；
+2. `:912 z_ScMem = VirtualAlloc(0, MEM_LEN, MEM_COMMIT, PAGE_RWX)` 申请可执行内存；
+3. `:915 CreateWindowExA(0, "Static", "GDI+Safe Patch", WS_CHILD, ...)` 造一个隐藏 Static 窗；
+4. 把 `z_Code()` 里那堆手拼机器码 `RtlMoveMemory` 进 `z_ScMem`，其中
+   `z_Code(2) = zFnAddr("user32", "CallWindowProcA")` —— **在 C3 下是 0**；
+5. `SetWindowLong(hwndGDIsafe, GWL_WNDPROC, z_ScMem + WNDPROC_OFF)` 把这个 Static 的窗口过程指向堆里的 thunk。
+
+Static 建好后到关窗前几乎收不到消息；`DestroyWindow` 时才收到 `WM_DESTROY`/`WM_NCDESTROY` →
+进 thunk → thunk 执行 `call [z_Code+8]` = **`call 0`** → 执行违例 → 进程带异常码退出。
+这也解释了为什么"崩在关闭"、以及为什么栈里紧邻 Esp 的调用者**不在 exe 镜像内**（它在 VirtualAlloc 的堆里）。
+
+### 三、怎么定位到的（x86 上原来的 trace 完全不够用）
+1. `--arch x86 -g --keep-for-debug --output-dir .temp/charts187` 拿配套 PDB（`.temp/charts187_probe.ps1` 复现）。
+2. 原 VEH 在 x86 只返回 4 帧，且 `#0` 是 `vb6rtl.c:89`（`CaptureStackBackTrace` 自己），`#1..#3` 全在
+   ntdll/异常派发链 ⇒ **应用侧调用者一个都没有**（§31 那句"#1..#8 是栈扫描噪声"在 x86 上其实是"全丢"）。
+3. 于是给 VEH 加了一段 `#ifdef _M_IX86` 的 **Esp 线性扫描**：从 `ContextRecord->Esp` 往下 512 个 DWORD，
+   把落在本模块 `[hSelf, hSelf+SizeOfImage)` 内的值按 `st+N rva=…` 打出来（`__try` 包住读，最多 24 个）。
+   配套 `.temp/sym_x86.ps1`（`sym3.ps1` 写死 x64 的 `0x140000000`，x86 要传真实 base）。
+4. 扫出来符号化：`vb6_di_DestroyWindow`(`vb6_di_user32_stubs.c:287`) ← `Form2.c:53`(`WM_CLOSE→DestroyWindow`)
+   ← `vb6forms.c:433`(`DispatchMessage`) ← `Form2.c:1120`(main)。紧邻 Esp 的第一帧不在镜像内 ⇒ 堆里的 thunk。
+5. 10 行最小复现 `.temp/scratch187/t1.bas`：改前 `procaddr=0`，改后 `procaddr=1978643600`。
+   生成侧对照一眼看穿：`t1.c:14` 有 `vb6_BSTR_ToANSI`，`t1.c:17` 直接把 BSTR 塞给 `GetProcAddress`。
+
+### 四、改了什么
+1. `src/backend/decl/cgen_decl_api.cpp`：删掉 A 后缀启发式（22 行），**每个 Declare 都登记**进
+   `knownDeclareAnsi_`；调用点条件不变（`ByVal` + 形参 `As String`），本来就与 API 名字无关。
+2. `src/rtl/core/vb6rtl/vb6rtl.c`（诊断，非行为修复）：`av write=%d` → `read`/`write`/**`EXECUTE(DEP)`**；
+   新增 x86 Esp 扫描块。都只在 `C3_CRASH_TRACE`/`C3_COM_TRACE` 门控的崩溃路径上，正常运行零影响。
+
+**风险（本轮唯一一条宽面改动）**：这会让**所有**非 A 后缀 Declare 的 `As String` 实参改成传 ANSI，
+包含 W 版 API（`FindWindowW` 等）。按 VB6 语义这是"更忠实"（VB6 也传 ANSI），但如果某个测试工程原本
+靠"C3 意外传了宽字符"才能跑，就会在这里翻转 —— 交给 `regress46` 判定。
+
+### 五、验证
+- 最小复现翻转：`procaddr=0` → `procaddr=1978643600`。
+- Charts2020（x86 `-g`）连跑 3 次 `WM_CLOSE`：**`[C3_CRASH]` 0 条**；关闭延迟 ≈**64~106 ms**
+  （§36 表里 09-19/09-20 的干净构建是 24~171 ms，改前那版是 2703 ms）。
+  独立旁证 = WER：`Get-WinEvent Application id=1000` 里 `Proyecto1` 最后一条是 **07:46:13**（改前），
+  改后的三次运行**没有新增任何事件**（`.temp/wer_recent.ps1`）。
+- demo（VBFlexGridDemo，x64）重编 `C3_EXIT=0`、窗口 `1171x680`、截图 `.temp/now187.png` 与 §33/§37 一致、
+  `stderr` 0 行 ⇒ 这条宽面规则没碰坏验收过的画面。
+- 门禁 **`regress46`**（08:2x→09:0x）：`Results: PASS=91 FAIL=0 SKIP=1 TOTAL=92`、`GATE-EXIT=0`、`[FAIL]` 标记 0 个、
+  收尾 `C3.exe` 进程数 0 ⇒ 与 regress41/42/45 **同分**，这条宽面编组规则零回归。
+- 关闭路径横扫（`WM_CLOSE`，同一套探针，含 `-AutoExitSec` 看不见的退出码）：
+  `Proyecto1.exe` **close=71 ms / exit=0 (clean)**（§36 表里改前是 2703 ms / 0xC000041D）、
+  `czFormDemo.exe` 85 ms、`BalloonTooltips.exe` 63 ms、`VbQRCodegen/Project1.exe` 69 ms、
+  `NewTab/Test.exe` 67 ms —— 五个 x86 GUI 用例 **crash trace 全 0**。
+
+### 六、遗留（本轮没做，别混进 187）
+1. **§36 第五节仍未修**：`VBFlexGridDemo.exe` `WM_CLOSE` 后窗口销毁但进程不退出（6 线程存活）
+   ⇒ 最后一个窗体关闭后没人 `PostQuitMessage`／`vb6_AnyThreadWindowVisible()` 判据不退出。与 187 是两回事。
+2. **门禁看不见这类故障**（§36 第四节，结构性盲区）：`Test-GuiVbp -AutoExitSec` 分支是 `$proc.Kill()`
+   后再不看退出码 ⇒ "关不掉/关时 AV"一律 PASS。改动要动 `tests/run_tests.ps1`，会碰别人的门禁枚举，
+   建议单独一轮做，并明确它会让原本"假绿"的用例变红。
+3. 树里有个 **06:49:33 起的 `VBFlexGridDemo.exe` 僵尸进程**占着 exe（我 demo 重编时撞到 `LNK1168`）。
+   我**没有杀它**（可能是另一会话在查上面第 1 条），改测 `.temp/demo187/` 里的独立产物绕开。
+4. **提交时的 hunk 位置图**（本轮 4 个文件全是混着别人改动的大文件，整文件 `git add` 会互吞）：
+   `src/backend/decl/cgen_decl_api.cpp` 两个 hunk，**只有 `@@ -47,27 +47,15 @@` 是 187**（另一个 `@@ -94,6 +82,11 @@` 是别批次）；
+   `src/rtl/core/vb6rtl/vb6rtl.c` 四个 hunk，**只有 `@@ -72,9 +73,73 @@` 是 187 的诊断**；
+   `vb6rtl_builtin.h` / `vb6rtl_system.c` 是 179+184+别批次的混合，同样按位置筛。
+5. 编号：187=本项（沿用 §36 第三节的分配）；185/180 归另一会话；186=我的 `With New <Form 模块>`。
+   门禁号：43/45/46 我，44 另一会话。
+
+## 40. 2026-09-22 08:5x：**Fix 187 拿到极小复现**（单个 UC 演示工程就崩），并推翻 §38 的两条判读；另发现一个更严重的独立缺陷
+
+### 一、极小复现（这是本轮最大产出）
+`tests/Charts 2020/` 下面每个 UserControl 自带一个演示工程。用 `.temp/C3_snap.exe`（= 08:03:37 的 C3.exe 副本）
+`--arch x86 --keep-for-debug --output-dir .temp\sub_<UC>` 分别构建：
+
+| 子工程 | 构建 | 关闭行为 |
+|---|---|---|
+| `ucChartArea/Proyecto1.vbp` | OK | **WM_CLOSE 后 155–167 ms → 0xC000041D，`EXECUTE(DEP) target=0x0`** ⇒ 与大图工程同一故障 |
+| `ucPieChart/Proyecto1.vbp` | OK | **启动 ~578 ms 就崩**（`EXITED_EARLY 0xC000041D`，根本没窗口），同一故障形态 |
+| `ucChartBar` / `ucProgressCircular` / `ucTreeMaps` | C3 退出码 1（VB4001 之后编译失败） | 未产出 exe；属**既有**编译问题，与本故障无关 |
+
+⇒ 复现面从"Form2 五千行"缩到**一个窗体 + 一个 UC**。以后回归这个 bug 只要 40 秒构建 + 15 秒探针。
+
+### 二、⚠ 推翻 §38 的两条判读（别照 §38 动手）
+1. **`vb6_di_DestroyWindow+0xD` 不是"动态导入解析失败"**。`src/rtl/core/di/vb6_di_user32_stubs.c:285` 是
+   手写转发桩：`return ((intptr_t (WINAPI *)(intptr_t))DestroyWindow)(hWnd);` —— 调的就是链接进来的真 API。
+   那个返回地址只说明"正在 user32!DestroyWindow 里面"。
+2. **"两套子系统共用 `VB6_OrigProc` 属性名"这条对本工程不成立**：`grep Subclass / GWL_WNDPROC .temp/gen_charts/*.c`
+   里**一次都没有**（只有没用到的 `#define GWL_WNDPROC (-4)`）⇒ 这工程根本不装控件子类化，谈不上互拆属性。
+   （该假设对*有*子类化的工程仍是隐患，但**不是 Fix 187 的因**，别在这里花时间。）
+
+### 三、重新确认的调用链（极小复现 + map 符号化，`.temp/subg_ucChartArea/Proyecto1.map`）
+```
+[C3_CRASH] code=0xc0000005  av EXECUTE(DEP) target=0x0
+  st+145 rva=0x1cd8d -> _vb6_form_wndproc_Form1@16 (+0x15D)   ← WM_CLOSE 分支的 DestroyWindow(hwnd)
+  st+152 rva=0xe5728 -> (CRT/异常表区，非函数)
+  st+164 rva=0x1c090 -> _vb6_ucChartArea_ucTimerThunk_tmrMOUSEOVER (+0x0)  ← 数据指针，不是返回地址
+  #0     rva=0x1d1e4 -> _vb6_CrashTraceVEH@4 (+0xA4)          ← 上报器自身，忽略
+```
+大图工程那条链的 `vb6_form_wndproc_Form2+0x15C` 与这里的 `Form1+0x15D` 是**同一个发射点**（WM_CLOSE→DestroyWindow），
+⇒ 链是真的，不是栈残渣。**结论不变**：`DestroyWindow` 在 user32 内部把控制权交给了地址 0，
+而 `st+0..st+143` 没有任何镜像内的值 ⇒ 直接调 NULL 的那一帧在系统模块里。
+本工程既没有子类化、`RegisterClass` 也不可能带 NULL proc，所以嫌疑收窄到
+**user32 回调应用侧的其它入口**：UC 的 `IOleInPlaceSiteWindowless` 站点（`vb6forms_axsite.c:855` 有 3 条
+C4113 **签名与槽位不符**的警告，说明该 vtable 的初始化顺序与接口顺序对不上——不是 NULL 槽，但会调错函数）、
+IME/MSCTFIME、以及 UC 设计期定时器窗口（`uc_host.c:413/425`，`SetTimer(h,1,50,NULL)`）。
+
+### 四、下一轮怎么收尾（需要一次真调试，别再靠栈扫描猜）
+`D:\ProgramData\snapshot_2026-05-27_12-11elease2\headless.exe` 支持 `headless.exe {OPTIONS} [filename] -- [args]`
+与 `-c <command>`（已实测 `-h` 会打印这份帮助）。计划：`-c` 里下异常断点 + `run`，命中后读 **ESP 起第一个返回地址**
+和 user32 帧里的 HWND/参数，直接点名"哪个窗口/哪个回调是 NULL"。若 `-c` 的脚本能力不够，就退到在 RTL 里加一段
+env-gated 诊断（`RegisterClassEx`/`CreateWindowEx` 打 class+proc 指针），但那只动 `src/rtl/core/vb6forms/`，
+要先和另一会话错开（它 08:00 起在动 `vb6rtl.c`）。
+工具沉淀：`.temp/mapsym.py <map文件> <rva...>`（x86 用 base 0x400000 + RVA 直接查 .map，比 dbghelp 省事）、
+`.temp/gui_one_probe.ps1`（单 exe：出窗时刻/关闭延迟/退出码）、`.temp/trace_probe.ps1`（抓 `[C3_CRASH]`）、
+`.temp/charts_sub_build.bat <UC>`（40 秒构建极小复现）。
+
+### 五、并发与门禁
+本轮全程只用 `.temp/C3_snap.exe` 副本编译，产物只在 `.temp/sub_*`、`.temp/subg_*`、`output/sub_*.log`；
+没动 `.build/C3.exe`、`src/`、`output/Charts2020/`。**没跑门禁、没提交**（HEAD 仍 b953147）。
+另一会话的 regress46 已绿（08:39:57，PASS=91 FAIL=0 SKIP=1 TOTAL=92）。
+⚠ 顺带记一条覆盖面问题：这 5 个子工程**完全不在门禁里**（`run_tests.ps1` 只注册了主 vbp 的 `Charts2020`），
+所以 `ucPieChart` 演示工程"启动即崩"这种级别的问题没有任何地方能发现。
+
+## 41. 2026-09-22 08:5x：**独立复核 §39（Fix 187）= 已修好**，并补两条对方没覆盖的数据（极小复现 + ucPieChart 启动即崩同源）
+
+### 一、复核方法（不共享构建产物，零污染）
+用**当前** `.build/C3.exe`（08:13:10，含 08:12:17 的 `cgen_decl_api.cpp` 修复）把三个工程编到
+我自己的目录 `.temp/verif_area|verif_pie|verif_full/`，再用 `.temp/close_check.ps1` 量 `WM_CLOSE` 延迟与退出码。
+本轮我**没有**再动 `.build/C3.exe`、`src/`、`output/`（日志写 `.temp/verif_*.log`）。
+
+### 二、结果：三例全部干净（改前基线取自 §36/§40）
+| 目标 | 改前 | **改后（本轮实测）** |
+|---|---|---|
+| `tests/Charts 2020/ucChartArea`（极小复现） | 155–478 ms / 0xC000041D | **73 ms / exit 0** |
+| `tests/Charts 2020/ucPieChart` | **启动 ~578 ms 即崩**（无窗口）0xC000041D | **75 ms / exit 0** |
+| `tests/Charts 2020`（用户报的那个大图工程） | 2703 ms / 0xC000041D | **73 ms / exit 0** |
+
+⇒ **§39 的根因判定成立，用户报的"关闭转圈"已消除**，且回到 09-19/09-20 干净构建的量级（24–171 ms）。
+
+### 三、两条新增信息（对方 §39 里没有）
+1. **`ucPieChart` 演示工程"启动即崩"与关闭崩溃是同一个根因**，不是第二个 bug —— 修复后它 75 ms 干净退出。
+   所以 §40 第三节那条"更严重的独立缺陷"自动关闭，别再单开一项。
+2. **极小复现值得沉淀成回归用例**：`tests/Charts 2020/ucChartArea/Proyecto1.vbp`（一个窗体 + 一个 UC）
+   就能复现，构建 ~40 秒。另外这 5 个子工程**一个都不在门禁里**（`run_tests.ps1` 只注册主 vbp 的 `Charts2020`），
+   所以"ucPieChart 启动即崩"这种级别的问题没有任何地方能发现 —— 与 §36 第四节的 `-AutoExitSec` 盲区是两回事，
+   这是**覆盖面**盲区。顺带记：`ucChartBar`/`ucProgressCircular`/`ucTreeMaps` 三个子工程当前**编译失败**
+   （C3 退出码 1，VB4001 之后），是既有问题、与 187 无关，纳入门禁前要先修。
+
+### 四、状态
+- 本轮**未改任何源码**（修复是另一会话的 §39），**未跑门禁、未提交**；HEAD 仍 `b953147`（我的 Fix 182）。
+  §39 第四节的 hunk 位置图由对方自己按它提交，我不代提。
+- 任务 #12（Fix 187）置为 completed（含本表复核数据）。
+- 另一会话提到的 06:49 `VBFlexGridDemo.exe` 僵尸进程：本轮查 `tasklist` 已不在（我自己也没有遗留进程）。
+
+## 42. 2026-09-22 09:1x：**Fix 188 已落地** —— `Startup = Sub Main` 的工程关窗后进程不退出：没人投递 WM_QUIT，因为 Fix 144 的 PostQuitMessage 只挂在"启动窗体"上，而这类工程**没有启动窗体**
+
+### 一、症状与复现（§36 第五节那条，独立于 187）
+`.temp/demo_close_probe.ps1`（PostMessage-only）对 `.temp/demo188/VBFlexGridDemo.exe`：
+`WM_CLOSE` 后 **`IsWindow=False`（窗口真销毁了）但进程 20s 仍存活、6 个线程**，stderr 零 trace。
+⇒ 不是崩，是**挂死**；副作用很实际：exe 被占住，下一轮 demo 重编直接 `LNK1168`（本轮就撞了一次）。
+
+### 二、根因（三行代码闭环）
+1. 入口：`Startup.c:63` 是 `if (vb6_AnyThreadWindowVisible()) vb6_MessageLoop();`（`cgen_base_generate_entry.inc:116/165`）。
+2. 循环：`vb6forms.c:431` 是 `while (GetMessage(&msg, NULL, 0, 0))` —— **只有 WM_QUIT 能结束它**。
+3. 谁投 WM_QUIT：后端 `cgen_form_wndproc_dispatch.inc:142-156` 的 Fix 144 规定
+   **只有"启动窗体"的 WM_DESTROY 才发 `PostQuitMessage(0)`**。而 `Startup = Sub Main` 的工程
+   **没有启动窗体** ⇒ 生成的 `MainForm.c:206-207` 的 WM_DESTROY 里只有 `vb6_Forms_Unregister(hwnd)`，
+   没有任何投递 ⇒ `GetMessage` 永久阻塞。
+（对照：`Startup = 窗体` 的工程正常，因为那条规则命中了。所以 czUI/Charts2020/empty_form 全都干净退出，
+只有 VBFlexGridDemo 这一类驻留 —— 与 §36 的差分一致。）
+
+### 三、改法（VB6 语义 = "最后一个窗体卸载 ⇒ 程序结束"，判据本来就在 Forms 注册表里）
+`vb6rtl_system.c` 的 Forms 集合已经有 `g_formCount`（`VB6_MAX_FORMS` 那张表），所以：
+1. `vb6_Forms_Unregister`：摘除后 **`g_formCount == 0` 且消息循环真在跑** ⇒ `PostQuitMessage(0)`。
+2. 新增 `void vb6_Forms_LoopDepth(int delta)`（`vb6rtl_builtin.h` 声明），`vb6_MessageLoop` 进出各调一次
+   （**计数**而非布尔，模态嵌套循环才不会把外层误关掉）。
+3. 为什么必须带"循环在跑"这个限定：`Sub Main` 里先 `Load Form: Unload Form` 再 `Show` 另一个的工程，
+   如果无条件投递，那条提前进队列的 WM_QUIT 会让它**永远进不了消息循环**（Show 完立刻退出）。
+4. 为什么不去放宽后端 Fix 144 那条"仅启动窗体"：Sub Main 工程根本没有可判定的"启动窗体"对象；
+   而 Forms 注册表就是 VB6 自己的判据，天然覆盖多窗体 / MDI / 模态。
+
+改动文件：`src/rtl/core/vb6rtl/vb6rtl_system.c`、`src/rtl/core/vb6rtl/vb6rtl_builtin.h`、
+`src/rtl/core/vb6forms/vb6forms.c` —— 与另一会话在做的 Fix 185 三文件
+（`cgen_expr_member_form_builtin.inc` / `cgen_expr_call_callee_withm.inc` / `vb6forms_ctrl.c`）**零重叠**。
+
+### 四、验证
+- demo 关窗：改前 `20s 存活 / 6 线程 / IsWindow=False` → 改后 **`close_ms=81~157` 且进程真退出**；
+  `-g` 构建连跑 12 次 + 非 `-g` 再连跑 6 次，**crash trace 全 0**。
+- 启动窗体路径没被搞坏：`tests/Charts 2020`（Form2 是启动窗体，现在会双投递 WM_QUIT）
+  用当前 exe 重编后 **`close=84ms / exit=0 (clean)`**（`.temp/gui_one_probe.ps1`，与 188 前同量级）。
+- demo 编译 `C3_EXIT=0`，画面未复看（本轮改动不碰绘制路径）。
+- 门禁 **`regress47`**：`Results: PASS=91 FAIL=0 SKIP=1 TOTAL=92`、`GATE-EXIT=0`、`[FAIL]` 标记 0 个、收尾无存活进程
+  ⇒ 与 regress41/42/45/46 **同分**，零回归。
+- 关闭行为横扫（全部用 regress47 现建的 exe，即**已含 188**，`.temp/gui_one_probe.ps1` 会读真实退出码）：
+  `Charts2020/Proyecto1` 87ms、`czUI/czFormDemo` 63ms、`BalloonTooltips` 85ms、`VbQRCodegen/Project1` 87ms、
+  `NewTab/Test` 75ms、`empty_form` 70ms、**`form_mdi_parent` 69ms** —— **7/7 全部 `exit=0 (clean)`**。
+  （MDI 与"启动窗体双投递 WM_QUIT"这两类是 188 最可能踩坏的，实测都没坏。）
+
+### 五、残余（188 **没有引入**，只是它让进程第一次真能走到退出路径才暴露）
+非 `-g` 构建 16 次关闭里 **1 次**出现退出路径上的"往地址 0 写"AV：
+`code=0xc0000005 at rva=0x15a271 base=00007FF6281B0000`、`av write target=0x0`、
+`#4 0x15a271  #5 0xa9df0  #6 0x5ed33  #7 0x138643`（一次 26 条 trace 的级联）。
+**同一形态在 188 之前就抓到过**：06:29 那次 release exe 的最后一条 trace 是
+`rva=0x15a201 / write=1 / target=0x0` —— 当时进程挂死在消息循环里，所以没人把它当问题。
+复现与抓取方法、以及"为什么要配同一次构建的 PDB"都记在 `.temp/teardown_av_note.md`；
+这条另开任务，不并进 188。
+
+### 六、编号与台账
+- Fix **188** = 本项（对方 §41 说 188+ 空闲，取之）。台账本节 = **§42**（§40/§41 是对方 187 的续）。
+- 门禁号：43/45/46/47 我，44 对方。
+- 未提交。`vb6rtl_system.c` / `vb6rtl_builtin.h` 现在是 **179 + 184 + 188 三批混合**（还混着别人的 hunk），
+  提交时按位置筛；`vb6forms.c` 是 184 + 188 + 别批次。
