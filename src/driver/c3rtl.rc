@@ -2,7 +2,7 @@
 // P10 (restored): RTL is embedded as .c/.h SOURCE and compiled by MSVC
 // at user-program build time. The P11.3 pre-compiled .lib scheme was
 // reverted: c3 is open source, no source protection needed.
-// 25 .h headers + 61 .c sources + 13 .inc fragments (all arch-neutral) = 99 resources.
+// 26 .h headers + 67 .c sources + 13 .inc fragments (all arch-neutral) = 106 resources.
 // 2026-09-17 源文件按家族分目录: core/vb6rtl|vb6com|vb6comserver|vb6forms|di/,
 // 解包后仍是平铺目录（RTL 内部 include 一律 basename，不受源目录影响）。
 // Runtime: FindResource/LoadResource extract to temp session directory
@@ -51,6 +51,14 @@
 130 RCDATA "../rtl/core/vb6forms/vb6forms_shape.c"
 131 RCDATA "../rtl/core/vb6forms/vb6forms_axsite.c"
 198 RCDATA "../rtl/core/vb6forms/vb6forms_axcontainer.c"
+// vb6forms_axsite.c 按功能家族拆分 (2026-09-20): 内部头 + 5 个族编译单元
+// 原单文件 1029 行 → 主文件仅作入口(不参与编译)；axsite/ 下为独立编译单元
+199 RCDATA "../rtl/core/vb6forms/vb6forms_axsite_internal.h"
+200 RCDATA "../rtl/core/vb6forms/axsite/ax_site.c"
+201 RCDATA "../rtl/core/vb6forms/axsite/ax_site_ext.c"
+202 RCDATA "../rtl/core/vb6forms/axsite/ax_propbag.c"
+203 RCDATA "../rtl/core/vb6forms/axsite/ax_load.c"
+204 RCDATA "../rtl/core/vb6forms/axsite/ax_host.c"
 
 // vb6rtl.h 按家族拆分 (2026-09-17): 伞头 + 7 个子头
 132 RCDATA "../rtl/core/vb6rtl/vb6rtl_base.h"
@@ -138,5 +146,3 @@
 195 RCDATA "../rtl/core/di/gdiplus/vb6_di_gdiplus_image_stubs.c"
 196 RCDATA "../rtl/core/di/gdiplus/vb6_di_gdiplus_brush_stubs.c"
 197 RCDATA "../rtl/core/di/gdiplus/vb6_di_gdiplus_path_stubs.c"
-// Fix 160y: DI 转发桩 unknown 族 (无 vb6_di_lib 标记的杂项符号)
-199 RCDATA "../rtl/core/di/vb6_di_unknown_stubs.c"

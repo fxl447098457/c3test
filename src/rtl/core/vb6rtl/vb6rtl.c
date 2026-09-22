@@ -1,6 +1,6 @@
 // vb6rtl.c - VB6运行时库最小实现
 // 仅支持 hello.bas 等简单程序运行
-// 2026-09-17 按家族拆分为 13 个编译单元（纯搬移，逐行未改；清单见 ai/022-源码拆分进度表.md）。
+// 2026-09-17 按家族拆分为 13 个编译单元（纯搬移，逐行未改）。
 // 本文件保留：头部 include + 运行时初始化/退出 + 内存/类支持 + Variant 转换与比较 + 错误处理。
 // 拆出文件与原行区间：
 //   vb6rtl_string.c        40~64, 65~283, 1606~1728, 1729~1789, 4667~4698
@@ -385,6 +385,12 @@ void vb6_RestoreErrState(void) {
 int32_t vb6_ErrNumber(void) { return vb6_err.number; }
 BSTR vb6_ErrDescription(void) { return vb6_err.description; }
 void vb6_ErrClear(void) { vb6_err.number = 0; vb6_err.description = NULL; vb6_err.source = NULL; }
+
+// P21-27: Erl — 出错行号 (声明见 vb6rtl_class_com.h)
+// 行号嵌入机制未实现 (cgen 不生成 VB 行号标签), 按 VB6 语义返回 0 —— VB6 中源码
+// 不带行号时 Erl 同样返回 0。此前只有声明没有定义: 任何用到 Erl 的工程都会在
+// 链接期报 LNK2019: unresolved external symbol vb6_Erl (CI vbman demo 实证)。
+int32_t vb6_Erl(void) { return 0; }
 
 BSTR vb6_ErrSource(void) { return vb6_err.source; }
 

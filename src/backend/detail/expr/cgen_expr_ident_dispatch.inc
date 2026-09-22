@@ -208,8 +208,11 @@
             std::string newExpr;
             auto itCom = knownTypedComVars_.find(lower);
             if (itCom != knownTypedComVars_.end()) {
-                const std::string& _progId = itCom->second->comProgId.empty() ? itCom->second->name : itCom->second->comProgId;
-                newExpr = "(void*)vb6_NewObject(L\"" + _progId + "\")";
+                newExpr = comNewExprFor(itCom->second);  // Fix 177b: 遮蔽→工程类工厂+IDispatch包装; 未遮蔽→空串
+                if (newExpr.empty()) {
+                    const std::string& _progId = itCom->second->comProgId.empty() ? itCom->second->name : itCom->second->comProgId;
+                    newExpr = "(void*)vb6_NewObject(L\"" + _progId + "\")";
+                }
             } else {
                 newExpr = "vb6_cls_" + itNew->second + "_New()";
             }

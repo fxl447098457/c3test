@@ -44,6 +44,21 @@ int32_t vb6_FreeFile(void) {
     return -1;  // 无可用通道
 }
 
+// P21-17: FileAttr — 查询已打开文件的属性
+//   attribute=1 → 文件模式 (1=Input, 2=Output, 4=Random, 8=Append, 16=Binary)
+//   attribute=2 → 操作系统文件句柄
+// 声明见 vb6rtl_class_com.h. 此前只有声明没有定义 → 用到即 LNK2019.
+// 通道未打开时按 VB6 语义报错 52 (Bad file name or number).
+int32_t vb6_FileAttr(int32_t filenumber, int32_t attribute) {
+    if (filenumber < 1 || filenumber >= VB6_MAX_FILES || !vb6_file_table[filenumber]) {
+        vb6_RaiseError(52, vb6_BSTR_FromStr(L"Bad file name or number"));
+        return 0;
+    }
+    if (attribute == 1) return vb6_file_mode[filenumber];
+    if (attribute == 2) return (int32_t)_fileno(vb6_file_table[filenumber]);
+    return 0;
+}
+
 int32_t vb6_Open(BSTR pathname, int32_t mode, int32_t access, int32_t filenumber, int32_t reclength) {
     (void)access;  // 简化: 忽略access参数
     if (filenumber < 1 || filenumber >= VB6_MAX_FILES) return 0;

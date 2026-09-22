@@ -11,8 +11,8 @@
 // cast. The cast keeps the compiler from complaining about unrelated API parameter
 // types while preserving the register/memory passing class of every argument.
 //
-// generated from: C:\Users\ADMINI~1\AppData\Local\Temp\C3C\119778974291800
-// date: 2026-09-21 14:08
+// generated from: a C3 compile session (pass -SessionDir to regenerate)
+// date: 2026-09-20 07:16
 //
 // Hand-maintained special cases stay in vb6_di_stubs.c (ordinals, msvbvm60 runtime,
 // dynamically loaded DLLs). Re-run the generator after a build exposes new symbols.
@@ -32,7 +32,6 @@ void WINAPI RtlCopyMemory(void*, const void*, size_t);
 void WINAPI RtlFillMemory(void*, size_t, unsigned char);
 void WINAPI RtlZeroMemory(void*, size_t);
 #include <stdint.h>
-#include <string.h>
 #include <shlwapi.h>
 #include <shlobj.h>
 #include <mmsystem.h>
@@ -53,27 +52,27 @@ void WINAPI RtlZeroMemory(void*, size_t);
 #pragma comment(lib, "imagehlp.lib")
 #pragma comment(lib, "comdlg32.lib")
 
-/* PathGetArgsW */
-intptr_t __stdcall vb6_di_PathGetArgsW(intptr_t lpszPath) {
-    return ((intptr_t (WINAPI *)(intptr_t))PathGetArgsW)(lpszPath);
+/* SHBrowseForFolder */
+intptr_t __stdcall vb6_di_SHBrowseForFolder(void* lpbi) {
+    return ((intptr_t (WINAPI *)(void*))SHBrowseForFolder)(lpbi);
 }
 
-/* DragAcceptFiles */
-void __stdcall vb6_di_DragAcceptFiles(intptr_t hWnd, intptr_t fAccept) {
-    ((void (WINAPI *)(intptr_t, intptr_t))DragAcceptFiles)(hWnd, fAccept);
+/* SHGetPathFromIDListA */
+intptr_t __stdcall vb6_di_SHGetPathFromIDListA(intptr_t pidl, BSTR pszPath) {
+    return ((intptr_t (WINAPI *)(intptr_t, BSTR))SHGetPathFromIDListA)(pidl, pszPath);
 }
 
-/* DragFinish */
-void __stdcall vb6_di_DragFinish(intptr_t hDrop) {
-    ((void (WINAPI *)(intptr_t))DragFinish)(hDrop);
+/* ShellExecuteA */
+intptr_t __stdcall vb6_di_ShellExecuteA(intptr_t hwnd, BSTR lpOperation, BSTR lpFile, BSTR lpParameters, BSTR lpDirectory, intptr_t nShowCmd) {
+    return ((intptr_t (WINAPI *)(intptr_t, BSTR, BSTR, BSTR, BSTR, intptr_t))ShellExecuteA)(hwnd, lpOperation, lpFile, lpParameters, lpDirectory, nShowCmd);
 }
 
-/* DragQueryFileW */
-intptr_t __stdcall vb6_di_DragQueryFileW(intptr_t hDrop, intptr_t iFile, intptr_t lpszFile, intptr_t cch) {
-    return ((intptr_t (WINAPI *)(intptr_t, intptr_t, intptr_t, intptr_t))DragQueryFileW)(hDrop, iFile, lpszFile, cch);
+/* MakeSureDirectoryPathExists */
+intptr_t __stdcall vb6_di_MakeSureDirectoryPathExists(BSTR DirPath) {
+    return ((intptr_t (WINAPI *)(BSTR))MakeSureDirectoryPathExists)(DirPath);
 }
 
-/* DragQueryPoint */
-intptr_t __stdcall vb6_di_DragQueryPoint(intptr_t hDrop, void* lpPoint) {
-    return ((intptr_t (WINAPI *)(intptr_t, void*))DragQueryPoint)(hDrop, lpPoint);
+/* PathMatchSpecW */
+intptr_t __stdcall vb6_di_PathMatchSpecW(intptr_t pszFileParam, intptr_t pszSpec) {
+    return ((intptr_t (WINAPI *)(intptr_t, intptr_t))PathMatchSpecW)(pszFileParam, pszSpec);
 }

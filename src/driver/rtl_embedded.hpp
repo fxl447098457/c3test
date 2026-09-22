@@ -141,9 +141,17 @@ enum RtlResourceID {
     // 注意: 179~197 已被 vb6forms_uc 拆分 + gdiplus 拆分占满, 故顺延到 198 避免 ID 冲突
     RTL_VB6FORMS_AXCONTAINER_C = 198,
 
+    // vb6forms_axsite.c 按功能家族拆分 (2026-09-20): 内部头 + 5 个族编译单元
+    RTL_VB6FORMS_AXSITE_INTERNAL_H         = 199,
+    RTL_AX_SITE_C                          = 200,
+    RTL_AX_SITE_EXT_C                      = 201,
+    RTL_AX_PROPBAG_C                       = 202,
+    RTL_AX_LOAD_C                          = 203,
+    RTL_AX_HOST_C                          = 204,
+
     // Fix 160y: DI 转发桩未带 vb6_di_lib 标记的杂项符号 (Imm 输入法 / version /
     // TransparentBlt / msvbvm60 运行时) — gen_di_stubs.ps1 归入 unknown 族
-    RTL_VB6_DI_UNKNOWN_STUBS_C = 199,
+    RTL_VB6_DI_UNKNOWN_STUBS_C             = 205,
 };
 
 // Session directory manager
@@ -161,6 +169,13 @@ public:
     // Get current session's RTL directory path
     const std::string& rtlDir() const { return rtlDir_; }
 
+    // 校验会话 rtl/ 下每个 RTL 文件是否存在且非空, 缺失的当场重新解包.
+    // 用途: 编译前调用. 兄弟进程的 cleanupOldSessions 可能已把本会话目录里的
+    // 部分文件删掉 (见 cleanupOldSessions 注释), 此时 cl 会对尚未编译的源文件报
+    // C1083 —— 这里自愈, 而不是让整次编译失败.
+    // 返回: 所有文件最终齐备 -> true
+    bool restoreMissing();
+
     // P11.2: session root dir (for intermediates .c/.h/.obj)
     const std::string& sessionDir() const { return sessionDir_; }
 
@@ -170,7 +185,7 @@ public:
     // Release session without cleanup (keep intermediates for debugging)
     void release() { sessionDir_.clear(); rtlDir_.clear(); }
 
-    // Clean up old session dirs (>300 seconds)
+    // Clean up old session dirs (owner process already gone + idle > 30 min)
     // Auto-called on each create()
     static void cleanupOldSessions();
 

@@ -84,6 +84,10 @@ HRESULT vb6_RegisterCoClass(const vb6_CoClassDesc* desc, const wchar_t* dllPath)
         wchar_t progIdW[256];
         MultiByteToWideChar(CP_ACP, 0, desc->progId, -1, progIdW, 256);
         RegSetValueExW(hKey, NULL, 0, REG_SZ, (BYTE*)progIdW, (DWORD)(wcslen(progIdW)+1)*2);
+        // ProgID 值: ProgIDFromCLSID 唯一认这一项。C3 导入外部 ActiveX DLL 时靠它反查
+        // 真实 ProgID, 缺了这一项就只能退化成按类型库名拼, 两者不一致时客户端生成的
+        // New 会拿到查不到的 ProgID → 运行期 429。
+        RegSetValueExW(hKey, L"ProgID", 0, REG_SZ, (BYTE*)progIdW, (DWORD)(wcslen(progIdW)+1)*2);
     }
     RegCloseKey(hKey);
     

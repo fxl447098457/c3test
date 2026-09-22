@@ -28,7 +28,12 @@
     //     原先只在"有事件"时才 include, 会让无事件的 DLL 类模块拿到隐式声明 ——
     //     C 下隐式声明的返回值按 int 截断, 指针会被砍成 32 位 (x64 必崩);
     //     改为 DLL 类模块一律 include.
-    if (isDll_ && isClassModule_) {
+    // ExeComBridge 01: 类模块一律 include vb6comserver.h (原先仅 DLL).
+    //   EXE 侧工程类实例也要能被包装成 IDispatch: emitClassFieldAccessors 生成的
+    //   字段访问器引用 vb6_ComObject_FromInstance / vb6_FindCoClassDesc /
+    //   vb6_ComObject_GetInstance (声明在此头), 缺头会 C4013 隐式声明截断指针
+    //   (Fix 099 同款教训). 纯头文件无导出修饰, EXE .c include 无副作用.
+    if (isClassModule_) {
         c_.emitLine("#include \"vb6comserver.h\"");
     }
     // P8.7 + Fix 010r-12: 标准模块之间的#include放在.c文件，避免.h循环依赖
@@ -66,9 +71,11 @@
         }
 
         h_.emitLine("typedef struct " + clsStruct + " {");
-    if (isDll_) {
-        h_.emitLine("    void* __comObj;  /* P6.6.3: back-ptr to COM wrapper (vb6_ComObject*) */");
-    }
+    // ExeComBridge 01: __comObj 无条件生成 (原先仅 DLL 工程).
+    //   vb6comserver_obj.c 的包装复用规则前置条件: 实例结构体首字段必须是 __comObj.
+    //   EXE 侧工程类实例也要能被包装成 IDispatch (阶段 3 在打包点接入).
+    //   纯 EXE 下无人写读该字段, _New() 置 NULL, 现有程序行为零变化.
+    h_.emitLine("    void* __comObj;  /* P6.6.3: back-ptr to COM wrapper (vb6_ComObject*) */");
 
         // 收集模块级变量作为结构体字段
         bool hasFields = false;
@@ -108,6 +115,10 @@
         // 类工厂函数声明
         h_.emitLine(clsStruct + "* " + clsStruct + "_New(void);");
         h_.emitLine("void " + clsStruct + "_Destroy(" + clsStruct + "* me);");
+        // ExeComBridge 03: COM 实参打包函数 (实现在本类 .c, 见 cgen_com.cpp
+        // emitClassFactory). 声明必须跨模块可见 —— `New <该类>` 的调用点通常
+        // 在别的模块 (VBMAN_DEMO 的 Form1.frm), 缺声明就是隐式 int 截断指针.
+        h_.emitLine("void* vb6_ComPack_" + cIdent(moduleName_) + "(void* instance);");
         // P6.4+: 默认实例 (VB_PredeclaredId=True) 惰性单例访问器, 跨模块可见
         if (!defaultInstanceClassName(moduleName_).empty()) {
             h_.emitLine(clsStruct + "* " + clsStruct + "_Default(void);");

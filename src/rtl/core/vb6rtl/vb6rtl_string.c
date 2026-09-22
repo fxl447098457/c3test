@@ -398,6 +398,20 @@ BSTR vb6_String(int32_t n, int32_t charCode) {
     return result;
 }
 
+// P21-29: Spc — 打印定位函数 (VB6: Print #1, Spc(5); "x"), 返回 n 个空格
+// 声明见 vb6rtl_class_com.h. 此前只有声明没有定义 → 用到即 LNK2019.
+BSTR vb6_Spc(int32_t count) {
+    return vb6_Space(count);
+}
+
+// P21-28: Tab — 打印定位函数 (VB6: Print #1, Tab(10); "x"), 定位到第 column 列 (1-based)
+// 当前无打印列位置跟踪, 按"从第 1 列起算"补 column-1 个空格; VB6 中 column 不大于
+// 当前列时会先换行, 该行为未建模。
+BSTR vb6_Tab(int32_t column) {
+    if (column <= 1) return vb6_BSTR_Empty();
+    return vb6_Space(column - 1);
+}
+
 int32_t vb6_StrComp(BSTR s1, BSTR s2, int32_t compare) {
     (void)compare;  // 简化: 仅二进制比较
     // Fix 173: NULL BSTR (vbNullString / 未赋值的 String) 与 L"" 等价 —— 原来对

@@ -3,7 +3,7 @@
 // Win32 forwarding stubs for VB6 `Declare ... Lib "x"` (Fix 076 scheme: C3 emits
 // `extern <ret> __stdcall vb6_di_<alias>(...)` and the RTL implements it).
 //
-// Family: com   (libs: ole32, oleaut32, advapi32, comdlg32)   stubs: 20
+// Family: com   (libs: ole32, oleaut32, advapi32, comdlg32)   stubs: 39
 //
 // Each stub reproduces C3's own generated prototype verbatim (that is the ABI the
 // caller uses: ByVal Long is widened to intptr_t, ByVal Single stays float, ByRef
@@ -11,8 +11,8 @@
 // cast. The cast keeps the compiler from complaining about unrelated API parameter
 // types while preserving the register/memory passing class of every argument.
 //
-// generated from: C:\Users\ADMINI~1\AppData\Local\Temp\C3C\119778974291800
-// date: 2026-09-21 14:08
+// generated from: a C3 compile session (pass -SessionDir to regenerate)
+// date: 2026-09-20 07:16
 //
 // Hand-maintained special cases stay in vb6_di_stubs.c (ordinals, msvbvm60 runtime,
 // dynamically loaded DLLs). Re-run the generator after a build exposes new symbols.
@@ -32,7 +32,6 @@ void WINAPI RtlCopyMemory(void*, const void*, size_t);
 void WINAPI RtlFillMemory(void*, size_t, unsigned char);
 void WINAPI RtlZeroMemory(void*, size_t);
 #include <stdint.h>
-#include <string.h>
 #include <shlwapi.h>
 #include <shlobj.h>
 #include <mmsystem.h>
@@ -54,102 +53,134 @@ void WINAPI RtlZeroMemory(void*, size_t);
 #pragma comment(lib, "comdlg32.lib")
 #pragma comment(lib, "comdlg32.lib")
 
-/* SysReAllocString */
-intptr_t __stdcall vb6_di_SysReAllocString(intptr_t pbString, intptr_t pszStrPtr) {
-    return ((intptr_t (WINAPI *)(intptr_t, intptr_t))SysReAllocString)(pbString, pszStrPtr);
+/* CryptAcquireContextA */
+intptr_t __stdcall vb6_di_CryptAcquireContextA(int32_t* phProv, BSTR pszContainer, BSTR pszProvider, intptr_t dwProvType, intptr_t dwFlags) {
+    return ((intptr_t (WINAPI *)(int32_t*, BSTR, BSTR, intptr_t, intptr_t))CryptAcquireContextA)(phProv, pszContainer, pszProvider, dwProvType, dwFlags);
 }
 
-/* VarDecFromI8 */
-intptr_t __stdcall vb6_di_VarDecFromI8(double i64In, void* pDecOut) {
-    return ((intptr_t (WINAPI *)(double, void*))VarDecFromI8)(i64In, pDecOut);
+/* CryptReleaseContext */
+intptr_t __stdcall vb6_di_CryptReleaseContext(intptr_t hProv, intptr_t dwFlags) {
+    return ((intptr_t (WINAPI *)(intptr_t, intptr_t))CryptReleaseContext)(hProv, dwFlags);
 }
 
-/* OleTranslateColor */
-intptr_t __stdcall vb6_di_OleTranslateColor(intptr_t Color, intptr_t hPal, int32_t* RGBResult) {
-    return ((intptr_t (WINAPI *)(intptr_t, intptr_t, int32_t*))OleTranslateColor)(Color, hPal, RGBResult);
+/* CryptCreateHash */
+intptr_t __stdcall vb6_di_CryptCreateHash(intptr_t hProv, intptr_t Algid, intptr_t hKey, intptr_t dwFlags, int32_t* phHash) {
+    return ((intptr_t (WINAPI *)(intptr_t, intptr_t, intptr_t, intptr_t, int32_t*))CryptCreateHash)(hProv, Algid, hKey, dwFlags, phHash);
 }
 
-/* OleLoadPicture */
-intptr_t __stdcall vb6_di_OleLoadPicture(void* pStream, intptr_t lSize, intptr_t fRunmode, void* riid, void** pIPicture) {
-    return ((intptr_t (WINAPI *)(void*, intptr_t, intptr_t, void*, void**))OleLoadPicture)(pStream, lSize, fRunmode, riid, pIPicture);
+/* CryptDestroyHash */
+intptr_t __stdcall vb6_di_CryptDestroyHash(intptr_t hHash) {
+    return ((intptr_t (WINAPI *)(intptr_t))CryptDestroyHash)(hHash);
 }
 
-/* OleLoadPicturePath */
-intptr_t __stdcall vb6_di_OleLoadPicturePath(intptr_t lpszPath, intptr_t pUnkCaller, intptr_t dwReserved, intptr_t ClrReserved, void* riid, void** pIPicture) {
-    return ((intptr_t (WINAPI *)(intptr_t, intptr_t, intptr_t, intptr_t, void*, void**))OleLoadPicturePath)(lpszPath, pUnkCaller, dwReserved, ClrReserved, riid, pIPicture);
+/* CryptHashData */
+intptr_t __stdcall vb6_di_CryptHashData(intptr_t hHash, uint8_t* pbData, intptr_t dwDataLen, intptr_t dwFlags) {
+    return ((intptr_t (WINAPI *)(intptr_t, uint8_t*, intptr_t, intptr_t))CryptHashData)(hHash, pbData, dwDataLen, dwFlags);
 }
 
-/* CreateStreamOnHGlobal */
-intptr_t __stdcall vb6_di_CreateStreamOnHGlobal(intptr_t hGlobal, intptr_t fDeleteOnRelease, void** pStream) {
-    return ((intptr_t (WINAPI *)(intptr_t, intptr_t, void**))CreateStreamOnHGlobal)(hGlobal, fDeleteOnRelease, pStream);
+/* CryptGetHashParam */
+intptr_t __stdcall vb6_di_CryptGetHashParam(intptr_t hHash, intptr_t dwParam, void* pbData, int32_t* pdwDataLen, intptr_t dwFlags) {
+    return ((intptr_t (WINAPI *)(intptr_t, intptr_t, void*, int32_t*, intptr_t))CryptGetHashParam)(hHash, dwParam, pbData, pdwDataLen, dwFlags);
+}
+
+/* CryptDeriveKey */
+intptr_t __stdcall vb6_di_CryptDeriveKey(intptr_t hProv, intptr_t Algid, intptr_t hBaseData, intptr_t dwFlags, int32_t* phKey) {
+    return ((intptr_t (WINAPI *)(intptr_t, intptr_t, intptr_t, intptr_t, int32_t*))CryptDeriveKey)(hProv, Algid, hBaseData, dwFlags, phKey);
+}
+
+/* CryptDestroyKey */
+intptr_t __stdcall vb6_di_CryptDestroyKey(intptr_t hKey) {
+    return ((intptr_t (WINAPI *)(intptr_t))CryptDestroyKey)(hKey);
+}
+
+/* CryptExportKey */
+intptr_t __stdcall vb6_di_CryptExportKey(intptr_t hKey, intptr_t hExpKey, intptr_t dwBlobType, intptr_t dwFlags, uint8_t* pbData, int32_t* pdwDataLen) {
+    return ((intptr_t (WINAPI *)(intptr_t, intptr_t, intptr_t, intptr_t, uint8_t*, int32_t*))CryptExportKey)(hKey, hExpKey, dwBlobType, dwFlags, pbData, pdwDataLen);
+}
+
+/* GetOpenFileNameW */
+intptr_t __stdcall vb6_di_GetOpenFileNameW(void* pOpenfilename) {
+    return ((intptr_t (WINAPI *)(void*))GetOpenFileNameW)(pOpenfilename);
+}
+
+/* GetSaveFileNameW */
+intptr_t __stdcall vb6_di_GetSaveFileNameW(void* pOpenfilename) {
+    return ((intptr_t (WINAPI *)(void*))GetSaveFileNameW)(pOpenfilename);
 }
 
 /* CoTaskMemFree */
-void __stdcall vb6_di_CoTaskMemFree(intptr_t hMem) {
-    ((void (WINAPI *)(intptr_t))CoTaskMemFree)(hMem);
+intptr_t __stdcall vb6_di_CoTaskMemFree(intptr_t hMem) {
+    return ((intptr_t (WINAPI *)(intptr_t))CoTaskMemFree)(hMem);
 }
 
-/* OleCreatePropertyFrame */
-intptr_t __stdcall vb6_di_OleCreatePropertyFrame(intptr_t hWndOwner, intptr_t X, intptr_t Y, intptr_t lpszCaption, intptr_t cObjects, void** pUnk, intptr_t cPages, void* pPageCLSID, intptr_t LCID, intptr_t dwReserved, intptr_t pvReserved) {
-    return ((intptr_t (WINAPI *)(intptr_t, intptr_t, intptr_t, intptr_t, intptr_t, void**, intptr_t, void*, intptr_t, intptr_t, intptr_t))OleCreatePropertyFrame)(hWndOwner, X, Y, lpszCaption, cObjects, pUnk, cPages, pPageCLSID, LCID, dwReserved, pvReserved);
+/* CreateStreamOnHGlobal */
+intptr_t __stdcall vb6_di_CreateStreamOnHGlobal(intptr_t hGlobal, intptr_t fDeleteOnRelease, void* ppstm) {
+    return ((intptr_t (WINAPI *)(intptr_t, intptr_t, void*))CreateStreamOnHGlobal)(hGlobal, fDeleteOnRelease, ppstm);
 }
 
-/* CLSIDFromString */
-intptr_t __stdcall vb6_di_CLSIDFromString(intptr_t lpszProgID, void* pCLSID) {
-    return ((intptr_t (WINAPI *)(intptr_t, void*))CLSIDFromString)(lpszProgID, pCLSID);
+/* OleLoadPicture */
+intptr_t __stdcall vb6_di_OleLoadPicture(intptr_t pStream, intptr_t lSize, intptr_t fRunmode, void* riid, void* ppvObj) {
+    return ((intptr_t (WINAPI *)(intptr_t, intptr_t, intptr_t, void*, void*))OleLoadPicture)(pStream, lSize, fRunmode, riid, ppvObj);
 }
 
-/* ChooseColorW */
-intptr_t __stdcall vb6_di_ChooseColorW(void* lpChooseColor) {
-    return ((intptr_t (WINAPI *)(void*))ChooseColorW)(lpChooseColor);
+/* CryptAcquireContextW */
+intptr_t __stdcall vb6_di_CryptAcquireContextW(int32_t* phProv, intptr_t pszContainer, intptr_t pszProvider, intptr_t dwProvType, intptr_t dwFlags) {
+    return ((intptr_t (WINAPI *)(int32_t*, intptr_t, intptr_t, intptr_t, intptr_t))CryptAcquireContextW)(phProv, pszContainer, pszProvider, dwProvType, dwFlags);
 }
 
-/* VariantInit */
-void __stdcall vb6_di_VariantInit(void* pvarg) {
-    ((void (WINAPI *)(void*))VariantInit)(pvarg);
+/* CryptGenKey */
+intptr_t __stdcall vb6_di_CryptGenKey(intptr_t hProv, intptr_t AlgId, intptr_t dwFlags, int32_t* phKey) {
+    return ((intptr_t (WINAPI *)(intptr_t, intptr_t, intptr_t, int32_t*))CryptGenKey)(hProv, AlgId, dwFlags, phKey);
 }
 
-/* VariantClear */
-intptr_t __stdcall vb6_di_VariantClear(void* pvarg) {
-    return ((intptr_t (WINAPI *)(void*))VariantClear)(pvarg);
+/* CryptGetUserKey */
+intptr_t __stdcall vb6_di_CryptGetUserKey(intptr_t hProv, intptr_t dwKeySpec, int32_t* phUserKey) {
+    return ((intptr_t (WINAPI *)(intptr_t, intptr_t, int32_t*))CryptGetUserKey)(hProv, dwKeySpec, phUserKey);
 }
 
-/* VariantCopy */
-intptr_t __stdcall vb6_di_VariantCopy(void* pvargDest, void* pvargSrc) {
-    return ((intptr_t (WINAPI *)(void*, void*))VariantCopy)(pvargDest, pvargSrc);
+/* SystemTimeToVariantTime */
+intptr_t __stdcall vb6_di_SystemTimeToVariantTime(void* lpSystemTime, double* pvTime) {
+    return ((intptr_t (WINAPI *)(void*, double*))SystemTimeToVariantTime)(lpSystemTime, pvTime);
 }
 
-/* VarCmp */
-intptr_t __stdcall vb6_di_VarCmp(void* pvargLeft, void* pvargRight, intptr_t LCID, intptr_t dwFlags) {
-    return ((intptr_t (WINAPI *)(void*, void*, intptr_t, intptr_t))VarCmp)(pvargLeft, pvargRight, LCID, dwFlags);
+/* VariantTimeToSystemTime */
+intptr_t __stdcall vb6_di_VariantTimeToSystemTime(double vTime, void* lpSystemTime) {
+    return ((intptr_t (WINAPI *)(double, void*))VariantTimeToSystemTime)(vTime, lpSystemTime);
 }
 
-/* VarI8FromDec */
-intptr_t __stdcall vb6_di_VarI8FromDec(void* pDecIn, double* i64Out) {
-    return ((intptr_t (WINAPI *)(void*, double*))VarI8FromDec)(pDecIn, i64Out);
+/* CryptGenRandom */
+intptr_t __stdcall vb6_di_CryptGenRandom(intptr_t hProv, intptr_t dwLen, intptr_t pbBuffer) {
+    return ((intptr_t (WINAPI *)(intptr_t, intptr_t, intptr_t))CryptGenRandom)(hProv, dwLen, pbBuffer);
 }
 
-/* VarI8FromR8 */
-intptr_t __stdcall vb6_di_VarI8FromR8(double DblIn, double* i64Out) {
-    return ((intptr_t (WINAPI *)(double, double*))VarI8FromR8)(DblIn, i64Out);
+/* CryptSetHashParam */
+intptr_t __stdcall vb6_di_CryptSetHashParam(intptr_t hHash, intptr_t dwParam, void* pbData, intptr_t dwFlags) {
+    return ((intptr_t (WINAPI *)(intptr_t, intptr_t, void*, intptr_t))CryptSetHashParam)(hHash, dwParam, pbData, dwFlags);
 }
 
-/* VarI8FromStr */
-intptr_t __stdcall vb6_di_VarI8FromStr(intptr_t lpStrIn, intptr_t LCID, intptr_t dwFlags, double* i64Out) {
-    return ((intptr_t (WINAPI *)(intptr_t, intptr_t, intptr_t, double*))VarI8FromStr)(lpStrIn, LCID, dwFlags, i64Out);
+/* CryptSignHashW */
+intptr_t __stdcall vb6_di_CryptSignHashW(intptr_t hHash, intptr_t dwKeySpec, intptr_t szDescription, intptr_t dwFlags, void* pbSignature, int32_t* pdwSigLen) {
+    return ((intptr_t (WINAPI *)(intptr_t, intptr_t, intptr_t, intptr_t, void*, int32_t*))CryptSignHashW)(hHash, dwKeySpec, szDescription, dwFlags, pbSignature, pdwSigLen);
 }
 
-/* SysAllocString */
-intptr_t __stdcall vb6_di_SysAllocString(intptr_t lpString) {
-    return ((intptr_t (WINAPI *)(intptr_t))SysAllocString)(lpString);
+/* CryptDecrypt */
+intptr_t __stdcall vb6_di_CryptDecrypt(intptr_t hKey, intptr_t hHash, intptr_t Final, intptr_t dwFlags, void* pbData, int32_t* pdwDataLen) {
+    return ((intptr_t (WINAPI *)(intptr_t, intptr_t, intptr_t, intptr_t, void*, int32_t*))CryptDecrypt)(hKey, hHash, Final, dwFlags, pbData, pdwDataLen);
 }
 
-/* SysFreeString */
-intptr_t __stdcall vb6_di_SysFreeString(intptr_t lpString) {
-    return ((intptr_t (WINAPI *)(intptr_t))SysFreeString)(lpString);
+/* ChooseColorA */
+intptr_t __stdcall vb6_di_ChooseColorA(void* pChoosecolor) {
+    return ((intptr_t (WINAPI *)(void*))ChooseColorA)(pChoosecolor);
 }
-
-/* CoTaskMemAlloc */
-intptr_t __stdcall vb6_di_CoTaskMemAlloc(intptr_t cBytes) {
-    return ((intptr_t (WINAPI *)(intptr_t))CoTaskMemAlloc)(cBytes);
+/* GetFileTitleA */
+intptr_t __stdcall vb6_di_GetFileTitleA(BSTR szFile, BSTR szTitle, intptr_t cbBuf) {
+    return ((intptr_t (WINAPI *)(BSTR, BSTR, intptr_t))GetFileTitleA)(szFile, szTitle, cbBuf);
+}
+/* GetOpenFileNameA */
+intptr_t __stdcall vb6_di_GetOpenFileNameA(void* file) {
+    return ((intptr_t (WINAPI *)(void*))GetOpenFileNameA)(file);
+}
+/* OleTranslateColor */
+intptr_t __stdcall vb6_di_OleTranslateColor(intptr_t lOleColor, intptr_t lHPalette, intptr_t lColorRef) {
+    return ((intptr_t (WINAPI *)(intptr_t, intptr_t, intptr_t))OleTranslateColor)(lOleColor, lHPalette, lColorRef);
 }
