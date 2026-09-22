@@ -2766,6 +2766,17 @@ env-gated 诊断（`RegisterClassEx`/`CreateWindowEx` 打 class+proc 指针）�
 
 ---
 
+## 43. 2026-09-22 12:2x：**Fix 189 已落地（仅测试侧）** —— 门禁 `Test-GuiVbp -AutoExitSec` 的盲区：窗口出来了、随后自己崩退，照样记 PASS
+
+**触发**：`Charts2020`/`czUI`/`NewTab`/`ExtShow` 四个用例走 `-AutoExitSec 3`。旧实现在"等窗口 → 轮询到超时 → `Kill()`"之后**无条件 `$script:pass++`，从不读退出码**；而轮询循环里的 `if ($proc.HasExited) { break }` 让"它提前自退"也走进同一条 pass 路径。于是窗口出现后的运行期崩溃只要落在预算秒数内，门禁就是绿的——实测标本 `flexgrid_compile2\VBFlexGridDemo.exe`：约 18s 抛 `0xC0000005`，`rva=0x15c5b1 av write target=0x0`。"编译期 0 错误 ≠ 健康"这条口径在运行期同样成立。
+
+**改法**（`tests/run_tests.ps1` 的 `Test-GuiVbp`，只加断言、不动其它分支）：区分"我们杀的"与"它自己退的"。超时兜底那条仍免检 PASS；`$proc.HasExited` 为真则读 `ExitCode`，非 0 就 `throw ("exited on its own at ~{0}s with code 0x{1:X8}" -f ...)` 交给既有 catch 记 FAIL，退码 0 记 `PASS (compile, window, self-exit at ~Ns, code 0)`。`$script:pass++` 移到分支末尾，throw 路径自然跳过。PowerShell 的 `throw "…" -f $x` 会被当成 `throw` 的参数，必须加括号。
+
+**验证**：① `.temp/fix189_proof.ps1 -Exe <那个 11:21 的包> -BudgetSec 25`：同一次运行下**新代码 FAIL、旧代码 PASS**，洞确认闭合；② `.temp/gate_vbp.ps1 -Tag vbp189`（只跑 `-Category vbp`，255 秒 vs 全门禁 20–25 分钟）→ `PASS=12 FAIL=0 SKIP=1 TOTAL=13`，四个 `AutoExitSec` 用例仍报 `auto-exit after 3s`，加严没把现成用例打成红。
+
+**同日查到、且不在代码里的两条，一并记录**：
+1. 嵌入清单是**三方**约束：`src/driver/c3rtl.rc` 的 `<id> RCDATA "路径"`、`src/driver/rtl_embedded.hpp` 的 `RTL_NAME = <id>`、`src/driver/rtl_embedded.cpp` 的 `{ RTL_NAME, "basename" }`——`.cpp` 只按 **basename** 索引，所以 id 错位是"抽出另一个文件"而非报错。合并提交 `c9b7986` 解这一族时取了一侧：`RTL_VB6_DI_UNKNOWN_STUBS_C`(205) 在枚举和表里、`.rc` 却没有 205，于是 `vb6_di_unknown_stubs.c` 根本没嵌进 C3.exe；同族 DI 桩从 **489 掉到 421，162 个手写桩丢失**。工作树里那份未提交的重生**是真并集**（583 = 270 两侧一致 + 182 取我们 + 131 取上游；名字与桩体均无丢失、无杜撰），但 HEAD 仍未提交，从 HEAD 干净构建拿到的还是坏编译器。核对工具：`.temp/yqt_embed_xcheck.sh <rev|WORKTREE>`、`.temp/di_body_audit.py`（比**桩体**，不只比名字——名字是全并集也可能逐符号取了对方桩体而静默回退手工修复）、`.temp/di_sig_divergence.py`（揪指针宽度/元数变化）。
+2. `ByVal <x> As Currency` 传 Win32 `POINT` 按值，x64 下**只有打包成单个 64 位整数**（x 在低 32、y 在高 32）才对：`.temp/abi_probe.c` 以真原型为基准实测，我们的 `(double)` 与上游的 `(intptr_t,intptr_t)` **都返回错误的 HWND**（真值=可见探针窗口）。且 DI 桩只按 API 名索引，同一 API 的两种真实声明形状无法共存（工作树已自相矛盾：`WindowFromPoint` 用上游 2 参、`ChildWindowFromPoint` 用我们 1 参，而 VBFlexGrid 里两者都是 `As Currency`）。要修必须让桩名按声明形状区分（codegen + `gen_di_stubs.ps1` 一起改），不是选边。
 ## 以下为合并自 origin/main 的并轨文档 (fan/dev 主文档之上追加保留)
 
 
@@ -3226,3 +3237,4 @@ cToolsArray.cls 的 6 错集中在三个草稿/边缘函数（Extend/DeArray/tes
 - 在 MemberAccessExpr/IndexOrCallExpr 生成时，若接收者表达式推断为 `void*`（COM 指针，如 UDT 内嵌 Collection/类字段），成员访问走 COM 调用路径（`vb6_ComGetIntProp(obj, L"Item")` 等）
 - 需先梳理 cgen_expr.cpp 中 COM 调用判定条件（knownObjectVars_/knownTypedComVars_ 等），确定「UDT 字段类型为 void*」的识别点
 - C2039/C2198/C2440（SafeArray 簇）独立，涉及 `MessBuffer_Data` 字段缺失与 SafeArray 参数包装，可另起一轮
+

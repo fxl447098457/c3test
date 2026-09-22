@@ -292,15 +292,28 @@ function Test-GuiVbp {
         if ($AutoExitSec -gt 0) {
             # GUI demo with no clean-exit contract: window shown is enough;
             # auto-kill after the timeout so the suite never hangs.
+            # Fix 189: 但"它自己先退了"不是我们让它退的。旧代码在这里无条件
+            # pass++ 且不读退出码, 于是运行期崩溃 (实测窗口出现后 18s 的
+            # 0xC0000005) 也算 PASS —— 只有超时兜底那条路径才该免检。
             $watch = [Diagnostics.Stopwatch]::StartNew()
             while ($watch.ElapsedMilliseconds -lt $AutoExitSec * 1000) {
                 $proc.Refresh()
                 if ($proc.HasExited) { break }
                 Start-Sleep -Milliseconds 100
             }
-            if (-not $proc.HasExited) { $proc.Kill(); $proc.WaitForExit(5000) | Out-Null }
+            $proc.Refresh()
+            if ($proc.HasExited) {
+                $selfSec = [int]($watch.ElapsedMilliseconds / 1000)
+                $code = $proc.ExitCode
+                if ($code -ne 0) {
+                    throw ("exited on its own at ~{0}s with code 0x{1:X8}" -f $selfSec, $code)
+                }
+                Write-Host "PASS (compile, window, self-exit at ~${selfSec}s, code 0)" -ForegroundColor Green
+            } else {
+                $proc.Kill(); $proc.WaitForExit(5000) | Out-Null
+                Write-Host "PASS (compile, window, auto-exit after ${AutoExitSec}s)" -ForegroundColor Green
+            }
             $script:pass++
-            Write-Host "PASS (compile, window, auto-exit after ${AutoExitSec}s)" -ForegroundColor Green
         } else {
             if (-not $proc.CloseMainWindow()) { throw "Main window refused close" }
             if (-not $proc.WaitForExit(2000)) { throw "Application did not exit after close" }
