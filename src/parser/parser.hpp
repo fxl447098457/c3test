@@ -130,6 +130,12 @@ private:
     std::unique_ptr<DeclareDecl> parseDeclareDecl(AccessLevel access);
     std::unique_ptr<EventDecl> parseEventDecl(AccessLevel access);
     std::unique_ptr<DelegateDecl> parseDelegateDecl(AccessLevel access);
+    // Interface 契约块 (tB 扩展, parser_interface.cpp): `Interface Name [Extends P] ... End Interface`
+    // pendingAttrs = 声明上方累积的 [Xxx] 属性行 (由 parseModuleBody 交出)
+    std::unique_ptr<InterfaceDecl> parseInterfaceDecl(std::vector<InterfaceAttr>& pendingAttrs);
+    DeclPtr parseInterfaceMemberDecl();
+    bool atBracketAttrLine() const;
+    bool parseBracketAttrLine(InterfaceAttr& out);
     std::unique_ptr<ConstDecl> parseConstDecl(AccessLevel access);
     std::unique_ptr<VariableDecl> parseVariableDecl(AccessLevel access, bool isStatic);
 

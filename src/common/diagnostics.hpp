@@ -55,6 +55,8 @@ enum class DiagnosticID : uint16_t {
     ParseInvalidSelect = 2008,
     ParseDuplicateLabel = 2009,
     ParseUndeclaredLabel = 2010,
+    ParseInvalidInterfaceMember = 2011,  // Interface 块内非法成员 (实现体/字段/可见性/事件)
+    ParseUnknownAttribute = 2012,        // 无法识别的 [Xxx] 属性行
 
     // 语义 (3xxx)
     SemUndeclaredIdentifier = 3001,

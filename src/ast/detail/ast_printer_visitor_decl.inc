@@ -102,6 +102,14 @@
         os_ << " (" << node.params.size() << " params)\n";
     }
 
+    void visit(InterfaceDecl& node) override {
+        out() << "Interface " << node.name;
+        if (!node.extendsName.empty()) os_ << " Extends " << node.extendsName;
+        os_ << " (" << node.members.size() << " members";
+        if (!node.attributes.empty()) os_ << ", " << node.attributes.size() << " attrs";
+        os_ << ")\n";
+    }
+
     void visit(ConstDecl& node) override {
         out() << "Const " << node.name
               << " (access=" << accessStr(node.access) << ")\n";

@@ -26,6 +26,7 @@ public:
     virtual void visit(DeclareDecl& node) {}
     virtual void visit(EventDecl& node) {}
     virtual void visit(DelegateDecl& node) {}
+    virtual void visit(InterfaceDecl& node) {}
     virtual void visit(ConstDecl& node) {}
     virtual void visit(VariableDecl& node) {}
     virtual void visit(ParameterDecl& node) {}

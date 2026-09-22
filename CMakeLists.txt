@@ -85,6 +85,7 @@ add_library(vb6c3-core STATIC
     src/parser/parser_expr_postfix.cpp
     src/parser/parser_decl.cpp
     src/parser/parser_decl_var.cpp
+    src/parser/parser_interface.cpp   # tB 扩展: Interface 契约块 (ai/022 B01)
     # 语句解析家族
     src/parser/stmt/parser_stmt.cpp
     src/parser/stmt/parser_stmt_control.cpp

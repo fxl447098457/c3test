@@ -121,6 +121,7 @@ enum class ASTNodeKind : uint16_t {
     TypeDecl, TypeMember,
     EnumDecl, EnumMember,
     DeclareDecl, EventDecl, DelegateDecl,
+    InterfaceDecl,  // Interface ... End Interface 契约块 (tB 扩展, ai/022 D1)
     ConstDecl, VariableDecl,
     ParameterDecl,
     MultiDecl,  // 逗号分隔的多变量声明 (Dim a, b, c As Long)

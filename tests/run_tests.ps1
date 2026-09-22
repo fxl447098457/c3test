@@ -579,6 +579,27 @@ function Test-Vbp {
 }
 
 # === 语法检查测试 ===
+# Negative syntax case: --syntax-only must FAIL and report the given (ASCII) text.
+# Used by the tB-extension contract diagnostics (ai/022 B01+).
+function Test-SyntaxFail {
+    param([string]$Name, [string]$Source, [string]$Needle)
+    $script:total++
+    Write-Host -NoNewline "  [SYNTAX-FAIL] $Name ... "
+    # Native stderr under SilentlyContinue is dropped by `& 2>&1`; let cmd.exe merge the
+    # streams, and collapse whitespace so long diagnostics cannot be word-wrapped apart.
+    $result = & cmd /c ('"' + $C3 + '" "' + $Source + '" --syntax-only 2>&1')
+    $text = (($result | Out-String) -replace '\s+', ' ')
+    if ($LASTEXITCODE -ne 0 -and $text.Contains($Needle)) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        Write-Host "  expected failing compile containing: $Needle" -ForegroundColor DarkGray
+        if ($Verbose) { Write-Host $text }
+    }
+}
+
 function Test-Syntax {
     param([string]$Name, [string]$Source)
     $script:total++
@@ -701,6 +722,10 @@ if ($Category -in @("all", "run", "bas")) {
     # generic Function/Sub with explicit instantiation + call-site type inference.
     Add-BasTest "test_generics" "$Tests\test_generics.bas" @("G-A=12", "G-B=hi", "G-C=21 abc!", "G-D=10", "G-E=10", "G-F=ab", "G-G=20", "LEN=2", "G-H=0", "G-I=20", "GENERICS-DONE")
     Add-BasTest "test_generics_x86" "$Tests\test_generics.bas" @("G-A=12", "G-B=hi", "G-C=21 abc!", "G-D=10", "G-E=10", "G-F=ab", "G-G=20", "LEN=2", "G-H=0", "G-I=20", "GENERICS-DONE") -Arch "x86"
+    # Interface (tB extension, ai/022 B01): contract-block syntax layer - the blocks
+    # parse, the new keywords stay soft, and the codegen path is still untouched.
+    Add-BasTest "test_interface" "$Tests\test_interface.bas" @("ITF-SOFT:12", "ITF-1:OK", "ITF-2:OK", "INTERFACE-DONE")
+    Add-BasTest "test_interface_x86" "$Tests\test_interface.bas" @("ITF-SOFT:12", "ITF-1:OK", "ITF-2:OK", "INTERFACE-DONE") -Arch "x86"
 
     # 分片: CI 用多 runner 并行跑 bas 用例时, 各 runner 只取第 BasShard 片
     if ($BasShardTotal -gt 1) {
@@ -834,6 +859,21 @@ if ($Category -in @("all", "syntax")) {
             $name = [System.IO.Path]::GetFileNameWithoutExtension($t)
             Test-Syntax $name $path
         }
+    }
+    Write-Host "MARKER-BEFORE-ITFNEG"
+    # tB extension (ai/022 B01): Interface contract-block diagnostics must fire.
+    $itfNeg = @(
+        @("itf_n01_member_body", "$Tests\itf_neg\n01_member_body.bas", "must not contain an implementation body"),
+        @("itf_n02_visibility", "$Tests\itf_neg\n02_visibility.bas", "must not carry an access modifier"),
+        @("itf_n03_field", "$Tests\itf_neg\n03_field.bas", "accepts only Sub/Function/Property signatures"),
+        @("itf_n04_missing_end", "$Tests\itf_neg\n04_missing_end.bas", "expected 'End Interface'"),
+        @("itf_n05_unknown_attr", "$Tests\itf_neg\n05_unknown_attr.bas", "Unrecognized attribute line [NotAnAttr]"),
+        @("itf_n06_attr_no_target", "$Tests\itf_neg\n06_attr_no_target.bas", "Attribute line must precede an Interface declaration"),
+        @("itf_n07_generic", "$Tests\itf_neg\n07_generic.bas", "does not support generic type parameters")
+    )
+    foreach ($c in $itfNeg) {
+        if (Test-Path $c[1]) { Test-SyntaxFail $c[0] $c[1] $c[2] }
+        else { Write-Host "  [SYNTAX-FAIL] $($c[0]) ... SKIP (missing case file)" -ForegroundColor DarkGray }
     }
     Write-Host ""
     

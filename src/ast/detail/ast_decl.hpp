@@ -209,6 +209,44 @@ public:
           callingConv(conv), params(std::move(p)), returnType(std::move(ret)) {}
 };
 
+// ============================================================
+// Interface 声明块 (tB 扩展: 显式接口契约, 见 ai/022 设计记录 D1/D2)
+// ============================================================
+
+// 方括号属性行: [Name] / [Name("text")] / [Name(3)]
+// 词法上整行是一个 Identifier token (文本含方括号), 由 parseBracketAttrLine 拆解;
+// 不改 lexer 是为了保住 `[带空格的名字]` 这一 VB6 名称引用语法 (ai/022 D1).
+struct InterfaceAttr {
+    std::string name;       // 属性名, 原样大小写 (如 "InterfaceId")
+    std::string strValue;   // 字符串实参 ("{GUID}" / 描述文本)
+    int64_t numValue = 0;   // 整型实参 (如 [DispId(3)])
+    bool hasStr = false;
+    bool hasNum = false;
+    SourceLocation loc;
+};
+
+// 接口成员: 签名节点 + 其上方的属性行 (属性挂在成员上, 不动通用 Decl 节点)
+struct InterfaceMember {
+    std::vector<InterfaceAttr> attributes;
+    DeclPtr decl;  // SubDecl / FunctionDecl / PropertyDecl, body 恒空
+};
+
+// Interface Name [Extends Parent] ... End Interface
+// 成员只允许 Sub / Function / Property Get|Let|Set 的**签名** (复用现有声明节点,
+// body 恒空: 出现实现体在解析期即报错). 存进 Module::interfaces, 不进 declarations,
+// 因此在语义/发码接手前对既有管线完全透明 (零回归).
+class InterfaceDecl : public Decl {
+public:
+    std::string name;
+    std::string extendsName;             // 空 = 无父接口
+    std::vector<InterfaceAttr> attributes;
+    std::vector<InterfaceMember> members;
+
+    InterfaceDecl(SourceLocation loc, std::string n, std::string ext)
+        : Decl(ASTNodeKind::InterfaceDecl, loc),
+          name(std::move(n)), extendsName(std::move(ext)) {}
+};
+
 // Const 声明: [Public|Private] Const name As Type = value
 class ConstDecl : public Decl {
 public:
@@ -291,6 +329,9 @@ public:
 
     // Implements 语句
     std::vector<std::unique_ptr<ImplementsStmt>> implements;
+
+    // Interface 契约块 (tB 扩展): 与 declarations 分离存放, 语义/发码前不被遍历
+    std::vector<std::unique_ptr<InterfaceDecl>> interfaces;
 
     // DefType 语句
     std::vector<std::unique_ptr<DefTypeStmt>> defTypes;

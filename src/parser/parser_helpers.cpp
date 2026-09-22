@@ -53,6 +53,8 @@ bool Parser::isSoftKeyword(TokenKind kind) const {
         case TokenKind::Compare:   case TokenKind::Base:     case TokenKind::Text:
         case TokenKind::Binary2:   case TokenKind::Explicit: case TokenKind::Private2:
         case TokenKind::Attribute: case TokenKind::Begin: case TokenKind::Default:
+        // tB 扩展接口关键字: 登记为软关键字, 存量代码里同名标识符 (变量/成员名) 不受影响
+        case TokenKind::Interface: case TokenKind::Extends:
         // 其他
         case TokenKind::Resume:    case TokenKind::Stop:
         case TokenKind::Let:       case TokenKind::Set:

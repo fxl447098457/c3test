@@ -28,6 +28,7 @@ bool Token::isKeyword() const {
         || kind == TokenKind::Implements || kind == TokenKind::Event
         || kind == TokenKind::Delegate
         || kind == TokenKind::RaiseEvent || kind == TokenKind::WithEvents
+        || kind == TokenKind::Interface || kind == TokenKind::Extends
         || kind == TokenKind::OnError || kind == TokenKind::GoTo
         || kind == TokenKind::GoSub || kind == TokenKind::Return
         || kind == TokenKind::Resume || kind == TokenKind::Exit

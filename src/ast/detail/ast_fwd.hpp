@@ -99,6 +99,7 @@ class EnumMember;
 class DeclareDecl;
 class EventDecl;
 class DelegateDecl;
+class InterfaceDecl;
 class ConstDecl;
 class VariableDecl;
 class ParameterDecl;

@@ -123,6 +123,33 @@ void Parser::parseModuleBody(Module& mod) {
             continue;
         }
 
+        // Interface 契约块 (tB 扩展, ai/022 D1): 可带前置 [属性行].
+        // 这类行过去必然落进下方的 "unexpected token at module level" 错误分支,
+        // 因此新增分支只把"错误"变成"可解析", 存量工程逐字节不变.
+        {
+            bool sawAttr = false;
+            std::vector<InterfaceAttr> pendingAttrs;
+            while (atBracketAttrLine()) {
+                sawAttr = true;
+                InterfaceAttr attr;
+                if (parseBracketAttrLine(attr)) pendingAttrs.push_back(std::move(attr));
+                skipNewLines();
+            }
+            if (cur_.kind == TokenKind::Interface) {
+                mod.interfaces.push_back(parseInterfaceDecl(pendingAttrs));
+                expectEndOfStatement();
+                continue;
+            }
+            if (sawAttr) {
+                if (!pendingAttrs.empty()) {
+                    diag_.error(DiagnosticID::ParseUnexpectedToken, currentLoc(),
+                        "Attribute line must precede an Interface declaration");
+                    skipToNextLine();
+                }
+                continue;  // 属性行本身已报错并越过该行
+            }
+        }
+
         // DefType 语句
         if (checkAny({TokenKind::DefBool, TokenKind::DefByte, TokenKind::DefInt,
                       TokenKind::DefLng, TokenKind::DefCur, TokenKind::DefSng,
