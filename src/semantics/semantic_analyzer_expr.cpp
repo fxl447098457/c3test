@@ -255,10 +255,23 @@ void SemanticAnalyzer::visit(IndexOrCallExpr& node) {
             if (pass_ == 2 &&
                 (!node.positional.empty() || !node.named.empty())) {
                 std::vector<Vb6Type> argT;
-                for (auto& arg : node.positional) argT.push_back(analyzeExpr(*arg));
+                std::vector<bool> argArr;
+                for (auto& arg : node.positional) {
+                    Vb6Type t = analyzeExpr(*arg);
+                    bool arr = (static_cast<uint16_t>(t) &
+                                static_cast<uint16_t>(Vb6Type::Array)) != 0;
+                    if (!arr) {
+                        if (auto* aid = dynamic_cast<IdentifierExpr*>(arg.get())) {
+                            Symbol* as = symTab_.lookup(aid->name);
+                            if (as && as->isArray) arr = true;
+                        }
+                    }
+                    argT.push_back(t);
+                    argArr.push_back(arr);
+                }
                 for (auto& namedArg : node.named) analyzeExpr(*namedArg.value);
                 deferredXmodCalls_.push_back(
-                    {&node, ident->name, std::move(argT), node.loc});
+                    {&node, ident->name, std::move(argT), std::move(argArr), node.loc});
                 argsAnalyzed = true;  // 上一步已分析, 跳过函数尾的重复遍历
             }
 

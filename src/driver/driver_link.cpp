@@ -69,6 +69,8 @@ bool Driver::runLinker(const CompileOptions& options, const std::string& outputD
     // MUST match baseName logic in runCodeGeneration (single-file + -o uses output stem)
     MsvcDriverOptions msvcOpts;
     for (size_t i = 0; i < modules_.size(); i++) {
+        // 泛型模板类 (G4): 未发码 (见 driver_codegen_module_loop), 无 .c 可链
+        if (!modules_[i]->classTypeParams.empty()) continue;
         std::string baseName;
         if (modules_.size() == 1 && !options.outputFile.empty()) {
             std::filesystem::path p(utf8ToPath(options.outputFile));

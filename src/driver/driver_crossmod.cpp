@@ -139,6 +139,15 @@ bool Driver::runCrossModuleResolution() {
                         || localSym->kind == SymbolKind::ComInterface)) {
                     localSym->comProjectImplClass = srcSym->name;
                 }
+                // 泛型 (G2) 暴露的存量洞回填: Fix 047 预注册只建"名字级" UDT
+                // 占位符号 (无成员表), 消费模块字段类型推断落空 → String 字段
+                // 按 Variant 发 (double)BSTR (普通跨模块 UDT 也复现, C2440).
+                // 源模块此时已分析完, 把完整成员表回填进占位符号.
+                if (srcSym->kind == SymbolKind::UserDefinedType &&
+                    localSym->kind == SymbolKind::UserDefinedType &&
+                    localSym->udtMembers.empty() && !srcSym->udtMembers.empty()) {
+                    localSym->udtMembers = srcSym->udtMembers;
+                }
                 continue;  // 已有本地定义，不需要外部符号
             }
 
@@ -151,6 +160,12 @@ bool Driver::runCrossModuleResolution() {
             extSym->sourceModule = moduleBaseNames[srcIdx];
             extSym->params = srcSym->params;  // 复制参数列表（函数调用需要）
             extSym->isArray = srcSym->isArray;
+            // 泛型 (G2) 暴露的存量洞: 跨模块 UDT 未复制成员表 → 消费模块成员
+            // 类型全退化 Variant (普通 UDT 复现: g.V As String 被 Debug.Print
+            // 按 Variant 发 (double)BSTR 强转 → C2440).
+            if (srcSym->kind == SymbolKind::UserDefinedType) {
+                extSym->udtMembers = srcSym->udtMembers;
+            }
             // O3: 携带重载组身份 — storageKey() 据此把变体注入 "<name>$ov$<fp>"
             // 独立键, 裸键留给 head; 消费模块的 resolveOverload 走 lookupModuleOverloads
             // 收集整组后按实参打分选变体.

@@ -1,0 +1,5 @@
+Type=Exe
+Class=GBox; gbox.cls
+Class=LNode; lnode.cls
+Module=Main; main.bas
+Startup="Sub Main"

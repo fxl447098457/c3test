@@ -27,6 +27,10 @@
         auto& module = modules_[i];
         auto& analyzer = analyzers_[i];
 
+        // 泛型模板类 (tB, G4): 本体不发码 (成员 As T 无法编译); 特化副本作为
+        // 独立 Module 已在 runGenericsPrepass 注入 modules_, 各自发码.
+        if (!module->classTypeParams.empty()) continue;
+
         // 确定输出基名
         std::string baseName;
         if (modules_.size() == 1 && !options.outputFile.empty()) {
@@ -48,6 +52,8 @@
         if (modules_.size() > 1) {
             for (size_t j = 0; j < modules_.size(); j++) {
                 if (j != i) {
+                    // 泛型模板类 (G4): 不发码 → 不进 include 依赖 (否则悬空 #include)
+                    if (!modules_[j]->classTypeParams.empty()) continue;
                     externalModules.insert(modules_[j]->moduleName);
                 }
             }

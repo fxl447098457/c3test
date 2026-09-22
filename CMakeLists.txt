@@ -93,6 +93,7 @@ add_library(vb6c3-core STATIC
     src/parser/stmt/parser_stmt_io.cpp
     src/ast/ast.cpp
     src/ast/ast_visitor.cpp
+    src/ast/ast_clone.cpp
     src/ast/ast_printer.cpp
     src/semantics/symbol_table.cpp
     src/semantics/type_system.cpp
@@ -209,6 +210,7 @@ add_executable(c3
     src/driver/driver_compile.cpp
     src/driver/driver_frontend.cpp
     src/driver/driver_semantics.cpp
+    src/driver/driver_generics.cpp
     src/driver/driver_crossmod.cpp
     src/driver/driver_link.cpp
     src/driver/rtl_embedded.cpp

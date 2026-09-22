@@ -1,0 +1,4 @@
+Type=Exe
+Module=GmodA; gmod_a.bas
+Module=GmodB; gmod_b.bas
+Startup="Sub Main"

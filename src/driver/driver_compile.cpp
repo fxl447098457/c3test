@@ -324,6 +324,15 @@ CompileResult Driver::compile(const CompileOptions& options) {
         }
     }
 
+    // === 阶段2.6: 泛型单态化 (tB 扩展, G2) — 模板登记 + 使用点物化.
+    // 必须早于语义: 注入的特化声明要作为普通声明被注册/发码.
+    if (!runGenericsPrepass()) {
+        std::cerr << diag_->toString();
+        result.errorCount = diag_->errorCount();
+        result.warningCount = diag_->warningCount();
+        return result;
+    }
+
     // === 阶段3: 语义分析 ===
     if (!runSemanticAnalysis(effectiveOpts)) {
         std::cerr << diag_->toString();
@@ -341,6 +350,16 @@ CompileResult Driver::compile(const CompileOptions& options) {
             result.warningCount = diag_->warningCount();
             return result;
         }
+    }
+
+    // === 阶段3.5b: 泛型推断 fixpoint (tB 扩展, G3) ===
+    // 裸调泛型的类型实参在延后点解析时绑定并上报; 此处的循环 收请求→物化→
+    // 增量分析→重链 至收敛. 无泛型模板立即 return true (逐字节护栏路径).
+    if (!runGenericsFixpoint()) {
+        std::cerr << diag_->toString();
+        result.errorCount = diag_->errorCount();
+        result.warningCount = diag_->warningCount();
+        return result;
     }
 
     // === 阶段3.6: P6.4 标记接口类 ===
