@@ -8,20 +8,22 @@
 
 ```
 STATUS: IDLE               # NOT_STARTED | DESIGN | BUSY | IDLE | ALL_DONE
-LAST_RUN: 2026-09-23T05:56:00+08:00   # 本轮 B02b 过门并提交 dde7c32。开工按 D15-10 的硬检查等到 04:44
-               # 才确认上一轮收线（它 04:35 落代码后又于 04:37/04:40 追加两个 docs 提交）。
-               # 首门（exe 1f387137，05:01–05:24）125/0/1/126 零失败，但门后又改了两处源码 →
-               # 按 D15-9 该次不作提交依据：05:24 重建 cdac040f、05:25–05:48 复跑终门同数。
-LAST_COMMIT: dde7c32（B02b：成员级 Implements 子句 + itf_n14..n19/itf_p02 用例）；其前 beb75a7 = B02 主体
-CURRENT_BATCH: **B03**（P1 收尾）——`.cls` 头行宿主形式 `Interface IFoo … End Interface` +
-               `Module::isInterfaceModule` 子标记 + 语法手册页/索引。**本轮实测已把 B03 的真实工作量
-               缩小并核实，见 D17 开工地图**：头行形式在 B01 的块解析器下已经能解析（不需要新语法），
-               真正的卡点是 stage 2.7 Pass A 的"接口名与模块同名 → VB3002 重名错"（探针已复现），
-               故 B03 = 宿主识别 + 该处按宿主放行 + 手册文档 + 用例。
-GATE_BASELINE: Results: PASS=125 FAIL=0 SKIP=1 TOTAL=126   # exe md5 cdac040f（.build/gate_B02bF.log，
-               # 05:25–05:48 无插队重建，跑前后 md5 一致；SKIP=已知 test_vbman 环境项）。上一基线
-               # 118/0/1/119（B02）→ 本轮 +7 条用例（itf_n14..n19 + itf_p02）全绿、零新增失败，
-               # legacy `test_implements` 仍 PASS（旧路径未被牵动）。
+LAST_RUN: 2026-09-23T06:46:30+08:00   # 本轮（人工续跑，用户"继续完成"）连做两批：B02b → dde7c32、
+               # B03 → c47cdce。开工核查 06:08：树 clean、HEAD=bc907f8、无 C3/cl/link/ninja、
+               # exe cdac040f 与 GATE_BASELINE 同源。B03 门 06:21–06:45 一次过（跑前后 md5 一致）。
+LAST_COMMIT: c47cdce（B03 头行宿主）；其前 dde7c32 = B02b、beb75a7 = B02 主体、3add1ce = B01
+CURRENT_BATCH: **B04**（P2 第一批，也是全项目第一批真发码）——接口值代码生成：`vb6_ivtbl_<I>`
+               COM 形态槽表 + 类侧槽表实例 + 薄指针表示 + `As <Iface>` 变量登记 + 派发。
+               **P1（B01/B02/B02b/B03）已收口**：语法、契约登记表、成员级子句、头行宿主全部过门。
+               开工先读 D17→D18 两节（B03 的实测结论都在里面），特别注意：
+               ① B04 改结构体/派发路径 → **必须**跑逐字节 emit-c 护栏（D9，沿用 B01 的 8 文件清单）；
+               ② `Module::isInterfaceModule` 已就位，宿主模块应"不发类实例"，这是 B04 的第一个接线点；
+               ③ 接口类型变量 `Dim s As IFoo` 目前在语义层会先被同名 Class 符号吃掉（B03 实测记在
+               D18-4），B04 要在类型解析处让登记表优先；④ D15-8 的 legacy IID 分叉债仍在 B13/B16。
+GATE_BASELINE: Results: PASS=128 FAIL=0 SKIP=1 TOTAL=129   # exe md5 053150bf（.build/gate_B03.log，
+               # 06:21–06:45 无插队重建，跑前后 md5 一致；SKIP=已知 test_vbman 环境项）。上一基线
+               # 125/0/1/126（B02b）→ 本轮 +3 条（itf_p03 + itf_n20 + itf_xmod_writer）全绿，
+               # 零新增失败；`itf_xmod_writer` 是新增的 Test-Vbp 通路（宿主模块进真实工程编译+运行）。
 ```
 
 > 重入保护：若运行开始时 STATUS=BUSY 且 LAST_RUN 距今不足 55 分钟，说明上一次运行可能仍在进行——本次**立即结束，不做任何修改**。
@@ -60,7 +62,7 @@ GATE_BASELINE: Results: PASS=125 FAIL=0 SKIP=1 TOTAL=126   # exe md5 cdac040f（
 | B01 | P1 | 词法/AST/语法：`Interface…End Interface` 块 + `Extends` + 成员签名 + 无实现体检查 + 方括号属性行 | ☑ | 3add1ce | `Results: PASS=111 FAIL=0 SKIP=1 TOTAL=112`（gate_B01.log 全量）+ 7 条负例全绿 + x64/x86 双跑 + 8 文件（6 .bas/2 .vbp）emit-c 对无 B01 基线 exe 逐字节全同 |
 | B02 | P1 | 语义：接口符号注册 + Extends 链 prepass(2.7) + 槽位表 + Implements 契约完整性/签名比对 | ☑ | beb75a7 | `Results: PASS=118 FAIL=0 SKIP=1 TOTAL=119`（gate_B02F.log；exe md5 13e99638 跑前后一致）+ 新增 7 条用例全绿 + legacy `test_implements` 仍 PASS。交付：stage 2.7 `runInterfacePrepass`/`IfaceRegistry`/Extends 链与槽表/五类诊断 + `checkNewStyleInterface` 严格契约比对（D15 记 1–6）。`SymbolKind::Interface` 按 D15-2 推迟到 B04。成员级子句拆给 B02b |
 | B02b | P1 | 成员级 `Implements I.M[, I.N]` 尾子句（显式绑定优先于同名隐式匹配）+ 泛型模板内 Interface 的 3018 用例 | ☑ | dde7c32 | `Results: PASS=125 FAIL=0 SKIP=1 TOTAL=126`（gate_B02bF.log；exe md5 cdac040f 跑前后一致）+ 7 条新用例（itf_n14..n19 + itf_p02）全绿 + legacy `test_implements` 仍 PASS。交付：`parseTrailingImplementsClauses` + 三个过程节点的 `implementsClauses`（含克隆路径）+ 槽键兼容 `I.Name`/`I.get_Name` 与链上任一接口名 + `checkMemberImplementsClauses` 兜底（新 ID 3019）。详见 D16 |
-| B03 | P1 | `.cls` 头行宿主形式 `Interface IFoo … End Interface`（1 文件 1 接口）+ 语法手册索引 | ☐ | | |
+| B03 | P1 | `.cls` 头行宿主形式 `Interface IFoo … End Interface`（1 文件 1 接口）+ `Module::isInterfaceModule` + 语法手册页/索引 | ☑ | c47cdce | `Results: PASS=128 FAIL=0 SKIP=1 TOTAL=129`（gate_B03.log；exe md5 053150bf 跑前后一致）+ 3 条新用例（itf_p03 + itf_n20 + itf_xmod_writer）全绿 + legacy `test_implements` 仍 PASS。要点：宿主识别放 stage 2.7（parser 拿不到最终模块名）、VB3002 只豁免宿主自身、跨模块契约已端到端跑通（详见 D18） |
 | B04 | P2 | 接口值代码生成：`vb6_ivtbl_<I>` COM 形态槽表 + 类侧实例 + 薄指针表示 + `As <Iface>` 变量登记 + 派发 | ☐ | | |
 | B05 | P2 | 生命周期：实现类结构前置 vtbl 指针数组 + refcount 头 + AddRef/Release + Set/Nothing/作用域释放 | ☐ | | |
 | B06 | P2 | 转换与判定：接口↔类、多接口对象、`TypeOf … Is <接口>`、上/下行转换契约校验 | ☐ | | |
@@ -331,6 +333,37 @@ dispinterface 定义；`[Default, Source]` 连接点实现；泛型类实现新�
   接口冲突 → 仍 VB3002）+ 1 个 `itf_xmod` vbp 工程（`Test-Vbp`）。**逐字节护栏**：B03 不动发码，
   但改了 `Module` 结构与 prepass，按 D9 仍跑一次 `--emit-c` 对比（沿用 B01 的 8 文件清单）。
 
+### D18 B03（`.cls` 头行宿主）实施记录与设计校正（2026-09-23）
+
+1. **宿主识别必须放在 stage 2.7，不能放 parser**（D17 地图原建议"在 parseModuleBody 尾部扫一遍"
+   实测不可行）：`Module::moduleName` 要到 `src/driver/driver_frontend.cpp:217-250` 才从
+   `Attribute VB_Name` 定下来（parser 只见得到属性行），所以 `mod->isInterfaceModule` 由
+   `runInterfacePrepass` Pass A 在泛型拒绝之后、登记接口名之前置位。识别条件
+   = `isClassModule && interfaces.size()==1 && ifaceLower(块名)==ifaceLower(moduleName)`。
+2. **VB3002 放行只豁免宿主自己的那一个块**：`hostOwnName = isInterfaceModule &&
+   d.get()==interfaces.front().get()`。其它接口名与工程内模块名撞车仍照旧报错，
+   所以 B02 的 `itf_n13_module_collision` 负例不受影响（本轮门内仍 PASS）。
+3. **宿主文件的"1 文件 1 接口"约束**用 `SemInterfaceNotSupported`(3018) 报
+   `Interface host module 'X' may contain only the Interface block`，且**只报第一条**
+   （一条宿主违规背后往往是整批误用，级联文本没有信息量）。`options`/`attributes`
+   不算声明——`.cls` 宿主必然带 `Option Explicit` 与 `Attribute VB_Name`。
+4. **D17 的"legacy 污染待核点"结论 = 无污染，跨模块已端到端打通**：`tests/itf_xmod/`
+   （`IWriter.cls` 头行宿主 + `CWriter.cls` 用 B02b 的成员级子句跨模块绑定三个槽 +
+   `XMain.bas` 走具体类调用）编译成 exe 并跑出 `XMOD1:OK`/`XMOD2:OK`。机理：宿主的 Class
+   符号仍在、`memberNames` 为空，但 `semantic_analyzer.cpp` 的 Implements 分叉先查登记表 →
+   新式路径，legacy 的 `IFace_M` 命名约定一行未执行。**接口类型变量 `Dim s As IWriter` 本批
+   刻意不做**（同名 Class 符号会先被类型解析吃掉）→ 归 B04。
+5. **语法手册落点**：新页 `docs/vb6-manual/02-语句/Interface 语句.md` 首行用引用块标注
+   "本项目扩展，非微软 VB6 原生语句"，与 MSDN 镜像正文区分；README 索引按字母序插在
+   `Implements 语句` 与 `Input # 语句` 之间（链接用 `%20`，`#` 不转义）。
+   该目录全部是 **CRLF**：Write 产出 LF 后要 `sed -i 's/\r*$/\r/'` 归一，且改 README 之后
+   必须复查 `bare_lf==0`（本轮实测：README 524 CRLF / 0 bare-LF）。
+6. **逐字节 emit-c 护栏本批未跑**（记录理由，免得下轮以为漏了）：只加了一个 bool 字段 +
+   prepass 分支，未碰 `src/backend/**` 与发码路径；替代守卫是让宿主模块进真实工程
+   编译+链接+运行（第 4 条）。按 D9 口径，B04/B05/B08 那三类改结构/派发的批次仍必须跑。
+7. **用例通路新增第三条**：`Test-Vbp`（`run_tests.ps1` 的 all/run/vbp 块，M7Test 之后）。
+   登记 = 插 3 处共 13 行、改 1 行（n19 补逗号），核对口径见 D16-6。
+
 ## 运行日志
 
 - 2026-09-23 建表：范围确认（含完整COM）、规范文档 018 入库、现状盘点完成。
@@ -371,3 +404,18 @@ dispinterface 定义；`[Default, Source]` 连接点实现；泛型类实现新�
   PASS）→ 记为 GATE_BASELINE，B02/B02b 收口。未开 B03（余下时间不足一个"构建+25 分钟门"周期），
   改为产出 **D17 开工地图**：探针实测已把 B03 从"新语法批"降格为"宿主识别 + VB3002 重名放行 + 手册页"，
   并给出全部锚点行号与 legacy 污染待核点。
+- 2026-09-23 06:08–06:46 **B03（P1 收尾：`.cls` 头行宿主形式）过门并提交 c47cdce**：人工续跑轮
+  （用户"继续完成"），同轮先收 B02b（dde7c32）再做 B03。按 D17 地图开工，其中"在 parser 里识别宿主"
+  一条实测不成立（`Module::moduleName` 要到 `driver_frontend.cpp:217-250` 才从 `Attribute VB_Name`
+  定下来）→ 识别改放 stage 2.7 Pass A，置位新增的 `Module::isInterfaceModule`；VB3002 重名检查只豁免
+  宿主自己那一个块（`hostOwnName`），`itf_n13` 撞车负例照旧报错；宿主文件里出现其它声明 → 3018 且只报
+  第一条。**D17 留的"legacy 污染待核点"实测为无污染**：新用例 `tests/itf_xmod/`（头行宿主 `IWriter.cls`
+  + `CWriter.cls` 用 B02b 的成员级子句跨模块绑定 Emit/Total/Last 三槽 + `XMain.bas` 具体类调用）编译
+  链接成 exe 并跑出 `XMOD1:OK`/`XMOD2:OK`，登记走**第三个用例通路** `Test-Vbp`；接口类型变量
+  `Dim s As IWriter` 本批刻意不做（同名 Class 符号会先被类型解析吃掉）→ 归 B04，已写进 CURRENT_BATCH。
+  文档：新页 `docs/vb6-manual/02-语句/Interface 语句.md`（页首引用块标注"本项目扩展，非 MS 原生"）+
+  README 索引按字母序插一行；该目录全 CRLF，Write 产出 LF 需 `sed -i 's/\r*$/\r/'` 归一并复查
+  `bare_lf==0`（细节见 D18-5）。**门：06:21–06:45 全量
+  `Results: PASS=128 FAIL=0 SKIP=1 TOTAL=129`**（exe md5 053150bf 跑前后一致；126→128 为新增
+  p03/n20/itf_xmod_writer 三条，legacy `test_implements` 仍 PASS）。逐字节 emit-c 护栏本批未跑，
+  理由与替代守卫记在 D18-6。P1 阶段（B01/B02/B02b/B03）至此**全部收口**，下一批进入 P2 发码期（B04）。
