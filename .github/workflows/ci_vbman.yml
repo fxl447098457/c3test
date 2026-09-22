@@ -9,10 +9,8 @@
 # 桩自愈: vbman 首编 LNK2019 时跑 gen_di_stubs.ps1 (add-only) 补桩 ->
 #       重建 C3 -> 重编; 产出的 src/rtl/core/di/** 应回 commit 固化。
 #
-# 目标架构 = x86: VBMAN 是 32 位 VB6 源码资产 (Long 存指针在 x64 下被截断,
-#   32 位才是其原生目标)。故 C3 调用一律带 --arch x86, MSVC 环境一律走
-#   vcvarsall x86, 注册/注销用 SysWOW64\regsvr32, ProgId 落 HKCR\WOW6432Node。
-#   唯一的 x64 例外是 C3.exe 自身 —— 它是构建工具, 与受编译目标无关。
+# 目标架构 = x86: VBMAN 是 32 位 VB6 源码资产。C3 调用带 --arch x86, MSVC 环境走
+#   vcvarsall x86, 注册/注销用 SysWOW64\regsvr32。例外: C3.exe 自身保持 x64 (构建工具)。
 
 name: VBMAN 链路验证
 
@@ -53,8 +51,7 @@ jobs:
         if: github.event_name != 'workflow_run'
         shell: pwsh
         run: |
-          # 这里刻意保留 x64: C3.exe 是构建工具, 位数与被编译目标无关;
-          # 产物由 --arch x86 决定 (T0 job 下载的 c3-exe 同样也是 x64)。
+          # 刻意保留 x64: C3.exe 是构建工具, 位数与被编译目标无关 (T0 下载的 c3-exe 也是 x64)。
           $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer\vswhere.exe"
           $vsPath = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath 2>$null
           if (-not $vsPath) { throw "No MSVC install" }
@@ -85,8 +82,7 @@ jobs:
         shell: pwsh
         run: |
           # 每 step 独立进程: 编译前重新注入 MSVC 环境 (链接完全依赖继承环境)
-          # vcvarsall x86: C3 依 VSCMD_ARG_TGT_ARCH/INCLUDE/LIB 判定目标, 该环境给出
-          # Hostx64\x86 交叉编译器 + lib\x86 + SDK x86 库, 与 --arch x86 配对。
+          # vcvarsall x86: Hostx64\x86 交叉编译器 + lib\x86 + SDK x86 库, 与 --arch x86 配对。
           $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer\vswhere.exe"
           $vsPath = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath 2>$null
           if (-not $vsPath) { throw "No MSVC install" }
@@ -269,9 +265,7 @@ jobs:
 
       - name: 注册 VBMAN.dll（x86 dll 用 SysWOW64 regsvr32）
         run: |
-          # x86: 先校验 PE machine=0x014C, 再用 SysWOW64\regsvr32 (32 位注册器)。
-          # 32 位注册器写 HKCR 会被文件系统/注册表重定向到 HKCR\WOW6432Node,
-          # 故注册有效性的校验也按 WOW6432Node 视图做。
+          # x86: 校验 PE machine=0x014C, 用 SysWOW64\regsvr32 (32 位注册器)。
           # regsvr32 是 GUI 程序, 必须 Start-Process -Wait 拿真实退出码。
           $dllPath = "tests_github\vbman\dist\DLL\VBMAN.dll"
           $fs = [System.IO.File]::OpenRead($dllPath)
@@ -318,10 +312,21 @@ jobs:
             [RegProbe]::FreeLibrary($h) | Out-Null
             throw "regsvr32 failed (probe 结论见上)"
           }
-          if (-not (Test-Path 'Registry::HKEY_CLASSES_ROOT\WOW6432Node\VBMANLIB.cVBMAN')) {
-            throw "ProgId VBMANLIB.cVBMAN 未落地 (x86 视图 HKCR\WOW6432Node), 注册无效"
+          $progId = 'VBMANLIB.cVBMAN'
+          $progKey = "Registry::HKEY_CLASSES_ROOT\$progId"
+          if (-not (Test-Path $progKey)) {
+            throw "ProgId $progId 未落地 (共享视图 HKCR\$progId), 注册无效"
           }
-          Write-Host "VBMAN.dll registered (HKCR\WOW6432Node\VBMANLIB.cVBMAN)"
+          $clsid = (Get-Item $progKey).GetValue('')
+          Write-Host "ProgId $progId -> CLSID $clsid"
+          $inprocPath = "Registry::HKEY_CLASSES_ROOT\WOW6432Node\CLSID\$clsid\InprocServer32"
+          if (-not (Test-Path $inprocPath)) {
+            throw "InprocServer32 未落到 32 位视图 ($inprocPath), x86 注册无效"
+          }
+          $registered = (Get-Item $inprocPath).GetValue('')
+          Write-Host "registered InprocServer32 = $registered"
+          if (-not (Test-Path $registered)) { throw "注册表中的 DLL 路径不存在: $registered" }
+          Write-Host "VBMAN.dll registered (HKCR\$progId + HKCR\WOW6432Node\CLSID\$clsid\InprocServer32)"
 
       - name: 编译 Helloworld demo（引用 ..\..\..\vbman\dist\DLL\VBMAN.dll, x86）
         shell: pwsh
