@@ -102,6 +102,7 @@ typedef struct vb6_ComObject {
     LONG refCount;
     const vb6_CoClassDesc* desc;
     void* vb6Instance;  // VB6类实例
+    int ownsInstance;  // Fix 188: 1=包装器拥有实例(释放时销毁), 0=借用(宿主拥有)
     struct vb6_ConnectionPointContainer* cpc;  // P6.6: 事件连接点容器 (lazy init)
     struct vb6_ProvideClassInfo2* pci;  // P6.6: IProvideClassInfo2 (lazy init)
 } vb6_ComObject;
@@ -128,6 +129,9 @@ vb6_ComObject* vb6_ComObject_Create(const vb6_CoClassDesc* desc);
 // 前置条件: 实例所在类的结构体首字段是 __comObj (ExeComBridge 01 起所有类模块
 // 都有该字段, DLL 与 EXE 工程一致).
 vb6_ComObject* vb6_ComObject_FromInstance(const vb6_CoClassDesc* desc, void* instance);
+// Fix 188: 包装**宿主已拥有**的实例 (Public 对象字段 getter / 方法返回工程类实例).
+// 释放语义与 FromInstance 不同: 客户端释放到 0 只回收包装器, 不销毁 VB6 实例.
+vb6_ComObject* vb6_ComObject_FromBorrowedInstance(const vb6_CoClassDesc* desc, void* instance);
 
 // Fix 099: 按类变量名 (VB6 模块名) 在 g_vb6_coclasses[] 中查描述, 未命中返回 NULL.
 const vb6_CoClassDesc* vb6_FindCoClassDesc(const char* classVariable);

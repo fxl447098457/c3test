@@ -51,10 +51,13 @@ bool SemanticAnalyzer::analyze(Module& module) {
                     // Fix 099: 显式 Public 字段 → COM 暴露清单 (见 Symbol::publicFieldNames).
                     // 只认 AccessLevel::Public: 类模块的 `Dim x` 被解析为
                     // AccessLevel::Default (=Public), 但真 VB6 中 Dim 等价 Private,
-                    // 不能当成对外可见的字段. 数组/WithEvents/As New 不暴露.
+                    // 不能当成对外可见的字段. 数组/WithEvents 不暴露.
+                    // Fix 187: As New 字段同样暴露 —— 实测真 VB6 (MSVBVM60 编译的
+                    // VBMAN.dll) 把 `Public HttpClient As New cHttpClient` 暴露为
+                    // PropertyGet + PropertyPutRef (同一 dispid) 对; 此前排除 As New
+                    // 使晚绑定客户端 vb6_ComGetProp("HttpClient") 取不到属性.
                     if (v092m.access == AccessLevel::Public
                         && !v092m.isWithEvents
-                        && !v092m.isNew
                         && !v092m.isDynamicArray
                         && v092m.dimensions.empty()) {
                         classSym->publicFieldNames.push_back(v092m.name);

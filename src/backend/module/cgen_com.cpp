@@ -201,9 +201,9 @@ void CCodeGen::emitClassFieldAccessors(Module& module) {
     for (auto& decl : module.declarations) {
         if (decl->kind != ASTNodeKind::VariableDecl) continue;
         auto& var = static_cast<VariableDecl&>(*decl);
-        // 与 semantic_analyzer.cpp 的 publicFieldNames 收集条件一致
+        // 与 semantic_analyzer.cpp 的 publicFieldNames 收集条件一致 (Fix 187: 含 As New)
         if (var.access != AccessLevel::Public) continue;
-        if (var.isWithEvents || var.isNew || var.isDynamicArray || !var.dimensions.empty()) continue;
+        if (var.isWithEvents || var.isDynamicArray || !var.dimensions.empty()) continue;
 
         const std::string fld = cIdent(var.name);
         const std::string fieldCT = mapTypeRef(var.asType.get());
@@ -216,14 +216,49 @@ void CCodeGen::emitClassFieldAccessors(Module& module) {
             && fieldCT.compare(0, 8, "vb6_cls_") == 0
             && fieldCT[fieldCT.size() - 1] == '*';
 
+        // Fix 187: As New 字段. 真 VB6 把它暴露为 PropertyGet/PutRef; 字段 C 侧是
+        // void* (惰性实例化的裸实例指针), 所以 getter 必须自己补实例化, 否则客户端
+        // 首次读取拿到空对象. 只有"工程内 MultiUse/SingleUse 类"与"外部 COM 类"
+        // 两种目标能安全映射; 其余 (内建集合/未知类型) 退化为空体存根, 宁缺勿错.
+        if (var.isNew && var.asType && var.asType->kind == ASTNodeKind::SimpleTypeRef) {
+            std::string nTarget = static_cast<SimpleTypeRef*>(var.asType.get())->name;
+            size_t nDot = nTarget.find_last_of('.');
+            if (nDot != std::string::npos) nTarget = nTarget.substr(nDot + 1);
+            Symbol* nSym = lookupModuleDotted(nTarget);
+            const bool nIsCoclass = nSym && nSym->kind == SymbolKind::Class
+                && !nSym->isInterface
+                && (nSym->instancing == VBInstancing::MultiUse
+                    || nSym->instancing == VBInstancing::SingleUse);
+            if (nIsCoclass) {
+                const std::string tId = cIdent(nSym->name);
+                fe.getLines.push_back("if (!me->" + fld + ") me->" + fld + " = (void*)vb6_cls_"
+                                      + tId + "_New();  /* As New auto-instantiate */");
+                fe.getLines.push_back("r = vb6_VariantObject(vb6_ComObject_FromBorrowedInstance("
+                                      "vb6_FindCoClassDesc(\"" + tId + "\"), (void*)me->" + fld + "));");
+                fe.letLines.push_back("me->" + fld + " = (value.vt == vb6_vtDispatch) ? "
+                                      "vb6_ComObject_GetInstance(value.pdispVal) : NULL;");
+            } else if (nSym && nSym->kind == SymbolKind::ComClass) {
+                const std::string nProgId = nSym->comProgId.empty() ? nSym->name : nSym->comProgId;
+                fe.getLines.push_back("if (!me->" + fld + ") me->" + fld
+                                      + " = (void*)vb6_NewObject(L\"" + nProgId
+                                      + "\");  /* As New auto-instantiate */");
+                fe.getLines.push_back("r = vb6_VariantObject((void*)me->" + fld + ");");
+                fe.letLines.push_back("me->" + fld + " = (value.vt == vb6_vtDispatch) ? "
+                                      "value.pdispVal : NULL;");
+            }
+            fields.push_back(fe);
+            continue;
+        }
+
         if (isClassPtr) {
             // (a) 工程类实例指针字段 → VT_DISPATCH: 裸实例交 RTL 包装成 IDispatch
+            // Fix 188: 借出型包装 —— 实例归宿主类所有, 客户端释放包装器不能销毁它.
             std::string target = (var.asType && var.asType->kind == ASTNodeKind::SimpleTypeRef)
                 ? static_cast<SimpleTypeRef*>(var.asType.get())->name : std::string();
             size_t dot = target.find_last_of('.');
             if (dot != std::string::npos) target = target.substr(dot + 1);
             if (target.empty()) continue;
-            fe.getLines.push_back("r = vb6_VariantObject(vb6_ComObject_FromInstance("
+            fe.getLines.push_back("r = vb6_VariantObject(vb6_ComObject_FromBorrowedInstance("
                                   "vb6_FindCoClassDesc(\"" + target + "\"), (void*)me->" + fld + "));");
             fe.letLines.push_back("me->" + fld + " = (" + fieldCT + ")("
                                   "(value.vt == vb6_vtDispatch) ? "

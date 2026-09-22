@@ -135,12 +135,14 @@
                 } else {
                     // Fix 079: check if innerName is a ByRef param of the current function
                     bool isCurrentByRefParam = false;
+                    Vb6Type curPType189 = Vb6Type::Unknown;
                     if (currentProc_) {
                         for (auto& p : currentProc_->params) {
                             if (Symbol::toLower(p.name) == Symbol::toLower(innerName) && !p.isByVal && !p.isParamArray) {
                                 bool paramIsArray = (static_cast<uint16_t>(p.type) & static_cast<uint16_t>(Vb6Type::Array)) != 0;
                                 if (!paramIsArray) {
                                     isCurrentByRefParam = true;
+                                    curPType189 = p.type;
                                 }
                                 break;
                             }
@@ -148,7 +150,17 @@
                     }
                     if (isCurrentByRefParam) {
                         // ByRef param of current function → already T*, pass directly
-                        argVal = innerName;
+                        // Fix 189: 例外 — 被调方形参是 ByRef Variant (C: vb6_VARIANT*)
+                        // 时不能直传 T*: 被调方 vb6_VariantFromValue((*p)) 会把 T 的
+                        // 字节当 VARIANT.vt 解析 → 字段错位 → 解引用垃圾 BSTR →
+                        // 0xC0000005. 按当前形参的 VB 类型重打包为字段式 VARIANT.
+                        std::string rep189;
+                        if (i < calleeParams.size()
+                            && (calleeParams[i].type == Vb6Type::Variant
+                                || calleeParams[i].type == Vb6Type::Empty)) {
+                            rep189 = wrapByRefVariantParamArg(innerName, curPType189);
+                        }
+                        argVal = rep189.empty() ? innerName : rep189;
                     } else {
                         // Local pointer variable → restore pointer with &
                         argVal = "&" + innerName;
@@ -324,16 +336,26 @@
                     // Fix 079: If the simple identifier is a ByRef param of the current function,
                     // it's already a pointer (T*) — pass directly, don't add &.
                     bool argIsCurrentByRefParam = false;
+                    Vb6Type argCurPType189 = Vb6Type::Unknown;
                     if (currentProc_) {
                         for (auto& p : currentProc_->params) {
                             if (Symbol::toLower(p.name) == Symbol::toLower(argVal) && !p.isByVal && !p.isParamArray) {
                                 argIsCurrentByRefParam = true;
+                                argCurPType189 = p.type;
                                 break;
                             }
                         }
                     }
                     if (argIsCurrentByRefParam) {
                         // ByRef param of current function → already T*, pass directly
+                        // Fix 189: ByRef Variant 形参时需重打包 (同 (*x) 路径, 见上).
+                        std::string rep189b;
+                        if (i < calleeParams.size()
+                            && (calleeParams[i].type == Vb6Type::Variant
+                                || calleeParams[i].type == Vb6Type::Empty)) {
+                            rep189b = wrapByRefVariantParamArg(argVal, argCurPType189);
+                        }
+                        if (!rep189b.empty()) argVal = rep189b;
                     } else if (isConstIdent(argVal)) {
                         // Fix 084aa: 常量是 #define 宏 (vb6_BSTR_FromStr(...) 或数值字面量),
                         // 取址 &ERR_X 展开为函数结果取址 → C2102. 按形参类型复合字面量包装.

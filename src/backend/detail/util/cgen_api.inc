@@ -137,6 +137,8 @@
     Vb6Type constIdentType(const std::string& name) const;
     // Fix 084aa: 常量宏作为 ByRef 实参 → 生成可寻址复合字面量包装
     std::string wrapConstArgForByRef(const std::string& argVal, Vb6Type paramVb6Type) const;
+    // Fix 189: 当前函数的 ByRef 具体类型形参作为 ByRef Variant 实参 → 字段式 VARIANT 包装
+    std::string wrapByRefVariantParamArg(const std::string& paramName, Vb6Type curParamType) const;
     void visit(OpenStmt& node) override;
     void visit(CloseStmt& node) override;
     void visit(PrintStmt& node) override;
