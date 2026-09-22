@@ -261,11 +261,16 @@ Write-Host "--- GUI VBP Compile-Only Tests ---" -ForegroundColor Yellow
 
 $script:guiQueue = @()
 function Add-GuiCompileTest {
-    param([string]$Name, [string]$VbpFile, [string]$Arch = "")
+    param([string]$Name, [string]$VbpFile, [string]$Arch = "", [switch]$Run3s)
+    $resolved = $VbpFile
+    if (-not ([IO.Path]::IsPathRooted($VbpFile))) {
+        $resolved = (Join-Path $CasesDir $VbpFile)
+    }
     $script:guiQueue += @{
         Name    = $Name
-        VbpFile = (Join-Path $CasesDir $VbpFile)
+        VbpFile = $resolved
         Arch    = $Arch
+        Run3s   = $Run3s
     }
 }
 
@@ -275,9 +280,12 @@ Add-GuiCompileTest "Charts2020" "Charts 2020\Proyecto1.vbp" -Arch "x86"
 # ExtShow: 跨模块窗体默认实例"无参" Show (Fix 146 回归靶, 2026-09-20 vbman C2198):
 # .bas caller 调 Form2.Show, 定义侧签名 (hMDIClient, modal) 后调用侧须补 modal=0
 Add-GuiCompileTest "ExtShow" "ext_show_test\test_ext_show.vbp"
+# VBFlexGridDemo: 仓库内部 demo (tests\VBFlexGridDemo), 编译后 3 秒存活自检
+# (GUI 自动化口径 2026-09-22: 交互式控件 demo 不做交互断言, 启动 3 秒不崩即 PASS)
+Add-GuiCompileTest "VBFlexGridDemo" (Join-Path $Root "tests\VBFlexGridDemo\VBFlexGridDemo.vbp") -Run3s
 
-if ($script:guiQueue.Count -ne 4) {
-    Write-Host "[ERROR] GUI 编译清单数量异常: $($script:guiQueue.Count) (应为 4)" -ForegroundColor Red
+if ($script:guiQueue.Count -ne 5) {
+    Write-Host "[ERROR] GUI 编译清单数量异常: $($script:guiQueue.Count) (应为 5)" -ForegroundColor Red
     exit 1
 }
 $missingGui = @($script:guiQueue | Where-Object { -not (Test-Path $_.VbpFile) })
@@ -305,6 +313,26 @@ function Test-GuiCompileOnly {
         $result | Select-Object -Last 25 | ForEach-Object { Write-Host "  $_" }
         $c3err = Join-Path $OutDir "c3-error.log"
         if (Test-Path $c3err) { Get-Content $c3err -Tail 25 | ForEach-Object { Write-Host "  $_" } }
+    }
+    if ($LASTEXITCODE -eq 0 -and $It.Run3s) {
+        # 3 秒存活自检: 启动后若 3 秒内自行退出 -> 视为启动崩溃 (FAIL); 存活则强杀后 PASS
+        $exe = Join-Path $OutDir "$([IO.Path]::GetFileNameWithoutExtension($It.VbpFile)).exe"
+        Write-Host -NoNewline "  [GUI-RUN3S] $($It.Name) ... "
+        if (-not (Test-Path $exe)) {
+            $script:fail++
+            Write-Host "FAIL (exe not found: $exe)" -ForegroundColor Red
+            return
+        }
+        $proc = Start-Process -FilePath $exe -PassThru
+        $crashed = $proc.WaitForExit(3000)
+        if ($crashed) {
+            $script:fail++
+            Write-Host "FAIL (exited early, code=$($proc.ExitCode))" -ForegroundColor Red
+        } else {
+            Stop-Process -Id $proc.Id -Force
+            $script:pass++
+            Write-Host "PASS (alive 3s, killed)" -ForegroundColor Green
+        }
     }
 }
 

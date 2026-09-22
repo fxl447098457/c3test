@@ -133,3 +133,6 @@ probe.txt
 scripts/_tmp_*.bat
 # VB6 工程工作区文件 (IDE 状态, 每人不同)
 *.vbw
+
+# 二分定位调试产物 (bisect*.vbp): 不属于门禁用例
+**/bisect*.vbp
