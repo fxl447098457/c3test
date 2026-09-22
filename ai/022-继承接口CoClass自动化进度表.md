@@ -8,22 +8,21 @@
 
 ```
 STATUS: IDLE               # NOT_STARTED | DESIGN | BUSY | IDLE | ALL_DONE
-LAST_RUN: 2026-09-23T06:46:30+08:00   # 本轮（人工续跑，用户"继续完成"）连做两批：B02b → dde7c32、
-               # B03 → c47cdce。开工核查 06:08：树 clean、HEAD=bc907f8、无 C3/cl/link/ninja、
-               # exe cdac040f 与 GATE_BASELINE 同源。B03 门 06:21–06:45 一次过（跑前后 md5 一致）。
-LAST_COMMIT: c47cdce（B03 头行宿主）；其前 dde7c32 = B02b、beb75a7 = B02 主体、3add1ce = B01
-CURRENT_BATCH: **B04**（P2 第一批，也是全项目第一批真发码）——接口值代码生成：`vb6_ivtbl_<I>`
-               COM 形态槽表 + 类侧槽表实例 + 薄指针表示 + `As <Iface>` 变量登记 + 派发。
-               **P1（B01/B02/B02b/B03）已收口**：语法、契约登记表、成员级子句、头行宿主全部过门。
-               开工先读 D17→D18 两节（B03 的实测结论都在里面），特别注意：
-               ① B04 改结构体/派发路径 → **必须**跑逐字节 emit-c 护栏（D9，沿用 B01 的 8 文件清单）；
-               ② `Module::isInterfaceModule` 已就位，宿主模块应"不发类实例"，这是 B04 的第一个接线点；
-               ③ 接口类型变量 `Dim s As IFoo` 目前在语义层会先被同名 Class 符号吃掉（B03 实测记在
-               D18-4），B04 要在类型解析处让登记表优先；④ D15-8 的 legacy IID 分叉债仍在 B13/B16。
+LAST_RUN: 2026-09-23T07:00:30+08:00   # 本轮（人工续跑，用户"继续完成"）三连：B02b → dde7c32、
+               # B03 → c47cdce（门 128/0/1/129）、总表收口 → 3a99efb，并追加 D19 B04 开工地图。
+               # 开工核查 06:08：树 clean、无 C3/cl/link/ninja、exe 与基线同源。
+LAST_COMMIT: 本轮地图/收口 docs 提交（哈希见 git log）；代码批 = c47cdce(B03)、dde7c32(B02b)
+CURRENT_BATCH: **B04**（P2 第一批，全项目第一批真发码）——接口值代码生成：`vb6_ivtbl_<I>` COM 形态
+               槽表 + 类侧实例 + 薄指针表示 + `As <Iface>` 变量登记 + 派发。**开工必读 D19**：
+               里面是本轮实测的后端接缝行号，并且**推翻了 D3 的一处硬假设**
+               （`__comObj` 必须是结构体第 0 字段，RTL 有裸偏移 0 读写 → 接口槽指针要放在它之后），
+               另含"必须新建的两件基础设施"（CCodeGen 拿不到 IfaceRegistry、无工程级已发表去重表）、
+               `isInterfaceModule` 后端零消费、以及建议拆分 **B04a（只发槽表不派发）/ B04b（薄指针+派发）**。
+               P1（B01/B02/B02b/B03）已全部收口。
 GATE_BASELINE: Results: PASS=128 FAIL=0 SKIP=1 TOTAL=129   # exe md5 053150bf（.build/gate_B03.log，
                # 06:21–06:45 无插队重建，跑前后 md5 一致；SKIP=已知 test_vbman 环境项）。上一基线
-               # 125/0/1/126（B02b）→ 本轮 +3 条（itf_p03 + itf_n20 + itf_xmod_writer）全绿，
-               # 零新增失败；`itf_xmod_writer` 是新增的 Test-Vbp 通路（宿主模块进真实工程编译+运行）。
+               # 125/0/1/126（B02b）→ B03 +3 条（itf_p03 + itf_n20 + itf_xmod_writer）全绿，
+               # 零新增失败；`itf_xmod_writer` 是新增的 Test-Vbp 通路（宿主模块真实编译+运行）。
 ```
 
 > 重入保护：若运行开始时 STATUS=BUSY 且 LAST_RUN 距今不足 55 分钟，说明上一次运行可能仍在进行——本次**立即结束，不做任何修改**。
@@ -364,6 +363,70 @@ dispinterface 定义；`[Default, Source]` 连接点实现；泛型类实现新�
 7. **用例通路新增第三条**：`Test-Vbp`（`run_tests.ps1` 的 all/run/vbp 块，M7Test 之后）。
    登记 = 插 3 处共 13 行、改 1 行（n19 补逗号），核对口径见 D16-6。
 
+### D19 B04 开工地图（2026-09-23 B03 收尾轮产出；行号本轮实测，含对 D3 的硬修正）
+
+- **⚠ 先改设计再做码：D3 的"前置新字段安全"结论是错的（本轮实测推翻）**。
+  `src/rtl/core/vb6comserver/vb6comserver_obj.c:268-272`（`vb6_ComObject_Create` 回填反指针）与
+  `:302-303`、`:318`（`vb6_ComObject_FromInstance` 复用/新建包装）都是 **裸偏移 0 读写**
+  `void** ppComObj = (void**)instance;`，并且 `vb6comserver.h:126-128` 把它写成明文前置条件
+  （"实例所在类的结构体首字段是 `__comObj`"）。而 `src/backend/detail/base/cgen_base_generate_c_open.inc:78`
+  从 ExeComBridge 01 起**无条件**把 `void* __comObj` 发在 `vb6_cls_<Name>` 第一位。
+  → **B04 落法**：`__comObj` 保持第 0 位不动，接口槽指针数组放在它**之后**
+  （`__comObj; const void* __ivtbl[k]; <原字段…>`），container_of 减法按"字段名 + 实测偏移"算，
+  不假设任何偏移；这样存量 COM 包装复用路径零改动。D3 里"接口指针 = `&obj->__ivtbl[i]`"的表述仍然成立。
+- 结构体接缝现状（`cgen_base_generate_c_open.inc`）：`vb6_cls_<Name>` 开在 :73，`__comObj` :78，
+  字段循环 :81-102，空结构补 `_placeholder` :104-106，`events` 指针 :108-111，收尾 :112。
+  另外 `usedVb6IfaceTypes_`（`cgen_state.inc:262` 登记 → `cgen_base_generate_epilogue.inc:44-59` 出
+  前置 typedef）已经在发 `vb6_vtbl_<I>` / `vb6_iface_<I>` 两个名字，**`vb6_ivtbl_` 前缀今天全仓零占用**，
+  D2 的隔离命名可以放心用。
+- **legacy 路径不发适配器**（与 D3 的预设有偏差）：`src/backend/module/cgen_com.cpp` 的
+  `emitInterfaceVtable(Module&)` :313-428 只遍历 `module.implements` :316，成员靠**实现类自己声明的
+  `IFoo_M` 前缀扫描**得到 :330-375，槽位**直接指向** `cProcName(IFoo_M)` 实现函数（:402-413），
+  没有任何 thunk；`vb6_iface_<I>{vtbl,obj}` 胖对在 :394-398，`vb6_iface_<I>_wrap()` 在 :416-426。
+  → B04 的 `vb6_iimpl_<C>_<I>_<slot>` 适配器是**新物种**，可抄的发码先例是 P6.5 事件包装
+  （`cgen_base_generate_body_pass.inc:30-130`，`evtWrapperName`，签名拼装 :89-98）与
+  P13.23 的 `emitComVtableSinks()`（`src/backend/module/cgen_com_events.cpp:288+`，声明 :256-270，
+  钩子 `evt_decl.inc:76` / `evt_impl.inc:135`）。
+- **两个必须新建的基础设施**（勘察实测，别当已存在）：
+  1. `CCodeGen` **拿不到 `IfaceRegistry`**：登记表只在 `src/driver/driver.hpp:143 ifaces_`，
+     消费者只有语义层（`semantic_analyzer.hpp:127`）。要按 legacy 的做法在模块循环里注入
+     （先例：`ifaceImplementersMap` 产于 `src/driver/detail/driver_codegen_dup_module_vars.inc:10-25`，
+     注入于 `driver_codegen_module_loop.inc:74`，API 在 `src/backend/detail/util/cgen_api.inc:217-221`）。
+  2. **没有工程级"已发表"去重表**：`vb6_vtbl_<I>` 今天是**按实现类重复 typedef** 的。
+     新式槽表若同样每个模块各发一遍，链接期必重复定义 → B04 需要一张工程级 set。
+- 变量登记与派发落点（`As <Iface>` 走"薄指针"要动的四处 + 现值语义）：
+  类型信息在 `Symbol::variableTypeName`（`src/semantics/semantic_analyzer_register.cpp:60-62`，
+  `resolveTypeOrDefault`/`resolveTypeRef` 在 `semantic_analyzer_typeref.cpp:29`）；
+  C 类型由 `src/backend/cgen_base_type.cpp:193-197` 决定，**当前是胖对 `vb6_iface_<I>` 按值**（门接条件是 legacy 的 `clsSym->isInterface` :194）
+  → 薄指针 = 这里分叉（命中登记表走单字 `void*`）。登记 `knownIfaceVars_` 的四处：
+  模块级 `src/backend/decl/cgen_decl_var.cpp:141-143`、局部 `src/backend/decl/cgen_localdecl.cpp:237-239`、
+  跨模块 `src/backend/detail/base/cgen_base_generate_crossmod.inc:24`、形参
+  `src/backend/decl/cgen_decl_func.cpp:109` / `cgen_decl_proc.cpp:116` / `cgen_decl_prop.cpp:117`。
+  调用派发 = `src/backend/detail/expr/cgen_expr_call_com_bind.inc`（整体门控 `isComMarker_` :7；
+  :67-97 查 `knownIfaceVars_` 后发 `x.vtbl->M(x.obj,…)` :91-93，标记来自
+  `cgen_expr_member_obj_dispatch.inc:20-31`）；去虚化直调在 `src/backend/cgen_util_classcall.cpp:17-224`
+  （`resolveClassMemberCall`，结果名 `vb6_<Cls>_<M>` 见 :115-118/:198/:223）；
+  `Set x = y` 的接口改写 + `wrap()` 在 `src/backend/detail/stmt/cgen_setlet_set_prop.inc:387-435`
+  （D3 记的 :419 已漂到 :435），`Set Nothing` :80-91。
+- 宿主模块（B03 的 `isInterfaceModule`）**目前后端零消费**（`src/backend/**` 无人读它），
+  `currentClassIsInterface`（`cgen_base_generate_decl_pass.inc:70-78`）只认 legacy 符号
+  → B04 第一件事就是让宿主模块"只发槽表、不发类实例"，否则 `IWriter.cls` 会被当成普通类发码。
+- 构建/管线接线成本很小：stage 4 入口 `src/driver/driver_compile.cpp:438-439` →
+  `Driver::runCodeGeneration`（`src/driver/driver.cpp:111`，实现拆在 9 个
+  `src/driver/detail/driver_codegen_*.inc`）；新增后端 `.cpp` 要进 `CMakeLists.txt` 的
+  `vb6c3-cgen` 列表（:127-179，先例 `:163 src/backend/module/cgen_com.cpp`、
+  `:173 src/backend/cgen_util_classcall.cpp`，注释行 :162）。
+- 测试面（本轮再核实）：`Add-BasTest` 在 `tests/run_tests.ps1:644-652`（入队 `$basQueue`，
+  由 :500 前结束的 `-Jobs` 并发 runner 消费；`test_interface` 的 x64/x86 双登记在 :727-728）、
+  `Test-Vbp` :503-579（`itf_xmod` 已在 :800）、`Test-SyntaxFail` :584-601、`Test-Syntax` :603-617。
+  **逐字节 emit-c 护栏**：`--emit-c` 开关在 `src/driver/driver_args.cpp:76`（`opts.emitC`，
+  链接在 `src/driver/driver_link.cpp:57` 跳过）；8 文件清单与 worktree 基线做法见 D14-15 与
+  B01 运行日志行（hello/test_rtl/test_array/test_error/test_ndarray/test_generics `.bas` +
+  M6Test/test_implements `.vbp`）。B04 改结构体与派发路径 = **必跑**。
+- 建议拆分：B04a = 槽表类型 + 宿主/类侧实例 + `isInterfaceModule` 后端接线 + 工程级去重表
+  （只发码不派发，逐字节护栏先保住"无新语法工程零变化"）；B04b = 薄指针类型分叉 +
+  `knownIfaceVars_` 四处登记 + 派发与 `Set`；B05 再管生命周期。两块各自过门。
+
 ## 运行日志
 
 - 2026-09-23 建表：范围确认（含完整COM）、规范文档 018 入库、现状盘点完成。
@@ -419,3 +482,16 @@ dispinterface 定义；`[Default, Source]` 连接点实现；泛型类实现新�
   `Results: PASS=128 FAIL=0 SKIP=1 TOTAL=129`**（exe md5 053150bf 跑前后一致；126→128 为新增
   p03/n20/itf_xmod_writer 三条，legacy `test_implements` 仍 PASS）。逐字节 emit-c 护栏本批未跑，
   理由与替代守卫记在 D18-6。P1 阶段（B01/B02/B02b/B03）至此**全部收口**，下一批进入 P2 发码期（B04）。
+- 2026-09-23 06:46–07:00 **B03 收尾后追加 D19（B04 开工地图），未开 B04**：B04 是第一个改结构体与
+  派发路径的发码批，按纪律不在共享树里留半批不可编译的后端代码。派一路只读勘察核实后端接缝，
+  结果里有一条**推翻我自己 D3 的硬假设**并已亲自复核：`src/rtl/core/vb6comserver/vb6comserver_obj.c:268-272`
+  与 `:302-303`、`:318` 用 `void** ppComObj = (void**)instance` 做**裸偏移 0** 读写，
+  `vb6comserver.h:126-128` 还把"首字段是 `__comObj`"写成明文前置条件 →
+  D3 说的"C 代码全按字段名访问、前置新字段安全"不成立，B04 必须让 `__comObj` 保持第 0 位、
+  把 `__ivtbl[k]` 放在它之后。地图另记：legacy 槽表**不发适配器**（槽位直指 `IFoo_M` 实现函数，
+  `cgen_com.cpp:402-413`）、`CCodeGen` 今天拿不到 `IfaceRegistry`（只有语义层注入）、
+  **没有工程级"已发表"去重表**（`vb6_vtbl_<I>` 按实现类重复 typedef）、
+  `isInterfaceModule` 后端零消费、胖对按值的门在 `cgen_base_type.cpp:193-197` 的 `clsSym->isInterface`、
+  `vb6_ivtbl_` 前缀全仓零占用可用；建议拆 B04a（只发槽表 + 宿主不发类实例 + 逐字节护栏）
+  与 B04b（薄指针 + 四处 `knownIfaceVars_` 登记 + 派发/`Set`）。**P1 阶段（B01/B02/B02b/B03）至此收口**，
+  门基线 128/0/1/129（本轮未改代码，故未复跑）。
