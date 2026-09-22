@@ -537,17 +537,27 @@ static LONG WINAPI vb6_crashFilter(EXCEPTION_POINTERS* ep) {
 static int vb6_vehScanStackForImage(char* buf, int n, int bufsz,
                                     CONTEXT* ctx, const char* imgName,
                                     const char* imgBase, ULONG imgSize) {
-    const DWORD* sp = (const DWORD*)ctx->Esp;
     int printed = 0, i;
+#ifdef _WIN64
+    const ULONG_PTR* sp = (const ULONG_PTR*)ctx->Rsp;
+#else
+    const DWORD* sp = (const DWORD*)ctx->Esp;
+#endif
     for (i = 0; i < 16384 && printed < 48 && n < bufsz - 128; i++) {
-        DWORD v;
-        if (IsBadReadPtr(sp + i, 4)) break;
+        ULONG_PTR v;
+        if (IsBadReadPtr(sp + i, sizeof(ULONG_PTR))) break;
         v = sp[i];
-        if (v >= (DWORD)(ULONG_PTR)imgBase &&
-            v < (DWORD)(ULONG_PTR)imgBase + imgSize) {
+        if (v >= (ULONG_PTR)imgBase &&
+            v < (ULONG_PTR)imgBase + imgSize) {
+#ifdef _WIN64
+            n += wsprintfA(buf + n, "  [sp+%d] 0x%016llX -> %s+0x%llX\r\n",
+                           i, (unsigned long long)v, imgName,
+                           (unsigned long long)(v - (ULONG_PTR)imgBase));
+#else
             n += wsprintfA(buf + n, "  [sp+%d] 0x%08lX -> %s+0x%08lX\r\n",
                            i, (unsigned long)v, imgName,
-                           (unsigned long)(v - (DWORD)(ULONG_PTR)imgBase));
+                           (unsigned long)(v - (ULONG_PTR)imgBase));
+#endif
             printed++;
         }
     }
@@ -596,11 +606,19 @@ static LONG WINAPI vb6_heapCorruptVEH(EXCEPTION_POINTERS* ep) {
         }
         if (isAV) {
             CONTEXT* c = ep->ContextRecord;
+#ifdef _WIN64
+            n += wsprintfA(buf + n,
+                "  rip=%p rsp=%p rbp=%p rax=%p rbx=%p rcx=%p rdx=%p rsi=%p rdi=%p\r\n",
+                (void*)c->Rip, (void*)c->Rsp, (void*)c->Rbp, (void*)c->Rax,
+                (void*)c->Rbx, (void*)c->Rcx, (void*)c->Rdx,
+                (void*)c->Rsi, (void*)c->Rdi);
+#else
             n += wsprintfA(buf + n,
                 "  eip=%p esp=%p ebp=%p eax=%p ebx=%p ecx=%p edx=%p esi=%p edi=%p\r\n",
                 (void*)c->Eip, (void*)c->Esp, (void*)c->Ebp, (void*)c->Eax,
                 (void*)c->Ebx, (void*)c->Ecx, (void*)c->Edx,
                 (void*)c->Esi, (void*)c->Edi);
+#endif
         }
         {
             void* frames[64];

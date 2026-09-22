@@ -151,3 +151,9 @@
 - 修复: ComObj_Invoke 实参改用 24B 槽中转 (整复制 16B OLE 内容再按需强转), 返回槽 24B 中转后回写 16B; 清理循环不再对槽位 VariantClear (槽内是调用方资源副本)。
 - 附带: vb6forms.c VEH 支持 0xC0000005 现场 (读写标志/寄存器/栈扫描镜像返回地址), C3_CRASH_TRACE=1 时生效。
 - 验证: 本机 x86 全链路 3/3 无崩溃存活至探针窗口结束。
+
+## 2026-09-22 Fix 195: VEH 栈扫描/寄存器打印用了 x86 专用 CONTEXT 字段, x64 编不过
+- 现象: Fix 194 的 VEH (vb6forms.c) 无条件使用 CONTEXT::Esp/Eip/Eax 等 x86 字段, 该 RTL 嵌入所有生成 exe, x64 目标全线 C2039 (回归 FAIL=62 的真凶之一)。
+- 修复: 栈扫描按 _WIN64 切 Rsp/ULONG_PTR (QWORD 值), 寄存器打印 x64 用 Rip/Rsp/Rax 系。
+- 环境附注: 本机沙箱黑名单拦 reg.exe, C3 走 vcvarsall 前缀时链路断 -> cl 无 INCLUDE 报 C1083, 与代码无关; CI 不受影响。
+- 验证: x64 hello.bas 编译+运行通过 (Sum=5050)。
