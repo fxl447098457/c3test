@@ -5,6 +5,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <functional>
+#include <map>
 
 namespace vb6c3 {
 
@@ -460,4 +461,261 @@ std::string CCodeGen::toLongIfVariant(const std::string& cExpr, const Expr* astE
     }
     return cExpr;
 }
+
+// Fix 156: 需要 double 上下文中的 Variant 表达式 → vb6_VariantToDouble 包装.
+// VB6 浮点除法 `/` 生成 `((double)(L) / (double)(R))`; 当 L/R 是 vb6_VARIANT
+// 结构体时 C 强制转换非法 → C2440 "函数/类型强制转换表达式: 无法从
+// “vb6_VARIANT”转换为“double”".
+//   VBFlexGrid.ctl Property Let FloatFromVariant 系: Select Case VarType(Value)
+//     Case vbDouble: Int64 = Value / 10000   (Value 是 ByVal Variant)
+//     → 原生成 Int64 = ((double)(Value) / (double)(10000.0)); C2440.
+// 与 toLongIfVariant 同构 (整除 \ 已在 Fix 084o 用同款处理), 仅提取函数换成
+// vb6_VariantToDouble. 未判为 Variant 时原样返回, 故对今天能编译的表达式零影响.
+std::string CCodeGen::toDoubleIfVariant(const std::string& cExpr, const Expr* astExpr) {
+    if (cExprIsVariant(cExpr)) return "vb6_VariantToDouble(" + cExpr + ")";
+    if (astExpr && astExpr->kind == ASTNodeKind::IdentifierExpr) {
+        auto& ident = static_cast<IdentifierExpr&>(const_cast<Expr&>(*astExpr));
+        std::string lower = ident.name;
+        std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+        if (knownVariantVars_.count(lower)) return "vb6_VariantToDouble(" + cExpr + ")";
+    }
+    return cExpr;
+}
+// ============================================================
+// Fix 178: 含所有权成员 (String / 动态数组 / Variant / 嵌套 UDT) 的 UDT 深拷贝
+// ============================================================
+// VB6 运行时按类型描述符复制 UDT: `b = a` 与 `LSet b = a` 之后 b 拥有**自己的一份**
+// String/子数组/Variant。C 端 `b = a` (以及 LSet 落的 memcpy) 是浅拷贝, 成员指针被
+// 两个变量共享 → 一处写、多处变。VBFlexGridDemo 的 PropRows Let 用
+//   LSet VBFlexGridCells.Rows(i) = VBFlexGridDefaultCols
+// 填新行, 于是行 2..149 的 Cols 载体全部别名到行 0 (探针: 写 (9,15)="NINE" 后
+// 读 0/2/9/11 行四格同值)。这里按符号表的成员元数据为每个此类 UDT 生成一个 static
+// 拷贝函数: 标量直赋、String 复制、动态数组走 vb6_ArrayAssign1D_Cb、嵌套 UDT 递归。
+// 对象/接口成员维持按位 (与既有代码同口径, 不引入 AddRef/Release 失衡)。
+
+namespace {
+
+// "vb6_type_TCELL" → "TCELL"; 非 UDT C 类型串返回空
+std::string udtNameOfCType(const std::string& udtCType) {
+    const std::string prefix = "vb6_type_";
+    if (udtCType.size() <= prefix.size() || udtCType.compare(0, prefix.size(), prefix) != 0)
+        return "";
+    return udtCType.substr(prefix.size());
+}
+
+// 剥掉 Array/ByRef 位标志, 取基础类型
+Vb6Type udtBaseType(Vb6Type t) {
+    uint16_t v = static_cast<uint16_t>(t);
+    v &= ~static_cast<uint16_t>(Vb6Type::Array);
+    v &= ~static_cast<uint16_t>(Vb6Type::ByRef);
+    return static_cast<Vb6Type>(v);
+}
+
+} // namespace
+
+// 符号表里的 UDT 符号 (vb6_type_X ← X); 查不到返回 nullptr
+static const Symbol* udtSymbolOf(const SymbolTable& symTab, const std::string& udtCType) {
+    std::string name = udtNameOfCType(udtCType);
+    if (name.empty()) return nullptr;
+    const Symbol* s = symTab.lookupModule(name);
+    if (s && s->kind == SymbolKind::UserDefinedType) return s;
+    return nullptr;
+}
+
+bool CCodeGen::udtHasOwnedMembersR(const std::string& udtCType,
+                                   std::vector<std::string>& stack) const {
+    const Symbol* sym = udtSymbolOf(symTab_, udtCType);
+    if (!sym) return false;                     // 无元数据 → 不敢当所有权处理
+    for (const auto& s : stack) if (s == udtCType) return false;  // 自引用防御
+    stack.push_back(udtCType);
+    bool owned = false;
+    for (const auto& mi : sym->udtMembers) {
+        Vb6Type bt = udtBaseType(mi.type);
+        // 定长数组成员与动态数组成员: 载体本身/元素可能持所有权
+        if (mi.isArrayDynamic) { owned = true; break; }
+        if (bt == Vb6Type::String || bt == Vb6Type::Variant) { owned = true; break; }
+        if (bt == Vb6Type::UserDefinedType && !mi.typeRefName.empty()) {
+            if (udtHasOwnedMembersR("vb6_type_" + cIdent(mi.typeRefName), stack)) {
+                owned = true; break;
+            }
+        }
+    }
+    stack.pop_back();
+    return owned;
+}
+
+bool CCodeGen::udtHasOwnedMembers(const std::string& udtCType) const {
+    std::vector<std::string> stack;
+    return udtHasOwnedMembersR(udtCType, stack);
+}
+
+void CCodeGen::requestUdtCopy(const std::string& udtCType, bool needVoidPtrWrapper) const {
+    if (udtNameOfCType(udtCType).empty()) return;
+    auto it = udtCopyRequested_.find(udtCType);
+    if (it == udtCopyRequested_.end()) {
+        udtCopyRequested_[udtCType] = needVoidPtrWrapper;
+    } else if (needVoidPtrWrapper) {
+        it->second = true;   // 只能升级: 有一处当数组元素用就需要 void* 版
+    }
+}
+
+std::string CCodeGen::udtDeepCopyAssign(const Expr& targetNode, const std::string& target,
+                                        const Expr* valueNode,
+                                        const std::string& value) const {
+    if (value.empty() || target.empty()) return "";
+    // 整体数组引用 (`A()` / `.Cols()`) 不是 UDT 结构体而是载体指针: 那里
+    // inferUdtTypeOfExpr 给出的是**元素** UDT 类型, 按结构体深拷贝会把指针当结构体拷。
+    // 该形态由 Fix 170/178 的 wrapWholeArrayAssign (vb6_ArrayAssign1D_Cb) 负责。
+    if (isWholeArrayRef(&targetNode) || isWholeArrayRef(valueNode)) return "";
+    // 目标 UDT: 优先从已生成的 C 串解析 (下标宏最具体), 退回 AST 推断
+    std::string tgtUdt;
+    if (target.compare(0, 7, "VB6_SA_") == 0) {
+        size_t vp = target.find("vb6_type_");
+        if (vp != std::string::npos) {
+            size_t end = target.find_first_of(",)", vp);
+            if (end != std::string::npos) tgtUdt = target.substr(vp, end - vp);
+        }
+    }
+    if (tgtUdt.empty()) tgtUdt = inferUdtTypeOfExpr(targetNode);
+    if (udtNameOfCType(tgtUdt).empty()) return "";
+    if (!valueNode) return "";
+    std::string valUdt = inferUdtTypeOfExpr(*valueNode);
+    if (valUdt != tgtUdt) return "";             // 异型 UDT / 非 UDT → 维持原路径
+    if (!udtHasOwnedMembers(tgtUdt)) return "";
+    requestUdtCopy(tgtUdt, false);
+    return "vb6_udtcpy_" + udtNameOfCType(tgtUdt) + "(&" + target + ", &" + value
+           + ");  /* Fix 178: UDT 深拷贝 */";
+}
+
+// 本模块请求到的全部 UDT 拷贝函数 (含依赖闭包)。先给前向声明再给定义, 因此集合内
+// 的相互引用与输出顺序无关。
+std::string CCodeGen::emitUdtCopyBlock() const {
+    if (udtCopyRequested_.empty()) return "";
+
+    // udtCType → 是否需要 void* 薄封装 (作为 vb6_udt_elem_copy 传入)
+    std::map<std::string, bool> need;
+    std::vector<std::string> work;
+    std::set<std::string> queued;
+    for (const auto& kv : udtCopyRequested_) {
+        need[kv.first] = kv.second;
+        work.push_back(kv.first);
+        queued.insert(kv.first);
+    }
+    while (!work.empty()) {
+        std::string udtCType = work.back();
+        work.pop_back();
+        const Symbol* sym = udtSymbolOf(symTab_, udtCType);
+        if (!sym) continue;
+        for (const auto& mi : sym->udtMembers) {
+            if (udtBaseType(mi.type) != Vb6Type::UserDefinedType || mi.typeRefName.empty())
+                continue;
+            std::string sub = "vb6_type_" + cIdent(mi.typeRefName);
+            if (udtNameOfCType(sub).empty() || !udtHasOwnedMembers(sub)) continue;
+            bool asElemCb = mi.isArrayDynamic;   // 动态数组元素 → 回调要 void* 版
+            auto it = need.find(sub);
+            if (it == need.end()) need[sub] = asElemCb;
+            else if (asElemCb) it->second = true;
+            if (queued.insert(sub).second) work.push_back(sub);
+        }
+    }
+
+    std::string out;
+    out += "\n/* === Fix 178: 含所有权成员的 UDT 深拷贝 (自动生成) === */\n";
+    for (const auto& kv : need) {
+        std::string n = udtNameOfCType(kv.first);
+        out += "static void vb6_udtcpy_" + n + "(vb6_type_" + n + "* d, const vb6_type_"
+             + n + "* s);\n";
+        if (kv.second)
+            out += "static void vb6_udtcpy_" + n + "_v(void* d, const void* s);\n";
+    }
+    out += "\n";
+
+    for (const auto& kv : need) {
+        const std::string& udtCType = kv.first;
+        std::string n = udtNameOfCType(udtCType);
+        const Symbol* sym = udtSymbolOf(symTab_, udtCType);
+        out += "static void vb6_udtcpy_" + n + "(vb6_type_" + n + "* d, const vb6_type_"
+             + n + "* s) {\n";
+        out += "    if (d == s) return;\n";
+        if (!sym) {                       // 元数据缺失: 退化成按位 (不会误释放)
+            out += "    *d = *s;\n}\n\n";
+            if (kv.second)
+                out += "static void vb6_udtcpy_" + n + "_v(void* d, const void* s) {\n"
+                       "    vb6_udtcpy_" + n + "((vb6_type_" + n + "*)d, (const vb6_type_"
+                     + n + "*)s);\n}\n\n";
+            continue;
+        }
+        for (const auto& mi : sym->udtMembers) {
+            std::string fn = cIdent(mi.name);
+            if (fn.empty()) continue;
+            std::string dl = "d->" + fn, sl = "s->" + fn;
+            Vb6Type bt = udtBaseType(mi.type);
+            std::string subUdt = (bt == Vb6Type::UserDefinedType && !mi.typeRefName.empty())
+                                     ? ("vb6_type_" + cIdent(mi.typeRefName)) : "";
+            bool subOwned = !subUdt.empty() && udtHasOwnedMembers(subUdt);
+            bool scalarOwned = (bt == Vb6Type::String || bt == Vb6Type::Variant);
+
+            if (mi.arraySize > 0) {
+                // 定长数组成员: 发射形态是 `T Name[N]`, 不能整体赋值
+                if (!scalarOwned && !subOwned) {
+                    out += "    memcpy(" + dl + ", " + sl + ", sizeof(" + dl + "));\n";
+                    continue;
+                }
+                std::string idx = fn + "[_i]";
+                out += "    { int32_t _n = (int32_t)(sizeof(d->" + fn
+                     + ") / sizeof(d->" + idx + ")); int32_t _i;\n";
+                out += "      for (_i = 0; _i < _n; _i++) {\n";
+                if (bt == Vb6Type::String) {
+                    out += "        BSTR _o = d->" + idx + "; d->" + idx
+                         + " = s->" + idx + " ? SysAllocString(s->" + idx + ") : NULL;\n"
+                           "        if (_o && _o != s->" + idx + ") vb6_BSTR_Free(_o);\n";
+                } else if (bt == Vb6Type::Variant) {
+                    out += "        vb6_VariantClear(&d->" + idx + "); vb6_VariantCopy(&d->"
+                         + idx + ", &s->" + idx + ");\n";
+                } else {
+                    out += "        vb6_udtcpy_" + udtNameOfCType(subUdt) + "(&d->" + idx
+                         + ", &s->" + idx + ");\n";
+                }
+                out += "      }\n    }\n";
+                continue;
+            }
+            if (mi.isArrayDynamic) {
+                // 动态数组成员: 载体必须各持一份; 元素含所有权时交给回调逐个深拷贝
+                std::string cb = "NULL";
+                if (subOwned) cb = "vb6_udtcpy_" + udtNameOfCType(subUdt) + "_v";
+                out += "    { vb6_SafeArray1D* _o = d->" + fn + ";\n"
+                       "      d->" + fn + " = vb6_ArrayAssign1D_Cb(NULL, s->" + fn + ", "
+                     + cb + ");\n"
+                       "      if (_o && _o != s->" + fn + ") vb6_SafeArrayDestroy1D(_o);\n"
+                       "    }\n";
+                continue;
+            }
+            if (bt == Vb6Type::String) {
+                out += "    { BSTR _o = d->" + fn + "; d->" + fn
+                     + " = s->" + fn + " ? SysAllocString(s->" + fn + ") : NULL;\n"
+                       "      if (_o && _o != s->" + fn + ") vb6_BSTR_Free(_o);\n    }\n";
+                continue;
+            }
+            if (bt == Vb6Type::Variant) {
+                out += "    vb6_VariantClear(&" + dl + "); vb6_VariantCopy(&" + dl + ", &"
+                     + sl + ");\n";
+                continue;
+            }
+            if (subOwned) {
+                out += "    vb6_udtcpy_" + udtNameOfCType(subUdt) + "(&" + dl + ", &" + sl
+                     + ");\n";
+                continue;
+            }
+            out += "    " + dl + " = " + sl + ";\n";   // 标量/对象指针: 按位
+        }
+        out += "}\n";
+        if (kv.second)
+            out += "static void vb6_udtcpy_" + n + "_v(void* d, const void* s) {\n"
+                   "    vb6_udtcpy_" + n + "((vb6_type_" + n + "*)d, (const vb6_type_"
+                 + n + "*)s);\n}\n";
+        out += "\n";
+    }
+    return out;
+}
+
 } // namespace vb6c3

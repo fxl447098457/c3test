@@ -45,11 +45,57 @@
                     idxArgsArray += "}";
                     // 打包值参数并生成调用
                     emitExpr(*node.value);
+                    // Fix 160w: RHS 为 WithMemberExpr/COM 成员时解封 (裸对象实参
+                    // 送 vb6_ComPack* → C2440) 且避免 marker 泄漏. COM SetPropArg
+                    // 载荷按 Variant 解 (VB6 把 Variant 结果原样传给属性 Set).
+                    if (isComMarker_) resolveComValue("Variant");
                     std::string valExpr = std::move(lastExpr_);
                     std::string packFn = comPackExpr(*node.value);
                     c_.emitLine("vb6_ComSetPropArg(" + objExpr + ", L\"" + memberName + "\", " +
                                  idxArgsArray + ", " + std::to_string(idxArgc) + ", " +
                                  packFn + "(" + valExpr + "));  /* COM SetPropArg */");
+                    return;
+                }
+            }
+        }
+    }
+
+    // Fix 152e: With 块内 ListBox/ComboBox 的**可索引属性写** —
+    //   .ItemData(i) = v / .Selected(i) = v / .List(i) = s
+    // target 是 IndexOrCallExpr{callee=WithMemberExpr(.Prop), args}. 通用路径会
+    // 走 prop_get 读 (vb6_GetItemData(tempVar) 单参) 再拼 " = value" → C2198 +
+    // C2106 (非左值). 这里按 RTL 写函数 (hwnd, idx, value) 直接生成.
+    if (node.target->kind == ASTNodeKind::IndexOrCallExpr
+        && !withObjectVars_.empty() && !withObjectInfoStack_.empty()) {
+        auto& wcCall = static_cast<IndexOrCallExpr&>(*node.target);
+        if (wcCall.callee && wcCall.callee->kind == ASTNodeKind::WithMemberExpr
+            && !wcCall.positional.empty() && wcCall.named.empty()) {
+            const auto& wcInfo = withObjectInfoStack_.back();
+            if (wcInfo.kind == WithObjKind::FormControl
+                && (wcInfo.ctrlType == FrmControlType::ListBox
+                    || wcInfo.ctrlType == FrmControlType::ComboBox)) {
+                auto& wcMem = static_cast<WithMemberExpr&>(*wcCall.callee);
+                const std::string wcTempVar = withObjectVars_.back();
+                std::string wcProp = Symbol::toLower(wcMem.memberName);
+                if (wcProp == "itemdata" || wcProp == "selected" || wcProp == "list") {
+                    emitExpr(*wcCall.positional[0]);
+                    std::string wcIdx = std::move(lastExpr_);
+                    emitExpr(*node.value);
+                    // Fix 160w: RHS 为 WithMemberExpr/COM 成员时解封
+                    // (.List(i)= → BSTR, .ItemData/.Selected(i)= → Long).
+                    if (isComMarker_) resolveComValue(wcProp == "list" ? "BSTR" : "Long");
+                    std::string wcVal = std::move(lastExpr_);
+                    if (wcProp == "itemdata") {
+                        c_.emitLine("vb6_SetItemData((void*)" + wcTempVar + ", " + wcIdx
+                                    + ", (int32_t)(" + wcVal + "));  /* With .ItemData(i)= */");
+                    } else if (wcProp == "selected") {
+                        c_.emitLine("vb6_SetSelected((void*)" + wcTempVar + ", " + wcIdx
+                                    + ", " + wcVal + ");  /* With .Selected(i)= */");
+                    } else {
+                        c_.emitLine("vb6_SetListItem((void*)" + wcTempVar + ", " + wcIdx
+                                    + ", " + wrapToBSTR(wcVal, *node.value)
+                                    + ");  /* With .List(i)= */");
+                    }
                     return;
                 }
             }
@@ -207,7 +253,19 @@
                                 + canonicalClassMemberName(srcModDef, plMaDef.memberName),
                             plSymDef->access, srcModDef);
                         std::string objDef;
-                        if (!defaultInstanceClassName(plObjDef.name).empty()) {
+                        // Fix 152c: 放置于窗体的 UserControl 实例 (如 VBFlexGrid1)
+                        // 的**参数化属性写** (VBFlexGrid1.TextMatrix(i,11,..) = "...").
+                        // 裸 emitExpr(*plMaDef.object) 只输出控件名 (C 里无声明) →
+                        // C2065。this 应取宿主窗口实例, 与 Fix 133y / 读取路径一致。
+                        auto itUCdef = knownUserControlCtrlVars_.find(plObjLowerDef);
+                        if (itUCdef != knownUserControlCtrlVars_.end()) {
+                            auto itCtrlDef = knownFormControls_.find(plObjLowerDef);
+                            std::string hwndArgDef = (itCtrlDef != knownFormControls_.end())
+                                ? makeCtrlHwndArg(plObjLowerDef, itCtrlDef->second)
+                                : ("vb6_hwnd_" + cIdent(plObjDef.name));
+                            objDef = "(vb6_cls_" + cIdent(itUCdef->second)
+                                   + "*)vb6_UC_InstanceOf(" + hwndArgDef + ")";
+                        } else if (!defaultInstanceClassName(plObjDef.name).empty()) {
                             objDef = "vb6_cls_" + cIdent(plClsDef) + "_Default()";
                         } else {
                             emitExpr(*plMaDef.object);
@@ -250,6 +308,16 @@
                                 }
                             } else if (pi.type == Vb6Type::String && cExprIsVariant(argExpr)) {
                                 oneDef = wrapToBSTR(argExpr, *argNode);
+                            } else if (pi.type == Vb6Type::String && pi.isByVal && argNode
+                                       && isScalarImplicitStr159(inferExprType(*argNode))) {
+                                // Fix 159-B: ByVal String 形参收到**日期/数值**实参 —
+                                // VB6 按 CStr 隐式转换, 此前只在实参是 vb6_VARIANT 时才
+                                // wrapToBSTR, 标量/日期实参裸拼 → C2440 "double→BSTR".
+                                //   UserEditingForm.frm: `TextMatrix(i,3) = DateAdd("d",i,Now())`
+                                //   MainForm.frm:        `EditText = ComboCalendarValue`
+                                // 仅收标量族 (Date/Double/Single/Long/Integer/Byte/Boolean/
+                                // Currency), Object/Variant/String 一律不介入 (走原路径).
+                                oneDef = wrapToBSTR(argExpr, *argNode);
                             } else if (!pi.isByVal) {
                                 bool simpleDef = !argExpr.empty()
                                     && ((argExpr[0] >= 'a' && argExpr[0] <= 'z')
@@ -291,8 +359,14 @@
         }
     }
 
+    // Fix 170: 目标是 VB6 **整体数组** (`A() = expr`, 空括号) —— emit 期间置
+    // wholeArrayLvalue_, 让 IndexOrCallExpr 发数组载体 (vb6_SafeArray1D*) 而不是
+    // VB6_SA_AT(elem, A, 0)。值语义侧用 tgtIsWholeArray170 决定右侧是否需要深拷贝。
+    bool tgtIsWholeArray170 = isWholeArrayRef(node.target.get());
+    wholeArrayLvalue_ = tgtIsWholeArray170;
     emitExpr(*node.target);
     std::string target = std::move(lastExpr_);
+    wholeArrayLvalue_ = false;
 
     // COM属性赋值检测 (P6.2): obj.Property = value → vb6_ComSetProp(obj, L"Property", pack(value))
     if (isComMarker_) {

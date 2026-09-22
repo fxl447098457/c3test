@@ -44,6 +44,12 @@ void* vb6_CreateFormWindowB(const char* className, const char* formName,
 // VB6坐标单位: 1英寸=1440缇, 1像素=15缇 (96DPI标准)
 int vb6_TwipToX(int twips);
 int vb6_TwipToY(int twips);
+// Fix 184: 唯一 DPI 源 + 反向换算 (像素 -> 缇)。RTL 内任何 px/缇 转换都必须
+// 走这四个入口，禁止再写死 15。
+int vb6_DpiX(void);
+int vb6_DpiY(void);
+int vb6_XToTwipX(int px);
+int vb6_YToTwipY(int px);
 
 // ============================================================
 // 控件创建

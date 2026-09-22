@@ -76,7 +76,8 @@ void SemanticAnalyzer::visit(EnumDecl& node) {
             // 如果有显式值
             if (member->value) {
                 if (auto* lit = dynamic_cast<LiteralExpr*>(member->value.get())) {
-                    if (lit->literalKind == LiteralKind::Long)
+                    if (lit->literalKind == LiteralKind::Long ||
+                        lit->literalKind == LiteralKind::LongPtr)  // Fix 082: ^ 后缀
                         nextValue = lit->longValue;
                     else if (lit->literalKind == LiteralKind::Integer)
                         nextValue = lit->intValue;
@@ -84,7 +85,8 @@ void SemanticAnalyzer::visit(EnumDecl& node) {
                     // Handle negative literals: -1, -42, etc.
                     if (auto* inner = dynamic_cast<LiteralExpr*>(unary->operand.get())) {
                         int64_t v = 0;
-                        if (inner->literalKind == LiteralKind::Long) v = inner->longValue;
+                        if (inner->literalKind == LiteralKind::Long ||
+                        inner->literalKind == LiteralKind::LongPtr) v = inner->longValue;
                         else if (inner->literalKind == LiteralKind::Integer) v = inner->intValue;
                         if (unary->op == UnaryOp::Negate) nextValue = -v;
                         else nextValue = v;

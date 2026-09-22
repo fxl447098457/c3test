@@ -98,6 +98,9 @@ BSTR vb6_Mid(BSTR s, int32_t start, int32_t len) {
     return result;
 }
 
+#ifdef vb6_InStr
+#undef vb6_InStr   // vb6rtl_builtin.h 的 _Generic 宏在定义处必须关闭, 否则本函数定义被改写
+#endif
 int32_t vb6_InStr(int32_t start, BSTR haystack, BSTR needle) {
     if (!haystack || !needle) return 0;
     int32_t hlen = vb6_BSTR_Len(haystack);
@@ -110,6 +113,20 @@ int32_t vb6_InStr(int32_t start, BSTR haystack, BSTR needle) {
         }
     }
     return 0;
+}
+
+// Fix 158s: InStr 的 needle 实参是 vb6_VARIANT 时 (For 循环里拿 Variant 判定包含
+// 关系, 如 VBFlexGrid DecStr/ExportString 一系) → 生成代码裸发
+// vb6_InStr(1, Buffer, Value), Value 是 vb6_VARIANT 结构体 → MSVC C2440
+// "无法从 vb6_VARIANT 转换到 BSTR"。vb6rtl_builtin.h 用 _Generic 在调用点分派到
+// 这里, 先 vb6_VariantToString 解包再走标准 InStr。返回类型同为 int32_t, 与
+// vb6_InStr 一致 (这一点与 158t 的 vb6_Mid 提案不同 —— 那里分派目标返回
+// int32_t 却被用作 BSTR, 语义不成立, 已弃用并在 codegen 侧另修)。
+int32_t vb6_InStrVar(int32_t start, BSTR haystack, vb6_VARIANT needle) {
+    BSTR s = vb6_VariantToString(needle);
+    int32_t r = vb6_InStr(start, haystack, s);
+    vb6_BSTR_Free(s);
+    return r;
 }
 
 // Fix 093a: InStrB — VB6 字节版 InStr, 支持两种实参形态:
@@ -192,12 +209,21 @@ BSTR vb6_Trim(BSTR s) {
     return result;
 }
 
+// Fix 160w: 定义真函数, 宏展开时 default: 分支经 _Generic 后又展开成同名宏的
+// 保护方式同 InStr: 宏在自身展开期间被禁用, 这里显式 #undef 关闭分派 (同下方
+// vb6_LTrimVar 定义). 改真函数与其子串拷贝语义.
+#undef vb6_LTrim
 BSTR vb6_LTrim(BSTR s) {
     if (!s) return vb6_BSTR_Empty();
     int32_t len = vb6_BSTR_Len(s);
     int32_t start = 0;
     while (start < len && iswspace(s[start])) start++;
     return vb6_BSTR_FromStr(s + start);
+}
+
+// Fix 160w: LTrim(<Variant>) — 先 vb6_VariantToString 解包再走真函数.
+BSTR vb6_LTrimVar(vb6_VARIANT s) {
+    return vb6_LTrim(vb6_VariantToString(s));
 }
 
 BSTR vb6_RTrim(BSTR s) {
@@ -374,9 +400,10 @@ BSTR vb6_String(int32_t n, int32_t charCode) {
 
 int32_t vb6_StrComp(BSTR s1, BSTR s2, int32_t compare) {
     (void)compare;  // 简化: 仅二进制比较
-    if (!s1 && !s2) return 0;
-    if (!s1) return -1;
-    if (!s2) return 1;
+    // Fix 173: NULL BSTR (vbNullString / 未赋值的 String) 与 L"" 等价 —— 原来对
+    // 单边 NULL 直接返回 ±1, 于是 `StrComp("", vbNullString)` 报"不等"。
+    if (!s1) s1 = L"";
+    if (!s2) s2 = L"";
     int32_t len1 = vb6_BSTR_Len(s1);
     int32_t len2 = vb6_BSTR_Len(s2);
     int32_t minLen = (len1 < len2) ? len1 : len2;

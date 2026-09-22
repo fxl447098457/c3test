@@ -184,5 +184,26 @@
             handled = true;
         }
 
+        // ---- Pattern M: VB6 内置 Forms 集合索引 ----
+        // Forms(i) = Forms.Item(i) (VB6 Forms 集合默认 Item 属性). Common.bas
+        // IsFormLoaded 用 Forms(i).Name 遍历已加载窗体. Forms 在 C 作用域无符号
+        // (RTL 全局伪对象, 同 form_builtin 的 forms/count/item 分支), 此前 Bare
+        // 索引落通用数组路径原样发射 `Forms(i)` → C 隐式 int → 外层 .Name 拼
+        // void* 字段 → C2224. 生成 vb6_Forms_Item(i) (RTL: 0-based, 返回窗体
+        // HWND void*); 其上的 .Name 由 generic_access (Fix 158e) 转 RTL 读.
+        if (!handled && nameLower == "forms" && node.positional.size() == 1
+            && currentProc_ && !knownLocalVars_.count(nameLower)) {
+            bool isFormsParam = false;
+            for (auto& p : currentProc_->params) {
+                if (Symbol::toLower(p.name) == nameLower) { isFormsParam = true; break; }
+            }
+            if (!isFormsParam) {
+                emitExpr(*node.positional[0]);
+                std::string idxForms = toLongIfVariant(std::move(lastExpr_), node.positional[0].get());
+                lastExpr_ = "vb6_Forms_Item((int32_t)(" + idxForms + "))";
+                handled = true;
+            }
+        }
+
         if (handled) return;
     }

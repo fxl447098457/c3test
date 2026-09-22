@@ -65,6 +65,7 @@
             if (memLower == "helpfile") { lastExpr_ = "vb6_App_HelpFile()"; return; }  // Fix 090ac: 此前落到 (void*)0.HelpFile → 语法错
             if (memLower == "hinstance") { lastExpr_ = "vb6_App_hInstance()"; return; }
             if (memLower == "hinstancehnd") { lastExpr_ = "vb6_App_hInstance()"; return; }  // VB6别名
+            if (memLower == "previnstance") { lastExpr_ = "vb6_App_PrevInstance()"; return; }  // Fix 158k: 此前落到 (void*)0.PrevInstance → C2059
             if (memLower == "title") { lastExpr_ = "vb6_App_EXEName()"; return; }  // 简化
             if (memLower == "major") { lastExpr_ = "0"; return; }
             if (memLower == "minor") { lastExpr_ = "0"; return; }
@@ -72,7 +73,12 @@
             // Fix 056b: App.ThreadID - 当前线程ID (windows.h 已包含)
             if (memLower == "threadid") { lastExpr_ = "(int32_t)GetCurrentThreadId()"; return; }
             // Fix 086: 补齐 App.LogMode / App.LogEvent (ToolsIDE/clsSubClass 引用)
-            if (memLower == "logmode") { lastExpr_ = "(int32_t)1"; return; }
+            // Fix 164y: LogMode 必须为 0 —— VB6 语义 0=独立EXE, 1=IDE调试,
+            // 2=IDE ActiveX. 生成的产物是独立 EXE, 此前硬编码 1 会让
+            // `If App.LogMode <> 0` 为真, 执行 IDE-only 的
+            // InitReleaseVisualStylesFixes (comctl32 v6 UAF workaround),
+            // 在消息循环中触发 COM vtable 空指针崩溃 (VBFlexGridDemo).
+            if (memLower == "logmode") { lastExpr_ = "(int32_t)0"; return; }
             if (memLower == "logevent") {
                 // RTL 无 LogEvent — 转发到调试输出 (首参为消息文本, 类型参数忽略)
                 lastExpr_ = "((void(*)(BSTR,int32_t))vb6_DebugWriteBSTR)";

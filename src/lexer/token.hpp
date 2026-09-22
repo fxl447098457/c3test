@@ -16,6 +16,7 @@ enum class TokenKind : uint16_t {
     Identifier,     // 以字母开头, 可含字母/数字/下划线, VB6标识符不区分大小写
     IntegerLiteral, // &H hex, &O oct, &B bin, 十进制
     LongLiteral,    // 后缀 &
+    LongPtrLiteral, // 后缀 ^ (VBA7 LongPtr, 指针宽度)
     FloatLiteral,   // Single(!后缀) / Double(#后缀, 或有小数点/E)
     DecimalLiteral, // @后缀 (Currency)
     StringLiteral,  // "..."

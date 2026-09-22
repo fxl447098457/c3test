@@ -20,6 +20,7 @@
 #include "semantics/type_system.hpp"
 #include "common/diagnostics.hpp"
 #include "project/frm_parser.hpp"
+#include <array>
 #include <string>
 #include <vector>
 #include <sstream>

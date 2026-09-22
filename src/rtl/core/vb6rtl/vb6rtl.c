@@ -19,6 +19,7 @@
 
 
 #include "vb6rtl.h"
+#include <intrin.h>   // _ReturnAddress (未处理错误定位)
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -72,9 +73,73 @@ double vb6_Pow(double base, double exp) {
 // 运行时初始化/退出
 // ============================================================
 
+// Fix 172: 崩溃回溯钩子 —— 生成代码的 AV 只有 WER 里一个"故障偏移", 定位不到调用者。
+// 装一个 VEH, 访问违例时把异常地址与栈帧**按 RVA** 打到 stderr (与 exe 首选基址
+// 0x140000000 相加即可用 PDB 解析到生成的 .c 行号, 见 .temp/sym3.ps1)。
+// 仅在 C3_COM_TRACE / C3_CRASH_TRACE 环境变量存在时安装, 只打印不改流程
+// (继续 EXCEPTION_CONTINUE_SEARCH, WER/退出码不变)。
+#ifdef _WIN32
+static LONG CALLBACK vb6_CrashTraceVEH(PEXCEPTION_POINTERS ep) {
+    DWORD code = ep->ExceptionRecord->ExceptionCode;
+    if (code == EXCEPTION_ACCESS_VIOLATION || code == EXCEPTION_IN_PAGE_ERROR
+        || code == EXCEPTION_ILLEGAL_INSTRUCTION || code == EXCEPTION_INT_DIVIDE_BY_ZERO
+        || code == EXCEPTION_STACK_OVERFLOW) {
+        HMODULE hSelf = GetModuleHandleA(NULL);
+        void* frames[24];
+        USHORT n = (USHORT)CaptureStackBackTrace(0, 24, frames, NULL);
+        fprintf(stderr, "[C3_CRASH] code=0x%lx at rva=0x%lx base=%p frames=%u\n",
+                (unsigned long)code,
+                (unsigned long)((char*)ep->ExceptionRecord->ExceptionAddress - (char*)hSelf),
+                (void*)hSelf, (unsigned)n);
+        if (code == EXCEPTION_ACCESS_VIOLATION) {
+            /* Fix 187 诊断: ExceptionInformation[0] 的取值是 0=读 / 1=写 / **8=执行(DEP)** ——
+             * 8 表示 CPU 跳到了一个不可执行的地址(常见为 0, 即 call NULL), 与"读写越界"
+             * 是完全不同的故障形态, 打成 write=8 会把人引向"缺空指针检查的出参"。 */
+            fprintf(stderr, "[C3_CRASH]   av %s target=0x%llx\n",
+                    ep->ExceptionRecord->ExceptionInformation[0] == 8 ? "EXECUTE(DEP)" :
+                    ep->ExceptionRecord->ExceptionInformation[0] ? "write" : "read",
+                    (unsigned long long)ep->ExceptionRecord->ExceptionInformation[1]);
+        }
+        for (USHORT i = 0; i < n; i++) {
+            fprintf(stderr, "[C3_CRASH] #%u rva=0x%lx\n", (unsigned)i,
+                    (unsigned long)((char*)frames[i] - (char*)hSelf));
+        }
+#ifdef _M_IX86
+        /* x86 上 CaptureStackBackTrace 常常只返回 VEH/异常派发链(4 帧), 应用侧调用者全丢。
+         * 追加一次 Esp 线性扫描, 打印落在本模块镜像内的候选返回地址(按栈深度标 st+N)。 */
+        {
+            PIMAGE_DOS_HEADER dos = (PIMAGE_DOS_HEADER)hSelf;
+            PIMAGE_NT_HEADERS nt = (PIMAGE_NT_HEADERS)((char*)hSelf + dos->e_lfanew);
+            char* lo = (char*)hSelf;
+            char* hi = lo + nt->OptionalHeader.SizeOfImage;
+            DWORD* sp = (DWORD*)ep->ContextRecord->Esp;
+            int printed = 0;
+            for (int k = 0; k < 512 && printed < 24; k++) {
+                DWORD v;
+                __try { v = sp[k]; }
+                __except (EXCEPTION_EXECUTE_HANDLER) { break; }
+                if ((char*)v >= lo && (char*)v < hi) {
+                    fprintf(stderr, "[C3_CRASH]   st+%d rva=0x%lx\n", k, (unsigned long)((char*)v - lo));
+                    printed++;
+                }
+            }
+        }
+#endif
+        fflush(stderr);
+    }
+    return EXCEPTION_CONTINUE_SEARCH;
+}
+#endif
+
 void vb6_Init(void) {
     // 初始化随机种子
     srand((unsigned int)time(NULL));
+#ifdef _WIN32
+    if (GetEnvironmentVariableA("C3_COM_TRACE", NULL, 0) > 0
+        || GetEnvironmentVariableA("C3_CRASH_TRACE", NULL, 0) > 0) {
+        AddVectoredExceptionHandler(1, vb6_CrashTraceVEH);
+    }
+#endif
     // 初始化COM库 (实现在vb6com.c中)
     vb6_ComInit();
 }
@@ -101,6 +166,12 @@ void vb6_Beep(void) {
 // P18-C: Option Compare
 int g_vb6_optionCompareText = 0;  // 0=Binary(default), 1=Text
 int vb6_StrCmp(const wchar_t* a, const wchar_t* b) {
+    // Fix 173: VB6 里未赋值的 String (UDT 字段 / 未初始化变量) 是 **NULL BSTR**
+    // (= vbNullString), 与 L"" 比较相等; 直接把 NULL 喂给 wcscmp → 读 0x0
+    // → 0xC0000005。踩到点: VBFlexGrid.ctl:20425 `If Not .Format = vbNullString`
+    // (GetTextDisplay 里 Format 从未赋值的列 → .Format==NULL)。
+    if (!a) a = L"";
+    if (!b) b = L"";
     if (g_vb6_optionCompareText) return _wcsicmp(a, b);
     return wcscmp(a, b);
 }
@@ -327,6 +398,12 @@ void vb6_ErrRaise(int32_t errNum, BSTR source, BSTR description) {
         longjmp(*vb6_error_jmp_ptr, errNum);
     }
     // 未处理错误: 显示消息并退出
+    // 定位调用点用: C3_COM_TRACE 下打印返回地址 (RVA 可对 -g 产出的 .map 符号化)
+    if (GetEnvironmentVariableA("C3_COM_TRACE", NULL, 0) > 0) {
+        fprintf(stderr, "[C3_ERR] unhandled raise %d from %p\n",
+                (int)errNum, _ReturnAddress());
+        fflush(stderr);
+    }
     fwprintf(stderr, L"Unhandled error %d", (int)errNum);
     if (description) fwprintf(stderr, L": %s", description);
     fwprintf(stderr, L"\n");

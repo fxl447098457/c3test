@@ -156,9 +156,9 @@ int32_t vb6_GetScaleWidth(void* hwnd) {
     RECT rc;
     if (GetClientRect((HWND)hwnd, &rc)) {
         /* VB6 ScaleWidth: client width in twips (1 twip = 1/1440 inch) */
-        /* TwipsPerPixelX is typically 15 at 96 DPI */
-        int32_t twipsPerPixel = (int32_t)(1440.0 / GetDeviceCaps(GetDC(NULL), LOGPIXELSX));
-        return (int32_t)(rc.right - rc.left) * twipsPerPixel;
+        /* Fix 184: 与 vb6_TwipToX 同一 DPI 源 (此前此处按真实 DPI、setter 按写死
+           的 15，Form_Resize 把两者混算后控件被缩小 20%)。 */
+        return vb6_XToTwipX(rc.right - rc.left);
     }
     return 0;
 }
@@ -168,8 +168,7 @@ int32_t vb6_GetScaleHeight(void* hwnd) {
     RECT rc;
     if (GetClientRect((HWND)hwnd, &rc)) {
         /* VB6 ScaleHeight: client height in twips */
-        int32_t twipsPerPixel = (int32_t)(1440.0 / GetDeviceCaps(GetDC(NULL), LOGPIXELSY));
-        return (int32_t)(rc.bottom - rc.top) * twipsPerPixel;
+        return vb6_YToTwipY(rc.bottom - rc.top);
     }
     return 0;
 }

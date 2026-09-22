@@ -606,11 +606,21 @@
                             }
                         }
                         if (ocxPath143.empty()) {
-                            // 不命中: vbp 的 GUID 作备用 CLSID, 路径取第一条 (单 OCX 工程)
-                            // Fix 148: 必须先判空 — 之前直接 front() 在 vbp 的 OCX 文件
-                            // 不存在 (ocxRefs_ 为空) 时是 UB, 实测段错误 (SIGSEGV).
-                            altClsid143 = "{" + ocxRefs_->front().first + "}";
-                            if (ocxRefs_->size() == 1) ocxPath143 = ocxRefs_->front().second;
+                            // 不命中 (vbp 写的 GUID 与 typelib coclass GUID 不一致, 见
+                            // Fix 143b): vbp 的 GUID 作备用 CLSID, 路径取第一条。
+                            //
+                            // Fix 160: 备用 CLSID 与路径【都】只在单 OCX 工程回退。
+                            // 旧实现只给路径加了 size()==1 守卫, altClsid143 却对任意
+                            // 条目数都取 front() —— 多 OCX 工程下正在生成 B 控件时拿到
+                            // A.ocx 的 CLSID, 而此时 ocxPath143 为空 (下方 ocxFiles_
+                            // 按 tlKey143 也查不到), ocxCreateAny 会退到 CoCreateInstance
+                            // 用 A 的 CLSID 激活出 A 的控件, 代码生成侧却按 B 处理,
+                            // 静默用错控件。单 OCX 工程 front() 就是自己, 回退语义不变。
+                            // Fix 148: front() 前必须判空 — ocxRefs_ 为空时是 UB, 实测段错误.
+                            if (ocxRefs_->size() == 1) {
+                                altClsid143 = "{" + ocxRefs_->front().first + "}";
+                                ocxPath143 = ocxRefs_->front().second;
+                            }
                         }
                     }
                     if (ocxPath143.empty() && ocxFiles_) {

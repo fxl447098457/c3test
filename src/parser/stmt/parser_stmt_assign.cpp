@@ -285,9 +285,32 @@ std::unique_ptr<EraseStmt> Parser::parseEraseStmt() {
         return name;
     };
 
+    // Fix 082: VB6 允许 `Erase arr()` 的可选空括号 (Common.bas:423
+    // `Erase MsgBoxHelpData()`), 旧代码解析到变量名就停 -> 残留 '(' 触发
+    // VB2003/VB2002。此处吃掉可选的下标列表。
+    // EraseStmt 只携带变量名 (见 ast_stmt.hpp), 无法表达下标, 故只接受空括号;
+    // `Erase arr(1 To 2)` 报诊断 —— 静默丢弃下标会让后端退化成销毁整个数组。
+    auto skipEraseSubscripts = [this, &loc]() {
+        if (!match(TokenKind::LeftParen)) return;
+        int depth = 1;
+        bool empty = true;
+        while (depth > 0 && cur_.kind != TokenKind::EndOfFile) {
+            if (cur_.kind == TokenKind::LeftParen)       depth++;
+            else if (cur_.kind == TokenKind::RightParen) depth--;
+            else if (depth > 0 && cur_.kind != TokenKind::NewLine) empty = false;
+            advance();
+        }
+        if (!empty) {
+            diag_.error(DiagnosticID::ParseExpectedToken, loc,
+                "Erase 不支持带下标的形式, 只支持 'Erase arr' 或 'Erase arr()'");
+        }
+    };
+
     names.push_back(parseEraseTarget());
+    skipEraseSubscripts();
     while (match(TokenKind::Comma)) {
         names.push_back(parseEraseTarget());
+        skipEraseSubscripts();
     }
     return std::make_unique<EraseStmt>(loc, std::move(names));
 }
@@ -323,6 +346,16 @@ StmtPtr Parser::parseLabelOrAssignmentOrCall() {
         auto nameTok = advance();  // consume label name
         advance();                 // consume ':'
         return std::make_unique<LabelStmt>(loc, nameTok.text);
+    }
+
+    // VB6 行号标签: 语句起始处的整数字面量只可能是行号 —— 赋值/调用的左值必须是名字。
+    // 冒号可选 (`100: x = 1` 与 `100 x = 1` 都合法)。与命名标签同一条路:
+    // labelName 存行号文本, 后端发 `vb6_label_<cIdent(行号)>` 天然是合法 C 标签,
+    // 语义层的标签存在性比对也是纯字符串, 所以只补这一处识别即可。
+    if (inSingleLineIf_ == 0 && cur_.kind == TokenKind::IntegerLiteral) {
+        auto numTok = advance();  // consume 行号
+        if (cur_.kind == TokenKind::Colon) advance();  // 可选冒号
+        return std::make_unique<LabelStmt>(loc, numTok.text);
     }
 
     // 解析左值/调用目标表达式
@@ -460,11 +493,18 @@ StmtPtr Parser::parseLabelOrAssignmentOrCall() {
         return std::make_unique<CallStmt>(loc, std::move(call));
     }
 
+    // Fix 151: VB6 单行 If 的 Then 分支语句以 `Else` 终止:
+    //   If IsMissing(Action) Then Extender.Drag Else Extender.Drag Action
+    // Else/ElseIf 不得被当作裸调用的第一个实参 (VBFlexGrid.ctl 3047/3057)。
+    auto isStmtEndKeyword151 = [this]() {
+        return cur_.kind == TokenKind::Else || cur_.kind == TokenKind::ElseIf;
+    };
+
     // VB6 无括号调用: Sub arg1, arg2 / Debug.Print "text"
     // 如果表达式后还有同一行的 token (非 NewLine/Colon/EndOfFile),
     // 且不是中缀运算符 (但前缀运算符如 - 可开始新参数), 则视为无括号调用的参数列表
     if (cur_.kind != TokenKind::NewLine && cur_.kind != TokenKind::Colon &&
-        cur_.kind != TokenKind::EndOfFile && 
+        cur_.kind != TokenKind::EndOfFile && !isStmtEndKeyword151() &&
         (!isInfixOperator(cur_.kind) || isPrefixOperator(cur_.kind) || isDebugPrint)) {
         // 将表达式包装为 IndexOrCallExpr, 追加参数
         auto call = std::make_unique<IndexOrCallExpr>(loc,

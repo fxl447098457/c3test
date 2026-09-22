@@ -140,6 +140,10 @@ enum RtlResourceID {
     // Fix 148: VB6 容器对象模型 (Extender/Container/Controls) — OCX 真宿主 (axcontainer.c)
     // 注意: 179~197 已被 vb6forms_uc 拆分 + gdiplus 拆分占满, 故顺延到 198 避免 ID 冲突
     RTL_VB6FORMS_AXCONTAINER_C = 198,
+
+    // Fix 160y: DI 转发桩未带 vb6_di_lib 标记的杂项符号 (Imm 输入法 / version /
+    // TransparentBlt / msvbvm60 运行时) — gen_di_stubs.ps1 归入 unknown 族
+    RTL_VB6_DI_UNKNOWN_STUBS_C = 199,
 };
 
 // Session directory manager

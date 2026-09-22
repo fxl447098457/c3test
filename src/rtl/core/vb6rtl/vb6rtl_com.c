@@ -397,6 +397,15 @@ vb6_VARIANT vb6_VariantArrayGetVal(vb6_VARIANT v, int32_t index) {
     return vb6_VariantArrayGet(&v, index);
 }
 
+/* Fix 158f: Variant数组元素的取址 (见 vb6rtl_variant.h 说明) */
+vb6_VARIANT* vb6_VariantArrayElemPtr(vb6_VARIANT* v, int32_t index) {
+    if (!v || !(v->vt & vb6_vtArray) || !v->parray) return NULL;
+    vb6_SafeArray1D* arr = v->parray;
+    if (index < arr->lBound || index > arr->uBound) return NULL;
+    if (arr->elemType != vb6_sa_variant) return NULL;
+    return &((vb6_VARIANT*)arr->data)[index - arr->lBound];
+}
+
 /* Variant数组索引: 从持有SafeArray的Variant中取/设元素 */
 vb6_VARIANT vb6_VariantArrayGet(vb6_VARIANT* v, int32_t index) {
     vb6_VARIANT result;
@@ -523,6 +532,12 @@ int16_t vb6_UserControl_Enabled     = -1;
 int32_t vb6_UserControl_MousePointer = 0;
 void*   vb6_UserControl_MouseIcon   = NULL;
 int32_t vb6_UserControl_OLEDropMode = 0;
+// Fix 154-B: UserControl 其余宿主属性定义 (设计期/宿主状态, 初值随意).
+void*   vb6_UserControl_Picture = NULL;
+int32_t vb6_UserControl_BackColor = 0;
+int32_t vb6_UserControl_ForeColor = 0;
+int16_t vb6_UserControl_RightToLeft = 0;
+void*   vb6_UserControl_ParentControls = NULL;
 vb6_ComIface_Font* vb6_UserControl_Font = &g_vb6_UserControl_FontObj;
 struct vb6_UserControl_Ambient_Type vb6_UserControl_Ambient = { &g_vb6_UserControl_FontObj };
 
@@ -532,10 +547,34 @@ int16_t vb6_Ambient_UserMode   = -1;         // compiled output is runtime
 BSTR    vb6_Ambient_DisplayName = NULL;     // set to control instance name at runtime
 int32_t vb6_Ambient_ForeColor  = 0;          // black
 int32_t vb6_Ambient_BackColor  = 0x8000000F; // BTNFACE (VB6 default)
+int16_t vb6_Ambient_RightToLeft = 0;         // Fix 154-B: TriState 从环境属性
 
 // --- Extender ---
 int32_t vb6_Extender_Left = 0;
 int32_t vb6_Extender_Top  = 0;
+// Fix 153-B: Extender 属性转发槽位.
+// Fix 162 更正: 下面这句"设计期对象, 运行期恒不活动 → 初值随意"是**错的** ——
+// Width/Height 在运行期被真实读取 (VBFlexGrid.ctl 28728 用它做 MouseUp 命中测试:
+// `If (X >= 0 And X <= UserControl.Width) And ... Then RaiseEvent Click`)。
+// 当时两者只有定义、无任何赋值 → 恒为 0 → 命中测试恒假 → Click 事件永不触发,
+// 且 UserControl.Width/Height 连声明都没有 → C2065。
+// 现由 vb6_uc_push/vb6_uc_pop 按当前实例同步 (源: vb6_UCRec.extWidth/extHeight,
+// 创建入口收到的缇值, 精确非近似)。
+int32_t vb6_Extender_Width  = 0;
+int32_t vb6_Extender_Height = 0;
+// Fix 162: `UserControl.Width/Height` 与 Extender 同值 (cgen 对宿主伪对象
+// UserControl 发 vb6_UserControl_<Member>, 对 Extender 发 vb6_Extender_<Member>)。
+int32_t vb6_UserControl_Width  = 0;
+int32_t vb6_UserControl_Height = 0;
+int16_t vb6_Extender_Visible = -1;
+BSTR    vb6_Extender_Tag = NULL;
+BSTR    vb6_Extender_ToolTipText = NULL;
+int32_t vb6_Extender_DragMode = 0;
+int32_t vb6_Extender_Align = 0;
+int32_t vb6_Extender_HelpContextID = 0;
+int32_t vb6_Extender_WhatsThisHelpID = 0;
+void*   vb6_Extender_Container = NULL;
+void*   vb6_Extender_DragIcon = NULL;
 
 // --- Fix 133u: Extender.Visible/Height (czUI.ctl) ---
 struct vb6_UserControl_Extender_Type vb6_UserControl_Extender = { -1, 0 };
@@ -640,14 +679,26 @@ void vb6_UserControl_CancelAsyncRead(BSTR propName) {
 // pixels -- matching Charts 2020 usage (Extender.Left is already container
 // pixels; target UserControl.ScaleMode = 3 = Pixel -> identity).
 static double vb6_ucScaleToPixels(int32_t mode) {
+    // Fix 184: 单位表必须用**真实 DPI**。此前整张表按 96 写死，而容器侧
+    // (vb6_TwipToX / vb6_XToTwipX) 已按 DPI，于是 UserControl 内部每做一次
+    // 缇<->像素往返就缩 20% (VBFlexGrid 内层窗口 914px -> 731px)。
+    static double s_dpi = 0.0;
+    double dpi;
+    if (s_dpi <= 0.0) {
+        HDC dc = GetDC(NULL);
+        int d = dc ? GetDeviceCaps(dc, LOGPIXELSX) : 96;
+        if (dc) ReleaseDC(NULL, dc);
+        s_dpi = (d > 0) ? (double)d : 96.0;
+    }
+    dpi = s_dpi;
     switch (mode) {
-        case 1: return 1.0 / 15.0;      /* Twips */
-        case 2: return 96.0 / 72.0;     /* Points */
+        case 1: return dpi / 1440.0;    /* Twips */
+        case 2: return dpi / 72.0;      /* Points */
         case 3: return 1.0;             /* Pixels */
         case 4: return 1.0;             /* Characters (approx) */
-        case 5: return 96.0;            /* Inches */
-        case 6: return 96.0 / 25.4;     /* Millimeters */
-        case 7: return 96.0 / 2.54;     /* Centimeters */
+        case 5: return dpi;             /* Inches */
+        case 6: return dpi / 25.4;      /* Millimeters */
+        case 7: return dpi / 2.54;      /* Centimeters */
         default: return 1.0;            /* User / Container* / unknown */
     }
 }
@@ -678,4 +729,30 @@ void vb6_UserControl_AsyncRead(BSTR url, int32_t asyncType, BSTR propertyName,
 // Changed (vb6_PropertyPage_Changed / bare Changed).
 void vb6_UserControl_PropertyChanged(BSTR propName) {
     (void)propName;
+}
+
+// Fix 174: Extender / UserControl host methods referenced by VBFlexGrid.ctl
+// (Standard EXE 编译形态下容器不活动, 方法做最小可行实现即可满足链接/运行):
+//   UserControl.OLEDrag → vb6_UserControl_OLEDrag      (VBFlexGrid.ctl 2832)
+//   Extender.Drag       → vb6_Extender_Drag            (VBFlexGrid.ctl 3047)
+//   Extender.SetFocus   → vb6_Extender_SetFocus        (VBFlexGrid.ctl 3052)
+//   Extender.ZOrder     → vb6_Extender_ZOrder          (VBFlexGrid.ctl 3057)
+// OLE drag/drop 在无容器运行时无意义; Drag 与 ZOrder 的可选参数保留签名
+// (cgen 以 `vb6_Extender_Drag(&(vb6_VARIANT){0}, 0)` 形态调用), 忽略即可.
+void vb6_UserControl_OLEDrag(void) {
+    (void)0;
+}
+
+void vb6_Extender_Drag(vb6_VARIANT* Action, int _has_Action) {
+    (void)Action; (void)_has_Action;
+    (void)0;
+}
+
+void vb6_Extender_SetFocus(void) {
+    if (vb6_UserControl_hWnd) SetFocus((HWND)vb6_UserControl_hWnd);
+}
+
+void vb6_Extender_ZOrder(vb6_VARIANT* Position, int _has_Position) {
+    (void)Position; (void)_has_Position;
+    (void)0;
 }

@@ -247,6 +247,9 @@ bool CCodeGen::tryRewriteCOMLvalue(const std::string& target, const std::string&
                 // 对 Get 有参/无参而 Let 末参才是 value 的属性 (Item(key),
                 // Expires) 会取错方向, 故直接查 PropertyLet/PropertySet 符号.
                 std::string valArg = value;
+                // Fix 159-A: 保存 Property Let 的**写方向**形参表, 供拼接值实参时
+                // 定位 Value 的真实槽位 (见本函数尾部 newCall 构造).
+                std::vector<ParameterInfo> letSig159;
                 if (!isSet && newVerbs.find("prop_get_") == std::string::npos
                     && prefix.rfind("vb6_", 0) == 0 && !afterPg.empty()
                     && afterPg.find('(') == std::string::npos) {
@@ -258,9 +261,12 @@ bool CCodeGen::tryRewriteCOMLvalue(const std::string& target, const std::string&
                     // [key] 会取错方向).
                     const ParameterInfo* lastP90w = nullptr;
                     std::vector<ParameterInfo> writeP90w;
+                    bool writeDirResolved90w = false;   // Fix 156-B
                     if (findClassMemberWriteParams(cls90w, afterPg, isSet, writeP90w)
                         && !writeP90w.empty()) {
                         lastP90w = &writeP90w.back();
+                        writeDirResolved90w = true;
+                        letSig159 = writeP90w;   // Fix 159-A
                     } else {
                         // fallback: 写方向也查不到时沿用旧 findClassMemberCallParams
                         // (Get 优先 — 可能取到 Get 方向参数, 此时保守不打包)
@@ -274,6 +280,91 @@ bool CCodeGen::tryRewriteCOMLvalue(const std::string& target, const std::string&
                     }
                     if (lastP90w && lastP90w->type == Vb6Type::Variant) {
                         valArg = packLetValueArg(*lastP90w, valueExpr, value);
+                    } else if (lastP90w && writeDirResolved90w
+                               && lastP90w->type != Vb6Type::Empty) {
+                        // Fix 156-B: 反方向 — Property Let 末形参是**具体类型**
+                        // (Integer/Long/String/Double/Object...) 而 RHS 是 vb6_VARIANT
+                        // → 裸拼 valArg 触发 C2440 "无法从 vb6_VARIANT 转换为 int16_t".
+                        // 与 cgen_expr_call_arg_variant.inc 的 Fix 029 (位置实参路径)
+                        // 同构, 但 Pattern C/D2 是**字符串级改写**(直接拼 prop_let_ 调用),
+                        // 不经过实参发射循环, 因此那条修正覆盖不到这里.
+                        //   VBFlexGrid.ctl: Select Case VarType(Value) 把 Variant 分发到
+                        //     各类型化属性 (28 处):
+                        //       vb6_VBFlexGrid_prop_let_CellTextStyle((void*)me, Value)
+                        //         (形参 Integer) → C2440 vb6_VARIANT→int16_t
+                        //       vb6_VBFlexGrid_prop_let_Text((void*)me, Value)
+                        //         (形参 String)  → C2440 vb6_VARIANT→BSTR
+                        //   MainForm/UserEditingForm: prop_let_Cell(r, c, Value) 同理.
+                        // 仅在**写方向参数表解析成功** (findClassMemberWriteParams) 时执行:
+                        // 090w 的 fallback 走 findClassMemberCallParams (Get 优先), 末形参
+                        // 可能是 Get 的索引 (如 Cell 的 Col) 而非 Let 的 value, 按它提取
+                        // 会得到语义错误的结果, 故宁可保持原状.
+                        // Variant 判定与 toLongIfVariant 一致: C 串级前缀 + 已知 Variant 变量.
+                        bool valIsVar156 = cExprIsVariant(value);
+                        if (!valIsVar156 && valueExpr
+                            && valueExpr->kind == ASTNodeKind::IdentifierExpr) {
+                            std::string vl156 = Symbol::toLower(
+                                static_cast<IdentifierExpr&>(*valueExpr).name);
+                            if (knownVariantVars_.count(vl156)) valIsVar156 = true;
+                        }
+                        // Fix 169: RHS 是返回 **Windows VARIANT\*** 的 COM 调用
+                        // (vb6_ComCall/vb6_ComGetProp/…) 时, 上面两条判定都不认它
+                        // (它们返回 void\*, 不是 vb6_VARIANT) → 于是裸拼给具体类型形参,
+                        // C 里指针→整数只是告警不是错误, 值被截断成垃圾:
+                        //   VBFlexGrid.c:1107 (UserControl_ReadProperties)
+                        //     prop_let_OLEDropMode(me, vb6_ComCall(PBag, L"ReadProperty", …))
+                        //   → .ctl 的 Select Case 落 Case Else → Err.Raise 380
+                        //   → 该链上无错误处理器 → vb6_ErrRaise 里 ExitProcess(380),
+                        //     demo 启动即退 (Fix 167 让它进了消息循环后才暴露出来)。
+                        // 按既有惯用法先 vb6_VariantFromComResult 归一成 vb6_VARIANT,
+                        // 再走同一条 ext156 提取链 (与 ScaleWidth 读取处同构)。
+                        std::string valExpr169 = value;
+                        {
+                            static const std::vector<std::string> comRes169 = {
+                                "vb6_ComCall(", "vb6_ComCallByDispid(",
+                                "vb6_ComGetProp(", "vb6_ComGetPropArg(",
+                            };
+                            size_t s169 = valExpr169.find_first_not_of(" \t\r\n(");
+                            for (const auto& pr : comRes169) {
+                                if (s169 != std::string::npos
+                                    && valExpr169.compare(s169, pr.size(), pr) == 0) {
+                                    valExpr169 = "vb6_VariantFromComResult(" + valExpr169 + ")";
+                                    valIsVar156 = true;
+                                    break;
+                                }
+                            }
+                        }
+                        if (valIsVar156) {
+                            bool pIsArr156 =
+                                (static_cast<uint16_t>(lastP90w->type)
+                                 & static_cast<uint16_t>(Vb6Type::Array)) != 0;
+                            Vb6Type pBase156 = static_cast<Vb6Type>(
+                                static_cast<uint16_t>(lastP90w->type)
+                                & ~static_cast<uint16_t>(Vb6Type::Array));
+                            const char* ext156 = nullptr;
+                            if (pIsArr156) {
+                                ext156 = "vb6_VariantToSafeArray1D";
+                            } else switch (pBase156) {
+                                case Vb6Type::String:                          ext156 = "vb6_VariantToString";    break;
+                                case Vb6Type::Long:   case Vb6Type::Integer:
+                                case Vb6Type::Byte:   case Vb6Type::Boolean:                                     ext156 = "vb6_VariantToLong";     break;
+                                case Vb6Type::Double: case Vb6Type::Single:
+                                case Vb6Type::Currency: case Vb6Type::Date:                                     ext156 = "vb6_VariantToDouble";   break;
+                                case Vb6Type::LongPtr: case Vb6Type::ULong:                                     ext156 = "vb6_VariantToLongPtr";  break;
+                                case Vb6Type::Object:                          ext156 = "vb6_VariantToObjectVal"; break;
+                                default: break;
+                            }
+                            // Fix 169: 用归一后的 valExpr169 (COM 结果已包成 vb6_VARIANT)
+                            if (ext156) valArg = std::string(ext156) + "(" + valExpr169 + ")";
+                        } else if (lastP90w->type == Vb6Type::String && valueExpr
+                                   && isScalarImplicitStr159(
+                                          inferExprType(*valueExpr))) {
+                            // Fix 159-B (与 cgen_assign_com_prop.inc 同族): 写方向末参是
+                            // ByVal String 而 RHS 是日期/数值标量 → VB6 隐式 CStr.
+                            //   VBFlexGrid.ctl:5118 EditText = DateSerial(...)  →
+                            //   VBFlexGrid.c:58027 prop_let_EditText(me, double) C2440.
+                            valArg = wrapToBSTR(value, *valueExpr);
+                        }
                     }
                 }
                 // Fix 090ad: 只写属性 (无 Get, 如 Dictionary.key(OldKey)=NewKey) 的 LHS
@@ -284,6 +375,7 @@ bool CCodeGen::tryRewriteCOMLvalue(const std::string& target, const std::string&
                 // 形参含 value), 末段即被 pad 的 value 位 → 丢弃, 由真实 RHS value
                 // 拼接补齐, 否则 C2197 参数太多 (Dictionary.c 110/162).
                 std::string finalArgs = argsStr;
+                bool valuePadDropped159ad = false;   // Fix 159-A: 090ad 弹掉占位 Value 时跳过重排
                 if (matchedVerb != "prop_get_" && !argsStr.empty()
                     && prefix.rfind("vb6_", 0) == 0 && !afterPg.empty()
                     && afterPg.find('(') == std::string::npos) {
@@ -297,6 +389,7 @@ bool CCodeGen::tryRewriteCOMLvalue(const std::string& target, const std::string&
                             std::vector<std::string> topArgs = splitTopLevelArgs(argsStr);
                             if (topArgs.size() == paramsCd2.size() + 1 && topArgs.size() > 1) {
                                 topArgs.pop_back();  // 移除被 pad 的 value 默认值
+                                valuePadDropped159ad = true;   // Fix 159-A
                                 finalArgs.clear();
                                 for (size_t i = 0; i < topArgs.size(); i++) {
                                     if (i) finalArgs += ", ";
@@ -307,10 +400,63 @@ bool CCodeGen::tryRewriteCOMLvalue(const std::string& target, const std::string&
                     }
                 }
                 std::string newCall;
-                if (finalArgs.empty()) {
-                    newCall = prefix + newVerbs + afterPg + "(" + valArg + ")";
-                } else {
-                    newCall = prefix + newVerbs + afterPg + "(" + finalArgs + ", " + valArg + ")";
+                // Fix 159-A: Value 实参槽位修正.
+                // VB6 的 Property Let 把被赋的值放在**声明末尾的业务形参** (Cell 的
+                // 第 6 个业务参数), 而 C 签名把 Optional 的 `int _has_*` 标志统一追加在
+                // 所有业务参数之后 → Value 并非最后一个 C 形参. 本函数此前一律把
+                // valArg 直接拼在最后, 于是 Value 落进 _has_Row 槽, 4 个标志整体前移:
+                //   VBFlexGrid1.Cell(FlexCellToolTipText, i, j) = "i/j info tip."
+                //   → prop_let_Cell(me, 8, i, j, -1, -1, 1, 1, 0, 0, "…")
+                //     (签名: me, Setting, Row, Col, RowSel, ColSel, Value, _has_×4)
+                //   → MainForm.c 5 处成对 C2440 "int→vb6_VARIANT" + "vb6_VARIANT→int".
+                // 修正: 解析到写方向参数表时, 把尾部恰好等于 Optional 形参个数的那几段
+                // (即 _has_* 标志) 摘出来, 将 valArg 插到业务参数末尾、标志之前.
+                // 严格前置条件 (段数 == 1 + 业务形参数 + Optional 数) 不满足时原样拼接,
+                // 保持既有行为 (090ad 已把 pad 出的占位 Value 弹掉的场景即不满足).
+                bool spliced159 = false;
+                if (!finalArgs.empty() && letSig159.size() >= 2 && !valuePadDropped159ad) {
+                    std::vector<std::string> seg159 = splitTopLevelArgs(finalArgs);
+                    size_t nBiz159 = letSig159.size();   // 含末位 Value (其槽位待本处填)
+                    size_t optCnt159 = 0;
+                    for (const auto& p : letSig159) {
+                        if (p.isOptional && !p.isParamArray) optCnt159++;
+                    }
+                    // finalArgs = [obj] + (业务形参 - Value) + _has_* 标志
+                    size_t nFlag159 = (seg159.size() > nBiz159 - 1)
+                                          ? (seg159.size() - nBiz159) : 0;
+                    bool flagsLookSimple159 = nFlag159 > 0;
+                    for (size_t i = seg159.size() - nFlag159;
+                         i < seg159.size() && flagsLookSimple159; i++) {
+                        for (char ch : seg159[i]) {
+                            if (!isdigit(static_cast<unsigned char>(ch)) && ch != '-') {
+                                flagsLookSimple159 = false;
+                                break;
+                            }
+                        }
+                    }
+                    if (nFlag159 > 0 && nFlag159 == optCnt159 && flagsLookSimple159
+                        && seg159.size() == (nBiz159 - 1) + nFlag159 + 1) {
+                        std::string head159, tail159;
+                        for (size_t i = 0; i + nFlag159 < seg159.size(); i++) {
+                            if (i) head159 += ", ";
+                            head159 += seg159[i];
+                        }
+                        for (size_t i = seg159.size() - nFlag159;
+                             i < seg159.size(); i++) {
+                            if (!tail159.empty()) tail159 += ", ";
+                            tail159 += seg159[i];
+                        }
+                        newCall = prefix + newVerbs + afterPg + "(" + head159
+                                + ", " + valArg + ", " + tail159 + ")";
+                        spliced159 = true;
+                    }
+                }
+                if (!spliced159) {
+                    if (finalArgs.empty()) {
+                        newCall = prefix + newVerbs + afterPg + "(" + valArg + ")";
+                    } else {
+                        newCall = prefix + newVerbs + afterPg + "(" + finalArgs + ", " + valArg + ")";
+                    }
                 }
                 std::string tag = isSet ? "Set" : "Let";
                 c_.emitLine(newCall + ";  /* Property " + tag + " via prop_get_ rewrite (Pattern C/D2) */");

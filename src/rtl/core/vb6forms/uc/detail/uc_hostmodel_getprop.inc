@@ -43,9 +43,9 @@
             vb6_ho_clientTwips(obj, &w, &hh);
         } else if (isForm) {
             RECT rc; GetWindowRect((HWND)obj, &rc);
-            w = (rc.right - rc.left) * 15; hh = (rc.bottom - rc.top) * 15;
+            w = vb6_XToTwipX(rc.right - rc.left); hh = vb6_YToTwipY(rc.bottom - rc.top);
             if (_wcsicmp(name, L"Left") == 0 || _wcsicmp(name, L"Top") == 0) {
-                w = rc.left * 15; hh = rc.top * 15;
+                w = vb6_XToTwipX(rc.left); hh = vb6_YToTwipY(rc.top);
             }
         } else {
             vb6_ho_ctrlRect(obj, NULL, NULL, &w, &hh);
@@ -58,7 +58,8 @@
                        _wcsicmp(name, L"Left") == 0) ? w : hh;
         // ScaleWidth/ScaleHeight 需按对象自身 ScaleMode 换算
         if (_wcsicmp(name, L"ScaleWidth") == 0 || _wcsicmp(name, L"ScaleHeight") == 0) {
-            if (scaleMode == 3) val = val / 15;   // Pixel
+            if (scaleMode == 3)   /* Fix 184: twips -> pixels via the shared DPI source */
+                val = (_wcsicmp(name, L"ScaleHeight") == 0) ? vb6_TwipToY(val) : vb6_TwipToX(val);
         }
         vb6_ho_setVariantLong(out, val); return 1;
     }

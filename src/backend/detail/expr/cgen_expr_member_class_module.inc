@@ -171,6 +171,38 @@
             }
 
             if (!isVarName) {
+                // Fix 159-F: 对象是**过程级变量** (symTab_ 只看模块作用域, 形参/局部
+                // 不可见 → isVarName 误判为 false) 而成员是 hWnd 时, 直接取该变量的值.
+                // 运行时约定"窗体/控件对象值本身就是它的 HWND"
+                //   (vb6_Forms_Register(void* hwnd)、Me→vb6_hwnd_MainForm、
+                //    控件实例经 vb6_UC_InstanceOf(vb6_hwnd_X) 反查),
+                // 故 VB6 的 Form.hWnd / RefForm.hWnd / CurrControl.hWnd 即该变量本身.
+                // 此前落到下面的"模块.成员"分支: memSym 命中 VBFlexGrid.ctl 的 hWnd 属性
+                // → 发出 vb6_VBFlexGrid_hWnd 全局 → C2065×17
+                // (Common.bas:1172/1175…, VisualStyles.bas:230/236/239…).
+                // 类实例变量 (knownClassVars_) 不介入 —— 它的 hWnd 应走上面的类成员分派.
+                {
+                    const std::string memL159F = Symbol::toLower(node.memberName);
+                    const std::string objL159F = Symbol::toLower(objIdent.name);
+                    bool objIsProcVar159F =
+                        !knownClassVars_.count(objL159F)
+                        && (knownLongVars_.count(objL159F)
+                            || knownObjectVars_.count(objL159F)
+                            || knownVariantVars_.count(objL159F)
+                            || knownLongPtrVars_.count(objL159F));
+                    if (memL159F == "hwnd" && objIsProcVar159F) {
+                        emitExpr(*node.object);
+                        std::string objE159F = std::move(lastExpr_);
+                        lastExpr_ = "(intptr_t)(" + objE159F + ")";
+                        if (std::getenv("C3_DBG159")) {
+                            std::fprintf(stderr,
+                                "[DBG159] 159F %s.hWnd -> %s (mod=%s)\n",
+                                objIdent.name.c_str(), lastExpr_.c_str(),
+                                moduleName_.c_str());
+                        }
+                        return;
+                    }
+                }
                 // 确定函数名的模块前缀
                 std::string sourceMod;
                 // Fix 092v: `Common.Version()` — 限定符是**模块名**时以限定模块为准.

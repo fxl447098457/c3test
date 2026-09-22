@@ -100,6 +100,7 @@ void SemanticAnalyzer::visit(LiteralExpr& node) {
     switch (node.literalKind) {
         case LiteralKind::Integer:  lastExprType_ = Vb6Type::Integer; break;
         case LiteralKind::Long:     lastExprType_ = Vb6Type::Long; break;
+        case LiteralKind::LongPtr:  lastExprType_ = Vb6Type::LongPtr; break;
         case LiteralKind::Single:   lastExprType_ = Vb6Type::Single; break;
         case LiteralKind::Double:   lastExprType_ = Vb6Type::Double; break;
         case LiteralKind::Currency: lastExprType_ = Vb6Type::Currency; break;

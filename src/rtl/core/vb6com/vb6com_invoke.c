@@ -73,6 +73,10 @@ void* vb6_ComCall(void* disp, const wchar_t* methodName,
     }
     IDispatch* pDisp = (IDispatch*)disp;
 
+    if (GetEnvironmentVariableW(L"C3_COM_TRACE", NULL, 0) > 0) {
+        fprintf(stderr, "[C3_COM] ComCall fallback to IDispatch: disp=%p isFont=%d method=%ls\n",
+                disp, vb6_UC_IsFont(disp), methodName); fflush(stderr);
+    }
     DISPID dispid = vb6_getDispid(pDisp, methodName);
     if (dispid == DISPID_UNKNOWN) {
         fwprintf(stderr, L"vb6_ComCall: method \"%ls\" not found\n", methodName);
@@ -106,7 +110,7 @@ void* vb6_ComCall(void* disp, const wchar_t* methodName,
 
     if (GetEnvironmentVariableW(L"C3_OCX_TRACE", NULL, 0) > 0)
         fprintf(stderr, "[C3_COM] Call '%ls' hr=0x%08lX vt=%d\n",
-                methodName, (unsigned long)hr, result ? result->vt : -1);
+                methodName, (unsigned long)hr, result ? result->vt : -1); fflush(stderr);
 
     if (FAILED(hr)) {
         vb6_ComCheckError(hr, &excep, L"ComCall");
@@ -191,6 +195,12 @@ void* vb6_ComCallByDispid(void* disp, int32_t dispid,
 // COM属性Get (返回VARIANT*)
 void* vb6_ComGetProp(void* disp, const wchar_t* propName) {
     if (!disp) return NULL;
+    /* Fix 164z2-dbg: C3_COM_TRACE 入口日志 */
+    if (GetEnvironmentVariableW(L"C3_COM_TRACE", NULL, 0) > 0) {
+        fprintf(stderr, "[C3_COM] GetProp entry: disp=%p isFont=%d isHost=%d name=%ls\n",
+                disp, vb6_UC_IsFont(disp), vb6_Host_IsHostObject(disp), propName);
+        fflush(stderr);
+    }
     /* Fix 125: 字体结构体 (非 COM 对象) 直接读字段 — 生成代码把 `With <font>.Name`
        编译成 COM 读, 对结构体做 Invoke 会崩。 */
     if (vb6_UC_IsFont(disp)) {
@@ -207,6 +217,29 @@ void* vb6_ComGetProp(void* disp, const wchar_t* propName) {
             }
         }
         return (void*)res;
+    }
+    /* Fix 168: Extender 结构体同 Fix 125 字体 —— `With UserControl.Extender` 的
+       .Width/.Height/.Align 被编译成对普通结构体的 COM 读, Invoke 即跳进 .data. */
+    if (vb6_UC_IsExtender(disp)) {
+        int32_t ekind = -1;
+        void* efp = vb6_UC_ExtenderField(disp, propName, &ekind);
+        VARIANT* eres = (VARIANT*)calloc(1, sizeof(VARIANT));
+        if (!eres) return NULL;
+        if (efp) {
+            switch (ekind) {
+                case 0: eres->vt = VT_BSTR; eres->bstrVal = SysAllocString(*(BSTR*)efp); break;
+                case 1: eres->vt = VT_R4;   eres->fltVal = *(float*)efp; break;
+                case 2: eres->vt = VT_I2;   eres->iVal = *(int16_t*)efp; break;
+                default: eres->vt = VT_I4;  eres->lVal = *(int32_t*)efp; break;
+            }
+        }
+        return (void*)eres;
+    }
+/* Fix 164z2-dbg: C3_COM_TRACE 时打印落入 IDispatch 的 disp */
+    if (GetEnvironmentVariableW(L"C3_COM_TRACE", NULL, 0) > 0) {
+        fprintf(stderr, "[C3_COM] GetProp fallback to IDispatch: disp=%p isFont=%d name=%ls\n",
+                disp, vb6_UC_IsFont(disp), propName);
+        fflush(stderr);
     }
     /* Fix 112: 宿主对象分派 (见 vb6_ComCall 注释) */
     if (vb6_Host_IsHostObject(disp)) {
@@ -240,7 +273,7 @@ void* vb6_ComGetProp(void* disp, const wchar_t* propName) {
 
     if (GetEnvironmentVariableW(L"C3_OCX_TRACE", NULL, 0) > 0)
         fprintf(stderr, "[C3_COM] GetProp '%ls' hr=0x%08lX vt=%d\n",
-                propName, (unsigned long)hr, result ? result->vt : -1);
+                propName, (unsigned long)hr, result ? result->vt : -1); fflush(stderr);
 
     if (FAILED(hr)) {
         vb6_ComCheckError(hr, &excep, L"ComGetProp");
@@ -322,6 +355,23 @@ void vb6_ComSetProp(void* disp, const wchar_t* propName, void* value_void) {
                 case 1: *(float*)fp = (float)vb6_VariantToDouble(v); break;
                 case 2: *(int16_t*)fp = (int16_t)vb6_VariantToDouble(v); break;
                 default: *(int32_t*)fp = (int32_t)vb6_VariantToDouble(v); break;
+            }
+        }
+        free(value_void);
+        return;
+    }
+    /* Fix 168: Extender 结构体的 `With ...: .Width = ...` 写字段, 同字体路径 */
+    if (disp && vb6_UC_IsExtender(disp)) {
+        int32_t ekind = -1;
+        void* efp = vb6_UC_ExtenderField(disp, propName, &ekind);
+        if (efp && value_void) {
+            VARIANT v = *(VARIANT*)value_void;
+            switch (ekind) {
+                case 0: *(BSTR*)efp = (v.vt == VT_BSTR && v.bstrVal)
+                                   ? SysAllocString(v.bstrVal) : NULL; break;
+                case 1: *(float*)efp = (float)vb6_VariantToDouble(v); break;
+                case 2: *(int16_t*)efp = (int16_t)vb6_VariantToDouble(v); break;
+                default: *(int32_t*)efp = (int32_t)vb6_VariantToDouble(v); break;
             }
         }
         free(value_void);

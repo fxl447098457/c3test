@@ -11,6 +11,12 @@
 #include <oleauto.h>
 #include <olectl.h>
 #include <stdint.h>
+// Fix 165: 恢复的 39 个桩所需 (PathMatchSpecW / SHBrowseForFolder / DwmSetWindowAttribute /
+// MakeSureDirectoryPathExists)。
+#include <shlwapi.h>
+#include <shlobj.h>
+#include <dwmapi.h>
+#include <imagehlp.h>
 
 // Use static CRT to match the generated code linkage
 #pragma comment(lib, "gdi32.lib")
@@ -18,6 +24,17 @@
 #pragma comment(lib, "shlwapi.lib")
 #pragma comment(lib, "user32.lib")
 #pragma comment(lib, "kernel32.lib")
+// Fix 165: 同上，恢复的桩所需。
+#pragma comment(lib, "shell32.lib")
+#pragma comment(lib, "dwmapi.lib")
+#pragma comment(lib, "imagehlp.lib")
+#pragma comment(lib, "comdlg32.lib")
+
+// Fix 165: winbase.h 只把 RtlFillMemory 定义成**函数式宏**、没有函数声明,
+// 而桩体里用的是 `(void (WINAPI *)(...))RtlFillMemory)` (后面没有 `(` → 宏不展开)
+// → C2065 未声明标识符。与 vb6_di_unknown_stubs.c 顶部同一手法: 先 #undef 再自己声明。
+#undef RtlFillMemory
+void WINAPI RtlFillMemory(void*, size_t, unsigned char);
 
 /* GDI32 forwarding stubs */
 intptr_t __stdcall vb6_di_CreateEnhMetaFileW(intptr_t a, intptr_t b, intptr_t c, intptr_t d) {
@@ -218,14 +235,66 @@ intptr_t __stdcall vb6_di_VarPtr(void* Ptr) {
  * VB6 运行时语义: if (psrc) psrc->AddRef(); *ppdst = psrc; 返回 HRESULT。
  * 旧值不在此处 Release (原版 VB6 由调用侧处理), 保持同一行为以避免误 Release
  * 非持有引用而崩溃; 代价是覆盖旧值时可能泄漏一次引用, 与原版一致。
- * 调用点: vbaObjSetAddref((void*)&(oCallback), _vb6_with_60->ClientCertCallback) */
+ * 调用点: vbaObjSetAddref((void*)&(oCallback), _vb6_with_60->ClientCertCallback)
+ *
+ * Fix 164x2: 只在来源是**真实 COM 对象**时才调用 AddRef。VB6 运行时的 psrc
+ * 永远是带 lpVtbl 的 IUnknown; 但 C3 编译的类实例 (vb6_cls_*) 是纯 C 结构体,
+ * 没有 vtable (VBFlexGridBase.bas 把 ObjPtr(Me) 即类结构体地址经 FlexObjSetAddRef
+ * 存进对象变量)。若无条件 AddRef, 会对结构体首 qword (常是窗口句柄) 解引用当
+ * vtable 调 [vtbl+8] → 0xC0000005。用 VirtualQuery 守卫: 仅当 vtable 指针落在
+ * 已提交可读页且第 2 槽 (AddRef) 指向可执行代码时才视为 COM。真 COM (StdPicture
+ * 等) 的 AddRef 语义原样保留。 */
+static int vb6_di_IsRealComObject(const void* p) {
+    if (!p) return 0;
+    const void* vtbl = *((void* const*)p);
+    if (!vtbl) return 0;
+    MEMORY_BASIC_INFORMATION mbi;
+    if (VirtualQuery(vtbl, &mbi, sizeof(mbi)) != sizeof(mbi)) return 0;
+    if (mbi.State != MEM_COMMIT) return 0;
+    if (mbi.Protect & (PAGE_NOACCESS | PAGE_GUARD)) return 0;
+    const void* addref = *((void* const*)vtbl + 1);
+    if (!addref) return 0;
+    if (VirtualQuery(addref, &mbi, sizeof(mbi)) != sizeof(mbi)) return 0;
+    if (mbi.State != MEM_COMMIT) return 0;
+    DWORD prot = mbi.Protect & 0xFF;  /* 剥离 PAGE_GUARD/NOCACHE/WRITECOMBINE 修饰位 */
+    return (prot == PAGE_EXECUTE || prot == PAGE_EXECUTE_READ
+            || prot == PAGE_EXECUTE_READWRITE || prot == PAGE_EXECUTE_WRITECOPY);
+}
 intptr_t __stdcall vb6_di_vb6___vbaObjSetAddref(void* oDest, intptr_t lSrcPtr) {
-    if (lSrcPtr) {
+    if (lSrcPtr && vb6_di_IsRealComObject((const void*)(uintptr_t)lSrcPtr)) {
         IUnknown* pSrc = (IUnknown*)(uintptr_t)lSrcPtr;
         pSrc->lpVtbl->AddRef(pSrc);
     }
     *(void**)oDest = (void*)(uintptr_t)lSrcPtr;
     return 0; /* S_OK */
+}
+
+/* Fix 160z: msvbvm60 运行时 __vbaObjAddref / __vbaObjSet (VBFlexGridBase 声明).
+ * __vbaObjAddref: 对已持有引用加一次引用并返回 S_OK (与 SetAddref 的存储部分
+ * 不同, 本符号只增加引用, 不写回目标)。
+ * __vbaObjSet: 把对象指针写入目标空位, 不加引用 (调用侧已接管所有权的场合)。 */
+intptr_t __stdcall vb6_di_vb6___vbaObjAddref(intptr_t lpObject) {
+    if (lpObject && vb6_di_IsRealComObject((const void*)(uintptr_t)lpObject)) {
+        IUnknown* pObj = (IUnknown*)(uintptr_t)lpObject;
+        pObj->lpVtbl->AddRef(pObj);
+    }
+    return 0; /* S_OK */
+}
+intptr_t __stdcall vb6_di_vb6___vbaObjSet(void* Destination, intptr_t lpObject) {
+    *(void**)Destination = (void*)(uintptr_t)lpObject;
+    return 0; /* S_OK */
+}
+
+/* Fix 160z-2: HtmlHelpW 由 hhctrl.ocx 导出, x64 SDK 无该导入库,
+ * 故按名动态解析 (isNoImportLib 只防链接, 这里提供真实现)。 */
+intptr_t __stdcall vb6_di_HtmlHelpW(intptr_t hWndCaller, intptr_t lpszFile, intptr_t uCommand, intptr_t dwData) {
+    static void (WINAPI* fnHtmlHelp)() = NULL;
+    if (fnHtmlHelp == NULL) {
+        HMODULE m = LoadLibraryA("hhctrl.ocx");
+        if (m != NULL) { fnHtmlHelp = (void (WINAPI*)())GetProcAddress(m, "HtmlHelpW"); }
+    }
+    if (fnHtmlHelp == NULL) { return 0; }
+    return (intptr_t)((intptr_t (WINAPI*)(intptr_t, intptr_t, intptr_t, intptr_t))fnHtmlHelp)(hWndCaller, lpszFile, uCommand, dwData);
 }
 
 /* 序号 644 别名 (VBMAN cToolsArray.cls):
@@ -270,4 +339,197 @@ intptr_t __stdcall vb6_di_CertSelectCertificateW(void* pCertSelectInfo) {
     }
     if (pfn) return (intptr_t)pfn(pCertSelectInfo);
     return 0;
+}
+
+/* Fix 174: COMCTL32 ordinal #383 forwarding stub (VBFlexGridBase.bas:
+ *   Declare Sub DoReaderMode Lib "comctl32" Alias "#383" (lpRMI As READERMODEINFO)
+ *   → vb6_di_ord_383(vb6_type_READERMODEINFO*), C3 生成代码以
+ *   `#define DoReaderMode vb6_di_ord_383` 映射 (VBFlexGridBase.h:205).
+ * Standard EXE 运行期无 ReaderMode 宿主, ordinal 解析失败时安全 no-op.
+ * 结构与 C3 生成的 VB6_TYPE_READERMODEINFO_DEFINED 一致. */
+typedef struct vb6_di_READERMODEINFO {
+    int32_t cbSize;
+    intptr_t hWnd;
+    int32_t dwFlags;
+    intptr_t lpRC;
+    intptr_t lpfnScroll;
+    intptr_t lpfnDispatch;
+    intptr_t lParam;
+} vb6_di_READERMODEINFO;
+void __stdcall vb6_di_ord_383(vb6_di_READERMODEINFO* lpRMI) {
+    typedef void (WINAPI* fnDoReaderMode)(vb6_di_READERMODEINFO*);
+    static fnDoReaderMode pfn = NULL;
+    if (!pfn) {
+        HMODULE h = GetModuleHandleW(L"comctl32.dll");
+        if (!h) h = LoadLibraryW(L"comctl32.dll");
+        if (h) pfn = (fnDoReaderMode)GetProcAddress(h, (LPCSTR)383);
+    }
+    if (pfn) pfn(lpRMI);
+}
+
+// ============================================================
+// Fix 165: 从 HEAD 恢复 39 个被 gen_di_stubs.ps1 重生成弄丢的桩
+//
+// 生成器只扫**一个编译会话**的 .h，本会话没声明到的符号就会从输出文件里消失
+// —— 于是 test_declare 之类的工程 LNK2019 vb6_di_GetTickCount。这些桩原先散在
+// 自动生成的 win32/user32/com/shell 四族里，重生成后整体被覆盖掉。
+//
+// 放这里的理由：gen_di_stubs.ps1:162 会把本文件已定义的名字跳过 ($hand)，
+// 所以写进来就不会再被下一次重生成删掉。
+// ============================================================
+/* ChooseColorA */
+intptr_t __stdcall vb6_di_ChooseColorA(void* pChoosecolor) {
+    return ((intptr_t (WINAPI *)(void*))ChooseColorA)(pChoosecolor);
+}
+/* GetFileTitleA */
+intptr_t __stdcall vb6_di_GetFileTitleA(BSTR szFile, BSTR szTitle, intptr_t cbBuf) {
+    return ((intptr_t (WINAPI *)(BSTR, BSTR, intptr_t))GetFileTitleA)(szFile, szTitle, cbBuf);
+}
+/* GetOpenFileNameA */
+intptr_t __stdcall vb6_di_GetOpenFileNameA(void* file) {
+    return ((intptr_t (WINAPI *)(void*))GetOpenFileNameA)(file);
+}
+/* MakeSureDirectoryPathExists */
+intptr_t __stdcall vb6_di_MakeSureDirectoryPathExists(BSTR DirPath) {
+    return ((intptr_t (WINAPI *)(BSTR))MakeSureDirectoryPathExists)(DirPath);
+}
+/* PathMatchSpecW */
+intptr_t __stdcall vb6_di_PathMatchSpecW(intptr_t pszFileParam, intptr_t pszSpec) {
+    return ((intptr_t (WINAPI *)(intptr_t, intptr_t))PathMatchSpecW)(pszFileParam, pszSpec);
+}
+/* SHBrowseForFolder */
+intptr_t __stdcall vb6_di_SHBrowseForFolder(void* lpbi) {
+    return ((intptr_t (WINAPI *)(void*))SHBrowseForFolder)(lpbi);
+}
+/* SHGetPathFromIDListA */
+intptr_t __stdcall vb6_di_SHGetPathFromIDListA(intptr_t pidl, BSTR pszPath) {
+    return ((intptr_t (WINAPI *)(intptr_t, BSTR))SHGetPathFromIDListA)(pidl, pszPath);
+}
+/* SendMessageA */
+intptr_t __stdcall vb6_di_SendMessageA(intptr_t hwnd, intptr_t wMsg, intptr_t wParam, void* lParam) {
+    return ((intptr_t (WINAPI *)(intptr_t, intptr_t, intptr_t, void*))SendMessageA)(hwnd, wMsg, wParam, lParam);
+}
+/* GetDesktopWindow */
+intptr_t __stdcall vb6_di_GetDesktopWindow() {
+    return ((intptr_t (WINAPI *)(void))GetDesktopWindow)();
+}
+/* CreateWindowExA */
+intptr_t __stdcall vb6_di_CreateWindowExA(intptr_t dwExStyle, BSTR lpClassName, BSTR lpWindowName, intptr_t dwStyle, intptr_t X, intptr_t Y, intptr_t nWidth, intptr_t nHeight, intptr_t hWndParent, intptr_t hMenu, intptr_t hInstance, void* lpParam) {
+    return ((intptr_t (WINAPI *)(intptr_t, BSTR, BSTR, intptr_t, intptr_t, intptr_t, intptr_t, intptr_t, intptr_t, intptr_t, intptr_t, void*))CreateWindowExA)(dwExStyle, lpClassName, lpWindowName, dwStyle, X, Y, nWidth, nHeight, hWndParent, hMenu, hInstance, lpParam);
+}
+/* SetWindowLongA */
+intptr_t __stdcall vb6_di_SetWindowLongA(intptr_t hwnd, intptr_t nIndex, intptr_t dwNewLong) {
+    return ((intptr_t (WINAPI *)(intptr_t, intptr_t, intptr_t))SetWindowLongA)(hwnd, nIndex, dwNewLong);
+}
+/* GetParent */
+intptr_t __stdcall vb6_di_GetParent(intptr_t hwnd) {
+    return ((intptr_t (WINAPI *)(intptr_t))GetParent)(hwnd);
+}
+/* GetWindow */
+intptr_t __stdcall vb6_di_GetWindow(intptr_t hwnd, intptr_t wCmd) {
+    return ((intptr_t (WINAPI *)(intptr_t, intptr_t))GetWindow)(hwnd, wCmd);
+}
+/* FindWindowExA */
+intptr_t __stdcall vb6_di_FindWindowExA(intptr_t hWnd1, intptr_t hWnd2, BSTR lpsz1, BSTR lpsz2) {
+    return ((intptr_t (WINAPI *)(intptr_t, intptr_t, BSTR, BSTR))FindWindowExA)(hWnd1, hWnd2, lpsz1, lpsz2);
+}
+/* PtInRect */
+intptr_t __stdcall vb6_di_PtInRect(void* lpRect, intptr_t X, intptr_t Y) {
+    return ((intptr_t (WINAPI *)(void*, intptr_t, intptr_t))PtInRect)(lpRect, X, Y);
+}
+/* LoadCursorA */
+intptr_t __stdcall vb6_di_LoadCursorA(intptr_t hInstance, intptr_t lpCursorName) {
+    return ((intptr_t (WINAPI *)(intptr_t, intptr_t))LoadCursorA)(hInstance, lpCursorName);
+}
+/* DestroyCursor */
+intptr_t __stdcall vb6_di_DestroyCursor(intptr_t hCursor) {
+    return ((intptr_t (WINAPI *)(intptr_t))DestroyCursor)(hCursor);
+}
+/* GetWindowLongA */
+intptr_t __stdcall vb6_di_GetWindowLongA(intptr_t hwnd, intptr_t nIndex) {
+    return ((intptr_t (WINAPI *)(intptr_t, intptr_t))GetWindowLongA)(hwnd, nIndex);
+}
+/* IsWindowUnicode */
+intptr_t __stdcall vb6_di_IsWindowUnicode(intptr_t hwnd) {
+    return ((intptr_t (WINAPI *)(intptr_t))IsWindowUnicode)(hwnd);
+}
+/* GetPropA */
+intptr_t __stdcall vb6_di_GetPropA(intptr_t hWnd, BSTR lpString) {
+    return ((intptr_t (WINAPI *)(intptr_t, BSTR))GetPropA)(hWnd, lpString);
+}
+/* SetPropA */
+intptr_t __stdcall vb6_di_SetPropA(intptr_t hWnd, BSTR lpString, intptr_t hData) {
+    return ((intptr_t (WINAPI *)(intptr_t, BSTR, intptr_t))SetPropA)(hWnd, lpString, hData);
+}
+/* RemovePropA */
+intptr_t __stdcall vb6_di_RemovePropA(intptr_t hWnd, BSTR lpString) {
+    return ((intptr_t (WINAPI *)(intptr_t, BSTR))RemovePropA)(hWnd, lpString);
+}
+/* PostMessageA */
+intptr_t __stdcall vb6_di_PostMessageA(intptr_t hWnd, intptr_t wMsg, intptr_t wParam, intptr_t lParam) {
+    return ((intptr_t (WINAPI *)(intptr_t, intptr_t, intptr_t, intptr_t))PostMessageA)(hWnd, wMsg, wParam, lParam);
+}
+/* CopyImage */
+intptr_t __stdcall vb6_di_CopyImage(intptr_t hImage, intptr_t uType, intptr_t cxDesired, intptr_t cyDesired, intptr_t fuFlags) {
+    return ((intptr_t (WINAPI *)(intptr_t, intptr_t, intptr_t, intptr_t, intptr_t))CopyImage)(hImage, uType, cxDesired, cyDesired, fuFlags);
+}
+/* IsZoomed */
+intptr_t __stdcall vb6_di_IsZoomed(intptr_t hWnd) {
+    return ((intptr_t (WINAPI *)(intptr_t))IsZoomed)(hWnd);
+}
+/* DwmSetWindowAttribute */
+intptr_t __stdcall vb6_di_DwmSetWindowAttribute(intptr_t hWnd, intptr_t dwAttribute, int32_t* pvAttribute, intptr_t cbAttribute) {
+    return ((intptr_t (WINAPI *)(intptr_t, intptr_t, int32_t*, intptr_t))DwmSetWindowAttribute)(hWnd, dwAttribute, pvAttribute, cbAttribute);
+}
+/* CreateRoundRectRgn */
+intptr_t __stdcall vb6_di_CreateRoundRectRgn(intptr_t X1, intptr_t Y1, intptr_t X2, intptr_t Y2, intptr_t X3, intptr_t Y3) {
+    return ((intptr_t (WINAPI *)(intptr_t, intptr_t, intptr_t, intptr_t, intptr_t, intptr_t))CreateRoundRectRgn)(X1, Y1, X2, Y2, X3, Y3);
+}
+/* SetWindowRgn */
+intptr_t __stdcall vb6_di_SetWindowRgn(intptr_t hWnd, intptr_t hRgn, intptr_t bRedraw) {
+    return ((intptr_t (WINAPI *)(intptr_t, intptr_t, intptr_t))SetWindowRgn)(hWnd, hRgn, bRedraw);
+}
+/* TlsGetValue */
+intptr_t __stdcall vb6_di_TlsGetValue(intptr_t dwTlsIndex) {
+    return ((intptr_t (WINAPI *)(intptr_t))TlsGetValue)(dwTlsIndex);
+}
+/* TlsSetValue */
+intptr_t __stdcall vb6_di_TlsSetValue(intptr_t dwTlsIndex, intptr_t lpTlsValue) {
+    return ((intptr_t (WINAPI *)(intptr_t, intptr_t))TlsSetValue)(dwTlsIndex, lpTlsValue);
+}
+/* TlsFree */
+intptr_t __stdcall vb6_di_TlsFree(intptr_t dwTlsIndex) {
+    return ((intptr_t (WINAPI *)(intptr_t))TlsFree)(dwTlsIndex);
+}
+/* TlsAlloc */
+intptr_t __stdcall vb6_di_TlsAlloc() {
+    return ((intptr_t (WINAPI *)(void))TlsAlloc)();
+}
+/* RtlFillMemory */
+void __stdcall vb6_di_RtlFillMemory(void* Destination, intptr_t Length, uint8_t Fill) {
+    ((void (WINAPI *)(void*, intptr_t, uint8_t))RtlFillMemory)(Destination, Length, Fill);
+}
+/* VirtualAlloc */
+intptr_t __stdcall vb6_di_VirtualAlloc(intptr_t lpAddress, intptr_t dwSize, intptr_t flAllocationType, intptr_t flProtect) {
+    return ((intptr_t (WINAPI *)(intptr_t, intptr_t, intptr_t, intptr_t))VirtualAlloc)(lpAddress, dwSize, flAllocationType, flProtect);
+}
+/* VirtualFree */
+intptr_t __stdcall vb6_di_VirtualFree(intptr_t lpAddress, intptr_t dwSize, intptr_t dwFreeType) {
+    return ((intptr_t (WINAPI *)(intptr_t, intptr_t, intptr_t))VirtualFree)(lpAddress, dwSize, dwFreeType);
+}
+/* GetModuleHandleA */
+intptr_t __stdcall vb6_di_GetModuleHandleA(BSTR lpModuleName) {
+    return ((intptr_t (WINAPI *)(BSTR))GetModuleHandleA)(lpModuleName);
+}
+/* LoadLibraryA */
+intptr_t __stdcall vb6_di_LoadLibraryA(BSTR lpLibFileName) {
+    return ((intptr_t (WINAPI *)(BSTR))LoadLibraryA)(lpLibFileName);
+}
+/* lstrlenA */
+intptr_t __stdcall vb6_di_lstrlenA(BSTR lpString) {
+    return ((intptr_t (WINAPI *)(BSTR))lstrlenA)(lpString);
+}
+/* GetTickCount */
+intptr_t __stdcall vb6_di_GetTickCount() {
+    return ((intptr_t (WINAPI *)(void))GetTickCount)();
 }

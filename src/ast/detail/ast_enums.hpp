@@ -52,7 +52,7 @@ enum class UnaryOp : uint8_t {
 
 // 字面量类型
 enum class LiteralKind : uint8_t {
-    Integer, Long, Single, Double, Currency, Decimal,
+    Integer, Long, LongPtr, Single, Double, Currency, Decimal,
     String, Date, Boolean,
     Nothing, Empty, Null,
 };

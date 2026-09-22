@@ -103,6 +103,12 @@ void SemanticAnalyzer::registerConstant(ConstDecl& decl) {
                     if (sym->type == Vb6Type::Unknown)
                         sym->type = Vb6Type::Long;
                     break;
+                case LiteralKind::LongPtr:  // Fix 082: ^ 后缀
+                    sym->constType = Vb6Type::LongPtr;
+                    sym->constIntValue = lit->longValue;
+                    if (sym->type == Vb6Type::Unknown)
+                        sym->type = Vb6Type::LongPtr;
+                    break;
                 case LiteralKind::Single:
                     sym->constType = Vb6Type::Single;
                     sym->constFloatValue = lit->floatValue;
@@ -151,7 +157,8 @@ void SemanticAnalyzer::registerConstant(ConstDecl& decl) {
             if (unary->op == UnaryOp::Negate) {
                 if (auto* innerLit = dynamic_cast<LiteralExpr*>(unary->operand.get())) {
                     sym->hasConstValue = true;
-                    if (innerLit->literalKind == LiteralKind::Long) {
+                    if (innerLit->literalKind == LiteralKind::Long ||
+                        innerLit->literalKind == LiteralKind::LongPtr) {
                         sym->constType = Vb6Type::Long;
                         sym->constIntValue = -innerLit->longValue;
                         if (sym->type == Vb6Type::Unknown)

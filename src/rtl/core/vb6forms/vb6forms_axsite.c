@@ -403,16 +403,51 @@ static const IPropertyBagVtbl g_pbVtbl = {
     pb_QueryInterface, pb_AddRef, pb_Release, pb_Read, pb_Write
 };
 
-/* --- 按 CLSID 字符串实例化: 优先免注册 LoadLibrary(ocxPath) --- */
+/* --- 按 CLSID 字符串实例化: 优先免注册 LoadLibrary(ocxPath) ---
+ *
+ * 失败原因区分 (Fix 159): 旧实现把所有失败都折成 CO_E_CLASSNOTREGISTERED
+ * (0x800401F1), 使 "OCX 位宽与宿主不匹配" (x64 宿主 LoadLibrary 32 位 OCX →
+ * ERROR_BAD_EXE_FORMAT) 与 "文件缺失" / "CLSID 不认" 在日志上完全不可区分,
+ * 配置错配只能靠猜. 现在按原因分开返回:
+ *   HRESULT_FROM_WIN32(ERROR_BAD_EXE_FORMAT)  PE 位宽不匹配 — 始终打日志
+ *   HRESULT_FROM_WIN32(ERROR_PROC_NOT_FOUND)   OCX 未导出 DllGetClassObject
+ *   CO_E_CLASSNOTREGISTERED (0x800401F1)      路径缺失/无效等通用失败
+ * 三者都是 FAILED 码; 调用方 (ocxCreateAny / vb6_OcxHost_Create) 只做
+ * SUCCEEDED/FAILED 判定, 控制流不变, 区分只体现在返回值与 stderr 诊断. */
+
+/* C3_OCX_TRACE=1 缓存 — ocxCreateFromPath 与 vb6_OcxHost_Create 共用 */
+static int ocxTraceEnabled(void) {
+    static int cached = -1;
+    if (cached < 0) cached = (GetEnvironmentVariableW(L"C3_OCX_TRACE", NULL, 0) > 0);
+    return cached;
+}
 
 static HRESULT ocxCreateFromPath(const wchar_t* ocxPath, REFCLSID rclsid, void** ppUnk) {
     *ppUnk = NULL;
     if (!ocxPath || !*ocxPath) return ((HRESULT)0x800401F1L);
     HMODULE hMod = LoadLibraryW(ocxPath);
-    if (!hMod) return ((HRESULT)0x800401F1L);
+    if (!hMod) {
+        DWORD le = GetLastError();
+        if (le == ERROR_BAD_EXE_FORMAT) {
+            /* 宿主与 OCX 位宽不一致: 用 --arch x86 重编宿主, 或换同位宽 OCX */
+            fprintf(stderr, "[C3_OCX]   %ls: PE 位宽不匹配 (ERROR_BAD_EXE_FORMAT); "
+                            "宿主与 OCX 位数必须一致 — 用 --arch x86 重编, 或换同位宽 OCX\n",
+                    ocxPath);
+            return HRESULT_FROM_WIN32(ERROR_BAD_EXE_FORMAT);
+        }
+        if (ocxTraceEnabled())
+            fprintf(stderr, "[C3_OCX]   LoadLibrary(%ls) failed: %lu\n",
+                    ocxPath, (unsigned long)le);
+        return ((HRESULT)0x800401F1L);
+    }
     typedef HRESULT (__stdcall *PFN_DllGetClassObject)(REFCLSID, REFIID, void**);
     PFN_DllGetClassObject pGet = (PFN_DllGetClassObject)GetProcAddress(hMod, "DllGetClassObject");
-    if (!pGet) { FreeLibrary(hMod); return ((HRESULT)0x800401F1L); }
+    if (!pGet) {
+        FreeLibrary(hMod);
+        if (ocxTraceEnabled())
+            fprintf(stderr, "[C3_OCX]   %ls: no DllGetClassObject export\n", ocxPath);
+        return HRESULT_FROM_WIN32(ERROR_PROC_NOT_FOUND);
+    }
     IClassFactory* cf = NULL;
     HRESULT hr = pGet(rclsid, &IID_IClassFactory, (void**)&cf);
     if (FAILED(hr) || !cf) { /* FreeLibrary 不做: DllGetClassObject 成功后对象可能回引 DLL */ return hr; }
@@ -836,7 +871,7 @@ void* vb6_OcxHost_Create(void* hwndForm, const wchar_t* clsidStr, const wchar_t*
     if (!hwndForm || !clsidStr) return NULL;
 
     /* C3_OCX_TRACE=1: 打印实例化/激活各步 HRESULT (诊断宿主问题) */
-    int ocxTrace = (GetEnvironmentVariableW(L"C3_OCX_TRACE", NULL, 0) > 0);
+    int ocxTrace = ocxTraceEnabled();
 
     /* 1. 实例化 (多路径 + 多候选 CLSID)
      * 候选 1 = clsidStr: 来自 OCX typelib 的 coclass GUID (typelib 真实类, 最可靠)
@@ -908,7 +943,7 @@ void* vb6_OcxHost_Create(void* hwndForm, const wchar_t* clsidStr, const wchar_t*
             if (ocxTrace) fprintf(stderr, "[C3_OCX]   SetClientSite done\n");
         }
         /* 4. 设计期大小 (HIMETRIC) */
-        SIZEL sz = { twipsToHimetric(w * 15), twipsToHimetric(h * 15) };
+        SIZEL sz = { twipsToHimetric(vb6_XToTwipX(w)), twipsToHimetric(vb6_YToTwipY(h)) };
         pOleObj->lpVtbl->SetExtent(pOleObj, DVASPECT_CONTENT, &sz);
         if (ocxTrace) fprintf(stderr, "[C3_OCX]   SetExtent done\n");
 

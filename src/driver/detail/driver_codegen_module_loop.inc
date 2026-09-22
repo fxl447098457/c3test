@@ -20,6 +20,9 @@
     const std::map<std::string, std::string>& ocxFiles = ocxFiles_;
     const std::vector<std::pair<std::string, std::string>>& ocxRefs = ocxRefs_;
 
+    // Fix 160: ComLib= 免注册组件表 {ProgID, CLSID, coclass名, 相对exe路径}
+    const std::vector<std::array<std::string, 4>>& comLibRefs = comLibRefs_;
+
     for (size_t i = 0; i < modules_.size(); i++) {
         auto& module = modules_[i];
         auto& analyzer = analyzers_[i];
@@ -60,6 +63,7 @@
         cgen.setDesignerFiles(&frmFiles_);  // Fix 112: 工程内 UserControl 设计器描述
         cgen.setOcxFiles(&ocxFiles);        // Fix 143: vbp Object= 的 ocx 路径表
         cgen.setOcxRefs(&ocxRefs);          // Fix 143b: 实例化 CLSID 以 vbp Object= 为准
+        cgen.setComLibRefs(&comLibRefs);    // Fix 160: ComLib= 免注册组件表 (入口点烘焙)
         cgen.setStaticModuleVarNames(&dupModuleVarNames);  // Fix 093b: 撞名模块级变量转 static
         cgen.setInterfaceImplementers(&ifaceImplementersMap);  // P6.4+: 接口唯一实现类映射
         cgen.setDefaultInstanceClasses(&defaultInstanceClasses);  // P6.4+: 类模块默认实例

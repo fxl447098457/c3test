@@ -20,6 +20,11 @@
 #include "vb6forms.h"
 #include "vb6forms_internal.h"
 #include "vb6rtl.h"      /* Fix 148: vb6_VARIANT 定义 */
+#include "vb6forms_uc_internal.h"  /* Fix 163: vb6_HostObj_At / UC_ControlsItemByName
+                                    * 返回 void* —— 本 TU 此前没有它们的原型, MSVC 按
+                                    * 隐式 `int` 声明编译 → x64 下 64 位指针被截成 32 位
+                                    * 再赋给 void* h (315/332 两处), Form.Controls 于是
+                                    * 拿到坏句柄。x86 下 pointer==int 侥幸不发作。 */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -245,10 +250,10 @@ static HRESULT STDMETHODCALLTYPE ax_Invoke(IDispatch* This, DISPID dispid, REFII
             RECT r = {0, 0, 0, 0};
             if (p->hwndForm) GetWindowRect((HWND)p->hwndForm, &r);
             int32_t v = 0;
-            if (_wcsicmp(nm, L"Width") == 0 || _wcsicmp(nm, L"ScaleWidth") == 0) v = (r.right - r.left) * 15;
-            else if (_wcsicmp(nm, L"Height") == 0 || _wcsicmp(nm, L"ScaleHeight") == 0) v = (r.bottom - r.top) * 15;
-            else if (_wcsicmp(nm, L"Left") == 0) v = r.left * 15;
-            else v = r.top * 15;
+            if (_wcsicmp(nm, L"Width") == 0 || _wcsicmp(nm, L"ScaleWidth") == 0) v = vb6_XToTwipX(r.right - r.left);
+            else if (_wcsicmp(nm, L"Height") == 0 || _wcsicmp(nm, L"ScaleHeight") == 0) v = vb6_YToTwipY(r.bottom - r.top);
+            else if (_wcsicmp(nm, L"Left") == 0) v = vb6_XToTwipX(r.left);
+            else v = vb6_YToTwipY(r.top);
             axSetI4(out, v);
             return S_OK;
         }

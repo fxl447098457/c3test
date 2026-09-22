@@ -136,8 +136,11 @@ void CCodeGen::visit(BinaryExpr& node) {
     }
 
     // 浮点除法: VB6 / → (double)left / (double)right
+    // Fix 156: 操作数为 Variant 时 C 强转非法 (C2440 vb6_VARIANT→double),
+    // 改走 vb6_VariantToDouble 提取 (与上方 IntDiv 的 Fix 084o 同构).
     if (node.op == BinaryOp::Div) {
-        lastExpr_ = "((double)(" + left + ") / (double)(" + right + "))";
+        lastExpr_ = "((double)(" + toDoubleIfVariant(left, node.left.get())
+                  + ") / (double)(" + toDoubleIfVariant(right, node.right.get()) + "))";
         return;
     }
 
@@ -206,6 +209,92 @@ void CCodeGen::visit(BinaryExpr& node) {
         }
     }
 
+    // Fix 158n: BinaryOp::Is 的 Variant 操作数 — `Is` 映射为 C `==`, 直接比较
+    // vb6_VARIANT 结构体 → C2088. 三种形态均需改写:
+    //   1. VBFlexGrid.ctl FindTag `If Buffer Is Value` (两操作数均 As Variant,
+    //      VT=vbObject 分支) → vb6_VarCmpEq(&Buffer, &Value)
+    //   2. VBFlexGrid.ctl `If Value Is Nothing` / `If Not Value Is Nothing`
+    //      (Value As Variant, Nothing→NULL) → vb6_IsNothing(vb6_VariantToObject(&Value))
+    //   3. 变体 vs 其它标量 → vb6_VarCmpLongEq(取值契形参)
+    // 普通对象/指针 Is (void* <=> NULL) 不满足 varLike, 保持原样, 不受影响.
+    if (node.op == BinaryOp::Is) {
+        auto varLike158n = [&](const std::string& c, Expr* ast) -> bool {
+            if (cExprIsVariant(c)) return true;
+            if (!ast) return false;
+            if (ast->kind == ASTNodeKind::IdentifierExpr) {
+                // 局部/形参标识符: knownVariantVars_ 只在 `As Variant` 声明时登记
+                // (cgen_localdecl 172 / cgen_decl_func 112), 类/接口成员不会误入 →
+                // 直接信 isDefinitelyVariantExpr, 不套类门 (否则 As Variant 形参
+                // 若另有类符号登记, 会误回对象路径 → C2088).
+                return isDefinitelyVariantExpr(*ast);
+            }
+            if (isDefinitelyVariantExpr(*ast)) {
+                // Fix 158p: 类/COM 接口成员 (VBFlexGrid.ctl `Private VBFlexGridFlexDataSource
+                // As IVBFlexDataSource`) 被符号表误注册为 Variant 时, inferClassTypeOfExpr
+                // 非空 → 实为对象指针, `Is Nothing` 应走 (X == NULL). 否则 158n 会把
+                // 对象取址塞进 vb6_VARIANT 临时变量 → C2440.
+                if (!inferClassTypeOfExpr(*ast).empty()) return false;
+                return true;
+            }
+            return false;
+        };
+        auto isNothingSentinel158n = [](const std::string& s) -> bool {
+            std::string t = s;
+            while (t.size() >= 2 && t.front() == '(' && t.back() == ')')
+                t = t.substr(1, t.size() - 2);
+            return t == "NULL" || t == "0";
+        };
+        auto simpIdent158n = [](const std::string& s) -> bool {
+            if (s.empty()) return false;
+            if (!(std::isalpha(static_cast<unsigned char>(s[0])) || s[0] == '_')) return false;
+            for (char c : s) {
+                if (!std::isalnum(static_cast<unsigned char>(c)) && c != '_' && c != '.') return false;
+            }
+            return true;
+        };
+        // Variant 表达式的取址: 左值标识符/成员/VB6_SA_AT(...) 直接 &,
+        // 其余 rvalue (vb6_VariantFromComResult 等) 用临时变量存上再取址.
+        auto variantAddr158n = [&](const std::string& s) -> std::string {
+            std::string t = s;
+            while (t.size() >= 2 && t.front() == '(' && t.back() == ')')
+                t = t.substr(1, t.size() - 2);
+            if (simpIdent158n(t) && !isConstIdent(t)) return "&" + s;
+            if (t.rfind("VB6_SA_AT(", 0) == 0) return "&" + s;
+            // Fix 158u: Variant 比较左值语义落在 COM 对象指针成员 (me->VBFlexGrid
+            // FlexDataSource 等 union 成员, 声类型 ComIface*/void*) 时, 裸 `vb6_VARIANT
+            // tmp = me->X;` 触发 C2440 (无法从 ComIface* 转换到 vb6_VARIANT).
+            // 包 vb6_VariantFromValue → 对指针走 vb6_VariantObject(VT_DISPATCH),
+            // 对已是 Variant 的 rvalue (vb6_VariantFromComResult 等, 无 "->") 保持直拷.
+            if (t.find("->") != std::string::npos) {
+                std::string tmp = "_vcmp_" + std::to_string(vcmpCounter_++);
+                c_.emitLine("vb6_VARIANT " + tmp + " = vb6_VariantFromValue(" + s + ");");
+                return "&" + tmp;
+            }
+            std::string tmp = "_vcmp_" + std::to_string(vcmpCounter_++);
+            c_.emitLine("vb6_VARIANT " + tmp + " = " + s + ";");
+            return "&" + tmp;
+        };
+        bool lv158n = varLike158n(left, node.left.get());
+        bool rv158n = varLike158n(right, node.right.get());
+        if (lv158n || rv158n) {
+            if (lv158n && rv158n) {
+                lastExpr_ = "(vb6_VarCmpEq(" + variantAddr158n(left) + ", "
+                          + variantAddr158n(right) + "))";
+            } else if (lv158n && isNothingSentinel158n(right)) {
+                lastExpr_ = "(vb6_IsNothing(vb6_VariantToObject(" + variantAddr158n(left) + ")))";
+            } else if (rv158n && isNothingSentinel158n(left)) {
+                lastExpr_ = "(vb6_IsNothing(vb6_VariantToObject(" + variantAddr158n(right) + ")))";
+            } else if (lv158n) {
+                lastExpr_ = "(vb6_VarCmpLongEq(" + variantAddr158n(left) + ", (int32_t)("
+                          + right + ")))";
+            } else {
+                lastExpr_ = "(vb6_VarCmpLongEq(" + variantAddr158n(right) + ", (int32_t)("
+                          + left + ")))";
+            }
+            return;
+        }
+    }
+
     // P24-Bug2: Variant比较运算 — vb6_VARIANT不能用C内置比较运算符
     if (node.op == BinaryOp::Eq || node.op == BinaryOp::Neq ||
         node.op == BinaryOp::Lt || node.op == BinaryOp::Gt ||
@@ -234,8 +323,17 @@ void CCodeGen::visit(BinaryExpr& node) {
         //   If hBrush = 0 Or Count = 0            (Count = 隐式 Variant 局部)
         //   → (vb6_VariantEmpty() == 0) C2088.
         // 类型化 getter (vb6_ComGetIntProp 等) 不在 cExprIsVariant 前缀表内, 不受影响.
-        if (lt != Vb6Type::Variant && cExprIsVariant(left)) lt = Vb6Type::Variant;
-        if (rt != Vb6Type::Variant && cExprIsVariant(right)) rt = Vb6Type::Variant;
+        // Fix 158m: inferExprType 对某些 Variant 表达式误报具体类型 (Variant 形参
+        // VBFlexGrid.ctl `If Value Is Nothing`、Variant() 数组元素 VTableHandle.bas
+        // `If VTableIPAO(0) = 0`), 直接 C 比较 vb6_VARIANT 结构体 → C2088. 用
+        // isDefinitelyVariantExpr (AST 语义表: knownVariantVars_/符号表 Variant 返回)
+        // 补充升级; 对上面的类型化 getter 返回 false, 不会回滚 P25 的降级修正.
+        auto isVariantOperand158m = [&](const std::string& c, Expr* ast) -> bool {
+            if (cExprIsVariant(c)) return true;
+            return ast && isDefinitelyVariantExpr(*ast);
+        };
+        if (lt != Vb6Type::Variant && isVariantOperand158m(left, node.left.get())) lt = Vb6Type::Variant;
+        if (rt != Vb6Type::Variant && isVariantOperand158m(right, node.right.get())) rt = Vb6Type::Variant;
         // Bug #2 fix: also check knownLongVars_/knownLongPtrVars_ for simple variable names
         // because inferExprType may return Variant for optional params or out-of-scope variables
         auto isSimpleIdent = [](const std::string& s) -> bool {
@@ -258,7 +356,12 @@ void CCodeGen::visit(BinaryExpr& node) {
         }
         // Bug #2 fix: LongPtr (intptr_t) comparisons should use direct C operators
         // instead of VarCmpLong which treats the operand as vb6_VARIANT*
-        if (lt == Vb6Type::LongPtr || rt == Vb6Type::LongPtr) {
+        // Fix 158o: 若某侧经 158m 提升为 Variant (C 表达式确实是 vb6_VARIANT 结构体,
+        // 如 LongPtr 数组误发成 VB6_SA_AT(vb6_VARIANT,...)), 另一侧 LongPtr 仍不能裸
+        // `==` (C2088 结构体比较). 双侧 LongPtr 才可直接比较; 混合态交给下方 Variant 块,
+        // 其中 LongPtr 侧按标量经 scalarArg 传给 VarCmpLong (VTableHandle.bas
+        // `If VTableIPAO(0) = NULL_PTR`, NULL_PTR=0).
+        if ((lt == Vb6Type::LongPtr || rt == Vb6Type::LongPtr) && lt != Vb6Type::Variant && rt != Vb6Type::Variant) {
             std::string op;
             switch (node.op) {
                 case BinaryOp::Eq:  op = "=="; break;
@@ -286,15 +389,26 @@ void CCodeGen::visit(BinaryExpr& node) {
                 default: cmpFn = "Eq"; break;
             }
             // Variant vs NonVariant: 使用VarCmpLong快捷函数
+            // Fix 158m-2: 标量侧可能是 VB Nothing → NULL (void*) (VBFlexGrid.ctl
+            // `If Value Is Nothing`), 直接传 VarCmpLongEq(vb6_VARIANT*, int32_t)
+            // → C2440 (不能 void* → int). 裸 NULL 包 (int32_t)(...) 再传.
+            auto scalarArg158m = [](const std::string& s) -> std::string {
+                std::string t = s;
+                while (t.size() >= 2 && t.front() == '(' && t.back() == ')')
+                    t = t.substr(1, t.size() - 2);
+                if (t.find("NULL") != std::string::npos) return "(int32_t)(" + s + ")";
+                return s;
+            };
             if (lt == Vb6Type::Variant && rt != Vb6Type::Variant) {
                 Vb6Type rActual = rt;
-                if (rActual == Vb6Type::Long || rActual == Vb6Type::Integer || rActual == Vb6Type::Boolean) {
+                // Fix 158o: LongPtr 侧也按标量处理 (Variant vs LongPtr 常量).
+                if (rActual == Vb6Type::Long || rActual == Vb6Type::Integer || rActual == Vb6Type::Boolean || rActual == Vb6Type::LongPtr) {
                     // P25: left可能是VARIANT rvalue(vb6_VariantFromComResult), 需要临时变量
                     // Fix 084aa: 常量宏 (#define) 不可取址 → 视为非左值走临时变量
                     bool leftIsLvalue = !left.empty() && (std::isalpha(static_cast<unsigned char>(left[0])) || left[0] == '_') && !isConstIdent(left);
                     if (leftIsLvalue) { for (char c : left) { if (!std::isalnum(static_cast<unsigned char>(c)) && c != '_') { leftIsLvalue = false; break; } } }
                     if (leftIsLvalue) {
-                        lastExpr_ = "(vb6_VarCmpLong" + cmpFn + "(&" + left + ", " + right + "))";
+                        lastExpr_ = "(vb6_VarCmpLong" + cmpFn + "(&" + left + ", " + scalarArg158m(right) + "))";
                     } else {
                         std::string tmp = "_vcmp_" + std::to_string(vcmpCounter_++);
                         // Fix 024: left 被 inferExprType 误判为 Variant, 但实际标量 (LenB/Asc/int 等).
@@ -304,14 +418,14 @@ void CCodeGen::visit(BinaryExpr& node) {
                                              && left.find("vb6_VariantFromComResult(") == std::string::npos)
                                             ? ("vb6_VariantFromComResult(" + left + ")") : ("vb6_VariantFromValue(" + left + ")");
                         c_.emitLine("vb6_VARIANT " + tmp + " = " + wrapL + ";");
-                        lastExpr_ = "(vb6_VarCmpLong" + cmpFn + "(&" + tmp + ", " + right + "))";
+                        lastExpr_ = "(vb6_VarCmpLong" + cmpFn + "(&" + tmp + ", " + scalarArg158m(right) + "))";
                     }
                     return;
                 }
             }
             if (rt == Vb6Type::Variant && lt != Vb6Type::Variant) {
                 Vb6Type lActual = lt;
-                if (lActual == Vb6Type::Long || lActual == Vb6Type::Integer || lActual == Vb6Type::Boolean) {
+                if (lActual == Vb6Type::Long || lActual == Vb6Type::Integer || lActual == Vb6Type::Boolean || lActual == Vb6Type::LongPtr) {
                     // 反转比较方向: Long op Variant → Variant reverseOp Long
                     std::string revCmpFn;
                     switch (node.op) {
@@ -325,7 +439,7 @@ void CCodeGen::visit(BinaryExpr& node) {
                     bool rightIsLvalue = !right.empty() && (std::isalpha(static_cast<unsigned char>(right[0])) || right[0] == '_') && !isConstIdent(right);
                     if (rightIsLvalue) { for (char c : right) { if (!std::isalnum(static_cast<unsigned char>(c)) && c != '_') { rightIsLvalue = false; break; } } }
                     if (rightIsLvalue) {
-                        lastExpr_ = "(vb6_VarCmpLong" + revCmpFn + "(&" + right + ", " + left + "))";
+                        lastExpr_ = "(vb6_VarCmpLong" + revCmpFn + "(&" + right + ", " + scalarArg158m(left) + "))";
                     } else {
                         std::string tmp = "_vcmp_" + std::to_string(vcmpCounter_++);
                         // Fix 024: right 被 inferExprType 误判为 Variant, 但实际标量. 用 FromValue 包装.
@@ -334,7 +448,7 @@ void CCodeGen::visit(BinaryExpr& node) {
                                              && right.find("vb6_VariantFromComResult(") == std::string::npos)
                                             ? ("vb6_VariantFromComResult(" + right + ")") : ("vb6_VariantFromValue(" + right + ")");
                         c_.emitLine("vb6_VARIANT " + tmp + " = " + wrapR + ";");
-                        lastExpr_ = "(vb6_VarCmpLong" + revCmpFn + "(&" + tmp + ", " + left + "))";
+                        lastExpr_ = "(vb6_VarCmpLong" + revCmpFn + "(&" + tmp + ", " + scalarArg158m(left) + "))";
                     }
                     return;
                 }
@@ -377,7 +491,34 @@ void CCodeGen::visit(BinaryExpr& node) {
     // Fix 039b: For Variant operands (knownVariantVars_ or cExprIsVariant), use
     // vb6_VariantToLong() instead of (int32_t)() cast, since VARIANT can't be cast to int.
     if (node.op == BinaryOp::And || node.op == BinaryOp::Or || node.op == BinaryOp::Xor) {
+        // Fix 082: VBA7 LongPtr 字面量 (^ 后缀) 参与位运算时必须保持指针宽度.
+        // LongPtr 是平台相关宽度 (32 位机 4 字节 / 64 位机 8 字节) -> intptr_t.
+        // 一律 (int32_t) 截断会丢弃符号位:
+        //   &H8000000000000000^ -> 0 (符号位被截掉),
+        //   intptr_t 变量 -> 32 位 -> 再赋值回 intptr_t 时符号扩展 -> 结果错误.
+        // (Common.bas: UnsignedAdd / UnsignedSub / Get_Wheel_Delta_wParam)
+        // 无 LongPtr 字面量时保持原有 int32_t 行为不变.
+        bool wide82 = false;
+        for (const Expr* e82 : {node.left.get(), node.right.get()}) {
+            if (e82 && e82->kind == ASTNodeKind::LiteralExpr &&
+                static_cast<const LiteralExpr*>(e82)->literalKind == LiteralKind::LongPtr) {
+                wide82 = true;
+                break;
+            }
+        }
         auto castBitwise = [&](const std::string& cExpr, const Expr* astExpr) -> std::string {
+            if (wide82) {
+                // Variant 提取用 vb6_VariantToLongPtr (返回 intptr_t) 而非
+                // vb6_VariantToLong (int32_t), 否则会先截断再拓宽.
+                if (cExprIsVariant(cExpr)) return "vb6_VariantToLongPtr(" + cExpr + ")";
+                if (astExpr && astExpr->kind == ASTNodeKind::IdentifierExpr) {
+                    auto& ident82 = static_cast<IdentifierExpr&>(const_cast<Expr&>(*astExpr));
+                    if (knownVariantVars_.count(Symbol::toLower(ident82.name))) {
+                        return "vb6_VariantToLongPtr(" + cExpr + ")";
+                    }
+                }
+                return "((intptr_t)(" + cExpr + "))";
+            }
             if (cExprIsVariant(cExpr)) return "vb6_VariantToLong(" + cExpr + ")";
             // Fix 110m: 本函数返回变量 (vb6_ret_X, C 类型 vb6_VARIANT) 参与位运算.
             // VB6 中函数名即返回变量, 且返回值是 Variant —

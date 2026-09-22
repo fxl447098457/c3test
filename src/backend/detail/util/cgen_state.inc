@@ -87,6 +87,17 @@
     // 让 VB6_SA_AT / VB6_SA_ND_AT2 使用正确的 struct 类型而非 vb6_VARIANT
     std::unordered_map<std::string, std::string> arrayUdtElemTypes_;
 
+    // Fix 170: 赋值目标 `A() = expr` (空括号整体数组) 上下文标记。
+    // 只在 visit(AssignmentStmt) 里 emit node.target 的那一瞬为 true,
+    // 让 IndexOrCallExpr 发数组载体 (vb6_SafeArray1D*) 而不是 VB6_SA_AT(elem, A, 0)
+    // —— 未 ReDim 的动态数组 data==NULL, 写 0 号元素即解引用 NULL → 0xC0000005。
+    bool wholeArrayLvalue_ = false;
+
+    // Fix 178: 本模块内被请求过的「含所有权成员 UDT」深拷贝函数 (vb6_type_X → 是否
+    // 需要 void* 版薄封装, 用于 vb6_ArrayAssign1D_Cb 的元素回调)。模块出口处一次性
+    // 生成 static vb6_udtcpy_<T>() 插到 .c 的 #include 之后 (见 generate epilogue)。
+    mutable std::map<std::string, bool> udtCopyRequested_;
+
     // Bug #1 fix (082h): 过程内已确认的ND数组名集合 (小写)
     // 当 UBound(arr, N>1) 触发ND版本时将arr注册到此集合,
     // 后续 UBound(arr, 1) 检查此集合也使用ND版本
@@ -100,6 +111,12 @@
     // Fix 117c: Single(float) 变量独立登记 — CStr 需要 VT_R4 语义 (7 位有效数字),
     // 否则 CSng(21.1) 会按 Double 打印成 21.1000003814697。
     std::unordered_set<std::string> knownSingleVars_;
+    // Fix 175: `As Date` 在 C 层与 Double 同为 double, 只按 C 类型串登记会让
+    // inferExprType 永远看不见 Date —— `Print "x=" & (d + 1)` / String 形参收 Date
+    // 实参都按 double 走 vb6_CStrDbl → 打出序列号 46023 而不是 2026/1/2。
+    // 与 knownDoubleVars_ **并存**登记 (仿 Fix 117c 的 Single 双登记口径),
+    // 消费点一律先判 Date, 以免既有 double 路径失去变量。
+    std::unordered_set<std::string> knownDateVars_;
 
     // 已知Long/Integer/Boolean变量名集合 (小写) - 用于COM值解封类型推断
     std::unordered_set<std::string> knownLongVars_;
@@ -379,6 +396,10 @@
 
     // Fix 143b: vbp Object= 原始引用列表 (CLSID 小写去花括号, ocx 绝对路径)
     const std::vector<std::pair<std::string, std::string>>* ocxRefs_ = nullptr;
+
+    // Fix 160: vbp ComLib= 免注册 COM 组件表 {ProgID, CLSID, coclass名, 相对exe路径}
+    const std::vector<std::array<std::string, 4>>* comLibRefs_ = nullptr;
+
     // Fix 112: sub-controls on a form whose type is an in-project UserControl
     std::unordered_map<std::string, std::string> knownUserControlCtrlVars_;
                   // DLL的ProgID前缀

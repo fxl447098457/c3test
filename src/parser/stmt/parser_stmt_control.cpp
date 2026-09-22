@@ -30,8 +30,14 @@ std::unique_ptr<IfStmt> Parser::parseIfStmt() {
         // 单行 If...Then...[Else...]
         StmtList thenBody;
         inSingleLineIf_++;
-        auto stmt = parseStatement();
-        if (stmt) thenBody.push_back(std::move(stmt));
+        // Fix 082: `If cond Then Else stmt` — Then 分支可以为空 (语义: 条件为真则
+        // 什么都不做)。样例工程 VisualStyles.bas:399 即此形式, 且该文件确属工程成员
+        // (VBFlexGridDemo.vbp:10), 即 VB6 实际接受这种写法。必须先判空再 parseStatement(),
+        // 否则 Else 会被当成语句首 token -> VB2002 "unexpected token in statement: Else"。
+        if (cur_.kind != TokenKind::Else) {
+            auto stmt = parseStatement();
+            if (stmt) thenBody.push_back(std::move(stmt));
+        }
 
         // 解析 Then 后续的冒号分隔语句: If x Then stmt1: stmt2: stmt3
         while (cur_.kind == TokenKind::Colon) {
@@ -102,6 +108,35 @@ std::unique_ptr<IfStmt> Parser::parseIfStmt() {
 // For 语句
 // ============================================================
 
+// VB6: `Next var1, var2, ...` — 一条 Next 关闭多层嵌套 For 循环 (内层在前,
+// 外层在后)。真实的 Next token 由当前循环消费; 逗号后多余的变量排队进
+// pendingNextVars_, 供各外层循环在检查 Next 时当作"已消费的合成 Next"弹出。
+void Parser::consumeNextClause(const std::string& /*loopVar*/) {
+    auto canConsumeVar = [&]() {
+        return canBeName(cur_.kind) && cur_.kind != TokenKind::NewLine &&
+               cur_.kind != TokenKind::Colon && cur_.kind != TokenKind::EndOfFile;
+    };
+    if (cur_.kind != TokenKind::Next) {
+        if (!pendingNextVars_.empty()) {
+            pendingNextVars_.erase(pendingNextVars_.begin());
+            return;
+        }
+        expect(TokenKind::Next, DiagnosticID::ParseMismatchedBlock,
+               "expected 'Next' to close For loop");
+        return;
+    }
+    advance(); // consume 'Next'
+    pendingNextVars_.clear(); // 真实 Next 出现即已重新同步
+    if (canConsumeVar()) advance(); // 本循环的可选变量
+    while (cur_.kind == TokenKind::Comma) {
+        advance(); // consume ','
+        if (canConsumeVar()) {
+            pendingNextVars_.push_back(cur_.text);
+            advance();
+        }
+    }
+}
+
 std::unique_ptr<ForStmt> Parser::parseForStmt() {
     auto loc = currentLoc();
     advance(); // consume 'For'
@@ -129,12 +164,7 @@ std::unique_ptr<ForStmt> Parser::parseForStmt() {
             auto stmt = parseStatement();
             if (stmt) body.push_back(std::move(stmt));
         }
-        expect(TokenKind::Next, DiagnosticID::ParseMismatchedBlock,
-               "expected 'Next' to close For loop");
-        if (canBeName(cur_.kind) && cur_.kind != TokenKind::NewLine &&
-            cur_.kind != TokenKind::Colon && cur_.kind != TokenKind::EndOfFile) {
-            advance();
-        }
+        consumeNextClause(varTok.text);
         return std::make_unique<ForStmt>(loc, varTok.text,
             std::move(start), std::move(end), std::move(step), std::move(body));
     }
@@ -143,12 +173,7 @@ std::unique_ptr<ForStmt> Parser::parseForStmt() {
     auto body = parseBlockUntil({TokenKind::Next});
 
     // Next [var] — 必须消费 Next, 可选的循环变量
-    expect(TokenKind::Next, DiagnosticID::ParseMismatchedBlock,
-           "expected 'Next' to close For loop");
-    if (canBeName(cur_.kind) && cur_.kind != TokenKind::NewLine &&
-        cur_.kind != TokenKind::Colon && cur_.kind != TokenKind::EndOfFile) {
-        advance();
-    }
+    consumeNextClause(varTok.text);
 
     return std::make_unique<ForStmt>(loc, varTok.text,
         std::move(start), std::move(end), std::move(step), std::move(body));
@@ -248,6 +273,26 @@ std::unique_ptr<WhileWendStmt> Parser::parseWhileWendStmt() {
     auto loc = currentLoc();
     advance(); // consume 'While'
     auto condition = parseExpression();
+
+    // 单行 While: While cond: stmt1: stmt2: Wend (Wend 必须与 While 同行)
+    // Fix 083: 原先没有 ':' 分支, While 之后的冒号落进 parseBlockUntil, 块结构
+    // 跟踪整体崩塌。样例工程 VBFlexGrid.ctl(26918,27258) 有两处
+    // `While PeekMessage(...) <> 0: Wend`, 其级联产物占该文件 766 个错误中的 714 个。
+    // parseForStmt/parseForEachStmt 本就有此分支 (见上方 129-146 / 173-190 行),
+    // 此处照抄, 终止符换成 Wend。严格超集: `While cond:` 此前必然报错。
+    if (cur_.kind == TokenKind::Colon) {
+        StmtList body;
+        while (cur_.kind == TokenKind::Colon) {
+            advance(); // consume ':'
+            if (cur_.kind == TokenKind::Wend) break;
+            auto stmt = parseStatement();
+            if (stmt) body.push_back(std::move(stmt));
+        }
+        expect(TokenKind::Wend, DiagnosticID::ParseMismatchedBlock,
+               "expected 'Wend'");
+        return std::make_unique<WhileWendStmt>(loc, std::move(condition), std::move(body));
+    }
+
     skipNewLines();
     auto body = parseBlockUntil({TokenKind::Wend});
     expect(TokenKind::Wend, DiagnosticID::ParseMismatchedBlock,

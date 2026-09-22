@@ -66,6 +66,17 @@ vb6_SafeArray1D* vb6_SafeArrayReDimPreserve1D_Udt(int32_t elemSize,
 // 销毁数组 (释放内存)
 void vb6_SafeArrayDestroy1D(vb6_SafeArray1D* arr);
 
+// Fix 170: 整体数组赋值 `A() = B()` —— 深拷贝 src 为新载体返回, 原 dst 销毁
+vb6_SafeArray1D* vb6_ArrayAssign1D(vb6_SafeArray1D* dst, vb6_SafeArray1D* src);
+
+// Fix 178: 元素是「含所有权成员的 UDT」(vb6_sa_udt) 时, memcpy 之后每个槽位仍指向
+// src 的元素 → 各行别名到同一份存储。cb(dstElem, srcElem) 负责把 src 元素深拷贝进
+// dst 元素 (dst 元素此刻是 src 的位拷贝, 其中指针归 src 所有, 不得释放)。
+// cb==NULL 等价于 Fix 170 的原行为。
+typedef void (*vb6_udt_elem_copy)(void* dst, const void* src);
+vb6_SafeArray1D* vb6_ArrayAssign1D_Cb(vb6_SafeArray1D* dst, vb6_SafeArray1D* src,
+                                      vb6_udt_elem_copy cb);
+
 // 获取/设置元素 (void*通用版)
 void* vb6_SafeArrayGetPtr(vb6_SafeArray1D* arr, int32_t index);
 void  vb6_SafeArrayPutElem(vb6_SafeArray1D* arr, int32_t index, void* value);

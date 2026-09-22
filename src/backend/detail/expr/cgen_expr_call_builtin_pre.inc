@@ -105,6 +105,17 @@
             // 注意 vb6_VariantArrayGet 按值返回, 不在白名单内.
             bool vpIsLvalue092s = lastExpr_.compare(0, 10, "VB6_SA_AT(") == 0
                 || lastExpr_.compare(0, 12, "VB6_SA_ND_AT") == 0;
+            // Fix 159-C: VarPtr(Variant 数组元素) — vb6_VariantArrayGet 按值返回
+            // vb6_VARIANT 结构体, 复合字面量 &(void*){...} 把它塞进 void* 槽 →
+            // C2440 "无法从 vb6_VARIANT 转换为 void *" (VTableHandle.c 181/187/267
+            // ObjPtr(VarArgList(i)), VBFlexGrid.c 18504~18645 VarPtr(Value(i))).
+            // 158f 的 vb6_VariantArrayElemPtr(vb6_VARIANT*, int32_t) 正是"取元素地址",
+            // 与 vb6_VariantArrayGet 同参数形态 → 直接改名, 得到真左值地址.
+            if (lastExpr_.compare(0, 20, "vb6_VariantArrayGet(") == 0) {
+                lastExpr_ = "(intptr_t)vb6_VariantArrayElemPtr("
+                          + lastExpr_.substr(20);
+                return;
+            }
             if (vpIsCall && !vpIsLvalue092s) {
                 lastExpr_ = "(intptr_t)&(void*){" + lastExpr_ + "}";
             } else if (!lastExpr_.empty() && (std::isdigit(static_cast<unsigned char>(lastExpr_[0])) || lastExpr_[0] == '(')) {
@@ -146,9 +157,23 @@
 
 
     // P18-E: Choose special handling - nested ternary chain
-    if (node.callee && node.callee->kind == ASTNodeKind::IdentifierExpr && !node.positional.empty()) {
-        auto& ident = static_cast<IdentifierExpr&>(*node.callee);
-        std::string csLower = ident.name;
+    if (node.callee && !node.positional.empty()) {
+        std::string csLower;
+        if (node.callee->kind == ASTNodeKind::IdentifierExpr) {
+            csLower = static_cast<IdentifierExpr&>(*node.callee).name;
+        } else if (node.callee->kind == ASTNodeKind::MemberAccessExpr) {
+            // Fix 137a: VBA.Choose(...) / VBA.Switch(...) — 源码以 VBA. 成员形态调用
+            // (VBFlexGrid.ctl 3824, MainForm.frm 567/571, UserEditingForm.frm 242).
+            // 需先约简 MemberAccessExpr 得到全局函数名再按 builtin 折叠, 否则 fallback
+            // 生成裸 vb6_Choose(...) 直调 → 无签名/类型信息 → LNK2019 (VBFLXGRD).
+            auto& maCs = static_cast<MemberAccessExpr&>(*node.callee);
+            if (maCs.object && maCs.object->kind == ASTNodeKind::IdentifierExpr) {
+                std::string objnm = Symbol::toLower(static_cast<IdentifierExpr&>(*maCs.object).name);
+                if (objnm == "vba" || objnm == "vba5") {
+                    csLower = maCs.memberName;
+                }
+            }
+        }
         std::transform(csLower.begin(), csLower.end(), csLower.begin(), ::tolower);
         if (csLower == "choose" && node.positional.size() >= 2) {
             emitExpr(*node.positional[0]);

@@ -2,6 +2,45 @@
 // 由 src/backend/expr/cgen_expr_call.cpp 拆出（2026-09-17），在函数体内被 #include，非独立编译单元。
 // 内容 = 原文件第 1010~1167 行，逐行未改。
 
+    // ---- Fix 158c: WithMemberExpr callee 带 **空括号** — With 块 UDT 动态/固定
+    // 数组成员整体引用 .member() → 裸数组表达式 tempVar->member (不带调用括号).
+    // 与下方 Fix 060 Pattern B 相同判定, 但不消费 positional (空).
+    // 否则 fallback 把 .member() 当函数调用 emit 成 tempVar->member() → C2064
+    // (VBFlexGrid.ctl ClearGrid: With VBFlexGridCells.Rows(iRow):
+    //     .Cols() = VBFlexGridDefaultCols.Cols() — LHS/RHS 都是整体数组引用).
+    if (node.callee && node.callee->kind == ASTNodeKind::WithMemberExpr
+        && node.positional.empty() && node.named.empty()
+        && !withObjectVars_.empty() && !withObjectInfoStack_.empty()) {
+        auto& wmExpr158 = static_cast<WithMemberExpr&>(*node.callee);
+        const auto& info158 = withObjectInfoStack_.back();
+        if (info158.kind == WithObjKind::Unknown) {
+            const std::string& tempVar158 = withObjectVars_.back();
+            std::string tempLower158 = Symbol::toLower(tempVar158);
+            auto it158 = knownUdtVars_.find(tempLower158);
+            if (it158 != knownUdtVars_.end()) {
+                const std::string prefix158c = "vb6_type_";
+                const std::string& udtCType158 = it158->second;
+                if (udtCType158.size() > prefix158c.size()
+                    && udtCType158.compare(0, prefix158c.size(), prefix158c) == 0) {
+                    std::string udtName158 = udtCType158.substr(prefix158c.size());
+                    Symbol* udtSym158 = symTab_.lookupModule(udtName158);
+                    if (udtSym158 && udtSym158->kind == SymbolKind::UserDefinedType) {
+                        std::string memLower158 = Symbol::toLower(wmExpr158.memberName);
+                        for (auto& mi158 : udtSym158->udtMembers) {
+                            if (Symbol::toLower(mi158.name) == memLower158) {
+                                if (mi158.isArrayDynamic || mi158.arraySize > 0) {
+                                    lastExpr_ = tempVar158 + "->" + cIdent(mi158.name);
+                                    return;
+                                }
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     // ---- Fix 060: WithMemberExpr callee with positional args — With block UDT array field ----
     // 处理 With 块内 .Data(index) 模式, 其中 .Data 是 UDT 动态数组字段
     // WithMemberExpr 不同于 MemberAccessExpr, 需要单独处理
@@ -54,6 +93,49 @@
                         }
                     }
                 }
+            }
+        } else if (info.kind == WithObjKind::FormControl
+                   && (info.ctrlType == FrmControlType::ListBox
+                       || info.ctrlType == FrmControlType::ComboBox)) {
+            // Fix 152e: With 块内 ListBox/ComboBox 的**可索引属性读取** —
+            // `.ItemData(i)` / `.List(i)` / `.Selected(i)` (callee 是
+            // WithMemberExpr 且带索引实参)。不拦截时走通用路径: 先 visit
+            // (WithMemberExpr) 发 `vb6_GetItemData(tempVar)` (cgen_expr_with.cpp
+            // 的 FormControl 读只喂 hwnd 单参, RTL 需 (void* hwnd, int idx) 两参)
+            // → C2198 "太少实参", 再把索引当函数调用拼 `(i)` → C2064.
+            // 与 P13.3b (MemberAccessExpr 同位) 一致: 直接生成 fn(hwnd, idx).
+            const std::string& tempVar = withObjectVars_.back();
+            std::string memLower152 = Symbol::toLower(wmExpr.memberName);
+            const char* fn152 = nullptr;
+            if (memLower152 == "list") fn152 = "vb6_GetListItem";
+            else if (memLower152 == "selected") fn152 = "vb6_GetSelected";
+            else if (memLower152 == "itemdata") fn152 = "vb6_GetItemData";
+            if (fn152) {
+                emitExpr(*node.positional[0]);
+                std::string idx152 = std::move(lastExpr_);
+                lastExpr_ = std::string(fn152) + "((void*)" + tempVar + ", " + idx152
+                          + ")  /* With indexed ctrl prop */";
+                return;
+            }
+            // Fix 152f: With 块内 ListBox/ComboBox 的**方法调用** —
+            // `.AddItem(item[, index])` / `.RemoveItem(index)`. 这两者既不在
+            // getControlPropReadFn (非属性) 也不在通用路径里映射, 原会退化成
+            // `tempVar.AddItem` → HWND__.AddItem → C2039 "不是 HWND__ 的成员"
+            // (VBFlexGrid demo 里 219 处, 全部 .AddItem)。直接映射到 RTL。
+            if (memLower152 == "additem") {
+                emitExpr(*node.positional[0]);
+                std::string item152 = std::move(lastExpr_);
+                lastExpr_ = "vb6_AddItem((void*)" + tempVar + ", "
+                          + wrapToBSTR(item152, *node.positional[0])
+                          + ")  /* With ctrl .AddItem */";
+                return;
+            }
+            if (memLower152 == "removeitem") {
+                emitExpr(*node.positional[0]);
+                std::string idx152r = std::move(lastExpr_);
+                lastExpr_ = "vb6_RemoveItem((void*)" + tempVar + ", " + idx152r
+                          + ")  /* With ctrl .RemoveItem */";
+                return;
             }
         }
     }

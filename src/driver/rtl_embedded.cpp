@@ -112,6 +112,7 @@ std::string SessionManager::create() {
         { RTL_VB6_DI_COM_STUBS_C,      "vb6_di_com_stubs.c" },
         { RTL_VB6_DI_NET_STUBS_C,      "vb6_di_net_stubs.c" },
         { RTL_VB6_DI_SHELL_STUBS_C,    "vb6_di_shell_stubs.c" },
+    { RTL_VB6_DI_UNKNOWN_STUBS_C,  "vb6_di_unknown_stubs.c" },
         { RTL_VB6COMSERVER_INTERNAL_H, "vb6comserver_internal.h" },
         { RTL_VB6COMSERVER_OBJ_C,      "vb6comserver_obj.c" },
         { RTL_VB6COMSERVER_FACTORY_C,  "vb6comserver_factory.c" },

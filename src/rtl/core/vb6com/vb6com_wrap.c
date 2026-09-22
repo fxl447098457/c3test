@@ -36,6 +36,12 @@ void* vb6_ComCallObject(void* disp, const wchar_t* methodName,
         }
         VariantClear(&vObj);
     }
+    if (GetEnvironmentVariableW(L"C3_COM_TRACE", NULL, 0) > 0) {
+        fprintf(stderr, "[C3_COM] CallObject: disp=%p method=%ls vt=%d -> obj=%p (pre-unwrap=%p)\n",
+                disp, methodName, pv ? pv->vt : -1, obj,
+                (pv && pv->vt == VT_DISPATCH) ? (void*)pv->pdispVal : NULL);
+        fflush(stderr);
+    }
     vb6_ComVarFree(pv);  // 仅释放结构体, 不Release pdispVal
     return obj;
 }
@@ -132,6 +138,10 @@ void* vb6_ComGetObjectProp(void* disp, const wchar_t* propName) {
             obj = (void*)vObj.pdispVal;
         }
         VariantClear(&vObj);
+    }
+    if (GetEnvironmentVariableW(L"C3_COM_TRACE", NULL, 0) > 0) {
+        fprintf(stderr, "[C3_COM] GetObjectProp obj: disp=%p prop=%ls vt=%d -> obj=%p\n",
+                disp, propName, pv ? pv->vt : -1, obj); fflush(stderr);
     }
     vb6_ComVarFree(pv);  // 仅释放结构体, 不Release pdispVal
     return obj;

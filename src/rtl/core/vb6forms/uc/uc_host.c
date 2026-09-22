@@ -153,6 +153,8 @@ void vb6_uc_push(vb6_UCRec* r, vb6_UCSaved* saved) {
     saved->ambientFont = vb6_Ambient_Font;
     saved->extLeft = vb6_Extender_Left;
     saved->extTop = vb6_Extender_Top;
+    saved->extWidth = vb6_Extender_Width;      // Fix 162
+    saved->extHeight = vb6_Extender_Height;    // Fix 162
     saved->hWnd = vb6_UserControl_hWnd;
     saved->autoRedraw = vb6_UserControl_AutoRedraw;
     saved->ext = vb6_UserControl_Extender;
@@ -172,6 +174,12 @@ void vb6_uc_push(vb6_UCRec* r, vb6_UCSaved* saved) {
     }
     vb6_Extender_Left = r->extLeft;
     vb6_Extender_Top = r->extTop;
+    // Fix 162: 外框尺寸同步。UserControl.<Member> 与 Extender.<Member> 由 cgen
+    // 发成两个不同标识符, VB6 里同值, 故四处一起填。
+    vb6_Extender_Width = r->extWidth;
+    vb6_Extender_Height = r->extHeight;
+    vb6_UserControl_Width = r->extWidth;
+    vb6_UserControl_Height = r->extHeight;
     vb6_UserControl_hWnd = r->hwnd;                 // Fix 133u
     vb6_UserControl_AutoRedraw = 1;                 // Fix 133u: 事件驱动重绘
     vb6_UserControl_Extender.Visible = -1;          // Fix 133u: 默认可见
@@ -199,6 +207,10 @@ void vb6_uc_pop(const vb6_UCSaved* saved) {
     vb6_Ambient_Font = (vb6_ComIface_Font*)saved->ambientFont;
     vb6_Extender_Left = saved->extLeft;
     vb6_Extender_Top = saved->extTop;
+    vb6_Extender_Width = saved->extWidth;            // Fix 162
+    vb6_Extender_Height = saved->extHeight;          // Fix 162
+    vb6_UserControl_Width = saved->extWidth;         // Fix 162
+    vb6_UserControl_Height = saved->extHeight;       // Fix 162
     vb6_UserControl_hWnd = saved->hWnd;              // Fix 133u
     vb6_UserControl_AutoRedraw = saved->autoRedraw;  // Fix 133u
     vb6_UserControl_Extender = saved->ext;           // Fix 133u

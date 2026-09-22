@@ -194,6 +194,18 @@ foreach ($s in $order) {
         } elseif ($ptype -match 'vb6_type_[A-Za-z0-9_]*') {
             $udtBad = $true
         }
+        # Fix 160y-2: vb6_ComIface_* / vb6_VARIANT are C3 RTL typedefs, not SDK.
+        # They only ever appear by-pointer here, so void* is ABI-identical.
+        if ($ptype -match 'vb6_ComIface_[A-Za-z0-9_]*\s*\*') {
+            $ptype = [regex]::Replace($ptype, 'vb6_ComIface_[A-Za-z0-9_]*\s*\*', 'void*')
+        } elseif ($ptype -match 'vb6_ComIface_[A-Za-z0-9_]*') {
+            $udtBad = $true
+        }
+        if ($ptype -match 'vb6_VARIANT\s*\*') {
+            $ptype = [regex]::Replace($ptype, 'vb6_VARIANT\s*\*', 'void*')
+        } elseif ($ptype -match 'vb6_VARIANT') {
+            $udtBad = $true
+        }
         $declParts += ($ptype + ' ' + $pname)
         $typeParts += $ptype
         $nameParts += $pname
@@ -205,21 +217,35 @@ foreach ($s in $order) {
     $args = ($nameParts -join ', ')
 
     # gdiplus: no C header in the SDK, so resolve the flat API lazily by name.
-    $dyn = ($api -match '^(Gdip|Gdiplus)')
-    if ($dyn) { $usedLibs[$famName]['__dynamic__'] = 1 }
+    # Fix 160y-3: DllGetVersion has no SDK declaration either (declared only as
+    # DLLGETVERSIONPROC in Shlwapi.h) — resolve it from comctl32.dll the same way.
+    $dynMod = ''
+    if ($api -match '^(Gdip|Gdiplus)') { $dynMod = 'gdiplus.dll' }
+    elseif ($api -eq 'DllGetVersion') { $dynMod = 'comctl32.dll' }
+    if ($dynMod -ne '') { $usedLibs[$famName]['__dynamic__'] = 1; $usedLibs[$famName][$dynMod] = 1 }
     if ($protos[$s].lib -ne '') { $usedLibs[$famName][$protos[$s].lib] = 1 }
+    # Fix 164: unknown 族是"没有 vb6_di_lib 标记"的兜底桶 (见上方 famName 路由), 桶里没有
+    # 库名可用; 但桩体转发的是**真实** Win32 API, 所以导入库只能按 API 名前缀推断。
+    # 漏一个就是 LNK2019: 首版 unknown 只带 New-Banner 兜底的 comdlg32,
+    # Imm* / GetFileVersionInfo* / VerQueryValue / TransparentBlt 共 14 个符号未解析,
+    # 表现为全套测试 64 例在链接阶段失败。多余的库无害 (静态导入库只在符号被引用时才拉入)。
+    if ($famName -eq 'unknown') {
+        if ($api -match '^Imm')                            { $usedLibs['unknown']['imm32'] = 1 }
+        elseif ($api -match '^(GetFileVersionInfo|VerQueryValue)') { $usedLibs['unknown']['version'] = 1 }
+        elseif ($api -match '^(TransparentBlt|AlphaBlend)') { $usedLibs['unknown']['msimg32'] = 1 }
+    }
 
     $out = $bodies[$bodyKey]
     $out.Add('/* ' + ($s -replace '^vb6_di_', '') + ' */')
-    if ($dyn) {
+    if ($dynMod -ne '') {
         if ($ret -eq 'void') {
             $out.Add('void __stdcall ' + $s + '(' + $decl + ') {')
-            $out.Add('    void (WINAPI *fn)(' + $types + ') = (void (WINAPI *)(' + $types + '))vb6_di_gdiplus_proc("' + $api + '");')
+            $out.Add('    void (WINAPI *fn)(' + $types + ') = (void (WINAPI *)(' + $types + '))vb6_di_dllproc("' + $dynMod + '", "' + $api + '");')
             $out.Add('    if (fn != NULL) { fn(' + $args + '); }')
             $out.Add('}')
         } else {
             $out.Add($ret + ' __stdcall ' + $s + '(' + $decl + ') {')
-            $out.Add('    ' + $ret + ' (WINAPI *fn)(' + $types + ') = (' + $ret + ' (WINAPI *)(' + $types + '))vb6_di_gdiplus_proc("' + $api + '");')
+            $out.Add('    ' + $ret + ' (WINAPI *fn)(' + $types + ') = (' + $ret + ' (WINAPI *)(' + $types + '))vb6_di_dllproc("' + $dynMod + '", "' + $api + '");')
             $out.Add('    if (fn == NULL) { return (' + $ret + ')2; /* GpStatus InvalidParameter */ }')
             $out.Add('    return fn(' + $args + ');')
             $out.Add('}')
@@ -277,6 +303,7 @@ function New-Banner([string]$family, [string[]]$libs, [bool]$needDynamic, [int]$
     $b += 'void WINAPI RtlFillMemory(void*, size_t, unsigned char);'
     $b += 'void WINAPI RtlZeroMemory(void*, size_t);'
     $b += '#include <stdint.h>'
+    $b += '#include <string.h>'
     $b += '#include <shlwapi.h>'
     $b += '#include <shlobj.h>'
     $b += '#include <mmsystem.h>'
@@ -298,12 +325,15 @@ function New-Banner([string]$family, [string[]]$libs, [bool]$needDynamic, [int]$
     $b += '#pragma comment(lib, "comdlg32.lib")'
     $b += ''
     if ($needDynamic) {
-        $b += '/* GDI+ flat API lives in gdiplus.dll but its header is C++-only, so the'
-        $b += ' * symbols below are resolved by name at first use. */'
-        $b += 'static void* vb6_di_gdiplus_proc(const char* name) {'
+        $b += '/* GDI+ flat API (and DllGetVersion) are not declared for C by the SDK'
+        $b += ' * headers, so those symbols are resolved by name at first use. */'
+        $b += 'static void* vb6_di_dllproc(const char* dll, const char* name) {'
         $b += '    static HMODULE mod = NULL;'
-        $b += '    if (mod == NULL) { mod = LoadLibraryA("gdiplus.dll"); }'
-        $b += '    return (mod != NULL) ? (void*)GetProcAddress(mod, name) : NULL;'
+        $b += '    static const char* dllname = NULL;'
+        $b += '    if (mod != NULL && dllname != NULL && strcmp(dll, dllname) != 0) { mod = NULL; }'
+        $b += '    if (mod == NULL) { mod = LoadLibraryA(dll); dllname = dll; }'
+        $b += '    if (mod == NULL) { return NULL; }'
+        $b += '    return (void*)GetProcAddress(mod, name);'
         $b += '}'
         $b += ''
     }
@@ -328,12 +358,16 @@ function New-GdiplusBanner([string]$sub, [int]$stubs) {
     $b += ''
     $b += '#include <windows.h>'
     $b += '#include <stdint.h>'
+    $b += '#include <string.h>'
     $b += '#pragma comment(lib, "gdiplus.lib")'
     $b += ''
-    $b += 'static void* vb6_di_gdiplus_proc(const char* name) {'
+    $b += 'static void* vb6_di_dllproc(const char* dll, const char* name) {'
     $b += '    static HMODULE mod = NULL;'
-    $b += '    if (mod == NULL) { mod = LoadLibraryA("gdiplus.dll"); }'
-    $b += '    return (mod != NULL) ? (void*)GetProcAddress(mod, name) : NULL;'
+    $b += '    static const char* dllname = NULL;'
+    $b += '    if (mod != NULL && dllname != NULL && strcmp(dll, dllname) != 0) { mod = NULL; }'
+    $b += '    if (mod == NULL) { mod = LoadLibraryA(dll); dllname = dll; }'
+    $b += '    if (mod == NULL) { return NULL; }'
+    $b += '    return (void*)GetProcAddress(mod, name);'
     $b += '}'
     $b += ''
     return $b
@@ -378,7 +412,7 @@ foreach ($fam in $families) {
 
 if ($bodies['unknown'].Count -gt 0) {
     $path = Join-Path $OutDir 'vb6_di_unknown_stubs.c'
-    $content = ((New-Banner 'unknown' @() $false $counts['unknown']) + $bodies['unknown']) -join "`r`n"
+    $content = ((New-Banner 'unknown' @($usedLibs['unknown'].Keys | Sort-Object) $false $counts['unknown']) + $bodies['unknown']) -join "`r`n"
     [System.IO.File]::WriteAllText($path, $content, (New-Object System.Text.UTF8Encoding($false)))
     $written.Add($path)
     Write-Output ('  unknown   -> vb6_di_unknown_stubs.c   stubs ' + $counts['unknown'] + '   !!! no vb6_di_lib marker')

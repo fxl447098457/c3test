@@ -12,6 +12,7 @@
 #include <fstream>
 #include <filesystem>
 #include <cstdlib>
+#include <algorithm>
 
 namespace vb6c3 {
 
@@ -117,6 +118,13 @@ bool Driver::runLinker(const CompileOptions& options, const std::string& outputD
             break;
         }
     }
+    // Fix 165: 入口点跟着启动对象走 — 见 msvc_driver.hpp 的 entryIsMain 注释。
+    // 与 cgen_base_generate_entry.inc:54 用的是同一个判定 (`sub main`), 两处若改须同改。
+    if (msvcOpts.isGui) {
+        std::string so165 = startupObject_;
+        std::transform(so165.begin(), so165.end(), so165.begin(), ::tolower);
+        msvcOpts.entryIsMain = (so165 == "sub main");
+    }
 
     // RTL 源码编译 (P10 恢复): 会话目录释放的 RTL .c 与生成代码一起编译,
     // 不再链接预编译 .lib —— 修改 RTL 源码后重编 C3.exe 即生效
@@ -156,6 +164,8 @@ bool Driver::runLinker(const CompileOptions& options, const std::string& outputD
     msvcOpts.sourceFiles.push_back(rtlDir + "/vb6_di_com_stubs.c");
     msvcOpts.sourceFiles.push_back(rtlDir + "/vb6_di_net_stubs.c");
     msvcOpts.sourceFiles.push_back(rtlDir + "/vb6_di_shell_stubs.c");
+    // Fix 160y: unknown 族 (无 vb6_di_lib 标记的杂项符号: Imm/version/TransparentBlt/msvbvm60)
+    msvcOpts.sourceFiles.push_back(rtlDir + "/vb6_di_unknown_stubs.c");
     // 092z-3 + Fix 112: vb6forms 组对**所有**工程类型都链接 —— vb6rtl/vb6com 的
     // 宿主对象分派挂接点 (vb6_Host_*) 引用 vb6forms_uc, 不能只在 GUI/DLL 下链接.
     // (原先 Fix 096 的按需扫描已不需要: 一律链接.)

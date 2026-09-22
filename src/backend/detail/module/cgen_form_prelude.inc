@@ -154,7 +154,12 @@
             std::vector<std::string> attachLines;
             for (const auto& ev : ucEventsPre) {
                 std::string handlerLower = Symbol::toLower(child.controlName + "_" + ev.name);
-                if (frmLowCode.find("sub " + handlerLower) == std::string::npos) continue;
+                // Fix 160x: 精确匹配事件处理子例程 — 子串 find 会把
+                // "sub vbflexgrid1_scrolltip(...)" 误判为存在 "vbflexgrid1_scroll"
+                // (MainForm VBFlexGrid1 无 Scroll 处理但 c3 为其声明 thunk →
+                // MainForm.c C2129 "静态函数已声明但未定义"). 匹配到 '(' 才算定义.
+                if (frmLowCode.find("sub " + handlerLower + "(") == std::string::npos
+                    && frmLowCode.find("sub " + handlerLower + " (") == std::string::npos) continue;
                 anyHandler = true;
                 std::string fnOrig = cIdent(child.controlName) + "_" + cIdent(ev.name);
                 std::string frmPrefix = "vb6_" + cIdent(formName) + "_";

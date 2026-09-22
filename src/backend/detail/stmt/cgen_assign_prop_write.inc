@@ -99,6 +99,38 @@
                                 + "*)vb6_UC_InstanceOf(" + hwndArg133y + ")";
                     }
                     emitExpr(*node.value);
+                    // Fix 160w: RHS 是 WithMemberExpr 或早期绑定 COM 成员访问
+                    // (`VBFlexGrid1.CellToolTipText = .Result`, `VBFlexGrid1.CellFontSize
+                    // = PropCellFont.Size`) 时, With/成员表达式路径只把**对象表达式**
+                    // 留在 lastExpr_ (bare `_vb6_with_N` / `PropCellFont`), 成员名挂在
+                    // comObjExpr_/comMemberName_ 上且 isComMarker_=true. 此处必须按
+                    // 目标 PropertyLet/Set 末形参类型立即解封, 否则:
+                    //  (a) 裸对象作为值实参 → C2440 (vb6_ComIface_Font*→float,
+                    //       MainForm.c:346 CellFontSize = PropCellFont.Size);
+                    //  (b) 标记残留, 下一过程 BinaryExpr 误消费 → C2065
+                    //       (_vb6_with_14/_vb6_with_15). 同 assign_com_prop Fix 110i.
+                    if (isComMarker_) {
+                        std::string hint160w = "BSTR";  // String 属性默认解 BSTR
+                        if (propLetSym && !propLetSym->params.empty()) {
+                            const Vb6Type pt160w = propLetSym->params.back().type;
+                            if (pt160w == Vb6Type::Double || pt160w == Vb6Type::Single
+                                || pt160w == Vb6Type::Date || pt160w == Vb6Type::Currency) {
+                                hint160w = "Double";
+                            } else if (pt160w == Vb6Type::Long || pt160w == Vb6Type::Integer
+                                       || pt160w == Vb6Type::Boolean || pt160w == Vb6Type::Byte
+                                       || pt160w == Vb6Type::Error) {
+                                hint160w = "Long";
+                            } else if (pt160w == Vb6Type::LongPtr) {
+                                hint160w = "LongPtr";
+                            } else if (pt160w == Vb6Type::Object) {
+                                hint160w = "Object";
+                            } else if (pt160w == Vb6Type::Variant || pt160w == Vb6Type::Empty
+                                       || pt160w == Vb6Type::Null) {
+                                hint160w = "Variant";
+                            }
+                        }
+                        resolveComValue(hint160w);
+                    }
                     std::string valExpr = std::move(lastExpr_);
                     // Fix 091n: 按 Let/Set **写方向**参数表适配值实参 —
                     //  · Variant 形参 ← 具体类型值 (Byte 数组/SafeArray1D* 等) 需
@@ -109,6 +141,7 @@
                     // 注意不能用裸 propLetSym->params: lookupModuleByKind 会全局命中
                     // 他类同名属性 (其 Variant 参数表) → 误打包 → 大规模 C2440
                     // (cHttpServer/cDataBase/cJson 的 Rs.Status = 200 等).
+                    std::string padArgs158h; // Fix 158h 入口参数 padding 结果
                     {
                         std::vector<ParameterInfo> wp091n;
                         bool isSet091n = (propLetSym->kind == SymbolKind::PropertySet);
@@ -137,13 +170,72 @@
                                 if (arrCarrier091n) {
                                     valExpr = packLetValueArg(lastP091n, node.value.get(), valExpr);
                                 }
-                            } else if (lastP091n.type == Vb6Type::String
-                                       && cExprIsVariant(valExpr)) {
-                                valExpr = wrapToBSTR(valExpr, *node.value);
+                            } else if (lastP091n.type == Vb6Type::String) {
+                                // Fix 091n 原条件 (String 形参 ← Variant 值) 只覆盖
+                                // COM 属性结果; UserEditingForm.c:588 `EditText =
+                                // ComboCalendarValue` (EditText Property Let As String,
+                                // ComboCalendarValue 解析为 double → C 实参 double → 形参
+                                // BSTR) 生成 vb6_VBFlexGrid_prop_let_EditText(..., double)
+                                // → C2440. VB6 这里把 Date/数值隐式转字符串 (CStr 规则).
+                                // 对数值/日期类 RHS 同样 wrapToBSTR (wrapToBSTR 按类型
+                                // 用 vb6_CStrDate/CStrDbl/CStrLong 等).
+                                if (cExprIsVariant(valExpr)) {
+                                    valExpr = wrapToBSTR(valExpr, *node.value);
+                                } else if (node.value) {
+                                    const Vb6Type vt160w = inferExprType(*node.value);
+                                    if (vt160w == Vb6Type::Double || vt160w == Vb6Type::Single
+                                        || vt160w == Vb6Type::Date || vt160w == Vb6Type::Currency
+                                        || vt160w == Vb6Type::Long || vt160w == Vb6Type::Integer
+                                        || vt160w == Vb6Type::Boolean || vt160w == Vb6Type::Byte) {
+                                        valExpr = wrapToBSTR(valExpr, *node.value);
+                                    }
+                                }
+                            }
+                        }
+                        // Fix 158h: 属性 Let/Set 写方向的**入口参数** (Optional ByRef
+                        // After 等前置参数) 缺失 → 生成的 prop_let_ 调用 C2198 参数太少
+                        // (VBFlexGrid.ctl:9212 "Public Property Let InsertMark(Optional
+                        // ByRef After As Boolean, ByVal Value As Long)", C 声明
+                        // (me, int16_t* After, int32_t Value, int _has_After), 而调用点
+                        // MainForm.frm:746/751 ".InsertMark = .FixedRows" / ".InsertMark
+                        // = -1" 只传 (obj, value)). 按写方向形参表补每个前置入口参数的
+                        // 默认值 + Optional 的 _has_ 标志 (与 m22_module Fix 090am 同模板).
+                        if (wp091n.size() > 1) {
+                            padArgs158h = objExpr;
+                            size_t np158h = wp091n.size() - 1;
+                            for (size_t j = 0; j < np158h; j++) {
+                                const ParameterInfo& pp158h = wp091n[j];
+                                std::string defP158h =
+                                    (pp158h.hasDefaultValue && !pp158h.defaultValueExpr.empty())
+                                    ? pp158h.defaultValueExpr : defaultValue(pp158h.type);
+                                padArgs158h += ", ";
+                                if (pp158h.isByVal) {
+                                    padArgs158h += defP158h;
+                                } else {
+                                    std::string ct158h = mapType(pp158h.type);
+                                    if (pp158h.type == Vb6Type::Variant
+                                        || pp158h.type == Vb6Type::Empty
+                                        || pp158h.type == Vb6Type::Null
+                                        || pp158h.type == Vb6Type::Object) {
+                                        padArgs158h += "&(" + ct158h + "){0}";
+                                    } else {
+                                        padArgs158h += "&(" + ct158h + "){" + defP158h + "}";
+                                    }
+                                }
+                            }
+                            padArgs158h += ", " + valExpr;
+                            for (size_t j = 0; j < np158h; j++) {
+                                if (wp091n[j].isOptional) padArgs158h += ", 0";
                             }
                         }
                     }
-                    c_.emitLine(funcName + "(" + objExpr + ", " + valExpr + ");  /* Property Let */");
+                    if (!padArgs158h.empty()) {
+                        c_.emitLine(funcName + "(" + padArgs158h
+                                    + ");  /* Property Let (Fix 158h) */");
+                    } else {
+                        c_.emitLine(funcName + "(" + objExpr + ", " + valExpr
+                                    + ");  /* Property Let */");
+                    }
                     return;
                 }
             }
@@ -204,6 +296,9 @@
                     std::string funcName = cProcName(prefix + tgtId.name, propSym->access,
                         propSym->isExternal ? propSym->sourceModule : (isClassModule_ ? moduleName_ : ""));
                     emitExpr(*node.value);
+                    // Fix 160w: bare 属性写 RHS 同为主路径场景 (WithMemberExpr/COM 成员)
+                    // — 消费标记以避免裸对象实参 C2440 与跨过程泄漏.
+                    if (isComMarker_) resolveComValue("BSTR");
                     std::string valExpr = std::move(lastExpr_);
                     c_.emitLine(funcName + (isClassModule_ ? "((void*)me, " : "(") + valExpr + ");  /* Property Let/Set (bare) */");
                     return;

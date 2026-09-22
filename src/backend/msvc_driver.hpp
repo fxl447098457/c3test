@@ -17,6 +17,11 @@ struct MsvcDriverOptions {
     bool isDll = false;                     // P6.6: ActiveX DLL mode
     std::string defFile;                    // P6.6: DLL export definition file (.def) path
     bool isGui = false;                     // P7: GUI program (Win32 window, not console)
+    // GUI 工程链接入口点取决于**代码生成了哪个**: 启动对象是窗体 → `WinMain`
+    // (SUBSYSTEM:WINDOWS 的默认入口即 WinMainCRTStartup); 启动对象是 `Sub Main` →
+    // `main` → 必须显式 /ENTRY:mainCRTStartup, 否则 LNK2019 main。
+    // 二者写死任一个都会让另一类工程链接失败, 所以由 driver 按启动对象决定。
+    bool entryIsMain = false;
     std::string typelibResFile;              // P6.13: .res file path (compiled resource)
     std::string versionInfoResFile;          // P23-05: VS_VERSION_INFO .res file path
     std::string userResFile;                // P23-03: User-specified .res file (from VBP ResFile=)
