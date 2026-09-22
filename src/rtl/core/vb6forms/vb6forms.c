@@ -5,6 +5,7 @@
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <windows.h>
+#include <psapi.h>    /* K32GetModuleInformation (崩溃栈扫描) */
 #include <shellapi.h>
 #include <commctrl.h>
 #endif
@@ -432,12 +433,150 @@ static LONG WINAPI vb6_crashFilter(EXCEPTION_POINTERS* ep) {
     return EXCEPTION_EXECUTE_HANDLER;
 }
 
+// 堆损坏 (0xC0000374) 不经过未处理异常过滤器: ntdll 持堆锁直接终止进程。
+// VEH 第一 chance 截获落栈; 此线程持堆锁, 只用无堆分配的 Win32 API
+// (CreateFileA/WriteFile/wsprintfA), CRT 文件 IO 会死锁。
+/* 扫描栈内存: 打印落在目标镜像代码范围内的返回地址候选 (异常派发会截断
+ * EBP 链, RtlCaptureStackBackTrace 拿不到应用帧; 直接按值扫描原始栈) */
+static int vb6_vehScanStackForImage(char* buf, int n, int bufsz,
+                                    CONTEXT* ctx, const char* imgName,
+                                    const char* imgBase, ULONG imgSize) {
+    const DWORD* sp = (const DWORD*)ctx->Esp;
+    int printed = 0, i;
+    for (i = 0; i < 16384 && printed < 48 && n < bufsz - 128; i++) {
+        DWORD v;
+        if (IsBadReadPtr(sp + i, 4)) break;
+        v = sp[i];
+        if (v >= (DWORD)(ULONG_PTR)imgBase &&
+            v < (DWORD)(ULONG_PTR)imgBase + imgSize) {
+            n += wsprintfA(buf + n, "  [sp+%d] 0x%08lX -> %s+0x%08lX\r\n",
+                           i, (unsigned long)v, imgName,
+                           (unsigned long)(v - (DWORD)(ULONG_PTR)imgBase));
+            printed++;
+        }
+    }
+    return n;
+}
+
+static LONG WINAPI vb6_heapCorruptVEH(EXCEPTION_POINTERS* ep) {
+    DWORD code = ep->ExceptionRecord->ExceptionCode;
+    int isCorrupt = (code == 0xC0000374);
+    int isAV = (code == 0xC0000005);
+    if (!isCorrupt && !isAV)
+        return EXCEPTION_CONTINUE_SEARCH;
+    HANDLE h = CreateFileA("c3_crash.txt", FILE_APPEND_DATA,
+                           FILE_SHARE_READ | FILE_SHARE_WRITE, NULL,
+                           OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (h == INVALID_HANDLE_VALUE) return EXCEPTION_CONTINUE_SEARCH;
+    {
+        char buf[16384];
+        int n;
+        if (isCorrupt)
+            n = wsprintfA(buf, "=== HEAP CORRUPTION code=0xC0000374 addr=%p ===\r\n",
+                          ep->ExceptionRecord->ExceptionAddress);
+        else
+            n = wsprintfA(buf, "=== AV code=0xC0000005 addr=%p %s %p ===\r\n",
+                          ep->ExceptionRecord->ExceptionAddress,
+                          ep->ExceptionRecord->ExceptionInformation[0] ? "WRITE" : "READ",
+                          (void*)ep->ExceptionRecord->ExceptionInformation[1]);
+        {   /* 模块名+运行时基址+偏移 (x86 ASLR 下基址随机, 符号化必须配对基址) */
+            HMODULE hm = NULL;
+            wchar_t wp[MAX_PATH] = {0};
+            char nm[80] = "?";
+            ULONG imgSize = 0;
+            if (GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+                                   GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                                   (LPCWSTR)ep->ExceptionRecord->ExceptionAddress, &hm) && hm) {
+                GetModuleFileNameW(hm, wp, MAX_PATH);
+                { const wchar_t* b = wcsrchr(wp, L'\\');
+                  WideCharToMultiByte(CP_ACP, 0, b ? b + 1 : wp, -1, nm, sizeof(nm), NULL, NULL); }
+                n += wsprintfA(buf + n, "  FAULT %s base=%p off=0x%08lX\r\n", nm, (void*)hm,
+                               (unsigned long)((const char*)ep->ExceptionRecord->ExceptionAddress
+                                               - (const char*)hm));
+            } else {
+                n += wsprintfA(buf + n, "  FAULT (unknown module) %p\r\n",
+                               ep->ExceptionRecord->ExceptionAddress);
+            }
+        }
+        if (isAV) {
+            CONTEXT* c = ep->ContextRecord;
+            n += wsprintfA(buf + n,
+                "  eip=%p esp=%p ebp=%p eax=%p ebx=%p ecx=%p edx=%p esi=%p edi=%p\r\n",
+                (void*)c->Eip, (void*)c->Esp, (void*)c->Ebp, (void*)c->Eax,
+                (void*)c->Ebx, (void*)c->Ecx, (void*)c->Edx,
+                (void*)c->Esi, (void*)c->Edi);
+        }
+        {
+            void* frames[64];
+            USHORT cnt = RtlCaptureStackBackTrace(0, 64, frames, NULL), i;
+            for (i = 0; i < cnt && n < (int)sizeof(buf) - 200; i++) {
+                HMODULE hm = NULL;
+                wchar_t wp[MAX_PATH] = {0};
+                char nm[80] = "?";
+                if (GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+                                       GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                                       (LPCWSTR)frames[i], &hm) && hm) {
+                    GetModuleFileNameW(hm, wp, MAX_PATH);
+                    { const wchar_t* b = wcsrchr(wp, L'\\');
+                      WideCharToMultiByte(CP_ACP, 0, b ? b + 1 : wp, -1, nm, sizeof(nm), NULL, NULL); }
+                    n += wsprintfA(buf + n, "  #%02d 0x%p  %s base=%p off=0x%08lX\r\n", i, frames[i],
+                                   nm, (void*)hm,
+                                   (unsigned long)((const char*)frames[i] - (const char*)hm));
+                } else {
+                    n += wsprintfA(buf + n, "  #%02d 0x%p  (unknown)\r\n", i, frames[i]);
+                }
+            }
+        }
+        if (isAV) {
+            /* 栈扫描: 找镜像范围内的返回地址 (需要 FAULT 模块的基址与大小) */
+            HMODULE hm = NULL;
+            if (GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+                                   GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                                   (LPCWSTR)ep->ExceptionRecord->ExceptionAddress, &hm) && hm) {
+                MODULEINFO mi;
+                wchar_t wp[MAX_PATH] = {0};
+                char nm[80] = "?";
+                GetModuleFileNameW(hm, wp, MAX_PATH);
+                { const wchar_t* b = wcsrchr(wp, L'\\');
+                  WideCharToMultiByte(CP_ACP, 0, b ? b + 1 : wp, -1, nm, sizeof(nm), NULL, NULL); }
+                if (K32GetModuleInformation(GetCurrentProcess(), hm, &mi, sizeof(mi))) {
+                    n += wsprintfA(buf + n, "  -- stack scan (%s imgsize=0x%lX) --\r\n",
+                                   nm, (unsigned long)mi.SizeOfImage);
+                    n = vb6_vehScanStackForImage(buf, n, (int)sizeof(buf) - 256,
+                                                 ep->ContextRecord, nm,
+                                                 (const char*)mi.lpBaseOfDll,
+                                                 mi.SizeOfImage);
+                }
+            }
+        }
+        {
+            DWORD written = 0;
+            WriteFile(h, buf, (DWORD)n, &written, NULL);
+            FlushFileBuffers(h);
+            CloseHandle(h);
+        }
+    }
+    return EXCEPTION_CONTINUE_SEARCH;
+}
+
 static void vb6_installCrashTrace(void) {
     static int done = 0;
     if (done) return;
     done = 1;
-    if (GetEnvironmentVariableW(L"C3_CRASH_TRACE", NULL, 0) > 0)
+    if (GetEnvironmentVariableW(L"C3_CRASH_TRACE", NULL, 0) > 0) {
+        AddVectoredExceptionHandler(1, vb6_heapCorruptVEH);
         SetUnhandledExceptionFilter(vb6_crashFilter);
+    }
+    if (GetEnvironmentVariableW(L"C3_PAGEHEAP", NULL, 0) > 0) {
+        /* 全堆页堆: 损坏当场变 AV(有栈), 事后 0xC0000374(无栈)。失败静默(无权限等)。 */
+        static const ULONG pgAllocs = 2;  /* HEAP_PAGE_ALLOCS */
+        HANDLE heaps[256];
+        DWORD nHeaps = GetProcessHeaps(256, heaps);
+        DWORD i;
+        for (i = 0; i < nHeaps; i++)
+            HeapSetInformation(heaps[i], HeapCompatibilityInformation,
+                               (void*)&pgAllocs, sizeof(pgAllocs));
+    }
 }
 
 void vb6_ShowForm(void* hwnd, int modal) {

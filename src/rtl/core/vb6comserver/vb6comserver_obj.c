@@ -210,59 +210,59 @@ static HRESULT STDMETHODCALLTYPE ComObj_Invoke(vb6_ComObject* self, DISPID dispI
     P189("[189] INVOKE W=%p cls=%s mem=%ls argc=%d\n", (void*)self,
          (self->desc && self->desc->classVariable) ? self->desc->classVariable : "?",
          method->name ? method->name : L"?", (int)(pDispParams ? pDispParams->cArgs : 0));
-    
+
     // Collect arguments
     // Note: Script engines like VBScript may pass VT_I2 etc.,
     // while bridge functions expect VT_I4 (via lVal). Coerce each param to VT_I4.
+    // invokeFunc 的实参/返回槽在适配器里按 vb6_VARIANT (x86 24B: vt 4B +
+    // pad 4B + union 16B) 布局访问; 前 16 字节与 OLE VARIANT 内容一致。
+    typedef struct { uint64_t v[3]; } vb6_VarSlot;
     int argc = pDispParams ? (int)pDispParams->cArgs : 0;
     void** args = NULL;
-    VARIANT* coercedArgs = NULL;
-    
+    void* coercedArgs = NULL;   /* 槽阵列, 每槽 vb6_VarSlot */
+
     if (argc > 0) {
         args = (void**)CoTaskMemAlloc(argc * sizeof(void*));
-        coercedArgs = (VARIANT*)CoTaskMemAlloc(argc * sizeof(VARIANT));
+        coercedArgs = (void*)CoTaskMemAlloc(argc * sizeof(vb6_VarSlot));
         if (!args || !coercedArgs) {
             if (args) CoTaskMemFree(args);
             if (coercedArgs) CoTaskMemFree(coercedArgs);
             return E_OUTOFMEMORY;
         }
-        // DISPPARAMS args are in reverse order
+        // 适配器按 vb6_VARIANT (24B) 布局访问实参与返回槽, 而 COM 边界的
+        // OLE VARIANT 是 16B。每个实参先整复制进 24B 槽, 再按需数值强转。
         for (int i = 0; i < argc; i++) {
             VARIANT* src = &pDispParams->rgvarg[argc - 1 - i];
+            vb6_VarSlot* slot = &((vb6_VarSlot*)coercedArgs)[i];
+            memset(slot, 0, sizeof(*slot));
+            memcpy(slot, src, sizeof(VARIANT));
+            args[i] = slot;
+        }
+        for (int i = 0; i < argc; i++) {
+            VARIANT* src = &pDispParams->rgvarg[argc - 1 - i];
+            VARIANT* dst = (VARIANT*)&((vb6_VarSlot*)coercedArgs)[i];
             // Coerce numeric types to VT_I4 (bridge functions use lVal)
             if (src->vt == VT_I2 || src->vt == VT_I1 || src->vt == VT_UI1 ||
                 src->vt == VT_UI2 || src->vt == VT_BOOL || src->vt == VT_EMPTY) {
-                VariantInit(&coercedArgs[i]);
-                HRESULT hr2 = VariantChangeType(&coercedArgs[i], src, 0, VT_I4);
-                if (SUCCEEDED(hr2)) {
-                    args[i] = &coercedArgs[i];
-                } else {
-                    args[i] = src;
-                }
+                VariantChangeType(dst, src, 0, VT_I4);
             } else if (src->vt == VT_R4) {
                 // Float -> Double for dblVal access
-                VariantInit(&coercedArgs[i]);
-                HRESULT hr2 = VariantChangeType(&coercedArgs[i], src, 0, VT_R8);
-                if (SUCCEEDED(hr2)) {
-                    args[i] = &coercedArgs[i];
-                } else {
-                    args[i] = src;
-                }
-            } else {
-                args[i] = src;  // VT_I4, VT_R8, VT_BSTR, etc. pass through
+                VariantChangeType(dst, src, 0, VT_R8);
             }
         }
     }
-    
+
     // Call VB6 method
     if (method->invokeFunc) {
-        method->invokeFunc(self->vb6Instance, args, argc, pVarResult);
+        vb6_VarSlot tmpRet;
+        memset(&tmpRet, 0, sizeof(tmpRet));
+        method->invokeFunc(self->vb6Instance, args, argc, &tmpRet);
+        if (pVarResult)
+            memcpy(pVarResult, &tmpRet, sizeof(VARIANT));
     }
-    
-    if (coercedArgs) {
-        for (int i = 0; i < argc; i++) VariantClear(&coercedArgs[i]);
-        CoTaskMemFree(coercedArgs);
-    }
+
+    // 槽内是调用方 VARIANT 的副本, 资源仍归调用方, 不得 VariantClear
+    if (coercedArgs) CoTaskMemFree(coercedArgs);
     if (args) CoTaskMemFree(args);
     return S_OK;
 }
