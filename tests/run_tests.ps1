@@ -622,7 +622,7 @@ if ($Category -in @("all", "run", "bas")) {
     Add-BasTest "hello" "$Tests\hello.bas"
     Add-BasTest "test_m5" "$Tests\test_m5.bas"
     Add-BasTest "test_rtl" "$Tests\test_rtl.bas"
-    Add-BasTest "test_array" "$Tests\test_array.bas"
+    Add-BasTest "test_array" "$Tests\test_array.bas" @("wa-clone=22", "wa-ub=3", "wa-str=65", "wa-rt=65", "=== Array Tests PASSED ===")
     Add-BasTest "test_fileio" "$Tests\test_fileio.bas"
     Add-BasTest "test_error" "$Tests\test_error.bas"
     Add-BasTest "test_now" "$Tests\test_now.bas"
@@ -633,6 +633,11 @@ if ($Category -in @("all", "run", "bas")) {
     Add-BasTest "test_softkeyword" "$Tests\test_softkeyword.bas" @("Get=42", "Step=5", "Name=test")
     Add-BasTest "test_date" "$Tests\test_date.bas" @("PASS_Year", "PASS_Month", "PASS_Day", "PASS_NowYear", "Done")
     Add-BasTest "test_colon" "$Tests\test_colon.bas" @("PASS1", "PASS2", "PASS3", "Done")
+    Add-BasTest "test_goto" "$GHTests\test_goto.bas" @("GOTO-PASS1", "GOTO-PASS2", "GOTO-PASS3", "GOTO-PASS4", "GOTO-PASS5", "GOTO-PASS6", "GOTO-PASS7", "GOTO DONE")
+    Add-BasTest "test_gosub" "$GHTests\test_gosub.bas" @("GOSUB-PASS1", "GOSUB-PASS2", "GOSUB-PASS3", "GOSUB DONE")
+    Add-BasTest "test_nested_udt_array" "$Tests\test_nested_udt_array.bas" @("NA1=1;NB1=D0;NC1=1.2", "NA5=5;NB5=D4;NC5=5.2", "HDR@ABC", "NESTED-DONE")
+    Add-BasTest "test_udt_assign" "$Tests\test_udt_assign.bas" @("A1=1;S1=hello;N1=42", "A2=99;S2=world;N2=7", "H1=11;HS1=alpha", "E1=5;ES1=five", "L1=2;LS1=hello", "UDT-ASSIGN-DONE")
+    Add-BasTest "test_date_display" "$Tests\test_date_display.bas" @("D1-noserial=Y", "D2-year=Y", "D2b-notime=Y", "D3-nextday=Y", "D4-nextyear=Y", "D5-diff0=Y", "D6-param=Y", "D7-longparam=Y", "D8-cstr=Y", "D9-format=Y", "DATE-DONE")
     Add-BasTest "test_variant" "$Tests\test_variant.bas" @("PASS1a", "PASS1c", "PASS5", "Done")
     Write-Host ""
 
@@ -771,11 +776,11 @@ if ($Category -in @("all", "syntax")) {
     # --- 生成物 / 输出目录说明 ---
     Write-Host "--- Syntax/Semantic Tests ---" -ForegroundColor Yellow
     
-    # T0 拆分: 13 个用例移入 tests_github\t0_cases\; test_onerror 留 tests\ (run 类双登记, 不可挪)
+    # T0 拆分: 11 个用例移入 tests_github\t0_cases\; test_onerror 留 tests\ (run 类双登记, 不可挪)
+    # test_goto / test_gosub 已升级为「编译+运行+输出比对」用例, 移入 bas 队列
     $syntaxTests = @(
         "$GHTests\test_basic.bas",
         "$GHTests\test_for.bas", "$GHTests\test_for2.bas",
-        "$GHTests\test_goto.bas", "$GHTests\test_gosub.bas",
         "$GHTests\test_select.bas",
         "$Tests\test_onerror.bas",
         "$GHTests\test_redim.bas",
