@@ -157,3 +157,9 @@
 - 修复: 栈扫描按 _WIN64 切 Rsp/ULONG_PTR (QWORD 值), 寄存器打印 x64 用 Rip/Rsp/Rax 系。
 - 环境附注: 本机沙箱黑名单拦 reg.exe, C3 走 vcvarsall 前缀时链路断 -> cl 无 INCLUDE 报 C1083, 与代码无关; CI 不受影响。
 - 验证: x64 hello.bas 编译+运行通过 (Sum=5050)。
+
+## 2026-09-22 Fix 196: Is/比较取址裸拷 VARIANT 临时, vbman 新增 SSE/Heartbeat 模块触发 C2440
+- 现象: vbman 上游新增 SSE 全家桶与 Winsock/cHeartbeat 后 CI 编译 C2440 两处: cHeartbeat.c(151) int32_t(vb6_ComGetIntProp)->vb6_VARIANT, cSSE.c(166) vb6_cls_cClientCallback*->vb6_VARIANT。
+- 根因: cgen_expr_binary.cpp variantAddr158n 裸拷分支只对含 -> 的表达式包 vb6_VariantFromValue (Fix 158u), 其余 rvalue (类型化 getter 返回 int32_t / 项目类指针解引用) 直接 vb6_VARIANT tmp = X 裸拷。
+- 修复: 裸拷分支统一走 vb6_VariantFromValue (_Generic: 已是 VARIANT 恒等直传, 标量/指针自动包装); 裸 vb6_ComCall( 结果保持 VariantFromComResult 解引用 (Fix 132 同规则)。
+- 验证: 本机 x86 全量 129 模块编译 exit=0, VBMAN.dll 产出 (2.3MB)。

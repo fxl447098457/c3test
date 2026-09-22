@@ -252,6 +252,21 @@ void CCodeGen::visit(BinaryExpr& node) {
             }
             return true;
         };
+        // Fix 196: 裸 `vb6_VARIANT tmp = X;` 对标量 (vb6_ComGetIntProp→int32_t,
+        // cHeartbeat `If Not oClient.Heartbeat Is Nothing`) 与类指针 (cSSE
+        // `(*Client)`) 触发 C2440. 统一 vb6_VariantFromValue 包装: _Generic 下
+        // 已是 VARIANT 的表达式恒等直传 (Fix 158u 场景不受影响), 标量/指针自动
+        // 包装; 裸 vb6_ComCall( 结果是 VARIANT*, 须走 VariantFromComResult
+        // 解引用 (与 Fix 132 同规则).
+        auto wrapVariantRvalue196 = [&](const std::string& e) -> std::string {
+            if (e.find("vb6_ComCall(") != std::string::npos
+                && e.find("vb6_VariantFromComResult(") == std::string::npos)
+                return "vb6_VariantFromComResult(" + e + ")";
+            if (e.find("vb6_VariantFromComResult(") != std::string::npos
+                || e.find("vb6_VariantFromValue(") != std::string::npos)
+                return e;
+            return "vb6_VariantFromValue(" + e + ")";
+        };
         // Variant 表达式的取址: 左值标识符/成员/VB6_SA_AT(...) 直接 &,
         // 其余 rvalue (vb6_VariantFromComResult 等) 用临时变量存上再取址.
         auto variantAddr158n = [&](const std::string& s) -> std::string {
@@ -271,7 +286,7 @@ void CCodeGen::visit(BinaryExpr& node) {
                 return "&" + tmp;
             }
             std::string tmp = "_vcmp_" + std::to_string(vcmpCounter_++);
-            c_.emitLine("vb6_VARIANT " + tmp + " = " + s + ";");
+            c_.emitLine("vb6_VARIANT " + tmp + " = " + wrapVariantRvalue196(s) + ";");
             return "&" + tmp;
         };
         bool lv158n = varLike158n(left, node.left.get());
