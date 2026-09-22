@@ -76,3 +76,29 @@ intptr_t __stdcall vb6_di_MakeSureDirectoryPathExists(BSTR DirPath) {
 intptr_t __stdcall vb6_di_PathMatchSpecW(intptr_t pszFileParam, intptr_t pszSpec) {
     return ((intptr_t (WINAPI *)(intptr_t, intptr_t))PathMatchSpecW)(pszFileParam, pszSpec);
 }
+
+// FATAL-HANDOFF merge: added back from fan/dev vb6_di_shell_stubs.c (missing in origin/main family)
+/* PathGetArgsW */
+intptr_t __stdcall vb6_di_PathGetArgsW(intptr_t lpszPath) {
+    return ((intptr_t (WINAPI *)(intptr_t))PathGetArgsW)(lpszPath);
+}
+
+/* DragAcceptFiles */
+void __stdcall vb6_di_DragAcceptFiles(intptr_t hWnd, intptr_t fAccept) {
+    ((void (WINAPI *)(intptr_t, intptr_t))DragAcceptFiles)(hWnd, fAccept);
+}
+
+/* DragFinish */
+void __stdcall vb6_di_DragFinish(intptr_t hDrop) {
+    ((void (WINAPI *)(intptr_t))DragFinish)(hDrop);
+}
+
+/* DragQueryFileW */
+intptr_t __stdcall vb6_di_DragQueryFileW(intptr_t hDrop, intptr_t iFile, intptr_t lpszFile, intptr_t cch) {
+    return ((intptr_t (WINAPI *)(intptr_t, intptr_t, intptr_t, intptr_t))DragQueryFileW)(hDrop, iFile, lpszFile, cch);
+}
+
+/* DragQueryPoint */
+intptr_t __stdcall vb6_di_DragQueryPoint(intptr_t hDrop, void* lpPoint) {
+    return ((intptr_t (WINAPI *)(intptr_t, void*))DragQueryPoint)(hDrop, lpPoint);
+}

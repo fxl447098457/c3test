@@ -146,3 +146,4 @@
 195 RCDATA "../rtl/core/di/gdiplus/vb6_di_gdiplus_image_stubs.c"
 196 RCDATA "../rtl/core/di/gdiplus/vb6_di_gdiplus_brush_stubs.c"
 197 RCDATA "../rtl/core/di/gdiplus/vb6_di_gdiplus_path_stubs.c"
+205 RCDATA "../rtl/core/di/vb6_di_unknown_stubs.c"
