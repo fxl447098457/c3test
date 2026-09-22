@@ -263,4 +263,26 @@ std::string CCodeGen::cProcName(const std::string& procName, AccessLevel access,
     return "vb6_" + cIdent(procName);
 }
 
+// 重载变体的 C 名后缀 (O2): 非变体/裸键 head 返回空串 —— 零重载工程产出一字不变.
+// 变体: "_ov" + 指纹消毒串 (非字母数字→'_') 并截断, 保证组内唯一 (fp 本身组内唯一).
+static std::string ovlSanitizeFp(const std::string& fp) {
+    std::string out;
+    for (char c : fp) out += (isalnum((unsigned char)c) ? c : '_');
+    if (out.size() > 24) out.resize(24);
+    return out;
+}
+
+std::string CCodeGen::ovlCSuffix(const Symbol* sym) const {
+    if (!sym || !sym->isOverloadVariant || sym->overloadFp.empty()) return "";
+    return "_ov" + ovlSanitizeFp(sym->overloadFp);
+}
+
+std::string CCodeGen::ovlCSuffixFromKey(const std::string& suffixKey) const {
+    // suffixKey = 语义层记在 AST 上的符号键后缀 "$ov$<fp>" ("" = 非变体)
+    const std::string pre = "$ov$";
+    if (suffixKey.empty()) return "";
+    if (suffixKey.compare(0, pre.size(), pre) != 0) return "";
+    return "_ov" + ovlSanitizeFp(suffixKey.substr(pre.size()));
+}
+
 } // namespace vb6c3

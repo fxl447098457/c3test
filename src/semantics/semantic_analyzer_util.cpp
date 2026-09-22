@@ -25,6 +25,105 @@ void SemanticAnalyzer::checkAssignment(Vb6Type targetType, Vb6Type valueType,
     }
 }
 
+std::string SemanticAnalyzer::computeOverloadFp(const Symbol& sym) const {
+    if (sym.kind != SymbolKind::Sub && sym.kind != SymbolKind::Function) return "";
+    // 类模块成员表 (memberParams/memberProcKinds/memberNames) 是单值槽,
+    // 重载整组支持在 O3 改造这些表之后; 现在类模块同名保持旧"重复声明"行为。
+    if (currentModule_ && currentModule_->isClassModule) return "";
+    // 窗体/UserControl 生命周期与绘制回调 (Form_Load / UserControl_Resize 等)
+    // 由运行期按固定名定形派发, 必须每名字唯一 → 禁入重载组 (O3 护栏)。
+    // 控件事件处理器 (Command1_Click) 的名字含动态控件前缀, 无法在此静态识别,
+    // 对其重载会在 MSVC 层报原型冲突 (确定性失败, 不会静默错编)。
+    {
+        std::string ln = Symbol::toLower(sym.name);
+        if (currentModule_ && currentModule_->isFormModule &&
+            (ln.compare(0, 5, "form_") == 0 || ln.compare(0, 12, "usercontrol_") == 0))
+            return "";
+    }
+    std::string fp;
+    fp += (sym.kind == SymbolKind::Function) ? "F" : "S";
+    for (const auto& p : sym.params) {
+        if (p.isParamArray) return "";  // fbc 规则: vararg 过程不进重载组
+        fp += ':';
+        fp += std::to_string(static_cast<int>(p.type));
+        fp += p.isByVal ? 'b' : 'r';
+        if (p.isOptional) fp += 'o';
+    }
+    fp += ":R";
+    fp += std::to_string(static_cast<int>(sym.type));
+    return fp;
+}
+
+int SemanticAnalyzer::ovlScoreParam(Vb6Type argT, const ParameterInfo& p) {
+    if (argT == Vb6Type::Unknown) return 2;  // 未知实参宽松放行 (隐式转换档)
+    if (p.type == argT) return 4;
+    // 数值域内 widening (Integer→Long→Single→Double 等) 优先于跨域转换 (→String 等)
+    if (TypeSystem::isNumeric(argT) && TypeSystem::isNumeric(p.type)) return 3;
+    // Variant 实参给具体形参 = 运行期打包, 与 Variant 形参同档 (两者并存时报歧义,
+    // 由用户显式 CLng/CStr 消歧 — VB 无静态类型可偏袒)
+    if (argT == Vb6Type::Variant) return 1;
+    if (p.type == Vb6Type::Variant) return 1;
+    if (TypeSystem::canImplicitConvert(argT, p.type)) return 2;
+    return 0;
+}
+
+Symbol* SemanticAnalyzer::resolveOverload(Symbol* head, const std::vector<Vb6Type>& argT,
+                                          SourceLocation loc, std::string& suffixOut) {
+    suffixOut.clear();
+    if (!head) return nullptr;
+    if (head->ovlCount == 0) return head;  // 非重载快路径, 与旧行为逐字节同
+    auto cands = symTab_.lookupModuleOverloads(head->name);
+    Symbol* best = nullptr;
+    int bestScore = -1;
+    int ties = 0;
+    size_t n = argT.size();
+    for (auto* s : cands) {
+        if (s->kind != head->kind) continue;
+        size_t required = 0;
+        for (auto& p : s->params) if (!p.isOptional) required++;
+        if (n < required || n > s->params.size()) continue;
+        int score = 0;
+        bool ok = true;
+        for (size_t i = 0; i < n; i++) {
+            int sc = ovlScoreParam(argT[i], s->params[i]);
+            if (!sc) { ok = false; break; }
+            score += sc;
+        }
+        if (!ok) continue;
+        if (score > bestScore) { bestScore = score; best = s; ties = 1; }
+        else if (score == bestScore) ties++;
+    }
+    if (!best) {
+        diag_.error(DiagnosticID::SemTypeMismatch, loc,
+            "没有与实参匹配的重载版本 '" + head->name + "' (候选 " +
+            std::to_string(cands.size()) + " 个)");
+        return head;
+    }
+    if (ties > 1) {
+        diag_.error(DiagnosticID::SemTypeMismatch, loc,
+            "对重载 '" + head->name + "' 的调用有歧义");
+        return head;
+    }
+    if (!cands.empty() && best != cands.front())
+        suffixOut = "$ov$" + best->overloadFp;
+    return best;
+}
+
+void SemanticAnalyzer::resolveDeferredCrossModuleOverloads() {
+    for (auto& site : deferredXmodCalls_) {
+        Symbol* head = symTab_.lookupModule(site.identName);
+        if (!head || !head->isExternal || head->ovlCount == 0 ||
+            (head->kind != SymbolKind::Function && head->kind != SymbolKind::Sub)) {
+            continue;  // 未注入成组 (单模块裸调/内置/本地) → 旧行为
+        }
+        std::string suffix;
+        Symbol* w = resolveOverload(head, site.argTypes, site.loc, suffix);
+        site.node->calleeOvlSuffix = suffix;
+        if (w) w->isReferenced = true;
+    }
+    deferredXmodCalls_.clear();
+}
+
 void SemanticAnalyzer::checkCallArgs(Symbol* procSym, IndexOrCallExpr& callNode) {
     if (!procSym) return;
 

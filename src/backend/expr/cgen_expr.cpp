@@ -345,7 +345,8 @@ void CCodeGen::visit(AddressOfExpr& node) {
         std::string fn = node.funcName;
         size_t dot = fn.find('.');
         if (dot != std::string::npos) fn = fn.substr(dot + 1);
-        lastExpr_ = "(intptr_t)" + delegateThunkName(node.delegateTypeName, fn);
+        lastExpr_ = "(intptr_t)" + delegateThunkName(node.delegateTypeName, fn)
+                    + ovlCSuffixFromKey(node.funcOvlSuffix);
         return;
     }
     // Fix 086: AddressOf 跨模块函数解析. VB6 里 AddressOf DelayTimerProc 的

@@ -27,13 +27,19 @@ std::string CCodeGen::delegateThunkName(const std::string& delName,
     return "vb6_delthunk_" + delLower(delName) + "_" + delLower(procName);
 }
 
-// 在本模块声明里按 VB 名找 Sub/FunctionDecl (大小写不敏感).
-static Decl* findProcDecl(Module& module, const std::string& name) {
+// 在本模块声明里按 VB 名找 Sub/FunctionDecl (大小写不敏感)。
+// procFp 非空 (O2 重载组) 时用符号表指纹精确匹配该变体。
+Decl* CCodeGen::findDelegateTargetDecl(Module& module, const std::string& name,
+                                        const std::string& procFp) {
     for (auto& d : module.declarations) {
-        if (d->kind == ASTNodeKind::SubDecl &&
-            delLower(static_cast<SubDecl&>(*d).name) == delLower(name)) return d.get();
-        if (d->kind == ASTNodeKind::FunctionDecl &&
-            delLower(static_cast<FunctionDecl&>(*d).name) == delLower(name)) return d.get();
+        if (d->kind != ASTNodeKind::SubDecl && d->kind != ASTNodeKind::FunctionDecl)
+            continue;
+        const std::string dn = (d->kind == ASTNodeKind::SubDecl)
+            ? static_cast<SubDecl&>(*d).name : static_cast<FunctionDecl&>(*d).name;
+        if (delLower(dn) != delLower(name)) continue;
+        if (procFp.empty()) return d.get();
+        auto* sym = symTab_.lookupModuleOverloadByLoc(dn, d->loc);
+        if (sym && !sym->overloadFp.empty() && sym->overloadFp == procFp) return d.get();
     }
     return nullptr;
 }
@@ -52,7 +58,7 @@ void CCodeGen::emitDelegateDecls(Module& module) {
 
         if (!delSym) continue;
         for (auto& t : delSym->delegateTargets) {
-            Decl* proc = findProcDecl(module, t.procName);
+            Decl* proc = findDelegateTargetDecl(module, t.procName, t.procFp);
             if (!proc) continue;  // 语义层已校验目标存在, 防御性跳过
             std::string sig = (proc->kind == ASTNodeKind::FunctionDecl)
                 ? makeProcSignature(static_cast<FunctionDecl&>(*proc))
@@ -63,8 +69,10 @@ void CCodeGen::emitDelegateDecls(Module& module) {
             std::string ret = sig.substr(0, sp);
             std::string targetName = sig.substr(sp + 1, lp - sp - 1);
             std::string params = sig.substr(lp);  // "(...)"
-            std::string thunkSig =
-                ret + " " + conv + " " + delegateThunkName(del.name, t.procName) + params;
+            // 重载组 (O2): 桩名带变体指纹后缀, 与 visit(AddressOfExpr) 侧同规则
+            std::string thunk = delegateThunkName(del.name, t.procName)
+                              + (t.procFp.empty() ? "" : ovlCSuffixFromKey("$ov$" + t.procFp));
+            std::string thunkSig = ret + " " + conv + " " + thunk + params;
             c_.emitLine("static " + thunkSig + ";");
 
             // 转发实参名 = 桩形参声明的尾标识符 (与目标逐字一致).

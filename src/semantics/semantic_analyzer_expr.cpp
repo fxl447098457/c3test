@@ -189,6 +189,7 @@ void SemanticAnalyzer::visit(DictionaryAccessExpr& node) {
 void SemanticAnalyzer::visit(IndexOrCallExpr& node) {
     // 分析被调用者
     Vb6Type calleeType = Vb6Type::Unknown;
+    bool argsAnalyzed = false;
 
     // 判断是函数调用还是数组索引
     if (auto* ident = dynamic_cast<IdentifierExpr*>(node.callee.get())) {
@@ -196,7 +197,22 @@ void SemanticAnalyzer::visit(IndexOrCallExpr& node) {
         if (sym) {
             sym->isReferenced = true;
 
-            if (sym->kind == SymbolKind::Variable &&
+            if (sym->ovlCount > 0 &&
+                (sym->kind == SymbolKind::Function || sym->kind == SymbolKind::Sub)) {
+                // 重载组: 先算实参类型, 打分选变体, 结果后缀记入节点供 cgen 定形
+                std::vector<Vb6Type> argT;
+                for (auto& arg : node.positional) argT.push_back(analyzeExpr(*arg));
+                for (auto& namedArg : node.named) analyzeExpr(*namedArg.value);
+                argsAnalyzed = true;
+                std::string suffix;
+                Symbol* w = resolveOverload(sym, argT, node.loc, suffix);
+                node.calleeOvlSuffix = suffix;
+                if (w) {
+                    w->isReferenced = true;
+                    calleeType = (w->kind == SymbolKind::Function)
+                                 ? w->type : Vb6Type::Variant;
+                }
+            } else if (sym->kind == SymbolKind::Variable &&
                 lookupDelegateSym(sym->variableTypeName)) {
                 // 委托变量直调: op(5, 6) — 按委托签名校验实参, 返回类型取委托声明.
                 auto* del = lookupDelegateSym(sym->variableTypeName);
@@ -232,6 +248,20 @@ void SemanticAnalyzer::visit(IndexOrCallExpr& node) {
             // 简化: 推导为Variant
             calleeType = Vb6Type::Variant;
 
+            // O3 延后: 跨模块 Public 重载组要到 runCrossModuleResolution (本模块
+            // 分析之后) 才注入, 此处查无此名. 记下 节点+实参类型, 待 Driver 注入
+            // 完成后补跑 resolveOverload 写 calleeOvlSuffix. 仅 pass 2 记录
+            // (两遍去重); 无实参的裸名引用不是调用, 不记.
+            if (pass_ == 2 &&
+                (!node.positional.empty() || !node.named.empty())) {
+                std::vector<Vb6Type> argT;
+                for (auto& arg : node.positional) argT.push_back(analyzeExpr(*arg));
+                for (auto& namedArg : node.named) analyzeExpr(*namedArg.value);
+                deferredXmodCalls_.push_back(
+                    {&node, ident->name, std::move(argT), node.loc});
+                argsAnalyzed = true;  // 上一步已分析, 跳过函数尾的重复遍历
+            }
+
             // 检查Option Explicit
             if (optionExplicit_ && pass_ == 2 &&
                 node.positional.empty()) {
@@ -245,12 +275,14 @@ void SemanticAnalyzer::visit(IndexOrCallExpr& node) {
         calleeType = Vb6Type::Variant;
     }
 
-    // 分析参数
-    for (auto& arg : node.positional) {
-        analyzeExpr(*arg);
-    }
-    for (auto& namedArg : node.named) {
-        analyzeExpr(*namedArg.value);
+    // 分析参数 (重载分支已在选择前分析过, 避免双重求值的副作用)
+    if (!argsAnalyzed) {
+        for (auto& arg : node.positional) {
+            analyzeExpr(*arg);
+        }
+        for (auto& namedArg : node.named) {
+            analyzeExpr(*namedArg.value);
+        }
     }
 
     lastExprType_ = calleeType;
@@ -324,6 +356,22 @@ bool SemanticAnalyzer::checkDelegateSignature(Symbol* del, Symbol* proc, SourceL
     return true;
 }
 
+bool SemanticAnalyzer::matchesDelegateSignature(Symbol* del, Symbol* proc) {
+    if (!del || !proc) return false;
+    if (del->delegateProcKind == ProcKind::Function) {
+        if (proc->kind != SymbolKind::Function) return false;
+        if (proc->type != del->delegateReturnType) return false;
+    } else {
+        if (proc->kind != SymbolKind::Sub) return false;
+    }
+    if (del->params.size() != proc->params.size()) return false;
+    for (size_t i = 0; i < del->params.size(); i++) {
+        if (del->params[i].type != proc->params[i].type) return false;
+        if (del->params[i].isByVal != proc->params[i].isByVal) return false;
+    }
+    return true;
+}
+
 void SemanticAnalyzer::bindDelegateAddressOf(const std::string& typeName, Expr& valueExpr,
                                              SourceLocation loc) {
     if (valueExpr.kind != ASTNodeKind::AddressOfExpr) return;
@@ -359,15 +407,34 @@ void SemanticAnalyzer::bindDelegateAddressOf(const std::string& typeName, Expr& 
             "Delegate '" + del->name + "' 绑定目标未找到或不可绑定: '" + aof.funcName + "'");
         return;
     }
-    if (!checkDelegateSignature(del, proc, loc)) return;
+    // 重载组: 在候选集中找签名相符的变体 (无组时行为同旧: 唯一 proc 直接比对)
+    if (proc->ovlCount > 0) {
+        Symbol* match = nullptr;
+        for (auto* c : symTab_.lookupModuleOverloads(fn)) {
+            if ((c->kind == SymbolKind::Sub || c->kind == SymbolKind::Function) &&
+                matchesDelegateSignature(del, c)) { match = c; break; }
+        }
+        if (!match) {
+            checkDelegateSignature(del, proc, loc);  // 复用报告器产出一次具体不符原因
+            return;
+        }
+        proc = match;
+    } else if (!checkDelegateSignature(del, proc, loc)) {
+        return;
+    }
 
     aof.delegateTypeName = del->name;
+    // 重载组内: 即使选中 head 也记录其 fp (桩名需区分具体变体); 无组时为 ""
+    aof.funcOvlSuffix = proc->ovlCount > 0 ? ("$ov$" + proc->overloadFp) : "";
     proc->isReferenced = true;
-    // 幂等登记桩生成需求 (同一目标可能被多处赋值引用).
+    // 幂等登记桩生成需求 (同一目标变体可能被多处赋值引用).
     for (auto& t : del->delegateTargets) {
-        if (Symbol::toLower(t.procName) == Symbol::toLower(proc->name)) return;
+        if (Symbol::toLower(t.procName) == Symbol::toLower(proc->name) &&
+            t.procFp == (proc->ovlCount > 0 ? proc->overloadFp : ""))
+            return;
     }
-    del->delegateTargets.push_back({proc->name, ""});
+    del->delegateTargets.push_back(
+        {proc->name, "", proc->ovlCount > 0 ? proc->overloadFp : ""});
 }
 
 void SemanticAnalyzer::visit(MeExpr& node) {

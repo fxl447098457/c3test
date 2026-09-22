@@ -1,0 +1,4 @@
+Type=Exe
+Startup="Sub Main"
+Module=ovl_modA.bas
+Module=ovl_modB.bas

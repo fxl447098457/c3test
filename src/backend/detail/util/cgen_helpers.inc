@@ -63,9 +63,15 @@
     // --- Delegate (tB 扩展): 桩类型名/桩名/声明趟发射/收尾定义/直调 ---
     std::string delegateTyName(const std::string& delName);
     std::string delegateThunkName(const std::string& delName, const std::string& procName);
+    // 重载 C 名后缀 (O2): 变体符号/AST 键后缀 → "_ov<fp消毒>", 非变体 = 空串
+    std::string ovlCSuffix(const Symbol* sym) const;
+    std::string ovlCSuffixFromKey(const std::string& suffixKey) const;
     void emitDelegateDecls(Module& module);
     void emitDelegateThunks();
     void emitDelegateCall(IndexOrCallExpr& node);
+    // 委托桩目标过程声明查找 (O2: procFp 非空时按重载变体指纹精确匹配)
+    Decl* findDelegateTargetDecl(Module& module, const std::string& name,
+                                 const std::string& procFp);
 
     // 生成参数列表
     std::string makeParamList(std::vector<std::unique_ptr<ParameterDecl>>& params, bool isDeclare = false);
