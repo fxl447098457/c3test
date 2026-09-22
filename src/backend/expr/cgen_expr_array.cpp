@@ -22,6 +22,12 @@ std::string CCodeGen::mapSaElemType(Vb6Type type) const {
         case Vb6Type::String:   return "vb6_sa_bstr";
         case Vb6Type::Variant:  return "vb6_sa_variant";
         case Vb6Type::Object:   return "vb6_sa_ptr";
+        // Fix 191: LongPtr/LongLong 是指针宽度整数, 不能落到 default 的 Variant 载体。
+        // VTableHandle.bas 的手写 vtable 子类化要求 `VTableIPAO(0 To 9) As LongPtr`
+        // 是紧密排布的 8 字节槽 —— 它把 VarPtr(VTableIPAO(0)) 直接当 COM vtable 用。
+        // 按 Variant 分配后步长变 16 字节、槽内容是 vb6_VARIANT 头部, 伪 vtable 的
+        // 第 5 槽读出 3 (VT_I4), 于是 (3 + 0x28) 读 → 0xC0000005 (左键点网格即崩)。
+        case Vb6Type::LongPtr:  return "vb6_sa_ptr";
         default:                return "vb6_sa_variant";
     }
 }
@@ -39,6 +45,7 @@ std::string CCodeGen::mapSaElemCType(Vb6Type type) const {
         case Vb6Type::Variant:  return "vb6_VARIANT";
         case Vb6Type::Currency: return "int64_t";
         case Vb6Type::Object:   return "void*";
+        case Vb6Type::LongPtr:  return "intptr_t";  // Fix 191: 见 mapSaElemType 同处注释
         default:                return "vb6_VARIANT";
     }
 }

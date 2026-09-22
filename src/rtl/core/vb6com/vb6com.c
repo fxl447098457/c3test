@@ -634,7 +634,14 @@ int32_t vb6_IsNothing(void* obj) {
 void vb6_ReleaseObject(void** objPtr) {
     if (!objPtr || !*objPtr) return;
 
+    /* Fix 191: 只有真是 COM 对象才谈得上 Release。VB6 里 `Set .OriginalIOleIPAO = Me`
+     * 存的是接口的 COM 身份, 而生成码把类实例 `me` 直接塞进了接口字段, 于是
+     * `Set ... = Nothing` 走到这里就是对 `me` 解引用 lpVtbl (VBFlexGridDemo 左键
+     * 点击 → DeActivateIPAO → 读 0x10 崩溃)。非 COM 接收者按 VB6 的
+     * "对象不支持此属性或方法" 处理: 只清指针, 不越权调用。 */
     IUnknown* pUnk = (IUnknown*)(*objPtr);
-    pUnk->lpVtbl->Release(pUnk);
+    if (vb6_ComIsDispatchable(pUnk)) {
+        pUnk->lpVtbl->Release(pUnk);
+    }
     *objPtr = NULL;
 }
