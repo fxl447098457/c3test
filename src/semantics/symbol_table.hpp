@@ -35,6 +35,7 @@ enum class SymbolKind : uint8_t {
     DeclareSub,     // Declare Sub (外部)
     DeclareFunc,    // Declare Function (外部)
     Event,          // Event 声明
+    Delegate,       // Delegate 声明 (tB 扩展: 具名函数指针类型)
     Class,          // 类模块 (.cls)
     Label,          // 行标签
     ComClass,       // COM coclass (来自TypeLib, 前期绑定)
@@ -257,6 +258,20 @@ struct Symbol {
     // comMethods[name]: 包含提升的方法签名 (key=小写方法名)
     std::string comGlobalNsMethodName;  // P24-04: 提升的方法名 (原始大小写, 如"VBMAN")
 
+    // --- Delegate 签名 (仅 SymbolKind::Delegate) ---
+    // 委托值本身按 Vb6Type::LongPtr 表示 (位兼容), 签名细节存这里,
+    // 供赋值/传参/调用点的签名检查与后端桩生成使用.
+    ProcKind delegateProcKind = ProcKind::Sub;
+    CallConv delegateCallConv = CallConv::StdCall;
+    Vb6Type delegateReturnType = Vb6Type::Void;
+    // 语义层在 AddressOf 绑定成功时登记的静态目标 (v1 限同模块过程).
+    // cgen 按对子生成调用桩: 桩用委托约定的签名, 体内转调 cdecl 过程本体.
+    struct DelegateTarget {
+        std::string procName;     // VB 过程名 (原样)
+        std::string procModule;   // "" = 当前模块 (v1 仅此形态)
+    };
+    std::vector<DelegateTarget> delegateTargets;
+
     // --- P20-21: UDT成员信息 (仅SymbolKind::UserDefinedType) ---
     struct UdtMemberInfo {
         std::string name;           // 成员名 (保留大小写)
@@ -316,6 +331,7 @@ struct Symbol {
             case SymbolKind::DeclareSub:      return "Declare Sub";
             case SymbolKind::DeclareFunc:     return "Declare Function";
             case SymbolKind::Event:           return "Event";
+            case SymbolKind::Delegate:        return "Delegate";
             case SymbolKind::Class:           return "Class";
             case SymbolKind::Label:           return "Label";
             case SymbolKind::ComClass:        return "ComClass";

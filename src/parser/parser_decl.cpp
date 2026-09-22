@@ -18,6 +18,7 @@ DeclPtr Parser::parseDeclaration() {
         case TokenKind::Enum:     return parseEnumDecl(AccessLevel::Default);
         case TokenKind::Declare:  return parseDeclareDecl(AccessLevel::Default);
         case TokenKind::Event:    return parseEventDecl(AccessLevel::Default);
+        case TokenKind::Delegate: return parseDelegateDecl(AccessLevel::Default);
         case TokenKind::Const:    return parseConstDeclList(AccessLevel::Default);
         case TokenKind::Dim:      return parseVariableDeclList(AccessLevel::Default, false);
         case TokenKind::Static:   return parseVariableDeclList(AccessLevel::Private, true);
@@ -45,6 +46,7 @@ DeclPtr Parser::parseDeclaration() {
                 case TokenKind::Enum:     return parseEnumDecl(access);
                 case TokenKind::Declare:  return parseDeclareDecl(access);
                 case TokenKind::Event:    return parseEventDecl(access);
+                case TokenKind::Delegate: return parseDelegateDecl(access);
                 case TokenKind::Const:    return parseConstDeclList(access);
                 default:                  return parseVariableDeclList(access, false);
             }

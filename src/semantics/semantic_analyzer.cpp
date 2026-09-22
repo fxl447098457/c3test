@@ -197,7 +197,8 @@ bool SemanticAnalyzer::analyze(Module& module) {
     // 的字段访问; 2) 对 Variant 收件人的 .成员 解析退化为跨模块类查找 (如 .Pos 误解析到
     // cToast.Pos, 参数个数不符, MSVC C2198/C2039/C2223 错误)。
     for (auto& decl : module.declarations) {
-        if (decl->kind == ASTNodeKind::TypeDecl || decl->kind == ASTNodeKind::EnumDecl) {
+        if (decl->kind == ASTNodeKind::TypeDecl || decl->kind == ASTNodeKind::EnumDecl ||
+            decl->kind == ASTNodeKind::DelegateDecl) {
             dispatchDecl(*decl, *this);
         }
     }

@@ -60,6 +60,13 @@
     std::string makeProcSignature(SubDecl& node);
     std::string makeProcSignature(FunctionDecl& node);
 
+    // --- Delegate (tB 扩展): 桩类型名/桩名/声明趟发射/收尾定义/直调 ---
+    std::string delegateTyName(const std::string& delName);
+    std::string delegateThunkName(const std::string& delName, const std::string& procName);
+    void emitDelegateDecls(Module& module);
+    void emitDelegateThunks();
+    void emitDelegateCall(IndexOrCallExpr& node);
+
     // 生成参数列表
     std::string makeParamList(std::vector<std::unique_ptr<ParameterDecl>>& params, bool isDeclare = false);
 

@@ -98,6 +98,7 @@ class EnumDecl;
 class EnumMember;
 class DeclareDecl;
 class EventDecl;
+class DelegateDecl;
 class ConstDecl;
 class VariableDecl;
 class ParameterDecl;

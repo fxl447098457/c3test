@@ -180,6 +180,26 @@ public:
           access(acc), name(std::move(n)), params(std::move(p)) {}
 };
 
+// Delegate 声明 (tB 扩展): [Public|Private] Delegate Sub/Function name [CDecl] (params) [As Type]
+// 声明一个具名函数指针类型; 委托值与 LongPtr 位兼容, 赋值/传参/调用时做签名检查.
+class DelegateDecl : public Decl {
+public:
+    AccessLevel access;
+    ProcKind procKind;      // Sub 或 Function
+    std::string name;
+    CallConv callingConv;   // 默认 StdCall, 尾置 CDecl 关键字切换
+    std::vector<std::unique_ptr<ParameterDecl>> params;
+    TypeRefPtr returnType;  // Function 返回类型 (可为nullptr)
+
+    DelegateDecl(SourceLocation loc, AccessLevel acc, ProcKind kind,
+                 std::string n, CallConv conv,
+                 std::vector<std::unique_ptr<ParameterDecl>> p,
+                 TypeRefPtr ret)
+        : Decl(ASTNodeKind::DelegateDecl, loc),
+          access(acc), procKind(kind), name(std::move(n)),
+          callingConv(conv), params(std::move(p)), returnType(std::move(ret)) {}
+};
+
 // Const 声明: [Public|Private] Const name As Type = value
 class ConstDecl : public Decl {
 public:

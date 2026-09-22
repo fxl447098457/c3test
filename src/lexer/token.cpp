@@ -26,6 +26,7 @@ bool Token::isKeyword() const {
         || kind == TokenKind::ByVal || kind == TokenKind::ByRef
         || kind == TokenKind::Optional || kind == TokenKind::ParamArray
         || kind == TokenKind::Implements || kind == TokenKind::Event
+        || kind == TokenKind::Delegate
         || kind == TokenKind::RaiseEvent || kind == TokenKind::WithEvents
         || kind == TokenKind::OnError || kind == TokenKind::GoTo
         || kind == TokenKind::GoSub || kind == TokenKind::Return
@@ -96,7 +97,8 @@ bool Token::isStatementStart() const {
         case TokenKind::Sub: case TokenKind::Function:
         case TokenKind::Property: case TokenKind::Declare:
         case TokenKind::Type: case TokenKind::Enum:
-        case TokenKind::Event: case TokenKind::Implements:
+        case TokenKind::Event: case TokenKind::Delegate:
+        case TokenKind::Implements:
         case TokenKind::If: case TokenKind::For:
         case TokenKind::Do: case TokenKind::While:
         case TokenKind::Select: case TokenKind::With:

@@ -110,6 +110,7 @@ private:
     std::unique_ptr<EnumDecl> parseEnumDecl(AccessLevel access);
     std::unique_ptr<DeclareDecl> parseDeclareDecl(AccessLevel access);
     std::unique_ptr<EventDecl> parseEventDecl(AccessLevel access);
+    std::unique_ptr<DelegateDecl> parseDelegateDecl(AccessLevel access);
     std::unique_ptr<ConstDecl> parseConstDecl(AccessLevel access);
     std::unique_ptr<VariableDecl> parseVariableDecl(AccessLevel access, bool isStatic);
 

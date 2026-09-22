@@ -339,6 +339,15 @@ void CCodeGen::visit(TypeOfExpr& node) {
 }
 
 void CCodeGen::visit(AddressOfExpr& node) {
+    // Delegate (tB 扩展): 已绑定的 AddressOf 产出调用桩地址 (与 decl pass 的
+    // 原型/定义同名), 而非裸过程地址 — 约定转换与签名匹配都收敛在桩上.
+    if (!node.delegateTypeName.empty()) {
+        std::string fn = node.funcName;
+        size_t dot = fn.find('.');
+        if (dot != std::string::npos) fn = fn.substr(dot + 1);
+        lastExpr_ = "(intptr_t)" + delegateThunkName(node.delegateTypeName, fn);
+        return;
+    }
     // Fix 086: AddressOf 跨模块函数解析. VB6 里 AddressOf DelayTimerProc 的
     // 目标可能定义在其他模块 (mDelay.DelayTimerProc), 或显式模块限定
     // (AddressOf ToolsTimer.TimerProc). 此前固定用当前模块前缀+Private,

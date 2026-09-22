@@ -408,3 +408,6 @@
     std::unordered_map<std::string, std::string> knownUserControlCtrlVars_;
                   // DLL的ProgID前缀
 
+
+    // Delegate (tB 扩展): decl pass 登记的桩定义文本, epilogue 统一发射
+    std::vector<std::string> delegateThunkDefs_;

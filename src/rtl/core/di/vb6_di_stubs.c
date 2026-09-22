@@ -349,3 +349,19 @@ void __stdcall vb6_di_ord_383(vb6_di_READERMODEINFO* lpRMI) {
     }
     if (pfn) pfn(lpRMI);
 }
+
+/* qsort (msvcrt) — CDecl 比较回调的转发桩。msvcrt 不在 gen_di_stubs 的家族表内,
+   手写于此 (生成器对手写名做跳过检测)。cmp 实参是 C3 生成的 __cdecl 调用桩,
+   必须按 cdecl 调, 故此处显式函数指针转型。 */
+#include <stdlib.h>
+void __stdcall vb6_di_qsort(intptr_t base, intptr_t num, intptr_t width, intptr_t cmp) {
+    qsort((void*)(uintptr_t)base, (size_t)num, (size_t)width,
+          (int(__cdecl*)(const void*, const void*))(uintptr_t)cmp);
+}
+
+/* EnumWindows (user32) — 手写单桩 (不重跑 gen_di_stubs, 避免其携带式全文件重写).
+   回调参数按 C3 生成的 intptr_t 原型接收, 内部转成真实 WNDENUMPROC。 */
+typedef int (CALLBACK* vb6_di_WNDENUMPROC)(void*, intptr_t);
+intptr_t __stdcall vb6_di_EnumWindows(intptr_t lpEnumFunc, intptr_t lParam) {
+    return (intptr_t)EnumWindows((vb6_di_WNDENUMPROC)(uintptr_t)lpEnumFunc, (LPARAM)lParam);
+}

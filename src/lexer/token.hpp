@@ -141,6 +141,7 @@ enum class TokenKind : uint16_t {
     Type,
     Enum,
     Event,
+    Delegate,       // Delegate 语句 (tB 扩展: 带签名检查的函数指针类型)
     RaiseEvent,
     Implements,
     Class,

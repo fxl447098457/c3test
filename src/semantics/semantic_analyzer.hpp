@@ -45,6 +45,7 @@ public:
     void visit(EnumMember& node) override;
     void visit(DeclareDecl& node) override;
     void visit(EventDecl& node) override;
+    void visit(DelegateDecl& node) override;
     void visit(ConstDecl& node) override;
     void visit(VariableDecl& node) override;
     void visit(ParameterDecl& node) override;
@@ -160,6 +161,15 @@ private:
 
     // 检查过程调用参数
     void checkCallArgs(Symbol* procSym, IndexOrCallExpr& callNode);
+
+    // --- Delegate 辅助 (semantic_analyzer_expr.cpp) ---
+    // typeName 解析为 SymbolKind::Delegate 时返回其符号, 否则 nullptr.
+    Symbol* lookupDelegateSym(const std::string& typeName);
+    // 校验 proc 是否匹配 del 签名 (procKind/返回类型/逐参类型与ByVal/参数个数).
+    bool checkDelegateSignature(Symbol* del, Symbol* proc, SourceLocation loc);
+    // 若 valueExpr 是 AddressOf 且 typeName 是委托: 解析目标过程、签名校验,
+    // 通过则在 AddressOfExpr 上打委托标记并登记 cgen 桩生成需求.
+    void bindDelegateAddressOf(const std::string& typeName, Expr& valueExpr, SourceLocation loc);
 
     // 标记符号为已引用
     void markReferenced(const std::string& name);
