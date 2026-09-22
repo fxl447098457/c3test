@@ -44,6 +44,7 @@ void CCodeGen::visit(PropertyDecl& node) {
     knownBstrVars_.clear();
     knownDoubleVars_.clear();
     knownSingleVars_.clear();
+    knownDateVars_.clear();   // Fix 175
     knownLongVars_.clear();
     knownLongPtrVars_.clear();  // Bug #2 fix: 也清空LongPtr集合
     knownVariantVars_.clear();
@@ -57,6 +58,18 @@ void CCodeGen::visit(PropertyDecl& node) {
     // Fix 091m: 回灌模块级 Variant 变量 (knownVariantVars_ 已被 clear)
     knownVariantVars_.insert(moduleVariantVars_.begin(), moduleVariantVars_.end());
     knownByRefParams_.clear();  // Fix 081g
+    // Fix 160w: 过程入口重置 COM 属性派发标记与 With 栈 — 上一个过程的 WithMemberExpr
+    // 值 (如 `.Result`, `PropCellFont.Size`) 只把对象表达式留在 lastExpr_, 成员名挂
+    // 在 comObjExpr_/comMemberName_/isComMarker_… 若不清, 会泄漏到下一个过程被其
+    // BinaryExpr/赋值误当作 COM 属性读取 → C2065 (_vb6_with_14/_vb6_with_15,
+    // Command5_Click -> Command10_Click) / C2440 (vb6_ComIface_Font*→float).
+    isComMarker_ = false;
+    comObjExpr_.clear();
+    comMemberName_.clear();
+    isEarlyBoundCom_ = false;
+    earlyBoundSym_ = nullptr;
+    withObjectVars_.clear();
+    withObjectInfoStack_.clear();
     // Fix 010r/010r-10: 类模块中注册me到knownClassVars_ (使Me.Method()正确分发)
     // 改为map赋值: me → 当前模块名(类名)
     if (isClassModule_) knownClassVars_["me"] = moduleName_;
@@ -111,8 +124,12 @@ void CCodeGen::visit(PropertyDecl& node) {
             // C2440, cZipArchive.c 2341/2343). 与 cgen_decl_func.cpp /
             // cgen_decl_proc.cpp 同步 (三处副本必须一致).
             else if (paramType == Vb6Type::Double || paramType == Vb6Type::Currency
-                     || paramType == Vb6Type::Single || paramType == Vb6Type::Date)
+                     || paramType == Vb6Type::Single || paramType == Vb6Type::Date) {
                 knownDoubleVars_.insert(pLower);
+                // Fix 175: Date 形参额外登记 —— C 层 Date/Double 同型, 只按
+                // C 类型串分派会让 inferExprType 看不见 Date (打出序列号)。
+                if (paramType == Vb6Type::Date) knownDateVars_.insert(pLower);
+            }
             else if (paramType == Vb6Type::Long || paramType == Vb6Type::Integer || paramType == Vb6Type::Boolean) knownLongVars_.insert(pLower);
             // Bug #2 fix: LongPtr 参数注册到独立集合
             else if (paramType == Vb6Type::LongPtr) knownLongPtrVars_.insert(pLower);
@@ -171,6 +188,14 @@ void CCodeGen::visit(PropertyDecl& node) {
         currentReturnVar_ = "vb6_ret_" + cIdent(node.name);
         if (node.returnType) {
             std::string retType = mapTypeRef(node.returnType.get());
+            // Fix 160-F: 与 cgen_decl_func.cpp:168 对齐 — Property Get 与 Function
+            // 的"给函数名赋值"语义相同, 但此字段从未设置, 使 Fix 092f 的
+            // 按返回类型解包 Variant 分支 (cgen_assign_value_sem.inc:265) 在
+            // Property Get 内永不生效:
+            //   Prop Get CellFontSize As Single 内
+            //     vb6_ret_CellFontSize = vb6_VariantFromComResult(vb6_ComCall(...))
+            //   → VBFlexGrid.c 32210/32212 两条 C2440 (vb6_VARIANT→float)。
+            currentReturnCType_ = retType;
             Vb6Type retVb6Type = typeSys_.resolveTypeName(
                 static_cast<SimpleTypeRef*>(node.returnType.get())->name);
             // Fix 038/054: UDT 返回值不能用 = 0 初始化 (C2440), 改用 {0}

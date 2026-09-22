@@ -109,6 +109,22 @@
             argVal = ansiVar;
         }
 
+        // Fix 175: 用户 Sub/Function/Property 的 **ByVal String 形参**收到数值/日期实参
+        // (`ShowStr(d)` / `ShowStr(n)`)。VB6 按 CStr 隐式转字符串; C 侧形参是 BSTR,
+        // 裸传 double → C2440, 裸传 int32_t → 只报 C4047 警告, 运行期把整数当指针
+        // 解引用 (0xC0000005 或读到垃圾字符串)。按形参类型补 wrapToBSTR。
+        if (!isDeclareAnsiCall && i < calleeParams.size() && calleeParams[i].isByVal
+            && calleeParams[i].type == Vb6Type::String && node.positional[i]
+            && !cExprIsVariant(argVal)) {
+            Vb6Type at175 = inferExprType(*node.positional[i]);
+            if (at175 == Vb6Type::Date || at175 == Vb6Type::Double || at175 == Vb6Type::Single
+                || at175 == Vb6Type::Currency || at175 == Vb6Type::Long
+                || at175 == Vb6Type::Integer || at175 == Vb6Type::Byte
+                || at175 == Vb6Type::Boolean || at175 == Vb6Type::LongPtr) {
+                argVal = wrapToBSTR(argVal, *node.positional[i]);
+            }
+        }
+
         // ByRef参数: 调用点传指针. 如果实参已经是解引用形式(*x), 取地址还原为x;
         // 如果是普通变量, 加&取地址
         // Fix 072: VB6 允许 ByVal 覆盖 ByRef 声明 (如 SHCreateMemStream(ByVal 0, 0))
@@ -121,7 +137,65 @@
         bool calleeParamIsArray = (i < calleeParams.size()
             && (static_cast<uint16_t>(calleeParams[i].type) & static_cast<uint16_t>(Vb6Type::Array)));
         if (isByRef) {
-            if (argVal.size() > 3 && argVal.substr(0, 2) == "(*" && argVal.back() == ')') {
+            // Fix 158b: ByRef **数组**形参 (C 形参 vb6_SafeArray1D**) 收到"整体数组引用"
+            // 实参. 1 维 arr() (空括号) 在 prelude 生成 VB6_SA_AT(T, arr, 0) (元素左值);
+            // 直接作为 ByRef 数组实参会落入下方复合字面量 (&(vb6_SafeArray1D**){元素}),
+            // 元素 T 与 ** 指针类型不符 → C2440 (VBFlexGrid.ctl SortGrid/MergeSort:
+            //   TextDisplayMergeSortRec(..., Data(), ...) — ReDim Data(Row1 To Row2)
+            //   As TINDIRECTMERGESORTDATA 局部数组). 正确语义: 传调用方数组指针
+            //   变量/成员的地址 &arr / &me->field. 已是当前函数 ByRef 数组参数的
+            //   (*Data) 形态由下方 (*x) 分支还原为 Data, 不在此处处理 (其还原走
+            //   calleeParamIsArray 分支把 (*x) → x).
+            bool wholeArr158 = false;
+            if (calleeParamIsArray && argVal.rfind("VB6_SA_AT(", 0) == 0) {
+                std::string inner158 = argVal.substr(10);
+                if (!inner158.empty() && inner158.back() == ')') inner158.pop_back();
+                std::vector<std::string> parts158;
+                size_t cut158 = 0;
+                for (size_t k158 = 0; k158 <= inner158.size(); k158++) {
+                    if (k158 == inner158.size() || inner158[k158] == ',') {
+                        parts158.push_back(inner158.substr(cut158, k158 - cut158));
+                        cut158 = k158 + 1;
+                    }
+                }
+                std::string name158, idx158;
+                if (parts158.size() == 3) {
+                    name158 = parts158[1];
+                    idx158 = parts158[2];
+                    size_t b158 = name158.find_first_not_of(" \t");
+                    if (b158 == std::string::npos) b158 = 0;
+                    size_t e158 = name158.find_last_not_of(" \t");
+                    if (e158 != std::string::npos) name158 = name158.substr(b158, e158 - b158 + 1);
+                    b158 = idx158.find_first_not_of(" \t");
+                    if (b158 == std::string::npos) b158 = 0;
+                    e158 = idx158.find_last_not_of(" \t");
+                    if (e158 != std::string::npos) idx158 = idx158.substr(b158, e158 - b158 + 1);
+                }
+                // 仅字面 0 下标 (= 空括号整体引用) 时重写. 两种形态:
+                //   1. 名字是标识符 (Data / me->field / _vb6_with_N->field) → &name.
+                //   2. 名字是 (*X) — 当前函数内 ByRef 数组参数的还原形态 (X 已是
+                //      vb6_SafeArray1D**), 直接传 X, 不加 & (否则成 *** C2440).
+                //       (MergeSortRec 递归: Call MergeSortRec(..., Data(), Sort))
+                if (idx158 == "0" && !name158.empty()) {
+                    if (name158.size() > 3 && name158[0] == '('
+                        && name158[1] == '*' && name158.back() == ')') {
+                        // 判 X 是纯标识符(|->|链 也允许, 如 (*me->Arr))
+                        std::string inner158 = name158.substr(2, name158.size() - 3);
+                        bool innerOk158 = !inner158.empty()
+                            && (std::isalpha(static_cast<unsigned char>(inner158[0])) || inner158[0] == '_');
+                        if (innerOk158) {
+                            argVal = inner158;
+                            wholeArr158 = true;
+                        }
+                    } else if (std::isalpha(static_cast<unsigned char>(name158[0]))) {
+                        argVal = "&" + name158;
+                        wholeArr158 = true;
+                    }
+                }
+            }
+            if (wholeArr158) {
+                // 已重写为单个取址形式, 跳过下方 ByRef 分发.
+            } else if (argVal.size() > 3 && argVal.substr(0, 2) == "(*" && argVal.back() == ')') {
                 // (*x) → depends on callee param type:
                 // If callee param is array (vb6_SafeArray1D**), arg (*x) means x is already vb6_SafeArray1D**,
                 // so pass x directly (not &x which would be ***).
@@ -177,12 +251,24 @@
                 bool isAsAnyParam = (i < calleeParams.size() && calleeParams[i].type == Vb6Type::Unknown);
                 bool isUdtByRefParam = (i < calleeParams.size() && calleeParams[i].type == Vb6Type::UserDefinedType);
 
+                // Fix 164x: 左值判定必须先剥离 UDT 字段链的注释后缀
+                // "  /* udt objfield <CType> */" (cgen_util_classtype.cpp:392 追加).
+                // 否则 Release.IUnk 判为字段链时因含空格/星号落入强转分支,
+                // CopyMemory 的第一实参生成 (void*)(intptr_t)(Release.IUnk) —
+                // 传字段值而非字段地址 → 运行时空指针写崩溃.
+                // 仅剥离用于左值判断, 输出仍用原样 argVal 保留注释.
+                std::string argValLv = argVal;
+                size_t lvCmPos = argValLv.find("  /* udt objfield ");
+                if (lvCmPos != std::string::npos) {
+                    argValLv = argValLv.substr(0, lvCmPos);
+                }
+
                 // Fix 064b: VB6_SA_AT(...) 数组元素作为 ByRef 实参时,
                 // 不应包装为 VARIANT 复合字面量, 应直接取地址.
                 // 典型: PolyPolygon(hDC, uPoints(0), aSizes(0), nCount)
                 //   uPoints(0) → VB6_SA_AT(vb6_type_POINTAPI, uPoints, 0)
                 //   应生成 (void*)&(VB6_SA_AT(...)) 而非 (&(vb6_VARIANT){.bstrVal=...})
-                bool isSaAtExpr = (argVal.find("VB6_SA_AT(") == 0);
+                bool isSaAtExpr = (argValLv.find("VB6_SA_AT(") == 0);
                 if (isSaAtExpr && !isAsAnyParam && !isUdtByRefParam) {
                     // 数组元素作为 ByRef 参数: 当 calleeParams 缺失或类型不匹配时,
                     // 对 Declare 函数的 As Any 参数一律传 void*
@@ -195,9 +281,9 @@
                     // As Any ByRef / UDT ByRef: 左值取地址, 非左值(字面量等)强转为void*
                     // Fix 069b: 对字面量(如 0)不能取地址 &(0) → C2101,
                     //   应直接强转 (void*)(intptr_t)(0).
-                    bool isSimpleIdent = !argVal.empty() && (std::isalpha(static_cast<unsigned char>(argVal[0])) || argVal[0] == '_');
+                    bool isSimpleIdent = !argValLv.empty() && (std::isalpha(static_cast<unsigned char>(argValLv[0])) || argValLv[0] == '_');
                     if (isSimpleIdent) {
-                        for (char c : argVal) {
+                        for (char c : argValLv) {
                             if (!std::isalnum(static_cast<unsigned char>(c)) && c != '_') {
                                 isSimpleIdent = false;
                                 break;
@@ -208,37 +294,51 @@
                     // 作为 ByRef UDT/AsAny 实参应取地址 &(x) 而非强转 (void*)(intptr_t)(x)
                     // Fix 084m: 字段链须允许 -> — With变量展开 (._vb6_with_2->SendBuffer)
                     // 也是左值字段链, 若判为非左值会生成 (void*)(intptr_t)(udt) → C2440
-                    bool isUdtFieldChain = !argVal.empty() && (std::isalpha(static_cast<unsigned char>(argVal[0])) || argVal[0] == '_');
+                    // Fix 190: 再允许 [] 下标 — 定长数组元素也是左值。VBFlexGrid.ctl:28348
+                    //   CopyMemory .szText(0), ByVal StrPtr(Text), LenB(Text)
+                    // 经 With 展开成 _vb6_with_776->szText[0]; 旧判定因含方括号视其为非左值,
+                    // 落入下方 (void*)(intptr_t)(expr) 兜底 → 把首元素的**值**当成目的地址。
+                    // NMTTDI 已清零, 该值即 0 → RtlMoveMemory 写 0x0, 鼠标悬停即 0xC0000005。
+                    // 方括号内是下标表达式(右值, 任意写法), 括号外仍只允许 标识符/./->
+                    bool isUdtFieldChain = !argValLv.empty() && (std::isalpha(static_cast<unsigned char>(argValLv[0])) || argValLv[0] == '_');
+                    int chainSubscriptDepth = 0;
                     if (isUdtFieldChain) {
-                        for (size_t ci = 0; ci < argVal.size(); ci++) {
-                            char c = argVal[ci];
+                        for (size_t ci = 0; ci < argValLv.size(); ci++) {
+                            char c = argValLv[ci];
+                            if (c == '[') { chainSubscriptDepth++; continue; }
+                            if (c == ']') {
+                                if (chainSubscriptDepth == 0) { isUdtFieldChain = false; break; }
+                                chainSubscriptDepth--; continue;
+                            }
+                            if (chainSubscriptDepth > 0) continue;
                             if (std::isalnum(static_cast<unsigned char>(c)) || c == '_' || c == '.') continue;
-                            if (c == '-' && ci + 1 < argVal.size() && argVal[ci + 1] == '>') { ci++; continue; }
+                            if (c == '-' && ci + 1 < argValLv.size() && argValLv[ci + 1] == '>') { ci++; continue; }
                             isUdtFieldChain = false;
                             break;
                         }
+                        if (chainSubscriptDepth != 0) isUdtFieldChain = false;
                     }
-                    bool isSaAt = (argVal.find("VB6_SA_AT(") == 0);
+                    bool isSaAt = (argValLv.find("VB6_SA_AT(") == 0);
                     // Fix 086: 宏常量/NULL 不是左值 — TLS_LOCAL_LEGACY_VERSION 是
                     // #define, &(宏) → C2101; NULL 同理.
-                    bool isConstMacro = (argVal == "NULL") || isConstIdent(argVal);
+                    bool isConstMacro = (argValLv == "NULL") || isConstIdent(argValLv);
                     // Fix 090k: (*uFile).BufferArray / (*uFile)->field — ByRef UDT
                     // 参数解引用的字段链也是左值 (As Any / CopyMemory 实参应取地址
                     // &(field), 而非下方 else 的 (void*)(intptr_t)(expr) 强转 —
                     // Variant 字段值强转指针 → C2440 "无法从 vb6_VARIANT 转 intptr_t").
                     bool isDerefFieldChain = false;
-                    if (!argVal.empty() && argVal[0] == '(' && argVal.size() > 2 && argVal[1] == '*') {
+                    if (!argValLv.empty() && argValLv[0] == '(' && argValLv.size() > 2 && argValLv[1] == '*') {
                         size_t depth090k = 0;
-                        for (size_t ci090k = 0; ci090k < argVal.size(); ci090k++) {
-                            char c090k = argVal[ci090k];
+                        for (size_t ci090k = 0; ci090k < argValLv.size(); ci090k++) {
+                            char c090k = argValLv[ci090k];
                             if (c090k == '(') depth090k++;
                             else if (c090k == ')') {
                                 depth090k--;
                                 if (depth090k == 0) {
-                                    if (ci090k + 1 < argVal.size() &&
-                                        (argVal[ci090k + 1] == '.' ||
-                                         (argVal[ci090k + 1] == '-' && ci090k + 2 < argVal.size()
-                                          && argVal[ci090k + 2] == '>'))) {
+                                    if (ci090k + 1 < argValLv.size() &&
+                                        (argValLv[ci090k + 1] == '.' ||
+                                         (argValLv[ci090k + 1] == '-' && ci090k + 2 < argValLv.size()
+                                          && argValLv[ci090k + 2] == '>'))) {
                                         isDerefFieldChain = true;
                                     }
                                     break;
@@ -246,8 +346,8 @@
                             }
                         }
                     }
-                    bool isLValue = (isSimpleIdent || isUdtFieldChain || isSaAt || argVal.find("me->") == 0
-                        || (argVal.size() > 4 && argVal[0] == '(' && argVal[1] == '*' && argVal.back() == ')')
+                    bool isLValue = (isSimpleIdent || isUdtFieldChain || isSaAt || argValLv.find("me->") == 0
+                        || (argValLv.size() > 4 && argValLv[0] == '(' && argValLv[1] == '*' && argValLv.back() == ')')
                         || isDerefFieldChain)
                         && !isConstMacro;
                     if (isLValue) {
@@ -271,7 +371,42 @@
                         std::string ccType = mapType(constIdentType(argVal));
                         if (ccType.empty() || ccType == "vb6_VARIANT") ccType = "int32_t";
                         argVal = "(void*)&(" + ccType + "){" + argVal + "}";
+                    } else if (argVal.compare(0, 20, "vb6_VariantArrayGet(") == 0) {
+                        // Fix 158f: Variant 数组元素整体引用作为 As Any ByRef 实参
+                        // (VTableHandle.bas: VariantCopy ArgListRev(i),
+                        // ArgList(UBound(ArgList) - i)). 元素是右值 (vb6_VariantArrayGet
+                        // 返回值), (void*)(intptr_t)(vb6_VARIANT) → C2440. 用 RTL
+                        // vb6_VariantArrayElemPtr(数组, 下标) 取底层槽位地址 — dest/src
+                        // 都指向真实元素, VariantCopy 读写落位正确.
+                        std::string inner158f = argVal.substr(20);
+                        if (!inner158f.empty() && inner158f.back() == ')') inner158f.pop_back();
+                        argVal = "vb6_VariantArrayElemPtr(" + inner158f + ")";
+                    } else if (isDefinitelyVariantExpr(*node.positional[i]) || cExprIsVariant(argVal)) {
+                        // Fix 158g: Variant 值 (Variant 属性读取函数返回) 作为 As Any
+                        // ByRef 实参 — VBFlexGrid.ctl: VariantCopy Cell, .CellTag
+                        // (CellTag As Variant → vb6_VBFlexGrid_prop_get_CellTag(me)
+                        // 返回 vb6_VARIANT). VB6 传临时副本地址; 复合字面量
+                        // (&(vb6_VARIANT){expr}) 编译且运行时正确 (src 以值拷贝),
+                        // (void*)(intptr_t)(vb6_VARIANT 结构值) → C2440.
+                        // Fix 160-H: 上面那句"编译正确"只对**标量**实参成立。
+                        // `(vb6_VARIANT){x}` 是**位置**初始化 → 用 x 初始化首个成员
+                        // `.vt` (vb6_vartype 枚举), 而不是整体拷贝。实参本身就是
+                        // vb6_VARIANT 时 → VBFlexGrid.c:22606
+                        //   C2440 "初始化: 无法从 vb6_VARIANT 转换为 vb6_vartype"。
+                        // 本文件其它分支要么用指定初始化器 (.vt=VT_BSTR,.bstrVal=…)
+                        // 要么用 {0}, 只有此处漏了。改走 Fix 090q 的成熟套路:
+                        // 求值到已声明临时再取址, 声明行挂 pending 保证先于引用。
+                        if (cExprIsVariant(argVal)) {
+                            std::string tmpVar160h = "_vb6_vartmp" + std::to_string(tempCounter_++);
+                            c_.addPending("vb6_VARIANT " + tmpVar160h + " = " + argVal + ";");
+                            argVal = "(void*)&" + tmpVar160h;
+                        } else {
+                            argVal = "(&(vb6_VARIANT){" + argVal + "})";
+                        }
                     } else {
+                        // 合并口径: 本 else 兜底两侧各自加了判别, 两者互斥可共存 ——
+                        // 数值字面量取复合字面量地址 (上游 Fix 182), Variant 值取整型
+                        // 载荷 (我们的 Fix 160w), 其余维持裸强转。
                         // Fix 182: As Any ByRef 的实参是数值字面量时, VB6 先把字面量求值到
                         // 临时存储, 再把该存储的地址传给形参. 直接强转 (void*)(intptr_t)(v)
                         // 是把数值本身当成指针 — cAsyncSocket 的
@@ -307,6 +442,13 @@
                                 ccType = "float";
                             }
                             argVal = "(void*)&(" + ccType + "){" + argVal + "}";
+                        } else if (cExprIsVariant(argVal)) {
+                            // Fix 160w: Variant 值 (COM 属性读取 vb6_VariantFromComResult 等)
+                            // 作为 As Any ByRef 实参的非左值兜底 — (void*)(intptr_t)(struct)
+                            // → C2440, 裸传 → C2172 (MainForm.c OleCreatePropertyFrame 参 8
+                            // ByVal Pages.pElems: Web 后端该 Variant 的整型载荷即指针值).
+                            // 用 vb6_VariantToLongPtr 取整型载荷再按值压回指针形参.
+                            argVal = "(void*)(intptr_t)vb6_VariantToLongPtr(" + argVal + ")";
                         } else {
                             // 非左值: 0 或复杂表达式 — 直接强转为 void*
                             argVal = "(void*)(intptr_t)(" + argVal + ")";
@@ -319,7 +461,18 @@
                 bool isAsAnyByVal = (i < calleeParams.size() && calleeParams[i].type == Vb6Type::Unknown)
                                     && argHasByValOverride;
                 if (isAsAnyByVal) {
-                    argVal = "(void*)(intptr_t)(" + argVal + ")";
+                    // Fix 160w: ByVal 覆盖 As Any 的实参恰为 vb6_VARIANT (COM 属性
+                    // 结果, 如 MainForm.frm:579 OleCreatePropertyFrame(..., ByVal
+                    // Pages.pElems, ...) → 实参 vb6_VariantFromComResult(vb6_ComGetProp(
+                    // Pages, L"pElems"))). (void*)(intptr_t)(vb6_VARIANT 结构值) →
+                    // C2440 "无法从 vb6_VARIANT 转换到 long", 且按位强转也丢指针.
+                    // pElems 底层是 Long 载荷的指针值 (IFontDisp** 数组头), 用
+                    // vb6_VariantToLongPtr 取整型载荷再按原样压回 void* 实参.
+                    if (cExprIsVariant(argVal)) {
+                        argVal = "(void*)(intptr_t)vb6_VariantToLongPtr(" + argVal + ")";
+                    } else {
+                        argVal = "(void*)(intptr_t)(" + argVal + ")";
+                    }
                 } else {
                 // 变量/非左值 → 复合字面量取地址; 变量 → &变量
                 // 检查是否是简单标识符 (变量名, 以字母/下划线开头)
@@ -449,20 +602,26 @@
                     // pvAppendBitsToBuffer ..., .Data, .BitLength) 若走复合字面量
                     // 会复制字段值到临时 int32, 被调方 (*lBitLen)++ 只改临时值 →
                     // 字段永不增长 → 位写入偏移全零 (HELLO WORLD 无法解码).
-                    bool isLvChain092z = !argVal.empty() && (std::isalpha(static_cast<unsigned char>(argVal[0])) || argVal[0] == '_');
-                    if (!isLvChain092z && argVal.size() > 2 && argVal[0] == '(' && argVal[1] == '*') {
+                    // Fix 164x: 同样先剥离 "  /* udt objfield */" 注释后缀再判左值.
+                    std::string argValLv092z = argVal;
+                    size_t lvCmPos092z = argValLv092z.find("  /* udt objfield ");
+                    if (lvCmPos092z != std::string::npos) {
+                        argValLv092z = argValLv092z.substr(0, lvCmPos092z);
+                    }
+                    bool isLvChain092z = !argValLv092z.empty() && (std::isalpha(static_cast<unsigned char>(argValLv092z[0])) || argValLv092z[0] == '_');
+                    if (!isLvChain092z && argValLv092z.size() > 2 && argValLv092z[0] == '(' && argValLv092z[1] == '*') {
                         // Fix 090k: (*ptr)->field / (*ptr).field 解引用字段链也是左值
                         int depth092z = 0;
-                        for (size_t ci092z = 0; ci092z < argVal.size(); ci092z++) {
-                            char c092z = argVal[ci092z];
+                        for (size_t ci092z = 0; ci092z < argValLv092z.size(); ci092z++) {
+                            char c092z = argValLv092z[ci092z];
                             if (c092z == '(') depth092z++;
                             else if (c092z == ')') {
                                 depth092z--;
                                 if (depth092z == 0) {
-                                    if (ci092z + 1 < argVal.size() &&
-                                        (argVal[ci092z + 1] == '.' ||
-                                         (argVal[ci092z + 1] == '-' && ci092z + 2 < argVal.size()
-                                          && argVal[ci092z + 2] == '>'))) {
+                                    if (ci092z + 1 < argValLv092z.size() &&
+                                        (argValLv092z[ci092z + 1] == '.' ||
+                                         (argValLv092z[ci092z + 1] == '-' && ci092z + 2 < argValLv092z.size()
+                                          && argValLv092z[ci092z + 2] == '>'))) {
                                         isLvChain092z = true;
                                     }
                                     break;

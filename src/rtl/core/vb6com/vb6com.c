@@ -330,11 +330,204 @@ void vb6_ComExit(void) {
 }
 
 // ============================================================
+// Fix 160: 免注册 COM — vbp ComLib= 声明的组件 DLL
+// ============================================================
+
+#define VB6_MAX_COMLIBS 256
+static Vb6ComLib g_comLibs[VB6_MAX_COMLIBS];
+static int g_comLibCount = 0;
+
+/* C3_COM_TRACE=1 缓存 */
+static int comLibTraceEnabled(void) {
+    static int cached = -1;
+    if (cached < 0) cached = (GetEnvironmentVariableW(L"C3_COM_TRACE", NULL, 0) > 0);
+    return cached;
+}
+
+void vb6_ComLibRegister(const Vb6ComLib* libs, int count) {
+    if (!libs || count <= 0) return;
+    if (count > VB6_MAX_COMLIBS) {
+        fprintf(stderr, "[C3_COM]   %d 条组件超过上限 %d, 超出部分被截断 (需注册表注册)\n",
+                count, VB6_MAX_COMLIBS);
+        count = VB6_MAX_COMLIBS;
+    }
+    memcpy(g_comLibs, libs, (size_t)count * sizeof(Vb6ComLib));
+    g_comLibCount = count;
+    if (comLibTraceEnabled())
+        fprintf(stderr, "[C3_COM]   registered %d component(s) from ComLib=\n", count);
+}
+
+/* 表查找:
+ *   1) 精确 progId 匹配 (大小写不敏感)
+ *   2) progId 无点号 (未限定名, 如 "FileSystemObject") → coclassName 匹配
+ *      覆盖 `Dim x As New ClassName` 传的是类名而非完整 ProgID 的情形.
+ *      只用在无点号时: 有 "Lib.Class" 形式的调用不做末段匹配, 避免
+ *      例如 CreateObject("Word.Application") 误命中名为 "Application" 的无关 coclass.
+ */
+static const Vb6ComLib* vb6_ComLibLookup(const wchar_t* progId) {
+    if (!progId || !*progId || g_comLibCount <= 0) return NULL;
+    for (int i = 0; i < g_comLibCount; i++) {
+        if (g_comLibs[i].progId && _wcsicmp(g_comLibs[i].progId, progId) == 0)
+            return &g_comLibs[i];
+    }
+    if (!wcschr(progId, L'.')) {   /* 无点号 */
+        for (int i = 0; i < g_comLibCount; i++) {
+            if (g_comLibs[i].coclassName &&
+                _wcsicmp(g_comLibs[i].coclassName, progId) == 0)
+                return &g_comLibs[i];
+        }
+    }
+    return NULL;
+}
+
+/* 免注册激活: LoadLibrary → GetProcAddress("DllGetClassObject") →
+ * IClassFactory::CreateInstance. 流程与 OCX 控件 (vb6forms_axsite.c
+ * ocxCreateFromPath) 一致, 并把 Fix 159 的失败原因区分一并搬来:
+ *   HRESULT_FROM_WIN32(ERROR_BAD_EXE_FORMAT)  PE 位宽不匹配 — 始终打日志
+ *   HRESULT_FROM_WIN32(ERROR_PROC_NOT_FOUND)   DLL 未导出 DllGetClassObject
+ *   CO_E_CLASSNOTREGISTERED (0x800401F1)      路径缺失/无效等通用失败
+ * 三者都是 FAILED 码; 调用方只做 SUCCEEDED/FAILED 判定, 区分只体现在返回值与 stderr. */
+static HRESULT comLibCreateFromPath(const wchar_t* dllPath, REFCLSID rclsid, void** ppUnk) {
+    *ppUnk = NULL;
+    if (!dllPath || !*dllPath) return ((HRESULT)0x800401F1L);
+    HMODULE hMod = LoadLibraryW(dllPath);
+    if (!hMod) {
+        DWORD le = GetLastError();
+        if (le == ERROR_BAD_EXE_FORMAT) {
+            /* 宿主与组件位宽不一致: 用 --arch x86 重编宿主, 或换同位宽组件 */
+            fprintf(stderr, "[C3_COM]   %ls: PE 位宽不匹配 (ERROR_BAD_EXE_FORMAT); "
+                            "宿主与组件位数必须一致 — 用 --arch x86 重编, 或换同位宽组件\n",
+                    dllPath);
+            return HRESULT_FROM_WIN32(ERROR_BAD_EXE_FORMAT);
+        }
+        if (comLibTraceEnabled())
+            fprintf(stderr, "[C3_COM]   LoadLibrary(%ls) failed: %lu\n",
+                    dllPath, (unsigned long)le);
+        return ((HRESULT)0x800401F1L);
+    }
+    typedef HRESULT (__stdcall *PFN_DllGetClassObject)(REFCLSID, REFIID, void**);
+    PFN_DllGetClassObject pGet = (PFN_DllGetClassObject)GetProcAddress(hMod, "DllGetClassObject");
+    if (!pGet) {
+        FreeLibrary(hMod);
+        if (comLibTraceEnabled())
+            fprintf(stderr, "[C3_COM]   %ls: no DllGetClassObject export\n", dllPath);
+        return HRESULT_FROM_WIN32(ERROR_PROC_NOT_FOUND);
+    }
+    IClassFactory* cf = NULL;
+    HRESULT hr = pGet(rclsid, &IID_IClassFactory, (void**)&cf);
+    if (FAILED(hr) || !cf) {
+        /* FreeLibrary 不做: DllGetClassObject 成功后对象可能回引 DLL */
+        if (comLibTraceEnabled())
+            fprintf(stderr, "[C3_COM]   DllGetClassObject failed: 0x%08lX\n",
+                    (unsigned long)hr);
+        return hr;
+    }
+    hr = cf->lpVtbl->CreateInstance(cf, NULL, &IID_IUnknown, ppUnk);
+    cf->lpVtbl->Release(cf);
+    return hr;
+}
+
+/* 表命中后的本地激活总入口.
+ * 路径候选与 OCX 的 ocxCreateAny 一致:
+ *   1) <exe目录>\<fileName 相对部分>   便携分发, 不依赖 CWD
+ *   2) <exe目录>\<裸文件名>            同目录
+ *   3) 原样                            开发机/绝对路径
+ *   4) 裸文件名                        系统 DLL 搜索路径
+ * 绝对路径只在候选 3 出现一次, 不重复拼 exe 目录.
+ * 返回 IDispatch*; 失败 NULL — 调用方继续注册表路径. */
+static void* comLibCreateLocal(const Vb6ComLib* e) {
+    if (!e || !e->clsidStr || !*e->clsidStr) return NULL;
+    CLSID clsid;
+    if (FAILED(CLSIDFromString((LPOLESTR)e->clsidStr, &clsid))) {
+        if (comLibTraceEnabled())
+            fwprintf(stderr, L"[C3_COM]   bad CLSID in table: %ls\n", e->clsidStr);
+        return NULL;
+    }
+
+    wchar_t exeDir[MAX_PATH];
+    exeDir[0] = 0;
+    DWORD n = GetModuleFileNameW(NULL, exeDir, MAX_PATH);
+    if (n > 0 && n < MAX_PATH) {
+        wchar_t* es = wcsrchr(exeDir, L'\\');
+        if (es) es[1] = 0;       /* 保留结尾 '\' */
+        else exeDir[0] = 0;
+    }
+
+    const wchar_t* fname = e->fileName ? e->fileName : L"";
+    if (fname && *fname) {
+        const wchar_t* s = wcsrchr(fname, L'\\');
+        if (!s) s = wcsrchr(fname, L'/');
+        if (s) fname = s + 1;
+    }
+
+    int isAbs = (e->fileName && wcschr(e->fileName, L':') != NULL)
+                || (e->fileName && e->fileName[0] == L'\\');
+
+    wchar_t exeRel[MAX_PATH * 2];
+    exeRel[0] = 0;
+    if (exeDir[0] && e->fileName && *e->fileName && !isAbs &&
+        wcslen(exeDir) + wcslen(e->fileName) + 1 < MAX_PATH * 2) {
+        wcscpy(exeRel, exeDir);
+        wcscat(exeRel, e->fileName);
+    }
+    wchar_t exeSide[MAX_PATH * 2];
+    exeSide[0] = 0;
+    if (exeDir[0] && fname[0] && wcslen(exeDir) + wcslen(fname) + 1 < MAX_PATH * 2) {
+        wcscpy(exeSide, exeDir);
+        wcscat(exeSide, fname);
+    }
+
+    IUnknown* pUnk = NULL;
+    HRESULT hr = E_FAIL;
+    const wchar_t* cands[4];
+    int nc = 0;
+    if (exeRel[0]) cands[nc++] = exeRel;
+    if (exeSide[0]) cands[nc++] = exeSide;
+    if (e->fileName && *e->fileName) cands[nc++] = e->fileName;
+    if (fname[0] && fname != e->fileName) cands[nc++] = fname;   /* 无目录部分时 fname==fileName, 不重复试 */
+    for (int ci = 0; ci < nc && !pUnk; ci++) {
+        hr = comLibCreateFromPath(cands[ci], &clsid, (void**)&pUnk);
+        if (SUCCEEDED(hr) && pUnk) break;
+    }
+    if (!pUnk) {
+        if (comLibTraceEnabled())
+            fwprintf(stderr, L"[C3_COM]   local activation failed: %ls (0x%08lX)\n",
+                     e->fileName ? e->fileName : L"(no path)", (unsigned long)hr);
+        return NULL;
+    }
+    IDispatch* pDisp = NULL;
+    hr = pUnk->lpVtbl->QueryInterface(pUnk, &IID_IDispatch, (void**)&pDisp);
+    pUnk->lpVtbl->Release(pUnk);
+    if (FAILED(hr) || !pDisp) return NULL;
+    return (void*)pDisp;
+}
+
+// ============================================================
 // CreateObject / GetObject
 // ============================================================
 
 void* vb6_CreateObject(const wchar_t* progId) {
     if (!progId) return NULL;
+
+    // Fix 160: ComLib= 免注册 — 本地 DLL 优先 (LoadLibrary+DllGetClassObject, 绕开注册表).
+    // 表未声明 (ComLib= 为空) 时 vb6_ComLibLookup 恒返 NULL, 该块整体跳过,
+    // 后续注册表路径与改动前完全一致 — 未声明组件零变化.
+    // C3_COM_PREFER_REG=1 强制注册表优先 (对齐 C3_OCX_PREFER_REG).
+    {
+        static int preferReg = -1;
+        if (preferReg < 0)
+            preferReg = (GetEnvironmentVariableW(L"C3_COM_PREFER_REG", NULL, 0) > 0) ? 1 : 0;
+        if (preferReg == 0) {
+            const Vb6ComLib* hit = vb6_ComLibLookup(progId);
+            if (hit) {
+                void* p = comLibCreateLocal(hit);
+                if (p) return p;
+                if (comLibTraceEnabled())
+                    fwprintf(stderr, L"[C3_COM]   %ls: local activation failed, trying registry\n",
+                             progId);
+            }
+        }
+    }
 
     CLSID clsid;
     HRESULT hr = CLSIDFromProgID(progId, &clsid);
@@ -373,7 +566,15 @@ void* vb6_GetObject(const wchar_t* pathName, const wchar_t* progId) {
     if (!progId) return NULL;
 
     CLSID clsid;
-    HRESULT hr = CLSIDFromProgID(progId, &clsid);
+    // Fix 160: ComLib= 免注册 — GetObject 只做 GetActiveObject / IPersistFile::Load,
+    // 不做本地实例化, 所以只借用表把 ProgID 解析成 CLSID (免注册可得), 未命中则原样走注册表.
+    HRESULT hr = E_FAIL;
+    {
+        const Vb6ComLib* hit = vb6_ComLibLookup(progId);
+        if (hit && hit->clsidStr && *hit->clsidStr)
+            hr = CLSIDFromString((LPOLESTR)hit->clsidStr, &clsid);
+    }
+    if (FAILED(hr)) hr = CLSIDFromProgID(progId, &clsid);
     if (FAILED(hr)) {
         fwprintf(stderr, L"vb6_GetObject: CLSIDFromProgID(\"%ls\") failed: 0x%08lX\n",
                  progId, (unsigned long)hr);
@@ -433,7 +634,14 @@ int32_t vb6_IsNothing(void* obj) {
 void vb6_ReleaseObject(void** objPtr) {
     if (!objPtr || !*objPtr) return;
 
+    /* Fix 191: 只有真是 COM 对象才谈得上 Release。VB6 里 `Set .OriginalIOleIPAO = Me`
+     * 存的是接口的 COM 身份, 而生成码把类实例 `me` 直接塞进了接口字段, 于是
+     * `Set ... = Nothing` 走到这里就是对 `me` 解引用 lpVtbl (VBFlexGridDemo 左键
+     * 点击 → DeActivateIPAO → 读 0x10 崩溃)。非 COM 接收者按 VB6 的
+     * "对象不支持此属性或方法" 处理: 只清指针, 不越权调用。 */
     IUnknown* pUnk = (IUnknown*)(*objPtr);
-    pUnk->lpVtbl->Release(pUnk);
+    if (vb6_ComIsDispatchable(pUnk)) {
+        pUnk->lpVtbl->Release(pUnk);
+    }
     *objPtr = NULL;
 }

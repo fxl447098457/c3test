@@ -30,6 +30,9 @@
 
 // Fix 126: CCur 返回 Currency 的**值** (生成代码里 Currency 按 double 承载, 与 Date
 // 一致), 保留 4 位小数精度。放大整数 (值×10000) 只出现在 VT_CY 变体的 cyVal 里。
+#ifdef vb6_CCur
+#undef vb6_CCur   // vb6rtl_builtin.h 的 _Generic 宏在定义处必须关闭
+#endif
 double vb6_CCur(double v) {
     return round(v * 10000.0) / 10000.0;
 }

@@ -38,6 +38,23 @@
             lastExpr_ = "(int32_t)sizeof(" + udtIt->second + ")";
             return;
         }
+        // Fix 160w: LenB(UDT变量.字段) — arg 是字段链 "pbitmapinfo.bmiheader"
+        // (VBFlexGrid.ctl: LenB(pBitmapInfo.BMIHeader)), 基名在 knownUdtVars_ 而
+        // 字段名不在 (knownUdtVars_ 只登记变量级). Fix 065 精确全串匹配失败,
+        // M22 之后落入 _Generic 宏 → MSVC 对所有分支做转换检查含 struct→BSTR
+        // → C2440 "无法从 vb6_type_BITMAPINFOHEADER 转换到 BSTR". 取基名命中
+        // 已知 UDT 即按 sizeof(基 UDT) 处理 (LenB 语义 = 该类型栈宽度, 足够).
+        {
+            size_t dot160w = argLower.find('.');
+            if (dot160w != std::string::npos) {
+                std::string base160w = argLower.substr(0, dot160w);
+                auto itBase160w = knownUdtVars_.find(base160w);
+                if (itBase160w != knownUdtVars_.end()) {
+                    lastExpr_ = "(int32_t)sizeof(" + itBase160w->second + ")";
+                    return;
+                }
+            }
+        }
         // Fix 084h: UDT 数组元素 LenB(VB6_SA_AT(vb6_type_XXX, arr, idx)) →
         // sizeof(vb6_type_XXX)。_Generic 宏无法匹配自定义结构体类型, 且
         // 数组元素类型未知, 直接由类型名生成 sizeof。

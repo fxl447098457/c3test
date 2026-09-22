@@ -169,6 +169,35 @@ void* vb6_UC_FontField(void* p, const wchar_t* name, int32_t* kind) {
     return NULL;
 }
 
+// Fix 168: `UserControl.Extender` 同样是普通结构体 (vb6_UserControl_Extender,
+// 只有 Visible/Height 两个字段), 不是 IDispatch。而 VBFlexGrid.ctl 的
+//   `With UserControl.Extender: .Align / .Width / .Height` (UserControl_Resize)
+// 被编译成 vb6_ComGetProp/SetProp(&vb6_UserControl_Extender, L"...") → 对结构体
+// 做 Invoke 必跳进 .data 崩 (0xC0000005, 与 Fix 125 字体、Fix 166 同族)。
+// 身份判定就认这一个全局实例的地址; 成员定位返回 **vb6_Extender_\* 全局槽位**
+// 的地址 —— 那才是 Fix 162 起按当前实例同步 (vb6_uc_push) 的真实存储,
+// 结构体字段只是 Fix 133u 时期给直接字段访问用的兼容壳。
+int32_t vb6_UC_IsExtender(const void* p) {
+    return p == (const void*)&vb6_UserControl_Extender;
+}
+
+// kind 编码与 vb6_UC_FontField 一致: 0=BSTR, 1=float, 2=int16, 3=int32
+void* vb6_UC_ExtenderField(void* p, const wchar_t* name, int32_t* kind) {
+    if (!vb6_UC_IsExtender(p) || !name || !kind) return NULL;
+    if (_wcsicmp(name, L"Width") == 0)           { *kind = 3; return &vb6_Extender_Width; }
+    if (_wcsicmp(name, L"Height") == 0)          { *kind = 3; return &vb6_Extender_Height; }
+    if (_wcsicmp(name, L"Left") == 0)            { *kind = 3; return &vb6_Extender_Left; }
+    if (_wcsicmp(name, L"Top") == 0)             { *kind = 3; return &vb6_Extender_Top; }
+    if (_wcsicmp(name, L"Align") == 0)           { *kind = 3; return &vb6_Extender_Align; }
+    if (_wcsicmp(name, L"Visible") == 0)         { *kind = 2; return &vb6_Extender_Visible; }
+    if (_wcsicmp(name, L"DragMode") == 0)        { *kind = 3; return &vb6_Extender_DragMode; }
+    if (_wcsicmp(name, L"HelpContextID") == 0)   { *kind = 3; return &vb6_Extender_HelpContextID; }
+    if (_wcsicmp(name, L"WhatsThisHelpID") == 0) { *kind = 3; return &vb6_Extender_WhatsThisHelpID; }
+    if (_wcsicmp(name, L"Tag") == 0)             { *kind = 0; return &vb6_Extender_Tag; }
+    if (_wcsicmp(name, L"ToolTipText") == 0)     { *kind = 0; return &vb6_Extender_ToolTipText; }
+    return NULL;
+}
+
 // Fix 128: 把 src 字体的 8 个字段拷进 dst 字体对象 (原地覆写)。
 // 用途: .frm 的 `BeginProperty Caption1_Font` 这类**Property Set** 型字体属性,
 // 其 Set 实现体是 `With m_X_Font: .Name = New_Font.Name ... : Refresh` —— 直接调用

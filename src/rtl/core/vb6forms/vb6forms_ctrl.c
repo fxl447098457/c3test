@@ -91,7 +91,7 @@ int vb6_GetControlLeft(void* hwnd) {
     GetWindowRect((HWND)hwnd, &rc);
     POINT pt = { rc.left, rc.top };
     ScreenToClient(GetParent((HWND)hwnd), &pt);
-    return pt.x * 15;
+    return vb6_XToTwipX(pt.x);
 }
 
 void vb6_SetControlLeft(void* hwnd, int left) {
@@ -109,7 +109,7 @@ int vb6_GetControlTop(void* hwnd) {
     GetWindowRect((HWND)hwnd, &rc);
     POINT pt = { rc.left, rc.top };
     ScreenToClient(GetParent((HWND)hwnd), &pt);
-    return pt.y * 15;
+    return vb6_YToTwipY(pt.y);
 }
 
 void vb6_SetControlTop(void* hwnd, int top) {
@@ -125,7 +125,7 @@ int vb6_GetControlWidth(void* hwnd) {
     if (!hwnd) return 0;
     RECT rc;
     GetWindowRect((HWND)hwnd, &rc);
-    return (rc.right - rc.left) * 15;
+    return vb6_XToTwipX(rc.right - rc.left);
 }
 
 void vb6_SetControlWidth(void* hwnd, int width) {
@@ -139,7 +139,7 @@ int vb6_GetControlHeight(void* hwnd) {
     if (!hwnd) return 0;
     RECT rc;
     GetWindowRect((HWND)hwnd, &rc);
-    return (rc.bottom - rc.top) * 15;
+    return vb6_YToTwipY(rc.bottom - rc.top);
 }
 
 void vb6_SetControlHeight(void* hwnd, int height) {

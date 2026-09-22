@@ -119,7 +119,12 @@ void CCodeGen::visit(WithStmt& node) {
 
             // COM对象变量检测
             if (withInfo.kind == WithObjKind::Unknown) {
-                if (knownObjectVars_.count(objNameLower)) {
+                // Fix 157f: knownObjectVars_ 跨过程不清空 (模块级/Object局部变量需持久),
+                // 但先前过程的 Object 类型参数注册 (如 ByRef This As Object) 会残留同名字
+                // 段. 若当前已知该名称为 UDT (knownUdtVars_), 优先按 struct 处理,
+                // 避免 `With This` (UDT参数) 被误判 COMObject → .field 走 vb6_ComGet*Prop
+                // 生成 C2172/C2440.
+                if (knownObjectVars_.count(objNameLower) && !knownUdtVars_.count(objNameLower)) {
                     withInfo.kind = WithObjKind::COMObject;
                 }
             }
@@ -131,7 +136,7 @@ void CCodeGen::visit(WithStmt& node) {
             // COM locals fall through as Unknown, causing .Add to be resolved as
             // the class's own method instead of COM dispatch (C2198).
             if (withInfo.kind == WithObjKind::Unknown) {
-                if (knownTypedComVars_.count(objNameLower)) {
+                if (knownTypedComVars_.count(objNameLower) && !knownUdtVars_.count(objNameLower)) {
                     withInfo.kind = WithObjKind::COMObject;
                 }
             }
@@ -358,6 +363,24 @@ void CCodeGen::visit(WithStmt& node) {
                     }
                 }
             }
+            // Fix 160w: Function 返回 UDT 的 With 目标 (Common.bas `With
+            // GetAppVersionInfo()`, Function As VS_FIXEDFILEINFO). callee 符号是
+            // Function 且返回 UserDefinedType → tempType = vb6_type_<UDT名>, kind 保持
+            // Unknown 走 struct 字段访问. 否则 void* fallback 发射
+            // `(void*)vb6_Common_GetAppVersionInfo()` → C2440 (struct→void*).
+            if (withInfo.kind == WithObjKind::Unknown && tempType == "void*"
+                && callExpr.callee && callExpr.callee->kind == ASTNodeKind::IdentifierExpr) {
+                auto& fnId160w = static_cast<IdentifierExpr&>(*callExpr.callee);
+                Symbol* fnSym160w = symTab_.lookupModule(fnId160w.name);
+                if (!fnSym160w) fnSym160w = symTab_.lookup(fnId160w.name);
+                if (fnSym160w && fnSym160w->kind == SymbolKind::Function
+                    && fnSym160w->type == Vb6Type::UserDefinedType
+                    && !fnSym160w->variableTypeName.empty()) {
+                    tempType = "vb6_type_" + cIdent(fnSym160w->variableTypeName);
+                    knownUdtVars_[tempVar] = tempType;
+                    knownLocalVars_.insert(tempVar);
+                }
+            }
             // 函数返回值且仍为void* → 默认按 COM 后期绑定分发
             if (withInfo.kind == WithObjKind::Unknown && tempType == "void*") {
                 // Fix 090y: void* With 目标 (COM 方法返回对象, 如 cIni.Section As
@@ -434,14 +457,57 @@ void CCodeGen::visit(WithStmt& node) {
     if (!withObjectInfoStack_.empty() && withObjectInfoStack_.back().kind == WithObjKind::FormControl && withObjectInfoStack_.back().ctrlType == FrmControlType::Menu) {  // P20-36
         c_.emitLine("int " + tempVar + " = 0;  /* Menu: no HWND, props use (hmenu,menuId) */");
     } else {
+        // Fix 160w: 宿主伪对象 `With UserControl` / `With PropertyPage` (UserControl
+        // 类模块内) — emitExpr(<IdentifierExpr "UserControl">) 生成裸 `UserControl`,
+        // C 无该声明 → C2065 (VBFlexGrid.c:1552). UserControl 伪对象在此作用域即当前
+        // 控件的宿主窗口 (vb6_UserControl_hWnd, extern HWND), 直接替换表达式.
+        // PropertyPage 同理用 vb6_PropertyPage_hwnd.
+        if (tempType == "void*" && node.object->kind == ASTNodeKind::IdentifierExpr) {
+            auto& hid160w = static_cast<IdentifierExpr&>(*node.object);
+            if (hid160w.name == "UserControl") {
+                lastExpr_ = "vb6_UserControl_hWnd";
+            } else if (hid160w.name.compare(0, 12, "PropertyPage") == 0) {
+                lastExpr_ = "vb6_PropertyPage_hwnd";
+            }
+        }
         // Fix 038: C2440 修复 — UDT 同类型转换和 UDT/VARIANT → void* 转换
         bool isUdtTempType = (tempType.rfind("vb6_type_", 0) == 0);
         if (isUdtTempType) {
             // Fix 081j: UDT With块使用指针引用，而非值拷贝
             // VB6中 With uPoints(lIdx) 内 .X = ... 直接修改数组元素
             // C中需要用指针: vb6_type_RECT* _vb6_with = &VB6_SA_AT(...)
-            c_.emitLine(tempType + "* " + tempVar + " = &(" + lastExpr_ + ")  /* With object ref (ptr) */;");
+            // Fix 160w: 目标是 Function 返回 UDT (With GetAppVersionInfo()) —
+            // 返回值是右值, &(fn()) → C2102 非法取址, 且 (void*) 强转 → C2440.
+            // 用复合字面量承载拷贝再取址 (VB6 在 With <udtFunc> 的临时副本上读写).
+            bool isFnRet160w = false;
+            if (node.object->kind == ASTNodeKind::IndexOrCallExpr) {
+                auto& ioc160w = static_cast<IndexOrCallExpr&>(*node.object);
+                if (ioc160w.callee && ioc160w.callee->kind == ASTNodeKind::IdentifierExpr) {
+                    auto& fid160w = static_cast<IdentifierExpr&>(*ioc160w.callee);
+                    Symbol* fn160w = symTab_.lookupModule(fid160w.name);
+                    if (!fn160w) fn160w = symTab_.lookup(fid160w.name);
+                    isFnRet160w = (fn160w && fn160w->kind == SymbolKind::Function);
+                }
+            }
+            if (isFnRet160w) {
+                // Fix 160w Final: `(T){fn()}` 是**位置初始化** (fn() 结果赋给首成员
+                // T.dwSignature), 不是整体拷贝 — MSVC 报 C2440 "无法从 vb6_type_X
+                // 转换到 int32_t" (Common.c 617/630/643). 改用 pending 临时承载拷贝
+                // 再取址 (与 arg_emit Fix 090q/160-H 同款: 声明先于引用落地).
+                std::string fnRetTmp160w = "_vb6_withret" + std::to_string(tempCounter_++);
+                c_.addPending(tempType + " " + fnRetTmp160w + " = " + lastExpr_ + ";");
+                c_.emitLine(tempType + "* " + tempVar + " = &" + fnRetTmp160w + "  /* With obj ref (fn ret copy) */;");
+            } else {
+                c_.emitLine(tempType + "* " + tempVar + " = &(" + lastExpr_ + ")  /* With object ref (ptr) */;");
+            }
         } else if (tempType == "void*") {
+            // Fix 160w: 宿主伪结构体全局 (UserControl.Extender / UserControl.Ambient)
+            // 在 vb6rtl_userctl.h 是 struct 值; (void*)(struct) → C2440 (VBFlexGrid.c
+            // 1521 "无法从 vb6_UserControl_Extender_Type 转换到 void *"). 取地址即可,
+            // With 体内 .成员 由 WithMemberExpr 按 COM dispatch 解析.
+            if (lastExpr_ == "vb6_UserControl_Extender" || lastExpr_ == "vb6_UserControl_Ambient") {
+                c_.emitLine(tempType + " " + tempVar + " = &(" + lastExpr_ + ")  /* With object ref (host struct) */;");
+            } else {
             // 检查表达式是否为 UDT 或 VARIANT — 这些类型不能直接 cast 到 void*
             std::string udtCType = inferUdtTypeOfExpr(*node.object);
             if (!udtCType.empty()) {
@@ -492,6 +558,7 @@ void CCodeGen::visit(WithStmt& node) {
                     c_.emitLine(tempType + " " + tempVar + " = (" + tempType + ")" + lastExpr_ + "  /* With object ref */;");
                 }
             }
+            }  /* Fix 160w: 宿主结构体 else 闭合 (tempType == "void*" 分支) */
         } else {
             c_.emitLine(tempType + " " + tempVar + " = (" + tempType + ")" + lastExpr_ + "  /* With object ref */;");
         }

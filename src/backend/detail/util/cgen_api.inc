@@ -259,3 +259,7 @@
     // 用 typelib GUID 会实例化出错误/失败的对象. 命中规则:
     //   typelib CLSID 在列表里 → 用它; 否则列表恰有一条 → 直接用 (单 OCX 工程).
     void setOcxRefs(const std::vector<std::pair<std::string, std::string>>* v) { ocxRefs_ = v; }
+
+    // Fix 160: vbp ComLib= 免注册 COM 组件表 {ProgID, CLSID, coclass名, 相对exe路径}.
+    // 入口点生成时烘焙成 static 表 + vb6_ComLibRegister 调用; 表空则一行不发.
+    void setComLibRefs(const std::vector<std::array<std::string, 4>>* v) { comLibRefs_ = v; }

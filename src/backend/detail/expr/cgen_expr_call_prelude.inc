@@ -244,6 +244,31 @@
             actualDimCount = (int)node.positional.size();
         }
 
+        // Fix 152: VB6 整体数组引用 `arr()` (空括号, 0 实参)。仅对 **2 维及以上**
+        // 拦截为装箱: 此前 2D+ 落入下方按维数取元素的路径, 在 positional 为空时
+        // 越界读 indices[0]/indices[1] → std::string 解引用垃圾 → 0xC0000005
+        // (VBFlexGrid.ctl:7451 `SaveArray = StrArr()`)。
+        // 一维 `arr()` (含 lvalue 整体数组赋值 `bColors() = ...`) 保持既有行为:
+        // 走下方 first 分支生成 VB6_SA_AT(elem, arr, 0) (是左值, 可赋可读),
+        // 不能改成 vb6_VariantArray(...) 否则 C2106 非左值 (Charts2020)。
+        //
+        // Fix 170 改写了这一口径: **空括号 = 整个数组**, 一维右值不再是 0 号元素
+        // (VB6_SA_AT(elem, A, 0) 让 `StrToVar = B()` 只搬走第一个字节、
+        //  `UBound(B())` 拿到的是字节而非载体), 左值更致命 —— 未 ReDim 的动态数组
+        // data==NULL, 写 0 号元素即解引用 NULL → 0xC0000005
+        // (Common.bas:1479 `B() = Text`, VBFlexGridDemo 启动崩溃)。
+        // 载体名对左值/右值都合法 (赋值目标是 vb6_SafeArray1D*, 不再需要
+        // vb6_VariantArray 包装 → 旧 C2106 顾虑不适用), 而 2D+ 右值仍保留 Fix 152
+        // 的装箱 (赋给 Variant 目标时由 wrapVariantValue 处理)。
+        if (node.positional.empty() && (wholeArrayLvalue_ || actualDimCount <= 1)) {
+            lastExpr_ = arrName;
+            return;
+        }
+        if (node.positional.empty() && actualDimCount >= 2) {
+            lastExpr_ = "vb6_VariantArray((void*)" + arrName + ")";
+            return;
+        }
+
         if (actualDimCount == 1 || node.positional.size() == 1) {
             // 一维访问: arr(i) -> VB6_SA_AT(type, arr, i)
             std::string index = "0";

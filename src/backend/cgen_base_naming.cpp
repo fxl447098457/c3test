@@ -143,6 +143,25 @@ std::string CCodeGen::resolveArrayTargetIdent(const std::string& varName) {
     if (dot != std::string::npos && dot > 0 && dot + 1 < varName.size()) {
         std::string objName = varName.substr(0, dot);
         std::string memberName = varName.substr(dot + 1);
+        // Fix: 多级成员链 (如 VBFlexGridMergeDrawInfo.Row.Cols) 逐段展开,
+        // 每段 cIdent, 段间保留 '.', 避免整段 cIdent 把 '.' 替换成 '_'
+        // (Row.Cols → Row_Cols → C2039 不是 vb6_type_TMERGEDRAWINFO 的成员).
+        auto expandMemberPath = [this](const std::string& path) {
+            std::string out;
+            size_t pos = 0;
+            while (pos <= path.size()) {
+                size_t d = path.find('.', pos);
+                std::string seg = (d == std::string::npos)
+                    ? path.substr(pos) : path.substr(pos, d - pos);
+                if (!seg.empty()) {
+                    if (!out.empty()) out += ".";
+                    out += cIdent(seg);
+                }
+                if (d == std::string::npos) break;
+                pos = d + 1;
+            }
+            return out;
+        };
         std::string objLower = objName;
         std::transform(objLower.begin(), objLower.end(), objLower.begin(), ::tolower);
         if (currentProc_) {
@@ -153,12 +172,20 @@ std::string CCodeGen::resolveArrayTargetIdent(const std::string& varName) {
                     && (p.type == Vb6Type::UserDefinedType
                         || (static_cast<uint16_t>(p.type) & static_cast<uint16_t>(Vb6Type::Array))
                         || p.type == Vb6Type::Variant)) {
-                    return "(*" + objName + ")." + cIdent(memberName);
+                    return "(*" + objName + ")." + expandMemberPath(memberName);
                 }
             }
         }
         if (knownUdtVars_.count(objLower)) {
-            return objName + "." + cIdent(memberName);
+            // Fix: 类模块 UDT 字段的带点链 ReDim/Erase 目标 — "VBFlexGridCells.Rows"
+            // (Private VBFlexGridCells As TROWS) 需生成 me->VBFlexGridCells.Rows,
+            // 此前裸名 → C2065 (VBFlexGrid.c 3370/4274/7999/8155). 局部变量/参数同名
+            // 时跳过 (局部遮蔽优先, 避免误加 me-> 前缀).
+            if (isClassModule_ && classMemberVars_.count(objLower)
+                && !knownLocalVars_.count(objLower)) {
+                return "me->" + objName + "." + expandMemberPath(memberName);
+            }
+            return objName + "." + expandMemberPath(memberName);
         }
     }
     return cIdent(varName);
@@ -183,7 +210,21 @@ bool CCodeGen::isStringConstIdent(const std::string& name) const {
 }
 
 bool CCodeGen::isConstIdent(const std::string& name) const {
-    return lookupConstSym(name) != nullptr;
+    if (lookupConstSym(name) != nullptr) return true;
+    // Fix 158l: RTL 头文件里的值型常量宏 (vb6rtl_userctl.h 的 vbPicType*/vbAsyncType*)
+    // 不在符号表 (VB6 内建常量, 由 RTL 提供 #define). 此前 isConstIdent 返回 false,
+    // 比较路径把 vbPicTypeIcon 当左值 → `&vbPicTypeIcon` 展开为 &3 → C2101
+    // (Common.c/VisualStyles.c/VBFlexGrid.c 的 `vbPicTypeIcon = .Type` 等).
+    // 凡 RTL #define 的值常量都视为"常量宏不可取址", 走复合字面量/临时变量路径.
+    static const std::unordered_set<std::string> kRtlConstMacros158l = {
+        "vbpictypenone", "vbpictypebitmap", "vbpictypemetafile",
+        "vbpictypeicon", "vbpictypeemetafile",
+        "vbasynctypepicture", "vbasynctypefile", "vbasynctypebytearray",
+        "vbasyncreadsynchronous", "vbasyncreadasynchronous", "vbasyncreadforceupdate",
+    };
+    std::string lower = name;
+    std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+    return kRtlConstMacros158l.count(lower) > 0;
 }
 
 Vb6Type CCodeGen::constIdentType(const std::string& name) const {

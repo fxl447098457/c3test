@@ -18,11 +18,32 @@ void* vb6_CreateObject(const wchar_t* progId);
 // GetObject(pathName, progId) - 获取运行中的COM对象
 void* vb6_GetObject(const wchar_t* pathName, const wchar_t* progId);
 
+// ============================================================
+// Fix 160: 免注册 COM (vbp ComLib= 声明的组件 DLL)
+// ============================================================
+// cgen 在入口点烘焙的组件表 — 每个元素对应一个 ComLib= DLL 里的一个 coclass.
+// vb6_CreateObject 按 ProgID 命中后改走 LoadLibrary+DllGetClassObject, 完全绕开
+// 注册表 (与 Object= 控件的免注册路径同款机制). 未命中 → 原有注册表路径.
+typedef struct Vb6ComLib {
+    const wchar_t* progId;       /* "MyLib.MyClass" */
+    const wchar_t* clsidStr;     /* "{XXXXXXXX-...}" — 来自 TYPEATTR->guid, 免注册可得 */
+    const wchar_t* coclassName;  /* "MyClass" — progid 缺失时的末段名兜底匹配 */
+    const wchar_t* fileName;     /* "bin\mylib.dll" — 相对 exe, 不依赖 CWD */
+} Vb6ComLib;
+
+// 注册组件表 (cgen 生成, 入口点调用一次). count 超过 256 截断并打 stderr 警告.
+void vb6_ComLibRegister(const Vb6ComLib* libs, int count);
+
 // IsNothing(obj) - 检查对象引用是否为Nothing
 int32_t vb6_IsNothing(void* obj);
 
 // ReleaseObject(&ptr) - 释放COM对象引用并置NULL
 void vb6_ReleaseObject(void** objPtr);
+
+// 接收者是否真是 COM 对象 (首槽 vtable 的前 7 槽指向可执行内存)。
+// 伪装的接收者 (UDT/类实例的地址) 一旦解引用 lpVtbl 就是 AV, 而不是 VB6 的
+// "对象不支持此属性或方法" —— 后期绑定与 Release 路径都先用它把这类挡掉。
+int32_t vb6_ComIsDispatchable(const void* disp);
 
 // COM后期绑定 (P6.2)
 // 返回VARIANT* (Windows VARIANT), 调用方需vb6_ComVarClear释放

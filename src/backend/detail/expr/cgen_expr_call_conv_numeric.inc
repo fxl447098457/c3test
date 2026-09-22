@@ -75,7 +75,18 @@
                 a0.find("vb6_Chr(") == 0 || a0.find("vb6_ChrW(") == 0 ||
                 a0.find("vb6_BSTR_Concat(") == 0 || a0.find("vb6_BSTR_FromStr(") == 0 ||
                 a0.find("vb6_CStr") == 0 || a0.find("vb6_VariantToString(") == 0 ||
-                a0.find("VB6_SA_AT(BSTR,") != std::string::npos;
+                a0.find("VB6_SA_AT(BSTR,") != std::string::npos ||
+                // Fix 152g: 控件字符串属性读取器返回 BSTR/wchar_t*, 之前未列入
+                // 白名单 → vb6_CLng(vb6_GetControlText(...)) 等把 BSTR 直接喂给
+                // 接 double 的转换函数 → C2440 "wchar_t* → double"。VB6 里
+                // CLng(Text1)/CDbl(Text1) 合法 (解析字符串), 需用 vb6_NumVal 桥接。
+                // 生成码在右括号后带 "  /* ctrl prop read */" 注释, 前缀匹配不受影响。
+                a0.find("vb6_GetControlText(") == 0 ||
+                a0.find("vb6_GetSelText(") == 0 ||
+                a0.find("vb6_GetControlTag(") == 0 ||
+                a0.find("vb6_GetToolTipText(") == 0 ||
+                a0.find("vb6_GetListItem(") == 0 ||
+                a0.find("vb6_GetMenuCaption(") == 0;
         }
         if (argIsBstrExpr && !args.empty()) {
             args[0] = "vb6_NumVal(" + args[0] + ")";

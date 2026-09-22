@@ -32,6 +32,11 @@ BSTR vb6_UCase(BSTR s);
 BSTR vb6_LCase(BSTR s);
 BSTR vb6_Trim(BSTR s);
 BSTR vb6_LTrim(BSTR s);
+// Fix 160w: vb6_LTrim 实参是 vb6_VARIANT 时 (如 Common.c:530 `LTrim(SplitToArray(..)[i])`
+// — 下标读出的元素是 Variant → 生成代码裸发 vb6_LTrim(vb6_VARIANT) → C2440
+// "无法从 vb6_VARIANT 转换到 BSTR"). 同款 _Generic 分派 (Fix 158s 先例):
+// Variant → vb6_LTrimVar (先 vb6_VariantToString 解包), 其余原样. 宏在自身展开
+// 期间被禁用, 故 default: 指向真函数; vb6rtl_string.c 的 vb6_LTrim 定义处 #undef.
 BSTR vb6_RTrim(BSTR s);
 BSTR vb6_Chr(int32_t code);
 int32_t vb6_Asc(BSTR s);
@@ -40,6 +45,12 @@ double vb6_Val(BSTR s);
 double vb6_NumVal(BSTR s);
 BSTR vb6_Str(int32_t n);
 BSTR vb6_Format(vb6_VARIANT expr, BSTR fmt);
+#ifndef __cplusplus
+#define vb6_LTrim(x) _Generic((x), \
+    vb6_VARIANT: vb6_LTrimVar, \
+    default: vb6_LTrim)((x))
+#endif
+BSTR vb6_LTrimVar(vb6_VARIANT s);
 
 // 消息框
 int32_t vb6_MsgBox(BSTR prompt, int32_t buttons, BSTR title);
@@ -64,6 +75,7 @@ double vb6_CDbl(double x);
 BSTR vb6_CStr(vb6_VARIANT x);
 // M22: typed CStr overloads
 BSTR vb6_CStrLong(int32_t x);
+BSTR vb6_CStrLongFromVariant(vb6_VARIANT x);   // Fix 158q: _Generic 兜底的 Variant 解包入口
 BSTR vb6_CStrDbl(double x);
 // Fix 117c: Single 专用 (VT_R4, 7 位有效数字 + 最短往返)
 BSTR vb6_CStrSingle(float x);
@@ -195,7 +207,7 @@ double vb6_TimeValue(BSTR timeStr);
 // P14.3.4: App全局对象属性
 BSTR vb6_App_Path(void);     // App.Path - EXE所在目录
 BSTR vb6_App_EXEName(void);  // App.EXEName - EXE文件名(不含扩展名)
-int32_t vb6_App_hInstance(void); // App.hInstance - 模块实例句柄
+intptr_t vb6_App_hInstance(void); // App.hInstance - 模块实例句柄 (Fix 179: 必须是指针宽度)
 BSTR vb6_App_HelpFile(void); // App.HelpFile - 帮助文件名(无App COM对象, 返回空串)
 
 // P18-C: Clipboard 对象
@@ -231,6 +243,7 @@ int32_t vb6_Forms_Count(void);
 void*  vb6_Forms_Item(int32_t index);  // 0-based
 void   vb6_Forms_Register(void* hwnd);   // 窗体创建时注册
 void   vb6_Forms_Unregister(void* hwnd); // 窗体销毁时注销
+void   vb6_Forms_LoopDepth(int delta);   // Fix 188: 消息循环进出 (最后一个窗体卸载才投 WM_QUIT)
 void*  vb6_Forms_GetActive(void);        // Fix 146: 当前活动窗体 (Screen.ActiveForm)
 
 // P14.2.4: IIf / InputBox
@@ -309,6 +322,62 @@ void   vb6_Lock(int32_t filenum, int64_t start, int64_t end);
 void   vb6_Unlock(int32_t filenum, int64_t start, int64_t end);
 void   vb6_Reset(void);
 BSTR   vb6_Partition(int64_t number, int64_t start, int64_t stop, int64_t interval);
+
+// ============================================================
+// Fix 158q: CStrLong/CLng/CDbl/CInt/CCur 的 Variant·BSTR 实参分派
+// ============================================================
+// 生成代码里会出现 vb6_CStrLong(<vb6_VARIANT>) (With 后端 COM 属性
+// vb6_VariantFromComResult(vb6_ComGetProp(...)) 被当 Long 转 BSTR → C2440
+// "无法从 vb6_VARIANT 转换到 int32_t"), 以及 vb6_CLng/vb6_CDbl/vb6_CInt/
+// vb6_CCur 收 vb6_VARIANT 或 BSTR 实参 (UDT 单元格 .Text → C2440 BSTR→double).
+// 用 _Generic (MSVC 2019 16.8+, /std:c11) 在**调用点**分派:
+//   vb6_VARIANT → 既有 vb6_*V 解包版; BSTR → 新增 vb6_*BSTR 解析版; 其余原样.
+// 位置必须在上面所有 vb6_CInt/CLng/CDbl/CCur 声明**之后**: 宏一旦定义, 其后
+// 出现同名声明/定义都会被改写 (头内 79~81 行的 CIntV/CLngV 内联体因此已在
+// 宏之前解析, 走的是真函数, 不会自我展开). 各 .c 的定义处用 #undef 自行关闭
+// (vb6rtl_conv.c / vb6rtl_misc.c), 同 vb6_LenB (Fix 048) 的既有先例.
+int32_t vb6_CLngBSTR(BSTR s);
+double vb6_CDblBSTR(BSTR s);
+int16_t vb6_CIntBSTR(BSTR s);
+double vb6_CCurBSTR(BSTR s);
+static inline double vb6_CCurV(vb6_VARIANT v) { return vb6_CCur(vb6_VariantToDouble(v)); }
+// Fix 160w: CLng(指针) 分派目标 — 截断为 int32_t (VB6 Long = 地址低半).
+static inline int32_t vb6_CLngPtr(void* p) { return (int32_t)(intptr_t)p; }
+#ifndef __cplusplus
+#define vb6_CStrLong(x) _Generic((x), \
+    vb6_VARIANT: vb6_CStrLongFromVariant, \
+    default: vb6_CStrLong)((x))
+#define vb6_CLng(x) _Generic((x), \
+    vb6_VARIANT: vb6_CLngV, \
+    BSTR: vb6_CLngBSTR, \
+    void*: vb6_CLngPtr, \
+    default: vb6_CLng)((x))
+#define vb6_CDbl(x) _Generic((x), \
+    vb6_VARIANT: vb6_CDblV, \
+    BSTR: vb6_CDblBSTR, \
+    default: vb6_CDbl)((x))
+#define vb6_CInt(x) _Generic((x), \
+    vb6_VARIANT: vb6_CIntV, \
+    BSTR: vb6_CIntBSTR, \
+    default: vb6_CInt)((x))
+#define vb6_CCur(x) _Generic((x), \
+    vb6_VARIANT: vb6_CCurV, \
+    BSTR: vb6_CCurBSTR, \
+    default: vb6_CCur)((x))
+#endif
+
+// Fix 158s: vb6_InStr 的 needle 实参是 vb6_VARIANT 时 (For 循环里对每个 Buffer 判
+// 定包含关系, Value 形参是 Variant) → 生成代码裸发 vb6_InStr(1, Buffer, Value),
+// VBFlexGrid.c 一系 C2440 "无法从 vb6_VARIANT 转换到 BSTR"。同款 _Generic 分派:
+// Variant → vb6_InStrVar (先 vb6_VariantToString 解包), 其余原样。两侧返回类型同为
+// int32_t, 分派自洽。宏在自身展开期间被禁用 (与 vb6_CLng 同技巧), 故 default: 指向
+// 真函数, 无递归; vb6rtl_string.c 的定义处自带 #undef。
+int32_t vb6_InStrVar(int32_t start, BSTR haystack, vb6_VARIANT needle);
+#ifndef __cplusplus
+#define vb6_InStr(start, haystack, needle) _Generic((needle), \
+    vb6_VARIANT: vb6_InStrVar, \
+    default: vb6_InStr)((start), (haystack), (needle))
+#endif
 
 #ifdef __cplusplus
 }

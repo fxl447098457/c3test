@@ -249,85 +249,9 @@
             c_.emitLine("  vb6_FileListBoxSetPath((void*)vb6_hwnd_" + cIdent(ctrl.controlName) + ", _p" + cIdent(ctrl.controlName) + "); }");
         }
 
-        // P24: .frx resource loading for this control
-        if (frxLoaded) {
-            std::string ctrlHwndVar;
-            {
-                std::string ctrlNameLower = ctrl.controlName;
-                std::transform(ctrlNameLower.begin(), ctrlNameLower.end(), ctrlNameLower.begin(), ::tolower);
-                if (knownControlArrays_.count(ctrlNameLower)) {
-                    ctrlHwndVar = "vb6_CtrlArr_GetAt(&vb6_arr_" + cIdent(ctrl.controlName) + ", " +
-                                  std::to_string(ctrl.index >= 0 ? ctrl.index : 0) + ")";
-                } else {
-                    ctrlHwndVar = "vb6_hwnd_" + cIdent(ctrl.controlName);
-                }
-            }
-
-            // P24: Control.Picture from .frx (CommandButton/OptionButton/CheckBox/PictureBox/Image)
-            if (ctrl.controlType == FrmControlType::CommandButton ||
-                ctrl.controlType == FrmControlType::OptionButton ||
-                ctrl.controlType == FrmControlType::CheckBox ||
-                ctrl.controlType == FrmControlType::PictureBox ||
-                ctrl.controlType == FrmControlType::Image) {
-                auto picIt = ctrl.properties.find("Picture");
-                if (picIt != ctrl.properties.end() && picIt->second.type == FrmValueType::FrxReference) {
-                    auto pic = FrxReader::readPicture(picIt->second.frxOffset, false);
-                    if (!pic.data.empty()) {
-                        std::string varName = "vb6_frx_pic_" + cIdent(ctrl.controlName);
-                        if (ctrl.index >= 0) varName += "_" + std::to_string(ctrl.index);
-                        h_.emitLine(bytesToHexArray(pic.data.data(), pic.data.size(), varName));
-                        bool isGraphicalBtn = (ctrl.controlType == FrmControlType::CommandButton ||
-                                               ctrl.controlType == FrmControlType::OptionButton ||
-                                               ctrl.controlType == FrmControlType::CheckBox) &&
-                                              ctrl.properties.count("Style") &&
-                                              ctrl.properties.at("Style").intValue == 1;
-                        if (isGraphicalBtn) {
-                            // Graphical button: use BM_SETIMAGE with IMAGE_BITMAP
-                            c_.emitLine("{ void* vb6_pic = vb6_LoadPictureFromMemory(" + varName + ", " + varName + "_size);");
-                            c_.emitLine("  if (vb6_pic) vb6_GraphicalBtn_SetImage((void*)" + ctrlHwndVar + ", vb6_pic); }");
-                        } else {
-                            // PictureBox/Image: use vb6_SetControlPicture
-                            c_.emitLine("{ void* vb6_pic = vb6_LoadPictureFromMemory(" + varName + ", " + varName + "_size);");
-                            c_.emitLine("  if (vb6_pic) vb6_SetControlPicture((void*)" + ctrlHwndVar + ", vb6_pic); }");
-                        }
-                    }
-                }
-            }
-
-            // P24: TextBox.Text from .frx (multiline text)
-            if (ctrl.controlType == FrmControlType::TextBox) {
-                auto txtIt = ctrl.properties.find("Text");
-                if (txtIt != ctrl.properties.end() && txtIt->second.type == FrmValueType::FrxReference) {
-                    auto txt = FrxReader::readText(txtIt->second.frxOffset);
-                    if (!txt.text.empty()) {
-                        c_.emitLine("{ wchar_t* vb6_wtxt = vb6_Utf8ToWide(\"" + escapeCString(txt.text) + "\");");
-                        c_.emitLine("  if (vb6_wtxt) { SetWindowTextW((HWND)" + ctrlHwndVar + ", vb6_wtxt); free(vb6_wtxt); } }");
-                    }
-                }
-            }
-
-            // P24: ListBox.List + ItemData from .frx
-            if (ctrl.controlType == FrmControlType::ListBox) {
-                auto listIt = ctrl.properties.find("List");
-                bool hasListFromFrx = (listIt != ctrl.properties.end() && listIt->second.type == FrmValueType::FrxReference);
-                FrxListData listData;
-                if (hasListFromFrx) {
-                    listData = FrxReader::readStringList(listIt->second.frxOffset);
-                    for (size_t i = 0; i < listData.items.size(); i++) {
-                        c_.emitLine("{ wchar_t* vb6_witem = vb6_Utf8ToWide(\"" + escapeCString(listData.items[i]) + "\");");
-                        c_.emitLine("  if (vb6_witem) { SendMessageW((HWND)" + ctrlHwndVar + ", LB_ADDSTRING, 0, (LPARAM)vb6_witem); free(vb6_witem); } }");
-                    }
-                }
-                auto idataIt = ctrl.properties.find("ItemData");
-                if (idataIt != ctrl.properties.end() && idataIt->second.type == FrmValueType::FrxReference) {
-                    auto intData = FrxReader::readIntList(idataIt->second.frxOffset);
-                    for (size_t i = 0; i < intData.items.size(); i++) {
-                        c_.emitLine("SendMessageW((HWND)" + ctrlHwndVar + ", LB_SETITEMDATA, " +
-                                    std::to_string((int)i) + ", (LPARAM)" + std::to_string(intData.items[i]) + ");");
-                    }
-                }
-            }
-        }
+        // P24 / Fix 182: .frx 设计期属性（Picture / TextBox.Text / ListBox.List）。
+        // 实现已抽到 cgen_form_create_controls.inc 的 emitControlFrxProps, 与容器子控件共用。
+        emitControlFrxProps(ctrl);
 
 ctrlId++;
     }

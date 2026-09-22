@@ -15,6 +15,12 @@
             }
         }
     }
+    // Fix 160: ComLib= 免注册组件表 — 入口点里烘焙 static Vb6ComLib 表并调
+    // vb6_ComLibRegister, 需 vb6com.h 提供 Vb6ComLib 类型. 表空则不发 (零回归).
+    // DLL 工程不发: ActiveX DLL 的入口点是 dll_entry.c, 此处不烘焙表, 加了也只是死头.
+    if (!isDll_ && !isClassModule_ && comLibRefs_ && !comLibRefs_->empty()) {
+        c_.emitLine("#include \"vb6com.h\"");
+    }
     // P6.6.3: ActiveX DLL 类模块需要 vb6comserver.h
     //   - 有事件: vb6_FireEvent
     //   - Fix 099: 有显式 Public 字段: vb6_ComObject_FromInstance / vb6_FindCoClassDesc

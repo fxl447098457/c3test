@@ -51,6 +51,11 @@ StmtPtr Parser::parseStatement() {
         // --- P14.1.2: Resume --
         case TokenKind::Resume:   return parseResumeStmt();
 
+        // VB6 行号标签: `100: ...` 或 `100 ...`。语句起始处只可能是行号 (赋值/调用的
+        // 左值必须是名字), 交给通用标签/赋值解析器识别成 LabelStmt。
+        case TokenKind::IntegerLiteral:
+            return parseLabelOrAssignmentOrCall();
+
         // --- P14.1.3: Error --
         case TokenKind::Error: {
             if (next_.kind == TokenKind::Equals || next_.kind == TokenKind::LeftParen) {
@@ -254,29 +259,26 @@ StmtPtr Parser::parseStatement() {
             return std::make_unique<CallStmt>(loc, std::move(callExpr));
         }
 
-        // P22: LSet/RSet statement form (LSet strVar = strExpr / RSet strVar = strExpr)
+        // P22: LSet/RSet statement form (LSet strVar = strExpr / RSet objVar = objExpr)
+        // Fix 082: LHS 可以是数组元素或成员 (VB6 允许 LSet arr(i) = arr(i+1) /
+        // LSet obj.Sub = obj2), 故复用通用左值解析而不是只接受裸标识符.
+        // (Common.bas:417 `LSet MsgBoxHelpData(i) = MsgBoxHelpData(i + 1)`)
         case TokenKind::LSet:
         case TokenKind::RSet: {
             auto loc = currentLoc();
             bool isLSet = (cur_.kind == TokenKind::LSet);
             advance();  // consume LSet/RSet
-            if (!canBeName(cur_.kind)) {
+            auto stmt = parseLabelOrAssignmentOrCall();
+            auto* assign = dynamic_cast<AssignmentStmt*>(stmt.get());
+            if (!assign) {
                 diag_.error(DiagnosticID::ParseExpectedToken, loc,
-                    isLSet ? "LSet statement requires variable name" : "RSet statement requires variable name");
+                    (isLSet ? "LSet statement requires '<target> = <expr>'"
+                            : "RSet statement requires '<target> = <expr>'"));
                 return nullptr;
             }
-            auto targetName = advance();
-            if (!match(TokenKind::Equals)) {
-                diag_.error(DiagnosticID::ParseExpectedToken, loc,
-                    isLSet ? "LSet statement requires =" : "RSet statement requires =");
-                return nullptr;
-            }
-            auto value = parseExpression();
-            auto assignStmt = std::make_unique<AssignmentStmt>(loc,
-                std::make_unique<IdentifierExpr>(loc, targetName.text), std::move(value));
-            if (isLSet) assignStmt->isLSet = true;
-            else assignStmt->isRSet = true;
-            return assignStmt;
+            if (isLSet) assign->isLSet = true;
+            else assign->isRSet = true;
+            return stmt;
         }
 
         default:

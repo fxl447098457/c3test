@@ -60,6 +60,12 @@ private:
     char advance();              // 前进1个字符
     bool match(char expected);   // 如果当前字符匹配则前进
 
+    // VBA7 LongPtr 字面量后缀 (^) 与 ^ 幂运算符消歧 (Fix 082)
+    // 当前 offset_ 指向 '^'。从 offset_+1 起向后看 (跳过空格/制表符): 若不是
+    // 数字/&/./-/+/( 之一, 则 '^' 是 LongPtr 后缀; 否则是幂运算符。
+    // 详见 lexer_number.cpp 中同名函数的注释 (消歧方向的数据依据与误判代价)。
+    bool isLongPtrSuffixHere() const;
+
     // 辅助判断
     bool isAlpha(char c) const;
     bool isDigit(char c) const;

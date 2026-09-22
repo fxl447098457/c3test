@@ -33,6 +33,9 @@ Vb6Type CCodeGen::inferExprType(Expr& expr) const {
             std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
             if (knownBstrVars_.count(lower)) return Vb6Type::String;
             if (knownSingleVars_.count(lower)) return Vb6Type::Single;
+            // Fix 175: Date 必须先于 Double 判 (Date 变量同时登记在 knownDoubleVars_
+            // 里以复用既有 double 取值路径, 口径同 Fix 117c 的 Single)。
+            if (knownDateVars_.count(lower)) return Vb6Type::Date;
             if (knownDoubleVars_.count(lower)) return Vb6Type::Double;
             if (knownLongVars_.count(lower)) return Vb6Type::Long;
             if (knownLongPtrVars_.count(lower)) return Vb6Type::LongPtr;
@@ -73,6 +76,16 @@ Vb6Type CCodeGen::inferExprType(Expr& expr) const {
             {
                 Vb6Type lt = inferExprType(*bin.left);
                 Vb6Type rt = inferExprType(*bin.right);
+                // Fix 175: VB6 日期算术 —— `Date ± 数值` 仍是 Date, `Date - Date` 是
+                // 天数差 (Double), `*` `\` `Mod` `^` 无日期语义按数值处理。
+                // TypeSystem::isNumeric(Date)==false, 交给 promote 会掉出数值阶梯。
+                if (lt == Vb6Type::Date || rt == Vb6Type::Date) {
+                    if (bin.op == BinaryOp::Add) return Vb6Type::Date;
+                    if (bin.op == BinaryOp::Sub)
+                        return (lt == Vb6Type::Date && rt == Vb6Type::Date)
+                                   ? Vb6Type::Double : Vb6Type::Date;
+                    return Vb6Type::Double;
+                }
                 return TypeSystem::promote(lt, rt);
             }
         }
@@ -499,7 +512,12 @@ std::string CCodeGen::getRuntimeParamCType(const std::string& funcName, size_t p
         {"vb6_DebugWriteLong",  {"int32_t"}},
         // 对象操作
         {"vb6_StrPtr",          {"BSTR"}},   // Fix 084o-7: StrPtr(Variant) → vb6_VariantToString 先行
-        {"vb6_ObjPtr",          {"uintptr_t"}},
+        // Fix 155: ObjPtr 实参签名是 `vb6_ObjPtr(void* obj)` (vb6rtl_builtin.h:288),
+        // 此前登记 "uintptr_t" (那是**返回**类型, 非形参). 运行时提取分支按形参类型
+        // 匹配 ("void*" → vb6_VariantToObjectVal), "uintptr_t" 无对应分支 → ObjPtr
+        // 收到 vb6_VARIANT (如 ObjPtr(ParentControls.Item(0)) 的 COM 结果) 时不做
+        // 提取, 把结构体裸传给 void* 形参 → C2172 "实参不是指针". 改为真实形参类型.
+        {"vb6_ObjPtr",          {"void*"}},
         {"vb6_ReleaseObject",   {"void**"}},
         {"vb6_NewObject",       {"const wchar_t*"}},
         {"vb6_CallByName",      {"void*", "BSTR", "int32_t"}},
@@ -581,4 +599,105 @@ std::string CCodeGen::rewriteByteArrayValue(const std::string& value) const {
     }
     return value;
 }
+
+// Fix 170: VB6 **整体数组引用** `A()` —— IndexOrCallExpr 无实参, callee 是已知数组变量或
+// 模块级数组。判定口径与 cgen_expr_call_prelude.inc 的 isArrayAccess 一致 (先 knownArrays_,
+// 再查模块符号表 sym->isArray), 因此 `GetTickCount()` / `Command()` 这类零参调用不会误判。
+bool CCodeGen::isWholeArrayRef(const Expr* e) const {
+    if (!e || e->kind != ASTNodeKind::IndexOrCallExpr) return false;
+    auto& n = static_cast<const IndexOrCallExpr&>(*e);
+    if (!n.positional.empty() || !n.named.empty()) return false;
+    if (!n.callee) return false;
+    if (n.callee->kind == ASTNodeKind::IdentifierExpr) {
+        auto& id = static_cast<const IdentifierExpr&>(*n.callee);
+        if (knownArrays_.count(Symbol::toLower(id.name))) return true;
+        Symbol* sym = symTab_.lookupModule(id.name);
+        return sym && sym->kind == SymbolKind::Variable && sym->isArray;
+    }
+    // Fix 178: `.Cols() = VBFlexGridDefaultCols.Cols()` —— UDT/With 的动态数组成员
+    // 用空括号整体赋值。原先只认裸数组变量, 这类目标退化成载体指针直赋 → 别名。
+    return isDynamicArrayMemberCallee(n.callee.get(), nullptr);
+}
+
+// Fix 178: callee 是「UDT 的动态数组成员」(`.Cols` / `Default.Cols`) 时返回 true,
+// 并按需带出元素 UDT 的 C 类型 (元素是标量类型时保持原值)。
+bool CCodeGen::isDynamicArrayMemberCallee(const Expr* callee, std::string* elemUdt) const {
+    if (!callee) return false;
+    std::string parentUdt, memName;
+    if (callee->kind == ASTNodeKind::MemberAccessExpr) {
+        auto& ma = static_cast<const MemberAccessExpr&>(*callee);
+        if (!ma.object) return false;
+        parentUdt = inferUdtTypeOfExpr(*ma.object);
+        memName = ma.memberName;
+    } else if (callee->kind == ASTNodeKind::WithMemberExpr) {
+        if (withObjectInfoStack_.empty() || withObjectVars_.empty()) return false;
+        if (withObjectInfoStack_.back().kind != WithObjKind::Unknown) return false;
+        auto it = knownUdtVars_.find(Symbol::toLower(withObjectVars_.back()));
+        if (it == knownUdtVars_.end()) return false;
+        parentUdt = it->second;
+        memName = static_cast<const WithMemberExpr&>(*callee).memberName;
+    } else {
+        return false;
+    }
+    const std::string prefix = "vb6_type_";
+    if (parentUdt.size() <= prefix.size()
+        || parentUdt.compare(0, prefix.size(), prefix) != 0) return false;
+    Symbol* sym = symTab_.lookupModule(parentUdt.substr(prefix.size()));
+    if (!sym || sym->kind != SymbolKind::UserDefinedType) return false;
+    std::string memLower = Symbol::toLower(memName);
+    for (const auto& mi : sym->udtMembers) {
+        if (Symbol::toLower(mi.name) != memLower) continue;
+        if (!mi.isArrayDynamic) return false;
+        if (elemUdt && mi.type == Vb6Type::UserDefinedType && !mi.typeRefName.empty())
+            *elemUdt = "vb6_type_" + cIdent(mi.typeRefName);
+        return true;
+    }
+    return false;
+}
+
+// Fix 170: 整体数组赋值 `A() = expr` 的右侧收口。
+// 只放行**必然新建载体**的 helper (vb6_StringToByteArray / StrConvToByteArray /
+// Array(...) 物化 / Split / Filter / COM ByteArray 解封)；其余形态一律走
+// vb6_ArrayAssign1D 深拷贝：
+//   · 裸数组变量 `A() = B()` —— 直接赋是两个名字别名同一载体;
+//   · vb6_VariantToByteArray / vb6_VariantToSafeArray1D —— Variant 持数组时**返回
+//     v.parray 本身** (见 vb6rtl_compat.c:187)，不拷贝就是与那个 Variant 共用载体。
+std::string CCodeGen::wrapWholeArrayAssign(const std::string& target,
+                                           const std::string& rhs,
+                                           const Expr* targetNode) const {
+    static const std::vector<std::string> freshCarrier = {
+        "vb6_StringToByteArray(", "vb6_StrConvToByteArray(",
+        "vb6_ArrayCreate(", "vb6_ArrayAssign1D(", "vb6_ComCallByteArray(",
+        "vb6_VariantArray(", "vb6_Split(", "vb6_Filter(",
+    };
+    // 跳过空白与左括号/解引用 (`(*Arr)` 形态的 ByRef 参数取的是载体本身)
+    size_t s = rhs.find_first_not_of(" \t\r\n(*");
+    if (s != std::string::npos) {
+        for (const auto& p : freshCarrier)
+            if (rhs.compare(s, p.size(), p) == 0) return rhs;
+    }
+    // Fix 178: 元素是含所有权成员的 UDT 时, 载体克隆还要逐元素深拷贝, 否则两侧元素
+    // 共享同一 BSTR / 子数组 (VBFlexGridCells.Rows(i).Cols 的别名就是这么来的)。
+    std::string elemUdt;
+    if (targetNode && targetNode->kind == ASTNodeKind::IndexOrCallExpr) {
+        auto& n = static_cast<const IndexOrCallExpr&>(*targetNode);
+        if (n.callee) {
+            if (n.callee->kind == ASTNodeKind::IdentifierExpr) {
+                auto& id = static_cast<const IdentifierExpr&>(*n.callee);
+                auto it = arrayUdtElemTypes_.find(Symbol::toLower(id.name));
+                if (it != arrayUdtElemTypes_.end()) elemUdt = it->second;
+            } else {
+                isDynamicArrayMemberCallee(n.callee.get(), &elemUdt);
+            }
+        }
+    }
+    if (!elemUdt.empty() && elemUdt.compare(0, 9, "vb6_type_") == 0
+        && udtHasOwnedMembers(elemUdt)) {
+        requestUdtCopy(elemUdt, true);
+        return "vb6_ArrayAssign1D_Cb(" + target + ", " + rhs + ", vb6_udtcpy_"
+             + elemUdt.substr(9) + "_v)";
+    }
+    return "vb6_ArrayAssign1D(" + target + ", " + rhs + ")";
+}
+
 } // namespace vb6c3

@@ -153,6 +153,9 @@ void  vb6_UC_BagPutBool(void* bag, const wchar_t* name, int32_t value);
 // Fix 125: 字体对象身份判定 + 字段定位 (供 COM 属性读写层直接操作字体字段)
 int32_t vb6_UC_IsFont(const void* p);
 void*   vb6_UC_FontField(void* p, const wchar_t* name, int32_t* kind);
+// Fix 168: Extender 结构体同上 (With UserControl.Extender 的 Width/Height/Align)
+int32_t vb6_UC_IsExtender(const void* p);
+void*   vb6_UC_ExtenderField(void* p, const wchar_t* name, int32_t* kind);
 // Fix 128: 原地把 src 字体的字段拷进 dst 字体 (用于 Property Set 型字体属性,
 // 避免调用其 Set 实现体里的 Refresh 破坏图表状态)
 void    vb6_UC_FontAssign(void* dst, void* src);

@@ -106,12 +106,51 @@
             // P22-10: UDT LSet — memory copy between UDTs
             std::string tgtLower = tgtId.name;
             std::transform(tgtLower.begin(), tgtLower.end(), tgtLower.begin(), ::tolower);
+            // Fix 160-C: VB 里"给函数名赋值"就是给返回值赋值, 其 C 存储是本函数的局部
+            // `vb6_ret_<Fn>`。LSet 目标手写 `cIdent(名)` 于是把**函数名**当成了 C 变量,
+            // 且因 `knownUdtVars_` 按 `vb6_ret_<fn>` 的 lower 注册 (decl/cgen_decl_func.cpp:215)
+            // 而查不到 → 连类型也判错, 掉进字符串分支:
+            //   Private Function GetAppVersionInfo() As VS_FIXEDFILEINFO
+            //     LSet GetAppVersionInfo = Value
+            //   → vb6_BSTR_Assign(&GetAppVersionInfo, vb6_LSet(vb6_CStr(...)))  C2065
+            //   正确: memcpy(&vb6_ret_GetAppVersionInfo, &Value, sizeof(vb6_type_...))
+            // 与 160-A 同根: 目标名应由标识符发射器决定, 不能手写。
+            bool tgtIsRetSlot160 = false;
+            if (currentProc_ && !currentReturnVar_.empty()
+                && tgtLower == Symbol::toLower(currentProc_->name)
+                && knownUdtVars_.find(tgtLower) == knownUdtVars_.end()
+                && !knownLocalVars_.count(tgtLower)) {
+                tgtC = currentReturnVar_;
+                tgtLower = Symbol::toLower(currentReturnVar_);
+                tgtIsRetSlot160 = true;
+            }
             auto udtIt = knownUdtVars_.find(tgtLower);
+            // Fix 160-A: LSet/RSet 的目标是**手写** `cIdent(名)` 而非走 IdentifierExpr
+            // 发射器, 因此漏掉了 cgen_expr_ident_symbol.inc:109-114 的类模块字段规则 —
+            // 类私有模块级 UDT (存储于 vb6_cls_<T> 结构体内) 被写成裸名:
+            //   LSet VBFlexGridComboBoxRect = RC
+            //     → memcpy(&VBFlexGridComboBoxRect, ...)   C2065 (应为 me->...)
+            // 源侧经 emitExpr 自带前缀, 所以只有目标侧报错。规则须与标识符侧逐条
+            // 一致, 否则局部 Dim UDT 会被错误前缀。
+            if (isClassModule_ && currentProc_) {
+                Symbol* tgtSym = symTab_.lookup(tgtId.name);
+                if (tgtSym && tgtSym->kind == SymbolKind::Variable && !tgtSym->isExternal
+                    && !knownLocalVars_.count(tgtLower)) {
+                    Symbol* paramSym = symTab_.lookupLocal(tgtId.name);
+                    if (!paramSym || paramSym->kind != SymbolKind::Parameter) {
+                        tgtC = "me->" + tgtC;
+                    }
+                }
+            }
             if (udtIt != knownUdtVars_.end()) {
                 // Target is a UDT: LSet/RSet copies raw memory (truncated to target size)
                 emitExpr(*node.value);
                 std::string srcExpr = lastExpr_;
                 std::string udtCType = udtIt->second;
+                // Fix 178: 含所有权成员 (String/动态数组/Variant) 的 UDT 不能按位拷 ——
+                // VB6 的 LSet 走类型描述符深拷贝, 这里退化成 memcpy 会让两侧共享成员。
+                std::string deep = udtDeepCopyAssign(*node.target, tgtC, node.value.get(), srcExpr);
+                if (!deep.empty()) { c_.emitLine(deep); return; }
                 c_.emitLine("memcpy(&" + tgtC + ", &" + srcExpr + ", sizeof(" + udtCType + "));  /* LSet UDT */");
                 return;
             }

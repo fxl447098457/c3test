@@ -75,6 +75,16 @@ Token Parser::expectName(const std::string& msg) {
     return Token{cur_.kind, cur_.text, cur_.line, cur_.column, cur_.length, {0}};
 }
 
+// VB6 的行号就是标签名: `100: ...` 声明, `GoTo 100` / `GoSub 100` / `Resume 100` /
+// `On Error GoTo 100` / `On x GoTo 100, 200` 引用。标签名统一存为文本, 后端
+// `vb6_label_ + cIdent(name)` 与语义层的字符串比对都无需为数字另开分支。
+std::string Parser::expectLabelTarget(const std::string& msg) {
+    if (cur_.kind == TokenKind::IntegerLiteral) {
+        return advance().text;
+    }
+    return expectName(msg).text;
+}
+
 // Fix 028: 见 parser.hpp 注释。剥离 VB6 标识符末尾的类型后缀, 返回剥离后的名字和类型名。
 Parser::TypeSuffixStrip Parser::stripTypeSuffix(const std::string& text) const {
     TypeSuffixStrip result;

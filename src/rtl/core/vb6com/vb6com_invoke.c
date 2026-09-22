@@ -24,6 +24,38 @@ typedef struct vb6_DispidCacheEntry {
 static vb6_DispidCacheEntry vb6_dispid_cache[VB6_DISPID_CACHE_SIZE];
 static int32_t vb6_dispid_cache_count = 0;
 
+// Fix 191: 按名后期绑定的接收者必须真的是 COM 对象, 否则 `pDisp->lpVtbl->...`
+// 就是一次野指针解引用 —— 进程直接 0xC0000005 死掉, 而不是像 VB6 那样把
+// "对象不支持此属性或方法" 交给 On Error 处理。
+// 触发实例 (VBFlexGridDemo, 左键点网格 → WM_SETFOCUS → VTableHandle.ActivateIPAO):
+//   VTableIPAO(0 To 9) As LongPtr 被按 Variant 载体分配 (见 cgen_expr_array.cpp
+//   的 mapSaElemType 缺 LongPtr 分支), 于是 VarPtr(VTableIPAO(0)) 指向的是
+//   vb6_VARIANT 头部; 伪 vtable 的第 5 槽读出来是 vt=VT_I4=3, 再 +0x28 →
+//   读 0x2b 崩溃。工程里所有手写 vtable 子类化 (VTableControl/VTablePPB/
+//   VTableEnumVARIANT…) 都走同一条路, 一个坏接收者就能杀掉整个进程。
+// 判据 (刻意不用"vtable 必须在模块镜像内": VTableHandle.bas 的伪 vtable 是
+// `VTableIPAO() As LongPtr` 数组, 载体在堆上, 那样会把合法对象一并拒掉):
+//   对象指针可读 → 首槽 vtable 可读且容得下前 7 槽 → 槽 0/1/2/5/6 指向可执行内存。
+// 放在 DISPID 缓存查找之后, 命中缓存的调用不受影响。
+static int32_t vb6_ComIsCodePtr(const void* p) {
+    MEMORY_BASIC_INFORMATION mbi;
+    if (!p || VirtualQuery(p, &mbi, sizeof(mbi)) == 0) return 0;
+    return (mbi.Protect & (PAGE_EXECUTE | PAGE_EXECUTE_READ
+                         | PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY)) != 0;
+}
+
+int32_t vb6_ComIsDispatchable(const void* disp) {
+    if (!disp || IsBadReadPtr(disp, sizeof(void*))) return 0;
+    void* vtbl = *(void**)disp;
+    /* IDispatch: QueryInterface/AddRef/Release/GetTypeInfoCount/
+     * GetTypeInfo/GetIDsOfNames/Invoke — 前 7 槽必须在可执行页里 */
+    if (!vtbl || IsBadReadPtr(vtbl, 7 * sizeof(void*))) return 0;
+    void** slot = (void**)vtbl;
+    return vb6_ComIsCodePtr(slot[0]) && vb6_ComIsCodePtr(slot[1])
+        && vb6_ComIsCodePtr(slot[2]) && vb6_ComIsCodePtr(slot[5])
+        && vb6_ComIsCodePtr(slot[6]);
+}
+
 static DISPID vb6_getDispid(IDispatch* pDisp, const wchar_t* name) {
     // 先查缓存
     for (int32_t i = 0; i < vb6_dispid_cache_count; i++) {
@@ -32,6 +64,7 @@ static DISPID vb6_getDispid(IDispatch* pDisp, const wchar_t* name) {
             return vb6_dispid_cache[i].dispid;
         }
     }
+    if (!vb6_ComIsDispatchable(pDisp)) return DISPID_UNKNOWN;
 
     // 调用GetIDsOfNames
     DISPID dispid;
@@ -71,8 +104,36 @@ void* vb6_ComCall(void* disp, const wchar_t* methodName,
         vb6_Host_ClearVariant(&hout);
         return (void*)hres;
     }
+    /* Fix 191: IUnknown 三法在**所有** COM 接口的 vtable 里固定在槽 0/1/2,
+     * 自定义接口 (IOleInPlaceActiveObject / IOleObject 这类无 IDispatch 的) 也一样。
+     * 而按名后期绑定要先 GetIDsOfNames —— 那是 IDispatch 的槽 5。对手写伪 vtable
+     * (VTableHandle.bas 的 VTableIPAO[] 槽位: QI/AddRef/Release/GetWindow/
+     * ContextSensitiveHelp/TranslateAccelerator/…) 就等于把
+     * IOleIPAO_TranslateAccelerator 当 GetIDsOfNames 调用, 参数全错位 → AV。
+     * VB6 编译 `obj.AddRef` 本来就是 vtbl[1](obj), 这里按同一口径直发。 */
+    if (vb6_ComIsDispatchable(disp) &&
+        (wcscmp(methodName, L"AddRef") == 0 || wcscmp(methodName, L"Release") == 0)) {
+        int32_t isAddRef191 = (wcscmp(methodName, L"AddRef") == 0);
+        void* slot191 = ((void**)disp)[1];
+        LONG n191 = isAddRef191
+            ? (LONG)((ULONG (STDMETHODCALLTYPE*)(void*))slot191)(disp)
+            : (LONG)((HRESULT (STDMETHODCALLTYPE*)(void*))slot191)(disp);
+        VARIANT** uargs191 = (VARIANT**)args_void;
+        if (uargs191) {
+            for (int32_t ui = 0; ui < argc; ui++) { if (uargs191[ui]) free(uargs191[ui]); }
+        }
+        VARIANT* ures191 = (VARIANT*)calloc(1, sizeof(VARIANT));
+        VariantInit(ures191);
+        ures191->vt = VT_I4;
+        ures191->lVal = n191;
+        return (void*)ures191;
+    }
     IDispatch* pDisp = (IDispatch*)disp;
 
+    if (GetEnvironmentVariableW(L"C3_COM_TRACE", NULL, 0) > 0) {
+        fprintf(stderr, "[C3_COM] ComCall fallback to IDispatch: disp=%p isFont=%d method=%ls\n",
+                disp, vb6_UC_IsFont(disp), methodName); fflush(stderr);
+    }
     DISPID dispid = vb6_getDispid(pDisp, methodName);
     if (dispid == DISPID_UNKNOWN) {
         fwprintf(stderr, L"vb6_ComCall: method \"%ls\" not found\n", methodName);
@@ -106,7 +167,7 @@ void* vb6_ComCall(void* disp, const wchar_t* methodName,
 
     if (GetEnvironmentVariableW(L"C3_OCX_TRACE", NULL, 0) > 0)
         fprintf(stderr, "[C3_COM] Call '%ls' hr=0x%08lX vt=%d\n",
-                methodName, (unsigned long)hr, result ? result->vt : -1);
+                methodName, (unsigned long)hr, result ? result->vt : -1); fflush(stderr);
 
     if (FAILED(hr)) {
         vb6_ComCheckError(hr, &excep, L"ComCall");
@@ -191,6 +252,12 @@ void* vb6_ComCallByDispid(void* disp, int32_t dispid,
 // COM属性Get (返回VARIANT*)
 void* vb6_ComGetProp(void* disp, const wchar_t* propName) {
     if (!disp) return NULL;
+    /* Fix 164z2-dbg: C3_COM_TRACE 入口日志 */
+    if (GetEnvironmentVariableW(L"C3_COM_TRACE", NULL, 0) > 0) {
+        fprintf(stderr, "[C3_COM] GetProp entry: disp=%p isFont=%d isHost=%d name=%ls\n",
+                disp, vb6_UC_IsFont(disp), vb6_Host_IsHostObject(disp), propName);
+        fflush(stderr);
+    }
     /* Fix 125: 字体结构体 (非 COM 对象) 直接读字段 — 生成代码把 `With <font>.Name`
        编译成 COM 读, 对结构体做 Invoke 会崩。 */
     if (vb6_UC_IsFont(disp)) {
@@ -207,6 +274,29 @@ void* vb6_ComGetProp(void* disp, const wchar_t* propName) {
             }
         }
         return (void*)res;
+    }
+    /* Fix 168: Extender 结构体同 Fix 125 字体 —— `With UserControl.Extender` 的
+       .Width/.Height/.Align 被编译成对普通结构体的 COM 读, Invoke 即跳进 .data. */
+    if (vb6_UC_IsExtender(disp)) {
+        int32_t ekind = -1;
+        void* efp = vb6_UC_ExtenderField(disp, propName, &ekind);
+        VARIANT* eres = (VARIANT*)calloc(1, sizeof(VARIANT));
+        if (!eres) return NULL;
+        if (efp) {
+            switch (ekind) {
+                case 0: eres->vt = VT_BSTR; eres->bstrVal = SysAllocString(*(BSTR*)efp); break;
+                case 1: eres->vt = VT_R4;   eres->fltVal = *(float*)efp; break;
+                case 2: eres->vt = VT_I2;   eres->iVal = *(int16_t*)efp; break;
+                default: eres->vt = VT_I4;  eres->lVal = *(int32_t*)efp; break;
+            }
+        }
+        return (void*)eres;
+    }
+/* Fix 164z2-dbg: C3_COM_TRACE 时打印落入 IDispatch 的 disp */
+    if (GetEnvironmentVariableW(L"C3_COM_TRACE", NULL, 0) > 0) {
+        fprintf(stderr, "[C3_COM] GetProp fallback to IDispatch: disp=%p isFont=%d name=%ls\n",
+                disp, vb6_UC_IsFont(disp), propName);
+        fflush(stderr);
     }
     /* Fix 112: 宿主对象分派 (见 vb6_ComCall 注释) */
     if (vb6_Host_IsHostObject(disp)) {
@@ -240,7 +330,7 @@ void* vb6_ComGetProp(void* disp, const wchar_t* propName) {
 
     if (GetEnvironmentVariableW(L"C3_OCX_TRACE", NULL, 0) > 0)
         fprintf(stderr, "[C3_COM] GetProp '%ls' hr=0x%08lX vt=%d\n",
-                propName, (unsigned long)hr, result ? result->vt : -1);
+                propName, (unsigned long)hr, result ? result->vt : -1); fflush(stderr);
 
     if (FAILED(hr)) {
         vb6_ComCheckError(hr, &excep, L"ComGetProp");
@@ -322,6 +412,23 @@ void vb6_ComSetProp(void* disp, const wchar_t* propName, void* value_void) {
                 case 1: *(float*)fp = (float)vb6_VariantToDouble(v); break;
                 case 2: *(int16_t*)fp = (int16_t)vb6_VariantToDouble(v); break;
                 default: *(int32_t*)fp = (int32_t)vb6_VariantToDouble(v); break;
+            }
+        }
+        free(value_void);
+        return;
+    }
+    /* Fix 168: Extender 结构体的 `With ...: .Width = ...` 写字段, 同字体路径 */
+    if (disp && vb6_UC_IsExtender(disp)) {
+        int32_t ekind = -1;
+        void* efp = vb6_UC_ExtenderField(disp, propName, &ekind);
+        if (efp && value_void) {
+            VARIANT v = *(VARIANT*)value_void;
+            switch (ekind) {
+                case 0: *(BSTR*)efp = (v.vt == VT_BSTR && v.bstrVal)
+                                   ? SysAllocString(v.bstrVal) : NULL; break;
+                case 1: *(float*)efp = (float)vb6_VariantToDouble(v); break;
+                case 2: *(int16_t*)efp = (int16_t)vb6_VariantToDouble(v); break;
+                default: *(int32_t*)efp = (int32_t)vb6_VariantToDouble(v); break;
             }
         }
         free(value_void);

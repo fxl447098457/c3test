@@ -76,6 +76,15 @@ struct VbpProject {
     };
     std::vector<ObjectRef> objects;
 
+    // C3 扩展 (Fix 160): 免注册 COM 组件 DLL。
+    // 格式: ComLib=<相对 exe 的 DLL 路径>  (可多行, 一行一个组件 DLL)
+    // VB6 标准 VBP 不含此字段。用途: 运行期 CreateObject("ProgID") 在目标机未注册
+    // 时, 改走 LoadLibrary(<该 DLL>) + DllGetClassObject 免注册激活, 与 Object=
+    // 控件的免注册路径 (Fix 143/148) 同款机制。路径相对 exe, 便于便携分发。
+    // C3 加载该 DLL 的 typelib, 枚举其中全部 coclass, 烘焙
+    // {ProgID, CLSID, coclass名, 路径} 表进产物; 用户无需手写 ProgID/CLSID。
+    std::vector<std::string> comLibs;
+
     // 资源文件
     std::string resFile;
 

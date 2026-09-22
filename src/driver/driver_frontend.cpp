@@ -14,6 +14,7 @@
 #include <filesystem>
 #include <algorithm>
 #include <cctype>
+#include <unordered_set>
 
 namespace vb6c3 {
 
@@ -307,6 +308,64 @@ bool Driver::runTypeLibImport(const CompileOptions& options) {
             if (!typelibParser_->findCachedCoClass(progId)) {
                 typelibParser_->loadByProgId(progId, true);
             }
+        }
+    }
+
+    // 2.5 Fix 160: ComLib= 免注册表收集
+    // 只有 vbp 里 ComLib= 显式声明过的 DLL 进表 — 普通 Reference= / auto-typelib 加载的
+    // typelib 一律不进。这是「未声明 ProgID 运行期零变化」的编译期半边: 表为空时
+    // 产物不调 vb6_ComLibRegister, vb6_CreateObject 走原注册表路径, 一字不改。
+    if (!comLibCanonMap_.empty()) {
+        // canonical 键归一, 与 driver_compile 的 comLibCanonMap_ 键一致
+        auto canonKey = [](const std::string& p) {
+            std::string c = p;
+            for (char& x : c) {
+                if (x >= 'A' && x <= 'Z') x = (char)(x - 'A' + 'a');
+                else if (x == '\\') x = '/';
+            }
+            return c;
+        };
+
+        // 跨 DLL 重复 ProgID 检测 (小写 ProgID → 首个声明它的 DLL)
+        std::unordered_map<std::string, std::string> seenProgId;
+        bool capWarned = false;
+        for (auto& tl : typelibParser_->cachedResults()) {
+            auto it = comLibCanonMap_.find(canonKey(tl->tlbPath));
+            if (it == comLibCanonMap_.end())
+                it = comLibCanonMap_.find(tl->canonPath);  // loadByPath 的 GetLongPathNameW 展开结果
+            if (it == comLibCanonMap_.end()) continue;
+            const std::string& relPath = it->second;
+
+            for (auto& cc : tl->coclasses) {
+                if (cc->progId.empty() || cc->clsidStr.empty()) continue;
+                if (comLibRefs_.size() >= 256) {
+                    if (!capWarned) {
+                        diag_->warn(DiagnosticID::CodeGenUnsupportedFeature, SourceLocation{},
+                                    "ComLib table full (256 entries); further components "
+                                    "must be registry-registered");
+                        capWarned = true;
+                    }
+                    continue;
+                }
+                std::string key = canonKey(cc->progId);
+                auto ins = seenProgId.insert({key, relPath});
+                if (!ins.second) {
+                    // 两个 DLL 导出同一 ProgID: 病态但真实存在 (同名/同版本组件).
+                    // 运行期按表序第一条命中即止, 会静默赢 — 必须在编译期告知.
+                    diag_->warn(DiagnosticID::CodeGenUnsupportedFeature, SourceLocation{},
+                                "Duplicate ProgID in ComLib components: " + cc->progId +
+                                " in both " + ins.first->second + " and " + relPath +
+                                "; first wins");
+                }
+                comLibRefs_.push_back({cc->progId, cc->clsidStr, cc->name, relPath});
+            }
+        }
+    }
+
+    if (options.verbose && !comLibRefs_.empty()) {
+        std::cerr << "C3: ComLib= reg-free components: " << comLibRefs_.size() << "\n";
+        for (const auto& e : comLibRefs_) {
+            std::cerr << "  " << e[0] << "  " << e[1] << "  <- " << e[3] << "\n";
         }
     }
 

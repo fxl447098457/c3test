@@ -207,6 +207,20 @@ VbpProject VbpParser::parseString(const std::string& content, const std::string&
             continue;
         }
 
+        // C3 扩展 (Fix 160): ComLib=<相对 exe 的组件 DLL 路径>
+        // 免注册 COM: 运行期 CreateObject 在本机未注册时改走 LoadLibrary+DllGetClassObject。
+        // 存原始值 (不 trim 内部空白), 路径解析与去重交给 driver_compile。
+        if (key == "ComLib") {
+            std::string s = value;
+            size_t a = s.find_first_not_of(" \t");
+            size_t b = s.find_last_not_of(" \t\r\n");
+            if (a != std::string::npos && b != std::string::npos) {
+                std::string trimmed = s.substr(a, b - a + 1);
+                if (!trimmed.empty()) project.comLibs.push_back(std::move(trimmed));
+            }
+            continue;
+        }
+
         // 项目属性
         if (key == "Type") {
             project.projectType = parseProjectType(value);

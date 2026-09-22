@@ -178,16 +178,16 @@ static void vb6_ho_ctrlRect(void* hwnd, int32_t* l, int32_t* t, int32_t* w, int3
     POINT pt = { rc.left, rc.top };
     HWND p = GetParent((HWND)hwnd);
     ScreenToClient(p ? p : hwnd, &pt);
-    if (l) *l = pt.x * 15;
-    if (t) *t = pt.y * 15;
-    if (w) *w = (rc.right - rc.left) * 15;
-    if (h) *h = (rc.bottom - rc.top) * 15;
+    if (l) *l = vb6_XToTwipX(pt.x);
+    if (t) *t = vb6_YToTwipY(pt.y);
+    if (w) *w = vb6_XToTwipX(rc.right - rc.left);
+    if (h) *h = vb6_YToTwipY(rc.bottom - rc.top);
 }
 
 static void vb6_ho_clientTwips(void* hwnd, int32_t* w, int32_t* h) {
     RECT rc; GetClientRect((HWND)hwnd, &rc);
-    if (w) *w = (rc.right - rc.left) * 15;
-    if (h) *h = (rc.bottom - rc.top) * 15;
+    if (w) *w = vb6_XToTwipX(rc.right - rc.left);
+    if (h) *h = vb6_YToTwipY(rc.bottom - rc.top);
 }
 
 static int32_t vb6_ho_getFontMember(void* fontProxy, const wchar_t* name, vb6_VARIANT* out) {

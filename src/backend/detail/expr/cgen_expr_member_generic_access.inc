@@ -50,10 +50,21 @@
 
     // 链式COM检测2: object求值结果是COM对象表达式
     // (从IndexOrCallExpr产生的COM调用结果, 是void*类型的IDispatch*)
+    // Fix 153: vb6_PropertyPage_SelectedControls(0) 返回 void* (被编辑控件引用),
+    // 其上的 .Rows/.Cols/.ClipSeparators 等成员须走后期绑定 COM, 否则生成
+    // `vb6_PropertyPage_SelectedControls(0).Rows` → C2224 (void* 无该成员)。
+    // Fix 158e: vb6_Common_PtrToObj(expr) (用户 Object 属性转换助手, 返回 void*)
+    // 与 vb6_CreateObject(progid) (返回 void* IDispatch*) 同属 COM 对象表达式 —
+    // 其上的方法 (.ListImages / .SendKeys) 也须走后期绑定, 否则拼 `.Member` → C2224
+    //   VBFlexGrid.c: ptrToObj(...).ListImages(Image).Index   (ObjPointer 恢复 COM 对象)
+    //   Common.c:     CreateObject("WScript.Shell").SendKeys Text, Wait, 1
     if (obj.find("vb6_ComCallObject(") == 0 ||
         obj.find("vb6_ComGetObjectProp(") == 0 ||
         obj.find("vb6_ComCall(") == 0 ||
-        obj.find("vb6_ComGetProp(") == 0) {
+        obj.find("vb6_ComGetProp(") == 0 ||
+        obj.find("vb6_Common_PtrToObj(") == 0 ||
+        obj.find("vb6_CreateObject(") == 0 ||
+        obj.find("vb6_PropertyPage_SelectedControls(") == 0) {
         // 对于vb6_ComCall/vb6_ComGetProp, 需要先解封为对象
         // 链式调用: ComCall返回VARIANT*, 需ComCallObject才能拿到IDispatch*
         std::string resolvedObj = obj;
@@ -68,6 +79,35 @@
         comMemberName_ = node.memberName;
         isComMarker_ = true;
         lastExpr_ = resolvedObj;
+        return;
+    }
+
+    // Fix 158e: Forms(i).Name — 内置 Forms 集合元素是窗体 HWND void*
+    // (Pattern M 发射: vb6_Forms_Item(i)). 窗体不是 IDispatch*, .Name 不能在
+    // HWND 上 COM 派发 (运行期 crash); 走 RTL 窗体属性读 vb6_GetControlText
+    // (窗体 Name ≈ 标题, Common.bas IsFormLoaded StrComp(Forms(i).Name, FormName))
+    // 否则拼 `vb6_Forms_Item(...).Name` → C2224 (void* 无该成员).
+    if (obj.find("vb6_Forms_Item(") == 0) {
+        std::string nameLower158e = node.memberName;
+        std::transform(nameLower158e.begin(), nameLower158e.end(), nameLower158e.begin(), ::tolower);
+        if (nameLower158e == "name" || nameLower158e == "caption") {
+            lastExpr_ = "vb6_GetControlText(" + obj + ")";
+            return;
+        }
+    }
+
+    // Fix 158d: 宿主伪对象 UserControl 的 COM 集合成员 (ParentControls) 在 RTL
+    // 声明为全局 void* (Controls 集合: vb6rtl_userctl.h). 其上的链式成员访问
+    // (.Count/.Item 等) 须走后期绑定 COM — 否则 M22 发射裸标识符后, 外层直接拼
+    // `vb6_UserControl_ParentControls.Count` (void* 上取字段) → C2224.
+    //   VBFlexGrid.ctl: If UserControl.ParentControls.Count = 0 Then (2370/2486)
+    //   → vb6_ComGetIntProp((void*)vb6_UserControl_ParentControls, L"Count")
+    //   与 Fix 153 (SelectedControls) / Fix 085 (void* UDT 字段) 走同一 marker 通道.
+    if (obj == "vb6_UserControl_ParentControls") {
+        comObjExpr_ = "(void*)" + obj;
+        comMemberName_ = node.memberName;
+        isComMarker_ = true;
+        lastExpr_ = "(void*)" + obj;
         return;
     }
 

@@ -6,6 +6,36 @@
     header_ = h_.str();
     source_ = c_.str();
 
+    // Fix 178: 本模块请求到的「含所有权成员 UDT」深拷贝函数落地。必须在 body pass
+    // 之后才知道用到了哪些类型, 而 C 又要求先定义后使用 —— 故插到 .c 自身
+    // `#include "<Base>.h"` 之后 (先于所有 #define 与函数体)。static: 每个 .c 各一份,
+    // 不与其他模块的同名副本冲突。
+    if (!udtCopyRequested_.empty()) {
+        std::string udtCopyBlock = emitUdtCopyBlock();
+        if (!udtCopyBlock.empty()) {
+            // 落在文件顶部**连续 include 段**之后。只跟第一行 include 走不够:
+            // 标准模块之间的 include 发射在 .c 里 (c_open), 跨模块 UDT 在那一刻
+            // 仍是不完整类型 → C2236/C2059。
+            std::string incMarker = "#include \"" + baseName_ + ".h\"";
+            size_t ip = source_.find(incMarker);
+            size_t at = std::string::npos;
+            if (ip != std::string::npos) {
+                size_t nl = source_.find('\n', ip);
+                at = (nl == std::string::npos) ? source_.size() : nl + 1;
+                while (at < source_.size()) {
+                    size_t eol = source_.find('\n', at);
+                    if (eol == std::string::npos) eol = source_.size();
+                    size_t b = source_.find_first_not_of(" \t\r", at);
+                    if (b == std::string::npos || b > eol) break;
+                    if (source_.compare(b, 8, "#include") != 0) break;
+                    at = eol + 1;
+                }
+            }
+            if (at != std::string::npos) source_.insert(at, udtCopyBlock);
+            else source_.insert(0, udtCopyBlock);
+        }
+    }
+
     // P6.3: 如果使用了COM接口类型, 在头文件中插入typedef前向声明
     // vb6_ComIface_<Name> 是不透明结构体, 仅用作类型化指针
     if (!usedComIfaceTypes_.empty() || !usedVb6IfaceTypes_.empty() || !usedClassTypes_.empty() || !usedUdtTypes_.empty()) {

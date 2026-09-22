@@ -28,6 +28,7 @@ static bool evalEnumMemberConstInt(ASTNode* expr, int64_t& result) {
         switch (lit->literalKind) {
         case LiteralKind::Integer: result = lit->intValue;  return true;
         case LiteralKind::Long:    result = lit->longValue; return true;
+        case LiteralKind::LongPtr: result = lit->longValue; return true;  // Fix 082: ^ 后缀
         case LiteralKind::Boolean: result = lit->boolValue ? 1 : 0; return true;
         default: return false;   // 浮点/字符串等不参与整数折叠
         }
@@ -143,6 +144,7 @@ void SemanticAnalyzer::visit(EnumDecl& node) {
             if (member->value) {
                 // Fix 191: 统一走整数常量求值 (字面量 / -字面量 / 算术与位运算 / 幂),
                 // 求值失败才沿用「上一成员值 + 1」的 VB6 递增语义.
+                // Fix 082 合并决议: LongPtr (^ 后缀) 字面量纳入求值器.
                 int64_t evaluated = 0;
                 if (evalEnumMemberConstInt(member->value.get(), evaluated)) {
                     nextValue = evaluated;

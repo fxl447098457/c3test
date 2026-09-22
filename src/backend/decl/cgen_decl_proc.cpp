@@ -43,6 +43,7 @@ void CCodeGen::visit(SubDecl& node) {
     knownBstrVars_.clear();
     knownDoubleVars_.clear();
     knownSingleVars_.clear();
+    knownDateVars_.clear();   // Fix 175
     knownLongVars_.clear();
     knownLongPtrVars_.clear();  // Bug #2 fix: 也清空LongPtr集合
     knownVariantVars_.clear();
@@ -56,6 +57,18 @@ void CCodeGen::visit(SubDecl& node) {
     // Fix 091m: 回灌模块级 Variant 变量 (knownVariantVars_ 已被 clear)
     knownVariantVars_.insert(moduleVariantVars_.begin(), moduleVariantVars_.end());
     knownByRefParams_.clear();  // Fix 081g
+    // Fix 160w: 过程入口重置 COM 属性派发标记与 With 栈 — 上一个过程的 WithMemberExpr
+    // 值 (如 `.Result`, `PropCellFont.Size`) 只把对象表达式留在 lastExpr_, 成员名挂
+    // 在 comObjExpr_/comMemberName_/isComMarker_… 若不清, 会泄漏到下一个过程被其
+    // BinaryExpr/赋值误当作 COM 属性读取 → C2065 (_vb6_with_14/_vb6_with_15,
+    // Command5_Click -> Command10_Click) / C2440 (vb6_ComIface_Font*→float).
+    isComMarker_ = false;
+    comObjExpr_.clear();
+    comMemberName_.clear();
+    isEarlyBoundCom_ = false;
+    earlyBoundSym_ = nullptr;
+    withObjectVars_.clear();
+    withObjectInfoStack_.clear();
     // Fix 010r/010r-10: 类模块中注册me到knownClassVars_ (使Me.Method()正确分发)
     // 改为map赋值: me → 当前模块名(类名)
     if (isClassModule_) knownClassVars_["me"] = moduleName_;
@@ -109,8 +122,12 @@ void CCodeGen::visit(SubDecl& node) {
             // frFireProgress 的 Current/Total As Currency → vb6_BSTR_FromStr(double)
             // C2440, cZipArchive.c 2341/2343). 与 visit(FunctionDecl) 同步.
             else if (paramType == Vb6Type::Double || paramType == Vb6Type::Currency
-                     || paramType == Vb6Type::Single || paramType == Vb6Type::Date)
+                     || paramType == Vb6Type::Single || paramType == Vb6Type::Date) {
                 knownDoubleVars_.insert(pLower);
+                // Fix 175: Date 形参额外登记 —— C 层 Date/Double 同型, 只按
+                // C 类型串分派会让 inferExprType 看不见 Date (打出序列号)。
+                if (paramType == Vb6Type::Date) knownDateVars_.insert(pLower);
+            }
             else if (paramType == Vb6Type::Long || paramType == Vb6Type::Integer || paramType == Vb6Type::Boolean) knownLongVars_.insert(pLower);
             // Bug #2 fix: LongPtr 参数注册到独立集合
             else if (paramType == Vb6Type::LongPtr) knownLongPtrVars_.insert(pLower);

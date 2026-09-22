@@ -47,27 +47,15 @@ void CCodeGen::visit(DeclareDecl& node) {
     // 注意: Windows API函数名是大小写敏感的, 需要保持原始大小写
     std::string exportedName = aliasName.empty() ? node.name : aliasName;
 
-    // M22: 检测A版Declare函数 (函数名或Alias以'A'结尾)
-    // A版API需要BSTR->ANSI转换: vb6_BSTR_ToANSI/vb6_FreeANSI
-    bool isAnsiDeclare = false;
-    if (!aliasName.empty()) {
-        // Alias "SomeFuncA" - check if alias ends with 'A'
-        std::string aliasStr = stripQuotes(node.aliasName);
-        if (aliasStr.size() >= 2 && aliasStr.back() == 'A' && std::isupper(static_cast<unsigned char>(aliasStr[aliasStr.size()-1]))) {
-            // Also check that the char before 'A' is lowercase (to avoid false positives like "Data")
-            if (std::isalpha(static_cast<unsigned char>(aliasStr[aliasStr.size()-2])) &&
-                std::islower(static_cast<unsigned char>(aliasStr[aliasStr.size()-2]))) {
-                isAnsiDeclare = true;
-            }
-        }
-    } else {
-        // No Alias - check if function name ends with 'A'
-        if (node.name.size() >= 2 && node.name.back() == 'A' &&
-            std::islower(static_cast<unsigned char>(node.name[node.name.size()-2]))) {
-            isAnsiDeclare = true;
-        }
-    }
-    if (isAnsiDeclare) {
+    // Fix 187: VB6 对 Declare 的 `ByVal <x> As String` **一律按 ANSI 编组**，与 API
+    // 名字是否以 'A' 结尾无关（VB6 没有宽字符编组，`As String` 出参永远是 LPSTR）。
+    // 此前只有名字以 A 结尾的才登记，于是 `GetProcAddress(h, "CallWindowProcA")` 这类
+    // 无后缀 API 收到的是裸 BSTR（UTF-16），名字查找必然失败返回 0 ——
+    // Charts2020 的 ucChartArea/ucChartBar/ucPieChart/ucTreeMaps/ucProgressCircular/
+    // LabelPlus 自造子类化 thunk 时把 0 写进 CallWindowProcA 槽位，关窗时 user32 调该
+    // thunk → `call 0` → 执行违例 0xC0000005（退出码 0xC000041D，表现为关闭转圈 ~2.7s）。
+    // 调用点的转换在 cgen_expr_call_arg_emit.inc（isDeclareAnsiCall 分支）。
+    {
         std::string funcLower = node.name;
         std::transform(funcLower.begin(), funcLower.end(), funcLower.begin(), ::tolower);
         knownDeclareAnsi_.insert(funcLower);
@@ -94,6 +82,11 @@ void CCodeGen::visit(DeclareDecl& node) {
     // 由 RTL 动态加载实现 (LoadLibrary + GetProcAddress), 见 vb6_di_stubs.c
     // 的 vb6_di_CertSelectCertificateW。
     bool isNoImportLib = (libLower == "cryptdlg");
+    // hhctrl.ocx 是 HTML Help ActiveX 控件 (HHCTRL), 其导入库只随 32 位
+    // 发行 (Windows SDK x64 不提供 hhctrl.ocx.lib) → 生成
+    // #pragma comment(lib, ...) 会 LNK1104 "无法打开文件". 实际符号由
+    // vb6_di_ 转发桩实现 (vb6_di_stubs.c), 无需导入库 → 不生成 pragma.
+    if (libLower == "hhctrl.ocx") isNoImportLib = true;
     // olepro32.dll 是 32 位遗留库, SDK 只在 x86 目录提供 olepro32.lib (x64 SDK 无);
     // 而 OleCreatePictureIndirect / OleLoadPicture 等实际由 oleaut32.dll 在 x86/x64 上导出,
     // 故把 olepro32 的链接映射到 oleaut32, 保证 32/64 位都能链接。

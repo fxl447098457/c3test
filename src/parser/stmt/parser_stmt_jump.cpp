@@ -59,8 +59,8 @@ std::unique_ptr<OnErrorStmt> Parser::parseOnErrorStmt() {
         return std::make_unique<OnErrorStmt>(loc, OnErrorKind::GoToZero);
     }
 
-    auto labelTok = expectName("expected label after 'On Error GoTo'");
-    return std::make_unique<OnErrorStmt>(loc, OnErrorKind::GoToLabel, labelTok.text);
+    auto labelTok = expectLabelTarget("expected label after 'On Error GoTo'");
+    return std::make_unique<OnErrorStmt>(loc, OnErrorKind::GoToLabel, labelTok);
 }
 
 // P14.1.2: Resume语句解析
@@ -70,9 +70,10 @@ std::unique_ptr<ResumeStmt> Parser::parseResumeStmt() {
     if (match(TokenKind::Next)) {
         return std::make_unique<ResumeStmt>(loc, ResumeKind::ResumeNext);
     }
-    if (cur_.kind == TokenKind::Identifier) {
-        auto labelTok = expectName("expected label after 'Resume'");
-        return std::make_unique<ResumeStmt>(loc, ResumeKind::ResumeLabel, labelTok.text);
+    // `Resume label` 与 `Resume <行号>` (VB6 行号即标签)
+    if (cur_.kind == TokenKind::Identifier || cur_.kind == TokenKind::IntegerLiteral) {
+        auto label = expectLabelTarget("expected label after 'Resume'");
+        return std::make_unique<ResumeStmt>(loc, ResumeKind::ResumeLabel, label);
     }
     return std::make_unique<ResumeStmt>(loc, ResumeKind::ResumeHere);
 }
@@ -138,9 +139,9 @@ std::unique_ptr<OnGoToStmt> Parser::parseOnGoToStmt() {
     expect(TokenKind::GoTo, DiagnosticID::ParseExpectedToken,
            "expected 'GoTo' in On...GoTo");
     std::vector<std::string> labels;
-    labels.push_back(expectName("expected label").text);
+    labels.push_back(expectLabelTarget("expected label"));
     while (match(TokenKind::Comma)) {
-        labels.push_back(expectName("expected label").text);
+        labels.push_back(expectLabelTarget("expected label"));
     }
     return std::make_unique<OnGoToStmt>(loc, std::move(index), std::move(labels));
 }
@@ -152,9 +153,9 @@ std::unique_ptr<OnGoSubStmt> Parser::parseOnGoSubStmt() {
     expect(TokenKind::GoSub, DiagnosticID::ParseExpectedToken,
            "expected 'GoSub' in On...GoSub");
     std::vector<std::string> labels;
-    labels.push_back(expectName("expected label").text);
+    labels.push_back(expectLabelTarget("expected label"));
     while (match(TokenKind::Comma)) {
-        labels.push_back(expectName("expected label").text);
+        labels.push_back(expectLabelTarget("expected label"));
     }
     return std::make_unique<OnGoSubStmt>(loc, std::move(index), std::move(labels));
 }
@@ -181,15 +182,13 @@ std::unique_ptr<ExitStmt> Parser::parseExitStmt() {
 std::unique_ptr<GoToStmt> Parser::parseGoToStmt() {
     auto loc = currentLoc();
     advance(); // consume 'GoTo'
-    auto label = expectName("expected label after 'GoTo'");
-    return std::make_unique<GoToStmt>(loc, label.text);
+    return std::make_unique<GoToStmt>(loc, expectLabelTarget("expected label after 'GoTo'"));
 }
 
 std::unique_ptr<GoSubStmt> Parser::parseGoSubStmt() {
     auto loc = currentLoc();
     advance(); // consume 'GoSub'
-    auto label = expectName("expected label after 'GoSub'");
-    return std::make_unique<GoSubStmt>(loc, label.text);
+    return std::make_unique<GoSubStmt>(loc, expectLabelTarget("expected label after 'GoSub'"));
 }
 
 std::unique_ptr<ReturnStmt> Parser::parseReturnStmt() {
