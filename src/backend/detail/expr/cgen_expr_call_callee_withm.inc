@@ -325,3 +325,49 @@
             }
         }
     }
+
+    // Fix 185: PictureBox.Print / PictureBox.Cls → RTL 控件绘制入口。
+    // 成员侧 (cgen_expr_member_form_builtin.inc) 把 comObjExpr_ 存成小写控件名，
+    // 所以这里查 knownFormControls_ 拿得到类型。本片段 include 在
+    // cgen_expr_call_com_bind.inc **之前**（见 cgen_expr_call.cpp:42-43），必须在此
+    // 消费掉标记，否则通用 COM 绑定会把它编成运行期 no-op 的 vb6_ComCall。
+    if (isComMarker_) {
+        auto itCtrl = knownFormControls_.find(comObjExpr_);
+        if (itCtrl != knownFormControls_.end() &&
+            itCtrl->second == FrmControlType::PictureBox &&
+            (comMemberName_ == "print" || comMemberName_ == "cls")) {
+            isComMarker_ = false;
+            isEarlyBoundCom_ = false;
+            earlyBoundSym_ = nullptr;
+            std::string method = std::move(comMemberName_);
+            std::string ctrlName = cIdent(knownFormControlOriginalNames_.count(comObjExpr_) ? knownFormControlOriginalNames_[comObjExpr_] : comObjExpr_);
+            comObjExpr_.clear();
+            comMemberName_.clear();
+            if (method == "print") {
+                std::string textArg = "0";  // 裸 Print = 空行
+                if (!node.positional.empty()) {
+                    emitExpr(*node.positional[0]);
+                    // 同 Fix 143: 实参自身是 COM 属性读时必须就地消费，
+                    // 否则把对象指针当字符串画、残留标记还会被上层当独立语句发射。
+                    if (isComMarker_) {
+                        isComMarker_ = false;
+                        isEarlyBoundCom_ = false;
+                        earlyBoundSym_ = nullptr;
+                        std::string objM = std::move(comObjExpr_);
+                        std::string memM = std::move(comMemberName_);
+                        comObjExpr_.clear();
+                        comMemberName_.clear();
+                        textArg = "vb6_ComGetStringProp(" + objM + ", L\"" + memM + "\")";
+                    } else {
+                        textArg = std::move(lastExpr_);
+                    }
+                }
+                c_.emitLine("vb6_ControlPrint((void*)vb6_hwnd_" + ctrlName + ", " + textArg + ");  /* PictureBox.Print */");
+                lastExpr_ = "0";
+                return;
+            }
+            c_.emitLine("vb6_ControlCls((void*)vb6_hwnd_" + ctrlName + ");  /* PictureBox.Cls */");
+            lastExpr_ = "0";
+            return;
+        }
+    }

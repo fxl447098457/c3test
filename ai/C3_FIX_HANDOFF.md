@@ -30,30 +30,21 @@
 
 ## B. 未完成项（每条都可直接开工；出处 = 删除前的 §号）
 
-### B1 Fix 185 —— 控件级 `_Paint` 事件从不派发 + `PictureBox.Print/Cls` 编成空转（**唯一剩下的画面差异**）
-"Drag/drop me" 那个框不显示。两个独立缺口（出处 §33 L2169–2187、§34、§35）：
-1. **`WM_PAINT` 转发**：`src/backend/detail/module/cgen_form_wndproc_subclass.inc` 的
-   `struct SubclassInfo`(:28-45) 加
-   `bool hasPaint=false`；两处扫描循环（:100-102 顶层控件 / :123-146 容器子控件）按
-   `controlType==PictureBox && symTab_.lookup(name+"_Paint")` 置值；push 门加 `|| hasPaint`；
-   发射点在 `WM_DESTROY`(:331) **之前**：`BeginPaint` → `SetPropW(hwnd,L"VB6_PaintDC",hdc)` →
-   调 `cProcName(ctrlName+"_Paint")` → `RemoveProp` + `EndPaint`，**必须 `return 0`**。
-2. **`Print`/`Cls` 落点改判**（覆盖 §34 的第 2/3 步）：`src/backend/detail/expr/cgen_expr_member_form_builtin.inc`
-   要在 :266 之后、:294 的 Fix 023e/089d 兜底**之前**插 PictureBox 分支
-   （`memLower∈{print,cls}` → `comObjExpr_=objLower`(**小写**控件名) / `comMemberName_=memLower` /
-   `isComMarker_=true`）。**顺序是硬约束**：先落兜底会把 `comObjExpr_` 设成 HWND 表达式(:297)，
-   调用侧 `knownFormControls_.find` 就查不到类型 —— 这正是今天生成
-   `vb6_ComCall(vb6_hwnd_Picture2, L"Print", …)`（运行期空转）的成因。
-3. **调用侧**：`src/backend/detail/expr/cgen_expr_call_callee_withm.inc` 在 ListBox 块(:264-310) 之后加第三块，照抄
-   :280-296 的 Fix 143 守卫，`emitLine("vb6_ControlPrint(...)")` + `lastExpr_="0"`
-   （协议成立：`src/backend/stmt/cgen_call.cpp` 有 `else if (callExpr=="0")` 分支）。
-4. **RTL**：新函数放 `src/rtl/core/vb6forms/vb6forms_ctrl.c`（已在 `C3RTL_EMBEDDED_FILES` 里，改完要重编 C3.exe）；
-   原型登记在 `src/rtl/core/vb6forms/vb6forms_prop_pic.h` 旁。DC 取 `GetPropW(hwnd,L"VB6_PaintDC")`，取不到回落
-   `GetDC`；未赋值的 `As String` 是 NULL BSTR，须按 `""` 处理；字体 `WM_GETFONT`；颜色读
-   `VB6_ForeColor` 属性（全仓无 `WM_CTLCOLORSTATIC`）；光标位置存 `VB6_PrintX/Y`。
+### B1 Fix 185 的**边界**：控件级 `_Paint` 只接了 PictureBox（Label / Frame / Image 仍无派发）
+Fix 185 已落地（见 D 表），当时按"爆炸半径一个点"的口径把 WM_PAINT 派发与 `Print/Cls` 两条
+都门在 `FrmControlType::PictureBox` 上 —— 依据是全工程度量 `<控件>_Paint` 只有 `MainForm.frm:658`
+一处（`UserControl_Paint` **不在此列**：它走 Fix 112 的宿主路径 `vb6_<ctl>_ucHostPaint`，
+`src/backend/module/cgen_form.cpp:189/241`，本来就通）。所以 **Label / Frame / Image 的
+`<控件>_Paint` 现在仍然是死代码**（成员侧不认 `print`/`cls`，调用侧照旧落
+`vb6_ComCall(HWND, …)` 运行期 no-op）。要扩面注意两点：
+① 先重量真实工程里 `<控件>_Paint` 的出现面，别照抄 PictureBox 分支；
+② `Image` 的 WM_PAINT 已被 `vb6_InstallImageSubclass`（`vb6forms_picture_prop.c:305-312`）占走，
+而它和代码生成的 `vb6_InstallControlSubclass` **共用同一个 `VB6_OrigProc` 属性名** ⇒ 后装的一方
+静默 no-op（见 B13）；扩到 Image 必须先解掉那条，否则"加了派发"和"没加"表现完全一样。
 
-**爆炸半径已度量：全工程只有 `MainForm.frm:658-660` 的 `Picture2_Paint` 一处**，所以按最小实现做，
-不要顺手支持其它控件。现状复核（2026-09-22）：`grep -rn "vb6_ControlPrint\|VB6_PaintDC" src` = 0 命中。
+另记一条**覆盖面**事实（本轮度量）：`tests/` 里没有任何用例写 `<控件>.Print`/`.Cls`
+（`grep` 只命中 `Debug.Print`），所以门禁**不经过**这条新路径 —— 它既不构成回归风险，
+也意味着 Fix 185 没有自动化断言，只能靠 VBFlexGridDemo 的 GUI 用例保证"编得过、跑得活"。
 
 ### B2 Fix 180 —— `ReDim` UDT 成员数组不带 `As` 时按 Variant 分配载体（步长不符）
 出处 §22 L1539–1545、§30（根因已收窄到一行判定）。现象：`ReDim h1.Items(0 To 1)`（不带 `As`）发成
@@ -237,6 +228,13 @@ UDT"），带名字的是 **Class 符号专属**的 `memberReturnTypes`（`unord
     任何一次后续编译（含测试套件）都可能删掉 ⇒ 构建的**同一条命令**里把产物快照到 `.temp/gen/`。
     取会话目录用 `grep -a "kept at" | tr -d '\r' | sed 's#.*kept at: ##'`（`[0-9]{13}` 会截断 15 位 id）。
     生成 `.c` 的行号**不映射** `.bas` 行号。
+11. **控件族"方法"的调用侧有两条互不相通的路径，只改一处会剩一半 no-op**（Fix 185 落地时实测）：
+    带实参的 `Pic.Print "x"` 走 `src/backend/detail/expr/cgen_expr_call_callee_withm.inc` —— 该片段
+    include 在 `cgen_expr_call_com_bind.inc` **之前**（`src/backend/expr/cgen_expr_call.cpp:42-43`），
+    所以新的控件特判必须追加在 withm 末尾才抢得到通用 COM 绑定前面；**无括号**的 `Pic.Cls` /
+    `List1.Clear` 根本不进 withm，而是落在 `src/backend/stmt/cgen_call.cpp` 的 `isComMarker_` 分支
+    （Fix 086 的 `List1.Clear` 就是同一形态先例）。配套协议：语句自己 `c_.emitLine(...)` 之后把
+    `lastExpr_` 置 `"0"`，`cgen_call.cpp` 的 `else if (callExpr == "0")` 分支保证不会再补发一条裸 `0;`。
 
 ## D. 已完成项一行索引（叙述已删；原文在 `git show 1465da1:ai/C3_FIX_HANDOFF.md` 的对应 §区间）
 
@@ -255,7 +253,7 @@ UDT"），带名字的是 **Class 符号专属**的 `memberReturnTypes`（`unord
 | §23–§28, §18 | Fix 181：控件默认字体改 VB6 口径 MS Sans Serif 8.25pt + `NONANTIALIASED_QUALITY`；悬垂 HFONT 隐患按"每控件一份字体"收口 | 已落地（尾巴见 B12） |
 | §25–§26, §33 | Fix 182：容器子控件**第二条发射路径**缺设计期属性（frx/Text/List…），`b953147`；CellPicture 预览空白由此关闭 | 已提交（尾巴见 B17） |
 | §29–§32 | Fix 184：网格只画 13 行的根因是 RTL 里**缇/像素两套 DPI 口径混用**（`*15` 硬编码 vs 真实 DPI），统一走 `vb6_DpiX/Y`；Fix 183 验证失败**已回退并作废** | 已落地（dpi=96 下逐位相同，所以控制台用例不动） |
-| §34–§35 | Fix 185 配方（**未落地** → 见 B1）；同时记录 `.temp/fix183_block.bin` 永久作废 | 见 B1 |
+| §34–§35 | Fix 185：控件级 `_Paint` 从不派发（`Picture2_Paint` 是死代码）+ `Print/Cls` 编成 `vb6_ComCall(HWND,…)` 运行期 no-op ⇒ "Drag/drop me" 框空白。四处协同：`SubclassInfo.hasPaint` + WM_PAINT 派发（`BeginPaint`→挂 `VB6_PaintDC`→调用户过程→`RemoveProp`+`EndPaint`，**`return 0`**）、成员侧 PictureBox 分支（必须落在 023e/089d 兜底**之前**）、调用侧 withm（带实参）+ `cgen_call.cpp`（无括号）两条、RTL `vb6_ControlPrint/vb6_ControlCls`。落地后 demo 画面与参考图**逐项一致**（最后一个已知差异关闭）。另记：`.temp/fix183_block.bin` 永久作废 | 已落地；边界 → B1 |
 | §36–§41 | Fix 187：`Declare As String` 只有名字以 A 结尾才做 ANSI 编组 → `GetProcAddress` 返回 0 → Charts2020 自造子类化 thunk `call NULL`（关闭崩溃）；含极小复现与一次无效取证（反向 A/B 未设 `C3_CRASH_TRACE`）的更正 | 已落地；尾巴见 B13/B14 |
 | §42 | Fix 188：`Startup = Sub Main` 的工程关窗后进程不退出（没人投 `WM_QUIT`，按 Forms 计数收口） | 已落地；偶发 AV 见 B15 |
 | §43 | Fix 189（**仅测试侧**）：门禁 `Test-GuiVbp -AutoExitSec` 无条件 `pass++`，窗口出现后自退崩溃照记 PASS；现改为区分"我们杀的"与"它自己退的"并读退出码 | 已落地（同节两条遗留 → B6/B3） |
