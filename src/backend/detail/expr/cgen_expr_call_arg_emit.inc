@@ -282,15 +282,29 @@
                     // 作为 ByRef UDT/AsAny 实参应取地址 &(x) 而非强转 (void*)(intptr_t)(x)
                     // Fix 084m: 字段链须允许 -> — With变量展开 (._vb6_with_2->SendBuffer)
                     // 也是左值字段链, 若判为非左值会生成 (void*)(intptr_t)(udt) → C2440
+                    // Fix 190: 再允许 [] 下标 — 定长数组元素也是左值。VBFlexGrid.ctl:28348
+                    //   CopyMemory .szText(0), ByVal StrPtr(Text), LenB(Text)
+                    // 经 With 展开成 _vb6_with_776->szText[0]; 旧判定因含方括号视其为非左值,
+                    // 落入下方 (void*)(intptr_t)(expr) 兜底 → 把首元素的**值**当成目的地址。
+                    // NMTTDI 已清零, 该值即 0 → RtlMoveMemory 写 0x0, 鼠标悬停即 0xC0000005。
+                    // 方括号内是下标表达式(右值, 任意写法), 括号外仍只允许 标识符/./->
                     bool isUdtFieldChain = !argValLv.empty() && (std::isalpha(static_cast<unsigned char>(argValLv[0])) || argValLv[0] == '_');
+                    int chainSubscriptDepth = 0;
                     if (isUdtFieldChain) {
                         for (size_t ci = 0; ci < argValLv.size(); ci++) {
                             char c = argValLv[ci];
+                            if (c == '[') { chainSubscriptDepth++; continue; }
+                            if (c == ']') {
+                                if (chainSubscriptDepth == 0) { isUdtFieldChain = false; break; }
+                                chainSubscriptDepth--; continue;
+                            }
+                            if (chainSubscriptDepth > 0) continue;
                             if (std::isalnum(static_cast<unsigned char>(c)) || c == '_' || c == '.') continue;
                             if (c == '-' && ci + 1 < argValLv.size() && argValLv[ci + 1] == '>') { ci++; continue; }
                             isUdtFieldChain = false;
                             break;
                         }
+                        if (chainSubscriptDepth != 0) isUdtFieldChain = false;
                     }
                     bool isSaAt = (argValLv.find("VB6_SA_AT(") == 0);
                     // Fix 086: 宏常量/NULL 不是左值 — TLS_LOCAL_LEGACY_VERSION 是

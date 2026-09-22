@@ -2777,6 +2777,76 @@ env-gated 诊断（`RegisterClassEx`/`CreateWindowEx` 打 class+proc 指针）�
 **同日查到、且不在代码里的两条，一并记录**：
 1. 嵌入清单是**三方**约束：`src/driver/c3rtl.rc` 的 `<id> RCDATA "路径"`、`src/driver/rtl_embedded.hpp` 的 `RTL_NAME = <id>`、`src/driver/rtl_embedded.cpp` 的 `{ RTL_NAME, "basename" }`——`.cpp` 只按 **basename** 索引，所以 id 错位是"抽出另一个文件"而非报错。合并提交 `c9b7986` 解这一族时取了一侧：`RTL_VB6_DI_UNKNOWN_STUBS_C`(205) 在枚举和表里、`.rc` 却没有 205，于是 `vb6_di_unknown_stubs.c` 根本没嵌进 C3.exe；同族 DI 桩从 **489 掉到 421，162 个手写桩丢失**。工作树里那份未提交的重生**是真并集**（583 = 270 两侧一致 + 182 取我们 + 131 取上游；名字与桩体均无丢失、无杜撰），但 HEAD 仍未提交，从 HEAD 干净构建拿到的还是坏编译器。核对工具：`.temp/yqt_embed_xcheck.sh <rev|WORKTREE>`、`.temp/di_body_audit.py`（比**桩体**，不只比名字——名字是全并集也可能逐符号取了对方桩体而静默回退手工修复）、`.temp/di_sig_divergence.py`（揪指针宽度/元数变化）。
 2. `ByVal <x> As Currency` 传 Win32 `POINT` 按值，x64 下**只有打包成单个 64 位整数**（x 在低 32、y 在高 32）才对：`.temp/abi_probe.c` 以真原型为基准实测，我们的 `(double)` 与上游的 `(intptr_t,intptr_t)` **都返回错误的 HWND**（真值=可见探针窗口）。且 DI 桩只按 API 名索引，同一 API 的两种真实声明形状无法共存（工作树已自相矛盾：`WindowFromPoint` 用上游 2 参、`ChildWindowFromPoint` 用我们 1 参，而 VBFlexGrid 里两者都是 `As Currency`）。要修必须让桩名按声明形状区分（codegen + `gen_di_stubs.ps1` 一起改），不是选边。
+---
+
+## 44. 2026-09-22 14:3x：**Fix 190 + Fix 191 已落地** —— demo 的 hover 崩溃与左键点击崩溃，一条是代码生成的左值判定，一条是 `As LongPtr` 数组按 Variant 载体分配
+
+**现象**（用户实测，两次都靠人鼠标操作才暴露）：
+1. 鼠标**悬停**到网格上 → 进程自动退出。
+2. 悬停修好后，鼠标**左键点击**单元格 → 退出；**右键不崩**（右键不抢焦点，这条差异直接把根因钉到 `WM_SETFOCUS`）。
+
+**工具链事实（先记，后面还会反复用到）**：要符号化崩溃轨迹**必须**用 `-g` 编译，
+`.temp/sym_x86.ps1 -Exe <exe> -Base 0x140000000 -Addrs <rva,...>` 依赖同目录的 `.pdb`；
+`.temp/yqt_demo.bat` 只带 `--keep-for-debug`（**无 PDB**），那种 exe 的 RVA 一个函数名都出不来。
+本轮全部改用 `.temp/case190g.ps1`（`tests\VBFlexGridDemo\VBFlexGridDemo.vbp -g --keep-for-debug
+--output-dir .temp\case190g` 顺手启动带 `C3_CRASH_TRACE`+`C3_COM_TRACE` 的实例给人点）。
+另：C3 不带 `--output-dir` 时 exe 落在**当前工作目录**（脚本里是仓库根），不在 vbp 目录也不在
+`output/` —— 找产物时别只翻 `output/`。
+
+**Fix 190（悬停崩）= 代码生成把带 `[]` 下标的链判成非左值。**
+`VBFlexGrid.ctl:28348` `CopyMemory .szText(0), ByVal StrPtr(Text), LenB(Text)`（`szText(0 To 159) As Byte`，
+`With NMTTDI`）展开成 `_vb6_with_776->szText[0]`；`cgen_expr_call_arg_emit.inc` 的 `isUdtFieldChain`
+字符循环只放行 标识符/`.`/`->`，方括号一出现就判非左值 → 落入 `As Any ByRef` 的非左值兜底
+`(void*)(intptr_t)(expr)`，于是把**首字节的值**当 memcpy 的目的地址；`NMTTDI` 已清零 → 写 0x0。
+生成码现在是 `(void*)&(_vb6_with_776->szText[0])`。
+改成按方括号深度判定：括号外仍只允许 标识符/`.`/`->`，括号内是下标表达式（右值）整体放行，
+这样 `buf(i - 1)` 这类带算术的下标也不会再退化（x64 下 `a[i-1]` 此前同样会走强转兜底）。
+全工程度量：`grep -oE "\(void\*\)\(intptr_t\)\([A-Za-z_][A-Za-z0-9_.>-]*\[[0-9]"` 在生成码里
+**只有这一处**，所以这次修改的爆炸半径是一个点。
+新增回归用例 `tests/test_asany_subscript.bas`（`Add-BasTest` 断言
+`WITH-SUB=Y / EXPR-SUB=Y / SCALAR=Y / CHAIN=Y / ASANY-DONE`）。
+写用例时踩到两个坑，都是"看起来是编译器坏了"：① `StrPtr` 给的是 **UTF-16** 字节，
+拷进 `Byte` 数组后奇数字节是 0，断言要按实际字节写；② `Byte` 数组元素**直接**进 `If` 比较会走
+Variant 通道（`vb6_VariantFromValue` + `vb6_VarCmpLongEq`）并且**不成立**，中间转一次 `Long` 就对
+（那是另一处缺陷，与本用例无关，已在用例注释里点名，未动）。
+
+**Fix 191（左键点击崩）= `As LongPtr` 数组按 Variant 载体分配，把伪 vtable 打成一堆 VARIANT 头。**
+链：`WM_SETFOCUS` → `vb6_VBFlexGrid_WindowProcControl` → `vb6_VTableHandle_ActivateIPAO(me)` →
+`VTableHandle.c` 的 COM 调用 → `vb6_getDispid` → `pDisp->lpVtbl->GetIDsOfNames`（`vb6com_invoke.c`）。
+`Private VTableIPAO(0 To 9) As LongPtr` 是**手写伪 COM vtable**：`ProcPtr(AddressOf IOleIPAO_*)` 逐个
+填进数组，再把 `VarPtr(VTableIPAO(0))` 当 vtable 指针装进 `VTableIPAOData.VTable`，于是
+`&VTableIPAOData` 就是一个合法 COM 对象。`cgen_expr_array.cpp` 的 `mapSaElemType`/`mapSaElemCType`
+**没有 `Vb6Type::LongPtr` 分支**（`resolveTypeName` 是对的，`builtinTypes_` 里 `longptr` 早在 Fix 081e
+就有），落到 `default` → `vb6_sa_variant` / `VB6_SA_AT(vb6_VARIANT, …)`。步长从 8 变 16，槽内容从
+指针变成 `vb6_VARIANT` 头，于是"vtable 第 5 槽"读出来是 `vt = VT_I4 = 3` → `3 + 0x28` →
+**AV 读 0x2b**（与轨迹里的 `av read target=0x2b` 精确对上）。已改为 `vb6_sa_ptr` + `intptr_t`。
+
+**同一条链上还有第二、三处，都在运行时补齐了口径**（三处是依次暴露的，不是一次看全的）：
+1. `obj.AddRef` / `obj.Release` 现在**直发 vtable 槽 1**。IUnknown 三法在**所有** COM 接口的 vtable
+   里固定在槽 0/1/2，自定义接口（`IOleInplaceActiveObject` 这类没有 IDispatch 的）同样成立；
+   而按名后期绑定要先 `GetIDsOfNames`（IDispatch 槽 5），对伪 vtable 就等于把
+   `IOleIPAO_TranslateAccelerator` 当 `GetIDsOfNames` 调，参数全错位（实测 `av read target=0xffffffffffffffff`）。
+2. `vb6_getDispid` 前加 `vb6_ComIsDispatchable(disp)` 守卫：接收者不是真 COM 对象时返回
+   `DISPID_UNKNOWN`，走已有的"method not found → 返回 NULL"quiet 路径。这类 Sub 在 VB6 里全程
+   `On Error GoTo CATCH_EXCEPTION`，所以静默失败**就是**VB6 语义，而一次野 `lpVtbl` 解引用是杀进程。
+   判据踩过一次坑：先写成"vtable 必须落在已加载模块镜像里"（`GetModuleHandleExW`
+   `FROM_ADDRESS`），**错的** —— 伪 vtable 的载体是堆上的 `LongPtr` 数组，那条规则把合法对象一起
+   拒了。改成：对象可读 → 首槽可读且容得下前 7 槽 → 槽 0/1/2/5/6 指向**可执行内存**
+   （`VirtualQuery` 的 `PAGE_EXECUTE*`）。
+3. `vb6_ReleaseObject`（每条 `Set X = Nothing` 都走它）用同一个守卫；不 dispatchable 就只清指针。
+   触发点是 `DeActivateIPAO` 结尾的 `Set VTableIPAOData.OriginalIOleIPAO = Nothing` —— 该字段被
+   `Set .OriginalIOleIPAO = This` 存成了类实例 `me`，而 `me` 的首字段 `__comObj` 为 NULL →
+   读 `NULL + 0x10`（Release 槽 2）。**遗留**：`Set <接口字段> = Me` 应存 COM 身份
+   （`me->__comObj`）而不是 `me`，这是代码生成侧的独立缺陷，本轮只在运行时兜住。
+
+**门禁**：`.temp/gate.ps1 -Tag regress50` → **`PASS=93 FAIL=0 SKIP=1 TOTAL=94`**（基线 92/0/1/93，
++1 即新增的 `test_asany_subscript`；SKIP 仍是 `test_vbman`——`VBMANLIB.cVBMAN` 未注册），
+`output/yqt_regress50.log`，GATE-EXIT=0，无 `fatal error C1060`，跑完无残留 C3/cl/link/ninja。
+编号让位：任务 #33 原挂 "Fix 191"（`As Currency` 传 `POINT` 的 x64 编组）尚未落地，已改标 **Fix 192**，
+191 归本轮的 LongPtr 载体 + COM 可派发守卫（代码注释与本节一致）。
+
+**验收**：用户实测 hover 不崩、左键点击不崩（"可以了，没有崩溃了"）。
+
 ## 以下为合并自 origin/main 的并轨文档 (fan/dev 主文档之上追加保留)
 
 

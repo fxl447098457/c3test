@@ -40,6 +40,11 @@ int32_t vb6_IsNothing(void* obj);
 // ReleaseObject(&ptr) - 释放COM对象引用并置NULL
 void vb6_ReleaseObject(void** objPtr);
 
+// 接收者是否真是 COM 对象 (首槽 vtable 的前 7 槽指向可执行内存)。
+// 伪装的接收者 (UDT/类实例的地址) 一旦解引用 lpVtbl 就是 AV, 而不是 VB6 的
+// "对象不支持此属性或方法" —— 后期绑定与 Release 路径都先用它把这类挡掉。
+int32_t vb6_ComIsDispatchable(const void* disp);
+
 // COM后期绑定 (P6.2)
 // 返回VARIANT* (Windows VARIANT), 调用方需vb6_ComVarClear释放
 void* vb6_ComCall(void* disp, const wchar_t* methodName,
