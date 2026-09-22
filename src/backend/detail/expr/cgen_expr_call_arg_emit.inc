@@ -260,8 +260,45 @@
                         if (ccType.empty() || ccType == "vb6_VARIANT") ccType = "int32_t";
                         argVal = "(void*)&(" + ccType + "){" + argVal + "}";
                     } else {
-                        // 非左值: 字面量或复杂表达式 — 直接强转为 void*
-                        argVal = "(void*)(intptr_t)(" + argVal + ")";
+                        // Fix 182: As Any ByRef 的实参是数值字面量时, VB6 先把字面量求值到
+                        // 临时存储, 再把该存储的地址传给形参. 直接强转 (void*)(intptr_t)(v)
+                        // 是把数值本身当成指针 — cAsyncSocket 的
+                        // ws_setsockopt(m_hSocket, ucsSolTCP, ucsSsoNoDelay, 1&, 4)
+                        // 形参为 int32_t*, 收到地址 0x1 → WSAEFAULT(10014),
+                        // Create 失败并关闭 socket, 后续 Bind 报 WSAENOTSOCK.
+                        // 实测对照: optval=(char*)1 → ret=-1 wsaerr=10014;
+                        //           optval=&(int32_t){1} → ret=0.
+                        // 0 保持原有 (void*)0 行为 (Fix 069b 场景需要 NULL 指针),
+                        // 其余复杂表达式维持原样, 控制影响面.
+                        std::string litBody = argVal;
+                        char litSuffix = 0;
+                        if (!litBody.empty() && (litBody.back() == 'L' || litBody.back() == 'l'
+                                                 || litBody.back() == 'f' || litBody.back() == 'F')) {
+                            litSuffix = litBody.back();
+                            litBody.pop_back();
+                        }
+                        bool isNumericLiteral = !litBody.empty();
+                        for (char c : litBody) {
+                            if (!std::isdigit(static_cast<unsigned char>(c))
+                                && c != '.' && c != 'e' && c != 'E') {
+                                isNumericLiteral = false;
+                                break;
+                            }
+                        }
+                        if (isNumericLiteral && litBody != "0") {
+                            std::string ccType = "int32_t";
+                            if (litBody.find('.') != std::string::npos
+                                || litBody.find('e') != std::string::npos
+                                || litBody.find('E') != std::string::npos) {
+                                ccType = "double";
+                            } else if (litSuffix == 'f' || litSuffix == 'F') {
+                                ccType = "float";
+                            }
+                            argVal = "(void*)&(" + ccType + "){" + argVal + "}";
+                        } else {
+                            // 非左值: 0 或复杂表达式 — 直接强转为 void*
+                            argVal = "(void*)(intptr_t)(" + argVal + ")";
+                        }
                     }
                 } else {
                 // Fix 072b: ByVal 覆盖 As Any 参数 — 传 (void*)(intptr_t)(val),
