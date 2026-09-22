@@ -127,7 +127,15 @@ void CCodeGen::visit(ExitStmt& node) {
             c_.emitLine("return " + currentReturnVar_ + ";");
             break;
         case ExitKind::Property:
-            c_.emitLine("return;");
+            // Fix 181: Property Get 有返回值, Exit Property 必须装回 vb6_ret_<name>,
+            // 否则正常路径把返回寄存器的残留值返回 (x86 下 cTlsReMaster.pvSocket
+            // 把 me 当实例返回, cTlsSocket_Bind 解引用崩溃实证);
+            // Property Let/Set 无返回值 (currentReturnVar_ 为空), 保持裸 return。
+            if (!currentReturnVar_.empty()) {
+                c_.emitLine("return " + currentReturnVar_ + ";");
+            } else {
+                c_.emitLine("return;");
+            }
             break;
     }
 }

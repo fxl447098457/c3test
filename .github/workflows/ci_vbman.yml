@@ -171,6 +171,7 @@ jobs:
           name: vbman-dll
           path: |
             tests_github/vbman/dist/DLL/VBMAN.dll
+            tests_github/vbman/dist/DLL/VBMAN.map
             .build/C3.exe
           if-no-files-found: error
           retention-days: 1

@@ -29,7 +29,17 @@
                     if (!defaultInstCls.empty()) {
                         objExpr = "vb6_cls_" + cIdent(defaultInstCls) + "_Default()";
                     } else {
+                        // Fix 180: 接收者是值上下文, 必须在值语境发射. 外层 IndexOrCallExpr
+                        // / CallStmt 会把 asCallCallee_ 置 true 后才 emit 本 MemberAccessExpr,
+                        // 若直接泄漏到接收者求值, 接收者是 PropertyGet (如 cTlsRemaster 内
+                        // pvSocket.Bind(...) 的 pvSocket) 时 IdentifierExpr 只发裸函数名
+                        // (本意"我是callee, 外层补参"), 外层却把它当对象表达式前置 →
+                        // 生成 vb6_cTlsSocket_Bind(vb6_cTlsReMaster_prop_get_pvSocket, ...)
+                        // 把函数指针当实例传 → 运行期解 vtable 0xC0000005 (VBMAN CI 实证).
+                        bool savedObjCtx180 = asCallCallee_;
+                        asCallCallee_ = false;
                         emitExpr(*node.object);
+                        asCallCallee_ = savedObjCtx180;
                         objExpr = std::move(lastExpr_);
                     }
                     // Fix 089h: 值上下文无括号方法引用 (Trim(FileStream.ReadLine)
