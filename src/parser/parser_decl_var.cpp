@@ -1,4 +1,4 @@
-// vb6c3 - 声明解析器 — Declare / Event / Const / Variable 声明 + 参数与类型引用
+// vb6c3 - 声明解析器 — Declare / Event / Delegate / Const / Variable 声明 + 参数与类型引用
 // 由 src/parser/parser_decl.cpp 拆出（2026-09-17），纯搬移、零行为改动。
 
 #include "parser/parser.hpp"
@@ -72,6 +72,50 @@ std::unique_ptr<EventDecl> Parser::parseEventDecl(AccessLevel access) {
     auto params = parseParameterList();
     expectEndOfStatement();
     return std::make_unique<EventDecl>(loc, access, nameTok.text, std::move(params));
+}
+
+// ============================================================
+// Delegate 声明 (tB 扩展: 具名函数指针类型)
+// ============================================================
+
+std::unique_ptr<DelegateDecl> Parser::parseDelegateDecl(AccessLevel access) {
+    auto loc = currentLoc();
+    advance(); // consume 'Delegate'
+
+    ProcKind procKind;
+    if (match(TokenKind::Sub)) {
+        procKind = ProcKind::Sub;
+    } else if (match(TokenKind::Function)) {
+        procKind = ProcKind::Function;
+    } else {
+        diag_.error(DiagnosticID::ParseExpectedToken, currentLoc(),
+            "expected 'Sub' or 'Function' after 'Delegate'");
+        procKind = ProcKind::Sub;
+    }
+
+    auto nameTok = expectName("expected Delegate name");
+
+    // 调用约定: 默认 StdCall, 可选 CDecl (位置同 Declare: 参数表之前)
+    CallConv callingConv = CallConv::StdCall;
+    if (match(TokenKind::CDecl)) {
+        callingConv = CallConv::CDecl;
+    }
+
+    auto params = parseParameterList();
+
+    TypeRefPtr returnType;
+    if (procKind == ProcKind::Function) {
+        if (match(TokenKind::As)) {
+            returnType = parseTypeRef();
+        } else {
+            diag_.error(DiagnosticID::ParseExpectedToken, currentLoc(),
+                "expected 'As type' in Delegate Function declaration");
+        }
+    }
+    expectEndOfStatement();
+
+    return std::make_unique<DelegateDecl>(loc, access, procKind,
+        nameTok.text, callingConv, std::move(params), std::move(returnType));
 }
 
 // ============================================================

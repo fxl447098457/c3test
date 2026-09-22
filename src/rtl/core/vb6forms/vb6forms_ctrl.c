@@ -364,3 +364,67 @@ void vb6_SetControlBackColor(void* hwnd, int color) {
     SetPropW((HWND)hwnd, L"VB6_BackColor", (HANDLE)(INT_PTR)color);
     InvalidateRect((HWND)hwnd, NULL, TRUE);
 }
+
+// ============================================================
+// Fix 185: 控件级绘制入口 PictureBox.Print / PictureBox.Cls
+// ============================================================
+//
+// DC 来源有两档：_Paint 派发时挂上的 VB6_PaintDC（BeginPaint/EndPaint 之间才有
+// 效，绝不能 ReleaseDC），否则回落 GetDC。VB6 允许在非 _Paint 时机 Print，效果就
+// 是画在屏幕上、下次重绘即消失，这里保持同样的宽松度。
+// 绘制光标 (PrintX/PrintY) 存窗口属性，Cls 归零 —— 等价于 VB6 的当前绘制位置。
+
+static HDC vb6_ControlPrintDC(HWND hw, BOOL* pFromPaint) {
+    HDC hdc = (HDC)GetPropW(hw, L"VB6_PaintDC");
+    *pFromPaint = (hdc != NULL) ? TRUE : FALSE;
+    if (hdc) return hdc;
+    return GetDC(hw);
+}
+
+void vb6_ControlCls(void* hwnd) {
+    if (!hwnd) return;
+    HWND hw = (HWND)hwnd;
+    BOOL fromPaint = FALSE;
+    HDC hdc = vb6_ControlPrintDC(hw, &fromPaint);
+    if (!hdc) return;
+    RECT rc;
+    GetClientRect(hw, &rc);
+    HBRUSH br = CreateSolidBrush((COLORREF)vb6_GetControlBackColor(hwnd));
+    if (br) {
+        FillRect(hdc, &rc, br);
+        DeleteObject(br);
+    }
+    if (!fromPaint) ReleaseDC(hw, hdc);
+    RemovePropW(hw, L"VB6_PrintX");
+    RemovePropW(hw, L"VB6_PrintY");
+}
+
+void vb6_ControlPrint(void* hwnd, void* bstrText) {
+    if (!hwnd) return;
+    HWND hw = (HWND)hwnd;
+    BSTR text = (BSTR)bstrText;
+    // 未赋值的 As String 是 NULL BSTR，对 VB6 而言等价于 ""（空行 = 只推进光标）
+    int len = text ? (int)SysStringLen(text) : 0;
+    BOOL fromPaint = FALSE;
+    HDC hdc = vb6_ControlPrintDC(hw, &fromPaint);
+    if (!hdc) return;
+    HFONT hFont = (HFONT)SendMessageW(hw, WM_GETFONT, 0, 0);
+    HFONT hOld = hFont ? (HFONT)SelectObject(hdc, hFont) : NULL;
+    SetBkMode(hdc, TRANSPARENT);
+    SetTextColor(hdc, (COLORREF)vb6_GetControlForeColor(hwnd));
+    RECT rc;
+    GetClientRect(hw, &rc);
+    int x = (int)(INT_PTR)GetPropW(hw, L"VB6_PrintX");
+    int y = (int)(INT_PTR)GetPropW(hw, L"VB6_PrintY");
+    if (len > 0) {
+        ExtTextOutW(hdc, x, y, ETO_CLIPPED, &rc, text, len, NULL);
+    }
+    TEXTMETRICW tm;
+    int advance = 0;
+    if (GetTextMetricsW(hdc, &tm)) advance = tm.tmHeight + tm.tmExternalLeading;
+    // VB6 的 Print 行末换行：光标回到最左并下移一行
+    SetPropW(hw, L"VB6_PrintX", (HANDLE)(INT_PTR)0);
+    SetPropW(hw, L"VB6_PrintY", (HANDLE)(INT_PTR)(y + advance));
+    if (hOld) SelectObject(hdc, hOld);
+    if (!fromPaint) ReleaseDC(hw, hdc);
+}

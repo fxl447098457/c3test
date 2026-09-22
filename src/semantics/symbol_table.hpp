@@ -35,6 +35,7 @@ enum class SymbolKind : uint8_t {
     DeclareSub,     // Declare Sub (外部)
     DeclareFunc,    // Declare Function (外部)
     Event,          // Event 声明
+    Delegate,       // Delegate 声明 (tB 扩展: 具名函数指针类型)
     Class,          // 类模块 (.cls)
     Label,          // 行标签
     ComClass,       // COM coclass (来自TypeLib, 前期绑定)
@@ -257,6 +258,23 @@ struct Symbol {
     // comMethods[name]: 包含提升的方法签名 (key=小写方法名)
     std::string comGlobalNsMethodName;  // P24-04: 提升的方法名 (原始大小写, 如"VBMAN")
 
+    // --- Delegate 签名 (仅 SymbolKind::Delegate) ---
+    // 委托值本身按 Vb6Type::LongPtr 表示 (位兼容), 签名细节存这里,
+    // 供赋值/传参/调用点的签名检查与后端桩生成使用.
+    ProcKind delegateProcKind = ProcKind::Sub;
+    CallConv delegateCallConv = CallConv::StdCall;
+    Vb6Type delegateReturnType = Vb6Type::Void;
+    // 语义层在 AddressOf 绑定成功时登记的静态目标 (v1 限同模块过程).
+    // cgen 按对子生成调用桩: 桩用委托约定的签名, 体内转调 cdecl 过程本体.
+    struct DelegateTarget {
+        std::string procName;     // VB 过程名 (原样)
+        std::string procModule;   // "" = 当前模块 (v1 仅此形态)
+        // 绑定的具体重载变体指纹 (O2): "" = 该名字无重载组 (旧行为);
+        // 非空 = 组内 fp 精确匹配的那条 (含 head), cgen 据此找回声明并区分桩名.
+        std::string procFp;
+    };
+    std::vector<DelegateTarget> delegateTargets;
+
     // --- P20-21: UDT成员信息 (仅SymbolKind::UserDefinedType) ---
     struct UdtMemberInfo {
         std::string name;           // 成员名 (保留大小写)
@@ -268,6 +286,15 @@ struct Symbol {
         bool isArrayDynamic = false;
     };
     std::vector<UdtMemberInfo> udtMembers;
+
+    // --- 重载组 (tB 式 Overloading, O1) ---
+    // overloadFp: 由语义层在 Pass1 注册前填好的"可重载过程"签名指纹
+    //   (空 = 不参与分组: 类模块成员 / ParamArray 过程 / 非 Sub|Function)。
+    // 同 kind 同名的第二个不同指纹变体存进 "<name>$ov$<fp>" 键 (isOverloadVariant),
+    // 裸键恒为声明序首个 (head) —— 276 处按名 lookup 的旧语义 = first-in-chain。
+    std::string overloadFp;
+    bool isOverloadVariant = false;
+    int ovlCount = 0;  // 仅 head 有意义: 已挂入的变体数
 
     Symbol() = default;
     Symbol(SymbolKind k, const std::string& n, Vb6Type t,
@@ -297,6 +324,12 @@ struct Symbol {
         if (kind == SymbolKind::Event) {
             return lowerName + "$ev";
         }
+        // 重载变体 (O1/O3): 独立组内键。存储/跨模块注入/getPublicSymbols 全部
+        // 经此键自然区分, head 恒占裸键。
+        if (isOverloadVariant && (kind == SymbolKind::Sub || kind == SymbolKind::Function)
+            && !overloadFp.empty()) {
+            return lowerName + "$ov$" + overloadFp;
+        }
         return lowerName;
     }
 
@@ -316,6 +349,7 @@ struct Symbol {
             case SymbolKind::DeclareSub:      return "Declare Sub";
             case SymbolKind::DeclareFunc:     return "Declare Function";
             case SymbolKind::Event:           return "Event";
+            case SymbolKind::Delegate:        return "Delegate";
             case SymbolKind::Class:           return "Class";
             case SymbolKind::Label:           return "Label";
             case SymbolKind::ComClass:        return "ComClass";
@@ -406,6 +440,19 @@ public:
 
     // 查找模块级符号 (按名称+类别, 用于Property Get/Let精确查找)
     Symbol* lookupModuleByKind(const std::string& name, SymbolKind kind) const;
+
+    // 重载组内按**声明位置**精确定位某一条 Sub/Function 变体 (Pass2/cgen 找回自身)。
+    // 无位置命中时回落裸键 head (零重载模块行为完全等价旧 lookupModule)。
+    Symbol* lookupModuleOverloadByLoc(const std::string& name,
+                                      const SourceLocation& loc) const;
+
+    // 重载组完整候选集: 裸键 head + 全部 "<name>$ov$" 变体 (按 map 迭代序, head 在前)。
+    // 组不存在或仅 head 时返回 {head} / {}。
+    std::vector<Symbol*> lookupModuleOverloads(const std::string& name) const;
+
+    // 按语义层选定的变体后缀取符号: suffix 空 = 裸键 head; 否则 "<name><suffix>"。
+    Symbol* lookupModuleOverloadBySuffix(const std::string& name,
+                                         const std::string& suffix) const;
 
     // 当前作用域深度 (0=模块级)
     int scopeDepth() const;

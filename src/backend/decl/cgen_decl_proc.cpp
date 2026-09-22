@@ -30,8 +30,8 @@ void CCodeGen::visit(SubDecl& node) {
 
     c_.indent();
 
-    // 查找符号获取参数信息
-    auto* sym = symTab_.lookupModule(node.name);
+    // 查找符号获取参数信息 (重载组内按声明位置取本变体, 无重载时等价旧 lookupModule)
+    auto* sym = symTab_.lookupModuleOverloadByLoc(node.name, node.loc);
     currentProc_ = sym;
     currentReturnVar_ = "";
     currentReturnCType_ = "";  // Fix 054

@@ -2,6 +2,9 @@
 // 由 src/backend/cgen_base.cpp 拆出（2026-09-17），在函数体内被 #include，非独立编译单元。
 // 内容 = 原文件第 1102~1152 行，逐行未改。
 
+    // Delegate (tB 扩展): 所有过程体已发射, 桩定义落地 (原型在 decl pass, 定义可后置)
+    emitDelegateThunks();
+
     // 保存生成结果
     header_ = h_.str();
     source_ = c_.str();

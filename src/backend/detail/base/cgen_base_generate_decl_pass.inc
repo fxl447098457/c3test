@@ -53,6 +53,9 @@
         }
     }
 
+    // 5.4 Delegate (tB 扩展): typedef + 桩前向声明; 定义在 epilogue 发射
+    emitDelegateDecls(module);
+
     // 6. Event声明 (类模块中)
     if (isClassModule_) {
         for (auto& decl : module.declarations) {

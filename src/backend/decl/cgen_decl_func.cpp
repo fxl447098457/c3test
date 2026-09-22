@@ -24,8 +24,8 @@ void CCodeGen::visit(FunctionDecl& node) {
 
     c_.indent();
 
-    // 查找符号获取参数信息
-    auto* sym = symTab_.lookupModule(node.name);
+    // 查找符号获取参数信息 (重载组内按声明位置取本变体, 无重载时等价旧 lookupModule)
+    auto* sym = symTab_.lookupModuleOverloadByLoc(node.name, node.loc);
     currentProc_ = sym;
 
     // Fix 056b: 清理局部数组注册 (模块级/类成员数组跨过程保留)

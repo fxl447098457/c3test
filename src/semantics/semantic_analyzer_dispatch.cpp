@@ -26,6 +26,7 @@ void dispatchDecl(Decl& decl, SemanticAnalyzer& analyzer) {
         case ASTNodeKind::EnumMember:    analyzer.visit(static_cast<EnumMember&>(decl)); break;
         case ASTNodeKind::DeclareDecl:   analyzer.visit(static_cast<DeclareDecl&>(decl)); break;
         case ASTNodeKind::EventDecl:     analyzer.visit(static_cast<EventDecl&>(decl)); break;
+        case ASTNodeKind::DelegateDecl:  analyzer.visit(static_cast<DelegateDecl&>(decl)); break;
         case ASTNodeKind::ConstDecl:     analyzer.visit(static_cast<ConstDecl&>(decl)); break;
         case ASTNodeKind::VariableDecl:  analyzer.visit(static_cast<VariableDecl&>(decl)); break;
         case ASTNodeKind::ParameterDecl: analyzer.visit(static_cast<ParameterDecl&>(decl)); break;

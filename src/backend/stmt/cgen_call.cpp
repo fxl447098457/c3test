@@ -208,6 +208,25 @@ void CCodeGen::visit(CallStmt& node) {
                 c_.emitLine("vb6_ClearList((void*)vb6_hwnd_" + ctrlNameCS + ");  /* ListBox.Clear */");
                 return;
             }
+            // Fix 185: 同族处理 —— 无括号的 PictureBox 绘制方法 (Picture2.Cls)。
+            // 带实参的那条走 cgen_expr_call_callee_withm.inc，两条路径都得覆盖，
+            // 否则留下 vb6_ComCall(vb6_hwnd_x, L"Cls", NULL, 0) 这种运行期 no-op。
+            if (itCtrlCS != knownFormControls_.end()
+                && itCtrlCS->second == FrmControlType::PictureBox) {
+                std::string memLowerCS = Symbol::toLower(comMemberName_);
+                if (memLowerCS == "cls" || memLowerCS == "print") {
+                    std::string ctrlNamePic = cIdent(knownFormControlOriginalNames_.count(comObjExpr_)
+                        ? knownFormControlOriginalNames_[comObjExpr_] : comObjExpr_);
+                    comObjExpr_.clear();
+                    comMemberName_.clear();
+                    if (memLowerCS == "cls") {
+                        c_.emitLine("vb6_ControlCls((void*)vb6_hwnd_" + ctrlNamePic + ");  /* PictureBox.Cls */");
+                    } else {
+                        c_.emitLine("vb6_ControlPrint((void*)vb6_hwnd_" + ctrlNamePic + ", 0);  /* PictureBox.Print */");
+                    }
+                    return;
+                }
+            }
             // 无括号的COM方法调用: obj.Method → vb6_ComCall(obj, L"Method", NULL, 0)
             callExpr = "vb6_ComCall(" + comObjExpr_ + ", L\"" + comMemberName_ + "\", NULL, 0)";
             comObjExpr_.clear();

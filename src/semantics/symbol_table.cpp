@@ -225,6 +225,28 @@ bool SymbolTable::define(std::unique_ptr<Symbol> sym) {
         }
     }
 
+    // 重载分组 (tB 式, O1): 语义层已把"可重载过程"的签名指纹写进 overloadFp.
+    // 裸键上已有**同 kind** 且指纹不同的过程 → 本符号挂 "<name>$ov$<fp>" 变体键;
+    // 指纹相同 (或 owner 非过程 / owner 未参与分组如类模块成员) → 落到下面原路径,
+    // 由 define 冲突报 SemDuplicateDeclaration, 旧行为不变.
+    if (keyOverride.empty() && !sym->overloadFp.empty() &&
+        (sym->kind == SymbolKind::Sub || sym->kind == SymbolKind::Function)) {
+        auto itOwn = current_->symbols_.find(lowerName);
+        Symbol* owner = (itOwn != current_->symbols_.end()) ? itOwn->second.get() : nullptr;
+        if (owner && owner->kind == sym->kind &&
+            !owner->overloadFp.empty() && owner->overloadFp != sym->overloadFp) {
+            sym->isOverloadVariant = true;  // 键由 storageKey() 派生 (lower$ov$fp)
+            if (current_->define(std::move(sym))) {
+                owner->ovlCount++;  // owner 指向堆上 Symbol, map 插入不使其失效
+                return true;
+            }
+            // 变体键撞车: 与非 head 变体同签名 (第三个同指纹声明) → 重复声明
+            diag_.error(DiagnosticID::SemDuplicateDeclaration, loc,
+                "重复声明: '" + lowerName + "' (重载组内同签名)");
+            return false;
+        }
+    }
+
     if (!current_->define(std::move(sym), keyOverride)) {
         diag_.error(DiagnosticID::SemDuplicateDeclaration, loc,
             "重复声明: \x27" + lowerName + "\x27");
@@ -256,6 +278,53 @@ Symbol* SymbolTable::lookupModule(const std::string& name) const {
 Symbol* SymbolTable::lookupModuleByKind(const std::string& name, SymbolKind kind) const {
     if (!moduleScope_) return nullptr;
     return moduleScope_->lookupLocalByKind(name, kind);
+}
+
+Symbol* SymbolTable::lookupModuleOverloadByLoc(const std::string& name,
+                                                const SourceLocation& loc) const {
+    if (!moduleScope_) return nullptr;
+    std::string lower = Symbol::toLower(name);
+    Symbol* head = nullptr;
+    for (const auto& [key, sym] : moduleScope_->symbols()) {
+        if (key == lower) {
+            head = sym.get();
+            if (head->location.line == loc.line && head->location.column == loc.column)
+                return head;
+        } else if (key.size() > lower.size() + 4 &&
+                   key.compare(0, lower.size(), lower) == 0 &&
+                   key.compare(lower.size(), 4, "$ov$") == 0) {
+            if (sym->location.line == loc.line && sym->location.column == loc.column)
+                return sym.get();
+        }
+    }
+    return head;  // 无位置命中 → 裸键 head (零重载模块 = 旧 lookupModule 行为)
+}
+
+std::vector<Symbol*> SymbolTable::lookupModuleOverloads(const std::string& name) const {
+    std::vector<Symbol*> out;
+    if (!moduleScope_) return out;
+    std::string lower = Symbol::toLower(name);
+    Symbol* head = nullptr;
+    for (const auto& [key, sym] : moduleScope_->symbols()) {
+        if (key == lower) { head = sym.get(); }
+        else if (key.size() > lower.size() + 4 &&
+                 key.compare(0, lower.size(), lower) == 0 &&
+                 key.compare(lower.size(), 4, "$ov$") == 0) {
+            out.push_back(sym.get());
+        }
+    }
+    if (head) out.insert(out.begin(), head);
+    return out;
+}
+
+Symbol* SymbolTable::lookupModuleOverloadBySuffix(const std::string& name,
+                                                  const std::string& suffix) const {
+    if (!moduleScope_) return nullptr;
+    std::string lower = Symbol::toLower(name);
+    if (suffix.empty()) return moduleScope_->symbols().count(lower)
+                                  ? moduleScope_->symbols().at(lower).get() : nullptr;
+    auto it = moduleScope_->symbols().find(lower + suffix);
+    return it != moduleScope_->symbols().end() ? it->second.get() : nullptr;
 }
 
 int SymbolTable::scopeDepth() const {
@@ -308,6 +377,7 @@ std::vector<const Symbol*> SymbolTable::getPublicSymbols() const {
     std::vector<const Symbol*> result;
     if (!moduleScope_) return result;
     for (const auto& [key, sym] : moduleScope_->symbols()) {
+        // O3: 重载变体随组注入跨模块 (storageKey 各自独立, head 占裸键)
         // Fix 084g: Friend 在 VB6 中表示"工程内可见", 与跨模块注入场景一致,
         // 因此 Friend 成员 (如 Friend Property Set fClient) 也应导出供其他模块引用
         if ((sym->access == AccessLevel::Public || sym->access == AccessLevel::Friend) && !sym->isBuiltin) {

@@ -267,6 +267,25 @@
                         return;
                     }
                 }
+                // Fix 185: PictureBox 的 Print/Cls 是**绘制**方法, 不是 COM 成员。
+                // 必须落在下面 Fix 023e/089d 兜底**之前**: 兜底把 comObjExpr_ 设成
+                // HWND 表达式(:296), 调用侧 knownFormControls_.find() 就拿不到控件
+                // 类型了 —— 今天 "Picture2.Print \"Drag/drop me\"" 编成
+                // vb6_ComCall(vb6_hwnd_Picture2, L"Print", …), 而控件 HWND 不是真的
+                // IDispatch*, 运行期静默 no-op, 那个框一直是空白。
+                if (itCtrl->second == FrmControlType::PictureBox) {
+                    std::string memLower = node.memberName;
+                    std::transform(memLower.begin(), memLower.end(), memLower.begin(), ::tolower);
+                    if (memLower == "print" || memLower == "cls") {
+                        comObjExpr_ = objLower;  // 小写控件名, 与 WebBrowser/ListBox 块同构
+                        comMemberName_ = memLower;
+                        isComMarker_ = true;
+                        isEarlyBoundCom_ = false;
+                        earlyBoundSym_ = nullptr;
+                        lastExpr_ = objLower;
+                        return;
+                    }
+                }
                 // ActiveX控件 (ImageList等): 属性访问走COM后期绑定
                 if (itCtrl->second == FrmControlType::ImageList ||
                     itCtrl->second == FrmControlType::Toolbar ||

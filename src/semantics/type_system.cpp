@@ -139,6 +139,7 @@ const char* TypeSystem::typeToString(Vb6Type t) {
         case Vb6Type::Decimal:         return "Decimal";
         case Vb6Type::Byte:            return "Byte";
         case Vb6Type::UserDefinedType: return "UserDefinedType";
+        case Vb6Type::LongPtr:         return "LongPtr";
         case Vb6Type::Void:            return "Void";
         case Vb6Type::Unknown:         return "Unknown";
         default:                        return "?";

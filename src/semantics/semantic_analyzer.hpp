@@ -45,6 +45,7 @@ public:
     void visit(EnumMember& node) override;
     void visit(DeclareDecl& node) override;
     void visit(EventDecl& node) override;
+    void visit(DelegateDecl& node) override;
     void visit(ConstDecl& node) override;
     void visit(VariableDecl& node) override;
     void visit(ParameterDecl& node) override;
@@ -105,6 +106,13 @@ public:
     // 模块 (两遍入口)
     void visit(Module& node) override;
 
+    // 跨模块重载延后解析 (O3): 本模块分析时其它模块的 Public 组尚未注入
+    // (runCrossModuleResolution 在其后), 故 visit(IndexOrCallExpr) 对当时查无
+    // 此名的调用点记下 节点+实参类型; Driver 注入完成后调本方法逐点补跑
+    // resolveOverload, 把 calleeOvlSuffix 写回 AST. 名称最终不属于任何重载组
+    // 的点原样放过 (维持旧行为).
+    void resolveDeferredCrossModuleOverloads();
+
 private:
     Diagnostics& diag_;
     SymbolTable symTab_;
@@ -160,6 +168,35 @@ private:
 
     // 检查过程调用参数
     void checkCallArgs(Symbol* procSym, IndexOrCallExpr& callNode);
+
+    // --- Delegate 辅助 (semantic_analyzer_expr.cpp) ---
+    // typeName 解析为 SymbolKind::Delegate 时返回其符号, 否则 nullptr.
+    Symbol* lookupDelegateSym(const std::string& typeName);
+    // 校验 proc 是否匹配 del 签名 (procKind/返回类型/逐参类型与ByVal/参数个数).
+    bool checkDelegateSignature(Symbol* del, Symbol* proc, SourceLocation loc);
+    // checkDelegateSignature 的无诊断版 (重载候选集筛选用)
+    bool matchesDelegateSignature(Symbol* del, Symbol* proc);
+    // 重载签名指纹 (tB 式, O1): 有资格分组 (非类模块的 Sub|Function、不含 ParamArray)
+    // 时返回 "F|S : 每个参数 <type码><b|r>[o] : R<retType码>"，否则空串。
+    std::string computeOverloadFp(const Symbol& sym) const;
+    // 重载选择 (O2): 逐参打分 4=精确 / 2=隐式可转 / 1=Variant形参兜底 / 0=淘汰,
+    // 求和取最高分唯一者; 平手报歧义、全淘汰报无匹配, 两者都回落 head 继续编译。
+    // suffixOut = 选定变体键后缀 ("" = head/非重载), 供 cgen 定形 C 名。
+    int ovlScoreParam(Vb6Type argT, const ParameterInfo& p);
+    Symbol* resolveOverload(Symbol* head, const std::vector<Vb6Type>& argT,
+                            SourceLocation loc, std::string& suffixOut);
+
+    // 跨模块重载延后解析的登记项 (见 public resolveDeferredCrossModuleOverloads)
+    struct DeferredXmodCallSite {
+        IndexOrCallExpr* node;
+        std::string identName;
+        std::vector<Vb6Type> argTypes;
+        SourceLocation loc;
+    };
+    std::vector<DeferredXmodCallSite> deferredXmodCalls_;
+    // 若 valueExpr 是 AddressOf 且 typeName 是委托: 解析目标过程、签名校验,
+    // 通过则在 AddressOfExpr 上打委托标记并登记 cgen 桩生成需求.
+    void bindDelegateAddressOf(const std::string& typeName, Expr& valueExpr, SourceLocation loc);
 
     // 标记符号为已引用
     void markReferenced(const std::string& name);

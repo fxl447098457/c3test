@@ -258,10 +258,14 @@
             lastExpr_ = cIdent(node.name);
         } else if (sym->isExternal) {
             // 跨模块函数: 使用 vb6_<ModuleName>_<ProcName> 格式
-            lastExpr_ = cProcName(node.name, sym->access, sym->sourceModule);
+            // (O3: 跨模块重载变体 — 语义层选定后缀在此消费, 与定义侧 _ov<fp> 同规则)
+            lastExpr_ = cProcName(node.name, sym->access, sym->sourceModule)
+                        + ovlCSuffixFromKey(pendingCalleeOvl_);
         } else {
-            lastExpr_ = cProcName(node.name, sym->access);
+            lastExpr_ = cProcName(node.name, sym->access)
+                        + ovlCSuffixFromKey(pendingCalleeOvl_);  // 重载变体后缀 (O2)
         }
+        pendingCalleeOvl_.clear();
         // Fix 086: VB6语义 — 无括号引用函数/过程即调用 (x = GetTickCount,
         // MySub 语句形式). callee上下文 (asCallCallee_) 由 IndexOrCallExpr 追加
         // 括号, 此处不重复; 含必选参数的过程无括号引用在 VB6 中是编译错误,

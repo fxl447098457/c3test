@@ -32,6 +32,15 @@ void SemanticAnalyzer::visit(AssignmentStmt& node) {
         // 解析器应保证 target/value 都非空; 若为空则跳过分析
         return;
     }
+    // Delegate 赋值绑定: op = AddressOf Proc → 签名校验 + 打桩标记
+    if (node.value->kind == ASTNodeKind::AddressOfExpr &&
+        node.target->kind == ASTNodeKind::IdentifierExpr) {
+        auto& ident = static_cast<IdentifierExpr&>(*node.target);
+        auto* varSym = symTab_.lookup(ident.name);
+        if (varSym && varSym->kind == SymbolKind::Variable) {
+            bindDelegateAddressOf(varSym->variableTypeName, *node.value, node.loc);
+        }
+    }
     Vb6Type valueType = analyzeExpr(*node.value);
     Vb6Type targetType = analyzeExpr(*node.target);
 
@@ -253,7 +262,22 @@ void SemanticAnalyzer::visit(LocalDeclStmt& node) {
                 sym->isStatic = varDecl.isStatic;
                 sym->isArray = !varDecl.dimensions.empty() || varDecl.isDynamicArray;
                 sym->dimCount = (int32_t)varDecl.dimensions.size();  // P8.1: 多维数组维度数
+                // Delegate 变量 (As <Delegate名>): 记录声明类型名 — 委托直调分支与
+                // 赋值绑定都以 variableTypeName 反查委托符号 (模块级路径由
+                // registerVariable 无条件记录, 此处仅委托类型需要).
+                if (varDecl.asType && varDecl.asType->kind == ASTNodeKind::SimpleTypeRef &&
+                    lookupDelegateSym(static_cast<SimpleTypeRef*>(varDecl.asType.get())->name)) {
+                    sym->variableTypeName =
+                        static_cast<SimpleTypeRef*>(varDecl.asType.get())->name;
+                }
                 symTab_.define(std::move(sym));
+                // Dim op As Operation = AddressOf Proc — 初始化器即绑定
+                if (varDecl.initializer && varDecl.asType &&
+                    varDecl.asType->kind == ASTNodeKind::SimpleTypeRef) {
+                    bindDelegateAddressOf(
+                        static_cast<SimpleTypeRef*>(varDecl.asType.get())->name,
+                        *varDecl.initializer, varDecl.loc);
+                }
                 break;
             }
             case ASTNodeKind::ConstDecl: {

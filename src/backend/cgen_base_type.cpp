@@ -127,7 +127,7 @@ Symbol* CCodeGen::lookupTypeSymbol(const std::string& name) const {
         return k == SymbolKind::Class || k == SymbolKind::UserDefinedType ||
                k == SymbolKind::EnumType || k == SymbolKind::ComClass ||
                k == SymbolKind::ComInterface || k == SymbolKind::ComModule ||
-               k == SymbolKind::ComGlobalNs;
+               k == SymbolKind::ComGlobalNs || k == SymbolKind::Delegate;
     };
     if (auto* s = symTab_.lookup(name)) {
         if (isTypeKind(s->kind)) return s;
@@ -137,6 +137,7 @@ Symbol* CCodeGen::lookupTypeSymbol(const std::string& name) const {
         SymbolKind::UserDefinedType, SymbolKind::EnumType, SymbolKind::Class,
         SymbolKind::ComClass, SymbolKind::ComInterface,
         SymbolKind::ComModule, SymbolKind::ComGlobalNs,
+        SymbolKind::Delegate,
     };
     for (SymbolKind k : typeKinds) {
         if (auto* m = symTab_.lookupModuleByKind(name, k)) return m;
@@ -221,6 +222,11 @@ std::string CCodeGen::mapTypeRef(ASTNode* typeRef) {
             // 检查是否是枚举类型 → 基础类型int32_t (VB6枚举底层是Long)
             if (udtSym && udtSym->kind == SymbolKind::EnumType) {
                 return "int32_t";
+            }
+            // Delegate 类型 (tB 扩展) → intptr_t: 委托值 = 生成调用桩的地址,
+            // 与 LongPtr 位兼容 (语义层 resolveTypeRef 同口径).
+            if (udtSym && udtSym->kind == SymbolKind::Delegate) {
+                return "intptr_t";
             }
             // Fix 164z: 项目符号 (类/COM/UDT/枚举) 全部查空后才允许走类型系统启发式。
             // 理由见上方 Fix 164z 注释。VB./VBA. 限定的对象末段 (Control/Form 等) 在

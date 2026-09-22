@@ -691,6 +691,12 @@ if ($Category -in @("all", "run", "bas")) {
     Add-BasTest "test_bstr_concat_scalar" "$Tests\test_bstr_concat_scalar.bas" @("BCS:16/16")
     # Fix 190: Declare "As Any" ByRef 的下标链实参必须取地址, 不能把元素值当指针
     Add-BasTest "test_asany_subscript" "$Tests\test_asany_subscript.bas" @("WITH-SUB=Y", "EXPR-SUB=Y", "SCALAR=Y", "CHAIN=Y", "ASANY-DONE")
+    # Delegate (tB extension): typed function pointers, stdcall/cdecl thunks, both arches
+    Add-BasTest "test_delegate" "$Tests\test_delegate.bas" @("CALL=Y", "INIT=Y", "REASSIGN=Y", "BITCMP=Y", "APICB=Y", "QSORT=Y", "MODVAR=Y", "DELEGATE-DONE")
+    Add-BasTest "test_delegate_x86" "$Tests\test_delegate.bas" @("CALL=Y", "INIT=Y", "REASSIGN=Y", "BITCMP=Y", "APICB=Y", "QSORT=Y", "MODVAR=Y", "DELEGATE-DONE") -Arch "x86"
+    # Overloading (tB extension): same-name by-type/arity resolution, Optional span, Variant tier
+    Add-BasTest "test_overload" "$Tests\test_overload.bas" @("F-L5", "F-Shi", "F-L6", "3", "5", "O0", "O17", "21", "OVERLOAD-DONE")
+    Add-BasTest "test_overload_x86" "$Tests\test_overload.bas" @("F-L5", "F-Shi", "F-L6", "3", "5", "O0", "O17", "21", "OVERLOAD-DONE") -Arch "x86"
 
     # 分片: CI 用多 runner 并行跑 bas 用例时, 各 runner 只取第 BasShard 片
     if ($BasShardTotal -gt 1) {
@@ -726,6 +732,10 @@ if ($Category -in @("all", "run", "vbp")) {
     $vbpSw = [Diagnostics.Stopwatch]::StartNew()
 
     Test-Vbp "test_class" "$Tests\test_class.vbp" @("3", "0")
+
+    # Cross-module overload resolution (O3): modA exports Sub/Function overload
+    # groups; modB Main calls them. Deferred re-resolution must pick variants.
+    Test-Vbp "ovl_xmod" "$Tests\ovl_xmod\test_ovl_xmod.vbp" @("XM1=105", "XM2=203", "XM3=SUB7", "XM3=STRhi", "XMOD-DONE")
 
     Test-Vbp "M6Test" "$Tests\M6Test.vbp" @("M6A:OK", "M6B:OK", "M6C:OK", "M6D:OK", "M6 PASSED")
     Test-Vbp "modulemethod" "$Tests\test_modulemethod.vbp" @("30", "21")

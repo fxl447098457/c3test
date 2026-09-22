@@ -74,6 +74,13 @@
         out() << "Event " << node.name << "\n";
     }
 
+    void visit(DelegateDecl& node) override {
+        out() << "Delegate " << procKindToString(node.procKind)
+              << " " << node.name;
+        if (node.callingConv == CallConv::CDecl) os_ << " CDecl";
+        os_ << " (" << node.params.size() << " params)\n";
+    }
+
     void visit(ConstDecl& node) override {
         out() << "Const " << node.name
               << " (access=" << accessStr(node.access) << ")\n";

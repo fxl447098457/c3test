@@ -35,7 +35,9 @@ void CCodeGen::clearProcArrayTracking() {
 
 std::string CCodeGen::makeProcSignature(SubDecl& node) {
     // 类模块方法始终带 vb6_<ClassName>_ 前缀 (与 dll_entry.c / resolveClassMemberCall 调用一致)
-    std::string name = cProcName(node.name, node.access, isClassModule_ ? moduleName_ : "");
+    // 重载组内按声明位置取本变体, 非 head 变体名带 _ov<fp> 后缀 (O2; 无重载时为空串)
+    std::string name = cProcName(node.name, node.access, isClassModule_ ? moduleName_ : "")
+                       + ovlCSuffix(symTab_.lookupModuleOverloadByLoc(node.name, node.loc));
     std::string params;
     if (isClassModule_) {
         params = classMeParam();
@@ -51,7 +53,8 @@ std::string CCodeGen::makeProcSignature(SubDecl& node) {
 
 std::string CCodeGen::makeProcSignature(FunctionDecl& node) {
     // 类模块方法始终带 vb6_<ClassName>_ 前缀 (与 dll_entry.c / resolveClassMemberCall 调用一致)
-    std::string name = cProcName(node.name, node.access, isClassModule_ ? moduleName_ : "");
+    std::string name = cProcName(node.name, node.access, isClassModule_ ? moduleName_ : "")
+                       + ovlCSuffix(symTab_.lookupModuleOverloadByLoc(node.name, node.loc));
     std::string params;
     if (isClassModule_) {
         params = classMeParam();
