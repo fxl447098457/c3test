@@ -45,6 +45,7 @@ void SemanticAnalyzer::registerVariable(VariableDecl& decl) {
         decl.loc, decl.access
     );
     sym->isStatic = decl.isStatic;
+    sym->isNewVar = decl.isNew;  // Fix 183: 记录 As New 标志, 供跨模块惰性实例化
     sym->isArray = !decl.dimensions.empty() || decl.isDynamicArray;
     sym->dimCount = (int32_t)decl.dimensions.size();  // P8.1: 多维数组维度数
     // P6.5: 记录WithEvents标志和源类名

@@ -282,8 +282,9 @@
     //     (按 valueExpr 推断的 VB 类型选字段; 与 cgen_expr M22 ByRef Variant 分支一致)
     // 非法形态 (&(vb6_VARIANT){vb6_VariantFromValue(v)}) 会触发 C2440
     // "vb6_VARIANT→vb6_vartype". lastP.type 非 Variant 时原样返回.
+    // Fix 185: 非 const — String 分支复用 wrapToBSTR (非 const 成员).
     std::string packLetValueArg(const ParameterInfo& lastP, Expr* valueExpr,
-                                const std::string& val) const;
+                                const std::string& val);
 
     // Fix 090ae: 链式 COM 默认属性索引赋值 (P25b 提取为可复用 helper)
     // VB: dic(a)(b) = v / Set dic(a)(b) = v — 多层默认属性/Item 索引写.

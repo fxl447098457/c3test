@@ -184,7 +184,10 @@
     for (auto& cc : coClasses) {
         std::string clsId = cIdent(cc.moduleName);
         std::string clsStruct = "vb6_cls_" + clsId;
-        entry.emitLine("struct " + clsStruct + ";  /* forward decl */");
+        // Fix 186: 必须同时发 typedef. 本文件既有 "struct X*" 用法, 也有裸 "X*"
+        // 用法 (主要是工程类实例返回值的 extern 声明与其 _p 局部变量); 只发标签
+        // 声明时裸名未声明 → C 语言下 C2143/C2065, 整个 dll_entry.c 编译失败.
+        entry.emitLine("typedef struct " + clsStruct + " " + clsStruct + ";  /* forward decl */");
         entry.emitLine("extern struct " + clsStruct + "* vb6_cls_" + clsId + "_New(void);");
         entry.emitLine("extern void vb6_cls_" + clsId + "_Destroy(struct " + clsStruct + "*);");
         // 类的方法函数前向声明
@@ -206,6 +209,15 @@
             {
                 std::string retType = (methodSym->kind == SymbolKind::Function || methodSym->kind == SymbolKind::PropertyGet)
                     ? mapType(methodSym->type) : "void";
+                // Fix 184: 返回工程类实例时真实 C 类型是 vb6_cls_<类>*, 须与函数定义一致.
+                // 否则 extern 与定义 ABI 不符 (结构体返回走隐藏指针参数, 指针返回走 EAX),
+                // x86 下返回值与实参全部错位 → 0xC0000005.
+                if (retType == "vb6_VARIANT" && !methodSym->variableTypeName.empty()) {
+                    auto* rcInstSym = lookupModuleDotted(methodSym->variableTypeName);
+                    if (rcInstSym && rcInstSym->kind == SymbolKind::Class && !rcInstSym->isInterface) {
+                        retType = "vb6_cls_" + cIdent(rcInstSym->name) + "*";
+                    }
+                }
                 std::string params = "struct " + clsStruct + "*";
                 for (auto& p : methodSym->params) {
                     std::string pType = mapType(p.type);
@@ -354,10 +366,26 @@
 
             if (methodSym->kind == SymbolKind::Function || methodSym->kind == SymbolKind::PropertyGet) {
                 std::string retType = mapType(methodSym->type);
+                // Fix 184: 工程类实例返回值先包装成 IDispatch 再放入 VARIANT
+                std::string retClsInst;
+                if (retType == "vb6_VARIANT" && !methodSym->variableTypeName.empty()) {
+                    auto* rcInstSym2 = lookupModuleDotted(methodSym->variableTypeName);
+                    if (rcInstSym2 && rcInstSym2->kind == SymbolKind::Class && !rcInstSym2->isInterface) {
+                        retClsInst = cIdent(rcInstSym2->name);
+                    }
+                }
                 entry.emitLine("if (result) {");
                 entry.indent();
-                entry.emitLine(retType + " _r = " + procName + "(" + callArgs + ");");
-                if (methodSym->type == Vb6Type::Long || methodSym->type == Vb6Type::Integer ||
+                if (!retClsInst.empty()) {
+                    entry.emitLine("vb6_cls_" + retClsInst + "* _p = " + procName + "(" + callArgs + ");");
+                    entry.emitLine("vb6_VARIANT _r = vb6_VariantObject(vb6_ComObject_FromInstance("
+                                   "vb6_FindCoClassDesc(\"" + retClsInst + "\"), (void*)_p));");
+                } else {
+                    entry.emitLine(retType + " _r = " + procName + "(" + callArgs + ");");
+                }
+                if (!retClsInst.empty()) {
+                    entry.emitLine("memcpy(result, &_r, sizeof(vb6_VARIANT));");
+                } else if (methodSym->type == Vb6Type::Long || methodSym->type == Vb6Type::Integer ||
                     methodSym->type == Vb6Type::Byte) {
                     entry.emitLine("((VARIANT*)result)->vt = VT_I4; ((VARIANT*)result)->lVal = (int32_t)_r;");
                 } else if (methodSym->type == Vb6Type::Boolean) {
