@@ -194,6 +194,14 @@ bool Driver::runParser(const CompileOptions& options) {
         Parser parser(std::move(buffer), *diag_, ppOpts);
         auto module = parser.parseModule(isClassModule);
 
+        // 泛型 (tB, G2): 合并本模块 parse 期收集的使用点扁名表
+        for (const auto& [fk, fv] : parser.flatGenerics()) {
+            GenericUseRec rec;
+            rec.base = fv.base;
+            rec.args = fv.args;
+            genericUses_[fk] = std::move(rec);  // 同源内容一致, 覆盖幂等
+        }
+
         // P7: 设置窗体模块标志
         if (module && isFormModule) {
             module->isFormModule = true;
@@ -206,6 +214,8 @@ bool Driver::runParser(const CompileOptions& options) {
         }
 
         if (module) {
+            // 泛型类 (G4): parse 期头行已写 moduleName; VB_Name 若存在须同名
+            const std::string headerName = module->moduleName;
             // 从 Attribute VB_Name 提取模块名
             // VB6 模块名来自 Attribute VB_Name = "ModuleName"
             for (const auto& attr : module->attributes) {
@@ -223,6 +233,16 @@ bool Driver::runParser(const CompileOptions& options) {
                         }
                     }
                 }
+            }
+            // 泛型类 (G4): 头行名与 VB_Name 属性不一致 → 模板登记名/成员引用
+            // 会分裂, 直接拒绝 (特化名以最终 moduleName 为准).
+            if (!module->classTypeParams.empty() && !headerName.empty() &&
+                !module->moduleName.empty() &&
+                Symbol::toLower(headerName) != Symbol::toLower(module->moduleName)) {
+                diag_->error(DiagnosticID::ParseExpectedToken, module->loc,
+                    "泛型类 Class 头行名 '" + headerName + "' 与 Attribute VB_Name '" +
+                    module->moduleName + "' 不一致");
+                return false;
             }
             // 如果没有 VB_Name 属性，使用文件名（去掉扩展名）作为模块名
             if (module->moduleName.empty()) {

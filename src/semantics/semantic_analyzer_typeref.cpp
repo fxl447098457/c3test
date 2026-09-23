@@ -96,6 +96,8 @@ Vb6Type SemanticAnalyzer::resolveTypeRef(ASTNode* typeRef) {
                 if (auto* sym = symTab_.lookupModule(lower)) {
                     if (sym->kind == SymbolKind::UserDefinedType)
                         return Vb6Type::UserDefinedType;
+                    if (sym->kind == SymbolKind::Delegate)
+                        return Vb6Type::LongPtr;  // 委托值与 LongPtr 位兼容
                     if (sym->kind == SymbolKind::EnumType)
                         return Vb6Type::Long;  // Enum成员是Long
                     if (sym->kind == SymbolKind::ComClass || sym->kind == SymbolKind::ComInterface || sym->kind == SymbolKind::ComModule || sym->kind == SymbolKind::ComGlobalNs)

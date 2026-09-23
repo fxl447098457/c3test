@@ -6,6 +6,7 @@
 #include "ast/ast_visitor.hpp"
 #include "semantics/symbol_table.hpp"
 #include "semantics/type_system.hpp"
+#include "semantics/generics_registry.hpp"
 #include "common/diagnostics.hpp"
 #include <string>
 #include <vector>
@@ -45,6 +46,7 @@ public:
     void visit(EnumMember& node) override;
     void visit(DeclareDecl& node) override;
     void visit(EventDecl& node) override;
+    void visit(DelegateDecl& node) override;
     void visit(ConstDecl& node) override;
     void visit(VariableDecl& node) override;
     void visit(ParameterDecl& node) override;
@@ -104,6 +106,30 @@ public:
 
     // 模块 (两遍入口)
     void visit(Module& node) override;
+
+    // 跨模块重载延后解析 (O3): 本模块分析时其它模块的 Public 组尚未注入
+    // (runCrossModuleResolution 在其后), 故 visit(IndexOrCallExpr) 对当时查无
+    // 此名的调用点记下 节点+实参类型; Driver 注入完成后调本方法逐点补跑
+    // resolveOverload, 把 calleeOvlSuffix 写回 AST. 名称最终不属于任何重载组
+    // 的点原样放过 (维持旧行为).
+    void resolveDeferredCrossModuleOverloads();
+
+    // 泛型 (tB, G3): 模板登记表只读视图 (driver 在逐模块分析前注入).
+    void setGenericRegistry(const GenRegistry* reg) { genReg_ = reg; }
+    // 推断成功的实例化请求 (驱动 fixpoint 物化) — 取空语义.
+    struct GenInstRequest {
+        std::string flat;                  // 小写扁名
+        std::string base;                  // 模板名 (原大小写)
+        std::vector<std::string> args;     // 类型实参名 (扁名)
+    };
+    std::vector<GenInstRequest> takeGenericRequests() {
+        std::vector<GenInstRequest> out;
+        out.swap(genericRequests_);
+        return out;
+    }
+    // 物化器注入的特化过程增量分析 (模块常规分析已结束时的补注册路径):
+    // 对给定声明按 pass1 注册 + pass2 体分析 走一遍 (与 visit(Module) 同构).
+    void analyzeExtraDecls(const std::vector<Decl*>& decls);
 
     // Fix 197: 枚举成员常量求值的对外入口 — Driver 在 Pass 1 前预注册跨模块
     // Public Enum 成员时调用 (evalOptionalDefault 查符号表发生在 Pass 1 期间,
@@ -165,6 +191,44 @@ private:
 
     // 检查过程调用参数
     void checkCallArgs(Symbol* procSym, IndexOrCallExpr& callNode);
+
+    // --- Delegate 辅助 (semantic_analyzer_expr.cpp) ---
+    // typeName 解析为 SymbolKind::Delegate 时返回其符号, 否则 nullptr.
+    Symbol* lookupDelegateSym(const std::string& typeName);
+    // 校验 proc 是否匹配 del 签名 (procKind/返回类型/逐参类型与ByVal/参数个数).
+    bool checkDelegateSignature(Symbol* del, Symbol* proc, SourceLocation loc);
+    // checkDelegateSignature 的无诊断版 (重载候选集筛选用)
+    bool matchesDelegateSignature(Symbol* del, Symbol* proc);
+    // 重载签名指纹 (tB 式, O1): 有资格分组 (非类模块的 Sub|Function、不含 ParamArray)
+    // 时返回 "F|S : 每个参数 <type码><b|r>[o] : R<retType码>"，否则空串。
+    std::string computeOverloadFp(const Symbol& sym) const;
+    // 重载选择 (O2): 逐参打分 4=精确 / 2=隐式可转 / 1=Variant形参兜底 / 0=淘汰,
+    // 求和取最高分唯一者; 平手报歧义、全淘汰报无匹配, 两者都回落 head 继续编译。
+    // suffixOut = 选定变体键后缀 ("" = head/非重载), 供 cgen 定形 C 名。
+    int ovlScoreParam(Vb6Type argT, const ParameterInfo& p);
+    Symbol* resolveOverload(Symbol* head, const std::vector<Vb6Type>& argT,
+                            SourceLocation loc, std::string& suffixOut);
+
+    // 跨模块重载延后解析的登记项 (见 public resolveDeferredCrossModuleOverloads)
+    struct DeferredXmodCallSite {
+        IndexOrCallExpr* node;
+        std::string identName;
+        std::vector<Vb6Type> argTypes;
+        // 泛型 (tB, G3): 逐位置实参"是否数组"标记 — 记录时局部作用域尚在,
+        // 可靠查得数组符号 (argTypes 里数组变量只带**元素类型**不带 Array 位,
+        // 且延后绑定期局部作用域已弹出无法回查). 专供 T() 形参位推断, 不污染
+        // argTypes (后者兼作已发货的跨模块重载打分输入).
+        std::vector<bool> argIsArray;
+        SourceLocation loc;
+    };
+    std::vector<DeferredXmodCallSite> deferredXmodCalls_;
+    // 泛型 (tB, G3): 调用点推断 (从模板登记表 AST 形参 + 延后点实参类型绑定)
+    const GenRegistry* genReg_ = nullptr;
+    std::vector<GenInstRequest> genericRequests_;
+    bool tryBindGenericCall(DeferredXmodCallSite& site, GenInstRequest& reqOut);
+    // 若 valueExpr 是 AddressOf 且 typeName 是委托: 解析目标过程、签名校验,
+    // 通过则在 AddressOfExpr 上打委托标记并登记 cgen 桩生成需求.
+    void bindDelegateAddressOf(const std::string& typeName, Expr& valueExpr, SourceLocation loc);
 
     // 标记符号为已引用
     void markReferenced(const std::string& name);

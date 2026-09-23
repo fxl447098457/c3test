@@ -32,6 +32,13 @@
             || funcSym->kind == SymbolKind::PropertyGet || funcSym->kind == SymbolKind::PropertyLet
             || funcSym->kind == SymbolKind::PropertySet
             || funcSym->kind == SymbolKind::DeclareSub || funcSym->kind == SymbolKind::DeclareFunc)) {
+            // 重载变体 (O2): 语义层选定变体时, 形参表/返回类型以变体符号为准
+            if (!node.calleeOvlSuffix.empty()) {
+                if (auto* ovSym = symTab_.lookupModuleOverloadBySuffix(
+                        idExpr.name, node.calleeOvlSuffix)) {
+                    funcSym = ovSym;
+                }
+            }
             calleeParams = funcSym->params;
             calleeIsBuiltin = funcSym->isBuiltin;
             calleeParamsFound = true;

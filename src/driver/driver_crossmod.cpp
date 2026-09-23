@@ -108,7 +108,18 @@ bool Driver::runCrossModuleResolution() {
             } else {
                 localSym = symTab.lookupModule(srcSym->name);
             }
-            if (localSym) {
+            // 重载变体 (O3): 裸键被同源外部 head 占用时**不**拦变体 —
+            // 消费模块需要重建 head+variants 组结构. 拦两种情况:
+            // 本地(非外部)定义占裸键 → 整组让位; 外部 head 来自别的源模块
+            // (先到先得已定主) 或同签名 → 不注入.
+            bool ovlVariantAllowed = false;
+            if (srcSym->isOverloadVariant && localSym && localSym->isExternal
+                && localSym->sourceModule == moduleBaseNames[srcIdx]
+                && !localSym->overloadFp.empty()
+                && localSym->overloadFp != srcSym->overloadFp) {
+                ovlVariantAllowed = true;
+            }
+            if (localSym && !ovlVariantAllowed) {
                 // Fix 177b: 引用类型库的同名 coclass 被本工程同名类模块遮蔽时,
                 // **不替换符号**, 只在 builtin ComClass 上记下工程实现类名.
                 // VB6 语义: 工程内定义优先于引用库 (VBMAN.vbp 定义 Class=Dictionary,
@@ -128,6 +139,15 @@ bool Driver::runCrossModuleResolution() {
                         || localSym->kind == SymbolKind::ComInterface)) {
                     localSym->comProjectImplClass = srcSym->name;
                 }
+                // 泛型 (G2) 暴露的存量洞回填: Fix 047 预注册只建"名字级" UDT
+                // 占位符号 (无成员表), 消费模块字段类型推断落空 → String 字段
+                // 按 Variant 发 (double)BSTR (普通跨模块 UDT 也复现, C2440).
+                // 源模块此时已分析完, 把完整成员表回填进占位符号.
+                if (srcSym->kind == SymbolKind::UserDefinedType &&
+                    localSym->kind == SymbolKind::UserDefinedType &&
+                    localSym->udtMembers.empty() && !srcSym->udtMembers.empty()) {
+                    localSym->udtMembers = srcSym->udtMembers;
+                }
                 continue;  // 已有本地定义，不需要外部符号
             }
 
@@ -140,6 +160,18 @@ bool Driver::runCrossModuleResolution() {
             extSym->sourceModule = moduleBaseNames[srcIdx];
             extSym->params = srcSym->params;  // 复制参数列表（函数调用需要）
             extSym->isArray = srcSym->isArray;
+            // 泛型 (G2) 暴露的存量洞: 跨模块 UDT 未复制成员表 → 消费模块成员
+            // 类型全退化 Variant (普通 UDT 复现: g.V As String 被 Debug.Print
+            // 按 Variant 发 (double)BSTR 强转 → C2440).
+            if (srcSym->kind == SymbolKind::UserDefinedType) {
+                extSym->udtMembers = srcSym->udtMembers;
+            }
+            // O3: 携带重载组身份 — storageKey() 据此把变体注入 "<name>$ov$<fp>"
+            // 独立键, 裸键留给 head; 消费模块的 resolveOverload 走 lookupModuleOverloads
+            // 收集整组后按实参打分选变体.
+            extSym->overloadFp = srcSym->overloadFp;
+            extSym->isOverloadVariant = srcSym->isOverloadVariant;
+            extSym->ovlCount = srcSym->ovlCount;
             // 类符号: 复制instancing、memberNames、isInterface、implementsNames
             if (srcSym->kind == SymbolKind::Class) {
                 extSym->instancing = srcSym->instancing;
@@ -186,6 +218,12 @@ bool Driver::runCrossModuleResolution() {
 
             symTab.defineExternal(std::move(extSym));
         }
+    }
+
+    // O3: 外部重载组已注入各模块表 — 补跑各模块分析期"当时查无此名"的调用点,
+    // 让语义层把变体后缀写回 AST (cgen 只消费 calleeOvlSuffix, 不做选择).
+    for (auto& analyzer : analyzers_) {
+        analyzer->resolveDeferredCrossModuleOverloads();
     }
 
     if (diag_->hasErrors()) return false;

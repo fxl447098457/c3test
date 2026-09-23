@@ -49,6 +49,12 @@ void vb6_SetImageStretch(void* hwnd, int stretch);
 
 void vb6_InstallImageSubclass(void* hwnd);
 
+// Fix 185: 控件级绘制入口 (PictureBox.Print / PictureBox.Cls)。
+// DC 取 _Paint 派发挂上的 VB6_PaintDC，取不到回落 GetDC；颜色/字体读
+// VB6_ForeColor / WM_GETFONT，光标位置存 VB6_PrintX/Y（Cls 归零）。
+void vb6_ControlPrint(void* hwnd, void* bstrText);
+void vb6_ControlCls(void* hwnd);
+
 // P18-F: 控件子类化基础设施 (GotFocus/LostFocus/MouseEnter/MouseLeave/控件级事件)
 // 通用控件子类化安装 (复用VB6_OrigProc属性模式)
 // subclassProc: 子类化窗口过程 (由cgen生成)

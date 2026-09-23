@@ -79,6 +79,9 @@ static bool evalEnumMemberConstInt(ASTNode* expr, int64_t& result) {
 
 
 void SemanticAnalyzer::visit(TypeDecl& node) {
+    // 泛型模板 (tB, G2): 不进符号表 —— 泛型器已按使用点注入特化副本,
+    // 模板本体对下游不存在 (未实例化即被引用会在符号查找处自然失败).
+    if (!node.typeParams.empty()) return;
     if (pass_ == 1) {
         auto sym = std::make_unique<Symbol>(
             SymbolKind::UserDefinedType, node.name,
@@ -218,6 +221,33 @@ void SemanticAnalyzer::visit(EventDecl& node) {
     }
 }
 
+void SemanticAnalyzer::visit(DelegateDecl& node) {
+    if (pass_ == 1) {
+        // 委托符号是一个"类型": 其值按 LongPtr 表示 (与指针位兼容),
+        // 签名 (procKind/callConv/params/returnType) 挂在符号上供检查与桩生成消费.
+        auto sym = std::make_unique<Symbol>(
+            SymbolKind::Delegate, node.name,
+            Vb6Type::LongPtr, node.loc, node.access
+        );
+        sym->delegateProcKind = node.procKind;
+        sym->delegateCallConv = node.callingConv;
+        if (node.procKind == ProcKind::Function && node.returnType) {
+            sym->delegateReturnType = resolveTypeRef(node.returnType.get());
+        }
+        for (auto& param : node.params) {
+            ParameterInfo pi;
+            pi.name = param->name;
+            pi.type = resolveTypeOrDefault(param->name, param->asType.get());
+            pi.isByVal = param->isByVal;
+            pi.isOptional = param->isOptional;
+            pi.isParamArray = param->isParamArray;
+            sym->params.push_back(std::move(pi));
+        }
+        symTab_.define(std::move(sym));
+    }
+    // 委托声明无过程体
+}
+
 void SemanticAnalyzer::visit(ConstDecl& node) {
     if (pass_ == 1) {
         registerConstant(node);
@@ -227,6 +257,12 @@ void SemanticAnalyzer::visit(ConstDecl& node) {
 void SemanticAnalyzer::visit(VariableDecl& node) {
     if (pass_ == 1) {
         registerVariable(node);
+    } else if (pass_ == 2 && node.initializer && node.asType &&
+               node.asType->kind == ASTNodeKind::SimpleTypeRef) {
+        // 模块级 Dim x As Operation = AddressOf Proc — pass1 时过程符号尚未齐,
+        // 绑定放在 pass2.
+        bindDelegateAddressOf(static_cast<SimpleTypeRef*>(node.asType.get())->name,
+                              *node.initializer, node.loc);
     }
 }
 

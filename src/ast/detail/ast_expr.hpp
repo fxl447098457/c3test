@@ -104,6 +104,13 @@ public:
     std::vector<NamedArg> named;       // 命名参数
     std::set<size_t> byvalOverrides;  // Fix 072: ByVal 覆盖的参数索引 (VB6 允许 ByVal x 覆盖 ByRef 声明)
     std::set<size_t> omittedArgs;     // Fix 142: 省略的位置实参索引 (VB6 a, , b) — 保留槽位, 代码生成按缺省值/IsMissing 处理
+    // Delegate 直调: op(5, 6) 中 op 是 As <Delegate> 变量. 语义层识别并标记,
+    // cgen 按委托签名的函数指针强转调用 (isDelegateCall=true 时 delegateTypeName 有效).
+    bool isDelegateCall = false;
+    std::string delegateTypeName;
+    // 重载选择结果 (O2): 语义层 resolveOverload 选定的变体键后缀
+    // ("" = 裸键 head / 非重载, 零改动; 否则 "$ov$<fp>", cgen 据此定形 C 名与形参表).
+    std::string calleeOvlSuffix;
 
     IndexOrCallExpr(SourceLocation loc, ExprPtr callee)
         : Expr(ASTNodeKind::IndexOrCallExpr, loc),
@@ -134,6 +141,11 @@ public:
 class AddressOfExpr : public Expr {
 public:
     std::string funcName;
+    // 委托绑定标记: 当赋值/初始化目标为 As <Delegate> 变量且签名校验通过时,
+    // 语义层填入委托类型名; cgen 据此生成/引用调用桩而非裸过程地址.
+    std::string delegateTypeName;
+    // 重载目标选择结果 (O2): 目标过程名所在组的变体键后缀 ("" = 裸键/非重载).
+    std::string funcOvlSuffix;
 
     AddressOfExpr(SourceLocation loc, std::string fn)
         : Expr(ASTNodeKind::AddressOfExpr, loc), funcName(std::move(fn)) {}

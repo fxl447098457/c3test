@@ -181,6 +181,41 @@ Vb6Type CCodeGen::inferExprType(Expr& expr) const {
                     return Vb6Type::Unknown;
                 }
             }
+            // 类实例成员函数返回类型 (tB 泛型类特化高发的跨类同名碰撞):
+            // 按 object 推断出的宿主类查 memberReturnTypes, 内置标量名直接映射.
+            // 下面的裸名 lookupModule(memberName) 在多个类同名成员时只命中
+            // storageKey 去重胜出的第一个模块版本 (如 box_g1_long 的 GetVal→Long),
+            // String 版被误判 → Debug.Print 把 BSTR 指针截断成垃圾数 (Fix 176 同源).
+            if (ma.object && symTab_.moduleScope()) {
+                std::string clsName = inferClassTypeOfExpr(*ma.object);
+                if (!clsName.empty()) {
+                    const std::string clsLower = Symbol::toLower(clsName);
+                    const std::string memLowerCls = Symbol::toLower(ma.memberName);
+                    for (const auto& [k, csym] : symTab_.moduleScope()->symbols()) {
+                        if (csym->kind != SymbolKind::Class) continue;
+                        bool hit = csym->isExternal
+                            ? (Symbol::toLower(csym->sourceModule) == clsLower)
+                            : (Symbol::toLower(csym->name) == clsLower);
+                        if (!hit) continue;
+                        auto it = csym->memberReturnTypes.find(memLowerCls);
+                        if (it != csym->memberReturnTypes.end()) {
+                            std::string rn = Symbol::toLower(it->second);
+                            if (rn == "string")  return Vb6Type::String;
+                            if (rn == "long")    return Vb6Type::Long;
+                            if (rn == "integer") return Vb6Type::Integer;
+                            if (rn == "boolean") return Vb6Type::Boolean;
+                            if (rn == "single")  return Vb6Type::Single;
+                            if (rn == "double")  return Vb6Type::Double;
+                            if (rn == "date")    return Vb6Type::Date;
+                            if (rn == "byte")    return Vb6Type::Byte;
+                            if (rn == "currency")return Vb6Type::Currency;
+                            if (rn == "variant") return Vb6Type::Variant;
+                            if (rn == "object")  return Vb6Type::Object;
+                        }
+                        break;
+                    }
+                }
+            }
             // 查找成员函数/属性的返回类型
             auto* memSym = symTab_.lookupModule(ma.memberName);
             if (memSym) return memSym->type;

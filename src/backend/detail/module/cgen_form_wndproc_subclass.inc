@@ -41,6 +41,7 @@
             bool hasDblClick = false;
             bool hasMouseHover = false;
             bool hasValidate = false;
+            bool hasPaint = false;   // Fix 185: 控件级 _Paint (PictureBox.Print/Cls 的落点)
             FrmControlType ctrlType;
         };
         std::vector<SubclassInfo> subclassCtrls;
@@ -94,11 +95,16 @@
             info.hasKeyUp = symTab_.lookup(ctrl.controlName + "_KeyUp") != nullptr;
             info.hasDblClick = symTab_.lookup(ctrl.controlName + "_DblClick") != nullptr;
             info.hasMouseHover = symTab_.lookup(ctrl.controlName + "_MouseHover") != nullptr;
+            // Fix 185: 控件级 _Paint。原先整个控件家族都没有 WM_PAINT 转发，
+            // MainForm.c 里的 vb6_MainForm_Picture2_Paint 是死代码。只接 PictureBox
+            // （VB6 里有绘制表面的控件），本 demo 度量该事件仅此一处。
+            info.hasPaint = (ctrl.controlType == FrmControlType::PictureBox) &&
+                            (symTab_.lookup(ctrl.controlName + "_Paint") != nullptr);
 
             // 只要有任一子类化事件需求就加入列表
             if (info.hasGotFocus || info.hasLostFocus || info.hasMouseEnter || info.hasMouseLeave ||
                 info.hasMouseDown || info.hasMouseUp || info.hasMouseMove ||
-                info.hasKeyPress || info.hasKeyDown || info.hasKeyUp || info.hasDblClick || info.hasValidate || info.hasMouseHover) {
+                info.hasKeyPress || info.hasKeyDown || info.hasKeyUp || info.hasDblClick || info.hasValidate || info.hasMouseHover || info.hasPaint) {
                 subclassCtrls.push_back(std::move(info));
             }
         }
@@ -143,9 +149,11 @@
                 info.hasKeyUp = symTab_.lookup(child.controlName + "_KeyUp") != nullptr;
                 info.hasDblClick = symTab_.lookup(child.controlName + "_DblClick") != nullptr;
                 info.hasMouseHover = symTab_.lookup(child.controlName + "_MouseHover") != nullptr;
+                info.hasPaint = (child.controlType == FrmControlType::PictureBox) &&
+                                (symTab_.lookup(child.controlName + "_Paint") != nullptr);  // Fix 185
                 if (info.hasGotFocus || info.hasLostFocus || info.hasMouseEnter || info.hasMouseLeave ||
                     info.hasMouseDown || info.hasMouseUp || info.hasMouseMove ||
-                    info.hasKeyPress || info.hasKeyDown || info.hasKeyUp || info.hasDblClick || info.hasValidate || info.hasMouseHover) {
+                    info.hasKeyPress || info.hasKeyDown || info.hasKeyUp || info.hasDblClick || info.hasValidate || info.hasMouseHover || info.hasPaint) {
                     subclassCtrls.push_back(std::move(info));
                 }
             }
@@ -325,6 +333,29 @@
             // P20-12: WM_VB6_RESTOREFOCUS - restore focus after Validate cancel
             if (info.hasValidate) {
                 c_.emitLine("if (msg == 0x7FFF) { RemovePropW(hwnd, L\"VB6_ValidateCancel\"); SetFocus(hwnd); return 0; }");
+            }
+
+            // Fix 185: 控件级 _Paint 派发 (PictureBox)。DC 用窗口属性传给
+            // vb6_ControlPrint/vb6_ControlCls —— VB6 的 Print 在 _Paint 里画的正是
+            // 这次 BeginPaint 拿到的 DC。必须 return 0: 否则消息落到原 STATIC 过程
+            // 再 BeginPaint 一次，并且用户画的内容会被它的默认绘制覆盖。
+            if (info.hasPaint) {
+                std::string fn = cProcName(info.ctrlName + "_Paint", AccessLevel::Private);
+                c_.emitLine("if (msg == WM_PAINT) {");
+                c_.indent();
+                c_.emitLine("PAINTSTRUCT vb6_ps;");
+                c_.emitLine("HDC vb6_hdc = BeginPaint(hwnd, &vb6_ps);");
+                c_.emitLine("if (vb6_hdc) {");
+                c_.indent();
+                c_.emitLine("SetPropW(hwnd, L\"VB6_PaintDC\", (HANDLE)vb6_hdc);");
+                c_.emitLine("{ extern void " + fn + "(); " + fn + "(); }");
+                c_.emitLine("RemovePropW(hwnd, L\"VB6_PaintDC\");");
+                c_.emitLine("EndPaint(hwnd, &vb6_ps);");
+                c_.dedent();
+                c_.emitLine("}");
+                c_.emitLine("return 0;");
+                c_.dedent();
+                c_.emitLine("}");
             }
 
             // WM_DESTROY: 移除子类化 + 清理ValidateCancel属性

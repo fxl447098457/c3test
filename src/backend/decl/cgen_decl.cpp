@@ -35,7 +35,9 @@ void CCodeGen::clearProcArrayTracking() {
 
 std::string CCodeGen::makeProcSignature(SubDecl& node) {
     // 类模块方法始终带 vb6_<ClassName>_ 前缀 (与 dll_entry.c / resolveClassMemberCall 调用一致)
-    std::string name = cProcName(node.name, node.access, isClassModule_ ? moduleName_ : "");
+    // 重载组内按声明位置取本变体, 非 head 变体名带 _ov<fp> 后缀 (O2; 无重载时为空串)
+    std::string name = cProcName(node.name, node.access, isClassModule_ ? moduleName_ : "")
+                       + ovlCSuffix(symTab_.lookupModuleOverloadByLoc(node.name, node.loc));
     std::string params;
     if (isClassModule_) {
         params = classMeParam();
@@ -51,7 +53,8 @@ std::string CCodeGen::makeProcSignature(SubDecl& node) {
 
 std::string CCodeGen::makeProcSignature(FunctionDecl& node) {
     // 类模块方法始终带 vb6_<ClassName>_ 前缀 (与 dll_entry.c / resolveClassMemberCall 调用一致)
-    std::string name = cProcName(node.name, node.access, isClassModule_ ? moduleName_ : "");
+    std::string name = cProcName(node.name, node.access, isClassModule_ ? moduleName_ : "")
+                       + ovlCSuffix(symTab_.lookupModuleOverloadByLoc(node.name, node.loc));
     std::string params;
     if (isClassModule_) {
         params = classMeParam();
@@ -198,6 +201,8 @@ void CCodeGen::visit(EnumMember& node) {
 }
 
 void CCodeGen::visit(TypeDecl& node) {
+    // 泛型模板 (tB, G2): 模板本体不发码 (特化副本由泛型器注入, 是普通 TypeDecl)
+    if (!node.typeParams.empty()) return;
     std::string typeName = cIdent(node.name);
 
     // Fix 010b: 多个VB6模块可能定义同名UDT (如SYSTEMTIME, FILETIME), 用#ifndef防止C2011重定义

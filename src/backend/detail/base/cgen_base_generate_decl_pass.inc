@@ -53,6 +53,9 @@
         }
     }
 
+    // 5.4 Delegate (tB 扩展): typedef + 桩前向声明; 定义在 epilogue 发射
+    emitDelegateDecls(module);
+
     // 6. Event声明 (类模块中)
     if (isClassModule_) {
         for (auto& decl : module.declarations) {
@@ -73,6 +76,15 @@
     }
     for (auto& decl : module.declarations) {
         if (currentClassIsInterface) continue;  // 接口类: 跳过方法声明
+        // 泛型模板 (tB): 本体不发前向声明 (特化副本各自以扁名发; 模板名从不被调用)
+        if ((decl->kind == ASTNodeKind::SubDecl &&
+             !static_cast<SubDecl&>(*decl).typeParams.empty()) ||
+            (decl->kind == ASTNodeKind::FunctionDecl &&
+             !static_cast<FunctionDecl&>(*decl).typeParams.empty()) ||
+            (decl->kind == ASTNodeKind::PropertyDecl &&
+             !static_cast<PropertyDecl&>(*decl).typeParams.empty())) {
+            continue;
+        }
         if (decl->kind == ASTNodeKind::SubDecl) {
             auto& sub = static_cast<SubDecl&>(*decl);
             std::string sig = makeProcSignature(sub);

@@ -19,6 +19,8 @@ void SemanticAnalyzer::visit(Module& node) {
 }
 
 void SemanticAnalyzer::visit(SubDecl& node) {
+    // 泛型模板 (tB, G2/G3): 模板本体不进符号表 (泛型器注入特化副本)
+    if (!node.typeParams.empty()) return;
     if (pass_ == 1) {
         // Pass1: 注册Sub符号
         auto sym = std::make_unique<Symbol>(
@@ -52,11 +54,15 @@ void SemanticAnalyzer::visit(SubDecl& node) {
             }
         }
 
+        // 重载分组资格与指纹 (O1); 无资格 (类模块/ParamArray) 时为空, 走旧路径
+        sym->overloadFp = computeOverloadFp(*sym);
+
         symTab_.define(std::move(sym));
     } else {
         // Pass2: 分析过程体
         if (verbose_) std::cerr << "[Sem]   Sub: " << node.name << std::endl;
-        auto* sym = symTab_.lookupModule(node.name);
+        // 重载组内按声明位置找回本变体 (裸键 head 可能是别的签名)
+        auto* sym = symTab_.lookupModuleOverloadByLoc(node.name, node.loc);
         if (!sym) return;  // 注册失败则跳过
 
         // Fix 047: Re-resolve parameter types in Pass 2 after cross-module resolution.
@@ -118,6 +124,8 @@ void SemanticAnalyzer::visit(SubDecl& node) {
 }
 
 void SemanticAnalyzer::visit(FunctionDecl& node) {
+    // 泛型模板 (tB, G2/G3): 见 visit(SubDecl) 同注释
+    if (!node.typeParams.empty()) return;
     if (pass_ == 1) {
         // Pass1: 注册Function符号
         Vb6Type retType = resolveTypeOrDefault(node.name, node.returnType.get());
@@ -159,11 +167,13 @@ void SemanticAnalyzer::visit(FunctionDecl& node) {
             }
         }
 
+        sym->overloadFp = computeOverloadFp(*sym);
+
         symTab_.define(std::move(sym));
     } else {
         // Pass2: 分析过程体
         if (verbose_) std::cerr << "[Sem]   Function: " << node.name << std::endl;
-        auto* sym = symTab_.lookupModule(node.name);
+        auto* sym = symTab_.lookupModuleOverloadByLoc(node.name, node.loc);
         if (!sym) return;
 
         // Fix 047: Re-resolve parameter types AND return type in Pass 2.
@@ -227,6 +237,8 @@ void SemanticAnalyzer::visit(FunctionDecl& node) {
 }
 
 void SemanticAnalyzer::visit(PropertyDecl& node) {
+    // 泛型模板 (tB, G2/G3): 见 visit(SubDecl) 同注释
+    if (!node.typeParams.empty()) return;
     if (pass_ == 1) {
         SymbolKind sk;
         switch (node.propKind) {

@@ -47,6 +47,7 @@ void Lexer::initKeywords() {
 
         {"type", TokenKind::Type}, {"enum", TokenKind::Enum},
         {"event", TokenKind::Event}, {"raiseevent", TokenKind::RaiseEvent},
+        {"delegate", TokenKind::Delegate},
         {"implements", TokenKind::Implements},
         {"class", TokenKind::Class},
 

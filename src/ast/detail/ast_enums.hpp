@@ -120,7 +120,7 @@ enum class ASTNodeKind : uint16_t {
     SubDecl, FunctionDecl, PropertyDecl,
     TypeDecl, TypeMember,
     EnumDecl, EnumMember,
-    DeclareDecl, EventDecl,
+    DeclareDecl, EventDecl, DelegateDecl,
     ConstDecl, VariableDecl,
     ParameterDecl,
     MultiDecl,  // 逗号分隔的多变量声明 (Dim a, b, c As Long)

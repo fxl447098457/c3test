@@ -21,6 +21,7 @@ const char* ASTNode::kindName() const {
     case ASTNodeKind::EnumMember:      return "EnumMember";
     case ASTNodeKind::DeclareDecl:     return "DeclareDecl";
     case ASTNodeKind::EventDecl:       return "EventDecl";
+    case ASTNodeKind::DelegateDecl:    return "DelegateDecl";
     case ASTNodeKind::ConstDecl:       return "ConstDecl";
     case ASTNodeKind::VariableDecl:    return "VariableDecl";
     case ASTNodeKind::ParameterDecl:   return "ParameterDecl";

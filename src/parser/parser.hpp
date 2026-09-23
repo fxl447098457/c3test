@@ -38,6 +38,25 @@ public:
     // 诊断查询
     bool hasErrors() const { return diag_.hasErrors(); }
 
+    // ============================================================
+    // 泛型 (tB 扩展, G1): 使用点扁平时登记的结构
+    //   使用点 Foo(Of Long) 在 parse 期即改写为扁名 (VB 标识符不含 '$',
+    //   故扁名不可能与真实名冲突), 同时把 flat → (模板基名, 实参表) 记入
+    //   flatGenerics_, 供 G2 泛型器物化 (免字符串反解码).
+    //   编码: Base + "$gen" + <arity> + "$" + join(args, "$$"),
+    //   实参自身可为嵌套扁名 (递归自描述).
+    // ============================================================
+    struct GenericUse {
+        std::string base;               // 模板基名 (源码原大小写)
+        std::vector<std::string> args;  // 类型实参 (各自已扁平)
+    };
+    // key = 扁名小写; 同 key 覆盖写 (内容同源必然一致, 幂等)
+    const std::unordered_map<std::string, GenericUse>& flatGenerics() const {
+        return flatGenerics_;
+    }
+    static std::string makeFlatGenericName(const std::string& base,
+                                           const std::vector<std::string>& args);
+
 private:
     // ============================================================
     // Token 消费接口
@@ -110,6 +129,7 @@ private:
     std::unique_ptr<EnumDecl> parseEnumDecl(AccessLevel access);
     std::unique_ptr<DeclareDecl> parseDeclareDecl(AccessLevel access);
     std::unique_ptr<EventDecl> parseEventDecl(AccessLevel access);
+    std::unique_ptr<DelegateDecl> parseDelegateDecl(AccessLevel access);
     std::unique_ptr<ConstDecl> parseConstDecl(AccessLevel access);
     std::unique_ptr<VariableDecl> parseVariableDecl(AccessLevel access, bool isStatic);
 
@@ -119,6 +139,16 @@ private:
 
     // 类型引用
     TypeRefPtr parseTypeRef();
+
+    // 泛型 (tB 扩展, G1)
+    // 声明侧: proc/Type 名后的 (Of T[, U]) 类型参数表; 非该形态则零消耗返回空.
+    std::vector<std::string> parseTypeParams();
+    // 使用侧: 名字后紧跟 (Of A[, B]) 时消费尾巴, ioName 改为扁名并登记
+    // flatGenerics_. 守卫: '(' 的下一个 token 必须是 Identifier "Of" (大小写
+    // 无关), 与数组下标 T() / 实参表 (x) 天然区分.
+    bool tryFlattenGenericName(std::string& ioName);
+    // 泛型实参位上的类型名: 基础名(可点号限定) + 递归 (Of ...) 扁平.
+    std::string parseGenericArgFlat();
 
     // ============================================================
     // 语句解析 (parser_stmt.cpp)
@@ -266,6 +296,16 @@ private:
     Preprocessor preproc_;
     Diagnostics& diag_;
     std::shared_ptr<SourceBuffer> buffer_;
+
+    // 泛型 (tB 扩展, G1): 使用点扁名 → 结构登记表 (public flatGenerics() 暴露)
+    std::unordered_map<std::string, GenericUse> flatGenerics_;
+    // 泛型 (tB 扩展, G3) 护栏: 正在解析的模板声明的类型参数名 (小写).
+    // tryFlattenGenericName 据此拒绝"体内以类型参数作泛型实参" (v1 不支持),
+    // 因扁名在 parse 期固化, 克隆期的 AST 类型替换无法再触及被折进串里的 T.
+    std::vector<std::string> curTypeParams_;
+    // 泛型类 (G4): 类头行 (Of T) 参数的模块层驻留 (成员声明的 curTypeParams_ 起点)
+    std::vector<std::string> outerTypeParams_;
+    bool classHeaderSeen_ = false;   // 本类模块已见 `Class X(Of T)` 头行
 
     // 当前 token (lookahead 缓冲的第一个)
     Token cur_;

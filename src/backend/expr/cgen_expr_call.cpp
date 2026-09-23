@@ -35,6 +35,14 @@ namespace vb6c3 {
 // 切分脚本对「片段按序拼回 == 拆分前原文件对应区间」做逐字节断言。
 
 void CCodeGen::visit(IndexOrCallExpr& node) {
+    // Delegate 直调 (tB 扩展): op(a,b) → ((vb6_del_t_op)(op))(a,b), 独立短路径
+    if (node.isDelegateCall) { emitDelegateCall(node); return; }
+    // 重载变体 (O2): callee 是标识符且语义层选定非 head 变体时, 把符号键后缀
+    // 交给 ident 发射路径消费 (visit(IdentifierExpr) 的过程分支)。
+    if (!node.calleeOvlSuffix.empty() && node.callee &&
+        node.callee->kind == ASTNodeKind::IdentifierExpr) {
+        pendingCalleeOvl_ = node.calleeOvlSuffix;
+    }
 #include "backend/detail/expr/cgen_expr_call_prelude.inc"
 #include "backend/detail/expr/cgen_expr_call_builtin_pre.inc"
 #include "backend/detail/expr/cgen_expr_call_callee_ident.inc"

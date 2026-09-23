@@ -41,6 +41,9 @@ public:
     std::vector<std::unique_ptr<ParameterDecl>> params;
     StmtList body;
     bool isStatic = false;  // Static Sub
+    // 泛型 (tB 扩展): 非空 = 泛型模板 (声明位 (Of T[,U]) 的类型参数名表).
+    // 模板声明不进符号表, 由泛型器 (driver_generics) 按使用点特化克隆.
+    std::vector<std::string> typeParams;
 
     SubDecl(SourceLocation loc, AccessLevel acc, std::string n,
             std::vector<std::unique_ptr<ParameterDecl>> p, StmtList b,
@@ -59,6 +62,8 @@ public:
     TypeRefPtr returnType;  // As Type (可为nullptr = Variant)
     StmtList body;
     bool isStatic = false;
+    // 泛型 (tB 扩展): 见 SubDecl::typeParams 注释
+    std::vector<std::string> typeParams;
 
     FunctionDecl(SourceLocation loc, AccessLevel acc, std::string n,
                  std::vector<std::unique_ptr<ParameterDecl>> p,
@@ -78,6 +83,8 @@ public:
     TypeRefPtr returnType;  // Property Get 返回类型 (可为nullptr)
     StmtList body;
     bool isDefault = false;  // 是否为默认属性
+    // 泛型 (tB 扩展): 见 SubDecl::typeParams
+    std::vector<std::string> typeParams;
 
     PropertyDecl(SourceLocation loc, AccessLevel acc, ProcKind kind,
                  std::string n, std::vector<std::unique_ptr<ParameterDecl>> p,
@@ -111,6 +118,8 @@ public:
     AccessLevel access;
     std::string name;
     std::vector<std::unique_ptr<TypeMember>> members;
+    // 泛型 (tB 扩展): 见 SubDecl::typeParams
+    std::vector<std::string> typeParams;
 
     TypeDecl(SourceLocation loc, AccessLevel acc, std::string n,
              std::vector<std::unique_ptr<TypeMember>> m)
@@ -178,6 +187,26 @@ public:
               std::vector<std::unique_ptr<ParameterDecl>> p)
         : Decl(ASTNodeKind::EventDecl, loc),
           access(acc), name(std::move(n)), params(std::move(p)) {}
+};
+
+// Delegate 声明 (tB 扩展): [Public|Private] Delegate Sub/Function name [CDecl] (params) [As Type]
+// 声明一个具名函数指针类型; 委托值与 LongPtr 位兼容, 赋值/传参/调用时做签名检查.
+class DelegateDecl : public Decl {
+public:
+    AccessLevel access;
+    ProcKind procKind;      // Sub 或 Function
+    std::string name;
+    CallConv callingConv;   // 默认 StdCall, 尾置 CDecl 关键字切换
+    std::vector<std::unique_ptr<ParameterDecl>> params;
+    TypeRefPtr returnType;  // Function 返回类型 (可为nullptr)
+
+    DelegateDecl(SourceLocation loc, AccessLevel acc, ProcKind kind,
+                 std::string n, CallConv conv,
+                 std::vector<std::unique_ptr<ParameterDecl>> p,
+                 TypeRefPtr ret)
+        : Decl(ASTNodeKind::DelegateDecl, loc),
+          access(acc), procKind(kind), name(std::move(n)),
+          callingConv(conv), params(std::move(p)), returnType(std::move(ret)) {}
 };
 
 // Const 声明: [Public|Private] Const name As Type = value
@@ -252,6 +281,10 @@ public:
     bool isClassModule = false;     // true = .cls类模块, false = .bas标准模块/.frm窗体模块
     bool isFormModule = false;      // true = .frm窗体模块 (P7)
     VBInstancing instancing = VBInstancing::Private;  // 类Instancing属性 (仅类模块)
+    // 泛型类模板 (tB 扩展, G4): .cls 头行 `Class Name(Of T[,U])` 的类型参数名表.
+    // 非空 = 该类是"泛型模板类" — 不进符号表/不发码; 泛型器按使用点克隆整个
+    // Module (moduleName 改为扁名) 注入 modules_, 走完整主管线发码 (显式实例化).
+    std::vector<std::string> classTypeParams;
 
     // Option 语句
     std::vector<std::unique_ptr<OptionStmt>> options;
