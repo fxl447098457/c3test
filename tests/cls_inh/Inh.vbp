@@ -2,5 +2,6 @@ Type=Exe
 Class=InhBase; InhBase.cls
 Class=InhMid; InhMid.cls
 Class=InhDerived; InhDerived.cls
+Class=InhSib; InhSib.cls
 Module=InhMain; InhMain.bas
 Startup="Sub Main"

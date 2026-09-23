@@ -848,7 +848,9 @@ if ($Category -in @("all", "run", "vbp")) {
     Test-Vbp "cls_inh_pair" "$Tests\cls_inh\Inh.vbp" @(
         "INH0:derived", "INH1:OK", "INH2:OK", "INH3:OK", "INH4:OK", "INH5:OK",
         "INH6:OK", "INH7:OK", "INH8:OK", "INH9:OK", "INH10:OK", "INH11:OK",
-        "INH12:OK", "INH13:OK", "INH14:OK", "INH15:OK", "INH16:OK")
+        "INH12:OK", "INH13:OK", "INH14:OK", "INH15:OK", "INH16:OK",
+        "INH17:OK", "INH18:OK", "INH19:OK", "INH20:OK", "INH21:OK",
+        "INH22:OK", "INH23:OK", "INH24:OK", "INH25:OK", "INH26:OK")
     Test-Vbp "test_vbman" "$Tests\test_vbman\test_vbman.vbp" @("P24-04a:OK", "P24-04b:OK", "P24-04:2/2") -Arch "x86" -RequiresCom "VBMANLIB.cVBMAN"
     $vbpSw.Stop()
     Write-Host "  (vbp/gui tests took $([Math]::Round($vbpSw.Elapsed.TotalSeconds))s)"
@@ -980,13 +982,14 @@ if ($Category -in @("all", "syntax")) {
     if (Test-Path "$Tests\cls_neg\ci_n10_base.cls") {
         Test-SyntaxFailMulti "ci_n10_event_base" @("$Tests\cls_neg\ci_n10_base.cls", "$Tests\cls_neg\ci_n10_derived.cls") "declares an Event"
     }
-    # ai/022 B08b (Overridable/Overrides): the four contract shapes are two-module cases,
+    # ai/022 B08b/B08d (Overridable/Overrides): the contract shapes are two-module cases,
     # the three placement cases are single-file. All ride the existing helpers.
     $ovNeg = @(
         @("ci_n12_override_ghost", "ci_n12", "no matching member in the inherited class chain"),
         @("ci_n13_not_overridable", "ci_n13", "not declared Overridable"),
         @("ci_n14_override_signature", "ci_n14", "does not match the Overridable member"),
-        @("ci_n15_needs_dispatch", "ci_n15", "needs dynamic dispatch")
+        @("ci_n19_propertylet_virtual", "ci_n19", "is a Property Let/Set, which this build cannot dispatch"),
+        @("ci_n20_bare_virtual_call", "ci_n20", "Bare (unqualified) call to overridable member")
     )
     foreach ($c in $ovNeg) {
         $a = "$Tests\cls_neg\" + $c[1] + "_base.cls"

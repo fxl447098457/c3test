@@ -37,3 +37,8 @@ End Function
 Public Function FrozenSeen() As String
     FrozenSeen = Me.Frozen()
 End Function
+
+' ai/022 B08d: the second slot is overridden here (multi-slot table + a real parameter)
+Public Overrides Function Greet(ByVal who As String) As String
+    Greet = "hi " & who & " (derived)"
+End Function

@@ -370,6 +370,16 @@ CompileResult Driver::compile(const CompileOptions& options) {
         return result;
     }
 
+    // === 阶段3.4b: 类虚表槽表 (tB 扩展, B08d) — 每类的有序虚槽清单, 发码按它生成 `__cvtbl`
+    // 字段、表类型与表实例。必须早于 3.5: 槽表读的是本工程模块的声明与 3.4 的 inhProcs。
+    // 工程无 Inherits、或链上没人写 Overrides 时本阶段只清表不改物, 生成物逐字节不变。
+    if (!buildVirtualSlotTables()) {
+        std::cerr << diag_->toString();
+        result.errorCount = diag_->errorCount();
+        result.warningCount = diag_->warningCount();
+        return result;
+    }
+
     // === 阶段3.5: 跨模块符号链接 ===
     // 多模块项目: 解析跨模块Public符号引用
     if (modules_.size() > 1) {

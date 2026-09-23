@@ -42,6 +42,14 @@
                         asCallCallee_ = savedObjCtx180;
                         objExpr = std::move(lastExpr_);
                     }
+                    // 类虚表 (tB, ai/022 B08d): 静态类型是"链上有虚槽的类" → 改按 __cvtbl 索引。
+                    // 覆盖 `Me.M()` 与 `obj.M()` 两种写法, 后者才真正修掉"基类型变量持有派生实例
+                    // 却静默绑基类实现"那个 B07b 遗留的切片问题。directFn 留着给下面的 _prop_ 判据。
+                    const std::string directFn = resolvedFn;
+                    const std::string dispatchFn = virtDispatchCallee(
+                        itClassVar->second, node.memberName, objExpr,
+                        /*mustDispatch=*/defaultInstCls.empty(), node.loc);
+                    if (!dispatchFn.empty()) resolvedFn = dispatchFn;
                     // Fix 089h: 值上下文无括号方法引用 (Trim(FileStream.ReadLine)
                     // → vb6_cToolsStream_ReadLine(me->FileStream) 只发 this) —
                     // C2198 参数太少. 补默认参数 (Optional/必选), 与链式值上下文
@@ -50,7 +58,7 @@
                     // 对 Get+Let 并存属性返回 Let 参数, 无括号属性读只发 me 即正确
                     // (prop_get_State(oClient)), pad 反而 C2197 参数过多.
                     if (!asCallCallee_
-                        && resolvedFn.find("_prop_") == std::string::npos) {
+                        && directFn.find("_prop_") == std::string::npos) {
                         std::vector<ParameterInfo> params89h;
                         bool isBuiltin89h = false;
                         if (findClassMemberCallParams(itClassVar->second, node.memberName,

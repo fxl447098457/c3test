@@ -79,6 +79,9 @@
     // tB Interface 契约 (B04): 每个新式接口一个槽指针字段; **必须排在 __comObj 之后**
     // (vb6comserver_obj.c 按裸偏移 0 读写 __comObj, 见 ai/022 D19 的硬修正)
     emitIfaceClassFields(module);
+    // 类虚表 (tB B08d): __cvtbl 排在 __comObj/__iv_ 之后、祖先字段之前 —— 整条继承链上偏移一致
+    // (前缀布局的硬要求, 见 ai/022 D32②)。无虚槽的类不加这个字段。
+    emitClassVirtField(module);
 
         // 收集模块级变量作为结构体字段 (tB B07b: 继承字段在前, 派生前缀必须与祖先一致)
         bool hasFields = false;
@@ -127,6 +130,10 @@
             h_.emitLine(clsStruct + "* " + clsStruct + "_Default(void);");
         }
         h_.emitBlank();
+
+        // 类虚表 (tB B08d): 本类视图的表类型 + 表实例声明。发在类结构体之后 —— 槽项的 me 形参
+        // 就是刚定义好的 vb6_cls_<X>*, 不需要任何跨模块的类型可见性。
+        emitClassVirtType(module);
 
         // P6.4: 生成接口vtable结构体 + 包装类型 + 全局vtable实例
         if (!module.implements.empty()) {

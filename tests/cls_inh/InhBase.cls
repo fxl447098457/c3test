@@ -76,3 +76,25 @@ End Function
 Public NotOverridable Function Frozen() As String
     Frozen = "frozen"
 End Function
+
+' --- ai/022 B08d: these two are virtual slots; the *Thru functions below are the
+' dispatching call sites (Me.Pick() inside the base body must bind to the instance).
+Public Overridable Function Pick() As String
+    Pick = "base"
+End Function
+
+Public Overridable Function Greet(ByVal who As String) As String
+    Greet = "hi " & who & " (base)"
+End Function
+
+Public Function PickThru() As String
+    PickThru = Me.Pick()
+End Function
+
+Public Function SpeakThru() As String
+    SpeakThru = Me.Speak()
+End Function
+
+Public Function GreetThru(ByVal who As String) As String
+    GreetThru = Me.Greet(who)
+End Function

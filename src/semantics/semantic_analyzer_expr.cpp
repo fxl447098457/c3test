@@ -10,17 +10,15 @@ namespace vb6c3 {
 // --- semantic_analyzer_expr.cpp: 表达式 Visitor + 类型引用 Visitor ---
 
 
-// 虚方法 (tB, B08b): 三处调用点共用的诊断文案 (ASCII, D12 口径)。之所以要报而不是放过:
-// B07b 的发码是静态绑定 —— 类体内对可覆盖成员的调用只会绑到本类实现, 后代的 Overrides
-// 静默失效。"编得过但跑错"比一条错误危险得多 (D27-13 的判例), 所以在 B08d 的类虚表落地前
-// 先把这条路堵死。
+// 虚方法 (tB, B08d): 裸名 (无 Me. 前缀) 引用自家可覆盖成员仍然判死。B08d 已经把虚表发了,
+// 但只接在**类成员调用**那条解析路上 (resolveClassMemberCall → 间接调用); 裸名走模块作用域的
+// 过程符号, 那条路发的是直接调用 —— 留着它会静默绑成本类实现, 与 B07b "继承成员必须写 Me."
+// 是同一条边界。B08d 之前这里报的是"类虚表还没发", 现在报的是"这个形状没接派发"。
 namespace {
-std::string vtblNeededMsg(const std::string& cls, const std::string& name) {
-    return "Call to overridable member '" + name + "' inside class '" + cls +
-           "' needs dynamic dispatch, which this build does not emit yet (class vtable ="
-           " ai/022 B08d); v1 would statically bind it to '" + cls + "." + name +
-           "'. Move the dispatching call to the caller side (obj." + name +
-           ") or drop the Overrides clause";
+std::string bareVirtualCallMsg(const std::string& cls, const std::string& name) {
+    return "Bare (unqualified) call to overridable member '" + name + "' inside class '" + cls +
+           "' would statically bind to '" + cls + "." + name + "' (this build dispatches only"
+           " Me." + name + " / obj." + name + " calls; ai/022 B08d). Write Me." + name;
 }
 } // namespace
 
@@ -135,15 +133,14 @@ void SemanticAnalyzer::visit(IdentifierExpr& node) {
     auto* sym = symTab_.lookup(node.name);
     if (sym) {
         sym->isReferenced = true;
-        // 虚方法 (tB, B08b): 裸名引用/隐式调用自家的可覆盖成员 —— 今天发码是静态绑定,
-        // 后代 Overrides 也不会生效, 所以按"会静默绑错"处理成错误 (类虚表在 B08d)。
+        // 虚方法 (tB, B08d): 裸名引用自家的可覆盖成员 —— 只有 Me./obj. 那条解析路接了派发。
         // 例外: 函数体里 `Name = …` 是**返回值赋值** (VB6 惯例), 不是调用, 不能算。
         if (pass_ == 2 && sym->kind != SymbolKind::Variable &&
             !(currentProc_ && Symbol::toLower(currentProc_->name) == lower) &&
             virtualCallNeedsDispatch(node.name)) {
             diag_.error(DiagnosticID::SemVirtualNotSupported, node.loc,
-                vtblNeededMsg(currentModule_ ? currentModule_->moduleName : std::string(),
-                              node.name));
+                bareVirtualCallMsg(currentModule_ ? currentModule_->moduleName : std::string(),
+                                   node.name));
         }
         lastExprType_ = sym->type;
     } else {
@@ -164,13 +161,9 @@ void SemanticAnalyzer::visit(IdentifierExpr& node) {
 
 void SemanticAnalyzer::visit(MemberAccessExpr& node) {
     Vb6Type objType = analyzeExpr(*node.object);
-    // 虚方法 (tB, B08b): Me.<可覆盖成员> —— 理由同 visit(IdentifierExpr) 的那处
-    if (pass_ == 2 && node.object && node.object->kind == ASTNodeKind::MeExpr &&
-        virtualCallNeedsDispatch(node.memberName)) {
-        diag_.error(DiagnosticID::SemVirtualNotSupported, node.loc,
-            vtblNeededMsg(currentModule_ ? currentModule_->moduleName : std::string(),
-                          node.memberName));
-    }
+    // 虚方法 (tB, B08d): `Me.<可覆盖成员>` 与 `对象变量.<成员>` 都交给发码层的间接调用
+    // (CCodeGen::virtDispatchCallee 按 stage 3.4b 的槽表定槽), 语义层不再介入 —— 这里曾有的
+    // B08b 拒绝判定已按 D32① 删除: 留着判定再另起一条发码路会得到永远到不了的码。
     // P20-21: 如果object是UDT, 查找成员类型
     if (objType == Vb6Type::UserDefinedType) {
         // 查找UDT符号获取成员类型
@@ -233,13 +226,13 @@ void SemanticAnalyzer::visit(IndexOrCallExpr& node) {
         auto* sym = symTab_.lookup(ident->name);
         if (sym) {
             sym->isReferenced = true;
-            // 虚方法 (tB, B08b): 这条分支自己查符号、不走 visit(IdentifierExpr), 所以裸名
-            // **带实参**的调用要在这里补同一判定 (属性/方法的 `Name(…)` 形态)。
+            // 虚方法 (tB, B08d): 这条分支自己查符号、不走 visit(IdentifierExpr), 所以裸名
+            // **带实参**的调用要在这里补同一条判定 (属性/方法的 `Name(…)` 形态)。
             if (pass_ == 2 && sym->kind != SymbolKind::Variable &&
                 virtualCallNeedsDispatch(ident->name)) {
                 diag_.error(DiagnosticID::SemVirtualNotSupported, node.loc,
-                    vtblNeededMsg(currentModule_ ? currentModule_->moduleName : std::string(),
-                                  ident->name));
+                    bareVirtualCallMsg(currentModule_ ? currentModule_->moduleName : std::string(),
+                                       ident->name));
             }
 
             if (sym->ovlCount > 0 &&

@@ -215,6 +215,8 @@ private:
     void runVirtualContractChecks();
     // 类继承 (tB, B07b): stage 3.4 把祖先自有成员并进派生类 Class 符号 (必须早于 3.5 的逐字段跨模块拷贝)
     bool mergeInheritedMembers();
+    // 类虚表 (tB, B08d): stage 3.4b 排每类的有序槽表 (要读 3.4 的 inhProcs 判"本类有无入口")
+    bool buildVirtualSlotTables();
     // fixpoint 单轮物化: 消费 genericUses_ 中未物化项; freshOut 收特化副本
     bool materializeGenerics(std::vector<std::pair<Module*, Decl*>>* freshOut);
     // 泛型推断 fixpoint (G3): 收请求→物化→增量分析→再跨模块, 至收敛

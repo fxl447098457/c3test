@@ -97,6 +97,20 @@
     void emitInheritedProcDecls(Module& module);   // .h: 桩声明
     void emitInheritedProcDefs(Module& module);    // .c: 桩定义
 
+    // ---- 类虚表发码 (tB, ai/022 B08d; 实现在 cgen_inherit.cpp) ----
+    // 表类型/字段/实例三处同源: 槽的 C 字段名与签名都取自 stage 3.4b 的 virtSlots。
+    const ClassChainView* classViewOf(const Module& module) const;   // 按模块身份取视图 (含链根)
+    const ClassChainView* classViewByName(const std::string& cls) const;  // 按类名取 (调用点用)
+    void emitClassVirtField(Module& module);       // .h: const void* __cvtbl 字段
+    void emitClassVirtType(Module& module);       // .h: vb6_cvtbl_<X> 类型 + extern 表实例声明
+    void emitClassVirtNewInit(Module& module);    // .c: _New() 里装载本类的表
+    void emitClassVirtImpl(Module& module);       // .c 末尾: 表实例定义
+    std::string cvtblImplName(const ClassChainView& v,
+                              const ClassChainView::VirtSlot& s) const;  // 表项目标函数 C 名
+    std::string virtDispatchCallee(const std::string& cls, const std::string& member,
+                                   const std::string& objExpr, bool mustDispatch,
+                                   const SourceLocation& loc);  // 空 = 本类不派发这个成员
+
     void emitIfaceContractTypedefs();                 // .h: 工程级 vb6_ivtbl_/vb6_ivref_ 类型
     void emitIfaceClassFields(Module& module);        // .h: 类结构体里的 __iv_<I> 字段
     void emitIfaceImplTables(Module& module);         // .c: 适配器 + 类侧槽表实例

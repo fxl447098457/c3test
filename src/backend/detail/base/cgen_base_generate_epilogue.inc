@@ -5,6 +5,10 @@
     // Delegate (tB 扩展): 所有过程体已发射, 桩定义落地 (原型在 decl pass, 定义可后置)
     emitDelegateThunks();
 
+    // 类虚表 (tB B08d): 表实例也后置在这里 —— 表项可能是本类的 Private 过程, 那份定义是
+    // `static` 且没有前置原型 (只有自家 .h 里 Public/Friend 那份有), 放前面就是未声明标识符。
+    emitClassVirtImpl(module);
+
     // 保存生成结果
     header_ = h_.str();
     source_ = c_.str();

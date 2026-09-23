@@ -129,6 +129,32 @@ void addKeyOnce(std::vector<std::string>& keys, const std::string& k) {
     keys.push_back(k);
 }
 
+// --- B08d: 类虚表槽的读法 (见 Driver::buildVirtualSlotTables 与 class_chain_registry.hpp) ---
+
+// 虚表字段名 = 槽键的 C 写法。属性键自带方向 (get_/put_/putref_), C 名用 prop_get_/
+// prop_let_/prop_set_ 前缀 (与 makePropertySignature、inheritedStubSig 同一口径); 一律小写,
+// 因为槽键本身就是小写 —— 类型、填表、调用点三处都按它拼, 再没有各写一套大小写的机会。
+std::string cvtblFieldOf(const std::string& slotKey) {
+    if (slotKey.compare(0, 4, "get_") == 0)    return "prop_get_" + slotKey.substr(4);
+    if (slotKey.compare(0, 4, "put_") == 0)    return "prop_let_" + slotKey.substr(4);
+    if (slotKey.compare(0, 7, "putref_") == 0) return "prop_set_" + slotKey.substr(7);
+    return slotKey;
+}
+
+// 本类该槽的入口声明: 先看本类自己的声明 (遮蔽或 Overrides), 再看 stage 3.4 判定要发转发桩
+// 的那批祖先声明。**都没有 = 这个槽在本类面上没有可调用入口** → v1 判死, 不静默少发一张表。
+Decl* virtFaceDecl(const ClassChainView& v, const std::string& slotKey) {
+    if (!v.mod || slotKey.empty()) return nullptr;
+    for (const auto& d : v.mod->declarations) {
+        // 只有过程声明能带虚修饰符 → 槽键非空即 Sub/Function/Property (ifaceSlotKey 对其余返回空)
+        if (d && ifaceSlotKey(*d) == slotKey) return d.get();
+    }
+    for (const auto& ip : v.inhProcs) {
+        if (ip.decl && ifaceSlotKey(*ip.decl) == slotKey) return ip.decl;
+    }
+    return nullptr;
+}
+
 // --- Pass D 的 v1 边界判据 (只看 AST, 不依赖语义层) ---
 
 bool hasEventDecl(const Module& m) {
@@ -643,6 +669,83 @@ bool Driver::mergeInheritedMembers() {
                 if (auto it = src->memberAccessLevels.find(k); it != src->memberAccessLevels.end()) {
                     dst->memberAccessLevels.emplace(k, it->second);  // tB B08a
                 }
+            }
+        }
+    }
+
+    return !diag_->hasErrors();
+}
+
+// ============================================================
+// stage 3.4b (B08d): 类虚表槽表 —— 把"链上被覆盖过的可覆盖成员"排成每个类的有序槽清单
+//
+// 为什么另起一张**按槽键**的表 (B08b 的 dynamicKeys 不够用): 那份只有成员名小写, 属性方向
+// (Get/Let/Set) 在分析器里拿不到; 发码要的是"第几槽叫什么、签名取自哪个声明、本类的入口是哪个"。
+//
+// 定序 = 首次声明位置 根→叶、每槽键一份; 筛选集 = 链**根**的 dynamicKeys (祖先的键集必然包含
+// 后代的键集, 因为标记是从每个最深类向上打的) → 同一条链上任何祖先的槽表都是更深层那张表的前缀,
+// `__cvtbl` 这一字段的偏移在整条链上一致 —— 不满足这条就会静默读错字段 (D19 同一族的坑)。
+//
+// 排在 3.4 之后: 判"本类有没有这个槽的入口"要读 inhProcs (3.4 的产物), 在 2.8 判会漏掉遮蔽。
+bool Driver::buildVirtualSlotTables() {
+    if (classes_.empty()) return true;  // 工程无 Inherits (2.8 早退) → 一行都不做 (护栏)
+
+    for (auto& kv : classes_) kv.second.virtSlots.clear();
+
+    for (const std::string& key : classOrder_) {
+        auto self = classes_.find(key);
+        if (self == classes_.end()) continue;
+        ClassChainView& v = self->second;
+        // 注意**不能**用 chain.size() < 2 早退: 链根 (谁都不继承的 Overridable 声明者) 的 chain
+        // 就只有它自己一个元素, 而它正是最需要视图的那一个 —— 判据换成下面那条 dyn.empty()。
+        if (v.chainBroken) continue;
+        auto rootIt = classes_.find(v.chain.empty() ? key : v.chain[0]);
+        if (rootIt == classes_.end()) continue;
+        const std::vector<std::string>& dyn = rootIt->second.dynamicKeys;
+        if (dyn.empty()) continue;  // 整条链没人 Overrides → 全员无表 (零新语法零改动)
+
+        bool logged = false;  // 一个类只报第一条 (D18-3: 级联文本没有信息量)
+        for (size_t ci = 0; ci < v.chain.size() && !logged; ci++) {
+            auto cit = classes_.find(v.chain[ci]);
+            if (cit == classes_.end() || !cit->second.mod) continue;
+            Module* cm = cit->second.mod;
+            for (const auto& d : cm->declarations) {
+                if (!d || logged) continue;
+                if (procVirtOf(*d) != ProcVirt::Overridable) continue;
+                const std::string nk = ifaceLower(ifaceDeclName(*d));
+                if (!keyIn(dyn, nk)) continue;  // 链上没人覆盖这条槽 → 静态绑定就是对的
+                const std::string sk = ifaceSlotKey(*d);
+                bool seen = false;
+                for (const auto& s : v.virtSlots) {
+                    if (s.slotKey == sk) { seen = true; break; }
+                }
+                if (seen) continue;  // 更靠根的类已声明过这条槽 (首份胜出; 签名一致由 E3 保证)
+
+                // v1 边界: 只有**读上下文**的槽 (Sub/Function/Property Get) 能派发。写上下文
+                // (`Me.Props(1) = v`) 的发码在 tryRewriteCOMLvalue 那条路上, 本批不碰 → 与其让它
+                // 静默绑成基类实现 (D27-13 判例), 不如在契约期判死。
+                if (d->kind == ASTNodeKind::PropertyDecl &&
+                    static_cast<const PropertyDecl&>(*d).propKind != ProcKind::PropertyGet) {
+                    diag_->error(DiagnosticID::SemVirtualNotSupported, d->loc,
+                        "Overridable member '" + procDeclName(*d) + "' of class '" + cit->second.name +
+                        "' is a Property Let/Set, which this build cannot dispatch (only Sub/Function"
+                        "/Property Get slots are emitted; ai/022 B08d)");
+                    logged = true;
+                    break;
+                }
+                Decl* impl = virtFaceDecl(v, sk);
+                if (!impl) {
+                    // 本类面上没有这个槽的入口: 祖先那份是 Private (3.4 不发桩)、或本类用**另一个
+                    // 方向**的同名成员遮蔽了它。两种都会让表项指向一个不存在的函数 → 判死。
+                    diag_->error(DiagnosticID::SemVirtualNotSupported, d->loc,
+                        "Overridable member '" + procDeclName(*d) + "' has no implementation visible to"
+                        " class '" + v.name + "' (a Private base member, or a same-named member of"
+                        " another direction, leaves no callable entry); v1 cannot emit its class"
+                        " vtable slot (ai/022 B08d)");
+                    logged = true;
+                    break;
+                }
+                v.virtSlots.push_back({sk, nk, cvtblFieldOf(sk), d.get(), cm, impl});
             }
         }
     }

@@ -50,6 +50,24 @@ struct ClassChainView {
     // 键用 interface_sig.hpp::ifaceSlotKey 的槽键 (属性按 get_/put_/putref_ 分向)。
     std::vector<std::string> dynamicKeys;
     bool hasVirtualMods = false;  // 本类自己声明过任一虚修饰符 (早退判据与诊断定位用)
+
+    // --- B08d: 类虚表 (stage 3.4b buildVirtualSlotTables 回填, 之后只读) ---
+    // 一个槽 = "链上有人用 Overrides 覆盖过"的那个可覆盖成员。B08b 的 dynamicKeys 只有
+    // **成员名** (分析器拿不到属性方向), 发码要的是有序 + 带方向的槽清单, 所以另起这张表。
+    //
+    // 定序规则 (前缀布局成立的前提, 别改): 按**首次声明位置** 根→叶 排序, 每槽键一份,
+    // 且筛选集合取链**根**的 dynamicKeys (K 对链上所有类相同) → 于是任一祖先的槽表都是
+    // 更深层类槽表的前缀, `me->__cvtbl` 的字段偏移在整条链上一致。
+    struct VirtSlot {
+        std::string slotKey;   // ifaceSlotKey: 属性自带 get_/put_/putref_ 方向
+        std::string nameKey;   // 成员名小写 (与分析器 dynamicKeys 同键, 供其快路径比对)
+        std::string field;     // 虚表里的 C 字段名 (小写, prop_get_ 前缀口径) — 三处共用唯一出处
+        Decl* decl = nullptr;  // 槽的**首个 Overridable 声明处** (诊断可读)
+        Module* owner = nullptr;
+        Decl* impl = nullptr;  // **本类**该槽的入口声明: 本类自己的声明, 或 stage 3.4 判定要发
+                               // 转发桩的那份祖先声明。C 名一律按本类模块名拼 (与两份定义同源)。
+    };
+    std::vector<VirtSlot> virtSlots;  // 空 = 本类不带 __cvtbl 字段 (零新语法时逐字节不变的护栏)
 };
 
 // key = 类名小写 (工程级唯一, D1)

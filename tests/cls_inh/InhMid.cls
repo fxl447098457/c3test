@@ -21,3 +21,9 @@ End Function
 Public Function Tag() As String
     Tag = "mid"
 End Function
+
+' ai/022 B08d: the middle class overrides Pick and the leaf does not -> an instance of
+' the leaf must still bind Me.Pick() to THIS implementation (nearest override wins).
+Public Overrides Function Pick() As String
+    Pick = "mid"
+End Function
