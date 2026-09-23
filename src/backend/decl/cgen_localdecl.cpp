@@ -239,6 +239,8 @@ void CCodeGen::emitLocalDeclCode(LocalDeclStmt& node) {
                     if (!ivrefCType(simple.name).empty()) {
                         knownIvrefVars_[lower] = simple.name;
                         isLocalIvrefType = true;
+                        // B05: 过程级接口变量在正常出口处 Release 自己那一份引用
+                        trackIvrefLocalForRelease(cIdent(var.name));
                     } else if (clsSym->isInterface) {
                         // P6.4: 接口类 → knownIfaceVars_ (而非 knownClassVars_)
                         knownIfaceVars_[lower] = clsSym->name;

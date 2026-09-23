@@ -24,3 +24,9 @@ End Function
 Public Property Get Last() As String Implements IWriter.Last
     Last = m_last
 End Property
+
+' B05: the reference count reaching zero is the only thing that gets us here,
+' so every TERM line in the run log is an actual Release-to-zero.
+Private Sub Class_Terminate()
+    Debug.Print "TERM last=" & m_last
+End Sub

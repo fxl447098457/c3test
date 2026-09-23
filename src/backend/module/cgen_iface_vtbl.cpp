@@ -13,8 +13,9 @@
 //     vb6_cls_C_New(): me->__iv_I.vt = &vb6_ivtbl_I_for_C;
 //   接口值 = &obj->__iv_I（D3 的薄指针口径），派发见 cgen_expr_call_ivref 分支.
 //
-// IUnknown 三件套本批是**占位实现**（E_NOTIMPL / 常量计数），槽号因此从 B04 起永久固定，
-// B13 只替换实现不动布局（D3 阶段接线）.
+// IUnknown 三件套：B04 是**占位**（E_NOTIMPL / 常量计数），槽号因此从 B04 起永久固定。
+// B05 把 AddRef/Release 换成真计数（引用计数头 `__refcount` 只落在实现新式接口的类上，
+// 无新语法的工程一个字节都不变），QueryInterface 仍占位到 B06（TypeOf/转换同批）.
 
 #include "backend/cgen.hpp"
 
@@ -252,7 +253,12 @@ std::string CCodeGen::ivParamDeclsRef(const Decl* sig) {
 // ============================================================
 
 void CCodeGen::emitIfaceClassFields(Module& module) {
-    for (const IfaceView* v : ivImplementedIfaces(module)) {
+    const std::vector<const IfaceView*> ifaces = ivImplementedIfaces(module);
+    if (ifaces.empty()) return;
+    // B05: 引用计数头. 只落在"实现新式接口"的类上 —— 无新语法的工程结构体逐字节不变.
+    // 位置在 __comObj (第 0 字段, D19 硬约束) 之后、__iv_<I> 槽字段之前.
+    h_.emitLine("    int32_t __refcount;  /* tB Interface B05: 1 at New, +1 per owning ref */");
+    for (const IfaceView* v : ifaces) {
         const std::string id = cIdent(v->name);
         h_.emitLine("    vb6_ivref_" + id + " __iv_" + id +
                     ";  /* tB Interface " + v->name + " (B04): iface ptr = &me->__iv_" + id + " */");
@@ -261,7 +267,12 @@ void CCodeGen::emitIfaceClassFields(Module& module) {
 
 void CCodeGen::emitIfaceNewInit(Module& module) {
     const std::string clsId = cIdent(moduleName_);
-    for (const IfaceView* v : ivImplementedIfaces(module)) {
+    const std::vector<const IfaceView*> ifaces = ivImplementedIfaces(module);
+    if (ifaces.empty()) return;
+    // B05: _New 交出的那一次引用由"创建者"持有: 类变量永不 Release (现状),
+    // 而 `Set <接口变量> = New <类>` 走引用移交 (不 AddRef) → 该接口变量就是唯一主人.
+    c_.emitLine("me->__refcount = 1;  /* tB Interface B05 */");
+    for (const IfaceView* v : ifaces) {
         const std::string id = cIdent(v->name);
         c_.emitLine("me->__iv_" + id + ".vt = &vb6_ivtbl_" + id + "_for_" + clsId + ";");
     }
@@ -281,29 +292,42 @@ void CCodeGen::emitIfaceImplTables(Module& module) {
     c_.emitBlank();
     c_.emitLine("// === tB Interface contract impl: " + module.moduleName + " (ai/022 B04) ===");
 
-    // IUnknown 占位三件套（每个实现类一份 static；B13/B05 换成真实现）
+    // IUnknown 三件套: QueryInterface 仍占位 (B06 与 TypeOf/接口转换同批),
+    // AddRef/Release 从 B05 起是真计数. 计数头挂在实例上而 self 是某个 `__iv_<I>`
+    // 的地址 → 回推实例的 offsetof 依赖具体接口, 故 AddRef/Release 按 (类, 接口) 各一份.
     c_.emitLine("static long vb6_iunk_" + clsId + "_QueryInterface(void* self, const void* riid, void** ppv) {");
     c_.indent();
     c_.emitLine("(void)self; (void)riid; (void)ppv;");
-    c_.emitLine("return 0x80004001L;  /* E_NOTIMPL: implemented in B13 */");
-    c_.dedent();
-    c_.emitLine("}");
-    c_.emitLine("static unsigned long vb6_iunk_" + clsId + "_AddRef(void* self) {");
-    c_.indent();
-    c_.emitLine("(void)self;");
-    c_.emitLine("return 1UL;  /* refcount lands in B05 */");
-    c_.dedent();
-    c_.emitLine("}");
-    c_.emitLine("static unsigned long vb6_iunk_" + clsId + "_Release(void* self) {");
-    c_.indent();
-    c_.emitLine("(void)self;");
-    c_.emitLine("return 1UL;  /* refcount lands in B05 */");
+    c_.emitLine("return 0x80004001L;  /* E_NOTIMPL: QueryInterface lands in B06 */");
     c_.dedent();
     c_.emitLine("}");
 
     for (const IfaceView* v : ifaces) {
         const std::string id = cIdent(v->name);
         const std::string ref = "vb6_ivref_" + id;
+
+        // B05: 真引用计数 (self = &me->__iv_<I>)
+        const std::string walk = "    " + clsStruct + "* me = (" + clsStruct + "*)((char*)self - offsetof(" +
+                                 clsStruct + ", __iv_" + id + "));";
+        c_.emitBlank();
+        c_.emitLine("static unsigned long vb6_iunk_" + clsId + "_" + id + "_AddRef(void* self) {");
+        c_.indent();
+        c_.emitLine(walk);
+        c_.emitLine("me->__refcount += 1;");
+        c_.emitLine("return (unsigned long)me->__refcount;");
+        c_.dedent();
+        c_.emitLine("}");
+        c_.emitLine("static unsigned long vb6_iunk_" + clsId + "_" + id + "_Release(void* self) {");
+        c_.indent();
+        c_.emitLine(walk);
+        c_.emitLine("me->__refcount -= 1;");
+        c_.emitLine("if (me->__refcount > 0) return (unsigned long)me->__refcount;");
+        // 实例已被 COM 包装器接管时 (__comObj 非空) 销毁权在包装器 (P6/B13 统一两套计数)
+        c_.emitLine("if (me->__comObj != NULL) return 0UL;  /* wrapper owns teardown */");
+        c_.emitLine(clsStruct + "_Destroy(me);  /* 0 引用: Class_Terminate + 释放 */");
+        c_.emitLine("return 0UL;");
+        c_.dedent();
+        c_.emitLine("}");
 
         std::vector<std::string> slotFns;
         for (const IfaceSlotView& slot : v->slots) {
@@ -336,14 +360,35 @@ void CCodeGen::emitIfaceImplTables(Module& module) {
         c_.emitLine("static const vb6_ivtbl_" + id + " vb6_ivtbl_" + id + "_for_" + clsId + " = {");
         c_.indent();
         c_.emitLine("vb6_iunk_" + clsId + "_QueryInterface,");
-        c_.emitLine("vb6_iunk_" + clsId + "_AddRef,");
-        c_.emitLine("vb6_iunk_" + clsId + "_Release,");
+        c_.emitLine("vb6_iunk_" + clsId + "_" + id + "_AddRef,");
+        c_.emitLine("vb6_iunk_" + clsId + "_" + id + "_Release,");
         for (size_t i = 0; i < slotFns.size(); i++) {
             c_.emitLine(slotFns[i] + (i + 1 < slotFns.size() ? "," : ""));
         }
         c_.dedent();
         c_.emitLine("};");
     }
+}
+
+// ============================================================
+// B05: 接口变量的作用域末尾释放
+// ============================================================
+
+void CCodeGen::trackIvrefLocalForRelease(const std::string& cName) {
+    for (const std::string& s : ivrefLocalsToRelease_) {
+        if (s == cName) return;
+    }
+    ivrefLocalsToRelease_.push_back(cName);
+}
+
+// 与 ansiTempsToFree_ 在同一位置调用（过程正常出口）。Exit Sub/Function 走裸
+// return，与 ANSI 临时变量同样漏清理——现状与本批边界一并记进总表。
+void CCodeGen::emitIvrefScopeRelease() {
+    for (const std::string& s : ivrefLocalsToRelease_) {
+        c_.emitLine("if (" + s + ") " + s + "->vt->Release(" + s +
+                    ");  /* tB Interface B05: scope-exit release */");
+    }
+    ivrefLocalsToRelease_.clear();
 }
 
 } // namespace vb6c3

@@ -42,6 +42,7 @@ void CCodeGen::visit(PropertyDecl& node) {
     // Fix 056b: 清理局部数组注册 (模块级/类成员数组跨过程保留)
     clearProcArrayTracking();
     ansiTempsToFree_.clear();
+    ivrefLocalsToRelease_.clear();  // tB Interface B05
     ansiCounter_ = 0;
     knownBstrVars_.clear();
     knownDoubleVars_.clear();
@@ -239,6 +240,9 @@ void CCodeGen::visit(PropertyDecl& node) {
         c_.emitLine("vb6_FreeANSI(" + ansiVar + ");");
     }
     ansiTempsToFree_.clear();
+
+    // tB Interface B05: 接口变量持有引用, 正常出口处经槽 Release (Exit Sub 例外, 同 ANSI 临时变量)
+    emitIvrefScopeRelease();
 
     // Property Get: 隐式返回 vb6_ret_<propName>
     if (node.propKind == ProcKind::PropertyGet && node.returnType) {

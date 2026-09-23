@@ -331,6 +331,10 @@
     std::unordered_map<std::string, std::string> knownIvrefVars_;
     // 成员访问片段 -> 调用片段之间传递"这次是接口槽调用"的接口名 (B04)
     std::string ivrefIfaceName_;
+    // tB Interface B05: 本过程内需要"作用域末尾 Release"的接口变量 (C 名)
+    std::vector<std::string> ivrefLocalsToRelease_;
+    // Set 语句里"旧值"临时变量的序号 (只有新语法路径消耗, 不影响其他工程)
+    int ivrefSetSeq_ = 0;
 
     // VB6 Static Sub/Function标志: 过程内所有局部变量都应生成C static
     bool inStaticProc_ = false;

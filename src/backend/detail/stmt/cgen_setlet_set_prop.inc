@@ -44,6 +44,16 @@
             // P6.3: 早期绑定COM变量 → vb6_ComReleaseTyped
             std::string targetLower = target;
             std::transform(targetLower.begin(), targetLower.end(), targetLower.begin(), ::tolower);
+            // tB Interface B05: Set <接口变量> = Nothing → 先经槽 Release 再清空.
+            // 不拦下来会落到下面的 vb6_ReleaseObject —— 那会把薄指针当 IDispatch* 用.
+            if (knownIvrefVars_.count(targetLower) &&
+                target.find_first_not_of(
+                    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_")
+                    == std::string::npos) {
+                c_.emitLine("if (" + target + ") " + target + "->vt->Release(" + target + ");");
+                c_.emitLine(target + " = NULL;  /* Set Nothing (tB Interface 值) */");
+                return;
+            }
             // Fix 084aa: Set dict(key) = Nothing 的目标是 vb6_ComCall(...) 函数调用,
             // 对调用结果取址 &vb6_ComCall(...) → C2102. 检测"以标识符开头+含("的
             // 函数调用形态, 改用 (&(void*){...}) 复合字面量包装 (仅释放引用).
@@ -396,7 +406,31 @@
                 std::transform(ivValLower.begin(), ivValLower.end(), ivValLower.begin(), ::tolower);
                 const bool isClassVar = knownClassVars_.count(ivValLower) != 0;
                 const bool isNewExpr = value.find("_New(") != std::string::npos;
+                // 目标是裸标识符 (= 过程级接口变量) 才接计数; me->字段 等形式
+                // 沿用 B04 的纯赋值改写, 生命周期留给后续批次.
+                const bool plainIvTarget = !target.empty() &&
+                    target.find_first_not_of(
+                        "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_")
+                        == std::string::npos;
                 if (isClassVar || isNewExpr) {
+                    if (plainIvTarget) {
+                        // COM 口径: 存旧值 → 覆盖 → AddRef 新 → Release 旧.
+                        // RHS 是 New 时那 1 次初始引用直接移交, 故不 AddRef.
+                        const std::string ivCType = "vb6_ivref_" + cIdent(v->name) + "*";
+                        const std::string ivOld = "__ivold" + std::to_string(ivrefSetSeq_++);
+                        c_.emitLine("{  /* tB Interface B05: Set " + target + " (refcounted) */");
+                        c_.indent();
+                        c_.emitLine(ivCType + " " + ivOld + " = " + target + ";");
+                        c_.emitLine(target + " = &(" + value + ")->__iv_" + cIdent(v->name) + ";");
+                        if (!isNewExpr) {
+                            c_.emitLine("if (" + target + ") " + target + "->vt->AddRef(" +
+                                        target + ");");
+                        }
+                        c_.emitLine("if (" + ivOld + ") " + ivOld + "->vt->Release(" + ivOld + ");");
+                        c_.dedent();
+                        c_.emitLine("}");
+                        return;
+                    }
                     value = "&(" + value + ")->__iv_" + cIdent(v->name);
                 } else {
                     diag_.error(DiagnosticID::CodeGenUnsupportedFeature, SourceLocation{},

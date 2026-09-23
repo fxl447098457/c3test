@@ -93,6 +93,8 @@
     void emitIfaceClassFields(Module& module);        // .h: 类结构体里的 __iv_<I> 字段
     void emitIfaceImplTables(Module& module);         // .c: 适配器 + 类侧槽表实例
     void emitIfaceNewInit(Module& module);            // .c: _New() 里回填 vt
+    void trackIvrefLocalForRelease(const std::string& cName);  // B05: 登记局部接口变量
+    void emitIvrefScopeRelease();                     // B05: 过程出口发 Release
     std::string ivrefCType(const std::string& typeName);   // 空串 = 不是新式接口
     const IfaceView* ivLookupIface(const std::string& written);
     std::vector<const IfaceView*> ivImplementedIfaces(Module& module);

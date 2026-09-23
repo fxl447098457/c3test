@@ -41,4 +41,48 @@ Sub Main()
         Debug.Print "IFV3:FAIL"
     End If
 
+    ' ---- B05: reference counting through the IUnknown prefix slots ----
+    ' (a) instance owned only by an interface variable: Set Nothing releases the
+    '     last reference, so Class_Terminate fires ("TERM last=bye").
+    Dim z As IWriter
+    Set z = New CWriter
+    z.Emit("bye")
+    Set z = Nothing
+    If z Is Nothing Then
+        Debug.Print "LIFE1:OK"
+    Else
+        Debug.Print "LIFE1:FAIL"
+    End If
+
+    ' (b) a class variable keeps its own reference: releasing every interface
+    '     variable that aliases it must NOT destroy the instance.
+    Dim w2 As CWriter
+    Set w2 = New CWriter
+    Dim p1 As IWriter
+    Dim p2 As IWriter
+    Set p1 = w2
+    Set p2 = w2
+    Set p1 = Nothing
+    p2.Emit("kept")
+    If p2.Total() = 1 Then
+        Debug.Print "LIFE2:OK"
+    Else
+        Debug.Print "LIFE2:FAIL"
+    End If
+    Set p2 = Nothing
+    If w2.Total() = 1 Then
+        Debug.Print "LIFE3:OK"
+    Else
+        Debug.Print "LIFE3:FAIL"
+    End If
+
+    ' (c) end-of-procedure release: only the procedure epilogue frees this one
+    ScopeExit
+    Debug.Print "LIFE9:OK"
+End Sub
+
+Sub ScopeExit()
+    Dim s2 As IWriter
+    Set s2 = New CWriter
+    s2.Emit("scoped")
 End Sub
