@@ -364,7 +364,12 @@
     // VB6_SA_AT(elem, A, 0)。值语义侧用 tgtIsWholeArray170 决定右侧是否需要深拷贝。
     bool tgtIsWholeArray170 = isWholeArrayRef(node.target.get());
     wholeArrayLvalue_ = tgtIsWholeArray170;
+    // 左值求值期间关掉虚表派发 (ai/022 B08e-4 站点⑭: Pattern C/D2 要对这段文本做
+    // `prop_get_` -> `prop_let_` 的字符串级改写, 派发表达式会被换成表里不存在的槽字段)
+    const bool savedVirtLhs = suppressVirtDispatch_;
+    suppressVirtDispatch_ = true;
     emitExpr(*node.target);
+    suppressVirtDispatch_ = savedVirtLhs;
     std::string target = std::move(lastExpr_);
     wholeArrayLvalue_ = false;
 

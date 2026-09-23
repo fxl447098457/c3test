@@ -121,6 +121,22 @@
             if (!resolvedFn.empty()) {
                 emitExpr(*node.object);
                 std::string objExpr = std::move(lastExpr_);
+                // 类虚表 (tB, ai/022 B08e 第⑪站): 这一支的 object 是"非标识符表达式", 但
+                // `Me.<字段>` 这种字段链发出来仍是纯读 (`me->m_up`), 所以 `Me.m_up.<属性>` 的读
+                // 实测落在这里 —— 上一版地图把它一概判成"按构造不纯 → 只能判死", 本轮按证据订正。
+                // 口径同 ①⑤: 纯的换成按 __cvtbl 索引, 不纯的由 mustDispatch 出 VB3027;
+                // 派发串与 this 实参共用下面这一个 thisArg083d (拼两遍 = 双副作用)。
+                // 两个方向坑: 属性写 (`_prop_let_`/`_prop_set_`) 不改写 (3.4b 无该方向的槽),
+                // 左值求值 (`suppressVirtDispatch_`) 也不改写 —— Pattern C/D2 会字符串级换后缀。
+                std::string thisArg083d = "(void*)" + objExpr;
+                if (!suppressVirtDispatch_
+                    && resolvedFn.find("_prop_let_") == std::string::npos
+                    && resolvedFn.find("_prop_set_") == std::string::npos) {
+                    const std::string dispatchFn083d = virtDispatchCallee(
+                        className, node.memberName, thisArg083d,
+                        /*mustDispatch=*/true, node.loc);
+                    if (!dispatchFn083d.empty()) resolvedFn = dispatchFn083d;
+                }
                 // Fix 090am: 值上下文无括号方法引用 (If Db.Sql(s).Param(p).QueryParam Then)
                 // — object 是非标识符链式调用 → 本 Fix 083d 分支只发 this ((void*)obj)
                 // → C2198 参数太少 (QueryParam 声明5参传1参). 与 Fix 089h/090ak 同模板:
@@ -132,7 +148,7 @@
                     && findClassMemberCallParams(className, node.memberName,
                                                  params090am, isB090am)
                     && !params090am.empty() && !isB090am) {
-                    std::string argList090am = "(void*)" + objExpr;
+                    std::string argList090am = thisArg083d;
                     for (size_t i = 0; i < params090am.size(); i++) {
                         const auto& param = params090am[i];
                         argList090am += ", ";
@@ -164,7 +180,7 @@
                     }
                     lastExpr_ = resolvedFn + "(" + argList090am + ")";
                 } else {
-                    lastExpr_ = resolvedFn + "((void*)" + objExpr + ")";
+                    lastExpr_ = resolvedFn + "(" + thisArg083d + ")";
                 }
                 return;
             }

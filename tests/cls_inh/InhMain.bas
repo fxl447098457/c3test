@@ -116,4 +116,9 @@ Sub Main()
     If hd.ViaBare() = "derived" Then Debug.Print "INH32:OK" Else Debug.Print "INH32:FAIL " & hd.ViaBare()
     If hd.ViaMeField() = "derived" Then Debug.Print "INH33:OK" Else Debug.Print "INH33:FAIL " & hd.ViaMeField()
     If hd.ViaMeFieldArg("bob") = "hi bob (derived)" Then Debug.Print "INH34:OK" Else Debug.Print "INH34:FAIL " & hd.ViaMeFieldArg("bob")
+    ' INH35/INH36 (ai/022 B08e-4, sites 11+14): property read through the Me-prefixed field
+    ' chain now dispatches (5 stored -> derived's Get adds 100), while the write stays direct.
+    ' INH36 is the bare-receiver control that already worked before this batch.
+    If hd.ViaLevel() = "105" Then Debug.Print "INH35:OK" Else Debug.Print "INH35:FAIL " & hd.ViaLevel()
+    If hd.ViaLevelBare() = "107" Then Debug.Print "INH36:OK" Else Debug.Print "INH36:FAIL " & hd.ViaLevelBare()
 End Sub

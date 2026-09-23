@@ -86,6 +86,7 @@ void CCodeGen::visit(WithMemberExpr& node) {
             // 属性写方向不改写: 3.4b 不给 Let/Set 建槽 (D33-7), 改派到会拿到 Get 的槽。
             std::string funcName = directFnW;
             if (!directFnW.empty()
+                && !suppressVirtDispatch_
                 && directFnW.find("_prop_let_") == std::string::npos
                 && directFnW.find("_prop_set_") == std::string::npos) {
                 const std::string dispatchFnW = virtDispatchCallee(

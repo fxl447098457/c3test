@@ -39,6 +39,10 @@ Public Function FrozenSeen() As String
 End Function
 
 ' ai/022 B08d: the second slot is overridden here (multi-slot table + a real parameter)
+Public Overrides Property Get Level() As Long
+    Level = Me.m_lvl + 100
+End Property
+
 Public Overrides Function Greet(ByVal who As String) As String
     Greet = "hi " & who & " (derived)"
 End Function

@@ -15,6 +15,7 @@ Protected m_secret As Long
 Protected m_tag As String
 Private m_pt As TPoint
 Private m_name As String
+Protected m_lvl As Long
 Public Label As String
 
 Public Sub Bump()
@@ -60,6 +61,14 @@ End Property
 
 Public Property Let Name(ByVal v As String)
     m_name = v
+End Property
+
+Public Overridable Property Get Level() As Long
+    Level = m_lvl
+End Property
+
+Public Property Let Level(ByVal v As Long)
+    m_lvl = v
 End Property
 
 Protected Sub SetSecret(ByVal v As Long)
