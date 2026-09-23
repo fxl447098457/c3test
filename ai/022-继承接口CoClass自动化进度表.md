@@ -5,19 +5,19 @@
 > 规范输入: `ai/讨论记录/018-接口继承与CoClass设计思路.md`（含 tB 文档要点与分阶段设计思路全文）。
 
 STATUS: IDLE               # NOT_STARTED | DESIGN | BUSY | IDLE | ALL_DONE
-LAST_RUN: 2026-09-23T09:52:32+08:00   # B06b 已收口（代码 4dc6b7e、总表 docs 提交见 git log）。
-               # 自动运行见本行不足 55 分钟请立即跳过。   # 本轮单批（B06b）；过门后另跑 8 文件逐字节护栏。
-               # 下一轮自动运行从 **B07** 开工（P3 第一批，地图见 D24）；重入保护照常：STATUS=BUSY 且不足 55 分钟立即跳过。
-LAST_COMMIT: 代码批 = 4dc6b7e(B06b)、613d2b8(B06a)、f644003(B05)、6bc97e8(B04)
-CURRENT_BATCH: **B07**（P3 第一批）——`Inherits` 语法 + 类链检测（单继承/环/深度）+ 继承成员合并与遮蔽 + 派生域。开工必读 **D24**（B07 地图，行号本轮实测）与 D23；四条硬约束：
-               ① **别照 D6 去 `parser_module.cpp:89-104` 那条 Class 头行分支挂 `Inherits`**：它要求 `parseTypeParams()` 见到 `( Of`（`parser_decl_var.cpp:463-471`），今天连 `Class Foo` 写在 `.cls` 首行都是 error。v1 只做独立子句行 `Inherits Base`；要动头行形式 = 放松既有 error path，必须补泛型 `.cls` 用例并重跑护栏。
-               ② 合并必须落在 **stage 3.5 之前**，且 `driver_crossmod.cpp:169-190` 是**逐字段手工拷贝**外部 Class 符号：成员表实有 11 张（D6 只列了 4 张，完整清单见 D24），漏一张就是跨模块瞎。链求解照抄 `driver_interface.cpp` 的 Pass A/B/C（环检测用 `seen`，父先序展平）。
-               ③ **不内嵌 `vb6_cls_Base`**（连 `__refcount`/`__iv_<I>` 一起继承 = 双计数，撞 D21-1 的单门禁）→ 字段扁平复制进用户字段区，字段 0 仍是 `__comObj`（D19）。遮蔽必须**按小写键裁决**：`cIdent` 保留大小写而成员表键小写，否则 `m_X`/`M_x` 发成两个 C 成员 = 静默错字段。
-               ④ 继承方法发**转发桩** `vb6_<D>_<M>` 转调 `vb6_<B>_<M>((vb6_cls_<B>*)me, …)`，别在每个调用点裸强转 `me`（`cgen_form.cpp:210` 有控件强转先例，但它要求前缀布局逐字段一致，且会挡住 B08 的 Overridable 钩子与 B09 的 MyBase 去虚化）。
-               另：早退条件必须是“本类或其链用到 Inherits”，不是“工程无新语法”（D24 末两条）。`Test-SyntaxFail` 只接单个 `$Source` → shadow/环/arity 这类**双文件负例**需要新 helper，B07 预算含它。
+LAST_RUN: 2026-09-23T11:55:16+08:00   # 本轮开工并收口 **B07a**（代码 a056705、总表见本轮 docs 提交）。
+               # 自动运行见本行不足 55 分钟请立即跳过。   # 本轮单批（B07a）；过门后另跑 8 文件逐字节护栏。
+               # 下一轮自动运行从 **B07b** 开工（P3 第二批，地图见 D26）；重入保护照常：STATUS=BUSY 且不足 55 分钟立即跳过。
+LAST_COMMIT: 代码批 = a056705(B07a)、4dc6b7e(B06b)、613d2b8(B06a)、f644003(B05)
+CURRENT_BATCH: **B07b**（P3 第二批，B07a 已过门 = a056705）——继承**成员合并**（stage 3.4 新轮，并 11 张成员表、按小写键裁决遮蔽）+ 继承字段进派生 struct（扁平复制、字段 0 仍是 `__comObj`）+ 继承方法**转发桩** + 手册页 `docs/vb6-manual/02-语句/Inherits 语句.md`。开工必读 **D26**（B07b 地图，锚点本轮实测）与 D25；四条硬约束：
+               ① 合并落在 **stage 3 之后、3.5 之前**（新 3.4 遍历 `analyzers_`，按 `classes_[key].chain` 从根往叶并表）：`driver_crossmod.cpp:169-190` 把 Class 符号成员表**逐字段手工拷贝**给外部工程，合并晚于 3.5 就得再抄一遍副本。
+               ② 11 张表一张都不能漏（清单与行号见 D26；`interfaceMethodParams` 是死字段别碰）；遮蔽在**合并阶段**就按小写键裁决完，发码只认胜者（`cIdent` 保留大小写，否则 `m_X`/`M_x` 发成两个 C 成员 = 静默错字段，D24③）。
+               ③ 不内嵌 `vb6_cls_Base`（连 `__refcount`/`__iv_<I>` 一起继承 = 双计数，撞 D21-1 单门禁）→ v1 在 2.8 就拒绝「基类或派生类实现新式 Interface」「基类带 Event」两类（3022，别悄悄降级），把前缀排布问题推到 B08+。
+               ④ 发码走**转发桩** `vb6_<D>_<M>` 转调 `vb6_<B>_<M>((vb6_cls_<B>*)me, …)`，别在调用点裸强转 `me`（D24④）；**B07b 第一件事是实测**：真实管线里派生 TU 能否看到基类完整 struct（本轮 `--emit-c` 观察到两个 `.h` 互相 include、谁先被包含谁只拿到对方前向 typedef → 包含序决定可见性）。若不完整，改法是给派生 `.c` 头部**先**显式 `#include "<Base>.h"`（只此一条）。
+               收益点：合并进符号表之后 `resolveClassMemberCall` 的 Fix 014 兜底与三个同源查询一行都不用改（D26）。
                遗留登记（不挡 B07）：**B06c** = 接口值作实参 / 进 Variant，归 B13/P6 前处理（要过 `vb6_ComIsDispatchable` 的 7 槽口径，D22-7③）。
-GATE_BASELINE: Results: PASS=128 FAIL=0 SKIP=1 TOTAL=129   # exe md5 4202570a（.build/gate_B06b.log，10:06 起跑，最后一次源码改动在起跑前、跑前后 exe 一致；SKIP=已知 test_vbman 环境项）。条目数与 B03/B04/B05/B06a 基线持平——B06b 未新增用例条目，只把 `itf_xmod_writer` 的断言 18→25 条 → 零新增失败。
-               # 另附 8 文件 --emit-c 对 pre-B06b 基线（worktree @613d2b8）逐字节全同；A/B 负控见 D23-3。
+GATE_BASELINE: Results: PASS=137 FAIL=0 SKIP=1 TOTAL=138   # exe md5 031f993b（.build/gate_B07a.log，11:25:47 起跑，最后一次源码改动在起跑前、跑前后 exe 一致；SKIP=已知 test_vbman 环境项）。条目 129→138（B07a 新增 8 条语法用例 + 1 个 vbp 工程）→ 零新增失败，legacy `test_implements` 仍 PASS。
+               # 另附 8 文件 --emit-c 对 pre-B07a 基线（worktree @58f02fe，自建 Debug exe）逐字节全同；本轮首次实测确认 `test_implements.vbp` 会产出 class struct，故类布局在清单里有覆盖（D25-7）。
 ```
 
 > 重入保护：若运行开始时 STATUS=BUSY 且 LAST_RUN 距今不足 55 分钟，说明上一次运行可能仍在进行——本次**立即结束，不做任何修改**。
@@ -60,7 +60,7 @@ GATE_BASELINE: Results: PASS=128 FAIL=0 SKIP=1 TOTAL=129   # exe md5 4202570a（
 | B04 | P2 | 接口值代码生成：`vb6_ivtbl_<I>` COM 形态槽表 + 类侧实例 + 薄指针表示 + `As <Iface>` 变量登记 + 派发 | ☑ | 6bc97e8 | `Results: PASS=128 FAIL=0 SKIP=1 TOTAL=129`（gate_B04.log；exe md5 ef1a7520 跑前后一致）+ 接口值派发端到端断言 IFV1/IFV2/IFV3 全绿 + legacy `test_implements` 仍 PASS。要点：新增 `cgen_iface_vtbl.cpp` 独立编译单元、`#ifndef VB6_IVTBL_<I>` 守卫替代 D19 设想的工程级去重表、`__iv_<I>` 紧跟 `__comObj`、槽键口径上提到 `interface_sig.hpp` 与语义层同源。B04a/B04b 合并成一批（理由见 D20-1）。逐字节 emit-c 护栏 8 文件对 pre-B04 基线全同 |
 | B05 | P2 | 生命周期：实现类结构**前置** vtbl 指针数组（实测不可行，见 D21-1）+ refcount 头 + AddRef/Release + Set/Nothing/作用域释放 | ☑ | f644003 | `Results: PASS=128 FAIL=0 SKIP=1 TOTAL=129`（gate_B05.log；exe md5 c615c657 跑前后一致）+ `itf_xmod_writer` 断言 5→11 条（LIFE1/2/3/9 + `TERM last=bye` + `TERM last=scoped`；实测该工程恰好 2 条 TERM，无误销毁、无重复释放）+ legacy `test_implements` 仍 PASS。要点：`__refcount` 只加在实现新式接口的类上（8 文件 emit-c 对 pre-B05 基线全同）；AddRef/Release 按 (类, 接口) 各一份；QI 仍占位到 B06；`__comObj` 非空时不归 0 销毁。详见 D21 |
 | B06 | P2 | 转换与判定：接口↔类、多接口对象、`TypeOf … Is <接口>`、上/下行转换契约校验 | ☑ **B06a**（QI + 跨接口 Set + `TypeOf <接口变量> Is <接口>`）+ **B06b**（下行转换 + `TypeOf <类变量> Is <接口>` + 修 B05 的 Nothing 野地址）；**B06c 遗留**：接口值作实参 / 进 Variant → 随 B13/P6 处理 | 4dc6b7e | B06a：`Results: PASS=128 FAIL=0 SKIP=1 TOTAL=129`（exe 7721bd72）+ 断言 11→18；B06b：`Results: PASS=128 FAIL=0 SKIP=1 TOTAL=129`（gate_B06b.log；exe 4202570a 跑前后一致）+ 断言 18→25（DN0..DN3 + TOC1..TOC3）+ legacy `test_implements` 仍 PASS + 8 文件 emit-c 对 pre-B06b(@613d2b8) 全同 + **A/B 负控证明 D22-10 缺陷真实**（基线二进制 exit=139，本批 exit=0）。详见 D22/D23 |
-| B07 | P3 | `Inherits` 语法 + 类链检测（单继承/环/深度）+ 继承成员合并与遮蔽 + 派生域 | ☐ | | |
+| B07 | P3 | `Inherits` 语法 + 类链检测（单继承/环/深度）+ 继承成员合并与遮蔽 + 派生域 | ◐ **B07a**（语法 + stage 2.8 链检测/诊断 + 多文件负例通路）；**B07b 待做**：成员合并 + 继承字段/转发桩发码 + 手册页 | a056705 | `Results: PASS=137 FAIL=0 SKIP=1 TOTAL=138`（gate_B07a.log；exe md5 031f993b 跑前后一致）+ 9 条新用例全绿（ci_n01..n07 + ci_pos_pair + cls_inh_pair）+ legacy `test_implements` 仍 PASS + 8 文件 emit-c 对 pre-B07a(@58f02fe) 全同。详见 D25（B07b 地图 = D26） |
 | B08 | P3 | `Protected` 可见性 + `Overridable/Overrides/NotOverridable` + 类级虚表 `vb6_cvtbl_<Cls>` 与多态派发 | ☐ | | |
 | B09 | P3 | `MyBase.M(…)` 显式基调用（去虚化）+ 构造链顺序 + 无新语法逐字节护栏 | ☐ | | |
 | B10 | P4 | `Implements IFace Via <holderVar>` 委托式实现：持有字段 + 自动转调桩 + 签名检查 | ☐ | | |
@@ -731,6 +731,131 @@ dispinterface 定义；`[Default, Source]` 连接点实现；泛型类实现新�
   字段/方法继承的具体类调用；`Protected`/`Overridable`/`Overrides` = B08，`MyBase` = B09，
   接口实现经继承满足契约的**新式**路径与派生类 vtbl = B08+，CoClass = P5。
 
+### D25 B07a（`Inherits` 语法 + 类链检测 stage 2.8）实施记录（2026-09-23）
+
+1. **词法接线 = 逐处镜像 `Extends` 四处**，实测确认 D24 的判断：`token.hpp` 枚举插在 `Extends`
+   之后 → 位置天然落在 `TrueKeyword..GetObject` 区间内，`token.cpp:7` 的区间判定自动覆盖，
+   但仍照 `Interface`/`Extends` 的样子补进 `isKeyword()` 显式列表（保持一致性，不依赖区间）。
+   软关键字表 `parser_helpers.cpp` 也补了 `Inherits` → `canBeName()` 仍认它，
+   所以 `Dim inherits As Long`、`Implements inherits.X` 这类既有写法不受影响。
+2. **零风险实证**：全仓 VB 语料（`*.bas`/`*.cls`/`*.frm`，含 demo 工程）里 `inherits` 这个词
+   出现次数 = **0**（大小写不敏感、排除本轮新建的 `tests/cls_*`）→ 把它关键字化不改变任何
+   存量输入的词形。护栏另用 8 文件 emit-c 独立证明（第 7 条）。
+3. **只做独立子句行**（兑现 D24①）：`Inherits Base` 走模块级主循环新分支，位置就在 `Implements`
+   之后；头行形式 `Class D Inherits B` **没有**动 —— 那条分支要求 `(Of T)`，放松它就是改既有
+   error path。点号限定名（`Project.IBase`）与 `parseImplements` 同口径吃掉，登记表按整键 +
+   末段两级解析（`ivLastSegment` 同思路）。
+4. **`Module::inherits` 用值类型 `vector<InheritsStmt>`，不需要碰克隆路径**：`ASTCloner::cloneModule`
+   本来就不拷 `implements`/`interfaces`（泛型特化副本不带契约），而泛型模板内的 `Inherits` 已在
+   stage 2.8 拒绝 → 特化副本天然无继承，与克隆器现状自洽。B02b 那种"新结构体 + 3 处克隆"的工作量
+   在这里省掉了，理由是**语义上特化类不该继承模板的继承关系**。
+5. **单继承的 arity 检查不需要新代码**：一条子句里写 `Inherits A, B` 撞的是 parse 的
+   `expectEndOfStatement()`（VB2003），"分两行各写一条"才由 2.8 报 3022 并只取第一条继续
+   （不级联）。自环 `Inherits Self` 单文件即可判定 → 走了既有的 `Test-SyntaxFail` 通路。
+6. **两条实测行为，都是刻意保留的**：
+   - **一条环只报一份**：Pass B 按登记序解 `baseKey`，A↔B 互指时后解出的那个（PairB）才报
+     `SemCircularDependency`，PairA 当时看到的 `baseKey` 还是空 → 不报。与 Extends 链同行为，
+     不是漏报（`tests/cls_neg/ci_n06_*` 就是这一发的常驻用例）。
+   - **接口宿主不能当基类**：`.cls` 里那一个同名 Interface 块不是实例类，Pass A 不登记它 →
+     `Inherits IHost` 得到 3020 "must be a class module in this project"。文案说得过去
+     （宿主确实不是可实例化的类），另开用例 `ci_n07_*`。
+   深度上限 16（含自身）是**自保兜底**，VB6/tB 都没这个限制；链上每个节点自己数自己，
+   所以报错的是最深的那个类。
+7. **护栏口径补一个实测结论**（解除 D24 留的疑问）：8 文件清单里的 `tests/test_implements.vbp`
+   确实产出 `typedef struct vb6_cls_CRectangle` / `vb6_cls_IShape` → **类布局在这份清单里是有覆盖的**，
+   以后"没碰类结构体"这类断言可以拿它当证据。本轮 8 文件对 pre-B07a 基线（worktree @58f02fe，
+   自建 Debug exe）`--emit-c` 输出逐字节全同。
+8. **stage 2.8 的早退条件 = "工程里一条 `Inherits` 都没有"**（D24 末两条的兑现）：先扫
+   `modules_` 再决定是否建表，因此非继承工程的生成物、诊断、阶段耗时无变化。
+9. **用例通路扩到"多文件"**：新增 `Invoke-SyntaxProj` + `Test-SyntaxFailMulti` + `Test-SyntaxMulti`
+   （C3 CLI 本来就收多个位置参数：`driver_args.cpp` 逐个 push、`driver_frontend.cpp` 按扩展名定
+   模块类型）→ 双文件负例（互指环、基是接口宿主）与双文件正例第一次有了零构建通路。
+   运行期正例 `cls_inh_pair`（`tests/cls_inh/Inh.vbp`）两条断言：`INH0:derived`（派生类自己能用）
+   + `INH1:OK`（**基类自身的字段/方法发码没被派生类影响** —— 这条是对照组，不是新功能）。
+   `run_tests.ps1` 登记为纯插入 +66/-0。条目基线 129 → 138（+8 语法 +1 vbp）。
+10. **工具链教训（本轮连踩两次，务必记住）**：**用 bash heredoc / `printf` 写 `.bat` 会被 MSYS 改写**
+    —— `>nul` 变成 `>/dev/null`、`\2019` 被当八进制转义、`\v` 变成垂直制表符 → `call vcvarsall` 静默
+    失败打印"系统找不到指定的路径"，cmake 随后报 `No CMAKE_CXX_COMPILER could be found`，
+    看起来像"VS 被卸了"。**基线构建 bat 一律用 python 以 r-string + CRLF 写**，写完断言
+    文件里不含 `/dev/null`。
+11. **`tests/run_tests.ps1` 是 UTF-8 带 BOM**（`git show HEAD:… | head -c 3` 实测，至少自 B01 起就是），
+    项目记忆里"无 BOM 的 GBK"那条已经过期 → 编辑时**保留 BOM**（二进制读 `[3:]`、写回补
+    `\xef\xbb\xbf`），"非 ASCII 字节数不变 + 无裸 LF + numstat 纯插入"三条断言照旧有效。
+12. **B07b 待做**（本批刻意不碰，避免把合并与语法混在一个门里）：成员合并与遮蔽裁决（11 张成员表、
+    大小写键）、继承字段进派生 struct（扁平复制，不内嵌）、继承方法转发桩、
+    `resolveClassMemberCall` 等消费点走链、legacy Implements 覆盖检查吃合并表、
+    手册页 `docs/vb6-manual/02-语句/Inherits 语句.md`（"实现状态"节要写真实进度，所以随 B07b 一起落）。
+13. **门数字**：`Results: PASS=137 FAIL=0 SKIP=1 TOTAL=138`（`.build/gate_B07a.log`，11:25:47 起跑；exe md5 `031f993b` 跑前后一致 → 可归因）。条目 129→138（+8 语法 +1 vbp），零新增失败；legacy `test_implements` 仍 PASS。
+
+### D26 B07b 开工地图（2026-09-23 B07a 收尾轮产出；行号本轮实测）
+
+- **本轮已就位的东西**：`Module::inherits`（值类型 `vector<InheritsStmt>`）、stage 2.8
+  `runClassChainPrepass` → `Driver::classes_`（`ClassChainView{name, mod, clause, baseKey,
+  baseText, chain(父先己后的小写键), chainBroken}` + `classOrder_`），诊断 3020/3021/3022。
+  **B07b 起 `classes_` 才有消费者**：注入点与发码点都要拿它，记得在 `driver_semantics.cpp`
+  注给 analyzer（照 `ifaces_` 的做法）+ `CCodeGen` 侧加 `clsreg_` 指针（照 `ivreg_`）。
+- **合并必须落在 stage 3 之后、3.5 之前**（B07a 的 2.8 只有"链"，没有"成员表"）：
+  成员表是 `SemanticAnalyzer::analyze` 的类模块块（`semantic_analyzer.cpp:35-162`）在
+  `symTab_.define` 之前逐声明填出来的，基类自己的表要等基类那轮 analyze 跑完才存在，而
+  `modules_` 顺序不保证基先派后 → 合并做成**新的一轮 3.4**（遍历 `analyzers_`，
+  按 `classes_[key].chain` 从根往叶把"父表"并进"子表"）。放在 3.5 之前才有意义的原因：
+  `driver_crossmod.cpp:169-190` 是把 Class 符号的 11 张成员表**逐字段手工拷贝**给外部工程，
+  合并晚于 3.5 就得再抄一遍外部副本。
+- **并表规则**（v1）：键 = `Symbol::toLower(成员名)`；**子优先**（子已占的键父不再占），
+  父先己后的顺序只在"两边都没写过"时决定 `memberNames` 的次序（对 legacy 契约检查
+  `semantic_analyzer.cpp:236-273` 的扫描序可见，不影响新式接口槽序 —— 那是 `IfaceRegistry` 的事）。
+  11 张表都要并：`memberNames` `memberReturnTypes` `memberProcKinds` `memberParams`
+  `memberFieldTypes` `memberFieldNames` `publicFieldNames` `memberFieldDispids`
+  `memberLetParams` `memberSetParams` `eventNames`（`symbol_table.hpp:116-197`；
+  `interfaceMethodParams` 是死字段，别碰）。
+- **发码侧要动的三处**（实测锚点）：
+  1. 结构体字段：`cgen_base_generate_c_open.inc:84-102` 的字段循环只遍历
+     `module.declarations` → 改成"先按链序发祖先的非遮蔽字段，再发本模块的"。
+     `cIdent` **保留大小写** → 同名不同拼写要在合并阶段就裁决掉，发码只认胜者，
+     否则一个 VB 字段发成两个 C 成员（D24③）。
+  2. 转发桩：类过程体的发码点在 `cgen_base_generate_body_pass.inc`（`emitClassFieldAccessors`
+     在 :27 被调），桩 = 对"链上祖先的、未被本类遮蔽的每个过程成员"生成
+     `vb6_<D>_<M>(vb6_cls_<D>* me, …) { return vb6_<B>_<M>((vb6_cls_<B>*)me, …); }`；
+     属性要按 `get_/put_/putref_` 三个方向分别发（`memberLetParams`/`memberSetParams` 已经带方向）。
+  3. 成员查找：`resolveClassMemberCall` 的 Fix 014 兜底（`cgen_util_classcall.cpp:161-200`）
+     读的就是 `classSym->memberNames` —— **合并进符号表之后这里一行都不用改**，
+     `findClassMemberCallParams` / `getClassMethodReturnType` / `canonicalClassMemberName`
+     同理（这是把合并做在符号表而不是做在发码层的最大收益）。
+- **跨 TU 的可行性实测**（这条把 D24④ 的不安解除了一半）：桩里的
+  `(vb6_cls_<B>*)me` 只要 `vb6_cls_<B>` 这个**类型名**可见即可 —— 多模块工程里
+  `driver_codegen_module_loop.inc:47-59` 会把**所有**其它模块名塞进 `externalModules`，
+  `cgen_base_generate_crossmod.inc:46-50` 于是给每个模块的 `.h` 都 `#include` 其它类头，
+  而循环 include 时拿到的是 `cgen_base_generate_epilogue.inc:62-67` 那份
+  `typedef struct vb6_cls_B vb6_cls_B;` **不完整类型** —— 指针转换对不完整类型合法，
+  **成员访问才非法**。所以桩能编译 —— 最小 `cl` 探针（`typedef struct vb6_cls_B vb6_cls_B;` +
+  `(vb6_cls_B*)me` 传给 `int vb6_B_M(vb6_cls_B*, int)`）零诊断通过；但 B07b 开工第一件事仍是
+  在**真实管线**里实测这一条（最小工程：两个 .cls + 一条继承方法调用，看 cl 是否报 C2223/C2156）。
+  本轮 `--emit-c` 观察（`tests/cls_inh`）：两个 `.h` **互相** `#include`（`InhBase.h` 里先
+  `#include "InhDerived.h"` 再发自己的 struct），带 include 守卫时**谁先被包含谁就只拿到对方的
+  前向 typedef** → 派生 TU 能否看到基类完整定义取决于包含序，不能只靠这条静态观察下结论。
+  若实测发现基类不完整，改法是给派生模块的 `.c` 在头部**先**显式 `#include "<Base>.h"`（只此一条，
+  不开泛化包含），或把桩发进基类 TU（代价：跨 TU 的符号可见性与 `_New` 顺序都要重看）。
+- **v1 边界（写进 2.8 的 3022 里，别悄悄降级）**：
+  ① 基类有 `EventDecl` → 拒绝（事件继承的语义 VB6/tB 都没定，且 `events` 字段位置一错就撞 D19 的偏移 0 不变式）；
+  ② 基类或派生类实现**新式 `Interface`** → 拒绝（`__refcount`/`__iv_<I>` 前缀复制规则要与 D21-1 的
+     "一个对象一个计数门禁"一起设计；`IfaceRegistry` 在 2.7 已就绪，判定条件现成）；
+  ③ 基类是 legacy 接口类（被 `Implements` 当接口的 `.cls`）→ 允许（它的成员都是普通字段/过程）；
+  ④ 泛型模板类的特化副本不参与继承（2.8 已拒模板内的 `Inherits`）。
+- **前缀布局兼容**：v1 只有 `void* __comObj`（字段 0）+ 用户字段 → 派生类 = 祖先字段序 + 自身新字段，
+  `(vb6_cls_<B>*)` 看到的偏移天然一致。②的拒绝把 `__refcount`/`__iv_` 的排布问题整体推到 B08+。
+- **用例形态**：`tests/cls_inh/Inh.vbp` 已在门内（`INH0:derived` + `INH1:OK`）。B07b 往
+  `InhDerived.cls` 加"经继承来的字段与方法"的断言（`INH2..INHk`），并补两条对照：
+  遮蔽时子胜（子类自己写同名成员）、以及 `Set d = New InhDerived` 之后**基类自己的实例**
+  仍走自己那份发码（防止桩把两个类的符号混起来）。负例走新加的
+  `Test-SyntaxFailMulti`（①②两类都是双文件）。
+- **手册**：`docs/vb6-manual/02-语句/Inherits 语句.md` 随 B07b 落（"实现状态"节要写真话），
+  README 索引 `:158` 旁按字母序插一行；目录全 CRLF，写完归一并复查 `bare_lf==0`（D18-5）。
+  页面上必须写清 `Extends`=接口、`Inherits`=类（018 §二十一自己把 `Inherits` 用作接口继承，
+  实现走的是 `Extends`，别照字面回头改）。
+- **逐字节护栏**：B07b 动结构体与发码 → 必须跑 8 文件清单（`test_implements.vbp` 已实测确认
+  产出 `vb6_cls_CRectangle`/`vb6_cls_IShape`，类布局有覆盖，D25-7）。基线 = pre-B07b 的 worktree exe，
+  **bat 用 python 写**（D25-10 的 MSYS `>nul` 坑）。
+
 ## 运行日志
 
 - 2026-09-23 建表：范围确认（含完整COM）、规范文档 018 入库、现状盘点完成。
@@ -852,3 +977,16 @@ dispinterface 定义；`[Default, Source]` 连接点实现；泛型类实现新�
   本轮另外两件事：①按用户指示把 CI 记账口径写进总表（**Actions 级全量是里程碑级**，每批仍跑本机门）；②派 Explore 出 **D24 = B07 开工地图**，其中含对 D2/D6 的 4 处硬修正
   （`SymbolKind::Interface` 从未加、`getPublicSymbols` 行号漂移、成员表清单缺 7 张、Class 头行分支要求 `(Of T)`）。边界照旧记录：`me->字段` 形式的接口/类字段不接、
   VB6 的 438 不抛（静态契约拒绝留 B13/P6）、B06c（接口值作实参/进 Variant）随 P6 处理。
+
+- 2026-09-23 10:38–11:55 **B07a（`Inherits` 语法 + 类继承链 prepass stage 2.8）过门并提交 a056705**：
+  词法接线逐处镜像 `Extends`（枚举位置天然落在 `isKeyword` 区间，仍补显式列表；软关键字表加 `Inherits` → `canBeName` 仍认它），
+  并且实测**全仓 VB 语料里 `inherits` 这个词出现 0 次** → 关键字化对存量输入零影响，这一点又被 8 文件 emit-c 逐字节护栏独立证明（对 worktree @58f02fe 基线全同）。
+  stage 2.8 `runClassChainPrepass` + Driver 级只读 `ClassChainRegistry`（Pass A/B/C 照抄 `driver_interface.cpp`）：登记/基类求解/环检测/链展开/深度 16，
+  新诊断 3020/3021/3022；早退条件 = 工程里一条 `Inherits` 都没有（兑现 D24）。刻意保留的两条实测行为：**一条环只报一份**（与 Extends 同行为，
+  `ci_n06_*` 常驻）、**接口宿主不能当基类**（宿主那一个 `.cls` 不是可实例化类 → 3020，`ci_n07_*`）。
+  本批另开两条通路：`Test-SyntaxFail` 只接单源文件 → 新增 `Invoke-SyntaxProj`/`Test-SyntaxFailMulti`/`Test-SyntaxMulti`（C3 CLI 本就收多个位置参数），
+  双文件负例第一次有零构建通路；运行期正例 `tests/cls_inh/Inh.vbp`（`INH0:derived` + `INH1:OK`，后者是“基类自身成员未被派生类影响”的对照组）。
+  门 `Results: PASS=137 FAIL=0 SKIP=1 TOTAL=138`（exe 031f993b，11:25:47 起跑、最后一次源码改动在起跑前）。`run_tests.ps1` 登记为纯插入 +66/-0。
+  本轮踩到的工具链坑（已进记忆）：heredoc/`printf` 写 `.bat` 会被 MSYS 改写（`>nul`→`>/dev/null`、`\2019` 当八进制）→ vcvars 静默失败、cmake 报找不到编译器，
+  看起来像 VS 被卸；基线 bat 一律用 python r-string + CRLF 写并断言不含 `/dev/null`。另更正记忆：`run_tests.ps1` 是 **UTF-8 带 BOM**（自 B01 起就是），编辑时剥了要写回。
+  B07b 地图 = D26（含“合并落 3.4”、11 张成员表、转发桩三处锚点、跨 TU 可见性待实测、v1 四类边界）。
