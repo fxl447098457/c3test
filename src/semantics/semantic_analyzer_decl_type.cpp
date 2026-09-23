@@ -270,4 +270,10 @@ void SemanticAnalyzer::visit(ParameterDecl& node) {
     // 参数在SubDecl/FunctionDecl中处理
 }
 
+// Fix 197: 对外入口 — Driver 在 Pass 1 前预注册跨模块 Public 枚举成员时
+// 复用同一求值器 (evalOptionalDefault 查符号表发生在 Pass 1 期间).
+bool SemanticAnalyzer::evalEnumConstIntForDriver(ASTNode* expr, int64_t& result) {
+    return evalEnumMemberConstInt(expr, result);
+}
+
 } // namespace vb6c3

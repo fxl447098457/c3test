@@ -131,6 +131,11 @@ public:
     // 对给定声明按 pass1 注册 + pass2 体分析 走一遍 (与 visit(Module) 同构).
     void analyzeExtraDecls(const std::vector<Decl*>& decls);
 
+    // Fix 197: 枚举成员常量求值的对外入口 — Driver 在 Pass 1 前预注册跨模块
+    // Public Enum 成员时调用 (evalOptionalDefault 查符号表发生在 Pass 1 期间,
+    // 而 runCrossModuleResolution 在其后, 跨模块枚举成员必须预注册).
+    static bool evalEnumConstIntForDriver(ASTNode* expr, int64_t& result);
+
 private:
     Diagnostics& diag_;
     SymbolTable symTab_;
