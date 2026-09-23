@@ -125,4 +125,13 @@ Sub Main()
     ' holding a derived instance now dispatches; INH38 is the explicit form that already worked.
     If hd.ItemDefault() = "derived9" Then Debug.Print "INH37:OK" Else Debug.Print "INH37:FAIL " & hd.ItemDefault()
     If hd.ItemBare() = "derived9" Then Debug.Print "INH38:OK" Else Debug.Print "INH38:FAIL " & hd.ItemBare()
+    ' INH39/INH40 (ai/022 B08e-6, site 9): the overridable call is made on the *return
+    ' variable* of a Function whose declared return type is the base class. RefOf hands back
+    ' Me, so on the derived instance it must answer "derived" (INH39 -- used to bind
+    ' statically to the base body); INH40 is the plain base-typed control that stays "base".
+    Dim rb As InhBase
+    Set rb = d.RefOf()
+    If d.g_viaRet = "derived" Then Debug.Print "INH39:OK" Else Debug.Print "INH39:FAIL " & d.g_viaRet
+    Set rb = b.RefOf()
+    If b.g_viaRet = "base" Then Debug.Print "INH40:OK" Else Debug.Print "INH40:FAIL " & b.g_viaRet
 End Sub

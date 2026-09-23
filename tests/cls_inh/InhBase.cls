@@ -100,6 +100,16 @@ Public Overridable Function Greet(ByVal who As String) As String
     Greet = "hi " & who & " (base)"
 End Function
 
+' ai/022 B08e-6 site 9: `RefOf.Speak()` inside a Function whose return type is this class
+' reads that function's return variable. The return variable is a plain C local, so the
+' receiver is pure and the call dispatches (INH39/INH40 in InhMain.bas).
+Public g_viaRet As String
+
+Public Function RefOf() As InhBase
+    Set RefOf = Me
+    g_viaRet = RefOf.Speak()
+End Function
+
 Public Function PickThru() As String
     PickThru = Me.Pick()
 End Function

@@ -129,6 +129,18 @@
             std::string resolvedFn =
                 resolveClassMemberCall(retClassName, node.memberName);
 
+            // 类虚表 (ai/022 B08e-6 站点⑫): 接收者是内层调用的发射文本 (`obj.Sql(s)`),
+            // 按构造含调用 → 求值两次就是双副作用, 派发不了。mustDispatch=true 把这里的
+            // 静默直调换成一条 VB3027: 与其"编得过、虚调用消失"(D27-13 判例), 不如判死。
+            if (!resolvedFn.empty() && !suppressVirtDispatch_
+                && resolvedFn.find("_prop_let_") == std::string::npos
+                && resolvedFn.find("_prop_set_") == std::string::npos) {
+                const std::string dispatchFn015 = virtDispatchCallee(
+                    retClassName, node.memberName, wrappedObj,
+                    /*mustDispatch=*/true, node.loc);
+                if (!dispatchFn015.empty()) resolvedFn = dispatchFn015;
+            }
+
             // 关键决策点: 外层是否要把本节点当作 callee 调用?
             // - asCallCallee_=true: visit(IndexOrCallExpr)/visit(CallStmt) 会随后附加
             //   用户参数 + Optional 默认值填充. 此时只 emit 裸函数名, wrappedObj 走

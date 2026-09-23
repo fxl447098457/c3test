@@ -623,6 +623,48 @@ function Test-SyntaxMulti {
     }
 }
 
+# Codegen-stage probes (ai/022 B08e-6): diagnostics raised while C is being emitted never
+# reach --syntax-only (driver_compile.cpp returns before codegen), and a full build would
+# pay for cl.exe + link. `--emit-c` runs the whole front end plus codegen and stops there.
+function Invoke-CodegenProj {
+    param([array]$Sources)
+    $argList = (($Sources | ForEach-Object { '"' + $_ + '"' }) -join ' ')
+    $out = & cmd /c ('"' + $C3 + '" ' + $argList + ' --emit-c 2>&1')
+    $script:codegenProjExit = $LASTEXITCODE
+    return (($out | Out-String) -replace '\s+', ' ')
+}
+
+function Test-CompileFail {
+    param([string]$Name, [array]$Sources, [string]$Needle)
+    $script:total++
+    Write-Host -NoNewline "  [COMPILE-FAIL] $Name ... "
+    $text = Invoke-CodegenProj $Sources
+    if ($script:codegenProjExit -ne 0 -and $text.Contains($Needle)) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        Write-Host "  expected failing codegen containing: $Needle" -ForegroundColor DarkGray
+        if ($Verbose) { Write-Host $text }
+    }
+}
+
+function Test-Compile {
+    param([string]$Name, [array]$Sources)
+    $script:total++
+    Write-Host -NoNewline "  [COMPILE] $Name ... "
+    $text = Invoke-CodegenProj $Sources
+    if ($script:codegenProjExit -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        if ($Verbose) { Write-Host $text }
+    }
+}
+
 function Test-SyntaxFail {
     param([string]$Name, [string]$Source, [string]$Needle)
     $script:total++
@@ -1032,6 +1074,28 @@ if ($Category -in @("all", "syntax")) {
     }
     if (Test-Path "$Tests\cls_neg\ci_pos2_base.cls") {
         Test-SyntaxMulti "ci_pos2_prot_in_family" @("$Tests\cls_neg\ci_pos2_base.cls", "$Tests\cls_neg\ci_pos2_derived.cls")
+    }
+    # ai/022 B08e-6 (class-vtable dispatch map, codegen stage): the three shapes below carry a
+    # call inside the receiver, so a virtual call there would need the receiver twice. Sites 12
+    # and 10 used to compile and bind statically to the base body; they now report VB3027. Site
+    # 8 already reported it through the priority-2 dispatcher -- pinned here so a refactor
+    # cannot lose it. Site 9's receiver is a plain return variable, so it must still compile.
+    $cgenVirtNeg = @(
+        @("ci_n24_chain_receiver", "ci_n24"),
+        @("ci_n25_prop_chain_receiver", "ci_n25"),
+        @("ci_n26_prop_receiver", "ci_n26")
+    )
+    foreach ($c in $cgenVirtNeg) {
+        $a = "$Tests\cls_neg\" + $c[1] + "_base.cls"
+        $b = "$Tests\cls_neg\" + $c[1] + "_derived.cls"
+        if ((Test-Path $a) -and (Test-Path $b)) {
+            Test-CompileFail $c[0] @($a, $b) "cannot be dispatched in this build"
+        } else {
+            Write-Host "  [COMPILE-FAIL] $($c[0]) ... SKIP (missing case files)" -ForegroundColor DarkGray
+        }
+    }
+    if (Test-Path "$Tests\cls_neg\ci_pos3_base.cls") {
+        Test-Compile "ci_pos3_retval_receiver" @("$Tests\cls_neg\ci_pos3_base.cls", "$Tests\cls_neg\ci_pos3_derived.cls")
     }
     Write-Host ""
     
