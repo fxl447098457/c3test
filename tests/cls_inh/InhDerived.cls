@@ -43,6 +43,10 @@ Public Overrides Property Get Level() As Long
     Level = Me.m_lvl + 100
 End Property
 
+Public Overrides Property Get Item(ByVal v As Variant) As String
+    Item = "derived" & CLng(v)
+End Property
+
 Public Overrides Function Greet(ByVal who As String) As String
     Greet = "hi " & who & " (derived)"
 End Function

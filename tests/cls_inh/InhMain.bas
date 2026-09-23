@@ -121,4 +121,8 @@ Sub Main()
     ' INH36 is the bare-receiver control that already worked before this batch.
     If hd.ViaLevel() = "105" Then Debug.Print "INH35:OK" Else Debug.Print "INH35:FAIL " & hd.ViaLevel()
     If hd.ViaLevelBare() = "107" Then Debug.Print "INH36:OK" Else Debug.Print "INH36:FAIL " & hd.ViaLevelBare()
+    ' INH37/INH38 (ai/022 B08e-5, sites 6+7): default-property call form on a base-typed field
+    ' holding a derived instance now dispatches; INH38 is the explicit form that already worked.
+    If hd.ItemDefault() = "derived9" Then Debug.Print "INH37:OK" Else Debug.Print "INH37:FAIL " & hd.ItemDefault()
+    If hd.ItemBare() = "derived9" Then Debug.Print "INH38:OK" Else Debug.Print "INH38:FAIL " & hd.ItemBare()
 End Sub

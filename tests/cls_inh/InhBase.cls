@@ -71,6 +71,10 @@ Public Property Let Level(ByVal v As Long)
     m_lvl = v
 End Property
 
+Public Overridable Property Get Item(ByVal v As Variant) As String
+    Item = "base" & CLng(v)
+End Property
+
 Protected Sub SetSecret(ByVal v As Long)
     m_secret = v
 End Sub

@@ -37,3 +37,11 @@ Public Function ViaLevelBare() As String
     m_up.Level = 7
     ViaLevelBare = CStr(m_up.Level)
 End Function
+' B08e-5 (sites 6+7): the default-property call form `m_up(9)` used to bind statically to the
+' base Item even though the explicit `m_up.Item(9)` already dispatched; both must agree.
+Public Function ItemDefault() As String
+    ItemDefault = m_up(9)
+End Function
+Public Function ItemBare() As String
+    ItemBare = m_up.Item(9)
+End Function
