@@ -8,8 +8,8 @@
 // stage 3.4 (mergeInheritedMembers): 语义分析**之后**、跨模块链接 (3.5) **之前**, 把祖先自己
 // 声明的成员并进派生类的 Class 符号 —— 晚于 3.5 就得再抄一遍外部工程副本。
 //
-// 两个阶段的早退条件都是"工程里一条 Inherits 都没有" (D24 护栏口径): 无新语法时不改任何
-// 生成物、符号表或诊断。
+// 两个阶段的早退条件都是"工程里既没有 Inherits / 虚修饰符, 也没有 Protected 成员"
+// (D24 护栏口径 + B08c 的 D34-2): 无新语法时不改任何生成物、符号表或诊断。
 
 #include "driver/driver.hpp"
 
@@ -117,6 +117,16 @@ std::string procDeclName(const Decl& d) {
 bool moduleHasVirtualMods(const Module& m) {
     for (const auto& d : m.declarations) {
         if (d && procVirtOf(*d) != ProcVirt::None) return true;
+    }
+    return false;
+}
+
+// B08c: 本模块有没有声明过任一 Protected 成员。越权判定要认"接收者声明的那个类是不是
+// 工程类", 而这只能读链视图 —— 所以带 Protected 的工程即便没有 Inherits 也得建表。
+bool moduleHasProtectedMember(const Module& m) {
+    if (!m.isClassModule) return false;   // 非类模块的 Protected 没有家族可言
+    for (const auto& d : m.declarations) {
+        if (d && memberAccess(*d) == AccessLevel::Protected) return true;
     }
     return false;
 }
@@ -329,17 +339,23 @@ bool Driver::runClassChainPrepass() {
     // B07a 之前逐字节相同 (零回归护栏的按 feature 门禁口径, D24 末两条)。
     bool anyClause = false;
     bool anyVirtual = false;
+    bool anyProtected = false;   // tB B08c
     for (auto& mod : modules_) {
         if (!mod) continue;
         if (!mod->inherits.empty()) anyClause = true;
         if (!anyVirtual && moduleHasVirtualMods(*mod)) anyVirtual = true;
-        if (anyClause && anyVirtual) break;
+        if (!anyProtected && moduleHasProtectedMember(*mod)) anyProtected = true;
+        if (anyClause && anyVirtual && anyProtected) break;
     }
-    if (!anyClause && !anyVirtual) return true;
+    if (!anyClause && !anyVirtual && !anyProtected) return true;
 
     // B08b E0 只要 modules_ → 放在建表之前, 且**不**因为"没有 Inherits"而跳过
     checkVirtualPlacement();
-    if (!anyClause) return !diag_->hasErrors();
+    if (!anyClause && !anyProtected) return !diag_->hasErrors();
+    // 只有 Protected、一条 Inherits 都没有的工程也往下走 Pass A/C: 越权判定需要视图。
+    // 这些视图全是单元素链, 后端 classChainOf() 的 `chain.size() < 2` 守卫照旧返回
+    // nullptr, 成员合并 (3.4) 与槽表 (3.4b) 也都在同一个守卫上空转 —— 也就是这条只喂
+    // 语义层, 不给存量工程开任何新的发码路径 (D34-2)。
 
     // --- Pass A: 登记可继承的工程类 + 子句侧边界拒绝 ---
     for (auto& mod : modules_) {

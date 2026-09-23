@@ -164,6 +164,9 @@ void SemanticAnalyzer::visit(MemberAccessExpr& node) {
     // 虚方法 (tB, B08d): `Me.<可覆盖成员>` 与 `对象变量.<成员>` 都交给发码层的间接调用
     // (CCodeGen::virtDispatchCallee 按 stage 3.4b 的槽表定槽), 语义层不再介入 —— 这里曾有的
     // B08b 拒绝判定已按 D32① 删除: 留着判定再另起一条发码路会得到永远到不了的码。
+    // 类继承 (tB, B08c): 这里是 obj.<成员> 唯一的必经点 (读、写、Set/Let、Call 与调用的
+    // callee 都从这里过), Protected 越权就判在这。
+    if (node.object) checkProtectedVisibility(*node.object, node.memberName, node.loc);
     // P20-21: 如果object是UDT, 查找成员类型
     if (objType == Vb6Type::UserDefinedType) {
         // 查找UDT符号获取成员类型

@@ -45,8 +45,9 @@ struct ClassChainView {
 
     // --- B08b: 虚成员 (Overridable / Overrides) 的裁决结果, stage 2.8 Pass E 回填, 之后只读 ---
     // dynamicKeys = "本类体内调用这个名字必须走虚槽"的成员键集合: 本类 (或它的某个后代)
-    // 声明的 Overridable 成员, 且链上**有更深的类**写了 Overrides。B08b 的发码还是静态绑定
-    // (类虚表在 B08d), 所以语义层拿这张表把"会静默绑成基类实现"的调用点判死 —— 见 D30。
+    // 声明的 Overridable 成员, 且链上**有更深的类**写了 Overrides。B08d 之后这条线真的发虚表
+    // (见下面的 virtSlots), 语义层只留"裸名调用"那一处拒绝; 属性方向要等槽键, 所以本表存
+    // **成员名**小写、发码层另用 virtSlots (D32④)。
     // 键用 interface_sig.hpp::ifaceSlotKey 的槽键 (属性按 get_/put_/putref_ 分向)。
     std::vector<std::string> dynamicKeys;
     bool hasVirtualMods = false;  // 本类自己声明过任一虚修饰符 (早退判据与诊断定位用)

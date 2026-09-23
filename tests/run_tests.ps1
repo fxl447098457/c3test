@@ -1013,6 +1013,26 @@ if ($Category -in @("all", "syntax")) {
     if (Test-Path "$Tests\cls_neg\ci_pos_base.cls") {
         Test-SyntaxMulti "ci_pos_pair" @("$Tests\cls_neg\ci_pos_base.cls", "$Tests\cls_neg\ci_pos_derived.cls")
     }
+    # ai/022 B08c (Protected access from outside the class family): the three out-of-family
+    # shapes below must be rejected at the call site, while in-family access (a base-typed
+    # variable used from the derived class, and from the declaring class itself) stays silent.
+    $protNeg = @(
+        @("ci_n21_prot_field_write", "ci_n21_base.cls", "ci_n21_stranger.cls"),
+        @("ci_n22_prot_sub_stdmod", "ci_n22_base.cls", "ci_n22_outsider.bas"),
+        @("ci_n23_prot_property_get", "ci_n23_base.cls", "ci_n23_stranger.cls")
+    )
+    foreach ($c in $protNeg) {
+        $a = "$Tests\cls_neg\" + $c[1]
+        $b = "$Tests\cls_neg\" + $c[2]
+        if ((Test-Path $a) -and (Test-Path $b)) {
+            Test-SyntaxFailMulti $c[0] @($a, $b) "is Protected"
+        } else {
+            Write-Host "  [SYNTAX-FAIL] $($c[0]) ... SKIP (missing case files)" -ForegroundColor DarkGray
+        }
+    }
+    if (Test-Path "$Tests\cls_neg\ci_pos2_base.cls") {
+        Test-SyntaxMulti "ci_pos2_prot_in_family" @("$Tests\cls_neg\ci_pos2_base.cls", "$Tests\cls_neg\ci_pos2_derived.cls")
+    }
     Write-Host ""
     
     # --- 生成环境检查与汇总 (冒烟+语法+VBP+run 计数) ---

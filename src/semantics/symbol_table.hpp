@@ -108,6 +108,11 @@ struct Symbol {
     // 仅对 SymbolKind::Variable 有效 — 当变量声明为 As ClassName 时存储类名
     // 用于跨模块解析时传递类类型信息到 consuming 模块的 cgen
     std::string variableTypeName;
+    // tB B08c: 局部变量/参数 `As <类型>` 的**原文类型名** (模块级字段同样记录, 与上一条独立)。
+    // 为什么不复用 variableTypeName: 那条已被后端十余处按"非空即类实例"消费 (inferClassTypeOfExpr
+    // 的 Fix 084g 分支、cgen_with、comwrite…)，给局部变量补上它就是改**发码**，破本批"发码零改动"
+    // 的验收口径。本字段目前只有 Protected 越权判定一个读者。
+    std::string srcTypeName;
     // Fix 183: 该变量声明为 As New (模块级 Public As New ClassName).
     // 跨模块注入时必须随 Symbol 复制, 否则消费模块不知道需要惰性实例化,
     // 导致 As New 全局对象运行期恒为 NULL → 解引用 0xC0000005.

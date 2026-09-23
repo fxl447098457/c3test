@@ -83,7 +83,8 @@ enum class DiagnosticID : uint16_t {
     SemInheritsUnknownBase = 3020,    // Inherits 的基名不是本工程内的类
     SemInheritsTooDeep = 3021,        // 继承链长度超上限
     SemInheritsNotSupported = 3022,   // v1 边界: 非类模块 / 泛型模板内 / 多条 Inherits
-    // 3023 预留: B08c (家族外越权访问 Protected 的拒绝) —— 见 ai/022 D29-1/D30。
+    // tB 类继承 (ai/022 D29-1, 批次 B08c): 家族外访问 Protected 成员。
+    SemProtectedOutsideFamily = 3023,   // obj.<Protected 成员> 的接收者类不在当前类的家族里
     // 虚方法 (tB 扩展, ai/022 D30, 批次 B08b). 文案一律 ASCII (D12).
     SemOverrideTargetUnknown = 3024,    // Overrides 找不到同名的祖先可覆盖成员
     SemOverrideNotOverridable = 3025,   // 祖先成员存在但未标 Overridable (或显式 NotOverridable)
