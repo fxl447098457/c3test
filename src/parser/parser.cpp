@@ -287,6 +287,9 @@ bool Parser::isDeclarationStart() const {
         case TokenKind::Event:
         case TokenKind::Friend:
         case TokenKind::Protected:  // tB 扩展 (B08a)
+        case TokenKind::Overridable:       // tB 扩展 (B08b): 虚方法修饰符可起一行声明
+        case TokenKind::Overrides:
+        case TokenKind::NotOverridable:
         case TokenKind::Global:
             return true;
         default:

@@ -69,3 +69,10 @@ End Sub
 Protected Function Secret() As Long
     Secret = m_secret
 End Function
+Public Overridable Function Speak() As String
+    Speak = "base"
+End Function
+
+Public NotOverridable Function Frozen() As String
+    Frozen = "frozen"
+End Function

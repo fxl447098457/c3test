@@ -83,6 +83,12 @@ enum class DiagnosticID : uint16_t {
     SemInheritsUnknownBase = 3020,    // Inherits 的基名不是本工程内的类
     SemInheritsTooDeep = 3021,        // 继承链长度超上限
     SemInheritsNotSupported = 3022,   // v1 边界: 非类模块 / 泛型模板内 / 多条 Inherits
+    // 3023 预留: B08c (家族外越权访问 Protected 的拒绝) —— 见 ai/022 D29-1/D30。
+    // 虚方法 (tB 扩展, ai/022 D30, 批次 B08b). 文案一律 ASCII (D12).
+    SemOverrideTargetUnknown = 3024,    // Overrides 找不到同名的祖先可覆盖成员
+    SemOverrideNotOverridable = 3025,   // 祖先成员存在但未标 Overridable (或显式 NotOverridable)
+    SemOverrideSignatureMismatch = 3026, // Overrides 与祖先槽签名不符
+    SemVirtualNotSupported = 3027,      // v1 边界: 该处的虚成员用法尚不支持 (含"需要类虚表")
 
     // 代码生成 (4xxx)
     CodeGenUnsupportedFeature = 4001,

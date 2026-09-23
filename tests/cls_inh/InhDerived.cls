@@ -28,3 +28,12 @@ Public Function BumpTwice() As Long
     Me.Bump
     BumpTwice = Me.Hits()
 End Function
+
+' overrides the base Overridable member: a direct call on the derived object binds here
+Public Overrides Function Speak() As String
+    Speak = "derived"
+End Function
+
+Public Function FrozenSeen() As String
+    FrozenSeen = Me.Frozen()
+End Function

@@ -31,6 +31,8 @@ bool Token::isKeyword() const {
         || kind == TokenKind::RaiseEvent || kind == TokenKind::WithEvents
         || kind == TokenKind::Interface || kind == TokenKind::Extends
         || kind == TokenKind::Inherits
+        || kind == TokenKind::Overridable || kind == TokenKind::Overrides
+        || kind == TokenKind::NotOverridable
         || kind == TokenKind::OnError || kind == TokenKind::GoTo
         || kind == TokenKind::GoSub || kind == TokenKind::Return
         || kind == TokenKind::Resume || kind == TokenKind::Exit

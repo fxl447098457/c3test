@@ -53,4 +53,10 @@ Sub Main()
     If b.PtSum() = 3 And d.PtSum() = 15 Then Debug.Print "INH11:OK" Else Debug.Print "INH11:FAIL"
     If d.RevealSecret(4) = 8 Then Debug.Print "INH12:OK" Else Debug.Print "INH12:FAIL v=" & d.RevealSecret(4)
     If d.TagRoundTrip("S") = "S" Then Debug.Print "INH13:OK" Else Debug.Print "INH13:FAIL"
+    ' INH14..INH16 (ai/022 B08b): an override applies to calls on the derived object, while the
+    ' base instance keeps its own implementation (through-base dispatch needs the class vtable,
+    ' which is ai/022 B08d). FrozenSeen() proves NotOverridable parses and inherits as a stub.
+    If d.Speak() = "derived" Then Debug.Print "INH14:OK" Else Debug.Print "INH14:FAIL " & d.Speak()
+    If b.Speak() = "base" Then Debug.Print "INH15:OK" Else Debug.Print "INH15:FAIL " & b.Speak()
+    If d.FrozenSeen() = "frozen" Then Debug.Print "INH16:OK" Else Debug.Print "INH16:FAIL " & d.FrozenSeen()
 End Sub

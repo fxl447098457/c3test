@@ -126,6 +126,8 @@ public:
     // 合并只发生在 Class 符号的成员表上, 模块作用域里没有它的过程符号 → 裸名会静默生成
     // 空调用, 所以发码前必须报错 (见 visit(IdentifierExpr) 的调用点)。
     bool declaredByAncestor(const std::string& name) const;
+    // 虚方法 (tB, B08b): 本类体内对这个名字的调用必须走虚槽 (有后代 Overrides 了它)
+    bool virtualCallNeedsDispatch(const std::string& name) const;
 
     // 泛型 (tB, G3): 模板登记表只读视图 (driver 在逐模块分析前注入).
     void setGenericRegistry(const GenRegistry* reg) { genReg_ = reg; }

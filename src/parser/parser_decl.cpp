@@ -10,10 +10,33 @@ namespace vb6c3 {
 // ============================================================
 
 DeclPtr Parser::parseDeclaration() {
+    // 虚方法修饰位 (tB 扩展, ai/022 B08b): VB6 里 Overridable/Overrides/NotOverridable 与访问
+    // 修饰符同位、互斥, 且访问修饰符可省 (`Overridable Sub X`) → 起手先吃一次, 吃了访问修饰符
+    // 之后再吃一次, 两种书写顺序都收。
+    ProcVirt virt = ProcVirt::None;
+    eatVirtualModifiers(virt);
+    if (cur_.kind != TokenKind::Public && cur_.kind != TokenKind::Private &&
+        cur_.kind != TokenKind::Friend && cur_.kind != TokenKind::Protected &&
+        cur_.kind != TokenKind::Global) {
+        checkVirtualOnProcStart(virt);
+    }
+
     switch (cur_.kind) {
-        case TokenKind::Sub:      return parseSubDecl(AccessLevel::Default, false);
-        case TokenKind::Function: return parseFunctionDecl(AccessLevel::Default, false);
-        case TokenKind::Property: return parsePropertyDecl(AccessLevel::Default);
+        case TokenKind::Sub: {
+            auto d = parseSubDecl(AccessLevel::Default, false);
+            if (d) d->virt = virt;
+            return d;
+        }
+        case TokenKind::Function: {
+            auto d = parseFunctionDecl(AccessLevel::Default, false);
+            if (d) d->virt = virt;
+            return d;
+        }
+        case TokenKind::Property: {
+            auto d = parsePropertyDecl(AccessLevel::Default);
+            if (d) d->virt = virt;
+            return d;
+        }
         case TokenKind::Type:     return parseTypeDecl(AccessLevel::Default);
         case TokenKind::Enum:     return parseEnumDecl(AccessLevel::Default);
         case TokenKind::Declare:  return parseDeclareDecl(AccessLevel::Default);
@@ -40,11 +63,26 @@ DeclPtr Parser::parseDeclaration() {
             }
             advance(); // consume access modifier
 
+            eatVirtualModifiers(virt);         // `Public Overridable Sub` (B08b)
+            checkVirtualOnProcStart(virt);     // 其余声明种类带虚修饰符 = 报错
+
             // Public Sub/Function/property/Type/Enum/Declare/Event/Const/Dim
             switch (cur_.kind) {
-                case TokenKind::Sub:      return parseSubDecl(access, false);
-                case TokenKind::Function: return parseFunctionDecl(access, false);
-                case TokenKind::Property: return parsePropertyDecl(access);
+                case TokenKind::Sub: {
+                    auto d = parseSubDecl(access, false);
+                    if (d) d->virt = virt;
+                    return d;
+                }
+                case TokenKind::Function: {
+                    auto d = parseFunctionDecl(access, false);
+                    if (d) d->virt = virt;
+                    return d;
+                }
+                case TokenKind::Property: {
+                    auto d = parsePropertyDecl(access);
+                    if (d) d->virt = virt;
+                    return d;
+                }
                 case TokenKind::Type:     return parseTypeDecl(access);
                 case TokenKind::Enum:     return parseEnumDecl(access);
                 case TokenKind::Declare:  return parseDeclareDecl(access);
@@ -61,6 +99,35 @@ DeclPtr Parser::parseDeclaration() {
             advance();
             return nullptr;
     }
+}
+
+// 吃连续的虚方法修饰符 (B08b)。三个修饰符互斥: 写第二个就报一条, 值取最后一个 (让后面的
+// 过程名解析继续走, 免得整块声明失联级联)。
+void Parser::eatVirtualModifiers(ProcVirt& io) {
+    for (;;) {
+        ProcVirt v = ProcVirt::None;
+        if (cur_.kind == TokenKind::Overridable) v = ProcVirt::Overridable;
+        else if (cur_.kind == TokenKind::Overrides) v = ProcVirt::Overrides;
+        else if (cur_.kind == TokenKind::NotOverridable) v = ProcVirt::NotOverridable;
+        else break;
+        if (io != ProcVirt::None) {
+            diag_.error(DiagnosticID::ParseUnexpectedToken, currentLoc(),
+                "duplicate virtual modifier (Overridable / Overrides / NotOverridable are"
+                " mutually exclusive)");
+        }
+        io = v;
+        advance();
+    }
+}
+
+// 虚修饰符只能落在 Sub/Function/Property 上 (B08b)。报错后清空, 让声明本体照旧解析。
+void Parser::checkVirtualOnProcStart(ProcVirt& io) {
+    if (io == ProcVirt::None) return;
+    if (cur_.kind == TokenKind::Sub || cur_.kind == TokenKind::Function ||
+        cur_.kind == TokenKind::Property) return;
+    diag_.error(DiagnosticID::ParseUnexpectedToken, currentLoc(),
+        "virtual modifier is only allowed on Sub/Function/Property declarations");
+    io = ProcVirt::None;
 }
 
 // ============================================================

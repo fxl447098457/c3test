@@ -60,6 +60,16 @@ enum class AccessLevel : uint8_t {
     Default = Public,
 };
 
+// 虚方法修饰位 (tB 扩展, ai/022 B08b): 只作用于 Sub/Function/Property 声明。
+// VB6 原生三件套互斥 → 一个字段三种取值, 不写成三个 bool (那会出现 6 种非法组合)。
+enum class ProcVirt : uint8_t {
+    None = 0,        // 未写修饰符 (= VB6 默认: 不可覆盖)
+    Overridable,     // 声明可被派生类覆盖
+    Overrides,       // 本声明覆盖祖先的 Overridable 成员
+    NotOverridable,  // 显式声明不可覆盖 (= None; 只用来与基类意图对照)
+};
+
+
 // VB6过程类型
 enum class ProcKind : uint8_t {
     Sub,

@@ -82,6 +82,53 @@ bool keyIn(const std::vector<std::string>& names, const std::string& key) {
     return false;
 }
 
+// --- B08b: 虚方法修饰位的读法 (只有过程声明能带, 见 parser_decl.cpp) ---
+
+ProcVirt procVirtOf(const Decl& d) {
+    switch (d.kind) {
+        case ASTNodeKind::SubDecl:      return static_cast<const SubDecl&>(d).virt;
+        case ASTNodeKind::FunctionDecl: return static_cast<const FunctionDecl&>(d).virt;
+        case ASTNodeKind::PropertyDecl: return static_cast<const PropertyDecl&>(d).virt;
+        default: return ProcVirt::None;
+    }
+}
+
+const char* procVirtText(ProcVirt v) {
+    switch (v) {
+        case ProcVirt::Overridable: return "Overridable";
+        case ProcVirt::Overrides: return "Overrides";
+        case ProcVirt::NotOverridable: return "NotOverridable";
+        default: break;
+    }
+    return "";
+}
+
+std::string procDeclName(const Decl& d) {
+    switch (d.kind) {
+        case ASTNodeKind::SubDecl:      return static_cast<const SubDecl&>(d).name;
+        case ASTNodeKind::FunctionDecl: return static_cast<const FunctionDecl&>(d).name;
+        case ASTNodeKind::PropertyDecl: return static_cast<const PropertyDecl&>(d).name;
+        default: break;
+    }
+    return std::string();
+}
+
+// 本模块有没有出现过任一虚修饰符 (2.8 的早退判据之一, 与 Inherits 子句并列)
+bool moduleHasVirtualMods(const Module& m) {
+    for (const auto& d : m.declarations) {
+        if (d && procVirtOf(*d) != ProcVirt::None) return true;
+    }
+    return false;
+}
+
+void addKeyOnce(std::vector<std::string>& keys, const std::string& k) {
+    if (k.empty()) return;
+    for (const auto& n : keys) {
+        if (n == k) return;
+    }
+    keys.push_back(k);
+}
+
 // --- Pass D 的 v1 边界判据 (只看 AST, 不依赖语义层) ---
 
 bool hasEventDecl(const Module& m) {
@@ -120,6 +167,130 @@ bool hasOverloadedProcs(const Module& m) {
 
 } // namespace
 
+// B08b E0: 虚修饰符的**位置**合法性。只读 modules_, 不依赖类链登记表 —— 这样"工程里没有一条
+// Inherits 但写了 Overridable"也能查, 而且不必为它建登记表 (建了就等于给无 Inherits 的工程
+// 新开一条后端路径, 破零回归护栏)。
+void Driver::checkVirtualPlacement() {
+    for (auto& mod : modules_) {
+        if (!mod) continue;
+        for (const auto& d : mod->declarations) {
+            if (!d) continue;
+            const ProcVirt pv = procVirtOf(*d);
+            if (pv == ProcVirt::None) continue;
+            const std::string vt = procVirtText(pv);
+            const std::string dn = procDeclName(*d);
+            if (!mod->isClassModule) {
+                diag_->error(DiagnosticID::SemVirtualNotSupported, d->loc,
+                    "'" + vt + "' member '" + dn + "' is only allowed in a class module (.cls):"
+                    " standard modules have no derived domain to override into");
+            } else if (!mod->classTypeParams.empty()) {
+                // 与 Inherits 同一理由: 特化克隆不携带 virt 位, 收了就是静默丢语义
+                diag_->error(DiagnosticID::SemVirtualNotSupported, d->loc,
+                    "'" + vt + "' is not allowed inside a generic class template ('" +
+                    mod->moduleName + "')");
+            } else if (mod->isInterfaceModule) {
+                diag_->error(DiagnosticID::SemVirtualNotSupported, d->loc,
+                    "'" + vt + "' is not allowed in an interface host module ('" +
+                    mod->moduleName + "'): a contract block has no implementation to dispatch");
+            }
+            if (pv == ProcVirt::Overrides && mod->inherits.empty()) {
+                diag_->error(DiagnosticID::SemOverrideTargetUnknown, d->loc,
+                    "Overrides member '" + dn + "' has no base class to override (class '" +
+                    mod->moduleName + "' has no Inherits clause)");
+            }
+        }
+    }
+}
+
+// B08b E1/E2/E3: 覆盖契约 + dynamicKeys 汇总。需要 2.8 的类链登记表, 所以只在有 Inherits 时跑。
+//
+// 契约口径 (与 Interface 的 D16 同源): 签名按 interface_sig.hpp 的**源码签名**比, 不比归一后的
+// Vb6Type —— 跨模块 Enum/UDT 在这一步还没注入。
+//
+// v1 边界 (SemVirtualNotSupported): 今天 B07b 的发码是**静态绑定** —— 派生类自己声明的成员抢键,
+// 所以 d.M() 直调已经天然是派生实现; 但"基类体内调 Me.M"仍会绑到基类实现, 那是假虚派发。
+// 类虚表在 B08d, 所以这里把 dynamicKeys 算出来交给语义层, 让那些调用点**报错**而不是静默绑错。
+void Driver::runVirtualContractChecks() {
+    // 一遍: 先把"哪个祖先声明过某成员的虚位"记下来 (供遮蔽裁决与诊断)
+    for (const std::string& key : classOrder_) {
+        auto self = classes_.find(key);
+        if (self == classes_.end()) continue;
+        ClassChainView& v = self->second;
+        v.dynamicKeys.clear();
+    }
+
+    for (const std::string& key : classOrder_) {
+        auto self = classes_.find(key);
+        if (self == classes_.end()) continue;
+        ClassChainView& v = self->second;
+        if (v.chainBroken || v.chain.size() < 2) continue;  // 无祖先: 位置检查已给说法
+        bool logged = false;  // 一个类只报第一条契约错 (D18-3: 级联文本没有信息量)
+        auto reject = [&](SourceLocation loc, DiagnosticID id, const std::string& msg) {
+            diag_->error(id, loc, msg);
+            logged = true;
+        };
+
+        for (const auto& d : v.mod->declarations) {
+            if (!d || logged) continue;
+            const ProcVirt pv = procVirtOf(*d);
+            if (pv != ProcVirt::Overrides) continue;
+            const std::string slot = ifaceSlotKey(*d);
+            const std::string dn = procDeclName(*d);
+
+            // 自近到远找**声明过这个槽**的祖先 (没声明过的中间类继续往上走: 它只是继承了那条槽)
+            const Decl* target = nullptr;
+            const ClassChainView* tv = nullptr;
+            for (size_t i = v.chain.size(); i-- > 1;) {
+                auto it = classes_.find(v.chain[i - 1]);
+                if (it == classes_.end() || !it->second.mod) continue;
+                for (const auto& ad : it->second.mod->declarations) {
+                    if (!ad || ad->kind != d->kind) continue;  // Sub 只覆盖 Sub, 属性按方向配
+                    if (slot != ifaceSlotKey(*ad)) continue;
+                    target = ad.get();
+                    tv = &it->second;
+                    break;
+                }
+                if (target) break;
+            }
+            if (!target) {
+                reject(d->loc, DiagnosticID::SemOverrideTargetUnknown,
+                    "Overrides member '" + dn + "' of class '" + v.name +
+                    "' has no matching member in the inherited class chain");
+                continue;
+            }
+            const ProcVirt pv2 = procVirtOf(*target);
+            if (memberAccess(*target) == AccessLevel::Private) {
+                reject(d->loc, DiagnosticID::SemOverrideNotOverridable,
+                    "Overrides member '" + dn + "' cannot replace the Private member declared by"
+                    " class '" + tv->name + "' (Private members are not visible to derived classes)");
+                continue;
+            }
+            if (pv2 != ProcVirt::Overridable && pv2 != ProcVirt::Overrides) {
+                reject(d->loc, DiagnosticID::SemOverrideNotOverridable,
+                    "Overrides member '" + dn + "' targets member '" + procDeclName(*target) +
+                    "' of class '" + tv->name + "', which is not declared Overridable");
+                continue;
+            }
+            IfaceProcSig mine, base;
+            if (!ifaceSigFromDecl(*d, mine) || !ifaceSigFromDecl(*target, base) ||
+                !ifaceSigEqual(mine, base)) {
+                reject(d->loc, DiagnosticID::SemOverrideSignatureMismatch,
+                    "Overrides member '" + dn + "' signature (" + mine.text +
+                    ") does not match the Overridable member of class '" + tv->name + "' (" +
+                    base.text + ")");
+                continue;
+            }
+            // 契约通过 → 本类与全部祖先的体内调用都要走虚槽 (B08d 前由语义层拒绝)
+            const std::string nk = ifaceLower(ifaceDeclName(*d));
+            for (size_t i = 0; i + 1 < v.chain.size(); i++) {
+                auto it = classes_.find(v.chain[i]);
+                if (it == classes_.end()) continue;
+                addKeyOnce(it->second.dynamicKeys, nk);
+            }
+        }
+    }
+}
+
 // v1 深度上限: 链上类数 (含自身)。VB6/tB 都没规定上限, 但转发桩数与链长成正比, 且环检测
 // 之外的病态输入要有个兜底 → 取一个远超真实代码的值。
 static const size_t kMaxInheritsDepth = 16;
@@ -128,13 +299,21 @@ bool Driver::runClassChainPrepass() {
     classes_.clear();
     classOrder_.clear();
 
-    // 早退: 工程里没有一条 Inherits → 不建表、不发诊断, 生成物与 B07a 之前逐字节相同
-    // (零回归护栏的按 feature 门禁口径, D24 末两条)。
+    // 早退: 工程里既没有一条 Inherits、也没有一个虚修饰符 → 不建表、不发诊断, 生成物与
+    // B07a 之前逐字节相同 (零回归护栏的按 feature 门禁口径, D24 末两条)。
     bool anyClause = false;
+    bool anyVirtual = false;
     for (auto& mod : modules_) {
-        if (mod && !mod->inherits.empty()) { anyClause = true; break; }
+        if (!mod) continue;
+        if (!mod->inherits.empty()) anyClause = true;
+        if (!anyVirtual && moduleHasVirtualMods(*mod)) anyVirtual = true;
+        if (anyClause && anyVirtual) break;
     }
-    if (!anyClause) return true;
+    if (!anyClause && !anyVirtual) return true;
+
+    // B08b E0 只要 modules_ → 放在建表之前, 且**不**因为"没有 Inherits"而跳过
+    checkVirtualPlacement();
+    if (!anyClause) return !diag_->hasErrors();
 
     // --- Pass A: 登记可继承的工程类 + 子句侧边界拒绝 ---
     for (auto& mod : modules_) {
@@ -331,12 +510,14 @@ bool Driver::runClassChainPrepass() {
         }
     }
 
+    // --- Pass E (B08b): 覆盖契约 + dynamicKeys (需要上面解好的 chain, 所以排在 Pass D 之后) ---
+    runVirtualContractChecks();
+
     return !diag_->hasErrors();
 }
 
 // ============================================================
 // stage 3.4 (B07b): 继承成员合并 —— 把祖先"自己声明"的成员并进派生类的 Class 符号
-// ============================================================
 //
 // 为什么做在符号表而不是发码层 (D26 的核心收益): resolveClassMemberCall 的 Fix 014 兜底、
 // findClassMemberCallParams、getClassMethodReturnType、canonicalClassMemberName 全部读

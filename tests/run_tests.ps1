@@ -848,7 +848,7 @@ if ($Category -in @("all", "run", "vbp")) {
     Test-Vbp "cls_inh_pair" "$Tests\cls_inh\Inh.vbp" @(
         "INH0:derived", "INH1:OK", "INH2:OK", "INH3:OK", "INH4:OK", "INH5:OK",
         "INH6:OK", "INH7:OK", "INH8:OK", "INH9:OK", "INH10:OK", "INH11:OK",
-        "INH12:OK", "INH13:OK")
+        "INH12:OK", "INH13:OK", "INH14:OK", "INH15:OK", "INH16:OK")
     Test-Vbp "test_vbman" "$Tests\test_vbman\test_vbman.vbp" @("P24-04a:OK", "P24-04b:OK", "P24-04:2/2") -Arch "x86" -RequiresCom "VBMANLIB.cVBMAN"
     $vbpSw.Stop()
     Write-Host "  (vbp/gui tests took $([Math]::Round($vbpSw.Elapsed.TotalSeconds))s)"
@@ -979,6 +979,32 @@ if ($Category -in @("all", "syntax")) {
     }
     if (Test-Path "$Tests\cls_neg\ci_n10_base.cls") {
         Test-SyntaxFailMulti "ci_n10_event_base" @("$Tests\cls_neg\ci_n10_base.cls", "$Tests\cls_neg\ci_n10_derived.cls") "declares an Event"
+    }
+    # ai/022 B08b (Overridable/Overrides): the four contract shapes are two-module cases,
+    # the three placement cases are single-file. All ride the existing helpers.
+    $ovNeg = @(
+        @("ci_n12_override_ghost", "ci_n12", "no matching member in the inherited class chain"),
+        @("ci_n13_not_overridable", "ci_n13", "not declared Overridable"),
+        @("ci_n14_override_signature", "ci_n14", "does not match the Overridable member"),
+        @("ci_n15_needs_dispatch", "ci_n15", "needs dynamic dispatch")
+    )
+    foreach ($c in $ovNeg) {
+        $a = "$Tests\cls_neg\" + $c[1] + "_base.cls"
+        $b = "$Tests\cls_neg\" + $c[1] + "_derived.cls"
+        if ((Test-Path $a) -and (Test-Path $b)) {
+            Test-SyntaxFailMulti $c[0] @($a, $b) $c[2]
+        } else {
+            Write-Host "  [SYNTAX-FAIL] $($c[0]) ... SKIP (missing case files)" -ForegroundColor DarkGray
+        }
+    }
+    if (Test-Path "$Tests\cls_neg\ci_n16_override_no_inherits.cls") {
+        Test-SyntaxFail "ci_n16_override_no_base" "$Tests\cls_neg\ci_n16_override_no_inherits.cls" "has no base class to override"
+    }
+    if (Test-Path "$Tests\cls_neg\ci_n17_overridable_in_bas.bas") {
+        Test-SyntaxFail "ci_n17_overridable_in_bas" "$Tests\cls_neg\ci_n17_overridable_in_bas.bas" "only allowed in a class module"
+    }
+    if (Test-Path "$Tests\cls_neg\ci_n18_overridable_in_interface.bas") {
+        Test-SyntaxFail "ci_n18_overridable_in_iface" "$Tests\cls_neg\ci_n18_overridable_in_interface.bas" "must not carry a virtual modifier"
     }
     # B07a positive guard: a base class in another module resolves and stays silent.
     if (Test-Path "$Tests\cls_neg\ci_pos_base.cls") {

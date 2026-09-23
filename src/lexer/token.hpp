@@ -149,6 +149,10 @@ enum class TokenKind : uint16_t {
     Interface,      // Interface 语句 (tB 扩展: 显式接口契约块, 见 ai/022 D1)
     Extends,        // Interface 的单继承子句 (仅接口域; 类继承用 Inherits, P3)
     Inherits,       // 类继承子句 (tB 扩展, ai/022 D6, 批次 B07): 类域用 Inherits, 接口域用 Extends
+    // 虚方法修饰符 (VB6 原生三件套; ai/022 D30, 批次 B08b): 只作用于 Sub/Function/Property
+    Overridable,
+    Overrides,
+    NotOverridable,
 
     // === 数据类型关键字 ===
     Boolean,

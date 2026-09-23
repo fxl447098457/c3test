@@ -244,6 +244,15 @@ std::unique_ptr<InterfaceDecl> Parser::parseInterfaceDecl(
             continue;  // 整行已消费 (失败路径已 skipToNextLine)
         }
 
+        if (cur_.kind == TokenKind::Overridable || cur_.kind == TokenKind::Overrides ||
+            cur_.kind == TokenKind::NotOverridable) {  // tB 扩展 (B08b): 契约块无实现, 谈不上覆盖
+            diag_.error(DiagnosticID::ParseInvalidInterfaceMember, currentLoc(),
+                "Interface member must not carry a virtual modifier (a contract has no"
+                " implementation to dispatch): " + cur_.text);
+            advance();
+            continue;
+        }
+
         if (cur_.kind == TokenKind::Public || cur_.kind == TokenKind::Private ||
             cur_.kind == TokenKind::Friend || cur_.kind == TokenKind::Static ||
             cur_.kind == TokenKind::Protected) {  // tB 扩展 (B08a)

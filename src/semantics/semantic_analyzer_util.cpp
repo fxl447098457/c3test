@@ -529,6 +529,24 @@ std::string SemanticAnalyzer::evalOptionalDefault(ASTNode* defaultValue, Vb6Type
 }
 
 
+// 虚方法 (tB, B08b): 本类体内调这个名字**必须**走虚槽 (链上有更深的类 Overrides 了它)。
+// 表由 2.8 的 runVirtualContractChecks 算好; 空表 = 全工程没有 Overrides → 本函数对所有名字
+// 都返回 false, 也就是对存量代码零影响。
+bool SemanticAnalyzer::virtualCallNeedsDispatch(const std::string& name) const {
+    if (!clsreg_ || clsreg_->empty() || !currentModule_) return false;
+    if (!currentModule_->isClassModule) return false;
+    auto self = clsreg_->find(ifaceLower(currentModule_->moduleName));
+    if (self == clsreg_->end() || self->second.mod != currentModule_) return false;
+    const ClassChainView& v = self->second;
+    if (v.dynamicKeys.empty()) return false;
+    const std::string lk = ifaceLower(name);
+    if (lk.empty()) return false;
+    for (const auto& k : v.dynamicKeys) {
+        if (k == lk) return true;
+    }
+    return false;
+}
+
 // 类继承 (tB, B07b): 祖先自己声明的成员名判定。刻意不复用 stage 3.4 回填的 inhProcs/inhFields
 // —— 本判定发生在语义分析途中, 那时合并还没跑; 而且"基类写了什么"这件事 2.8 就已经定死了。
 bool SemanticAnalyzer::declaredByAncestor(const std::string& name) const {

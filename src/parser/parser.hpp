@@ -121,6 +121,9 @@ private:
     // 声明解析 (parser_decl.cpp)
     // ============================================================
     DeclPtr parseDeclaration();
+    // 虚方法修饰位 (tB 扩展, ai/022 B08b): 见 parser_decl.cpp 的 parseDeclaration 头注释
+    void eatVirtualModifiers(ProcVirt& io);
+    void checkVirtualOnProcStart(ProcVirt& io);
     DeclPtr parseVariableDeclList(AccessLevel access, bool isStatic);
     DeclPtr parseConstDeclList(AccessLevel access);
     std::unique_ptr<SubDecl> parseSubDecl(AccessLevel access, bool isStatic);

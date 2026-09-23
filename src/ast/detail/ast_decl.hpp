@@ -63,6 +63,10 @@ public:
     // 模板声明不进符号表, 由泛型器 (driver_generics) 按使用点特化克隆.
     std::vector<std::string> typeParams;
     std::vector<ImplementsClause> implementsClauses;  // B02b, 空 = 无显式绑定
+    // 虚方法修饰位 (B08b)。刻意不放进构造函数参数表: 三个 decl 的构造点分布在 parser_decl /
+    // parser_interface / ast_clone 三处, 加尾参要同批改三处签名; 成员默认值 + 事后赋值更小。
+    // 泛型模板内的虚修饰符已在 parse 期拒绝 → 特化克隆永远不会带着它 (同 B07 的 Inherits 理由)。
+    ProcVirt virt = ProcVirt::None;
 
     SubDecl(SourceLocation loc, AccessLevel acc, std::string n,
             std::vector<std::unique_ptr<ParameterDecl>> p, StmtList b,
@@ -84,6 +88,7 @@ public:
     // 泛型 (tB 扩展): 见 SubDecl::typeParams 注释
     std::vector<std::string> typeParams;
     std::vector<ImplementsClause> implementsClauses;  // B02b, 见 SubDecl
+    ProcVirt virt = ProcVirt::None;                   // B08b, 见 SubDecl
 
     FunctionDecl(SourceLocation loc, AccessLevel acc, std::string n,
                  std::vector<std::unique_ptr<ParameterDecl>> p,
@@ -106,6 +111,7 @@ public:
     // 泛型 (tB 扩展): 见 SubDecl::typeParams
     std::vector<std::string> typeParams;
     std::vector<ImplementsClause> implementsClauses;  // B02b, 见 SubDecl
+    ProcVirt virt = ProcVirt::None;                   // B08b, 见 SubDecl
 
     PropertyDecl(SourceLocation loc, AccessLevel acc, ProcKind kind,
                  std::string n, std::vector<std::unique_ptr<ParameterDecl>> p,
