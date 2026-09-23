@@ -23,6 +23,8 @@
 #include "semantics/interfaces_registry.hpp"
 
 #include <algorithm>
+#include <cctype>
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -47,6 +49,69 @@ std::vector<std::unique_ptr<ParameterDecl>>* ivParamsOf(Decl& d) {
         case ASTNodeKind::PropertyDecl: return &static_cast<PropertyDecl&>(d).params;
         default:                        return nullptr;
     }
+}
+
+// B06a: 接口 IID —— 16 字节，按真实 GUID 内存序摆（Data1/2/3 小端、Data4 原序），
+// 这样 P6 把它交给真 COM 时不必再翻字节。取值优先级：源码里的 [InterfaceId("...")]
+// （IfaceView.guid，B01 起只写不读，本批开始有消费者）→ 否则按 4 词 FNV-1a 从接口
+// 小写名确定性派生（与 cgen_util_dllentry_prelude.inc 的 generateIid 同族；D8 禁止随机）。
+uint32_t ivFnv1a(const std::string& s, uint32_t seed) {
+    uint32_t h = seed;
+    for (unsigned char c : s) { h ^= c; h *= 0x01000193u; }
+    return h;
+}
+
+bool ivParseGuidText(const std::string& text, unsigned char out[16]) {
+    auto digitVal = [](char c) -> int { return c <= '9' ? c - '0' : (c - 'a' + 10); };
+    std::string hex;
+    for (char ch : text) {
+        char lo = (char)tolower((unsigned char)ch);
+        if (isdigit((unsigned char)lo) || (lo >= 'a' && lo <= 'f')) hex.push_back(lo);
+    }
+    if (hex.size() != 32) return false;
+    unsigned char b[16];
+    for (int i = 0; i < 16; i++) {
+        b[i] = (unsigned char)(digitVal(hex[(size_t)i * 2]) * 16 + digitVal(hex[(size_t)i * 2 + 1]));
+    }
+    // 可读序: Data1=b[0..3] Data2=b[4..5] Data3=b[6..7] Data4=b[8..15]
+    out[0] = b[3]; out[1] = b[2]; out[2] = b[1]; out[3] = b[0];
+    out[4] = b[5]; out[5] = b[4];
+    out[6] = b[7]; out[7] = b[6];
+    for (int i = 8; i < 16; i++) out[i] = b[i];
+    return true;
+}
+
+void ivDeriveIid(const IfaceView& v, unsigned char out[16]) {
+    if (!v.guid.empty() && ivParseGuidText(v.guid, out)) return;
+    const std::string key = "iviface:" + ifaceLower(v.name);
+    const uint32_t h1 = ivFnv1a(key, 0xa1b2c3d4u);
+    const uint32_t h2 = ivFnv1a(key, 0xe5f60718u);
+    const uint32_t h3 = ivFnv1a(key, 0x9a0b1c2du);
+    const uint32_t h4 = ivFnv1a(key, 0x3e4f5061u);
+    const uint32_t d1 = h1;
+    const uint32_t d2 = (h2 >> 16) & 0xFFFFu;
+    const uint32_t d3 = ((h2 & 0xFFFFu) | 0x4000u) & 0xFFFFu;   // version 4
+    const uint32_t d4a = ((((h3 >> 16) & 0xFFFFu) | 0x8000u)) & 0xFFFFu;  // variant 1
+    const uint32_t d4b = (h3 & 0xFFFFu);
+    out[0] = (unsigned char)(d1 >> 24); out[1] = (unsigned char)(d1 >> 16);
+    out[2] = (unsigned char)(d1 >> 8);  out[3] = (unsigned char)d1;
+    out[4] = (unsigned char)(d2 >> 8);  out[5] = (unsigned char)d2;
+    out[6] = (unsigned char)(d3 >> 8);  out[7] = (unsigned char)d3;
+    out[8] = (unsigned char)(d4a >> 8); out[9] = (unsigned char)d4a;
+    out[10] = (unsigned char)(d4b >> 8); out[11] = (unsigned char)d4b;
+    out[12] = (unsigned char)(h4 >> 24); out[13] = (unsigned char)(h4 >> 16);
+    out[14] = (unsigned char)(h4 >> 8);  out[15] = (unsigned char)h4;
+}
+
+std::string ivIidInitializer(const unsigned char b[16]) {
+    static const char* hex = "0123456789ABCDEF";
+    std::string out = "{ ";
+    for (int i = 0; i < 16; i++) {
+        if (i) out += ",";
+        out += std::string("0x") + hex[(b[i] >> 4) & 0xF] + hex[b[i] & 0xF];
+    }
+    out += " }";
+    return out;
 }
 
 } // namespace
@@ -208,6 +273,7 @@ void CCodeGen::emitIfaceContractTypedefs() {
     });
 
     bool headerDone = false;
+    bool iidBaseDone = false;
     for (const IfaceView* v : views) {
         if (v->chainBroken || v->slots.empty()) continue;
         if (!headerDone) {
@@ -221,12 +287,23 @@ void CCodeGen::emitIfaceContractTypedefs() {
         for (char& ch : guard) {
             if (ch >= 'a' && ch <= 'z') ch = static_cast<char>(ch - 'a' + 'A');
         }
+        // IUnknown 的 IID 全工程唯一一份（同样每 TU 一份 static 常量 → 只能按值比）
+        if (!iidBaseDone) {
+            iidBaseDone = true;
+            h_.emitLine("#ifndef VB6_IV_IID_IUNKNOWN");
+            h_.emitLine("#define VB6_IV_IID_IUNKNOWN");
+            h_.emitLine("/* IID of IUnknown {00000000-0000-0000-C000-000000000046}, GUID memory order */");
+            h_.emitLine("static const unsigned char vb6_iv_iid_IUnknown[16] = "
+                        "{ 0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0xC0,0x00,0x00,0x00,0x00,0x00,0x00,0x46 };");
+            h_.emitLine("#endif");
+            h_.emitBlank();
+        }
         h_.emitLine("#ifndef " + guard);
         h_.emitLine("#define " + guard);
         h_.emitLine("typedef struct " + ref + " " + ref + ";");
         h_.emitLine("typedef struct " + tbl + " {");
         h_.indent();
-        h_.emitLine("/* IUnknown prefix slots: placeholders in B04, real QI/refcount in B13/B05 */");
+        h_.emitLine("/* IUnknown prefix slots: AddRef/Release real in B05, QueryInterface in B06a */");
         h_.emitLine("long (*QueryInterface)(void* self, const void* riid, void** ppv);");
         h_.emitLine("unsigned long (*AddRef)(void* self);");
         h_.emitLine("unsigned long (*Release)(void* self);");
@@ -237,6 +314,14 @@ void CCodeGen::emitIfaceContractTypedefs() {
         h_.dedent();
         h_.emitLine("} " + tbl + ";");
         h_.emitLine("struct " + ref + " { const " + tbl + "* vt; };");
+        // B06a: 本接口的 IID（QueryInterface 按值比这个 16 字节块）
+        {
+            unsigned char iid[16];
+            ivDeriveIid(*v, iid);
+            h_.emitLine("static const unsigned char vb6_iv_iid_" + id + "[16] = " +
+                        ivIidInitializer(iid) + ";  /* " +
+                        (v->guid.empty() ? "derived from name" : "from InterfaceId attribute") + " */");
+        }
         h_.emitLine("#endif");
         h_.emitBlank();
     }
@@ -292,19 +377,51 @@ void CCodeGen::emitIfaceImplTables(Module& module) {
     c_.emitBlank();
     c_.emitLine("// === tB Interface contract impl: " + module.moduleName + " (ai/022 B04) ===");
 
-    // IUnknown 三件套: QueryInterface 仍占位 (B06 与 TypeOf/接口转换同批),
-    // AddRef/Release 从 B05 起是真计数. 计数头挂在实例上而 self 是某个 `__iv_<I>`
-    // 的地址 → 回推实例的 offsetof 依赖具体接口, 故 AddRef/Release 按 (类, 接口) 各一份.
-    c_.emitLine("static long vb6_iunk_" + clsId + "_QueryInterface(void* self, const void* riid, void** ppv) {");
-    c_.indent();
-    c_.emitLine("(void)self; (void)riid; (void)ppv;");
-    c_.emitLine("return 0x80004001L;  /* E_NOTIMPL: QueryInterface lands in B06 */");
-    c_.dedent();
-    c_.emitLine("}");
+    // IUnknown 三件套一律按 (类, 接口) 各一份：`self` 是某个 `__iv_<I>` 的地址，
+    // 回推实例、以及 QI 命中"本类的另一个接口"时要减/加的偏移都依赖具体接口
+    // （B05 已为 AddRef/Release 这么做了，QI 同理）。先给本类全部 AddRef 发前向
+    // 声明，QI 才能在任意发射顺序下调到兄弟接口的 AddRef。
+    for (const IfaceView* v : ifaces) {
+        c_.emitLine("static unsigned long vb6_iunk_" + clsId + "_" + cIdent(v->name) +
+                    "_AddRef(void* self);");
+    }
 
     for (const IfaceView* v : ifaces) {
         const std::string id = cIdent(v->name);
         const std::string ref = "vb6_ivref_" + id;
+
+        // B06a: 真 QueryInterface —— 认 IUnknown、本接口、以及本类实现的其它接口
+        const std::string walkQI = "    " + clsStruct + "* me = (" + clsStruct + "*)((char*)self - offsetof(" +
+                                   clsStruct + ", __iv_" + id + "));";
+        c_.emitBlank();
+        c_.emitLine("static long vb6_iunk_" + clsId + "_" + id + "_QueryInterface(void* self, const void* riid, void** ppv) {");
+        c_.indent();
+        c_.emitLine(walkQI);
+        c_.emitLine("(void)me;  /* 无兄弟接口时上面的回推用不到 */");
+        c_.emitLine("if (!ppv) return 0x80070057L;  /* E_POINTER */");
+        c_.emitLine("*ppv = NULL;");
+        c_.emitLine("if (!riid) return 0x80070057L;  /* E_POINTER */");
+        c_.emitLine("if (vb6_IidEqual(riid, vb6_iv_iid_IUnknown) || vb6_IidEqual(riid, vb6_iv_iid_" + id + ")) {");
+        c_.indent();
+        c_.emitLine("*ppv = self;");
+        c_.emitLine("vb6_iunk_" + clsId + "_" + id + "_AddRef(self);");
+        c_.emitLine("return 0L;  /* S_OK */");
+        c_.dedent();
+        c_.emitLine("}");
+        for (const IfaceView* s : ifaces) {
+            if (s == v) continue;
+            const std::string sid = cIdent(s->name);
+            c_.emitLine("if (vb6_IidEqual(riid, vb6_iv_iid_" + sid + ")) {");
+            c_.indent();
+            c_.emitLine("*ppv = &me->__iv_" + sid + ";");
+            c_.emitLine("vb6_iunk_" + clsId + "_" + sid + "_AddRef(*ppv);");
+            c_.emitLine("return 0L;  /* S_OK */");
+            c_.dedent();
+            c_.emitLine("}");
+        }
+        c_.emitLine("return 0x80004002L;  /* E_NOINTERFACE: not implemented by this class */");
+        c_.dedent();
+        c_.emitLine("}");
 
         // B05: 真引用计数 (self = &me->__iv_<I>)
         const std::string walk = "    " + clsStruct + "* me = (" + clsStruct + "*)((char*)self - offsetof(" +
@@ -359,7 +476,7 @@ void CCodeGen::emitIfaceImplTables(Module& module) {
         c_.emitBlank();
         c_.emitLine("static const vb6_ivtbl_" + id + " vb6_ivtbl_" + id + "_for_" + clsId + " = {");
         c_.indent();
-        c_.emitLine("vb6_iunk_" + clsId + "_QueryInterface,");
+        c_.emitLine("vb6_iunk_" + clsId + "_" + id + "_QueryInterface,");
         c_.emitLine("vb6_iunk_" + clsId + "_" + id + "_AddRef,");
         c_.emitLine("vb6_iunk_" + clsId + "_" + id + "_Release,");
         for (size_t i = 0; i < slotFns.size(); i++) {

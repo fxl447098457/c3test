@@ -76,6 +76,55 @@ Sub Main()
         Debug.Print "LIFE3:FAIL"
     End If
 
+    ' ---- B06a: QueryInterface / cross-interface Set / TypeOf ... Is <interface> ----
+    ' sw's object is reached through two different interfaces; ILog is found by QI
+    ' from an IWriter pointer (sibling-interface branch), and INope is not there.
+    Dim sw As CWriter
+    Set sw = New CWriter
+    Dim wr As IWriter
+    Dim lg As ILog
+    Set wr = sw
+    wr.Emit("through-writer")
+    Set lg = wr
+    lg.Log("through-log")
+    If sw.Total() = 1 Then
+        Debug.Print "QI1:OK"
+    Else
+        Debug.Print "QI1:FAIL"
+    End If
+    If sw.Logged() = 1 Then
+        Debug.Print "QI2:OK"
+    Else
+        Debug.Print "QI2:FAIL"
+    End If
+    If lg Is Nothing Then
+        Debug.Print "QI3:FAIL"
+    Else
+        Debug.Print "QI3:OK"
+    End If
+    If TypeOf wr Is ILog Then
+        Debug.Print "TOF1:OK"
+    Else
+        Debug.Print "TOF1:FAIL"
+    End If
+    If TypeOf lg Is IWriter Then
+        Debug.Print "TOF2:OK"
+    Else
+        Debug.Print "TOF2:FAIL"
+    End If
+    If TypeOf wr Is INope Then
+        Debug.Print "TOF3:FAIL"
+    Else
+        Debug.Print "TOF3:OK"
+    End If
+    Set lg = Nothing
+    Set wr = Nothing
+    If sw.Total() = 1 Then
+        Debug.Print "QI4:OK"
+    Else
+        Debug.Print "QI4:FAIL"
+    End If
+
     ' (c) end-of-procedure release: only the procedure epilogue frees this one
     ScopeExit
     Debug.Print "LIFE9:OK"

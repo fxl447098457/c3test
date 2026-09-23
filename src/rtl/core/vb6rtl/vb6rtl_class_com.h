@@ -82,6 +82,22 @@ int32_t vb6_IsNothing(void* obj);
 // VB6: Set obj = Nothing
 void vb6_ReleaseObject(void** objPtr);
 
+// tB Interface (ai/022 B06a): 新式接口薄指针 (vb6_ivref_<I>*) 的 IUnknown 前缀槽.
+// 前 3 槽自 B04 起固定为 QueryInterface/AddRef/Release, 与 vb6_ivtbl_<I> 逐字对齐.
+typedef struct vb6_ivtbl_prefix {
+    long (*QueryInterface)(void* self, const void* riid, void** ppv);
+    unsigned long (*AddRef)(void* self);
+    unsigned long (*Release)(void* self);
+} vb6_ivtbl_prefix;
+
+// IidEqual(a, b) - 16 字节 IID 按值比较. 生成码里的 IID 常量是 #ifndef 块内的
+// static 数组, 每个编译单元各一份, 地址不可比 (只有 COM 包装器那套 IID 是全局的).
+int32_t vb6_IidEqual(const void* a, const void* b);
+
+// IfaceSupports(ifacePtr, iid) - TypeOf x Is <接口>: 走真 QueryInterface, 成功即
+// Release, 净效果只回答"支持不支持", 不留下引用 (VB6 的 TypeOf 同语义).
+int32_t vb6_IfaceSupports(void* ifacePtr, const void* iid);
+
 // COM对象方法/属性调用 — 后期绑定 (P6.2)
 // 通过IDispatch::Invoke调用方法/属性
 // args参数为Windows vb6_VARIANT数组指针(由vb6com.c定义), cgen通过void*传递

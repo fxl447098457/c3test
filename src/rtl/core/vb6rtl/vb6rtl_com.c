@@ -756,3 +756,27 @@ void vb6_Extender_ZOrder(vb6_VARIANT* Position, int _has_Position) {
     (void)Position; (void)_has_Position;
     (void)0;
 }
+
+// ============================================================
+// tB Interface (ai/022 B06a): 薄指针 IUnknown 前缀槽的运行时支撑
+// ============================================================
+
+int32_t vb6_IidEqual(const void* a, const void* b) {
+    const unsigned char* x = (const unsigned char*)a;
+    const unsigned char* y = (const unsigned char*)b;
+    int i;
+    if (!x || !y) return 0;
+    for (i = 0; i < 16; i++) { if (x[i] != y[i]) return 0; }
+    return 1;
+}
+
+int32_t vb6_IfaceSupports(void* ifacePtr, const void* iid) {
+    vb6_ivtbl_prefix* vt;
+    void* got = NULL;
+    if (!ifacePtr || !iid) return 0;
+    vt = *(vb6_ivtbl_prefix**)ifacePtr;      /* 薄指针首字 = 该接口的 vtable */
+    if (!vt || !vt->QueryInterface) return 0;
+    if (vt->QueryInterface(ifacePtr, iid, &got) != 0 || !got) return 0;
+    if (*(vb6_ivtbl_prefix**)got) (*(vb6_ivtbl_prefix**)got)->Release(got);
+    return 1;
+}

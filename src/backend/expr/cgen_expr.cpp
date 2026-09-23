@@ -323,6 +323,24 @@ void CCodeGen::visit(NewExpr& node) {
 void CCodeGen::visit(TypeOfExpr& node) {
     emitExpr(*node.object);
     std::string obj = std::move(lastExpr_);
+    // tB Interface B06a: TypeOf x Is <新式接口> → 真 QueryInterface，经 RTL 的
+    // vb6_IfaceSupports（QI 成功后立刻 Release，净效果只回答"支持不支持"）。
+    // 左侧只认接口变量：类变量/COM 变量的 TypeOf 仍走 vb6_TypeOf 老路 —— 那个桩
+    // 在 vb6rtl_conv.c 里恒返 0（既有工程的 TypeOf x Is <类> 一直恒假），改它是
+    // 行为变更，另批处理，本批刻意不碰。
+    if (const IfaceView* ivt = ivLookupIface(node.typeName)) {
+        std::string objLower = obj;
+        std::transform(objLower.begin(), objLower.end(), objLower.begin(), ::tolower);
+        if (!knownIvrefVars_.count(objLower)) {
+            diag_.error(DiagnosticID::CodeGenUnsupportedFeature, node.loc,
+                "TypeOf ... Is " + node.typeName + " needs an interface variable on the left"
+                " side (tB Interface " + ivt->name + ")");
+            lastExpr_ = "0";
+            return;
+        }
+        lastExpr_ = "vb6_IfaceSupports(" + obj + ", vb6_iv_iid_" + cIdent(ivt->name) + ")";
+        return;
+    }
     // Fix 040b: vb6_TypeOf expects void* (IDispatch*). If the operand is a
     // Variant (vb6_VARIANT struct), extract the object pointer first.
     if (cExprIsVariant(obj)) {

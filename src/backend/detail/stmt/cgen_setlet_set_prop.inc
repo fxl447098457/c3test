@@ -406,12 +406,32 @@
                 std::transform(ivValLower.begin(), ivValLower.end(), ivValLower.begin(), ::tolower);
                 const bool isClassVar = knownClassVars_.count(ivValLower) != 0;
                 const bool isNewExpr = value.find("_New(") != std::string::npos;
+                // B06a: RHS 也是接口变量 → 真 QueryInterface（VB6 跨接口 Set 的语义）。
+                // QI 成功即已 AddRef（B06a 的 QI 实现负责），失败得到 NULL = Nothing。
                 // 目标是裸标识符 (= 过程级接口变量) 才接计数; me->字段 等形式
                 // 沿用 B04 的纯赋值改写, 生命周期留给后续批次.
                 const bool plainIvTarget = !target.empty() &&
                     target.find_first_not_of(
                         "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_")
                         == std::string::npos;
+                const bool isIvrefVar = knownIvrefVars_.count(ivValLower) != 0;
+                if (plainIvTarget && isIvrefVar) {
+                    const std::string ivCType = "vb6_ivref_" + cIdent(v->name) + "*";
+                    const std::string ivOld = "__ivold" + std::to_string(ivrefSetSeq_);
+                    const std::string ivGot = "__ivgot" + std::to_string(ivrefSetSeq_);
+                    ivrefSetSeq_++;
+                    c_.emitLine("{  /* tB Interface B06a: Set " + target + " = QueryInterface */");
+                    c_.indent();
+                    c_.emitLine(ivCType + " " + ivOld + " = " + target + ";");
+                    c_.emitLine("void* " + ivGot + " = NULL;");
+                    c_.emitLine("if (" + value + ") " + value + "->vt->QueryInterface(" + value +
+                                ", vb6_iv_iid_" + cIdent(v->name) + ", &" + ivGot + ");");
+                    c_.emitLine(target + " = (" + ivCType + ")" + ivGot + ";");
+                    c_.emitLine("if (" + ivOld + ") " + ivOld + "->vt->Release(" + ivOld + ");");
+                    c_.dedent();
+                    c_.emitLine("}");
+                    return;
+                }
                 if (isClassVar || isNewExpr) {
                     if (plainIvTarget) {
                         // COM 口径: 存旧值 → 覆盖 → AddRef 新 → Release 旧.
@@ -434,8 +454,9 @@
                     value = "&(" + value + ")->__iv_" + cIdent(v->name);
                 } else {
                     diag_.error(DiagnosticID::CodeGenUnsupportedFeature, SourceLocation{},
-                        "Interface binding: Set " + target + " = <expr> needs a class instance or"
-                        " New on the right side (tB Interface " + v->name + ")");
+                        "Interface binding: Set " + target + " = <expr> needs a class instance,"
+                        " New, or another interface value on the right side"
+                        " (tB Interface " + v->name + ")");
                 }
             }
         }
