@@ -842,7 +842,12 @@ if ($Category -in @("all", "run", "vbp")) {
     Test-Vbp "itf_xmod_writer" "$Tests\itf_xmod\XWriter.vbp" @("XMOD1:OK", "XMOD2:OK", "IFV1:OK", "IFV2:OK", "IFV3:OK", "LIFE1:OK", "LIFE2:OK", "LIFE3:OK", "LIFE9:OK", "TERM last=bye", "TERM last=scoped", "QI1:OK", "QI2:OK", "QI3:OK", "QI4:OK", "TOF1:OK", "TOF2:OK", "TOF3:OK", "DN0:OK", "DN1:OK", "DN2:OK", "DN3:OK", "TOC1:OK", "TOC2:OK", "TOC3:OK")
 
     # test_vbman 用于验证外部 COM 组件 VBMANLIB (x86 DLL, 供 32 位程序调用)
-    Test-Vbp "cls_inh_pair" "$Tests\cls_inh\Inh.vbp" @("INH0:derived", "INH1:OK")
+    # ai/022 B07b: INH2..INH11 cover the merged member face + prefix-copied fields +
+    # forwarding stubs (private Long/UDT/BSTR fields, Optional params, Property Get/Let,
+    # 3-level chain, child-wins shadowing, base/derived instance isolation).
+    Test-Vbp "cls_inh_pair" "$Tests\cls_inh\Inh.vbp" @(
+        "INH0:derived", "INH1:OK", "INH2:OK", "INH3:OK", "INH4:OK", "INH5:OK",
+        "INH6:OK", "INH7:OK", "INH8:OK", "INH9:OK", "INH10:OK", "INH11:OK")
     Test-Vbp "test_vbman" "$Tests\test_vbman\test_vbman.vbp" @("P24-04a:OK", "P24-04b:OK", "P24-04:2/2") -Arch "x86" -RequiresCom "VBMANLIB.cVBMAN"
     $vbpSw.Stop()
     Write-Host "  (vbp/gui tests took $([Math]::Round($vbpSw.Elapsed.TotalSeconds))s)"
@@ -961,6 +966,17 @@ if ($Category -in @("all", "syntax")) {
     }
     if (Test-Path "$Tests\cls_neg\ci_n07_iface_host.cls") {
         Test-SyntaxFailMulti "ci_n07_base_is_iface_host" @("$Tests\cls_neg\ci_n07_iface_host.cls", "$Tests\cls_neg\ci_n07_derives_host.cls") "inherits unknown base class"
+    }
+    # ai/022 B07b (v1 boundaries): unqualified inherited call, inherited field redeclared,
+    # and an event-bearing base. All three are two-module cases -> Test-SyntaxFailMulti.
+    if (Test-Path "$Tests\cls_neg\ci_n08_base.cls") {
+        Test-SyntaxFailMulti "ci_n08_bare_inherited_call" @("$Tests\cls_neg\ci_n08_base.cls", "$Tests\cls_neg\ci_n08_derived.cls") "cannot be called unqualified"
+    }
+    if (Test-Path "$Tests\cls_neg\ci_n09_base.cls") {
+        Test-SyntaxFailMulti "ci_n09_redeclared_field" @("$Tests\cls_neg\ci_n09_base.cls", "$Tests\cls_neg\ci_n09_derived.cls") "redeclares inherited field"
+    }
+    if (Test-Path "$Tests\cls_neg\ci_n10_base.cls") {
+        Test-SyntaxFailMulti "ci_n10_event_base" @("$Tests\cls_neg\ci_n10_base.cls", "$Tests\cls_neg\ci_n10_derived.cls") "declares an Event"
     }
     # B07a positive guard: a base class in another module resolves and stays silent.
     if (Test-Path "$Tests\cls_neg\ci_pos_base.cls") {

@@ -28,9 +28,9 @@ void CCodeGen::emitClassFactory(Module& module) {
 
     // 初始化所有字段为默认值
     // 同时注册BSTR/Long类型成员到knownBstrVars_/knownLongVars_ (用于赋值时BSTR安全处理)
-    for (auto& decl : module.declarations) {
-        if (decl->kind == ASTNodeKind::VariableDecl) {
-            auto& var = static_cast<VariableDecl&>(*decl);
+    for (VariableDecl* var_p : structFieldDecls(module)) {
+        if (var_p) {
+            auto& var = *var_p;
             std::string field = cIdent(var.name);
             // 注册到类型集合 (用于后续赋值时BSTR安全处理)
             std::string lower = var.name;
@@ -111,9 +111,9 @@ void CCodeGen::emitClassFactory(Module& module) {
     }
 
     // 释放BSTR字段
-    for (auto& decl : module.declarations) {
-        if (decl->kind == ASTNodeKind::VariableDecl) {
-            auto& var = static_cast<VariableDecl&>(*decl);
+    for (VariableDecl* var_p : structFieldDecls(module)) {
+        if (var_p) {
+            auto& var = *var_p;
             Vb6Type varType = var.asType ? resolveArrayElemType(var.asType.get()) : Vb6Type::Variant;
             if (varType == Vb6Type::String) {
                 c_.emitLine("vb6_BSTR_Free(me->" + cIdent(var.name) + ");");

@@ -219,6 +219,8 @@
     }
     // Interface 契约 (tB, ai/022 B04): stage 2.7 建好的工程级只读登记表, 发码期取槽表.
     void setInterfaceRegistry(const IfaceRegistry* reg) { ivreg_ = reg; }
+    // 类继承 (tB, ai/022 B07b): stage 2.8 链登记表, 发码期取继承字段与转发桩清单.
+    void setClassChainRegistry(const ClassChainRegistry* reg) { clsreg_ = reg; }
     // 查询接口唯一实现类名 (空串 = 无映射/多实现类, 不可用)
     std::string singleImplementationClass(const std::string& ifaceName) const {
         if (!interfaceImplementers_) return "";

@@ -124,7 +124,13 @@ void SemanticAnalyzer::visit(IdentifierExpr& node) {
         lastExprType_ = sym->type;
     } else {
         // 未找到标识符
-        if (optionExplicit_ && pass_ == 2) {
+        // 类继承 (tB, B07b): 命中祖先声明的成员 → 升格为错误。裸名这条路会静默少一段
+        // 代码 (发码侧认不出这个名字), 比报错糟得多; v1 要求写成 Me.<名字>。
+        if (pass_ == 2 && declaredByAncestor(node.name)) {
+            diag_.error(DiagnosticID::SemInheritsNotSupported, node.loc,
+                "Inherited member '" + node.name + "' cannot be called unqualified in this build"
+                " (write Me." + node.name + "; v1 merges inherited members onto the class symbol only)");
+        } else if (optionExplicit_ && pass_ == 2) {
             diag_.warn(DiagnosticID::SemUndeclaredIdentifier, node.loc,
                 "未声明的标识符: '" + node.name + "' (可能来自其他模块)");
         }

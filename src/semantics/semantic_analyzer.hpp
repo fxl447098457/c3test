@@ -8,6 +8,7 @@
 #include "semantics/type_system.hpp"
 #include "semantics/generics_registry.hpp"
 #include "semantics/interfaces_registry.hpp"
+#include "semantics/class_chain_registry.hpp"  // tB 类继承 (B07b)
 #include "common/diagnostics.hpp"
 #include <string>
 #include <set>
@@ -121,10 +122,17 @@ public:
     // 的点原样放过 (维持旧行为).
     void resolveDeferredCrossModuleOverloads();
 
+    // 类继承 (tB, B07b): 这个名字是不是某个祖先类自己声明的成员 (字段或过程)?
+    // 合并只发生在 Class 符号的成员表上, 模块作用域里没有它的过程符号 → 裸名会静默生成
+    // 空调用, 所以发码前必须报错 (见 visit(IdentifierExpr) 的调用点)。
+    bool declaredByAncestor(const std::string& name) const;
+
     // 泛型 (tB, G3): 模板登记表只读视图 (driver 在逐模块分析前注入).
     void setGenericRegistry(const GenRegistry* reg) { genReg_ = reg; }
     // Interface 契约 (tB, B02): stage 2.7 建好的只读登记表, 供 Implements 分叉判定.
     void setInterfaceRegistry(const IfaceRegistry* reg) { ifaceReg_ = reg; }
+    // 类继承 (tB, B07b): stage 2.8 链登记表 (祖先声明的只读视图), 供裸名继承成员判定.
+    void setClassChainRegistry(const ClassChainRegistry* reg) { clsreg_ = reg; }
     // 推断成功的实例化请求 (驱动 fixpoint 物化) — 取空语义.
     struct GenInstRequest {
         std::string flat;                  // 小写扁名
@@ -241,6 +249,7 @@ private:
     // 泛型 (tB, G3): 调用点推断 (从模板登记表 AST 形参 + 延后点实参类型绑定)
     const GenRegistry* genReg_ = nullptr;
     const IfaceRegistry* ifaceReg_ = nullptr;  // Interface 契约 (tB, B02)
+    const ClassChainRegistry* clsreg_ = nullptr;  // 类继承链 (tB, B07b)
     std::vector<GenInstRequest> genericRequests_;
     bool tryBindGenericCall(DeferredXmodCallSite& site, GenInstRequest& reqOut);
     // 若 valueExpr 是 AddressOf 且 typeName 是委托: 解析目标过程、签名校验,

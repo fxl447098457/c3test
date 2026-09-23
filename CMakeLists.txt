@@ -162,6 +162,7 @@ add_library(vb6c3-cgen STATIC
     # 模块级产物（COM 服务器 / 窗体）
     src/backend/module/cgen_com.cpp
     src/backend/module/cgen_iface_vtbl.cpp
+    src/backend/module/cgen_inherit.cpp
     src/backend/module/cgen_com_events.cpp
     src/backend/module/cgen_delegate.cpp
     src/backend/module/cgen_form.cpp

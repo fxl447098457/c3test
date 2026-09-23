@@ -210,6 +210,8 @@ private:
     bool runInterfacePrepass();
     // 类继承 (tB, B07a): stage 2.8 建类继承链登记表 (基名解析/环/深度/v1 边界)
     bool runClassChainPrepass();
+    // 类继承 (tB, B07b): stage 3.4 把祖先自有成员并进派生类 Class 符号 (必须早于 3.5 的逐字段跨模块拷贝)
+    bool mergeInheritedMembers();
     // fixpoint 单轮物化: 消费 genericUses_ 中未物化项; freshOut 收特化副本
     bool materializeGenerics(std::vector<std::pair<Module*, Decl*>>* freshOut);
     // 泛型推断 fixpoint (G3): 收请求→物化→增量分析→再跨模块, 至收敛

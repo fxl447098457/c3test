@@ -360,6 +360,16 @@ CompileResult Driver::compile(const CompileOptions& options) {
         return result;
     }
 
+    // === 阶段3.4: 继承成员合并 (tB 扩展, B07b) — 祖先自有成员并进派生类 Class 符号.
+    // 必须早于 3.5: driver_crossmod.cpp 把 Class 符号的成员表逐字段拷给外部工程副本.
+    // 工程无 Inherits 时立即 return true (2.8 未建表), 生成物逐字节不变.
+    if (!mergeInheritedMembers()) {
+        std::cerr << diag_->toString();
+        result.errorCount = diag_->errorCount();
+        result.warningCount = diag_->warningCount();
+        return result;
+    }
+
     // === 阶段3.5: 跨模块符号链接 ===
     // 多模块项目: 解析跨模块Public符号引用
     if (modules_.size() > 1) {

@@ -19,6 +19,7 @@
 #include "semantics/symbol_table.hpp"
 #include "semantics/type_system.hpp"
 #include "semantics/interfaces_registry.hpp"  // tB Interface 契约发码 (ai/022 B04)
+#include "semantics/class_chain_registry.hpp"  // tB 类继承发码 (ai/022 B07b)
 #include "common/diagnostics.hpp"
 #include "project/frm_parser.hpp"
 #include <array>

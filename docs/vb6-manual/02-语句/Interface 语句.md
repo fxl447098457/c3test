@@ -51,8 +51,10 @@
 
 **实现状态**
 
-当前版本交付的是语法与编译期契约检查。接口类型变量、虚表发码、`New`/`CreateObject` 激活与
-COM 注册（IUnknown/IDispatch、类型库导出）按 `ai/022` 进度表在后续批次交付。
+已交付（`ai/022` B01–B06b）：语法与契约检查、接口类型变量、虚表发码与派发、引用计数生命周期、
+`QueryInterface`/跨接口 `Set`/`TypeOf … Is <接口>` 与上下行转换。
+未交付：接口值作实参 / 进 `Variant`、`New`/`CreateObject` 的 COM 激活与注册（IUnknown/IDispatch
+完整兼容、类型库导出）按进度表在后续批次（B13/P6）交付。
 
 **另见**
 

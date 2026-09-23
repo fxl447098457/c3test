@@ -80,12 +80,12 @@
     // (vb6comserver_obj.c 按裸偏移 0 读写 __comObj, 见 ai/022 D19 的硬修正)
     emitIfaceClassFields(module);
 
-        // 收集模块级变量作为结构体字段
+        // 收集模块级变量作为结构体字段 (tB B07b: 继承字段在前, 派生前缀必须与祖先一致)
         bool hasFields = false;
-        for (auto& decl : module.declarations) {
-            if (decl->kind == ASTNodeKind::VariableDecl) {
+        for (VariableDecl* var_p : structFieldDecls(module)) {
+            if (var_p) {
                 hasFields = true;
-                auto& var = static_cast<VariableDecl&>(*decl);
+                auto& var = *var_p;
                 std::string cType = mapTypeRef(var.asType.get());
                 if (var.isDynamicArray || !var.dimensions.empty()) {
                     // 数组: 使用vb6_SafeArray1D*/vb6_SafeArrayND* (NOT SAFEARRAY*)

@@ -41,6 +41,8 @@ bool Driver::runSemanticAnalysis(const CompileOptions& options) {
         analyzer->setGenericRegistry(&genView_);
         // Interface 契约 (tB, B02): stage 2.7 建好的只读登记表
         analyzer->setInterfaceRegistry(&ifaces_);
+        // 类继承 (tB, B07b): stage 2.8 建好的只读链登记表 (裸名继承成员判定)
+        analyzer->setClassChainRegistry(&classes_);
 
         // P6.3: 如果有TypeLib解析结果, 注入COM类型信息到符号表
         if (typelibParser_) {

@@ -89,6 +89,14 @@
     void emitClassFieldAccessors(Module& module);
     void emitInterfaceVtable(Module& module);
     // tB Interface 契约发码 (ai/022 D2/D3, 批次 B04, 见 cgen_iface_vtbl.cpp)
+    // ---- Inherits 发码 (tB, ai/022 B07b; 实现在 cgen_inherit.cpp) ----
+    const ClassChainView* classChainOf(const Module& module) const;  // 空 = 本模块无继承链
+    std::vector<VariableDecl*> structFieldDecls(Module& module);      // 继承字段 (根→叶) + 自有字段
+    std::string inheritedRetType(Decl& d);
+    std::string inheritedStubSig(Decl& d);
+    void emitInheritedProcDecls(Module& module);   // .h: 桩声明
+    void emitInheritedProcDefs(Module& module);    // .c: 桩定义
+
     void emitIfaceContractTypedefs();                 // .h: 工程级 vb6_ivtbl_/vb6_ivref_ 类型
     void emitIfaceClassFields(Module& module);        // .h: 类结构体里的 __iv_<I> 字段
     void emitIfaceImplTables(Module& module);         // .c: 适配器 + 类侧槽表实例

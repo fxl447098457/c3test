@@ -1,4 +1,5 @@
 #include "semantics/semantic_analyzer.hpp"
+#include "semantics/interface_sig.hpp"  // tB Interface/继承线共用的小写键函数 (B07b)
 #include <algorithm>
 #include <cctype>
 #include <cstdio>
@@ -525,6 +526,37 @@ std::string SemanticAnalyzer::evalOptionalDefault(ASTNode* defaultValue, Vb6Type
     
     // 其他非字面量表达式 -> 暂不支持, 返回空让cgen用类型零值
     return "";
+}
+
+
+// 类继承 (tB, B07b): 祖先自己声明的成员名判定。刻意不复用 stage 3.4 回填的 inhProcs/inhFields
+// —— 本判定发生在语义分析途中, 那时合并还没跑; 而且"基类写了什么"这件事 2.8 就已经定死了。
+bool SemanticAnalyzer::declaredByAncestor(const std::string& name) const {
+    if (!clsreg_ || clsreg_->empty() || !currentModule_) return false;
+    if (!currentModule_->isClassModule) return false;
+    auto self = clsreg_->find(ifaceLower(currentModule_->moduleName));
+    if (self == clsreg_->end() || self->second.mod != currentModule_) return false;
+    const ClassChainView& v = self->second;
+    if (v.chainBroken || v.chain.size() < 2) return false;
+    const std::string lk = ifaceLower(name);
+    if (lk.empty()) return false;
+    for (size_t i = 0; i + 1 < v.chain.size(); i++) {  // 根 → 父 (末位是自身, 不含)
+        auto it = clsreg_->find(v.chain[i]);
+        if (it == clsreg_->end() || !it->second.mod) continue;
+        for (const auto& d : it->second.mod->declarations) {
+            if (!d) continue;
+            std::string dn;
+            switch (d->kind) {
+                case ASTNodeKind::VariableDecl: dn = static_cast<const VariableDecl&>(*d).name; break;
+                case ASTNodeKind::SubDecl:      dn = static_cast<const SubDecl&>(*d).name; break;
+                case ASTNodeKind::FunctionDecl: dn = static_cast<const FunctionDecl&>(*d).name; break;
+                case ASTNodeKind::PropertyDecl: dn = static_cast<const PropertyDecl&>(*d).name; break;
+                default: continue;
+            }
+            if (ifaceLower(dn) == lk) return true;
+        }
+    }
+    return false;
 }
 
 } // namespace vb6c3

@@ -401,6 +401,10 @@
     // 槽表/适配器/薄指针类型都由它驱动, 与 legacy 的 implementsNames 口径互不影响.
     const IfaceRegistry* ivreg_ = nullptr;
 
+    // 类继承 (tB, ai/022 B07b): stage 2.8 建好的工程级只读链登记表 (driver 注入).
+    // 继承字段与前缀布局、转发桩都由 view 的 inhFields/inhProcs 驱动 (stage 3.4 回填).
+    const ClassChainRegistry* clsreg_ = nullptr;
+
     // P6.4+: class-module default instance (VB_PredeclaredId=True) lowercase name -> canonical
     const std::map<std::string, std::string>* defaultInstanceClasses_ = nullptr;
 

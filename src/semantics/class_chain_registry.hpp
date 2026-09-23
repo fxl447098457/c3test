@@ -17,17 +17,31 @@
 namespace vb6c3 {
 
 class Module;
+class Decl;
 struct InheritsStmt;
 
 // 单个工程类 (只登记"能当基类用"的模块: 类模块、非泛型模板、非接口宿主)。
 struct ClassChainView {
     std::string name;                  // 类名 (原大小写, 工程级唯一)
-    const Module* mod = nullptr;       // 该类的模块 (B07b 的成员合并要读它的声明)
+    Module* mod = nullptr;             // 该类的模块 (成员合并与发码都要读它的声明; 非 const 是因为
+                                     // 发码层的 makeProcSignature/mapTypeRef 吃非 const 引用)
     const InheritsStmt* clause = nullptr;  // 指向 Module::inherits[0]; 空 = 无基类
     std::string baseKey;               // 基类的小写键 (已解到 chainKey), 空 = 无基类
     std::string baseText;              // 基名书写原文 (诊断可读)
     std::vector<std::string> chain;    // 自根到叶的小写键 (根在前, 末位是自身) — B07b 的成员合并按此序取声明
     bool chainBroken = false;          // 基链有错 (未知基/环/过深), 不再级联报错
+
+    // --- B07b: stage 3.4 (mergeInheritedMembers) 回填, 之后只读 ---
+    // 为什么回填而不是让发码层重算: 合并的"祖先 own 声明 + 遮蔽裁决"必须与符号表里那 8 张
+    // 成员表**同源**, 否则 struct 字段与可调用成员会各按一套规则走 (静默错字段)。
+    std::vector<Decl*> inhFields;  // 祖先数据字段 (自根到叶, 只算各祖先自己的声明)
+    // 需要转发桩的祖先过程 (自根到叶, 已去掉被遮蔽与 Private 的)。owner = 声明它的那个祖先模块,
+    // 发码时要拿它拼 `vb6_<owner>_<M>((vb6_cls_<owner>*)me, …)`。
+    struct InheritedProc {
+        Decl* decl = nullptr;
+        Module* owner = nullptr;
+    };
+    std::vector<InheritedProc> inhProcs;
 };
 
 // key = 类名小写 (工程级唯一, D1)

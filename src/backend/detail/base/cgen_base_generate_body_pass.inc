@@ -18,6 +18,9 @@
         }
     }
 
+    // === Inherits (tB B07b): 祖先成员的转发桩定义 (排在过程体之后、工厂函数之前) ===
+    if (isClassModule_ && !currentClassIsInterface) emitInheritedProcDefs(module);
+
     // === 类模块: 生成工厂函数 ===
     if (isClassModule_ && !currentClassIsInterface) {  // P6.4: 接口类不生成工厂/析构函数
         emitClassFactory(module);
