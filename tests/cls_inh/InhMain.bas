@@ -85,4 +85,25 @@ Sub Main()
     Dim up3 As InhBase
     Set up3 = sib
     If up3.SpeakThru() = "sibling" Then Debug.Print "INH26:OK" Else Debug.Print "INH26:FAIL " & up3.SpeakThru()
+    ' INH27..INH31 (ai/022 B08e): the very same calls written INSIDE `With <var>` must bind
+    ' through the instance's own table. INH27/28 are the discriminators: wu is declared
+    ' InhBase but holds the InhDerived instance, so a statically bound call answers "base".
+    Dim wu As InhBase
+    Set wu = d
+    With wu
+        If .Speak() = "derived" Then Debug.Print "INH27:OK" Else Debug.Print "INH27:FAIL " & .Speak()
+        If .Greet("bob") = "hi bob (derived)" Then Debug.Print "INH28:OK" Else Debug.Print "INH28:FAIL " & .Greet("bob")
+    End With
+    Dim wm As InhMid
+    Set wm = New InhMid
+    With wm
+        ' INH29: mid instance picks mid's override; INH30/31 stay on the direct path
+        ' (Property Let/Get and a plain Sub are not virtual slots -> must not be rewritten).
+        If .Pick() = "mid" Then Debug.Print "INH29:OK" Else Debug.Print "INH29:FAIL " & .Pick()
+        .Name = "wn"
+        If .Name = "wn" Then Debug.Print "INH30:OK" Else Debug.Print "INH30:FAIL " & .Name
+        .Bump
+        .Bump
+        If .Hits() = 2 Then Debug.Print "INH31:OK" Else Debug.Print "INH31:FAIL " & .Hits()
+    End With
 End Sub
