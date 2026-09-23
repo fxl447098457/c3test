@@ -125,6 +125,61 @@ Sub Main()
         Debug.Print "QI4:FAIL"
     End If
 
+    ' ---- B06b: Nothing-safe upcast / downcast / TypeOf on a class variable ----
+    ' (a) nz was never Set -> upcasting Nothing must yield Nothing, not a wild
+    '     pointer (NULL + offsetof is non-zero, and the AddRef would deref it).
+    Dim nz As CWriter
+    Dim snz As IWriter
+    Set snz = nz
+    If snz Is Nothing Then
+        Debug.Print "DN0:OK"
+    Else
+        Debug.Print "DN0:FAIL"
+    End If
+
+    ' (b) upcast then downcast: same instance, and the interface side letting go
+    '     must not pull the object out from under the class variable (AddRef count).
+    Dim dw As CWriter
+    Set dw = New CWriter
+    Dim di As IWriter
+    Set di = dw
+    di.Emit("down-cast")
+    Dim dw2 As CWriter
+    Set dw2 = di
+    If dw2 Is Nothing Then
+        Debug.Print "DN1:FAIL"
+    Else
+        Debug.Print "DN1:OK"
+    End If
+    Set di = Nothing
+    If dw2 Is Nothing Then
+        Debug.Print "DN2:FAIL"
+    Else
+        Debug.Print "DN2:OK"
+    End If
+    If dw2.Total() = 1 Then
+        Debug.Print "DN3:OK"
+    Else
+        Debug.Print "DN3:FAIL"
+    End If
+
+    ' (c) TypeOf on a project class variable (static IID membership, no cast needed)
+    If TypeOf dw Is IWriter Then
+        Debug.Print "TOC1:OK"
+    Else
+        Debug.Print "TOC1:FAIL"
+    End If
+    If TypeOf dw Is ILog Then
+        Debug.Print "TOC2:OK"
+    Else
+        Debug.Print "TOC2:FAIL"
+    End If
+    If TypeOf dw Is INope Then
+        Debug.Print "TOC3:FAIL"
+    Else
+        Debug.Print "TOC3:OK"
+    End If
+
     ' (c) end-of-procedure release: only the procedure epilogue frees this one
     ScopeExit
     Debug.Print "LIFE9:OK"

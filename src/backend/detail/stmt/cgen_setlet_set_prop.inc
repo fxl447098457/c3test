@@ -433,6 +433,14 @@
                     return;
                 }
                 if (isClassVar || isNewExpr) {
+                    // D22-10: 类变量可能是 Nothing —— &NULL->__iv_<I> 算出来是个**非空**野地址
+                    // (NULL + offsetof)，紧接着的 AddRef 就会解引用它。New 的返回值恒非空，
+                    // 而且对它做三目会让 _New() 求值两次（凭空多创建一个实例），所以守卫只加在
+                    // "裸类变量"这条路上。
+                    const std::string ivField = "__iv_" + cIdent(v->name);
+                    const std::string ivPtr = isClassVar
+                        ? "((" + value + ") ? &(" + value + ")->" + ivField + " : NULL)"
+                        : "&(" + value + ")->" + ivField;
                     if (plainIvTarget) {
                         // COM 口径: 存旧值 → 覆盖 → AddRef 新 → Release 旧.
                         // RHS 是 New 时那 1 次初始引用直接移交, 故不 AddRef.
@@ -441,7 +449,7 @@
                         c_.emitLine("{  /* tB Interface B05: Set " + target + " (refcounted) */");
                         c_.indent();
                         c_.emitLine(ivCType + " " + ivOld + " = " + target + ";");
-                        c_.emitLine(target + " = &(" + value + ")->__iv_" + cIdent(v->name) + ";");
+                        c_.emitLine(target + " = " + ivPtr + ";");
                         if (!isNewExpr) {
                             c_.emitLine("if (" + target + ") " + target + "->vt->AddRef(" +
                                         target + ");");
@@ -451,7 +459,7 @@
                         c_.emitLine("}");
                         return;
                     }
-                    value = "&(" + value + ")->__iv_" + cIdent(v->name);
+                    value = ivPtr;
                 } else {
                     diag_.error(DiagnosticID::CodeGenUnsupportedFeature, SourceLocation{},
                         "Interface binding: Set " + target + " = <expr> needs a class instance,"
@@ -459,6 +467,36 @@
                         " (tB Interface " + v->name + ")");
                 }
             }
+        }
+    }
+
+    // tB Interface B06b: Set <工程类变量> = <接口变量> → 下行转换。
+    // 用按类导出的 vb6_iv_from_iv_<C> 验明正身（薄指针所属实例的槽表是 C 那个 TU 的
+    // static const 对象，使用点比不了地址 → 绝不能写裸强转）；命中才 AddRef ——
+    // 类变量那一遍引用按 D21-5 的不变式永不释放，不加码的话接口侧 Release 到 0
+    // 会把对象从这个类变量脚下抽走。
+    {
+        std::string dcTgt = target, dcRhs = value;
+        std::transform(dcTgt.begin(), dcTgt.end(), dcTgt.begin(), ::tolower);
+        std::transform(dcRhs.begin(), dcRhs.end(), dcRhs.begin(), ::tolower);
+        auto itDcCls = knownClassVars_.find(dcTgt);
+        const bool dcPlain =
+            !target.empty() && target.find_first_not_of(
+                "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_")
+                == std::string::npos &&
+            !value.empty() && value.find_first_not_of(
+                "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_")
+                == std::string::npos;
+        if (itDcCls != knownClassVars_.end() && knownIvrefVars_.count(dcRhs) && dcPlain) {
+            const std::string dcClsC = cIdent(itDcCls->second);
+            c_.emitLine("{  /* tB Interface B06b: Set " + target + " = downcast of " + value + " */");
+            c_.indent();
+            c_.emitLine("void* __ivdown = vb6_iv_from_iv_" + dcClsC + "(" + value + ");");
+            c_.emitLine(target + " = (vb6_cls_" + dcClsC + "*)__ivdown;");
+            c_.emitLine("if (" + target + ") " + value + "->vt->AddRef(" + value + ");");
+            c_.dedent();
+            c_.emitLine("}");
+            return;
         }
     }
 

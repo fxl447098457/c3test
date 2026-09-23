@@ -485,6 +485,44 @@ void CCodeGen::emitIfaceImplTables(Module& module) {
         c_.dedent();
         c_.emitLine("};");
     }
+
+    // B06b: 两个跨模块助手（声明进类的 .h，实现进类的 .c —— 槽表实例是本 TU 的
+    // static const 对象，别的 TU 拿不到它的地址，所以"这根薄指针是不是本类的实例"
+    // 只能在这里判，不能在使用点写裸强转）。
+    const std::string fromIv = "vb6_iv_from_iv_" + clsId;
+    const std::string testIid = "vb6_iv_test_iid_" + clsId;
+    h_.emitBlank();
+    h_.emitLine("void* " + fromIv + "(void* self);  /* tB Interface B06b: iface ptr -> instance */");
+    h_.emitLine("int32_t " + testIid + "(void* self, const void* riid);  /* tB Interface B06b: TypeOf <cls> Is <iface> */");
+
+    c_.emitBlank();
+    c_.emitLine("void* " + fromIv + "(void* self) {");
+    c_.indent();
+    c_.emitLine("const void* vt;");
+    c_.emitLine("if (!self) return NULL;");
+    c_.emitLine("vt = *(const void**)self;");
+    for (const IfaceView* v : ifaces) {
+        const std::string id = cIdent(v->name);
+        c_.emitLine("if (vt == (const void*)&vb6_ivtbl_" + id + "_for_" + clsId + ")");
+        c_.indent();
+        c_.emitLine("return (char*)self - offsetof(" + clsStruct + ", __iv_" + id + ");");
+        c_.dedent();
+    }
+    c_.emitLine("return NULL;  /* not an instance of this class (Set ... = Nothing 语义) */");
+    c_.dedent();
+    c_.emitLine("}");
+
+    c_.emitBlank();
+    c_.emitLine("int32_t " + testIid + "(void* self, const void* riid) {");
+    c_.indent();
+    c_.emitLine("if (!self || !riid) return 0;  /* Nothing 不匹配任何类型 */");
+    c_.emitLine("if (vb6_IidEqual(riid, vb6_iv_iid_IUnknown)) return 1;");
+    for (const IfaceView* v : ifaces) {
+        c_.emitLine("if (vb6_IidEqual(riid, vb6_iv_iid_" + cIdent(v->name) + ")) return 1;");
+    }
+    c_.emitLine("return 0;");
+    c_.dedent();
+    c_.emitLine("}");
 }
 
 // ============================================================

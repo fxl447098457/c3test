@@ -331,10 +331,19 @@ void CCodeGen::visit(TypeOfExpr& node) {
     if (const IfaceView* ivt = ivLookupIface(node.typeName)) {
         std::string objLower = obj;
         std::transform(objLower.begin(), objLower.end(), objLower.begin(), ::tolower);
+        auto itClsTof = knownClassVars_.find(objLower);
+        if (itClsTof != knownClassVars_.end()) {
+            // 类变量的动态类型恒等于声明类型 → 静态 IID 归属判定即可（按类导出的
+            // vb6_iv_test_iid_<C>，见 cgen_iface_vtbl.cpp），不需要减 offsetof，也就
+            // 不会要求"这个类恰好实现了该接口"才编译得过（不实现时必须老实返回 False）。
+            lastExpr_ = "vb6_iv_test_iid_" + cIdent(itClsTof->second) + "(" + obj + ", vb6_iv_iid_" +
+                        cIdent(ivt->name) + ")";
+            return;
+        }
         if (!knownIvrefVars_.count(objLower)) {
             diag_.error(DiagnosticID::CodeGenUnsupportedFeature, node.loc,
-                "TypeOf ... Is " + node.typeName + " needs an interface variable on the left"
-                " side (tB Interface " + ivt->name + ")");
+                "TypeOf ... Is " + node.typeName + " needs an interface variable or a project"
+                " class variable on the left side (tB Interface " + ivt->name + ")");
             lastExpr_ = "0";
             return;
         }
