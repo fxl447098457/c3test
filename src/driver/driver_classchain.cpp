@@ -417,6 +417,9 @@ bool Driver::mergeInheritedMembers() {
                 if (auto it = src->memberProcKinds.find(k); it != src->memberProcKinds.end()) {
                     dst->memberProcKinds.emplace(k, it->second);
                 }
+                if (auto it = src->memberAccessLevels.find(k); it != src->memberAccessLevels.end()) {
+                    dst->memberAccessLevels.emplace(k, it->second);  // tB B08a
+                }
                 if (auto it = src->memberReturnTypes.find(k); it != src->memberReturnTypes.end()) {
                     dst->memberReturnTypes.emplace(k, it->second);
                 }
@@ -455,6 +458,9 @@ bool Driver::mergeInheritedMembers() {
                 }
                 if (auto it = src->memberFieldTypes.find(k); it != src->memberFieldTypes.end()) {
                     dst->memberFieldTypes.emplace(k, it->second);
+                }
+                if (auto it = src->memberAccessLevels.find(k); it != src->memberAccessLevels.end()) {
+                    dst->memberAccessLevels.emplace(k, it->second);  // tB B08a
                 }
             }
         }

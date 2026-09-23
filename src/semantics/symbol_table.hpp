@@ -188,6 +188,10 @@ struct Symbol {
     // Pattern C/D2 属性赋值改写 (prop_get_ → prop_let_) 无法判定 Let 末参是否
     // Variant → 值实参不打包 → C2440. 故独立记录 Let/Set 胜出者参数表 (同类内
     // Let/Set 各自唯一, 无条件覆盖写入), 供 findClassMemberWriteParams 使用.
+    // tB 类继承 (B08a): 成员小写键 -> 声明时的访问级别。既有 11 张成员表都不带访问级别,
+    // 而 `Protected` 的语义 (家族内可见) 与 `Inherits` 的可见面裁决都要读它; 跨模块拷贝
+    // (driver_crossmod) 与继承合并 (driver_classchain) 两处都得带上, 漏一张就是静默错判。
+    std::unordered_map<std::string, AccessLevel> memberAccessLevels;
     std::unordered_map<std::string, std::vector<ParameterInfo>> memberLetParams;
     std::unordered_map<std::string, std::vector<ParameterInfo>> memberSetParams;
     bool isInterface = false;                          // 是否为接口类(纯抽象,无实现)

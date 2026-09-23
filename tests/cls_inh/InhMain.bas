@@ -51,4 +51,6 @@ Sub Main()
     ' INH11: derived and base instances keep separate storage (prefix copy, not shared)
     b.SetPt 1
     If b.PtSum() = 3 And d.PtSum() = 15 Then Debug.Print "INH11:OK" Else Debug.Print "INH11:FAIL"
+    If d.RevealSecret(4) = 8 Then Debug.Print "INH12:OK" Else Debug.Print "INH12:FAIL v=" & d.RevealSecret(4)
+    If d.TagRoundTrip("S") = "S" Then Debug.Print "INH13:OK" Else Debug.Print "INH13:FAIL"
 End Sub

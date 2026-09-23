@@ -94,7 +94,9 @@
             // Fix 055: Form事件处理函数不能为static, 因为wndproc用extern引用它们
             bool isFormEventProc = module.isFormModule && sub.name.find("Form_") == 0;
             // Fix 089e: Friend/Public 成员跨模块可调用 → 非 static 声明
-            if (sub.access == AccessLevel::Public || sub.access == AccessLevel::Friend || isFormEventProc) {
+            // tB B08a: Protected 也非 static —— 派生模块 TU 的转发桩要能看见它
+            if (sub.access == AccessLevel::Public || sub.access == AccessLevel::Friend ||
+                sub.access == AccessLevel::Protected || isFormEventProc) {
                 h_.emitLine(sig + ";");
             } else {
                 h_.emitLine("static " + sig + ";");
@@ -105,7 +107,8 @@
             // Fix 055: Form事件处理函数不能为static, 因为wndproc用extern引用它们
             bool isFormEventFunc = module.isFormModule && func.name.find("Form_") == 0;
             // Fix 089e: Friend/Public 成员跨模块可调用 → 非 static 声明
-            if (func.access == AccessLevel::Public || func.access == AccessLevel::Friend || isFormEventFunc) {
+            if (func.access == AccessLevel::Public || func.access == AccessLevel::Friend ||
+                func.access == AccessLevel::Protected || isFormEventFunc) {  // tB B08a
                 h_.emitLine(sig + ";");
             } else {
                 h_.emitLine("static " + sig + ";");
@@ -114,7 +117,8 @@
             auto& prop = static_cast<PropertyDecl&>(*decl);
             std::string sig = makePropertySignature(prop);
             // Fix 089e: Friend Property (Friend Property Get/Let/Set) 跨模块可调用
-            if (prop.access == AccessLevel::Public || prop.access == AccessLevel::Friend) {
+            if (prop.access == AccessLevel::Public || prop.access == AccessLevel::Friend ||
+                prop.access == AccessLevel::Protected) {  // tB B08a
                 h_.emitLine(sig + ";");
             } else {
                 h_.emitLine("static " + sig + ";");

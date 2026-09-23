@@ -29,6 +29,7 @@ void Lexer::initKeywords() {
         {"const", TokenKind::Const},
         {"public", TokenKind::Public}, {"private", TokenKind::Private},
         {"static", TokenKind::Static}, {"friend", TokenKind::Friend},
+        {"protected", TokenKind::Protected},  // tB 扩展 (ai/022 B08a)
         {"global", TokenKind::Global},
 
         {"as", TokenKind::As}, {"new", TokenKind::New},

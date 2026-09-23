@@ -55,6 +55,8 @@ enum class AccessLevel : uint8_t {
     Public = 0,
     Private = 1,
     Friend = 2,     // VB6无此关键字，保留
+    Protected = 3,  // tB 扩展 (B08a): 只在类家族内可见。追加在末尾 —— Default=Public 是别名,
+                    // 插在中间会牵动任何按数值比较的代码
     Default = Public,
 };
 

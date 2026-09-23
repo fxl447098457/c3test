@@ -15,6 +15,7 @@ private:
         switch (a) {
         case AccessLevel::Public:  return "Public";
         case AccessLevel::Private: return "Private";
+        case AccessLevel::Protected: return "Protected";  // tB B08a
         case AccessLevel::Friend:  return "Friend";
         default: return "?";
         }

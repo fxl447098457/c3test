@@ -23,6 +23,7 @@ bool Token::isKeyword() const {
         || kind == TokenKind::As || kind == TokenKind::New
         || kind == TokenKind::Public || kind == TokenKind::Private
         || kind == TokenKind::Static || kind == TokenKind::Friend
+        || kind == TokenKind::Protected
         || kind == TokenKind::ByVal || kind == TokenKind::ByRef
         || kind == TokenKind::Optional || kind == TokenKind::ParamArray
         || kind == TokenKind::Implements || kind == TokenKind::Event

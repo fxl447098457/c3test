@@ -184,7 +184,8 @@ std::unique_ptr<VariableDecl> Parser::parseVariableDecl(AccessLevel access, bool
     // 但如果从 parseDeclaration 直接调用, Dim 尚未消费
     if (cur_.kind == TokenKind::Dim || cur_.kind == TokenKind::Public ||
         cur_.kind == TokenKind::Private || cur_.kind == TokenKind::Static ||
-        cur_.kind == TokenKind::Global || cur_.kind == TokenKind::Friend) {
+        cur_.kind == TokenKind::Global || cur_.kind == TokenKind::Friend ||
+        cur_.kind == TokenKind::Protected) {  // tB 扩展 (B08a)
         advance();
     }
 

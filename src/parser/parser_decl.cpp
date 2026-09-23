@@ -26,12 +26,15 @@ DeclPtr Parser::parseDeclaration() {
         case TokenKind::Public:
         case TokenKind::Private:
         case TokenKind::Friend:
+        case TokenKind::Protected:
         case TokenKind::Global: {
             AccessLevel access;
             if (cur_.kind == TokenKind::Public || cur_.kind == TokenKind::Global) {
                 access = AccessLevel::Public;
             } else if (cur_.kind == TokenKind::Friend) {
                 access = AccessLevel::Friend;
+            } else if (cur_.kind == TokenKind::Protected) {
+                access = AccessLevel::Protected;  // tB 扩展 (B08a)
             } else {
                 access = AccessLevel::Private;
             }

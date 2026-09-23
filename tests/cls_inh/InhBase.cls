@@ -11,6 +11,8 @@ Private Type TPoint
 End Type
 
 Private m_hits As Long
+Protected m_secret As Long
+Protected m_tag As String
 Private m_pt As TPoint
 Private m_name As String
 Public Label As String
@@ -59,3 +61,11 @@ End Property
 Public Property Let Name(ByVal v As String)
     m_name = v
 End Property
+
+Protected Sub SetSecret(ByVal v As Long)
+    m_secret = v
+End Sub
+
+Protected Function Secret() As Long
+    Secret = m_secret
+End Function

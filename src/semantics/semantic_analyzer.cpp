@@ -49,6 +49,8 @@ bool SemanticAnalyzer::analyze(Module& module) {
                     // Fix 092p: 登记字段声明原名 — C 结构体成员名按声明生成, 访问点需
                     // 把源码里的大小写变体 (.socket) 规范化回该名.
                     classSym->memberFieldNames[Symbol::toLower(v092m.name)] = v092m.name;
+                    // tB B08a: 记录访问级别 (Private 字段在真 VB6 里等价于 Dim, 也照样记)
+                    classSym->memberAccessLevels[Symbol::toLower(v092m.name)] = v092m.access;
                     if (v092m.asType && v092m.asType->kind == ASTNodeKind::SimpleTypeRef) {
                         classSym->memberFieldTypes[Symbol::toLower(v092m.name)] =
                             static_cast<SimpleTypeRef*>(v092m.asType.get())->name;
@@ -71,6 +73,7 @@ bool SemanticAnalyzer::analyze(Module& module) {
                     classSym->memberNames.push_back(s.name);
                     // Fix 016: Sub 写入 memberProcKinds (覆盖任意前值)
                     classSym->memberProcKinds[Symbol::toLower(s.name)] = ProcKind::Sub;
+                    classSym->memberAccessLevels[Symbol::toLower(s.name)] = s.access;  // tB B08a
                     // Fix 033: memberParams 改在 Pass1 填充 (class init 阶段类型解析不完整, 导致 Variant 回归)
                     break;
                 }
@@ -86,6 +89,7 @@ bool SemanticAnalyzer::analyze(Module& module) {
                     // Fix 016: Function 写入 memberProcKinds (覆盖任意前值 — 同类内
                     // 不允许 Function 与同名 Property 共存, 故此处覆盖无冲突风险)
                     classSym->memberProcKinds[Symbol::toLower(f.name)] = ProcKind::Function;
+                    classSym->memberAccessLevels[Symbol::toLower(f.name)] = f.access;  // tB B08a
                     // Fix 033: memberParams 改在 Pass1 填充 (class init 阶段类型解析不完整)
                     break;
                 }
@@ -134,6 +138,7 @@ bool SemanticAnalyzer::analyze(Module& module) {
                             }
                         }
                         if (wins) {
+                            classSym->memberAccessLevels[lower] = p.access;  // tB B08a
                             if (p.propKind == ProcKind::PropertyGet) {
                                 classSym->memberProcKinds[lower] = ProcKind::PropertyGet;
                             } else if (p.propKind == ProcKind::PropertyLet) {
@@ -149,6 +154,7 @@ bool SemanticAnalyzer::analyze(Module& module) {
                     auto& e = static_cast<EventDecl&>(*decl);
                     classSym->memberNames.push_back(e.name);
                     classSym->eventNames.push_back(e.name);  // P6.5: 收集事件名
+                    classSym->memberAccessLevels[Symbol::toLower(e.name)] = e.access;  // tB B08a
                     break;
                 }
                 default:

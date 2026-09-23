@@ -286,6 +286,7 @@ bool Parser::isDeclarationStart() const {
         case TokenKind::Declare:
         case TokenKind::Event:
         case TokenKind::Friend:
+        case TokenKind::Protected:  // tB 扩展 (B08a)
         case TokenKind::Global:
             return true;
         default:

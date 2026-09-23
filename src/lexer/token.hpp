@@ -112,6 +112,7 @@ enum class TokenKind : uint16_t {
     Private,
     Static,
     Friend,
+    Protected,  // tB 扩展 (ai/022 B08a)
     Global,
 
     As,

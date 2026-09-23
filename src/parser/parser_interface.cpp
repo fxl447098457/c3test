@@ -245,7 +245,8 @@ std::unique_ptr<InterfaceDecl> Parser::parseInterfaceDecl(
         }
 
         if (cur_.kind == TokenKind::Public || cur_.kind == TokenKind::Private ||
-            cur_.kind == TokenKind::Friend || cur_.kind == TokenKind::Static) {
+            cur_.kind == TokenKind::Friend || cur_.kind == TokenKind::Static ||
+            cur_.kind == TokenKind::Protected) {  // tB 扩展 (B08a)
             diag_.error(DiagnosticID::ParseInvalidInterfaceMember, currentLoc(),
                 "Interface member must not carry an access modifier (contract members are public): " + cur_.text);
             advance();

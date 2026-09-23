@@ -185,6 +185,7 @@ bool Driver::runCrossModuleResolution() {
                 extSym->memberFieldDispids = srcSym->memberFieldDispids; // Fix 099: Public 字段 TypeLib DISPID
                 extSym->memberLetParams = srcSym->memberLetParams;       // Fix 091a: Let 写方向参数表
                 extSym->memberSetParams = srcSym->memberSetParams;       // Fix 091a: Set 写方向参数表
+                extSym->memberAccessLevels = srcSym->memberAccessLevels; // tB B08a: 成员访问级别
                 extSym->isInterface = srcSym->isInterface;  // P6.4
                 extSym->implementsNames = srcSym->implementsNames;  // P6.4
                 extSym->interfaceMethodNames = srcSym->interfaceMethodNames;  // P6.4
