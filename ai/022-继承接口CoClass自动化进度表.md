@@ -5,28 +5,29 @@
 > 规范输入: `ai/讨论记录/018-接口继承与CoClass设计思路.md`（含 tB 文档要点与分阶段设计思路全文）。
 
 STATUS: IDLE               # NOT_STARTED | DESIGN | BUSY | IDLE | ALL_DONE
-LAST_RUN: 2026-09-24T05:58:00+08:00   # 本轮 = **B08e-5 已过门并提交 d9eca95**（⑥⑦ 两处 Pattern L 接派发；④ 判为走不到、另登站点⑮）。时间线：04:31 起表、04:49 跑门、05:16 中途重占一次、05:50 收线、05:58 出 docs。**流程变更（用户 05:36 指示）**：全量回归改跑 GitHub Actions（本地一轮 55–60 分钟且三写者抢 CPU），推 `github` remote 的 `dev` 分支触发 `ci.yml`，用 `scripts/watch-gh-actions.ps1` 盯；本地 `-Category all` 降级为里程碑级，批次内只做快检（`-Category syntax` + 目标用例单跑 + `--emit-c` 逐字节护栏）。被本行顶掉的旧注：：本轮 = B08e-5，04:31 起表，代码/用例/护栏已就绪（⑥⑦ 两处 Pattern L 接派发 + ④ 判为走不到、新登站点⑮），全量门 04:49 起跑还在跑（另一棵树正在大构建：43 个 C3.exe / 20 cl.exe / 37 link.exe），过门后按 392a52d 的先例记哈希收线。
-               # 自动运行见本行不足 55 分钟请立即跳过。   # 13 站地图与逐条裁决在 D35；本轮新增**站点⑭**（不在这 13 个消费点里，但是属性读的先决条件），开工前先读 D35-6。
-LAST_COMMIT: 代码批 = d9eca95(B08e-5)、392a52d(B08e-4)、8987386(B08e-2)、e531d82(B08e-1)、82b1b34(B08c)、df9806e(B08d)、05397be(B08b)   # **连续两批把 commit 标题从上一批复制串了行**：392a52d 按"不改历史"记着；d9eca95 在**推送前**用 `--amend` 改回正确标题（只改自己刚建、未 push 的 tip，`git diff a81d779..HEAD` 校验内容零变化）。教训：**commit message 一律现写，不复用上批文本**。
-CURRENT_BATCH: **B08e-6**。⑥⑦ 已交付（D35-8）；④ 判为走不到（不是静默直调，是编译不过），另登站点⑮。次序：
-               1. **判死一批：⑧⑨⑩⑫⑬**（属性返回对象 / AST 兜底链 / 015 方法链 / `.ctl` 子控件）——接收者
-                  按构造含调用 → `mustDispatch=true` 出 `VB3027`。**前置**：先给 `tests/run_tests.ps1` 补一个
-                  "真编译必须失败 + 断言 stderr 文本"的助手（cgen 期诊断 `--syntax-only` 看不见：
-                  `driver_compile.cpp` 早退在 :426、发码在其后；3.4b 在 :376 看得见），照 `Test-SyntaxFail`
-                  的 `cmd /c` 合并 stderr 写法改。**负控一律附发射形状对比**（B08e-3 的教训）。
-               2. **⑮ = UDT 对象字段的调用位置路由**：`u.h.M()`（`Public Type … h As <类>`）现在发成非法 C
-                  `u.h.Speak()` → `error C2039`；先让它走 `/* udt objfield */` marker 那条既有通路编得过，
-                  再谈派发。不在 13 站计数里，别混进 B08e 收尾。
-               3. 全部站点出完后开 **B09 = `MyBase.M(…)` 显式基调用（去虚化）+ 构造链顺序**。
-               硬约束（三次实测同结论）：判定只走 `virtDispatchCallee` 的 `mustDispatch`；派发串与 this
+LAST_RUN: 2026-09-24T06:55:00+08:00   # 本轮 = **B08e-6 已提交 40eea3f**（⑨ 接派发、⑩⑫ 判死、⑧ 实测已被优先级2 判死、⑬ 改判无需改；前置 `Test-CompileFail` 走 `--emit-c`）。**13 站到此全部出完**。上一轮 B08e-5 = d9eca95 + docs f8e3a1a/f20a36d。
+               # 自动运行见本行不足 55 分钟请立即跳过。   # 13 站地图与逐条裁决在 D35（含 D35-9 本轮记录）；开工前先读 D35 全表 + 本批 CURRENT_BATCH 的硬约束。
+LAST_COMMIT: 代码批 = 40eea3f(B08e-6)、d9eca95(B08e-5)、392a52d(B08e-4)、8987386(B08e-2)、e531d82(B08e-1)、82b1b34(B08c)、df9806e(B08d)   # **commit message 一律现写、不复用上批文本**（连续两批串过行，教训见 D35-8 末）；本轮起 push 只推 `github/dev`（Actions 门），`origin`(gitcode) 与 `main` 不碰、**绝不建 MR**。
+CURRENT_BATCH: **B08e-7 = 站点⑮（UDT 对象字段的调用位置路由）**。⑮ 一出，B08e 就整体收口，下一批改开 **B09**。
+               1. **⑮**：`Public Type … h As <类>` 之后 `u.h.M()`（M 是 Sub/Function）现在发成非法 C
+                  `u.h.M()` → C 编译期 `error C2039`（**不是**静默直调，见 D35-8）。根因 = UDT 对象字段在
+                  **调用位置**没拿到 `/* udt objfield */` marker，落到 `class_fallback.inc` 末尾
+                  `obj + "." + member` 的兜底。先修路由让它编得过，再谈派发（派发那一半要看接收者
+                  `(void*)&u.h` 之类是不是纯读 —— 若是，就能直接接 `virtDispatchCallee`）。
+                  验收同前：最小用例 + 发射形状两行 C + `Inh.vbp` 运行期断言 + A/B。
+               2. **顺手一条**（⑮ 不用就单独记 B09 前置）：`com_entry.c` 给派生类的**覆盖**过程发 extern
+                  用了基类 C 类型名、`typedef struct vb6_cls_<基>` 前置声明排在后面 → `error C2143`
+                  （`Overrides` 一个返回工程类类型的方法即触发；D35-9⑤）。B09 的 `MyBase` 转发桩会先撞上它。
+               3. 然后 **B09 = `MyBase.M(…)` 显式基调用（去虚化）+ 构造链顺序**。
+               硬约束（四次实测同结论）：判定只走 `virtDispatchCallee` 的 `mustDispatch`；派发串与 this
                实参共用同一个串；`Property Let/Set` 无槽别放开；每条改动要运行期断言 + A/B 负控
                （**基线 exe 改码前 `cp .build/C3.exe .build/pre_<批>_C3.exe` 即可，不必重建 worktree**）；
-               派发表达式以 `->slot` 结尾不带右括号，不会误触发 Fix 083e 的 callee 拆解。
-               收尾登记：**B09 = `MyBase.M(…)` 显式基调用（去虚化）+ 构造链顺序**，排在 B08e 全部站点之后。
-               **B06c** = 接口值作实参 / 进 Variant，归 B13/P6 前处理（D22-7③）。
-               手册 `Inherits 语句.md` 现状与代码一致：`Me.<字段>.<属性>` 的读仍列在未交付，本轮不用改。
-GATE_BASELINE: (Actions 级) c3test run **#10 [dev] = completed/success**（05:58 触发、06:08 收线，约 11 分钟；7 个 job 全绿 = build + smoke / bas#1 / bas#2 / syntax / compile / vbp；构建类型 **Release**，与本机 Debug 门是两个配置）。推送区间 `a227c7a..f8e3a1a`。**下一批起门就在 Actions 上记**。上一条本地测量 = B08e-5（本地全量门的最后一次）：exe md5 ac14cf25（`.build/gate_B08e5.log`，04:49 起跑、05:50 收线；下一批起全量门改在 GitHub Actions 上测，本行留作对照基线）。上一条 B08e-4 测量：exe md5 f2547af6（`.build/gate_B08e4.log`，03:29 起跑、04:20 收线，跑前后 exe md5 一致；SKIP=已知 test_vbman 环境项；日志里 43 处 "FAIL" 全是 `[SYNTAX-FAIL]` 用例名，不是失败）。**条目数连续三批不变**：新证据都在既有用例 `cls_inh_pair` 内部 —— `Inh.vbp` 运行期断言 31→36（INH32..INH36，其中 INH35 是本轮判别项、INH32/36 是两侧都绿的对照），legacy `test_implements`、`itf_xmod_writer` 全绿。上一批 B08e-2 = 同数字（exe 62609690）。
-               # 逐字节护栏每批都做：8 文件 `--emit-c` 对"修复前"exe 全同 8/8；本轮 BASE=`.build/pre_b08e4_C3.exe`，模板 `.build/byteguard_b08e4.py`（改两个常量即可复用）。
+               派发表达式以 `->slot` 结尾不带右括号，不会误触发 Fix 083e 的 callee 拆解；
+               **A/B 必须同时比发射形状**（B08e-3 把"运行期结果没变"当成了"这一支不管属性读"，误判一轮）。
+               收尾登记：**B06c** = 接口值作实参 / 进 Variant，归 B13/P6 前处理（D22-7③）。
+               手册 `Inherits 语句.md` 本轮已随代码更新（⑨ 进纯读清单、⑬ 加"直调即正确"、未交付删掉"属性/方法返回对象"那条）。
+GATE_BASELINE: (Actions 级) c3test run **#11 [dev] = completed/success**（https://github.com/fxl447098457/c3test/actions/runs/35930693404；06:52:17 推 `f8e3a1a..40eea3f`、06:52:31 run 起、07:02 盯到收线，约 10 分钟；**run#11 的 head_sha 已核 = 40eea3f**，不是上一批的残留；build + smoke / bas#1 / bas#2 / syntax / compile / vbp 全绿，构建类型 **Release**，与本机 Debug 门是两个配置）。同批本机侧测量：`-Category syntax` **78→82 全绿**（+3 判死负例 `ci_n24/25/26` +1 正例 `ci_pos3`）、`-Category vbp` **17/0/1/18**（`cls_inh_pair` PASS，SKIP=已知 test_vbman 环境项）、8 文件 `--emit-c` 对 `pre_b08e6_C3.exe` 全同 8/8、新 exe md5 `90907230`。**条目只在 syntax 涨**：`Inh.vbp` 的运行期断言 38→40（INH39 判别、INH40 对照）在 `cls_inh_pair` 内部，不涨条目。上一条本地全量测量 = B08e-5（`.build/gate_B08e5.log`，exe md5 ac14cf25，153/0/1/154），留作 Debug 侧对照基线。
+               # 逐字节护栏每批都做：8 文件 `--emit-c` 对"修复前"exe 全同 8/8；本轮 BASE=`.build/pre_b08e6_C3.exe`，模板 `.build/byteguard_b08e6.py`（改两个常量即可复用）。
 ```
 
 > 重入保护：若运行开始时 STATUS=BUSY 且 LAST_RUN 距今不足 55 分钟，说明上一次运行可能仍在进行——本次**立即结束，不做任何修改**。
@@ -71,7 +72,7 @@ GATE_BASELINE: (Actions 级) c3test run **#10 [dev] = completed/success**（05:5
 | B06 | P2 | 转换与判定：接口↔类、多接口对象、`TypeOf … Is <接口>`、上/下行转换契约校验 | ☑ **B06a**（QI + 跨接口 Set + `TypeOf <接口变量> Is <接口>`）+ **B06b**（下行转换 + `TypeOf <类变量> Is <接口>` + 修 B05 的 Nothing 野地址）；**B06c 遗留**：接口值作实参 / 进 Variant → 随 B13/P6 处理 | 4dc6b7e | B06a：`Results: PASS=128 FAIL=0 SKIP=1 TOTAL=129`（exe 7721bd72）+ 断言 11→18；B06b：`Results: PASS=128 FAIL=0 SKIP=1 TOTAL=129`（gate_B06b.log；exe 4202570a 跑前后一致）+ 断言 18→25（DN0..DN3 + TOC1..TOC3）+ legacy `test_implements` 仍 PASS + 8 文件 emit-c 对 pre-B06b(@613d2b8) 全同 + **A/B 负控证明 D22-10 缺陷真实**（基线二进制 exit=139，本批 exit=0）。详见 D22/D23 |
 | B07 | P3 | `Inherits` 语法 + 类链检测（单继承/环/深度）+ 继承成员合并与遮蔽 + 派生域 | ☑ **B07a**（语法 + stage 2.8 链检测/诊断 + 多文件负例通路）+ **B07b**（stage 3.4 成员合并 + 前缀布局 + 转发桩）；**B07 遗留**：裸名继承调用（要 `Me.`）、继承 `Public` 字段的 COM 对外暴露 → 分别归 B08+/P6 | b1c0050 | `Results: PASS=140 FAIL=0 SKIP=1 TOTAL=141`（gate_B07b.log；exe md5 50ce2e77 跑前后一致）+ `cls_inh` 三级链 12 条断言 + ci_n08/n09/n10 三条边界负例 + legacy `test_implements` 仍 PASS + 8 文件 emit-c 对 pre-B07b(@a056705) 全同。要点：并 8 张成员表（不是 11 张，理由在码内）、祖先私有字段**也复制进布局**、属性三向各一份桩、`_has_` 尾参必须转发、**封掉裸名继承调用的静默错代码**。详见 D27（B08 地图 = D28） |
 | B08 | P3 | `Protected` 可见性 + `Overridable/Overrides/NotOverridable` + 类级虚表 `vb6_cvtbl_<Cls>` 与多态派发 | ☑ **B08a**（`Protected`：家族内经 `Me.` 可用，含跨 TU 与 Protected 字段）+ **B08b**（虚修饰符三件套语法 + `Overrides` 覆盖契约：槽键按方向配对、签名复用接口口径 + 把需要动态派发的调用点判死，避免静态绑回基类实现的假虚派发）+ **B08d**（类虚表 + 运行期真派发：3.4b 排每类有序虚槽、`const void* __cvtbl` 字段、表类型/实例/装载三点同源、两处类成员发码路按槽索引改写，并删掉 B08b 的 `Me.X` 拒绝）已交付；**B08c**（家族外访问 `Protected` 的拒绝，诊断 `VB3023`：判定落在 `visit(MemberAccessExpr)` = `obj.<成员>` 的唯一必经点；接收者→工程类靠新加的 `Symbol::srcTypeName`，认不出接收者或当前类未登记一律放过）已交付 → **B08 四条全出**（要点与踩坑见 D34） | 82b1b34(B08c)、df9806e(B08d)、05397be(B08b)、2117d1c(B08a) | `Results: PASS=149 FAIL=0 SKIP=1 TOTAL=150`（gate_B08d_v3.log；exe md5 83c4e49c 跑前后一致）+ `-Category syntax` 73→74（删 ci_n15、增 ci_n19/ci_n20）+ `Inh.vbp` 运行期断言 17→27 条（INH17..23 派发：`b/m/d.PickThru()` 分别 base/mid/mid = 绑最近覆盖者、INH20 叶类覆盖被基类体内看见、INH23 基类型变量持有派生实例不再切片；INH24..26 扇出）+ 8 文件 emit-c 对 pre-B08d(@fb6a254) **8/8 逐字节全同**。更早两轮证据：B08b = `148/0/1/149`（gate_B08b.log、exe 546265e7、syntax 66→73、断言 14→17）。要点：`ProcVirt` 四值枚举而非三 bool；契约检查落 2.8、槽表落 3.4b（3.4 之后分不清"谁声明的"，而"本类有没有入口"要读 3.4 的 inhProcs）；筛选集取**链根**的 dynamicKeys → 叶类也带字段；`Me.X` 不在"优先级2"那一批发码。详见 D31、D33（B08d 地图 = D32，其中 ②③ 已被 D33 修正） |
-| B08e | P3 | 虚表线收尾：`resolveClassMemberCall` 其余 13 个消费点逐条接上派发或判死（站点地图与裁决见 D35） | ◐ **B08e-1**（① `With w` 内 `.M()`）、**B08e-2**（⑤ `Me.<字段>.方法()`）、**B08e-3**（零代码：⑩/⑪ 裁决纠偏 + 找出先决条件⑭）、**B08e-4**（⑭ `suppressVirtDispatch_` + ⑪ `Me.<字段>.<属性>` 的读）、**B08e-5**（⑥⑦ 默认属性调用式 `m_up(9)`）已出；下一轮 ⑧⑨⑩⑫⑬ 判死（前置 = `Test-CompileFail` 助手）+ ⑮（UDT 字段调用位置的路由缺陷）；②③ 判为探针无需改、④ 判为走不到 | e531d82(B08e-1)、8987386(B08e-2)、392a52d(B08e-4)、d9eca95(B08e-5) | 最新本地门 = B08e-5：`Results: PASS=153 FAIL=0 SKIP=1 TOTAL=154`（gate_B08e5.log；exe md5 ac14cf25 跑前跑后一致）+ `Inh.vbp` 断言 36→38 + A/B（`pre_b08e5_C3.exe`：INH37 FAIL base9）+ 8 文件 emit-c 8/8。上一批 B08e-4：`Results: PASS=153 FAIL=0 SKIP=1 TOTAL=154`（gate_B08e4.log；exe md5 f2547af6 跑前跑后一致）+ `Inh.vbp` 断言 31→36 + A/B 负控（`pre_b08e4_C3.exe`：INH35 FAIL 5）+ 8 文件 emit-c 8/8。B08e-3 未跑门（零代码，先例 B00）。 |
+| B08e | P3 | 虚表线收尾：`resolveClassMemberCall` 其余 13 个消费点逐条接上派发或判死（站点地图与裁决见 D35） | ◐ **B08e-1**（① `With w` 内 `.M()`）、**B08e-2**（⑤ `Me.<字段>.方法()`）、**B08e-3**（零代码：⑩/⑪ 裁决纠偏 + 找出先决条件⑭）、**B08e-4**（⑭ `suppressVirtDispatch_` + ⑪ `Me.<字段>.<属性>` 的读）、**B08e-5**（⑥⑦ 默认属性调用式 `m_up(9)`）、**B08e-6**（⑨ 接派发 + ⑩⑫ 判死 + `Test-CompileFail` 前置；⑧ 实测已被优先级2 判死、⑬ 改判无需改）已出；下一轮 **⑮**（UDT 字段调用位置的路由缺陷，D35-8）；②③ 判为探针无需改、④ 判为走不到 → **13 站在 B08e-6 后全部出完，⑮ 一出就开 B09（`MyBase`）** | e531d82(B08e-1)、8987386(B08e-2)、392a52d(B08e-4)、d9eca95(B08e-5)、40eea3f(B08e-6) | 最新门 = B08e-6（Actions 级，见状态头 GATE_BASELINE）+ `Inh.vbp` 断言 38→40（INH39 判别/INH40 对照）+ A/B（`pre_b08e6_C3.exe`：INH39 FAIL base、其余 39 条 OK；`ci_n24`/`ci_n25` 改前 `--emit-c` 退出码 0）+ 8 文件 emit-c 8/8 + `-Category syntax` 78→82 全绿。上一条本地门 = B08e-5：`Results: PASS=153 FAIL=0 SKIP=1 TOTAL=154`（gate_B08e5.log；exe md5 ac14cf25 跑前跑后一致）。上一批 B08e-4：同 153/0/1/154（gate_B08e4.log；exe f2547af6）。B08e-3 未跑门（零代码，先例 B00）。 |
 | B09 | P3 | `MyBase.M(…)` 显式基调用（去虚化）+ 构造链顺序 + 无新语法逐字节护栏 | ☐ | | |
 | B10 | P4 | `Implements IFace Via <holderVar>` 委托式实现：持有字段 + 自动转调桩 + 签名检查 | ☐ | | |
 | B11 | P5 | `CoClass…End CoClass` 语法 + `[CoClassId]/[Default] Interface/[ComCreatable]/[CoClassCustomConstructor]` + 契约聚合校验 | ☐ | | |
@@ -1381,14 +1382,55 @@ dispinterface 定义；`[Default, Source]` 连接点实现；泛型类实现新�
 | ⑤ | `cgen_expr_member_voidptr_com.inc:37`（Fix 088b typed 字段链） | `(void*)me->m_h`（纯读） | ☑ **B08e-2 已接派发**（`Me.m_h.Speak()`/带参的 `Greet` 两条断言钉住，见 D35-5）。**但只覆盖到 Sub/Function 的调用形状**：属性读走 ⑩，见该行的订正 |
 | ⑥ | `cgen_expr_call_callee_ident.inc:144`（Pattern L，默认属性 `Item`） | `emitExpr(callee)` 出来的字段/变量（纯读） | ☑ **B08e-5 已接派发**（D35-8）。显式 `m_up.Item(9)` 早就对（走 ①/B08d），默认式 `m_up(9)` 此前静默切片 |
 | ⑦ | `cgen_expr_call_callee_member.inc:224`（Pattern L 的另一半） | 同 ⑥ | ☑ **B08e-5 与 ⑥ 同批接上**（两处代码文本一模一样、只差缩进） |
-| ⑧ | `cgen_expr_member_class_module.inc:140`（Fix 083c 属性返回对象） | `(void*)vb6_<Mod>_prop_get_<P>((void*)me)` → 含调用，**按构造即不纯** | **判死**（`mustDispatch=true` → VB3027），除非给发码层加"表达式提升成 temp"的机制（全仓没有，`hoistLocalDecls` 只提声明） |
-| ⑨ | `cgen_expr_member_obj_dispatch.inc:143`（083c/088d 同一族） | 属性返回对象，同 ⑧ | **判死** |
-| ⑩ | `cgen_expr_member_class_fallback.inc:224`（Fix 088c AST 兜底链） | `(void*)<任意已发码头>`，多为链式调用 | **上一版（B08e-2）把这条改成"与 ⑤ 同法可接"，本轮实测证否：`Me.<字段>.<属性>` 的读根本不走这一支**（本轮在此处加了派发，`INH35` 照旧拿基类实现的 `5`；把 ⑤ 的发射形状与这里对比后定位到 ⑪）。→ 裁决退回**判死**（与 ⑧⑨⑪⑫⑬ 同批处理：接收者按构造含调用时出 `VB3027`）。本轮改动已 `git checkout` 还原，`src/`+`tests/` 与 8987386 逐字节一致 |
+| ⑧ | `cgen_expr_member_class_module.inc:140`（Fix 083c 属性返回对象） | `(void*)vb6_<Mod>_prop_get_<P>((void*)me)` → 含调用，**按构造即不纯** | **B08e-6 实测：这一支被优先级2 提前接走，对带槽成员不可达** —— `Own.Speak()`（Own 是本模块返回类对象的属性）在**改动前**就报 `VB3027`，报出它的是 `cgen_expr_member_class_module.inc:49`（优先级2 的 dispatch，`mustDispatch = defaultInstCls.empty()`），因为 Fix 090al 的 `inferClassTypeOfExpr` 能给属性标识符推出类名 → `itClassVar` 非空 → 根本走不到 :134 那个分支。`:140` 要命中必须"AST 推不出而符号推得出"，本轮没能构造出这种形状。→ **不改码**，用 `ci_n26_base/derived` 把这条既有契约钉住（判死口径与 D33-7 一致，只是先例已在） |
+| ⑨ | `cgen_expr_member_obj_dispatch.inc:143`（083c/088d 同一族） | 属性返回对象，同 ⑧ | ☑ **B08e-6 接上派发（不是判死）** —— 地图把这一条当"同 ⑧"是**错的**：`Fix 088d` 这一支的接收者是 `(void*)vb6_ret_<函数名>`，即**本函数返回值的裸 C 局部**，纯读、`cvtblObjIsPure` 恒真 → 与 ⑤ 同法一行改写就派发。改前 `vb6_VtPos3Base_Speak((void*)vb6_ret_Maker)`、改后 `((const vb6_cvtbl_VtPos3Base*)((vb6_cls_VtPos3Base*)(void*)vb6_ret_Maker)->__cvtbl)->speak(...)`，运行期 INH39 由 `base` 翻成 `derived`（见 D35-9） |
+| ⑩ | `cgen_expr_member_class_fallback.inc:224`（Fix 088c AST 兜底链） | `(void*)<任意已发码头>`，多为链式调用 | **上一版（B08e-2）把这条改成"与 ⑤ 同法可接"，本轮实测证否：`Me.<字段>.<属性>` 的读根本不走这一支**（本轮在此处加了派发，`INH35` 照旧拿基类实现的 `5`；把 ⑤ 的发射形状与这里对比后定位到 ⑪）。→ 裁决退回**判死**（与 ⑧⑨⑪⑫⑬ 同批处理：接收者按构造含调用时出 `VB3027`）。本轮改动已 `git checkout` 还原，`src/`+`tests/` 与 8987386 逐字节一致。**☑ B08e-6 已生效**（`ci_n25`）：`k.Own.Speak()` 改前发 `vb6_Vt25Base_Speak((void*)vb6_Vt25Base_prop_get_Own(k))`、运行期答 `base`，改前 `--emit-c` 退出码 0；改后出 `VB3027`、退出码 1。这一支的接收者是"纯读的已发码头"时（`me->m_x` 形状）会直接派发，所以接的是派发而不是判死 —— 判死只落在含调用的那一半 |
 
 | ⑪(已交付) | `cgen_expr_member_m22_module.inc:120`（Fix 083d 非标识符 object）**← B08e-4 已接派发，见 D35-7**；原文如下 | | `"(void*)" + emitExpr(object)`：`Me.<字段>` 这类字段链发出来**是纯读**（地图上一版"按构造即不纯"说过头了） | **属性读的真正落点，但不能直接接派发** —— 本轮实测：这一支发出来的读文本会被`src/backend/cgen_util_comwrite.cpp` 的 **Pattern C/D2 字符串级重写**复用（`obj.Prop = v` 是先发一遍读、再把文本里的 `prop_get_X` 换成 `prop_let_X`），callee 换成派发表达式后它照样盲换 → `__cvtbl)->prop_get_level` 被改成 `->prop_let_level` → `error C2039: "prop_let_level" 不是 "vb6_cvtbl_InhBase" 的成员`。**先决条件 = 站点⑭**：让 Pattern C/D2 认得派发表达式（见 D35-6），否则这条只能连属性读一起搁着 |
 
-| ⑫ | `cgen_expr_member_voidptr_com.inc:119`（Fix 015 方法链） | 内层调用返回实例 → 不纯 | **判死** |
-| ⑬ | `cgen_expr_member_form_builtin.inc:178`（`.ctl` 子控件） | `(vb6_cls_X*)vb6_UC_InstanceOf(<hwnd>)` → 含调用，不纯；而 `.ctl` **可以**有槽（见前提） | **判死**（别按"外部 COM 形状"当不可达跳过） |
+| ⑫ | `cgen_expr_member_voidptr_com.inc:119`（Fix 015 方法链） | 内层调用返回实例 → 不纯 | ☑ **B08e-6 判死已生效**（`ci_n24`）：`k.Chain(2).Speak()` 改前发 `vb6_Vt24Base_Speak(vb6_Vt24Base_Chain(k, 2))` 并答 `base`，改后出 `VB3027`。**顺带一条实测**：内层 `Chain` 只要被 `Overrides` 过就会先派发（形状 `vb6_KBase_Speak(((const vb6_cvtbl_KBase*)...)->chain(k, 2))`），外层照旧切片 —— 也就是这一族的"内层对、外层错"是同一个洞的两个半边，判死把错的那半边变成响亮的那个 |
+| ⑬ | `cgen_expr_member_form_builtin.inc:178`（`.ctl` 子控件） | `(vb6_cls_X*)vb6_UC_InstanceOf(<hwnd>)` → 含调用，不纯；而 `.ctl` **可以**有槽（见前提） | **B08e-6 改判：无需改**（原判"判死"作废）。接收者文本确实含调用，但 `vb6_UC_InstanceOf` 发的是 `r->me` —— 宿主创建该控件时登记的那个 `.ctl` 类的实例（`src/rtl/core/vb6forms/uc/uc_host.c:309`，登记点 `vb6_UC_HostCreate(typeName, …)`），**动态类型恒等于静态类型**，直调即正确。这与 D35 里"预声明实例 `X_Default()` 传 `mustDispatch=false`"是同一条理由；在这里放 `mustDispatch=true` 只会给**正确**的代码凭空造出 VB3027。VB6 也没有"把一个 `.ctl` 实例换成更深派生类"的途径（子控件不是运行时可赋值的对象变量） |
+
+**D35-9 B08e-6（⑧⑨⑩⑫⑬ 判死批 + `Test-CompileFail` 前置）实施记录（2026-09-24 06:16–）**
+
+1. **前置助手**：`tests/run_tests.ps1` 新增 `Invoke-CodegenProj` / `Test-CompileFail` / `Test-Compile`
+   三个函数（`Test-SyntaxFailMulti` 的 `cmd /c ... 2>&1` 合并写法照搬，把 `--syntax-only` 换成
+   **`--emit-c`**）。为什么是 `--emit-c` 而不是真编译：`--emit-c` 跑完前端 + 全部语义阶段 + 发码，
+   正好越过 `driver_compile.cpp:426` 那个 syntaxOnly 早退点，又不调 cl.exe/link（负例一条几秒 vs
+   真编译几十秒），且实测**不在源码目录落任何文件**（`tests/cls_neg` 跑前跑后 `ls` 全同）。
+   判据仍是"退出码非 0 **且** 输出含指定 ASCII 文本"。
+2. **开工前的实测把三条裁决改了**（地图上一版按"接收者形状"推，本轮按发射文本核）：
+   - **⑧ 不是判死点，是已经死了**：`Own.Speak()`（Own = 本模块返回类对象的属性）用**改动前**的
+     二进制就报 `VB3027`，报它的是优先级2 的 `class_module.inc:49`（`mustDispatch = defaultInstCls.empty()`），
+     因为 Fix 090al 的 `inferClassTypeOfExpr` 给属性标识符也推得出类名 → `itClassVar` 命中 → 走不到 :134。
+     `:140` 要命中需要"AST 推不出而符号推得出"，本轮构造不出这种形状 → **不改码**，`ci_n26` 钉住既有契约。
+   - **⑨ 不是判死点，是能接**：`Fix 088d` 的接收者是 `(void*)vb6_ret_<函数名>`，本函数返回值的裸局部 →
+     纯读 → 与 ⑤ 同法接派发（这是本轮唯一的行为改进，见 3）。
+   - **⑬ 判死是错的**：`vb6_UC_InstanceOf(hwnd)` 发的是 `r->me`（`uc_host.c:309`），即宿主为该控件按
+     `typeName` 创建的那个 `.ctl` 实例 → 动态类型恒等于静态类型 → 直调本来就正确；在这里放
+     `mustDispatch=true` 等于给正确代码凭空造错。改成**无需改**（理由与 D35 里"预声明实例传 false"同源）。
+3. **本轮交付**：⑨ 接派发、⑩⑫ 判死（`mustDispatch=true`，三处都带 `suppressVirtDispatch_` 与
+   `_prop_let_`/`_prop_set_` 两道既有保护，派发串与 this 实参共用同一个串）。证据三条并排：
+   - ⑨ `ci_pos3`：改前 `vb6_VtPos3Base_Speak((void*)vb6_ret_Maker)` → 改后
+     `((const vb6_cvtbl_VtPos3Base*)((vb6_cls_VtPos3Base*)(void*)vb6_ret_Maker)->__cvtbl)->speak((void*)vb6_ret_Maker)`。
+     运行期 `Inh.vbp` 断言 38→40：**INH39**（`RefOf.Speak()` 在派生实例上，改前 `FAIL base`、改后 OK）、
+     **INH40**（基类实例上的对照，两侧都 OK）。A/B 用 `.build/pre_b08e6_C3.exe`（同一个工程：39 OK/1 FAIL）。
+   - ⑩ `ci_n25_base/derived`：改前 `--emit-c` 退出码 **0**、发 `vb6_Vt25Base_Speak((void*)vb6_Vt25Base_prop_get_Own(k))`；
+     改后退出码 **1** + `VB3027`。
+   - ⑫ `ci_n24_base/derived`：改前退出码 0、发 `vb6_Vt24Base_Speak(vb6_Vt24Base_Chain(k, 2))`；改后 1 + `VB3027`。
+   - `ci_n26`（⑧）：改前改后**都是**退出码 1 + `VB3027` —— 它的价值是防回归，不是新证据，别当新证据记。
+4. **护栏与影响面**：8 文件 `--emit-c` 对 `pre_b08e6_C3.exe` 逐字节全同 8/8；`-Category syntax`
+   本地 78→**82 条全绿**（+3 判死负例 +1 正例）。判死只在"该类有虚槽"时生效，而槽要求链上有
+   `Overrides` → 全仓除 `tests/cls_inh`、`tests/cls_neg` 与 `.build/probe_*` 外没有任何工程用
+   `Overridable`（`grep -rln Overridable --include=*.cls --include=*.bas --include=*.frm` 只剩探针三个文件），
+   所以这三条改动的可达面就是本轮新用例本身。
+5. **踩到一条既有缺陷（不在本批范围，登记）**：`com_entry.c` 给派生类的**覆盖**过程发 extern 时，
+   用的是基类的 C 类型名（`extern vb6_cls_KBase* vb6_KDerived_Chain(...)`），而 `typedef struct vb6_cls_KBase`
+   的前置声明排在它**后面** → C 编译期 `error C2143: 缺少"{"`（x64/Debug 实测，`Chain As KBase` +
+   `Overrides Chain` 即触发；未被覆盖的继承形状不触发，因为走的是 `void*` 那条）。这属于 P6/B13 的
+   "从基类继承的成员的 COM 对外暴露"一片，**未修**，本批探针改成不覆盖返回对象的方法绕开。
+6. **剩余**：⑮（UDT 对象字段的调用位置路由，D35-8 登记）与 ②③④⑬ 的"判为探针/走不到/无需改"
+   三条已在表里落定 → B08e 的 13 站到此全部出完，下一批 **B08e-7 = 站点⑮**，之后 **B09 = `MyBase`**。
 
 建议次序：**④⑤（纯形状、真收益）→ ⑥⑦（默认属性）→ ⑧⑨⑩⑪⑫⑬（判死，一批一次做完，
 共用同一个 `Test-CompileFail` 助手与同一条负例族）**。每站都要"最小用例先证可达"（④⑤⑥⑦ 若编不出
@@ -1589,3 +1631,4 @@ dispinterface 定义；`[Default, Source]` 连接点实现；泛型类实现新�
 - 2026-09-24 03:19–04:28 **B08e-4（站点⑭ + ⑪：`Me.<字段>.<属性>` 的读接上类虚表派发）过门并提交 `392a52d`**：上一轮 D35-6 给了三条出路，本轮实际走了**第四条**——不动 `cgen_util_comwrite.cpp`，改在发码层加`bool suppressVirtDispatch_`（`cgen_state.inc`），5 个 `emitExpr(*node.target)` 求值左值期间置位，①⑤⑪ 三处派发点见到就直调：Pattern C/D2 只消费**左值文本**，只要左值永远不带派发表达式，它看到的仍是自己认识的老形状，读上下文照常派发。顺带挖出 B08e-3 没想到的事实：裸 `m_up.Level = 5` 一直正确，是因为`cgen_assign_prop_write.inc` 有一条专门的属性写路径（要求 object 是 `IdentifierExpr`）会在左值求值之前直接发`vb6_<C>_prop_let_P(obj, v)`；带 `Me.` 前缀才落进该判据之外、退到字符串级重写 —— **⑭ 的真实触发条件是"左值 + `Me.` 前缀"**，比"属性写"窄得多。⑪ 接线同 ①⑤（`thisArg083d` 一份两用、`_prop_let_`/`_prop_set_` 与 `suppressVirtDispatch_` 双跳过）。用例：`InhBase` 加 `Protected m_lvl` + `Overridable Property Get Level`/`Property Let Level`、`InhDerived` 加 `Overrides Property Get Level`（体内 `Me.m_lvl`）、`InhHolder` 加 `ViaLevel()`/`ViaLevelBare()`，断言 34→36；**A/B**：基线 `.build/pre_b08e4_C3.exe` 上 `INH35:FAIL 5`（基类 getter），本批 OK，`INH36`（裸接收者对照）两侧都绿；8 文件 `--emit-c` 对基线 8/8 全同。**门 03:29–04:20**：`Results: PASS=153 FAIL=0 SKIP=1 TOTAL=154`（跑前后 exe md5 f2547af6 一致才记账）—— 起跑那一刻 `who_is_building2.ps1` 抓到另一个写入者正从 `C:\Users\Administrator\Documents\c3.vb6.pro` 那份副本跑 `Inh.vbp`（正是 D34-8 记过的那棵树），本轮按纪律**不杀不动**，靠 md5 前后一致判定测量仍可归因；门比平常慢约一倍。**两条记过的失误**：① 提交标题从上一批复制串了行，写成"With 块内…（B08e-1）"而内容是 B08e-4 —— 共享树里不改历史，已在状态头按哈希声明清楚；② 往 `.cls` 里用 `sed -i` 插含 `&` 的行会被替换式吃掉（探针文件被弄坏一次，改用 Write 工具重写），沿用本仓"别拿 shell 内联改文件"的教训。手册 `Inherits 语句.md` 同步：`Me.<字段>.<属性>` 的读从"未交付"移到"已交付"，并写明写方向仍直调。
 - 2026-09-24 04:31–06:00 **B08e-5（⑥⑦ 站：默认属性调用式 `m_up(9)` 接上类虚表派发）过门并提交 `d9eca95`**：原判的"先做 ④"被实测改写了：**④ 现在走不到静默直调** —— `u.h.Speak()`（UDT 里的对象字段）发的是非法 C `u.h.Speak()`，编译期就 `error C2039`，属**路由缺陷**，另登为站点⑮（不在 13 站计数里）。真正可达的是 ⑥⑦：同一实例、同一 `Item`，显式 `m_up.Item(3)` 早已派发、默认式 `m_up(4)` 发 `vb6_PBBase_prop_get_Item(me->m_up, vb6_VariantFromValue(4))` → 运行期答 `base4`。两处 Pattern L（`call_callee_ident.inc:144`、`call_callee_member.inc:224`，文本一模一样只差缩进）加同口径派发，带 `suppressVirtDispatch_` 保护。用例：`InhBase` 加 `Overridable Property Get Item(ByVal v As Variant)` + `InhDerived` 的 `Overrides` + `InhHolder` 的 `ItemDefault()`/`ItemBare()`，断言 36→38；A/B 用 `.build/pre_b08e5_C3.exe`（INH37 修复前 FAIL base9）；8 文件 `--emit-c` 全同 8/8；修复前后的发射形状两行 C 一起抄进 D35-8（B08e-3 的教训兑现）。**踩到的一条既有限制**（不是本批引入）：Pattern L 固定用 `vb6_VariantFromValue` 打包索引，`Item` 声明成 `ByVal i As Long` 时默认式撞 `error C2440: vb6_VARIANT → int32_t` → 本用例的 `Item` 必须是 Variant 索引。**门 04:49–05:50（61 分钟）**：`Results: PASS=153 FAIL=0 SKIP=1 TOTAL=154`、跑前后 exe md5 `ac14cf25` 一致；慢的原因是另一棵树（`C:\Users\Administrator\Documents\c3.vb6.pro`）同时在做大构建（一眼数到 43 个 C3.exe / 20 cl.exe / 37 link.exe），按纪律不碰它，只在 05:16 中途重占过一次锁。**流程变更（用户 05:36 指示）**：全量回归改到 GitHub Actions —— 推 `github` remote 的 `dev` 分支触发 `.github/workflows/ci.yml`（build + 分片 regression 矩阵），用 `scripts/watch-gh-actions.ps1` 盯；本地 `all` 门降级为里程碑级，批次内只做 `-Category syntax` + 目标用例单跑 + `--emit-c` 护栏。本批仍按本地门记账（起跑时还不知此指示）。**失误一条**：本批 commit 标题又从上一批复制串了行（连续第二次），这次在推送前用 `--amend` 改回 d9eca95 的正确标题，并用 `git diff a81d779..HEAD --stat` 校验只含本批 6 个文件、内容零变化；教训写进状态头：message 一律现写。
 - 2026-09-24 05:58–06:10 **门流程切到 GitHub Actions（用户 05:36 指示）**：`git push github HEAD:dev`（快进 `a227c7a..f8e3a1a`，含本批 `d9eca95` + `f8e3a1a`）→ `.github/workflows/ci.yml` run **#10 [dev] = completed/success**，05:58 触发、06:08 收线，**约 11 分钟**跑完 7 个 job（build / smoke / bas#1 / bas#2 / syntax / compile / vbp；CI 是 **Release** 构建，与本机 Debug 门两个口径，记账时分开写）。对比：本批那轮本地全量门 04:49–05:50 = **61 分钟**（另两棵树在抢 CPU 时更慢），一小时一轮的自动化根本放不下 → **从此批内不做本地 `-Category all`**，只做三项快检（`-Category syntax` 或目标用例单跑 + 目标 vbp 单跑 + 8 文件 `--emit-c` 逐字节护栏）+ A/B 负控，全量门推 Actions 后用 `watch-gh-actions.ps1` 盯。**脚本必须用 pwsh 7 跑**：`"C:/Program Files/PowerShell/7/pwsh" -NoProfile -File scripts/watch-gh-actions.ps1 [-Once]` —— Windows PowerShell 5.1 会把这个 BOM-less UTF-8 脚本按 ANSI 读，中文注释直接炸成 `ParserError: UnexpectedToken`，看着像脚本坏了其实是用错 shell。红线不变：只推 `github` 的 `dev`，不建 MR、不碰 main、不推 `origin`(gitcode)。
+- 2026-09-24 06:16– **B08e-6（⑨ 接派发 + ⑩⑫ 判死 + `Test-CompileFail` 前置）提交 `40eea3f`**：开工前按发射文本核了一遍 ⑧⑨⑬，**三条里两条裁决要改**（D35-9 ②）：⑧ 的 `Own.Speak()` 用**改动前**的二进制就报 `VB3027`（报它的是优先级2 `class_module.inc:49`，Fix 090al 的 `inferClassTypeOfExpr` 给属性标识符也推得出类名 → `itClassVar` 命中，:140 那一支对带槽成员根本走不到）→ 不改码，只用 `ci_n26` 把既有契约钉住，并写明它是防回归不是新证据；⑨ 的 `Fix 088d` 接收者是 `(void*)vb6_ret_<函数名>`（本函数返回值的裸局部，纯读）→ **能接派发**，成了本轮唯一的行为改进；⑬ 的 `vb6_UC_InstanceOf(hwnd)` 发的是 `r->me`（`uc_host.c:309`，宿主按 `typeName` 建的那个 `.ctl` 实例）→ 动态类型恒等于静态类型，直调本来就正确，**判死是给正确代码凭空造错**，改判无需改。真正落地的：⑨ 派发（`Inh.vbp` 断言 38→40，**INH39** 改前 `FAIL base`/改后 OK，**INH40** 两侧都绿当对照）、⑩⑫ `mustDispatch=true` 判死（`ci_n25`/`ci_n24` 改前 `--emit-c` 退出码 0 + 静默直调的 C 各一行，改后 1 + `VB3027`，形状都抄进 D35-9③）。**前置助手**：`tests/run_tests.ps1` 加 `Invoke-CodegenProj`/`Test-CompileFail`/`Test-Compile`，跑的是 **`--emit-c`** 而不是真编译 —— 它跑完前端+语义+发码（正好越过 `driver_compile.cpp:426` 的 syntaxOnly 早退），又不用付 cl.exe/link 的钱，实测不在源码目录落文件。护栏：8 文件 `--emit-c` 对 `pre_b08e6_C3.exe` 全同 8/8、`-Category syntax` 78→**82 全绿**；判死只在链上有 `Overrides` 时生效，而全仓除 `tests/cls_inh`/`tests/cls_neg`/`.build/probe_*` 没有任何工程写 `Overridable`（一条 `grep -rln` 就是证据），可达面即本批用例本身。**登记一条既有缺陷（未修）**：`com_entry.c` 给派生类的**覆盖**过程发 extern 时用了基类 C 类型名，而 `typedef struct vb6_cls_<基>` 的前置声明排在它后面 → `error C2143`（`Overrides` 一个返回工程类类型的方法即触发）；属 P6/B13 那片，本批探针改成不覆盖返回对象的方法绕开。**全量门 = Actions**（推 `github/dev` 触发 `ci.yml`，`watch-gh-actions.ps1` 用 pwsh 7 盯）：结果记在状态头 GATE_BASELINE。至此 13 站全部出完，下一批 **B08e-7 = 站点⑮**（UDT 对象字段的调用位置路由），⑮ 一出就开 **B09 = `MyBase` + 构造链顺序（那处要顺手把 `com_entry` 的 `Overrides` 返回类型缺陷一起处理，B09 的 `MyBase` 转发桩会先撞上它）**。
