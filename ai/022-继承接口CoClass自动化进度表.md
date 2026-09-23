@@ -1127,14 +1127,20 @@ dispinterface 定义；`[Default, Source]` 连接点实现；泛型类实现新�
   `__comObj` → `__iv_<I>…` → `__cvtbl` → 祖先字段 → 自有字段。**只给链上任一类带过 `Overridable`/
   `Overrides` 的类加**（照 `__refcount` 的按 feature 加字段手法），否则 8 文件 `--emit-c` 护栏必挂。
   实现位置：`cgen_base_generate_c_open.inc` 的字段循环之前，与 `emitIfaceClassFields` 同一层。
-- **表与表项必须是跨 TU 可见的**（这是与 B06 的 `vb6_ivtbl_<I>_for_<C>` **相反**的一条，别照抄那边）：
-  派生 TU 的 `_New` 要给自己装"祖先链的表"，所以 `vb6_cvtbl_<Cls>` 与它的类型别名
-  `vb6_pfn_<Cls>_<slot>` 都发在 `<Cls>.h`（非 static）。表项类型是函数指针，签名 = `(vb6_cls_<祖先>*, 实参…)`；
-  填派生实现时靠 B07b 的前缀布局做 `(vb6_cls_<祖先>*)` 强转（不完整 struct 间的指针转换合法，D27-11）。
+- **类型要跨 TU 可见，表实例不用**（本条是读完 `cgen_inherit.cpp` 后改正的版本，原来写的
+  "表与表项都必须非 static"是错的）：每个具体类只需要**一张**表实例，装它的是自己 TU 里的 `_New`
+  → `static const vb6_cvtbl_<D> vb6_cvtbl_<D>_impl` 发在 `<D>.c` 就够；但**类型**
+  `vb6_cvtbl_<X>` 与函数指针别名 `vb6_pfn_<X>_<slot>` 必须发在 `<X>.h`，因为祖先体内那句
+  `Me.M()` 的发码在祖先 TU 里，它要按**自己那张视图**（`vb6_cvtbl_<祖先>`）去索引派生对象装进去的表。
+- **多视图靠"字段类型 `void*` + 用点强转"统一**（这是 B08d 的关键设计，别改成 typed 字段）：
+  A 声明 `Overridable` → 它的视图是 `{speak}`；B 又新声明一个 `Overridable` → B 的视图是 `{speak, extra}`。
+  前缀布局要求 B 的 `__cvtbl` 与 A 的是**同一个字段**（同偏移），类型却不同 → 字段只能发成
+  `void* __cvtbl;`，用点写成 `((const vb6_cvtbl_<本类>*)me->__cvtbl)-><槽字段>((vb6_cls_<本类>*)me, …)`。
+  槽序定死为"链上虚槽、根→叶、每槽键一份"，于是**任何祖先视图都是派生表的前缀**，强转才成立。
 - **装载点**：`vb6_cls_<D>_New`（`cgen_com.cpp` 的 `_New`/`_Destroy` 已经在 B07b 走过同一张
-  `structFieldDecls`）→ `me->__cvtbl = &vb6_cvtbl_<A>;`，`A` = 表类型所属的那个"虚槽定主"类。
-  **每个具体类装自己的表**（同一祖先链、不同覆盖集 = 不同表实例），命名 `vb6_cvtbl_<A>_for_<D>`，
-  叶子类自己那一份可以就取 `vb6_cvtbl_<D>` 以免和 A 的同名混淆 —— 先定命名再写发码，两处要一致。
+  `structFieldDecls`）→ `me->__cvtbl = (void*)&vb6_cvtbl_<D>_impl;`。**每个具体类只装自己那一张表**
+  （同一祖先链、不同覆盖集 = 不同表实例），类型用本类视图 `vb6_cvtbl_<D>`、实例名 `vb6_cvtbl_<D>_impl`
+  —— 定死这一对命名，`.h` 的类型、`.c` 的实例与 `_New` 的装载三处必须一致。
 - **`Overrides` 的契约检查一行都不用改**（2.8 `runVirtualContractChecks`），它只保证"目标存在且可覆盖、
   签名一致"，与派发机制无关；批完后把 `dynamicKeys` 的**语义**从"要拒绝"改成"要发槽"即可。
 - **用例翻转（这是本批的验收证据）**：`ci_n15_base.cls` 的 `Talk = Me.Pick()` 形状搬进
@@ -1145,6 +1151,13 @@ dispinterface 定义；`[Default, Source]` 连接点实现；泛型类实现新�
   工作；`__iv_<I>` 与 `__cvtbl` 共存要等 P6 一起设计（`Inherits` 一个实现了接口的类目前根本进不来）。
   `MyBase.M`（B09）的**去虚化**正好依赖本批的表结构（`MyBase.M` = 直调 `vb6_<Base>_M`，不查表），
   所以表项别顺手做成"只能查表"的形态。
+- **要复用的取名机器（`cgen_inherit.cpp` 实测，别另写一套）**：C 符号名 =
+  `cProcName(procBaseName(decl), accessOf(decl), moduleName)`，属性名自带 `prop_get_/prop_let_/prop_set_` 前缀
+  （与 `makePropertySignature`/`resolveClassMemberCall` 同源）；形参表 = `classMeParam()` + 逐个
+  `makeParamCType(p, false)` + Optional 的 `int _has_<x>` 尾参；返回类型 = `inheritedRetType(decl)`。
+  B08d 的函数指针别名与表项**必须**用这四件套拼，否则要么签名不一致、要么链接期找不到定义。
+  填表时把派生实现强转成祖先视图的函数指针类型（前缀布局保证 ABI 一致），
+  或者复用 B07b 已经发出来的转发桩做 entry —— 后者更稳，桩的签名天生就是"派生类的 me + 祖先的实现"。
 - **护栏**：改结构体 + 改派发 → 8 文件 `--emit-c` 必须全同（基线 = pre-B08d worktree，自建 Debug exe）。
   本轮 B08b 用的 `base_build.ps1` + `byteguard_b08b.py` 已在 `.build\` 里，改两个路径就能复用
   （dev.ps1 在 worktree 里跑不通：它只 `cmake --build`、不 configure，见 D31-10）。
@@ -1307,4 +1320,4 @@ dispinterface 定义；`[Default, Source]` 连接点实现；泛型类实现新�
   落地面：`ProcVirt` 四值枚举（**不是三个 bool**：三件套互斥，那样有 6 种非法组合要两层各防一遍）；AST 三个过程节点加 `virt` 成员（零构造函数签名改动，`ast_clone` 刻意不拷 → 模板内已拒）；parse 的修饰符**吃两次**（`Overridable Sub` 与 `Public Overridable Sub` 都收）；契约检查落在 **2.8 新增 `runVirtualContractChecks`**（放 3.4 之后 Class 符号成员表已被合并污染，分不清"谁声明的"），属性按 `ifaceSlotKey` 分方向配对、签名复用 `ifaceSigFromDecl`/`ifaceSigEqual`（与接口契约同一套函数，不留两套判据）。
   两处值得单独记：**① 拒绝点要三处**（`visit(IdentifierExpr)` 的查到符号分支、`visit(IndexOrCallExpr)` 的裸 callee 分支——它自己查符号、不经过前者，少埋一处就漏 `Speak(5)`；`visit(MemberAccessExpr)` 的 `Me.X`）；**② 返回值赋值差点被误杀**：`Speak = "base"` 在 `Speak` 自己体内长得和调用一模一样，要靠 `currentProc_` 同名豁免，否则最正面的用法第一刀就死。
   门 `Results: PASS=148 FAIL=0 SKIP=1 TOTAL=149`（exe 546265e7，14:56:16 起跑）；`-Category syntax` 66→73（新增 `ci_n12`..`ci_n18` 七条负例：无目标 / 未标 Overridable / 签名不符 / 需要动态派发 / 无 Inherits 写 Overrides / 标准模块写 Overridable / Interface 块写虚修饰符）；`Inh.vbp` 断言 14→17；护栏 8 文件对 worktree @2117d1c **8/8 逐字节全同**。
-  工具链一条：worktree 基线构建用 `.build\base_build.ps1`（PowerShell 不经 MSYS，一条命令 configure+build 就过）；`scripts/dev.ps1` 在 worktree 里不行，它只 `cmake --build`、不 configure。诊断 ID 从 **3024** 起到 3027，**3023 仍留给 B08c**。下一批 **B08d**（地图 D32）。
+  工具链一条：worktree 基线构建用 `.build\base_build.ps1`（PowerShell 不经 MSYS，一条命令 configure+build 就过）；`scripts/dev.ps1` 在 worktree 里不行，它只 `cmake --build`、不 configure。诊断 ID 从 **3024** 起到 3027，**3023 仍留给 B08c**。下一批 **B08d**（地图 D32）。  收尾后为 B08d 摸了一遍 `cgen_inherit.cpp`，顺手改正 **D32 的一条**：表实例其实可以是 owning TU 的 `static const`（只有**类型**要跨 TU 发进 `.h`），并且多视图逼出 `__cvtbl` 只能是 `void*` + 用点强转 —— 原写法“表与表项都必须非 static”会让下一轮白改一遍发码；另把要复用的取名四件套（`cProcName`/`procBaseName`、`classMeParam`+`makeParamCType`、`inheritedRetType`）记进了 D32。
