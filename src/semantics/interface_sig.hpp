@@ -141,4 +141,36 @@ inline bool ifaceSigEqual(const IfaceProcSig& a, const IfaceProcSig& b) {
     return true;
 }
 
+// ============================================================
+// 成员级 `Implements I.M` 子句的共用口径 (tB 扩展, ai/022 B02b/B04)
+// 语义层比对与后端绑定查找都用这两个函数, 保证"检查到什么就发什么码".
+// ============================================================
+
+// 过程声明尾部的子句列表; 非过程声明 = nullptr
+inline const std::vector<ImplementsClause>* ifaceProcClauses(const Decl& d) {
+    switch (d.kind) {
+        case ASTNodeKind::SubDecl:      return &static_cast<const SubDecl&>(d).implementsClauses;
+        case ASTNodeKind::FunctionDecl: return &static_cast<const FunctionDecl&>(d).implementsClauses;
+        case ASTNodeKind::PropertyDecl: return &static_cast<const PropertyDecl&>(d).implementsClauses;
+        default:                        return nullptr;
+    }
+}
+
+// 属性成员槽键前缀 (Sub/Function = 空), 与 ifaceSlotKey 同一套 COM 惯例 (D2)
+inline std::string ifaceSlotPrefix(const Decl& d) {
+    if (d.kind != ASTNodeKind::PropertyDecl) return std::string();
+    switch (static_cast<const PropertyDecl&>(d).propKind) {
+        case ProcKind::PropertyGet: return "get_";
+        case ProcKind::PropertyLet: return "put_";
+        case ProcKind::PropertySet: return "putref_";
+        default:                    return std::string();
+    }
+}
+
+// 子句 `I.M` 的目标槽键: 按实现成员的 Get/Let/Set 补前缀 (也允许直接写槽名,
+// 那由调用方的候选集回退处理)
+inline std::string ifaceClauseSlotKey(const Decl& implDecl, const std::string& memberName) {
+    return ifaceSlotPrefix(implDecl) + ifaceLower(memberName);
+}
+
 } // namespace vb6c3

@@ -188,6 +188,13 @@ std::string CCodeGen::mapTypeRef(ASTNode* typeRef) {
             // 对象指针写进 int32_t → 截断 + 后续 AddRef 把类结构体当 COM 解引用 → 0xC0000005.
             // 检查是否是类名 → 映射为类结构体指针
             // Fix 107: 用 lookupTypeSymbol (含 $ty 回退), 否则同名过程会遮蔽类型.
+            // tB Interface 契约 (ai/022 B04): 新式接口名 -> 薄指针 vb6_ivref_<I>*.
+            // 必须排在 Class 符号分支之前: 头行宿主的 .cls 同时也是一个同名 Class 符号,
+            // 走 legacy 分支会得到根本不存在的 vb6_iface_<I> 胖对类型.
+            {
+                const std::string ivType = ivrefCType(lookupName);
+                if (!ivType.empty()) return ivType;
+            }
             auto* clsSym = lookupTypeSymbol(lookupName);
             if (clsSym && clsSym->kind == SymbolKind::Class) {
                 // P6.4: 接口类 → vb6_iface_<Name> 包装类型 (非指针)

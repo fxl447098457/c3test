@@ -72,6 +72,7 @@
         cgen.setComLibRefs(&comLibRefs);    // Fix 160: ComLib= 免注册组件表 (入口点烘焙)
         cgen.setStaticModuleVarNames(&dupModuleVarNames);  // Fix 093b: 撞名模块级变量转 static
         cgen.setInterfaceImplementers(&ifaceImplementersMap);  // P6.4+: 接口唯一实现类映射
+        cgen.setInterfaceRegistry(&ifaces_);  // tB Interface 契约 (B04): stage 2.7 只读登记表
         cgen.setDefaultInstanceClasses(&defaultInstanceClasses);  // P6.4+: 类模块默认实例
         cgen.setTrimIncludes(options.trimIncludes);  // opt4: 裁剪未实际引用的跨模块include
         if (options.trimIncludes) {

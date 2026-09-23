@@ -88,6 +88,21 @@
     // Fix 099: 生成 Public 字段的 COM 读写访问器 (ActiveX DLL 专用, 见 cgen_com.cpp)
     void emitClassFieldAccessors(Module& module);
     void emitInterfaceVtable(Module& module);
+    // tB Interface 契约发码 (ai/022 D2/D3, 批次 B04, 见 cgen_iface_vtbl.cpp)
+    void emitIfaceContractTypedefs();                 // .h: 工程级 vb6_ivtbl_/vb6_ivref_ 类型
+    void emitIfaceClassFields(Module& module);        // .h: 类结构体里的 __iv_<I> 字段
+    void emitIfaceImplTables(Module& module);         // .c: 适配器 + 类侧槽表实例
+    void emitIfaceNewInit(Module& module);            // .c: _New() 里回填 vt
+    std::string ivrefCType(const std::string& typeName);   // 空串 = 不是新式接口
+    const IfaceView* ivLookupIface(const std::string& written);
+    std::vector<const IfaceView*> ivImplementedIfaces(Module& module);
+    Decl* ivFindImplMember(Module& module, const IfaceView& v, const IfaceSlotView& slot);
+    std::string ivSlotRetType(const Decl* sig);
+    std::string ivParamDecls(Decl& d);
+    std::string ivParamDeclsRef(const Decl* sig);
+    std::string ivForwardArgs(Decl& d);
+    std::string ivImplCName(Decl& d);
+    std::string ivSlotKeyForMember(const IfaceView& v, const std::string& member);
     void emitEventSink(Module& module);
     void emitComVtableSinkDecls();  // .h 前向声明
     void emitComVtableSinks();      // .c 实现

@@ -228,14 +228,19 @@ void CCodeGen::emitLocalDeclCode(LocalDeclStmt& node) {
             bool isLocalEnumType = false;  // Fix 010q
             bool isLocalComIfaceType = false;
             bool isLocalVb6IfaceType = false;  // P6.4: VB6接口引用
+            bool isLocalIvrefType = false;     // tB Interface 契约 (B04): 薄指针接口变量
             if (var.asType && var.asType->kind == ASTNodeKind::SimpleTypeRef) {
                 auto& simple = static_cast<SimpleTypeRef&>(*var.asType);
                 auto* clsSym = lookupModuleDotted(simple.name);
                 if (clsSym && clsSym->kind == SymbolKind::Class) {
                     std::string lower = var.name;
                     std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
-                    // P6.4: 接口类 → knownIfaceVars_ (而非 knownClassVars_)
-                    if (clsSym->isInterface) {
+                    // tB Interface 契约 (B04): 新式接口变量 -> knownIvrefVars_ + NULL 初值
+                    if (!ivrefCType(simple.name).empty()) {
+                        knownIvrefVars_[lower] = simple.name;
+                        isLocalIvrefType = true;
+                    } else if (clsSym->isInterface) {
+                        // P6.4: 接口类 → knownIfaceVars_ (而非 knownClassVars_)
                         knownIfaceVars_[lower] = clsSym->name;
                         isLocalVb6IfaceType = true;
                     } else {
@@ -311,8 +316,8 @@ void CCodeGen::emitLocalDeclCode(LocalDeclStmt& node) {
                 c_.emitLine(storageClass + cType + " " + cName + " = " + lastExpr_ + ";");
             } else {
                 std::string initVal;
-                if (isLocalClassType || isLocalComIfaceType) {
-                    initVal = "NULL";
+                if (isLocalClassType || isLocalComIfaceType || isLocalIvrefType) {
+                    initVal = "NULL";  // 薄指针接口变量 (B04) 与类实例一样是裸指针
                 } else if (isLocalVb6IfaceType) {
                     initVal = "{0}";  // P6.4: 接口引用 = {vtbl=NULL, obj=NULL}
                 } else if (isLocalUdtType) {

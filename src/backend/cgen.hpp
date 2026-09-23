@@ -18,6 +18,7 @@
 #include "ast/ast_visitor.hpp"
 #include "semantics/symbol_table.hpp"
 #include "semantics/type_system.hpp"
+#include "semantics/interfaces_registry.hpp"  // tB Interface 契约发码 (ai/022 B04)
 #include "common/diagnostics.hpp"
 #include "project/frm_parser.hpp"
 #include <array>

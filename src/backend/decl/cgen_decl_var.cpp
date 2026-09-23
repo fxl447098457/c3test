@@ -138,8 +138,11 @@ void CCodeGen::visit(VariableDecl& node) {
         if (clsSym && clsSym->kind == SymbolKind::Class) {
             std::string lower = node.name;
             std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
-            // P6.4: 接口类 → 注册到 knownIfaceVars_ (而非 knownClassVars_)
-            if (clsSym->isInterface) {
+            // tB Interface 契约 (B04): 新式接口变量 -> knownIvrefVars_
+            if (!ivrefCType(simple.name).empty()) {
+                knownIvrefVars_[lower] = simple.name;
+            } else if (clsSym->isInterface) {
+                // P6.4: 接口类 → 注册到 knownIfaceVars_ (而非 knownClassVars_)
                 knownIfaceVars_[lower] = clsSym->name;
             } else {
                 // Fix 010r-10: map赋值, 存储类名以便方法分发时查找

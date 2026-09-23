@@ -384,6 +384,29 @@
     // (已在前面的Nothing分支处理, 但那里用的是vb6_ReleaseObject)
     // 这里检查target是否是早期绑定变量, 将vb6_ReleaseObject改为vb6_ComReleaseTyped
 
+    // tB Interface 契约 (B04): Set ivref = obj → ivref = &(obj)->__iv_<I>
+    // 薄指针 = 对象内该接口槽字段的地址 (D3); Nothing 已是 NULL, 这里不动.
+    {
+        std::string ivTargetLower = target;
+        std::transform(ivTargetLower.begin(), ivTargetLower.end(), ivTargetLower.begin(), ::tolower);
+        auto itIv = knownIvrefVars_.find(ivTargetLower);
+        if (itIv != knownIvrefVars_.end() && value != "NULL") {
+            if (const IfaceView* v = ivLookupIface(itIv->second)) {
+                std::string ivValLower = value;
+                std::transform(ivValLower.begin(), ivValLower.end(), ivValLower.begin(), ::tolower);
+                const bool isClassVar = knownClassVars_.count(ivValLower) != 0;
+                const bool isNewExpr = value.find("_New(") != std::string::npos;
+                if (isClassVar || isNewExpr) {
+                    value = "&(" + value + ")->__iv_" + cIdent(v->name);
+                } else {
+                    diag_.error(DiagnosticID::CodeGenUnsupportedFeature, SourceLocation{},
+                        "Interface binding: Set " + target + " = <expr> needs a class instance or"
+                        " New on the right side (tB Interface " + v->name + ")");
+                }
+            }
+        }
+    }
+
     // P6.4: 接口引用赋值: Set ifaceRef = obj → ifaceRef = vb6_iface_IFoo_wrap(obj)
     {
         std::string targetLower = target;

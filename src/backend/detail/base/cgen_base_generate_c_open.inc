@@ -76,6 +76,9 @@
     //   EXE 侧工程类实例也要能被包装成 IDispatch (阶段 3 在打包点接入).
     //   纯 EXE 下无人写读该字段, _New() 置 NULL, 现有程序行为零变化.
     h_.emitLine("    void* __comObj;  /* P6.6.3: back-ptr to COM wrapper (vb6_ComObject*) */");
+    // tB Interface 契约 (B04): 每个新式接口一个槽指针字段; **必须排在 __comObj 之后**
+    // (vb6comserver_obj.c 按裸偏移 0 读写 __comObj, 见 ai/022 D19 的硬修正)
+    emitIfaceClassFields(module);
 
         // 收集模块级变量作为结构体字段
         bool hasFields = false;
@@ -128,6 +131,7 @@
         // P6.4: 生成接口vtable结构体 + 包装类型 + 全局vtable实例
         if (!module.implements.empty()) {
             emitInterfaceVtable(module);
+            emitIfaceImplTables(module);  // tB Interface 契约 (B04): 新式接口另发一套表
         }
 
         // P6.5: 生成事件接收器表 (事件源类的回调函数指针表)

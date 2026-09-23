@@ -1,0 +1,349 @@
+// vb6c3 - tB 式 Interface 契约发码 (ai/022 D2/D3, 批次 B04)
+//
+// 本文件只负责"新式 `Interface ... End Interface`"这条路径，与 legacy VB6 的
+// `IFoo_M` 前缀扫描 + 胖对 `vb6_iface_<I>{vtbl,obj}` (cgen_com.cpp) 完全隔离：
+//
+//   类型（工程级，只发一次，#ifndef 守卫）
+//     typedef struct vb6_ivref_I { ... } vb6_ivref_I;   // 薄指针的指向类型（单词）
+//     typedef struct vb6_ivtbl_I { QI, AddRef, Release, <自有槽…> } vb6_ivtbl_I;
+//   实现类
+//     vb6_cls_C { void* __comObj; vb6_ivref_I __iv_I; … }   // __comObj 必须仍是第 0 字段 (D19)
+//     static <R> vb6_iimpl_C_I_<slot>(vb6_ivref_I* self, …) // container_of 后直调成员
+//     static const vb6_ivtbl_I vb6_ivtbl_I_for_C = { … };
+//     vb6_cls_C_New(): me->__iv_I.vt = &vb6_ivtbl_I_for_C;
+//   接口值 = &obj->__iv_I（D3 的薄指针口径），派发见 cgen_expr_call_ivref 分支.
+//
+// IUnknown 三件套本批是**占位实现**（E_NOTIMPL / 常量计数），槽号因此从 B04 起永久固定，
+// B13 只替换实现不动布局（D3 阶段接线）.
+
+#include "backend/cgen.hpp"
+
+#include "semantics/interface_sig.hpp"
+#include "semantics/interfaces_registry.hpp"
+
+#include <algorithm>
+#include <string>
+#include <vector>
+
+namespace vb6c3 {
+namespace {
+
+// 限定名末段：`Project.IFoo` → `IFoo`（与 parseImplements 的点号拼接对称, Fix 083）
+std::string ivLastSegment(const std::string& s) {
+    size_t p = s.rfind('.');
+    return p == std::string::npos ? s : s.substr(p + 1);
+}
+
+bool ivNameMatches(const std::string& written, const std::string& name) {
+    const std::string lower = ifaceLower(name);
+    return ifaceLower(written) == lower || ifaceLower(ivLastSegment(written)) == lower;
+}
+
+std::vector<std::unique_ptr<ParameterDecl>>* ivParamsOf(Decl& d) {
+    switch (d.kind) {
+        case ASTNodeKind::SubDecl:      return &static_cast<SubDecl&>(d).params;
+        case ASTNodeKind::FunctionDecl: return &static_cast<FunctionDecl&>(d).params;
+        case ASTNodeKind::PropertyDecl: return &static_cast<PropertyDecl&>(d).params;
+        default:                        return nullptr;
+    }
+}
+
+} // namespace
+
+// ============================================================
+// 查找
+// ============================================================
+
+const IfaceView* CCodeGen::ivLookupIface(const std::string& written) {
+    if (!ivreg_) return nullptr;
+    auto it = ivreg_->find(ifaceLower(written));
+    if (it == ivreg_->end()) it = ivreg_->find(ifaceLower(ivLastSegment(written)));
+    if (it == ivreg_->end()) return nullptr;
+    if (it->second.chainBroken || it->second.slots.empty()) return nullptr;
+    return &it->second;
+}
+
+std::string CCodeGen::ivrefCType(const std::string& typeName) {
+    const IfaceView* v = ivLookupIface(typeName);
+    return v ? "vb6_ivref_" + cIdent(v->name) + "*" : std::string();
+}
+
+// 本模块（类）实现了哪些新式接口：按 `Implements` 书写序，同名去重
+std::vector<const IfaceView*> CCodeGen::ivImplementedIfaces(Module& module) {
+    std::vector<const IfaceView*> out;
+    std::vector<std::string> seen;
+    for (const auto& impl : module.implements) {
+        if (!impl) continue;
+        const IfaceView* v = ivLookupIface(impl->interfaceName);
+        if (!v) continue;
+        const std::string key = ifaceLower(v->name);
+        if (std::find(seen.begin(), seen.end(), key) != seen.end()) continue;
+        seen.push_back(key);
+        out.push_back(v);
+    }
+    return out;
+}
+
+// 槽的实现成员：显式子句优先，其次同名隐式匹配（与语义层同一套口径, D16-2）
+Decl* CCodeGen::ivFindImplMember(Module& module, const IfaceView& v, const IfaceSlotView& slot) {
+    for (auto& d : module.declarations) {
+        if (!d) continue;
+        const std::vector<ImplementsClause>* clauses = ifaceProcClauses(*d);
+        if (!clauses || clauses->empty()) continue;
+        for (const auto& c : *clauses) {
+            if (!ivNameMatches(c.ifaceName, slot.ownerIface) &&
+                !ivNameMatches(c.ifaceName, v.name)) {
+                continue;
+            }
+            // 允许写成员名 (`I.Name`) 或直接写槽名 (`I.get_Name`)
+            if (ifaceClauseSlotKey(*d, c.memberName) == slot.key ||
+                ifaceLower(c.memberName) == slot.key) {
+                return d.get();
+            }
+        }
+    }
+    for (auto& d : module.declarations) {
+        if (!d) continue;
+        const std::vector<ImplementsClause>* clauses = ifaceProcClauses(*d);
+        if (clauses && !clauses->empty()) continue;  // 写了子句 = 只按子句入座
+        IfaceProcSig sig;
+        if (!ifaceSigFromDecl(*d, sig)) continue;
+        if (sig.slotKey == slot.key) return d.get();
+    }
+    return nullptr;
+}
+
+// ============================================================
+// 签名文本
+// ============================================================
+
+// 调用点成员名 -> 槽键：先按 Sub/Function 的裸名匹配，再按属性三槽前缀回退
+// （`s.Name` 读属性 → get_name；写属性由赋值路径自己带前缀，B04b 之后补）
+std::string CCodeGen::ivSlotKeyForMember(const IfaceView& v, const std::string& member) {
+    const std::string bare = ifaceLower(member);
+    for (const IfaceSlotView& s : v.slots) {
+        if (s.key == bare) return s.key;
+    }
+    for (const char* p : {"get_", "put_", "putref_"}) {
+        const std::string prefixed = std::string(p) + bare;
+        for (const IfaceSlotView& s : v.slots) {
+            if (s.key == prefixed) return s.key;
+        }
+    }
+    return std::string();
+}
+
+std::string CCodeGen::ivSlotRetType(const Decl* sig) {
+    if (!sig) return "void";
+    Decl& d = *const_cast<Decl*>(sig);
+    if (d.kind == ASTNodeKind::FunctionDecl) {
+        return mapTypeRef(static_cast<FunctionDecl&>(d).returnType.get());
+    }
+    if (d.kind == ASTNodeKind::PropertyDecl) {
+        PropertyDecl& p = static_cast<PropertyDecl&>(d);
+        return p.propKind == ProcKind::PropertyGet ? mapTypeRef(p.returnType.get())
+                                                   : std::string("void");
+    }
+    return "void";
+}
+
+// 形参声明文本（不含 self），与 makeParamList 同口径：ByRef→指针，Optional 追加 _has_ 尾标记
+std::string CCodeGen::ivParamDecls(Decl& d) {
+    std::string out;
+    std::vector<std::unique_ptr<ParameterDecl>>* ps = ivParamsOf(d);
+    if (!ps) return out;
+    for (auto& p : *ps) out += ", " + makeParamCType(p.get(), false);
+    for (auto& p : *ps) {
+        if (p->isOptional && !p->isParamArray) out += ", int _has_" + cIdent(p->name);
+    }
+    return out;
+}
+
+// 适配器转调实参（不含 me），顺序必须与 ivParamDecls 严格一致
+std::string CCodeGen::ivForwardArgs(Decl& d) {
+    std::string out;
+    std::vector<std::unique_ptr<ParameterDecl>>* ps = ivParamsOf(d);
+    if (!ps) return out;
+    for (auto& p : *ps) out += ", " + cIdent(p->name);
+    for (auto& p : *ps) {
+        if (p->isOptional && !p->isParamArray) out += ", _has_" + cIdent(p->name);
+    }
+    return out;
+}
+
+// 实现成员对应的 C 过程名（与 cgen_com.cpp 的 legacy 取名口径一致）
+std::string CCodeGen::ivImplCName(Decl& d) {
+    const std::string mod = isClassModule_ ? moduleName_ : std::string();
+    if (d.kind == ASTNodeKind::SubDecl) {
+        SubDecl& n = static_cast<SubDecl&>(d);
+        return cProcName(n.name, n.access, mod);
+    }
+    if (d.kind == ASTNodeKind::FunctionDecl) {
+        FunctionDecl& n = static_cast<FunctionDecl&>(d);
+        return cProcName(n.name, n.access, mod);
+    }
+    if (d.kind == ASTNodeKind::PropertyDecl) {
+        PropertyDecl& n = static_cast<PropertyDecl&>(d);
+        std::string prefix = "prop_let_";
+        if (n.propKind == ProcKind::PropertyGet) prefix = "prop_get_";
+        else if (n.propKind == ProcKind::PropertySet) prefix = "prop_set_";
+        return cProcName(prefix + n.name, n.access, mod);
+    }
+    return std::string();
+}
+
+// ============================================================
+// 头文件：工程级接口类型（#ifndef 守卫，任何模块用到都自足）
+// ============================================================
+
+void CCodeGen::emitIfaceContractTypedefs() {
+    if (!ivreg_ || ivreg_->empty()) return;  // 无新式接口的工程：零输出（护栏）
+
+    std::vector<const IfaceView*> views;
+    for (const auto& kv : *ivreg_) views.push_back(&kv.second);
+    // unordered_map 迭代顺序不稳定 → 按小写名排序，保证生成物可复现
+    std::sort(views.begin(), views.end(), [](const IfaceView* a, const IfaceView* b) {
+        return ifaceLower(a->name) < ifaceLower(b->name);
+    });
+
+    bool headerDone = false;
+    for (const IfaceView* v : views) {
+        if (v->chainBroken || v->slots.empty()) continue;
+        if (!headerDone) {
+            h_.emitLine("// === tB-style Interface contract slot tables (ai/022 B04) ===");
+            headerDone = true;
+        }
+        const std::string id = cIdent(v->name);
+        const std::string tbl = "vb6_ivtbl_" + id;
+        const std::string ref = "vb6_ivref_" + id;
+        std::string guard = "VB6_IVTBL_" + id;
+        for (char& ch : guard) {
+            if (ch >= 'a' && ch <= 'z') ch = static_cast<char>(ch - 'a' + 'A');
+        }
+        h_.emitLine("#ifndef " + guard);
+        h_.emitLine("#define " + guard);
+        h_.emitLine("typedef struct " + ref + " " + ref + ";");
+        h_.emitLine("typedef struct " + tbl + " {");
+        h_.indent();
+        h_.emitLine("/* IUnknown prefix slots: placeholders in B04, real QI/refcount in B13/B05 */");
+        h_.emitLine("long (*QueryInterface)(void* self, const void* riid, void** ppv);");
+        h_.emitLine("unsigned long (*AddRef)(void* self);");
+        h_.emitLine("unsigned long (*Release)(void* self);");
+        for (const IfaceSlotView& slot : v->slots) {
+            h_.emitLine(ivSlotRetType(slot.sig) + " (*" + cIdent(slot.key) + ")(" +
+                        ref + "* self" + ivParamDeclsRef(slot.sig) + ");");
+        }
+        h_.dedent();
+        h_.emitLine("} " + tbl + ";");
+        h_.emitLine("struct " + ref + " { const " + tbl + "* vt; };");
+        h_.emitLine("#endif");
+        h_.emitBlank();
+    }
+}
+
+// 头文件槽声明用的形参文本（接口侧签名可能是 const 节点）
+std::string CCodeGen::ivParamDeclsRef(const Decl* sig) {
+    if (!sig) return std::string();
+    return ivParamDecls(*const_cast<Decl*>(sig));
+}
+
+// ============================================================
+// 类结构体字段 + _New 初始化
+// ============================================================
+
+void CCodeGen::emitIfaceClassFields(Module& module) {
+    for (const IfaceView* v : ivImplementedIfaces(module)) {
+        const std::string id = cIdent(v->name);
+        h_.emitLine("    vb6_ivref_" + id + " __iv_" + id +
+                    ";  /* tB Interface " + v->name + " (B04): iface ptr = &me->__iv_" + id + " */");
+    }
+}
+
+void CCodeGen::emitIfaceNewInit(Module& module) {
+    const std::string clsId = cIdent(moduleName_);
+    for (const IfaceView* v : ivImplementedIfaces(module)) {
+        const std::string id = cIdent(v->name);
+        c_.emitLine("me->__iv_" + id + ".vt = &vb6_ivtbl_" + id + "_for_" + clsId + ";");
+    }
+}
+
+// ============================================================
+// 类侧：适配器 + 槽表实例
+// ============================================================
+
+void CCodeGen::emitIfaceImplTables(Module& module) {
+    const std::vector<const IfaceView*> ifaces = ivImplementedIfaces(module);
+    if (ifaces.empty()) return;
+
+    const std::string clsId = cIdent(moduleName_);
+    const std::string clsStruct = "vb6_cls_" + clsId;
+
+    c_.emitBlank();
+    c_.emitLine("// === tB Interface contract impl: " + module.moduleName + " (ai/022 B04) ===");
+
+    // IUnknown 占位三件套（每个实现类一份 static；B13/B05 换成真实现）
+    c_.emitLine("static long vb6_iunk_" + clsId + "_QueryInterface(void* self, const void* riid, void** ppv) {");
+    c_.indent();
+    c_.emitLine("(void)self; (void)riid; (void)ppv;");
+    c_.emitLine("return 0x80004001L;  /* E_NOTIMPL: implemented in B13 */");
+    c_.dedent();
+    c_.emitLine("}");
+    c_.emitLine("static unsigned long vb6_iunk_" + clsId + "_AddRef(void* self) {");
+    c_.indent();
+    c_.emitLine("(void)self;");
+    c_.emitLine("return 1UL;  /* refcount lands in B05 */");
+    c_.dedent();
+    c_.emitLine("}");
+    c_.emitLine("static unsigned long vb6_iunk_" + clsId + "_Release(void* self) {");
+    c_.indent();
+    c_.emitLine("(void)self;");
+    c_.emitLine("return 1UL;  /* refcount lands in B05 */");
+    c_.dedent();
+    c_.emitLine("}");
+
+    for (const IfaceView* v : ifaces) {
+        const std::string id = cIdent(v->name);
+        const std::string ref = "vb6_ivref_" + id;
+
+        std::vector<std::string> slotFns;
+        for (const IfaceSlotView& slot : v->slots) {
+            Decl* impl = ivFindImplMember(module, *v, slot);
+            if (!impl) {
+                // 契约缺失在语义层已经报过错（B02/B02b），这里只留 NULL 占位避免级联编译错误
+                slotFns.push_back("NULL");
+                continue;
+            }
+            const std::string fn = "vb6_iimpl_" + clsId + "_" + id + "_" + cIdent(slot.key);
+            slotFns.push_back(fn);
+
+            c_.emitBlank();
+            c_.emitLine("static " + ivSlotRetType(slot.sig) + " " + fn + "(" + ref + "* self" +
+                        ivParamDecls(*impl) + ") {");
+            c_.indent();
+            c_.emitLine(clsStruct + "* me = (" + clsStruct + "*)((char*)self - offsetof(" +
+                        clsStruct + ", __iv_" + id + "));");
+            const std::string call = ivImplCName(*impl) + "(me" + ivForwardArgs(*impl) + ")";
+            if (ivSlotRetType(slot.sig) == "void") {
+                c_.emitLine(call + ";");
+            } else {
+                c_.emitLine("return " + call + ";");
+            }
+            c_.dedent();
+            c_.emitLine("}");
+        }
+
+        c_.emitBlank();
+        c_.emitLine("static const vb6_ivtbl_" + id + " vb6_ivtbl_" + id + "_for_" + clsId + " = {");
+        c_.indent();
+        c_.emitLine("vb6_iunk_" + clsId + "_QueryInterface,");
+        c_.emitLine("vb6_iunk_" + clsId + "_AddRef,");
+        c_.emitLine("vb6_iunk_" + clsId + "_Release,");
+        for (size_t i = 0; i < slotFns.size(); i++) {
+            c_.emitLine(slotFns[i] + (i + 1 < slotFns.size() ? "," : ""));
+        }
+        c_.dedent();
+        c_.emitLine("};");
+    }
+}
+
+} // namespace vb6c3

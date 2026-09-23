@@ -31,31 +31,6 @@ std::string ifaceBareName(const std::string& slotKey) {
     return slotKey;
 }
 
-// 过程声明尾部的成员级 Implements 子句 (B02b); 非过程声明 = nullptr
-const std::vector<ImplementsClause>* procImplementsClauses(const Decl& d) {
-    switch (d.kind) {
-        case ASTNodeKind::SubDecl:
-            return &static_cast<const SubDecl&>(d).implementsClauses;
-        case ASTNodeKind::FunctionDecl:
-            return &static_cast<const FunctionDecl&>(d).implementsClauses;
-        case ASTNodeKind::PropertyDecl:
-            return &static_cast<const PropertyDecl&>(d).implementsClauses;
-        default:
-            return nullptr;
-    }
-}
-
-// 属性成员槽键的前缀 (Sub/Function = 空), 与 ifaceSlotKey 同一套 COM 惯例 (D2)
-std::string procSlotPrefix(const Decl& d) {
-    if (d.kind != ASTNodeKind::PropertyDecl) return std::string();
-    switch (static_cast<const PropertyDecl&>(d).propKind) {
-        case ProcKind::PropertyGet: return "get_";
-        case ProcKind::PropertyLet: return "put_";
-        case ProcKind::PropertySet: return "putref_";
-        default:                    return std::string();
-    }
-}
-
 // `Project.IFoo` 式限定名的末段 (与模块级 parseImplements 的点号拼接对称, Fix 083)
 std::string ifaceLastSegment(const std::string& s) {
     size_t p = s.rfind('.');
@@ -74,7 +49,7 @@ bool ifaceNameMatches(const std::string& written, const std::string& name) {
 const IfaceSlotView* findClauseSlot(const IfaceView& view, const std::string& writtenIface,
                                     const Decl& implDecl, const std::string& memberName) {
     const std::string bare = ifaceLower(memberName);
-    const std::string prefixed = procSlotPrefix(implDecl) + bare;
+    const std::string prefixed = ifaceSlotPrefix(implDecl) + bare;
     for (const std::string& key : {prefixed, bare}) {
         for (const auto& slot : view.slots) {
             if (slot.key != key) continue;
@@ -125,7 +100,7 @@ void SemanticAnalyzer::checkNewStyleInterface(const Module& module, const IfaceV
     std::set<const Decl*> explicitDecls;
     for (const auto& d : module.declarations) {
         if (!d) continue;
-        const std::vector<ImplementsClause>* clauses = procImplementsClauses(*d);
+        const std::vector<ImplementsClause>* clauses = ifaceProcClauses(*d);
         if (!clauses || clauses->empty()) continue;
         explicitDecls.insert(d.get());
         IfaceProcSig sig;
@@ -195,7 +170,7 @@ void SemanticAnalyzer::checkMemberImplementsClauses(
 
     for (const auto& d : module.declarations) {
         if (!d) continue;
-        const std::vector<ImplementsClause>* clauses = procImplementsClauses(*d);
+        const std::vector<ImplementsClause>* clauses = ifaceProcClauses(*d);
         if (!clauses || clauses->empty()) continue;
         IfaceProcSig sig;
         if (!ifaceSigFromDecl(*d, sig)) continue;

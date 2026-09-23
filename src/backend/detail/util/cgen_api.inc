@@ -217,6 +217,8 @@
     void setInterfaceImplementers(const std::map<std::string, std::string>* m) {
         interfaceImplementers_ = m;
     }
+    // Interface 契约 (tB, ai/022 B04): stage 2.7 建好的工程级只读登记表, 发码期取槽表.
+    void setInterfaceRegistry(const IfaceRegistry* reg) { ivreg_ = reg; }
     // 查询接口唯一实现类名 (空串 = 无映射/多实现类, 不可用)
     std::string singleImplementationClass(const std::string& ifaceName) const {
         if (!interfaceImplementers_) return "";

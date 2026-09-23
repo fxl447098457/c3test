@@ -24,6 +24,7 @@ void CCodeGen::emitClassFactory(Module& module) {
     //   结构体的首字段 (见 cgen_base_generate_c_open.inc), EXE 的 _New() 与
     //   DLL 侧保持一致; 纯 EXE 下无人写读, 恒 NULL, 行为零变化.
     c_.emitLine("me->__comObj = NULL;  /* P6.6.3: no COM wrapper yet */");
+    emitIfaceNewInit(module);  // tB Interface 契约 (B04): me->__iv_<I>.vt = &vb6_ivtbl_<I>_for_<C>
 
     // 初始化所有字段为默认值
     // 同时注册BSTR/Long类型成员到knownBstrVars_/knownLongVars_ (用于赋值时BSTR安全处理)

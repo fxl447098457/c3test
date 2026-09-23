@@ -15,6 +15,20 @@
             return;
         }
 
+        // tB Interface 契约 (B04): 接口变量的成员访问 → 走 vb6_ivtbl_<I> 槽表
+        auto itIvrefVar = knownIvrefVars_.find(objLower);
+        if (itIvrefVar != knownIvrefVars_.end()) {
+            emitExpr(*node.object);
+            comObjExpr_ = lastExpr_;
+            comMemberName_ = node.memberName;
+            ivrefIfaceName_ = itIvrefVar->second;  // 交给 com_bind 的 ivref 分支消费
+            isComMarker_ = true;
+            isEarlyBoundCom_ = false;
+            earlyBoundSym_ = nullptr;
+            lastExpr_ = lastExpr_;
+            return;
+        }
+
         // P6.4: 接口引用成员访问 (Dim x As IFoo) → 通过vtable调用
         // 设置接口标记, 由IndexOrCallExpr/AssignmentStmt识别
         auto itIfaceVar = knownIfaceVars_.find(objLower);

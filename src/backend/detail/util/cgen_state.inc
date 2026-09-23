@@ -325,6 +325,12 @@
     // P6.4: Implements 接口引用变量 (小写变量名 → 接口名)
     // Dim x As IFoo → knownIfaceVars_["x"] = "IFoo"
     std::unordered_map<std::string, std::string> knownIfaceVars_;
+    // Interface 契约 (tB, ai/022 B04): `Dim x As <新式接口>` → 变量名小写 → 接口名.
+    // 与 legacy 的 knownIfaceVars_ 分开: 新式接口值是**薄指针** (vb6_ivref_<I>*),
+    // 派发/Set 都走 ivref 分支, 不共用胖对文本.
+    std::unordered_map<std::string, std::string> knownIvrefVars_;
+    // 成员访问片段 -> 调用片段之间传递"这次是接口槽调用"的接口名 (B04)
+    std::string ivrefIfaceName_;
 
     // VB6 Static Sub/Function标志: 过程内所有局部变量都应生成C static
     bool inStaticProc_ = false;
@@ -386,6 +392,10 @@
 
     // P6.4+: interface -> single implementer map (injected by driver)
     const std::map<std::string, std::string>* interfaceImplementers_ = nullptr;
+
+    // Interface 契约 (tB, ai/022 B04): stage 2.7 建好的工程级只读登记表 (driver 注入).
+    // 槽表/适配器/薄指针类型都由它驱动, 与 legacy 的 implementsNames 口径互不影响.
+    const IfaceRegistry* ivreg_ = nullptr;
 
     // P6.4+: class-module default instance (VB_PredeclaredId=True) lowercase name -> canonical
     const std::map<std::string, std::string>* defaultInstanceClasses_ = nullptr;
