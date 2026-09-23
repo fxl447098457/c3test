@@ -5,19 +5,28 @@
 > 规范输入: `ai/讨论记录/018-接口继承与CoClass设计思路.md`（含 tB 文档要点与分阶段设计思路全文）。
 
 STATUS: IDLE               # NOT_STARTED | DESIGN | BUSY | IDLE | ALL_DONE
-LAST_RUN: 2026-09-23T11:55:16+08:00   # 本轮开工并收口 **B07a**（代码 a056705、总表见本轮 docs 提交）。
-               # 自动运行见本行不足 55 分钟请立即跳过。   # 本轮单批（B07a）；过门后另跑 8 文件逐字节护栏。
-               # 下一轮自动运行从 **B07b** 开工（P3 第二批，地图见 D26）；重入保护照常：STATUS=BUSY 且不足 55 分钟立即跳过。
-LAST_COMMIT: 代码批 = a056705(B07a)、4dc6b7e(B06b)、613d2b8(B06a)、f644003(B05)
-CURRENT_BATCH: **B07b**（P3 第二批，B07a 已过门 = a056705）——继承**成员合并**（stage 3.4 新轮，并 11 张成员表、按小写键裁决遮蔽）+ 继承字段进派生 struct（扁平复制、字段 0 仍是 `__comObj`）+ 继承方法**转发桩** + 手册页 `docs/vb6-manual/02-语句/Inherits 语句.md`。开工必读 **D26**（B07b 地图，锚点本轮实测）与 D25；四条硬约束：
-               ① 合并落在 **stage 3 之后、3.5 之前**（新 3.4 遍历 `analyzers_`，按 `classes_[key].chain` 从根往叶并表）：`driver_crossmod.cpp:169-190` 把 Class 符号成员表**逐字段手工拷贝**给外部工程，合并晚于 3.5 就得再抄一遍副本。
-               ② 11 张表一张都不能漏（清单与行号见 D26；`interfaceMethodParams` 是死字段别碰）；遮蔽在**合并阶段**就按小写键裁决完，发码只认胜者（`cIdent` 保留大小写，否则 `m_X`/`M_x` 发成两个 C 成员 = 静默错字段，D24③）。
-               ③ 不内嵌 `vb6_cls_Base`（连 `__refcount`/`__iv_<I>` 一起继承 = 双计数，撞 D21-1 单门禁）→ v1 在 2.8 就拒绝「基类或派生类实现新式 Interface」「基类带 Event」两类（3022，别悄悄降级），把前缀排布问题推到 B08+。
-               ④ 发码走**转发桩** `vb6_<D>_<M>` 转调 `vb6_<B>_<M>((vb6_cls_<B>*)me, …)`，别在调用点裸强转 `me`（D24④）；**B07b 第一件事是实测**：真实管线里派生 TU 能否看到基类完整 struct（本轮 `--emit-c` 观察到两个 `.h` 互相 include、谁先被包含谁只拿到对方前向 typedef → 包含序决定可见性）。若不完整，改法是给派生 `.c` 头部**先**显式 `#include "<Base>.h"`（只此一条）。
-               收益点：合并进符号表之后 `resolveClassMemberCall` 的 Fix 014 兜底与三个同源查询一行都不用改（D26）。
-               遗留登记（不挡 B07）：**B06c** = 接口值作实参 / 进 Variant，归 B13/P6 前处理（要过 `vb6_ComIsDispatchable` 的 7 槽口径，D22-7③）。
-GATE_BASELINE: Results: PASS=137 FAIL=0 SKIP=1 TOTAL=138   # exe md5 031f993b（.build/gate_B07a.log，11:25:47 起跑，最后一次源码改动在起跑前、跑前后 exe 一致；SKIP=已知 test_vbman 环境项）。条目 129→138（B07a 新增 8 条语法用例 + 1 个 vbp 工程）→ 零新增失败，legacy `test_implements` 仍 PASS。
-               # 另附 8 文件 --emit-c 对 pre-B07a 基线（worktree @58f02fe，自建 Debug exe）逐字节全同；本轮首次实测确认 `test_implements.vbp` 会产出 class struct，故类布局在清单里有覆盖（D25-7）。
+LAST_RUN: 2026-09-23T13:14:58+08:00   # 本轮开工并收口 **B07b**（代码 b1c0050、总表见本轮 docs 提交）。
+               # 自动运行见本行不足 55 分钟请立即跳过。   # 本轮两批（B07a 收口 + B07b 全批）；都各跑过门与护栏。
+               # 下一轮自动运行从 **B08a** 开工（P3 第三批 `Protected`，地图见 D28）；重入保护照常：STATUS=BUSY 且不足 55 分钟立即跳过。
+LAST_COMMIT: 代码批 = b1c0050(B07b)、a056705(B07a)、4dc6b7e(B06b)、613d2b8(B06a)
+CURRENT_BATCH: **B08a**（P3 第三批的第一半）——`Protected` 可见性：关键字 + `AccessLevel::Protected` +
+               成员访问权限检查 + 新诊断。开工必读 **D28**（B08 地图，锚点本轮实测）与 D27；四条硬约束：
+               ① 拆批判据照 D20-1：B08a = `Protected`（可观测性天然成立 —— 这个关键字今天根本不存在，写了撞 VB2002）；
+               B08b = `Overridable/Overrides/NotOverridable` + 类虚表 + 动态派发（要改结构体，另批另跑护栏）。
+               ② 接线四处逐处镜像 `Friend`（`lexer_keywords.cpp:31` / `token.hpp` 枚举 / `token.cpp:25` /
+               `parser.cpp:288` + `parser_decl.cpp:28-39`），新关键字**同时**进软关键字表，并按 D27 的做法先实测
+               语料里该词出现次数（`protected` 本轮实测 0 次）；`AccessLevel` 的新值取 `Protected = 3`，别插在中间。
+               ③ 可见性检查是**从零加**（D27-14：全仓没有任何"成员不可访问"诊断，`Private` 现在只体现为跨模块注入不收）
+               → 新 ID 从 3023 起；检查点要能看到"访问者所在模块 vs 成员所属类"，`Protected` 的放行条件读
+               `Driver::classes_[key].chain`（注入路线照 `analyzer->setClassChainRegistry`）。
+               ④ B08b 的虚表字段位置是硬约束：字段 0 恒为 `__comObj`（D19）、`__iv_<I>` 紧跟其后是 B04 定死的 →
+               `__cvtbl` 只能排在 `emitIfaceClassFields` 之后，且**只给链上含 `Overridable` 的类**加（照 `__refcount`
+               的按 feature 加字段手法）；`Overrides` 的签名比对用 `interface_sig.hpp` 的源码签名口径（D16 理由）。
+               B07 遗留（不挡 B08）：**裸名**调用继承成员仍拒绝（要 `Me.`，D27-8）；继承来的 `Public` 字段不对外
+               COM 暴露（`publicFieldNames`/`memberFieldDispids` 未并，归 P6/B13）。
+               更早的遗留登记：**B06c** = 接口值作实参 / 进 Variant，归 B13/P6 前处理（要过 `vb6_ComIsDispatchable` 的 7 槽口径，D22-7③）。
+GATE_BASELINE: Results: PASS=140 FAIL=0 SKIP=1 TOTAL=141   # exe md5 50ce2e77（.build/gate_B07b.log，12:47:44 起跑，最后一次源码改动在起跑前、跑前后 exe 一致；SKIP=已知 test_vbman 环境项）。条目 138→141（B07b 三条 v1 边界负例）→ 零新增失败；`cls_inh_pair` 断言 2→12 条、legacy `test_implements` 与 `itf_xmod_writer` 仍全绿。
+               # 另附 8 文件 --emit-c 对 pre-B07b 基线（worktree @a056705，自建 Debug exe）逐字节全同（B07b 动了结构体与发码，按 D9 必须跑）。
 ```
 
 > 重入保护：若运行开始时 STATUS=BUSY 且 LAST_RUN 距今不足 55 分钟，说明上一次运行可能仍在进行——本次**立即结束，不做任何修改**。
@@ -60,7 +69,7 @@ GATE_BASELINE: Results: PASS=137 FAIL=0 SKIP=1 TOTAL=138   # exe md5 031f993b（
 | B04 | P2 | 接口值代码生成：`vb6_ivtbl_<I>` COM 形态槽表 + 类侧实例 + 薄指针表示 + `As <Iface>` 变量登记 + 派发 | ☑ | 6bc97e8 | `Results: PASS=128 FAIL=0 SKIP=1 TOTAL=129`（gate_B04.log；exe md5 ef1a7520 跑前后一致）+ 接口值派发端到端断言 IFV1/IFV2/IFV3 全绿 + legacy `test_implements` 仍 PASS。要点：新增 `cgen_iface_vtbl.cpp` 独立编译单元、`#ifndef VB6_IVTBL_<I>` 守卫替代 D19 设想的工程级去重表、`__iv_<I>` 紧跟 `__comObj`、槽键口径上提到 `interface_sig.hpp` 与语义层同源。B04a/B04b 合并成一批（理由见 D20-1）。逐字节 emit-c 护栏 8 文件对 pre-B04 基线全同 |
 | B05 | P2 | 生命周期：实现类结构**前置** vtbl 指针数组（实测不可行，见 D21-1）+ refcount 头 + AddRef/Release + Set/Nothing/作用域释放 | ☑ | f644003 | `Results: PASS=128 FAIL=0 SKIP=1 TOTAL=129`（gate_B05.log；exe md5 c615c657 跑前后一致）+ `itf_xmod_writer` 断言 5→11 条（LIFE1/2/3/9 + `TERM last=bye` + `TERM last=scoped`；实测该工程恰好 2 条 TERM，无误销毁、无重复释放）+ legacy `test_implements` 仍 PASS。要点：`__refcount` 只加在实现新式接口的类上（8 文件 emit-c 对 pre-B05 基线全同）；AddRef/Release 按 (类, 接口) 各一份；QI 仍占位到 B06；`__comObj` 非空时不归 0 销毁。详见 D21 |
 | B06 | P2 | 转换与判定：接口↔类、多接口对象、`TypeOf … Is <接口>`、上/下行转换契约校验 | ☑ **B06a**（QI + 跨接口 Set + `TypeOf <接口变量> Is <接口>`）+ **B06b**（下行转换 + `TypeOf <类变量> Is <接口>` + 修 B05 的 Nothing 野地址）；**B06c 遗留**：接口值作实参 / 进 Variant → 随 B13/P6 处理 | 4dc6b7e | B06a：`Results: PASS=128 FAIL=0 SKIP=1 TOTAL=129`（exe 7721bd72）+ 断言 11→18；B06b：`Results: PASS=128 FAIL=0 SKIP=1 TOTAL=129`（gate_B06b.log；exe 4202570a 跑前后一致）+ 断言 18→25（DN0..DN3 + TOC1..TOC3）+ legacy `test_implements` 仍 PASS + 8 文件 emit-c 对 pre-B06b(@613d2b8) 全同 + **A/B 负控证明 D22-10 缺陷真实**（基线二进制 exit=139，本批 exit=0）。详见 D22/D23 |
-| B07 | P3 | `Inherits` 语法 + 类链检测（单继承/环/深度）+ 继承成员合并与遮蔽 + 派生域 | ◐ **B07a**（语法 + stage 2.8 链检测/诊断 + 多文件负例通路）；**B07b 待做**：成员合并 + 继承字段/转发桩发码 + 手册页 | a056705 | `Results: PASS=137 FAIL=0 SKIP=1 TOTAL=138`（gate_B07a.log；exe md5 031f993b 跑前后一致）+ 9 条新用例全绿（ci_n01..n07 + ci_pos_pair + cls_inh_pair）+ legacy `test_implements` 仍 PASS + 8 文件 emit-c 对 pre-B07a(@58f02fe) 全同。详见 D25（B07b 地图 = D26） |
+| B07 | P3 | `Inherits` 语法 + 类链检测（单继承/环/深度）+ 继承成员合并与遮蔽 + 派生域 | ☑ **B07a**（语法 + stage 2.8 链检测/诊断 + 多文件负例通路）+ **B07b**（stage 3.4 成员合并 + 前缀布局 + 转发桩）；**B07 遗留**：裸名继承调用（要 `Me.`）、继承 `Public` 字段的 COM 对外暴露 → 分别归 B08+/P6 | b1c0050 | `Results: PASS=140 FAIL=0 SKIP=1 TOTAL=141`（gate_B07b.log；exe md5 50ce2e77 跑前后一致）+ `cls_inh` 三级链 12 条断言 + ci_n08/n09/n10 三条边界负例 + legacy `test_implements` 仍 PASS + 8 文件 emit-c 对 pre-B07b(@a056705) 全同。要点：并 8 张成员表（不是 11 张，理由在码内）、祖先私有字段**也复制进布局**、属性三向各一份桩、`_has_` 尾参必须转发、**封掉裸名继承调用的静默错代码**。详见 D27（B08 地图 = D28） |
 | B08 | P3 | `Protected` 可见性 + `Overridable/Overrides/NotOverridable` + 类级虚表 `vb6_cvtbl_<Cls>` 与多态派发 | ☐ | | |
 | B09 | P3 | `MyBase.M(…)` 显式基调用（去虚化）+ 构造链顺序 + 无新语法逐字节护栏 | ☐ | | |
 | B10 | P4 | `Implements IFace Via <holderVar>` 委托式实现：持有字段 + 自动转调桩 + 签名检查 | ☐ | | |
@@ -856,6 +865,115 @@ dispinterface 定义；`[Default, Source]` 连接点实现；泛型类实现新�
   产出 `vb6_cls_CRectangle`/`vb6_cls_IShape`，类布局有覆盖，D25-7）。基线 = pre-B07b 的 worktree exe，
   **bat 用 python 写**（D25-10 的 MSYS `>nul` 坑）。
 
+### D27 B07b（继承成员合并 stage 3.4 + 前缀布局 + 转发桩）实施记录（2026-09-23）
+
+1. **合并落点 = 新 stage 3.4 `Driver::mergeInheritedMembers()`**（`driver_compile.cpp` 插在阶段3 与
+   3.5 之间，理由照 D26：`driver_crossmod.cpp:169-190` 把 Class 符号成员表逐字段拷给外部工程副本）。
+   消费的是 2.8 的 `chain`（父先己后），回填到 `ClassChainView::inhFields/inhProcs`，发码层只读这两张清单
+   —— 这样"结构体字段"与"可调用成员"不可能各按一套规则走。
+2. **v1 实际并 8 张表而不是 11 张**（过程面 6：`memberNames` `memberProcKinds` `memberReturnTypes`
+   `memberParams` `memberLetParams` `memberSetParams`；字段面 2：`memberFieldNames` `memberFieldTypes`）。
+   刻意不并的 3 张各有硬理由：`publicFieldNames` + `memberFieldDispids` 是 Fix 099 的 COM 对外暴露清单，
+   并了就会让 `dll_entry` 去找派生 TU 根本不发的字段访问器（**链接期才炸**，比编译期难查）→ 归 P6/B13；
+   `eventNames` 无需并（带事件的基类已在 2.8 判死）。字段**不进** `memberNames` 是 Fix 099 的硬规定
+   （那张表被用来判定"成员访问是否为属性调用"，并字段会把 `Foo(obj.Field)` 改写成 `prop_get_` 调用）。
+3. **同名 Property 的 Get/Let/Set 是"一个键、多个方向节点"**：第一版按成员键去重 `own.procs` →
+   `Property Let` 的桩整个丢失（只有 `prop_get_Name` 发出来）。改成过程桶**不去重**、成员表按
+   `mergedKeys` 每键只并一次、桩按节点逐方向发。这条只有跑真实工程才会露出来（INH9）。
+4. **遮蔽裁决 = 近者（叶方向）优先抢键，落表仍按根→叶**：先"叶→根"扫描抢键（`taken` 集合），再按祖先下标
+   `stable_sort` 落表，于是 `memberNames` 的次序是"根先、同层声明序"（对 legacy 契约检查的扫描序可见，
+   不影响新式接口槽序）。层内多方向不互相遮蔽（`mine` 集合在整层扫完才并入 `taken`）——第一版在层内就
+   `taken.insert` 导致第二个方向被自己挡住。
+5. **布局 = 前缀复制，祖先的 `Private` 字段也复制**：派生 struct = `__comObj` + 祖先字段（根→叶）+ 自有字段。
+   私有字段虽然对派生类不可见（不进成员表可见面），但**必须占布局**，否则基类实现自己的 `me->m_x` 全错位。
+   `_New()` 的字段初始化与 `_Destroy()` 的 BSTR/数组释放同样改走 `structFieldDecls()`（继承在前），
+   否则继承来的 String 字段既不初始化也不释放。
+6. **转发桩**（`src/backend/module/cgen_inherit.cpp`，新独立编译单元）：
+   `vb6_<D>_<M>(vb6_cls_<D>* me, …) { vb6_<B>_<M>((vb6_cls_<B>*)me, …); }`，属性的 C 名带
+   `prop_get_/prop_let_/prop_set_` 前缀（与 `makePropertySignature`、`ivImplCName` 同口径，否则链接期找不到）。
+   形参表与转调实参的口径直接照抄 `ivParamDecls`/`ivForwardArgs`（含 **Optional 的 `int _has_x` 尾参**
+   ——不跟着转发基类的 `IsMissing` 就失真，INH6/7/8 专打这一发）。那两个函数在 `cgen_iface_vtbl.cpp` 的
+   匿名 namespace 里、跨 TU 取不到 → 本文件重写了一份 5 行的 `paramsOf`，**没有**为此改 B04 的热点文件。
+7. **跨 TU 可见性实测（解除 D24④/D26 的悬念）**：不给派生 `.c` 加任何显式 `#include "<Base>.h"`，
+   现有"多模块工程互相 include 类头"就够 —— 桩只需要类型名（指针转换对不完整类型合法），而
+   **继承来的 UDT 字段**要的完整类型也在基类 `.h` 里、经那道 include 可见（`_New` 发的
+   `memset(&me->m_pt, 0, sizeof(me->m_pt))` 在派生 TU 编译通过 = 实证）。真实证据是运行期的
+   `INH3`（`d.SetPt 5` → `d.PtSum() = 15`，走基类实现读写继承来的 `TPoint`）——编译通过不等于布局对。
+   如果哪天包含关系变了，INH3 会先炸，这就是它当常驻用例的理由。
+8. **本轮最有价值的发现：裸名调用继承成员是**静默错代码**，不是编译错误**。`Bump`（不带 `Me.`）在
+   `Option Explicit` 下只给一条 VB3001 警告，`cl` 零诊断、exe 照生、**那段调用直接消失**
+   （实测 `INH2:FAIL n=0`）。根因：合并只发生在 Class 符号的成员表上，模块作用域里没有这个过程的
+   `Symbol`，发码侧认不出这个名字。已在 `visit(IdentifierExpr)` 的"未找到标识符"分支升格为
+   VB3022 错误并要求写 `Me.` *成员名*（`SemanticAnalyzer::declaredByAncestor` 只看 2.8 的链与祖先声明，
+   不复用 3.4 的回填 —— 判定发生在语义分析途中，那时合并还没跑）。手册"注意"节同步写明。
+9. **v1 边界（2.8 Pass D，全部 3022，一个类只报第一条）**：① 基类带 `Event`（`events` sink 挂在结构体
+   尾部，前缀复制不成立）；② 基类**或派生类**实现新式 `Interface`（`__refcount`/`__iv_<I>` 跟着复制 =
+   一个对象两份计数，撞 D21-1 单门禁）；③ 基类有同名重载过程（桩要带 `$ov$` 变体后缀，与 B08 一起去虚化
+   时一起设计）；④ 派生类重声明祖先同名字段（C 结构体容不下两个同名成员）。判据一律只看 AST。
+   第一版 `hasOverloadedProcs` 把"同名 Property 的 Get+Let 两个节点"误判成重载，整条链被判死 ——
+   与第 3 条同一个坑，两处都得按"成员键"算。
+10. **用例与门**：`tests/cls_inh` 从 2 类扩成 3 类链（`InhBase ← InhMid ← InhDerived`），断言 2→12
+    （INH0/1 原有；INH2 继承 Sub/Function+私有 Long；INH3 继承 UDT 字段；INH4/5 子胜遮蔽且基类实例不受影响；
+    INH6/7/8 Optional 转发；INH9 属性 Get/Let 双向；INH10 中间层成员与祖父成员并存；INH11 实例隔离）；
+    新增 3 条双文件负例 `ci_n08_bare_inherited_call` / `ci_n09_redeclared_field` / `ci_n10_event_base`，
+    走 B07a 刚建的 `Test-SyntaxFailMulti`（`--syntax-only` 通路，无需 vbp）。`run_tests.ps1` 登记 +16/-1
+    （那 1 行删除是把 `Test-Vbp` 的断言列表改成多行）。B07b 后语法类 65/0/0。
+11. **工具链新坑（本轮实测）**：`scripts/build.bat` 是 **LF-only + GBK 注释**，从 agent 的 bash 里
+    `cmd //c scripts\build.bat` 会被 cmd 在注释的 `）`/`(` 字节上截断 `if (...)` 块，产出一堆
+    "'_BIN' 不是内部或外部命令" 式噪声、cmake 那侧看似 VS 丢失。**构建一律用
+    `powershell -NoProfile -File scripts/dev.ps1 -SkipTest`**（它打 "All done!"，与既有门一致）。
+12. **护栏**：8 文件 `--emit-c` 对 pre-B07b 基线（worktree @`a056705`，自建 Debug exe）**8/8 逐字节全同**；
+    基线 worktree 用后即 `git worktree remove --force` + `prune`。
+13. **门数字**：`Results: PASS=140 FAIL=0 SKIP=1 TOTAL=141`（`.build/gate_B07b.log`，12:47:44 起跑、13:1x 收；exe md5 `50ce2e77` 跑前后一致 → 可归因）。条目 138→141（三条 v1 边界负例），零新增失败；语法类单跑 65/0/0；legacy `test_implements` 与 `itf_xmod_writer`（25 断言）仍全绿。
+14. **B08 的既有事实（本轮顺手实测）**：`AccessLevel` 只有 `Public/Private/Friend`（`types.hpp:54-59`）、
+    全仓**没有任何"成员不可访问"的诊断**（`Protected`/`Overridable`/`Overrides` 三个词在 `src/` 里只出现在
+    错误处理块的 `inProtectedBlock_`，与继承无关）→ B08 的可见性是**从零加检查 + 新诊断**，不是改口径。
+
+### D28 B08 开工地图（2026-09-23 B07b 收尾轮产出；锚点本轮实测）
+
+- **先拆批**（判据仍是 D20-1"每批都要有可观测行为"）：
+  - **B08a = `Protected` 可见性**（语法 + 访问权限检查 + 新诊断）。可观测性天然成立：今天
+    `Protected` 这个关键字**根本不存在**，写了就在 parse 期撞 VB2002，加了就能解析 + 报"不可访问"。
+  - **B08b = `Overridable`/`Overrides`/`NotOverridable` + 类虚表 + 动态派发**。它要改结构体
+    （多一个 `__cvtbl` 字段）与 `Me.` 调用点，必须与 B08a 分开过门、分开跑 8 文件护栏。
+- **B08a 的四处接线 = 逐处镜像 `Friend`**（本轮实测锚点）：`src/lexer/lexer_keywords.cpp:31`
+  （`{"friend", TokenKind::Friend}` 旁）、`src/lexer/token.hpp` 枚举、`src/lexer/token.cpp:25`
+  （`isKeyword` 显式列表）、`src/parser/parser.cpp:288` 与 `src/parser/parser_decl.cpp:28-39`
+  （访问修饰符 parse 分支）。`AccessLevel` 在 `src/common/types.hpp:54-59`，只有
+  `Public=0/Private=1/Friend=2/Default=Public` → 新值取 `Protected = 3`（**别插在中间**，
+  `Default = Public` 的别名与任何按数值的比较都会被插队影响）。
+- **两个零成本的前车之鉴**（B07a/B07b 各踩一次）：① 新关键字**同时**进
+  `src/parser/parser_helpers.cpp` 的软关键字表（`isSoftKeyword`/`canBeName`），并且**实测**全仓 VB 语料
+  里该词出现次数 —— `inherits` 与 `protected` 本轮实测都是 **0 次**，`overridable`/`overrides` 待测；
+  ② `isStatementStart()` 刻意不含这些词（D12"语句位永不识别"），别顺手加。
+- **可见性检查是从零加、不是改口径**（D27-14）：全仓没有任何"成员不可访问"的诊断，`Private` 的
+  "不可见"目前只体现为**跨模块注入时不收进去**（`driver_crossmod.cpp` 的 Public 过滤）。所以 B08a 要新加
+  诊断 ID（`diagnostics.hpp` 现用最大 3022 → `SemMemberNotAccessible = 3023`、
+  `SemOverridesMismatch = 3024` 预留），检查点候选：`resolveClassMemberCall`（成员访问）+
+  字段访问的规范化点（`canonicalClassMemberName` 一族），两处都要能看到"访问者所在模块 vs 成员所属类"。
+  `Protected` 的判定口径 = 当前模块是基类本身、或**在继承链上**（读 `Driver::classes_[key].chain`）→
+  这也是 3.4 之外第二个消费 `chain` 的地方，注入路线照 `analyzer->setClassChainRegistry(&classes_)`
+  （`driver_semantics.cpp:44`）。
+- **B08b 的挂钩点早就备好了**：B07b 的转发桩（`cgen_inherit.cpp`）是"派生类调用祖先实现"的唯一出口，
+  去虚化 = 让 `Overrides` 的桩改指本类实现、动态派发 = 让**基类体内**对 `Me.M` 的调用改走 `__cvtbl` 槽。
+  要动的三处：① 结构体加 `__cvtbl`（**位置硬约束**：字段 0 仍是 `__comObj`（D19），`__iv_<I>` 紧跟其后
+  是 B04 定死的 → 新指针只能排在 `emitIfaceClassFields` 之后，且**只给链上含 `Overridable` 的类**加
+  —— 与 `__refcount` 同一套"按 feature 加字段"的保护栏手法，见 D21）；② `resolveClassMemberCall`
+  （`cgen_util_classcall.cpp`）读 Class 符号判虚；③ 虚表实例按类一份、函数指针槽序稳定
+  （根→叶、同层声明序 —— 就是 3.4 落表顺序，别另起一套）。
+- **`Overrides` 的签名比对用源码签名口径**（与 D16 同一理由：跨模块 Enum/UDT 在 stage 3 早期尚未注入，
+  归一成 `Vb6Type` 再比会误判）→ 直接复用 `src/semantics/interface_sig.hpp` 的 `ifaceSigFromDecl`，
+  那里是签名文本的唯一出处。
+- **继承与新式接口的互斥要重新审视**：B07b 在 2.8 Pass D 判死了"任一侧实现新式 Interface"（D27-9②），
+  若 B08b 的虚表与 `__iv_<I>` 要在同一个类上共存，`__refcount`/`__cvtbl`/`__iv_` 三者的定序要一次定清
+  （写进 D29，别在实现中途改）。
+- **门与护栏**：B08a 不动发码 → 8 文件护栏可省（按 D18-6 的口径记录理由 + 用真实工程编译替代）；
+  B08b 动结构体与派发 → **必须**跑，基线 exe 用 worktree（bat 用 python 以 r-string + CRLF 写，D25-10；
+  构建本身用 `powershell -File scripts/dev.ps1 -SkipTest`，D27-11）。
+- **用例形态**：B08a = `tests/cls_neg/ci_n11_protected_*`（跨模块访问 Protected → 3023）+
+  `ci_pos_protected`（链内访问放行）；B08b = `tests/cls_inh` 再加一层（`InhBase` 的 `Overridable Sub Speak`、
+  `InhDerived` `Overrides Speak`）+ 断言"基类指针调 `Speak` 也走派生实现"—— 这条是唯一能证明真虚派发的形状。
+
 ## 运行日志
 
 - 2026-09-23 建表：范围确认（含完整COM）、规范文档 018 入库、现状盘点完成。
@@ -990,3 +1108,15 @@ dispinterface 定义；`[Default, Source]` 连接点实现；泛型类实现新�
   本轮踩到的工具链坑（已进记忆）：heredoc/`printf` 写 `.bat` 会被 MSYS 改写（`>nul`→`>/dev/null`、`\2019` 当八进制）→ vcvars 静默失败、cmake 报找不到编译器，
   看起来像 VS 被卸；基线 bat 一律用 python r-string + CRLF 写并断言不含 `/dev/null`。另更正记忆：`run_tests.ps1` 是 **UTF-8 带 BOM**（自 B01 起就是），编辑时剥了要写回。
   B07b 地图 = D26（含“合并落 3.4”、11 张成员表、转发桩三处锚点、跨 TU 可见性待实测、v1 四类边界）。
+
+- 2026-09-23 11:59–13:15 **B07b（继承成员合并 + 前缀布局 + 转发桩）过门并提交 b1c0050**：
+  合并做成新的 **stage 3.4**（语义之后、跨模块之前），把祖先"自己声明"的成员并进派生类的 Class 符号 —— 实际并 **8 张**表而不是地图里说的 11 张：
+  `publicFieldNames`/`memberFieldDispids` 并了会让 `dll_entry` 去找派生 TU 根本不发的字段访问器（**链接期才炸**）→ 推到 P6/B13，`eventNames` 无需并（带事件的基类已在 2.8 判死）；字段绝不进 `memberNames`（Fix 099 硬规定，会把字段访问改写成 `prop_get_` 调用）。
+  发码走**前缀复制 + 按类转发桩**：派生 struct = `__comObj` + 祖先字段（根→叶，**含祖先私有字段**，否则基类实现的 `me->x` 全体错位）+ 自有字段，
+  桩 `vb6_<D>_<M>(vb6_cls_<D>* me,…) { vb6_<B>_<M>((vb6_cls_<B>*)me,…); }` 用 `prop_get_/prop_let_/prop_set_` 三向各一份、Optional 的 `int _has_` 尾参一并转发（否则基类 `IsMissing` 失真）。
+  D24④/D26 悬着的**跨 TU 可见性**这条实测解除：不用给派生 `.c` 显式 `#include "<Base>.h"`，现有互相 include 就给了桩所需的类型名，  而继承来的 `Private Type TPoint` 字段要的完整类型也在（`_New` 的 `memset(&me->m_pt,…,sizeof(me->m_pt))` 在派生 TU 编得过）；真正的证据是跑出来的 `INH3`（`d.SetPt 5` → `d.PtSum()=15`）——编译通过不等于布局对。
+  **本轮最有价值的发现**：裸名调用继承成员**不是编译错误而是静默少一段代码**（`Option Explicit` 下只给 VB3001，exe 照生、`INH2` 实测 n=0）；  已按 `declaredByAncestor` 升格为 VB3022 并要求写 `Me.`，手册"注意"节同步。2.8 Pass D 另封四类边界（事件基类 / 任一侧新式接口 / 基类重载 / 重声明继承字段），
+  两处踩到同一个坑：属性的 Get/Let/Set 是"一个成员键、多个方向节点"，按键去重会丢桩、按节点数判重载会误判整条链。
+  门 `Results: PASS=140 FAIL=0 SKIP=1 TOTAL=141`（exe 50ce2e77，12:47:44 起跑）；护栏 8 文件对 worktree @a056705 基线 8/8 逐字节全同、用后即删。
+  工具链两条：`scripts/build.bat`（LF-only + GBK 注释）在 agent 的 cmd 里会被注释中的括号字节截断 `if (...)` 块 → 构建改用 `dev.ps1 -SkipTest`；  `git checkout --` 在这个 autocrlf=true 的仓里会把工作树改成 CRLF（本轮差点用它"确认"，结果抹掉了我自己的 STATUS 改动）。
+  本轮另外收了 B07a 的账（a056705 + 总表 296c556）。B08 地图 = D28（先拆 B08a=`Protected` / B08b=虚表，含四处镜像锚点与新诊断起点 3023）。
