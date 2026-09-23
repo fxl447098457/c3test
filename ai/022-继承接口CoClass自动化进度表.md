@@ -5,40 +5,44 @@
 > 规范输入: `ai/讨论记录/018-接口继承与CoClass设计思路.md`（含 tB 文档要点与分阶段设计思路全文）。
 
 STATUS: IDLE               # NOT_STARTED | DESIGN | BUSY | IDLE | ALL_DONE
-LAST_RUN: 2026-09-24T00:12:00+08:00   # B08c 已收口（代码 82b1b34、总表本轮 docs 提交）。本轮一批：B08c（`Protected` 家族外越权的拒绝）。
-               # 自动运行见本行不足 55 分钟请立即跳过。   # 门 20:47/21:41/22:24/23:26 四跑：前三跑全被**同一台机器上另一个写入者**打断（它 20:41 把整个工作树复制到 `C:\Users\Administrator\Documents\c3.vb6.pro` 并从那份副本跑 `-Category all`，其间还重链了我这边的 `.build\C3.exe`，v3 更留下一次 `test_softkeyword` 的瞬时 `FAIL (compile)`）；原因与处置见 D34-8。
-               # 下一轮自动运行从 **B08e** 开工（虚表线收尾：13 条未接派发的 `resolveClassMemberCall` 消费点逐条接上或判死，清单与四条硬约束见 CURRENT_BATCH）；重入保护照常：STATUS=BUSY 且不足 55 分钟立即跳过。
-LAST_COMMIT: 代码批 = 82b1b34(B08c)、df9806e(B08d)、05397be(B08b)、2117d1c(B08a)、b1c0050(B07b)、a056705(B07a)
-CURRENT_BATCH: **B08e**（虚表线的收尾，B08d 遗留）——把**剩下的类成员发码路**逐条接上派发或判死。
-               B08d 只在两处接了间接调用（`cgen_expr_member_class_module.inc:26` 的 dispatchFn@:49、
-               `cgen_expr_member_class_fallback.inc:87` 的 dispatchFnFb@:93），但 `resolveClassMemberCall(`
-               全仓有 **15 个消费点**（本轮实测清点，行号即本轮）：
-               `cgen_expr_call_callee_ident.inc:144`、`cgen_expr_call_callee_member.inc:141` 与 `:224`、
-               `cgen_expr_member_class_fallback.inc:224`、`cgen_expr_member_class_module.inc:20` 与 `:140`、
-               `cgen_expr_member_form_builtin.inc:178`、`cgen_expr_member_generic_access.inc:136`、
-               `cgen_expr_member_m22_module.inc:120`、`cgen_expr_member_obj_dispatch.inc:143`（= 属性返回
-               对象那条 083c/088d 通路，`pvSocket.Pick()`）、`cgen_expr_member_voidptr_com.inc:37` 与
-               `:119`、`cgen_expr_with.cpp:82`（= `With w` 块内）。剩下 13 条**逐条**二选一：接
-               `virtDispatchCallee(...)`，或按 D33-7 的口径补 `VB3027` 判死。**先证可达性再动手** ——
-               这 13 条不是都吃得到虚槽（form/builtin、voidptr_com 那几条是外部 COM 形状），
-               每条先给一个能编出"静默直调"的最小用例，编不出来的就在总表记"不可达"并跳过，
-               别为了凑数改代码。
-               硬约束：① 判定必须走 `virtDispatchCallee` 的 `mustDispatch` 参数（false = 认不出槽就
-               回落直调，true = 认不出即诊断），别在每条路上手写槽查找；② 接收者表达式**按两次**
-               就是双副作用（`cvtblObjIsPure` 那条"含 `(` 即不纯"的规则已在此用一次，新路口径一致）；
-               ③ `Property Let/Set` 方向的槽 3.4b 已判死，收尾时别顺手放开；
-               ④ 每条改动都要有运行期断言（`Inh.vbp` 加 `INH27..`），只有 `--syntax-only` 的证据
-               抓不到"编得过、调用消失"那一类（D27-13 的教训）。
-               B08 已全交付（a/b/c/d，见 D29/D31/D33/D34）；**B09 = `MyBase.M(…)` 显式基调用（去虚化）
-               + 构造链顺序**，排在 B08e 之后 —— `MyBase` 要的是"绕过虚表直调基类实现"，与本轮
-               刚发的 `vb6_cvtbl_<Cls>` 是同一条链的另一半，先收尾再开 MyBase 才不会两套口径。
+LAST_RUN: 2026-09-24T01:41:00+08:00   # 本轮批次 = B08e-1（`With w` 块内 `.M()` 接上类虚表派发，代码 e531d82、门 153/0/1/154 一次过）。
+               # 自动运行见本行不足 55 分钟请立即跳过。   # D35 已把 B08e 剩下的 13 站逐条裁决完（含可达性探针实证），下一轮照 D35 动工，不必重新勘察。
+LAST_COMMIT: 代码批 = e531d82(B08e-1)、82b1b34(B08c)、df9806e(B08d)、05397be(B08b)、2117d1c(B08a)、b1c0050(B07b)
+CURRENT_BATCH: **B08e-2**（虚表线收尾的第二批）。站号、形状、裁决全在 **D35 那张 13 站表**里，这里只给次序与要点：
+               1. **先做 ⑤ = `cgen_expr_member_voidptr_com.inc:37`（Fix 088b typed 字段链）**。本轮探针已
+                  **实证它在静默产出错代码**：`Me.m_h.Speak()`（`m_h As PBBase` 模块级字段、实际持派生
+                  实例）→ 发的是 `vb6_PBBase_Speak((void*)me->m_h)` → 运行期答 `"base"`；而同一对象写成
+                  裸 `m_h.Speak()` 已经正确派发（答 `"derived"`）。改法与 ①（`cgen_expr_with.cpp`）完全同
+                  口径：`thisArg`（`(void*)me->m_h`，纯读）交给 `virtDispatchCallee(fieldCls, member,
+                  thisArg, /*mustDispatch=*/true, node.loc)`，认不出槽保持原样，`prop_let_`/`prop_set_`
+                  不改写。**派发串与 this 实参取同一个串，别拼两遍**（D35-2 的双副作用口径）。
+               2. 用例：给 `tests/cls_inh/` 加一个持有字段类（照探针的形状：`Private m_h As InhBase` +
+                  `Hold` + `ViaBare` + `ViaMeField`），`Inh.vbp` 登记，断言从 `INH32` 起编号；
+                  **必须跑 A/B 负控**（基线二进制下 `ViaMeField` 要 FAIL 成 `base`，否则用例没钉住东西）。
+                  探针本体在 `.build/probe_b08e/`（不入版本库，可能被别人清掉；重建只需
+                  PBBase/PBDerived/PBHolder 三份 + `Startup="Sub Main"` 的 .vbp）。
+               3. 然后 ④（`cgen_expr_member_generic_access.inc:136`，UDT 对象字段）与 ⑥⑦
+                  （`cgen_expr_call_callee_ident.inc:144` / `cgen_expr_call_callee_member.inc:224`，默认属性
+                  `Item`）—— ⑥⑦ 注意 `lastExprNeedsObjectUnpack_` 那条 Set 转换别被派发表达式骗到。
+                  ②③ 已判为**探针站点、无需改**（② 的 `m_h.Speak()` 派发有实证）。
+               4. 最后一起做 ⑧⑨⑩⑪⑫⑬ 的**判死**（属性返回对象 / AST 兜底链 / 083d 链 / 015 方法链 /
+                  `.ctl` 子控件）：这些接收者按构造含调用，只能报 `VB3027` 而不是静默直调。
+                  **前置条件**：cgen 期诊断 `--syntax-only` 看不见（`driver_compile.cpp` 的早退在 :426、
+                  发码在它之后），要先给 `tests/run_tests.ps1` 补一个"真编译必须失败 + 断言 stderr 文本"
+                  的助手（照 `Test-SyntaxFail` 的 `cmd /c` 合并 stderr 写法，去掉 `--syntax-only`）。
+                  `.ctl` **不是**外部 COM 形状：`driver_classchain.cpp:381` 的门槛是 `isClassModule`，
+                  `.cls|.ctl|.pag` 都算 → UserControl 可以有槽，别按不可达跳过。
+               硬约束（沿用上轮，仍有效）：① 判定只走 `virtDispatchCallee` 的 `mustDispatch` 参数，别手写槽查找；
+               ② 接收者用两次 = 双副作用，新路口径与 `cvtblObjIsPure` 一致；③ `Property Let/Set` 无槽（3.4b 判死），
+               别顺手放开；④ 每条改动都要运行期断言，只有 `--syntax-only` 的证据抓不到"编得过、调用消失"。
+               收尾登记：**B09 = `MyBase.M(…)` 显式基调用（去虚化）+ 构造链顺序**，排在 B08e 全部站点出完之后。
                更早的遗留登记：**B06c** = 接口值作实参 / 进 Variant，归 B13/P6 前处理（D22-7③）。
-               B08c 之后仍开的洞（都在手册页写明、不算漏做）：数组元素 / 属性返回对象 / `With w`
-               内的 `.X` 不判 Protected；家族内经**基类型变量**访问按宽松规则放过（不跟 CLR 的
-               "必须是本类型或更深实例"对齐）；同名属性多方向按名字取严。
-GATE_BASELINE: Results: PASS=153 FAIL=0 SKIP=1 TOTAL=154   # exe md5 33d68fc7（.build/gate_B08c_v4.log，23:26 起跑、00:07 收线，跑前后 exe md5 一致；SKIP=已知 test_vbman 环境项）。条目 150→154 = 净 +4：`-Category syntax` 74→78（`ci_n21` 家族外字段写 / `ci_n22` 标准模块里 `Protected Sub` 带实参调用 / `ci_n23` 家族外 `Property Get` 读 三条负例 + `ci_pos2_base|derived` 家族内正例）。`cls_inh_pair` 26 条运行期断言、legacy `test_implements`、`itf_xmod_writer` 仍全绿。上一批 B08d = `149/0/1/150`（exe 83c4e49c）。
-               # 另附 8 文件 --emit-c 对 pre-B08c 基线（worktree `D:\.wt_b08c_base` @fb6a254，`.build\base_build.ps1` + `.build/byteguard_b08c.py`）逐字节全同 8/8。
-               # 门的可信度前提（本轮实测教训）：跑前先 `.build/who_is_building2.ps1` 看清有没有别的构建/套件在跑，跑完立刻核 exe md5；v3 那次 152/1/1/154 的唯一 FAIL 与 B08c 无关（该用例无任何类、走的代码路径碰不到本批判定），同 exe 单独复跑两次均 PASS → 判为与第三方套件争抢 CPU/临时目录的瞬时失败，不记数。
+               B08c 之后仍开的洞（手册页已写明、不算漏做）：数组元素 / 属性返回对象 / `With w` 内的 `.X`
+               不判 Protected；家族内经**基类型变量**访问按宽松规则放过；同名属性多方向按名字取严。
+               本轮另订正了手册一处**错到把洞说成已支持**的句子（"字段链 `me.m_oSocket.Pick()` 正常派发"
+               → 实为 ⑤ 的静默直调），下一轮做完 ⑤ 记得把那句话改回正面表述。
+GATE_BASELINE: Results: PASS=153 FAIL=0 SKIP=1 TOTAL=154   # exe md5 00a3a9b4（.build/gate_B08e.log，01:11 起跑、01:37 收线，跑前后 exe md5 一致；SKIP=已知 test_vbman 环境项）。**条目与上一批同数**（153/0/1/154）：本批的新证据全在既有用例 `cls_inh_pair` 内部（`Inh.vbp` 运行期断言 26→31 条，INH27..INH31），不新增测试项。legacy `test_implements`、`itf_xmod_writer`、`cls_inh_pair` 仍全绿。
+               # 另附 8 文件 --emit-c 对 pre-B08e-1 基线（worktree `D:\.wt_b08e_base` @7f34a91，`.build\base_build2.ps1`（build-only 版，避开 `cmake -S` 二次 configure 在被打断后 restat 报 `Permission denied`）+ `.build/byteguard_b08e.py`）逐字节全同 8/8；同一基线二进制还用作 A/B 负控的"修复前"侧。
 ```
 
 > 重入保护：若运行开始时 STATUS=BUSY 且 LAST_RUN 距今不足 55 分钟，说明上一次运行可能仍在进行——本次**立即结束，不做任何修改**。
@@ -83,6 +87,7 @@ GATE_BASELINE: Results: PASS=153 FAIL=0 SKIP=1 TOTAL=154   # exe md5 33d68fc7（
 | B06 | P2 | 转换与判定：接口↔类、多接口对象、`TypeOf … Is <接口>`、上/下行转换契约校验 | ☑ **B06a**（QI + 跨接口 Set + `TypeOf <接口变量> Is <接口>`）+ **B06b**（下行转换 + `TypeOf <类变量> Is <接口>` + 修 B05 的 Nothing 野地址）；**B06c 遗留**：接口值作实参 / 进 Variant → 随 B13/P6 处理 | 4dc6b7e | B06a：`Results: PASS=128 FAIL=0 SKIP=1 TOTAL=129`（exe 7721bd72）+ 断言 11→18；B06b：`Results: PASS=128 FAIL=0 SKIP=1 TOTAL=129`（gate_B06b.log；exe 4202570a 跑前后一致）+ 断言 18→25（DN0..DN3 + TOC1..TOC3）+ legacy `test_implements` 仍 PASS + 8 文件 emit-c 对 pre-B06b(@613d2b8) 全同 + **A/B 负控证明 D22-10 缺陷真实**（基线二进制 exit=139，本批 exit=0）。详见 D22/D23 |
 | B07 | P3 | `Inherits` 语法 + 类链检测（单继承/环/深度）+ 继承成员合并与遮蔽 + 派生域 | ☑ **B07a**（语法 + stage 2.8 链检测/诊断 + 多文件负例通路）+ **B07b**（stage 3.4 成员合并 + 前缀布局 + 转发桩）；**B07 遗留**：裸名继承调用（要 `Me.`）、继承 `Public` 字段的 COM 对外暴露 → 分别归 B08+/P6 | b1c0050 | `Results: PASS=140 FAIL=0 SKIP=1 TOTAL=141`（gate_B07b.log；exe md5 50ce2e77 跑前后一致）+ `cls_inh` 三级链 12 条断言 + ci_n08/n09/n10 三条边界负例 + legacy `test_implements` 仍 PASS + 8 文件 emit-c 对 pre-B07b(@a056705) 全同。要点：并 8 张成员表（不是 11 张，理由在码内）、祖先私有字段**也复制进布局**、属性三向各一份桩、`_has_` 尾参必须转发、**封掉裸名继承调用的静默错代码**。详见 D27（B08 地图 = D28） |
 | B08 | P3 | `Protected` 可见性 + `Overridable/Overrides/NotOverridable` + 类级虚表 `vb6_cvtbl_<Cls>` 与多态派发 | ☑ **B08a**（`Protected`：家族内经 `Me.` 可用，含跨 TU 与 Protected 字段）+ **B08b**（虚修饰符三件套语法 + `Overrides` 覆盖契约：槽键按方向配对、签名复用接口口径 + 把需要动态派发的调用点判死，避免静态绑回基类实现的假虚派发）+ **B08d**（类虚表 + 运行期真派发：3.4b 排每类有序虚槽、`const void* __cvtbl` 字段、表类型/实例/装载三点同源、两处类成员发码路按槽索引改写，并删掉 B08b 的 `Me.X` 拒绝）已交付；**B08c**（家族外访问 `Protected` 的拒绝，诊断 `VB3023`：判定落在 `visit(MemberAccessExpr)` = `obj.<成员>` 的唯一必经点；接收者→工程类靠新加的 `Symbol::srcTypeName`，认不出接收者或当前类未登记一律放过）已交付 → **B08 四条全出**（要点与踩坑见 D34） | 82b1b34(B08c)、df9806e(B08d)、05397be(B08b)、2117d1c(B08a) | `Results: PASS=149 FAIL=0 SKIP=1 TOTAL=150`（gate_B08d_v3.log；exe md5 83c4e49c 跑前后一致）+ `-Category syntax` 73→74（删 ci_n15、增 ci_n19/ci_n20）+ `Inh.vbp` 运行期断言 17→27 条（INH17..23 派发：`b/m/d.PickThru()` 分别 base/mid/mid = 绑最近覆盖者、INH20 叶类覆盖被基类体内看见、INH23 基类型变量持有派生实例不再切片；INH24..26 扇出）+ 8 文件 emit-c 对 pre-B08d(@fb6a254) **8/8 逐字节全同**。更早两轮证据：B08b = `148/0/1/149`（gate_B08b.log、exe 546265e7、syntax 66→73、断言 14→17）。要点：`ProcVirt` 四值枚举而非三 bool；契约检查落 2.8、槽表落 3.4b（3.4 之后分不清"谁声明的"，而"本类有没有入口"要读 3.4 的 inhProcs）；筛选集取**链根**的 dynamicKeys → 叶类也带字段；`Me.X` 不在"优先级2"那一批发码。详见 D31、D33（B08d 地图 = D32，其中 ②③ 已被 D33 修正） |
+| B08e | P3 | 虚表线收尾：`resolveClassMemberCall` 其余 13 个消费点逐条接上派发或判死（站点地图与裁决见 D35） | ◐ **B08e-1**（① `With w` 内 `.M()` 接派发，本轮）；**下一轮从 ⑤ 开工**（`Me.m_h.Speak()` 已实证静默绑基类实现，改法照 ①）；待接 ④⑥⑦、待判死 ⑧⑨⑩⑪⑫⑬、②③ 判为探针无需改（站号见 D35 那张表） | e531d82 | `Results: PASS=153 FAIL=0 SKIP=1 TOTAL=154`（gate_B08e.log；exe md5 00a3a9b4 跑前跑后一致）+ `Inh.vbp` 运行期断言 26→31（INH27..INH31）+ A/B 负控（基线 @7f34a91：INH27/28 FAIL）+ 8 文件 emit-c 对基线 8/8 全同。
 | B09 | P3 | `MyBase.M(…)` 显式基调用（去虚化）+ 构造链顺序 + 无新语法逐字节护栏 | ☐ | | |
 | B10 | P4 | `Implements IFace Via <holderVar>` 委托式实现：持有字段 + 自动转调桩 + 签名检查 | ☐ | | |
 | B11 | P5 | `CoClass…End CoClass` 语法 + `[CoClassId]/[Default] Interface/[ComCreatable]/[CoClassCustomConstructor]` + 契约聚合校验 | ☐ | | |
@@ -1269,6 +1274,78 @@ dispinterface 定义；`[Default, Source]` 连接点实现；泛型类实现新�
    门的 `Results` 只在"跑前后 md5 一致"时才可信。工具脚本 `.build/who_is_building.ps1` /
    `who_is_building2.ps1`（列 cmake/ninja/cl + 反查父进程与命令行）本轮留下复用。
 
+### D35 B08e（把剩下的类成员发码路逐条接上派发或判死）实施记录 + 13 站地图（2026-09-24）
+
+**本轮交付 = B08e-1：`With w` 块内的类成员调用接上虚表派发**（`cgen_expr_with.cpp:82` 那一站）。
+
+1. **为什么这一站是真漏洞而不是收尾**：`With up As InhBase`（`up` 持 `InhDerived` 实例）里写
+   `.Speak()`，改动前静默绑到 `vb6_InhBase_Speak` → 运行期答 `"base"`。这就是 B08d 用 INH23 修掉的
+   同一个切片，只是换了一种写法，而 B08d 的地图（D32）没把 With 站列进必修两处里。
+   **A/B 负控实测**：基线二进制（worktree `D:\.wt_b08e_base` @7f34a91，exe md5 `bc3eaa3b`）跑
+   `Inh.vbp` → `INH27:FAIL base` / `INH28:FAIL hi bob (base)`；本批改后二进制（exe md5 `00a3a9b4`）
+   → 两条 OK。INH29/30/31 两侧都绿，是"不许改坏"的对照：`With` 内**非槽**成员（`Property Let/Get`
+   同名对、无括号裸 `Sub`）必须仍走原直调路。
+2. **改法**：与 B08d 两处同口径 —— `resolveClassMemberCall` 的结果先留成 `directFnW`，再问
+   `virtDispatchCallee(info.className, node.memberName, tempVar, /*mustDispatch=*/true, node.loc)`，
+   认得出槽就换 callee，认不出（该类无表 / 该成员不是槽）保持原样。`With` 的接收者是块入口那个
+   类实例 temp（`cgen_with.cpp` 声明成 `vb6_cls_<X>*` 的纯变量名）→ `cvtblObjIsPure` 恒真，
+   所以 `mustDispatch=true` 不可能因"形状不支持"误报，纯粹是"不留静默直调"的表态。
+   **两个方向坑**：① 属性写（`prop_let_`/`prop_set_`）不改写 —— 3.4b 根本不给 Let/Set 建槽
+   （D33-7），拿 `node.memberName` 去查会命中同名的 `get_<X>` 槽，把写变成读；② `asCallCallee_`
+   那一支仍走 `pendingChainObj_` 协议（Fix 090s），只是 `lastExpr_` 从裸函数名换成派发表达式，
+   外层 `cgen_expr_call_com_bind.inc:343` / `cgen_call.cpp:331` 把它当 callee 拼参数 —— 派发表达式
+   以 `->slot` 结尾不带右括号，不会误触发 Fix 083e 的"callee 已是 func(obj) 形式 → 拆开"路径。
+3. **护栏**：8 文件 `--emit-c` 对基线 exe（7f34a91）逐字节全同 8/8（`.build/byteguard_b08e.py`，
+   BASE/NEW 两个绝对路径改一下即可复用到下一批）。用例：`Inh.vbp` 运行期断言 26→31 条
+   （`INH27..INH31`），`-Category syntax` 条数不变。
+4. **本轮顺手做掉的可达性探针（下一轮别重做）**：`.build/probe_b08e/`（PB.vbp + PBBase/PBDerived/
+   PBHolder，全在 `.build` 里、不入版本库，改完即弃）用**当前**二进制跑出的三条形状：
+
+   | 形状 | 运行结果 | 发射出来的 C |
+   |---|---|---|
+   | `m_h.Speak()`（模块级字段，裸名接收者） | `derived` ✅ | `((const vb6_cvtbl_PBBase*)((vb6_cls_PBBase*)me->m_h)->__cvtbl)->speak(me->m_h)` |
+   | `Me.m_h.Speak()`（同一个对象、同一个成员，多个 `Me.`） | **`base` ❌** | `vb6_PBBase_Speak((void*)me->m_h)` |
+   | `With w : .Speak()` | `derived` ✅（本轮修的这条） | 派发表达式 |
+   | `arr(1).Speak()`（类数组元素） | 编译不过 | `error C2224`（不是静默错码，是硬失败） |
+
+   → **⑤ 站已被证实"可达且正在产出错代码"**，且接收者 `(void*)me->m_h` 是纯读、一行同口径改写即可
+   （`thisArg` 与派发用的对象文本取**同一个串**，别拼两遍）；手册里"字段链 `me.m_oSocket.Pick()`
+   正常派发"那句是**错的**，本轮已按此证据改正。②站（裸名模块级字段）证实**已在派发**，不用动。
+
+**13 站地图（下一轮直接照此动工；站号 = `resolveClassMemberCall(` 的其余消费点）**
+
+先记两条**判定前提**（本轮读码核实，省得下一轮重查）：
+- 能否有槽 = 该类在不在 `ClassChainRegistry::classes_`：`driver_classchain.cpp:381` 的门槛是
+  `mod->isClassModule && classTypeParams.empty() && !isInterfaceModule` → **.frm 永远无槽**、
+  **泛型模板类（含其特化扁名）永远无槽**、接口宿主无槽；`.cls`/`.ctl`/`.pag` 都算类模块，
+  所以 **UserControl 可以有槽**（B08e 不能把 `.ctl` 当外部形状跳过）。
+- **cgen 期诊断 `--syntax-only` 抓不到**：`virtDispatchCallee` 的 `mustDispatch` 报错发生在发码，
+  而 `driver_compile.cpp` 的 syntaxOnly 早退在 :426、3.4b 在 :376 → 3.4b 的判死（如 Let/Set 槽）
+  能用 `Test-SyntaxFail` 断言，**B08e 要加的 VB3027 判死不能** → 需要先给 `run_tests.ps1` 补一个
+  "编译必须失败 + 断言 stderr 文本"的 `Test-VbpFail`/`Test-CompileFail` 助手（`Test-SyntaxFail` 的
+  `cmd /c` 合并 stderr 写法可照搬，把 `--syntax-only` 换成真编译）。
+
+| 站 | 文件:行 | 接收者形状 | 裁决 |
+|---|---|---|---|
+| ① | `cgen_expr_with.cpp:82` | With temp（纯） | ☑ **已接派发**（本轮，见上） |
+| ② | `cgen_expr_member_class_module.inc:20` | 只做"有没有这个成员"的探针，命中后落进已接派发的优先级2 | 判**无需改**（探针；上面探针表已证 `m_h.Speak()` 真在派发） |
+| ③ | `cgen_expr_call_callee_member.inc:141` | 探针（`resolvedFn` 只测空，非空即交给已接派发的 MAE 路） | 判**无需改**（探针） |
+| ④ | `cgen_expr_member_generic_access.inc:136` | `(void*)<UDT 对象字段链>`，一般是 `uFile.SourceArchive` 这种纯读 | **可接派发**：非泛型字段类能有槽；先给最小用例（UDT 字段 + `Inherits` + `Overrides`）证可达 |
+| ⑤ | `cgen_expr_member_voidptr_com.inc:37`（Fix 088b typed 字段链） | `(void*)me->m_h`（纯读） | ☑ **已证实可达 + 正在静默产出基类实现**（`Me.m_h.Speak()` → `base`）→ **下一轮第一站就是它**，照 ① 的口径改即可 |
+| ⑥ | `cgen_expr_call_callee_ident.inc:144`（Pattern L，默认属性 `Item`） | `emitExpr(callee)` 出来的字段/变量 | **可接派发**（`Overridable Property Get Item` 是合法槽），注意 `lastExprNeedsObjectUnpack_` 那条 Set 转换别被派发表达式骗到 |
+| ⑦ | `cgen_expr_call_callee_member.inc:224`（Pattern L 的另一半） | 同 ⑥ | 同 ⑥ 一起处理 |
+| ⑧ | `cgen_expr_member_class_module.inc:140`（Fix 083c 属性返回对象） | `(void*)vb6_<Mod>_prop_get_<P>((void*)me)` → 含调用，**按构造即不纯** | **判死**（`mustDispatch=true` → VB3027），除非给发码层加"表达式提升成 temp"的机制（全仓没有，`hoistLocalDecls` 只提声明） |
+| ⑨ | `cgen_expr_member_obj_dispatch.inc:143`（083c/088d 同一族） | 属性返回对象，同 ⑧ | **判死** |
+| ⑩ | `cgen_expr_member_class_fallback.inc:224`（Fix 088c AST 兜底链） | `(void*)<任意已发码头>`，多为链式调用 | **判死**（偶有纯前缀也统一按不派发处理，口径别散） |
+| ⑪ | `cgen_expr_member_m22_module.inc:120`（Fix 083d 非标识符 object） | 同上，`arr(3)`/`f(x)` 一律算不纯 | **判死** |
+| ⑫ | `cgen_expr_member_voidptr_com.inc:119`（Fix 015 方法链） | 内层调用返回实例 → 不纯 | **判死** |
+| ⑬ | `cgen_expr_member_form_builtin.inc:178`（`.ctl` 子控件） | `(vb6_cls_X*)vb6_UC_InstanceOf(<hwnd>)` → 含调用，不纯；而 `.ctl` **可以**有槽（见前提） | **判死**（别按"外部 COM 形状"当不可达跳过） |
+
+建议次序：**④⑤（纯形状、真收益）→ ⑥⑦（默认属性）→ ⑧⑨⑩⑪⑫⑬（判死，一批一次做完，
+共用同一个 `Test-CompileFail` 助手与同一条负例族）**。每站都要"最小用例先证可达"（④⑤⑥⑦ 若编不出
+"静默直调"的用例就在总表记不可达并跳过，别凑数改码），⑧⑨⑩⑪⑫⑬ 的负例断言的是"必须报 VB3027"，
+本身即证据。全部站号出完再开 B09（`MyBase`），两套口径不能并存。
+
 ## 运行日志
 
 - 2026-09-23 建表：范围确认（含完整COM）、规范文档 018 入库、现状盘点完成。
@@ -1457,3 +1534,4 @@ dispinterface 定义；`[Default, Source]` 连接点实现；泛型类实现新�
   v4（23:26–00:07，153/0/1/154，跑前后 exe md5 33d68fc7 一致）才作为 GATE_BASELINE。
   固定动作从此加两条：跑长门前用 `.build/who_is_building2.ps1`（本轮新留：列 cmake/ninja/cl + 反查父进程与
   命令行）确认没有别的构建或套件在跑；跑完立刻核 exe md5，md5 变过的门一律重跑。
+- 2026-09-24 00:55–01:45 **B08e-1（13 站地图的第 ① 站：`With w` 块内 `.M()` 接上类虚表派发）过门并提交 `e531d82`**：开工时 00:55 见上一轮（B08c）已把状态头改回 IDLE、门 153/0/1/154，按流程重占 BUSY 后从 `CURRENT_BATCH=B08e` 动工。改动一处（`cgen_expr_with.cpp` 的 ClassInstance 分支，+13/-1），口径照 B08d：`resolveClassMemberCall` 结果交给 `virtDispatchCallee(..., mustDispatch=true)` 改写，属性写方向显式排除（3.4b 无 Let/Set 槽，拿成员名去查会命中同名的 `get_` 槽、把写变成读）。**门一次过**：01:11 起跑（跑前 `who_is_building2.ps1` 静默）、01:37 收线 `Results: PASS=153 FAIL=0 SKIP=1 TOTAL=154`，跑前后 exe md5 均 `00a3a9b4` → 可归因；条目数与上一批相同，因为新证据 （`INH27..INH31`）全在既有用例 `cls_inh_pair` 内部。**A/B 负控**：worktree `D:\.wt_b08e_base` @7f34a91 建的基线二进制 `bc3eaa3b` 跑同一份用例 → `INH27:FAIL base` / `INH28:FAIL hi bob (base)`，本批两条 OK；**逐字节护栏** 8/8 全同。另外做了三件不改码的勘察（结论都在 D35）：① **13 站逐条裁决**（②③ 探针无需改、④⑤⑥⑦ 可接派发、⑧⑨⑩⑪⑫⑬ 只能判死）；② **可达性探针实证 ⑤ 站正在产出错代码** —— `Me.m_h.Speak()` 静默答 `base`，同一对象裸写 `m_h.Speak()` 已正确答 `derived`，`With w : .Speak()` 本批修好；类数组元素 `arr(1).Speak()` 是硬失败（C2224）不是静默；③ **cgen 期诊断 `--syntax-only` 抓不到**（`driver_compile.cpp` syntaxOnly 早退在 :426、3.4b 在 :376）→ 判死那一批要先给 `run_tests.ps1` 补 `Test-CompileFail` 助手。手册 `Inherits 语句.md` 顺手订正一句**把洞说成已支持**的错话（原文称字段链 `me.m_oSocket.Pick()` 正常派发，实为 ⑤ 的静默直调），并补上 `With` 已交付、`Me.<字段>.成员名` 未交付。**本轮环境事故（记给下一轮）**：给基线 worktree 建二进制时，后台 bash 任务在 ~8 分钟处被回收、把 ninja 打断在 79/114；随后 `base_build.ps1` 无条件重跑 `cmake -S` 触发 `ninja -t restat build.ninja: failed recompaction: Permission denied` →  configure 步骤假失败（对象文件其实全在，`ninja: no work to do` 即证明）。留下 `.build/base_build2.ps1`（`build.ninja` 存在就跳过 configure），下一轮建基线直接用它的 `-Wt` 形式。基线 worktree `D:\.wt_b08e_base` 本轮收线后已 `git worktree remove`。
