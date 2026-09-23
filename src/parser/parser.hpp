@@ -113,6 +113,7 @@ private:
     void parseModuleBody(Module& mod);
     std::unique_ptr<OptionStmt> parseOption();
     std::unique_ptr<ImplementsStmt> parseImplements();
+    InheritsStmt parseInherits();  // 类继承子句 `Inherits Base` (tB 扩展, ai/022 B07)
     std::unique_ptr<DefTypeStmt> parseDefType();
     std::unique_ptr<AttributeStmt> parseAttribute();
 

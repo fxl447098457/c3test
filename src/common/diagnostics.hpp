@@ -79,6 +79,10 @@ enum class DiagnosticID : uint16_t {
     SemInterfaceSignatureMismatch = 3017,  // 实现成员签名与接口槽不符
     SemInterfaceNotSupported = 3018,       // v1 边界: 该处的 Interface 用法尚不支持
     SemInterfaceClauseUnbound = 3019,      // 成员级 Implements 子句没被任何契约比对接纳 (B02b)
+    // 类继承 (tB 扩展, ai/022 D6, 批次 B07). 文案一律 ASCII (D12).
+    SemInheritsUnknownBase = 3020,    // Inherits 的基名不是本工程内的类
+    SemInheritsTooDeep = 3021,        // 继承链长度超上限
+    SemInheritsNotSupported = 3022,   // v1 边界: 非类模块 / 泛型模板内 / 多条 Inherits
 
     // 代码生成 (4xxx)
     CodeGenUnsupportedFeature = 4001,

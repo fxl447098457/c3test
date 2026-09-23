@@ -581,6 +581,48 @@ function Test-Vbp {
 # === 语法检查测试 ===
 # Negative syntax case: --syntax-only must FAIL and report the given (ASCII) text.
 # Used by the tB-extension contract diagnostics (ai/022 B01+).
+# Multi-source --syntax-only probes (ai/022 B07): C3.exe accepts several positional files
+# and driver_frontend picks the module kind per extension, so class-Inherits cases that need
+# the base class in a *second* module are testable without a full vbp build.
+function Invoke-SyntaxProj {
+    param([array]$Sources)
+    $argList = (($Sources | ForEach-Object { '"' + $_ + '"' }) -join ' ')
+    $out = & cmd /c ('"' + $C3 + '" ' + $argList + ' --syntax-only 2>&1')
+    $script:syntaxProjExit = $LASTEXITCODE
+    return (($out | Out-String) -replace '\s+', ' ')
+}
+
+function Test-SyntaxFailMulti {
+    param([string]$Name, [array]$Sources, [string]$Needle)
+    $script:total++
+    Write-Host -NoNewline "  [SYNTAX-FAIL] $Name ... "
+    $text = Invoke-SyntaxProj $Sources
+    if ($script:syntaxProjExit -ne 0 -and $text.Contains($Needle)) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        Write-Host "  expected failing compile containing: $Needle" -ForegroundColor DarkGray
+        if ($Verbose) { Write-Host $text }
+    }
+}
+
+function Test-SyntaxMulti {
+    param([string]$Name, [array]$Sources)
+    $script:total++
+    Write-Host -NoNewline "  [SYNTAX] $Name ... "
+    $text = Invoke-SyntaxProj $Sources
+    if ($script:syntaxProjExit -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        if ($Verbose) { Write-Host $text }
+    }
+}
+
 function Test-SyntaxFail {
     param([string]$Name, [string]$Source, [string]$Needle)
     $script:total++
@@ -800,6 +842,7 @@ if ($Category -in @("all", "run", "vbp")) {
     Test-Vbp "itf_xmod_writer" "$Tests\itf_xmod\XWriter.vbp" @("XMOD1:OK", "XMOD2:OK", "IFV1:OK", "IFV2:OK", "IFV3:OK", "LIFE1:OK", "LIFE2:OK", "LIFE3:OK", "LIFE9:OK", "TERM last=bye", "TERM last=scoped", "QI1:OK", "QI2:OK", "QI3:OK", "QI4:OK", "TOF1:OK", "TOF2:OK", "TOF3:OK", "DN0:OK", "DN1:OK", "DN2:OK", "DN3:OK", "TOC1:OK", "TOC2:OK", "TOC3:OK")
 
     # test_vbman 用于验证外部 COM 组件 VBMANLIB (x86 DLL, 供 32 位程序调用)
+    Test-Vbp "cls_inh_pair" "$Tests\cls_inh\Inh.vbp" @("INH0:derived", "INH1:OK")
     Test-Vbp "test_vbman" "$Tests\test_vbman\test_vbman.vbp" @("P24-04a:OK", "P24-04b:OK", "P24-04:2/2") -Arch "x86" -RequiresCom "VBMANLIB.cVBMAN"
     $vbpSw.Stop()
     Write-Host "  (vbp/gui tests took $([Math]::Round($vbpSw.Elapsed.TotalSeconds))s)"
@@ -900,6 +943,29 @@ if ($Category -in @("all", "syntax")) {
     if (Test-Path "$Tests\itf_pos\p02_clause_binding.cls") { Test-Syntax "itf_p02_clause_binding" "$Tests\itf_pos\p02_clause_binding.cls" }
     # ai/022 B03 positive guard: a host module name is no longer a name collision.
     if (Test-Path "$Tests\itf_pos\p03_headline_host.cls") { Test-Syntax "itf_p03_headline_host" "$Tests\itf_pos\p03_headline_host.cls" }
+    # ai/022 B07a (class Inherits, P3): chain diagnostics must fire. Single-file cases ride
+    # the existing Test-SyntaxFail path; the two-module cases need Test-SyntaxFailMulti.
+    $clsInhNeg = @(
+        @("ci_n01_unknown_base", "$Tests\cls_neg\ci_n01_unknown_base.cls", "inherits unknown base class"),
+        @("ci_n02_not_class", "$Tests\cls_neg\ci_n02_not_class.bas", "only allowed in a class module"),
+        @("ci_n03_duplicate_clause", "$Tests\cls_neg\ci_n03_duplicate_clause.cls", "more than one Inherits clause"),
+        @("ci_n04_self_cycle", "$Tests\cls_neg\ci_n04_self_cycle.cls", "Circular Inherits chain"),
+        @("ci_n05_generic_template", "$Tests\cls_neg\ci_n05_generic_template.cls", "not allowed inside a generic class template")
+    )
+    foreach ($c in $clsInhNeg) {
+        if (Test-Path $c[1]) { Test-SyntaxFail $c[0] $c[1] $c[2] }
+        else { Write-Host "  [SYNTAX-FAIL] $($c[0]) ... SKIP (missing case file)" -ForegroundColor DarkGray }
+    }
+    if (Test-Path "$Tests\cls_neg\ci_n06_pair_a.cls") {
+        Test-SyntaxFailMulti "ci_n06_pair_cycle" @("$Tests\cls_neg\ci_n06_pair_a.cls", "$Tests\cls_neg\ci_n06_pair_b.cls") "Circular Inherits chain"
+    }
+    if (Test-Path "$Tests\cls_neg\ci_n07_iface_host.cls") {
+        Test-SyntaxFailMulti "ci_n07_base_is_iface_host" @("$Tests\cls_neg\ci_n07_iface_host.cls", "$Tests\cls_neg\ci_n07_derives_host.cls") "inherits unknown base class"
+    }
+    # B07a positive guard: a base class in another module resolves and stays silent.
+    if (Test-Path "$Tests\cls_neg\ci_pos_base.cls") {
+        Test-SyntaxMulti "ci_pos_pair" @("$Tests\cls_neg\ci_pos_base.cls", "$Tests\cls_neg\ci_pos_derived.cls")
+    }
     Write-Host ""
     
     # --- 生成环境检查与汇总 (冒烟+语法+VBP+run 计数) ---

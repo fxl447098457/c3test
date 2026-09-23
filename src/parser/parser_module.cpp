@@ -123,6 +123,15 @@ void Parser::parseModuleBody(Module& mod) {
             continue;
         }
 
+        // Inherits 语句 (tB 扩展, ai/022 D6, 批次 B07): 类模块的 `Inherits Base`.
+        // 这类行过去必然落进下方的 "unexpected token at module level" 错误分支 (VB2002),
+        // 因此新增分支只把"错误"变成"可解析", 存量工程逐字节不变.
+        if (cur_.kind == TokenKind::Inherits) {
+            mod.inherits.push_back(parseInherits());
+            expectEndOfStatement();
+            continue;
+        }
+
         // Interface 契约块 (tB 扩展, ai/022 D1): 可带前置 [属性行].
         // 这类行过去必然落进下方的 "unexpected token at module level" 错误分支,
         // 因此新增分支只把"错误"变成"可解析", 存量工程逐字节不变.
@@ -256,6 +265,23 @@ std::unique_ptr<ImplementsStmt> Parser::parseImplements() {
         fullName += "." + part.text;
     }
     return std::make_unique<ImplementsStmt>(loc, fullName);
+}
+
+// 类继承子句 (tB 扩展, B07): 与 parseImplements 同口径吃点号限定名 (Project.IFace 那种
+// 写法), 但 v1 只有一条基类名 —— 逗号列表在这里天然落到 expectEndOfStatement 的 VB2003,
+// 即"单继承"的 arity 检查不需要新代码.
+InheritsStmt Parser::parseInherits() {
+    InheritsStmt s;
+    s.loc = currentLoc();
+    advance(); // consume 'Inherits'
+    auto nameTok = expectName("expected base class name");
+    s.baseName = nameTok.text;
+    while (cur_.kind == TokenKind::Dot && canBeName(peek2().kind)) {
+        advance(); // consume '.'
+        auto part = expectName("expected base class name after '.'");
+        s.baseName += "." + part.text;
+    }
+    return s;
 }
 
 std::unique_ptr<DefTypeStmt> Parser::parseDefType() {

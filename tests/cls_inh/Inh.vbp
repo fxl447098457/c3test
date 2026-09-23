@@ -1,0 +1,5 @@
+Type=Exe
+Class=InhBase; InhBase.cls
+Class=InhDerived; InhDerived.cls
+Module=InhMain; InhMain.bas
+Startup="Sub Main"

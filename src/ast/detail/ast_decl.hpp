@@ -43,6 +43,14 @@ struct ImplementsClause {
     SourceLocation loc;
 };
 
+// 类继承子句 (tB 扩展; ai/022 D6, 批次 B07): 模块级 `Inherits Base`.
+// v1 = 单继承, 多于一条由 stage 2.8 报 3022. baseName 留原文 (可含点号限定, 口径同
+// ImplementsStmt/Fix 083), 基类解理由登记表按小写键 + 末段匹配.
+struct InheritsStmt {
+    SourceLocation loc;
+    std::string baseName;
+};
+
 // Sub 声明: [Public|Private] Sub name(params) ... End Sub
 class SubDecl : public Decl {
 public:
@@ -350,6 +358,9 @@ public:
 
     // Interface 契约块 (tB 扩展): 与 declarations 分离存放, 语义/发码前不被遍历
     std::vector<std::unique_ptr<InterfaceDecl>> interfaces;
+    // Inherits 子句 (tB 扩展, B07): 按声明序保存; 单继承 → 多于一条在 stage 2.8 报错.
+    // 泛型模板类与非类模块内的 Inherits 同样在 2.8 拒绝 (v1 边界, 见 D24).
+    std::vector<InheritsStmt> inherits;
 
     // DefType 语句
     std::vector<std::unique_ptr<DefTypeStmt>> defTypes;

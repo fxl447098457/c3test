@@ -215,6 +215,7 @@ add_executable(c3
     src/driver/driver_semantics.cpp
     src/driver/driver_generics.cpp
     src/driver/driver_interface.cpp
+    src/driver/driver_classchain.cpp
     src/driver/driver_crossmod.cpp
     src/driver/driver_link.cpp
     src/driver/rtl_embedded.cpp

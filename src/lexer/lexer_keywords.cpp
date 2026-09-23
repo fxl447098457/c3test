@@ -52,6 +52,7 @@ void Lexer::initKeywords() {
         {"class", TokenKind::Class},
         {"interface", TokenKind::Interface},   // tB 扩展: 显式接口契约块 (软关键字)
         {"extends", TokenKind::Extends},       // Interface .. Extends 单继承 (软关键字)
+        {"inherits", TokenKind::Inherits},     // 类继承子句 Inherits Base (tB 扩展, B07; 软关键字)
 
         {"boolean", TokenKind::Boolean}, {"byte", TokenKind::Byte},
         {"integer", TokenKind::Integer}, {"long", TokenKind::Long},

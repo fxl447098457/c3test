@@ -147,6 +147,7 @@ enum class TokenKind : uint16_t {
     Class,
     Interface,      // Interface 语句 (tB 扩展: 显式接口契约块, 见 ai/022 D1)
     Extends,        // Interface 的单继承子句 (仅接口域; 类继承用 Inherits, P3)
+    Inherits,       // 类继承子句 (tB 扩展, ai/022 D6, 批次 B07): 类域用 Inherits, 接口域用 Extends
 
     // === 数据类型关键字 ===
     Boolean,

@@ -342,6 +342,16 @@ CompileResult Driver::compile(const CompileOptions& options) {
         return result;
     }
 
+    // === 阶段2.8: 类继承链登记表 (tB 扩展, B07a) — 基名解析/环/深度/v1 边界.
+    // 必须早于语义: 派生类的成员合并 (B07b) 要按链序读基类声明, 而每模块各一张符号表.
+    // 工程里没有一条 Inherits 时本阶段直接早退, 不改任何生成物 (D24 护栏口径).
+    if (!runClassChainPrepass()) {
+        std::cerr << diag_->toString();
+        result.errorCount = diag_->errorCount();
+        result.warningCount = diag_->warningCount();
+        return result;
+    }
+
     // === 阶段3: 语义分析 ===
     if (!runSemanticAnalysis(effectiveOpts)) {
         std::cerr << diag_->toString();
