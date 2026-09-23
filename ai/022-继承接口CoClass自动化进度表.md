@@ -8,35 +8,20 @@
 
 ```
 STATUS: IDLE               # NOT_STARTED | DESIGN | BUSY | IDLE | ALL_DONE
-LAST_RUN: 2026-09-23T08:59:28+08:00   # B05（接口引用计数）过门并提交 f644003，随后总表收口（D21）。
-               # 本轮 07:05 起连做 B04、B05 两批，各过一次全量门（129 项基线两次持平）。
-               # 下一轮自动运行从 **B06** 开工；重入保护照常：见 STATUS=BUSY 且不足 55 分钟立即跳过。
-LAST_COMMIT: 代码批 = f644003(B05)、6bc97e8(B04)、c47cdce(B03)；本轮 docs 收口哈希见 git log
-CURRENT_BATCH: **B06a**（P2 第三批拆分，理由见 D21-1 与下面三条实测）——真 `QueryInterface`
-               + 接口↔接口赋值 + `TypeOf <接口变量> Is <接口>`。**B06b** = 下行转换
-               `Set <类变量> = <接口变量>`（需要按类导出的 from_iv，见③）。开工必读 **D21** + 本栏三条：
-               ① `vb6_TypeOf` 是恒返 0 的 RTL 桩（`src/rtl/core/vb6rtl/vb6rtl_conv.c:316-322`），
-                 即既有工程的 `TypeOf x Is <类>` **一直恒假**（`tests/BalloonTooltips/cTT.cls` 在用）→
-                 别顺手改桩（那是行为变更，另批处理）；接口侧在 codegen 期发 QI，绕开该桩。
-               ② IID 必须**按值比**：槽表 `#ifndef` 块发在每个模块头里，同一 IID 常量各 TU 一份、地址不等。
-                 发射格式 = 16 字节、按真实 GUID 内存序（Data1/2/3 小端 + Data4 原序）→ P6 的二进制
-                 COM 兼容免费拿到。确定性取值沿用 4 词 FNV（`cgen_util_dllentry_prelude.inc:56-70`），
-                 有 `[InterfaceId("…")]` 时优先用它——`IfaceView.guid` 现在**只写不读**
-                 （`src/driver/driver_interface.cpp:79-81` 填，全仓零消费），B06 起才有消费者。
-                 比较器 + `vb6_iv_supports(self, iid)`（QI 后立刻 Release，匹配 VB6 TypeOf 的净效果）
-                 放 RTL，别放生成的每个模块（static 函数会招 C4505）。
-               ③ 跨 TU **不能**把薄指针强转成 `vb6_cls_C*`：类结构体只在自己的 .c 里定义，别处只有前向
-                 声明（`cgen_base_type.cpp:206` 的 `usedClassTypes_`）→ B06b 要按类导出
-                 `void* vb6_iv_<C>_from_iv(void* self)`，用 `static const vb6_ivtbl_<I>_for_<C>` 的
-                 **地址全等**验明正身再减 offsetof。另：`Symbol::implementsNames` 有全工程正向数据，
-                 反向索引"类→接口集"与唯一实现类映射在 `driver_codegen_dup_module_vars.inc:5-26`。
-               ④ QI 与 AddRef/Release 同规格按 (类, 接口) 各一份；成功后要 AddRef 返回的那个接口指针。
-               另外 D21-10：槽表 typedef 注释还写着 "placeholders in B04"，本批必然重编，一并改掉。
-GATE_BASELINE: Results: PASS=128 FAIL=0 SKIP=1 TOTAL=129   # exe md5 c615c657（.build/gate_B05.log，08:32 起跑，
-               # 最后一次源码改动在起跑之前，跑前后 exe 一致；SKIP=已知 test_vbman 环境项）。
-               # 条目数与 B03/B04 基线持平：B05 未新增用例条目，只把 `itf_xmod_writer` 的断言由 5 条
-               # 扩到 11 条 → 零新增失败。另附 8 文件 --emit-c 对 pre-B05 基线（worktree @6bc97e8 /
-               # exe dc09fd9f）逐字节全同（D21-9）。
+LAST_RUN: 2026-09-23T09:46:16+08:00   # B06a（QI + 跨接口 Set + TypeOf）过门并提交 613d2b8，总表收口（D22）。
+               # 本轮连做 B04、B05、B06a 三批，各过一次全量门（129 项基线三次持平）。
+               # 下一轮自动运行从 **B06b** 开工；重入保护照常：见 STATUS=BUSY 且不足 55 分钟立即跳过。
+LAST_COMMIT: 代码批 = 613d2b8(B06a)、f644003(B05)、6bc97e8(B04)；本轮 docs 收口哈希见 git log
+CURRENT_BATCH: **B06b**（P2 第三批的后半，下行转换与判定）——`Set <类变量> = <接口变量>`、
+               `TypeOf <类变量> Is <接口>`、接口值作实参/进 Variant。开工必读 **D22**，三条：
+               ① 下行转换的真障碍不是类型可见性（`vb6_cls_<C>` 发在类自己的 .h 里，别处 include 后               就是完整类型，减偏移哪个 TU 都能做），而是**身份验证**：槽表实例               `vb6_ivtbl_<I>_for_<C>` 是 C 的 .c 里的 `static const` 对象，别的 TU 拿不到地址 →               必须按类导出 `void* vb6_iv_<C>_from_iv(void* self)`（在 C 自己的 .c 里比 vt 地址全等               才减 offsetof，否则 NULL），声明放类的 .h 里跨模块可见；**别写成裸强转**（对象不是               那个类时会静默指到别处去）（D22-8）；               ② `vb6_TypeOf` 是恒返 0 的 RTL 桩、既有工程 `TypeOf x Is <类>` 一直恒假
+               （`vb6rtl_conv.c:316-322`，cTT.cls 在用）→ 类侧 TypeOf 若要做真，必须单独评估回归面；
+               ③ 接口值进 Variant 前先想清 `vb6_ComIsDispatchable` 只查 7 槽（D22-7③），接口槽少时
+               会读到 vtable 之外。另外：QI 认 IUnknown 现返回本接口薄指针（D22-7④），P6 统一。
+               ④ **B05 的真缺陷（D22-10，本批必修）**：上转型 `s = &(w)->__iv_<I>;` 在 `w` 为 Nothing               时算出的是 `NULL + offsetof` 这个**非空野地址**，紧接着的 AddRef 就解引用它 → 崩溃；               改成 `s = (w) ? &(w)->__iv_<I> : NULL;`，并补负控用例（`Dim nz As CWriter` 永不 Set →               `Set s = nz` → `s Is Nothing` 为真）。`from_iv` 同样自守 `if (!self) return NULL;`。GATE_BASELINE: Results: PASS=128 FAIL=0 SKIP=1 TOTAL=129   # exe md5 7721bd72（.build/gate_B06a.log，09:17 起跑，最后一次
+               # 源码改动在起跑前，跑前后 exe 一致；SKIP=已知 test_vbman 环境项）。条目数与 B03 基线
+               # 持平：B06a 未新增用例条目，只把 `itf_xmod_writer` 断言 11→18 条 → 零新增失败。
+               # 另附 8 文件 --emit-c 对 pre-B06a 基线（worktree @f644003）逐字节全同。
 ```
 
 > 重入保护：若运行开始时 STATUS=BUSY 且 LAST_RUN 距今不足 55 分钟，说明上一次运行可能仍在进行——本次**立即结束，不做任何修改**。
@@ -78,7 +63,7 @@ GATE_BASELINE: Results: PASS=128 FAIL=0 SKIP=1 TOTAL=129   # exe md5 c615c657（
 | B03 | P1 | `.cls` 头行宿主形式 `Interface IFoo … End Interface`（1 文件 1 接口）+ `Module::isInterfaceModule` + 语法手册页/索引 | ☑ | c47cdce | `Results: PASS=128 FAIL=0 SKIP=1 TOTAL=129`（gate_B03.log；exe md5 053150bf 跑前后一致）+ 3 条新用例（itf_p03 + itf_n20 + itf_xmod_writer）全绿 + legacy `test_implements` 仍 PASS。要点：宿主识别放 stage 2.7（parser 拿不到最终模块名）、VB3002 只豁免宿主自身、跨模块契约已端到端跑通（详见 D18） |
 | B04 | P2 | 接口值代码生成：`vb6_ivtbl_<I>` COM 形态槽表 + 类侧实例 + 薄指针表示 + `As <Iface>` 变量登记 + 派发 | ☑ | 6bc97e8 | `Results: PASS=128 FAIL=0 SKIP=1 TOTAL=129`（gate_B04.log；exe md5 ef1a7520 跑前后一致）+ 接口值派发端到端断言 IFV1/IFV2/IFV3 全绿 + legacy `test_implements` 仍 PASS。要点：新增 `cgen_iface_vtbl.cpp` 独立编译单元、`#ifndef VB6_IVTBL_<I>` 守卫替代 D19 设想的工程级去重表、`__iv_<I>` 紧跟 `__comObj`、槽键口径上提到 `interface_sig.hpp` 与语义层同源。B04a/B04b 合并成一批（理由见 D20-1）。逐字节 emit-c 护栏 8 文件对 pre-B04 基线全同 |
 | B05 | P2 | 生命周期：实现类结构**前置** vtbl 指针数组（实测不可行，见 D21-1）+ refcount 头 + AddRef/Release + Set/Nothing/作用域释放 | ☑ | f644003 | `Results: PASS=128 FAIL=0 SKIP=1 TOTAL=129`（gate_B05.log；exe md5 c615c657 跑前后一致）+ `itf_xmod_writer` 断言 5→11 条（LIFE1/2/3/9 + `TERM last=bye` + `TERM last=scoped`；实测该工程恰好 2 条 TERM，无误销毁、无重复释放）+ legacy `test_implements` 仍 PASS。要点：`__refcount` 只加在实现新式接口的类上（8 文件 emit-c 对 pre-B05 基线全同）；AddRef/Release 按 (类, 接口) 各一份；QI 仍占位到 B06；`__comObj` 非空时不归 0 销毁。详见 D21 |
-| B06 | P2 | 转换与判定：接口↔类、多接口对象、`TypeOf … Is <接口>`、上/下行转换契约校验 | ☐ | | |
+| B06 | P2 | 转换与判定：接口↔类、多接口对象、`TypeOf … Is <接口>`、上/下行转换契约校验 | ◐ **B06a 已发货**（QI + 跨接口 Set + `TypeOf <接口变量> Is <接口>`）；**B06b 未做**（下行转换 `Set <类变量> = <接口变量>`、`TypeOf <类变量> Is <接口>`、接口值作实参/进 Variant） | 613d2b8 | `Results: PASS=128 FAIL=0 SKIP=1 TOTAL=129`（gate_B06a.log；exe md5 7721bd72 跑前后一致）+ `itf_xmod_writer` 断言 11→18 条（QI1..QI4 + TOF1..TOF3）+ legacy `test_implements` 仍 PASS + 8 文件 emit-c 对 pre-B06a 基线全同。要点：IID 按值比（每 TU 一份 static 常量）、QI 按 (类,接口) 各一份、`vb6_TypeOf` 恒假桩刻意不碰。详见 D22 |
 | B07 | P3 | `Inherits` 语法 + 类链检测（单继承/环/深度）+ 继承成员合并与遮蔽 + 派生域 | ☐ | | |
 | B08 | P3 | `Protected` 可见性 + `Overridable/Overrides/NotOverridable` + 类级虚表 `vb6_cvtbl_<Cls>` 与多态派发 | ☐ | | |
 | B09 | P3 | `MyBase.M(…)` 显式基调用（去虚化）+ 构造链顺序 + 无新语法逐字节护栏 | ☐ | | |
@@ -225,6 +210,22 @@ dispinterface 定义；`[Default, Source]` 连接点实现；泛型类实现新�
 - 诊断文案 = ASCII（D12 硬约束）；测试用例文件 = GBK+CRLF（D9 红线）；新用例登记在 `tests/run_tests.ps1` 的 itf_neg 数组（:864 起）与 bas 队列（:725 附近）。
 - B02 门新增断言：契约报错类用 `Test-SyntaxFail`（编译期诊断）；正例契约满足类目前只能到 `--compile-only`/syntax 级（emit 要到 B04），`test_interface.bas` 里以"Implements IShape + 完整同名成员 → 无诊断"形式做 guard（现有 Add-BasTest 是 compile+run，接口类型变量还不可用，B02 正例改放 `.bas` 但**仅经 Test-Syntax 类通路**——注意 run 阶段若 `Set x = New Class` 未涉及接口类型则不受影响）。
 - 逐字节护栏复用本轮做法：临时 `git worktree add D:\c3.<tag> --detach HEAD` + 同 cmake(Ninja/Debug 用主 .build 同款 cache 参数) 构建基线 exe，8 文件清单见本轮日志行，`--emit-c` 双路 `cmp`；用后 `git worktree remove --force + prune`。
+- **GitHub Actions 全量 = 里程碑级，不是每批**（用户 2026-09-23 09:55 定调："这个测试不用每次都做，
+  按之前的做就行，等大改全部实现完成之后再跑 github actions 这样的全量测试"）。所以：
+  **每批仍走本机 `tests/run_tests.ps1 -Category all` 门 + 逐字节护栏 + 本地 commit**（本文件既有纪律，
+  一字不改）；Actions 那一级留到**整条线（B04–B18 / STATUS=ALL_DONE）做完**跑一次，届时：
+  仓库 = `https://github.com/fxl447098457/c3test`，主路径 `git push github HEAD:dev` → `ci.yml`
+  （`regression` 矩阵 = run_tests.ps1 五段 smoke/bas×2/vbp/compile/syntax，`smoke` 本轮刚补进矩阵；
+  CI 是 Release 构建，与本机 Debug 两个口径），体系级 T0/T1/T2 走 tag `github-test-NNN` 或
+  workflow_dispatch → `ci_t0.yml`；监控用 `pwsh -File scripts/watch-gh-actions.ps1`
+  （自取 remote 内嵌 PAT、输出打码，别手动 echo 那个 URL）。
+  另两处事实供那一次参考：`tests_github/` 的用例是 2026-09-20 从 `tests/` **复制**的，本线新增的
+  `itf_*` 在 run_t1/run_t2 里 0 命中（**他人正在修清单同步，本任务不动**）；`run_t2.ps1` 也不在
+  `run_tests.ps1` 里。gitcode 那条 `origin` 与 Actions 无关。
+  **红线**：本机门不变 → 平时依旧"永不 push"；只有上面那一次里程碑全量允许推 `github` 远端
+  （`dev` 分支或 `github-test-*` tag），不建 MR，且届时先跟用户确认一句。
+- **触及类结构体布局 / Set / 派发 / COM 打包的批次，除全量门外必须另跑 T2**（B04–B06a 这三批此前漏了）。
+
 
 ### D15 B02 实施中产生的设计校正（2026-09-23，写代码后回灌）
 
@@ -521,6 +522,78 @@ dispinterface 定义；`[Default, Source]` 连接点实现；泛型类实现新�
     改它要重建二进制，而门与二进制一一绑定（D15-9），不值得为一条注释重跑 28 分钟全量门；
     B06 动 QI 时必然重编，那时一并更新（发射点是 `cgen_iface_vtbl.cpp` 的 `emitIfaceContractTypedefs`）。
 
+### D22 B06a（QueryInterface / 跨接口 Set / `TypeOf … Is <接口>`）实施记录（2026-09-23）
+
+1. **IID 只能按值比，且要按真 GUID 内存序发**：`vb6_iv_iid_<I>` 是 `#ifndef` 块里的
+   `static const unsigned char[16]` → 同一接口在**每个编译单元各一份、地址不同**，比较必须走
+   RTL 的 `vb6_IidEqual`（16 字节值比）。字节序 = Data1/2/3 小端 + Data4 原序，P6 交给真 COM
+   时不必再翻。取值优先级：源码 `[InterfaceId("…")]`（`IfaceView.guid`，B01 起**只写不读**，
+   本批起才有消费者）→ 否则 4 词 FNV-1a 从接口小写名派生（键 `"iviface:" + lower(名)`，与
+   `cgen_util_dllentry_prelude.inc:56-70` 的 `generateIid` 同族；D8 禁随机）。
+   IUnknown 用固定常量 `vb6_iv_iid_IUnknown`（自带 guard，全 TU 一份语义）。
+2. **QI 与 AddRef/Release 同规格按 (类, 接口) 各一份**（D21-2 同一理由）：命中兄弟接口要
+   `&me->__iv_<J>`，偏移依赖 J。为此 `emitIfaceImplTables` 顶部先发本类**全部 AddRef 的前向
+   声明**——接口块的发射顺序与被调用顺序不一致，C 里用到必须先声明。语义：认 IUnknown / 本接口 /
+   本类实现的其它接口，成功即对返回的那个指针 AddRef；其它 IID → `E_NOINTERFACE(0x80004002)`
+   且 `*ppv=NULL`；`ppv`/`riid` 为空 → `E_POINTER(0x80070057)`。
+3. **薄指针前 3 槽固定 = RTL 可以通用调用它**：RTL 新增 `vb6_ivtbl_prefix{QI,AddRef,Release}`
+   + `vb6_IidEqual` + `vb6_IfaceSupports(ifacePtr, iid)`（声明在 `vb6rtl_class_com.h`、实现在
+   `vb6rtl_com.c`；放 RTL 而非每个模块的 static，免 C4189/C4505 且只有一份）。
+   `IfaceSupports` QI 成功后立刻 Release → 净效果只回答"支持不支持"，正是 VB6 `TypeOf … Is` 的口径。
+4. **`vb6_TypeOf` 那个恒返 0 的桩刻意没碰**（`vb6rtl_conv.c:316-322`）：既有工程的
+   `TypeOf x Is <类>` 一直恒假（`tests/BalloonTooltips/cTT.cls`、VBFlexGridDemo 在用），修它是
+   **行为变更**，另批处理。本批只在 `visit(TypeOfExpr)` 开头加"右侧是新式接口"的分叉：左侧必须
+   是接口变量，否则报 ASCII 诊断并返回 0（不静默给错答案）。该诊断没有 `--syntax-only` 级用例
+   ——`Test-SyntaxFail` 只看语法/语义阶段，codegen 诊断够不着（同 D20-7⑤口径）。
+5. **跨接口 `Set` 的引用口径**：发成一个 C 块 —— 存旧值 → `p->vt->QueryInterface(p,
+   vb6_iv_iid_<目标>, &got)` → `q = (vb6_ivref_<目标>*)got` → Release 旧值。QI 成功已 AddRef，
+   故 q 直接持有那份；失败得 NULL = Nothing（VB6 此处抛 438，本项目先按 Nothing 处理，
+   错误码留给 P6/错误处理批次，已记边界）。
+6. **用例形状**：`CWriter` 升级为双接口类（`IWriter` + 新增 `ILog`；`ILog` 带
+   `Property Get Logged` → 顺带再验一次属性槽键 `get_Logged`）；另加**无实现类**的 `INope`
+   （只进登记表、只出 IID）→ 负向 `TypeOf`/`E_NOINTERFACE` 有真实覆盖。新增 QI1..QI4 +
+   TOF1..TOF3 共 7 条断言：TOF1 走"从 IWriter 指针 QI 到 ILog"、TOF2 走反向兄弟分支、
+   TOF3 走 E_NOINTERFACE。实跑仍**恰好 2 条 TERM**（`last=bye` / `last=scoped`）→ 新增的
+   QI/AddRef/Release 收支平衡，没有多一个少一个引用。
+7. **本批边界**：① 下行转换 `Set <类变量> = <接口变量>` → B06b（见第 8 条）；②
+   `TypeOf <类变量> Is <接口>`；③ 接口值进 Variant / 作实参传递的 QI 化（`cExprIsVariant`
+   那条老路与薄指针不兼容，`vb6_ComIsDispatchable` 只查 7 槽，接口槽数少时会读到 vtable 之外）；
+   ④ QI 认 IUnknown 时返回的是**本接口的薄指针**而非全对象统一的 IUnknown 指针（内部自洽；
+   二进制 COM 兼容由 P6 的包装器负责）。
+8. **下行转换（B06b）的真实障碍不是类型可见性，而是"身份验证"**（本条订正 Explore 报告的
+   一处判断：`vb6_cls_<C>` 结构体是发在**类自己的 .h** 里的，别处 include 后就是完整类型 ——
+   B04 生成的 `s = &(w)->__iv_IWriter;` 能编译过就是证据，所以使用点**看得见**
+   `offsetof(vb6_cls_C, __iv_<I>)`，减偏移这件事哪个 TU 都能做）。真正的限制是：槽表实例
+   `vb6_ivtbl_<I>_for_<C>` 是 C 的 .c 里的 `static const` 对象，别的 TU 拿不到它的地址，
+   于是"这根薄指针到底是不是 C 的实例"没法在使用点判定。B06b 因此按类导出一个验明正身的
+   助手（在 C 自己的 .c 里比较 `*(const void**)self == &vb6_ivtbl_<I>_for_<C>`，命中才减
+   offsetof 返回实例，否则 NULL），声明放类的 .h 里跨模块可见；不要写成裸强转（对象不是那个类
+   时会静默指到别处去）。上行方向（`TypeOf <类变量> Is <接口>`）同一套助手反着用即可。
+
+9. **B06b 设计定稿（下一轮直接动工，不用再调研）**：按类在 `emitIfaceImplTables` 里多发两个
+   跨模块助手（声明进类的 .h，实现进类的 .c，与槽表实例同 TU）：
+   - `void* vb6_iv_from_iv_<C>(void* self)` —— 下行转换验身：比 `*(const void**)self` 与本类
+     每个 `&vb6_ivtbl_<I>_for_<C>` 地址全等，命中才 `(char*)self - offsetof(vb6_cls_C, __iv_<I>)`，
+     否则 NULL（= Nothing）。`Set <类变量 w> = <接口变量 s>` 发成
+     `w = (vb6_cls_C*)vb6_iv_from_iv_C(s); if (w) s->vt->AddRef(s);`
+     —— **必须 AddRef**：类变量那一遍引用永不释放（D21-5 不变式），不加码的话接口侧释放到 0
+     会把对象从 w 脚下抽走。
+   - `int32_t vb6_iv_test_iid_<C>(void* self, const void* riid)` —— `TypeOf <类变量> Is <接口>`
+     用**静态** IID 归属判定（类变量的动态类型恒等于声明类型）：`self != NULL` 且 riid 命中
+     IUnknown 或本类实现的任一接口 IID → 1。这条不需要减偏移，也就绕开了"字段是否存在"的
+     编译期问题（`TypeOf w Is INope` 对不实现 INope 的类必须能编译并返回 False）。
+   两者都只在 `ivImplementedIfaces(module)` 非空时发射 → 逐字节护栏照旧成立。
+   静态契约（类不实现该接口时 `Set w = s` 要不要在编译期拒）留到 B13/P6 与 IID 表一起做，
+   本批按运行期 NULL 处理并记边界。
+
+10. **B05 留下的一个真缺陷，B06b 必须顺手修（已复现推理，未有用例）**：上转型发的是
+    `s = &(w)->__iv_<I>;` —— `w` 是 Nothing（声明了但从没 `Set`）时，C 层面算的是
+    `NULL + offsetof(...)` = 一个**非空野地址**，紧接着 `if (s) s->vt->AddRef(s)` 就解引用它 →
+    崩溃。修法：发成 `s = (w) ? &(w)->__iv_<I> : NULL;`（三目即可，不需要临时变量）。
+    配套负控用例：`Dim nz As CWriter`（永不 Set）→ `Set s = nz` → 期望 `s Is Nothing` 为真。
+    `vb6_iv_from_iv_<C>` 同样要自守 `if (!self) return NULL;`。
+    为什么 B05 的门没抓到：既有断言全部先 `Set w = New CWriter` 再上转，没有 Nothing 侧路径。
+
 ## 运行日志
 
 - 2026-09-23 建表：范围确认（含完整COM）、规范文档 018 入库、现状盘点完成。
@@ -614,3 +687,18 @@ dispinterface 定义；`[Default, Source]` 连接点实现；泛型类实现新�
   `vb6_ComIsDispatchable` 拒绝才没崩）→ 本批改成经槽真 Release。另：AddRef/Release 从 B04 的"按类一份"
   改成"按 (类, 接口) 一份"——`self` 是 `&me->__iv_<I>`，container_of 依赖具体接口的 offsetof，多接口类
   共用一份必然算错实例地址（本批开工即改）。门 `Results: PASS=128 FAIL=0 SKIP=1 TOTAL=129`（exe c615c657），护栏 8 文件对 pre-B05 基线全同（worktree 用后即删）。
+
+- 2026-09-23 09:00–09:46 **B06a（QI + 跨接口 Set + TypeOf Is 接口）过门并提交 613d2b8**：
+  开工先派一路 Explore 摸 B06 接缝，三条实测结论改写了方案（D22-1/4/8）：
+  ① `IfaceView.guid` 自 B01 起**只写不读**，IID 常量在生成侧一处都没有 → 本批起消费，且必须
+  **按值比**（`#ifndef` 块发在每个模块头里，同接口常量各 TU 一份、地址不等）；按真 GUID 内存序
+  发 16 字节，P6 交真 COM 时不用翻。② `vb6_TypeOf` 是恒返 0 的桩 —— 既有工程 `TypeOf x Is <类>`
+  **一直恒假**（cTT.cls 在用），改它是行为变更 → 本批只加“右侧是新式接口”的分叉，桩一个字没动。
+  ③ 跨 TU 强转薄指针不可能（类结构体只在自己 .c 里定义）→ 下行转换切给 B06b。
+  实现上沿用 D21-2 的教训：QI 也按 (类, 接口) 各一份（命中兄弟接口要按各自 offsetof 取地址），
+  并在类块顶部先发全部 AddRef 前向声明（发射顺序 ≠ 调用顺序）。RTL 加 `vb6_IidEqual` /
+  `vb6_IfaceSupports`（QI 后立即 Release = VB6 TypeOf 的净效果），放 RTL 而不是每个模块的 static
+  （免未引用警告、只一份）。用例把 CWriter 升成双接口类（IWriter+ILog，ILog 带 Property Get 再验一次
+  属性槽键），并加**无实现类**的 INope 让 E_NOINTERFACE 分支真有覆盖。实跑 18 条断言全中、
+  TERM 仍恰好 2 条（QI 收支平衡）。门 `Results: PASS=128 FAIL=0 SKIP=1 TOTAL=129`（exe 7721bd72）；护栏 8 文件对 pre-B06a
+  基线全同（worktree @f644003，用后即删）。
