@@ -106,4 +106,14 @@ Sub Main()
         .Bump
         If .Hits() = 2 Then Debug.Print "INH31:OK" Else Debug.Print "INH31:FAIL " & .Hits()
     End With
+    ' INH32..INH34 (ai/022 B08e-2): the holder's field is declared InhBase but holds the
+    ' InhDerived instance. INH32 (bare `m_up.Speak()`) is the control that already passed;
+    ' INH33/INH34 are the Me-prefixed field chain, which used to bind statically to the
+    ' BASE implementation (A/B control against the pre-B08e-2 binary: both FAIL there).
+    Dim hd As InhHolder
+    Set hd = New InhHolder
+    hd.Hold d
+    If hd.ViaBare() = "derived" Then Debug.Print "INH32:OK" Else Debug.Print "INH32:FAIL " & hd.ViaBare()
+    If hd.ViaMeField() = "derived" Then Debug.Print "INH33:OK" Else Debug.Print "INH33:FAIL " & hd.ViaMeField()
+    If hd.ViaMeFieldArg("bob") = "hi bob (derived)" Then Debug.Print "INH34:OK" Else Debug.Print "INH34:FAIL " & hd.ViaMeFieldArg("bob")
 End Sub

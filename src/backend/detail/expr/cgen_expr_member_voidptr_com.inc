@@ -37,6 +37,16 @@
                 resolveClassMemberCall(fieldCls, node.memberName);
             if (!resolvedFn.empty()) {
                 std::string thisArg = "(void*)" + objExpr;
+                // 类虚表 (tB, ai/022 B08e 第⑤站): `Me.m_h.Pick()` 与裸 `m_h.Pick()` 是同一个调用,
+                // 后者早就按 __cvtbl 派发, 这一支却静默发 `vb6_<Base>_Pick((void*)me->m_h)` —— 基类型
+                // 字段持有派生实例时切片回基类实现。接收者 (void*)<字段链> 是纯读, 派发串与 this 实参
+                // 取**同一个** thisArg (拼两遍就是双副作用)。属性写方向不改写: 3.4b 无 Let/Set 槽。
+                if (resolvedFn.find("_prop_let_") == std::string::npos
+                    && resolvedFn.find("_prop_set_") == std::string::npos) {
+                    const std::string dispatchFn88b = virtDispatchCallee(
+                        fieldCls, node.memberName, thisArg, /*mustDispatch=*/true, node.loc);
+                    if (!dispatchFn88b.empty()) resolvedFn = dispatchFn88b;
+                }
                 if (asCallCallee_) {
                     // 由外层 IndexOrCallExpr/CallStmt 把 thisArg 前置到参数首 (同 Fix 015)
                     pendingChainObj_ = thisArg;
