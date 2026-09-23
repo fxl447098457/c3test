@@ -4,24 +4,20 @@
 > 每次运行开始先读本文件，结束前必须更新本文件（状态头 + 批次清单 + 运行日志）。
 > 规范输入: `ai/讨论记录/018-接口继承与CoClass设计思路.md`（含 tB 文档要点与分阶段设计思路全文）。
 
-## 状态头（机器可读，每次运行维护）
-
-```
 STATUS: IDLE               # NOT_STARTED | DESIGN | BUSY | IDLE | ALL_DONE
-LAST_RUN: 2026-09-23T09:46:16+08:00   # B06a（QI + 跨接口 Set + TypeOf）过门并提交 613d2b8，总表收口（D22）。
-               # 本轮连做 B04、B05、B06a 三批，各过一次全量门（129 项基线三次持平）。
-               # 下一轮自动运行从 **B06b** 开工；重入保护照常：见 STATUS=BUSY 且不足 55 分钟立即跳过。
-LAST_COMMIT: 代码批 = 613d2b8(B06a)、f644003(B05)、6bc97e8(B04)；本轮 docs 收口哈希见 git log
-CURRENT_BATCH: **B06b**（P2 第三批的后半，下行转换与判定）——`Set <类变量> = <接口变量>`、
-               `TypeOf <类变量> Is <接口>`、接口值作实参/进 Variant。开工必读 **D22**，三条：
-               ① 下行转换的真障碍不是类型可见性（`vb6_cls_<C>` 发在类自己的 .h 里，别处 include 后               就是完整类型，减偏移哪个 TU 都能做），而是**身份验证**：槽表实例               `vb6_ivtbl_<I>_for_<C>` 是 C 的 .c 里的 `static const` 对象，别的 TU 拿不到地址 →               必须按类导出 `void* vb6_iv_<C>_from_iv(void* self)`（在 C 自己的 .c 里比 vt 地址全等               才减 offsetof，否则 NULL），声明放类的 .h 里跨模块可见；**别写成裸强转**（对象不是               那个类时会静默指到别处去）（D22-8）；               ② `vb6_TypeOf` 是恒返 0 的 RTL 桩、既有工程 `TypeOf x Is <类>` 一直恒假
-               （`vb6rtl_conv.c:316-322`，cTT.cls 在用）→ 类侧 TypeOf 若要做真，必须单独评估回归面；
-               ③ 接口值进 Variant 前先想清 `vb6_ComIsDispatchable` 只查 7 槽（D22-7③），接口槽少时
-               会读到 vtable 之外。另外：QI 认 IUnknown 现返回本接口薄指针（D22-7④），P6 统一。
-               ④ **B05 的真缺陷（D22-10，本批必修）**：上转型 `s = &(w)->__iv_<I>;` 在 `w` 为 Nothing               时算出的是 `NULL + offsetof` 这个**非空野地址**，紧接着的 AddRef 就解引用它 → 崩溃；               改成 `s = (w) ? &(w)->__iv_<I> : NULL;`，并补负控用例（`Dim nz As CWriter` 永不 Set →               `Set s = nz` → `s Is Nothing` 为真）。`from_iv` 同样自守 `if (!self) return NULL;`。GATE_BASELINE: Results: PASS=128 FAIL=0 SKIP=1 TOTAL=129   # exe md5 7721bd72（.build/gate_B06a.log，09:17 起跑，最后一次
-               # 源码改动在起跑前，跑前后 exe 一致；SKIP=已知 test_vbman 环境项）。条目数与 B03 基线
-               # 持平：B06a 未新增用例条目，只把 `itf_xmod_writer` 断言 11→18 条 → 零新增失败。
-               # 另附 8 文件 --emit-c 对 pre-B06a 基线（worktree @f644003）逐字节全同。
+LAST_RUN: 2026-09-23T09:52:32+08:00   # B06b 已收口（代码 4dc6b7e、总表 docs 提交见 git log）。
+               # 自动运行见本行不足 55 分钟请立即跳过。   # 本轮单批（B06b）；过门后另跑 8 文件逐字节护栏。
+               # 下一轮自动运行从 **B07** 开工（P3 第一批，地图见 D24）；重入保护照常：STATUS=BUSY 且不足 55 分钟立即跳过。
+LAST_COMMIT: 代码批 = 4dc6b7e(B06b)、613d2b8(B06a)、f644003(B05)、6bc97e8(B04)
+CURRENT_BATCH: **B07**（P3 第一批）——`Inherits` 语法 + 类链检测（单继承/环/深度）+ 继承成员合并与遮蔽 + 派生域。开工必读 **D24**（B07 地图，行号本轮实测）与 D23；四条硬约束：
+               ① **别照 D6 去 `parser_module.cpp:89-104` 那条 Class 头行分支挂 `Inherits`**：它要求 `parseTypeParams()` 见到 `( Of`（`parser_decl_var.cpp:463-471`），今天连 `Class Foo` 写在 `.cls` 首行都是 error。v1 只做独立子句行 `Inherits Base`；要动头行形式 = 放松既有 error path，必须补泛型 `.cls` 用例并重跑护栏。
+               ② 合并必须落在 **stage 3.5 之前**，且 `driver_crossmod.cpp:169-190` 是**逐字段手工拷贝**外部 Class 符号：成员表实有 11 张（D6 只列了 4 张，完整清单见 D24），漏一张就是跨模块瞎。链求解照抄 `driver_interface.cpp` 的 Pass A/B/C（环检测用 `seen`，父先序展平）。
+               ③ **不内嵌 `vb6_cls_Base`**（连 `__refcount`/`__iv_<I>` 一起继承 = 双计数，撞 D21-1 的单门禁）→ 字段扁平复制进用户字段区，字段 0 仍是 `__comObj`（D19）。遮蔽必须**按小写键裁决**：`cIdent` 保留大小写而成员表键小写，否则 `m_X`/`M_x` 发成两个 C 成员 = 静默错字段。
+               ④ 继承方法发**转发桩** `vb6_<D>_<M>` 转调 `vb6_<B>_<M>((vb6_cls_<B>*)me, …)`，别在每个调用点裸强转 `me`（`cgen_form.cpp:210` 有控件强转先例，但它要求前缀布局逐字段一致，且会挡住 B08 的 Overridable 钩子与 B09 的 MyBase 去虚化）。
+               另：早退条件必须是“本类或其链用到 Inherits”，不是“工程无新语法”（D24 末两条）。`Test-SyntaxFail` 只接单个 `$Source` → shadow/环/arity 这类**双文件负例**需要新 helper，B07 预算含它。
+               遗留登记（不挡 B07）：**B06c** = 接口值作实参 / 进 Variant，归 B13/P6 前处理（要过 `vb6_ComIsDispatchable` 的 7 槽口径，D22-7③）。
+GATE_BASELINE: Results: PASS=128 FAIL=0 SKIP=1 TOTAL=129   # exe md5 4202570a（.build/gate_B06b.log，10:06 起跑，最后一次源码改动在起跑前、跑前后 exe 一致；SKIP=已知 test_vbman 环境项）。条目数与 B03/B04/B05/B06a 基线持平——B06b 未新增用例条目，只把 `itf_xmod_writer` 的断言 18→25 条 → 零新增失败。
+               # 另附 8 文件 --emit-c 对 pre-B06b 基线（worktree @613d2b8）逐字节全同；A/B 负控见 D23-3。
 ```
 
 > 重入保护：若运行开始时 STATUS=BUSY 且 LAST_RUN 距今不足 55 分钟，说明上一次运行可能仍在进行——本次**立即结束，不做任何修改**。
@@ -63,7 +59,7 @@ CURRENT_BATCH: **B06b**（P2 第三批的后半，下行转换与判定）——
 | B03 | P1 | `.cls` 头行宿主形式 `Interface IFoo … End Interface`（1 文件 1 接口）+ `Module::isInterfaceModule` + 语法手册页/索引 | ☑ | c47cdce | `Results: PASS=128 FAIL=0 SKIP=1 TOTAL=129`（gate_B03.log；exe md5 053150bf 跑前后一致）+ 3 条新用例（itf_p03 + itf_n20 + itf_xmod_writer）全绿 + legacy `test_implements` 仍 PASS。要点：宿主识别放 stage 2.7（parser 拿不到最终模块名）、VB3002 只豁免宿主自身、跨模块契约已端到端跑通（详见 D18） |
 | B04 | P2 | 接口值代码生成：`vb6_ivtbl_<I>` COM 形态槽表 + 类侧实例 + 薄指针表示 + `As <Iface>` 变量登记 + 派发 | ☑ | 6bc97e8 | `Results: PASS=128 FAIL=0 SKIP=1 TOTAL=129`（gate_B04.log；exe md5 ef1a7520 跑前后一致）+ 接口值派发端到端断言 IFV1/IFV2/IFV3 全绿 + legacy `test_implements` 仍 PASS。要点：新增 `cgen_iface_vtbl.cpp` 独立编译单元、`#ifndef VB6_IVTBL_<I>` 守卫替代 D19 设想的工程级去重表、`__iv_<I>` 紧跟 `__comObj`、槽键口径上提到 `interface_sig.hpp` 与语义层同源。B04a/B04b 合并成一批（理由见 D20-1）。逐字节 emit-c 护栏 8 文件对 pre-B04 基线全同 |
 | B05 | P2 | 生命周期：实现类结构**前置** vtbl 指针数组（实测不可行，见 D21-1）+ refcount 头 + AddRef/Release + Set/Nothing/作用域释放 | ☑ | f644003 | `Results: PASS=128 FAIL=0 SKIP=1 TOTAL=129`（gate_B05.log；exe md5 c615c657 跑前后一致）+ `itf_xmod_writer` 断言 5→11 条（LIFE1/2/3/9 + `TERM last=bye` + `TERM last=scoped`；实测该工程恰好 2 条 TERM，无误销毁、无重复释放）+ legacy `test_implements` 仍 PASS。要点：`__refcount` 只加在实现新式接口的类上（8 文件 emit-c 对 pre-B05 基线全同）；AddRef/Release 按 (类, 接口) 各一份；QI 仍占位到 B06；`__comObj` 非空时不归 0 销毁。详见 D21 |
-| B06 | P2 | 转换与判定：接口↔类、多接口对象、`TypeOf … Is <接口>`、上/下行转换契约校验 | ◐ **B06a 已发货**（QI + 跨接口 Set + `TypeOf <接口变量> Is <接口>`）；**B06b 未做**（下行转换 `Set <类变量> = <接口变量>`、`TypeOf <类变量> Is <接口>`、接口值作实参/进 Variant） | 613d2b8 | `Results: PASS=128 FAIL=0 SKIP=1 TOTAL=129`（gate_B06a.log；exe md5 7721bd72 跑前后一致）+ `itf_xmod_writer` 断言 11→18 条（QI1..QI4 + TOF1..TOF3）+ legacy `test_implements` 仍 PASS + 8 文件 emit-c 对 pre-B06a 基线全同。要点：IID 按值比（每 TU 一份 static 常量）、QI 按 (类,接口) 各一份、`vb6_TypeOf` 恒假桩刻意不碰。详见 D22 |
+| B06 | P2 | 转换与判定：接口↔类、多接口对象、`TypeOf … Is <接口>`、上/下行转换契约校验 | ☑ **B06a**（QI + 跨接口 Set + `TypeOf <接口变量> Is <接口>`）+ **B06b**（下行转换 + `TypeOf <类变量> Is <接口>` + 修 B05 的 Nothing 野地址）；**B06c 遗留**：接口值作实参 / 进 Variant → 随 B13/P6 处理 | 4dc6b7e | B06a：`Results: PASS=128 FAIL=0 SKIP=1 TOTAL=129`（exe 7721bd72）+ 断言 11→18；B06b：`Results: PASS=128 FAIL=0 SKIP=1 TOTAL=129`（gate_B06b.log；exe 4202570a 跑前后一致）+ 断言 18→25（DN0..DN3 + TOC1..TOC3）+ legacy `test_implements` 仍 PASS + 8 文件 emit-c 对 pre-B06b(@613d2b8) 全同 + **A/B 负控证明 D22-10 缺陷真实**（基线二进制 exit=139，本批 exit=0）。详见 D22/D23 |
 | B07 | P3 | `Inherits` 语法 + 类链检测（单继承/环/深度）+ 继承成员合并与遮蔽 + 派生域 | ☐ | | |
 | B08 | P3 | `Protected` 可见性 + `Overridable/Overrides/NotOverridable` + 类级虚表 `vb6_cvtbl_<Cls>` 与多态派发 | ☐ | | |
 | B09 | P3 | `MyBase.M(…)` 显式基调用（去虚化）+ 构造链顺序 + 无新语法逐字节护栏 | ☐ | | |
@@ -222,6 +218,10 @@ dispinterface 定义；`[Default, Source]` 连接点实现；泛型类实现新�
   另两处事实供那一次参考：`tests_github/` 的用例是 2026-09-20 从 `tests/` **复制**的，本线新增的
   `itf_*` 在 run_t1/run_t2 里 0 命中（**他人正在修清单同步，本任务不动**）；`run_t2.ps1` 也不在
   `run_tests.ps1` 里。gitcode 那条 `origin` 与 Actions 无关。
+  **分支名已定：远端 c3test 保持 `dev`，不改名为 `fan/dev`**（用户 2026-09-23 09:58 决定：
+  "既然不改也不影响的话，那我就不改了"）。本地 `fan/dev` → 远端 `dev` 用 refspec 映射
+  （`git push github HEAD:dev`）即可，全仓唯一引用分支名的 `.github/workflows/ci.yml:5`
+  保持 `branches: [main, dev]` —— **不要再往里加 `fan/dev`**（本轮已有一次加了又撤）。
   **红线**：本机门不变 → 平时依旧"永不 push"；只有上面那一次里程碑全量允许推 `github` 远端
   （`dev` 分支或 `github-test-*` tag），不建 MR，且届时先跟用户确认一句。
 - **触及类结构体布局 / Set / 派发 / COM 打包的批次，除全量门外必须另跑 T2**（B04–B06a 这三批此前漏了）。
@@ -594,6 +594,143 @@ dispinterface 定义；`[Default, Source]` 连接点实现；泛型类实现新�
     `vb6_iv_from_iv_<C>` 同样要自守 `if (!self) return NULL;`。
     为什么 B05 的门没抓到：既有断言全部先 `Set w = New CWriter` 再上转，没有 Nothing 侧路径。
 
+### D23 B06b（下行转换 / `TypeOf <类变量> Is <接口>` / 修 B05 野地址）实施记录（2026-09-23）
+
+1. **按类导出两个跨模块助手**（`emitIfaceImplTables` 尾部发；声明进类的 `.h`、实现进类的 `.c`，
+   与槽表实例同 TU）：
+   - `void* vb6_iv_from_iv_<C>(void* self)` —— 薄指针 → 实例。先 `if (!self) return NULL;`，
+     再取 `vt = *(const void**)self`，与本类每个 `&vb6_ivtbl_<I>_for_<C>` **地址全等**比对，
+     命中才 `(char*)self - offsetof(vb6_cls_C, __iv_<I>)`。这就是 D22-8 说的"障碍是身份不是
+     布局"的落地：表实例是 owning TU 的 `static const`，别处拿不到地址，所以判身只能在这里做。
+   - `int32_t vb6_iv_test_iid_<C>(void* self, const void* riid)` —— 静态 IID 归属判定。
+   两者都只在 `ivImplementedIfaces(module)` 非空时发射 → 无新语法工程生成物逐字节不变。
+2. **下行转换**：`Set <类变量> = <接口变量>` 发成一个 C 块
+   `void* __ivdown = vb6_iv_from_iv_C(s); w = (vb6_cls_C*)__ivdown; if (w) s->vt->AddRef(s);`
+   —— **AddRef 是必需的**：类变量那一遍引用按 D21-5 的不变式永不释放，不给它加一次码，
+   接口侧 `Release` 到 0 就会把对象从这个还活着的类变量脚下抽走（悬垂）。未命中得 NULL，
+   即 VB6 的 `Set w = Nothing` 语义；VB6 这里其实抛 438，**静态契约拒绝留给 B13/P6**（记边界）。
+3. **修掉 B05 的真缺陷（D22-10）**：上转型现在发成
+   `s = ((w) ? &(w)->__iv_IWriter : NULL);`。守卫**只加在"裸类变量"这条路上** —— 给 `New`
+   那条加三目会让 `_New()` 求值两次、凭空多创建一个实例（这个坑我在写的时候避开了，
+   注释里写明原因）。配套负控用例 `DN0`：`Dim nz As CWriter` 永不 Set → `Set snz = nz` →
+   `snz Is Nothing` 必须为真。**A/B 实测（同一份最小工程，只在 .build/negctl 里做，未入库）**：
+   pre-B06b 基线二进制（@613d2b8，exe 67a28bfe）编译出的可执行文件 **段错误 exit=139**
+   （= 0xC0000005，正是 `AddRef` 解引用 `NULL + offsetof` 那个非空野地址）；
+   本批二进制（exe 4202570a）同一工程 exit=0 且打印 `NEGCTL:Nothing-OK`
+   → 缺陷是真的、不是理论上的，且本批确实修掉了。`itf_xmod` 里的 DN0 就是这个 case 的常驻版本。
+4. **`TypeOf <工程类变量> Is <新式接口>` 走静态 IID 归属**（`vb6_iv_test_iid_<C>`）：类变量的
+   动态类型恒等于声明类型，所以这条**不需要减 offsetof**，也就不要求"这个类恰好实现该接口"
+   才编译得过 —— 不实现时必须老实返回 False（用例 `TOC3` 用无实现类的 `INope` 打这一发）。
+   左侧现在三类形态：接口变量（B06a，`vb6_IfaceSupports` 走真 QI）／类变量（B06b，静态判定）／
+   其他（ASCII 诊断，仍无 `--syntax-only` 级用例覆盖）。`vb6_TypeOf` 那个恒返 0 的桩照旧一个字没动。
+5. **两侧都只认裸标识符**：`me-><字段>` 形式的类字段／接口字段、属性目标、Variant 右值都不接
+   （接口字段的声明侧 `Dim x As IWriter` 在类模块里会进 `knownIvrefVars_` 的短名，但 `Set me->x = …`
+   的目标文本带 `me->` 前缀命不中 → 沿用 B04 的纯赋值路径，不计身份）。记为边界。
+6. **实跑与负控**：`itf_xmod_writer` 断言 18→25 条（DN0..DN3 + TOC1..TOC3），实跑全中、
+   仍然**恰好 2 条 TERM**（`last=bye` / `last=scoped`）→ 新增的下行转换 AddRef 与三处上转型
+   守卫没有多一个或少一个引用。
+7. **待回记**：门数字与逐字节护栏见总表 GATE_BASELINE（同批跑）。
+
+### D24 B07 开工地图（2026-09-23 B06b 收尾轮产出；行号为 fa877ef/613d2b8 之后本轮 Explore 实测，含对 D2/D6 的硬修正）
+
+- **`Inherits` 今天会被硬拒**（不是静默接受，好事）：`inherits` 词化成 `Identifier`，
+  在 `src/parser/parser_module.cpp:187-191` 落到 fall-through，报
+  `VB2002 unexpected token at module level: inherits`（`ParseUnexpectedToken=2002`,
+  `src/common/diagnostics.hpp:49`），随后 `advance()+skipToNextLine()` → 整行丢弃。
+  全仓（`src/` + `tests/` + `docs/vb6-manual/`）对 `Inherits`/`MyBase`/`Protected`/
+  `Overridable`/`vb6_cvtbl_` 的命中数 = **0**，B07 起全是绿地。
+- **语法接线 = 逐处镜像 `Extends`，四处**：`src/lexer/token.hpp:144-149`（枚举；
+  `:149` 注释"仅接口域; 类继承用 Inherits, P3"就是本批的占位说明）、
+  `src/lexer/lexer_keywords.cpp:51-54`、`src/parser/parser_helpers.cpp:56-57`（软关键字表，
+  `canBeName()=Identifier||isSoftKeyword` 在 `:67-69`）、`src/lexer/token.cpp:31`
+  （`isKeyword()` 显式列表）。枚举位置在 `TrueKeyword`(:24)~`GetObject`(:289) 区间内，
+  所以 `token.cpp:7` 的区间判定自动覆盖。**切勿**进 `isStatementStart()`
+  （`token.cpp:93-126` 连 `Interface`/`Extends` 都不在，D12 的"语句位永不识别"红线）。
+  基类名解析照抄 `parseImplements()`（`parser_module.cpp:242-259`，Fix 083 的点号循环在 `:253-257`）。
+- **D6 的头行接缝是错的，放松它=改既有 error path**：`parser_module.cpp:89-104` 那条
+  `Class` 头行分支要求 `parseTypeParams()` 见到 `( Of`（`parser_decl_var.cpp:463-471` 否则返回空）
+  → `:95-97` 直接报"泛型类头行需要 (Of T[,U])"。即今天 **`.cls` 首行写 `Class Foo` 本身就是错**。
+  B07 若要支持 `Class Derived Inherits Base` 头行形式，必须放松该守卫 → 按 D9 跑逐字节护栏
+  （`test_generics.bas` 在 8 文件清单内）并补一个泛型 `.cls` 用例。建议 v1 只做**独立子句行**
+  `Inherits Base`（B01 的 `Interface…Extends` 也是两条路分开走的先例）。
+- **AST 增量**：`Module` 加 `inheritsName`（`src/ast/detail/ast_decl.hpp:332-360` 字段区，
+  `isClassModule:332`/`implements:349`/`interfaces:352` 旁），`ImplementsClause:40-44` 是"新结构体
+  + clone 路径"的先例（B02b 动 3 处，`src/ast/ast_clone.cpp:707-720` 一带，见 D4）。
+  `ast_printer_visitor_decl.inc` 既不印 `implements` 也不印 `interfaces`（grep 0 命中）→ 无需动打印器。
+  下一个空闲**语义**诊断 ID = **3020**（`SemInterfaceClauseUnbound=3019`, `diagnostics.hpp:81`；4xxx 才是 codegen）。
+- **类链求解照抄接口登记表的三趟结构**（`src/driver/driver_interface.cpp`）：Pass A 工程级唯一名 +
+  与模块名冲突（`:29-84`，冲突判定 `:61-67`）、Pass B 父未知（`:90-94`）+ `seen` 集环检测
+  （`:96-113`）、Pass C **父先序**展平 + `used` 键冲突诊断（`:115-167`，`chain.insert(begin)` 在 `:126`）。
+  产出 = **每类一张只读"有效成员表"**（新 `ClassChainRegistry`，Driver 级，与 `IfaceRegistry` 平级），
+  不改 AST、不动符号表枚举。理由与 D2 一致：每模块一张符号表而类名是工程级唯一。
+  合并必须落在 **stage 3.5 之前**（`driver_compile.cpp`：2.6 泛型 :329 / 2.7 接口 :338 /
+  3 语义 / 3.5 `runCrossModuleResolution` :356 / 3.5b :367 / 3.6 :372-387），否则外部工程的逐字段
+  拷贝看不见派生域。单继承 =  arity 检查，另加深度上限。
+- **D6 的合并字段清单不全**：`driver_crossmod.cpp:169-190` 是逐个字段手工拷贝外部 Class 符号，
+  成员表实有 11 张（`symbol_table.hpp:116-197`）：`memberNames` `memberReturnTypes` `memberProcKinds`
+  `memberParams` `memberFieldTypes` `memberFieldNames` `publicFieldNames` `memberFieldDispids`
+  `memberLetParams` `memberSetParams` `eventNames`。漏一个 = 跨模块消费点瞎。**`interfaceMethodParams`
+  是死字段**（D2 当时就记了从没被写入），别往里挂东西。
+- **要"走基链"或吃合并表的函数（点名到行）**：`resolveClassMemberCall`
+  （`cgen_util_classcall.cpp:17-224`；Fix 014 的 `classSym->memberNames` 兜底 `:161-200` 就是守门人，
+  发出名在 `:115/:118/:198/:223`，注意它**不走** `cProcName`，是手拼 `vb6_<Cls>_<prefix><Member>`）、
+  `findClassMemberCallParams`（`:237`，Phase A :248 / Phase B ~:407 / `memberReturnTypes` 兜底 :439）、
+  `findClassMemberWriteParams`（消费点 `cgen_util_comwrite.cpp:275,:387`）、
+  `getClassMethodReturnType`（`:400`）、`canonicalClassMemberName`/`canonicalClassFieldName`
+  （`cgen_util_comwrite.cpp:178`）、`inferClassTypeOfExpr`（`cgen_util_classtype.cpp:15-124+`）、
+  `knownClassVars_` 注册（`cgen_util.cpp:28`、`cgen_decl_{func,proc,prop}.cpp:104/110/112`）、
+  driver 两张字段图扫描（`driver_codegen_typedfield_scan.inc:10-85`、`driver_codegen_voidfield_scan.inc:11-92`）、
+  `classVariantMembers_` 扫描（`cgen_base_generate_state_scan.inc:56-114`）、
+  `emitClassFieldAccessors`（声明 `cgen_helpers.inc:89`，调用 `cgen_base_generate_body_pass.inc:27`）、
+  legacy Implements 覆盖检查（`semantic_analyzer.cpp:236-273`，扫 `memberNames` 在 `:271`
+  → 继承来的实现**应当**满足契约，本批顺手让它走有效成员表）。
+- **布局：不内嵌 `vb6_cls_Base`，改字段扁平复制**。内嵌一条就同时继承基类的 `__refcount` 与
+  `__iv_<I>` 字段 → 双计数（撞 D21-1"一个类一个计数门禁"）、且 derived `_New` 要重复初始化继承槽的
+  vtbl（`emitIfaceNewInit`, `cgen_iface_vtbl.cpp:353-365`）。B07 = 把基类私有字段按原序前置进派生
+  struct 的用户字段区（发码点 `cgen_base_generate_c_open.inc:84-102`，字段 0 仍 `void* __comObj` `:76`，
+  D19 不变）。
+- **遮蔽判定必须大小写无关**（这是本轮发现的真实静默错字段风险）：`:84-102` 的字段循环**零去重、
+  零归一**，而 `cIdent` 保留大小写（`cgen_base_naming.cpp:49-78`）、成员表键却是小写
+  （`memberFieldNames`/`memberFieldTypes`）→ `m_X` 与 `M_x` 今天会发成**两个不同 C 成员**共享一个
+  VB6 逻辑字段。合并时按小写键裁决胜者，struct 与所有表都用同一个拼写。
+- **方法复用 = 转发桩，不做基类方法直调强转**。基方法符号是 `vb6_<Base>_<M>(vb6_cls_<Base>* me,…)`
+  （属性 `vb6_<Base>_prop_get_<P>`），定义在基类 TU；`cProcName` 在
+  `cgen_base_naming.cpp:249-265`（类方法一律带模块段），重载后缀 `_ov<fp>` 在 `:271-274`。
+  `(vb6_cls_Base*)me` 强转有先例（`cgen_form.cpp:210,:237-250,:269` 的 `(vb6_cls_<ctl>*)me`），
+  但它要求前缀布局逐字段一致，还得给每个调用点插桩；桩顺带绕过 `_ov` 后缀、B08 的 Overridable
+  钩子、B09 的 MyBase 去虚化三件麻烦 → B07 发
+  `vb6_<Derived>_<M>(vb6_cls_<Derived>* me,…){ vb6_<Base>_<M>((vb6_cls_<Base>*)me, …); }`
+  只对**未被子类重名遮蔽**的继承成员生成。`me` 的类型来自 `classMeParam()`（`cgen_decl_prop.cpp:324-328`），
+  `visit(MeExpr)` 在 `cgen_expr.cpp:396-411` 发裸 `me`。
+- **B07 语义层有个真空**：全仓没有"项目类成员不存在"的诊断（`cgen_expr_member_precheck.inc` 只管
+  `Err`/`VBA`/控件），今天写 `x.NoSuchMethod()` 会发成一个不存在的 C 调用 → **MSVC 编译错，不是 C3 诊断**。
+  后果：负例断言只能挂在**本批新加的 3020 诊断文本**上，不能靠既有行为。
+- **用例形态**：单 `.cls` 负例照 `tests/itf_neg/n08_missing_slot.cls`（`run_tests.ps1:866-890` 的
+  `$itfNeg`，`Test-SyntaxFail` 在 `:584`，缺失文件→SKIP 不是 FAIL `:891-894`）——`Inherits NotThere`
+  这类"单文件即可判定"的负例零成本。**但 shadow / 单继承 arity / 环 A↔B / 深度上限都是双文件用例**：
+  `Test-SyntaxFail` 只接一个 `$Source`（`:590` 单引号参数）。两条路：给 helper 加文件列表
+  （CLI 本身收多个位置参数：`driver_args.cpp:145` 逐个 push，`driver_frontend.cpp:149-163` 按扩展名定
+  模块类型），或新写 `tests/cls_inh/*.vbp` + `Test-VbpFail`。B07 预算里含这个 helper。
+  正例落地沿用 `tests/itf_xmod/` 的 vbp + `Test-Vbp` 断言（`:503`，只支持正向 needle、无 exclude）。
+- **手册**：新建 `docs/vb6-manual/02-语句/Inherits 语句.md`（模板 = 同目录 `Interface 语句.md`，
+  首行引用块标"本项目扩展"，末尾"实现状态"节，D18-5 的 CRLF 归一 + README `bare_lf==0` 复查照做），
+  README 索引在 `:158`（`- [Interface 语句](…%20语句.md)`）旁按字母序插一行。
+  **必须写明**：`Extends`=接口继承、`Inherits`=类继承，两者永不同义——018 自己 §二十一
+  （`ai/讨论记录/018-接口继承与CoClass设计思路.md:1210-1224`）用 `Inherits` 写接口继承，
+  而 `:1549-1551` 又把它划给类继承，实现按 `Extends` 落地，别照 018 的字面回头改。
+- **D6 其余漂移**（按 D22-8 的规矩不原地改历史，只在此登记）：`getPublicSymbols` 实在
+  `symbol_table.cpp:376`（D6 写 :383，7 行漂移）；D2 计划的 `SymbolKind::Interface` 至今没加
+  （`symbol_table.hpp:23-45` 末位是 `ComGlobalNs`），B07 一切接口信息仍以 `IfaceRegistry` 为准。
+- **护栏口径校正**：逐字节 `--emit-c` 对比是**每批手工仪式**，不是 CI/测试套属性
+  （`grep emit-c tests/run_tests.ps1` = 0 命中），且其机理是**按 feature 早退**
+  （`cgen_iface_vtbl.cpp:341-342/:354-356/:372-373`）。B07 的早退条件必须是
+  "本类或其链用到 `Inherits`"，不是"工程里没有新语法"。8 文件清单里的
+  `tests/test_implements.vbp` 是唯一带 `.cls` 的类工程输入，B07 开工时先**实测确认**它确实
+  产出 class struct（否则"类布局未变"这句断言无覆盖）。
+- **B07 边界（建议，超出的往后批）**：只做 `Inherits` 语法 + 链检测 + 有效成员表 +
+  字段/方法继承的具体类调用；`Protected`/`Overridable`/`Overrides` = B08，`MyBase` = B09，
+  接口实现经继承满足契约的**新式**路径与派生类 vtbl = B08+，CoClass = P5。
+
 ## 运行日志
 
 - 2026-09-23 建表：范围确认（含完整COM）、规范文档 018 入库、现状盘点完成。
@@ -702,3 +839,16 @@ dispinterface 定义；`[Default, Source]` 连接点实现；泛型类实现新�
   属性槽键），并加**无实现类**的 INope 让 E_NOINTERFACE 分支真有覆盖。实跑 18 条断言全中、
   TERM 仍恰好 2 条（QI 收支平衡）。门 `Results: PASS=128 FAIL=0 SKIP=1 TOTAL=129`（exe 7721bd72）；护栏 8 文件对 pre-B06a
   基线全同（worktree @f644003，用后即删）。
+
+- 2026-09-23 09:52–10:37 **B06b（下行转换 + `TypeOf <类变量> Is <接口>` + 修 B05 的 Nothing 上转型野地址）过门并提交 4dc6b7e**：
+  实现只有两件按类导出的助手（`vb6_iv_from_iv_<C>` 先比 `vt` 与自家 `&vb6_ivtbl_<I>_for_<C>` **地址全等**才减 `offsetof`；`vb6_iv_test_iid_<C>` 静态 IID 归属），
+  这就是 D22-8 校正的落地——跨 TU 的障碍是身份验证不是布局（槽表实例是 owning TU 的 `static const`）。下行转换**必须 AddRef**：类变量那一遍引用按 D21-5 的不变式永不释放，
+  不给它加一次码就会在接口侧 Release 到 0 时把对象从还活着的类变量脚下抽走。`TypeOf <类变量> Is <接口>` 走静态判定（类变量的动态类型恒等于声明类型 → 不需要 offsetof，
+  也就不要求该类实现该接口，`TOC3` 用无实现类 `INope` 打这一发），`vb6_TypeOf` 恒返 0 的桩照旧未动。
+  **必修项 D22-10 做了 A/B 实测**（最小工程只在 `.build/negctl` 里跑，未入库）：pre-B06b 基线二进制 exit=139（=0xC0000005，正是 `NULL + offsetof` 那个非空野地址被 AddRef 解引用），
+  本批二进制 exit=0 且打印 `NEGCTL:Nothing-OK`；`itf_xmod` 的 `DN0` 是它的常驻版本。守卫只加在裸类变量路径——给 `New` 那条加三目会二次求值 `_New()`、凭空多创建一个实例。
+  门 `Results: PASS=128 FAIL=0 SKIP=1 TOTAL=129`（exe 4202570a，10:06 起跑、最后一次源码改动在起跑前）；护栏 8 文件对 worktree @613d2b8 基线逐字节全同、用后即删；
+  实跑 25 条断言全中且 **TERM 仍恰好 2 条** → 新增 AddRef 与三处上转型守卫没有多算也没有漏算引用。
+  本轮另外两件事：①按用户指示把 CI 记账口径写进总表（**Actions 级全量是里程碑级**，每批仍跑本机门）；②派 Explore 出 **D24 = B07 开工地图**，其中含对 D2/D6 的 4 处硬修正
+  （`SymbolKind::Interface` 从未加、`getPublicSymbols` 行号漂移、成员表清单缺 7 张、Class 头行分支要求 `(Of T)`）。边界照旧记录：`me->字段` 形式的接口/类字段不接、
+  VB6 的 438 不抛（静态契约拒绝留 B13/P6）、B06c（接口值作实参/进 Variant）随 P6 处理。
