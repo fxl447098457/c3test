@@ -8,21 +8,24 @@
 
 ```
 STATUS: IDLE               # NOT_STARTED | DESIGN | BUSY | IDLE | ALL_DONE
-LAST_RUN: 2026-09-23T07:00:30+08:00   # 本轮（人工续跑，用户"继续完成"）三连：B02b → dde7c32、
-               # B03 → c47cdce（门 128/0/1/129）、总表收口 → 3a99efb，并追加 D19 B04 开工地图。
-               # 开工核查 06:08：树 clean、无 C3/cl/link/ninja、exe 与基线同源。
-LAST_COMMIT: 本轮地图/收口 docs 提交（哈希见 git log）；代码批 = c47cdce(B03)、dde7c32(B02b)
-CURRENT_BATCH: **B04**（P2 第一批，全项目第一批真发码）——接口值代码生成：`vb6_ivtbl_<I>` COM 形态
-               槽表 + 类侧实例 + 薄指针表示 + `As <Iface>` 变量登记 + 派发。**开工必读 D19**：
-               里面是本轮实测的后端接缝行号，并且**推翻了 D3 的一处硬假设**
-               （`__comObj` 必须是结构体第 0 字段，RTL 有裸偏移 0 读写 → 接口槽指针要放在它之后），
-               另含"必须新建的两件基础设施"（CCodeGen 拿不到 IfaceRegistry、无工程级已发表去重表）、
-               `isInterfaceModule` 后端零消费、以及建议拆分 **B04a（只发槽表不派发）/ B04b（薄指针+派发）**。
-               P1（B01/B02/B02b/B03）已全部收口。
-GATE_BASELINE: Results: PASS=128 FAIL=0 SKIP=1 TOTAL=129   # exe md5 053150bf（.build/gate_B03.log，
-               # 06:21–06:45 无插队重建，跑前后 md5 一致；SKIP=已知 test_vbman 环境项）。上一基线
-               # 125/0/1/126（B02b）→ B03 +3 条（itf_p03 + itf_n20 + itf_xmod_writer）全绿，
-               # 零新增失败；`itf_xmod_writer` 是新增的 Test-Vbp 通路（宿主模块真实编译+运行）。
+LAST_RUN: 2026-09-23T08:04:00+08:00   # B04（接口值代码生成）过门并提交 6bc97e8，随后总表收口（D20）。
+               # 本轮从 07:05 开工、门 07:33:30 起跑、08:01 结束，全程未构建期插队。
+               # 下一轮自动运行从 B05 开工；重入保护照常：见 BUSY + 不足 55 分钟即跳过。
+LAST_COMMIT: 代码批 = 6bc97e8(B04)、c47cdce(B03)、dde7c32(B02b)；本轮 docs 收口提交哈希见 git log
+CURRENT_BATCH: **B05**（P2 第二批，生命周期）——真实 IUnknown/AddRef/Release 与引用计数、
+               `Set`/`Nothing`/作用域末尾释放、宿主 `.cls` 不再发空类结构体（D20-7④）。
+               **开工必读 D20**（B04 落地后的真实布局 + 5 条边界）。三条硬约束：
+               ① B04 的 IUnknown 三件套槽是 `E_NOTIMPL` + 常量 1 的**占位**，**槽号自此固定不可再变**；
+               ② `vb6_ivref_<I>` 是单词薄指针，`Set s = Nothing` 现在只发 `s = NULL`，
+                 引用计数要在 `Set` 赋值路径（`cgen_setlet_set_prop.inc`）与作用域末尾**两头**补，
+                 别只改一处；③ 经接口变量写属性（`put_`/`putref_` 槽）仍是 B04 边界①，
+                 接口↔接口转换与 `TypeOf … Is <接口>` 属 B06，别顺手做进 B05。
+               P1 已全收口；P2 已完成 B04。
+GATE_BASELINE: Results: PASS=128 FAIL=0 SKIP=1 TOTAL=129   # exe md5 ef1a7520（.build/gate_B04.log，
+               # 07:33:30 起跑；最后一次源码改动 07:32:52，跑前后 exe 一致，期间无他人重建。
+               # SKIP=已知 test_vbman 环境项）。条目数与 B03 基线持平：B04 未新增用例条目，
+               # 只给 `itf_xmod_writer` 追加 IFV1/IFV2/IFV3 三条运行断言 → 零新增失败。
+               # 另附 8 文件 --emit-c 对 pre-B04 基线二进制逐字节全同（D20-8、D20-9）。
 ```
 
 > 重入保护：若运行开始时 STATUS=BUSY 且 LAST_RUN 距今不足 55 分钟，说明上一次运行可能仍在进行——本次**立即结束，不做任何修改**。
@@ -62,7 +65,7 @@ GATE_BASELINE: Results: PASS=128 FAIL=0 SKIP=1 TOTAL=129   # exe md5 053150bf（
 | B02 | P1 | 语义：接口符号注册 + Extends 链 prepass(2.7) + 槽位表 + Implements 契约完整性/签名比对 | ☑ | beb75a7 | `Results: PASS=118 FAIL=0 SKIP=1 TOTAL=119`（gate_B02F.log；exe md5 13e99638 跑前后一致）+ 新增 7 条用例全绿 + legacy `test_implements` 仍 PASS。交付：stage 2.7 `runInterfacePrepass`/`IfaceRegistry`/Extends 链与槽表/五类诊断 + `checkNewStyleInterface` 严格契约比对（D15 记 1–6）。`SymbolKind::Interface` 按 D15-2 推迟到 B04。成员级子句拆给 B02b |
 | B02b | P1 | 成员级 `Implements I.M[, I.N]` 尾子句（显式绑定优先于同名隐式匹配）+ 泛型模板内 Interface 的 3018 用例 | ☑ | dde7c32 | `Results: PASS=125 FAIL=0 SKIP=1 TOTAL=126`（gate_B02bF.log；exe md5 cdac040f 跑前后一致）+ 7 条新用例（itf_n14..n19 + itf_p02）全绿 + legacy `test_implements` 仍 PASS。交付：`parseTrailingImplementsClauses` + 三个过程节点的 `implementsClauses`（含克隆路径）+ 槽键兼容 `I.Name`/`I.get_Name` 与链上任一接口名 + `checkMemberImplementsClauses` 兜底（新 ID 3019）。详见 D16 |
 | B03 | P1 | `.cls` 头行宿主形式 `Interface IFoo … End Interface`（1 文件 1 接口）+ `Module::isInterfaceModule` + 语法手册页/索引 | ☑ | c47cdce | `Results: PASS=128 FAIL=0 SKIP=1 TOTAL=129`（gate_B03.log；exe md5 053150bf 跑前后一致）+ 3 条新用例（itf_p03 + itf_n20 + itf_xmod_writer）全绿 + legacy `test_implements` 仍 PASS。要点：宿主识别放 stage 2.7（parser 拿不到最终模块名）、VB3002 只豁免宿主自身、跨模块契约已端到端跑通（详见 D18） |
-| B04 | P2 | 接口值代码生成：`vb6_ivtbl_<I>` COM 形态槽表 + 类侧实例 + 薄指针表示 + `As <Iface>` 变量登记 + 派发 | ☐ | | |
+| B04 | P2 | 接口值代码生成：`vb6_ivtbl_<I>` COM 形态槽表 + 类侧实例 + 薄指针表示 + `As <Iface>` 变量登记 + 派发 | ☑ | 6bc97e8 | `Results: PASS=128 FAIL=0 SKIP=1 TOTAL=129`（gate_B04.log；exe md5 ef1a7520 跑前后一致）+ 接口值派发端到端断言 IFV1/IFV2/IFV3 全绿 + legacy `test_implements` 仍 PASS。要点：新增 `cgen_iface_vtbl.cpp` 独立编译单元、`#ifndef VB6_IVTBL_<I>` 守卫替代 D19 设想的工程级去重表、`__iv_<I>` 紧跟 `__comObj`、槽键口径上提到 `interface_sig.hpp` 与语义层同源。B04a/B04b 合并成一批（理由见 D20-1）。逐字节 emit-c 护栏 8 文件对 pre-B04 基线全同 |
 | B05 | P2 | 生命周期：实现类结构前置 vtbl 指针数组 + refcount 头 + AddRef/Release + Set/Nothing/作用域释放 | ☐ | | |
 | B06 | P2 | 转换与判定：接口↔类、多接口对象、`TypeOf … Is <接口>`、上/下行转换契约校验 | ☐ | | |
 | B07 | P3 | `Inherits` 语法 + 类链检测（单继承/环/深度）+ 继承成员合并与遮蔽 + 派生域 | ☐ | | |
@@ -427,6 +430,42 @@ dispinterface 定义；`[Default, Source]` 连接点实现；泛型类实现新�
   （只发码不派发，逐字节护栏先保住"无新语法工程零变化"）；B04b = 薄指针类型分叉 +
   `knownIfaceVars_` 四处登记 + 派发与 `Set`；B05 再管生命周期。两块各自过门。
 
+### D20 B04（接口值代码生成）实施记录（2026-09-23）
+
+1. **B04a/B04b 合并成一批**（D19 建议的拆分不成立）：只发槽表不派发没有任何**可观测行为**，
+   过门等于没过门。实际节奏改成"先 emit-c 观察生成物 → 再接派发 → 一次过门"。
+2. **落地后的内存布局**（`__comObj` 保第 0 位 = D19 硬修正的执行）：
+   `vb6_cls_C { void* __comObj; vb6_ivref_<I> __iv_<I>; <原字段…>; }`，
+   `vb6_ivref_<I>` 是**单词结构体** `{ const vb6_ivtbl_<I>* vt; }`，接口值 = `&obj->__iv_<I>`，
+   适配器里 `offsetof(vb6_cls_C, __iv_<I>)` 做 container_of 再直调 `vb6_C_<M>(me, …)`。
+3. **不需要 D19 说的"工程级已发表去重表"**：`vb6_ivtbl_<I>` / `vb6_ivref_<I>` 用
+   `#ifndef VB6_IVTBL_<I>` 守卫，发在**每个模块头文件**里 → 同 TU 多次包含天然幂等，
+   也不依赖 include 顺序；输出可复现靠"按小写接口名排序"（`unordered_map` 迭代顺序不稳定）。
+   三个发射钩子在 `ivreg_` 为空时**零输出**，所以无新语法工程的生成物逐字节不变（已实测）。
+4. **CCodeGen 接入方式**：`cgen.setInterfaceRegistry(&ifaces_)`，与 legacy 的
+   `setInterfaceImplementers` 同一个注入点（`driver_codegen_module_loop.inc`）；
+   新后端文件 `src/backend/module/cgen_iface_vtbl.cpp`（`CMakeLists.txt` 的 `vb6c3-cgen` 列表登记）。
+5. **槽键口径只有一份**：成员名→槽键 = 先裸名（Sub/Function）再 `get_/put_/putref_` 前缀回退；
+   `ifaceProcClauses` / `ifaceSlotPrefix` / `ifaceClauseSlotKey` 从 `semantic_analyzer_iface.cpp`
+   上提到 `interface_sig.hpp`，语义层契约比对与后端绑定查找（`ivFindImplMember`）共用，
+   包括"写了子句的成员不再参与同名隐式匹配"这条规则。
+6. **实测生成物**（`tests/itf_xmod` 的 Main，`--emit-c`）：
+   `vb6_ivref_IWriter* s = NULL;` → `s = &(w)->__iv_IWriter;  /* Set */` →
+   `s->vt->emit(s, vb6_BSTR_FromStr(L"delta"));` / `s->vt->total(s)` / `s->vt->get_last(s)`；
+   `Set s = Nothing` → `s = NULL`、`If s Is Nothing` 直接可用（薄指针语义免费送）。
+   运行断言 `IFV1/IFV2/IFV3:OK` 已并入 `itf_xmod_writer` 的 `Test-Vbp`  needles。
+7. **本批边界（后面批次补，别当已存在）**：
+   ① 经接口变量**写**属性（`s.Title = v` → `put_` 槽）未接；
+   ② 接口↔接口转换、`TypeOf … Is <接口>`（B06）；③ 真实 IUnknown/引用计数（三件套现在是
+   `E_NOTIMPL` + 常量 1 的**占位**，槽号自此固定）（B05/B13）；
+   ④ 宿主 `.cls` 仍按普通类发一个空结构体（无害，"宿主不发类实例"待 B05 一起做）；
+   ⑤ `Set s = <Variant>` 右值推断没有 legacy 那样的唯一实现类兜底，直接报 ASCII 诊断
+   `Interface binding: Set … needs a class instance or New …`，**该诊断暂无用例覆盖**。
+8. **门数字不变**：129 项（本批只给 `itf_xmod_writer` 加了 3 条断言，没新增用例条目）；
+   逐字节 emit-c 护栏 = 8 文件对 pre-B04 基线二进制（worktree @f8ca84e）**全同**。
+9. **worktree 卫生**：基线 worktree 用完即 `git worktree remove --force` + `git worktree prune`，
+   并确认 `git worktree list` 只剩主目录（历史上留过孤儿 worktree 迷惑后人）。
+
 ## 运行日志
 
 - 2026-09-23 建表：范围确认（含完整COM）、规范文档 018 入库、现状盘点完成。
@@ -495,3 +534,18 @@ dispinterface 定义；`[Default, Source]` 连接点实现；泛型类实现新�
   `vb6_ivtbl_` 前缀全仓零占用可用；建议拆 B04a（只发槽表 + 宿主不发类实例 + 逐字节护栏）
   与 B04b（薄指针 + 四处 `knownIfaceVars_` 登记 + 派发/`Set`）。**P1 阶段（B01/B02/B02b/B03）至此收口**，
   门基线 128/0/1/129（本轮未改代码，故未复跑）。
+
+- 2026-09-23 07:05–08:04 **B04（P2 第一批：接口值代码生成）过门并提交 6bc97e8**：人工确认"没有其他写者"
+  后直接开工。**D19 建议的 B04a/B04b 拆分未采纳**（只发槽表不派发没有任何可观测行为，过门等于没过门），
+  节奏改成"先 `--emit-c` 观察生成物 → 再接派发 → 一次过门"。交付：新编译单元
+  `src/backend/module/cgen_iface_vtbl.cpp`（14 个成员，`CMakeLists.txt` 的 `vb6c3-cgen` 登记）+
+  三个发射钩子（头文件尾 / 类结构体 `__comObj` 之后 / `_New()` 里 `vt` 初始化）+
+  `Set`/`MemberAccess`/`IndexOrCall` 三处接线 + `cgen_base_type.cpp` 在 Class 分支**之前**返回薄指针类型。
+  两处对开工地图的修正：**不需要**工程级"已发表去重表"（`#ifndef VB6_IVTBL_<I>` 守卫 + 按小写接口名排序
+  即可幂等且可复现）；槽键口径不必复制一份（`ifaceProcClauses`/`ifaceSlotPrefix`/`ifaceClauseSlotKey`
+  从 `semantic_analyzer_iface.cpp` 上提到 `interface_sig.hpp`，语义比对与后端绑定查找同源）。
+  实测生成物：`vb6_ivref_IWriter* s = NULL;` → `s = &(w)->__iv_IWriter;` → `s->vt->emit(s, …)` /
+  `s->vt->total(s)` / `s->vt->get_last(s)`，`Set s = Nothing` 与 `If s Is Nothing` 白送（薄指针语义）。
+  门 `Results: PASS=128 FAIL=0 SKIP=1 TOTAL=129`（exe md5 ef1a7520 跑前后一致；用例条目数与 B03 持平，
+  本批只加 3 条断言）+ 8 文件 `--emit-c` 对 pre-B04 worktree(@f8ca84e) 基线逐字节全同。
+  基线 worktree 已 `remove --force` + `prune`，`git worktree list` 只剩主目录（D20-9）。
