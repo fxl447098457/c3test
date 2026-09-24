@@ -4,35 +4,43 @@
 > 每次运行开始先读本文件，结束前必须更新本文件（状态头 + 批次清单 + 运行日志）。
 > 规范输入: `ai/讨论记录/018-接口继承与CoClass设计思路.md`（含 tB 文档要点与分阶段设计思路全文）。
 
-STATUS: BUSY             # NOT_STARTED | DESIGN | BUSY | IDLE | ALL_DONE
-LAST_RUN: 2026-09-24T13:05:17+08:00   # 本轮 = **B10 代码已完成并提交 `3c5d8e6`，但门没跑成**：GitHub 侧现在 502/504
-               # （`git push github HEAD:dev` 三次全挂，`ls-remote` 只在 `-c http.version=HTTP/1.1` 下
-               # 勉强通一次，`api.github.com` 直接 502）→ 按"没跑门就不记 GATE_BASELINE、不收 IDLE"的
-               # 规矩，状态留在 BUSY，**下一轮的第一件事就是把 `3c5d8e6` 推上去盯 watcher**。
+STATUS: IDLE             # NOT_STARTED | DESIGN | BUSY | IDLE | ALL_DONE
+LAST_RUN: 2026-09-24T13:17:37+08:00   # 本轮 = **B10 收线**（代码 `3c5d8e6`，门 = Actions run **#16 = success**、head_sha 已核；
+               # 上一轮把同一批的代码+文档提了、门当时被 GitHub 502/504 挡住，本轮只做"推上去 + 盯完 + 记账"）。
                # 自动运行见本行不足 55 分钟请立即跳过。
-LAST_COMMIT: 代码批 = 3c5d8e6(B10，**未过门**)、9eb2ca7(B09c)、debb110(B09b)、02bac92(B09)、77ecef1(B08f-1)、40eea3f(B08e-6)、d9eca95(B08e-5)、392a52d(B08e-4)   # **commit message 一律现写、不复用上批文本**；push 只推 `github/dev`（Actions 门），`origin`(gitcode) 与 `main` 不碰、**绝不建 MR**。
-CURRENT_BATCH: **B10 收尾 = 把已提交的 `3c5d8e6` 过门并记账**，然后才开 **B11**。
-               1. 推 `github HEAD:dev`（504 就换 `-c http.version=HTTP/1.1` 或隔几分钟重试；**别改代码**，
-                  本轮代码已经量完：见 D43 末"验收"段）。
-               2. `pwsh 7` 跑 `scripts/watch-gh-actions.ps1 -Interval 45`；收线后**核 run 的 head_sha == 3c5d8e6**，
-                  再数 7 个 job；顺带在 vbp 分片日志里确认 `itf_via_pair` 与 `itf_via_x86` 双 PASS。
-               3. 把数字记进本头（GATE_BASELINE 换成本轮 run），`STATUS` 才改 IDLE、`CURRENT_BATCH` 交出 **B11**。
-               4. **B11 = P5 `CoClass…End CoClass` 语法 + `[CoClassId]/[Default] Interface/[ComCreatable]/
-                  [CoClassCustomConstructor]` 折算 + 契约聚合校验**（设计依据 018 + 本表 D1/D2/D3；
-                  计划书另见 `ai/026`，未提交）。开工照例先量：`CoClass` 这个词今天是否已在词法登记、
-                  现有 `[Default]`/attribute 折算通路在哪、组内可用(P5)与对外激活(P6/B15-B17)的分界。
-               仍开（B10 顺带量出来的三条，都在 **caller 侧**、不在 B11 里顺手做）：接口变量上的
-               `Property Let/Set` 写（发成模块变量形状 → C2065）、带 `Optional` 的接口槽调用点少发
-               `_has_`（→ C2198）、接口块声明在 `.bas` 里时调用点认不出（`tests/itf_via` 因此改用头行宿主）。
-               登记不删：B06c（接口值作实参/进 Variant）、⑮d（UDT 在第三个模块）、祖先 Private UDT
-               进**方法签名**（D40 末①）、`com_entry` 基类 extern 的 `void*` 返回、
-               **Class_Terminate 在 EXE 里没有触发点**（D41）。
-               硬约束（沿用）：未用新语法逐字节不变（护栏已扩到 **10 文件**，模板
-               `.build/byteguard_b10.py`，BASE `.build/pre_b10_C3.exe`）；每条改动运行期断言 + A/B 负控 +
-               **同时比发射形状**；布局/接口类改动 **x64 + x86 双跑**。
-GATE_BASELINE: (Actions 级) c3test run **#15 [dev] = completed/success**（https://github.com/fxl447098457/c3test/actions/runs/35951196275；由 `debb110..9eb2ca7` 那次 push 触发；收线后核 **run#15 的 head_sha = `9eb2ca7`** = 本机 `git rev-parse HEAD`；7 个 job 全 success = Build + smoke / bas#1 / bas#2 / syntax / compile / vbp，构建类型 **Release**；**vbp 分片日志逐条可见 `cls_inh_pair ... PASS` 与 `cls_inh_x86 ... PASS`，该分片 `Results: PASS=18 FAIL=0 SKIP=1 TOTAL=19`（SKIP = 已知 test_vbman 环境项）→ 继承线是双架构覆盖**）。同批本机侧：`tests/cls_inh` 断言 **52→59**、x64 与 x86 build+run 各 **59/59、0 FAIL**；A/B（`.build/pre_b09c_C3.exe`）改码前**编不过** = 1×C2065；8 文件 `--emit-c` 对 `pre_b09c_C3.exe` 全同 **8/8**；`-Category syntax` **84/0**。上一条门 = B09b 的 run **#14**（head debb110，全绿）；再上一条 = B09 的 run **#13**（head 02bac92，全绿）。再上一条本地全量测量 = B08e-5（`.build/gate_B08e5.log`，exe md5 ac14cf25，153/0/1/154，留作 Debug 侧对照基线）。
-               # 逐字节护栏每批都做：8 文件 `--emit-c` 对"改码前"exe 全同 8/8。下一批 BASE = `.build/pre_b10_C3.exe`
-               # （本轮过门用的 exe md5 = `4e3c5cb9`；**动代码前先** `cp .build/C3.exe .build/pre_b10_C3.exe`）。
+LAST_COMMIT: 代码批 = 3c5d8e6(B10)、9eb2ca7(B09c)、debb110(B09b)、02bac92(B09)、77ecef1(B08f-1)、40eea3f(B08e-6)、d9eca95(B08e-5)、392a52d(B08e-4)   # **commit message 一律现写、不复用上批文本**；push 只推 `github/dev`（Actions 门），`origin`(gitcode) 与 `main` 不碰、**绝不建 MR**。
+CURRENT_BATCH: **B11 = P5 `CoClass…End CoClass`**，实施依据是 **`ai/026-CoClass与COM暴露计划书.md`**
+               （它已声明"取代 022 里关于 P5 的那几段"）：026 第五节 = B11 的全部职责，第六节把 B11 拆成
+               **C01（块语法 + 属性行落 AST，不校验不发码）→ C02（身份求解唯一函数 CLSID/IID/ProgID + 可复现性）
+               → C03（契约聚合校验 + 拒绝清单 + `As <CoClass>` 语义）→ C04（存量 attribute 只读折算）**。
+               一个批次只推一格，别把 C01 与 C03 混着做（026 特意把"不校验、不发码"钉在 C01）。
+               1. **先量后写**（B10 又验了一次：每层的可观测面不一样）：`CoClass` 今天**不是** lexer token
+                  （本轮 grep：`src/lexer/`、`src/parser/` 里只剩 `parser_interface.cpp:41` 一句注释说
+                  "CoClass 系列属性名先接受语法、由 P5/P6 消费"）→ 量 `CoClass Foo … End CoClass` 现在
+                  报什么、属性行进不进 AST，裁决写进新的 **D44**，再动词法。
+               2. 词法登记照 B10/Delegate 的**软关键字四件套**（`token.hpp` 枚举 + `token.cpp::isKeyword` +
+                  `lexer_keywords.cpp` + `parser_helpers.cpp` 软表；`isStatementStart` 不加），
+                  登记前先做语料核查（026 二节已给一份，复核一次即可）。
+               3. 契约聚合**复用** B02 的 `checkNewStyleInterface`/`IfaceRegistry`，不新造比对器（026 五-1）；
+                  身份求解必须**只有一处函数**（026 三节"不可让步"），B13/B16 的 legacy IID mint 分叉以它为判据。
+               4. 拒绝清单四类（026 五-6）：`Inherits` 一个 CoClass、EXE 工程 `[ComCreatable(True)]`、
+                  `[Implementation]` 指向不存在/非类、接口集合里混 legacy `.cls` 当接口 —— 诊断 ASCII，
+                  负例走 `--syntax-only`（语法期）或 `--emit-c`（发码期），按诊断所在层选通路（022 记过这条）。
+               5. 硬约束（沿用）：没有 CoClass 块也没有被折算 attribute 的工程**逐字节不变** —— 护栏现在是
+                  **10 文件**清单（B10 起），模板 `.build/byteguard_b10.py`，BASE = `.build/pre_b11_C3.exe`
+                  （**动代码前先** `cp .build/C3.exe .build/pre_b11_C3.exe`，本轮 exe md5 `2a121f18`）；
+                  每条改动运行期断言 + A/B 负控 + **同时比发射形状**；布局/接口类改动 **x64 + x86 双跑**。
+               6. 门：`git -c http.version=HTTP/1.1 push github HEAD:dev`（GitHub 今天 502/504 过，
+                  强制 HTTP/1.1 就通），`pwsh 7` 跑 `scripts/watch-gh-actions.ps1 -Interval 45`，
+                  **核 run 的 head_sha == 本批提交**才记 GATE_BASELINE；门没跑完就别把 STATUS 收成 IDLE。
+               仍开（不在 B11）：B10 量出的三条 **caller 侧**洞（接口变量的 `Property Let/Set` 写、带
+               `Optional` 的接口槽调用点少发 `_has_`、接口块放 `.bas` 时调用点认不出）、B06c（接口值作实参/
+               进 Variant）、⑮d（UDT 在第三个模块）、祖先 Private UDT 进**方法签名**（D40 末①）、
+               `com_entry` 基类 extern 的 `void*` 返回、**Class_Terminate 在 EXE 里没有触发点**（D41）。
+               开工前必读 026 七节的四条债务（D15-8 的 IID mint、D22-7④ 的 QI 返回本接口薄指针、
+               D33 的字段定序、B15 才让"对外"可见）。
+GATE_BASELINE: (Actions 级) c3test run **#16 [dev] = completed/success**（https://github.com/fxl447098457/c3test/actions/runs/35958487267；由 `9eb2ca7..3c5d8e6` 那次 push 触发 —— 注意前两次推被 GitHub 504 挡了，**`-c http.version=HTTP/1.1` 之后才通**；收线后核 **run#16 的 head_sha = `3c5d8e6`** = 本机 `git rev-parse HEAD`；7 个 job 全 success = Build + smoke / bas#1 / bas#2 / syntax / compile / vbp，构建类型 **Release**；**vbp 分片日志逐条可见 `itf_via_pair ... PASS` 与 `itf_via_x86 ... PASS`，该分片 `Results: PASS=20 FAIL=0 SKIP=1 TOTAL=21`**（新增两项、SKIP 仍是已知 test_vbman 环境项））。同批本机侧：新工程 `tests/itf_via` **VIA1..VIA9 在 x64 与 x86 各 9/9**；A/B（`.build/pre_b10_C3.exe`）对同一工程停在 `VB2003`+`VB2002`（= D42 的原始读数）；**逐字节护栏从 8 文件扩到 10 文件**（加进 `itf_xmod\XWriter.vbp`、`cls_inh\Inh.vbp`，因为本批动的是接口适配器发射器与 stage 2.7）对 `pre_b10_C3.exe` 全同 **10/10**；`-Category syntax` **84→89**、`-Category vbp` **20/0/1/21**；本机 exe md5 `2a121f18`。上一条门 = B09c 的 run **#15**（head 9eb2ca7，全绿）；再上一条 = B09b 的 run **#14**（head debb110）。再上一条本地全量测量 = B08e-5（`.build/gate_B08e5.log`，exe md5 ac14cf25，153/0/1/154，留作 Debug 侧对照基线）。
+               # 逐字节护栏每批都做：10 文件 `--emit-c` 对"改码前"exe 全同 10/10；下一批 BASE = `.build/pre_b11_C3.exe`。
 ```
 
 > 重入保护：若运行开始时 STATUS=BUSY 且 LAST_RUN 距今不足 55 分钟，说明上一次运行可能仍在进行——本次**立即结束，不做任何修改**。
@@ -2034,3 +2042,4 @@ vb6_F9Base_prop_let_Level((void*)u.c, 9);  /* Property Let via prop_get_ rewrite
 - 2026-09-24 10:56– **B09c（`Set MyBase.<属性>` 目标侧 + P3 收尾两条实测）提交 `9eb2ca7`**：三条候选先一起量再动手 —— 只有 ① 需要改码（改码前发 `vb6_T9Base_prop_set_Peer(MyBase, me)`，函数名与实参序都对、**错的只是接收者** → 在 SetStmt 各分支之前接管，`tryEmitMyBaseAssign(forSet=true)` 只认 Property Set，命中 Let 判死）；② ⑮e 早在 B08f-1 就通了（D37 那条是在坏元数据上量的，现测：写绑根 `prop_let_`、读按实例派发、运行期 109 两架构一致）→ 只补断言；③ `Class_Terminate` 继承链**不做** —— EXE 工程三种形状实测都不触发 terminate（`_Destroy` 只有接口 Release 归零与窗体销毁两个调用点），现在发就是发死代码，登记为生命周期/P6 那片的一个既有缺口。自己写错的两条期望也记进 D41（`Level` 在 `InhSib` 分支上没有槽 = 按分支建表是对的；根类 `Class_Initialize` 是赋值不是追加）。验收：`Inh.vbp` 断言 **52→59**、**x64 与 x86 各 59/59**、A/B 改码前编不过（1×C2065）、8 文件 emit-c 对 `pre_b09c_C3.exe` 8/8、`-Category syntax` 84/0。门 = GitHub Actions（推 `debb110..9eb2ca7`，pwsh 7 盯 watcher）。**P3（继承线）到此收口**：B07a/B07b/B08a-d/B08e 13 站/B08f-1/B09/B09b/B09c 全出，下一批 **B10 = `Implements Via`（委托式实现，免手写转发桩）**。
 - 2026-09-24 11:40– **B09c 收线（只读 + 文档，未改编译器代码）**：Actions run **#15 [dev] = completed/success**， 收线后核 **head_sha = `9eb2ca7`** = 本机 `git rev-parse HEAD`，7 个 job（Build + smoke/bas#1/bas#2/syntax/compile/vbp） 全 success；vbp 分片日志里 `cls_inh_pair ... PASS` 与 `cls_inh_x86 ... PASS` 逐条可见，该分片 `PASS=18 FAIL=0 SKIP=1 TOTAL=19`。 状态头按此记账（`STATUS=IDLE`、CURRENT_BATCH 交出 **B10**、BASE 换 `pre_b10_C3.exe`，本轮 exe md5 `4e3c5cb9`）， 手册 `Inherits 语句.md` 补三处：`MyBase` 的 `Set` 向（含"基类那个名字只有 Let"→ `VB3028`）、 `Class_Terminate` 反序链**为什么不做**（EXE 里没有触发点，实测三种形状）、属性写穿过 UDT 对象字段 从"未交付"移到"已实测通过"（D41 订正）。**顺手把 B10 的第 0 步量掉了**（记录见 **D42**）： `Implements I Via m_f` 今天停在**语法层**（`VB2003` + `VB2002`，因为 `Via` 连软关键字都没登记 —— 四个登记点零命中）， 而去掉 `Via …` 的那份手写就是 **5 条 `VB3012`**（Extends 展开后逐槽报）→ Via 的验收面 = 这 5 条消失且零转发成员。 **P3（继承线）至此完全收口。**
 - 2026-09-24 11:51– **B10（`Implements <接口> Via <持有字段>` 委托式实现）提交 `3c5d8e6`**：四个落点一次接完 —— `Via` 软关键字登记、`ImplementsStmt::viaField`、**stage 2.7 新增 Pass D** 把"字段是不是本类对象字段 / 字段类型那个类实现没实现该接口"裁决成 `vias_`（判定必须在这里做：那些类的符号 3.5 才注入，只有 2.7 看得见整工程模块表），语义层据此免掉逐槽 `VB3012`、发码层据此给没写的槽转发到 **持有对象自己的接口槽** `h->vt-><slot>(h, …)`。**关键选型**：不直调 `vb6_<持有类>_<成员>` —— 接口实现按惯例是 `Private` = C 层 `static`，跨翻译单元连不到（B09 就是这条判死了 `MyBase` 的私有目标），绕表白拿"逐槽合成"。新工程 `tests/itf_via`（纯委托 / 一半自家 / Nothing 字段 / 引用计数 / `TypeOf`）**x64+x86 各 9/9**；A/B 是 D42 那条原始读数（改码前 `VB2003`+`VB2002`）；护栏扩到 10 文件（把两个接口/继承工程也纳入逐字节对照）10/10；`-Category syntax` 84→89。**顺带量出三条既有洞并登记**（见 D43 末）：接口变量的 `Property Let/Set` 写、带 `Optional` 的接口槽调用点少发 `_has_`、接口块放 `.bas` 时调用点认不出 —— 三条都是"到达槽的 caller 形状缺失"，不是委托分支错，另批处理。下一批 **B11 = P5 `CoClass…End CoClass` 语法 + 属性折算 + 契约聚合校验**。
+- 2026-09-24 13:15– **B10 收线（门 = Actions run #16 全绿，本轮只推送+盯门+记账，未改代码）**：上一次推 `github/dev` 连撞 GitHub 502/504（`api.github.com` 也 502），按"门没跑就不收 IDLE"的规矩把 STATUS 留在 BUSY 并把下一步写死在 CURRENT_BATCH 里；本轮 `-c http.version=HTTP/1.1` 推成 `9eb2ca7..3c5d8e6`，watcher 收线后核 **run#16 head_sha = 3c5d8e6**、7 个 job 全 success，vbp 分片日志里 `itf_via_pair`/`itf_via_x86` 逐条 PASS（该分片 20/0/1/21）。GATE_BASELINE 换成本批，P4 的 Via 正式记成已交付，下一批 **B11 = P5 CoClass**（实施依据 `ai/026` 的 C01→C04，开工先量 `CoClass` 块的今天行为并写 D44）。
