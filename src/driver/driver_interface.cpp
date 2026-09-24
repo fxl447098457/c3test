@@ -22,7 +22,7 @@
 
 namespace vb6c3 {
 
-bool Driver::runInterfacePrepass() {
+bool Driver::runInterfacePrepass(const CompileOptions& options) {
     ifaces_.clear();
     ifaceOrder_.clear();
 
@@ -176,10 +176,10 @@ bool Driver::runInterfacePrepass() {
     // 裁决结果 vias_ 有两个消费方: 语义层据此免掉逐槽 VB3012 (契约由被委托对象满足),
     // 发码层据此给没有自家实现的槽转调持有对象的接口槽 (cgen_iface_vtbl.cpp)。
     vias_.clear();
+    // 模块名小写 -> 模块. Pass D 与 Pass F 共用 (CoClass 的 [Implementation] 也按名字找类模块).
+    std::unordered_map<std::string, Module*> byName;
+    for (auto& mod : modules_) byName[ifaceLower(mod->moduleName)] = mod.get();
     {
-        std::unordered_map<std::string, Module*> byName;
-        for (auto& mod : modules_) byName[ifaceLower(mod->moduleName)] = mod.get();
-
         // 与语义层 lookupWrittenIface 同一口径: 先按写的全名, 再按点号末段 (Fix 083)
         auto resolveIface = [this](const std::string& written) -> const IfaceView* {
             auto it = ifaces_.find(ifaceLower(written));
@@ -294,6 +294,94 @@ bool Driver::runInterfacePrepass() {
                           << " comCreatable=" << (id.comCreatable ? "True" : "False") << std::endl;
                 // 同名两个块: 首值胜。重复名/引用是否存在这类校验按 D44 整片归 C03。
                 coclassIds_.emplace(ifaceLower(id.name), std::move(id));
+            }
+        }
+    }
+
+    // --- Pass F: CoClass 块的形状与名字校验 (tB 扩展, ai/022 D48, 批次 B11/C03a) ---
+    // 放在这里（而不是语义层）的理由与 Pass D 同一条：只有此刻整工程的模块表与接口登记表同时可见。
+    // **契约聚合不在这一格**：实现类到底满不满足每个条目，要等 stage 3.4 的成员合并才判得准
+    // （基类实现了、派生类没重写 的情况在 2.7 看不见）→ 归 C03b，见 D48-3。
+    {
+        std::unordered_map<std::string, const CoClassDecl*> firstBlock;
+        for (auto& mod : modules_) {
+            for (auto& cc : mod->coclasses) {
+                if (!cc || cc->name.empty()) continue;   // 无名块: parse 期已报错, 不再级联
+                const std::string key = ifaceLower(cc->name);
+
+                // 1) 块名撞车（重复块名 / 撞模块名 / 撞接口名）
+                if (firstBlock.count(key)) {
+                    diag_->error(DiagnosticID::SemCoClassDuplicate, cc->loc,
+                        "CoClass name '" + cc->name + "' is declared twice "
+                        "(CoClass names are project-wide unique)");
+                    continue;
+                }
+                if (moduleKeys.count(key) && ifaceLower(mod->moduleName) != key) {
+                    // 例外（与 B03 的接口宿主同一条理由）：VB6 最自然的写法就是把
+                    // `CoClass Widget` 写在 `Widget.cls` 里（块名 = 宿主模块名），这不是撞车。
+                    diag_->error(DiagnosticID::SemCoClassDuplicate, cc->loc,
+                        "CoClass name '" + cc->name + "' collides with a module of the same name "
+                        "(module, interface and CoClass names share one project-wide namespace)");
+                    continue;
+                }
+                if (ifaces_.count(key)) {
+                    diag_->error(DiagnosticID::SemCoClassDuplicate, cc->loc,
+                        "CoClass name '" + cc->name + "' collides with an Interface block of the "
+                        "same name (a contract and the class that groups contracts cannot share one name)");
+                    continue;
+                }
+                firstBlock[key] = cc.get();
+
+                // 2) 契约条目
+                std::unordered_map<std::string, int> entrySeen;
+                int defaults = 0;
+                for (const auto& r : cc->ifaces) {
+                    const std::string rk = ifaceLower(r.ifaceName);
+                    if (rk.empty()) continue;            // 无名条目: parse 期已报错
+                    if (!ifaces_.count(rk)) {
+                        auto cls = byName.find(rk);
+                        if (cls != byName.end() && cls->second && cls->second->isClassModule) {
+                            // 026 五-6 第四类: VB6 把 .cls 当接口用的旧习惯, 不是新式契约
+                            diag_->error(DiagnosticID::SemCoClassEntryInvalid, r.loc,
+                                "CoClass '" + cc->name + "' lists '" + r.ifaceName + "' as a contract, "
+                                "but that is a class module (the legacy 'use a .cls as an interface' "
+                                "habit is not a contract; declare an Interface block instead)");
+                        } else {
+                            diag_->error(DiagnosticID::SemCoClassEntryInvalid, r.loc,
+                                "CoClass '" + cc->name + "' lists contract entry '" + r.ifaceName +
+                                "' which is not an Interface block in this project");
+                        }
+                    }
+                    if (++entrySeen[rk] > 1) {
+                        diag_->error(DiagnosticID::SemCoClassEntryInvalid, r.loc,
+                            "CoClass '" + cc->name + "' lists interface '" + r.ifaceName +
+                            "' more than once (the contract set is a set)");
+                    }
+                    if (r.isDefault) defaults++;
+                }
+                if (defaults > 1) {
+                    diag_->error(DiagnosticID::SemCoClassEntryInvalid, cc->loc,
+                        "CoClass '" + cc->name + "' marks " + std::to_string(defaults) +
+                        " interfaces [Default]; a coclass has exactly one default interface");
+                }
+
+                // 3) v1 边界: [Implementation] 必须指本工程的类模块; EXE 工程不能声明可注册为 COM 服务器
+                auto idit = coclassIds_.find(key);
+                const std::string impl = idit == coclassIds_.end() ? std::string() : idit->second.implName;
+                if (!impl.empty()) {
+                    auto it = byName.find(ifaceLower(impl));
+                    Module* target = it == byName.end() ? nullptr : it->second;
+                    if (!target || !target->isClassModule || target->isInterfaceModule) {
+                        diag_->error(DiagnosticID::SemCoClassNotSupported, cc->loc,
+                            "CoClass '" + cc->name + "' binds [Implementation(\"" + impl +
+                            "\")] but '" + impl + "' is not a class module of this project");
+                    }
+                }
+                if (!options.isDll && idit != coclassIds_.end() && idit->second.comCreatable) {
+                    diag_->error(DiagnosticID::SemCoClassNotSupported, cc->loc,
+                        "CoClass '" + cc->name + "' marks [ComCreatable(True)] in an EXE project: only "
+                        "ActiveX DLL projects register a COM server (an EXE keeps the in-project half)");
+                }
             }
         }
     }

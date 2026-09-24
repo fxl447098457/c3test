@@ -3,12 +3,14 @@ Option Explicit
 
 ' ai/022 B11/C02: one block per identity tier (ai/026 section 3), all three resolved by the
 ' single function in src/semantics/coclass_identity.cpp.
+' C03a (ai/022 D48): both implementation targets are real class modules of this project, and
+' no block claims [ComCreatable(True)] -- this is a Type=Exe project, where that is refused.
 
 ' Tier 1 -- every identity written out explicitly, so nothing is derived from the project.
 CoClass CCCircle
     [CoClassId("{11111111-1111-1111-1111-111111111111}")]
     [ProgId("Shapes.Circle")]
-    [ComCreatable(True)]
+    [ComCreatable(False)]
     [Implementation("CircleImpl")]
     Interface IShape
     [Default] Interface ITagged

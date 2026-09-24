@@ -338,7 +338,7 @@ CompileResult Driver::compile(const CompileOptions& options) {
 
     // === 阶段2.7: Interface 契约登记表 (tB 扩展, B02) — 名字/Extends 链/展平槽表.
     // 必须早于语义: 每个模块各一张符号表, 而接口名是工程级唯一的, 契约比对要跨模块查表.
-    if (!runInterfacePrepass()) {
+    if (!runInterfacePrepass(effectiveOpts)) {
         std::cerr << diag_->toString();
         result.errorCount = diag_->errorCount();
         result.warningCount = diag_->warningCount();

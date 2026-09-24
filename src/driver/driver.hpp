@@ -218,7 +218,8 @@ private:
     bool runSemanticAnalysis(const CompileOptions& options);
     bool runGenericsPrepass();  // 泛型 (tB): 模板登记 + 使用点物化 (G2)
     // Interface (tB, B02): stage 2.7 建接口契约登记表 (名字/Extends 链/展平槽表)
-    bool runInterfacePrepass();
+    // options 只被 Pass F 用一项: EXE 工程不能注册为 COM 服务器 (ai/022 D48, B11/C03a).
+    bool runInterfacePrepass(const CompileOptions& options);
     // 类继承 (tB, B07a): stage 2.8 建类继承链登记表 (基名解析/环/深度/v1 边界)
     bool runClassChainPrepass();
     // 虚方法 (tB, B08b): 2.8 内两步 —— 位置合法性 (只读 modules_) / 覆盖契约与 dynamicKeys (要链)

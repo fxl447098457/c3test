@@ -95,6 +95,10 @@ enum class DiagnosticID : uint16_t {
     // tB 委托式实现 (ai/022 B10): `Implements I Via m_holder` 的可用性判定。
     SemViaTargetUnknown = 3029,         // Via 目标不是本类的对象持有字段 / 接口名不是新式 Interface
     SemViaHolderNotImplemented = 3030,  // 字段类型那个类没有实现被委托的接口 (v1 不接受再往下委托)
+    // tB CoClass 块 (ai/022 D48, 批次 B11/C03a): 形状与名字校验. 文案一律 ASCII (D12).
+    SemCoClassEntryInvalid = 3031,      // 契约条目: 引用不存在的接口 / 条目重复 / [Default] 标了多条
+    SemCoClassDuplicate = 3032,         // 块名撞车: 重复块名 / 撞模块名 / 撞接口名
+    SemCoClassNotSupported = 3033,      // v1 边界: [Implementation] 不是类模块 / EXE 工程 ComCreatable(True)
 
     // 代码生成 (4xxx)
     CodeGenUnsupportedFeature = 4001,
