@@ -71,6 +71,28 @@
                         ASTNode* returnType, const StmtList& body, SourceLocation loc,
                         bool isNaked);
 
+    // 混排 (项2/项3): 在语句流里就地降级一条 AsmStmt。由 emitStmtList 的
+    // AsmStmt 分支调用。
+    //   x86: 发 MSVC `__asm { }` 内联块 —— [X] → C 变量名 (MSVC 按名解析), 天然
+    //        指向 VB 局部变量/参数; 非 Naked 时自动 push/pop 踩到的 callee-saved。
+    //   x64: 没有内联汇编, 片段降级为**独立** MASM 过程, 被引用的 VB 变量以**地址**
+    //        作参数传入 ([X] → [rcx] 等); 调用点发 `vb6_asm_<proc>_<n>(&X, ...)`。
+    //   细节与限制见 ai/vb-asm-extension-spec §12.5。
+    void emitAsmStmtMixed(AsmStmt& node);
+
+    // 混排辅助: 扫描汇编块里出现的 [名字] 引用, 分类成
+    //   regs  —— 寄存器名 (原样保留)
+    //   vbVars —— 解析到可见 VB 变量/参数的名字 (原名 + 是否 ByRef 参数)
+    //   function —— 是否出现 [Function]
+    // 解析不到 (既非寄存器也非可见变量) 的名字收进 unknown。
+    struct AsmRefScan {
+        std::vector<std::string> vbVars;        // 出现顺序, 去重
+        std::vector<std::string> byRefVars;     // vbVars 里属于 ByRef 参数的
+        std::vector<std::string> unknown;       // 无法解析的名字
+        bool function = false;
+    };
+    AsmRefScan scanAsmRefs(const AsmStmt& node);
+
     // --- Delegate (tB 扩展): 桩类型名/桩名/声明趟发射/收尾定义/直调 ---
     std::string delegateTyName(const std::string& delName);
     std::string delegateThunkName(const std::string& delName, const std::string& procName);

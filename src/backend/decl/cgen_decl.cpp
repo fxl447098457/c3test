@@ -41,8 +41,10 @@ void CCodeGen::clearProcArrayTracking() {
 //                push/pop 块内踩到的 callee-saved (ebx/esi/edi, 及 clobber 里的 ebp)。
 //   x64: 不发 C 体, 只发 `extern` 原型 + 把元数据记进 asmProcs_
 //        (driver 侧生成 .asm, ml64 汇编后进链接)。
-//   边界 (spec §10): 整块独占过程体 (混排待 v2) / 非类方法 / 无 Optional/ParamArray /
-//   参数为整型或指针 (浮点 xmm 传参待 v2) / x64 参数 ≤4 (寄存器传参上限)。
+//   **体里还有其它语句 (混排, 项2) 时本函数返回 false** —— 交给常规过程生成流程,
+//   其中每条 AsmStmt 由 emitStmtList 的 AsmStmt 分支就地降级 (见 cgen_stmt_asm.cpp)。
+//   边界 (spec §10): 类方法 / 无 Optional/ParamArray / 参数为整型或指针或浮点 /
+//   x64 参数 ≤4 (寄存器传参上限)。
 // ============================================================
 bool CCodeGen::tryEmitAsmProc(const std::string& procName, AccessLevel access,
                               std::vector<std::unique_ptr<ParameterDecl>>& params,
@@ -56,6 +58,11 @@ bool CCodeGen::tryEmitAsmProc(const std::string& procName, AccessLevel access,
     }
     if (!asmNode) return false;   // 与 Asm 无关的常规过程
 
+    // 项2 混排: 体里除了 Asm 块还有别的语句 → 不在这里接管。
+    // (整过程降级的 x64 路只发 extern 原型, 没法表达"块之间还有 VB 语句";
+    //  混排由 emitStmtList 逐条 AsmStmt 就地降级, 见 cgen_stmt_asm.cpp。)
+    if (body.size() != 1) return false;
+
     auto fail = [&](DiagnosticID id, const std::string& msg) -> bool {
         diag_.error(id, loc, msg);
         return true;              // 已接管: 不再发 C 体 (编译已失败)
@@ -63,9 +70,6 @@ bool CCodeGen::tryEmitAsmProc(const std::string& procName, AccessLevel access,
 
     const bool x86 = (targetArch_ == "x86");
 
-    if (body.size() != 1)
-        return fail(DiagnosticID::SemAsmMixedBody,
-                    "Asm 块必须独占过程体 (不支持与 VB 语句混排)");
     if (isClassModule_)
         return fail(DiagnosticID::SemAsmMixedBody, "类方法暂不支持 Asm 块 (仅标准模块过程)");
 

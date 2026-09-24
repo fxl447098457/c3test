@@ -144,6 +144,7 @@ add_library(vb6c3-cgen STATIC
     src/backend/expr/cgen_expr_with.cpp
     # 语句家族
     src/backend/stmt/cgen_stmt.cpp
+    src/backend/stmt/cgen_stmt_asm.cpp
     src/backend/stmt/cgen_assign.cpp
     src/backend/stmt/cgen_setlet.cpp
     src/backend/stmt/cgen_control.cpp

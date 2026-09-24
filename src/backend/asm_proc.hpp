@@ -23,6 +23,15 @@ struct AsmProcInfo {
     // `Asm Clobber("rbx","memory")` 声明 (小写)。与块内静态扫描出的寄存器取并集,
     // 决定过程要 push/pop 哪些 callee-saved 寄存器。
     std::vector<std::string> clobbers;
+
+    // ============================================================
+    // 混排 (项2/项3): 过程体 = C 语句 + Asm 片段。片段被降级为**独立**的 MASM 过程,
+    // 其参数是被引用 VB 变量的**地址**。此时 lines 里已经被 cgen 预替换成
+    // `[reg]` / `[reg±N]` (asmRewriteAddrRefs), 驱动侧**不能再**做 ABI 参数替换。
+    //   linesFinal=true  → driver 调 asmRewriteLines(lines, {}, cName) 即只做注释/标签规整
+    //   linesFinal=false → 原行为 (整过程 = 单 Asm 块, 参数走 ABI 寄存器)
+    // ============================================================
+    bool linesFinal = false;
 };
 
 // ============================================================
@@ -345,6 +354,62 @@ inline std::vector<std::pair<std::string, std::string>> asmBuildX86Subs(
     }
     subs.push_back({ "[function]", retVarName.empty() ? std::string("eax") : retVarName });
     return subs;
+}
+
+// ============================================================
+// 「地址引用」重写 (混排 x64 片段专用, 项3)
+//   x64 没有 MSVC 内联汇编, 混排片段被降级为独立 MASM 过程, 每个被引用的 VB 变量以
+//   **地址** 作参数传入。于是 VB 侧的 `[X]` 语义 = "X 变量的内存" = MASM 的 `[reg]`
+//   (reg 存着 &X), `[X+4]` → `[reg+4]`。
+//
+//   为什么不能复用 asmRewriteLines: 它的 subs 值是**完整操作数** (寄存器名/变量名),
+//   带偏移形态按 `<值>±N` 拼接 —— 对 `[X+4]` 会拼出 `[rcx]+4` (把 [rcx] 当基址再加 4),
+//   语义完全不对。地址引用要求把偏移写在方括号**里面** (即 `[rcx+4]`), 所以单独一份。
+// ============================================================
+inline std::vector<std::string> asmRewriteAddrRefs(
+        const std::vector<std::string>& lines,
+        const std::vector<std::pair<std::string, std::string>>& subs) {
+    std::vector<std::string> out;
+    out.reserve(lines.size());
+    for (auto& line : lines) {
+        std::string s = line;
+        for (auto& sub : subs) {
+            const std::string& name = sub.first;      // 不含方括号
+            const std::string& reg = sub.second;      // 寄存器名 (不含方括号)
+            std::string openLower = "[" + name;
+            for (auto& c : openLower)
+                c = static_cast<char>(::tolower(static_cast<unsigned char>(c)));
+            size_t pos = 0;
+            while (pos < s.size()) {
+                std::string low = s;
+                for (auto& c : low)
+                    c = static_cast<char>(::tolower(static_cast<unsigned char>(c)));
+                size_t hit = low.find(openLower, pos);
+                if (hit == std::string::npos) break;
+                size_t k = hit + openLower.size();
+                // 名字后必须紧跟 '+'/'-' 偏移 或 ']' —— 否则是 [namex] 这种别的引用
+                std::string offset;
+                size_t after = k;
+                if (k < s.size() && (s[k] == '+' || s[k] == '-')) {
+                    size_t d = k, e = k + 1;
+                    while (e < s.size() && std::isdigit(static_cast<unsigned char>(s[e]))) e++;
+                    if (e == k + 1 || e >= s.size() || s[e] != ']') { pos = hit + 1; continue; }
+                    offset = s.substr(d, e - d);     // 含符号
+                    after = e + 1;                   // 吞掉 ']'
+                } else if (k < s.size() && s[k] == ']') {
+                    after = k + 1;                   // 吞掉 ']'
+                } else {
+                    pos = hit + 1;
+                    continue;
+                }
+                std::string repl = "[" + reg + offset + "]";
+                s.replace(hit, after - hit, repl);
+                pos = hit + repl.size();
+            }
+        }
+        out.push_back(s);
+    }
+    return out;
 }
 
 // ============================================================

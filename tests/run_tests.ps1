@@ -1542,8 +1542,9 @@ if ($Category -in @("all", "ctor")) {
 # asm: ai/vb-asm-extension-spec — Asm 块完整形态
 #   x64: 生成 .asm → ml64 → 链接 (基本块/ByRef/Naked/自动保存/Clobber/单行)
 #   x86: __asm{} 内联块 (同一份语法换后端)
-#   负例: 3037 (与 VB 语句混排) / 3036 (x86 <Naked> 引用参数) / 2012 (<Naked> 修饰非过程) /
-#         2014 (Clobber 参数非字符串)
+#   混排 (项2/项3): Asm 片段与 VB 语句混排 + 片段内引用 VB 局部变量
+#   负例: 3037 (类方法里的 Asm) / 3036 (x86 <Naked> 引用参数) / 2012 (<Naked> 修饰非过程) /
+#         2014 (Clobber 参数非字符串) / 3039 ([X] 解析不到) / 3040 (x64 引用 >4 个变量)
 # =============================================
 if ($Category -in @("all", "asm")) {
     Write-Host "--- Asm Block Tests (ai/vb-asm-extension-spec) ---" -ForegroundColor Yellow
@@ -1564,12 +1565,55 @@ if ($Category -in @("all", "asm")) {
             "X86-DBL:3.75", "X86-SUM5:15", "X86-BIG:4000000000",
             "X86-MAKE64:4294967297", "X86-DONE") -Arch "x86"
     }
-    if (Test-Path "$Tests\asm\asm_neg.vbp") {
-        Test-VbpBuildFail "asm_neg_mixed_body" "$Tests\asm\asm_neg.vbp" "3037"
+    # --- 项2/项3 混排 + 片段引用 VB 局部变量 (spec §12.5) ---
+    if (Test-Path "$Tests\asm\asm_mixed_basic.vbp") {
+        # 最小混排: 片段 + 一条 VB 语句; VB 语句覆盖片段写的返回值
+        Test-Vbp "asm_mixed_basic" "$Tests\asm\asm_mixed_basic.vbp" @("MIXED:1")
+    }
+    if (Test-Path "$Tests\asm\asm_mixed.vbp") {
+        # x64: 片段降级为独立 MASM 过程, 变量以地址传入 ([X] → [rcx])
+        #   局部变量读写 / 多片段 / ByRef 参数 / [Function] / callee-saved 自动保存 /
+        #   Clobber / [X+4] 偏移形态
+        Test-Vbp "asm_mixed_x64" "$Tests\asm\asm_mixed.vbp" @(
+            "MIX-ACC:175", "MIX-TWO:22", "MIX-BUMP:15", "MIX-RET:42",
+            "MIX-KEEP-RBX:80", "MIX-CLOBBER:11", "MIX-OFFSET:4294967297", "MIX-DONE")
+    }
+    if (Test-Path "$Tests\asm\asm_mixed_x86.vbp") {
+        # x86: 片段就地发 __asm{} 内联块, [X] 按名解析 (ByRef 参数经本地副本对齐 x64 语义);
+        #      另加一例引用 5 个变量 (x86 无 4 个上限)
+        Test-Vbp "asm_mixed_x86_inline" "$Tests\asm\asm_mixed_x86.vbp" @(
+            "XMIX-ACC:175", "XMIX-TWO:22", "XMIX-BUMP:15", "XMIX-RET:42",
+            "XMIX-KEEP-EBX:80", "XMIX-CLOBBER:11", "XMIX-OFFSET:4294967297",
+            "XMIX-SUMMIX:1006", "XMIX-DONE") -Arch "x86"
+    }
+    if (Test-Path "$Tests\asm\asm_mixed_neg.vbp") {
+        # 3039: [X] 既不是寄存器也不是可见的 VB 变量 (两个架构都触发)
+        # 3040: x64 单个片段引用 >4 个 VB 变量 (x64 专属, 见下)
+        Test-VbpBuildFail "asm_mixed_neg_unresolved_ref" "$Tests\asm\asm_mixed_neg.vbp" "3039"
+    }
+    if (Test-Path "$Tests\asm\asm_mixed_neg.vbp") {
+        # 3040 只在 x64 出现 (x86 名字解析走栈帧, 不占参数寄存器)
+        $script:total++
+        Write-Host -NoNewline "  [VBP-BUILD-FAIL] asm_mixed_neg_ref_limit ... "
+        $result = & cmd /c ('"' + $C3 + '" "' + "$Tests\asm\asm_mixed_neg.vbp" + '" --output-dir "' + $OutDir + '" 2>&1')
+        $text = (($result | Out-String) -replace '\s+', ' ')
+        if ($LASTEXITCODE -ne 0 -and $text.Contains("3040")) {
+            $script:pass++
+            Write-Host "PASS" -ForegroundColor Green
+        } else {
+            $script:fail++
+            Write-Host "FAIL" -ForegroundColor Red
+            Write-Host "  expected failing build containing: 3040" -ForegroundColor DarkGray
+            if ($Verbose) { Write-Host $text }
+        }
     }
     if (Test-Path "$Tests\asm\asm_width_neg.vbp") {
         # 宽度不一致 (mov rax, edx) → 3038 (宽度校验前移, 不再漏到 ml64 的 A2022)
         Test-VbpBuildFail "asm_neg_operand_width" "$Tests\asm\asm_width_neg.vbp" "3038"
+    }
+    if (Test-Path "$Tests\asm\asm_cls_neg.vbp") {
+        # 类方法里的 Asm 块 → 3037 (v2 边界: 只支持标准模块过程)
+        Test-VbpBuildFail "asm_neg_class_method" "$Tests\asm\asm_cls_neg.vbp" "3037"
     }
     if (Test-Path "$Tests\asm\asm_attr_neg.vbp") {
         Test-VbpBuildFail "asm_neg_naked_on_nonproc" "$Tests\asm\asm_attr_neg.vbp" "2012"

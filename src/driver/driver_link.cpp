@@ -77,8 +77,17 @@ static void emitMasmProc(std::ostream& os, const AsmProcInfo& p) {
     // [name] → ABI 寄存器 / [Function] → 与返回类型同宽的返回寄存器。
     // 替换表在 asm_proc.hpp (asmBuildX64Subs) —— codegen 期的宽度校验 (3038) 用的是
     // 同一张表, 改映射两边自动一致, 不会再各写一份走偏。
-    auto subs = asmBuildX64Subs(p);
-    if (hasStackParam) {
+    //
+    // 混排 (项2/项3) 例外: cgen 已把 [X] 预替换成 [rcx] 这类**地址解引用**形态
+    // (asmRewriteAddrRefs), 参数表里的 vb6_a0… 只是"这里有一个整型参数"的占位,
+    // 不能再做一遍 ABI 替换 (会把 [rcx] 里的 rcx 当成另一个参数名去查)。
+    std::vector<std::pair<std::string, std::string>> subs;
+    if (!p.linesFinal) subs = asmBuildX64Subs(p);
+    std::vector<std::string> body;
+    if (p.linesFinal) {
+        // 只做注释 / 括号空白 / 局部标签规整, 不动操作数
+        body = asmRewriteLines(p.lines, {}, p.cName);
+    } else if (hasStackParam) {
         // 有帧时栈参相对 RBP。Win64 被调方入口布局 (自 RBP 向上):
         //   [rbp+0]  已保存的 rbp
         //   [rbp+8]  返回地址 (call 压入)
@@ -94,9 +103,10 @@ static void emitMasmProc(std::ostream& os, const AsmProcInfo& p) {
                 if (sub.first == "[" + s.name + "]") sub.second = to;
             k++;
         }
+        body = asmRewriteLines(p.lines, subs, p.cName);
+    } else {
+        body = asmRewriteLines(p.lines, subs, p.cName);
     }
-
-    std::vector<std::string> body = asmRewriteLines(p.lines, subs, p.cName);
 
     // callee-saved 自动保存 (spec §5 第 3 条 / §7): 扫描块内实际用到的 + clobber 声明的。
     // `<Naked>` 下不生成任何保存代码 —— 用户全权负责 (含自己 ret)。
