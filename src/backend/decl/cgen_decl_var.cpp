@@ -87,6 +87,12 @@ void CCodeGen::visit(VariableDecl& node) {
             std::string udtCType = resolveArrayUdtElemCType(node.asType.get());
             if (!udtCType.empty()) arrayUdtElemTypes_[lower] = udtCType;
         }
+        // Fix 192: 注册类数组元素类名 (`Dim s(1) As ShapeAct` — 静态数组同样踩 C2224,
+        // 不是只有 ReDim 的形状坏)。没有它, s(0).Move 的接收者推断不出类。
+        {
+            std::string cls = resolveArrayClassElemType(node.asType.get());
+            if (!cls.empty()) arrayClassElemTypes_[lower] = cls;
+        }
         if (!trackOnly_) knownLocalVars_.insert(lower);
         return;
     }
@@ -124,6 +130,11 @@ void CCodeGen::visit(VariableDecl& node) {
         {
             std::string udtCType = resolveArrayUdtElemCType(node.asType.get());
             if (!udtCType.empty()) arrayUdtElemTypes_[lower] = udtCType;
+        }
+        // Fix 192: 同上, 动态数组 `Dim a() As ShapeAct`
+        {
+            std::string cls = resolveArrayClassElemType(node.asType.get());
+            if (!cls.empty()) arrayClassElemTypes_[lower] = cls;
         }
         if (!trackOnly_) knownLocalVars_.insert(lower);
         return;

@@ -1,0 +1,5 @@
+Type=Exe
+Name="ArrClsApp"
+Module=ArrClsMain; ArrClsMain.bas
+Class=ArrClsShape; ArrClsShape.cls
+Startup="Sub Main"

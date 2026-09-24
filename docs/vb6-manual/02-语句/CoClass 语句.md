@@ -70,9 +70,18 @@
   `Set v = CreateObject("<工程名>.<块名>")` 里 ProgID 命中本工程某个块的，同样在编译期换成
   `New <实现类>`；命中不到的一概照旧走注册表，外部组件不受影响。真发生了改写，stderr 有一行
   `C3: CoClass 'Circle' activated in-project: type name -> class 'ShapeAct' (...)`，没用到就一个字不多。
-- **`ReDim a(1) As Circle` 会编不过，但不是 CoClass 的事**：改写照做（名字变成实现类名），
-  而 `ReDim ... As <普通类名>` 这个形状**本来就**在 C 层撞 `C2224`（数组元素没被发成类指针，
-  `arr(0).Move` 无从下手 —— 拿 `ReDim a(1) As ShapeAct` 实测同一处报错）。登记为既有缺口。
+- **`ReDim a(1) As Circle` 现在编得过**（Fix 192，2026-09-25 修）。这条以前记的是"会编不过，
+  但不是 CoClass 的事" —— 前半句已不成立，后半句的**判断是对的，范围记窄了**：撞 `C2224` 的
+  不是 `ReDim … As <类名>` 这一个形状，而是**元素类型为项目类的数组的成员访问**本身。
+  `Dim s(1) As ShapeAct` 这种静态数组一样撞（`s(0).Move` 发成
+  `VB6_SA_AT(void*, s, 0).Move(...)`，void* 取成员）。根因在**访问侧推断**：
+  `resolveArrayElemType` 把 `As 某类` 压成 `Vb6Type::Object`（枚举装不下"哪个类"），
+  `inferClassTypeOfExpr` 又只认"方法调用返回类"，于是 `arr(i)` 推断不出类。
+  修法 = 登记元素类名（`arrayClassElemTypes_`，`Dim`/`ReDim As` 两侧都登记）+ 推断侧认它，
+  之后照常走早绑定 `vb6_ShapeAct_Move(VB6_SA_AT(void*, a, 0), …)`。
+  覆盖：`Dim s(1) As C`、`Dim a() As C` + `ReDim a(n)`（不带 As）、`ReDim a(n) As C`、
+  `ReDim Preserve`、模块级数组、CoClass 块名当元素类型（`ReDim a(1) As Circle`）。
+  夹具 `tests/arr_cls`（AC1–AC6），基线实测 28 条 `C2224` → 修后 0，x64 + x86 都跑。
 - **`TypeOf c Is Circle` 这一位今天仍然答"否"，而且与 CoClass 无关**：改写照做（名字会变成实现类名），
   但 `TypeOf … Is <类名>` 本身就是既有缺口 —— 拿一个从没写过 CoClass 的工程实测
   `TypeOf raw Is ShapeAct` 也答 False（只有接口名那条路 `TypeOf iv Is IShapeAct` 有效，见 `itf_xmod`）。

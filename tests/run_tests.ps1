@@ -1076,6 +1076,16 @@ if ($Category -in @("all", "run", "vbp")) {
     # slip would show up on x86 only (022 D40 rule).
     $ccActExpected = @("CC1:OK", "CC2:OK", "CC3:OK", "CC4:OK", "CC5:OK", "CC6:OK", "CC7:OK",
         "CC8:OK", "CC9:OK", "CC-DONE")
+    # Fix 192: 元素类型为项目类的数组 (arr(i).Method)。此前接收者推断不出类 →
+    # `VB6_SA_AT(void*, arr, i).Move(...)` → MSVC C2224。AC1/AC2 是静态数组 ——
+    # 缺口不是 ReDim 专属; AC3 是 ReDim As <类名>; AC5 是 ReDim Preserve。
+    # 基线(改动前)实测 28 条 C2224, 修后 0。两个架构都跑: 元素槽是 void*,
+    # 转成 vb6_cls_X* 的布局只在 x86 上才会暴露对齐问题。
+    $arrClsExpected = @("AC1:OK", "AC2:OK", "AC3:OK", "AC4:OK", "AC5:OK",
+        "AC6:OK", "ARRCLS-DONE")
+    Test-Vbp "arr_cls_elem" "$Tests\arr_cls\ArrCls.vbp" $arrClsExpected
+    Test-Vbp "arr_cls_elem_x86" "$Tests\arr_cls\ArrCls.vbp" $arrClsExpected -Arch "x86"
+
     Test-Vbp "cc_act_pair" "$Tests\cc_act\Act.vbp" $ccActExpected
     Test-Vbp "cc_act_x86" "$Tests\cc_act\Act.vbp" $ccActExpected -Arch "x86"
 
