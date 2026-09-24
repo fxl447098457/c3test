@@ -137,7 +137,10 @@ IDispatch 成员表、内嵌 `.tlb` 都在发），RTL 侧的 `QueryInterface`/`
 - **口径（B13c 定）**：`[Default]` 指向新式接口的类，**契约成员不会变成对外可点的 disp id**。
   契约成员按 VB6 惯例是 `Private`，把它们发进 IDispatch 表等于换语义；而这个接口的成员对外
   可调用要靠"真接口"那条路（类型库 `TKIND_INTERFACE` + 成员进库），排在 B15。
-  今天对外能调用的是**类的公有成员**那一档。
+  今天对外能调用的是**类的公有成员**那一档 —— 这条已经有真客户端钉住：回归里的
+  `ax_dll_dispatch_invoke` 用 `tests\tools\disp_probe.c`（`LoadLibrary` + `DllGetClassObject`，
+  不查注册表）把编出来的 DLL 真的按 `IDispatch` 调通，`cc_dll_dispatch_iface_only` 则钉住反面：
+  只满足新式接口的类，`GetIDsOfNames` 一个名字都不认。
 - 仍开的一条读数（B15）：类型库里新式接口的 `cFuncs` 是 **0** —— 接口模块写的 `Sub`/`Property`
   从来没进过类型库（收集口径是"类模块的公有成员"）。
 

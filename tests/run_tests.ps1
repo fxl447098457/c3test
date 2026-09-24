@@ -124,6 +124,10 @@ $script:total = 0
 # 取读数的助手单独一个文件（tests\tlb_identity.ps1）。它只用 $C3/$Tests/$OutDir,
 # 这里都已经就位。
 . (Join-Path $PSScriptRoot "tlb_identity.ps1")
+# ai/022 B14: 同样单独一个文件 —— 这回是「真客户端」：
+# tests\disp_invoke.ps1 用 tests\tools\disp_probe.c（LoadLibrary + DllGetClassObject）
+# 把产出的 DLL 真的按 IDispatch 调一遍，不再只比字节。
+. (Join-Path $PSScriptRoot "disp_invoke.ps1")
 
 # === COM 测试前: 检查相关 COM 组件是否已注册 ===
 # 仅当所需的 COM 组件已注册时, 才执行对应的 COM 测试 (例如 VBMANLIB)
@@ -1234,6 +1238,26 @@ if ($Category -in @("all", "run", "vbp")) {
     # (乙) the typelib's coclass DEFAULT ref == the IID the server actually answers with, i.e.
     # the class's own default dispinterface (B13e, after B13c's redirect was reverted).
     Test-TlbIdentitySingleSource "cc_dll_tlb_matches_table" "$Tests\cc_dll\CoDll.vbp" "CoDll" "CImpl" "IProbe" "{11112222-3333-4444-5555-666677778888}"
+    # ai/022 B14: the DLL product finally gets a real caller. TestAXDLL.Calc is the legacy
+    # face (Public members exist, so IDispatch must answer); cc_dll's CImpl only satisfies a
+    # modern interface, so its IDispatch member surface must be EMPTY (B13c ruling (b)), and
+    # the interface IID is answered by the fat pointer -- pinned here as a measured fact, so
+    # B15/B16 (real interface in the library / thin pointer out of QI) has to flip it on purpose.
+    Test-DispatchInvoke "ax_dll_dispatch_invoke" "$Tests\test_activex_dll\test_activex_dll.vbp" `
+        "test_activex_dll" "{D84F362F-8EF1-D16D-8814-C16ADB700BAB}" @(
+        "CREATE hr=0x00000000 ptr=OK",
+        "QI_IUNKNOWN hr=0x00000000 same=yes",
+        "TYPEINFOCOUNT=1 hr=0x00000000",
+        "CALL=ADD hr=0x00000000 result=42",
+        "CALL=GETVALUE hr=0x00000000 result=7",
+        "NAMES=bogus hr=0x80020006 dispid=-1")
+    Test-DispatchInvoke "cc_dll_dispatch_iface_only" "$Tests\cc_dll\CoDll.vbp" `
+        "CoDll" "{11112222-3333-4444-5555-666677778888}" @(
+        "CREATE hr=0x00000000 ptr=OK",
+        "QI_IUNKNOWN hr=0x00000000 same=yes",
+        "EXTRA_IID={F5CEF988-3217-6173-94B7-BB99C4B8CB81}",
+        "QI_EXTRA hr=0x00000000 same=yes") @(
+        "CALL=ADD") "{F5CEF988-3217-6173-94B7-BB99C4B8CB81}"
     Test-Vbp "test_vbman" "$Tests\test_vbman\test_vbman.vbp" @("P24-04a:OK", "P24-04b:OK", "P24-04:2/2") -Arch "x86" -RequiresCom "VBMANLIB.cVBMAN"
     $vbpSw.Stop()
     Write-Host "  (vbp/gui tests took $([Math]::Round($vbpSw.Elapsed.TotalSeconds))s)"
