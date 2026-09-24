@@ -131,6 +131,26 @@ End Function
 
 Public g_init As String
 
+' ai/022 B09c: a Property Set on the base, reached from the derived class through
+' `Set MyBase.Peer = ...` (the target side used to emit the bare identifier MyBase -> C2065).
+Private m_peer As InhBase
+
+Public Property Get Peer() As InhBase
+    Set Peer = m_peer
+End Property
+
+Public Property Set Peer(ByVal o As InhBase)
+    Set m_peer = o
+End Property
+
+Public Function PeerIs(ByVal o As InhBase) As String
+    If m_peer Is o Then
+        PeerIs = "same"
+    Else
+        PeerIs = "diff"
+    End If
+End Function
+
 Private Sub Class_Initialize()
     g_init = "base;"
 End Sub

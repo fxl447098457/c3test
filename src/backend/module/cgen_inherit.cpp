@@ -358,6 +358,12 @@ int procRankForWrite(const Decl& d) {
     return pk == ProcKind::PropertyLet ? 0 : (pk == ProcKind::PropertySet ? 1 : 9);
 }
 
+// Set 语句专用: 只认 Property Set (Let 槽接不了对象引用)。
+int procRankForWriteSet(const Decl& d) {
+    if (d.kind != ASTNodeKind::PropertyDecl) return 9;
+    return static_cast<const PropertyDecl&>(d).propKind == ProcKind::PropertySet ? 0 : 9;
+}
+
 struct MyBaseHit {
     Decl* decl = nullptr;
     Module* owner = nullptr;
@@ -473,7 +479,8 @@ bool CCodeGen::tryEmitMyBaseMember(MemberAccessExpr& node) {
 // `MyBase.Level = v` — 属性 Let / 数据字段写入。读侧那条 `Module.var` 回退
 // (cgen_assign_stmt_special.inc) 会把 MyBase 当模块名 → `vb6_MyBase_Level = v` (C2065),
 // 所以写侧必须单独接管。rhsC 由调用方先 emitExpr 求好。
-bool CCodeGen::tryEmitMyBaseAssign(MemberAccessExpr& ma, const std::string& rhsC) {
+// forSet=true 是同一条通路的 `Set MyBase.X = obj` 形 (只认 Property Set; 字段不参与)。
+bool CCodeGen::tryEmitMyBaseAssign(MemberAccessExpr& ma, const std::string& rhsC, bool forSet) {
     const ClassChainView* base = myBaseClassOf(ma);
     if (!base) return true;
     const std::string memLower = ifaceLower(ma.memberName);
@@ -484,14 +491,19 @@ bool CCodeGen::tryEmitMyBaseAssign(MemberAccessExpr& ma, const std::string& rhsC
     };
     const MyBaseHit hit = findMyBaseProc(*base, memLower, /*forWrite=*/true);
     if (hit.decl) {
+        if (forSet && procRankForWriteSet(*hit.decl) >= 9)
+            return reject("class '" + hit.owner->moduleName
+                          + "' has no Property Set with this name (a Let cannot take Set)");
         if (accessOf(*hit.decl) == AccessLevel::Private)
             return reject("setter is Private in class '" + hit.owner->moduleName + "'");
         const std::string fn =
             cProcName(procBaseName(*hit.decl), accessOf(*hit.decl), hit.owner->moduleName);
         c_.emitLine(fn + "((vb6_cls_" + cIdent(hit.owner->moduleName) + "*)me, " + rhsC +
-                    ");  /* tB Inherits B09: MyBase 属性写 */");
+                    ");  /* tB Inherits B09: MyBase 写 */");
         return true;
     }
+    if (forSet)
+        return reject("class '" + base->mod->moduleName + "' has no Property Set with this name");
     if (VariableDecl* fld = findMyBaseField(*base, memLower)) {
         if (fld->access == AccessLevel::Private)
             return reject("field is Private in class '" + base->mod->moduleName + "'");

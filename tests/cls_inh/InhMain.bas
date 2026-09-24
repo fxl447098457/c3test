@@ -142,8 +142,8 @@ Sub Main()
     If d.g_viaRet = "derived" Then Debug.Print "INH39:OK" Else Debug.Print "INH39:FAIL " & d.g_viaRet
     Set rb = b.RefOf()
     If b.g_viaRet = "base" Then Debug.Print "INH40:OK" Else Debug.Print "INH40:FAIL " & b.g_viaRet
-    ' INH41..INH43 (ai/022 B08f-1, D37): the UDT object field lives in InhUdt.bas, i.e. it
-    ' references a class from *another* module. The class name used to be dropped in analysis,
+    ' INH41..INH43 (ai/022 B08f-1, D37): the UDT object field is declared in THIS module and
+    ' references a class from another one. The class name used to be dropped in analysis,
     ' so `Set u.h = d` wrapped a VARIANT into a vb6_cls_InhBase* field (C2440), `u.h.Speak()`
     ' emitted illegal C (C2039) and `u.h.Greet(...)` fell to late-bound COM dispatch. All three
     ' now go through the class member path and bind to the instance.
@@ -172,4 +172,27 @@ Sub Main()
     Dim mi2 As InhMid
     Set mi2 = New InhMid
     If mi2.g_init = "base;mid;" Then Debug.Print "INH52:OK" Else Debug.Print "INH52:FAIL " & mi2.g_init
+    ' INH53..INH58 (ai/022 B09c): the `Set` direction of MyBase, plus the x86 layout line of
+    ' B09b pushed to the deepest holder. INH53/INH54 are the target-side fix (`Set MyBase.Peer`
+    ' used to emit the bare identifier MyBase -> C2065); INH55 reads/writes through a UDT object
+    ' field whose declared type is an ancestor holding a sibling instance (Level has no slot on
+    ' that branch -> root's accessors answer 4, Speak does -> "sibling"); INH56/INH57 pin the
+    ' immediate-base rule for Class_Initialize on a 2-level chain - note the root's initializer
+    ' ASSIGNS g_init, so re-running it legitimately wipes the "sib;" the leaf appended;
+    ' INH58 round-trips the root's Private UDT field from two levels down, which is exactly what
+    ' the void*-vs-vb6_type_TPoint stride difference corrupted on x86; INH59 is ⑮e with the
+    ' dispatch half included (root's Let stores 5, the derived's Override reads 5+100).
+    If d.SetMyBasePeer() = "same" Then Debug.Print "INH53:OK" Else Debug.Print "INH53:FAIL " & d.SetMyBasePeer()
+    If d.SetMyBaseNothing() = "cleared" Then Debug.Print "INH54:OK" Else Debug.Print "INH54:FAIL"
+    Dim sg As InhSib
+    Set sg = New InhSib
+    If sg.PropWriteViaUdt(4) = "4/sibling" Then Debug.Print "INH55:OK" Else Debug.Print "INH55:FAIL " & sg.PropWriteViaUdt(4)
+    If sg.g_init = "base;sib;" Then Debug.Print "INH56:OK" Else Debug.Print "INH56:FAIL " & sg.g_init
+    sg.InitRerun
+    If sg.g_init = "base;" Then Debug.Print "INH57:OK" Else Debug.Print "INH57:FAIL " & sg.g_init
+    sg.SetPt 3
+    If sg.PtSum() = 9 Then Debug.Print "INH58:OK" Else Debug.Print "INH58:FAIL " & sg.PtSum()
+    Set u.h = d
+    u.h.Level = 5
+    If u.h.Level = 105 Then Debug.Print "INH59:OK" Else Debug.Print "INH59:FAIL " & u.h.Level
 End Sub

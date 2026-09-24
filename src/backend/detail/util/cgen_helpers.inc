@@ -114,7 +114,8 @@
     // ---- MyBase 显式基调用 + 构造链 (tB, ai/022 B09; 实现在 cgen_inherit.cpp) ----
     // 去虚化: `MyBase.M` 直调基类会跑的那一份实现, 不查 __cvtbl。
     bool tryEmitMyBaseMember(MemberAccessExpr& node);  // true = 已接管 (含判死)
-    bool tryEmitMyBaseAssign(MemberAccessExpr& ma, const std::string& rhsC);  // MyBase.X = v
+    bool tryEmitMyBaseAssign(MemberAccessExpr& ma, const std::string& rhsC,
+                             bool forSet = false);  // MyBase.X = v / Set MyBase.X = obj
     const ClassChainView* myBaseClassOf(MemberAccessExpr& node);  // 空 = 已判死 VB3028
     std::string chainInitCName(const std::string& clsName) const;  // vb6_<X>_chain_init
     bool classIsBaseOfSomething(const std::string& clsLower) const;

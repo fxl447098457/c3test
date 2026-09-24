@@ -4,6 +4,20 @@
 
     if (!node.target || !node.value) return;
 
+    // ai/022 B09c: `Set MyBase.<属性> = obj` —— 目标侧走基类面上的 Property Set。
+    // 实测改码前发的是 `vb6_T9Base_prop_set_Peer(MyBase, me);  /* Set Property */` —— 函数名
+    // 那条通路本来就查对了, 错的只是**接收者**: `MyBase` 被当裸标识符发出去 → C2065 未声明。
+    // 这里在 Nothing/COM/链式那些分支之前就接管, 与 Let 侧的 tryEmitMyBaseAssign 同一条口径。
+    if (node.target->kind == ASTNodeKind::MemberAccessExpr) {
+        auto& ma09c = static_cast<MemberAccessExpr&>(*node.target);
+        if (ma09c.object && ma09c.object->kind == ASTNodeKind::IdentifierExpr
+            && Symbol::toLower(static_cast<IdentifierExpr&>(*ma09c.object).name) == "mybase") {
+            emitExpr(*node.value);
+            std::string rhs09c = std::move(lastExpr_);
+            if (tryEmitMyBaseAssign(ma09c, rhs09c, /*forSet=*/true)) return;
+        }
+    }
+
     // 检测 Set obj = Nothing → vb6_ReleaseObject(&obj)
     if (node.value->kind == ASTNodeKind::LiteralExpr) {
         auto& lit = static_cast<LiteralExpr&>(*node.value);

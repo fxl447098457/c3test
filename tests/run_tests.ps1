@@ -901,7 +901,11 @@ if ($Category -in @("all", "run", "vbp")) {
         # through Me./obj.), INH49/INH50 = construction chain root->leaf + MyBase.Class_Initialize,
         # INH51 = Overrides returning a project class (com_entry.c forward-decl ordering).
         "INH44:OK", "INH45:OK", "INH46:OK", "INH47:OK", "INH48:OK", "INH49:OK", "INH50:OK",
-        "INH51:OK", "INH52:OK")
+        "INH51:OK", "INH52:OK",
+        # ai/022 B09c: INH53/INH54 = `Set MyBase.<Property Set>` target side, INH55 = property
+        # write through a UDT object field, INH56/INH57 = immediate-base Class_Initialize,
+        # INH58 = root's Private UDT field used two levels down (the x86 stride case).
+        "INH53:OK", "INH54:OK", "INH55:OK", "INH56:OK", "INH57:OK", "INH58:OK", "INH59:OK")
     Test-Vbp "cls_inh_pair" "$Tests\cls_inh\Inh.vbp" $inhExpected
     Test-Vbp "cls_inh_x86" "$Tests\cls_inh\Inh.vbp" $inhExpected -Arch "x86"
     Test-Vbp "test_vbman" "$Tests\test_vbman\test_vbman.vbp" @("P24-04a:OK", "P24-04b:OK", "P24-04:2/2") -Arch "x86" -RequiresCom "VBMANLIB.cVBMAN"

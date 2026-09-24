@@ -77,6 +77,25 @@ Public Function BaseTag() As String
     BaseTag = MyBase.Tag()
 End Function
 
+' ai/022 B09c: `Set MyBase.<属性> = obj` (target side must reach the base's prop_set_ with a
+' proper receiver, and `Set MyBase.<属性> = Nothing` must not leak the bare identifier).
+Public Function SetMyBasePeer() As String
+    Set MyBase.Peer = Me
+    Dim p As InhBase
+    Set p = MyBase.Peer
+    SetMyBasePeer = p.PeerIs(Me)
+End Function
+
+Public Function SetMyBaseNothing() As String
+    Set MyBase.Peer = Nothing
+    SetMyBaseNothing = "cleared"
+End Function
+
+' MyBase.Class_Initialize is the *immediate* base's initializer (InhMid's), not the root's.
+Public Sub RerunBaseInit()
+    MyBase.Class_Initialize
+End Sub
+
 ' property read + write through the base face (InhBase's m_name is Private, so only the
 ' accessors are reachable), and a public data field (InhBase.Label).
 Public Function NameViaBase(ByVal v As String) As String
