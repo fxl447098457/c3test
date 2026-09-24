@@ -61,11 +61,25 @@
   EXE 工程里写 `[ComCreatable(True)]`（`VB3033`，只有 ActiveX DLL 才注册 COM 服务器，
   EXE 保留组内那半）；**契约聚合**（块列的接口，实现类含祖先必须满足）报 `VB3012`/`VB3017`；
   `Inherits` 一个 CoClass 块名报 `VB3020`，话已改成指名"那是组契约的块，没有成员表可继承"。
-- **还没有的**：把块名当类型用（`As` *CoClassName*、`New` *CoClassName*、`CreateObject` *ProgID*
-  的编译期改写）。按进度表 `ai/022` 归 C05 / B12。注意 `As` *CoClassName*
-  今天**不报错**：未知类型名被当 `Variant` 晚绑定吞掉，所以它是"静默不对"而不是"编译不过"。
-  之所以不先做"认得这个名字是类型"的一半：那样只会把静默变成成员访问报错，而派发还在 C05。
-- 没写 `[Implementation]` 的块**不判契约**（无从判起），今天也不要求非写不可。
+- **组内已激活**（`ai/022` B11/C05）：块名可以当类型用。写在**类型位置**上的块名 —— `Dim c As Circle`、
+  形参 `Sub Use(c As Circle)`、返回值 `Function F() As Circle`、模块级字段、`ReDim ... As Circle`、
+  `Dim c As New Circle`、`New Circle`、`TypeOf c Is Circle` —— 在编译期就地改写成 `[Implementation]`
+  那个**类名**，此后走的就是"工程类"那条已经跑通的路：变量是类结构体指针、`New` 直调类工厂
+  （不经注册表）、成员调用按实现类的虚表派发（派生类 `Overrides` 的那份会答话，不是静默绑根）。
+  `Set v = CreateObject("<工程名>.<块名>")` 里 ProgID 命中本工程某个块的，同样在编译期换成
+  `New <实现类>`；命中不到的一概照旧走注册表，外部组件不受影响。真发生了改写，stderr 有一行
+  `C3: CoClass 'Circle' activated in-project: type name -> class 'ShapeAct' (...)`，没用到就一个字不多。
+- **一处口径偏差，记清楚别当 bug 找**：`As Circle` 能摸到的成员面是**实现类的公开成员**，比默认接口宽。
+  要"只有默认接口那一份"就写 `As IShape`（B02/B03 的接口视图，比对更严）。为什么 v1 不拿接口视图当
+  `As <块名>` 的默认：契约按 `ai/026` 五-1 只要求"实现类**连同祖先满足**这些槽"，实现类完全可以不写
+  `Implements`（上面 `p08` 那种形状就是合法的），那时候对象身上没有那份接口槽表可指。
+- 两条边界：`CreateObject` 的改写只认"整个右值就是这一枚调用"（`Set c = CreateObject("p.c")`），
+  嵌在更大表达式里的（`Foo(CreateObject("p.c"))`）照旧走注册表；块名与一个**同名模块**并存时
+  类/模块赢 —— `Widget.cls` 里写 `CoClass Widget` 是 VB6 惯用写法，`As Widget` 的含义不许被一块
+  新语法改掉；折算记录（下条）一律不进类型表，同一个理由。
+- 没写 `[Implementation]` 的块**不判契约**（无从判起），块本身照样合法；但把它的名字当类型用会报
+  `VB3039` —— 那块没有可绑的实现类，而这一位在改前是"未知类型名被当 `Variant` 吞掉、成员调用变成
+  空指针上的晚绑定"，编译器既然已经知道块没有实现类，就没有理由让用户去猜。
 - `CoClass` 是软关键字，存量代码里同名变量、同名成员照旧可用。
 - VB6 存量写法：类模块头部那几行 `Attribute VB_Creatable` / `VB_Exposed` / `VB_PredeclaredId` /
   `VB_GlobalNameSpace` **会被折算成一条 CoClass 记录**（`ai/022` B11/C04），于是老工程的 CLSID
@@ -80,9 +94,11 @@
 
 `ai/022` B11/C01：语法与语法树（块、属性行、契约条目、`[Default]` 标记）；B11/C02：三档身份
 （CLSID/IID/ProgID）的唯一求解函数与可复现性；B11/C03a：形状与名字校验（见上"注意"清单）；
-B11/C03b：契约聚合校验（`VB3012`/`VB3017`）；B11/C04：存量头属性的只读折算。
-前三者对不用该语法的工程**逐字节不变**，C04 对折算工程也不产出一克发码（只多 stderr 信息行）。
-**组内可用**（`As`/`New`/`CreateObject`）要到 C05 与 B12 点亮；
+B11/C03b：契约聚合校验（`VB3012`/`VB3017`）；B11/C04：存量头属性的只读折算；
+**B11/C05（= 进度表里的 B12）：组内激活** —— `As`/`New`/`CreateObject` 绑到 `[Implementation]` 类。
+前五格对不用该语法的工程**逐字节不变**；C05 只在"块名被当类型用"或 ProgID 命中本工程时才动发码，
+不这么写的工程照旧逐字节不变（`ai/022` D55 的 16 文件 `--emit-c` 护栏里连 `cc_id` 这种"声明了块、
+从不把块名当类型"的工程也多不出一个 stderr 字符）。
 **对外可用**（类工厂、注册、类型库、外部进程 `CreateObject`）要到 B13–B17。
 
 **另见**
