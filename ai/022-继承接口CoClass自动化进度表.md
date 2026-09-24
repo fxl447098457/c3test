@@ -4,9 +4,11 @@
 > 每次运行开始先读本文件，结束前必须更新本文件（状态头 + 批次清单 + 运行日志）。
 > 规范输入: `ai/讨论记录/018-接口继承与CoClass设计思路.md`（含 tB 文档要点与分阶段设计思路全文）。
 
-STATUS: IDLE             # NOT_STARTED | DESIGN | BUSY | IDLE | ALL_DONE
-LAST_RUN: 2026-09-24T15:04:06+08:00   # 本轮 = **B11/C02 出完并收线**（代码 `f0b820d`，门 = Actions run ** #19 = success**、head 已核 = f0b820d）。
-               # 实测 D46（含一条自我订正：note 诊断当不了验收面）/ 实施 D47。自动运行见本行不足 55 分钟请立即跳过。
+STATUS: BUSY             # NOT_STARTED | DESIGN | BUSY | IDLE | ALL_DONE
+LAST_RUN: 2026-09-24T15:07:34+08:00   # 本轮 = **B11/C02 出完并收线**（代码 `f0b820d`，门 = Actions run ** #19 = success**、head 已核 = f0b820d）。
+               # 本轮 = **B11/C03 开工**（契约聚合校验 + C01 明知不做的四条 + 拒绝清单四类）：先量每种形状的现有读数，
+               # 裁决记 **D48**；`As <CoClass>` 要不要并进本格按 026 六节的边界另断（清单第 5 条）。
+               # 上一轮 = C02 收线（run#19 全绿）。自动运行见本行不足 55 分钟请立即跳过。
 LAST_COMMIT: 代码批 = f0b820d(B11/C02)、e7c7a31(B11/C01)、3c5d8e6(B10)、9eb2ca7(B09c)、debb110(B09b)、02bac92(B09)、77ecef1(B08f-1)、40eea3f(B08e-6)   # **commit message 一律现写、不复用上批文本**；push 只推 `github/dev`（Actions 门），`origin`(gitcode) 与 `main` 不碰、**绝不建 MR**。
 CURRENT_BATCH: **B11/C03 = 契约聚合校验 + 拒绝清单 + `As <CoClass>` 语义**（026 六节 C03 = 022 五节整片职责）。
                1. **先量后写**：C02 之后 CoClass 的观测面 = stage 2.7（Pass E 已在那儿跑）+ stderr 的
@@ -2044,6 +2046,95 @@ mint 换算法也测不出来。用例还钉了一条更强的形状：**同一�
 不得再自己解析属性行 —— 这是本格留下的唯一入口约束。
 
 
+### D48 B11/C03 前置实测与裁决（2026-09-24 15:07–，只量不改码；探针在 `.build/probe_c03/q1..q11`）
+
+**结论先行：C03 要拒的九种形状里，八种今天一声不吭，只有一种已经被既有检查挡住了。**
+每种都用 `.build/pre_b11c03_C3.exe`（= C02 收线二进制）跑 `--syntax-only` 量过：
+
+| 形状 | 今天的读数 | 归谁 |
+|---|---|---|
+| 两个同名 `CoClass CCA` | 静默（`coclassIds_` 首值胜，第二个整块消失） | C03 |
+| 块名撞**模块名** | 静默 | C03 |
+| 同一块 `[Default]` 标两条 | 静默（求解取第一条） | C03 |
+| 同一块 `Interface IOne` 写两遍 | 静默 | C03 |
+| 条目引用不存在的接口 | 静默 | C03 |
+| `[Implementation("NoSuch")]` 指向不存在 | 静默 | C03 |
+| `[Implementation("IOne")]` 指向接口块 / `[Implementation("Q8bBase")]` 指向 `.bas` | 都静默 | C03 |
+| `Inherits CCC`（CCC 是 CoClass 块名） | **已经报 `VB3020`**："inherits unknown base class 'CCC' (the target must be a class module in this project)" | 只需改文案 |
+| 块列了 `Interface IShape`，实现类**根本没写** `Implements IShape` | **静默** | C03 的正菜 |
+| 实现类写了 `Implements IShape` 但缺槽 | `VB3012`（B02 就有，逐槽一条） | 已覆盖 |
+
+三条要记住的实测细节：
+
+1. **`Inherits` 一个 CoClass 已经被挡**（`VB3020`），但理由是错的（"unknown base class"，而这个名字确实存在，
+   只是不是类）。026 五-6 说"v1 拒，照 3022 那批同族处理" → 这条的活是**把文案改成指名"CoClass 块不能被继承"**，
+   不是新造检查。文案一改，`tests/cls_inh`/`ci_n*` 里凡按 `VB3020` 原句断言的都要跟着核一遍。
+2. **契约聚合是真缺口**：B02 的 `checkNewStyleInterface` 只对**写了 `Implements` 的类**跑；CoClass 块里的条目
+   不会给实现类补上这份义务，所以"块说 CImpl 满足 IShape、而 CImpl 压根没 Implements"今天无人管 → 这正是
+   C03 唯一的实质新增判定，也是 026 五-1"复用比对器"这句话的落点。
+3. **聚合检查不能放 stage 2.7**：实现类的成员在 **3.4 `mergeInheritedMembers()` 之后**才带得上祖先实现
+   （B07b 的转发桩那时才存在），而 2.7 只看得到本模块自有声明 —— 放 2.7 会把"基类实现了、派生类没重写"
+   误判成缺失。裁决 = 新开 **stage 3.4c `runCoClassContractCheck()`**（3.4 之后、3.5 之前），
+   读 `Driver::classes_` 的链与合并后的符号，比对器仍走 `interface_sig.hpp` 那套槽键与签名口径。
+
+**C03 这一格切两半（026 六节把 C03 写成一格，但里面有两种性质的活）**：
+
+- **C03a（本轮做）= 形状与名字校验**，全部能在 2.7 就地判定（`modules_` + `ifaces_` 都看得见，同 B10 Pass D
+  的判据位置）：块名重名 / 撞模块名 / 撞接口名、条目重复、`[Default]` 多标、条目引用不存在的接口、
+  `[Implementation]` 指向不存在或不是类、EXE 工程 `[ComCreatable(True)]`。
+- **C03b（下一轮）= 契约聚合**（上面第 2/3 条）+ `As <CoClass>` = 默认接口视图（026 五-3）。
+  `As` 实测今天也是**静默通过**（探针 q11：`Dim x As CCC` + `x.A` 一声不吭 → 未知类型名被当 Variant 晚绑定），
+  所以它不是"从报错改成通过"而是"从静默错改成有类型"，和聚合一样要动语义层，别和 C03a 混一批。
+
+**新增诊断按族给三个号，不混用**（沿用 3015-3018 的分法：一个号管一类判据）：
+`SemCoClassEntryInvalid = 3031`（条目：未知接口名 / 重复条目 / `[Default]` 多标 / 默认接口不在集合里）、
+`SemCoClassDuplicate = 3032`（名字撞车：块名重复、撞模块名、撞接口名）、
+`SemCoClassNotSupported = 3033`（v1 边界：`[Implementation]` 不是类 / EXE 工程 `[ComCreatable(True)]`）。
+文案一律 ASCII（D12）。
+
+**一颗先拆掉的雷**：C02 的用例工程 `tests/cc_id/Id.vbp` 是 `Type=Exe` 且 `CCCircle` 写了
+`[ComCreatable(True)]` —— 正是 3033 要判死的形状，而 `Test-IdentityNote` 要求退出码 0，
+所以校验一落地，C02 那三条断言立刻变红。定案 = 走 026 的语义正道：**把 `cc_id` 的 `[ComCreatable(True)]`
+改成 `False`**（needle 跟着改），EXE+ComCreatable 的拒绝另立 `cc_neg` 负例；不把 `cc_id` 换成 DLL 工程
+（那会让身份用例依赖 `Type=DLL` 的 `Startup=`/tlb 行为，把两批的失败面搅在一起）。
+
+### D49 B11/C03a 实施（2026-09-24 15:07–，代码 `e515d89`）= CoClass 块的形状与名字校验
+
+**落点**：`driver_interface.cpp` 的 **stage 2.7 新增 Pass F**（判据位置与 Pass D 同一条理由：
+只有此刻整工程模块表 + 接口登记表同时可见）+ 三个诊断号（3031 条目 / 3032 名字 / 3033 v1 边界）+
+`runInterfacePrepass(const CompileOptions&)` 多收一个参数（只为 `isDll` 一项，`driver_compile.cpp`
+一处调用点跟着改）。发码层零改动。
+
+**八条判据**（D48 表格里"今天静默"的那八种，逐条对上探针）：块名重复 / 撞别的模块名 / 撞接口名（3032）、
+条目引用不存在的接口 / 把类模块当接口列进集合 / 条目重复 / `[Default]` 多标（3031）、
+`[Implementation]` 指向不存在或不是类模块 / EXE 工程 `[ComCreatable(True)]`（3033）。
+
+**两条要留下的判断**：
+
+① **块名 = 自己宿主模块名必须豁免**。第一版按"撞模块名就拒"写完，实测立刻把自己的正例 p07 打回 ——
+而 VB6 最自然的写法就是 `Widget.cls` 里写 `CoClass Widget`（实现类即宿主）。豁免条件取
+"撞的就是**装这个块的**那个模块"（与 B03 的接口宿主同一条理由），跨模块撞名照旧拒。
+这条 026 没写，是实施时**被自己的用例逼出来的**（又一次"先量再写"，只是这次量的是自己的正例）。
+② **上一批的用例是这一批的雷，而且要当面拆**（D48 已预告）：`cc_id`/`p05`/`p07` 三处正例分别声明了
+不存在的实现类与 EXE+`[ComCreatable(True)]`，校验一落地就全红。定案不是放宽校验，而是把用例改成正面形状
+（`cc_id` 补一个真的 `CircleImpl.cls`、`ComCreatable` 改 `False`、p07 改成宿主同名惯用法），
+`True` 的那一面另立负例 `itf_n34`。**一个校验批的完成标志是"旧正例与新负例同时全绿"**，
+只加负例不改正例的批都是把红灯留给下一轮。
+
+**验收**：`-Category syntax` **99→107**（`itf_n29`..`n34` 单文件 + `itf_n35_coclass_legacy_cls`、
+`itf_n36_coclass_vs_module` 双文件 + p05/p07 改造后仍静默 + `cc_id` 三条身份断言一字不差）；
+A/B = `.build/pre_b11c03_C3.exe` 对 `n29`/`n34` **零命中**（这两条诊断本批之前根本不存在）；
+10 文件 `--emit-c` 对 `pre_b11c03_C3.exe` **10/10 逐字节全同**（本批没碰发码，护栏测的是"没手滑"）；
+`tests/cc_id/Id.vbp` 真编译真运行（三条身份行照出、`Id.exe` 打出 `cc_id`）。门 = push 后的 Actions run，
+编号见状态头。
+
+**下一格 = C03b**（D48 已切好边界）：`runCoClassContractCheck()` 放 **stage 3.4c**（3.4 成员合并之后、
+3.5 之前），复用 `interface_sig.hpp` 的槽键与签名口径，判"块列出的每个接口，实现类（含祖先）必须满足"；
+外加 `As <CoClass>` = 默认接口视图。`Inherits` 一个 CoClass 已被 `VB3020` 挡住，**这条只剩文案活**
+（把"unknown base class"改成指名"CoClass 块不能被继承"），改文案时要顺带核 `tests/cls_inh` 与 `ci_n*`
+里按原句断言的负例。
+
+
 ## 运行日志
 
 - 2026-09-23 建表：范围确认（含完整COM）、规范文档 018 入库、现状盘点完成。
@@ -2250,3 +2341,4 @@ mint 换算法也测不出来。用例还钉了一条更强的形状：**同一�
 - 2026-09-24 13:15– **B10 收线（门 = Actions run #16 全绿，本轮只推送+盯门+记账，未改代码）**：上一次推 `github/dev` 连撞 GitHub 502/504（`api.github.com` 也 502），按"门没跑就不收 IDLE"的规矩把 STATUS 留在 BUSY 并把下一步写死在 CURRENT_BATCH 里；本轮 `-c http.version=HTTP/1.1` 推成 `9eb2ca7..3c5d8e6`，watcher 收线后核 **run#16 head_sha = 3c5d8e6**、7 个 job 全 success，vbp 分片日志里 `itf_via_pair`/`itf_via_x86` 逐条 PASS（该分片 20/0/1/21）。GATE_BASELINE 换成本批，P4 的 Via 正式记成已交付，下一批 **B11 = P5 CoClass**（实施依据 `ai/026` 的 C01→C04，开工先量 `CoClass` 块的今天行为并写 D44）。
 - 2026-09-24 13:24– **B11/C01（`CoClass…End CoClass` 块语法 + 属性行落 AST）提交 `e7c7a31`**：按 022 清单第 1 条先量后写（D44 四条读数：`CoClass` 不是 token 故只第一行报 VB2002、`ProgId`/`Implementation` 不在属性白名单、`[ComCreatable(True)]` 布尔实参被 `strtoll` 判死、`[Default] Interface X` 同行写法不通），再落 C01 的三个落点（词法软关键字四件套 / AST 六处登记含 printer / parser 在 `parser_interface.cpp` 复用属性行 machinery 并加 `requireOwnLine`）。实施中暴露一条 026 没写的规则：**属性行归属要按"名字+位置+同行"合判**（`--dump-ast` 抓到身份四件套挂到了第一个接口上），顺手把 `itf_n06` 的 needle 跟着改成涵盖 CoClass。验收 = `-Category syntax` 89→95（`itf_p05`/`p06` + `itf_n25`..`n28`）+ A/B（`pre_b11_C3.exe` 停在 D44 原始读数）+ 10 文件 `--emit-c` 10/10 + 带块工程真编译真运行；C01 无语义可断，故本批**不建 vbp 工程**（运行期断言从 C05 起才有承载面）。门 = 本次 push 触发的 Actions run，结论见状态头。
 - 2026-09-24 14:17– **B11/C02（身份求解唯一函数 CLSID/IID/ProgID + 可复现性）提交 `f0b820d`**：先量四件事再动手（D46）—— 现成 mint 是 `.inc` 里的局部 lambda、跨不出翻译单元；legacy 那两枚 lambda 没有任何用例覆盖（全部 `tests/*.vbp` 都是 Type=Exe）所以本批一字不动；vbp 三段式与工程名的行号复核无漂移；**"发一条 note 诊断当验收面"这个设想实测不通**（Driver 只在阶段失败时整体打印诊断，note 在成功的编译里看不见）→ 改走 stderr 的 `C3:` 信息行，且不能走 stdout，因为 `--emit-c` 的 stdout 就是 C 文本。落点 = 新单元 `src/semantics/coclass_identity.{hpp,cpp}`（纯函数唯一入口；026 没写的三条口径这次定了：vbp 查表次序 = 先 `[Implementation]` 再块名、`<Proj>` 兜序 = `Name=` > 工程基名 > "VB6EXE"、seed 一律小写而 ProgID 保留原大小写）+ stage 2.7 Pass E + `Driver::coclassIds_`。验收 = `-Category syntax` 96→99（三条断言的期望 GUID 由 python 独立复算 FNV-1a 得到，不拿编译器自己的输出当基线；含"换 vbp `Name=` 只有派生档动、显式档一字不动"与"同一输入跑两次逐字节相同"）、A/B（`pre_b11c02_C3.exe` 一行身份都不出）、10 文件 `--emit-c` 10/10、`Id.vbp` 真编译真运行（`Id.exe` 打出 cc_id）。门 = push `f660e25..f0b820d` 触发的 run#19，结论见状态头（GitHub 连撞 502/504，第 4 次才推上去，且**必须用 `ls-remote` 核实**：第 3 次那句 "Everything up-to-date" 是假象，远端当时还停在 f660e25）。另有两条工具性教训：`watch-gh-actions.ps1` 在 502 上会整脚本抛错退出（`ErrorActionPreference=Stop`），不能当可靠哨兵；CJK 长串经 `python - <<EOF` 的 stdin 会被按 cp936 解码，改用 UTF-8 脚本文件。）
+- 2026-09-24 15:07– **B11/C03a（CoClass 块形状与名字校验，stage 2.7 Pass F）提交 `e515d89`**：D48 量出 C03 要拒的九种形状里**八种今天一声不吭**（唯一已挡住的是 `Inherits` 一个 CoClass 名 → `VB3020`，只是理由文案说成 unknown base class，这条只剩改文案）。本批按判据族给三个号：`VB3031` 条目（未知接口 / 把类模块当接口 / 条目重复 / `[Default]` 多标）、`VB3032` 块名撞车、`VB3033` v1 边界（`[Implementation]` 不是类模块 / EXE 工程 `[ComCreatable(True)]`）。两条实施教训：**块名等于自己宿主模块名必须豁免**（第一版把正例 p07 打回了 —— VB6 最自然的写法就是 `Widget.cls` 里写 `CoClass Widget`，与 B03 接口宿主同一条理由）；**上一批的用例是这一批的雷**——`cc_id`/`p05`/`p07` 三处正例分别声明了不存在的实现类与 EXE+ComCreatable，校验一落地全红，定案是改用例为正形状（补 `CircleImpl.cls`、ComCreatable 改 False、p07 换成宿主同名惯用法）而不是放宽校验，`True` 那一面另立 `itf_n34` 负例。验收 = `-Category syntax` 99→107（n29..n34 单文件 + n35/n36 双文件 + 旧正例全绿 + cc_id 三条身份断言一字不差）、A/B（`pre_b11c03_C3.exe` 对 n29/n34 零命中）、10 文件 `--emit-c` 10/10、`Id.vbp` 真编译真运行。门 = push 后的 Actions run，结论见状态头。**下一格 = C03b**：`runCoClassContractCheck()` 放 stage 3.4c（2.7 判不准祖先实现，D48-3）+ `As <CoClass>` 默认接口视图 + `VB3020` 文案。
