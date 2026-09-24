@@ -59,7 +59,8 @@
   （`VB3032`）；契约条目引用不存在的接口、把**类模块**当接口列进集合、同一条目写两遍、
   标了不止一条 `[Default]`（`VB3031`）；`[Implementation]` 指向不存在或不是类模块、
   EXE 工程里写 `[ComCreatable(True)]`（`VB3033`，只有 ActiveX DLL 才注册 COM 服务器，
-  EXE 保留组内那半）；**契约聚合**（块列的接口，实现类含祖先必须满足）报 `VB3012`/`VB3017`；
+  EXE 保留组内那半 —— 反过来说，在 DLL 工程里这一位是真开关：它决定组名档 ProgID 会不会进
+  COM 服务器表，见下"实现状态"）；**契约聚合**（块列的接口，实现类含祖先必须满足）报 `VB3012`/`VB3017`；
   `Inherits` 一个 CoClass 块名报 `VB3020`，话已改成指名"那是组契约的块，没有成员表可继承"。
 - **组内已激活**（`ai/022` B11/C05）：块名可以当类型用。写在**类型位置**上的块名 —— `Dim c As Circle`、
   形参 `Sub Use(c As Circle)`、返回值 `Function F() As Circle`、模块级字段、UDT 成员
@@ -107,15 +108,24 @@ B11/C03b：契约聚合校验（`VB3012`/`VB3017`）；B11/C04：存量头属性
 前五格对不用该语法的工程**逐字节不变**；C05 只在"块名被当类型用"或 ProgID 命中本工程时才动发码，
 不这么写的工程照旧逐字节不变（`ai/022` D55 的 16 文件 `--emit-c` 护栏里连 `cc_id` 这种"声明了块、
 从不把块名当类型"的工程也多不出一个 stderr 字符）。
-**对外可用**（类工厂、注册、类型库、外部进程 `CreateObject`）要到 B13–B17，但**这一半不是从零开始**——
-`ai/022` D56 把现状量清楚了，三条用例（`tests\test_activex_dll\` 两份 + `tests\cc_dll\`）现在就在回归里：
-`Type=DLL` 工程今天**能编能链**（`DllGetClassObject`/`DllRegisterServer` 那一族、IDispatch 成员表、
-内嵌 `.tlb` 都在发），RTL 侧的 `QueryInterface`/`AddRef`/`Release` 也是**真实现**（原子计数、归零销毁
-实例并在那里触发 `Class_Terminate`）。差的是**CoClass 块参与不进去**，四条都有读数：注册的 ProgID 是
-`<工程名>.<类模块名>`，块名那一档（`<工程名>.<块名>`）在产物里根本不出现；表里接口的 IID 由**第二套
-mint**（`cgen_util_dllentry_prelude.inc`）算出来，与语义层求解的那枚不一致，`[CoClassId]`/`[ProgId]`
-显式档同理不被产物读取；只实现新式接口的类因为契约成员按惯例写 `Private`，对外**一个方法都点不到**；
-`[ComCreatable(True)]` 与 `VB_Creatable = False` 目前对产品也没有可观察差别。
+**对外可用**（类工厂、注册、类型库、外部进程 `CreateObject`）走 B13–B17，`ai/022` D56 量现状、D57 记落地。
+先说不是从零开始的那半：`Type=DLL` 工程今天**能编能链**（`DllGetClassObject`/`DllRegisterServer` 那一族、
+IDispatch 成员表、内嵌 `.tlb` 都在发），RTL 侧的 `QueryInterface`/`AddRef`/`Release` 也是**真实现**
+（原子计数、归零销毁实例并在那里触发 `Class_Terminate`）。回归里有四条用例钉住这条线
+（`tests\test_activex_dll\` 两份 + `tests\cc_dll\`，助手 `Test-VbpDll`）。
+
+**B13b 已经接上的**（`ai/022` D57）：
+- **块名那一档 ProgID 会注册了**，但**要显式表态** —— `[ComCreatable(True)]` 是唯一开关：写了它，
+  COM 服务器表里就多出一行 `<工程名>.<块名>`（同 CLSID、同类工厂），`g_vb6_coclassCount` 从 1 变 2；
+  不写它，组名对外仍然不存在。`<工程名>.<类模块名>` 那一档**保留**，存量 DLL 客户不受影响。
+- **表里的身份与语义层同源**：CLSID 走唯一出口（`[CoClassId]` > vbp 三段式 > 确定性派生），
+  块内 `[Default]` 接口的 IID 也是出口那一枚 —— 以前同一个接口在一次编译里会被两套管子各算一份
+  （产物里是 legacy 那份），现在并掉了。
+- 两个边界要说清：① **折算记录不享受以上两条**（VB6 头属性折来的身份继续走原路，改了就是把
+  存量 DLL 工程的注册身份换掉）；② **非默认接口的 IID 还没并**，类型库侧还有第三种派生
+  （`TypeLibBuilder::generateUuid`），表与 `.tlb` 是否逐值一致**未证明**。这两条都在 B13c/B15 名下。
+- 还差的那半（B13c 要先定口径）：只实现新式接口的类对外**一个方法都点不到** —— 契约成员按 VB6
+  惯例写 `Private`，而 IDispatch 成员表只收公有成员。
 
 **另见**
 

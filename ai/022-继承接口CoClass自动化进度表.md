@@ -4,14 +4,14 @@
 > 每次运行开始先读本文件，结束前必须更新本文件（状态头 + 批次清单 + 运行日志）。
 > 规范输入: `ai/讨论记录/018-接口继承与CoClass设计思路.md`（含 tB 文档要点与分阶段设计思路全文）。
 
-STATUS: IDLE             # NOT_STARTED | DESIGN | BUSY | IDLE | ALL_DONE
-LAST_RUN: 2026-09-24T23:40:40+08:00   # 本轮 = **B13a 出完并收线**（代码 `9785f4f`，门 = Actions run #44 = success、
-               # head 已核）。**本格按测量改写了排期（D56）**：原计划"IUnknown 三件套从零真实现 + 先造
-               # DLL 测试工程"两处前提都是错的 —— `tests\test_activex_dll\` 两份 `Type=DLL` 工程一直存在、
-               # 真编译 25 秒出 .dll+.tlb+导出表，只是从没登记进回归；RTL 的
-               # `ComObj_QueryInterface/AddRef/Release` 也早是真实现（原子计数、归零销毁并触发
-               # `Class_Terminate`）。B13a 交的是**观测面**（`Test-VbpDll` 助手 + 四条用例 + 新工程
-               # `tests/cc_dll`，零编译器代码改动），B13 余 **B13b/B13c**。自动运行见本行不足 55 分钟请立即跳过。
+STATUS: BUSY             # NOT_STARTED | DESIGN | BUSY | IDLE | ALL_DONE
+LAST_RUN: 2026-09-25T00:22:02+08:00   # 本轮 = **B13b 开工（把身份出口落到产物：`dll_entry` 只从 `coclassIds_` 取值）**。
+               # 上一格 B13a 已于 run #44 全绿收线（`7b6570a`+`988c7cb`，门 head `9785f4f`）。
+               # 开工前置已核：本地 = `github/dev` = `5268ab6`（fetch 过，无他人新提交）。
+               # BASE = `.build/pre_b13b_C3.exe`（md5 3b5b348e…，合并后的树重建）。
+               # 验收的关键证据是**翻面**：`cc_dll_identity_two_channels` 现在钉的是分叉
+               # （needle 0x0AD9CBC7 / absent CoDll.PG+F5CEF988），合并后必须反过来。
+               # 自动运行见本行不足 55 分钟请立即跳过。
 LAST_COMMIT: 代码批 = 7b6570a+988c7cb(B13a；门 head = 合并 `9785f4f`)、7f829ee(B11/C05=B12)、b82a184+02d70fe(B11/C04)、c4aaa4c(B11/C03b)、e515d89(B11/C03a)、f0b820d(B11/C02)、e7c7a31(B11/C01)、3c5d8e6(B10)、9eb2ca7(B09c)、debb110(B09b)、02bac92(B09)   # **commit message 一律现写、不复用上批文本**；push 只推 `github/dev`（Actions 门），`origin`(gitcode) 与 `main` 不碰、**绝不建 MR**。
 CURRENT_BATCH: **B13b = 把身份出口落到产物：`dll_entry` 只从 `coclassIds_` 取值，删掉第二套 mint**
                （022 表 B13 行的后半。**先读 D56 再动码**，那六条读数就是本格的地图。）
@@ -2459,6 +2459,56 @@ D54-② 那条"类变量永不 Release"不变式（对外一旦发 IDispatch/IUn
 8. **一条通用教训**：**别把"没有用例"读成"没有实现"** —— 这次两个方向都错了：RTL 三件套比计划书假设的
    完整得多，而两份现成工程因为从未登记被当成"DLL 路径不存在"。测量阶段先花 25 秒真编译一次，
    比读码推断便宜得多，也比它可靠得多。
+
+
+**D57（B13b 实施：dll_entry 的身份改读唯一出口）**
+
+1. **接线照既有先例，不开新机制**：`CCodeGen` 上三个 setter（`setInterfaceRegistry` /
+   `setViaRegistry` / `setClassChainRegistry`，`cgen_api.inc:227-232` + `cgen_state.inc` 成员 +
+   `driver_codegen_module_loop.inc:75-77` 注入）已经是同一条路，本批加第四个
+   `setCoClassIdentityRegistry(&coclassIds_)`。位置选在 `driver_codegen_dll_typelib.inc`
+   （`dllCgen` 那一段）而**不是** `driver_codegen_module_loop.inc`，因为这张表只由
+   `generateDllEntry` 消费。
+2. **只接手写块，折算记录一律照旧**（`id.legacyFolded` 即跳过）。理由与 C04 同源而且是第二次生效：
+   折算记录在没有 vbp 三段式时其 `clsid` 是 C02 mint，与 legacy `generateClsid` **种子不同** ⇒
+   覆盖上去等于把"改码前编得过、注册表里躺着的存量 DLL 工程"的身份换掉 = 破逐字节护栏。
+   副产物：**`legacyFolded` 第一次有产品级读数** —— 有它 = 不覆盖、且不会多出组名那一行
+   （折算块名恒等于类模块名）。
+3. **`[ComCreatable(True)]` 第一次有后果**：组名档 ProgID（`<工程>.<块名>`）**只在该位为真时发出**，
+   表里就多一行 —— 同 CLSID、同类工厂、同 destroyFunc，只差 ProgID 文本，
+   `g_vb6_coclassCount` 1→2。类模块名那一档**保留不删**：存量 DLL 客户照旧
+   `CreateObject("<工程>.<类>")`，这是"两半不对称"的收法而不是替换。
+   反过来说，一个手写块若不写 `[ComCreatable(True)]`，它的组名对外仍然不存在 —— 这是刻意的
+   默认（对外可创建要显式表态），也给了 D56-6 那条"9 条 False 与 True 无差别"一个可解释的答案：
+   差别现在存在于**手写块**这一侧，存量 attribute 那一侧继续无副作用（护栏）。
+4. **IID 并掉的准确范围**：`iidMap` 建表时，接口名 == 该块 `[Default]` 接口 → 用出口值，
+   于是 `IID_vb6iface_<I>` 与 `IID_vb6def_<C>` 对同一个接口第一次给同一个 GUID
+   （cc_dll 实测两枚都成 `{F5CEF988-…}`，legacy 那枚 `0AD9CBC7` 从产物里消失）。
+   **非默认接口仍走 legacy derive** —— 它要和 `cgen_iface_vtbl.cpp:84` 的 `ivDeriveIid`
+   （key `"iviface:"+名`，同族不同 key）一起收，那是**第三通道**，归 B13c，别在这批半接。
+5. **本批新量到的第三枚 mint 在类型库侧**（D56 没记，因为它不在 dll_entry 里）：
+   `TypeLibBuilder::generateUuid`（`src/typelib/typelib_builder.cpp:24`），
+   `driver_codegen_dll_typelib.inc:263-269` 的优先级是 `comClsidStr > classClsidMap_ > generateUuid`，
+   **不读 `coclassIds_`**；且 typelib 构建会**回写** `comClsidStr` / `comDefaultIfaceIid` /
+   `comSourceIfaceIid` 给 dll_entry 读（`generateDllEntry` 刻意排在 typelib 之后）。
+    ⇒ 表内自洽了，但"表 vs `.tlb` 对同一个 coclass 是否同值"**本批未证**（需要能读 `.tlb` 的工具，
+   `OleView`/`tlbimp` 不在依赖里）。登记给 B13c 顺手量 + 决定是否把 typelib 也接到出口上；
+   026 七-1 说的"合并成一处"到今天为止是**两步里的第一步**。
+6. **为什么 EXE 侧不动**（这是本批最重要的一条边界）：`com_entry.c` 由**同一个** `generateDllEntry`
+   以 `includeDllExports=false` 生成，把注册表也喂给它 = 让每个带手写块的 EXE 工程换身份。
+   所以 `comEntryCgen` 上刻意**不调** setter，EXE 继续整跑 legacy。护栏按构造成立，另加实测：
+   `tests\cc_act\Act.vbp`（EXE、**带两个手写块**，是最危险的形状）BASE vs NEW 全产物 md5 对照
+   （含 `com_entry.c`）。
+7. **验收**：`cc_dll_identity_single_source`（原 `cc_dll_identity_two_channels` 翻面）断
+   needle `"CoDll.PG"` + `const int g_vb6_coclassCount = 2;` + `0xF5CEF988`、absent `0AD9CBC7`；
+   A/B = `.build/pre_b13b_C3.exe` 跑同一份工程，`CoDll.PG` 0 次、`0AD9CBC7` 1 次（缺陷在 BASE 侧复现）；
+   四条 `Test-VbpDll` 全绿（含 x86）；16 件逐字节护栏全同；`.tlb` 与表的一致性**未**由本批证明。
+8. **harness 坑（本轮自己撞的两条）**：① `src/` 下的 `.hpp/.inc/.cpp` 是 **CRLF**，而
+   `ai/022` 与 `tests/run_tests.ps1` 的 **blob 是 LF**（工作树那份因 `core.autocrlf=true` 是 CRLF）
+   ⇒ 任何"插入后断言行尾"的检查必须**按文件各自实测**，不能全仓一套；插入文本要先探测目标文件的
+   `nl` 再拼（本批 `b13b_flip_case.py` 就是这么过的）。② Python 里
+   `("A" + nl` 换行 `"B" + nl)` 是**语法错**（名字与字符串并置），必须写成 `("A" + nl + "B" + nl)`；
+   症状是一句 `SyntaxError: Is this intended to be part of the string?`，跟引号无关，别去找引号。
 
 ## 运行日志
 
