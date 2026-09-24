@@ -2633,3 +2633,15 @@ D54-② 那条"类变量永不 Release"不变式（对外一旦发 IDispatch/IUn
   （`coclassIds_` 现在为每个带 header attribute 的存量类模块存着一个**与模块同名**的条目，门内 8 个）
   写进 C05 的第 0 步测量点 ③。
 - 2026-09-24 20:42– **B11/C05（组内激活，同批交付 022 的 B12）提交 `7f829ee`**：先按 CURRENT_BATCH 给的三点量（D54）—— ① 吞点在**两层**且互相不认识（语义 `semantic_analyzer_typeref.cpp:135` 回退 `Variant`、发码 `cgen_base_type.cpp:293` 回退 `void*`），类符号还要 3.5 才注入 ⇒ 没有单一入口，别名表这条路要 N 个消费者都记得问；② 项目类**没有引用计数**、`Set x = Nothing` 只发 `target = NULL;`、`_Destroy` 全仓两个调用点 ⇒ 本批不新增释放面、也不碰 D41；③ 折算名今天**根本不被类型路径读**（`coclassIds_` 只喂校验与 stderr）⇒ 闸门现在下：折算记录不进表、同名模块占位时类/模块赢（先例 = Fix 177b 那句遮蔽裁决）、块名等于实现类不改。④ 三条 BASE 坏读数（`void* a = 0` + 晚绑定 / `vb6_NewObject(L"块名")` / 注册表 `vb6_CreateObject`，全 rc=0 零诊断）就是 026 五-3/4/5 的立项理由；⑤ 顺带复现 D43 第三条：`.bas` 里声明的接口当类型用时 `iv.Move 5` 发成 `vb6_StructImpl_Move((&(int32_t){5}))`（接收者丢了、类挑错了）⇒ v1 不把组名做成接口视图的第二条理由。实施（D55）：新单元 `src/driver/coclass_activate.{hpp,cpp}` 做 **stage 2.7 Pass G 就地改名**（选型照泛型单态化"语义/cgen 零感知"，兑现的收益是发码侧零新分支），`CreateObject` 走 **AST 节点替换**而非 cgen 仿冒文本 —— Fix 179a 按发码文本前缀认 New，替换成节点后 `As Object` 的 IDispatch 包装自动成立。新号 `VB3039`。验收 = syntax 116→**118**、`tests/cc_act` CC1..CC9 **x64+x86 各 9/9**、A/B 三条坏读数 base 复现 new 消失、护栏 **16/16**（`cc_id` 三个块零激活行 = 闸门证据）。门 = 本次 push 触发的 Actions run，编号见状态头。
+
+- 2026-09-24 22:05– **B11/C05 收线（门 = Actions run #37 全绿，本轮只盯门 + 记账，未改编译器代码）**：
+  收线前核 **head_sha = `0dca0d0`** = 本机 `git rev-parse HEAD`（该 head = 代码 `7f829ee` + 两处文档订正
+  `df3f737`/`0dca0d0`），**8 个 job 全 success**；同一批里 `df3f737` 的 run #34 也已全绿（收线门取订正后的 head）。
+  vbp 分片含本批新增的 `cc_act_pair` / `cc_act_x86`（脚本末行 `if ($script:fail -gt 0) { exit 1 }` ⇒
+  job 绿就等于这两条真跑真过，不是被 Test-Path 跳过）。本批共享分支无并发：开工与收线都是
+  本地 = `github/dev`（开工 `cb33ab3`、收线代码 head `0dca0d0`），没有出现 C04 那种被他人抢先推的情况。
+  GATE_BASELINE 换成本批，BASE = `.build/pre_b11c06_C3.exe`（本轮收线 exe md5 `d010be65`，已核与
+  `.build/C3.exe` 同 md5），状态头收 `STATUS=IDLE`、CURRENT_BATCH 交出 **B13**（P6 第一格：IUnknown
+  三件套真实现 + 对象布局 COM 化收尾；第 0 步 = 先造一份 ActiveX DLL 形状的能编能跑用例），并把这批
+  量到的三条既有洞（`.bas` 里声明的新式接口在调用点认不出、`TypeOf x Is <工程类名>` 恒 False、
+  `ReDim a(1) As <工程类>` 撞 C2224）留进 B13 的"仍开"段供后续裁决。
