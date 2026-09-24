@@ -608,6 +608,29 @@ function Test-SyntaxFailMulti {
     }
 }
 
+# ai/022 B11/C04: --syntax-only must SUCCEED and the merged output must carry every needle
+# (and none of the -Absent ones). Folding legacy header attributes is a read-only information
+# channel, so "what got folded" and "what deliberately did NOT" is asserted here, not by
+# an exit code (D52).
+function Test-SyntaxNote {
+    param([string]$Name, [array]$Sources, [array]$Needles, [array]$Absent = @())
+    $script:total++
+    Write-Host -NoNewline "  [SYNTAX-NOTE] $Name ... "
+    $text = Invoke-SyntaxProj $Sources
+    $bad = @($Needles | Where-Object { -not $text.Contains($_) })
+    $hit = @($Absent | Where-Object { $text.Contains($_) })
+    if ($script:syntaxProjExit -eq 0 -and $bad.Count -eq 0 -and $hit.Count -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        Write-Host ("  exit=" + $script:syntaxProjExit + " missing: " + ($bad -join ' | ') +
+                    " unexpected: " + ($hit -join ' | ')) -ForegroundColor DarkGray
+        if ($Verbose) { Write-Host $text }
+    }
+}
+
 function Test-SyntaxMulti {
     param([string]$Name, [array]$Sources)
     $script:total++
@@ -1220,6 +1243,23 @@ if ($Category -in @("all", "syntax")) {
     if (Test-Path "$Tests\itf_pos\p09_coclass_holder.cls") {
         Test-SyntaxMulti "itf_p09_coclass_via_delegated" @("$Tests\itf_pos\p09_coclass_holder.cls", "$Tests\itf_pos\p09_coclass_impl.cls")
     }
+    # ai/022 B11/C04 (026 section 6, D52): a VB6 class module that never says "CoClass".
+    # Its header attribute lines fold into one CoClass record, solved by the SAME Pass E, and
+    # the fold must stay read-only: VB_Creatable=True in an EXE project is the corpus' normal
+    # shape (134 of 143 lines) and must NOT inherit C03a's VB3033; a folded name used as an
+    # Inherits base must NOT get the "that is a CoClass block" wording (D52-3).
+    if (Test-Path "$Tests\itf_pos\p10_coclass_fold_base.cls") {
+        Test-SyntaxNote "itf_p10_coclass_fold" @("$Tests\itf_pos\p10_coclass_fold_base.cls", "$Tests\itf_pos\p10_coclass_fold_der.cls") @(
+            "C3: CoClass 'FoldBase' identity: CLSID={96466C30-E240-55A4-9434-24F1C884C2AB} (minted) IID=- (missing) ProgID=VB6EXE.FoldBase (minted) impl='FoldBase' comCreatable=True folded-from-legacy: VB_Creatable=True VB_Exposed=False VB_PredeclaredId=False VB_GlobalNameSpace=False",
+            "C3: CoClass 'FoldDer' identity:") @("VB_VarHelpID", "VB_Description", "is a CoClass block", "VB3033")
+    }
+    # Both shapes in one module: the hand-written block wins, so the record carries no fold
+    # tag and [ComCreatable(False)] -- not VB_Creatable=True -- is what reaches the identity.
+    if (Test-Path "$Tests\itf_pos\p11_coclass_block_wins.cls") {
+        Test-SyntaxNote "itf_p11_coclass_block_wins" @("$Tests\itf_pos\p11_coclass_block_wins.cls") @(
+            "C3: class 'FoldWins' has both a CoClass block and 4 legacy header attribute line(s): the block wins, the attributes are not folded",
+            "CoClass 'FoldWins' identity: CLSID={EA2B2FD6-E5C6-5192-D0C9-A13BC6FC7859} (minted) IID=- (missing) ProgID=VB6EXE.FoldWins (minted) impl='' comCreatable=False") @("folded-from-legacy")
+    }
     # ai/022 B11/C02: the three identity tiers, asserted against expected GUIDs computed by an
     # independent FNV-1a re-implementation of the seed strings "coc:<proj>.<coclass>" and
     # "itf:<proj>.<iface>" (both lowered) -- NOT scraped from this compiler's own output, or the
@@ -1237,6 +1277,13 @@ if ($Category -in @("all", "syntax")) {
         "CoClass 'CCVbp' identity: CLSID={33333333-4444-5555-6666-777777777777} (vbp) IID={28519764-65C8-D639-C831-604BAD706603} (minted) ProgID=OtherApp.CCVbp (minted) impl='VbpImpl' comCreatable=False",
         "CoClass 'CCMint' identity: CLSID={CE88DE91-E77D-563D-D74F-5CA0DF3902D2} (minted) IID={28519764-65C8-D639-C831-604BAD706603} (minted) ProgID=OtherApp.CCMint (minted)")
     Test-IdentityStable "cc_id_repeatable" $ccShapes
+    # ai/022 B11/C04: a class that writes NO block but is listed in the .vbp the VB6 way
+    # (Class=Name; file.cls; {CLSID}). Folding has to hand that entry to the same resolver,
+    # so the vbp tier lights up for legacy projects too -- the proof that there is still only
+    # one identity channel (D47) rather than a legacy side door.
+    Test-IdentityNote "cc_id_fold_vbp_tier" "$Tests\cc_id\IdFold.vbp" @(
+        "CoClass 'FoldVbp' identity: CLSID={77777777-8888-9999-AAAABBBBBBBBBBBB} (vbp) IID=- (missing) ProgID=FoldApp.FoldVbp (minted) impl='FoldVbp' comCreatable=True folded-from-legacy: VB_Creatable=True VB_Exposed=False VB_PredeclaredId=False VB_GlobalNameSpace=False")
+    Test-IdentityStable "cc_id_fold_repeatable" "$Tests\cc_id\IdFold.vbp"
     # ai/022 B07a (class Inherits, P3): chain diagnostics must fire. Single-file cases ride
     # the existing Test-SyntaxFail path; the two-module cases need Test-SyntaxFailMulti.
     $clsInhNeg = @(

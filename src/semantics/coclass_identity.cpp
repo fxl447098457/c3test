@@ -85,6 +85,7 @@ bool findBoolAttr(const std::vector<InterfaceAttr>& attrs, const std::string& lo
 CoClassIdentity resolveCoClassIdentity(const CoClassDecl& block, const CoClassEnv& env) {
     CoClassIdentity id;
     id.name = block.name;
+    id.legacyFolded = block.foldedFromAttributes();
     id.comCreatable = findBoolAttr(block.attributes, "comcreatable");
 
     std::string s;

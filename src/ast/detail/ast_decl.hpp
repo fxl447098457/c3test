@@ -304,6 +304,14 @@ public:
     std::vector<InterfaceAttr> attributes;
     std::vector<CoClassIfaceRef> ifaces;
 
+    // 折算来源 (ai/026 六节 C04 / ai/022 D52, 批次 B11/C04): **非空 = 这条记录不是手写的**,
+    // 而是 stage 2.7 从 `.cls` 头部的 legacy `Attribute VB_*` 行折出来的; 元素是消费掉的
+    // 属性名 (源码原样大小写, 如 "VB_Creatable"). 一条字段而不是一 bool + 一条清单:
+    // 两处真相迟早漂移. Pass F 的形状校验与 stage 3.4c 的契约聚合都跳过折算记录 ——
+    // 存量语料里 134 条 `VB_Creatable = True` 全在 EXE 工程, 一视同仁就是把能编的代码判死.
+    std::vector<std::string> legacyFoldKeys;
+    bool foldedFromAttributes() const { return !legacyFoldKeys.empty(); }
+
     CoClassDecl(SourceLocation loc, std::string n)
         : Decl(ASTNodeKind::CoClassDecl, loc), name(std::move(n)) {}
 };
