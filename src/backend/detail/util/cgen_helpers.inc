@@ -532,6 +532,8 @@
     Vb6Type resolveArrayElemType(ASTNode* typeRef) const;
     // Fix 055: 从ArrayTypeRef获取UDT元素C类型名 (如"vb6_type_RECT"), 非UDT返回空串
     std::string resolveArrayUdtElemCType(ASTNode* typeRef) const;
+    // Fix 192: 从ArrayTypeRef/asType获取元素**类名** (如"ShapeAct"), 非项目类返回空串
+    std::string resolveArrayClassElemType(ASTNode* typeRef) const;
 
     // Fix 100: ReDim complex target (member chain with subscript)
     void emitReDimComplexTarget(ReDimStmt& node);

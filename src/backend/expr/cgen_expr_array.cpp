@@ -140,4 +140,31 @@ std::string CCodeGen::resolveArrayUdtElemCType(ASTNode* typeRef) const {
     return "";
 }
 
+// Fix 192: 数组元素为**项目类**时返回该类名 (否则空串)。
+// 与 resolveArrayUdtElemCType 对称: 后者只认 UDT, 而 `As ShapeAct` 这类元素类型
+// 在 resolveArrayElemType 里被压成 Vb6Type::Object, 类名就此丢失 —— arr(i).Move
+// 的接收者推断不出类, 落到通用成员访问 → VB6_SA_AT(void*, arr, i).Move(...) →
+// MSVC `C2224: ".Move" 的左侧必须具有结构/联合类型` (void* 不是结构体)。
+// 只认**项目内 Class** (和 COM 类): 内置对象 (Collection/Forms 等) 走 COM 晚绑定,
+// 不需要也不该进这张表 (它们没有 vb6_<Cls>_<Method> 早绑定符号)。
+std::string CCodeGen::resolveArrayClassElemType(ASTNode* typeRef) const {
+    if (!typeRef) return "";
+    if (typeRef->kind == ASTNodeKind::ArrayTypeRef) {
+        auto& arrType = static_cast<ArrayTypeRef&>(*typeRef);
+        return resolveArrayClassElemType(arrType.elementType.get());
+    }
+    if (typeRef->kind != ASTNodeKind::SimpleTypeRef) return "";
+    auto& simple = static_cast<const SimpleTypeRef&>(*typeRef);
+    if (simple.name.empty()) return "";
+    // Fix 107 的教训: 类型与过程可能同名, 必须用 lookupTypeSymbol (查 <name>$ty)
+    // 而不是通用 lookup, 否则命中的是过程符号。
+    const Symbol* sym = lookupTypeSymbol(simple.name);
+    if (!sym) return "";
+    // 只认**项目内 Class**。ComClass (typelib 导入的外部 COM 类) 的成员访问走
+    // vb6_ComCall 晚绑定, 把它登记进来会让 inferClassTypeOfExpr 返回类名、把调用
+    // 引向并不存在的 vb6_<Cls>_<Method> 早绑定符号 —— 按"宁少列不可多列"排除。
+    if (sym->kind == SymbolKind::Class) return simple.name;
+    return "";
+}
+
 } // namespace vb6c3

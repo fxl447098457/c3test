@@ -107,6 +107,11 @@ void CCodeGen::emitLocalDeclCode(LocalDeclStmt& node) {
                     std::string udtCType = resolveArrayUdtElemCType(var.asType.get());
                     if (!udtCType.empty()) arrayUdtElemTypes_[lower] = udtCType;
                 }
+                // Fix 192: 注册类数组元素类名 (静态数组 `Dim s(1) As ShapeAct`)
+                {
+                    std::string cls = resolveArrayClassElemType(var.asType.get());
+                    if (!cls.empty()) arrayClassElemTypes_[lower] = cls;
+                }
                 knownLocalVars_.insert(lower);
                 break;
             }
@@ -139,6 +144,11 @@ void CCodeGen::emitLocalDeclCode(LocalDeclStmt& node) {
                 {
                     std::string udtCType = resolveArrayUdtElemCType(var.asType.get());
                     if (!udtCType.empty()) arrayUdtElemTypes_[lower] = udtCType;
+                }
+                // Fix 192: 同上, 动态数组 `Dim a() As ShapeAct`
+                {
+                    std::string cls = resolveArrayClassElemType(var.asType.get());
+                    if (!cls.empty()) arrayClassElemTypes_[lower] = cls;
                 }
                 knownLocalVars_.insert(lower);
                 break;

@@ -86,6 +86,12 @@
     // 当数组元素类型为 UserDefinedType 时, 记录实际 UDT C 类型名,
     // 让 VB6_SA_AT / VB6_SA_ND_AT2 使用正确的 struct 类型而非 vb6_VARIANT
     std::unordered_map<std::string, std::string> arrayUdtElemTypes_;
+    // Fix 192: 数组名 → 元素**类名** (小写key, e.g. "shapes" → "ShapeAct").
+    // 与 arrayUdtElemTypes_ 对称: resolveArrayElemType 把 `As 某类` 压成
+    // Vb6Type::Object (枚举装不下"哪个类"), 于是 arr(i).Method 的接收者推断不出类
+    // → 发 VB6_SA_AT(void*, arr, i).Method(...) (void* 取成员 → C2224).
+    // 静态数组 `Dim s(1) As C` / 动态数组 `Dim a() As C` / `ReDim a(1) As C` 都要登记。
+    std::unordered_map<std::string, std::string> arrayClassElemTypes_;
 
     // Fix 170: 赋值目标 `A() = expr` (空括号整体数组) 上下文标记。
     // 只在 visit(AssignmentStmt) 里 emit node.target 的那一瞬为 true,

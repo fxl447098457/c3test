@@ -60,6 +60,20 @@ std::string CCodeGen::inferClassTypeOfExpr(const ASTNode& expr) const {
                 // 此前仅支持 MemberAccessExpr/WithMemberExpr callee, 裸函数推断断链 →
                 // 生成 (ret).Method(...) 非法字段访问 (C2039: 不是 vb6_cls_X 的成员).
                 auto& id = static_cast<const IdentifierExpr&>(*call.callee);
+                // Fix 192: **类数组元素** arr(i) — 元素类型是项目类时, arr(i) 本身就是
+                // 一个类实例 (void* 槽里放的是 vb6_cls_X*), 后续 .Method/.Field 必须按
+                // 该类解析。此前这里只查"裸函数调用返回类", 类数组元素漏掉 →
+                // 接收者推断不出类 → 通用成员访问发 VB6_SA_AT(void*, arr, i).Move(...)
+                // → MSVC C2224 "左侧必须具有结构/联合类型" (void* 取成员)。
+                // 静态 `Dim s(1) As C` 与 `ReDim a(1) As C` 都踩同一处。
+                // 先查数组表: 名字在 knownArrays_ 里就是下标访问, 不是函数调用。
+                {
+                    std::string arrLower = Symbol::toLower(id.name);
+                    if (knownArrays_.count(arrLower)) {
+                        auto itArr = arrayClassElemTypes_.find(arrLower);
+                        if (itArr != arrayClassElemTypes_.end()) return itArr->second;
+                    }
+                }
                 const Symbol* fn = symTab_.lookupModule(id.name);
                 if (fn && fn->kind == SymbolKind::Function
                     && !fn->variableTypeName.empty()) {

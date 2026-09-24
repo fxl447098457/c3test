@@ -27,6 +27,7 @@ void CCodeGen::clearProcArrayTracking() {
         knownArrays_.erase(name);
         arrayElemTypes_.erase(name);
         arrayUdtElemTypes_.erase(name);
+        arrayClassElemTypes_.erase(name);
         arrayDimCounts_.erase(name);
         knownByteArrayVars_.erase(name);
     }
