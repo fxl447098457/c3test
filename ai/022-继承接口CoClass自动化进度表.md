@@ -4,16 +4,16 @@
 > 每次运行开始先读本文件，结束前必须更新本文件（状态头 + 批次清单 + 运行日志）。
 > 规范输入: `ai/讨论记录/018-接口继承与CoClass设计思路.md`（含 tB 文档要点与分阶段设计思路全文）。
 
-STATUS: BUSY             # NOT_STARTED | DESIGN | BUSY | IDLE | ALL_DONE
-LAST_RUN: 2026-09-25T03:23:13+08:00   # 本轮 = **B13e 开工（对外默认接口的口径：让"广告"与"应答"重新对齐）**。
-               # 上一格 B13d 已于 run #50 全绿收线（代码 `9df23ba`，门 head `2c7c5e2`）。
-               # 开工第一件事照例是送读数：先核 B13e 自己的前提 —— D59-4 那条"胖包装器应答瘦 IID
-               # 会静默调错函数"。第一枪就不成立（RTL `ComObj_GetTypeInfo` + `TypeLibBuilder` 只有
-               # `TKIND_DISPATCH`，客户根本走不到"按接口虚表取槽"），所以本格**不是**去收那条危险，
-               # 而是收同一次读码顺手撞见的另一条：`.tlb` 的默认接口与服务器 `GetIDsOfNames` 认的
-               # 成员面不是同一档（详见稍后落的 D60）。
+STATUS: IDLE             # NOT_STARTED | DESIGN | BUSY | IDLE | ALL_DONE
+LAST_RUN: 2026-09-25T04:03:47+08:00   # 本轮 = **B13e 收线（对外默认接口口径：广告 == 应答）**，代码 `b10ec1a`、
+               # 台账 `5d29a5c`、门 = run **52**（head 已核 = `5d29a5c`，8 job 全绿）。
+               # **B13（P6 对外那一半）五格 a/b/c/d/e 到此出完**；下一格 = B14
+               # （IDispatch 四件套接新式接口，范围要先按 CURRENT_BATCH 的三件测量收窄）。
+               # 本轮额外一笔账：收线途中把自己的一条记忆文件（`memory/c3-build-test-hazards.md`）
+               # 用 `io.open(p,'wb')` 写坏了（先截断后求值 ⇒ 0 字节），已从会话日志里
+               # 取最新全量快照 + 重放后续编辑重建，损失与恢复过程记在该文件末尾。
                # 自动运行见本行不足 55 分钟请立即跳过。
-LAST_COMMIT: 代码批 = 9df23ba(B13d)、bd38798(B13c)、b1a8e58(B13b)、7b6570a+988c7cb(B13a；门 head = 合并 `9785f4f`)、7f829ee(B11/C05=B12)、b82a184+02d70fe(B11/C04)、c4aaa4c(B11/C03b)、e515d89(B11/C03a)、f0b820d(B11/C02)、e7c7a31(B11/C01)、3c5d8e6(B10)、9eb2ca7(B09c)、debb110(B09b)、02bac92(B09)   # **commit message 一律现写、不复用上批文本**；push 只推 `github/dev`（Actions 门），`origin`(gitcode) 与 `main` 不碰、**绝不建 MR**。
+LAST_COMMIT: 代码批 = b10ec1a(B13e)、5d29a5c(B13e 台账)、9df23ba(B13d)、bd38798(B13c)、b1a8e58(B13b)、7b6570a+988c7cb(B13a；门 head = 合并 `9785f4f`)、7f829ee(B11/C05=B12)、b82a184+02d70fe(B11/C04)、c4aaa4c(B11/C03b)、e515d89(B11/C03a)、f0b820d(B11/C02)、e7c7a31(B11/C01)、3c5d8e6(B10)、9eb2ca7(B09c)、debb110(B09b)、02bac92(B09)   # **commit message 一律现写、不复用上批文本**；push 只推 `github/dev`（Actions 门），`origin`(gitcode) 与 `main` 不碰、**绝不建 MR**。
 CURRENT_BATCH: **B14 = IDispatch 四件套接新式接口（GetTypeInfoCount/GetTypeInfo/GetIDsOfNames/Invoke + DispId 表）—— 范围要先量出来再定**
                （**先读 D56、D58-5、D59-4 与 D60**。D59-4 那条"静默调错函数"的机制已被 D60-1 证伪，
                但它指的方向 —— 胖/瘦两个世界还没接成一个 —— 就是 B14/B16/B17 这一串。）
@@ -60,24 +60,21 @@ CURRENT_BATCH: **B14 = IDispatch 四件套接新式接口（GetTypeInfoCount/Get
                祖先 Private UDT 进方法签名（D40 末①）、`com_entry` 基类 extern 的 `void*` 返回、
                `Class_Terminate` 在 EXE 里无触发点（D41）、
                `CreateTypeLib2(SYS_WIN64)` 写死（`typelib/typelib_builder.cpp:117`，B15）。
-GATE_BASELINE: (Actions 级) c3test run **#50 [dev] = completed/success**（https://github.com/fxl447098457/c3test/actions/runs/36045176665；
-               head 已核 = `2c7c5e2` = 代码 `9df23ba` + 台账/手册 `2c7c5e2`；8 个 job 全绿。
-               `Tests (syntax)` 分片里多了本批那条 `itf_canonical_iunknown`（走 `--emit-c` 断形状：
-               两处 QI 各有一处"规范指针"分支 + 旧的 `IID_IUnknown) ||` 合并分支必须已消失），
-               `Tests (vbp)` 分片里 `itf_xmod_writer` 的 QI1..QI4 / LIFE1..LIFE3 / TOF1..TOF3 全绿
-               ⇒ 本接口与兄弟接口两条分支、引用计数、`TypeOf` 都没被这次改动碰坏。
-               助手没定义或用例红都会让那个 job 非零退出 ⇒ 门绿即"断的是真产物形状"。
-               本机侧同批（树 = 开工时同步到的 `e896efb`，收线 exe md5 905c9392cede13ab9d915f05b091ed3c）：
-               `-Category syntax` **119/0**（118 + 新用例）；`-Category vbp` **27 PASS / 0 FAIL / 1 SKIP**
-               （唯一的 SKIP 还是 `test_vbman`，本机没注册 32 位 VBMAN，属已知基线）；
-               **护栏豁免粒度本批升到"整段函数体"**：`.build/b13d_guard.py` —— 14 个不含新式接口的
-               工程 `--emit-c` 逐字节全同，含新式接口的工程摘掉所有 `vb6_iunk_*_QueryInterface` 体后
-               剩余行序列全同（QI 体 36→46 行）→ 违例 0；`.build/b13d_ab_all.py` 三工程全产物 A/B →
-               `cc_act`（EXE、带两个手写块）**零文件变化**、存量 `test_activex_dll` 只 `.rc` 那行绝对
-               临时路径天然不同、`cc_dll` 只 `CImpl.c` 的 QI 体变（**`.tlb` 与 `.def` 一字未动**）
-               = 零未归类变化。A/B 负控 = BASE `.build/pre_b13d_C3.exe` 跑同一份 XWriter：`canon`
-               **0 处**、合并分支 **2 处** ⇒ 缺陷在 BASE 侧复现、本批侧消失（D59-1）。
-               # 逐字节护栏每批都做；下一批 BASE = `.build/pre_b13e_C3.exe`（md5 905c9392cede13ab9d915f05b091ed3c）。
+GATE_BASELINE: (Actions 级) c3test run **#52 [dev] = completed/success**（https://github.com/fxl447098457/c3test/actions/runs/36051166723；
+               head 已核 = `5d29a5c` = 代码 `b10ec1a` + 台账/手册 `5d29a5c`；8 个 job 全绿。
+               `Tests (vbp)` 分片里本批两条靶子用例都绿：`cc_dll_identity_single_source`（翻面后的
+               needle：`IID_vb6def_CImpl` 回 `0x7CA8CD81`、`IID_vb6iface_IProbe` 仍 `0xF5CEF988`）与
+               `cc_dll_tlb_matches_table`（甲/乙两条判据，乙 = 表的默认接口 IID == 库的 DEFAULT 引用
+               == 库的 `_<类名>`）⇒ 门绿即"广告 == 应答"这条口径在真链接的 DLL 上成立。
+               助手没定义或用例红都会让那个 job 非零退出。
+               本机侧同批（树 = 开工时同步到的 `e896efb`，收线 exe md5 1c09fa371ad0882d2e1229fc4ebc809c）：
+               `-Category syntax` **119/0**；`-Category vbp` **27 PASS / 0 FAIL / 1 SKIP**（唯一的 SKIP
+               还是 `test_vbman`，本机没注册 32 位 VBMAN，属已知基线）；
+               **护栏 = 全产物 A/B 四工程**（`.build/b13e_ab_all.py`，比上批多带 `test_event_dll`）：
+               `cc_act`(EXE) 零文件变化、两枚存量 DLL 连 `.tlb` 都逐字节不变（只 `.rc` 那行绝对临时路径
+               天然不同）、`cc_dll` 只 `dll_entry.c` 的 `IID_vb6def_*` 1 行 + `.tlb` = 零未归类变化；
+               负控 = 同一份助手喂 BASE `.build/pre_b13e_C3.exe`（`905c9392…`）⇒ 乙 判红。
+               # 逐字节护栏每批都做；下一批 BASE = `.build/pre_b14_C3.exe`（md5 1c09fa371ad0882d2e1229fc4ebc809c）。
 ```
 
 > 重入保护：若运行开始时 STATUS=BUSY 且 LAST_RUN 距今不足 55 分钟，说明上一次运行可能仍在进行——本次**立即结束，不做任何修改**。
