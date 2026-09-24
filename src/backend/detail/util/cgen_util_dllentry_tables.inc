@@ -90,18 +90,12 @@ std::string wideName = "L\"" + bareName + "\"";
     for (auto& cc : coClasses) {
         for (auto& ifaceName : cc.implementsNames) {
             if (iidMap.find(ifaceName) != iidMap.end()) continue;
-            // ai/022 B13b: 这个接口就是块里 [Default] 那个 → 用唯一出口求出的 IID。
-            // 并掉的是 D56-3 那枚"同一次编译里一个接口两个 IID"：表的 defaultIfaceIid
-            // 与 ifaceIids[] 从此对同一个接口给同一个 GUID。
             std::string lower = Symbol::toLower(ifaceName);
-            if (!cc.defaultIfaceName.empty() && lower == cc.defaultIfaceName &&
-                !cc.defaultIfaceIid.empty()) {
-                iidMap[ifaceName] = cc.defaultIfaceIid;
-                continue;
-            }
             // ai/022 B13c: 新式接口（Pass E 的接口 IID 表里有名）取表里的值 —— 与类自己的
             // vtable QI、类型库三处同值；表里没有（legacy `Implements` 的类模块）才落到
             // prelude 那枚 legacy 派生，存量工程的产物逐字节不变。
+            // （B13b 在这里还有一条"看它是不是块 `[Default]` 那个"的分支：B13e 起对外默认接口
+            // 不再从出口取，那条分支没有对象可管了，跟着一起撤 —— 见 collect.inc 同批注释。）
             if (iidreg_) {
                 auto mapIt = iidreg_->find(lower);
                 if (mapIt != iidreg_->end() && !mapIt->second.empty()) {

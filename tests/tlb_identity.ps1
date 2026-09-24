@@ -1,12 +1,18 @@
 ﻿# ============================================================
-# ai/022 B13c: 类型库探针用例（run_tests.ps1 用 `. $PSScriptRoot\tlb_identity.ps1` 引入）
+# ai/022 B13c/B13e: 类型库探针用例（run_tests.ps1 用 `. $PSScriptRoot\tlb_identity.ps1` 引入）
 #
-# 证明的是本格那条判据：**一个接口在一次编译里只许一枚 GUID**，而且 COM 服务器表与 `.tlb`
-# 逐值一致。三条通道各自从**产物**里读一遍，不读编译器内部状态：
-#   1) `dll_entry.c` 的 `IID_vb6def_<实现类>`          —— 晚绑定/早绑定 QI 的默认接口 IID
-#   2) `<实现类>.h` 的 `vb6_iv_iid_<接口>[16]`          —— 新式接口 vtable 的 QueryInterface
-#   3) `<工程>.tlb` 的 `_<接口>` dispinterface 与 coclass 的 DEFAULT 引用 —— 客户端看到的
-# coclass 的 CLSID 另外与表里的 `clsidStr` 对一次。
+# 钉的是两条判据，都从**产物**里读，不读编译器内部状态：
+#
+# 甲（B13c）：**一个接口在一次编译里只许一枚 GUID**。三条通道各自读一遍：
+#   1) `dll_entry.c` 的 `IID_vb6iface_<接口>`            —— COM 服务器表的接口 IID 数组
+#   2) `<实现类>.h` 的 `vb6_iv_iid_<接口>[16]`           —— 新式接口 vtable 的 QueryInterface
+#   3) `<工程>.tlb` 的 `_<接口>` dispinterface           —— 客户端导入后看到的那一枚
+#
+# 乙（B13e）：**广告 == 应答**。类型库给 coclass 标的 DEFAULT 接口，必须就是服务器真正
+# 应答成员面的那一枚（`desc->methods` = 类的 Public 成员 = `_<类名>`）：
+#   4) `dll_entry.c` 的 `IID_vb6def_<实现类>`  ==  5) `.tlb` 里 coclass 的 DEFAULT 引用
+#   且该引用指向 `_<类名>` 本身；coclass 的 CLSID 再与表里的 `clsidStr` 对一次。
+#   B13c 曾把 5) 改成跟块里的 `[Default]`（`_<接口>`），实测把两头劈开了 ⇒ 本批回退。
 #
 # 为什么非要自己写探针：D57-5 记的就是「表与 .tlb 是否同值」到今天没人证过 —— 类型库是
 # `CreateTypeLib2` 写出来的二进制，`--emit-c` 不含它，仓里也没有 OleView/tlbimp 依赖。
@@ -96,7 +102,12 @@ function Test-TlbIdentitySingleSource {
     $p = Join-Path $genDir "$ClassName.h"
     if (Test-Path $p) { $hdr = Get-Content $p -Raw }
 
-    # 通道 1：COM 服务器表
+    # 通道 1a：COM 服务器表里"接口自己的 IID"
+    $tableIfaceIid = ""
+    if ($entry -match ("static const IID IID_vb6iface_" + $IfaceName + " = (\{[^;]*\})")) {
+        $tableIfaceIid = GuidFromIidInitializer $matches[1]
+    }
+    # 通道 1b：COM 服务器表里"默认接口的 IID"（服务器按它应答早绑定 QI）
     $tableIid = ""
     if ($entry -match ("static const IID IID_vb6def_" + $ClassName + " = (\{[^;]*\})")) {
         $tableIid = GuidFromIidInitializer $matches[1]
@@ -110,6 +121,10 @@ function Test-TlbIdentitySingleSource {
     $tlbIface = ""
     if ($tlbText -match ("kind=dispinterface name=_" + $IfaceName + " guid=(\{[0-9A-F-]{36}\})")) {
         $tlbIface = $matches[1]
+    }
+    $tlbClass = ""
+    if ($tlbText -match ("kind=dispinterface name=_" + $ClassName + " guid=(\{[0-9A-F-]{36}\})")) {
+        $tlbClass = $matches[1]
     }
     $coclassGuid = ""
     $defaultRef = ""
@@ -127,19 +142,27 @@ function Test-TlbIdentitySingleSource {
     }
 
     $detail = @()
+    if (-not $tableIfaceIid) { $detail += "dll_entry.c 里没有 IID_vb6iface_$IfaceName" }
     if (-not $tableIid)   { $detail += "dll_entry.c 里没有 IID_vb6def_$ClassName" }
     if (-not $ivIid)      { $detail += "$ClassName.h 里没有 vb6_iv_iid_$IfaceName" }
     if (-not $tlbIface)   { $detail += "类型库里读不到 _$IfaceName 的 GUID" }
+    if (-not $tlbClass)   { $detail += "类型库里读不到 _$ClassName 的 GUID" }
     if (-not $coclassGuid){ $detail += "类型库里读不到 coclass $ClassName" }
     if (-not $defaultRef) { $detail += "coclass $ClassName 没有 DEFAULT 接口引用" }
-    if ($tableIid -and $ivIid -and $tableIid -ne $ivIid) {
-        $detail += "表与 vtable 不同值: $tableIid vs $ivIid"
+    # 甲：一个接口在一次编译里只许一枚 GUID（vtable QI / 表 / 类型库三条通道同值）
+    if ($tableIfaceIid -and $ivIid -and $tableIfaceIid -ne $ivIid) {
+        $detail += "表的接口 IID 与 vtable 不同值: $tableIfaceIid vs $ivIid"
     }
-    if ($tableIid -and $tlbIface -and $tableIid -ne $tlbIface) {
-        $detail += "表与类型库接口不同值: $tableIid vs $tlbIface"
+    if ($tableIfaceIid -and $tlbIface -and $tableIfaceIid -ne $tlbIface) {
+        $detail += "表的接口 IID 与类型库 _$IfaceName 不同值: $tableIfaceIid vs $tlbIface"
     }
+    # 乙：广告的那一枚 == 服务器应答的那一枚（B13e）—— 类型库说谁是默认接口，
+    # 服务器的成员面与早绑定 QI 就必须是谁。`_<类名>` 正是 `desc->methods` 那一档。
     if ($tableIid -and $defaultRef -and $tableIid -ne $defaultRef) {
         $detail += "表的默认接口 IID 不等于类型库的 DEFAULT 引用: $tableIid vs $defaultRef"
+    }
+    if ($defaultRef -and $tlbClass -and $defaultRef -ne $tlbClass) {
+        $detail += "类型库的 DEFAULT 引用不是 ${ClassName}: $defaultRef vs $tlbClass"
     }
     if ($coclassGuid -ne $ExpectedClsid) { $detail += "类型库 coclass = $coclassGuid，期望 $ExpectedClsid" }
     if ($entry -notmatch ('"' + [regex]::Escape($ExpectedClsid) + '",\s*/\*\s*clsidStr')) {
@@ -148,7 +171,7 @@ function Test-TlbIdentitySingleSource {
 
     if ($detail.Count -eq 0) {
         $script:pass++
-        Write-Host "PASS (one IID across table/vtable/typelib)" -ForegroundColor Green
+        Write-Host "PASS (one IID per interface; advertised default == answered default)" -ForegroundColor Green
     } else {
         $script:fail++
         Write-Host "FAIL" -ForegroundColor Red

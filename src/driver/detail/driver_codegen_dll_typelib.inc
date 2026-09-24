@@ -59,20 +59,6 @@
             if (tlbBuilder.beginLib(tlbPath, libId, options.dllProgId + " TypeLib", options.dllProgId)) {
                 int dispidCounter = 1;
                 std::set<std::string> processedClasses;
-                // ai/022 B13c: coclass 的登记**延后**到所有接口类型都进库之后。
-                // 理由：默认接口现在可以是块指定的那个新式接口（`_IProbe`），而符号表里
-                // 谁先谁后由 unordered_map 决定 —— 先引用后注册会拿到 TYPE_E_ELEMENTNOTFOUND。
-                struct TlbCoClassRow {
-                    std::string name;      // 类模块名
-                    std::string clsid;     // coclass 的 CLSID
-                    std::string primary;   // 类自己的默认 dispinterface（`_类名`）
-                    std::string source;    // 事件源 dispinterface 名，可空
-                    std::string defaultIface;  // 块里 [Default] 指的接口名，可空
-                    size_t publicMembers = 0;  // `_类名` 在库里有多少成员（口径诊断用）
-                };
-                std::vector<TlbCoClassRow> coClassRows;
-                // 已进库的类型名（小写）：登记 coclass 时要确认 `[Default]` 指的接口在里面
-                std::set<std::string> tlbTypes;
                 // 新式接口的 IID：与 vtable QI、dll_entry 的 IID 表读同一张 Pass E 表
                 // （`ifaceIds_`）。查不到 = 不是新式接口 → 保持类型库自己那枚 legacy mint。
                 auto ifaceIidFromMap = [&](const std::string& name) -> std::string {
@@ -89,31 +75,6 @@
                         if (!id.implName.empty() && Symbol::toLower(id.implName) == lower) return &id;
                     }
                     return nullptr;
-                };
-                // 登记一个 coclass。`late` = 延后那一轮（此刻整库的类型都齐了）。
-                auto registerCoClass = [&](const TlbCoClassRow& row, bool late) {
-                    std::string primary = row.primary;
-                    if (!row.defaultIface.empty()) {
-                        const std::string want = "_" + row.defaultIface;
-                        if (tlbTypes.count(Symbol::toLower(want))) {
-                            primary = want;
-                        } else if (!late) {
-                            return;  // 交给你延后到整轮之后再登记
-                        }
-                    }
-                    if (!tlbBuilder.addCoClass(row.name, row.clsid, primary, row.source)) {
-                        std::cerr << "C3: TypeLib addCoClass failed for " << row.name << ": "
-                                  << tlbBuilder.lastError() << std::endl;
-                        return;
-                    }
-                    if (primary != row.primary && row.publicMembers == 0) {
-                        // ai/022 B13c 口径（第 2 条拍板 (b)）：块的 [Default] 指向新式接口，
-                        // 而契约成员按 VB6 惯例是 Private ⇒ 这个类对外**一个方法都点不到**。
-                        // 不偷偷把契约成员发成 disp id（那是换语义），只把原因说清楚。
-                        std::cerr << "C3: CoClass '" << row.name << "' default interface '"
-                                  << row.defaultIface << "' is a vtable interface: 0 Public member"
-                                  " exported for IDispatch clients" << std::endl;
-                    }
                 };
                 for (auto* symTab : allSymTabs) {
                     // 遍历模块级作用域中的符号, 找出 Public Class (ActiveX DLL 的 coclass)
@@ -338,29 +299,19 @@
                             }
                             if (clsid.empty()) clsid = TypeLibBuilder::generateUuid(clsSym.name);
                             if (clsSym.comClsidStr.empty()) clsSym.comClsidStr = clsid;
-                            tlbTypes.insert(Symbol::toLower(ifaceName));
-                            if (sourceIfaceOk) tlbTypes.insert(Symbol::toLower(sourceIfaceName));
-                            TlbCoClassRow row;
-                            row.name = clsSym.name;
-                            row.clsid = clsid;
-                            row.primary = ifaceName;
-                            row.source = sourceIfaceOk ? sourceIfaceName : std::string();
-                            row.defaultIface = ccid ? ccid->defaultIface : std::string();
-                            row.publicMembers = methods.size();
-                            // 只有"块把默认接口指向了新式接口、而那个 `_X` 还没进库"的行才延后
-                            // —— 存量工程（没有手写块）走不到这条，.tlb 的类型登记顺序一字不动。
-                            if (!row.defaultIface.empty() &&
-                                !tlbTypes.count(Symbol::toLower("_" + row.defaultIface))) {
-                                coClassRows.push_back(std::move(row));
-                            } else {
-                                registerCoClass(row, false);
+                            // ai/022 B13e: 默认接口**一律**是 `<_类名>`，不跟块里的 [Default]。
+                            // B13c 曾把它改指向块的 `[Default]` 接口（`_IProbe`），实测是把"广告"
+                            // 与"应答"分开：类型库说默认视图是 `_IProbe`，而服务器的成员面
+                            // （`GetIDsOfNames`/`Invoke` 查 `desc->methods`）只有类的 Public 成员，
+                            // 两头都点不到。谁应答就广告谁。
+                            if (!tlbBuilder.addCoClass(clsSym.name, clsid, ifaceName,
+                                                       sourceIfaceOk ? sourceIfaceName : std::string())) {
+                                std::cerr << "C3: TypeLib addCoClass failed for " << clsSym.name << ": "
+                                          << tlbBuilder.lastError() << std::endl;
                             }
                         }
                     }
                 }
-
-                // 延后的那些行：此刻工程里所有接口类型都进库了，指向块指定的 `_X` 才安全。
-                for (auto& row : coClassRows) registerCoClass(row, true);
 
                 if (!tlbBuilder.endLib(tlbPath)) {
                     std::cerr << "C3: TypeLib generation failed: " << tlbBuilder.lastError() << std::endl;

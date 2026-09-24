@@ -120,28 +120,24 @@ IDispatch 成员表、内嵌 `.tlb` 都在发），RTL 侧的 `QueryInterface`/`
   COM 服务器表里就多出一行 `<工程名>.<块名>`（同 CLSID、同类工厂），`g_vb6_coclassCount` 从 1 变 2；
   不写它，组名对外仍然不存在。`<工程名>.<类模块名>` 那一档**保留**，存量 DLL 客户不受影响。
 - **表里的身份与语义层同源**：CLSID 走唯一出口（`[CoClassId]` > vbp 三段式 > 确定性派生），
-  块内 `[Default]` 接口的 IID 也是出口那一枚。
+  块内 `[Default]` 接口的 IID 也出自同一张表。
 - **一个接口在一次编译里只有一枚 GUID**（B13c）：接口自己的 IID 也搬进了唯一出口
   （`[InterfaceId]` > 按 `<工程名>` + 接口名的确定性派生），三条通道 —— COM 服务器表、
   实现类自己的接口 vtable 的 `QueryInterface`、类型库 —— 一律读它，不再各算一份。
   回归里 `cc_dll_tlb_matches_table` 用 `tests\tools\tlbprobe.cpp`（`LoadTypeLib` 探针）
-  钉住这一点，改动前的实测是同一个 `IProbe` 有**四枚**值，而且类型库广告给客户端的那枚
-  服务器根本不应答（早绑定客户端必然 `E_NOINTERFACE`）。
-- **类型库的 coclass 默认接口现在跟随块**：以前写死成"类自己那堆公有成员"那一档（`_<类名>`），
-  `[Default] Interface IProbe` 不算数；现在 `[Default]` 指新式接口时，类型库里那个 coclass 的
-  DEFAULT 引用就是那个接口。
+  钉住这一点，改动前的实测是同一个 `IProbe` 有**四枚**值。
+- **对外广告的那个视图 == 服务器应答的那个视图**（B13e）：类型库里 coclass 的 DEFAULT 引用、
+  COM 服务器表里的"默认接口 IID"，一律是 `<_类名>` 那一档 —— 也就是类的**公有成员**，
+  正是 `IDispatch` 的 `GetIDsOfNames`/`Invoke` 真正查的那张表。`[Default] Interface IProbe`
+  管的是**语言层**的默认视图（`As PG` 拿到哪份成员面、虚表怎么排），不改对外那一档。
+  B13c 曾把类型库的 DEFAULT 改成跟随块，实测是把"广告"与"应答"劈开：客户端按库里的
+  默认接口去点，服务器那头的成员面却是另一份，两头都点不到 ⇒ 本批回退。
 - 边界要说清：① **折算记录不享受以上各条**（VB6 头属性折来的身份继续走原路，改了就是把存量
   DLL 工程的注册身份换掉）；② 表里没有的接口（不是新式接口）照旧走各自的老派生。
 - **口径（B13c 定）**：`[Default]` 指向新式接口的类，**契约成员不会变成对外可点的 disp id**。
   契约成员按 VB6 惯例是 `Private`，把它们发进 IDispatch 表等于换语义；而这个接口的成员对外
   可调用要靠"真接口"那条路（类型库 `TKIND_INTERFACE` + 成员进库），排在 B15。
-  今天对外能调用的是**类的公有成员**那一档。为了不让"注册成功却点不到"变成谜，编译时会打一条
-  `C3: CoClass '<类>' default interface '<接口>' is a vtable interface: 0 Public member exported for IDispatch clients`。
-- **一条已知边界（`ai/022` D59 读出来，等拍板）**：块的 `[Default]` 指向新式接口时，COM 包装器的
-  `QueryInterface` 仍会**答应**那个 IID、交回的却是 IDispatch 那一份胖指针（包装器本身）——
-  早绑定客户按接口虚表去调第 3 个槽，打到的是 `GetTypeInfoCount`。在两条出路中选一条之前
-  （对外不发布这个 IID，或让包装器真返回接口虚表指针 = B16），**不要把"默认接口是新式接口"的
-  CoClass 暴露给早绑定的外部客户**。晚绑定（`CreateObject` + 公有成员）不受影响。
+  今天对外能调用的是**类的公有成员**那一档。
 - 仍开的一条读数（B15）：类型库里新式接口的 `cFuncs` 是 **0** —— 接口模块写的 `Sub`/`Property`
   从来没进过类型库（收集口径是"类模块的公有成员"）。
 

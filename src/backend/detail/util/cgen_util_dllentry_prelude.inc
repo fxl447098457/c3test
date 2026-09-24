@@ -26,9 +26,6 @@
         // 只在块是手写的（块名 != 类模块名）且 [ComCreatable(True)] 时非空 ——
         // 折算记录（C04）的名字恒等于类模块名，天然不会产生第二行。
         std::string groupProgId;
-        // 组契约里 [Default] 那个接口的名字（小写比较用），非空表示这一行的身份
-        // 来自手写块 ⇒ ifaceIids 里同名接口必须用同一个 IID（D56-3 的两枚 IID 由此并掉）。
-        std::string defaultIfaceName;
     };
     std::vector<CoClassInfo> coClasses;
     // 组名档多出的行数（g_vb6_coclasses[] 的总行数 = coClasses.size() + extraGroupRows）

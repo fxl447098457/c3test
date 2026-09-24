@@ -1208,26 +1208,31 @@ if ($Category -in @("all", "run", "vbp")) {
     # acceptance evidence, so the needles are now exactly the other way round:
     #   - the group ProgID CoDll.PG is in the product (a second row, same CLSID) because the
     #     block writes [ComCreatable(True)] -- the first product-level consequence that bit has
-    #   - IID_vb6iface_IProbe == IID_vb6def_CImpl == the stage-2.7 value (0xF5CEF988), so the
-    #     dllentry minter no longer answers for an interface the resolver already resolved
+    #   - IID_vb6iface_IProbe == the stage-2.7 value (0xF5CEF988), so the dllentry minter no
+    #     longer answers for an interface the resolver already resolved
     #   - 0AD9CBC7 (what generateIid derived here before B13b) must be gone
     # The legacy <Proj>.<Class> row stays: existing DLL clients keep working.
+    # B13e: IID_vb6def_CImpl is back to the *default dispinterface* GUID (0x7CA8CD81, written
+    # back by the TypeLib builder) instead of the interface's own -- the server's member
+    # surface (desc->methods) is that one, so table and typelib now advertise what they answer.
     Test-VbpDll "cc_dll_identity_single_source" "$Tests\cc_dll\CoDll.vbp" @(
         '"CoDll.CImpl"',
         '"CoDll.PG"',
         "const int g_vb6_coclassCount = 2;",
         "{11112222-3333-4444-5555-666677778888}",
         "0xF5CEF988",
+        "0x7CA8CD81",
         "0, /* methodCount */") @(
         "0AD9CBC7") @(
         "CoClass 'PG' identity: CLSID={11112222-3333-4444-5555-666677778888} (vbp)",
         "IID={F5CEF988-3217-6173-94B7-BB99C4B8CB81} (minted)",
         "ProgID=CoDll.PG (minted)",
-        "impl='CImpl' comCreatable=True",
-        "default interface 'IProbe' is a vtable interface: 0 Public member")
+        "impl='CImpl' comCreatable=True")
 
-    # ai/022 B13c: D57-5 「COM 表与 .tlb 是否逐值一致」的第一个读数 —— 同一个接口在
-    # COM 服务器表、类自己的 vtable QI、类型库三条通道里必须只有一枚 GUID。
+    # ai/022 B13c/B13e: two invariants read out of the *products* (dll_entry.c / CImpl.h /
+    # CoDll.tlb): (甲) one interface == one GUID across table / vtable QI / typelib (B13c);
+    # (乙) the typelib's coclass DEFAULT ref == the IID the server actually answers with, i.e.
+    # the class's own default dispinterface (B13e, after B13c's redirect was reverted).
     Test-TlbIdentitySingleSource "cc_dll_tlb_matches_table" "$Tests\cc_dll\CoDll.vbp" "CoDll" "CImpl" "IProbe" "{11112222-3333-4444-5555-666677778888}"
     Test-Vbp "test_vbman" "$Tests\test_vbman\test_vbman.vbp" @("P24-04a:OK", "P24-04b:OK", "P24-04:2/2") -Arch "x86" -RequiresCom "VBMANLIB.cVBMAN"
     $vbpSw.Stop()
