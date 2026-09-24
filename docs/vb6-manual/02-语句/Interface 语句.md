@@ -55,9 +55,14 @@
 `QueryInterface`/跨接口 `Set`/`TypeOf … Is <接口>` 与上下行转换。**规范 IUnknown**（B13d）：一个类
 实现多个接口时，从**任何**一个接口问 `IUnknown` 拿到的都是同一个指针（本类实现序里第一个接口的指针，
 `QueryInterface` 的三个槽都真实可用），所以 `Set` 赋值与"同一个对象"的比较不会因入口接口而异而分裂。
-未交付：接口值作实参 / 进 `Variant`、`New`/`CreateObject` 的 COM 激活与注册（IUnknown/IDispatch
-完整兼容、类型库导出）按进度表在后续批次（B13/P6）交付。跨"进程内薄指针"与"COM 包装器"两个世界的
-IUnknown 身份目前仍是两个值（外部客户拿到的是包装器指针）——接成一个是 B16/B17 的活。
+
+对外那一半（B13–B15 已交付的部分）：`IDispatch` 四件套被真客户端点通（B14），**接口在类型库里占的
+那一档现在是真接口**（B15：`TKIND_INTERFACE`，GUID 用唯一出口那枚；改之前那一档是"一行假 coclass
+（带一枚谁也不认的 CLSID、还宣称可创建）+ 一张 0 成员的 `_<接口>` dispinterface"）。仍未交付的：
+接口值作实参 / 进 `Variant`；**接口成员的对外调用契约**（库里那一档的 `cFuncs` 还是 0 —— 生成的槽
+是 `cdecl` + 原生返回值，不是 canonical COM，排在 B16）；`New`/`CreateObject` 的外部激活与注册
+（B17）。跨"进程内薄指针"与"COM 包装器"两个世界的 IUnknown 身份目前仍是两个值（外部客户拿到的是
+包装器指针）—— 接成一个是 B16/B17 的活。
 
 **另见**
 

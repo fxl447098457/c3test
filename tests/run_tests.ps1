@@ -1258,6 +1258,9 @@ if ($Category -in @("all", "run", "vbp")) {
     # CoDll.tlb): (甲) one interface == one GUID across table / vtable QI / typelib (B13c);
     # (乙) the typelib's coclass DEFAULT ref == the IID the server actually answers with, i.e.
     # the class's own default dispinterface (B13e, after B13c's redirect was reverted).
+    # B15: 甲's third channel now reads the interface's own row (TKIND_INTERFACE, named IProbe)
+    # instead of the empty `_IProbe` dispinterface, and the helper also asserts the two rows this
+    # batch deleted stay deleted -- so reverting the shape turns this same case red.
     Test-TlbIdentitySingleSource "cc_dll_tlb_matches_table" "$Tests\cc_dll\CoDll.vbp" "CoDll" "CImpl" "IProbe" "{11112222-3333-4444-5555-666677778888}"
     # ai/022 B14: the DLL product finally gets a real caller. TestAXDLL.Calc is the legacy
     # face (Public members exist, so IDispatch must answer); cc_dll's CImpl only satisfies a

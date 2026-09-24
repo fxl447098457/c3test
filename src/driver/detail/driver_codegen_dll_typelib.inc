@@ -91,6 +91,32 @@
                         if (processedClasses.count(clsSym.name)) continue;
                         processedClasses.insert(clsSym.name);
 
+                        // ai/022 B15 (D62-4/D62-5): **新式接口的宿主模块**在库里发成真接口
+                        // (`TKIND_INTERFACE`)，并到此为止 —— 不再发 `_<名>` 那张空 dispinterface，
+                        // 也不再发那一行 coclass。今天这条循环是唯一没有 `isInterface` 过滤的 COM
+                        // 消费者（对照 `cgen_util_dllentry_collect.inc:26`、`driver_codegen_dll_sync.inc:8`），
+                        // 于是接口模块在 COM 表里不存在、却在库里占了一整行**可创建**的 coclass，
+                        // CLSID 还是另一枚谁也不认的 mint（`generateUuid(类名)`）。
+                        // 成员面为什么这批发不了：`vb6_ivtbl_<I>` 的槽不是 canonical COM
+                        // （`CC_CDECL` + 原生返回值 + IUnknown 之后没有 IDispatch 前缀），照现状发进库
+                        // 就是重演 D60 的"广告 != 应答" ⇒ 与薄指针布局一起走 B16。
+                        // 判据沿用 B13c 那一条（Pass E 命中 = 这个模块名就是一个新式接口），
+                        // legacy 那条（被 `Implements` 点名但没有 Interface 块的类）一行不动。
+                        {
+                            const std::string ifaceRowIid = ifaceIidFromMap(clsSym.name);
+                            auto ifaceIt = ifaces_.find(Symbol::toLower(clsSym.name));
+                            if (!ifaceRowIid.empty() && ifaceIt != ifaces_.end()) {
+                                if (tlbBuilder.addVtableInterface(ifaceIt->second.name, ifaceRowIid)) {
+                                    clsSym.comDefaultIfaceIid = ifaceRowIid;
+                                    clsSym.comDefaultIfaceName = ifaceIt->second.name;
+                                } else {
+                                    std::cerr << "C3: TypeLib addVtableInterface failed for "
+                                              << clsSym.name << ": " << tlbBuilder.lastError() << std::endl;
+                                }
+                                continue;
+                            }
+                        }
+
                         std::vector<TypeLibBuilder::MethodInfo> methods;
                         // 类→宿主符号表映射 (与 cgen_util.cpp Fix 016b 一致):
                         // 只记录 isExternal=false 的本地 Class 所在表, 成员查找优先用宿主表,

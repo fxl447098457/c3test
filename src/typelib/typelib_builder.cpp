@@ -342,4 +342,64 @@ bool TypeLibBuilder::addDispInterface(const std::string& name,
 #endif
 }
 
+// ============================================================
+// ai/022 B15: 添加真接口 (TKIND_INTERFACE)
+// ============================================================
+// 与 addDispInterface 只差 kind 与 funckind 一档：这一档的 GUID 就是 QI 认的那枚 IID。
+// 成员面刻意留空 —— 生成的 `vb6_ivtbl_<I>` 槽不是 canonical COM（`CC_CDECL` + 原生返回值，
+// 且 IUnknown 之后没有 IDispatch 前缀），照现状发进库就是"广告 != 应答"（022 D60 那条口径），
+// 补齐它属于布局批 B16。空接口的可行性是实测的（D62-1 mode 9：CreateTypeInfo + SetGuid +
+// LayOut 三步建成，读回 cFuncs=0）；反过来 `SetTypeFlags(TYPEFLAG_FCANCREATE)` 加在接口上会被
+// 拒（`0x800288BD`），所以这里不碰 flags。
+
+bool TypeLibBuilder::addVtableInterface(const std::string& name, const std::string& iidStr) {
+#ifdef _WIN32
+    if (!pCreateLib_) {
+        lastError_ = "beginLib() not called";
+        return false;
+    }
+
+    auto* pCTL = static_cast<ICreateTypeLib2*>(pCreateLib_);
+
+    int wlen = MultiByteToWideChar(CP_UTF8, 0, name.c_str(), -1, nullptr, 0);
+    std::vector<WCHAR> wName(wlen);
+    MultiByteToWideChar(CP_UTF8, 0, name.c_str(), -1, wName.data(), wlen);
+
+    ICreateTypeInfo* pCTI = nullptr;
+    HRESULT hr = pCTL->CreateTypeInfo(wName.data(), TKIND_INTERFACE, &pCTI);
+    if (FAILED(hr) || !pCTI) {
+        lastError_ = "CreateTypeInfo(interface) failed for " + name + ": 0x" + std::to_string(hr);
+        return false;
+    }
+
+    std::string iid = iidStr.empty() ? generateUuid(name) : iidStr;
+    GUID iidGuid;
+    hr = CLSIDFromString(std::wstring(iid.begin(), iid.end()).c_str(), &iidGuid);
+    if (FAILED(hr)) {
+        std::wstring wIid = L"{" + std::wstring(iid.begin(), iid.end()) + L"}";
+        hr = CLSIDFromString(wIid.c_str(), &iidGuid);
+    }
+    if (FAILED(hr)) {
+        lastError_ = "Bad IID for interface " + name + ": " + iid;
+        pCTI->Release();
+        return false;
+    }
+    pCTI->SetGuid(iidGuid);
+
+    hr = pCTI->LayOut();
+    if (FAILED(hr)) {
+        lastError_ = "LayOut failed for interface " + name + ": 0x" + std::to_string(hr);
+        pCTI->Release();
+        return false;
+    }
+
+    interfaces_.push_back({name, nullptr, pCTI, (int32_t)interfaces_.size()});
+    return true;
+#else
+    (void)name; (void)iidStr;
+    lastError_ = "Not supported on this platform";
+    return false;
+#endif
+}
+
 } // namespace vb6c3
