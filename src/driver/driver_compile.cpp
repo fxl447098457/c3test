@@ -383,6 +383,17 @@ CompileResult Driver::compile(const CompileOptions& options) {
         return result;
     }
 
+    // === 阶段3.4c: CoClass 契约聚合 (tB 扩展, ai/022 D50, 批次 B11/C03b) ===
+    // 块里每列一个接口, 就要去 [Implementation] 那个类**连同祖先**查每一槽有没有实现。
+    // 必须晚于 2.8 的链表与 3.4 的成员合并: 派生类自己不写成员、由祖先提供那份实现, 是合法形状。
+    // 工程没有 CoClass 块时本阶段立即 return true, 生成物逐字节不变。
+    if (!runCoClassContractCheck()) {
+        std::cerr << diag_->toString();
+        result.errorCount = diag_->errorCount();
+        result.warningCount = diag_->warningCount();
+        return result;
+    }
+
     // === 阶段3.5: 跨模块符号链接 ===
     // 多模块项目: 解析跨模块Public符号引用
     if (modules_.size() > 1) {

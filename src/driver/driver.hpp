@@ -229,6 +229,10 @@ private:
     bool mergeInheritedMembers();
     // 类虚表 (tB, B08d): stage 3.4b 排每类的有序槽表 (要读 3.4 的 inhProcs 判"本类有无入口")
     bool buildVirtualSlotTables();
+    // CoClass 契约聚合 (tB, ai/022 D50, 批次 B11/C03b): stage 3.4c 判"块里列出的每个接口,
+    // [Implementation] 那个类**含祖先**是否满足". 必须在 3.4 之后: 祖先自有的成员只有链表
+    // (stage 2.8) 能给全, 而链表的消费序与成员合并同源. 工程无 CoClass 块时立即返回 true.
+    bool runCoClassContractCheck();
     // fixpoint 单轮物化: 消费 genericUses_ 中未物化项; freshOut 收特化副本
     bool materializeGenerics(std::vector<std::pair<Module*, Decl*>>* freshOut);
     // 泛型推断 fixpoint (G3): 收请求→物化→增量分析→再跨模块, 至收敛

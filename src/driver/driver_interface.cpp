@@ -15,6 +15,7 @@
 #include "semantics/coclass_identity.hpp"   // CoClass 身份 (tB, B11/C02)
 
 #include <iostream>
+#include <map>
 #include <set>
 #include <string>
 #include <unordered_map>
@@ -386,6 +387,143 @@ bool Driver::runInterfacePrepass(const CompileOptions& options) {
         }
     }
 
+    return !diag_->hasErrors();
+}
+
+// ============================================================
+// stage 3.4c: CoClass 契约聚合 (tB 扩展; ai/022 D50, 批次 B11/C03b)
+// ============================================================
+//
+// 判"块里列出的每个接口, [Implementation] 那个类满足不满足"。为什么不在 stage 2.7
+// (Pass F 就在旁边) 而要多一个阶段: 实现类**自己不写成员、由祖先提供**那份实现是合法
+// 形状 (D50 探针 pd: 祖先只声明成员、不写 Implements, 派生 Inherits 它 —— 这条路今天
+// 唯一被 VB3022 挡住的是"祖先或派生自己写了新式 Implements"那半)。祖先的成员表要到
+// stage 2.8 的链表 + 3.4 的成员合并才看得全, 所以比对排在 3.4b 之后。
+//
+// 不新造比对器 (026 五-1): 槽键与签名口径全部走 interface_sig.hpp 那一份 inline 函数,
+// 与语义层的 checkNewStyleInterface 共用同一套词汇, 两侧不可能对"什么叫同一槽"给出不同
+// 答案。这里重复的只有"把声明表按槽键建索引"这一小段 —— 刻意不去改 B02 那条已发货的
+// 路径 (它的子句记账与遮蔽规则牵动 VB3019), 回归面比省下的二十行贵。
+// 诊断复用既有 VB3012/VB3017 两个号: 缺槽与签名不符的语义和 Implements 那边完全同族,
+// 只是主语从"类实现了接口"换成"CoClass 绑定了接口" (D48-2)。
+bool Driver::runCoClassContractCheck() {
+    bool anyBlock = false;
+    for (const auto& mod : modules_) {
+        if (!mod->coclasses.empty()) { anyBlock = true; break; }
+    }
+    if (!anyBlock) return true;   // 零新语法护栏: 工程里没有 CoClass 块就到此为止
+
+    std::unordered_map<std::string, Module*> byName;
+    for (auto& mod : modules_) byName[ifaceLower(mod->moduleName)] = mod.get();
+
+    // 槽键还原成可读成员名 (与语义层 ifaceBareName 同一条口径)
+    auto bareName = [](const std::string& slotKey) {
+        for (const char* p : {"putref_", "get_", "put_"}) {
+            std::string k(p);
+            if (slotKey.size() > k.size() && slotKey.compare(0, k.size(), k) == 0)
+                return slotKey.substr(k.size());
+        }
+        return slotKey;
+    };
+    // (实现类, 本接口) 是否委托式实现 `Implements I Via m_h`: 是则契约由持有对象满足,
+    // 逐槽"未实现"不报 (B10 同一口径; 签名不符照报, 写了还对不上必然是笔误)。
+    auto delegatedTo = [this](const std::string& classKey, const std::string& ifaceKey) {
+        auto it = vias_.find(classKey);
+        if (it == vias_.end()) return false;
+        for (const ViaView& vv : it->second)
+            if (vv.ifaceKey == ifaceKey) return true;
+        return false;
+    };
+
+    for (auto& mod : modules_) {
+        for (auto& cc : mod->coclasses) {
+            if (!cc || cc->name.empty()) continue;
+            auto idit = coclassIds_.find(ifaceLower(cc->name));
+            // 没写 [Implementation] 的块跳过 (Pass F 今天不要求非有不可, 见 D50-4)
+            if (idit == coclassIds_.end() || idit->second.implName.empty()) continue;
+            auto tgt = byName.find(ifaceLower(idit->second.implName));
+            Module* impl = tgt == byName.end() ? nullptr : tgt->second;
+            // 指向不存在/不是类模块: Pass F 已经报过 VB3033, 这里不级联
+            if (!impl || !impl->isClassModule || impl->isInterfaceModule) continue;
+            // D11 v1 边界: 泛型类不实现接口, 语义层已就该类报过错
+            if (!impl->classTypeParams.empty()) continue;
+
+            // 链 = 自根到叶 (stage 2.8 解好). 类链登记表只收"能当基类用"的模块,
+            // 表里没有 = 这个类没有基类可继承, 就它自己一张声明表。
+            std::vector<Module*> chain{ impl };
+            auto cv = classes_.find(ifaceLower(impl->moduleName));
+            if (cv != classes_.end() && !cv->second.chainBroken && !cv->second.chain.empty()) {
+                std::vector<Module*> full;
+                for (const std::string& k : cv->second.chain) {
+                    auto hit = byName.find(k);
+                    if (hit != byName.end() && hit->second) full.push_back(hit->second);
+                }
+                if (!full.empty()) chain.swap(full);
+            }
+
+            for (const auto& r : cc->ifaces) {
+                auto vit = ifaces_.find(ifaceLower(r.ifaceName));
+                if (vit == ifaces_.end()) continue;   // 条目名不存在: Pass F 已报 VB3031
+                const IfaceView& view = vit->second;
+                if (view.chainBroken) continue;       // 父链有错, 建表期已报, 不再级联
+
+                // 实现侧槽表: **叶优先**入席 (派生遮蔽祖先), 所以链倒着走、首见者胜。
+                // 与 B02 同一取舍: 访问级别不参与判定 (Private 成员也算入席)。
+                std::map<std::string, IfaceProcSig> bound;
+                for (size_t i = chain.size(); i-- > 0;) {
+                    for (const auto& d : chain[i]->declarations) {
+                        if (!d) continue;
+                        IfaceProcSig sig;
+                        if (!ifaceSigFromDecl(*d, sig)) continue;
+                        std::string key = sig.slotKey;
+                        if (const auto* clauses = ifaceProcClauses(*d)) {
+                            if (!clauses->empty()) {
+                                // 写了子句的成员只按子句入座 (B02b 同一条规矩)
+                                key.clear();
+                                for (const ImplementsClause& c : *clauses) {
+                                    bool mine = ifaceLower(c.ifaceName) == ifaceLower(view.name);
+                                    for (const IfaceSlotView& s : view.slots) {
+                                        if (ifaceLower(c.ifaceName) == ifaceLower(s.ownerIface)) mine = true;
+                                    }
+                                    if (!mine) continue;
+                                    key = ifaceSlotPrefix(*d) + ifaceLower(c.memberName);
+                                    break;
+                                }
+                                if (key.empty()) continue;   // 子句指向别的接口: 不参与本契约
+                            }
+                        }
+                        bound.emplace(key, sig);
+                    }
+                }
+
+                const bool via = delegatedTo(ifaceLower(impl->moduleName), ifaceLower(view.name));
+                for (const auto& slot : view.slots) {
+                    IfaceProcSig want;
+                    if (slot.sig) ifaceSigFromDecl(*slot.sig, want);
+                    const std::string member = slot.ownerIface + "." +
+                        (slot.memberName.empty() ? bareName(slot.key) : slot.memberName);
+
+                    auto it = bound.find(slot.key);
+                    if (it == bound.end()) {
+                        if (!via) {
+                            diag_->error(DiagnosticID::SemInterfaceNotImplemented, r.loc,
+                                "CoClass '" + cc->name + "' binds interface '" + view.name +
+                                "': member '" + member + "' (" + want.text + ") is not implemented by "
+                                "class '" + impl->moduleName + "' or any of its ancestors");
+                        }
+                        continue;
+                    }
+                    if (!ifaceSigEqual(want, it->second)) {
+                        diag_->error(DiagnosticID::SemInterfaceSignatureMismatch,
+                            it->second.decl ? it->second.decl->loc : r.loc,
+                            "CoClass '" + cc->name + "' binds interface '" + view.name +
+                            "': member '" + member + "' signature mismatch (interface: " +
+                            want.text + ", class: " + it->second.text + ")");
+                    }
+                }
+            }
+        }
+    }
     return !diag_->hasErrors();
 }
 

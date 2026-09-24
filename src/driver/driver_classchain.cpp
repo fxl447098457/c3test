@@ -422,6 +422,18 @@ bool Driver::runClassChainPrepass() {
             }
         }
         if (classes_.find(bk) == classes_.end()) {
+            // 基名是个 CoClass 块: 挡下的动作一样 (它不是类, 没有成员表可继承), 但理由得说对
+            // —— 报"unknown base class"会让人去查拼写, 而真正的问题是拿组合同的块当基类
+            // (ai/022 D49 留给本批的文案活; 026 五-6 第一条)。号保持 VB3020, 既有断言不动。
+            if (coclassIds_.count(bk)) {
+                diag_->error(DiagnosticID::SemInheritsUnknownBase, v.clause->loc,
+                    "Class '" + v.name + "' inherits '" + v.baseText + "', which is a CoClass "
+                    "block: a coclass groups contracts and owns no member table to inherit "
+                    "(Inherits takes a class module; bind to the coclass' [Implementation] "
+                    "class instead)");
+                v.chainBroken = true;
+                continue;
+            }
             diag_->error(DiagnosticID::SemInheritsUnknownBase, v.clause->loc,
                 "Class '" + v.name + "' inherits unknown base class '" + v.baseText +
                 "' (the target must be a class module in this project)");
