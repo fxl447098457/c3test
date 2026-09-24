@@ -4,10 +4,12 @@
 > 每次运行开始先读本文件，结束前必须更新本文件（状态头 + 批次清单 + 运行日志）。
 > 规范输入: `ai/讨论记录/018-接口继承与CoClass设计思路.md`（含 tB 文档要点与分阶段设计思路全文）。
 
-STATUS: IDLE             # NOT_STARTED | DESIGN | BUSY | IDLE | ALL_DONE
-LAST_RUN: 2026-09-24T15:36:32+08:00   # 本轮 = **B11/C03a 出完并收线**（代码 `e515d89`，门 = Actions run ** #21 = success**、
+STATUS: BUSY             # NOT_STARTED | DESIGN | BUSY | IDLE | ALL_DONE
+LAST_RUN: 2026-09-24T15:38:58+08:00   # 上一轮 = **B11/C03a 出完并收线**（代码 `e515d89`，门 = Actions run ** #21 = success**、
                # head 已核 = e515d89、7 个 job 全绿）。实测 D48（九种形状只挡了一种）/ 实施 D49（八条判据 +
-               # 宿主同名豁免）。自动运行见本行不足 55 分钟请立即跳过。
+               # 本轮 = **B11/C03b 开工**（契约聚合校验 = 新 stage 3.4c + `As <CoClass>` 默认接口视图 + `VB3020` 文案）：
+               # 先量 3.4 之后实现类看得见哪些槽、`As <CoClass>` 今天报什么，裁决记 **D50**。
+               # 上一轮 = C03a 收线（run#21 全绿）。自动运行见本行不足 55 分钟请立即跳过。
 LAST_COMMIT: 代码批 = e515d89(B11/C03a)、f0b820d(B11/C02)、e7c7a31(B11/C01)、3c5d8e6(B10)、9eb2ca7(B09c)、debb110(B09b)、02bac92(B09)、77ecef1(B08f-1)   # **commit message 一律现写、不复用上批文本**；push 只推 `github/dev`（Actions 门），`origin`(gitcode) 与 `main` 不碰、**绝不建 MR**。
 CURRENT_BATCH: **B11/C03b = 契约聚合校验（新增 stage 3.4c）+ `As <CoClass>` 默认接口视图**（D48 切好的下半格）。
                1. **先量后写，裁决记 D50**。量的对象 = 3.4 成员合并之后实现类到底"看得见哪些槽"：D48-3 已量到
@@ -2134,6 +2136,83 @@ A/B = `.build/pre_b11c03_C3.exe` 对 `n29`/`n34` **零命中**（这两条诊断
 里按原句断言的负例。
 
 
+### D50 B11/C03b 前置实测与裁决（2026-09-24 15:38–，只量不改码；探针在 `.build/probe_c03b/pa..pf`）
+
+**量的对象 = 契约聚合到底要看得见哪些成员表**（D48-3 留的那句"祖先实现了、派生类没重写 在 2.7
+看不见"要落实）。三种供给路径分别探：
+
+| 探针 | 形状 | 今天（C03a 之后）的读数 |
+|---|---|---|
+| pa | 派生类自己写 `Implements I` + `Inherits` 一个实现了 I 的基类 | `VB3022`：**派生类自己实现新式接口**就不许继承 |
+| pb | 基类写 `Implements I`，派生类 `Inherits` 它、自己不写 | `VB3022`：**基类实现新式接口**就不许当基类 |
+| pd | 基类**只声明成员、不认领接口**，派生 `Inherits` 它 | **全静默**（契约根本没人查） |
+| pe | 绑定类缺一个槽 | 静默（本批之后 = `VB3012`） |
+| pf | 绑定类的成员 `ByVal`、接口写 `ByRef` | 静默（本批之后 = `VB3017`） |
+| pc | `Dim c As CCCircle`（把块名当类型） | **静默当 `Variant`**，连 `Set c = Nothing` 都不问 |
+
+① **D48-3 的理由成立，但要说准它成立在哪一半**：可达的"祖先供给成员"只有一种形状 —— 祖先自己
+声明成员而不写 `Implements`（pd）。带 `Implements` 的两种（pa/pb）今天被 B08f 的 v1 边界整条挡死，
+所以"2.7 看不见祖先成员"不是假警报，而是**只有 pd 这一条路真的需要链**。结论不变：契约比对排在
+链表（2.8）与成员合并（3.4）之后，也就是新阶段 3.4c。
+
+② **`As <CoClass>` 本批整条推给 C05**（pc 实测是"静默 Variant"）：状态头那条"要么不做、要么只做到
+认得这个名字是类型"的半开方案，量出来是**净负收益** —— 认得它是类型之后成员访问立刻开始报错，
+而派发仍要到 C05，用户拿到的只是"从静默变成一堆说不清的错"。所以这一格与派发**同批**做。
+
+③ 观测面复用现成的：`--syntax-only` 一路跑到阶段 3.6 之后才 return（`driver_compile.cpp:429`），
+所以 3.4c 的诊断天然进得了 `Test-SyntaxFail`/`Test-SyntaxFailMulti` 这条负例通路，不必再找 D46
+那种 stderr 信息行的替代面。
+
+④ **号段沿用，不发新号**：`VB3012 = SemInterfaceNotImplemented`、`VB3017 = SemInterfaceSignatureMismatch`
+（状态头说的"VB3012 族"就是这两个）。缺槽与签名不符在 `Implements` 那边已是这两个号，CoClass 这边
+语义完全同族，只差主语 —— 多发一个号只会让人以为契约有两种算法。
+
+⑤ **没写 `[Implementation]` 的块跳过**（p05 与 `cc_id` 的 `CCMint` 都是合法形状）：没绑实现类就无从
+判起。顺手立"块必须绑实现类"是 C05 的事（那时才要拿它 `New`）。
+
+### D51 B11/C03b 实施（2026-09-24 15:38–，代码 `c4aaa4c`）= 契约聚合校验 + VB3020 文案
+
+**落点**：`driver_compile.cpp` 新增**阶段 3.4c**（3.4b 与 3.5 之间，且刻意放在 `modules_.size() > 1`
+那个 if **之外** —— 单文件工程里的块同样要判）。实现 `Driver::runCoClassContractCheck()` 写在
+`driver_interface.cpp` 末尾，与 Pass D/E/F 同一翻译单元：四条判据共用的前提是"整工程模块表 +
+接口登记表同时可见"。零回归 = 工程里没有 CoClass 块立即 `return true`（与 3.4/3.4b 的早退同族）。
+
+**槽表怎么建**（这一格的全部技术内容）：按 `ClassChainView::chain`（自根到叶）**倒着走**、槽键
+首见者胜 —— 于是"派生遮蔽祖先"自动成立，且遮蔽规则与 3.4 的成员合并同源，不会两套裁决。
+成员级 `Implements I.M` 子句照 B02b 的规矩：写了子句的成员**只**按子句入座，不回落同名隐式匹配。
+访问级别不参与判定（B02 就是这个口径，这里另立一套只会让两个比对器互相打脸）。
+
+**两条刻意的取舍**：
+
+① **不重构 `checkNewStyleInterface` 来共用它那张 impl 表**。它的子句记账牵动 `VB3019`（未认领子句
+的兜底诊断），改它 = 把 B02 那条已发货路径的回归面全展开；而这里多写的只有"按槽键建索引"二十来行。
+两侧真正共用的是 `interface_sig.hpp` 那一套 inline 口径（槽键、签名抽取、签名相等），
+所以"什么算同一个槽、什么算签名不符"仍只有一份定义 —— 这是"复用"的正确粒度（026 五-1）。
+② 类链登记表只收"能当基类用"的模块，表里没有就当该类没有祖先（只用它自己那张声明表），
+不为此扩表。泛型宿主（D11 边界）直接跳过。
+
+**VB3020 文案**（D49 留的尾巴）：只在"基名撞到一个 CoClass 块名"时换成新句，指名那是组契约的块、
+没有成员表可继承；其余情形保持原句。号不变，`ci_n01`（真不存在的基名）与 `ci_n07`（基名是接口宿主）
+两条按原句断言的用例因此一字未动 —— 改前 grep 过，全仓按那句断言的就只有这两处。
+
+**上一批的用例又一次变成这一批的红灯**（D49-② 的第二次应验，而且这次连"理由"都提前写好了）：
+新校验一落地，`p07`/`cc_id/CircleImpl`/`cc_id/VbpImpl` 三条正例全红 —— 前两条是 `ByVal` 对上接口的
+`ByRef`（签名口径算它俩不等），第三条是 `VbpImpl` 根本没有 `Move`/`Label`。定案仍是**改正例**：
+按接口的写法去掉 `ByVal`、给 `VbpImpl` 补齐两槽，不放宽校验也不给 `ByVal` 开后门。
+
+**验收**：`-Category syntax` **107→112**（`itf_n37` 缺槽 / `itf_n38` 签名不符 / `itf_n39` `Inherits`
+块名 三条负例 + `itf_p08` 祖先供给 / `itf_p09` Via 委托供给 两条正例；p09 兼作 B10×B11 的接缝用例，
+`vias_` 里查到的委托关系免逐槽 `VB3012`、签名不符照报）；A/B = `.build/pre_b11c03b_C3.exe` 对
+`n37`/`n38` **零命中**，对 `n39` 出的是**旧那句** "unknown base class"（新句本批独有）；
+10 文件 `--emit-c` 对 `pre_b11c03b_C3.exe` **10/10 逐字节全同**；`cc_id/Id.vbp` 真编译真运行、
+且 `--emit-c` 与改码前逐字节相同（本批一克发码都不产），`cls_inh/Inh.vbp` 真编译 exit 0。
+门 = push 后的 Actions run，编号见状态头。
+
+**下一格 = C04**（存量 `Attribute VB_Creatable`/`Instancing` 只读折算成 CoClass 记录，`ai/026` C04）：
+它独立且小，而 C05（组内激活）按 D50-② 要把 `As <CoClass>` 类型识别与派发**一并**做，开工前先量
+"`As <未知类名>` 今天在哪一层吞掉"（`Variant` 兜底点）与"`New <CoClass>` 直调实现类工厂"的落点。
+
+
 ## 运行日志
 
 - 2026-09-23 建表：范围确认（含完整COM）、规范文档 018 入库、现状盘点完成。
@@ -2341,3 +2420,4 @@ A/B = `.build/pre_b11c03_C3.exe` 对 `n29`/`n34` **零命中**（这两条诊断
 - 2026-09-24 13:24– **B11/C01（`CoClass…End CoClass` 块语法 + 属性行落 AST）提交 `e7c7a31`**：按 022 清单第 1 条先量后写（D44 四条读数：`CoClass` 不是 token 故只第一行报 VB2002、`ProgId`/`Implementation` 不在属性白名单、`[ComCreatable(True)]` 布尔实参被 `strtoll` 判死、`[Default] Interface X` 同行写法不通），再落 C01 的三个落点（词法软关键字四件套 / AST 六处登记含 printer / parser 在 `parser_interface.cpp` 复用属性行 machinery 并加 `requireOwnLine`）。实施中暴露一条 026 没写的规则：**属性行归属要按"名字+位置+同行"合判**（`--dump-ast` 抓到身份四件套挂到了第一个接口上），顺手把 `itf_n06` 的 needle 跟着改成涵盖 CoClass。验收 = `-Category syntax` 89→95（`itf_p05`/`p06` + `itf_n25`..`n28`）+ A/B（`pre_b11_C3.exe` 停在 D44 原始读数）+ 10 文件 `--emit-c` 10/10 + 带块工程真编译真运行；C01 无语义可断，故本批**不建 vbp 工程**（运行期断言从 C05 起才有承载面）。门 = 本次 push 触发的 Actions run，结论见状态头。
 - 2026-09-24 14:17– **B11/C02（身份求解唯一函数 CLSID/IID/ProgID + 可复现性）提交 `f0b820d`**：先量四件事再动手（D46）—— 现成 mint 是 `.inc` 里的局部 lambda、跨不出翻译单元；legacy 那两枚 lambda 没有任何用例覆盖（全部 `tests/*.vbp` 都是 Type=Exe）所以本批一字不动；vbp 三段式与工程名的行号复核无漂移；**"发一条 note 诊断当验收面"这个设想实测不通**（Driver 只在阶段失败时整体打印诊断，note 在成功的编译里看不见）→ 改走 stderr 的 `C3:` 信息行，且不能走 stdout，因为 `--emit-c` 的 stdout 就是 C 文本。落点 = 新单元 `src/semantics/coclass_identity.{hpp,cpp}`（纯函数唯一入口；026 没写的三条口径这次定了：vbp 查表次序 = 先 `[Implementation]` 再块名、`<Proj>` 兜序 = `Name=` > 工程基名 > "VB6EXE"、seed 一律小写而 ProgID 保留原大小写）+ stage 2.7 Pass E + `Driver::coclassIds_`。验收 = `-Category syntax` 96→99（三条断言的期望 GUID 由 python 独立复算 FNV-1a 得到，不拿编译器自己的输出当基线；含"换 vbp `Name=` 只有派生档动、显式档一字不动"与"同一输入跑两次逐字节相同"）、A/B（`pre_b11c02_C3.exe` 一行身份都不出）、10 文件 `--emit-c` 10/10、`Id.vbp` 真编译真运行（`Id.exe` 打出 cc_id）。门 = push `f660e25..f0b820d` 触发的 run#19，结论见状态头（GitHub 连撞 502/504，第 4 次才推上去，且**必须用 `ls-remote` 核实**：第 3 次那句 "Everything up-to-date" 是假象，远端当时还停在 f660e25）。另有两条工具性教训：`watch-gh-actions.ps1` 在 502 上会整脚本抛错退出（`ErrorActionPreference=Stop`），不能当可靠哨兵；CJK 长串经 `python - <<EOF` 的 stdin 会被按 cp936 解码，改用 UTF-8 脚本文件。）
 - 2026-09-24 15:07– **B11/C03a（CoClass 块形状与名字校验，stage 2.7 Pass F）提交 `e515d89`**：D48 量出 C03 要拒的九种形状里**八种今天一声不吭**（唯一已挡住的是 `Inherits` 一个 CoClass 名 → `VB3020`，只是理由文案说成 unknown base class，这条只剩改文案）。本批按判据族给三个号：`VB3031` 条目（未知接口 / 把类模块当接口 / 条目重复 / `[Default]` 多标）、`VB3032` 块名撞车、`VB3033` v1 边界（`[Implementation]` 不是类模块 / EXE 工程 `[ComCreatable(True)]`）。两条实施教训：**块名等于自己宿主模块名必须豁免**（第一版把正例 p07 打回了 —— VB6 最自然的写法就是 `Widget.cls` 里写 `CoClass Widget`，与 B03 接口宿主同一条理由）；**上一批的用例是这一批的雷**——`cc_id`/`p05`/`p07` 三处正例分别声明了不存在的实现类与 EXE+ComCreatable，校验一落地全红，定案是改用例为正形状（补 `CircleImpl.cls`、ComCreatable 改 False、p07 换成宿主同名惯用法）而不是放宽校验，`True` 那一面另立 `itf_n34` 负例。验收 = `-Category syntax` 99→107（n29..n34 单文件 + n35/n36 双文件 + 旧正例全绿 + cc_id 三条身份断言一字不差）、A/B（`pre_b11c03_C3.exe` 对 n29/n34 零命中）、10 文件 `--emit-c` 10/10、`Id.vbp` 真编译真运行。门 = push 后的 Actions run，结论见状态头。**下一格 = C03b**：`runCoClassContractCheck()` 放 stage 3.4c（2.7 判不准祖先实现，D48-3）+ `As <CoClass>` 默认接口视图 + `VB3020` 文案。
+- 2026-09-24 15:38– **B11/C03b（CoClass 契约聚合校验 = 新阶段 3.4c）提交 `c4aaa4c`**：D50 量出可达的"祖先供给成员"只有"祖先声明成员而不写 `Implements`"这一种形状（带 `Implements` 的两种被 B08f 的 `VB3022` 挡死），所以 D48-3 那条"2.7 看不见祖先成员"要说准成立在哪一半 —— 但结论不变，比对排在链表与成员合并之后；同批量到 `As <CoClass>` 今天**静默当 Variant**，于是把 026 五-3 整条推给 C05 与派发同批做（只做"认得是类型"的半开会把静默变成说不清的错）。实施：`runCoClassContractCheck()` 按链倒着走、槽键首见者胜（派生遮蔽祖先，与 3.4 同源），成员级子句沿用 B02b 规矩，缺槽/签名不符复用 `VB3012`/`VB3017` 两个号（主语换成 CoClass 块）；**刻意不重构** `checkNewStyleInterface` 来共用它的 impl 表 —— 那牵动 `VB3019` 的子句记账，而两侧共用的 `interface_sig.hpp` 已经保证"槽"与"签名相等"只有一份定义。`VB3020` 的文案活按 D49 收掉：只有"基名是个 CoClass 块"换新句，`ci_n01`/`ci_n07` 原句不动。D49-② 那条教训第二次应验 —— 新校验把自己的三条旧正例（`p07`/`CircleImpl`/`VbpImpl`）打红，两处 `ByVal` 撞 `ByRef`、一处压根没实现，定案照旧是改正例。验收 = `-Category syntax` 107→112（n37/n38/n39 + p08/p09）、A/B 零命中（n39 出旧句，新句本批独有）、10 文件 `--emit-c` 10/10、`Id.vbp` 真编译真运行且发码逐字节未动。**下一格 = C04**（存量 attribute 只读折算），C05 连带 `As <CoClass>` 一起做。
