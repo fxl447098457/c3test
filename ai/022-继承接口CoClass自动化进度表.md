@@ -1927,8 +1927,10 @@ vb6_F9Base_prop_let_Level((void*)u.c, 9);  /* Property Let via prop_get_ rewrite
 
 **验收**：`-Category syntax` **89→95**（新用例 `itf_p05`/`itf_p06` + 负例 `itf_n25`..`n28`）；A/B =
 `.build/pre_b11_C3.exe` 对 `n25` 停在 `VB2002 unexpected token at module level: CoClass`（D44 的原始读数）；
-10 文件 `--emit-c` 对 `pre_b11_C3.exe` **10/10 逐字节全同**；带 CoClass 块的 `p05` 还做了**真编译 + 真运行**
-（打印 `ok`）—— C01 没有任何语义可断，所以本批**不建 vbp 工程**（一次显式的"批粒度小于一个工程"取舍，
+10 文件 `--emit-c` 对 `pre_b11_C3.exe` **10/10 逐字节全同**；另做一条**惰性证明**（比护栏更贴本批）：
+同一份 `p05` 工程**删掉 CoClass 块**后 `--emit-c` 与保留块时逐字节相同（唯一差异是两个源文件名注释，
+`.build/probe_b11/inert/{w,n}.c`）—— 块在发码层一行都不发；带块的 `p05` 还做了**真编译 + 真运行**
+（打印 `ok`）。C01 没有任何语义可断，所以本批**不建 vbp 工程**（一次显式的"批粒度小于一个工程"取舍，
 运行期断言从 C05 起才有承载面）。门 = 本次 push（`3c5d8e6..e7c7a31`）触发的 Actions run，编号与结论记在状态头。
 
 **下一格 = C02**（026 六节）：身份求解唯一函数 `CLSID/IID/ProgID` 三优先级 + 两次构建可复现。C01 已经把
