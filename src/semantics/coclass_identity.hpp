@@ -41,6 +41,10 @@ struct CoClassIdentity {
     IdentitySource iidSource = IdentitySource::Missing;
     IdentitySource progIdSource = IdentitySource::Minted;
     bool comCreatable = false;  // [ComCreatable(True)]
+    // 这条身份来自**折算**而不是手写块 (ai/026 六节 C04 / ai/022 D52, 批次 B11/C04)。
+    // 唯一消费者是 stage 2.8 的 VB3020 文案：折算记录的名字恒等于一个类模块名，
+    // 说"那是个 CoClass 块、没有成员表可继承"对一个从没写过块的存量工程是假理由。
+    bool legacyFolded = false;
 };
 
 // 求解要看的"块外面的世界"：工程名、vbp 的 CLSID 表、接口登记表（取 [InterfaceId]）。

@@ -268,6 +268,98 @@ bool Driver::runInterfacePrepass(const CompileOptions& options) {
         }
     }
 
+    // --- Pass E0: 存量 header attribute 只读折算 (ai/026 六节 C04 / ai/022 D52, 批次 B11/C04) ---
+    //
+    // VB6 不把 COM 身份写在源码里，而写在 `.cls` 头部那几行 `Attribute VB_*` 上。本 Pass 把它们
+    // 折成**同一条** CoClass 记录塞进 Module::coclasses —— 于是 Pass E 仍是全工程唯一的身份出口、
+    // coclassIds_ 仍是唯一读数（D47 之后这条是硬规矩：不许另立第二套身份通道）。
+    //
+    // 三条按 D52 实测定的口径：
+    //  1) 只折 `.cls` 类模块、且属性名**不带点**。语料实测成员级行（`Attribute m_oSocket.
+    //     VB_VarHelpID` 一类）另有 40+ 种名字，混进来就是把成员元数据当身份读；`.ctl`/`.pag`
+    //     虽然 `isClassModule` 也算真，但 026 六节只让折类模块，按文件名后缀挡掉。
+    //  2) 折算记录**只记信息、不开判死**：Pass F 的形状/名字校验与 stage 3.4c 的契约聚合都按
+    //     foldedFromAttributes() 跳过它。实测 143 条 `VB_Creatable` 里 134 条是 True、且全在
+    //     EXE 工程 —— 一视同仁就是给 C03a 新立的 VB3033 送一批"改码前一声不吭"的存量工程当红。
+    //  3) 手写块优先：同一模块两者都有时**不折**，只报一条信息行（026 六节"以手写块为准"）。
+    //     `Instancing` 不在这里折：它的唯一真相是 `Module::instancing`（parse 期从 BEGIN 头读），
+    //     复制进记录就是造两处真相。
+    {
+        auto boolLiteral = [](const AttributeStmt& a, bool& out) {
+            if (!a.value || a.value->kind != ASTNodeKind::LiteralExpr) return false;
+            const std::string& raw = static_cast<const LiteralExpr&>(*a.value).rawText;
+            if (raw == "True" || raw == "true" || raw == "-1") { out = true; return true; }
+            if (raw == "False" || raw == "false" || raw == "0") { out = false; return true; }
+            return false;
+        };
+        // { 源码里的属性名, 折进记录后的属性名 } —— 只有第一枚有现成归宿（身份求解读
+        // [ComCreatable]），其余三枚按原名带着：今天无人读，B13/B15 的类型库标志位从这里取。
+        struct FoldKey { const char* legacy; const char* target; };
+        static const FoldKey kFoldKeys[] = {
+            { "VB_Creatable",       "ComCreatable"       },
+            { "VB_Exposed",         "VB_Exposed"         },
+            { "VB_PredeclaredId",   "VB_PredeclaredId"   },
+            { "VB_GlobalNameSpace", "VB_GlobalNameSpace" },
+        };
+
+        for (auto& mod : modules_) {
+            if (!mod || !mod->isClassModule || mod->isInterfaceModule) continue;
+            if (!mod->classTypeParams.empty()) continue;   // 泛型模板: 这些属性行本身在 2.6 就被拒
+            const std::string fname = ifaceLower(mod->filename);
+            size_t dot = fname.rfind('.');
+            if (dot == std::string::npos || fname.substr(dot) != ".cls") continue;
+
+            // 每个键取首行（与 Pass E 对同名属性行"首值胜"同一条口径）
+            const AttributeStmt* hit[4] = { nullptr, nullptr, nullptr, nullptr };
+            for (const auto& attr : mod->attributes) {
+                if (!attr || attr->attrName.find('.') != std::string::npos) continue;
+                for (size_t i = 0; i < 4; i++) {
+                    if (!hit[i] && ifaceLower(attr->attrName) == ifaceLower(kFoldKeys[i].legacy)) {
+                        hit[i] = attr.get();
+                        break;
+                    }
+                }
+            }
+            int nHit = 0;
+            const AttributeStmt* first = nullptr;
+            for (size_t i = 0; i < 4; i++) if (hit[i]) { nHit++; if (!first) first = hit[i]; }
+            if (!nHit) continue;   // 只写 VB_Name 的模块（含本工程全部 .bas 用例）到此为止
+
+            bool hasHandwritten = false;
+            for (const auto& cc : mod->coclasses) {
+                if (cc && !cc->foldedFromAttributes()) { hasHandwritten = true; break; }
+            }
+            if (hasHandwritten) {
+                std::cerr << "C3: class '" << mod->moduleName << "' has both a CoClass block and "
+                          << nHit << " legacy header attribute line(s): the block wins, the "
+                          << "attributes are not folded" << std::endl;
+                continue;
+            }
+
+            auto cc = std::make_unique<CoClassDecl>(first->loc, mod->moduleName);
+            InterfaceAttr impl;
+            impl.name = "Implementation";
+            impl.strValue = mod->moduleName;   // 类自己就是那个实现
+            impl.hasStr = true;
+            impl.loc = cc->loc;
+            cc->attributes.push_back(std::move(impl));
+            for (size_t i = 0; i < 4; i++) {
+                if (!hit[i]) continue;
+                bool truthy = false;
+                const bool gotBool = boolLiteral(*hit[i], truthy);
+                InterfaceAttr a;
+                a.name = kFoldKeys[i].target;
+                a.loc = hit[i]->loc;
+                a.hasNum = true;
+                a.numValue = (gotBool && truthy) ? 1 : 0;
+                cc->legacyFoldKeys.push_back(std::string(kFoldKeys[i].legacy) + "=" +
+                                             (a.numValue ? "True" : "False"));
+                cc->attributes.push_back(std::move(a));
+            }
+            mod->coclasses.push_back(std::move(cc));
+        }
+    }
+
     // --- Pass E: CoClass 身份求解 (tB 扩展, ai/026 三节 / ai/022 D46, 批次 B11/C02) ---
     // 求解本身在 src/semantics/coclass_identity.cpp 这个唯一入口里；这里只给上下文、缓存结果。
     // 报告走 stderr 的 "C3: ..." 信息行（driver_compile.cpp 的 "C3: 加载工程" 是同族先例）：
@@ -292,7 +384,13 @@ bool Driver::runInterfacePrepass(const CompileOptions& options) {
                           << " ProgID=" << id.progId
                           << " (" << identitySourceName(id.progIdSource) << ")"
                           << " impl='" << id.implName << "'"
-                          << " comCreatable=" << (id.comCreatable ? "True" : "False") << std::endl;
+                          << " comCreatable=" << (id.comCreatable ? "True" : "False");
+                if (cc->foldedFromAttributes()) {
+                    // 折算来的记录在**同一行**里说清楚: 消费者是谁、折了哪几行属性。
+                    std::cerr << " folded-from-legacy:";
+                    for (const std::string& k : cc->legacyFoldKeys) std::cerr << ' ' << k;
+                }
+                std::cerr << std::endl;
                 // 同名两个块: 首值胜。重复名/引用是否存在这类校验按 D44 整片归 C03。
                 coclassIds_.emplace(ifaceLower(id.name), std::move(id));
             }
@@ -308,6 +406,9 @@ bool Driver::runInterfacePrepass(const CompileOptions& options) {
         for (auto& mod : modules_) {
             for (auto& cc : mod->coclasses) {
                 if (!cc || cc->name.empty()) continue;   // 无名块: parse 期已报错, 不再级联
+                // 折算记录不参与 (D52-2): 语料里 134 条 `VB_Creatable = True` 全在 EXE 工程,
+                // 让新校验打它们 = 把改码前编得过的存量工程当场打死。
+                if (cc->foldedFromAttributes()) continue;
                 const std::string key = ifaceLower(cc->name);
 
                 // 1) 块名撞车（重复块名 / 撞模块名 / 撞接口名）
@@ -409,7 +510,11 @@ bool Driver::runInterfacePrepass(const CompileOptions& options) {
 bool Driver::runCoClassContractCheck() {
     bool anyBlock = false;
     for (const auto& mod : modules_) {
-        if (!mod->coclasses.empty()) { anyBlock = true; break; }
+        // 折算记录没有契约条目、也不该被契约判死 (D52-2) ⇒ 早退条件只认手写块
+        for (const auto& cc : mod->coclasses) {
+            if (cc && !cc->foldedFromAttributes()) { anyBlock = true; break; }
+        }
+        if (anyBlock) break;
     }
     if (!anyBlock) return true;   // 零新语法护栏: 工程里没有 CoClass 块就到此为止
 

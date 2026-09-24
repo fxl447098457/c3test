@@ -1,0 +1,5 @@
+Type=Exe
+Name="FoldApp"
+Module=IdMain; IdMain.bas
+Class=FoldVbp; FoldVbp.cls; {77777777-8888-9999-AAAABBBBBBBBBBBB}
+Startup="Sub Main"
