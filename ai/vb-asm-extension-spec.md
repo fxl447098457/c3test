@@ -2,7 +2,9 @@
 
 > 工具链约束：**MSVC**（x86 32 位有 `__asm{}` 内联；x64 无内联汇编，只能走 MASM 独立过程）。
 > 设计取向：用户侧语法学习 **FreeBASIC** 的 `Asm...End Asm`（BASIC 原生、按名引用、干净），后端换成 **MASM + intrinsics**（适配 MSVC/x64）。
-> 状态：v1 设计定稿，未实现。
+> 状态：**已实现**（2026-09-24）。x86 走 `__asm{}` 内联、x64 走 MASM 独立过程两条后端均已落地；
+> `Asm/End Asm` 块 + 单行 `Asm <指令>` + `<Naked>` + `Clobber(...)` + callee-saved 自动保存均已实现，
+> 测试见 `tests/asm/`（x64 正例 `asm_ok`、x86 正例 `asm_x86`、负例 2012/2014/3036/3037），门禁 `asm` 分类 + CI 矩阵。
 
 ---
 
@@ -33,19 +35,21 @@ Public Function AddFive(ByVal num As Long) As Long
     End Asm
 End Function
 
-' Naked 整函数汇编（不生成 prologue/epilogue，asm 即函数体）
+' Naked 整函数汇编（不生成 prologue/epilogue，asm 即函数体，自己 ret）
+' ⚠ 指针与 cmpxchg 累加器不能共用 RAX/EAX —— 见 §11，正解是指针放 R10。
 <Naked>
-Public Function AtomicAdd(ByRef target As Long, ByVal add As Long) As Long
+Public Function AtomicAdd(ByRef target As Long, ByVal addend As Long) As Long
     Asm
-        mov eax, [target]      ' eax = target 指针
-        mov eax, [eax]         ' eax = *target
+        mov r9d, edx            ' 其余参数先搬走 (addend)
+        mov r10, [target]       ' 指针只加载一次, 循环内不再写 r10
     .retry:
-        mov edx, eax
-        add edx, [add]
-        mov ecx, [target]
-        lock cmpxchg [ecx], edx
+        mov eax, [r10]          ' 累加器: 与 r10 各司其职
+        mov r8d, eax
+        add r8d, r9d
+        lock cmpxchg [r10], r8d
         jne .retry
         mov [Function], eax     ' 返回旧值
+        ret                     ' <Naked>: 尾部不自动补 ret, 自己写
     End Asm
 End Function
 ```
@@ -54,14 +58,25 @@ End Function
 
 | 项 | 规则 |
 |---|---|
-| 块结构 | `Asm ... End Asm`；单行可用 `Asm <指令>`。 |
+| 块结构 | `Asm ... End Asm`；单行可用 `Asm <指令>`（过程体只有一条指令时）。 |
 | 按名引用 | `[var]` 引用变量；编译器做栈帧 / ABI 寄存器替换（见 §4、§5）。 |
-| 返回值 | `[Function]` 占位 → 映射到 ABI 返回寄存器（x86=eax，x64=rax）。 |
+| 返回值 | `[Function]` 占位 → 映射到 ABI 返回寄存器（x86=eax，x64=rax）。x86 内联块里若整块没写 `[Function]`，收尾自动把 EAX 落到返回值（单行形式靠这条）。 |
 | 注释 | 用 VB 风格 `'`，**不用** `;`（避免与汇编冲突）。 |
 | 大小标注 | 用 **MASM 风格 `dword ptr [n]`**，不要用 GAS 的 `dword Ptr [n]`（那是 GAS 怪癖，别泄漏给用户）。 |
-| 标签 | `.name:` 局部标签，`jmp .name` 引用；PC 相对偏移由汇编器算。 |
+| 标签 | `.name:` 局部标签，`jmp .name` 引用；发射期重写为 `<过程名>_<name>`（MASM PROC 内无 proc 局部标签，同文件多 PROC 会撞名）。 |
 | 寄存器命名 | 标准 Intel：`eax/rax`、`xmm0`…、`st(0)`…。 |
-| 可选 clobber | `Asm Clobber("rbx","r12","memory") ... End Asm`，声明踩了哪些寄存器 / 内存，供编译器自动生成保存代码。 |
+| 可选 clobber | `Asm Clobber("rbx","r12","memory") ... End Asm`，声明踩了哪些寄存器 / 内存，与块内静态扫描取并集后自动生成 push/pop。 |
+| 属性 | `<Naked>` 独占一行写在 `Sub`/`Function` 之前（角括号属性行；修饰非过程 → 2012）。 |
+
+**指令宽度必须一致**：MASM（以及 MSVC 内联汇编）不容许宽度不等的 `mov` —— `mov rbx, ecx`（64←32）
+是 A2022，`mov eax, rax` 同理。32 位值就写 32 位寄存器（写 `ebx` 零扩展到 RBX），或显式
+`movsxd rbx, ecx`；配合 `[Function]` 时也按返回宽度取寄存器（`Long` 返回写 `eax`，指针/64 位写 `rax`）。
+
+**这条已由编译器兜底（2026-09-24）**：codegen 期用与后端完全同一张替换表（`asm_proc.hpp` 的
+`asmBuildX64Subs` / `asmBuildX86Subs`）模拟代入后，对两个**纯寄存器**操作数做宽度校验
+（`asmCheckRegWidths`），不一致直接报 **VB3038**（带 VB 源码位置与改法提示），不再漏到
+ml64 的 A2022 / cl 的 C2443。内存操作数（`dword ptr [x]`）与变宽指令（movzx/movsx/movsxd/lea）
+不做判定，仍交给汇编器。
 
 ### 2.3 By-name 引用语义（重要）
 
@@ -108,11 +123,16 @@ END
 
 ---
 
-## 4. Lowering：x86（MSVC `__asm{}`）
+## 4. Lowering：x86（MSVC `__asm{}`）—— 已实现
 
 - 把 `Asm...End Asm` 块 1:1 包进 `__asm { }`；`[var]`、`[Function]` 由 MSVC 内联汇编器按名解析（它原生支持引用局部变量名）。
-- **callee-saved 自动保存**：非 `<Naked>` 块，编译器在块入口 push `ebx, esi, edi, ebp`、出口 pop（x86 的 callee-saved 集）。`<Naked>` 下不保存，用户全权负责。
-- 仅 32 位可用；若目标为 x64，编译器报错并提示改用 MASM 路径（见 §5）。
+- **callee-saved 自动保存**：非 `<Naked>` 块，编译器在块入口 push、出口 pop —— 集合 = 块内文本扫描命中的 callee-saved ∪ `Clobber(...)` 声明（x86 集：`ebx/esi/edi/ebp`；`r12–r15` 是 x64 独有，x86 下忽略）。
+  只保存**实际用到**的，而不是无条件保存四个（减少无谓指令，且 `ebp` 帧指针在共享栈帧下更该少动）。
+- **返回值收尾**：非 `<Naked>` 且块内没写 `[Function]` 时，自动追加 `mov <返回变量>, eax` —— 值按 VB 约定留在 EAX。单行形式 `Asm mov eax, [num]` 正是靠这条。
+- `<Naked>` 产出 `__declspec(naked)` 函数：只有 `__asm` 块，无 prologue/epilogue、不自动补 `ret`。
+  ⚠ x86 `<Naked>` **不能按名引用参数**（没有栈帧，参数在调用者的栈上，名字无从解析）→ 报 **3036**。
+- 生成的 C 里回填变量初始值用 `= 0` 而**不是** `{}` —— `/std:c11` 下空花括号初始化标量是 C23 语法，cl 报 C2143（实测踩过）。
+- 仅 32 位可用；x64 目标自动走 MASM 路径（见 §5），用户侧语法不变。
 
 ---
 
@@ -196,12 +216,18 @@ END
 
 ---
 
-## 10. 开放问题 / v2
+## 10. 开放问题 / 待办
 
-1. x64 下是否放开「引用 VB 局部变量」（需自动 spill 到栈并映射）——v1 暂限定仅参数。
-2. 行内混排（非 Naked 的语句间 asm）是否支持——v1 仅整块；混排需与寄存器分配器深度耦合，风险高，暂缓。
-3. ARM64 后端（AAPCS 表 + `armasm64`/`clang` 集成）——待 x86/x64 跑通后评估。
-4. 标签 / 外部符号重定位：独立 MASM 过程由 `ml64` + 链接器处理；若未来做裸字节 Emit 逃生舱，需自行生成重定位项。
+1. **x86 `<Naked>` 不能按名引用参数** —— naked 无栈帧, x86 参数在调用者栈上, 名字无从解析。
+   已实现为编译期诊断 **3036**（唯一来源）。x64 无此限制（参数在 ABI 寄存器里）。
+2. x64 下是否放开「引用 VB 局部变量」（需自动 spill 到栈并映射）——当前限定仅参数。
+   注: Asm 过程体独占整个过程, 此时并不存在 VB 局部变量; 仅在放开混排后才成为真问题。
+3. 行内混排（非 Naked 的语句间 asm）是否支持——当前仅整块；混排需与寄存器分配器深度耦合，风险高，暂缓。
+4. ARM64 后端（AAPCS 表 + `armasm64`/`clang` 集成）——待 x64 跑通后评估（已具备 x86/x64 两套 ABI 表）。
+5. 标签 / 外部符号重定位：独立 MASM 过程由 `ml64` + 链接器处理；若未来做裸字节 Emit 逃生舱，需自行生成重定位项。
+6. 浮点/向量参数与返回（x64 走 XMM0–3）：当前 Asm 过程只接受整型与指针 —— 浮点按值参数与
+   `Single`/`Double` 返回均报 3037。
+7. x86 `int64_t` 返回（edx:eax 双寄存器）与 x64 栈传参（>4 参）：报 3037。
 
 ---
 

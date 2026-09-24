@@ -383,6 +383,7 @@ StmtPtr ASTCloner::cloneStmt(const Stmt* s) {
         auto n = std::make_unique<AsmStmt>(s->loc);
         n->lines = x.lines;
         n->naked = x.naked;
+        n->clobbers = x.clobbers;
         out = std::move(n);
         break;
     }
@@ -665,6 +666,7 @@ std::unique_ptr<SubDecl> ASTCloner::cloneSubDecl(const SubDecl& d,
     auto out = std::make_unique<SubDecl>(d.loc, d.access, newName, std::move(params),
                                          std::move(body), d.isStatic);
     out->implementsClauses = d.implementsClauses;
+    out->isNaked = d.isNaked;
     return out;
 }
 
@@ -683,6 +685,7 @@ std::unique_ptr<FunctionDecl> ASTCloner::cloneFunctionDecl(const FunctionDecl& d
     auto out = std::make_unique<FunctionDecl>(d.loc, d.access, newName, std::move(params),
                                               std::move(ret), std::move(body), d.isStatic);
     out->implementsClauses = d.implementsClauses;
+    out->isNaked = d.isNaked;
     return out;
 }
 
