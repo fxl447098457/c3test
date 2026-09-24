@@ -264,7 +264,15 @@ std::unique_ptr<ImplementsStmt> Parser::parseImplements() {
         auto part = expectName("expected interface name after '.'");
         fullName += "." + part.text;
     }
-    return std::make_unique<ImplementsStmt>(loc, fullName);
+    auto stmt = std::make_unique<ImplementsStmt>(loc, fullName);
+    // tB 扩展 (ai/022 D42, 批次 B10): 委托式实现子句 `Implements I Via m_holder`。
+    // 没有 Via 时下面的分支根本不进, 存量路径逐字节不变 (VB6 里 `Via` 不是关键字,
+    // 语料核查: tests/archive/publish 的 .bas/.cls/.frm/.ctl 中 \bvia\b 零命中)。
+    if (cur_.kind == TokenKind::Via) {
+        advance(); // consume 'Via'
+        stmt->viaField = expectName("expected holder field name after 'Via'").text;
+    }
+    return stmt;
 }
 
 // 类继承子句 (tB 扩展, B07): 与 parseImplements 同口径吃点号限定名 (Project.IFace 那种

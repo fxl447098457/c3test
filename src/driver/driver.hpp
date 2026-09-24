@@ -143,6 +143,9 @@ private:
     // 挂 Driver 而非某个符号表: 每模块一张符号表, 而接口名是工程级唯一的.
     IfaceRegistry ifaces_;
     std::vector<std::string> ifaceOrder_;  // 登记序, 保证诊断输出确定性
+    // 委托式实现 (tB, B10): stage 2.7 Pass D 建好的只读裁决表 (小写类模块名 → Via 子句).
+    // 消费方 = 语义层 (据此免掉逐槽 VB3012) 与发码层 (据此转调持有对象的接口槽).
+    ViaRegistry vias_;
     // 类继承 (tB, B07a): stage 2.8 建好的只读链登记表 (小写类名 → 父先己后的链).
     // 同上, 挂 Driver 而非符号表; B07b 的成员合并是唯一消费者.
     ClassChainRegistry classes_;

@@ -1,0 +1,9 @@
+Type=Exe
+Reference=*\G{00020430-0000-0000-C000-000000000046}#2.0#0#C:\Windows\SysWOW64\stdole2.tlb#OLE Automation
+Class=IViaShape; IViaShape.cls
+Class=IViaNamed; IViaNamed.cls
+Class=CViaHolder; CViaHolder.cls
+Class=CViaBare; CViaBare.cls
+Class=CViaDeleg; CViaDeleg.cls
+Module=ViaMain; ViaMain.bas
+Startup="ViaMain"

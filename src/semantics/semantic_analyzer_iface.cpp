@@ -69,6 +69,19 @@ const IfaceView* lookupWrittenIface(const IfaceRegistry* reg, const std::string&
     return it == reg->end() ? nullptr : &it->second;
 }
 
+// (本类, 本接口) 是否被 stage 2.7 Pass D 判成委托式实现 `Implements I Via m_h` (B10)。
+// 判定不在这里做 (要看别的模块的 Implements 列表, 语义层看不到), 这里只查结果。
+bool viaDelegates(const ViaRegistry* reg, const Module& m, const IfaceView& view) {
+    if (!reg) return false;
+    auto it = reg->find(ifaceLower(m.moduleName));
+    if (it == reg->end()) return false;
+    const std::string want = ifaceLower(view.name);
+    for (const ViaView& vv : it->second) {
+        if (vv.ifaceKey == want) return true;
+    }
+    return false;
+}
+
 } // namespace
 
 void SemanticAnalyzer::checkNewStyleInterface(const Module& module, const IfaceView& view,
@@ -83,6 +96,10 @@ void SemanticAnalyzer::checkNewStyleInterface(const Module& module, const IfaceV
         return;
     }
     if (view.chainBroken) return;  // 建表阶段 (stage 2.7) 已就该接口报过错, 不再级联
+
+    // tB 委托式实现 (B10): `Implements I Via m_h` 把整份契约转交给 m_h 那个对象, 所以
+    // 逐槽"未实现"不报 —— 但本类自家写了的成员仍按接口槽校签名 (写了还对不上必然是笔误)。
+    const bool delegated = viaDelegates(viaReg_, module, view);
 
     // 实现侧成员表: 槽键 → 签名 (两席争同一槽 = 契约歧义, 报错)
     std::map<std::string, IfaceProcSig> impl;
@@ -130,9 +147,11 @@ void SemanticAnalyzer::checkNewStyleInterface(const Module& module, const IfaceV
 
         auto it = impl.find(slot.key);
         if (it == impl.end()) {
-            diag_.error(DiagnosticID::SemInterfaceNotImplemented, loc,
-                "Implements " + writtenName + ": member '" + member + "' (" + want.text +
-                ") is not implemented by class '" + module.moduleName + "'");
+            if (!delegated) {
+                diag_.error(DiagnosticID::SemInterfaceNotImplemented, loc,
+                    "Implements " + writtenName + ": member '" + member + "' (" + want.text +
+                    ") is not implemented by class '" + module.moduleName + "'");
+            }
             continue;
         }
         if (!ifaceSigEqual(want, it->second)) {

@@ -544,8 +544,12 @@ StmtPtr ASTCloner::cloneStmt(const Stmt* s) {
         out = std::make_unique<DoEventsStmt>(s->loc); break;
     case ASTNodeKind::OptionStmt:
         out = std::make_unique<OptionStmt>(s->loc, static_cast<const OptionStmt&>(*s).optionKind); break;
-    case ASTNodeKind::ImplementsStmt:
-        out = std::make_unique<ImplementsStmt>(s->loc, static_cast<const ImplementsStmt&>(*s).interfaceName); break;
+    case ASTNodeKind::ImplementsStmt: {
+        auto& x = static_cast<const ImplementsStmt&>(*s);
+        auto c = std::make_unique<ImplementsStmt>(x.loc, x.interfaceName);
+        c->viaField = x.viaField;  // ai/022 B10: 委托子句要跟着拷，否则泛型/克隆路径丢 Via
+        out = std::move(c); break;
+    }
     case ASTNodeKind::DefTypeStmt: {
         auto& x = static_cast<const DefTypeStmt&>(*s);
         out = std::make_unique<DefTypeStmt>(x.loc, x.defKind, x.ranges); break;

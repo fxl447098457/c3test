@@ -179,10 +179,23 @@ Decl* CCodeGen::ivFindImplMember(Module& module, const IfaceView& v, const Iface
     return nullptr;
 }
 
+// tB 委托式实现 (ai/022 B10): 本类是否把接口 v 的整份契约转交给一个持有字段。
+// 裁决 (字段存不存在、字段类型那个类实现没实现 v) 全在 stage 2.7 Pass D —— 那时才
+// 看得见整工程的模块表; 这里只取结果, 不再判一遍。
+const ViaView* CCodeGen::ivViaFor(const Module& module, const IfaceView& v) {
+    if (!ivviareg_) return nullptr;
+    auto it = ivviareg_->find(ifaceLower(module.moduleName));
+    if (it == ivviareg_->end()) return nullptr;
+    const std::string want = ifaceLower(v.name);
+    for (const ViaView& vv : it->second) {
+        if (vv.ifaceKey == want) return &vv;
+    }
+    return nullptr;
+}
+
 // ============================================================
 // 签名文本
 // ============================================================
-
 // 调用点成员名 -> 槽键：先按 Sub/Function 的裸名匹配，再按属性三槽前缀回退
 // （`s.Name` 读属性 → get_name；写属性由赋值路径自己带前缀，B04b 之后补）
 std::string CCodeGen::ivSlotKeyForMember(const IfaceView& v, const std::string& member) {
@@ -450,8 +463,43 @@ void CCodeGen::emitIfaceImplTables(Module& module) {
         for (const IfaceSlotView& slot : v->slots) {
             Decl* impl = ivFindImplMember(module, *v, slot);
             if (!impl) {
-                // 契约缺失在语义层已经报过错（B02/B02b），这里只留 NULL 占位避免级联编译错误
-                slotFns.push_back("NULL");
+                // tB 委托式实现 (ai/022 B10): 本类自己没写这一席, 但整份契约转交给了一个
+                // 持有字段 → 发一个"转调持有对象同名槽"的适配器。
+                // 为什么绕接口表、而不是直调 `vb6_<持有类>_<成员>`: 实现接口的成员按 VB6 惯例
+                // 写 Private = C 层 static, 跨翻译单元连不到 (B09 的 MyBase 正是撞上这条才把
+                // Private 目标判死的); 表项发在持有类自己的 TU 里, 函数指针从对象里读, 天然可用。
+                const ViaView* via = ivViaFor(module, *v);
+                if (!via || !slot.sig) {
+                    // 契约缺失在语义层已经报过错（B02/B02b），这里只留 NULL 占位避免级联编译错误
+                    slotFns.push_back("NULL");
+                    continue;
+                }
+                const std::string fn = "vb6_iimpl_" + clsId + "_" + id + "_" + cIdent(slot.key);
+                const std::string ret = ivSlotRetType(slot.sig);
+                const std::string fld = cIdent(via->fieldName);
+                Decl& sigDecl = *const_cast<Decl*>(slot.sig);
+                slotFns.push_back(fn);
+
+                c_.emitBlank();
+                c_.emitLine("static " + ret + " " + fn + "(" + ref + "* self" +
+                            ivParamDecls(sigDecl) + ") {");
+                c_.indent();
+                c_.emitLine(clsStruct + "* me = (" + clsStruct + "*)((char*)self - offsetof(" +
+                            clsStruct + ", __iv_" + id + "));");
+                c_.emitLine("vb6_ivref_" + id + "* h = me->" + fld + " ? &me->" + fld +
+                            "->__iv_" + id + " : NULL;  /* tB Via " + via->fieldName +
+                            " -> " + via->holderModule + " */");
+                const std::string call =
+                    "h->vt->" + cIdent(slot.key) + "(h" + ivForwardArgs(sigDecl) + ")";
+                if (ret == "void") {
+                    c_.emitLine("if (h) " + call + ";");
+                } else {
+                    c_.emitLine("if (h) return " + call + ";");
+                    c_.emitLine(ret + " __via0 = {0};  /* 持有对象是 Nothing: 退成该类型的零值 */");
+                    c_.emitLine("return __via0;");
+                }
+                c_.dedent();
+                c_.emitLine("}");
                 continue;
             }
             const std::string fn = "vb6_iimpl_" + clsId + "_" + id + "_" + cIdent(slot.key);

@@ -143,6 +143,9 @@ public:
     void setGenericRegistry(const GenRegistry* reg) { genReg_ = reg; }
     // Interface 契约 (tB, B02): stage 2.7 建好的只读登记表, 供 Implements 分叉判定.
     void setInterfaceRegistry(const IfaceRegistry* reg) { ifaceReg_ = reg; }
+    // 委托式实现 (tB, B10): stage 2.7 Pass D 的裁决表; 命中的 (类, 接口) 对整份契约
+    // 由被委托对象满足, 逐槽 VB3012 不再报.
+    void setViaRegistry(const ViaRegistry* reg) { viaReg_ = reg; }
     // 类继承 (tB, B07b): stage 2.8 链登记表 (祖先声明的只读视图), 供裸名继承成员判定.
     void setClassChainRegistry(const ClassChainRegistry* reg) { clsreg_ = reg; }
     // 推断成功的实例化请求 (驱动 fixpoint 物化) — 取空语义.
@@ -261,6 +264,7 @@ private:
     // 泛型 (tB, G3): 调用点推断 (从模板登记表 AST 形参 + 延后点实参类型绑定)
     const GenRegistry* genReg_ = nullptr;
     const IfaceRegistry* ifaceReg_ = nullptr;  // Interface 契约 (tB, B02)
+    const ViaRegistry* viaReg_ = nullptr;      // 委托式实现 `Implements I Via m_h` (tB, B10)
     const ClassChainRegistry* clsreg_ = nullptr;  // 类继承链 (tB, B07b)
     std::vector<GenInstRequest> genericRequests_;
     bool tryBindGenericCall(DeferredXmodCallSite& site, GenInstRequest& reqOut);

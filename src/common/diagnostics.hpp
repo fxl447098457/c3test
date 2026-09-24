@@ -92,6 +92,9 @@ enum class DiagnosticID : uint16_t {
     SemVirtualNotSupported = 3027,      // v1 边界: 该处的虚成员用法尚不支持 (含"需要类虚表")
     // tB 类继承 (ai/022 B09): `MyBase.<成员>` 显式基调用的可用性判定。
     SemMyBaseNotSupported = 3028,       // 无基类 / 基面上没有这个成员 / 基成员是 Private
+    // tB 委托式实现 (ai/022 B10): `Implements I Via m_holder` 的可用性判定。
+    SemViaTargetUnknown = 3029,         // Via 目标不是本类的对象持有字段 / 接口名不是新式 Interface
+    SemViaHolderNotImplemented = 3030,  // 字段类型那个类没有实现被委托的接口 (v1 不接受再往下委托)
 
     // 代码生成 (4xxx)
     CodeGenUnsupportedFeature = 4001,

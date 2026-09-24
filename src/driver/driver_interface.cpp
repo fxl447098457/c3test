@@ -15,6 +15,7 @@
 
 #include <set>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace vb6c3 {
@@ -162,6 +163,104 @@ bool Driver::runInterfacePrepass() {
                 slot.sig = m.decl.get();
                 slot.index = static_cast<int32_t>(v.slots.size());
                 v.slots.push_back(std::move(slot));
+            }
+        }
+    }
+
+    // --- Pass D: 委托式实现 `Implements I Via m_holder` (ai/022 D42/D43, 批次 B10) ---
+    //
+    // 为什么在这里、不在语义层: 判定要看"字段类型那个类实现了接口没有", 而那些类的
+    // 符号要到 stage 3.5 才注入本模块作用域 —— 只有此刻整工程的模块表看得见。
+    // 裁决结果 vias_ 有两个消费方: 语义层据此免掉逐槽 VB3012 (契约由被委托对象满足),
+    // 发码层据此给没有自家实现的槽转调持有对象的接口槽 (cgen_iface_vtbl.cpp)。
+    vias_.clear();
+    {
+        std::unordered_map<std::string, Module*> byName;
+        for (auto& mod : modules_) byName[ifaceLower(mod->moduleName)] = mod.get();
+
+        // 与语义层 lookupWrittenIface 同一口径: 先按写的全名, 再按点号末段 (Fix 083)
+        auto resolveIface = [this](const std::string& written) -> const IfaceView* {
+            auto it = ifaces_.find(ifaceLower(written));
+            if (it == ifaces_.end()) {
+                size_t dot = written.rfind('.');
+                if (dot != std::string::npos)
+                    it = ifaces_.find(ifaceLower(written.substr(dot + 1)));
+            }
+            return it == ifaces_.end() ? nullptr : &it->second;
+        };
+        auto findField = [](Module& m, const std::string& name) -> VariableDecl* {
+            for (const auto& d : m.declarations) {
+                if (!d || d->kind != ASTNodeKind::VariableDecl) continue;
+                auto& v = static_cast<VariableDecl&>(*d);
+                if (ifaceLower(v.name) == ifaceLower(name)) return &v;
+            }
+            return nullptr;
+        };
+
+        for (auto& mod : modules_) {
+            for (const auto& impl : mod->implements) {
+                if (!impl || impl->viaField.empty()) continue;  // 非委托式: 本 Pass 不管
+                const std::string written = impl->interfaceName + " Via " + impl->viaField;
+                auto reject = [&](DiagnosticID id, const std::string& msg) {
+                    diag_->error(id, impl->loc, "'" + written + "': " + msg);
+                };
+                if (!mod->isClassModule) {
+                    reject(DiagnosticID::SemViaTargetUnknown,
+                           "Via is only allowed in a class module");
+                    continue;
+                }
+                const IfaceView* v = resolveIface(impl->interfaceName);
+                if (!v) {
+                    reject(DiagnosticID::SemViaTargetUnknown,
+                           "the delegated name is not an Interface block (Via is only "
+                           "defined for interfaces with a checked contract)");
+                    continue;
+                }
+                VariableDecl* fld = findField(*mod, impl->viaField);
+                auto* ref = fld && fld->asType
+                    ? dynamic_cast<SimpleTypeRef*>(fld->asType.get()) : nullptr;
+                if (!ref) {
+                    reject(DiagnosticID::SemViaTargetUnknown,
+                           "holder '" + impl->viaField + "' is not a module-level field "
+                           "declared As <Class> in this module");
+                    continue;
+                }
+                Module* holder = nullptr;
+                auto hit = byName.find(ifaceLower(ref->name));
+                if (hit != byName.end()) holder = hit->second;
+                if (!holder || !holder->isClassModule || holder->isInterfaceModule) {
+                    reject(DiagnosticID::SemViaTargetUnknown,
+                           "field '" + impl->viaField + "' is not of a project class type ("
+                           "'" + ref->name + "' is not a class module)");
+                    continue;
+                }
+                // v1 边界 (D43-4): 持有类必须**自己**实现同一个接口。它自己又是委托
+                // (A Via f, f:B; B Via g, g:A) 的话运行期能构成无限回环, 这里直接拒。
+                bool holderImplements = false;
+                bool chained = false;
+                for (const auto& hi : holder->implements) {
+                    if (!hi || resolveIface(hi->interfaceName) != v) continue;
+                    if (!hi->viaField.empty()) {
+                        reject(DiagnosticID::SemViaHolderNotImplemented,
+                               "class '" + holder->moduleName + "' delegates interface '" +
+                               v->name + "' too (chained Via is not supported)");
+                        chained = true;
+                    } else {
+                        holderImplements = true;
+                    }
+                    break;
+                }
+                if (!holderImplements && !chained) {
+                    reject(DiagnosticID::SemViaHolderNotImplemented,
+                           "class '" + holder->moduleName + "' (type of field '" +
+                           impl->viaField + "') does not implement interface '" + v->name + "'");
+                    continue;
+                }
+                ViaView vv;
+                vv.ifaceKey = ifaceLower(v->name);
+                vv.fieldName = fld->name;
+                vv.holderModule = holder->moduleName;
+                vias_[ifaceLower(mod->moduleName)].push_back(std::move(vv));
             }
         }
     }

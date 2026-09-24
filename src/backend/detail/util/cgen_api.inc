@@ -219,6 +219,9 @@
     }
     // Interface 契约 (tB, ai/022 B04): stage 2.7 建好的工程级只读登记表, 发码期取槽表.
     void setInterfaceRegistry(const IfaceRegistry* reg) { ivreg_ = reg; }
+    // 委托式实现 (tB, ai/022 B10): stage 2.7 Pass D 的裁决表, 发码期据此把无自家实现的
+    // 槽转调持有对象的同名槽.
+    void setViaRegistry(const ViaRegistry* reg) { ivviareg_ = reg; }
     // 类继承 (tB, ai/022 B07b): stage 2.8 链登记表, 发码期取继承字段与转发桩清单.
     void setClassChainRegistry(const ClassChainRegistry* reg) { clsreg_ = reg; }
     // 查询接口唯一实现类名 (空串 = 无映射/多实现类, 不可用)

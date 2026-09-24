@@ -882,6 +882,14 @@ if ($Category -in @("all", "run", "vbp")) {
     Test-Vbp "M7Test" "$Tests\m7_test\M7Test.vbp" @("4/4 PASSED")
     # ai/022 B03: cross-module new-style contract reached through an Interface head-line host
     Test-Vbp "itf_xmod_writer" "$Tests\itf_xmod\XWriter.vbp" @("XMOD1:OK", "XMOD2:OK", "IFV1:OK", "IFV2:OK", "IFV3:OK", "LIFE1:OK", "LIFE2:OK", "LIFE3:OK", "LIFE9:OK", "TERM last=bye", "TERM last=scoped", "QI1:OK", "QI2:OK", "QI3:OK", "QI4:OK", "TOF1:OK", "TOF2:OK", "TOF3:OK", "DN0:OK", "DN1:OK", "DN2:OK", "DN3:OK", "TOC1:OK", "TOC2:OK", "TOC3:OK")
+    # ai/022 B10: `Implements IViaNamed Via m_h` -- six slots served by generated
+    # adapters over the holder's own interface table (no forwarding member written).
+    # Both architectures: the adapter dereferences a field whose type is another
+    # class's struct, so a layout slip would only surface on x86 (022 D40 rule).
+    $viaExpected = @("VIA1:OK", "VIA2:OK", "VIA3:OK", "VIA4:OK", "VIA5:OK",
+        "VIA6:OK", "VIA7:OK", "VIA8:OK", "VIA9:OK", "VIA-DONE")
+    Test-Vbp "itf_via_pair" "$Tests\itf_via\Via.vbp" $viaExpected
+    Test-Vbp "itf_via_x86" "$Tests\itf_via\Via.vbp" $viaExpected -Arch "x86"
 
     # test_vbman 用于验证外部 COM 组件 VBMANLIB (x86 DLL, 供 32 位程序调用)
     # ai/022 B07b: INH2..INH11 cover the merged member face + prefix-copied fields +
@@ -994,12 +1002,20 @@ if ($Category -in @("all", "syntax")) {
         @("itf_n18_clause_sig_mismatch", "$Tests\itf_neg\n18_clause_sig_mismatch.cls", "signature mismatch"),
         @("itf_n19_iface_in_generic", "$Tests\itf_neg\n19_iface_in_generic.cls", "not allowed inside a generic class template"),
         # ai/022 B03: Interface head-line host form (.cls named after its single block)
-        @("itf_n20_host_extra_decl", "$Tests\itf_neg\n20_host_extra_decl.cls", "may contain only the Interface block")
+        @("itf_n20_host_extra_decl", "$Tests\itf_neg\n20_host_extra_decl.cls", "may contain only the Interface block"),
+        # ai/022 B10 (Implements .. Via): the delegate clause is resolved in stage 2.7
+        # Pass D, and both rejection reasons are error-level.
+        @("itf_n21_via_no_field", "$Tests\itf_neg\n21_via_no_field.cls", "is not a module-level field"),
+        @("itf_n23_via_not_iface", "$Tests\itf_neg\n23_via_not_iface.cls", "not an Interface block"),
+        @("itf_n24_via_in_bas", "$Tests\itf_neg\n24_via_in_bas.bas", "only allowed in a class module")
     )
     foreach ($c in $itfNeg) {
         if (Test-Path $c[1]) { Test-SyntaxFail $c[0] $c[1] $c[2] }
         else { Write-Host "  [SYNTAX-FAIL] $($c[0]) ... SKIP (missing case file)" -ForegroundColor DarkGray }
     }
+    # ai/022 B10: the Via holder field must name a class that implements the interface
+    # itself -- a same-named member is not enough (there is no slot field to delegate to).
+    Test-SyntaxFailMulti "itf_n22_via_holder_not_impl" @("$Tests\itf_neg\n22_via_base.cls", "$Tests\itf_neg\n22_via_deleg.cls") "does not implement interface"
     # Positive guard (ai/022 B02): a class satisfying a new-style contract (
     # Extends-inherited slot + property tri-slot keys) must stay silent.
     if (Test-Path "$Tests\itf_pos\p01_contract_ok.cls") { Test-Syntax "itf_p01_contract_ok" "$Tests\itf_pos\p01_contract_ok.cls" }
@@ -1008,6 +1024,9 @@ if ($Category -in @("all", "syntax")) {
     if (Test-Path "$Tests\itf_pos\p02_clause_binding.cls") { Test-Syntax "itf_p02_clause_binding" "$Tests\itf_pos\p02_clause_binding.cls" }
     # ai/022 B03 positive guard: a host module name is no longer a name collision.
     if (Test-Path "$Tests\itf_pos\p03_headline_host.cls") { Test-Syntax "itf_p03_headline_host" "$Tests\itf_pos\p03_headline_host.cls" }
+    # ai/022 B10 positive guard: Via is registered as a SOFT keyword, so an existing
+    # program that uses Via as a variable name still parses.
+    if (Test-Path "$Tests\itf_pos\p04_via_soft_ident.bas") { Test-Syntax "itf_p04_via_soft_ident" "$Tests\itf_pos\p04_via_soft_ident.bas" }
     # ai/022 B07a (class Inherits, P3): chain diagnostics must fire. Single-file cases ride
     # the existing Test-SyntaxFail path; the two-module cases need Test-SyntaxFailMulti.
     $clsInhNeg = @(

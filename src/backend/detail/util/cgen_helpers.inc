@@ -133,6 +133,8 @@
     const IfaceView* ivLookupIface(const std::string& written);
     std::vector<const IfaceView*> ivImplementedIfaces(Module& module);
     Decl* ivFindImplMember(Module& module, const IfaceView& v, const IfaceSlotView& slot);
+    // tB 委托式实现 (ai/022 B10): 本类把接口 v 整份转交给哪个持有字段 (无则 nullptr)
+    const ViaView* ivViaFor(const Module& module, const IfaceView& v);
     std::string ivSlotRetType(const Decl* sig);
     std::string ivParamDecls(Decl& d);
     std::string ivParamDeclsRef(const Decl* sig);

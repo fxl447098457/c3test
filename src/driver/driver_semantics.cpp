@@ -41,6 +41,8 @@ bool Driver::runSemanticAnalysis(const CompileOptions& options) {
         analyzer->setGenericRegistry(&genView_);
         // Interface 契约 (tB, B02): stage 2.7 建好的只读登记表
         analyzer->setInterfaceRegistry(&ifaces_);
+        // 委托式实现 (tB, B10): stage 2.7 Pass D 建好的裁决表 (整份契约转交给持有字段)
+        analyzer->setViaRegistry(&vias_);
         // 类继承 (tB, B07b): stage 2.8 建好的只读链登记表 (裸名继承成员判定)
         analyzer->setClassChainRegistry(&classes_);
 
