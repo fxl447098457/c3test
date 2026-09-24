@@ -9,10 +9,10 @@ LAST_RUN: 2026-09-24T11:40:14+08:00   # 本轮 = **B09c 收线**（代码已提�
                # 自动运行见本行不足 55 分钟请立即跳过。
 LAST_COMMIT: 代码批 = 9eb2ca7(B09c)、debb110(B09b)、02bac92(B09)、77ecef1(B08f-1)、40eea3f(B08e-6)、d9eca95(B08e-5)、392a52d(B08e-4)、8987386(B08e-2)   # **commit message 一律现写、不复用上批文本**；push 只推 `github/dev`（Actions 门），`origin`(gitcode) 与 `main` 不碰、**绝不建 MR**。
 CURRENT_BATCH: **B10 = P4 `Implements <接口> Via <持有字段>`（委托式实现：成员自动转交给一个持有对象，免手写转发桩）**
-               0. **先量后写**（本表反复兑现的那条纪律）：Interface(P1)/接口值与派发(P2)/`Inherits`(P3) 都收口了，
-                  但 Via 这条线**一行都没量过**。开工第一步：复制一份现有接口工程（`tests` 下 B01-B06 那批），
-                  写 `Implements IFoo Via m_foo`，量出现在的诊断与发射形状（parser 在 `Implements` 之后遇到
-                  `Via` 报什么、语义层的契约完整性会不会因此被绕过），裁决写进新的 **D42** 再动手改码。
+               0. **第 0 步已量完**（本轮 2026-09-24 11:40–，只读探针，记录见 **D42**）：`Implements I Via m_f` 今天停在**语法层**
+                  （`VB2003`＋`VB2002`，因为 `Via` 连软关键字都没登记）；去掉 `Via …` 的那份手写 = **Extends 展开后逐槽 5 条
+                  `VB3012`** → Via 的**验收面**就是这 5 条全消失、且**不写一个转发成员**就能按接口槽调通运行期。
+                  层序与边界照 **D42** 走（语义层判定必须走符号面，桩在发码层，两边共用一份槽映射）。
                1. **`Via` 这个词今天根本没登记**（本轮 grep 核实：`src/lexer/token.hpp`、`token.cpp`、
                   `lexer_keywords.cpp`、`parser_helpers.cpp` 四处零命中）→ 按 D1 记的 Delegate 先例补登记，
                   并且**同时进软关键字表**；补登记前做一次语料核查（tests/archive/publish 里 `Via` 作标识符的
@@ -1755,6 +1755,32 @@ vb6_F9Base_prop_let_Level((void*)u.c, 9);  /* Property Let via prop_get_ rewrite
 而 `InhSib` 自己不加字段 —— 于是“派生链上任一级把 UDT 字段发成 `void*`”在 x86 上会以**破坏**而不是
 **恰好重叠**的形式现形（`InhDerived` 那侧因为后面还有自有字段把空洞吃掉了，所以旧用例看不出问题）。
 
+### D42 B10 前置实测（2026-09-24 11:40–，只量不改码；探针在 `.build/probe_b10/`）
+
+**探针形状**：`V10Widget.cls`（一个普通类，成员 `Area`/`Describe`/`Name` 的 Get+Let/`Rename` 全齐）
++ `V10Square.cls`（同文件内声明 `Interface IShapeV10` 与 `Interface INamedV10 Extends IShapeV10`，
+再写 `Implements INamedV10 Via m_w` + `Private m_w As V10Widget`）。两文件一起过
+`--syntax-only` 与 `--emit-c`（跨模块形状，不建 vbp）。
+
+1. **`Via` 今天连软关键字都不是**（本轮 grep 复核 D1 记的四个登记点：`src/lexer/token.hpp`、
+   `src/lexer/token.cpp`、`src/lexer/lexer_keywords.cpp`、`src/parser/parser_helpers.cpp` —— **`Via` 零命中**）。
+   实测后果落在**语法层**：`V10Square.cls(19,22): error VB2003: expected end of statement (newline or :)`
+   ＋ `(19,26): error VB2002: unexpected token at module level: m_w`，两条路（syntax-only / emit-c）
+   退出码都是 1。也就是说模块级 `Implements` 只吃到接口名，`Via` 被当标识符撞在语句结尾上。
+   → **B10 的第一层是词法+语法**（四处登记 + `Via <字段>` 尾子句），且**语义层与发码层今天没有观测面**
+   （编不过就拿不到发射形状 —— 别一上来就改 `cgen_com.cpp`）。
+2. **要免掉的那份手写长什么样，量出来了**：同一份文件去掉 ` Via m_w` → 语义层按 **Extends 展开后的每个槽**
+   逐条报 `VB3012 Implements INamedV10: member 'IShapeV10.Area' (Function Area() As double) is not
+   implemented by class 'V10Bare'`（本例 5 条：`Area`/`Describe`/`Name` 的 Get/`Name` 的 Let/`Rename`）。
+   → Via 的验收面 = **这 5 条 VB3012 全部消失**、且**不写任何一个转发成员**就能按 `IShapeV10`/`INamedV10`
+   槽位调通运行期。
+3. **顺序约束（先想清楚再动手）**：契约检查在语义层（stage 3，跑在 codegen 之前），转发桩是发码层产物，
+   所以"已实现"的判定**必须走符号面**（查 `V10Widget` 的成员表，D2 预留的 `implementsMap`/$itf$ 键正是为此），
+   不能等桩发出来再验 —— 反过来桩那侧要能拿到"槽 → 被委托成员"的同一份映射，两边共用一个来源，别各算一遍。
+4. **本批边界**（越界就是范围红线）：`Via` 目标只认**本类的对象持有字段**；VB6 老形式
+   `Implements x ByRef y As New T`、属性 `Set` 向的委托、`Extends` 深度 >2 的链、以及**B06c**（接口值作实参）
+   都不在 B10 —— 先把一条 `Interface … Via <字段>` 的桩与契约同时打通。
+
 ## 运行日志
 
 - 2026-09-23 建表：范围确认（含完整COM）、规范文档 018 入库、现状盘点完成。
@@ -1956,3 +1982,4 @@ vb6_F9Base_prop_let_Level((void*)u.c, 9);  /* Property Let via prop_get_ rewrite
 - 2026-09-24 09:43 **B09 的门 = GitHub Actions run #13 [dev] = completed/success**（head_sha 已核 = `02bac92`，本机 `git rev-parse HEAD` 同值；build + smoke / bas#1 / bas#2 / syntax / compile / vbp 全绿，Release 配置）。收线前另做了一项目前不在门里的检查：**x86 侧 `Inh.vbp` 段错误**，拆用例定位到`m_pt` 之后的基类字段写入越界，根因 = 继承的 **Private UDT 字段**在派生结构体里发成 `void*`（x64 8 字节巧合对齐、x86 4 字节 → 前缀布局错位、`_New` 少分配 4 字节）。**B07b 起就有，不是本批引入**（改码前的源码在 x86 已经越界写 `g_viaRet`/`m_name`，只是没崩）。登记为 **B09b**（实测与验收要求见 **D39**），下一批先修它再开 B10。本轮零代码改动（代码已在 `02bac92`，门已过）。
 - 2026-09-24 10:18– **B09b（祖先 `Private` UDT 的类型名进派生模块作用域 = x86 继承字段错位）提交 `debb110`**：先用“改一个词”的判别实验钉死洞的性质（同一工程把 `Private Type TPoint` 写成 `Public`，派生结构体立刻从 `void* m_pt;` 变 `vb6_type_TPoint m_pt;` 且 x86 从段错误变全绿）→ 缺的**只是名字**，不是定义、不是 include、不是尺寸：`getPublicSymbols()` 按 `access != Private` 过滤，祖先的私有类型符号从来没进过消费者作用域，`mapTypeRef` 于是回落 `void*`。落点在 `runCrossModuleResolution()` 末尾加一条pass（沿 `Inherits` 链、只补被 `inhFields` 用到的 UDT/Enum 名、本地同名不抢、`udtMembers` 一并复制）。**顺手清掉三条从 B07b 就挂着的 x86 红字**（INH35/INH36/INH39 读的都排在 `m_pt` 之后 = 同一个洞，不是派发逻辑错）。**门里新增 `cls_inh_x86`**（同一份 `$inhExpected` 清单跑 x64+x86 两遍）→ 布局类改动从此自动双架构覆盖。实测：`tests/cls_inh` 两架构 build+run 各 **52/52、0 FAIL**（改码前 x86 崩）；8 文件 `--emit-c` 对 `pre_b09_C3.exe` 全同 8/8（这一版 BASE 在 B09 之前，连 B09 一起证没漂）；`-Category syntax` 84/0。门 = GitHub Actions（推 `02bac92..debb110`，pwsh 7 盯 `watch-gh-actions.ps1`），结论与 run#head_sha 核对记在状态头。下一批 **B10 = `Implements Via`（委托式实现，免手写转发桩）**。
 - 2026-09-24 10:56– **B09c（`Set MyBase.<属性>` 目标侧 + P3 收尾两条实测）提交 `9eb2ca7`**：三条候选先一起量再动手 —— 只有 ① 需要改码（改码前发 `vb6_T9Base_prop_set_Peer(MyBase, me)`，函数名与实参序都对、**错的只是接收者** → 在 SetStmt 各分支之前接管，`tryEmitMyBaseAssign(forSet=true)` 只认 Property Set，命中 Let 判死）；② ⑮e 早在 B08f-1 就通了（D37 那条是在坏元数据上量的，现测：写绑根 `prop_let_`、读按实例派发、运行期 109 两架构一致）→ 只补断言；③ `Class_Terminate` 继承链**不做** —— EXE 工程三种形状实测都不触发 terminate（`_Destroy` 只有接口 Release 归零与窗体销毁两个调用点），现在发就是发死代码，登记为生命周期/P6 那片的一个既有缺口。自己写错的两条期望也记进 D41（`Level` 在 `InhSib` 分支上没有槽 = 按分支建表是对的；根类 `Class_Initialize` 是赋值不是追加）。验收：`Inh.vbp` 断言 **52→59**、**x64 与 x86 各 59/59**、A/B 改码前编不过（1×C2065）、8 文件 emit-c 对 `pre_b09c_C3.exe` 8/8、`-Category syntax` 84/0。门 = GitHub Actions（推 `debb110..9eb2ca7`，pwsh 7 盯 watcher）。**P3（继承线）到此收口**：B07a/B07b/B08a-d/B08e 13 站/B08f-1/B09/B09b/B09c 全出，下一批 **B10 = `Implements Via`（委托式实现，免手写转发桩）**。
+- 2026-09-24 11:40– **B09c 收线（只读 + 文档，未改编译器代码）**：Actions run **#15 [dev] = completed/success**， 收线后核 **head_sha = `9eb2ca7`** = 本机 `git rev-parse HEAD`，7 个 job（Build + smoke/bas#1/bas#2/syntax/compile/vbp） 全 success；vbp 分片日志里 `cls_inh_pair ... PASS` 与 `cls_inh_x86 ... PASS` 逐条可见，该分片 `PASS=18 FAIL=0 SKIP=1 TOTAL=19`。 状态头按此记账（`STATUS=IDLE`、CURRENT_BATCH 交出 **B10**、BASE 换 `pre_b10_C3.exe`，本轮 exe md5 `4e3c5cb9`）， 手册 `Inherits 语句.md` 补三处：`MyBase` 的 `Set` 向（含"基类那个名字只有 Let"→ `VB3028`）、 `Class_Terminate` 反序链**为什么不做**（EXE 里没有触发点，实测三种形状）、属性写穿过 UDT 对象字段 从"未交付"移到"已实测通过"（D41 订正）。**顺手把 B10 的第 0 步量掉了**（记录见 **D42**）： `Implements I Via m_f` 今天停在**语法层**（`VB2003` + `VB2002`，因为 `Via` 连软关键字都没登记 —— 四个登记点零命中）， 而去掉 `Via …` 的那份手写就是 **5 条 `VB3012`**（Extends 展开后逐槽报）→ Via 的验收面 = 这 5 条消失且零转发成员。 **P3（继承线）至此完全收口。**
