@@ -4,11 +4,14 @@
 > 每次运行开始先读本文件，结束前必须更新本文件（状态头 + 批次清单 + 运行日志）。
 > 规范输入: `ai/讨论记录/018-接口继承与CoClass设计思路.md`（含 tB 文档要点与分阶段设计思路全文）。
 
-STATUS: IDLE             # NOT_STARTED | DESIGN | BUSY | IDLE | ALL_DONE
-LAST_RUN: 2026-09-24T22:01:49+08:00   # 本轮 = **B11/C05 出完并收线**（代码 `7f829ee` +
-               # 两处文档订正 `df3f737`/`0dca0d0`，门 = Actions run #37 = success、head 已核 = `0dca0d0`、
-               # 8 个 job 全绿）。实测 D54 / 实施 D55（含收线前追加的两条实测）。**这一格同时交付 022 的 B12**。
-               # 开工前置已核：本地 = `github/dev` = `cb33ab3`，BASE 用当棵树重建。自动运行见本行不足 55 分钟请立即跳过。
+STATUS: BUSY             # NOT_STARTED | DESIGN | BUSY | IDLE | ALL_DONE
+LAST_RUN: 2026-09-24T22:22:24+08:00   # 本轮 = **B13 开工（P6 第一格：IUnknown 三件套真实现 + 对象布局 COM 化收尾）**。
+               # 上一格 B11/C05（=B12）已于 run #37 全绿收线（`41071d5`/`924e44d`）。
+               # 按 CURRENT_BATCH 的第 0 步走：**先造一份 ActiveX DLL 形状的能编能跑测试工程**（今天
+               # `tests/` 下全是 Type=Exe，`DllGetClassObject`/类工厂表那条路没有任何承载面），
+               # 再量 IUnknown 一族 / 两套 mint / `legacyFolded`+`ComCreatable` 的消费者 —— 裁决记 D56。
+               # 开工前置：本地 = `924e44d`；GitHub 此刻 504，push 前重核 `ls-remote github dev`。
+               # 自动运行见本行不足 55 分钟请立即跳过。
 LAST_COMMIT: 代码批 = 7f829ee(B11/C05=B12)、b82a184+02d70fe(B11/C04)、c4aaa4c(B11/C03b)、e515d89(B11/C03a)、f0b820d(B11/C02)、e7c7a31(B11/C01)、3c5d8e6(B10)、9eb2ca7(B09c)、debb110(B09b)、02bac92(B09)   # **commit message 一律现写、不复用上批文本**；push 只推 `github/dev`（Actions 门），`origin`(gitcode) 与 `main` 不碰、**绝不建 MR**。
 CURRENT_BATCH: **B13 = P6 第一格：IUnknown 三件套的真实实现 + 对象布局 COM 化收尾**
                （022 表 B13 那一行；026 三节/七节的对外那半从这里开始，`ai/026` 七-1 与 D15-8 说的
@@ -2412,6 +2415,58 @@ D54-② 那条"类变量永不 Release"不变式（对外一旦发 IDispatch/IUn
 `git diff --numstat` 一眼就能看出来；插完必须断言 `count(b"\r\n") == 0`。另外 bash heredoc 里的
 `"$Tests\itf_neg\n40_..."` 路径里紧跟着出现 `n`（例：`\itf_neg` 后面接 `n40_...`）时会被当成换行吃掉一行，带 `t` 同理 —— 反斜杠一律用 `chr(92)` 拼出来，别指望字符串里连写两个反斜杠。
 
+
+
+**D56（B13 开工测量：对外那一半今天到底有什么；`.build/probe_b13/`、`.build/b13_probe.ps1`）**
+
+0. **本格 CURRENT_BATCH 的第 0 步前提是错的，先记账**：`tests/` 下**不是**"全是 `Type=Exe`" ——
+   `tests\test_activex_dll\` 里躺着两份 `Type=DLL` 工程（`test_activex_dll.vbp` / `test_event_dll.vbp`，
+   5 个类、三段式 `Class=Name; file.cls; {CLSID}` 带显式 CLSID），**今天真编译 25 秒就产出
+   259–269 KB 的 `.dll` + `TestAXDLL.tlb` + `activex_dll.def`（导出 DllGetClassObject / DllCanUnloadNow /
+   DllRegisterServer / DllUnregisterServer / DllMain）**。它们的错处是**从没登记进 `run_tests.ps1`**
+   （grep "activex" 零命中）⇒ 整条 ActiveX DLL 管线**在门内一次都没跑过**，此前每一句"对外还差什么"
+   都是没测过的话。⇒ 本批第 0 步从"造工程"改成"**把现成工程接进回归** + 补一份 CoClass 块在 DLL 里的工程"。
+1. **dll_entry 的唯一读数通道是"真编译 + 读回临时目录"**：生成的 C 只在 `--keep-for-debug` 时留下
+   （stderr 打 `intermediates kept at: <dir>`），而 **`--emit-c` 不含 `dll_entry.c`**（实测 0 命中）。
+   `g_vb6_coclasses[]` 每条 = `progId / clsidStr / classVariable / factoryFunc=vb6_cls_<C>_New /
+   destroyFunc / methodCount + IDispatch 成员表 / ifaceCount + ifaceIids / defaultIfaceIid /
+   sourceIfaceIid / events`。`test_activex_dll` 里 Calc 的四条公有成员都进了 disp 表
+   （`L"SetValue", 1, 1`），`clsidStr` **就是 vbp 三段式那一枚** ⇒ CLSID 这一位在"显式写在 vbp 上"时两通道一致。
+2. **RTL 侧的 IUnknown 三件套早就有真的**（本格按"要从零写"排期，是错的）：`vb6comserver_factory.c`
+   的 `CF_CreateInstance` → `vb6_ComObject_Create` → QI；`vb6comserver_obj.c:24-72` 的
+   `ComObj_QueryInterface` 认 IUnknown/IDispatch（返回 `self` = **规范指针**，符合 COM）、认
+   `ifaceIids[i]`、认 `defaultIfaceIid`、按需挂 `IConnectionPointContainer` / `IProvideClassInfo2`，
+   全不认才 `E_NOINTERFACE`；`AddRef/Release` 是 `InterlockedIncrement(&self->refCount)` + 全局
+   `g_vb6_cRef`，**归零时调 `desc->destroyFunc` ⇒ `Class_Terminate` 在 DLL 侧有触发点**（D41 那条
+   "没有触发点"只成立于 EXE，本批实测划清）。⇒ **"真实现 IUnknown 三件套"不是 B13 的活**。
+3. **两套 mint 的分叉现在看得见，而且比 D46-2 说的更近**：同一份 `tests\cc_dll\CoDll.vbp`
+   （新式接口 `IProbe` + `Implements IProbe` 的实现类 + `CoClass PG` 块）一次编译里 `IProbe` 拿到
+   **两枚不同的 IID** —— stage 2.7（`coclass_identity.cpp` → `coclassIds_`）给
+   `IID={F5CEF988-…} (minted)`、`ProgID=CoDll.PG (minted)`；dll_entry（`cgen_util_dllentry_prelude.inc`
+   那两枚 lambda）给 `IID_vb6iface_IProbe = {0AD9CBC7-…}`、注册 ProgID `CoDll.CImpl`。并且
+   **`coclassIds_` 的后端消费者为 0**（全仓 grep 只有 `driver_interface.cpp` 与 `driver_classchain.cpp`
+   读它：校验、Pass G、VB3020 文案）⇒ **产品注册的从来不是 C02 求解出来的那一份**，
+   D47 那句"唯一身份出口"目前只覆盖语义层，没覆盖产物。
+4. **块名在对外这一侧完全不存在**：表按**类模块**逐条发（`classVariable="CImpl"`、`progId="CoDll.CImpl"`），
+   `CoDll.PG` 在产物文本里 **0 次** ⇒ 组名 ProgID 进不了注册表，外部 `CreateObject("CoDll.PG")` 必失败；
+   而组内那半（C05）认的正是 `CoDll.PG` ⇒ **两半不对称**。
+5. **只实现新式接口的类对外不可调用**：`cc_dll` 那条 `methodCount=0 / methods=NULL` —— 新式契约的实现
+   成员按 VB6 惯例写 `Private`（`p01`/`itf_xmod` 皆然），disp 表只收公有成员 ⇒ 外部 IDispatch 客户
+   一个方法都点不到；而 `ifaceCount=1` 只把枚 IID 记进表、QI 命中后仍返回**同一个 IDispatch 指针**
+   （`self`）⇒ 今天"新式接口对外"= 伪装成 dispinterface。这条要先定口径再动手（接口槽发 disp id？
+   还是明确"新式接口不出 DLL"并给诊断？），不许顺手做。
+6. **`comCreatable` / `legacyFolded` 在产品侧的读数（原测量点 ④）**：`[ComCreatable(True)]` 在 DLL 工程
+   合法（EXE 才 `VB3033`），但两者后端消费者为 0 ⇒ 表里一条不少、注册一条不漏，
+   `VB_Creatable = False` 那 9 条与 True 目前对产品**没有任何可观察差别**。
+7. ⇒ **B13 按实测重切成三格**：**B13a（本批已出）= 观测面**（新助手 `Test-VbpDll` + 三条用例进门 +
+   新工程 `tests/cc_dll`，零编译器代码改动）；**B13b = 把身份出口落到产物**（dll_entry 只从
+   `coclassIds_` 取值、删第二套 lambda、块名 ProgID 上表、`comCreatable`/`legacyFolded` 给读数；
+   `cc_dll_identity_two_channels` 就是这条的对照，现在钉分叉、合并后必须翻面）；
+   **B13c = 新式接口对外可调用的口径 + 规范 IUnknown**（`vb6_iunk_<C>_<I>` 认 `IID_IUnknown`
+   现返回**本接口薄指针**，D22-7④ 要在这里收）。
+8. **一条通用教训**：**别把"没有用例"读成"没有实现"** —— 这次两个方向都错了：RTL 三件套比计划书假设的
+   完整得多，而两份现成工程因为从未登记被当成"DLL 路径不存在"。测量阶段先花 25 秒真编译一次，
+   比读码推断便宜得多，也比它可靠得多。
 
 ## 运行日志
 

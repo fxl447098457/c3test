@@ -107,7 +107,15 @@ B11/C03b：契约聚合校验（`VB3012`/`VB3017`）；B11/C04：存量头属性
 前五格对不用该语法的工程**逐字节不变**；C05 只在"块名被当类型用"或 ProgID 命中本工程时才动发码，
 不这么写的工程照旧逐字节不变（`ai/022` D55 的 16 文件 `--emit-c` 护栏里连 `cc_id` 这种"声明了块、
 从不把块名当类型"的工程也多不出一个 stderr 字符）。
-**对外可用**（类工厂、注册、类型库、外部进程 `CreateObject`）要到 B13–B17。
+**对外可用**（类工厂、注册、类型库、外部进程 `CreateObject`）要到 B13–B17，但**这一半不是从零开始**——
+`ai/022` D56 把现状量清楚了，三条用例（`tests\test_activex_dll\` 两份 + `tests\cc_dll\`）现在就在回归里：
+`Type=DLL` 工程今天**能编能链**（`DllGetClassObject`/`DllRegisterServer` 那一族、IDispatch 成员表、
+内嵌 `.tlb` 都在发），RTL 侧的 `QueryInterface`/`AddRef`/`Release` 也是**真实现**（原子计数、归零销毁
+实例并在那里触发 `Class_Terminate`）。差的是**CoClass 块参与不进去**，四条都有读数：注册的 ProgID 是
+`<工程名>.<类模块名>`，块名那一档（`<工程名>.<块名>`）在产物里根本不出现；表里接口的 IID 由**第二套
+mint**（`cgen_util_dllentry_prelude.inc`）算出来，与语义层求解的那枚不一致，`[CoClassId]`/`[ProgId]`
+显式档同理不被产物读取；只实现新式接口的类因为契约成员按惯例写 `Private`，对外**一个方法都点不到**；
+`[ComCreatable(True)]` 与 `VB_Creatable = False` 目前对产品也没有可观察差别。
 
 **另见**
 
