@@ -131,7 +131,6 @@ bool CCodeGen::tryEmitAsmProc(const std::string& procName, AccessLevel access,
         // `[param]` → C 参数名 (MSVC 内联汇编按名解析, ByRef 参数名本身就是指针 →
         // "变量即其地址"语义与 x64 侧一致); [Function] → 返回临时变量 (naked 下为 eax)。
         // x86 `<Naked>` 例外: 没有栈帧, 参数在调用者栈上, 名字无从解析 → 报 3036。
-        std::vector<std::pair<std::string, std::string>> subs;
         for (auto& ps : info.params) {
             size_t sp = ps.find(' ');
             if (sp == std::string::npos) continue;
@@ -148,11 +147,27 @@ bool CCodeGen::tryEmitAsmProc(const std::string& procName, AccessLevel access,
                                     " (naked 无栈帧, 参数在调用者的栈上); 请去掉 <Naked> 或改用寄存器/立即数");
                 }
             }
-            subs.push_back({ "[" + name + "]", name });
         }
-        subs.push_back({ "[function]", info.naked ? std::string("eax") : std::string(kRetName) });
+        auto subs = asmBuildX86Subs(info, info.naked ? std::string("eax") : std::string(kRetName));
 
         std::vector<std::string> body = asmRewriteLines(info.lines, subs, info.cName);
+
+        // 宽度校验 (把 cl 的 C2443/A2022 前移成 VB 诊断 3038)
+        {
+            bool widthBad = false;
+            asmCheckRegWidths(body, [&](int idx, const std::string& dst, const std::string& src,
+                                        int dw, int sw) {
+                if (widthBad) return;   // 只报第一处
+                widthBad = true;
+                fail(DiagnosticID::SemAsmOperandWidthMismatch,
+                     "Asm 第 " + std::to_string(idx + 1) + " 行操作数宽度不一致: `" +
+                     info.lines[idx] + "` (" + dst + " 是 " + std::to_string(dw) +
+                     " 位, " + src + " 是 " + std::to_string(sw) +
+                     " 位); 请统一宽度 —— 32 位值用低 32 位寄存器 (如 ebx/edi), 或改用 movsxd/movzx");
+            });
+            if (widthBad) return true;   // 诊断已报, 不再发射
+        }
+
         std::vector<std::string> saved =
             info.naked ? std::vector<std::string>()
                        : asmSavedRegsForArch(info.lines, info.clobbers, /*x64=*/false);
@@ -179,6 +194,25 @@ bool CCodeGen::tryEmitAsmProc(const std::string& procName, AccessLevel access,
     }
 
     // ---------------- x64: 独立 MASM 过程 (driver 侧) ----------------
+    // 宽度校验 (把 ml64 的 A2022 前移成 VB 诊断 3038): 用与 driver 完全同一张替换表
+    // (asmBuildX64Subs) 模拟代入后查两个纯寄存器操作数的宽度。
+    {
+        auto xsubs = asmBuildX64Subs(info);
+        auto xbody = asmRewriteLines(info.lines, xsubs, info.cName);
+        bool widthBad = false;
+        asmCheckRegWidths(xbody, [&](int idx, const std::string& dst, const std::string& src,
+                                     int dw, int sw) {
+            if (widthBad) return;   // 只报第一处
+            widthBad = true;
+            fail(DiagnosticID::SemAsmOperandWidthMismatch,
+                 "Asm 第 " + std::to_string(idx + 1) + " 行操作数宽度不一致: `" +
+                 info.lines[idx] + "` (" + dst + " 是 " + std::to_string(dw) +
+                 " 位, " + src + " 是 " + std::to_string(sw) +
+                 " 位); 请统一宽度 —— 32 位值用低 32 位寄存器 (如 ecx/eax), 或改用 movsxd/movzx");
+        });
+        if (widthBad) return true;   // 诊断已报, 不再收集 (编译到此失败)
+    }
+
     c_.emitLine("/* ai/vb-asm-extension-spec: 过程体为 Asm 块; 实现在 ml64 汇编的 "
                 + info.cName + " (见 .asm) */");
     c_.emitLine("extern " + info.retCType + " " + info.cName + "(" + paramsC + ");");

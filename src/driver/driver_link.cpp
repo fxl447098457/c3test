@@ -67,31 +67,10 @@ static void toLowerAscii(std::string& s) {
 
 // 把一个 Asm 过程写成 MASM PROC 体
 static void emitMasmProc(std::ostream& os, const AsmProcInfo& p) {
-    static const char* kReg64[4] = {"rcx", "rdx", "r8", "r9"};
-    static const char* kReg32[4] = {"ecx", "edx", "r8d", "r9d"};
-
-    // [name] → ABI 寄存器。32 位整型用低 32 位名 (int8/16/32, BOOL); 指针/64 位用整寄存器
-    // (ByRef 的 `T*` 即"变量即其地址", 要取值需再解引用一次 —— 见 spec §2.3)。
-    std::vector<std::pair<std::string, std::string>> subs;
-    for (size_t i = 0; i < p.params.size() && i < 4; i++) {
-        const std::string& ps = p.params[i];       // "CType name"
-        size_t sp = ps.find(' ');
-        if (sp == std::string::npos) continue;
-        std::string ctype = ps.substr(0, sp);
-        std::string name = ps.substr(sp + 1);
-        while (!name.empty() && name.back() == ' ') name.pop_back();
-        bool is32 = (ctype == "int32_t" || ctype == "int16_t" || ctype == "int8_t" ||
-                     ctype == "VBABOOL" || ctype == "unsigned");
-        subs.push_back({ "[" + name + "]", is32 ? kReg32[i] : kReg64[i] });
-    }
-    // `[Function]` 是返回值占位: 映射到 ABI 返回寄存器的**与返回类型同宽**的名字。
-    // 关键约束: MASM 不容许宽度不等的 mov (`mov rax, eax` = A2022), 而 VB 侧
-    // `Long` 返回就是"值在 EAX 里" —— 故 32 位返回用 eax, 64 位/指针用 rax。
-    // 于是 `mov [Function], eax` 退化成 `mov eax, eax` (自赋值, 重写时消掉)。
-    static const char* kRet32[] = {"int8_t", "int16_t", "int32_t", "VBABOOL", "unsigned"};
-    bool retIs32 = false;
-    for (const char* k : kRet32) if (p.retCType == k) retIs32 = true;
-    subs.push_back({ "[function]", retIs32 ? "eax" : "rax" });
+    // [name] → ABI 寄存器 / [Function] → 与返回类型同宽的返回寄存器。
+    // 替换表在 asm_proc.hpp (asmBuildX64Subs) —— codegen 期的宽度校验 (3038) 用的是
+    // 同一张表, 改映射两边自动一致, 不会再各写一份走偏。
+    auto subs = asmBuildX64Subs(p);
 
     std::vector<std::string> body = asmRewriteLines(p.lines, subs, p.cName);
 

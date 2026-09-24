@@ -1513,6 +1513,10 @@ if ($Category -in @("all", "asm")) {
     if (Test-Path "$Tests\asm\asm_neg.vbp") {
         Test-VbpBuildFail "asm_neg_mixed_body" "$Tests\asm\asm_neg.vbp" "3037"
     }
+    if (Test-Path "$Tests\asm\asm_width_neg.vbp") {
+        # 宽度不一致 (mov rax, edx) → 3038 (宽度校验前移, 不再漏到 ml64 的 A2022)
+        Test-VbpBuildFail "asm_neg_operand_width" "$Tests\asm\asm_width_neg.vbp" "3038"
+    }
     if (Test-Path "$Tests\asm\asm_attr_neg.vbp") {
         Test-VbpBuildFail "asm_neg_naked_on_nonproc" "$Tests\asm\asm_attr_neg.vbp" "2012"
         Test-VbpBuildFail "asm_neg_clobber_nonstring" "$Tests\asm\asm_attr_neg.vbp" "2014"

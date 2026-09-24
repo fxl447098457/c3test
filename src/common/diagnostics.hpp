@@ -107,6 +107,7 @@ enum class DiagnosticID : uint16_t {
     SemAsmFormUnsupported = 3036,       // asm扩展: 该形态不支持. 当前唯一来源 = x86 `<Naked>` 过程里
                                         // 按名引用参数 (naked 无栈帧, 参数在调用者的栈上, 名字无从解析)
     SemAsmMixedBody = 3037,             // asm扩展: x64 下 Asm 块必须独占过程体 (v1 不支持与 VB 语句混排)
+    SemAsmOperandWidthMismatch = 3038,  // asm扩展: Asm 指令两个寄存器操作数宽度不一致 (原本要到 ml64 才报 A2022)
 
     // 代码生成 (4xxx)
     CodeGenUnsupportedFeature = 4001,

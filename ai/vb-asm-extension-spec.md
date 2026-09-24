@@ -72,6 +72,12 @@ End Function
 是 A2022，`mov eax, rax` 同理。32 位值就写 32 位寄存器（写 `ebx` 零扩展到 RBX），或显式
 `movsxd rbx, ecx`；配合 `[Function]` 时也按返回宽度取寄存器（`Long` 返回写 `eax`，指针/64 位写 `rax`）。
 
+**这条已由编译器兜底（2026-09-24）**：codegen 期用与后端完全同一张替换表（`asm_proc.hpp` 的
+`asmBuildX64Subs` / `asmBuildX86Subs`）模拟代入后，对两个**纯寄存器**操作数做宽度校验
+（`asmCheckRegWidths`），不一致直接报 **VB3038**（带 VB 源码位置与改法提示），不再漏到
+ml64 的 A2022 / cl 的 C2443。内存操作数（`dword ptr [x]`）与变宽指令（movzx/movsx/movsxd/lea）
+不做判定，仍交给汇编器。
+
 ### 2.3 By-name 引用语义（重要）
 
 - `[var]`（局部 / ByVal 参数）→ 变量存储位置（取/存其值）。

@@ -191,4 +191,118 @@ inline std::vector<std::string> asmRewriteLines(
     return out;
 }
 
+// ============================================================
+// `[param]` / `[Function]` 替换表构建 (x64 驱动 emitMasmProc 与 codegen 宽度校验共用;
+// 两份实现迟早走偏, 所以只留这一份)
+//   x64: 32 位整型参数 (int8/16/32, BOOL, unsigned) → 低 32 位寄存器; 指针/64 位 → 整寄存器;
+//        [Function] → 与返回类型同宽的返回寄存器 (MASM 不容许宽度不等的 mov)。
+//   x86: [param] → C 参数名 (MSVC 内联汇编按名解析); [Function] → 返回变量名
+//        (naked 下传空串 → eax)。
+// ============================================================
+inline std::vector<std::pair<std::string, std::string>> asmBuildX64Subs(const AsmProcInfo& p) {
+    static const char* kReg64[4] = {"rcx", "rdx", "r8", "r9"};
+    static const char* kReg32[4] = {"ecx", "edx", "r8d", "r9d"};
+    std::vector<std::pair<std::string, std::string>> subs;
+    for (size_t i = 0; i < p.params.size() && i < 4; i++) {
+        const std::string& ps = p.params[i];       // "CType name"
+        size_t sp = ps.find(' ');
+        if (sp == std::string::npos) continue;
+        std::string ctype = ps.substr(0, sp);
+        std::string name = ps.substr(sp + 1);
+        while (!name.empty() && name.back() == ' ') name.pop_back();
+        bool is32 = (ctype == "int32_t" || ctype == "int16_t" || ctype == "int8_t" ||
+                     ctype == "VBABOOL" || ctype == "unsigned");
+        subs.push_back({ "[" + name + "]", is32 ? kReg32[i] : kReg64[i] });
+    }
+    bool retIs32 = (p.retCType == "int8_t" || p.retCType == "int16_t" ||
+                    p.retCType == "int32_t" || p.retCType == "VBABOOL" ||
+                    p.retCType == "unsigned");
+    subs.push_back({ "[function]", retIs32 ? "eax" : "rax" });
+    return subs;
+}
+
+inline std::vector<std::pair<std::string, std::string>> asmBuildX86Subs(
+        const AsmProcInfo& p, const std::string& retVarName) {
+    std::vector<std::pair<std::string, std::string>> subs;
+    for (auto& ps : p.params) {
+        size_t sp = ps.find(' ');
+        if (sp == std::string::npos) continue;
+        std::string name = ps.substr(sp + 1);
+        while (!name.empty() && name.back() == ' ') name.pop_back();
+        subs.push_back({ "[" + name + "]", name });
+    }
+    subs.push_back({ "[function]", retVarName.empty() ? std::string("eax") : retVarName });
+    return subs;
+}
+
+// ============================================================
+// 操作数宽度校验 (spec §2.2): 把 ml64 的 A2022 / cl 的 C2443 前移成 VB 诊断。
+//   起因 (实测踩过): `mov rbx, ecx` (64←32) / `mov eax, rax` (32←64) 这类宽度不等
+//   的寄存器搬运, 要等到汇编阶段才报一句 A2022, 用户完全对不上 VB 源码行。
+//   只对「两个操作数都是纯寄存器且宽度已知」的行判定 —— 内存操作数 (dword ptr [x])
+//   不解析、交给汇编器; movzx/movsx/movsxd/lea 本来就是变宽/取址, 排除。
+//   传入的是**重写后**的 body (asmRewriteLines 不增删行, 下标与用户原始行一一对应)。
+// ============================================================
+inline int asmRegWidthBits(const std::string& r) {
+    static const char* k64[] = {"rax","rbx","rcx","rdx","rsi","rdi","rbp","rsp",
+                                "r8","r9","r10","r11","r12","r13","r14","r15"};
+    static const char* k32[] = {"eax","ebx","ecx","edx","esi","edi","ebp","esp",
+                                "r8d","r9d","r10d","r11d","r12d","r13d","r14d","r15d"};
+    static const char* k16[] = {"ax","bx","cx","dx","si","di","bp","sp",
+                                "r8w","r9w","r10w","r11w","r12w","r13w","r14w","r15w"};
+    static const char* k8[]  = {"al","ah","bl","bh","cl","ch","dl","dh","sil","dil",
+                                "bpl","spl","r8b","r9b","r10b","r11b","r12b","r13b","r14b","r15b"};
+    for (const char* k : k64) if (r == k) return 64;
+    for (const char* k : k32) if (r == k) return 32;
+    for (const char* k : k16) if (r == k) return 16;
+    for (const char* k : k8)  if (r == k) return 8;
+    return 0;   // 内存操作数 / 立即数 / C 变量名 (x86 按名引用) / xmm 等 → 不判定
+}
+
+template <typename OnError>
+inline void asmCheckRegWidths(const std::vector<std::string>& body, OnError onError) {
+    auto isIdentCh = [](char c) {
+        return std::isalnum(static_cast<unsigned char>(c)) || c == '_';
+    };
+    auto pureReg = [&](const std::string& t) -> std::string {
+        if (t.empty() || t.find('[') != std::string::npos ||
+            t.find('(') != std::string::npos || t.find(',') != std::string::npos)
+            return "";
+        for (char c : t) if (!isIdentCh(c)) return "";
+        return t;   // 全标识符 → 可能是寄存器 (宽度表查不到就当变量名跳过)
+    };
+    for (size_t i = 0; i < body.size(); i++) {
+        std::string s = body[i];
+        size_t q = s.find(';');                       // 重写后注释是 `;`
+        if (q != std::string::npos) s = s.substr(0, q);
+        size_t a = s.find_first_not_of(" \t");
+        if (a == std::string::npos) continue;
+        s = s.substr(a);
+        static const char* kPrefixes[] = {"lock ", "rep ", "repe ", "repne ", "repz ", "repnz "};
+        for (const char* p : kPrefixes)
+            if (s.rfind(p, 0) == 0) { s = s.substr(std::strlen(p)); break; }
+        // 助记符
+        size_t e = 0;
+        while (e < s.size() && isIdentCh(s[e])) e++;
+        std::string mn = s.substr(0, e);
+        for (auto& c : mn) c = static_cast<char>(::tolower(static_cast<unsigned char>(c)));
+        if (mn == "movzx" || mn == "movsx" || mn == "movsxd" || mn == "lea" ||
+            mn == "xlat" || mn == "imul" || mn == "shrd" || mn == "shld")
+            continue;   // 变宽 / 多形 / 三操作数, 不做双寄存器等宽判定
+        size_t comma = s.find(',', e);
+        if (comma == std::string::npos) continue;
+        auto grab = [&](size_t b, size_t end) {
+            while (b < end && (s[b] == ' ' || s[b] == '\t')) b++;
+            while (end > b && (s[end - 1] == ' ' || s[end - 1] == '\t')) end--;
+            return s.substr(b, end - b);
+        };
+        std::string dst = pureReg(grab(e, comma));
+        std::string src = pureReg(grab(comma + 1, s.size()));
+        if (dst.empty() || src.empty()) continue;
+        int dw = asmRegWidthBits(dst), sw = asmRegWidthBits(src);
+        if (dw == 0 || sw == 0 || dw == sw) continue;
+        onError(i, dst, src, dw, sw);
+    }
+}
+
 } // namespace vb6c3
