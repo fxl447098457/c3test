@@ -179,6 +179,10 @@ public:
 };
 
 // Declare 声明: Declare [PtrSafe] Sub/Function name Lib "lib" [Alias "alias"] (params)
+// ai/024: 另有 DeclareWide 变体 (tB 兼容) — 同形, 但**禁用 ANSI<->Unicode 转换**:
+// `ByVal x As String` 直接传 BSTR (即宽字符指针), 不做 vb6_BSTR_ToANSI。用于
+// 需要宽字符入口的 API (`wsprintfW` / `_wtoi64` 等)。注意 String 仍是 BSTR 而不是
+// LPWSTR, 所以 `[out] LPWSTR*` 这类"返回预分配宽串"的参数不适用 (tB 文档同此警告)。
 class DeclareDecl : public Decl {
 public:
     AccessLevel access;
@@ -188,6 +192,7 @@ public:
     std::string aliasName;  // 可为空
     CallConv callingConv;
     bool isPtrSafe = false;  // PtrSafe关键字 (64位兼容)
+    bool isWide = false;     // ai/024: DeclareWide — 不做 ANSI<->Unicode 转换
     std::vector<std::unique_ptr<ParameterDecl>> params;
     TypeRefPtr returnType;  // Function返回类型 (可为nullptr)
 
@@ -195,11 +200,11 @@ public:
                 std::string n, std::string lib, std::string alias,
                 CallConv conv, bool ptrSafe,
                 std::vector<std::unique_ptr<ParameterDecl>> p,
-                TypeRefPtr ret)
+                TypeRefPtr ret, bool wide = false)
         : Decl(ASTNodeKind::DeclareDecl, loc),
           access(acc), procKind(kind), name(std::move(n)),
           libName(std::move(lib)), aliasName(std::move(alias)),
-          callingConv(conv), isPtrSafe(ptrSafe),
+          callingConv(conv), isPtrSafe(ptrSafe), isWide(wide),
           params(std::move(p)), returnType(std::move(ret)) {}
 };
 
@@ -341,6 +346,9 @@ class Module : public ASTNode {
 public:
     std::string filename;           // 源文件路径
     std::string moduleName;         // 模块名 (通常来自Attribute VB_Name)
+    // ai/023 S03: 所属包名 (小写; "" = 宿主/非包源)。由 driver_frontend 按
+    // S02 登记的 文件→包 映射回填, 跨模块注入处 (driver_crossmod) 据此做导出过滤。
+    std::string packageName;
 
     // 模块类别
     bool isClassModule = false;     // true = .cls类模块, false = .bas标准模块/.frm窗体模块

@@ -34,6 +34,9 @@ void insertComMethod(Symbol& sym, const std::string& key, Symbol::ComMethodSig s
 } // namespace
 
 bool Driver::runSemanticAnalysis(const CompileOptions& options) {
+    // ai/084a M1: 类成员访问级别预计算表 (只读, 随后随各分析器下发)
+    buildMemberAccessTable();
+
     analyzers_.clear();
     for (auto& module : modules_) {
         auto analyzer = std::make_unique<SemanticAnalyzer>(*diag_, options.verbose);
@@ -43,6 +46,31 @@ bool Driver::runSemanticAnalysis(const CompileOptions& options) {
         analyzer->setInterfaceRegistry(&ifaces_);
         // 类继承 (tB, B07b): stage 2.8 建好的只读链登记表 (裸名继承成员判定)
         analyzer->setClassChainRegistry(&classes_);
+        // ai/084a M1/M2: 成员访问级别表 (Private 越界裁决的数据源)
+        analyzer->setMemberAccessTable(&memberAccessTable_);
+        // ai/084c: Class_Initialize 形参个数表 (New Cls(args) 元数校验)
+        analyzer->setCtorParamCounts(ctorParamCounts_);
+
+        // ai/023 S03: 包导出边界屏蔽表 (预计算, driver_compile 填)。
+        // 本模块消费"其他包"时, 那些包的被屏蔽成员名在本模块查无此名的瞬间
+        // 报 VB7006 —— 必须在分析器创建时就位 (无实参裸调用不走 deferred 通路)。
+        {
+            const std::string& ownPkg = module->packageName;
+            std::map<std::string, std::string> blocked;
+            for (const auto& [pkg, names] : packageBlockedNames_) {
+                if (pkg == ownPkg) continue;
+                blocked.insert(names.begin(), names.end());
+            }
+            if (!blocked.empty()) analyzer->setBlockedPackageNames(std::move(blocked));
+
+            // ai/023 S04: 非导出包类名 (同样排除自己的包)
+            std::map<std::string, std::string> blockedCls;
+            for (const auto& [pkg, names] : packageBlockedClasses_) {
+                if (pkg == ownPkg) continue;
+                blockedCls.insert(names.begin(), names.end());
+            }
+            if (!blockedCls.empty()) analyzer->setBlockedPackageClasses(std::move(blockedCls));
+        }
 
         // P6.3: 如果有TypeLib解析结果, 注入COM类型信息到符号表
         if (typelibParser_) {
@@ -397,6 +425,89 @@ bool Driver::runSemanticAnalysis(const CompileOptions& options) {
         analyzers_.push_back(std::move(analyzer));
     }
     return !diag_->hasErrors();
+}
+
+// ai/084a M1: 扫全部类模块的 AST 声明建成员访问级别表。与语义层 pass-1 的
+// memberAccessLevels 回填 (semantic_analyzer.cpp:42-163) 同一套 precedence:
+// Property Get 总是覆盖; Let/Set 仅在键不存在或现有也是 Let/Set 时写入。
+// 泛型模板类与语义层同口径跳过 (本体声明不外泄, 特化副本走完整管线自建)。
+void Driver::buildMemberAccessTable() {
+    memberAccessTable_.clear();
+    ctorParamCounts_.clear();
+    for (const auto& module : modules_) {
+        if (!module || !module->isClassModule) continue;
+        if (!module->classTypeParams.empty()) continue;  // 泛型模板 (G4): 与 analyze() 同口径
+        const std::string clsLower = Symbol::toLower(module->moduleName);
+        auto& members = memberAccessTable_[clsLower];
+        // ai/084c: Class_Initialize 形参个数 (带参构造 New Cls(args) 的元数校验源)
+        int ctorN = 0;
+        for (const auto& decl : module->declarations) {
+            if (decl && decl->kind == ASTNodeKind::SubDecl) {
+                auto& s = static_cast<SubDecl&>(*decl);
+                if (s.name == "Class_Initialize") { ctorN = (int)s.params.size(); break; }
+            }
+        }
+        ctorParamCounts_[clsLower] = ctorN;
+        // ai/084a M3: 定义包归属 + Friend 豁免位 (packageExportInfos_ 在 stage 0 已填)
+        const std::string pkgLower = Symbol::toLower(module->packageName);
+        bool pkgFriendOpen = false;
+        if (!pkgLower.empty()) {
+            auto pit = packageExportInfos_.find(pkgLower);
+            if (pit != packageExportInfos_.end()) pkgFriendOpen = pit->second.friendVisible;
+        }
+        std::map<std::string, ProcKind> procKindOf;  // 复刻 memberProcKinds 的 wins 判定
+        for (const auto& decl : module->declarations) {
+            if (!decl) continue;
+            switch (decl->kind) {
+                case ASTNodeKind::VariableDecl: {
+                    auto& v = static_cast<VariableDecl&>(*decl);
+                    members[Symbol::toLower(v.name)] =
+                        { v.access, clsLower, true, pkgLower, pkgFriendOpen };
+                    break;
+                }
+                case ASTNodeKind::SubDecl: {
+                    auto& s = static_cast<SubDecl&>(*decl);
+                    members[Symbol::toLower(s.name)] = { s.access, clsLower, false, pkgLower, pkgFriendOpen };
+                    procKindOf[Symbol::toLower(s.name)] = ProcKind::Sub;
+                    break;
+                }
+                case ASTNodeKind::FunctionDecl: {
+                    auto& f = static_cast<FunctionDecl&>(*decl);
+                    members[Symbol::toLower(f.name)] = { f.access, clsLower, false, pkgLower, pkgFriendOpen };
+                    procKindOf[Symbol::toLower(f.name)] = ProcKind::Function;
+                    break;
+                }
+                case ASTNodeKind::PropertyDecl: {
+                    auto& p = static_cast<PropertyDecl&>(*decl);
+                    std::string lower = Symbol::toLower(p.name);
+                    auto it = procKindOf.find(lower);
+                    bool wins = false;
+                    if (p.propKind == ProcKind::PropertyGet) {
+                        wins = true;
+                    } else if (p.propKind == ProcKind::PropertyLet) {
+                        wins = (it == procKindOf.end()
+                                || it->second == ProcKind::PropertyLet
+                                || it->second == ProcKind::PropertySet);
+                    } else if (p.propKind == ProcKind::PropertySet) {
+                        wins = (it == procKindOf.end()
+                                || it->second == ProcKind::PropertySet);
+                    }
+                    if (wins) {
+                        members[lower] = { p.access, clsLower, false, pkgLower, pkgFriendOpen };
+                        procKindOf[lower] = p.propKind;
+                    }
+                    break;
+                }
+                case ASTNodeKind::EventDecl: {
+                    auto& e = static_cast<EventDecl&>(*decl);
+                    members[Symbol::toLower(e.name)] = { e.access, clsLower, false, pkgLower, pkgFriendOpen };
+                    break;
+                }
+                default:
+                    break;
+            }
+        }
+    }
 }
 
 } // namespace vb6c3

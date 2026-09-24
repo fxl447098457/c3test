@@ -11,9 +11,12 @@ namespace vb6c3 {
 // Declare 声明 (外部函数声明)
 // ============================================================
 
-std::unique_ptr<DeclareDecl> Parser::parseDeclareDecl(AccessLevel access) {
+// ai/024: `isWide` = 该声明由 `DeclareWide` 引入 (tB 兼容), 语义是"禁用
+// ANSI<->Unicode 转换"。两者语法完全同形, 只是起始记号不同 (`Declare` 关键字 vs
+// 标识符 `DeclareWide`), 故共用本函数。
+std::unique_ptr<DeclareDecl> Parser::parseDeclareDecl(AccessLevel access, bool isWide) {
     auto loc = currentLoc();
-    advance(); // consume 'Declare'
+    advance(); // consume 'Declare' / 'DeclareWide'
 
     bool isPtrSafe = false;
     if (match(TokenKind::Identifier) && toLower(cur_.text) == "ptrsafe") {
@@ -59,7 +62,7 @@ std::unique_ptr<DeclareDecl> Parser::parseDeclareDecl(AccessLevel access) {
 
     return std::make_unique<DeclareDecl>(loc, access, procKind,
         nameTok.text, libTok.text, aliasName, callingConv, isPtrSafe,
-        std::move(params), std::move(returnType));
+        std::move(params), std::move(returnType), isWide);
 }
 
 // ============================================================

@@ -207,6 +207,39 @@ VbpProject VbpParser::parseString(const std::string& content, const std::string&
             continue;
         }
 
+        // C3 扩展 (ai/023 S01): Package=Name; Version —— 工程引用/包。
+        // 只记名字+版本, 不写路径 (023 D3); 解析与三条硬校验在 driver 的
+        // checkPackages (driver_compile.cpp), 这里不做诊断 (parseString 无 diag 通道)。
+        if (key == "Package") {
+            VbpProject::PackageRef ref;
+            auto semiPos = value.find(';');
+            if (semiPos == std::string::npos) {
+                // 宽容写法: Package=Foo-1.2 (目录名即引用)。
+                // 包名只允许 A-Za-z0-9_ (不含 '-'), 所以首个 '-' 必是分隔位。
+                std::string s = value;
+                size_t a = s.find_first_not_of(" \t");
+                size_t b = s.find_last_not_of(" \t\r\n");
+                s = (a != std::string::npos) ? s.substr(a, b - a + 1) : "";
+                auto dash = s.find('-');
+                if (dash != std::string::npos) {
+                    ref.name = s.substr(0, dash);
+                    ref.version = s.substr(dash + 1);
+                } else {
+                    ref.name = s; // 无版本 → 下游 checkPackages 报错
+                }
+            } else {
+                auto trimStr = [](const std::string& x) {
+                    size_t a = x.find_first_not_of(" \t");
+                    size_t b = x.find_last_not_of(" \t\r\n");
+                    return (a != std::string::npos) ? x.substr(a, b - a + 1) : std::string();
+                };
+                ref.name = trimStr(value.substr(0, semiPos));
+                ref.version = trimStr(value.substr(semiPos + 1));
+            }
+            if (!ref.name.empty()) project.packageRefs.push_back(std::move(ref));
+            continue;
+        }
+
         // C3 扩展 (Fix 160): ComLib=<相对 exe 的组件 DLL 路径>
         // 免注册 COM: 运行期 CreateObject 在本机未注册时改走 LoadLibrary+DllGetClassObject。
         // 存原始值 (不 trim 内部空白), 路径解析与去重交给 driver_compile。
@@ -217,6 +250,36 @@ VbpProject VbpParser::parseString(const std::string& content, const std::string&
             if (a != std::string::npos && b != std::string::npos) {
                 std::string trimmed = s.substr(a, b - a + 1);
                 if (!trimmed.empty()) project.comLibs.push_back(std::move(trimmed));
+            }
+            continue;
+        }
+
+        // C3 扩展 (ai/024, 批次 T01): 静态链接相关的两个多行键。
+        //   LibDir=<目录>          静态库搜索根 (顺序 = 搜索顺序)
+        //   ExtraLib=<.lib/.obj…>  附加静态库 (没有对应 Declare 的链接依赖, 如库间互引)
+        // 两键都可多行; 一行内也可用 ';' 分隔多项 (Windows 路径不含 ';')。
+        // 顺序保留 = 搜索顺序。相对路径的基准由 driver 统一用 resolvePath 给
+        // (vbp 所在目录), 与 ComLib= 同族。
+        if (key == "LibDir" || key == "ExtraLib") {
+            auto& sink = (key == "LibDir") ? project.libDirs : project.extraLibs;
+            const std::string s = value;
+            size_t pos = 0;
+            while (pos <= s.size()) {
+                const size_t sep = s.find(';', pos);
+                const std::string item =
+                    (sep == std::string::npos) ? s.substr(pos) : s.substr(pos, sep - pos);
+                const size_t a = item.find_first_not_of(" \t");
+                const size_t b = item.find_last_not_of(" \t\r\n");
+                if (a != std::string::npos && b != std::string::npos) {
+                    std::string trimmed = item.substr(a, b - a + 1);
+                    // 去掉可能带的引号 ("Lib" 与 Lib 等价)
+                    if (trimmed.size() >= 2 && trimmed.front() == '"' && trimmed.back() == '"') {
+                        trimmed = trimmed.substr(1, trimmed.size() - 2);
+                    }
+                    if (!trimmed.empty()) sink.push_back(std::move(trimmed));
+                }
+                if (sep == std::string::npos) break;
+                pos = sep + 1;
             }
             continue;
         }

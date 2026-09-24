@@ -112,8 +112,41 @@ Symbol* SemanticAnalyzer::resolveOverload(Symbol* head, const std::vector<Vb6Typ
     return best;
 }
 
+bool SemanticAnalyzer::reportIfPackageBlocked(const std::string& name, SourceLocation loc) {
+    auto it = blockedPkgNames_.find(Symbol::toLower(name));
+    if (it == blockedPkgNames_.end()) return false;
+    diag_.error(DiagnosticID::VbpPackageNotExported, loc,
+                "'" + name + "' is not exported by package '" + it->second +
+                "' (only Public members of exported modules are visible)");
+    return true;
+}
+
+bool SemanticAnalyzer::reportIfPackageClassBlocked(const std::string& name,
+                                                  SourceLocation loc) {
+    if (blockedPkgClasses_.empty() || name.empty()) return false;
+    std::string key = Symbol::toLower(name);
+    auto it = blockedPkgClasses_.find(key);
+    if (it == blockedPkgClasses_.end()) return false;
+    if (!reportedBlockedClasses_.insert(key).second) return true;  // 已报过, 静默拦
+    diag_.error(DiagnosticID::VbpPackageNotExported, loc,
+                "'" + it->second + "' is a class of a package that does not export it"
+                " (add 'Class=" + it->second + "; Public' to the package manifest)");
+    return true;
+}
+
 void SemanticAnalyzer::resolveDeferredCrossModuleOverloads() {
     for (auto& site : deferredXmodCalls_) {
+        // ai/023 S03: 包导出边界 —— 被屏蔽的名字在这里给出专用诊断 (VB7006),
+        // 而不是漏成 stage-3 的 3001 警告 + cgen 期 C2xxx。
+        {
+            auto bit = blockedPkgNames_.find(Symbol::toLower(site.identName));
+            if (bit != blockedPkgNames_.end()) {
+                diag_.error(DiagnosticID::VbpPackageNotExported, site.loc,
+                            "'" + site.identName + "' is not exported by package '" +
+                            bit->second + "' (only Public members of exported modules)");
+                continue;
+            }
+        }
         Symbol* head = symTab_.lookupModule(site.identName);
         // 普通 (非组) 跨模块过程在场: 调用点归它, 泛型模板不得抢占
         // (tB 优先级 非泛型 > 泛型; 模板注册符号, 与真实过程同名时只可能

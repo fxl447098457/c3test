@@ -151,6 +151,7 @@ enum class ASTNodeKind : uint16_t {
     MidStmt,  // P18-A: Mid$ statement (assignment)
     ExitStmt,
     StopStmt,
+    AsmStmt,   // ai/vb-asm-extension-spec: Asm ... End Asm 内联汇编块
     EndStmt,
     CallStmt,
     ReDimStmt,

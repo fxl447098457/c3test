@@ -94,6 +94,7 @@ jobs:
           - category: vbp
           - category: compile
           - category: syntax
+          - category: asm
     env:
       C3_VCVARSALL: ""
     steps:

@@ -1,0 +1,5 @@
+Type=Exe
+Name=PkgXmodFriend
+Module=XmHostBad; friend_host.bas
+Startup="Sub Main"
+Package=XmodPkg; 1.0

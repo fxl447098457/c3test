@@ -133,6 +133,34 @@ std::string MsvcDriver::findClExe() const {
     return "cl.exe";
 }
 
+// ai/vb-asm-extension-spec: 定位 ml64.exe。
+// 与 cl.exe 同一个 MSVC bin 目录 (Hostx64/x64; 32 位宿主取 Hostx86/x64)。
+// 优先 VCINSTALLDIR (vcvars 之后已设), 再走 vswhere 解析的 VS 根; 都找不到退回裸名
+// "ml64.exe" (PATH —— 用户从 VS 开发者提示符启动时可命中)。
+std::string MsvcDriver::findMl64Exe() {
+    namespace fs = std::filesystem;
+    std::vector<std::string> vcRoots;
+    const char* vc = std::getenv("VCINSTALLDIR");
+    if (vc && vc[0] != '\0') vcRoots.push_back(vc);
+    std::string vs = findVsInstallPath();
+    if (!vs.empty()) vcRoots.push_back(vs + "\\VC");
+
+    std::error_code ec;
+    for (auto root : vcRoots) {
+        if (!root.empty() && root.back() != '\\') root.push_back('\\');
+        std::string msvcDir = root + "Tools\\MSVC";
+        if (!fs::exists(msvcDir, ec)) continue;
+        for (auto& e : fs::directory_iterator(msvcDir, ec)) {
+            if (!e.is_directory()) continue;
+            for (const char* host : {"Hostx64\\x64", "Hostx86\\x64"}) {
+                fs::path cand = e.path() / (std::string(host) + "\\ml64.exe");
+                if (fs::exists(cand, ec)) return cand.string();
+            }
+        }
+    }
+    return "ml64.exe";
+}
+
 // P11.4: Build vcvarsall.bat prefix if needed
 std::string MsvcDriver::buildVcvarsPrefix(const std::string& arch) const {
     // P24-05: Check if vcvarsall already set AND target arch matches current env

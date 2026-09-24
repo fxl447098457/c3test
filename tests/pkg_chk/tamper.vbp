@@ -1,0 +1,5 @@
+Type=Exe
+Name=PkgChkTampered
+Module=TampHost; tamper_host.bas
+Startup="Sub Main"
+Package=TamperedPkg; 1.0

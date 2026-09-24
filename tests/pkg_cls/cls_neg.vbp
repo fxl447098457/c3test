@@ -1,0 +1,5 @@
+Type=Exe
+Name=PkgClsNeg
+Module=ClsHostNeg; cls_neg_host.bas
+Startup="Sub Main"
+Package=ClsNeg; 1.0

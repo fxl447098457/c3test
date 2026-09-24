@@ -301,9 +301,25 @@ void CCodeGen::visit(NewExpr& node) {
     // (cgen_decl_var.cpp:198 knownTypedComVars_ 注册) 保持一致.
     auto* clsSym = lookupModuleDotted(node.className);
     if (clsSym && clsSym->kind == SymbolKind::Class) {
-        // 本工程类: 调用类工厂函数
+        // 本工程类: 调用类工厂函数。
+        // ai/084c: 带实参 → _NewParams(实参) (语义层已按 ctorParams_ 校验元数,
+        // 工厂与原型在类模块 .c/.h 成对生成); 无实参走 _New() 默认值路径。
         std::string clsStruct = "vb6_cls_" + cIdent(clsSym->name);
-        lastExpr_ = "(" + clsStruct + "_New())";
+        if (!node.args.empty()) {
+            std::vector<std::string> emitted;
+            for (auto& a : node.args) {
+                emitExpr(*a);
+                emitted.push_back(std::move(lastExpr_));
+            }
+            std::string joined;
+            for (auto& e : emitted) {
+                if (!joined.empty()) joined += ", ";
+                joined += e;
+            }
+            lastExpr_ = "(" + clsStruct + "_NewParams(" + joined + "))";
+        } else {
+            lastExpr_ = "(" + clsStruct + "_New())";
+        }
     } else if (clsSym && clsSym->kind == SymbolKind::ComClass) {
         // P24-11: COM early-bound class: use real ProgID from TypeLib, not the raw class name
         std::string progId = clsSym->comProgId.empty() ? node.className : clsSym->comProgId;

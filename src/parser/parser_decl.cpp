@@ -21,6 +21,13 @@ DeclPtr Parser::parseDeclaration() {
         checkVirtualOnProcStart(virt);
     }
 
+    // ai/024: `DeclareWide` (tB 兼容) —— 语法与 `Declare` 完全同形, 只是禁用
+    // ANSI<->Unicode 转换。词法器把它切成 Identifier (关键词表是精确匹配,
+    // "declarewide" 不命中 "declare"), 故在分派前拦一道。
+    if (cur_.kind == TokenKind::Identifier && toLower(cur_.text) == "declarewide") {
+        return parseDeclareDecl(AccessLevel::Default, true);
+    }
+
     switch (cur_.kind) {
         case TokenKind::Sub: {
             auto d = parseSubDecl(AccessLevel::Default, false);
@@ -86,6 +93,12 @@ DeclPtr Parser::parseDeclaration() {
                 case TokenKind::Type:     return parseTypeDecl(access);
                 case TokenKind::Enum:     return parseEnumDecl(access);
                 case TokenKind::Declare:  return parseDeclareDecl(access);
+                case TokenKind::Identifier:
+                    // `Public DeclareWide Sub ...` (ai/024)
+                    if (toLower(cur_.text) == "declarewide") {
+                        return parseDeclareDecl(access, true);
+                    }
+                    return parseVariableDeclList(access, false);
                 case TokenKind::Event:    return parseEventDecl(access);
                 case TokenKind::Delegate: return parseDelegateDecl(access);
                 case TokenKind::Const:    return parseConstDeclList(access);

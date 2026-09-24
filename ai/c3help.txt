@@ -24,14 +24,14 @@ C3 - Visual Basic 6.0 Compiler
   --dump-preprocess  输出预处理后的源码
   --dump-ir          输出中间表示
   --dump-frm         输出.frm窗体描述
-  --emit-c           生成C代码 (输出到 --output-dir)
+  --emit-c           生成C代码 (写中间目录 + dump 到 stdout, 不进 --output-dir)
   --emit-llvm        生成LLVM IR
   --keep-for-debug   保留中间文件便于调试
   --compat-check     兼容性检查模式
 
 TypeLib/COM 选项:
-  --typelib <文件>   显式引用TypeLib
-  --no-auto-typelib  禁用自动TypeLib加载
+  --typelib <文件>    显式引用TypeLib
+  --no-auto-typelib   禁用自动TypeLib加载
   --progid <前缀>     ActiveX DLL的ProgID前缀
   --libid <字符串>    显式指定TypeLib的LibID
 
@@ -40,7 +40,19 @@ TypeLib/COM 选项:
   --trim-includes     裁剪未实际引用的跨模块include
   --no-warn <ID列表>   抑制指定ID的警告 (逗号分隔, 如 3001,3003)
 
+静态库选项 (Lib "xxx.lib" / "xxx.obj"):
+  --libdir <目录>     静态库搜索根 (可重复, 按给定顺序查找)
+                      裸文件名在此列表 + vbp 的 LibDir= + <工程目录>/Lib 中查找
+  --extra-lib <库>    附加静态库 (.lib/.obj), 可重复 —— 用于没有对应
+                      Declare 的链接依赖 (如静态库之间互引)
+
 示例:
   C3 hello.bas -o hello.exe
   C3 app.vbp --target win-x64
   C3 module.bas -d:DEBUG=-1
+
+------------------------------------------------------------
+注: 本文件是 C3 --help 的快照。若与源码 src/driver/driver_args.cpp
+中的帮助文本不一致, 以源码为准。
+参数完整说明见 ai/C3_COMPILE_OPTIONS.md
+VB6 -> C 语法/特性说明见 ai/ 目录及 docs/

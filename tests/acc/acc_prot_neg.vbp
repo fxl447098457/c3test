@@ -1,0 +1,5 @@
+Type=Exe
+Name=AccProtNeg
+Module=ProtNegMain; acc_prot_neg_main.bas
+Class=ProtBase; ProtBase.cls
+Startup="Sub Main"

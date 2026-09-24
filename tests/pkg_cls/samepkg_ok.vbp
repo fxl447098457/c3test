@@ -1,0 +1,5 @@
+Type=Exe
+Name=PkgSamePkg
+Module=SamePkgHost; samepkg_host.bas
+Startup="Sub Main"
+Package=ClsNeg; 1.0

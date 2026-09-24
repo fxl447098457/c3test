@@ -1,0 +1,5 @@
+Type=Exe
+Name=PkgFriendOpen
+Module=FrHost; friend_open_host.bas
+Startup="Sub Main"
+Package=FrOpenPkg; 1.0

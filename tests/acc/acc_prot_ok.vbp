@@ -1,0 +1,6 @@
+Type=Exe
+Name=AccProt
+Module=ProtMain; acc_prot_main.bas
+Class=ProtBase; ProtBase.cls
+Class=ProtDerived; ProtDerived.cls
+Startup="Sub Main"

@@ -151,6 +151,10 @@
     }
 
     void visit(StopStmt&) override { out() << "Stop\n"; }
+    void visit(AsmStmt& node) override {
+        out() << "Asm (" << node.lines.size() << " lines"
+              << (node.naked ? ", Naked" : "") << ")\n";
+    }
     void visit(EndStmt&) override  { out() << "End\n"; }
 
     void visit(CallStmt& node) override {

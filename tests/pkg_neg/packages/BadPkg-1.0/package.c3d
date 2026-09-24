@@ -1,0 +1,5 @@
+[C3Package]
+Format=1
+Name=BadPkg
+Version=1.0
+Bogus=1

@@ -1,0 +1,12 @@
+[C3Package]
+Format=1
+Name=ChkPkg
+Version=1.0
+Desc=ai/023 S05 fixture
+
+[Files]
+ChkPkg.bas=aeaf0c4c67379930b0379b7b594dd885370e25cc,114
+
+[Export]
+Module=ChkPkg; Public
+Friend=False

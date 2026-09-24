@@ -120,6 +120,17 @@
 
         // 类工厂函数声明
         h_.emitLine(clsStruct + "* " + clsStruct + "_New(void);");
+        // ai/084c: 带参构造工厂 (Class_Initialize 带形参时) — `New Cls(args)` 的
+        // 调用点通常在别的模块, 原型必须跨模块可见 (同 _New 本身)。
+        for (auto& decl : module.declarations) {
+            if (decl && decl->kind == ASTNodeKind::SubDecl) {
+                auto& sub = static_cast<SubDecl&>(*decl);
+                if (sub.name == "Class_Initialize" && !sub.params.empty()) {
+                    h_.emitLine(clsStruct + "* " + clsStruct + "_NewParams(" + makeParamList(sub.params) + ");");
+                    break;
+                }
+            }
+        }
         h_.emitLine("void " + clsStruct + "_Destroy(" + clsStruct + "* me);");
         // ExeComBridge 03: COM 实参打包函数 (实现在本类 .c, 见 cgen_com.cpp
         // emitClassFactory). 声明必须跨模块可见 —— `New <该类>` 的调用点通常

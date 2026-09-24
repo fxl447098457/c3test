@@ -15,9 +15,29 @@ void CCodeGen::emitClassFactory(Module& module) {
     c_.emitLine("// === 类工厂函数: " + module.moduleName + " ===");
     c_.emitBlank();
 
-    // _New: 分配+初始化
-    c_.emitLine(clsStruct + "* " + clsStruct + "_New(void) {");
-    c_.indent();
+    // ai/084c: Class_Initialize 形参 → 带参工厂 _NewParams(实参)。
+    // _New(void) 保留为默认值路径 —— 默认实例 (_Default)/COM 打包 (vb6_ComPack_*)/
+    // 隐式 As New 等内部自动创建通路仍以零参 _New() 为契约, 不能因带参构造而消失。
+    SubDecl* initSub = nullptr;
+    for (auto& decl : module.declarations) {
+        if (decl->kind == ASTNodeKind::SubDecl) {
+            auto& sub = static_cast<SubDecl&>(*decl);
+            if (sub.name == "Class_Initialize") { initSub = &sub; break; }
+        }
+    }
+    const bool hasCtorParams = initSub && !initSub->params.empty();
+    if (hasCtorParams) {
+        for (auto& p : initSub->params) {
+            if (!p->isByVal || p->isOptional) {
+                diag_.error(DiagnosticID::CodeGenUnsupportedFeature, initSub->loc,
+                    "带参构造 (Class_Initialize 带形参) 目前仅支持非 Optional 的 ByVal 参数");
+                break;
+            }
+        }
+    }
+
+    // 工厂公共体: 分配 + iface/vtbl 初始化 + 字段默认值 + 事件指针 + Class_Initialize
+    auto emitFactoryBody = [&](const std::string& ctorCallSuffix) {
     c_.emitLine(clsStruct + "* me = (" + clsStruct + "*)vb6_Alloc(sizeof(" + clsStruct + "));");
     c_.emitLine("if (!me) return NULL;");
     // ExeComBridge 01: 无条件初始化 (原先仅 DLL). __comObj 现在是所有类模块
@@ -77,22 +97,45 @@ void CCodeGen::emitClassFactory(Module& module) {
         c_.emitLine("me->events = NULL;  /* P6.5: no event sink initially */");
     }
 
-    // 检查是否有 Class_Initialize 方法
-    bool hasInit = false;
-    for (auto& decl : module.declarations) {
-        if (decl->kind == ASTNodeKind::SubDecl) {
-            auto& sub = static_cast<SubDecl&>(*decl);
-            if (sub.name == "Class_Initialize") {
-                hasInit = true;
-                c_.emitLine(cProcName("Class_Initialize", sub.access, isClassModule_ ? moduleName_ : "") + "(me);");
-                break;
-            }
+        if (initSub) {
+            c_.emitLine(cProcName("Class_Initialize", initSub->access, isClassModule_ ? moduleName_ : "")
+                        + "(me" + ctorCallSuffix + ");");
         }
-    }
+        c_.emitLine("return me;");
+    };
 
-    c_.emitLine("return me;");
-    c_.dedent();
-    c_.emitLine("}");
+    if (hasCtorParams) {
+        // _New(void): 各形参默认值兜底 (内部自动创建路径产出"默认初始化"实例)
+        c_.emitLine(clsStruct + "* " + clsStruct + "_New(void) {");
+        c_.indent();
+        std::string defaults;
+        for (auto& p : initSub->params) {
+            if (!defaults.empty()) defaults += ", ";
+            Vb6Type pt = p->asType ? resolveArrayElemType(p->asType.get()) : Vb6Type::Variant;
+            defaults += defaultValue(pt);
+        }
+        c_.emitLine("return " + clsStruct + "_NewParams(" + defaults + ");");
+        c_.dedent();
+        c_.emitLine("}");
+        c_.emitBlank();
+        // _NewParams: 真工厂, 形参映射与类方法 (makeParamList) 完全一致
+        c_.emitLine(clsStruct + "* " + clsStruct + "_NewParams(" + makeParamList(initSub->params) + ") {");
+        c_.indent();
+        std::string argNames;
+        for (auto& p : initSub->params) {
+            if (!argNames.empty()) argNames += ", ";
+            argNames += cIdent(p->name);
+        }
+        emitFactoryBody(", " + argNames);
+        c_.dedent();
+        c_.emitLine("}");
+    } else {
+        c_.emitLine(clsStruct + "* " + clsStruct + "_New(void) {");
+        c_.indent();
+        emitFactoryBody("");
+        c_.dedent();
+        c_.emitLine("}");
+    }
 
     // _Destroy: 终止+释放
     c_.emitBlank();

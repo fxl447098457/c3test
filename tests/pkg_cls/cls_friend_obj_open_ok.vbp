@@ -1,0 +1,5 @@
+Type=Exe
+Name=FrOpen
+Module=FrOpenHost; cls_friend_open_host.bas
+Package=ClsFriendOpen; 1.0
+Startup="Sub Main"

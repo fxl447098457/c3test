@@ -131,7 +131,8 @@ private:
     std::unique_ptr<PropertyDecl> parsePropertyDecl(AccessLevel access);
     std::unique_ptr<TypeDecl> parseTypeDecl(AccessLevel access);
     std::unique_ptr<EnumDecl> parseEnumDecl(AccessLevel access);
-    std::unique_ptr<DeclareDecl> parseDeclareDecl(AccessLevel access);
+    // isWide = 由 `DeclareWide` 引入 (tB 兼容, ai/024): 禁用 ANSI<->Unicode 转换
+    std::unique_ptr<DeclareDecl> parseDeclareDecl(AccessLevel access, bool isWide = false);
     std::unique_ptr<EventDecl> parseEventDecl(AccessLevel access);
     std::unique_ptr<DelegateDecl> parseDelegateDecl(AccessLevel access);
     // Interface 契约块 (tB 扩展, parser_interface.cpp): `Interface Name [Extends P] ... End Interface`
@@ -200,6 +201,8 @@ private:
     std::unique_ptr<RaiseEventStmt> parseRaiseEventStmt();
     std::unique_ptr<EndStmt> parseEndStmt();
     std::unique_ptr<StopStmt> parseStopStmt();
+    // ai/vb-asm-extension-spec: Asm ... End Asm (原始行捕获, 不做 VB 语法解析)
+    StmtPtr parseAsmStmt();
     std::unique_ptr<SetStmt> parseSetStmt();
     std::unique_ptr<LetStmt> parseLetStmt();
     std::unique_ptr<CallStmt> parseCallStmt();

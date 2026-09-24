@@ -29,6 +29,12 @@
     // 否则每个窗体模块各出一个 WinMain → LNK2005.
     void setStartupObject(const std::string& s) { startupObject_ = s; }
 
+    // ai/vb-asm-extension-spec: 目标架构 ("x64"/"x86") — Asm 块 v1 仅 x64 (x86 报 3030)
+    void setTargetArch(const std::string& a) { targetArch_ = a; }
+    // ai/vb-asm-extension-spec: 已收集的 Asm 过程 (函数体=单个 Asm 块),
+    // driver 侧据此生成 .asm 并调 ml64 → obj → 链接 (见 driver_link.cpp)
+    const std::vector<AsmProcInfo>& asmProcs() const { return asmProcs_; }
+
     // Fix 086: 设置工程内全部窗体模块名集合(小写), 由driver预扫描提供.
     // 跨模块窗体默认实例引用 (cLogs 里 FLogs.Visible / Unload FLogs) 需要知道
     // FLogs 是窗体, 才能生成 vb6_form_hwnd_FLogs() 访问器调用而非裸标识符.

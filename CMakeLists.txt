@@ -70,6 +70,7 @@ add_library(vb6c3-core STATIC
     src/common/diagnostics.cpp
     src/common/source_manager.cpp
     src/common/encoding.cpp
+    src/common/sha1.cpp
     src/lexer/lexer.cpp
     src/lexer/lexer_keywords.cpp
     src/lexer/lexer_number.cpp
@@ -110,6 +111,8 @@ add_library(vb6c3-core STATIC
     src/semantics/semantic_analyzer_util.cpp
     src/semantics/semantic_analyzer_builtin.cpp
     src/project/vbp_parser.cpp
+    src/driver/driver_pack.cpp
+    src/project/package_manifest.cpp   # ai/023 S01: package.c3d 清单解析
     src/project/frm_parser.cpp
     src/project/frm_parser_util.cpp
     src/project/frx_reader.cpp
@@ -219,6 +222,9 @@ add_executable(c3
     src/driver/driver_classchain.cpp
     src/driver/driver_crossmod.cpp
     src/driver/driver_link.cpp
+    src/driver/driver_staticlib.cpp
+    src/driver/static_lib.cpp
+    src/driver/coff_archive.cpp
     src/driver/rtl_embedded.cpp
     src/driver/c3rtl.rc
 )

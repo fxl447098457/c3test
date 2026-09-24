@@ -1,0 +1,12 @@
+[C3Package]
+Format=1
+Name=DemoPkg
+Version=1.0
+Desc=S01 positive fixture
+
+[Files]
+DemoPkg.bas=a78550c0da53cdeca626f01c23406e08eef19214,50
+
+[Export]
+Module=DemoPkg; Public
+Friend=False

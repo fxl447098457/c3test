@@ -270,6 +270,16 @@ void SemanticAnalyzer::visit(LocalDeclStmt& node) {
                     sym->variableTypeName =
                         static_cast<SimpleTypeRef*>(varDecl.asType.get())->name;
                 }
+                // ai/084a M1: 类类型局部变量也记录类型名 (原先只给委托记)。
+                // 仅当类型名命中成员访问级别预计算表 (= 工程内类模块) 才记,
+                // 供 visit(MemberAccessExpr) 的接收者解析; 其他消费方都有 kind 守卫。
+                else if (varDecl.asType && varDecl.asType->kind == ASTNodeKind::SimpleTypeRef &&
+                    memberAccess_ &&
+                    memberAccess_->count(Symbol::toLower(
+                        static_cast<SimpleTypeRef*>(varDecl.asType.get())->name))) {
+                    sym->variableTypeName =
+                        static_cast<SimpleTypeRef*>(varDecl.asType.get())->name;
+                }
                 symTab_.define(std::move(sym));
                 // Dim op As Operation = AddressOf Proc — 初始化器即绑定
                 if (varDecl.initializer && varDecl.asType &&

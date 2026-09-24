@@ -1,0 +1,5 @@
+Type=Exe
+Name=AccNeg
+Module=AccNegMain; acc_neg_main.bas
+Class=AccThing; AccThing.cls
+Startup="Sub Main"

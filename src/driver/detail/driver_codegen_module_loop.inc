@@ -76,6 +76,7 @@
         cgen.setInterfaceRegistry(&ifaces_);  // tB Interface 契约 (B04): stage 2.7 只读登记表
         cgen.setDefaultInstanceClasses(&defaultInstanceClasses);  // P6.4+: 类模块默认实例
         cgen.setTrimIncludes(options.trimIncludes);  // opt4: 裁剪未实际引用的跨模块include
+        cgen.setTargetArch(options.arch);            // ai/vb-asm-extension-spec: Asm 块仅 x64
         if (options.trimIncludes) {
             // opt4: 基于AST实际引用收集外部模块, 供 include 裁剪
             std::unordered_set<std::string> refdModules;
@@ -95,6 +96,11 @@
         bool ok = cgen.generate(*module, baseName, externalModules,
                                 options.isDll, options.dllProgId, frmDescPtr);
         if (!ok) return false;
+
+        // ai/vb-asm-extension-spec: 回收本模块的 Asm 过程 (体=单个 Asm 块), 交 runLinker 生成 .asm
+        for (auto& ap : cgen.asmProcs()) {
+            asmProcs_.push_back({baseName, ap});
+        }
 
         // 写 .h 文件
         std::string hPath = outputDir + "/" + baseName + ".h";

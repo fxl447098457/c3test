@@ -1,0 +1,11 @@
+[C3Package]
+Format=1
+Name=FrOpenPkg
+Version=1.0
+
+[Files]
+FrOpenPkg.bas=8778140b2161f870f7111f956b2ca129b7dfe62e,119
+
+[Export]
+Module=FrOpenPkg; Public
+Friend=True

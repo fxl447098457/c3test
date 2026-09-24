@@ -1,0 +1,13 @@
+[C3Package]
+Format=1
+Name=ClsNeg
+Version=1.0
+Desc=same-package use of a non-exported class
+
+[Files]
+HiddenCls.cls=8d5c90097a6d3dd072c0a3682a6b47ed58437b8d,128
+ClsInner.bas=e973eae6b773fcdacae734d445946c43f0da0784,143
+
+[Export]
+Module=ClsInner; Public
+Friend=False

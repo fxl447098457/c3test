@@ -148,7 +148,14 @@ ExprPtr ASTCloner::cloneExprInner(const Expr* e) {
     }
     case ASTNodeKind::NewExpr: {
         auto& n = static_cast<const NewExpr&>(*e);
-        return std::make_unique<NewExpr>(n.loc, substName(n.className));
+        auto out = std::make_unique<NewExpr>(n.loc, substName(n.className));
+        // 084c: 带参构造的实参一并克隆 (泛型特化/模板克隆路径需要保真)
+        for (const auto& a : n.args) {
+            auto ca = cloneExprInner(a.get());
+            if (a && !ca) return nullptr;
+            out->args.push_back(std::move(ca));
+        }
+        return out;
     }
     case ASTNodeKind::TypeOfExpr: {
         auto& t = static_cast<const TypeOfExpr&>(*e);
@@ -371,6 +378,14 @@ StmtPtr ASTCloner::cloneStmt(const Stmt* s) {
         out = std::make_unique<ExitStmt>(s->loc, static_cast<const ExitStmt&>(*s).exitKind); break;
     case ASTNodeKind::StopStmt:
         out = std::make_unique<StopStmt>(s->loc); break;
+    case ASTNodeKind::AsmStmt: {
+        auto& x = static_cast<const AsmStmt&>(*s);
+        auto n = std::make_unique<AsmStmt>(s->loc);
+        n->lines = x.lines;
+        n->naked = x.naked;
+        out = std::move(n);
+        break;
+    }
     case ASTNodeKind::EndStmt:
         out = std::make_unique<EndStmt>(s->loc); break;
     case ASTNodeKind::CallStmt: {
@@ -695,6 +710,7 @@ std::unique_ptr<Module> ASTCloner::cloneModule(const Module& m,
     auto out = std::make_unique<Module>(m.loc, m.filename);
     out->filename = m.filename;
     out->moduleName = newName;
+    out->packageName = m.packageName;  // ai/023 S03: 包归属随模块克隆 (泛型实例化同包)
     out->isClassModule = m.isClassModule;
     out->isFormModule = false;
     out->instancing = m.instancing;

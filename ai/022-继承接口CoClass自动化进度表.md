@@ -4,11 +4,9 @@
 > 每次运行开始先读本文件，结束前必须更新本文件（状态头 + 批次清单 + 运行日志）。
 > 规范输入: `ai/讨论记录/018-接口继承与CoClass设计思路.md`（含 tB 文档要点与分阶段设计思路全文）。
 
-STATUS: IDLE               # NOT_STARTED | DESIGN | BUSY | IDLE | ALL_DONE
-LAST_RUN: 2026-09-23T19:40:00+08:00   # B08d 已收口（代码 df9806e、总表本轮 docs 提交）。本轮一批：B08d（类虚表 + 运行期动态派发）。
-               # 自动运行见本行不足 55 分钟请立即跳过。   # 门 18:03/18:33/19:06 三次全量（前两次见下方"本轮跑了三次门"的原因），最终 19:06–19:34。
-               # 下一轮自动运行从 **B08c** 开工（家族外越权访问 `Protected` 的拒绝，地图见下方 CURRENT_BATCH）；
-               # 重入保护照常：STATUS=BUSY 且不足 55 分钟立即跳过。
+STATUS: BUSY               # NOT_STARTED | DESIGN | BUSY | IDLE | ALL_DONE
+LAST_RUN: 2026-09-23T19:55:00+08:00   # 本轮（用户手工续跑）从 **B08c** 开工：家族外越权访问 `Protected` 的拒绝。
+               # 自动运行见本行不足 55 分钟请立即跳过。   # 上一批 B08d 已收口（代码 df9806e、总表 282f592、门 149/0/1/150）。
 LAST_COMMIT: 代码批 = df9806e(B08d)、05397be(B08b)、2117d1c(B08a)、b1c0050(B07b)、a056705(B07a)、4dc6b7e(B06b)
 CURRENT_BATCH: **B08c**（P3 第三批的剩余那半）——**拒绝**家族**外**访问 `Protected` 成员。
                B08a 只做到"家族内可用"，今天从家族外写 `obj.ProtectedField` / 调 `obj.ProtectedSub`

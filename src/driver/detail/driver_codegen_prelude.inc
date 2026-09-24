@@ -7,3 +7,6 @@
         return false;
     }
 
+    // ai/vb-asm-extension-spec: 本次发码收集的 Asm 过程 (runLinker 消费) —— 防重复调用累积
+    asmProcs_.clear();
+
