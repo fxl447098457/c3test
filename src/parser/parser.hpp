@@ -137,12 +137,16 @@ private:
     // Interface 契约块 (tB 扩展, parser_interface.cpp): `Interface Name [Extends P] ... End Interface`
     // pendingAttrs = 声明上方累积的 [Xxx] 属性行 (由 parseModuleBody 交出)
     std::unique_ptr<InterfaceDecl> parseInterfaceDecl(std::vector<InterfaceAttr>& pendingAttrs);
+    // CoClass 契约聚合块 (tB 扩展, ai/026 四节 / ai/022 D44, 批次 B11/C01; 同在 parser_interface.cpp):
+    // `CoClass Name ... End CoClass`, 块体只收属性行与 `Interface <名>` 引用行. C01 不校验、不发码.
+    std::unique_ptr<CoClassDecl> parseCoClassDecl(std::vector<InterfaceAttr>& pendingAttrs);
     DeclPtr parseInterfaceMemberDecl();
     // 成员级 `Implements I.M[, I.N]` 尾子句 (tB 扩展, ai/022 D5, B02b):
     // 在过程签名之后、行尾之前调用; 无 Implements 时不消费任何 token.
     void parseTrailingImplementsClauses(std::vector<ImplementsClause>& out);
     bool atBracketAttrLine() const;
-    bool parseBracketAttrLine(InterfaceAttr& out);
+    // requireOwnLine=false: 属性行后同行还可以接声明 (CoClass 块的 `[Default] Interface X`)
+    bool parseBracketAttrLine(InterfaceAttr& out, bool requireOwnLine = true);
     std::unique_ptr<ConstDecl> parseConstDecl(AccessLevel access);
     std::unique_ptr<VariableDecl> parseVariableDecl(AccessLevel access, bool isStatic);
 

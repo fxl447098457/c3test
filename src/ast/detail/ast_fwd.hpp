@@ -100,6 +100,7 @@ class DeclareDecl;
 class EventDecl;
 class DelegateDecl;
 class InterfaceDecl;
+class CoClassDecl;
 class ConstDecl;
 class VariableDecl;
 class ParameterDecl;

@@ -149,10 +149,17 @@ void Parser::parseModuleBody(Module& mod) {
                 expectEndOfStatement();
                 continue;
             }
+            // CoClass 契约聚合块 (tB 扩展, ai/026 四节 / ai/022 D44, 批次 B11/C01):
+            // 同样只在"过去必然报错"的位置新增分支, 存量工程逐字节不变.
+            if (cur_.kind == TokenKind::CoClass) {
+                mod.coclasses.push_back(parseCoClassDecl(pendingAttrs));
+                expectEndOfStatement();
+                continue;
+            }
             if (sawAttr) {
                 if (!pendingAttrs.empty()) {
                     diag_.error(DiagnosticID::ParseUnexpectedToken, currentLoc(),
-                        "Attribute line must precede an Interface declaration");
+                        "Attribute line must precede an Interface or CoClass declaration");
                     skipToNextLine();
                 }
                 continue;  // 属性行本身已报错并越过该行

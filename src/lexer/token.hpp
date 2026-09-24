@@ -150,6 +150,7 @@ enum class TokenKind : uint16_t {
     Extends,        // Interface 的单继承子句 (仅接口域; 类继承用 Inherits, P3)
     Inherits,       // 类继承子句 (tB 扩展, ai/022 D6, 批次 B07): 类域用 Inherits, 接口域用 Extends
     Via,            // 委托式实现子句 `Implements I Via m_holder` (tB 扩展, ai/022 D42, 批次 B10; 软关键字)
+    CoClass,        // 契约聚合块 `CoClass Name … End CoClass` (tB 扩展, ai/026 四节, 批次 B11/C01; 软关键字)
     // 虚方法修饰符 (VB6 原生三件套; ai/022 D30, 批次 B08b): 只作用于 Sub/Function/Property
     Overridable,
     Overrides,

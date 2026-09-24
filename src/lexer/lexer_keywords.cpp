@@ -55,6 +55,7 @@ void Lexer::initKeywords() {
         {"extends", TokenKind::Extends},       // Interface .. Extends 单继承 (软关键字)
         {"inherits", TokenKind::Inherits},     // 类继承子句 Inherits Base (tB 扩展, B07; 软关键字)
         {"via", TokenKind::Via},               // `Implements I Via m_h` 委托子句 (tB 扩展, B10; 软关键字)
+        {"coclass", TokenKind::CoClass},       // CoClass 契约聚合块 (tB 扩展, ai/026, B11/C01; 软关键字)
         {"overridable", TokenKind::Overridable},       // 虚方法修饰符三件套 (VB6 原生; B08b, 软关键字)
         {"overrides", TokenKind::Overrides},           // 同上
         {"notoverridable", TokenKind::NotOverridable}, // 同上 (显式不可覆盖 = 默认)

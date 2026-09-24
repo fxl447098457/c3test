@@ -32,6 +32,7 @@ bool Token::isKeyword() const {
         || kind == TokenKind::Interface || kind == TokenKind::Extends
         || kind == TokenKind::Inherits
         || kind == TokenKind::Via
+        || kind == TokenKind::CoClass
         || kind == TokenKind::Overridable || kind == TokenKind::Overrides
         || kind == TokenKind::NotOverridable
         || kind == TokenKind::OnError || kind == TokenKind::GoTo

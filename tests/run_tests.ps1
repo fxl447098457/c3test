@@ -985,7 +985,7 @@ if ($Category -in @("all", "syntax")) {
         @("itf_n03_field", "$Tests\itf_neg\n03_field.bas", "accepts only Sub/Function/Property signatures"),
         @("itf_n04_missing_end", "$Tests\itf_neg\n04_missing_end.bas", "expected 'End Interface'"),
         @("itf_n05_unknown_attr", "$Tests\itf_neg\n05_unknown_attr.bas", "Unrecognized attribute line [NotAnAttr]"),
-        @("itf_n06_attr_no_target", "$Tests\itf_neg\n06_attr_no_target.bas", "Attribute line must precede an Interface declaration"),
+        @("itf_n06_attr_no_target", "$Tests\itf_neg\n06_attr_no_target.bas", "Attribute line must precede an Interface or CoClass declaration"),
         @("itf_n07_generic", "$Tests\itf_neg\n07_generic.bas", "does not support generic type parameters"),
         # ai/022 B02 (semantic layer): stage 2.7 contract registry + Implements checks
         @("itf_n08_missing_slot", "$Tests\itf_neg\n08_missing_slot.cls", "is not implemented by class"),
@@ -1007,7 +1007,13 @@ if ($Category -in @("all", "syntax")) {
         # Pass D, and both rejection reasons are error-level.
         @("itf_n21_via_no_field", "$Tests\itf_neg\n21_via_no_field.cls", "is not a module-level field"),
         @("itf_n23_via_not_iface", "$Tests\itf_neg\n23_via_not_iface.cls", "not an Interface block"),
-        @("itf_n24_via_in_bas", "$Tests\itf_neg\n24_via_in_bas.bas", "only allowed in a class module")
+        @("itf_n24_via_in_bas", "$Tests\itf_neg\n24_via_in_bas.bas", "only allowed in a class module"),
+        # ai/022 B11/C01 (CoClass block, syntax layer): malformed clauses must be refused
+        # at the parser -- C01 does no validation beyond block structure.
+        @("itf_n25_coclass_no_name", "$Tests\itf_neg\n25_coclass_no_name.bas", "expected CoClass name"),
+        @("itf_n26_coclass_missing_end", "$Tests\itf_neg\n26_coclass_missing_end.bas", "expected 'End CoClass'"),
+        @("itf_n27_coclass_bad_member", "$Tests\itf_neg\n27_coclass_bad_member.bas", "CoClass block accepts only attribute lines"),
+        @("itf_n28_coclass_ref_no_name", "$Tests\itf_neg\n28_coclass_ref_no_name.bas", "expected interface name after 'Interface' in CoClass block")
     )
     foreach ($c in $itfNeg) {
         if (Test-Path $c[1]) { Test-SyntaxFail $c[0] $c[1] $c[2] }
@@ -1027,6 +1033,10 @@ if ($Category -in @("all", "syntax")) {
     # ai/022 B10 positive guard: Via is registered as a SOFT keyword, so an existing
     # program that uses Via as a variable name still parses.
     if (Test-Path "$Tests\itf_pos\p04_via_soft_ident.bas") { Test-Syntax "itf_p04_via_soft_ident" "$Tests\itf_pos\p04_via_soft_ident.bas" }
+    # ai/022 B11/C01 positive guards: the CoClass block form parses end to end, and CoClass
+    # stays usable as an ordinary identifier (soft keyword registration).
+    if (Test-Path "$Tests\itf_pos\p05_coclass_block.bas") { Test-Syntax "itf_p05_coclass_block" "$Tests\itf_pos\p05_coclass_block.bas" }
+    if (Test-Path "$Tests\itf_pos\p06_coclass_soft_ident.bas") { Test-Syntax "itf_p06_coclass_soft_ident" "$Tests\itf_pos\p06_coclass_soft_ident.bas" }
     # ai/022 B07a (class Inherits, P3): chain diagnostics must fire. Single-file cases ride
     # the existing Test-SyntaxFail path; the two-module cases need Test-SyntaxFailMulti.
     $clsInhNeg = @(
