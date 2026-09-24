@@ -60,6 +60,14 @@
     std::string makeProcSignature(SubDecl& node);
     std::string makeProcSignature(FunctionDecl& node);
 
+    // ai/vb-asm-extension-spec: 过程体 = 单个 Asm 块时降级为独立 MASM 过程 (v1: x64/ml64)。
+    // 返回 true = 已接管该过程 (调用方应立即 return, 不再走常规 C 体发射)。
+    //   x64: 只发 extern 原型 + 收集元数据到 asmProcs_;
+    //   x86: 报 3030; 混排/类方法/Optional/ParamArray/>4参/浮点参 → 3030/3031。
+    bool tryEmitAsmProc(const std::string& procName, AccessLevel access,
+                        std::vector<std::unique_ptr<ParameterDecl>>& params,
+                        ASTNode* returnType, const StmtList& body, SourceLocation loc);
+
     // --- Delegate (tB 扩展): 桩类型名/桩名/声明趟发射/收尾定义/直调 ---
     std::string delegateTyName(const std::string& delName);
     std::string delegateThunkName(const std::string& delName, const std::string& procName);
@@ -74,11 +82,15 @@
                                  const std::string& procFp);
 
     // 生成参数列表
-    std::string makeParamList(std::vector<std::unique_ptr<ParameterDecl>>& params, bool isDeclare = false);
+    // staticEntry: ai/024 T02 —— true 表示这条声明要直连**静态归档**里的真实导出
+    // 符号 (不是 Win32 DLL 导入库)。此时 `ByVal <x> As String` 声明为 `char*`,
+    // 与调用点实际发出的 ANSI `char*` 口径对齐 (见 makeParamCType 的注释)。
+    std::string makeParamList(std::vector<std::unique_ptr<ParameterDecl>>& params,
+                              bool isDeclare = false, bool staticEntry = false);
 
     // Fix 084k: 生成单个参数的C类型+名字 ("int32_t x" / "vb6_cls_cWinsock** o"),
     // 与makeParamList逐参数逻辑完全一致, 供事件包装器等复用
-    std::string makeParamCType(ParameterDecl* p, bool isDeclare = false);
+    std::string makeParamCType(ParameterDecl* p, bool isDeclare = false, bool staticEntry = false);
 
     // 生成Property签名 (不含函数体)
     std::string makePropertySignature(PropertyDecl& node);

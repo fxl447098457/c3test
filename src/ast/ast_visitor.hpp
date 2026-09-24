@@ -57,6 +57,7 @@ public:
     virtual void visit(MidStmt& node) {}  // P18-A
     virtual void visit(ExitStmt& node) {}
     virtual void visit(StopStmt& node) {}
+    virtual void visit(AsmStmt& node) {}   // ai/vb-asm-extension-spec
     virtual void visit(EndStmt& node) {}
     virtual void visit(CallStmt& node) {}
     virtual void visit(ReDimStmt& node) {}

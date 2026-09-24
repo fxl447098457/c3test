@@ -1,0 +1,5 @@
+Type=Exe
+Name=PkgChkOk
+Module=ChkHost; chk_host.bas
+Startup="Sub Main"
+Package=ChkPkg; 1.0

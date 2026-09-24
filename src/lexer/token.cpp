@@ -109,6 +109,7 @@ bool Token::isStatementStart() const {
         case TokenKind::If: case TokenKind::For:
         case TokenKind::Do: case TokenKind::While:
         case TokenKind::Select: case TokenKind::With:
+        case TokenKind::Asm:  // ai/vb-asm-extension-spec
         case TokenKind::Set: case TokenKind::Let:
         case TokenKind::Call: case TokenKind::GoTo:
         case TokenKind::GoSub: case TokenKind::Return:

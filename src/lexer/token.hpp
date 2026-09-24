@@ -103,6 +103,10 @@ enum class TokenKind : uint16_t {
     With,
     // 无End With, End With由End + With组合解析
 
+    // ai/vb-asm-extension-spec: Asm ... End Asm 内联汇编块 (tB 扩展)
+    // 用户侧语法学 FreeBASIC; 后端 x64 走 MASM 独立过程 (ml64)
+    Asm,
+
     // === 声明关键字 ===
     Dim,
     ReDim,

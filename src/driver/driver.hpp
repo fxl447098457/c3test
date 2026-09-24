@@ -7,16 +7,21 @@
 #include "semantics/type_system.hpp"
 #include "com/typelib_parser.hpp"
 #include "project/frm_parser.hpp"
+#include "driver/static_lib.hpp"    // ai/024: 静态库寻址 (LibSearchPaths)
+#include "backend/asm_proc.hpp"     // ai/vb-asm-extension-spec: Asm 过程降级元数据
 #include "semantics/generics_registry.hpp"
 #include "semantics/interfaces_registry.hpp"  // Interface 契约 (tB, B02)
 #include "semantics/coclass_identity.hpp"     // CoClass 身份求解 (tB, B11/C02)
 #include "semantics/class_chain_registry.hpp"  // 类继承链 (tB, B07)
 #include <array>
+#include <cctype>
+#include <filesystem>
 #include <string>
 #include <vector>
 #include <memory>
 #include <map>
 #include <unordered_map>
+#include "common/encoding.hpp"
 
 namespace vb6c3 {
 
@@ -81,6 +86,24 @@ struct CompileOptions {
     // 增量编译 (性能优化): 基于内容哈希的obj级缓存, 跳过未变化的.c编译
     bool incremental = false;
 
+    // 静态库搜索根 (ai/024 E2, 批次 T01): `--libdir <dir>` 可重复。
+    // 与 vbp 的 `LibDir=` 汇入同一张搜索根表; CLI 的项按 cwd 解析 (用户在命令行
+    // 亲手敲的路径), 工程内的相对路径一律以 vbp 目录为基准 —— 两条基准各自诚实。
+    std::vector<std::string> libDirs;
+
+    // 附加静态库 (ai/024 M4): `--extra-lib <x>` 可重复 —— 没有对应 Declare 的链接
+    // 依赖 (典型: 静态库之间互引)。寻址与静态 Declare 的 Lib 串完全同一条路。
+    std::vector<std::string> extraLibs;
+
+    // ai/023 S01: 包搜索根 (--package-root, 可重复)。
+    // 与 vbp 的 Package= 同族: 相对路径以【工程目录】为基准 (E2: 不引入 cwd)。
+    // 缺省根 <vbp目录>/packages 由 checkPackages 自动追加, 排在显式根之后。
+    std::vector<std::string> packageRoots;
+
+    // ai/023 S05: --check-packages 只读模式 —— 解析 Package= 引用、逐文件
+    // 校验 sha1/size, 打印结果后退出 (不编译)。用于 CI 里预检包完整性。
+    bool checkPackagesOnly = false;
+
     // 裁剪include (性能优化): 只include实际引用的外部模块, 降低cl预处理量
     bool trimIncludes = false;
 };
@@ -91,6 +114,13 @@ struct CompileResult {
     std::string outputFile;
     int errorCount = 0;
     int warningCount = 0;
+};
+
+// ai/vb-asm-extension-spec: 一个已发码的 Asm 过程 (过程体 = 单个 Asm 块)
+//   moduleBase = 所属模块产物基名 (与 .c 同名) —— 用于命名 <base>_asm.asm
+struct EmittedAsmProc {
+    std::string moduleBase;
+    AsmProcInfo info;
 };
 
 // 编译器驱动
@@ -151,6 +181,14 @@ private:
     // 同上, 挂 Driver 而非符号表; B07b 的成员合并是唯一消费者.
     ClassChainRegistry classes_;
     std::vector<std::string> classOrder_;  // 登记序, 保证诊断输出确定性
+    // ai/084a M1: 类成员访问级别预计算表 (小写类名 → 小写成员名 → 级别+定义类)。
+    // runSemanticAnalysis 入口处从 AST 声明建表, 之后只读, 经 setMemberAccessTable 下发。
+    // 不 visit 期查符号表的理由见 symbol_table.hpp MemberAccessTable 注释。
+    MemberAccessTable memberAccessTable_;
+    void buildMemberAccessTable();
+    // ai/084c: 类名(小写) → Class_Initialize 形参个数 (buildMemberAccessTable 顺带扫描,
+    // 经 setCtorParamCounts 下发; 表内缺席 = 非本工程类, New 带实参在语义层报错)。
+    std::map<std::string, int> ctorParamCounts_;
     // 已物化扁名 (fixpoint 去重; 值为 true 即"已注入为普通声明")
     std::unordered_map<std::string, bool> genericMaterialized_;
     // cap 护栏 (计划冻结版): 总量 ≤1024, 单名嵌套深度 ≤16
@@ -171,9 +209,36 @@ private:
     std::string projectBaseName_;
     std::string projectPath32_;    // P11.1: VBP Path32 field (output dir)
 
+    // 静态库寻址 (ai/024, 批次 T01) —— 阶段0 收集搜索根, 阶段2.x 校验 Declare 引用。
+    // 基准目录 = vbp 所在目录 (单文件模式 = 源文件所在目录); 绝不引入 cwd 基准。
+    LibSearchPaths staticLibPaths_;
+    // 已解析成功的静态库: 原始 Lib 串 → 绝对路径 (T02 发码时按此组装链接输入)
+    std::map<std::string, std::string> staticLibResolved_;
+    // 附加静态库的原始串 (vbp 的 ExtraLib= ++ CLI 的 --extra-lib), 按书写顺序。
+    // 与 Declare 的 Lib 串同一条寻址路径, 因此也共用同一批诊断。
+    std::vector<std::string> extraLibRaw_;
+    // ai/024 T02: ExtraLib 的链接输入, 与 extraLibRaw_ **同序**。元素可能是
+    //   绝对路径 (工程内找到) 或 裸名 (没找到但后缀是 .lib/.a → 放行给链接器,
+    //   靠 LIB 环境变量 / /LIBPATH 找)。driver_link.cpp 原样追加到链接命令行。
+    std::vector<std::string> extraLibResolved_;
+
+    // ai/024 E4 (批次 T04b): `Alias "_foo@12"` 逃生舱的 /alternatename 指令表。
+    // 发码侧对 '@' 只能清洗成 '_' (非合法 C 标识符), 修饰后的内部名与真实符号
+    // 对不上 → 链接命令行追加 /alternatename:<修饰内部名>=<真实符号> 桥接。
+    // 元素形如 "internal=real"; 由 driver_staticlib.cpp 的 alternatenameDirective()
+    // 生成 (发码侧 sanitizer 的镜像, 见该函数注释), driver_link.cpp 去重后交给
+    // MsvcDriverOptions::alternatenames。
+    std::vector<std::string> staticLibAlternatenames_;
+
     // Fix 142: VBP 的 Startup= 启动对象 ("Sub Main" 或窗体模块名).
     // 决定多模块工程中哪个模块生成进程入口点 (WinMain/main).
     std::string startupObject_;
+
+    // ai/vb-asm-extension-spec: Asm 块过程的降级元数据 (发码期收集, 链接近前消费)。
+    //   moduleBase = 该过程所属模块的产物基名 (与 .c 同名, 用于命名 <base>_asm.asm);
+    //   runCodeGeneration 逐模块从 CCodeGen::asmProcs() 回收, runLinker 生成 .asm
+    //   并调 ml64 → .obj → MsvcDriverOptions::extraObjects。
+    std::vector<EmittedAsmProc> asmProcs_;
 
     // Fix 143: vbp Object= 的 OCX 文件表 (CLSID 小写去花括号 → ocx 绝对路径).
     // 第三方 OCX 控件免注册加载用.
@@ -192,6 +257,42 @@ private:
     // Fix 160: ComLib= 组件表 {ProgID, CLSID, coclass名, 相对exe路径},
     // runTypeLibImport 收集, cgen 烘焙进产物入口点 (vb6_ComLibRegister).
     std::vector<std::array<std::string, 4>> comLibRefs_;
+
+    // === ai/023 S03: 包导出边界 ===
+    // S02 加载时 (driver_compile) 填充, S03 跨模块注入处 (driver_crossmod) 消费。
+    struct PackageExportInfo {
+        bool friendVisible = false;                  // 清单 [Export] Friend=True
+        std::map<std::string, bool> exportedModules; // 小写 Module/Class 名 (VB_Name)
+    };
+    std::map<std::string, PackageExportInfo> packageExportInfos_; // key: 小写包名
+    // 源文件 → 所属包 (key: normSourceKey(绝对路径); value: 小写包名)。
+    // frontend 建 Module 时回填 module->packageName。
+    std::map<std::string, std::string> packageOfFile_;
+    // ai/023 S03: 预计算的包内被屏蔽成员表 (小写包名 → 小写成员名 → 所在模块名)。
+    // driver_compile 在 S02 读包源码时用 extractProcDecls 扫描得到:
+    //   非导出模块的全部过程 / 导出模块的 Friend 过程 (清单 Friend=True 时豁免)。
+    // Private 过程本就不导出 (getPublicSymbols 过滤), 一并列进只为诊断完整。
+    // runSemanticAnalysis 按消费者的包归属下发给各分析器, visit 期查无此名时
+    // 命中即报 VB7006 —— 无实参裸调用不走 deferred 通路, 必须在 visit 期拦。
+    std::map<std::string, std::map<std::string, std::string>> packageBlockedNames_;
+
+    // ai/023 S04: 预计算的包内被屏蔽**类名**表 (小写包名 → 小写类名 → 类名)。
+    // 类不走 S03 的符号注入通路 —— 消费方 codegen 靠 lookupTypeSymbol 解析,
+    // 解析不到就**静默退化成后期绑定 COM** (`vb6_NewObject(L"HiddenCls")`)，
+    // 比 S03 的 LNK2019 更坏 (编译通过、运行期才炸)。故非导出类必须在语义层
+    // 硬拦: visit(NewExpr) 与类型引用 (Dim ... As Cls) 两处报 VB7006。
+    std::map<std::string, std::map<std::string, std::string>> packageBlockedClasses_;
+
+    // 源文件路径归一键: 弱规范化 + 小写 (Windows 同款)。S02 登记与 frontend
+    // 查询两侧共用, 保证同一文件必然命中同键。
+    static std::string normSourceKey(const std::string& utf8Path) {
+        std::error_code ec;
+        std::filesystem::path p = std::filesystem::weakly_canonical(utf8ToPath(utf8Path), ec);
+        if (ec || p.empty()) p = utf8ToPath(utf8Path).lexically_normal();
+        std::string s = pathToUtf8(p);
+        for (auto& c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        return s;
+    }
 
     // P23-05: VBP version info (for VS_VERSION_INFO resource)
     int verMajor_ = 1;
@@ -238,6 +339,9 @@ private:
     // 泛型推断 fixpoint (G3): 收请求→物化→增量分析→再跨模块, 至收敛
     bool runGenericsFixpoint();
     bool runCrossModuleResolution();  // 跨模块符号链接
+    // 静态库引用校验 (ai/024 批次 T01): 遍历全部 Declare, 对静态形态的 Lib 串做
+    // 寻址 + 后端格式匹配, 失败即报错。**本批次不发码** (T02 才接 codegen)。
+    bool validateStaticLibRefs(const CompileOptions& options);
     bool runCodeGeneration(const CompileOptions& options, const std::string& outputDir);
     void writeErrorLog(const std::string& logPath, const std::string& stage);
     bool runLinker(const CompileOptions& options, const std::string& outputDir, const std::string& intermediatesDir, SessionManager& session);

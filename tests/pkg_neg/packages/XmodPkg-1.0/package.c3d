@@ -1,0 +1,10 @@
+[C3Package]
+Format=1
+Name=XmodPkg
+Version=1.0
+
+[Files]
+XmodPkg.bas=a0602d59dcd69fe68db9688a24a2032ef8ec93ae,71
+
+[Export]
+Module=XmodPkg; Public

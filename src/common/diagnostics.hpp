@@ -57,6 +57,7 @@ enum class DiagnosticID : uint16_t {
     ParseUndeclaredLabel = 2010,
     ParseInvalidInterfaceMember = 2011,  // Interface 块内非法成员 (实现体/字段/可见性/事件)
     ParseUnknownAttribute = 2012,        // 无法识别的 [Xxx] 属性行
+    ParseAsmBlockMalformed = 2013,       // asm扩展: Asm 块形式非法 (非块形式 / 缺 End Asm)
 
     // 语义 (3xxx)
     SemUndeclaredIdentifier = 3001,
@@ -99,6 +100,11 @@ enum class DiagnosticID : uint16_t {
     SemCoClassEntryInvalid = 3031,      // 契约条目: 引用不存在的接口 / 条目重复 / [Default] 标了多条
     SemCoClassDuplicate = 3032,         // 块名撞车: 重复块名 / 撞模块名 / 撞接口名
     SemCoClassNotSupported = 3033,      // v1 边界: [Implementation] 不是类模块 / EXE 工程 ComCreatable(True)
+    // 084a/084c/asm 扩展 (合并期与 022 B09-B11 撞号, 顺延到 3034-3037)
+    SemPrivateOutsideClass = 3034,      // 084a: 类外经 obj./Me. 访问 Private 成员 (接收者不在定义类家族内)
+    SemCtorArityMismatch = 3035,        // 084c: New Cls(args) 实参个数与 Class_Initialize 形参不符
+    SemAsmArchUnsupported = 3036,       // asm扩展: Asm 块在 x86 目标下不支持 (v1 仅 x64, 走 MASM/ml64)
+    SemAsmMixedBody = 3037,             // asm扩展: x64 下 Asm 块必须独占过程体 (v1 不支持与 VB 语句混排)
 
     // 代码生成 (4xxx)
     CodeGenUnsupportedFeature = 4001,
@@ -109,10 +115,26 @@ enum class DiagnosticID : uint16_t {
     LinkUnresolvedExternal = 5001,
     LinkDuplicateSymbol = 5002,
     LinkMissingRTL = 5003,
+    // 静态库链接 (ai/024, 批次 T01). 文案一律 ASCII (沿用 022/023 纪律)。
+    LinkStaticLibPath = 5004,      // 静态库文件在全部搜索根下都找不到
+    LinkStaticLibFormat = 5005,    // 后端 × 归档格式不匹配 (MSVC 吃 .lib/.obj, MinGW 吃 .a/.o)
+    LinkStaticLibParam = 5006,     // 静态 Declare 的参数形态不受支持 (x86 ByVal Variant, §六-8)
+    LinkStaticLibAmbiguous = 5007, // 归档里多个符号与声明归一化后同名 (§五 L2)
+    LinkStaticLibSymbol = 5008,    // 声明算出的引用名与归档里唯一候选不一致 (§五 L2)
     // 预处理 (6xxx)
     PreprocUndefinedConstant = 6001,
     PreprocInvalidDirective = 6002,
     PreprocConstRedefinition = 6003,
+
+    // 工程引用/包 (ai/023 S01). 文案一律 ASCII (沿用 022/024 纪律)。
+    VbpPackageNotFound = 7001,    // 包目录或 package.c3d 在全部搜索根下找不到
+    VbpPackageEscape = 7002,      // 包名/版本含路径字符 (解析结果跳出搜索根)
+    VbpPackageFormat = 7003,      // 清单不合法 (未知段/键、Format≠1、缺必填)
+    VbpPackageConflict = 7004,    // 包名与宿主工程名冲突 (模块名冲突在 S03 符号层)
+    VbpPackageFileMissing = 7005, // 清单列的文件不存在 (警告, D7 校验不拒收; 哈希比对 S05)
+    VbpPackageNotExported = 7006, // 引用了包内未导出的成员 (Friend/Private 边界, ai/023 S03)
+    VbpPackageHashMismatch = 7007, // 包文件 sha1/size 与清单不符 (警告, D7 校验不拒收; ai/023 S05)
+    VbpPackageFriendMember = 7008, // 084a M3: 经 obj. 访问包导出类的 Friend 成员 (清单未开 Friend=True)
 };
 
 // 单条诊断信息

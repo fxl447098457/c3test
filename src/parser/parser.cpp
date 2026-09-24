@@ -194,6 +194,8 @@ bool Parser::isStatementStart() const {
         case TokenKind::While:
         case TokenKind::Select:
         case TokenKind::With:
+        // ai/vb-asm-extension-spec: Asm 块起始
+        case TokenKind::Asm:
         // 跳转
         case TokenKind::GoTo:
         case TokenKind::GoSub:
@@ -293,6 +295,14 @@ bool Parser::isDeclarationStart() const {
         case TokenKind::Global:
             return true;
         default:
+            // ai/024: `DeclareWide` (tB 兼容) —— 关键词表是精确匹配, "declarewide"
+            // 不命中 "declare", 所以它以 Identifier 形态出现。这里放行, 具体解析
+            // 交给 parseDeclaration() (与 `Declare` 共用 parseDeclareDecl)。
+            // 判定收得很紧 (必须整词等于 declarewide), 不影响其它标识符开头的行
+            // —— 那类行仍旧落回 "unexpected token at module level"。
+            if (cur_.kind == TokenKind::Identifier && toLower(cur_.text) == "declarewide") {
+                return true;
+            }
             return false;
     }
 }

@@ -1,0 +1,5 @@
+Type=Exe
+Name=PkgDimOnly
+Module=DimOnly; dimonly_host.bas
+Startup="Sub Main"
+Package=ClsNeg; 1.0

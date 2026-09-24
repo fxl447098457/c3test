@@ -1,4 +1,5 @@
 #include "driver/driver.hpp"
+#include "driver/driver_pack.hpp"
 #include "common/encoding.hpp"
 #include <string>
 #include <vector>
@@ -109,6 +110,21 @@ private:
 namespace {
 
 int runCompile(vb6c3::Driver& driver, int argc, char* argv[]) {
+    // ai/023 S06: --pack/--unpack 分发外壳。在进入编译管线前截获 ——
+    // 容器是纯分发形态, 编译器本体永不读它 (D5)。
+    for (int i = 1; i < argc; ++i) {
+        std::string a = argv[i] ? argv[i] : "";
+        if (a == "--pack" && i + 1 < argc) {
+            return vb6c3::runPackMode(argv[i + 1]);
+        }
+        if (a == "--unpack" && i + 1 < argc) {
+            std::string outDir;
+            for (int j = i + 2; j + 1 < argc; ++j) {
+                if (argv[j] && std::string(argv[j]) == "--output-dir") outDir = argv[j + 1];
+            }
+            return vb6c3::runUnpackMode(argv[i + 1], outDir);
+        }
+    }
     auto result = driver.compile(argc, argv);
 
     // success=false 且 errorCount=0 = 编译未成功却无错误计数 (如 GUI 工程链接未产出

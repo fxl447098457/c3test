@@ -1,0 +1,5 @@
+Type=Exe
+Name=PkgClsHost
+Module=ClsHost; cls_host.bas
+Startup="Sub Main"
+Package=ClsPkg; 1.0

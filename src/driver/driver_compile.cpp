@@ -5,11 +5,13 @@
 #include "driver/driver.hpp"
 #include "common/diagnostics.hpp"
 #include "common/encoding.hpp"
+#include "common/sha1.hpp"
 #include "common/source_manager.hpp"
 #include "ast/ast.hpp"
 #include "semantics/semantic_analyzer.hpp"
 #include "driver/rtl_embedded.hpp"
 #include "project/vbp_parser.hpp"
+#include "project/package_manifest.hpp"   // ai/023 S01: 包引用三条硬校验
 #include <iostream>
 #include <fstream>
 #include <filesystem>
@@ -107,6 +109,176 @@ CompileResult Driver::compile(const CompileOptions& options) {
             // Fix 142: 保存 Startup= 启动对象, 供代码生成阶段决定哪个模块生成入口点
             startupObject_ = project.startupObject;
 
+            // === 静态库搜索根 (ai/024 E2, 批次 T01) ===
+            // 基准 = vbp 所在目录 (绝不引入 cwd 基准)。搜索顺序:
+            //   vbp 的 LibDir= 各项 (按书写顺序, vbp 相对) → CLI --libdir 各项 → <vbp>/Lib
+            // 默认根排在最后, 保证"显式总赢过隐式"。
+            {
+                std::error_code ec;
+                std::filesystem::path vbpAbs = std::filesystem::absolute(utf8ToPath(srcFile), ec);
+                if (ec) vbpAbs = utf8ToPath(srcFile);
+                staticLibPaths_.setBaseDir(pathToUtf8(vbpAbs.parent_path()));
+                for (const auto& d : project.libDirs) {
+                    staticLibPaths_.addRoot(pathToUtf8(project.resolvePath(d)));
+                }
+                for (const auto& d : options.libDirs) {
+                    // CLI 给的目录: 与 LibDir= 同一基准 (工程目录)。全流程只有"工程目录"
+                    // 这一个基准, 命令行也不例外 —— 构建结果不该随 cwd 而变 (E2)。
+                    staticLibPaths_.addRoot(d);
+                }
+                staticLibPaths_.addDefaultRoot();
+                // 附加静态库 (M4): vbp 的 ExtraLib= 在前, CLI 的 --extra-lib 在后
+                for (const auto& x : project.extraLibs) extraLibRaw_.push_back(x);
+                for (const auto& x : options.extraLibs) extraLibRaw_.push_back(x);
+                if (options.verbose && !staticLibPaths_.roots().empty()) {
+                    std::cout << "C3: 静态库搜索根 (" << staticLibPaths_.roots().size() << "):";
+                    for (const auto& r : staticLibPaths_.roots()) std::cout << " " << r;
+                    std::cout << std::endl;
+                }
+            }
+
+
+            // === 包引用检查 (ai/023 S01: 三条硬校验; S02: 源码级加载) ===
+            //   逃逸/冲突 → error (退出码非零); 缺文件 → warning (D7 不拒收)。
+            std::vector<ResolvedPackage> resolvedPkgs;
+            checkPackages(project, options.packageRoots, *diag_, &resolvedPkgs);
+            if (diag_->hasErrors()) {
+                // 硬错误不进管线 (与 "vbp 无源文件" 同款早退); 诊断先落 stderr
+                std::cerr << diag_->toString();
+                result.errorCount = diag_->errorCount();
+                result.warningCount = diag_->warningCount();
+                return result;
+            }
+
+            // === S05: --check-packages 只读模式 ===
+            // 解析 + 逐文件 sha1/size 校验已完成 (警告也在上面 diag_ 里), 这里把
+            // 解析结果打印成人类可读清单后直接退出, 不进编译管线。供 CI 预检。
+            if (options.checkPackagesOnly) {
+                auto lowerOfCopy = [](std::string s) {
+                    for (char& c : s) c = static_cast<char>(::tolower(static_cast<unsigned char>(c)));
+                    return s;
+                };
+                if (resolvedPkgs.empty()) {
+                    std::cout << "C3: no package references in this project" << std::endl;
+                }
+                for (const auto& rp : resolvedPkgs) {
+                    std::cout << "C3: package " << rp.name << "-" << rp.version << " -> "
+                              << pathToUtf8(rp.dir) << std::endl;
+                    for (const auto& fe : rp.manifest.files) {
+                        std::cout << "    file " << fe.path;
+                        std::error_code fec;
+                        auto fp = rp.dir / utf8ToPath(fe.path);
+                        if (!std::filesystem::exists(fp, fec)) {
+                            std::cout << "  MISSING" << std::endl;
+                            continue;
+                        }
+                        std::string actual = sha1HexOfFile(pathToUtf8(fp));
+                        if (fe.sha1.empty()) {
+                            std::cout << "  (no hash in manifest)" << std::endl;
+                        } else if (lowerOfCopy(fe.sha1) == actual) {
+                            std::cout << "  sha1=OK" << std::endl;
+                        } else {
+                            std::cout << "  sha1=MISMATCH (actual " << actual << ")"
+                                      << std::endl;
+                        }
+                    }
+                }
+                result.success = true;   // 只读模式恒成功; 诊断 (警告) 照常打印
+                result.errorCount = diag_->errorCount();
+                result.warningCount = diag_->warningCount();
+                if (result.warningCount > 0) std::cerr << diag_->toString();
+                return result;
+            }
+
+            // === S02: 源码级加载 ===
+            // 把包内 .bas/.cls 追加进编译集 (v1 只允许标准模块与类模块, 023 八-5)。
+            // 模块名 = 源码头 `Attribute VB_Name`; 与宿主模块名冲突 → 硬错
+            // (023 六节第三条硬校验的 "已加载模块名" 部分)。
+            // S03: 同时登记 导出信息表 + 文件→包映射, 供 frontend 回填
+            // module->packageName 与跨模块注入处做导出过滤。
+            if (!resolvedPkgs.empty()) {
+                // 宿主已加载的模块名 (大小写不敏感, Windows 同款)
+                auto lowerOf = [](std::string s) {
+                    for (char& c : s) c = static_cast<char>(::tolower(static_cast<unsigned char>(c)));
+                    return s;
+                };
+                std::vector<std::string> hostModNames;
+                for (const auto& entry : project.sources) {
+                    if (!entry.moduleName.empty()) hostModNames.push_back(lowerOf(entry.moduleName));
+                }
+
+                for (const auto& rp : resolvedPkgs) {
+                    // 导出信息表 (key: 小写包名)
+                    auto& info = packageExportInfos_[lowerOf(rp.name)];
+                    info.friendVisible = rp.manifest.friendVisible;
+                    for (const auto& ex : rp.manifest.exports) {
+                        info.exportedModules[lowerOf(ex.name)] = true;
+                    }
+
+                    for (const auto& fe : rp.manifest.files) {
+                        // v1 边界: 只加载 .bas/.cls (023 八-5; .frm/.ctl 禁入包)
+                        bool isBas = fe.path.size() >= 4 && fe.path.compare(fe.path.size()-4, 4, ".bas") == 0;
+                        bool isCls = fe.path.size() >= 4 && fe.path.compare(fe.path.size()-4, 4, ".cls") == 0;
+                        if (!isBas && !isCls) continue;
+
+                        auto srcPath = rp.dir / utf8ToPath(fe.path);
+                        std::error_code sec;
+                        if (!std::filesystem::exists(srcPath, sec)) continue; // 已警告过 (D7)
+
+                        auto src = SourceBuffer::readAndConvertToUtf8(pathToUtf8(srcPath));
+                        std::string modName = extractVbModuleName(src.content);
+                        if (!modName.empty()) {
+                            std::string lowerName = lowerOf(modName);
+                            for (const auto& h : hostModNames) {
+                                if (h == lowerName) {
+                                    diag_->error(DiagnosticID::VbpPackageConflict, SourceLocation{},
+                                                 "package module name conflicts with host module: " +
+                                                 rp.name + "/" + modName);
+                                }
+                            }
+                            hostModNames.push_back(lowerName); // 包间也不得撞名
+                        }
+                        std::string srcUtf8 = pathToUtf8(srcPath);
+                        packageOfFile_[normSourceKey(srcUtf8)] = lowerOf(rp.name);
+                        // S03: 预计算本模块被包边界屏蔽的成员 (供 visit 期报 VB7006)
+                        {
+                            bool modExported =
+                                packageExportInfos_[lowerOf(rp.name)]
+                                    .exportedModules.count(lowerOf(modName)) > 0;
+                            bool friendOk = packageExportInfos_[lowerOf(rp.name)].friendVisible;
+                            auto& blocked = packageBlockedNames_[lowerOf(rp.name)];
+                            for (const auto& [acc, proc] : extractProcDecls(src.content)) {
+                                bool allowedProc =
+                                    modExported &&
+                                    (acc == "public" || (acc == "friend" && friendOk));
+                                if (!allowedProc) {
+                                    blocked[lowerOf(proc)] = modName;
+                                }
+                            }
+                            // S04: 类模块的**类名**同样受导出边界约束。
+                            // 类不走符号注入 (消费方 codegen 用 lookupTypeSymbol),
+                            // 拦不住就会静默退化成后期绑定 COM 调用 —— 编译通过、
+                            // 运行期才失败。非导出类在此进屏蔽表, 由语义层报 VB7006。
+                            if (isCls && !modName.empty() && !modExported) {
+                                packageBlockedClasses_[lowerOf(rp.name)][lowerOf(modName)] = modName;
+                            }
+                        }
+                        effectiveOpts.sourceFiles.push_back(srcUtf8);
+                        if (options.verbose) {
+                            std::cout << "C3: package " << rp.name << "-" << rp.version
+                                      << " source: " << fe.path
+                                      << (modName.empty() ? "" : " (module " + modName + ")")
+                                      << std::endl;
+                        }
+                    }
+                }
+                if (diag_->hasErrors()) {
+                    std::cerr << diag_->toString();
+                    result.errorCount = diag_->errorCount();
+                    result.warningCount = diag_->warningCount();
+                    return result;
+                }
+            }
 
             // P6.6: 从VBP工程类型推断是否为ActiveX DLL
             if (!effectiveOpts.isDll && project.projectType == VbpProjectType::ActiveXDLL) {
@@ -217,6 +389,27 @@ CompileResult Driver::compile(const CompileOptions& options) {
             if (!project.resFile.empty()) {
                 userResFile_ = pathToUtf8(project.resolvePath(project.resFile));
             }
+        }
+    }
+
+    // === 静态库搜索根 (单文件模式, 无 .vbp) ===
+    // 基准 = 第一个源文件所在目录 (E2: 绝不引入 cwd 基准)。多源文件直编时以首个为准,
+    // 这时用 --libdir 显式给根才是可靠做法。
+    if (staticLibPaths_.baseDir().empty() && !effectiveOpts.sourceFiles.empty()) {
+        std::error_code ec;
+        std::filesystem::path sp = std::filesystem::absolute(
+            utf8ToPath(effectiveOpts.sourceFiles[0]), ec);
+        if (ec) sp = utf8ToPath(effectiveOpts.sourceFiles[0]);
+        staticLibPaths_.setBaseDir(pathToUtf8(sp.parent_path()));
+        for (const auto& d : options.libDirs) {
+            staticLibPaths_.addRoot(d);
+        }
+        staticLibPaths_.addDefaultRoot();
+        for (const auto& x : options.extraLibs) extraLibRaw_.push_back(x);
+        if (options.verbose && !staticLibPaths_.roots().empty()) {
+            std::cout << "C3: 静态库搜索根 (" << staticLibPaths_.roots().size() << "):";
+            for (const auto& r : staticLibPaths_.roots()) std::cout << " " << r;
+            std::cout << std::endl;
         }
     }
 
@@ -349,6 +542,17 @@ CompileResult Driver::compile(const CompileOptions& options) {
     // 必须早于语义: 派生类的成员合并 (B07b) 要按链序读基类声明, 而每模块各一张符号表.
     // 工程里没有一条 Inherits 时本阶段直接早退, 不改任何生成物 (D24 护栏口径).
     if (!runClassChainPrepass()) {
+        std::cerr << diag_->toString();
+        result.errorCount = diag_->errorCount();
+        result.warningCount = diag_->warningCount();
+        return result;
+    }
+
+    // === 阶段2.9: 静态库引用校验 (ai/024, 批次 T01) — 只校验, 不发码 ===
+    // 遍历全部 Declare, 对静态形态的 Lib 串 (Lib "xxx.lib"/"xxx.obj") 做寻址 +
+    // 后端格式匹配 + 参数形态检查。工程里没有静态 Declare 时立即早退, 不改生成物
+    // (E3 护栏: 动态路径的字节输出必须与基线全同)。
+    if (!validateStaticLibRefs(effectiveOpts)) {
         std::cerr << diag_->toString();
         result.errorCount = diag_->errorCount();
         result.warningCount = diag_->warningCount();
@@ -508,6 +712,11 @@ CompileResult Driver::compile(const CompileOptions& options) {
         std::cout << "C3: [debug] intermediates kept at: " << intermediatesDir << std::endl;
     }
 
+    // 成功路径也要露出警告 (否则 ai/023 D7 "缺文件→警告不拒收" 这类诊断完全不可见;
+    // 只在 warningCount>0 时才打, 避免每次成功构建多打空行)
+    if (diag_->hasWarnings()) {
+        std::cerr << diag_->toString();
+    }
     result.success = true;
     result.outputFile = effectiveOpts.outputFile;
     result.errorCount = diag_->errorCount();

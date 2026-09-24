@@ -11,6 +11,7 @@
 #include "semantics/class_chain_registry.hpp"  // tB 类继承 (B07b)
 #include "common/diagnostics.hpp"
 #include <string>
+#include <map>
 #include <set>
 #include <utility>
 #include <vector>
@@ -141,6 +142,26 @@ public:
 
     // 泛型 (tB, G3): 模板登记表只读视图 (driver 在逐模块分析前注入).
     void setGenericRegistry(const GenRegistry* reg) { genReg_ = reg; }
+    // ai/023 S03: 包导出边界屏蔽表 (lowerName → 包名)。driver 在跨模块注入后、
+    // resolveDeferredCrossModuleOverloads 之前下发; 延后调用点命中即报 VB7006,
+    // 否则该名字只会是 stage-3 的 3001 警告 + cgen 期 C2xxx。
+    void setBlockedPackageNames(std::map<std::string, std::string> m) {
+        blockedPkgNames_ = std::move(m);
+    }
+    // ai/023 S03: 名字命中包屏蔽表 → 报 VB7006 并返回 true (调用点改走错误路径)。
+    bool reportIfPackageBlocked(const std::string& name, SourceLocation loc);
+    // ai/023 S04: 类名命中包屏蔽表 (非导出包类) → 报 VB7006 并返回 true。
+    // 同一类名可能被多处引用 (Dim/New/参数), 内部去重只报一次。
+    bool reportIfPackageClassBlocked(const std::string& name, SourceLocation loc);
+    void setBlockedPackageClasses(std::map<std::string, std::string> m) {
+        blockedPkgClasses_ = std::move(m);
+    }
+    // ai/084a M1: 类成员访问级别预计算表 (driver 建好, 只读下发; 见 symbol_table.hpp 注释)。
+    // M2 消费: visit(MemberAccessExpr) 解析出接收者类后, Private 成员越界 → 3028。
+    void setMemberAccessTable(const MemberAccessTable* t) { memberAccess_ = t; }
+    // ai/084c: 类名(小写) → Class_Initialize 形参个数 (无该过程记 0, 非工程类不在表内)。
+    // driver 从 AST 预计算下发 (visit 期查不到跨模块类符号, 同 memberAccess_ 的理由)。
+    void setCtorParamCounts(std::map<std::string, int> m) { ctorParams_ = std::move(m); }
     // Interface 契约 (tB, B02): stage 2.7 建好的只读登记表, 供 Implements 分叉判定.
     void setInterfaceRegistry(const IfaceRegistry* reg) { ifaceReg_ = reg; }
     // 委托式实现 (tB, B10): stage 2.7 Pass D 的裁决表; 命中的 (类, 接口) 对整份契约
@@ -261,6 +282,17 @@ private:
         SourceLocation loc;
     };
     std::vector<DeferredXmodCallSite> deferredXmodCalls_;
+    // ai/023 S03: 本模块被包导出边界屏蔽的名字 (lowerName → 包名), 见 setBlockedPackageNames
+    std::map<std::string, std::string> blockedPkgNames_;
+    // ai/023 S04: 非导出包类 (lowerClassName → 类名); 与 reportedBlockedClasses_
+    // 配合, 同一类名多处引用只报一次 VB7006。
+    std::map<std::string, std::string> blockedPkgClasses_;
+    std::set<std::string> reportedBlockedClasses_;
+    // ai/084a M1/M2: 成员访问级别表 + 接收者解析守卫 (见 symbol_table.hpp MemberAccessTable)
+    const MemberAccessTable* memberAccess_ = nullptr;
+    std::map<std::string, int> ctorParams_;  // ai/084c: 类名 → Class_Initialize 形参个数
+    // obj 为 Me / 类类型变量时解析出接收者类并裁决 Private 越界; 解析不出 → 静默放行 (v1)
+    void checkMemberAccessGuard(const Expr& obj, const std::string& memberName, SourceLocation loc);
     // 泛型 (tB, G3): 调用点推断 (从模板登记表 AST 形参 + 延后点实参类型绑定)
     const GenRegistry* genReg_ = nullptr;
     const IfaceRegistry* ifaceReg_ = nullptr;  // Interface 契约 (tB, B02)

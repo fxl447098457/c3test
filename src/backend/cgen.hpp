@@ -22,6 +22,7 @@
 #include "semantics/class_chain_registry.hpp"  // tB 类继承发码 (ai/022 B07b)
 #include "common/diagnostics.hpp"
 #include "project/frm_parser.hpp"
+#include "backend/asm_proc.hpp"  // ai/vb-asm-extension-spec: Asm 过程降级元数据
 #include <array>
 #include <string>
 #include <vector>

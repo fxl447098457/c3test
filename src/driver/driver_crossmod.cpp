@@ -100,6 +100,30 @@ bool Driver::runCrossModuleResolution() {
             // 跳过本模块导出的符号
             if (srcIdx == i) continue;
 
+            // === ai/023 S03: 包导出边界 ===
+            // 注入是跨模块符号可见的唯一通道, 在此过滤与 Private 的
+            // "不导出即不可见" 完全同构。规则:
+            //   - 源是包内模块且消费者不在同包 (宿主/另一包):
+            //     只放行【导出模块】的 Public 成员 (清单 Friend=True 时含 Friend);
+            //     非导出模块整模块不可见。
+            //   - 源是宿主模块: 恒放行 (包消费宿主不受限)。
+            //   - 同包模块之间: 恒放行 (Friend = 包内可见)。
+            if (!modules_[srcIdx]->packageName.empty() &&
+                modules_[srcIdx]->packageName != modules_[i]->packageName) {
+                const std::string& srcPkg = modules_[srcIdx]->packageName;
+                bool allowed = false;
+                auto pit = packageExportInfos_.find(srcPkg);
+                if (pit != packageExportInfos_.end() &&
+                    pit->second.exportedModules.count(Symbol::toLower(moduleBaseNames[srcIdx]))) {
+                    allowed = (srcSym->access == AccessLevel::Public) ||
+                              (pit->second.friendVisible &&
+                               srcSym->access == AccessLevel::Friend);
+                }
+                if (!allowed) {
+                    continue;
+                }
+            }
+
             // 检查本模块是否已有此符号的本地定义
             // Fix 010r-12: Property变体需按kind分别检查 (Get/Let/Set各自独立)
             Symbol* localSym = nullptr;

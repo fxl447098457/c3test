@@ -13,6 +13,8 @@
 #include <filesystem>
 #include <cstdlib>
 #include <algorithm>
+#include <cctype>
+#include <unordered_set>
 
 namespace vb6c3 {
 
@@ -49,6 +51,175 @@ static void addFormsSources(MsvcDriverOptions& opts, const std::string& rtlDir) 
     opts.sourceFiles.push_back(rtlDir + "/uc_propbag.c");
     // Fix 148: OCX 真宿主 (免注册 LoadLibrary + DllGetClassObject) —— NewTab 等第三方 32 位 OCX
     opts.sourceFiles.push_back(rtlDir + "/vb6forms_axcontainer.c");
+}
+
+// ============================================================
+// ai/vb-asm-extension-spec: Asm 过程 → MASM (.asm) → ml64 → .obj
+//   v1 (x64): 每个「函数体 = 单个 Asm 块」的过程降级为独立 MASM 过程。
+//   按名引用 `[param]` → Win64 ABI 寄存器 (RCX,RDX,R8,R9), `[Function]` → RAX;
+//   `'` 注释 → MASM `;`; `.name:` 局部标签 → `<proc>_<name>` (MASM 无 proc 局部标签,
+//   且一个 .asm 里多个 PROC 的裸标签会撞名)。
+// ============================================================
+
+static void toLowerAscii(std::string& s) {
+    for (auto& c : s) c = static_cast<char>(::tolower(static_cast<unsigned char>(c)));
+}
+
+// 把一个 Asm 过程写成 MASM PROC 体
+static void emitMasmProc(std::ostream& os, const AsmProcInfo& p) {
+    static const char* kReg64[4] = {"rcx", "rdx", "r8", "r9"};
+    static const char* kReg32[4] = {"ecx", "edx", "r8d", "r9d"};
+
+    // [name] → ABI 寄存器。32 位整型用低 32 位名 (int8/16/32, BOOL); 指针/64 位用整寄存器
+    // (ByRef 的 `T*` 即"变量即其地址", 要取值需再解引用一次 —— 见 spec §2.3)。
+    struct Sub { std::string token, repl; };
+    std::vector<Sub> subs;
+    for (size_t i = 0; i < p.params.size() && i < 4; i++) {
+        const std::string& ps = p.params[i];       // "CType name"
+        size_t sp = ps.find(' ');
+        if (sp == std::string::npos) continue;
+        std::string ctype = ps.substr(0, sp);
+        std::string name = ps.substr(sp + 1);
+        while (!name.empty() && name.back() == ' ') name.pop_back();
+        bool is32 = (ctype == "int32_t" || ctype == "int16_t" || ctype == "int8_t" ||
+                     ctype == "VBABOOL" || ctype == "unsigned");
+        subs.push_back({ "[" + name + "]", is32 ? kReg32[i] : kReg64[i] });
+    }
+    // `[Function]` 是返回值占位: 映射到 ABI 返回寄存器的**与返回类型同宽**的名字。
+    // 关键约束: MASM 不容许宽度不等的 mov (`mov rax, eax` = A2022), 而 VB 侧
+    // `Long` 返回就是"值在 EAX 里" —— 故 32 位返回用 eax, 64 位/指针用 rax。
+    // 于是 `mov [Function], eax` 退化成 `mov eax, eax` (自赋值, 发射时消掉)。
+    static const char* kRet32[] = {"int8_t", "int16_t", "int32_t", "VBABOOL", "unsigned"};
+    bool retIs32 = false;
+    for (const char* k : kRet32) if (p.retCType == k) retIs32 = true;
+    subs.push_back({ "[function]", retIs32 ? "eax" : "rax" });
+
+    // 第一遍: 收集 `.name:` 局部标签 (MASM 无 proc 局部标签; 多 PROC 同文件会撞名)
+    std::vector<std::string> labels;
+    for (auto& raw : p.lines) {
+        size_t i = 0;
+        while (i < raw.size() && (raw[i] == ' ' || raw[i] == '\t')) i++;
+        if (i >= raw.size() || raw[i] != '.') continue;
+        size_t j = i + 1;
+        while (j < raw.size() && (isalnum(static_cast<unsigned char>(raw[j])) || raw[j] == '_')) j++;
+        if (j > i + 1 && j < raw.size() && raw[j] == ':') labels.push_back(raw.substr(i + 1, j - i - 1));
+    }
+
+    os << p.cName << " PROC\n";
+    bool lastWasRet = false;
+    for (auto& raw : p.lines) {
+        std::string line = raw;
+        for (auto& ch : line) if (ch == '\'') ch = ';';   // VB/FB 风格注释 → MASM
+        // 括号内空白归一: `[ num ]` → `[num]` (后面才能做朴素 token 替换)
+        auto squeeze = [](std::string& s, const std::string& a, const std::string& b) {
+            size_t pos = 0;
+            while ((pos = s.find(a, pos)) != std::string::npos) { s.replace(pos, a.size(), b); }
+        };
+        squeeze(line, "[ ", "["); squeeze(line, " ]", "]");
+        squeeze(line, ",\t", ","); squeeze(line, "\t", " ");
+        // 局部标签重写: `.name` → `<proc>_<name>` (定义与 jmp/jne 引用同改)
+        for (auto& lb : labels) {
+            std::string from = "." + lb, to = p.cName + "_" + lb;
+            std::string lower = line; toLowerAscii(lower);
+            std::string fromLower = from; toLowerAscii(fromLower);
+            size_t pos = 0;
+            while ((pos = lower.find(fromLower, pos)) != std::string::npos) {
+                // 只替换标签 token 边界 (后随 非标识符字符)
+                size_t after = pos + fromLower.size();
+                if (after < lower.size() && (isalnum(static_cast<unsigned char>(lower[after])) || lower[after] == '_')) {
+                    pos = after; continue;
+                }
+                line.replace(pos, from.size(), to);
+                lower.replace(pos, from.size(), to);
+                pos += to.size();
+            }
+        }
+        // [param] / [Function] 替换 (大小写不敏感)
+        for (auto& s : subs) {
+            std::string tokenLower = s.token; toLowerAscii(tokenLower);
+            std::string lower = line; toLowerAscii(lower);
+            size_t pos = 0;
+            while ((pos = lower.find(tokenLower, pos)) != std::string::npos) {
+                line.replace(pos, s.token.size(), s.repl);
+                lower.replace(pos, s.token.size(), s.repl);
+                pos += s.repl.size();
+            }
+        }
+        // 自赋值消掉: `[Function]` 宽度映射后, `mov [Function], eax` 会变成
+        // `mov eax, eax` (值本来就在返回寄存器里) —— 换成注释, 免无谓指令。
+        {
+            std::string t = line; toLowerAscii(t);
+            size_t a = t.find_first_not_of(" \t");
+            if (a != std::string::npos && t.compare(a, 3, "mov") == 0) {
+                size_t c = t.find(',', a);
+                if (c != std::string::npos) {
+                    auto grab = [&](size_t b, size_t e) {
+                        while (b < e && (t[b] == ' ' || t[b] == '\t')) b++;
+                        while (e > b && (t[e-1] == ' ' || t[e-1] == '\t')) e--;
+                        return t.substr(b, e - b);
+                    };
+                    std::string dst = grab(a + 3, c);
+                    size_t semi = t.find(';', c + 1);
+                    std::string src = grab(c + 1, semi == std::string::npos ? t.size() : semi);
+                    if (!dst.empty() && dst == src)
+                        line = "; [Function] -> " + dst + " (值已在返回寄存器, 自赋值省略)";
+                }
+            }
+        }
+        os << "    " << line << "\n";
+        std::string tline = line; toLowerAscii(tline);
+        size_t s = tline.find_first_not_of(" \t");
+        lastWasRet = (s != std::string::npos && tline.compare(s, 3, "ret") == 0 &&
+                      (s + 3 >= tline.size() || tline[s + 3] == ' ' || tline[s + 3] == ';'));
+    }
+    if (!lastWasRet) os << "    ret\n";   // v1: 过程按叶函数处理, 编译器补返回
+    os << p.cName << " ENDP\n";
+}
+
+// driver_link.cpp 内的落盘 + 汇编 + 收集
+static bool assembleAsmProcs(const std::vector<EmittedAsmProc>& procs,
+                             const std::string& intermediatesDir, MsvcDriverOptions& msvcOpts,
+                             bool verbose) {
+    namespace fs = std::filesystem;
+    std::string ml64 = MsvcDriver::findMl64Exe();
+
+    // 按模块基名分组 → 一个模块一个 .asm (多 PROC 同文件)
+    std::vector<std::string> order;
+    std::map<std::string, std::vector<const AsmProcInfo*>> byBase;
+    for (auto& ep : procs) {
+        std::string key = ep.moduleBase;
+        if (byBase.find(key) == byBase.end()) order.push_back(key);
+        byBase[key].push_back(&ep.info);
+    }
+
+    for (auto& base : order) {
+        std::string asmPath = intermediatesDir + "/" + base + "_asm.asm";
+        std::string objPath = intermediatesDir + "/" + base + "_asm.obj";
+        {
+            std::ofstream ofs(asmPath, std::ios::out | std::ios::trunc);
+            if (!ofs) {
+                std::cerr << "C3: error: 无法写入汇编文件: " << asmPath << std::endl;
+                return false;
+            }
+            ofs << "; === C3 auto-generated (ai/vb-asm-extension-spec) ===\n";
+            ofs << "; Asm 块过程降级为独立 MASM 过程 (Win64 ABI)\n";
+            ofs << "_TEXT SEGMENT\n";
+            for (auto* p : byBase[base]) emitMasmProc(ofs, *p);
+            ofs << "_TEXT ENDS\n";
+            ofs << "END\n";
+        }
+        // ml64 /c /Fo <obj> <asm> —— 外层多包一层引号: executeCommand 走
+        // "cmd /c <cmd>", cmd 在 /c 后首字符是引号时会剥首尾各一个 (同 rc.exe 的先例)。
+        std::string args = "\"" + ml64 + "\" /nologo /c /Fo \"" + objPath + "\" \"" + asmPath + "\"";
+        if (verbose) std::cout << "C3: ml64: " << args << std::endl;
+        int ret = MsvcDriver::executeCommand("\"" + args + "\"");
+        if (ret != 0 || !fs::exists(utf8ToPath(objPath))) {
+            std::cerr << "C3: error: ml64 汇编失败 (" << asmPath << "), 退出码 " << ret << std::endl;
+            return false;
+        }
+        msvcOpts.extraObjects.push_back(objPath);
+    }
+    return true;
 }
 
 bool Driver::runLinker(const CompileOptions& options, const std::string& outputDir,
@@ -199,6 +370,49 @@ bool Driver::runLinker(const CompileOptions& options, const std::string& outputD
     msvcOpts.debugInfo = options.debugInfo;
     msvcOpts.optimizationLevel = options.optimizationLevel;
     msvcOpts.arch = options.arch;  // DualArch: pass target architecture
+
+    // === ai/024 T02: 用户静态库 → 链接输入 ===
+    // 两类来源合并:
+    //   A) Declare 的 `Lib "x.lib"` 静态形态 → staticLibResolved_ (T01 已解析, 全是绝对路径)
+    //   B) vbp `ExtraLib=` / CLI `--extra-lib` → extraLibResolved_ (绝对路径, 或"放行给
+    //      链接器"的裸名 —— 靠 LIB 环境变量与下面的 /LIBPATH 找)
+    // 发码侧对静态 Declare 只发 `extern <真实导出名>` 而**不发** `#pragma comment(lib,...)`
+    // (见 cgen_decl_api.cpp 的 isStaticDecl), 所以这两份清单就是静态库进入链接的**唯一**通路。
+    {
+        std::unordered_set<std::string> seen;
+        auto pushInput = [&](const std::string& p) {
+            if (p.empty()) return;
+            std::string key = p;
+            for (size_t i = 0; i < key.size(); i++) {
+                key[i] = static_cast<char>(::tolower(static_cast<unsigned char>(key[i])));
+            }
+            if (!seen.insert(key).second) return;
+            msvcOpts.userLibInputs.push_back(p);
+        };
+        for (const auto& kv : staticLibResolved_) pushInput(kv.second);
+        for (const auto& p : extraLibResolved_) pushInput(p);
+
+        // 搜索根 → /LIBPATH:, 顺序即静态库搜索顺序:
+        // vbp `LibDir=` → CLI `--libdir` → `<工程目录>/Lib` (显式总赢过隐式)。
+        for (const auto& r : staticLibPaths_.roots()) msvcOpts.libSearchPaths.push_back(r);
+
+        // ai/024 E4 (T04b): Alias "_foo@12" 逃生舱的 /alternatename 桥接指令。
+        // 同名 Declare 在多模块重复出现会生成重复指令 → 按整串去重 (符号名
+        // 大小写在链接器眼里有区分, 这里保序保原文)。
+        {
+            std::unordered_set<std::string> altSeen;
+            for (const auto& a : staticLibAlternatenames_) {
+                if (a.empty() || !altSeen.insert(a).second) continue;
+                msvcOpts.alternatenames.push_back(a);
+            }
+        }
+
+        if (options.verbose && (!msvcOpts.userLibInputs.empty() || !msvcOpts.libSearchPaths.empty())) {
+            std::cout << "C3: link inputs -- user libs (" << msvcOpts.userLibInputs.size() << "):";
+            for (const auto& l : msvcOpts.userLibInputs) std::cout << " " << l;
+            std::cout << std::endl;
+        }
+    }
 
     // opt3: 增量编译 — obj级缓存目录放在输出目录下, 跨运行持久
     msvcOpts.incremental = options.incremental;
@@ -417,6 +631,13 @@ bool Driver::runLinker(const CompileOptions& options, const std::string& outputD
         msvcOpts.userResFile = userResFile_;
         if (options.verbose) {
             std::cout << "C3: User resource file: " << userResFile_ << std::endl;
+        }
+    }
+
+    // ai/vb-asm-extension-spec: Asm 块过程 → .asm → ml64 → .obj → 链接输入
+    if (!asmProcs_.empty()) {
+        if (!assembleAsmProcs(asmProcs_, intermediatesDir, msvcOpts, options.verbose)) {
+            return false;
         }
     }
 

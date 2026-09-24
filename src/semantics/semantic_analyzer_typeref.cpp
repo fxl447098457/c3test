@@ -32,6 +32,9 @@ Vb6Type SemanticAnalyzer::resolveTypeRef(ASTNode* typeRef) {
     switch (typeRef->kind) {
         case ASTNodeKind::SimpleTypeRef: {
             auto& simple = static_cast<SimpleTypeRef&>(*typeRef);
+            // ai/023 S04: 非导出包类作类型名 (Dim x As HiddenCls / 参数 / 返回值)
+            // → VB7006。不拦的话类型退化成 Object/void*, 与后期绑定 COM 同一结局。
+            reportIfPackageClassBlocked(simple.name, typeRef->loc);
             Vb6Type t = typeSys_.resolveTypeName(simple.name);
             if (t == Vb6Type::Unknown) {
                 // Fix 069: "As Any" 是 VB6 Declare 语句中故意使用的基础类型,

@@ -444,3 +444,9 @@
     // 重载调用变体 (O2): IndexOrCallExpr 发射 callee ident 前置入的符号键后缀,
     // 由 ident 发射路径消费并清空 ("" = 裸键 head, 产出不受影响)
     std::string pendingCalleeOvl_;
+
+    // ai/vb-asm-extension-spec: Asm 块过程收集 + 目标架构
+    //   函数体 = 单个 AsmStmt 时, 不发 C 体, 改发 extern 原型并把元数据记在这里,
+    //   由 driver 生成独立 MASM 过程 (ml64) 参与链接。x86 下报 3030 (v1 仅 x64)。
+    std::vector<AsmProcInfo> asmProcs_;
+    std::string targetArch_ = "x64";

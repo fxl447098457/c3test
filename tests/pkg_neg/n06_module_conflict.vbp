@@ -1,0 +1,5 @@
+Type=Exe
+Name=PkgNeg06
+Module=XmodPkg; host_stub.bas
+Startup="Sub Main"
+Package=XmodPkg; 1.0

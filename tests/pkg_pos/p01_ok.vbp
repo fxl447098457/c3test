@@ -1,0 +1,6 @@
+Type=Exe
+Name=PkgHostP01
+Module=PkgHost; p01_host.bas
+Startup="Sub Main"
+ExeName32="p01_ok.exe"
+Package=DemoPkg; 1.0

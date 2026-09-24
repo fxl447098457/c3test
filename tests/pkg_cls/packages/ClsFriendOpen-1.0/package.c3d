@@ -1,0 +1,12 @@
+[C3Package]
+Format=1
+Name=ClsFriendOpen
+Version=1.0
+Desc=084a M3 friend fixture
+
+[Files]
+FrThing.cls=7e6b42121e56927b58b5afa1fb2ec2b7eeda792b,378
+
+[Export]
+Class=FrThing; Public
+Friend=True

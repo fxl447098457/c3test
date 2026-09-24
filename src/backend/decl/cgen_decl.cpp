@@ -33,6 +33,82 @@ void CCodeGen::clearProcArrayTracking() {
     knownNDArraysInProc_.clear();
 }
 
+// ============================================================
+// ai/vb-asm-extension-spec: Asm 块过程降级 (v1: x64 → MASM 独立过程)
+//   命中: 过程体恰好是 1 条 AsmStmt。
+//   x64: 不发 C 体, 只发 `extern` 原型 + 把元数据记进 asmProcs_
+//        (driver 侧生成 .asm, ml64 汇编后进链接)。
+//   x86: 报 3030 (v1 未支持 x86 内联汇编)。
+//   v1 边界 (spec §10): 整块独占过程体 / 非类方法 / 无 Optional/ParamArray /
+//   参数 ≤4 (Win64 寄存器传参上限) / 参数为整型或指针 (浮点 xmm 传参待 v2)。
+// ============================================================
+bool CCodeGen::tryEmitAsmProc(const std::string& procName, AccessLevel access,
+                              std::vector<std::unique_ptr<ParameterDecl>>& params,
+                              ASTNode* returnType, const StmtList& body, SourceLocation loc) {
+    AsmStmt* asmNode = nullptr;
+    for (auto& st : body) {
+        if (st && st->kind == ASTNodeKind::AsmStmt) {
+            if (!asmNode) asmNode = static_cast<AsmStmt*>(st.get());
+        }
+    }
+    if (!asmNode) return false;   // 与 Asm 无关的常规过程
+
+    auto fail = [&](DiagnosticID id, const std::string& msg) -> bool {
+        diag_.error(id, loc, msg);
+        return true;              // 已接管: 不再发 C 体 (编译已失败)
+    };
+
+    if (body.size() != 1)
+        return fail(DiagnosticID::SemAsmMixedBody,
+                    "Asm 块必须独占过程体 (v1 不支持与 VB 语句混排)");
+    if (targetArch_ == "x86")
+        return fail(DiagnosticID::SemAsmArchUnsupported,
+                    "Asm 块在 x86 目标下暂不支持 (v1 走 MASM/ml64, 请改用 --arch x64)");
+    if (isClassModule_)
+        return fail(DiagnosticID::SemAsmMixedBody, "类方法暂不支持 Asm 块 (v1 仅标准模块过程)");
+    if (params.size() > 4)
+        return fail(DiagnosticID::SemAsmMixedBody,
+                    "Asm 过程 v1 最多 4 个参数 (Win64 寄存器传参上限, 栈传参待 v2)");
+
+    for (auto& p : params) {
+        if (p->isOptional)   return fail(DiagnosticID::SemAsmMixedBody, "Asm 过程暂不支持 Optional 参数 (v1)");
+        if (p->isParamArray) return fail(DiagnosticID::SemAsmMixedBody, "Asm 过程暂不支持 ParamArray 参数 (v1)");
+    }
+
+    AsmProcInfo info;
+    info.cName = cProcName(procName, access, "");
+    info.retCType = returnType ? mapTypeRef(returnType) : "void";
+    for (auto& p : params) info.params.push_back(makeParamCType(p.get()));
+
+    // 参数类型白名单: 整型 / 任意指针 (含 ByRef 的 `T*`)。浮点与结构体按值 v1 不支持。
+    static const char* kIntTypes[] = {"int8_t", "int16_t", "int32_t", "int64_t", "intptr_t", "unsigned", "VBABOOL"};
+    for (auto& ps : info.params) {
+        std::string t = ps.substr(0, ps.find(' '));
+        bool ok = t.find('*') != std::string::npos;
+        for (const char* k : kIntTypes) if (t == k) ok = true;
+        if (!ok) return fail(DiagnosticID::SemAsmMixedBody,
+                             "Asm 过程参数暂只支持整型与指针 (v1): " + ps);
+    }
+
+    // 返回类型同理 (double/Single 走 xmm0, String 走 BSTR 约定, 均待 v2)
+    {
+        const std::string& rt = info.retCType;
+        bool ok = (rt == "void") || rt.find('*') != std::string::npos;
+        for (const char* k : kIntTypes) if (rt == k) ok = true;
+        if (!ok) return fail(DiagnosticID::SemAsmMixedBody,
+                             "Asm 过程返回类型暂只支持整型/指针/void (v1): " + rt);
+    }
+
+    info.lines = asmNode->lines;
+
+    std::string paramsC = makeParamList(params);
+    c_.emitLine("/* ai/vb-asm-extension-spec: 过程体为 Asm 块; 实现在 ml64 汇编的 "
+                + info.cName + " (见 .asm) */");
+    c_.emitLine("extern " + info.retCType + " " + info.cName + "(" + paramsC + ");");
+    asmProcs_.push_back(std::move(info));
+    return true;
+}
+
 std::string CCodeGen::makeProcSignature(SubDecl& node) {
     // 类模块方法始终带 vb6_<ClassName>_ 前缀 (与 dll_entry.c / resolveClassMemberCall 调用一致)
     // 重载组内按声明位置取本变体, 非 head 变体名带 _ov<fp> 后缀 (O2; 无重载时为空串)
@@ -70,7 +146,15 @@ std::string CCodeGen::makeProcSignature(FunctionDecl& node) {
 }
 
 // Fix 084k: 单个参数的C类型+名字, 与makeParamList逐参数逻辑完全一致
-std::string CCodeGen::makeParamCType(ParameterDecl* p, bool isDeclare) {
+//
+// ai/024 T02 `staticEntry`: 静态库 (归档) 直连路径专用。唯一差别是 `ByVal <x> As String`:
+//   动态路 (DLL 导入)   → `BSTR`  —— Fix 187 起调用点发的是 ANSI `char*`, 声明发 BSTR
+//                                    本来就不一致, 靠 MSVC 只报 C4047 容忍。
+//   静态路 (归档直连)   → `char*`  —— 没有转发桩做中间转换, `char*` 直接进真实函数,
+//                                    必须与调用点口径一致, 否则警告噪声 + 固化不一致。
+// 只改 ByVal String 这一种形态 (024 §五之三)。ByRef String 在静态路下仍是 `BSTR*`,
+// 语义未定义, 属 v1 文档化边界, 不在这里猜。
+std::string CCodeGen::makeParamCType(ParameterDecl* p, bool isDeclare, bool staticEntry) {
     // P14.1.5: ParamArray → SAFEARRAY* (always Variant array)
     if (p->isParamArray) {
         return "SAFEARRAY* " + cIdent(p->name);
@@ -108,6 +192,13 @@ std::string CCodeGen::makeParamCType(ParameterDecl* p, bool isDeclare) {
         }
     }
 
+    // ai/024 T02: 静态归档直连路径 —— ByVal String 声明为 char* (见函数头注释)。
+    // 放在这里而不是 mapTypeRef 里: mapTypeRef 是全局类型映射, 静态路只是"声明口径"
+    // 不同, 不该污染全局 (同样的理由: 调用点的 ANSI 编组仍由 knownDeclareAnsi_ 单点驱动)。
+    if (staticEntry && p->isByVal && cType == "BSTR") {
+        cType = "char*";
+    }
+
     // Fix 010r-6 rev2: ByRef array parameters need vb6_SafeArray1D** (double pointer)
     // so the callee can assign a new SafeArray (e.g. ReDim) and the caller sees it.
     // ByVal array params and As Any params stay as single pointer.
@@ -121,14 +212,15 @@ std::string CCodeGen::makeParamCType(ParameterDecl* p, bool isDeclare) {
     return cType + "* " + cName;
 }
 
-std::string CCodeGen::makeParamList(std::vector<std::unique_ptr<ParameterDecl>>& params, bool isDeclare) {
+std::string CCodeGen::makeParamList(std::vector<std::unique_ptr<ParameterDecl>>& params, bool isDeclare,
+                                    bool staticEntry) {
     if (params.empty()) return "void";
 
     std::string result;
     for (size_t i = 0; i < params.size(); i++) {
         if (i > 0) result += ", ";
         auto& p = params[i];
-        result += makeParamCType(p.get(), isDeclare);
+        result += makeParamCType(p.get(), isDeclare, staticEntry);
     }
     // P20-36: IsMissing support - append _has_ flags for Optional params
     // Fix 042c: Declare functions are __declspec(dllimport) — external DLL imports

@@ -21,6 +21,8 @@ StmtPtr Parser::parseStatement() {
         case TokenKind::While:    return parseWhileWendStmt();
         case TokenKind::Select:   return parseSelectCaseStmt();
         case TokenKind::With:     return parseWithStmt();
+        // ai/vb-asm-extension-spec: Asm ... End Asm 内联汇编块
+        case TokenKind::Asm:      return parseAsmStmt();
 
         // --- 跳转语句 ---
         case TokenKind::GoTo:     return parseGoToStmt();
@@ -356,6 +358,65 @@ StmtList Parser::parseBlockUntil(std::initializer_list<TokenKind> endKinds) {
     }
 
     return stmts;
+}
+
+// ============================================================
+// ai/vb-asm-extension-spec: Asm ... End Asm 原始块捕获
+//   块内行按**原始源码**直取 (buffer_->getLine), 不做 token 重组 ——
+//   保证 `dword ptr [x]` / `.label:` / `'` 注释 等原样交付给 MASM。
+//   token 流只用来找边界: 行首处出现 End + Asm。
+// ============================================================
+StmtPtr Parser::parseAsmStmt() {
+    auto loc = currentLoc();
+    Token asmTok = advance();   // consume 'Asm'
+
+    // v1: 仅支持块形式 —— Asm 后必须换行 (`Asm <指令>` 单行形式不支持)
+    if (!check(TokenKind::NewLine) && !check(TokenKind::EndOfFile)) {
+        diag_.error(DiagnosticID::ParseAsmBlockMalformed, loc,
+                    "Asm 块必须独占一行 (v1 不支持 `Asm <指令>` 单行形式)");
+    }
+
+    auto stmt = std::make_unique<AsmStmt>(loc);
+    const uint32_t startLine = asmTok.line;
+    uint32_t endLine = 0;
+
+    // 逐 token 前进, 直到「行首」出现 End + Asm (atLineStart 由消费 NewLine 置位)
+    bool atLineStart = true;
+    while (!check(TokenKind::EndOfFile)) {
+        Token t = peek();
+        if (t.kind == TokenKind::NewLine) { advance(); atLineStart = true; continue; }
+        if (atLineStart && t.kind == TokenKind::End) {
+            advance();                       // consume End
+            if (check(TokenKind::Asm)) {
+                advance();                   // consume Asm
+                endLine = t.line;
+                break;
+            }
+            atLineStart = false;             // End 是块内内容, 继续
+            continue;
+        }
+        atLineStart = false;
+        advance();
+    }
+
+    if (endLine == 0) {
+        diag_.error(DiagnosticID::ParseAsmBlockMalformed, loc, "Asm 块缺少 End Asm");
+        return stmt;
+    }
+
+    // 原始行切片: (startLine, endLine) 开区间
+    //   getLine() 返回的行含行尾换行 (含 CRLF 的 \r), 必须剥掉 —— 否则发射端
+    //   再加一个 \n 会凭空多出空行 (实测 ml64 对空行无害, 但输出不可读)。
+    if (buffer_) {
+        for (uint32_t ln = startLine + 1; ln < endLine; ln++) {
+            std::string line(buffer_->getLine(ln));
+            while (!line.empty() && (line.back() == '\n' || line.back() == '\r')) line.pop_back();
+            stmt->lines.push_back(line);
+        }
+    }
+    // 注意: 不要把 `End Asm` 行尾的 NewLine 吃掉 —— 语句边界由外层
+    // parseBlock 的 expectEndOfStatement() 统一消费 (同其它语句)。
+    return stmt;
 }
 
 } // namespace vb6c3

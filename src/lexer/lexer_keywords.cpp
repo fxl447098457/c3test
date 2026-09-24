@@ -23,6 +23,8 @@ void Lexer::initKeywords() {
         {"is", TokenKind::IsKeyword},
 
         {"with", TokenKind::With},
+        // ai/vb-asm-extension-spec: Asm 块起始 (End Asm 由 End + Asm 组合解析)
+        {"asm", TokenKind::Asm},
 
         {"dim", TokenKind::Dim}, {"redim", TokenKind::ReDim},
         {"preserve", TokenKind::Preserve},

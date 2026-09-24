@@ -1,0 +1,5 @@
+Type=Exe
+Name=FrBad
+Module=FrBadHost; cls_friend_bad_host.bas
+Package=ClsFriend; 1.0
+Startup="Sub Main"

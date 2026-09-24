@@ -54,6 +54,21 @@ std::pair<CompileOptions, int> Driver::parseArgs(int argc, char* argv[]) {
         else if (arg == "--gui" && i + 1 < argc) {
             opts.guiMode = argv[++i];
         }
+        else if (arg == "--libdir" && i + 1 < argc) {
+            // ai/024 E2: 静态库搜索根, 可重复; 顺序即搜索顺序 (在 vbp 的 LibDir= 之后)
+            opts.libDirs.push_back(argv[++i]);
+        }
+        else if (arg == "--extra-lib" && i + 1 < argc) {
+            // ai/024 M4: 附加静态库 (无对应 Declare 的链接依赖), 可重复
+            opts.extraLibs.push_back(argv[++i]);
+        }
+        else if (arg == "--package-root" && i + 1 < argc) {
+            // ai/023 S01: 包搜索根, 可重复; 缺省根 <工程目录>/packages 排最后
+            opts.packageRoots.push_back(argv[++i]);
+        }
+        else if (arg == "--check-packages") {
+            opts.checkPackagesOnly = true;  // ai/023 S05: 只读校验包引用后退出
+        }
         else if (arg == "--dump-tokens") {
             opts.dumpTokens = true;
         }
@@ -197,7 +212,7 @@ void Driver::printHelp() {
               << "  --dump-preprocess  输出预处理后的源码\n"
               << "  --dump-ir          输出中间表示\n"
               << "  --dump-frm         输出.frm窗体描述\n"
-              << "  --emit-c           生成C代码 (输出到 --output-dir)\n"
+              << "  --emit-c           生成C代码 (写中间目录 + dump 到 stdout, 不进 --output-dir)\n"
               << "  --emit-llvm        生成LLVM IR\n"
               << "  --keep-for-debug   保留中间文件便于调试\n"
               << "  --compat-check     兼容性检查模式\n"
@@ -212,6 +227,18 @@ void Driver::printHelp() {
               << "  --incremental       增量编译 (obj级缓存, 跳过未变化的.c)\n"
               << "  --trim-includes     裁剪未实际引用的跨模块include\n"
               << "  --no-warn <ID列表>   抑制指定ID的警告 (逗号分隔, 如 3001,3003)\n"
+              << "\n"
+              << "静态库选项 (Lib \"xxx.lib\" / \"xxx.obj\"):\n"
+              << "  --libdir <目录>     静态库搜索根 (可重复, 按给定顺序查找)\n"
+              << "                      裸文件名在此列表 + vbp 的 LibDir= + <工程目录>/Lib 中查找\n"
+              << "  --extra-lib <库>    附加静态库 (.lib/.obj), 可重复 —— 用于没有对应\n"
+              << "                      Declare 的链接依赖 (如静态库之间互引)\n"
+              << "\n"
+              << "包/工程引用选项 (vbp 的 Package=, ai/023):\n"
+              << "  --package-root <目录>  包搜索根 (可重复); 缺省 <工程目录>/packages\n"
+              << "  --check-packages    只读校验包引用 (寻址+sha1/size), 打印后退出\n"
+              << "  --pack <目录>       把含 package.c3d 的目录打成 <Name>-<Version>.c3pkg\n"
+              << "  --unpack <容器> [--output-dir <目录>]  释放 .c3pkg 容器\n"
               << "\n"
               << "示例:\n"
               << "  C3 hello.bas -o hello.exe\n"

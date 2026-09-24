@@ -54,6 +54,7 @@ class OnGoSubStmt;
 class MidStmt;
 class ExitStmt;
 class StopStmt;
+class AsmStmt;   // ai/vb-asm-extension-spec: Asm 块
 class EndStmt;
 class CallStmt;
 class ReDimStmt;

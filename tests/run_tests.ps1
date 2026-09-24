@@ -743,6 +743,117 @@ function Test-Syntax {
     }
 }
 
+# ai/023 S01: vbp-level negative case. The package hard checks run in driver stage 0
+# (before the pipeline), so --syntax-only is enough: compile must FAIL and the output
+# must contain the given ASCII needle.
+function Test-VbpFail {
+    param([string]$Name, [string]$VbpFile, [string]$Needle)
+    $script:total++
+    Write-Host -NoNewline "  [VBP-FAIL] $Name ... "
+    $result = & cmd /c ('"' + $C3 + '" "' + $VbpFile + '" --syntax-only 2>&1')
+    $text = (($result | Out-String) -replace '\s+', ' ')
+    if ($LASTEXITCODE -ne 0 -and $text.Contains($Needle)) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        Write-Host "  expected failing compile containing: $Needle" -ForegroundColor DarkGray
+        if ($Verbose) { Write-Host $text }
+    }
+}
+
+# ai/023 S03: vbp-level negative case that only surfaces in the FULL pipeline
+# (package export boundary fires at visit time / stage 3.5, not syntax-only).
+function Test-VbpBuildFail {
+    param([string]$Name, [string]$VbpFile, [string]$Needle)
+    $script:total++
+    Write-Host -NoNewline "  [VBP-BUILD-FAIL] $Name ... "
+    $result = & cmd /c ('"' + $C3 + '" "' + $VbpFile + '" --output-dir "' + $OutDir + '" 2>&1')
+    $text = (($result | Out-String) -replace '\s+', ' ')
+    if ($LASTEXITCODE -ne 0 -and $text.Contains($Needle)) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        Write-Host "  expected failing build containing: $Needle" -ForegroundColor DarkGray
+        if ($Verbose) { Write-Host $text }
+    }
+}
+
+# ai/023 S05: build must SUCCEED but emit the given warning text (D7: 校验不拒收,
+# 警告必须可见 —— 成功路径吞警告的坑在 S01 已修, 本用例防回归).
+function Test-VbpWarn {
+    param([string]$Name, [string]$VbpFile, [string]$Needle)
+    $script:total++
+    Write-Host -NoNewline "  [VBP-WARN] $Name ... "
+    $result = & cmd /c ('"' + $C3 + '" "' + $VbpFile + '" --output-dir "' + $OutDir + '" 2>&1')
+    $text = (($result | Out-String) -replace '\s+', ' ')
+    if ($LASTEXITCODE -eq 0 -and $text.Contains($Needle)) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        Write-Host "  expected successful build containing: $Needle" -ForegroundColor DarkGray
+        if ($Verbose) { Write-Host $text }
+    }
+}
+
+# ai/023 S05/S06: generic CLI check — exit 0 and output contains needle.
+function Test-CliOk {
+    param([string]$Name, [string[]]$C3Args, [string]$Needle)
+    $script:total++
+    Write-Host -NoNewline "  [CLI] $Name ... "
+    $result = & cmd /c (('"' + $C3 + '" ' + ($C3Args -join ' ') + ' 2>&1'))
+    $text = (($result | Out-String) -replace '\s+', ' ')
+    if ($LASTEXITCODE -eq 0 -and $text.Contains($Needle)) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        Write-Host "  expected exit 0 containing: $Needle" -ForegroundColor DarkGray
+        if ($Verbose) { Write-Host $text }
+    }
+}
+
+# ai/023 S06: pack -> unpack -> every file byte-identical (acceptance: 逐文件 cmp).
+function Test-PackRoundtrip {
+    param([string]$Name, [string]$PkgDir)
+    $script:total++
+    Write-Host -NoNewline "  [PACK-RT] $Name ... "
+    $tmp = Join-Path $OutDir ("packrt_" + [guid]::NewGuid().ToString("N").Substring(0,8))
+    try {
+        New-Item -ItemType Directory -Path $tmp | Out-Null
+        Copy-Item -Recurse -Path "$PkgDir\*" -Destination $tmp
+        & cmd /c (('"' + $C3 + '" --pack "' + $tmp + '" 2>&1')) | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "pack failed" }
+        $pkgFile = Get-ChildItem -Path $tmp -Filter "*.c3pkg" | Select-Object -First 1
+        if (-not $pkgFile) { throw "no .c3pkg produced" }
+        $outDir = Join-Path $tmp "unpacked"
+        & cmd /c (('"' + $C3 + '" --unpack "' + $pkgFile.FullName + '" --output-dir "' + $outDir + '" 2>&1')) | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "unpack failed" }
+        foreach ($f in (Get-ChildItem -Path $PkgDir -File)) {
+            if ($f.Extension -eq ".c3pkg") { continue }
+            $srcHash = (Get-FileHash -Algorithm SHA1 $f.FullName).Hash
+            $dst = Join-Path $outDir $f.Name
+            if (-not (Test-Path $dst)) { throw "missing after unpack: $($f.Name)" }
+            $dstHash = (Get-FileHash -Algorithm SHA1 $dst).Hash
+            if ($srcHash -ne $dstHash) { throw "content differs: $($f.Name)" }
+        }
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } catch {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        Write-Host "  $($_.Exception.Message)" -ForegroundColor DarkGray
+    } finally {
+        if (Test-Path $tmp) { Remove-Item -Recurse -Force $tmp }
+    }
+}
+
 # =============================================
 # 语法检查: 用 -syntax-only 验证源码合法性; 未生成目标时仍计为通过
 # =============================================
@@ -1255,6 +1366,157 @@ if ($Category -in @("all", "syntax")) {
         if (Test-Path $path) {
             $name = [System.IO.Path]::GetFileNameWithoutExtension($t)
             Test-Syntax $name $path
+        }
+    }
+    Write-Host ""
+}
+
+# ai/023 S01: package/project-reference hard checks (diagnostics only, no codegen).
+# Negatives ride --syntax-only (stage-0 checks fire before the pipeline); positives
+# build+run the host to prove the checks don't break a normal build (D7: warnings
+# never reject a build).
+if ($Category -in @("all", "pkg")) {
+    Write-Host "--- Package Reference Tests (ai/023 S01) ---" -ForegroundColor Yellow
+    Test-VbpFail "pkg_n01_not_found"    "$Tests\pkg_neg\n01_not_found.vbp"    "package not found in any search root"
+    Test-VbpFail "pkg_n02_escape_name"  "$Tests\pkg_neg\n02_escape_name.vbp"  "package name contains path characters"
+    Test-VbpFail "pkg_n03_conflict"     "$Tests\pkg_neg\n03_conflict.vbp"     "package name conflicts with project name"
+    Test-VbpFail "pkg_n04_bad_manifest" "$Tests\pkg_neg\n04_bad_manifest.vbp" "unknown key in [C3Package]"
+    Test-VbpFail "pkg_n05_name_mismatch" "$Tests\pkg_neg\n05_name_mismatch.vbp" "manifest Name mismatch"
+    # ai/023 S02: package source loading — a package module may not collide with a
+    # host module name (checked at load time, before the pipeline).
+    Test-VbpFail "pkg_n06_module_conflict" "$Tests\pkg_neg\n06_module_conflict.vbp" "package module name conflicts with host module"
+    if (Test-Path "$Tests\pkg_pos\p01_ok.vbp") {
+        Test-Vbp "pkg_p01_ok" "$Tests\pkg_pos\p01_ok.vbp" @("PKG-S01:OK")
+    }
+    if (Test-Path "$Tests\pkg_pos\p02_missing_file_warn.vbp") {
+        Test-Vbp "pkg_p02_missing_file_warn" "$Tests\pkg_pos\p02_missing_file_warn.vbp" @("PKG-S01:OK")
+    }
+    # ai/023 S02: host calls a package Function and Property Get across modules.
+    if (Test-Path "$Tests\pkg_xmod\pkg_xmod_ok.vbp") {
+        Test-Vbp "pkg_s02_xmod" "$Tests\pkg_xmod\pkg_xmod_ok.vbp" @("PKG-XMOD:42", "PKG-XMOD:XM")
+    }
+    # ai/023 S03: package export boundary — Friend member invisible to host (VB7006),
+    # visible again with manifest Friend=True.
+    if (Test-Path "$Tests\pkg_xmod\friend_bad.vbp") {
+        Test-VbpBuildFail "pkg_s03_friend_blocked" "$Tests\pkg_xmod\friend_bad.vbp" "is not exported by package"
+    }
+    if (Test-Path "$Tests\pkg_xmod\friend_open_ok.vbp") {
+        Test-Vbp "pkg_s03_friend_open" "$Tests\pkg_xmod\friend_open_ok.vbp" @("PKG-FRIEND-OK")
+    }
+    # ai/023 S04: class modules across the package boundary. An exported class binds
+    # statically (PKG-C1 = New + method + property); a class the manifest does not
+    # export must be a hard VB7006 error, not a silent late-bound COM fallback
+    # (codegen emits vb6_NewObject(L"Cls") when the class symbol is missing).
+    if (Test-Path "$Tests\pkg_cls\cls_ok.vbp") {
+        Test-Vbp "pkg_s04_cls_ok" "$Tests\pkg_cls\cls_ok.vbp" @("PKG-C1:42")
+    }
+    if (Test-Path "$Tests\pkg_cls\cls_neg.vbp") {
+        Test-VbpBuildFail "pkg_s04_cls_blocked" "$Tests\pkg_cls\cls_neg.vbp" "does not export it"
+    }
+    if (Test-Path "$Tests\pkg_cls\dimonly.vbp") {
+        # `Dim x As Cls` alone (no New) must also be rejected — otherwise the type
+        # silently degrades to Object/void*.
+        Test-VbpBuildFail "pkg_s04_cls_dim_only" "$Tests\pkg_cls\dimonly.vbp" "does not export it"
+    }
+    # ai/084a M3: member-level Friend boundary on exported package classes —
+    # obj.<Friend member> from the host is a hard 7008 unless the manifest
+    # declares Friend=True (same-package / package-to-package stay unrestricted).
+    if (Test-Path "$Tests\pkg_cls\cls_friend_obj_bad.vbp") {
+        Test-VbpBuildFail "acc_m3_pkg_friend_obj_blocked" "$Tests\pkg_cls\cls_friend_obj_bad.vbp" "Friend"
+    }
+    if (Test-Path "$Tests\pkg_cls\cls_friend_obj_open_ok.vbp") {
+        Test-Vbp "acc_m3_pkg_friend_obj_open" "$Tests\pkg_cls\cls_friend_obj_open_ok.vbp" @("FR-OPEN:12")
+    }
+    if (Test-Path "$Tests\pkg_cls\samepkg_ok.vbp") {        # Same-package module uses the non-exported class: must NOT be blocked.
+        Test-Vbp "pkg_s04_cls_same_package" "$Tests\pkg_cls\samepkg_ok.vbp" @("PKG-C3:OK")
+    }
+    # ai/023 S05: per-file sha1/size verification. Clean package = no warning;
+    # tampered byte = warning VB7007 and build CONTINUES (D7 校验不拒收);
+    # --check-packages prints resolution read-only (OK / MISMATCH) and exits.
+    if (Test-Path "$Tests\pkg_chk\chk_ok.vbp") {
+        Test-Vbp "pkg_s05_chk_ok" "$Tests\pkg_chk\chk_ok.vbp" @("PKG-S05:55")
+        Test-CliOk "pkg_s05_check_packages_ok" @('"' + "$Tests\pkg_chk\chk_ok.vbp" + '"', "--check-packages") "sha1=OK"
+    }
+    if (Test-Path "$Tests\pkg_chk\tamper.vbp") {
+        Test-VbpWarn "pkg_s05_tamper_warn_builds" "$Tests\pkg_chk\tamper.vbp" "hash mismatch"
+        Test-CliOk "pkg_s05_check_packages_tampered" @('"' + "$Tests\pkg_chk\tamper.vbp" + '"', "--check-packages") "sha1=MISMATCH"
+    }
+    # ai/023 S06: pack -> unpack roundtrip must be byte-identical.
+    if (Test-Path "$Tests\pkg_chk\packages\ChkPkg-1.0\package.c3d") {
+        Test-PackRoundtrip "pkg_s06_pack_roundtrip" "$Tests\pkg_chk\packages\ChkPkg-1.0"
+    }
+    Write-Host ""
+}
+
+# ai/084a M1/M2: class member access levels. Positives prove same-class (Me. /
+# other instance), Friend-same-project and inherited-Private-field access stay
+# legal; the negative proves Private proc access from outside the class is a
+# hard 3028 (previously a silent C2129 at MSVC stage).
+if ($Category -in @("all", "acc")) {
+    Write-Host "--- Member Access Level Tests (ai/084a M1/M2) ---" -ForegroundColor Yellow
+    if (Test-Path "$Tests\acc\acc_ok.vbp") {
+        Test-Vbp "acc_m2_ok" "$Tests\acc\acc_ok.vbp" @("ACC-USE:6", "ACC-OK")
+    }
+    if (Test-Path "$Tests\acc\acc_fam.vbp") {
+        Test-Vbp "acc_m2_family_field" "$Tests\acc\acc_fam.vbp" @("ACC-FAM:3")
+    }
+    if (Test-Path "$Tests\acc\acc_neg.vbp") {
+        Test-VbpBuildFail "acc_m2_private_blocked" "$Tests\acc\acc_neg.vbp" "Private"
+    }
+    # ai/084a: Protected — family-internal access (Me. and obj.) stays legal, a
+    # stranger reaching a Protected member is a hard 3023 (placeholder now landed).
+    if (Test-Path "$Tests\acc\acc_prot_ok.vbp") {
+        Test-Vbp "acc_prot_family_ok" "$Tests\acc\acc_prot_ok.vbp" @("PROT:fam")
+    }
+    if (Test-Path "$Tests\acc\acc_prot_neg.vbp") {
+        Test-VbpBuildFail "acc_prot_stranger_blocked" "$Tests\acc\acc_prot_neg.vbp" "Protected"
+    }
+    Write-Host ""
+}
+
+# =============================================
+# ctor: ai/084c 类构造函数 — 带参 (New Cls(args) → _NewParams) 与无参 (Class_Initialize)
+# =============================================
+if ($Category -in @("all", "ctor")) {
+    Write-Host "--- ctor (ai/084c class constructors) ---" -ForegroundColor Yellow
+    if (Test-Path "$Tests\ctor\ctor_ok.vbp") {
+        Test-Vbp "ctor_ok" "$Tests\ctor\ctor_ok.vbp" @("amt:42", "CNT:7")
+    }
+    if (Test-Path "$Tests\ctor\ctor_neg.vbp") {
+        Test-VbpBuildFail "ctor_neg_arity" "$Tests\ctor\ctor_neg.vbp" "3035"
+    }
+    if (Test-Path "$Tests\ctor\ctor_neg2.vbp") {
+        Test-VbpBuildFail "ctor_neg2_no_params" "$Tests\ctor\ctor_neg2.vbp" "3035"
+    }
+    Write-Host ""
+}
+
+# =============================================
+# asm: ai/vb-asm-extension-spec — Asm 块最小闭环 (v1 x64 → .asm → ml64 → 链接)
+# 正例跑通 AddFive/AtomicAdd; 负例覆盖 3037 (混排) 与 3036 (x86 目标)
+# =============================================
+if ($Category -in @("all", "asm")) {
+    Write-Host "--- Asm Block Tests (ai/vb-asm-extension-spec) ---" -ForegroundColor Yellow
+    if (Test-Path "$Tests\asm\asm_ok.vbp") {
+        Test-Vbp "asm_ok" "$Tests\asm\asm_ok.vbp" @("ASM-ADD:42", "ASM-ATOMIC-OLD:10", "ASM-ATOMIC-NEW:15", "ASM-DONE")
+    }
+    if (Test-Path "$Tests\asm\asm_neg.vbp") {
+        Test-VbpBuildFail "asm_neg_mixed_body" "$Tests\asm\asm_neg.vbp" "3037"
+    }
+    if (Test-Path "$Tests\asm\asm_x86_neg.vbp") {
+        # x86 负例需要额外 --arch x86, Test-VbpBuildFail 不带自定义参数, 就地内联同款判据
+        $script:total++
+        Write-Host -NoNewline "  [VBP-BUILD-FAIL] asm_x86_neg ... "
+        $result = & cmd /c ('"' + $C3 + '" "' + "$Tests\asm\asm_x86_neg.vbp" + '" --arch x86 --output-dir "' + $OutDir + '" 2>&1')
+        $text = (($result | Out-String) -replace '\s+', ' ')
+        if ($LASTEXITCODE -ne 0 -and $text.Contains("3036")) {
+            $script:pass++
+            Write-Host "PASS" -ForegroundColor Green
+        } else {
+            $script:fail++
+            Write-Host "FAIL" -ForegroundColor Red
+            Write-Host "  expected failing build containing: 3036" -ForegroundColor DarkGray
+            if ($Verbose) { Write-Host $text }
         }
     }
     Write-Host ""

@@ -1,0 +1,11 @@
+[C3Package]
+Format=1
+Name=GapPkg
+Version=1.0
+Desc=manifest lists a missing file (warning only)
+
+[Files]
+Ghost.bas=2222222222222222222222222222222222222222,100
+
+[Export]
+Module=DemoPkg; Public

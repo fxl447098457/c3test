@@ -1,0 +1,6 @@
+Type=Exe
+Name=AccFam
+Module=AccFamMain; acc_fam_main.bas
+Class=AccBase; AccBase.cls
+Class=AccDerived; AccDerived.cls
+Startup="Sub Main"
