@@ -77,6 +77,7 @@
 
     // 6.5 Inherits (tB B07b): 祖先成员的转发桩声明 → .h (接口宿主无继承, 与 currentClassIsInterface 互斥)
     if (isClassModule_ && !currentClassIsInterface) emitInheritedProcDecls(module);
+    if (!currentClassIsInterface) emitChainInitDecl(module);  // tB Inherits B09: 构造链入口
     for (auto& decl : module.declarations) {
         if (currentClassIsInterface) continue;  // 接口类: 跳过方法声明
         // 泛型模板 (tB): 本体不发前向声明 (特化副本各自以扁名发; 模板名从不被调用)

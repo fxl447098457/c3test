@@ -121,3 +121,16 @@ End Function
 Public Function GreetThru(ByVal who As String) As String
     GreetThru = Me.Greet(who)
 End Function
+
+' --- ai/022 B09 (MyBase + 构造链) -------------------------------------------------
+' Maker returns a *project class*: an Overrides of it in a derived class is what used to
+' break com_entry.c (extern emitted before that class's typedef -> error C2143).
+Public Overridable Function Maker() As InhBase
+    Set Maker = Me
+End Function
+
+Public g_init As String
+
+Private Sub Class_Initialize()
+    g_init = "base;"
+End Sub

@@ -153,4 +153,23 @@ Sub Main()
     If u.h.Greet("bob") = "hi bob (derived)" Then Debug.Print "INH42:OK" Else Debug.Print "INH42:FAIL " & u.h.Greet("bob")
     Set u.h = b
     If u.h.Speak() = "base" Then Debug.Print "INH43:OK" Else Debug.Print "INH43:FAIL " & u.h.Speak()
+    ' INH44..INH52 (ai/022 B09): `MyBase.<member>` = the implementation the *immediate* base
+    ' would run, straight-called (no __cvtbl). INH44/INH45 are the discriminators -- the same
+    ' members answer "derived" through Me./obj. (INH12/INH34), so a table lookup would FAIL here.
+    ' INH46 pins nearest-declaration (InhMid shadows Tag). INH47/INH48 = property Let+Get and a
+    ' public data field through the base face. INH49/INH50 = construction chain root->leaf and
+    ' MyBase.Class_Initialize (InhMid's Private initializer, reached through the B09 bridge).
+    ' INH51 = an Overrides whose return type is a project class (com_entry.c used to die on it).
+    If d.BaseSpeak() = "base" Then Debug.Print "INH44:OK" Else Debug.Print "INH44:FAIL " & d.BaseSpeak()
+    If d.BaseGreet("bob") = "hi bob (base)" Then Debug.Print "INH45:OK" Else Debug.Print "INH45:FAIL " & d.BaseGreet("bob")
+    If d.BaseTag() = "mid" Then Debug.Print "INH46:OK" Else Debug.Print "INH46:FAIL " & d.BaseTag()
+    If d.NameViaBase("wn") = "wn" Then Debug.Print "INH47:OK" Else Debug.Print "INH47:FAIL " & d.NameViaBase("wn")
+    If d.LabelViaBase("lbl") = "lbl" Then Debug.Print "INH48:OK" Else Debug.Print "INH48:FAIL " & d.LabelViaBase("lbl")
+    If d.g_init = "base;mid;leaf;" Then Debug.Print "INH49:OK" Else Debug.Print "INH49:FAIL " & d.g_init
+    d.RerunMidInit
+    If d.g_init = "base;mid;leaf;mid;" Then Debug.Print "INH50:OK" Else Debug.Print "INH50:FAIL " & d.g_init
+    If d.Maker() Is d Then Debug.Print "INH51:OK" Else Debug.Print "INH51:FAIL"
+    Dim mi2 As InhMid
+    Set mi2 = New InhMid
+    If mi2.g_init = "base;mid;" Then Debug.Print "INH52:OK" Else Debug.Print "INH52:FAIL " & mi2.g_init
 End Sub

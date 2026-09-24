@@ -50,3 +50,47 @@ End Property
 Public Overrides Function Greet(ByVal who As String) As String
     Greet = "hi " & who & " (derived)"
 End Function
+
+' --- ai/022 B09 (MyBase = the implementation the *immediate* base would run) ------
+' Overrides a member whose return type is a project class: com_entry.c used to emit this
+' extern before InhBase's typedef (error C2143).
+Public Overrides Function Maker() As InhBase
+    Set Maker = Me
+End Function
+
+Private Sub Class_Initialize()
+    Me.g_init = Me.g_init & "leaf;"
+End Sub
+
+' Speak/Greet/Tag are slots overridden below or in InhMid: MyBase. must NOT go through the
+' table (that is what Me.Speak()/d.Speak() are for), and Tag pins the nearest-declaration
+' rule (InhMid declares Tag itself, so MyBase.Tag() is "mid", not InhBase's "base").
+Public Function BaseSpeak() As String
+    BaseSpeak = MyBase.Speak()
+End Function
+
+Public Function BaseGreet(ByVal who As String) As String
+    BaseGreet = MyBase.Greet(who)
+End Function
+
+Public Function BaseTag() As String
+    BaseTag = MyBase.Tag()
+End Function
+
+' property read + write through the base face (InhBase's m_name is Private, so only the
+' accessors are reachable), and a public data field (InhBase.Label).
+Public Function NameViaBase(ByVal v As String) As String
+    MyBase.Name = v
+    NameViaBase = MyBase.Name
+End Function
+
+Public Function LabelViaBase(ByVal v As String) As String
+    MyBase.Label = v
+    LabelViaBase = MyBase.Label
+End Function
+
+' InhMid's own initializer, re-run on demand (it is Private, so it goes through the
+' construction-chain bridge).
+Public Sub RerunMidInit()
+    MyBase.Class_Initialize
+End Sub

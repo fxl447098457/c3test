@@ -892,7 +892,12 @@ if ($Category -in @("all", "run", "vbp")) {
         "INH6:OK", "INH7:OK", "INH8:OK", "INH9:OK", "INH10:OK", "INH11:OK",
         "INH12:OK", "INH13:OK", "INH14:OK", "INH15:OK", "INH16:OK",
         "INH17:OK", "INH18:OK", "INH19:OK", "INH20:OK", "INH21:OK",
-        "INH22:OK", "INH23:OK", "INH24:OK", "INH25:OK", "INH26:OK")
+        "INH22:OK", "INH23:OK", "INH24:OK", "INH25:OK", "INH26:OK",
+        # ai/022 B09: INH44/INH45 = MyBase de-virtualized (the same members answer "derived"
+        # through Me./obj.), INH49/INH50 = construction chain root->leaf + MyBase.Class_Initialize,
+        # INH51 = Overrides returning a project class (com_entry.c forward-decl ordering).
+        "INH44:OK", "INH45:OK", "INH46:OK", "INH47:OK", "INH48:OK", "INH49:OK", "INH50:OK",
+        "INH51:OK", "INH52:OK")
     Test-Vbp "test_vbman" "$Tests\test_vbman\test_vbman.vbp" @("P24-04a:OK", "P24-04b:OK", "P24-04:2/2") -Arch "x86" -RequiresCom "VBMANLIB.cVBMAN"
     $vbpSw.Stop()
     Write-Host "  (vbp/gui tests took $([Math]::Round($vbpSw.Elapsed.TotalSeconds))s)"
@@ -1081,15 +1086,19 @@ if ($Category -in @("all", "syntax")) {
     # 8 already reported it through the priority-2 dispatcher -- pinned here so a refactor
     # cannot lose it. Site 9's receiver is a plain return variable, so it must still compile.
     $cgenVirtNeg = @(
-        @("ci_n24_chain_receiver", "ci_n24"),
-        @("ci_n25_prop_chain_receiver", "ci_n25"),
-        @("ci_n26_prop_receiver", "ci_n26")
+        @("ci_n24_chain_receiver", "ci_n24", "cannot be dispatched in this build"),
+        @("ci_n25_prop_chain_receiver", "ci_n25", "cannot be dispatched in this build"),
+        @("ci_n26_prop_receiver", "ci_n26", "cannot be dispatched in this build"),
+        # ai/022 B09: `MyBase` where there is no base class, and `MyBase.<name>` the base face
+        # does not have -> VB3028. Both used to compile into an undefined `vb6_MyBase_<name>`.
+        @("ci_n27_mybase_no_inherits", "ci_n27", "has no Inherits clause"),
+        @("ci_n28_mybase_no_such_member", "ci_n28", "has no such member")
     )
     foreach ($c in $cgenVirtNeg) {
         $a = "$Tests\cls_neg\" + $c[1] + "_base.cls"
         $b = "$Tests\cls_neg\" + $c[1] + "_derived.cls"
         if ((Test-Path $a) -and (Test-Path $b)) {
-            Test-CompileFail $c[0] @($a, $b) "cannot be dispatched in this build"
+            Test-CompileFail $c[0] @($a, $b) $c[2]
         } else {
             Write-Host "  [COMPILE-FAIL] $($c[0]) ... SKIP (missing case files)" -ForegroundColor DarkGray
         }

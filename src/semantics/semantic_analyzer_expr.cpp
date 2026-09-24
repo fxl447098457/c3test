@@ -151,6 +151,9 @@ void SemanticAnalyzer::visit(IdentifierExpr& node) {
             diag_.error(DiagnosticID::SemInheritsNotSupported, node.loc,
                 "Inherited member '" + node.name + "' cannot be called unqualified in this build"
                 " (write Me." + node.name + "; v1 merges inherited members onto the class symbol only)");
+        } else if (lower == "mybase" && currentModule_ && currentModule_->isClassModule) {
+            // tB Inherits (ai/022 B09): `MyBase` 不是标识符, 由发码层按名字接管 (去虚化基调用),
+            // 用错位置在那里报 VB3028。这里不出"未声明的标识符", 否则每条合法写法都配一条噪声。
         } else if (optionExplicit_ && pass_ == 2) {
             diag_.warn(DiagnosticID::SemUndeclaredIdentifier, node.loc,
                 "未声明的标识符: '" + node.name + "' (可能来自其他模块)");

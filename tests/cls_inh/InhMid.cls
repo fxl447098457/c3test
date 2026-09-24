@@ -27,3 +27,9 @@ End Function
 Public Overrides Function Pick() As String
     Pick = "mid"
 End Function
+
+' ai/022 B09: the middle class of the chain has its own initializer too, so a leaf
+' instance must run base;mid; before its own (root -> leaf).
+Private Sub Class_Initialize()
+    Me.g_init = Me.g_init & "mid;"
+End Sub

@@ -77,6 +77,10 @@ void CCodeGen::emitClassFactory(Module& module) {
         c_.emitLine("me->events = NULL;  /* P6.5: no event sink initially */");
     }
 
+    // tB Inherits (B09): 祖先的 Class_Initialize **先**跑 (链上根→叶), 再跑自家那份。
+    // 自家没有 Class_Initialize 时也要跑祖先的 —— 所以这条在下面的 hasInit 循环之外。
+    emitClassInitChain(module);
+
     // 检查是否有 Class_Initialize 方法
     bool hasInit = false;
     for (auto& decl : module.declarations) {

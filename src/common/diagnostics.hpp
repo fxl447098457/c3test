@@ -90,6 +90,8 @@ enum class DiagnosticID : uint16_t {
     SemOverrideNotOverridable = 3025,   // 祖先成员存在但未标 Overridable (或显式 NotOverridable)
     SemOverrideSignatureMismatch = 3026, // Overrides 与祖先槽签名不符
     SemVirtualNotSupported = 3027,      // v1 边界: 该处的虚成员用法尚不支持 (含"需要类虚表")
+    // tB 类继承 (ai/022 B09): `MyBase.<成员>` 显式基调用的可用性判定。
+    SemMyBaseNotSupported = 3028,       // 无基类 / 基面上没有这个成员 / 基成员是 Private
 
     // 代码生成 (4xxx)
     CodeGenUnsupportedFeature = 4001,

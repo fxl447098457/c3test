@@ -111,6 +111,17 @@
                                    const std::string& objExpr, bool mustDispatch,
                                    const SourceLocation& loc);  // 空 = 本类不派发这个成员
 
+    // ---- MyBase 显式基调用 + 构造链 (tB, ai/022 B09; 实现在 cgen_inherit.cpp) ----
+    // 去虚化: `MyBase.M` 直调基类会跑的那一份实现, 不查 __cvtbl。
+    bool tryEmitMyBaseMember(MemberAccessExpr& node);  // true = 已接管 (含判死)
+    bool tryEmitMyBaseAssign(MemberAccessExpr& ma, const std::string& rhsC);  // MyBase.X = v
+    const ClassChainView* myBaseClassOf(MemberAccessExpr& node);  // 空 = 已判死 VB3028
+    std::string chainInitCName(const std::string& clsName) const;  // vb6_<X>_chain_init
+    bool classIsBaseOfSomething(const std::string& clsLower) const;
+    void emitChainInitDecl(Module& module);   // .h: 桥接声明 (仅"有 Class_Initialize 且被继承")
+    void emitChainInitDef(Module& module);    // .c 末尾: 桥接定义
+    void emitClassInitChain(Module& module);  // .c: 派生类 _New() 里根→叶跑祖先初始化
+
     void emitIfaceContractTypedefs();                 // .h: 工程级 vb6_ivtbl_/vb6_ivref_ 类型
     void emitIfaceClassFields(Module& module);        // .h: 类结构体里的 __iv_<I> 字段
     void emitIfaceImplTables(Module& module);         // .c: 适配器 + 类侧槽表实例
