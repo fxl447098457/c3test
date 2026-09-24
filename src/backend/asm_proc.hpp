@@ -482,4 +482,184 @@ inline void asmCheckRegWidths(const std::vector<std::string>& body, OnError onEr
     }
 }
 
+// ============================================================
+// 隐含累加器别名检查 (spec §11 项1: cmpxchg×RAX/EAX) —— 把"静默死循环/静默垃圾值"
+//   前移成 VB 诊断 3041。
+//
+//   要抓的形态 (实测踩过, 见 spec §11 的 AtomicAdd):
+//       mov rax, [ptr]        ; 把指针放进 RAX —— RAX/EAX 是同一个物理寄存器
+//       mov eax, [rax]        ; 写 EAX → 连带把 RAX 高 32 位清 0 → 指针已毁
+//       lock cmpxchg [rax], 1 ; 累加器是 EAX, 但 [rax] 里的 rax 已经不是指针了
+//
+//   判据 (静态、块内顺序、**只看别名**):
+//     ① 块里存在一条带隐含累加器的指令 (cmpxchg / xadd / div / idiv / mul / imul 单操作数
+//        / aam / aad …) —— 其隐含寄存器记作 A (cmpxchg→RAX 族, mul/div→RAX 族, xadd 无)。
+//     ② 在该指令**之前**的最后一条**无条件写 A 的整寄存器** (64 位段) 的指令记作 W,
+//        写坏的是 `<A族64> 的其余位`; 而 W 之前的最后一条 `写 A 的**短**宽度` (≤32 位)
+//        才是"累加器最后一次被正确装载"的指令 L。
+//     ③ 若 **W 在块内 (≥0) 且 L 在块内且 W 在 L 之后** → 报。理由: W 把指针/基址
+//        装进 A 的高位, 之后写的只是 A 的低 32 位, 高位回不来了。这正是 cmpxchg 双陷阱。
+//
+//   为什么这是启发式而不是数据流: 完整答案需要活跃变量分析 + 分支/循环建模 (Asm 块是
+//   **原始文本**, 没有 CFG)。这里只抓"**同块内**、**顺序可达**、**别名**"这三个条件
+//   同时成立的情形 —— 实测的那个 bug 完全落在这个交集里。跨块/跨分支/条件重载一律
+//   放过 (宁可不报, 不可误报: 误报会挡住合法代码)。
+//
+//   放过 (刻意不报) 的常见合法写法:
+//     * `mov rax, [v]` 之后**没有**再写 eax 一族 (rax 整体保留) → W 之后无 L → 不报。
+//     * [`mov eax, [v]` 之后 `cmpxchg [rbx], ecx`] —— cmpxchg 用的是别的基址寄存器,
+//       EAX 是当**累加器/旧值比较**用的, 没人需要它保存指针 → W 是 `mov eax,...` 本身
+//       (写的是 32 位), 不满足"64 位段写" → 不报。
+//     * 累加器只在**进入块之前**被装载 (`mov rax, rcx` 之类在块内的第一条) → W=0 位置,
+//       L 在 W 之后 → 不报。
+// ============================================================
+struct AsmAccumWrite {
+    int line = -1;          // 指令下标 (-1 = 无)
+    bool wide = false;      // 是否 64 位段 (写满整寄存器)
+};
+
+// 指令的隐含累加器族 ("rax" / "rdx" / 空)。只列确有隐含累加器的助记符。
+inline std::string asmImplicitAccumulator(const std::string& mn) {
+    if (mn == "cmpxchg" || mn == "xadd") return "rax";
+    if (mn == "mul" || mn == "imul" || mn == "div" || mn == "idiv") return "rax";
+    if (mn == "mulx") return "rdx";
+    return "";
+}
+
+// 解析一行, 返回 {助记符(小写), 第一个操作数, 其余操作数} —— 足够做上面的判据。
+// 不追求完整汇编语法: 去注释/去前缀/拿助记符/按顶层逗号切操作数。
+struct AsmLineParts {
+    std::string mn;
+    std::vector<std::string> ops;
+    bool valid = false;
+};
+
+inline AsmLineParts asmParseLineSimple(const std::string& raw) {
+    AsmLineParts out;
+    std::string s = raw;
+    size_t q = s.find(';');                     // 重写后注释是 `;`
+    if (q != std::string::npos) s = s.substr(0, q);
+    // 去 `lock`/`rep*` 前缀 (可能有多个)
+    static const char* kPrefixes[] = {"lock ", "rep ", "repe ", "repne ", "repz ", "repnz "};
+    bool stripped = true;
+    while (stripped) {
+        stripped = false;
+        size_t a = s.find_first_not_of(" \t");
+        if (a == std::string::npos) return out;
+        s = s.substr(a);
+        for (const char* p : kPrefixes)
+            if (s.rfind(p, 0) == 0) { s = s.substr(std::strlen(p)); stripped = true; break; }
+    }
+    auto isIdentCh = [](char c) {
+        return std::isalnum(static_cast<unsigned char>(c)) || c == '_';
+    };
+    size_t e = 0;
+    while (e < s.size() && isIdentCh(s[e])) e++;
+    if (e == 0) return out;                      // 标签行 / 空行
+    out.mn = s.substr(0, e);
+    for (auto& c : out.mn) c = static_cast<char>(::tolower(static_cast<unsigned char>(c)));
+    // 助记符后必须跟空白或行尾, 否则是标签 (如 `retry:`)
+    if (e < s.size() && s[e] == ':') return out;
+    // 按顶层逗号切操作数 (方括号内逗号属于寻址表达式, 不切)
+    std::string rest = s.substr(e);
+    int depth = 0;
+    std::string cur;
+    for (char c : rest) {
+        if (c == '[' || c == '(') depth++;
+        else if (c == ']' || c == ')') depth--;
+        if (c == ',' && depth == 0) { out.ops.push_back(cur); cur.clear(); continue; }
+        cur += c;
+    }
+    if (!cur.empty()) out.ops.push_back(cur);
+    for (auto& op : out.ops) {
+        size_t b = op.find_first_not_of(" \t");
+        size_t en = op.find_last_not_of(" \t");
+        op = (b == std::string::npos) ? std::string() : op.substr(b, en - b + 1);
+    }
+    out.valid = true;
+    return out;
+}
+
+// 寄存器名 → 它属于哪个"族" (rax / rdx / rcx …) 以及宽度。asmRegWidthBits 只管宽度,
+// 这里要的是族。返回空串 = 不是已知整寄存器。
+inline std::string asmRegFamily(const std::string& r) {
+    struct Ent { const char* name; const char* fam; };
+    static const Ent kEnts[] = {
+        {"rax","rax"},{"eax","rax"},{"ax","rax"},{"al","rax"},{"ah","rax"},
+        {"rbx","rbx"},{"ebx","rbx"},{"bx","rbx"},{"bl","rbx"},{"bh","rbx"},
+        {"rcx","rcx"},{"ecx","rcx"},{"cx","rcx"},{"cl","rcx"},{"ch","rcx"},
+        {"rdx","rdx"},{"edx","rdx"},{"dx","rdx"},{"dl","rdx"},{"dh","rdx"},
+        {"rsi","rsi"},{"esi","rsi"},{"si","rsi"},{"sil","rsi"},
+        {"rdi","rdi"},{"edi","rdi"},{"di","rdi"},{"dil","rdi"},
+        {"rbp","rbp"},{"ebp","rbp"},{"bp","rbp"},{"bpl","rbp"},
+        {"rsp","rsp"},{"esp","rsp"},{"sp","rsp"},{"spl","rsp"},
+        {"r8","r8"},{"r8d","r8"},{"r8w","r8"},{"r8b","r8"},
+        {"r9","r9"},{"r9d","r9"},{"r9w","r9"},{"r9b","r9"},
+        {"r10","r10"},{"r10d","r10"},{"r10w","r10"},{"r10b","r10"},
+        {"r11","r11"},{"r11d","r11"},{"r11w","r11"},{"r11b","r11"},
+        {"r12","r12"},{"r12d","r12"},{"r12w","r12"},{"r12b","r12"},
+        {"r13","r13"},{"r13d","r13"},{"r13w","r13"},{"r13b","r13"},
+        {"r14","r14"},{"r14d","r14"},{"r14w","r14"},{"r14b","r14"},
+        {"r15","r15"},{"r15d","r15"},{"r15w","r15"},{"r15b","r15"},
+    };
+    for (const Ent& e : kEnts) if (r == e.name) return e.fam;
+    return "";
+}
+
+// 扫一遍 body, 找出「累加器族 A 的最后一条整宽写 W」与「最后一条短宽写 L」。
+//   "整宽"/"短宽" 是**相对目标架构的地址宽度**说的, 不是相对 64:
+//     x64: 整宽 = 64 位段名 (rax/r8..r15); 短宽 = 32/16/8 位 (eax/ax/al —— 32 位写还会清高 32 位)
+//     x86: 整宽 = 32 位段名 (eax/ecx...);  短宽 = 16/8 位 (ax/al —— 写 ax 保留高 16 位!)
+//   把"整宽"写死成 64 会让 x86 的 `mov eax, ebx` (它就是 x86 的整宽写) 被当成短宽, 判据全崩。
+template <typename OnClobber>
+inline void asmCheckAccumAlias(const std::vector<std::string>& body, OnClobber onClobber,
+                               bool x64 = true) {
+    const int fullBits = x64 ? 64 : 32;
+
+    // 每条指令的 {目标寄存器族, 是否整宽} —— 只取第一个操作数 (x86/x64 里目的操作数
+    // 一律在首位; 例外是 `mov [mem], r` —— 那第一个操作数是内存, 不算寄存器写)。
+    struct WriteEnt { int line; std::string fam; bool wide; };
+    std::vector<WriteEnt> writes;
+
+    for (size_t i = 0; i < body.size(); i++) {
+        AsmLineParts p = asmParseLineSimple(body[i]);
+        if (!p.valid || p.ops.empty()) continue;
+        // mov / movsxd / movzx / movsx / lea 等普通搬运: 目的 = ops[0]
+        // (movsxd/movzx/movsx 是**整宽**写: `movsxd rax, ecx` 写满 rax)
+        const std::string& op0 = p.ops[0];
+        // 第一个操作数必须是纯寄存器名
+        std::string fam = asmRegFamily(op0);
+        if (fam.empty()) continue;
+        int w = asmRegWidthBits(op0);
+        if (w == 0) continue;
+        // 只关心会写寄存器的指令 (排除 cmp/test/jmp 这类只读的: cmp 的目的也读)
+        if (p.mn == "cmp" || p.mn == "test" || p.mn == "jmp" || p.mn == "call" ||
+            p.mn == "push" || p.mn == "nop" || p.mn == "ret")
+            continue;
+        writes.push_back({ (int)i, fam, w >= fullBits });
+    }
+
+    // 对每条带隐含累加器的指令做检查
+    for (size_t i = 0; i < body.size(); i++) {
+        AsmLineParts p = asmParseLineSimple(body[i]);
+        if (!p.valid) continue;
+        std::string accFam = asmImplicitAccumulator(p.mn);
+        if (accFam.empty()) continue;
+        // 累加器族 = rax / rdx; 找该族在 i 之前的 W (最后一条整宽写) 与 L (最后一条短宽写)
+        int wLine = -1, lLine = -1;
+        for (const WriteEnt& w : writes) {
+            if (w.line >= (int)i) break;
+            if (w.fam != accFam) continue;
+            if (w.wide) wLine = w.line;
+            else lLine = w.line;
+        }
+        // ③: 该族在**本块内**先有一条整宽写 W (把有意义的 64 位值放进累加器 —— 典型是
+        //    "把指针/基址装进 RAX"), 之后又有一条短宽写 L (只写低 32 位/16 位/8 位)。
+        //    L 一来, W 建立的高位就**回不来了** (32 位写还会把高 32 位清零)。
+        //    而此时 A 是隐含累加器 → 累加器只剩残值, 无论它原本装的是指针还是数。
+        if (wLine >= 0 && lLine >= 0 && lLine > wLine)
+            onClobber((int)i, (int)wLine, (int)lLine, p.mn, accFam);
+    }
+}
+
 } // namespace vb6c3

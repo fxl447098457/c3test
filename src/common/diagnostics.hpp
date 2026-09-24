@@ -110,6 +110,8 @@ enum class DiagnosticID : uint16_t {
     SemAsmOperandWidthMismatch = 3038,  // asm扩展: Asm 指令两个寄存器操作数宽度不一致 (原本要到 ml64 才报 A2022)
     SemAsmMixedRefUnresolved = 3039,    // 混排 (项3): Asm 片段里 [X] 的 X 既不是寄存器也不是可见的 VB 变量
     SemAsmMixedRefLimit = 3040,         // 混排 (项3, x64): 单个片段引用的 VB 变量超过 4 个 (Win64 只有 4 个整型参数寄存器)
+    SemAsmAccumAliasClobber = 3041,     // 项1: Asm 块里某条指令的隐含累加器寄存器 (cmpxchg/div/mul 等) 被同块
+                                        //      前面的指令写坏, 且写坏前的值已无从恢复 (静态可达性启发式, 见 asm_proc.hpp)
 
     // 代码生成 (4xxx)
     CodeGenUnsupportedFeature = 4001,

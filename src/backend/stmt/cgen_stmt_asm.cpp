@@ -206,6 +206,24 @@ void CCodeGen::emitAsmStmtMixed(AsmStmt& node) {
         });
         if (widthBad) return;
 
+        // 项1: 隐含累加器别名 → 3041 (x86 内联块同样适用)
+        {
+            bool aliasBad = false;
+            asmCheckAccumAlias(body, [&](int idx, int wLine, int lLine,
+                                         const std::string& mnem, const std::string& fam) {
+                if (aliasBad) return;
+                aliasBad = true;
+                diag_.error(DiagnosticID::SemAsmAccumAliasClobber, node.loc,
+                            "Asm 第 " + std::to_string(idx + 1) + " 行 `" + node.lines[idx] +
+                            "`: 该指令的隐含累加器 " + fam + " 已被第 " +
+                            std::to_string(wLine + 1) + " 行 `" + node.lines[wLine] +
+                            "` 写坏 (之后第 " + std::to_string(lLine + 1) + " 行 `" +
+                            node.lines[lLine] + "` 只写了它的低位)。cmpxchg/mul/div 的累加器"
+                            "就是 AX/DX 家族 —— 别再把它当指针/基址用 (模板见 spec §11)");
+            }, /*x64=*/false);
+            if (aliasBad) return;
+        }
+
         // 块内踩到的 callee-saved (ebx/esi/edi, 含 clobber 声明) 成对 push/pop
         std::vector<std::string> saved =
             asmSavedRegsForArch(node.lines, node.clobbers, /*x64=*/false);
@@ -288,6 +306,27 @@ void CCodeGen::emitAsmStmtMixed(AsmStmt& node) {
                     "或改用 movsxd/movzx");
     });
     if (widthBad) return;
+
+    // 项1: 隐含累加器别名 (cmpxchg×RAX/EAX 等) → 3041。
+    // 混排 x64 片段里地址在 rcx/rdx/r8/r9, 理论上不碰 rax —— 但用户完全可能在片段内
+    // 自己 `mov rax, [q]` 之类, 所以同一套检查照做。
+    {
+        bool aliasBad = false;
+        asmCheckAccumAlias(body, [&](int idx, int wLine, int lLine,
+                                     const std::string& mnem, const std::string& fam) {
+            if (aliasBad) return;
+            aliasBad = true;
+            diag_.error(DiagnosticID::SemAsmAccumAliasClobber, node.loc,
+                        "Asm 第 " + std::to_string(idx + 1) + " 行 `" + node.lines[idx] +
+                        "`: 该指令的隐含累加器 " + fam + " 已被第 " + std::to_string(wLine + 1) +
+                        " 行 `" + node.lines[wLine] + "` 写坏 (之后第 " +
+                        std::to_string(lLine + 1) + " 行 `" + node.lines[lLine] +
+                        "` 只写了它的低 32 位)。cmpxchg/mul/div 的累加器是 RAX/EAX 一族, "
+                        "而 EAX 就是 RAX 的低 32 位 —— 二者不可兼得; 请把指针/基址改放到 "
+                        "R10/R11 等无关寄存器 (模板见 spec §11)");
+        }, /*x64=*/true);
+        if (aliasBad) return;
+    }
 
     // 剩下的 `[名字]` 若既非地址参数也非寄存器, 就是打错了 —— 由 3039 已挡,
     // 这里再兜一次 (不报错, 交给 ml64; 但重写后残留 [x] 一定是漏网之鱼)。

@@ -1608,6 +1608,20 @@ if ($Category -in @("all", "asm")) {
             if ($Verbose) { Write-Host $text }
         }
     }
+    if (Test-Path "$Tests\asm\asm_alias_neg.vbp") {
+        # 项1: cmpxchg/mul 的隐含累加器与指针/基址同族 (RAX/EAX) → 3041
+        # (实测的静默死循环/段错误, 现在编译期拦住)
+        Test-VbpBuildFail "asm_neg_accum_alias" "$Tests\asm\asm_alias_neg.vbp" "3041"
+    }
+    if (Test-Path "$Tests\asm\asm_alias_x86_neg.vbp") {
+        # 同上, x86 内联块 (Test-VbpBuildFail 不带自定义参数, 就地内联判据)
+        $script:total++
+        Write-Host -NoNewline "  [VBP-BUILD-FAIL] asm_neg_accum_alias_x86 ... "
+        $result = & cmd /c ('"' + $C3 + '" "' + "$Tests\asm\asm_alias_x86_neg.vbp" + '" --arch x86 --output-dir "' + $OutDir + '" 2>&1')
+        $text = (($result | Out-String) -replace '\s+', ' ')
+        if ($text -match "3041") { $script:passed++; Write-Host "PASS" -ForegroundColor Green }
+        else { $script:failed++; Write-Host "FAIL (expected 3041)" -ForegroundColor Red }
+    }
     if (Test-Path "$Tests\asm\asm_width_neg.vbp") {
         # 宽度不一致 (mov rax, edx) → 3038 (宽度校验前移, 不再漏到 ml64 的 A2022)
         Test-VbpBuildFail "asm_neg_operand_width" "$Tests\asm\asm_width_neg.vbp" "3038"

@@ -165,6 +165,24 @@ bool CCodeGen::tryEmitAsmProc(const std::string& procName, AccessLevel access,
             if (widthBad) return true;   // 诊断已报, 不再发射
         }
 
+        // 项1: 隐含累加器别名 (cmpxchg×EAX/EDX 等) → 3041。x86 同为 32 位寄存器:
+        // `cmpxchg [eax], ecx` 的地址寄存器与隐含累加器同为 EAX 时同样互毁。
+        {
+            bool aliasBad = false;
+            asmCheckAccumAlias(body, [&](int idx, int wLine, int lLine,
+                                         const std::string& mnem, const std::string& fam) {
+                if (aliasBad) return;
+                aliasBad = true;
+                fail(DiagnosticID::SemAsmAccumAliasClobber,
+                     "Asm 第 " + std::to_string(idx + 1) + " 行 `" + info.lines[idx] +
+                     "`: 该指令的隐含累加器 " + fam + " 已被第 " + std::to_string(wLine + 1) +
+                     " 行 `" + info.lines[wLine] + "` 写坏 (之后第 " + std::to_string(lLine + 1) +
+                     " 行 `" + info.lines[lLine] + "` 只写了它的低位)。cmpxchg/mul/div 的"
+                     "累加器就是 AX/DX 家族 —— 别再把它当指针/基址用 (模板见 spec §11)");
+            }, /*x64=*/false);
+            if (aliasBad) return true;
+        }
+
         std::vector<std::string> saved =
             info.naked ? std::vector<std::string>()
                        : asmSavedRegsForArch(info.lines, info.clobbers, /*x64=*/false);
@@ -218,6 +236,24 @@ bool CCodeGen::tryEmitAsmProc(const std::string& procName, AccessLevel access,
                  " 位); 请统一宽度 —— 32 位值用低 32 位寄存器 (如 ecx/eax), 或改用 movsxd/movzx");
         });
         if (widthBad) return true;   // 诊断已报, 不再收集 (编译到此失败)
+
+        // 项1: 隐含累加器别名 (cmpxchg×RAX/EAX 等静态可见的踩法) → 3041
+        bool aliasBad = false;
+        asmCheckAccumAlias(xbody, [&](int idx, int wLine, int lLine,
+                                      const std::string& mn, const std::string& fam) {
+            if (aliasBad) return;   // 只报第一处
+            aliasBad = true;
+            fail(DiagnosticID::SemAsmAccumAliasClobber,
+                 "Asm 第 " + std::to_string(idx + 1) + " 行 `" + info.lines[idx] +
+                 "`: 该指令的隐含累加器 " + fam + " 已被第 " + std::to_string(wLine + 1) +
+                 " 行 `" + info.lines[wLine] + "` 写坏 (之后第 " + std::to_string(lLine + 1) +
+                 " 行 `" + info.lines[lLine] + "` 只写了它的低 32 位, 高 32 位回不来了)。"
+                 "cmpxchg/mul/div 的累加器是 RAX/EAX 一族, 而 EAX 就是 RAX 的低 32 位 —— "
+                 "把指针/基址放在 RAX 又让它当累加器, 必然互毁: 轻则永不相等死循环, 重则"
+                 "把值当地址访问而崩溃。请把指针/基址改放到 R10/R11 等无关寄存器 "
+                 "(模板见 spec §11)");
+        }, /*x64=*/true);
+        if (aliasBad) return true;
     }
 
     c_.emitLine("/* ai/vb-asm-extension-spec: 过程体为 Asm 块; 实现在 ml64 汇编的 "
