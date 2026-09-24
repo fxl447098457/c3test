@@ -62,11 +62,14 @@
 
     // ai/vb-asm-extension-spec: 过程体 = 单个 Asm 块时降级为独立 MASM 过程 (v1: x64/ml64)。
     // 返回 true = 已接管该过程 (调用方应立即 return, 不再走常规 C 体发射)。
-    //   x64: 只发 extern 原型 + 收集元数据到 asmProcs_;
-    //   x86: 报 3030; 混排/类方法/Optional/ParamArray/>4参/浮点参 → 3030/3031。
+    //   x64: 只发 extern 原型 + 收集元数据到 asmProcs_ (driver 生成 MASM → ml64 → 链接);
+    //   x86: 直接发 C 函数体, 内含 MSVC `__asm { }` 内联块;
+    //   混排/类方法/Optional/ParamArray/(x64)>4参/浮点参 → 3037; 参数或返回类型越界 → 3037。
+    //   isNaked = 过程上的 `<Naked>` (spec §7): 不生成保存/对齐/ret。
     bool tryEmitAsmProc(const std::string& procName, AccessLevel access,
                         std::vector<std::unique_ptr<ParameterDecl>>& params,
-                        ASTNode* returnType, const StmtList& body, SourceLocation loc);
+                        ASTNode* returnType, const StmtList& body, SourceLocation loc,
+                        bool isNaked);
 
     // --- Delegate (tB 扩展): 桩类型名/桩名/声明趟发射/收尾定义/直调 ---
     std::string delegateTyName(const std::string& delName);

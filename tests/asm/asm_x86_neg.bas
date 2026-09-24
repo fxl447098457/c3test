@@ -1,15 +1,16 @@
-Attribute VB_Name = "AsmX86"
-' ai/vb-asm-extension-spec 负例: Asm 块 + x86 目标 → 3036 (v1 仅 x64)
+Attribute VB_Name = "AsmX86Neg"
+' ai/vb-asm-extension-spec 负例: x86 目标 + <Naked> 里按名引用参数 → 3036
+' (naked 无栈帧, x86 参数在调用者的栈上, 名字无从解析; 去掉 <Naked> 或改用寄存器)
 Option Explicit
 
-Public Function AddFive(ByVal num As Long) As Long
+<Naked>
+Public Function BadNaked(ByVal num As Long) As Long
     Asm
         mov eax, [num]
-        add eax, 5
-        mov [Function], eax
+        ret
     End Asm
 End Function
 
 Sub Main()
-    Debug.Print "ASM-X86:" & AddFive(1)
+    Debug.Print "ASM-X86-NAKED:" & BadNaked(1)
 End Sub

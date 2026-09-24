@@ -10,6 +10,8 @@ namespace vb6c3 {
 // ============================================================
 
 DeclPtr Parser::parseDeclaration() {
+    // ai/vb-asm-extension-spec: `<Naked>` 只对 Sub/Function 有意义。角括号属性行在模块循环里
+    // 就被 tryParseAngleAttr() 摘走并置 pendingNaked_; 若紧随的不是过程声明, 由调用方清掉。
     // 虚方法修饰位 (tB 扩展, ai/022 B08b): VB6 里 Overridable/Overrides/NotOverridable 与访问
     // 修饰符同位、互斥, 且访问修饰符可省 (`Overridable Sub X`) → 起手先吃一次, 吃了访问修饰符
     // 之后再吃一次, 两种书写顺序都收。
@@ -198,6 +200,38 @@ void Parser::parseTrailingImplementsClauses(std::vector<ImplementsClause>& out) 
     }
 }
 
+// 角括号过程属性 (ai/vb-asm-extension-spec): 目前只有 `<Naked>` 一个名字。
+// 直接拿原始行文本判定 (token 级前瞻要跨两个 token, 而这里要认的只是"整行是不是 <Naked>"),
+// 命中就吃掉整行 token 并把 pendingNaked_ 置位, 由紧随的 Sub/Function 声明取走。
+bool Parser::tryParseAngleAttr() {
+    if (cur_.kind != TokenKind::LessThan) return false;
+    std::string text;
+    if (buffer_) {
+        std::string line(buffer_->getLine(cur_.line));
+        while (!line.empty() && (line.back() == '\n' || line.back() == '\r')) line.pop_back();
+        size_t b = line.find_first_not_of(" \t");
+        size_t e = line.find_last_not_of(" \t");
+        if (b != std::string::npos) text = line.substr(b, e - b + 1);
+    }
+    std::string compact;                       // 去空白 + 转小写, 只用来判定
+    for (char c : text) {
+        if (c == ' ' || c == '\t' || c == '\r' || c == '\n') continue;
+        compact += static_cast<char>(::tolower(static_cast<unsigned char>(c)));
+    }
+    if (compact == "<naked>") {
+        while (!check(TokenKind::NewLine) && !check(TokenKind::EndOfFile)) advance();
+        pendingNaked_ = true;
+        return true;
+    }
+    if (compact.size() >= 2 && compact.front() == '<' && compact.back() == '>') {
+        diag_.error(DiagnosticID::ParseUnknownAttribute, currentLoc(),
+                    "未知的角括号属性 (目前仅支持 <Naked>): " + text);
+        while (!check(TokenKind::NewLine) && !check(TokenKind::EndOfFile)) advance();
+        return true;
+    }
+    return false;   // 不是属性行 (比较运算符等), token 流原样交回
+}
+
 // ============================================================
 // Sub 声明
 // ============================================================
@@ -224,6 +258,8 @@ std::unique_ptr<SubDecl> Parser::parseSubDecl(AccessLevel access, bool isStatic)
         std::move(params), std::move(body), isStatic);
     d->typeParams = std::move(typeParams);
     d->implementsClauses = std::move(clauses);   // B02b
+    d->isNaked = pendingNaked_;                  // ai/vb-asm-extension-spec: <Naked>
+    pendingNaked_ = false;
     curTypeParams_.clear();  // G3 护栏窗口只覆盖本模板 params+body
     return d;
 }
@@ -259,6 +295,8 @@ std::unique_ptr<FunctionDecl> Parser::parseFunctionDecl(AccessLevel access, bool
         std::move(params), std::move(returnType), std::move(body), isStatic);
     d->typeParams = std::move(typeParams);
     d->implementsClauses = std::move(clauses);   // B02b
+    d->isNaked = pendingNaked_;                  // ai/vb-asm-extension-spec: <Naked>
+    pendingNaked_ = false;
     curTypeParams_.clear();  // G3 护栏窗口只覆盖本模板 params+As+body
     return d;
 }

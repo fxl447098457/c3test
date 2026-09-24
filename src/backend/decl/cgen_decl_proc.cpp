@@ -16,8 +16,9 @@ namespace vb6c3 {
 void CCodeGen::visit(SubDecl& node) {
     // 泛型模板 (tB, G2/G3): 模板本体不发码 (泛型器注入特化副本)
     if (!node.typeParams.empty()) return;
-    // ai/vb-asm-extension-spec: Asm 块过程 → 独立 MASM 过程 (v1 x64)
-    if (tryEmitAsmProc(node.name, node.access, node.params, nullptr, node.body, node.loc)) return;
+    // ai/vb-asm-extension-spec: Asm 块过程 → x64 独立 MASM 过程 / x86 内联 __asm 块
+    if (tryEmitAsmProc(node.name, node.access, node.params, nullptr, node.body, node.loc,
+                       node.isNaked)) return;
     std::string sig = makeProcSignature(node);
 
     // Fix 055: Form事件处理函数不能为static, 因为wndproc用extern引用它们

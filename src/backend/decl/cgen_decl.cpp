@@ -34,17 +34,20 @@ void CCodeGen::clearProcArrayTracking() {
 }
 
 // ============================================================
-// ai/vb-asm-extension-spec: Asm 块过程降级 (v1: x64 → MASM 独立过程)
-//   命中: 过程体恰好是 1 条 AsmStmt。
+// ai/vb-asm-extension-spec: Asm 块过程降级
+//   命中: 过程体恰好是 1 条 AsmStmt (块形式或单行形式)。
+//   x86 (32 位): 降级为 MSVC `__asm { }` 内联块 —— 共享 C 函数栈帧, 按名引用天然成立
+//                ([var] → C 参数名), [Function] → 返回临时变量; 非 Naked 时自动
+//                push/pop 块内踩到的 callee-saved (ebx/esi/edi, 及 clobber 里的 ebp)。
 //   x64: 不发 C 体, 只发 `extern` 原型 + 把元数据记进 asmProcs_
 //        (driver 侧生成 .asm, ml64 汇编后进链接)。
-//   x86: 报 3030 (v1 未支持 x86 内联汇编)。
-//   v1 边界 (spec §10): 整块独占过程体 / 非类方法 / 无 Optional/ParamArray /
-//   参数 ≤4 (Win64 寄存器传参上限) / 参数为整型或指针 (浮点 xmm 传参待 v2)。
+//   边界 (spec §10): 整块独占过程体 (混排待 v2) / 非类方法 / 无 Optional/ParamArray /
+//   参数为整型或指针 (浮点 xmm 传参待 v2) / x64 参数 ≤4 (寄存器传参上限)。
 // ============================================================
 bool CCodeGen::tryEmitAsmProc(const std::string& procName, AccessLevel access,
                               std::vector<std::unique_ptr<ParameterDecl>>& params,
-                              ASTNode* returnType, const StmtList& body, SourceLocation loc) {
+                              ASTNode* returnType, const StmtList& body, SourceLocation loc,
+                              bool isNaked) {
     AsmStmt* asmNode = nullptr;
     for (auto& st : body) {
         if (st && st->kind == ASTNodeKind::AsmStmt) {
@@ -58,21 +61,20 @@ bool CCodeGen::tryEmitAsmProc(const std::string& procName, AccessLevel access,
         return true;              // 已接管: 不再发 C 体 (编译已失败)
     };
 
+    const bool x86 = (targetArch_ == "x86");
+
     if (body.size() != 1)
         return fail(DiagnosticID::SemAsmMixedBody,
-                    "Asm 块必须独占过程体 (v1 不支持与 VB 语句混排)");
-    if (targetArch_ == "x86")
-        return fail(DiagnosticID::SemAsmArchUnsupported,
-                    "Asm 块在 x86 目标下暂不支持 (v1 走 MASM/ml64, 请改用 --arch x64)");
+                    "Asm 块必须独占过程体 (不支持与 VB 语句混排)");
     if (isClassModule_)
-        return fail(DiagnosticID::SemAsmMixedBody, "类方法暂不支持 Asm 块 (v1 仅标准模块过程)");
-    if (params.size() > 4)
+        return fail(DiagnosticID::SemAsmMixedBody, "类方法暂不支持 Asm 块 (仅标准模块过程)");
+    if (!x86 && params.size() > 4)
         return fail(DiagnosticID::SemAsmMixedBody,
-                    "Asm 过程 v1 最多 4 个参数 (Win64 寄存器传参上限, 栈传参待 v2)");
+                    "x64 Asm 过程最多 4 个参数 (Win64 寄存器传参上限, 栈传参待 v2)");
 
     for (auto& p : params) {
-        if (p->isOptional)   return fail(DiagnosticID::SemAsmMixedBody, "Asm 过程暂不支持 Optional 参数 (v1)");
-        if (p->isParamArray) return fail(DiagnosticID::SemAsmMixedBody, "Asm 过程暂不支持 ParamArray 参数 (v1)");
+        if (p->isOptional)   return fail(DiagnosticID::SemAsmMixedBody, "Asm 过程暂不支持 Optional 参数");
+        if (p->isParamArray) return fail(DiagnosticID::SemAsmMixedBody, "Asm 过程暂不支持 ParamArray 参数");
     }
 
     AsmProcInfo info;
@@ -80,14 +82,14 @@ bool CCodeGen::tryEmitAsmProc(const std::string& procName, AccessLevel access,
     info.retCType = returnType ? mapTypeRef(returnType) : "void";
     for (auto& p : params) info.params.push_back(makeParamCType(p.get()));
 
-    // 参数类型白名单: 整型 / 任意指针 (含 ByRef 的 `T*`)。浮点与结构体按值 v1 不支持。
+    // 参数类型白名单: 整型 / 任意指针 (含 ByRef 的 `T*`)。浮点与结构体按值不支持。
     static const char* kIntTypes[] = {"int8_t", "int16_t", "int32_t", "int64_t", "intptr_t", "unsigned", "VBABOOL"};
     for (auto& ps : info.params) {
         std::string t = ps.substr(0, ps.find(' '));
         bool ok = t.find('*') != std::string::npos;
         for (const char* k : kIntTypes) if (t == k) ok = true;
         if (!ok) return fail(DiagnosticID::SemAsmMixedBody,
-                             "Asm 过程参数暂只支持整型与指针 (v1): " + ps);
+                             "Asm 过程参数暂只支持整型与指针: " + ps);
     }
 
     // 返回类型同理 (double/Single 走 xmm0, String 走 BSTR 约定, 均待 v2)
@@ -96,12 +98,121 @@ bool CCodeGen::tryEmitAsmProc(const std::string& procName, AccessLevel access,
         bool ok = (rt == "void") || rt.find('*') != std::string::npos;
         for (const char* k : kIntTypes) if (rt == k) ok = true;
         if (!ok) return fail(DiagnosticID::SemAsmMixedBody,
-                             "Asm 过程返回类型暂只支持整型/指针/void (v1): " + rt);
+                             "Asm 过程返回类型暂只支持整型/指针/void: " + rt);
     }
+    if (x86 && info.retCType == "int64_t")
+        return fail(DiagnosticID::SemAsmMixedBody,
+                    "x86 内联汇编过程暂不支持 64 位整型返回 (返回值在 edx:eax, 待 v2)");
 
     info.lines = asmNode->lines;
+    info.naked = isNaked;
+    info.clobbers = asmNode->clobbers;
 
     std::string paramsC = makeParamList(params);
+
+    // ---------------- x86: MSVC 内联汇编 ----------------
+    if (x86) {
+        // 注释状态: `<Naked>` 走 __declspec(naked) (无 prologue/epilogue, 用户自写 ret);
+        // 普通块由 MSVC 保留 C 函数帧, 我们只在块入口/出口成对 push/pop callee-saved。
+        if (info.naked)
+            c_.emitLine("/* ai/vb-asm-extension-spec: <Naked> Asm 过程 → MSVC __asm 块 (x86, 无 prologue/epilogue) */");
+        else
+            c_.emitLine("/* ai/vb-asm-extension-spec: Asm 块 → MSVC __asm 块 (x86) */");
+
+        std::string head = info.retCType + " " + info.cName + "(" + paramsC + ")";
+        c_.emitLine((info.naked ? "__declspec(naked) " : "") + head + " {");
+
+        const char* kRetName = "vb6_asm_ret_";
+        // 注意: 用 `= 0` 而不是 `{}` —— `/std:c11` 下空花括号初始化标量是 C23 才有的语法,
+        // 会让 cl 报 C2143 (实测踩过)。
+        if (!info.naked && info.retCType != "void")
+            c_.emitLine("    " + info.retCType + " " + kRetName + " = 0;");
+
+        // `[param]` → C 参数名 (MSVC 内联汇编按名解析, ByRef 参数名本身就是指针 →
+        // "变量即其地址"语义与 x64 侧一致); [Function] → 返回临时变量 (naked 下为 eax)。
+        // x86 `<Naked>` 例外: 没有栈帧, 参数在调用者栈上, 名字无从解析 → 报 3036。
+        for (auto& ps : info.params) {
+            size_t sp = ps.find(' ');
+            if (sp == std::string::npos) continue;
+            std::string name = ps.substr(sp + 1);
+            while (!name.empty() && name.back() == ' ') name.pop_back();
+            if (info.naked) {
+                std::string token = "[" + name + "]";
+                std::string tokenLower; for (char ch : token) tokenLower += static_cast<char>(::tolower(static_cast<unsigned char>(ch)));
+                for (auto& l : info.lines) {
+                    std::string lower; for (char ch : l) lower += static_cast<char>(::tolower(static_cast<unsigned char>(ch)));
+                    if (lower.find(tokenLower) != std::string::npos)
+                        return fail(DiagnosticID::SemAsmFormUnsupported,
+                                    "x86 <Naked> 过程无法按名引用参数 " + token +
+                                    " (naked 无栈帧, 参数在调用者的栈上); 请去掉 <Naked> 或改用寄存器/立即数");
+                }
+            }
+        }
+        auto subs = asmBuildX86Subs(info, info.naked ? std::string("eax") : std::string(kRetName));
+
+        std::vector<std::string> body = asmRewriteLines(info.lines, subs, info.cName);
+
+        // 宽度校验 (把 cl 的 C2443/A2022 前移成 VB 诊断 3038)
+        {
+            bool widthBad = false;
+            asmCheckRegWidths(body, [&](int idx, const std::string& dst, const std::string& src,
+                                        int dw, int sw) {
+                if (widthBad) return;   // 只报第一处
+                widthBad = true;
+                fail(DiagnosticID::SemAsmOperandWidthMismatch,
+                     "Asm 第 " + std::to_string(idx + 1) + " 行操作数宽度不一致: `" +
+                     info.lines[idx] + "` (" + dst + " 是 " + std::to_string(dw) +
+                     " 位, " + src + " 是 " + std::to_string(sw) +
+                     " 位); 请统一宽度 —— 32 位值用低 32 位寄存器 (如 ebx/edi), 或改用 movsxd/movzx");
+            });
+            if (widthBad) return true;   // 诊断已报, 不再发射
+        }
+
+        std::vector<std::string> saved =
+            info.naked ? std::vector<std::string>()
+                       : asmSavedRegsForArch(info.lines, info.clobbers, /*x64=*/false);
+
+        // 返回值收尾: 块里没写 `[Function]` 时, 值按 VB 约定留在 EAX —— 落到 C 返回变量。
+        // (x64 那条后端不需要这步: 值本来就在 RAX 里, 过程直接 ret 即可。)
+        // 单行形式 (`Asm mov eax, [num]`) 正是靠这条拿到返回值。
+        // 判据用**重写后**的 body: 用户写了 [Function] 就会看到 kRetName。
+        bool wroteRet = false;
+        for (auto& l : body)
+            if (l.find(kRetName) != std::string::npos) { wroteRet = true; break; }
+        if (!info.naked && info.retCType != "void" && !wroteRet)
+            body.push_back(std::string("mov ") + kRetName + ", eax");
+
+        c_.emitLine("    __asm {");
+        for (auto& r : saved) c_.emitLine("        push " + r);
+        for (auto& l : body) c_.emitLine("        " + l);
+        for (auto it = saved.rbegin(); it != saved.rend(); ++it) c_.emitLine("        pop " + *it);
+        c_.emitLine("    }");
+        if (!info.naked && info.retCType != "void")
+            c_.emitLine("    return " + std::string(kRetName) + ";");
+        c_.emitLine("}");
+        return true;
+    }
+
+    // ---------------- x64: 独立 MASM 过程 (driver 侧) ----------------
+    // 宽度校验 (把 ml64 的 A2022 前移成 VB 诊断 3038): 用与 driver 完全同一张替换表
+    // (asmBuildX64Subs) 模拟代入后查两个纯寄存器操作数的宽度。
+    {
+        auto xsubs = asmBuildX64Subs(info);
+        auto xbody = asmRewriteLines(info.lines, xsubs, info.cName);
+        bool widthBad = false;
+        asmCheckRegWidths(xbody, [&](int idx, const std::string& dst, const std::string& src,
+                                     int dw, int sw) {
+            if (widthBad) return;   // 只报第一处
+            widthBad = true;
+            fail(DiagnosticID::SemAsmOperandWidthMismatch,
+                 "Asm 第 " + std::to_string(idx + 1) + " 行操作数宽度不一致: `" +
+                 info.lines[idx] + "` (" + dst + " 是 " + std::to_string(dw) +
+                 " 位, " + src + " 是 " + std::to_string(sw) +
+                 " 位); 请统一宽度 —— 32 位值用低 32 位寄存器 (如 ecx/eax), 或改用 movsxd/movzx");
+        });
+        if (widthBad) return true;   // 诊断已报, 不再收集 (编译到此失败)
+    }
+
     c_.emitLine("/* ai/vb-asm-extension-spec: 过程体为 Asm 块; 实现在 ml64 汇编的 "
                 + info.cName + " (见 .asm) */");
     c_.emitLine("extern " + info.retCType + " " + info.cName + "(" + paramsC + ");");
