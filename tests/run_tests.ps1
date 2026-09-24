@@ -1503,12 +1503,19 @@ if ($Category -in @("all", "asm")) {
     if (Test-Path "$Tests\asm\asm_ok.vbp") {
         Test-Vbp "asm_ok" "$Tests\asm\asm_ok.vbp" @(
             "ASM-ADD:42", "ASM-ATOMIC-OLD:10", "ASM-ATOMIC-NEW:15",
-            "ASM-KEEP-RBX:37", "ASM-CLOBBER:12", "ASM-NAKED:100", "ASM-ONELINE:1234", "ASM-DONE")
+            "ASM-KEEP-RBX:37", "ASM-CLOBBER:12", "ASM-NAKED:100", "ASM-ONELINE:1234",
+            # 项4 x64 浮点 (XMM0/xmm1 + xmm0 返回) / 项5 x64 栈传参 (shadow space 之后) /
+            # 项6 x64 int64 返回 (RAX) —— 见 spec §12.1/12.2
+            "ASM-DBL:3.75", "ASM-SUM6:21", "ASM-BIG64:4000000000", "ASM-DONE")
     }
     if (Test-Path "$Tests\asm\asm_x86.vbp") {
         Test-Vbp "asm_x86_inline" "$Tests\asm\asm_x86.vbp" @(
             "X86-ADD:42", "X86-KEEP-EBX:37", "X86-CLOBBER:12",
-            "X86-NAKED:5", "X86-ONELINE:1234", "X86-DONE") -Arch "x86"
+            "X86-NAKED:5", "X86-ONELINE:1234",
+            # 项4 x86 浮点返回 (ST0 → fstp) / 项5 x86 全栈参数按名解析 /
+            # 项6 x86 int64 返回 (EDX:EAX + [Function+4]) —— 见 spec §12.1/12.3
+            "X86-DBL:3.75", "X86-SUM5:15", "X86-BIG:4000000000",
+            "X86-MAKE64:4294967297", "X86-DONE") -Arch "x86"
     }
     if (Test-Path "$Tests\asm\asm_neg.vbp") {
         Test-VbpBuildFail "asm_neg_mixed_body" "$Tests\asm\asm_neg.vbp" "3037"

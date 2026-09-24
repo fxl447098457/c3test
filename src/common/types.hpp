@@ -32,7 +32,12 @@ enum class Vb6Type : uint16_t {
     Decimal = 14,    // 96-bit unsigned integer + scaling
     Byte = 17,       // 8-bit unsigned
     ULong = 19,      // unsigned Long (VB7+)
-    LongPtr = 20,     // Fix 081e: LongPtr/LongLong - architecture-width integer (intptr_t)
+    LongPtr = 20,     // Fix 081e: LongPtr - architecture-width integer (intptr_t)
+    // Fix 084m: LongLong 与 LongPtr **分开**。历史实现把 LongLong 也映射到 LongPtr,
+    // 于是 x86 下 (intptr_t = 4 字节) 它退化成 32 位 —— 与「有符号 64 位,
+    // -2^63 .. 2^63-1」的语义不符, 实测让 Asm 过程的 int64 返回值高位全丢。
+    // 语义: 恒为 64 位有符号 (int64_t), 与架构无关 (对比 LongPtr 是架构宽度)。
+    LongLong = 21,
     UserDefinedType = 36,
     Array = 8192,    // bit flag
     ByRef = 16384,   // bit flag

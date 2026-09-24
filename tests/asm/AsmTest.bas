@@ -78,6 +78,43 @@ Public Function Identity(ByVal num As Long) As Long
     Asm mov eax, [num]
 End Function
 
+' ---- 项4: 浮点参数/返回 (spec §6) ----
+' Double 参数走 XMM0 (Win64 独立于整型计数), 返回走 XMM0。
+Public Function DblAdd(ByVal a As Double, ByVal b As Double) As Double
+    Asm
+        addsd xmm0, xmm1        ' xmm0 = a + b (第 2 个双精度在 xmm1)
+        movsd [Function], xmm0  ' 返回双精度
+    End Asm
+End Function
+
+' ---- 项5: x64 栈传参 (>4 参) ----
+' 第 5、6 个参数在栈上 (32B shadow + 8B 返回地址之后)。有栈参时后端建 RBP 帧,
+' 用户按 [p5]/[p6] 引用, 宽度由自己标注。
+Public Function Sum6(ByVal a As Long, ByVal b As Long, ByVal c As Long,
+                     ByVal d As Long, ByVal e As Long, ByVal f As Long) As Long
+    Asm
+        mov eax, [a]
+        add eax, [b]
+        add eax, [c]
+        add eax, [d]
+        add eax, dword ptr [e]      ' 第 5 参在 [rbp+16]
+        add eax, dword ptr [f]      ' 第 6 参在 [rbp+24]
+        mov [Function], eax
+    End Asm
+End Function
+
+' ---- 项6 (x64 形态): int64 返回直接走 RAX ----
+' Win64 下 64 位整型返回值就放 RAX, 与指针同宽 —— 无需 EDX:EAX 拆分 (对比 x86)。
+' Fix 084m 后 LongLong 是真正的 int64_t (x64 下与 intptr_t 同宽, x86 下才是 8 字节)。
+Public Function BigAdd64(ByVal a As Long, ByVal b As Long) As LongLong
+    Asm
+        movsxd rax, ecx         ' 符号扩展 ecx (a) → rax
+        movsxd rdx, edx         ' 符号扩展 edx (b) → rdx
+        add rax, rdx            ' 64 位相加, 不丢溢出
+        mov [Function], rax     ' 64 位返回 → rax
+    End Asm
+End Function
+
 Sub Main()
     Debug.Print "ASM-ADD:" & AddFive(37)
 
@@ -92,5 +129,8 @@ Sub Main()
     Debug.Print "ASM-CLOBBER:" & ClobberR12(1)     ' 12
     Debug.Print "ASM-NAKED:" & NakedFive(95)       ' 100
     Debug.Print "ASM-ONELINE:" & Identity(1234)    ' 1234
+    Debug.Print "ASM-DBL:" & DblAdd(1.5, 2.25)     ' 3.75
+    Debug.Print "ASM-SUM6:" & Sum6(1, 2, 3, 4, 5, 6)  ' 21
+    Debug.Print "ASM-BIG64:" & BigAdd64(2000000000, 2000000000)  ' 4000000000
     Debug.Print "ASM-DONE"
 End Sub

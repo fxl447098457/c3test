@@ -60,9 +60,10 @@ End Function
 |---|---|
 | 块结构 | `Asm ... End Asm`；单行可用 `Asm <指令>`（过程体只有一条指令时）。 |
 | 按名引用 | `[var]` 引用变量；编译器做栈帧 / ABI 寄存器替换（见 §4、§5）。 |
-| 返回值 | `[Function]` 占位 → 映射到 ABI 返回寄存器（x86=eax，x64=rax）。x86 内联块里若整块没写 `[Function]`，收尾自动把 EAX 落到返回值（单行形式靠这条）。 |
+| 带偏移引用 | `[var]` / `[Function]` 后可直接跟常量偏移：`[Function+4]`、`[buf-8]`。编译器把整对方括号一起吃掉（`[Function+4]` → `ret+4`）。x86 下用来取 64 位返回变量的高低半（见 §12.3）。 |
+| 返回值 | `[Function]` 占位 → 映射到 ABI 返回寄存器（x86=eax，x64=rax；浮点 x86=`fstp` 目标、x64=`xmm0`）。x86 内联块里若整块没写 `[Function]`，收尾自动把 EAX 落到返回值（单行形式靠这条）。 |
 | 注释 | 用 VB 风格 `'`，**不用** `;`（避免与汇编冲突）。 |
-| 大小标注 | 用 **MASM 风格 `dword ptr [n]`**，不要用 GAS 的 `dword Ptr [n]`（那是 GAS 怪癖，别泄漏给用户）。 |
+| 大小标注 | 用 **MASM 风格 `dword ptr [n]`**，不要用 GAS 的 `dword Ptr [n]`（那是 GAS 怪癖，别泄漏给用户）。x86 内联汇编里向 64 位变量写 32 位寄存器，`dword ptr` **不能省**（否则 C2443）。 |
 | 标签 | `.name:` 局部标签，`jmp .name` 引用；发射期重写为 `<过程名>_<name>`（MASM PROC 内无 proc 局部标签，同文件多 PROC 会撞名）。 |
 | 寄存器命名 | 标准 Intel：`eax/rax`、`xmm0`…、`st(0)`…。 |
 | 可选 clobber | `Asm Clobber("rbx","r12","memory") ... End Asm`，声明踩了哪些寄存器 / 内存，与块内静态扫描取并集后自动生成 push/pop。 |
@@ -180,8 +181,22 @@ END
 | 平台 / 约定 | 参数传递 | 返回值 | 被调用者保存 (callee) | 调用者保存 (caller) | 栈对齐 |
 |---|---|---|---|---|---|
 | Win32 `cdecl` | 右→左压栈，caller 清栈 | eax (64位: edx:eax) | ebx, esi, edi, ebp, esp | eax, ecx, edx | 4B |
-| Win32 `stdcall` | 右→左压栈，callee 清栈 | eax | 同上 | 同上 | 4B |
-| **Win64** | RCX,RDX,R8,R9 + 栈(右→左) | RAX | RBX,RBP,RDI,RSI,R12–R15 | RAX,RCX,RDX,R8–R11 | **16B** |
+| Win32 `stdcall` | 右→左压栈，callee 清栈 | eax (64位: edx:eax) | 同上 | 同上 | 4B |
+| **Win64** | RCX,RDX,R8,R9 + 栈(右→左) | RAX (64位整型) / XMM0 (浮点) | RBX,RBP,RDI,RSI,R12–R15 | RAX,RCX,RDX,R8–R11 | **16B** |
+
+**浮点参数（Win64，2026-09-24 实测确认）**：XMM0–XMM3，**与整型参数独立计数** —— 整型用
+RCX/RDX/R8/R9 的编号，浮点用 XMM0–3 的编号，互不占用。例：`F(a As Long, x As Double)`
+→ `a` 在 RCX、`x` 在 **XMM0**（不是 XMM1）。第 4 个之后的浮点参数才溢出到**栈**。
+
+**Win64 栈槽布局（2026-09-24 实测，踩过 shadow space）**：被调方入口自 RBP 向上：
+`[rbp+0]` 旧 rbp / `[rbp+8]` 返回地址 / `[rbp+16..47]` **调用方预留 32B shadow space** /
+`[rbp+48]` 第 5 个栈参数 / `[rbp+56]` 第 6 个 …… 相对 RSP 则是 `[rsp+40]` 第 5 参
+（8B 返回地址 + 32B shadow）。**漏算 shadow 会静默取到垃圾**（首版写成 `[rbp+16+8k]`，
+`Sum6` 返回 -1644341686 而非 21）。
+
+**x86 浮点 / int64**：浮点参数按值在栈上（`[ebp+8+4n]`，double 占 8B）；
+浮点返回经 **ST(0)**（所以 `[Function]` 在 x86 下作 `fstp` 目标是 C double 变量）；
+int64 返回经 **EDX:EAX**，配合 `[Function]` / `[Function+4]` 偏移写法（低/高 32 位）。
 
 > 换架构（如 ARM64 AAPCS）只填一张新表，前端语法与后端编码不动——三层解耦的价值。
 
@@ -225,9 +240,12 @@ END
 3. 行内混排（非 Naked 的语句间 asm）是否支持——当前仅整块；混排需与寄存器分配器深度耦合，风险高，暂缓。
 4. ARM64 后端（AAPCS 表 + `armasm64`/`clang` 集成）——待 x64 跑通后评估（已具备 x86/x64 两套 ABI 表）。
 5. 标签 / 外部符号重定位：独立 MASM 过程由 `ml64` + 链接器处理；若未来做裸字节 Emit 逃生舱，需自行生成重定位项。
-6. 浮点/向量参数与返回（x64 走 XMM0–3）：当前 Asm 过程只接受整型与指针 —— 浮点按值参数与
-   `Single`/`Double` 返回均报 3037。
-7. x86 `int64_t` 返回（edx:eax 双寄存器）与 x64 栈传参（>4 参）：报 3037。
+6. ~~浮点/向量参数与返回（x64 走 XMM0–3）~~ —— **已实现 (2026-09-24)**。x64: XMM0–3 独立
+   计数 + `[Function]` → `xmm0`；x86: 浮点按值栈传 + `[Function]` → `fstp` 目标。
+   见 §12.1。向量 (XMM/YMM 打包类型) 仍未支持，按"标量浮点"处理。
+7. ~~x86 `int64_t` 返回（edx:eax 双寄存器）与 x64 栈传参（>4 参）~~ —— **已实现 (2026-09-24)**。
+   x64 栈传参见 §12.2（含 shadow space 陷阱）；x86 int64 返回见 §12.3（`[Function+4]` 偏移写法）。
+8. **`LongLong` 语义修正（Fix 084m，2026-09-24）** —— 见 §12.4。这是根因级修复，不是 asm 局部糖。
 
 ---
 
@@ -255,3 +273,116 @@ mov [Function], eax     ' 返回旧值
 正例夹具 `tests/asm/AsmTest.bas` 的 AtomicAdd 即此模板；定位过程（探针 p5 抓 ZF、p6 四变体二分）留在 `.temp/asmtest/` 可复查。
 
 **环境**：`run_tests.ps1` 自建 MSVC 环境（vswhere/C3_VCVARSALL + 动态发现 SDK，本机 SDK 在 `D:\Windows Kits\10`）。手工复现时**不要再额外 call vcvars64** —— 反而会把 INCLUDE 搅乱（C1083 stddef.h）。
+
+---
+
+## 12. 实现记录：项 4/5/6 + LongLong 语义修正（2026-09-24）
+
+本轮把 §10 的待办 6、7 全部落地，并顺手修掉一个**根因级类型缺陷**（LongLong）。
+两套后端各自跑通，正例断言全部为真：
+
+```
+x64  tests/asm/asm_ok.vbp    ASM-DBL:3.75  ASM-SUM6:21   ASM-BIG64:4000000000
+x86  tests/asm/asm_x86.vbp   X86-DBL:3.75  X86-SUM5:15   X86-BIG:4000000000  X86-MAKE64:4294967297
+```
+
+### 12.1 浮点参数与返回（项 4）
+
+**共件** `asm_proc.hpp` 新增 ABI 参数分类：`AsmParamClass{Int,Float,Stack}` +
+`AsmParamSlot{ctype,name,cls,regIndex,stackOffset}` + `asmClassifyParams(params, abi)`。
+
+- **x64**：整型/指针与浮点**各自独立编号**。`Int` → `kReg64/kReg32[regIndex]`（rcx/rdx/r8/r9），
+  `Float` → `"xmm"+regIndex`，`Stack` → `"[rsp+"+stackOffset+"]"`。`[Function]` 浮点返回 → `xmm0`。
+- **x86**：全部参数走栈（`[ebp+8+4n]`），但 MSVC 内联汇编**按名解析** —— `[name]` → C 形参名，
+  名字天然指向正确栈槽，**不用我们算偏移**。浮点返回经 ST(0)，所以 `[Function]` 是 `fstp` 的目标。
+
+**x86 返回收尾自动化**（用户没显式写 `[Function]` 时，由 codegen 补）：
+
+```cpp
+if (!info.naked && info.retCType != "void" && !wroteRet) {
+    if (asmIsFloatCType(info.retCType)) body.push_back("fstp " + kRetName);
+    else if (info.retCType == "int64_t") {
+        body.push_back("mov dword ptr [" + kRetName + "], eax");       // 低 32 位
+        body.push_back("mov dword ptr [" + kRetName + "+4], edx");     // 高 32 位
+    } else body.push_back("mov " + kRetName + ", eax");
+}
+```
+
+`dword ptr` 不能省：x86 内联汇编里向 64 位变量写 32 位寄存器，不标宽度 cl 报 **C2443**。
+
+### 12.2 x64 栈传参（项 5）——shadow space 是真正的坑
+
+用户写 `[e]` / `[f]`（第 5/6 参），宽度自己标（`dword ptr [e]`）。
+`driver_link.cpp` 的 `emitMasmProc` 检测到有栈参数时**才**生成 RBP 帧
+（`push rbp; mov rbp, rsp`），偏移是 **`[rbp+48+8k]`**，epilogue 逆序 pop 非 rbp 的
+callee-saved 再 `leave`。
+
+> **踩坑**：首版偏移写成 `[rbp+16+8k]`，`Sum6(1..6)` 返回 `-1644341686`（垃圾）。
+> 正确的账是：`[rbp+0]` 旧 rbp、`[rbp+8]` 返回地址、`[rbp+16..47]` **调用方预留的 32B
+> shadow space**、`[rbp+48]` 才是第 5 参。漏算 shadow 不会报错，只会静默读错内存。
+
+调试逃生舱：环境变量 **`C3_KEEP_ASM=<dir>`** 会把生成的 `.asm` 拷一份到该目录
+（driver 默认清空中间目录，排障时看不到 .asm）。
+
+### 12.3 x86 int64 返回（项 6）与 `[Function+偏移]` 语法
+
+x86 下 `LongLong` 返回走 EDX:EAX。返回变量是 64 位 C 变量，低 32 位在 `+0`、高 32 位在 `+4`，
+于是需要 **`[Function]` / `[Function+4]`** 这对写法 —— 这是本轮新增的**语法能力**。
+
+实现落在 `asmRewriteLines` 的 subs 代入阶段，统一处理两种形态、**都连整对方括号一起吃掉**：
+
+| 形态 | 输入 | 输出 |
+|---|---|---|
+| 精确 | `[name]` | `val` |
+| 带偏移 | `[name+4]` / `[name-8]` | `val+4` / `val-8` |
+
+> ⚠ **两个方向的错法都踩过**（写在这里免得后人重走）：
+> - 只吃前缀 `[name+` → `val+`：留下孤立的 `]` → cl **C2400「找到 ]」**。
+> - 只吃前缀但补上方括号 `[name+` → `[val+`：变成「按 val 当指针再偏 4」的内存引用，
+>   **语法合法、编译零报错**，运行静默取到垃圾 —— 比编不过更坏。
+>
+> 另一个坑：**不能拿完整的 `[name]` 去 `find`** —— `[name+4]` 里并不含 `[name]` 这个子串，
+> `find` 直接 npos，偏移分支永远进不去。必须扫 `[` + bare 前缀。
+
+### 12.4 `LongLong` 语义修正（Fix 084m）——根因级
+
+**症状**：x86 下 `BigAdd(2000000000, 2000000000)` 打出 `-294967296`，`Make64(1,1)` 打出 `1`
+（高位恒 0）。
+
+**根因不在 asm**。全局类型系统把 `LongLong` 与 `LongPtr` 一视同仁（`type_system.cpp`：
+`{"longlong", Vb6Type::LongPtr}`，注释写「VBA7 兼容」），而 `LongPtr` → `intptr_t`
+**在 x86 上是 4 字节**。于是 `int64_t` 语义的 `LongLong` 退化成 32 位：返回变量只有
+4 字节，`[Function+4]` 写到变量外面，高位全丢。
+
+**修法**：把 `LongLong` 从 `LongPtr` 里拆出来，给它自己的 `Vb6Type::LongLong = 21`，
+映射恒为 **`int64_t`（8 字节，与架构无关）**：
+
+| 位置 | 改动 |
+|---|---|
+| `src/common/types.hpp` | 新增 `LongLong = 21`（`LongPtr = 20` 保持不动） |
+| `src/semantics/type_system.cpp` | `{"longlong", Vb6Type::LongLong}`；`toString` 加分支；`isIntegral` 收录；`getTypeSize` 加 LongPtr(架构宽度)/LongLong(8) |
+| `src/backend/cgen_base_type.cpp` | `mapType` 与字面名 fallback 各自拆分 LongPtr/LongLong |
+| `src/backend/expr/cgen_expr_binary_util.cpp` | `CStr` 分派加 `LongLong` → `vb6_CStrLongLong`（落到 default 的 `CStrLong` 会截断） |
+| `src/rtl/core/vb6rtl/vb6rtl_conv.c/.h` | 新增 `vb6_CStrLongLong(int64_t)`（`vb6_Format` 不认 VT_I8，故直接 `%lld` 格式化） |
+| `cgen_decl_{func,proc,prop}.cpp` | 参数/返回值为 LongLong 时也登记 `knownLongPtrVars_`（复用标量整数的表达式路径） |
+
+> 注意与 `^` 后缀（VBA7 `LongPtr` 字面量）区分：后者语义确实是**指针宽度**，保持 `intptr_t`
+> 不变（`cgen_expr.cpp` 的 `LiteralKind::LongPtr` 分支**不动**）。
+
+`tests/asm/asm_x86.bas` 的 `BigAdd` 顺带演示了正确的 64 位加法写法 —— **先各自符号扩展到
+64 位再相加**，而不是在 32 位累加器上先溢出回绕：
+
+```asm
+mov eax, [a]
+cdq                     ' 扩 a
+mov ecx, eax
+mov ebx, edx            ' ebx:ecx = (int64)a
+mov eax, [b]
+cdq                     ' 扩 b
+add ecx, eax
+adc ebx, edx            ' 高 32 位带进位
+mov dword ptr [Function], ecx
+mov dword ptr [Function+4], ebx
+```
+
+（`ebx` 是 callee-saved，块内踩了它由既有机制自动 push/pop —— 生成代码里可见。）

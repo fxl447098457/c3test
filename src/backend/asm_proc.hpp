@@ -26,6 +26,63 @@ struct AsmProcInfo {
 };
 
 // ============================================================
+// 参数 ABI 分类 (spec §6 ABI 表 / §5 绑定模型)
+//   x64 (Win64): 整型/指针走 RCX,RDX,R8,R9 (独立计数); float/double 走 XMM0–3 (独立计数);
+//   两类**各自计数**, 第 5 个起压栈 ([rsp+40+8k], 40 = 8 返回地址 + 32 shadow space)。
+//   x86 (stdcall/cdecl): 全部右→左压栈, 第 n 个 (0 基) 在 [ebp+8+4n]; 浮点按值也压栈。
+//   float (Single) 在栈上是 4 字节, double 8 字节 —— 占位宽度按类型计。
+// ============================================================
+enum class AsmParamClass { Int, Float, Stack };
+
+inline bool asmIsFloatCType(const std::string& t) { return t == "float" || t == "double"; }
+
+struct AsmParamSlot {
+    std::string ctype;          // C 类型
+    std::string name;           // 参数名
+    AsmParamClass cls = AsmParamClass::Int;
+    int regIndex = -1;          // Int: GPR 槽 (0-3); Float: xmm 槽 (0-3); Stack: -1
+    int stackOffset = 0;        // Stack: 相对 rsp/ebp 的字节偏移 (x64: 从 rsp; x86: 从 ebp)
+};
+
+// 把 "CType name" 解析成槽位表。abi == "x64" / "x86"。
+inline std::vector<AsmParamSlot> asmClassifyParams(const std::vector<std::string>& params,
+                                                   const std::string& abi) {
+    std::vector<AsmParamSlot> out;
+    int gpr = 0, xmm = 0, stackBy = 0;
+    for (auto& ps : params) {
+        size_t sp = ps.find(' ');
+        if (sp == std::string::npos) continue;
+        AsmParamSlot s;
+        s.ctype = ps.substr(0, sp);
+        s.name = ps.substr(sp + 1);
+        while (!s.name.empty() && s.name.back() == ' ') s.name.pop_back();
+        const bool isFloat = asmIsFloatCType(s.ctype);
+        const bool isPtr = s.ctype.find('*') != std::string::npos;
+        if (abi == "x64") {
+            if (isFloat && xmm < 4) {
+                s.cls = AsmParamClass::Float; s.regIndex = xmm++;
+            } else if (!isFloat && !isPtr && gpr < 4) {
+                s.cls = AsmParamClass::Int; s.regIndex = gpr++;
+            } else if (!isFloat && isPtr && gpr < 4) {
+                s.cls = AsmParamClass::Int; s.regIndex = gpr++;
+            } else {
+                // 压栈: 8 返回地址 + 32 shadow space = 40; 之后每个栈参占 8 字节槽。
+                s.cls = AsmParamClass::Stack;
+                s.stackOffset = 40 + stackBy;
+                stackBy += 8;      // Win64 栈槽一律 8 字节对齐
+            }
+        } else {
+            s.cls = AsmParamClass::Stack;
+            s.stackOffset = 8 + stackBy;   // x86: [ebp+8] 起
+            stackBy += isFloat && s.ctype == "float" ? 4 : (isFloat ? 8 : 4);
+            stackBy = (stackBy + 3) & ~3;  // 4 字节对齐
+        }
+        out.push_back(std::move(s));
+    }
+    return out;
+}
+
+// ============================================================
 // callee-saved 寄存器识别 (spec §7)
 //   三处口径一致: x64 MASM 过程 / x86 内联块 / (将来) 其它后端。
 //   做法是**文本级 token 扫描**: 把每行按"标识符"切分, 命中别名表即算用到。
@@ -156,14 +213,50 @@ inline std::vector<std::string> asmRewriteLines(
             }
         }
         // ④ subs 代入
+        //   两种形态, 都要**连整对方括号一起吃掉** (与 [name] → val 的口径一致):
+        //     a) 精确形态 `[name]`              → val
+        //     b) 带常量偏移 `[name+4]` / `[name-8]` → val+4 / val-8
+        //   为什么 b 必须整体处理 (实测踩过两次, 两个方向都错):
+        //     只吃前缀 `[name+` → val+ 会留下孤立的 `]` → cl 报 C2400「找到 ]」;
+        //     只吃前缀但补上方括号 `[name+` → [val+ 会变成「按 val 当指针再偏 4」的
+        //     内存引用 —— 语法合法、编译零报错, 但语义完全不对, 运行静默取到垃圾。
+        //   偏移只限十进制数字 (+/- 可选); [name] 与 [name+...] 由长度/字符双重区分,
+        //   不会互相误吞 (`[abc]` 不会被 `[ab` 规则命中, 因为要求紧随 `+`/`-` 且
+        //   再往后全是数字并以 `]` 收尾)。
         for (auto& s : subs) {
-            std::string tokenLower = lower(s.first);
+            // 扫 "[" + bare (不含尾部 ']'), 从而同时覆盖精确与带偏移两种形态。
+            //   注意: 不能拿完整的 "[name]" 去 find —— "[name+4]" 里并不含 "[name]"
+            //   这个子串, find 直接 npos, 偏移分支永远进不去 (踩过)。
+            std::string bare = s.first.substr(1, s.first.size() - 2);
+            std::string openLower = lower("[" + bare);
             std::string lowLine = lower(line);
             size_t pos = 0;
-            while ((pos = lowLine.find(tokenLower, pos)) != std::string::npos) {
-                line.replace(pos, s.first.size(), s.second);
-                lowLine.replace(pos, s.first.size(), s.second);
-                pos += s.second.size();
+            while (pos < lowLine.size() &&
+                   (pos = lowLine.find(openLower, pos)) != std::string::npos) {
+                size_t k = pos + openLower.size();
+                // 形态 b: [name±N]  →  val±N   (连尾 ']' 一起吃)
+                if (k < lowLine.size() && (lowLine[k] == '+' || lowLine[k] == '-')) {
+                    char sign = lowLine[k];
+                    size_t d = k + 1, e = d;
+                    while (e < lowLine.size() && std::isdigit(static_cast<unsigned char>(lowLine[e]))) e++;
+                    if (e > d && e < lowLine.size() && lowLine[e] == ']') {
+                        std::string off = line.substr(d, e - d);
+                        std::string repl = s.second + sign + off;
+                        size_t whole = e + 1 - pos;      // "[name±N]" 整体长度
+                        line.replace(pos, whole, repl);
+                        lowLine.replace(pos, whole, lower(repl));
+                        pos += repl.size();
+                        continue;
+                    }
+                }
+                // 形态 a: [name]  →  val
+                if (k < lowLine.size() && lowLine[k] == ']') {
+                    line.replace(pos, openLower.size() + 1, s.second);
+                    lowLine.replace(pos, openLower.size() + 1, s.second);
+                    pos += s.second.size();
+                    continue;
+                }
+                pos += 1;   // 不是我们的引用形态 (如 [namex]), 继续往后找
             }
         }
         // ⑤ 自赋值消除
@@ -203,27 +296,46 @@ inline std::vector<std::pair<std::string, std::string>> asmBuildX64Subs(const As
     static const char* kReg64[4] = {"rcx", "rdx", "r8", "r9"};
     static const char* kReg32[4] = {"ecx", "edx", "r8d", "r9d"};
     std::vector<std::pair<std::string, std::string>> subs;
-    for (size_t i = 0; i < p.params.size() && i < 4; i++) {
-        const std::string& ps = p.params[i];       // "CType name"
-        size_t sp = ps.find(' ');
-        if (sp == std::string::npos) continue;
-        std::string ctype = ps.substr(0, sp);
-        std::string name = ps.substr(sp + 1);
-        while (!name.empty() && name.back() == ' ') name.pop_back();
-        bool is32 = (ctype == "int32_t" || ctype == "int16_t" || ctype == "int8_t" ||
-                     ctype == "VBABOOL" || ctype == "unsigned");
-        subs.push_back({ "[" + name + "]", is32 ? kReg32[i] : kReg64[i] });
+    // 按 Win64 ABI 分类: 整型/指针 GPR 独立计数, float/double XMM 独立计数, 溢出压栈。
+    auto slots = asmClassifyParams(p.params, "x64");
+    for (auto& s : slots) {
+        if (s.cls == AsmParamClass::Int) {
+            bool is32 = (s.ctype == "int32_t" || s.ctype == "int16_t" || s.ctype == "int8_t" ||
+                         s.ctype == "VBABOOL" || s.ctype == "unsigned");
+            subs.push_back({ "[" + s.name + "]", is32 ? kReg32[s.regIndex] : kReg64[s.regIndex] });
+        } else if (s.cls == AsmParamClass::Float) {
+            // float/double 在 xmm0–3; 大小标注由用户写 (`movss`/`movsd` 或 dword/qword ptr)。
+            subs.push_back({ "[" + s.name + "]", "xmm" + std::to_string(s.regIndex) });
+        } else {
+            // 栈参数 (第 5 个起): 用户写 `[name]` 表示"该槽的**地址表达式**", 代入后为
+            // 裸 `[rsp+40+8k]` —— 宽度由用户的 `dword ptr`/`qword ptr` 标注决定
+            // (Win64 栈槽一律 8 字节, 但参数本身可能只占低 4 字节)。
+            // 布局: [rsp+0] 返回地址; [rsp+8..39] 调用方 shadow space (32B);
+            //       [rsp+40] 第 5 参, [rsp+48] 第 6 参 …
+            subs.push_back({ "[" + s.name + "]",
+                             "[rsp+" + std::to_string(s.stackOffset) + "]" });
+        }
     }
-    bool retIs32 = (p.retCType == "int8_t" || p.retCType == "int16_t" ||
-                    p.retCType == "int32_t" || p.retCType == "VBABOOL" ||
-                    p.retCType == "unsigned");
-    subs.push_back({ "[function]", retIs32 ? "eax" : "rax" });
+    // [Function] → 与返回类型同宽的返回寄存器。浮点返回走 xmm0 (spec §6)。
+    std::string ret;
+    if (asmIsFloatCType(p.retCType)) ret = "xmm0";
+    else {
+        bool retIs32 = (p.retCType == "int8_t" || p.retCType == "int16_t" ||
+                        p.retCType == "int32_t" || p.retCType == "VBABOOL" ||
+                        p.retCType == "unsigned");
+        ret = retIs32 ? "eax" : "rax";
+    }
+    subs.push_back({ "[function]", ret });
     return subs;
 }
 
 inline std::vector<std::pair<std::string, std::string>> asmBuildX86Subs(
         const AsmProcInfo& p, const std::string& retVarName) {
     std::vector<std::pair<std::string, std::string>> subs;
+    // x86: 全部参数 (含 >4 个 / 浮点按值) 由 MSVC 内联汇编按名解析 —— 名字天然指向
+    // 正确的栈槽或寄存器, 无需我们算偏移。这里只需保留 [name] → name 的替换。
+    // 带偏移的形态 ([Function+4]) 由 asmRewriteLines 的通用规则展开, subs 只表达
+    // 「[name] → 内容」这一件事, 不在这里拼前缀变体 (拼过, 两种写法都错, 见该处注释)。
     for (auto& ps : p.params) {
         size_t sp = ps.find(' ');
         if (sp == std::string::npos) continue;

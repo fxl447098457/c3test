@@ -76,6 +76,8 @@ BSTR vb6_CStr(vb6_VARIANT x);
 // M22: typed CStr overloads
 BSTR vb6_CStrLong(int32_t x);
 BSTR vb6_CStrLongFromVariant(vb6_VARIANT x);   // Fix 158q: _Generic 兜底的 Variant 解包入口
+// Fix 084m: LongLong → String (64 位, 不截断; vb6_Format 不认 VT_I8, 故独立实现)
+BSTR vb6_CStrLongLong(int64_t x);
 BSTR vb6_CStrDbl(double x);
 // Fix 117c: Single 专用 (VT_R4, 7 位有效数字 + 最短往返)
 BSTR vb6_CStrSingle(float x);

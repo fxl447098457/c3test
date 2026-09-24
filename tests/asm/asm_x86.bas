@@ -45,11 +45,71 @@ Public Function Identity(ByVal num As Long) As Long
     Asm mov eax, [num]
 End Function
 
+' ---- 项4: 浮点参数/返回 (x86 下 double 在栈上, 返回经 ST(0)) ----
+Public Function DblAdd(ByVal a As Double, ByVal b As Double) As Double
+    Asm
+        fld qword ptr [a]
+        fadd qword ptr [b]
+        fstp [Function]         ' 返回双精度 (ST0 → 返回变量)
+    End Asm
+End Function
+
+' ---- 项5: 5 个参数 (x86 全部走栈, 按名解析天然正确) ----
+Public Function Sum5(ByVal a As Long, ByVal b As Long, ByVal c As Long,
+                     ByVal d As Long, ByVal e As Long) As Long
+    Asm
+        mov eax, [a]
+        add eax, [b]
+        add eax, [c]
+        add eax, [d]
+        add eax, [e]
+        mov [Function], eax
+    End Asm
+End Function
+
+' ---- 项6: int64 返回 (edx:eax 对) ----
+' x86 下 LongLong 按值返回走 EDX:EAX; 返回变量是 64 位 C 变量, 低 32 位在 +0, 高 32 位在 +4,
+' 故用 [Function] / [Function+4] 这对偏移写法 (asmRewriteLines 的偏移规则负责整体展开)。
+' 注意 x86 内联汇编中写 64 位变量的低 32 位必须显式 `dword ptr` (否则 C2443 操作数大小冲突)。
+'
+' 这里演示「两个 Long 相加, 结果以 64 位返回且**不丢溢出**」—— 正确做法是先把 int32 操作数
+' 各自符号扩展到 64 位 (cdq 只扩 eax), 再作 64 位加法, 否则 eax 上先溢出回绕就晚了:
+'   反面写法 `mov eax,[a]; add eax,[b]; cdq` 在 a=b=2e9 时 eax 先变成 -294967296,
+'   再 cdq 得到 edx=-1, 结果 -294967296 而非 4000000000。
+Public Function BigAdd(ByVal a As Long, ByVal b As Long) As LongLong
+    Asm
+        mov eax, [a]
+        cdq                             ' 扩 a 到 edx:eax
+        mov ecx, eax
+        mov ebx, edx                    ' ebx:ecx = (int64)a
+        mov eax, [b]
+        cdq                             ' 扩 b 到 edx:eax
+        add ecx, eax                    ' 低 32 位相加
+        adc ebx, edx                    ' 高 32 位带进位相加
+        mov dword ptr [Function], ecx
+        mov dword ptr [Function+4], ebx
+    End Asm
+End Function
+
+' 演示 EDX:EAX 对的直接搬运: 64 位值拆成 (lo, hi) 两半传入, 组装后返回
+Public Function Make64(ByVal lo As Long, ByVal hi As Long) As LongLong
+    Asm
+        mov eax, [lo]
+        mov edx, [hi]                   ' edx:eax = hi:lo
+        mov dword ptr [Function], eax
+        mov dword ptr [Function+4], edx
+    End Asm
+End Function
+
 Sub Main()
     Debug.Print "X86-ADD:" & AddFive(37)          ' 42
     Debug.Print "X86-KEEP-EBX:" & KeepEbx(30)      ' 37
     Debug.Print "X86-CLOBBER:" & ClobberDriven(1)  ' 12
     Debug.Print "X86-NAKED:" & NakedFive()         ' 5
     Debug.Print "X86-ONELINE:" & Identity(1234)    ' 1234
+    Debug.Print "X86-DBL:" & DblAdd(1.5, 2.25)     ' 3.75
+    Debug.Print "X86-SUM5:" & Sum5(1, 2, 3, 4, 5)  ' 15
+    Debug.Print "X86-BIG:" & BigAdd(2000000000, 2000000000)  ' 4000000000
+    Debug.Print "X86-MAKE64:" & Make64(1, 1)                 ' 4294967297
     Debug.Print "X86-DONE"
 End Sub
