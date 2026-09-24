@@ -4,18 +4,15 @@
 > 每次运行开始先读本文件，结束前必须更新本文件（状态头 + 批次清单 + 运行日志）。
 > 规范输入: `ai/讨论记录/018-接口继承与CoClass设计思路.md`（含 tB 文档要点与分阶段设计思路全文）。
 
-STATUS: BUSY             # NOT_STARTED | DESIGN | BUSY | IDLE | ALL_DONE
-LAST_RUN: 2026-09-25T04:10:34+08:00   # 本轮 = **B14 开工（IDispatch 四件套接新式接口；范围先由三件测量定）**。
-               # 上一格 B13e 已于 run #52 全绿收线（代码 `b10ec1a`，门 head `5d29a5c`）
-               # ⇒ **B13（P6 对外那一半）五格 a/b/c/d/e 出完**。
-               # CURRENT_BATCH 点名的三件测量：① 胖包装器对 `IID_IDispatch` 交回什么、
-               # `GetTypeInfoCount`/`GetTypeInfo` 各答哪份 `ITypeInfo`；② 薄指针 `vb6_ivtbl_<I>`
-               # 头三槽之外有没有 IDispatch 那四槽的位置（没有 = 要动布局 = D19 地盘，先报告）；
-               # ③ 接口成员的 DispId 今天在哪算、有没有一份可发的表。读数落 D61。
-               # 硬规矩：不把 `Private` 契约成员发成 disp id（B13c 口径 (b)）；
-               # 逐字节护栏两层照旧，存量 DLL 连 `.tlb` 都不许变。
+STATUS: IDLE             # NOT_STARTED | DESIGN | BUSY | IDLE | ALL_DONE
+LAST_RUN: 2026-09-25T04:46:20+08:00   # 本轮 = **B14 收线（IDispatch 那一半：从字节级升到真跑级）**，代码 `ddf4e9b`、
+               # 台账 `4534a83`、门 = run **54**（head 已核 = `4534a83`，8 job 全绿）。
+               # 三件测量（D61）里两件把自己的排期打了：四件套本身是通的、缺的是**成员面**；
+               # 薄指针没有 IDispatch 那四槽 ⇒ dual/布局那半**必须排在 B15 之后**（否则重演 D60）。
+               # 下一格 = **B15**（真接口进类型库 + 接口成员进库 + 修"接口模块被登记成 coclass"），
+               # 它的四件测量已写在 CURRENT_BATCH 里；B16 之后才谈让 QI 交回薄指针。
                # 自动运行见本行不足 55 分钟请立即跳过。
-LAST_COMMIT: 代码批 = b10ec1a(B13e)、5d29a5c(B13e 台账)、9df23ba(B13d)、bd38798(B13c)、b1a8e58(B13b)、7b6570a+988c7cb(B13a；门 head = 合并 `9785f4f`)、7f829ee(B11/C05=B12)、b82a184+02d70fe(B11/C04)、c4aaa4c(B11/C03b)、e515d89(B11/C03a)、f0b820d(B11/C02)、e7c7a31(B11/C01)、3c5d8e6(B10)、9eb2ca7(B09c)、debb110(B09b)、02bac92(B09)   # **commit message 一律现写、不复用上批文本**；push 只推 `github/dev`（Actions 门），`origin`(gitcode) 与 `main` 不碰、**绝不建 MR**。
+LAST_COMMIT: 代码批 = ddf4e9b(B14 测试批)、4534a83(B14 台账)、b10ec1a(B13e)、5d29a5c(B13e 台账)、9df23ba(B13d)、bd38798(B13c)、b1a8e58(B13b)、7b6570a+988c7cb(B13a；门 head = 合并 `9785f4f`)、7f829ee(B11/C05=B12)、b82a184+02d70fe(B11/C04)、c4aaa4c(B11/C03b)、e515d89(B11/C03a)、f0b820d(B11/C02)、e7c7a31(B11/C01)、3c5d8e6(B10)、9eb2ca7(B09c)、debb110(B09b)、02bac92(B09)   # **commit message 一律现写、不复用上批文本**；push 只推 `github/dev`（Actions 门），`origin`(gitcode) 与 `main` 不碰、**绝不建 MR**。
 CURRENT_BATCH: **B15 = 类型库导出：把新式接口在库里发成真接口（`TKIND_INTERFACE` + 成员进库），顺带修"接口模块被登记成 coclass"的形状**
                （**先读 D58-6、D60-3 与 D61（尤其 D61-2/D61-3/D61-5）**。本批是 B16 的硬前置：
                D61-5 已定死顺序 —— 先让"库里那一档的成员面"存在，才谈得上让服务器多应答一枚 IID。）
@@ -62,21 +59,21 @@ CURRENT_BATCH: **B15 = 类型库导出：把新式接口在库里发成真接口
                `ReDim a(1) As <工程类>` 撞 C2224、B10 的三条 caller 侧洞、B06c（接口值作实参/进 Variant）、
                ⑮d、祖先 Private UDT 进方法签名（D40 末①）、`com_entry` 基类 extern 的 `void*` 返回、
                `Class_Terminate` 在 EXE 里无触发点（D41）。
-GATE_BASELINE: (Actions 级) c3test run **#52 [dev] = completed/success**（https://github.com/fxl447098457/c3test/actions/runs/36051166723；
-               head 已核 = `5d29a5c` = 代码 `b10ec1a` + 台账/手册 `5d29a5c`；8 个 job 全绿。
-               `Tests (vbp)` 分片里本批两条靶子用例都绿：`cc_dll_identity_single_source`（翻面后的
-               needle：`IID_vb6def_CImpl` 回 `0x7CA8CD81`、`IID_vb6iface_IProbe` 仍 `0xF5CEF988`）与
-               `cc_dll_tlb_matches_table`（甲/乙两条判据，乙 = 表的默认接口 IID == 库的 DEFAULT 引用
-               == 库的 `_<类名>`）⇒ 门绿即"广告 == 应答"这条口径在真链接的 DLL 上成立。
-               助手没定义或用例红都会让那个 job 非零退出。
-               本机侧同批（树 = 开工时同步到的 `e896efb`，收线 exe md5 1c09fa371ad0882d2e1229fc4ebc809c）：
-               `-Category syntax` **119/0**；`-Category vbp` **27 PASS / 0 FAIL / 1 SKIP**（唯一的 SKIP
-               还是 `test_vbman`，本机没注册 32 位 VBMAN，属已知基线）；
-               **护栏 = 全产物 A/B 四工程**（`.build/b13e_ab_all.py`，比上批多带 `test_event_dll`）：
-               `cc_act`(EXE) 零文件变化、两枚存量 DLL 连 `.tlb` 都逐字节不变（只 `.rc` 那行绝对临时路径
-               天然不同）、`cc_dll` 只 `dll_entry.c` 的 `IID_vb6def_*` 1 行 + `.tlb` = 零未归类变化；
-               负控 = 同一份助手喂 BASE `.build/pre_b13e_C3.exe`（`905c9392…`）⇒ 乙 判红。
-               # 逐字节护栏每批都做；下一批 BASE = `.build/pre_b14_C3.exe`（md5 1c09fa371ad0882d2e1229fc4ebc809c）。
+GATE_BASELINE: (Actions 级) c3test run **#54 [dev] = completed/success**（https://github.com/fxl447098457/c3test/actions/runs/36055910123；
+               head 已核 = `4534a83` = 测试 `ddf4e9b` + 台账 `4534a83`；8 个 job 全绿。
+               `Tests (vbp)` 分片里本批两条新用例都绿：`ax_dll_dispatch_invoke`（真客户端把
+               `TestAXDLL.dll` 按 IDispatch 调通：`Add(2,40)=42`、`SetValue(7)`→`GetValue()=7`、
+               未知名 `DISP_E_UNKNOWNNAME`）与 `cc_dll_dispatch_iface_only`（只满足新式接口的类
+               成员面为空 + 接口 IID 由胖指针应答 `same=yes`）。**这两个断言要在一台没注册过
+               任何组件的干净 runner 上才成立** ⇒ 门绿本身就是"对外那一半真能用"的证据，
+               不再只是产物字节一致。
+               本机侧同批（树 = 开工时的 `1186def`（B13e 收线头），开工与收线 exe 同一枚 md5
+               1c09fa371ad0882d2e1229fc4ebc809c —— **本批零编译器改动**，这条就是逐字节护栏）：
+               `-Category syntax` **119/0**；`-Category vbp` **29 PASS / 0 FAIL / 1 SKIP / TOTAL=30**
+               （比 B13e 多出的两条就是本批新用例；唯一 SKIP 仍是 `test_vbman`，本机没注册 32 位
+               VBMAN，属已知基线）；新助手先证明能红 = 同一份用例喂一个不存在的 CLSID ⇒
+               `GETFACTORY hr=0x80040111` → 判红。
+               # 逐字节护栏每批都做；下一批 BASE = `.build/pre_b15_C3.exe`（md5 1c09fa371ad0882d2e1229fc4ebc809c）。
 ```
 
 > 重入保护：若运行开始时 STATUS=BUSY 且 LAST_RUN 距今不足 55 分钟，说明上一次运行可能仍在进行——本次**立即结束，不做任何修改**。
