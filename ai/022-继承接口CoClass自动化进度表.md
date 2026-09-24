@@ -62,21 +62,25 @@ CURRENT_BATCH: **B13d = 规范 IUnknown：同一个对象对 `IID_IUnknown` 必�
                祖先 Private UDT 进方法签名（D40 末①）、`com_entry` 基类 extern 的 `void*` 返回、
                **`Class_Terminate` 在 EXE 里无触发点**（D41；DLL 侧有，见 D56-2）、
                B15 类型库线（`CreateTypeLib2(SYS_WIN64)` 写死在 `typelib/typelib_builder.cpp:117`）。
-GATE_BASELINE: (Actions 级) c3test run **#46 [dev] = completed/success**（https://github.com/fxl447098457/c3test/actions/runs/36029493966；
-               head 已核 = `7b9fa78` = 代码 `b1a8e58` + 台账/手册 `7b9fa78`；8 个 job 全绿。
-               `Tests (vbp)` 分片含 4 条 `Test-VbpDll`，其中 `cc_dll_identity_single_source` 是
-               **从 B13a 那条"钉分叉"的用例翻面来的**（needle 换成 `"CoDll.PG"` +
-               `const int g_vb6_coclassCount = 2;` + `0xF5CEF988`，absent 换成 `0AD9CBC7`）⇒
-               门绿 = 产品侧身份出口真的接通了，不是本机自说自话。
-               本机侧同批（合并后的树、exe md5 473784ed4086cabbaf13dbd5e27a708a）：`-Category syntax` **118/0**（不变）；
-               16 件逐字节护栏 **16/16 全同**（`.build/byteguard_b13b.py`）；
-               **新立的第二层护栏**：`.build/b13b_ab_exe.py` 对 `tests\cc_act\Act.vbp`（EXE、带两个
-               手写块 = 最危险形状）做 BASE vs NEW 全产物对照，**12 个生成文件（含 `com_entry.c`）
-               零 DIFF** ⇒ "EXE 不接线"这条边界是实测出来的，不是嘴上说的；
-               A/B 负控 = `.build/pre_b13b_C3.exe` 跑同一份 cc_dll，`CoDll.PG` **0 次**、
-               legacy `0AD9CBC7` **1 次**（缺陷在 BASE 侧复现、本批侧消失）。
-               下一条门 = B13a 的 run **#44**（head `9785f4f`，8 job）。
-               # 逐字节护栏每批都做；下一批 BASE = `.build/pre_b13c_C3.exe`（md5 473784ed4086cabbaf13dbd5e27a708a）。
+GATE_BASELINE: (Actions 级) c3test run **#48 [dev] = completed/success**（https://github.com/fxl447098457/c3test/actions/runs/36040083639；
+               head 已核 = `4311883` = 代码 `bd38798` + 台账 `4311883`；8 个 job 全绿。
+               `Tests (vbp)` 分片里 DLL 侧从 4 条变 **5** 条：新增的 `cc_dll_tlb_matches_table`
+               用 `tests\tools\tlbprobe.cpp` **真去读 `.tlb`**，断"COM 服务器表 / 新式接口 vtable 的
+               QI / 类型库三条通道同一枚 GUID"，外加 coclass 的 DEFAULT 引用 == 表的
+               `defaultIfaceIid`。助手没定义、探针编不出来、`.tlb` 读不到或用例红都会让那个 job
+               非零退出 ⇒ 门绿就是"探针在 CI 上真跑通且同值成立"，不是本机自说自话。
+               本机侧同批（树 = 开工时同步到的 `0111bab`，收线 exe md5 759e9f51a7b6d65dc62d2ead43e227af）：
+               `-Category syntax` **118/0**；`-Category vbp` **27 PASS / 0 FAIL / 1 SKIP**
+               （唯一的 SKIP 还是 `test_vbman`，本机没注册 32 位 VBMAN，属已知基线）；
+               **护栏升到"两层 + 可归类"**：`.build/b13c_guard.py`（16 件 `--emit-c`，只许
+               `static const unsigned char vb6_iv_iid_<I>[16] = {…}` 那些行变，其余任何字节变化当场红）
+               → **16/16**；`.build/b13c_ab_all.py`（三工程全产物 A/B）→ `cc_act` 只有 5 个 `.h` 的
+               iv 行变且 `com_entry.c` 全同（D57-6 那条 EXE 边界仍然成立）、存量 `test_activex_dll`
+               含 `.tlb` **全同**（折算隔离）、`cc_dll` 允许 `.tlb` 变 = **零未归类变化**。
+               A/B 负控 = BASE `.build/pre_b13c_C3.exe` 跑同一份 cc_dll：同一个 `IProbe` 出**四枚**
+               GUID、`.tlb` 的 coclass DEFAULT 是 `_CImpl {7CA8CD81-…}` ⇒ 缺陷在 BASE 侧复现、本批侧
+               消失（读数细节在 D58-2）。
+               # 逐字节护栏每批都做；下一批 BASE = `.build/pre_b13d_C3.exe`（md5 759e9f51a7b6d65dc62d2ead43e227af）。
 ```
 
 > 重入保护：若运行开始时 STATUS=BUSY 且 LAST_RUN 距今不足 55 分钟，说明上一次运行可能仍在进行——本次**立即结束，不做任何修改**。
