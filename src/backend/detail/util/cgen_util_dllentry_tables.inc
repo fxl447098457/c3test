@@ -89,9 +89,21 @@ std::string wideName = "L\"" + bareName + "\"";
     std::unordered_map<std::string, std::string> iidMap;
     for (auto& cc : coClasses) {
         for (auto& ifaceName : cc.implementsNames) {
-            if (iidMap.find(ifaceName) == iidMap.end()) {
-                iidMap[ifaceName] = generateIid("iface:" + progId + "." + ifaceName);
+            if (iidMap.find(ifaceName) != iidMap.end()) continue;
+            std::string lower = Symbol::toLower(ifaceName);
+            // ai/022 B13c: 新式接口（Pass E 的接口 IID 表里有名）取表里的值 —— 与类自己的
+            // vtable QI、类型库三处同值；表里没有（legacy `Implements` 的类模块）才落到
+            // prelude 那枚 legacy 派生，存量工程的产物逐字节不变。
+            // （B13b 在这里还有一条"看它是不是块 `[Default]` 那个"的分支：B13e 起对外默认接口
+            // 不再从出口取，那条分支没有对象可管了，跟着一起撤 —— 见 collect.inc 同批注释。）
+            if (iidreg_) {
+                auto mapIt = iidreg_->find(lower);
+                if (mapIt != iidreg_->end() && !mapIt->second.empty()) {
+                    iidMap[ifaceName] = mapIt->second;
+                    continue;
+                }
             }
+            iidMap[ifaceName] = generateIid("iface:" + progId + "." + ifaceName);
         }
     }
 
@@ -198,12 +210,14 @@ std::string wideName = "L\"" + bareName + "\"";
     // 3. 全局coclass描述表
     entry.emitLine("const vb6_CoClassDesc g_vb6_coclasses[] = {");
     entry.indent();
-    for (auto& cc : coClasses) {
+    // 一行 = 一个 ProgID 档。B13b 起同一份契约可以占两档：类模块名档（存量口径）
+    // 与 CoClass 块名档（手写块 + [ComCreatable(True)]），CLSID 相同、工厂相同。
+    auto emitCoclassRow = [&](const CoClassInfo& cc, const std::string& rowProgId) {
         std::string clsId = cIdent(cc.moduleName);
         std::string clsStruct = "vb6_cls_" + clsId;
         entry.emitLine("{");
         entry.indent();
-        entry.emitLine("\"" + cc.progId + "\",  /* progId */");
+        entry.emitLine("\"" + rowProgId + "\",  /* progId */");
         entry.emitLine("\"" + cc.clsidStr + "\",  /* clsidStr */");
         entry.emitLine("\"" + cc.moduleName + "\",  /* classVariable */");
         entry.emitLine("(void*(*)(void))" + clsStruct + "_New,  /* factoryFunc */");
@@ -245,6 +259,13 @@ std::string wideName = "L\"" + bareName + "\"";
         }
         entry.dedent();
         entry.emitLine("},");
+    };
+    for (auto& cc : coClasses) {
+        emitCoclassRow(cc, cc.progId);
+        if (!cc.groupProgId.empty()) {
+            emitCoclassRow(cc, cc.groupProgId);
+            extraGroupRows++;
+        }
     }
     entry.dedent();
     entry.emitLine("};");

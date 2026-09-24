@@ -120,6 +120,14 @@ $script:pass = 0
 $script:fail = 0
 $script:skip = 0
 $script:total = 0
+# ai/022 B13c: 类型库 / COM 服务器表 / 接口 vtable ä¸条通道是否同值,
+# 取读数的助手单独一个文件（tests\tlb_identity.ps1）。它只用 $C3/$Tests/$OutDir,
+# 这里都已经就位。
+. (Join-Path $PSScriptRoot "tlb_identity.ps1")
+# ai/022 B14: 同样单独一个文件 —— 这回是「真客户端」：
+# tests\disp_invoke.ps1 用 tests\tools\disp_probe.c（LoadLibrary + DllGetClassObject）
+# 把产出的 DLL 真的按 IDispatch 调一遍，不再只比字节。
+. (Join-Path $PSScriptRoot "disp_invoke.ps1")
 
 # === COM 测试前: 检查相关 COM 组件是否已注册 ===
 # 仅当所需的 COM 组件已注册时, 才执行对应的 COM 测试 (例如 VBMANLIB)
@@ -1016,6 +1024,83 @@ if ($Category -in @("all", "run", "bas")) {
 }
 
 # --- VBP 工程测试 (串行; GUI 窗口效果无法通过自动校验并行确认) ---
+# === ai/022 B13a: ActiveX DLL 工程测试 (产物 + 生成的 COM 服务器入口) ==============
+# A DLL has no stdout, so the observable surface is: (1) the project links into a .dll
+# at all, (2) the def file exports the COM entry points, (3) the generated COM server
+# table (dll_entry.c) carries the identity the project declared. The compiler writes
+# those C files to a temp dir and deletes it unless --keep-for-debug is passed, and
+# prints "intermediates kept at: <dir>" on stderr -- that line is the only handle.
+function Test-VbpDll {
+    param(
+        [string]$Name,
+        [string]$VbpFile,
+        [string[]]$Needles = @(),      # asserted against dll_entry.c + activex_dll.def
+        [string[]]$Absent = @(),
+        [string[]]$LogNeedles = @(),   # asserted against the compiler's own output
+        [string]$Arch = ""
+    )
+    $script:total++
+    Write-Host -NoNewline "  [VBP-DLL] $Name ... "
+
+    if ($Arch) {
+        $out = & $C3 $VbpFile --arch $Arch --output-dir $OutDir --keep-for-debug 2>&1
+    } else {
+        $out = & $C3 $VbpFile --output-dir $OutDir --keep-for-debug 2>&1
+    }
+    $exitCode = $LASTEXITCODE
+    $logText = (($out | Out-String) -replace '\s+', ' ')
+
+    if ($exitCode -ne 0) {
+        $script:fail++
+        Write-Host "FAIL (compile)" -ForegroundColor Red
+        if ($Verbose) { Write-Host $logText }
+        return
+    }
+
+    $baseName = [System.IO.Path]::GetFileNameWithoutExtension($VbpFile)
+    $dllPath = Join-Path $OutDir "$baseName.dll"
+    if (-not (Test-Path $dllPath)) {
+        $script:fail++
+        Write-Host "FAIL (no dll)" -ForegroundColor Red
+        return
+    }
+
+    $genDir = $null
+    foreach ($line in $out) {
+        $t = "$line"
+        $at = $t.IndexOf("intermediates kept at: ")
+        if ($at -ge 0) { $genDir = $t.Substring($at + 23).Trim(); break }
+    }
+    if (-not $genDir -or -not (Test-Path $genDir)) {
+        $script:fail++
+        Write-Host "FAIL (no intermediates)" -ForegroundColor Red
+        return
+    }
+    $gen = ""
+    foreach ($f in @("dll_entry.c", "activex_dll.def")) {
+        $p = Join-Path $genDir $f
+        if (Test-Path $p) { $gen += ((Get-Content $p -Raw) -replace '\s+', ' ') }
+    }
+    if ($gen.Length -lt 40) {
+        $script:fail++
+        Write-Host "FAIL (no generated entry)" -ForegroundColor Red
+        return
+    }
+
+    $detail = @()
+    foreach ($n in $Needles)     { if (-not $gen.Contains($n))     { $detail += "missing: $n" } }
+    foreach ($a in $Absent)      { if ($gen.Contains($a))          { $detail += "unexpected: $a" } }
+    foreach ($n in $LogNeedles)  { if (-not $logText.Contains($n)) { $detail += "log missing: $n" } }
+    if ($detail.Count -gt 0) {
+        $script:fail++
+        Write-Host "FAIL (assert)" -ForegroundColor Red
+        foreach ($d in $detail) { Write-Host "    $d" -ForegroundColor DarkGray }
+        return
+    }
+    $script:pass++
+    Write-Host "PASS" -ForegroundColor Green
+}
+
 if ($Category -in @("all", "run", "vbp")) {
     # --- VBP 工程测试 (P5) --- (串行)
     Write-Host "--- VBP Project Tests (P5) ---" -ForegroundColor Yellow
@@ -1125,6 +1210,75 @@ if ($Category -in @("all", "run", "vbp")) {
         "INH53:OK", "INH54:OK", "INH55:OK", "INH56:OK", "INH57:OK", "INH58:OK", "INH59:OK")
     Test-Vbp "cls_inh_pair" "$Tests\cls_inh\Inh.vbp" $inhExpected
     Test-Vbp "cls_inh_x86" "$Tests\cls_inh\Inh.vbp" $inhExpected -Arch "x86"
+    # --- ai/022 B13a: the ActiveX DLL pipeline enters the gate for the first time ---
+    # Both projects under tests\test_activex_dll have existed since P6 but were never
+    # registered, so nothing in the regression had ever LINKED a .dll -- every claim on
+    # the COM server side was unmeasured. These three cases make that surface observable
+    # (product + exports + the generated coclass table) without changing compiler code.
+    Test-VbpDll "ax_dll_calc" "$Tests\test_activex_dll\test_activex_dll.vbp" @(
+        "const vb6_CoClassDesc g_vb6_coclasses[]",
+        '"TestAXDLL.Calc"',
+        '"{D84F362F-8EF1-D16D-8814-C16ADB700BAB}"',
+        'L"SetValue", 1, 1',
+        "DllGetClassObject", "DllRegisterServer")
+    Test-VbpDll "ax_dll_event" "$Tests\test_activex_dll\test_event_dll.vbp" @(
+        '"EventCalc"', '"{E1F2A3B4-C5D6-7890-ABCD-123456789ABC}"',
+        "vb6_disp_EventCalc_Increment_invoke", "DllCanUnloadNow", "DllUnregisterServer")
+    Test-VbpDll "ax_dll_calc_x86" "$Tests\test_activex_dll\test_activex_dll.vbp" @(
+        "const vb6_CoClassDesc g_vb6_coclasses[]", '"TestAXDLL.Calc"',
+        '"{D84F362F-8EF1-D16D-8814-C16ADB700BAB}"',
+        "DllGetClassObject", "DllRegisterServer") -Arch "x86"
+    # B13b: the two identity channels are merged for the DLL product. This case used to
+    # PIN THE FORK (needle 0x0AD9CBC7 / absent CoDll.PG); flipping it is the batch's
+    # acceptance evidence, so the needles are now exactly the other way round:
+    #   - the group ProgID CoDll.PG is in the product (a second row, same CLSID) because the
+    #     block writes [ComCreatable(True)] -- the first product-level consequence that bit has
+    #   - IID_vb6iface_IProbe == the stage-2.7 value (0xF5CEF988), so the dllentry minter no
+    #     longer answers for an interface the resolver already resolved
+    #   - 0AD9CBC7 (what generateIid derived here before B13b) must be gone
+    # The legacy <Proj>.<Class> row stays: existing DLL clients keep working.
+    # B13e: IID_vb6def_CImpl is back to the *default dispinterface* GUID (0x7CA8CD81, written
+    # back by the TypeLib builder) instead of the interface's own -- the server's member
+    # surface (desc->methods) is that one, so table and typelib now advertise what they answer.
+    Test-VbpDll "cc_dll_identity_single_source" "$Tests\cc_dll\CoDll.vbp" @(
+        '"CoDll.CImpl"',
+        '"CoDll.PG"',
+        "const int g_vb6_coclassCount = 2;",
+        "{11112222-3333-4444-5555-666677778888}",
+        "0xF5CEF988",
+        "0x7CA8CD81",
+        "0, /* methodCount */") @(
+        "0AD9CBC7") @(
+        "CoClass 'PG' identity: CLSID={11112222-3333-4444-5555-666677778888} (vbp)",
+        "IID={F5CEF988-3217-6173-94B7-BB99C4B8CB81} (minted)",
+        "ProgID=CoDll.PG (minted)",
+        "impl='CImpl' comCreatable=True")
+
+    # ai/022 B13c/B13e: two invariants read out of the *products* (dll_entry.c / CImpl.h /
+    # CoDll.tlb): (甲) one interface == one GUID across table / vtable QI / typelib (B13c);
+    # (乙) the typelib's coclass DEFAULT ref == the IID the server actually answers with, i.e.
+    # the class's own default dispinterface (B13e, after B13c's redirect was reverted).
+    Test-TlbIdentitySingleSource "cc_dll_tlb_matches_table" "$Tests\cc_dll\CoDll.vbp" "CoDll" "CImpl" "IProbe" "{11112222-3333-4444-5555-666677778888}"
+    # ai/022 B14: the DLL product finally gets a real caller. TestAXDLL.Calc is the legacy
+    # face (Public members exist, so IDispatch must answer); cc_dll's CImpl only satisfies a
+    # modern interface, so its IDispatch member surface must be EMPTY (B13c ruling (b)), and
+    # the interface IID is answered by the fat pointer -- pinned here as a measured fact, so
+    # B15/B16 (real interface in the library / thin pointer out of QI) has to flip it on purpose.
+    Test-DispatchInvoke "ax_dll_dispatch_invoke" "$Tests\test_activex_dll\test_activex_dll.vbp" `
+        "test_activex_dll" "{D84F362F-8EF1-D16D-8814-C16ADB700BAB}" @(
+        "CREATE hr=0x00000000 ptr=OK",
+        "QI_IUNKNOWN hr=0x00000000 same=yes",
+        "TYPEINFOCOUNT=1 hr=0x00000000",
+        "CALL=ADD hr=0x00000000 result=42",
+        "CALL=GETVALUE hr=0x00000000 result=7",
+        "NAMES=bogus hr=0x80020006 dispid=-1")
+    Test-DispatchInvoke "cc_dll_dispatch_iface_only" "$Tests\cc_dll\CoDll.vbp" `
+        "CoDll" "{11112222-3333-4444-5555-666677778888}" @(
+        "CREATE hr=0x00000000 ptr=OK",
+        "QI_IUNKNOWN hr=0x00000000 same=yes",
+        "EXTRA_IID={F5CEF988-3217-6173-94B7-BB99C4B8CB81}",
+        "QI_EXTRA hr=0x00000000 same=yes") @(
+        "CALL=ADD") "{F5CEF988-3217-6173-94B7-BB99C4B8CB81}"
     Test-Vbp "test_vbman" "$Tests\test_vbman\test_vbman.vbp" @("P24-04a:OK", "P24-04b:OK", "P24-04:2/2") -Arch "x86" -RequiresCom "VBMANLIB.cVBMAN"
     $vbpSw.Stop()
     Write-Host "  (vbp/gui tests took $([Math]::Round($vbpSw.Elapsed.TotalSeconds))s)"
@@ -1330,6 +1484,10 @@ if ($Category -in @("all", "syntax")) {
     Test-IdentityNote "cc_id_fold_vbp_tier" "$Tests\cc_id\IdFold.vbp" @(
         "CoClass 'FoldVbp' identity: CLSID={77777777-8888-9999-AAAABBBBBBBBBBBB} (vbp) IID=- (missing) ProgID=FoldApp.FoldVbp (minted) impl='FoldVbp' comCreatable=True folded-from-legacy: VB_Creatable=True VB_Exposed=False VB_PredeclaredId=False VB_GlobalNameSpace=False")
     Test-IdentityStable "cc_id_fold_repeatable" "$Tests\cc_id\IdFold.vbp"
+    # ai/022 B13d: 规范 IUnknown —— 薄指针的 QI 认 IID_IUnknown 时必须回“本类实现序里第一个
+    # 接口”的薄指针（两处 QI 回同一个值），不再是各自的 self。XWriter 的 CWriter 同时实现
+    # IWriter + ILog = 最小可用形状；真跑那一半由 itf_xmod_writer（QI1..QI4）钉住兄弟/本接口分支没坏。
+    Test-CanonicalIUnknownShape "itf_canonical_iunknown" @("$Tests\itf_xmod\XWriter.vbp") "void* canon = &me->__iv_IWriter;" 2
     # ai/022 B07a (class Inherits, P3): chain diagnostics must fire. Single-file cases ride
     # the existing Test-SyntaxFail path; the two-module cases need Test-SyntaxFailMulti.
     $clsInhNeg = @(

@@ -22,8 +22,14 @@
         std::vector<std::string> eventNames;       // 事件名称列表
         std::string defaultIfaceIid;              // 默认dispinterface IID (用于早绑定QI)
         std::string sourceIfaceIid;               // source dispinterface IID
+        // ai/022 B13b: 这个类的 CoClass **块名**档 ProgID ("<工程>.<块名>")。
+        // 只在块是手写的（块名 != 类模块名）且 [ComCreatable(True)] 时非空 ——
+        // 折算记录（C04）的名字恒等于类模块名，天然不会产生第二行。
+        std::string groupProgId;
     };
     std::vector<CoClassInfo> coClasses;
+    // 组名档多出的行数（g_vb6_coclasses[] 的总行数 = coClasses.size() + extraGroupRows）
+    int extraGroupRows = 0;
 
     // P12.1: Hex格式化辅助 (IID常量生成用)
     auto StringFormatHex2 = [](uint8_t v) -> std::string {

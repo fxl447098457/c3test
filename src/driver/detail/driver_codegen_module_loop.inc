@@ -74,6 +74,7 @@
         cgen.setInterfaceImplementers(&ifaceImplementersMap);  // P6.4+: 接口唯一实现类映射
         cgen.setClassChainRegistry(&classes_);  // tB 类继承 (B07b): stage 2.8 只读链登记表
         cgen.setInterfaceRegistry(&ifaces_);  // tB Interface 契约 (B04): stage 2.7 只读登记表
+        cgen.setInterfaceIidMap(&ifaceIds_);  // tB 接口 IID 唯一出口 (B13c): 同一个 Pass E 建的表
         cgen.setViaRegistry(&vias_);          // tB 委托式实现 (B10): stage 2.7 Pass D 裁决表
         cgen.setDefaultInstanceClasses(&defaultInstanceClasses);  // P6.4+: 类模块默认实例
         cgen.setTrimIncludes(options.trimIncludes);  // opt4: 裁剪未实际引用的跨模块include

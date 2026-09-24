@@ -18,6 +18,10 @@
         dllCgen.setStaticModuleVarNames(&dupModuleVarNames);  // Fix 093b: 撞名模块级变量转 static
         dllCgen.setInterfaceImplementers(&ifaceImplementersMap);  // P6.4+: 接口唯一实现类映射
         dllCgen.setDefaultInstanceClasses(&defaultInstanceClasses);  // P6.4+: 类模块默认实例
+        // ai/022 B13b: dll_entry 的身份一律取 stage 2.7 的唯一出口 coclassIds_。
+        // 只接 DLL 这条 cgen —— EXE 的 com_entry.c 本批刻意不接线（理由见 D57）。
+        dllCgen.setCoClassIdentityRegistry(&coclassIds_);
+        dllCgen.setInterfaceIidMap(&ifaceIds_);  // ai/022 B13c: 非默认接口的 IID 也读同一张表
         // Collect all symbol tables for cross-module Property lookup
         std::vector<SymbolTable*> allSymTabs;
         for (auto& analyzer : analyzers_) {
@@ -55,6 +59,23 @@
             if (tlbBuilder.beginLib(tlbPath, libId, options.dllProgId + " TypeLib", options.dllProgId)) {
                 int dispidCounter = 1;
                 std::set<std::string> processedClasses;
+                // 新式接口的 IID：与 vtable QI、dll_entry 的 IID 表读同一张 Pass E 表
+                // （`ifaceIds_`）。查不到 = 不是新式接口 → 保持类型库自己那枚 legacy mint。
+                auto ifaceIidFromMap = [&](const std::string& name) -> std::string {
+                    auto it = ifaceIds_.find(Symbol::toLower(name));
+                    return it == ifaceIds_.end() ? std::string() : it->second;
+                };
+                // 类 → 手写块的身份（与 cgen_util_dllentry_collect.inc 的匹配口径一致：
+                // 折算记录一律跳过，存量 DLL 的 .tlb 逐字节不变）
+                auto identityForClass = [&](const std::string& className) -> const CoClassIdentity* {
+                    const std::string lower = Symbol::toLower(className);
+                    for (const auto& kv : coclassIds_) {
+                        const CoClassIdentity& id = kv.second;
+                        if (id.name.empty() || id.legacyFolded) continue;
+                        if (!id.implName.empty() && Symbol::toLower(id.implName) == lower) return &id;
+                    }
+                    return nullptr;
+                };
                 for (auto* symTab : allSymTabs) {
                     // 遍历模块级作用域中的符号, 找出 Public Class (ActiveX DLL 的 coclass)
                     auto* modScope = symTab->moduleScope();
@@ -207,8 +228,13 @@
                             }
                         }
 
-                        std::string iid = TypeLibBuilder::generateUuid("_" + clsSym.name);
                         std::string ifaceName = "_" + clsSym.name;
+                        // ai/022 B13c: 这个"类"其实是个**新式接口模块**（头行 `Interface IProbe`）
+                        // → 它的类型库 GUID 就是那个接口的 IID，取 Pass E 的表，不再 mint 一枚
+                        // 只有类型库知道的值（D58 读数：IProbe 在一次编译里曾有 4 枚 GUID）。
+                        const std::string mapIid = ifaceIidFromMap(clsSym.name);
+                        std::string iid = mapIid.empty()
+                            ? TypeLibBuilder::generateUuid("_" + clsSym.name) : mapIid;
                         bool ifaceOk = tlbBuilder.addDispInterface(ifaceName, iid, methods);
                         if (!ifaceOk) {
                             std::cerr << "C3: TypeLib addDispInterface failed for " << ifaceName << ": " << tlbBuilder.lastError() << std::endl;
@@ -260,15 +286,28 @@
 
                         // Only add CoClass if primary interface was added successfully
                         if (ifaceOk) {
-                            std::string clsid = clsSym.comClsidStr;
-                            if (clsid.empty()) {
+                            const CoClassIdentity* ccid = identityForClass(clsSym.name);
+                            std::string clsid;
+                            if (ccid && !ccid->clsid.empty()) {
+                                // ai/022 B13c: 手写块的 CLSID 取唯一出口（与 dll_entry 同值）
+                                clsid = ccid->clsid;
+                            } else if (!clsSym.comClsidStr.empty()) {
+                                clsid = clsSym.comClsidStr;
+                            } else {
                                 auto it = classClsidMap_.find(clsSym.lowerName);
                                 if (it != classClsidMap_.end()) clsid = it->second;
                             }
                             if (clsid.empty()) clsid = TypeLibBuilder::generateUuid(clsSym.name);
                             if (clsSym.comClsidStr.empty()) clsSym.comClsidStr = clsid;
-                            if (!tlbBuilder.addCoClass(clsSym.name, clsid, ifaceName, sourceIfaceName)) {
-                                std::cerr << "C3: TypeLib addCoClass failed for " << clsSym.name << ": " << tlbBuilder.lastError() << std::endl;
+                            // ai/022 B13e: 默认接口**一律**是 `<_类名>`，不跟块里的 [Default]。
+                            // B13c 曾把它改指向块的 `[Default]` 接口（`_IProbe`），实测是把"广告"
+                            // 与"应答"分开：类型库说默认视图是 `_IProbe`，而服务器的成员面
+                            // （`GetIDsOfNames`/`Invoke` 查 `desc->methods`）只有类的 Public 成员，
+                            // 两头都点不到。谁应答就广告谁。
+                            if (!tlbBuilder.addCoClass(clsSym.name, clsid, ifaceName,
+                                                       sourceIfaceOk ? sourceIfaceName : std::string())) {
+                                std::cerr << "C3: TypeLib addCoClass failed for " << clsSym.name << ": "
+                                          << tlbBuilder.lastError() << std::endl;
                             }
                         }
                     }

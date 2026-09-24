@@ -59,7 +59,8 @@
   （`VB3032`）；契约条目引用不存在的接口、把**类模块**当接口列进集合、同一条目写两遍、
   标了不止一条 `[Default]`（`VB3031`）；`[Implementation]` 指向不存在或不是类模块、
   EXE 工程里写 `[ComCreatable(True)]`（`VB3033`，只有 ActiveX DLL 才注册 COM 服务器，
-  EXE 保留组内那半）；**契约聚合**（块列的接口，实现类含祖先必须满足）报 `VB3012`/`VB3017`；
+  EXE 保留组内那半 —— 反过来说，在 DLL 工程里这一位是真开关：它决定组名档 ProgID 会不会进
+  COM 服务器表，见下"实现状态"）；**契约聚合**（块列的接口，实现类含祖先必须满足）报 `VB3012`/`VB3017`；
   `Inherits` 一个 CoClass 块名报 `VB3020`，话已改成指名"那是组契约的块，没有成员表可继承"。
 - **组内已激活**（`ai/022` B11/C05）：块名可以当类型用。写在**类型位置**上的块名 —— `Dim c As Circle`、
   形参 `Sub Use(c As Circle)`、返回值 `Function F() As Circle`、模块级字段、UDT 成员
@@ -132,7 +133,41 @@ B11/C03b：契约聚合校验（`VB3012`/`VB3017`）；B11/C04：存量头属性
 前五格对不用该语法的工程**逐字节不变**；C05 只在"块名被当类型用"或 ProgID 命中本工程时才动发码，
 不这么写的工程照旧逐字节不变（`ai/022` D55 的 16 文件 `--emit-c` 护栏里连 `cc_id` 这种"声明了块、
 从不把块名当类型"的工程也多不出一个 stderr 字符）。
-**对外可用**（类工厂、注册、类型库、外部进程 `CreateObject`）要到 B13–B17。
+**对外可用**（类工厂、注册、类型库、外部进程 `CreateObject`）走 B13–B17，`ai/022` D56 量现状、D57/D58 记落地。
+先说不是从零开始的那半：`Type=DLL` 工程今天**能编能链**（`DllGetClassObject`/`DllRegisterServer` 那一族、
+IDispatch 成员表、内嵌 `.tlb` 都在发），RTL 侧的 `QueryInterface`/`AddRef`/`Release` 也是**真实现**
+（原子计数、归零销毁实例并在那里触发 `Class_Terminate`）。回归里有五条用例钉住这条线
+（`tests\test_activex_dll\` 两份 + `tests\cc_dll\`，助手 `Test-VbpDll`，外加一条读 `.tlb` 的
+`Test-TlbIdentitySingleSource`）。
+
+**B13b/B13c 已经接上的**（`ai/022` D57、D58）：
+- **块名那一档 ProgID 会注册了**，但**要显式表态** —— `[ComCreatable(True)]` 是唯一开关：写了它，
+  COM 服务器表里就多出一行 `<工程名>.<块名>`（同 CLSID、同类工厂），`g_vb6_coclassCount` 从 1 变 2；
+  不写它，组名对外仍然不存在。`<工程名>.<类模块名>` 那一档**保留**，存量 DLL 客户不受影响。
+- **表里的身份与语义层同源**：CLSID 走唯一出口（`[CoClassId]` > vbp 三段式 > 确定性派生），
+  块内 `[Default]` 接口的 IID 也出自同一张表。
+- **一个接口在一次编译里只有一枚 GUID**（B13c）：接口自己的 IID 也搬进了唯一出口
+  （`[InterfaceId]` > 按 `<工程名>` + 接口名的确定性派生），三条通道 —— COM 服务器表、
+  实现类自己的接口 vtable 的 `QueryInterface`、类型库 —— 一律读它，不再各算一份。
+  回归里 `cc_dll_tlb_matches_table` 用 `tests\tools\tlbprobe.cpp`（`LoadTypeLib` 探针）
+  钉住这一点，改动前的实测是同一个 `IProbe` 有**四枚**值。
+- **对外广告的那个视图 == 服务器应答的那个视图**（B13e）：类型库里 coclass 的 DEFAULT 引用、
+  COM 服务器表里的"默认接口 IID"，一律是 `<_类名>` 那一档 —— 也就是类的**公有成员**，
+  正是 `IDispatch` 的 `GetIDsOfNames`/`Invoke` 真正查的那张表。`[Default] Interface IProbe`
+  管的是**语言层**的默认视图（`As PG` 拿到哪份成员面、虚表怎么排），不改对外那一档。
+  B13c 曾把类型库的 DEFAULT 改成跟随块，实测是把"广告"与"应答"劈开：客户端按库里的
+  默认接口去点，服务器那头的成员面却是另一份，两头都点不到 ⇒ 本批回退。
+- 边界要说清：① **折算记录不享受以上各条**（VB6 头属性折来的身份继续走原路，改了就是把存量
+  DLL 工程的注册身份换掉）；② 表里没有的接口（不是新式接口）照旧走各自的老派生。
+- **口径（B13c 定）**：`[Default]` 指向新式接口的类，**契约成员不会变成对外可点的 disp id**。
+  契约成员按 VB6 惯例是 `Private`，把它们发进 IDispatch 表等于换语义；而这个接口的成员对外
+  可调用要靠"真接口"那条路（类型库 `TKIND_INTERFACE` + 成员进库），排在 B15。
+  今天对外能调用的是**类的公有成员**那一档 —— 这条已经有真客户端钉住：回归里的
+  `ax_dll_dispatch_invoke` 用 `tests\tools\disp_probe.c`（`LoadLibrary` + `DllGetClassObject`，
+  不查注册表）把编出来的 DLL 真的按 `IDispatch` 调通，`cc_dll_dispatch_iface_only` 则钉住反面：
+  只满足新式接口的类，`GetIDsOfNames` 一个名字都不认。
+- 仍开的一条读数（B15）：类型库里新式接口的 `cFuncs` 是 **0** —— 接口模块写的 `Sub`/`Property`
+  从来没进过类型库（收集口径是"类模块的公有成员"）。
 
 **另见**
 

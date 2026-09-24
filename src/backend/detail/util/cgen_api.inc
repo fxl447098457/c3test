@@ -230,6 +230,15 @@
     void setViaRegistry(const ViaRegistry* reg) { ivviareg_ = reg; }
     // 类继承 (tB, ai/022 B07b): stage 2.8 链登记表, 发码期取继承字段与转发桩清单.
     void setClassChainRegistry(const ClassChainRegistry* reg) { clsreg_ = reg; }
+    // CoClass 身份出口 (tB, ai/022 B13b): 只喂 generateDllEntry。EXE 的 com_entry.c 本批
+    // **不接线** —— 它今天整个跑在 legacy mint 上，接上就是把改码前编得过的存量工程换掉。
+    void setCoClassIdentityRegistry(const std::unordered_map<std::string, CoClassIdentity>* reg) {
+        ccreg_ = reg;
+    }
+    // 接口 IID 唯一出口 (ai/022 B13c): 同上，只读注入
+    void setInterfaceIidMap(const std::unordered_map<std::string, std::string>* map) {
+        iidreg_ = map;
+    }
     // 查询接口唯一实现类名 (空串 = 无映射/多实现类, 不可用)
     std::string singleImplementationClass(const std::string& ifaceName) const {
         if (!interfaceImplementers_) return "";

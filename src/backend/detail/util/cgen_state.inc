@@ -422,6 +422,16 @@
     // 继承字段与前缀布局、转发桩都由 view 的 inhFields/inhProcs 驱动 (stage 3.4 回填).
     const ClassChainRegistry* clsreg_ = nullptr;
 
+    // CoClass 身份 (tB, ai/022 B13b): stage 2.7 Pass E 求出的唯一出口 (coclassIds_)。
+    // 只有 generateDllEntry 读它 —— 产品里的 CLSID / 默认接口 IID / 组名 ProgID 一律
+    // 从这里取，prelude 里那两枚 lambda 退成"读不到块的类"的兜底路径。
+    const std::unordered_map<std::string, CoClassIdentity>* ccreg_ = nullptr;
+
+    // 接口 IID 表 (tB, ai/022 B13c): stage 2.7 Pass E 由 `buildIfaceIdMap` 建的只读表，
+    // key = 接口名小写。新式接口的 IID 三处消费者（vtable QI / dll_entry 的 IID 表 /
+    // 类型库）一律读它；表里没有的接口保持各自 legacy 派生（存量产物不变）。
+    const std::unordered_map<std::string, std::string>* iidreg_ = nullptr;
+
     // P6.4+: class-module default instance (VB_PredeclaredId=True) lowercase name -> canonical
     const std::map<std::string, std::string>* defaultInstanceClasses_ = nullptr;
 

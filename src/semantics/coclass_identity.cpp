@@ -57,6 +57,26 @@ std::string ifaceSeed(const std::string& project, const std::string& ifaceName) 
     return "itf:" + ifaceLower(project) + "." + ifaceLower(ifaceName);
 }
 
+std::string ifaceIidFromName(const std::string& project, const std::string& ifaceName) {
+    return mintGuid(ifaceSeed(project, ifaceName),
+                    kIfaceSeeds[0], kIfaceSeeds[1], kIfaceSeeds[2], kIfaceSeeds[3]);
+}
+
+std::string resolveIfaceIid(const std::string& project, const IfaceView& v) {
+    if (!v.guid.empty()) return v.guid;  // [InterfaceId("...")] 是最高优先档
+    return ifaceIidFromName(project, v.name);
+}
+
+IfaceIdMap buildIfaceIdMap(const std::string& project, const IfaceRegistry& ifaces) {
+    IfaceIdMap out;
+    for (const auto& kv : ifaces) {
+        const IfaceView& v = kv.second;
+        if (v.name.empty() || v.chainBroken) continue;  // 父链已错的接口不再往外发身份
+        out.emplace(ifaceLower(v.name), resolveIfaceIid(project, v));
+    }
+    return out;
+}
+
 namespace {
 
 // 块级属性行按名字取字符串实参（大小写不敏感；写了但实参不是字符串则算没命中）
@@ -128,14 +148,10 @@ CoClassIdentity resolveCoClassIdentity(const CoClassDecl& block, const CoClassEn
             auto it = env.ifaces->find(ifaceLower(id.defaultIface));
             if (it != env.ifaces->end()) v = &it->second;
         }
-        if (v && !v->guid.empty()) {
-            id.iid = v->guid;
-            id.iidSource = IdentitySource::Explicit;
-        } else {
-            id.iid = mintGuid(ifaceSeed(env.project, id.defaultIface),
-                              kIfaceSeeds[0], kIfaceSeeds[1], kIfaceSeeds[2], kIfaceSeeds[3]);
-            id.iidSource = IdentitySource::Minted;
-        }
+        // 登记不到同名接口（块写 `[Default] IX` 而 IX 是 legacy 类模块）时按**名字**mint，
+        // 与 B13b 之前逐字节同值 —— 这一档不是新式接口，`ifaceIds_` 里也不会有它。
+        id.iid = v ? resolveIfaceIid(env.project, *v) : ifaceIidFromName(env.project, id.defaultIface);
+        id.iidSource = (v && !v->guid.empty()) ? IdentitySource::Explicit : IdentitySource::Minted;
     } else {
         id.iidSource = IdentitySource::Missing;
     }
