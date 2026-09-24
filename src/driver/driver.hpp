@@ -9,6 +9,7 @@
 #include "project/frm_parser.hpp"
 #include "semantics/generics_registry.hpp"
 #include "semantics/interfaces_registry.hpp"  // Interface 契约 (tB, B02)
+#include "semantics/coclass_identity.hpp"     // CoClass 身份求解 (tB, B11/C02)
 #include "semantics/class_chain_registry.hpp"  // 类继承链 (tB, B07)
 #include <array>
 #include <string>
@@ -158,6 +159,13 @@ private:
 
     // P6.8: VBP指定的类CLSID映射 (模块名小写 -> CLSID字符串)
     std::unordered_map<std::string, std::string> classClsidMap_;
+
+    // CoClass 身份 (tB 扩展, ai/022 D46, 批次 B11/C02): stage 2.7 Pass E 求解一次、之后只读。
+    // key = CoClass 块名小写。消费者 = 将来的 C05（`New`/`CreateObject` 编译期改写）与
+    // B13/B15/B16（对外那半）；C02 只发一条 note 让它可测。
+    std::unordered_map<std::string, CoClassIdentity> coclassIds_;
+    // vbp 的 Name= 字段（ProgID 默认值与确定性 mint 的 <Proj>，与 projectBaseName_ 分叉，见 D46）
+    std::string vbpProjectName_;
 
     // VBP工程基名 (用于多模块工程的输出文件命名)
     std::string projectBaseName_;

@@ -684,6 +684,49 @@ function Test-SyntaxFail {
     }
 }
 
+# ai/022 B11/C02: CoClass identity assertions. The resolver prints one info line per block on
+# stderr -- note-level *diagnostics* cannot be the surface here, because Diagnostics::toString()
+# is only dumped when a stage fails, so a note never reaches a successful compile (ai/022 D46).
+function Invoke-IdentityText {
+    param([string]$Proj)
+    $out = & cmd /c ('"' + $C3 + '" "' + $Proj + '" --syntax-only 2>&1')
+    $script:identityExit = $LASTEXITCODE
+    return (((@($out | Where-Object { "$_" -match 'identity:' })) | Out-String) -replace '\s+', ' ')
+}
+
+function Test-IdentityNote {
+    param([string]$Name, [string]$Proj, [array]$Needles)
+    $script:total++
+    Write-Host -NoNewline "  [IDENTITY] $Name ... "
+    $text = Invoke-IdentityText $Proj
+    $bad = @($Needles | Where-Object { -not $text.Contains($_) })
+    if ($script:identityExit -eq 0 -and $bad.Count -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        Write-Host ("  exit=" + $script:identityExit + " missing: " + ($bad -join ' | ')) -ForegroundColor DarkGray
+        if ($Verbose) { Write-Host $text }
+    }
+}
+
+function Test-IdentityStable {
+    param([string]$Name, [string]$Proj)
+    $script:total++
+    Write-Host -NoNewline "  [IDENTITY] $Name ... "
+    $a = Invoke-IdentityText $Proj
+    $b = Invoke-IdentityText $Proj
+    if ($a.Length -gt 0 -and $a -ceq $b) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        Write-Host "  two runs of the same project differ (or printed nothing)" -ForegroundColor DarkGray
+    }
+}
+
 function Test-Syntax {
     param([string]$Name, [string]$Source)
     $script:total++
@@ -1038,6 +1081,23 @@ if ($Category -in @("all", "syntax")) {
     if (Test-Path "$Tests\itf_pos\p05_coclass_block.bas") { Test-Syntax "itf_p05_coclass_block" "$Tests\itf_pos\p05_coclass_block.bas" }
     if (Test-Path "$Tests\itf_pos\p06_coclass_soft_ident.bas") { Test-Syntax "itf_p06_coclass_soft_ident" "$Tests\itf_pos\p06_coclass_soft_ident.bas" }
     if (Test-Path "$Tests\itf_pos\p07_coclass_cls_host.cls") { Test-Syntax "itf_p07_coclass_cls_host" "$Tests\itf_pos\p07_coclass_cls_host.cls" }
+    # ai/022 B11/C02: the three identity tiers, asserted against expected GUIDs computed by an
+    # independent FNV-1a re-implementation of the seed strings "coc:<proj>.<coclass>" and
+    # "itf:<proj>.<iface>" (both lowered) -- NOT scraped from this compiler's own output, or the
+    # test could only ever re-state the implementation (ai/022 D46).
+    $ccShapes = "$Tests\cc_id\Id.vbp"
+    $ccOther = "$Tests\cc_id\Id2.vbp"
+    Test-IdentityNote "cc_id_explicit_tier" $ccShapes @(
+        "CoClass 'CCCircle' identity: CLSID={11111111-1111-1111-1111-111111111111} (explicit) IID={22222222-3333-4444-5555-666666666666} (explicit) ProgID=Shapes.Circle (explicit) impl='CircleImpl' comCreatable=True",
+        "CoClass 'CCVbp' identity: CLSID={33333333-4444-5555-6666-777777777777} (vbp) IID={62D63A9A-7316-DAB9-B2D1-5DDFB57EDB17} (minted) ProgID=ShapesApp.CCVbp (minted) impl='VbpImpl' comCreatable=False",
+        "CoClass 'CCMint' identity: CLSID={A5B36375-4E3A-D5F9-D2A2-1912F3EDC498} (minted) IID={62D63A9A-7316-DAB9-B2D1-5DDFB57EDB17} (minted) ProgID=ShapesApp.CCMint (minted) impl='' comCreatable=False")
+    # Same sources, only the vbp Name= differs: the minted tier moves while the explicit line
+    # stays character-identical to the case above -- that split IS the reproducibility claim.
+    Test-IdentityNote "cc_id_project_name_scope" $ccOther @(
+        "CoClass 'CCCircle' identity: CLSID={11111111-1111-1111-1111-111111111111} (explicit)",
+        "CoClass 'CCVbp' identity: CLSID={33333333-4444-5555-6666-777777777777} (vbp) IID={28519764-65C8-D639-C831-604BAD706603} (minted) ProgID=OtherApp.CCVbp (minted) impl='VbpImpl' comCreatable=False",
+        "CoClass 'CCMint' identity: CLSID={CE88DE91-E77D-563D-D74F-5CA0DF3902D2} (minted) IID={28519764-65C8-D639-C831-604BAD706603} (minted) ProgID=OtherApp.CCMint (minted)")
+    Test-IdentityStable "cc_id_repeatable" $ccShapes
     # ai/022 B07a (class Inherits, P3): chain diagnostics must fire. Single-file cases ride
     # the existing Test-SyntaxFail path; the two-module cases need Test-SyntaxFailMulti.
     $clsInhNeg = @(

@@ -12,7 +12,9 @@
 #include "ast/ast.hpp"
 #include "semantics/interface_sig.hpp"
 #include "semantics/interfaces_registry.hpp"
+#include "semantics/coclass_identity.hpp"   // CoClass 身份 (tB, B11/C02)
 
+#include <iostream>
 #include <set>
 #include <string>
 #include <unordered_map>
@@ -261,6 +263,37 @@ bool Driver::runInterfacePrepass() {
                 vv.fieldName = fld->name;
                 vv.holderModule = holder->moduleName;
                 vias_[ifaceLower(mod->moduleName)].push_back(std::move(vv));
+            }
+        }
+    }
+
+    // --- Pass E: CoClass 身份求解 (tB 扩展, ai/026 三节 / ai/022 D46, 批次 B11/C02) ---
+    // 求解本身在 src/semantics/coclass_identity.cpp 这个唯一入口里；这里只给上下文、缓存结果。
+    // 报告走 stderr 的 "C3: ..." 信息行（driver_compile.cpp 的 "C3: 加载工程" 是同族先例）：
+    // 诊断通道今天只在**阶段失败**时才整体打印，note 级在成功的编译里根本看不见；而 --emit-c
+    // 的 stdout 是 C 文本，不能混。D44/D45 那条"每层的可观测面不一样"的第三次应验。
+    coclassIds_.clear();
+    {
+        CoClassEnv env;
+        // <Proj>: vbp 的 Name= > 工程基名 > 兜底字面量（第三条沿用 com_entry 那侧已有的兜序）
+        env.project = !vbpProjectName_.empty() ? vbpProjectName_
+                    : (!projectBaseName_.empty() ? projectBaseName_ : std::string("VB6EXE"));
+        env.vbpClsids = &classClsidMap_;
+        env.ifaces = &ifaces_;
+        for (auto& mod : modules_) {
+            for (auto& cc : mod->coclasses) {
+                if (!cc || cc->name.empty()) continue;  // 无名块: parse 期已报错, 不再级联
+                CoClassIdentity id = resolveCoClassIdentity(*cc, env);
+                std::cerr << "C3: CoClass '" << id.name << "' identity: CLSID=" << id.clsid
+                          << " (" << identitySourceName(id.clsidSource) << ")"
+                          << " IID=" << (id.iid.empty() ? std::string("-") : id.iid)
+                          << " (" << identitySourceName(id.iidSource) << ")"
+                          << " ProgID=" << id.progId
+                          << " (" << identitySourceName(id.progIdSource) << ")"
+                          << " impl='" << id.implName << "'"
+                          << " comCreatable=" << (id.comCreatable ? "True" : "False") << std::endl;
+                // 同名两个块: 首值胜。重复名/引用是否存在这类校验按 D44 整片归 C03。
+                coclassIds_.emplace(ifaceLower(id.name), std::move(id));
             }
         }
     }

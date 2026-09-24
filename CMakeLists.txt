@@ -97,6 +97,7 @@ add_library(vb6c3-core STATIC
     src/ast/ast_clone.cpp
     src/ast/ast_printer.cpp
     src/semantics/symbol_table.cpp
+    src/semantics/coclass_identity.cpp    # tB 扩展: CoClass 身份求解唯一函数 (ai/026 三节, B11/C02)
     src/semantics/type_system.cpp
     src/semantics/semantic_analyzer.cpp
     src/semantics/semantic_analyzer_dispatch.cpp

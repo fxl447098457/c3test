@@ -96,6 +96,9 @@ CompileResult Driver::compile(const CompileOptions& options) {
             }
             // 注意: 不再设置effectiveOpts.outputFile, 让runLinker通过projectBaseName_统一处理
             // 这样确保输出路径始终包含outputDir前缀
+            // CoClass 身份的 <Proj> 用 vbp 的 Name= 字段 (VB6 的 ProgID 语义就是
+            // <工程名>.<类名>); 求解处再退到 projectBaseName_ (ai/026 三节 / ai/022 D46)。
+            vbpProjectName_ = project.projectName;
             // P11.1: Save VBP Path32 for output directory resolution
             if (!project.outputPath.empty()) {
                 projectPath32_ = pathToUtf8(project.resolvePath(project.outputPath));
