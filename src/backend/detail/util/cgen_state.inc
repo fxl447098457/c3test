@@ -447,6 +447,9 @@
 
     // ai/vb-asm-extension-spec: Asm 块过程收集 + 目标架构
     //   函数体 = 单个 AsmStmt 时, 不发 C 体, 改发 extern 原型并把元数据记在这里,
-    //   由 driver 生成独立 MASM 过程 (ml64) 参与链接。x86 下报 3030 (v1 仅 x64)。
+    //   由 driver 生成独立 MASM 过程 (ml64) 参与链接。
+    //   混排 (项2): 逐条 AsmStmt 就地降级, 也往这里追加 (每片段一个独立过程)。
     std::vector<AsmProcInfo> asmProcs_;
     std::string targetArch_ = "x64";
+    // 混排 (项2): 每个过程体清零; 给降级出来的 Asm 辅助过程/标签起唯一序号。
+    int asmMixedBlockCounter_ = 0;

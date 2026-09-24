@@ -170,6 +170,16 @@ BSTR vb6_CStrDbl(double x) {
     vb6_VARIANT v; memset(&v, 0, sizeof(v)); v.vt = (vb6_vartype)VT_R8; v.dblVal = x;
     return vb6_Format(v, NULL);
 }
+// Fix 084m: LongLong (恒 64 位有符号) → String。
+//   为什么另开一个函数而不复用 vb6_CStrLong: vb6_Format 不认识 VT_I8 (它只覆盖
+//   vtInteger/vtLong/vtDouble/... 这一族), 走 vb6_CStrLong 会先被截成 int32_t
+//   —— 实测 BigAdd(2e9,2e9)=4000000000 打成 -294967296。故这里直接按 64 位格式化,
+//   不经过 VARIANT。VB6 的 CStr 对整数就是十进制无前导零的短形式, 与 %lld 一致。
+BSTR vb6_CStrLongLong(int64_t x) {
+    wchar_t buf[32];
+    _snwprintf_s(buf, 32, _TRUNCATE, L"%lld", (long long)x);
+    return vb6_BSTR_FromStr(buf);
+}
 // Fix 117c: Single → String 必须保留 VT_R4 (7 位有效数字 + 最短往返), 否则
 // CSng(21.1) 会像 Double 一样打印成 "21.1000003814697"。
 BSTR vb6_CStrSingle(float x) {

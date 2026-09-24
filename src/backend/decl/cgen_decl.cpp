@@ -41,8 +41,10 @@ void CCodeGen::clearProcArrayTracking() {
 //                push/pop 块内踩到的 callee-saved (ebx/esi/edi, 及 clobber 里的 ebp)。
 //   x64: 不发 C 体, 只发 `extern` 原型 + 把元数据记进 asmProcs_
 //        (driver 侧生成 .asm, ml64 汇编后进链接)。
-//   边界 (spec §10): 整块独占过程体 (混排待 v2) / 非类方法 / 无 Optional/ParamArray /
-//   参数为整型或指针 (浮点 xmm 传参待 v2) / x64 参数 ≤4 (寄存器传参上限)。
+//   **体里还有其它语句 (混排, 项2) 时本函数返回 false** —— 交给常规过程生成流程,
+//   其中每条 AsmStmt 由 emitStmtList 的 AsmStmt 分支就地降级 (见 cgen_stmt_asm.cpp)。
+//   边界 (spec §10): 类方法 / 无 Optional/ParamArray / 参数为整型或指针或浮点 /
+//   x64 参数 ≤4 (寄存器传参上限)。
 // ============================================================
 bool CCodeGen::tryEmitAsmProc(const std::string& procName, AccessLevel access,
                               std::vector<std::unique_ptr<ParameterDecl>>& params,
@@ -56,6 +58,11 @@ bool CCodeGen::tryEmitAsmProc(const std::string& procName, AccessLevel access,
     }
     if (!asmNode) return false;   // 与 Asm 无关的常规过程
 
+    // 项2 混排: 体里除了 Asm 块还有别的语句 → 不在这里接管。
+    // (整过程降级的 x64 路只发 extern 原型, 没法表达"块之间还有 VB 语句";
+    //  混排由 emitStmtList 逐条 AsmStmt 就地降级, 见 cgen_stmt_asm.cpp。)
+    if (body.size() != 1) return false;
+
     auto fail = [&](DiagnosticID id, const std::string& msg) -> bool {
         diag_.error(id, loc, msg);
         return true;              // 已接管: 不再发 C 体 (编译已失败)
@@ -63,14 +70,8 @@ bool CCodeGen::tryEmitAsmProc(const std::string& procName, AccessLevel access,
 
     const bool x86 = (targetArch_ == "x86");
 
-    if (body.size() != 1)
-        return fail(DiagnosticID::SemAsmMixedBody,
-                    "Asm 块必须独占过程体 (不支持与 VB 语句混排)");
     if (isClassModule_)
         return fail(DiagnosticID::SemAsmMixedBody, "类方法暂不支持 Asm 块 (仅标准模块过程)");
-    if (!x86 && params.size() > 4)
-        return fail(DiagnosticID::SemAsmMixedBody,
-                    "x64 Asm 过程最多 4 个参数 (Win64 寄存器传参上限, 栈传参待 v2)");
 
     for (auto& p : params) {
         if (p->isOptional)   return fail(DiagnosticID::SemAsmMixedBody, "Asm 过程暂不支持 Optional 参数");
@@ -82,27 +83,23 @@ bool CCodeGen::tryEmitAsmProc(const std::string& procName, AccessLevel access,
     info.retCType = returnType ? mapTypeRef(returnType) : "void";
     for (auto& p : params) info.params.push_back(makeParamCType(p.get()));
 
-    // 参数类型白名单: 整型 / 任意指针 (含 ByRef 的 `T*`)。浮点与结构体按值不支持。
+    // 参数/返回类型白名单: 整型 / 任意指针 / 浮点 (float,double —— 走 xmm/浮点栈, spec §6)。
+    // 其余 (VARIANT/结构体按值/String 等) 仍拒绝 —— 它们各有复杂编组约定, 待后续。
     static const char* kIntTypes[] = {"int8_t", "int16_t", "int32_t", "int64_t", "intptr_t", "unsigned", "VBABOOL"};
+    auto typeOk = [](const std::string& t) {
+        if (t.find('*') != std::string::npos) return true;    // 指针
+        if (asmIsFloatCType(t)) return true;                  // float / double
+        for (const char* k : kIntTypes) if (t == k) return true;
+        return false;
+    };
     for (auto& ps : info.params) {
         std::string t = ps.substr(0, ps.find(' '));
-        bool ok = t.find('*') != std::string::npos;
-        for (const char* k : kIntTypes) if (t == k) ok = true;
-        if (!ok) return fail(DiagnosticID::SemAsmMixedBody,
-                             "Asm 过程参数暂只支持整型与指针: " + ps);
+        if (!typeOk(t)) return fail(DiagnosticID::SemAsmMixedBody,
+                                    "Asm 过程参数暂只支持整型/指针/浮点: " + ps);
     }
-
-    // 返回类型同理 (double/Single 走 xmm0, String 走 BSTR 约定, 均待 v2)
-    {
-        const std::string& rt = info.retCType;
-        bool ok = (rt == "void") || rt.find('*') != std::string::npos;
-        for (const char* k : kIntTypes) if (rt == k) ok = true;
-        if (!ok) return fail(DiagnosticID::SemAsmMixedBody,
-                             "Asm 过程返回类型暂只支持整型/指针/void: " + rt);
-    }
-    if (x86 && info.retCType == "int64_t")
+    if (!(info.retCType == "void") && !typeOk(info.retCType))
         return fail(DiagnosticID::SemAsmMixedBody,
-                    "x86 内联汇编过程暂不支持 64 位整型返回 (返回值在 edx:eax, 待 v2)");
+                    "Asm 过程返回类型暂只支持整型/指针/浮点/void: " + info.retCType);
 
     info.lines = asmNode->lines;
     info.naked = isNaked;
@@ -168,19 +165,47 @@ bool CCodeGen::tryEmitAsmProc(const std::string& procName, AccessLevel access,
             if (widthBad) return true;   // 诊断已报, 不再发射
         }
 
+        // 项1: 隐含累加器别名 (cmpxchg×EAX/EDX 等) → 3042。x86 同为 32 位寄存器:
+        // `cmpxchg [eax], ecx` 的地址寄存器与隐含累加器同为 EAX 时同样互毁。
+        {
+            bool aliasBad = false;
+            asmCheckAccumAlias(body, [&](int idx, int wLine, int lLine,
+                                         const std::string& mnem, const std::string& fam) {
+                if (aliasBad) return;
+                aliasBad = true;
+                fail(DiagnosticID::SemAsmAccumAliasClobber,
+                     "Asm 第 " + std::to_string(idx + 1) + " 行 `" + info.lines[idx] +
+                     "`: 该指令的隐含累加器 " + fam + " 已被第 " + std::to_string(wLine + 1) +
+                     " 行 `" + info.lines[wLine] + "` 写坏 (之后第 " + std::to_string(lLine + 1) +
+                     " 行 `" + info.lines[lLine] + "` 只写了它的低位)。cmpxchg/mul/div 的"
+                     "累加器就是 AX/DX 家族 —— 别再把它当指针/基址用 (模板见 spec §11)");
+            }, /*x64=*/false);
+            if (aliasBad) return true;
+        }
+
         std::vector<std::string> saved =
             info.naked ? std::vector<std::string>()
                        : asmSavedRegsForArch(info.lines, info.clobbers, /*x64=*/false);
 
-        // 返回值收尾: 块里没写 `[Function]` 时, 值按 VB 约定留在 EAX —— 落到 C 返回变量。
+        // 返回值收尾: 块里没写 `[Function]` 时, 值按 VB 约定留在返回寄存器 —— 落到 C 返回变量。
         // (x64 那条后端不需要这步: 值本来就在 RAX 里, 过程直接 ret 即可。)
         // 单行形式 (`Asm mov eax, [num]`) 正是靠这条拿到返回值。
+        //   浮点返回 (spec §6): __stdcall 下返回值在 ST(0); 64 位整型在 EDX:EAX。
         // 判据用**重写后**的 body: 用户写了 [Function] 就会看到 kRetName。
         bool wroteRet = false;
         for (auto& l : body)
             if (l.find(kRetName) != std::string::npos) { wroteRet = true; break; }
-        if (!info.naked && info.retCType != "void" && !wroteRet)
-            body.push_back(std::string("mov ") + kRetName + ", eax");
+        if (!info.naked && info.retCType != "void" && !wroteRet) {
+            if (asmIsFloatCType(info.retCType))
+                body.push_back(std::string("fstp ") + kRetName);      // ST(0) → 返回变量
+            else if (info.retCType == "int64_t")
+                body.push_back(std::string("mov dword ptr [") + kRetName + "], eax");  // 低 32 位
+            else
+                body.push_back(std::string("mov ") + kRetName + ", eax");
+            // 注: int64 的高 32 位在 edx, 单独再发一条 (见下)。
+            if (info.retCType == "int64_t")
+                body.push_back(std::string("mov dword ptr [") + kRetName + "+4], edx");
+        }
 
         c_.emitLine("    __asm {");
         for (auto& r : saved) c_.emitLine("        push " + r);
@@ -211,6 +236,24 @@ bool CCodeGen::tryEmitAsmProc(const std::string& procName, AccessLevel access,
                  " 位); 请统一宽度 —— 32 位值用低 32 位寄存器 (如 ecx/eax), 或改用 movsxd/movzx");
         });
         if (widthBad) return true;   // 诊断已报, 不再收集 (编译到此失败)
+
+        // 项1: 隐含累加器别名 (cmpxchg×RAX/EAX 等静态可见的踩法) → 3042
+        bool aliasBad = false;
+        asmCheckAccumAlias(xbody, [&](int idx, int wLine, int lLine,
+                                      const std::string& mn, const std::string& fam) {
+            if (aliasBad) return;   // 只报第一处
+            aliasBad = true;
+            fail(DiagnosticID::SemAsmAccumAliasClobber,
+                 "Asm 第 " + std::to_string(idx + 1) + " 行 `" + info.lines[idx] +
+                 "`: 该指令的隐含累加器 " + fam + " 已被第 " + std::to_string(wLine + 1) +
+                 " 行 `" + info.lines[wLine] + "` 写坏 (之后第 " + std::to_string(lLine + 1) +
+                 " 行 `" + info.lines[lLine] + "` 只写了它的低 32 位, 高 32 位回不来了)。"
+                 "cmpxchg/mul/div 的累加器是 RAX/EAX 一族, 而 EAX 就是 RAX 的低 32 位 —— "
+                 "把指针/基址放在 RAX 又让它当累加器, 必然互毁: 轻则永不相等死循环, 重则"
+                 "把值当地址访问而崩溃。请把指针/基址改放到 R10/R11 等无关寄存器 "
+                 "(模板见 spec §11)");
+        }, /*x64=*/true);
+        if (aliasBad) return true;
     }
 
     c_.emitLine("/* ai/vb-asm-extension-spec: 过程体为 Asm 块; 实现在 ml64 汇编的 "

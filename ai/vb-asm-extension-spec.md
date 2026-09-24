@@ -60,9 +60,10 @@ End Function
 |---|---|
 | 块结构 | `Asm ... End Asm`；单行可用 `Asm <指令>`（过程体只有一条指令时）。 |
 | 按名引用 | `[var]` 引用变量；编译器做栈帧 / ABI 寄存器替换（见 §4、§5）。 |
-| 返回值 | `[Function]` 占位 → 映射到 ABI 返回寄存器（x86=eax，x64=rax）。x86 内联块里若整块没写 `[Function]`，收尾自动把 EAX 落到返回值（单行形式靠这条）。 |
+| 带偏移引用 | `[var]` / `[Function]` 后可直接跟常量偏移：`[Function+4]`、`[buf-8]`。编译器把整对方括号一起吃掉（`[Function+4]` → `ret+4`）。x86 下用来取 64 位返回变量的高低半（见 §12.3）。 |
+| 返回值 | `[Function]` 占位 → 映射到 ABI 返回寄存器（x86=eax，x64=rax；浮点 x86=`fstp` 目标、x64=`xmm0`）。x86 内联块里若整块没写 `[Function]`，收尾自动把 EAX 落到返回值（单行形式靠这条）。 |
 | 注释 | 用 VB 风格 `'`，**不用** `;`（避免与汇编冲突）。 |
-| 大小标注 | 用 **MASM 风格 `dword ptr [n]`**，不要用 GAS 的 `dword Ptr [n]`（那是 GAS 怪癖，别泄漏给用户）。 |
+| 大小标注 | 用 **MASM 风格 `dword ptr [n]`**，不要用 GAS 的 `dword Ptr [n]`（那是 GAS 怪癖，别泄漏给用户）。x86 内联汇编里向 64 位变量写 32 位寄存器，`dword ptr` **不能省**（否则 C2443）。 |
 | 标签 | `.name:` 局部标签，`jmp .name` 引用；发射期重写为 `<过程名>_<name>`（MASM PROC 内无 proc 局部标签，同文件多 PROC 会撞名）。 |
 | 寄存器命名 | 标准 Intel：`eax/rax`、`xmm0`…、`st(0)`…。 |
 | 可选 clobber | `Asm Clobber("rbx","r12","memory") ... End Asm`，声明踩了哪些寄存器 / 内存，与块内静态扫描取并集后自动生成 push/pop。 |
@@ -80,9 +81,24 @@ ml64 的 A2022 / cl 的 C2443。内存操作数（`dword ptr [x]`）与变宽指
 
 ### 2.3 By-name 引用语义（重要）
 
+**整过程形态**（过程体恰好只有一个 Asm 块 —— 见 §5）：
+
 - `[var]`（局部 / ByVal 参数）→ 变量存储位置（取/存其值）。
 - `[var]`（ByRef 参数）→ **引用单元本身**（即那个指针）。要取值需再解一次引用，例如 `mov eax,[var]`（取指针）后 `mov eax,[eax]`（解引用）。这是 FreeBASIC 的「变量即其地址」语义，需如实告知用户。
 - `[Function]` → ABI 返回寄存器。
+
+**混排形态**（过程体里还有 VB 语句 —— 见 §12.5）语义**统一成"那个变量本身"**：
+
+- `[var]` → **该 VB 变量的内存**。局部变量、ByVal 参数、ByRef 参数、模块级变量一视同仁：
+  ByRef 参数也直接读写调用者的那个变量（不再需要用户手动解引用）。
+- x86 实现：MSVC 内联汇编按名解析，ByRef 参数**经本地副本**进出（编译器生成
+  `T vb6_asmref_... = (*x);` ... `(*x) = vb6_asmref_...;`），所以 `[x]` 就是那个变量。
+- x64 实现：片段降级为独立 MASM 过程，变量以**地址**作参数传入 → `[x]` → `[rcx]`。
+- `[Function]` → 返回变量（x64 也走地址参数，`[Function]` → `[rcx]`）。
+
+> 为什么两种形态语义不同：整过程形态下过程体里没有任何 VB 语句，用户写的就是"函数级"
+> 汇编，`[param]` 自然映射到 ABI 寄存器（那是指针/值本身）；混排形态下用户是在"操作一个
+> VB 变量"，把指针语义泄漏给他纯属多余。**这一差异是有意的，且已在 §2.2/§12.5 写明。**
 
 ---
 
@@ -180,8 +196,22 @@ END
 | 平台 / 约定 | 参数传递 | 返回值 | 被调用者保存 (callee) | 调用者保存 (caller) | 栈对齐 |
 |---|---|---|---|---|---|
 | Win32 `cdecl` | 右→左压栈，caller 清栈 | eax (64位: edx:eax) | ebx, esi, edi, ebp, esp | eax, ecx, edx | 4B |
-| Win32 `stdcall` | 右→左压栈，callee 清栈 | eax | 同上 | 同上 | 4B |
-| **Win64** | RCX,RDX,R8,R9 + 栈(右→左) | RAX | RBX,RBP,RDI,RSI,R12–R15 | RAX,RCX,RDX,R8–R11 | **16B** |
+| Win32 `stdcall` | 右→左压栈，callee 清栈 | eax (64位: edx:eax) | 同上 | 同上 | 4B |
+| **Win64** | RCX,RDX,R8,R9 + 栈(右→左) | RAX (64位整型) / XMM0 (浮点) | RBX,RBP,RDI,RSI,R12–R15 | RAX,RCX,RDX,R8–R11 | **16B** |
+
+**浮点参数（Win64，2026-09-24 实测确认）**：XMM0–XMM3，**与整型参数独立计数** —— 整型用
+RCX/RDX/R8/R9 的编号，浮点用 XMM0–3 的编号，互不占用。例：`F(a As Long, x As Double)`
+→ `a` 在 RCX、`x` 在 **XMM0**（不是 XMM1）。第 4 个之后的浮点参数才溢出到**栈**。
+
+**Win64 栈槽布局（2026-09-24 实测，踩过 shadow space）**：被调方入口自 RBP 向上：
+`[rbp+0]` 旧 rbp / `[rbp+8]` 返回地址 / `[rbp+16..47]` **调用方预留 32B shadow space** /
+`[rbp+48]` 第 5 个栈参数 / `[rbp+56]` 第 6 个 …… 相对 RSP 则是 `[rsp+40]` 第 5 参
+（8B 返回地址 + 32B shadow）。**漏算 shadow 会静默取到垃圾**（首版写成 `[rbp+16+8k]`，
+`Sum6` 返回 -1644341686 而非 21）。
+
+**x86 浮点 / int64**：浮点参数按值在栈上（`[ebp+8+4n]`，double 占 8B）；
+浮点返回经 **ST(0)**（所以 `[Function]` 在 x86 下作 `fstp` 目标是 C double 变量）；
+int64 返回经 **EDX:EAX**，配合 `[Function]` / `[Function+4]` 偏移写法（低/高 32 位）。
 
 > 换架构（如 ARM64 AAPCS）只填一张新表，前端语法与后端编码不动——三层解耦的价值。
 
@@ -220,14 +250,25 @@ END
 
 1. **x86 `<Naked>` 不能按名引用参数** —— naked 无栈帧, x86 参数在调用者栈上, 名字无从解析。
    已实现为编译期诊断 **3036**（唯一来源）。x64 无此限制（参数在 ABI 寄存器里）。
-2. x64 下是否放开「引用 VB 局部变量」（需自动 spill 到栈并映射）——当前限定仅参数。
-   注: Asm 过程体独占整个过程, 此时并不存在 VB 局部变量; 仅在放开混排后才成为真问题。
-3. 行内混排（非 Naked 的语句间 asm）是否支持——当前仅整块；混排需与寄存器分配器深度耦合，风险高，暂缓。
+2. ~~x64 下是否放开「引用 VB 局部变量」（需自动 spill 到栈并映射）——当前限定仅参数。~~
+   —— **已实现 (2026-09-24, 项3)**，见 §12.5。走的是"变量以地址作参数传入独立 MASM 过程"，
+   **不需要**新的栈槽映射 / 寄存器分配器；代价是 x64 单片段最多引用 4 个变量（3041）。
+3. ~~行内混排（非 Naked 的语句间 asm）是否支持——当前仅整块；混排需与寄存器分配器深度耦合，风险高，暂缓。~~
+   —— **已实现 (2026-09-24, 项2)**，见 §12.5。x86 就地发 `__asm{}`（零成本）；x64 片段降级为
+   独立 MASM 过程（x86 也做了 ByRef 副本以对齐语义）。放弃的是"寄存器/标志位跨片段传播"。
 4. ARM64 后端（AAPCS 表 + `armasm64`/`clang` 集成）——待 x64 跑通后评估（已具备 x86/x64 两套 ABI 表）。
 5. 标签 / 外部符号重定位：独立 MASM 过程由 `ml64` + 链接器处理；若未来做裸字节 Emit 逃生舱，需自行生成重定位项。
-6. 浮点/向量参数与返回（x64 走 XMM0–3）：当前 Asm 过程只接受整型与指针 —— 浮点按值参数与
-   `Single`/`Double` 返回均报 3037。
-7. x86 `int64_t` 返回（edx:eax 双寄存器）与 x64 栈传参（>4 参）：报 3037。
+6. ~~浮点/向量参数与返回（x64 走 XMM0–3）~~ —— **已实现 (2026-09-24)**。x64: XMM0–3 独立
+   计数 + `[Function]` → `xmm0`；x86: 浮点按值栈传 + `[Function]` → `fstp` 目标。
+   见 §12.1。向量 (XMM/YMM 打包类型) 仍未支持，按"标量浮点"处理。
+7. ~~x86 `int64_t` 返回（edx:eax 双寄存器）与 x64 栈传参（>4 参）~~ —— **已实现 (2026-09-24)**。
+   x64 栈传参见 §12.2（含 shadow space 陷阱）；x86 int64 返回见 §12.3（`[Function+4]` 偏移写法）。
+8. **`LongLong` 语义修正（Fix 084m，2026-09-24）** —— 见 §12.4。这是根因级修复，不是 asm 局部糖。
+9. ~~混排 (项2) + 片段引用 VB 局部变量 (项3)~~ —— **已实现 (2026-09-24)**，见 §12.5。
+   残留边界：类方法不支持（3037）；x64 单片段 ≤4 个变量引用（3041）；跨片段不共享寄存器/标志位；
+   不支持 `me->` 成员引用。
+10. ~~项1 cmpxchg×RAX/EAX 别名陷阱~~ —— **已工具化为 3042**（2026-09-24 晚），见 §11.1。
+    静态启发式（同块 + 顺序 + 别名），刻意的漏报边界一并写在 §11.1。
 
 ---
 
@@ -254,4 +295,237 @@ mov [Function], eax     ' 返回旧值
 
 正例夹具 `tests/asm/AsmTest.bas` 的 AtomicAdd 即此模板；定位过程（探针 p5 抓 ZF、p6 四变体二分）留在 `.temp/asmtest/` 可复查。
 
+### 11.1 项1 已工具化（2026-09-24 晚）—— VB3042
+
+上述陷阱**不再只靠文档**：codegen 期做一次静态检查（`asm_proc.hpp` 的 `asmCheckAccumAlias`），
+命中报 **`VB3042 SemAsmAccumAliasClobber`**。判据是"**别名 + 块内顺序可达**"这个交集：
+
+1. 块里有一条带**隐含累加器**的指令（`cmpxchg`→RAX、`mul`/`imul`/`div`/`idiv`→RAX、`mulx`→RDX。
+   注意 **`xadd` 不算** —— 它只读写两个显式操作数，没有隐含累加器）；
+2. 在该指令**之前**，同一个寄存器族先有一条**满宽写 W**（x64: `mov rax, r10`；x86: `mov eax, ebx`
+   —— 建立有意义的满宽值，典型是"把指针/基址放进 RAX"），之后又有一条**短宽写 L**
+   （`mov eax, 0` / x86 `mov ax, 0` —— 只写低位，x64 下 32 位写还会把高 32 位清零）；
+3. 即 **`L` 晚于 `W`** → 高位回不来了，而这条指令正把该寄存器当累加器用 → 报。
+
+x86 判据同构，**"满宽"取 32 而非 64**（x86 的 `mov eax, ebx` 就是它的满宽写）。两架构在
+**整过程形态**与**混排片段**四条路径上都接了这个检查。
+
+**这是启发式，不是数据流分析** —— Asm 块是原始文本、没有 CFG，完整答案需要活跃变量分析与
+分支建模。所以刻意只抓"同块、顺序、别名"三条件同时成立的形态，跨块/跨分支/条件重载一律放过
+（**宁可不报，不可误报**：误报会挡住合法代码）。由此**必然漏掉**的写法：
+
+* 指针在**进入块之前**装进 RAX（块内看不到那条整宽写）→ 不报；
+* 两条指令在**不同片段**里 → 不报（片段是独立单元，本就不共享寄存器）；
+* 重载在**条件分支**里（`jne` 回跳形成的循环）→ 静态顺序不构成"可达"证据，不报。
+
+**放过而不误报**的常见合法写法（都有正例守着）：
+* `mov eax, [r10]` + `lock cmpxchg [r10], r8d`（AtomicAdd 模板）—— rax 族**只有**短宽写，
+  从没有整宽写 → `W` 不存在 → 不报；
+* `mov rax, r10` 之后**不再**写 eax，（`mov ecx,[rax]` / `cmpxchg [rcx],edx`）—— 没有短宽写 → 不报。
+
+负例夹具：`tests/asm/AsmAliasNeg.bas`（x64 两形态：cmpxchg / mul）、
+`tests/asm/AsmAliasX86Neg.bas`（x86，`mov ax,0` 毁 eax）。
+
 **环境**：`run_tests.ps1` 自建 MSVC 环境（vswhere/C3_VCVARSALL + 动态发现 SDK，本机 SDK 在 `D:\Windows Kits\10`）。手工复现时**不要再额外 call vcvars64** —— 反而会把 INCLUDE 搅乱（C1083 stddef.h）。
+
+---
+
+## 12. 实现记录：项 4/5/6 + LongLong 语义修正（2026-09-24）
+
+本轮把 §10 的待办 6、7 全部落地，并顺手修掉一个**根因级类型缺陷**（LongLong）。
+两套后端各自跑通，正例断言全部为真：
+
+```
+x64  tests/asm/asm_ok.vbp    ASM-DBL:3.75  ASM-SUM6:21   ASM-BIG64:4000000000
+x86  tests/asm/asm_x86.vbp   X86-DBL:3.75  X86-SUM5:15   X86-BIG:4000000000  X86-MAKE64:4294967297
+```
+
+### 12.1 浮点参数与返回（项 4）
+
+**共件** `asm_proc.hpp` 新增 ABI 参数分类：`AsmParamClass{Int,Float,Stack}` +
+`AsmParamSlot{ctype,name,cls,regIndex,stackOffset}` + `asmClassifyParams(params, abi)`。
+
+- **x64**：整型/指针与浮点**各自独立编号**。`Int` → `kReg64/kReg32[regIndex]`（rcx/rdx/r8/r9），
+  `Float` → `"xmm"+regIndex`，`Stack` → `"[rsp+"+stackOffset+"]"`。`[Function]` 浮点返回 → `xmm0`。
+- **x86**：全部参数走栈（`[ebp+8+4n]`），但 MSVC 内联汇编**按名解析** —— `[name]` → C 形参名，
+  名字天然指向正确栈槽，**不用我们算偏移**。浮点返回经 ST(0)，所以 `[Function]` 是 `fstp` 的目标。
+
+**x86 返回收尾自动化**（用户没显式写 `[Function]` 时，由 codegen 补）：
+
+```cpp
+if (!info.naked && info.retCType != "void" && !wroteRet) {
+    if (asmIsFloatCType(info.retCType)) body.push_back("fstp " + kRetName);
+    else if (info.retCType == "int64_t") {
+        body.push_back("mov dword ptr [" + kRetName + "], eax");       // 低 32 位
+        body.push_back("mov dword ptr [" + kRetName + "+4], edx");     // 高 32 位
+    } else body.push_back("mov " + kRetName + ", eax");
+}
+```
+
+`dword ptr` 不能省：x86 内联汇编里向 64 位变量写 32 位寄存器，不标宽度 cl 报 **C2443**。
+
+### 12.2 x64 栈传参（项 5）——shadow space 是真正的坑
+
+用户写 `[e]` / `[f]`（第 5/6 参），宽度自己标（`dword ptr [e]`）。
+`driver_link.cpp` 的 `emitMasmProc` 检测到有栈参数时**才**生成 RBP 帧
+（`push rbp; mov rbp, rsp`），偏移是 **`[rbp+48+8k]`**，epilogue 逆序 pop 非 rbp 的
+callee-saved 再 `leave`。
+
+> **踩坑**：首版偏移写成 `[rbp+16+8k]`，`Sum6(1..6)` 返回 `-1644341686`（垃圾）。
+> 正确的账是：`[rbp+0]` 旧 rbp、`[rbp+8]` 返回地址、`[rbp+16..47]` **调用方预留的 32B
+> shadow space**、`[rbp+48]` 才是第 5 参。漏算 shadow 不会报错，只会静默读错内存。
+
+调试逃生舱：环境变量 **`C3_KEEP_ASM=<dir>`** 会把生成的 `.asm` 拷一份到该目录
+（driver 默认清空中间目录，排障时看不到 .asm）。
+
+### 12.3 x86 int64 返回（项 6）与 `[Function+偏移]` 语法
+
+x86 下 `LongLong` 返回走 EDX:EAX。返回变量是 64 位 C 变量，低 32 位在 `+0`、高 32 位在 `+4`，
+于是需要 **`[Function]` / `[Function+4]`** 这对写法 —— 这是本轮新增的**语法能力**。
+
+实现落在 `asmRewriteLines` 的 subs 代入阶段，统一处理两种形态、**都连整对方括号一起吃掉**：
+
+| 形态 | 输入 | 输出 |
+|---|---|---|
+| 精确 | `[name]` | `val` |
+| 带偏移 | `[name+4]` / `[name-8]` | `val+4` / `val-8` |
+
+> ⚠ **两个方向的错法都踩过**（写在这里免得后人重走）：
+> - 只吃前缀 `[name+` → `val+`：留下孤立的 `]` → cl **C2400「找到 ]」**。
+> - 只吃前缀但补上方括号 `[name+` → `[val+`：变成「按 val 当指针再偏 4」的内存引用，
+>   **语法合法、编译零报错**，运行静默取到垃圾 —— 比编不过更坏。
+>
+> 另一个坑：**不能拿完整的 `[name]` 去 `find`** —— `[name+4]` 里并不含 `[name]` 这个子串，
+> `find` 直接 npos，偏移分支永远进不去。必须扫 `[` + bare 前缀。
+
+### 12.4 `LongLong` 语义修正（Fix 084m）——根因级
+
+**症状**：x86 下 `BigAdd(2000000000, 2000000000)` 打出 `-294967296`，`Make64(1,1)` 打出 `1`
+（高位恒 0）。
+
+**根因不在 asm**。全局类型系统把 `LongLong` 与 `LongPtr` 一视同仁（`type_system.cpp`：
+`{"longlong", Vb6Type::LongPtr}`，注释写「VBA7 兼容」），而 `LongPtr` → `intptr_t`
+**在 x86 上是 4 字节**。于是 `int64_t` 语义的 `LongLong` 退化成 32 位：返回变量只有
+4 字节，`[Function+4]` 写到变量外面，高位全丢。
+
+**修法**：把 `LongLong` 从 `LongPtr` 里拆出来，给它自己的 `Vb6Type::LongLong = 21`，
+映射恒为 **`int64_t`（8 字节，与架构无关）**：
+
+| 位置 | 改动 |
+|---|---|
+| `src/common/types.hpp` | 新增 `LongLong = 21`（`LongPtr = 20` 保持不动） |
+| `src/semantics/type_system.cpp` | `{"longlong", Vb6Type::LongLong}`；`toString` 加分支；`isIntegral` 收录；`getTypeSize` 加 LongPtr(架构宽度)/LongLong(8) |
+| `src/backend/cgen_base_type.cpp` | `mapType` 与字面名 fallback 各自拆分 LongPtr/LongLong |
+| `src/backend/expr/cgen_expr_binary_util.cpp` | `CStr` 分派加 `LongLong` → `vb6_CStrLongLong`（落到 default 的 `CStrLong` 会截断） |
+| `src/rtl/core/vb6rtl/vb6rtl_conv.c/.h` | 新增 `vb6_CStrLongLong(int64_t)`（`vb6_Format` 不认 VT_I8，故直接 `%lld` 格式化） |
+| `cgen_decl_{func,proc,prop}.cpp` | 参数/返回值为 LongLong 时也登记 `knownLongPtrVars_`（复用标量整数的表达式路径） |
+
+> 注意与 `^` 后缀（VBA7 `LongPtr` 字面量）区分：后者语义确实是**指针宽度**，保持 `intptr_t`
+> 不变（`cgen_expr.cpp` 的 `LiteralKind::LongPtr` 分支**不动**）。
+
+`tests/asm/asm_x86.bas` 的 `BigAdd` 顺带演示了正确的 64 位加法写法 —— **先各自符号扩展到
+64 位再相加**，而不是在 32 位累加器上先溢出回绕：
+
+```asm
+mov eax, [a]
+cdq                     ' 扩 a
+mov ecx, eax
+mov ebx, edx            ' ebx:ecx = (int64)a
+mov eax, [b]
+cdq                     ' 扩 b
+add ecx, eax
+adc ebx, edx            ' 高 32 位带进位
+mov dword ptr [Function], ecx
+mov dword ptr [Function+4], ebx
+```
+
+（`ebx` 是 callee-saved，块内踩了它由既有机制自动 push/pop —— 生成代码里可见。）
+
+---
+
+## 12.5 混排（项 2）+ 片段引用 VB 局部变量（项 3）—— 2026-09-24
+
+### 要解决的问题
+
+v1 要求 Asm 块**独占过程体**（`body.size() == 1`），否则 3037。于是下面这种最常见的写法
+根本写不出来：
+
+```vb
+Public Function MixedAcc(ByVal n As Long) As Long
+    Dim acc As Long
+    acc = n * 2                     ' VB 语句
+    Asm                             ' ← 片段夹在语句中间
+        mov eax, [acc]              ' ← 直接引用 VB 局部变量 (项3)
+        add eax, 1
+        mov [acc], eax
+    End Asm
+    MixedAcc = acc + 100            ' VB 语句继续用同一个 acc
+End Function
+```
+
+### 两个后端各自的落地方式
+
+| | x86 | x64 |
+|---|---|---|
+| 机制 | 就地发 `__asm { }` 内联块 | 片段降级为**独立** MASM 过程 |
+| `[X]` 映射 | 直接换成 C 标识符（MSVC 按名解析，编译器自己决定寄存器/栈槽） | `[rcx]`（第 k 个引用变量在 RCX/RDX/R8/R9） |
+| 变量怎么进去 | 不需要传 —— 名字就在同一个 C 函数里 | 以**地址**作参数：`vb6_asm_<proc>_<n>((intptr_t)&X, ...)` |
+| `[Function]` | → 返回变量名（与整过程形态一致） | → 追加一个 `vb6_ret` 地址参数，`[Function]` → `[rcx]` |
+| 4 个变量上限 | 无 | 有（**3041**） |
+| callee-saved | `push`/`pop` 在 `__asm{}` 块内 | 既有 `asmSavedRegsForArch` 机制照旧自动处理 |
+
+x86 的 ByRef 参数**额外走一次本地副本**：MSVC 内联汇编里 `[x]`（x 是 `T*`）得到的是**指针**，
+不是调用者的变量；于是编译器在块前发 `T vb6_asmref_<seq>_x = (*x);`、块后发 `(*x) = vb6_asmref_<seq>_x;`。
+**这样 x86/x64 的片段源码写法完全一致**（同一个 `.bas` 换 `--arch` 就能编），这也是为什么混排
+形态的 By-name 语义被统一成"那个变量本身"（§2.3）。
+
+### 3 个实现要点（都是踩出来的）
+
+**① x64 为什么用"独立过程 + 地址参数"，而不是"局部变量 spill 到栈并映射偏移"。**
+后者需要活变量分析 + 栈槽映射 + 寄存器分配器三件套，而现成通路（`asmRewriteLines` 纯文本
+替换）一样都没有。地址参数方案把"变量在哪儿"这件事交回给 C 编译器（`&X`），片段只看一个
+指针 —— **零新机制、语义精确**，代价是 4 个变量的上限和跨片段不共享寄存器。
+
+**② 地址引用不能复用 `asmRewriteLines`。** 它的 subs 值是**完整操作数**，带偏移形态按
+`<值>±N` 拼接 —— 对 `[X+4]` 会拼出 `[rcx]+4`（把 `[rcx]` 当基址再加 4），语义完全错。地址引用
+要求偏移写在方括号**里面**（`[rcx+4]`），所以另写了一份 `asmRewriteAddrRefs`
+（`asm_proc.hpp`），扫描 `[名字]` / `[名字±N]` 整体替换。`AsmProcInfo::linesFinal` 标记
+"行已终态"，驱动侧据此跳过 ABI 参数替换（否则 `asmBuildX64Subs` 会把 `[rcx]` 里的 `rcx`
+当成另一个参数名去查）。
+
+**③ 宽度校验必须在替换「之后」做。** 3038 的判据是"两个纯寄存器操作数宽度不等"。混排下
+`[X]` 变成 `[rcx]` 之后，`mov eax, [X]` 的正确写法是 `mov eax, [rcx]`（内存操作数，不判定），
+但如果有人在整过程形态下写 `mov eax, [X]`（`[X]` → `rcx` bare），那就是真的 32←64 —— 
+必须报 3038。两条路径共用 `asmCheckRegWidths`，但传入的 body 必须是**已替换**的那份。
+
+### 边界与诊断
+
+| 边界 | 诊断 |
+|---|---|
+| 类方法里的 Asm 块（混排与整过程都不支持） | **3037** |
+| `[X]` 的 X 既不是寄存器，也不是可见的 VB 变量/参数 | **3040** |
+| x64 单个片段引用 > 4 个 VB 变量 | **3041** |
+
+> 3037 的语义从"必须独占过程体"改成"类方法不支持" —— 混排本身就是它当初拦的东西，
+> 现在合法了。门禁里 `asm_neg.vbp`（原 3037 夹具）已转成**正例**
+> `asm_mixed_basic.vbp`，3037 的覆盖移到新的 `asm_cls_neg.vbp`（类方法）。
+
+### 语义边界（写进文档，用户必须知道）
+
+- **片段之间不共享寄存器 / 标志位状态**（x64 下它们甚至是不同的函数）。要在片段间传递
+  数据，走 VB 变量。
+- **x64 下不要踩掉还没用完的地址寄存器** —— 第 k 个引用的变量地址在 RCX/RDX/R8/R9
+  （按首次出现顺序）。这是片段的"调用约定"，与真实内联汇编一样需要寄存器纪律。
+- 不支持引用 `me->` 成员（类方法整体不支持）。
+- 不支持引用其它模块的模块级变量（`其他模块.变量`）。
+
+### 门禁增量（asm 分类 8 → 12 个用例）
+
+| 用例 | 覆盖 |
+|---|---|
+| `asm_mixed_basic` | 最小混排（原 3037 夹具转正） |
+| `asm_mixed_x64` | 局部变量读写 / 多片段 / ByRef 参数 / `[Function]` / callee-saved / Clobber / `[X+4]` 偏移 |
+| `asm_mixed_x86_inline` | 同上换 x86（含 ByRef 副本、5 个变量引用） |
+| `asm_mixed_neg_unresolved_ref` | 3040 |
+| `asm_mixed_neg_ref_limit` | 3041（x64 专属） |
+| `asm_neg_class_method` | 3037（类方法） |

@@ -106,12 +106,17 @@ enum class DiagnosticID : uint16_t {
     SemCtorArityMismatch = 3035,        // 084c: New Cls(args) 实参个数与 Class_Initialize 形参不符
     SemAsmFormUnsupported = 3036,       // asm扩展: 该形态不支持. 当前唯一来源 = x86 `<Naked>` 过程里
                                         // 按名引用参数 (naked 无栈帧, 参数在调用者的栈上, 名字无从解析)
-    SemAsmMixedBody = 3037,             // asm扩展: x64 下 Asm 块必须独占过程体 (v1 不支持与 VB 语句混排)
+    SemAsmMixedBody = 3037,             // asm扩展: 类方法里的 Asm 块 (v1/v2 只支持标准模块过程)
     SemAsmOperandWidthMismatch = 3038,  // asm扩展: Asm 指令两个寄存器操作数宽度不一致 (原本要到 ml64 才报 A2022)
     // CoClass 组内激活 (tB 扩展, ai/026 五-3, ai/022 D54, B11/C05): 把一个**没有
     // [Implementation]** 的 CoClass 块名写在类型位置上。今天这形状静默当 Variant
     // (D54 实测 M1/M5: `void* a = 0;` + 晚绑定 DISPID 调用), 而"块没有实现类"编译器已经知道。
     SemCoClassTypeUnbound = 3039,
+    // 混排 / 累加器别名 (asm 扩展, 合并期再与 022 撞号 3039, 顺延到 3040-3042)
+    SemAsmMixedRefUnresolved = 3040,    // 混排 (项3): Asm 片段里 [X] 的 X 既不是寄存器也不是可见的 VB 变量
+    SemAsmMixedRefLimit = 3041,         // 混排 (项3, x64): 单个片段引用的 VB 变量超过 4 个 (Win64 只有 4 个整型参数寄存器)
+    SemAsmAccumAliasClobber = 3042,     // 项1: Asm 块里某条指令的隐含累加器寄存器 (cmpxchg/div/mul 等) 被同块
+                                        //      前面的指令写坏, 且写坏前的值已无从恢复 (静态可达性启发式, 见 asm_proc.hpp)
 
     // 代码生成 (4xxx)
     CodeGenUnsupportedFeature = 4001,

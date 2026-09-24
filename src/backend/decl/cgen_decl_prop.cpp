@@ -44,6 +44,7 @@ void CCodeGen::visit(PropertyDecl& node) {
     ansiTempsToFree_.clear();
     ivrefLocalsToRelease_.clear();  // tB Interface B05
     ansiCounter_ = 0;
+    asmMixedBlockCounter_ = 0;   // ai/vb-asm-extension-spec 项2: 混排片段序号按过程重置
     knownBstrVars_.clear();
     knownDoubleVars_.clear();
     knownSingleVars_.clear();
@@ -135,7 +136,7 @@ void CCodeGen::visit(PropertyDecl& node) {
             }
             else if (paramType == Vb6Type::Long || paramType == Vb6Type::Integer || paramType == Vb6Type::Boolean) knownLongVars_.insert(pLower);
             // Bug #2 fix: LongPtr 参数注册到独立集合
-            else if (paramType == Vb6Type::LongPtr) knownLongPtrVars_.insert(pLower);
+            else if (paramType == Vb6Type::LongPtr || paramType == Vb6Type::LongLong) knownLongPtrVars_.insert(pLower);   // Fix 084m
             // Fix 035: Variant 参数也要注册, 否则 `(*X) = concrete` 赋值不会触发
             // wrapVariantValue 包装, 导致 C2440 (ByRef Variant 参数写穿透场景).
             else if (paramType == Vb6Type::Variant) knownVariantVars_.insert(pLower);

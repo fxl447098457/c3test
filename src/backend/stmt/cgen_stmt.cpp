@@ -54,6 +54,9 @@ case ASTNodeKind::GoSubStmt:       visit(static_cast<GoSubStmt&>(*stmt)); break;
             case ASTNodeKind::EraseStmt:       visit(static_cast<EraseStmt&>(*stmt)); break;
             case ASTNodeKind::LabelStmt:       visit(static_cast<LabelStmt&>(*stmt)); break;
             case ASTNodeKind::LocalDeclStmt:   visit(static_cast<LocalDeclStmt&>(*stmt)); break;
+            // ai/vb-asm-extension-spec 项2/项3: 混排 —— Asm 块出现在语句流中间。
+            // (体里只有这一个 AsmStmt 的过程由 tryEmitAsmProc 早退接管, 走不到这里。)
+            case ASTNodeKind::AsmStmt:         emitAsmStmtMixed(static_cast<AsmStmt&>(*stmt)); break;
             case ASTNodeKind::Block:            visit(static_cast<Block&>(*stmt)); break;
             // 文件 I/O
             case ASTNodeKind::OpenStmt:        visit(static_cast<OpenStmt&>(*stmt)); break;

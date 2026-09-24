@@ -67,12 +67,46 @@ static void toLowerAscii(std::string& s) {
 
 // 把一个 Asm 过程写成 MASM PROC 体
 static void emitMasmProc(std::ostream& os, const AsmProcInfo& p) {
+    // 先判有没有栈参数 (第 5 个起 / 浮点溢出): 有则改用 RBP 帧指针寻址。
+    // 起因: callee-saved 的 push 会移动 RSP, 使 [rsp+40] 这类偏移失效;
+    // Win64 在**非叶函数**里也允许/推荐用 RBP 建帧 (即使没有 SEH)。
+    bool hasStackParam = false;
+    for (auto& s : asmClassifyParams(p.params, "x64"))
+        if (s.cls == AsmParamClass::Stack) { hasStackParam = true; break; }
+
     // [name] → ABI 寄存器 / [Function] → 与返回类型同宽的返回寄存器。
     // 替换表在 asm_proc.hpp (asmBuildX64Subs) —— codegen 期的宽度校验 (3038) 用的是
     // 同一张表, 改映射两边自动一致, 不会再各写一份走偏。
-    auto subs = asmBuildX64Subs(p);
-
-    std::vector<std::string> body = asmRewriteLines(p.lines, subs, p.cName);
+    //
+    // 混排 (项2/项3) 例外: cgen 已把 [X] 预替换成 [rcx] 这类**地址解引用**形态
+    // (asmRewriteAddrRefs), 参数表里的 vb6_a0… 只是"这里有一个整型参数"的占位,
+    // 不能再做一遍 ABI 替换 (会把 [rcx] 里的 rcx 当成另一个参数名去查)。
+    std::vector<std::pair<std::string, std::string>> subs;
+    if (!p.linesFinal) subs = asmBuildX64Subs(p);
+    std::vector<std::string> body;
+    if (p.linesFinal) {
+        // 只做注释 / 括号空白 / 局部标签规整, 不动操作数
+        body = asmRewriteLines(p.lines, {}, p.cName);
+    } else if (hasStackParam) {
+        // 有帧时栈参相对 RBP。Win64 被调方入口布局 (自 RBP 向上):
+        //   [rbp+0]  已保存的 rbp
+        //   [rbp+8]  返回地址 (call 压入)
+        //   [rbp+16] 调用方预留的 32 字节 shadow space 起点
+        //   [rbp+48] 第 5 个参数 (shadow 之上), [rbp+56] 第 6 个 …
+        // 故实际偏移 = 16 + 32 + 8k = 48 + 8k。
+        auto slots = asmClassifyParams(p.params, "x64");
+        int k = 0;
+        for (auto& s : slots) {
+            if (s.cls != AsmParamClass::Stack) continue;
+            std::string to = "[rbp+" + std::to_string(48 + 8 * k) + "]";
+            for (auto& sub : subs)
+                if (sub.first == "[" + s.name + "]") sub.second = to;
+            k++;
+        }
+        body = asmRewriteLines(p.lines, subs, p.cName);
+    } else {
+        body = asmRewriteLines(p.lines, subs, p.cName);
+    }
 
     // callee-saved 自动保存 (spec §5 第 3 条 / §7): 扫描块内实际用到的 + clobber 声明的。
     // `<Naked>` 下不生成任何保存代码 —— 用户全权负责 (含自己 ret)。
@@ -80,14 +114,28 @@ static void emitMasmProc(std::ostream& os, const AsmProcInfo& p) {
         p.naked ? std::vector<std::string>()
                 : asmSavedRegsForArch(p.lines, p.clobbers, /*x64=*/true);
 
-    os << "; Win64 ABI: RCX,RDX,R8,R9 = 整型参数; RAX = 返回\n";
+    os << "; Win64 ABI: RCX,RDX,R8,R9 = 整型参数; XMM0-3 = 浮点; RAX = 返回\n";
     if (!saved.empty()) {
         os << "; callee-saved 自动保存:";
         for (auto& r : saved) os << " " << r;
         os << " (块内使用/ clobber 声明)\n";
     }
+    if (hasStackParam) os << "; 有栈参数 → 建 RBP 帧 (栈参寻址 [rbp+16+8k])\n";
     os << p.cName << " PROC\n";
-    for (auto& r : saved) os << "    push " << r << "\n";
+    // 建帧 (有栈参数或需保存 RBP 时)。顺序: push rbp → mov rbp,rsp → 其余 callee-saved。
+    bool frame = hasStackParam || (!p.naked && saved.size() &&
+                 std::find(saved.begin(), saved.end(), std::string("rbp")) != saved.end());
+    std::vector<std::string> pushList = saved;
+    if (hasStackParam && std::find(pushList.begin(), pushList.end(), std::string("rbp")) == pushList.end())
+        pushList.insert(pushList.begin(), "rbp");
+    if (hasStackParam) {
+        os << "    push rbp\n";
+        os << "    mov  rbp, rsp\n";
+        for (auto& r : pushList) if (r != "rbp") os << "    push " << r << "\n";
+    } else {
+        for (auto& r : pushList) os << "    push " << r << "\n";
+    }
+    (void)frame;
 
     bool lastWasRet = false;
     for (auto& line : body) {
@@ -97,7 +145,14 @@ static void emitMasmProc(std::ostream& os, const AsmProcInfo& p) {
         lastWasRet = (s != std::string::npos && tline.compare(s, 3, "ret") == 0 &&
                       (s + 3 >= tline.size() || tline[s + 3] == ' ' || tline[s + 3] == ';'));
     }
-    for (auto it = saved.rbegin(); it != saved.rend(); ++it) os << "    pop " << *it << "\n";
+    if (hasStackParam) {
+        // 有帧: 先逆序 pop 掉 rbp 之后压的 callee-saved, 再 `leave` 复位 rsp/rbp。
+        for (auto it = pushList.rbegin(); it != pushList.rend(); ++it)
+            if (*it != "rbp") os << "    pop " << *it << "\n";
+        os << "    leave\n";
+    } else {
+        for (auto it = pushList.rbegin(); it != pushList.rend(); ++it) os << "    pop " << *it << "\n";
+    }
     if (!p.naked && !lastWasRet) os << "    ret\n";   // 非 Naked: 叶函数, 编译器补返回
     os << p.cName << " ENDP\n";
 }
@@ -121,6 +176,8 @@ static bool assembleAsmProcs(const std::vector<EmittedAsmProc>& procs,
     for (auto& base : order) {
         std::string asmPath = intermediatesDir + "/" + base + "_asm.asm";
         std::string objPath = intermediatesDir + "/" + base + "_asm.obj";
+        // 调试逃生舱: C3_KEEP_ASM=<目录> 时把生成的 .asm 额外拷一份过去 (排障用)。
+        const char* keepAsm = std::getenv("C3_KEEP_ASM");
         {
             std::ofstream ofs(asmPath, std::ios::out | std::ios::trunc);
             if (!ofs) {
@@ -133,6 +190,13 @@ static bool assembleAsmProcs(const std::vector<EmittedAsmProc>& procs,
             for (auto* p : byBase[base]) emitMasmProc(ofs, *p);
             ofs << "_TEXT ENDS\n";
             ofs << "END\n";
+        }
+        if (keepAsm && keepAsm[0]) {
+            std::error_code ec;
+            std::string dest = std::string(keepAsm) + "/" + base + "_asm.asm";
+            fs::copy_file(utf8ToPath(asmPath), utf8ToPath(dest),
+                          fs::copy_options::overwrite_existing, ec);
+            if (!ec) std::cerr << "C3: [C3_KEEP_ASM] " << dest << std::endl;
         }
         // ml64 /c /Fo <obj> <asm> —— 外层多包一层引号: executeCommand 走
         // "cmd /c <cmd>", cmd 在 /c 后首字符是引号时会剥首尾各一个 (同 rc.exe 的先例)。
