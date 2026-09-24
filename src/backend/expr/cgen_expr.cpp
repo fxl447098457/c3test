@@ -366,6 +366,40 @@ void CCodeGen::visit(TypeOfExpr& node) {
         lastExpr_ = "vb6_IfaceSupports(" + obj + ", vb6_iv_iid_" + cIdent(ivt->name) + ")";
         return;
     }
+    // Fix 193: `TypeOf lhs Is <项目类>` —— 老路那一支 `vb6_TypeOf` 是**恒返 0 的桩**
+    // (vb6rtl_conv.c: 注释写着"简化版, 始终返回 False"), 于是项目类这一位一直答"否"
+    // (`TypeOf raw Is ShapeAct` 也 False, 与 CoClass 无关)。改成编译期按
+    // **声明类 + 祖先链**判定: 声明类 D 的 chain (自根到叶, 末位是自身) 含目标类 → 真。
+    //
+    // 为什么是静态判定而不是运行时 RTTI: 项目类没有通用的运行时类型标记 ——
+    // `__cvtbl` 只在**有虚槽**的类上生成 (cgen_inherit.cpp: "无虚槽的类连字段都不加 →
+    // 零新语法逐字节不变"), 拿它当 RTTI 覆盖面不均; 给所有类加类型字段则要动
+    // 每个类的结构体布局 (022 线有逐字节护栏), 代价与收益不成比例。
+    //
+    // 残留边界 (登记, 不静默): `Dim b As InhBase : Set b = New InhDerived` 之后
+    // `TypeOf b Is InhDerived` 按声明类型答"否", 而 VB6 按实际类型答"是"。
+    // 这是**假阴性**, 与改前恒假同向, 不会把原本对的翻成错的。
+    if (node.object) {
+        const Symbol* tofSym = lookupTypeSymbol(node.typeName);
+        if (tofSym && tofSym->kind == SymbolKind::Class) {
+            std::string declCls = inferClassTypeOfExpr(*node.object);
+            if (!declCls.empty()) {
+                const std::string want = Symbol::toLower(tofSym->name);
+                bool isA = (Symbol::toLower(declCls) == want);
+                if (!isA) {
+                    if (const ClassChainView* cvD = classViewByName(declCls)) {
+                        for (const auto& k : cvD->chain) {
+                            if (k == want) { isA = true; break; }
+                        }
+                    }
+                }
+                // Nothing 不匹配任何类型 (VB6 语义) → 真也要判空, 不能发常量 1。
+                // 假那一支用逗号表达式保留 obj 的求值 (副作用), 不是裸 0。
+                lastExpr_ = isA ? ("(" + obj + ") != NULL") : ("(" + obj + ", 0)");
+                return;
+            }
+        }
+    }
     // Fix 040b: vb6_TypeOf expects void* (IDispatch*). If the operand is a
     // Variant (vb6_VARIANT struct), extract the object pointer first.
     if (cExprIsVariant(obj)) {

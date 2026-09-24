@@ -82,10 +82,26 @@
   覆盖：`Dim s(1) As C`、`Dim a() As C` + `ReDim a(n)`（不带 As）、`ReDim a(n) As C`、
   `ReDim Preserve`、模块级数组、CoClass 块名当元素类型（`ReDim a(1) As Circle`）。
   夹具 `tests/arr_cls`（AC1–AC6），基线实测 28 条 `C2224` → 修后 0，x64 + x86 都跑。
-- **`TypeOf c Is Circle` 这一位今天仍然答"否"，而且与 CoClass 无关**：改写照做（名字会变成实现类名），
-  但 `TypeOf … Is <类名>` 本身就是既有缺口 —— 拿一个从没写过 CoClass 的工程实测
-  `TypeOf raw Is ShapeAct` 也答 False（只有接口名那条路 `TypeOf iv Is IShapeAct` 有效，见 `itf_xmod`）。
-  `c Is Nothing` 与 `Not (c Is Nothing)` 正常。登记在 `ai/022`，不是本批该顺手修的东西。
+- **`TypeOf c Is Circle` 现在答得对**（Fix 193，2026-09-25 修）。这条以前记的是"今天仍然答否，
+  而且与 CoClass 无关" —— **前半句的"与 CoClass 无关"是对的，但"答否"是既有缺口这一层没查到底**：
+  `TypeOf … Is <类名>` 落进的是 `vb6_TypeOf`，那是 `vb6rtl_conv.c` 里一个**恒返 0 的桩**
+  （注释自己写着"简化版，始终返回 False"）。所以错的**不是** `Is Circle` 这一支，而是
+  `Is <项目类>` 整支 —— 拿一个从没写过 CoClass 的工程实测 `TypeOf raw Is ShapeAct` 也答 False，
+  而 `raw` 就声明成 `ShapeAct`。只有接口名那条路（`TypeOf iv Is IShapeAct`，走
+  `vb6_IfaceSupports` 真 QueryInterface）一直是好的。
+  修法 = 编译期按**声明类 + 祖先链**判定（`inferClassTypeOfExpr` 取声明类，`ClassChainView::chain`
+  自根到叶含祖先）：目标类是声明类或其祖先 → 真（`Nothing` 仍要判空，不能发常量 1）；否则假。
+  CoClass 那条路原样受益 —— 块名在类型位置已改写成实现类名，于是 `TypeOf c Is Circle` 与
+  `TypeOf c Is ShapeAct` 都答"是"。
+  覆盖：自身 / 直接祖先 / 链根 / 兄弟类（False）/ 无关类（False）/ `Nothing` 与 `Set … = Nothing`
+  （False）/ 无继承无虚槽的普通类 / 类数组元素（与 Fix 192 联动）。
+  夹具 `tests/typeof`（TOF1–TOF12），基线实测 **8 FAIL / 4 OK** —— 那 4 个 OK 只是"本该 False"
+  被恒假蒙对；修后 12/12，x64 + x86 都跑。
+  **残留边界（登记，不静默）**：判定按的是**声明**类型，不是运行时实际类型。
+  `Dim b As InhBase : Set b = New InhDerived` 之后 `TypeOf b Is InhDerived`，VB6 按实际类型答"是"，
+  这里答"否"。这是**假阴性，与改前恒假同向**，不会把原本对的翻成错的；要修得给类加运行时类型标记
+  （`__cvtbl` 只在**有虚槽**的类上生成，当通用 RTTI 覆盖面不均；给所有类加字段则动结构体布局，
+  022 线有逐字节护栏），代价与收益不成比例，不在这批里做。
 - **一处口径偏差，记清楚别当 bug 找**：`As Circle` 能摸到的成员面是**实现类的公开成员**，比默认接口宽。
   要"只有默认接口那一份"就写 `As IShape`（B02/B03 的接口视图，比对更严）。为什么 v1 不拿接口视图当
   `As <块名>` 的默认：契约按 `ai/026` 五-1 只要求"实现类**连同祖先满足**这些槽"，实现类完全可以不写
