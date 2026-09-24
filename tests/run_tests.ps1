@@ -1016,6 +1016,83 @@ if ($Category -in @("all", "run", "bas")) {
 }
 
 # --- VBP 工程测试 (串行; GUI 窗口效果无法通过自动校验并行确认) ---
+# === ai/022 B13a: ActiveX DLL 工程测试 (产物 + 生成的 COM 服务器入口) ==============
+# A DLL has no stdout, so the observable surface is: (1) the project links into a .dll
+# at all, (2) the def file exports the COM entry points, (3) the generated COM server
+# table (dll_entry.c) carries the identity the project declared. The compiler writes
+# those C files to a temp dir and deletes it unless --keep-for-debug is passed, and
+# prints "intermediates kept at: <dir>" on stderr -- that line is the only handle.
+function Test-VbpDll {
+    param(
+        [string]$Name,
+        [string]$VbpFile,
+        [string[]]$Needles = @(),      # asserted against dll_entry.c + activex_dll.def
+        [string[]]$Absent = @(),
+        [string[]]$LogNeedles = @(),   # asserted against the compiler's own output
+        [string]$Arch = ""
+    )
+    $script:total++
+    Write-Host -NoNewline "  [VBP-DLL] $Name ... "
+
+    if ($Arch) {
+        $out = & $C3 $VbpFile --arch $Arch --output-dir $OutDir --keep-for-debug 2>&1
+    } else {
+        $out = & $C3 $VbpFile --output-dir $OutDir --keep-for-debug 2>&1
+    }
+    $exitCode = $LASTEXITCODE
+    $logText = (($out | Out-String) -replace '\s+', ' ')
+
+    if ($exitCode -ne 0) {
+        $script:fail++
+        Write-Host "FAIL (compile)" -ForegroundColor Red
+        if ($Verbose) { Write-Host $logText }
+        return
+    }
+
+    $baseName = [System.IO.Path]::GetFileNameWithoutExtension($VbpFile)
+    $dllPath = Join-Path $OutDir "$baseName.dll"
+    if (-not (Test-Path $dllPath)) {
+        $script:fail++
+        Write-Host "FAIL (no dll)" -ForegroundColor Red
+        return
+    }
+
+    $genDir = $null
+    foreach ($line in $out) {
+        $t = "$line"
+        $at = $t.IndexOf("intermediates kept at: ")
+        if ($at -ge 0) { $genDir = $t.Substring($at + 23).Trim(); break }
+    }
+    if (-not $genDir -or -not (Test-Path $genDir)) {
+        $script:fail++
+        Write-Host "FAIL (no intermediates)" -ForegroundColor Red
+        return
+    }
+    $gen = ""
+    foreach ($f in @("dll_entry.c", "activex_dll.def")) {
+        $p = Join-Path $genDir $f
+        if (Test-Path $p) { $gen += ((Get-Content $p -Raw) -replace '\s+', ' ') }
+    }
+    if ($gen.Length -lt 40) {
+        $script:fail++
+        Write-Host "FAIL (no generated entry)" -ForegroundColor Red
+        return
+    }
+
+    $detail = @()
+    foreach ($n in $Needles)     { if (-not $gen.Contains($n))     { $detail += "missing: $n" } }
+    foreach ($a in $Absent)      { if ($gen.Contains($a))          { $detail += "unexpected: $a" } }
+    foreach ($n in $LogNeedles)  { if (-not $logText.Contains($n)) { $detail += "log missing: $n" } }
+    if ($detail.Count -gt 0) {
+        $script:fail++
+        Write-Host "FAIL (assert)" -ForegroundColor Red
+        foreach ($d in $detail) { Write-Host "    $d" -ForegroundColor DarkGray }
+        return
+    }
+    $script:pass++
+    Write-Host "PASS" -ForegroundColor Green
+}
+
 if ($Category -in @("all", "run", "vbp")) {
     # --- VBP 工程测试 (P5) --- (串行)
     Write-Host "--- VBP Project Tests (P5) ---" -ForegroundColor Yellow
@@ -1104,6 +1181,40 @@ if ($Category -in @("all", "run", "vbp")) {
         "INH53:OK", "INH54:OK", "INH55:OK", "INH56:OK", "INH57:OK", "INH58:OK", "INH59:OK")
     Test-Vbp "cls_inh_pair" "$Tests\cls_inh\Inh.vbp" $inhExpected
     Test-Vbp "cls_inh_x86" "$Tests\cls_inh\Inh.vbp" $inhExpected -Arch "x86"
+    # --- ai/022 B13a: the ActiveX DLL pipeline enters the gate for the first time ---
+    # Both projects under tests\test_activex_dll have existed since P6 but were never
+    # registered, so nothing in the regression had ever LINKED a .dll -- every claim on
+    # the COM server side was unmeasured. These three cases make that surface observable
+    # (product + exports + the generated coclass table) without changing compiler code.
+    Test-VbpDll "ax_dll_calc" "$Tests\test_activex_dll\test_activex_dll.vbp" @(
+        "const vb6_CoClassDesc g_vb6_coclasses[]",
+        '"TestAXDLL.Calc"',
+        '"{D84F362F-8EF1-D16D-8814-C16ADB700BAB}"',
+        'L"SetValue", 1, 1',
+        "DllGetClassObject", "DllRegisterServer")
+    Test-VbpDll "ax_dll_event" "$Tests\test_activex_dll\test_event_dll.vbp" @(
+        '"EventCalc"', '"{E1F2A3B4-C5D6-7890-ABCD-123456789ABC}"',
+        "vb6_disp_EventCalc_Increment_invoke", "DllCanUnloadNow", "DllUnregisterServer")
+    Test-VbpDll "ax_dll_calc_x86" "$Tests\test_activex_dll\test_activex_dll.vbp" @(
+        "const vb6_CoClassDesc g_vb6_coclasses[]", '"TestAXDLL.Calc"',
+        '"{D84F362F-8EF1-D16D-8814-C16ADB700BAB}"',
+        "DllGetClassObject", "DllRegisterServer") -Arch "x86"
+    # cc_dll pins TODAY'S SHAPE of a CoClass block inside a DLL project, including the two
+    # places the outward half is knowingly incomplete (022 D56). B13b must FLIP this case:
+    # once the identity channels are merged, the stage-2.7 values (CoDll.PG / F5CEF988)
+    # should be what the product registers, and the dllentry-minted IID_vb6iface_IProbe
+    # (0x0AD9CBC7) should disappear from the generated entry.
+    Test-VbpDll "cc_dll_identity_two_channels" "$Tests\cc_dll\CoDll.vbp" @(
+        '"CoDll.CImpl"',
+        "{11112222-3333-4444-5555-666677778888}",
+        "0x0AD9CBC7",
+        "0, /* methodCount */") @(
+        "CoDll.PG", "F5CEF988") @(
+        "CoClass 'PG' identity: CLSID={11112222-3333-4444-5555-666677778888} (vbp)",
+        "IID={F5CEF988-3217-6173-94B7-BB99C4B8CB81} (minted)",
+        "ProgID=CoDll.PG (minted)",
+        "impl='CImpl' comCreatable=False")
+
     Test-Vbp "test_vbman" "$Tests\test_vbman\test_vbman.vbp" @("P24-04a:OK", "P24-04b:OK", "P24-04:2/2") -Arch "x86" -RequiresCom "VBMANLIB.cVBMAN"
     $vbpSw.Stop()
     Write-Host "  (vbp/gui tests took $([Math]::Round($vbpSw.Elapsed.TotalSeconds))s)"
