@@ -59,6 +59,9 @@ public:
     std::vector<std::unique_ptr<ParameterDecl>> params;
     StmtList body;
     bool isStatic = false;  // Static Sub
+    // ai/vb-asm-extension-spec: `<Naked>` 整函数汇编 —— 不生成任何 prologue/epilogue
+    // (x86 不包 callee-saved 自动保存; x64 不补 ret), 用户全权负责。
+    bool isNaked = false;
     // 泛型 (tB 扩展): 非空 = 泛型模板 (声明位 (Of T[,U]) 的类型参数名表).
     // 模板声明不进符号表, 由泛型器 (driver_generics) 按使用点特化克隆.
     std::vector<std::string> typeParams;
@@ -85,6 +88,7 @@ public:
     TypeRefPtr returnType;  // As Type (可为nullptr = Variant)
     StmtList body;
     bool isStatic = false;
+    bool isNaked = false;   // ai/vb-asm-extension-spec: 见 SubDecl::isNaked
     // 泛型 (tB 扩展): 见 SubDecl::typeParams 注释
     std::vector<std::string> typeParams;
     std::vector<ImplementsClause> implementsClauses;  // B02b, 见 SubDecl

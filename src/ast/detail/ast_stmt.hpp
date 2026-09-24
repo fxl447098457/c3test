@@ -305,6 +305,9 @@ class AsmStmt : public Stmt {
 public:
     std::vector<std::string> lines;   // 原始汇编行 (不含 Asm / End Asm 两行)
     bool naked = false;               // <Naked> 修饰: 整函数汇编, 不生成 prologue/epilogue
+    // `Asm Clobber("rbx","memory")` 声明的被踩寄存器 (小写, 原样收录; "memory" 单独保留)。
+    // 与块内静态扫描出的寄存器取并集 → 生成 callee-saved 的 push/pop (x64 MASM / x86 内联)。
+    std::vector<std::string> clobbers;
 
     AsmStmt(SourceLocation loc)
         : Stmt(ASTNodeKind::AsmStmt, loc) {}

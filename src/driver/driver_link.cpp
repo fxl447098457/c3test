@@ -72,8 +72,7 @@ static void emitMasmProc(std::ostream& os, const AsmProcInfo& p) {
 
     // [name] → ABI 寄存器。32 位整型用低 32 位名 (int8/16/32, BOOL); 指针/64 位用整寄存器
     // (ByRef 的 `T*` 即"变量即其地址", 要取值需再解引用一次 —— 见 spec §2.3)。
-    struct Sub { std::string token, repl; };
-    std::vector<Sub> subs;
+    std::vector<std::pair<std::string, std::string>> subs;
     for (size_t i = 0; i < p.params.size() && i < 4; i++) {
         const std::string& ps = p.params[i];       // "CType name"
         size_t sp = ps.find(' ');
@@ -88,91 +87,39 @@ static void emitMasmProc(std::ostream& os, const AsmProcInfo& p) {
     // `[Function]` 是返回值占位: 映射到 ABI 返回寄存器的**与返回类型同宽**的名字。
     // 关键约束: MASM 不容许宽度不等的 mov (`mov rax, eax` = A2022), 而 VB 侧
     // `Long` 返回就是"值在 EAX 里" —— 故 32 位返回用 eax, 64 位/指针用 rax。
-    // 于是 `mov [Function], eax` 退化成 `mov eax, eax` (自赋值, 发射时消掉)。
+    // 于是 `mov [Function], eax` 退化成 `mov eax, eax` (自赋值, 重写时消掉)。
     static const char* kRet32[] = {"int8_t", "int16_t", "int32_t", "VBABOOL", "unsigned"};
     bool retIs32 = false;
     for (const char* k : kRet32) if (p.retCType == k) retIs32 = true;
     subs.push_back({ "[function]", retIs32 ? "eax" : "rax" });
 
-    // 第一遍: 收集 `.name:` 局部标签 (MASM 无 proc 局部标签; 多 PROC 同文件会撞名)
-    std::vector<std::string> labels;
-    for (auto& raw : p.lines) {
-        size_t i = 0;
-        while (i < raw.size() && (raw[i] == ' ' || raw[i] == '\t')) i++;
-        if (i >= raw.size() || raw[i] != '.') continue;
-        size_t j = i + 1;
-        while (j < raw.size() && (isalnum(static_cast<unsigned char>(raw[j])) || raw[j] == '_')) j++;
-        if (j > i + 1 && j < raw.size() && raw[j] == ':') labels.push_back(raw.substr(i + 1, j - i - 1));
-    }
+    std::vector<std::string> body = asmRewriteLines(p.lines, subs, p.cName);
 
+    // callee-saved 自动保存 (spec §5 第 3 条 / §7): 扫描块内实际用到的 + clobber 声明的。
+    // `<Naked>` 下不生成任何保存代码 —— 用户全权负责 (含自己 ret)。
+    std::vector<std::string> saved =
+        p.naked ? std::vector<std::string>()
+                : asmSavedRegsForArch(p.lines, p.clobbers, /*x64=*/true);
+
+    os << "; Win64 ABI: RCX,RDX,R8,R9 = 整型参数; RAX = 返回\n";
+    if (!saved.empty()) {
+        os << "; callee-saved 自动保存:";
+        for (auto& r : saved) os << " " << r;
+        os << " (块内使用/ clobber 声明)\n";
+    }
     os << p.cName << " PROC\n";
+    for (auto& r : saved) os << "    push " << r << "\n";
+
     bool lastWasRet = false;
-    for (auto& raw : p.lines) {
-        std::string line = raw;
-        for (auto& ch : line) if (ch == '\'') ch = ';';   // VB/FB 风格注释 → MASM
-        // 括号内空白归一: `[ num ]` → `[num]` (后面才能做朴素 token 替换)
-        auto squeeze = [](std::string& s, const std::string& a, const std::string& b) {
-            size_t pos = 0;
-            while ((pos = s.find(a, pos)) != std::string::npos) { s.replace(pos, a.size(), b); }
-        };
-        squeeze(line, "[ ", "["); squeeze(line, " ]", "]");
-        squeeze(line, ",\t", ","); squeeze(line, "\t", " ");
-        // 局部标签重写: `.name` → `<proc>_<name>` (定义与 jmp/jne 引用同改)
-        for (auto& lb : labels) {
-            std::string from = "." + lb, to = p.cName + "_" + lb;
-            std::string lower = line; toLowerAscii(lower);
-            std::string fromLower = from; toLowerAscii(fromLower);
-            size_t pos = 0;
-            while ((pos = lower.find(fromLower, pos)) != std::string::npos) {
-                // 只替换标签 token 边界 (后随 非标识符字符)
-                size_t after = pos + fromLower.size();
-                if (after < lower.size() && (isalnum(static_cast<unsigned char>(lower[after])) || lower[after] == '_')) {
-                    pos = after; continue;
-                }
-                line.replace(pos, from.size(), to);
-                lower.replace(pos, from.size(), to);
-                pos += to.size();
-            }
-        }
-        // [param] / [Function] 替换 (大小写不敏感)
-        for (auto& s : subs) {
-            std::string tokenLower = s.token; toLowerAscii(tokenLower);
-            std::string lower = line; toLowerAscii(lower);
-            size_t pos = 0;
-            while ((pos = lower.find(tokenLower, pos)) != std::string::npos) {
-                line.replace(pos, s.token.size(), s.repl);
-                lower.replace(pos, s.token.size(), s.repl);
-                pos += s.repl.size();
-            }
-        }
-        // 自赋值消掉: `[Function]` 宽度映射后, `mov [Function], eax` 会变成
-        // `mov eax, eax` (值本来就在返回寄存器里) —— 换成注释, 免无谓指令。
-        {
-            std::string t = line; toLowerAscii(t);
-            size_t a = t.find_first_not_of(" \t");
-            if (a != std::string::npos && t.compare(a, 3, "mov") == 0) {
-                size_t c = t.find(',', a);
-                if (c != std::string::npos) {
-                    auto grab = [&](size_t b, size_t e) {
-                        while (b < e && (t[b] == ' ' || t[b] == '\t')) b++;
-                        while (e > b && (t[e-1] == ' ' || t[e-1] == '\t')) e--;
-                        return t.substr(b, e - b);
-                    };
-                    std::string dst = grab(a + 3, c);
-                    size_t semi = t.find(';', c + 1);
-                    std::string src = grab(c + 1, semi == std::string::npos ? t.size() : semi);
-                    if (!dst.empty() && dst == src)
-                        line = "; [Function] -> " + dst + " (值已在返回寄存器, 自赋值省略)";
-                }
-            }
-        }
+    for (auto& line : body) {
         os << "    " << line << "\n";
         std::string tline = line; toLowerAscii(tline);
         size_t s = tline.find_first_not_of(" \t");
         lastWasRet = (s != std::string::npos && tline.compare(s, 3, "ret") == 0 &&
                       (s + 3 >= tline.size() || tline[s + 3] == ' ' || tline[s + 3] == ';'));
     }
-    if (!lastWasRet) os << "    ret\n";   // v1: 过程按叶函数处理, 编译器补返回
+    for (auto it = saved.rbegin(); it != saved.rend(); ++it) os << "    pop " << *it << "\n";
+    if (!p.naked && !lastWasRet) os << "    ret\n";   // 非 Naked: 叶函数, 编译器补返回
     os << p.cName << " ENDP\n";
 }
 

@@ -1,0 +1,12 @@
+Type=Exe
+Reference=*\G{00020430-0000-0000-C000-000000000046}#2.0#0#C:\Windows\System32\stdole2.tlb#OLE Automation
+Module=AsmX86; asm_x86.bas
+Startup="Sub Main"
+Command32=""
+Name="AsmX86"
+HelpContextID="0"
+CompatibleMode="0"
+ExeName32="asm_x86.exe"
+VersionMajor32=1
+VersionMinor32=0
+VersionRevision32=0

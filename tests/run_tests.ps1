@@ -1492,16 +1492,30 @@ if ($Category -in @("all", "ctor")) {
 }
 
 # =============================================
-# asm: ai/vb-asm-extension-spec — Asm 块最小闭环 (v1 x64 → .asm → ml64 → 链接)
-# 正例跑通 AddFive/AtomicAdd; 负例覆盖 3037 (混排) 与 3036 (x86 目标)
+# asm: ai/vb-asm-extension-spec — Asm 块完整形态
+#   x64: 生成 .asm → ml64 → 链接 (基本块/ByRef/Naked/自动保存/Clobber/单行)
+#   x86: __asm{} 内联块 (同一份语法换后端)
+#   负例: 3037 (与 VB 语句混排) / 3036 (x86 <Naked> 引用参数) / 2012 (<Naked> 修饰非过程) /
+#         2014 (Clobber 参数非字符串)
 # =============================================
 if ($Category -in @("all", "asm")) {
     Write-Host "--- Asm Block Tests (ai/vb-asm-extension-spec) ---" -ForegroundColor Yellow
     if (Test-Path "$Tests\asm\asm_ok.vbp") {
-        Test-Vbp "asm_ok" "$Tests\asm\asm_ok.vbp" @("ASM-ADD:42", "ASM-ATOMIC-OLD:10", "ASM-ATOMIC-NEW:15", "ASM-DONE")
+        Test-Vbp "asm_ok" "$Tests\asm\asm_ok.vbp" @(
+            "ASM-ADD:42", "ASM-ATOMIC-OLD:10", "ASM-ATOMIC-NEW:15",
+            "ASM-KEEP-RBX:37", "ASM-CLOBBER:12", "ASM-NAKED:100", "ASM-ONELINE:1234", "ASM-DONE")
+    }
+    if (Test-Path "$Tests\asm\asm_x86.vbp") {
+        Test-Vbp "asm_x86_inline" "$Tests\asm\asm_x86.vbp" @(
+            "X86-ADD:42", "X86-KEEP-EBX:37", "X86-CLOBBER:12",
+            "X86-NAKED:5", "X86-ONELINE:1234", "X86-DONE") -Arch "x86"
     }
     if (Test-Path "$Tests\asm\asm_neg.vbp") {
         Test-VbpBuildFail "asm_neg_mixed_body" "$Tests\asm\asm_neg.vbp" "3037"
+    }
+    if (Test-Path "$Tests\asm\asm_attr_neg.vbp") {
+        Test-VbpBuildFail "asm_neg_naked_on_nonproc" "$Tests\asm\asm_attr_neg.vbp" "2012"
+        Test-VbpBuildFail "asm_neg_clobber_nonstring" "$Tests\asm\asm_attr_neg.vbp" "2014"
     }
     if (Test-Path "$Tests\asm\asm_x86_neg.vbp") {
         # x86 负例需要额外 --arch x86, Test-VbpBuildFail 不带自定义参数, 就地内联同款判据

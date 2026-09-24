@@ -188,6 +188,11 @@ private:
     std::unique_ptr<SelectCaseStmt> parseSelectCaseStmt();
     std::unique_ptr<WithStmt> parseWithStmt();
 
+    // ai/vb-asm-extension-spec: `<Naked>` 角括号过程属性。角括号属性行 (VB6 家族没有这条路)
+    // 只承载 Naked 一个名字; 解析后暂存, 由紧随其后的 Sub/Function 声明取走。
+    bool pendingNaked_ = false;
+    bool tryParseAngleAttr();   // 命中并消费 `<Naked>` 返回 true; 否则不动 token 流
+
     // 单行语句
     StmtPtr parseOnStmt();
     std::unique_ptr<OnErrorStmt> parseOnErrorStmt();

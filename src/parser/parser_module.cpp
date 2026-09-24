@@ -176,6 +176,12 @@ void Parser::parseModuleBody(Module& mod) {
             continue;
         }
 
+        // 角括号过程属性行 (ai/vb-asm-extension-spec): `<Naked>`
+        if (cur_.kind == TokenKind::LessThan && tryParseAngleAttr()) {
+            expectEndOfStatement();
+            continue;
+        }
+
         // Attribute 语句
         if (cur_.kind == TokenKind::Attribute) {
             mod.attributes.push_back(parseAttribute());
@@ -186,6 +192,11 @@ void Parser::parseModuleBody(Module& mod) {
         // 声明
         if (isDeclarationStart()) {
             auto decl = parseDeclaration();
+            if (pendingNaked_) {   // `<Naked>` 后面跟的不是过程声明
+                diag_.error(DiagnosticID::ParseUnknownAttribute, currentLoc(),
+                            "<Naked> 只能修饰 Sub/Function");
+                pendingNaked_ = false;
+            }
             if (decl) {
                 // 逗号分隔的多变量声明展开为独立声明
                 if (decl->kind == ASTNodeKind::MultiDecl) {

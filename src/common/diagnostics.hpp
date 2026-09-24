@@ -58,6 +58,7 @@ enum class DiagnosticID : uint16_t {
     ParseInvalidInterfaceMember = 2011,  // Interface 块内非法成员 (实现体/字段/可见性/事件)
     ParseUnknownAttribute = 2012,        // 无法识别的 [Xxx] 属性行
     ParseAsmBlockMalformed = 2013,       // asm扩展: Asm 块形式非法 (非块形式 / 缺 End Asm)
+    ParseAsmClobberMalformed = 2014,     // asm扩展: Clobber(...) 参数非法 (非字符串 / 空表)
 
     // 语义 (3xxx)
     SemUndeclaredIdentifier = 3001,
@@ -103,7 +104,8 @@ enum class DiagnosticID : uint16_t {
     // 084a/084c/asm 扩展 (合并期与 022 B09-B11 撞号, 顺延到 3034-3037)
     SemPrivateOutsideClass = 3034,      // 084a: 类外经 obj./Me. 访问 Private 成员 (接收者不在定义类家族内)
     SemCtorArityMismatch = 3035,        // 084c: New Cls(args) 实参个数与 Class_Initialize 形参不符
-    SemAsmArchUnsupported = 3036,       // asm扩展: Asm 块在 x86 目标下不支持 (v1 仅 x64, 走 MASM/ml64)
+    SemAsmFormUnsupported = 3036,       // asm扩展: 该形态不支持. 当前唯一来源 = x86 `<Naked>` 过程里
+                                        // 按名引用参数 (naked 无栈帧, 参数在调用者的栈上, 名字无从解析)
     SemAsmMixedBody = 3037,             // asm扩展: x64 下 Asm 块必须独占过程体 (v1 不支持与 VB 语句混排)
 
     // 代码生成 (4xxx)
