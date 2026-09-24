@@ -75,6 +75,16 @@ public:
                     const std::string& ifaceName,
                     const std::string& sourceIfaceName = "");
 
+    /// ai/022 B15: 添加**真接口** (TKIND_INTERFACE), 成员面暂空。
+    /// 与 addDispInterface 的区别就是 kind: 这一档的 GUID 是 QI 会认的那枚 IID,
+    /// 而 dispinterface 的 GUID 只是 IDispatch 视图的身份。
+    /// 成员为什么暂空: 生成的 vb6_ivtbl_<I> 槽不是 canonical COM (CC_CDECL + 原生返回值,
+    /// 也没有 IDispatch 前缀), 发出去就是"广告 != 应答" —— 那半属 B16 (022 D62-1/D62-5)。
+    /// @param name    接口名 (用接口自己的名字, 不加 "_" 前缀)
+    /// @param iidStr  接口 IID, 空则自动生成
+    /// @return true=成功
+    bool addVtableInterface(const std::string& name, const std::string& iidStr);
+
     /// 结束构建, 保存到文件
     /// @param tlbPath 输出 .tlb 文件路径
     /// @return true=成功

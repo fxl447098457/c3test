@@ -3,10 +3,13 @@
 #
 # 钉的是两条判据，都从**产物**里读，不读编译器内部状态：
 #
-# 甲（B13c）：**一个接口在一次编译里只许一枚 GUID**。三条通道各自读一遍：
+# 甲（B13c，读法在 B15 换过一次）：**一个接口在一次编译里只许一枚 GUID**。三条通道各自读一遍：
 #   1) `dll_entry.c` 的 `IID_vb6iface_<接口>`            —— COM 服务器表的接口 IID 数组
 #   2) `<实现类>.h` 的 `vb6_iv_iid_<接口>[16]`           —— 新式接口 vtable 的 QueryInterface
-#   3) `<工程>.tlb` 的 `_<接口>` dispinterface           —— 客户端导入后看到的那一枚
+#   3) `<工程>.tlb` 里**那一档真接口**（`kind=interface name=<接口>`）—— 客户端导入后看到的那一枚
+#      B15 之前这里读的是 `kind=dispinterface name=_<接口>`：库里给接口的位置挂着一张 0 成员的
+#      dispinterface，外加一行冒充 coclass 的假身份 ⇒ 通道 3 换读法，同时加两条反面断言
+#      （见下面的 `又被登记成`），谁把形状改回去这条用例就红。
 #
 # 乙（B13e）：**广告 == 应答**。类型库给 coclass 标的 DEFAULT 接口，必须就是服务器真正
 # 应答成员面的那一枚（`desc->methods` = 类的 Public 成员 = `_<类名>`）：
@@ -117,9 +120,9 @@ function Test-TlbIdentitySingleSource {
     if ($hdr -match ("vb6_iv_iid_" + $IfaceName + "\[16\] = (\{[^}]*\})")) {
         $ivIid = GuidFromIvBytes $matches[1]
     }
-    # 通道 3：类型库
+    # 通道 3：类型库里那一档**真接口**（ai/022 B15：TKIND_INTERFACE，名字 = 接口自己的名字）
     $tlbIface = ""
-    if ($tlbText -match ("kind=dispinterface name=_" + $IfaceName + " guid=(\{[0-9A-F-]{36}\})")) {
+    if ($tlbText -match ("kind=interface name=" + $IfaceName + " guid=(\{[0-9A-F-]{36}\})")) {
         $tlbIface = $matches[1]
     }
     $tlbClass = ""
@@ -145,7 +148,7 @@ function Test-TlbIdentitySingleSource {
     if (-not $tableIfaceIid) { $detail += "dll_entry.c 里没有 IID_vb6iface_$IfaceName" }
     if (-not $tableIid)   { $detail += "dll_entry.c 里没有 IID_vb6def_$ClassName" }
     if (-not $ivIid)      { $detail += "$ClassName.h 里没有 vb6_iv_iid_$IfaceName" }
-    if (-not $tlbIface)   { $detail += "类型库里读不到 _$IfaceName 的 GUID" }
+    if (-not $tlbIface)   { $detail += "类型库里读不到真接口 $IfaceName 那一档的 GUID" }
     if (-not $tlbClass)   { $detail += "类型库里读不到 _$ClassName 的 GUID" }
     if (-not $coclassGuid){ $detail += "类型库里读不到 coclass $ClassName" }
     if (-not $defaultRef) { $detail += "coclass $ClassName 没有 DEFAULT 接口引用" }
@@ -154,7 +157,15 @@ function Test-TlbIdentitySingleSource {
         $detail += "表的接口 IID 与 vtable 不同值: $tableIfaceIid vs $ivIid"
     }
     if ($tableIfaceIid -and $tlbIface -and $tableIfaceIid -ne $tlbIface) {
-        $detail += "表的接口 IID 与类型库 _$IfaceName 不同值: $tableIfaceIid vs $tlbIface"
+        $detail += "表的接口 IID 与类型库真接口 $IfaceName 不同值: $tableIfaceIid vs $tlbIface"
+    }
+    # 甲的两条反面断言（ai/022 B15）：接口宿主那一档曾经是一张 0 成员的 `_<接口>` dispinterface
+    # 外加一行冒充 coclass 的假 CLSID。形状改回去 = 本批白做，所以这里直接判红。
+    if ($tlbText -match ("kind=coclass name=" + $IfaceName + " guid=")) {
+        $detail += "库里 $IfaceName 又占了一行 coclass（一枚假 CLSID + 一句可创建）"
+    }
+    if ($tlbText -match ("kind=dispinterface name=_" + $IfaceName + " guid=")) {
+        $detail += "库里 $IfaceName 又有一张 0 成员的 _$IfaceName dispinterface"
     }
     # 乙：广告的那一枚 == 服务器应答的那一枚（B13e）—— 类型库说谁是默认接口，
     # 服务器的成员面与早绑定 QI 就必须是谁。`_<类名>` 正是 `desc->methods` 那一档。
@@ -171,7 +182,7 @@ function Test-TlbIdentitySingleSource {
 
     if ($detail.Count -eq 0) {
         $script:pass++
-        Write-Host "PASS (one IID per interface; advertised default == answered default)" -ForegroundColor Green
+        Write-Host "PASS (one IID per interface, stored as a real interface; advertised default == answered default)" -ForegroundColor Green
     } else {
         $script:fail++
         Write-Host "FAIL" -ForegroundColor Red
