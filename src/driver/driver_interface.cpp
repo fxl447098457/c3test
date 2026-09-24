@@ -321,7 +321,8 @@ bool Driver::runInterfacePrepass(const CompileOptions& options) {
                 }
             }
             int nHit = 0;
-            for (size_t i = 0; i < 4; i++) if (hit[i]) nHit++;
+            const AttributeStmt* first = nullptr;
+            for (size_t i = 0; i < 4; i++) if (hit[i]) { nHit++; if (!first) first = hit[i]; }
             if (!nHit) continue;   // 只写 VB_Name 的模块（含本工程全部 .bas 用例）到此为止
 
             bool hasHandwritten = false;
@@ -335,7 +336,7 @@ bool Driver::runInterfacePrepass(const CompileOptions& options) {
                 continue;
             }
 
-            auto cc = std::make_unique<CoClassDecl>(hit[0] ? hit[0]->loc : mod->loc, mod->moduleName);
+            auto cc = std::make_unique<CoClassDecl>(first->loc, mod->moduleName);
             InterfaceAttr impl;
             impl.name = "Implementation";
             impl.strValue = mod->moduleName;   // 类自己就是那个实现
