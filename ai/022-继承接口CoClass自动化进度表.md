@@ -4,9 +4,10 @@
 > 每次运行开始先读本文件，结束前必须更新本文件（状态头 + 批次清单 + 运行日志）。
 > 规范输入: `ai/讨论记录/018-接口继承与CoClass设计思路.md`（含 tB 文档要点与分阶段设计思路全文）。
 
-STATUS: IDLE             # NOT_STARTED | DESIGN | BUSY | IDLE | ALL_DONE
-LAST_RUN: 2026-09-24T14:07:06+08:00   # 本轮 = **B11/C01 出完并收线**（代码 `e7c7a31`、跟进 `f660e25`，门 = Actions run **#17 全绿、head 已核 = e7c7a31**）。
-               # 实测 D44 / 实施 D45。自动运行见本行不足 55 分钟请立即跳过。
+STATUS: BUSY             # NOT_STARTED | DESIGN | BUSY | IDLE | ALL_DONE
+LAST_RUN: 2026-09-24T14:17:24+08:00   # 本轮 = **B11/C01 出完并收线**（代码 `e7c7a31`、跟进 `f660e25`，门 = Actions run **#17 全绿、head 已核 = e7c7a31**）。
+               # 本轮 = **B11/C02 开工**（身份求解唯一函数 CLSID/IID/ProgID + 可复现性）：先量三处既有底子与可观测面，裁决记 **D46**。
+               # run#18（跟进提交 f660e25 触发）= completed/success，C01 的账已闭环。上一轮 = C01 收线。自动运行见本行不足 55 分钟请立即跳过。
 LAST_COMMIT: 代码批 = e7c7a31(B11/C01)、3c5d8e6(B10)、9eb2ca7(B09c)、debb110(B09b)、02bac92(B09)、77ecef1(B08f-1)、40eea3f(B08e-6)、d9eca95(B08e-5)   # **commit message 一律现写、不复用上批文本**；push 只推 `github/dev`（Actions 门），`origin`(gitcode) 与 `main` 不碰、**绝不建 MR**。
 CURRENT_BATCH: **B11/C02 = 身份求解唯一函数（CLSID / IID / ProgID 三优先级）+ 两次构建可复现**，
                实施依据 **`ai/026-CoClass与COM暴露计划书.md`** 三节 + 六节 C02 那一行。
@@ -1934,6 +1935,98 @@ vb6_F9Base_prop_let_Level((void*)u.c, 9);  /* Property Let via prop_get_ rewrite
 
 **下一格 = C02**（026 六节）：身份求解唯一函数 `CLSID/IID/ProgID` 三优先级 + 两次构建可复现。C01 已经把
 输入面备好了 —— `InterfaceAttr` 的字符串/整数/布尔三形态与 `CoClassDecl::attributes` 就是它的读取起点。
+
+### D46 B11/C02 前置实测与裁决（2026-09-24 14:17–，只量不改码）
+
+**这一格没有运行期可观测面，所以先得把"怎么验收"定下来。** 实测四件事：
+
+1. **现成的 mint 底子是两个 `.inc` 内的局部 lambda，跨不出翻译单元**：
+   `cgen_util_dllentry_prelude.inc:40-72` 的 `generateClsid` / `generateIid`（同一套 FNV-1a × 4 条种子链，
+   只差 4 个初始常量）。它们是 `CCodeGen::generateDllEntry` 函数体的片段（`cgen_util.cpp:32-36` 把四段
+   `.inc` 串成一个函数）→ **别的层想复用只能复制一份**，而那正是 026 三节"禁止三处各读一遍"要防的事。
+2. **这条 mint 路今天没有任何测试覆盖**：全部 `tests/*.vbp` 都是 `Type=Exe`，`generateClsid/generateIid`
+   只在 ActiveX DLL 的 coclass 表里跑。所以"把 legacy lambda 换成调用新函数"这件事**在 C02 里做不起**
+   —— 改了也没有逐字节护栏能证明没改坏。裁决 = **C02 只新建唯一入口，legacy 两枚 lambda 一字不动**，
+   替换动作按 026 七-1 / D15-8 归 **B13/B16 分叉**（届时先要有 DLL 形状的用例）。新函数用**不同的种子常量
+   + 带前缀的 seed 串**，保证两套 mint 不可能撞车，并把这条写进代码注释。
+3. **vbp 三段式与工程名来源都还在 026 引的位置**（复核无漂移）：解析在 `vbp_parser.cpp:66-112`
+   （`Class=Name; x.cls; {CLSID}`，只有 `{...}` 形态才存进 `entry.clsidStr`），收集在
+   `driver_compile.cpp:74-81` 的 `classClsidMap_[lower(moduleName)]`（**键是类模块名**，不是 CoClass 名）。
+   工程名侧现成只有 `projectBaseName_`（`ExeName32` stem，否则 vbp 文件名 stem，单文件编译为空），
+   vbp 的 `Name=` 字段只在 `driver_compile.cpp:117` 就地用来兜 DLL 的 `dllProgId`，**没存下来**。
+4. **可观测面要找第三趟才对**：`--dump-ast` 在 `driver_compile.cpp:313` 就返回了，跑在 stage 2.7
+   **之前**，拿不到工程名与 vbp 表；`--emit-c` 又不许在 C02 发码。本条原写"那就发一条 note 级诊断"，
+   **实测是错的**：`Diagnostics::toString()` 确实无条件拼所有级别，但 Driver 只在**某个阶段失败**时
+   才把它整体打印（`driver_compile.cpp` 里 10 处 `if (!runXxx()) { std::cerr << diag_->toString(); }`），
+   所以 note 在成功的编译里根本看不见 —— 用它当验收面会得到一个"永远为空"的断言。
+   定案 = 走 **stderr 的 `C3: ...` 信息行**（`driver_compile.cpp:63` 的 "C3: 加载工程" 是同族先例，
+   而且只在真有 CoClass 块时才发，零新语法工程一字不多），并且**不新增诊断 ID**（那条 note 没有读者）。
+   两条踩坑留档：① 信息行绝不能走 stdout —— `--emit-c` 的 stdout 就是 C 文本，混一行就毁产物；
+   ② 这是 D44/D45 那条"每层的可观测面不一样"的第三次应验，而且这次是**先假设了一个面、量了才发现它不通**。
+
+**C02 落点裁决**：
+
+- 新单元 `src/semantics/coclass_identity.{hpp,cpp}`：`CoClassIdentity{clsid,iid,progId,defaultIface,impl,
+  clsidSource,progIdSource}` + **唯一入口** `resolveCoClassIdentity(block, env)` + `mintGuid(seed, 常量组)`。
+  放 `src/semantics/` 与 `interfaces_registry.hpp` 同族（plain 结构、只读视图、不拥有 AST）。
+- 三档优先级按 026 三节实现，其中 **vbp 档的查表次序**要新定（026 没写）：`[Implementation("X")]` 的 X
+  先查 `classClsidMap_`，查不到再用 CoClass 块名查（VB6 的三段式挂在类模块上，而 CoClass 名常与该模块同名）。
+- `<Proj>` 取值 = vbp `Name=` > `projectBaseName_` > 字面量 `"VB6EXE"`（第三条兜法沿用
+  `driver_codegen_dll_entry.inc:27` 已有的兜序，不新造）。为此在 `driver_compile.cpp` 存一个
+  `vbpProjectName_`。**与 com_entry 那侧用 `projectBaseName_` 是分叉的**，理由 = VB6 的 ProgID 语义是
+  `<工程名>.<类名>`，而工程名就是 `Name=` 字段；这条分叉要写进 B13/B16 的对账清单。
+- IID 档 = 默认接口的 `[InterfaceId]`（`IfaceView::guid` 早在 B02 就存了）> `"itf:<Proj>.<接口名>"` mint；
+  块里没有 `[Default]` 条目 → `iid` 留空并在 note 里标 `no-default`（存在性校验按 D44 归 C03）。
+- 求解结果挂 **`Driver::coclassIds_`**（key = CoClass 名小写），与 `ifaces_`/`vias_` 同族；
+  求解发生在 stage 2.7 的**新 Pass E**（那时接口登记表刚建好、工程名与 vbp 表都已就位）。
+  注：**同名两个 CoClass 块 = 后一个不覆盖前一个**（`emplace` 首值胜），这是 C03 的重复名检查欠的账，不在 C02 报。
+- 用例面：三条档位各一条 note 断言 + **可复现性两条**（同一输入跑两次逐字节相同；换一个工程名再跑，
+  确定性档跟着变而显式档一字不动）。为此给 `run_tests.ps1` 加一个 `Test-SyntaxNote`
+  （退出码 0 **且** 输出含 needle —— 现有 `Test-Syntax` 只看退出码，`Test-SyntaxFail` 只看非 0）。
+  确定性档的期望串用 python 独立复算 FNV-1a 得到，**不拿编译器自己的输出当基线**（否则等于没测）。
+
+
+### D47 B11/C02 实施（2026-09-24 14:17–，代码 `f0b820d`）= 身份求解唯一函数
+
+**落点**：`src/semantics/coclass_identity.{hpp,cpp}`（新编译单元，进 `vb6c3-core`）+
+`runInterfacePrepass` 末尾的 **Pass E** + `Driver::coclassIds_`（key = 块名小写）+
+`driver_compile.cpp` 存一份 `vbpProjectName_`。发码层一行未动。
+
+**唯一入口的形状**：`resolveCoClassIdentity(const CoClassDecl&, const CoClassEnv&)` 是纯函数
+（不写诊断、不碰全局），`CoClassEnv{project, vbpClsids, ifaces}` 把"块外面的世界"当参数传进去
+—— 这样 C05/B13/B15 的调用点各自给上下文，而**算法只有一份**。三档优先级按 026 三节，
+其中三处 026 没写、这次必须定的口径：
+
+- **vbp 档的查表次序**：三段式挂在**类模块名**上（`classClsidMap_` 的 key 就是模块名），而 CoClass
+  块名不必等于任何模块名 → 先按 `[Implementation("X")]` 的 X 查，查不到再按块名查。
+- **`<Proj>` 的兜序**：vbp `Name=` > `projectBaseName_` > 字面量 `"VB6EXE"`。第三条不是新造的，
+  是 `driver_codegen_dll_entry.inc:27` 那段注释里已有的兜法。**与 com_entry 那侧用
+  `projectBaseName_` 是分叉的**（VB6 的 ProgID 语义是 `<工程名>.<类名>`，工程名就是 `Name=`），
+  这条要进 B13/B16 的对账清单。
+- **seed 的大小写**：`coc:`/`itf:` 前缀 + 工程名与块名**一律小写**（VB 大小写不敏感，`Circle`
+  与 `circle` 必须同一个 GUID）；而 ProgID 默认值保留块名**原样大小写**（它是给人看的名字）。
+
+**两条判据级别的纪律**：
+
+① **期望串必须由另一套实现算出来**。三条断言里的两个 GUID 是 python 独立复算 FNV-1a（同一
+seed 串、同一常量组）得到的，不是拿编译器自己的输出抄回去 —— 否则用例只能"重述实现"，
+mint 换算法也测不出来。用例还钉了一条更强的形状：**同一批源文件、只换 vbp 的 `Name=`**，
+派生档整串跟着动、显式档一字不动（可复现性 = "只有声明决定身份"这句话的直接证伪面）。
+② **legacy 那两枚 mint lambda 一字未动**（D46-2）：它们只在 ActiveX DLL 路径上跑，而全部
+`tests/*.vbp` 都是 `Type=Exe` → 改了没有任何护栏能证明没改坏。新 mint 用**不同的常量组**，
+并存期间不可能撞车；合并动作按 026 七-1 / D15-8 归 B13/B16。
+
+**验收**：`-Category syntax` **96→99**（`cc_id_explicit_tier` 三条档位全串相等 +
+`cc_id_project_name_scope` 换工程名 + `cc_id_repeatable` 同一输入跑两次逐字节相同，新助手
+`Test-IdentityNote`/`Test-IdentityStable`）；A/B = `.build/pre_b11c02_C3.exe` 对 `Id.vbp` **一行身份
+都不出**；10 文件 `--emit-c` 对 `pre_b11c02_C3.exe` **10/10**；`Id.vbp` **真编译真运行**（`Id.exe`
+打出 `cc_id`，三条身份行照出）。门 = push `f660e25..f0b820d` 触发的 Actions run（编号见状态头）。
+
+**C03 从这里接手**：块名重名 / 引用的接口名不存在 / 接口名重复 / `[Default]` 标两条这四条
+"明知不做"，加上拒绝清单四类；其中"块名撞类型库 `ComClass`"要先定优先级（`symbol_table.hpp:248-252`
+已有一套"工程类遮蔽类型库 coclass"的机制，别新造第三套）。**身份一律只许读 `Driver::coclassIds_`**，
+不得再自己解析属性行 —— 这是本格留下的唯一入口约束。
+
 
 ## 运行日志
 
