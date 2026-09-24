@@ -1067,6 +1067,17 @@ if ($Category -in @("all", "run", "vbp")) {
         "VIA6:OK", "VIA7:OK", "VIA8:OK", "VIA9:OK", "VIA-DONE")
     Test-Vbp "itf_via_pair" "$Tests\itf_via\Via.vbp" $viaExpected
     Test-Vbp "itf_via_x86" "$Tests\itf_via\Via.vbp" $viaExpected -Arch "x86"
+    # ai/022 B11/C05 (ai/026 section 5, items 3-5): a CoClass block name used AS A TYPE --
+    # `As Circle` / `New Circle` / `CreateObject("ActApp.Circle")` all bind to the block's
+    # [Implementation] class. CC2/CC3 walk the other type positions (module field, parameter,
+    # return type); CC6 proves the group view keeps the virtual table (an overridden Area on an
+    # Inherits chain must answer), CC4/CC5/CC7 the ProgID rewrite including case.
+    # Both architectures: the rewritten variable's C type is a class struct pointer, so a layout
+    # slip would show up on x86 only (022 D40 rule).
+    $ccActExpected = @("CC1:OK", "CC2:OK", "CC3:OK", "CC4:OK", "CC5:OK", "CC6:OK", "CC7:OK",
+        "CC8:OK", "CC9:OK", "CC-DONE")
+    Test-Vbp "cc_act_pair" "$Tests\cc_act\Act.vbp" $ccActExpected
+    Test-Vbp "cc_act_x86" "$Tests\cc_act\Act.vbp" $ccActExpected -Arch "x86"
 
     # test_vbman 用于验证外部 COM 组件 VBMANLIB (x86 DLL, 供 32 位程序调用)
     # ai/022 B07b: INH2..INH11 cover the merged member face + prefix-copied fields +
@@ -1247,11 +1258,13 @@ if ($Category -in @("all", "syntax")) {
     # Its header attribute lines fold into one CoClass record, solved by the SAME Pass E, and
     # the fold must stay read-only: VB_Creatable=True in an EXE project is the corpus' normal
     # shape (134 of 143 lines) and must NOT inherit C03a's VB3033; a folded name used as an
-    # Inherits base must NOT get the "that is a CoClass block" wording (D52-3).
+    # Inherits base must NOT get the "that is a CoClass block" wording (D52-3). C05 adds the
+    # third file: the folded name used as a TYPE must still mean the class, so it must also
+    # produce no activation line (D54-3).
     if (Test-Path "$Tests\itf_pos\p10_coclass_fold_base.cls") {
-        Test-SyntaxNote "itf_p10_coclass_fold" @("$Tests\itf_pos\p10_coclass_fold_base.cls", "$Tests\itf_pos\p10_coclass_fold_der.cls") @(
+        Test-SyntaxNote "itf_p10_coclass_fold" @("$Tests\itf_pos\p10_coclass_fold_base.cls", "$Tests\itf_pos\p10_coclass_fold_der.cls", "$Tests\itf_pos\p10_coclass_fold_use.bas") @(
             "C3: CoClass 'FoldBase' identity: CLSID={96466C30-E240-55A4-9434-24F1C884C2AB} (minted) IID=- (missing) ProgID=VB6EXE.FoldBase (minted) impl='FoldBase' comCreatable=True folded-from-legacy: VB_Creatable=True VB_Exposed=False VB_PredeclaredId=False VB_GlobalNameSpace=False",
-            "C3: CoClass 'FoldDer' identity:") @("VB_VarHelpID", "VB_Description", "is a CoClass block", "VB3033")
+            "C3: CoClass 'FoldDer' identity:") @("VB_VarHelpID", "VB_Description", "is a CoClass block", "VB3033", "activated in-project")
     }
     # Both shapes in one module: the hand-written block wins, so the record carries no fold
     # tag and [ComCreatable(False)] -- not VB_Creatable=True -- is what reaches the identity.
@@ -1260,6 +1273,18 @@ if ($Category -in @("all", "syntax")) {
             "C3: class 'FoldWins' has both a CoClass block and 4 legacy header attribute line(s): the block wins, the attributes are not folded",
             "CoClass 'FoldWins' identity: CLSID={EA2B2FD6-E5C6-5192-D0C9-A13BC6FC7859} (minted) IID=- (missing) ProgID=VB6EXE.FoldWins (minted) impl='' comCreatable=False") @("folded-from-legacy")
     }
+    # ai/022 B11/C05 (ai/026 section 5, items 3-5): the observable face of in-project
+    # activation is one information line per block that is ACTUALLY USED as a type -- and no
+    # line at all for a block nobody binds to (cc_id declares three and uses none, see the
+    # byte guard). Asserting the line rather than the exit code, because the stage succeeds.
+    Test-SyntaxNote "cc_act_group_names" @("$Tests\cc_act\Act.vbp") @(
+        "CoClass 'Circle' activated in-project: type name -> class 'ShapeAct'",
+        "CoClass 'Ring' activated in-project: type name -> class 'RingAct'",
+        "ProgID=ActApp.Circle") @("declares no [Implementation]", "VB3039")
+    # A block without [Implementation] stays legal, but binding a variable to it has no
+    # answer -- the use site is where the refusal lands (D54-2: today that shape is a silent
+    # late-bound call on a null pointer, which is worse than an error).
+    Test-SyntaxFail "itf_n40_coclass_type_no_impl" "$Tests\itf_neg\n40_coclass_type_no_impl.bas" "declares no [Implementation] class"
     # ai/022 B11/C02: the three identity tiers, asserted against expected GUIDs computed by an
     # independent FNV-1a re-implementation of the seed strings "coc:<proj>.<coclass>" and
     # "itf:<proj>.<iface>" (both lowered) -- NOT scraped from this compiler's own output, or the

@@ -1,0 +1,8 @@
+Type=Exe
+Name="ActApp"
+Module=ActMain; ActMain.bas
+Module=ActBlocks; ActBlocks.bas
+Class=IShapeAct; IShapeAct.cls
+Class=ShapeAct; ShapeAct.cls
+Class=RingAct; RingAct.cls
+Startup="Sub Main"

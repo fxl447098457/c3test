@@ -10,6 +10,7 @@
 #include "driver/driver.hpp"
 
 #include "ast/ast.hpp"
+#include "driver/coclass_activate.hpp"   // stage 2.7 Pass G: 组内名字激活 (ai/022 D54, B11/C05)
 #include "semantics/interface_sig.hpp"
 #include "semantics/interfaces_registry.hpp"
 #include "semantics/coclass_identity.hpp"   // CoClass 身份 (tB, B11/C02)
@@ -486,6 +487,31 @@ bool Driver::runInterfacePrepass(const CompileOptions& options) {
                 }
             }
         }
+    }
+
+    // --- Pass G: 组内名字激活 (tB 扩展, ai/026 五-3/4/5, ai/022 D54, 批次 B11/C05) ---
+    // 把写在类型位置上的**块名**就地换成块绑的类名, 于是 `As <块名>`/`New <块名>`/
+    // `Set x = CreateObject("<本工程 ProgID>")` 全部落到"工程类"这条已经实测通了的路上
+    // (D54 探针 M4)。为什么是就地改名而不是给语义层+cgen 各开一个别名入口, 以及不改之前
+    // 那三份坏读数 (`void* a = 0` + 晚绑定 DISPID 调用 / `vb6_NewObject(L"块名")` /
+    // 走注册表的 CreateObject) 都记在 D54; 实现口径见 src/driver/coclass_activate.hpp 头注。
+    // 三条准入 (D54-③): 折算记录不算 (它的块名恒等于一个类模块名, 抢的就是那条路的字节)、
+    // 被同名模块占住的名字不算 (类/模块赢 —— `As Widget` 今天的含义不许被一块新语法改掉)、
+    // 绑不上类模块的不算 (Pass F 的 VB3033 已经判死, 这里不重复报)。
+    {
+        std::vector<CoClassActivation> acts;
+        std::vector<std::string> implLess;
+        for (const auto& kv : coclassIds_) {
+            const CoClassIdentity& id = kv.second;
+            if (id.legacyFolded || id.name.empty()) continue;
+            const std::string key = ifaceLower(id.name);
+            if (byName.count(key)) continue;         // 同名模块占位: 类/模块赢
+            if (id.implName.empty()) { implLess.push_back(id.name); continue; }
+            auto impl = byName.find(ifaceLower(id.implName));
+            if (impl == byName.end() || !impl->second || !impl->second->isClassModule) continue;
+            acts.push_back(CoClassActivation{id.name, id.implName, id.progId});
+        }
+        activateCoClassNames(modules_, acts, implLess, *diag_);
     }
 
     return !diag_->hasErrors();

@@ -108,6 +108,10 @@ enum class DiagnosticID : uint16_t {
                                         // 按名引用参数 (naked 无栈帧, 参数在调用者的栈上, 名字无从解析)
     SemAsmMixedBody = 3037,             // asm扩展: x64 下 Asm 块必须独占过程体 (v1 不支持与 VB 语句混排)
     SemAsmOperandWidthMismatch = 3038,  // asm扩展: Asm 指令两个寄存器操作数宽度不一致 (原本要到 ml64 才报 A2022)
+    // CoClass 组内激活 (tB 扩展, ai/026 五-3, ai/022 D54, B11/C05): 把一个**没有
+    // [Implementation]** 的 CoClass 块名写在类型位置上。今天这形状静默当 Variant
+    // (D54 实测 M1/M5: `void* a = 0;` + 晚绑定 DISPID 调用), 而"块没有实现类"编译器已经知道。
+    SemCoClassTypeUnbound = 3039,
 
     // 代码生成 (4xxx)
     CodeGenUnsupportedFeature = 4001,
