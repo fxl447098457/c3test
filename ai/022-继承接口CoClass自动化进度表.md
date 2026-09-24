@@ -2386,6 +2386,24 @@ D54-② 那条"类变量永不 Release"不变式（对外一旦发 IDispatch/IUn
 `cc_act` 的 CC5 是今天唯一一条包装读数）。折算的 `VB_Creatable = False` 那 9 条与 True 的差别
 仍然只在记录里那一位，B13/B16 要给出可解释的处理。
 
+**收线后追加的两条实测（同一个 exe，`.build/probe_c05/M7..M11`；写在这里是因为两条都推翻了我
+自己在手册上先写的话）**：
+- `TypeOf t7 Is Circle` 编译过、改写也发生（激活行的引用数从 10 涨到 13），运行期答 **False**；
+  对照 `TypeOf raw Is ShapeAct`（一份**从不写 CoClass** 的形状）**同样答 False** ⇒ 缺的是
+  `TypeOf … Is <类名>` 本身，与 CoClass 无关（`itf_xmod` 的 TOF1..TOF3 走的是接口名那条路，是好的）。
+  同一份代码里 `t7 Is Nothing` 答得对。手册已把 `TypeOf` 从"已激活的位点"清单里摘出去、当面写明
+  "改写照做、结果仍为否"。登记给后续：**对外那半要用到 `TypeOf`/QI 时这条必须先收**。
+- `ReDim arr(1) As Circle` 在 C 层撞 `error C2224: '.Move' 左边必须是结构体/联合`；对照
+  `ReDim arr(1) As ShapeAct`（普通类）**报同一处、同一条** ⇒ `ReDim ... As <工程类>` 今天是坏的
+  （数组元素没发成类指针），不是本批的改写造成的。手册同步改口径。UDT 成员那一位反而是好的：
+  `Private Type THeld : c As Circle : End Type` + `Set h.c = New Circle : h.c.Move 6 : h.c.Area()=14`
+  实测 **U1:OK** ⇒ 手册把"UDT 成员"留在已交付清单里，把 `ReDim` 挪出去。
+
+**给下一批的一条流程教训（自己撞的）**：`tests/run_tests.ps1` 在仓库里是 **UTF-8 带 BOM + LF**
+（不是记忆里写的 CRLF）。把插入段按 CRLF 写进去 = 一次 29 行的登记变成 1624/1598 的整文件改动，
+`git diff --numstat` 一眼就能看出来；插完必须断言 `count(b"\r\n") == 0`。另外 bash heredoc 里的
+`"$Tests\itf_neg\n40_..."` 路径里紧跟着出现 `n`（例：`\itf_neg` 后面接 `n40_...`）时会被当成换行吃掉一行，带 `t` 同理 —— 反斜杠一律用 `chr(92)` 拼出来，别指望字符串里连写两个反斜杠。
+
 
 ## 运行日志
 

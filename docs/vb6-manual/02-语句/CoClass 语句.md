@@ -62,13 +62,21 @@
   EXE 保留组内那半）；**契约聚合**（块列的接口，实现类含祖先必须满足）报 `VB3012`/`VB3017`；
   `Inherits` 一个 CoClass 块名报 `VB3020`，话已改成指名"那是组契约的块，没有成员表可继承"。
 - **组内已激活**（`ai/022` B11/C05）：块名可以当类型用。写在**类型位置**上的块名 —— `Dim c As Circle`、
-  形参 `Sub Use(c As Circle)`、返回值 `Function F() As Circle`、模块级字段、`ReDim ... As Circle`、
-  `Dim c As New Circle`、`New Circle`、`TypeOf c Is Circle` —— 在编译期就地改写成 `[Implementation]`
+  形参 `Sub Use(c As Circle)`、返回值 `Function F() As Circle`、模块级字段、UDT 成员
+  （`Private Type THeld : c As Circle : End Type`，实测 `h.c.Move 6` 跑得通）、`New Circle` ——
+  在编译期就地改写成 `[Implementation]`
   那个**类名**，此后走的就是"工程类"那条已经跑通的路：变量是类结构体指针、`New` 直调类工厂
   （不经注册表）、成员调用按实现类的虚表派发（派生类 `Overrides` 的那份会答话，不是静默绑根）。
   `Set v = CreateObject("<工程名>.<块名>")` 里 ProgID 命中本工程某个块的，同样在编译期换成
   `New <实现类>`；命中不到的一概照旧走注册表，外部组件不受影响。真发生了改写，stderr 有一行
   `C3: CoClass 'Circle' activated in-project: type name -> class 'ShapeAct' (...)`，没用到就一个字不多。
+- **`ReDim a(1) As Circle` 会编不过，但不是 CoClass 的事**：改写照做（名字变成实现类名），
+  而 `ReDim ... As <普通类名>` 这个形状**本来就**在 C 层撞 `C2224`（数组元素没被发成类指针，
+  `arr(0).Move` 无从下手 —— 拿 `ReDim a(1) As ShapeAct` 实测同一处报错）。登记为既有缺口。
+- **`TypeOf c Is Circle` 这一位今天仍然答"否"，而且与 CoClass 无关**：改写照做（名字会变成实现类名），
+  但 `TypeOf … Is <类名>` 本身就是既有缺口 —— 拿一个从没写过 CoClass 的工程实测
+  `TypeOf raw Is ShapeAct` 也答 False（只有接口名那条路 `TypeOf iv Is IShapeAct` 有效，见 `itf_xmod`）。
+  `c Is Nothing` 与 `Not (c Is Nothing)` 正常。登记在 `ai/022`，不是本批该顺手修的东西。
 - **一处口径偏差，记清楚别当 bug 找**：`As Circle` 能摸到的成员面是**实现类的公开成员**，比默认接口宽。
   要"只有默认接口那一份"就写 `As IShape`（B02/B03 的接口视图，比对更严）。为什么 v1 不拿接口视图当
   `As <块名>` 的默认：契约按 `ai/026` 五-1 只要求"实现类**连同祖先满足**这些槽"，实现类完全可以不写
