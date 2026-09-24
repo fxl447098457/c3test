@@ -484,7 +484,7 @@ inline void asmCheckRegWidths(const std::vector<std::string>& body, OnError onEr
 
 // ============================================================
 // 隐含累加器别名检查 (spec §11 项1: cmpxchg×RAX/EAX) —— 把"静默死循环/静默垃圾值"
-//   前移成 VB 诊断 3041。
+//   前移成 VB 诊断 3042。
 //
 //   要抓的形态 (实测踩过, 见 spec §11 的 AtomicAdd):
 //       mov rax, [ptr]        ; 把指针放进 RAX —— RAX/EAX 是同一个物理寄存器

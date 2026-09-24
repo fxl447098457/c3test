@@ -165,7 +165,7 @@ bool CCodeGen::tryEmitAsmProc(const std::string& procName, AccessLevel access,
             if (widthBad) return true;   // 诊断已报, 不再发射
         }
 
-        // 项1: 隐含累加器别名 (cmpxchg×EAX/EDX 等) → 3041。x86 同为 32 位寄存器:
+        // 项1: 隐含累加器别名 (cmpxchg×EAX/EDX 等) → 3042。x86 同为 32 位寄存器:
         // `cmpxchg [eax], ecx` 的地址寄存器与隐含累加器同为 EAX 时同样互毁。
         {
             bool aliasBad = false;
@@ -237,7 +237,7 @@ bool CCodeGen::tryEmitAsmProc(const std::string& procName, AccessLevel access,
         });
         if (widthBad) return true;   // 诊断已报, 不再收集 (编译到此失败)
 
-        // 项1: 隐含累加器别名 (cmpxchg×RAX/EAX 等静态可见的踩法) → 3041
+        // 项1: 隐含累加器别名 (cmpxchg×RAX/EAX 等静态可见的踩法) → 3042
         bool aliasBad = false;
         asmCheckAccumAlias(xbody, [&](int idx, int wLine, int lLine,
                                       const std::string& mn, const std::string& fam) {

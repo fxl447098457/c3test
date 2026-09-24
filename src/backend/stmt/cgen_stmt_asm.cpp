@@ -35,7 +35,7 @@ namespace vb6c3 {
 //   * 每个片段是**独立单元** —— 寄存器/标志位状态不跨片段传播 (x64 下它们甚至是
 //     不同的函数)。片段内部可自由使用任意寄存器 (callee-saved 由编译器自动保护)。
 //   * x64 单个片段最多引用 **4 个** VB 变量 (Win64 只有 RCX/RDX/R8/R9 四个整型
-//     参数寄存器; 地址必须常驻寄存器才能用 `[reg]` 表示"变量本身") → 超了报 3040。
+//     参数寄存器; 地址必须常驻寄存器才能用 `[reg]` 表示"变量本身") → 超了报 3041。
 //     x86 无此限制 (名字解析走栈帧, 不占参数寄存器)。
 //   * 不能引用类成员 (`me->x`) —— 类方法整体不支持 Asm (3037)。
 //   * 参数与局部变量的可见性以**发码时**的已知集合为准: 过程内 Dim 出来的标量局部
@@ -206,7 +206,7 @@ void CCodeGen::emitAsmStmtMixed(AsmStmt& node) {
         });
         if (widthBad) return;
 
-        // 项1: 隐含累加器别名 → 3041 (x86 内联块同样适用)
+        // 项1: 隐含累加器别名 → 3042 (x86 内联块同样适用)
         {
             bool aliasBad = false;
             asmCheckAccumAlias(body, [&](int idx, int wLine, int lLine,
@@ -307,7 +307,7 @@ void CCodeGen::emitAsmStmtMixed(AsmStmt& node) {
     });
     if (widthBad) return;
 
-    // 项1: 隐含累加器别名 (cmpxchg×RAX/EAX 等) → 3041。
+    // 项1: 隐含累加器别名 (cmpxchg×RAX/EAX 等) → 3042。
     // 混排 x64 片段里地址在 rcx/rdx/r8/r9, 理论上不碰 rax —— 但用户完全可能在片段内
     // 自己 `mov rax, [q]` 之类, 所以同一套检查照做。
     {
@@ -328,7 +328,7 @@ void CCodeGen::emitAsmStmtMixed(AsmStmt& node) {
         if (aliasBad) return;
     }
 
-    // 剩下的 `[名字]` 若既非地址参数也非寄存器, 就是打错了 —— 由 3039 已挡,
+    // 剩下的 `[名字]` 若既非地址参数也非寄存器, 就是打错了 —— 由 3040 已挡,
     // 这里再兜一次 (不报错, 交给 ml64; 但重写后残留 [x] 一定是漏网之鱼)。
     info.lines = body;
 
