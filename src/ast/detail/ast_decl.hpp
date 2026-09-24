@@ -279,6 +279,35 @@ public:
           name(std::move(n)), extendsName(std::move(ext)) {}
 };
 
+// ============================================================
+// CoClass 契约聚合块 (tB 扩展: 显式 CoClass, 见 ai/026 四节 + ai/022 D44)
+// ============================================================
+
+// 块内一条契约条目: `Interface <名>` 是**引用** (指向已声明的 Interface 块),
+// 不是内联定义 —— 026 四节的样本里它没有 End Interface.
+// isDefault 由前置的 [Default] 属性行置位 (该属性行被消费掉, 不再进 attributes,
+// 免得"C03 读哪个"有两处真相).
+struct CoClassIfaceRef {
+    std::string ifaceName;
+    bool isDefault = false;
+    std::vector<InterfaceAttr> attributes;
+    SourceLocation loc;
+};
+
+// CoClass Name ... End CoClass
+// 块级属性行 (CoClassId / ProgId / ComCreatable / Implementation) + 契约条目集合.
+// 与 interfaces 同一个手法: 存进 Module::coclasses 而**不进 declarations**, 因此在
+// 语义/发码接手前对既有管线完全透明 (零回归). B11/C01 只到"落到 AST 为止".
+class CoClassDecl : public Decl {
+public:
+    std::string name;
+    std::vector<InterfaceAttr> attributes;
+    std::vector<CoClassIfaceRef> ifaces;
+
+    CoClassDecl(SourceLocation loc, std::string n)
+        : Decl(ASTNodeKind::CoClassDecl, loc), name(std::move(n)) {}
+};
+
 // Const 声明: [Public|Private] Const name As Type = value
 class ConstDecl : public Decl {
 public:
@@ -372,6 +401,9 @@ public:
 
     // Interface 契约块 (tB 扩展): 与 declarations 分离存放, 语义/发码前不被遍历
     std::vector<std::unique_ptr<InterfaceDecl>> interfaces;
+    // CoClass 契约聚合块 (tB 扩展, ai/026 / ai/022 D44): 同上分离存放.
+    // B11/C01 起只有 parser 写、printer 读; 校验与发码在 C02/C03/C05 分批接手.
+    std::vector<std::unique_ptr<CoClassDecl>> coclasses;
     // Inherits 子句 (tB 扩展, B07): 按声明序保存; 单继承 → 多于一条在 stage 2.8 报错.
     // 泛型模板类与非类模块内的 Inherits 同样在 2.8 拒绝 (v1 边界, 见 D24).
     std::vector<InheritsStmt> inherits;

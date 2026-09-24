@@ -7,8 +7,10 @@
 #include "common/diagnostics.hpp"
 #include "ast/ast.hpp"
 #include "semantics/semantic_analyzer.hpp"
+#include "semantics/interface_sig.hpp"   // tB Inherits B09b: ifaceLower (类链键口径)
 #include <iostream>
 #include <unordered_map>
+#include <unordered_set>
 
 namespace vb6c3 {
 
@@ -242,6 +244,59 @@ bool Driver::runCrossModuleResolution() {
             }
 
             symTab.defineExternal(std::move(extSym));
+        }
+    }
+
+    // tB Inherits (ai/022 B09b, 实测见 022 D39): 祖先模块里 **Private** 的 UDT/Enum 类型符号,
+    // 凡被继承字段用到的, 也注进消费者作用域。
+    // 为什么必须注: 继承字段是**按值**嵌进派生结构体的, 类型名在消费者模块解不出来时 mapTypeRef
+    // 回落到 `void*` —— x64 上 sizeof(void*) 恰好等于小 UDT 的尺寸, 布局"巧合正确"、断言全绿;
+    // x86 上短 4 字节 → 该字段之后每个继承字段的偏移全错, 而 _New() 又按短了的 sizeof 分配
+    // → 基类那份过程写后面的字段就是越界写 (Inh.vbp 在 x86 段错误就是这个形状)。
+    // 只沿 Inherits 链补、只补"被继承字段用到"的名字、本地已有同名符号一律不抢 → 不写 Inherits
+    // 的工程一个符号都不会多。类型**定义**的文本早就在基类自己的 .h 里 (visit(TypeDecl) 不分访问
+    // 级别, 还带 VB6_TYPE_<X>_DEFINED 守卫), 这里缺的从来只是名字。
+    if (!classes_.empty()) {
+        std::unordered_map<const Module*, size_t> modIndexOf;
+        for (size_t k = 0; k < modules_.size(); k++) modIndexOf[modules_[k].get()] = k;
+        for (size_t i = 0; i < analyzers_.size(); i++) {
+            auto itSelf = classes_.find(ifaceLower(modules_[i]->moduleName));
+            if (itSelf == classes_.end() || itSelf->second.mod != modules_[i].get()) continue;
+            const ClassChainView& self = itSelf->second;
+            if (self.chainBroken || self.baseKey.empty() || self.inhFields.empty()) continue;
+            std::unordered_set<std::string> needNames;   // 只看 SimpleTypeRef (与本洞无关的形状不外扩)
+            for (Decl* d : self.inhFields) {
+                if (!d || d->kind != ASTNodeKind::VariableDecl) continue;
+                VariableDecl& v = static_cast<VariableDecl&>(*d);
+                if (!v.asType || v.asType->kind != ASTNodeKind::SimpleTypeRef) continue;
+                needNames.insert(ifaceLower(static_cast<SimpleTypeRef&>(*v.asType).name));
+            }
+            if (needNames.empty()) continue;
+            SymbolTable& symTab = analyzers_[i]->symbolTable();
+            const std::string selfKey = ifaceLower(modules_[i]->moduleName);
+            for (const std::string& ancKey : self.chain) {
+                if (ancKey == selfKey) continue;
+                auto itAnc = classes_.find(ancKey);
+                if (itAnc == classes_.end() || !itAnc->second.mod) continue;
+                auto itIdx = modIndexOf.find(itAnc->second.mod);
+                if (itIdx == modIndexOf.end() || !analyzers_[itIdx->second]) continue;
+                SymbolTable& ancTab = analyzers_[itIdx->second]->symbolTable();
+                if (!ancTab.moduleScope()) continue;
+                for (const auto& kv : ancTab.moduleScope()->symbols()) {
+                    const Symbol* ts = kv.second.get();
+                    if (!ts) continue;
+                    if (ts->kind != SymbolKind::UserDefinedType && ts->kind != SymbolKind::EnumType)
+                        continue;
+                    if (!needNames.count(ifaceLower(ts->name))) continue;
+                    if (symTab.lookupModule(ts->name)) continue;   // 本地已有/已注入 → 不抢
+                    auto extSym = std::make_unique<Symbol>(
+                        ts->kind, ts->name, ts->type, ts->location, ts->access);
+                    extSym->isExternal = true;
+                    extSym->sourceModule = itAnc->second.mod->moduleName;
+                    if (ts->kind == SymbolKind::UserDefinedType) extSym->udtMembers = ts->udtMembers;
+                    symTab.defineExternal(std::move(extSym));
+                }
+            }
         }
     }
 

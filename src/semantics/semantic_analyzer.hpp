@@ -130,6 +130,16 @@ public:
     // 虚方法 (tB, B08b): 本类体内对这个名字的调用必须走虚槽 (有后代 Overrides 了它)
     bool virtualCallNeedsDispatch(const std::string& name) const;
 
+    // 类继承 (tB, B08c): `obj.<成员>` 的 Protected 越权判定, 命中即报错并返回 true。
+    // 只在"接收者解析得出工程类 + 链上最近的声明者把它声明成 Protected + 当前模块不在那条
+    // 家族链上"三者同时成立时报错; 任一不成立 (含解析不出接收者) 一律放过 —— 漏报可以补,
+    // 把能编译的代码判成越权不可接受。红线同 D29-1: 绝不去 driver_crossmod 的逐字段成员表
+    // 拷贝里按级别过滤, 那会把越权退化成运行期才炸的晚绑定 COM 调用。
+    bool checkProtectedVisibility(const Expr& obj, const std::string& member,
+                                  const SourceLocation& loc);
+    // stage 2.8 登记表里"就是本模块"的那个类视图; 未登记 (泛型模板 / 接口宿主) 返回 nullptr。
+    const ClassChainView* selfClassView() const;
+
     // 泛型 (tB, G3): 模板登记表只读视图 (driver 在逐模块分析前注入).
     void setGenericRegistry(const GenRegistry* reg) { genReg_ = reg; }
     // ai/023 S03: 包导出边界屏蔽表 (lowerName → 包名)。driver 在跨模块注入后、
@@ -154,6 +164,9 @@ public:
     void setCtorParamCounts(std::map<std::string, int> m) { ctorParams_ = std::move(m); }
     // Interface 契约 (tB, B02): stage 2.7 建好的只读登记表, 供 Implements 分叉判定.
     void setInterfaceRegistry(const IfaceRegistry* reg) { ifaceReg_ = reg; }
+    // 委托式实现 (tB, B10): stage 2.7 Pass D 的裁决表; 命中的 (类, 接口) 对整份契约
+    // 由被委托对象满足, 逐槽 VB3012 不再报.
+    void setViaRegistry(const ViaRegistry* reg) { viaReg_ = reg; }
     // 类继承 (tB, B07b): stage 2.8 链登记表 (祖先声明的只读视图), 供裸名继承成员判定.
     void setClassChainRegistry(const ClassChainRegistry* reg) { clsreg_ = reg; }
     // 推断成功的实例化请求 (驱动 fixpoint 物化) — 取空语义.
@@ -283,6 +296,7 @@ private:
     // 泛型 (tB, G3): 调用点推断 (从模板登记表 AST 形参 + 延后点实参类型绑定)
     const GenRegistry* genReg_ = nullptr;
     const IfaceRegistry* ifaceReg_ = nullptr;  // Interface 契约 (tB, B02)
+    const ViaRegistry* viaReg_ = nullptr;      // 委托式实现 `Implements I Via m_h` (tB, B10)
     const ClassChainRegistry* clsreg_ = nullptr;  // 类继承链 (tB, B07b)
     std::vector<GenInstRequest> genericRequests_;
     bool tryBindGenericCall(DeferredXmodCallSite& site, GenInstRequest& reqOut);

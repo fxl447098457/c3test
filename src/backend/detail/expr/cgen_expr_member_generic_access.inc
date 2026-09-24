@@ -136,6 +136,18 @@
             std::string resolvedFn = resolveClassMemberCall(clsName, node.memberName);
             if (!resolvedFn.empty()) {
                 std::string thisArg = "(void*)" + objExpr;
+                // 类虚表 (ai/022 B08f-1/D35 站点④): 接收者是 `u.h` 这样的 UDT 对象字段，
+                // 纯读、可以安全用两次 → 与 ⑤/⑨ 同法按实例派发。B08f-1 之前这一支对
+                // 跨模块 UDT 字段根本走不到（类型名在语义层就丢了，发出来的是非法 C），
+                // 所以这条派发是随"通路修好"一起才存在的；Let/Set 方向 3.4b 无槽，不改写。
+                if (!suppressVirtDispatch_
+                    && resolvedFn.find("_prop_let_") == std::string::npos
+                    && resolvedFn.find("_prop_set_") == std::string::npos) {
+                    const std::string dispatchFnUdt = virtDispatchCallee(
+                        clsName, node.memberName, thisArg,
+                        /*mustDispatch=*/true, node.loc);
+                    if (!dispatchFnUdt.empty()) resolvedFn = dispatchFnUdt;
+                }
                 if (asCallCallee_) {
                     // 由外层 IndexOrCallExpr 把 thisArg 前置到参数首 (同 Fix 015)
                     pendingChainObj_ = thisArg;

@@ -29,8 +29,15 @@
     }
     // Fix 084n: UDT 的 Variant 字段 (如 ZipFileInfo.SourceFile As Variant)
     // Set .SourceFile = obj → 也需 vb6_VariantFromValue 包装对象指针 (void*→vb6_VARIANT C2440)
+    // ai/022 B08f-1 (D37): 但 `As <项目类>` 的 UDT 字段在语义层**也**记成 Variant，而它在 C 里是
+    // `vb6_cls_X* h;` —— 再包一层就是把 vb6_VARIANT 结构体灌进指针字段 (C2440, `Set u.h = obj`)。
+    // 所以按字段的真实 C 类型否决：只有不是 `vb6_cls_*` 时才当它是 Variant 容器
+    // (`void*` 的 COM/Collection 字段维持 Fix 084n 原样，那条路才是它当初的动机)。
     if (!targetIsVariant) {
-        targetIsVariant = (inferUdtFieldVb6Type(node.target.get()) == Vb6Type::Variant);
+        const std::string udtFldC = udtFieldCTypeOfTarget(node.target.get());
+        if (udtFldC.rfind("vb6_cls_", 0) != 0) {
+            targetIsVariant = (inferUdtFieldVb6Type(node.target.get()) == Vb6Type::Variant);
+        }
     }
 
     // Fix 038b-6: Set 语句中 Variant 值 → 对象引用提取

@@ -97,12 +97,17 @@ void CCodeGen::emitClassFactory(Module& module) {
         c_.emitLine("me->events = NULL;  /* P6.5: no event sink initially */");
     }
 
-        if (initSub) {
-            c_.emitLine(cProcName("Class_Initialize", initSub->access, isClassModule_ ? moduleName_ : "")
-                        + "(me" + ctorCallSuffix + ");");
-        }
-        c_.emitLine("return me;");
-    };
+    // tB Inherits (B09): 祖先的 Class_Initialize **先**跑 (链上根→叶), 再跑自家那份。
+    // 自家没有 Class_Initialize 时也要跑祖先的 —— 所以这条在下面的 initSub 判空之外。
+    emitClassInitChain(module);
+
+    // 084c: 自家 Class_Initialize —— 访问级别命名 + 带参构造 (_NewParams) 时透传实参
+    if (initSub) {
+        c_.emitLine(cProcName("Class_Initialize", initSub->access, isClassModule_ ? moduleName_ : "")
+                    + "(me" + ctorCallSuffix + ");");
+    }
+    c_.emitLine("return me;");
+};
 
     if (hasCtorParams) {
         // _New(void): 各形参默认值兜底 (内部自动创建路径产出"默认初始化"实例)

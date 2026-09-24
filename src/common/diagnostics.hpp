@@ -91,10 +91,20 @@ enum class DiagnosticID : uint16_t {
     SemOverrideNotOverridable = 3025,   // 祖先成员存在但未标 Overridable (或显式 NotOverridable)
     SemOverrideSignatureMismatch = 3026, // Overrides 与祖先槽签名不符
     SemVirtualNotSupported = 3027,      // v1 边界: 该处的虚成员用法尚不支持 (含"需要类虚表")
-    SemPrivateOutsideClass = 3028,      // 084a: 类外经 obj./Me. 访问 Private 成员 (接收者不在定义类家族内)
-    SemCtorArityMismatch = 3029,        // 084c: New Cls(args) 实参个数与 Class_Initialize 形参不符
-    SemAsmArchUnsupported = 3030,       // asm扩展: Asm 块在 x86 目标下不支持 (v1 仅 x64, 走 MASM/ml64)
-    SemAsmMixedBody = 3031,             // asm扩展: x64 下 Asm 块必须独占过程体 (v1 不支持与 VB 语句混排)
+    // tB 类继承 (ai/022 B09): `MyBase.<成员>` 显式基调用的可用性判定。
+    SemMyBaseNotSupported = 3028,       // 无基类 / 基面上没有这个成员 / 基成员是 Private
+    // tB 委托式实现 (ai/022 B10): `Implements I Via m_holder` 的可用性判定。
+    SemViaTargetUnknown = 3029,         // Via 目标不是本类的对象持有字段 / 接口名不是新式 Interface
+    SemViaHolderNotImplemented = 3030,  // 字段类型那个类没有实现被委托的接口 (v1 不接受再往下委托)
+    // tB CoClass 块 (ai/022 D48, 批次 B11/C03a): 形状与名字校验. 文案一律 ASCII (D12).
+    SemCoClassEntryInvalid = 3031,      // 契约条目: 引用不存在的接口 / 条目重复 / [Default] 标了多条
+    SemCoClassDuplicate = 3032,         // 块名撞车: 重复块名 / 撞模块名 / 撞接口名
+    SemCoClassNotSupported = 3033,      // v1 边界: [Implementation] 不是类模块 / EXE 工程 ComCreatable(True)
+    // 084a/084c/asm 扩展 (合并期与 022 B09-B11 撞号, 顺延到 3034-3037)
+    SemPrivateOutsideClass = 3034,      // 084a: 类外经 obj./Me. 访问 Private 成员 (接收者不在定义类家族内)
+    SemCtorArityMismatch = 3035,        // 084c: New Cls(args) 实参个数与 Class_Initialize 形参不符
+    SemAsmArchUnsupported = 3036,       // asm扩展: Asm 块在 x86 目标下不支持 (v1 仅 x64, 走 MASM/ml64)
+    SemAsmMixedBody = 3037,             // asm扩展: x64 下 Asm 块必须独占过程体 (v1 不支持与 VB 语句混排)
 
     // 代码生成 (4xxx)
     CodeGenUnsupportedFeature = 4001,

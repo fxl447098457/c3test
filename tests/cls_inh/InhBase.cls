@@ -15,6 +15,7 @@ Protected m_secret As Long
 Protected m_tag As String
 Private m_pt As TPoint
 Private m_name As String
+Protected m_lvl As Long
 Public Label As String
 
 Public Sub Bump()
@@ -62,6 +63,18 @@ Public Property Let Name(ByVal v As String)
     m_name = v
 End Property
 
+Public Overridable Property Get Level() As Long
+    Level = m_lvl
+End Property
+
+Public Property Let Level(ByVal v As Long)
+    m_lvl = v
+End Property
+
+Public Overridable Property Get Item(ByVal v As Variant) As String
+    Item = "base" & CLng(v)
+End Property
+
 Protected Sub SetSecret(ByVal v As Long)
     m_secret = v
 End Sub
@@ -87,6 +100,16 @@ Public Overridable Function Greet(ByVal who As String) As String
     Greet = "hi " & who & " (base)"
 End Function
 
+' ai/022 B08e-6 site 9: `RefOf.Speak()` inside a Function whose return type is this class
+' reads that function's return variable. The return variable is a plain C local, so the
+' receiver is pure and the call dispatches (INH39/INH40 in InhMain.bas).
+Public g_viaRet As String
+
+Public Function RefOf() As InhBase
+    Set RefOf = Me
+    g_viaRet = RefOf.Speak()
+End Function
+
 Public Function PickThru() As String
     PickThru = Me.Pick()
 End Function
@@ -98,3 +121,36 @@ End Function
 Public Function GreetThru(ByVal who As String) As String
     GreetThru = Me.Greet(who)
 End Function
+
+' --- ai/022 B09 (MyBase + 构造链) -------------------------------------------------
+' Maker returns a *project class*: an Overrides of it in a derived class is what used to
+' break com_entry.c (extern emitted before that class's typedef -> error C2143).
+Public Overridable Function Maker() As InhBase
+    Set Maker = Me
+End Function
+
+Public g_init As String
+
+' ai/022 B09c: a Property Set on the base, reached from the derived class through
+' `Set MyBase.Peer = ...` (the target side used to emit the bare identifier MyBase -> C2065).
+Private m_peer As InhBase
+
+Public Property Get Peer() As InhBase
+    Set Peer = m_peer
+End Property
+
+Public Property Set Peer(ByVal o As InhBase)
+    Set m_peer = o
+End Property
+
+Public Function PeerIs(ByVal o As InhBase) As String
+    If m_peer Is o Then
+        PeerIs = "same"
+    Else
+        PeerIs = "diff"
+    End If
+End Function
+
+Private Sub Class_Initialize()
+    g_init = "base;"
+End Sub

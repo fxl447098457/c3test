@@ -341,6 +341,14 @@
             if (!isVarName && knownTypedComVars_.count(objLower)) isVarName = true;
             if (!isVarName && knownIfaceVars_.count(objLower)) isVarName = true;
 
+            // tB Inherits (ai/022 B09): `MyBase.X = v` 走基类面上的 Property Let / 数据字段。
+            // 落到下面的 Module.var 回退就是 `vb6_MyBase_X = v` (C2065 未声明)。
+            if (objLower == "mybase") {
+                emitExpr(*node.value);
+                std::string valMyBase09 = std::move(lastExpr_);
+                if (tryEmitMyBaseAssign(maExpr, valMyBase09)) return;
+            }
+
             // Fix 084o-4: 函数名引用返回 UDT 的字段赋值 ("FuncName.Field = expr").
             // VB6 函数体内可用函数名访问返回 UDT 的字段 (如 pvVfsOpen.FileName = STR_BUFFER).
             // 目标展开为 vb6_ret_FuncName.Field (与读取侧 cgen_expr.cpp:203 一致),

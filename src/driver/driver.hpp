@@ -11,6 +11,7 @@
 #include "backend/asm_proc.hpp"     // ai/vb-asm-extension-spec: Asm 过程降级元数据
 #include "semantics/generics_registry.hpp"
 #include "semantics/interfaces_registry.hpp"  // Interface 契约 (tB, B02)
+#include "semantics/coclass_identity.hpp"     // CoClass 身份求解 (tB, B11/C02)
 #include "semantics/class_chain_registry.hpp"  // 类继承链 (tB, B07)
 #include <array>
 #include <cctype>
@@ -173,6 +174,9 @@ private:
     // 挂 Driver 而非某个符号表: 每模块一张符号表, 而接口名是工程级唯一的.
     IfaceRegistry ifaces_;
     std::vector<std::string> ifaceOrder_;  // 登记序, 保证诊断输出确定性
+    // 委托式实现 (tB, B10): stage 2.7 Pass D 建好的只读裁决表 (小写类模块名 → Via 子句).
+    // 消费方 = 语义层 (据此免掉逐槽 VB3012) 与发码层 (据此转调持有对象的接口槽).
+    ViaRegistry vias_;
     // 类继承 (tB, B07a): stage 2.8 建好的只读链登记表 (小写类名 → 父先己后的链).
     // 同上, 挂 Driver 而非符号表; B07b 的成员合并是唯一消费者.
     ClassChainRegistry classes_;
@@ -193,6 +197,13 @@ private:
 
     // P6.8: VBP指定的类CLSID映射 (模块名小写 -> CLSID字符串)
     std::unordered_map<std::string, std::string> classClsidMap_;
+
+    // CoClass 身份 (tB 扩展, ai/022 D46, 批次 B11/C02): stage 2.7 Pass E 求解一次、之后只读。
+    // key = CoClass 块名小写。消费者 = 将来的 C05（`New`/`CreateObject` 编译期改写）与
+    // B13/B15/B16（对外那半）；C02 只发一条 note 让它可测。
+    std::unordered_map<std::string, CoClassIdentity> coclassIds_;
+    // vbp 的 Name= 字段（ProgID 默认值与确定性 mint 的 <Proj>，与 projectBaseName_ 分叉，见 D46）
+    std::string vbpProjectName_;
 
     // VBP工程基名 (用于多模块工程的输出文件命名)
     std::string projectBaseName_;
@@ -308,7 +319,8 @@ private:
     bool runSemanticAnalysis(const CompileOptions& options);
     bool runGenericsPrepass();  // 泛型 (tB): 模板登记 + 使用点物化 (G2)
     // Interface (tB, B02): stage 2.7 建接口契约登记表 (名字/Extends 链/展平槽表)
-    bool runInterfacePrepass();
+    // options 只被 Pass F 用一项: EXE 工程不能注册为 COM 服务器 (ai/022 D48, B11/C03a).
+    bool runInterfacePrepass(const CompileOptions& options);
     // 类继承 (tB, B07a): stage 2.8 建类继承链登记表 (基名解析/环/深度/v1 边界)
     bool runClassChainPrepass();
     // 虚方法 (tB, B08b): 2.8 内两步 —— 位置合法性 (只读 modules_) / 覆盖契约与 dynamicKeys (要链)
@@ -318,6 +330,10 @@ private:
     bool mergeInheritedMembers();
     // 类虚表 (tB, B08d): stage 3.4b 排每类的有序槽表 (要读 3.4 的 inhProcs 判"本类有无入口")
     bool buildVirtualSlotTables();
+    // CoClass 契约聚合 (tB, ai/022 D50, 批次 B11/C03b): stage 3.4c 判"块里列出的每个接口,
+    // [Implementation] 那个类**含祖先**是否满足". 必须在 3.4 之后: 祖先自有的成员只有链表
+    // (stage 2.8) 能给全, 而链表的消费序与成员合并同源. 工程无 CoClass 块时立即返回 true.
+    bool runCoClassContractCheck();
     // fixpoint 单轮物化: 消费 genericUses_ 中未物化项; freshOut 收特化副本
     bool materializeGenerics(std::vector<std::pair<Module*, Decl*>>* freshOut);
     // 泛型推断 fixpoint (G3): 收请求→物化→增量分析→再跨模块, 至收敛

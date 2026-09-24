@@ -97,6 +97,10 @@ void SemanticAnalyzer::visit(SubDecl& node) {
                 resolveTypeOrDefault(param->name, param->asType.get()),
                 param->loc, AccessLevel::Private
             );
+            // tB B08c: 记一条 `As <类型>` 原文, 供 Protected 越权判定认接收者类
+            if (param->asType && param->asType->kind == ASTNodeKind::SimpleTypeRef) {
+                paramSym->srcTypeName = static_cast<SimpleTypeRef*>(param->asType.get())->name;
+            }
             symTab_.define(std::move(paramSym));
         }
 
@@ -211,6 +215,10 @@ void SemanticAnalyzer::visit(FunctionDecl& node) {
                 resolveTypeOrDefault(param->name, param->asType.get()),
                 param->loc, AccessLevel::Private
             );
+            // tB B08c: 记一条 `As <类型>` 原文, 供 Protected 越权判定认接收者类
+            if (param->asType && param->asType->kind == ASTNodeKind::SimpleTypeRef) {
+                paramSym->srcTypeName = static_cast<SimpleTypeRef*>(param->asType.get())->name;
+            }
             symTab_.define(std::move(paramSym));
         }
 
@@ -372,6 +380,10 @@ void SemanticAnalyzer::visit(PropertyDecl& node) {
                 resolveTypeOrDefault(param->name, param->asType.get()),
                 param->loc, AccessLevel::Private
             );
+            // tB B08c: 记一条 `As <类型>` 原文, 供 Protected 越权判定认接收者类
+            if (param->asType && param->asType->kind == ASTNodeKind::SimpleTypeRef) {
+                paramSym->srcTypeName = static_cast<SimpleTypeRef*>(param->asType.get())->name;
+            }
             symTab_.define(std::move(paramSym));
         }
 

@@ -123,6 +123,18 @@
                                    const std::string& objExpr, bool mustDispatch,
                                    const SourceLocation& loc);  // 空 = 本类不派发这个成员
 
+    // ---- MyBase 显式基调用 + 构造链 (tB, ai/022 B09; 实现在 cgen_inherit.cpp) ----
+    // 去虚化: `MyBase.M` 直调基类会跑的那一份实现, 不查 __cvtbl。
+    bool tryEmitMyBaseMember(MemberAccessExpr& node);  // true = 已接管 (含判死)
+    bool tryEmitMyBaseAssign(MemberAccessExpr& ma, const std::string& rhsC,
+                             bool forSet = false);  // MyBase.X = v / Set MyBase.X = obj
+    const ClassChainView* myBaseClassOf(MemberAccessExpr& node);  // 空 = 已判死 VB3028
+    std::string chainInitCName(const std::string& clsName) const;  // vb6_<X>_chain_init
+    bool classIsBaseOfSomething(const std::string& clsLower) const;
+    void emitChainInitDecl(Module& module);   // .h: 桥接声明 (仅"有 Class_Initialize 且被继承")
+    void emitChainInitDef(Module& module);    // .c 末尾: 桥接定义
+    void emitClassInitChain(Module& module);  // .c: 派生类 _New() 里根→叶跑祖先初始化
+
     void emitIfaceContractTypedefs();                 // .h: 工程级 vb6_ivtbl_/vb6_ivref_ 类型
     void emitIfaceClassFields(Module& module);        // .h: 类结构体里的 __iv_<I> 字段
     void emitIfaceImplTables(Module& module);         // .c: 适配器 + 类侧槽表实例
@@ -133,6 +145,8 @@
     const IfaceView* ivLookupIface(const std::string& written);
     std::vector<const IfaceView*> ivImplementedIfaces(Module& module);
     Decl* ivFindImplMember(Module& module, const IfaceView& v, const IfaceSlotView& slot);
+    // tB 委托式实现 (ai/022 B10): 本类把接口 v 整份转交给哪个持有字段 (无则 nullptr)
+    const ViaView* ivViaFor(const Module& module, const IfaceView& v);
     std::string ivSlotRetType(const Decl* sig);
     std::string ivParamDecls(Decl& d);
     std::string ivParamDeclsRef(const Decl* sig);
@@ -456,6 +470,11 @@
     // 供赋值语句判断 Variant RHS 需转换的目标类型 (如 cZipArchive 的 .FileName As String
     // ← vb6_VariantArrayGet → vb6_VariantToString; uBuf.MaxMatch As Long ← At() → vb6_VariantToLong)
     Vb6Type inferUdtFieldVb6Type(const ASTNode* target) const;
+
+    // ai/022 B08f-1 (D37): 走同一条 UDT 解析路, 但返回字段在 C 里的**对象类型**
+    // (`vb6_cls_X*` / `void*` / "" = 不是对象字段或推不出)。判"这个左值到底是不是 Variant
+    // 容器"用它 —— `mi.type` 那条口径对跨模块的 `As <项目类>` 会说是 Variant。
+    std::string udtFieldCTypeOfTarget(const ASTNode* target) const;
 
     // Fix 084o: 若 C 表达式为 Variant (字符串级检测或已知 Variant 变量), 返回
     // vb6_VariantToLong(...) 包装, 否则原样返回. 用于需要 int32_t 的上下文:

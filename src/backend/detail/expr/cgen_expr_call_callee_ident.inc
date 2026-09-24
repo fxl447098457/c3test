@@ -147,6 +147,16 @@
                                         std::string objExpr = std::move(lastExpr_);
                                         emitExpr(*node.positional[0]);
                                         std::string arg = std::move(lastExpr_);
+                                    // 类虚表 (tB, ai/022 B08e-5 第⑥站): 默认属性调用 `m_up(4)` 此前静默发
+                                    // `vb6_<Base>_prop_get_Item(接收者, ...)`, 接收者声明成基类而实际持派生实例时会切片回
+                                    // 基类的 Item; 显式写 `m_up.Item(4)` 走的是 ①/B08d 那条早已派发的路, 两种写法必须一致。
+                                    // 口径同 ①⑤⑪: 派发串与实参里的接收者是同一个 objExpr, 不纯时由 mustDispatch 出诊断,
+                                    // 左值求值 (suppressVirtDispatch_) 不改派。
+                                    if (!suppressVirtDispatch_) {
+                                        const std::string dispatchFnL = virtDispatchCallee(
+                                            fieldType, "Item", objExpr, /*mustDispatch=*/true, node.loc);
+                                        if (!dispatchFnL.empty()) itemFn = dispatchFnL;
+                                    }
                                         lastExpr_ = itemFn + "(" + objExpr + ", vb6_VariantFromValue(" + arg + "))";
                                         lastExprNeedsObjectUnpack_ = true;  // Set 语句需转 void*
                                         handled = true;

@@ -1,5 +1,5 @@
 Attribute VB_Name = "ctor_neg2_main"
-' ai/084c 负例2: CtorPlain 的 Class_Initialize 无参, New 带实参 → 3029
+' ai/084c 负例2: CtorPlain 的 Class_Initialize 无参, New 带实参 → 3035
 Option Explicit
 
 Sub Main()

@@ -301,4 +301,256 @@ std::string CCodeGen::virtDispatchCallee(const std::string& cls, const std::stri
            "((" + clsId + "*)" + objExpr + ")->__cvtbl)->" + cIdent(hit->field);
 }
 
+// ============================================================
+// MyBase 显式基调用 + 构造链 (tB B09, ai/022 D38)
+//
+// `MyBase.M(…)` = "按**基类自己会跑的那一份实现**直调", 与虚表无关 → 永远不去查 __cvtbl
+// (去虚化)。实现所在模块 = 基类自己的声明; 基类没声明就沿基类的链往上找最近的一份 (与 B07b
+// 的转发桩同源: 桩调的就是 `vb6_<owner>_<M>`)。
+//
+// 三条边界 (都在这里判死, 不留非法 C 给链接期):
+//  ① 基面上没有这个成员 → VB3028;
+//  ② Private 祖先成员在 C 层就是 `static` (Fix 089e), 派生 TU 连不上 → VB3028。唯一例外是
+//     Class_Initialize: 它由下面的链入口桥接函数发出 (emitChainInitDecl/Def), 与构造链共用;
+//  ③ 读上下文的成员优先级与 resolveClassMemberCall 一致 (Get > Function > Sub > Let > Set);
+//     写侧 (`MyBase.Level = v`) 由 comwrite 的 prop_get_ → prop_let_/prop_set_ 文本改写完成。
+// ============================================================
+
+namespace {
+
+// 声明的裸成员名 (Sub/Function/Property 三类), 小写比较用。
+const std::string* procMemberName(const Decl& d) {
+    switch (d.kind) {
+        case ASTNodeKind::PropertyDecl: return &static_cast<const PropertyDecl&>(d).name;
+        case ASTNodeKind::FunctionDecl: return &static_cast<const FunctionDecl&>(d).name;
+        case ASTNodeKind::SubDecl:      return &static_cast<const SubDecl&>(d).name;
+        default:                        return nullptr;
+    }
+}
+
+// 读上下文优先级 (越小越优先), 与 resolveClassMemberCall 的 "Get > Sub/Function > Let > Set" 一致。
+int procRankForRead(const Decl& d) {
+    switch (d.kind) {
+        case ASTNodeKind::PropertyDecl: {
+            const ProcKind pk = static_cast<const PropertyDecl&>(d).propKind;
+            return pk == ProcKind::PropertyGet ? 0 : (pk == ProcKind::PropertyLet ? 3 : 4);
+        }
+        case ASTNodeKind::FunctionDecl: return 1;
+        case ASTNodeKind::SubDecl:      return 2;
+        default:                        return 9;
+    }
+}
+
+// 模块是否**自己**声明了 Class_Initialize (构造链与 MyBase.Class_Initialize 同一条判据)。
+bool declaresClassInit(const Module& m) {
+    for (const auto& d : m.declarations) {
+        if (d && d->kind == ASTNodeKind::SubDecl &&
+            ifaceLower(static_cast<const SubDecl&>(*d).name) == "class_initialize")
+            return true;
+    }
+    return false;
+}
+
+// 写上下文: 只认 Property Let / Set (拿 Get 去写就是 C2198 或值被丢掉)。
+int procRankForWrite(const Decl& d) {
+    if (d.kind != ASTNodeKind::PropertyDecl) return 9;
+    const ProcKind pk = static_cast<const PropertyDecl&>(d).propKind;
+    return pk == ProcKind::PropertyLet ? 0 : (pk == ProcKind::PropertySet ? 1 : 9);
+}
+
+// Set 语句专用: 只认 Property Set (Let 槽接不了对象引用)。
+int procRankForWriteSet(const Decl& d) {
+    if (d.kind != ASTNodeKind::PropertyDecl) return 9;
+    return static_cast<const PropertyDecl&>(d).propKind == ProcKind::PropertySet ? 0 : 9;
+}
+
+struct MyBaseHit {
+    Decl* decl = nullptr;
+    Module* owner = nullptr;
+};
+
+// 在"基类会跑的那一份面"上找成员: 先查基类自己的声明, 没有再沿继承面 (B07b 桩的同一份 owner)。
+MyBaseHit findMyBaseProc(const ClassChainView& base, const std::string& memLower, bool forWrite) {
+    MyBaseHit hit;
+    int best = 9;
+    auto consider = [&](Decl* d, Module* m) {
+        if (!d || !m) return;
+        const std::string* nm = procMemberName(*d);
+        if (!nm || ifaceLower(*nm) != memLower) return;
+        const int r = forWrite ? procRankForWrite(*d) : procRankForRead(*d);
+        if (r < best) { best = r; hit.decl = d; hit.owner = m; }
+    };
+    for (auto& d : base.mod->declarations) consider(d.get(), base.mod);
+    if (!hit.decl)
+        for (const auto& ip : base.inhProcs) consider(ip.decl, ip.owner);
+    return hit;
+}
+
+// 数据字段: 基类自己的声明 + 基类的继承面 (前缀布局让祖先字段落在同一偏移)。
+VariableDecl* findMyBaseField(const ClassChainView& base, const std::string& memLower) {
+    for (auto& d : base.mod->declarations) {
+        if (d && d->kind == ASTNodeKind::VariableDecl &&
+            ifaceLower(static_cast<VariableDecl&>(*d).name) == memLower)
+            return static_cast<VariableDecl*>(d.get());
+    }
+    for (Decl* d : base.inhFields) {
+        if (d && d->kind == ASTNodeKind::VariableDecl &&
+            ifaceLower(static_cast<VariableDecl&>(*d).name) == memLower)
+            return static_cast<VariableDecl*>(d);
+    }
+    return nullptr;
+}
+
+} // namespace
+
+// "本类的直接基类"视图。空 = 判死并写好 VB3028 (读/写两条入口共用)。
+const ClassChainView* CCodeGen::myBaseClassOf(MemberAccessExpr& node) {
+    auto reject = [&](const std::string& why) -> const ClassChainView* {
+        diag_.error(DiagnosticID::SemMyBaseNotSupported, node.loc,
+                    "MyBase." + node.memberName + ": " + why + " (tB Inherits, ai/022 B09)");
+        lastExpr_ = "0";  // 判死了, 这里只要保证不发出非法 C
+        return nullptr;
+    };
+    if (!isClassModule_) return reject("MyBase is only valid inside a class module (.cls)");
+    const ClassChainView* self = classViewByName(moduleName_);
+    if (!self || self->baseKey.empty())
+        return reject("class '" + moduleName_ + "' has no Inherits clause");
+    const ClassChainView* base = classViewByName(self->baseKey);
+    if (!base || !base->mod)
+        return reject("base class '" + self->baseText + "' is not a resolvable project class");
+    return base;
+}
+
+std::string CCodeGen::chainInitCName(const std::string& clsName) const {
+    return "vb6_" + cIdent(clsName) + "_chain_init";
+}
+
+bool CCodeGen::classIsBaseOfSomething(const std::string& clsLower) const {
+    if (!clsreg_) return false;
+    for (const auto& kv : *clsreg_) {
+        if (kv.second.baseKey == clsLower) return true;
+    }
+    return false;
+}
+
+bool CCodeGen::tryEmitMyBaseMember(MemberAccessExpr& node) {
+    const ClassChainView* base = myBaseClassOf(node);
+    if (!base) return true;  // 已判死, lastExpr_ 是合法占位
+    const std::string memLower = ifaceLower(node.memberName);
+    auto reject = [&](const std::string& why) -> bool {
+        diag_.error(DiagnosticID::SemMyBaseNotSupported, node.loc,
+                    "MyBase." + node.memberName + ": " + why + " (tB Inherits, ai/022 B09)");
+        lastExpr_ = "0";
+        return true;
+    };
+
+    const MyBaseHit hit = findMyBaseProc(*base, memLower, /*forWrite=*/false);
+    if (hit.decl) {
+        // Class_Initialize 恒是 Private → 走桥接; 其余 Private 成员判死 (边界②)。
+        if (memLower == "class_initialize" && hit.owner == base->mod) {
+            lastExpr_ = chainInitCName(base->mod->moduleName) + "((vb6_cls_" +
+                        cIdent(base->mod->moduleName) + "*)me)";
+            return true;
+        }
+        if (accessOf(*hit.decl) == AccessLevel::Private)
+            return reject("member is Private in class '" + hit.owner->moduleName +
+                          "', so a derived class cannot reach it");
+        const std::string fn =
+            cProcName(procBaseName(*hit.decl), accessOf(*hit.decl), hit.owner->moduleName);
+        const std::string thisArg = "((vb6_cls_" + cIdent(hit.owner->moduleName) + "*)me)";
+        if (asCallCallee_) {
+            // 实参表由外层 IndexOrCallExpr 拼 (与站点④/⑤/⑨ 同一条通路: this 排在首位)
+            pendingChainObj_ = thisArg;
+            lastExpr_ = fn;
+        } else {
+            lastExpr_ = fn + "(" + thisArg + ")";
+        }
+        return true;
+    }
+    if (VariableDecl* fld = findMyBaseField(*base, memLower)) {
+        if (fld->access == AccessLevel::Private)
+            return reject("field is Private in class '" + base->mod->moduleName + "'");
+        lastExpr_ = "((vb6_cls_" + cIdent(base->mod->moduleName) + "*)me)->" + cIdent(fld->name);
+        return true;
+    }
+    return reject("class '" + base->mod->moduleName + "' has no such member");
+}
+
+// `MyBase.Level = v` — 属性 Let / 数据字段写入。读侧那条 `Module.var` 回退
+// (cgen_assign_stmt_special.inc) 会把 MyBase 当模块名 → `vb6_MyBase_Level = v` (C2065),
+// 所以写侧必须单独接管。rhsC 由调用方先 emitExpr 求好。
+// forSet=true 是同一条通路的 `Set MyBase.X = obj` 形 (只认 Property Set; 字段不参与)。
+bool CCodeGen::tryEmitMyBaseAssign(MemberAccessExpr& ma, const std::string& rhsC, bool forSet) {
+    const ClassChainView* base = myBaseClassOf(ma);
+    if (!base) return true;
+    const std::string memLower = ifaceLower(ma.memberName);
+    auto reject = [&](const std::string& why) -> bool {
+        diag_.error(DiagnosticID::SemMyBaseNotSupported, ma.loc,
+                    "MyBase." + ma.memberName + ": " + why + " (tB Inherits, ai/022 B09)");
+        return true;
+    };
+    const MyBaseHit hit = findMyBaseProc(*base, memLower, /*forWrite=*/true);
+    if (hit.decl) {
+        if (forSet && procRankForWriteSet(*hit.decl) >= 9)
+            return reject("class '" + hit.owner->moduleName
+                          + "' has no Property Set with this name (a Let cannot take Set)");
+        if (accessOf(*hit.decl) == AccessLevel::Private)
+            return reject("setter is Private in class '" + hit.owner->moduleName + "'");
+        const std::string fn =
+            cProcName(procBaseName(*hit.decl), accessOf(*hit.decl), hit.owner->moduleName);
+        c_.emitLine(fn + "((vb6_cls_" + cIdent(hit.owner->moduleName) + "*)me, " + rhsC +
+                    ");  /* tB Inherits B09: MyBase 写 */");
+        return true;
+    }
+    if (forSet)
+        return reject("class '" + base->mod->moduleName + "' has no Property Set with this name");
+    if (VariableDecl* fld = findMyBaseField(*base, memLower)) {
+        if (fld->access == AccessLevel::Private)
+            return reject("field is Private in class '" + base->mod->moduleName + "'");
+        const std::string lhs = "((vb6_cls_" + cIdent(base->mod->moduleName) + "*)me)->" +
+                                cIdent(fld->name);
+        c_.emitLine(resolveArrayElemType(fld->asType.get()) == Vb6Type::String
+                        ? "vb6_BSTR_Assign(&" + lhs + ", " + rhsC + ");"
+                        : lhs + " = " + rhsC + ";");
+        return true;
+    }
+    return reject("class '" + base->mod->moduleName + "' has no writable member with this name");
+}
+
+// .h: 链入口桥接的声明。只有"自己声明了 Class_Initialize" **且** "确实被谁继承"的类才发 →
+// 零继承工程逐字节不变。
+void CCodeGen::emitChainInitDecl(Module& module) {
+    if (!isClassModule_ || !declaresClassInit(module)) return;
+    if (!classIsBaseOfSomething(ifaceLower(module.moduleName))) return;
+    h_.emitLine("void " + chainInitCName(module.moduleName) + "(vb6_cls_" +
+                cIdent(module.moduleName) + "* me);  /* tB Inherits B09: 派生实例的构造链入口 */");
+}
+
+// .c 末尾: 桥接定义。放在所有过程体之后 —— 被桥接的 Class_Initialize 是 `static`。
+void CCodeGen::emitChainInitDef(Module& module) {
+    if (!isClassModule_ || !declaresClassInit(module)) return;
+    if (!classIsBaseOfSomething(ifaceLower(module.moduleName))) return;
+    const std::string init =
+        cProcName("Class_Initialize", AccessLevel::Private, module.moduleName);
+    c_.emitBlank();
+    c_.emitLine("// === Inherits (tB B09): 基类构造链入口 (桥接到本类的 static Class_Initialize) ===");
+    c_.emitLine("void " + chainInitCName(module.moduleName) + "(vb6_cls_" +
+                cIdent(module.moduleName) + "* me) { " + init + "(me); }");
+}
+
+// .c: 派生类 _New() 里, 自有字段初始化之后、自有 Class_Initialize 之前按**根→叶**跑祖先的初始化。
+void CCodeGen::emitClassInitChain(Module& module) {
+    const ClassChainView* v = classViewOf(module);
+    if (!v || v->baseKey.empty() || !clsreg_) return;
+    for (const std::string& ancKey : v->chain) {
+        if (ancKey == ifaceLower(v->name)) continue;  // 链末是自身, 自家的初始化在后面
+        auto it = clsreg_->find(ancKey);
+        if (it == clsreg_->end() || !it->second.mod) continue;
+        if (!declaresClassInit(*it->second.mod)) continue;
+        const std::string ancMod = it->second.mod->moduleName;
+        c_.emitLine(chainInitCName(ancMod) + "(((vb6_cls_" + cIdent(ancMod) + "*)me));"
+                    "  /* tB Inherits B09: 基类构造链 (根→叶) */");
+    }
+}
+
 } // namespace vb6c3

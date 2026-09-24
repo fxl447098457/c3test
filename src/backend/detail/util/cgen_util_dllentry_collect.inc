@@ -215,7 +215,12 @@
                 if (retType == "vb6_VARIANT" && !methodSym->variableTypeName.empty()) {
                     auto* rcInstSym = lookupModuleDotted(methodSym->variableTypeName);
                     if (rcInstSym && rcInstSym->kind == SymbolKind::Class && !rcInstSym->isInterface) {
-                        retType = "vb6_cls_" + cIdent(rcInstSym->name) + "*";
+                        // ai/022 B09-0: 带 `struct` 关键字。本文件的 typedef 是**按类分块**发的
+                        // (每个类一行 "typedef struct vb6_cls_X vb6_cls_X;"), 而这里引用的可能是
+                        // **另一个还没轮到**的类 (派生类块排在基类块之前就是这样): 裸 `vb6_cls_X*`
+                        // 在该行还是未声明名 → error C2143。`struct vb6_cls_X*` 自己就把标签带上了,
+                        // 与上面的 _New/_Destroy extern 同一口径, 不再有顺序依赖。
+                        retType = "struct vb6_cls_" + cIdent(rcInstSym->name) + "*";
                     }
                 }
                 std::string params = "struct " + clsStruct + "*";

@@ -176,7 +176,12 @@ void CCodeGen::visit(LetStmt& node) {
             }
         }
     }
+    // 左值求值期间关掉虚表派发 (ai/022 B08e-4 站点⑭: Pattern C/D2 要对这段文本做
+    // `prop_get_` -> `prop_let_` 的字符串级改写, 派发表达式会被换成表里不存在的槽字段)
+    const bool savedVirtLhs = suppressVirtDispatch_;
+    suppressVirtDispatch_ = true;
     emitExpr(*node.target);
+    suppressVirtDispatch_ = savedVirtLhs;
     std::string target = std::move(lastExpr_);
     emitExpr(*node.value);
     // COM属性值: 根据目标变量类型解封
@@ -300,7 +305,12 @@ void CCodeGen::visit(MidStmt& node) {
         valueVar = "vb6_VariantToString(" + valueVar + ")";
     }
     // Emit target variable address
+    // 左值求值期间关掉虚表派发 (ai/022 B08e-4 站点⑭: Pattern C/D2 要对这段文本做
+    // `prop_get_` -> `prop_let_` 的字符串级改写, 派发表达式会被换成表里不存在的槽字段)
+    const bool savedVirtLhs = suppressVirtDispatch_;
+    suppressVirtDispatch_ = true;
     emitExpr(*node.target);
+    suppressVirtDispatch_ = savedVirtLhs;
     std::string targetVar = std::move(lastExpr_);
     c_.emitLine("vb6_MidSet(&" + targetVar + ", " + startVar + ", " + lenVar + ", " + valueVar + ");");
 }

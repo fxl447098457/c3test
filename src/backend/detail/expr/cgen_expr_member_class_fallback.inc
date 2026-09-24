@@ -223,12 +223,25 @@
                 std::string resolvedFn =
                     resolveClassMemberCall(clsFromAst, node.memberName);
                 if (!resolvedFn.empty()) {
+                    // 类虚表 (ai/022 B08e-6 站点⑩): 接收者是"任意已发码头"。纯读
+                    // (`me->m_x` 这类) 与 ⑤ 同法接派发; 含调用的 (链式/属性返回对象) 由
+                    // mustDispatch=true 出 VB3027 —— 这一支此前一律静默直调, 正是
+                    // D27-13 那类"编得过、虚调用消失"的形状。
+                    std::string thisArg088c = "(void*)" + obj;
+                    if (!suppressVirtDispatch_
+                        && resolvedFn.find("_prop_let_") == std::string::npos
+                        && resolvedFn.find("_prop_set_") == std::string::npos) {
+                        const std::string dispatchFn088c = virtDispatchCallee(
+                            clsFromAst, node.memberName, thisArg088c,
+                            /*mustDispatch=*/true, node.loc);
+                        if (!dispatchFn088c.empty()) resolvedFn = dispatchFn088c;
+                    }
                     if (asCallCallee_) {
                         // 外层 IndexOrCallExpr/CallStmt 前置 this 并补参数
-                        pendingChainObj_ = "(void*)" + obj;
+                        pendingChainObj_ = thisArg088c;
                         lastExpr_ = resolvedFn;
                     } else {
-                        lastExpr_ = resolvedFn + "((void*)" + obj + ")";
+                        lastExpr_ = resolvedFn + "(" + thisArg088c + ")";
                     }
                     return;
                 }

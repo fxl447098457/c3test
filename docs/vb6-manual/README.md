@@ -134,6 +134,7 @@
 - [ChDir 语句](02-语句/ChDir%20语句.md)
 - [ChDrive 语句](02-语句/ChDrive%20语句.md)
 - [Close 语句](02-语句/Close%20语句.md)
+- [CoClass 语句](02-语句/CoClass%20语句.md)
 - [Const 语句](02-语句/Const%20语句.md)
 - [Date 语句](02-语句/Date%20语句.md)
 - [Declare 语句](02-语句/Declare%20语句.md)

@@ -127,6 +127,7 @@ private:
         case ASTNodeKind::EventDecl:     visit(static_cast<EventDecl&>(d)); break;
         case ASTNodeKind::DelegateDecl:  visit(static_cast<DelegateDecl&>(d)); break;
         case ASTNodeKind::InterfaceDecl: visit(static_cast<InterfaceDecl&>(d)); break;
+        case ASTNodeKind::CoClassDecl:   visit(static_cast<CoClassDecl&>(d)); break;
         case ASTNodeKind::ConstDecl:     visit(static_cast<ConstDecl&>(d)); break;
         case ASTNodeKind::VariableDecl:  visit(static_cast<VariableDecl&>(d)); break;
         case ASTNodeKind::ParameterDecl: visit(static_cast<ParameterDecl&>(d)); break;

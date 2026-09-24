@@ -37,4 +37,19 @@ struct IfaceView {
 // key = 接口名小写 (工程级唯一, D1)
 using IfaceRegistry = std::unordered_map<std::string, IfaceView>;
 
+// ============================================================
+// ai/022 B10: 委托式实现 `Implements I Via m_holder` 的裁决结果
+// ============================================================
+// 同样在 stage 2.7 一次建成、之后只读: 判定要跨模块看"持有字段的类型那个类实现了
+// 接口没有", 而那时别的类的符号还没进本模块符号表 (stage 3.5 才注入) —— 只有这里
+// 能把整工程的模块表看全。
+struct ViaView {
+    std::string ifaceKey;      // 被委托接口的小写键 (登记表里的规范名)
+    std::string fieldName;     // 持有字段名 (源码原样大小写)
+    std::string holderModule;  // 字段类型对应的类模块名 (原样大小写)
+};
+
+// key = 实现类模块名小写; 一个类可以委托多个接口, 按 `Implements` 书写序
+using ViaRegistry = std::unordered_map<std::string, std::vector<ViaView>>;
+
 } // namespace vb6c3

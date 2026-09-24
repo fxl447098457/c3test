@@ -1,5 +1,5 @@
 Attribute VB_Name = "AsmNeg"
-' ai/vb-asm-extension-spec 负例: Asm 块与 VB 语句混排 (x64 v1 不支持) → 3031
+' ai/vb-asm-extension-spec 负例: Asm 块与 VB 语句混排 (x64 v1 不支持) → 3037
 Option Explicit
 
 Public Function Mixed(ByVal a As Long) As Long

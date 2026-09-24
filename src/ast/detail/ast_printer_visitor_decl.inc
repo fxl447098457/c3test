@@ -110,6 +110,20 @@
         os_ << ")\n";
     }
 
+    void visit(CoClassDecl& node) override {
+        out() << "CoClass " << node.name;
+        os_ << " (" << node.ifaces.size() << " ifaces";
+        if (!node.attributes.empty()) os_ << ", " << node.attributes.size() << " attrs";
+        os_ << ")\n";
+        indent_++;
+        for (auto& r : node.ifaces) {
+            out() << (r.isDefault ? "[Default] Interface " : "Interface ") << r.ifaceName;
+            if (!r.attributes.empty()) os_ << " (" << r.attributes.size() << " attrs)";
+            os_ << "\n";
+        }
+        indent_--;
+    }
+
     void visit(ConstDecl& node) override {
         out() << "Const " << node.name
               << " (access=" << accessStr(node.access) << ")\n";

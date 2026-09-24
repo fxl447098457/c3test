@@ -314,6 +314,14 @@
     // 一旦消费即清空, 防止跨调用泄漏.
     std::string pendingChainObj_;
 
+    // 类虚表 (ai/022 B08e-4 站点⑭): 赋值/Set/Let 的**左值**文本发出来之后还要过一遍
+    // `cgen_util_comwrite.cpp` 的 Pattern C/D2 —— 它把 `prop_get_X` 整体换成 `prop_let_X`/
+    // `prop_set_X` (写方向在 3.4b 没有槽, 只能直调)。callee 若是派发表达式
+    // `((const vb6_cvtbl_C*)(...)->__cvtbl)->prop_get_x`, 那个盲替换会得到表里不存在的
+    // `->prop_let_x` (error C2039)。所以左值求值期间置 true, 让 ①⑤⑪ 三处都不改派。
+    // 读上下文 (普通表达式里的 `Me.f.Level`) 不受影响, 照旧派发。
+    bool suppressVirtDispatch_ = false;
+
     // 类模块标志
     bool isClassModule_ = false;
     bool isFormModule_ = false;
@@ -400,6 +408,9 @@
     // Interface 契约 (tB, ai/022 B04): stage 2.7 建好的工程级只读登记表 (driver 注入).
     // 槽表/适配器/薄指针类型都由它驱动, 与 legacy 的 implementsNames 口径互不影响.
     const IfaceRegistry* ivreg_ = nullptr;
+
+    // 委托式实现 `Implements I Via m_h` (tB, ai/022 B10): stage 2.7 Pass D 的只读裁决表.
+    const ViaRegistry* ivviareg_ = nullptr;
 
     // 类继承 (tB, ai/022 B07b): stage 2.8 建好的工程级只读链登记表 (driver 注入).
     // 继承字段与前缀布局、转发桩都由 view 的 inhFields/inhProcs 驱动 (stage 3.4 回填).

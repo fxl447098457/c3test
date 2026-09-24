@@ -98,6 +98,9 @@ CompileResult Driver::compile(const CompileOptions& options) {
             }
             // 注意: 不再设置effectiveOpts.outputFile, 让runLinker通过projectBaseName_统一处理
             // 这样确保输出路径始终包含outputDir前缀
+            // CoClass 身份的 <Proj> 用 vbp 的 Name= 字段 (VB6 的 ProgID 语义就是
+            // <工程名>.<类名>); 求解处再退到 projectBaseName_ (ai/026 三节 / ai/022 D46)。
+            vbpProjectName_ = project.projectName;
             // P11.1: Save VBP Path32 for output directory resolution
             if (!project.outputPath.empty()) {
                 projectPath32_ = pathToUtf8(project.resolvePath(project.outputPath));
@@ -528,7 +531,7 @@ CompileResult Driver::compile(const CompileOptions& options) {
 
     // === 阶段2.7: Interface 契约登记表 (tB 扩展, B02) — 名字/Extends 链/展平槽表.
     // 必须早于语义: 每个模块各一张符号表, 而接口名是工程级唯一的, 契约比对要跨模块查表.
-    if (!runInterfacePrepass()) {
+    if (!runInterfacePrepass(effectiveOpts)) {
         std::cerr << diag_->toString();
         result.errorCount = diag_->errorCount();
         result.warningCount = diag_->warningCount();
@@ -578,6 +581,17 @@ CompileResult Driver::compile(const CompileOptions& options) {
     // 字段、表类型与表实例。必须早于 3.5: 槽表读的是本工程模块的声明与 3.4 的 inhProcs。
     // 工程无 Inherits、或链上没人写 Overrides 时本阶段只清表不改物, 生成物逐字节不变。
     if (!buildVirtualSlotTables()) {
+        std::cerr << diag_->toString();
+        result.errorCount = diag_->errorCount();
+        result.warningCount = diag_->warningCount();
+        return result;
+    }
+
+    // === 阶段3.4c: CoClass 契约聚合 (tB 扩展, ai/022 D50, 批次 B11/C03b) ===
+    // 块里每列一个接口, 就要去 [Implementation] 那个类**连同祖先**查每一槽有没有实现。
+    // 必须晚于 2.8 的链表与 3.4 的成员合并: 派生类自己不写成员、由祖先提供那份实现, 是合法形状。
+    // 工程没有 CoClass 块时本阶段立即 return true, 生成物逐字节不变。
+    if (!runCoClassContractCheck()) {
         std::cerr << diag_->toString();
         result.errorCount = diag_->errorCount();
         result.warningCount = diag_->warningCount();

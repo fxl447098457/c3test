@@ -149,10 +149,17 @@ void Parser::parseModuleBody(Module& mod) {
                 expectEndOfStatement();
                 continue;
             }
+            // CoClass 契约聚合块 (tB 扩展, ai/026 四节 / ai/022 D44, 批次 B11/C01):
+            // 同样只在"过去必然报错"的位置新增分支, 存量工程逐字节不变.
+            if (cur_.kind == TokenKind::CoClass) {
+                mod.coclasses.push_back(parseCoClassDecl(pendingAttrs));
+                expectEndOfStatement();
+                continue;
+            }
             if (sawAttr) {
                 if (!pendingAttrs.empty()) {
                     diag_.error(DiagnosticID::ParseUnexpectedToken, currentLoc(),
-                        "Attribute line must precede an Interface declaration");
+                        "Attribute line must precede an Interface or CoClass declaration");
                     skipToNextLine();
                 }
                 continue;  // 属性行本身已报错并越过该行
@@ -264,7 +271,15 @@ std::unique_ptr<ImplementsStmt> Parser::parseImplements() {
         auto part = expectName("expected interface name after '.'");
         fullName += "." + part.text;
     }
-    return std::make_unique<ImplementsStmt>(loc, fullName);
+    auto stmt = std::make_unique<ImplementsStmt>(loc, fullName);
+    // tB 扩展 (ai/022 D42, 批次 B10): 委托式实现子句 `Implements I Via m_holder`。
+    // 没有 Via 时下面的分支根本不进, 存量路径逐字节不变 (VB6 里 `Via` 不是关键字,
+    // 语料核查: tests/archive/publish 的 .bas/.cls/.frm/.ctl 中 \bvia\b 零命中)。
+    if (cur_.kind == TokenKind::Via) {
+        advance(); // consume 'Via'
+        stmt->viaField = expectName("expected holder field name after 'Via'").text;
+    }
+    return stmt;
 }
 
 // 类继承子句 (tB 扩展, B07): 与 parseImplements 同口径吃点号限定名 (Project.IFace 那种
