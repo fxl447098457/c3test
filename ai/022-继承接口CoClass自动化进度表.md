@@ -4,62 +4,60 @@
 > 每次运行开始先读本文件，结束前必须更新本文件（状态头 + 批次清单 + 运行日志）。
 > 规范输入: `ai/讨论记录/018-接口继承与CoClass设计思路.md`（含 tB 文档要点与分阶段设计思路全文）。
 
-STATUS: BUSY             # NOT_STARTED | DESIGN | BUSY | IDLE | ALL_DONE
-LAST_RUN: 2026-09-24T15:38:58+08:00   # 上一轮 = **B11/C03a 出完并收线**（代码 `e515d89`，门 = Actions run ** #21 = success**、
-               # head 已核 = e515d89、7 个 job 全绿）。实测 D48（九种形状只挡了一种）/ 实施 D49（八条判据 +
-               # 本轮 = **B11/C03b 开工**（契约聚合校验 = 新 stage 3.4c + `As <CoClass>` 默认接口视图 + `VB3020` 文案）：
-               # 先量 3.4 之后实现类看得见哪些槽、`As <CoClass>` 今天报什么，裁决记 **D50**。
-               # 上一轮 = C03a 收线（run#21 全绿）。自动运行见本行不足 55 分钟请立即跳过。
-LAST_COMMIT: 代码批 = e515d89(B11/C03a)、f0b820d(B11/C02)、e7c7a31(B11/C01)、3c5d8e6(B10)、9eb2ca7(B09c)、debb110(B09b)、02bac92(B09)、77ecef1(B08f-1)   # **commit message 一律现写、不复用上批文本**；push 只推 `github/dev`（Actions 门），`origin`(gitcode) 与 `main` 不碰、**绝不建 MR**。
-CURRENT_BATCH: **B11/C03b = 契约聚合校验（新增 stage 3.4c）+ `As <CoClass>` 默认接口视图**（D48 切好的下半格）。
-               1. **先量后写，裁决记 D50**。量的对象 = 3.4 成员合并之后实现类到底"看得见哪些槽"：D48-3 已量到
-                  stage 2.7 **判不准祖先实现**（祖先的成员那时还没并进子类），所以契约校验必须在
-                  `mergeInheritedMembers()`(3.4) 与 `buildVirtualSlotTables()`(3.4b) **之后**。观测面沿用 D46 的
-                  教训：2.7/2.8/3/3.4/3.5/3.6 的诊断 `--syntax-only` 就收得到（`syntaxOnly` 在 3.6 之后才 return，
-                  `driver_compile.cpp:429`），负例走 `Test-SyntaxFail`/`Test-SyntaxFailMulti`；**stderr 的 `C3:`
-                  信息行只能证明"跑到了"，不能当验收面**。
-               2. **落点** = `Driver::runCoClassContractCheck()`，插在 `driver_compile.cpp:384` 之后（阶段 3.4b 与
-                  3.5 之间）、`modules_.size()>1` 那个 if **之外**（单文件工程也要判）。零回归靠老规矩：工程里没有
-                  CoClass 块就立即 return true。
-               3. **不新造比对器**（026 五-1）：槽键与签名口径复用 `src/semantics/interface_sig.hpp`
-                  （`ifaceSlotKey`/`ifaceSigFromDecl`）与 `semantic_analyzer_iface.cpp:87` 的
-                  `checkNewStyleInterface` 判据，缺槽/签名不符报**既有 `VB3012` 族**，别发新号段。实现类要按
-                  **含祖先**的可见成员表查（这正是放 3.4 之后的唯一理由）。
-               4. **判据范围** = 只判块里列出的接口：实现类自己的其它成员（含 `Private`）不入契约（026 五-3 末句）。
-                  没有 `[Implementation]` 的块（C03a 只拒"指向不存在/不是类"，空着是合法的）本批**跳过不判**，
-                  别顺手把"必须绑实现类"也立起来 —— 那是 C05 的事。
-               5. `As <CoClass>` = **默认接口视图**（026 五-3）：一次做不完就**只做到"认得这个名字是类型"**为止，
-                  派发留 **C05**，别半开。
-               6. **改 `VB3020` 文案**（D49 的尾巴）：`driver_classchain.cpp:425-426` 现句 "inherits unknown base
-                  class" 挡 `Inherits <CoClass名>` 是对的，只是理由说错了（不是"不存在"，是"CoClass 不能被继承"）。
-                  **实测只有两处按原句断言**（`tests/run_tests.ps1:1116` = `ci_n01_unknown_base`、
-                  `:1131` = `ci_n07_base_is_iface_host`，它 `Inherits` 的是**接口宿主模块**、不是 CoClass），
-                  两句都不该跟着 CoClass 文案一起改：所以要么另立一号给"基名是个 CoClass"，要么在
-                  `driver_classchain.cpp` 按"这个名字到底是什么"分支出两句文案，让上面两条各留原句。
-               7. 硬约束（沿用）：没有 CoClass 块的工程**逐字节不变** —— 10 文件 `--emit-c`，BASE =
-                  `.build/pre_b11c03b_C3.exe`（**已 `cp`**，收线 exe md5 见下方 GATE_BASELINE）；每条改动配 A/B
-                  负控；本批只加诊断不改发码形状，若 `As <CoClass>` 真落到语义层则 **x64 + x86 双跑**。
-               8. 门：`git -c http.version=HTTP/1.1 push github HEAD:dev` + **`git ls-remote github dev` 核 sha**
-                  （"Everything up-to-date" 不是证据）；盯门用 `.build/wait_run.py <sha> <秒>`，本机 python 直连
-                  api.github.com 会 `getaddrinfo failed`（curl 通路正常）→ 备一份 `.build/wait_run2.py`（走 curl）。
-               仍开（不在 C03b）：`New <CoClass>`/`CreateObject(ProgID)` 编译期改写与派发 = **C05**；存量 attribute
-               只读折算 = **C04**；legacy 两枚 mint lambda 与新 mint 合并 = **B13/B16**（前提先有 ActiveX DLL 形状
-               用例，见 D46-2）；B10 量出的三条 caller 侧洞（接口变量的 `Property Let/Set` 写、带 `Optional` 的
-               接口槽调用点少发 `_has_`、接口块放 `.bas` 时调用点认不出）、B06c（接口值作实参/进 Variant）、
+STATUS: IDLE             # NOT_STARTED | DESIGN | BUSY | IDLE | ALL_DONE
+LAST_RUN: 2026-09-24T16:13:02+08:00   # 本轮 = **B11/C03b 出完并收线**（代码 `c4aaa4c`，门 = Actions run ** #23 = success**、
+               # head 已核 = 4045b42、7 个 job 全绿）。实测 D50（`Inherits`×`Implements` 互斥、`As <块名>`
+               # 静默当 Variant）/ 实施 D51。自动运行见本行不足 55 分钟请立即跳过。
+LAST_COMMIT: 代码批 = c4aaa4c(B11/C03b)、e515d89(B11/C03a)、f0b820d(B11/C02)、e7c7a31(B11/C01)、3c5d8e6(B10)、9eb2ca7(B09c)、debb110(B09b)、02bac92(B09)   # **commit message 一律现写、不复用上批文本**；push 只推 `github/dev`（Actions 门），`origin`(gitcode) 与 `main` 不碰、**绝不建 MR**。
+CURRENT_BATCH: **B11/C04 = 存量 attribute 只读折算**（026 六节 C04：把 VB6 的 `Attribute VB_Creatable` /
+               `Instancing` / `VB_Exposed` 一类的 header 属性折成与手写块**同一条**内部记录）。
+               1. **先量后写，裁决记 D52**。量三件事，都已有初步落点（别重新勘察，去核实即可）：
+                  ① 这些 attribute 今天**根本没被解析** —— `Module::instancing` 只从 `.cls` 的
+                     `BEGIN…END` 头里的 `MultiUse` 来（`parser_module.cpp:39-67`），而 `Attribute` 行
+                     作为 `AttributeStmt`（`ast_stmt_io.hpp:234-242`，只有 `attrName` + `value` 两个字段）
+                     躺在语句表里，全仓**只有 `VB_Name` 被消费**（`ast_clone.cpp:717` 与 driver 的 moduleName）。
+                     先把"哪些 attribute 真实存在、值域长什么样"从 `tests/` 与 `archive/` 的存量 `.cls` 里量出来。
+                  ② 折算触发条件：只折**类模块**、且该模块**没有**手写 `CoClass` 块；两者都有时按 026
+                     说的"以手写块为准 + 一条警告"，别静默二选一。
+                  ③ 折出来的东西**必须进同一张表**：目标 = 造一份 `CoClassDecl` 记进 `Module::coclasses`
+                     （或与之等价的记录），让 stage 2.7 **Pass E** 照旧是唯一身份出口、`Driver::coclassIds_`
+                     照旧是唯一读数。**不许另立第二套身份通道**（D47 之后这条是硬规矩）。
+               2. **本批最大的连带风险 = C03a/C03b 的判死会打存量工程**：折算出的块若带
+                  `comCreatable=True`，在 **EXE 工程**里会被 `VB3033` 判死（C03a 刚立的规矩）—— 而这些
+                  `.cls` 改码前一声不吭。默认裁决 = **折算只记信息、不开判死**：来源是"折算"的记录
+                  不参与 `VB3033`/`VB3031`，只有手写块才享受（并承受）新校验。契约那一半今天打不着
+                  （legacy `Implements` 把类当接口，按 026 五-6 不入契约集合），但要在 D52 里当面量一句
+                  "折出来的块到底有没有契约条目"，别凭感觉。
+               3. 观测面：折算了哪条 attribute、折成哪个块 → 走 stderr 的 `C3:` 信息行（D46-①：note 诊断
+                  在成功的编译里根本看不见）；负例/正例照旧 `--syntax-only` 通路，`Test-SyntaxFail`。
+               4. 硬约束（沿用）：没有这些 attribute、也没有手写块的工程**逐字节不变** —— 10 文件
+                  `--emit-c`，BASE = `.build/pre_b11c04_C3.exe`（**动码前先** `cp .build/C3.exe` 过去；
+                  本轮收线 exe md5 见下方 GATE_BASELINE）；每条改动配 A/B 负控；只加信息与折算、
+                  不动发码 ⇒ 无需 x86 双跑（真动了 `Module::instancing` 的消费面就要双跑）。
+               5. 门：`git -c http.version=HTTP/1.1 push github HEAD:dev` + **`git ls-remote github dev` 核 sha**
+                  （"Everything up-to-date" 不是证据）；盯门用 `.build/wait_run2.py <sha> <秒>`（走 curl，
+                  本机 python 直连 api.github.com 会 `getaddrinfo failed`）。
+               仍开（不在 C04）：`As <CoClass>`/`New <CoClass>`/`CreateObject(ProgID)` 编译期改写 + 默认接口
+               派发 = **C05**（D50-②：类型识别与派发**同批**做，先量"`As <未知类名>` 今天在哪一层被吞成
+               `Variant`"）；legacy 两枚 mint lambda 与新 mint 合并 = **B13/B16**（前提先有 ActiveX DLL 形状
+               用例，D46-2）；B10 的三条 caller 侧洞（接口变量的 `Property Let/Set` 写、带 `Optional` 的接口槽
+               调用点少发 `_has_`、接口块放 `.bas` 时调用点认不出）、B06c（接口值作实参/进 Variant）、
                ⑮d（UDT 在第三个模块）、祖先 Private UDT 进**方法签名**（D40 末①）、`com_entry` 基类 extern 的
                `void*` 返回、**Class_Terminate 在 EXE 里没有触发点**（D41）。开工前读 026 七节四条债务。
-GATE_BASELINE: (Actions 级) c3test run ** #21 [dev] = completed/success**（https://github.com/fxl447098457/c3test/actions/runs/35969473683；由 `6fbf6f6..e515d89`
-               那次 push 触发，**已核 run 的 head_sha = `e515d89`** = 本批代码提交；7 个 job 全 success =
-               Build + smoke / bas#1 / bas#2 / syntax / compile / vbp，构建类型 Release）。
-               同批本机侧：`-Category syntax` **99→107**（`itf_n29`..`n34` 单文件 + `itf_n35_coclass_legacy_cls`、
-               `itf_n36_coclass_vs_module` 双文件 + 改造后的 p05/p07 正例照静默 + `cc_id` 三条身份断言一字不差）；
-               A/B = `.build/pre_b11c03_C3.exe` 对 `n29`/`n34` **零命中**（这两条诊断本批之前不存在）；
-               10 文件 `--emit-c` 对 `pre_b11c03_C3.exe` **10/10 逐字节全同**；`tests/cc_id/Id.vbp` 真编译真运行
-               （三条身份行照出、`Id.exe` 打出 `cc_id`）。本轮收线 exe md5 = `e883b6d8`。上一条门 = B11/C02 的
-               run **#19**（head f0b820d，全绿；跟进 run#20 也绿）；再上 = B11/C01 的 run **#17**（head e7c7a31）、
-               B10 的 run **#16**（head 3c5d8e6）。再上一条本地全量测量 = B08e-5（`.build/gate_B08e5.log`，
-               exe md5 ac14cf25，153/0/1/154，留作 Debug 侧对照基线）。
-               # 逐字节护栏每批都做：10 文件 `--emit-c` 对"改码前"exe 全同 10/10；下一批 BASE = `.build/pre_b11c03b_C3.exe`。
+GATE_BASELINE: (Actions 级) c3test run ** #23 [dev] = completed/success**（https://github.com/fxl447098457/c3test/actions/runs/35972949058；由 `e07438a..4045b42`
+               那次 push 触发，**已核 run 的 head_sha = `4045b42`** = 本批代码+文档的树；7 个 job 全 success = Build + smoke / bas#1 / bas#2 / syntax / compile / vbp，
+               构建类型 Release）。
+               同批本机侧：`-Category syntax` **107→112**（`itf_n37` 缺槽 / `itf_n38` 签名不符 / `itf_n39`
+               `Inherits` 块名 三条负例 + `itf_p08` 祖先供给契约 / `itf_p09` Via 委托供给契约 两条正例，
+               p09 兼作 B10×B11 的接缝用例）；A/B = `.build/pre_b11c03b_C3.exe` 对 `n37`/`n38` **零命中**、
+               对 `n39` 出的是**旧那句** "unknown base class"（新句本批独有）；10 文件 `--emit-c` 对
+               `pre_b11c03b_C3.exe` **10/10 逐字节全同**；`cc_id/Id.vbp` 真编译真运行、且它的 `--emit-c`
+               与改码前**逐字节相同**（本批不产一克发码），`cls_inh/Inh.vbp` 真编译 exit 0。
+               本轮收线 exe md5 = `45690cc7`。上一条门 = B11/C03a 的 run **#21**（head e515d89，全绿；
+               跟进 run#22 也绿）；再上 = B11/C02 的 run **#19**（head f0b820d）、B11/C01 的 run **#17**
+               （head e7c7a31）、B10 的 run **#16**（head 3c5d8e6）。再上一条本地全量测量 = B08e-5
+               （`.build/gate_B08e5.log`，exe md5 ac14cf25，153/0/1/154，留作 Debug 侧对照基线）。
+               # 逐字节护栏每批都做：10 文件 `--emit-c` 对"改码前"exe 全同 10/10；下一批 BASE = `.build/pre_b11c04_C3.exe`。
 ```
 
 > 重入保护：若运行开始时 STATUS=BUSY 且 LAST_RUN 距今不足 55 分钟，说明上一次运行可能仍在进行——本次**立即结束，不做任何修改**。
@@ -110,7 +108,7 @@ GATE_BASELINE: (Actions 级) c3test run ** #21 [dev] = completed/success**（htt
 | B09b | P3 | x86 布局缺陷：继承字段里 `Private` UDT 在派生 TU 解不出类型名 → 回落 `void*` → 前缀错位（D39 登记，本批治） | ☑ **B09b**（`debb110`，记录见 **D40**）：`runCrossModuleResolution()` 末尾沿 `Inherits` 链注入被继承字段用到的 UDT/Enum 类型符号（含 `udtMembers`；本地同名不抢）；判别实验 = 把 `Private Type` 改成 `Public` 看发射形状 + x86 能否跑起来；顺带清掉从 B07b 挂着的 INH35/INH36/INH39 三条 x86 红字；**门新增 `cls_inh_x86`**（同一份断言清单双架构跑） | `debb110` | `tests/cls_inh` x64 + x86 build+run 各 **52/52、0 FAIL**（改码前 x86 段错误）；8 文件 emit-c 对 `pre_b09_C3.exe` 8/8；`-Category syntax` 84/0 |
 | B09c | P3 | 收尾 P3 三条小尾巴：`Set MyBase.<属性> = obj`、⑮e（属性写穿过 UDT 对象字段）、`Class_Terminate` 反序链 | ☑ **B09c**（`9eb2ca7`，三条的实测与处置见 **D41**）：① 需要改码并已修 （改码前只有接收者是裸 `MyBase` → C2065）；② **⑮e 早在 B08f-1 就通了**，D37 那条是在坏元数据上量的 → 只补断言（INH55/INH59）；③ **`Class_Terminate` 链不做** —— EXE 工程三种形状实测都不触发 terminate，发出去就是死代码 → 登记为生命周期/P6 的既有缺口 | `9eb2ca7` | `Inh.vbp` 断言 **52→59**、**x64 + x86 各 59/59、0 FAIL**（A/B：改码前编不过，1×C2065）；8 文件 emit-c 对 `pre_b09c_C3.exe` 8/8；`-Category syntax` 84/0；INH58 = B09b 最深用例（隔两级持有根的 Private UDT 字段）|
 | B10 | P4 | `Implements IFace Via <holderVar>` 委托式实现：持有字段 + 自动转调桩 + 签名检查 | ☑ **B10**（`3c5d8e6`，实施与选型见 **D43**）：`Via` 软关键字四件套 → 语法 `ImplementsStmt::viaField` → **stage 2.7 Pass D** 裁决（`vias_`，一份来源同喂语义与发码；`VB3029`/`VB3030` 两类判死含链式 Via）→ 语义层免逐槽 `VB3012` → 发码层转调**持有对象的接口槽**（不直调 Private 成员：C 层 static 跨 TU 连不到）+ Nothing 字段退零值 | `3c5d8e6` | `tests/itf_via` 新工程 **VIA1..VIA9 x64 与 x86 各 9/9**；A/B 改码前 `VB2003`+`VB2002`；4 条负例（n21/n22/n23/n24）+ 1 条软关键字正例 p04；10 文件 `--emit-c` 对 `pre_b10_C3.exe` 全同 10/10；`-Category syntax` 84→89 |
-| B11 | P5 | `CoClass…End CoClass` 语法 + `[CoClassId]/[Default] Interface/[ComCreatable]/[CoClassCustomConstructor]` + 契约聚合校验（实施依据换成 `ai/026`，其六节把 B11 拆成 C01–C05） | ◐ **C01 已出（`e7c7a31`）= 块语法 + 属性行落 AST**（零回归靠 `Module::coclasses` 不进 `declarations`；属性行归属按"名字+位置+同行"合判，见 D44/D45）；**C02 已出（`f0b820d`）= 身份求解唯一函数**（`src/semantics/coclass_identity.{hpp,cpp}` 纯函数 + stage 2.7 Pass E + `Driver::coclassIds_`；见 D46/D47）；**C03a 已出（`e515d89`）= 块形状与名字校验**（stage 2.7 Pass F 八条判据 + `VB3031/3032/3033` 三号；**宿主同名豁免**是实施时被自己的正例逼出来的，见 D49-①；上一批的用例变这一批的红灯，三条正例改成正面形状而非放宽校验，见 D49-②）。**下一格 = C03b**（契约聚合 = 新 stage 3.4c + `As <CoClass>` 默认接口视图 + `VB3020` 文案），C04 = 存量 attribute 折算，C05 = 组内激活 | `e515d89`(C03a)、`f0b820d`(C02)、`e7c7a31`(C01) | run **#21**（head 已核 = `e515d89`）+ `-Category syntax` 99→107 + 10 文件 `--emit-c` 对 `pre_b11c03_C3.exe` 10/10 + A/B 两条新诊断零命中+ `Id.vbp` 真编译真运行 |
+| B11 | P5 | `CoClass…End CoClass` 语法 + `[CoClassId]/[Default] Interface/[ComCreatable]/[CoClassCustomConstructor]` + 契约聚合校验（实施依据换成 `ai/026`，其六节把 B11 拆成 C01–C05） | ◐ **C01 已出（`e7c7a31`）= 块语法 + 属性行落 AST**（零回归靠 `Module::coclasses` 不进 `declarations`；属性行归属按"名字+位置+同行"合判，见 D44/D45）；**C02 已出（`f0b820d`）= 身份求解唯一函数**（`src/semantics/coclass_identity.{hpp,cpp}` 纯函数 + stage 2.7 Pass E + `Driver::coclassIds_`；见 D46/D47）；**C03a 已出（`e515d89`）= 块形状与名字校验**（stage 2.7 Pass F 八条判据 + `VB3031/3032/3033`；宿主同名豁免见 D49-①）；**C03b 已出（`c4aaa4c`）= 契约聚合校验**（新 **stage 3.4c** `runCoClassContractCheck()`：按链倒着走、叶优先，缺槽 `VB3012`/签名不符 `VB3017`，`vias_` 命中的委托免逐槽；`VB3020` 文案收口。`As <CoClass>` 按 D50-② 整条并入 C05）。**下一格 = C04**（存量 attribute 只读折算，且折算记录不开判死），C05 = 组内激活 | `c4aaa4c`(C03b)、`e515d89`(C03a)、`f0b820d`(C02)、`e7c7a31`(C01) | run **#23**（head 已核 = `4045b42`）+ `-Category syntax` 107→112 + 10 文件 `--emit-c` 对 `pre_b11c03b_C3.exe` 10/10 + A/B（n37/n38 零命中、n39 出旧句）+ `Id.vbp` 真编译真运行且发码逐字节未动 |
 | B12 | P5 | 组内激活：`New <CoClass>` / `CreateObject("ProgID")` 编译期映射 + 默认接口派发 | ☐ | | |
 | B13 | P6 | IUnknown 三件套真实实现（IID 表 QI / 原子 AddRef-Release）+ 对象布局 COM 化收尾 | ☐ | | |
 | B14 | P6 | IDispatch 四件套接入新式接口（GetTypeInfo/GetIDsOfNames/Invoke + DispId 表） | ☐ | | |
