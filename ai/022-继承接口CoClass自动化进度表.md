@@ -4,58 +4,58 @@
 > 每次运行开始先读本文件，结束前必须更新本文件（状态头 + 批次清单 + 运行日志）。
 > 规范输入: `ai/讨论记录/018-接口继承与CoClass设计思路.md`（含 tB 文档要点与分阶段设计思路全文）。
 
-STATUS: IDLE             # NOT_STARTED | DESIGN | BUSY | IDLE | ALL_DONE
-LAST_RUN: 2026-09-25T02:59:53+08:00   # 本轮 = **B13d 出完并收线**（代码 `9df23ba`）：薄指针的 `QueryInterface` 不再
-               # 把 `IID_IUnknown` 与本接口并成一个分支回 `self`（那两个 `self` 是同一结构体里两个
-               # 不同偏移的成员 ⇒ 同一对象两个身份），改成一律回"本类实现序第一个接口"的薄指针 ——
-               # 零布局改动（D19 不入视野），单接口类的值与改前完全相同。
-               # 本批最值钱的不是这条修复，是**顺手读出来的危险**（D59-4）：RTL 的
-               # `ComObj_QueryInterface` 对表里的 `defaultIfaceIid`/`ifaceIids` 一律交回**胖包装器**，
-               # 而 B13b/B13c 之后那些字段里装的可能是新式 vtable 接口的 IID、`.tlb` 还把它当默认
-               # 接口广告 ⇒ 早绑定客户 QI 成功、按虚表调第 3 槽打到 `GetTypeInfoCount` = 静默调错
-               # 函数。两条出路等下一批拍板（**B13e**），本批刻意不动：那会把上一批刚立的用例翻面。
-               # 门 = 本次 push 触发的 Actions run，编号见 GATE_BASELINE。
+STATUS: BUSY             # NOT_STARTED | DESIGN | BUSY | IDLE | ALL_DONE
+LAST_RUN: 2026-09-25T03:23:13+08:00   # 本轮 = **B13e 开工（对外默认接口的口径：让"广告"与"应答"重新对齐）**。
+               # 上一格 B13d 已于 run #50 全绿收线（代码 `9df23ba`，门 head `2c7c5e2`）。
+               # 开工第一件事照例是送读数：先核 B13e 自己的前提 —— D59-4 那条"胖包装器应答瘦 IID
+               # 会静默调错函数"。第一枪就不成立（RTL `ComObj_GetTypeInfo` + `TypeLibBuilder` 只有
+               # `TKIND_DISPATCH`，客户根本走不到"按接口虚表取槽"），所以本格**不是**去收那条危险，
+               # 而是收同一次读码顺手撞见的另一条：`.tlb` 的默认接口与服务器 `GetIDsOfNames` 认的
+               # 成员面不是同一档（详见稍后落的 D60）。
                # 自动运行见本行不足 55 分钟请立即跳过。
 LAST_COMMIT: 代码批 = 9df23ba(B13d)、bd38798(B13c)、b1a8e58(B13b)、7b6570a+988c7cb(B13a；门 head = 合并 `9785f4f`)、7f829ee(B11/C05=B12)、b82a184+02d70fe(B11/C04)、c4aaa4c(B11/C03b)、e515d89(B11/C03a)、f0b820d(B11/C02)、e7c7a31(B11/C01)、3c5d8e6(B10)、9eb2ca7(B09c)、debb110(B09b)、02bac92(B09)   # **commit message 一律现写、不复用上批文本**；push 只推 `github/dev`（Actions 门），`origin`(gitcode) 与 `main` 不碰、**绝不建 MR**。
-CURRENT_BATCH: **B13e = 对外发布口径拍板：新式接口的 IID 到底发不发（收 D59-4 那条危险）**
-               （**先读 D58-5、D59-1 与 D59-4**。这条决定是 B13c 那条口径的下游，也是 B16/B17 的前置。）
-               1. 危险的确切形状（D59-4）：`src\rtl\core\vb6comserver\vb6comserver_obj.c:24-49` 对
-                  `desc->ifaceIids[i]` 与 `desc->defaultIfaceIid` 一律 `*ppv = self`（注释写着
-                  `// dispinterface: same IDispatch pointer`）。这两个字段自 B13b/B13c 起装的
-                  **可能是新式 vtable 接口**的 IID，而 `.tlb` 自 B13c 起把同一个 IID 当 coclass 的
-                  默认接口广告出去 ⇒ 早绑定客户 QI 成功，然后按接口虚表调第 3 槽 —— 那个位置在
-                  IDispatch 上是 `GetTypeInfoCount`。**静默调错函数比 `E_NOINTERFACE` 危险得多。**
-               2. 两条出路（选一条，或给第三条），本批先拍板再写码：
-                  (i) **对外不发布**新式接口的 IID：`dll_entry` 的 `iidMap`/`defaultIfaceIid` 把
-                      `iidreg_` 认识（= 新式）的那几项滤掉，类型库的 coclass 默认接口回到
-                      `<_类名>` 那一档 ⇒ 客户问不到也就不会调错；代价 = `cc_dll_identity_single_source`
-                      与 `cc_dll_tlb_matches_table` 两条用例**要翻面**（B13b/B13c 立的），手册里
-                      "表与 `.tlb` 逐值一致"那句要改成"新式接口不参与对外发布"。
-                  (ii) **真应答**：包装器对新式 IID 返回 `&me->__iv_<I>` —— 要类侧给 RTL 一张
-                      "实例→第 k 个接口指针"的映射（`vb6_CoClassDesc` 加字段 + 类侧发那张表），
-                      且接口成员得先进类型库（B15）⇒ 这一半实质就是 B16 的正路，别塞进本批。
-               3. 判据一次列清（不许半接）：选 (i) 之后"一个接口一次编译只许一枚 GUID"**仍然成立**
-                  （值不动），变的只是**哪些通道发布它**；`.tlb`、COM 表、`QueryInterface` 三处
-                  口径必须是同一个说法 —— 不允许出现"库里广告、表里不认"或反过来的中间态（那正是
-                  今天的样子）。
-               4. 硬约束与基线：BASE = `.build/pre_b13e_C3.exe`（本轮收线 exe，
-                  md5 `905c9392cede13ab9d915f05b091ed3c`）。护栏两层换 BASE 路径复用：
-                  ① `.build/b13d_guard.py`（含新式接口的工程按"**整段 QI 函数体豁免**"判，
-                  其余 14 个工程逐字节全同）；② `.build/b13d_ab_all.py`（三工程全产物 A/B：
-                  EXE `cc_act`、存量 DLL 含 `.tlb` 不许变、`cc_dll` 允许变的范围**要在拍板后重新声明**）。
-                  本轮实测基线：`-Category syntax` **119/0**、`-Category vbp` **27 PASS / 0 FAIL /
-                  1 SKIP**（唯一的 SKIP = `test_vbman`，本机没注册 32 位 VBMAN，属已知基线）、
-                  门 job **8**、DLL 侧用例 **5** 条 + 新用例 `itf_canonical_iunknown`。
+CURRENT_BATCH: **B14 = IDispatch 四件套接新式接口（GetTypeInfoCount/GetTypeInfo/GetIDsOfNames/Invoke + DispId 表）—— 范围要先量出来再定**
+               （**先读 D56、D58-5、D59-4 与 D60**。D59-4 那条"静默调错函数"的机制已被 D60-1 证伪，
+               但它指的方向 —— 胖/瘦两个世界还没接成一个 —— 就是 B14/B16/B17 这一串。）
+               1. B13e 收线时已经量到、不必重测的：① `.tlb` 只有 `TKIND_DISPATCH` 与
+                  `TKIND_COCLASS` 两种 kind（`TypeLibBuilder` 没有 `TKIND_INTERFACE` 发码路 = B15）；
+                  ② 服务器的成员面只有 `desc->methods` 那一档（类的 Public 成员 + 显式字段）；
+                  ③ 对外默认视图 = `<_类名>`（D60-3 拍板），新式接口的 IID 只在表/vtable/库里
+                  做**身份**用。⇒ 本格**不许**走"把 `Private` 契约成员发成 disp id"那条捷径
+                  （B13c 已按 (b) 拍板，且服务器的 `GetIDsOfNames` 只认公有成员，发了就是两边假绿）。
+               2. 动手前先量三件事（量完把读数记进 D61，范围按读数收窄）：
+                  ① 胖包装器对 `IID_IDispatch` 交回什么、`GetTypeInfoCount`/`GetTypeInfo` 各自答
+                     哪一份 `ITypeInfo`（B13a 的读数是"按 CLSID 取 coclass 那份"，本批要复核
+                     它对接口指针这一路还成不成立）；
+                  ② 薄指针 `vb6_ivtbl_<I>` 的头三槽之外有没有 IDispatch 那四槽的位置 ——
+                     **没有就意味着要动布局**：那是 D19 那条硬约束的地盘，先报告再改，别顺手加字段；
+                  ③ 接口成员的 DispId 今天在哪算（`Symbol::comDispid` 那条链是类模块侧的），
+                     以及"接口成员"有没有一份可发的表。
+               3. 判据（不许半接）：① 一条 gated 真跑用例，走 IDispatch 面把**接口成员**点通一次
+                  （`GetIDsOfNames` 拿到 dispid + `Invoke` 调起来并看到副作用）；② 库里那个接口的
+                  类型信息与客户拿到的指针是同一档（延续 D60-3 的"广告 == 应答"）；③ 逐字节护栏
+                  两层照旧，存量 DLL 连 `.tlb` 都不许变；④ 断不了行为就先断形状，但要写清楚
+                  哪半属 B17（外部激活冒烟）。
+               4. 硬约束与基线：BASE = `.build/pre_b14_C3.exe`（本轮收线 exe，
+                  md5 1c09fa371ad0882d2e1229fc4ebc809c）。护栏：① 分类护栏换 BASE 路径复用
+                  `.build/b13c_guard.py` 那套（16 件 `--emit-c`）；② 全产物 A/B 复用
+                  `.build/b13e_ab_all.py`（四工程：`cc_act` + 两枚存量 DLL 走 strict、`cc_dll` 的
+                  允许面要按本批靶子**重新声明**）。本轮实测基线：`-Category syntax` **119/0**、
+                  `-Category vbp` **27 PASS / 0 FAIL / 1 SKIP**（唯一的 SKIP = `test_vbman`，
+                  本机没注册 32 位 VBMAN，属已知基线）、门 job **8**、DLL 侧用例 **5** 条
+                  （3 条 `Test-VbpDll` + `cc_dll_tlb_matches_table` + `itf_canonical_iunknown`）。
                   动身份/布局照例给 x86+x64 双读数。
                5. 门与规矩沿用：push 只推 `github/dev` + `git ls-remote` 核 sha；盯门
                   `.build/wait_run2.py <sha> <秒>`；开工与收线各同步一次；行尾/编码按文件实测
-                  （本轮：`tests\tlb_identity.ps1` 是 BOM+CRLF、`Interface 语句.md` 是 CRLF、
-                  `CoClass 语句.md` 与 `ai/022` 是 LF）。
-               仍开（不在 B13e）：跨"包装器 ↔ 薄指针"两个世界的 IUnknown 身份还没接成一个
-               （= 上面 (ii) 的那半，归 B16/B17）、新式接口模块的成员从来没进 `.tlb`
-               （实测 `_IProbe` 的 `cFuncs` = 0，D58-6）、接口模块在 `.tlb` 里被登记成 coclass
-               （形状应是 `TKIND_INTERFACE`）⇒ 两条都归 **B15**；`.bas` 里声明的新式接口在调用点
-               认不出（D43 第三条）、`TypeOf x Is <工程类名>` 恒 False、`ReDim a(1) As <工程类>`
+                  （本轮：`ai/022`、`CoClass 语句.md` 是 LF，`tests\tlb_identity.ps1` 与
+                  `run_tests.ps1` 是 BOM+CRLF，三枚 `cgen_util_dllentry_*.inc` 与
+                  `driver_codegen_dll_typelib.inc` 是 CRLF）。
+               仍开（不在 B14）：胖包装器应答新式 IID 时交回的是**胖**指针（正解 = `vb6_CoClassDesc`
+               带一张"实例→第 k 个接口指针"的映射 ⇒ 归 **B16**，见 D60-4）、新式接口的成员从来没
+               进 `.tlb`（实测 `_IProbe` 的 `cFuncs` = 0，D58-6）与接口模块在库里被登记成 coclass
+               （形状应是 `TKIND_INTERFACE`）⇒ 两条归 **B15**、跨"包装器 ↔ 薄指针"两个世界的
+               IUnknown 身份还没接成一个（B16/B17）、`.bas` 里声明的新式接口在调用点认不出
+               （D43 第三条）、`TypeOf x Is <工程类名>` 恒 False、`ReDim a(1) As <工程类>`
                撞 C2224、B10 的三条 caller 侧洞、B06c（接口值作实参/进 Variant）、⑮d、
                祖先 Private UDT 进方法签名（D40 末①）、`com_entry` 基类 extern 的 `void*` 返回、
                `Class_Terminate` 在 EXE 里无触发点（D41）、
@@ -130,7 +130,7 @@ GATE_BASELINE: (Actions 级) c3test run **#50 [dev] = completed/success**（http
 | B10 | P4 | `Implements IFace Via <holderVar>` 委托式实现：持有字段 + 自动转调桩 + 签名检查 | ☑ **B10**（`3c5d8e6`，实施与选型见 **D43**）：`Via` 软关键字四件套 → 语法 `ImplementsStmt::viaField` → **stage 2.7 Pass D** 裁决（`vias_`，一份来源同喂语义与发码；`VB3029`/`VB3030` 两类判死含链式 Via）→ 语义层免逐槽 `VB3012` → 发码层转调**持有对象的接口槽**（不直调 Private 成员：C 层 static 跨 TU 连不到）+ Nothing 字段退零值 | `3c5d8e6` | `tests/itf_via` 新工程 **VIA1..VIA9 x64 与 x86 各 9/9**；A/B 改码前 `VB2003`+`VB2002`；4 条负例（n21/n22/n23/n24）+ 1 条软关键字正例 p04；10 文件 `--emit-c` 对 `pre_b10_C3.exe` 全同 10/10；`-Category syntax` 84→89 |
 | B11 | P5 | `CoClass…End CoClass` 语法 + `[CoClassId]/[Default] Interface/[ComCreatable]/[CoClassCustomConstructor]` + 契约聚合校验（实施依据换成 `ai/026`，其六节把 B11 拆成 C01–C05） | ◐ **C01 已出（`e7c7a31`）= 块语法 + 属性行落 AST**（零回归靠 `Module::coclasses` 不进 `declarations`；属性行归属按"名字+位置+同行"合判，见 D44/D45）；**C02 已出（`f0b820d`）= 身份求解唯一函数**（`src/semantics/coclass_identity.{hpp,cpp}` 纯函数 + stage 2.7 Pass E + `Driver::coclassIds_`；见 D46/D47）；**C03a 已出（`e515d89`）= 块形状与名字校验**（stage 2.7 Pass F 八条判据 + `VB3031/3032/3033`；宿主同名豁免见 D49-①）；**C03b 已出（`c4aaa4c`）= 契约聚合校验**（新 **stage 3.4c** `runCoClassContractCheck()`：按链倒着走、叶优先，缺槽 `VB3012`/签名不符 `VB3017`，`vias_` 命中的委托免逐槽；`VB3020` 文案收口。`As <CoClass>` 按 D50-② 整条并入 C05）。**C04 已出 = 存量头属性只读折算**（stage 2.7 新 **Pass E0**：四行 `Attribute VB_*` → 一条 `CoClassDecl` 进同一张表，Pass E 仍是唯一身份出口；折算记录**不参与判死**（Pass F/3.4c 跳过它），手写块优先，见 D52/D53）；**C05 已出（`7f829ee`）= 组内激活**（stage 2.7 新 **Pass G**：类型位点上的块名**就地改绑**`[Implementation]` 类 + `CreateObject(ProgID)` 换成 `New`，`VB3039` 挡住没有实现类的块名当类型用；实测 D54、实施 D55。发码侧零新分支，护栏 16/16。这一格同时把 022 的 **B12** 一起交付） | `7f829ee`(C05)、`c4aaa4c`(C03b)、`e515d89`(C03a)、`f0b820d`(C02)、`e7c7a31`(C01) | run **#23**（head 已核 = `4045b42`）+ `-Category syntax` 107→112 + 10 文件 `--emit-c` 对 `pre_b11c03b_C3.exe` 10/10 + A/B（n37/n38 零命中、n39 出旧句）+ `Id.vbp` 真编译真运行且发码逐字节未动 |
 | B12 | P5 | 组内激活：`New <CoClass>` / `CreateObject("ProgID")` 编译期映射 + 默认接口派发 | ☑ **由 B11/C05 交付**（`7f829ee`）= Pass G 就地改绑实现类，`As`/`New`/`CreateObject` 三面同归一条工程类路；`As Object` 目标经 Fix 179a 拿到 IDispatch 包装。**口径偏差**：`As <块名>` 的成员面是实现类的公开成员（比默认接口宽），要窄视图写 `As IShape` —— 两条理由记 D54-⑤ | 实测 D54 / 实施 D55 | `-Category syntax` 116→118 + `tests/cc_act` CC1..CC9 **x64+x86 各 9/9** + 护栏 16/16 + A/B 三条坏读数（base 复现、new 消失）；门见状态头 |
-| B13 | P6 | ~~IUnknown 三件套真实实现~~ **D56 推翻**：RTL 的 `ComObj_QueryInterface/AddRef/Release` 早是真实现（原子计数、归零销毁、`Class_Terminate` 在 DLL 侧有触发点）⇒ 本格真正的活 = **把 CoClass 块接进对外那一半**（身份出口、块名 ProgID、新式接口对外可调用） | ☑ **B13a（观测面）**：新助手 `Test-VbpDll` + 把现成的 `tests\test_activex_dll` 两份 DLL 工程接进回归（此前门内一次都没链接过 .dll）+ 新工程 `tests\cc_dll`；**B13b 已出**（`dll_entry` 的 CLSID / 默认接口 IID / 组名 ProgID 一律读 `coclassIds_`；`[ComCreatable(True)]` = 组名那一档 ProgID 的唯一开关，`legacyFolded` 继续走原路 = 折算隔离；legacy lambda 降级成「读不到块才用」的兜底，未并掉的两枚见 D57-4/5）、**B13c 已出**（D58）= 接口自己的 IID 也进唯一出口（`resolveIfaceIid` 与块内 `[Default]` 共用一个函数；Pass E 建 `Driver::ifaceIds_`），COM 服务器表 / 新式接口 vtable 的 QI / 类型库三条通道一律读这张表（BASE 实测同一个 `IProbe` 有**四枚** GUID、且 `.tlb` 广告给客户端的那枚服务器不应答 ⇒ D57-5 那条"未证"当场证伪并修好）；类型库的 coclass 默认接口开始跟随块的 `[Default]`（只延后需要重定向的那几行 ⇒ 没有手写块的工程连类型顺序都不动）；D56-5 的对外口径**拍板走 (b)**：`Private` 契约成员不发成 disp id，改打一条 `C3: …vtable interface: 0 Public member…` 信息行说明"注册了却点不到"（D58-5）；新增 `.tlb` 读数工具 `tests\tools\tlbprobe.cpp` + gated 用例 `cc_dll_tlb_matches_table`（助手在 `tests\tlb_identity.ps1`）。**B13d 已出**（D59）= 薄指针的规范 IUnknown：`vb6_iunk_<C>_<I>_QueryInterface` 不再把 `IID_IUnknown` 与本接口并成一个分支回 `self`（两个不同偏移的 `__iv_` 成员 ⇒ 同一对象两个身份），一律回**本类实现序第一个接口**的薄指针 —— 那是唯一一处偏移 0 就是 vtable、既能当身份又能被再次 QI/AddRef/Release 的合法指针，且零布局改动（D19 不入视野）、单接口类拿到的值与改前相同。用例两条：`itf_canonical_iunknown`（`--emit-c` 断形状 + 负控跑过 BASE）与真编译真跑的 `itf_xmod_writer`（QI1..QI4）。**本批最值钱的是顺手读出的一条危险**（D59-4）：RTL 包装器对表里的 `defaultIfaceIid`/`ifaceIids` 一律交回胖指针，而这两处自 B13b/c 起可能装着新式 vtable 接口的 IID 且 `.tlb` 把它当默认接口广告 ⇒ 早绑定客户 QI 成功后按虚表第 3 槽调用会打到 `GetTypeInfoCount`（静默调错函数）。两种收法（对外不发布 / 让包装器真返回薄指针 = B16）等 **B13e** 拍板 —— 本批刻意不动，因为它要把上一批刚立的用例翻面。**余 B13e**（对外发布口径拍板，D59-4） | `9785f4f`(B13a)、`b1a8e58`(B13b)、`bd38798`(B13c)、`9df23ba`(B13d) |
+| B13 | P6 | ~~IUnknown 三件套真实实现~~ **D56 推翻**：RTL 的 `ComObj_QueryInterface/AddRef/Release` 早是真实现（原子计数、归零销毁、`Class_Terminate` 在 DLL 侧有触发点）⇒ 本格真正的活 = **把 CoClass 块接进对外那一半**（身份出口、块名 ProgID、新式接口对外可调用） | ☑ **B13a（观测面）**：新助手 `Test-VbpDll` + 把现成的 `tests\test_activex_dll` 两份 DLL 工程接进回归（此前门内一次都没链接过 .dll）+ 新工程 `tests\cc_dll`；**B13b 已出**（`dll_entry` 的 CLSID / 默认接口 IID / 组名 ProgID 一律读 `coclassIds_`；`[ComCreatable(True)]` = 组名那一档 ProgID 的唯一开关，`legacyFolded` 继续走原路 = 折算隔离；legacy lambda 降级成「读不到块才用」的兜底，未并掉的两枚见 D57-4/5）、**B13c 已出**（D58）= 接口自己的 IID 也进唯一出口（`resolveIfaceIid` 与块内 `[Default]` 共用一个函数；Pass E 建 `Driver::ifaceIds_`），COM 服务器表 / 新式接口 vtable 的 QI / 类型库三条通道一律读这张表（BASE 实测同一个 `IProbe` 有**四枚** GUID、且 `.tlb` 广告给客户端的那枚服务器不应答 ⇒ D57-5 那条"未证"当场证伪并修好）；类型库的 coclass 默认接口开始跟随块的 `[Default]`（只延后需要重定向的那几行 ⇒ 没有手写块的工程连类型顺序都不动）；D56-5 的对外口径**拍板走 (b)**：`Private` 契约成员不发成 disp id，改打一条 `C3: …vtable interface: 0 Public member…` 信息行说明"注册了却点不到"（D58-5）；新增 `.tlb` 读数工具 `tests\tools\tlbprobe.cpp` + gated 用例 `cc_dll_tlb_matches_table`（助手在 `tests\tlb_identity.ps1`）。**B13d 已出**（D59）= 薄指针的规范 IUnknown：`vb6_iunk_<C>_<I>_QueryInterface` 不再把 `IID_IUnknown` 与本接口并成一个分支回 `self`（两个不同偏移的 `__iv_` 成员 ⇒ 同一对象两个身份），一律回**本类实现序第一个接口**的薄指针 —— 那是唯一一处偏移 0 就是 vtable、既能当身份又能被再次 QI/AddRef/Release 的合法指针，且零布局改动（D19 不入视野）、单接口类拿到的值与改前相同。用例两条：`itf_canonical_iunknown`（`--emit-c` 断形状 + 负控跑过 BASE）与真编译真跑的 `itf_xmod_writer`（QI1..QI4）。**本批最值钱的是顺手读出的一条危险**（D59-4）：RTL 包装器对表里的 `defaultIfaceIid`/`ifaceIids` 一律交回胖指针，而这两处自 B13b/c 起可能装着新式 vtable 接口的 IID 且 `.tlb` 把它当默认接口广告 ⇒ 早绑定客户 QI 成功后按虚表第 3 槽调用会打到 `GetTypeInfoCount`（静默调错函数）。两种收法（对外不发布 / 让包装器真返回薄指针 = B16）等 **B13e** 拍板 —— 本批刻意不动，因为它要把上一批刚立的用例翻面。**B13e 已出**（D60）= 对外默认接口的口径拍板 + 回退：**广告的那一枚必须就是应答的那一枚**。先证伪 D59-4 那条危险（`TypeLibBuilder` 只有 `TKIND_DISPATCH`/`TKIND_COCLASS`，客户从库里学不到接口虚表布局 ⇒ "第 3 槽打到 `GetTypeInfoCount`"不成立），再收同一次读码撞见的真问题：B13c 把 `.tlb` 的 coclass DEFAULT 引用重定向到 `_IProbe`（库里 0 成员），而服务器 `GetIDsOfNames`/`Invoke` 认的是类的公有成员那一档（`_CImpl`）⇒ 两边点不到。三处一起退回（表的 `defaultIfaceIid` 改由类型库回写值说话、`ifaceIids` 里 `[Default]` 同名接口那条覆盖分支删掉、类型库的 DEFAULT 重定向连同延后登记机器拆掉），coclass 的 CLSID 与接口自己的 IID **仍**取唯一出口 ⇒ 甲判据不动；`(i)` 的全量形态（滤掉 `ifaceIids` 里新式那几项）刻意没走，那会让表与 vtable 劈成两枚 GUID，正解归 B16（D60-4）。用例两条翻面/升级：`cc_dll_identity_single_source`（`IID_vb6def_CImpl` 回 `0x7CA8CD81`）、`cc_dll_tlb_matches_table`（甲 + 乙两条判据，负控在 BASE 上被乙判红）；那条 `…is a vtable interface…` 信息行随前提一起删除。**B13 五格到此出完（a/b/c/d/e）** | `9785f4f`(B13a)、`b1a8e58`(B13b)、`bd38798`(B13c)、`9df23ba`(B13d)、`b10ec1a`(B13e) |
 | B14 | P6 | IDispatch 四件套接入新式接口（GetTypeInfo/GetIDsOfNames/Invoke + DispId 表） | ☐ | | |
 | B15 | P6 | 类型库导出：typelib_builder 从 dispinterface 扩到 TKIND_INTERFACE/dual + GUID 来源接线 | ☐ | | |
 | B16 | P6 | DllGetClassObject/DllRegisterServer/DllUnregisterServer/DllCanUnloadNow 对新式 CoClass/类工厂接线 + x86/x64 双验 | ☐ | | |
@@ -2647,6 +2647,58 @@ D54-② 那条"类变量永不 Release"不变式（对外一旦发 IDispatch/IUn
    （外部客户拿到 `vb6_ComObject*`，进程内薄指针 QI 拿到 `&me->__iv_<first>`）。把它接成一个 =
    上面 (ii) 那一半，归 B16/B17。
 
+**D60（B13e 读数 + 对外口径拍板：广告的那一枚必须就是应答的那一枚；顺带把 D59-4 那条"危险"证伪）**
+
+1. **本格开工第一枪打的是自己的前提**：D59-4 说"胖包装器应答瘦 IID ⇒ 早绑定客户按接口虚表调第 3 槽
+   打到 `GetTypeInfoCount`，静默调错函数"。读码 + `tests\tools\tlbprobe.cpp` 实测**不成立**，两条理由：
+   ① `TypeLibBuilder` 只会发 `TKIND_DISPATCH`（`addDispInterface`）与 `TKIND_COCLASS`（`addCoClass`），
+   仓里**根本没有 `TKIND_INTERFACE` 那条发码路**（那正是 B15 的活）⇒ 客户从 `.tlb` 学到 `_IProbe`
+   的 kind 是 `dispinterface`（本轮读数：`CoDll.tlb` 四个类型 = `_IProbe`/coclass `IProbe`/`_CImpl`/
+   coclass `CImpl`，一个 `TKIND_INTERFACE` 都没有），按 IDispatch 走，不会去取接口虚表第 3 槽；
+   ② 服务器侧 `ComObj_GetIDsOfNames`/`Invoke` 只查 `desc->methods`（= 类的 Public 成员），
+   也从没有一条路把 vtable 接口的方法发出去。⇒ 那条"危险"要成立，客户得**从产物之外**自己知道
+   接口虚表布局。D59-4 记的机制是错的，但它指的方向是对的 —— 同一次读码撞见了一条**真的**不同值。
+2. **真问题（本批的靶子）**：B13c 把 `.tlb` 里 coclass 的 DEFAULT 引用重定向到块 `[Default]` 那个
+   `_IProbe`，而 `_IProbe` 在库里的成员数是 **0**（D58-6 实测 `cFuncs`=0），服务器真正认账的成员面是
+   `desc->methods` = 类的公有成员 = `_CImpl` 那一档。于是"广告"与"应答"是两份东西：早绑定客户照库
+   编译 ⇒ 一个方法都点不到；晚绑定 `CreateObject` + 公有成员 ⇒ 反倒能用。B13c 那次改动把自己刚立的
+   "表与 `.tlb` 逐值一致"从"默认接口 IID 一致"改成了"两边一起指向一枚点不到的 GUID"，一致性看着在，
+   可用性掉了。教训：**"两条通道同值"这种判据必须同时钉住"值 + 那一档是谁"**，只比值会被自己骗。
+3. **拍板（= D59-4 的 (i) 收窄版）：对外默认视图一律是 `<_类名>`，`[Default]` 只管语言层。**
+   三处一起退回，不留中间态：① `cgen_util_dllentry_collect.inc` 不再拿出口的 `iid` 覆写
+   `info.defaultIfaceIid`（改由类型库回写的 `comDefaultIfaceIid` 说话，也就是"谁应答谁上表"）；
+   ② `cgen_util_dllentry_tables.inc` 删掉 B13b 那条"`ifaceIids` 里 `[Default]` 同名接口改用出口 IID"
+   的分支（连带 `CoClassInfo::defaultIfaceName` 这个字段一起没用了）；③ `driver_codegen_dll_typelib.inc`
+   删掉 DEFAULT 重定向 + 为它搭的"延后登记"机器（`TlbCoClassRow`/`tlbTypes`/`registerCoClass`）。
+   保留的：`identityForClass`（coclass 的 CLSID 仍取唯一出口，与表同值）与 `ifaceIidFromMap`
+   （接口模块自己那条 dispinterface 的 GUID 仍读 Pass E 的表）⇒ **甲判据一个字没松**。
+   那条 `C3: … is a vtable interface: 0 Public member…` 信息行随之删除 —— 它的前提（库里广告的是
+   零成员接口）已经不存在，留着一行只会误导。
+4. **为什么没有把 `ifaceIids[]` 里"新式接口"那几项滤掉**（D59-4 的 (i) 全量形态）：滤掉就把甲判据
+   从三条通道削成两条，而且表与 vtable 会**当场自相矛盾** —— 类自己的 `vb6_iv_iid_<I>` 还在应答那枚
+   GUID，服务器表却装着另一枚。"胖应答瘦"的残余今天仍在一处：客户若已知接口 IID 并对着胖指针 QI，
+   拿到的是包装器而非 `&me->__iv_<I>`。正解是 (ii) —— 让包装器真返回薄指针（`vb6_CoClassDesc` 加一张
+   "实例→第 k 个接口指针"的映射，即 **B16**），那时这枚 IID 该应答成瘦指针、也就更不该滤。故本批
+   刻意只收"广告档"，把这条写进 B16 的前置，不半接。
+5. **判据落进回归**：`cc_dll_identity_single_source` 翻面（`IID_vb6def_CImpl` 回到 `0x7CA8CD81` 并
+   新增为 needle，`IID_vb6iface_IProbe` 仍是 `0xF5CEF988`，撤掉那条日志断言）；
+   `cc_dll_tlb_matches_table`（`tests\tlb_identity.ps1`）从一条升级成两条 —— 甲：表的
+   `IID_vb6iface_<I>` == `<C>.h` 的 `vb6_iv_iid_<I>[16]` == 库的 `_<I>`；乙：表的 `IID_vb6def_<C>`
+   == 库的 coclass DEFAULT 引用 == 库的 `_<C>` 那一档（再加 CLSID 与 `clsidStr` 对一次）。
+   负控照例跑在 BASE 上：同一份助手喂 `pre_b13e_C3.exe` ⇒ 乙 判红（DEFAULT `{F5CEF988-…}` vs
+   `_CImpl` `{7CA8CD81-…}`），喂本轮 exe ⇒ 全绿。D59-4 那句"要把两条用例翻面"也确实兑现了。
+6. **护栏（BASE `905c9392cede13ab9d915f05b091ed3c`）**：① `-Category syntax` **119/0**；
+   ② `.build/b13e_ab_all.py` 全产物 A/B，四工程一次量（比 B13d 多带 `test_event_dll`，因为
+   `addCoClass` 从 lambda 搬回原地、事件源那条参数表达式被重写）：`cc_act`(EXE) **0 个文件变化**、
+   两枚存量 DLL 连 `.tlb` 都**逐字节不变**（只 `.rc` 那行绝对临时路径天然不同）、`cc_dll` 只许
+   `dll_entry.c` 的 `IID_vb6def_*` 那 1 行 + `.tlb` ⇒ 零未归类变化，且"改动确实进了产物"按全局
+   行数判（`def_lines>=1`）；③ `-Category vbp` 见状态头门读数。
+7. **一条 harness 坑**：PowerShell 的双引号串里写 `"…_$Var: …"` 会被解析成**作用/驱动器限定符**
+   （`Variable reference is not valid`），整个测试文件 ParserError —— 消息文本要紧跟变量名时一律
+   写 `${Var}`。本轮踩在 `tests\tlb_identity.ps1` 的一条中文消息上，被 `-Category syntax` 之外的
+   dot-source 自测挡下，没进门。
+
+
 ## 运行日志
 
 - 2026-09-23 建表：范围确认（含完整COM）、规范文档 018 入库、现状盘点完成。
@@ -2887,3 +2939,5 @@ D54-② 那条"类变量永不 Release"不变式（对外一旦发 IDispatch/IUn
 - 2026-09-25 01:24– **B13c（三通道 IID 合并 + 新式接口对外口径）代码提交 `bd38798`**：开工第一件事照例是把 CURRENT_BATCH 的前提送去实测，这一轮的读数是**类型库从来没有和服务器对过话** —— D57-5 说"未证"，实测答案是"**证伪**"：BASE（`473784ed…`）编 `tests\cc_dll`，同一个 `IProbe` 拿到**四枚** GUID（出口/表 `{F5CEF988-…}`、vtable QI `{74B1BA3B-…}`、`.tlb` 的 `_IProbe` `{1E34D82B-…}`、`.tlb` 的 coclass `IProbe` `{28B6B94B-…}`），而 `.tlb` 里 coclass `CImpl` 的 DEFAULT 引用是 `_CImpl = {7CA8CD81-…}`，服务器手里那枚是 `F5CEF988` ⇒ **早绑定客户端照类型库去 QI 必然 `E_NOINTERFACE`**。为了把这个"没工具"的死角变成可断言的东西，新写 `tests\tools\tlbprobe.cpp`（`LoadTypeLib`+`GetTypeAttr`+`GetRefTypeOfImplType`，151 行）与助手 `Test-TlbIdentitySingleSource`（`tests\tlb_identity.ps1`，`run_tests.ps1` 只多一行 dot-source）。合并的做法仍是不开第二套 mint：**把接口自己的 IID 也搬进唯一出口**（`resolveIfaceIid` 与块内 `[Default]` 那条共用一个函数；Pass E 建 `Driver::ifaceIds_`），三个消费者一律读它，`ivDeriveIid`/`generateIid`/`generateUuid` 降级成"表里没有（= 不是新式接口）才用"的兜底。类型库另外补了一条**结构**修正：coclass 的默认接口以前写死 `<_类名>`，现在块的 `[Default]` 指新式接口时跟随它；踩到 `unordered_map` 遍历序导致的 `TYPE_E_ELEMENTNOTFOUND`，解法刻意收窄成**只延后需要重定向的那几行** —— 第一版无差别延后所有 coclass 时存量 `TestAXDLL.tlb` 变了 3976 字节（内容同、类型序变），是实测把它否决掉的。第 2 条口径**拍板走 (b)**：契约成员（`Private`）不发成 disp id（那是换语义，而且服务器的 `GetIDsOfNames` 只认公有成员，(a) 只会两边假绿），改成编译时打一条 `C3: CoClass … is a vtable interface: 0 Public member exported for IDispatch clients`；真接口那条正路（`TKIND_INTERFACE` + 成员进库）连同实测到的新洞（`_IProbe` 的 `cFuncs` 恒 0 —— 接口模块成员从来没进类型库）一起归 B15。护栏两层都升级：16 件 `--emit-c` 改成**分类**护栏（`.build/b13c_guard.py`，只许 `vb6_iv_iid_*` 行变）→ 16/16；全产物 A/B（`.build/b13c_ab_all.py`）三工程一次量 → `cc_act` 只有 5 个 `.h` 的 iv 行变且 `com_entry.c` 全同（D57-6 的 EXE 不接仍然成立）、存量 `test_activex_dll` 含 `.tlb` **全同**、`cc_dll` 允许 `.tlb` 变 = 本批靶子，零未归类变化。门内读数：`-Category syntax` 118/0、`-Category vbp` 27/0/1（`test_vbman` SKIP 是本机没注册 VBMAN）、DLL 侧 5 条用例全绿（含 x86 与新用例）。另记两条 harness 坑（D58-8）：`scripts\env.ps1` 是 ANSI 且首行带 shebang，pwsh dot-source 会读成乱码 ⇒ 自测脚本要 MSVC 环境就自己 `cmd /c "call vcvarsall.bat x64 && set"`；heredoc 塞 Windows 路径第 N 次咬人（`\2019` 被吃掉成"系统找不到指定的路径"）⇒ 反斜杠文本一律走 Write 工具。门 = 本次 push 触发的 Actions run，编号见状态头。
 
 - 2026-09-25 02:33– **B13d（规范 IUnknown）代码提交 `9df23ba`**：单文件改动（`cgen_iface_vtbl.cpp` 的 QI 发射器）。读数先行的老规矩又兑现一次：BASE 的 `itf_xmod\XWriter.vbp`（`CWriter` 同时实现 `IWriter`+`ILog` = 最小两接口形状）实测两处 QI 都是 `if (IidEqual(riid, IID_IUnknown) || IidEqual(riid, IID_<自己>)) *ppv = self` —— 而 `__iv_IWriter` 与 `__iv_ILog` 是同一结构体两个不同偏移的成员，所以"同一对象问 IUnknown"按入口接口不同给出两个地址（D22-7④ 从记录变成可复现的读数）。收法选**"本类实现序第一个接口的薄指针"当规范指针**：① 它是唯一一处偏移 0 就是 vtable 的合法 COM 对象指针（`vb6_cls_<C>` 偏移 0 是裸回指 `__comObj`，把 `me` 交出去等于让客户对着指针取 vtable ⇒ 直接踩飞）；② 不加字段 ⇒ D19 那条布局约束根本不进入视野，存量工程（没有 `__iv_`）形状不动；③ "实现序第一个"与"结构体最靠前的 `__iv_`"天然重合（同一份 `ivImplementedIfaces` 喂两边），不需要新序规则。单接口类 `canon == self`，值一字未变。 **本批真正的新料是顺手读出的一条危险**（D59-4）：`ComObj_QueryInterface` 对 `desc->defaultIfaceIid`/`ifaceIids[i]` 一律 `*ppv = self`（注释还写着 "dispinterface: same IDispatch pointer" —— legacy 世界里是对的），可这两个字段自 B13b/B13c 起装的**可能是新式 vtable 接口**的 IID，而 `.tlb` 自 B13c 起把同一个 IID 当 coclass 默认接口广告 ⇒ 早绑定客户 QI 成功、按接口第 3 槽调用打到 IDispatch 的 `GetTypeInfoCount` = **静默调错函数**，比 `E_NOINTERFACE` 危险。两种收法（对外不发布新式 IID / 让包装器真返回 `&me->__iv_<I>` = 实质是 B16）留 **B13e** 拍板，本批刻意不动 —— 动它要把上一批刚立的 `cc_dll_identity_single_source` 与 `cc_dll_tlb_matches_table` 两条用例翻面，同一批里既改身份口径又改对外发布口径，门就不干净了。 断言只能断形状：全链路**没有任何自生成调用点**会去问 `IID_IUnknown`（VB 没有 QI 面，接口值进 Variant/实参是未开的 B06c），端到端身份属 B17；于是新用例 `itf_canonical_iunknown` 走 B08e-6 那条 `--emit-c` 通道钉"两处 QI 各有一处规范指针分支 + 旧的 `IID_IUnknown) ||` 合并分支已消失"，负控在 BASE 上跑过（`canon` 0 处、合并分支 2 处 ⇒ 用例能红），行为那半靠真编译真跑的 `itf_xmod_writer`（QI1..QI4 + LIFE + TOF）兜。 护栏：① `-Category syntax` **119/0**（118 + 新用例）；② `.build/b13d_guard.py` 把豁免粒度从"某类行"升到"**整段函数体**"——14 个不含新式接口的工程 `--emit-c` 逐字节全同，`itf_xmod` 摘掉所有 `vb6_iunk_*_QueryInterface` 后剩余行序列全同（QI 体 36→46 行），`cc_id` 一个 QI 体都没有；③ `.build/b13d_ab_all.py` 三工程全产物 A/B：`cc_act`（EXE、带两个手写块）**零文件变化**、存量 `test_activex_dll` 只 `.rc` 那行绝对临时路径天然不同、`cc_dll` 只 `CImpl.c` 的 QI 体变（**`.tlb` 与 `.def` 一字未动**）= 零未归类变化；④ `-Category vbp` **27 PASS / 0 FAIL / 1 SKIP**（SKIP = `test_vbman`，已知基线）。手册两条：`Interface 语句.md` 补规范 IUnknown 已交付 + 跨包装器/薄指针两个世界的身份还没接成一个；`CoClass 语句.md` 补一条用户能踩的已知边界（拍板前别把"默认接口是新式接口"的 CoClass 暴露给早绑定客户）。harness 坑一条："`改动确实进了产物`"这类自检要按**全局**行数判 —— 先按单工程判时被 `cc_id`（声明接口但无人实现 ⇒ QI 体 0 处）误红了一次。 门 = 本次 push 触发的 Actions run，门 = run **#50**（8 job 全绿、head 已核 `2c7c5e2`）。
+
+- 2026-09-25 03:23– **B13e（对外默认接口的口径：广告 == 应答）代码提交 `b10ec1a`**：本格的前提是上一批自己写的，所以第一枪照例打自己 —— D59-4 那条"胖包装器应答瘦 IID ⇒ 早绑定客户按接口虚表调第 3 槽打到 `GetTypeInfoCount`、静默调错函数"**实测不成立**：`TypeLibBuilder` 只会发 `TKIND_DISPATCH`/`TKIND_COCLASS`（本轮 `tlbprobe` 读数：`CoDll.tlb` 四个类型，`TKIND_INTERFACE` 0 个，`_IProbe` 的 kind 是 dispinterface），客户从库里学不到接口虚表布局；服务器侧 `GetIDsOfNames`/`Invoke` 也只查 `desc->methods`。方向对、机制错，真问题在旁边那条：B13c 把 `.tlb` 里 coclass 的 DEFAULT 引用重定向到块 `[Default]` 那个 `_IProbe`，而 `_IProbe` 在库里成员数是 **0**（D58-6），服务器认账的成员面是类的公有成员 = `_CImpl` 那一档 ⇒ 广告与应答是两份东西，**B13c 那次"让两条通道同值"把自己立的判据做成了空壳**（值一致、可用性没了）。拍板走 D59-4 的 (i) 收窄版：对外默认视图一律 `<_类名>`，`[Default]` 只管语言层，三处一起退回不留中间态 —— `collect.inc` 不再拿出口 `iid` 覆写 `info.defaultIfaceIid`（改由类型库回写值说话）、`tables.inc` 删掉 B13b 那条"`ifaceIids` 里 `[Default]` 同名接口改用出口 IID"的分支（`CoClassInfo::defaultIfaceName` 字段随之删）、`driver_codegen_dll_typelib.inc` 拆掉 DEFAULT 重定向连同为它搭的延后登记机器（`TlbCoClassRow`/`tlbTypes`/`registerCoClass` 与那条 `…is a vtable interface: 0 Public member…` 信息行）。**保留** `identityForClass`（coclass 的 CLSID 仍取出口）与 `ifaceIidFromMap`（接口模块那条 dispinterface 的 GUID 仍读 Pass E 的表）⇒ 甲判据"一个接口一次编译一枚 GUID"一个字没松。没走 (i) 全量（把 `ifaceIids[]` 里新式那几项滤掉）的理由写进 D60-4：那会把表与 vtable 劈成两枚 GUID、当场自相矛盾，而"胖应答瘦"的正解是 B16 让包装器真返回 `&me->__iv_<I>`。用例两条：`cc_dll_identity_single_source` 翻面（`IID_vb6def_CImpl` 回 `0x7CA8CD81` 并新增为 needle、`IID_vb6iface_IProbe` 仍 `0xF5CEF988`、撤掉那条日志断言），`cc_dll_tlb_matches_table` 从一条判据升成两条（乙 = 表的 `IID_vb6def_<C>` == 库的 DEFAULT 引用 == 库的 `_<C>`），负控跑在 BASE `905c9392…` 上 ⇒ 乙 判红（`{F5CEF988}` vs `{7CA8CD81}`）、喂新 exe 全绿。护栏：① `-Category syntax` **119/0**；② `.build/b13e_ab_all.py` 全产物 A/B 四工程（比 B13d 多带 `test_event_dll`，因为 `addCoClass` 从 lambda 搬回原地、事件源那条参数表达式重写了）：`cc_act`(EXE) **0 个文件变化**、两枚存量 DLL 连 `.tlb` 都逐字节不变（只 `.rc` 那行绝对临时路径天然不同）、`cc_dll` 只 `dll_entry.c` 的 `IID_vb6def_*` **1 行** + `.tlb` = 零未归类变化，且按全局 `def_lines>=1` 自证"回退确实进了产物"；③ `-Category vbp` **27 PASS / 0 FAIL / 1 SKIP**（SKIP 还是 `test_vbman`），收线 exe md5 `1c09fa371ad0882d2e1229fc4ebc809c`（跑测试前后一字不差）。手册一条订正：`CoClass 语句.md` 里 B13c 写的"类型库的 coclass 默认接口现在跟随块"与那条"已知边界"（第 3 槽打到 `GetTypeInfoCount`）**都是错的**，改成"对外广告的那个视图 == 服务器应答的那个视图" + 把证伪过程留在 D60-1。harness 坑一条：中文消息里紧跟变量名写 `"…_$Var: …"` 会被 PowerShell 当成作用限定符 ⇒ 整个 `tests\tlb_identity.ps1` ParserError，一律写 `${Var}`。门 = 本次 push 触发的 Actions run，编号见状态头。
