@@ -4,69 +4,61 @@
 > 每次运行开始先读本文件，结束前必须更新本文件（状态头 + 批次清单 + 运行日志）。
 > 规范输入: `ai/讨论记录/018-接口继承与CoClass设计思路.md`（含 tB 文档要点与分阶段设计思路全文）。
 
-STATUS: BUSY             # NOT_STARTED | DESIGN | BUSY | IDLE | ALL_DONE
-LAST_RUN: 2026-09-24T22:22:24+08:00   # 本轮 = **B13 开工（P6 第一格：IUnknown 三件套真实现 + 对象布局 COM 化收尾）**。
-               # 上一格 B11/C05（=B12）已于 run #37 全绿收线（`41071d5`/`924e44d`）。
-               # 按 CURRENT_BATCH 的第 0 步走：**先造一份 ActiveX DLL 形状的能编能跑测试工程**（今天
-               # `tests/` 下全是 Type=Exe，`DllGetClassObject`/类工厂表那条路没有任何承载面），
-               # 再量 IUnknown 一族 / 两套 mint / `legacyFolded`+`ComCreatable` 的消费者 —— 裁决记 D56。
-               # 开工前置：本地 = `924e44d`；GitHub 此刻 504，push 前重核 `ls-remote github dev`。
-               # 自动运行见本行不足 55 分钟请立即跳过。
-LAST_COMMIT: 代码批 = 7f829ee(B11/C05=B12)、b82a184+02d70fe(B11/C04)、c4aaa4c(B11/C03b)、e515d89(B11/C03a)、f0b820d(B11/C02)、e7c7a31(B11/C01)、3c5d8e6(B10)、9eb2ca7(B09c)、debb110(B09b)、02bac92(B09)   # **commit message 一律现写、不复用上批文本**；push 只推 `github/dev`（Actions 门），`origin`(gitcode) 与 `main` 不碰、**绝不建 MR**。
-CURRENT_BATCH: **B13 = P6 第一格：IUnknown 三件套的真实实现 + 对象布局 COM 化收尾**
-               （022 表 B13 那一行；026 三节/七节的对外那半从这里开始，`ai/026` 七-1 与 D15-8 说的
-               "mint 分叉"就在这一格或 B16 落地）。
-               1. **先量后写，裁决记 D56**。四件事按顺序量，第 ① 件是**前提**、量不动就别动码：
-                  ① **先问"有没有一份 ActiveX DLL 形状的测试工程"**。今天 `tests/` 下所有 `.vbp` 都是
-                     `Type=Exe`（D46-2 已经量过一次），而 `DllGetClassObject`/类工厂表/注册那一族
-                     代码路径只在 DLL 上跑 ⇒ B13 的第 0 步是**造一份能编能跑的 DLL 用例**，
-                     不是先改 QI。没有它，任何"对外可用"的断言都只能是 `--emit-c` 层的文本断言。
-                  ② 现成的 IUnknown 一族长什么样：`cgen_iface_vtbl.cpp:410-460` 每 (类,接口) 生成
-                     `vb6_iunk_<C>_<I>` 的 QI/AddRef/Release，计数用 `__refcount`，而
-                     **`__refcount` 只给写了 `Implements` 的类生成**（同一文件 :353-358）；
-                     QI 认 `IUnknown` 目前返回**本接口的薄指针**（D22-7④，026 七-2 点名要在这里收）。
-                     量准"没写 Implements 的类被 QI 时今天发生什么"，再决定 B13 的边界。
-                  ③ 两套 mint 的分叉判据：`cgen_util_dllentry_prelude.inc` 里那两枚局部 lambda 与
-                     `src/semantics/coclass_identity.cpp` 同族不同种子（D46-2）；合并的判据就是
-                     026 三节那个唯一入口，**不许出现第二条身份通道**（D47 之后这条是硬规矩）。
-                  ④ `CoClassIdentity.legacyFolded` 与 `[ComCreatable(True)]` 今天在 DLL 里有没有
-                     任何消费者（现状：只有 Pass F 的校验与 stderr 信息行）；`VB_Creatable = False`
-                     那 9 条与 True 的差别要在这里给出可解释的读数，不能再"只在记录里那一位"。
-               2. 观测面沿用前几批：身份/激活看 stderr 的 `C3: CoClass ...` 行（note 诊断在成功的
-                  编译里根本看不见，D46-①），行为面看 `Test-Vbp` 运行期断言 —— **对外这一半必须
-                  真编译真运行**，光 `--emit-c` 不算数。
-               3. 硬约束：不用新语法的工程逐字节不变 ⇒ BASE = `.build/pre_b11c06_C3.exe`
-                  （**动码前先** `cp .build/C3.exe` 过去；本轮收线 exe md5 = d010be65f02fb716c0de11d8b2acf640，
-                  16 文件护栏清单 = `.build/byteguard_b11c05.py`，直接改 BASE 路径复用）。
-                  本轮基线：`-Category syntax` **118**、门 job 数 **8**。动了发码/布局就 **x86+x64 双跑**
-                  （C05 的 `cc_act` 已经两架构各 9/9，B13 的对象布局改动只会更需要）。
-               4. 门：`git -c http.version=HTTP/1.1 push github HEAD:dev` + **`git ls-remote github dev` 核 sha**
-                  （"Everything up-to-date" 与 "unexpected disconnect" 都出现过，重试到核上为止）；
-                  盯门 `.build/wait_run2.py <sha> <秒>`。共享分支：开工与收线各同步一次，
-                  BASE 与基线数字一律按**合并后的树**重算。
-               仍开（不在 B13）：**C05 收线前量到三条"改写没问题、底下那条路本来就没通"的既有洞**
-               （D55 末追加）—— `.bas` 里声明的新式接口在调用点认不出（D43 第三条）、
-               `TypeOf x Is <工程类名>` 恒为 False（对照组同样 False，接口名那条路是好的）、
-               `ReDim a(1) As <工程类>` 撞 C2224。三条都与 CoClass 无关，但"默认接口/QI/数组化"
-               在对外文档里迟早要提，动它们之前先读那一段。另：B10 的三条 caller 侧洞、B06c、
-               ⑮d、祖先 Private UDT 进方法签名（D40 末①）、`com_entry` 基类 extern 的 `void*` 返回、
-               **Class_Terminate 在 EXE 里没有触发点**（D41，B13 一旦引入引用计数就会从"没触发"
-               变成"触发但语义不对"，届时必须一起想）。开工前读 026 七节四条债务。
-GATE_BASELINE: (Actions 级) c3test run **#37 [dev] = completed/success**（https://github.com/fxl447098457/c3test/actions/runs/36008693266；
-               由 `df3f737..0dca0d0` 那次 push 触发，**已核 run 的 head_sha = `0dca0d0`** = 本批代码 + 文档 +
-               两条收线前实测的订正；8 个 job 全 success = Build + smoke / bas#1 / bas#2 / syntax / compile /
-               vbp / asm / …。vbp 分片**含本批新增的 `cc_act_pair` 与 `cc_act_x86`**（脚本末行
-               `if ($script:fail -gt 0) { exit 1 }` ⇒ job 绿就等于这两条真跑真过，不是被 Test-Path 跳过）。
-               同批本机侧：`-Category syntax` **116→118**（`cc_act_group_names` 两块各一行激活 + ProgID；
-               `itf_n40_coclass_type_no_impl` 断 `VB3039`；`p10` 加第三份文件 + 新 Absent"折算名当类型用
-               不产生激活行"）；新端到端工程 `tests/cc_act/Act.vbp` 断言 **CC1..CC9 + CC-DONE，x64 与 x86
-               各 9/9**（CC6 = 派生 `Overrides` 经组名答话；CC9 = 组名与实现类名同一实例；CC5 = Object 目标
-               的 IDispatch 包装）；A/B = `.build/pre_b11c05_C3.exe` 对 p10/cc_act **零激活行**、对 n40
-               **零诊断**（D54-④ 那三条坏读数在 BASE 侧复现、在本批侧消失）；护栏 **16/16**（10 严格逐字节 +
-               6 个会折算/会声明块的工程 `--emit-c` 逐字节全同，`cc_id` 连 stderr 都不多一个字）。
-               本轮收线 exe md5 = d010be65f02fb716c0de11d8b2acf640。上一条门 = B11/C04 的 run **#31**（head `c3c00e0`，8 job）；
-               本批过程中 `df3f737` 的 run **#34** 也已全绿（8 job），收线门取订正后的 head。
-               # 逐字节护栏每批都做；下一批 BASE = `.build/pre_b11c06_C3.exe`（md5 d010be65f02fb716c0de11d8b2acf640）。
+STATUS: IDLE             # NOT_STARTED | DESIGN | BUSY | IDLE | ALL_DONE
+LAST_RUN: 2026-09-24T23:40:40+08:00   # 本轮 = **B13a 出完并收线**（代码 `9785f4f`，门 = Actions run #44 = success、
+               # head 已核）。**本格按测量改写了排期（D56）**：原计划"IUnknown 三件套从零真实现 + 先造
+               # DLL 测试工程"两处前提都是错的 —— `tests\test_activex_dll\` 两份 `Type=DLL` 工程一直存在、
+               # 真编译 25 秒出 .dll+.tlb+导出表，只是从没登记进回归；RTL 的
+               # `ComObj_QueryInterface/AddRef/Release` 也早是真实现（原子计数、归零销毁并触发
+               # `Class_Terminate`）。B13a 交的是**观测面**（`Test-VbpDll` 助手 + 四条用例 + 新工程
+               # `tests/cc_dll`，零编译器代码改动），B13 余 **B13b/B13c**。自动运行见本行不足 55 分钟请立即跳过。
+LAST_COMMIT: 代码批 = 7b6570a+988c7cb(B13a；门 head = 合并 `9785f4f`)、7f829ee(B11/C05=B12)、b82a184+02d70fe(B11/C04)、c4aaa4c(B11/C03b)、e515d89(B11/C03a)、f0b820d(B11/C02)、e7c7a31(B11/C01)、3c5d8e6(B10)、9eb2ca7(B09c)、debb110(B09b)、02bac92(B09)   # **commit message 一律现写、不复用上批文本**；push 只推 `github/dev`（Actions 门），`origin`(gitcode) 与 `main` 不碰、**绝不建 MR**。
+CURRENT_BATCH: **B13b = 把身份出口落到产物：`dll_entry` 只从 `coclassIds_` 取值，删掉第二套 mint**
+               （022 表 B13 行的后半。**先读 D56 再动码**，那六条读数就是本格的地图。）
+               1. 四条落地面，每条都有 D56 的现成读数：
+                  ① `g_vb6_coclasses[]` 的 `progId` 要多出**块名那一档**（`<工程>.<块名>`）——今天产物里
+                     `CoDll.PG` 出现 **0** 次，而组内那半（C05）认的正是这一枚，两半不对称。
+                     类模块名那一档要不要保留 = "存量 DLL 客户是否照旧 `CreateObject`"的取舍 ⇒ 默认两档都注册，
+                     动手前先把这句写成可复核的裁决。
+                  ② `clsidStr` / `defaultIfaceIid` / `ifaceIids` 改读 `coclassIds_`（含 `[CoClassId]`/`[ProgId]`
+                     显式档）；`cgen_util_dllentry_prelude.inc` 那两枚 lambda 删掉，或降级到"仅服务读不到块
+                     的存量工程"这一条兜底路径上 —— **不许留第二条身份通道**（D47 硬规矩）。
+                  ③ `comCreatable` / `legacyFolded` 给产品级读数：`VB_Creatable = False` 的条目应当不进类工厂表
+                     （或进表但 `DllGetClassObject` 拒绝），二选一说清，别再"只在记录里那一位"。
+                  ④ 类型库（`TestAXDLL.tlb` 已经在发）里的身份与表里的是否一致 —— 顺手量一次，别整条押到 B15。
+               2. 观测面已经铺好（B13a）：`Test-VbpDll` 断"产物存在 + `dll_entry.c`/`activex_dll.def` 内容 +
+                  编译器 stderr 身份行"。**`cc_dll_identity_two_channels` 现在钉的是分叉**（needle
+                  `0x0AD9CBC7`、absent `CoDll.PG` / `F5CEF988`）⇒ **B13b 过门时这条必须翻面**，
+                  翻面本身就是本批的验收证据；另外两条 `ax_dll_calc` / `ax_dll_event` 钉的是存量工程不许被改坏。
+               3. 护栏：本批会改**已存在 DLL 工程**的产物，但**不该改 EXE 工程的任何字节** ⇒ 逐字节护栏照旧
+                  16 件（`.build/byteguard_b11c05.py` 换 BASE 路径复用），再加一条"DLL 侧改前改后对照"
+                  （`dll_entry.c` 从本轮起是可读产物，BASE 那份先 `--keep-for-debug` 存下来）。
+                  BASE = `.build/pre_b13b_C3.exe`（**合并后的树**重建，本轮收线 exe md5 3b5b348ea7c9810389de1fdff0d78732；
+                  B13a 自己零编译器代码改动，但收线前并入了 Asm 线 8 枚 ⇒ 这枚与 C05 收线那枚不同）。
+                  本轮基线：`-Category syntax` **118**、门 job **8**、
+                  vbp 分片 **+4 条 `Test-VbpDll`**。动了注册/身份就给 x86+x64 双读数。
+               4. 门：`git -c http.version=HTTP/1.1 push github HEAD:dev` + **`git ls-remote github dev` 核 sha**；
+                  盯门 `.build/wait_run2.py <sha> <秒>`；共享分支开工与收线各同步一次，基线按合并后的树重算。
+               仍开（不在 B13b）：**B13c** = 只实现新式接口的类对外 `methodCount=0`（契约成员按惯例是
+               `Private`，disp 表只收公有 ⇒ 外部一个方法都点不到）的口径裁决，和 `vb6_iunk_<C>_<I>` 认
+               `IID_IUnknown` 现返回**本接口薄指针**（D22-7④）；`.bas` 里声明的新式接口在调用点认不出
+               （D43 第三条）、`TypeOf x Is <工程类名>` 恒 False、`ReDim a(1) As <工程类>` 撞 C2224、
+               B10 的三条 caller 侧洞、B06c、⑮d、祖先 Private UDT 进方法签名（D40 末①）、`com_entry`
+               基类 extern 的 `void*` 返回、**`Class_Terminate` 在 EXE 里仍无触发点**（D41；DLL 侧有，见 D56-2）。
+GATE_BASELINE: (Actions 级) c3test run **#44 [dev] = completed/success**（https://github.com/fxl447098457/c3test/actions/runs/36020593259；
+               head 已核 = `9785f4f` = 本批 **B13a** 的测试工程 + 台账 D56 + 手册口径改写 +
+               收线前并入的 Asm 线 8 枚（合并提交 `9785f4f`）；8 个 job 全绿，`Tests (vbp)` 分片
+               **含本轮新增的四条 `Test-VbpDll`**
+               （`ax_dll_calc` / `ax_dll_event` / `cc_dll_identity_two_channels` / `ax_dll_calc_x86`）——
+               **这是本项目历史上第一次在门内链接 ActiveX .dll**（`tests\test_activex_dll` 两份工程自 P6
+               存在却从未登记，D56-0）。本批自身**零编译器代码改动**，但收线前并入了别人的 Asm 线
+               ⇒ 逐字节护栏不能拿"同一枚 exe"自证，合并后的树重建 exe md5 = 3b5b348ea7c9810389de1fdff0d78732，
+               16 件清单原样留给 B13b（换 BASE 路径复用）。
+               本机侧同批（都在合并后的树上跑）：`-Category syntax` **118**、
+               `-Category vbp` **25/0/1**（含新四条），新助手用一条假 needle
+               （`0xDEADBEEF_NOT_IN_PRODUCT`）做过**能红**的负控，PASS 不是空的。
+               上一条门 = B11/C05 的 run **#37**（head `0dca0d0`，8 job）。
+               # 逐字节护栏每批都做；下一批 BASE = `.build/pre_b13b_C3.exe`（md5 3b5b348ea7c9810389de1fdff0d78732）。
 ```
 
 > 重入保护：若运行开始时 STATUS=BUSY 且 LAST_RUN 距今不足 55 分钟，说明上一次运行可能仍在进行——本次**立即结束，不做任何修改**。
@@ -119,7 +111,7 @@ GATE_BASELINE: (Actions 级) c3test run **#37 [dev] = completed/success**（http
 | B10 | P4 | `Implements IFace Via <holderVar>` 委托式实现：持有字段 + 自动转调桩 + 签名检查 | ☑ **B10**（`3c5d8e6`，实施与选型见 **D43**）：`Via` 软关键字四件套 → 语法 `ImplementsStmt::viaField` → **stage 2.7 Pass D** 裁决（`vias_`，一份来源同喂语义与发码；`VB3029`/`VB3030` 两类判死含链式 Via）→ 语义层免逐槽 `VB3012` → 发码层转调**持有对象的接口槽**（不直调 Private 成员：C 层 static 跨 TU 连不到）+ Nothing 字段退零值 | `3c5d8e6` | `tests/itf_via` 新工程 **VIA1..VIA9 x64 与 x86 各 9/9**；A/B 改码前 `VB2003`+`VB2002`；4 条负例（n21/n22/n23/n24）+ 1 条软关键字正例 p04；10 文件 `--emit-c` 对 `pre_b10_C3.exe` 全同 10/10；`-Category syntax` 84→89 |
 | B11 | P5 | `CoClass…End CoClass` 语法 + `[CoClassId]/[Default] Interface/[ComCreatable]/[CoClassCustomConstructor]` + 契约聚合校验（实施依据换成 `ai/026`，其六节把 B11 拆成 C01–C05） | ◐ **C01 已出（`e7c7a31`）= 块语法 + 属性行落 AST**（零回归靠 `Module::coclasses` 不进 `declarations`；属性行归属按"名字+位置+同行"合判，见 D44/D45）；**C02 已出（`f0b820d`）= 身份求解唯一函数**（`src/semantics/coclass_identity.{hpp,cpp}` 纯函数 + stage 2.7 Pass E + `Driver::coclassIds_`；见 D46/D47）；**C03a 已出（`e515d89`）= 块形状与名字校验**（stage 2.7 Pass F 八条判据 + `VB3031/3032/3033`；宿主同名豁免见 D49-①）；**C03b 已出（`c4aaa4c`）= 契约聚合校验**（新 **stage 3.4c** `runCoClassContractCheck()`：按链倒着走、叶优先，缺槽 `VB3012`/签名不符 `VB3017`，`vias_` 命中的委托免逐槽；`VB3020` 文案收口。`As <CoClass>` 按 D50-② 整条并入 C05）。**C04 已出 = 存量头属性只读折算**（stage 2.7 新 **Pass E0**：四行 `Attribute VB_*` → 一条 `CoClassDecl` 进同一张表，Pass E 仍是唯一身份出口；折算记录**不参与判死**（Pass F/3.4c 跳过它），手写块优先，见 D52/D53）；**C05 已出（`7f829ee`）= 组内激活**（stage 2.7 新 **Pass G**：类型位点上的块名**就地改绑**`[Implementation]` 类 + `CreateObject(ProgID)` 换成 `New`，`VB3039` 挡住没有实现类的块名当类型用；实测 D54、实施 D55。发码侧零新分支，护栏 16/16。这一格同时把 022 的 **B12** 一起交付） | `7f829ee`(C05)、`c4aaa4c`(C03b)、`e515d89`(C03a)、`f0b820d`(C02)、`e7c7a31`(C01) | run **#23**（head 已核 = `4045b42`）+ `-Category syntax` 107→112 + 10 文件 `--emit-c` 对 `pre_b11c03b_C3.exe` 10/10 + A/B（n37/n38 零命中、n39 出旧句）+ `Id.vbp` 真编译真运行且发码逐字节未动 |
 | B12 | P5 | 组内激活：`New <CoClass>` / `CreateObject("ProgID")` 编译期映射 + 默认接口派发 | ☑ **由 B11/C05 交付**（`7f829ee`）= Pass G 就地改绑实现类，`As`/`New`/`CreateObject` 三面同归一条工程类路；`As Object` 目标经 Fix 179a 拿到 IDispatch 包装。**口径偏差**：`As <块名>` 的成员面是实现类的公开成员（比默认接口宽），要窄视图写 `As IShape` —— 两条理由记 D54-⑤ | 实测 D54 / 实施 D55 | `-Category syntax` 116→118 + `tests/cc_act` CC1..CC9 **x64+x86 各 9/9** + 护栏 16/16 + A/B 三条坏读数（base 复现、new 消失）；门见状态头 |
-| B13 | P6 | IUnknown 三件套真实实现（IID 表 QI / 原子 AddRef-Release）+ 对象布局 COM 化收尾 | ☐ | | |
+| B13 | P6 | ~~IUnknown 三件套真实实现~~ **D56 推翻**：RTL 的 `ComObj_QueryInterface/AddRef/Release` 早是真实现（原子计数、归零销毁、`Class_Terminate` 在 DLL 侧有触发点）⇒ 本格真正的活 = **把 CoClass 块接进对外那一半**（身份出口、块名 ProgID、新式接口对外可调用） | ☑ **B13a（观测面，本轮）**：新助手 `Test-VbpDll` + 把现成的 `tests\test_activex_dll` 两份 DLL 工程接进回归（此前门内一次都没链接过 .dll）+ 新工程 `tests\cc_dll`；**余 B13b**（`dll_entry` 只从 `coclassIds_` 取值、删第二套 mint、块名 ProgID 上表、`comCreatable`/`legacyFolded` 给读数）、**余 B13c**（新式接口对外零方法的口径 + `vb6_iunk_*` 认 `IID_IUnknown` 返回薄指针 D22-7④） | `9785f4f`(B13a) |
 | B14 | P6 | IDispatch 四件套接入新式接口（GetTypeInfo/GetIDsOfNames/Invoke + DispId 表） | ☐ | | |
 | B15 | P6 | 类型库导出：typelib_builder 从 dispinterface 扩到 TKIND_INTERFACE/dual + GUID 来源接线 | ☐ | | |
 | B16 | P6 | DllGetClassObject/DllRegisterServer/DllUnregisterServer/DllCanUnloadNow 对新式 CoClass/类工厂接线 + x86/x64 双验 | ☐ | | |
@@ -2700,3 +2692,5 @@ D54-② 那条"类变量永不 Release"不变式（对外一旦发 IDispatch/IUn
   三件套真实现 + 对象布局 COM 化收尾；第 0 步 = 先造一份 ActiveX DLL 形状的能编能跑用例），并把这批
   量到的三条既有洞（`.bas` 里声明的新式接口在调用点认不出、`TypeOf x Is <工程类名>` 恒 False、
   `ReDim a(1) As <工程类>` 撞 C2224）留进 B13 的"仍开"段供后续裁决。
+
+- 2026-09-24 23:40– **B13a（DLL 管线的观测面）提交 `7b6570a`（测试与工程）+ `988c7cb`（D56 与手册），收线前并入 Asm 线后门 head = 合并提交 `9785f4f`**：开工第一件事就是把 CURRENT_BATCH 的前提送去实测，两枚都炸（D56）—— ① `tests/` 下**不是**全是 `Type=Exe`：`tests\test_activex_dll\` 躺着两份 `Type=DLL` 工程，真编译 25 秒产出 266 KB 的 `.dll` + `TestAXDLL.tlb` + `activex_dll.def`（五个导出函数齐全），它们的错处只是**从没登记进 `run_tests.ps1`** ⇒ 整条对外管线在门内一次都没跑过；② 「IUnknown 三件套要从零写」也是错的：`vb6comserver_obj.c:24-99` 的 QI/AddRef/Release 是真实现（原子计数、归零调 `destroyFunc` ⇒ `Class_Terminate` 在 DLL 侧**有**触发点，D41 那条只成立于 EXE）。于是本批改交付「让这一半第一次可被断言」：新助手 `Test-VbpDll`（DLL 没有 stdout ⇒ 断产物存在 + `dll_entry.c`/`activex_dll.def` 内容 + stderr 身份行；`--emit-c` **不含** `dll_entry.c`，唯一读数通道是 `--keep-for-debug` 打出的临时目录）+ 三条用例（两份现成工程 + 新写的 `tests/cc_dll/CoDll.vbp`）。D56 量出对外那半真正缺的四条、并且能指名道姓：**块名 ProgID 在产物里 0 次**、同一份编译里 `IProbe` 拿到**两枚 IID**（语义层 `{F5CEF988-…}` vs 产物 `{0AD9CBC7-…}`，因为 `coclassIds_` 后端消费者为 0）、只实现新式接口的类 `methodCount=0` 对外点不到任何方法、`comCreatable`/`legacyFolded` 对产品零影响 ⇒ B13 重切成 a/b/c 三格。本批自身零编译器代码改动；收线前并入 Asm 线 8 枚（合并提交 `9785f4f`）⇒ BASE 与基线数字一律按**合并后的树**重算（收线 exe md5 见状态头，`-Category syntax` 与逐字节护栏都在那棵树上复量）。另记一条 harness 坑：本仓 `core.autocrlf=true` ⇒ `tests/run_tests.ps1` 的**工作树** checkout 后是 CRLF（仓库里的 blob 仍是 LF+BOM），所以「插入后断言 count(CRLF)==0」这类自检要从「文件字节」改成「committed blob」（`git show HEAD:<path>`），否则合并完第一次 splice 就会被自己的断言挡下。本批真正咬人的是另一条老坑复发：注册文本经 bash heredoc 落盘时 `"$Tests\test_activex_dll"` 里的 `\t` 被吃掉成 TAB，症状是编译器报「`.vbp文件中没有源文件: D:\c3.vb6.pro\tests est_activex_dll …`」，而 `Test-VbpDll` 把它报成 `FAIL (compile)` —— **看起来像 x86 工具链问题或并发争用**（我第一反应就是后者，还「复现失败」了一次才去查字节）。⇒ 带反斜杠的 PowerShell 文本一律走 Write 工具或 `chr(92)`；新助手第一次红，先 `hex()` 看路径字节，再怀疑工具链。门 = 本次 push 触发的 Actions run，编号见状态头。
