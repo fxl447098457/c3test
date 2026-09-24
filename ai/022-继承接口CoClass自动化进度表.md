@@ -5,29 +5,34 @@
 > 规范输入: `ai/讨论记录/018-接口继承与CoClass设计思路.md`（含 tB 文档要点与分阶段设计思路全文）。
 
 STATUS: IDLE             # NOT_STARTED | DESIGN | BUSY | IDLE | ALL_DONE
-LAST_RUN: 2026-09-24T09:59:00+08:00   # 本轮 = **B09 已提交 `02bac92`**（`MyBase` 去虚化基调用 + 构造链根→叶 + 前置 B09-0 = `com_entry` 的 C2143）；门 = Actions run **#13 = success**（head_sha 已核 = `02bac92`）。收线前另挖出一条 **x86 布局缺陷 → 登记为 B09b**（实测与根因见 **D39**）。
+LAST_RUN: 2026-09-24T10:51:00+08:00   # 本轮 = **B09b 已提交 `debb110`**（x86 继承字段错位：祖先 `Private` UDT 的类型名注进派生模块作用域，记录 = **D40**）；门 = Actions run **#14 = success**（head_sha 已核 = `debb110`）。同一轮里 B09（`MyBase` + 构造链）的 docs 也收了口。
                # 自动运行见本行不足 55 分钟请立即跳过。
-LAST_COMMIT: 代码批 = 02bac92(B09)、77ecef1(B08f-1)、40eea3f(B08e-6)、d9eca95(B08e-5)、392a52d(B08e-4)、8987386(B08e-2)、e531d82(B08e-1)   # **commit message 一律现写、不复用上批文本**；push 只推 `github/dev`（Actions 门），`origin`(gitcode) 与 `main` 不碰、**绝不建 MR**。
-CURRENT_BATCH: **B09b = 继承字段里的 `Private` UDT 在派生 TU 退化成 `void*` → x86 前缀布局错位**（先修这条再开 B10）。下一轮**先读 D39 再动手**：
-               1. **症状/根因/归属全在 D39**：`vb6_cls_InhBase` 发 `vb6_type_TPoint m_pt;`，而 `InhMid`/`InhDerived`/`InhSib`
-                  发 `void* m_pt;` → x64 巧合等尺寸（所以门里全绿）、x86 短 4 字节 → `m_pt` 之后每个基类字段偏移全错，
-                  且 `_New()` 按短了的 `sizeof` 分配 → 基类那份过程写 `m_name`/`Label`/`g_init` 就是越界写。
-                  **B07b 起就有**（x86 改码前的源码已经在越界，只是没崩）；不是 B09 引入的回归。
-               2. **落点**：`structFieldDecls`（`cgen_inherit.cpp:75`）按 `mapTypeRef(var.asType)` 发继承字段类型，
-                  而那个 UDT 是基类的 `Private` → 派生 TU 里没有这个名字。修法 = 按**声明所在模块**解类型 + 把那份
-                  UDT 定义按需注入消费者 .c（`VB6_TYPE_<X>_DEFINED` 这条 guard 说明按需注入的先例已存在）。
-                  与 D37（`typeRefName` 丢失）同族、但那是**对象字段**、这是**UDT 字段**，判据不同，别照抄那一版。
-               3. **验收必须 x86 + x64 双跑**：最小用例 = 基类含 `Private` UDT 字段、其后还有别的字段、派生类读写它。
-                  本轮教训写死一条：**x64 全绿掩盖不了布局错误**（`sizeof(void*) == sizeof(小 UDT)` 在 x64 恰好成立）。
-               4. 然后 **B10 = `Implements Via`（委托式实现，免手写转发桩）**。
-               仍开的存量：⑮d/⑮e（D37 末）、`Class_Terminate` 的继承链、`Set MyBase.<属性> = obj` 未验、
-               `com_entry` 里基类自家 extern 的 `void*` 返回类型（Fix 184 只做了一半，D38 末）、
-               **B06c** = 接口值作实参 / 进 Variant（归 B13/P6 前处理，D22-7③）。
-               硬约束（沿用）：判定只走 `virtDispatchCallee` 的 `mustDispatch`；派发串与 this 实参共用同一个串；
-               `Property Let/Set` 无槽别放开；每条改动要运行期断言 + A/B 负控（基线 exe 改码前
-               `cp .build/C3.exe .build/pre_<批>_C3.exe` 即可）；**A/B 必须同时比发射形状**（B08e-3 的教训）。
-               手册 `Inherits 语句.md` 本轮已随代码更新（`MyBase` 与构造链进"说明"、x86 的 UDT 字段限制进"注意"）。
-GATE_BASELINE: (Actions 级) c3test run **#13 [dev] = completed/success**（https://github.com/fxl447098457/c3test/actions/runs/35944164691；由 `77ecef1..02bac92` 那次 push 触发，watcher 在 **09:51** 那一轮看到它 completed/success（列表里标的是 09:43）；收线后核 **run#13 的 head_sha = 02bac92** = 本机 `git rev-parse HEAD`，不是上一批残留；build + smoke / bas#1 / bas#2 / syntax / compile / vbp 全绿，构建类型 **Release**，与本机 Debug 门是两个配置）。同批本机侧：`Inh.vbp` x64 真编译 + 运行期断言 **43→52**（INH44/INH45 判别去虚化 —— 同两个成员经 `Me.`/`obj.` 答案是 "derived"；INH46 就近遮蔽；INH47/48 属性与字段写；INH49/INH50 构造链与桥；INH51 = B09-0 的返回工程类 `Overrides`；INH52 中间类实例），**改码前的二进制编不过这个工程**（6 个 C 错：C2143 + 5×C2065，A/B = `pre_b09_C3.exe`）；负例 `ci_n27_mybase_no_inherits`/`ci_n28_mybase_no_such_member` 走 `--emit-c` 断言 `VB3028`（改前退出码 0、静默发未声明符号）；8 文件 `--emit-c` 全同 8/8；`-Category syntax` **82→84 全绿**；本机 exe md5 `153d6ae8`（跑前后一致）。**两条口径提醒**：① `-Category vbp` 本机这轮被他人套件抢 CPU 后回收，没跑完 —— 门的 vbp 分片已覆盖（Actions 绿）；② `cls_inh_pair` **不带 `-Arch`** → x86 的 `Inh.vbp` 不在门里，而它现在**崩**（D39）。上一条门 = B08f-1 的 run **#12**（head 77ecef1，同全绿）；再上一条本地全量测量 = B08e-5（`.build/gate_B08e5.log`，exe md5 ac14cf25，153/0/1/154，留作 Debug 侧对照基线）。
+LAST_COMMIT: 代码批 = debb110(B09b)、02bac92(B09)、77ecef1(B08f-1)、40eea3f(B08e-6)、d9eca95(B08e-5)、392a52d(B08e-4)、8987386(B08e-2)、e531d82(B08e-1)   # **commit message 一律现写、不复用上批文本**；push 只推 `github/dev`（Actions 门），`origin`(gitcode) 与 `main` 不碰、**绝不建 MR**。
+CURRENT_BATCH: **B09c = 收尾 P3（继承线）剩下的三条小尾巴**，一条批次做完再开 B10。用户口径 = 「早点把继承干完」，所以先把 P3 清干净、不再往新线铺张：
+               1. **`Class_Terminate` 的继承链**：`emitClassFactory` 的 `_Destroy()` 里只跑**自家**那份
+                  （`cgen_com.cpp:103-111` 那个循环读的就是 `module.declarations`）。要做的是**反序**（叶→根），
+                  与 B09 的构造链对称：`Class_Terminate` 也是 `Private`（= `static`）→ 直接复用
+                  `vb6_<X>_chain_init` 那座桥的形状，加一座 `vb6_<X>_chain_term`；判据、发放条件（"自己写了
+                  Class_Terminate 且被谁继承"）与 `emitChainInitDecl/Def` 一字同构，`cgen_inherit.cpp` 里改。
+               2. **`Set MyBase.<属性> = obj`**：读与 `Let` 已在 B09 接好，`Set` 那条走 `cgen_setlet_set_*`
+                  另一条通路，**本批没验过它的发射形状**（D38 末留的）。先在 `tests/cls_inh` 加一条
+                  （基类给一个 `Public Property Set Foo(ByVal o As Object)`，派生里 `Set MyBase.Foo = x`）
+                  量一下现在发的是什么 —— 若是非法 C 就照 `tryEmitMyBaseAssign` 补一个 `forWrite` 命中
+                  `Property Set` 的分支；若已经正确就只加断言。**别不看形状就动手**（B08e-3 的教训）。
+               3. **⑮e**（D37 末）：属性写穿过 UDT 对象字段（`u.h.Level = 5`）两种发射都是非法 C，
+                  要治得走 `cgen_assign_prop_write.inc` 那条专用通路，而它要求 object 是 `IdentifierExpr`
+                  （D35-6 记过这条前提）—— 先把那个前提摸清再决定改哪。⑮d（UDT 在第三个模块）同批另说，
+                  判据是 `symTab_.lookupModule(UDT 名)` 的消费者可见面，与本三条不同条线，**别混着做**。
+               4. 三条都要：`tests/cls_inh` 运行期断言 + **x64 与 x86 双跑**（本批起 `cls_inh_x86` 已在门里，
+                  布局/ABI 类的改动它会替我盯着）+ 8 文件 `--emit-c` 护栏 + A/B 负控。
+               5. 然后 **B10 = `Implements Via`（委托式实现，免手写转发桩）**。
+               仍开（不在 B09c）：⑮d、祖先 `Private` UDT 出现在**方法签名**上的同类回落（D40 末①）、
+               `com_entry` 基类自家 extern 的 `void*` 返回类型（Fix 184 半件）、**B06c**（接口值作实参 /
+               进 Variant，归 B13/P6 前处理，D22-7③）。
+               硬约束（沿用）：判定只走 `virtDispatchCallee` 的 `mustDispatch`；`Property Let/Set` 无槽别放开；
+               每条改动要运行期断言 + A/B 负控（基线 exe 改码前 `cp .build/C3.exe .build/pre_<批>_C3.exe`）；
+               **A/B 必须同时比发射形状**；**布局/ABI 类改动必须双架构真跑**（B09b 新学的那条）。
+GATE_BASELINE: (Actions 级) c3test run **#14 [dev] = completed/success**（https://github.com/fxl447098457/c3test/actions/runs/35948281393；由 `02bac92..debb110` 那次 push 触发，watcher 10:49 那一轮看到收线；收线后核 **run#14 的 head_sha = debb110** = 本机 `git rev-parse HEAD`；7 个 job 全 success = Build + smoke / bas#1 / bas#2 / syntax / compile / vbp，构建类型 **Release**。**vbp 分片日志里 `cls_inh_pair ... PASS` 与新增的 `cls_inh_x86 ... PASS` 逐条可见，该分片 `Results: PASS=18 FAIL=0 SKIP=1 TOTAL=19`（SKIP = 已知 test_vbman 环境项）→ 继承线从本批起是双架构覆盖**）。同批本机侧：`tests/cls_inh` x64 与 x86 build+run 各 **52/52、0 FAIL**（**改码前 x86 段错误**、且 INH35/INH36/INH39 从 B07b 起就在 x86 失败 —— 同一个洞，D40），8 文件 `--emit-c` 对 `pre_b09_C3.exe` 全同 8/8（BASE 在 B09 之前 → 连 B09 一起证没漂），`-Category syntax` **84/0**，本机 exe md5 `cd4ff73e`。上一条门 = B09 的 run **#13**（head 02bac92，全绿；同批本机 `Inh.vbp` 断言 43→52 + `ci_n27`/`ci_n28` 判死负例）。再上一条本地全量测量 = B08e-5（`.build/gate_B08e5.log`，exe md5 ac14cf25，153/0/1/154，留作 Debug 侧对照基线）。
                # 逐字节护栏每批都做：8 文件 `--emit-c` 对"修复前"exe 全同 8/8；本轮 BASE=`.build/pre_b09_C3.exe`，模板 `.build/byteguard_b09.py`（改两个常量即可复用）。
 ```
 
@@ -76,6 +81,7 @@ GATE_BASELINE: (Actions 级) c3test run **#13 [dev] = completed/success**（http
 | B08e | P3 | 虚表线收尾：`resolveClassMemberCall` 其余 13 个消费点逐条接上派发或判死（站点地图与裁决见 D35）——**13 站已在 B08e-6 全部出完** | ☑ **B08e-1**（① `With w` 内 `.M()`）、**B08e-2**（⑤ `Me.<字段>.方法()`）、**B08e-3**（零代码：⑩/⑪ 裁决纠偏 + 找出先决条件⑭）、**B08e-4**（⑭ `suppressVirtDispatch_` + ⑪ `Me.<字段>.<属性>` 的读）、**B08e-5**（⑥⑦ 默认属性调用式 `m_up(9)`）、**B08e-6**（⑨ 接派发 + ⑩⑫ 判死 + `Test-CompileFail` 前置；⑧ 实测已被优先级2 判死、⑬ 改判无需改）已出；下一轮 **⑮**（UDT 字段调用位置的路由缺陷，D35-8）；②③ 判为探针无需改、④ 判为走不到 → **13 站在 B08e-6 后全部出完，⑮ 一出就开 B09（`MyBase`）** | e531d82(B08e-1)、8987386(B08e-2)、392a52d(B08e-4)、d9eca95(B08e-5)、40eea3f(B08e-6) | 最新门 = B08e-6（Actions 级，见状态头 GATE_BASELINE）+ `Inh.vbp` 断言 38→40（INH39 判别/INH40 对照）+ A/B（`pre_b08e6_C3.exe`：INH39 FAIL base、其余 39 条 OK；`ci_n24`/`ci_n25` 改前 `--emit-c` 退出码 0）+ 8 文件 emit-c 8/8 + `-Category syntax` 78→82 全绿。上一条本地门 = B08e-5：`Results: PASS=153 FAIL=0 SKIP=1 TOTAL=154`（gate_B08e5.log；exe md5 ac14cf25 跑前跑后一致）。上一批 B08e-4：同 153/0/1/154（gate_B08e4.log；exe f2547af6）。B08e-3 未跑门（零代码，先例 B00）。 |
 | B08f | P3 | UDT 里放工程类对象字段的整条通路（⑮a 写方向 / ⑮b 调用方向 / ⑮c 派发 / ⑮d UDT 自己在第三个模块），实测与落点见 **D36**、真根因与实施见 **D37**；原挂在 B08e 的"站点⑮"，因与虚表无共同判据而单列 | ◐ **B08f-1 已出（`77ecef1`）= ⑮a+⑮b+⑮c 一起**（三处接线：语义层 Variant 分支也存类型名 / `udtFieldObjCType` 按当前符号表回判工程类 / Set 侧按真实 C 类型否决 Variant 容器判定；通路一通，D35 站点④ 才第一次可达，顺手接上派发）。**⑮d/⑮e 仍开**：UDT 声明在使用点之外的模块时同样坏；属性写穿过 UDT 字段两条路都发非法 C，卡在 `symTab_.lookupModule(UDT 名)` 的消费者可见性 —— 与本批不同判据，另批先量可见面再动 | 77ecef1 | 验收只能走**真编译**（`--emit-c` 对坏形状返回 0）：`Inh.vbp` 断言 40→43（INH41/42 判别、INH43 对照），改码前的二进制编不过这个工程；8 文件 emit-c 8/8、`-Category syntax` 82/0 |
 | B09 | P3 | `MyBase.M(…)` 显式基调用（去虚化）+ 构造链顺序 + 无新语法逐字节护栏；前置 = `com_entry` 的 typedef 分块顺序（D35-9 ⑤） | ☑ **B09**（`02bac92`，记录见 **D38**）：`MyBase` 走发码层按接收者名字接管（precheck 的 `Err`/`VBA` 先例，lexer/parser 未动）；实现按“就近声明”取 `vb6_<owner>_<M>`，**不查 `__cvtbl`**；读 `Get>Function>Sub>Let>Set`、写只认 `Let/Set`；`VB3028` 判死三条形（无 Inherits / 基面无此名 / 基类 Private = C 层 static）；构造链根→叶 + `vb6_<基>_chain_init` 桥（仅“写了 Class_Initialize 且被谁继承”才发）。B09-0：`com_entry` 的类返回类型 extern 改 `struct vb6_cls_X*`。**仍开（另批）**：**B09b = x86 布局缺陷**（继承的 Private UDT 字段在派生 TU 退化成 `void*` → 前缀错位、`_New` 少分配 4 字节 → 写 `m_pt` 之后的基类字段越界；x64 巧合正确，所以门里看不见，实测见 **D39**）、`Class_Terminate` 反序链、`Set MyBase.<属性> = obj` 未验、基类自家 extern 的 `void*` 返回类型（Fix 184 只做了一半） | `02bac92` | `Inh.vbp` 断言 **43→52**（INH44/45 判别去虚化、INH49/50 构造链与桥、INH51 = B09-0 用例）；**改码前编不过这个工程**（C2143 + 5×C2065）；负例 `ci_n27`/`ci_n28` 走 `--emit-c` 断言 VB3028（改前退出码 0）；8 文件 emit-c 8/8、`-Category syntax` 82→84 全绿 |
+| B09b | P3 | x86 布局缺陷：继承字段里 `Private` UDT 在派生 TU 解不出类型名 → 回落 `void*` → 前缀错位（D39 登记，本批治） | ☑ **B09b**（`debb110`，记录见 **D40**）：`runCrossModuleResolution()` 末尾沿 `Inherits` 链注入被继承字段用到的 UDT/Enum 类型符号（含 `udtMembers`；本地同名不抢）；判别实验 = 把 `Private Type` 改成 `Public` 看发射形状 + x86 能否跑起来；顺带清掉从 B07b 挂着的 INH35/INH36/INH39 三条 x86 红字；**门新增 `cls_inh_x86`**（同一份断言清单双架构跑） | `debb110` | `tests/cls_inh` x64 + x86 build+run 各 **52/52、0 FAIL**（改码前 x86 段错误）；8 文件 emit-c 对 `pre_b09_C3.exe` 8/8；`-Category syntax` 84/0 |
 | B10 | P4 | `Implements IFace Via <holderVar>` 委托式实现：持有字段 + 自动转调桩 + 签名检查 | ☐ | | |
 | B11 | P5 | `CoClass…End CoClass` 语法 + `[CoClassId]/[Default] Interface/[ComCreatable]/[CoClassCustomConstructor]` + 契约聚合校验 | ☐ | | |
 | B12 | P5 | 组内激活：`New <CoClass>` / `CreateObject("ProgID")` 编译期映射 + 默认接口派发 | ☐ | | |
@@ -1649,6 +1655,46 @@ x64 靠 `sizeof(void*) == sizeof(TPoint) == 8` **巧合成立**，x86 上 `void*
 基类含 `Private <UDT 字段>` + 该字段之后还有别的字段 + 派生类读写它，**x86 真编译 + 真跑**。
 `Inherits 语句.md` 的"注意"里那条"基类含 Event / 前缀复制不成立"旁边要补一句本版 x86 的 UDT 字段限制。
 
+### D40 B09b 的实施记录：祖先 `Private` UDT 的**类型名**进派生模块作用域（2026-09-24 10:18–，代码 `debb110`）
+
+**判据先钉住，再动手**（D39 留的三条里第一条就是别照抄 D37 那一版）。做法 = 拿同一个工程改一个词：
+`Private Type TPoint` → `Public Type TPoint`，其余一字不动，`--emit-c` 一比：
+
+| 基类里 UDT 的写法 | 派生结构体里那份继承字段 | x86 build+run | x64 build+run |
+|---|---|---|---|
+| `Private Type TPoint` | `void* m_pt;` | **段错误**（47 行后崩） | 52/52 全绿（假绿） |
+| `Public Type TPoint` | `vb6_type_TPoint m_pt;` | 53/53 全绿 | 全绿 |
+
+一张表就把洞定死了：**不缺类型定义、不缺 #include、不缺尺寸，只缺名字**。`visit(TypeDecl)` 发 UDT
+定义时不分访问级别（还带 `VB6_TYPE_<X>_DEFINED` 守卫，重复发也安全），定义的文本一直在基类自己的
+`.h` 里；而 `mapTypeRef` → `lookupTypeSymbol` 走的是**消费者模块**的符号表，`getPublicSymbols()`
+（`driver_crossmod.cpp:33` 那份池子）按 `access != Private` 过滤 → 祖先的私有类型符号从来就没进过
+派生模块的作用域 → 解不出就回落到 `void*`。所以这不需要 D39 里设想的“按需把 UDT 定义注进消费者 .h”
+那条重活，落点在**注入阶段**，不是发码阶段。
+
+**改了什么**：`runCrossModuleResolution()` 末尾加一条独立 pass（在 O3 重载补跑之前）：对每个
+`ClassChainView` 有 `baseKey` 的模块，沿 `chain` 走到每个祖先模块，把它符号表里 `UserDefinedType` /
+`EnumType` 中**被继承字段用到**的那些（键 = `inhFields` 里 `VariableDecl::asType` 是 `SimpleTypeRef`
+的名字），以 `isExternal + sourceModule=<祖先模块名>` 复制进消费者表，`UserDefinedType` 连
+`udtMembers` 一起复制（与既有跨模块 UDT 注入同一条口径）。三道护栏：① 只在 `!classes_.empty()` 时跑；
+② 消费者已有同名符号一律不抢（`lookupModule` 命中就跳过）；③ 只沿 `Inherits` 链、只补被字段用到的名字
+→ 不写 `Inherits` 的工程一个符号都不会多（8 文件 `--emit-c` 对 `pre_b09_C3.exe` 全同 8/8，且那一版
+BASE 是 B09 之前 → 连 B09+B09b 两批一起证了没漂）。
+
+**顺手清掉两条陈旧红字**：`Inh35`/`Inh36`/`Inh39` 从 B07b 起就在 x86 上失败（本批之前实测过：改码前的
+源码 + 改码前的二进制，x86 三条 FAIL 且不崩）。它们读的都在 `m_pt` **之后**（`m_lvl` 经 `Level` 属性、
+`g_viaRet`）—— 同一个错位洞，不是派发逻辑错。修完 x86 与 x64 各 52/52、0 FAIL。
+
+**门里补的口径（本批真正的长期收益）**：`tests/run_tests.ps1` 把 `Inh.vbp` 的期望清单提成
+`$inhExpected` 变量，同一份清单跑 **两遍**：`cls_inh_pair`（默认架构）+ 新增 `cls_inh_x86`
+（`-Arch "x86"`）。**布局类改动从此自动双架构覆盖** —— 只测默认架构的门证明不了布局主张（D39 的教训）。
+`-Category syntax` 84/0 不变（顺带证明脚本改动能解析）。
+
+**没做的相邻两件事**（别顺手，都要先量）：① 祖先 `Private` UDT 出现在**方法签名**（参数/返回值）上时
+仍是同一条回落路径（`inheritedRetType`/`makeParamCType` 也调 `mapTypeRef`）—— 本批只治“按值嵌进结构体”
+这一类，签名那类是 ABI 问题、判据不同；② 泛型特化与 `Inherits` 的组合、以及⑮d（UDT 声明在第三个模块）
+仍然各自卡在自己的可见性判据上，与本洞不同条线。
+
 ## 运行日志
 
 - 2026-09-23 建表：范围确认（含完整COM）、规范文档 018 入库、现状盘点完成。
@@ -1848,3 +1894,4 @@ x64 靠 `sizeof(void*) == sizeof(TPoint) == 8` **巧合成立**，x86 上 `void*
 - 2026-09-24 07:31–09:30 **B08f-1（跨模块 UDT 对象字段：⑮a+⑮b+⑮c 一次做完）提交 `77ecef1`**：开头按 D36 的落点去改 Set 发码（新增 `udtFieldCTypeOfTarget` + 在 `cgen_setlet_set_rhs.inc` 否决 Variant 判定），改完实测**同一条语句一字不变** → 那条守卫当时确实是死代码，revert；顺着"为什么改不到"再挖一层才碰到真根因（**D37**）：`As <项目类>` 跨模块引用时 `resolveTypeRef` 认不出来（Class 符号要到 stage 3.5 才注入本模块作用域）→ 一律回退 `Variant`，而 UDT 成员登记只在 `UserDefinedType`/`Object` 两个分支里存 `typeRefName` → **类名连名字都没留下**；同一个字段因此有两套口径：结构体发射器（跑在 3.5 之后）按名字查得到类、发 `vb6_cls_X* h;`，成员元数据说是 Variant。**判别实验**钉住结论：把同一个 UDT 声明在类模块内，`Set t.h = me` 与 `t.h.Speak()` 两条**改前就正确**（metadata 全对）。三处接线一起改：语义层 Variant 分支也存类型名（只加元数据、不动 `mi.type`；`typeRefName` 全仓 9 处读侧逐条核过，要么限定 `mi.type`、要么查到名字后还要 `kind == UserDefinedType` 才认 → 塞一个 Class 名它们全都看不见）、`udtFieldObjCType` 按当前符号表回判、Set 侧按真实 C 类型否决 Variant 容器判定（`void*` 的 COM 字段维持 Fix 084n 原样）。**通路一通就把派发接上**（D35 站点④ 至此第一次可达，那 8 行不接就正好是 D27-13 判过的"编得过、调用静默退化"，留着比接上更危险）：`u.h.Speak()` 从非法 C 变成 `((const vb6_cvtbl_InhBase*)((vb6_cls_InhBase*)(void*)u.h)->__cvtbl)->speak(...)`。**验收只能走真编译**（`--emit-c` 对这些坏形状全返回 0 —— 上一轮记的那条方法论这轮用上了）：`Inh.vbp` 断言 40→43（INH41/INH42 判别、INH43 基类对照），**改码前的二进制编不过这个工程**（C2440 + C2039，A/B 用 `pre_b08e6_C3.exe`）；8 文件 `--emit-c` 全同 8/8、`-Category syntax` 82/0。测试用例写成"UDT 与使用点同模块"，因为另两层本批没碰：**⑮d**（UDT 声明在第三个模块 → 消费者模块 `lookupModule(UDT 名)` 查不到，同一坏形状原样复发）、**⑮e**（属性写穿过 UDT 对象字段：改前 `u.h.Level = 5;`、改后 `u.h->Level = 5;`，两种都是非法 C，不是本批引入的回归）。另记一条小瑕疵：标记注释会漏进发射语句（`u.h  /* udt objfield … */ = d;`，C 语法合法、且类模块那一形改前就这样），未动。**门 = GitHub Actions**（推 `github/dev` 的 `40eea3f..77ecef1`，pwsh 7 跑 `watch-gh-actions.ps1` 盯），结论与 run#head_sha 核对记在状态头。下一批 **B09 = `MyBase` 显式基调用 + 构造链顺序**。
 - 2026-09-24 08:32– **B09（`MyBase` 去虚化基调用 + 构造链根→叶 + 前置 B09-0）提交 `02bac92`**：`MyBase` 走**发码层按接收者名字接管**（precheck 的 `Err`/`VBA` 先例），lexer/parser 一行未动 → 零新语法逐字节护栏构造成立；实现取“就近声明”（基类自己 > 基类的 `inhProcs`），C 名与 B07b 中转函数、虚表表项同一套拼名，**不查 `__cvtbl`**；读按 `Get>Function>Sub>Let>Set`、写只认 `Let/Set`；`MyBase.X = v` 从 `Module.var` 回退里抢回来。判死三条形 `VB3028`（无 Inherits / 基面无此名 / 基类 Private 成员 = C 层 static）。构造链 `emitClassInitChain` + 桥接 `vb6_<基>_chain_init`（仅“写了 Class_Initialize 且被谁继承”才发），`MyBase.Class_Initialize` 复用同一座桥；`Class_Terminate` 反序链未做。前置 B09-0：`com_entry.c` 的类返回类型 extern 改 `struct vb6_cls_X*`，去掉 typedef 分块顺序依赖（`Overrides` 一个返回工程类的方法即 C2143）。`Inh.vbp` 断言 43→52（**改码前编不过这个工程**：C2143 + 5×C2065）、负例 `ci_n27`/`ci_n28` 走 `--emit-c` 断言 VB3028（改前退出码 0）、8 文件 emit-c 8/8、`-Category syntax` 82→84 全绿。门 = GitHub Actions（推 `github/dev`，pwsh 7 跑 `watch-gh-actions.ps1`），结论与 run#head_sha 核对记在状态头。下一批 **B10 = `Implements Via`（委托式实现，免手写转发桩）**；仍开：`Class_Terminate` 继承链、`Set MyBase.<属性> = obj` 未验、基类自家 extern 的 `void*` 返回类型。
 - 2026-09-24 09:43 **B09 的门 = GitHub Actions run #13 [dev] = completed/success**（head_sha 已核 = `02bac92`，本机 `git rev-parse HEAD` 同值；build + smoke / bas#1 / bas#2 / syntax / compile / vbp 全绿，Release 配置）。收线前另做了一项目前不在门里的检查：**x86 侧 `Inh.vbp` 段错误**，拆用例定位到`m_pt` 之后的基类字段写入越界，根因 = 继承的 **Private UDT 字段**在派生结构体里发成 `void*`（x64 8 字节巧合对齐、x86 4 字节 → 前缀布局错位、`_New` 少分配 4 字节）。**B07b 起就有，不是本批引入**（改码前的源码在 x86 已经越界写 `g_viaRet`/`m_name`，只是没崩）。登记为 **B09b**（实测与验收要求见 **D39**），下一批先修它再开 B10。本轮零代码改动（代码已在 `02bac92`，门已过）。
+- 2026-09-24 10:18– **B09b（祖先 `Private` UDT 的类型名进派生模块作用域 = x86 继承字段错位）提交 `debb110`**：先用“改一个词”的判别实验钉死洞的性质（同一工程把 `Private Type TPoint` 写成 `Public`，派生结构体立刻从 `void* m_pt;` 变 `vb6_type_TPoint m_pt;` 且 x86 从段错误变全绿）→ 缺的**只是名字**，不是定义、不是 include、不是尺寸：`getPublicSymbols()` 按 `access != Private` 过滤，祖先的私有类型符号从来没进过消费者作用域，`mapTypeRef` 于是回落 `void*`。落点在 `runCrossModuleResolution()` 末尾加一条pass（沿 `Inherits` 链、只补被 `inhFields` 用到的 UDT/Enum 名、本地同名不抢、`udtMembers` 一并复制）。**顺手清掉三条从 B07b 就挂着的 x86 红字**（INH35/INH36/INH39 读的都排在 `m_pt` 之后 = 同一个洞，不是派发逻辑错）。**门里新增 `cls_inh_x86`**（同一份 `$inhExpected` 清单跑 x64+x86 两遍）→ 布局类改动从此自动双架构覆盖。实测：`tests/cls_inh` 两架构 build+run 各 **52/52、0 FAIL**（改码前 x86 崩）；8 文件 `--emit-c` 对 `pre_b09_C3.exe` 全同 8/8（这一版 BASE 在 B09 之前，连 B09 一起证没漂）；`-Category syntax` 84/0。门 = GitHub Actions（推 `02bac92..debb110`，pwsh 7 盯 `watch-gh-actions.ps1`），结论与 run#head_sha 核对记在状态头。下一批 **B10 = `Implements Via`（委托式实现，免手写转发桩）**。
