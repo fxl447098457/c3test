@@ -202,6 +202,10 @@ private:
     // key = CoClass 块名小写。消费者 = 将来的 C05（`New`/`CreateObject` 编译期改写）与
     // B13/B15/B16（对外那半）；C02 只发一条 note 让它可测。
     std::unordered_map<std::string, CoClassIdentity> coclassIds_;
+    // 接口 IID 表 (tB, ai/022 B13c): 同一个 Pass E 里由 `buildIfaceIdMap` 建，key = 接口名小写。
+    // 三处消费者（新式接口 vtable 的 QI、dll_entry 的 IID 表、类型库）从此只读这一张表 ——
+    // "一个接口在一次编译里只许一枚 GUID" 的落地形式。
+    std::unordered_map<std::string, std::string> ifaceIds_;
     // vbp 的 Name= 字段（ProgID 默认值与确定性 mint 的 <Proj>，与 projectBaseName_ 分叉，见 D46）
     std::string vbpProjectName_;
 

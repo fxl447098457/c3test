@@ -66,4 +66,25 @@ CoClassIdentity resolveCoClassIdentity(const CoClassDecl& block, const CoClassEn
 std::string coclassSeed(const std::string& project, const std::string& coclassName);
 std::string ifaceSeed(const std::string& project, const std::string& ifaceName);
 
+// ============================================================
+// 接口自己的 IID 也从这里求 (ai/022 B13c)
+// ============================================================
+// "一个接口在一次编译里只许一枚 GUID" —— 新式接口的 IID 今天同时被三处各自派生（vtable 的
+// `ivDeriveIid`、dll_entry 的 `generateIid`、类型库的 `generateUuid`），三枚值互不相等，
+// 于是类型库广告给客户端的 IID 服务器根本不应答。本函数是这三处唯一的取值口：
+// 显式 `[InterfaceId("...")]` > `mintGuid(ifaceSeed(<Proj>, <接口名>), kIfaceSeeds)`。
+// 与 `resolveCoClassIdentity` 里默认接口那条 IID 走的是同一条式子，两者不可能分叉。
+std::string resolveIfaceIid(const std::string& project, const IfaceView& v);
+
+// 只按名字 mint（不看 `[InterfaceId]`）。块里 `[Default]` 指的是一个 legacy 类模块时用它，
+// 值与 B13c 之前逐字节相同。
+std::string ifaceIidFromName(const std::string& project, const std::string& ifaceName);
+
+// 整工程的接口 IID 表：key = 接口名小写（`ifaceLower`），value = "{...}"。
+// stage 2.7 Pass E 建一次、之后与 `coclassIds_` 同样只读。表里没有 = 这个接口不是新式
+// 接口（legacy `Implements` 的类模块、或没有登记名的场合）⇒ 消费者保持各自的 legacy 派生，
+// 存量工程的产物逐字节不变（C04 隔离原则第三次应验）。
+using IfaceIdMap = std::unordered_map<std::string, std::string>;
+IfaceIdMap buildIfaceIdMap(const std::string& project, const IfaceRegistry& ifaces);
+
 } // namespace vb6c3

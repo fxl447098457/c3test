@@ -235,6 +235,10 @@
     void setCoClassIdentityRegistry(const std::unordered_map<std::string, CoClassIdentity>* reg) {
         ccreg_ = reg;
     }
+    // 接口 IID 唯一出口 (ai/022 B13c): 同上，只读注入
+    void setInterfaceIidMap(const std::unordered_map<std::string, std::string>* map) {
+        iidreg_ = map;
+    }
     // 查询接口唯一实现类名 (空串 = 无映射/多实现类, 不可用)
     std::string singleImplementationClass(const std::string& ifaceName) const {
         if (!interfaceImplementers_) return "";

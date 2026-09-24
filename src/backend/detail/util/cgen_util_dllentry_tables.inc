@@ -99,6 +99,16 @@ std::string wideName = "L\"" + bareName + "\"";
                 iidMap[ifaceName] = cc.defaultIfaceIid;
                 continue;
             }
+            // ai/022 B13c: 新式接口（Pass E 的接口 IID 表里有名）取表里的值 —— 与类自己的
+            // vtable QI、类型库三处同值；表里没有（legacy `Implements` 的类模块）才落到
+            // prelude 那枚 legacy 派生，存量工程的产物逐字节不变。
+            if (iidreg_) {
+                auto mapIt = iidreg_->find(lower);
+                if (mapIt != iidreg_->end() && !mapIt->second.empty()) {
+                    iidMap[ifaceName] = mapIt->second;
+                    continue;
+                }
+            }
             iidMap[ifaceName] = generateIid("iface:" + progId + "." + ifaceName);
         }
     }

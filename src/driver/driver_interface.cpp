@@ -396,6 +396,18 @@ bool Driver::runInterfacePrepass(const CompileOptions& options) {
                 coclassIds_.emplace(ifaceLower(id.name), std::move(id));
             }
         }
+        // 接口 IID 表 (ai/022 B13c): 同一个 <Proj>、同一组种子，块内 [Default] 那条与
+        // 新式接口 vtable 用的是同一个函数 ⇒ 结构上不可能分叉。
+        ifaceIds_ = buildIfaceIdMap(env.project, ifaces_);
+        // 读数按源码序打（unordered_map 的桶序不稳定，会让同一工程两次编译的信息行换顺序）
+        for (auto& mod : modules_) {
+            for (auto& d : mod->interfaces) {
+                if (!d || d->name.empty()) continue;
+                auto it = ifaceIds_.find(ifaceLower(d->name));
+                if (it == ifaceIds_.end()) continue;  // 父链已错的接口不发身份
+                std::cerr << "C3: Interface '" << d->name << "' IID=" << it->second << std::endl;
+            }
+        }
     }
 
     // --- Pass F: CoClass 块的形状与名字校验 (tB 扩展, ai/022 D48, 批次 B11/C03a) ---

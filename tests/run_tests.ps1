@@ -120,6 +120,10 @@ $script:pass = 0
 $script:fail = 0
 $script:skip = 0
 $script:total = 0
+# ai/022 B13c: 类型库 / COM 服务器表 / 接口 vtable ä¸条通道是否同值,
+# 取读数的助手单独一个文件（tests\tlb_identity.ps1）。它只用 $C3/$Tests/$OutDir,
+# 这里都已经就位。
+. (Join-Path $PSScriptRoot "tlb_identity.ps1")
 
 # === COM 测试前: 检查相关 COM 组件是否已注册 ===
 # 仅当所需的 COM 组件已注册时, 才执行对应的 COM 测试 (例如 VBMANLIB)
@@ -1219,8 +1223,12 @@ if ($Category -in @("all", "run", "vbp")) {
         "CoClass 'PG' identity: CLSID={11112222-3333-4444-5555-666677778888} (vbp)",
         "IID={F5CEF988-3217-6173-94B7-BB99C4B8CB81} (minted)",
         "ProgID=CoDll.PG (minted)",
-        "impl='CImpl' comCreatable=True")
+        "impl='CImpl' comCreatable=True",
+        "default interface 'IProbe' is a vtable interface: 0 Public member")
 
+    # ai/022 B13c: D57-5 「COM 表与 .tlb 是否逐值一致」的第一个读数 —— 同一个接口在
+    # COM 服务器表、类自己的 vtable QI、类型库三条通道里必须只有一枚 GUID。
+    Test-TlbIdentitySingleSource "cc_dll_tlb_matches_table" "$Tests\cc_dll\CoDll.vbp" "CoDll" "CImpl" "IProbe" "{11112222-3333-4444-5555-666677778888}"
     Test-Vbp "test_vbman" "$Tests\test_vbman\test_vbman.vbp" @("P24-04a:OK", "P24-04b:OK", "P24-04:2/2") -Arch "x86" -RequiresCom "VBMANLIB.cVBMAN"
     $vbpSw.Stop()
     Write-Host "  (vbp/gui tests took $([Math]::Round($vbpSw.Elapsed.TotalSeconds))s)"

@@ -330,10 +330,22 @@ void CCodeGen::emitIfaceContractTypedefs() {
         // B06a: 本接口的 IID（QueryInterface 按值比这个 16 字节块）
         {
             unsigned char iid[16];
-            ivDeriveIid(*v, iid);
+            const std::string* mapIid = nullptr;
+            if (iidreg_) {
+                auto it = iidreg_->find(ifaceLower(v->name));
+                if (it != iidreg_->end()) mapIid = &it->second;
+            }
+            std::string srcNote = "derived from name";
+            if (mapIid && ivParseGuidText(*mapIid, iid)) {
+                // ai/022 B13c: 一枚接口在一次编译里只许一枚 GUID —— 值来自 stage 2.7 Pass E
+                // 的接口 IID 表，与 dll_entry 的 IID 表、类型库读同一份。
+                srcNote = "from interface IID map";
+            } else {
+                ivDeriveIid(*v, iid);
+                if (!v->guid.empty()) srcNote = "from InterfaceId attribute";
+            }
             h_.emitLine("static const unsigned char vb6_iv_iid_" + id + "[16] = " +
-                        ivIidInitializer(iid) + ";  /* " +
-                        (v->guid.empty() ? "derived from name" : "from InterfaceId attribute") + " */");
+                        ivIidInitializer(iid) + ";  /* " + srcNote + " */");
         }
         h_.emitLine("#endif");
         h_.emitBlank();
