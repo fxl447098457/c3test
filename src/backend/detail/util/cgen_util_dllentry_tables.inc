@@ -89,9 +89,17 @@ std::string wideName = "L\"" + bareName + "\"";
     std::unordered_map<std::string, std::string> iidMap;
     for (auto& cc : coClasses) {
         for (auto& ifaceName : cc.implementsNames) {
-            if (iidMap.find(ifaceName) == iidMap.end()) {
-                iidMap[ifaceName] = generateIid("iface:" + progId + "." + ifaceName);
+            if (iidMap.find(ifaceName) != iidMap.end()) continue;
+            // ai/022 B13b: 这个接口就是块里 [Default] 那个 → 用唯一出口求出的 IID。
+            // 并掉的是 D56-3 那枚"同一次编译里一个接口两个 IID"：表的 defaultIfaceIid
+            // 与 ifaceIids[] 从此对同一个接口给同一个 GUID。
+            std::string lower = Symbol::toLower(ifaceName);
+            if (!cc.defaultIfaceName.empty() && lower == cc.defaultIfaceName &&
+                !cc.defaultIfaceIid.empty()) {
+                iidMap[ifaceName] = cc.defaultIfaceIid;
+                continue;
             }
+            iidMap[ifaceName] = generateIid("iface:" + progId + "." + ifaceName);
         }
     }
 
@@ -198,12 +206,14 @@ std::string wideName = "L\"" + bareName + "\"";
     // 3. 全局coclass描述表
     entry.emitLine("const vb6_CoClassDesc g_vb6_coclasses[] = {");
     entry.indent();
-    for (auto& cc : coClasses) {
+    // 一行 = 一个 ProgID 档。B13b 起同一份契约可以占两档：类模块名档（存量口径）
+    // 与 CoClass 块名档（手写块 + [ComCreatable(True)]），CLSID 相同、工厂相同。
+    auto emitCoclassRow = [&](const CoClassInfo& cc, const std::string& rowProgId) {
         std::string clsId = cIdent(cc.moduleName);
         std::string clsStruct = "vb6_cls_" + clsId;
         entry.emitLine("{");
         entry.indent();
-        entry.emitLine("\"" + cc.progId + "\",  /* progId */");
+        entry.emitLine("\"" + rowProgId + "\",  /* progId */");
         entry.emitLine("\"" + cc.clsidStr + "\",  /* clsidStr */");
         entry.emitLine("\"" + cc.moduleName + "\",  /* classVariable */");
         entry.emitLine("(void*(*)(void))" + clsStruct + "_New,  /* factoryFunc */");
@@ -245,6 +255,13 @@ std::string wideName = "L\"" + bareName + "\"";
         }
         entry.dedent();
         entry.emitLine("},");
+    };
+    for (auto& cc : coClasses) {
+        emitCoclassRow(cc, cc.progId);
+        if (!cc.groupProgId.empty()) {
+            emitCoclassRow(cc, cc.groupProgId);
+            extraGroupRows++;
+        }
     }
     entry.dedent();
     entry.emitLine("};");

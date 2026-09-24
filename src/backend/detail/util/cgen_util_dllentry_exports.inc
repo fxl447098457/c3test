@@ -2,7 +2,7 @@
 // 由 src/backend/cgen_util.cpp 拆出（2026-09-17），在函数体内被 #include，非独立编译单元。
 // 内容 = 原文件第 624~696 行，逐行未改。
 
-    entry.emitLine("const int g_vb6_coclassCount = " + std::to_string(coClasses.size()) + ";");
+    entry.emitLine("const int g_vb6_coclassCount = " + std::to_string(coClasses.size() + extraGroupRows) + ";");
     entry.emitBlank();
 
     // ExeComBridge 01: includeDllExports=false (EXE 工程的 com_entry.c) 时只生成

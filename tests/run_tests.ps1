@@ -1199,21 +1199,27 @@ if ($Category -in @("all", "run", "vbp")) {
         "const vb6_CoClassDesc g_vb6_coclasses[]", '"TestAXDLL.Calc"',
         '"{D84F362F-8EF1-D16D-8814-C16ADB700BAB}"',
         "DllGetClassObject", "DllRegisterServer") -Arch "x86"
-    # cc_dll pins TODAY'S SHAPE of a CoClass block inside a DLL project, including the two
-    # places the outward half is knowingly incomplete (022 D56). B13b must FLIP this case:
-    # once the identity channels are merged, the stage-2.7 values (CoDll.PG / F5CEF988)
-    # should be what the product registers, and the dllentry-minted IID_vb6iface_IProbe
-    # (0x0AD9CBC7) should disappear from the generated entry.
-    Test-VbpDll "cc_dll_identity_two_channels" "$Tests\cc_dll\CoDll.vbp" @(
+    # B13b: the two identity channels are merged for the DLL product. This case used to
+    # PIN THE FORK (needle 0x0AD9CBC7 / absent CoDll.PG); flipping it is the batch's
+    # acceptance evidence, so the needles are now exactly the other way round:
+    #   - the group ProgID CoDll.PG is in the product (a second row, same CLSID) because the
+    #     block writes [ComCreatable(True)] -- the first product-level consequence that bit has
+    #   - IID_vb6iface_IProbe == IID_vb6def_CImpl == the stage-2.7 value (0xF5CEF988), so the
+    #     dllentry minter no longer answers for an interface the resolver already resolved
+    #   - 0AD9CBC7 (what generateIid derived here before B13b) must be gone
+    # The legacy <Proj>.<Class> row stays: existing DLL clients keep working.
+    Test-VbpDll "cc_dll_identity_single_source" "$Tests\cc_dll\CoDll.vbp" @(
         '"CoDll.CImpl"',
+        '"CoDll.PG"',
+        "const int g_vb6_coclassCount = 2;",
         "{11112222-3333-4444-5555-666677778888}",
-        "0x0AD9CBC7",
+        "0xF5CEF988",
         "0, /* methodCount */") @(
-        "CoDll.PG", "F5CEF988") @(
+        "0AD9CBC7") @(
         "CoClass 'PG' identity: CLSID={11112222-3333-4444-5555-666677778888} (vbp)",
         "IID={F5CEF988-3217-6173-94B7-BB99C4B8CB81} (minted)",
         "ProgID=CoDll.PG (minted)",
-        "impl='CImpl' comCreatable=False")
+        "impl='CImpl' comCreatable=True")
 
     Test-Vbp "test_vbman" "$Tests\test_vbman\test_vbman.vbp" @("P24-04a:OK", "P24-04b:OK", "P24-04:2/2") -Arch "x86" -RequiresCom "VBMANLIB.cVBMAN"
     $vbpSw.Stop()

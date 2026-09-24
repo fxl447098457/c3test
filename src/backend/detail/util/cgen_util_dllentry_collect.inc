@@ -35,6 +35,33 @@
                 info.clsidStr = sym->comClsidStr.empty() ? generateClsid(progId + "." + sym->name) : sym->comClsidStr;  // P6.8: 优先使用VBP指定的CLSID
                 info.progId = progId + "." + sym->name;
 
+                // ai/022 B13b: 身份从唯一出口 coclassIds_ 取（026 三节"不可让步" + D47"不许
+                // 第二条通道"；D56-3 实测：登记表在后端一个消费者都没有，产品注册的从来不是
+                // 语义层那一份）。登记表按**块名**索引，这里按 [Implementation] 反查实现类。
+                // **只接手写块**：折算记录（C04）的 clsid/iid 一旦覆盖上去，存量 DLL 工程的
+                // 注册身份就会换 mint（两族种子不同），那是"把改码前编得过的工程产物改掉"，
+                // 与逐字节护栏冲突 —— legacyFolded 一律照旧走 comClsidStr / legacy lambda。
+                const CoClassIdentity* ccid = nullptr;
+                if (ccreg_) {
+                    for (const auto& kv : *ccreg_) {
+                        const CoClassIdentity& id = kv.second;
+                        if (id.name.empty() || id.legacyFolded) continue;
+                        if (Symbol::toLower(id.implName) == lowerName) { ccid = &id; break; }
+                    }
+                }
+                if (ccid) {
+                    if (!ccid->clsid.empty()) info.clsidStr = ccid->clsid;
+                    if (!ccid->iid.empty()) {
+                        info.defaultIfaceIid = ccid->iid;
+                        info.defaultIfaceName = Symbol::toLower(ccid->defaultIface);
+                    }
+                    // 组名档 ProgID：块名与类模块名不同名才有意义（VB6 惯用的同名写法不产生第二行），
+                    // 且必须 [ComCreatable(True)] —— 这个位今天第一次在产品侧有后果。
+                    if (ccid->comCreatable && Symbol::toLower(ccid->name) != lowerName) {
+                        info.groupProgId = progId + "." + ccid->name;
+                    }
+                }
+
                 // 使用类的memberNames查找Public方法符号
                 // (不能按前缀"ClassName_"搜索, 因为单模块工程中方法名是"SetValue"而非"Calc_SetValue")
                 // Fix 016b: 优先搜索该类自身的符号表 (classOwningSymTab), 避免跨类同名碰撞.
@@ -138,7 +165,7 @@
                         : sym->comSourceIfaceIid;
                 }
                 // P6.6.6: 默认接口IID (由driver TypeLib builder回写)
-                info.defaultIfaceIid = sym->comDefaultIfaceIid;
+                if (info.defaultIfaceIid.empty()) info.defaultIfaceIid = sym->comDefaultIfaceIid;
                 coClasses.push_back(std::move(info));
             }
         }
