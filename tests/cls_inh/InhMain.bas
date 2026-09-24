@@ -1,5 +1,13 @@
 Option Explicit
 
+' ai/022 B08f-1 (D37): the class name of a UDT object field used to be dropped when the class
+' lives in another module, so `Set u.h = d` wrapped a VARIANT into a vb6_cls_InhBase* field
+' (C2440), `u.h.Speak()` emitted illegal C (C2039) and `u.h.Greet(...)` fell to late-bound COM.
+Public Type TWrap
+    h As InhBase
+    n As Long
+End Type
+
 Sub Main()
     Dim d As InhDerived
     Set d = New InhDerived
@@ -134,4 +142,15 @@ Sub Main()
     If d.g_viaRet = "derived" Then Debug.Print "INH39:OK" Else Debug.Print "INH39:FAIL " & d.g_viaRet
     Set rb = b.RefOf()
     If b.g_viaRet = "base" Then Debug.Print "INH40:OK" Else Debug.Print "INH40:FAIL " & b.g_viaRet
+    ' INH41..INH43 (ai/022 B08f-1, D37): the UDT object field lives in InhUdt.bas, i.e. it
+    ' references a class from *another* module. The class name used to be dropped in analysis,
+    ' so `Set u.h = d` wrapped a VARIANT into a vb6_cls_InhBase* field (C2440), `u.h.Speak()`
+    ' emitted illegal C (C2039) and `u.h.Greet(...)` fell to late-bound COM dispatch. All three
+    ' now go through the class member path and bind to the instance.
+    Dim u As TWrap
+    Set u.h = d
+    If u.h.Speak() = "derived" Then Debug.Print "INH41:OK" Else Debug.Print "INH41:FAIL " & u.h.Speak()
+    If u.h.Greet("bob") = "hi bob (derived)" Then Debug.Print "INH42:OK" Else Debug.Print "INH42:FAIL " & u.h.Greet("bob")
+    Set u.h = b
+    If u.h.Speak() = "base" Then Debug.Print "INH43:OK" Else Debug.Print "INH43:FAIL " & u.h.Speak()
 End Sub

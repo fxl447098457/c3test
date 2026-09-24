@@ -445,6 +445,11 @@
     // ← vb6_VariantArrayGet → vb6_VariantToString; uBuf.MaxMatch As Long ← At() → vb6_VariantToLong)
     Vb6Type inferUdtFieldVb6Type(const ASTNode* target) const;
 
+    // ai/022 B08f-1 (D37): 走同一条 UDT 解析路, 但返回字段在 C 里的**对象类型**
+    // (`vb6_cls_X*` / `void*` / "" = 不是对象字段或推不出)。判"这个左值到底是不是 Variant
+    // 容器"用它 —— `mi.type` 那条口径对跨模块的 `As <项目类>` 会说是 Variant。
+    std::string udtFieldCTypeOfTarget(const ASTNode* target) const;
+
     // Fix 084o: 若 C 表达式为 Variant (字符串级检测或已知 Variant 变量), 返回
     // vb6_VariantToLong(...) 包装, 否则原样返回. 用于需要 int32_t 的上下文:
     // 整除运算符 \ 的操作数、vb6_VariantArrayGet/GetVal 的索引、For 循环 Variant

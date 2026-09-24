@@ -332,6 +332,38 @@ Vb6Type CCodeGen::inferUdtFieldVb6Type(const ASTNode* target) const {
 }
 
 
+// ai/022 B08f-1 (D37): 与上一条走同一条 UDT 解析路, 但返回字段在 **C 里的对象类型**
+// (`vb6_cls_X*` / `void*` / "" = 不是对象字段或推不出)。为什么不直接改 inferUdtFieldVb6Type
+// 的返回值: `As <项目类>` 的 UDT 成员在语义层就是 Variant，而 Vb6Type::Variant 另有消费者
+// （实参打包、Let 赋值语义），改它等于同时改那几处行为。这里要回答的问题只有一个 ——
+// "这个左值到底是不是 Variant 容器" —— 那只有字段的真实 C 类型说了算。
+std::string CCodeGen::udtFieldCTypeOfTarget(const ASTNode* target) const {
+    if (!target) return std::string();
+    std::string udtCType, memName;
+    if (target->kind == ASTNodeKind::MemberAccessExpr) {
+        auto& ma = static_cast<const MemberAccessExpr&>(*target);
+        if (!ma.object) return std::string();
+        udtCType = inferUdtTypeOfExpr(*ma.object);
+        memName = ma.memberName;
+    } else if (target->kind == ASTNodeKind::WithMemberExpr) {
+        if (withObjectInfoStack_.empty() || withObjectVars_.empty()) return std::string();
+        const auto& info = withObjectInfoStack_.back();
+        if (info.kind != WithObjKind::Unknown) return std::string();  // 仅 UDT
+        memName = static_cast<const WithMemberExpr&>(*target).memberName;
+        auto it = knownUdtVars_.find(Symbol::toLower(withObjectVars_.back()));
+        if (it == knownUdtVars_.end()) return std::string();
+        udtCType = it->second;
+    } else {
+        return std::string();
+    }
+    const std::string prefix = "vb6_type_";
+    if (memName.empty() || udtCType.size() <= prefix.size()
+        || udtCType.compare(0, prefix.size(), prefix) != 0)
+        return std::string();
+    return udtFieldObjCType(udtCType, Symbol::toLower(memName));
+}
+
+
 // ============================================================
 // Fix 085: UDT 对象字段类型推断
 // ============================================================
@@ -372,6 +404,22 @@ std::string CCodeGen::udtFieldObjCType(const std::string& udtCType,
             }
             // Collection/COM/接口 等对象字段 → COM dispatch
             return "void*";
+        }
+        // ai/022 B08f-1 (D37): 跨模块的 `As <项目类>` 在语义层落到 Variant 兜底 (类名靠
+        // semantic_analyzer_decl_type.cpp 那条新增分支存进 typeRefName)。这里按**当前**
+        // (stage 3.5 之后，Class 符号已注入)的符号表回判：认得出工程类才当对象字段，
+        // 认不出照旧返回 "" —— 现在标量/真 Variant 字段也带名字了，不能顺手误判成对象。
+        if (mi.type == Vb6Type::Variant && !mi.typeRefName.empty()) {
+            std::string tn = mi.typeRefName;
+            if (tn.size() > 4 && tn.compare(0, 4, "VBA.") == 0) tn = tn.substr(4);
+            Symbol* refSym = symTab_.lookupModule(tn);
+            if (refSym && refSym->kind == SymbolKind::Class) {
+                std::string clsCanon = !refSym->sourceModule.empty()
+                                           ? refSym->sourceModule
+                                           : moduleName_;
+                return "vb6_cls_" + cIdent(clsCanon) + "*";
+            }
+            return "";
         }
         // Fix 177: String 字段 → "BSTR"。调用方 appendUdtObjFieldMarker 只对
         // "void*"/"vb6_cls_*" 追加对象标记, 故新增此返回不影响既有分派;
