@@ -887,7 +887,11 @@ if ($Category -in @("all", "run", "vbp")) {
     # ai/022 B07b: INH2..INH11 cover the merged member face + prefix-copied fields +
     # forwarding stubs (private Long/UDT/BSTR fields, Optional params, Property Get/Let,
     # 3-level chain, child-wins shadowing, base/derived instance isolation).
-    Test-Vbp "cls_inh_pair" "$Tests\cls_inh\Inh.vbp" @(
+    # ai/022 B09b: run the same project on BOTH architectures. An inherited field is embedded by
+    # value, so the derived struct's prefix must be byte-exact against the base struct; a wrong
+    # field type is invisible on x64 when sizeof(void*) happens to equal that type's size, and only
+    # the x86 build/run catches it (022 D39: INH35/INH36/INH39 failed on x86 for exactly that).
+    $inhExpected = @(
         "INH0:derived", "INH1:OK", "INH2:OK", "INH3:OK", "INH4:OK", "INH5:OK",
         "INH6:OK", "INH7:OK", "INH8:OK", "INH9:OK", "INH10:OK", "INH11:OK",
         "INH12:OK", "INH13:OK", "INH14:OK", "INH15:OK", "INH16:OK",
@@ -898,6 +902,8 @@ if ($Category -in @("all", "run", "vbp")) {
         # INH51 = Overrides returning a project class (com_entry.c forward-decl ordering).
         "INH44:OK", "INH45:OK", "INH46:OK", "INH47:OK", "INH48:OK", "INH49:OK", "INH50:OK",
         "INH51:OK", "INH52:OK")
+    Test-Vbp "cls_inh_pair" "$Tests\cls_inh\Inh.vbp" $inhExpected
+    Test-Vbp "cls_inh_x86" "$Tests\cls_inh\Inh.vbp" $inhExpected -Arch "x86"
     Test-Vbp "test_vbman" "$Tests\test_vbman\test_vbman.vbp" @("P24-04a:OK", "P24-04b:OK", "P24-04:2/2") -Arch "x86" -RequiresCom "VBMANLIB.cVBMAN"
     $vbpSw.Stop()
     Write-Host "  (vbp/gui tests took $([Math]::Round($vbpSw.Elapsed.TotalSeconds))s)"
