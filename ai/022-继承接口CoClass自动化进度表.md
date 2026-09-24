@@ -4,9 +4,9 @@
 > 每次运行开始先读本文件，结束前必须更新本文件（状态头 + 批次清单 + 运行日志）。
 > 规范输入: `ai/讨论记录/018-接口继承与CoClass设计思路.md`（含 tB 文档要点与分阶段设计思路全文）。
 
-STATUS: IDLE             # NOT_STARTED | DESIGN | BUSY | IDLE | ALL_DONE
-LAST_RUN: 2026-09-24T13:17:37+08:00   # 本轮 = **B10 收线**（代码 `3c5d8e6`，门 = Actions run **#16 = success**、head_sha 已核；
-               # 上一轮把同一批的代码+文档提了、门当时被 GitHub 502/504 挡住，本轮只做"推上去 + 盯完 + 记账"）。
+STATUS: BUSY             # NOT_STARTED | DESIGN | BUSY | IDLE | ALL_DONE
+LAST_RUN: 2026-09-24T13:24:30+08:00   # 本轮 = **B11 / C01 起步**：先做 022 清单第 1 条的"先量后写"（量 `CoClass` 块今天
+               # 在哪一层断、属性行进不进 AST），裁决记 **D44**；上一轮 = B10 收线（代码 `3c5d8e6`，门 = run **#16 全绿**）。
                # 自动运行见本行不足 55 分钟请立即跳过。
 LAST_COMMIT: 代码批 = 3c5d8e6(B10)、9eb2ca7(B09c)、debb110(B09b)、02bac92(B09)、77ecef1(B08f-1)、40eea3f(B08e-6)、d9eca95(B08e-5)、392a52d(B08e-4)   # **commit message 一律现写、不复用上批文本**；push 只推 `github/dev`（Actions 门），`origin`(gitcode) 与 `main` 不碰、**绝不建 MR**。
 CURRENT_BATCH: **B11 = P5 `CoClass…End CoClass`**，实施依据是 **`ai/026-CoClass与COM暴露计划书.md`**
@@ -1839,6 +1839,101 @@ vb6_F9Base_prop_let_Level((void*)u.c, 9);  /* Property Let via prop_get_ rewrite
 （新增 `itf_xmod\XWriter.vbp`、`cls_inh\Inh.vbp` —— 本批动的是接口适配器发射器和 2.7，
 这两个工程是最直接的压力点）10/10 全同；`-Category syntax` 84→89。
 
+### D44 B11/C01 前置实测（2026-09-24 13:24–，只量不改码；探针在 `.build/probe_b11/P1..P4`）
+
+**结论先行：`CoClass` 今天的可观测面只在语法层，且层与层之间断在第一行。** C01 的验收面因此是
+`--syntax-only` + `--dump-ast`（D15-5 那条单文件通路），不是运行期。
+
+四份探针（P1 = `.bas` 里整块含内联 Interface 定义、P2 = `.cls` 头行宿主、P3 = `As Circle`/`New Circle`
+消费点、P4 = 畸形块）对 `.build/pre_b11_C3.exe` 的读数：
+
+1. **`CoClass` 不是 token**（`src/lexer/` 零登记，只是 Identifier）→ 模块级主循环落进兜底分支，
+   第一行报 `VB2002 unexpected token at module level: CoClass`。关键形状：**错误恢复只 `skipToNextLine`
+   跳一行**，块内其余行于是各自按"模块级"重新解析 —— 所以 P1 报出 20 条互相无关的错、P2 只 2 条
+   （13 行的 `[CoClassId]` 名字已在白名单 → 14 行 `Interface` 被当成**顶层接口块**吞掉、只剩 17 行
+   `End CoClass` 报错）。一句话：现在的 CoClass 块不是"整块被拒"，而是**被拆散后各部分各自为政**，
+   这比整块被拒更危险（P2 那份"看起来只差两行"其实把块内的接口声明偷运成了顶层声明）。
+2. **属性白名单缺两词**：`itfKnownAttrNames`（`parser_interface.cpp:42-50`）收了 `coclassid`/
+   `comcreatable`/`coclasscustomconstructor`/`default`/`source`，但 **`ProgId` 与 `Implementation` 没登记**
+   → `VB2012 Unrecognized attribute line`。026 四节样本正好用了这两个词，所以 C01 不补就连样本都进不去。
+3. **布尔实参不支持**：`[ComCreatable(True)]` → `VB2012 Attribute line argument must be a string or an
+   integer: True`。属性行整体是一个 token，参数用 `strtoll` 现解析，`True` 在这里**不是 token** ——
+   所以修法是解析器认 `"True"/"False"` 字面，不是改 lexer。
+4. **同行"属性 + 声明"今天不通**：`[Default] Interface ICircle` → `VB2003 expected end of statement`（列 15）
+   + `VB2002 Attribute line must precede an Interface declaration`，根因是 `parseBracketAttrLine` 末尾无条件
+   `expectEndOfStatement()`。026 四节把 `[Default] Interface ICircle` 写在同一行 → 必须处理。**裁决：不动
+   Interface 那条路**（`itf_n06` 负例正守着那句诊断，且改了等于给契约块开新语法），只给 CoClass 块内
+   用一个 `requireOwnLine=false` 的变体：属性行吃掉后若同行还有内容，留给块体循环判定。
+5. **`End CoClass`** 单独报 `VB2002 unexpected token at module level: End`（P3/P4 各一处）。
+6. **语料核查**（026 二节那份的复核）：`tests/` + `archive/` 里 `coclass` 作标识符 **0 次**（唯一命中是
+   `coclassid`/`coclassinfo` 之类）→ 软关键字登记安全。
+7. **同名不同物，别撞车**：仓库里"coclass"三处既有设施全是**外部类型库侧**的（`typelib_builder_coclass.cpp`
+   的 `addCoClass`、`symbol_table.hpp:41` 的 `ComClass`、`vbp_parser.hpp:84-85` 引用工程枚举 coclass 烘 ProgID 表），
+   与新的语言块无关；`symbol_table.hpp:248-252` 已有一套"本工程类模块遮蔽类型库 coclass"的机制 —— **C03 做
+   `As <CoClass>` 名解析时必须先说清"块名与 typelib 的 ComClass 同名谁赢"**，别顺手新造第三套优先级。
+
+**C01 落点裁决**（严格守在 026 六节"不校验、不发码"那一格）：
+- 词法四件套照 B10/Delegate：`token.hpp` 枚举 + `token.cpp::isKeyword` + `lexer_keywords.cpp` +
+  `parser_helpers.cpp` 软表；`isStatementStart` 不加。
+- AST 新增 `CoClassDecl`（含 `CoClassIfaceRef{ifaceName,isDefault,attributes}`），存进 **`Module::coclasses`** ——
+  与 `interfaces` 同一个手法：**不进 `declarations`**，语义/发码层看不见它，所以"零回归"是结构性的而非测试性的。
+  可观测面靠 `--dump-ast` 的 printer 一行。
+- 块体语法：**只收属性行与 `Interface <名>` 引用行**（`Interface IShape` 在 026 样本里没有 `End Interface`
+  = 引用已声明的接口，不是内联定义），`[Default]` 标默认。内联定义/字段/过程一律按非法行报错。
+- **属性行归属要单独定规则**（实施时才暴露，026 四节没写）：样本把 `CoClassId/ProgId/ComCreatable/
+  Implementation` 四条写在**首个契约条目之前**，而 `[Default]` 只能贴在条目上 —— 若一律"属性行留给下一条
+  `Interface`"，那四条就挂到了第一个接口上（`--dump-ast` 一眼看穿：`Interface IShape (4 attrs)`）。
+  定案 = 按"**名字 + 位置 + 是否同行**"三条合判：`[Default]` 永远归条目；同行紧跟 `Interface` 的归条目；
+  其余在首个条目之前归块、之后归下一条目。**不靠空行**（空行不是语法）。
+- 属性通路复用现成的 `InterfaceAttr` 与 `parseBracketAttrLine`（顺带补第 2、3 条：白名单加两词、
+  布尔折成 `numValue` 1/0 —— 不加新字段，因为 C02 求解身份时 `True`/`1` 同义）。
+- **C01 的代码进了 `parser_interface.cpp`，没另立 `parser_coclass.cpp`**（本条覆盖上面"新文件"的设想）：
+  方括号属性行的全部语法（白名单、实参形态、`requireOwnLine`）都在那个文件里，CoClass 块要复用的正是它；
+  分家就得把 `itfAsciiLower` 一类判定复制一份，等于把"一处属性行语法"拆成两处。CMakeLists 因此未动。
+- **不新增诊断 ID**：畸形子句只用 `Parse*` 家族（2001/2002/2005/2012）；校验语义（宿主 `.frm/.ctl`、
+  `[Implementation]` 指向、默认接口 ∈ 集合、契约聚合、拒绝清单四类）整片留给 C03，`As`/`New`/`CreateObject`
+  改写留给 C05，身份求解唯一函数留给 C02。
+- 于是这几条 C01 **明知不做**（P5 探针量过形状，都在 C03 账上）：同一块里 `Interface X` 写两遍不报重复、
+  块名与别的 CoClass/类/接口重名不报、引用的接口名不存在不报、`[Default]` 标两条不报。
+- `[Default, Source]` 这种**逗号并列**的属性名今天仍整串比对 → `VB2012` 不认（026 四节末那条"只接受并存档"
+  要等真做元数据时才补拆解，不在 C01 顺手加）。
+- 一处**顺带**的既有文案要跟着改：`parser_module.cpp:155` 那句 "Attribute line must precede an Interface
+  declaration" 现在也要涵盖 CoClass（同批改 `itf_n06` 的 needle，否则负例假绿）。
+
+### D45 B11/C01 实施（2026-09-24 13:24–，代码 `e7c7a31`）= `CoClass…End CoClass` 落到 AST
+
+**落点**（15 文件，全在 `src/` 的语法侧 + 用例；CMakeLists 未动）：
+
+- 词法四件套：`token.hpp` 枚举 + `token.cpp::isKeyword` + `lexer_keywords.cpp` + `parser_helpers.cpp` 软表。
+- AST：`ast_enums.hpp` 的 `ASTNodeKind::CoClassDecl` + `ast_fwd.hpp` + `ast_decl.hpp`（`CoClassDecl` /
+  `CoClassIfaceRef{ifaceName,isDefault,attributes,loc}` / `Module::coclasses`）+ `ast_visitor.hpp` 的 visit 钩子
+  + printer 三处（`visit(CoClassDecl&)`、`visitDeclHelper` 的 case、`print(Module&)` 的循环）。
+  **这一串就是"新增一个模块级块类型要登记的位置"清单**，C04（attribute 折算）与以后任何新块照它走，省一轮 grep。
+- parser：`parser.hpp` 两个声明（`parseCoClassDecl`、`parseBracketAttrLine` 加 `requireOwnLine`，默认 true
+  → Interface 那条路行为不变）+ `parser_interface.cpp` 末尾的 `parseCoClassDecl` +
+  `parser_module.cpp` 主循环 Interface 分支旁多一个 CoClass 分支。
+- 属性行通路：白名单补 `progid`/`implementation`；实参形态补 `True`/`False`（折进 `numValue`）。
+
+**三条以后还用得上的判断**：
+
+① **结构性零回归优于测试性零回归**。新块存进 `Module::coclasses` 而不是 `declarations`，语义层与发码层
+没有任何一条路能看见它 —— 于是"10 文件 `--emit-c` 全同"是**必然**而不是运气（护栏照跑，只是它测的是
+"我没有手滑"，不是"我猜到了所有影响面"）。这与 B01 给 `interfaces` 的做法同构，D44 把它写成了选型理由。
+② **只到 AST 的批，观测面要两条腿**：`--syntax-only` 静默只证明"不报错"，证明"属性行进到了哪一层"得靠
+`--dump-ast`。本批正是 printer 一行 `Interface IShape (4 attrs)` 暴露出"写在首个条目之前的身份四件套挂到了
+第一个接口上"—— 光看 `--syntax-only` 退出码这条 bug 会一路带到 C02 的身份求解里才炸。
+③ **块的属性归属规则要按"名字 + 位置 + 是否同行"合判，不能靠空行**（空行不是语法）。定案见 D44；
+`[Default]` 折成 `isDefault` 布尔位、不再同时留在 `attributes` 里，免得 C03 面对两处真相。
+
+**验收**：`-Category syntax` **89→95**（新用例 `itf_p05`/`itf_p06` + 负例 `itf_n25`..`n28`）；A/B =
+`.build/pre_b11_C3.exe` 对 `n25` 停在 `VB2002 unexpected token at module level: CoClass`（D44 的原始读数）；
+10 文件 `--emit-c` 对 `pre_b11_C3.exe` **10/10 逐字节全同**；带 CoClass 块的 `p05` 还做了**真编译 + 真运行**
+（打印 `ok`）—— C01 没有任何语义可断，所以本批**不建 vbp 工程**（一次显式的"批粒度小于一个工程"取舍，
+运行期断言从 C05 起才有承载面）。门 = 本次 push（`3c5d8e6..e7c7a31`）触发的 Actions run，编号与结论记在状态头。
+
+**下一格 = C02**（026 六节）：身份求解唯一函数 `CLSID/IID/ProgID` 三优先级 + 两次构建可复现。C01 已经把
+输入面备好了 —— `InterfaceAttr` 的字符串/整数/布尔三形态与 `CoClassDecl::attributes` 就是它的读取起点。
+
 ## 运行日志
 
 - 2026-09-23 建表：范围确认（含完整COM）、规范文档 018 入库、现状盘点完成。
@@ -2043,3 +2138,4 @@ vb6_F9Base_prop_let_Level((void*)u.c, 9);  /* Property Let via prop_get_ rewrite
 - 2026-09-24 11:40– **B09c 收线（只读 + 文档，未改编译器代码）**：Actions run **#15 [dev] = completed/success**， 收线后核 **head_sha = `9eb2ca7`** = 本机 `git rev-parse HEAD`，7 个 job（Build + smoke/bas#1/bas#2/syntax/compile/vbp） 全 success；vbp 分片日志里 `cls_inh_pair ... PASS` 与 `cls_inh_x86 ... PASS` 逐条可见，该分片 `PASS=18 FAIL=0 SKIP=1 TOTAL=19`。 状态头按此记账（`STATUS=IDLE`、CURRENT_BATCH 交出 **B10**、BASE 换 `pre_b10_C3.exe`，本轮 exe md5 `4e3c5cb9`）， 手册 `Inherits 语句.md` 补三处：`MyBase` 的 `Set` 向（含"基类那个名字只有 Let"→ `VB3028`）、 `Class_Terminate` 反序链**为什么不做**（EXE 里没有触发点，实测三种形状）、属性写穿过 UDT 对象字段 从"未交付"移到"已实测通过"（D41 订正）。**顺手把 B10 的第 0 步量掉了**（记录见 **D42**）： `Implements I Via m_f` 今天停在**语法层**（`VB2003` + `VB2002`，因为 `Via` 连软关键字都没登记 —— 四个登记点零命中）， 而去掉 `Via …` 的那份手写就是 **5 条 `VB3012`**（Extends 展开后逐槽报）→ Via 的验收面 = 这 5 条消失且零转发成员。 **P3（继承线）至此完全收口。**
 - 2026-09-24 11:51– **B10（`Implements <接口> Via <持有字段>` 委托式实现）提交 `3c5d8e6`**：四个落点一次接完 —— `Via` 软关键字登记、`ImplementsStmt::viaField`、**stage 2.7 新增 Pass D** 把"字段是不是本类对象字段 / 字段类型那个类实现没实现该接口"裁决成 `vias_`（判定必须在这里做：那些类的符号 3.5 才注入，只有 2.7 看得见整工程模块表），语义层据此免掉逐槽 `VB3012`、发码层据此给没写的槽转发到 **持有对象自己的接口槽** `h->vt-><slot>(h, …)`。**关键选型**：不直调 `vb6_<持有类>_<成员>` —— 接口实现按惯例是 `Private` = C 层 `static`，跨翻译单元连不到（B09 就是这条判死了 `MyBase` 的私有目标），绕表白拿"逐槽合成"。新工程 `tests/itf_via`（纯委托 / 一半自家 / Nothing 字段 / 引用计数 / `TypeOf`）**x64+x86 各 9/9**；A/B 是 D42 那条原始读数（改码前 `VB2003`+`VB2002`）；护栏扩到 10 文件（把两个接口/继承工程也纳入逐字节对照）10/10；`-Category syntax` 84→89。**顺带量出三条既有洞并登记**（见 D43 末）：接口变量的 `Property Let/Set` 写、带 `Optional` 的接口槽调用点少发 `_has_`、接口块放 `.bas` 时调用点认不出 —— 三条都是"到达槽的 caller 形状缺失"，不是委托分支错，另批处理。下一批 **B11 = P5 `CoClass…End CoClass` 语法 + 属性折算 + 契约聚合校验**。
 - 2026-09-24 13:15– **B10 收线（门 = Actions run #16 全绿，本轮只推送+盯门+记账，未改代码）**：上一次推 `github/dev` 连撞 GitHub 502/504（`api.github.com` 也 502），按"门没跑就不收 IDLE"的规矩把 STATUS 留在 BUSY 并把下一步写死在 CURRENT_BATCH 里；本轮 `-c http.version=HTTP/1.1` 推成 `9eb2ca7..3c5d8e6`，watcher 收线后核 **run#16 head_sha = 3c5d8e6**、7 个 job 全 success，vbp 分片日志里 `itf_via_pair`/`itf_via_x86` 逐条 PASS（该分片 20/0/1/21）。GATE_BASELINE 换成本批，P4 的 Via 正式记成已交付，下一批 **B11 = P5 CoClass**（实施依据 `ai/026` 的 C01→C04，开工先量 `CoClass` 块的今天行为并写 D44）。
+- 2026-09-24 13:24– **B11/C01（`CoClass…End CoClass` 块语法 + 属性行落 AST）提交 `e7c7a31`**：按 022 清单第 1 条先量后写（D44 四条读数：`CoClass` 不是 token 故只第一行报 VB2002、`ProgId`/`Implementation` 不在属性白名单、`[ComCreatable(True)]` 布尔实参被 `strtoll` 判死、`[Default] Interface X` 同行写法不通），再落 C01 的三个落点（词法软关键字四件套 / AST 六处登记含 printer / parser 在 `parser_interface.cpp` 复用属性行 machinery 并加 `requireOwnLine`）。实施中暴露一条 026 没写的规则：**属性行归属要按"名字+位置+同行"合判**（`--dump-ast` 抓到身份四件套挂到了第一个接口上），顺手把 `itf_n06` 的 needle 跟着改成涵盖 CoClass。验收 = `-Category syntax` 89→95（`itf_p05`/`p06` + `itf_n25`..`n28`）+ A/B（`pre_b11_C3.exe` 停在 D44 原始读数）+ 10 文件 `--emit-c` 10/10 + 带块工程真编译真运行；C01 无语义可断，故本批**不建 vbp 工程**（运行期断言从 C05 起才有承载面）。门 = 本次 push 触发的 Actions run，结论见状态头。
