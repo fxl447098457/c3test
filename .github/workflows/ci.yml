@@ -1,10 +1,12 @@
 name: VB6 C3 Regression
 
 on:
+  # main 分支已删除 (内容全在 dev 里, 2026-09-25), 默认分支 = dev。
+  # 注意 gate/* 分支不在此列 → 必须手动 `gh workflow run ci.yml --ref <branch>` 才会触发。
   push:
-    branches: [main, dev]
+    branches: [dev]
   pull_request:
-    branches: [main]
+    branches: [dev]
   workflow_dispatch:
 
 jobs:
