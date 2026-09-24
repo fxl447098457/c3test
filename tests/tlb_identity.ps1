@@ -156,3 +156,46 @@ function Test-TlbIdentitySingleSource {
         else { Write-Host ("        " + ($detail -join '; ')) -ForegroundColor DarkGray }
     }
 }
+
+# ============================================================
+# ai/022 B13d: 规范 IUnknown 的形状断言
+# ============================================================
+# COM 的规矩是"同一个对象不管从哪个接口问 IUnknown，拿到的必须是同一个指针"。
+# 薄指针那条路以前把 `IID_IUnknown` 与本接口的 IID 并成一个分支、回 `*ppv = self`，
+# 于是两个接口各问一次会拿到两个不同地址（`__iv_A` 与 `__iv_B` 是同一个结构体里
+# 两个不同偏移的成员，这一点没有含糊空间）。本批改成一律回"本类实现序第一个接口"
+# 的薄指针 —— 那既是稳定身份，也是一份偏移 0 就是 vtable 的合法对象指针。
+#
+# 为什么断形状而不是断行为：整条代码路径上**没有任何自己生成的调用点**去问
+# `IID_IUnknown`（VB 侧没有 QueryInterface 面，接口值也不能进 Variant = B06c），
+# 真正的调用者是外部 COM 客户 ⇒ 那是 B17 的读数。这里钉的是"每个 QI 都回同一个
+# 规范指针、且旧的合并分支已经不在"，配一条真编译真跑（`itf_xmod_writer` 的
+# QI1..QI4）保证兄弟接口/本接口两条分支没有被改坏。
+function Test-CanonicalIUnknownShape {
+    param(
+        [string]$Name,
+        [array]$Sources,
+        [string]$CanonNeedle,     # 例: "void* canon = &me->__iv_IWriter;"
+        [int]$CanonCount          # 该工程里实现新式接口的类的 QI 份数
+    )
+    $script:total++
+    Write-Host -NoNewline "  [IUNK-SHAPE] $Name ... "
+    $text = Invoke-CodegenProj $Sources
+    $detail = @()
+    if ($script:codegenProjExit -ne 0) { $detail += "codegen exit=$script:codegenProjExit" }
+    $hits = ([regex]::Matches($text, [regex]::Escape($CanonNeedle))).Count
+    if ($hits -ne $CanonCount) { $detail += "规范指针分支 $hits 处，期望 $CanonCount 处" }
+    # 旧形状：IUnknown 与本接口并成一个分支、回 self —— 每个接口各回各的，身份不恒等
+    if ($text.Contains("vb6_IidEqual(riid, vb6_iv_iid_IUnknown) ||")) {
+        $detail += "还有把 IID_IUnknown 与本接口并在一起的分支（回 self = 每个接口一个身份）"
+    }
+    if ($detail.Count -eq 0) {
+        $script:pass++
+        Write-Host "PASS ($CanonCount QI 都回同一枚规范指针)" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        Write-Host ("        " + ($detail -join '; ')) -ForegroundColor DarkGray
+        if ($Verbose) { Write-Host $text }
+    }
+}

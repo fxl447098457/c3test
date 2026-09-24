@@ -137,6 +137,11 @@ IDispatch 成员表、内嵌 `.tlb` 都在发），RTL 侧的 `QueryInterface`/`
   可调用要靠"真接口"那条路（类型库 `TKIND_INTERFACE` + 成员进库），排在 B15。
   今天对外能调用的是**类的公有成员**那一档。为了不让"注册成功却点不到"变成谜，编译时会打一条
   `C3: CoClass '<类>' default interface '<接口>' is a vtable interface: 0 Public member exported for IDispatch clients`。
+- **一条已知边界（`ai/022` D59 读出来，等拍板）**：块的 `[Default]` 指向新式接口时，COM 包装器的
+  `QueryInterface` 仍会**答应**那个 IID、交回的却是 IDispatch 那一份胖指针（包装器本身）——
+  早绑定客户按接口虚表去调第 3 个槽，打到的是 `GetTypeInfoCount`。在两条出路中选一条之前
+  （对外不发布这个 IID，或让包装器真返回接口虚表指针 = B16），**不要把"默认接口是新式接口"的
+  CoClass 暴露给早绑定的外部客户**。晚绑定（`CreateObject` + 公有成员）不受影响。
 - 仍开的一条读数（B15）：类型库里新式接口的 `cFuncs` 是 **0** —— 接口模块写的 `Sub`/`Property`
   从来没进过类型库（收集口径是"类模块的公有成员"）。
 

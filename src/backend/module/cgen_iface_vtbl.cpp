@@ -418,15 +418,28 @@ void CCodeGen::emitIfaceImplTables(Module& module) {
         // B06a: 真 QueryInterface —— 认 IUnknown、本接口、以及本类实现的其它接口
         const std::string walkQI = "    " + clsStruct + "* me = (" + clsStruct + "*)((char*)self - offsetof(" +
                                    clsStruct + ", __iv_" + id + "));";
+        // B13d: 规范 IUnknown —— 不管"从哪个接口问"，返回的都是**本类实现序里第一个接口**
+        // 的薄指针（= 类结构体里最靠前的那个 __iv_ 字段）。它是唯一一处"偏移 0 就是 vtable"
+        // 的合法 COM 对象指针，所以这个值既能当身份比、也能直接被再次 QI/AddRef/Release，
+        // 而且不需要给类结构体加字段（D19：布局不能动）。
+        const std::string canonId = cIdent(ifaces.front()->name);
         c_.emitBlank();
         c_.emitLine("static long vb6_iunk_" + clsId + "_" + id + "_QueryInterface(void* self, const void* riid, void** ppv) {");
         c_.indent();
         c_.emitLine(walkQI);
-        c_.emitLine("(void)me;  /* 无兄弟接口时上面的回推用不到 */");
         c_.emitLine("if (!ppv) return 0x80070057L;  /* E_POINTER */");
         c_.emitLine("*ppv = NULL;");
         c_.emitLine("if (!riid) return 0x80070057L;  /* E_POINTER */");
-        c_.emitLine("if (vb6_IidEqual(riid, vb6_iv_iid_IUnknown) || vb6_IidEqual(riid, vb6_iv_iid_" + id + ")) {");
+        c_.emitLine("if (vb6_IidEqual(riid, vb6_iv_iid_IUnknown)) {");
+        c_.indent();
+        c_.emitLine("void* canon = &me->__iv_" + canonId +
+                    ";  /* 规范指针 (ai/022 B13d): 本类实现的第一个接口 */");
+        c_.emitLine("*ppv = canon;");
+        c_.emitLine("vb6_iunk_" + clsId + "_" + canonId + "_AddRef(canon);");
+        c_.emitLine("return 0L;  /* S_OK */");
+        c_.dedent();
+        c_.emitLine("}");
+        c_.emitLine("if (vb6_IidEqual(riid, vb6_iv_iid_" + id + ")) {");
         c_.indent();
         c_.emitLine("*ppv = self;");
         c_.emitLine("vb6_iunk_" + clsId + "_" + id + "_AddRef(self);");
