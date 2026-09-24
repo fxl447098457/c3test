@@ -9,6 +9,9 @@ Attribute VB_Name = "AsmMixed"
 '   * 片段内可自由使用任意寄存器 (callee-saved 由编译器自动 push/pop)。
 Option Explicit
 
+' 模块级变量 (混排片段也能引用本模块的模块级变量)
+Private g_counter As Long
+
 ' --- 基本形态: 片段读局部变量 + 写回, VB 语句继续用同一变量 ---
 Public Function MixedAcc(ByVal n As Long) As Long
     Dim acc As Long
@@ -106,6 +109,18 @@ Public Function MixedOffset(ByVal lo As Long, ByVal hi As Long) As LongLong
     MixedOffset = q
 End Function
 
+' --- 引用模块级变量 ---
+Public Function TouchGlobal(ByVal n As Long) As Long
+    Dim t As Long
+    t = n
+    Asm
+        mov eax, [t]                    ' 局部
+        add eax, [g_counter]            ' 模块级 (也是取地址, 与局部同一条通路)
+        mov [t], eax
+    End Asm
+    TouchGlobal = t
+End Function
+
 Sub Main()
     Debug.Print "MIX-ACC:" & MixedAcc(37)            ' 175
     Debug.Print "MIX-TWO:" & TwoBlocks(5)            ' 22
@@ -117,5 +132,7 @@ Sub Main()
     Debug.Print "MIX-KEEP-RBX:" & MixedKeepRbx(3)    ' 80
     Debug.Print "MIX-CLOBBER:" & MixedClobber(9)     ' 11
     Debug.Print "MIX-OFFSET:" & MixedOffset(1, 1)    ' 4294967297
+    g_counter = 1000
+    Debug.Print "MIX-GLOBAL:" & TouchGlobal(5)       ' 1005
     Debug.Print "MIX-DONE"
 End Sub

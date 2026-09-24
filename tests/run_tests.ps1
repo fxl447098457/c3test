@@ -1576,7 +1576,8 @@ if ($Category -in @("all", "asm")) {
         #   Clobber / [X+4] 偏移形态
         Test-Vbp "asm_mixed_x64" "$Tests\asm\asm_mixed.vbp" @(
             "MIX-ACC:175", "MIX-TWO:22", "MIX-BUMP:15", "MIX-RET:42",
-            "MIX-KEEP-RBX:80", "MIX-CLOBBER:11", "MIX-OFFSET:4294967297", "MIX-DONE")
+            "MIX-KEEP-RBX:80", "MIX-CLOBBER:11", "MIX-OFFSET:4294967297",
+            "MIX-GLOBAL:1005", "MIX-DONE")
     }
     if (Test-Path "$Tests\asm\asm_mixed_x86.vbp") {
         # x86: 片段就地发 __asm{} 内联块, [X] 按名解析 (ByRef 参数经本地副本对齐 x64 语义);
@@ -1584,7 +1585,7 @@ if ($Category -in @("all", "asm")) {
         Test-Vbp "asm_mixed_x86_inline" "$Tests\asm\asm_mixed_x86.vbp" @(
             "XMIX-ACC:175", "XMIX-TWO:22", "XMIX-BUMP:15", "XMIX-RET:42",
             "XMIX-KEEP-EBX:80", "XMIX-CLOBBER:11", "XMIX-OFFSET:4294967297",
-            "XMIX-SUMMIX:1006", "XMIX-DONE") -Arch "x86"
+            "XMIX-SUMMIX:1006", "XMIX-GLOBAL:1005", "XMIX-DONE") -Arch "x86"
     }
     if (Test-Path "$Tests\asm\asm_mixed_neg.vbp") {
         # 3039: [X] 既不是寄存器也不是可见的 VB 变量 (两个架构都触发)
