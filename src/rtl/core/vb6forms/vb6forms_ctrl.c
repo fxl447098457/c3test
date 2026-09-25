@@ -52,13 +52,13 @@ void vb6_SetControlText(void* hwnd, void* bstr) {
 
 int vb6_GetCheckValue(void* hwnd) {
     if (!hwnd) return 0;
-    LRESULT state = SendMessageA((HWND)hwnd, BM_GETCHECK, 0, 0);
+    LRESULT state = SendMessageW((HWND)hwnd, BM_GETCHECK, 0, 0);
     return (int)state;  // BST_UNCHECKED=0, BST_CHECKED=1, BST_INDETERMINATE=2
 }
 
 void vb6_SetCheckValue(void* hwnd, int value) {
     if (!hwnd) return;
-    SendMessageA((HWND)hwnd, BM_SETCHECK, (WPARAM)value, 0);
+    SendMessageW((HWND)hwnd, BM_SETCHECK, (WPARAM)value, 0);
 }
 
 int vb6_GetControlVisible(void* hwnd) {

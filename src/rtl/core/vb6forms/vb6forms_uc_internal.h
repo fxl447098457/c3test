@@ -20,6 +20,7 @@
 #define VB6C3_VB6FORMS_UC_INTERNAL_H
 
 #include "vb6forms.h"
+#include "vb6forms_internal.h"   /* Fix 190: UTF-8 → UTF-16 转码助手 */
 #include "vb6rtl.h"
 
 #include <stdint.h>

@@ -18,6 +18,13 @@
 #include <oleauto.h>  /* SysAllocString, BSTR */
 #include <olectl.h>   /* IPicture, OleLoadPicture, OLE_HANDLE */
 
+// ============================================================
+// Fix 190: 源码字符串 = UTF-8, 窗口层 = UTF-16
+// 转码助手 (vb6_u8ToWideDup / vb6_u8ToWideBuf / vb6_wideToU8Buf) 定义在
+// vb6forms_internal.h —— 它们要跨 vb6forms 的多个拆分编译单元共用。
+// ============================================================
+
+
 // 全局变量
 HINSTANCE g_hInstance = NULL;
 static int g_nextControlId = 100;  // 控件ID从100开始 (1-99保留给菜单)
@@ -56,21 +63,24 @@ static int g_timerCount = 0;
 // 其余仍在用它的控件就拿着已销毁的 GDI 句柄 (句柄还会被复用 → 别的控件拿到同一
 // 数值)，表现为跨控件随机换字形，极难归因。失败时退回 stock 对象同样安全。
 static HFONT vb6_Vb6DefaultGuiFont(void) {
-    LOGFONTA lf = {0};
+    LOGFONTW lf = {0};
     HDC hdc = GetDC(NULL);
     int dpiY = hdc ? GetDeviceCaps(hdc, LOGPIXELSY) : 96;
     HFONT hFont;
     if (hdc) ReleaseDC(NULL, hdc);
     lf.lfHeight = -MulDiv(825, dpiY, 7200);   /* 8.25pt → 像素 */
     lf.lfWeight = FW_NORMAL;
+    // Fix 190: 保持 DEFAULT_CHARSET —— 它让 GDI 按**字符串实际字符**做字体链接,
+    // 于是同一控件既能画 CJK 也能画韩文/西里尔/希腊文; 写死某个具体代码页字符集
+    // (如 GB2312_CHARSET) 会让系统在字体里找不到韩文/俄文字形, 显示成方框。
     lf.lfCharSet = DEFAULT_CHARSET;
     lf.lfOutPrecision = OUT_DEFAULT_PRECIS;
     lf.lfClipPrecision = CLIP_DEFAULT_PRECIS;
     // VB6 的 MS Sans Serif 是点阵字体, 从不抗锯齿; 开了 ClearType 会比参考图更宽更糊
     lf.lfQuality = NONANTIALIASED_QUALITY;
     lf.lfPitchAndFamily = DEFAULT_PITCH | FF_DONTCARE;
-    lstrcpyA(lf.lfFaceName, "MS Sans Serif");
-    hFont = CreateFontIndirectA(&lf);
+    wcscpy(lf.lfFaceName, L"MS Sans Serif");
+    hFont = CreateFontIndirectW(&lf);
     if (!hFont) hFont = (HFONT)GetStockObject(DEFAULT_GUI_FONT);
     return hFont;
 }
@@ -128,12 +138,18 @@ static void vb6_formClassBg_set(const char* className, int bg);
 
 int vb6_RegisterFormClassBg(const char* className, void* wndProc, void* hInstance,
                             int iconResId, int backColor) {
-    WNDCLASSEXA wc = {0};
-    wc.cbSize = sizeof(WNDCLASSEXA);
+    // Fix 190: 用 W 版注册窗口类。RegisterClassExA 注册出来的类即使之后用
+    // CreateWindowExW 创建, 窗口本身仍然是 ANSI 窗口 —— 控件/标题文本会被系统
+    // 按 ACP 来回转换, 多语言必然乱码。类名在 RTL 内部以 UTF-8 传递, 此处转宽。
+    wchar_t wcls[128];
+    vb6_u8ToWideBuf(className, wcls, 128);
+
+    WNDCLASSEXW wc = {0};
+    wc.cbSize = sizeof(WNDCLASSEXW);
     wc.style = CS_HREDRAW | CS_VREDRAW | CS_DBLCLKS;  // 支持双击
     wc.lpfnWndProc = (WNDPROC)wndProc;
     wc.hInstance = (HINSTANCE)hInstance;
-    wc.hCursor = LoadCursorA(NULL, (LPCSTR)IDC_ARROW);
+    wc.hCursor = LoadCursorW(NULL, IDC_ARROW);
     // czUI fix: .frm 的窗体级 BackColor — 用 .frm 颜色做类背景刷, 否则窗体永远
     // 是 BTNFACE 灰 (czForm Demo 深蓝底变灰底). backColor<0 = 未指定, 走 VB6 默认.
     if (backColor >= 0) {
@@ -145,19 +161,24 @@ int vb6_RegisterFormClassBg(const char* className, void* wndProc, void* hInstanc
     } else {
         wc.hbrBackground = (HBRUSH)(COLOR_BTNFACE + 1);  // VB6默认灰色背景
     }
-    wc.lpszClassName = className;
+    wc.lpszClassName = wcls;
 
     // czUI fix: 未指定图标时不再回退到 IDI_APPLICATION — VB6 窗体没有 Icon 属性时
     // 标题栏就是没有图标 (UserControl.Parent.Icon = Nothing, czUI 自绘标题栏因此
     // 不画图标); 类图标留空, 系统在任务栏等处自动用默认图标, 行为一致。
     if (iconResId > 0) {
-        wc.hIcon = LoadIconA((HINSTANCE)hInstance, (LPCSTR)MAKEINTRESOURCEA(iconResId));
+        wc.hIcon = LoadIconW((HINSTANCE)hInstance, MAKEINTRESOURCEW(iconResId));
         wc.hIconSm = wc.hIcon;
     }
 
-    if (!RegisterClassExA(&wc)) {
+    if (!RegisterClassExW(&wc)) {
+        if (GetEnvironmentVariableA("C3_FORMS_TRACE", NULL, 0) > 0)
+            fprintf(stderr, "[C3_FORMS] RegisterClassExW cls='%ls' FAILED err=%lu\n",
+                    wcls, (unsigned long)GetLastError());
         return -1;
     }
+    if (GetEnvironmentVariableA("C3_FORMS_TRACE", NULL, 0) > 0)
+        fprintf(stderr, "[C3_FORMS] RegisterClassExW cls='%ls' ok\n", wcls);
     return 0;
 }
 
@@ -246,10 +267,15 @@ void* vb6_CreateFormWindowB(const char* className, const char* formName,
         py = (y == CW_USEDEFAULT) ? CW_USEDEFAULT : vb6_TwipToY(y);
     }
 
-    HWND hwnd = CreateWindowExA(
+    // Fix 190: 类名/标题在 RTL 内是 UTF-8, 窗口层要 UTF-16
+    wchar_t wcls[128];
+    vb6_u8ToWideBuf(className, wcls, 128);
+    wchar_t* wtitle = vb6_u8ToWideDup(formName);
+
+    HWND hwnd = CreateWindowExW(
         exStyle,
-        className,
-        formName,
+        wcls,
+        wtitle ? wtitle : L"",
         style,
         px, py,
         winW, winH,
@@ -259,6 +285,16 @@ void* vb6_CreateFormWindowB(const char* className, const char* formName,
         userData  // 传递给WM_CREATE
     );
 
+    if (GetEnvironmentVariableA("C3_FORMS_TRACE", NULL, 0) > 0) {
+        wchar_t pb[64] = {0};
+        GetWindowTextW(hwnd, pb, 64);
+        fprintf(stderr, "[C3_FORMS] CreateFormWindowB cls='%s' title='%s' -> hwnd=%p len=%d titleW='%ls' isUni=%d\n",
+                className, formName ? formName : "", (void*)hwnd,
+                GetWindowTextLengthW(hwnd), pb, IsWindowUnicode(hwnd));
+        fflush(stderr);
+    }
+
+    free(wtitle);
     return (void*)hwnd;
 }
 
@@ -275,13 +311,20 @@ void* vb6_CreateControl(const char* win32Class, const char* controlName,
     int pw = vb6_TwipToX(width);
     int ph = vb6_TwipToY(height);
 
-    // Fix 081l: Use CreateWindowExA to match the ANSI form window registered with RegisterClassExA.
-    // Mixing CreateWindowExW controls with CreateWindowExA forms causes ANSI/Unicode mismatch
-    // that can lead to heap corruption when sending text messages.
-    HWND hwnd = CreateWindowExA(
+    // Fix 190: 标准控件类名 (Button/Edit/Static/ListBox/ComboBox/ScrollBar) 在
+    // CreateWindowExW 下会创建出**Unicode 版本**的控件 —— 这才是能正确显示
+    // 中文/韩文/俄文的前提 (ANSI 版 ListBox 收到 SendMessageW(LB_ADDSTRING, 宽串)
+    // 会把 UTF-16 当字节串读, 直接乱码/截断)。
+    // 注意: 窗口类注册 (RegisterClassExW) 与窗口创建 (CreateWindowExW) 必须同为 W,
+    // 混用会被系统当成 ANSI 窗口 (见 Fix 081l 的反面教训)。
+    wchar_t wcls[128];
+    vb6_u8ToWideBuf(win32Class, wcls, 128);
+    wchar_t* wname = vb6_u8ToWideDup(controlName);
+
+    HWND hwnd = CreateWindowExW(
         (DWORD)exStyle,
-        win32Class,
-        controlName,
+        wcls,
+        wname ? wname : L"",
         (DWORD)style,
         px, py, pw, ph,
         (HWND)hParent,
@@ -289,6 +332,7 @@ void* vb6_CreateControl(const char* win32Class, const char* controlName,
         (HINSTANCE)hInstance,
         NULL
     );
+    free(wname);
 
     // 设置默认字体 (VB6使用MS Sans Serif 8.25pt)
     if (hwnd) {
@@ -296,10 +340,10 @@ void* vb6_CreateControl(const char* win32Class, const char* controlName,
         // 那是 Segoe UI 9pt, 比 VB6 的 MS Sans Serif 8.25pt 宽, 控件标题被截字。
         HFONT hFont = vb6_Vb6DefaultGuiFont();
         if (!hFont) {
-            hFont = CreateFontA(
+            hFont = CreateFontW(
                 -11, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
                 DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-                DEFAULT_QUALITY, FF_DONTCARE, "MS Sans Serif"
+                DEFAULT_QUALITY, FF_DONTCARE, L"MS Sans Serif"
             );
         }
         SendMessage(hwnd, WM_SETFONT, (WPARAM)hFont, MAKELPARAM(FALSE, 0));
@@ -539,25 +583,26 @@ static void vb6_installCrashTrace(void) {
 void vb6_ShowForm(void* hwnd, int modal) {
     vb6_installCrashTrace();
     if (GetEnvironmentVariableW(L"C3_OCX_TRACE", NULL, 0) > 0) {
-        char cap[160] = {0};
-        GetWindowTextA((HWND)hwnd, cap, 159);
-        fprintf(stderr, "[C3_MODAL] ShowForm hwnd=%p modal=%d cap='%s'\n", hwnd, modal, cap);
+        wchar_t cap[160] = {0};
+        GetWindowTextW((HWND)hwnd, cap, 159);
+        fprintf(stderr, "[C3_MODAL] ShowForm hwnd=%p modal=%d cap='%ls'\n", hwnd, modal, cap);
     }
     if (!hwnd) return;
 
     // Fix 115: 恢复 VB6 的 "先 Form_Load, 后 Show" 顺序。
-    // 编译器把 Form_Load 用 PostMessageA(hwnd, 0x7FF0, 0, 0) 延迟到消息队列
+    // 编译器把 Form_Load 用 PostMessageW(hwnd, 0x7FF0, 0, 0) 延迟到消息队列
     // (见 cgen_form_wndproc_create.inc 的 WM_CREATE 处理), 而这里的
     // ShowWindow/UpdateWindow 会在队列消息派发**之前**强制首次 WM_PAINT。
     // 于是 UserControl 的 Draw 会在"Form_Load 尚未添加数据系列"的状态下执行,
     // 对空数组取 m_Serie(0) → 空指针崩溃 (Charts 2020 ucChartArea 在
     // LegendAlign=LA_TOP 时必经该分支)。先把挂起的延迟 Form_Load 派发掉。
+    // Fix 190: A 版消息 API 会把 Unicode 消息降级成 ANSI (WM_CHAR/文本), 全部换 W。
     {
         const UINT kDeferredFormLoad = 0x7FF0;   // 编译器生成的"延迟 Form_Load"消息
         MSG msg;
-        while (PeekMessageA(&msg, (HWND)hwnd, kDeferredFormLoad, kDeferredFormLoad, PM_REMOVE)) {
+        while (PeekMessageW(&msg, (HWND)hwnd, kDeferredFormLoad, kDeferredFormLoad, PM_REMOVE)) {
             TranslateMessage(&msg);
-            DispatchMessageA(&msg);
+            DispatchMessageW(&msg);
         }
     }
 
@@ -612,7 +657,7 @@ void vb6_ShowForm(void* hwnd, int modal) {
             msgCount++;
             // P24-Timer: WM_TIMER现在由WndProc分发, 模态循环不再拦截
             // 模态Tab键导航 (IsDialogMessage处理对话框键盘导航)
-            if (!useDlgMsg || !IsDialogMessageA((HWND)hwnd, &msg)) {
+            if (!useDlgMsg || !IsDialogMessageW((HWND)hwnd, &msg)) {
                 TranslateMessage(&msg);
                 DispatchMessage(&msg);
             }

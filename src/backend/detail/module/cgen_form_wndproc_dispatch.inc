@@ -356,14 +356,18 @@
     c_.emitLine("}");
 
     // default: DefWindowProc (P7.7: MDI窗体使用DefFrameProc/DefMDIChildProc)
+    // Fix 190: 必须用 W 版。窗口类现在由 RegisterClassExW 注册, 窗体的 Unicode
+    // 标志随之打开 —— DefWindowProcA 会把 WM_SETTEXT/WM_GETTEXT 的 **宽字符串**
+    // 当 ANSI 字节串处理, 于是标题/文本只剩第一个字符 (实测 Form1 -> "F",
+    // 探针窗口 "PROBE" -> "P"; 同文件的控件子类过程本来就用 DefWindowProcW)。
     c_.emitLine("default:");
     c_.indent();
     if (isMDIForm) {
-        c_.emitLine("return DefFrameProcA(hwnd, (HWND)vb6_GetMDIClient(hwnd), msg, wParam, lParam);");
+        c_.emitLine("return DefFrameProcW(hwnd, (HWND)vb6_GetMDIClient(hwnd), msg, wParam, lParam);");
     } else if (isMDIChild) {
-        c_.emitLine("return DefMDIChildProcA(hwnd, msg, wParam, lParam);");
+        c_.emitLine("return DefMDIChildProcW(hwnd, msg, wParam, lParam);");
     } else {
-        c_.emitLine("return DefWindowProcA(hwnd, msg, wParam, lParam);");
+        c_.emitLine("return DefWindowProcW(hwnd, msg, wParam, lParam);");
     }
     c_.dedent();
 

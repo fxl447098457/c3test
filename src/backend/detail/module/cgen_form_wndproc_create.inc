@@ -93,7 +93,7 @@
     std::string formLoadFn = cProcName("Form_Load", AccessLevel::Private);
     auto* formLoadSym = symTab_.lookup("Form_Load");
     if (formLoadSym) {
-        c_.emitLine("PostMessageA(hwnd, 0x7FF0, 0, 0);  /* defer Form_Load */");
+        c_.emitLine("PostMessageW(hwnd, 0x7FF0, 0, 0);  /* defer Form_Load */");
     }
     // P24-Timer: 在WM_CREATE中注册Timer (此时hwnd可用)
     for (const auto& ctrl : frmDesc.formControl.children) {
