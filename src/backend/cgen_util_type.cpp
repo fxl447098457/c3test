@@ -115,6 +115,40 @@ Vb6Type CCodeGen::inferExprType(Expr& expr) const {
         }
         case ASTNodeKind::MemberAccessExpr: {
             auto& ma = static_cast<MemberAccessExpr&>(expr);
+            // C29-1a: 内建窗体控件的整数型属性必须在这里就判成 Long。`Left` 同时是 VB
+            // 内置函数名, 落到下面的符号表查找会被折成 String (Fix 081i 记过同一类),
+            // 于是 `If Line1.Left = 600` 生成 vb6_StrCmp(整数值, BSTR) —— 把 600 当
+            // 指针解引用, 运行期直接段错误 (实测就是这条)。口径同上面的
+            // UserControl.ScaleWidth 分支: 按"对象是内建控件 + 属性名"给类型。
+            // 只认内建控件类型: 工程内 .ctl 宿主同名属性 (如 Value) 由它自己的符号表说话。
+            static const char* const kNumericFc[] = {
+                "left", "top", "width", "height",
+                "shape", "fillstyle", "borderwidth", "borderstyle",
+                "fillcolor", "bordercolor", "x1", "y1", "x2", "y2",
+            };
+            std::string fcName;   // 命中的内建控件名 (空 = 这不是内建控件的属性访问)
+            if (ma.object && ma.object->kind == ASTNodeKind::IdentifierExpr) {
+                fcName = Symbol::toLower(static_cast<IdentifierExpr&>(*ma.object).name);
+            } else if (ma.object && ma.object->kind == ASTNodeKind::IndexOrCallExpr) {
+                // 控件数组的元素 (`lamp(1).Left`): 对象位是 `名字(下标)`, 同一条规则。
+                // 只认确实在 knownFormControls_ 里的名字, 所以函数调用返回对象
+                // (`GetWidget(1).Left`) 不会被误判。
+                auto& callFc = static_cast<IndexOrCallExpr&>(*ma.object);
+                if (callFc.callee && callFc.callee->kind == ASTNodeKind::IdentifierExpr
+                    && callFc.positional.size() == 1) {
+                    fcName = Symbol::toLower(
+                        static_cast<IdentifierExpr&>(*callFc.callee).name);
+                }
+            }
+            if (!fcName.empty()) {
+                auto fcIt = knownFormControls_.find(fcName);
+                if (fcIt != knownFormControls_.end() && fcIt->second != FrmControlType::Unknown) {
+                    std::string memFc = Symbol::toLower(ma.memberName);
+                    for (const char* n : kNumericFc) {
+                        if (memFc == n) return Vb6Type::Long;
+                    }
+                }
+            }
             // P24-12: Err对象特殊处理
             if (ma.object && ma.object->kind == ASTNodeKind::IdentifierExpr) {
                 auto& objId = static_cast<IdentifierExpr&>(*ma.object);

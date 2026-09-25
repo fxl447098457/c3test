@@ -130,6 +130,11 @@
                 style |= kSsBitmap | kSsCenterImg;
                 createCaption = "";
                 break;
+            case FrmControlType::Shape:
+            case FrmControlType::Line:
+                // C29-1a: 自绘控件 (VB6_SHAPE / VB6_LINE)，无文本、无边框样式
+                createCaption = "";
+                break;
             default:
                 break;
         }
@@ -139,6 +144,12 @@
                                 ctrl.controlType == FrmControlType::ComboBox);
         std::string delayedText = (ctrl.controlType == FrmControlType::TextBox) ? ctrlText : ctrlCaption;
         if (needDelayedText) createCaption = "";  // 创建时不传文本
+
+        // C29-1a: Line 在 VB6 里没有 Left/Top/Width/Height —— 窗口矩形就是 X1/Y1/X2/Y2
+        // (容器缇值) 的包围盒。不这样算, 控件会拿默认尺寸 1000x300 创建出来。
+        if (ctrl.controlType == FrmControlType::Line) {
+            lineRectFromEndpoints(ctrl, left, top, width, height);
+        }
 
         // 生成vb6_CreateControl调用
         // 生成vb6_CreateControl调用 (P7.6: 数组控件用CtrlArr_SetAt)
@@ -211,32 +222,8 @@
             }
         }
 
-        // P20-35: Shape/Line属性初始化 (从.frm属性设置)
-        if (ctrl.controlType == FrmControlType::Shape) {
-            std::string shw = "vb6_hwnd_" + cIdent(ctrl.controlName);
-            auto shIt = ctrl.properties.find("Shape"); if (shIt != ctrl.properties.end() && shIt->second.intValue != 0)
-                c_.emitLine("vb6_SetShapeType((void*)" + shw + ", " + std::to_string((int)shIt->second.intValue) + ");");
-            shIt = ctrl.properties.find("BorderWidth"); if (shIt != ctrl.properties.end() && shIt->second.intValue != 1)
-                c_.emitLine("vb6_SetShapeBorderWidth((void*)" + shw + ", " + std::to_string((int)shIt->second.intValue) + ");");
-            shIt = ctrl.properties.find("BorderStyle"); if (shIt != ctrl.properties.end() && shIt->second.intValue != 1)
-                c_.emitLine("vb6_SetShapeBorderStyle((void*)" + shw + ", " + std::to_string((int)shIt->second.intValue) + ");");
-            shIt = ctrl.properties.find("FillStyle"); if (shIt != ctrl.properties.end() && shIt->second.intValue != 1)
-                c_.emitLine("vb6_SetShapeFillStyle((void*)" + shw + ", " + std::to_string((int)shIt->second.intValue) + ");");
-        } else if (ctrl.controlType == FrmControlType::Line) {
-            std::string lhw = "vb6_hwnd_" + cIdent(ctrl.controlName);
-            auto lIt2 = ctrl.properties.find("X1"); if (lIt2 != ctrl.properties.end() && lIt2->second.intValue != 0)
-                c_.emitLine("vb6_SetLineX1((void*)" + lhw + ", " + std::to_string((int)lIt2->second.intValue) + ");");
-            lIt2 = ctrl.properties.find("Y1"); if (lIt2 != ctrl.properties.end() && lIt2->second.intValue != 0)
-                c_.emitLine("vb6_SetLineY1((void*)" + lhw + ", " + std::to_string((int)lIt2->second.intValue) + ");");
-            lIt2 = ctrl.properties.find("X2"); if (lIt2 != ctrl.properties.end())
-                c_.emitLine("vb6_SetLineX2((void*)" + lhw + ", " + std::to_string((int)lIt2->second.intValue) + ");");
-            lIt2 = ctrl.properties.find("Y2"); if (lIt2 != ctrl.properties.end())
-                c_.emitLine("vb6_SetLineY2((void*)" + lhw + ", " + std::to_string((int)lIt2->second.intValue) + ");");
-            lIt2 = ctrl.properties.find("BorderWidth"); if (lIt2 != ctrl.properties.end() && lIt2->second.intValue != 1)
-                c_.emitLine("vb6_SetLineBorderWidth((void*)" + lhw + ", " + std::to_string((int)lIt2->second.intValue) + ");");
-            lIt2 = ctrl.properties.find("BorderStyle"); if (lIt2 != ctrl.properties.end() && lIt2->second.intValue != 1)
-                c_.emitLine("vb6_SetLineBorderStyle((void*)" + lhw + ", " + std::to_string((int)lIt2->second.intValue) + ");");
-        }
+        // C29-1a: 设计期外观属性落到控件 (原来这里是一整段内联块; 容器子控件那条路共用同一个助手)
+        emitShapeLineProps(ctrl, ctrlHwndExprForInit(ctrl));
 
         // P20-37: DriveListBox/DirListBox/FileListBox initial population
         if (ctrl.controlType == FrmControlType::DriveListBox) {

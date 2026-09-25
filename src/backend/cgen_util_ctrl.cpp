@@ -47,7 +47,10 @@ std::string CCodeGen::getControlPropReadFn(FrmControlType ctrlType, const std::s
     if (propLower == "mousepointer") return "vb6_GetMousePointer";
     if (propLower == "mouseicon") return "vb6_GetMouseIcon";
     // P13.10: BorderStyle (all visible controls)
-    if (propLower == "borderstyle") return "vb6_GetBorderStyle";
+    // C29-1a: Shape/Line 的 BorderStyle 是"画笔线型"(0..6), 与窗口边框样式(0/1)同名
+    // 不同物 —— 让这两个类型走下面各自的 case, 否则读回来的永远是窗口那套。
+    if (propLower == "borderstyle" && ctrlType != FrmControlType::Shape
+        && ctrlType != FrmControlType::Line) return "vb6_GetBorderStyle";
 
     switch (ctrlType) {
     case FrmControlType::TextBox:
@@ -210,7 +213,10 @@ std::string CCodeGen::getControlPropWriteFn(FrmControlType ctrlType, const std::
     if (propLower == "mousepointer") return "vb6_SetMousePointer";
     if (propLower == "mouseicon") return "vb6_SetMouseIcon";
     // P13.10: BorderStyle (all visible controls)
-    if (propLower == "borderstyle") return "vb6_SetBorderStyle";
+    // C29-1a: Shape/Line 的 BorderStyle 是"画笔线型"(0..6), 与窗口边框样式(0/1)同名
+    // 不同物 —— 让这两个类型走下面各自的 case, 否则读回来的永远是窗口那套。
+    if (propLower == "borderstyle" && ctrlType != FrmControlType::Shape
+        && ctrlType != FrmControlType::Line) return "vb6_SetBorderStyle";
 
     switch (ctrlType) {
     case FrmControlType::TextBox:
@@ -461,7 +467,68 @@ long CCodeGen::controlTypeStyleBits(const FrmControl& ctrl) const {
 
 bool CCodeGen::controlTypeClearsCaption(const FrmControl& ctrl) const {
     return ctrl.controlType == FrmControlType::PictureBox ||
-           ctrl.controlType == FrmControlType::Image;
+           ctrl.controlType == FrmControlType::Image ||
+           // C29-1a: Shape / Line 是自绘控件, 窗口文字没有任何视觉效果, 但留着控件名
+           // 当 caption 会让子类化/工具提示那几条路把它当有文本的控件看待。
+           ctrl.controlType == FrmControlType::Shape ||
+           ctrl.controlType == FrmControlType::Line;
+}
+
+// C29-1a: Line 的窗口矩形就是四个端点的包围盒 (单位 = 容器缇值, 与 .frm 存的一致)。
+// 两条创建路 (顶层 / 容器子控件) 都调这里, 免得一边算对一边算成默认的 2000x300。
+void CCodeGen::lineRectFromEndpoints(const FrmControl& ctrl,
+                                     int& l, int& t, int& w, int& h) {
+    auto getTw = [&ctrl](const char* key) -> int {
+        auto it = ctrl.properties.find(key);
+        return (it != ctrl.properties.end()) ? (int)it->second.intValue : 0;
+    };
+    int x1 = getTw("X1"), y1 = getTw("Y1");
+    int x2 = getTw("X2"), y2 = getTw("Y2");
+    l = (x1 < x2) ? x1 : x2;
+    t = (y1 < y2) ? y1 : y2;
+    w = (x1 < x2) ? x2 - x1 : x1 - x2;
+    h = (y1 < y2) ? y2 - y1 : y1 - y2;
+    if (w < 1) w = 1;
+    if (h < 1) h = 1;
+}
+
+// C29-1a: 设计期外观属性落到控件上。值为 0 的那些 (Shape=0、FillStyle=0、BorderStyle=0)
+// 也照发 —— RTL 侧把这类枚举存成 val+1, 所以 0 不再等于"没设过"。
+// C29-1a: 设计期初始化用的句柄表达式 —— 控件数组 (如 ShapeLamp(0)/ShapeLamp(1)) 的
+// 句柄在 vb6_arr_<名> 里, 硬写 vb6_hwnd_<名> 会打到空句柄上 (SetProp 静默失败)。
+std::string CCodeGen::ctrlHwndExprForInit(const FrmControl& ctrl) const {
+    std::string lower = Symbol::toLower(ctrl.controlName);
+    if (knownControlArrays_.count(lower)) {
+        return "vb6_CtrlArr_GetAt(&vb6_arr_" + cIdent(ctrl.controlName) + ", "
+             + std::to_string(ctrl.index >= 0 ? ctrl.index : 0) + ")";
+    }
+    return "vb6_hwnd_" + cIdent(ctrl.controlName);
+}
+
+void CCodeGen::emitShapeLineProps(const FrmControl& ctrl, const std::string& hwndExpr) {
+    auto emitInt = [&](const char* prop, const char* fn, int skipWhen) {
+        auto it = ctrl.properties.find(prop);
+        if (it == ctrl.properties.end()) return;
+        int v = (int)it->second.intValue;
+        if (v == skipWhen) return;
+        c_.emitLine(std::string(fn) + "((void*)" + hwndExpr + ", " + std::to_string(v) + ");");
+    };
+    if (ctrl.controlType == FrmControlType::Shape) {
+        emitInt("Shape", "vb6_SetShapeType", -1);
+        emitInt("BorderWidth", "vb6_SetShapeBorderWidth", 1);
+        emitInt("BorderStyle", "vb6_SetShapeBorderStyle", 1);
+        emitInt("FillStyle", "vb6_SetShapeFillStyle", 1);
+        emitInt("FillColor", "vb6_SetShapeFillColor", 0);
+        emitInt("BorderColor", "vb6_SetShapeBorderColor", 0);
+    } else if (ctrl.controlType == FrmControlType::Line) {
+        emitInt("X1", "vb6_SetLineX1", -1);
+        emitInt("Y1", "vb6_SetLineY1", -1);
+        emitInt("X2", "vb6_SetLineX2", -1);
+        emitInt("Y2", "vb6_SetLineY2", -1);
+        emitInt("BorderWidth", "vb6_SetLineBorderWidth", 1);
+        emitInt("BorderStyle", "vb6_SetLineBorderStyle", 1);
+        emitInt("BorderColor", "vb6_SetLineColor", 0);
+    }
 }
 
 // P20-36: 生成控件属性访问的HWND参数 (Menu控件用GetMenu+menuId)

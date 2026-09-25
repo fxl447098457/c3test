@@ -253,6 +253,18 @@
     // VB6 PictureBox/Image 的 STATIC 控件不显示 Caption (标题在创建时应清空)。
     bool controlTypeClearsCaption(const FrmControl& ctrl) const;
 
+    // C29-1a: Shape / Line 的两条创建路 (顶层控件 与 Frame/PictureBox 子控件) 共用一份
+    // 口径 —— 之前这两类在 controlTypeToWin32Class 里返回 nullptr, 控件被当"不可见控件"
+    // 跳过 (句柄永远 NULL), 而属性表/自绘窗口类其实早就写好了, 缺的就是创建那一刀。
+    //  1) Line 没有 Left/Top/Width/Height: 窗口矩形 = X1/Y1/X2/Y2 (容器缇值) 的包围盒;
+    //  2) 设计期的 Shape/FillStyle/BorderStyle/BorderWidth/两个颜色 要落到控件属性上。
+    static void lineRectFromEndpoints(const FrmControl& ctrl,
+                                      int& l, int& t, int& w, int& h);
+    void emitShapeLineProps(const FrmControl& ctrl, const std::string& hwndExpr);
+    // 控件初始化时的句柄表达式: 控件数组走 CtrlArr_GetAt, 其余走 vb6_hwnd_<名>。
+    // (Shape/Line 的设计期初始化以前硬写 vb6_hwnd_*, 控件数组那条路会打到空句柄上)
+    std::string ctrlHwndExprForInit(const FrmControl& ctrl) const;
+
     // P11.7: 返回控件类型的默认属性名 (如 TextBox->"Text", Label->"Caption")
     // 空字符串表示该控件类型无默认属性
     static const char* getDefaultPropertyName(FrmControlType ctrlType);

@@ -198,6 +198,11 @@ const char* FrmParser::controlTypeToWin32Class(FrmControlType type) {
         case FrmControlType::VScrollBar:   return "SCROLLBAR";  // SBS_VERT样式
         case FrmControlType::Timer:        return nullptr;       // 不可见控件, 无窗口
         case FrmControlType::Image:        return "STATIC";     // SS_BITMAP
+        // C29-1a: Shape/Line 是 VB6 的"轻量图形控件"，RTL 里自注册了这两个类
+        // (vb6forms_shape.c: vb6_RegisterShapeLineClasses → VB6_SHAPE / VB6_LINE)，
+        // 但这里一直缺映射 ⇒ 创建流程把控件当"不可见控件"跳过，句柄永远是 NULL。
+        case FrmControlType::Shape:        return "VB6_SHAPE";
+        case FrmControlType::Line:         return "VB6_LINE";
         case FrmControlType::Menu:         return nullptr;       // 菜单, 非窗口
         case FrmControlType::WebBrowser:  return nullptr;       // WebView2, 运行时动态创建
         default:                           return nullptr;
