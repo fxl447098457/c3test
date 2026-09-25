@@ -4,8 +4,8 @@
 > 每次运行开始先读本文件，结束前必须更新本文件（状态头 + 批次清单 + 运行日志）。
 > 规范输入: `ai/讨论记录/018-接口继承与CoClass设计思路.md`（含 tB 文档要点与分阶段设计思路全文）。
 
-STATUS: BUSY                # NOT_STARTED | DESIGN | BUSY | IDLE | ALL_DONE
-LAST_RUN: 2026-09-26T04:45:00+08:00   # 本轮 = **029 线换批**：C29-2（ProgressBar）**移交另一位作者**（用户 2026-09-26 指定），本线已把自己那 8 个文件的半成品从共享树里退干净并重建过 C3.exe（WIP 存 `.build\c292_progressbar_wip.patch`、判据工程 `.build\c292_fixture\`）。本轮 = **C29-9 开工测量（零源码改动）**⇒ 量出 `VB.Timer` 运行期不触发是这条判据的前置阻塞，已停在要用户点头的岔口（详见运行日志最新那条）。上一条 = C29-1b 出完并过门 = `440129c`，门 run #85（8/8 job 全绿）。自动运行见本行不足 55 分钟请立即跳过。
+STATUS: ALL_DONE             # NOT_STARTED | DESIGN | BUSY | IDLE | ALL_DONE
+LAST_RUN: 2026-09-26T05:45:00+08:00   # 本轮 = **029 内置控件线 C29-9 出完并过门**（CommonDialog 换成原生 comdlg32、摘掉 MSComDlg.OCX 那条默认路）= 代码 `e7f3352`，门 Actions run #86（head `e7f3352`，8/8 job 全绿，17.8 分钟）。本轮另一件定调的事：C29-2（ProgressBar）**移交另一位作者**，本线把半成品退干净了（WIP 存 `.build\c292_progressbar_wip.patch`、判据工程 `.build\c292_fixture\`）。进度与读数记在 `ai\029-内置控件补全计划书.md` §九，本表只挂指针 + 换 GATE_BASELINE。自动运行见本行不足 55 分钟请立即跳过。
                # B21 交付一笔 = `2ddcc8b`（cgen 侧 15 文件 + 用例 32 条 + 手册 Boolean 页 + 分类护栏脚本
                # `.build\b21_emitc_guard.py`）。根因是两条不是一条、护栏 RED 一次的教训、以及顺带量出的 `Print #`
                # 那条，全在 **D70**；待拍板 5 就此收口，新撞出的一条记为待拍板 7（未拍板、未动手）。
@@ -41,18 +41,15 @@ LAST_COMMIT: 代码批 = 0413bb9(B18)、732c1f8(B17 门后修堆损坏)、a5517f
                规则沿用：push 只推 `github/dev`；门跑 Actions（`.build/wait_run2.py <sha> <秒>` 盯）；`.build` 里的
                临时 `.ps1` 一律 ASCII only；用例文件按同目录邻居的编码/行尾（`.bas`/`.vbp` = UTF-8+CRLF，
                `tests\*.ps1` = BOM+CRLF）。
-GATE_BASELINE: (Actions 级) c3test run **#85 [dev] = completed/success**（head `440129c` = C29-1b 那一笔，
+GATE_BASELINE: (Actions 级) c3test run **#86 [dev] = completed/success**（head `e7f3352` = C29-9 那一笔，
                8/8 job 全绿 = Build C3.exe + Tests(smoke/syntax/vbp/compile/asm/bas#1/bas#2)，
-               03:47→04:05 共 18.6 分钟；逐 job 的 status/conclusion 用 `GET /runs/{id}/jobs` 核过）。
-               **本机同源的读数**：`-Category syntax` 129/0；30 件工程 `--emit-c` 逐字节护栏
-               （BASE = `b21_C3.exe`，一次盖住 C29-1a + C29-1b 两批）changed_lines=0；
-               `tests\ctrlfiles` 的 14 条判据 x64 与 x86 各 14/14，喂 BASE 二进制 12 条翻红
-               （另两条 CF11/CF14 只走原生 `ListBox`，本来就不测本批能力）。
-               本机 `-Category vbp` = PASS=45 / FAIL=15 / SKIP=1，红的 15 条与门前沿用同一批环境噪声
-               （`no probe` / `no reader` / 要注册表 / 要非 ASCII 控制台），42→45 的增量恰好是本批新登记的三条
-               （`ctrlfiles`、`ctrlfiles_x86`、`cf_emitc_shape`）。
-               基线相对上一版（run #84，head `5b37b4e` = C29-1a）新增的用面：`ctrlfiles[_x86]` + `cf_emitc_shape`。
-               上一版基线 = run #84（C29-1a）；再上一版 = run #83（head `2ddcc8b`，B21）。
+               05:21→05:39 共 17.8 分钟；逐 job 的 status/conclusion 用 `GET /runs/{id}/jobs` 核过）。
+               **本机同源读数**：`-Category syntax` 129/0；30 件存量工程 `--emit-c` 逐字节护栏 changed_lines=0；
+               `tests\ctrldlg` 的 10 条判据 x64 与 x86 各 10/10；负控 = 喂 BASE(`b21_C3.exe`) 直接编不过
+               （`C2065: vb6_hwnd_dl2 未声明`，那条 OCX 路上没有属性宿主）。新助手 `Test-EmitcAbsent` 双向验过
+               （真针 PASS、在场的形状报红）。
+               基线相对上一版（run #85，head `440129c` = C29-1b）新增的用面：`ctrldlg[_x86]` + `dl_emitc_shape`
+               + `dl_emitc_no_ocx`。上一版基线 = run #85（C29-1b）；再上一版 = run #84（`5b37b4e`，C29-1a）。
 ```
 
 > 重入保护：若运行开始时 STATUS=BUSY 且 LAST_RUN 距今不足 55 分钟，说明上一次运行可能仍在进行——本次**立即结束，不做任何修改**。
@@ -3390,3 +3387,8 @@ D54-② 那条"类变量永不 Release"不变式（对外一旦发 IDispatch/IUn
   ② **comdlg32 不是新依赖**：DI 层已有 `vb6_di_GetOpenFileNameW`/`vb6_di_ChooseColorA` 一族，`vb6_di_com_stubs.c` 里 `#pragma comment(lib, "comdlg32.lib")` 也在；按同文件 GDI+ 那条"flat API 走 GetProcAddress"的现例实现 ⇒ §六-3 的工具链依赖面不动。
   ③ **卡住的是判据不是实现**：D3 那条"模态框自己起 Timer 自关"走不通，根因在更前面 —— **`VB.Timer` 运行期根本不触发**，两条独立成因（都实测）：注册那一刀压根没发（`cgen_form_wndproc_create.inc` 那段循环遍历 `frmDesc.formControl.children`，窗体的 Timer 不在里面 ⇒ 产物里一个 `vb6_SetTimer(` 都没有，而 `case WM_TIMER: vb6_DispatchTimer(wParam)` 那半边是好的）；Timer 是无窗口控件 ⇒ `vb6_hwnd_<timer>` 恒 NULL，`Enabled`/`Interval` 写进 `SetPropW(NULL, ...)` 静默丢。探针读数：1.2 秒 DoEvents 轮询 ticks=0（删掉设计期 `Enabled` 行照旧 0）。
   **⇒ 本轮停在一条要用户点头的岔口**：建议先立一小批 **C29-T（Timer 运行期触发）**——它本身是内置控件线上的一条真实缺陷，且 C29-9 六个 `Show*` 的自关闭探针依赖它；通了再动 CommonDialog 本体。按纪律 STATUS 保持 BUSY、不收线（本轮没有可过门的源码改动），下一轮第一件事 = 按用户对岔口的答复开工。探针工程留在 `.build\c299_probe\`、`.build\c299_ac\`，不进回归。
+- 2026-09-26 04:12–05:45 **029 线两件事**：先把 C29-2（ProgressBar）**移交另一位作者**（用户指定；本线那 8 个文件的半成品从共享树退干净、判据工程与 WIP 留在 `.build\c292_...` 下、重建过 C3.exe），期间用户两次定调 => 新决策 **D6：内置控件一律原生实现，默认路绝不走外部 OCX**（理由 = MSCOMCTL/MSComDlg 这些 OCX 只有 32 位，x64 里 `CoCreateInstance` 直接失败，"门绿"跟"控件在"是两件事）。
+  然后按 D6 做 **C29-9 CommonDialog = 已出并过门（`e7f3352`，门 run #86 8/8 全绿）**。四处 OCX 形状一起摘（变量声明 / `CoCreateInstance` / 成员访问 COM 派发 / **无括号方法的语句路**，最后一处是照着 `List1.Clear` 那个先例的位置接的，只改 callee 侧不够）；属性宿主换成自注册的不可见子窗口 `VB6_COMMONDIALOG`（0x0、清 WS_VISIBLE），这样 cgen 的 `readFn(hwnd)`/`writeFn(hwnd,v)` 形状不用特判，`GetParent` 顺手就是模态父窗；六个 `Show*` 直调 comdlg32 且只经 `LoadLibrary`+`GetProcAddress`（照 GDI+ 那条例子）⇒ import lib 依赖面零增长。`Filter` 对外仍是竖线串，原生 `描述\0模式\0…` 那张表只在 `Show*` 那一刻折；取消按 `CancelError` 报 32755 且不改已有读数。
+  **同批堵掉一条通用属性抢占**（第三次撞到"两套名单只更新一套"这一族）：CommonDialog 的 `FontName`/`FontSize` 是 `ChooseFont` 字段，而通用那族 `vb6_SetControlFontName` 查在类型 switch **之前**，不挡就把赋值静默落到控件字体上、读回空。另按 `SetPropW` 存 0 那条老坑给布尔 normalize（VB6 `True` = -1，直存 `val+1` 会变 0 跟"从没设过"撞车）。
+  **判据**：`tests\ctrldlg`（10 条读数 x64/x86 各 10/10，恒假守卫把六个 `Show*` 留在源码里——真弹框的判据另立 C29-9b，否则用例会在没人点"取消"的地方把门卡死）；发码两面都钉：`dl_emitc_shape` 断原生入口在、`dl_emitc_no_ocx` 断 `CoCreateInstance`/`vb6_com_<名>` 不再在（为此新加助手 `Test-EmitcAbsent`，并按纪律双向验过：真针 PASS、在场形状报红）。负控喂 BASE 直接编不过（那条路上没有属性宿主），"改之前的症状"由本轮开工测量给（探针六条读数全空、退出码 0）。护栏：syntax 129/0、30 件工程逐字节全同。
+  **本轮工具/流程踩坑（已写进记忆）**：python 里 `"ai\029-..."` 会被当 `\02` 八进制转义吃掉，落盘成一个裸控制字符 + `9-`（本轮在 022 状态头里真发生了一次，已修并全文扫控制字符）→ 写档脚本里的反斜杠一律 `chr(92)` 拼；`io.open(p).read()` 是文本模式会把 CRLF 折成 LF，按行尾改写必须 `'rb'` + 手工 split `chr(13)+chr(10)`；给 PS 5.1 跑的临时脚本要么 ASCII-only 要么带 BOM。
