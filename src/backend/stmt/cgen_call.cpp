@@ -199,6 +199,27 @@ void CCodeGen::visit(CallStmt& node) {
         // COM调用检测 (P6.2): isComMarker_标志
         if (isComMarker_) {
             isComMarker_ = false;
+            // D6 / C29-9: 无括号的 `CommonDialog1.ShowOpen` —— 与 List1.Clear 同一条
+            // 语句路。不接这里的话会落到下面 `vb6_ComCall(dl1, L"ShowOpen")`：既编不过
+            // (裸控制名)，也正是本批要拆掉的 OCX 形状。
+            {
+                auto itCd = knownFormControls_.find(comObjExpr_);
+                std::string mCd = Symbol::toLower(comMemberName_);
+                if (itCd != knownFormControls_.end()
+                    && itCd->second == FrmControlType::CommonDialog
+                    && (mCd == "showopen" || mCd == "showsave" || mCd == "showcolor"
+                        || mCd == "showfont" || mCd == "showprinter" || mCd == "showabout")) {
+                    std::string hwndCd = cIdent(knownFormControlOriginalNames_.count(comObjExpr_)
+                        ? knownFormControlOriginalNames_[comObjExpr_] : comObjExpr_);
+                    std::string fnCd = "vb6_CdShow"
+                        + std::string(1, (char)::toupper((unsigned char)mCd[4])) + mCd.substr(5);
+                    comObjExpr_.clear();
+                    comMemberName_.clear();
+                    c_.emitLine(fnCd + "((void*)vb6_hwnd_" + hwndCd + ");"
+                                "  /* CommonDialog." + mCd + " (原生 comdlg32) */");
+                    return;
+                }
+            }
             // Fix 086: 无括号的控件方法调用 (List1.Clear) — 与 IndexOrCallExpr
             // 的 P13.3 处理一致, 生成 vb6_ClearList(vb6_hwnd_Listx), 而非
             // vb6_ComCall(list1,...) 裸控制名 (C2065).

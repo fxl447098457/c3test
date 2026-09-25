@@ -24,8 +24,11 @@ std::string CCodeGen::getControlPropReadFn(FrmControlType ctrlType, const std::s
     if (propLower == "height") return "vb6_GetControlHeight";
     if (propLower == "hwnd") return "vb6_GetControlHwnd";
     // P13.1: Font properties (all visible controls with text)
-    if (propLower == "fontname") return "vb6_GetControlFontName";
-    if (propLower == "fontsize") return "vb6_GetControlFontSize";
+    // D6 / C29-9: CommonDialog 的 FontName / FontSize 是**对话框字段**（ChooseFont 的 LOGFONT），
+    // 不是控件字体 —— 这枚控件没有外观。通用那一组查在类型 switch **之前**，不挡就把
+    // `CD1.FontName = "Consolas"` 静默落到字体属性上（C29-1a 那条 borderstyle 被抢走同一类碰撞）。
+    if (propLower == "fontname" && ctrlType != FrmControlType::CommonDialog) return "vb6_GetControlFontName";
+    if (propLower == "fontsize" && ctrlType != FrmControlType::CommonDialog) return "vb6_GetControlFontSize";
     if (propLower == "fontbold") return "vb6_GetControlFontBold";
     if (propLower == "fontitalic") return "vb6_GetControlFontItalic";
     if (propLower == "fontunderline") return "vb6_GetControlFontUnderline";
@@ -181,9 +184,26 @@ std::string CCodeGen::getControlPropReadFn(FrmControlType ctrlType, const std::s
         if (propLower == "visible") return "vb6_GetControlVisible";
         if (propLower == "enabled") return "vb6_GetControlEnabled";
         break;
+    // D6 / C29-9: CommonDialog —— 属性袋挂在那枚自注册的不可见窗口上，
+    // 读写口全部走 vb6_Cd* （原生 comdlg32，不再经 MSComDlg.OCX）。
+    case FrmControlType::CommonDialog:
+        if (propLower == "filter") return "vb6_CdGetFilter";
+        if (propLower == "filename") return "vb6_CdGetFileName";
+        if (propLower == "filetitle") return "vb6_CdGetFileTitle";
+        if (propLower == "dialogtitle") return "vb6_CdGetDialogTitle";
+        if (propLower == "initdir") return "vb6_CdGetInitDir";
+        if (propLower == "defaultext") return "vb6_CdGetDefaultExt";
+        if (propLower == "fontname") return "vb6_CdGetFontName";
+        if (propLower == "flags") return "vb6_CdGetFlags";
+        if (propLower == "cancelerror") return "vb6_CdGetCancelError";
+        if (propLower == "color") return "vb6_CdGetColor";
+        if (propLower == "min") return "vb6_CdGetMin";
+        if (propLower == "max") return "vb6_CdGetMax";
+        if (propLower == "copies") return "vb6_CdGetCopies";
+        if (propLower == "fontsize") return "vb6_CdGetFontSize";
+        break;
     case FrmControlType::Shape:  // P20-35
-        if (propLower == "shape") return "vb6_GetShapeType";
-        if (propLower == "borderwidth") return "vb6_GetShapeBorderWidth";
+        if (propLower == "shape") return "vb6_GetShapeType";        if (propLower == "borderwidth") return "vb6_GetShapeBorderWidth";
         if (propLower == "borderstyle") return "vb6_GetShapeBorderStyle";
         if (propLower == "fillstyle") return "vb6_GetShapeFillStyle";
         if (propLower == "bordercolor") return "vb6_GetShapeBorderColor";
@@ -220,8 +240,9 @@ std::string CCodeGen::getControlPropWriteFn(FrmControlType ctrlType, const std::
     if (propLower == "width") return "vb6_SetControlWidth";
     if (propLower == "height") return "vb6_SetControlHeight";
     // P13.1: Font properties (all visible controls with text)
-    if (propLower == "fontname") return "vb6_SetControlFontName";
-    if (propLower == "fontsize") return "vb6_SetControlFontSize";
+    // D6 / C29-9: 同上 —— CommonDialog 的 Font* 走它自己的属性袋（写侧）。
+    if (propLower == "fontname" && ctrlType != FrmControlType::CommonDialog) return "vb6_SetControlFontName";
+    if (propLower == "fontsize" && ctrlType != FrmControlType::CommonDialog) return "vb6_SetControlFontSize";
     if (propLower == "fontbold") return "vb6_SetControlFontBold";
     if (propLower == "fontitalic") return "vb6_SetControlFontItalic";
     if (propLower == "fontunderline") return "vb6_SetControlFontUnderline";
@@ -356,6 +377,23 @@ std::string CCodeGen::getControlPropWriteFn(FrmControlType ctrlType, const std::
         if (propLower == "pattern") return "vb6_FileListBoxSetPattern";
         if (propLower == "filename") return "vb6_FileListBoxSetFileName";
         if (propLower == "listindex") return "vb6_SetListIndex";
+        break;
+    // D6 / C29-9: CommonDialog 写侧（取消由 RTL 按 CancelError 决定报不报 32755）。
+    case FrmControlType::CommonDialog:
+        if (propLower == "filter") return "vb6_CdSetFilter";
+        if (propLower == "filename") return "vb6_CdSetFileName";
+        if (propLower == "filetitle") return "vb6_CdSetFileTitle";
+        if (propLower == "dialogtitle") return "vb6_CdSetDialogTitle";
+        if (propLower == "initdir") return "vb6_CdSetInitDir";
+        if (propLower == "defaultext") return "vb6_CdSetDefaultExt";
+        if (propLower == "fontname") return "vb6_CdSetFontName";
+        if (propLower == "flags") return "vb6_CdSetFlags";
+        if (propLower == "cancelerror") return "vb6_CdSetCancelError";
+        if (propLower == "color") return "vb6_CdSetColor";
+        if (propLower == "min") return "vb6_CdSetMin";
+        if (propLower == "max") return "vb6_CdSetMax";
+        if (propLower == "copies") return "vb6_CdSetCopies";
+        if (propLower == "fontsize") return "vb6_CdSetFontSize";
         break;
     case FrmControlType::Shape:  // P20-35
         if (propLower == "shape") return "vb6_SetShapeType";

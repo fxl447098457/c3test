@@ -146,6 +146,15 @@
                 // C29-1a: 自绘控件 (VB6_SHAPE / VB6_LINE)，无文本、无边框样式
                 createCaption = "";
                 break;
+            case FrmControlType::CommonDialog:
+                // D6 / C29-9: 这枚"控件"没有外观 —— 它是原生对话框的属性袋。
+                // 窗口照建（要有句柄存属性），但必须**不可见**：基础样式里有 WS_VISIBLE，
+                // 这里清掉，尺寸也由下面的 0x0 兜住。
+                createCaption = "";
+                style &= ~kWsVisible;
+                width = 0;
+                height = 0;
+                break;
             default:
                 break;
         }
@@ -298,6 +307,40 @@
             }
         }
 
+        // D6 / C29-9: CommonDialog 的设计期四行（VB6 会把用户填的属性原样存进 .frm）。
+        // 走的是刚建好的那枚不可见句柄，所以顺序上必须排在 vb6_hwnd_<名> 赋值之后 ——
+        // 这里就是那条不变式（同 C29-1a 的 emitShapeLineProps 一个位置）。
+        if (ctrl.controlType == FrmControlType::CommonDialog) {
+            std::string cdHwnd = "vb6_hwnd_" + cIdent(ctrl.controlName);
+            auto cdStr = [&](const char* key, const char* fn) {
+                auto it = ctrl.properties.find(key);
+                if (it == ctrl.properties.end() || it->second.type != FrmValueType::String) return;
+                std::string raw = it->second.rawText;
+                if (raw.size() >= 2 && raw.front() == '"' && raw.back() == '"')
+                    raw = raw.substr(1, raw.size() - 2);
+                c_.emitLine(std::string(fn) + "((void*)" + cdHwnd + ", vb6_BSTR_FromStr(L\""
+                            + escapeWideCString(raw) + "\"));");
+            };
+            auto cdInt = [&](const char* key, const char* fn) {
+                auto it = ctrl.properties.find(key);
+                if (it == ctrl.properties.end()) return;
+                c_.emitLine(std::string(fn) + "((void*)" + cdHwnd + ", "
+                            + std::to_string((int)it->second.intValue) + ");");
+            };
+            cdStr("Filter",      "vb6_CdSetFilter");
+            cdStr("DialogTitle", "vb6_CdSetDialogTitle");
+            cdStr("InitDir",     "vb6_CdSetInitDir");
+            cdStr("DefaultExt",  "vb6_CdSetDefaultExt");
+            cdStr("FileName",    "vb6_CdSetFileName");
+            cdStr("FontName",    "vb6_CdSetFontName");
+            cdInt("Flags",       "vb6_CdSetFlags");
+            cdInt("CancelError", "vb6_CdSetCancelError");
+            cdInt("Color",       "vb6_CdSetColor");
+            cdInt("Min",         "vb6_CdSetMin");
+            cdInt("Max",         "vb6_CdSetMax");
+            cdInt("Copies",      "vb6_CdSetCopies");
+            cdInt("FontSize",    "vb6_CdSetFontSize");
+        }
         // P24 / Fix 182: .frx 设计期属性（Picture / TextBox.Text / ListBox.List）。
         // 实现已抽到 cgen_form_create_controls.inc 的 emitControlFrxProps, 与容器子控件共用。
         emitControlFrxProps(ctrl);

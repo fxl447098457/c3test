@@ -210,6 +210,11 @@ const char* FrmParser::controlTypeToWin32Class(FrmControlType type) {
         // 但这里一直缺映射 ⇒ 创建流程把控件当"不可见控件"跳过，句柄永远是 NULL。
         case FrmControlType::Shape:        return "VB6_SHAPE";
         case FrmControlType::Line:         return "VB6_LINE";
+        // D6 / C29-9: CommonDialog **不再走 MSComDlg.OCX** —— 那控件只有 32 位，x64 里
+        // CoCreateInstance 直接失败，今天整枚控件是静默空转（读数全空、Show* 不出现、
+        // 退出码照旧 0，见 029 §九）。这里给它一枚自注册的**不可见**类当属性宿主：
+        // 有句柄才谈得上 SetPropW 存属性、GetParent 拿模态父窗（注册见 vb6forms_ctrl.c）。
+        case FrmControlType::CommonDialog: return "VB6_COMMONDIALOG";
         case FrmControlType::Menu:         return nullptr;       // 菜单, 非窗口
         case FrmControlType::WebBrowser:  return nullptr;       // WebView2, 运行时动态创建
         default:                           return nullptr;

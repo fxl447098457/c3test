@@ -332,6 +332,32 @@
         }
     }
 
+    // D6 / C29-9: CommonDialog.Show* → 原生 comdlg32 入口（成员侧打的是小写控件名）。
+    // 必须在这里消费掉标记，否则下面的通用 COM 绑定会编成运行期 no-op 的 vb6_ComCall。
+    if (isComMarker_) {
+        auto itCtrlCd = knownFormControls_.find(comObjExpr_);
+        if (itCtrlCd != knownFormControls_.end() &&
+            itCtrlCd->second == FrmControlType::CommonDialog) {
+            std::string mCd = comMemberName_;
+            if (mCd == "showopen" || mCd == "showsave" || mCd == "showcolor"
+                || mCd == "showfont" || mCd == "showprinter" || mCd == "showabout") {
+                isComMarker_ = false;
+                isEarlyBoundCom_ = false;
+                earlyBoundSym_ = nullptr;
+                std::string hwndCd = cIdent(knownFormControlOriginalNames_.count(comObjExpr_)
+                    ? knownFormControlOriginalNames_[comObjExpr_] : comObjExpr_);
+                comObjExpr_.clear();
+                comMemberName_.clear();
+                std::string fnCd = "vb6_CdShow"
+                    + std::string(1, (char)::toupper((unsigned char)mCd[4])) + mCd.substr(5);
+                c_.emitLine("{" + fnCd + "((void*)vb6_hwnd_" + hwndCd + ");}"
+                            "  /* CommonDialog." + mCd + " (原生 comdlg32) */");
+                lastExpr_ = "0";
+                return;
+            }
+        }
+    }
+
     // Fix 185: PictureBox.Print / PictureBox.Cls → RTL 控件绘制入口。
     // 成员侧 (cgen_expr_member_form_builtin.inc) 把 comObjExpr_ 存成小写控件名，
     // 所以这里查 knownFormControls_ 拿得到类型。本片段 include 在

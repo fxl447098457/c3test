@@ -106,8 +106,9 @@ void CCodeGen::emitControlHandleDecls(const FrmFormDesc& frmDesc) {
         if (!ctrlLower.empty() && emitted.insert(ctrlLower).second) {
             if (ctrl.controlType == FrmControlType::ImageList ||
                 ctrl.controlType == FrmControlType::Toolbar ||
-                ctrl.controlType == FrmControlType::StatusBar ||
-                ctrl.controlType == FrmControlType::CommonDialog) {
+                ctrl.controlType == FrmControlType::StatusBar) {
+                // D6 / C29-9: CommonDialog 已从这一组摘出 ⇒ 它现在拿到的是普通
+                // `vb6_hwnd_<名>`（自注册的不可见窗口），不再是 IDispatch* 变量。
                 c_.emitLine("static void* vb6_com_" + cIdent(ctrl.controlName) + " = NULL;  /* IDispatch* */");
             } else if (knownControlArrays_.count(ctrlLower)) {
                 c_.emitLine("static vb6_CtrlArr vb6_arr_" + cIdent(ctrl.controlName) + ";");

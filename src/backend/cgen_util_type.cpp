@@ -162,6 +162,25 @@ Vb6Type CCodeGen::inferExprType(Expr& expr) const {
                             if (memFc == n) return Vb6Type::String;
                         }
                     }
+                    // D6 / C29-9: CommonDialog 的成员面。不登记 ⇒ 字符串属性被判成
+                    // Variant ⇒ 比较/拼接走错箱（C29-1b 那条"x64 真、x86 假"的同族坑），
+                    // 而 `CancelError` 这类布尔判成 Variant 还会让 `If CD1.CancelError`
+                    // 走 VarCmp 而不是直接真值判断。
+                    if (fcIt->second == FrmControlType::CommonDialog) {
+                        static const char* const kStrFcCd[] = {
+                            "filter", "filename", "filetitle", "dialogtitle",
+                            "initdir", "defaultext", "fontname",
+                        };
+                        static const char* const kNumFcCd[] = {
+                            "flags", "cancelerror", "color", "min", "max", "copies", "fontsize",
+                        };
+                        for (const char* n : kStrFcCd) {
+                            if (memFc == n) return Vb6Type::String;
+                        }
+                        for (const char* n : kNumFcCd) {
+                            if (memFc == n) return Vb6Type::Long;
+                        }
+                    }
                 }
             }
             // P24-12: Err对象特殊处理

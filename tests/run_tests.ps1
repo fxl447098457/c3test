@@ -794,6 +794,28 @@ function Test-EmitcShape {
     }
 }
 
+# Test-EmitcShape 的反面：断 --emit-c 的输出里**没有**某些形状。用在 D6 那一类改动上
+# （"这一类控件不再走 OCX 晚绑定"）—— 只断"原生入口在"不够，残留的 OCX 形状会让两条路
+# 并存，读数目视上全绿、发码却还在 CoCreateInstance。
+function Test-EmitcAbsent {
+    param([string]$Name, [array]$Sources, [array]$Needles)
+    $script:total++
+    Write-Host -NoNewline "  [EMITC-ABSENT] $Name ... "
+    $argList = (($Sources | ForEach-Object { '"' + $_ + '"' }) -join ' ')
+    $out = & cmd /c ('"' + $C3 + '"' + ' ' + $argList + ' --emit-c 2>&1')
+    $code = $LASTEXITCODE
+    $raw = ($out | Out-String)
+    $hit = @($Needles | Where-Object { $raw.Contains($_) })
+    if ($code -eq 0 -and $hit.Count -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host ("  exit=" + $code + " 还在场: " + ($hit -join ' | ')) -ForegroundColor DarkGray
+        if ($Verbose) { Write-Host $raw }
+    }
+}
+
 function Test-SyntaxFail {
     param([string]$Name, [string]$Source, [string]$Needle)
     $script:total++
@@ -1282,6 +1304,32 @@ if ($Category -in @("all", "run", "vbp")) {
     $cfNeedles = @("CTRLFILES-DONE") + (1..14 | ForEach-Object { "CF$_=Y" })
     Test-Vbp "ctrlfiles" "$Tests\ctrlfiles\CfApp.vbp" $cfNeedles
     Test-Vbp "ctrlfiles_x86" "$Tests\ctrlfiles\CfApp.vbp" $cfNeedles -Arch "x86"
+    # ai/029 C29-9 / 决策 D6：CommonDialog 换成原生 comdlg32，不再经 MSComDlg.OCX。
+    # 为什么必须换（实测）：那个 OCX 只有 32 位，x64 里 CoCreateInstance 直接失败，于是改之前
+    # 这枚控件是静默空转的 —— 探针六条属性读数全空、六个 Show* 一个都不出现，而程序照旧打完
+    # 尾针、退出码 0。10 条读数：设计期四行落位（DL1-DL4）/ Filter 竖线原样读回（DL5）/
+    # 另一枚不被继承（DL6-DL7）/ 运行期读写回路（DL8）/ 两枚不串（DL9）/ 六个 Show* 的发码形状（DL10）。
+    # DL10 用恒假守卫把调用留在源码里：真弹框的判据要一套"起窗 + 自关"的探针（下一小批 C29-9b），
+    # 否则用例会在没人点"取消"的地方把门卡死。负控：喂 BASE 二进制直接编不过
+    # （C2065: vb6_hwnd_dl2 未声明 —— 那条路上压根没有属性宿主）。
+    $dlNeedles = @("CTRLDLG-DONE") + (1..10 | ForEach-Object { "DL$_=Y" })
+    Test-Vbp "ctrldlg" "$Tests\ctrldlg\DlApp.vbp" $dlNeedles
+    Test-Vbp "ctrldlg_x86" "$Tests\ctrldlg\DlApp.vbp" $dlNeedles -Arch "x86"
+    # 发码两面都要钉：原生入口在场，OCX 那一族形状不许还在场（D6：摘一类少一类）。
+    Test-EmitcShape "dl_emitc_shape" @("$Tests\ctrldlg\DlApp.vbp") @(
+        'vb6_RegisterCommDialogClass((void*)hInstance);',
+        '"VB6_COMMONDIALOG", "",',
+        'vb6_CdShowOpen((void*)vb6_hwnd_dl1);',
+        'vb6_CdShowFont((void*)vb6_hwnd_dl1);',
+        'vb6_CdSetFlags((void*)vb6_hwnd_dl1, 528);'
+    )
+    # 反面断言走新助手 Test-EmitcAbsent：只断原生入口在不够 —— 两条路并存时读数目视全绿、
+    # 发码却还在 CoCreateInstance，正是本批要拆掉的东西。
+    Test-EmitcAbsent "dl_emitc_no_ocx" @("$Tests\ctrldlg\DlApp.vbp") @(
+        'vb6_com_dl1',
+        'CLSIDFromProgID',
+        'CoCreateInstance'
+    )
     # 通知接线这一刀没法在无头环境里真点一下, 所以断的是发码形状: 三条 WM_COMMAND 派发
     # (含 Dir 下钻的前置判定) + 设计期 Path/Pattern 落到初值。少了任何一条, 控件就是
     # "能显示、不联动" —— 而 CF12/CF13 是手工调 Sub 证明的, 不看这里就没人盯接线。
