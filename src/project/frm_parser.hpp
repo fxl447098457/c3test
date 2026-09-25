@@ -156,6 +156,10 @@ struct FrmFile {
     FrmFormDesc form;                  // 窗体描述
     std::string codeSection;           // VB代码段 (Attribute和VB代码, 不含Begin...End)
     std::filesystem::path frmFilePath; // 文件路径
+    // Fix 196: 文件根本没读进来 (不存在 / 路径错 / 权限)。调用方**必须**据此报错 ——
+    // 否则整张窗体 (设计器 + 代码段) 会静默变成空模块, 编出的 exe 什么都不做,
+    // 却报"编译成功"。中文路径下曾经正是这个症状。
+    bool readFailed = false;
 };
 
 // ============================================================

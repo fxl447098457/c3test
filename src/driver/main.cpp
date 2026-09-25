@@ -5,6 +5,7 @@
 #include <vector>
 #include <iostream>
 #include <algorithm>
+#include <filesystem>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -215,31 +216,48 @@ struct ConsoleFlushAtExit {
 namespace {
 
 int runCompile(vb6c3::Driver& driver, int argc, char* argv[]) {
-    // ai/023 S06: --pack/--unpack 分发外壳。在进入编译管线前截获 ——
-    // 容器是纯分发形态, 编译器本体永不读它 (D5)。
-    for (int i = 1; i < argc; ++i) {
-        std::string a = argv[i] ? argv[i] : "";
-        if (a == "--pack" && i + 1 < argc) {
-            return vb6c3::runPackMode(argv[i + 1]);
-        }
-        if (a == "--unpack" && i + 1 < argc) {
-            std::string outDir;
-            for (int j = i + 2; j + 1 < argc; ++j) {
-                if (argv[j] && std::string(argv[j]) == "--output-dir") outDir = argv[j + 1];
+    // Fix 196: 路径转换异常兜底。
+    //   std::filesystem 的**窄串**重载 (path(const std::string&), exists(str), absolute(str) ...)
+    //   在 Windows 上按系统 ACP (中文机为 936/GBK) 解释 char*, 而 C3 内部路径一律 UTF-8。
+    //   一旦那些字节不是合法 ACP 序列 —— 路径里含奇数个非 ASCII 字符时极常见, 例如
+    //   "..\中文叉\Form1.frm" 的 UTF-8 字节解 GBK 会剩一个孤立前导字节 ——
+    //   MultiByteToWideChar 返回 0, _Convert_narrow_to_wide 抛 filesystem_error。
+    //   此前无人接住 -> std::terminate -> abort(): 用户看到的是模态「Debug Error」对话框
+    //   (退出码 3), 而不是一条能看懂的错误信息。
+    //   这里兜住整条管线: 至少保证编译器永远"死得有话说"(退出码 1)。
+    //   根治仍是让每个入口走 utf8ToPath (见 common/encoding.hpp 的 *Utf8 包装族)。
+    try {
+        // ai/023 S06: --pack/--unpack 分发外壳。在进入编译管线前截获 ——
+        // 容器是纯分发形态, 编译器本体永不读它 (D5)。
+        for (int i = 1; i < argc; ++i) {
+            std::string a = argv[i] ? argv[i] : "";
+            if (a == "--pack" && i + 1 < argc) {
+                return vb6c3::runPackMode(argv[i + 1]);
             }
-            return vb6c3::runUnpackMode(argv[i + 1], outDir);
+            if (a == "--unpack" && i + 1 < argc) {
+                std::string outDir;
+                for (int j = i + 2; j + 1 < argc; ++j) {
+                    if (argv[j] && std::string(argv[j]) == "--output-dir") outDir = argv[j + 1];
+                }
+                return vb6c3::runUnpackMode(argv[i + 1], outDir);
+            }
         }
-    }
-    auto result = driver.compile(argc, argv);
+        auto result = driver.compile(argc, argv);
 
-    // success=false 且 errorCount=0 = 编译未成功却无错误计数 (如 GUI 工程链接未产出
-    // exe) — 必须判为失败. -h/--help/--version 走的是 compile() 里 success=true 的
-    // "正常退出" 分支, 不会落到这里, 因此脚本里 c3 --version 退出码为 0.
-    if (!result.success && result.errorCount == 0) {
+        // success=false 且 errorCount=0 = 编译未成功却无错误计数 (如 GUI 工程链接未产出
+        // exe) — 必须判为失败. -h/--help/--version 走的是 compile() 里 success=true 的
+        // "正常退出" 分支, 不会落到这里, 因此脚本里 c3 --version 退出码为 0.
+        if (!result.success && result.errorCount == 0) {
+            return 1;
+        }
+
+        return result.errorCount > 0 ? 1 : 0;
+    } catch (const std::filesystem::filesystem_error& e) {
+        std::cerr << "C3: 路径处理失败: " << e.what() << std::endl;
+        std::cerr << "C3: 这通常意味着某个路径没有经 utf8ToPath() 转换就交给了 std::filesystem。"
+                  << std::endl;
         return 1;
     }
-
-    return result.errorCount > 0 ? 1 : 0;
 }
 
 }  // namespace

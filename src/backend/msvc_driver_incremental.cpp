@@ -32,7 +32,7 @@ std::string hashString(const std::string& s) {
 
 // 文件内容哈希; 读取失败返回空串
 std::string hashFile(const std::string& path) {
-    std::ifstream f(path, std::ios::binary);
+    std::ifstream f = ifstreamUtf8(path, std::ios::binary);
     if (!f) return "";
     uint64_t h = 1469598103934665603ULL;
     char buf[65536];
@@ -55,7 +55,7 @@ std::string hashFile(const std::string& path) {
 std::vector<std::string> collectLocalIncludes(const std::string& cPath, const std::string& srcDir,
                                               const std::string& rtlDir) {
     std::vector<std::string> incs;
-    std::ifstream f(cPath);
+    std::ifstream f = ifstreamUtf8(cPath);
     if (!f) return incs;
     std::string line;
     while (std::getline(f, line)) {
@@ -114,7 +114,7 @@ bool MsvcDriver::compileAndLinkIncremental(const MsvcDriverOptions& options) {
     // 读缓存: objName -> record
     std::unordered_map<std::string, std::string> cache;
     {
-        std::ifstream f(cacheFile);
+        std::ifstream f = ifstreamUtf8(cacheFile);
         std::string line;
         while (std::getline(f, line)) {
             size_t tab = line.find('\t');
@@ -189,10 +189,8 @@ bool MsvcDriver::compileAndLinkIncremental(const MsvcDriverOptions& options) {
             compileCmd << " \"" << src << "\"";
         }
         std::string rspPath = objDir + "/_c3_cl_args.rsp";
-        {
-            std::ofstream rspFile(rspPath, std::ios::out | std::ios::trunc);
-            if (rspFile) rspFile << compileCmd.str().substr(cl.length());
-        }
+        // Fix 196: UTF-16LE+BOM (cl/link 按系统 ANSI 代码页读 @rsp, 见 msvc_driver.hpp)
+        writeMsvcResponseFile(rspPath, compileCmd.str().substr(cl.length()));
         std::string vcvarsPrefix = buildVcvarsPrefix(arch);
         std::string fullCmd = vcvarsPrefix + cl + " @\"" + rspPath + "\" > \"" + tmpLogPath + "\" 2>&1";
         int ret = executeCommand(fullCmd);
@@ -204,8 +202,8 @@ bool MsvcDriver::compileAndLinkIncremental(const MsvcDriverOptions& options) {
             }
             if (outputDirForLog.empty()) outputDirForLog = ".";
             std::string errorLogPath = outputDirForLog + "/c3-error.log";
-            std::ifstream tmpLog(tmpLogPath);
-            std::ofstream errLog(errorLogPath, std::ios::out | std::ios::trunc);
+            std::ifstream tmpLog = ifstreamUtf8(tmpLogPath);
+            std::ofstream errLog = ofstreamUtf8(errorLogPath, std::ios::out | std::ios::trunc);
             if (tmpLog && errLog) {
                 errLog << "C3: Compilation failed (exit code " << ret << ")" << std::endl;
                 errLog << "=== MSVC Output ===" << std::endl;
@@ -243,7 +241,7 @@ bool MsvcDriver::compileAndLinkIncremental(const MsvcDriverOptions& options) {
 
     // 更新缓存索引 (总是写, 保证新模块/新记录持久)
     {
-        std::ofstream f(cacheFile, std::ios::out | std::ios::trunc);
+        std::ofstream f = ofstreamUtf8(cacheFile, std::ios::out | std::ios::trunc);
         for (auto& kv : newCache) {
             f << kv.first << "\t" << kv.second << "\n";
         }
@@ -293,10 +291,8 @@ bool MsvcDriver::compileAndLinkIncremental(const MsvcDriverOptions& options) {
     if (options.debugInfo) linkCmd << " /DEBUG /MAP";
 
     std::string linkRsp = objDir + "/_c3_link_args.rsp";
-    {
-        std::ofstream rspFile(linkRsp, std::ios::out | std::ios::trunc);
-        if (rspFile) rspFile << linkCmd.str().substr(linkExe.length());
-    }
+    // Fix 196: UTF-16LE+BOM (link.exe 直调 @rsp 同样按 ANSI 代码页读, 实测 UTF-8 → LNK1117)
+    writeMsvcResponseFile(linkRsp, linkCmd.str().substr(linkExe.length()));
     std::string vcvarsPrefix2 = buildVcvarsPrefix(arch);
     std::string fullLinkCmd = vcvarsPrefix2 + linkExe + " @\"" + linkRsp + "\" > \"" + tmpLogPath + "\" 2>&1";
 
@@ -313,8 +309,8 @@ bool MsvcDriver::compileAndLinkIncremental(const MsvcDriverOptions& options) {
         }
         if (outputDirForLog.empty()) outputDirForLog = ".";
         std::string errorLogPath = outputDirForLog + "/c3-error.log";
-        std::ifstream tmpLog(tmpLogPath);
-        std::ofstream errLog(errorLogPath, std::ios::out | std::ios::trunc);
+        std::ifstream tmpLog = ifstreamUtf8(tmpLogPath);
+        std::ofstream errLog = ofstreamUtf8(errorLogPath, std::ios::out | std::ios::trunc);
         if (tmpLog && errLog) {
             errLog << "C3: Compilation failed (exit code " << ret2 << ")" << std::endl;
             errLog << "=== MSVC Output ===" << std::endl;

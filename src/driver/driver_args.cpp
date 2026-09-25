@@ -178,10 +178,10 @@ std::pair<CompileOptions, int> Driver::parseArgs(int argc, char* argv[]) {
 void Driver::writeErrorLog(const std::string& logPath, const std::string& stage) {
     // Prepend fail info (also creates file if not exists from MSVC driver)
     if (!std::filesystem::exists(utf8ToPath(logPath))) {
-        std::ofstream createLog(logPath, std::ios::out);
+        std::ofstream createLog = ofstreamUtf8(logPath, std::ios::out);
         createLog << "C3: Compilation failed (stage: " << stage << ")" << std::endl;
     }
-    std::ofstream errLog(logPath, std::ios::out | std::ios::app);
+    std::ofstream errLog = ofstreamUtf8(logPath, std::ios::out | std::ios::app);
     if (!errLog) return;
     errLog << "\n=== C3 Diagnostics (" << stage << ") ===" << std::endl;
     errLog << diag_->toString();

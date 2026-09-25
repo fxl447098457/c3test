@@ -4,6 +4,7 @@
 // RTL sources are compiled by MSVC together with the generated code.
 
 #include "driver/rtl_embedded.hpp"
+#include "common/encoding.hpp"
 
 #include <iostream>
 #include <fstream>
@@ -64,10 +65,35 @@ SessionManager::~SessionManager() {
 }
 
 std::string SessionManager::getSessionRoot() {
+#ifdef _WIN32
+    // Fix 196: 环境变量必须按**宽字符**读。CRT 的 getenv 返回的是 ACP 字节, 而 C3
+    // 内部统一 UTF-8 —— %TEMP% 一旦含非 ASCII (典型: 中文用户名 C:\Users\张三\...),
+    // 这些 ACP 字节会被 executeCommand 的 MultiByteToWideChar(CP_UTF8) 当 UTF-8 解码,
+    // 临时目录在命令行里变成乱码 -> cmd 的重定向目标非法 -> **cl 根本没执行**,
+    // 只报 exit code 1 且零输出 (实测)。这里转成 UTF-8, 与其余路径口径一致。
+    auto envW = [](const wchar_t* name) -> std::string {
+        wchar_t buf[32768];
+        DWORD n = GetEnvironmentVariableW(name, buf, 32768);
+        if (n == 0 || n >= 32768) return std::string();
+        return wideToUtf8(std::wstring(buf, n));
+    };
+    std::string tmp = envW(L"TMP");
+    if (tmp.empty()) tmp = envW(L"TEMP");
+    if (tmp.empty()) {
+        wchar_t tbuf[32768];
+        DWORD n = GetTempPathW(32768, tbuf);
+        if (n > 0) tmp = wideToUtf8(std::wstring(tbuf, n));
+    }
+    // GetTempPathW 的返回值以 '\' 结尾; 手写 TMP 可能也带尾分隔符
+    while (!tmp.empty() && (tmp.back() == '\\' || tmp.back() == '/')) tmp.pop_back();
+    if (tmp.empty()) tmp = "C:\\Temp";
+    return tmp + "\\C3C";
+#else
     const char* tmp = std::getenv("TMP");
     if (!tmp || tmp[0] == '\0') tmp = std::getenv("TEMP");
     if (!tmp || tmp[0] == '\0') tmp = "C:\\Temp";
     return std::string(tmp) + "\\C3C";
+#endif
 }
 
 // ============================================================
@@ -247,7 +273,7 @@ std::string SessionManager::create() {
     rtlDir_ = sessionDir_ + "\\rtl";
 
     std::error_code ec;
-    std::filesystem::create_directories(rtlDir_, ec);
+    std::filesystem::create_directories(utf8ToPath(rtlDir_), ec);
     if (ec) {
         std::cerr << "C3: cannot create session directory: " << rtlDir_ << " (" << ec.message() << ")" << std::endl;
         rtlDir_.clear();
@@ -275,7 +301,7 @@ bool SessionManager::extractResource(int resId, const std::string& fileName, con
     }
 
     std::string filePath = targetDir + "\\" + fileName;
-    std::ofstream ofs(filePath, std::ios::out | std::ios::trunc | std::ios::binary);
+    std::ofstream ofs(utf8ToPath(filePath), std::ios::out | std::ios::trunc | std::ios::binary);
     if (!ofs) return false;
 
     ofs.write(data.data(), static_cast<std::streamsize>(data.size()));
@@ -286,7 +312,7 @@ void SessionManager::cleanup() {
     if (sessionDir_.empty()) return;
 
     std::error_code ec;
-    std::filesystem::remove_all(sessionDir_, ec);
+    std::filesystem::remove_all(utf8ToPath(sessionDir_), ec);
     // Ignoring errors - best effort cleanup
 
     sessionDir_.clear();
@@ -302,13 +328,13 @@ bool SessionManager::restoreMissing() {
     if (rtlDir_.empty()) return false;
 
     std::error_code ec;
-    std::filesystem::create_directories(rtlDir_, ec);   // 目录本身被删也要能恢复
+    std::filesystem::create_directories(utf8ToPath(rtlDir_), ec);   // 目录本身被删也要能恢复
 
     int repaired = 0, failed = 0;
     for (size_t i = 0; i < kRtlFileCount; i++) {
         const std::string path = rtlDir_ + "\\" + kRtlFiles[i].name;
         ec.clear();
-        auto size = std::filesystem::file_size(path, ec);
+        auto size = std::filesystem::file_size(utf8ToPath(path), ec);
         if (!ec && size > 0) continue;                  // 齐备
 
         if (extractResource(kRtlFiles[i].id, kRtlFiles[i].name, rtlDir_)) {
@@ -327,7 +353,7 @@ bool SessionManager::restoreMissing() {
 
 void SessionManager::cleanupOldSessions() {
     std::string root = getSessionRoot();
-    if (!std::filesystem::exists(root)) return;
+    if (!std::filesystem::exists(utf8ToPath(root))) return;
 
     // 陈旧阈值 30 分钟. 单次编译要跑 cl /MP 并行编译 100+ 个 RTL 源文件, 在 CI 16 路
     // 并发下实测可超过 300 秒 —— 旧的 300s 阈值会把**仍在编译**的兄弟会话目录判成过期
@@ -335,7 +361,7 @@ void SessionManager::cleanupOldSessions() {
     const auto maxAge = std::chrono::minutes(30);
 
     std::error_code ec;
-    for (auto& entry : std::filesystem::directory_iterator(root, ec)) {
+    for (auto& entry : std::filesystem::directory_iterator(utf8ToPath(root), ec)) {
         if (!entry.is_directory()) continue;
 
         // 1) 属主进程仍存活 -> 绝不删除 (会话目录名 = "<ticks>_<pid>")

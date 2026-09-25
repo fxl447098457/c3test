@@ -217,6 +217,9 @@ FrmFile FrmParser::parse(const std::string& frmFilePath) {
     // M22: 使用编码检测+转换读取, 确保GBK等非UTF-8文件正确解码
     auto readResult = SourceBuffer::readAndConvertToUtf8(frmFilePath);
     if (readResult.content.empty()) {
+        // Fix 196: 明确标记失败。合法 .frm 至少有 VERSION 行, 内容为空只可能是
+        // 打不开 (路径错/不存在/权限)。调用方报错, 不再静默产出空模块。
+        frmFile.readFailed = true;
         return frmFile;
     }
 

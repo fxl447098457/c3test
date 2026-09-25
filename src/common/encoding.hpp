@@ -5,6 +5,8 @@
 
 #include <string>
 #include <filesystem>
+#include <fstream>
+#include <cstdio>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -72,6 +74,45 @@ inline std::filesystem::path utf8ToPath(const std::string& utf8) {
 #else
     return std::filesystem::path(utf8);
 #endif
+}
+
+// ============================================================
+// Fix 196: 文件流的 UTF-8 安全包装
+// ------------------------------------------------------------
+// std::ofstream/std::ifstream/std::fopen 的**窄字符串**重载在 Windows 上把 char*
+// 当**系统 ANSI 代码页 (936/GBK)** 解释, 而 C3 内部路径一律 UTF-8。中文/韩文/俄文
+// 目录下这些调用会打开乱码路径 —— 轻则「无法写入文件」直接失败, 重则写到一个
+// **同名的乱码文件**里, 静默丢产物。下面包装统一经 utf8ToPath() 走宽字符重载。
+//
+// 实测 (非 ASCII %TEMP%):
+//   std::ofstream ofs("C:\\Windows\\Temp\\新建temp\\C3C\\..\\FrxData.h")  -> 失败
+//   ofstreamUtf8(同一字符串)                                            -> 成功
+//
+// ASCII 路径下与原行为逐字节一致 (多一次 UTF-8→UTF-16 转换), 无副作用。
+// ============================================================
+
+inline std::ofstream ofstreamUtf8(const std::string& utf8Path,
+                                  std::ios::openmode mode = std::ios::out) {
+    return std::ofstream(utf8ToPath(utf8Path), mode);
+}
+
+inline std::ifstream ifstreamUtf8(const std::string& utf8Path,
+                                  std::ios::openmode mode = std::ios::in) {
+    return std::ifstream(utf8ToPath(utf8Path), mode);
+}
+
+inline std::FILE* fopenUtf8(const std::string& utf8Path, const char* mode) {
+#ifdef _WIN32
+    return _wfopen(utf8ToPath(utf8Path).c_str(), utf8ToWide(mode).c_str());
+#else
+    return std::fopen(utf8Path.c_str(), mode);
+#endif
+}
+
+// 窄串版存在性判断 (收 UTF-8 路径; 失败一律当"不存在", 不抛异常)
+inline bool existsUtf8(const std::string& utf8Path) {
+    std::error_code ec;
+    return std::filesystem::exists(utf8ToPath(utf8Path), ec) && !ec;
 }
 
 } // namespace vb6c3

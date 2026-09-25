@@ -7,7 +7,7 @@
 
         std::string dllEntryPath = outputDir + "/dll_entry.c";
         {
-            std::ofstream ofs(dllEntryPath, std::ios::out | std::ios::trunc);
+            std::ofstream ofs = ofstreamUtf8(dllEntryPath, std::ios::out | std::ios::trunc);
             if (!ofs) {
                 std::cerr << "C3: 无法写入文件: " << dllEntryPath << std::endl;
                 return false;
@@ -54,7 +54,7 @@
 
         std::string comEntryPath = outputDir + "/com_entry.c";
         {
-            std::ofstream ofs(comEntryPath, std::ios::out | std::ios::trunc);
+            std::ofstream ofs = ofstreamUtf8(comEntryPath, std::ios::out | std::ios::trunc);
             if (!ofs) {
                 std::cerr << "C3: 无法写入文件: " << comEntryPath << std::endl;
                 return false;

@@ -1221,6 +1221,83 @@ if ($Category -in @("all", "run", "vbp")) {
         if ($Verbose) { Get-Content $frxExOut -ErrorAction SilentlyContinue }
     }
 
+    # --- Fix 196: 非 ASCII (中文) 路径下的完整编译 + 运行 ---
+    # 真因: cl.exe / link.exe 读 @rsp 响应文件时按**系统 ANSI 代码页**解释字节, 而
+    # 命令行本身就是 UTF-8。于是 /Fe"…\新建文件夹\out\x.exe" 被解成 GBK 乱码
+    # (且 GBK 双字节会吃掉后面的 '\'), 链接期 LNK1104「无法打开文件」/ LNK1117。
+    # 修法 = 响应文件写 UTF-16LE+BOM (见 msvc_driver.hpp 的实测矩阵)。
+    #
+    # 目录名用 [char] 拼出来, 让本脚本保持**纯 ASCII**: Windows PowerShell 5.1 读
+    # 无 BOM 的 UTF-8 .ps1 会按 ANSI 解码, 直接写字面量会让路径本身先烂掉。
+    $cnName = [string]::Join('', [char]0x4E2D, [char]0x6587, [char]0x8DEF, [char]0x5F84,
+                                  [char]0x6D4B, [char]0x8BD5)   # 中文路径测试
+    $cnDir = Join-Path $OutDir $cnName
+    if (Test-Path $cnDir) { Remove-Item $cnDir -Recurse -Force }
+    New-Item -ItemType Directory -Path $cnDir | Out-Null
+    Copy-Item "$Tests\frxdata\*" $cnDir
+    $script:total++
+    Write-Host -NoNewline "  [VBP] nonascii_path ... "
+    $cnOut = Join-Path $cnDir "out"
+    $cnCompile = & $C3 (Join-Path $cnDir "FrxData.vbp") --output-dir $cnOut 2>&1
+    $cnExe = Join-Path $cnOut "FrxData.exe"
+    if ($LASTEXITCODE -ne 0 -or -not (Test-Path $cnExe)) {
+        $script:fail++
+        Write-Host "FAIL (compile in non-ASCII path)" -ForegroundColor Red
+        if ($Verbose) { Write-Host ($cnCompile | Out-String) }
+    } else {
+        # 光能链接还不够: 跑起来核对取值, 顺带证明同目录下的 .frx 也按宽路径读到了
+        $cnRun = Invoke-TestExe -ExePath $cnExe -WorkDir $cnOut -Name "FrxDataCn"
+        $cnOk = $cnRun.Ok
+        foreach ($needle in @("FD1=alpha|beta", "FD4=5", "FD6=-7", "FRXDATA-DONE")) {
+            if (-not ($cnRun.Output | Where-Object { $_ -like "*$needle*" })) { $cnOk = $false }
+        }
+        if ($cnOk) {
+            $script:pass++
+            Write-Host "PASS" -ForegroundColor Green
+        } else {
+            $script:fail++
+            Write-Host "FAIL (non-ASCII path run)" -ForegroundColor Red
+            if ($Verbose) { Write-Host ("    " + $cnRun.Detail); Write-Host ($cnRun.Output -join "`n") }
+        }
+    }
+
+    # --- Fix 196b: 非 ASCII 路径 + **缺 .frx** 不得让编译器 abort() ---
+    # 崩溃机理 (实测栈, driver_frontend.cpp 的 VB4004 告警分支):
+    #   std::filesystem::path(utf8String) 的**窄串**重载按系统 ACP(中文机 936/GBK) 解释
+    #   char*, 而该处拿到的是 UTF-8。路径字节凑不成合法 GBK 序列时
+    #   _Convert_narrow_to_wide 抛 filesystem_error -> 无人接 -> std::terminate -> abort()
+    #   => 退出码 3 + 模态「Debug Error / abort() has been called」对话框。
+    #   "非 ASCII 字符数为奇数" 几乎必然落进这条 (首字符起按 2 字节分组会剩半个)。
+    #   目录名取「中文叉」(3 字 = 9 字节, 奇) 精确命中; 「新建目录」(4 字 = 12 字节, 偶)
+    #   反而侥幸不崩 —— 所以上一用例覆盖不到, 必须单列。
+    # 仍用 [char] 拼名字保持本脚本纯 ASCII (见上一段注释)。
+    $cnOddName = [string]::Join('', [char]0x4E2D, [char]0x6587, [char]0x53C9)   # 中文叉
+    $cnOddDir = Join-Path $OutDir $cnOddName
+    if (Test-Path $cnOddDir) { Remove-Item $cnOddDir -Recurse -Force }
+    New-Item -ItemType Directory -Path $cnOddDir | Out-Null
+    Copy-Item "$Tests\frxdata\FrxData.frm" $cnOddDir      # 故意**不**拷 .frx
+    $script:total++
+    Write-Host -NoNewline "  [VBP] nonascii_missing_frx ... "
+    $oddOut = Join-Path $cnOddDir "out"
+    $oddLog = (& $C3 (Join-Path $cnOddDir "FrxData.frm") --emit-c --output-dir $oddOut 2>&1 | Out-String)
+    $oddRc = $LASTEXITCODE
+    if ($oddRc -eq 3) {
+        $script:fail++
+        Write-Host "FAIL (abort() 复现: exit=3)" -ForegroundColor Red
+        if ($Verbose) { Write-Host $oddLog }
+    } elseif ($oddRc -ne 0) {
+        $script:fail++
+        Write-Host "FAIL (exit=$oddRc)" -ForegroundColor Red
+        if ($Verbose) { Write-Host $oddLog }
+    } elseif ($oddLog -notlike "*VB4004*") {
+        $script:fail++
+        Write-Host "FAIL (缺 .frx 却未报 VB4004)" -ForegroundColor Red
+        if ($Verbose) { Write-Host $oddLog }
+    } else {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    }
+
     Test-Vbp "M6Test" "$Tests\M6Test.vbp" @("M6A:OK", "M6B:OK", "M6C:OK", "M6D:OK", "M6 PASSED")
     Test-Vbp "modulemethod" "$Tests\test_modulemethod.vbp" @("30", "21")
 

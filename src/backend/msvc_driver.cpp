@@ -294,13 +294,9 @@ bool MsvcDriver::compileAndLink(const MsvcDriverOptions& options) {
     // Use response file to avoid cmd.exe command line length limit (8191 chars)
     // when compiling many source files (e.g. 125+ .c files in a large project)
     std::string rspPath = tmpLogDir + "/_c3_cl_args.rsp";
-    {
-        std::ofstream rspFile(rspPath, std::ios::out | std::ios::trunc);
-        if (rspFile) {
-            // Write arguments (everything after "cl.exe ")
-            rspFile << cmd.str().substr(cl.length());
-        }
-    }
+    // Fix 196: 必须写成 UTF-16LE+BOM —— cl/link 按系统 ANSI 代码页读 @rsp,
+    // 原样落 UTF-8 会把中文路径解成乱码 (详见 msvc_driver.hpp 的实测矩阵)。
+    writeMsvcResponseFile(rspPath, cmd.str().substr(cl.length()));
 
     // P11.4: Prepend vcvarsall.bat setup if cl.exe not in PATH
     std::string vcvarsPrefix = buildVcvarsPrefix(options.arch);
@@ -316,8 +312,8 @@ bool MsvcDriver::compileAndLink(const MsvcDriverOptions& options) {
         }
         if (outputDirForLog.empty()) outputDirForLog = ".";
         std::string errorLogPath = outputDirForLog + "/c3-error.log";
-        std::ifstream tmpLog(tmpLogPath);
-        std::ofstream errLog(errorLogPath, std::ios::out | std::ios::trunc);
+        std::ifstream tmpLog = ifstreamUtf8(tmpLogPath);
+        std::ofstream errLog = ofstreamUtf8(errorLogPath, std::ios::out | std::ios::trunc);
         if (tmpLog && errLog) {
             errLog << "C3: Compilation failed (exit code " << ret << ")" << std::endl;
             errLog << "=== MSVC Output ===" << std::endl;

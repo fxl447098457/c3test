@@ -179,7 +179,7 @@ static bool assembleAsmProcs(const std::vector<EmittedAsmProc>& procs,
         // 调试逃生舱: C3_KEEP_ASM=<目录> 时把生成的 .asm 额外拷一份过去 (排障用)。
         const char* keepAsm = std::getenv("C3_KEEP_ASM");
         {
-            std::ofstream ofs(asmPath, std::ios::out | std::ios::trunc);
+            std::ofstream ofs = ofstreamUtf8(asmPath, std::ios::out | std::ios::trunc);
             if (!ofs) {
                 std::cerr << "C3: error: 无法写入汇编文件: " << asmPath << std::endl;
                 return false;
@@ -496,7 +496,7 @@ bool Driver::runLinker(const CompileOptions& options, const std::string& outputD
     // P6.6: ActiveX DLL - generate .def export file (in intermediatesDir)
     if (options.isDll) {
         std::string defPath = intermediatesDir + "/activex_dll.def";
-        std::ofstream defFile(defPath, std::ios::out | std::ios::trunc);
+        std::ofstream defFile = ofstreamUtf8(defPath, std::ios::out | std::ios::trunc);
         if (defFile) {
             defFile << "LIBRARY\n";
             defFile << "EXPORTS\n";
@@ -516,11 +516,11 @@ bool Driver::runLinker(const CompileOptions& options, const std::string& outputD
     // P9: Embed TypeLib into DLL resource
     if (options.isDll && !options.dllProgId.empty()) {
         std::string tlbPath = pathToUtf8(std::filesystem::absolute(utf8ToPath(intermediatesDir + "/" + options.dllProgId + ".tlb")));
-        if (std::filesystem::exists(tlbPath)) {
+        if (existsUtf8(tlbPath)) {
             std::string absInterDir = pathToUtf8(std::filesystem::absolute(utf8ToPath(intermediatesDir)));
             std::string rcPath = absInterDir + "\\activex_dll_typelib.rc";
             {
-                std::ofstream rcFile(rcPath, std::ios::out | std::ios::trunc);
+                std::ofstream rcFile = ofstreamUtf8(rcPath, std::ios::out | std::ios::trunc);
                 if (rcFile) {
                     std::string tlbPathForRc = tlbPath;
                     for (auto& c : tlbPathForRc) { if (c == '\\') c = '/'; }
@@ -545,7 +545,7 @@ bool Driver::runLinker(const CompileOptions& options, const std::string& outputD
                 // rc 路径剥成 C:\...\rc.exe" -> 找不到命令 -> rcRet != 0 被静默跳过,
                 // TypeLib 资源不再嵌入 (实测 DLL 少 141KB)。多包一层让 cmd 剥外层、留下 rc 自己的引号。
                 int rcRet = MsvcDriver::executeCommand("\"" + rcArgs.str() + "\"");
-                if (rcRet == 0 && std::filesystem::exists(resPath)) {
+                if (rcRet == 0 && existsUtf8(resPath)) {
                     msvcOpts.typelibResFile = resPath;
                     if (options.verbose) {
                         std::cout << "C3: TypeLib resource embedded: " << resPath << std::endl;
@@ -565,7 +565,7 @@ bool Driver::runLinker(const CompileOptions& options, const std::string& outputD
         std::string absInterDir2 = pathToUtf8(std::filesystem::absolute(utf8ToPath(intermediatesDir)));
         std::string verRcPath = absInterDir2 + "\\version_info.rc";
         {
-            std::ofstream rcFile(verRcPath, std::ios::out | std::ios::trunc);
+            std::ofstream rcFile = ofstreamUtf8(verRcPath, std::ios::out | std::ios::trunc);
             if (rcFile) {
                 // Determine internal name from project base name or output file
                 std::string internalName = projectBaseName_.empty() ? "VB6App" : projectBaseName_;
@@ -642,7 +642,7 @@ bool Driver::runLinker(const CompileOptions& options, const std::string& outputD
             }
             // 同 rcArgs: 必须多包一层引号, 否则 cmd 剥引号后 rc 路径被破坏 (见上文注释)
             int verRcRet = MsvcDriver::executeCommand("\"" + verRcArgs.str() + "\"");
-            if (verRcRet == 0 && std::filesystem::exists(verResPath)) {
+            if (verRcRet == 0 && existsUtf8(verResPath)) {
                 msvcOpts.versionInfoResFile = verResPath;
                 if (options.verbose) {
                     std::cout << "C3: VS_VERSION_INFO resource compiled: " << verResPath << std::endl;
