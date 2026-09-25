@@ -5,7 +5,7 @@
 > 规范输入: `ai/讨论记录/018-接口继承与CoClass设计思路.md`（含 tB 文档要点与分阶段设计思路全文）。
 
 STATUS: ALL_DONE             # NOT_STARTED | DESIGN | BUSY | IDLE | ALL_DONE
-LAST_RUN: 2026-09-26T05:45:00+08:00   # 本轮 = **029 内置控件线 C29-9 出完并过门**（CommonDialog 换成原生 comdlg32、摘掉 MSComDlg.OCX 那条默认路）= 代码 `e7f3352`，门 Actions run #86（head `e7f3352`，8/8 job 全绿，17.8 分钟）。本轮另一件定调的事：C29-2（ProgressBar）**移交另一位作者**，本线把半成品退干净了（WIP 存 `.build\c292_progressbar_wip.patch`、判据工程 `.build\c292_fixture\`）。进度与读数记在 `ai\029-内置控件补全计划书.md` §九，本表只挂指针 + 换 GATE_BASELINE。自动运行见本行不足 55 分钟请立即跳过。
+LAST_RUN: 2026-09-26T06:45:00+08:00   # 本轮 = **029 线两批**：① C29-9 CommonDialog 已收线（`e7f3352`，门 #86）；② 用户追加"把 timer 的精度做高一点" → 新立并做完 **C29-T（VB.Timer 运行期真触发 + winmm ms 级精度）= 代码 `f7b1d2d`，门 Actions run #88（8/8 job 全绿，18.6 分钟）**。③ 末尾按用户要求本地复跑另一位作者 CI 里三条超时的用例（test_ndarray_x86 / test_compat / test_types_x86）：三条**全绿**，运行阶段只用 84~1127 ms，慢的是编译阶段（22~43 s） 症状是那条 **5 s 预算**在 -Jobs 20 的 4 核 runner 上被并发 cl/link 饿死（主套件 B19 已为同一件事把预算改成 60s = `8174219`；那份 `tests_github` 副本还是 5s，按"清单漂移有人在修"不去动它）。进度与读数记在 `ai\029-内置控件补全计划书.md` §九。自动运行见本行不足 55 分钟请立即跳过。
                # B21 交付一笔 = `2ddcc8b`（cgen 侧 15 文件 + 用例 32 条 + 手册 Boolean 页 + 分类护栏脚本
                # `.build\b21_emitc_guard.py`）。根因是两条不是一条、护栏 RED 一次的教训、以及顺带量出的 `Print #`
                # 那条，全在 **D70**；待拍板 5 就此收口，新撞出的一条记为待拍板 7（未拍板、未动手）。
@@ -41,15 +41,19 @@ LAST_COMMIT: 代码批 = 0413bb9(B18)、732c1f8(B17 门后修堆损坏)、a5517f
                规则沿用：push 只推 `github/dev`；门跑 Actions（`.build/wait_run2.py <sha> <秒>` 盯）；`.build` 里的
                临时 `.ps1` 一律 ASCII only；用例文件按同目录邻居的编码/行尾（`.bas`/`.vbp` = UTF-8+CRLF，
                `tests\*.ps1` = BOM+CRLF）。
-GATE_BASELINE: (Actions 级) c3test run **#86 [dev] = completed/success**（head `e7f3352` = C29-9 那一笔，
+GATE_BASELINE: (Actions 级) c3test run **#88 [dev] = completed/success**（head `f7b1d2d` = C29-T 那一笔，
                8/8 job 全绿 = Build C3.exe + Tests(smoke/syntax/vbp/compile/asm/bas#1/bas#2)，
-               05:21→05:39 共 17.8 分钟；逐 job 的 status/conclusion 用 `GET /runs/{id}/jobs` 核过）。
-               **本机同源读数**：`-Category syntax` 129/0；30 件存量工程 `--emit-c` 逐字节护栏 changed_lines=0；
-               `tests\ctrldlg` 的 10 条判据 x64 与 x86 各 10/10；负控 = 喂 BASE(`b21_C3.exe`) 直接编不过
-               （`C2065: vb6_hwnd_dl2 未声明`，那条 OCX 路上没有属性宿主）。新助手 `Test-EmitcAbsent` 双向验过
-               （真针 PASS、在场的形状报红）。
-               基线相对上一版（run #85，head `440129c` = C29-1b）新增的用面：`ctrldlg[_x86]` + `dl_emitc_shape`
-               + `dl_emitc_no_ocx`。上一版基线 = run #85（C29-1b）；再上一版 = run #84（`5b37b4e`，C29-1a）。
+               06:10→06:28 共 18.6 分钟；逐 job 用 `GET /runs/{id}/jobs` 核过）。
+               **门只认 "VB6 C3 Regression" 那条 workflow 的 run 号**：从 `f7b1d2d` 这次推送起，dev 上
+               多了另一位作者的 workflow "GitHub Tests T0+T1+T2"（它的 run #1 会同时被触发，编号体系
+               完全不同，别把它当门 —— 本轮它有一条 T1 红，红因见上面 LAST_RUN 那条 5s 预算的读数）。
+               本机同源读数：`-Category syntax` 129/0；30 件存量工程 `--emit-c` changed_lines=0；
+               `tests\c29timer` 10 条 tick 区间读数 x64 与 x86 各 10/10；BASE 负控 10 条全翻红
+               且每条对上症状（运行期开不起来=0、改 Interval 不生效=32、关掉还烧=16、精度地板=32）。
+               精度对照（1 秒墙钟窗口的 tick 数，名义=1000/Interval）：Interval=20 → 改前 29 / 改后 49，
+               =100 → 32 / 10，=5 → 32 / 198。
+               基线相对上一版（run #86，head `e7f3352` = C29-9）新增的用面：`tmtimer[_x86]`。
+               上一版基线 = run #86（C29-9）；再往前 = #85（C29-1b）、#84（C29-1a）。
 ```
 
 > 重入保护：若运行开始时 STATUS=BUSY 且 LAST_RUN 距今不足 55 分钟，说明上一次运行可能仍在进行——本次**立即结束，不做任何修改**。
@@ -3392,3 +3396,7 @@ D54-② 那条"类变量永不 Release"不变式（对外一旦发 IDispatch/IUn
   **同批堵掉一条通用属性抢占**（第三次撞到"两套名单只更新一套"这一族）：CommonDialog 的 `FontName`/`FontSize` 是 `ChooseFont` 字段，而通用那族 `vb6_SetControlFontName` 查在类型 switch **之前**，不挡就把赋值静默落到控件字体上、读回空。另按 `SetPropW` 存 0 那条老坑给布尔 normalize（VB6 `True` = -1，直存 `val+1` 会变 0 跟"从没设过"撞车）。
   **判据**：`tests\ctrldlg`（10 条读数 x64/x86 各 10/10，恒假守卫把六个 `Show*` 留在源码里——真弹框的判据另立 C29-9b，否则用例会在没人点"取消"的地方把门卡死）；发码两面都钉：`dl_emitc_shape` 断原生入口在、`dl_emitc_no_ocx` 断 `CoCreateInstance`/`vb6_com_<名>` 不再在（为此新加助手 `Test-EmitcAbsent`，并按纪律双向验过：真针 PASS、在场形状报红）。负控喂 BASE 直接编不过（那条路上没有属性宿主），"改之前的症状"由本轮开工测量给（探针六条读数全空、退出码 0）。护栏：syntax 129/0、30 件工程逐字节全同。
   **本轮工具/流程踩坑（已写进记忆）**：python 里 `"ai\029-..."` 会被当 `\02` 八进制转义吃掉，落盘成一个裸控制字符 + `9-`（本轮在 022 状态头里真发生了一次，已修并全文扫控制字符）→ 写档脚本里的反斜杠一律 `chr(92)` 拼；`io.open(p).read()` 是文本模式会把 CRLF 折成 LF，按行尾改写必须 `'rb'` + 手工 split `chr(13)+chr(10)`；给 PS 5.1 跑的临时脚本要么 ASCII-only 要么带 BOM。
+- 2026-09-26 05:44–06:45 **029 线 C29-T 出完并过门 + 一次"超时"归因**：
+  ① C29-9 收线（门 #86，head `e7f3352`，8/8 全绿）后，用户追加一句"把 timer 的精度做高一点"，于是把 C29-9 测量时撞见的那条独立缺陷正式立成 **C29-T** 并做完：Timer 换成自注册的不可见窗口 `VB6_TIMER` 当身份（与 C29-9 的 `VB6_COMMONDIALOG` 同法，cgen 的属性读写形状不用特判）、注册不再看设计期 `Enabled` 的脸色（有事件处理器就挂表，设计期值只决定起不起）、底层从 `SetTimer`（~15.6 ms 地板）换成 winmm `timeSetEvent(wResolution=1)`，到期回调只把消息投回窗体、仍走原 `case WM_TIMER` 派发口。winmm 经 `LoadLibrary`+`GetProcAddress` 取 → 不新增 import lib。
+  ② 两条老坑各撞一次，值得记：布尔 `Enabled` 存 `val+1` 时 VB6 的 True=-1 会变成 0（与"从没设过"不可分辨）→ 单独 normalize；**`TIME_PERIODIC` 手抄成 0x02（真值 1）会让 `timeSetEvent` 直接失败并静默退回 SetTimer** —— 不报错、功能也对，只是"精度没上去"，极难归因 → 改成显式引 `mmsystem.h`（它只是被 `WIN32_LEAN_AND_MEAN` 排除）。判据因此必须带量化区间：20 ms 名义 50 给 [40,60]，`Interval=5` 名义 200 而地板只有 ~64（阈值 100 才分得开）。
+  ③ 推送后门 #88 全绿；同时 dev 上被触发了另一位作者的 workflow（"GitHub Tests T0+T1+T2" run #1），用户贴来三条超时（`test_ndarray_x86` / `test_compat` / `test_types_x86`，都是 `run timeout 5s`）。本地按同一口径复跑（x64+x86 各一遍，含针校验）：三条**全绿**，**运行阶段只有 84~1127 ms**，慢的是编译阶段（22~43 s）→ 结论是那条 5 s 预算在 `-Jobs 20` 的 4 核 runner 上被并发cl/link 饿死（正是主套件 B19 把它改成 60s 的原因，见 `8174219`），不是程序问题、也不是本批改慢。那份 `tests_github` 副本的清单与预算**按既有约定不去碰**（有人在修），本轮只在台账记归因。
