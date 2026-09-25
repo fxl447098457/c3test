@@ -5,7 +5,7 @@
 > 规范输入: `ai/讨论记录/018-接口继承与CoClass设计思路.md`（含 tB 文档要点与分阶段设计思路全文）。
 
 STATUS: ALL_DONE             # NOT_STARTED | DESIGN | BUSY | IDLE | ALL_DONE
-LAST_RUN: 2026-09-26T04:10:00+08:00   # 本轮 = **029 内置控件线第二批 C29-1b（文件系统三控件 Drive/Dir/File）出完并过门 = 代码 `440129c`，门 Actions run #85（8/8 job 全绿）**。进度与读数记在 `ai9-内置控件补全计划书.md` §九，本表只挂指针 + 换 GATE_BASELINE。
+LAST_RUN: 2026-09-26T04:10:00+08:00   # 本轮 = **029 内置控件线第二批 C29-1b（文件系统三控件 Drive/Dir/File）出完并过门 = 代码 `440129c`，门 Actions run #85（8/8 job 全绿）**。进度与读数记在 `ai\029-内置控件补全计划书.md` §九，本表只挂指针 + 换 GATE_BASELINE。
                # B21 交付一笔 = `2ddcc8b`（cgen 侧 15 文件 + 用例 32 条 + 手册 Boolean 页 + 分类护栏脚本
                # `.build\b21_emitc_guard.py`）。根因是两条不是一条、护栏 RED 一次的教训、以及顺带量出的 `Print #`
                # 那条，全在 **D70**；待拍板 5 就此收口，新撞出的一条记为待拍板 7（未拍板、未动手）。
