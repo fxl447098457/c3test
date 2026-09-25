@@ -254,7 +254,12 @@
                     }
                 }
                 // P13.3: ListBox/ComboBox method access (AddItem/RemoveItem/Clear/List)
-                if (itCtrl->second == FrmControlType::ListBox || itCtrl->second == FrmControlType::ComboBox) {
+                // C29-1b: 文件系统三控件本质就是这两类窗口 (Drive=组合框、Dir/File=列表框),
+                // 可索引属性 `Dir1.List(i)` 与 `File1.Clear` 之类走完全相同的一条路。
+                if (itCtrl->second == FrmControlType::ListBox || itCtrl->second == FrmControlType::ComboBox
+                    || itCtrl->second == FrmControlType::DirListBox
+                    || itCtrl->second == FrmControlType::FileListBox
+                    || itCtrl->second == FrmControlType::DriveListBox) {
                     std::string memLower = node.memberName;
                     std::transform(memLower.begin(), memLower.end(), memLower.begin(), ::tolower);
                     if (memLower == "additem" || memLower == "removeitem" || memLower == "clear" || memLower == "list") {

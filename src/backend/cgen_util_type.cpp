@@ -147,6 +147,21 @@ Vb6Type CCodeGen::inferExprType(Expr& expr) const {
                     for (const char* n : kNumericFc) {
                         if (memFc == n) return Vb6Type::Long;
                     }
+                    // C29-1b: 文件系统三控件的四个字符串属性。不登记则推断成 Variant,
+                    // `File1.FileName = File1.List(0)` 这类比较就走 vb6_VarCmpEq 而不是
+                    // vb6_StrCmp —— 右边 (RTL 声明 void*) 装箱成 VT_UNKNOWN, 于是
+                    // 同一条读数 x64 为真、x86 为假。VB6 里这四个属性是 String, 类型
+                    // 就该在这里落地, 不在用例里绕。
+                    if (fcIt->second == FrmControlType::DriveListBox
+                        || fcIt->second == FrmControlType::DirListBox
+                        || fcIt->second == FrmControlType::FileListBox) {
+                        static const char* const kStringFc3[] = {
+                            "drive", "path", "pattern", "filename", "list",
+                        };
+                        for (const char* n : kStringFc3) {
+                            if (memFc == n) return Vb6Type::String;
+                        }
+                    }
                 }
             }
             // P24-12: Err对象特殊处理

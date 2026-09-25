@@ -182,9 +182,15 @@
             std::string mcLower131 = mcId131.name;
             std::transform(mcLower131.begin(), mcLower131.end(), mcLower131.begin(), ::tolower);
             auto itCtrl131 = knownFormControls_.find(mcLower131);
+            // C29-1b: 文件系统三控件的原生窗口就是 LISTBOX / COMBOBOX, 可索引属性
+            // 与 ListBox 完全同一批 RTL 读函数, 所以拦截面必须一起放宽 —— 否则
+            // dirList.List(0) 落到成员读函数那条单参路径, 发成 vb6_GetListItem(hwnd)(0)。
             if (itCtrl131 != knownFormControls_.end()
                 && (itCtrl131->second == FrmControlType::ListBox
-                    || itCtrl131->second == FrmControlType::ComboBox)) {
+                    || itCtrl131->second == FrmControlType::ComboBox
+                    || itCtrl131->second == FrmControlType::DirListBox
+                    || itCtrl131->second == FrmControlType::FileListBox
+                    || itCtrl131->second == FrmControlType::DriveListBox)) {
                 std::string prop131 = maC131.memberName;
                 std::transform(prop131.begin(), prop131.end(), prop131.begin(), ::tolower);
                 const char* fn131 = nullptr;

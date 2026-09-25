@@ -169,10 +169,12 @@ BSTR vb6_DriveListBoxDrive(void* hwnd) {
     if (!hwnd) return SysAllocString(L"C");
     int sel = (int)SendMessageW((HWND)hwnd, CB_GETCURSEL, 0, 0);
     if (sel == CB_ERR) sel = 0;
-    wchar_t buf[4] = L"C:";
+    wchar_t buf[8] = L"C:";
     SendMessageW((HWND)hwnd, CB_GETLBTEXT, sel, (LPARAM)buf);
-    // Ensure format: "C:" or "C:\"
+    // VB6 口径: 下拉列表里显示 "C:\", 但 Drive 属性**不带**尾反斜杠 (读数就是 "C:")。
+    // 列表项保留原样, 只在这一刀出口上截掉。
     if (buf[0] && buf[1] == ':') {
+        if (buf[2] == L'\\' && buf[3] == L'\0') buf[2] = L'\0';
         BSTR bstr = SysAllocString(buf);
         return bstr;
     }
@@ -249,10 +251,42 @@ void vb6_DirListBoxRefresh(void* hwnd) {
     do {
         if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
             if (fd.cFileName[0] == '.' && (fd.cFileName[1] == 0 || (fd.cFileName[1] == '.' && fd.cFileName[2] == 0))) continue;
-            SendMessageW((HWND)hwnd, LB_ADDSTRING, 0, (LPARAM)fd.cFileName);
+            // C29-1b: VB6 的 DirListBox 把每一项列成 [名字] —— 方括号就是"这是目录"的记号,
+            // 双击下钻也靠它认 (旧实现直接列裸名字, 于是既看不出层级也没法下钻)。
+            wchar_t entry[MAX_PATH + 8];
+            _snwprintf_s(entry, MAX_PATH + 8, _TRUNCATE, L"[%s]", fd.cFileName);
+            SendMessageW((HWND)hwnd, LB_ADDSTRING, 0, (LPARAM)entry);
         }
     } while (FindNextFileW(hFind, &fd));
     FindClose(hFind);
+}
+
+/* C29-1b: 双击一项就下钻一层。返回 1 表示 Path 真的变了 (调用方据此才发 Dir1_Change,
+ * 与 VB6 "Path 变了才触发 Change" 的口径一致); 选中项不是 [名字] (卷标行、空列表、
+ * 双击到非目录) 时返回 0, 什么都不动。 */
+int32_t vb6_DirListBoxDescendSelected(void* hwnd) {
+    if (!hwnd) return 0;
+    int sel = (int)SendMessageW((HWND)hwnd, LB_GETCURSEL, 0, 0);
+    if (sel == LB_ERR) return 0;
+    wchar_t text[MAX_PATH + 8] = {0};
+    if ((int)SendMessageW((HWND)hwnd, LB_GETTEXT, sel, (LPARAM)text) == LB_ERR) return 0;
+    size_t n = wcslen(text);
+    if (n < 3 || text[0] != L'[' || text[n - 1] != L']') return 0;
+    text[n - 1] = 0;
+    wchar_t* name = text + 1;
+    BSTR cur = vb6_DirListBoxPath(hwnd);
+    if (!cur || SysStringLen(cur) == 0) { SysFreeString(cur); return 0; }
+    wchar_t next[MAX_PATH * 2];
+    size_t curLen = wcslen(cur);
+    if (curLen && (cur[curLen - 1] == L'\\' || cur[curLen - 1] == L'/'))
+        _snwprintf_s(next, MAX_PATH * 2, _TRUNCATE, L"%s%s", cur, name);
+    else
+        _snwprintf_s(next, MAX_PATH * 2, _TRUNCATE, L"%s\\%s", cur, name);
+    SysFreeString(cur);
+    BSTR nb = SysAllocString(next);
+    vb6_DirListBoxSetPath(hwnd, nb);
+    SysFreeString(nb);
+    return 1;
 }
 
 // FileListBox: LISTBOX populated with file entries

@@ -198,6 +198,13 @@ const char* FrmParser::controlTypeToWin32Class(FrmControlType type) {
         case FrmControlType::VScrollBar:   return "SCROLLBAR";  // SBS_VERT样式
         case FrmControlType::Timer:        return nullptr;       // 不可见控件, 无窗口
         case FrmControlType::Image:        return "STATIC";     // SS_BITMAP
+        // C29-1b: 文件系统三控件在 VB6 里本来就是公共控件的薄封装 —— Drive 是
+        // CBS_DROPDOWNLIST 的组合框、Dir / File 是列表框。以前这三格缺映射, 创建流程
+        // 把它们当"不可见控件"跳过, 于是 RTL 里那套 P20-37 填充 helper 从来没被喂过
+        // 一个真句柄 (与 Shape/Line 同一类洞, 见 029 §二-2)。
+        case FrmControlType::DriveListBox:   return "COMBOBOX";
+        case FrmControlType::DirListBox:     return "LISTBOX";
+        case FrmControlType::FileListBox:    return "LISTBOX";
         // C29-1a: Shape/Line 是 VB6 的"轻量图形控件"，RTL 里自注册了这两个类
         // (vb6forms_shape.c: vb6_RegisterShapeLineClasses → VB6_SHAPE / VB6_LINE)，
         // 但这里一直缺映射 ⇒ 创建流程把控件当"不可见控件"跳过，句柄永远是 NULL。
@@ -228,6 +235,9 @@ const char* FrmParser::controlTypeToVb6Name(FrmControlType type) {
         case FrmControlType::Image:        return "Image";
         case FrmControlType::Shape:        return "Shape";
         case FrmControlType::Line:         return "Line";
+        case FrmControlType::DriveListBox: return "DriveListBox";
+        case FrmControlType::DirListBox:     return "DirListBox";
+        case FrmControlType::FileListBox:    return "FileListBox";
         case FrmControlType::Menu:         return "Menu";
         case FrmControlType::WebBrowser:  return "WebBrowser";
         default:                           return "Control";

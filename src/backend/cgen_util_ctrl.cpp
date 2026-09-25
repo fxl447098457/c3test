@@ -151,6 +151,36 @@ std::string CCodeGen::getControlPropReadFn(FrmControlType ctrlType, const std::s
         if (propLower == "enabled") return "vb6_GetMenuEnabled";
         if (propLower == "visible") return "vb6_GetMenuVisible";
         break;
+    // C29-1b: 文件系统三控件的专有成员。列表成员走 ListBox/ComboBox 那一族 helper
+    // (它们内部按窗口类分流 LB_* / CB_*), 所以 Drive 的组合框与 Dir/File 的列表框
+    // 共用同一批读函数, 不需要为这三类另写一套。
+    case FrmControlType::DriveListBox:
+        if (propLower == "drive") return "vb6_DriveListBoxDrive";
+        if (propLower == "text") return "vb6_GetControlText";
+        if (propLower == "listcount") return "vb6_GetListCount";
+        if (propLower == "listindex") return "vb6_GetListIndex";
+        if (propLower == "list") return "vb6_GetListItem";
+        if (propLower == "visible") return "vb6_GetControlVisible";
+        if (propLower == "enabled") return "vb6_GetControlEnabled";
+        break;
+    case FrmControlType::DirListBox:
+        if (propLower == "path") return "vb6_DirListBoxPath";
+        if (propLower == "listcount") return "vb6_GetListCount";
+        if (propLower == "listindex") return "vb6_GetListIndex";
+        if (propLower == "list") return "vb6_GetListItem";
+        if (propLower == "visible") return "vb6_GetControlVisible";
+        if (propLower == "enabled") return "vb6_GetControlEnabled";
+        break;
+    case FrmControlType::FileListBox:
+        if (propLower == "path") return "vb6_FileListBoxPath";
+        if (propLower == "pattern") return "vb6_FileListBoxPattern";
+        if (propLower == "filename") return "vb6_FileListBoxFileName";
+        if (propLower == "listcount") return "vb6_GetListCount";
+        if (propLower == "listindex") return "vb6_GetListIndex";
+        if (propLower == "list") return "vb6_GetListItem";
+        if (propLower == "visible") return "vb6_GetControlVisible";
+        if (propLower == "enabled") return "vb6_GetControlEnabled";
+        break;
     case FrmControlType::Shape:  // P20-35
         if (propLower == "shape") return "vb6_GetShapeType";
         if (propLower == "borderwidth") return "vb6_GetShapeBorderWidth";
@@ -309,6 +339,23 @@ std::string CCodeGen::getControlPropWriteFn(FrmControlType ctrlType, const std::
         if (propLower == "checked") return "vb6_SetMenuChecked";
         if (propLower == "enabled") return "vb6_SetMenuEnabled";
         if (propLower == "visible") return "vb6_SetMenuVisible";
+        break;
+    // C29-1b: 写侧同理 —— Path / Pattern / Drive 一赋就重刷列表 (RTL setter 内部
+    // 调 Refresh), 这正是 VB6 三控件联动的机制。
+    case FrmControlType::DriveListBox:
+        if (propLower == "drive") return "vb6_DriveListBoxSetDrive";
+        if (propLower == "text") return "vb6_SetControlText";
+        if (propLower == "listindex") return "vb6_SetListIndex";
+        break;
+    case FrmControlType::DirListBox:
+        if (propLower == "path") return "vb6_DirListBoxSetPath";
+        if (propLower == "listindex") return "vb6_SetListIndex";
+        break;
+    case FrmControlType::FileListBox:
+        if (propLower == "path") return "vb6_FileListBoxSetPath";
+        if (propLower == "pattern") return "vb6_FileListBoxSetPattern";
+        if (propLower == "filename") return "vb6_FileListBoxSetFileName";
+        if (propLower == "listindex") return "vb6_SetListIndex";
         break;
     case FrmControlType::Shape:  // P20-35
         if (propLower == "shape") return "vb6_SetShapeType";

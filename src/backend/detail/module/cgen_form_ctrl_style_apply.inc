@@ -130,6 +130,17 @@
                 style |= kSsBitmap | kSsCenterImg;
                 createCaption = "";
                 break;
+            case FrmControlType::DriveListBox:
+                // C29-1b: VB6 的 DriveListBox 外观就是"只能选、不能改"的组合框
+                style |= 0x0003L | kWsVscroll | kWsBorder;  // CBS_DROPDOWNLIST
+                createCaption = "";
+                break;
+            case FrmControlType::DirListBox:
+            case FrmControlType::FileListBox:
+                // 列表框同款: LBS_NOTIFY 才有 SELCHANGE / DBLCLK 通知可派
+                style |= kLbsNotify | kWsBorder | kWsVscroll;
+                createCaption = "";
+                break;
             case FrmControlType::Shape:
             case FrmControlType::Line:
                 // C29-1a: 自绘控件 (VB6_SHAPE / VB6_LINE)，无文本、无边框样式
@@ -225,15 +236,66 @@
         // C29-1a: 设计期外观属性落到控件 (原来这里是一整段内联块; 容器子控件那条路共用同一个助手)
         emitShapeLineProps(ctrl, ctrlHwndExprForInit(ctrl));
 
-        // P20-37: DriveListBox/DirListBox/FileListBox initial population
+        // P20-37 / C29-1b: 三控件的初值。设计期给了 Drive / Path / Pattern 就用它, 没给才
+        // 退回当前目录 (FileListBox 的 Pattern 缺省时由 RTL 回 "*.*")。顺序上先填表再设值,
+        // SetDrive / SetPath / SetPattern 自己会重刷列表。
         if (ctrl.controlType == FrmControlType::DriveListBox) {
-            c_.emitLine("vb6_DriveListBoxRefresh((void*)vb6_hwnd_" + cIdent(ctrl.controlName) + ");");
+            std::string p37Hwnd = "vb6_hwnd_" + cIdent(ctrl.controlName);
+            c_.emitLine("vb6_DriveListBoxRefresh((void*)" + p37Hwnd + ");");
+            auto dIt = ctrl.properties.find("Drive");
+            if (dIt != ctrl.properties.end() && dIt->second.type == FrmValueType::String) {
+                std::string dRaw = dIt->second.rawText;
+                if (dRaw.size() >= 2 && dRaw.front() == '"' && dRaw.back() == '"')
+                    dRaw = dRaw.substr(1, dRaw.size() - 2);
+                if (!dRaw.empty())
+                    c_.emitLine("vb6_DriveListBoxSetDrive((void*)" + p37Hwnd
+                                + ", vb6_BSTR_FromStr(L\"" + escapeWideCString(dRaw) + "\"));");
+            }
         } else if (ctrl.controlType == FrmControlType::DirListBox) {
-            c_.emitLine("{ wchar_t _p" + cIdent(ctrl.controlName) + "[MAX_PATH]; GetCurrentDirectoryW(MAX_PATH, _p" + cIdent(ctrl.controlName) + ");");
-            c_.emitLine("  vb6_DirListBoxSetPath((void*)vb6_hwnd_" + cIdent(ctrl.controlName) + ", _p" + cIdent(ctrl.controlName) + "); }");
+            std::string p37Var = "_p" + cIdent(ctrl.controlName);
+            std::string p37Hwnd2 = "vb6_hwnd_" + cIdent(ctrl.controlName);
+            auto pIt = ctrl.properties.find("Path");
+            bool hasPath = (pIt != ctrl.properties.end() && pIt->second.type == FrmValueType::String);
+            std::string pRaw;
+            if (hasPath) {
+                pRaw = pIt->second.rawText;
+                if (pRaw.size() >= 2 && pRaw.front() == '"' && pRaw.back() == '"')
+                    pRaw = pRaw.substr(1, pRaw.size() - 2);
+            }
+            if (hasPath && !pRaw.empty()) {
+                c_.emitLine("vb6_DirListBoxSetPath((void*)" + p37Hwnd2
+                            + ", vb6_BSTR_FromStr(L\"" + escapeWideCString(pRaw) + "\"));");
+            } else {
+                c_.emitLine("{ wchar_t " + p37Var + "[MAX_PATH]; GetCurrentDirectoryW(MAX_PATH, " + p37Var + ");");
+                c_.emitLine("  vb6_DirListBoxSetPath((void*)" + p37Hwnd2 + ", " + p37Var + "); }");
+            }
         } else if (ctrl.controlType == FrmControlType::FileListBox) {
-            c_.emitLine("{ wchar_t _p" + cIdent(ctrl.controlName) + "[MAX_PATH]; GetCurrentDirectoryW(MAX_PATH, _p" + cIdent(ctrl.controlName) + ");");
-            c_.emitLine("  vb6_FileListBoxSetPath((void*)vb6_hwnd_" + cIdent(ctrl.controlName) + ", _p" + cIdent(ctrl.controlName) + "); }");
+            std::string p37Var2 = "_p" + cIdent(ctrl.controlName);
+            std::string p37Hwnd3 = "vb6_hwnd_" + cIdent(ctrl.controlName);
+            auto qIt = ctrl.properties.find("Path");
+            bool hasQ = (qIt != ctrl.properties.end() && qIt->second.type == FrmValueType::String);
+            std::string qRaw;
+            if (hasQ) {
+                qRaw = qIt->second.rawText;
+                if (qRaw.size() >= 2 && qRaw.front() == '"' && qRaw.back() == '"')
+                    qRaw = qRaw.substr(1, qRaw.size() - 2);
+            }
+            if (hasQ && !qRaw.empty()) {
+                c_.emitLine("vb6_FileListBoxSetPath((void*)" + p37Hwnd3
+                            + ", vb6_BSTR_FromStr(L\"" + escapeWideCString(qRaw) + "\"));");
+            } else {
+                c_.emitLine("{ wchar_t " + p37Var2 + "[MAX_PATH]; GetCurrentDirectoryW(MAX_PATH, " + p37Var2 + ");");
+                c_.emitLine("  vb6_FileListBoxSetPath((void*)" + p37Hwnd3 + ", " + p37Var2 + "); }");
+            }
+            auto kIt = ctrl.properties.find("Pattern");
+            if (kIt != ctrl.properties.end() && kIt->second.type == FrmValueType::String) {
+                std::string kRaw = kIt->second.rawText;
+                if (kRaw.size() >= 2 && kRaw.front() == '"' && kRaw.back() == '"')
+                    kRaw = kRaw.substr(1, kRaw.size() - 2);
+                if (!kRaw.empty())
+                    c_.emitLine("vb6_FileListBoxSetPattern((void*)" + p37Hwnd3
+                                + ", vb6_BSTR_FromStr(L\"" + escapeWideCString(kRaw) + "\"));");
+            }
         }
 
         // P24 / Fix 182: .frx 设计期属性（Picture / TextBox.Text / ListBox.List）。
