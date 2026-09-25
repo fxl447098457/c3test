@@ -25,6 +25,13 @@ static const char* kBstrReturningCalls[] = {
     "vb6_ErrDescription(", "vb6_ErrSource(",
     "vb6_App_Path(", "vb6_App_EXEName(", "vb6_App_HelpFile(",
     "vb6_GetControlText(", "vb6_GetControlCaption(",
+    // Fix 194: 下列 RTL 取值函数的 C 声明是 `void*`(RTL 统一风格), **语义上是 BSTR**。
+    // 漏登记会被判成 Variant → `vb6_CStr(vb6_VariantFromValue(void*))` → _Generic 无
+    // void* 分支, 落到 default `vb6_VariantObject` → CStr 得空串。
+    // 实测: Form1.frm 的 `B = List2.List(J)` 恒不相等 ("aaa" vs ""), 对比数据把所有项
+    // 都当成"未找到"塞进 List3 (应为 List4)。
+    "vb6_GetListItem(",
+    "vb6_GetSelText(", "vb6_GetToolTipText(", "vb6_GetMenuCaption(",
 };
 
 bool CCodeGen::isBstrReturningCall(const std::string& expr) {
@@ -177,6 +184,31 @@ std::string CCodeGen::wrapToBSTR(const std::string& expr, Expr& node) {
         }
         default: return "vb6_CStrLong(" + expr + ")";  // fallback
     }
+}
+
+// Fix 194: 字符串型控件属性 (Caption/Text/ToolTipText/MenuCaption) 的写入值必须转 BSTR。
+//
+// 现象 (用户报的 Form1.frm): `Label1(0).Caption = List1.ListCount` 点一下就
+// 0xC000041D (用户回调未处理异常, 进程直接消失); `Label1(1).Caption = List4.ListCount`
+// 当 List4 为空时"没反应"(不崩也不改)。
+//
+// 根因: 生成 `vb6_SetControlText(vb6_CtrlArr_GetAt(&vb6_arr_Label1, 0), vb6_GetListCount(...))`
+// —— 第二参形参是 `void* bstr`, 实参却是 int32 计数。于是
+//   * 计数 ≠ 0 → SetWindowTextW(hwnd, (BSTR)3) 解引用地址 3 → 访问违例;
+//   * 计数 == 0 → 传 NULL → 函数内 `if (bstr)` 为假 → **静默不生效**
+//     (这正是"点了没什么反应"的来源, 也是最难查的一种)。
+//
+// 原来只有"默认属性写入"和"With 块"两条路径手动调了 wrapToBSTR, 控件数组元素具名
+// 属性 (`Label1(0).Caption = v`)、WithEvents 变量、显式 Let/Set 这几条都漏了 ——
+// 同一缺陷类散在 6 处, 修一处补一处迟早再漏。收敛到本函数: 凡写字符串型控件属性,
+// 值一律过这里; 非字符串型属性 (Picture/Value/ListIndex …) 原样返回。
+std::string CCodeGen::controlPropValueExpr(const std::string& writeFn,
+                                           const std::string& valExpr, Expr& valueNode) {
+    if (writeFn.find("SetControlText") != std::string::npos
+        || writeFn.find("SetMenuCaption") != std::string::npos) {
+        return wrapToBSTR(valExpr, valueNode);
+    }
+    return valExpr;
 }
 
 

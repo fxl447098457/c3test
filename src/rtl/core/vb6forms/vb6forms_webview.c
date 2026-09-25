@@ -59,17 +59,20 @@ static vb6_WebViewInfo* vb6_FindWebViewInfo(void* hwnd) {
 
 void* vb6_CreateWebView(void* hParent, int x, int y, int width, int height, const char* controlName) {
     // 创建一个static控件作为WebView的宿主区域
-    HWND hwnd = CreateWindowExA(0, "STATIC", controlName,
+    // Fix 190: 窗口层 Unicode —— 占位 STATIC 用 W 版创建, 名字按 UTF-8 解码
+    wchar_t* wname = vb6_u8ToWideDup(controlName);
+    HWND hwnd = CreateWindowExW(0, L"STATIC", wname ? wname : L"",
         WS_CHILD | WS_VISIBLE | WS_CLIPCHILDREN,
         x, y, width, height,
         (HWND)hParent, NULL, (HINSTANCE)vb6_GetAppInstance(), NULL);
+    free(wname);
 
     if (hwnd && g_webViewCount < VB6_WEBVIEW_MAX) {
         vb6_WebViewInfo* info = &g_webViews[g_webViewCount++];
         memset(info, 0, sizeof(*info));
         info->hwnd = (void*)hwnd;
         info->ready = 1;  // 简化版: 直接标记为就绪
-        SetWindowTextA(hwnd, "WebView2 Placeholder");
+        SetWindowTextW(hwnd, L"WebView2 Placeholder");
     }
     return (void*)hwnd;
 }

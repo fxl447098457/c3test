@@ -122,6 +122,12 @@ enum class DiagnosticID : uint16_t {
     CodeGenUnsupportedFeature = 4001,
     CodeGenLLVMError = 4002,
     CodeGenLinkerError = 4003,
+    // Fix 195: 窗体引用的二进制资源 (.frx/.ctx/.pgx) 缺失或读不出。
+    // VB6 把"无法用文本行表达的属性值"(多行文本 / 图片 / 长字符串) 存进同名 .frx,
+    // 属性行只留 `Text = "Form1.frx":0000` 的偏移引用。资源缺失时这些属性的设计期
+    // 取值会被**静默丢弃** (VB6 IDE 自己会写 <窗体>.log 报"文件引用无效"), 于是编出来
+    // 的 exe 与 VB6 不一致却毫无提示 —— 本号就是补这条提示。
+    CodeGenFormResourceMissing = 4004,
 
     // RTL/链接 (5xxx)
     LinkUnresolvedExternal = 5001,

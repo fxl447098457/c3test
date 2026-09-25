@@ -4,6 +4,7 @@
 #include "project/frx_reader.hpp"
 #include <fstream>
 #include <cstring>
+#include <cstdlib>
 #include <algorithm>
 
 // Windows MultiByteToWideChar for GBK->UTF-8 conversion
@@ -207,24 +208,27 @@ FrxListData FrxReader::readStringList(size_t offset) {
 // ============================================================
 // 读取整数列表 (ListBox.ItemData)
 // ============================================================
-// 格式: [2B count] [per item: 2B integer value (WORD)]
-// 注意: VB6 ItemData 实际是 Long (4 bytes), 需要验证
+// Fix 195: 实测 (10 个真实工程的 .frx) 这个 blob 与 List **同构** ——
+//   [2B count] [2B 前导值] [每项: 2B len + len 字节十进制文本]
+// 原实现按"每项 2B 整数"读, 读到的是结构的字节本身 —— 任何工程都只解出
+// 恒定假值 1/304/12288/1/304… (实测 frxParse、Charts 2020、VBFlexGridDemo
+// 三个工程全是同一串), 也就是说设计期 ItemData 编进 exe 一直是垃圾。
+// 段长可自证: frxParse/Form1.frx 的 ItemData@0x9A70 段长 13 字节
+// = 4 + 3×(2+1), 与下一个资源偏移 0x9A7D 精确相接; 1 项工程为 7 字节。
 FrxIntListData FrxReader::readIntList(size_t offset) {
     FrxIntListData result;
     if (fileData_.empty()) {
         lastError_ = ".frx file not loaded";
         return result;
     }
-    if (offset + 2 > fileData_.size()) {
+    if (offset + 4 > fileData_.size()) {
         lastError_ = "Int list offset out of range";
         return result;
     }
 
     const uint8_t* base = fileData_.data() + offset;
-    // VB6 .frx ItemData format: [2B count] [2B prefix] [per item: 2B Integer]
-    // The prefix value equals count; skip both
     uint16_t count = readLE16(base);
-    size_t pos = 4;  // skip count(2B) + prefix(2B)
+    size_t pos = 4;  // skip count(2B) + 前导值(2B)
 
     if (count > 10000) {
         lastError_ = "Invalid int list count in .frx";
@@ -233,9 +237,13 @@ FrxIntListData FrxReader::readIntList(size_t offset) {
 
     for (uint16_t i = 0; i < count; i++) {
         if (offset + pos + 2 > fileData_.size()) break;
-        int16_t val = (int16_t)readLE16(base + pos);
-        result.items.push_back(val);
+        uint16_t strLen = readLE16(base + pos);
         pos += 2;
+        if (offset + pos + strLen > fileData_.size()) break;
+        std::string s((const char*)(base + pos), strLen);
+        pos += strLen;
+        // 十进制文本 -> int (容忍负号); 解析不出按 VB6 默认值 0 处理
+        result.items.push_back(static_cast<int>(std::strtol(s.c_str(), nullptr, 10)));
     }
     return result;
 }

@@ -117,6 +117,7 @@ add_library(vb6c3-core STATIC
     src/project/frm_parser.cpp
     src/project/frm_parser_util.cpp
     src/project/frx_reader.cpp
+    src/project/frx_extract.cpp        # Fix 195: .frx 设计期取值 -> VB 代码 (--extract-frx)
     src/com/typelib_parser.cpp
     src/com/typelib_parser_parse.cpp
     src/com/typelib_parser_desc.cpp

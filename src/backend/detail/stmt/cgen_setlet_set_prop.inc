@@ -186,6 +186,8 @@
                     if (_rhsIsComPicture && _setWriteFn.find("SetControlPicture") != std::string::npos) {
                         _setWriteFn = "vb6_SetControlPictureFromCom";
                     }
+                    // Fix 194: 字符串型控件属性的值必须转 BSTR (数值 RHS → 指针解引用 / 静默无效)
+                    _setValExpr = controlPropValueExpr(_setWriteFn, _setValExpr, *node.value);
                     c_.emitLine(_setWriteFn + "(" + makeCtrlHwndArg(_setObjLower, _setItCtrl->second) + ", " + _setValExpr + ");  /* Set Control Property */");
                     return;
                 }

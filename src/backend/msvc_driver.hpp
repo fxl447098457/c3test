@@ -5,6 +5,11 @@
 #include <string>
 #include <vector>
 #include <ostream>
+#include <fstream>
+#include <filesystem>
+#include <cstdint>
+
+#include "common/encoding.hpp"
 
 namespace vb6c3 {
 
@@ -69,6 +74,52 @@ inline void appendUserLibInputs(std::ostream& os, const MsvcDriverOptions& optio
 // 同 appendUserLibInputs 的理由: cl /link 与 link.exe 两条路径共用, 避免漂移。
 inline void appendExtraObjects(std::ostream& os, const MsvcDriverOptions& options) {
     for (const auto& o : options.extraObjects) os << " \"" << o << "\"";
+}
+
+// 写 MSVC 响应文件 (.rsp)。
+//
+// URL-为什么必须单独一个函数: cl.exe / link.exe 读 @rsp **不按 UTF-8, 也不按 UTF-16 猜** ——
+// 直接把文件字节按**系统 ANSI 代码页**(中文机器 = 936)解释。C3 内部路径统一是 UTF-8,
+// 原样写进去就会把 `新建文件夹` 解成 `鏂板缓鏂囦欢澶`, 而且 GBK 双字节还会吃掉后面的
+// `\` (0x5C) → `/Fe"…\out\Form1.exe"` 变成 `/Fe"…澶筡out\Form1.exe"` → LNK1104
+// 「无法打开文件」/ LNK1117「选项语法错误」。
+//
+// 落点实验 (真 MSVC 14.29.30159, 目标目录含中文, 实测矩阵):
+//   cl   @rsp  x64 : UTF-8 → LNK1104   | ACP(GBK) → OK | UTF-16LE+BOM → OK
+//   cl   @rsp  x86 : UTF-16LE+BOM → OK
+//   link @rsp 直调 : UTF-8 → LNK1117   | UTF-16LE+BOM → OK
+// 选 UTF-16LE+BOM (而不是 ACP): ACP 只能表达系统代码页里的字符 (中文 Windows 上编
+// 一个含日文/韩文目录的工程仍会退化成 '?'), 而 UTF-16 是无损的, 且没有 DBCS
+// 「尾字节 0x5C」这类陷阱。BOM 是必需的 —— 没有 BOM 时工具链不认它是 Unicode。
+//
+// 用 std::filesystem::path 而不是 std::string 打开: MSVC 的 ofstream(const char*)
+// 按 ACP 解释窄字符串, 传 UTF-8 会写错地方 (objDir 为空时 rsp 落在用户输出目录,
+// 那里很可能就是中文路径)。
+inline bool writeMsvcResponseFile(const std::string& utf8Path, const std::string& utf8Content) {
+#ifdef _WIN32
+    // 用 path (wstring) 打开, 不走 ACP 解释的窄字符串重载
+    std::ofstream f(utf8ToPath(utf8Path), std::ios::out | std::ios::binary | std::ios::trunc);
+    if (!f) return false;
+    f.put('\xFF');
+    f.put('\xFE');  // UTF-16LE BOM: 工具链靠它判定 Unicode 响应文件
+    std::wstring w = utf8ToWide(utf8Content);
+    std::string bytes;
+    bytes.reserve(w.size() * 2);
+    for (wchar_t wc : w) {
+        // Windows 的 wchar_t 就是 UTF-16 码元, 直接拆字节即可 (含代理对)
+        uint16_t u = static_cast<uint16_t>(wc);
+        bytes.push_back(static_cast<char>(u & 0xFF));
+        bytes.push_back(static_cast<char>((u >> 8) & 0xFF));
+    }
+    f.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+    f.close();
+    return !f.fail();
+#else
+    std::ofstream f(utf8Path.c_str(), std::ios::out | std::ios::trunc);
+    if (!f) return false;
+    f << utf8Content;
+    return true;
+#endif
 }
 
 class MsvcDriver {

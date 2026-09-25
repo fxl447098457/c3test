@@ -1,0 +1,16 @@
+# VB6 二进制资源 (窗体属性侧车) 一律不得做行尾/编码转换。
+#
+# .frx/.ctx/.pgx 是 VB6 保存窗体时生成的二进制容器 (.frm/.ctl/.pag 的同名侧车),
+# 内部是 [长度前缀][数据] 的紧凑结构。里面的偏移量按**字节**记账, 只要 git 把
+# 某个 CRLF 改成 LF, 所有后续偏移全错, 解析出的是垃圾。
+#
+# 风险来源: core.autocrlf=true 时 git 靠"前 8KB 里有没有 NUL 字节"来判定文本;
+# 这些小文件 (几十字节到几 KB) 一旦被判成文本就会被改写。实测当前仓库里的
+# .frx 恰好都含 NUL 所以没被改坏, 但那是**巧合**, 且本机 autocrlf=true 与
+# Linux CI 的 autocrlf=false 行为不一致 —— 显式标 binary 把这个不确定性消除。
+#
+# `binary` 是 git 内置宏 = -diff -merge -text, 对已按二进制存储的既有文件是
+# no-op (不会引起任何既有 blob 重写), 纯属把判定钉死。
+*.frx binary
+*.ctx binary
+*.pgx binary

@@ -975,6 +975,10 @@ if ($Category -in @("all", "run", "bas")) {
     Add-BasTest "test_rtl" "$Tests\test_rtl.bas"
     Add-BasTest "test_array" "$Tests\test_array.bas" @("wa-clone=22", "wa-ub=3", "wa-str=65", "wa-rt=65", "=== Array Tests PASSED ===")
     Add-BasTest "test_fileio" "$Tests\test_fileio.bas"
+    # --- Fix 197: RTL 文件 I/O 在非 ASCII 路径下必须工作 ---
+    # 源码纯 ASCII, 中文文件名在运行时用 ChrW 拼出, 检查 9 项 MkDir/Print#/Line Input/
+    # Write#/FileCopy/Kill/Name/ChDir/RmDir 全过 (缺一即 FAIL: 断言 needle 缺失)。
+    Add-BasTest "test_nonascii_fileio" "$Tests\test_nonascii_fileio.bas" @("NA1-MKDIR=Y", "NA2-PRINT-SIZE=Y", "NA3-ROUNDTRIP=Y", "NA4-WRITE=Y", "NA5-FILECOPY=Y", "NA6-KILL=Y", "NA7-NAME=Y", "NA8-CHDIR=Y", "NA9-RMDIR=Y", "NONASCII-FILEIO-DONE")
     Add-BasTest "test_error" "$Tests\test_error.bas"
     Add-BasTest "test_now" "$Tests\test_now.bas"
     Add-BasTest "test_getput" "$Tests\test_getput.bas" @("PASS1a", "PASS1b", "PASS1c", "PASS2", "PASS3", "PASS4")
@@ -995,6 +999,13 @@ if ($Category -in @("all", "run", "bas")) {
         # --- P5.5 数据类型兼容性测试 ---
     Write-Host "--- Compat Tests (P5.5) ---" -ForegroundColor Yellow
 
+    # Fix 195: Replace 必须返回**完整**结果。原实现无条件用手工 malloc + 字符数长度
+    # 前缀构造结果 BSTR, 而 Windows 下 vb6_BSTR_Len 走 SysStringLen (前缀是字节数) ——
+    # 任何替换成功的结果都被截成一半 (Replace("abc","b","") 得 "a" 而非 "ac"),
+    # 且该内存会被 SysFreeString 释放 → 堆损坏。start>1 时还漏了前缀字符。
+    Add-BasTest "test_replace" "$Tests\test_replace.bas" @(
+        "R1=OK", "R2=OK", "R3=OK", "R4=OK", "R5=OK",
+        "R6=OK", "R7=OK", "R8=OK", "R9=OK", "R10=OK", "REPLACE-DONE")
     Add-BasTest "test_compat" "$Tests\test_compat.bas"
     Add-BasTest "test_types" "$Tests\test_types.bas"
     Add-BasTest "test_control" "$Tests\test_control.bas"
@@ -1166,6 +1177,130 @@ if ($Category -in @("all", "run", "vbp")) {
     # Generic classes (G4): .cls `Class Name(Of T)` header template + whole-module
     # specialization clone (two specializations coexist; self-referential LNode).
     Test-Vbp "gen_cls" "$Tests\gen_cls\gen_cls.vbp" @("GC1=42", "GC2=box:42", "GC3=hey", "GC4=box:hey", "GC5=33", "GC6=y", "GCLS-DONE")
+
+    # Fix 194: 控件属性的字符串写入值必须转 BSTR (控件数组元素具名属性曾生成
+    # `vb6_SetControlText(hwnd, (BSTR)ListCount)` 直接段错误), 且 List(j) 参与
+    # 字符串相等比较要按 BSTR 处理 (RTL 声明是 void* → 曾判成 VariantObject, 比较恒假)。
+    Test-Vbp "ctrlprop" "$Tests\ctrlprop\CtrlProp.vbp" @("CP1=2", "CP2=2", "CP3=1", "CP4=2", "CP5=2", "CTRLPROP-DONE")
+
+    # Fix 195: .frx 三种 blob 的真实布局 —— 字符串 (Text) / 字符串表 (List) /
+    # 整数表 (ItemData)。旧 readIntList 按"每项 2B 整数"读 ItemData, 读到的是
+    # 结构的字节本身, 任何工程都解出 1/304/12288 这串恒定假值 → 设计期 ItemData
+    # 编进 exe 一直是垃圾。本用例的 ItemData 取 5/300/-7, 旧实现必错。
+    Test-Vbp "frxdata" "$Tests\frxdata\FrxData.vbp" @(
+        "FD1=alpha|beta", "FD2=3", "FD3=1234", "FD4=5", "FD5=300", "FD6=-7",
+        "FD7=OK", "FRXDATA-DONE")
+
+    # --- Fix 195: 资源引用缺失不得静默, 且 --extract-frx 能把 .frx 取值导成 VB 代码 ---
+    # 背景: VB6 把多行文本/图片甩进同名 .frx, .frm 里只留 `属性 = "X.frx":含偏移`。
+    # .frx 缺失时属性设计期取值被静默丢弃, 编出的 exe 与 VB6 不一致却没提示
+    # (VB6 IDE 自己会写 <窗体>.log 报"文件引用无效")。
+    $frxNoFile = Join-Path $OutDir "frx_nofile"
+    if (Test-Path $frxNoFile) { Remove-Item $frxNoFile -Recurse -Force }
+    New-Item -ItemType Directory -Path $frxNoFile | Out-Null
+    Copy-Item "$Tests\frxdata\FrxData.frm" $frxNoFile
+    Test-CliOk "frx_missing_warn" @(
+        "`"$frxNoFile\FrxData.frm`"", "--output-dir", "`"$frxNoFile`"") "VB4004"
+
+    $frxExDir = Join-Path $OutDir "frx_extract"
+    if (Test-Path $frxExDir) { Remove-Item $frxExDir -Recurse -Force }
+    New-Item -ItemType Directory -Path $frxExDir | Out-Null
+    Copy-Item "$Tests\frxdata\FrxData.frm" $frxExDir
+    Copy-Item "$Tests\frxdata\FrxData.frx" $frxExDir
+    Test-CliOk "frx_extract" @("`"$frxExDir\FrxData.frm`"", "--extract-frx") ".frx.bas"
+
+    # 导出内容: 文本(多行拼接) / 列表项 / 列表项数据 三类都要落到普通 VB 语句上
+    $frxExOut = Join-Path $frxExDir "FrxData.frx.bas"
+    $script:total++
+    Write-Host -NoNewline "  [CLI] frx_extract_content ... "
+    if ((Test-Path $frxExOut) -and
+        (Select-String -Path $frxExOut -Pattern 'Text1\.Text = "alpha" & vbCrLf & "beta"' -Quiet) -and
+        (Select-String -Path $frxExOut -Pattern 'List1\.AddItem "1234"' -Quiet) -and
+        (Select-String -Path $frxExOut -Pattern 'List1\.ItemData\(1\) = 300' -Quiet)) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        if ($Verbose) { Get-Content $frxExOut -ErrorAction SilentlyContinue }
+    }
+
+    # --- Fix 196: 非 ASCII (中文) 路径下的完整编译 + 运行 ---
+    # 真因: cl.exe / link.exe 读 @rsp 响应文件时按**系统 ANSI 代码页**解释字节, 而
+    # 命令行本身就是 UTF-8。于是 /Fe"…\新建文件夹\out\x.exe" 被解成 GBK 乱码
+    # (且 GBK 双字节会吃掉后面的 '\'), 链接期 LNK1104「无法打开文件」/ LNK1117。
+    # 修法 = 响应文件写 UTF-16LE+BOM (见 msvc_driver.hpp 的实测矩阵)。
+    #
+    # 目录名用 [char] 拼出来, 让本脚本保持**纯 ASCII**: Windows PowerShell 5.1 读
+    # 无 BOM 的 UTF-8 .ps1 会按 ANSI 解码, 直接写字面量会让路径本身先烂掉。
+    $cnName = [string]::Join('', [char]0x4E2D, [char]0x6587, [char]0x8DEF, [char]0x5F84,
+                                  [char]0x6D4B, [char]0x8BD5)   # 中文路径测试
+    $cnDir = Join-Path $OutDir $cnName
+    if (Test-Path $cnDir) { Remove-Item $cnDir -Recurse -Force }
+    New-Item -ItemType Directory -Path $cnDir | Out-Null
+    Copy-Item "$Tests\frxdata\*" $cnDir
+    $script:total++
+    Write-Host -NoNewline "  [VBP] nonascii_path ... "
+    $cnOut = Join-Path $cnDir "out"
+    $cnCompile = & $C3 (Join-Path $cnDir "FrxData.vbp") --output-dir $cnOut 2>&1
+    $cnExe = Join-Path $cnOut "FrxData.exe"
+    if ($LASTEXITCODE -ne 0 -or -not (Test-Path $cnExe)) {
+        $script:fail++
+        Write-Host "FAIL (compile in non-ASCII path)" -ForegroundColor Red
+        if ($Verbose) { Write-Host ($cnCompile | Out-String) }
+    } else {
+        # 光能链接还不够: 跑起来核对取值, 顺带证明同目录下的 .frx 也按宽路径读到了
+        $cnRun = Invoke-TestExe -ExePath $cnExe -WorkDir $cnOut -Name "FrxDataCn"
+        $cnOk = $cnRun.Ok
+        foreach ($needle in @("FD1=alpha|beta", "FD4=5", "FD6=-7", "FRXDATA-DONE")) {
+            if (-not ($cnRun.Output | Where-Object { $_ -like "*$needle*" })) { $cnOk = $false }
+        }
+        if ($cnOk) {
+            $script:pass++
+            Write-Host "PASS" -ForegroundColor Green
+        } else {
+            $script:fail++
+            Write-Host "FAIL (non-ASCII path run)" -ForegroundColor Red
+            if ($Verbose) { Write-Host ("    " + $cnRun.Detail); Write-Host ($cnRun.Output -join "`n") }
+        }
+    }
+
+    # --- Fix 196b: 非 ASCII 路径 + **缺 .frx** 不得让编译器 abort() ---
+    # 崩溃机理 (实测栈, driver_frontend.cpp 的 VB4004 告警分支):
+    #   std::filesystem::path(utf8String) 的**窄串**重载按系统 ACP(中文机 936/GBK) 解释
+    #   char*, 而该处拿到的是 UTF-8。路径字节凑不成合法 GBK 序列时
+    #   _Convert_narrow_to_wide 抛 filesystem_error -> 无人接 -> std::terminate -> abort()
+    #   => 退出码 3 + 模态「Debug Error / abort() has been called」对话框。
+    #   "非 ASCII 字符数为奇数" 几乎必然落进这条 (首字符起按 2 字节分组会剩半个)。
+    #   目录名取「中文叉」(3 字 = 9 字节, 奇) 精确命中; 「新建目录」(4 字 = 12 字节, 偶)
+    #   反而侥幸不崩 —— 所以上一用例覆盖不到, 必须单列。
+    # 仍用 [char] 拼名字保持本脚本纯 ASCII (见上一段注释)。
+    $cnOddName = [string]::Join('', [char]0x4E2D, [char]0x6587, [char]0x53C9)   # 中文叉
+    $cnOddDir = Join-Path $OutDir $cnOddName
+    if (Test-Path $cnOddDir) { Remove-Item $cnOddDir -Recurse -Force }
+    New-Item -ItemType Directory -Path $cnOddDir | Out-Null
+    Copy-Item "$Tests\frxdata\FrxData.frm" $cnOddDir      # 故意**不**拷 .frx
+    $script:total++
+    Write-Host -NoNewline "  [VBP] nonascii_missing_frx ... "
+    $oddOut = Join-Path $cnOddDir "out"
+    $oddLog = (& $C3 (Join-Path $cnOddDir "FrxData.frm") --emit-c --output-dir $oddOut 2>&1 | Out-String)
+    $oddRc = $LASTEXITCODE
+    if ($oddRc -eq 3) {
+        $script:fail++
+        Write-Host "FAIL (abort() 复现: exit=3)" -ForegroundColor Red
+        if ($Verbose) { Write-Host $oddLog }
+    } elseif ($oddRc -ne 0) {
+        $script:fail++
+        Write-Host "FAIL (exit=$oddRc)" -ForegroundColor Red
+        if ($Verbose) { Write-Host $oddLog }
+    } elseif ($oddLog -notlike "*VB4004*") {
+        $script:fail++
+        Write-Host "FAIL (缺 .frx 却未报 VB4004)" -ForegroundColor Red
+        if ($Verbose) { Write-Host $oddLog }
+    } else {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    }
 
     Test-Vbp "M6Test" "$Tests\M6Test.vbp" @("M6A:OK", "M6B:OK", "M6C:OK", "M6D:OK", "M6 PASSED")
     Test-Vbp "modulemethod" "$Tests\test_modulemethod.vbp" @("30", "21")

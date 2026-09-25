@@ -9,6 +9,13 @@
     bool frxLoaded = false;
     if (!frmDesc.frxFilePath.empty()) {
         frxLoaded = FrxReader::load(frmDesc.frxFilePath);
+        // Fix 195: 文件在, 但读不出来 (损坏/被截断/权限) 同样会静默丢属性值。
+        if (!frxLoaded) {
+            diag_.warn(DiagnosticID::CodeGenFormResourceMissing, SourceLocation{},
+                "无法读取二进制资源文件 " + frmDesc.frxFilePath.filename().string()
+                + ": " + FrxReader::lastError()
+                + "。窗体中引用该文件的属性, 其设计期取值将被忽略。");
+        }
     }
     std::string clsName = "VB6_Form_" + cIdent(formName);    // Win32窗口类名
     std::string wndProc = "vb6_form_wndproc_" + cIdent(formName);  // WndProc函数名

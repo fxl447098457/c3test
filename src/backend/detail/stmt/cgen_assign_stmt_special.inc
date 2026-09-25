@@ -82,10 +82,8 @@
                         std::string idxArg = std::move(lastExpr_);
                         emitExpr(*node.value);
                         std::string valExpr = std::move(lastExpr_);
-                        if (writeFn.find("SetControlText") != std::string::npos
-                            || writeFn.find("SetMenuCaption") != std::string::npos) {
-                            valExpr = wrapToBSTR(valExpr, *node.value);
-                        }
+                        // Fix 194: 统一入口 (原为手写 SetControlText/SetMenuCaption 判断)
+                        valExpr = controlPropValueExpr(writeFn, valExpr, *node.value);
                         std::string origName = knownFormControlOriginalNames_.count(caLower)
                             ? knownFormControlOriginalNames_[caLower] : caId.name;
                         c_.emitLine(writeFn + "(vb6_CtrlArr_GetAt(&vb6_arr_" + cIdent(origName)
@@ -211,11 +209,8 @@
                 if (!writeFn.empty()) {
                     emitExpr(*node.value);
                     std::string valExpr = std::move(lastExpr_);
-                    // M22: Text/Caption property writes need BSTR value
-                    if (writeFn.find("SetControlText") != std::string::npos ||
-                        writeFn.find("SetMenuCaption") != std::string::npos) {
-                        valExpr = wrapToBSTR(valExpr, *node.value);
-                    }
+                    // M22: Text/Caption property writes need BSTR value (Fix 194: 收敛到统一入口)
+                    valExpr = controlPropValueExpr(writeFn, valExpr, *node.value);
                     c_.emitLine(writeFn + "(" + formHwnd + ", " + valExpr + ");  /* Me." + maExpr.memberName + " */");
                     return;
                 }
@@ -252,6 +247,10 @@
                                 if (isComMarker_) resolveComValue();
                                 valExpr = std::move(lastExpr_);
                             }
+                            // Fix 194: 字符串型属性 (Caption/Text) 的值必须转 BSTR。
+                            // `Label1(0).Caption = List1.ListCount` 原先直传 int32 →
+                            // 非 0 时被当指针解引用 (0xC000041D), 为 0 时静默不生效。
+                            valExpr = controlPropValueExpr(writeFn, valExpr, *node.value);
                             c_.emitLine(writeFn + "(vb6_CtrlArr_GetAt(&vb6_arr_" + cIdent(arrId.name) + ", " + idxArg + "), " + valExpr + ");  /* Control Array Property */");
                             return;
                         }
@@ -274,6 +273,7 @@
                         std::string weVarName = (itOrig != knownWithEventsCtrlOrigNames_.end()) ? itOrig->second : objLower;
                         emitExpr(*node.value);
                         std::string valExpr = std::move(lastExpr_);
+                        valExpr = controlPropValueExpr(writeFn, valExpr, *node.value);  // Fix 194
                         c_.emitLine(writeFn + "(" + weVarName + ", " + valExpr + ");  /* WithEvents ctrl prop write */");
                         return;
                     }
@@ -300,11 +300,8 @@
                         lastExprIsComPicture_ = false;  // consume the flag
                     }
                     std::string valExpr = std::move(lastExpr_);
-                    // M22: Text/Caption property writes need BSTR value
-                    if (writeFn.find("SetControlText") != std::string::npos ||
-                        writeFn.find("SetMenuCaption") != std::string::npos) {
-                        valExpr = wrapToBSTR(valExpr, *node.value);
-                    }
+                    // M22: Text/Caption property writes need BSTR value (Fix 194: 收敛到统一入口)
+                    valExpr = controlPropValueExpr(writeFn, valExpr, *node.value);
                     // ImageList Picture fix: use SetControlPictureFromCom for COM IPictureDisp
                     if (rhsIsComPicture && writeFn.find("SetControlPicture") != std::string::npos) {
                         writeFn = "vb6_SetControlPictureFromCom";

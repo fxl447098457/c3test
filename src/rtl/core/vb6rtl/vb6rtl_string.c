@@ -333,6 +333,7 @@ BSTR vb6_Replace(BSTR expr, BSTR find, BSTR rep, int32_t start, int32_t count, i
     if (findLen == 0 || exprLen == 0) return vb6_BSTR_FromStr(expr);
 
     if (start < 1) start = 1;
+    if (start > exprLen) return vb6_BSTR_Empty();   // VB6: start 超出长度 -> 空串
     int32_t maxCount = (count == -1) ? INT32_MAX : count;
 
     // 计算结果长度
@@ -346,15 +347,35 @@ BSTR vb6_Replace(BSTR expr, BSTR find, BSTR rep, int32_t start, int32_t count, i
     }
     if (matches == 0) return vb6_BSTR_FromStr(expr);
 
+    // Fix 195: 结果必须按 BSTR 的既有约定构造 —— 长度前缀是**字节数**且由 OLE
+    // 分配器管理。原实现无条件 malloc + 写字符数, 在 Windows 上撞两个坑:
+    //   ① vb6_BSTR_Len 走 SysStringLen (字节/2), 于是结果被读成一半长度
+    //      (Replace("abc","b","") 得 "a" 而非 "ac");
+    //   ② 这块内存之后会被 vb6_BSTR_Free -> SysFreeString 释放, 不是 OLE 分配的
+    //      指针 -> 堆损坏。
     int32_t resultLen = exprLen + matches * (repLen - findLen);
+#ifdef _WIN32
+    BSTR result = SysAllocStringLen(NULL, (UINT)resultLen);
+    if (!result) return NULL;
+#else
     uint32_t* p = (uint32_t*)malloc(sizeof(uint32_t) + (resultLen + 1) * sizeof(wchar_t));
     if (!p) return NULL;
     *p = (uint32_t)resultLen;
     BSTR result = (BSTR)(p + 1);
+    result[resultLen] = L'\0';
+#endif
 
     // 执行替换
-    pos = start - 1;
+    // Fix 195: start 之前的字符要原样保留 (VB6: 只有 start 起的位置参与替换)。
+    // 原实现从 pos=start-1 直接开写, 前缀从不复制, 于是
+    // Replace("aaa","a","b",2) 得 "bb"+"未初始化堆字节" 而不是 "abb"。
     int32_t outPos = 0;
+    int32_t preLen = start - 1;
+    if (preLen > 0) {
+        memcpy(result, expr, preLen * sizeof(wchar_t));
+        outPos = preLen;
+    }
+    pos = start - 1;
     int32_t done = 0;
     while (done < matches) {
         wchar_t* found = wcsstr(expr + pos, find);
@@ -373,7 +394,14 @@ BSTR vb6_Replace(BSTR expr, BSTR find, BSTR rep, int32_t start, int32_t count, i
     }
     // 剩余部分
     int32_t remain = exprLen - pos;
-    if (remain > 0) memcpy(result + outPos, expr + pos, remain * sizeof(wchar_t));
+    if (remain > 0) {
+        memcpy(result + outPos, expr + pos, remain * sizeof(wchar_t));
+        outPos += remain;
+    }
+    // 防御: 任何长度不一致都不许把未初始化的堆内存当字符串吐出去
+    if (outPos < resultLen) {
+        memset(result + outPos, 0, (size_t)(resultLen - outPos) * sizeof(wchar_t));
+    }
     result[resultLen] = L'\0';
     return result;
 }

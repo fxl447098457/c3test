@@ -72,10 +72,11 @@
         vb6_ho_setVariantDispatch(out, c); return 1;
     }
     if (_wcsicmp(name, L"Caption") == 0 || _wcsicmp(name, L"Text") == 0) {
-        char buf[256]; int n = GetWindowTextA((HWND)obj, buf, sizeof(buf));
-        wchar_t wbuf[256];
-        for (int i = 0; i < n && i < 255; i++) wbuf[i] = (wchar_t)(unsigned char)buf[i];
-        wbuf[n < 255 ? n : 255] = 0;
+        // Fix 190: 窗口层是 Unicode —— 必须 GetWindowTextW。旧代码用 GetWindowTextA
+        // 再逐字节提升为 wchar_t (= 按 Latin-1 解码 ACP 字节), 中文读回来就是乱码,
+        // UserControl 里 `Parent.Caption` 一类的读取全受影响。
+        wchar_t wbuf[512] = {0};
+        GetWindowTextW((HWND)obj, wbuf, 511);
         vb6_ho_setVariantBstr(out, vb6_BSTR_FromStr(wbuf)); return 1;
     }
     // 字体属性 (Font / TitleFont / *Font) → 返回 Font 代理

@@ -10,7 +10,10 @@ namespace vb6c3 {
 
 VbpProject VbpParser::parse(const std::string& vbpFilePath) {
     VbpProject project;
-    project.vbpFilePath = std::filesystem::absolute(vbpFilePath);
+    // Fix 196: 必须经 utf8ToPath —— std::filesystem::absolute(窄串) 在 Windows 上按
+    // **ACP** 解释 char*, 而这里收的是 UTF-8。中文目录下 vbpFilePath 会变成乱码,
+    // 于是 resolvePath() 拼出的每个源文件路径都不存在 (后果见 frm_parser 的静默空模块)。
+    project.vbpFilePath = std::filesystem::absolute(utf8ToPath(vbpFilePath));
 
     // M22: 使用编码检测+转换读取, 确保GBK等非UTF-8文件正确解码
     auto readResult = SourceBuffer::readAndConvertToUtf8(vbpFilePath);
@@ -24,7 +27,8 @@ VbpProject VbpParser::parse(const std::string& vbpFilePath) {
 VbpProject VbpParser::parseString(const std::string& content, const std::string& vbpFilePath) {
     VbpProject project;
     if (!vbpFilePath.empty()) {
-        project.vbpFilePath = std::filesystem::absolute(vbpFilePath);
+        // Fix 196: 同 parse(), 窄串是 UTF-8, 不走 utf8ToPath 会被按 ACP 解释
+        project.vbpFilePath = std::filesystem::absolute(utf8ToPath(vbpFilePath));
     }
 
     std::istringstream stream(content);
