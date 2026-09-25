@@ -729,6 +729,27 @@ function Test-CompileFail {
     }
 }
 
+# ai/028 V2: --emit-c 通路上断言"必须出现的读数" (退出码 0 + 每条 needle 都在)。
+# 语义层的检查 (未声明标识符 VB3001 一族) 在 --syntax-only 上根本看不见 —— 那条通路停在
+# parse 之后 —— 所以"孔里就是普通表达式"这条判据只能走 codegen 通路量。
+function Test-CodegenNote {
+    param([string]$Name, [array]$Sources, [array]$Needles, [array]$Absent = @())
+    $script:total++
+    Write-Host -NoNewline "  [CODEGEN-NOTE] $Name ... "
+    $text = Invoke-CodegenProj $Sources
+    $bad = @($Needles | Where-Object { -not $text.Contains($_) })
+    $hit = @($Absent | Where-Object { $text.Contains($_) })
+    if ($script:codegenProjExit -eq 0 -and $bad.Count -eq 0 -and $hit.Count -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host ("  exit=" + $script:codegenProjExit + " missing: " + ($bad -join ' | ') +
+                    " unexpected: " + ($hit -join ' | ')) -ForegroundColor DarkGray
+        if ($Verbose) { Write-Host $text }
+    }
+}
+
 function Test-Compile {
     param([string]$Name, [array]$Sources)
     $script:total++
@@ -1087,10 +1108,20 @@ if ($Category -in @("all", "run", "bas")) {
                    "RS13=OK", "RS14=OK", "RS15=OK", "RS16=OK", "RS17=OK", "RS18=OK",
                    "RAWSTR-DONE")
     Add-BasTest "test_rawstr" "$Tests\test_rawstr.bas" $rsNeedles
-    Add-BasTest "test_rawstr_x86" "$Tests\test_rawstr.bas" $rsNeedles -Arch "x86"
+    Add-BasTest "test_rawstr_x86" "$Tests\test_rawstr.bas" $rsNeedles -Arch "x86"    # ai/028 V2: 串内插值 (美元花括号开孔)。21 条读数逐条钉"与手写的 & CStr() / Format$
+    # 同读数" —— 展开在词法出口, 编译器下游看到的就是手写形 (计划书 R2/R4)。
+    $riNeedles = @("RI01=OK", "RI02=OK", "RI03=OK", "RI04=OK", "RI05=OK", "RI06=OK",
+                   "RI07=OK", "RI08=OK", "RI09=OK", "RI10=OK", "RI11=OK", "RI12=OK",
+                   "RI13=OK", "RI14=OK", "RI15=OK", "RI16=OK", "RI17=OK", "RI18=OK",
+                   "RI19=OK", "RI20=OK", "RI21=OK", "p=1234", "INTERP-DONE")
+    Add-BasTest "test_interp" "$Tests\test_interp.bas" $riNeedles
+    Add-BasTest "test_interp_x86" "$Tests\test_interp.bas" $riNeedles -Arch "x86"
+
     # 同一份内容存成 4 种 (编码 x 行尾): 前一对量解码, 后一对量「行界归一成 CRLF」这条口径。
     foreach ($v in @("rs_utf8bom_crlf", "rs_utf8bom_lf", "rs_gbk_crlf", "rs_gbk_lf")) {
-        Add-BasTest ("rs_var_" + $v) "$Tests\rawstr_var\" + $v + ".bas" @("RV1=OK", "RV2=OK", "RV3=OK", "RV-DONE")
+        # 参数位置上不能直接写 "..." + $v + "...": PowerShell 会把 + 当独立实参传进来
+        # (实测四份变体全成 FAIL (compile)，因为 $Source 只拿到目录)。$($v) 显式界定变量名。
+        Add-BasTest ("rs_var_" + $v) "$Tests\rawstr_var\$($v).bas" @("RV1=OK", "RV2=OK", "RV3=OK", "RV-DONE")
     }
 
     # Interface (tB extension, ai/022 B01): contract-block syntax layer - the blocks
@@ -1908,6 +1939,30 @@ if ($Category -in @("all", "syntax")) {
     }
     # 发码形状判据: 字面量独占一行、行界以 \r\n 转义出现、非 ASCII 一律 \uXXXX
     # (⇒ 与 cl.exe 的源码编码假设无关)。
+    # ai/028 V2 负例。前两条在词法层 (1008 = 孔没等到闭合的右花括号, 含"孔跨行"这种写法;
+    # 1009 = 空孔), --syntax-only 就够。后两条是 R2 的钉子: 孔里的表达式就是普通表达式,
+    # 未声明的名字照报既有的 VB3001。in_n4 特意让**第二个孔**出错 —— 报在 (8,7) 才证明
+    # 子扫描的窗口把行列播种做对了 (指回原文件, 不需要事后平移 AST)。
+    $inNeg = @(
+        @("in_n1_unclosed_hole", "in_n1_unclosed_hole.bas", "VB1008"),
+        @("in_n2_empty_hole", "in_n2_empty_hole.bas", "VB1009")
+    )
+    foreach ($c in $inNeg) {
+        $inNegPath = "$Tests\interp_neg\" + $c[1]
+        if (Test-Path $inNegPath) {
+            Test-SyntaxFail $c[0] $inNegPath $c[2]
+        } else {
+            Write-Host "  [SYNTAX-FAIL] $($c[0]) ... SKIP (missing case file)" -ForegroundColor DarkGray
+        }
+    }
+    Test-CodegenNote "in_n3_undeclared_in_hole" @("$Tests\interp_neg\in_n3_undeclared_in_hole.bas") @("VB3001", "nopeHere")
+    Test-CodegenNote "in_n4_second_hole_line" @("$Tests\interp_neg\in_n4_second_hole_line.bas") @("VB3001", "alsoNope", "(8,7)")
+    # ai/028 V2 的发码形状: 插值必须** literally ** 发成手写的 & CStr() / Format$ 形状 ——
+    # 注意第二枚读数挑的是 vb6_CStrLong (按实参类型改发专用 CStr), 这正是"降级成真 AST"
+    # 才继承得到的东西 (计划书 R2/R3 的实测面)。
+    Test-EmitcShape "ri_emitc_shape" @("$Tests\test_interp.bas") @(
+        'vb6_BSTR_Concat(vb6_BSTR_FromStr(L"n="), vb6_CStrLong(n))',
+        'vb6_Format(vb6_VariantLong(n), vb6_BSTR_FromStr(L"#,##0"))')
     Test-EmitcShape "rs_emitc_shape" @("$Tests\test_rawstr.bas") @(
         'vb6_BSTR_FromStr(L"line1\r\nline2")',
         '#define RS_CONST (vb6_BSTR_FromStr(L"k1\r\nk2 = \"v\""))',

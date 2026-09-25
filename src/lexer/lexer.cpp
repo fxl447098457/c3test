@@ -4,11 +4,23 @@
 
 namespace vb6c3 {
 
-Lexer::Lexer(std::shared_ptr<SourceBuffer> buffer, Diagnostics& diag)
+Lexer::Lexer(std::shared_ptr<SourceBuffer> buffer, Diagnostics& diag,
+             uint32_t begin, uint32_t end)
     : buffer_(std::move(buffer))
     , diag_(diag)
-    , content_(buffer_->content())
 {
+    // begin/end = 扫描窗口 (ai/028 V2 的插值孔)。默认 begin=0/end=0 ⇒ 整份文件,
+    // 存量调用点一字不改。窗口内 offset_ 从 0 数, 但 line_/column_ 用现成的
+    // getLocation 播种 ⇒ 窗口里发出的 token 位置直接落在原文件上。
+    size_t total = buffer_->content().size();
+    if (begin > total) begin = static_cast<uint32_t>(total);
+    uint32_t stop = (end == 0 || end < begin || end > total) ? static_cast<uint32_t>(total) : end;
+    base_ = begin;
+    // 必须先套 string_view 再 substr: std::string::substr 返回**临时 string**, 直接赋给
+    // content_ (string_view) 就是悬垂引用 —— 实测所有源文件第一格就"意外字符"。
+    // buffer_ 持有这份内容 (shared_ptr), 视图的寿命因此跟着 Lexer 走。
+    content_ = std::string_view(buffer_->content()).substr(begin, stop - begin);
+    buffer_->getLocation(begin, line_, column_);
     initKeywords();
 }
 
@@ -112,6 +124,18 @@ Token Lexer::errorToken(const std::string& msg, uint32_t startLine, uint32_t sta
 }
 
 // === 前瞻接口 ===
+//
+// 唯一的"取下一枚"入口。三处 (nextToken / peekToken / peekToken2) 都必须走它：
+// 反引号插值串会把展开剩下的 token 压进 pending_，谁绕过 pending_ 直接 scanToken()
+// 谁就把它跳过 —— 那是**漏 token**，比报错难查得多。
+Token Lexer::takeScanned() {
+    if (!pending_.empty()) {
+        Token tok = std::move(pending_.front());
+        pending_.pop_front();
+        return tok;
+    }
+    return scanToken();
+}
 
 Token Lexer::nextToken() {
     if (!lookahead_.empty()) {
@@ -119,19 +143,19 @@ Token Lexer::nextToken() {
         lookahead_.pop_front();
         return tok;
     }
-    return scanToken();
+    return takeScanned();
 }
 
 const Token& Lexer::peekToken() {
     if (lookahead_.empty()) {
-        lookahead_.push_back(scanToken());
+        lookahead_.push_back(takeScanned());
     }
     return lookahead_.front();
 }
 
 const Token& Lexer::peekToken2() {
     while (lookahead_.size() < 2) {
-        lookahead_.push_back(scanToken());
+        lookahead_.push_back(takeScanned());
     }
     return lookahead_[1];
 }

@@ -24,3 +24,7 @@ tests/rawstr_var/*.bas -text
 tests/rawstr_neg/*.bas -text
 tests/rawstr_proj/* -text
 tests/test_rawstr.bas -text
+# ai/028 V2 同理: 插值用例的**行号/列号**就是断言对象 (负例 n4 钉"第二个孔落在原文件
+# 第 8 行"), 行尾被改写就会挪位置。
+tests/interp_neg/*.bas -text
+tests/test_interp.bas -text

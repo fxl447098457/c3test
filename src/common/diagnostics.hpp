@@ -45,6 +45,10 @@ enum class DiagnosticID : uint16_t {
     LexFileEncodingError = 1006,
     // C3 扩展: 反引号原始多行串 (ai/028 V1)。文案 = ASCII (D12 硬约束)。
     LexUnterminatedRawString = 1007,   // `...` 里找不到闭合的那枚反引号
+    // C3 扩展: 串内插值 ${expr} / ${expr:fmt} (ai/028 V2)。这两条也在词法层 ——
+    // 插值整串在出口就展开成普通 token, 后面的语法/语义问题由既有的诊断负责 (R2/R4)。
+    LexUnterminatedInterp = 1008,      // 孔没等到闭合的 '}' (含"孔跨行"这种写法)
+    LexEmptyInterpHole = 1009,         // ${} / ${:fmt} —— 不静默当文本
 
     // 语法 (2xxx)
     ParseExpectedToken = 2001,
