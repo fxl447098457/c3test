@@ -266,6 +266,12 @@ Token Lexer::scanToken() {
         return scanString();
     }
 
+    // 反引号原始多行串 (C3 扩展, ai/028 V1)。VB6 里 ` 不是任何记号的开头，
+    // 走 default 分支必然报"意外字符"，所以把这一格变成特性是纯加法。
+    if (c == '`') {
+        return scanRawString();
+    }
+
     // 运算符和分隔符
     switch (c) {
         case '+': advance(); return makeToken(TokenKind::Plus, "+", startLine, startCol);

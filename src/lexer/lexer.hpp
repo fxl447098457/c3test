@@ -47,6 +47,7 @@ private:
     Token scanOctNumber();      // &O...
     Token scanBinNumber();      // &B...
     Token scanString();
+    Token scanRawString();          // C3 扩展: `...` 原始多行串 (ai/028 V1)
     Token scanDateLiteral();    // #...#
     Token scanOperator();
     Token scanComment();

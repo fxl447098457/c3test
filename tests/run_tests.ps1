@@ -744,6 +744,35 @@ function Test-Compile {
     }
 }
 
+# ai/028 V1: --emit-c 的字面量形状断言 (故意不折叠空白 —— 行结构本身就是读数)。
+# 多行串必须在词法出口折成「一行 C 字面量 + \r\n 转义」; 真换行若漏进 C 源码就会把一枚
+# 字面量劈成两行, 于是「带字面量的行里未转义的双引号必须成对」就是这条判据的不变式。
+function Test-EmitcShape {
+    param([string]$Name, [array]$Sources, [array]$Needles)
+    $script:total++
+    Write-Host -NoNewline "  [EMITC-SHAPE] $Name ... "
+    $argList = (($Sources | ForEach-Object { '"' + $_ + '"' }) -join ' ')
+    $out = & cmd /c ('"' + $C3 + '" ' + $argList + ' --emit-c 2>&1')
+    $code = $LASTEXITCODE
+    $raw = ($out | Out-String)
+    $bad = @($Needles | Where-Object { -not $raw.Contains($_) })
+    $odd = 0
+    foreach ($ln in ($raw -split "`r?`n")) {
+        if ($ln.Contains('vb6_BSTR_FromStr(')) {
+            if (([regex]::Matches($ln, '(?<!\\)"')).Count % 2 -ne 0) { $odd++ }
+        }
+    }
+    if ($code -eq 0 -and $bad.Count -eq 0 -and $odd -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host ("  exit=" + $code + " missing: " + ($bad -join ' | ') +
+                    " odd-literal-lines=" + $odd) -ForegroundColor DarkGray
+        if ($Verbose) { Write-Host $raw }
+    }
+}
+
 function Test-SyntaxFail {
     param([string]$Name, [string]$Source, [string]$Needle)
     $script:total++
@@ -1050,6 +1079,20 @@ if ($Category -in @("all", "run", "bas")) {
     # generic Function/Sub with explicit instantiation + call-site type inference.
     Add-BasTest "test_generics" "$Tests\test_generics.bas" @("G-A=12", "G-B=hi", "G-C=21 abc!", "G-D=10", "G-E=10", "G-F=ab", "G-G=20", "LEN=2", "G-H=0", "G-I=20", "GENERICS-DONE")
     Add-BasTest "test_generics_x86" "$Tests\test_generics.bas" @("G-A=12", "G-B=hi", "G-C=21 abc!", "G-D=10", "G-E=10", "G-F=ab", "G-G=20", "LEN=2", "G-H=0", "G-I=20", "GENERICS-DONE") -Arch "x86"
+    # --- ai/028 V1: 反引号原始多行串 (C3 扩展; 词法出口归一, 计划书 R4) ---
+    # 18 条读数逐字比掉「与手写的 VB6 串相等」。其中 RS14 = Const 落点、RS15 = Declare 的
+    # Lib 名落点 (DI 桩所属家族按 Lib 串选, 折错就 LNK2019)、RS16/17/18 = 定界计数。
+    $rsNeedles = @("RS01=OK", "RS02=OK", "RS03=OK", "RS04=OK", "RS05=OK", "RS06=OK",
+                   "RS07=OK", "RS08=OK", "RS09=OK", "RS10=OK", "RS11=OK", "RS12=OK",
+                   "RS13=OK", "RS14=OK", "RS15=OK", "RS16=OK", "RS17=OK", "RS18=OK",
+                   "RAWSTR-DONE")
+    Add-BasTest "test_rawstr" "$Tests\test_rawstr.bas" $rsNeedles
+    Add-BasTest "test_rawstr_x86" "$Tests\test_rawstr.bas" $rsNeedles -Arch "x86"
+    # 同一份内容存成 4 种 (编码 x 行尾): 前一对量解码, 后一对量「行界归一成 CRLF」这条口径。
+    foreach ($v in @("rs_utf8bom_crlf", "rs_utf8bom_lf", "rs_gbk_crlf", "rs_gbk_lf")) {
+        Add-BasTest ("rs_var_" + $v) "$Tests\rawstr_var\" + $v + ".bas" @("RV1=OK", "RV2=OK", "RV3=OK", "RV-DONE")
+    }
+
     # Interface (tB extension, ai/022 B01): contract-block syntax layer - the blocks
     # parse, the new keywords stay soft, and the codegen path is still untouched.
     Add-BasTest "test_interface" "$Tests\test_interface.bas" @("ITF-SOFT:12", "ITF-1:OK", "ITF-2:OK", "INTERFACE-DONE")
@@ -1182,6 +1225,12 @@ if ($Category -in @("all", "run", "vbp")) {
     # `vb6_SetControlText(hwnd, (BSTR)ListCount)` 直接段错误), 且 List(j) 参与
     # 字符串相等比较要按 BSTR 处理 (RTL 声明是 void* → 曾判成 VariantObject, 比较恒假)。
     Test-Vbp "ctrlprop" "$Tests\ctrlprop\CtrlProp.vbp" @("CP1=2", "CP2=2", "CP3=1", "CP4=2", "CP5=2", "CTRLPROP-DONE")
+    # ai/028 V1 的另两个 R4 落点: 模块头 Attribute 的值与 CreateObject 的工程内 ProgID
+    # 都写成反引号串 —— 前者折错则模块名对不上 .vbp, 后者折错则没有改写、运行期变查注册表。
+    $rsProjNeedles = @("RP1=OK", "RP2=OK", "RP3=OK", "RP4=OK", "RP5=OK", "RP-DONE")
+    Test-Vbp "rawstr_proj" "$Tests\rawstr_proj\RsApp.vbp" $rsProjNeedles
+    Test-Vbp "rawstr_proj_x86" "$Tests\rawstr_proj\RsApp.vbp" $rsProjNeedles -Arch "x86"
+
 
     # Fix 195: .frx 三种 blob 的真实布局 —— 字符串 (Text) / 字符串表 (List) /
     # 整数表 (ItemData)。旧 readIntList 按"每项 2B 整数"读 ItemData, 读到的是
@@ -1840,6 +1889,31 @@ if ($Category -in @("all", "syntax")) {
     if (Test-Path "$Tests\cls_neg\ci_n18_overridable_in_interface.bas") {
         Test-SyntaxFail "ci_n18_overridable_in_iface" "$Tests\cls_neg\ci_n18_overridable_in_interface.bas" "must not carry a virtual modifier"
     }
+    # ai/028 V1 负例: 未闭合的反引号串 (表达式位与 Attribute 行两个入口) 与三枚反引号
+    # (想写一枚字面反引号但少写闭合符) 都报 1007。最后一条是 R1 的钉子 —— 普通的 "" 串
+    # 一律不许跨行、不许插值, 老诊断 1002 必须继续报, 否则就是新语法吃掉老语法。
+    $rsNeg = @(
+        @("rs_n1_unclosed", "rs_n1_unclosed.bas", "VB1007"),
+        @("rs_n2_three_backticks", "rs_n2_three_backticks.bas", "VB1007"),
+        @("rs_n3_plain_quote_oneline", "rs_n3_plain_quote_still_oneline.bas", "VB1002"),
+        @("rs_n4_unclosed_on_attr", "rs_n4_unclosed_on_attr.bas", "VB1007")
+    )
+    foreach ($c in $rsNeg) {
+        $rsNegPath = "$Tests\rawstr_neg\" + $c[1]
+        if (Test-Path $rsNegPath) {
+            Test-SyntaxFail $c[0] $rsNegPath $c[2]
+        } else {
+            Write-Host "  [SYNTAX-FAIL] $($c[0]) ... SKIP (missing case file)" -ForegroundColor DarkGray
+        }
+    }
+    # 发码形状判据: 字面量独占一行、行界以 \r\n 转义出现、非 ASCII 一律 \uXXXX
+    # (⇒ 与 cl.exe 的源码编码假设无关)。
+    Test-EmitcShape "rs_emitc_shape" @("$Tests\test_rawstr.bas") @(
+        'vb6_BSTR_FromStr(L"line1\r\nline2")',
+        '#define RS_CONST (vb6_BSTR_FromStr(L"k1\r\nk2 = \"v\""))',
+        'vb6_BSTR_FromStr(L"\u59D3\u540D: \u5F20\u4E09\r\n\u5907\u6CE8: \"vip\"")',
+        'vb6_BSTR_FromStr(L"C:\\note\\{x}\\n")')
+
     # B07a positive guard: a base class in another module resolves and stays silent.
     if (Test-Path "$Tests\cls_neg\ci_pos_base.cls") {
         Test-SyntaxMulti "ci_pos_pair" @("$Tests\cls_neg\ci_pos_base.cls", "$Tests\cls_neg\ci_pos_derived.cls")

@@ -43,6 +43,8 @@ enum class DiagnosticID : uint16_t {
     LexInvalidCharLiteral = 1004,
     LexUnrecognizedToken = 1005,
     LexFileEncodingError = 1006,
+    // C3 扩展: 反引号原始多行串 (ai/028 V1)。文案 = ASCII (D12 硬约束)。
+    LexUnterminatedRawString = 1007,   // `...` 里找不到闭合的那枚反引号
 
     // 语法 (2xxx)
     ParseExpectedToken = 2001,
