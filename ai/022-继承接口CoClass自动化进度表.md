@@ -5,14 +5,17 @@
 > 规范输入: `ai/讨论记录/018-接口继承与CoClass设计思路.md`（含 tB 文档要点与分阶段设计思路全文）。
 
 STATUS: ALL_DONE             # NOT_STARTED | DESIGN | BUSY | IDLE | ALL_DONE
-LAST_RUN: 2026-09-25T21:55:00+08:00   # 本轮 = **B20（ai/028 两批：反引号原始多行串 + 串内插值）出完并过门（Actions run #82，head `c2f7317`，8/8 job 全绿）**。
-               # 需求出自 `todo/vi.md`（群友建议：字符串连接现代语法）。**一切落在词法层**：无孔串折成与手写 `"..."` 同形的普通记号、
-               # 有孔串展开成 `( "文" & CStr( 式 ) & ... )` ⇒ parser / AST / semantics / cgen / RTL 零改动（计划书 R4）。
-               # 交付三笔：`4c16f50`（V1 词法归一 + 用例 + 手册）、`f8ec76e`（夹具按字节钉死 `-text`，防 CI 上四份塌成两份）、
-               # `c2f7317`（V2 插值 + 窗口子扫描 + 负例 + 发码形状断言）。读数与两条推翻计划书的订正见 **D68**/**D69**。
-               # 上一轮 = **B19（控制台/管道编码 + 错误出口 + 套件超时预算，run #73）**；再上一轮 = B18 收口批（run #68）。
+LAST_RUN: 2026-09-25T23:25:00+08:00   # 本轮 = **B21（待拍板 5：布尔的两套读数）出完并过门 = 代码 `2ddcc8b`，门 Actions run #83（head `2ddcc8b`，8/8 job 全绿）** + 顺手把 **待拍板 6 量成 D71**（B22 的开工地图，未动代码）。
+               # B21 交付一笔 = `2ddcc8b`（cgen 侧 15 文件 + 用例 32 条 + 手册 Boolean 页 + 分类护栏脚本
+               # `.build\b21_emitc_guard.py`）。根因是两条不是一条、护栏 RED 一次的教训、以及顺带量出的 `Print #`
+               # 那条，全在 **D70**；待拍板 5 就此收口，新撞出的一条记为待拍板 7（未拍板、未动手）。
+               # 上一轮 = **B20（ai/028：反引号原始多行串 + 串内插值，run #82 全绿，head `c2f7317`）**：需求出自
+               # `todo/vi.md`，**一切落在词法层**（无孔串折成与手写 `"..."` 同形的普通记号、有孔串展开成
+               # `( "文" & CStr( 式 ) & ... )` ⇒ parser / AST / semantics / cgen / RTL 零改动）；交付三笔 =
+               # `4c16f50` + `f8ec76e`（夹具按字节钉死 `-text`，防 CI 上四份塌成两份）+ `c2f7317`，读数见 **D68**/**D69**。
+               # 再上一轮 = **B19（控制台/管道编码 + 错误出口 + 套件超时预算，run #73）**；再往前 = B18 收口批（run #68）。
                # 自动运行见本行不足 55 分钟请立即跳过。
-LAST_COMMIT: 代码批 = c2f7317(B20 插值)、4c16f50+f8ec76e(B20 多行串/夹具钉字节)、8174219(B19 套件超时/读数)、d4e53c2(B19 错误出口)、796220d(B19 控制台编码)、732c1f8(B17 门后修堆损坏)、a5517fa(B17)、578faa4(B16)、941b6dc(B15)、0caa3c5(B15 门 head = 合并用户 Fix 192/193)、ddf4e9b(B14 测试批)、4534a83(B14 台账)、b10ec1a(B13e)、5d29a5c(B13e 台账)、9df23ba(B13d)、bd38798(B13c)、b1a8e58(B13b)、7b6570a+988c7cb(B13a；门 head = 合并 `9785f4f`)、7f829ee(B11/C05=B12)、b82a184+02d70fe(B11/C04)、c4aaa4c(B11/C03b)、e515d89(B11/C03a)、f0b820d(B11/C02)、e7c7a31(B11/C01)、3c5d8e6(B10)、9eb2ca7(B09c)、debb110(B09b)、02bac92(B09)   # **commit message 一律现写、不复用上批文本**；push 只推 `github/dev`（Actions 门），`origin`(gitcode) 与 `main` 不碰、**绝不建 MR**。
+LAST_COMMIT: 代码批 = 2ddcc8b(B21 布尔可见性+装箱)、c2f7317(B20 插值)、4c16f50+f8ec76e(B20 多行串/夹具钉字节)、8174219(B19 套件超时/读数)、d4e53c2(B19 错误出口)、796220d(B19 控制台编码)、732c1f8(B17 门后修堆损坏)、a5517fa(B17)、578faa4(B16)、941b6dc(B15)、0caa3c5(B15 门 head = 合并用户 Fix 192/193)、ddf4e9b(B14 测试批)、4534a83(B14 台账)、b10ec1a(B13e)、5d29a5c(B13e 台账)、9df23ba(B13d)、bd38798(B13c)、b1a8e58(B13b)、7b6570a+988c7cb(B13a；门 head = 合并 `9785f4f`)、7f829ee(B11/C05=B12)、b82a184+02d70fe(B11/C04)、c4aaa4c(B11/C03b)、e515d89(B11/C03a)、f0b820d(B11/C02)、e7c7a31(B11/C01)、3c5d8e6(B10)、9eb2ca7(B09c)、debb110(B09b)、02bac92(B09)   # **commit message 一律现写、不复用上批文本**；push 只推 `github/dev`（Actions 门），`origin`(gitcode) 与 `main` 不碰、**绝不建 MR**。
 LAST_COMMIT: 代码批 = 0413bb9(B18)、732c1f8(B17 门后修堆损坏)、a5517fa(B17)、578faa4(B16)、941b6dc(B15)、0caa3c5(B15 门 head = 合并用户 Fix 192/193)、ddf4e9b(B14 测试批)、4534a83(B14 台账)、b10ec1a(B13e)、5d29a5c(B13e 台账)、9df23ba(B13d)、bd38798(B13c)、b1a8e58(B13b)、7b6570a+988c7cb(B13a；门 head = 合并 `9785f4f`)、7f829ee(B11/C05=B12)、b82a184+02d70fe(B11/C04)、c4aaa4c(B11/C03b)、e515d89(B11/C03a)、f0b820d(B11/C02)、e7c7a31(B11/C01)、3c5d8e6(B10)、9eb2ca7(B09c)、debb110(B09b)、02bac92(B09)   # **commit message 一律现写、不复用上批文本**；push 只推 `github/dev`（Actions 门），`origin`(gitcode) 与 `main` 不碰、**绝不建 MR**。
                含完整 COM）的收口文档 = `ai\027-接口继承CoClass实施收口.md`（交付总览表 + 语言/COM 两侧要点 +
                **v1 边界清单 12 条** + 怎么验 + 记录索引）；逐格过程与全部实测读数 = 本文件的设计记录 D1–D65。
@@ -28,19 +31,23 @@ LAST_COMMIT: 代码批 = 0413bb9(B18)、732c1f8(B17 门后修堆损坏)、a5517f
                4. **派生类自己 `Implements` 新式接口**（`VB3022`，B18 写示例时实测）与**经继承满足的接口契约**、
                   **继承来的 `Public` 字段对外 COM 暴露** —— 这三条要一起做（都在 stage 2.7 Pass D 与 3.4 的成员
                   合并那一片，028 类的工作量）。
-               5. **`CStr(布尔)` 与 `&` / `Print` 两套读数不一致**（B20 写插值用例时实测；A/B 确认与本批无关，改前改后同读数）：`CStr(True)`、`CStr(1 > 0)`、`CStr(CBool(True))` 全回 `"-1"`，而同一个值走 `True & ""` 回 `"True"`（VB6 两处都回 `"True"`）；顺带 `TypeName(True)` 回 `"Long"`，VB6 回 `"Boolean"` ⇒ 布尔的"字符串形状"在 C3 里有两条路，且 `TypeName` 这一条也不对。**这条会直接咬到新语法**：`${flag}` 插值降级成 `CStr(flag)`，于是插值里的布尔与 `Debug.Print flag` 读数不一致。要单独一批收（改 `CStr` 会动到存量工程的输出面 ⇒ 需要拍板）。
+               5. **【已收 = B21，读数见 D70】`CStr(布尔)` 与 `&` / `Print` 两套读数不一致**（B20 写插值用例时实测；A/B 确认与本批无关，改前改后同读数）：`CStr(True)`、`CStr(1 > 0)`、`CStr(CBool(True))` 全回 `"-1"`，而同一个值走 `True & ""` 回 `"True"`（VB6 两处都回 `"True"`）；顺带 `TypeName(True)` 回 `"Long"`，VB6 回 `"Boolean"` ⇒ 布尔的"字符串形状"在 C3 里有两条路，且 `TypeName` 这一条也不对。**这条会直接咬到新语法**：`${flag}` 插值降级成 `CStr(flag)`，于是插值里的布尔与 `Debug.Print flag` 读数不一致。→ B21 收完：根因是**两条**（登记表看不见布尔 + 装箱按 C 类型选到 `VT_I2`/`VT_I4`），两条一起修完读数才合一；`tests\test_bool_display.bas` 32 条钉死，含 `Integer`/`Long`/`Byte` 的反向护栏。
                6. **工程内类经 `CreateObject` 编译期改写后交给 `As Object`，按名点公有 `Function` 报 `vb6_ComCall: method "…" not found`**（早绑定 `Dim o As <类名>` 正常）—— B20 的 `tests\rawstr_proj\` 第一版就是这样写的，改成早绑定才通。与 B17 那条"契约成员是 Private ⇒ 默认面点不到"不是一回事：这里 `Note()` 是 `Public`。要么晚绑定那一面缺一块，要么改写出来的 VARIANT 类型标记不对 ⇒ 先量（外部注册 DLL 那条 `cc_dll_late_client` 是通的，所以缺口在"in-project 改写出来的对象"这一支）。
+               7. **`Print #` / `Write #` 的实参不分类型**（B21 顺手量出，`.build\b21_out\probe_print.bas`）：非 BSTR 的实参一律先 `vb6_Str((int32_t)x)` 再落盘 ⇒ 布尔写成 `-1`（VB6 是 `True`）、`3.5` 被截成 `3`（VB6 是 ` 3.5`）、`Write #1, True` 写成 `"-1"`（VB6 是 `#TRUE#`）。这条不是布尔专属，是 `Print #` 那一族缺按 VB 类型分派的那一层；B21 只收了 `CStr` / `Format` / `&` / `String` 形参 / Variant 装箱 / `Debug.Print` 六处出口，落盘这一处另开一批（会改存量工程的落盘字节）。
                规则沿用：push 只推 `github/dev`；门跑 Actions（`.build/wait_run2.py <sha> <秒>` 盯）；`.build` 里的
                临时 `.ps1` 一律 ASCII only；用例文件按同目录邻居的编码/行尾（`.bas`/`.vbp` = UTF-8+CRLF，
                `tests\*.ps1` = BOM+CRLF）。
-GATE_BASELINE: (Actions 级) c3test run **#82 [dev] = completed/success**（head `c2f7317`，8/8 job 全绿 =
-               Build C3.exe + Tests(smoke/syntax/bas#1/bas#2/vbp/compile/asm)）。**CI 的分类逐条读数这一轮取不到**：
-               PAT 无 `actions:read` ⇒ `/actions/jobs/{id}/logs` 回 403，故门结论以 run 级为准；本机同二进制的读数是
-               `-Category syntax` 两轮 128/0 与 129/0（第二轮含新增的 `ri_emitc_shape`）、`rawstr_proj` x64+x86 各 6 条
-               needle 全绿、四份编码变体各 4 条全绿。基线相对上一版新增的用面：`test_rawstr[_x86]`、`rawstr_var`×4、
-               `rawstr_proj[_x86]`、`test_interp[_x86]`、`rawstr_neg`×4 + `interp_neg`×4、`rs_emitc_shape`/`ri_emitc_shape`。
+GATE_BASELINE: (Actions 级) c3test run **#83 [dev] = completed/success**（head `2ddcc8b` = B21 那一笔，8/8 job 全绿 =
+               Build C3.exe + Tests(smoke/syntax/vbp/compile/asm/bas#1/bas#2)，23:05→23:19 共 14.6 分钟）。
+               **CI 的分类逐条读数仍取不到**：PAT 无 `actions:read` ⇒ job 日志端点 403；本轮改用
+               `GET /repos/…/actions/runs/36151881443/jobs`（这个端点不要 `actions:read`）拿到八条 job 的
+               `status/conclusion` 与 run 的 `head_sha` ⇒ 门结论现在是**逐 job 核过**的，不再是 run 级一把。
+               本机同二进制（`.build\b21_C3.exe`，md5 `9456577b`；BASE = `pre_b21_C3.exe`，md5 `70f5b98d`）的读数：
+               `test_bool_display` 与 `test_bool_display_x86` 走真 harness 各 PASS、`test_types.bas` 手工跑读数已改对、
+               `-Category syntax` 129/0、30 件工程 `--emit-c` 分类护栏 OK（只 4 行布尔变化）。
+               基线相对上一版（run #82，head `c2f7317`）新增的用面：`test_bool_display[_x86]`。
                另：他人那一支的 run **#81**（head `a93d97e`，Fix 190/194–197）也已 completed/success —— 本轮开工先把
-               `github/dev` 合回本地（合并基线 `8174219`，两侧改动不相交）。上一版基线 = run #73（head `8174219`）。
+               `github/dev` 合回本地（合并基线 `8174219`，两侧改动不相交）。上一版基线 = run #82（head `c2f7317`，B20）。
 ```
 
 > 重入保护：若运行开始时 STATUS=BUSY 且 LAST_RUN 距今不足 55 分钟，说明上一次运行可能仍在进行——本次**立即结束，不做任何修改**。
@@ -101,6 +108,7 @@ GATE_BASELINE: (Actions 级) c3test run **#82 [dev] = completed/success**（head
 | B18 | P7 | 端到端示例工程 + 全量回归 + 设计文档归档（018 附录或新 023）+ STATUS=ALL_DONE | ☑ **B18 已出（代码 `0413bb9`，Actions run #68 全绿）—— 本线收口** = ① **端到端示例 `tests\cc_demo\`**：同一份源集合编两种形态（VB6 常规做法）——`DemoExe.vbp` 语言侧 `DEMO1..DEMO12`（组名当类型 `As Shape`/`New Shape`、契约成员**只能经接口变量**调、公有成员直调、`Overrides` 虚派发、`MyBase` 去虚化、继承来的公有成员、`Protected` 家族内可用、基类型变量持有派生实例不切片、`Via` 三个槽全转发、工程内 `CreateObject(ProgID)` 改写、`TypeOf`），`DemoDll.vbp` 对外侧由**另一个进程**的 C3 客户（`DemoClient.vbp`，不引用 DLL）`CreateObject("DemoDll.Shape")` 激活；② **归档 `ai\027-接口继承CoClass实施收口.md`**（018 保持原样）：交付总览表、语言/COM 两侧要点、**v1 边界 12 条**（逐条现状+影响）、怎么验（用例名/命令/探针与助手清单）、记录索引；手册 `CoClass 语句.md` 加示例指引；③ **写示例撞到并记下**两条 v1 边界（派生类自己 `Implements` 新式接口 = `VB3022`；EXE 的 CoClass 块不能 `[ComCreatable]` = `VB3033`）与一条易误读现象（`New <名字>` 不在工程内 ⇒ 静默按注册表创建、运行期 429 ⇒ `.vbp` 的 `Class=`/`Module=` 清单是唯一事实面），都进 **D65**；④ 四条新用例进 vbp 回归（`cc_demo_exe[_x86]` 走 `Test-Vbp`；`cc_demo_dll_external[_x86]` 走 `Test-ComActivateClient`，**注册与反注册成对**并断言三类键 `gone`，本机跑完实测注册表查无残留）；⑤ **本批零编译器改动**（`.build/C3.exe` 与 BASE 同 md5）⇒ 逐字节/A-B 护栏由"编译器没变"这条代替（先例 B14）。 | `0413bb9` | 门 #68（8 job 全绿）+ `.build/b18_cases.ps1` 四条 `pass=4 fail=0` + 注册表残留核查（DemoDll/CoDll 的 CLSID/ProgID/TypeLib 全 clean） |
 | B19 | 维护 | 用户报障：`cmd` 里 C3 的报错信息与运行输出乱码（四语种通用：中/日/韩/英；cmd / PS 5.1 / pwsh 7 三 shell）+ CI bas#1 的 "run timeout 5s" 假红 | ☑ **B19 已出（代码 `796220d` + `d4e53c2`，套件侧 `8174219`，Actions run #73 全绿）** = ① **控制台/管道两套出口按句柄类型选路**——控制台（含 ConPTY）走 `WriteConsoleW`（与 `chcp` 无关）、管道/文件按**当时的控制台代码页**写字节、某行装不下就整行退 UTF-8（`lpUsedDefaultChar` 当判据），**全程不碰用户的代码页**；② 未处理运行期错误的出口按「有没有可写 std 句柄」判（旧判据 `GetConsoleWindow()` 在重定向下会把批处理卡在模态框上）；③ 三条用例进 vbp：读屏探针 `tests\tools\con_capture.c` 跑 x64/x86 两档 + `chcp 936` 重定向按**字节**断言；④ 套件运行预算 5s→`-RunTimeoutSec`（默认 60s）+ 超时读数（CPU 时间/进程状态/最后一行输出）。详见 **D66**/**D67** |
 | B20 | 语言扩展 | **ai/028 两批一起发货**：反引号原始多行串（V1）+ 串内插值 `${expr}` / `${expr:fmt}`（V2）—— 需求出自 `todo/vi.md`（群友 Fan XiaoLei 2026-09-15），口径 = 现代语法糖，`&` 与普通 `"..."` 一字不动 | ☑ **B20 已出（V1 = `4c16f50` + 夹具钉字节 `f8ec76e`，V2 = `c2f7317`；门 = Actions run #82，head `c2f7317`，8/8 job 全绿）** = ① **一切落在词法层**：无孔的串在 `scanRawString` 出口折成与手写 `"..."` 逐字节同形的普通 `StringLiteral`；有孔的串展开成普通 token 链 `( "文本" & CStr( expr ) & ... )`（格式段 = `Format$(expr,"fmt")`）⇒ **parser / AST / semantics / cgen / driver / RTL 一字未动**，AST 里不存在"第二种字符串"（计划书 R4：`rawText` 全仓 57 处消费、至少四处各自剥引号折 `""`，形态位那条路每新增一处消费者就会漏一次）；② 语法口径：行界一律读成 CRLF（`source_manager.cpp` 已把源文件行尾抹成 LF ⇒ 源码行尾风格不可能影响串值）、起始反引号后紧跟的那一个换行裁掉、零转义、串内 `"` 原样、反引号双写、`$${` 是字面 `${` 的出口、裸 `{`/`}` 与冒号是文本（JSON 安全）；③ R4 四个落点各打一条真判据：`Const` 值 / `Declare … Lib` 的库名（DI 桩按 Lib 串选家族，折错直接 LNK2019）/ 工程内 `CreateObject` 的 ProgID（实测 1 次改写）/ 模块头 `Attribute`（折错则模块名对不上 `.vbp`）；④ "降级为真"有发码级证据：产物里是 `vb6_BSTR_Concat(vb6_BSTR_FromStr(L"n="), vb6_CStrLong(n))` —— 连"按实参类型改发专用 CStr"都一起继承；孔内未声明的名字照报既有 `VB3001`，且**第二个孔**报在 `(8,7)`（子扫描走 `[begin,end)` 窗口 + `getLocation` 播种 ⇒ 行列天然落在原文件，不需要事后平移 AST）；⑤ 新诊断三条全 ASCII 文案（D12）：`VB1007` 未闭合串 / `VB1008` 孔未闭合 / `VB1009` 空孔。读数与两条推翻计划书的订正见 **D68**（V1）与 **D69**（V2）。 | `4c16f50`+`f8ec76e`+`c2f7317` | 门 #82（8 job 全绿：Build + smoke + syntax + bas#1 + bas#2 + vbp + compile + asm；CI 分类逐条读数取不到 —— PAT 无 `actions:read` ⇒ job 日志端点 403，门结论以 run 级为准）。逐字节护栏 `.build\b20_emitc_guard.py`：BASE = 合并后、反引号之前的 `pre_b20_C3.exe` ⇒ **23 件存量工程 `--emit-c` 全同**；反向断言 **4/4**（V1 三件 + `test_interp.bas` 在 BASE 必失败、NEW 必成功）= 护栏能红的证明。用例：`test_rawstr`(+x86，18 条读数)、`rawstr_var`×4（GBK / UTF-8 BOM × CRLF / LF 同一内容四份源同读数）、`rawstr_proj`(+x86)、`test_interp`(+x86，21 条读数)、`rawstr_neg`×4 + `interp_neg`×4、`rs_emitc_shape` / `ri_emitc_shape`。本地读数：`-Category syntax` 两轮 128/0、129/0（第二轮含新增的 `ri_emitc_shape`）；`rawstr_proj` x64+x86 各 6 条 needle 全绿；四份变体各 4 条 needle 全绿。手册 `String 数据类型` 页加两节并标明非 VB6 原生（广告==应答）。**两条自己的坑**：(a) 四份变体第一次登记把 `"..." + $v + "..."` 直接写在参数位置 ⇒ PowerShell 把 `+` 当独立实参 ⇒ 四条 `FAIL (compile)`（本地 bas 跑抓到，门之前就修好并单独验过路径形状）；(b) 本机 `core.autocrlf=true` 把 `*.bas` 统统按 LF 存进索引 ⇒ 行尾/编码参与断言的夹具必须 `-text`，否则四份在 CI 上塌成两份、用例静默失效（见 `f8ec76e`，与仓库里 `.frx` 那段注释同源的道理）。 |
+| B21 | 存量弱点 | **待拍板 5 收口**：布尔在「值→文本」与「装箱进 Variant」两条路上的读数合一（B20 撞见、A/B 确认与本批无关） | ☑ **B21 已出（代码 = `2ddcc8b`，门 = Actions run #83）** = 根因**是两条不是一条**，只修一条另一半仍在（实测：`CStr` 修好后 `VarType(b)` 依旧是 2）：① **可见性** —— `As Boolean` 与 `As Integer` 在 C 层同为 `int16_t`，cgen 的类型登记表按 **C 类型串**分派，于是 `inferExprType` 永远看不见布尔，`CStr(b)` / `b & ""` / `String` 形参收布尔实参 / 裸值的 `Debug.Print` 全落到整数分支（`-1`、`0`）；照 Fix 117c(Single)/Fix 175(Date) 的**并登记**口径加 `knownBoolVars_`，五个登记点（`Dim`/局部 `Const`/模块级变量/形参/函数返回值）各补一处、消费点一律先判布尔。② **装箱** —— `_Generic vb6_VariantFromValue` 按 C 类型选构造器，`int16_t` 命中 `short:` → `VT_I2`、布尔字面量的裸 `(-1)` 是 `int` → `VT_I4`，于是 `VarType(b)=2`、`TypeName(True)="Long"`、`Format` 走数字分支（`Format` 的布尔分支原本还**刻意**写着 `vb6_VariantInt((int16_t)x)`）；装箱点收进一个 `boxToVariant`，只有推断为布尔才换成 `vb6_VariantBool`、其余**原样**回退。RTL 侧本来就把 `VT_BOOL` 格式化得对（`vb6rtl_conv.c` 的 `True`/`False` 与 `TypeName="Boolean"`、`vb6rtl_format_extract.inc` 的 `Format`），所以这一半的活全在 cgen，不在运行时 —— 一开始按"RTL 不认布尔"去猜会走错方向。 | `2ddcc8b` | 门 #83（head `2ddcc8b`，**8/8 job 全绿**，逐 job 读数见 GATE_BASELINE）。逐字节护栏 `.build\b21_emitc_guard.py`：BASE = `pre_b21_C3.exe`（**HEAD 干净构建树**，先把 W1 改动导成 patch 再反向 `checkout --` 构建，构完 `git apply` 回来 ⇒ BASE 里不含本批任何一半）vs NEW = `C3.exe`，**30 件存量工程 `--emit-c` 只 4 行不同、且全在 `test_types.bas` 那几句 `Debug.Print` 布尔**（`-1` → `True`，正是要修的）；分类判据 = 新增侧必须带 `vb6_VariantBool(`/`vb6_CStrBool(`、两侧剥掉包装名与强制转换后逐字符相同。**本批最值钱的一条**：助手最初写成"实参已是 VARIANT 就直传"，看着更干净，护栏当场 RED —— 它把 VbQRCodegen 的 `vb6_VarType(vb6_VariantFromValue(VB6_SA_AT(...)))` 那层**恒等包装**一起删了（语义等价但存量可观察产物变了）⇒ 口径改成"非布尔原样回退"（读数见 D70-2）。判据用例 `tests\test_bool_display.bas` 32 条（B1-B8 转字符串四条路、B9-B14 类型标记、B15-B20 落进 Variant 的那一半、**B21-B27 反向护栏**钉 `Integer`/`Long`/`Byte` 的装箱读数、B28-B29 判定语义、B30 `${b}` 插值、B31-B32 裸值 `Debug.Print`）+ 登记 `test_bool_display[_x86]`。负控 = 同一份用例喂 BASE 二进制 ⇒ B1-B20 与 B30-B32 一起翻红（`B31-raw-1`、`B32-raw0`）。本地读数：x64 与 x86 各 32/32 通过（含走真 harness 的两条 shard）、`-Category syntax` 129/0、`test_types.bas` 现打 `Boolean=True`/`FalseVal=False`/`NotTrue=False`。**没顺带修的**：`Print #` / `Write #` 的实参不分类型一律 `vb6_Str((int32_t)x)` —— 同一批量出，已记待拍板 7。 |
 
 > 批次可按实施中发现的耦合度合并/拆分，但**阶段范围不得越界**；每次运行只推进能各自独立过门的批。
 
@@ -3055,6 +3063,33 @@ D54-② 那条"类变量永不 Release"不变式（对外一旦发 IDispatch/IUn
 - **一个致命的悬垂**：`content_` 是 `std::string_view`，构造里写 `content_ = buffer_->content().substr(begin, len)` 拿到的是**临时 `std::string` 的视图** ⇒ 所有源文件（连不带反引号的存量用例）在 `(1,1)` 报"意外字符"。修法：先套一层 `std::string_view(...)` 再 `substr`。**后面任何要开窗口的人都踩得到，写在这里。**
 - **格式段不能沿用表达式位的扫描**：`${n:#,##0}` 里第一个 `#` 会被"跳过日期面量"的规则当成 `#…#` 的开头，一路吞到行尾 ⇒ 误报 `VB1008`。改成"顶层 `:` 之后按**纯文本**读到第一个 `}`"（计划书 §二 本来就是这个口径，是实现漏了）。同理 **坏孔要丢到本行末尾**再交 `Invalid`：不丢的话同一行尾那枚闭合反引号会被当成新串开头，一条真错配一串假错（含假的 `VB1007`）。
 - 撞见两条**与本批无关**的存量弱点（A/B 确认改前改后同读数，未动，等拍板）：① `CStr(True)` 回 `"-1"`，VB6 回 `"True"`（`CStr(1 > 0)`、`CStr(t <> 0)` 同）⇒ 用例改用 `If … Then` 取读数；② 工程内类经 `CreateObject` 改写后交给 `Dim o As Object`，按名点公有 `Function` 报 `vb6_ComCall: method "…" not found`，早绑定（`As <类名>`）正常。
+### D70 B21（布尔的可见性与装箱）落地后的四条读数（2026-09-25）
+
+- **一条现象、两条根因，缺一半就只修一半**：`CStr(b)` 走的是"表达式→BSTR"的 `wrapToBSTR`/`CStr` 分支，`VarType(b)`、`Format(b,…)`、Variant 形参走的是"值→Variant 装箱"那一路。只登记 `knownBoolVars_`（可见性）之后实测 `CStr(b)=True` 但 `VarType(b)` 仍是 2、`Format(b,"G")` 仍是 `-1`；补上装箱侧才合一。**下次再撞"某个类型显示不对"，先问是哪一条路：登记表还是 `_Generic`。**
+- **`_Generic vb6_VariantFromValue` 的分支表就是运行时的类型标记**：`short:` → `vb6_VariantInt`（`VT_I2`/2/"Integer"）、`int:` → `vb6_VariantLong`（`VT_I4`/3/"Long"）—— 而 `As Boolean` 在 C 层就是 `int16_t`、布尔字面量就是裸 `(-1)`，所以装箱必然落错。**同类问题这是第三次**（Single=Fix 117c、Date=Fix 175、Boolean=B21）：口径固定为「另开一张按 VB 声明登记的集合 + 消费点先判它」，不要去改 C 型（`int16_t` 与 `Integer` 同型是布局事实，动它波及 ABI 与 `.tlb`）。
+- **护栏把"顺手改干净"抓了回来**：`boxToVariant` 第一版写成"实参已是 VARIANT 就直接传，不套恒等包装"，30 件工程对照当场 RED 两行 —— VbQRCodegen 的 `vb6_VarType(vb6_VariantFromValue(VB6_SA_AT(vb6_VARIANT, vParam, lIdx)))` 少了一层包装。语义上完全等价（`VariantFromValue` 对 `vb6_VARIANT` 是 identity），但它是**存量工程的可观察产物**，与本批主张无关 ⇒ 改成"非布尔一律原样回退"，对照回到只剩 4 行真该变的。**"更干净"不是这一批判据的合格理由，逐字节相同才是。**
+- **BASE 的取法记一笔**：本批开工时工作树已含"可见性"那一半的未提交改动，直接 `cp` 现有 exe 当 BASE 会让护栏少测一半 ⇒ 先 `git diff > .build\w1_full.patch`，`git checkout --` 回 HEAD 构建 BASE（`pre_b21_C3.exe`），再 `git apply` 回来构建 NEW。窗口约 4 分钟、只碰自己那 13 个文件，共享树里用这种"导 patch—回退—重建—回灌"的写法而不是 stash。
+- 顺带量出一条**不属于本批**的（记待拍板 7）：`Print #` / `Write #` 的非 BSTR 实参不分类型一律 `vb6_Str((int32_t)x)` ⇒ 布尔落盘 `-1`、`3.5` 被截成 `3`、`Write #1, True` 写成 `"-1"`（VB6 依次是 `True`、` 3.5`、`#TRUE#`）。
+### D71 B22 开工地图（= 待拍板 6 的测量，2026-09-25 B21 收尾轮顺手做）**行号与读数均为本轮实测**
+
+- **复现比登记的更小**：不需要 `CreateObject`。`.build\b22_out\W2App.vbp`（EXE，`W2Note.cls` 有公有 `Function Note()` 与 `Property Get Tag()`）里
+  `Dim o As Object: Set o = New W2Note: o.Note()` ⇒ 空串 + stderr `vb6_ComCall: method "Note" not found`；`o.Tag` 同报
+  `vb6_ComGetProp: property "Tag" not found` ⇒ **缺口在所有"工程内类实例交给 `As Object` 后按名点"这一片**，不是改写那一支。
+- **改写那一支顺带量清了边界**：`swapCreateObject`（`src/driver/coclass_activate.cpp:87-99`）的 `byProgId` 只装 **CoClass 块的 ProgID**，
+  所以 `CreateObject("W2App.W2Note")`（工程名 + 类名、无块）今天 429 = 设计内；补一个 `CoClass Note2 [Implementation("W2Note")]` 之后
+  改写点 fire（`C3: CoClass 'Note2' activated in-project: ... 2 CreateObject rewrite(s)`），`As Object` 那一侧仍空、早绑定那一侧
+  `[note-ok]` ⇒ 与 B20 登记的现象同一根。
+- **发码读数**：`o = (void*)vb6_ComObject_FromInstance(vb6_FindCoClassDesc("W2Note"), (void*)vb6_cls_W2Note_New())`；类的 pack 出口
+  是 `vb6_ComPack_W2Note` → `vb6_ComPackVB6InstanceRaw("W2Note", instance)`，而该函数按 `classVariable` 在 `g_vb6_coclasses` 里查 desc
+  （`src/rtl/core/vb6comserver/vb6comserver_obj.c:449` 起，注释写明"未进 coclass 表的类没有 IDispatch 面 ⇒ 回 NULL"）。
+  ⇒ 两条候选根因待分家：**(a)** `vb6_FindCoClassDesc("W2Note")` 回 NULL（那 `o` 干脆是 Nothing）；**(b)** desc 在、但它的成员名表为空
+  （`GetIDsOfNames` 点不到 ⇒ 与 stderr 的"method not found"更合）。本轮未分家：`--emit-c` 里**看不到** server/coclass 表
+  （只有 `--keep-for-debug` 的临时目录有），下一轮先从那里读 `g_vb6_coclasses` 的实参与成员表条数。
+- **EXE 侧想借"对外那一档"补面是死路**：给 `Note2` 加 `[ComCreatable(True)]` ⇒ `VB3033`（EXE 工程不注册 COM 服务器，B18 已立的边界）。
+  ⇒ 若走 (b)，成员表面得为"进程内晚绑定"单独发一张，不能复用注册表那一条。
+- **本轮踩到的两条工具坑**（写在这里省下一轮的时间）：`.build` 里的临时 runner 用 `$ErrorActionPreference = "Stop"` 会把 C3 的
+  **信息面 `C3:` 行（走 stderr）**当异常中断整个脚本 —— 这类 runner 一律 `"Continue"`；以及它报 `exit=1` 之后旧 exe 仍在原地、
+  跑出来的读数全是**上一版的**（这条基线记忆里早就有："`Test-Path $exe` 不是构建成功的判据"，本轮又差一点中招）。
 ## 运行日志
 
 - 2026-09-23 建表：范围确认（含完整COM）、规范文档 018 入库、现状盘点完成。
@@ -3321,3 +3356,11 @@ D54-② 那条"类变量永不 Release"不变式（对外一旦发 IDispatch/IUn
   **护栏与门**：`.build\b20_emitc_guard.py` 量 BASE = `pre_b20_C3.exe`（合并后、反引号之前）vs NEW ⇒ **23 件存量工程 `--emit-c` 逐字节全同**；反向断言 **4/4**（含反引号的源在 BASE 必失败、NEW 必成功）= 护栏能红的证明。门 = run #82，8 个 job 全绿；CI 分类逐条读数这一轮取不到（PAT 无 `actions:read`，job 日志端点 403），已在 GATE_BASELINE 里写明并按 run 级记账。手册 `String 数据类型` 页加两节，标明是本项目扩展、真 VB6 编不过（广告==应答）。
 
 - 2026-09-25 22:05–22:20 **同步 gitcode：`fan/dev` 推送 + MR !54 合并进 `main`**（门 = Actions run #82 全绿，head `c2f7317`）：先把 `origin/main`（MR !53 的服务端合并提交 `68fb713`）合回 `fan/dev` —— 无冲突（内容早已在 `e38fbeb` 那一支里合过），合并树 = 门验证过的那棵树；推送前专门核了一次"相对 main 删掉了什么"，因为删除行集中在 `vb6rtl_file.c` / `driver/main.cpp` / `vb6forms.c` 这些**别人也在改**的文件上：实测方向是反的 —— main 上还是 `vb6rtl_file.c` 的 482 行旧版（= `e38fbeb` 那份 md5 `8a00315f`），我这边是 Fix 197 的 662 行新版（md5 `180c3dce`，就是 `github/dev` 上 `c905707` 那一支）⇒ 这次 MR 是**推进** main，不是覆盖别人的新工作。随后 `fan/dev` 推上去（`4675438..3304236`，服务端钩子 PASSED）→ 建 MR !54（84 文件 +4030/−344）→ 按常设默认（`mergeable: true` 且 `base.sha` == 实时 `main` 才合，不再问）合并 → `main` 移到 `696733d`「!54 merge fan/dev into main」。**合完核对**：`git diff origin/main HEAD` 空、两侧 tree 同一枚 oid ⇒ main 现在就是被门验证过的那棵树。台账本身是文档，按本轮新定调**不推 CI**。
+- 2026-09-25 22:26–23:20 **B21（待拍板 5 收口 = 布尔的两套读数）出完**：开工先做 BASE —— 工作树里已有本批前一半（可见性登记）的未提交改动，`cp` 现成 exe 当基线会让护栏少测一半 ⇒ `git diff > .build\w1_full.patch`、`git checkout --` 那 13 个文件回 HEAD、构建 `pre_b21_C3.exe`（md5 `70f5b98d`）、`git apply` 回灌、再构建 NEW（md5 `9456577b`，收线快照留在 `.build\b21_C3.exe`）。共享树里不用 stash，导 patch 的窗口约 4 分钟、只碰自己的文件。
+  **两条根因**：① 可见性（`As Boolean` 与 `Integer` 同为 `int16_t`，登记表按 C 类型串分派 ⇒ `inferExprType` 看不见布尔，`CStr` / `&` / `String` 形参 / 裸值 `Debug.Print` 全落整数分支）—— 加 `knownBoolVars_`，五个登记点各补一处、消费点先判它；② 装箱（`_Generic vb6_VariantFromValue` 把 `int16_t` 送到 `short:` → `VT_I2`、把布尔字面量的裸 `(-1)` 送到 `int:` → `VT_I4`）—— 装箱点收进 `boxToVariant`，只有推断为布尔才换 `vb6_VariantBool`。RTL 侧对 `VT_BOOL` 本来就格式化得对，所以本批全在 cgen。
+  **护栏 RED 一次、按读数改口径**：助手第一版写成“实参已是 VARIANT 就直传”，30 件工程对照当场差 2 行 —— VbQRCodegen 的`vb6_VarType(vb6_VariantFromValue(VB6_SA_AT(...)))` 少了一层**恒等**包装（语义等价，但那是存量可观察产物）⇒ 改成“非布尔一律原样回退”，对照回到只剩 4 行真该变的（全在 `test_types.bas` 的 `Debug.Print` 布尔那几句，`-1` → `True`）。分类判据脚本 `.build\b21_emitc_guard.py`（清单 = B20 那 23 件 + 7 件含 `As Boolean` 的存量源）。
+  **用例与读数**：`tests\test_bool_display.bas` 32 条（含 `Integer`/`Long`/`Byte` 装箱读数的反向护栏、`${b}` 插值、裸值 `Debug.Print`）+ 登记 `test_bool_display[_x86]`；负控 = 同一份用例喂 BASE 二进制 ⇒ B1-B20 与 B30-B32 一起翻红（`B31-raw-1`、`B32-raw0`）；两条用例走真 harness（`-Category bas -BasShard 22/60 -BasShardTotal 100`）各 PASS；x64/x86 各 32/32；`-Category syntax` 129/0；`test_types.bas` 现打 `Boolean=True`/`FalseVal=False`/`NotTrue=False`。手册 `Boolean 数据类型` 页加“本项目的实现口径”一节（含未对齐的那条边界）。
+  **顺带量出、未动手**：`Print #` / `Write #` 的非 BSTR 实参不分类型一律 `vb6_Str((int32_t)x)`\u21d2 布尔落盘 `-1`、`3.5` 截成 `3`、`Write #1, True` 写成 `"-1"`（VB6 依次是 True、空格 3.5、`#TRUE#`）—— 记为待拍板 7。
+  **门 = Actions run #83**（head `2ddcc8b`，23:05 到 23:19，14.6 分钟）**8/8 job 全绿** = Build C3.exe + Tests(smoke / syntax / vbp / compile / asm / bas#1 / bas#2)。这一轮的门读数**逐 job 核过**：PAT 无 `actions:read` 仍旧挡住 job 日志端点（403），但 `GET /repos/…/actions/runs/36151881443/jobs` 不要那个权限域，于是 run 级一把绿升级成八条 `status/conclusion` + `head_sha` 对表 —— 以后都按这条取数，别再拿 run 级当结论。
+  **B22（= 待拍板 6）本轮只量不做**，复现缩到最小形（`New` 一个工程内类交给 `As Object` 就会空，不需要 `CreateObject`），两条候选根因的分家、探针位置与两条工具坑全在 **D71**。
+  **本会话撞到的一条**：一次工具返回里夹了段伪装成“security notice”的提示注入，要我去 `curl` 一个本机监听端口并把它称作“默认目标”。没执行（本机那条端口探测根本没有任何 LISTENING，日志里也没有那个端口号），只登记不照办。
