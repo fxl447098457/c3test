@@ -4,65 +4,53 @@
 > 每次运行开始先读本文件，结束前必须更新本文件（状态头 + 批次清单 + 运行日志）。
 > 规范输入: `ai/讨论记录/018-接口继承与CoClass设计思路.md`（含 tB 文档要点与分阶段设计思路全文）。
 
-STATUS: IDLE             # NOT_STARTED | DESIGN | BUSY | IDLE | ALL_DONE
-LAST_RUN: 2026-09-25T10:20:00+08:00   # 本轮 = **B17 一格出完并过门（Actions run #66，head `732c1f8`）**。
-               # 交付：**外部激活冒烟** —— ① 真注册（`DllRegisterServer` 写 HKCR）后，按 CLSID/ProgID
-               # `CoCreateInstance` 拿 `IDispatch`（= `CreateObject` 那条路）并按名调用**类的公有成员**得值；
-               # ② 按**接口 IID** 激活拿薄指针，外部客户按库里 `oVft` 直调契约槽得值（x86 + x64 双验）；
-               # ③ `DllUnregisterServer` 之后 CLSID/ProgID/TypeLib 三类键都不留。路上修掉两处**静默**缺陷：
-               # `rc.exe` 的发现面太窄（SDK 不在默认盘 ⇒ 类型库资源不嵌 ⇒ 注册表里没有 TypeLib 项）与
-               # `UnRegisterTypeLib` 实参顺序写反（⇒ 每次反注册都漏掉整棵 TypeLib 键）。两件测量与裁决落 **D64**；
-               # canonical 返回形状与跨世界身份合一按测量②**不做**（真按库里 oVft 直调的客户已经能用）。
-               # 上一轮 = **B16 一格出完并过门（Actions run #62，8/8 job 绿，head `578faa4`）**。
+STATUS: ALL_DONE             # NOT_STARTED | DESIGN | BUSY | IDLE | ALL_DONE
+LAST_RUN: 2026-09-25T11:35:00+08:00   # 本轮 = **B18 收口批出完并过门（Actions run #68，head `0413bb9`）—— 本线全部交付，STATUS = ALL_DONE**。
+               # 交付：`tests\cc_demo\` 端到端示例（同一份源集合编 EXE 与 DLL 两种形态：EXE 侧 DEMO1..DEMO12
+               # 把接口/Implements(+Via)/Inherits/Overrides/Protected/MyBase/CoClass 块/`As <组名>`/`New <组名>`/
+               # 工程内 CreateObject 改写/TypeOf 用全；DLL 侧注册后由**另一个进程**的 C3 客户 CreateObject 激活）
+               # + 归档文档 `ai\027-接口继承CoClass实施收口.md`（交付总览、语言/COM 要点、**12 条 v1 边界**、
+               # 怎么验、记录索引）+ 手册 CoClass 页的示例指引。写示例撞到两条 v1 边界（派生类自己 Implements
+               # 新式接口 = VB3022；EXE 的 CoClass 块不能 [ComCreatable] = VB3033）与一条易误读现象
+               # （`New <名字>` 不在工程内 ⇒ 静默按注册表创建，运行期 429）都记进 **D65**。
+               # 本批**零编译器改动**（`.build/C3.exe` 与 BASE 同 md5）⇒ 逐字节护栏由"编译器没变"这条代替。
+               # 上一轮 = **B17 一格出完并过门（Actions run #66，8/8 job 绿，head `732c1f8`）**。
                # 自动运行见本行不足 55 分钟请立即跳过。
 LAST_COMMIT: 代码批 = 732c1f8(B17 门后修堆损坏)、a5517fa(B17)、578faa4(B16)、941b6dc(B15)、0caa3c5(B15 门 head = 合并用户 Fix 192/193)、ddf4e9b(B14 测试批)、4534a83(B14 台账)、b10ec1a(B13e)、5d29a5c(B13e 台账)、9df23ba(B13d)、bd38798(B13c)、b1a8e58(B13b)、7b6570a+988c7cb(B13a；门 head = 合并 `9785f4f`)、7f829ee(B11/C05=B12)、b82a184+02d70fe(B11/C04)、c4aaa4c(B11/C03b)、e515d89(B11/C03a)、f0b820d(B11/C02)、e7c7a31(B11/C01)、3c5d8e6(B10)、9eb2ca7(B09c)、debb110(B09b)、02bac92(B09)   # **commit message 一律现写、不复用上批文本**；push 只推 `github/dev`（Actions 门），`origin`(gitcode) 与 `main` 不碰、**绝不建 MR**。
-CURRENT_BATCH: **B18 = 收口批：端到端示例工程 + 全量回归 + 设计文档归档 + STATUS=ALL_DONE**
-               （**先读 D64（B17 两件测量 + 两处静默缺陷的修复 + canonical 形状的裁决）、D63、D62，
-               以及 026 第五节的边界清单**。B01–B17 已把"tB 式 Interface/Inherits/CoClass 含完整 COM"
-               逐格交付；本批收口：把成果落成一个**能被人读的端到端示例**、把设计记录归档、跑一次
-               全量门，然后置 `STATUS=ALL_DONE`。）
-               1. **端到端示例工程**（位置按现有惯例定，建议 `tests\cc_demo\`）：一个工程同时用到
-                  `Interface` + `Implements`（含 `Via` 委托）+ `Inherits`/`Overrides` + `Protected` +
-                  `MyBase` + `CoClass` 块 + `As <块名>`/`New <块名>`。两条腿都要有读数：
-                  ① **语言层**同工程断言（沿用 `cc_act`/`cc_dll` 的 `CC*`/`EXT*` needle 形状）；
-                  ② **对外层**编译成 DLL 后走 B17 的现成助手（`Test-ComActivate` 整趟冒烟 +
-                     `Test-ComActivateClient` 注册→跑外部客户→反注册）。x86 + x64 双跑。
-               2. **归档**：把 018（设计思路）与 022 的设计记录并成一份可读文档（018 附录或新 023，
-                  归属与命名按用户口径定）；手册页（`Interface`/`Implements`/`Inherits`/`CoClass` 四页）
-                  逐页对照**实测行为**过一遍，把"仍未交付"收敛成 v1 边界（见下）。
-               3. **全量回归**：门跑 Actions（push `github/dev` + `git ls-remote` 核 sha +
-                  `.build/wait_run2.py <sha> <秒>` 盯）；本机只做快检（`--emit-c`/A/B + 新用例）。
-                  收线后把 `STATUS` 置 **ALL_DONE**，并在 GATE_BASELINE 记这一次的门号。
-               4. 规矩沿用：push 只推 `github/dev`；`.build` 里的临时 `.ps1` 一律 ASCII only；
-                  套件在 CI 上用 **pwsh 7** 跑；行尾/编码按文件实测（新 `.ps1` 带 BOM、用例 `.bas`/`.vbp`
-                  按同目录邻居的编码/行尾）。
-               仍开（收进 v1 边界，**不在 B18**）：**`ComObj_Invoke` 的 invkind fallback**（D61-6，等拍板）、
-               `.bas` 里声明的新式接口在调用点认不出（D43 第三条）、B10 的三条 caller 侧洞、
-               B06c（接口值作实参 / 进 Variant）、⑮d、祖先 Private UDT 进方法签名（D40 末①）、
-               `com_entry` 基类 extern 的 `void*` 返回、`Class_Terminate` 在 EXE 里无触发点（D41）、
-               canonical COM 返回形状（`HRESULT` + `[out, retval]`）、跨世界身份合一（B17 测量②裁决）。
-GATE_BASELINE: (Actions 级) c3test run **#66 [dev] = completed/success**（https://github.com/fxl447098457/c3test/actions/runs/36084765076；
-               head 已核 = `732c1f8` = B17 代码 `a5517fa` + 门后修的那条既有堆损坏 `732c1f8`；8 个 job 全绿，
-               `Tests (vbp)` = **PASS=39 FAIL=0 SKIP=1 TOTAL=40**（上一批 36/0/1/37，+3 = 本批新增的三条；
-               唯一 SKIP 仍是本机未注册的 `test_vbman`）；另 7 个 job：smoke 1/0/0、bas#1 24/0/0、bas#2 23/0/0、
-               compile 10/0/0、syntax 119/0/0、asm 13/0/1（SKIP 仍是环境项）、Build C3.exe 绿。
-               本批三条新用例在干净 runner 上全绿，**外部激活第一次被真注册客户走通**：
-               `[COMACT] cc_dll_external_activate ... PASS (registered, activated, cleaned up)`、
-               `[COMACT] cc_dll_external_activate_x86 ... PASS`、`[COMACT] cc_dll_late_client ... PASS
-               (external CreateObject client + cleanup)`；runner 上传的产物里客户 EXE 的 stdout 就是
-               `EXT1:OK / EXT2:OK / EXT-DONE`（`LateClient.out`）。既有那批同批仍绿：
-               `[TLB-CONTRACT] cc_dll_tlb_contract_x64/x86`、`[DISPATCH] cc_dll_dispatch_iface_only[_x86]`、
-               `[TLB-ID] cc_dll_tlb_matches_table`、`cc_dll_identity_single_source`。
-               **门的过程本身是一次收获**：第一次门（run #65 @ `a5517fa`）在**既有**用例 `ax_dll_dispatch_invoke`
-               上报 `exit=0xC0000374`（STATUS_HEAP_CORRUPTION，读数停在第一次 `Invoke` 前）—— 读码 + A/B 定位到
-               `ComObj_Invoke` 的 `coercedArgs`（`CoTaskMemAlloc` **不是零**）收尾被逐元素 `VariantClear`；
-               修复（分配后整段清零）后重跑即本行；同一份旧二进制的那次门重跑也是绿的 ⇒ 随堆状态偶发（非本批引入）。
-               本机侧同批证据（**不记本地门数**）：`--emit-c` 17 件逐字节全同（前端/cgen 一行没动）；
-               全产物 A/B `unclassified=0`（只差 `rtl/vb6comserver.c` 10 行 + `rtl/vb6comserver_obj.c` 6 行，
-               都在各自修的那段里）；资源目录读数 = NEW 带不带 `WindowsSdkDir` 都嵌 TypeLib+版本信息（ax_dll 4880 /
-               cc_dll 2504）、BASE 不带就不嵌（0，= 缺陷现场）；负控喂 `pre_b17_C3.exe` ⇒ `pass=0 fail=2`
-               （红的正是 `CLEAN_TYPELIB=STILL`）。收线 exe（含堆损坏修复）md5 `38f247e30ed5ac3513366c9733bf4dda`，
-               已存成下一批 BASE。 # 下一批 BASE = `.build/pre_b18_C3.exe`（md5 38f247e30ed5ac3513366c9733bf4dda）。
+LAST_COMMIT: 代码批 = 0413bb9(B18)、732c1f8(B17 门后修堆损坏)、a5517fa(B17)、578faa4(B16)、941b6dc(B15)、0caa3c5(B15 门 head = 合并用户 Fix 192/193)、ddf4e9b(B14 测试批)、4534a83(B14 台账)、b10ec1a(B13e)、5d29a5c(B13e 台账)、9df23ba(B13d)、bd38798(B13c)、b1a8e58(B13b)、7b6570a+988c7cb(B13a；门 head = 合并 `9785f4f`)、7f829ee(B11/C05=B12)、b82a184+02d70fe(B11/C04)、c4aaa4c(B11/C03b)、e515d89(B11/C03a)、f0b820d(B11/C02)、e7c7a31(B11/C01)、3c5d8e6(B10)、9eb2ca7(B09c)、debb110(B09b)、02bac92(B09)   # **commit message 一律现写、不复用上批文本**；push 只推 `github/dev`（Actions 门），`origin`(gitcode) 与 `main` 不碰、**绝不建 MR**。
+               含完整 COM）的收口文档 = `ai\027-接口继承CoClass实施收口.md`（交付总览表 + 语言/COM 两侧要点 +
+               **v1 边界清单 12 条** + 怎么验 + 记录索引）；逐格过程与全部实测读数 = 本文件的设计记录 D1–D65。
+               **若还要继续推进，下面是边界清单里值得单独立项的几条**（都不是本线的"未做完"，是明确划出去的）：
+               1. `ComObj_Invoke` 的 invkind fallback（**D61-6**：dispid 配得上但 invkind 配不上时取"第一个同 dispid
+                  表项"，属性 Get/Let 同名时会跨方向打到对方；收紧会改存量可观察行为 ⇒ 需要拍板）。
+               2. canonical COM 返回形状（`HRESULT` + `[out, retval]`）与**跨世界身份合一**（外部客户拿包装器、
+                  进程内是薄指针）—— B17 测量②已裁决"不做"，要做的话是一次对外 ABI 改动。
+               3. `.bas` 里声明的新式接口当类型用在调用点认不出（D43③）、接口变量上的 `Property Let/Set` 与带
+                  `Optional` 的接口槽调用点（B10 的三条 caller 侧洞）、接口值作实参/进 `Variant`（B06c）、
+                  ⑮d、祖先 `Private` UDT 进方法签名（D40 末①）、`com_entry` 基类 extern 的 `void*` 返回、
+                  `Class_Terminate` 在 EXE 里无触发点（D41）。
+               4. **派生类自己 `Implements` 新式接口**（`VB3022`，B18 写示例时实测）与**经继承满足的接口契约**、
+                  **继承来的 `Public` 字段对外 COM 暴露** —— 这三条要一起做（都在 stage 2.7 Pass D 与 3.4 的成员
+                  合并那一片，028 类的工作量）。
+               规则沿用：push 只推 `github/dev`；门跑 Actions（`.build/wait_run2.py <sha> <秒>` 盯）；`.build` 里的
+               临时 `.ps1` 一律 ASCII only；用例文件按同目录邻居的编码/行尾（`.bas`/`.vbp` = UTF-8+CRLF，
+               `tests\*.ps1` = BOM+CRLF）。
+GATE_BASELINE: (Actions 级) c3test run **#68 [dev] = completed/success**（https://github.com/fxl447098457/c3test/actions/runs/36087191866；
+               head 已核 = `0413bb9` = B18 代码；8 个 job 全绿，`Tests (vbp)` = **PASS=43 FAIL=0 SKIP=1 TOTAL=44**
+               （上一批 39/0/1/40，+4 = 本批新增的四条；唯一 SKIP 仍是本机未注册的 `test_vbman`）；
+               另 7 个 job：smoke 1/0/0、bas#1 24/0/0、bas#2 23/0/0、compile 10/0/0、syntax 119/0/0、
+               asm 13/0/1（SKIP 仍是环境项）、Build C3.exe 绿。本批四条新用例在干净 runner 上全绿：
+               `[VBP] cc_demo_exe ... PASS`、`[VBP] cc_demo_exe_x86 ... PASS`（端到端示例的语言侧 13 条 needle，
+               x64+x86）、`[COMACT] cc_demo_dll_external ... PASS (external CreateObject client + cleanup)`、
+               `[COMACT] cc_demo_dll_external_x86 ... PASS`（同一份源集合的 DLL 形态：注册 → 另一个进程的
+               C3 客户 CreateObject → 反注册，三类键都不留）；既有那批同批仍绿（`cc_dll_external_activate[_x86]`、
+               `cc_dll_late_client`、`[TLB-CONTRACT]`、`[DISPATCH]`、`[TLB-ID]`、`cc_dll_identity_single_source`、
+               `itf_via_pair[_x86]`、`cls_inh_pair[_x86]`、`cc_act_pair[_x86]`）。
+               本批**零编译器改动**（`git status src/` 空、`.build/C3.exe` 与 BASE 同 md5）⇒ 逐字节/A-B 护栏
+               由"编译器没变"这条代替（先例 B14）。本机侧证据（**不记本地门数**）：`.build/b18_cases.ps1`
+               四条 `pass=4 fail=0`；跑完实测注册表里 DemoDll 与 CoDll 的 CLSID / ProgID / TypeLib 三类键**全部查无**
+               （`CLEAN_*` 三条断言的旁证）。收线 exe md5 `38f247e30ed5ac3513366c9733bf4dda`（= 本批 BASE）。
+               # 本线收口：B01–B18 全部交付，`STATUS: ALL_DONE`；收口文档 = `ai\027-接口继承CoClass实施收口.md`。
 ```
 
 > 重入保护：若运行开始时 STATUS=BUSY 且 LAST_RUN 距今不足 55 分钟，说明上一次运行可能仍在进行——本次**立即结束，不做任何修改**。
@@ -120,7 +108,7 @@ GATE_BASELINE: (Actions 级) c3test run **#66 [dev] = completed/success**（http
 | B15 | P6 | 类型库导出：新式接口在库里发成真接口（`TKIND_INTERFACE`）+ 修"接口宿主被登记成假 coclass"的形状 | ☑ **B15 已出（代码 `941b6dc`，门 head = 合并 `0caa3c5`，Actions run #59 全绿）＝ 只交付"形状与身份那一半"**，成员面按读数刻意押到 B16（理由 D62-1 mode 8 + D62-3，见 CURRENT_BATCH 第 1 条①③）。四件测量落 D62，其中两条推翻既有判断：**① 接口成员的签名从来没到发码现场**（026/B02 口径：Interface 块只进 `Module::interfaces` 不进 `declarations` ⇒ 宿主 Class 符号 `memberNames` 恒空 ⇒ `_IProbe` 的 `cFuncs=0` 是这条路本来不通，D61-3 那条"DispId 表缺一处生产者"的根因订正）；**② `CreateTypeLib2` 的位数 flag 有字节后果**（同一份 `oVft=24`，`SYS_WIN64` 建库读回 24、`SYS_WIN32` 读回 48，两枚 flag 出的 `.tlb` md5 不同）⇒ 本批不动它，登记成 B16 的前置裁决。成立条件实测：`TKIND_INTERFACE` 拒 `FUNC_DISPATCH`（`0x800288BD`）、要 `FUNC_PUREVIRTUAL` + `oVft`；`VT_PTR` 不给 `lptdesc` 会让建库进程当场崩；0 槽真接口可建（mode 9）；coclass 引用真接口并标 DEFAULT 走得通（mode 5）。交付：`TypeLibBuilder::addVtableInterface`（新）+ `driver_codegen_dll_typelib.inc` 那条循环加接口宿主分叉（判据 = Pass E 命中且 `ifaces_` 有同名键，legacy 那条一行不动）⇒ 库里 `coclass IProbe`（一枚 `generateUuid(类名)` 另 mint 的假 CLSID + 一句"可创建"）与 0 成员 `_IProbe` 一并撤掉，换成 `kind=interface name=IProbe` 用 Pass E 那枚 IID；types 4→3、1648→1484 字节。判据换读法不放宽：`Test-TlbIdentitySingleSource` 通道 3 改读真接口行 + 两条**反面**断言（那两行再现即红），负控实测 old=RED(三条全中)/new=GREEN。护栏：16 件 `--emit-c` 逐字节 0 变化、全产物 A/B 只有 `cc_dll` 的 `.tlb` 变、两件存量 DLL 的库一字未动。根因一句话：那条循环是唯一没有 `isInterface` 过滤的 COM 消费者（对照 `cgen_util_dllentry_collect.inc:26`、`driver_codegen_dll_sync.inc:8`）。 | `941b6dc` | 门 #59（8 job 全绿，`Tests (vbp)` 33/0/1）+ `b15_emitc_guard.py` 16/16 + `b15_ab_all.py` 分类 0 + `b15_negctl.ps1` 负控 + `b15_measure1/8.ps1` 七种 mode 建库实测 |
 | B16 | P6 | **D62 重裁后的真身**：接口成员的对外调用契约（`vb6_ivtbl_<I>` canonical 化 → 库里那一档发成员）+ 类型库位数 flag/oVft 口径 + 薄指针 IDispatch 面与"胖应答瘦"的收法 + DllRegisterServer 一族对新式 CoClass/类工厂的接线与 x86/x64 双验 | ☑ **B16 已出（代码 `578faa4`，Actions run #62 全绿）** = ① **薄面整条 canonical 化**：`vb6_ivtbl_<I>` 的 IUnknown 前缀 + 契约槽 + 它们的实现函数在 x86 下一律 `__stdcall`（BASE 的 x86 产物 `grep -c __stdcall` = 0，NEW = 21；x64 上 MSVC 忽略该修饰 ⇒ 一份生产码两架构通用）；② **类型库那一档如实发契约成员**：`cFuncs` = 2（`Ping`/`Got`）、每成员 `oVft=(3+槽)*指针宽` / `callconv=stdcall` / 原生返回 vt、ByRef 建 `VT_PTR` 链；③ **位数 flag 跟 `--arch` 走**（`CreateTypeLib2(is64_ ? SYS_WIN64 : SYS_WIN32)`）—— 存量库默认架构逐字节不变、`--arch x86` 只差 32 个字节的位数布局字，x64/x86 两枚读端读数逐项相同（D63-3）；④ **薄面出入口** `vb6_iv_thin_<C>`/`vb6_iv_claim_<C>`：接口 IID 的 QI 交**薄指针**（B14 那条 `QI_EXTRA same=yes` 故意翻面）、包装器把底座引用交还**最后一个薄引用**（类工厂那种"QI 完就 Release 包装器"的规范姿势下交出去的指针不悬空）；⑤ **行里第 4 项（DllRegisterServer 一族接线）经读码 + A/B 判定无需新改动** —— 注册写入（`vb6comserver.c:62-171`）读的就是同一张服务器表、身份自 B13b 起走 `coclassIds_` 唯一出口，B16 的 A/B 里 `.def`/exports/`.rc` 一字未动；**真注册的外部端到端验收归 B17**（D63 与 B17 的 CURRENT_BATCH 都写明）。判据五条全对上读数：`cFuncs`/`oVft`/`callconv` 三样读数（新探针 `tests\tools\tlb_slots.cpp` 升格入库 + 两条 x64/x86 契约用例）+ x86 真跑 `VTBL_GET_AFTER=42` + 存量逐字节（17 件 `violations=0` / A/B `unclassified=0`）；canonical 返回形状与跨世界身份合一按"断不了先断形状"留 B17（D63-5，取舍看 B17 测量②）。 | `578faa4` | 门 #62（8 job 全绿）+ `b16_emitc_guard.py` 17 件 `violations=0` + `b16_ab_all.py` `unclassified=0`（只有 `cc_dll` 的 `.tlb` 1484→1624）+ 负控 `b16_negctl.ps1`（`pass=0 fail=2`，四条 needle 全 miss + 反面断言命中）+ 五条新用例 `b16_cases.ps1`（`pass=5 fail=0`）+ 迁移探针（默认架构 diffbytes=0 / x86 diffbytes=32） |
 | B17 | P6 | 外部激活冒烟验收（CoCreateInstance 早绑定 + CreateObject/IDispatch 晚绑定 双路） | ☑ **B17 已出（代码 `a5517fa` + 门后修一条 `732c1f8`，Actions run #66 全绿）** = **对外那条管线第一次被真注册客户走通**，路上修掉两处一直存在的**静默**缺陷：① **`rc.exe` 的发现面太窄**（`driver_link.cpp`）—— 旧写法只认 `WindowsSdkDir` 环境变量与 `C:\Program Files (x86)\Windows Kits\10\bin`，SDK 装在别的盘（本机 = `D:\Windows Kits\10`，用户确认）就**静默不嵌**资源：实测 BASE 产出的 DLL 连 `.rsrc` 段都没有（数据目录 2 = `(0,0)`，NEW = `(4880)`/`(2504)`）⇒ 注册表里没有 TypeLib 项、外部工具按 LIBID 找不到库；改成与套件同一套探测（环境变量 → Program Files → 盘符 → PATH，目录内取版本号最大者，TypeLib 与版本信息两处共用），且"找不到 rc.exe"不再藏在 `--verbose` 后面；② **`vb6_UnregisterTypeLib` 的 `UnRegisterTypeLib` 实参顺序写反**（原型 `(libID, wVerMajor, wVerMinor, lcid, syskind)`，旧写法把 syskind 塞进 lcid 槽）⇒ 两个键都找错、函数失败，而本函数无条件返回 S_OK ⇒ **每次反注册都静默漏掉整棵 TypeLib 键**（实测：CLSID/ProgID 清干净、`TypeLib\{libid}` 还在）；按原型给对顺序并取库自己声明的 lcid/syskind（中性库记在 0x0409 下；x64 库 `syskind=3`、x86 库 `=1`，`.build/b17_tlbattr` 直接读 TLIBATTR 得到）。判据五条全对上读数：① 外部三条验收 —— `cc_dll_external_activate[_x86]`（注册四项 + `PROGID_LOOKUP same=yes` + `COCREATE_DISP ptr=OK` + `CALL=Twice result=42` + `COCREATE_IFACE` + `VTBL_GET_AFTER=42` + `CLEAN_*` 三类键 `gone`）与 `cc_dll_late_client`（**另一个进程**的 C3 客户 EXE：不引用 DLL，`CreateObject` + 晚绑定调用，`EXT1:OK`/`EXT2:OK`）；② 早绑定按库里 `oVft=(3+槽)*指针宽` 直调得 42，x86 + x64 双验；③ 注册表可清理（反注册后 CLSID/ProgID/TypeLib 三类键都不留，用例可重复跑 —— 修缺陷②之后才成立）；④ 存量行为不变（注册写同一张服务器表；`--emit-c` 17 件逐字节全同，全产物 A/B 只差 `rtl/vb6comserver.c` 的 10 行、全在反注册那段）；⑤ canonical 返回形状与跨世界身份合一按测量②**不做**。**晚绑定的边界**：契约成员是 `Private` ⇒ 类的默认面上按名点不到（`NAMES=Ping hr=0x80020006`，VB6 语义的应有读数，正面钉住）；为此 `CImpl.cls` 加了一个公有成员 `Twice`（B13b 那条 `methodCount` 针 0→1），于是同一类**两个面**并存：默认面走 `IDispatch` 晚绑定、接口面走契约槽早绑定。 | `a5517fa` + `732c1f8` | 门 #66（见 GATE_BASELINE）+ `.build/b17_ab_all.py`（A 段 `--emit-c` 17 件逐字节全同；B 段只差 `rtl/vb6comserver.c` 10 行；C 段资源目录：NEW 带不带 `WindowsSdkDir` 都嵌、BASE 不带就不嵌）+ 负控 `.build/b17_negctl.ps1` 喂 `pre_b17_C3.exe` ⇒ **pass=0 fail=2**（红的正是 `CLEAN_TYPELIB=STILL`）+ 三条新用例 `.build/b17_cases.ps1` ⇒ `pass=3 fail=0`（x64/x86 冒烟 + 外部客户）+ 门后补一条**既有潜伏缺陷**（`732c1f8`）：第一次门在既有用例 `ax_dll_dispatch_invoke` 上报 `exit=0xC0000374`（堆损坏），定位到 `ComObj_Invoke` 的 `coercedArgs`（`CoTaskMemAlloc` **不零**）收尾对每个元素 `VariantClear`，“原样传下去”那一支从没 `VariantInit` 过；A/B（把该数组填成 vt=VT_BSTR + 野指针的临时编译器）**恰好停在同一读数处**、清零版整趟干净；修为分配后整段清零（本机 12 次不复现 = 随堆状态偶发，非本批引入；同一次旧门的重跑又是绿的，也是这条的侧面证据） |
-| B18 | P7 | 端到端示例工程 + 全量回归 + 设计文档归档（018 附录或新 023）+ STATUS=ALL_DONE | ☐ | | |
+| B18 | P7 | 端到端示例工程 + 全量回归 + 设计文档归档（018 附录或新 023）+ STATUS=ALL_DONE | ☑ **B18 已出（代码 `0413bb9`，Actions run #68 全绿）—— 本线收口** = ① **端到端示例 `tests\cc_demo\`**：同一份源集合编两种形态（VB6 常规做法）——`DemoExe.vbp` 语言侧 `DEMO1..DEMO12`（组名当类型 `As Shape`/`New Shape`、契约成员**只能经接口变量**调、公有成员直调、`Overrides` 虚派发、`MyBase` 去虚化、继承来的公有成员、`Protected` 家族内可用、基类型变量持有派生实例不切片、`Via` 三个槽全转发、工程内 `CreateObject(ProgID)` 改写、`TypeOf`），`DemoDll.vbp` 对外侧由**另一个进程**的 C3 客户（`DemoClient.vbp`，不引用 DLL）`CreateObject("DemoDll.Shape")` 激活；② **归档 `ai\027-接口继承CoClass实施收口.md`**（018 保持原样）：交付总览表、语言/COM 两侧要点、**v1 边界 12 条**（逐条现状+影响）、怎么验（用例名/命令/探针与助手清单）、记录索引；手册 `CoClass 语句.md` 加示例指引；③ **写示例撞到并记下**两条 v1 边界（派生类自己 `Implements` 新式接口 = `VB3022`；EXE 的 CoClass 块不能 `[ComCreatable]` = `VB3033`）与一条易误读现象（`New <名字>` 不在工程内 ⇒ 静默按注册表创建、运行期 429 ⇒ `.vbp` 的 `Class=`/`Module=` 清单是唯一事实面），都进 **D65**；④ 四条新用例进 vbp 回归（`cc_demo_exe[_x86]` 走 `Test-Vbp`；`cc_demo_dll_external[_x86]` 走 `Test-ComActivateClient`，**注册与反注册成对**并断言三类键 `gone`，本机跑完实测注册表查无残留）；⑤ **本批零编译器改动**（`.build/C3.exe` 与 BASE 同 md5）⇒ 逐字节/A-B 护栏由"编译器没变"这条代替（先例 B14）。 | `0413bb9` | 门 #68（8 job 全绿）+ `.build/b18_cases.ps1` 四条 `pass=4 fail=0` + 注册表残留核查（DemoDll/CoDll 的 CLSID/ProgID/TypeLib 全 clean） |
 
 > 批次可按实施中发现的耦合度合并/拆分，但**阶段范围不得越界**；每次运行只推进能各自独立过门的批。
 
@@ -2938,6 +2926,41 @@ D54-② 那条"类变量永不 Release"不变式（对外一旦发 IDispatch/IUn
    `memset(..., 0, argc * sizeof(VARIANT))`。这条也顺带解释了"同一批二进制在 CI 上偶发红"这类历史现象
    的一种来源：**未初始化内存 + 收尾清理**的组合。
 
+**D65（B18 收口：端到端示例、写示例时撞到的两条 v1 边界、归档与验收面）**
+
+1. **端到端示例的形状（`tests\cc_demo\`）**：**同一份源集合**编两种形态 —— 这是 VB6 的常规做法
+   （同源多工程），也让"语言侧"与"对外侧"各有承载面：
+   - `DemoExe.vbp`（Type=Exe，`Startup="Sub Main"`）：`IDemoShape`（接口宿主）+ `DemoShape`
+     （`Implements IDemoShape`，含一个公有成员 `Twice`）+ `DemoHolder`（`Implements … Via m_h`）
+     + `DemoBase`/`DemoDerived`（`Inherits` + `Overrides` + `Protected` + `MyBase`）+ `DemoBlocks.bas`
+     （CoClass 块）→ `DEMO1..DEMO12` 各钉一个行为：组名当类型（`As Shape`/`New Shape`）、契约成员**只能经接口
+     变量**调、公有成员可直调、覆盖后的虚派发、`MyBase` 去虚化、继承来的公有成员、`Protected` 家族内可用、
+     基类型变量持有派生实例不切片、`Via` 委托三个槽全转发、工程内 `CreateObject(ProgID)` 改写、`TypeOf`。
+   - `DemoDll.vbp`（Type=DLL，同源 + `DemoBlocksDll.bas` 的 `[ComCreatable(True)]`）→ 注册后由**另一个进程**的
+     C3 客户 `DemoClient.vbp`（不引用 DLL）`CreateObject("DemoDll.Shape")` 调公有成员。
+2. **写示例撞到的两条 v1 边界（都是"设计如此"，记下来免得下次再撞）**：
+   ① **派生类自己 `Implements` 新式接口 → `VB3022` 拒绝**（第一版示例把 `Inherits` 与 `Implements` 写在同一个
+   类上，编译期就挡住了）。所以示例把**继承链与接口链拆成两条**：`DemoBase/DemoDerived` 与
+   `IDemoShape/DemoShape/DemoHolder` 互不相干。这条边界的另一半（经继承满足的接口契约、继承来的 `Public`
+   字段对外暴露）此前已在 v1 边界清单里。
+   ② **EXE 工程的 CoClass 块不能写 `[ComCreatable(True)]`**（`VB3033`：只有 ActiveX DLL 才注册 COM 服务器），
+   所以块源按工程类型分两份 —— 这本身也是"EXE 只保留组内那一半"的正面证据（EXE 侧仍拿到
+   `activated in-project: … 1 CreateObject rewrite(s)`）。
+3. **一处容易误读的现象（记下来）**：`New <名字>` 里的名字若**不在本工程**（示例第一版把
+   `DemoDerived.cls` 忘在 `.vbp` 外），编译器不报错，而是按 VB6 语义当成 `New <ProgID>` 走**注册表创建**
+   ⇒ 运行期 `429`（弹模态框；套件里表现为超时）。**判据**：`.vbp` 的 `Class=`/`Module=` 清单是唯一事实面，
+   漏登记 = 静默换语义。示例的四条用例（`cc_demo_exe[_x86]`、`cc_demo_dll_external[_x86]`）现在就是这条的护栏。
+4. **归档**：`ai\027-接口继承CoClass实施收口.md`（新文档，`018` 保持"外部讨论存档"一字未改）——
+   交付总览表（能力 → 用户写法 → 批次/代码）、语言/COM 两侧要点、**v1 边界清单**（12 条，逐条写现状与影响）、
+   怎么验（用例名 + 命令 + 探针/助手清单）、记录索引（022 的 D1–D64 与手册四页）。手册 `CoClass 语句.md`
+   末尾加了示例工程指引。
+5. **验收面（四条新用例进 vbp 回归）**：`cc_demo_exe`(x64) / `cc_demo_exe_x86` 走 `Test-Vbp`（13 条 needle）；
+   `cc_demo_dll_external`(x64) / `_x86` 走 `Test-ComActivateClient` —— **注册与反注册成对**（探针调
+   `DllRegisterServer`/`DllUnregisterServer`，且断言 `CLEAN_CLSID/CLEAN_PROGID/CLEAN_TYPELIB=gone`），
+   所以这几条在干净 runner 上可重复跑、不留键（本机跑完实测注册表三类键都查无）。
+6. **本批零编译器改动**：`git status src/` 为空、`.build/C3.exe` 与 BASE 同 md5 ⇒ 逐字节/A-B 护栏由
+   "编译器没变"这条代替（先例：B14 那一格）。
+
 ## 运行日志
 
 - 2026-09-23 建表：范围确认（含完整COM）、规范文档 018 入库、现状盘点完成。
@@ -3190,3 +3213,5 @@ D54-② 那条"类变量永不 Release"不变式（对外一旦发 IDispatch/IUn
 - 2026-09-25 07:20–08:34 **B16 一格出完并过门（Actions run #62，head `578faa4`）**：开工先做三件测量（读数与裁决落 **D63**）—— ① **x86 调用约定今天不成立**：`--arch x86 --emit-c` 的产物里一个约定修饰都没有（`grep -c __stdcall` **BASE 0 / NEW 21**，`cc_dll`），而 COM 规范是 `CC_STDCALL` ⇒ 薄面整条 canonical 化；② **canonical 化的波及面**靠分类护栏逐条逼出来（`__stdcall` 只出现在声明/实现新式接口的工程、薄面那一对 `vb6_iv_thin_/vb6_iv_claim_` 只出现在**有接口宿主**的工程、服务器表每个 coclass 行多 `ifaceThinPtr`/`instanceClaimRelease` 两个字段 = 新式宿主填函数名、存量填 `NULL`），`cc_id` 只声明接口没有宿主 ⇒ 只有 `__stdcall`（护栏因此把 `EXPECT_FIRING` 与 `EXPECT_THIN_HOSTS` 分开写死）；③ **位数 flag 拍板跟 `--arch` 走**并把代价量到字节：默认架构存量库**逐字节不变**（md5 同 `87d34673`、diffbytes=0），`--arch x86` 只差 **32 个字节**（@20 头部位数声明字 `41`/`43` + 31 处布局字），且两架构的差集与 BASE→NEW 的差集**同址**、x64/x86 两枚读端读回的值逐项相同。实施**零布局改动**（D19 不入视野）：`cgen_iface_vtbl.cpp`（`__stdcall` + 薄面出入口）、`cgen_util_dllentry_collect/prelude/tables.inc`（表行两个新字段）、`vb6comserver.{h,c}` + `vb6rtl_class_com.h`（接口 IID 的 QI 交薄指针、包装器把底座引用交还最后一个薄引用）、`typelib_builder.{hpp,cpp}`（如实发契约 + flag 跟位数）、`driver_codegen_dll_typelib.inc`（喂 `IfaceView::slots`，= D62-2 认定的唯一事实面）。判据五条全上读数：新探针 `tests\tools\tlb_slots.cpp` 升格入库 + 助手 `tests\tlb_contract.ps1` 两条契约用例（x64 `oVft=24/32`、x86 `oVft=12/16`，**x86 那条必须用 x86 读端**）+ `tests\tools\disp_probe.c` 长一条按库里形状**直调 vtable 槽**的支路（`VTBL_GET_BEFORE=0` → 槽 3 写 21 → `VTBL_GET_AFTER=42`，x64 与 x86 各一条真跑用例）+ `QI_EXTRA same=yes→no` 的**故意翻面**（接口 IID 现在交薄指针）。护栏：`--emit-c` 17 件 `violations=0`、全产物 A/B `unclassified=0`（只有 `cc_dll` 的 `.tlb` 1484→1624 的预期变化）、负控在 `pre_b16_C3.exe` 上 `pass=0 fail=2`（四条 needle 全 miss + 反面断言 `cFuncs=0` 命中）。**三条流程教训**（写进 D63-8）：套件在 CI 上用 pwsh 7（`Join-Path` 4 参形式在 PS 5.1 下静默给空串 ⇒ 本地复现也得用 pwsh）、套件 `$env:LIB` 是 x64 在前（x86 助手链接要临时换 `$msvc.LibX86`，否则 LNK4272 + 10 个未解析外部）、探针直调薄指针的槽要**先解一层**（`*(probe_ivtbl**)p`；`((probe_ivtbl*)p)->Got(p)` 是拿指针当槽表，实测读到堆外当场崩）——顺带：崩溃型探针必须 `setvbuf(stdout, NULL, _IONBF, 0)`，否则块缓冲把已打印的读数全吞掉。行里第 4 项（DllRegisterServer 一族接线）经读码 + A/B 判定**无需新改动**（注册写入读同一张服务器表、身份自 B13b 起走唯一出口；`.def`/exports/`.rc` 一字未动），真注册的外部端到端验收归 **B17**。收线 exe（= 门 head 的树）md5 `90129adbb5dbb3c5fca14fcc872dc0f2`，已存成 `.build/pre_b17_C3.exe` 作下一批 BASE。
 
 - 2026-09-25 08:40–10:20 **B17 一格出完并过门（Actions run #66，head `732c1f8`）**：开工按批次要求先做两件测量（读数与裁决落 **D64**）—— ① **注册与外部激活逐级读数**：`DllRegisterServer` 那一级通（CLSID/ProgID/InprocServer32/ThreadingModel 四项都在），`CLSIDFromProgID` + `CoCreateInstance(IID_IDispatch)`（= `CreateObject` 那条路）通，**断在类型库那一级**（`LoadTypeLibEx` 读不到内嵌库 ⇒ 注册表里没有 TypeLib 项）；挖下去是**两条静默缺陷**：`rc.exe` 的发现面太窄（旧写法只认 `WindowsSdkDir` 与 `C:\Program Files (x86)\…`，而本机 SDK 在 `D:\Windows Kits\10` ⇒ 类型库与版本信息**都不嵌**，BASE 产物连 `.rsrc` 段都没有）与 `UnRegisterTypeLib` 的**实参顺序写反**（`lcid`/`syskind` 互换 ⇒ 反注册静默漏掉整棵 TypeLib 键、而 RTL 无条件返回 S_OK）。② **早绑定外部读数**：注册过的、由系统装载的 DLL 上按接口 IID 激活拿薄指针、按库里 `oVft` 直调契约槽得 42（x64 + x86）⇒ 顺带裁决 **canonical 返回形状不做**（真按 oVft 直调的客户已经能用）。实施 = 两处修复 + `tests\tools\com_act_probe.c`（升格入库）+ 助手 `tests\com_activate.ps1`（整趟冒烟 / 注册→跑外部客户→反注册）+ 夹具 `tests\cc_dll_client\`（C3 编出来的**外部**客户 EXE，走真实注册表链路）+ `CImpl.cls` 加一个公有成员 `Twice`（晚绑定要有东西可点；B13b 的 `methodCount` 针 0→1）。三条新用例进 vbp 回归（x64/x86 冒烟 + 外部客户）。护栏：`.build/b17_ab_all.py` 三段 —— `--emit-c` **17 件逐字节全同**、全产物 A/B 只差 `rtl/vb6comserver.c` 的 10 行（全在反注册那段）、**资源目录读数**（NEW 带不带 `WindowsSdkDir` 都嵌 = 修好了；BASE 不带就不嵌 = 缺陷现场）；负控 `.build/b17_negctl.ps1` 喂收线前的 `pre_b17_C3.exe` ⇒ **pass=0 fail=2**，红的正是 `CLEAN_TYPELIB=STILL`。**三条教训写进 D64-7**：产品二进制跨构建不可比（`link.exe` 写 PE 时间戳，同一个 exe 连编两次 md5 都不同 ⇒ 判据要看资源目录/emitted 文件）；探针的模式词别写死在 `argv[5]`（`… <progid> reg` 会静默退化成整趟跑，注册完顺手反注册 ⇒ 下一个进程再激活就 `429`）；GUI 子系统 exe 的未处理运行期错误会弹**模态框**（套件里表现为"跑超时被杀"）⇒ 客户夹具要 `On Error Resume Next` 把失败落到读数上（本机手工跑时真被这个框挡过一次）。**门后补一刀**：第一次门（#65）的 vbp job 在既有用例 `ax_dll_dispatch_invoke` 上报 exit=0xC0000374（堆损坏），读码 + A/B 把它定位成 `ComObj_Invoke` 的 `coercedArgs`未初始化就被 `VariantClear`（本机 12 次不复现 = 随堆状态偶发，非本批引入），修为整段清零（`732c1f8`）后重跑门 #66 全绿。收线 exe（含该修复）md5 `38f247e30ed5ac3513366c9733bf4dda`，已存成 `.build/pre_b18_C3.exe` 作下一批 BASE。
+
+- 2026-09-25 10:30–11:35 **B18 收口批出完并过门（Actions run #68，head `0413bb9`）—— 本线全部交付，`STATUS = ALL_DONE`**：本批**零编译器改动**（`git status src/` 空、`.build/C3.exe` 与 BASE 同 md5 ⇒ 逐字节/A-B 护栏由"编译器没变"这条代替，先例 B14），交付三样：① **端到端示例 `tests\cc_demo\`** —— 同一份源集合编两种形态（VB6 常规做法）：`DemoExe.vbp` 语言侧把整条线用一遍（`IDemoShape` 接口宿主 + `DemoShape` 的 `Implements` + `DemoHolder` 的 `Via` 委托 + `DemoBase`/`DemoDerived` 的 `Inherits`/`Overrides`/`Protected`/`MyBase` + `CoClass Shape` 块 + `As Shape`/`New Shape`/工程内 `CreateObject` 改写/`TypeOf`），`DEMO1..DEMO12` 各钉一个行为、x64+x86 双跑；`DemoDll.vbp` 对外侧（同源 + 块里 `[ComCreatable(True)]`）注册后由**另一个进程**的 C3 客户 `DemoClient.vbp`（不引用 DLL）`CreateObject("DemoDll.Shape")` 调公有成员。② **归档 `ai\027-接口继承CoClass实施收口.md`**（`018` 保持"外部讨论存档"一字未改）：交付总览表、语言/COM 两侧要点、**v1 边界 12 条**（逐条现状 + 影响）、怎么验（用例名/命令/探针与助手清单）、记录索引；手册 `CoClass 语句.md` 加示例指引。③ **写示例撞到的三条读数进 D65**：派生类自己 `Implements` 新式接口 = `VB3022`（示例因此把继承链与接口链拆成两条）、EXE 的 CoClass 块不能写 `[ComCreatable(True)]` = `VB3033`（块源按工程类型分两份，EXE 侧仍拿到 in-project 激活）、`New <名字>` 不在工程内时编译器**不报错**而是按 VB6 语义当 `New <ProgID>` 走注册表创建 ⇒ 运行期 429（第一版示例把 `DemoDerived.cls` 忘在 `.vbp` 外就踩到了；`.vbp` 的 `Class=`/`Module=` 清单是唯一事实面）。验收：四条新用例进 vbp 回归 —— `cc_demo_exe[_x86]`（`Test-Vbp`，13 条 needle）+ `cc_demo_dll_external[_x86]`（`Test-ComActivateClient`：注册 → 跑外部客户 → 反注册，并断言 `CLEAN_CLSID/CLEAN_PROGID/CLEAN_TYPELIB=gone`），本机 `.build/b18_cases.ps1` 四条 `pass=4 fail=0`，跑完实测注册表里 DemoDll 与 CoDll 的 CLSID/ProgID/TypeLib 三类键**全部查无**（可重复跑、不脏机器）。收线 exe md5 `38f247e30ed5ac3513366c9733bf4dda`（= BASE）。
