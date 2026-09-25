@@ -1167,6 +1167,11 @@ if ($Category -in @("all", "run", "vbp")) {
     # specialization clone (two specializations coexist; self-referential LNode).
     Test-Vbp "gen_cls" "$Tests\gen_cls\gen_cls.vbp" @("GC1=42", "GC2=box:42", "GC3=hey", "GC4=box:hey", "GC5=33", "GC6=y", "GCLS-DONE")
 
+    # Fix 194: 控件属性的字符串写入值必须转 BSTR (控件数组元素具名属性曾生成
+    # `vb6_SetControlText(hwnd, (BSTR)ListCount)` 直接段错误), 且 List(j) 参与
+    # 字符串相等比较要按 BSTR 处理 (RTL 声明是 void* → 曾判成 VariantObject, 比较恒假)。
+    Test-Vbp "ctrlprop" "$Tests\ctrlprop\CtrlProp.vbp" @("CP1=2", "CP2=2", "CP3=1", "CP4=2", "CP5=2", "CTRLPROP-DONE")
+
     Test-Vbp "M6Test" "$Tests\M6Test.vbp" @("M6A:OK", "M6B:OK", "M6C:OK", "M6D:OK", "M6 PASSED")
     Test-Vbp "modulemethod" "$Tests\test_modulemethod.vbp" @("30", "21")
 

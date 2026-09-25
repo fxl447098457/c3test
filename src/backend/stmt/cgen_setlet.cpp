@@ -89,6 +89,7 @@ void CCodeGen::visit(LetStmt& node) {
                         std::string weVarName = (itOrig != knownWithEventsCtrlOrigNames_.end()) ? itOrig->second : objLower;
                         emitExpr(*node.value);
                         std::string valExpr = std::move(lastExpr_);
+                        valExpr = controlPropValueExpr(writeFn, valExpr, *node.value);  // Fix 194
                         c_.emitLine(writeFn + "(" + weVarName + ", " + valExpr + ");  /* Let WithEvents ctrl prop */");
                         return;
                     }
@@ -100,6 +101,7 @@ void CCodeGen::visit(LetStmt& node) {
                 if (!writeFn.empty()) {
                     emitExpr(*node.value);
                     std::string valExpr = std::move(lastExpr_);
+                    valExpr = controlPropValueExpr(writeFn, valExpr, *node.value);  // Fix 194
                     c_.emitLine(writeFn + "(" + makeCtrlHwndArg(objLower, itCtrl->second) + ", " + valExpr + ");  /* Let Control Property */");
                     return;
                 }

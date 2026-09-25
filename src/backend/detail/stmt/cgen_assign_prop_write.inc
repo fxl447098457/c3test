@@ -313,11 +313,8 @@
                 if (!writeFn.empty()) {
                     emitExpr(*node.value);
                     std::string valExpr = std::move(lastExpr_);
-                    // M22: Text/Caption default prop writes need BSTR value
-                    if (writeFn.find("SetControlText") != std::string::npos ||
-                        writeFn.find("SetMenuCaption") != std::string::npos) {
-                        valExpr = wrapToBSTR(valExpr, *node.value);
-                    }
+                    // M22: Text/Caption default prop writes need BSTR value (Fix 194: 收敛到统一入口)
+                    valExpr = controlPropValueExpr(writeFn, valExpr, *node.value);
                     c_.emitLine(writeFn + "(" + makeCtrlHwndArg(tgtLower, itCtrl->second) + ", " + valExpr + ");  /* default prop: ." + std::string(defaultProp) + " */");
                     return;
                 }
@@ -338,6 +335,8 @@
                         std::string weVarName2 = (itOrig2 != knownWithEventsCtrlOrigNames_.end()) ? itOrig2->second : cIdent(tgtId2.name);
                         emitExpr(*node.value);
                         std::string valExpr2 = std::move(lastExpr_);
+                        // Fix 194: 原缺 BSTR 转换 (数值 RHS → 指针解引用 / 静默无效)
+                        valExpr2 = controlPropValueExpr(writeFn2, valExpr2, *node.value);
                         c_.emitLine(writeFn2 + "(" + weVarName2 + ", " + valExpr2 + ");  /* WithEvents ctrl default prop: ." + std::string(defaultProp2) + " */");
                         return;
                     }
@@ -361,12 +360,8 @@
                     std::transform(mnuLower.begin(), mnuLower.end(), mnuLower.begin(), ::tolower);
                     c_.emitLine(writeFn + "(" + makeCtrlHwndArg(mnuLower, info.ctrlType) + ", " + lastExpr_ + ");  /* With menu prop write */");
                 } else {
-                    // M22: Text/Caption prop writes need BSTR
-                    { std::string _v = lastExpr_;
-                      if (writeFn.find("SetControlText") != std::string::npos || writeFn.find("SetMenuCaption") != std::string::npos) {
-                          lastExpr_ = wrapToBSTR(_v, *node.value);
-                      }
-                    }
+                    // M22: Text/Caption prop writes need BSTR (Fix 194: 收敛到统一入口)
+                    lastExpr_ = controlPropValueExpr(writeFn, lastExpr_, *node.value);
                     c_.emitLine(writeFn + "(" + tempVar + ", " + lastExpr_ + ");");
                 }
                 return;
@@ -377,7 +372,9 @@
             std::string writeFn = getControlPropWriteFn(info.ctrlType, wmExpr.memberName);
             if (!writeFn.empty()) {
                 emitExpr(*node.value);
-                c_.emitLine(writeFn + "(" + info.ctrlOrigName + ", " + lastExpr_ + ");");
+                // Fix 194: 原缺 BSTR 转换 (数值 RHS → 指针解引用 / 静默无效)
+                std::string valExpr = controlPropValueExpr(writeFn, lastExpr_, *node.value);
+                c_.emitLine(writeFn + "(" + info.ctrlOrigName + ", " + valExpr + ");");
                 return;
             }
             break;
