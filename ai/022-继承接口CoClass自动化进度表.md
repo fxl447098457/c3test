@@ -5,7 +5,7 @@
 > 规范输入: `ai/讨论记录/018-接口继承与CoClass设计思路.md`（含 tB 文档要点与分阶段设计思路全文）。
 
 STATUS: ALL_DONE             # NOT_STARTED | DESIGN | BUSY | IDLE | ALL_DONE
-LAST_RUN: 2026-09-25T23:25:00+08:00   # 本轮 = **B21（待拍板 5：布尔的两套读数）出完并过门 = 代码 `2ddcc8b`，门 Actions run #83（head `2ddcc8b`，8/8 job 全绿）** + 顺手把 **待拍板 6 量成 D71**（B22 的开工地图，未动代码）。
+LAST_RUN: 2026-09-26T02:36:00+08:00   # 本轮 = **029 内置控件线第一批 C29-1a（Shape / Line 的创建那一刀）出完并过门 = 代码 `5b37b4e`，门 Actions run #84（head `5b37b4e`，8/8 job 全绿）**。进度与读数记在 `ai\029-内置控件补全计划书.md` §九，本表只挂指针 + 换 GATE_BASELINE。
                # B21 交付一笔 = `2ddcc8b`（cgen 侧 15 文件 + 用例 32 条 + 手册 Boolean 页 + 分类护栏脚本
                # `.build\b21_emitc_guard.py`）。根因是两条不是一条、护栏 RED 一次的教训、以及顺带量出的 `Print #`
                # 那条，全在 **D70**；待拍板 5 就此收口，新撞出的一条记为待拍板 7（未拍板、未动手）。
@@ -41,17 +41,20 @@ LAST_COMMIT: 代码批 = 0413bb9(B18)、732c1f8(B17 门后修堆损坏)、a5517f
                规则沿用：push 只推 `github/dev`；门跑 Actions（`.build/wait_run2.py <sha> <秒>` 盯）；`.build` 里的
                临时 `.ps1` 一律 ASCII only；用例文件按同目录邻居的编码/行尾（`.bas`/`.vbp` = UTF-8+CRLF，
                `tests\*.ps1` = BOM+CRLF）。
-GATE_BASELINE: (Actions 级) c3test run **#83 [dev] = completed/success**（head `2ddcc8b` = B21 那一笔，8/8 job 全绿 =
-               Build C3.exe + Tests(smoke/syntax/vbp/compile/asm/bas#1/bas#2)，23:05→23:19 共 14.6 分钟）。
-               **CI 的分类逐条读数仍取不到**：PAT 无 `actions:read` ⇒ job 日志端点 403；本轮改用
-               `GET /repos/…/actions/runs/36151881443/jobs`（这个端点不要 `actions:read`）拿到八条 job 的
-               `status/conclusion` 与 run 的 `head_sha` ⇒ 门结论现在是**逐 job 核过**的，不再是 run 级一把。
-               本机同二进制（`.build\b21_C3.exe`，md5 `9456577b`；BASE = `pre_b21_C3.exe`，md5 `70f5b98d`）的读数：
-               `test_bool_display` 与 `test_bool_display_x86` 走真 harness 各 PASS、`test_types.bas` 手工跑读数已改对、
-               `-Category syntax` 129/0、30 件工程 `--emit-c` 分类护栏 OK（只 4 行布尔变化）。
-               基线相对上一版（run #82，head `c2f7317`）新增的用面：`test_bool_display[_x86]`。
-               另：他人那一支的 run **#81**（head `a93d97e`，Fix 190/194–197）也已 completed/success —— 本轮开工先把
-               `github/dev` 合回本地（合并基线 `8174219`，两侧改动不相交）。上一版基线 = run #82（head `c2f7317`，B20）。
+GATE_BASELINE: (Actions 级) c3test run **#84 [dev] = completed/success**（head = 029 线第一批 C29-1a 那一笔，
+               **8/8 job 全绿** = Build C3.exe + Tests(smoke / syntax / vbp / compile / asm / bas#1 / bas#2)，
+               18:08 起、约 27 分钟，逐 job 的 status/conclusion 用 `GET /repos/…/actions/runs/{id}/jobs` 核过
+               （该端点不要 `actions:read`；job 日志端点仍旧 403 ⇒ 门的分类读数取不到逐条日志，
+               但结论不再是 run 级一把）。本机同二进制的读数：`[VBP] ctrlshape` 与 `ctrlshape_x86` 走真 harness
+               各 PASS，手工跑 x64 与 x86 各 21/21，负控喂 BASE 二进制（`b21_C3.exe`，md5 `9456577b`，即 HEAD 那一版）
+               21 条全翻红，30 件存量工程 `--emit-c` 与 BASE **逐字节全同**（changed_lines=0）。
+               **本机 -Category vbp 一轮 PASS=42 FAIL=15 SKIP=1 不是回归**：那 15 条里十三条是探针/读手没建成
+               （`no probe` / `no reader x64|x86`），另两条是要注册表与非 ASCII 控制台的用例
+               （`nonascii_missing_frx`、`cc_dll_identity_single_source`）。
+               第二次本机跑用 vcvars 灌过 PATH 仍一字不差复现，而 CI 的 vbp job 全绿 ⇒ 记为本机环境噪声，
+               门读数一律以 CI 为准。基线相对上一版（run #83，head = B21）新增的用面：`ctrlshape[_x86]`。
+               另：run #83（B21 布尔那一笔，8/8 job 全绿）与更前面的 #82（B20）仍是各自批次的门；#81
+               （head `a93d97e`，他人那一支 Fix 190/194-197）也已 completed/success。
 ```
 
 > 重入保护：若运行开始时 STATUS=BUSY 且 LAST_RUN 距今不足 55 分钟，说明上一次运行可能仍在进行——本次**立即结束，不做任何修改**。
@@ -3373,3 +3376,8 @@ D54-② 那条"类变量永不 Release"不变式（对外一旦发 IDispatch/IUn
   ② **全仓库零 `WM_NOTIFY`**（`WM_NOTIFY` / `NM_` / `LVN_` / `TVN_` / `TBN_` 四类关键字零命中）⇒ ListView / TreeView / Toolbar / StatusBar / SSTab 这五个通知型控件共用一条还没建的通道，硬前置排在 C29-4。
   ③ 两条「顺手就答掉」的待量：**产物不带 application manifest**（`Microsoft.Windows.Common-Controls` 全仓零命中 ⇒ 原生控件只能拿 comctl32 v5.82 行为，是否补一份 `.rc` manifest 变成决策 D5，建议独立成 C29-M 不混进控件批次）；**`For Each` 今天只吃数组**（`cgen_control.cpp:151` 起三类判定，`As Collection` 有声明没有枚举）⇒ 集合对象的 `For Each n In TreeView1.Nodes` 用「按显示序返回对象数组快照」就能通，不必做 `_NewEnum`（顺带记下「Collection 也不能 For Each」这条既有缺口）。
   **要用户拍的板共五条**（D1 成员对象表示法 / D2 事件参数类型名收不收 `MSComctlLib.` 前缀 / D3 GUI 判据手法与探针入册 / D4 Data + OLE 不做 / D5 comctl 版本），批次表 C29-0..C29-9 一批一扇门。本轮零源码改动 ⇒ 按「没源码不进 CI」不推 `github/dev`。
+- 2026-09-26 01:05–02:40 （用户重申目标后开工）**029 内置控件线第一批 C29-1a 出完并过门 = 代码 `5b37b4e`，门 Actions run #84（8/8 job 全绿）**：把「RTL 写好一半、创建那一刀没接上」的 Shape / Line 接上 —— `controlTypeToWin32Class` 缺那两格 ⇒ 控件一路落到「不可见控件跳过」，句柄永远 NULL，屏幕上什么都没有而且一声不响（取证法：往 `tests\test_form\Form1.frm` 上摆五个这类控件再 `--emit-c`，`vb6_CreateControl(` 仍旧只有原有那 3 次）。开工先按 022/B21 那条口径取 BASE（工作树当时已含本批一部分改动 ⇒ 导 patch、回退自己那几个文件、构建 BASE、回灌、构建 NEW），BASE 复用 `b21_C3.exe`（md5 9456577b = HEAD 那一版）。
+  **同批堵掉的三条同族洞**（都是「两套代码各写一遍、只有一套更新」）：① 顶层控件与容器子控件是两条创建路，子控件那条一条外观属性都不发；控件数组（`lamp(0)`/`lamp(1)`，Shape 手册里「指示灯」就是这种用法）的设计期初始化硬写 `vb6_hwnd_<名>`，会打到空句柄上 ⇒ 抽成 `emitShapeLineProps` + `lineRectFromEndpoints` + `ctrlHwndExprForInit` 两条路共用；② `ctrl.Left` 被 VB 内置函数名 `Left` 带偏成 String（Fix 081i 给 UDT 记过同一个坑），于是 `If Line1.Left = 600` 生成 `vb6_StrCmp(整数, BSTR)` ⇒ 把 600 当指针解引用，**实测就是段错误**，不是读数偏差；③ `borderstyle` 在属性表里被通用分支先抢走（通用那条查在类型 switch 之前）⇒ `Line1.BorderStyle` 读的是窗口边框样式(0/1)而不是画笔线型(0..6)。另两条纯运行时的：`SetPropW` 存 `(HANDLE)0` 与「从没设过」不可分辨（`FillStyle=0`/`BorderStyle=0` 读回变默认 1）⇒ 三处改存 val+1；旧的 `if (borderS <= 0) borderS = 1` 让 `PS_NULL` 分支成死码，一并去掉。Line 的 X1/Y1/X2/Y2 定口径为**容器缇值**、窗口矩形 = 四端点包围盒、赋端点连窗口一起搬。
+  **判据与护栏**：`tests\ctrlshape\`（CsApp.vbp + CsForm.frm，21 条读数：几何落位 / 设计期整数属性 / 运行期读写回路 / 端点搬窗口 / BorderWidth 强制实线 / 容器子控件 / 控件数组按槽位），窗体 `Form_Load` 打完 `Unload Me` 自退 ⇒ 走现成 `Test-Vbp` 拿 stdout 针，登记 `ctrlshape[_x86]`；x64 与 x86 各 21/21，负控喂 BASE 二进制 21 条全翻红，`.build\c29_emitc_guard.py` 30 件存量工程 `--emit-c` 与 BASE 逐字节全同（changed_lines=0）。手册 `Shape 控件` / `Line 控件` 两页各加一节「本项目的实现口径」（缇与像素的分界、无事件仍然成立、以及三项没落地的属性）。029 §九记全量读数。
+  **两处本轮踩到的工具/流程坑（都已写进记忆与 029）**：① **RTL 的 .c 改动必须重建 C3.exe 才生效** —— RTL 是以资源嵌在编译器里的（`src\driver\rtl_embedded.hpp` + `c3rtl.rc`，链接期解出到临时目录再编），只改 RTL 就跑测试读到的是旧运行时，症状正好是「代码写了不出现」；② 自己起的本地 `-Category vbp` 把 `C3.exe` 锁住 ⇒ 随后的 `build.bat` 撞 `LNK1168`（exit 1168），按纪律等套件跑完再构建，没动任何进程。另外记一条**本机 vbp 噪声**：`-Category vbp` 本机跑 PASS=42 FAIL=15，那 15 条是探针/读手没建成加两条要注册表/非 ASCII 控制台的用例，灌过 vcvars 的第二次跑一字不差复现，而 CI 的 vbp job 全绿 ⇒ 门读数一律以 CI 为准。
+  **计划书被实测推翻的一条**：C29-0（外部子窗口探针入册）第一批就判定**不必做** —— 「程序自己读几何属性 + 打完自退出」这条判据既够强（BASE 下 21 条全红）又零新基础设施。同时读出两条留给后续的事实：控件 `.hwnd` 不是数值面（`void*` 装箱成 `VT_DISPATCH`，`<> 0` 恒不成立），以及 `As Collection` 能 `Add`/`Count` 但**不能 `For Each`**（`For Each` 只吃数组）—— 后者正是 §三 D1 选 (a) 时「集合靠数组快照可枚举」的第二个理由。下一批 = C29-1b（文件系统三控件），开工地图已写进 029 §九。
