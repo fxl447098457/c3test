@@ -232,8 +232,16 @@ HRESULT vb6_UnregisterTypeLib(const wchar_t* dllPath) {
     TLIBATTR* pAttr = NULL;
     hr = pTypeLib->lpVtbl->GetLibAttr(pTypeLib, &pAttr);
     if (SUCCEEDED(hr) && pAttr) {
+        // ai/022 B17: 这一行的实参顺序原先就错了 —— UnRegisterTypeLib 的原型是
+        // (libID, wVerMajor, wVerMinor, **lcid**, **syskind**), 旧写法把 syskind 塞进了 lcid
+        // 槽 (SYS_WIN64=3)、把 lcid 塞进了 syskind 槽, 于是两个键都找错 → 函数失败、而本函数
+        // 一律返回 S_OK ⇒ **每次反注册都静默漏掉整棵 TypeLib 键** (实测: 注册后 CLSID/ProgID
+        // 都清干净了, `TypeLib\{libid}` 还在)。顺序改正后按报出的 lcid/syskind 反注册。
+        // lcid 兜底 0x0409: 我们的库是中性的 (头里 lcid=0), RegisterTypeLib 记在 409 下。
+        DWORD lcid = pAttr->lcid ? pAttr->lcid : 0x0409;
+        SYSKIND syskind = pAttr->syskind ? pAttr->syskind : SYS_WIN64;
         UnRegisterTypeLib(&pAttr->guid, pAttr->wMajorVerNum, pAttr->wMinorVerNum,
-                         SYS_WIN64, pAttr->lcid);
+                         lcid, syskind);
         pTypeLib->lpVtbl->ReleaseTLibAttr(pTypeLib, pAttr);
     }
     ITypeLib_Release(pTypeLib);

@@ -1,0 +1,6 @@
+Type=Exe
+Name=AccOk
+Module=AccMain; acc_main.bas
+Class=AccThing; AccThing.cls
+Class=AccUser; AccUser.cls
+Startup="Sub Main"

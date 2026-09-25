@@ -60,6 +60,20 @@ std::string CCodeGen::inferClassTypeOfExpr(const ASTNode& expr) const {
                 // 此前仅支持 MemberAccessExpr/WithMemberExpr callee, 裸函数推断断链 →
                 // 生成 (ret).Method(...) 非法字段访问 (C2039: 不是 vb6_cls_X 的成员).
                 auto& id = static_cast<const IdentifierExpr&>(*call.callee);
+                // Fix 192: **类数组元素** arr(i) — 元素类型是项目类时, arr(i) 本身就是
+                // 一个类实例 (void* 槽里放的是 vb6_cls_X*), 后续 .Method/.Field 必须按
+                // 该类解析。此前这里只查"裸函数调用返回类", 类数组元素漏掉 →
+                // 接收者推断不出类 → 通用成员访问发 VB6_SA_AT(void*, arr, i).Move(...)
+                // → MSVC C2224 "左侧必须具有结构/联合类型" (void* 取成员)。
+                // 静态 `Dim s(1) As C` 与 `ReDim a(1) As C` 都踩同一处。
+                // 先查数组表: 名字在 knownArrays_ 里就是下标访问, 不是函数调用。
+                {
+                    std::string arrLower = Symbol::toLower(id.name);
+                    if (knownArrays_.count(arrLower)) {
+                        auto itArr = arrayClassElemTypes_.find(arrLower);
+                        if (itArr != arrayClassElemTypes_.end()) return itArr->second;
+                    }
+                }
                 const Symbol* fn = symTab_.lookupModule(id.name);
                 if (fn && fn->kind == SymbolKind::Function
                     && !fn->variableTypeName.empty()) {
@@ -332,6 +346,38 @@ Vb6Type CCodeGen::inferUdtFieldVb6Type(const ASTNode* target) const {
 }
 
 
+// ai/022 B08f-1 (D37): 与上一条走同一条 UDT 解析路, 但返回字段在 **C 里的对象类型**
+// (`vb6_cls_X*` / `void*` / "" = 不是对象字段或推不出)。为什么不直接改 inferUdtFieldVb6Type
+// 的返回值: `As <项目类>` 的 UDT 成员在语义层就是 Variant，而 Vb6Type::Variant 另有消费者
+// （实参打包、Let 赋值语义），改它等于同时改那几处行为。这里要回答的问题只有一个 ——
+// "这个左值到底是不是 Variant 容器" —— 那只有字段的真实 C 类型说了算。
+std::string CCodeGen::udtFieldCTypeOfTarget(const ASTNode* target) const {
+    if (!target) return std::string();
+    std::string udtCType, memName;
+    if (target->kind == ASTNodeKind::MemberAccessExpr) {
+        auto& ma = static_cast<const MemberAccessExpr&>(*target);
+        if (!ma.object) return std::string();
+        udtCType = inferUdtTypeOfExpr(*ma.object);
+        memName = ma.memberName;
+    } else if (target->kind == ASTNodeKind::WithMemberExpr) {
+        if (withObjectInfoStack_.empty() || withObjectVars_.empty()) return std::string();
+        const auto& info = withObjectInfoStack_.back();
+        if (info.kind != WithObjKind::Unknown) return std::string();  // 仅 UDT
+        memName = static_cast<const WithMemberExpr&>(*target).memberName;
+        auto it = knownUdtVars_.find(Symbol::toLower(withObjectVars_.back()));
+        if (it == knownUdtVars_.end()) return std::string();
+        udtCType = it->second;
+    } else {
+        return std::string();
+    }
+    const std::string prefix = "vb6_type_";
+    if (memName.empty() || udtCType.size() <= prefix.size()
+        || udtCType.compare(0, prefix.size(), prefix) != 0)
+        return std::string();
+    return udtFieldObjCType(udtCType, Symbol::toLower(memName));
+}
+
+
 // ============================================================
 // Fix 085: UDT 对象字段类型推断
 // ============================================================
@@ -372,6 +418,22 @@ std::string CCodeGen::udtFieldObjCType(const std::string& udtCType,
             }
             // Collection/COM/接口 等对象字段 → COM dispatch
             return "void*";
+        }
+        // ai/022 B08f-1 (D37): 跨模块的 `As <项目类>` 在语义层落到 Variant 兜底 (类名靠
+        // semantic_analyzer_decl_type.cpp 那条新增分支存进 typeRefName)。这里按**当前**
+        // (stage 3.5 之后，Class 符号已注入)的符号表回判：认得出工程类才当对象字段，
+        // 认不出照旧返回 "" —— 现在标量/真 Variant 字段也带名字了，不能顺手误判成对象。
+        if (mi.type == Vb6Type::Variant && !mi.typeRefName.empty()) {
+            std::string tn = mi.typeRefName;
+            if (tn.size() > 4 && tn.compare(0, 4, "VBA.") == 0) tn = tn.substr(4);
+            Symbol* refSym = symTab_.lookupModule(tn);
+            if (refSym && refSym->kind == SymbolKind::Class) {
+                std::string clsCanon = !refSym->sourceModule.empty()
+                                           ? refSym->sourceModule
+                                           : moduleName_;
+                return "vb6_cls_" + cIdent(clsCanon) + "*";
+            }
+            return "";
         }
         // Fix 177: String 字段 → "BSTR"。调用方 appendUdtObjFieldMarker 只对
         // "void*"/"vb6_cls_*" 追加对象标记, 故新增此返回不影响既有分派;

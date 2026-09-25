@@ -1,0 +1,12 @@
+[C3Package]
+Format=1
+Name=ClsPkg
+Version=1.0
+Desc=S04 class fixture
+
+[Files]
+PkgThing.cls=2500e27c037bc7fbb0fa3c106ad7a4565fab8cdf,361
+
+[Export]
+Class=PkgThing; Public
+Friend=False

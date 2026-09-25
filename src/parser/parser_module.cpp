@@ -123,12 +123,61 @@ void Parser::parseModuleBody(Module& mod) {
             continue;
         }
 
+        // Inherits 语句 (tB 扩展, ai/022 D6, 批次 B07): 类模块的 `Inherits Base`.
+        // 这类行过去必然落进下方的 "unexpected token at module level" 错误分支 (VB2002),
+        // 因此新增分支只把"错误"变成"可解析", 存量工程逐字节不变.
+        if (cur_.kind == TokenKind::Inherits) {
+            mod.inherits.push_back(parseInherits());
+            expectEndOfStatement();
+            continue;
+        }
+
+        // Interface 契约块 (tB 扩展, ai/022 D1): 可带前置 [属性行].
+        // 这类行过去必然落进下方的 "unexpected token at module level" 错误分支,
+        // 因此新增分支只把"错误"变成"可解析", 存量工程逐字节不变.
+        {
+            bool sawAttr = false;
+            std::vector<InterfaceAttr> pendingAttrs;
+            while (atBracketAttrLine()) {
+                sawAttr = true;
+                InterfaceAttr attr;
+                if (parseBracketAttrLine(attr)) pendingAttrs.push_back(std::move(attr));
+                skipNewLines();
+            }
+            if (cur_.kind == TokenKind::Interface) {
+                mod.interfaces.push_back(parseInterfaceDecl(pendingAttrs));
+                expectEndOfStatement();
+                continue;
+            }
+            // CoClass 契约聚合块 (tB 扩展, ai/026 四节 / ai/022 D44, 批次 B11/C01):
+            // 同样只在"过去必然报错"的位置新增分支, 存量工程逐字节不变.
+            if (cur_.kind == TokenKind::CoClass) {
+                mod.coclasses.push_back(parseCoClassDecl(pendingAttrs));
+                expectEndOfStatement();
+                continue;
+            }
+            if (sawAttr) {
+                if (!pendingAttrs.empty()) {
+                    diag_.error(DiagnosticID::ParseUnexpectedToken, currentLoc(),
+                        "Attribute line must precede an Interface or CoClass declaration");
+                    skipToNextLine();
+                }
+                continue;  // 属性行本身已报错并越过该行
+            }
+        }
+
         // DefType 语句
         if (checkAny({TokenKind::DefBool, TokenKind::DefByte, TokenKind::DefInt,
                       TokenKind::DefLng, TokenKind::DefCur, TokenKind::DefSng,
                       TokenKind::DefDbl, TokenKind::DefDate, TokenKind::DefStr,
                       TokenKind::DefObj, TokenKind::DefVar})) {
             mod.defTypes.push_back(parseDefType());
+            expectEndOfStatement();
+            continue;
+        }
+
+        // 角括号过程属性行 (ai/vb-asm-extension-spec): `<Naked>`
+        if (cur_.kind == TokenKind::LessThan && tryParseAngleAttr()) {
             expectEndOfStatement();
             continue;
         }
@@ -143,6 +192,11 @@ void Parser::parseModuleBody(Module& mod) {
         // 声明
         if (isDeclarationStart()) {
             auto decl = parseDeclaration();
+            if (pendingNaked_) {   // `<Naked>` 后面跟的不是过程声明
+                diag_.error(DiagnosticID::ParseUnknownAttribute, currentLoc(),
+                            "<Naked> 只能修饰 Sub/Function");
+                pendingNaked_ = false;
+            }
             if (decl) {
                 // 逗号分隔的多变量声明展开为独立声明
                 if (decl->kind == ASTNodeKind::MultiDecl) {
@@ -228,7 +282,32 @@ std::unique_ptr<ImplementsStmt> Parser::parseImplements() {
         auto part = expectName("expected interface name after '.'");
         fullName += "." + part.text;
     }
-    return std::make_unique<ImplementsStmt>(loc, fullName);
+    auto stmt = std::make_unique<ImplementsStmt>(loc, fullName);
+    // tB 扩展 (ai/022 D42, 批次 B10): 委托式实现子句 `Implements I Via m_holder`。
+    // 没有 Via 时下面的分支根本不进, 存量路径逐字节不变 (VB6 里 `Via` 不是关键字,
+    // 语料核查: tests/archive/publish 的 .bas/.cls/.frm/.ctl 中 \bvia\b 零命中)。
+    if (cur_.kind == TokenKind::Via) {
+        advance(); // consume 'Via'
+        stmt->viaField = expectName("expected holder field name after 'Via'").text;
+    }
+    return stmt;
+}
+
+// 类继承子句 (tB 扩展, B07): 与 parseImplements 同口径吃点号限定名 (Project.IFace 那种
+// 写法), 但 v1 只有一条基类名 —— 逗号列表在这里天然落到 expectEndOfStatement 的 VB2003,
+// 即"单继承"的 arity 检查不需要新代码.
+InheritsStmt Parser::parseInherits() {
+    InheritsStmt s;
+    s.loc = currentLoc();
+    advance(); // consume 'Inherits'
+    auto nameTok = expectName("expected base class name");
+    s.baseName = nameTok.text;
+    while (cur_.kind == TokenKind::Dot && canBeName(peek2().kind)) {
+        advance(); // consume '.'
+        auto part = expectName("expected base class name after '.'");
+        s.baseName += "." + part.text;
+    }
+    return s;
 }
 
 std::unique_ptr<DefTypeStmt> Parser::parseDefType() {

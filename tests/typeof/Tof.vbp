@@ -1,0 +1,10 @@
+Type=Exe
+Name="TofApp"
+Module=TofMain; TofMain.bas
+Class=TofBase; TofBase.cls
+Class=TofMid; TofMid.cls
+Class=TofLeaf; TofLeaf.cls
+Class=TofSib; TofSib.cls
+Class=TofPlain; TofPlain.cls
+Startup="Sub Main"
+ExeName32="Tof.exe"

@@ -42,6 +42,13 @@
             if (_memLower == "raise")       { lastExpr_ = "vb6_ErrRaise";         return; }
         }
 
+        // ai/022 B09: `MyBase.<成员>` = 显式基调用 (去虚化, 直调基类会跑的那一份实现)。
+        // 按**接收者名字**在这里接管、不占 token: 与上面的 Err / VBA 同一条前置通路 (最早、
+        // 小写名匹配), 于是 lexer/parser 一行不动 —— 零新语法工程的逐字节护栏自动成立。
+        if (_objLower == "mybase") {
+            if (tryEmitMyBaseMember(node)) return;
+        }
+
         // Fix 084y-6: VBA 模块成员 (VBA.vbCr / VBA.Replace 等). 编译器不注册
         // "VBA" 模块符号 → M22 fallback 生成 vb6_VBA_<member> (rtl 无此名 →
         // C2065). 常量内联字面量; 函数生成裸 rtl 名 vb6_<member> (去 $ 后缀,

@@ -18,6 +18,14 @@
         dllCgen.setStaticModuleVarNames(&dupModuleVarNames);  // Fix 093b: 撞名模块级变量转 static
         dllCgen.setInterfaceImplementers(&ifaceImplementersMap);  // P6.4+: 接口唯一实现类映射
         dllCgen.setDefaultInstanceClasses(&defaultInstanceClasses);  // P6.4+: 类模块默认实例
+        // ai/022 B13b: dll_entry 的身份一律取 stage 2.7 的唯一出口 coclassIds_。
+        // 只接 DLL 这条 cgen —— EXE 的 com_entry.c 本批刻意不接线（理由见 D57）。
+        dllCgen.setCoClassIdentityRegistry(&coclassIds_);
+        dllCgen.setInterfaceIidMap(&ifaceIds_);  // ai/022 B13c: 非默认接口的 IID 也读同一张表
+        // ai/022 B16: 接口登记表 —— dll_entry 靠它判断"这个类的某个 Implements 是不是
+        // 新式接口"（是则引用 vb6_iv_thin_<类>/vb6_iv_claim_<类>），判据与类模块自身发码
+        // 时逐字相同（同一张 ivreg_）。
+        dllCgen.setInterfaceRegistry(&ifaces_);
         // Collect all symbol tables for cross-module Property lookup
         std::vector<SymbolTable*> allSymTabs;
         for (auto& analyzer : analyzers_) {
@@ -52,9 +60,27 @@
             // 不到时退化成 "<库名>.<类名>" —— 库名多一段后缀就会拼出 CLSIDFromProgID 查不
             // 到的 ProgID, 运行期 New 报 429 (0x800401F3)。
             // LIBID 种子保持不变: 改它会给已构建产物换一套 GUID, 与本次修复无关。
-            if (tlbBuilder.beginLib(tlbPath, libId, options.dllProgId + " TypeLib", options.dllProgId)) {
+            if (tlbBuilder.beginLib(tlbPath, libId, options.dllProgId + " TypeLib", options.dllProgId,
+                                   /*is64=*/options.arch != "x86")) {
                 int dispidCounter = 1;
                 std::set<std::string> processedClasses;
+                // 新式接口的 IID：与 vtable QI、dll_entry 的 IID 表读同一张 Pass E 表
+                // （`ifaceIds_`）。查不到 = 不是新式接口 → 保持类型库自己那枚 legacy mint。
+                auto ifaceIidFromMap = [&](const std::string& name) -> std::string {
+                    auto it = ifaceIds_.find(Symbol::toLower(name));
+                    return it == ifaceIds_.end() ? std::string() : it->second;
+                };
+                // 类 → 手写块的身份（与 cgen_util_dllentry_collect.inc 的匹配口径一致：
+                // 折算记录一律跳过，存量 DLL 的 .tlb 逐字节不变）
+                auto identityForClass = [&](const std::string& className) -> const CoClassIdentity* {
+                    const std::string lower = Symbol::toLower(className);
+                    for (const auto& kv : coclassIds_) {
+                        const CoClassIdentity& id = kv.second;
+                        if (id.name.empty() || id.legacyFolded) continue;
+                        if (!id.implName.empty() && Symbol::toLower(id.implName) == lower) return &id;
+                    }
+                    return nullptr;
+                };
                 for (auto* symTab : allSymTabs) {
                     // 遍历模块级作用域中的符号, 找出 Public Class (ActiveX DLL 的 coclass)
                     auto* modScope = symTab->moduleScope();
@@ -69,6 +95,123 @@
                         // Deduplicate: each class only once across all symbol tables
                         if (processedClasses.count(clsSym.name)) continue;
                         processedClasses.insert(clsSym.name);
+
+                        // ai/022 B15 (D62-4/D62-5): **新式接口的宿主模块**在库里发成真接口
+                        // (`TKIND_INTERFACE`)，并到此为止 —— 不再发 `_<名>` 那张空 dispinterface，
+                        // 也不再发那一行 coclass。今天这条循环是唯一没有 `isInterface` 过滤的 COM
+                        // 消费者（对照 `cgen_util_dllentry_collect.inc:26`、`driver_codegen_dll_sync.inc:8`），
+                        // 于是接口模块在 COM 表里不存在、却在库里占了一整行**可创建**的 coclass，
+                        // CLSID 还是另一枚谁也不认的 mint（`generateUuid(类名)`）。
+                        // B16 起成员面如实发进去（见 addVtableInterface）：生成码自 B16 起整条薄面
+                        // 都是 `__stdcall`，与库里的 `CC_STDCALL` + `oVft=(3+槽号)*指针宽` 一一对应。
+                        // 判据沿用 B13c 那一条（Pass E 命中 = 这个模块名就是一个新式接口），
+                        // legacy 那条（被 `Implements` 点名但没有 Interface 块的类）一行不动。
+                        {
+                            const std::string ifaceRowIid = ifaceIidFromMap(clsSym.name);
+                            auto ifaceIt = ifaces_.find(Symbol::toLower(clsSym.name));
+                            if (!ifaceRowIid.empty() && ifaceIt != ifaces_.end()) {
+                                // 成员面 (B16)。三处口径都从 `IfaceView::slots` 来 —— 与生成码
+                                // `vb6_ivtbl_<I>` 读的是同一份、同一个顺序，所以槽号对得上：
+                                //   名字: COM 惯例 (Property 是 get_/put_/putref_ 前缀, 过程用声明里的
+                                //         大小写); 同名 Property 的 Get/Let/Set 共享一个 memid。
+                                //   类型: SimpleTypeRef 走类型表 (Long→VT_I4/String→VT_BSTR), 其余
+                                //         (无 As / 数组 / LongPtr / UDT / 工程类) 落 VT_VARIANT 兜底
+                                //         —— 这一档"类型保真"的缺口属 B17, 见 022 D63。
+                                std::vector<TypeLibBuilder::MethodInfo> vtableMembers;
+                                {
+                                    TypeSystem& ts = lastAnalyzer->typeSystem();
+                                    auto tlTypeOf = [&](const ASTNode* tr) -> Vb6Type {
+                                        if (!tr || tr->kind != ASTNodeKind::SimpleTypeRef) {
+                                            return Vb6Type::Variant;
+                                        }
+                                        return ts.resolveTypeName(
+                                            static_cast<const SimpleTypeRef*>(tr)->name);
+                                    };
+                                    std::map<std::string, int32_t> propMemid;
+                                    int32_t nextMemid = 1;
+                                    for (const IfaceSlotView& slot : ifaceIt->second.slots) {
+                                        const Decl* sig = slot.sig;
+                                        if (!sig) {
+                                            std::cerr << "C3: TypeLib vtable member skipped (no sig): "
+                                                      << ifaceIt->second.name << "." << slot.key
+                                                      << std::endl;
+                                            continue;
+                                        }
+                                        TypeLibBuilder::MethodInfo mi;
+                                        std::string base;
+                                        bool isGet = false, isPut = false, isPutRef = false;
+                                        const std::vector<std::unique_ptr<ParameterDecl>>* ps = nullptr;
+                                        switch (sig->kind) {
+                                            case ASTNodeKind::SubDecl: {
+                                                const SubDecl& d = static_cast<const SubDecl&>(*sig);
+                                                base = d.name;
+                                                mi.returnType = Vb6Type::Void;
+                                                ps = &d.params;
+                                                break;
+                                            }
+                                            case ASTNodeKind::FunctionDecl: {
+                                                const FunctionDecl& d = static_cast<const FunctionDecl&>(*sig);
+                                                base = d.name;
+                                                mi.returnType = tlTypeOf(d.returnType.get());
+                                                ps = &d.params;
+                                                break;
+                                            }
+                                            case ASTNodeKind::PropertyDecl: {
+                                                const PropertyDecl& d = static_cast<const PropertyDecl&>(*sig);
+                                                base = d.name;
+                                                isGet = d.propKind == ProcKind::PropertyGet;
+                                                isPut = d.propKind == ProcKind::PropertyLet;
+                                                isPutRef = d.propKind == ProcKind::PropertySet;
+                                                mi.returnType = isGet ? tlTypeOf(d.returnType.get())
+                                                                      : Vb6Type::Void;
+                                                ps = &d.params;
+                                                break;
+                                            }
+                                            default:
+                                                break;
+                                        }
+                                        mi.name = (isGet ? "get_" : (isPut ? "put_"
+                                                   : (isPutRef ? "putref_" : std::string()))) + base;
+                                        mi.isPropertyGet = isGet;
+                                        mi.isPropertyPut = isPut;
+                                        mi.isPropertyPutRef = isPutRef;
+                                        if (isGet || isPut || isPutRef) {
+                                            const std::string pkey = Symbol::toLower(base);
+                                            auto pm = propMemid.find(pkey);
+                                            if (pm != propMemid.end()) {
+                                                mi.dispid = pm->second;
+                                            } else {
+                                                mi.dispid = nextMemid++;
+                                                propMemid[pkey] = mi.dispid;
+                                            }
+                                        } else {
+                                            mi.dispid = nextMemid++;
+                                        }
+                                        if (ps) {
+                                            for (const auto& p : *ps) {
+                                                ParameterInfo pi;
+                                                pi.name = p->name;
+                                                pi.type = tlTypeOf(p->asType.get());
+                                                pi.isByVal = p->isByVal;
+                                                pi.isOptional = p->isOptional;
+                                                pi.isParamArray = p->isParamArray;
+                                                mi.params.push_back(pi);
+                                            }
+                                        }
+                                        vtableMembers.push_back(std::move(mi));
+                                    }
+                                }
+                                if (tlbBuilder.addVtableInterface(ifaceIt->second.name, ifaceRowIid,
+                                                                  vtableMembers)) {
+                                    clsSym.comDefaultIfaceIid = ifaceRowIid;
+                                    clsSym.comDefaultIfaceName = ifaceIt->second.name;
+                                } else {
+                                    std::cerr << "C3: TypeLib addVtableInterface failed for "
+                                              << clsSym.name << ": " << tlbBuilder.lastError() << std::endl;
+                                }
+                                continue;
+                            }
+                        }
 
                         std::vector<TypeLibBuilder::MethodInfo> methods;
                         // 类→宿主符号表映射 (与 cgen_util.cpp Fix 016b 一致):
@@ -207,8 +350,13 @@
                             }
                         }
 
-                        std::string iid = TypeLibBuilder::generateUuid("_" + clsSym.name);
                         std::string ifaceName = "_" + clsSym.name;
+                        // ai/022 B13c: 这个"类"其实是个**新式接口模块**（头行 `Interface IProbe`）
+                        // → 它的类型库 GUID 就是那个接口的 IID，取 Pass E 的表，不再 mint 一枚
+                        // 只有类型库知道的值（D58 读数：IProbe 在一次编译里曾有 4 枚 GUID）。
+                        const std::string mapIid = ifaceIidFromMap(clsSym.name);
+                        std::string iid = mapIid.empty()
+                            ? TypeLibBuilder::generateUuid("_" + clsSym.name) : mapIid;
                         bool ifaceOk = tlbBuilder.addDispInterface(ifaceName, iid, methods);
                         if (!ifaceOk) {
                             std::cerr << "C3: TypeLib addDispInterface failed for " << ifaceName << ": " << tlbBuilder.lastError() << std::endl;
@@ -260,15 +408,28 @@
 
                         // Only add CoClass if primary interface was added successfully
                         if (ifaceOk) {
-                            std::string clsid = clsSym.comClsidStr;
-                            if (clsid.empty()) {
+                            const CoClassIdentity* ccid = identityForClass(clsSym.name);
+                            std::string clsid;
+                            if (ccid && !ccid->clsid.empty()) {
+                                // ai/022 B13c: 手写块的 CLSID 取唯一出口（与 dll_entry 同值）
+                                clsid = ccid->clsid;
+                            } else if (!clsSym.comClsidStr.empty()) {
+                                clsid = clsSym.comClsidStr;
+                            } else {
                                 auto it = classClsidMap_.find(clsSym.lowerName);
                                 if (it != classClsidMap_.end()) clsid = it->second;
                             }
                             if (clsid.empty()) clsid = TypeLibBuilder::generateUuid(clsSym.name);
                             if (clsSym.comClsidStr.empty()) clsSym.comClsidStr = clsid;
-                            if (!tlbBuilder.addCoClass(clsSym.name, clsid, ifaceName, sourceIfaceName)) {
-                                std::cerr << "C3: TypeLib addCoClass failed for " << clsSym.name << ": " << tlbBuilder.lastError() << std::endl;
+                            // ai/022 B13e: 默认接口**一律**是 `<_类名>`，不跟块里的 [Default]。
+                            // B13c 曾把它改指向块的 `[Default]` 接口（`_IProbe`），实测是把"广告"
+                            // 与"应答"分开：类型库说默认视图是 `_IProbe`，而服务器的成员面
+                            // （`GetIDsOfNames`/`Invoke` 查 `desc->methods`）只有类的 Public 成员，
+                            // 两头都点不到。谁应答就广告谁。
+                            if (!tlbBuilder.addCoClass(clsSym.name, clsid, ifaceName,
+                                                       sourceIfaceOk ? sourceIfaceName : std::string())) {
+                                std::cerr << "C3: TypeLib addCoClass failed for " << clsSym.name << ": "
+                                          << tlbBuilder.lastError() << std::endl;
                             }
                         }
                     }

@@ -1,0 +1,5 @@
+Type=Exe
+Name=PkgNeg01
+Module=PkgHost; host_stub.bas
+Startup="Sub Main"
+Package=NoPkg; 9.9

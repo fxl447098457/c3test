@@ -13,6 +13,9 @@ namespace vb6c3 {
 void CCodeGen::visit(FunctionDecl& node) {
     // 泛型模板 (tB, G2/G3): 模板本体不发码 (泛型器注入特化副本)
     if (!node.typeParams.empty()) return;
+    // ai/vb-asm-extension-spec: Asm 块过程 → x64 独立 MASM 过程 / x86 内联 __asm 块
+    if (tryEmitAsmProc(node.name, node.access, node.params, node.returnType.get(),
+                       node.body, node.loc, node.isNaked)) return;
     std::string sig = makeProcSignature(node);
 
     // Fix 055: Form事件处理函数不能为static, 因为wndproc用extern引用它们
@@ -33,7 +36,9 @@ void CCodeGen::visit(FunctionDecl& node) {
     // Fix 056b: 清理局部数组注册 (模块级/类成员数组跨过程保留)
     clearProcArrayTracking();
     ansiTempsToFree_.clear();
+    ivrefLocalsToRelease_.clear();  // tB Interface B05
     ansiCounter_ = 0;
+    asmMixedBlockCounter_ = 0;   // ai/vb-asm-extension-spec 项2: 混排片段序号按过程重置
     knownBstrVars_.clear();
     knownDoubleVars_.clear();
     knownSingleVars_.clear();
@@ -125,7 +130,9 @@ void CCodeGen::visit(FunctionDecl& node) {
             }
             else if (paramType == Vb6Type::Long || paramType == Vb6Type::Integer || paramType == Vb6Type::Boolean) knownLongVars_.insert(pLower);
             // Bug #2 fix: LongPtr 参数注册到独立集合
-            else if (paramType == Vb6Type::LongPtr) knownLongPtrVars_.insert(pLower);
+            // Fix 084m: LongLong 同路 —— 二者都是标量整数 (intptr_t / int64_t), 表达式侧
+            // 需要绕开 Variant 分派走直接 C 运算, 复用同一集合即可 (宽度由 C 整型提升决定)。
+            else if (paramType == Vb6Type::LongPtr || paramType == Vb6Type::LongLong) knownLongPtrVars_.insert(pLower);
             // Fix 035: Variant 参数也要注册, 否则 `(*X) = concrete` 赋值不会触发
             // wrapVariantValue 包装, 导致 C2440 (ByRef Variant 参数写穿透场景).
             else if (paramType == Vb6Type::Variant) knownVariantVars_.insert(pLower);
@@ -202,7 +209,8 @@ void CCodeGen::visit(FunctionDecl& node) {
     else if (funcRetVb6Type == Vb6Type::Double) knownDoubleVars_.insert(funcRetLower);
     else if (funcRetVb6Type == Vb6Type::Long || funcRetVb6Type == Vb6Type::Integer || funcRetVb6Type == Vb6Type::Boolean) knownLongVars_.insert(funcRetLower);
     // Bug #2 fix: LongPtr 返回值变量注册到独立集合
-    else if (funcRetVb6Type == Vb6Type::LongPtr) knownLongPtrVars_.insert(funcRetLower);
+    // Fix 084m: LongLong 同路 (见参数处注释)
+    else if (funcRetVb6Type == Vb6Type::LongPtr || funcRetVb6Type == Vb6Type::LongLong) knownLongPtrVars_.insert(funcRetLower);
     // Fix 035: Variant 返回值变量也要注册, 否则 `Foo = concrete_expr` 赋值不会触发
     // wrapVariantValue 包装, 导致 C2440 (BSTR/int32_t → vb6_VARIANT).
     else if (funcRetVb6Type == Vb6Type::Variant) knownVariantVars_.insert(funcRetLower);
@@ -300,6 +308,9 @@ void CCodeGen::visit(FunctionDecl& node) {
         c_.emitLine("vb6_FreeANSI(" + ansiVar + ");");
     }
     ansiTempsToFree_.clear();
+
+    // tB Interface B05: 接口变量持有引用, 正常出口处经槽 Release (Exit Sub 例外, 同 ANSI 临时变量)
+    emitIvrefScopeRelease();
 
     // 返回值
     c_.emitLine("return " + currentReturnVar_ + ";");

@@ -1,0 +1,10 @@
+VERSION 1.0 CLASS
+BEGIN
+  MultiUse = -1  'True
+END
+Attribute VB_Name = "IHost"
+Option Explicit
+
+Interface IHost
+    Sub Work()
+End Interface

@@ -1,0 +1,12 @@
+[C3Package]
+Format=1
+Name=XmodPkg
+Version=1.0
+Desc=S02 cross-module fixture
+
+[Files]
+XmodPkg.bas=b097f99f75b6f7dbe25e692a47432d00fdc0805d,350
+
+[Export]
+Module=XmodPkg; Public
+Friend=False

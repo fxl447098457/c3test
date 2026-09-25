@@ -23,11 +23,18 @@ bool Token::isKeyword() const {
         || kind == TokenKind::As || kind == TokenKind::New
         || kind == TokenKind::Public || kind == TokenKind::Private
         || kind == TokenKind::Static || kind == TokenKind::Friend
+        || kind == TokenKind::Protected
         || kind == TokenKind::ByVal || kind == TokenKind::ByRef
         || kind == TokenKind::Optional || kind == TokenKind::ParamArray
         || kind == TokenKind::Implements || kind == TokenKind::Event
         || kind == TokenKind::Delegate
         || kind == TokenKind::RaiseEvent || kind == TokenKind::WithEvents
+        || kind == TokenKind::Interface || kind == TokenKind::Extends
+        || kind == TokenKind::Inherits
+        || kind == TokenKind::Via
+        || kind == TokenKind::CoClass
+        || kind == TokenKind::Overridable || kind == TokenKind::Overrides
+        || kind == TokenKind::NotOverridable
         || kind == TokenKind::OnError || kind == TokenKind::GoTo
         || kind == TokenKind::GoSub || kind == TokenKind::Return
         || kind == TokenKind::Resume || kind == TokenKind::Exit
@@ -102,6 +109,7 @@ bool Token::isStatementStart() const {
         case TokenKind::If: case TokenKind::For:
         case TokenKind::Do: case TokenKind::While:
         case TokenKind::Select: case TokenKind::With:
+        case TokenKind::Asm:  // ai/vb-asm-extension-spec
         case TokenKind::Set: case TokenKind::Let:
         case TokenKind::Call: case TokenKind::GoTo:
         case TokenKind::GoSub: case TokenKind::Return:

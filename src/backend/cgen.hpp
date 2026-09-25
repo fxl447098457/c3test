@@ -18,8 +18,12 @@
 #include "ast/ast_visitor.hpp"
 #include "semantics/symbol_table.hpp"
 #include "semantics/type_system.hpp"
+#include "semantics/interfaces_registry.hpp"  // tB Interface 契约发码 (ai/022 B04)
+#include "semantics/class_chain_registry.hpp"  // tB 类继承发码 (ai/022 B07b)
 #include "common/diagnostics.hpp"
+#include "semantics/coclass_identity.hpp"  // CoClass 身份唯一出口 (ai/022 B13b)
 #include "project/frm_parser.hpp"
+#include "backend/asm_proc.hpp"  // ai/vb-asm-extension-spec: Asm 过程降级元数据
 #include <array>
 #include <string>
 #include <vector>

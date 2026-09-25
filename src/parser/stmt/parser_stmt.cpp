@@ -21,7 +21,8 @@ StmtPtr Parser::parseStatement() {
         case TokenKind::While:    return parseWhileWendStmt();
         case TokenKind::Select:   return parseSelectCaseStmt();
         case TokenKind::With:     return parseWithStmt();
-
+        // ai/vb-asm-extension-spec: Asm ... End Asm 内联汇编块
+        case TokenKind::Asm:      return parseAsmStmt();
         // --- 跳转语句 ---
         case TokenKind::GoTo:     return parseGoToStmt();
         case TokenKind::GoSub:    return parseGoSubStmt();
@@ -356,6 +357,111 @@ StmtList Parser::parseBlockUntil(std::initializer_list<TokenKind> endKinds) {
     }
 
     return stmts;
+}
+
+// ============================================================
+// ai/vb-asm-extension-spec: Asm ... End Asm 原始块捕获
+//   块内行按**原始源码**直取 (buffer_->getLine), 不做 token 重组 ——
+//   保证 `dword ptr [x]` / `.label:` / `'` 注释 等原样交付给 MASM。
+//   token 流只用来找边界: 行首处出现 End + Asm。
+// ============================================================
+StmtPtr Parser::parseAsmStmt() {
+    auto loc = currentLoc();
+    Token asmTok = advance();   // consume 'Asm'
+
+    auto stmt = std::make_unique<AsmStmt>(loc);
+
+    // ① 可选 Clobber 头 (spec §2.2): `Asm Clobber("rbx","memory")` —— 声明本块踩到的
+    //    寄存器/内存, 供后端生成 callee-saved 的 push/pop。寄存器名大小写归一为小写。
+    if (check(TokenKind::Identifier) && toLower(cur_.text) == "clobber") {
+        advance();   // Clobber
+        if (!check(TokenKind::LeftParen)) {
+            diag_.error(DiagnosticID::ParseAsmClobberMalformed, currentLoc(),
+                        "Clobber 需要参数表: Clobber(\"rbx\", \"memory\")");
+            while (!check(TokenKind::NewLine) && !check(TokenKind::EndOfFile)) advance();
+            return stmt;
+        }
+        advance();   // (
+        while (!check(TokenKind::RightParen) && !check(TokenKind::NewLine) &&
+               !check(TokenKind::EndOfFile)) {
+            if (check(TokenKind::StringLiteral)) {
+                std::string raw = advance().text;
+                std::string name;
+                for (char c : raw) {
+                    if (c == '"') continue;
+                    name += static_cast<char>(::tolower(static_cast<unsigned char>(c)));
+                }
+                if (!name.empty()) stmt->clobbers.push_back(name);
+            } else if (check(TokenKind::Comma)) {
+                advance();
+            } else {
+                diag_.error(DiagnosticID::ParseAsmClobberMalformed, currentLoc(),
+                            "Clobber 参数必须是字符串寄存器名 (如 \"rbx\", \"memory\")");
+                advance();
+            }
+        }
+        match(TokenKind::RightParen);
+        if (stmt->clobbers.empty())
+            diag_.error(DiagnosticID::ParseAsmClobberMalformed, loc, "Clobber 列表为空");
+    }
+
+    // ② 单行形式 `Asm <指令>` (spec §2.2): Asm 后还有内容 → 本行剩余原文即整块。
+    if (!check(TokenKind::NewLine) && !check(TokenKind::EndOfFile)) {
+        if (buffer_) {
+            std::string line(buffer_->getLine(asmTok.line));
+            while (!line.empty() && (line.back() == '\n' || line.back() == '\r')) line.pop_back();
+            size_t kwLen = asmTok.length ? asmTok.length : 3;
+            size_t kwEnd = (asmTok.column > 0 ? asmTok.column - 1 : 0) + kwLen;
+            if (kwEnd <= line.size()) {
+                std::string rest = line.substr(kwEnd);
+                size_t b = rest.find_first_not_of(" \t");
+                if (b != std::string::npos) stmt->lines.push_back(rest.substr(b));
+            }
+        }
+        while (!check(TokenKind::NewLine) && !check(TokenKind::EndOfFile)) advance();
+        return stmt;   // 单行形式没有 End Asm; 行尾 NewLine 交给外层统一消费
+    }
+
+    const uint32_t startLine = asmTok.line;
+    uint32_t endLine = 0;
+
+    // 逐 token 前进, 直到「行首」出现 End + Asm (atLineStart 由消费 NewLine 置位)
+    bool atLineStart = true;
+    while (!check(TokenKind::EndOfFile)) {
+        Token t = peek();
+        if (t.kind == TokenKind::NewLine) { advance(); atLineStart = true; continue; }
+        if (atLineStart && t.kind == TokenKind::End) {
+            advance();                       // consume End
+            if (check(TokenKind::Asm)) {
+                advance();                   // consume Asm
+                endLine = t.line;
+                break;
+            }
+            atLineStart = false;             // End 是块内内容, 继续
+            continue;
+        }
+        atLineStart = false;
+        advance();
+    }
+
+    if (endLine == 0) {
+        diag_.error(DiagnosticID::ParseAsmBlockMalformed, loc, "Asm 块缺少 End Asm");
+        return stmt;
+    }
+
+    // 原始行切片: (startLine, endLine) 开区间
+    //   getLine() 返回的行含行尾换行 (含 CRLF 的 \r), 必须剥掉 —— 否则发射端
+    //   再加一个 \n 会凭空多出空行 (实测 ml64 对空行无害, 但输出不可读)。
+    if (buffer_) {
+        for (uint32_t ln = startLine + 1; ln < endLine; ln++) {
+            std::string line(buffer_->getLine(ln));
+            while (!line.empty() && (line.back() == '\n' || line.back() == '\r')) line.pop_back();
+            stmt->lines.push_back(line);
+        }
+    }
+    // 注意: 不要把 `End Asm` 行尾的 NewLine 吃掉 —— 语句边界由外层
+    // parseBlock 的 expectEndOfStatement() 统一消费 (同其它语句)。
+    return stmt;
 }
 
 } // namespace vb6c3

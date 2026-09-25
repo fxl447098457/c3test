@@ -1,0 +1,12 @@
+[C3Package]
+Format=1
+Name=TamperedPkg
+Version=1.0
+Desc=ai/023 S05 fixture
+
+[Files]
+TamperedPkg.bas=43de76e247f8d1ccbde2a3b0bde8108aacb1fb16,114
+
+[Export]
+Module=TamperedPkg; Public
+Friend=False

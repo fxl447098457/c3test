@@ -86,6 +86,12 @@
     // 当数组元素类型为 UserDefinedType 时, 记录实际 UDT C 类型名,
     // 让 VB6_SA_AT / VB6_SA_ND_AT2 使用正确的 struct 类型而非 vb6_VARIANT
     std::unordered_map<std::string, std::string> arrayUdtElemTypes_;
+    // Fix 192: 数组名 → 元素**类名** (小写key, e.g. "shapes" → "ShapeAct").
+    // 与 arrayUdtElemTypes_ 对称: resolveArrayElemType 把 `As 某类` 压成
+    // Vb6Type::Object (枚举装不下"哪个类"), 于是 arr(i).Method 的接收者推断不出类
+    // → 发 VB6_SA_AT(void*, arr, i).Method(...) (void* 取成员 → C2224).
+    // 静态数组 `Dim s(1) As C` / 动态数组 `Dim a() As C` / `ReDim a(1) As C` 都要登记。
+    std::unordered_map<std::string, std::string> arrayClassElemTypes_;
 
     // Fix 170: 赋值目标 `A() = expr` (空括号整体数组) 上下文标记。
     // 只在 visit(AssignmentStmt) 里 emit node.target 的那一瞬为 true,
@@ -314,6 +320,14 @@
     // 一旦消费即清空, 防止跨调用泄漏.
     std::string pendingChainObj_;
 
+    // 类虚表 (ai/022 B08e-4 站点⑭): 赋值/Set/Let 的**左值**文本发出来之后还要过一遍
+    // `cgen_util_comwrite.cpp` 的 Pattern C/D2 —— 它把 `prop_get_X` 整体换成 `prop_let_X`/
+    // `prop_set_X` (写方向在 3.4b 没有槽, 只能直调)。callee 若是派发表达式
+    // `((const vb6_cvtbl_C*)(...)->__cvtbl)->prop_get_x`, 那个盲替换会得到表里不存在的
+    // `->prop_let_x` (error C2039)。所以左值求值期间置 true, 让 ①⑤⑪ 三处都不改派。
+    // 读上下文 (普通表达式里的 `Me.f.Level`) 不受影响, 照旧派发。
+    bool suppressVirtDispatch_ = false;
+
     // 类模块标志
     bool isClassModule_ = false;
     bool isFormModule_ = false;
@@ -325,6 +339,16 @@
     // P6.4: Implements 接口引用变量 (小写变量名 → 接口名)
     // Dim x As IFoo → knownIfaceVars_["x"] = "IFoo"
     std::unordered_map<std::string, std::string> knownIfaceVars_;
+    // Interface 契约 (tB, ai/022 B04): `Dim x As <新式接口>` → 变量名小写 → 接口名.
+    // 与 legacy 的 knownIfaceVars_ 分开: 新式接口值是**薄指针** (vb6_ivref_<I>*),
+    // 派发/Set 都走 ivref 分支, 不共用胖对文本.
+    std::unordered_map<std::string, std::string> knownIvrefVars_;
+    // 成员访问片段 -> 调用片段之间传递"这次是接口槽调用"的接口名 (B04)
+    std::string ivrefIfaceName_;
+    // tB Interface B05: 本过程内需要"作用域末尾 Release"的接口变量 (C 名)
+    std::vector<std::string> ivrefLocalsToRelease_;
+    // Set 语句里"旧值"临时变量的序号 (只有新语法路径消耗, 不影响其他工程)
+    int ivrefSetSeq_ = 0;
 
     // VB6 Static Sub/Function标志: 过程内所有局部变量都应生成C static
     bool inStaticProc_ = false;
@@ -387,6 +411,27 @@
     // P6.4+: interface -> single implementer map (injected by driver)
     const std::map<std::string, std::string>* interfaceImplementers_ = nullptr;
 
+    // Interface 契约 (tB, ai/022 B04): stage 2.7 建好的工程级只读登记表 (driver 注入).
+    // 槽表/适配器/薄指针类型都由它驱动, 与 legacy 的 implementsNames 口径互不影响.
+    const IfaceRegistry* ivreg_ = nullptr;
+
+    // 委托式实现 `Implements I Via m_h` (tB, ai/022 B10): stage 2.7 Pass D 的只读裁决表.
+    const ViaRegistry* ivviareg_ = nullptr;
+
+    // 类继承 (tB, ai/022 B07b): stage 2.8 建好的工程级只读链登记表 (driver 注入).
+    // 继承字段与前缀布局、转发桩都由 view 的 inhFields/inhProcs 驱动 (stage 3.4 回填).
+    const ClassChainRegistry* clsreg_ = nullptr;
+
+    // CoClass 身份 (tB, ai/022 B13b): stage 2.7 Pass E 求出的唯一出口 (coclassIds_)。
+    // 只有 generateDllEntry 读它 —— 产品里的 CLSID / 默认接口 IID / 组名 ProgID 一律
+    // 从这里取，prelude 里那两枚 lambda 退成"读不到块的类"的兜底路径。
+    const std::unordered_map<std::string, CoClassIdentity>* ccreg_ = nullptr;
+
+    // 接口 IID 表 (tB, ai/022 B13c): stage 2.7 Pass E 由 `buildIfaceIdMap` 建的只读表，
+    // key = 接口名小写。新式接口的 IID 三处消费者（vtable QI / dll_entry 的 IID 表 /
+    // 类型库）一律读它；表里没有的接口保持各自 legacy 派生（存量产物不变）。
+    const std::unordered_map<std::string, std::string>* iidreg_ = nullptr;
+
     // P6.4+: class-module default instance (VB_PredeclaredId=True) lowercase name -> canonical
     const std::map<std::string, std::string>* defaultInstanceClasses_ = nullptr;
 
@@ -415,3 +460,12 @@
     // 重载调用变体 (O2): IndexOrCallExpr 发射 callee ident 前置入的符号键后缀,
     // 由 ident 发射路径消费并清空 ("" = 裸键 head, 产出不受影响)
     std::string pendingCalleeOvl_;
+
+    // ai/vb-asm-extension-spec: Asm 块过程收集 + 目标架构
+    //   函数体 = 单个 AsmStmt 时, 不发 C 体, 改发 extern 原型并把元数据记在这里,
+    //   由 driver 生成独立 MASM 过程 (ml64) 参与链接。
+    //   混排 (项2): 逐条 AsmStmt 就地降级, 也往这里追加 (每片段一个独立过程)。
+    std::vector<AsmProcInfo> asmProcs_;
+    std::string targetArch_ = "x64";
+    // 混排 (项2): 每个过程体清零; 给降级出来的 Asm 辅助过程/标签起唯一序号。
+    int asmMixedBlockCounter_ = 0;

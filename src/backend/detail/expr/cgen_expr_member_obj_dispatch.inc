@@ -15,6 +15,20 @@
             return;
         }
 
+        // tB Interface 契约 (B04): 接口变量的成员访问 → 走 vb6_ivtbl_<I> 槽表
+        auto itIvrefVar = knownIvrefVars_.find(objLower);
+        if (itIvrefVar != knownIvrefVars_.end()) {
+            emitExpr(*node.object);
+            comObjExpr_ = lastExpr_;
+            comMemberName_ = node.memberName;
+            ivrefIfaceName_ = itIvrefVar->second;  // 交给 com_bind 的 ivref 分支消费
+            isComMarker_ = true;
+            isEarlyBoundCom_ = false;
+            earlyBoundSym_ = nullptr;
+            lastExpr_ = lastExpr_;
+            return;
+        }
+
         // P6.4: 接口引用成员访问 (Dim x As IFoo) → 通过vtable调用
         // 设置接口标记, 由IndexOrCallExpr/AssignmentStmt识别
         auto itIfaceVar = knownIfaceVars_.find(objLower);
@@ -128,11 +142,25 @@
                     std::string fn088d =
                         resolveClassMemberCall(retCls088d, node.memberName);
                     if (!fn088d.empty()) {
+                        // 类虚表 (ai/022 B08e-6 站点⑨): 接收者是本函数返回值的裸变量
+                        // (`vb6_ret_X`, 纯读) → 与 ⑤ 同法接派发。`Function Maker() As KBase`
+                        // 体内 `Maker.Speak()` 此前静默绑基类实现, 而 Maker 完全可以返回一个
+                        // 更深类的实例 (继承来的方法体在基类里, me 是派生实例)。
+                        // 派发串与 this 实参共用同一个串; Let/Set 方向 3.4b 无槽, 不改写。
+                        std::string thisArg088d = "(void*)" + currentReturnVar_;
+                        if (!suppressVirtDispatch_
+                            && fn088d.find("_prop_let_") == std::string::npos
+                            && fn088d.find("_prop_set_") == std::string::npos) {
+                            const std::string dispatchFn088d = virtDispatchCallee(
+                                retCls088d, node.memberName, thisArg088d,
+                                /*mustDispatch=*/true, node.loc);
+                            if (!dispatchFn088d.empty()) fn088d = dispatchFn088d;
+                        }
                         if (asCallCallee_) {
-                            pendingChainObj_ = "(void*)" + currentReturnVar_;
+                            pendingChainObj_ = thisArg088d;
                             lastExpr_ = fn088d;  // 外层补参数
                         } else {
-                            lastExpr_ = fn088d + "((void*)" + currentReturnVar_ + ")";
+                            lastExpr_ = fn088d + "(" + thisArg088d + ")";
                         }
                         return;
                     }

@@ -32,7 +32,12 @@ enum class Vb6Type : uint16_t {
     Decimal = 14,    // 96-bit unsigned integer + scaling
     Byte = 17,       // 8-bit unsigned
     ULong = 19,      // unsigned Long (VB7+)
-    LongPtr = 20,     // Fix 081e: LongPtr/LongLong - architecture-width integer (intptr_t)
+    LongPtr = 20,     // Fix 081e: LongPtr - architecture-width integer (intptr_t)
+    // Fix 084m: LongLong 与 LongPtr **分开**。历史实现把 LongLong 也映射到 LongPtr,
+    // 于是 x86 下 (intptr_t = 4 字节) 它退化成 32 位 —— 与「有符号 64 位,
+    // -2^63 .. 2^63-1」的语义不符, 实测让 Asm 过程的 int64 返回值高位全丢。
+    // 语义: 恒为 64 位有符号 (int64_t), 与架构无关 (对比 LongPtr 是架构宽度)。
+    LongLong = 21,
     UserDefinedType = 36,
     Array = 8192,    // bit flag
     ByRef = 16384,   // bit flag
@@ -55,8 +60,20 @@ enum class AccessLevel : uint8_t {
     Public = 0,
     Private = 1,
     Friend = 2,     // VB6无此关键字，保留
+    Protected = 3,  // tB 扩展 (B08a): 只在类家族内可见。追加在末尾 —— Default=Public 是别名,
+                    // 插在中间会牵动任何按数值比较的代码
     Default = Public,
 };
+
+// 虚方法修饰位 (tB 扩展, ai/022 B08b): 只作用于 Sub/Function/Property 声明。
+// VB6 原生三件套互斥 → 一个字段三种取值, 不写成三个 bool (那会出现 6 种非法组合)。
+enum class ProcVirt : uint8_t {
+    None = 0,        // 未写修饰符 (= VB6 默认: 不可覆盖)
+    Overridable,     // 声明可被派生类覆盖
+    Overrides,       // 本声明覆盖祖先的 Overridable 成员
+    NotOverridable,  // 显式声明不可覆盖 (= None; 只用来与基类意图对照)
+};
+
 
 // VB6过程类型
 enum class ProcKind : uint8_t {

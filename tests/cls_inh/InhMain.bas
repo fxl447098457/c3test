@@ -1,0 +1,198 @@
+Option Explicit
+
+' ai/022 B08f-1 (D37): the class name of a UDT object field used to be dropped when the class
+' lives in another module, so `Set u.h = d` wrapped a VARIANT into a vb6_cls_InhBase* field
+' (C2440), `u.h.Speak()` emitted illegal C (C2039) and `u.h.Greet(...)` fell to late-bound COM.
+Public Type TWrap
+    h As InhBase
+    n As Long
+End Type
+
+Sub Main()
+    Dim d As InhDerived
+    Set d = New InhDerived
+    Debug.Print "INH0:" & d.Name2()
+
+    Dim b As InhBase
+    Set b = New InhBase
+    b.Bump
+    b.Bump
+    If b.Hits() = 2 Then
+        Debug.Print "INH1:OK"
+    Else
+        Debug.Print "INH1:FAIL hits=" & b.Hits()
+    End If
+
+    ' INH2: inherited Sub/Function through the stub + inherited private field
+    If d.BumpTwice() = 2 Then
+        Debug.Print "INH2:OK"
+    Else
+        Debug.Print "INH2:FAIL n=" & d.BumpTwice()
+    End If
+
+    ' INH3: inherited UDT field keeps the same offset inside the derived struct
+    d.SetPt 5
+    If d.PtSum() = 15 Then Debug.Print "INH3:OK" Else Debug.Print "INH3:FAIL sum=" & d.PtSum()
+
+    ' INH4/INH5: shadowing is child-wins, the base instance is unaffected
+    If d.Tag() = "mid" Then Debug.Print "INH4:OK" Else Debug.Print "INH4:FAIL tag=" & d.Tag()
+    If b.Tag() = "base" Then Debug.Print "INH5:OK" Else Debug.Print "INH5:FAIL tag=" & b.Tag()
+
+    ' INH6..INH8: Optional params forwarded by the stub (IsMissing seen in the base)
+    If d.Cat("p") = "p/solo" Then Debug.Print "INH6:OK" Else Debug.Print "INH6:FAIL " & d.Cat("p")
+    If d.Sum3(1, 2) = 3 Then Debug.Print "INH7:OK" Else Debug.Print "INH7:FAIL " & d.Sum3(1, 2)
+    If d.Sum3(1, 2, 10) = 13 Then Debug.Print "INH8:OK" Else Debug.Print "INH8:FAIL " & d.Sum3(1, 2, 10)
+
+    ' INH9: Property Get/Let stubs in both directions
+    d.Name = "zz"
+    If d.Name = "zz" Then Debug.Print "INH9:OK" Else Debug.Print "INH9:FAIL name=" & d.Name
+
+    ' INH10: mid-level own member and a grandparent member both reachable (3-level chain)
+    d.SetMidTag "m"
+    If d.MidTag() = "m" And d.Label = "" Then
+        d.Label = "LB"
+        If d.Label = "LB" Then Debug.Print "INH10:OK" Else Debug.Print "INH10:FAIL label"
+    Else
+        Debug.Print "INH10:FAIL mid=" & d.MidTag()
+    End If
+
+    ' INH11: derived and base instances keep separate storage (prefix copy, not shared)
+    b.SetPt 1
+    If b.PtSum() = 3 And d.PtSum() = 15 Then Debug.Print "INH11:OK" Else Debug.Print "INH11:FAIL"
+    If d.RevealSecret(4) = 8 Then Debug.Print "INH12:OK" Else Debug.Print "INH12:FAIL v=" & d.RevealSecret(4)
+    If d.TagRoundTrip("S") = "S" Then Debug.Print "INH13:OK" Else Debug.Print "INH13:FAIL"
+    ' INH14..INH16 (ai/022 B08b): an override applies to calls on the derived object, while the
+    ' base instance keeps its own implementation. FrozenSeen() proves NotOverridable parses and
+    ' inherits as a stub.
+    If d.Speak() = "derived" Then Debug.Print "INH14:OK" Else Debug.Print "INH14:FAIL " & d.Speak()
+    If b.Speak() = "base" Then Debug.Print "INH15:OK" Else Debug.Print "INH15:FAIL " & b.Speak()
+    If d.FrozenSeen() = "frozen" Then Debug.Print "INH16:OK" Else Debug.Print "INH16:FAIL " & d.FrozenSeen()
+    ' INH17..INH23 (ai/022 B08d): the class vtable. PickThru/SpeakThru/GreetThru all run
+    ' Me.<slot>() **inside the base body**, so what they return is the dispatch result.
+    Dim m As InhMid
+    Set m = New InhMid
+    If b.PickThru() = "base" Then Debug.Print "INH17:OK" Else Debug.Print "INH17:FAIL " & b.PickThru()
+    If m.PickThru() = "mid" Then Debug.Print "INH18:OK" Else Debug.Print "INH18:FAIL " & m.PickThru()
+    ' INH19 is the evidence for 'bind to the nearest override', not to the leaf
+    If d.PickThru() = "mid" Then Debug.Print "INH19:OK" Else Debug.Print "INH19:FAIL " & d.PickThru()
+    If d.SpeakThru() = "derived" Then Debug.Print "INH20:OK" Else Debug.Print "INH20:FAIL " & d.SpeakThru()
+    If b.SpeakThru() = "base" Then Debug.Print "INH21:OK" Else Debug.Print "INH21:FAIL " & b.SpeakThru()
+    If d.GreetThru("bob") = "hi bob (derived)" Then Debug.Print "INH22:OK" Else Debug.Print "INH22:FAIL " & d.GreetThru("bob")
+    ' INH23: a base-typed variable holding a derived instance must not slice to the base impl
+    Dim up As InhBase
+    Set up = d
+    If up.Speak() = "derived" Then Debug.Print "INH23:OK" Else Debug.Print "INH23:FAIL " & up.Speak()
+    ' INH24/INH25 (ai/022 B08d): a second branch off the same base (fan-out). Each instance
+    ' dispatches on its own table, so the sibling's Speak must not leak into InhDerived.
+    Dim sib As InhSib
+    Set sib = New InhSib
+    If sib.Speak() = "sibling" Then Debug.Print "INH24:OK" Else Debug.Print "INH24:FAIL " & sib.Speak()
+    ' INH25: inherited slot the sibling does NOT override still resolves through ITS table
+    ' (base's own Pick) while the base-typed view keeps working on the same instance
+    If sib.PickThru() = "base" Then Debug.Print "INH25:OK" Else Debug.Print "INH25:FAIL " & sib.PickThru()
+    Dim up3 As InhBase
+    Set up3 = sib
+    If up3.SpeakThru() = "sibling" Then Debug.Print "INH26:OK" Else Debug.Print "INH26:FAIL " & up3.SpeakThru()
+    ' INH27..INH31 (ai/022 B08e): the very same calls written INSIDE `With <var>` must bind
+    ' through the instance's own table. INH27/28 are the discriminators: wu is declared
+    ' InhBase but holds the InhDerived instance, so a statically bound call answers "base".
+    Dim wu As InhBase
+    Set wu = d
+    With wu
+        If .Speak() = "derived" Then Debug.Print "INH27:OK" Else Debug.Print "INH27:FAIL " & .Speak()
+        If .Greet("bob") = "hi bob (derived)" Then Debug.Print "INH28:OK" Else Debug.Print "INH28:FAIL " & .Greet("bob")
+    End With
+    Dim wm As InhMid
+    Set wm = New InhMid
+    With wm
+        ' INH29: mid instance picks mid's override; INH30/31 stay on the direct path
+        ' (Property Let/Get and a plain Sub are not virtual slots -> must not be rewritten).
+        If .Pick() = "mid" Then Debug.Print "INH29:OK" Else Debug.Print "INH29:FAIL " & .Pick()
+        .Name = "wn"
+        If .Name = "wn" Then Debug.Print "INH30:OK" Else Debug.Print "INH30:FAIL " & .Name
+        .Bump
+        .Bump
+        If .Hits() = 2 Then Debug.Print "INH31:OK" Else Debug.Print "INH31:FAIL " & .Hits()
+    End With
+    ' INH32..INH34 (ai/022 B08e-2): the holder's field is declared InhBase but holds the
+    ' InhDerived instance. INH32 (bare `m_up.Speak()`) is the control that already passed;
+    ' INH33/INH34 are the Me-prefixed field chain, which used to bind statically to the
+    ' BASE implementation (A/B control against the pre-B08e-2 binary: both FAIL there).
+    Dim hd As InhHolder
+    Set hd = New InhHolder
+    hd.Hold d
+    If hd.ViaBare() = "derived" Then Debug.Print "INH32:OK" Else Debug.Print "INH32:FAIL " & hd.ViaBare()
+    If hd.ViaMeField() = "derived" Then Debug.Print "INH33:OK" Else Debug.Print "INH33:FAIL " & hd.ViaMeField()
+    If hd.ViaMeFieldArg("bob") = "hi bob (derived)" Then Debug.Print "INH34:OK" Else Debug.Print "INH34:FAIL " & hd.ViaMeFieldArg("bob")
+    ' INH35/INH36 (ai/022 B08e-4, sites 11+14): property read through the Me-prefixed field
+    ' chain now dispatches (5 stored -> derived's Get adds 100), while the write stays direct.
+    ' INH36 is the bare-receiver control that already worked before this batch.
+    If hd.ViaLevel() = "105" Then Debug.Print "INH35:OK" Else Debug.Print "INH35:FAIL " & hd.ViaLevel()
+    If hd.ViaLevelBare() = "107" Then Debug.Print "INH36:OK" Else Debug.Print "INH36:FAIL " & hd.ViaLevelBare()
+    ' INH37/INH38 (ai/022 B08e-5, sites 6+7): default-property call form on a base-typed field
+    ' holding a derived instance now dispatches; INH38 is the explicit form that already worked.
+    If hd.ItemDefault() = "derived9" Then Debug.Print "INH37:OK" Else Debug.Print "INH37:FAIL " & hd.ItemDefault()
+    If hd.ItemBare() = "derived9" Then Debug.Print "INH38:OK" Else Debug.Print "INH38:FAIL " & hd.ItemBare()
+    ' INH39/INH40 (ai/022 B08e-6, site 9): the overridable call is made on the *return
+    ' variable* of a Function whose declared return type is the base class. RefOf hands back
+    ' Me, so on the derived instance it must answer "derived" (INH39 -- used to bind
+    ' statically to the base body); INH40 is the plain base-typed control that stays "base".
+    Dim rb As InhBase
+    Set rb = d.RefOf()
+    If d.g_viaRet = "derived" Then Debug.Print "INH39:OK" Else Debug.Print "INH39:FAIL " & d.g_viaRet
+    Set rb = b.RefOf()
+    If b.g_viaRet = "base" Then Debug.Print "INH40:OK" Else Debug.Print "INH40:FAIL " & b.g_viaRet
+    ' INH41..INH43 (ai/022 B08f-1, D37): the UDT object field is declared in THIS module and
+    ' references a class from another one. The class name used to be dropped in analysis,
+    ' so `Set u.h = d` wrapped a VARIANT into a vb6_cls_InhBase* field (C2440), `u.h.Speak()`
+    ' emitted illegal C (C2039) and `u.h.Greet(...)` fell to late-bound COM dispatch. All three
+    ' now go through the class member path and bind to the instance.
+    Dim u As TWrap
+    Set u.h = d
+    If u.h.Speak() = "derived" Then Debug.Print "INH41:OK" Else Debug.Print "INH41:FAIL " & u.h.Speak()
+    If u.h.Greet("bob") = "hi bob (derived)" Then Debug.Print "INH42:OK" Else Debug.Print "INH42:FAIL " & u.h.Greet("bob")
+    Set u.h = b
+    If u.h.Speak() = "base" Then Debug.Print "INH43:OK" Else Debug.Print "INH43:FAIL " & u.h.Speak()
+    ' INH44..INH52 (ai/022 B09): `MyBase.<member>` = the implementation the *immediate* base
+    ' would run, straight-called (no __cvtbl). INH44/INH45 are the discriminators -- the same
+    ' members answer "derived" through Me./obj. (INH12/INH34), so a table lookup would FAIL here.
+    ' INH46 pins nearest-declaration (InhMid shadows Tag). INH47/INH48 = property Let+Get and a
+    ' public data field through the base face. INH49/INH50 = construction chain root->leaf and
+    ' MyBase.Class_Initialize (InhMid's Private initializer, reached through the B09 bridge).
+    ' INH51 = an Overrides whose return type is a project class (com_entry.c used to die on it).
+    If d.BaseSpeak() = "base" Then Debug.Print "INH44:OK" Else Debug.Print "INH44:FAIL " & d.BaseSpeak()
+    If d.BaseGreet("bob") = "hi bob (base)" Then Debug.Print "INH45:OK" Else Debug.Print "INH45:FAIL " & d.BaseGreet("bob")
+    If d.BaseTag() = "mid" Then Debug.Print "INH46:OK" Else Debug.Print "INH46:FAIL " & d.BaseTag()
+    If d.NameViaBase("wn") = "wn" Then Debug.Print "INH47:OK" Else Debug.Print "INH47:FAIL " & d.NameViaBase("wn")
+    If d.LabelViaBase("lbl") = "lbl" Then Debug.Print "INH48:OK" Else Debug.Print "INH48:FAIL " & d.LabelViaBase("lbl")
+    If d.g_init = "base;mid;leaf;" Then Debug.Print "INH49:OK" Else Debug.Print "INH49:FAIL " & d.g_init
+    d.RerunMidInit
+    If d.g_init = "base;mid;leaf;mid;" Then Debug.Print "INH50:OK" Else Debug.Print "INH50:FAIL " & d.g_init
+    If d.Maker() Is d Then Debug.Print "INH51:OK" Else Debug.Print "INH51:FAIL"
+    Dim mi2 As InhMid
+    Set mi2 = New InhMid
+    If mi2.g_init = "base;mid;" Then Debug.Print "INH52:OK" Else Debug.Print "INH52:FAIL " & mi2.g_init
+    ' INH53..INH58 (ai/022 B09c): the `Set` direction of MyBase, plus the x86 layout line of
+    ' B09b pushed to the deepest holder. INH53/INH54 are the target-side fix (`Set MyBase.Peer`
+    ' used to emit the bare identifier MyBase -> C2065); INH55 reads/writes through a UDT object
+    ' field whose declared type is an ancestor holding a sibling instance (Level has no slot on
+    ' that branch -> root's accessors answer 4, Speak does -> "sibling"); INH56/INH57 pin the
+    ' immediate-base rule for Class_Initialize on a 2-level chain - note the root's initializer
+    ' ASSIGNS g_init, so re-running it legitimately wipes the "sib;" the leaf appended;
+    ' INH58 round-trips the root's Private UDT field from two levels down, which is exactly what
+    ' the void*-vs-vb6_type_TPoint stride difference corrupted on x86; INH59 is ⑮e with the
+    ' dispatch half included (root's Let stores 5, the derived's Override reads 5+100).
+    If d.SetMyBasePeer() = "same" Then Debug.Print "INH53:OK" Else Debug.Print "INH53:FAIL " & d.SetMyBasePeer()
+    If d.SetMyBaseNothing() = "cleared" Then Debug.Print "INH54:OK" Else Debug.Print "INH54:FAIL"
+    Dim sg As InhSib
+    Set sg = New InhSib
+    If sg.PropWriteViaUdt(4) = "4/sibling" Then Debug.Print "INH55:OK" Else Debug.Print "INH55:FAIL " & sg.PropWriteViaUdt(4)
+    If sg.g_init = "base;sib;" Then Debug.Print "INH56:OK" Else Debug.Print "INH56:FAIL " & sg.g_init
+    sg.InitRerun
+    If sg.g_init = "base;" Then Debug.Print "INH57:OK" Else Debug.Print "INH57:FAIL " & sg.g_init
+    sg.SetPt 3
+    If sg.PtSum() = 9 Then Debug.Print "INH58:OK" Else Debug.Print "INH58:FAIL " & sg.PtSum()
+    Set u.h = d
+    u.h.Level = 5
+    If u.h.Level = 105 Then Debug.Print "INH59:OK" Else Debug.Print "INH59:FAIL " & u.h.Level
+End Sub

@@ -301,9 +301,25 @@ void CCodeGen::visit(NewExpr& node) {
     // (cgen_decl_var.cpp:198 knownTypedComVars_ 注册) 保持一致.
     auto* clsSym = lookupModuleDotted(node.className);
     if (clsSym && clsSym->kind == SymbolKind::Class) {
-        // 本工程类: 调用类工厂函数
+        // 本工程类: 调用类工厂函数。
+        // ai/084c: 带实参 → _NewParams(实参) (语义层已按 ctorParams_ 校验元数,
+        // 工厂与原型在类模块 .c/.h 成对生成); 无实参走 _New() 默认值路径。
         std::string clsStruct = "vb6_cls_" + cIdent(clsSym->name);
-        lastExpr_ = "(" + clsStruct + "_New())";
+        if (!node.args.empty()) {
+            std::vector<std::string> emitted;
+            for (auto& a : node.args) {
+                emitExpr(*a);
+                emitted.push_back(std::move(lastExpr_));
+            }
+            std::string joined;
+            for (auto& e : emitted) {
+                if (!joined.empty()) joined += ", ";
+                joined += e;
+            }
+            lastExpr_ = "(" + clsStruct + "_NewParams(" + joined + "))";
+        } else {
+            lastExpr_ = "(" + clsStruct + "_New())";
+        }
     } else if (clsSym && clsSym->kind == SymbolKind::ComClass) {
         // P24-11: COM early-bound class: use real ProgID from TypeLib, not the raw class name
         std::string progId = clsSym->comProgId.empty() ? node.className : clsSym->comProgId;
@@ -323,6 +339,67 @@ void CCodeGen::visit(NewExpr& node) {
 void CCodeGen::visit(TypeOfExpr& node) {
     emitExpr(*node.object);
     std::string obj = std::move(lastExpr_);
+    // tB Interface B06a: TypeOf x Is <新式接口> → 真 QueryInterface，经 RTL 的
+    // vb6_IfaceSupports（QI 成功后立刻 Release，净效果只回答"支持不支持"）。
+    // 左侧只认接口变量：类变量/COM 变量的 TypeOf 仍走 vb6_TypeOf 老路 —— 那个桩
+    // 在 vb6rtl_conv.c 里恒返 0（既有工程的 TypeOf x Is <类> 一直恒假），改它是
+    // 行为变更，另批处理，本批刻意不碰。
+    if (const IfaceView* ivt = ivLookupIface(node.typeName)) {
+        std::string objLower = obj;
+        std::transform(objLower.begin(), objLower.end(), objLower.begin(), ::tolower);
+        auto itClsTof = knownClassVars_.find(objLower);
+        if (itClsTof != knownClassVars_.end()) {
+            // 类变量的动态类型恒等于声明类型 → 静态 IID 归属判定即可（按类导出的
+            // vb6_iv_test_iid_<C>，见 cgen_iface_vtbl.cpp），不需要减 offsetof，也就
+            // 不会要求"这个类恰好实现了该接口"才编译得过（不实现时必须老实返回 False）。
+            lastExpr_ = "vb6_iv_test_iid_" + cIdent(itClsTof->second) + "(" + obj + ", vb6_iv_iid_" +
+                        cIdent(ivt->name) + ")";
+            return;
+        }
+        if (!knownIvrefVars_.count(objLower)) {
+            diag_.error(DiagnosticID::CodeGenUnsupportedFeature, node.loc,
+                "TypeOf ... Is " + node.typeName + " needs an interface variable or a project"
+                " class variable on the left side (tB Interface " + ivt->name + ")");
+            lastExpr_ = "0";
+            return;
+        }
+        lastExpr_ = "vb6_IfaceSupports(" + obj + ", vb6_iv_iid_" + cIdent(ivt->name) + ")";
+        return;
+    }
+    // Fix 193: `TypeOf lhs Is <项目类>` —— 老路那一支 `vb6_TypeOf` 是**恒返 0 的桩**
+    // (vb6rtl_conv.c: 注释写着"简化版, 始终返回 False"), 于是项目类这一位一直答"否"
+    // (`TypeOf raw Is ShapeAct` 也 False, 与 CoClass 无关)。改成编译期按
+    // **声明类 + 祖先链**判定: 声明类 D 的 chain (自根到叶, 末位是自身) 含目标类 → 真。
+    //
+    // 为什么是静态判定而不是运行时 RTTI: 项目类没有通用的运行时类型标记 ——
+    // `__cvtbl` 只在**有虚槽**的类上生成 (cgen_inherit.cpp: "无虚槽的类连字段都不加 →
+    // 零新语法逐字节不变"), 拿它当 RTTI 覆盖面不均; 给所有类加类型字段则要动
+    // 每个类的结构体布局 (022 线有逐字节护栏), 代价与收益不成比例。
+    //
+    // 残留边界 (登记, 不静默): `Dim b As InhBase : Set b = New InhDerived` 之后
+    // `TypeOf b Is InhDerived` 按声明类型答"否", 而 VB6 按实际类型答"是"。
+    // 这是**假阴性**, 与改前恒假同向, 不会把原本对的翻成错的。
+    if (node.object) {
+        const Symbol* tofSym = lookupTypeSymbol(node.typeName);
+        if (tofSym && tofSym->kind == SymbolKind::Class) {
+            std::string declCls = inferClassTypeOfExpr(*node.object);
+            if (!declCls.empty()) {
+                const std::string want = Symbol::toLower(tofSym->name);
+                bool isA = (Symbol::toLower(declCls) == want);
+                if (!isA) {
+                    if (const ClassChainView* cvD = classViewByName(declCls)) {
+                        for (const auto& k : cvD->chain) {
+                            if (k == want) { isA = true; break; }
+                        }
+                    }
+                }
+                // Nothing 不匹配任何类型 (VB6 语义) → 真也要判空, 不能发常量 1。
+                // 假那一支用逗号表达式保留 obj 的求值 (副作用), 不是裸 0。
+                lastExpr_ = isA ? ("(" + obj + ") != NULL") : ("(" + obj + ", 0)");
+                return;
+            }
+        }
+    }
     // Fix 040b: vb6_TypeOf expects void* (IDispatch*). If the operand is a
     // Variant (vb6_VARIANT struct), extract the object pointer first.
     if (cExprIsVariant(obj)) {

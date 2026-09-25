@@ -1,0 +1,5 @@
+Type=Exe
+Name=SamePkg
+Module=PkgHost; host_stub.bas
+Startup="Sub Main"
+Package=SamePkg; 1.0

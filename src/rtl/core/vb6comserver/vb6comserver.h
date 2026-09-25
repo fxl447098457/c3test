@@ -51,6 +51,20 @@ typedef struct vb6_EventDesc {
     int32_t dispid;         // DISPID
 } vb6_EventDesc;
 
+// ai/022 B16: 薄指针 (vb6_ivref_<I>*) 指向的槽表首三槽 = IUnknown。生成码的
+// vb6_ivtbl_<I> 与它逐字对齐 (B04 起槽号固定 0/1/2)。
+// 本类型与 vb6rtl_class_com.h 里那份是**同一份声明**: 两棵编译树 (vb6rtl / vb6comserver)
+// 各自要能用, 而生成码两个头都 include —— 用同一个 #ifndef 守卫, 先到的那个生效。
+// `__stdcall` 是 B16 的口径: x86 下不加就是 __cdecl, 与类型库里如实写出的 CC_STDCALL 对不上。
+#ifndef VB6_IVTBL_PREFIX_DEFINED
+#define VB6_IVTBL_PREFIX_DEFINED
+typedef struct vb6_ivtbl_prefix {
+    long (__stdcall *QueryInterface)(void* self, const void* riid, void** ppv);
+    unsigned long (__stdcall *AddRef)(void* self);
+    unsigned long (__stdcall *Release)(void* self);
+} vb6_ivtbl_prefix;
+#endif
+
 // coclass描述结构
 // 每个Public类(instancing >= PublicNotCreatable)生成一条
 typedef struct vb6_CoClassDesc {
@@ -75,6 +89,13 @@ typedef struct vb6_CoClassDesc {
     const char* sourceIfaceIid;           // source dispinterface IID字符串字符串 (NULL=无事件)
     int eventCount;                       // 事件数量
     const vb6_EventDesc* events;          // 事件描述表 (DISPID + 名称)
+    // ai/022 B16: 新式接口 (`Interface ... End Interface`) 的对外面。两个指针同生同灭:
+    // cgen 只给"实现了新式接口"的类生成它们, 其余类 (legacy `Implements` 的类模块、
+    // 无接口的存量工程) 都是 NULL —— QI 与销毁照旧走胖指针那条, 存量产物零影响。
+    // 为什么在**结构体末尾**追加: 除本表和空桩 `{0}` 外没有别的位置初始化者, 但末尾
+    // 追加让任何"少写一个初始化器"的旧写法自动得 NULL, 不会错位到别的字段上。
+    void* (*ifaceThinPtr)(void* instance, const void* riid);  // 接口 IID -> 薄指针 (vb6_ivref_<I>*)
+    void  (*instanceClaimRelease)(void* instance);            // 包装器放手: 清 __comObj + 退底座引用
 } vb6_CoClassDesc;
 
 // IDispatch方法描述

@@ -74,6 +74,10 @@
             currentClassIsInterface = true;
         }
     }
+
+    // 6.5 Inherits (tB B07b): 祖先成员的转发桩声明 → .h (接口宿主无继承, 与 currentClassIsInterface 互斥)
+    if (isClassModule_ && !currentClassIsInterface) emitInheritedProcDecls(module);
+    if (!currentClassIsInterface) emitChainInitDecl(module);  // tB Inherits B09: 构造链入口
     for (auto& decl : module.declarations) {
         if (currentClassIsInterface) continue;  // 接口类: 跳过方法声明
         // 泛型模板 (tB): 本体不发前向声明 (特化副本各自以扁名发; 模板名从不被调用)
@@ -91,7 +95,9 @@
             // Fix 055: Form事件处理函数不能为static, 因为wndproc用extern引用它们
             bool isFormEventProc = module.isFormModule && sub.name.find("Form_") == 0;
             // Fix 089e: Friend/Public 成员跨模块可调用 → 非 static 声明
-            if (sub.access == AccessLevel::Public || sub.access == AccessLevel::Friend || isFormEventProc) {
+            // tB B08a: Protected 也非 static —— 派生模块 TU 的转发桩要能看见它
+            if (sub.access == AccessLevel::Public || sub.access == AccessLevel::Friend ||
+                sub.access == AccessLevel::Protected || isFormEventProc) {
                 h_.emitLine(sig + ";");
             } else {
                 h_.emitLine("static " + sig + ";");
@@ -102,7 +108,8 @@
             // Fix 055: Form事件处理函数不能为static, 因为wndproc用extern引用它们
             bool isFormEventFunc = module.isFormModule && func.name.find("Form_") == 0;
             // Fix 089e: Friend/Public 成员跨模块可调用 → 非 static 声明
-            if (func.access == AccessLevel::Public || func.access == AccessLevel::Friend || isFormEventFunc) {
+            if (func.access == AccessLevel::Public || func.access == AccessLevel::Friend ||
+                func.access == AccessLevel::Protected || isFormEventFunc) {  // tB B08a
                 h_.emitLine(sig + ";");
             } else {
                 h_.emitLine("static " + sig + ";");
@@ -111,7 +118,8 @@
             auto& prop = static_cast<PropertyDecl&>(*decl);
             std::string sig = makePropertySignature(prop);
             // Fix 089e: Friend Property (Friend Property Get/Let/Set) 跨模块可调用
-            if (prop.access == AccessLevel::Public || prop.access == AccessLevel::Friend) {
+            if (prop.access == AccessLevel::Public || prop.access == AccessLevel::Friend ||
+                prop.access == AccessLevel::Protected) {  // tB B08a
                 h_.emitLine(sig + ";");
             } else {
                 h_.emitLine("static " + sig + ";");

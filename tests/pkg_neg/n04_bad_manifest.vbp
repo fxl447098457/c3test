@@ -1,0 +1,5 @@
+Type=Exe
+Name=PkgNeg04
+Module=PkgHost; host_stub.bas
+Startup="Sub Main"
+Package=BadPkg; 1.0

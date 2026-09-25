@@ -43,6 +43,24 @@ static HRESULT STDMETHODCALLTYPE ComObj_QueryInterface(vb6_ComObject* self, REFI
     if (self->desc && self->desc->ifaceCount > 0 && self->desc->ifaceIids) {
         for (i = 0; i < self->desc->ifaceCount; i++) {
             if (IsEqualIID(riid, self->desc->ifaceIids[i])) {
+                // ai/022 B16: 新式接口 (Interface 块) 交回**薄指针** —— 首字段是
+                // vb6_ivtbl_<I>*, 槽 3 起是契约成员, 与类型库 TKIND_INTERFACE 那一条
+                // (cFuncs / oVft / CC_STDCALL) 同形. 这正是 B15 起对外广告的那一档,
+                // 所以"广告 == 应答"在接口这一档上成立 (D60-4 的"胖应答瘦"到此收口).
+                // 生命周期: 薄指针的引用记在实例自己的 __refcount 上 (B05), 包装器
+                // 最后一次 Release 会把底座引用交还 (见 ComObj_Release) → QI 之后立刻
+                // Release 包装器 (IClassFactory::CreateInstance 的规范姿势) 也安全.
+                if (self->desc->ifaceThinPtr && self->vb6Instance) {
+                    void* thin = self->desc->ifaceThinPtr(self->vb6Instance,
+                                                           self->desc->ifaceIids[i]);
+                    if (thin) {
+                        vb6_ivtbl_prefix* vt = *(vb6_ivtbl_prefix**)thin;
+                        vt->AddRef(thin);
+                        *ppv = thin;
+                        return S_OK;
+                    }
+                    /* 本类没实现这个新式接口 (provider 认 IID): 落到胖路 */
+                }
                 *ppv = self;  // dispinterface: same IDispatch pointer
                 self->vtable->AddRef(self);
                 return S_OK;
@@ -94,18 +112,19 @@ static ULONG STDMETHODCALLTYPE ComObj_Release(vb6_ComObject* self) {
          self->ownsInstance, (void*)self->vb6Instance);
     InterlockedDecrement(&g_vb6_cRef);
     if (count == 0) {
-        // Fix 188: 只有"拥有实例"的包装器 (CoCreateInstance / Set x = New cY) 才在
-        // 释放归零时销毁 VB6 实例. 借用型包装 (Public 对象字段 getter / 方法返回的
-        // 工程类实例) 的实例生命周期归宿主 (字段/全局变量/集合), 客户端释放只回收
-        // 包装器; 否则宿主字段变悬垂指针, 之后宿主再用/再销毁即 0xC0000374
-        // (实测 VBMAN x86 demo: `VBMAN.HttpClient.ShowPage` 后客户端释放包装器,
-        //  把 cVBMAN 字段里的 cHttpClient 实例销毁掉).
+        // Fix 188 + ai/022 B16 的并集: 是否销毁实例先看**拥有关系** —— 只有拥有型包装
+        // (CoCreateInstance / Set x = New cY) 才动实例; 借用型 (Public 对象字段 getter /
+        // 方法返回的工程类实例) 的生命周期归宿主, 只清实例上的 __comObj 回填。
+        // 拥有型里, 实现了新式接口的类走 claim 那条: 包装器退掉自己的"底座引用",
+        // 实例若有薄引用在世则不销毁 (由最后一个薄引用的 Release 收尾), 否则当场销毁;
+        // 没有这道 claim 的类 (存量/无接口) 结果与原来直接 destroyFunc 完全一致。
         if (self->ownsInstance) {
-            if (self->desc && self->desc->destroyFunc && self->vb6Instance) {
+            if (self->desc && self->desc->instanceClaimRelease && self->vb6Instance) {
+                self->desc->instanceClaimRelease(self->vb6Instance);
+            } else if (self->desc && self->desc->destroyFunc && self->vb6Instance) {
                 self->desc->destroyFunc(self->vb6Instance);
             }
         } else if (self->vb6Instance) {
-            // 清掉实例上的 __comObj 回填, 避免下次 getter 复用已释放的包装器
             *(void**)self->vb6Instance = NULL;
         }
         self->vb6Instance = NULL;
@@ -231,6 +250,9 @@ static HRESULT STDMETHODCALLTYPE ComObj_Invoke(vb6_ComObject* self, DISPID dispI
         }
         // 适配器按 vb6_VARIANT (24B) 布局访问实参与返回槽, 而 COM 边界的
         // OLE VARIANT 是 16B。每个实参先整复制进 24B 槽, 再按需数值强转。
+        // (ai/022 B17 那条"未初始化就被 VariantClear"的堆损坏在这里由下面的
+        //  `memset(slot, 0, sizeof(*slot))` 一并解决 —— 旧写法按 VARIANT 尺寸清零,
+        //  在这套 24B 槽设计下 x86 会算少, 故合并时只保留这一份。)
         for (int i = 0; i < argc; i++) {
             VARIANT* src = &pDispParams->rgvarg[argc - 1 - i];
             vb6_VarSlot* slot = &((vb6_VarSlot*)coercedArgs)[i];

@@ -90,6 +90,19 @@ void CCodeGen::visit(ReDimStmt& node) {
         }
     }
     Vb6Type elemType = resolveArrayElemType(node.asType.get());
+    // Fix 192: `ReDim a(1) As Circle` 的元素类名登记 (与声明侧 `Dim a() As C` 对称).
+    // 这是本缺口**最初被发现的形状** (`ReDim ... As <类名>`), 但实测静态数组
+    // `Dim s(1) As C` 一样坏 —— 根因在访问侧推断, 不在 ReDim。此处登记是让
+    // ReDim 首次确立元素类型时也生效 (VB6 允许 ReDim 带 As 覆盖/补声明)。
+    // 只认裸变量名: 成员链 (obj.Field) / With 成员 (.Data) 的键形态与访问侧
+    // 查表的键对不上, 猜错比不猜更坏 —— 沿用 Fix 180 的"不去猜"纪律。
+    {
+        std::string cls = resolveArrayClassElemType(node.asType.get());
+        if (!cls.empty() && !lowerVar.empty()
+            && lowerVar.find('.') == std::string::npos) {
+            arrayClassElemTypes_[lowerVar] = cls;
+        }
+    }
     std::string saElemType = mapSaElemType(elemType);
     // Bug4-Fix: UDT数组需使用vb6_SafeArrayReDim1D_Udt
     std::string udtCType = resolveArrayUdtElemCType(node.asType.get());

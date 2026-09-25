@@ -5,6 +5,7 @@
 #include "common/types.hpp"
 #include "common/diagnostics.hpp"
 #include <algorithm>
+#include <map>
 #include <string>
 #include <vector>
 #include <unordered_map>
@@ -13,6 +14,30 @@
 #include <optional>
 
 namespace vb6c3 {
+
+// ============================================================
+// 084a: 类成员访问级别预计算表 (ai/084a M1)
+// ============================================================
+// 为什么预计算而不是 visit 期查符号表: 跨模块类符号 (extSym) 的成员表要到
+// stage 3.5 注入才有, 当前模块分析时 lookup 查无成员 —— 与 023 S03 预计算
+// 屏蔽表同因同解。driver 在 runSemanticAnalysis 入口处扫一遍全部类模块的
+// AST 声明建表, 之后只读, 经 SemanticAnalyzer::setMemberAccessTable 下发。
+struct MemberAccessEntry {
+    AccessLevel level = AccessLevel::Public;
+    std::string definingModuleLower;  // 声明成员的类模块名 (小写)
+    // 字段与过程在继承合并下不对称 (tB B07b): 祖先 Private **字段**仍并入派生类
+    // (inhFields 无 Private 剔除), Private **过程**被剔除 (转发桩只收非 Private)。
+    // 故家族内放行只对字段成立; Private 过程在派生类里必须语义期拦下 —— 否则
+    // 语义放行、发码期 LNK2019, 比报错糟一档。
+    bool isField = false;
+    // ai/084a M3: 定义类所属包 (小写; 空 = 宿主工程模块)。Friend 成员的跨包
+    // 裁决依据: 消费方包 != 定义包 且 !pkgFriendOpen → 7008。
+    std::string definingPkg;
+    bool pkgFriendOpen = false;  // 定义包清单 [Export] Friend=True
+};
+// key1 = 类名小写, key2 = 成员名小写。只含工程内类模块声明的成员 (白名单):
+// 查不到 = 不裁决, 维持旧行为, 避免屏蔽表过宽误杀。
+using MemberAccessTable = std::map<std::string, std::map<std::string, MemberAccessEntry>>;
 
 class TypeSystem;  // 前向声明
 
@@ -108,6 +133,11 @@ struct Symbol {
     // 仅对 SymbolKind::Variable 有效 — 当变量声明为 As ClassName 时存储类名
     // 用于跨模块解析时传递类类型信息到 consuming 模块的 cgen
     std::string variableTypeName;
+    // tB B08c: 局部变量/参数 `As <类型>` 的**原文类型名** (模块级字段同样记录, 与上一条独立)。
+    // 为什么不复用 variableTypeName: 那条已被后端十余处按"非空即类实例"消费 (inferClassTypeOfExpr
+    // 的 Fix 084g 分支、cgen_with、comwrite…)，给局部变量补上它就是改**发码**，破本批"发码零改动"
+    // 的验收口径。本字段目前只有 Protected 越权判定一个读者。
+    std::string srcTypeName;
     // Fix 183: 该变量声明为 As New (模块级 Public As New ClassName).
     // 跨模块注入时必须随 Symbol 复制, 否则消费模块不知道需要惰性实例化,
     // 导致 As New 全局对象运行期恒为 NULL → 解引用 0xC0000005.
@@ -188,6 +218,10 @@ struct Symbol {
     // Pattern C/D2 属性赋值改写 (prop_get_ → prop_let_) 无法判定 Let 末参是否
     // Variant → 值实参不打包 → C2440. 故独立记录 Let/Set 胜出者参数表 (同类内
     // Let/Set 各自唯一, 无条件覆盖写入), 供 findClassMemberWriteParams 使用.
+    // tB 类继承 (B08a): 成员小写键 -> 声明时的访问级别。既有 11 张成员表都不带访问级别,
+    // 而 `Protected` 的语义 (家族内可见) 与 `Inherits` 的可见面裁决都要读它; 跨模块拷贝
+    // (driver_crossmod) 与继承合并 (driver_classchain) 两处都得带上, 漏一张就是静默错判。
+    std::unordered_map<std::string, AccessLevel> memberAccessLevels;
     std::unordered_map<std::string, std::vector<ParameterInfo>> memberLetParams;
     std::unordered_map<std::string, std::vector<ParameterInfo>> memberSetParams;
     bool isInterface = false;                          // 是否为接口类(纯抽象,无实现)

@@ -17,6 +17,8 @@
         indent_++;
         for (auto& opt : module.options) visitStmtHelper(*opt);
         for (auto& imp : module.implements) visitStmtHelper(*imp);
+        for (auto& itf : module.interfaces) visitDeclHelper(*itf);
+        for (auto& cc : module.coclasses) visitDeclHelper(*cc);
         for (auto& def : module.defTypes) visitStmtHelper(*def);
         for (auto& decl : module.declarations) visitDeclHelper(*decl);
         for (auto& attr : module.attributes) visitStmtHelper(*attr);

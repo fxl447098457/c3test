@@ -1,0 +1,9 @@
+Type=DLL
+Name="DemoDll"
+Class=IDemoShape; IDemoShape.cls
+Class=DemoBase; DemoBase.cls
+Class=DemoDerived; DemoDerived.cls
+Class=DemoShape; DemoShape.cls
+Class=DemoHolder; DemoHolder.cls
+Module=DemoBlocksDll; DemoBlocksDll.bas
+Startup=""

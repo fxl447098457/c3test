@@ -249,6 +249,12 @@ bool Driver::runParser(const CompileOptions& options) {
                 std::filesystem::path p(utf8ToPath(filePath));
                 module->moduleName = pathToUtf8(p.stem());
             }
+            // ai/023 S03: 包归属回填 (S02 在 driver_compile 登记的 文件→包 映射;
+            // 查不到 = 宿主源, packageName 留空)
+            {
+                auto pit = packageOfFile_.find(normSourceKey(filePath));
+                if (pit != packageOfFile_.end()) module->packageName = pit->second;
+            }
             // P7: 保存窗体描述 (此时moduleName已从Attribute VB_Name或文件名确定)
             // Fix 110: .ctl/.pag 与 .frm 同样需要设计期子控件元数据.
             // 背景: VB6 的 UserControl/PropertyPage 可放置设计期子控件

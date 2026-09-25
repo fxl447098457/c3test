@@ -120,6 +120,21 @@ $script:pass = 0
 $script:fail = 0
 $script:skip = 0
 $script:total = 0
+# ai/022 B13c: 类型库 / COM 服务器表 / 接口 vtable ä¸条通道是否同值,
+# 取读数的助手单独一个文件（tests\tlb_identity.ps1）。它只用 $C3/$Tests/$OutDir,
+# 这里都已经就位。
+. (Join-Path $PSScriptRoot "tlb_identity.ps1")
+# ai/022 B14: 同样单独一个文件 —— 这回是「真客户端」：
+# tests\disp_invoke.ps1 用 tests\tools\disp_probe.c（LoadLibrary + DllGetClassObject）
+# 把产出的 DLL 真的按 IDispatch 调一遍，不再只比字节。
+. (Join-Path $PSScriptRoot "disp_invoke.ps1")
+# ai/022 B16: 类型库的「契约面」读数（tests\tools\tlb_slots.cpp）——
+# 库里那一档真接口发不发成员、槽偏移/调用约定对不对；x86 与 x64 各一条读数。
+. (Join-Path $PSScriptRoot "tlb_contract.ps1")
+# ai/022 B17: 外部激活 —— 真注册 (DllRegisterServer) + 走系统那条路的客户：
+# tests\tools\com_act_probe.c 按 CLSID/ProgID `CoCreateInstance` 拿 IDispatch（= CreateObject
+# 那条路）与接口薄指针（早绑定直调契约槽），并证明反注册后三类键都不留。
+. (Join-Path $PSScriptRoot "com_activate.ps1")
 
 # === COM 测试前: 检查相关 COM 组件是否已注册 ===
 # 仅当所需的 COM 组件已注册时, 才执行对应的 COM 测试 (例如 VBMANLIB)
@@ -579,6 +594,177 @@ function Test-Vbp {
 }
 
 # === 语法检查测试 ===
+# Negative syntax case: --syntax-only must FAIL and report the given (ASCII) text.
+# Used by the tB-extension contract diagnostics (ai/022 B01+).
+# Multi-source --syntax-only probes (ai/022 B07): C3.exe accepts several positional files
+# and driver_frontend picks the module kind per extension, so class-Inherits cases that need
+# the base class in a *second* module are testable without a full vbp build.
+function Invoke-SyntaxProj {
+    param([array]$Sources)
+    $argList = (($Sources | ForEach-Object { '"' + $_ + '"' }) -join ' ')
+    $out = & cmd /c ('"' + $C3 + '" ' + $argList + ' --syntax-only 2>&1')
+    $script:syntaxProjExit = $LASTEXITCODE
+    return (($out | Out-String) -replace '\s+', ' ')
+}
+
+function Test-SyntaxFailMulti {
+    param([string]$Name, [array]$Sources, [string]$Needle)
+    $script:total++
+    Write-Host -NoNewline "  [SYNTAX-FAIL] $Name ... "
+    $text = Invoke-SyntaxProj $Sources
+    if ($script:syntaxProjExit -ne 0 -and $text.Contains($Needle)) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        Write-Host "  expected failing compile containing: $Needle" -ForegroundColor DarkGray
+        if ($Verbose) { Write-Host $text }
+    }
+}
+
+# ai/022 B11/C04: --syntax-only must SUCCEED and the merged output must carry every needle
+# (and none of the -Absent ones). Folding legacy header attributes is a read-only information
+# channel, so "what got folded" and "what deliberately did NOT" is asserted here, not by
+# an exit code (D52).
+function Test-SyntaxNote {
+    param([string]$Name, [array]$Sources, [array]$Needles, [array]$Absent = @())
+    $script:total++
+    Write-Host -NoNewline "  [SYNTAX-NOTE] $Name ... "
+    $text = Invoke-SyntaxProj $Sources
+    $bad = @($Needles | Where-Object { -not $text.Contains($_) })
+    $hit = @($Absent | Where-Object { $text.Contains($_) })
+    if ($script:syntaxProjExit -eq 0 -and $bad.Count -eq 0 -and $hit.Count -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        Write-Host ("  exit=" + $script:syntaxProjExit + " missing: " + ($bad -join ' | ') +
+                    " unexpected: " + ($hit -join ' | ')) -ForegroundColor DarkGray
+        if ($Verbose) { Write-Host $text }
+    }
+}
+
+function Test-SyntaxMulti {
+    param([string]$Name, [array]$Sources)
+    $script:total++
+    Write-Host -NoNewline "  [SYNTAX] $Name ... "
+    $text = Invoke-SyntaxProj $Sources
+    if ($script:syntaxProjExit -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        if ($Verbose) { Write-Host $text }
+    }
+}
+
+# Codegen-stage probes (ai/022 B08e-6): diagnostics raised while C is being emitted never
+# reach --syntax-only (driver_compile.cpp returns before codegen), and a full build would
+# pay for cl.exe + link. `--emit-c` runs the whole front end plus codegen and stops there.
+function Invoke-CodegenProj {
+    param([array]$Sources)
+    $argList = (($Sources | ForEach-Object { '"' + $_ + '"' }) -join ' ')
+    $out = & cmd /c ('"' + $C3 + '" ' + $argList + ' --emit-c 2>&1')
+    $script:codegenProjExit = $LASTEXITCODE
+    return (($out | Out-String) -replace '\s+', ' ')
+}
+
+function Test-CompileFail {
+    param([string]$Name, [array]$Sources, [string]$Needle)
+    $script:total++
+    Write-Host -NoNewline "  [COMPILE-FAIL] $Name ... "
+    $text = Invoke-CodegenProj $Sources
+    if ($script:codegenProjExit -ne 0 -and $text.Contains($Needle)) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        Write-Host "  expected failing codegen containing: $Needle" -ForegroundColor DarkGray
+        if ($Verbose) { Write-Host $text }
+    }
+}
+
+function Test-Compile {
+    param([string]$Name, [array]$Sources)
+    $script:total++
+    Write-Host -NoNewline "  [COMPILE] $Name ... "
+    $text = Invoke-CodegenProj $Sources
+    if ($script:codegenProjExit -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        if ($Verbose) { Write-Host $text }
+    }
+}
+
+function Test-SyntaxFail {
+    param([string]$Name, [string]$Source, [string]$Needle)
+    $script:total++
+    Write-Host -NoNewline "  [SYNTAX-FAIL] $Name ... "
+    # Native stderr under SilentlyContinue is dropped by `& 2>&1`; let cmd.exe merge the
+    # streams, and collapse whitespace so long diagnostics cannot be word-wrapped apart.
+    $result = & cmd /c ('"' + $C3 + '" "' + $Source + '" --syntax-only 2>&1')
+    $text = (($result | Out-String) -replace '\s+', ' ')
+    if ($LASTEXITCODE -ne 0 -and $text.Contains($Needle)) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        Write-Host "  expected failing compile containing: $Needle" -ForegroundColor DarkGray
+        if ($Verbose) { Write-Host $text }
+    }
+}
+
+# ai/022 B11/C02: CoClass identity assertions. The resolver prints one info line per block on
+# stderr -- note-level *diagnostics* cannot be the surface here, because Diagnostics::toString()
+# is only dumped when a stage fails, so a note never reaches a successful compile (ai/022 D46).
+function Invoke-IdentityText {
+    param([string]$Proj)
+    $out = & cmd /c ('"' + $C3 + '" "' + $Proj + '" --syntax-only 2>&1')
+    $script:identityExit = $LASTEXITCODE
+    return (((@($out | Where-Object { "$_" -match 'identity:' })) | Out-String) -replace '\s+', ' ')
+}
+
+function Test-IdentityNote {
+    param([string]$Name, [string]$Proj, [array]$Needles)
+    $script:total++
+    Write-Host -NoNewline "  [IDENTITY] $Name ... "
+    $text = Invoke-IdentityText $Proj
+    $bad = @($Needles | Where-Object { -not $text.Contains($_) })
+    if ($script:identityExit -eq 0 -and $bad.Count -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        Write-Host ("  exit=" + $script:identityExit + " missing: " + ($bad -join ' | ')) -ForegroundColor DarkGray
+        if ($Verbose) { Write-Host $text }
+    }
+}
+
+function Test-IdentityStable {
+    param([string]$Name, [string]$Proj)
+    $script:total++
+    Write-Host -NoNewline "  [IDENTITY] $Name ... "
+    $a = Invoke-IdentityText $Proj
+    $b = Invoke-IdentityText $Proj
+    if ($a.Length -gt 0 -and $a -ceq $b) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        Write-Host "  two runs of the same project differ (or printed nothing)" -ForegroundColor DarkGray
+    }
+}
+
 function Test-Syntax {
     param([string]$Name, [string]$Source)
     $script:total++
@@ -592,6 +778,117 @@ function Test-Syntax {
         $script:fail++
         Write-Host "FAIL" -ForegroundColor Red
         if ($Verbose) { Write-Host ($result | Out-String) }
+    }
+}
+
+# ai/023 S01: vbp-level negative case. The package hard checks run in driver stage 0
+# (before the pipeline), so --syntax-only is enough: compile must FAIL and the output
+# must contain the given ASCII needle.
+function Test-VbpFail {
+    param([string]$Name, [string]$VbpFile, [string]$Needle)
+    $script:total++
+    Write-Host -NoNewline "  [VBP-FAIL] $Name ... "
+    $result = & cmd /c ('"' + $C3 + '" "' + $VbpFile + '" --syntax-only 2>&1')
+    $text = (($result | Out-String) -replace '\s+', ' ')
+    if ($LASTEXITCODE -ne 0 -and $text.Contains($Needle)) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        Write-Host "  expected failing compile containing: $Needle" -ForegroundColor DarkGray
+        if ($Verbose) { Write-Host $text }
+    }
+}
+
+# ai/023 S03: vbp-level negative case that only surfaces in the FULL pipeline
+# (package export boundary fires at visit time / stage 3.5, not syntax-only).
+function Test-VbpBuildFail {
+    param([string]$Name, [string]$VbpFile, [string]$Needle)
+    $script:total++
+    Write-Host -NoNewline "  [VBP-BUILD-FAIL] $Name ... "
+    $result = & cmd /c ('"' + $C3 + '" "' + $VbpFile + '" --output-dir "' + $OutDir + '" 2>&1')
+    $text = (($result | Out-String) -replace '\s+', ' ')
+    if ($LASTEXITCODE -ne 0 -and $text.Contains($Needle)) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        Write-Host "  expected failing build containing: $Needle" -ForegroundColor DarkGray
+        if ($Verbose) { Write-Host $text }
+    }
+}
+
+# ai/023 S05: build must SUCCEED but emit the given warning text (D7: 校验不拒收,
+# 警告必须可见 —— 成功路径吞警告的坑在 S01 已修, 本用例防回归).
+function Test-VbpWarn {
+    param([string]$Name, [string]$VbpFile, [string]$Needle)
+    $script:total++
+    Write-Host -NoNewline "  [VBP-WARN] $Name ... "
+    $result = & cmd /c ('"' + $C3 + '" "' + $VbpFile + '" --output-dir "' + $OutDir + '" 2>&1')
+    $text = (($result | Out-String) -replace '\s+', ' ')
+    if ($LASTEXITCODE -eq 0 -and $text.Contains($Needle)) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        Write-Host "  expected successful build containing: $Needle" -ForegroundColor DarkGray
+        if ($Verbose) { Write-Host $text }
+    }
+}
+
+# ai/023 S05/S06: generic CLI check — exit 0 and output contains needle.
+function Test-CliOk {
+    param([string]$Name, [string[]]$C3Args, [string]$Needle)
+    $script:total++
+    Write-Host -NoNewline "  [CLI] $Name ... "
+    $result = & cmd /c (('"' + $C3 + '" ' + ($C3Args -join ' ') + ' 2>&1'))
+    $text = (($result | Out-String) -replace '\s+', ' ')
+    if ($LASTEXITCODE -eq 0 -and $text.Contains($Needle)) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        Write-Host "  expected exit 0 containing: $Needle" -ForegroundColor DarkGray
+        if ($Verbose) { Write-Host $text }
+    }
+}
+
+# ai/023 S06: pack -> unpack -> every file byte-identical (acceptance: 逐文件 cmp).
+function Test-PackRoundtrip {
+    param([string]$Name, [string]$PkgDir)
+    $script:total++
+    Write-Host -NoNewline "  [PACK-RT] $Name ... "
+    $tmp = Join-Path $OutDir ("packrt_" + [guid]::NewGuid().ToString("N").Substring(0,8))
+    try {
+        New-Item -ItemType Directory -Path $tmp | Out-Null
+        Copy-Item -Recurse -Path "$PkgDir\*" -Destination $tmp
+        & cmd /c (('"' + $C3 + '" --pack "' + $tmp + '" 2>&1')) | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "pack failed" }
+        $pkgFile = Get-ChildItem -Path $tmp -Filter "*.c3pkg" | Select-Object -First 1
+        if (-not $pkgFile) { throw "no .c3pkg produced" }
+        $outDir = Join-Path $tmp "unpacked"
+        & cmd /c (('"' + $C3 + '" --unpack "' + $pkgFile.FullName + '" --output-dir "' + $outDir + '" 2>&1')) | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "unpack failed" }
+        foreach ($f in (Get-ChildItem -Path $PkgDir -File)) {
+            if ($f.Extension -eq ".c3pkg") { continue }
+            $srcHash = (Get-FileHash -Algorithm SHA1 $f.FullName).Hash
+            $dst = Join-Path $outDir $f.Name
+            if (-not (Test-Path $dst)) { throw "missing after unpack: $($f.Name)" }
+            $dstHash = (Get-FileHash -Algorithm SHA1 $dst).Hash
+            if ($srcHash -ne $dstHash) { throw "content differs: $($f.Name)" }
+        }
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } catch {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        Write-Host "  $($_.Exception.Message)" -ForegroundColor DarkGray
+    } finally {
+        if (Test-Path $tmp) { Remove-Item -Recurse -Force $tmp }
     }
 }
 
@@ -701,6 +998,10 @@ if ($Category -in @("all", "run", "bas")) {
     # generic Function/Sub with explicit instantiation + call-site type inference.
     Add-BasTest "test_generics" "$Tests\test_generics.bas" @("G-A=12", "G-B=hi", "G-C=21 abc!", "G-D=10", "G-E=10", "G-F=ab", "G-G=20", "LEN=2", "G-H=0", "G-I=20", "GENERICS-DONE")
     Add-BasTest "test_generics_x86" "$Tests\test_generics.bas" @("G-A=12", "G-B=hi", "G-C=21 abc!", "G-D=10", "G-E=10", "G-F=ab", "G-G=20", "LEN=2", "G-H=0", "G-I=20", "GENERICS-DONE") -Arch "x86"
+    # Interface (tB extension, ai/022 B01): contract-block syntax layer - the blocks
+    # parse, the new keywords stay soft, and the codegen path is still untouched.
+    Add-BasTest "test_interface" "$Tests\test_interface.bas" @("ITF-SOFT:12", "ITF-1:OK", "ITF-2:OK", "INTERFACE-DONE")
+    Add-BasTest "test_interface_x86" "$Tests\test_interface.bas" @("ITF-SOFT:12", "ITF-1:OK", "ITF-2:OK", "INTERFACE-DONE") -Arch "x86"
 
     # 分片: CI 用多 runner 并行跑 bas 用例时, 各 runner 只取第 BasShard 片
     if ($BasShardTotal -gt 1) {
@@ -730,6 +1031,83 @@ if ($Category -in @("all", "run", "bas")) {
 }
 
 # --- VBP 工程测试 (串行; GUI 窗口效果无法通过自动校验并行确认) ---
+# === ai/022 B13a: ActiveX DLL 工程测试 (产物 + 生成的 COM 服务器入口) ==============
+# A DLL has no stdout, so the observable surface is: (1) the project links into a .dll
+# at all, (2) the def file exports the COM entry points, (3) the generated COM server
+# table (dll_entry.c) carries the identity the project declared. The compiler writes
+# those C files to a temp dir and deletes it unless --keep-for-debug is passed, and
+# prints "intermediates kept at: <dir>" on stderr -- that line is the only handle.
+function Test-VbpDll {
+    param(
+        [string]$Name,
+        [string]$VbpFile,
+        [string[]]$Needles = @(),      # asserted against dll_entry.c + activex_dll.def
+        [string[]]$Absent = @(),
+        [string[]]$LogNeedles = @(),   # asserted against the compiler's own output
+        [string]$Arch = ""
+    )
+    $script:total++
+    Write-Host -NoNewline "  [VBP-DLL] $Name ... "
+
+    if ($Arch) {
+        $out = & $C3 $VbpFile --arch $Arch --output-dir $OutDir --keep-for-debug 2>&1
+    } else {
+        $out = & $C3 $VbpFile --output-dir $OutDir --keep-for-debug 2>&1
+    }
+    $exitCode = $LASTEXITCODE
+    $logText = (($out | Out-String) -replace '\s+', ' ')
+
+    if ($exitCode -ne 0) {
+        $script:fail++
+        Write-Host "FAIL (compile)" -ForegroundColor Red
+        if ($Verbose) { Write-Host $logText }
+        return
+    }
+
+    $baseName = [System.IO.Path]::GetFileNameWithoutExtension($VbpFile)
+    $dllPath = Join-Path $OutDir "$baseName.dll"
+    if (-not (Test-Path $dllPath)) {
+        $script:fail++
+        Write-Host "FAIL (no dll)" -ForegroundColor Red
+        return
+    }
+
+    $genDir = $null
+    foreach ($line in $out) {
+        $t = "$line"
+        $at = $t.IndexOf("intermediates kept at: ")
+        if ($at -ge 0) { $genDir = $t.Substring($at + 23).Trim(); break }
+    }
+    if (-not $genDir -or -not (Test-Path $genDir)) {
+        $script:fail++
+        Write-Host "FAIL (no intermediates)" -ForegroundColor Red
+        return
+    }
+    $gen = ""
+    foreach ($f in @("dll_entry.c", "activex_dll.def")) {
+        $p = Join-Path $genDir $f
+        if (Test-Path $p) { $gen += ((Get-Content $p -Raw) -replace '\s+', ' ') }
+    }
+    if ($gen.Length -lt 40) {
+        $script:fail++
+        Write-Host "FAIL (no generated entry)" -ForegroundColor Red
+        return
+    }
+
+    $detail = @()
+    foreach ($n in $Needles)     { if (-not $gen.Contains($n))     { $detail += "missing: $n" } }
+    foreach ($a in $Absent)      { if ($gen.Contains($a))          { $detail += "unexpected: $a" } }
+    foreach ($n in $LogNeedles)  { if (-not $logText.Contains($n)) { $detail += "log missing: $n" } }
+    if ($detail.Count -gt 0) {
+        $script:fail++
+        Write-Host "FAIL (assert)" -ForegroundColor Red
+        foreach ($d in $detail) { Write-Host "    $d" -ForegroundColor DarkGray }
+        return
+    }
+    $script:pass++
+    Write-Host "PASS" -ForegroundColor Green
+}
+
 if ($Category -in @("all", "run", "vbp")) {
     # --- VBP 工程测试 (P5) --- (串行)
     Write-Host "--- VBP Project Tests (P5) ---" -ForegroundColor Yellow
@@ -771,8 +1149,246 @@ if ($Category -in @("all", "run", "vbp")) {
     Test-Vbp "test_implements" "$Tests\test_implements.vbp" @("IMPL1:OK", "IMPL2:OK", "Implements test PASSED")
     Test-Vbp "test_events" "$Tests\test_events\test_events.vbp" @("Events test PASSED")
     Test-Vbp "M7Test" "$Tests\m7_test\M7Test.vbp" @("4/4 PASSED")
+    # ai/022 B03: cross-module new-style contract reached through an Interface head-line host
+    Test-Vbp "itf_xmod_writer" "$Tests\itf_xmod\XWriter.vbp" @("XMOD1:OK", "XMOD2:OK", "IFV1:OK", "IFV2:OK", "IFV3:OK", "LIFE1:OK", "LIFE2:OK", "LIFE3:OK", "LIFE9:OK", "TERM last=bye", "TERM last=scoped", "QI1:OK", "QI2:OK", "QI3:OK", "QI4:OK", "TOF1:OK", "TOF2:OK", "TOF3:OK", "DN0:OK", "DN1:OK", "DN2:OK", "DN3:OK", "TOC1:OK", "TOC2:OK", "TOC3:OK")
+    # ai/022 B10: `Implements IViaNamed Via m_h` -- six slots served by generated
+    # adapters over the holder's own interface table (no forwarding member written).
+    # Both architectures: the adapter dereferences a field whose type is another
+    # class's struct, so a layout slip would only surface on x86 (022 D40 rule).
+    $viaExpected = @("VIA1:OK", "VIA2:OK", "VIA3:OK", "VIA4:OK", "VIA5:OK",
+        "VIA6:OK", "VIA7:OK", "VIA8:OK", "VIA9:OK", "VIA-DONE")
+    Test-Vbp "itf_via_pair" "$Tests\itf_via\Via.vbp" $viaExpected
+    Test-Vbp "itf_via_x86" "$Tests\itf_via\Via.vbp" $viaExpected -Arch "x86"
+    # ai/022 B11/C05 (ai/026 section 5, items 3-5): a CoClass block name used AS A TYPE --
+    # `As Circle` / `New Circle` / `CreateObject("ActApp.Circle")` all bind to the block's
+    # [Implementation] class. CC2/CC3 walk the other type positions (module field, parameter,
+    # return type); CC6 proves the group view keeps the virtual table (an overridden Area on an
+    # Inherits chain must answer), CC4/CC5/CC7 the ProgID rewrite including case.
+    # Both architectures: the rewritten variable's C type is a class struct pointer, so a layout
+    # slip would show up on x86 only (022 D40 rule).
+    $ccActExpected = @("CC1:OK", "CC2:OK", "CC3:OK", "CC4:OK", "CC5:OK", "CC6:OK", "CC7:OK",
+        "CC8:OK", "CC9:OK", "CC-DONE")
+    # Fix 192: 元素类型为项目类的数组 (arr(i).Method)。此前接收者推断不出类 →
+    # `VB6_SA_AT(void*, arr, i).Move(...)` → MSVC C2224。AC1/AC2 是静态数组 ——
+    # 缺口不是 ReDim 专属; AC3 是 ReDim As <类名>; AC5 是 ReDim Preserve。
+    # 基线(改动前)实测 28 条 C2224, 修后 0。两个架构都跑: 元素槽是 void*,
+    # 转成 vb6_cls_X* 的布局只在 x86 上才会暴露对齐问题。
+    $arrClsExpected = @("AC1:OK", "AC2:OK", "AC3:OK", "AC4:OK", "AC5:OK",
+        "AC6:OK", "ARRCLS-DONE")
+    Test-Vbp "arr_cls_elem" "$Tests\arr_cls\ArrCls.vbp" $arrClsExpected
+    Test-Vbp "arr_cls_elem_x86" "$Tests\arr_cls\ArrCls.vbp" $arrClsExpected -Arch "x86"
+
+    # Fix 193: `TypeOf lhs Is <项目类>`。此前落进 vb6_TypeOf —— 那是 vb6rtl_conv.c 里
+    # 一个恒返 0 的桩, 于是项目类这一位一律答"否" (连 `TypeOf raw Is ShapeAct`
+    # 都是 False)。改按"声明类 + 祖先链"静态判定后: TOF1-TOF3 自身/祖先 True,
+    # TOF4-TOF7 兄弟/子类 False, TOF8-TOF9 Nothing False, TOF10 无虚槽的普通类,
+    # TOF11 类数组元素 (与 Fix 192 联动), TOF12 进 If 分支不是只在 Print 里对。
+    # 基线(改动前)实测 8 FAIL / 4 OK —— 那 4 个 OK 只是"本该 False"被恒假蒙对。
+    $tofExpected = @("TOF1:OK", "TOF2:OK", "TOF3:OK", "TOF4:OK", "TOF5:OK", "TOF6:OK",
+        "TOF7:OK", "TOF8:OK", "TOF9:OK", "TOF10:OK", "TOF11:OK", "TOF12:OK", "TOF-DONE")
+    Test-Vbp "typeof_class" "$Tests\typeof\Tof.vbp" $tofExpected
+    Test-Vbp "typeof_class_x86" "$Tests\typeof\Tof.vbp" $tofExpected -Arch "x86"
+
+    Test-Vbp "cc_act_pair" "$Tests\cc_act\Act.vbp" $ccActExpected
+    Test-Vbp "cc_act_x86" "$Tests\cc_act\Act.vbp" $ccActExpected -Arch "x86"
 
     # test_vbman 用于验证外部 COM 组件 VBMANLIB (x86 DLL, 供 32 位程序调用)
+    # ai/022 B07b: INH2..INH11 cover the merged member face + prefix-copied fields +
+    # forwarding stubs (private Long/UDT/BSTR fields, Optional params, Property Get/Let,
+    # 3-level chain, child-wins shadowing, base/derived instance isolation).
+    # ai/022 B09b: run the same project on BOTH architectures. An inherited field is embedded by
+    # value, so the derived struct's prefix must be byte-exact against the base struct; a wrong
+    # field type is invisible on x64 when sizeof(void*) happens to equal that type's size, and only
+    # the x86 build/run catches it (022 D39: INH35/INH36/INH39 failed on x86 for exactly that).
+    $inhExpected = @(
+        "INH0:derived", "INH1:OK", "INH2:OK", "INH3:OK", "INH4:OK", "INH5:OK",
+        "INH6:OK", "INH7:OK", "INH8:OK", "INH9:OK", "INH10:OK", "INH11:OK",
+        "INH12:OK", "INH13:OK", "INH14:OK", "INH15:OK", "INH16:OK",
+        "INH17:OK", "INH18:OK", "INH19:OK", "INH20:OK", "INH21:OK",
+        "INH22:OK", "INH23:OK", "INH24:OK", "INH25:OK", "INH26:OK",
+        # ai/022 B09: INH44/INH45 = MyBase de-virtualized (the same members answer "derived"
+        # through Me./obj.), INH49/INH50 = construction chain root->leaf + MyBase.Class_Initialize,
+        # INH51 = Overrides returning a project class (com_entry.c forward-decl ordering).
+        "INH44:OK", "INH45:OK", "INH46:OK", "INH47:OK", "INH48:OK", "INH49:OK", "INH50:OK",
+        "INH51:OK", "INH52:OK",
+        # ai/022 B09c: INH53/INH54 = `Set MyBase.<Property Set>` target side, INH55 = property
+        # write through a UDT object field, INH56/INH57 = immediate-base Class_Initialize,
+        # INH58 = root's Private UDT field used two levels down (the x86 stride case).
+        "INH53:OK", "INH54:OK", "INH55:OK", "INH56:OK", "INH57:OK", "INH58:OK", "INH59:OK")
+    Test-Vbp "cls_inh_pair" "$Tests\cls_inh\Inh.vbp" $inhExpected
+    Test-Vbp "cls_inh_x86" "$Tests\cls_inh\Inh.vbp" $inhExpected -Arch "x86"
+    # --- ai/022 B13a: the ActiveX DLL pipeline enters the gate for the first time ---
+    # Both projects under tests\test_activex_dll have existed since P6 but were never
+    # registered, so nothing in the regression had ever LINKED a .dll -- every claim on
+    # the COM server side was unmeasured. These three cases make that surface observable
+    # (product + exports + the generated coclass table) without changing compiler code.
+    Test-VbpDll "ax_dll_calc" "$Tests\test_activex_dll\test_activex_dll.vbp" @(
+        "const vb6_CoClassDesc g_vb6_coclasses[]",
+        '"TestAXDLL.Calc"',
+        '"{D84F362F-8EF1-D16D-8814-C16ADB700BAB}"',
+        'L"SetValue", 1, 1',
+        "DllGetClassObject", "DllRegisterServer")
+    Test-VbpDll "ax_dll_event" "$Tests\test_activex_dll\test_event_dll.vbp" @(
+        '"EventCalc"', '"{E1F2A3B4-C5D6-7890-ABCD-123456789ABC}"',
+        "vb6_disp_EventCalc_Increment_invoke", "DllCanUnloadNow", "DllUnregisterServer")
+    Test-VbpDll "ax_dll_calc_x86" "$Tests\test_activex_dll\test_activex_dll.vbp" @(
+        "const vb6_CoClassDesc g_vb6_coclasses[]", '"TestAXDLL.Calc"',
+        '"{D84F362F-8EF1-D16D-8814-C16ADB700BAB}"',
+        "DllGetClassObject", "DllRegisterServer") -Arch "x86"
+    # B13b: the two identity channels are merged for the DLL product. This case used to
+    # PIN THE FORK (needle 0x0AD9CBC7 / absent CoDll.PG); flipping it is the batch's
+    # acceptance evidence, so the needles are now exactly the other way round:
+    #   - the group ProgID CoDll.PG is in the product (a second row, same CLSID) because the
+    #     block writes [ComCreatable(True)] -- the first product-level consequence that bit has
+    #   - IID_vb6iface_IProbe == the stage-2.7 value (0xF5CEF988), so the dllentry minter no
+    #     longer answers for an interface the resolver already resolved
+    #   - 0AD9CBC7 (what generateIid derived here before B13b) must be gone
+    # The legacy <Proj>.<Class> row stays: existing DLL clients keep working.
+    # B13e: IID_vb6def_CImpl is back to the *default dispinterface* GUID (0x7CA8CD81, written
+    # back by the TypeLib builder) instead of the interface's own -- the server's member
+    # surface (desc->methods) is that one, so table and typelib now advertise what they answer.
+    Test-VbpDll "cc_dll_identity_single_source" "$Tests\cc_dll\CoDll.vbp" @(
+        '"CoDll.CImpl"',
+        '"CoDll.PG"',
+        "const int g_vb6_coclassCount = 2;",
+        "{11112222-3333-4444-5555-666677778888}",
+        "0xF5CEF988",
+        "0x7CA8CD81",
+        # ai/022 B17: CImpl 多了个公有成员 Twice（外部晚绑定要有东西可点），methodCount 0→1。
+        # 这条针同时钉住"表里的成员面与库里 `_CImpl` 那一档同源"（B13e 的广告==应答）。
+        "1, /* methodCount */") @(
+        "0AD9CBC7") @(
+        "CoClass 'PG' identity: CLSID={11112222-3333-4444-5555-666677778888} (vbp)",
+        "IID={F5CEF988-3217-6173-94B7-BB99C4B8CB81} (minted)",
+        "ProgID=CoDll.PG (minted)",
+        "impl='CImpl' comCreatable=True")
+
+    # ai/022 B13c/B13e: two invariants read out of the *products* (dll_entry.c / CImpl.h /
+    # CoDll.tlb): (甲) one interface == one GUID across table / vtable QI / typelib (B13c);
+    # (乙) the typelib's coclass DEFAULT ref == the IID the server actually answers with, i.e.
+    # the class's own default dispinterface (B13e, after B13c's redirect was reverted).
+    # B15: 甲's third channel now reads the interface's own row (TKIND_INTERFACE, named IProbe)
+    # instead of the empty `_IProbe` dispinterface, and the helper also asserts the two rows this
+    # batch deleted stay deleted -- so reverting the shape turns this same case red.
+    Test-TlbIdentitySingleSource "cc_dll_tlb_matches_table" "$Tests\cc_dll\CoDll.vbp" "CoDll" "CImpl" "IProbe" "{11112222-3333-4444-5555-666677778888}"
+    # ai/022 B16: 库里那一档真接口的**成员面**。B15 只摆正了形状与身份（cFuncs 仍是 0），
+    # 本批起它要如实发契约，两条读数（x64 / x86）各钉自己的槽偏移 —— 同一个 vtable，
+    # x86 客户端按 4 字节一步读到的槽 3/4 在 12/16，x64 客户端在 24/32；
+    # 「建库 flag 与目标位数不配」或「发成员却不发偏移」都会让其中一条红。
+    Test-TlbIfaceContract "cc_dll_tlb_contract_x64" "$Tests\cc_dll\CoDll.vbp" "CoDll" @(
+        "TYPE 0 kind=interface name=IProbe guid={F5CEF988-3217-6173-94B7-BB99C4B8CB81} cFuncs=2 cVars=0 cImplTypes=0 cbSizeInstance=8",
+        "FUNC 0 memid=1 name=Ping invkind=1 funckind=purevirtual callconv=stdcall oVft=24 cParams=1 ret=0x0018",
+        "PARAM 0 flags=0x0001 vt=0x0003",
+        "FUNC 1 memid=2 name=get_Got invkind=2 funckind=purevirtual callconv=stdcall oVft=32 cParams=0 ret=0x0003") @(
+        "name=IProbe guid={F5CEF988-3217-6173-94B7-BB99C4B8CB81} cFuncs=0",
+        "oVft=12",
+        "oVft=16")
+    Test-TlbIfaceContract "cc_dll_tlb_contract_x86" "$Tests\cc_dll\CoDll.vbp" "CoDll" @(
+        "TYPE 0 kind=interface name=IProbe guid={F5CEF988-3217-6173-94B7-BB99C4B8CB81} cFuncs=2 cVars=0 cImplTypes=0 cbSizeInstance=4",
+        "FUNC 0 memid=1 name=Ping invkind=1 funckind=purevirtual callconv=stdcall oVft=12 cParams=1 ret=0x0018",
+        "FUNC 1 memid=2 name=get_Got invkind=2 funckind=purevirtual callconv=stdcall oVft=16 cParams=0 ret=0x0003") @(
+        "oVft=24",
+        "oVft=32") "x86"
+    # ai/022 B14: the DLL product finally gets a real caller. TestAXDLL.Calc is the legacy
+    # face (Public members exist, so IDispatch must answer); cc_dll's CImpl only satisfies a
+    # modern interface, so its IDispatch member surface must be EMPTY (B13c ruling (b)).
+    # B16 DID flip the second half of that pin on purpose: the interface IID now answers with
+    # the THIN pointer (same=no -- it is no longer the IDispatch wrapper), and the new
+    # CREATE_IFACE/VTBL_* readings call its contract slots by the library's shape. The slot
+    # numbers [3]=Ping, [4]=Got are the library's oVft=24/32 read back by tests\tools -- if the
+    # row's shape and the shipped vtable ever drift apart, VTBL_GET_AFTER stops being 42.
+    Test-DispatchInvoke "ax_dll_dispatch_invoke" "$Tests\test_activex_dll\test_activex_dll.vbp" `
+        "test_activex_dll" "{D84F362F-8EF1-D16D-8814-C16ADB700BAB}" @(
+        "CREATE hr=0x00000000 ptr=OK",
+        "QI_IUNKNOWN hr=0x00000000 same=yes",
+        "TYPEINFOCOUNT=1 hr=0x00000000",
+        "CALL=ADD hr=0x00000000 result=42",
+        "CALL=GETVALUE hr=0x00000000 result=7",
+        "NAMES=bogus hr=0x80020006 dispid=-1")
+    Test-DispatchInvoke "cc_dll_dispatch_iface_only" "$Tests\cc_dll\CoDll.vbp" `
+        "CoDll" "{11112222-3333-4444-5555-666677778888}" @(
+        "CREATE hr=0x00000000 ptr=OK",
+        "QI_IUNKNOWN hr=0x00000000 same=yes",
+        "EXTRA_IID={F5CEF988-3217-6173-94B7-BB99C4B8CB81}",
+        "QI_EXTRA hr=0x00000000 same=no",
+        "CREATE_IFACE hr=0x00000000 ptr=OK",
+        "VTBL_GET_BEFORE=0",
+        "VTBL_GET_AFTER=42") @(
+        "CALL=ADD") "{F5CEF988-3217-6173-94B7-BB99C4B8CB81}"
+    # ai/022 B16: 同一批断言在 x86 上再真跑一遍 —— 这是布局改动（vtable 槽 + 库里的偏移 +
+    # 调用约定）唯一的 x86 侧端到端读数：x86 探针按库里那形状直调槽 3/4，
+    # 若槽位置/调用约定/返回值任何一处对不上，VTBL_GET_AFTER 就不是 42。
+    Test-DispatchInvoke "cc_dll_dispatch_iface_only_x86" "$Tests\cc_dll\CoDll.vbp" `
+        "CoDll" "{11112222-3333-4444-5555-666677778888}" @(
+        "CREATE hr=0x00000000 ptr=OK",
+        "QI_IUNKNOWN hr=0x00000000 same=yes",
+        "QI_EXTRA hr=0x00000000 same=no",
+        "CREATE_IFACE hr=0x00000000 ptr=OK",
+        "VTBL_GET_BEFORE=0",
+        "VTBL_GET_AFTER=42",
+        "DONE") @(
+        "CALL=ADD") "{F5CEF988-3217-6173-94B7-BB99C4B8CB81}" "x86"
+
+    # --- ai/022 B17: 外部激活（注册 -> 系统那条路 -> 反注册后不留键）---
+    # 上面两条走的是**进程内**独立客户端（LoadLibrary + DllGetClassObject，刻意不查注册表）；
+    # 这两条走的是系统那条路：DllRegisterServer 真写注册表，再按 CLSID/ProgID 让 COM 自己去找
+    # InprocServer32、装载 DLL —— 也就是 CreateObject / CoCreateInstance 客户实际走的链路。
+    # 断言的形状与理由（读数见 ai/022 D64）：
+    #   - REG_* 四项 + REG_TYPELIB_PATH：CLSID/ProgID/InprocServer32/ThreadingModel 与
+    #     "按 LIBID 找得到类型库"都成立（B17 修掉两条真缺陷才走到这一步：rc.exe 发现面太窄
+    #     ⇒ 库根本没嵌进 DLL；反注册的实参顺序写反 ⇒ 整棵 TypeLib 键静默留着）
+    #   - NAMES=Twice + CALL=Twice result=42：晚绑定按名调用**类的公有成员**（CreateObject 那半）
+    #   - NAMES=Ping hr=0x80020006：契约成员是 Private，类的默认面上点不到 —— 这一条是
+    #     **VB6 语义的应有读数**，不是缺陷；接口成员走下面的早绑定那条
+    #   - COCREATE_IFACE + VTBL_GET_AFTER=42：接口 IID 的 QI/激活交薄指针，按库里 oVft 直调契约槽
+    #   - CLEAN_*=gone：反注册之后 CLSID/ProgID/TypeLib 三类键都不留（用例可重复跑、不脏机器）
+    $comActNeedles = @(
+        "REGSVR hr=0x00000000",
+        "REG_INPROC_PATH=OK",
+        "REG_THREADING=OK Apartment",
+        "REG_PROGID_CLSID=OK {11112222-3333-4444-5555-666677778888}",
+        "REG_TYPELIB_PATH=OK",
+        "PROGID_LOOKUP hr=0x00000000 same=yes",
+        "COCREATE_DISP hr=0x00000000 ptr=OK",
+        "NAMES=Twice hr=0x00000000 dispid=1",
+        "CALL=Twice hr=0x00000000 result=42",
+        "NAMES=Ping hr=0x80020006 dispid=-1",
+        "COCREATE_IFACE hr=0x00000000 ptr=OK",
+        "VTBL_GET_AFTER=42",
+        "UNREGSVR hr=0x00000000",
+        "CLEAN_CLSID=gone",
+        "CLEAN_PROGID=gone",
+        "CLEAN_TYPELIB=gone",
+        "DONE")
+    Test-ComActivate "cc_dll_external_activate" "$Tests\cc_dll\CoDll.vbp" "CoDll" `
+        "{11112222-3333-4444-5555-666677778888}" "CoDll.CImpl" `
+        "{F5CEF988-3217-6173-94B7-BB99C4B8CB81}" $comActNeedles
+    Test-ComActivate "cc_dll_external_activate_x86" "$Tests\cc_dll\CoDll.vbp" "CoDll" `
+        "{11112222-3333-4444-5555-666677778888}" "CoDll.CImpl" `
+        "{F5CEF988-3217-6173-94B7-BB99C4B8CB81}" $comActNeedles "x86"
+    # 真正的外部客户是个**别的进程**：C3 编译的 `tests\cc_dll_client` 不引用 DLL，
+    # CreateObject + 按名调用全走注册表 → IDispatch 晚绑定（test_p613_typelib 那一族的做法）。
+    Test-ComActivateClient "cc_dll_late_client" "$Tests\cc_dll\CoDll.vbp" "CoDll" `
+        "{11112222-3333-4444-5555-666677778888}" "CoDll.CImpl" `
+        "$Tests\cc_dll_client\LateClient.vbp" @("EXT1:OK", "EXT2:OK", "EXT-DONE")
+
+    # --- ai/022 B18 端到端示例（收口批）: 同一个源集合编成 EXE 与 DLL 两种形态 ---
+    # EXE 形态: 语言层全用一遍（Interface/Implements(+Via 委托)/Inherits/Overrides/Protected/
+    # MyBase/CoClass 块/`As <块名>`/`New <块名>`/工程内 CreateObject 改写/TypeOf），
+    # DEMO1..DEMO12 各自钉一个行为；x64 与 x86 各跑一遍（继承来的字段与槽布局只有 x86 才暴露）。
+    # DLL 形态: 同一个源集合 + [ComCreatable(True)] 的块，注册后由**另一个进程**的 C3 客户
+    # CreateObject 激活（B17 的外部那条路）。
+    $demoNeedles = @(
+        "DEMO1:OK", "DEMO2:OK", "DEMO3:OK", "DEMO4:OK", "DEMO5:OK", "DEMO6:OK",
+        "DEMO7:OK", "DEMO8:OK", "DEMO9:OK", "DEMO10:OK", "DEMO11:OK", "DEMO12:OK", "DEMO-DONE")
+    Test-Vbp "cc_demo_exe" "$Tests\cc_demo\DemoExe.vbp" $demoNeedles
+    Test-Vbp "cc_demo_exe_x86" "$Tests\cc_demo\DemoExe.vbp" $demoNeedles -Arch "x86"
+    Test-ComActivateClient "cc_demo_dll_external" "$Tests\cc_demo\DemoDll.vbp" "DemoDll" `
+        "{993BE038-BBA4-7804-FEB0-E65927384CA7}" "DemoDll.Shape" `
+        "$Tests\cc_demo\DemoClient.vbp" @("DEMOEXT1:OK", "DEMOEXT-DONE")
+    Test-ComActivateClient "cc_demo_dll_external_x86" "$Tests\cc_demo\DemoDll.vbp" "DemoDll" `
+        "{993BE038-BBA4-7804-FEB0-E65927384CA7}" "DemoDll.Shape" `
+        "$Tests\cc_demo\DemoClient.vbp" @("DEMOEXT1:OK", "DEMOEXT-DONE") "x86"
     Test-Vbp "test_vbman" "$Tests\test_vbman\test_vbman.vbp" @("P24-04a:OK", "P24-04b:OK", "P24-04:2/2") -Arch "x86" -RequiresCom "VBMANLIB.cVBMAN"
     $vbpSw.Stop()
     Write-Host "  (vbp/gui tests took $([Math]::Round($vbpSw.Elapsed.TotalSeconds))s)"
@@ -835,6 +1451,261 @@ if ($Category -in @("all", "syntax")) {
             Test-Syntax $name $path
         }
     }
+    # tB extension (ai/022 B01): Interface contract-block diagnostics must fire.
+    $itfNeg = @(
+        @("itf_n01_member_body", "$Tests\itf_neg\n01_member_body.bas", "must not contain an implementation body"),
+        @("itf_n02_visibility", "$Tests\itf_neg\n02_visibility.bas", "must not carry an access modifier"),
+        @("itf_n03_field", "$Tests\itf_neg\n03_field.bas", "accepts only Sub/Function/Property signatures"),
+        @("itf_n04_missing_end", "$Tests\itf_neg\n04_missing_end.bas", "expected 'End Interface'"),
+        @("itf_n05_unknown_attr", "$Tests\itf_neg\n05_unknown_attr.bas", "Unrecognized attribute line [NotAnAttr]"),
+        @("itf_n06_attr_no_target", "$Tests\itf_neg\n06_attr_no_target.bas", "Attribute line must precede an Interface or CoClass declaration"),
+        @("itf_n07_generic", "$Tests\itf_neg\n07_generic.bas", "does not support generic type parameters"),
+        # ai/022 B02 (semantic layer): stage 2.7 contract registry + Implements checks
+        @("itf_n08_missing_slot", "$Tests\itf_neg\n08_missing_slot.cls", "is not implemented by class"),
+        @("itf_n09_sig_mismatch", "$Tests\itf_neg\n09_sig_mismatch.cls", "signature mismatch"),
+        @("itf_n10_unknown_parent", "$Tests\itf_neg\n10_unknown_parent.bas", "extends unknown interface"),
+        @("itf_n11_extends_cycle", "$Tests\itf_neg\n11_extends_cycle.bas", "Circular Extends chain"),
+        @("itf_n12_dup_member", "$Tests\itf_neg\n12_dup_member.bas", "cannot be overloaded"),
+        @("itf_n13_module_collision", "$Tests\itf_neg\n13_module_collision.bas", "collides with a module of the same name"),
+        # ai/022 B02b: member-level Implements I.M[, I.N] trailing clause
+        @("itf_n14_clause_no_member", "$Tests\itf_neg\n14_clause_no_member.cls", "has no member"),
+        @("itf_n15_clause_not_implemented", "$Tests\itf_neg\n15_clause_not_implemented.cls", "does not implement interface"),
+        @("itf_n16_clause_in_bas", "$Tests\itf_neg\n16_clause_in_bas.bas", "only valid in a class module"),
+        @("itf_n17_clause_unqualified", "$Tests\itf_neg\n17_clause_unqualified.bas", "needs a qualified name"),
+        @("itf_n18_clause_sig_mismatch", "$Tests\itf_neg\n18_clause_sig_mismatch.cls", "signature mismatch"),
+        @("itf_n19_iface_in_generic", "$Tests\itf_neg\n19_iface_in_generic.cls", "not allowed inside a generic class template"),
+        # ai/022 B03: Interface head-line host form (.cls named after its single block)
+        @("itf_n20_host_extra_decl", "$Tests\itf_neg\n20_host_extra_decl.cls", "may contain only the Interface block"),
+        # ai/022 B10 (Implements .. Via): the delegate clause is resolved in stage 2.7
+        # Pass D, and both rejection reasons are error-level.
+        @("itf_n21_via_no_field", "$Tests\itf_neg\n21_via_no_field.cls", "is not a module-level field"),
+        @("itf_n23_via_not_iface", "$Tests\itf_neg\n23_via_not_iface.cls", "not an Interface block"),
+        @("itf_n24_via_in_bas", "$Tests\itf_neg\n24_via_in_bas.bas", "only allowed in a class module"),
+        # ai/022 B11/C01 (CoClass block, syntax layer): malformed clauses must be refused
+        # at the parser -- C01 does no validation beyond block structure.
+        @("itf_n25_coclass_no_name", "$Tests\itf_neg\n25_coclass_no_name.bas", "expected CoClass name"),
+        @("itf_n26_coclass_missing_end", "$Tests\itf_neg\n26_coclass_missing_end.bas", "expected 'End CoClass'"),
+        @("itf_n27_coclass_bad_member", "$Tests\itf_neg\n27_coclass_bad_member.bas", "CoClass block accepts only attribute lines"),
+        @("itf_n28_coclass_ref_no_name", "$Tests\itf_neg\n28_coclass_ref_no_name.bas", "expected interface name after 'Interface' in CoClass block"),
+        # ai/022 B11/C03a (CoClass shape + name validation, stage 2.7 Pass F): every refused
+        # shape must report its own reason, and none of them may be silent any more.
+        @("itf_n29_coclass_dup_name", "$Tests\itf_neg\n29_coclass_dup_name.bas", "is declared twice"),
+        @("itf_n30_coclass_unknown_iface", "$Tests\itf_neg\n30_coclass_unknown_iface.bas", "is not an Interface block in this project"),
+        @("itf_n31_coclass_two_defaults", "$Tests\itf_neg\n31_coclass_two_defaults.bas", "marks 2 interfaces [Default]"),
+        @("itf_n32_coclass_dup_entry", "$Tests\itf_neg\n32_coclass_dup_entry.bas", "more than once (the contract set is a set)"),
+        @("itf_n33_coclass_impl_missing", "$Tests\itf_neg\n33_coclass_impl_missing.bas", "is not a class module of this project"),
+        @("itf_n34_coclass_exe_creatable", "$Tests\itf_neg\n34_coclass_exe_creatable.bas", "marks [ComCreatable(True)] in an EXE project"),
+        # ai/022 B11/C03b (CoClass contract aggregation, stage 3.4c): the block binds a
+        # class, and every slot of every listed interface must be met by that class or an
+        # ancestor -- same VB3012/VB3017 family the Implements checker uses.
+        @("itf_n37_coclass_missing_slot", "$Tests\itf_neg\n37_coclass_missing_slot.cls", "is not implemented by class"),
+        @("itf_n38_coclass_sig_mismatch", "$Tests\itf_neg\n38_coclass_sig_mismatch.cls", "signature mismatch (interface:")
+    )
+    foreach ($c in $itfNeg) {
+        if (Test-Path $c[1]) { Test-SyntaxFail $c[0] $c[1] $c[2] }
+        else { Write-Host "  [SYNTAX-FAIL] $($c[0]) ... SKIP (missing case file)" -ForegroundColor DarkGray }
+    }
+    # ai/022 B10: the Via holder field must name a class that implements the interface
+    # itself -- a same-named member is not enough (there is no slot field to delegate to).
+    Test-SyntaxFailMulti "itf_n22_via_holder_not_impl" @("$Tests\itf_neg\n22_via_base.cls", "$Tests\itf_neg\n22_via_deleg.cls") "does not implement interface"
+    # ai/022 B11/C03a: two more refusals only exist once a second module is in scope --
+    # a class used as an interface (VB6 habit), and a block name shadowing another module.
+    Test-SyntaxFailMulti "itf_n35_coclass_legacy_cls" @("$Tests\itf_neg\n35_legacy_cls_iface.bas", "$Tests\itf_neg\n35_cls.cls") "but that is a class module"
+    Test-SyntaxFailMulti "itf_n36_coclass_vs_module" @("$Tests\itf_neg\n36_coclass_vs_module.bas", "$Tests\itf_neg\n36_other.bas") "collides with a module of the same name"
+    # ai/022 B11/C03b: inheriting a CoClass block name was already refused, but the sentence
+    # blamed a name that does exist in the project; the new wording names the real mistake.
+    Test-SyntaxFailMulti "itf_n39_inherits_coclass" @("$Tests\itf_neg\n39_coclass_as_base.bas", "$Tests\itf_neg\n39_coclass_as_base_der.cls") "which is a CoClass block"
+    # Positive guard (ai/022 B02): a class satisfying a new-style contract (
+    # Extends-inherited slot + property tri-slot keys) must stay silent.
+    if (Test-Path "$Tests\itf_pos\p01_contract_ok.cls") { Test-Syntax "itf_p01_contract_ok" "$Tests\itf_pos\p01_contract_ok.cls" }
+    # ai/022 B02b positive guard: explicit clause binding (cross-interface slot, inherited
+    # slot named via child interface, property tri-slot keys, arbitrary member names).
+    if (Test-Path "$Tests\itf_pos\p02_clause_binding.cls") { Test-Syntax "itf_p02_clause_binding" "$Tests\itf_pos\p02_clause_binding.cls" }
+    # ai/022 B03 positive guard: a host module name is no longer a name collision.
+    if (Test-Path "$Tests\itf_pos\p03_headline_host.cls") { Test-Syntax "itf_p03_headline_host" "$Tests\itf_pos\p03_headline_host.cls" }
+    # ai/022 B10 positive guard: Via is registered as a SOFT keyword, so an existing
+    # program that uses Via as a variable name still parses.
+    if (Test-Path "$Tests\itf_pos\p04_via_soft_ident.bas") { Test-Syntax "itf_p04_via_soft_ident" "$Tests\itf_pos\p04_via_soft_ident.bas" }
+    # ai/022 B11/C01 positive guards: the CoClass block form parses end to end, and CoClass
+    # stays usable as an ordinary identifier (soft keyword registration).
+    if (Test-Path "$Tests\itf_pos\p05_coclass_block.bas") { Test-Syntax "itf_p05_coclass_block" "$Tests\itf_pos\p05_coclass_block.bas" }
+    if (Test-Path "$Tests\itf_pos\p06_coclass_soft_ident.bas") { Test-Syntax "itf_p06_coclass_soft_ident" "$Tests\itf_pos\p06_coclass_soft_ident.bas" }
+    if (Test-Path "$Tests\itf_pos\p07_coclass_cls_host.cls") { Test-Syntax "itf_p07_coclass_cls_host" "$Tests\itf_pos\p07_coclass_cls_host.cls" }
+    # ai/022 B11/C03b positive guards: the contract may be met by an ancestor that merely
+    # declares the members (p08), or delegated whole to a holder object (p09, B10 x B11).
+    if (Test-Path "$Tests\itf_pos\p08_coclass_base.cls") {
+        Test-SyntaxMulti "itf_p08_coclass_via_ancestor" @("$Tests\itf_pos\p08_coclass_ancestor_contract.cls", "$Tests\itf_pos\p08_coclass_base.cls", "$Tests\itf_pos\p08_coclass_der.cls")
+    }
+    if (Test-Path "$Tests\itf_pos\p09_coclass_holder.cls") {
+        Test-SyntaxMulti "itf_p09_coclass_via_delegated" @("$Tests\itf_pos\p09_coclass_holder.cls", "$Tests\itf_pos\p09_coclass_impl.cls")
+    }
+    # ai/022 B11/C04 (026 section 6, D52): a VB6 class module that never says "CoClass".
+    # Its header attribute lines fold into one CoClass record, solved by the SAME Pass E, and
+    # the fold must stay read-only: VB_Creatable=True in an EXE project is the corpus' normal
+    # shape (134 of 143 lines) and must NOT inherit C03a's VB3033; a folded name used as an
+    # Inherits base must NOT get the "that is a CoClass block" wording (D52-3). C05 adds the
+    # third file: the folded name used as a TYPE must still mean the class, so it must also
+    # produce no activation line (D54-3).
+    if (Test-Path "$Tests\itf_pos\p10_coclass_fold_base.cls") {
+        Test-SyntaxNote "itf_p10_coclass_fold" @("$Tests\itf_pos\p10_coclass_fold_base.cls", "$Tests\itf_pos\p10_coclass_fold_der.cls", "$Tests\itf_pos\p10_coclass_fold_use.bas") @(
+            "C3: CoClass 'FoldBase' identity: CLSID={96466C30-E240-55A4-9434-24F1C884C2AB} (minted) IID=- (missing) ProgID=VB6EXE.FoldBase (minted) impl='FoldBase' comCreatable=True folded-from-legacy: VB_Creatable=True VB_Exposed=False VB_PredeclaredId=False VB_GlobalNameSpace=False",
+            "C3: CoClass 'FoldDer' identity:") @("VB_VarHelpID", "VB_Description", "is a CoClass block", "VB3033", "activated in-project")
+    }
+    # Both shapes in one module: the hand-written block wins, so the record carries no fold
+    # tag and [ComCreatable(False)] -- not VB_Creatable=True -- is what reaches the identity.
+    if (Test-Path "$Tests\itf_pos\p11_coclass_block_wins.cls") {
+        Test-SyntaxNote "itf_p11_coclass_block_wins" @("$Tests\itf_pos\p11_coclass_block_wins.cls") @(
+            "C3: class 'FoldWins' has both a CoClass block and 4 legacy header attribute line(s): the block wins, the attributes are not folded",
+            "CoClass 'FoldWins' identity: CLSID={EA2B2FD6-E5C6-5192-D0C9-A13BC6FC7859} (minted) IID=- (missing) ProgID=VB6EXE.FoldWins (minted) impl='' comCreatable=False") @("folded-from-legacy")
+    }
+    # ai/022 B11/C05 (ai/026 section 5, items 3-5): the observable face of in-project
+    # activation is one information line per block that is ACTUALLY USED as a type -- and no
+    # line at all for a block nobody binds to (cc_id declares three and uses none, see the
+    # byte guard). Asserting the line rather than the exit code, because the stage succeeds.
+    Test-SyntaxNote "cc_act_group_names" @("$Tests\cc_act\Act.vbp") @(
+        "CoClass 'Circle' activated in-project: type name -> class 'ShapeAct'",
+        "CoClass 'Ring' activated in-project: type name -> class 'RingAct'",
+        "ProgID=ActApp.Circle") @("declares no [Implementation]", "VB3039")
+    # A block without [Implementation] stays legal, but binding a variable to it has no
+    # answer -- the use site is where the refusal lands (D54-2: today that shape is a silent
+    # late-bound call on a null pointer, which is worse than an error).
+    Test-SyntaxFail "itf_n40_coclass_type_no_impl" "$Tests\itf_neg\n40_coclass_type_no_impl.bas" "declares no [Implementation] class"
+    # ai/022 B11/C02: the three identity tiers, asserted against expected GUIDs computed by an
+    # independent FNV-1a re-implementation of the seed strings "coc:<proj>.<coclass>" and
+    # "itf:<proj>.<iface>" (both lowered) -- NOT scraped from this compiler's own output, or the
+    # test could only ever re-state the implementation (ai/022 D46).
+    $ccShapes = "$Tests\cc_id\Id.vbp"
+    $ccOther = "$Tests\cc_id\Id2.vbp"
+    Test-IdentityNote "cc_id_explicit_tier" $ccShapes @(
+        "CoClass 'CCCircle' identity: CLSID={11111111-1111-1111-1111-111111111111} (explicit) IID={22222222-3333-4444-5555-666666666666} (explicit) ProgID=Shapes.Circle (explicit) impl='CircleImpl' comCreatable=False",
+        "CoClass 'CCVbp' identity: CLSID={33333333-4444-5555-6666-777777777777} (vbp) IID={62D63A9A-7316-DAB9-B2D1-5DDFB57EDB17} (minted) ProgID=ShapesApp.CCVbp (minted) impl='VbpImpl' comCreatable=False",
+        "CoClass 'CCMint' identity: CLSID={A5B36375-4E3A-D5F9-D2A2-1912F3EDC498} (minted) IID={62D63A9A-7316-DAB9-B2D1-5DDFB57EDB17} (minted) ProgID=ShapesApp.CCMint (minted) impl='' comCreatable=False")
+    # Same sources, only the vbp Name= differs: the minted tier moves while the explicit line
+    # stays character-identical to the case above -- that split IS the reproducibility claim.
+    Test-IdentityNote "cc_id_project_name_scope" $ccOther @(
+        "CoClass 'CCCircle' identity: CLSID={11111111-1111-1111-1111-111111111111} (explicit)",
+        "CoClass 'CCVbp' identity: CLSID={33333333-4444-5555-6666-777777777777} (vbp) IID={28519764-65C8-D639-C831-604BAD706603} (minted) ProgID=OtherApp.CCVbp (minted) impl='VbpImpl' comCreatable=False",
+        "CoClass 'CCMint' identity: CLSID={CE88DE91-E77D-563D-D74F-5CA0DF3902D2} (minted) IID={28519764-65C8-D639-C831-604BAD706603} (minted) ProgID=OtherApp.CCMint (minted)")
+    Test-IdentityStable "cc_id_repeatable" $ccShapes
+    # ai/022 B11/C04: a class that writes NO block but is listed in the .vbp the VB6 way
+    # (Class=Name; file.cls; {CLSID}). Folding has to hand that entry to the same resolver,
+    # so the vbp tier lights up for legacy projects too -- the proof that there is still only
+    # one identity channel (D47) rather than a legacy side door.
+    Test-IdentityNote "cc_id_fold_vbp_tier" "$Tests\cc_id\IdFold.vbp" @(
+        "CoClass 'FoldVbp' identity: CLSID={77777777-8888-9999-AAAABBBBBBBBBBBB} (vbp) IID=- (missing) ProgID=FoldApp.FoldVbp (minted) impl='FoldVbp' comCreatable=True folded-from-legacy: VB_Creatable=True VB_Exposed=False VB_PredeclaredId=False VB_GlobalNameSpace=False")
+    Test-IdentityStable "cc_id_fold_repeatable" "$Tests\cc_id\IdFold.vbp"
+    # ai/022 B13d: 规范 IUnknown —— 薄指针的 QI 认 IID_IUnknown 时必须回“本类实现序里第一个
+    # 接口”的薄指针（两处 QI 回同一个值），不再是各自的 self。XWriter 的 CWriter 同时实现
+    # IWriter + ILog = 最小可用形状；真跑那一半由 itf_xmod_writer（QI1..QI4）钉住兄弟/本接口分支没坏。
+    Test-CanonicalIUnknownShape "itf_canonical_iunknown" @("$Tests\itf_xmod\XWriter.vbp") "void* canon = &me->__iv_IWriter;" 2
+    # ai/022 B07a (class Inherits, P3): chain diagnostics must fire. Single-file cases ride
+    # the existing Test-SyntaxFail path; the two-module cases need Test-SyntaxFailMulti.
+    $clsInhNeg = @(
+        @("ci_n01_unknown_base", "$Tests\cls_neg\ci_n01_unknown_base.cls", "inherits unknown base class"),
+        @("ci_n02_not_class", "$Tests\cls_neg\ci_n02_not_class.bas", "only allowed in a class module"),
+        @("ci_n03_duplicate_clause", "$Tests\cls_neg\ci_n03_duplicate_clause.cls", "more than one Inherits clause"),
+        @("ci_n04_self_cycle", "$Tests\cls_neg\ci_n04_self_cycle.cls", "Circular Inherits chain"),
+        @("ci_n05_generic_template", "$Tests\cls_neg\ci_n05_generic_template.cls", "not allowed inside a generic class template"),
+        @("ci_n11_protected_in_interface", "$Tests\cls_neg\ci_n11_protected_in_interface.bas", "must not carry an access modifier")
+    )
+    foreach ($c in $clsInhNeg) {
+        if (Test-Path $c[1]) { Test-SyntaxFail $c[0] $c[1] $c[2] }
+        else { Write-Host "  [SYNTAX-FAIL] $($c[0]) ... SKIP (missing case file)" -ForegroundColor DarkGray }
+    }
+    if (Test-Path "$Tests\cls_neg\ci_n06_pair_a.cls") {
+        Test-SyntaxFailMulti "ci_n06_pair_cycle" @("$Tests\cls_neg\ci_n06_pair_a.cls", "$Tests\cls_neg\ci_n06_pair_b.cls") "Circular Inherits chain"
+    }
+    if (Test-Path "$Tests\cls_neg\ci_n07_iface_host.cls") {
+        Test-SyntaxFailMulti "ci_n07_base_is_iface_host" @("$Tests\cls_neg\ci_n07_iface_host.cls", "$Tests\cls_neg\ci_n07_derives_host.cls") "inherits unknown base class"
+    }
+    # ai/022 B07b (v1 boundaries): unqualified inherited call, inherited field redeclared,
+    # and an event-bearing base. All three are two-module cases -> Test-SyntaxFailMulti.
+    if (Test-Path "$Tests\cls_neg\ci_n08_base.cls") {
+        Test-SyntaxFailMulti "ci_n08_bare_inherited_call" @("$Tests\cls_neg\ci_n08_base.cls", "$Tests\cls_neg\ci_n08_derived.cls") "cannot be called unqualified"
+    }
+    if (Test-Path "$Tests\cls_neg\ci_n09_base.cls") {
+        Test-SyntaxFailMulti "ci_n09_redeclared_field" @("$Tests\cls_neg\ci_n09_base.cls", "$Tests\cls_neg\ci_n09_derived.cls") "redeclares inherited field"
+    }
+    if (Test-Path "$Tests\cls_neg\ci_n10_base.cls") {
+        Test-SyntaxFailMulti "ci_n10_event_base" @("$Tests\cls_neg\ci_n10_base.cls", "$Tests\cls_neg\ci_n10_derived.cls") "declares an Event"
+    }
+    # ai/022 B08b/B08d (Overridable/Overrides): the contract shapes are two-module cases,
+    # the three placement cases are single-file. All ride the existing helpers.
+    $ovNeg = @(
+        @("ci_n12_override_ghost", "ci_n12", "no matching member in the inherited class chain"),
+        @("ci_n13_not_overridable", "ci_n13", "not declared Overridable"),
+        @("ci_n14_override_signature", "ci_n14", "does not match the Overridable member"),
+        @("ci_n19_propertylet_virtual", "ci_n19", "is a Property Let/Set, which this build cannot dispatch"),
+        @("ci_n20_bare_virtual_call", "ci_n20", "Bare (unqualified) call to overridable member")
+    )
+    foreach ($c in $ovNeg) {
+        $a = "$Tests\cls_neg\" + $c[1] + "_base.cls"
+        $b = "$Tests\cls_neg\" + $c[1] + "_derived.cls"
+        if ((Test-Path $a) -and (Test-Path $b)) {
+            Test-SyntaxFailMulti $c[0] @($a, $b) $c[2]
+        } else {
+            Write-Host "  [SYNTAX-FAIL] $($c[0]) ... SKIP (missing case files)" -ForegroundColor DarkGray
+        }
+    }
+    if (Test-Path "$Tests\cls_neg\ci_n16_override_no_inherits.cls") {
+        Test-SyntaxFail "ci_n16_override_no_base" "$Tests\cls_neg\ci_n16_override_no_inherits.cls" "has no base class to override"
+    }
+    if (Test-Path "$Tests\cls_neg\ci_n17_overridable_in_bas.bas") {
+        Test-SyntaxFail "ci_n17_overridable_in_bas" "$Tests\cls_neg\ci_n17_overridable_in_bas.bas" "only allowed in a class module"
+    }
+    if (Test-Path "$Tests\cls_neg\ci_n18_overridable_in_interface.bas") {
+        Test-SyntaxFail "ci_n18_overridable_in_iface" "$Tests\cls_neg\ci_n18_overridable_in_interface.bas" "must not carry a virtual modifier"
+    }
+    # B07a positive guard: a base class in another module resolves and stays silent.
+    if (Test-Path "$Tests\cls_neg\ci_pos_base.cls") {
+        Test-SyntaxMulti "ci_pos_pair" @("$Tests\cls_neg\ci_pos_base.cls", "$Tests\cls_neg\ci_pos_derived.cls")
+    }
+    # ai/022 B08c (Protected access from outside the class family): the three out-of-family
+    # shapes below must be rejected at the call site, while in-family access (a base-typed
+    # variable used from the derived class, and from the declaring class itself) stays silent.
+    $protNeg = @(
+        @("ci_n21_prot_field_write", "ci_n21_base.cls", "ci_n21_stranger.cls"),
+        @("ci_n22_prot_sub_stdmod", "ci_n22_base.cls", "ci_n22_outsider.bas"),
+        @("ci_n23_prot_property_get", "ci_n23_base.cls", "ci_n23_stranger.cls")
+    )
+    foreach ($c in $protNeg) {
+        $a = "$Tests\cls_neg\" + $c[1]
+        $b = "$Tests\cls_neg\" + $c[2]
+        if ((Test-Path $a) -and (Test-Path $b)) {
+            Test-SyntaxFailMulti $c[0] @($a, $b) "is Protected"
+        } else {
+            Write-Host "  [SYNTAX-FAIL] $($c[0]) ... SKIP (missing case files)" -ForegroundColor DarkGray
+        }
+    }
+    if (Test-Path "$Tests\cls_neg\ci_pos2_base.cls") {
+        Test-SyntaxMulti "ci_pos2_prot_in_family" @("$Tests\cls_neg\ci_pos2_base.cls", "$Tests\cls_neg\ci_pos2_derived.cls")
+    }
+    # ai/022 B08e-6 (class-vtable dispatch map, codegen stage): the three shapes below carry a
+    # call inside the receiver, so a virtual call there would need the receiver twice. Sites 12
+    # and 10 used to compile and bind statically to the base body; they now report VB3027. Site
+    # 8 already reported it through the priority-2 dispatcher -- pinned here so a refactor
+    # cannot lose it. Site 9's receiver is a plain return variable, so it must still compile.
+    $cgenVirtNeg = @(
+        @("ci_n24_chain_receiver", "ci_n24", "cannot be dispatched in this build"),
+        @("ci_n25_prop_chain_receiver", "ci_n25", "cannot be dispatched in this build"),
+        @("ci_n26_prop_receiver", "ci_n26", "cannot be dispatched in this build"),
+        # ai/022 B09: `MyBase` where there is no base class, and `MyBase.<name>` the base face
+        # does not have -> VB3028. Both used to compile into an undefined `vb6_MyBase_<name>`.
+        @("ci_n27_mybase_no_inherits", "ci_n27", "has no Inherits clause"),
+        @("ci_n28_mybase_no_such_member", "ci_n28", "has no such member")
+    )
+    foreach ($c in $cgenVirtNeg) {
+        $a = "$Tests\cls_neg\" + $c[1] + "_base.cls"
+        $b = "$Tests\cls_neg\" + $c[1] + "_derived.cls"
+        if ((Test-Path $a) -and (Test-Path $b)) {
+            Test-CompileFail $c[0] @($a, $b) $c[2]
+        } else {
+            Write-Host "  [COMPILE-FAIL] $($c[0]) ... SKIP (missing case files)" -ForegroundColor DarkGray
+        }
+    }
+    if (Test-Path "$Tests\cls_neg\ci_pos3_base.cls") {
+        Test-Compile "ci_pos3_retval_receiver" @("$Tests\cls_neg\ci_pos3_base.cls", "$Tests\cls_neg\ci_pos3_derived.cls")
+    }
     Write-Host ""
     
     # --- 生成环境检查与汇总 (冒烟+语法+VBP+run 计数) ---
@@ -856,6 +1727,241 @@ if ($Category -in @("all", "syntax")) {
         if (Test-Path $path) {
             $name = [System.IO.Path]::GetFileNameWithoutExtension($t)
             Test-Syntax $name $path
+        }
+    }
+    Write-Host ""
+}
+
+# ai/023 S01: package/project-reference hard checks (diagnostics only, no codegen).
+# Negatives ride --syntax-only (stage-0 checks fire before the pipeline); positives
+# build+run the host to prove the checks don't break a normal build (D7: warnings
+# never reject a build).
+if ($Category -in @("all", "pkg")) {
+    Write-Host "--- Package Reference Tests (ai/023 S01) ---" -ForegroundColor Yellow
+    Test-VbpFail "pkg_n01_not_found"    "$Tests\pkg_neg\n01_not_found.vbp"    "package not found in any search root"
+    Test-VbpFail "pkg_n02_escape_name"  "$Tests\pkg_neg\n02_escape_name.vbp"  "package name contains path characters"
+    Test-VbpFail "pkg_n03_conflict"     "$Tests\pkg_neg\n03_conflict.vbp"     "package name conflicts with project name"
+    Test-VbpFail "pkg_n04_bad_manifest" "$Tests\pkg_neg\n04_bad_manifest.vbp" "unknown key in [C3Package]"
+    Test-VbpFail "pkg_n05_name_mismatch" "$Tests\pkg_neg\n05_name_mismatch.vbp" "manifest Name mismatch"
+    # ai/023 S02: package source loading — a package module may not collide with a
+    # host module name (checked at load time, before the pipeline).
+    Test-VbpFail "pkg_n06_module_conflict" "$Tests\pkg_neg\n06_module_conflict.vbp" "package module name conflicts with host module"
+    if (Test-Path "$Tests\pkg_pos\p01_ok.vbp") {
+        Test-Vbp "pkg_p01_ok" "$Tests\pkg_pos\p01_ok.vbp" @("PKG-S01:OK")
+    }
+    if (Test-Path "$Tests\pkg_pos\p02_missing_file_warn.vbp") {
+        Test-Vbp "pkg_p02_missing_file_warn" "$Tests\pkg_pos\p02_missing_file_warn.vbp" @("PKG-S01:OK")
+    }
+    # ai/023 S02: host calls a package Function and Property Get across modules.
+    if (Test-Path "$Tests\pkg_xmod\pkg_xmod_ok.vbp") {
+        Test-Vbp "pkg_s02_xmod" "$Tests\pkg_xmod\pkg_xmod_ok.vbp" @("PKG-XMOD:42", "PKG-XMOD:XM")
+    }
+    # ai/023 S03: package export boundary — Friend member invisible to host (VB7006),
+    # visible again with manifest Friend=True.
+    if (Test-Path "$Tests\pkg_xmod\friend_bad.vbp") {
+        Test-VbpBuildFail "pkg_s03_friend_blocked" "$Tests\pkg_xmod\friend_bad.vbp" "is not exported by package"
+    }
+    if (Test-Path "$Tests\pkg_xmod\friend_open_ok.vbp") {
+        Test-Vbp "pkg_s03_friend_open" "$Tests\pkg_xmod\friend_open_ok.vbp" @("PKG-FRIEND-OK")
+    }
+    # ai/023 S04: class modules across the package boundary. An exported class binds
+    # statically (PKG-C1 = New + method + property); a class the manifest does not
+    # export must be a hard VB7006 error, not a silent late-bound COM fallback
+    # (codegen emits vb6_NewObject(L"Cls") when the class symbol is missing).
+    if (Test-Path "$Tests\pkg_cls\cls_ok.vbp") {
+        Test-Vbp "pkg_s04_cls_ok" "$Tests\pkg_cls\cls_ok.vbp" @("PKG-C1:42")
+    }
+    if (Test-Path "$Tests\pkg_cls\cls_neg.vbp") {
+        Test-VbpBuildFail "pkg_s04_cls_blocked" "$Tests\pkg_cls\cls_neg.vbp" "does not export it"
+    }
+    if (Test-Path "$Tests\pkg_cls\dimonly.vbp") {
+        # `Dim x As Cls` alone (no New) must also be rejected — otherwise the type
+        # silently degrades to Object/void*.
+        Test-VbpBuildFail "pkg_s04_cls_dim_only" "$Tests\pkg_cls\dimonly.vbp" "does not export it"
+    }
+    # ai/084a M3: member-level Friend boundary on exported package classes —
+    # obj.<Friend member> from the host is a hard 7008 unless the manifest
+    # declares Friend=True (same-package / package-to-package stay unrestricted).
+    if (Test-Path "$Tests\pkg_cls\cls_friend_obj_bad.vbp") {
+        Test-VbpBuildFail "acc_m3_pkg_friend_obj_blocked" "$Tests\pkg_cls\cls_friend_obj_bad.vbp" "Friend"
+    }
+    if (Test-Path "$Tests\pkg_cls\cls_friend_obj_open_ok.vbp") {
+        Test-Vbp "acc_m3_pkg_friend_obj_open" "$Tests\pkg_cls\cls_friend_obj_open_ok.vbp" @("FR-OPEN:12")
+    }
+    if (Test-Path "$Tests\pkg_cls\samepkg_ok.vbp") {        # Same-package module uses the non-exported class: must NOT be blocked.
+        Test-Vbp "pkg_s04_cls_same_package" "$Tests\pkg_cls\samepkg_ok.vbp" @("PKG-C3:OK")
+    }
+    # ai/023 S05: per-file sha1/size verification. Clean package = no warning;
+    # tampered byte = warning VB7007 and build CONTINUES (D7 校验不拒收);
+    # --check-packages prints resolution read-only (OK / MISMATCH) and exits.
+    if (Test-Path "$Tests\pkg_chk\chk_ok.vbp") {
+        Test-Vbp "pkg_s05_chk_ok" "$Tests\pkg_chk\chk_ok.vbp" @("PKG-S05:55")
+        Test-CliOk "pkg_s05_check_packages_ok" @('"' + "$Tests\pkg_chk\chk_ok.vbp" + '"', "--check-packages") "sha1=OK"
+    }
+    if (Test-Path "$Tests\pkg_chk\tamper.vbp") {
+        Test-VbpWarn "pkg_s05_tamper_warn_builds" "$Tests\pkg_chk\tamper.vbp" "hash mismatch"
+        Test-CliOk "pkg_s05_check_packages_tampered" @('"' + "$Tests\pkg_chk\tamper.vbp" + '"', "--check-packages") "sha1=MISMATCH"
+    }
+    # ai/023 S06: pack -> unpack roundtrip must be byte-identical.
+    if (Test-Path "$Tests\pkg_chk\packages\ChkPkg-1.0\package.c3d") {
+        Test-PackRoundtrip "pkg_s06_pack_roundtrip" "$Tests\pkg_chk\packages\ChkPkg-1.0"
+    }
+    Write-Host ""
+}
+
+# ai/084a M1/M2: class member access levels. Positives prove same-class (Me. /
+# other instance), Friend-same-project and inherited-Private-field access stay
+# legal; the negative proves Private proc access from outside the class is a
+# hard 3028 (previously a silent C2129 at MSVC stage).
+if ($Category -in @("all", "acc")) {
+    Write-Host "--- Member Access Level Tests (ai/084a M1/M2) ---" -ForegroundColor Yellow
+    if (Test-Path "$Tests\acc\acc_ok.vbp") {
+        Test-Vbp "acc_m2_ok" "$Tests\acc\acc_ok.vbp" @("ACC-USE:6", "ACC-OK")
+    }
+    if (Test-Path "$Tests\acc\acc_fam.vbp") {
+        Test-Vbp "acc_m2_family_field" "$Tests\acc\acc_fam.vbp" @("ACC-FAM:3")
+    }
+    if (Test-Path "$Tests\acc\acc_neg.vbp") {
+        Test-VbpBuildFail "acc_m2_private_blocked" "$Tests\acc\acc_neg.vbp" "Private"
+    }
+    # ai/084a: Protected — family-internal access (Me. and obj.) stays legal, a
+    # stranger reaching a Protected member is a hard 3023 (placeholder now landed).
+    if (Test-Path "$Tests\acc\acc_prot_ok.vbp") {
+        Test-Vbp "acc_prot_family_ok" "$Tests\acc\acc_prot_ok.vbp" @("PROT:fam")
+    }
+    if (Test-Path "$Tests\acc\acc_prot_neg.vbp") {
+        Test-VbpBuildFail "acc_prot_stranger_blocked" "$Tests\acc\acc_prot_neg.vbp" "Protected"
+    }
+    Write-Host ""
+}
+
+# =============================================
+# ctor: ai/084c 类构造函数 — 带参 (New Cls(args) → _NewParams) 与无参 (Class_Initialize)
+# =============================================
+if ($Category -in @("all", "ctor")) {
+    Write-Host "--- ctor (ai/084c class constructors) ---" -ForegroundColor Yellow
+    if (Test-Path "$Tests\ctor\ctor_ok.vbp") {
+        Test-Vbp "ctor_ok" "$Tests\ctor\ctor_ok.vbp" @("amt:42", "CNT:7")
+    }
+    if (Test-Path "$Tests\ctor\ctor_neg.vbp") {
+        Test-VbpBuildFail "ctor_neg_arity" "$Tests\ctor\ctor_neg.vbp" "3035"
+    }
+    if (Test-Path "$Tests\ctor\ctor_neg2.vbp") {
+        Test-VbpBuildFail "ctor_neg2_no_params" "$Tests\ctor\ctor_neg2.vbp" "3035"
+    }
+    Write-Host ""
+}
+
+# =============================================
+# asm: ai/vb-asm-extension-spec — Asm 块完整形态
+#   x64: 生成 .asm → ml64 → 链接 (基本块/ByRef/Naked/自动保存/Clobber/单行)
+#   x86: __asm{} 内联块 (同一份语法换后端)
+#   混排 (项2/项3): Asm 片段与 VB 语句混排 + 片段内引用 VB 局部变量
+#   负例: 3037 (类方法里的 Asm) / 3036 (x86 <Naked> 引用参数) / 2012 (<Naked> 修饰非过程) /
+#         2014 (Clobber 参数非字符串) / 3040 ([X] 解析不到) / 3041 (x64 引用 >4 个变量)
+# =============================================
+if ($Category -in @("all", "asm")) {
+    Write-Host "--- Asm Block Tests (ai/vb-asm-extension-spec) ---" -ForegroundColor Yellow
+    if (Test-Path "$Tests\asm\asm_ok.vbp") {
+        Test-Vbp "asm_ok" "$Tests\asm\asm_ok.vbp" @(
+            "ASM-ADD:42", "ASM-ATOMIC-OLD:10", "ASM-ATOMIC-NEW:15",
+            "ASM-KEEP-RBX:37", "ASM-CLOBBER:12", "ASM-NAKED:100", "ASM-ONELINE:1234",
+            # 项4 x64 浮点 (XMM0/xmm1 + xmm0 返回) / 项5 x64 栈传参 (shadow space 之后) /
+            # 项6 x64 int64 返回 (RAX) —— 见 spec §12.1/12.2
+            "ASM-DBL:3.75", "ASM-SUM6:21", "ASM-BIG64:4000000000", "ASM-DONE")
+    }
+    if (Test-Path "$Tests\asm\asm_x86.vbp") {
+        Test-Vbp "asm_x86_inline" "$Tests\asm\asm_x86.vbp" @(
+            "X86-ADD:42", "X86-KEEP-EBX:37", "X86-CLOBBER:12",
+            "X86-NAKED:5", "X86-ONELINE:1234",
+            # 项4 x86 浮点返回 (ST0 → fstp) / 项5 x86 全栈参数按名解析 /
+            # 项6 x86 int64 返回 (EDX:EAX + [Function+4]) —— 见 spec §12.1/12.3
+            "X86-DBL:3.75", "X86-SUM5:15", "X86-BIG:4000000000",
+            "X86-MAKE64:4294967297", "X86-DONE") -Arch "x86"
+    }
+    # --- 项2/项3 混排 + 片段引用 VB 局部变量 (spec §12.5) ---
+    if (Test-Path "$Tests\asm\asm_mixed_basic.vbp") {
+        # 最小混排: 片段 + 一条 VB 语句; VB 语句覆盖片段写的返回值
+        Test-Vbp "asm_mixed_basic" "$Tests\asm\asm_mixed_basic.vbp" @("MIXED:1")
+    }
+    if (Test-Path "$Tests\asm\asm_mixed.vbp") {
+        # x64: 片段降级为独立 MASM 过程, 变量以地址传入 ([X] → [rcx])
+        #   局部变量读写 / 多片段 / ByRef 参数 / [Function] / callee-saved 自动保存 /
+        #   Clobber / [X+4] 偏移形态
+        Test-Vbp "asm_mixed_x64" "$Tests\asm\asm_mixed.vbp" @(
+            "MIX-ACC:175", "MIX-TWO:22", "MIX-BUMP:15", "MIX-RET:42",
+            "MIX-KEEP-RBX:80", "MIX-CLOBBER:11", "MIX-OFFSET:4294967297",
+            "MIX-GLOBAL:1005", "MIX-DONE")
+    }
+    if (Test-Path "$Tests\asm\asm_mixed_x86.vbp") {
+        # x86: 片段就地发 __asm{} 内联块, [X] 按名解析 (ByRef 参数经本地副本对齐 x64 语义);
+        #      另加一例引用 5 个变量 (x86 无 4 个上限)
+        Test-Vbp "asm_mixed_x86_inline" "$Tests\asm\asm_mixed_x86.vbp" @(
+            "XMIX-ACC:175", "XMIX-TWO:22", "XMIX-BUMP:15", "XMIX-RET:42",
+            "XMIX-KEEP-EBX:80", "XMIX-CLOBBER:11", "XMIX-OFFSET:4294967297",
+            "XMIX-SUMMIX:1006", "XMIX-GLOBAL:1005", "XMIX-DONE") -Arch "x86"
+    }
+    if (Test-Path "$Tests\asm\asm_mixed_neg.vbp") {
+        # 3040: [X] 既不是寄存器也不是可见的 VB 变量 (两个架构都触发)
+        # 3041: x64 单个片段引用 >4 个 VB 变量 (x64 专属, 见下)
+        Test-VbpBuildFail "asm_mixed_neg_unresolved_ref" "$Tests\asm\asm_mixed_neg.vbp" "3040"
+    }
+    if (Test-Path "$Tests\asm\asm_mixed_neg.vbp") {
+        # 3041 只在 x64 出现 (x86 名字解析走栈帧, 不占参数寄存器)
+        $script:total++
+        Write-Host -NoNewline "  [VBP-BUILD-FAIL] asm_mixed_neg_ref_limit ... "
+        $result = & cmd /c ('"' + $C3 + '" "' + "$Tests\asm\asm_mixed_neg.vbp" + '" --output-dir "' + $OutDir + '" 2>&1')
+        $text = (($result | Out-String) -replace '\s+', ' ')
+        if ($LASTEXITCODE -ne 0 -and $text.Contains("3041")) {
+            $script:pass++
+            Write-Host "PASS" -ForegroundColor Green
+        } else {
+            $script:fail++
+            Write-Host "FAIL" -ForegroundColor Red
+            Write-Host "  expected failing build containing: 3041" -ForegroundColor DarkGray
+            if ($Verbose) { Write-Host $text }
+        }
+    }
+    if (Test-Path "$Tests\asm\asm_alias_neg.vbp") {
+        # 项1: cmpxchg/mul 的隐含累加器与指针/基址同族 (RAX/EAX) → 3042
+        # (实测的静默死循环/段错误, 现在编译期拦住)
+        Test-VbpBuildFail "asm_neg_accum_alias" "$Tests\asm\asm_alias_neg.vbp" "3042"
+    }
+    if (Test-Path "$Tests\asm\asm_alias_x86_neg.vbp") {
+        # 同上, x86 内联块 (Test-VbpBuildFail 不带自定义参数, 就地内联判据)
+        $script:total++
+        Write-Host -NoNewline "  [VBP-BUILD-FAIL] asm_neg_accum_alias_x86 ... "
+        $result = & cmd /c ('"' + $C3 + '" "' + "$Tests\asm\asm_alias_x86_neg.vbp" + '" --arch x86 --output-dir "' + $OutDir + '" 2>&1')
+        $text = (($result | Out-String) -replace '\s+', ' ')
+        if ($text -match "3042") { $script:passed++; Write-Host "PASS" -ForegroundColor Green }
+        else { $script:failed++; Write-Host "FAIL (expected 3042)" -ForegroundColor Red }
+    }
+    if (Test-Path "$Tests\asm\asm_width_neg.vbp") {
+        # 宽度不一致 (mov rax, edx) → 3038 (宽度校验前移, 不再漏到 ml64 的 A2022)
+        Test-VbpBuildFail "asm_neg_operand_width" "$Tests\asm\asm_width_neg.vbp" "3038"
+    }
+    if (Test-Path "$Tests\asm\asm_cls_neg.vbp") {
+        # 类方法里的 Asm 块 → 3037 (v2 边界: 只支持标准模块过程)
+        Test-VbpBuildFail "asm_neg_class_method" "$Tests\asm\asm_cls_neg.vbp" "3037"
+    }
+    if (Test-Path "$Tests\asm\asm_attr_neg.vbp") {
+        Test-VbpBuildFail "asm_neg_naked_on_nonproc" "$Tests\asm\asm_attr_neg.vbp" "2012"
+        Test-VbpBuildFail "asm_neg_clobber_nonstring" "$Tests\asm\asm_attr_neg.vbp" "2014"
+    }
+    if (Test-Path "$Tests\asm\asm_x86_neg.vbp") {
+        # x86 负例需要额外 --arch x86, Test-VbpBuildFail 不带自定义参数, 就地内联同款判据
+        $script:total++
+        Write-Host -NoNewline "  [VBP-BUILD-FAIL] asm_x86_neg ... "
+        $result = & cmd /c ('"' + $C3 + '" "' + "$Tests\asm\asm_x86_neg.vbp" + '" --arch x86 --output-dir "' + $OutDir + '" 2>&1')
+        $text = (($result | Out-String) -replace '\s+', ' ')
+        if ($LASTEXITCODE -ne 0 -and $text.Contains("3036")) {
+            $script:pass++
+            Write-Host "PASS" -ForegroundColor Green
+        } else {
+            $script:fail++
+            Write-Host "FAIL" -ForegroundColor Red
+            Write-Host "  expected failing build containing: 3036" -ForegroundColor DarkGray
+            if ($Verbose) { Write-Host $text }
         }
     }
     Write-Host ""

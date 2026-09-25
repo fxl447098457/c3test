@@ -53,6 +53,13 @@ bool Parser::isSoftKeyword(TokenKind kind) const {
         case TokenKind::Compare:   case TokenKind::Base:     case TokenKind::Text:
         case TokenKind::Binary2:   case TokenKind::Explicit: case TokenKind::Private2:
         case TokenKind::Attribute: case TokenKind::Begin: case TokenKind::Default:
+        // tB 扩展接口关键字: 登记为软关键字, 存量代码里同名标识符 (变量/成员名) 不受影响
+        case TokenKind::Interface: case TokenKind::Extends: case TokenKind::Inherits:
+        case TokenKind::Protected:
+        case TokenKind::Overridable: case TokenKind::Overrides:
+        case TokenKind::NotOverridable:  // tB 扩展 (ai/022 B08b): 虚方法修饰符同为软关键字
+        case TokenKind::Via:             // tB 扩展 (ai/022 B10): `Implements I Via m_h` 的 Via
+        case TokenKind::CoClass:         // tB 扩展 (ai/026, B11/C01): CoClass 块名可作普通标识符
         // 其他
         case TokenKind::Resume:    case TokenKind::Stop:
         case TokenKind::Let:       case TokenKind::Set:

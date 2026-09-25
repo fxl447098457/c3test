@@ -1,0 +1,10 @@
+Type=Exe
+Name="DemoApp"
+Class=IDemoShape; IDemoShape.cls
+Class=DemoBase; DemoBase.cls
+Class=DemoDerived; DemoDerived.cls
+Class=DemoShape; DemoShape.cls
+Class=DemoHolder; DemoHolder.cls
+Module=DemoBlocks; DemoBlocks.bas
+Module=DemoMain; DemoMain.bas
+Startup="Sub Main"

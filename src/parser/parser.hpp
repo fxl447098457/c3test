@@ -113,6 +113,7 @@ private:
     void parseModuleBody(Module& mod);
     std::unique_ptr<OptionStmt> parseOption();
     std::unique_ptr<ImplementsStmt> parseImplements();
+    InheritsStmt parseInherits();  // 类继承子句 `Inherits Base` (tB 扩展, ai/022 B07)
     std::unique_ptr<DefTypeStmt> parseDefType();
     std::unique_ptr<AttributeStmt> parseAttribute();
 
@@ -120,6 +121,9 @@ private:
     // 声明解析 (parser_decl.cpp)
     // ============================================================
     DeclPtr parseDeclaration();
+    // 虚方法修饰位 (tB 扩展, ai/022 B08b): 见 parser_decl.cpp 的 parseDeclaration 头注释
+    void eatVirtualModifiers(ProcVirt& io);
+    void checkVirtualOnProcStart(ProcVirt& io);
     DeclPtr parseVariableDeclList(AccessLevel access, bool isStatic);
     DeclPtr parseConstDeclList(AccessLevel access);
     std::unique_ptr<SubDecl> parseSubDecl(AccessLevel access, bool isStatic);
@@ -127,9 +131,23 @@ private:
     std::unique_ptr<PropertyDecl> parsePropertyDecl(AccessLevel access);
     std::unique_ptr<TypeDecl> parseTypeDecl(AccessLevel access);
     std::unique_ptr<EnumDecl> parseEnumDecl(AccessLevel access);
-    std::unique_ptr<DeclareDecl> parseDeclareDecl(AccessLevel access);
+    // isWide = 由 `DeclareWide` 引入 (tB 兼容, ai/024): 禁用 ANSI<->Unicode 转换
+    std::unique_ptr<DeclareDecl> parseDeclareDecl(AccessLevel access, bool isWide = false);
     std::unique_ptr<EventDecl> parseEventDecl(AccessLevel access);
     std::unique_ptr<DelegateDecl> parseDelegateDecl(AccessLevel access);
+    // Interface 契约块 (tB 扩展, parser_interface.cpp): `Interface Name [Extends P] ... End Interface`
+    // pendingAttrs = 声明上方累积的 [Xxx] 属性行 (由 parseModuleBody 交出)
+    std::unique_ptr<InterfaceDecl> parseInterfaceDecl(std::vector<InterfaceAttr>& pendingAttrs);
+    // CoClass 契约聚合块 (tB 扩展, ai/026 四节 / ai/022 D44, 批次 B11/C01; 同在 parser_interface.cpp):
+    // `CoClass Name ... End CoClass`, 块体只收属性行与 `Interface <名>` 引用行. C01 不校验、不发码.
+    std::unique_ptr<CoClassDecl> parseCoClassDecl(std::vector<InterfaceAttr>& pendingAttrs);
+    DeclPtr parseInterfaceMemberDecl();
+    // 成员级 `Implements I.M[, I.N]` 尾子句 (tB 扩展, ai/022 D5, B02b):
+    // 在过程签名之后、行尾之前调用; 无 Implements 时不消费任何 token.
+    void parseTrailingImplementsClauses(std::vector<ImplementsClause>& out);
+    bool atBracketAttrLine() const;
+    // requireOwnLine=false: 属性行后同行还可以接声明 (CoClass 块的 `[Default] Interface X`)
+    bool parseBracketAttrLine(InterfaceAttr& out, bool requireOwnLine = true);
     std::unique_ptr<ConstDecl> parseConstDecl(AccessLevel access);
     std::unique_ptr<VariableDecl> parseVariableDecl(AccessLevel access, bool isStatic);
 
@@ -170,6 +188,11 @@ private:
     std::unique_ptr<SelectCaseStmt> parseSelectCaseStmt();
     std::unique_ptr<WithStmt> parseWithStmt();
 
+    // ai/vb-asm-extension-spec: `<Naked>` 角括号过程属性。角括号属性行 (VB6 家族没有这条路)
+    // 只承载 Naked 一个名字; 解析后暂存, 由紧随其后的 Sub/Function 声明取走。
+    bool pendingNaked_ = false;
+    bool tryParseAngleAttr();   // 命中并消费 `<Naked>` 返回 true; 否则不动 token 流
+
     // 单行语句
     StmtPtr parseOnStmt();
     std::unique_ptr<OnErrorStmt> parseOnErrorStmt();
@@ -187,6 +210,8 @@ private:
     std::unique_ptr<RaiseEventStmt> parseRaiseEventStmt();
     std::unique_ptr<EndStmt> parseEndStmt();
     std::unique_ptr<StopStmt> parseStopStmt();
+    // ai/vb-asm-extension-spec: Asm ... End Asm (原始行捕获, 不做 VB 语法解析)
+    StmtPtr parseAsmStmt();
     std::unique_ptr<SetStmt> parseSetStmt();
     std::unique_ptr<LetStmt> parseLetStmt();
     std::unique_ptr<CallStmt> parseCallStmt();

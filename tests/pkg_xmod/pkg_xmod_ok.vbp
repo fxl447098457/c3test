@@ -1,0 +1,6 @@
+Type=Exe
+Name=PkgXmodHost
+Module=XmHost; xm_host.bas
+Startup="Sub Main"
+ExeName32="pkg_xmod_ok.exe"
+Package=XmodPkg; 1.0

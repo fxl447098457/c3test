@@ -121,6 +121,9 @@ public:
 class NewExpr : public Expr {
 public:
     std::string className;
+    // C3 扩展 (084c): `New Cls(a, b)` 带参构造 — VB6 本体不允许 `New X(...)`，
+    // 仅本工程类 (Class_Initialize 带形参) 生效; COM/外部类带实参在语义层报错。
+    std::vector<ExprPtr> args;
 
     NewExpr(SourceLocation loc, std::string cls)
         : Expr(ASTNodeKind::NewExpr, loc), className(std::move(cls)) {}

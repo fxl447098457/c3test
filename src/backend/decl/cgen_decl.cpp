@@ -27,10 +27,241 @@ void CCodeGen::clearProcArrayTracking() {
         knownArrays_.erase(name);
         arrayElemTypes_.erase(name);
         arrayUdtElemTypes_.erase(name);
+        arrayClassElemTypes_.erase(name);
         arrayDimCounts_.erase(name);
         knownByteArrayVars_.erase(name);
     }
     knownNDArraysInProc_.clear();
+}
+
+// ============================================================
+// ai/vb-asm-extension-spec: Asm 块过程降级
+//   命中: 过程体恰好是 1 条 AsmStmt (块形式或单行形式)。
+//   x86 (32 位): 降级为 MSVC `__asm { }` 内联块 —— 共享 C 函数栈帧, 按名引用天然成立
+//                ([var] → C 参数名), [Function] → 返回临时变量; 非 Naked 时自动
+//                push/pop 块内踩到的 callee-saved (ebx/esi/edi, 及 clobber 里的 ebp)。
+//   x64: 不发 C 体, 只发 `extern` 原型 + 把元数据记进 asmProcs_
+//        (driver 侧生成 .asm, ml64 汇编后进链接)。
+//   **体里还有其它语句 (混排, 项2) 时本函数返回 false** —— 交给常规过程生成流程,
+//   其中每条 AsmStmt 由 emitStmtList 的 AsmStmt 分支就地降级 (见 cgen_stmt_asm.cpp)。
+//   边界 (spec §10): 类方法 / 无 Optional/ParamArray / 参数为整型或指针或浮点 /
+//   x64 参数 ≤4 (寄存器传参上限)。
+// ============================================================
+bool CCodeGen::tryEmitAsmProc(const std::string& procName, AccessLevel access,
+                              std::vector<std::unique_ptr<ParameterDecl>>& params,
+                              ASTNode* returnType, const StmtList& body, SourceLocation loc,
+                              bool isNaked) {
+    AsmStmt* asmNode = nullptr;
+    for (auto& st : body) {
+        if (st && st->kind == ASTNodeKind::AsmStmt) {
+            if (!asmNode) asmNode = static_cast<AsmStmt*>(st.get());
+        }
+    }
+    if (!asmNode) return false;   // 与 Asm 无关的常规过程
+
+    // 项2 混排: 体里除了 Asm 块还有别的语句 → 不在这里接管。
+    // (整过程降级的 x64 路只发 extern 原型, 没法表达"块之间还有 VB 语句";
+    //  混排由 emitStmtList 逐条 AsmStmt 就地降级, 见 cgen_stmt_asm.cpp。)
+    if (body.size() != 1) return false;
+
+    auto fail = [&](DiagnosticID id, const std::string& msg) -> bool {
+        diag_.error(id, loc, msg);
+        return true;              // 已接管: 不再发 C 体 (编译已失败)
+    };
+
+    const bool x86 = (targetArch_ == "x86");
+
+    if (isClassModule_)
+        return fail(DiagnosticID::SemAsmMixedBody, "类方法暂不支持 Asm 块 (仅标准模块过程)");
+
+    for (auto& p : params) {
+        if (p->isOptional)   return fail(DiagnosticID::SemAsmMixedBody, "Asm 过程暂不支持 Optional 参数");
+        if (p->isParamArray) return fail(DiagnosticID::SemAsmMixedBody, "Asm 过程暂不支持 ParamArray 参数");
+    }
+
+    AsmProcInfo info;
+    info.cName = cProcName(procName, access, "");
+    info.retCType = returnType ? mapTypeRef(returnType) : "void";
+    for (auto& p : params) info.params.push_back(makeParamCType(p.get()));
+
+    // 参数/返回类型白名单: 整型 / 任意指针 / 浮点 (float,double —— 走 xmm/浮点栈, spec §6)。
+    // 其余 (VARIANT/结构体按值/String 等) 仍拒绝 —— 它们各有复杂编组约定, 待后续。
+    static const char* kIntTypes[] = {"int8_t", "int16_t", "int32_t", "int64_t", "intptr_t", "unsigned", "VBABOOL"};
+    auto typeOk = [](const std::string& t) {
+        if (t.find('*') != std::string::npos) return true;    // 指针
+        if (asmIsFloatCType(t)) return true;                  // float / double
+        for (const char* k : kIntTypes) if (t == k) return true;
+        return false;
+    };
+    for (auto& ps : info.params) {
+        std::string t = ps.substr(0, ps.find(' '));
+        if (!typeOk(t)) return fail(DiagnosticID::SemAsmMixedBody,
+                                    "Asm 过程参数暂只支持整型/指针/浮点: " + ps);
+    }
+    if (!(info.retCType == "void") && !typeOk(info.retCType))
+        return fail(DiagnosticID::SemAsmMixedBody,
+                    "Asm 过程返回类型暂只支持整型/指针/浮点/void: " + info.retCType);
+
+    info.lines = asmNode->lines;
+    info.naked = isNaked;
+    info.clobbers = asmNode->clobbers;
+
+    std::string paramsC = makeParamList(params);
+
+    // ---------------- x86: MSVC 内联汇编 ----------------
+    if (x86) {
+        // 注释状态: `<Naked>` 走 __declspec(naked) (无 prologue/epilogue, 用户自写 ret);
+        // 普通块由 MSVC 保留 C 函数帧, 我们只在块入口/出口成对 push/pop callee-saved。
+        if (info.naked)
+            c_.emitLine("/* ai/vb-asm-extension-spec: <Naked> Asm 过程 → MSVC __asm 块 (x86, 无 prologue/epilogue) */");
+        else
+            c_.emitLine("/* ai/vb-asm-extension-spec: Asm 块 → MSVC __asm 块 (x86) */");
+
+        std::string head = info.retCType + " " + info.cName + "(" + paramsC + ")";
+        c_.emitLine((info.naked ? "__declspec(naked) " : "") + head + " {");
+
+        const char* kRetName = "vb6_asm_ret_";
+        // 注意: 用 `= 0` 而不是 `{}` —— `/std:c11` 下空花括号初始化标量是 C23 才有的语法,
+        // 会让 cl 报 C2143 (实测踩过)。
+        if (!info.naked && info.retCType != "void")
+            c_.emitLine("    " + info.retCType + " " + kRetName + " = 0;");
+
+        // `[param]` → C 参数名 (MSVC 内联汇编按名解析, ByRef 参数名本身就是指针 →
+        // "变量即其地址"语义与 x64 侧一致); [Function] → 返回临时变量 (naked 下为 eax)。
+        // x86 `<Naked>` 例外: 没有栈帧, 参数在调用者栈上, 名字无从解析 → 报 3036。
+        for (auto& ps : info.params) {
+            size_t sp = ps.find(' ');
+            if (sp == std::string::npos) continue;
+            std::string name = ps.substr(sp + 1);
+            while (!name.empty() && name.back() == ' ') name.pop_back();
+            if (info.naked) {
+                std::string token = "[" + name + "]";
+                std::string tokenLower; for (char ch : token) tokenLower += static_cast<char>(::tolower(static_cast<unsigned char>(ch)));
+                for (auto& l : info.lines) {
+                    std::string lower; for (char ch : l) lower += static_cast<char>(::tolower(static_cast<unsigned char>(ch)));
+                    if (lower.find(tokenLower) != std::string::npos)
+                        return fail(DiagnosticID::SemAsmFormUnsupported,
+                                    "x86 <Naked> 过程无法按名引用参数 " + token +
+                                    " (naked 无栈帧, 参数在调用者的栈上); 请去掉 <Naked> 或改用寄存器/立即数");
+                }
+            }
+        }
+        auto subs = asmBuildX86Subs(info, info.naked ? std::string("eax") : std::string(kRetName));
+
+        std::vector<std::string> body = asmRewriteLines(info.lines, subs, info.cName);
+
+        // 宽度校验 (把 cl 的 C2443/A2022 前移成 VB 诊断 3038)
+        {
+            bool widthBad = false;
+            asmCheckRegWidths(body, [&](int idx, const std::string& dst, const std::string& src,
+                                        int dw, int sw) {
+                if (widthBad) return;   // 只报第一处
+                widthBad = true;
+                fail(DiagnosticID::SemAsmOperandWidthMismatch,
+                     "Asm 第 " + std::to_string(idx + 1) + " 行操作数宽度不一致: `" +
+                     info.lines[idx] + "` (" + dst + " 是 " + std::to_string(dw) +
+                     " 位, " + src + " 是 " + std::to_string(sw) +
+                     " 位); 请统一宽度 —— 32 位值用低 32 位寄存器 (如 ebx/edi), 或改用 movsxd/movzx");
+            });
+            if (widthBad) return true;   // 诊断已报, 不再发射
+        }
+
+        // 项1: 隐含累加器别名 (cmpxchg×EAX/EDX 等) → 3042。x86 同为 32 位寄存器:
+        // `cmpxchg [eax], ecx` 的地址寄存器与隐含累加器同为 EAX 时同样互毁。
+        {
+            bool aliasBad = false;
+            asmCheckAccumAlias(body, [&](int idx, int wLine, int lLine,
+                                         const std::string& mnem, const std::string& fam) {
+                if (aliasBad) return;
+                aliasBad = true;
+                fail(DiagnosticID::SemAsmAccumAliasClobber,
+                     "Asm 第 " + std::to_string(idx + 1) + " 行 `" + info.lines[idx] +
+                     "`: 该指令的隐含累加器 " + fam + " 已被第 " + std::to_string(wLine + 1) +
+                     " 行 `" + info.lines[wLine] + "` 写坏 (之后第 " + std::to_string(lLine + 1) +
+                     " 行 `" + info.lines[lLine] + "` 只写了它的低位)。cmpxchg/mul/div 的"
+                     "累加器就是 AX/DX 家族 —— 别再把它当指针/基址用 (模板见 spec §11)");
+            }, /*x64=*/false);
+            if (aliasBad) return true;
+        }
+
+        std::vector<std::string> saved =
+            info.naked ? std::vector<std::string>()
+                       : asmSavedRegsForArch(info.lines, info.clobbers, /*x64=*/false);
+
+        // 返回值收尾: 块里没写 `[Function]` 时, 值按 VB 约定留在返回寄存器 —— 落到 C 返回变量。
+        // (x64 那条后端不需要这步: 值本来就在 RAX 里, 过程直接 ret 即可。)
+        // 单行形式 (`Asm mov eax, [num]`) 正是靠这条拿到返回值。
+        //   浮点返回 (spec §6): __stdcall 下返回值在 ST(0); 64 位整型在 EDX:EAX。
+        // 判据用**重写后**的 body: 用户写了 [Function] 就会看到 kRetName。
+        bool wroteRet = false;
+        for (auto& l : body)
+            if (l.find(kRetName) != std::string::npos) { wroteRet = true; break; }
+        if (!info.naked && info.retCType != "void" && !wroteRet) {
+            if (asmIsFloatCType(info.retCType))
+                body.push_back(std::string("fstp ") + kRetName);      // ST(0) → 返回变量
+            else if (info.retCType == "int64_t")
+                body.push_back(std::string("mov dword ptr [") + kRetName + "], eax");  // 低 32 位
+            else
+                body.push_back(std::string("mov ") + kRetName + ", eax");
+            // 注: int64 的高 32 位在 edx, 单独再发一条 (见下)。
+            if (info.retCType == "int64_t")
+                body.push_back(std::string("mov dword ptr [") + kRetName + "+4], edx");
+        }
+
+        c_.emitLine("    __asm {");
+        for (auto& r : saved) c_.emitLine("        push " + r);
+        for (auto& l : body) c_.emitLine("        " + l);
+        for (auto it = saved.rbegin(); it != saved.rend(); ++it) c_.emitLine("        pop " + *it);
+        c_.emitLine("    }");
+        if (!info.naked && info.retCType != "void")
+            c_.emitLine("    return " + std::string(kRetName) + ";");
+        c_.emitLine("}");
+        return true;
+    }
+
+    // ---------------- x64: 独立 MASM 过程 (driver 侧) ----------------
+    // 宽度校验 (把 ml64 的 A2022 前移成 VB 诊断 3038): 用与 driver 完全同一张替换表
+    // (asmBuildX64Subs) 模拟代入后查两个纯寄存器操作数的宽度。
+    {
+        auto xsubs = asmBuildX64Subs(info);
+        auto xbody = asmRewriteLines(info.lines, xsubs, info.cName);
+        bool widthBad = false;
+        asmCheckRegWidths(xbody, [&](int idx, const std::string& dst, const std::string& src,
+                                     int dw, int sw) {
+            if (widthBad) return;   // 只报第一处
+            widthBad = true;
+            fail(DiagnosticID::SemAsmOperandWidthMismatch,
+                 "Asm 第 " + std::to_string(idx + 1) + " 行操作数宽度不一致: `" +
+                 info.lines[idx] + "` (" + dst + " 是 " + std::to_string(dw) +
+                 " 位, " + src + " 是 " + std::to_string(sw) +
+                 " 位); 请统一宽度 —— 32 位值用低 32 位寄存器 (如 ecx/eax), 或改用 movsxd/movzx");
+        });
+        if (widthBad) return true;   // 诊断已报, 不再收集 (编译到此失败)
+
+        // 项1: 隐含累加器别名 (cmpxchg×RAX/EAX 等静态可见的踩法) → 3042
+        bool aliasBad = false;
+        asmCheckAccumAlias(xbody, [&](int idx, int wLine, int lLine,
+                                      const std::string& mn, const std::string& fam) {
+            if (aliasBad) return;   // 只报第一处
+            aliasBad = true;
+            fail(DiagnosticID::SemAsmAccumAliasClobber,
+                 "Asm 第 " + std::to_string(idx + 1) + " 行 `" + info.lines[idx] +
+                 "`: 该指令的隐含累加器 " + fam + " 已被第 " + std::to_string(wLine + 1) +
+                 " 行 `" + info.lines[wLine] + "` 写坏 (之后第 " + std::to_string(lLine + 1) +
+                 " 行 `" + info.lines[lLine] + "` 只写了它的低 32 位, 高 32 位回不来了)。"
+                 "cmpxchg/mul/div 的累加器是 RAX/EAX 一族, 而 EAX 就是 RAX 的低 32 位 —— "
+                 "把指针/基址放在 RAX 又让它当累加器, 必然互毁: 轻则永不相等死循环, 重则"
+                 "把值当地址访问而崩溃。请把指针/基址改放到 R10/R11 等无关寄存器 "
+                 "(模板见 spec §11)");
+        }, /*x64=*/true);
+        if (aliasBad) return true;
+    }
+
+    c_.emitLine("/* ai/vb-asm-extension-spec: 过程体为 Asm 块; 实现在 ml64 汇编的 "
+                + info.cName + " (见 .asm) */");
+    c_.emitLine("extern " + info.retCType + " " + info.cName + "(" + paramsC + ");");
+    asmProcs_.push_back(std::move(info));
+    return true;
 }
 
 std::string CCodeGen::makeProcSignature(SubDecl& node) {
@@ -70,7 +301,15 @@ std::string CCodeGen::makeProcSignature(FunctionDecl& node) {
 }
 
 // Fix 084k: 单个参数的C类型+名字, 与makeParamList逐参数逻辑完全一致
-std::string CCodeGen::makeParamCType(ParameterDecl* p, bool isDeclare) {
+//
+// ai/024 T02 `staticEntry`: 静态库 (归档) 直连路径专用。唯一差别是 `ByVal <x> As String`:
+//   动态路 (DLL 导入)   → `BSTR`  —— Fix 187 起调用点发的是 ANSI `char*`, 声明发 BSTR
+//                                    本来就不一致, 靠 MSVC 只报 C4047 容忍。
+//   静态路 (归档直连)   → `char*`  —— 没有转发桩做中间转换, `char*` 直接进真实函数,
+//                                    必须与调用点口径一致, 否则警告噪声 + 固化不一致。
+// 只改 ByVal String 这一种形态 (024 §五之三)。ByRef String 在静态路下仍是 `BSTR*`,
+// 语义未定义, 属 v1 文档化边界, 不在这里猜。
+std::string CCodeGen::makeParamCType(ParameterDecl* p, bool isDeclare, bool staticEntry) {
     // P14.1.5: ParamArray → SAFEARRAY* (always Variant array)
     if (p->isParamArray) {
         return "SAFEARRAY* " + cIdent(p->name);
@@ -108,6 +347,13 @@ std::string CCodeGen::makeParamCType(ParameterDecl* p, bool isDeclare) {
         }
     }
 
+    // ai/024 T02: 静态归档直连路径 —— ByVal String 声明为 char* (见函数头注释)。
+    // 放在这里而不是 mapTypeRef 里: mapTypeRef 是全局类型映射, 静态路只是"声明口径"
+    // 不同, 不该污染全局 (同样的理由: 调用点的 ANSI 编组仍由 knownDeclareAnsi_ 单点驱动)。
+    if (staticEntry && p->isByVal && cType == "BSTR") {
+        cType = "char*";
+    }
+
     // Fix 010r-6 rev2: ByRef array parameters need vb6_SafeArray1D** (double pointer)
     // so the callee can assign a new SafeArray (e.g. ReDim) and the caller sees it.
     // ByVal array params and As Any params stay as single pointer.
@@ -121,14 +367,15 @@ std::string CCodeGen::makeParamCType(ParameterDecl* p, bool isDeclare) {
     return cType + "* " + cName;
 }
 
-std::string CCodeGen::makeParamList(std::vector<std::unique_ptr<ParameterDecl>>& params, bool isDeclare) {
+std::string CCodeGen::makeParamList(std::vector<std::unique_ptr<ParameterDecl>>& params, bool isDeclare,
+                                    bool staticEntry) {
     if (params.empty()) return "void";
 
     std::string result;
     for (size_t i = 0; i < params.size(); i++) {
         if (i > 0) result += ", ";
         auto& p = params[i];
-        result += makeParamCType(p.get(), isDeclare);
+        result += makeParamCType(p.get(), isDeclare, staticEntry);
     }
     // P20-36: IsMissing support - append _has_ flags for Optional params
     // Fix 042c: Declare functions are __declspec(dllimport) — external DLL imports

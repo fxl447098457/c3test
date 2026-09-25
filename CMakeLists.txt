@@ -70,6 +70,7 @@ add_library(vb6c3-core STATIC
     src/common/diagnostics.cpp
     src/common/source_manager.cpp
     src/common/encoding.cpp
+    src/common/sha1.cpp
     src/lexer/lexer.cpp
     src/lexer/lexer_keywords.cpp
     src/lexer/lexer_number.cpp
@@ -85,6 +86,7 @@ add_library(vb6c3-core STATIC
     src/parser/parser_expr_postfix.cpp
     src/parser/parser_decl.cpp
     src/parser/parser_decl_var.cpp
+    src/parser/parser_interface.cpp   # tB 扩展: Interface 契约块 (ai/022 B01)
     # 语句解析家族
     src/parser/stmt/parser_stmt.cpp
     src/parser/stmt/parser_stmt_control.cpp
@@ -96,11 +98,13 @@ add_library(vb6c3-core STATIC
     src/ast/ast_clone.cpp
     src/ast/ast_printer.cpp
     src/semantics/symbol_table.cpp
+    src/semantics/coclass_identity.cpp    # tB 扩展: CoClass 身份求解唯一函数 (ai/026 三节, B11/C02)
     src/semantics/type_system.cpp
     src/semantics/semantic_analyzer.cpp
     src/semantics/semantic_analyzer_dispatch.cpp
     src/semantics/semantic_analyzer_register.cpp
     src/semantics/semantic_analyzer_typeref.cpp
+    src/semantics/semantic_analyzer_iface.cpp
     src/semantics/semantic_analyzer_decl.cpp
     src/semantics/semantic_analyzer_decl_type.cpp
     src/semantics/semantic_analyzer_stmt.cpp
@@ -108,6 +112,8 @@ add_library(vb6c3-core STATIC
     src/semantics/semantic_analyzer_util.cpp
     src/semantics/semantic_analyzer_builtin.cpp
     src/project/vbp_parser.cpp
+    src/driver/driver_pack.cpp
+    src/project/package_manifest.cpp   # ai/023 S01: package.c3d 清单解析
     src/project/frm_parser.cpp
     src/project/frm_parser_util.cpp
     src/project/frx_reader.cpp
@@ -138,6 +144,7 @@ add_library(vb6c3-cgen STATIC
     src/backend/expr/cgen_expr_with.cpp
     # 语句家族
     src/backend/stmt/cgen_stmt.cpp
+    src/backend/stmt/cgen_stmt_asm.cpp
     src/backend/stmt/cgen_assign.cpp
     src/backend/stmt/cgen_setlet.cpp
     src/backend/stmt/cgen_control.cpp
@@ -159,6 +166,8 @@ add_library(vb6c3-cgen STATIC
     src/backend/decl/cgen_localdecl_hoist.cpp
     # 模块级产物（COM 服务器 / 窗体）
     src/backend/module/cgen_com.cpp
+    src/backend/module/cgen_iface_vtbl.cpp
+    src/backend/module/cgen_inherit.cpp
     src/backend/module/cgen_com_events.cpp
     src/backend/module/cgen_delegate.cpp
     src/backend/module/cgen_form.cpp
@@ -211,8 +220,14 @@ add_executable(c3
     src/driver/driver_frontend.cpp
     src/driver/driver_semantics.cpp
     src/driver/driver_generics.cpp
+    src/driver/driver_interface.cpp
+    src/driver/coclass_activate.cpp
+    src/driver/driver_classchain.cpp
     src/driver/driver_crossmod.cpp
     src/driver/driver_link.cpp
+    src/driver/driver_staticlib.cpp
+    src/driver/static_lib.cpp
+    src/driver/coff_archive.cpp
     src/driver/rtl_embedded.cpp
     src/driver/c3rtl.rc
 )

@@ -346,6 +346,21 @@ ExprPtr Parser::parseNewExpr() {
     }
     // 泛型使用点 (tB): New Foo(Of Long) — 扁名化, 泛型器据此特化类模块
     tryFlattenGenericName(className);
+    // C3 扩展 (084c): `New Cls(args)` 带参构造 — VB6 本体不允许 (构造只能走
+    // 无参 Class_Initialize), 这里在语法上放行, 语义层按目标类 Class_Initialize
+    // 的形参个数校验 (ctorParams_ 预计算表), COM/外部类带实参一律报错。
+    if (cur_.kind == TokenKind::LeftParen) {
+        auto ne = std::make_unique<NewExpr>(loc, className);
+        advance(); // consume '('
+        if (cur_.kind != TokenKind::RightParen) {
+            do {
+                auto arg = parseExpression();
+                if (arg) ne->args.push_back(std::move(arg));
+            } while (match(TokenKind::Comma));
+        }
+        expect(TokenKind::RightParen, DiagnosticID::ParseExpectedToken, "expected ')'");
+        return ne;
+    }
     return std::make_unique<NewExpr>(loc, className);
 }
 

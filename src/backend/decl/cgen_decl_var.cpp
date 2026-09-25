@@ -87,6 +87,12 @@ void CCodeGen::visit(VariableDecl& node) {
             std::string udtCType = resolveArrayUdtElemCType(node.asType.get());
             if (!udtCType.empty()) arrayUdtElemTypes_[lower] = udtCType;
         }
+        // Fix 192: 注册类数组元素类名 (`Dim s(1) As ShapeAct` — 静态数组同样踩 C2224,
+        // 不是只有 ReDim 的形状坏)。没有它, s(0).Move 的接收者推断不出类。
+        {
+            std::string cls = resolveArrayClassElemType(node.asType.get());
+            if (!cls.empty()) arrayClassElemTypes_[lower] = cls;
+        }
         if (!trackOnly_) knownLocalVars_.insert(lower);
         return;
     }
@@ -125,6 +131,11 @@ void CCodeGen::visit(VariableDecl& node) {
             std::string udtCType = resolveArrayUdtElemCType(node.asType.get());
             if (!udtCType.empty()) arrayUdtElemTypes_[lower] = udtCType;
         }
+        // Fix 192: 同上, 动态数组 `Dim a() As ShapeAct`
+        {
+            std::string cls = resolveArrayClassElemType(node.asType.get());
+            if (!cls.empty()) arrayClassElemTypes_[lower] = cls;
+        }
         if (!trackOnly_) knownLocalVars_.insert(lower);
         return;
     }
@@ -138,8 +149,11 @@ void CCodeGen::visit(VariableDecl& node) {
         if (clsSym && clsSym->kind == SymbolKind::Class) {
             std::string lower = node.name;
             std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
-            // P6.4: 接口类 → 注册到 knownIfaceVars_ (而非 knownClassVars_)
-            if (clsSym->isInterface) {
+            // tB Interface 契约 (B04): 新式接口变量 -> knownIvrefVars_
+            if (!ivrefCType(simple.name).empty()) {
+                knownIvrefVars_[lower] = simple.name;
+            } else if (clsSym->isInterface) {
+                // P6.4: 接口类 → 注册到 knownIfaceVars_ (而非 knownClassVars_)
                 knownIfaceVars_[lower] = clsSym->name;
             } else {
                 // Fix 010r-10: map赋值, 存储类名以便方法分发时查找

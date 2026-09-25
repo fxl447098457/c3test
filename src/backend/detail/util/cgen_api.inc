@@ -29,6 +29,12 @@
     // 否则每个窗体模块各出一个 WinMain → LNK2005.
     void setStartupObject(const std::string& s) { startupObject_ = s; }
 
+    // ai/vb-asm-extension-spec: 目标架构 ("x64"/"x86") — Asm 块 v1 仅 x64 (x86 报 3030)
+    void setTargetArch(const std::string& a) { targetArch_ = a; }
+    // ai/vb-asm-extension-spec: 已收集的 Asm 过程 (函数体=单个 Asm 块),
+    // driver 侧据此生成 .asm 并调 ml64 → obj → 链接 (见 driver_link.cpp)
+    const std::vector<AsmProcInfo>& asmProcs() const { return asmProcs_; }
+
     // Fix 086: 设置工程内全部窗体模块名集合(小写), 由driver预扫描提供.
     // 跨模块窗体默认实例引用 (cLogs 里 FLogs.Visible / Unload FLogs) 需要知道
     // FLogs 是窗体, 才能生成 vb6_form_hwnd_FLogs() 访问器调用而非裸标识符.
@@ -218,6 +224,22 @@
     // P6.4+: 接口 → 唯一实现类名 映射 (小写接口名 → 实现类规范名), 由 driver 预扫描提供.
     void setInterfaceImplementers(const std::map<std::string, std::string>* m) {
         interfaceImplementers_ = m;
+    }
+    // Interface 契约 (tB, ai/022 B04): stage 2.7 建好的工程级只读登记表, 发码期取槽表.
+    void setInterfaceRegistry(const IfaceRegistry* reg) { ivreg_ = reg; }
+    // 委托式实现 (tB, ai/022 B10): stage 2.7 Pass D 的裁决表, 发码期据此把无自家实现的
+    // 槽转调持有对象的同名槽.
+    void setViaRegistry(const ViaRegistry* reg) { ivviareg_ = reg; }
+    // 类继承 (tB, ai/022 B07b): stage 2.8 链登记表, 发码期取继承字段与转发桩清单.
+    void setClassChainRegistry(const ClassChainRegistry* reg) { clsreg_ = reg; }
+    // CoClass 身份出口 (tB, ai/022 B13b): 只喂 generateDllEntry。EXE 的 com_entry.c 本批
+    // **不接线** —— 它今天整个跑在 legacy mint 上，接上就是把改码前编得过的存量工程换掉。
+    void setCoClassIdentityRegistry(const std::unordered_map<std::string, CoClassIdentity>* reg) {
+        ccreg_ = reg;
+    }
+    // 接口 IID 唯一出口 (ai/022 B13c): 同上，只读注入
+    void setInterfaceIidMap(const std::unordered_map<std::string, std::string>* map) {
+        iidreg_ = map;
     }
     // 查询接口唯一实现类名 (空串 = 无映射/多实现类, 不可用)
     std::string singleImplementationClass(const std::string& ifaceName) const {

@@ -30,6 +30,7 @@ std::string CCodeGen::mapType(Vb6Type type) const {
         case Vb6Type::Integer:  cType = "int16_t"; break;
         case Vb6Type::Long:     cType = "int32_t"; break;
         case Vb6Type::LongPtr: cType = "intptr_t"; break;   // Fix 081e: architecture-width integer
+        case Vb6Type::LongLong: cType = "int64_t"; break;   // Fix 084m: 恒 64 位有符号 (不随架构)
         case Vb6Type::Single:   cType = "float"; break;
         case Vb6Type::Double:   cType = "double"; break;
         // Fix 126: Currency = 64bit/10000 (4 位小数) 的**值** —— 与 Date 一样按值语义
@@ -74,7 +75,9 @@ std::string CCodeGen::mapComType(Vb6Type type) const {
     switch (baseType) {
         case Vb6Type::Integer:  return "int16_t";
         case Vb6Type::Long:     return "int32_t";
-        case Vb6Type::LongPtr: return "intptr_t";  // Fix 081e        case Vb6Type::Single:   return "float";
+        case Vb6Type::LongPtr: return "intptr_t";  // Fix 081e
+        case Vb6Type::LongLong: return "int64_t";  // Fix 084m: 恒 64 位有符号
+        case Vb6Type::Single:   return "float";
         case Vb6Type::Double:   return "double";
         case Vb6Type::Currency: return "double";   // Fix 126: 值语义
         case Vb6Type::Date:     return "double";
@@ -188,6 +191,13 @@ std::string CCodeGen::mapTypeRef(ASTNode* typeRef) {
             // 对象指针写进 int32_t → 截断 + 后续 AddRef 把类结构体当 COM 解引用 → 0xC0000005.
             // 检查是否是类名 → 映射为类结构体指针
             // Fix 107: 用 lookupTypeSymbol (含 $ty 回退), 否则同名过程会遮蔽类型.
+            // tB Interface 契约 (ai/022 B04): 新式接口名 -> 薄指针 vb6_ivref_<I>*.
+            // 必须排在 Class 符号分支之前: 头行宿主的 .cls 同时也是一个同名 Class 符号,
+            // 走 legacy 分支会得到根本不存在的 vb6_iface_<I> 胖对类型.
+            {
+                const std::string ivType = ivrefCType(lookupName);
+                if (!ivType.empty()) return ivType;
+            }
             auto* clsSym = lookupTypeSymbol(lookupName);
             if (clsSym && clsSym->kind == SymbolKind::Class) {
                 // P6.4: 接口类 → vb6_iface_<Name> 包装类型 (非指针)
@@ -242,8 +252,11 @@ std::string CCodeGen::mapTypeRef(ASTNode* typeRef) {
             // VB6语言类型别名
             // Fix 081e: LongPtr now has its own Vb6Type::LongPtr → intptr_t
             // (handled by resolveTypeName + mapType, this fallback is for edge cases)
-            if (lookupName == "LongPtr" || lookupName == "LongLong") {
+            if (lookupName == "LongPtr") {
                 return "intptr_t";
+            }
+            if (lookupName == "LongLong") {
+                return "int64_t";   // Fix 084m: 恒 64 位有符号 (与 LongPtr 的架构宽度不同)
             }
             // VB6内置枚举类型 (Vb前缀): VbCompareMethod, VbTriState, VbFileAttribute等
             // VB6枚举底层是Long (int32_t)

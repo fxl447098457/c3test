@@ -26,6 +26,8 @@ public:
     virtual void visit(DeclareDecl& node) {}
     virtual void visit(EventDecl& node) {}
     virtual void visit(DelegateDecl& node) {}
+    virtual void visit(InterfaceDecl& node) {}
+    virtual void visit(CoClassDecl& node) {}
     virtual void visit(ConstDecl& node) {}
     virtual void visit(VariableDecl& node) {}
     virtual void visit(ParameterDecl& node) {}
@@ -55,6 +57,7 @@ public:
     virtual void visit(MidStmt& node) {}  // P18-A
     virtual void visit(ExitStmt& node) {}
     virtual void visit(StopStmt& node) {}
+    virtual void visit(AsmStmt& node) {}   // ai/vb-asm-extension-spec
     virtual void visit(EndStmt& node) {}
     virtual void visit(CallStmt& node) {}
     virtual void visit(ReDimStmt& node) {}

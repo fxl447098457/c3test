@@ -7,12 +7,21 @@
 #include "semantics/symbol_table.hpp"
 #include "semantics/type_system.hpp"
 #include "semantics/generics_registry.hpp"
+#include "semantics/interfaces_registry.hpp"
+#include "semantics/class_chain_registry.hpp"  // tB 类继承 (B07b)
 #include "common/diagnostics.hpp"
 #include <string>
+#include <map>
+#include <set>
+#include <utility>
 #include <vector>
 #include <iostream>
 
 namespace vb6c3 {
+
+// 成员级 `Implements I.M[, I.N]` 尾子句的定位键 (tB 扩展, ai/022 B02b):
+// (所属过程声明节点, 子句在该声明尾部列表中的序号).
+using IfaceClauseRef = std::pair<const Decl*, size_t>;
 
 // ============================================================
 // 语义分析器
@@ -114,8 +123,52 @@ public:
     // 的点原样放过 (维持旧行为).
     void resolveDeferredCrossModuleOverloads();
 
+    // 类继承 (tB, B07b): 这个名字是不是某个祖先类自己声明的成员 (字段或过程)?
+    // 合并只发生在 Class 符号的成员表上, 模块作用域里没有它的过程符号 → 裸名会静默生成
+    // 空调用, 所以发码前必须报错 (见 visit(IdentifierExpr) 的调用点)。
+    bool declaredByAncestor(const std::string& name) const;
+    // 虚方法 (tB, B08b): 本类体内对这个名字的调用必须走虚槽 (有后代 Overrides 了它)
+    bool virtualCallNeedsDispatch(const std::string& name) const;
+
+    // 类继承 (tB, B08c): `obj.<成员>` 的 Protected 越权判定, 命中即报错并返回 true。
+    // 只在"接收者解析得出工程类 + 链上最近的声明者把它声明成 Protected + 当前模块不在那条
+    // 家族链上"三者同时成立时报错; 任一不成立 (含解析不出接收者) 一律放过 —— 漏报可以补,
+    // 把能编译的代码判成越权不可接受。红线同 D29-1: 绝不去 driver_crossmod 的逐字段成员表
+    // 拷贝里按级别过滤, 那会把越权退化成运行期才炸的晚绑定 COM 调用。
+    bool checkProtectedVisibility(const Expr& obj, const std::string& member,
+                                  const SourceLocation& loc);
+    // stage 2.8 登记表里"就是本模块"的那个类视图; 未登记 (泛型模板 / 接口宿主) 返回 nullptr。
+    const ClassChainView* selfClassView() const;
+
     // 泛型 (tB, G3): 模板登记表只读视图 (driver 在逐模块分析前注入).
     void setGenericRegistry(const GenRegistry* reg) { genReg_ = reg; }
+    // ai/023 S03: 包导出边界屏蔽表 (lowerName → 包名)。driver 在跨模块注入后、
+    // resolveDeferredCrossModuleOverloads 之前下发; 延后调用点命中即报 VB7006,
+    // 否则该名字只会是 stage-3 的 3001 警告 + cgen 期 C2xxx。
+    void setBlockedPackageNames(std::map<std::string, std::string> m) {
+        blockedPkgNames_ = std::move(m);
+    }
+    // ai/023 S03: 名字命中包屏蔽表 → 报 VB7006 并返回 true (调用点改走错误路径)。
+    bool reportIfPackageBlocked(const std::string& name, SourceLocation loc);
+    // ai/023 S04: 类名命中包屏蔽表 (非导出包类) → 报 VB7006 并返回 true。
+    // 同一类名可能被多处引用 (Dim/New/参数), 内部去重只报一次。
+    bool reportIfPackageClassBlocked(const std::string& name, SourceLocation loc);
+    void setBlockedPackageClasses(std::map<std::string, std::string> m) {
+        blockedPkgClasses_ = std::move(m);
+    }
+    // ai/084a M1: 类成员访问级别预计算表 (driver 建好, 只读下发; 见 symbol_table.hpp 注释)。
+    // M2 消费: visit(MemberAccessExpr) 解析出接收者类后, Private 成员越界 → 3028。
+    void setMemberAccessTable(const MemberAccessTable* t) { memberAccess_ = t; }
+    // ai/084c: 类名(小写) → Class_Initialize 形参个数 (无该过程记 0, 非工程类不在表内)。
+    // driver 从 AST 预计算下发 (visit 期查不到跨模块类符号, 同 memberAccess_ 的理由)。
+    void setCtorParamCounts(std::map<std::string, int> m) { ctorParams_ = std::move(m); }
+    // Interface 契约 (tB, B02): stage 2.7 建好的只读登记表, 供 Implements 分叉判定.
+    void setInterfaceRegistry(const IfaceRegistry* reg) { ifaceReg_ = reg; }
+    // 委托式实现 (tB, B10): stage 2.7 Pass D 的裁决表; 命中的 (类, 接口) 对整份契约
+    // 由被委托对象满足, 逐槽 VB3012 不再报.
+    void setViaRegistry(const ViaRegistry* reg) { viaReg_ = reg; }
+    // 类继承 (tB, B07b): stage 2.8 链登记表 (祖先声明的只读视图), 供裸名继承成员判定.
+    void setClassChainRegistry(const ClassChainRegistry* reg) { clsreg_ = reg; }
     // 推断成功的实例化请求 (驱动 fixpoint 物化) — 取空语义.
     struct GenInstRequest {
         std::string flat;                  // 小写扁名
@@ -162,6 +215,18 @@ private:
 
     // 已声明的标签 (用于GoTo检查)
     std::vector<std::string> declaredLabels_;
+
+    // --- Interface 契约 (tB, B02) ---
+    // 新式接口的严格契约比对 (error 级): 槽表来自 stage 2.7 登记表, 实现侧按
+    // 同一套 ifaceSlotKey/ifaceSigFromDecl 规范函数取名 (源码签名口径).
+    // 与 legacy VB6 Implements (warn 级 + IFace_M 命名约定) 互斥, 见 analyze() 分叉.
+    void checkNewStyleInterface(const Module& module, const IfaceView& view,
+                                const std::string& writtenName, const SourceLocation& loc,
+                                std::set<IfaceClauseRef>& boundClauses);
+    // 成员级 `Implements I.M[, I.N]` 子句 (tB, B02b) 的兜底诊断: 每条子句都必须被某个
+    // 新式契约比对接纳, 否则它就是静默失效的摆设; 非类模块里的子句一并在此报错.
+    void checkMemberImplementsClauses(const Module& module,
+                                      const std::set<IfaceClauseRef>& boundClauses);
         std::vector<std::pair<std::string, SourceLocation>> gosubTargetLabels_;  // P12.5: GoSub引用的标签+位置
 
     // ---- 内部辅助 ----
@@ -222,8 +287,22 @@ private:
         SourceLocation loc;
     };
     std::vector<DeferredXmodCallSite> deferredXmodCalls_;
+    // ai/023 S03: 本模块被包导出边界屏蔽的名字 (lowerName → 包名), 见 setBlockedPackageNames
+    std::map<std::string, std::string> blockedPkgNames_;
+    // ai/023 S04: 非导出包类 (lowerClassName → 类名); 与 reportedBlockedClasses_
+    // 配合, 同一类名多处引用只报一次 VB7006。
+    std::map<std::string, std::string> blockedPkgClasses_;
+    std::set<std::string> reportedBlockedClasses_;
+    // ai/084a M1/M2: 成员访问级别表 + 接收者解析守卫 (见 symbol_table.hpp MemberAccessTable)
+    const MemberAccessTable* memberAccess_ = nullptr;
+    std::map<std::string, int> ctorParams_;  // ai/084c: 类名 → Class_Initialize 形参个数
+    // obj 为 Me / 类类型变量时解析出接收者类并裁决 Private 越界; 解析不出 → 静默放行 (v1)
+    void checkMemberAccessGuard(const Expr& obj, const std::string& memberName, SourceLocation loc);
     // 泛型 (tB, G3): 调用点推断 (从模板登记表 AST 形参 + 延后点实参类型绑定)
     const GenRegistry* genReg_ = nullptr;
+    const IfaceRegistry* ifaceReg_ = nullptr;  // Interface 契约 (tB, B02)
+    const ViaRegistry* viaReg_ = nullptr;      // 委托式实现 `Implements I Via m_h` (tB, B10)
+    const ClassChainRegistry* clsreg_ = nullptr;  // 类继承链 (tB, B07b)
     std::vector<GenInstRequest> genericRequests_;
     bool tryBindGenericCall(DeferredXmodCallSite& site, GenInstRequest& reqOut);
     // 若 valueExpr 是 AddressOf 且 typeName 是委托: 解析目标过程、签名校验,

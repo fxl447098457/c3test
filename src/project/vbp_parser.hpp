@@ -85,6 +85,36 @@ struct VbpProject {
     // {ProgID, CLSID, coclass名, 路径} 表进产物; 用户无需手写 ProgID/CLSID。
     std::vector<std::string> comLibs;
 
+    // 静态库搜索根 (ai/024 E2, 批次 T01)。
+    // 格式: LibDir=<目录>   (可多行, 一行一个根; 顺序即搜索顺序)
+    //       一行内也可用 ';' 分隔多个目录 (便利写法, Windows 路径不含 ';')
+    // 语义与 ComLib= 同族: 相对路径以【vbp 所在目录】为基准 (resolvePath), 绝不引入 cwd。
+    // 用途: 静态模式 Declare (Lib "xxx.lib") 的裸文件名在哪些目录下找。
+    // 缺省根 <vbp目录>/Lib 由 driver 自动追加, 无需在此列出。
+    // VB6 标准 VBP 不含此字段, 是 C3 扩展。
+    std::vector<std::string> libDirs;
+
+    // 附加静态库 (ai/024 M4, 批次 T01)。
+    // 格式: ExtraLib=<.lib/.obj 路径或裸名>   (可多行; 一行内可用 ';' 分隔多个)
+    // 用途: 链接**没有对应 Declare** 的静态库/目标文件 —— 典型场景是静态库之间互相
+    //       依赖 (A.lib 内部引用了 B.lib 的符号), 用户不会为 B 写 Declare。
+    // 寻址与静态 Declare 的 Lib 串**完全同一条路** (绝对 → 工程相对 → 搜索根),
+    // 所以裸名也吃 LibDir= / --libdir / <vbp目录>/Lib。
+    // 与 Lib "x.lib" 的分工: 写 Declare 的地方就写 Lib, 纯链接依赖才写 ExtraLib。
+    std::vector<std::string> extraLibs;
+
+    // 工程引用/包 (ai/023 S01)。
+    // 格式: Package=Name; Version   (可多行, 一行一个包)
+    // vbp 里只写名字+版本, 不写路径 (023 D3); 寻址唯一:
+    //   <搜索根>/<Name>-<Version>/package.c3d
+    // 搜索根 = <vbp目录>/packages (缺省) + CLI --package-root (追加)。
+    // VB6 标准 VBP 不含此字段, 是 C3 扩展。
+    struct PackageRef {
+        std::string name;     // 包名 (A-Za-z0-9_); 也是限定名前缀 Pkg.Mod.Func
+        std::string version;  // "1.2" → 目录 VBFlexGrid-1.2 (023 六节, '-' 分隔)
+    };
+    std::vector<PackageRef> packageRefs;
+
     // 资源文件
     std::string resFile;
 

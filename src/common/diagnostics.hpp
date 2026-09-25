@@ -55,6 +55,10 @@ enum class DiagnosticID : uint16_t {
     ParseInvalidSelect = 2008,
     ParseDuplicateLabel = 2009,
     ParseUndeclaredLabel = 2010,
+    ParseInvalidInterfaceMember = 2011,  // Interface 块内非法成员 (实现体/字段/可见性/事件)
+    ParseUnknownAttribute = 2012,        // 无法识别的 [Xxx] 属性行
+    ParseAsmBlockMalformed = 2013,       // asm扩展: Asm 块形式非法 (非块形式 / 缺 End Asm)
+    ParseAsmClobberMalformed = 2014,     // asm扩展: Clobber(...) 参数非法 (非字符串 / 空表)
 
     // 语义 (3xxx)
     SemUndeclaredIdentifier = 3001,
@@ -71,6 +75,48 @@ enum class DiagnosticID : uint16_t {
     SemInterfaceNotImplemented = 3012,
     SemCircularDependency = 3013,
     SemVariantOverflow = 3014,
+    // Interface 契约 (tB 扩展, ai/022 B02). 文案一律 ASCII (D12).
+    SemInterfaceUnknownParent = 3015,      // Extends 的父接口不存在
+    SemInterfaceSlotConflict = 3016,       // 链上槽名冲突 / 接口内同名重载
+    SemInterfaceSignatureMismatch = 3017,  // 实现成员签名与接口槽不符
+    SemInterfaceNotSupported = 3018,       // v1 边界: 该处的 Interface 用法尚不支持
+    SemInterfaceClauseUnbound = 3019,      // 成员级 Implements 子句没被任何契约比对接纳 (B02b)
+    // 类继承 (tB 扩展, ai/022 D6, 批次 B07). 文案一律 ASCII (D12).
+    SemInheritsUnknownBase = 3020,    // Inherits 的基名不是本工程内的类
+    SemInheritsTooDeep = 3021,        // 继承链长度超上限
+    SemInheritsNotSupported = 3022,   // v1 边界: 非类模块 / 泛型模板内 / 多条 Inherits
+    // tB 类继承 (ai/022 D29-1, 批次 B08c): 家族外访问 Protected 成员。
+    SemProtectedOutsideFamily = 3023,   // obj.<Protected 成员> 的接收者类不在当前类的家族里
+    // 虚方法 (tB 扩展, ai/022 D30, 批次 B08b). 文案一律 ASCII (D12).
+    SemOverrideTargetUnknown = 3024,    // Overrides 找不到同名的祖先可覆盖成员
+    SemOverrideNotOverridable = 3025,   // 祖先成员存在但未标 Overridable (或显式 NotOverridable)
+    SemOverrideSignatureMismatch = 3026, // Overrides 与祖先槽签名不符
+    SemVirtualNotSupported = 3027,      // v1 边界: 该处的虚成员用法尚不支持 (含"需要类虚表")
+    // tB 类继承 (ai/022 B09): `MyBase.<成员>` 显式基调用的可用性判定。
+    SemMyBaseNotSupported = 3028,       // 无基类 / 基面上没有这个成员 / 基成员是 Private
+    // tB 委托式实现 (ai/022 B10): `Implements I Via m_holder` 的可用性判定。
+    SemViaTargetUnknown = 3029,         // Via 目标不是本类的对象持有字段 / 接口名不是新式 Interface
+    SemViaHolderNotImplemented = 3030,  // 字段类型那个类没有实现被委托的接口 (v1 不接受再往下委托)
+    // tB CoClass 块 (ai/022 D48, 批次 B11/C03a): 形状与名字校验. 文案一律 ASCII (D12).
+    SemCoClassEntryInvalid = 3031,      // 契约条目: 引用不存在的接口 / 条目重复 / [Default] 标了多条
+    SemCoClassDuplicate = 3032,         // 块名撞车: 重复块名 / 撞模块名 / 撞接口名
+    SemCoClassNotSupported = 3033,      // v1 边界: [Implementation] 不是类模块 / EXE 工程 ComCreatable(True)
+    // 084a/084c/asm 扩展 (合并期与 022 B09-B11 撞号, 顺延到 3034-3037)
+    SemPrivateOutsideClass = 3034,      // 084a: 类外经 obj./Me. 访问 Private 成员 (接收者不在定义类家族内)
+    SemCtorArityMismatch = 3035,        // 084c: New Cls(args) 实参个数与 Class_Initialize 形参不符
+    SemAsmFormUnsupported = 3036,       // asm扩展: 该形态不支持. 当前唯一来源 = x86 `<Naked>` 过程里
+                                        // 按名引用参数 (naked 无栈帧, 参数在调用者的栈上, 名字无从解析)
+    SemAsmMixedBody = 3037,             // asm扩展: 类方法里的 Asm 块 (v1/v2 只支持标准模块过程)
+    SemAsmOperandWidthMismatch = 3038,  // asm扩展: Asm 指令两个寄存器操作数宽度不一致 (原本要到 ml64 才报 A2022)
+    // CoClass 组内激活 (tB 扩展, ai/026 五-3, ai/022 D54, B11/C05): 把一个**没有
+    // [Implementation]** 的 CoClass 块名写在类型位置上。今天这形状静默当 Variant
+    // (D54 实测 M1/M5: `void* a = 0;` + 晚绑定 DISPID 调用), 而"块没有实现类"编译器已经知道。
+    SemCoClassTypeUnbound = 3039,
+    // 混排 / 累加器别名 (asm 扩展, 合并期再与 022 撞号 3039, 顺延到 3040-3042)
+    SemAsmMixedRefUnresolved = 3040,    // 混排 (项3): Asm 片段里 [X] 的 X 既不是寄存器也不是可见的 VB 变量
+    SemAsmMixedRefLimit = 3041,         // 混排 (项3, x64): 单个片段引用的 VB 变量超过 4 个 (Win64 只有 4 个整型参数寄存器)
+    SemAsmAccumAliasClobber = 3042,     // 项1: Asm 块里某条指令的隐含累加器寄存器 (cmpxchg/div/mul 等) 被同块
+                                        //      前面的指令写坏, 且写坏前的值已无从恢复 (静态可达性启发式, 见 asm_proc.hpp)
 
     // 代码生成 (4xxx)
     CodeGenUnsupportedFeature = 4001,
@@ -81,10 +127,26 @@ enum class DiagnosticID : uint16_t {
     LinkUnresolvedExternal = 5001,
     LinkDuplicateSymbol = 5002,
     LinkMissingRTL = 5003,
+    // 静态库链接 (ai/024, 批次 T01). 文案一律 ASCII (沿用 022/023 纪律)。
+    LinkStaticLibPath = 5004,      // 静态库文件在全部搜索根下都找不到
+    LinkStaticLibFormat = 5005,    // 后端 × 归档格式不匹配 (MSVC 吃 .lib/.obj, MinGW 吃 .a/.o)
+    LinkStaticLibParam = 5006,     // 静态 Declare 的参数形态不受支持 (x86 ByVal Variant, §六-8)
+    LinkStaticLibAmbiguous = 5007, // 归档里多个符号与声明归一化后同名 (§五 L2)
+    LinkStaticLibSymbol = 5008,    // 声明算出的引用名与归档里唯一候选不一致 (§五 L2)
     // 预处理 (6xxx)
     PreprocUndefinedConstant = 6001,
     PreprocInvalidDirective = 6002,
     PreprocConstRedefinition = 6003,
+
+    // 工程引用/包 (ai/023 S01). 文案一律 ASCII (沿用 022/024 纪律)。
+    VbpPackageNotFound = 7001,    // 包目录或 package.c3d 在全部搜索根下找不到
+    VbpPackageEscape = 7002,      // 包名/版本含路径字符 (解析结果跳出搜索根)
+    VbpPackageFormat = 7003,      // 清单不合法 (未知段/键、Format≠1、缺必填)
+    VbpPackageConflict = 7004,    // 包名与宿主工程名冲突 (模块名冲突在 S03 符号层)
+    VbpPackageFileMissing = 7005, // 清单列的文件不存在 (警告, D7 校验不拒收; 哈希比对 S05)
+    VbpPackageNotExported = 7006, // 引用了包内未导出的成员 (Friend/Private 边界, ai/023 S03)
+    VbpPackageHashMismatch = 7007, // 包文件 sha1/size 与清单不符 (警告, D7 校验不拒收; ai/023 S05)
+    VbpPackageFriendMember = 7008, // 084a M3: 经 obj. 访问包导出类的 Friend 成员 (清单未开 Friend=True)
 };
 
 // 单条诊断信息

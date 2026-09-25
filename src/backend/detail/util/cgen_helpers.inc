@@ -69,6 +69,39 @@
     std::string makeProcSignature(SubDecl& node);
     std::string makeProcSignature(FunctionDecl& node);
 
+    // ai/vb-asm-extension-spec: 过程体 = 单个 Asm 块时降级为独立 MASM 过程 (v1: x64/ml64)。
+    // 返回 true = 已接管该过程 (调用方应立即 return, 不再走常规 C 体发射)。
+    //   x64: 只发 extern 原型 + 收集元数据到 asmProcs_ (driver 生成 MASM → ml64 → 链接);
+    //   x86: 直接发 C 函数体, 内含 MSVC `__asm { }` 内联块;
+    //   混排/类方法/Optional/ParamArray/(x64)>4参/浮点参 → 3037; 参数或返回类型越界 → 3037。
+    //   isNaked = 过程上的 `<Naked>` (spec §7): 不生成保存/对齐/ret。
+    bool tryEmitAsmProc(const std::string& procName, AccessLevel access,
+                        std::vector<std::unique_ptr<ParameterDecl>>& params,
+                        ASTNode* returnType, const StmtList& body, SourceLocation loc,
+                        bool isNaked);
+
+    // 混排 (项2/项3): 在语句流里就地降级一条 AsmStmt。由 emitStmtList 的
+    // AsmStmt 分支调用。
+    //   x86: 发 MSVC `__asm { }` 内联块 —— [X] → C 变量名 (MSVC 按名解析), 天然
+    //        指向 VB 局部变量/参数; 非 Naked 时自动 push/pop 踩到的 callee-saved。
+    //   x64: 没有内联汇编, 片段降级为**独立** MASM 过程, 被引用的 VB 变量以**地址**
+    //        作参数传入 ([X] → [rcx] 等); 调用点发 `vb6_asm_<proc>_<n>(&X, ...)`。
+    //   细节与限制见 ai/vb-asm-extension-spec §12.5。
+    void emitAsmStmtMixed(AsmStmt& node);
+
+    // 混排辅助: 扫描汇编块里出现的 [名字] 引用, 分类成
+    //   regs  —— 寄存器名 (原样保留)
+    //   vbVars —— 解析到可见 VB 变量/参数的名字 (原名 + 是否 ByRef 参数)
+    //   function —— 是否出现 [Function]
+    // 解析不到 (既非寄存器也非可见变量) 的名字收进 unknown。
+    struct AsmRefScan {
+        std::vector<std::string> vbVars;        // 出现顺序, 去重
+        std::vector<std::string> byRefVars;     // vbVars 里属于 ByRef 参数的
+        std::vector<std::string> unknown;       // 无法解析的名字
+        bool function = false;
+    };
+    AsmRefScan scanAsmRefs(const AsmStmt& node);
+
     // --- Delegate (tB 扩展): 桩类型名/桩名/声明趟发射/收尾定义/直调 ---
     std::string delegateTyName(const std::string& delName);
     std::string delegateThunkName(const std::string& delName, const std::string& procName);
@@ -83,11 +116,15 @@
                                  const std::string& procFp);
 
     // 生成参数列表
-    std::string makeParamList(std::vector<std::unique_ptr<ParameterDecl>>& params, bool isDeclare = false);
+    // staticEntry: ai/024 T02 —— true 表示这条声明要直连**静态归档**里的真实导出
+    // 符号 (不是 Win32 DLL 导入库)。此时 `ByVal <x> As String` 声明为 `char*`,
+    // 与调用点实际发出的 ANSI `char*` 口径对齐 (见 makeParamCType 的注释)。
+    std::string makeParamList(std::vector<std::unique_ptr<ParameterDecl>>& params,
+                              bool isDeclare = false, bool staticEntry = false);
 
     // Fix 084k: 生成单个参数的C类型+名字 ("int32_t x" / "vb6_cls_cWinsock** o"),
     // 与makeParamList逐参数逻辑完全一致, 供事件包装器等复用
-    std::string makeParamCType(ParameterDecl* p, bool isDeclare = false);
+    std::string makeParamCType(ParameterDecl* p, bool isDeclare = false, bool staticEntry = false);
 
     // 生成Property签名 (不含函数体)
     std::string makePropertySignature(PropertyDecl& node);
@@ -97,6 +134,59 @@
     // Fix 099: 生成 Public 字段的 COM 读写访问器 (ActiveX DLL 专用, 见 cgen_com.cpp)
     void emitClassFieldAccessors(Module& module);
     void emitInterfaceVtable(Module& module);
+    // tB Interface 契约发码 (ai/022 D2/D3, 批次 B04, 见 cgen_iface_vtbl.cpp)
+    // ---- Inherits 发码 (tB, ai/022 B07b; 实现在 cgen_inherit.cpp) ----
+    const ClassChainView* classChainOf(const Module& module) const;  // 空 = 本模块无继承链
+    std::vector<VariableDecl*> structFieldDecls(Module& module);      // 继承字段 (根→叶) + 自有字段
+    std::string inheritedRetType(Decl& d);
+    std::string inheritedStubSig(Decl& d);
+    void emitInheritedProcDecls(Module& module);   // .h: 桩声明
+    void emitInheritedProcDefs(Module& module);    // .c: 桩定义
+
+    // ---- 类虚表发码 (tB, ai/022 B08d; 实现在 cgen_inherit.cpp) ----
+    // 表类型/字段/实例三处同源: 槽的 C 字段名与签名都取自 stage 3.4b 的 virtSlots。
+    const ClassChainView* classViewOf(const Module& module) const;   // 按模块身份取视图 (含链根)
+    const ClassChainView* classViewByName(const std::string& cls) const;  // 按类名取 (调用点用)
+    void emitClassVirtField(Module& module);       // .h: const void* __cvtbl 字段
+    void emitClassVirtType(Module& module);       // .h: vb6_cvtbl_<X> 类型 + extern 表实例声明
+    void emitClassVirtNewInit(Module& module);    // .c: _New() 里装载本类的表
+    void emitClassVirtImpl(Module& module);       // .c 末尾: 表实例定义
+    std::string cvtblImplName(const ClassChainView& v,
+                              const ClassChainView::VirtSlot& s) const;  // 表项目标函数 C 名
+    std::string virtDispatchCallee(const std::string& cls, const std::string& member,
+                                   const std::string& objExpr, bool mustDispatch,
+                                   const SourceLocation& loc);  // 空 = 本类不派发这个成员
+
+    // ---- MyBase 显式基调用 + 构造链 (tB, ai/022 B09; 实现在 cgen_inherit.cpp) ----
+    // 去虚化: `MyBase.M` 直调基类会跑的那一份实现, 不查 __cvtbl。
+    bool tryEmitMyBaseMember(MemberAccessExpr& node);  // true = 已接管 (含判死)
+    bool tryEmitMyBaseAssign(MemberAccessExpr& ma, const std::string& rhsC,
+                             bool forSet = false);  // MyBase.X = v / Set MyBase.X = obj
+    const ClassChainView* myBaseClassOf(MemberAccessExpr& node);  // 空 = 已判死 VB3028
+    std::string chainInitCName(const std::string& clsName) const;  // vb6_<X>_chain_init
+    bool classIsBaseOfSomething(const std::string& clsLower) const;
+    void emitChainInitDecl(Module& module);   // .h: 桥接声明 (仅"有 Class_Initialize 且被继承")
+    void emitChainInitDef(Module& module);    // .c 末尾: 桥接定义
+    void emitClassInitChain(Module& module);  // .c: 派生类 _New() 里根→叶跑祖先初始化
+
+    void emitIfaceContractTypedefs();                 // .h: 工程级 vb6_ivtbl_/vb6_ivref_ 类型
+    void emitIfaceClassFields(Module& module);        // .h: 类结构体里的 __iv_<I> 字段
+    void emitIfaceImplTables(Module& module);         // .c: 适配器 + 类侧槽表实例
+    void emitIfaceNewInit(Module& module);            // .c: _New() 里回填 vt
+    void trackIvrefLocalForRelease(const std::string& cName);  // B05: 登记局部接口变量
+    void emitIvrefScopeRelease();                     // B05: 过程出口发 Release
+    std::string ivrefCType(const std::string& typeName);   // 空串 = 不是新式接口
+    const IfaceView* ivLookupIface(const std::string& written);
+    std::vector<const IfaceView*> ivImplementedIfaces(Module& module);
+    Decl* ivFindImplMember(Module& module, const IfaceView& v, const IfaceSlotView& slot);
+    // tB 委托式实现 (ai/022 B10): 本类把接口 v 整份转交给哪个持有字段 (无则 nullptr)
+    const ViaView* ivViaFor(const Module& module, const IfaceView& v);
+    std::string ivSlotRetType(const Decl* sig);
+    std::string ivParamDecls(Decl& d);
+    std::string ivParamDeclsRef(const Decl* sig);
+    std::string ivForwardArgs(Decl& d);
+    std::string ivImplCName(Decl& d);
+    std::string ivSlotKeyForMember(const IfaceView& v, const std::string& member);
     void emitEventSink(Module& module);
     void emitComVtableSinkDecls();  // .h 前向声明
     void emitComVtableSinks();      // .c 实现
@@ -415,6 +505,11 @@
     // ← vb6_VariantArrayGet → vb6_VariantToString; uBuf.MaxMatch As Long ← At() → vb6_VariantToLong)
     Vb6Type inferUdtFieldVb6Type(const ASTNode* target) const;
 
+    // ai/022 B08f-1 (D37): 走同一条 UDT 解析路, 但返回字段在 C 里的**对象类型**
+    // (`vb6_cls_X*` / `void*` / "" = 不是对象字段或推不出)。判"这个左值到底是不是 Variant
+    // 容器"用它 —— `mi.type` 那条口径对跨模块的 `As <项目类>` 会说是 Variant。
+    std::string udtFieldCTypeOfTarget(const ASTNode* target) const;
+
     // Fix 084o: 若 C 表达式为 Variant (字符串级检测或已知 Variant 变量), 返回
     // vb6_VariantToLong(...) 包装, 否则原样返回. 用于需要 int32_t 的上下文:
     // 整除运算符 \ 的操作数、vb6_VariantArrayGet/GetVal 的索引、For 循环 Variant
@@ -446,6 +541,8 @@
     Vb6Type resolveArrayElemType(ASTNode* typeRef) const;
     // Fix 055: 从ArrayTypeRef获取UDT元素C类型名 (如"vb6_type_RECT"), 非UDT返回空串
     std::string resolveArrayUdtElemCType(ASTNode* typeRef) const;
+    // Fix 192: 从ArrayTypeRef/asType获取元素**类名** (如"ShapeAct"), 非项目类返回空串
+    std::string resolveArrayClassElemType(ASTNode* typeRef) const;
 
     // Fix 100: ReDim complex target (member chain with subscript)
     void emitReDimComplexTarget(ReDimStmt& node);

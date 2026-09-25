@@ -208,6 +208,9 @@ bool MsvcDriver::compileAndLink(const MsvcDriverOptions& options) {
         cmd << " \"" << src << "\"";
     }
 
+    // ai/vb-asm-extension-spec: ml64 汇编产物作为附加链接输入 (cl 会把 .obj 转交链接器)
+    appendExtraObjects(cmd, options);
+
     // P11.3 (reverted): RTL 以 .c 源码加入 sourceFiles 编译, 无 .lib 链接
 
     // 链接选项
@@ -256,6 +259,11 @@ bool MsvcDriver::compileAndLink(const MsvcDriverOptions& options) {
         }
         cmd << " ole32.lib oleaut32.lib uuid.lib advapi32.lib user32.lib shell32.lib gdi32.lib";
     }
+
+    // ai/024 T02: 用户静态库 (归档) 的搜索根与库文件本体。
+    // 放在三个分支之外单点追加 —— 三种工程类型 (DLL/GUI/控制台) 的库列表不同,
+    // 但静态库这一项对三者是同一件事。
+    appendUserLibInputs(cmd, options);
 
     // P-debug: 调试构建顺带输出 .map, 便于 crashctx.py 符号化崩溃现场
     // 注: 不可用 /MAPINFO:LINES — 本工程 link.exe (14.29.30159) 仅支持

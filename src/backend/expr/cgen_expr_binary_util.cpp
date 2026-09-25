@@ -144,6 +144,13 @@ std::string CCodeGen::wrapToBSTR(const std::string& expr, Expr& node) {
         case Vb6Type::String: return expr;
         case Vb6Type::Integer:
         case Vb6Type::Long:   return "vb6_CStrLong(" + expr + ")";
+        // Fix 084m: LongLong 走 64 位格式化 —— 落到 default 的 vb6_CStrLong 会先截成
+        // int32_t (实测 4000000000 → -294967296)。
+        case Vb6Type::LongLong: return "vb6_CStrLongLong(" + expr + ")";
+        // LongPtr 复用 LongLong 的 64 位格式化: x64 下 intptr_t 就是 int64_t; x86 下
+        // intptr_t 为 32 位, 但该分支只在 LongPtr 变量作字符串拼接时命中, 传 intptr_t
+        // 给 int64_t 形参是合法提升, 无截断风险 (x86 值本来就只有 32 位)。
+        case Vb6Type::LongPtr:  return "vb6_CStrLongLong((int64_t)" + expr + ")";
         case Vb6Type::Single:
         case Vb6Type::Double: return "vb6_CStrDbl(" + expr + ")";
         case Vb6Type::Boolean: return "vb6_CStrBool(" + expr + ")";

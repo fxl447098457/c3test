@@ -1,0 +1,6 @@
+Type=Exe
+Name=PkgHostP02
+Module=PkgHost; p01_host.bas
+Startup="Sub Main"
+ExeName32="p02_missing_file_warn.exe"
+Package=GapPkg; 1.0

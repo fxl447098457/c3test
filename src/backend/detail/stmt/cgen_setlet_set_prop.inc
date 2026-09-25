@@ -4,11 +4,30 @@
 
     if (!node.target || !node.value) return;
 
+    // ai/022 B09c: `Set MyBase.<属性> = obj` —— 目标侧走基类面上的 Property Set。
+    // 实测改码前发的是 `vb6_T9Base_prop_set_Peer(MyBase, me);  /* Set Property */` —— 函数名
+    // 那条通路本来就查对了, 错的只是**接收者**: `MyBase` 被当裸标识符发出去 → C2065 未声明。
+    // 这里在 Nothing/COM/链式那些分支之前就接管, 与 Let 侧的 tryEmitMyBaseAssign 同一条口径。
+    if (node.target->kind == ASTNodeKind::MemberAccessExpr) {
+        auto& ma09c = static_cast<MemberAccessExpr&>(*node.target);
+        if (ma09c.object && ma09c.object->kind == ASTNodeKind::IdentifierExpr
+            && Symbol::toLower(static_cast<IdentifierExpr&>(*ma09c.object).name) == "mybase") {
+            emitExpr(*node.value);
+            std::string rhs09c = std::move(lastExpr_);
+            if (tryEmitMyBaseAssign(ma09c, rhs09c, /*forSet=*/true)) return;
+        }
+    }
+
     // 检测 Set obj = Nothing → vb6_ReleaseObject(&obj)
     if (node.value->kind == ASTNodeKind::LiteralExpr) {
         auto& lit = static_cast<LiteralExpr&>(*node.value);
         if (lit.literalKind == LiteralKind::Nothing) {
+            // 左值求值期间关掉虚表派发 (ai/022 B08e-4 站点⑭: Pattern C/D2 要对这段文本做
+                // `prop_get_` -> `prop_let_` 的字符串级改写, 派发表达式会被换成表里不存在的槽字段)
+            const bool savedVirtLhs = suppressVirtDispatch_;
+            suppressVirtDispatch_ = true;
             emitExpr(*node.target);
+            suppressVirtDispatch_ = savedVirtLhs;
             std::string target = std::move(lastExpr_);
 
             // COM属性SetRef Nothing: Set obj.Property = Nothing → vb6_ComSetRef(obj, L"Property", NULL)
@@ -44,6 +63,16 @@
             // P6.3: 早期绑定COM变量 → vb6_ComReleaseTyped
             std::string targetLower = target;
             std::transform(targetLower.begin(), targetLower.end(), targetLower.begin(), ::tolower);
+            // tB Interface B05: Set <接口变量> = Nothing → 先经槽 Release 再清空.
+            // 不拦下来会落到下面的 vb6_ReleaseObject —— 那会把薄指针当 IDispatch* 用.
+            if (knownIvrefVars_.count(targetLower) &&
+                target.find_first_not_of(
+                    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_")
+                    == std::string::npos) {
+                c_.emitLine("if (" + target + ") " + target + "->vt->Release(" + target + ");");
+                c_.emitLine(target + " = NULL;  /* Set Nothing (tB Interface 值) */");
+                return;
+            }
             // Fix 084aa: Set dict(key) = Nothing 的目标是 vb6_ComCall(...) 函数调用,
             // 对调用结果取址 &vb6_ComCall(...) → C2102. 检测"以标识符开头+含("的
             // 函数调用形态, 改用 (&(void*){...}) 复合字面量包装 (仅释放引用).
@@ -272,7 +301,12 @@
         return;
     }
 
+    // 左值求值期间关掉虚表派发 (ai/022 B08e-4 站点⑭: Pattern C/D2 要对这段文本做
+    // `prop_get_` -> `prop_let_` 的字符串级改写, 派发表达式会被换成表里不存在的槽字段)
+    const bool savedVirtLhs = suppressVirtDispatch_;
+    suppressVirtDispatch_ = true;
     emitExpr(*node.target);
+    suppressVirtDispatch_ = savedVirtLhs;
     std::string target = std::move(lastExpr_);
 
     // COM属性SetRef: Set obj.Property = objRef → vb6_ComSetRef(obj, L"Property", objRef)
@@ -383,6 +417,112 @@
     // P6.3: 早期绑定COM变量Set Nothing → vb6_ComReleaseTyped
     // (已在前面的Nothing分支处理, 但那里用的是vb6_ReleaseObject)
     // 这里检查target是否是早期绑定变量, 将vb6_ReleaseObject改为vb6_ComReleaseTyped
+
+    // tB Interface 契约 (B04): Set ivref = obj → ivref = &(obj)->__iv_<I>
+    // 薄指针 = 对象内该接口槽字段的地址 (D3); Nothing 已是 NULL, 这里不动.
+    {
+        std::string ivTargetLower = target;
+        std::transform(ivTargetLower.begin(), ivTargetLower.end(), ivTargetLower.begin(), ::tolower);
+        auto itIv = knownIvrefVars_.find(ivTargetLower);
+        if (itIv != knownIvrefVars_.end() && value != "NULL") {
+            if (const IfaceView* v = ivLookupIface(itIv->second)) {
+                std::string ivValLower = value;
+                std::transform(ivValLower.begin(), ivValLower.end(), ivValLower.begin(), ::tolower);
+                const bool isClassVar = knownClassVars_.count(ivValLower) != 0;
+                const bool isNewExpr = value.find("_New(") != std::string::npos;
+                // B06a: RHS 也是接口变量 → 真 QueryInterface（VB6 跨接口 Set 的语义）。
+                // QI 成功即已 AddRef（B06a 的 QI 实现负责），失败得到 NULL = Nothing。
+                // 目标是裸标识符 (= 过程级接口变量) 才接计数; me->字段 等形式
+                // 沿用 B04 的纯赋值改写, 生命周期留给后续批次.
+                const bool plainIvTarget = !target.empty() &&
+                    target.find_first_not_of(
+                        "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_")
+                        == std::string::npos;
+                const bool isIvrefVar = knownIvrefVars_.count(ivValLower) != 0;
+                if (plainIvTarget && isIvrefVar) {
+                    const std::string ivCType = "vb6_ivref_" + cIdent(v->name) + "*";
+                    const std::string ivOld = "__ivold" + std::to_string(ivrefSetSeq_);
+                    const std::string ivGot = "__ivgot" + std::to_string(ivrefSetSeq_);
+                    ivrefSetSeq_++;
+                    c_.emitLine("{  /* tB Interface B06a: Set " + target + " = QueryInterface */");
+                    c_.indent();
+                    c_.emitLine(ivCType + " " + ivOld + " = " + target + ";");
+                    c_.emitLine("void* " + ivGot + " = NULL;");
+                    c_.emitLine("if (" + value + ") " + value + "->vt->QueryInterface(" + value +
+                                ", vb6_iv_iid_" + cIdent(v->name) + ", &" + ivGot + ");");
+                    c_.emitLine(target + " = (" + ivCType + ")" + ivGot + ";");
+                    c_.emitLine("if (" + ivOld + ") " + ivOld + "->vt->Release(" + ivOld + ");");
+                    c_.dedent();
+                    c_.emitLine("}");
+                    return;
+                }
+                if (isClassVar || isNewExpr) {
+                    // D22-10: 类变量可能是 Nothing —— &NULL->__iv_<I> 算出来是个**非空**野地址
+                    // (NULL + offsetof)，紧接着的 AddRef 就会解引用它。New 的返回值恒非空，
+                    // 而且对它做三目会让 _New() 求值两次（凭空多创建一个实例），所以守卫只加在
+                    // "裸类变量"这条路上。
+                    const std::string ivField = "__iv_" + cIdent(v->name);
+                    const std::string ivPtr = isClassVar
+                        ? "((" + value + ") ? &(" + value + ")->" + ivField + " : NULL)"
+                        : "&(" + value + ")->" + ivField;
+                    if (plainIvTarget) {
+                        // COM 口径: 存旧值 → 覆盖 → AddRef 新 → Release 旧.
+                        // RHS 是 New 时那 1 次初始引用直接移交, 故不 AddRef.
+                        const std::string ivCType = "vb6_ivref_" + cIdent(v->name) + "*";
+                        const std::string ivOld = "__ivold" + std::to_string(ivrefSetSeq_++);
+                        c_.emitLine("{  /* tB Interface B05: Set " + target + " (refcounted) */");
+                        c_.indent();
+                        c_.emitLine(ivCType + " " + ivOld + " = " + target + ";");
+                        c_.emitLine(target + " = " + ivPtr + ";");
+                        if (!isNewExpr) {
+                            c_.emitLine("if (" + target + ") " + target + "->vt->AddRef(" +
+                                        target + ");");
+                        }
+                        c_.emitLine("if (" + ivOld + ") " + ivOld + "->vt->Release(" + ivOld + ");");
+                        c_.dedent();
+                        c_.emitLine("}");
+                        return;
+                    }
+                    value = ivPtr;
+                } else {
+                    diag_.error(DiagnosticID::CodeGenUnsupportedFeature, SourceLocation{},
+                        "Interface binding: Set " + target + " = <expr> needs a class instance,"
+                        " New, or another interface value on the right side"
+                        " (tB Interface " + v->name + ")");
+                }
+            }
+        }
+    }
+
+    // tB Interface B06b: Set <工程类变量> = <接口变量> → 下行转换。
+    // 用按类导出的 vb6_iv_from_iv_<C> 验明正身（薄指针所属实例的槽表是 C 那个 TU 的
+    // static const 对象，使用点比不了地址 → 绝不能写裸强转）；命中才 AddRef ——
+    // 类变量那一遍引用按 D21-5 的不变式永不释放，不加码的话接口侧 Release 到 0
+    // 会把对象从这个类变量脚下抽走。
+    {
+        std::string dcTgt = target, dcRhs = value;
+        std::transform(dcTgt.begin(), dcTgt.end(), dcTgt.begin(), ::tolower);
+        std::transform(dcRhs.begin(), dcRhs.end(), dcRhs.begin(), ::tolower);
+        auto itDcCls = knownClassVars_.find(dcTgt);
+        const bool dcPlain =
+            !target.empty() && target.find_first_not_of(
+                "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_")
+                == std::string::npos &&
+            !value.empty() && value.find_first_not_of(
+                "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_")
+                == std::string::npos;
+        if (itDcCls != knownClassVars_.end() && knownIvrefVars_.count(dcRhs) && dcPlain) {
+            const std::string dcClsC = cIdent(itDcCls->second);
+            c_.emitLine("{  /* tB Interface B06b: Set " + target + " = downcast of " + value + " */");
+            c_.indent();
+            c_.emitLine("void* __ivdown = vb6_iv_from_iv_" + dcClsC + "(" + value + ");");
+            c_.emitLine(target + " = (vb6_cls_" + dcClsC + "*)__ivdown;");
+            c_.emitLine("if (" + target + ") " + value + "->vt->AddRef(" + value + ");");
+            c_.dedent();
+            c_.emitLine("}");
+            return;
+        }
+    }
 
     // P6.4: 接口引用赋值: Set ifaceRef = obj → ifaceRef = vb6_iface_IFoo_wrap(obj)
     {

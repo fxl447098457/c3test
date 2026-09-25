@@ -79,7 +79,20 @@ void CCodeGen::visit(WithMemberExpr& node) {
         // Fix 011r-1: 若className已知, 优先用resolveClassMemberCall精确解析该类成员
         // 避免symTab_.lookupModule捡错模块(Pattern A2)
         if (!info.className.empty()) {
-            std::string funcName = resolveClassMemberCall(info.className, node.memberName);
+            const std::string directFnW = resolveClassMemberCall(info.className, node.memberName);
+            // 类虚表 (tB, ai/022 B08e): `With b : b.M() 写成 .M()` 与 `b.M()` 是同一个调用,
+            // 接收者就是 With 入口那个类实例 temp (纯读变量名) → 必须按 __cvtbl 派发, 否则
+            // `With up As InhBase`（up 持派生实例）会静默绑回基类实现 = B08d 修掉的切片。
+            // 属性写方向不改写: 3.4b 不给 Let/Set 建槽 (D33-7), 改派到会拿到 Get 的槽。
+            std::string funcName = directFnW;
+            if (!directFnW.empty()
+                && !suppressVirtDispatch_
+                && directFnW.find("_prop_let_") == std::string::npos
+                && directFnW.find("_prop_set_") == std::string::npos) {
+                const std::string dispatchFnW = virtDispatchCallee(
+                    info.className, node.memberName, tempVar, /*mustDispatch=*/true, node.loc);
+                if (!dispatchFnW.empty()) funcName = dispatchFnW;
+            }
             if (!funcName.empty()) {
                 // Fix 044a: When used as standalone expression (!asCallCallee_),
                 // pad Optional params (value + _has_ flags). When used as callee

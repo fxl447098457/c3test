@@ -85,6 +85,14 @@
             }
             // 对象是类实例变量 — 用resolveClassMemberCall查证成员身份
             std::string resolvedFn = resolveClassMemberCall(itClassVar->second, node.memberName);
+            // 类虚表 (tB B08d): `Me.<槽>` 的发码落在这里 —— 上面"优先级2"那一支整块在
+            // `node.object` 是 IdentifierExpr 的分支里, `Me` 是 MeExpr → 从来进不到那一支, 是本支
+            // 按 emit 出来的对象文本 ("me") 认出类实例的。所以两处都得改写, 且这一处必须派发:
+            // 派发不了就由 virtDispatchCallee 出诊断, 不留静默直调。
+            const std::string directFnFb = resolvedFn;
+            const std::string dispatchFnFb = virtDispatchCallee(
+                itClassVar->second, node.memberName, obj090, /*mustDispatch=*/true, node.loc);
+            if (!dispatchFnFb.empty()) resolvedFn = dispatchFnFb;
             if (!resolvedFn.empty()) {
                 // 方法/属性调用: vb6_<className>_<prefix><memberName>(obj)
                 // Fix 089h: 值上下文无括号方法引用 (x = obj.ReadLine 或参数内引用)
@@ -92,7 +100,7 @@
                 // (同 Fix 015 链式值上下文 / With 类 Fix 044a). asCallCallee_
                 // (带括号调用) 由外层 IndexOrCallExpr 经 split 补参, 此处不 pad.
                 if (!asCallCallee_
-                    && resolvedFn.find("_prop_") == std::string::npos) {
+                    && directFnFb.find("_prop_") == std::string::npos) {
                     std::vector<ParameterInfo> params89h;
                     bool isBuiltin89h = false;
                     if (findClassMemberCallParams(itClassVar->second, node.memberName,
@@ -215,12 +223,25 @@
                 std::string resolvedFn =
                     resolveClassMemberCall(clsFromAst, node.memberName);
                 if (!resolvedFn.empty()) {
+                    // 类虚表 (ai/022 B08e-6 站点⑩): 接收者是"任意已发码头"。纯读
+                    // (`me->m_x` 这类) 与 ⑤ 同法接派发; 含调用的 (链式/属性返回对象) 由
+                    // mustDispatch=true 出 VB3027 —— 这一支此前一律静默直调, 正是
+                    // D27-13 那类"编得过、虚调用消失"的形状。
+                    std::string thisArg088c = "(void*)" + obj;
+                    if (!suppressVirtDispatch_
+                        && resolvedFn.find("_prop_let_") == std::string::npos
+                        && resolvedFn.find("_prop_set_") == std::string::npos) {
+                        const std::string dispatchFn088c = virtDispatchCallee(
+                            clsFromAst, node.memberName, thisArg088c,
+                            /*mustDispatch=*/true, node.loc);
+                        if (!dispatchFn088c.empty()) resolvedFn = dispatchFn088c;
+                    }
                     if (asCallCallee_) {
                         // 外层 IndexOrCallExpr/CallStmt 前置 this 并补参数
-                        pendingChainObj_ = "(void*)" + obj;
+                        pendingChainObj_ = thisArg088c;
                         lastExpr_ = resolvedFn;
                     } else {
-                        lastExpr_ = resolvedFn + "((void*)" + obj + ")";
+                        lastExpr_ = resolvedFn + "(" + thisArg088c + ")";
                     }
                     return;
                 }

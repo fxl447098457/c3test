@@ -148,7 +148,14 @@ ExprPtr ASTCloner::cloneExprInner(const Expr* e) {
     }
     case ASTNodeKind::NewExpr: {
         auto& n = static_cast<const NewExpr&>(*e);
-        return std::make_unique<NewExpr>(n.loc, substName(n.className));
+        auto out = std::make_unique<NewExpr>(n.loc, substName(n.className));
+        // 084c: 带参构造的实参一并克隆 (泛型特化/模板克隆路径需要保真)
+        for (const auto& a : n.args) {
+            auto ca = cloneExprInner(a.get());
+            if (a && !ca) return nullptr;
+            out->args.push_back(std::move(ca));
+        }
+        return out;
     }
     case ASTNodeKind::TypeOfExpr: {
         auto& t = static_cast<const TypeOfExpr&>(*e);
@@ -371,6 +378,15 @@ StmtPtr ASTCloner::cloneStmt(const Stmt* s) {
         out = std::make_unique<ExitStmt>(s->loc, static_cast<const ExitStmt&>(*s).exitKind); break;
     case ASTNodeKind::StopStmt:
         out = std::make_unique<StopStmt>(s->loc); break;
+    case ASTNodeKind::AsmStmt: {
+        auto& x = static_cast<const AsmStmt&>(*s);
+        auto n = std::make_unique<AsmStmt>(s->loc);
+        n->lines = x.lines;
+        n->naked = x.naked;
+        n->clobbers = x.clobbers;
+        out = std::move(n);
+        break;
+    }
     case ASTNodeKind::EndStmt:
         out = std::make_unique<EndStmt>(s->loc); break;
     case ASTNodeKind::CallStmt: {
@@ -544,8 +560,12 @@ StmtPtr ASTCloner::cloneStmt(const Stmt* s) {
         out = std::make_unique<DoEventsStmt>(s->loc); break;
     case ASTNodeKind::OptionStmt:
         out = std::make_unique<OptionStmt>(s->loc, static_cast<const OptionStmt&>(*s).optionKind); break;
-    case ASTNodeKind::ImplementsStmt:
-        out = std::make_unique<ImplementsStmt>(s->loc, static_cast<const ImplementsStmt&>(*s).interfaceName); break;
+    case ASTNodeKind::ImplementsStmt: {
+        auto& x = static_cast<const ImplementsStmt&>(*s);
+        auto c = std::make_unique<ImplementsStmt>(x.loc, x.interfaceName);
+        c->viaField = x.viaField;  // ai/022 B10: 委托子句要跟着拷，否则泛型/克隆路径丢 Via
+        out = std::move(c); break;
+    }
     case ASTNodeKind::DefTypeStmt: {
         auto& x = static_cast<const DefTypeStmt&>(*s);
         out = std::make_unique<DefTypeStmt>(x.loc, x.defKind, x.ranges); break;
@@ -645,6 +665,8 @@ std::unique_ptr<SubDecl> ASTCloner::cloneSubDecl(const SubDecl& d,
     if (failed_) return nullptr;
     auto out = std::make_unique<SubDecl>(d.loc, d.access, newName, std::move(params),
                                          std::move(body), d.isStatic);
+    out->implementsClauses = d.implementsClauses;
+    out->isNaked = d.isNaked;
     return out;
 }
 
@@ -660,8 +682,11 @@ std::unique_ptr<FunctionDecl> ASTCloner::cloneFunctionDecl(const FunctionDecl& d
     if (d.returnType && !ret) { failed_ = true; return nullptr; }
     auto body = cloneStmtList(d.body);
     if (failed_) return nullptr;
-    return std::make_unique<FunctionDecl>(d.loc, d.access, newName, std::move(params),
-                                          std::move(ret), std::move(body), d.isStatic);
+    auto out = std::make_unique<FunctionDecl>(d.loc, d.access, newName, std::move(params),
+                                              std::move(ret), std::move(body), d.isStatic);
+    out->implementsClauses = d.implementsClauses;
+    out->isNaked = d.isNaked;
+    return out;
 }
 
 std::unique_ptr<PropertyDecl> ASTCloner::clonePropertyDecl(const PropertyDecl& d,
@@ -679,6 +704,7 @@ std::unique_ptr<PropertyDecl> ASTCloner::clonePropertyDecl(const PropertyDecl& d
     auto out = std::make_unique<PropertyDecl>(d.loc, d.access, d.propKind, newName,
                                               std::move(params), std::move(ret), std::move(body));
     out->isDefault = d.isDefault;
+    out->implementsClauses = d.implementsClauses;
     return out;
 }
 
@@ -691,6 +717,7 @@ std::unique_ptr<Module> ASTCloner::cloneModule(const Module& m,
     auto out = std::make_unique<Module>(m.loc, m.filename);
     out->filename = m.filename;
     out->moduleName = newName;
+    out->packageName = m.packageName;  // ai/023 S03: 包归属随模块克隆 (泛型实例化同包)
     out->isClassModule = m.isClassModule;
     out->isFormModule = false;
     out->instancing = m.instancing;

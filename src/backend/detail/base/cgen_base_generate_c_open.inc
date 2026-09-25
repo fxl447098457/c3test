@@ -76,13 +76,19 @@
     //   EXE 侧工程类实例也要能被包装成 IDispatch (阶段 3 在打包点接入).
     //   纯 EXE 下无人写读该字段, _New() 置 NULL, 现有程序行为零变化.
     h_.emitLine("    void* __comObj;  /* P6.6.3: back-ptr to COM wrapper (vb6_ComObject*) */");
+    // tB Interface 契约 (B04): 每个新式接口一个槽指针字段; **必须排在 __comObj 之后**
+    // (vb6comserver_obj.c 按裸偏移 0 读写 __comObj, 见 ai/022 D19 的硬修正)
+    emitIfaceClassFields(module);
+    // 类虚表 (tB B08d): __cvtbl 排在 __comObj/__iv_ 之后、祖先字段之前 —— 整条继承链上偏移一致
+    // (前缀布局的硬要求, 见 ai/022 D32②)。无虚槽的类不加这个字段。
+    emitClassVirtField(module);
 
-        // 收集模块级变量作为结构体字段
+        // 收集模块级变量作为结构体字段 (tB B07b: 继承字段在前, 派生前缀必须与祖先一致)
         bool hasFields = false;
-        for (auto& decl : module.declarations) {
-            if (decl->kind == ASTNodeKind::VariableDecl) {
+        for (VariableDecl* var_p : structFieldDecls(module)) {
+            if (var_p) {
                 hasFields = true;
-                auto& var = static_cast<VariableDecl&>(*decl);
+                auto& var = *var_p;
                 std::string cType = mapTypeRef(var.asType.get());
                 if (var.isDynamicArray || !var.dimensions.empty()) {
                     // 数组: 使用vb6_SafeArray1D*/vb6_SafeArrayND* (NOT SAFEARRAY*)
@@ -114,6 +120,17 @@
 
         // 类工厂函数声明
         h_.emitLine(clsStruct + "* " + clsStruct + "_New(void);");
+        // ai/084c: 带参构造工厂 (Class_Initialize 带形参时) — `New Cls(args)` 的
+        // 调用点通常在别的模块, 原型必须跨模块可见 (同 _New 本身)。
+        for (auto& decl : module.declarations) {
+            if (decl && decl->kind == ASTNodeKind::SubDecl) {
+                auto& sub = static_cast<SubDecl&>(*decl);
+                if (sub.name == "Class_Initialize" && !sub.params.empty()) {
+                    h_.emitLine(clsStruct + "* " + clsStruct + "_NewParams(" + makeParamList(sub.params) + ");");
+                    break;
+                }
+            }
+        }
         h_.emitLine("void " + clsStruct + "_Destroy(" + clsStruct + "* me);");
         // ExeComBridge 03: COM 实参打包函数 (实现在本类 .c, 见 cgen_com.cpp
         // emitClassFactory). 声明必须跨模块可见 —— `New <该类>` 的调用点通常
@@ -125,9 +142,14 @@
         }
         h_.emitBlank();
 
+        // 类虚表 (tB B08d): 本类视图的表类型 + 表实例声明。发在类结构体之后 —— 槽项的 me 形参
+        // 就是刚定义好的 vb6_cls_<X>*, 不需要任何跨模块的类型可见性。
+        emitClassVirtType(module);
+
         // P6.4: 生成接口vtable结构体 + 包装类型 + 全局vtable实例
         if (!module.implements.empty()) {
             emitInterfaceVtable(module);
+            emitIfaceImplTables(module);  // tB Interface 契约 (B04): 新式接口另发一套表
         }
 
         // P6.5: 生成事件接收器表 (事件源类的回调函数指针表)

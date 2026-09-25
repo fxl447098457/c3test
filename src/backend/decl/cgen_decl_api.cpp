@@ -1,4 +1,5 @@
 #include "backend/cgen.hpp"
+#include "driver/static_lib.hpp"
 #include <algorithm>
 #include <cctype>
 #include <iostream>
@@ -11,17 +12,6 @@ namespace vb6c3 {
 
 void CCodeGen::visit(DeclareDecl& node) {
     // 外部函数声明 (Declare Sub/Function ... Lib "xxx" [Alias "yyy"] [CDecl])
-    // Fix 081e: Declare函数返回Long在x64下应映射为intptr_t
-    // VB6 Long (32-bit) 在Declare中常用于返回句柄/指针 (如CreateEnhMetaFileW返回HDC),
-    // 在x64下需要intptr_t (8字节) 才能容纳指针值
-    std::string retType = (node.procKind == ProcKind::Function)
-        ? mapDeclareType(node.returnType.get()) : "void";
-
-    std::string params = makeParamList(node.params, true);
-
-    // 调用约定
-    std::string callConv = (node.callingConv == CallConv::CDecl) ? "__cdecl" : "__stdcall";
-
     // 去除字符串两端引号 (词法器保留引号)
     auto stripQuotes = [](const std::string& s) -> std::string {
         if (s.size() >= 2 && s.front() == '"' && s.back() == '"')
@@ -36,6 +26,36 @@ void CCodeGen::visit(DeclareDecl& node) {
          libName.compare(libName.size()-4, 4, ".DLL") == 0)) {
         libName = libName.substr(0, libName.size()-4);
     }
+
+    // === ai/024 T02: 静态库分支 ===
+    // `.lib/.obj` 结尾的 Lib 串是**归档** (项目自带), 不是 Win32 DLL 导入库。与动态路
+    // 的三处差别 (其余一字不改):
+    //   1) 声明直连**真实导出符号** `MyAdd`, 而不是 `vb6_di_MyAdd` 转发桩 ——
+    //      桩是给 Win32 DLL 家族准备的 (实现由 scripts/gen_di_stubs.ps1 从生成头的
+    //      `/* vb6_di_lib: X */` 标记产出), 用户自己的归档里没有 `vb6_di_MyAdd`,
+    //      沿用必然 LNK2019。直连的另一个好处: 引用符号由编译器按 callConv 生成
+    //      (x86 stdcall 自动加 `@N`), 正是 024 §五 L0 的口径 —— 装饰名靠编译器算,
+    //      不靠 C3 手写尺寸表。
+    //   2) **不** emit `#pragma comment(lib,...)`: 库路径由 driver 从 LibSearchPaths
+    //      解析成绝对路径后直接进链接命令行 (driver_link.cpp 的 extraLibInputs)。
+    //      既避免路径里的 `\` 落进 C 字面量, 也避免今天那条
+    //      `libForLink + ".lib"` 盲拼在 `mylib.lib` 上拼出 `mylib.lib.lib`
+    //      (实测 LNK1104)。
+    //   3) **不** emit `/* vb6_di_lib: ... */` 家族标记: 那是给桩生成器认家族用的,
+    //      静态库不该被生成器当成一个新的 DLL 家族。
+    // 动态路 (裸名 / .dll) 在这里 isStaticDecl=false, 下面每一处都退化成原逻辑。
+    const bool isStaticDecl = (classifyLib(libName) != LibKind::Dynamic);
+
+    // Fix 081e: Declare函数返回Long在x64下应映射为intptr_t
+    // VB6 Long (32-bit) 在Declare中常用于返回句柄/指针 (如CreateEnhMetaFileW返回HDC),
+    // 在x64下需要intptr_t (8字节) 才能容纳指针值
+    std::string retType = (node.procKind == ProcKind::Function)
+        ? mapDeclareType(node.returnType.get()) : "void";
+
+    std::string params = makeParamList(node.params, true, isStaticDecl);
+
+    // 调用约定
+    std::string callConv = (node.callingConv == CallConv::CDecl) ? "__cdecl" : "__stdcall";
 
     // Alias: 去引号, 保持原始导出名 (大小写敏感, 可能含#序号前缀)
     std::string aliasName = stripQuotes(node.aliasName);
@@ -55,10 +75,21 @@ void CCodeGen::visit(DeclareDecl& node) {
     // LabelPlus 自造子类化 thunk 时把 0 写进 CallWindowProcA 槽位，关窗时 user32 调该
     // thunk → `call 0` → 执行违例 0xC0000005（退出码 0xC000041D，表现为关闭转圈 ~2.7s）。
     // 调用点的转换在 cgen_expr_call_arg_emit.inc（isDeclareAnsiCall 分支）。
+    // ai/024: `DeclareWide` —— 整个 ANSI 编组机制只由 knownDeclareAnsi_ 这一个集合
+    // 驱动 (消费点: cgen_expr_call_callee_params.inc 的 isDeclareAnsiCall 判定,
+    // 以及 cgen_expr_call_arg_emit.inc 的 vb6_BSTR_ToANSI 生成)。所以"禁用
+    // ANSI<->Unicode 转换"的全部实现 = **不登记**。调用点随即把 BSTR 原样传给
+    // callee (BSTR 就是宽字符指针), 无需 StrPtr。
+    // 宽声明对同名函数有优先权: 若先出现普通 Declare 已登记, 这里撤掉登记。
+    // (同名同时出现宽/非宽两种声明属未定义用法, 仅保证"宽的那条最终生效"。)
     {
         std::string funcLower = node.name;
         std::transform(funcLower.begin(), funcLower.end(), funcLower.begin(), ::tolower);
-        knownDeclareAnsi_.insert(funcLower);
+        if (node.isWide) {
+            knownDeclareAnsi_.erase(funcLower);
+        } else {
+            knownDeclareAnsi_.insert(funcLower);
+        }
     }
 
     // Fix 092z-2: VB6/VBA 运行时库 (msvbvm60 等) 不生成 #pragma comment(lib, ...)
@@ -94,7 +125,9 @@ void CCodeGen::visit(DeclareDecl& node) {
     if (libLower == "olepro32") {
         libForLink = "oleaut32";
     }
-    if (!isVb6RuntimeLib && !isNoImportLib) {
+    // ai/024 T02: 静态路**不**发 pragma (见上方 isStaticDecl 注释之二)。
+    // olepro32→oleaut32 的重映射只对动态导入库有意义, 静态路自然也不适用。
+    if (!isVb6RuntimeLib && !isNoImportLib && !isStaticDecl) {
         c_.emitLine("#pragma comment(lib, \"" + libForLink + ".lib\")");
     }
 
@@ -139,18 +172,27 @@ void CCodeGen::visit(DeclareDecl& node) {
             sanitizedExport = "vb6_" + sanitizedExport;
         }
     }
-    std::string cExportedIdent = "vb6_di_" + sanitizedExport;
+    // ai/024 T02: 动态路保留 `vb6_di_` 命名空间 (转发桩桥到真实 API); 静态路直接用
+    // **真实导出名** —— 归档里就是这么叫的, 少一层跳转, 也少一处要生成的桩。
+    std::string cExportedIdent = isStaticDecl ? sanitizedExport : ("vb6_di_" + sanitizedExport);
 
     // 2026-09-17: 把 Lib 家族写进生成头, 供 scripts/gen_di_stubs.ps1 按 DLL 家族
     // 把转发桩拆成多个文件。此前生成器只能靠外部的"未解析符号清单"决定要产出哪些
     // 桩, 而那份清单(.temp/unresolved_syms.txt)早已不存在 → 生成器无法重跑。
     // 格式固定为单行 `/* vb6_di_lib: <libName> */`, 紧邻其后的 vb6_di_* 原型即属该家族。
     // libName 已去引号、去 .dll 后缀 (见上文), 无 Lib 时为空串, 生成器按 unknown 处理。
-    h_.emitLine("/* vb6_di_lib: " + libName + " */");
+    // ai/024 T02: 静态路不发这个标记 —— 那会让桩生成器把一个项目自带的归档当成
+    // 新的 DLL 家族去产出 vb6_di_* 桩, 而静态路根本不走桩。
+    if (!isStaticDecl) {
+        h_.emitLine("/* vb6_di_lib: " + libName + " */");
+    }
 
     // Fix 010i: 同一Declare函数可能出现在多个VB6模块中 (如CoTaskMemFree)
     // 用#ifndef guard防止__declspec(dllimport)声明重定义 (C2371)
-    std::string diGuard = "VB6_DI_" + sanitizedExport + "_DEFINED";
+    // ai/024 T02: 静态路用**另一套** guard 名 —— 同名的动态声明 (Lib "user32" 与
+    // Lib "foo.lib" 撞名) 各自独立, 不会因为共用 guard 而被静默吞掉一条。
+    std::string diGuard = (isStaticDecl ? "VB6_STATICLIB_" : "VB6_DI_")
+                        + sanitizedExport + "_DEFINED";
     h_.emitLine("#ifndef " + diGuard);
     h_.emitLine("#define " + diGuard);
     // Fix 076: Changed from __declspec(dllimport) to extern declaration.
@@ -158,6 +200,8 @@ void CCodeGen::visit(DeclareDecl& node) {
     // resolved by Windows import libraries (which export the real API names like
     // CloseEnhMetaFile, not vb6_di_CloseEnhMetaFile). Instead, we declare them as
     // extern and provide forwarding stubs in vb6rtl.c that bridge vb6_di_Xxx → real API.
+    // ai/024 T02: 静态路这条 extern 就是**真实归档符号**本身, 无桩可桥 —— 引用符号
+    // 由编译器按 callConv 生成 (x86 stdcall 得 `_MyAdd@16`), 与归档成员名一致即解析成功。
     h_.emitLine("extern " + retType + " " + callConv + " " + cExportedIdent + "(" + params + ");");
     h_.emitLine("#endif");
 
@@ -166,9 +210,13 @@ void CCodeGen::visit(DeclareDecl& node) {
     //   - SDK宏 (CopyMemory等): #ifndef为false, 跳过 → 调用使用SDK宏
     //   - SDK函数声明: #ifndef为true, 生成 → 调用重定向到C3导入版本
     //   - 无SDK定义: #ifndef为true, 生成 → 正常
-    h_.emitLine("#ifndef " + cFuncIdent);
-    h_.emitLine("#define " + cFuncIdent + " " + cExportedIdent);
-    h_.emitLine("#endif");
+    // ai/024 T02: 静态路且无 Alias 时两者同名 (`MyAdd`→`MyAdd`), 自指的 #define 无意义
+    // 且会让调试时宏展开停不下来, 直接跳过。
+    if (cFuncIdent != cExportedIdent) {
+        h_.emitLine("#ifndef " + cFuncIdent);
+        h_.emitLine("#define " + cFuncIdent + " " + cExportedIdent);
+        h_.emitLine("#endif");
+    }
 }
 
 } // namespace vb6c3

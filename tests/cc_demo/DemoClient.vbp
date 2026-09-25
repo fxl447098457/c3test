@@ -1,0 +1,4 @@
+Type=Exe
+Name="DemoClient"
+Module=DemoClientMain; DemoClient.bas
+Startup="Sub Main"

@@ -16,6 +16,9 @@ namespace vb6c3 {
 void CCodeGen::visit(SubDecl& node) {
     // 泛型模板 (tB, G2/G3): 模板本体不发码 (泛型器注入特化副本)
     if (!node.typeParams.empty()) return;
+    // ai/vb-asm-extension-spec: Asm 块过程 → x64 独立 MASM 过程 / x86 内联 __asm 块
+    if (tryEmitAsmProc(node.name, node.access, node.params, nullptr, node.body, node.loc,
+                       node.isNaked)) return;
     std::string sig = makeProcSignature(node);
 
     // Fix 055: Form事件处理函数不能为static, 因为wndproc用extern引用它们
@@ -41,7 +44,9 @@ void CCodeGen::visit(SubDecl& node) {
     // Fix 056b: 清理局部数组注册 (模块级/类成员数组跨过程保留)
     clearProcArrayTracking();
     ansiTempsToFree_.clear();
+    ivrefLocalsToRelease_.clear();  // tB Interface B05
     ansiCounter_ = 0;
+    asmMixedBlockCounter_ = 0;   // ai/vb-asm-extension-spec 项2: 混排片段序号按过程重置
     knownBstrVars_.clear();
     knownDoubleVars_.clear();
     knownSingleVars_.clear();
@@ -132,7 +137,7 @@ void CCodeGen::visit(SubDecl& node) {
             }
             else if (paramType == Vb6Type::Long || paramType == Vb6Type::Integer || paramType == Vb6Type::Boolean) knownLongVars_.insert(pLower);
             // Bug #2 fix: LongPtr 参数注册到独立集合
-            else if (paramType == Vb6Type::LongPtr) knownLongPtrVars_.insert(pLower);
+            else if (paramType == Vb6Type::LongPtr || paramType == Vb6Type::LongLong) knownLongPtrVars_.insert(pLower);   // Fix 084m
             // Fix 035: Variant 参数也要注册, 否则 `(*X) = concrete` 赋值不会触发
             // wrapVariantValue 包装, 导致 C2440 (ByRef Variant 参数写穿透场景).
             else if (paramType == Vb6Type::Variant) knownVariantVars_.insert(pLower);
@@ -251,6 +256,9 @@ void CCodeGen::visit(SubDecl& node) {
         c_.emitLine("vb6_FreeANSI(" + ansiVar + ");");
     }
     ansiTempsToFree_.clear();
+
+    // tB Interface B05: 接口变量持有引用, 正常出口处经槽 Release (Exit Sub 例外, 同 ANSI 临时变量)
+    emitIvrefScopeRelease();
 
     // 正常退出守卫 - 防止落入dispatch switch
     c_.emitLine("return;");

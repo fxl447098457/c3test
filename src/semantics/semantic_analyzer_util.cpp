@@ -1,4 +1,5 @@
 #include "semantics/semantic_analyzer.hpp"
+#include "semantics/interface_sig.hpp"  // tB Interface/继承线共用的小写键函数 (B07b)
 #include <algorithm>
 #include <cctype>
 #include <cstdio>
@@ -111,8 +112,41 @@ Symbol* SemanticAnalyzer::resolveOverload(Symbol* head, const std::vector<Vb6Typ
     return best;
 }
 
+bool SemanticAnalyzer::reportIfPackageBlocked(const std::string& name, SourceLocation loc) {
+    auto it = blockedPkgNames_.find(Symbol::toLower(name));
+    if (it == blockedPkgNames_.end()) return false;
+    diag_.error(DiagnosticID::VbpPackageNotExported, loc,
+                "'" + name + "' is not exported by package '" + it->second +
+                "' (only Public members of exported modules are visible)");
+    return true;
+}
+
+bool SemanticAnalyzer::reportIfPackageClassBlocked(const std::string& name,
+                                                  SourceLocation loc) {
+    if (blockedPkgClasses_.empty() || name.empty()) return false;
+    std::string key = Symbol::toLower(name);
+    auto it = blockedPkgClasses_.find(key);
+    if (it == blockedPkgClasses_.end()) return false;
+    if (!reportedBlockedClasses_.insert(key).second) return true;  // 已报过, 静默拦
+    diag_.error(DiagnosticID::VbpPackageNotExported, loc,
+                "'" + it->second + "' is a class of a package that does not export it"
+                " (add 'Class=" + it->second + "; Public' to the package manifest)");
+    return true;
+}
+
 void SemanticAnalyzer::resolveDeferredCrossModuleOverloads() {
     for (auto& site : deferredXmodCalls_) {
+        // ai/023 S03: 包导出边界 —— 被屏蔽的名字在这里给出专用诊断 (VB7006),
+        // 而不是漏成 stage-3 的 3001 警告 + cgen 期 C2xxx。
+        {
+            auto bit = blockedPkgNames_.find(Symbol::toLower(site.identName));
+            if (bit != blockedPkgNames_.end()) {
+                diag_.error(DiagnosticID::VbpPackageNotExported, site.loc,
+                            "'" + site.identName + "' is not exported by package '" +
+                            bit->second + "' (only Public members of exported modules)");
+                continue;
+            }
+        }
         Symbol* head = symTab_.lookupModule(site.identName);
         // 普通 (非组) 跨模块过程在场: 调用点归它, 泛型模板不得抢占
         // (tB 优先级 非泛型 > 泛型; 模板注册符号, 与真实过程同名时只可能
@@ -525,6 +559,165 @@ std::string SemanticAnalyzer::evalOptionalDefault(ASTNode* defaultValue, Vb6Type
     
     // 其他非字面量表达式 -> 暂不支持, 返回空让cgen用类型零值
     return "";
+}
+
+
+// 虚方法 (tB, B08b): 本类体内调这个名字**必须**走虚槽 (链上有更深的类 Overrides 了它)。
+// 表由 2.8 的 runVirtualContractChecks 算好; 空表 = 全工程没有 Overrides → 本函数对所有名字
+// 都返回 false, 也就是对存量代码零影响。
+bool SemanticAnalyzer::virtualCallNeedsDispatch(const std::string& name) const {
+    if (!clsreg_ || clsreg_->empty() || !currentModule_) return false;
+    if (!currentModule_->isClassModule) return false;
+    auto self = clsreg_->find(ifaceLower(currentModule_->moduleName));
+    if (self == clsreg_->end() || self->second.mod != currentModule_) return false;
+    const ClassChainView& v = self->second;
+    if (v.dynamicKeys.empty()) return false;
+    const std::string lk = ifaceLower(name);
+    if (lk.empty()) return false;
+    for (const auto& k : v.dynamicKeys) {
+        if (k == lk) return true;
+    }
+    return false;
+}
+
+// 类继承 (tB, B07b): 祖先自己声明的成员名判定。刻意不复用 stage 3.4 回填的 inhProcs/inhFields
+// —— 本判定发生在语义分析途中, 那时合并还没跑; 而且"基类写了什么"这件事 2.8 就已经定死了。
+bool SemanticAnalyzer::declaredByAncestor(const std::string& name) const {
+    if (!clsreg_ || clsreg_->empty() || !currentModule_) return false;
+    if (!currentModule_->isClassModule) return false;
+    auto self = clsreg_->find(ifaceLower(currentModule_->moduleName));
+    if (self == clsreg_->end() || self->second.mod != currentModule_) return false;
+    const ClassChainView& v = self->second;
+    if (v.chainBroken || v.chain.size() < 2) return false;
+    const std::string lk = ifaceLower(name);
+    if (lk.empty()) return false;
+    for (size_t i = 0; i + 1 < v.chain.size(); i++) {  // 根 → 父 (末位是自身, 不含)
+        auto it = clsreg_->find(v.chain[i]);
+        if (it == clsreg_->end() || !it->second.mod) continue;
+        for (const auto& d : it->second.mod->declarations) {
+            if (!d) continue;
+            std::string dn;
+            switch (d->kind) {
+                case ASTNodeKind::VariableDecl: dn = static_cast<const VariableDecl&>(*d).name; break;
+                case ASTNodeKind::SubDecl:      dn = static_cast<const SubDecl&>(*d).name; break;
+                case ASTNodeKind::FunctionDecl: dn = static_cast<const FunctionDecl&>(*d).name; break;
+                case ASTNodeKind::PropertyDecl: dn = static_cast<const PropertyDecl&>(*d).name; break;
+                default: continue;
+            }
+            if (ifaceLower(dn) == lk) return true;
+        }
+    }
+    return false;
+}
+
+// ============================================================
+// Protected 可见性 (tB, B08c)
+// ============================================================
+
+namespace {
+
+// 一个类**自己声明**的、名字小写键为 lk 的成员里是否含 Protected。
+// 返回值: -1 = 本类没声明过这个名字; 0 = 声明了但都不是 Protected; 1 = 有任一 Protected。
+// 四类成员 (字段/Sub/Function/Property) —— 刻意与 driver 侧 `memberAccess()` 的口径一致
+// (2.8 的"这工程有没有 Protected"早退判据用的就是它)，两边认同样的成员才不会出现
+// "表没建 → 判定静默失效"的缝。Event 不在其中：带 Event 的基类在 2.8 已被判死。
+// 属性也按**名字**取严而不是按方向: MemberAccessExpr 上拿不到 Get/Let/Set 方向 (与 B08b 的
+// dynamicKeys 同一个限制), 同名多方向访问级别不同这种形状在 v1 里按 Protected 论 ——
+// 手册页已写明这条边界。
+// 为什么读 AST 而不读符号表的 memberAccessLevels: 那张表只在本模块自己的符号表里, 而
+// 跨模块的 Class 符号要到 stage 3.5 才注入 (本判定在 stage 3); 登记表里的 mod 指针是
+// stage 2.8 就定死的全工程视图, 与 stage 3.4 的合并顺序无关。
+int ownProtectedAccess(const Module& m, const std::string& lk) {
+    int found = -1;
+    for (const auto& d : m.declarations) {
+        if (!d) continue;
+        std::string dn;
+        AccessLevel acc = AccessLevel::Public;
+        switch (d->kind) {
+            case ASTNodeKind::VariableDecl: {
+                const auto& x = static_cast<const VariableDecl&>(*d); dn = x.name; acc = x.access; break; }
+            case ASTNodeKind::SubDecl: {
+                const auto& x = static_cast<const SubDecl&>(*d); dn = x.name; acc = x.access; break; }
+            case ASTNodeKind::FunctionDecl: {
+                const auto& x = static_cast<const FunctionDecl&>(*d); dn = x.name; acc = x.access; break; }
+            case ASTNodeKind::PropertyDecl: {
+                const auto& x = static_cast<const PropertyDecl&>(*d); dn = x.name; acc = x.access; break; }
+            default: continue;
+        }
+        if (dn.empty() || ifaceLower(dn) != lk) continue;
+        if (found < 0) found = 0;
+        if (acc == AccessLevel::Protected) return 1;
+    }
+    return found;
+}
+
+} // namespace
+
+const ClassChainView* SemanticAnalyzer::selfClassView() const {
+    if (!clsreg_ || clsreg_->empty() || !currentModule_) return nullptr;
+    if (!currentModule_->isClassModule) return nullptr;
+    auto it = clsreg_->find(ifaceLower(currentModule_->moduleName));
+    if (it == clsreg_->end() || it->second.mod != currentModule_) return nullptr;
+    return &it->second;
+}
+
+bool SemanticAnalyzer::checkProtectedVisibility(const Expr& obj, const std::string& member,
+                                                const SourceLocation& loc) {
+    if (pass_ != 2 || !clsreg_ || clsreg_->empty() || member.empty()) return false;
+    const std::string lk = ifaceLower(member);
+
+    // --- 1) 接收者 -> 工程类 (读 srcTypeName: 模块级字段/局部变量/参数三处都留了原文类型名) ---
+    std::string recvKey;
+    if (obj.kind == ASTNodeKind::IdentifierExpr) {
+        const auto& id = static_cast<const IdentifierExpr&>(obj);
+        Symbol* s = symTab_.lookup(id.name);
+        if (!s || (s->kind != SymbolKind::Variable && s->kind != SymbolKind::Parameter)) return false;
+        if (s->srcTypeName.empty()) return false;
+        recvKey = ifaceLower(s->srcTypeName);
+    } else if (obj.kind == ASTNodeKind::MeExpr) {
+        const ClassChainView* self = selfClassView();
+        if (!self) return false;
+        recvKey = ifaceLower(self->name);
+    } else {
+        // v1 边界: 属性返回对象 (pvSocket.Pick())、With 块内的 .X、函数实参位置的
+        // 调用链等形状都不判定 —— 认不出接收者就放过, 不在这里猜类型。
+        return false;
+    }
+    auto rv = clsreg_->find(recvKey);
+    if (rv == clsreg_->end() || !rv->second.mod || rv->second.chainBroken) return false;
+    const ClassChainView& recv = rv->second;
+
+    // --- 2) 沿链找最近声明者 (叶优先 = 与 stage 3.4 的遮蔽裁决同向) ---
+    std::string declKey;
+    std::string declName;
+    for (size_t i = recv.chain.size(); i-- > 0;) {
+        auto it = clsreg_->find(recv.chain[i]);
+        if (it == clsreg_->end() || !it->second.mod) continue;
+        const int p = ownProtectedAccess(*it->second.mod, lk);
+        if (p < 0) continue;             // 这一层没声明, 继续往根走
+        if (p == 0) return false;        // 最近者抢到了键, 且它不是 Protected
+        declKey = recv.chain[i];
+        declName = it->second.name;
+        break;
+    }
+    if (declKey.empty()) return false;   // 链上无人声明这个名字 (交别的诊断管)
+
+    // --- 3) 当前模块在不在这条家族链上 ---
+    const ClassChainView* cur = selfClassView();
+    if (!cur) {
+        // 类模块但没登记 (泛型模板 / 接口宿主): 证明不了它不在家族里, 放过。
+        // 标准模块 / 窗体 / 用户控件不可能是任何类的家族成员, 直接落到下面的越权分支。
+        if (currentModule_ && currentModule_->isClassModule) return false;
+    } else {
+        for (const auto& k : cur->chain) {
+            if (k == declKey) return false;   // 声明者就是本类或本类的祖先
+        }
+    }
+    diag_.error(DiagnosticID::SemProtectedOutsideFamily, loc,
+        "Member '" + member + "' of class '" + declName + "' is Protected: reachable only from"
+        " inside that class family (the declaring class and its derivatives), current context '" +
+        (currentModule_ ? currentModule_->moduleName : std::string()) + "' (ai/022 B08c)");
+    return true;
 }
 
 } // namespace vb6c3

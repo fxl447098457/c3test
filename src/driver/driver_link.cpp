@@ -13,6 +13,8 @@
 #include <filesystem>
 #include <cstdlib>
 #include <algorithm>
+#include <cctype>
+#include <unordered_set>
 
 namespace vb6c3 {
 
@@ -49,6 +51,250 @@ static void addFormsSources(MsvcDriverOptions& opts, const std::string& rtlDir) 
     opts.sourceFiles.push_back(rtlDir + "/uc_propbag.c");
     // Fix 148: OCX 真宿主 (免注册 LoadLibrary + DllGetClassObject) —— NewTab 等第三方 32 位 OCX
     opts.sourceFiles.push_back(rtlDir + "/vb6forms_axcontainer.c");
+}
+
+// ============================================================
+// ai/vb-asm-extension-spec: Asm 过程 → MASM (.asm) → ml64 → .obj
+//   v1 (x64): 每个「函数体 = 单个 Asm 块」的过程降级为独立 MASM 过程。
+//   按名引用 `[param]` → Win64 ABI 寄存器 (RCX,RDX,R8,R9), `[Function]` → RAX;
+//   `'` 注释 → MASM `;`; `.name:` 局部标签 → `<proc>_<name>` (MASM 无 proc 局部标签,
+//   且一个 .asm 里多个 PROC 的裸标签会撞名)。
+// ============================================================
+
+static void toLowerAscii(std::string& s) {
+    for (auto& c : s) c = static_cast<char>(::tolower(static_cast<unsigned char>(c)));
+}
+
+// 把一个 Asm 过程写成 MASM PROC 体
+static void emitMasmProc(std::ostream& os, const AsmProcInfo& p) {
+    // 先判有没有栈参数 (第 5 个起 / 浮点溢出): 有则改用 RBP 帧指针寻址。
+    // 起因: callee-saved 的 push 会移动 RSP, 使 [rsp+40] 这类偏移失效;
+    // Win64 在**非叶函数**里也允许/推荐用 RBP 建帧 (即使没有 SEH)。
+    bool hasStackParam = false;
+    for (auto& s : asmClassifyParams(p.params, "x64"))
+        if (s.cls == AsmParamClass::Stack) { hasStackParam = true; break; }
+
+    // [name] → ABI 寄存器 / [Function] → 与返回类型同宽的返回寄存器。
+    // 替换表在 asm_proc.hpp (asmBuildX64Subs) —— codegen 期的宽度校验 (3038) 用的是
+    // 同一张表, 改映射两边自动一致, 不会再各写一份走偏。
+    //
+    // 混排 (项2/项3) 例外: cgen 已把 [X] 预替换成 [rcx] 这类**地址解引用**形态
+    // (asmRewriteAddrRefs), 参数表里的 vb6_a0… 只是"这里有一个整型参数"的占位,
+    // 不能再做一遍 ABI 替换 (会把 [rcx] 里的 rcx 当成另一个参数名去查)。
+    std::vector<std::pair<std::string, std::string>> subs;
+    if (!p.linesFinal) subs = asmBuildX64Subs(p);
+    std::vector<std::string> body;
+    if (p.linesFinal) {
+        // 只做注释 / 括号空白 / 局部标签规整, 不动操作数
+        body = asmRewriteLines(p.lines, {}, p.cName);
+    } else if (hasStackParam) {
+        // 有帧时栈参相对 RBP。Win64 被调方入口布局 (自 RBP 向上):
+        //   [rbp+0]  已保存的 rbp
+        //   [rbp+8]  返回地址 (call 压入)
+        //   [rbp+16] 调用方预留的 32 字节 shadow space 起点
+        //   [rbp+48] 第 5 个参数 (shadow 之上), [rbp+56] 第 6 个 …
+        // 故实际偏移 = 16 + 32 + 8k = 48 + 8k。
+        auto slots = asmClassifyParams(p.params, "x64");
+        int k = 0;
+        for (auto& s : slots) {
+            if (s.cls != AsmParamClass::Stack) continue;
+            std::string to = "[rbp+" + std::to_string(48 + 8 * k) + "]";
+            for (auto& sub : subs)
+                if (sub.first == "[" + s.name + "]") sub.second = to;
+            k++;
+        }
+        body = asmRewriteLines(p.lines, subs, p.cName);
+    } else {
+        body = asmRewriteLines(p.lines, subs, p.cName);
+    }
+
+    // callee-saved 自动保存 (spec §5 第 3 条 / §7): 扫描块内实际用到的 + clobber 声明的。
+    // `<Naked>` 下不生成任何保存代码 —— 用户全权负责 (含自己 ret)。
+    std::vector<std::string> saved =
+        p.naked ? std::vector<std::string>()
+                : asmSavedRegsForArch(p.lines, p.clobbers, /*x64=*/true);
+
+    os << "; Win64 ABI: RCX,RDX,R8,R9 = 整型参数; XMM0-3 = 浮点; RAX = 返回\n";
+    if (!saved.empty()) {
+        os << "; callee-saved 自动保存:";
+        for (auto& r : saved) os << " " << r;
+        os << " (块内使用/ clobber 声明)\n";
+    }
+    if (hasStackParam) os << "; 有栈参数 → 建 RBP 帧 (栈参寻址 [rbp+16+8k])\n";
+    os << p.cName << " PROC\n";
+    // 建帧 (有栈参数或需保存 RBP 时)。顺序: push rbp → mov rbp,rsp → 其余 callee-saved。
+    bool frame = hasStackParam || (!p.naked && saved.size() &&
+                 std::find(saved.begin(), saved.end(), std::string("rbp")) != saved.end());
+    std::vector<std::string> pushList = saved;
+    if (hasStackParam && std::find(pushList.begin(), pushList.end(), std::string("rbp")) == pushList.end())
+        pushList.insert(pushList.begin(), "rbp");
+    if (hasStackParam) {
+        os << "    push rbp\n";
+        os << "    mov  rbp, rsp\n";
+        for (auto& r : pushList) if (r != "rbp") os << "    push " << r << "\n";
+    } else {
+        for (auto& r : pushList) os << "    push " << r << "\n";
+    }
+    (void)frame;
+
+    bool lastWasRet = false;
+    for (auto& line : body) {
+        os << "    " << line << "\n";
+        std::string tline = line; toLowerAscii(tline);
+        size_t s = tline.find_first_not_of(" \t");
+        lastWasRet = (s != std::string::npos && tline.compare(s, 3, "ret") == 0 &&
+                      (s + 3 >= tline.size() || tline[s + 3] == ' ' || tline[s + 3] == ';'));
+    }
+    if (hasStackParam) {
+        // 有帧: 先逆序 pop 掉 rbp 之后压的 callee-saved, 再 `leave` 复位 rsp/rbp。
+        for (auto it = pushList.rbegin(); it != pushList.rend(); ++it)
+            if (*it != "rbp") os << "    pop " << *it << "\n";
+        os << "    leave\n";
+    } else {
+        for (auto it = pushList.rbegin(); it != pushList.rend(); ++it) os << "    pop " << *it << "\n";
+    }
+    if (!p.naked && !lastWasRet) os << "    ret\n";   // 非 Naked: 叶函数, 编译器补返回
+    os << p.cName << " ENDP\n";
+}
+
+// driver_link.cpp 内的落盘 + 汇编 + 收集
+static bool assembleAsmProcs(const std::vector<EmittedAsmProc>& procs,
+                             const std::string& intermediatesDir, MsvcDriverOptions& msvcOpts,
+                             bool verbose) {
+    namespace fs = std::filesystem;
+    std::string ml64 = MsvcDriver::findMl64Exe();
+
+    // 按模块基名分组 → 一个模块一个 .asm (多 PROC 同文件)
+    std::vector<std::string> order;
+    std::map<std::string, std::vector<const AsmProcInfo*>> byBase;
+    for (auto& ep : procs) {
+        std::string key = ep.moduleBase;
+        if (byBase.find(key) == byBase.end()) order.push_back(key);
+        byBase[key].push_back(&ep.info);
+    }
+
+    for (auto& base : order) {
+        std::string asmPath = intermediatesDir + "/" + base + "_asm.asm";
+        std::string objPath = intermediatesDir + "/" + base + "_asm.obj";
+        // 调试逃生舱: C3_KEEP_ASM=<目录> 时把生成的 .asm 额外拷一份过去 (排障用)。
+        const char* keepAsm = std::getenv("C3_KEEP_ASM");
+        {
+            std::ofstream ofs(asmPath, std::ios::out | std::ios::trunc);
+            if (!ofs) {
+                std::cerr << "C3: error: 无法写入汇编文件: " << asmPath << std::endl;
+                return false;
+            }
+            ofs << "; === C3 auto-generated (ai/vb-asm-extension-spec) ===\n";
+            ofs << "; Asm 块过程降级为独立 MASM 过程 (Win64 ABI)\n";
+            ofs << "_TEXT SEGMENT\n";
+            for (auto* p : byBase[base]) emitMasmProc(ofs, *p);
+            ofs << "_TEXT ENDS\n";
+            ofs << "END\n";
+        }
+        if (keepAsm && keepAsm[0]) {
+            std::error_code ec;
+            std::string dest = std::string(keepAsm) + "/" + base + "_asm.asm";
+            fs::copy_file(utf8ToPath(asmPath), utf8ToPath(dest),
+                          fs::copy_options::overwrite_existing, ec);
+            if (!ec) std::cerr << "C3: [C3_KEEP_ASM] " << dest << std::endl;
+        }
+        // ml64 /c /Fo <obj> <asm> —— 外层多包一层引号: executeCommand 走
+        // "cmd /c <cmd>", cmd 在 /c 后首字符是引号时会剥首尾各一个 (同 rc.exe 的先例)。
+        std::string args = "\"" + ml64 + "\" /nologo /c /Fo \"" + objPath + "\" \"" + asmPath + "\"";
+        if (verbose) std::cout << "C3: ml64: " << args << std::endl;
+        int ret = MsvcDriver::executeCommand("\"" + args + "\"");
+        if (ret != 0 || !fs::exists(utf8ToPath(objPath))) {
+            std::cerr << "C3: error: ml64 汇编失败 (" << asmPath << "), 退出码 " << ret << std::endl;
+            return false;
+        }
+        msvcOpts.extraObjects.push_back(objPath);
+    }
+    return true;
+}
+
+// ============================================================
+// ai/022 B17: rc.exe 的唯一发现处 (TypeLib 资源与 VS_VERSION_INFO 两处共用)。
+// 旧写法只有 "WindowsSdkDir 环境变量 + C:\Program Files (x86)\Windows Kits\10" 两条路，
+// 于是 SDK 装在别的盘 (本机 = D:\Windows Kits\10) 且没导出该环境变量时**静默不嵌资源** ——
+// 实测产出的 DLL 连 .rsrc 段都没有，类型库注册表项写不进去，外部客户按 LIBID 找不到库。
+// 顺序与 tests\run_tests.ps1 的 SDK 探测对齐: 环境变量 → Program Files → 盘符扫描 → PATH。
+// 目录内取**版本号最大**的那个 (旧写法取 directory_iterator 的最后一个, 结果随枚举顺序变)。
+// ============================================================
+
+static bool versionDirGreater(const std::string& a, const std::string& b) {
+    auto parse = [](const std::string& s) {
+        std::vector<int> v;
+        size_t i = 0;
+        while (i < s.size() && v.size() < 4) {
+            int n = 0;
+            bool any = false;
+            while (i < s.size() && s[i] >= '0' && s[i] <= '9') { n = n * 10 + (s[i] - '0'); i++; any = true; }
+            if (!any) return std::vector<int>();
+            v.push_back(n);
+            if (i < s.size() && s[i] == '.') i++; else break;
+        }
+        return v;
+    };
+    std::vector<int> va = parse(a), vb = parse(b);
+    if (va.empty() || vb.empty()) return a > b;
+    return va > vb;
+}
+
+static std::string findRcExeInSdkBin(const std::filesystem::path& binDir) {
+    std::error_code ec;
+    if (!std::filesystem::exists(binDir, ec)) return std::string();
+    std::vector<std::string> vers;
+    for (const auto& entry : std::filesystem::directory_iterator(binDir, ec)) {
+        if (!entry.is_directory()) continue;
+        std::error_code ec2;
+        if (std::filesystem::exists(entry.path() / "x64" / "rc.exe", ec2)) vers.push_back(entry.path().filename().string());
+    }
+    if (vers.empty()) return std::string();
+    std::sort(vers.begin(), vers.end(), [](const std::string& a, const std::string& b) {
+        return versionDirGreater(a, b);   // 大的在前
+    });
+    return (binDir / vers.front() / "x64" / "rc.exe").string();
+}
+
+static std::string findRcExe() {
+    std::error_code ec;
+    std::filesystem::path toolsRc = std::filesystem::current_path() / "tools" / "rc.exe";
+    if (std::filesystem::exists(toolsRc, ec)) return toolsRc.string();
+
+    std::vector<std::filesystem::path> binDirs;
+    if (const char* sdkDir = std::getenv("WindowsSdkDir"); sdkDir && sdkDir[0]) {
+        std::string root = sdkDir;
+        while (!root.empty() && (root.back() == '\\' || root.back() == '/')) root.pop_back();
+        binDirs.emplace_back(root + "\\bin");
+    }
+    for (const char* envName : {"ProgramFiles(x86)", "ProgramFiles"}) {
+        if (const char* base = std::getenv(envName); base && base[0]) {
+            binDirs.emplace_back(std::filesystem::path(base) / "Windows Kits" / "10" / "bin");
+        }
+    }
+    for (const char* drive : {"C:", "D:", "E:", "F:"}) {
+        binDirs.emplace_back(std::filesystem::path(std::string(drive) + "\\") / "Windows Kits" / "10" / "bin");
+    }
+    for (const auto& dir : binDirs) {
+        std::string rc = findRcExeInSdkBin(dir);
+        if (!rc.empty()) return rc;
+    }
+    // PATH 上直接有 rc.exe 的场合 (VS 开发者提示符把 <sdk>\bin\<ver>\x64 塞进 PATH)
+    if (const char* path = std::getenv("PATH"); path && path[0]) {
+        std::string p = path;
+        size_t start = 0;
+        while (start <= p.size()) {
+            size_t sep = p.find(';', start);
+            std::string dir = p.substr(start, sep == std::string::npos ? std::string::npos : sep - start);
+            if (!dir.empty()) {
+                std::filesystem::path cand = std::filesystem::path(dir) / "rc.exe";
+                if (std::filesystem::exists(cand, ec)) return cand.string();
+            }
+            if (sep == std::string::npos) break;
+            start = sep + 1;
+        }
+    }
+    return std::string();
 }
 
 bool Driver::runLinker(const CompileOptions& options, const std::string& outputDir,
@@ -200,6 +446,49 @@ bool Driver::runLinker(const CompileOptions& options, const std::string& outputD
     msvcOpts.optimizationLevel = options.optimizationLevel;
     msvcOpts.arch = options.arch;  // DualArch: pass target architecture
 
+    // === ai/024 T02: 用户静态库 → 链接输入 ===
+    // 两类来源合并:
+    //   A) Declare 的 `Lib "x.lib"` 静态形态 → staticLibResolved_ (T01 已解析, 全是绝对路径)
+    //   B) vbp `ExtraLib=` / CLI `--extra-lib` → extraLibResolved_ (绝对路径, 或"放行给
+    //      链接器"的裸名 —— 靠 LIB 环境变量与下面的 /LIBPATH 找)
+    // 发码侧对静态 Declare 只发 `extern <真实导出名>` 而**不发** `#pragma comment(lib,...)`
+    // (见 cgen_decl_api.cpp 的 isStaticDecl), 所以这两份清单就是静态库进入链接的**唯一**通路。
+    {
+        std::unordered_set<std::string> seen;
+        auto pushInput = [&](const std::string& p) {
+            if (p.empty()) return;
+            std::string key = p;
+            for (size_t i = 0; i < key.size(); i++) {
+                key[i] = static_cast<char>(::tolower(static_cast<unsigned char>(key[i])));
+            }
+            if (!seen.insert(key).second) return;
+            msvcOpts.userLibInputs.push_back(p);
+        };
+        for (const auto& kv : staticLibResolved_) pushInput(kv.second);
+        for (const auto& p : extraLibResolved_) pushInput(p);
+
+        // 搜索根 → /LIBPATH:, 顺序即静态库搜索顺序:
+        // vbp `LibDir=` → CLI `--libdir` → `<工程目录>/Lib` (显式总赢过隐式)。
+        for (const auto& r : staticLibPaths_.roots()) msvcOpts.libSearchPaths.push_back(r);
+
+        // ai/024 E4 (T04b): Alias "_foo@12" 逃生舱的 /alternatename 桥接指令。
+        // 同名 Declare 在多模块重复出现会生成重复指令 → 按整串去重 (符号名
+        // 大小写在链接器眼里有区分, 这里保序保原文)。
+        {
+            std::unordered_set<std::string> altSeen;
+            for (const auto& a : staticLibAlternatenames_) {
+                if (a.empty() || !altSeen.insert(a).second) continue;
+                msvcOpts.alternatenames.push_back(a);
+            }
+        }
+
+        if (options.verbose && (!msvcOpts.userLibInputs.empty() || !msvcOpts.libSearchPaths.empty())) {
+            std::cout << "C3: link inputs -- user libs (" << msvcOpts.userLibInputs.size() << "):";
+            for (const auto& l : msvcOpts.userLibInputs) std::cout << " " << l;
+            std::cout << std::endl;
+        }
+    }
+
     // opt3: 增量编译 — obj级缓存目录放在输出目录下, 跨运行持久
     msvcOpts.incremental = options.incremental;
     msvcOpts.incrementalCacheDir = outputDir + "/.c3obj";
@@ -240,33 +529,8 @@ bool Driver::runLinker(const CompileOptions& options, const std::string& outputD
                 }
             }
 
-            // Find rc.exe
-            std::string rcExePath;
-            std::filesystem::path toolsRc = std::filesystem::current_path() / "tools" / "rc.exe";
-            if (std::filesystem::exists(toolsRc)) {
-                rcExePath = toolsRc.string();
-            } else {
-                std::string sdkBinDir;
-                const char* sdkDir = std::getenv("WindowsSdkDir");
-                if (sdkDir && sdkDir[0] != '\0') {
-                    std::string sdkRoot = sdkDir;
-                    while (!sdkRoot.empty() && sdkRoot.back() == '\\') sdkRoot.pop_back();
-                    sdkBinDir = sdkRoot + "\\bin";
-                }
-                if (sdkBinDir.empty() || !std::filesystem::exists(sdkBinDir)) {
-                    static const char* commonSdkBin = "C:\\Program Files (x86)\\Windows Kits\\10\\bin";
-                    if (std::filesystem::exists(commonSdkBin)) sdkBinDir = commonSdkBin;
-                }
-                if (!sdkBinDir.empty() && std::filesystem::exists(sdkBinDir)) {
-                    for (auto& entry : std::filesystem::directory_iterator(sdkBinDir)) {
-                        if (!entry.is_directory()) continue;
-                        std::filesystem::path candidate = entry.path() / "x64" / "rc.exe";
-                        if (std::filesystem::exists(candidate)) {
-                            rcExePath = candidate.string();
-                        }
-                    }
-                }
-            }
+            // Find rc.exe (共用发现处: 见 findRcExe)
+            std::string rcExePath = findRcExe();
 
             if (!rcExePath.empty()) {
                 std::string resPath = absInterDir + "\\activex_dll_typelib.res";
@@ -287,8 +551,10 @@ bool Driver::runLinker(const CompileOptions& options, const std::string& outputD
                         std::cout << "C3: TypeLib resource embedded: " << resPath << std::endl;
                     }
                 }
-            } else if (options.verbose) {
-                std::cout << "C3: rc.exe not found, TypeLib will not be embedded in DLL" << std::endl;
+            } else {
+                // 找不到 rc.exe = 类型库不嵌进 DLL ⇒ 注册表里也就没有 TypeLib 项，外部客户
+                // 按 LIBID 找不到契约。这是**静默**的质量损失，所以不藏在 --verbose 后面 (B17)。
+                std::cerr << "C3: rc.exe not found, TypeLib will not be embedded in DLL" << std::endl;
             }
         } else if (options.verbose) {
             std::cout << "C3: TypeLib file not found: " << tlbPath << std::endl;
@@ -364,33 +630,8 @@ bool Driver::runLinker(const CompileOptions& options, const std::string& outputD
             }
         }
 
-        // Find rc.exe (reuse same logic as TypeLib RC)
-        std::string rcExePath2;
-        std::filesystem::path toolsRc2 = std::filesystem::current_path() / "tools" / "rc.exe";
-        if (std::filesystem::exists(toolsRc2)) {
-            rcExePath2 = toolsRc2.string();
-        } else {
-            std::string sdkBinDir2;
-            const char* sdkDir2 = std::getenv("WindowsSdkDir");
-            if (sdkDir2 && sdkDir2[0] != '\0') {
-                std::string sdkRoot2 = sdkDir2;
-                while (!sdkRoot2.empty() && sdkRoot2.back() == '\\') sdkRoot2.pop_back();
-                sdkBinDir2 = sdkRoot2 + "\\bin";
-            }
-            if (sdkBinDir2.empty() || !std::filesystem::exists(sdkBinDir2)) {
-                static const char* commonSdkBin2 = "C:\\Program Files (x86)\\Windows Kits\\10\\bin";
-                if (std::filesystem::exists(commonSdkBin2)) sdkBinDir2 = commonSdkBin2;
-            }
-            if (!sdkBinDir2.empty() && std::filesystem::exists(sdkBinDir2)) {
-                for (auto& entry : std::filesystem::directory_iterator(sdkBinDir2)) {
-                    if (!entry.is_directory()) continue;
-                    std::filesystem::path candidate = entry.path() / "x64" / "rc.exe";
-                    if (std::filesystem::exists(candidate)) {
-                        rcExePath2 = candidate.string();
-                    }
-                }
-            }
-        }
+        // Find rc.exe (共用发现处: 见 findRcExe)
+        std::string rcExePath2 = findRcExe();
 
         if (!rcExePath2.empty()) {
             std::string verResPath = absInterDir2 + "\\version_info.res";
@@ -407,8 +648,8 @@ bool Driver::runLinker(const CompileOptions& options, const std::string& outputD
                     std::cout << "C3: VS_VERSION_INFO resource compiled: " << verResPath << std::endl;
                 }
             }
-        } else if (options.verbose) {
-            std::cout << "C3: rc.exe not found, version info will not be embedded" << std::endl;
+        } else {
+            std::cerr << "C3: rc.exe not found, version info will not be embedded" << std::endl;
         }
     }
 
@@ -417,6 +658,13 @@ bool Driver::runLinker(const CompileOptions& options, const std::string& outputD
         msvcOpts.userResFile = userResFile_;
         if (options.verbose) {
             std::cout << "C3: User resource file: " << userResFile_ << std::endl;
+        }
+    }
+
+    // ai/vb-asm-extension-spec: Asm 块过程 → .asm → ml64 → .obj → 链接输入
+    if (!asmProcs_.empty()) {
+        if (!assembleAsmProcs(asmProcs_, intermediatesDir, msvcOpts, options.verbose)) {
+            return false;
         }
     }
 

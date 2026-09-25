@@ -59,6 +59,7 @@ void SemanticAnalyzer::registerVariable(VariableDecl& decl) {
     // 当变量声明为 As ClassName 时，存储类名以便 consuming 模块的 cgen 能正确识别类实例变量
     if (decl.asType && decl.asType->kind == ASTNodeKind::SimpleTypeRef) {
         sym->variableTypeName = static_cast<SimpleTypeRef*>(decl.asType.get())->name;
+        sym->srcTypeName = sym->variableTypeName;  // tB B08c
     }
     symTab_.define(std::move(sym));
 }

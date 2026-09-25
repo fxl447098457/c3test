@@ -217,6 +217,7 @@ void traverseStmt(Stmt& stmt, ASTVisitor& visitor) {
     case ASTNodeKind::OnGoSubStmt:
     case ASTNodeKind::MidStmt:  // P18-A
     case ASTNodeKind::StopStmt:
+    case ASTNodeKind::AsmStmt:  // ai/vb-asm-extension-spec (无子节点)
     case ASTNodeKind::EndStmt:
     case ASTNodeKind::EraseStmt:
     case ASTNodeKind::LabelStmt:
@@ -235,6 +236,7 @@ void traverseStmt(Stmt& stmt, ASTVisitor& visitor) {
         case ASTNodeKind::OnGoSubStmt:  visitor.visit(static_cast<OnGoSubStmt&>(stmt)); break;
         case ASTNodeKind::MidStmt:       visitor.visit(static_cast<MidStmt&>(stmt)); break;  // P18-A
         case ASTNodeKind::StopStmt:     visitor.visit(static_cast<StopStmt&>(stmt)); break;
+        case ASTNodeKind::AsmStmt:      visitor.visit(static_cast<AsmStmt&>(stmt)); break;
         case ASTNodeKind::EndStmt:      visitor.visit(static_cast<EndStmt&>(stmt)); break;
         case ASTNodeKind::EraseStmt:    visitor.visit(static_cast<EraseStmt&>(stmt)); break;
         case ASTNodeKind::LabelStmt:    visitor.visit(static_cast<LabelStmt&>(stmt)); break;

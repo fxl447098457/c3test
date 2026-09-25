@@ -54,6 +54,7 @@ class OnGoSubStmt;
 class MidStmt;
 class ExitStmt;
 class StopStmt;
+class AsmStmt;   // ai/vb-asm-extension-spec: Asm 块
 class EndStmt;
 class CallStmt;
 class ReDimStmt;
@@ -99,6 +100,8 @@ class EnumMember;
 class DeclareDecl;
 class EventDecl;
 class DelegateDecl;
+class InterfaceDecl;
+class CoClassDecl;
 class ConstDecl;
 class VariableDecl;
 class ParameterDecl;

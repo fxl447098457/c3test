@@ -62,3 +62,7 @@
             h_.emitLine("#define " + std::string(m) + " " + remap);
         }
     }
+
+    // tB Interface 契约 (ai/022 B04): 工程级槽表类型. 每个模块头文件各发一份,
+    // 块内 #ifndef 守卫 -> 同一 TU 多次包含无害; 无新式接口的工程零输出.
+    emitIfaceContractTypedefs();

@@ -64,6 +64,33 @@
             }
         }
 
+        // tB Interface 契约 (B04): x.Method(args) → x->vt-><slot>(x, args)
+        if (!ivrefIfaceName_.empty()) {
+            const std::string ivIface = ivrefIfaceName_;
+            ivrefIfaceName_.clear();
+            std::string slotKey;
+            if (const IfaceView* v = ivLookupIface(ivIface)) {
+                slotKey = ivSlotKeyForMember(*v, memberName);
+            }
+            if (!slotKey.empty()) {
+                std::vector<std::string> ivArgs;
+                for (size_t i = 0; i < node.positional.size(); i++) {
+                    emitExpr(*node.positional[i]);
+                    ivArgs.push_back(lastExpr_);
+                }
+                for (auto& named : node.named) {
+                    emitExpr(*named.value);
+                    ivArgs.push_back(lastExpr_);
+                }
+                std::string call = objExpr + "->vt->" + cIdent(slotKey) + "(" + objExpr;
+                for (size_t i = 0; i < ivArgs.size(); i++) call += ", " + ivArgs[i];
+                call += ")";
+                lastExpr_ = call;
+                return;
+            }
+            // 接口里没有这个成员: 契约检查已报过错, 落回后续路径不再级联
+        }
+
         // P6.4: 接口引用方法调用 (Dim x As IFoo → x.Method → x.vtbl->Method(x.obj, args))
         {
             std::string objLower = objExpr;

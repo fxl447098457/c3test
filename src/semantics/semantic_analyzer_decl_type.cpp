@@ -106,6 +106,17 @@ void SemanticAnalyzer::visit(TypeDecl& node) {
                     else if (mi.type == Vb6Type::Object) {
                         mi.typeRefName = stRef->name;
                     }
+                    // ai/022 B08f-1 (D37): `As <项目类>` 在**跨模块**引用时 resolveTypeRef
+                    // 认不出来 (Class 符号要到 stage 3.5 才注入到本模块作用域) → 回退成
+                    // Variant，于是类名也跟着丢，cgen 侧 `udtFieldObjCType` 再也认不出这是
+                    // 对象字段 (Set 被当 Variant 容器、成员调用落 COM 晚绑定)。
+                    // **只补名字、不动 `mi.type`**：名字是纯元数据，`typeRefName` 的读侧逐处
+                    // 核过 —— 要么限定在 `mi.type == UserDefinedType`/`== Object` 分支内，要么
+                    // 查到名字后还要 `kind == UserDefinedType` 才认，所以塞一个 Class 名它们
+                    // 全都看不见（清单见 ai/022 D37）。
+                    else if (mi.type == Vb6Type::Variant) {
+                        mi.typeRefName = stRef->name;
+                    }
                 }
             }
             if (memberPtr->arraySize) {

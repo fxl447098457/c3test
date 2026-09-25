@@ -251,9 +251,12 @@ public:
 };
 
 // Implements 语句: Implements InterfaceName
+//   [tB 扩展 B10] 末尾可带委托子句: `Implements I Via m_holder` —— 本类不再自己写这些
+//   成员，契约整份转交给持有字段 m_holder 的对象。无 Via 时 viaField 为空，行为逐字节不变。
 class ImplementsStmt : public Stmt {
 public:
     std::string interfaceName;
+    std::string viaField;  // 空 = 非委托式实现
 
     ImplementsStmt(SourceLocation loc, std::string name)
         : Stmt(ASTNodeKind::ImplementsStmt, loc), interfaceName(std::move(name)) {}

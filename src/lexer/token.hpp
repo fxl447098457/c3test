@@ -103,6 +103,10 @@ enum class TokenKind : uint16_t {
     With,
     // 无End With, End With由End + With组合解析
 
+    // ai/vb-asm-extension-spec: Asm ... End Asm 内联汇编块 (tB 扩展)
+    // 用户侧语法学 FreeBASIC; 后端 x64 走 MASM 独立过程 (ml64)
+    Asm,
+
     // === 声明关键字 ===
     Dim,
     ReDim,
@@ -112,6 +116,7 @@ enum class TokenKind : uint16_t {
     Private,
     Static,
     Friend,
+    Protected,  // tB 扩展 (ai/022 B08a)
     Global,
 
     As,
@@ -145,6 +150,15 @@ enum class TokenKind : uint16_t {
     RaiseEvent,
     Implements,
     Class,
+    Interface,      // Interface 语句 (tB 扩展: 显式接口契约块, 见 ai/022 D1)
+    Extends,        // Interface 的单继承子句 (仅接口域; 类继承用 Inherits, P3)
+    Inherits,       // 类继承子句 (tB 扩展, ai/022 D6, 批次 B07): 类域用 Inherits, 接口域用 Extends
+    Via,            // 委托式实现子句 `Implements I Via m_holder` (tB 扩展, ai/022 D42, 批次 B10; 软关键字)
+    CoClass,        // 契约聚合块 `CoClass Name … End CoClass` (tB 扩展, ai/026 四节, 批次 B11/C01; 软关键字)
+    // 虚方法修饰符 (VB6 原生三件套; ai/022 D30, 批次 B08b): 只作用于 Sub/Function/Property
+    Overridable,
+    Overrides,
+    NotOverridable,
 
     // === 数据类型关键字 ===
     Boolean,

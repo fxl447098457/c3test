@@ -1,10 +1,12 @@
 name: VB6 C3 Regression
 
 on:
+  # main 分支已删除 (内容全在 dev 里, 2026-09-25), 默认分支 = dev。
+  # 注意 gate/* 分支不在此列 → 必须手动 `gh workflow run ci.yml --ref <branch>` 才会触发。
   push:
-    branches: [main, dev]
+    branches: [dev]
   pull_request:
-    branches: [main]
+    branches: [dev]
   workflow_dispatch:
 
 jobs:
@@ -83,6 +85,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # smoke 是 run_tests.ps1 的 5 个 section 之一 (--syntax-only / compile / run / syntax
+          # 四段各自有属, smoke 段只跑 tests_github/t0_cases/smoke.bas 的端到端编译+运行+断言).
+          # 之前矩阵漏了它 → CI 里的"全量"其实差这一段.
+          - category: smoke
           - category: bas
             shard: 1
           - category: bas
@@ -90,6 +96,7 @@ jobs:
           - category: vbp
           - category: compile
           - category: syntax
+          - category: asm
     env:
       C3_VCVARSALL: ""
     steps:

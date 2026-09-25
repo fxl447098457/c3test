@@ -107,6 +107,11 @@ void CCodeGen::emitLocalDeclCode(LocalDeclStmt& node) {
                     std::string udtCType = resolveArrayUdtElemCType(var.asType.get());
                     if (!udtCType.empty()) arrayUdtElemTypes_[lower] = udtCType;
                 }
+                // Fix 192: 注册类数组元素类名 (静态数组 `Dim s(1) As ShapeAct`)
+                {
+                    std::string cls = resolveArrayClassElemType(var.asType.get());
+                    if (!cls.empty()) arrayClassElemTypes_[lower] = cls;
+                }
                 knownLocalVars_.insert(lower);
                 break;
             }
@@ -139,6 +144,11 @@ void CCodeGen::emitLocalDeclCode(LocalDeclStmt& node) {
                 {
                     std::string udtCType = resolveArrayUdtElemCType(var.asType.get());
                     if (!udtCType.empty()) arrayUdtElemTypes_[lower] = udtCType;
+                }
+                // Fix 192: 同上, 动态数组 `Dim a() As ShapeAct`
+                {
+                    std::string cls = resolveArrayClassElemType(var.asType.get());
+                    if (!cls.empty()) arrayClassElemTypes_[lower] = cls;
                 }
                 knownLocalVars_.insert(lower);
                 break;
@@ -228,14 +238,21 @@ void CCodeGen::emitLocalDeclCode(LocalDeclStmt& node) {
             bool isLocalEnumType = false;  // Fix 010q
             bool isLocalComIfaceType = false;
             bool isLocalVb6IfaceType = false;  // P6.4: VB6接口引用
+            bool isLocalIvrefType = false;     // tB Interface 契约 (B04): 薄指针接口变量
             if (var.asType && var.asType->kind == ASTNodeKind::SimpleTypeRef) {
                 auto& simple = static_cast<SimpleTypeRef&>(*var.asType);
                 auto* clsSym = lookupModuleDotted(simple.name);
                 if (clsSym && clsSym->kind == SymbolKind::Class) {
                     std::string lower = var.name;
                     std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
-                    // P6.4: 接口类 → knownIfaceVars_ (而非 knownClassVars_)
-                    if (clsSym->isInterface) {
+                    // tB Interface 契约 (B04): 新式接口变量 -> knownIvrefVars_ + NULL 初值
+                    if (!ivrefCType(simple.name).empty()) {
+                        knownIvrefVars_[lower] = simple.name;
+                        isLocalIvrefType = true;
+                        // B05: 过程级接口变量在正常出口处 Release 自己那一份引用
+                        trackIvrefLocalForRelease(cIdent(var.name));
+                    } else if (clsSym->isInterface) {
+                        // P6.4: 接口类 → knownIfaceVars_ (而非 knownClassVars_)
                         knownIfaceVars_[lower] = clsSym->name;
                         isLocalVb6IfaceType = true;
                     } else {
@@ -311,8 +328,8 @@ void CCodeGen::emitLocalDeclCode(LocalDeclStmt& node) {
                 c_.emitLine(storageClass + cType + " " + cName + " = " + lastExpr_ + ";");
             } else {
                 std::string initVal;
-                if (isLocalClassType || isLocalComIfaceType) {
-                    initVal = "NULL";
+                if (isLocalClassType || isLocalComIfaceType || isLocalIvrefType) {
+                    initVal = "NULL";  // 薄指针接口变量 (B04) 与类实例一样是裸指针
                 } else if (isLocalVb6IfaceType) {
                     initVal = "{0}";  // P6.4: 接口引用 = {vtbl=NULL, obj=NULL}
                 } else if (isLocalUdtType) {

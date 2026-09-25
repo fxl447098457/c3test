@@ -35,6 +35,36 @@
                 info.clsidStr = sym->comClsidStr.empty() ? generateClsid(progId + "." + sym->name) : sym->comClsidStr;  // P6.8: 优先使用VBP指定的CLSID
                 info.progId = progId + "." + sym->name;
 
+                // ai/022 B13b: 身份从唯一出口 coclassIds_ 取（026 三节"不可让步" + D47"不许
+                // 第二条通道"；D56-3 实测：登记表在后端一个消费者都没有，产品注册的从来不是
+                // 语义层那一份）。登记表按**块名**索引，这里按 [Implementation] 反查实现类。
+                // **只接手写块**：折算记录（C04）的 clsid/iid 一旦覆盖上去，存量 DLL 工程的
+                // 注册身份就会换 mint（两族种子不同），那是"把改码前编得过的工程产物改掉"，
+                // 与逐字节护栏冲突 —— legacyFolded 一律照旧走 comClsidStr / legacy lambda。
+                const CoClassIdentity* ccid = nullptr;
+                if (ccreg_) {
+                    for (const auto& kv : *ccreg_) {
+                        const CoClassIdentity& id = kv.second;
+                        if (id.name.empty() || id.legacyFolded) continue;
+                        if (Symbol::toLower(id.implName) == lowerName) { ccid = &id; break; }
+                    }
+                }
+                if (ccid) {
+                    if (!ccid->clsid.empty()) info.clsidStr = ccid->clsid;
+                    // ai/022 B13e：**默认接口的 IID 不再从出口覆盖**。B13b 那样做之后，产品里的
+                    // "默认接口"变成块指定的那个新式接口，可它对外既没有成员（契约成员是 `Private`）、
+                    // 类型库里的渲染又是 0 成员的 dispinterface ⇒ 服务器 `GetIDsOfNames` 认的成员面
+                    // （= 类的公有成员那一档）与库广告出来的那一档不再是同一档。新式接口在这里只留
+                    // **身份**（下面 `iidMap` 走 `iidreg_` 那条，与 vtable QI/类型库同值），
+                    // 门面交回 `<_类名>`；`defaultIfaceIid` 沿用 typelib 的回写值（见本文件末尾），
+                    // 于是"广告的那一枚 == 服务器应答的那一枚"重新成立。
+                    // 组名档 ProgID：块名与类模块名不同名才有意义（VB6 惯用的同名写法不产生第二行），
+                    // 且必须 [ComCreatable(True)] —— 这个位今天第一次在产品侧有后果。
+                    if (ccid->comCreatable && Symbol::toLower(ccid->name) != lowerName) {
+                        info.groupProgId = progId + "." + ccid->name;
+                    }
+                }
+
                 // 使用类的memberNames查找Public方法符号
                 // (不能按前缀"ClassName_"搜索, 因为单模块工程中方法名是"SetValue"而非"Calc_SetValue")
                 // Fix 016b: 优先搜索该类自身的符号表 (classOwningSymTab), 避免跨类同名碰撞.
@@ -110,6 +140,15 @@
                 }
                 // P12.1: 收集 Implements 接口列表
                 info.implementsNames = sym->implementsNames;
+                // ai/022 B16: 本类是否实现**新式接口** —— 判据与 cgen_iface_vtbl 发码
+                // 时用的那条逐字相同（ivLookupIface 命中：登记表里有、链没断、有槽），
+                // 因为这一位决定 dll_entry.c 要不要引用 vb6_iv_thin_<类> /
+                // vb6_iv_claim_<类> 这两个符号（引用一处就必须发一处）。
+                // 注: dllCgen 的 ivreg_ 由 driver 在调用 generateDllEntry 前注入
+                // （driver_codegen_dll_typelib.inc），没注时这里恒 false = 退回胖路。
+                for (const auto& ifaceName : info.implementsNames) {
+                    if (ivLookupIface(ifaceName)) { info.hasNewStyleIface = true; break; }
+                }
                 // Fix 099: 收集显式 Public 字段 (semantic_analyzer 填的 publicFieldNames).
                 // 真 VB6 把类的 Public 字段暴露为 Property Get/Let; 此前 C3 完全不进
                 // IDispatch 表 → 客户端 GetIDsOfNames("Router") 失败 → vb6_ComGetProp
@@ -138,7 +177,7 @@
                         : sym->comSourceIfaceIid;
                 }
                 // P6.6.6: 默认接口IID (由driver TypeLib builder回写)
-                info.defaultIfaceIid = sym->comDefaultIfaceIid;
+                if (info.defaultIfaceIid.empty()) info.defaultIfaceIid = sym->comDefaultIfaceIid;
                 coClasses.push_back(std::move(info));
             }
         }
@@ -195,6 +234,15 @@
         std::string clsStruct = "vb6_cls_" + clsId;
         entry.emitLine("extern struct " + clsStruct + "* vb6_cls_" + clsId + "_New(void);");
         entry.emitLine("extern void vb6_cls_" + clsId + "_Destroy(struct " + clsStruct + "*);");
+        // ai/022 B16: 新式接口那一面（薄指针出入口）由类模块自己的 TU 提供，见
+        // cgen_iface_vtbl.cpp 的 emitIfaceImplTables 末尾. 只在真的发了这两个符号的
+        // 类上声明（判据同上），否则整行都不出现 —— 无新式接口的工程逐字节不变.
+        if (cc.hasNewStyleIface) {
+            entry.emitLine("extern void* vb6_iv_thin_" + clsId +
+                           "(void* instance, const void* riid);  /* B16: 接口 IID -> 薄指针 */");
+            entry.emitLine("extern void vb6_iv_claim_" + clsId +
+                           "(void* instance);  /* B16: COM 包装器放手, 退底座引用 */");
+        }
         // 类的方法函数前向声明
         for (size_t mi = 0; mi < cc.publicMethodNames.size(); mi++) {
             Symbol* methodSym = cc.publicMethodSyms[mi];
@@ -220,7 +268,12 @@
                 if (retType == "vb6_VARIANT" && !methodSym->variableTypeName.empty()) {
                     auto* rcInstSym = lookupModuleDotted(methodSym->variableTypeName);
                     if (rcInstSym && rcInstSym->kind == SymbolKind::Class && !rcInstSym->isInterface) {
-                        retType = "vb6_cls_" + cIdent(rcInstSym->name) + "*";
+                        // ai/022 B09-0: 带 `struct` 关键字。本文件的 typedef 是**按类分块**发的
+                        // (每个类一行 "typedef struct vb6_cls_X vb6_cls_X;"), 而这里引用的可能是
+                        // **另一个还没轮到**的类 (派生类块排在基类块之前就是这样): 裸 `vb6_cls_X*`
+                        // 在该行还是未声明名 → error C2143。`struct vb6_cls_X*` 自己就把标签带上了,
+                        // 与上面的 _New/_Destroy extern 同一口径, 不再有顺序依赖。
+                        retType = "struct vb6_cls_" + cIdent(rcInstSym->name) + "*";
                     }
                 }
                 std::string params = "struct " + clsStruct + "*";

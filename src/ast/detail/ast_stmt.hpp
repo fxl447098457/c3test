@@ -298,6 +298,21 @@ public:
         : Stmt(ASTNodeKind::StopStmt, loc) {}
 };
 
+// Asm ... End Asm 内联汇编块 (ai/vb-asm-extension-spec)
+// v1: 行文本按原始源码直存 (不经 token 重组), 保证 `dword ptr [x]` / `.label:` 等原样;
+// 参数→ABI 寄存器替换在发码/驱动侧做文本级替换。naked 为 <Naked> 修饰占位 (v1 未启用)。
+class AsmStmt : public Stmt {
+public:
+    std::vector<std::string> lines;   // 原始汇编行 (不含 Asm / End Asm 两行)
+    bool naked = false;               // <Naked> 修饰: 整函数汇编, 不生成 prologue/epilogue
+    // `Asm Clobber("rbx","memory")` 声明的被踩寄存器 (小写, 原样收录; "memory" 单独保留)。
+    // 与块内静态扫描出的寄存器取并集 → 生成 callee-saved 的 push/pop (x64 MASM / x86 内联)。
+    std::vector<std::string> clobbers;
+
+    AsmStmt(SourceLocation loc)
+        : Stmt(ASTNodeKind::AsmStmt, loc) {}
+};
+
 // End 语句 (终止程序)
 class EndStmt : public Stmt {
 public:

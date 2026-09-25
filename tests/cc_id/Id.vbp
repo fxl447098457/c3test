@@ -1,0 +1,8 @@
+Type=Exe
+Name="ShapesApp"
+Module=IdMain; IdMain.bas
+Module=IdIfaces; IdIfaces.bas
+Module=IdBlocks; IdBlocks.bas
+Class=CircleImpl; CircleImpl.cls
+Class=VbpImpl; VbpImpl.cls; {33333333-4444-5555-6666-777777777777}
+Startup="Sub Main"

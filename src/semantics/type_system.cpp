@@ -14,7 +14,8 @@ TypeSystem::TypeSystem() {
         {"long", Vb6Type::Long},
         {"lng", Vb6Type::Long},
         {"longptr", Vb6Type::LongPtr},    // Fix 081e: LongPtr = architecture-width integer
-        {"longlong", Vb6Type::LongPtr},   // VBA7 LongLong compatibility
+        // Fix 084m: LongLong 走自己的枚举 —— 恒为 64 位有符号, 不随架构退化 (见 types.hpp)
+        {"longlong", Vb6Type::LongLong},
         {"single", Vb6Type::Single},
         {"sng", Vb6Type::Single},
         {"double", Vb6Type::Double},
@@ -140,6 +141,7 @@ const char* TypeSystem::typeToString(Vb6Type t) {
         case Vb6Type::Byte:            return "Byte";
         case Vb6Type::UserDefinedType: return "UserDefinedType";
         case Vb6Type::LongPtr:         return "LongPtr";
+        case Vb6Type::LongLong:        return "LongLong";
         case Vb6Type::Void:            return "Void";
         case Vb6Type::Unknown:         return "Unknown";
         default:                        return "?";
@@ -152,7 +154,8 @@ bool TypeSystem::isNumeric(Vb6Type t) {
 
 bool TypeSystem::isIntegral(Vb6Type t) {
     return t == Vb6Type::Byte || t == Vb6Type::Integer ||
-           t == Vb6Type::Long || t == Vb6Type::Boolean;
+           t == Vb6Type::Long || t == Vb6Type::Boolean ||
+           t == Vb6Type::LongLong || t == Vb6Type::LongPtr;   // Fix 084m
 }
 
 bool TypeSystem::isFloat(Vb6Type t) {
@@ -256,6 +259,9 @@ int TypeSystem::typeSize(Vb6Type t) {
         case Vb6Type::Object:   return 4;  // IDispatch指针
         case Vb6Type::Variant:  return 16; // VARIANT
         case Vb6Type::Decimal:  return 16;  // P20-07: DECIMAL is 14 bytes but aligned to 16
+        case Vb6Type::ULong:    return 4;
+        case Vb6Type::LongPtr:  return static_cast<int>(sizeof(void*));  // Fix 081e: 架构宽度
+        case Vb6Type::LongLong: return 8;   // Fix 084m: 恒 64 位有符号
         default:                return 0;
     }
 }
