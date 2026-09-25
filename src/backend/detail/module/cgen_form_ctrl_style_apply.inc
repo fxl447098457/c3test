@@ -155,6 +155,14 @@
                 width = 0;
                 height = 0;
                 break;
+            case FrmControlType::Timer:
+                // C29-T: 与 CommonDialog 同一手法 —— Timer 要有句柄（当计时器的身份），
+                // 但绝不能有外观：不可见、0x0，且不吃 Tab 焦点。
+                createCaption = "";
+                style &= ~kWsVisible;
+                width = 0;
+                height = 0;
+                break;
             default:
                 break;
         }

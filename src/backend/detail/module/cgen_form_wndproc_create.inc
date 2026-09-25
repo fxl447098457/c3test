@@ -105,8 +105,15 @@
             pIt = ctrl.properties.find("Enabled");
             if (pIt != ctrl.properties.end()) enabled = (int)pIt->second.intValue;
             std::string timerFn = cProcName(ctrl.controlName + "_Timer", AccessLevel::Private);
-            if (enabled) {
-                c_.emitLine("{ extern void " + timerFn + "(); vb6_SetTimer((void*)hwnd, " + std::to_string(interval) + ", (void*)" + timerFn + "); }");
+            // C29-T: 改之前"设计期 Enabled=0 就整段不发"，于是运行期 `Timer1.Enabled = True`
+            // 永远起不来（实测 tick 数 0）。现在只要有事件处理器就**照挂**，把设计期那个
+            // Enabled 当参数交给 RTL 决定起不起；key 传 Timer 控件自己的不可见句柄，
+            // 运行期的 Enabled/Interval 才找得回这一格。没处理器就没得派发，跳过（否则链接期
+            // 会引用一个不存在的 vb6_<名>_Timer）。
+            if (symTab_.lookup(ctrl.controlName + "_Timer")) {
+                c_.emitLine("{ extern void " + timerFn + "(); vb6_TimerAttach((void*)hwnd, vb6_hwnd_"
+                            + cIdent(ctrl.controlName) + ", " + std::to_string(interval) + ", (void*)"
+                            + timerFn + ", " + (enabled ? "-1" : "0") + "); }");
             }
         }
     }

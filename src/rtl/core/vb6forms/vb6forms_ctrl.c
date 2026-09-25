@@ -535,6 +535,23 @@ static LRESULT CALLBACK vb6_CdWndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     return DefWindowProcW(h, m, w, l);
 }
 
+// C29-T: Timer 的身份类（同样不可见、同样只当句柄用 —— 计时器真正的状态在
+// vb6forms.c 的 g_timerTable 里，按这个句柄找回那一格）。
+static LRESULT CALLBACK vb6_TimerWndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
+    return DefWindowProcW(h, m, w, l);
+}
+
+void vb6_RegisterTimerClass(void* hInstance) {
+    static BOOL done = FALSE;
+    if (done) return;
+    WNDCLASSW wc;
+    ZeroMemory(&wc, sizeof(wc));
+    wc.lpfnWndProc   = vb6_TimerWndProc;
+    wc.hInstance     = (HINSTANCE)hInstance;
+    wc.lpszClassName = L"VB6_TIMER";
+    if (RegisterClassW(&wc)) done = TRUE;
+}
+
 void vb6_RegisterCommDialogClass(void* hInstance) {
     static BOOL done = FALSE;
     if (done) return;

@@ -145,6 +145,8 @@ void vb6_SetCancelButton(void* hwnd, int isCancel);
 
 // 属性宿主是一枚自注册的不可见子窗口 VB6_COMMONDIALOG（029 决策 D6）
 void vb6_RegisterCommDialogClass(void* hInstance);
+// C29-T: Timer 的身份类（不可见、0x0），CreateControls 开头注册。
+void vb6_RegisterTimerClass(void* hInstance);
 
 wchar_t* vb6_CdGetFilter(void* hwnd);      void vb6_CdSetFilter(void* hwnd, wchar_t* v);
 wchar_t* vb6_CdGetFileName(void* hwnd);    void vb6_CdSetFileName(void* hwnd, wchar_t* v);

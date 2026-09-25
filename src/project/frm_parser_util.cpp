@@ -196,7 +196,11 @@ const char* FrmParser::controlTypeToWin32Class(FrmControlType type) {
         case FrmControlType::PictureBox:   return "STATIC";     // SS_BITMAP样式
         case FrmControlType::HScrollBar:   return "SCROLLBAR";  // SBS_HORZ样式
         case FrmControlType::VScrollBar:   return "SCROLLBAR";  // SBS_VERT样式
-        case FrmControlType::Timer:        return nullptr;       // 不可见控件, 无窗口
+        // C29-T: Timer 以前是"无窗口"控件 ⇒ 生成代码里的 vb6_hwnd_<timer> 恒 NULL，
+        // 于是 `Timer1.Enabled = True` 这类运行期写法落到 SetPropW(NULL,...) 被静默丢。
+        // 现在给它一枚自注册的**不可见**窗口当身份（注册见 vb6forms.c 的
+        // vb6_RegisterTimerClass），Enabled/Interval 才找得回自己那一格计时器。
+        case FrmControlType::Timer:        return "VB6_TIMER";
         case FrmControlType::Image:        return "STATIC";     // SS_BITMAP
         // C29-1b: 文件系统三控件在 VB6 里本来就是公共控件的薄封装 —— Drive 是
         // CBS_DROPDOWNLIST 的组合框、Dir / File 是列表框。以前这三格缺映射, 创建流程
