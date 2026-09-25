@@ -143,3 +143,29 @@
 - 2026-06-26 P5-P7锛氬妯″潡宸ョ▼ / COM 瀵硅薄妯″瀷 / 绐椾綋鎺т欢涓夐」缁煎悎楠岃瘉锛孧6-M8
 - 2026-06-25 P2-P4锛氫袱閬嶈涔? + 120+ 鍐呯疆绗﹀彿锛汣 浠ｇ爜鐢熸垚 + MSVC 椹卞姩锛岀紪璇戝嚭 hello.exe锛孧3-M5
 - 2026-06-24 P0-P1锛氳瘝娉曞櫒锛圠L(2)+Unicode锛?+ 瑙ｆ瀽鍣紙绾? 2900 琛岋級璺戦�氾紝M1/M2
+
+## 2026-09-22 Fix 194: COM 被调侧 VARIANT ABI 错配致 demo 堆损坏 (0xC0000374)
+- 现象: VBMAN demo 启动即 0xC0000374 堆损坏, 间歇性, CI 与本机同签名。
+- 定位: RTL VEH 抓 0xC0000374 落栈 + IFEO 页堆把损坏变成 AV, 页堆下锁定 VBMAN.dll 内 memcpy 24B 写越界, 调用链 Form_Load->ComGetProp->ComObj_Invoke。
+- 根因: 生成码适配器按 vb6_VARIANT (x86 24B) 布局读写 invokeFunc 的实参/返回槽, 而 COM 边界 OLE VARIANT 是 16B, 透传/直写越界 8B。
+- 修复: ComObj_Invoke 实参改用 24B 槽中转 (整复制 16B OLE 内容再按需强转), 返回槽 24B 中转后回写 16B; 清理循环不再对槽位 VariantClear (槽内是调用方资源副本)。
+- 附带: vb6forms.c VEH 支持 0xC0000005 现场 (读写标志/寄存器/栈扫描镜像返回地址), C3_CRASH_TRACE=1 时生效。
+- 验证: 本机 x86 全链路 3/3 无崩溃存活至探针窗口结束。
+
+## 2026-09-22 Fix 195: VEH 栈扫描/寄存器打印用了 x86 专用 CONTEXT 字段, x64 编不过
+- 现象: Fix 194 的 VEH (vb6forms.c) 无条件使用 CONTEXT::Esp/Eip/Eax 等 x86 字段, 该 RTL 嵌入所有生成 exe, x64 目标全线 C2039 (回归 FAIL=62 的真凶之一)。
+- 修复: 栈扫描按 _WIN64 切 Rsp/ULONG_PTR (QWORD 值), 寄存器打印 x64 用 Rip/Rsp/Rax 系。
+- 环境附注: 本机沙箱黑名单拦 reg.exe, C3 走 vcvarsall 前缀时链路断 -> cl 无 INCLUDE 报 C1083, 与代码无关; CI 不受影响。
+- 验证: x64 hello.bas 编译+运行通过 (Sum=5050)。
+
+## 2026-09-22 Fix 196: Is/比较取址裸拷 VARIANT 临时, vbman 新增 SSE/Heartbeat 模块触发 C2440
+- 现象: vbman 上游新增 SSE 全家桶与 Winsock/cHeartbeat 后 CI 编译 C2440 两处: cHeartbeat.c(151) int32_t(vb6_ComGetIntProp)->vb6_VARIANT, cSSE.c(166) vb6_cls_cClientCallback*->vb6_VARIANT。
+- 根因: cgen_expr_binary.cpp variantAddr158n 裸拷分支只对含 -> 的表达式包 vb6_VariantFromValue (Fix 158u), 其余 rvalue (类型化 getter 返回 int32_t / 项目类指针解引用) 直接 vb6_VARIANT tmp = X 裸拷。
+- 修复: 裸拷分支统一走 vb6_VariantFromValue (_Generic: 已是 VARIANT 恒等直传, 标量/指针自动包装); 裸 vb6_ComCall( 结果保持 VariantFromComResult 解引用 (Fix 132 同规则)。
+- 验证: 本机 x86 全量 129 模块编译 exit=0, VBMAN.dll 产出 (2.3MB)。
+
+## 2026-09-22 Fix 197: 跨模块 Public 枚举成员未预注册, Optional 默认值回退 0
+- 现象: vbman HTTP 服务端永不 accept 连接 (CI demo CLOSE_WAIT + HTTP 超时)。本机探针实证 cTlsSocket.Create 收到 EventMask=0 (缺省值 ucsSfdAll=63 未生效) -> WSAAsyncSelect(lEvent=0) 等于注销通知 -> 消息永不派发。
+- 根因: evalOptionalDefault 查符号表发生在 Pass 1 期间, 而 runCrossModuleResolution 在其后才注入跨模块符号; Fix 047 的 Pass1 前预注册只注册 EnumType 类型名, 未注册 EnumMember 常量 -> 跨类枚举默认值 lookup 失败回退 0。同模块内枚举默认值不受影响 (最小复现 optenum4 实证, 修复前 0 修复后 63)。
+- 修复: driver_semantics.cpp Fix 047 预注册块扩展 — 其他模块 Public Enum 的成员一并预注册 (evalEnumConstIntForDriver 求值, 复用 Fix 191 求值器, 按 VB6 递增语义)。
+- 修复后本机实测: mask=0 -> mask=63, WSAAsyncSelect 注册成功; demo 由「永不 accept」前进到「连接后 0xC0000005 崩溃」, 断点转移至 cAsyncSocket wndproc 机器码 thunk (InitAsyncSelectNotifyThunk) 与 c3 项目类对象布局失配 (EXECUTE(DEP) target=0), 待后续处理。

@@ -12,12 +12,24 @@
 # ============================================================
 
 function Get-DispProbeExe {
+    param([string]$Arch = "")     # "" = 默认(x64) | x86
     $src = Join-Path $Tests "tools\disp_probe.c"
-    $exe = Join-Path $OutDir "disp_probe.exe"
+    $name = "disp_probe.exe"
+    if ($Arch -eq "x86") { $name = "disp_probe_x86.exe" }
+    $exe = Join-Path $OutDir $name
     if ((Test-Path $exe) -and ((Get-Item $src).LastWriteTime -le (Get-Item $exe).LastWriteTime)) { return $exe }
     $prev = (Get-Location).Path
     Set-Location $OutDir          # cl 把 .obj 落在当前目录，跟着产物走就不会脏工作树
-    & cl /nologo /W3 /O1 /utf-8 $src /Fe:$exe /link ole32.lib oleaut32.lib *> $null
+    if ($Arch -eq "x86") {
+        # LIB 顺序坑：$env:LIB 是 x64 在前，x86 链接会挑走 x64 的 ole32.lib（LNK4272）⇒ 临时换掉
+        $cl = Join-Path $msvc.BinX86 "cl.exe"
+        $savedLib = $env:LIB
+        $env:LIB = $msvc.LibX86
+        & $cl /nologo /W3 /O1 /utf-8 $src /Fe:$exe /link ole32.lib oleaut32.lib *> $null
+        $env:LIB = $savedLib
+    } else {
+        & cl /nologo /W3 /O1 /utf-8 $src /Fe:$exe /link ole32.lib oleaut32.lib *> $null
+    }
     Set-Location $prev
     if (-not (Test-Path $exe)) { return $null }
     return $exe
@@ -31,12 +43,15 @@ function Test-DispatchInvoke {
         [string]$Clsid,               # 传给探针的 CLSID（带花括号）
         [string[]]$Needles,
         [string[]]$Absent = @(),
-        [string]$ExtraIid = ""        # 非空 = 再问一次这枚 IID，看服务器答的是哪份指针
+        [string]$ExtraIid = "",       # 非空 = 再问一次这枚 IID，看服务器答的是哪份指针
+        [string]$Arch = ""            # "" = 默认(x64) | x86 —— B16 起同一批断言在 x86 上也真跑一遍
     )
     $script:total++
     Write-Host -NoNewline "  [DISPATCH] $Name ... "
 
-    $out = & $C3 $VbpFile --output-dir $OutDir 2>&1
+    $c3args = @($VbpFile, "--output-dir", $OutDir)
+    if ($Arch) { $c3args = @($VbpFile, "--arch", $Arch, "--output-dir", $OutDir) }
+    $out = & $C3 @c3args 2>&1
     if ($LASTEXITCODE -ne 0) {
         $script:fail++
         Write-Host "FAIL (compile)" -ForegroundColor Red
@@ -49,7 +64,7 @@ function Test-DispatchInvoke {
         Write-Host "FAIL (no dll)" -ForegroundColor Red
         return
     }
-    $probe = Get-DispProbeExe
+    $probe = Get-DispProbeExe $Arch
     if (-not $probe) {
         $script:fail++
         Write-Host "FAIL (no probe)" -ForegroundColor Red

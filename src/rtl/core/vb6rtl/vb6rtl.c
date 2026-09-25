@@ -513,17 +513,29 @@ void vb6_RaiseError(int32_t errNum, BSTR description) {
         vb6_err_in_handler = 1;  // P14.1.2: 标记进入错误处理器
         longjmp(*vb6_error_jmp_ptr, errNum);
     }
-    // 未设置错误处理: GUI程序弹MessageBox, CLI程序输出stderr
-    if (GetConsoleWindow()) {
-        // CLI程序: 输出到stderr
-        fwprintf(stderr, L"Unhandled VB6 Error #%d: %ls\n", errNum,
-                 description ? description : L"(no description)");
-    } else {
-        // GUI程序: 弹出VB6风格错误对话框
-        wchar_t msg[512];
-        swprintf(msg, 512, L"Run-time error '%d':\n%ls",
-                 errNum, description ? description : L"(no description)");
-        MessageBoxW(NULL, msg, L"VB6 Runtime Error", MB_ICONERROR | MB_OK);
+    // 未设置错误处理: 只要有**可写的 std 句柄** (控制台 / 管道 / 文件) 就写 stderr, 只有句柄都不可用
+    // (从资源管理器双击起的 GUI 程序) 才弹 VB6 风格对话框。
+    // 判据不能用 GetConsoleWindow(): GUI 子系统 exe 从 cmd 里起时 std 句柄**就是**那份控制台,
+    // 而它返回 NULL —— 会把本该打到 stderr 的错误变成模态框; 更不能只看"是不是控制台": 批处理/套件
+    // 把 stdout/stderr 重定向成管道时, 弹框没人点确定 ⇒ 进程永远卡住 (CI 上表现为 5s 超时被杀)。
+    {
+        HANDLE hErr = GetStdHandle(STD_ERROR_HANDLE);
+        HANDLE hOut = GetStdHandle(STD_OUTPUT_HANDLE);
+        int canWrite = 0;
+        if (hErr && hErr != INVALID_HANDLE_VALUE && GetFileType(hErr) != FILE_TYPE_UNKNOWN) canWrite = 1;
+        else if (hOut && hOut != INVALID_HANDLE_VALUE && GetFileType(hOut) != FILE_TYPE_UNKNOWN) canWrite = 1;
+        if (canWrite) {
+            wchar_t line[600];
+            int n = swprintf(line, 600, L"Unhandled VB6 Error #%d: %ls\n", errNum,
+                             description ? description : L"(no description)");
+            if (n > 0) vb6_ConWriteErrW(line, n);
+        } else {
+            // 无处可写 (双击启动的 GUI 程序): 弹 VB6 风格错误对话框
+            wchar_t msg[512];
+            swprintf(msg, 512, L"Run-time error '%d':\n%ls",
+                     errNum, description ? description : L"(no description)");
+            MessageBoxW(NULL, msg, L"VB6 Runtime Error", MB_ICONERROR | MB_OK);
+        }
     }
     exit(errNum);
 }

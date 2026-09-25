@@ -16,6 +16,16 @@
 // IUnknown 三件套：B04 是**占位**（E_NOTIMPL / 常量计数），槽号因此从 B04 起永久固定。
 // B05 把 AddRef/Release 换成真计数（引用计数头 `__refcount` 只落在实现新式接口的类上，
 // 无新语法的工程一个字节都不变），QueryInterface 仍占位到 B06（TypeOf/转换同批）.
+//
+// B16: 整条薄面对（IUnknown 前缀 + 契约槽）一律加 `__stdcall`。x86 下不加就是 `__cdecl`
+// （B16 测量①：`--arch x86 --emit-c` 的产物里一个约定修饰都没有），而 COM 规范是
+// `CC_STDCALL`；类型库里那一档要如实写 `callconv`，它就必须真的成立。x64 下 MSVC 接受并
+// 忽略 `__stdcall`（同 cgen_delegate/cgen_com_events 的先例），所以两种架构共用一份生成码，
+// 只有"实现新式接口"的工程这一段会变（其余工程逐字节不变）。
+// 同批还给出薄面的出入口 `vb6_iv_thin_<C>` / `vb6_iv_claim_<C>`（见 emitIfaceImplTables
+// 末尾）：COM 包装器按 IID 交回薄指针、并在自己最后一次 Release 时把底座引用交还实例，
+// 于是 `IClassFactory::CreateInstance` 那种"QI 完就 Release 包装器"的规范姿势下，交出去
+// 的接口指针不会悬空。
 
 #include "backend/cgen.hpp"
 
@@ -317,11 +327,11 @@ void CCodeGen::emitIfaceContractTypedefs() {
         h_.emitLine("typedef struct " + tbl + " {");
         h_.indent();
         h_.emitLine("/* IUnknown prefix slots: AddRef/Release real in B05, QueryInterface in B06a */");
-        h_.emitLine("long (*QueryInterface)(void* self, const void* riid, void** ppv);");
-        h_.emitLine("unsigned long (*AddRef)(void* self);");
-        h_.emitLine("unsigned long (*Release)(void* self);");
+        h_.emitLine("long (__stdcall *QueryInterface)(void* self, const void* riid, void** ppv);");
+        h_.emitLine("unsigned long (__stdcall *AddRef)(void* self);");
+        h_.emitLine("unsigned long (__stdcall *Release)(void* self);");
         for (const IfaceSlotView& slot : v->slots) {
-            h_.emitLine(ivSlotRetType(slot.sig) + " (*" + cIdent(slot.key) + ")(" +
+            h_.emitLine(ivSlotRetType(slot.sig) + " (__stdcall *" + cIdent(slot.key) + ")(" +
                         ref + "* self" + ivParamDeclsRef(slot.sig) + ");");
         }
         h_.dedent();
@@ -407,7 +417,7 @@ void CCodeGen::emitIfaceImplTables(Module& module) {
     // （B05 已为 AddRef/Release 这么做了，QI 同理）。先给本类全部 AddRef 发前向
     // 声明，QI 才能在任意发射顺序下调到兄弟接口的 AddRef。
     for (const IfaceView* v : ifaces) {
-        c_.emitLine("static unsigned long vb6_iunk_" + clsId + "_" + cIdent(v->name) +
+        c_.emitLine("static unsigned long __stdcall vb6_iunk_" + clsId + "_" + cIdent(v->name) +
                     "_AddRef(void* self);");
     }
 
@@ -424,7 +434,7 @@ void CCodeGen::emitIfaceImplTables(Module& module) {
         // 而且不需要给类结构体加字段（D19：布局不能动）。
         const std::string canonId = cIdent(ifaces.front()->name);
         c_.emitBlank();
-        c_.emitLine("static long vb6_iunk_" + clsId + "_" + id + "_QueryInterface(void* self, const void* riid, void** ppv) {");
+        c_.emitLine("static long __stdcall vb6_iunk_" + clsId + "_" + id + "_QueryInterface(void* self, const void* riid, void** ppv) {");
         c_.indent();
         c_.emitLine(walkQI);
         c_.emitLine("if (!ppv) return 0x80070057L;  /* E_POINTER */");
@@ -465,14 +475,14 @@ void CCodeGen::emitIfaceImplTables(Module& module) {
         const std::string walk = "    " + clsStruct + "* me = (" + clsStruct + "*)((char*)self - offsetof(" +
                                  clsStruct + ", __iv_" + id + "));";
         c_.emitBlank();
-        c_.emitLine("static unsigned long vb6_iunk_" + clsId + "_" + id + "_AddRef(void* self) {");
+        c_.emitLine("static unsigned long __stdcall vb6_iunk_" + clsId + "_" + id + "_AddRef(void* self) {");
         c_.indent();
         c_.emitLine(walk);
         c_.emitLine("me->__refcount += 1;");
         c_.emitLine("return (unsigned long)me->__refcount;");
         c_.dedent();
         c_.emitLine("}");
-        c_.emitLine("static unsigned long vb6_iunk_" + clsId + "_" + id + "_Release(void* self) {");
+        c_.emitLine("static unsigned long __stdcall vb6_iunk_" + clsId + "_" + id + "_Release(void* self) {");
         c_.indent();
         c_.emitLine(walk);
         c_.emitLine("me->__refcount -= 1;");
@@ -506,7 +516,7 @@ void CCodeGen::emitIfaceImplTables(Module& module) {
                 slotFns.push_back(fn);
 
                 c_.emitBlank();
-                c_.emitLine("static " + ret + " " + fn + "(" + ref + "* self" +
+                c_.emitLine("static " + ret + " __stdcall " + fn + "(" + ref + "* self" +
                             ivParamDecls(sigDecl) + ") {");
                 c_.indent();
                 c_.emitLine(clsStruct + "* me = (" + clsStruct + "*)((char*)self - offsetof(" +
@@ -531,7 +541,7 @@ void CCodeGen::emitIfaceImplTables(Module& module) {
             slotFns.push_back(fn);
 
             c_.emitBlank();
-            c_.emitLine("static " + ivSlotRetType(slot.sig) + " " + fn + "(" + ref + "* self" +
+            c_.emitLine("static " + ivSlotRetType(slot.sig) + " __stdcall " + fn + "(" + ref + "* self" +
                         ivParamDecls(*impl) + ") {");
             c_.indent();
             c_.emitLine(clsStruct + "* me = (" + clsStruct + "*)((char*)self - offsetof(" +
@@ -594,6 +604,47 @@ void CCodeGen::emitIfaceImplTables(Module& module) {
         c_.emitLine("if (vb6_IidEqual(riid, vb6_iv_iid_" + cIdent(v->name) + ")) return 1;");
     }
     c_.emitLine("return 0;");
+    c_.dedent();
+    c_.emitLine("}");
+
+    // B16: 薄面的两个出入口 —— COM 包装器 (vb6comserver) 靠它们把"接口 IID"这一档
+    // 交回给调用者，并管住交出去之后的生命期。
+    //   vb6_iv_thin_<C>(instance, riid) : IID → 那根薄指针 (本类没实现 = NULL)
+    //   vb6_iv_claim_<C>(instance)      : 包装器放手 —— 清掉 __comObj 回指, 再退掉底座引用
+    //     (_New / FromInstance 移交给包装器的那一次). 退完仍 > 0 = 还有薄引用在世, 由最后一个
+    //     薄引用的 Release 收尾 (那条路的 __comObj 已被清空, 直接走"自己销毁"分支).
+    // 为什么必须成对给: `IClassFactory::CreateInstance` 的规范姿势就是
+    // `QI(请求的 IID)` 紧接着 `Release(包装器)` —— 只给 thin 不给 claim, 刚交出去的
+    // 接口指针会被那次 Release 当场销毁 (悬空). 成对给之后, "谁手里还有引用"由
+    // __refcount 一条线说了算 (薄指针的 AddRef/Release 自 B05 起就记在这条线上).
+    const std::string thinFn = "vb6_iv_thin_" + clsId;
+    const std::string claimFn = "vb6_iv_claim_" + clsId;
+    h_.emitBlank();
+    h_.emitLine("void* " + thinFn + "(void* instance, const void* riid);  /* tB Interface B16: 接口 IID -> 薄指针 (无则 NULL) */");
+    h_.emitLine("void " + claimFn + "(void* instance);  /* tB Interface B16: COM 包装器放手, 退掉底座引用 */");
+
+    c_.emitBlank();
+    c_.emitLine("void* " + thinFn + "(void* instance, const void* riid) {");
+    c_.indent();
+    c_.emitLine(clsStruct + "* me = (" + clsStruct + "*)instance;");
+    c_.emitLine("if (!me || !riid) return NULL;");
+    for (const IfaceView* v : ifaces) {
+        const std::string id = cIdent(v->name);
+        c_.emitLine("if (vb6_IidEqual(riid, vb6_iv_iid_" + id + ")) return &me->__iv_" + id + ";");
+    }
+    c_.emitLine("return NULL;  /* 本类没实现这个接口 */");
+    c_.dedent();
+    c_.emitLine("}");
+
+    c_.emitBlank();
+    c_.emitLine("void " + claimFn + "(void* instance) {");
+    c_.indent();
+    c_.emitLine(clsStruct + "* me = (" + clsStruct + "*)instance;");
+    c_.emitLine("if (!me) return;");
+    c_.emitLine("me->__comObj = NULL;  /* B16: 包装器已走, 薄引用的最后一次 Release 自己收尾 */");
+    c_.emitLine("me->__refcount -= 1;");
+    c_.emitLine("if (me->__refcount > 0) return;  /* 还有薄引用在世 */");
+    c_.emitLine(clsStruct + "_Destroy(me);");
     c_.dedent();
     c_.emitLine("}");
 }

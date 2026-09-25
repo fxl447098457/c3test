@@ -14,7 +14,11 @@ param(
     [string]$OutputDirectory = "",
     [int]$Jobs = 1,          # >1 时并行运行纯 .bas 用例 (每 worker 独立输出目录); GUI/VBP 始终串行
     [int]$BasShard = 0,      # bas 分片当前编号 (1..BasShardTotal); 0=不分片整队跑
-    [int]$BasShardTotal = 1  # bas 分片总数 (供 CI 用多 runner 并行跑 bas 用例)
+    [int]$BasShardTotal = 1, # bas 分片总数 (供 CI 用多 runner 并行跑 bas 用例)
+    # 单条用例「运行」阶段的墙钟预算 (秒)。5s 在 -Jobs 20 的并行编译下会误杀: 4 vCPU runner 上
+    # 被 cl/link 压住时, 健康的小 exe 也可能 >5s 才跑完 (实测卡住的进程只有 15ms CPU、线程 Ready)。
+    # 真挂 (模态框/死锁) 靠这个上限兜底; 超时时会把 CPU 时间/状态/最后一行输出写进日志, 见下两处。
+    [int]$RunTimeoutSec = 60
 )
 
 $ErrorActionPreference = "SilentlyContinue"
@@ -116,6 +120,24 @@ Write-Host ("  cl.exe: $($clCmd.Source)") -ForegroundColor Gray
 if (-not (Test-Path $OutDir)) { New-Item -ItemType Directory -Path $OutDir | Out-Null }
 
 # === 测试基础函数 ===
+# 运行超时时的读数: 报出已烧掉的 CPU 时间、进程状态与最后一行输出。
+# 判据: CPU≈0 且没有任何输出 = 进程根本没被调度 (机器被并行编译压满, 不是用例的错);
+#       CPU 不小却一直不退出 = 它自己在转/在等, 那是真问题。
+function Get-RunTimeoutDiag {
+    param($Proc, $OutTask, $ErrTask)
+    $cpu = -1; $st = '?'
+    try { $cpu = [int]$Proc.TotalProcessorTime.TotalMilliseconds } catch { }
+    try { if ($Proc.HasExited) { $st = "exited=$($Proc.ExitCode)" } else { $st = 'alive' } } catch { }
+    $last = ''
+    foreach ($t in @($OutTask, $ErrTask)) {
+        if ($t -and $t.Wait(1500)) {
+            $txt = ''
+            try { $txt = [string]$t.Result } catch { }
+            if ($txt) { $line = @($txt.TrimEnd() -split "`r?`n" | Where-Object { $_ }); if ($line.Count -gt 0) { $last = $line[-1] } }
+        }
+    }
+    return " (cpu=${cpu}ms, ${st}, last='$last')"
+}
 $script:pass = 0
 $script:fail = 0
 $script:skip = 0
@@ -128,6 +150,16 @@ $script:total = 0
 # tests\disp_invoke.ps1 用 tests\tools\disp_probe.c（LoadLibrary + DllGetClassObject）
 # 把产出的 DLL 真的按 IDispatch 调一遍，不再只比字节。
 . (Join-Path $PSScriptRoot "disp_invoke.ps1")
+# ai/022 B16: 类型库的「契约面」读数（tests\tools\tlb_slots.cpp）——
+# 库里那一档真接口发不发成员、槽偏移/调用约定对不对；x86 与 x64 各一条读数。
+. (Join-Path $PSScriptRoot "tlb_contract.ps1")
+# ai/022 B17: 外部激活 —— 真注册 (DllRegisterServer) + 走系统那条路的客户：
+# tests\tools\com_act_probe.c 按 CLSID/ProgID `CoCreateInstance` 拿 IDispatch（= CreateObject
+# 那条路）与接口薄指针（早绑定直调契约槽），并证明反注册后三类键都不留。
+. (Join-Path $PSScriptRoot "com_activate.ps1")
+# ai/022 B19: 控制台/管道的**编码**用例 —— 程序输出在 cmd 与重定向下都不许乱码
+# (中文/日文/韩文/英文四语种; 覆盖 WriteConsoleW 那条与“控制台代码页”那条字节路)。
+. (Join-Path $PSScriptRoot "console_enc.ps1")
 
 # === COM 测试前: 检查相关 COM 组件是否已注册 ===
 # 仅当所需的 COM 组件已注册时, 才执行对应的 COM 测试 (例如 VBMANLIB)
@@ -203,14 +235,15 @@ function Invoke-TestExe {
         $proc = [System.Diagnostics.Process]::Start($psi)
         $soTask = $proc.StandardOutput.ReadToEndAsync()
         $seTask = $proc.StandardError.ReadToEndAsync()
-        if (-not $proc.WaitForExit(5000)) {
+        if (-not $proc.WaitForExit($RunTimeoutSec * 1000)) {
+            $diag = Get-RunTimeoutDiag -Proc $proc -OutTask $soTask -ErrTask $seTask
             try { $proc.Kill() } catch { }
             $proc.WaitForExit()
             return @{
                 Ok       = $false
                 ExitCode = $null
                 Output   = @()
-                Detail   = "run timeout: 5s"
+                Detail   = "run timeout: ${RunTimeoutSec}s$diag"
             }
         }
         $stdout = $soTask.Result
@@ -433,11 +466,14 @@ function Invoke-BasSetParallel {
     }
     if ($shards.Count -eq 0) { return }
 
+    # -Parallel 的 runspace 里调不到脚本函数 ⇒ 超时预算用 $using: 传, 读数逻辑内联
+    $runTimeoutMs = $RunTimeoutSec * 1000
     $results = $shards | ForEach-Object -Parallel {
         $shardItems = $_[0]
         $workDir    = $_[1]
         New-Item -ItemType Directory -Path $workDir -Force | Out-Null
         $c3 = $using:C3
+        $runTimeoutMs = $using:runTimeoutMs
         $p = 0; $f = 0; $details = @()
         foreach ($it in $shardItems) {
             if ($it.Arch) {
@@ -452,7 +488,7 @@ function Invoke-BasSetParallel {
             $exePath = Join-Path $workDir "$baseName.exe"
             if (-not (Test-Path $exePath)) { $f++; $details += "$($it.Name): no exe"; continue }
 
-            # --- 运行 (语义与 Invoke-TestExe 一致; 5s 超时) ---
+            # --- 运行 (语义与 Invoke-TestExe 一致; 见 -RunTimeoutSec) ---
             $stdoutFile = Join-Path $workDir "$($it.Name).out"
             $stderrFile = Join-Path $workDir "$($it.Name).err"
             $runOk = $false
@@ -467,10 +503,22 @@ function Invoke-BasSetParallel {
                 $proc = [System.Diagnostics.Process]::Start($psi)
                 $soTask = $proc.StandardOutput.ReadToEndAsync()
                 $seTask = $proc.StandardError.ReadToEndAsync()
-                if (-not $proc.WaitForExit(5000)) {
+                if (-not $proc.WaitForExit($runTimeoutMs)) {
+                    # 读数: CPU 时间 + 进程状态 + 最后一行输出 (CPU≈0 且无输出 = 没被调度, 不是挂)
+                    $cpu = -1; $st = '?'
+                    try { $cpu = [int]$proc.TotalProcessorTime.TotalMilliseconds } catch { }
+                    try { if ($proc.HasExited) { $st = "exited=$($proc.ExitCode)" } else { $st = 'alive' } } catch { }
                     try { $proc.Kill() } catch { }
                     $proc.WaitForExit()
-                    $f++; $details += "$($it.Name): run timeout 5s"; continue
+                    $last = ''
+                    foreach ($t in @($soTask, $seTask)) {
+                        if ($t -and $t.Wait(1500)) {
+                            $txt = ''
+                            try { $txt = [string]$t.Result } catch { }
+                            if ($txt) { $line = @($txt.TrimEnd() -split "`r?`n" | Where-Object { $_ }); if ($line.Count -gt 0) { $last = $line[-1] } }
+                        }
+                    }
+                    $f++; $details += "$($it.Name): run timeout (cpu=${cpu}ms, ${st}, last='$last')"; continue
                 }
                 [IO.File]::WriteAllText($stdoutFile, [string]$soTask.Result, [Text.Encoding]::Default)
                 [IO.File]::WriteAllText($stderrFile, [string]$seTask.Result, [Text.Encoding]::Default)
@@ -1247,7 +1295,9 @@ if ($Category -in @("all", "run", "vbp")) {
         "{11112222-3333-4444-5555-666677778888}",
         "0xF5CEF988",
         "0x7CA8CD81",
-        "0, /* methodCount */") @(
+        # ai/022 B17: CImpl 多了个公有成员 Twice（外部晚绑定要有东西可点），methodCount 0→1。
+        # 这条针同时钉住"表里的成员面与库里 `_CImpl` 那一档同源"（B13e 的广告==应答）。
+        "1, /* methodCount */") @(
         "0AD9CBC7") @(
         "CoClass 'PG' identity: CLSID={11112222-3333-4444-5555-666677778888} (vbp)",
         "IID={F5CEF988-3217-6173-94B7-BB99C4B8CB81} (minted)",
@@ -1262,11 +1312,32 @@ if ($Category -in @("all", "run", "vbp")) {
     # instead of the empty `_IProbe` dispinterface, and the helper also asserts the two rows this
     # batch deleted stay deleted -- so reverting the shape turns this same case red.
     Test-TlbIdentitySingleSource "cc_dll_tlb_matches_table" "$Tests\cc_dll\CoDll.vbp" "CoDll" "CImpl" "IProbe" "{11112222-3333-4444-5555-666677778888}"
+    # ai/022 B16: 库里那一档真接口的**成员面**。B15 只摆正了形状与身份（cFuncs 仍是 0），
+    # 本批起它要如实发契约，两条读数（x64 / x86）各钉自己的槽偏移 —— 同一个 vtable，
+    # x86 客户端按 4 字节一步读到的槽 3/4 在 12/16，x64 客户端在 24/32；
+    # 「建库 flag 与目标位数不配」或「发成员却不发偏移」都会让其中一条红。
+    Test-TlbIfaceContract "cc_dll_tlb_contract_x64" "$Tests\cc_dll\CoDll.vbp" "CoDll" @(
+        "TYPE 0 kind=interface name=IProbe guid={F5CEF988-3217-6173-94B7-BB99C4B8CB81} cFuncs=2 cVars=0 cImplTypes=0 cbSizeInstance=8",
+        "FUNC 0 memid=1 name=Ping invkind=1 funckind=purevirtual callconv=stdcall oVft=24 cParams=1 ret=0x0018",
+        "PARAM 0 flags=0x0001 vt=0x0003",
+        "FUNC 1 memid=2 name=get_Got invkind=2 funckind=purevirtual callconv=stdcall oVft=32 cParams=0 ret=0x0003") @(
+        "name=IProbe guid={F5CEF988-3217-6173-94B7-BB99C4B8CB81} cFuncs=0",
+        "oVft=12",
+        "oVft=16")
+    Test-TlbIfaceContract "cc_dll_tlb_contract_x86" "$Tests\cc_dll\CoDll.vbp" "CoDll" @(
+        "TYPE 0 kind=interface name=IProbe guid={F5CEF988-3217-6173-94B7-BB99C4B8CB81} cFuncs=2 cVars=0 cImplTypes=0 cbSizeInstance=4",
+        "FUNC 0 memid=1 name=Ping invkind=1 funckind=purevirtual callconv=stdcall oVft=12 cParams=1 ret=0x0018",
+        "FUNC 1 memid=2 name=get_Got invkind=2 funckind=purevirtual callconv=stdcall oVft=16 cParams=0 ret=0x0003") @(
+        "oVft=24",
+        "oVft=32") "x86"
     # ai/022 B14: the DLL product finally gets a real caller. TestAXDLL.Calc is the legacy
     # face (Public members exist, so IDispatch must answer); cc_dll's CImpl only satisfies a
-    # modern interface, so its IDispatch member surface must be EMPTY (B13c ruling (b)), and
-    # the interface IID is answered by the fat pointer -- pinned here as a measured fact, so
-    # B15/B16 (real interface in the library / thin pointer out of QI) has to flip it on purpose.
+    # modern interface, so its IDispatch member surface must be EMPTY (B13c ruling (b)).
+    # B16 DID flip the second half of that pin on purpose: the interface IID now answers with
+    # the THIN pointer (same=no -- it is no longer the IDispatch wrapper), and the new
+    # CREATE_IFACE/VTBL_* readings call its contract slots by the library's shape. The slot
+    # numbers [3]=Ping, [4]=Got are the library's oVft=24/32 read back by tests\tools -- if the
+    # row's shape and the shipped vtable ever drift apart, VTBL_GET_AFTER stops being 42.
     Test-DispatchInvoke "ax_dll_dispatch_invoke" "$Tests\test_activex_dll\test_activex_dll.vbp" `
         "test_activex_dll" "{D84F362F-8EF1-D16D-8814-C16ADB700BAB}" @(
         "CREATE hr=0x00000000 ptr=OK",
@@ -1280,8 +1351,93 @@ if ($Category -in @("all", "run", "vbp")) {
         "CREATE hr=0x00000000 ptr=OK",
         "QI_IUNKNOWN hr=0x00000000 same=yes",
         "EXTRA_IID={F5CEF988-3217-6173-94B7-BB99C4B8CB81}",
-        "QI_EXTRA hr=0x00000000 same=yes") @(
+        "QI_EXTRA hr=0x00000000 same=no",
+        "CREATE_IFACE hr=0x00000000 ptr=OK",
+        "VTBL_GET_BEFORE=0",
+        "VTBL_GET_AFTER=42") @(
         "CALL=ADD") "{F5CEF988-3217-6173-94B7-BB99C4B8CB81}"
+    # ai/022 B16: 同一批断言在 x86 上再真跑一遍 —— 这是布局改动（vtable 槽 + 库里的偏移 +
+    # 调用约定）唯一的 x86 侧端到端读数：x86 探针按库里那形状直调槽 3/4，
+    # 若槽位置/调用约定/返回值任何一处对不上，VTBL_GET_AFTER 就不是 42。
+    Test-DispatchInvoke "cc_dll_dispatch_iface_only_x86" "$Tests\cc_dll\CoDll.vbp" `
+        "CoDll" "{11112222-3333-4444-5555-666677778888}" @(
+        "CREATE hr=0x00000000 ptr=OK",
+        "QI_IUNKNOWN hr=0x00000000 same=yes",
+        "QI_EXTRA hr=0x00000000 same=no",
+        "CREATE_IFACE hr=0x00000000 ptr=OK",
+        "VTBL_GET_BEFORE=0",
+        "VTBL_GET_AFTER=42",
+        "DONE") @(
+        "CALL=ADD") "{F5CEF988-3217-6173-94B7-BB99C4B8CB81}" "x86"
+
+    # --- ai/022 B17: 外部激活（注册 -> 系统那条路 -> 反注册后不留键）---
+    # 上面两条走的是**进程内**独立客户端（LoadLibrary + DllGetClassObject，刻意不查注册表）；
+    # 这两条走的是系统那条路：DllRegisterServer 真写注册表，再按 CLSID/ProgID 让 COM 自己去找
+    # InprocServer32、装载 DLL —— 也就是 CreateObject / CoCreateInstance 客户实际走的链路。
+    # 断言的形状与理由（读数见 ai/022 D64）：
+    #   - REG_* 四项 + REG_TYPELIB_PATH：CLSID/ProgID/InprocServer32/ThreadingModel 与
+    #     "按 LIBID 找得到类型库"都成立（B17 修掉两条真缺陷才走到这一步：rc.exe 发现面太窄
+    #     ⇒ 库根本没嵌进 DLL；反注册的实参顺序写反 ⇒ 整棵 TypeLib 键静默留着）
+    #   - NAMES=Twice + CALL=Twice result=42：晚绑定按名调用**类的公有成员**（CreateObject 那半）
+    #   - NAMES=Ping hr=0x80020006：契约成员是 Private，类的默认面上点不到 —— 这一条是
+    #     **VB6 语义的应有读数**，不是缺陷；接口成员走下面的早绑定那条
+    #   - COCREATE_IFACE + VTBL_GET_AFTER=42：接口 IID 的 QI/激活交薄指针，按库里 oVft 直调契约槽
+    #   - CLEAN_*=gone：反注册之后 CLSID/ProgID/TypeLib 三类键都不留（用例可重复跑、不脏机器）
+    $comActNeedles = @(
+        "REGSVR hr=0x00000000",
+        "REG_INPROC_PATH=OK",
+        "REG_THREADING=OK Apartment",
+        "REG_PROGID_CLSID=OK {11112222-3333-4444-5555-666677778888}",
+        "REG_TYPELIB_PATH=OK",
+        "PROGID_LOOKUP hr=0x00000000 same=yes",
+        "COCREATE_DISP hr=0x00000000 ptr=OK",
+        "NAMES=Twice hr=0x00000000 dispid=1",
+        "CALL=Twice hr=0x00000000 result=42",
+        "NAMES=Ping hr=0x80020006 dispid=-1",
+        "COCREATE_IFACE hr=0x00000000 ptr=OK",
+        "VTBL_GET_AFTER=42",
+        "UNREGSVR hr=0x00000000",
+        "CLEAN_CLSID=gone",
+        "CLEAN_PROGID=gone",
+        "CLEAN_TYPELIB=gone",
+        "DONE")
+    Test-ComActivate "cc_dll_external_activate" "$Tests\cc_dll\CoDll.vbp" "CoDll" `
+        "{11112222-3333-4444-5555-666677778888}" "CoDll.CImpl" `
+        "{F5CEF988-3217-6173-94B7-BB99C4B8CB81}" $comActNeedles
+    Test-ComActivate "cc_dll_external_activate_x86" "$Tests\cc_dll\CoDll.vbp" "CoDll" `
+        "{11112222-3333-4444-5555-666677778888}" "CoDll.CImpl" `
+        "{F5CEF988-3217-6173-94B7-BB99C4B8CB81}" $comActNeedles "x86"
+    # 真正的外部客户是个**别的进程**：C3 编译的 `tests\cc_dll_client` 不引用 DLL，
+    # CreateObject + 按名调用全走注册表 → IDispatch 晚绑定（test_p613_typelib 那一族的做法）。
+    Test-ComActivateClient "cc_dll_late_client" "$Tests\cc_dll\CoDll.vbp" "CoDll" `
+        "{11112222-3333-4444-5555-666677778888}" "CoDll.CImpl" `
+        "$Tests\cc_dll_client\LateClient.vbp" @("EXT1:OK", "EXT2:OK", "EXT-DONE")
+
+    # --- ai/022 B18 端到端示例（收口批）: 同一个源集合编成 EXE 与 DLL 两种形态 ---
+    # EXE 形态: 语言层全用一遍（Interface/Implements(+Via 委托)/Inherits/Overrides/Protected/
+    # MyBase/CoClass 块/`As <块名>`/`New <块名>`/工程内 CreateObject 改写/TypeOf），
+    # DEMO1..DEMO12 各自钉一个行为；x64 与 x86 各跑一遍（继承来的字段与槽布局只有 x86 才暴露）。
+    # DLL 形态: 同一个源集合 + [ComCreatable(True)] 的块，注册后由**另一个进程**的 C3 客户
+    # CreateObject 激活（B17 的外部那条路）。
+    $demoNeedles = @(
+        "DEMO1:OK", "DEMO2:OK", "DEMO3:OK", "DEMO4:OK", "DEMO5:OK", "DEMO6:OK",
+        "DEMO7:OK", "DEMO8:OK", "DEMO9:OK", "DEMO10:OK", "DEMO11:OK", "DEMO12:OK", "DEMO-DONE")
+    Test-Vbp "cc_demo_exe" "$Tests\cc_demo\DemoExe.vbp" $demoNeedles
+    Test-Vbp "cc_demo_exe_x86" "$Tests\cc_demo\DemoExe.vbp" $demoNeedles -Arch "x86"
+    Test-ComActivateClient "cc_demo_dll_external" "$Tests\cc_demo\DemoDll.vbp" "DemoDll" `
+        "{993BE038-BBA4-7804-FEB0-E65927384CA7}" "DemoDll.Shape" `
+        "$Tests\cc_demo\DemoClient.vbp" @("DEMOEXT1:OK", "DEMOEXT-DONE")
+    Test-ComActivateClient "cc_demo_dll_external_x86" "$Tests\cc_demo\DemoDll.vbp" "DemoDll" `
+        "{993BE038-BBA4-7804-FEB0-E65927384CA7}" "DemoDll.Shape" `
+        "$Tests\cc_demo\DemoClient.vbp" @("DEMOEXT1:OK", "DEMOEXT-DONE") "x86"
+    # --- ai/022 B19: 控制台输出的编码（四语种）---
+    # 控制台那条路走 WriteConsoleW，渲染与 chcp 无关（实测 936/65001/437 逐字相同）；
+    # 重定向那条走“控制台代码页”的字节（装不下才退回 UTF-8）。两条都真跑真读。
+    $cnSample = Join-Path $Tests "cc_cn\CnMain.bas"
+    $cnNeedles = @("中文", "日本語 テスト", "한국어 테스트", "English test")
+    Test-CnConsoleOutput "cc_cn_console" $cnSample $cnNeedles
+    Test-CnConsoleOutput "cc_cn_console_x86" $cnSample $cnNeedles "x86"
+    Test-CnRedirectOutput "cc_cn_redirect_gbk" $cnSample 936
     Test-Vbp "test_vbman" "$Tests\test_vbman\test_vbman.vbp" @("P24-04a:OK", "P24-04b:OK", "P24-04:2/2") -Arch "x86" -RequiresCom "VBMANLIB.cVBMAN"
     $vbpSw.Stop()
     Write-Host "  (vbp/gui tests took $([Math]::Round($vbpSw.Elapsed.TotalSeconds))s)"

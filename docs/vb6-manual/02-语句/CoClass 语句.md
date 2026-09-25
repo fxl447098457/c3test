@@ -171,10 +171,30 @@ IDispatch 成员表、内嵌 `.tlb` 都在发），RTL 侧的 `QueryInterface`/`
   一行 `coclass IProbe`（带一枚谁也不认的 CLSID，还宣称可创建）+ 一张 0 成员的 `_IProbe`
   dispinterface。回归里 `cc_dll_tlb_matches_table` 的通道 3 跟着换了读法，并加两条**反面**断言
   （库里再出现那两行就判红）。
-- 仍开的一条（B16）：库里那一档的 `cFuncs` 仍是 **0** —— 接口成员还没有 canonical 形状
-  （生成的 vtable 槽是 `cdecl` + 原生返回值，IUnknown 之后也没有 IDispatch 前缀），照现状发进库
-  就是"广告 != 应答"。成员的调用契约、`oVft` 与 `--arch` 的位数口径一起排在 B16。
+- **接口成员在库里如实发契约**（B16）：那一档的 `cFuncs` = 契约成员数，每个成员带
+  `oVft=(3+槽号)*指针宽` / `callconv=stdcall` / 原生返回 vt（`ByRef` 建 `VT_PTR` 链），
+  类型库的位数 flag 跟 `--arch` 走。薄面（槽表 + 实现函数）在 x86 下一律 `__stdcall`；
+  接口 IID 的 `QueryInterface` 交**薄指针**（前 3 槽就是 IUnknown，客户端可当 `IUnknown*` 收尾）。
+- **外部激活真跑通**（B17）：`DllRegisterServer` 写注册表之后 ——
+  - 按 CLSID / ProgID `CoCreateInstance` 拿到 `IDispatch`（= `CreateObject` 走的那条路），
+    按名调用**类的公有成员**得值；
+  - 按**接口 IID** 激活拿到薄指针，客户端按库里的 `oVft` **直调契约槽**得值（x86 与 x64 各一遍）；
+  - `DllUnregisterServer` 之后 CLSID / ProgID / TypeLib 三类键**都不留**（用例可重复跑、不脏机器）。
+  契约成员是 `Private`，所以类的**默认面上按名点不到**它们 —— 这是 VB6 语义的应有行为，不是缺陷；
+  接口成员走上面那条早绑定路。回归里 `cc_dll_external_activate`（x64）、
+  `cc_dll_external_activate_x86` 钉住这些读数，`cc_dll_late_client` 则是把"另一个进程才是客户"
+  那半接上：C3 编译的外部客户 EXE（不引用 DLL）`CreateObject` 后按名调用。
+  这一格顺带修掉两条真缺陷：① `rc.exe` 的发现面太窄 —— SDK 不在默认盘时**静默不嵌**类型库资源，
+  于是注册表里根本没有 TypeLib 项、外部客户按 LIBID 找不到库；② 反注册的 `UnRegisterTypeLib`
+  实参顺序写反（`lcid`/`syskind` 互换）⇒ 每次反注册都静默漏掉整棵 TypeLib 键。
+- 仍开：**canonical 返回形状**（`HRESULT` + `[out, retval]`）按 B17 的实测**不做** ——
+  真按库里 `oVft` 直调的客户已经能用，它只有"把接口当 dual 自动化接口"才需要；
+  跨"进程内薄指针"与"COM 包装器"两个世界的 IUnknown 身份目前仍是两个值（外部客户拿到的是包装器指针）。
 
 **另见**
 
 [Interface 语句](Interface%20语句.md)、[Implements 语句](Implements%20语句.md)
+
+**端到端示例**：`tests\cc_demo\` —— 同一份源集合编成 EXE（语言侧 12 条断言）与 DLL（注册后由外部客户
+`CreateObject` 激活）两种形态；把接口、`Implements`（含 `Via` 委托）、`Inherits`/`Overrides`/`Protected`/
+`MyBase`、CoClass 块与组内激活一次用全。分工与边界见 `ai/027-接口继承CoClass实施收口.md`。

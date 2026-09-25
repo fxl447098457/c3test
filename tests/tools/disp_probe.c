@@ -74,6 +74,29 @@ static VARIANT mk_i4(LONG v) {
     return x;
 }
 
+/* ai/022 B16: 薄指针的槽表形状 (与生成码 vb6_ivtbl_<I> 逐槽对齐). 薄指针本身是
+ * `{ vt }` 一字段结构, 所以要**先解一层**取槽表再按槽调 —— 直接 `((probe_ivtbl*)p)->X`
+ * 是拿 p 当槽表, 会读到对象后面的堆内存 (实测就是它把探针打崩的). */
+typedef struct probe_ivtbl_IProbe {
+    long (__stdcall *QueryInterface)(void *self, const void *riid, void **ppv);
+    unsigned long (__stdcall *AddRef)(void *self);
+    unsigned long (__stdcall *Release)(void *self);
+    void (__stdcall *Ping)(void *self, LONG n);   /* 契约槽 0: oVft=(3+0)*指针宽 */
+    LONG (__stdcall *Got)(void *self);            /* 契约槽 1: oVft=(3+1)*指针宽 */
+} probe_ivtbl_IProbe;
+
+/* ai/022 B16: 按 .tlb 里的形状**直调契约槽** —— 指针首字段是槽表, 槽 3 起是成员
+ * (oVft=(3+槽号)*指针宽, CC_STDCALL), 与 TKIND_INTERFACE 那一行一一对应.
+ * 本支路写死 cc_dll 的 IProbe 形状: [3]=Ping(ByVal n As Long), [4]=Got() As Long,
+ * 实现是 m_got = n*2 (tests\cc_dll\CImpl.cls). 先读一次原值, 再经槽 3 写 21,
+ * 再经槽 4 读回 —— 两个槽的身份与顺序都被这一次读数证明. */
+static void call_vtable_slots(void *iface) {
+    probe_ivtbl_IProbe *vt = *(probe_ivtbl_IProbe **)iface;
+    printf("VTBL_GET_BEFORE=%ld\n", (long)vt->Got(iface));
+    vt->Ping(iface, 21);
+    printf("VTBL_GET_AFTER=%ld\n", (long)vt->Got(iface));
+}
+
 int main(int argc, char **argv) {
     HMODULE mod;
     PFN_GETCLASSOBJ getClassObject;
@@ -92,6 +115,9 @@ int main(int argc, char **argv) {
         printf("USAGE=<dll> <clsid> [iid]\n");
         return 2;
     }
+    /* 探针的价值全在这些读数上：一旦中途崩溃，块缓冲会把已打印的行全吞掉
+     * (管道/重定向下 stdout 不是行缓冲)，所以这里显式关掉缓冲。 */
+    setvbuf(stdout, NULL, _IONBF, 0);
     printf("COINIT hr=0x%08lX\n", (unsigned long)CoInitializeEx(NULL, COINIT_APARTMENTTHREADED));
 
     mod = LoadLibraryExA(argv[1], NULL, LOAD_WITH_ALTERED_SEARCH_PATH);
@@ -135,6 +161,31 @@ int main(int argc, char **argv) {
         printf("QI_EXTRA hr=0x%08lX same=%s\n", (unsigned long)hr,
                FAILED(hr) ? "no" : (extra == (IUnknown *)disp ? "yes" : "no"));
         if (extra) IUnknown_Release(extra);
+
+        /* ai/022 B16: 走 `IClassFactory::CreateInstance(<接口 IID>)` 这条规范早期绑定路.
+         * 工厂内部 QI 完立刻 Release 了包装器 (vb6comserver_factory.c), 所以这条读数同时
+         * 回答两件事: ① 交出来的是**薄指针** (不是 IDispatch 包装器), ② 它**还活着** ——
+         * 底座引用交还 (instanceClaimRelease) 之后, 对象保到最后一个薄引用 Release 为止. */
+        {
+            IClassFactory *fac2 = NULL;
+            void *thin = NULL;
+            hr = getClassObject(&clsid, &IID_IClassFactory_local, (void **)&fac2);
+            if (SUCCEEDED(hr) && fac2) {
+                hr = IClassFactory_CreateInstance(fac2, NULL, &extraIid, (void **)&thin);
+                printf("CREATE_IFACE hr=0x%08lX ptr=%s\n", (unsigned long)hr,
+                       thin ? "OK" : "NULL");
+                IClassFactory_Release(fac2);
+                if (thin) {
+                    call_vtable_slots(thin);
+                    /* 最后一个薄引用: 交给 IUnknown::Release 收尾. 这里用的正是
+                     * 客户端的规范姿势 —— 薄指针与前 3 槽构成 IUnknown 兼容前缀,
+                     * 所以它可直接当 IUnknown* 用 (B16 判据 ③ 的另一面). */
+                    IUnknown_Release((IUnknown *)thin);
+                }
+            } else {
+                printf("CREATE_IFACE hr=0x%08lX ptr=NULL\n", (unsigned long)hr);
+            }
+        }
     }
 
     hr = IDispatch_GetTypeInfoCount(disp, &cinfo);

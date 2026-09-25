@@ -7,6 +7,16 @@
 #include "vb6comserver.h"
 #include "vb6comserver_internal.h"
 
+/* [PROBE189] 临时探针: 包装器引用计数轨迹 (C3_COM_RC_TRACE=1 时输出到 stderr) */
+#include <stdio.h>
+static int probe189_on(void) {
+    static int v = -1;
+    if (v < 0) v = (getenv("C3_COM_RC_TRACE") != NULL);
+    return v;
+}
+#define P189(...) do { if (probe189_on()) { fprintf(stderr, __VA_ARGS__); fflush(stderr); } } while (0)
+/* [/PROBE189] */
+
 #ifndef CONNECT_E_NOCONNECTION
 #define CONNECT_E_NOCONNECTION 0x80040200
 #endif
@@ -33,6 +43,24 @@ static HRESULT STDMETHODCALLTYPE ComObj_QueryInterface(vb6_ComObject* self, REFI
     if (self->desc && self->desc->ifaceCount > 0 && self->desc->ifaceIids) {
         for (i = 0; i < self->desc->ifaceCount; i++) {
             if (IsEqualIID(riid, self->desc->ifaceIids[i])) {
+                // ai/022 B16: 新式接口 (Interface 块) 交回**薄指针** —— 首字段是
+                // vb6_ivtbl_<I>*, 槽 3 起是契约成员, 与类型库 TKIND_INTERFACE 那一条
+                // (cFuncs / oVft / CC_STDCALL) 同形. 这正是 B15 起对外广告的那一档,
+                // 所以"广告 == 应答"在接口这一档上成立 (D60-4 的"胖应答瘦"到此收口).
+                // 生命周期: 薄指针的引用记在实例自己的 __refcount 上 (B05), 包装器
+                // 最后一次 Release 会把底座引用交还 (见 ComObj_Release) → QI 之后立刻
+                // Release 包装器 (IClassFactory::CreateInstance 的规范姿势) 也安全.
+                if (self->desc->ifaceThinPtr && self->vb6Instance) {
+                    void* thin = self->desc->ifaceThinPtr(self->vb6Instance,
+                                                           self->desc->ifaceIids[i]);
+                    if (thin) {
+                        vb6_ivtbl_prefix* vt = *(vb6_ivtbl_prefix**)thin;
+                        vt->AddRef(thin);
+                        *ppv = thin;
+                        return S_OK;
+                    }
+                    /* 本类没实现这个新式接口 (provider 认 IID): 落到胖路 */
+                }
                 *ppv = self;  // dispinterface: same IDispatch pointer
                 self->vtable->AddRef(self);
                 return S_OK;
@@ -73,17 +101,31 @@ static HRESULT STDMETHODCALLTYPE ComObj_QueryInterface(vb6_ComObject* self, REFI
 
 static ULONG STDMETHODCALLTYPE ComObj_AddRef(vb6_ComObject* self) {
     ULONG count = InterlockedIncrement(&self->refCount);
+    P189("[189] ADDREF W=%p cnt=%u\n", (void*)self, (unsigned)count);
     InterlockedIncrement(&g_vb6_cRef);
     return count;
 }
 
 static ULONG STDMETHODCALLTYPE ComObj_Release(vb6_ComObject* self) {
     ULONG count = InterlockedDecrement(&self->refCount);
+    P189("[189] RELEASE W=%p cnt=%u owns=%d inst=%p\n", (void*)self, (unsigned)count,
+         self->ownsInstance, (void*)self->vb6Instance);
     InterlockedDecrement(&g_vb6_cRef);
     if (count == 0) {
-        // Call VB6 Class_Terminate + Destroy
-        if (self->desc && self->desc->destroyFunc && self->vb6Instance) {
-            self->desc->destroyFunc(self->vb6Instance);
+        // Fix 188 + ai/022 B16 的并集: 是否销毁实例先看**拥有关系** —— 只有拥有型包装
+        // (CoCreateInstance / Set x = New cY) 才动实例; 借用型 (Public 对象字段 getter /
+        // 方法返回的工程类实例) 的生命周期归宿主, 只清实例上的 __comObj 回填。
+        // 拥有型里, 实现了新式接口的类走 claim 那条: 包装器退掉自己的"底座引用",
+        // 实例若有薄引用在世则不销毁 (由最后一个薄引用的 Release 收尾), 否则当场销毁;
+        // 没有这道 claim 的类 (存量/无接口) 结果与原来直接 destroyFunc 完全一致。
+        if (self->ownsInstance) {
+            if (self->desc && self->desc->instanceClaimRelease && self->vb6Instance) {
+                self->desc->instanceClaimRelease(self->vb6Instance);
+            } else if (self->desc && self->desc->destroyFunc && self->vb6Instance) {
+                self->desc->destroyFunc(self->vb6Instance);
+            }
+        } else if (self->vb6Instance) {
+            *(void**)self->vb6Instance = NULL;
         }
         self->vb6Instance = NULL;
         // Release PCI
@@ -184,59 +226,65 @@ static HRESULT STDMETHODCALLTYPE ComObj_Invoke(vb6_ComObject* self, DISPID dispI
         }
     }
     if (!method) return DISP_E_MEMBERNOTFOUND;
-    
+    P189("[189] INVOKE W=%p cls=%s mem=%ls argc=%d\n", (void*)self,
+         (self->desc && self->desc->classVariable) ? self->desc->classVariable : "?",
+         method->name ? method->name : L"?", (int)(pDispParams ? pDispParams->cArgs : 0));
+
     // Collect arguments
     // Note: Script engines like VBScript may pass VT_I2 etc.,
     // while bridge functions expect VT_I4 (via lVal). Coerce each param to VT_I4.
+    // invokeFunc 的实参/返回槽在适配器里按 vb6_VARIANT (x86 24B: vt 4B +
+    // pad 4B + union 16B) 布局访问; 前 16 字节与 OLE VARIANT 内容一致。
+    typedef struct { uint64_t v[3]; } vb6_VarSlot;
     int argc = pDispParams ? (int)pDispParams->cArgs : 0;
     void** args = NULL;
-    VARIANT* coercedArgs = NULL;
-    
+    void* coercedArgs = NULL;   /* 槽阵列, 每槽 vb6_VarSlot */
+
     if (argc > 0) {
         args = (void**)CoTaskMemAlloc(argc * sizeof(void*));
-        coercedArgs = (VARIANT*)CoTaskMemAlloc(argc * sizeof(VARIANT));
+        coercedArgs = (void*)CoTaskMemAlloc(argc * sizeof(vb6_VarSlot));
         if (!args || !coercedArgs) {
             if (args) CoTaskMemFree(args);
             if (coercedArgs) CoTaskMemFree(coercedArgs);
             return E_OUTOFMEMORY;
         }
-        // DISPPARAMS args are in reverse order
+        // 适配器按 vb6_VARIANT (24B) 布局访问实参与返回槽, 而 COM 边界的
+        // OLE VARIANT 是 16B。每个实参先整复制进 24B 槽, 再按需数值强转。
+        // (ai/022 B17 那条"未初始化就被 VariantClear"的堆损坏在这里由下面的
+        //  `memset(slot, 0, sizeof(*slot))` 一并解决 —— 旧写法按 VARIANT 尺寸清零,
+        //  在这套 24B 槽设计下 x86 会算少, 故合并时只保留这一份。)
         for (int i = 0; i < argc; i++) {
             VARIANT* src = &pDispParams->rgvarg[argc - 1 - i];
+            vb6_VarSlot* slot = &((vb6_VarSlot*)coercedArgs)[i];
+            memset(slot, 0, sizeof(*slot));
+            memcpy(slot, src, sizeof(VARIANT));
+            args[i] = slot;
+        }
+        for (int i = 0; i < argc; i++) {
+            VARIANT* src = &pDispParams->rgvarg[argc - 1 - i];
+            VARIANT* dst = (VARIANT*)&((vb6_VarSlot*)coercedArgs)[i];
             // Coerce numeric types to VT_I4 (bridge functions use lVal)
             if (src->vt == VT_I2 || src->vt == VT_I1 || src->vt == VT_UI1 ||
                 src->vt == VT_UI2 || src->vt == VT_BOOL || src->vt == VT_EMPTY) {
-                VariantInit(&coercedArgs[i]);
-                HRESULT hr2 = VariantChangeType(&coercedArgs[i], src, 0, VT_I4);
-                if (SUCCEEDED(hr2)) {
-                    args[i] = &coercedArgs[i];
-                } else {
-                    args[i] = src;
-                }
+                VariantChangeType(dst, src, 0, VT_I4);
             } else if (src->vt == VT_R4) {
                 // Float -> Double for dblVal access
-                VariantInit(&coercedArgs[i]);
-                HRESULT hr2 = VariantChangeType(&coercedArgs[i], src, 0, VT_R8);
-                if (SUCCEEDED(hr2)) {
-                    args[i] = &coercedArgs[i];
-                } else {
-                    args[i] = src;
-                }
-            } else {
-                args[i] = src;  // VT_I4, VT_R8, VT_BSTR, etc. pass through
+                VariantChangeType(dst, src, 0, VT_R8);
             }
         }
     }
-    
+
     // Call VB6 method
     if (method->invokeFunc) {
-        method->invokeFunc(self->vb6Instance, args, argc, pVarResult);
+        vb6_VarSlot tmpRet;
+        memset(&tmpRet, 0, sizeof(tmpRet));
+        method->invokeFunc(self->vb6Instance, args, argc, &tmpRet);
+        if (pVarResult)
+            memcpy(pVarResult, &tmpRet, sizeof(VARIANT));
     }
-    
-    if (coercedArgs) {
-        for (int i = 0; i < argc; i++) VariantClear(&coercedArgs[i]);
-        CoTaskMemFree(coercedArgs);
-    }
+
+    // 槽内是调用方 VARIANT 的副本, 资源仍归调用方, 不得 VariantClear
+    if (coercedArgs) CoTaskMemFree(coercedArgs);
     if (args) CoTaskMemFree(args);
     return S_OK;
 }
@@ -263,6 +311,9 @@ vb6_ComObject* vb6_ComObject_Create(const vb6_CoClassDesc* desc) {
     obj->refCount = 1;
     obj->desc = desc;
     obj->vb6Instance = desc->factoryFunc();  // Call vb6_cls_<Name>_New()
+    P189("[189] CREATE W=%p inst=%p cls=%s\n", (void*)obj, (void*)obj->vb6Instance,
+         desc->classVariable ? desc->classVariable : "?");
+    obj->ownsInstance = 1;  // Fix 188: 类工厂创建的实例归客户端所有
     obj->cpc = NULL;  // Lazy init CPC
     obj->pci = NULL;  // Lazy init PCI
     // Set back-pointer for event support (first field of VB6 class struct = __comObj)
@@ -313,9 +364,45 @@ vb6_ComObject* vb6_ComObject_FromInstance(const vb6_CoClassDesc* desc, void* ins
     obj->refCount = 1;
     obj->desc = desc;
     obj->vb6Instance = instance;
+    obj->ownsInstance = 1;  /* Fix 188: 调用方把新实例的所有权交给包装器 */
+    P189("[189] FROM-INST W=%p inst=%p cls=%s\n", (void*)obj, (void*)instance,
+         desc->classVariable ? desc->classVariable : "?");
     obj->cpc = NULL;
     obj->pci = NULL;
     *ppComObj = obj;  /* 回填 __comObj, 后续复用 */
+
+    InterlockedIncrement(&g_vb6_cRef);
+    return obj;
+}
+
+// Fix 188: 包装"宿主已拥有"的实例 —— 见 vb6comserver.h 声明. 释放到 0 时只回收
+// 包装器并清空 __comObj 回填, 不调用 destroyFunc.
+vb6_ComObject* vb6_ComObject_FromBorrowedInstance(const vb6_CoClassDesc* desc, void* instance) {
+    void** ppComObj;
+    vb6_ComObject* existing;
+    vb6_ComObject* obj;
+    if (!desc || !instance) return NULL;
+
+    ppComObj = (void**)instance;
+    existing = (vb6_ComObject*)*ppComObj;
+    if (existing) {
+        existing->vtable->AddRef(existing);
+        return existing;
+    }
+
+    obj = (vb6_ComObject*)CoTaskMemAlloc(sizeof(vb6_ComObject));
+    if (!obj) return NULL;
+
+    obj->vtable = &g_ComObjectVtable;
+    obj->refCount = 1;
+    obj->desc = desc;
+    obj->vb6Instance = instance;
+    obj->ownsInstance = 0;
+    P189("[189] FROM-BORROW W=%p inst=%p cls=%s\n", (void*)obj, (void*)instance,
+         desc->classVariable ? desc->classVariable : "?");
+    obj->cpc = NULL;
+    obj->pci = NULL;
+    *ppComObj = obj;
 
     InterlockedIncrement(&g_vb6_cRef);
     return obj;
@@ -366,6 +453,7 @@ void* vb6_ComPackVB6InstanceRaw(const char* classVariable, void* instance) {
 
     if (!instance) return NULL;
     desc = vb6_FindCoClassDesc(classVariable);
+    P189("[189] PACKRAW cls=%s inst=%p desc=%p\n", classVariable, instance, (void*)desc);
     // 未进 coclass 表 (Private / 非 MultiUse|SingleUse) 的类没有 IDispatch 方法表,
     // 包装也无从应答 GetIDsOfNames → 返回 NULL (等效 VB6 传 Nothing), 不冒充对象.
     if (!desc) return NULL;
