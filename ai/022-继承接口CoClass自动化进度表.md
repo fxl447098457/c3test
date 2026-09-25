@@ -28,6 +28,8 @@ LAST_COMMIT: 代码批 = 0413bb9(B18)、732c1f8(B17 门后修堆损坏)、a5517f
                4. **派生类自己 `Implements` 新式接口**（`VB3022`，B18 写示例时实测）与**经继承满足的接口契约**、
                   **继承来的 `Public` 字段对外 COM 暴露** —— 这三条要一起做（都在 stage 2.7 Pass D 与 3.4 的成员
                   合并那一片，028 类的工作量）。
+               5. **`CStr(布尔)` 与 `&` / `Print` 两套读数不一致**（B20 写插值用例时实测；A/B 确认与本批无关，改前改后同读数）：`CStr(True)`、`CStr(1 > 0)`、`CStr(CBool(True))` 全回 `"-1"`，而同一个值走 `True & ""` 回 `"True"`（VB6 两处都回 `"True"`）；顺带 `TypeName(True)` 回 `"Long"`，VB6 回 `"Boolean"` ⇒ 布尔的"字符串形状"在 C3 里有两条路，且 `TypeName` 这一条也不对。**这条会直接咬到新语法**：`${flag}` 插值降级成 `CStr(flag)`，于是插值里的布尔与 `Debug.Print flag` 读数不一致。要单独一批收（改 `CStr` 会动到存量工程的输出面 ⇒ 需要拍板）。
+               6. **工程内类经 `CreateObject` 编译期改写后交给 `As Object`，按名点公有 `Function` 报 `vb6_ComCall: method "…" not found`**（早绑定 `Dim o As <类名>` 正常）—— B20 的 `tests\rawstr_proj\` 第一版就是这样写的，改成早绑定才通。与 B17 那条"契约成员是 Private ⇒ 默认面点不到"不是一回事：这里 `Note()` 是 `Public`。要么晚绑定那一面缺一块，要么改写出来的 VARIANT 类型标记不对 ⇒ 先量（外部注册 DLL 那条 `cc_dll_late_client` 是通的，所以缺口在"in-project 改写出来的对象"这一支）。
                规则沿用：push 只推 `github/dev`；门跑 Actions（`.build/wait_run2.py <sha> <秒>` 盯）；`.build` 里的
                临时 `.ps1` 一律 ASCII only；用例文件按同目录邻居的编码/行尾（`.bas`/`.vbp` = UTF-8+CRLF，
                `tests\*.ps1` = BOM+CRLF）。
