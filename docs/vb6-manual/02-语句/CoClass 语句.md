@@ -194,3 +194,7 @@ IDispatch 成员表、内嵌 `.tlb` 都在发），RTL 侧的 `QueryInterface`/`
 **另见**
 
 [Interface 语句](Interface%20语句.md)、[Implements 语句](Implements%20语句.md)
+
+**端到端示例**：`tests\cc_demo\` —— 同一份源集合编成 EXE（语言侧 12 条断言）与 DLL（注册后由外部客户
+`CreateObject` 激活）两种形态；把接口、`Implements`（含 `Via` 委托）、`Inherits`/`Overrides`/`Protected`/
+`MyBase`、CoClass 块与组内激活一次用全。分工与边界见 `ai/027-接口继承CoClass实施收口.md`。
