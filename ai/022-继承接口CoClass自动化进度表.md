@@ -5,7 +5,7 @@
 > 规范输入: `ai/讨论记录/018-接口继承与CoClass设计思路.md`（含 tB 文档要点与分阶段设计思路全文）。
 
 STATUS: ALL_DONE             # NOT_STARTED | DESIGN | BUSY | IDLE | ALL_DONE
-LAST_RUN: 2026-09-26T02:36:00+08:00   # 本轮 = **029 内置控件线第一批 C29-1a（Shape / Line 的创建那一刀）出完并过门 = 代码 `5b37b4e`，门 Actions run #84（head `5b37b4e`，8/8 job 全绿）**。进度与读数记在 `ai\029-内置控件补全计划书.md` §九，本表只挂指针 + 换 GATE_BASELINE。
+LAST_RUN: 2026-09-26T04:10:00+08:00   # 本轮 = **029 内置控件线第二批 C29-1b（文件系统三控件 Drive/Dir/File）出完并过门 = 代码 `440129c`，门 Actions run #85（8/8 job 全绿）**。进度与读数记在 `ai9-内置控件补全计划书.md` §九，本表只挂指针 + 换 GATE_BASELINE。
                # B21 交付一笔 = `2ddcc8b`（cgen 侧 15 文件 + 用例 32 条 + 手册 Boolean 页 + 分类护栏脚本
                # `.build\b21_emitc_guard.py`）。根因是两条不是一条、护栏 RED 一次的教训、以及顺带量出的 `Print #`
                # 那条，全在 **D70**；待拍板 5 就此收口，新撞出的一条记为待拍板 7（未拍板、未动手）。
@@ -41,20 +41,18 @@ LAST_COMMIT: 代码批 = 0413bb9(B18)、732c1f8(B17 门后修堆损坏)、a5517f
                规则沿用：push 只推 `github/dev`；门跑 Actions（`.build/wait_run2.py <sha> <秒>` 盯）；`.build` 里的
                临时 `.ps1` 一律 ASCII only；用例文件按同目录邻居的编码/行尾（`.bas`/`.vbp` = UTF-8+CRLF，
                `tests\*.ps1` = BOM+CRLF）。
-GATE_BASELINE: (Actions 级) c3test run **#84 [dev] = completed/success**（head = 029 线第一批 C29-1a 那一笔，
-               **8/8 job 全绿** = Build C3.exe + Tests(smoke / syntax / vbp / compile / asm / bas#1 / bas#2)，
-               18:08 起、约 27 分钟，逐 job 的 status/conclusion 用 `GET /repos/…/actions/runs/{id}/jobs` 核过
-               （该端点不要 `actions:read`；job 日志端点仍旧 403 ⇒ 门的分类读数取不到逐条日志，
-               但结论不再是 run 级一把）。本机同二进制的读数：`[VBP] ctrlshape` 与 `ctrlshape_x86` 走真 harness
-               各 PASS，手工跑 x64 与 x86 各 21/21，负控喂 BASE 二进制（`b21_C3.exe`，md5 `9456577b`，即 HEAD 那一版）
-               21 条全翻红，30 件存量工程 `--emit-c` 与 BASE **逐字节全同**（changed_lines=0）。
-               **本机 -Category vbp 一轮 PASS=42 FAIL=15 SKIP=1 不是回归**：那 15 条里十三条是探针/读手没建成
-               （`no probe` / `no reader x64|x86`），另两条是要注册表与非 ASCII 控制台的用例
-               （`nonascii_missing_frx`、`cc_dll_identity_single_source`）。
-               第二次本机跑用 vcvars 灌过 PATH 仍一字不差复现，而 CI 的 vbp job 全绿 ⇒ 记为本机环境噪声，
-               门读数一律以 CI 为准。基线相对上一版（run #83，head = B21）新增的用面：`ctrlshape[_x86]`。
-               另：run #83（B21 布尔那一笔，8/8 job 全绿）与更前面的 #82（B20）仍是各自批次的门；#81
-               （head `a93d97e`，他人那一支 Fix 190/194-197）也已 completed/success。
+GATE_BASELINE: (Actions 级) c3test run **#85 [dev] = completed/success**（head `440129c` = C29-1b 那一笔，
+               8/8 job 全绿 = Build C3.exe + Tests(smoke/syntax/vbp/compile/asm/bas#1/bas#2)，
+               03:47→04:05 共 18.6 分钟；逐 job 的 status/conclusion 用 `GET /runs/{id}/jobs` 核过）。
+               **本机同源的读数**：`-Category syntax` 129/0；30 件工程 `--emit-c` 逐字节护栏
+               （BASE = `b21_C3.exe`，一次盖住 C29-1a + C29-1b 两批）changed_lines=0；
+               `tests\ctrlfiles` 的 14 条判据 x64 与 x86 各 14/14，喂 BASE 二进制 12 条翻红
+               （另两条 CF11/CF14 只走原生 `ListBox`，本来就不测本批能力）。
+               本机 `-Category vbp` = PASS=45 / FAIL=15 / SKIP=1，红的 15 条与门前沿用同一批环境噪声
+               （`no probe` / `no reader` / 要注册表 / 要非 ASCII 控制台），42→45 的增量恰好是本批新登记的三条
+               （`ctrlfiles`、`ctrlfiles_x86`、`cf_emitc_shape`）。
+               基线相对上一版（run #84，head `5b37b4e` = C29-1a）新增的用面：`ctrlfiles[_x86]` + `cf_emitc_shape`。
+               上一版基线 = run #84（C29-1a）；再上一版 = run #83（head `2ddcc8b`，B21）。
 ```
 
 > 重入保护：若运行开始时 STATUS=BUSY 且 LAST_RUN 距今不足 55 分钟，说明上一次运行可能仍在进行——本次**立即结束，不做任何修改**。
@@ -3381,3 +3379,9 @@ D54-② 那条"类变量永不 Release"不变式（对外一旦发 IDispatch/IUn
   **判据与护栏**：`tests\ctrlshape\`（CsApp.vbp + CsForm.frm，21 条读数：几何落位 / 设计期整数属性 / 运行期读写回路 / 端点搬窗口 / BorderWidth 强制实线 / 容器子控件 / 控件数组按槽位），窗体 `Form_Load` 打完 `Unload Me` 自退 ⇒ 走现成 `Test-Vbp` 拿 stdout 针，登记 `ctrlshape[_x86]`；x64 与 x86 各 21/21，负控喂 BASE 二进制 21 条全翻红，`.build\c29_emitc_guard.py` 30 件存量工程 `--emit-c` 与 BASE 逐字节全同（changed_lines=0）。手册 `Shape 控件` / `Line 控件` 两页各加一节「本项目的实现口径」（缇与像素的分界、无事件仍然成立、以及三项没落地的属性）。029 §九记全量读数。
   **两处本轮踩到的工具/流程坑（都已写进记忆与 029）**：① **RTL 的 .c 改动必须重建 C3.exe 才生效** —— RTL 是以资源嵌在编译器里的（`src\driver\rtl_embedded.hpp` + `c3rtl.rc`，链接期解出到临时目录再编），只改 RTL 就跑测试读到的是旧运行时，症状正好是「代码写了不出现」；② 自己起的本地 `-Category vbp` 把 `C3.exe` 锁住 ⇒ 随后的 `build.bat` 撞 `LNK1168`（exit 1168），按纪律等套件跑完再构建，没动任何进程。另外记一条**本机 vbp 噪声**：`-Category vbp` 本机跑 PASS=42 FAIL=15，那 15 条是探针/读手没建成加两条要注册表/非 ASCII 控制台的用例，灌过 vcvars 的第二次跑一字不差复现，而 CI 的 vbp job 全绿 ⇒ 门读数一律以 CI 为准。
   **计划书被实测推翻的一条**：C29-0（外部子窗口探针入册）第一批就判定**不必做** —— 「程序自己读几何属性 + 打完自退出」这条判据既够强（BASE 下 21 条全红）又零新基础设施。同时读出两条留给后续的事实：控件 `.hwnd` 不是数值面（`void*` 装箱成 `VT_DISPATCH`，`<> 0` 恒不成立），以及 `As Collection` 能 `Add`/`Count` 但**不能 `For Each`**（`For Each` 只吃数组）—— 后者正是 §三 D1 选 (a) 时「集合靠数组快照可枚举」的第二个理由。下一批 = C29-1b（文件系统三控件），开工地图已写进 029 §九。
+
+- 2026-09-26 03:05–04:10 （同一目标续跑）**029 内置控件线第二批 C29-1b 出完并过门 = 代码 `440129c`，门 Actions run #85（head `440129c`，8/8 job 全绿，18.6 分钟）**：把文件系统三控件接上原生窗口 —— Drive = `COMBOBOX`(`CBS_DROPDOWNLIST`)、Dir / File = `LISTBOX`(`LBS_NOTIFY`)，同一批补上样式、设计期初值（`.frm` 的 `Drive`/`Path`/`Pattern` 以前**根本读不到**，那里硬写 `GetCurrentDirectoryW`）、属性读写表、`WM_COMMAND` 三条派发（Drive `Change`/`Click`、Dir `Change`(下钻后)/`Click`、File `Click`/`DblClick`）。RTL 那半边补两条 VB6 口径：Dir 的每一项列成 `[名字]`（原来是裸名字，既看不出层级也没法下钻）+ 新增 `vb6_DirListBoxDescendSelected`（双击下钻，`Path` 真变了才回发 `Change`）；`Drive` 出口去掉尾反斜杠（列表项仍是 `C:\`，属性读数是 `C:`）。
+  **本批最值钱的一条是"定义有、声明无"**：那 12 个 RTL 入口躺了很久但任何 `.h` 里都没有声明 —— 因为三控件在 `controlTypeToWin32Class` 缺格 ⇒ 句柄永远 NULL ⇒ 从没有调用点。接上第一枚真句柄，生成代码按"返回 `int`"的隐式原型编译、字符串句柄被截成 32 位，**真跑段错误在 OLEAUT32**（`--emit-c` 与 syntax 分类都看不出，只有真编译真跑能暴露）。`vb6forms_*.h` 不引 `oleauto.h`，故声明一律写 `wchar_t*`（`OLECHAR` = `wchar_t`，与 `.c` 里的 `BSTR` 同一类型、不冲突）。
+  **另两条同族洞**：① 可索引属性 `List(i)` 的发码点在 `cgen_expr_call_callee_withm.inc`(P13.3b) 而**不在**成员访问侧(P13.3)，两处各自硬编码 `{ListBox, ComboBox}` —— 只放宽一处照旧 `C2198: vb6_GetListItem 用于调用的参数太少`（发成 `vb6_GetListItem(hwnd)(0)`）；② 控件的字符串属性没登记进 `inferExprType` ⇒ `File1.FileName = File1.List(0)` 两侧判成 Variant 走 `vb6_VarCmpEq`，而 `vb6_GetListItem` 声明是 `void*` ⇒ 装箱落 `default:` 成 `VT_UNKNOWN` —— **同一条读数 x64 为真、x86 为假**。中途先在用例里绕（赋值给一枚 String 临时变量，两架构都绿），撤了：那是把编译器的问题挪进测试。修在推断层（C29-1a 加 `kNumericFc` 的同一处）。`Fix 194` 的注释早就点过这个 `void*` 坑，但只补了 `CStr` 那一路。
+  **未修、记下的一条既有缺口**：`Left(字符串, n)` 写在**窗体模块**里被控件属性抢走（编成 `vb6_GetControlLeft(vb6_hwnd_..., ..., 1)`），同一句在 `.bas` 里正常 ⇒ 与本线无关，本批判据改用 `Mid(s,1,1)` 绕开。
+  **判据与护栏**：`tests\ctrlfiles\`（CfApp.vbp + CfForm.frm，14 条读数：三控件都有窗口且填进去过 / `[名字]` 约定 / 设计期 `Path`+`Pattern` / 改 `Pattern` 立刻重刷 / `ListIndex`↔`FileName` 回路 / 目录→文件与盘→目录两条联动 / 与原生 `ListBox` 口径一致），登记 `ctrlfiles[_x86]`；x64 与 x86 各 14/14，负控喂 BASE(`b21_C3.exe`) 12 条翻红（另两条只走原生 `ListBox`，本来就不测本批能力）。通知接线在无头环境点不了 ⇒ 另登记 `cf_emitc_shape` 断**发码形状**。30 件存量工程 `--emit-c` 逐字节全同（BASE 一颗盖住 C29-1a + C29-1b 两批，changed_lines=0）、`-Category syntax` 129/0、本机 `-Category vbp` PASS=45（比上一版 42 恰好多本批新登记的三条），红的 15 条是门前沿用同一批环境噪声。手册三页各加一节「本项目的实现口径」。029 §九记全量读数、批次表与状态头同步。
