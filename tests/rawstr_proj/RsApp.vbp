@@ -1,0 +1,6 @@
+Type=Exe
+Name="RsApp"
+Module=RsMain; RsMain.bas
+Module=RsBlocks; RsBlocks.bas
+Class=RsGreeter; RsGreeter.cls
+Startup="Sub Main"

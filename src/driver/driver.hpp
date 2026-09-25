@@ -78,6 +78,7 @@ struct CompileOptions {
 
     // 窗体调试 (P7)
     bool dumpFrm = false;                    // 输出.frm窗体描述解析结果
+    bool extractFrx = false;                 // Fix 195: 把 .frx 设计期取值导出成 VB 代码
     bool keepTemps = false;                   // 保留中间文件 (调试用)
 
     // 警告抑制 (性能优化): 需要静默的诊断ID列表, 如 --no-warn 3001,3003

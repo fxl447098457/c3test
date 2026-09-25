@@ -340,32 +340,91 @@ void* vb6_DictAccess(void* obj, const wchar_t* key) {
 // Debug.Print 变参版 (cgen生成用)
 // ============================================================
 
+// 控制台输出: 句柄是**控制台**就走 WriteConsoleW —— 控制台对宽字符的渲染与 chcp 无关,
+// 中文 cmd(936)、chcp 65001 的终端、Windows Terminal(ConPTY) 一样正确; 重定向(文件/管道)
+// 时写 UTF-8 字节, 保持"文件里是 UTF-8"这条既有口径。
+// 旧写法是 wprintf: 重定向时 CRT 按 C locale 转窄 ⇒ 中文全变 '?'; 控制台上虽然能显示,
+// 但一旦用户改过代码页/在 ConPTY 里就跟着变。
+static void vb6_ConWriteHandle(HANDLE h, const wchar_t* s, int len) {
+    DWORD mode = 0;
+    if (!s || len <= 0) return;
+    if (GetConsoleMode(h, &mode)) {
+        const wchar_t* p = s;
+        int left = len;
+        while (left > 0) {
+            DWORD chunk = (DWORD)(left > 4096 ? 4096 : left);
+            DWORD done = 0;
+            if (!WriteConsoleW(h, p, chunk, &done, NULL) || done == 0) break;
+            p += done;
+            left -= (int)done;
+        }
+        return;
+    }
+    {
+        /* 非控制台 (重定向到文件 / 被 PowerShell 之类接到管道): 写**控制台代码页**的字节 ——
+         * 这正是 cmd 重定向与 PowerShell([Console]::OutputEncoding 默认跟控制台代码页,
+         * 实测 PS 5.1 与 pwsh 7 都是 gb2312) 期待的编码; 装不下 (如 437 代码页要写中文)
+         * 就退回 UTF-8, 不丢字。 */
+        UINT cp = GetConsoleOutputCP();
+        int need;
+        char* buf;
+        FILE* f = (h == GetStdHandle(STD_ERROR_HANDLE)) ? stderr : stdout;
+        BOOL usedDefault = FALSE;
+        if (!cp) cp = GetACP();
+        need = WideCharToMultiByte(cp, 0, s, len, NULL, 0, NULL, &usedDefault);
+        if (need <= 0 || usedDefault) {
+            cp = CP_UTF8;
+            need = WideCharToMultiByte(CP_UTF8, 0, s, len, NULL, 0, NULL, NULL);
+        }
+        if (need <= 0) return;
+        buf = (char*)malloc((size_t)need);
+        if (!buf) return;
+        if (WideCharToMultiByte(cp, 0, s, len, buf, need, NULL, NULL) == need) {
+            fwrite(buf, 1, (size_t)need, f);
+            fflush(f);
+        }
+        free(buf);
+    }
+}
+
+void vb6_ConWriteOutW(const wchar_t* s, int len) {
+    vb6_ConWriteHandle(GetStdHandle(STD_OUTPUT_HANDLE), s, len);
+}
+
+void vb6_ConWriteErrW(const wchar_t* s, int len) {
+    vb6_ConWriteHandle(GetStdHandle(STD_ERROR_HANDLE), s, len);
+}
+
 void vb6_DebugPrintStr(BSTR s) {
     if (s) {
-        wprintf(L"%ls", s);
+        vb6_ConWriteOutW((const wchar_t*)s, (int)vb6_BSTR_Len(s));
     }
-    wprintf(L"\n");
+    vb6_ConWriteOutW(L"\n", 1);
     fflush(stdout);
 }
 
 // Debug.Print 分项输出
 void vb6_DebugWriteBSTR(BSTR s) {
-    if (s) wprintf(L"%ls", s);
+    if (s) vb6_ConWriteOutW((const wchar_t*)s, (int)vb6_BSTR_Len(s));
     fflush(stdout);
 }
 
 void vb6_DebugWriteLong(int32_t n) {
-    wprintf(L"%d", n);
+    wchar_t buf[32];
+    swprintf(buf, 32, L"%d", (int)n);
+    vb6_ConWriteOutW(buf, (int)wcslen(buf));
     fflush(stdout);
 }
 
 void vb6_DebugWriteDouble(double d) {
-    wprintf(L"%g", d);
+    wchar_t buf[64];
+    swprintf(buf, 64, L"%g", d);
+    vb6_ConWriteOutW(buf, (int)wcslen(buf));
     fflush(stdout);
 }
 
 void vb6_DebugWriteNewline(void) {
-    wprintf(L"\n");
+    vb6_ConWriteOutW(L"\n", 1);
     fflush(stdout);
 }
 

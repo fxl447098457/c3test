@@ -10,6 +10,7 @@
 //      sectionNumber!=0), 未定义引用与节内静态符号都不要。
 
 #include "driver/coff_archive.hpp"
+#include "common/encoding.hpp"
 
 #include <cstdint>
 #include <cstdio>
@@ -20,7 +21,8 @@ namespace vb6c3 {
 namespace {
 
 bool readFile(const std::string& path, std::string* out) {
-    std::FILE* f = std::fopen(path.c_str(), "rb");
+    // Fix 196: 走 _wfopen —— 用户 .lib 可能躺在中文目录下, fopen 会把 UTF-8 当 ACP
+    std::FILE* f = fopenUtf8(path, "rb");
     if (!f) return false;
     char buf[65536];
     size_t n;

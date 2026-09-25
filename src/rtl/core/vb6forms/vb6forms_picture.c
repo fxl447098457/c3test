@@ -29,7 +29,10 @@ void* vb6_LoadPictureFromFile(const char* filePath) {
     if (!ext) ext = "";
     
     WCHAR wPath[MAX_PATH] = {0};
-    MultiByteToWideChar(CP_ACP, 0, filePath, -1, wPath, MAX_PATH);
+    // Fix 190: 内部字符串统一 UTF-8 (源文件转码而来), 路径同样 —— 用 CP_ACP
+    // 会把中文/日文文件名转成乱码, LoadImageW 直接找不到文件。
+    if (MultiByteToWideChar(CP_UTF8, 0, filePath, -1, wPath, MAX_PATH) <= 0)
+        MultiByteToWideChar(CP_ACP, 0, filePath, -1, wPath, MAX_PATH);
     
     if (_stricmp(ext, ".ico") == 0 || _stricmp(ext, ".cur") == 0) {
         /* Icon/Cursor */

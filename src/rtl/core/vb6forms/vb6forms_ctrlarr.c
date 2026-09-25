@@ -124,7 +124,7 @@ void vb6_CtrlArr_Unload(vb6_CtrlArr* arr, int index) {
 
 // 自动查找MDIClient窗口的回调
 static BOOL CALLBACK FindMDIClientEnumProc(HWND hwnd, LPARAM lParam) {
-    HWND hMDIClient = (HWND)GetPropA(hwnd, "VB6_MDIClient");
+    HWND hMDIClient = (HWND)GetPropW(hwnd, L"VB6_MDIClient");
     if (hMDIClient) {
         *(HWND*)lParam = hMDIClient;
         return FALSE;  /* 找到, 停止枚举 */
@@ -138,20 +138,24 @@ static HWND vb6_AutoFindMDIClient(void) {
     return hMDIClient;
 }
 int vb6_RegisterMDIFormClass(const char* className, void* wndProc, void* hInstance, int iconResId) {
-    WNDCLASSEXA wc = {0};
+    // Fix 190: 与主窗体一致 —— 必须用 W 版注册, 否则 MDI 窗体是 ANSI 窗口,
+    // 标题/子窗体标题里的非 ASCII 会被按 ACP 转换 (中韩俄文乱码)。
+    wchar_t wcls[128];
+    vb6_u8ToWideBuf(className, wcls, 128);
+    WNDCLASSEXW wc = {0};
     wc.cbSize = sizeof(wc);
     wc.style = CS_HREDRAW | CS_VREDRAW;
     wc.lpfnWndProc = (WNDPROC)wndProc;
     wc.hInstance = (HINSTANCE)hInstance;
-    wc.hCursor = LoadCursorA(NULL, (LPCSTR)IDC_ARROW);
+    wc.hCursor = LoadCursorW(NULL, IDC_ARROW);
     wc.hbrBackground = (HBRUSH)(COLOR_APPWORKSPACE + 1);
-    wc.lpszClassName = className;
+    wc.lpszClassName = wcls;
     if (iconResId > 0) {
-        wc.hIcon = LoadIconA((HINSTANCE)hInstance, MAKEINTRESOURCEA(iconResId));
+        wc.hIcon = LoadIconW((HINSTANCE)hInstance, MAKEINTRESOURCEW(iconResId));
     } else {
-        wc.hIcon = LoadIconA(NULL, (LPCSTR)IDI_APPLICATION);
+        wc.hIcon = LoadIconW(NULL, IDI_APPLICATION);
     }
-    ATOM atom = RegisterClassExA(&wc);
+    ATOM atom = RegisterClassExW(&wc);
     return (atom != 0) ? 0 : -1;
 }
 
@@ -174,12 +178,18 @@ void* vb6_CreateMDIFormWindow(const char* className, const char* formName,
         px = x;
         py = y;
     }
-    HWND hwnd = CreateWindowExA(
-        0, className, formName,
+    // Fix 190: MDI 框架全程 W 版 (类名/标题是 RTL 内部 UTF-8, 此处转宽)
+    wchar_t wclsM[128];
+    vb6_u8ToWideBuf(className, wclsM, 128);
+    wchar_t* wtitleM = vb6_u8ToWideDup(formName);
+
+    HWND hwnd = CreateWindowExW(
+        0, wclsM, wtitleM ? wtitleM : L"",
         mdiStyle,
         px, py,
         winW, winH,
         NULL, NULL, (HINSTANCE)hInstance, NULL);
+    free(wtitleM);
     if (!hwnd) return NULL;
 
     /* 创建MDI客户窗口 */
@@ -187,8 +197,8 @@ void* vb6_CreateMDIFormWindow(const char* className, const char* formName,
     ccs.hWindowMenu = NULL;   /* P7.8菜单系统实现后填充 */
     ccs.idFirstChild = 1000;  /* MDI子窗体ID起始值 */
 
-    HWND hMDIClient = CreateWindowExA(
-        0, "MDICLIENT", NULL,
+    HWND hMDIClient = CreateWindowExW(
+        0, L"MDICLIENT", NULL,
         WS_CHILD | WS_CLIPCHILDREN | WS_VSCROLL | WS_HSCROLL | MDIS_ALLCHILDSTYLES,
         0, 0, 0, 0,
         hwnd, (HMENU)0xCAC,   /* MDI客户窗口控件ID */
@@ -200,7 +210,7 @@ void* vb6_CreateMDIFormWindow(const char* className, const char* formName,
     ShowWindow(hMDIClient, SW_SHOW);
 
     /* 保存MDI客户窗口句柄到父窗体属性 */
-    SetPropA(hwnd, "VB6_MDIClient", hMDIClient);
+    SetPropW(hwnd, L"VB6_MDIClient", hMDIClient);
 
     return (void*)hwnd;
 }
@@ -226,9 +236,12 @@ void* vb6_CreateMDIChildWindow(const char* className, const char* formName,
         px = (x == CW_USEDEFAULT) ? CW_USEDEFAULT : vb6_TwipToX(x);
         py = (y == CW_USEDEFAULT) ? CW_USEDEFAULT : vb6_TwipToY(y);
     }
-    MDICREATESTRUCTA mcs = {0};
-    mcs.szClass = className;
-    mcs.szTitle = formName;
+    // Fix 190: MDICREATESTRUCTW —— 类名/标题必须宽字符, 否则子窗体标题乱码
+    wchar_t* wclsC = vb6_u8ToWideDup(className);
+    wchar_t* wtitleC = vb6_u8ToWideDup(formName);
+    MDICREATESTRUCTW mcs = {0};
+    mcs.szClass = wclsC;
+    mcs.szTitle = wtitleC;
     mcs.x = px;
     mcs.y = py;
     mcs.cx = winW;
@@ -236,47 +249,49 @@ void* vb6_CreateMDIChildWindow(const char* className, const char* formName,
     mcs.style = 0;
     mcs.lParam = 0;
 
-    HWND hChild = (HWND)SendMessageA((HWND)hMDIClient, WM_MDICREATE, 0, (LPARAM)&mcs);
+    HWND hChild = (HWND)SendMessageW((HWND)hMDIClient, WM_MDICREATE, 0, (LPARAM)&mcs);
+    free(wclsC);
+    free(wtitleC);
     return (void*)hChild;
 }
 
 void* vb6_GetMDIClient(void* hMDIForm) {
     if (!hMDIForm) return NULL;
-    return (void*)GetPropA((HWND)hMDIForm, "VB6_MDIClient");
+    return (void*)GetPropW((HWND)hMDIForm, L"VB6_MDIClient");
 }
 
 int vb6_MDIMessageLoop(void* hAccelTable) {
     MSG msg;
     HACCEL hAccel = (HACCEL)hAccelTable;
-    while (GetMessageA(&msg, NULL, 0, 0)) {
+    while (GetMessageW(&msg, NULL, 0, 0)) {
         /* MDI加速键处理 */
-        if (hAccel && TranslateAcceleratorA(msg.hwnd, hAccel, &msg)) {
+        if (hAccel && TranslateAcceleratorW(msg.hwnd, hAccel, &msg)) {
             continue;
         }
         if (!TranslateMDISysAccel(vb6_GetMDIClient(GetParent(msg.hwnd)), &msg)) {
             TranslateMessage(&msg);
-            DispatchMessageA(&msg);
+            DispatchMessageW(&msg);
         }
     }
     return (int)msg.wParam;
 }
 
 void vb6_MDITile(void* hMDIClient, int style) {
-    SendMessageA((HWND)hMDIClient, WM_MDITILE, (WPARAM)(style ? MDITILE_VERTICAL : 0), 0);
+    SendMessageW((HWND)hMDIClient, WM_MDITILE, (WPARAM)(style ? MDITILE_VERTICAL : 0), 0);
 }
 
 void vb6_MDICascade(void* hMDIClient) {
-    SendMessageA((HWND)hMDIClient, WM_MDICASCADE, 0, 0);
+    SendMessageW((HWND)hMDIClient, WM_MDICASCADE, 0, 0);
 }
 
 void vb6_MDIArrangeIcons(void* hMDIClient) {
-    SendMessageA((HWND)hMDIClient, WM_MDIICONARRANGE, 0, 0);
+    SendMessageW((HWND)hMDIClient, WM_MDIICONARRANGE, 0, 0);
 }
 
 void* vb6_MDIGetActive(void* hMDIClient) {
-    return (void*)SendMessageA((HWND)hMDIClient, WM_MDIGETACTIVE, 0, 0);
+    return (void*)SendMessageW((HWND)hMDIClient, WM_MDIGETACTIVE, 0, 0);
 }
 
 void vb6_MDIActivate(void* hMDIClient, void* hChild) {
-    SendMessageA((HWND)hMDIClient, WM_MDIACTIVATE, (WPARAM)(HWND)hChild, 0);
+    SendMessageW((HWND)hMDIClient, WM_MDIACTIVATE, (WPARAM)(HWND)hChild, 0);
 }

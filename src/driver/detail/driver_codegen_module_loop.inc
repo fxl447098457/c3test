@@ -107,7 +107,7 @@
         // 写 .h 文件
         std::string hPath = outputDir + "/" + baseName + ".h";
         {
-            std::ofstream ofs(hPath, std::ios::out | std::ios::trunc);
+            std::ofstream ofs = ofstreamUtf8(hPath, std::ios::out | std::ios::trunc);
             if (!ofs) {
                 std::cerr << "C3: 无法写入文件: " << hPath << std::endl;
                 return false;
@@ -118,7 +118,7 @@
         // 写 .c 文件
         std::string cPath = outputDir + "/" + baseName + ".c";
         {
-            std::ofstream ofs(cPath, std::ios::out | std::ios::trunc);
+            std::ofstream ofs = ofstreamUtf8(cPath, std::ios::out | std::ios::trunc);
             if (!ofs) {
                 std::cerr << "C3: 无法写入文件: " << cPath << std::endl;
                 return false;

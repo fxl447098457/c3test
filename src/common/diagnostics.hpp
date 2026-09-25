@@ -43,6 +43,12 @@ enum class DiagnosticID : uint16_t {
     LexInvalidCharLiteral = 1004,
     LexUnrecognizedToken = 1005,
     LexFileEncodingError = 1006,
+    // C3 扩展: 反引号原始多行串 (ai/028 V1)。文案 = ASCII (D12 硬约束)。
+    LexUnterminatedRawString = 1007,   // `...` 里找不到闭合的那枚反引号
+    // C3 扩展: 串内插值 ${expr} / ${expr:fmt} (ai/028 V2)。这两条也在词法层 ——
+    // 插值整串在出口就展开成普通 token, 后面的语法/语义问题由既有的诊断负责 (R2/R4)。
+    LexUnterminatedInterp = 1008,      // 孔没等到闭合的 '}' (含"孔跨行"这种写法)
+    LexEmptyInterpHole = 1009,         // ${} / ${:fmt} —— 不静默当文本
 
     // 语法 (2xxx)
     ParseExpectedToken = 2001,
@@ -122,6 +128,12 @@ enum class DiagnosticID : uint16_t {
     CodeGenUnsupportedFeature = 4001,
     CodeGenLLVMError = 4002,
     CodeGenLinkerError = 4003,
+    // Fix 195: 窗体引用的二进制资源 (.frx/.ctx/.pgx) 缺失或读不出。
+    // VB6 把"无法用文本行表达的属性值"(多行文本 / 图片 / 长字符串) 存进同名 .frx,
+    // 属性行只留 `Text = "Form1.frx":0000` 的偏移引用。资源缺失时这些属性的设计期
+    // 取值会被**静默丢弃** (VB6 IDE 自己会写 <窗体>.log 报"文件引用无效"), 于是编出来
+    // 的 exe 与 VB6 不一致却毫无提示 —— 本号就是补这条提示。
+    CodeGenFormResourceMissing = 4004,
 
     // RTL/链接 (5xxx)
     LinkUnresolvedExternal = 5001,

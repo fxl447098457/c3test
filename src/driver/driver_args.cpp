@@ -120,6 +120,9 @@ std::pair<CompileOptions, int> Driver::parseArgs(int argc, char* argv[]) {
         else if (arg == "--dump-frm") {
             opts.dumpFrm = true;  // P7: 输出.frm窗体描述
         }
+        else if (arg == "--extract-frx") {
+            opts.extractFrx = true;  // Fix 195: .frx 设计期取值导出为 VB 代码
+        }
         else if (arg == "-v" || arg == "--verbose") {
             opts.verbose = true;
         }
@@ -175,10 +178,10 @@ std::pair<CompileOptions, int> Driver::parseArgs(int argc, char* argv[]) {
 void Driver::writeErrorLog(const std::string& logPath, const std::string& stage) {
     // Prepend fail info (also creates file if not exists from MSVC driver)
     if (!std::filesystem::exists(utf8ToPath(logPath))) {
-        std::ofstream createLog(logPath, std::ios::out);
+        std::ofstream createLog = ofstreamUtf8(logPath, std::ios::out);
         createLog << "C3: Compilation failed (stage: " << stage << ")" << std::endl;
     }
-    std::ofstream errLog(logPath, std::ios::out | std::ios::app);
+    std::ofstream errLog = ofstreamUtf8(logPath, std::ios::out | std::ios::app);
     if (!errLog) return;
     errLog << "\n=== C3 Diagnostics (" << stage << ") ===" << std::endl;
     errLog << diag_->toString();
@@ -212,6 +215,7 @@ void Driver::printHelp() {
               << "  --dump-preprocess  输出预处理后的源码\n"
               << "  --dump-ir          输出中间表示\n"
               << "  --dump-frm         输出.frm窗体描述\n"
+              << "  --extract-frx      把 .frx 的设计期取值导出成 VB 代码 (生成 <窗体>.frx.bas, 之后可删 .frx)\n"
               << "  --emit-c           生成C代码 (写中间目录 + dump 到 stdout, 不进 --output-dir)\n"
               << "  --emit-llvm        生成LLVM IR\n"
               << "  --keep-for-debug   保留中间文件便于调试\n"

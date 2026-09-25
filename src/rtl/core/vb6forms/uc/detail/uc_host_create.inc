@@ -11,8 +11,12 @@
     // 控件 RedrawControl 用它做底色填充, 取不到就落到 BTNFACE 灰/系统色,
     // 深色窗体上圆角周围会出现灰圈。
     {
-        char parentClass[128] = {0};
-        if (hParent && GetClassNameA((HWND)hParent, parentClass, (int)sizeof(parentClass) - 1) > 0) {
+        // Fix 190: 窗口层已全面 Unicode —— 类名必须用 GetClassNameW 读, 再转回
+        // RTL 内部的 UTF-8 键 (与 vb6_RegisterFormClassBg 登记时用的是同一套字节)。
+        wchar_t parentClassW[128] = {0};
+        if (hParent && GetClassNameW((HWND)hParent, parentClassW, 127) > 0) {
+            char parentClass[256] = {0};
+            vb6_wideToU8Buf(parentClassW, parentClass, (int)sizeof(parentClass));
             int bg = vb6_Forms_QueryClassBg(parentClass);
             if (bg >= 0) vb6_Ambient_BackColor = bg;
         }
@@ -39,10 +43,16 @@
     r->extWidth = width;    // Fix 162: 外框尺寸 (缇), 供 Extender/UserControl
     r->extHeight = height;  //          的 Width/Height 读取
     if (ctrlName) {
-        size_t n = strlen(ctrlName);
-        if (n >= VB6_UC_NAME_LEN) n = VB6_UC_NAME_LEN - 1;
-        for (size_t i = 0; i < n; i++) r->ctrlName[i] = (wchar_t)ctrlName[i];
-        r->ctrlName[n] = 0;
+        // Fix 190: ctrlName 来自生成代码的字面量 = UTF-8。旧代码逐字节提升为
+        // wchar_t 等于按 Latin-1 解码, 中文控件名会变成一串乱码宽字符。
+        wchar_t* wctrl = vb6_u8ToWideDup(ctrlName);
+        if (wctrl) {
+            wcsncpy(r->ctrlName, wctrl, VB6_UC_NAME_LEN - 1);
+            r->ctrlName[VB6_UC_NAME_LEN - 1] = 0;
+            free(wctrl);
+        } else {
+            r->ctrlName[0] = 0;
+        }
     }
 
     HWND hwnd = CreateWindowExW(0, L"VB6_UserControlHost", L"",

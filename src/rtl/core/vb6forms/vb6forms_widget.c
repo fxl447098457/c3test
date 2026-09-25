@@ -232,12 +232,15 @@ void vb6_SetLabelAutoSize(void* hwnd, int32_t val) {
     if (val) {
         SetPropW((HWND)hwnd, L"VB6_AutoSize", (HANDLE)1);
         HDC hdc = GetDC((HWND)hwnd);
-        char text[1024] = {0};
-        GetWindowTextA((HWND)hwnd, text, sizeof(text));
+        // Fix 190: 标签文本是 Unicode (窗口层已切 W), 度量必须用 W 版 API ——
+        // GetWindowTextA 读 Unicode 窗口会把非 ASCII 降级成 '?', GetTextExtentPoint32A
+        // 再按单字节量宽, 中文标签的 AutoSize 宽度会算错 (截字/留白)。
+        wchar_t text[1024] = {0};
+        GetWindowTextW((HWND)hwnd, text, 1024);
         HFONT hFont = (HFONT)SendMessageW((HWND)hwnd, WM_GETFONT, 0, 0);
         HFONT hOld = (HFONT)SelectObject(hdc, hFont);
         SIZE sz;
-        GetTextExtentPoint32A(hdc, text, (int)strlen(text), &sz);
+        GetTextExtentPoint32W(hdc, text, (int)wcslen(text), &sz);
         SelectObject(hdc, hOld);
         ReleaseDC((HWND)hwnd, hdc);
         SetWindowPos((HWND)hwnd, NULL, 0, 0, sz.cx + 4, sz.cy + 2, SWP_NOMOVE | SWP_NOZORDER);
