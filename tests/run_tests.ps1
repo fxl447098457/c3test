@@ -1185,9 +1185,13 @@ if ($Category -in @("all", "run", "vbp")) {
 
     # P20-38: ProgressBar 复刻 (msctls_progress32, 不加载 mscomctl.ocx)。
     # PB11 盯 SetPropW 存 0 被当成"未设置"回落默认值的坑。
+    # P20-43 修正: 期望串必须与夹具 Debug.Print 的**完整标签**逐字一致
+    # (此前登记成缩写 "PB1=100", 夹具打的是 "PB1-MAX=100" -> GA 报 output mismatch,
+    #  内容其实全对 —— 纯粹是注册表与夹具漂移)。
     Test-Vbp "ctrlprogress" "$Tests\ctrlprogress\CtrlProgress.vbp" @(
-        "PB1=100", "PB2=0", "PB3=0", "PB4=1", "PB5=0", "PB6=40", "PB7=200",
-        "PB8=10", "PB9=-10", "PB10=1", "PB11=0", "CTRLPROGRESS-DONE")
+        "PB1-MAX=100", "PB2-MIN=0", "PB3-VALUE=0", "PB4-SCROLLSTD=1",
+        "PB5-ORIENTH=0", "PB6-SET40=40", "PB7-MAX200=200", "PB8-D2MAX=10",
+        "PB9-D2MIN=-10", "PB10-D2ORI=1", "PB11-D2SCR=0", "CTRLPROGRESS-DONE")
 
     # P20-39: ImageList 复刻 (comctl32 ImageList_* API, 不加载 mscomctl.ocx)。
     # 图片三路来源: ①设计期 .frx 裸 DIB ②运行期 LoadPicture (VB6 StdPicture = 活着的
@@ -1217,14 +1221,22 @@ if ($Category -in @("all", "run", "vbp")) {
     # 所以 RTL 自己注册一个同名真窗口类 (见 vb6_StatusBar_RegisterClass)。
     # SB8/SB15 盯 sbrNum 面板的设计期 Text 不能被"系统自动显示"覆盖 (text / shown 两个字段);
     # SB29/SB31 盯 Panels.Add 插到中间时 memmove 留下的悬垂副本 (双重释放 → ClearPanels 崩)。
+    # P20-43 修正: 同 ctrlprogress —— 期望串与夹具完整标签逐字一致。
+    # SB0 是已知局限 (vb6_GetControlHwnd 直返入参, Me.hwnd 在 Debug.Print 里为空),
+    # SB34-LASTKEY= 为空是对的 (第 3 格是没给 Key 的时间面板)。
     Test-Vbp "ctrlstatusbar" "$Tests\ctrlstatusbar\CtrlStatusBar.vbp" @(
-        "SB1=3", "SB2=pr", "SB3=Ready", "SB4=0", "SB5=1", "SB6=40", "SB7=tp",
-        "SB8=Tip", "SB9=2", "SB10=120", "SB11=0", "SB12=NumLock state", "SB13=5",
-        "SB14=2", "SB15=Tip", "SB16=2", "SB17=0", "SB18=Simple text here",
-        "SB19=Changed", "SB20=0", "SB21=Busy", "SB22=4", "SB23=4", "SB24=extra",
-        "SB25=Extra", "SB26=2", "SB27=5", "SB28=ins", "SB29=tp", "SB30=4",
-        "SB31=tp", "SB32=4", "SB33=3", "SB35=77", "SB36=123", "SB37=0",
-        "SB38=hello", "SB39=6", "SB40=0", "CTRLSTATUSBAR-DONE")
+        "SB0-HWND= CAP=CtrlStatusBar CL=", "SB1-COUNT=3", "SB2-KEY1=pr",
+        "SB3-TEXT1=Ready", "SB4-STYLE1=0", "SB5-AUTOSZ1=1", "SB6-MINW1=40",
+        "SB7-KEY2=tp", "SB8-TEXT2=Tip", "SB9-STYLE2=2", "SB10-W2=120",
+        "SB11-AUTOSZ2=0", "SB12-TIP2=NumLock state", "SB13-STYLE3=5",
+        "SB14-IDXBYKEY=2", "SB15-TEXTBYKEY=Tip", "SB16-ALIGN=2", "SB17-STYLE=0",
+        "SB18-SIMPLE2=Simple text here", "SB19-SIMPLE2B=Changed", "SB20-STYLE2B=0",
+        "SB21-SETTEXT=Busy", "SB22-ADDIDX=4", "SB23-COUNT2=4", "SB24-NEWKEY=extra",
+        "SB25-NEWTEXT=Extra", "SB26-INSERT=2", "SB27-COUNT3=5", "SB28-IDXP2=ins",
+        "SB29-IDXP3=tp", "SB30-AFTERRM=4", "SB31-P2KEY=tp", "SB32-COUNT4=4",
+        "SB33-AFTERRM2=3", "SB34-LASTKEY=", "SB35-SETMINW=77", "SB36-SETW=123",
+        "SB37-SETAUTOSZ=0", "SB38-SETTIP=hello", "SB39-SETSTYLE=6",
+        "SB40-AFTERCLR=0", "CTRLSTATUSBAR-DONE")
 
     # --- Fix 195: 资源引用缺失不得静默, 且 --extract-frx 能把 .frx 取值导成 VB 代码 ---
     # 背景: VB6 把多行文本/图片甩进同名 .frx, .frm 里只留 `属性 = "X.frx":含偏移`。
