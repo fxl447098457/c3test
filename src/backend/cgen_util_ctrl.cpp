@@ -581,4 +581,16 @@ std::string CCodeGen::wrapVariantValue(ASTNode* valueNode, const std::string& cE
     // 已注册的 _Generic 选择器, 不再粗暴回退到 VariantLong (会把指针/BSTR 当 int 截断)。
     return "vb6_VariantFromValue(" + cExpr + ")";
 }
+
+// Fix 198: 见 cgen_helpers.inc 声明处注释 —— 装箱点的布尔口径修正.
+std::string CCodeGen::boxToVariant(Expr* expr, const std::string& cExpr) const {
+    // 非布尔表达式必须逐字节退回原样 (vb6_VariantFromValue): 早退式的
+    // "已是 VARIANT 就不包" 看着更干净, 但它会把存量码也一起改了 (护栏实测
+    // VbQRCodegen 的 VB6_SA_AT 实参少了那层恒等包装) —— 本批只许动布尔。
+    if (expr && inferExprType(*expr) == Vb6Type::Boolean && !cExprIsVariant(cExpr)) {
+        // 形参是 int16_t: 显式收窄, 兼容 _Bool/int 两种 C 侧布尔表示.
+        return "vb6_VariantBool((int16_t)(" + cExpr + "))";
+    }
+    return "vb6_VariantFromValue(" + cExpr + ")";
+}
 } // namespace vb6c3

@@ -152,6 +152,12 @@ void CCodeGen::visit(CallStmt& node) {
                                     // Fix 091r: 判定改用 isVariantVal091r (含
                                     // knownVariantVars_/类字段 兜底).
                                     c_.emitLine("vb6_DebugWriteBSTR(vb6_VariantToString(" + val + "));");
+                                } else if (inferExprType(*call.positional[j]) == Vb6Type::Boolean) {
+                                    // Fix 198: Debug.Print b (b As Boolean) 落到下面的
+                                    // DebugWriteLong 会打成 -1/0 —— VB6 打 True/False,
+                                    // 与 CStr / `&` 拼接同一口径 (同一个值两条路读数不同,
+                                    // 正是 ai/022 待拍板 5 的那处不一致)。
+                                    c_.emitLine("vb6_DebugWriteBSTR(vb6_CStrBool(" + val + "));");
                                 } else {
                                     // 整数/布尔值, 用DebugWriteLong输出
                                     c_.emitLine("vb6_DebugWriteLong((int32_t)(" + val + "));");

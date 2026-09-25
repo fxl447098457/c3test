@@ -44,6 +44,15 @@
     // 例如: 整数字面量→vb6_VariantLong, 浮点→vb6_VariantDouble, BSTR→vb6_VariantString
     std::string wrapVariantValue(ASTNode* valueNode, const std::string& cExpr) const;
 
+    // Fix 198: 装箱点上的布尔口径修正. `As Boolean` 在 C 层就是 int16_t (与 Integer
+    // 同型), 布尔字面量又是裸 (-1) (int) → 交给 _Generic vb6_VariantFromValue 会分别
+    // 选到 short:/int: 分支, 装箱成 VT_I2 / VT_I4: 实测 VarType(b)=2、
+    // TypeName(True)="Long"、经 Variant 的 CStr/Format 打成 -1/0.
+    // 本助手只在 inferExprType 判为 Boolean 时把包装换成 vb6_VariantBool, 其余表达式
+    // 逐字节回退到 vb6_VariantFromValue(原样) —— 非布尔路径的生成码不变.
+    // expr 允许为 nullptr (该位置没有 AST 实参, 如命名实参) → 按原样装箱.
+    std::string boxToVariant(Expr* expr, const std::string& cExpr) const;
+
     // VB6标识符 → C全局函数名
     // 本模块: vb6_<ProcName>
     // 跨模块(外部): vb6_<ModuleName>_<ProcName>

@@ -51,6 +51,7 @@ void CCodeGen::visit(SubDecl& node) {
     knownDoubleVars_.clear();
     knownSingleVars_.clear();
     knownDateVars_.clear();   // Fix 175
+    knownBoolVars_.clear();     // ai/022 W1
     knownLongVars_.clear();
     knownLongPtrVars_.clear();  // Bug #2 fix: 也清空LongPtr集合
     knownVariantVars_.clear();
@@ -135,7 +136,11 @@ void CCodeGen::visit(SubDecl& node) {
                 // C 类型串分派会让 inferExprType 看不见 Date (打出序列号)。
                 if (paramType == Vb6Type::Date) knownDateVars_.insert(pLower);
             }
-            else if (paramType == Vb6Type::Long || paramType == Vb6Type::Integer || paramType == Vb6Type::Boolean) knownLongVars_.insert(pLower);
+            else if (paramType == Vb6Type::Long || paramType == Vb6Type::Integer || paramType == Vb6Type::Boolean) {
+                knownLongVars_.insert(pLower);
+                // ai/022 W1: 布尔形参另登记一份 (口径同 Fix 175 的 Date 形参)
+                if (paramType == Vb6Type::Boolean) knownBoolVars_.insert(pLower);
+            }
             // Bug #2 fix: LongPtr 参数注册到独立集合
             else if (paramType == Vb6Type::LongPtr || paramType == Vb6Type::LongLong) knownLongPtrVars_.insert(pLower);   // Fix 084m
             // Fix 035: Variant 参数也要注册, 否则 `(*X) = concrete` 赋值不会触发

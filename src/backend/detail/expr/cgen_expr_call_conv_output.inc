@@ -57,7 +57,9 @@
         } else if (argType == Vb6Type::String) {
             args[0] = "vb6_VariantString(" + args[0] + ")";
         } else if (argType == Vb6Type::Boolean) {
-            args[0] = "vb6_VariantInt((int16_t)(" + args[0] + "))";
+            // Fix 198: 原为 vb6_VariantInt((int16_t)x) —— 那是把 VB 的 Boolean 当
+            // C 的 short 装箱 (VT_I2), 于是 Format(True,"G") 打出 -1. 换真 VT_BOOL.
+            args[0] = boxToVariant(node.positional[0].get(), args[0]);
         } else if (argType == Vb6Type::Byte) {
             args[0] = "vb6_VariantInt((int16_t)(" + args[0] + "))";
         } else if (argType == Vb6Type::Date) {
@@ -99,7 +101,8 @@
                 || (args[0].compare(0, 21, "vb6_ComGetObjectProp(") == 0);
             args[0] = comRes121b
                 ? "vb6_VariantFromComResult(" + args[0] + ")"
-                : "vb6_VariantFromValue(" + args[0] + ")";
+                : boxToVariant(node.positional.empty() ? nullptr
+                                 : node.positional[0].get(), args[0]);
             argList.clear();
             for (size_t i = 0; i < args.size(); i++) {
                 if (i > 0) argList += ", ";

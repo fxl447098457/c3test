@@ -37,6 +37,9 @@ Vb6Type CCodeGen::inferExprType(Expr& expr) const {
             // 里以复用既有 double 取值路径, 口径同 Fix 117c 的 Single)。
             if (knownDateVars_.count(lower)) return Vb6Type::Date;
             if (knownDoubleVars_.count(lower)) return Vb6Type::Double;
+            // ai/022 W1: 必须先于 knownLongVars_ 判 (口径同 Fix 175 的 Date) ——
+            // As Boolean 的 C 型与 Integer 同串, 只按 C 类型登记就永远看不见布尔。
+            if (knownBoolVars_.count(lower)) return Vb6Type::Boolean;
             if (knownLongVars_.count(lower)) return Vb6Type::Long;
             if (knownLongPtrVars_.count(lower)) return Vb6Type::LongPtr;
             if (knownVariantVars_.count(lower)) return Vb6Type::Variant;

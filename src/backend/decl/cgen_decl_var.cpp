@@ -314,6 +314,9 @@ void CCodeGen::visit(VariableDecl& node) {
         std::string lower = node.name;
         std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
         knownLongVars_.insert(lower);
+        // ai/022 W1: 模块级 As Boolean 同型, 需另登记 (口径同上处 Dim 分支)
+        if (resolveArrayElemType(node.asType.get()) == Vb6Type::Boolean)
+            knownBoolVars_.insert(lower);
     } else if (cType == "vb6_VARIANT") {
         // P8.4: 记录Variant类型局部变量
         std::string lower = node.name;

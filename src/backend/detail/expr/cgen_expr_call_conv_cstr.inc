@@ -25,6 +25,10 @@
                 callee = "vb6_CStrSingle";
             }
             // 参数是int32_t/Long变量 → 用vb6_CStrLong
+            // ai/022 W1: 布尔形参/局部此前落在 Long 组 → CStr(b) 打成 -1。
+            else if (knownBoolVars_.count(argLower)) {
+                callee = "vb6_CStrBool";
+            }
             else if (knownLongVars_.count(argLower)) {
                 callee = "vb6_CStrLong";
             }
@@ -47,6 +51,8 @@
             }
             if (argType == Vb6Type::Long || argType == Vb6Type::Integer) {
                 callee = "vb6_CStrLong";
+            } else if (argType == Vb6Type::Boolean) {
+                callee = "vb6_CStrBool";   // ai/022 W1: VB6 的 CStr(True) = "True"
             } else if (argType == Vb6Type::Date) {
                 callee = "vb6_CStrDate";   // Fix 175: 日期按 VB6 短日期串输出
             } else if (argType == Vb6Type::Single) {
