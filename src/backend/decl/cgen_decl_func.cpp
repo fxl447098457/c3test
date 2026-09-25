@@ -100,6 +100,9 @@ void CCodeGen::visit(FunctionDecl& node) {
             auto& simpleP = static_cast<SimpleTypeRef&>(*p->asType);
             std::string pLower = p->name;
             std::transform(pLower.begin(), pLower.end(), pLower.begin(), ::tolower);
+            // P20-44: `As DataObject` 形参 → 记入 dataObjectParams_, 成员访问改道 RTL
+            if (Symbol::toLower(simpleP.name) == "dataobject")
+                dataObjectParams_.insert(pLower);
             auto* pSym = symTab_.lookupModule(simpleP.name);
 
             if (pSym && pSym->kind == SymbolKind::UserDefinedType) {

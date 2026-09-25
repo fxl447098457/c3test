@@ -21,6 +21,25 @@ std::string CCodeGen::resolveComValue(const std::string& unpackType) {
     std::string objExpr = std::move(comObjExpr_);
     std::string memberName = std::move(comMemberName_);
 
+    // P20-44: OLE 拖放的 **DataObject 形参**成员 —— `Data.GetText` 等。
+    // 处理器形参 `void** Data` 不是 IDispatch, 掉 COM 派发运行期必炸/答错。
+    // **必须放在 early-bound 分支之前**: DataObject 是 COM 类, early-bound 会先
+    // 命中并发 ComGetStringProp (实测踩过, 拦截放后面根本到不了)。
+    // DataObject 指针 = *Data, 所以 RTL 调用首参是 `(void*)(*Data)`。
+    {
+        std::string ddLower = Symbol::toLower(objExpr);
+        auto* ddSym = symTab_.lookup(ddLower);
+        // **形参**的 `As <类型>` 原文记在 srcTypeName (tB B08c 那条), 变量声明才记
+        // variableTypeName —— 两边都看, 否则处理器形参永远判不中 (实测踩过)。
+        if (ddSym && !ddSym->srcTypeName.empty()
+            && Symbol::toLower(ddSym->srcTypeName) == "dataobject") {
+            std::string memDD = Symbol::toLower(memberName);
+            std::string ddArg = "(void*)(*" + objExpr + ")";
+            if (memDD == "gettext")      { lastExpr_ = "vb6_oleDD_GetText(" + ddArg + ")"; isComMarker_ = false; return lastExpr_; }
+            if (memDD == "getfilecount") { lastExpr_ = "vb6_oleDD_GetFileCount(" + ddArg + ")"; isComMarker_ = false; return lastExpr_; }
+        }
+    }
+
     // P20-39: ImageList 原生复刻 —— 把集合/属性读改道到 RTL。
     // 放在两个 COM 分支**之前**, 否则 Count 会走默认 BSTR 解包、Key 会走 ComCallObject。
     {
@@ -469,6 +488,21 @@ std::string CCodeGen::resolveComMarkerForPack(const std::string& packFnHint) {
     isComMarker_ = false;
     std::string objExpr = std::move(comObjExpr_);
     std::string memName = std::move(comMemberName_);
+
+    // P20-44: **DataObject 形参**成员在参数打包路径也要拦 —— Debug.Print 的实参
+    // 打包走的就是这里 (resolveComValue 只管"取值语句"那条路)。形参 `As <类型>`
+    // 原文记在 srcTypeName, 变量声明才记 variableTypeName。
+    {
+        std::string ddLower = Symbol::toLower(objExpr);
+        auto* ddSym = symTab_.lookup(ddLower);
+        if (ddSym && !ddSym->srcTypeName.empty()
+            && Symbol::toLower(ddSym->srcTypeName) == "dataobject") {
+            std::string memDD = Symbol::toLower(memName);
+            std::string ddArg = "(void*)(*" + objExpr + ")";
+            if (memDD == "gettext")      return "vb6_oleDD_GetText(" + ddArg + ")";
+            if (memDD == "getfilecount") return "vb6_oleDD_GetFileCount(" + ddArg + ")";
+        }
+    }
 
     // 前期绑定: 利用签名确定返回类型
     if (isEarlyBoundCom_ && earlyBoundSym_) {

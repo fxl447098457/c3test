@@ -220,6 +220,9 @@
             c_.emitLine("{ extern void " + termFn43 + "(); " + termFn43 + "(); }");
         }
     }
+    // P20-44: 窗体销毁时撤销该窗体控件的 OLE 放置目标登记 (RevokeDragDrop 对
+    // 已销毁的 hwnd 无害, 但不清表会留悬垂 hwnd 在 g_targets 里)。
+    c_.emitLine("vb6_OLEDrop_RevokeAll();");
     c_.emitLine("break;");
     c_.dedent();
     c_.emitLine("}");

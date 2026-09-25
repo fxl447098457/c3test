@@ -1,0 +1,11 @@
+selftest begin
+cb textlen=4 effect=1 btn=0 shift=0 x=22.0 y=9.0
+after enter effect=2
+cb textlen=4 effect=1 btn=0 shift=0 x=22.0 y=9.0
+after over effect=2
+cb textlen=4 effect=1 btn=0 shift=0 x=22.0 y=9.0
+after drop hr=0x0 effect=2
+queryText=0x0
+enum=ok
+hdrop first=C:\a.txt
+selftest end

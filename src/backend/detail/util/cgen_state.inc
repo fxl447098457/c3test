@@ -133,6 +133,11 @@
 
     // P8.4: 已知Variant变量名集合 (小写) - 用于赋值时包装值
     std::unordered_set<std::string> knownVariantVars_;
+    // P20-44: 处理器形参里 `As DataObject` 的名字 (小写)。这些形参在 C 里是
+    // void** (指向 DataObject), 其成员访问 (Data.GetText 等) 必须改道 RTL。
+    // **为什么不用 symTab_**: codegen 生成处理器体时形参不在符号表 (实测 lookup
+    // found=0), 只能在注册参数的同一循环里顺手收进集合。
+    std::unordered_set<std::string> dataObjectParams_;
 
     // Fix 091m: 模块级 Variant 变量名集合 (小写). knownVariantVars_ 在每个过程
     // 开始时 clear(), 模块级变量 (如 ToolsLogs: Dim EnumLevelNames As Variant)

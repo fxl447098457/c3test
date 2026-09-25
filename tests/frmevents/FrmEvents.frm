@@ -9,6 +9,14 @@ Begin VB.Form FrmEvents
    ScaleHeight     =   2400
    ScaleWidth      =   4800
    StartUpPosition =   3  '窗口缺省
+   Begin VB.TextBox txtDrop
+      Height          =   285
+      Left            =   240
+      OLEDropMode     =   1  'Manual
+      TabIndex        =   1
+      Top             =   1800
+      Width           =   3000
+   End
    Begin VB.Timer tmrDrive
       Interval        =   150
       Enabled         =   -1  'True
@@ -173,6 +181,19 @@ End Sub
 
 Private Sub Form_OLEDragDrop(Data As DataObject, Effect As Long, Button As Integer, Shift As Integer, X As Single, Y As Single)
     Debug.Print "OLE-DROP"
+End Sub
+
+Private Sub txtDrop_OLEDragDrop(Data As DataObject, Effect As Long, Button As Integer, Shift As Integer, X As Single, Y As Single)
+    Debug.Print "EV24-OLE-DROP=" & Data.GetText & " EFF=" & Effect & " X=" & X
+    Effect = 2
+End Sub
+
+Private Sub txtDrop_OLEDragOver(Data As DataObject, Effect As Long, Button As Integer, Shift As Integer, X As Single, Y As Single, State As Integer)
+    Static done As Integer
+    If done = 0 Then
+        done = 1
+        Debug.Print "EV25-OLE-OVER"
+    End If
 End Sub
 
 Private Sub Form_Terminate()

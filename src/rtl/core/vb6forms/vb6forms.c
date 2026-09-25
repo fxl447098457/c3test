@@ -506,10 +506,31 @@ int vb6_MessageLoop(void) {
     if (GetEnvironmentVariableA("C3_COM_TRACE", NULL, 0) > 0) {
         fprintf(stderr, "[C3_FSM] MessageLoop enter\n"); fflush(stderr);
     }
-    while (GetMessage(&msg, NULL, 0, 0)) {
-        // P24-Timer: WM_TIMER现在由WndProc分发, 消息循环不再拦截
-        TranslateMessage(&msg);
-        DispatchMessage(&msg);
+    // P20-44: OLE 拖放无头联测 —— 环境变量在时, **处理完第一条消息之后**给每个
+    // 已注册目标发一次 DragEnter+Drop, 文本 "OLE-TEST-DROP"。
+    // DoDragDrop 是模态循环, 无头环境没法真拖, 只能这样驱动目标侧的事件链。
+    // **必须在消息循环内 fire**: OLEDropMode 的 Register 发生在延迟的 Form_Load
+    // (PostMessage 0x7FF0) 里, 循环前 g_targetCount 还是 0, 什么都 fire 不到 (实测踩过)。
+    {
+        wchar_t oleFlag44[8] = { 0 };
+        int oleFired44 = 0;
+        if (GetEnvironmentVariableW(L"C3_OLEDDB_TEST", oleFlag44, 8) > 0) {
+            extern void vb6_oleDD_FireTestDropAtRegistered(void);
+            while (GetMessage(&msg, NULL, 0, 0)) {
+                TranslateMessage(&msg);
+                DispatchMessage(&msg);
+                if (!oleFired44) {
+                    oleFired44 = 1;
+                    vb6_oleDD_FireTestDropAtRegistered();
+                }
+            }
+        } else {
+            while (GetMessage(&msg, NULL, 0, 0)) {
+                // P24-Timer: WM_TIMER现在由WndProc分发, 消息循环不再拦截
+                TranslateMessage(&msg);
+                DispatchMessage(&msg);
+            }
+        }
     }
     vb6_Forms_LoopDepth(-1);   // Fix 188
     if (GetEnvironmentVariableW(L"C3_OCX_TRACE", NULL, 0) > 0)

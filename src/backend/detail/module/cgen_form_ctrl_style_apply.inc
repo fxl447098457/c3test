@@ -455,6 +455,32 @@
             }
         }
 
+        // P20-44: OLE 拖放目标侧 —— OLEDropMode<>0 时注册为放置目标。
+        // 用户写的 <Ctl>_OLEDragOver/_OLEDragDrop **直接注册成 RTL 回调**:
+        // C3 给它生成的签名 `void X(void** Data, int32_t*, int16_t*, int16_t*, float*, float*)`
+        // 与 RTL 的 Vb6OLEDropCb 完全一致, 不需要 thunk。
+        // 块内 extern 声明即可 (处理器的定义在本文件后面), 不用动头文件。
+        {
+            auto odmIt = ctrl.properties.find("OLEDropMode");
+            if (odmIt != ctrl.properties.end() && odmIt->second.intValue != 0) {
+                std::string odNLower = ctrl.controlName;
+                std::transform(odNLower.begin(), odNLower.end(), odNLower.begin(), ::tolower);
+                std::string odHwnd = knownControlArrays_.count(odNLower) ?
+                    ("vb6_CtrlArr_GetAt(&vb6_arr_" + cIdent(ctrl.controlName) + ", 0)") :
+                    ("vb6_hwnd_" + cIdent(ctrl.controlName));
+                c_.emitLine("vb6_OLEDrop_Register((void*)" + odHwnd + ");");
+                static const char* odEv43[2] = { "_OLEDragOver", "_OLEDragDrop" };
+                for (int odK = 0; odK < 2; odK++) {
+                    auto* odSym = symTab_.lookup(ctrl.controlName + odEv43[odK]);
+                    if (!odSym) continue;
+                    std::string odFn = cProcName(odSym->name, AccessLevel::Private);
+                    c_.emitLine("{ extern void " + odFn + "(void**, int32_t*, int16_t*, int16_t*, float*, float*);");
+                    c_.emitLine("  vb6_OLEDrop_SetHandler((void*)" + odHwnd + ", "
+                              + std::to_string(odK) + ", (void*)" + odFn + "); }");
+                }
+            }
+        }
+
         // P24 / Fix 182: .frx 设计期属性（Picture / TextBox.Text / ListBox.List）。
         // 实现已抽到 cgen_form_create_controls.inc 的 emitControlFrxProps, 与容器子控件共用。
         emitControlFrxProps(ctrl);

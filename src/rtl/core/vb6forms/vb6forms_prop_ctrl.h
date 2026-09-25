@@ -194,6 +194,20 @@ void    vb6_SSTab_RegisterChild(void* hwnd, void* childHwnd, int32_t page);
 // 事件: 窗体 WndProc 收到 TCN_SELCHANGE 后调用, 返回**切换前**的页号
 int32_t vb6_SSTab_OnSelChange(void* hwnd);
 
+// ===================== OLE 拖放 (P20-44) =====================
+//   目标侧: OLEDropMode<>0 时 Register; 处理器直接注册成回调 (签名与 C3 生成的
+//   `void X_OLEDragDrop(void** Data, int32_t* Effect, int16_t* Button,
+//    int16_t* Shift, float* X, float* Y)` 一致, 不需要 thunk)。
+//   **原型必须在这里**: 生成代码只 include 这一族头, 漏了 = x64 隐式 int 截指针。
+int32_t vb6_OLEDrop_Register(void* hwnd);
+void    vb6_OLEDrop_Revoke(void* hwnd);
+void    vb6_OLEDrop_RevokeAll(void);
+void    vb6_OLEDrop_SetHandler(void* hwnd, int32_t kind, void* cb);
+//   DataObject 取值 (GetText 返回 BSTR 副本)
+void*   vb6_oleDD_GetText(void* dataObj);
+int32_t vb6_oleDD_GetFileCount(void* dataObj);
+const wchar_t* vb6_oleDD_GetFile(void* dataObj, int32_t idx);
+
 //   StatusBar: Align 0=None 1=Top 2=Bottom(默认) 3=Left 4=Right
 //              Style 0=sbrNormal(多面板, 默认) 1=sbrSimple(单格, 读 SimpleText)
 //   Panels.Add(index, key, text) 返回 **VB6 语义的 1 基 Index**; 插到中间时后面整体后移。

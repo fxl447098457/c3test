@@ -48,6 +48,8 @@ static const char* kBstrReturningCalls[] = {
     // P20-42: SSTab 的 TabCaption(i) —— C 签名 `void*`、语义 BSTR, 同一类。
     // 漏登记时 Debug.Print 会打出空串, 看着像"页标题没设进去"。
     "vb6_SSTab_GetTabCaption",
+    // P20-44: OLE 拖放 DataObject 取值 —— 同类 (void* 声明 / BSTR 语义)
+    "vb6_oleDD_GetText",
 };
 
 bool CCodeGen::isBstrReturningCall(const std::string& expr) {

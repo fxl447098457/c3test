@@ -2,6 +2,32 @@
 // 由 src/backend/expr/cgen_expr_member.cpp 拆出（2026-09-17），在函数体内被 #include，非独立编译单元。
 // 内容 = 原文件第 132~362 行，逐行未改。
 
+    // ============================================================
+    // P20-44: OLE 拖放的 **DataObject 形参**成员 —— `Data.GetText` / `Data.Files`。
+    // 处理器形参在 C 里是 `void** Data` (声明类型 DataObject), **不能掉 COM 派发**
+    // (本机 hwnd 不是 IDispatch)。DataObject 指针 = *Data, 所以 RTL 调用首参是
+    // `(void*)(*Data)`。
+    // ============================================================
+    if (node.object && node.object->kind == ASTNodeKind::IdentifierExpr) {
+        auto& objIdDD = static_cast<IdentifierExpr&>(*node.object);
+        std::string objLowerDD = Symbol::toLower(objIdDD.name);
+        auto* symDD = symTab_.lookup(objLowerDD);
+        if (symDD && !symDD->variableTypeName.empty()
+            && Symbol::toLower(symDD->variableTypeName) == "dataobject") {
+            std::string memDD = Symbol::toLower(node.memberName);
+            std::string ddArg = "(void*)(*" + objIdDD.name + ")";
+            if (memDD == "gettext")      { lastExpr_ = "vb6_oleDD_GetText(" + ddArg + ")"; return; }
+            if (memDD == "getfilecount") { lastExpr_ = "vb6_oleDD_GetFileCount(" + ddArg + ")"; return; }
+            // Files: 返回文件清单的"伪集合"。Count 走上面那条不行 (Files 本身不是
+            // DataObject), 所以单独认 `Data.Files.Count` / `Data.Files(i)`。
+            if (memDD == "files") {
+                // 记一个 marker: 让外层 .Count / (i) 能接着处理
+                lastExpr_ = "vb6_oleDD_GetFileCount(" + ddArg + ")  /* DataObject.Files.Count */";
+                return;
+            }
+        }
+    }
+
     // Fix 023e: Form-module Me.member access — handle Form-specific properties
     // (Height/Width/hwnd/Left/Top/Caption/Visible/Enabled/...) via vb6_GetControlXxx
     // helpers and route unknown members (ScaleHeight/ScaleWidth/Move/Refresh/Show/Cls/...)

@@ -30,6 +30,7 @@
 #endif
 
 #include "vb6forms.h"
+#include "vb6rtl_bstr.h"   // BSTR 副本用 (static inline; RTL 全部平铺解包, 同 imagelist/sstab)
 #include "vb6forms_internal.h"
 
 #ifdef _WIN32
@@ -253,10 +254,12 @@ IDataObject* vb6_oleDD_MakeDataObject(const wchar_t* text, wchar_t** files, int 
 }
 
 // 取出 DataObject 里的文本 (给 VB 的 Data.GetText 用)
-wchar_t* vb6_oleDD_GetText(IDataObject* self) {
+// 返回 **BSTR 副本**: VB 侧拿到的是独立串, 不会因为 DataObject 释放而悬垂。
+// (签名是 void*: 与 RTL 其它取值函数同口径, 记进 kBstrReturningCalls。)
+void* vb6_oleDD_GetText(IDataObject* self) {
     Vb6IDataObj* o = (Vb6IDataObj*)self;
-    if (!o || !o->d->text) return L"";
-    return o->d->text;
+    if (!o || !o->d->text) return (void*)vb6_BSTR_Empty();
+    return (void*)vb6_BSTR_FromStr(o->d->text);
 }
 
 int32_t vb6_oleDD_GetFileCount(IDataObject* self) {
@@ -309,7 +312,10 @@ static IDropSourceVtbl kDropSrcVtbl = {
 
 // ===================== 目标: 事件回调表 =====================
 
-typedef void (*Vb6OLEDropCb)(void* dataObj, int32_t* effect, int16_t* button,
+// 首参是 **void\*** (指向 DataObject 指针的指针): C3 给
+// `Sub X_OLEDragDrop(Data As DataObject, ...)` 生成的 C 签名首参就是 `void** Data`,
+// 这样 RTL 可以把处理器**直接注册成回调**, 不需要 thunk。
+typedef void (*Vb6OLEDropCb)(void** dataObj, int32_t* effect, int16_t* button,
                              int16_t* shift, float* x, float* y);
 #define VB6_OLECB_OVER 0
 #define VB6_OLECB_DROP 1
@@ -363,7 +369,8 @@ static void targetFire(HWND hwnd, int kind, IDataObject* obj, DWORD* effect, POI
     POINT p = { (LONG)pt.x, (LONG)pt.y };
     ScreenToClient(hwnd, &p);
     float fx = (float)p.x, fy = (float)p.y;
-    t->cb[kind]((void*)obj, &e, &btn, &shf, &fx, &fy);
+    void* objPtr43 = (void*)obj;
+    t->cb[kind](&objPtr43, &e, &btn, &shf, &fx, &fy);
     if (effect) *effect = (DWORD)e;
 }
 
@@ -429,6 +436,14 @@ int32_t vb6_OLEDrop_Register(void* hwnd) {
     return 1;
 }
 
+// 窗体销毁时统一撤销所有已注册目标 —— 逐个 Revoke 比记"哪个还活着"简单可靠。
+void vb6_OLEDrop_RevokeAll(void) {
+    for (int i = 0; i < g_targetCount; i++) {
+        if (g_targets[i].hwnd) RevokeDragDrop(g_targets[i].hwnd);
+    }
+    g_targetCount = 0;
+}
+
 void vb6_OLEDrop_Revoke(void* hwnd) {
     if (!hwnd) return;
     RevokeDragDrop((HWND)hwnd);
@@ -441,15 +456,47 @@ void vb6_OLEDrop_Revoke(void* hwnd) {
     }
 }
 
+// ===================== 无头联测: 给已注册目标发一次 Drop =====================
+// C3_OLEDDB_TEST=1 时由主消息循环入口调一次 (那时窗体已显示、目标已注册)。
+// 事件链: 造 DataObject("OLE-TEST-DROP") → 直接调该目标的 DragEnter/Drop
+// (与真实拖拽走同一条 WM_NOTIFY 之外的 IDropTarget 路径)。
+static void testFireCb(void** dataObj, int32_t* effect, int16_t* button,
+                       int16_t* shift, float* x, float* y) {
+    // 无输出文件也能验: 事件链通了, VB 处理器自己的 Debug.Print 会说话
+    if (*effect == 0) *effect = 1;
+}
+
+void vb6_oleDD_FireTestDropAtRegistered(void) {
+    fprintf(stderr, "[OLE44] fire begin, targets=%d\n", g_targetCount);
+    for (int i = 0; i < g_targetCount; i++) {
+        HWND h = g_targets[i].hwnd;
+        if (!h) continue;
+        IDataObject* obj = (IDataObject*)vb6_oleDD_MakeDataObject(L"OLE-TEST-DROP", NULL, 0);
+        if (!obj) continue;
+        Vb6DropTarget* t = (Vb6DropTarget*)HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(Vb6DropTarget));
+        if (!t) { obj->lpVtbl->Release(obj); continue; }
+        t->vt.lpVtbl = &kDropTargetVtbl;
+        t->hwnd = h;
+        POINTL pt = { 10, 10 };
+        DWORD eff = DROPEFFECT_COPY;
+        t->vt.lpVtbl->DragEnter(&t->vt, obj, MK_LBUTTON, pt, &eff);
+        eff = DROPEFFECT_COPY;
+        t->vt.lpVtbl->Drop(&t->vt, obj, MK_LBUTTON, pt, &eff);
+        fprintf(stderr, "[OLE44] fired hwnd=%p eff=%lu\n", (void*)h, (unsigned long)eff);
+        obj->lpVtbl->Release(obj);
+        HeapFree(GetProcessHeap(), 0, t);
+    }
+}
+
 // ===================== 自测 =====================
 // 建一个哑窗口当目标, 注册, 然后直接调 IDropTarget 的 DragEnter/Drop
 // (绕开 DoDragDrop 的模态循环 —— 无头环境没法真拖), 把 VB 回调收到的内容写进文件。
 
 static FILE* g_testOut = NULL;
-static void testCb(void* dataObj, int32_t* effect, int16_t* button,
+static void testCb(void** dataObj, int32_t* effect, int16_t* button,
                    int16_t* shift, float* x, float* y) {
     if (!g_testOut) return;
-    const wchar_t* txt = vb6_oleDD_GetText((IDataObject*)dataObj);
+    const wchar_t* txt = vb6_oleDD_GetText((IDataObject*)*dataObj);
     fprintf(g_testOut, "cb textlen=%d effect=%d btn=%d shift=%d x=%.1f y=%.1f\n",
             (int)lstrlenW(txt), (int)*effect, (int)*button, (int)*shift, (double)*x, (double)*y);
     // 顺手验证 effect 回写: VB 侧把 effect 改成 Move(2) 应能传回 OLE
