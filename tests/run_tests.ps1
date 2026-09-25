@@ -14,7 +14,11 @@ param(
     [string]$OutputDirectory = "",
     [int]$Jobs = 1,          # >1 时并行运行纯 .bas 用例 (每 worker 独立输出目录); GUI/VBP 始终串行
     [int]$BasShard = 0,      # bas 分片当前编号 (1..BasShardTotal); 0=不分片整队跑
-    [int]$BasShardTotal = 1  # bas 分片总数 (供 CI 用多 runner 并行跑 bas 用例)
+    [int]$BasShardTotal = 1, # bas 分片总数 (供 CI 用多 runner 并行跑 bas 用例)
+    # 单条用例「运行」阶段的墙钟预算 (秒)。5s 在 -Jobs 20 的并行编译下会误杀: 4 vCPU runner 上
+    # 被 cl/link 压住时, 健康的小 exe 也可能 >5s 才跑完 (实测卡住的进程只有 15ms CPU、线程 Ready)。
+    # 真挂 (模态框/死锁) 靠这个上限兜底; 超时时会把 CPU 时间/状态/最后一行输出写进日志, 见下两处。
+    [int]$RunTimeoutSec = 60
 )
 
 $ErrorActionPreference = "SilentlyContinue"
@@ -116,6 +120,24 @@ Write-Host ("  cl.exe: $($clCmd.Source)") -ForegroundColor Gray
 if (-not (Test-Path $OutDir)) { New-Item -ItemType Directory -Path $OutDir | Out-Null }
 
 # === 测试基础函数 ===
+# 运行超时时的读数: 报出已烧掉的 CPU 时间、进程状态与最后一行输出。
+# 判据: CPU≈0 且没有任何输出 = 进程根本没被调度 (机器被并行编译压满, 不是用例的错);
+#       CPU 不小却一直不退出 = 它自己在转/在等, 那是真问题。
+function Get-RunTimeoutDiag {
+    param($Proc, $OutTask, $ErrTask)
+    $cpu = -1; $st = '?'
+    try { $cpu = [int]$Proc.TotalProcessorTime.TotalMilliseconds } catch { }
+    try { if ($Proc.HasExited) { $st = "exited=$($Proc.ExitCode)" } else { $st = 'alive' } } catch { }
+    $last = ''
+    foreach ($t in @($OutTask, $ErrTask)) {
+        if ($t -and $t.Wait(1500)) {
+            $txt = ''
+            try { $txt = [string]$t.Result } catch { }
+            if ($txt) { $line = @($txt.TrimEnd() -split "`r?`n" | Where-Object { $_ }); if ($line.Count -gt 0) { $last = $line[-1] } }
+        }
+    }
+    return " (cpu=${cpu}ms, ${st}, last='$last')"
+}
 $script:pass = 0
 $script:fail = 0
 $script:skip = 0
@@ -213,14 +235,15 @@ function Invoke-TestExe {
         $proc = [System.Diagnostics.Process]::Start($psi)
         $soTask = $proc.StandardOutput.ReadToEndAsync()
         $seTask = $proc.StandardError.ReadToEndAsync()
-        if (-not $proc.WaitForExit(5000)) {
+        if (-not $proc.WaitForExit($RunTimeoutSec * 1000)) {
+            $diag = Get-RunTimeoutDiag -Proc $proc -OutTask $soTask -ErrTask $seTask
             try { $proc.Kill() } catch { }
             $proc.WaitForExit()
             return @{
                 Ok       = $false
                 ExitCode = $null
                 Output   = @()
-                Detail   = "run timeout: 5s"
+                Detail   = "run timeout: ${RunTimeoutSec}s$diag"
             }
         }
         $stdout = $soTask.Result
@@ -443,11 +466,14 @@ function Invoke-BasSetParallel {
     }
     if ($shards.Count -eq 0) { return }
 
+    # -Parallel 的 runspace 里调不到脚本函数 ⇒ 超时预算用 $using: 传, 读数逻辑内联
+    $runTimeoutMs = $RunTimeoutSec * 1000
     $results = $shards | ForEach-Object -Parallel {
         $shardItems = $_[0]
         $workDir    = $_[1]
         New-Item -ItemType Directory -Path $workDir -Force | Out-Null
         $c3 = $using:C3
+        $runTimeoutMs = $using:runTimeoutMs
         $p = 0; $f = 0; $details = @()
         foreach ($it in $shardItems) {
             if ($it.Arch) {
@@ -462,7 +488,7 @@ function Invoke-BasSetParallel {
             $exePath = Join-Path $workDir "$baseName.exe"
             if (-not (Test-Path $exePath)) { $f++; $details += "$($it.Name): no exe"; continue }
 
-            # --- 运行 (语义与 Invoke-TestExe 一致; 5s 超时) ---
+            # --- 运行 (语义与 Invoke-TestExe 一致; 见 -RunTimeoutSec) ---
             $stdoutFile = Join-Path $workDir "$($it.Name).out"
             $stderrFile = Join-Path $workDir "$($it.Name).err"
             $runOk = $false
@@ -477,10 +503,22 @@ function Invoke-BasSetParallel {
                 $proc = [System.Diagnostics.Process]::Start($psi)
                 $soTask = $proc.StandardOutput.ReadToEndAsync()
                 $seTask = $proc.StandardError.ReadToEndAsync()
-                if (-not $proc.WaitForExit(5000)) {
+                if (-not $proc.WaitForExit($runTimeoutMs)) {
+                    # 读数: CPU 时间 + 进程状态 + 最后一行输出 (CPU≈0 且无输出 = 没被调度, 不是挂)
+                    $cpu = -1; $st = '?'
+                    try { $cpu = [int]$proc.TotalProcessorTime.TotalMilliseconds } catch { }
+                    try { if ($proc.HasExited) { $st = "exited=$($proc.ExitCode)" } else { $st = 'alive' } } catch { }
                     try { $proc.Kill() } catch { }
                     $proc.WaitForExit()
-                    $f++; $details += "$($it.Name): run timeout 5s"; continue
+                    $last = ''
+                    foreach ($t in @($soTask, $seTask)) {
+                        if ($t -and $t.Wait(1500)) {
+                            $txt = ''
+                            try { $txt = [string]$t.Result } catch { }
+                            if ($txt) { $line = @($txt.TrimEnd() -split "`r?`n" | Where-Object { $_ }); if ($line.Count -gt 0) { $last = $line[-1] } }
+                        }
+                    }
+                    $f++; $details += "$($it.Name): run timeout (cpu=${cpu}ms, ${st}, last='$last')"; continue
                 }
                 [IO.File]::WriteAllText($stdoutFile, [string]$soTask.Result, [Text.Encoding]::Default)
                 [IO.File]::WriteAllText($stderrFile, [string]$seTask.Result, [Text.Encoding]::Default)
