@@ -128,6 +128,12 @@ void vb6_DebugWriteLong(int32_t n);    // 输出整数片段(不换行)
 void vb6_DebugWriteDouble(double d);   // 输出浮点片段(不换行)
 void vb6_DebugWriteNewline(void);      // 输出换行
 
+// 控制台输出: 宽字符走控制台原生路径 (WriteConsoleW, 与 chcp 无关); 重定向时写 UTF-8 字节。
+// 中文 cmd 默认代码页 936, 而 RTL 内部是 UTF-16 —— 直接把宽字符交给 CRT 的窄路径会在
+// 非 CJK 代码页/重定向下把中文丢成 '?'。所有"给人看的"控制台输出都该走这两个函数。
+void vb6_ConWriteOutW(const wchar_t* s, int len);
+void vb6_ConWriteErrW(const wchar_t* s, int len);
+
 // 整除
 int32_t vb6_IntDiv(int32_t a, int32_t b);
 

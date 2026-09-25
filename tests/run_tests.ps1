@@ -135,6 +135,9 @@ $script:total = 0
 # tests\tools\com_act_probe.c 按 CLSID/ProgID `CoCreateInstance` 拿 IDispatch（= CreateObject
 # 那条路）与接口薄指针（早绑定直调契约槽），并证明反注册后三类键都不留。
 . (Join-Path $PSScriptRoot "com_activate.ps1")
+# ai/022 B19: 控制台/管道的**编码**用例 —— 程序输出在 cmd 与重定向下都不许乱码
+# (中文/日文/韩文/英文四语种; 覆盖 WriteConsoleW 那条与“控制台代码页”那条字节路)。
+. (Join-Path $PSScriptRoot "console_enc.ps1")
 
 # === COM 测试前: 检查相关 COM 组件是否已注册 ===
 # 仅当所需的 COM 组件已注册时, 才执行对应的 COM 测试 (例如 VBMANLIB)
@@ -1389,6 +1392,14 @@ if ($Category -in @("all", "run", "vbp")) {
     Test-ComActivateClient "cc_demo_dll_external_x86" "$Tests\cc_demo\DemoDll.vbp" "DemoDll" `
         "{993BE038-BBA4-7804-FEB0-E65927384CA7}" "DemoDll.Shape" `
         "$Tests\cc_demo\DemoClient.vbp" @("DEMOEXT1:OK", "DEMOEXT-DONE") "x86"
+    # --- ai/022 B19: 控制台输出的编码（四语种）---
+    # 控制台那条路走 WriteConsoleW，渲染与 chcp 无关（实测 936/65001/437 逐字相同）；
+    # 重定向那条走“控制台代码页”的字节（装不下才退回 UTF-8）。两条都真跑真读。
+    $cnSample = Join-Path $Tests "cc_cn\CnMain.bas"
+    $cnNeedles = @("中文", "日本語 テスト", "한국어 테스트", "English test")
+    Test-CnConsoleOutput "cc_cn_console" $cnSample $cnNeedles
+    Test-CnConsoleOutput "cc_cn_console_x86" $cnSample $cnNeedles "x86"
+    Test-CnRedirectOutput "cc_cn_redirect_gbk" $cnSample 936
     Test-Vbp "test_vbman" "$Tests\test_vbman\test_vbman.vbp" @("P24-04a:OK", "P24-04b:OK", "P24-04:2/2") -Arch "x86" -RequiresCom "VBMANLIB.cVBMAN"
     $vbpSw.Stop()
     Write-Host "  (vbp/gui tests took $([Math]::Round($vbpSw.Elapsed.TotalSeconds))s)"

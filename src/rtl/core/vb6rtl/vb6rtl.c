@@ -513,17 +513,27 @@ void vb6_RaiseError(int32_t errNum, BSTR description) {
         vb6_err_in_handler = 1;  // P14.1.2: 标记进入错误处理器
         longjmp(*vb6_error_jmp_ptr, errNum);
     }
-    // 未设置错误处理: GUI程序弹MessageBox, CLI程序输出stderr
-    if (GetConsoleWindow()) {
-        // CLI程序: 输出到stderr
-        fwprintf(stderr, L"Unhandled VB6 Error #%d: %ls\n", errNum,
-                 description ? description : L"(no description)");
-    } else {
-        // GUI程序: 弹出VB6风格错误对话框
-        wchar_t msg[512];
-        swprintf(msg, 512, L"Run-time error '%d':\n%ls",
-                 errNum, description ? description : L"(no description)");
-        MessageBoxW(NULL, msg, L"VB6 Runtime Error", MB_ICONERROR | MB_OK);
+    // 未设置错误处理: 有控制台就写 stderr, 没有才弹 VB6 风格对话框。
+    // 判据不能再用 GetConsoleWindow(): GUI 子系统 exe 从 cmd 里起时 std 句柄**就是**那份控制台
+    // (输出能进 cmd 窗口), 而 GetConsoleWindow() 返回 NULL —— 于是本该打到 stderr 的错误变成
+    // 一个模态框, 在批处理/套件里表现为"进程卡住直到有人点确定"。改为按句柄判 (ConPTY 也认)。
+    {
+        DWORD errMode = 0;
+        DWORD outMode = 0;
+        int hasConsole = GetConsoleMode(GetStdHandle(STD_ERROR_HANDLE), &errMode) ||
+                         GetConsoleMode(GetStdHandle(STD_OUTPUT_HANDLE), &outMode);
+        if (hasConsole) {
+            wchar_t line[600];
+            int n = swprintf(line, 600, L"Unhandled VB6 Error #%d: %ls\n", errNum,
+                             description ? description : L"(no description)");
+            if (n > 0) vb6_ConWriteErrW(line, n);
+        } else {
+            // 无控制台 (从资源管理器双击等): 弹 VB6 风格错误对话框
+            wchar_t msg[512];
+            swprintf(msg, 512, L"Run-time error '%d':\n%ls",
+                     errNum, description ? description : L"(no description)");
+            MessageBoxW(NULL, msg, L"VB6 Runtime Error", MB_ICONERROR | MB_OK);
+        }
     }
     exit(errNum);
 }

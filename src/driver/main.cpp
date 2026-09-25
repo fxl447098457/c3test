@@ -3,6 +3,8 @@
 #include "common/encoding.hpp"
 #include <string>
 #include <vector>
+#include <iostream>
+#include <algorithm>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -74,36 +76,139 @@ void installCrashTraceIfRequested() {
 }  // namespace
 
 // ---------------------------------------------------------------------------
-// 控制台代码页守卫
+// 控制台输出: 按句柄类型选路
 //
-// C3 内部统一 UTF-8 (源文件读入即转 UTF-8, /utf-8 编译, argv 转 UTF-8),
-// std::cout 输出的是 UTF-8 字节, 而中文 cmd 默认代码页 936(GBK) 会显示乱码。
-// 进入时把控制台输入/输出代码页切到 UTF-8, 退出时恢复原值:
-//   1. 不需要用户手动 chcp 65001;
-//   2. 不污染用户会话 —— C3 退出后 cmd 恢复 GBK, 之后在同一 cmd 运行
-//      C3 编译出的 exe (vb6rtl 按 ACP 输出) 仍正常显示。
-// 输出重定向到文件/管道时写入的始终是原始 UTF-8 字节, 不受影响。
+//   * 句柄是**控制台**(含 ConPTY/Windows Terminal) -> UTF-8 转 UTF-16 后 WriteConsoleW:
+//     控制台渲染宽字符与 chcp 无关, 也不需要动用户的代码页。
+//   * 句柄是**管道/文件**(被 PowerShell 接走、或用户 `> file`) -> 写**控制台代码页**的字节:
+//     cmd 重定向与 PowerShell 都按这个代码页解码 (实测 PS 5.1 与 pwsh 7 的
+//     `[Console]::OutputEncoding` 默认都跟控制台代码页走, 本机 = gb2312), 写 UTF-8 给它们
+//     才是乱码。装不下时 (例如 437 代码页要写中文) 退回 UTF-8, 不丢字。
+//
+// 老办法是"进 C3 时把控制台代码页切成 65001、退出恢复", 有两个坑: ① 判据是
+// GetConsoleWindow(), 在 Windows Terminal/ConPTY 下返回 NULL ⇒ 守卫不触发, UTF-8 字节
+// 落到 936 控制台上 = 乱码; ② 切换是**整个控制台**的 —— C3 随后拉起的 cl.exe/link.exe
+// 吐 GBK 中文, 在 65001 下反而成了乱码。现在这个实现既不看窗口、也不动代码页。
 // ---------------------------------------------------------------------------
-class ConsoleCodePageGuard {
+class ConsoleUtf8Buf : public std::streambuf {
 public:
-    ConsoleCodePageGuard() {
-        if (GetConsoleWindow() != nullptr) {  // 仅当实际附加到控制台时才切换
-            oldOut_ = GetConsoleOutputCP();
-            oldIn_ = GetConsoleCP();
-            SetConsoleOutputCP(CP_UTF8);
-            SetConsoleCP(CP_UTF8);
-        }
+    ConsoleUtf8Buf(std::streambuf* fallback, HANDLE h, bool isConsole, UINT targetCp)
+        : fallback_(fallback), h_(h), isConsole_(isConsole), cp_(targetCp) {}
+
+protected:
+    int overflow(int ch) override {
+        if (ch == EOF) return 0;
+        buf_.push_back(static_cast<char>(ch));
+        if (ch == '\n') flushBuf();
+        return ch;
     }
-    ~ConsoleCodePageGuard() {
-        if (oldOut_ != 0) SetConsoleOutputCP(oldOut_);
-        if (oldIn_ != 0) SetConsoleCP(oldIn_);
+
+    std::streamsize xsputn(const char* s, std::streamsize n) override {
+        buf_.append(s, static_cast<size_t>(n));
+        if (buf_.find('\n') != std::string::npos) flushBuf();
+        return n;
     }
-    ConsoleCodePageGuard(const ConsoleCodePageGuard&) = delete;
-    ConsoleCodePageGuard& operator=(const ConsoleCodePageGuard&) = delete;
+
+    int sync() override {
+        flushBuf();
+        if (fallback_) fallback_->pubsync();
+        return 0;
+    }
 
 private:
-    UINT oldOut_ = 0;
-    UINT oldIn_ = 0;
+    // UTF-8 整行 -> UTF-16 -> 目标编码; 尾部若是被截断的多字节序列就留到下次, 不丢半个汉字
+    void flushBuf() {
+        if (buf_.empty()) return;
+        int wlen = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, buf_.data(), (int)buf_.size(),
+                                       nullptr, 0);
+        if (wlen <= 0) {          // 结尾是半个字符: 退到最后一个完整序列再转
+            size_t keep = 0;
+            for (size_t cut = 1; cut <= 3 && cut < buf_.size(); ++cut) {
+                size_t n = buf_.size() - cut;
+                if (MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, buf_.data(), (int)n, nullptr, 0) > 0) {
+                    keep = n;
+                    break;
+                }
+            }
+            if (keep == 0) {      // 真转不动 (不该发生): 原样写出, 别卡着
+                writeBytes(buf_.data(), buf_.size());
+                buf_.clear();
+                return;
+            }
+            std::string tail = buf_.substr(keep);
+            buf_.resize(keep);
+            flushBuf();
+            buf_ = tail;
+            return;
+        }
+        {
+            std::wstring w(static_cast<size_t>(wlen), L'\0');
+            MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, buf_.data(), (int)buf_.size(), &w[0], wlen);
+            if (isConsole_) {
+                size_t off = 0;
+                while (off < w.size()) {
+                    DWORD chunk = static_cast<DWORD>(std::min<size_t>(w.size() - off, 4096));
+                    DWORD done = 0;
+                    if (!WriteConsoleW(h_, w.data() + off, chunk, &done, nullptr) || done == 0) break;
+                    off += done;
+                }
+            } else {
+                writeWide(w.data(), (int)w.size());
+            }
+        }
+        buf_.clear();
+    }
+
+    void writeWide(const wchar_t* w, int len) {
+        BOOL usedDefault = FALSE;
+        int need = WideCharToMultiByte(cp_, 0, w, len, nullptr, 0, nullptr, &usedDefault);
+        if (need <= 0 || usedDefault) {   // 目标代码页装不下 -> UTF-8 兜底
+            int n8 = WideCharToMultiByte(CP_UTF8, 0, w, len, nullptr, 0, nullptr, nullptr);
+            if (n8 <= 0) return;
+            std::string s8(static_cast<size_t>(n8), '\0');
+            WideCharToMultiByte(CP_UTF8, 0, w, len, &s8[0], n8, nullptr, nullptr);
+            writeBytes(s8.data(), s8.size());
+            return;
+        }
+        std::string sb(static_cast<size_t>(need), '\0');
+        WideCharToMultiByte(cp_, 0, w, len, &sb[0], need, nullptr, nullptr);
+        writeBytes(sb.data(), sb.size());
+    }
+
+    void writeBytes(const char* s, size_t n) {
+        if (fallback_) fallback_->sputn(s, (std::streamsize)n);
+    }
+
+    std::streambuf* fallback_;
+    HANDLE h_;
+    bool isConsole_;
+    UINT cp_;
+    std::string buf_;
+};
+
+// stdout/stderr 都装上: 是控制台就走宽字符, 是管道/文件就按控制台代码页转字节
+static void installConsoleUtf8(std::ostream& os, DWORD stdHandleId) {
+    HANDLE h = GetStdHandle(stdHandleId);
+    DWORD mode = 0;
+    bool isConsole = false;
+    if (!h || h == INVALID_HANDLE_VALUE) return;
+    isConsole = GetConsoleMode(h, &mode) != 0;
+    UINT cp = GetConsoleOutputCP();
+    if (!cp) cp = GetACP();
+    static ConsoleUtf8Buf* coutBuf = nullptr;
+    static ConsoleUtf8Buf* cerrBuf = nullptr;
+    ConsoleUtf8Buf*& slot = (stdHandleId == STD_ERROR_HANDLE) ? cerrBuf : coutBuf;
+    if (slot) return;
+    slot = new ConsoleUtf8Buf(os.rdbuf(), h, isConsole, cp);   // 常驻: 与进程同寿
+    os.rdbuf(slot);
+}
+
+// 退出前把两条流刷干净 (std::cout/cerr 的静态析构顺序不可靠)
+struct ConsoleFlushAtExit {
+    ~ConsoleFlushAtExit() {
+        std::cout.flush();
+        std::cerr.flush();
+    }
 };
 #endif
 
@@ -142,7 +247,9 @@ int runCompile(vb6c3::Driver& driver, int argc, char* argv[]) {
 int main(int argc, char* argv[]) {
 #ifdef _WIN32
     installCrashTraceIfRequested();
-    ConsoleCodePageGuard consoleCpGuard;  // 控制台切 UTF-8, 退出时恢复
+    installConsoleUtf8(std::cout, STD_OUTPUT_HANDLE);
+    installConsoleUtf8(std::cerr, STD_ERROR_HANDLE);
+    static ConsoleFlushAtExit consoleFlushAtExit;   // 与进程同寿
 #endif
 
     vb6c3::Driver driver;
