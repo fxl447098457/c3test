@@ -212,6 +212,91 @@ static bool assembleAsmProcs(const std::vector<EmittedAsmProc>& procs,
     return true;
 }
 
+// ============================================================
+// ai/022 B17: rc.exe 的唯一发现处 (TypeLib 资源与 VS_VERSION_INFO 两处共用)。
+// 旧写法只有 "WindowsSdkDir 环境变量 + C:\Program Files (x86)\Windows Kits\10" 两条路，
+// 于是 SDK 装在别的盘 (本机 = D:\Windows Kits\10) 且没导出该环境变量时**静默不嵌资源** ——
+// 实测产出的 DLL 连 .rsrc 段都没有，类型库注册表项写不进去，外部客户按 LIBID 找不到库。
+// 顺序与 tests\run_tests.ps1 的 SDK 探测对齐: 环境变量 → Program Files → 盘符扫描 → PATH。
+// 目录内取**版本号最大**的那个 (旧写法取 directory_iterator 的最后一个, 结果随枚举顺序变)。
+// ============================================================
+
+static bool versionDirGreater(const std::string& a, const std::string& b) {
+    auto parse = [](const std::string& s) {
+        std::vector<int> v;
+        size_t i = 0;
+        while (i < s.size() && v.size() < 4) {
+            int n = 0;
+            bool any = false;
+            while (i < s.size() && s[i] >= '0' && s[i] <= '9') { n = n * 10 + (s[i] - '0'); i++; any = true; }
+            if (!any) return std::vector<int>();
+            v.push_back(n);
+            if (i < s.size() && s[i] == '.') i++; else break;
+        }
+        return v;
+    };
+    std::vector<int> va = parse(a), vb = parse(b);
+    if (va.empty() || vb.empty()) return a > b;
+    return va > vb;
+}
+
+static std::string findRcExeInSdkBin(const std::filesystem::path& binDir) {
+    std::error_code ec;
+    if (!std::filesystem::exists(binDir, ec)) return std::string();
+    std::vector<std::string> vers;
+    for (const auto& entry : std::filesystem::directory_iterator(binDir, ec)) {
+        if (!entry.is_directory()) continue;
+        std::error_code ec2;
+        if (std::filesystem::exists(entry.path() / "x64" / "rc.exe", ec2)) vers.push_back(entry.path().filename().string());
+    }
+    if (vers.empty()) return std::string();
+    std::sort(vers.begin(), vers.end(), [](const std::string& a, const std::string& b) {
+        return versionDirGreater(a, b);   // 大的在前
+    });
+    return (binDir / vers.front() / "x64" / "rc.exe").string();
+}
+
+static std::string findRcExe() {
+    std::error_code ec;
+    std::filesystem::path toolsRc = std::filesystem::current_path() / "tools" / "rc.exe";
+    if (std::filesystem::exists(toolsRc, ec)) return toolsRc.string();
+
+    std::vector<std::filesystem::path> binDirs;
+    if (const char* sdkDir = std::getenv("WindowsSdkDir"); sdkDir && sdkDir[0]) {
+        std::string root = sdkDir;
+        while (!root.empty() && (root.back() == '\\' || root.back() == '/')) root.pop_back();
+        binDirs.emplace_back(root + "\\bin");
+    }
+    for (const char* envName : {"ProgramFiles(x86)", "ProgramFiles"}) {
+        if (const char* base = std::getenv(envName); base && base[0]) {
+            binDirs.emplace_back(std::filesystem::path(base) / "Windows Kits" / "10" / "bin");
+        }
+    }
+    for (const char* drive : {"C:", "D:", "E:", "F:"}) {
+        binDirs.emplace_back(std::filesystem::path(std::string(drive) + "\\") / "Windows Kits" / "10" / "bin");
+    }
+    for (const auto& dir : binDirs) {
+        std::string rc = findRcExeInSdkBin(dir);
+        if (!rc.empty()) return rc;
+    }
+    // PATH 上直接有 rc.exe 的场合 (VS 开发者提示符把 <sdk>\bin\<ver>\x64 塞进 PATH)
+    if (const char* path = std::getenv("PATH"); path && path[0]) {
+        std::string p = path;
+        size_t start = 0;
+        while (start <= p.size()) {
+            size_t sep = p.find(';', start);
+            std::string dir = p.substr(start, sep == std::string::npos ? std::string::npos : sep - start);
+            if (!dir.empty()) {
+                std::filesystem::path cand = std::filesystem::path(dir) / "rc.exe";
+                if (std::filesystem::exists(cand, ec)) return cand.string();
+            }
+            if (sep == std::string::npos) break;
+            start = sep + 1;
+        }
+    }
+    return std::string();
+}
+
 bool Driver::runLinker(const CompileOptions& options, const std::string& outputDir,
                        const std::string& intermediatesDir, SessionManager& session) {
     // --emit-c mode: no linking needed
@@ -444,33 +529,8 @@ bool Driver::runLinker(const CompileOptions& options, const std::string& outputD
                 }
             }
 
-            // Find rc.exe
-            std::string rcExePath;
-            std::filesystem::path toolsRc = std::filesystem::current_path() / "tools" / "rc.exe";
-            if (std::filesystem::exists(toolsRc)) {
-                rcExePath = toolsRc.string();
-            } else {
-                std::string sdkBinDir;
-                const char* sdkDir = std::getenv("WindowsSdkDir");
-                if (sdkDir && sdkDir[0] != '\0') {
-                    std::string sdkRoot = sdkDir;
-                    while (!sdkRoot.empty() && sdkRoot.back() == '\\') sdkRoot.pop_back();
-                    sdkBinDir = sdkRoot + "\\bin";
-                }
-                if (sdkBinDir.empty() || !std::filesystem::exists(sdkBinDir)) {
-                    static const char* commonSdkBin = "C:\\Program Files (x86)\\Windows Kits\\10\\bin";
-                    if (std::filesystem::exists(commonSdkBin)) sdkBinDir = commonSdkBin;
-                }
-                if (!sdkBinDir.empty() && std::filesystem::exists(sdkBinDir)) {
-                    for (auto& entry : std::filesystem::directory_iterator(sdkBinDir)) {
-                        if (!entry.is_directory()) continue;
-                        std::filesystem::path candidate = entry.path() / "x64" / "rc.exe";
-                        if (std::filesystem::exists(candidate)) {
-                            rcExePath = candidate.string();
-                        }
-                    }
-                }
-            }
+            // Find rc.exe (共用发现处: 见 findRcExe)
+            std::string rcExePath = findRcExe();
 
             if (!rcExePath.empty()) {
                 std::string resPath = absInterDir + "\\activex_dll_typelib.res";
@@ -491,8 +551,10 @@ bool Driver::runLinker(const CompileOptions& options, const std::string& outputD
                         std::cout << "C3: TypeLib resource embedded: " << resPath << std::endl;
                     }
                 }
-            } else if (options.verbose) {
-                std::cout << "C3: rc.exe not found, TypeLib will not be embedded in DLL" << std::endl;
+            } else {
+                // 找不到 rc.exe = 类型库不嵌进 DLL ⇒ 注册表里也就没有 TypeLib 项，外部客户
+                // 按 LIBID 找不到契约。这是**静默**的质量损失，所以不藏在 --verbose 后面 (B17)。
+                std::cerr << "C3: rc.exe not found, TypeLib will not be embedded in DLL" << std::endl;
             }
         } else if (options.verbose) {
             std::cout << "C3: TypeLib file not found: " << tlbPath << std::endl;
@@ -568,33 +630,8 @@ bool Driver::runLinker(const CompileOptions& options, const std::string& outputD
             }
         }
 
-        // Find rc.exe (reuse same logic as TypeLib RC)
-        std::string rcExePath2;
-        std::filesystem::path toolsRc2 = std::filesystem::current_path() / "tools" / "rc.exe";
-        if (std::filesystem::exists(toolsRc2)) {
-            rcExePath2 = toolsRc2.string();
-        } else {
-            std::string sdkBinDir2;
-            const char* sdkDir2 = std::getenv("WindowsSdkDir");
-            if (sdkDir2 && sdkDir2[0] != '\0') {
-                std::string sdkRoot2 = sdkDir2;
-                while (!sdkRoot2.empty() && sdkRoot2.back() == '\\') sdkRoot2.pop_back();
-                sdkBinDir2 = sdkRoot2 + "\\bin";
-            }
-            if (sdkBinDir2.empty() || !std::filesystem::exists(sdkBinDir2)) {
-                static const char* commonSdkBin2 = "C:\\Program Files (x86)\\Windows Kits\\10\\bin";
-                if (std::filesystem::exists(commonSdkBin2)) sdkBinDir2 = commonSdkBin2;
-            }
-            if (!sdkBinDir2.empty() && std::filesystem::exists(sdkBinDir2)) {
-                for (auto& entry : std::filesystem::directory_iterator(sdkBinDir2)) {
-                    if (!entry.is_directory()) continue;
-                    std::filesystem::path candidate = entry.path() / "x64" / "rc.exe";
-                    if (std::filesystem::exists(candidate)) {
-                        rcExePath2 = candidate.string();
-                    }
-                }
-            }
-        }
+        // Find rc.exe (共用发现处: 见 findRcExe)
+        std::string rcExePath2 = findRcExe();
 
         if (!rcExePath2.empty()) {
             std::string verResPath = absInterDir2 + "\\version_info.res";
@@ -611,8 +648,8 @@ bool Driver::runLinker(const CompileOptions& options, const std::string& outputD
                     std::cout << "C3: VS_VERSION_INFO resource compiled: " << verResPath << std::endl;
                 }
             }
-        } else if (options.verbose) {
-            std::cout << "C3: rc.exe not found, version info will not be embedded" << std::endl;
+        } else {
+            std::cerr << "C3: rc.exe not found, version info will not be embedded" << std::endl;
         }
     }
 

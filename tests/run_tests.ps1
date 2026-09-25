@@ -131,6 +131,10 @@ $script:total = 0
 # ai/022 B16: 类型库的「契约面」读数（tests\tools\tlb_slots.cpp）——
 # 库里那一档真接口发不发成员、槽偏移/调用约定对不对；x86 与 x64 各一条读数。
 . (Join-Path $PSScriptRoot "tlb_contract.ps1")
+# ai/022 B17: 外部激活 —— 真注册 (DllRegisterServer) + 走系统那条路的客户：
+# tests\tools\com_act_probe.c 按 CLSID/ProgID `CoCreateInstance` 拿 IDispatch（= CreateObject
+# 那条路）与接口薄指针（早绑定直调契约槽），并证明反注册后三类键都不留。
+. (Join-Path $PSScriptRoot "com_activate.ps1")
 
 # === COM 测试前: 检查相关 COM 组件是否已注册 ===
 # 仅当所需的 COM 组件已注册时, 才执行对应的 COM 测试 (例如 VBMANLIB)
@@ -1250,7 +1254,9 @@ if ($Category -in @("all", "run", "vbp")) {
         "{11112222-3333-4444-5555-666677778888}",
         "0xF5CEF988",
         "0x7CA8CD81",
-        "0, /* methodCount */") @(
+        # ai/022 B17: CImpl 多了个公有成员 Twice（外部晚绑定要有东西可点），methodCount 0→1。
+        # 这条针同时钉住"表里的成员面与库里 `_CImpl` 那一档同源"（B13e 的广告==应答）。
+        "1, /* methodCount */") @(
         "0AD9CBC7") @(
         "CoClass 'PG' identity: CLSID={11112222-3333-4444-5555-666677778888} (vbp)",
         "IID={F5CEF988-3217-6173-94B7-BB99C4B8CB81} (minted)",
@@ -1322,6 +1328,49 @@ if ($Category -in @("all", "run", "vbp")) {
         "VTBL_GET_AFTER=42",
         "DONE") @(
         "CALL=ADD") "{F5CEF988-3217-6173-94B7-BB99C4B8CB81}" "x86"
+
+    # --- ai/022 B17: 外部激活（注册 -> 系统那条路 -> 反注册后不留键）---
+    # 上面两条走的是**进程内**独立客户端（LoadLibrary + DllGetClassObject，刻意不查注册表）；
+    # 这两条走的是系统那条路：DllRegisterServer 真写注册表，再按 CLSID/ProgID 让 COM 自己去找
+    # InprocServer32、装载 DLL —— 也就是 CreateObject / CoCreateInstance 客户实际走的链路。
+    # 断言的形状与理由（读数见 ai/022 D64）：
+    #   - REG_* 四项 + REG_TYPELIB_PATH：CLSID/ProgID/InprocServer32/ThreadingModel 与
+    #     "按 LIBID 找得到类型库"都成立（B17 修掉两条真缺陷才走到这一步：rc.exe 发现面太窄
+    #     ⇒ 库根本没嵌进 DLL；反注册的实参顺序写反 ⇒ 整棵 TypeLib 键静默留着）
+    #   - NAMES=Twice + CALL=Twice result=42：晚绑定按名调用**类的公有成员**（CreateObject 那半）
+    #   - NAMES=Ping hr=0x80020006：契约成员是 Private，类的默认面上点不到 —— 这一条是
+    #     **VB6 语义的应有读数**，不是缺陷；接口成员走下面的早绑定那条
+    #   - COCREATE_IFACE + VTBL_GET_AFTER=42：接口 IID 的 QI/激活交薄指针，按库里 oVft 直调契约槽
+    #   - CLEAN_*=gone：反注册之后 CLSID/ProgID/TypeLib 三类键都不留（用例可重复跑、不脏机器）
+    $comActNeedles = @(
+        "REGSVR hr=0x00000000",
+        "REG_INPROC_PATH=OK",
+        "REG_THREADING=OK Apartment",
+        "REG_PROGID_CLSID=OK {11112222-3333-4444-5555-666677778888}",
+        "REG_TYPELIB_PATH=OK",
+        "PROGID_LOOKUP hr=0x00000000 same=yes",
+        "COCREATE_DISP hr=0x00000000 ptr=OK",
+        "NAMES=Twice hr=0x00000000 dispid=1",
+        "CALL=Twice hr=0x00000000 result=42",
+        "NAMES=Ping hr=0x80020006 dispid=-1",
+        "COCREATE_IFACE hr=0x00000000 ptr=OK",
+        "VTBL_GET_AFTER=42",
+        "UNREGSVR hr=0x00000000",
+        "CLEAN_CLSID=gone",
+        "CLEAN_PROGID=gone",
+        "CLEAN_TYPELIB=gone",
+        "DONE")
+    Test-ComActivate "cc_dll_external_activate" "$Tests\cc_dll\CoDll.vbp" "CoDll" `
+        "{11112222-3333-4444-5555-666677778888}" "CoDll.CImpl" `
+        "{F5CEF988-3217-6173-94B7-BB99C4B8CB81}" $comActNeedles
+    Test-ComActivate "cc_dll_external_activate_x86" "$Tests\cc_dll\CoDll.vbp" "CoDll" `
+        "{11112222-3333-4444-5555-666677778888}" "CoDll.CImpl" `
+        "{F5CEF988-3217-6173-94B7-BB99C4B8CB81}" $comActNeedles "x86"
+    # 真正的外部客户是个**别的进程**：C3 编译的 `tests\cc_dll_client` 不引用 DLL，
+    # CreateObject + 按名调用全走注册表 → IDispatch 晚绑定（test_p613_typelib 那一族的做法）。
+    Test-ComActivateClient "cc_dll_late_client" "$Tests\cc_dll\CoDll.vbp" "CoDll" `
+        "{11112222-3333-4444-5555-666677778888}" "CoDll.CImpl" `
+        "$Tests\cc_dll_client\LateClient.vbp" @("EXT1:OK", "EXT2:OK", "EXT-DONE")
     Test-Vbp "test_vbman" "$Tests\test_vbman\test_vbman.vbp" @("P24-04a:OK", "P24-04b:OK", "P24-04:2/2") -Arch "x86" -RequiresCom "VBMANLIB.cVBMAN"
     $vbpSw.Stop()
     Write-Host "  (vbp/gui tests took $([Math]::Round($vbpSw.Elapsed.TotalSeconds))s)"

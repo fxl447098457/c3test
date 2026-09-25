@@ -63,14 +63,17 @@
 `callconv=stdcall` 与原生返回类型；类型库的位数 flag 跟 `--arch` 走 ⇒ x86 客户端按 4 字节一步读到的
 槽偏移与 x64 的各按自己的指针宽）。生成的**槽表与实现函数在 x86 下一律 `__stdcall`**（x64 单一 ABI 下
 MSVC 忽略该修饰）—— 这就是 COM 规范要求的调用约定，探针按库里那一形状直调槽并拿到返回值（x86/x64
-双验）。仍未交付的：接口值作实参 / 进 `Variant`；**canonical COM 的返回形状**（成员返回 `HRESULT`、
-结果走 `[out, retval]` —— 现在仍是"原生返回类型 + `__stdcall`"，排在 B17）；`New`/`CreateObject`
-的外部激活与注册（B17）。
+双验）。**外部激活也真跑通了**（B17）：`DllRegisterServer` 写注册表之后，按接口 IID
+`CoCreateInstance` 拿到的就是薄指针，外部客户端按库里那一形状直调契约槽得值（x86/x64 各一遍），
+`DllUnregisterServer` 之后 CLSID / ProgID / TypeLib 三类键都不留。仍未交付的：接口值作实参 / 进
+`Variant`；**canonical COM 的返回形状**（成员返回 `HRESULT`、结果走 `[out, retval]`）按 B17 的实测
+**不做** —— 真按库里 `oVft` 直调的客户已经能用，它只有"把接口当 dual 自动化接口"才需要。
 
 跨"进程内薄指针"与"COM 包装器"两个世界的身份：接口 IID 的 `QueryInterface` 现在**交薄指针**（B16
 前交的是 COM 包装器胖指针），且包装器把底座引用交还给最后一个薄引用 —— `IClassFactory::CreateInstance`
 那种"QI 完就 Release 包装器"的规范姿势下，交出去的接口指针不会悬空。同一次 QI 问 `IID_IUnknown`
-拿到的仍是包装器指针（与薄指针是两个值）—— 接成一个是 B17 的活。
+拿到的仍是包装器指针（与薄指针是两个值）—— 这一条仍未接成同一个值：外部客户（`CreateObject`）
+拿到的是包装器，进程内薄指针是另一个表示。
 
 **另见**
 

@@ -1,0 +1,4 @@
+Type=Exe
+Name="LateClient"
+Module=LateMain; LateMain.bas
+Startup="Sub Main"
