@@ -995,6 +995,13 @@ if ($Category -in @("all", "run", "bas")) {
         # --- P5.5 数据类型兼容性测试 ---
     Write-Host "--- Compat Tests (P5.5) ---" -ForegroundColor Yellow
 
+    # Fix 195: Replace 必须返回**完整**结果。原实现无条件用手工 malloc + 字符数长度
+    # 前缀构造结果 BSTR, 而 Windows 下 vb6_BSTR_Len 走 SysStringLen (前缀是字节数) ——
+    # 任何替换成功的结果都被截成一半 (Replace("abc","b","") 得 "a" 而非 "ac"),
+    # 且该内存会被 SysFreeString 释放 → 堆损坏。start>1 时还漏了前缀字符。
+    Add-BasTest "test_replace" "$Tests\test_replace.bas" @(
+        "R1=OK", "R2=OK", "R3=OK", "R4=OK", "R5=OK",
+        "R6=OK", "R7=OK", "R8=OK", "R9=OK", "R10=OK", "REPLACE-DONE")
     Add-BasTest "test_compat" "$Tests\test_compat.bas"
     Add-BasTest "test_types" "$Tests\test_types.bas"
     Add-BasTest "test_control" "$Tests\test_control.bas"
@@ -1171,6 +1178,48 @@ if ($Category -in @("all", "run", "vbp")) {
     # `vb6_SetControlText(hwnd, (BSTR)ListCount)` 直接段错误), 且 List(j) 参与
     # 字符串相等比较要按 BSTR 处理 (RTL 声明是 void* → 曾判成 VariantObject, 比较恒假)。
     Test-Vbp "ctrlprop" "$Tests\ctrlprop\CtrlProp.vbp" @("CP1=2", "CP2=2", "CP3=1", "CP4=2", "CP5=2", "CTRLPROP-DONE")
+
+    # Fix 195: .frx 三种 blob 的真实布局 —— 字符串 (Text) / 字符串表 (List) /
+    # 整数表 (ItemData)。旧 readIntList 按"每项 2B 整数"读 ItemData, 读到的是
+    # 结构的字节本身, 任何工程都解出 1/304/12288 这串恒定假值 → 设计期 ItemData
+    # 编进 exe 一直是垃圾。本用例的 ItemData 取 5/300/-7, 旧实现必错。
+    Test-Vbp "frxdata" "$Tests\frxdata\FrxData.vbp" @(
+        "FD1=alpha|beta", "FD2=3", "FD3=1234", "FD4=5", "FD5=300", "FD6=-7",
+        "FD7=OK", "FRXDATA-DONE")
+
+    # --- Fix 195: 资源引用缺失不得静默, 且 --extract-frx 能把 .frx 取值导成 VB 代码 ---
+    # 背景: VB6 把多行文本/图片甩进同名 .frx, .frm 里只留 `属性 = "X.frx":含偏移`。
+    # .frx 缺失时属性设计期取值被静默丢弃, 编出的 exe 与 VB6 不一致却没提示
+    # (VB6 IDE 自己会写 <窗体>.log 报"文件引用无效")。
+    $frxNoFile = Join-Path $OutDir "frx_nofile"
+    if (Test-Path $frxNoFile) { Remove-Item $frxNoFile -Recurse -Force }
+    New-Item -ItemType Directory -Path $frxNoFile | Out-Null
+    Copy-Item "$Tests\frxdata\FrxData.frm" $frxNoFile
+    Test-CliOk "frx_missing_warn" @(
+        "`"$frxNoFile\FrxData.frm`"", "--output-dir", "`"$frxNoFile`"") "VB4004"
+
+    $frxExDir = Join-Path $OutDir "frx_extract"
+    if (Test-Path $frxExDir) { Remove-Item $frxExDir -Recurse -Force }
+    New-Item -ItemType Directory -Path $frxExDir | Out-Null
+    Copy-Item "$Tests\frxdata\FrxData.frm" $frxExDir
+    Copy-Item "$Tests\frxdata\FrxData.frx" $frxExDir
+    Test-CliOk "frx_extract" @("`"$frxExDir\FrxData.frm`"", "--extract-frx") ".frx.bas"
+
+    # 导出内容: 文本(多行拼接) / 列表项 / 列表项数据 三类都要落到普通 VB 语句上
+    $frxExOut = Join-Path $frxExDir "FrxData.frx.bas"
+    $script:total++
+    Write-Host -NoNewline "  [CLI] frx_extract_content ... "
+    if ((Test-Path $frxExOut) -and
+        (Select-String -Path $frxExOut -Pattern 'Text1\.Text = "alpha" & vbCrLf & "beta"' -Quiet) -and
+        (Select-String -Path $frxExOut -Pattern 'List1\.AddItem "1234"' -Quiet) -and
+        (Select-String -Path $frxExOut -Pattern 'List1\.ItemData\(1\) = 300' -Quiet)) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        if ($Verbose) { Get-Content $frxExOut -ErrorAction SilentlyContinue }
+    }
 
     Test-Vbp "M6Test" "$Tests\M6Test.vbp" @("M6A:OK", "M6B:OK", "M6C:OK", "M6D:OK", "M6 PASSED")
     Test-Vbp "modulemethod" "$Tests\test_modulemethod.vbp" @("30", "21")

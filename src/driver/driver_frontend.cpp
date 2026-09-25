@@ -171,11 +171,38 @@ bool Driver::runParser(const CompileOptions& options) {
             // M22: FrmParser.parse已使用readAndConvertToUtf8, 返回的codeSection是UTF-8
             frmDesc = FrmParser::parse(filePath);
             // P24: 设置 .frx 文件路径 (与 .frm 同目录同名)
+            // Fix 195: 定位规则收进 resolveFrmResourceFile; 找不到时告警而非静默 ——
+            //          原先静默丢弃会让编出的 exe 与 VB6 不一致却毫无提示。
             {
-                auto frxPath = frmDesc.frmFilePath;
-                frxPath.replace_extension(isControlModule ? ".ctx" : (isPropertyPageModule ? ".pgx" : ".frx"));
-                if (std::filesystem::exists(frxPath)) {
+                std::vector<FrmResourceRef> frxRefs;
+                collectFrmResourceRefs(frmDesc.form.formControl, frxRefs);
+
+                std::string fallbackExt = isControlModule ? ".ctx" : (isPropertyPageModule ? ".pgx" : ".frx");
+                auto frxPath = resolveFrmResourceFile(frmDesc, fallbackExt);
+
+                if (!frxPath.empty()) {
                     frmDesc.form.frxFilePath = frxPath;
+                } else if (!frxRefs.empty()) {
+                    // 只列前 6 个属性, 多则省略 (诊断行不该被刷屏)
+                    std::string props;
+                    size_t shown = 0;
+                    for (const auto& ref : frxRefs) {
+                        if (shown == 6) { props += ", ..."; break; }
+                        if (shown) props += ", ";
+                        props += ref.where;
+                        shown++;
+                    }
+                    std::string refFileName = frxRefs.front().fileName.empty()
+                        ? std::filesystem::path(frmDesc.frmFilePath)
+                              .replace_extension(fallbackExt).filename().string()
+                        : frxRefs.front().fileName;
+                    diag_->warn(DiagnosticID::CodeGenFormResourceMissing,
+                        SourceLocation{filePath, 1, 0},
+                        "找不到二进制资源文件 " + refFileName + " (被引用的属性: " + props + ")。"
+                        "这些属性的设计期取值将被忽略, 编出的程序会与 VB6 不一致。"
+                        "该文件由 VB6 保存窗体时自动生成, 请把它与 "
+                        + std::filesystem::path(filePath).filename().string() + " 放在同一目录;"
+                        "或用 C3 --extract-frx 把它的取值导出成 VB 代码, 从此不再需要它。");
                 }
             }
             // Empty designer code is valid; do not feed the header to the VB parser.

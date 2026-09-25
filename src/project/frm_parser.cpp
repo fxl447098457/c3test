@@ -317,4 +317,62 @@ FrmFile FrmParser::parseString(const std::string& content, const std::string& fr
     return frmFile;
 }
 
+// ============================================================
+// Fix 195: 外部二进制资源 (.frx/.ctx/.pgx) 的收集与定位
+// ============================================================
+
+namespace {
+
+void collectRefsInBlocks(const std::vector<FrmPropertyBlock>& blocks,
+                         const std::string& prefix,
+                         std::vector<FrmResourceRef>& out) {
+    for (const auto& blk : blocks) {
+        std::string blkPrefix = prefix + "." + blk.blockName;
+        for (const auto& kv : blk.properties) {
+            if (kv.second.type != FrmValueType::FrxReference) continue;
+            out.push_back({blkPrefix + "." + kv.first, kv.second.frxFile, kv.second.frxOffset,
+                           kv.second.rawText});
+        }
+        collectRefsInBlocks(blk.nestedBlocks, blkPrefix, out);
+    }
+}
+
+} // namespace
+
+void collectFrmResourceRefs(const FrmControl& ctrl, std::vector<FrmResourceRef>& out) {
+    // 控件数组元素在 VB 里写作 `Label1(0)`, 路径里带上索引, 这样 where 本身
+    // 就是一句合法的 VB 左值 (导出器直接照抄)。
+    const std::string self = ctrl.controlName
+        + (ctrl.index >= 0 ? "(" + std::to_string(ctrl.index) + ")" : std::string());
+    for (const auto& kv : ctrl.properties) {
+        if (kv.second.type != FrmValueType::FrxReference) continue;
+        out.push_back({self + "." + kv.first, kv.second.frxFile, kv.second.frxOffset,
+                       kv.second.rawText});
+    }
+    collectRefsInBlocks(ctrl.propertyBlocks, self, out);
+    // 子控件 (含 Frame 内的) 一律按自己的名字拼路径 —— VB6 就是这么寻址的。
+    for (const auto& child : ctrl.children) collectFrmResourceRefs(child, out);
+}
+
+std::filesystem::path resolveFrmResourceFile(const FrmFile& frm,
+                                             const std::string& fallbackExt) {
+    auto candidate = frm.frmFilePath;
+    candidate.replace_extension(fallbackExt);
+
+    std::vector<FrmResourceRef> refs;
+    collectFrmResourceRefs(frm.form.formControl, refs);
+
+    // 1) 属性行里的引用名是权威 —— 且能容忍 .frm 被改名的场景
+    //    (Form1.frm 改名成 Form1_copy.frm 后, 属性里写的仍是 "Form1.frx")
+    if (!refs.empty() && !refs.front().fileName.empty()) {
+        auto named = candidate.parent_path() / refs.front().fileName;
+        std::error_code ec;
+        if (std::filesystem::exists(named, ec)) return named;
+    }
+    // 2) 退回"同基名"
+    std::error_code ec2;
+    if (std::filesystem::exists(candidate, ec2)) return candidate;
+    return {};
+}
+
 } // namespace vb6c3

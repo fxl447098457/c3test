@@ -12,6 +12,7 @@
 #include "driver/rtl_embedded.hpp"
 #include "project/vbp_parser.hpp"
 #include "project/package_manifest.hpp"   // ai/023 S01: 包引用三条硬校验
+#include "project/frx_extract.hpp"        // Fix 195: --extract-frx
 #include <iostream>
 #include <fstream>
 #include <filesystem>
@@ -467,6 +468,55 @@ CompileResult Driver::compile(const CompileOptions& options) {
             std::cerr << "C3: --dump-frm: 未找到.frm文件\n";
         }
     result.success = true;
+        return result;
+    }
+
+    // === Fix 195: .frx 设计期取值 -> VB 代码 ===
+    // 出口 = 生成 <窗体>.frx.bas, 把 .frx 里的设计期数据搬成 Form_Load 里的赋值,
+    // 之后 .frx 可删 (编译期本来就把它内联进 C 代码, exe 从不读它)。
+    if (effectiveOpts.extractFrx) {
+        bool hasFrm = false;
+        for (const auto& srcFile : effectiveOpts.sourceFiles) {
+            std::string lower = srcFile;
+            for (auto& c : lower) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            if (lower.size() < 4 || lower.compare(lower.size() - 4, 4, ".frm") != 0) continue;
+            hasFrm = true;
+
+            auto frm = FrmParser::parse(srcFile);
+            auto frxPath = resolveFrmResourceFile(frm, ".frx");
+            auto exported = frxExtractToVb(frm, frxPath);
+            if (!exported.error.empty()) {
+                std::cerr << "C3: --extract-frx: " << srcFile << ": " << exported.error << "\n";
+                result.errorCount = 1;
+                return result;
+            }
+
+            auto outPath = std::filesystem::path(utf8ToPath(srcFile));
+            outPath.replace_extension(".frx.bas");
+            std::ofstream ofs(outPath, std::ios::binary);
+            if (!ofs.is_open()) {
+                std::cerr << "C3: --extract-frx: 无法写入 " << pathToUtf8(outPath) << "\n";
+                result.errorCount = 1;
+                return result;
+            }
+            ofs << exported.content;
+            ofs.close();
+
+            std::cout << "C3: 已导出 " << exported.assignmentCount << " 条赋值 -> "
+                      << pathToUtf8(outPath) << "\n";
+            // 大工程可能有几十上百个图片资源, 控制台只提示前几条, 全量清单在生成的文件里
+            for (size_t si = 0; si < exported.skipped.size() && si < 6; ++si) {
+                std::cout << "C3:   需手工处理: " << exported.skipped[si] << "\n";
+            }
+            if (exported.skipped.size() > 6) {
+                std::cout << "C3:   (另有 " << (exported.skipped.size() - 6)
+                          << " 项需手工处理, 清单见生成文件)\n";
+            }
+        }
+        if (!hasFrm) {
+            std::cerr << "C3: --extract-frx: 未找到.frm文件\n";
+        }
+        result.success = result.errorCount == 0;
         return result;
     }
 

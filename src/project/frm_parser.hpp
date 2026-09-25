@@ -159,6 +159,32 @@ struct FrmFile {
 };
 
 // ============================================================
+// Fix 195: 外部二进制资源引用 (.frx/.ctx/.pgx)
+// ============================================================
+// VB6 的行式设计器格式 (Begin/End + `键 = 值`) 无法表达多行文本与二进制图片,
+// 于是把这类属性值甩进同名资源文件, .frm 里只留 `Text = "Form1.frx":0000` 的
+// 字节偏移引用。资源缺失时这些属性的设计期取值会被静默丢弃 —— 所以解析与
+// 定位这两件事必须只有一份实现 (前端告警、--extract-frx 都走这里)。
+
+struct FrmResourceRef {
+    std::string where;      // 属性路径, 如 "Text1.Text" / "List1.Images.ListImage1.Picture"
+    std::string fileName;   // 属性行里写的文件名, 如 "Form1.frx"
+    size_t offset = 0;      // 该属性数据在资源文件里的字节偏移
+    std::string rawText;    // 属性行右侧原文, 如 "\"Form1.frx\":0000" (供导出器列出待删行)
+};
+
+// 递归收集 (含子控件 / BeginProperty 块 / 嵌套块) 的所有资源引用。
+// 路径按 VB6 的控件寻址习惯拼: 控件名 + 属性名 (不叠父控件名, Frame 里的控件
+// 在 VB6 里也是直接按自己的名字访问的)。
+void collectFrmResourceRefs(const FrmControl& ctrl,
+                            std::vector<FrmResourceRef>& out);
+
+// 定位资源文件: 优先用属性行里的引用名 (权威, 且能容忍 .frm 被改名),
+// 再退回 <窗体基名> + fallbackExt。都找不到返回空 path。
+std::filesystem::path resolveFrmResourceFile(const FrmFile& frm,
+                                             const std::string& fallbackExt);
+
+// ============================================================
 // .frm 解析器
 // ============================================================
 
