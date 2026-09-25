@@ -193,6 +193,27 @@ void CCodeGen::visit(CallStmt& node) {
         // COM调用检测 (P6.2): isComMarker_标志
         if (isComMarker_) {
             isComMarker_ = false;
+            // P20-39: ImageList 原生复刻 —— **无实参**的 `ImageList1.ListImages.Clear`
+            // 走不到 visit(IndexOrCallExpr&), 是在这条语句路径上收尾的。这里必须同样拦一道,
+            // 否则掉回 vb6_ComCall(vb6_ComGetObjectProp(...), L"Clear", NULL, 0) 的假 IDispatch。
+            // (cgen_expr_call_com_bind.inc 那条管带实参的 Add/Remove, 两条并行, 别只挂一头。)
+            if (imageListNameOfExpr(comObjExpr_) != ""
+                && Symbol::toLower(comMemberName_) == "clear") {
+                std::string ilSlot = "vb6_com_" + imageListNameOfExpr(comObjExpr_);
+                comObjExpr_.clear();
+                comMemberName_.clear();
+                c_.emitLine("vb6_ImageList_ClearImages((void*)" + ilSlot + ");");
+                return;
+            }
+            // P20-40: 同款 —— `StatusBar1.Panels.Clear` 无实参, 也必须在这条语句路径收尾。
+            if (statusBarNameOfExpr(comObjExpr_) != ""
+                && Symbol::toLower(comMemberName_) == "clear") {
+                std::string sbHwnd = "vb6_hwnd_" + statusBarNameOfExpr(comObjExpr_);
+                comObjExpr_.clear();
+                comMemberName_.clear();
+                c_.emitLine("vb6_StatusBar_ClearPanels((void*)" + sbHwnd + ");");
+                return;
+            }
             // Fix 086: 无括号的控件方法调用 (List1.Clear) — 与 IndexOrCallExpr
             // 的 P13.3 处理一致, 生成 vb6_ClearList(vb6_hwnd_Listx), 而非
             // vb6_ComCall(list1,...) 裸控制名 (C2065).

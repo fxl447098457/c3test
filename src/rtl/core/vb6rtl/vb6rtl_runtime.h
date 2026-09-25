@@ -31,6 +31,9 @@ int32_t vb6_PA_UBound(SAFEARRAY* psa);
 int32_t vb6_PA_LBound(SAFEARRAY* psa);
 
 void vb6_Init(void);
+// comctl32 通用控件引导 (ProgressBar/StatusBar/Toolbar/ListView/TreeView 依赖)。
+// 由 vb6_Init 自己调用; 这里额外声明以便其它 RTL 单元直接使用。
+void vb6_ComCtl_Init(void);
 void vb6_Exit(void);
 void vb6_End(void);
 void vb6_Beep(void);

@@ -152,6 +152,19 @@ enum RtlResourceID {
     // Fix 160y: DI 转发桩未带 vb6_di_lib 标记的杂项符号 (Imm 输入法 / version /
     // TransparentBlt / msvbvm60 运行时) — gen_di_stubs.ps1 归入 unknown 族
     RTL_VB6_DI_UNKNOWN_STUBS_C             = 205,
+
+    // P20-38: VB6 ProgressBar 控件 (msctls_progress32 复刻, 不加载 mscomctl.ocx)
+    RTL_VB6FORMS_PROGRESS_C                = 206,
+    RTL_VB6FORMS_IMAGELIST_C               = 207,
+
+    // P20-40: VB6 StatusBar 控件 (msctls_status32 复刻, 不加载 mscomctl.ocx)
+    RTL_VB6FORMS_STATUSBAR_C               = 208,
+
+    // P20-42: VB6 SSTab 控件 (SysTabControl32 复刻, 不加载 TABCTL32.OCX)
+    RTL_VB6FORMS_SSTAB_C                   = 209,
+
+    // P20-44: OLE 拖放 (IDataObject/IDropSource/IDropTarget 复刻)
+    RTL_VB6FORMS_OLEDD_C                   = 210,
 };
 
 // Session directory manager

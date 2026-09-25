@@ -21,6 +21,159 @@ std::string CCodeGen::resolveComValue(const std::string& unpackType) {
     std::string objExpr = std::move(comObjExpr_);
     std::string memberName = std::move(comMemberName_);
 
+    // P20-39: ImageList 原生复刻 —— 把集合/属性读改道到 RTL。
+    // 放在两个 COM 分支**之前**, 否则 Count 会走默认 BSTR 解包、Key 会走 ComCallObject。
+    {
+        std::string memLower = memberName;
+        std::transform(memLower.begin(), memLower.end(), memLower.begin(), ::tolower);
+        std::string slot = imageListSlotVarOfExpr(objExpr);
+        if (slot.empty()) { }
+        else if (memLower == "count") {
+            lastExpr_ = "vb6_GetImageListCount((void*)" + slot + ")";
+            isComMarker_ = false;
+            return lastExpr_;
+        } else {
+            // ListImages(i).Key / .Index: 从 Item 的第一个实参里抠下标 (只支持字面量)
+            std::string num;
+            std::string argTxt;   // Item 的实参原文, 下标/Key 两路都要用, 提到外层留着
+            size_t ia = objExpr.find("L\"Item\", (void*[]){");
+            if (ia != std::string::npos) {
+                size_t open = ia + strlen("L\"Item\", (void*[]){");
+                size_t close = objExpr.find('}', open);
+                argTxt = objExpr.substr(open, close - open);
+                // 形如 "vb6_ComPackInt(1)" 或直接的 "1": 抠 '(' 之后到 ')' / ',' 之前
+                size_t lp = argTxt.find('(');
+                if (lp != std::string::npos) {
+                    size_t end = argTxt.find_first_of("),", lp + 1);
+                    num = (end == std::string::npos) ? argTxt.substr(lp + 1)
+                                                     : argTxt.substr(lp + 1, end - lp - 1);
+                } else {
+                    num = argTxt;
+                }
+                bool isNum = !num.empty();
+                for (char c : num) if (!isdigit((unsigned char)c)) { isNum = false; break; }
+                if (!isNum) num.clear();
+            }
+            // `ListImages("SomeKey")` 是 VB6 的按 Key 取项, 实参是宽字符串不是下标。
+            // 同一条 Item 实参两种形态都得认, 否则掉回假 IDispatch 路径。
+            std::string keyLit;
+            if (num.empty()) {
+                size_t qs = argTxt.find("L\"");
+                if (qs != std::string::npos) {
+                    size_t qe = argTxt.find('"', qs + 2);
+                    if (qe != std::string::npos) {
+                        keyLit = argTxt.substr(qs + 2, qe - qs - 2);
+                        // 转义引号收尾 (VB6 `""` 在 C 里就是 `\"`)
+                        if (!keyLit.empty() && keyLit.back() == '\\') keyLit.pop_back();
+                    }
+                }
+            }
+            if (!num.empty() && memLower == "key") {
+                lastExpr_ = "vb6_GetImageListKeyAt((void*)" + slot + ", " + num + ")";
+                isComMarker_ = false;
+                return lastExpr_;
+            }
+            if (!num.empty() && memLower == "index") {   // ListImage.Index (1 基)
+                lastExpr_ = "vb6_ImageListIndexAt((void*)" + slot + ", " + num + ")";
+                isComMarker_ = false;
+                return lastExpr_;
+            }
+            if (!keyLit.empty() && memLower == "key") {
+                lastExpr_ = "vb6_GetImageListKeyByKey((void*)" + slot
+                          + ", (const wchar_t*)(vb6_BSTR_FromStr(L\"" + keyLit + "\")))";
+                isComMarker_ = false;
+                return lastExpr_;
+            }
+            if (!keyLit.empty() && memLower == "index") {
+                lastExpr_ = "vb6_ImageListIndexByKey((void*)" + slot
+                          + ", (const wchar_t*)(vb6_BSTR_FromStr(L\"" + keyLit + "\")))";
+                isComMarker_ = false;
+                return lastExpr_;
+            }
+        }
+    }
+
+    // P20-40: StatusBar 原生复刻 —— Panels.Count 与 Panels(i).成员 改道到 RTL。
+    // 与上面 ImageList 分支同一套手法, 只是槽是 HWND、下标要从 Item 实参里抠。
+    {
+        std::string memLower = memberName;
+        std::transform(memLower.begin(), memLower.end(), memLower.begin(), ::tolower);
+        std::string hwnd = statusBarHwndVarOfExpr(objExpr);
+        if (!hwnd.empty()) {
+            if (memLower == "count") {
+                lastExpr_ = "vb6_StatusBar_GetPanelsCount((void*)" + hwnd + ")";
+                isComMarker_ = false;
+                return lastExpr_;
+            }
+            // 抠 Item 的实参: 字面量下标, 或 `Panels("Key")` 那种宽字符串 Key。
+            // 注意没有独立的 `L"Item"` 层 —— Panels 被生成器当**默认成员**, 索引跟着
+            // 它那一层的 `(void*[]){…}` 走, 所以按参数包抠再剥 vb6_ComPackInt(...)。
+            std::string idx;
+            std::string keyLit;
+            const std::string kArr = "(void*[]){";
+            size_t ia = objExpr.find(kArr);
+            if (ia != std::string::npos) {
+                size_t open = ia + kArr.size();
+                size_t close = objExpr.find('}', open);
+                if (close != std::string::npos) {
+                    std::string argTxt = objExpr.substr(open, close - open);
+                    size_t lp = argTxt.find('(');
+                    if (lp != std::string::npos) {
+                        size_t end = argTxt.find_first_of("),", lp + 1);
+                        idx = (end == std::string::npos) ? argTxt.substr(lp + 1)
+                                                         : argTxt.substr(lp + 1, end - lp - 1);
+                    } else {
+                        idx = argTxt;
+                    }
+                    bool isNum = !idx.empty();
+                    for (char c : idx) if (!isdigit((unsigned char)c)) { isNum = false; break; }
+                    if (!isNum) idx.clear();
+                    if (idx.empty()) {
+                        size_t qs = argTxt.find("L\"");
+                        if (qs != std::string::npos) {
+                            size_t qe = argTxt.find('"', qs + 2);
+                            if (qe != std::string::npos)
+                                keyLit = argTxt.substr(qs + 2, qe - qs - 2);
+                        }
+                    }
+                }
+            }
+            auto sbGet = [&](const char* fn) {
+                return std::string(fn) + "((void*)" + hwnd + ", " + idx + ")";
+            };
+            // Key 形态走 *ByKey 两路之一, 没抠出下标就退回按下标那版 (下标为空串时
+            // RTL 会越界, 宁可编译期宁可什么都不发也别发坏代码 —— 这里退化成按 Key 查)。
+            auto sbFinishByKey = [&](const char* byIdx, const char* byKey) {
+                isComMarker_ = false;
+                if (!keyLit.empty())
+                    lastExpr_ = std::string(byKey) + "((void*)" + hwnd
+                              + ", (const wchar_t*)(vb6_BSTR_FromStr(L\"" + keyLit + "\")))";
+                else
+                    lastExpr_ = std::string(byIdx) + "((void*)" + hwnd + ", " + idx + ")";
+                return lastExpr_;
+            };
+            if (memLower == "key")   { lastExpr_ = sbFinishByKey("vb6_StatusBar_GetPanelKey",
+                                                                  "vb6_StatusBar_GetPanelKeyByKey");
+                                       isComMarker_ = false; return lastExpr_; }
+            if (memLower == "text")  { lastExpr_ = sbFinishByKey("vb6_StatusBar_GetPanelText",
+                                                                  "vb6_StatusBar_GetPanelTextByKey");
+                                       isComMarker_ = false; return lastExpr_; }
+            if (memLower == "index") { lastExpr_ = sbFinishByKey("vb6_StatusBar_GetPanelIndexByKey",
+                                                                  "vb6_StatusBar_GetPanelIndexByKey");
+                                       isComMarker_ = false; return lastExpr_; }
+            if (memLower == "width")        { lastExpr_ = sbGet("vb6_StatusBar_GetPanelWidth");
+                                              isComMarker_ = false; return lastExpr_; }
+            if (memLower == "minwidth")     { lastExpr_ = sbGet("vb6_StatusBar_GetPanelMinWidth");
+                                              isComMarker_ = false; return lastExpr_; }
+            if (memLower == "autosize")     { lastExpr_ = sbGet("vb6_StatusBar_GetPanelAutoSize");
+                                              isComMarker_ = false; return lastExpr_; }
+            if (memLower == "style")        { lastExpr_ = sbGet("vb6_StatusBar_GetPanelStyle");
+                                              isComMarker_ = false; return lastExpr_; }
+            if (memLower == "tooltiptext")  { lastExpr_ = sbGet("vb6_StatusBar_GetPanelToolTip");
+                                              isComMarker_ = false; return lastExpr_; }
+        }
+    }
+
     // P24-07: 早期绑定推断 — 利用TypeLib签名的returnType决策
     if (isEarlyBoundCom_ && earlyBoundSym_) {
         isEarlyBoundCom_ = false;

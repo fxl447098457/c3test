@@ -119,19 +119,59 @@ void vb6_EnumRelease(void* penum) {
     pEnum->lpVtbl->Release(pEnum);
 }
 
-// P21-18: LoadPictureEx - OleLoadPicturePath for all image types
+// ============================================================
+// LoadPicture 相关
+// 纪律: LoadPicture 返回的是 **VB6 的 StdPicture 对象** (实现 IPicture + IPictureDisp,
+// 即 IDispatch*), 是一个**活着的 COM 对象** —— 不是"Release 掉只剩句柄"的残骸。
+// 调用方 (ImageList.ListImages.Add 等) 要拿它 AddRef 后长期持有, 镜像 VB6 里
+// ListImage.Picture 会 keep 一份引用的行为。谁 AddRef 谁在不用时 vb6_ReleasePicture。
+// ============================================================
+
+// OleInitialize 必须至少成功调过一次, 否则 OleLoadPicturePath 静默失败。
+// 0=还没试过 / 1=OleInitialize 成 / 2=退化为 CoInitialize
+static int vb6_OleEnsureInit(void) {
+    static int oleInited = 0;
+    if (oleInited) return oleInited;
+    if (SUCCEEDED(OleInitialize(NULL))) {
+        oleInited = 1;
+    } else {
+        CoInitialize(NULL);
+        oleInited = 2;
+    }
+    return oleInited;
+}
+
+// P21-18: LoadPictureEx — OleLoadPicturePath for all image types (BMP/ICO/EMF/WMF/JPG/GIF/PNG)
+// 返回活着的 IPicture* (带一次引用); 失败返回 NULL。用完请 vb6_ReleasePicture。
 void* vb6_LoadPictureEx(BSTR pathname) {
     if (!pathname) return NULL;
+    vb6_OleEnsureInit();
     IPicture* pPicture = NULL;
     HRESULT hr = OleLoadPicturePath(pathname, NULL, 0, 0, &IID_IPicture, (void**)&pPicture);
-    if (FAILED(hr)) return NULL;
-    OLE_HANDLE hHandle = 0;
-    pPicture->lpVtbl->get_Handle(pPicture, &hHandle);
-    /* Note: we release IPicture but the HBITMAP handle remains valid while
-       the picture is kept by GDI. For a more correct implementation we'd
-       DuplicateHandle, but this matches VB6's LoadPicture behavior well enough. */
-    pPicture->lpVtbl->Release(pPicture);
-    return (void*)(intptr_t)hHandle;
+    if (FAILED(hr) || !pPicture) return NULL;
+    return (void*)pPicture;
+}
+
+// 从活着的 IPicture 里取图形句柄 (不销毁 picture 本身)。
+// *kind 出 1=BITMAP 2=METAFILE 3=ICON (IPicture::Type 的 PICTTYPE 取值), 可不传 NULL。
+// 注意 IPicture::Handle 在对象存活期才有效, 别把句柄单独存起来脱离 picture。
+void* vb6_PictureHandleOf(void* picture, int32_t* kind) {
+    if (!picture) return NULL;
+    IPicture* p = (IPicture*)picture;
+    OLE_HANDLE h = 0;
+    if (p->lpVtbl->get_Handle(p, &h) != S_OK || !h) return NULL;
+    if (kind) {
+        short t = 0;
+        if (p->lpVtbl->get_Type(p, &t) == S_OK) *kind = (int32_t)t;
+        else *kind = 1;
+    }
+    return (void*)(intptr_t)h;
+}
+
+// 释放 LoadPicture 返回的 picture 对象 (Release)。
+void vb6_ReleasePicture(void* picture) {
+    if (!picture) return;
+    ((IPicture*)picture)->lpVtbl->Release((IPicture*)picture);
 }
 
 // ============================================================

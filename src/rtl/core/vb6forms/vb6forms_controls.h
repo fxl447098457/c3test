@@ -13,6 +13,19 @@ extern "C" {
 // 动态加载控件 (Controls.Add)
 // ============================================================
 
+// msctls_status32 的窗口类。comctl32 在本机 (v5.82 / v6) 实际**不注册**这个类,
+// 由 RTL 自己补一个同名的真窗口类 (SB_* 契约 + 自绘), 已注册就跳过。
+void vb6_StatusBar_RegisterClass(void);
+
+// ============================================================
+// comctl32 通用控件引导 (ProgressBar/StatusBar/Toolbar/ListView/TreeView 依赖)
+// 必须在任何 CreateWindowExW 通用控件类之前调用, 否则 "msctls_progress32"
+// 等类未注册 → CreateWindowExW 失败但**不报错** (GetLastError 才是 1400),
+// 表现为"控件凭空消失"。由生成的 WinMain 经 vb6_Init() 调用。
+// 幂等, 失败静默 (comctl32 缺失的极端环境下退化为老式控件/缺失)。
+// ============================================================
+void vb6_ComCtl_Init(void);
+
 // 设置Form窗口的IDispatch指针 (Form创建后调用)
 // 用于 Me.Controls.Add 等 COM 属性访问
 void vb6_Form_SetDispatch(void* hwnd, void* pDispatch);

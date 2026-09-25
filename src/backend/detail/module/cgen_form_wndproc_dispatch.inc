@@ -41,6 +41,60 @@
     c_.dedent();
     c_.emitLine("}");
 
+    // ============================================================
+    // P20-42: WM_NOTIFY —— C3 此前**一个 WM_NOTIFY 分支都没有**。
+    // comctl32 的通用控件 (SysTabControl32 等) 不用 WM_COMMAND 报事件, 一律走
+    // WM_NOTIFY: lParam 指向 NMHDR{hwndFrom, idFrom, code}。
+    // 这里只接 SSTab 的 TCN_SELCHANGE (code = -551): 交给 RTL 换算成"切换前的
+    // 页号"并刷新子控件可见性, 再把该值作为参数调 <控件名>_Click。
+    // ============================================================
+    {
+        bool anyNotify = false;
+        for (const auto& ctrl : frmDesc.formControl.children) {
+            if (ctrl.controlType != FrmControlType::SSTab) continue;
+            if (!symTab_.lookup(ctrl.controlName + "_Click")) continue;
+            anyNotify = true;
+            break;
+        }
+        if (anyNotify) {
+            c_.emitLine("case WM_NOTIFY: {");
+            c_.indent();
+            c_.emitLine("if (vb6_formLoading_" + cIdent(formName) + ") break;  /* block events during form init */");
+            c_.emitLine("NMHDR* pNM42 = (NMHDR*)lParam;");
+            c_.emitLine("if (!pNM42) break;");
+            for (const auto& ctrl : frmDesc.formControl.children) {
+                if (ctrl.controlType != FrmControlType::SSTab) continue;
+                auto* clickSym = symTab_.lookup(ctrl.controlName + "_Click");
+                if (!clickSym) continue;
+                std::string clickFn = cProcName(clickSym->name, AccessLevel::Private);
+                std::string ctlNLower = ctrl.controlName;
+                std::transform(ctlNLower.begin(), ctlNLower.end(), ctlNLower.begin(), ::tolower);
+                std::string hwndVar = knownControlArrays_.count(ctlNLower)
+                    ? ("vb6_CtrlArr_GetAt(&vb6_arr_" + cIdent(ctrl.controlName) + ", 0)")
+                    : ("vb6_hwnd_" + cIdent(ctrl.controlName));
+                // TCN_SELCHANGE = -551 (TCN_FIRST=-550, TCN_SELCHANGE=TCN_FIRST-1)
+                c_.emitLine("if (pNM42->code == -551 && (void*)pNM42->hwndFrom == "
+                            + hwndVar + ") {");
+                c_.indent();
+                c_.emitLine("extern void " + clickFn + "(int16_t*);");
+                c_.emitLine("int16_t vb6_prev42 = (int16_t)vb6_SSTab_OnSelChange((void*)"
+                            + hwndVar + ");");
+                // 页号没变就不触发: 重建标签项 (Tabs/TabVisible 改动后) 时 comctl32
+                // 会自发一条 prev==cur 的噪声 TCN_SELCHANGE, VB6 语义里"没切换"不算 Click。
+                c_.emitLine("if (vb6_prev42 != (int16_t)vb6_SSTab_GetTab((void*)"
+                            + hwndVar + ")) {");
+                c_.indent();
+                c_.emitLine(clickFn + "(&vb6_prev42);");
+                c_.dedent();
+                c_.emitLine("}");
+                c_.dedent();
+                c_.emitLine("}");
+            }
+            c_.emitLine("break;");
+            c_.dedent();
+            c_.emitLine("}");
+        }
+    }
 
     // WM_CLOSE: 调用Form_Unload判断是否允许关闭
     c_.emitLine("case WM_CLOSE: {");
@@ -154,6 +208,16 @@
         }
         if (postQuit) {
             c_.emitLine("PostQuitMessage(0);  /* Fix 144: 仅启动窗体结束消息循环 */");
+        }
+    }
+    // P20-43: Form_Terminate —— VB6 语义是"窗体实例被销毁时最后触发"。
+    // 挂在 WM_DESTROY 里、PostQuitMessage 之前, 这是窗体生命周期的最后一站。
+    {
+        auto* termSym43 = symTab_.lookup(formName + "_Terminate");
+        if (!termSym43) termSym43 = symTab_.lookup("Form_Terminate");
+        if (termSym43) {
+            std::string termFn43 = cProcName(termSym43->name, AccessLevel::Private);
+            c_.emitLine("{ extern void " + termFn43 + "(); " + termFn43 + "(); }");
         }
     }
     c_.emitLine("break;");
@@ -274,6 +338,13 @@
         bool hasMouseDown = symTab_.lookup(formName + "_MouseDown") || symTab_.lookup("Form_MouseDown");
         bool hasMouseUp = symTab_.lookup(formName + "_MouseUp") || symTab_.lookup("Form_MouseUp");
         bool hasMouseMove = symTab_.lookup(formName + "_MouseMove") || symTab_.lookup("Form_MouseMove");
+        // P20-43: Form_Click —— VB6 在"按下并抬起"时触发。WM_LBUTTONUP 与 MouseUp
+        // 是同一条消息, **不能各自发一个 case** (C2196 case 值重复), 必须并进同一组:
+        // 有 MouseUp 处理器就共用它那组 case, 在里面补一次 Click 调用。
+        auto* clickSym43 = symTab_.lookup(formName + "_Click");
+        if (!clickSym43) clickSym43 = symTab_.lookup("Form_Click");
+        bool hasFormClick43 = clickSym43 != nullptr;
+        std::string formClickFn43 = hasFormClick43 ? cProcName(clickSym43->name, AccessLevel::Private) : std::string();
         if (hasMouseDown) {
             c_.emitLine("case WM_LBUTTONDOWN: case WM_RBUTTONDOWN: case WM_MBUTTONDOWN: {");
             c_.indent();
@@ -288,7 +359,7 @@
             c_.dedent();
             c_.emitLine("}");
         }
-        if (hasMouseUp) {
+        if (hasMouseUp || hasFormClick43) {
             c_.emitLine("case WM_LBUTTONUP: case WM_RBUTTONUP: case WM_MBUTTONUP: {");
             c_.indent();
             c_.emitLine("{ int16_t vb6_button = 0; int16_t vb6_shift = 0;");
@@ -297,7 +368,13 @@
             c_.emitLine("else if (msg == WM_MBUTTONUP) vb6_button = 4;");
             c_.emitLine("if (wParam & MK_SHIFT) vb6_shift |= 1; if (wParam & MK_CONTROL) vb6_shift |= 2; if (GetKeyState(VK_MENU) & 0x8000) vb6_shift |= 4;");
             c_.emitLine("float vb6_x = (float)(int16_t)LOWORD(lParam); float vb6_y = (float)(int16_t)HIWORD(lParam);");
-            c_.emitLine("extern void " + mouseUpFn + "(int16_t*, int16_t*, float*, float*); " + mouseUpFn + "(&vb6_button, &vb6_shift, &vb6_x, &vb6_y); }");
+            if (hasMouseUp) {
+                c_.emitLine("extern void " + mouseUpFn + "(int16_t*, int16_t*, float*, float*); " + mouseUpFn + "(&vb6_button, &vb6_shift, &vb6_x, &vb6_y); }");
+            }
+            // P20-43: 同一条消息里补 Form_Click (有处理器才发)
+            if (hasFormClick43) {
+                c_.emitLine("{ extern void " + formClickFn43 + "(); " + formClickFn43 + "(); }");
+            }
             c_.emitLine("break;");
             c_.dedent();
             c_.emitLine("}");
@@ -317,8 +394,13 @@
     }
     // P18-B: Form_DblClick (WM_LBUTTONDBLCLK)
     {
-        std::string dblClickFn = cProcName(formName + "_DblClick", AccessLevel::Private);
-        if (symTab_.lookup(formName + "_DblClick") || symTab_.lookup("Form_DblClick")) {
+        // P20-43: 调用名必须取**符号真名**。此前写死 formName + "_DblClick",
+        // 而用户写的是 `Form_DblClick` → 定义落在 vb6_Form_DblClick, 调用却发
+        // vb6_<窗体名>_DblClick → LNK2019 (与 Activate 同一处缺陷)。
+        auto* dblSym43 = symTab_.lookup(formName + "_DblClick");
+        if (!dblSym43) dblSym43 = symTab_.lookup("Form_DblClick");
+        std::string dblClickFn = dblSym43 ? cProcName(dblSym43->name, AccessLevel::Private) : std::string();
+        if (dblSym43) {
             c_.emitLine("case WM_LBUTTONDBLCLK: {");
             c_.indent();
             c_.emitLine("extern void " + dblClickFn + "(); " + dblClickFn + "();");
@@ -329,17 +411,23 @@
     }
     // P18-B: WM_ACTIVATE -> Form_Activate/Deactivate
     {
-        std::string activateFn = cProcName(formName + "_Activate", AccessLevel::Private);
-        std::string deactivateFn = cProcName(formName + "_Deactivate", AccessLevel::Private);
-        bool hasActivate = symTab_.lookup(formName + "_Activate") || symTab_.lookup("Form_Activate");
-        bool hasDeactivate = symTab_.lookup(formName + "_Deactivate") || symTab_.lookup("Form_Deactivate");
+        // P20-43: 同 DblClick —— 调用名取符号真名。写死 formName + "_Activate"
+        // 会让 `Form_Activate` 的定义 (vb6_Form_Activate) 连不上 → LNK2019。
+        auto* actSym43 = symTab_.lookup(formName + "_Activate");
+        if (!actSym43) actSym43 = symTab_.lookup("Form_Activate");
+        auto* deactSym43 = symTab_.lookup(formName + "_Deactivate");
+        if (!deactSym43) deactSym43 = symTab_.lookup("Form_Deactivate");
+        bool hasActivate = actSym43 != nullptr;
+        bool hasDeactivate = deactSym43 != nullptr;
         if (hasActivate || hasDeactivate) {
             c_.emitLine("case WM_ACTIVATE: {");
             c_.indent();
             if (hasActivate) {
+                std::string activateFn = cProcName(actSym43->name, AccessLevel::Private);
                 c_.emitLine("if (LOWORD(wParam) != WA_INACTIVE) { extern void " + activateFn + "(); " + activateFn + "(); }");
             }
             if (hasDeactivate) {
+                std::string deactivateFn = cProcName(deactSym43->name, AccessLevel::Private);
                 c_.emitLine("if (LOWORD(wParam) == WA_INACTIVE) { extern void " + deactivateFn + "(); " + deactivateFn + "(); }");
             }
             c_.emitLine("break;");
@@ -347,6 +435,38 @@
             c_.emitLine("}");
         }
     }
+    // ============================================================
+    // P20-43: 补齐窗体常用事件 (调用名一律取**符号真名**, 与 Activate 同一修法)。
+    // ============================================================
+    // Form_Paint (WM_PAINT) —— **已有**: create.inc 的 WM_PAINT 分支里
+    // (BeginPaint/EndPaint 之间, 还捎带 OCX 绘制), 那边的命名 bug 已一并修掉,
+    // 这里不能再发一个 case, 否则 C2196 case 值重复。
+    // Form_GotFocus / Form_LostFocus (WM_SETFOCUS / WM_KILLFOCUS)
+    {
+        auto* gotSym43 = symTab_.lookup(formName + "_GotFocus");
+        if (!gotSym43) gotSym43 = symTab_.lookup("Form_GotFocus");
+        auto* lostSym43 = symTab_.lookup(formName + "_LostFocus");
+        if (!lostSym43) lostSym43 = symTab_.lookup("Form_LostFocus");
+        if (gotSym43) {
+            std::string gotFn43 = cProcName(gotSym43->name, AccessLevel::Private);
+            c_.emitLine("case WM_SETFOCUS: {");
+            c_.indent();
+            c_.emitLine("{ extern void " + gotFn43 + "(); " + gotFn43 + "(); }");
+            c_.emitLine("break;");
+            c_.dedent();
+            c_.emitLine("}");
+        }
+        if (lostSym43) {
+            std::string lostFn43 = cProcName(lostSym43->name, AccessLevel::Private);
+            c_.emitLine("case WM_KILLFOCUS: {");
+            c_.indent();
+            c_.emitLine("{ extern void " + lostFn43 + "(); " + lostFn43 + "(); }");
+            c_.emitLine("break;");
+            c_.dedent();
+            c_.emitLine("}");
+        }
+    }
+
     // P24-Timer: WM_TIMER分发 (窗口关联定时器触发)
     c_.emitLine("case WM_TIMER: {");
     c_.indent();

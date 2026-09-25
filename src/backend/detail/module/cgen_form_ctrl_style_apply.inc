@@ -28,6 +28,11 @@
         constexpr long kEsAutoV    = 0x00000040L;  // ES_AUTOVSCROLL
         constexpr long kWsHscroll  = 0x00100000L;  // WS_HSCROLL
         constexpr long kWsVscroll  = 0x00200000L;  // WS_VSCROLL
+        // P20-40: StatusBar — SBARS_SIZEGRIP/SBARS_TOOLTIPS 是 commctrl.h 的类专属样式
+        // (不是 WS_*, 但仍要进 CreateWindow 的 style 参数)。RTL 自己算面板文本,
+        // 故这里只给 sizegrip (与 VB6 默认观感一致), tooltip 由 RTL 存着不激活。
+        constexpr long kSbarsGrip  = 0x00000100L;  // SBARS_SIZEGRIP
+        constexpr long kSbarsTip   = 0x00000800L;  // SBARS_TOOLTIPS
 
         // Fix 124: WS_CLIPSIBLINGS —— 标准控件与 UC 宿主同层叠放时,
         // 重绘不得画到上层兄弟控件上 (否则出现"控件被其他控件擦掉")。
@@ -129,6 +134,20 @@
                 // VB6 Image: STATIC + SS_BITMAP + SS_CENTERIMAGE (no border)
                 style |= kSsBitmap | kSsCenterImg;
                 createCaption = "";
+                break;
+            case FrmControlType::ProgressBar:
+                // VB6 ProgressBar 无标题; 外观属性 (Orientation/Scrolling) 由
+                // vb6_InitProgressBar 在窗口创建后改写 GWL_STYLE, 这里只给默认水平。
+                createCaption = "";
+                break;
+            case FrmControlType::StatusBar:  // P20-40: msctls_status32
+                style |= kSbarsGrip;
+                createCaption = "";   // 面板文本走 SB_SETTEXTW, 创建时不给标题
+                break;
+            case FrmControlType::SSTab:      // P20-42: SysTabControl32
+                // 位置/外观类 TCS_* 由 vb6_SSTab_Init 在窗口创建后改写 GWL_STYLE
+                // (创建时读设计期属性容易与"未写即默认"的口径打架), 这里只给基类样式。
+                createCaption = "";   // 页标题走 TCM_INSERTITEM, 创建时不给标题
                 break;
             default:
                 break;
@@ -247,6 +266,193 @@
         } else if (ctrl.controlType == FrmControlType::FileListBox) {
             c_.emitLine("{ wchar_t _p" + cIdent(ctrl.controlName) + "[MAX_PATH]; GetCurrentDirectoryW(MAX_PATH, _p" + cIdent(ctrl.controlName) + ");");
             c_.emitLine("  vb6_FileListBoxSetPath((void*)vb6_hwnd_" + cIdent(ctrl.controlName) + ", _p" + cIdent(ctrl.controlName) + "); }");
+        }
+
+        // ProgressBar 设计期属性 (Min/Max/Value/Orientation/Scrolling)。
+        // 未写进 .frm 的传 -1 表示"用 VB6 默认" (Min=0 / Max=100 / Value=0 / 水平 / 分块)。
+        // 注意 VB6 序列化 ProgressBar 时常见 `Value = -10` (控件默认值的内部表示),
+        // 这里一并当作未指定处理, 由 RTL 钳位到 0 —— 与 VB6 运行时的实际读数一致。
+        if (ctrl.controlType == FrmControlType::ProgressBar) {
+            std::string pbNLower = ctrl.controlName;
+            std::transform(pbNLower.begin(), pbNLower.end(), pbNLower.begin(), ::tolower);
+            std::string pbHwnd = knownControlArrays_.count(pbNLower) ?
+                ("vb6_CtrlArr_GetAt(&vb6_arr_" + cIdent(ctrl.controlName) + ", " +
+                 std::to_string(ctrl.index >= 0 ? ctrl.index : 0) + ")") :
+                ("vb6_hwnd_" + cIdent(ctrl.controlName));
+            auto pbIt = ctrl.properties.find("Min");
+            int pbgMin = (pbIt != ctrl.properties.end() && pbIt->second.intValue != -1)
+                       ? (int)pbIt->second.intValue : -1;
+            pbIt = ctrl.properties.find("Max");
+            int pbgMax = (pbIt != ctrl.properties.end() && pbIt->second.intValue != -1)
+                       ? (int)pbIt->second.intValue : -1;
+            pbIt = ctrl.properties.find("Value");
+            int pbgVal = (pbIt != ctrl.properties.end() && pbIt->second.intValue != -1
+                          && pbIt->second.intValue > -10)
+                       ? (int)pbIt->second.intValue : -1;
+            pbIt = ctrl.properties.find("Orientation");
+            int pbgOri = (pbIt != ctrl.properties.end() && pbIt->second.intValue != -1)
+                       ? (int)pbIt->second.intValue : -1;
+            pbIt = ctrl.properties.find("Scrolling");
+            int pbgScr = (pbIt != ctrl.properties.end() && pbIt->second.intValue != -1)
+                       ? (int)pbIt->second.intValue : -1;
+            c_.emitLine("vb6_InitProgressBar((void*)" + pbHwnd + ", "
+                      + std::to_string(pbgMin) + ", " + std::to_string(pbgMax) + ", "
+                      + std::to_string(pbgVal) + ", " + std::to_string(pbgOri) + ", "
+                      + std::to_string(pbgScr) + ");");
+        }
+
+        // P20-40: StatusBar 设计期 —— Init 一次, 再按 Panels 集合逐项灌进去。
+        // 未写进 .frm 的属性走 VB6 默认 (Align=2 靠下 / Style=0 多面板 / 无面板)。
+        if (ctrl.controlType == FrmControlType::StatusBar) {
+            // 登记裸名: 表达式侧的 statusBarNameOfExpr 是把 `vb6_ComGetObjectProp(vb6_com_X,
+            // L"Panels")` 抠成裸名 X 之后比对的, 存槽名或带前缀的名字都匹配不上。
+            statusBarVars_.insert(ctrl.controlName);
+            std::string sbNLower = ctrl.controlName;
+            std::transform(sbNLower.begin(), sbNLower.end(), sbNLower.begin(), ::tolower);
+            std::string sbHwnd = knownControlArrays_.count(sbNLower) ?
+                ("vb6_CtrlArr_GetAt(&vb6_arr_" + cIdent(ctrl.controlName) + ", " +
+                 std::to_string(ctrl.index >= 0 ? ctrl.index : 0) + ")") :
+                ("vb6_hwnd_" + cIdent(ctrl.controlName));
+
+            // 取字符串字面量: FrmValue::rawText 带引号, 剥掉后转义即可直接拼进 C 源码。
+            auto litOf = [](const std::map<std::string, FrmValue>& mp, const std::string& k) {
+                auto it = mp.find(k);
+                if (it == mp.end() || it->second.type != FrmValueType::String) return std::string();
+                std::string raw = it->second.rawText;
+                if (raw.size() >= 2 && raw.front() == '"' && raw.back() == '"')
+                    raw = raw.substr(1, raw.size() - 2);
+                for (char& ch : raw) if (ch == '"') ch = '\'';
+                return raw;
+            };
+            auto intOf = [](const std::map<std::string, FrmValue>& mp, const std::string& k) -> int {
+                auto it = mp.find(k);
+                return (it != mp.end()) ? (int)it->second.intValue : -1;
+            };
+
+            auto alIt = ctrl.properties.find("Align");
+            int sbAlign = (alIt != ctrl.properties.end() && alIt->second.intValue >= 0)
+                        ? (int)alIt->second.intValue : 2;
+            int sbStyle = (intOf(ctrl.properties, "Style") == 1) ? 1 : 0;
+            c_.emitLine("vb6_StatusBar_Init((void*)" + sbHwnd + ", "
+                      + std::to_string(sbStyle) + ", " + std::to_string(sbAlign) + ");");
+
+            if (sbStyle == 1) {   // sbrSimple: 只有一格, 内容走 SimpleText
+                std::string stx = litOf(ctrl.properties, "SimpleText");
+                c_.emitLine("vb6_StatusBar_SetSimpleText((void*)" + sbHwnd + ", "
+                          + (stx.empty() ? std::string("L\"\"") : ("L\"" + stx + "\"")) + ");");
+            }
+
+            for (const auto& block : ctrl.propertyBlocks) {
+                // 两种块名都认: 有裸标题行时取标题, 没有(StatusBar 的 Panels 就是这种)
+                // 时解析器兜底成 "Items"。
+                if (block.blockName != "Panels" && block.blockName != "Items") continue;
+                int pOrd = 0;
+                for (const auto& p : block.nestedBlocks) {
+                    pOrd++;
+                    // 下标没写就按出现顺序 (VB6 的 `Panels(1)/(2)` 一般都会写)。
+                    int idx = intOf(p.properties, "Index");
+                    if (idx <= 0) idx = pOrd;
+                    std::string key = litOf(p.properties, "Key");
+                    std::string txt = litOf(p.properties, "Text");
+                    c_.emitLine("vb6_StatusBar_AddPanel((void*)" + sbHwnd + ", "
+                              + std::to_string(idx) + ", "
+                              + (key.empty() ? std::string("NULL") : ("L\"" + key + "\"")) + ", "
+                              + "L\"" + txt + "\");");
+                    // 子属性只在偏离 VB6 默认值时才发, 省掉一堆无意义的调用。
+                    int pv = intOf(p.properties, "Style");
+                    if (pv > 0) c_.emitLine("vb6_StatusBar_SetPanelStyle((void*)" + sbHwnd
+                                          + ", " + std::to_string(idx) + ", " + std::to_string(pv) + ");");
+                    pv = intOf(p.properties, "AutoSize");
+                    if (pv > 0) c_.emitLine("vb6_StatusBar_SetPanelAutoSize((void*)" + sbHwnd
+                                          + ", " + std::to_string(idx) + ", " + std::to_string(pv) + ");");
+                    // Width/MinWidth 的 VB6 默认就是 0, 只在**显式给了正数**时才发;
+                    // 用 `!= 0` 会把"没写"误判成 -1 灌进去。
+                    pv = intOf(p.properties, "Width");
+                    if (pv > 0) c_.emitLine("vb6_StatusBar_SetPanelWidth((void*)" + sbHwnd
+                                          + ", " + std::to_string(idx) + ", " + std::to_string(pv) + ");");
+                    pv = intOf(p.properties, "MinWidth");
+                    if (pv > 0) c_.emitLine("vb6_StatusBar_SetPanelMinWidth((void*)" + sbHwnd
+                                          + ", " + std::to_string(idx) + ", " + std::to_string(pv) + ");");
+                    std::string tip = litOf(p.properties, "ToolTipText");
+                    if (!tip.empty()) c_.emitLine("vb6_StatusBar_SetPanelToolTip((void*)" + sbHwnd
+                                          + ", " + std::to_string(idx) + ", L\"" + tip + "\");");
+                }
+                // **不要 break**: 一个控件里可以有多个同名的集合块 (StatusBar 的 Panels
+                // 一项一个块, 块名都是解析器兜底的 "Items"), break 会把第二项之后的
+                // 面板整个丢掉, 且不报任何错。
+            }
+        }
+
+        // P20-42: SSTab 设计期 —— 一次 Init 灌进 Tabs/Tab/TabOrientation/TabStyle/
+        // TabsPerRow/WordWrap, 再逐页灌 Caption。
+        // 页标题的 .frm 形态支持两种: ①VB6 实际写的 BeginProperty Tabs {…} 块里
+        // 逐个 BeginProperty TabN {…} 的 Caption; ②手写的 `TabCaption(0) = "…"` 行。
+        if (ctrl.controlType == FrmControlType::SSTab) {
+            std::string tsNLower = ctrl.controlName;
+            std::transform(tsNLower.begin(), tsNLower.end(), tsNLower.begin(), ::tolower);
+            std::string tsHwnd = knownControlArrays_.count(tsNLower) ?
+                ("vb6_CtrlArr_GetAt(&vb6_arr_" + cIdent(ctrl.controlName) + ", " +
+                 std::to_string(ctrl.index >= 0 ? ctrl.index : 0) + ")") :
+                ("vb6_hwnd_" + cIdent(ctrl.controlName));
+
+            auto tsInt = [](const std::map<std::string, FrmValue>& mp, const std::string& k, int defv) -> int {
+                auto it = mp.find(k);
+                if (it == mp.end()) return defv;
+                return (int)it->second.intValue;
+            };
+            auto tsLit = [](const std::map<std::string, FrmValue>& mp, const std::string& k) -> std::string {
+                auto it = mp.find(k);
+                if (it == mp.end() || it->second.type != FrmValueType::String) return std::string();
+                std::string raw = it->second.rawText;
+                if (raw.size() >= 2 && raw.front() == '"' && raw.back() == '"')
+                    raw = raw.substr(1, raw.size() - 2);
+                for (char& ch : raw) if (ch == '"') ch = '\'';
+                return raw;
+            };
+
+            int tsTabs     = tsInt(ctrl.properties, "Tabs", 0);
+            int tsCur      = tsInt(ctrl.properties, "Tab", 0);
+            int tsOrient   = tsInt(ctrl.properties, "TabOrientation", 0);
+            int tsStyle    = tsInt(ctrl.properties, "TabStyle", 0);
+            int tsPerRow   = tsInt(ctrl.properties, "TabsPerRow", 0);
+            int tsWrap     = tsInt(ctrl.properties, "WordWrap", 0);
+            if (tsTabs < 0) tsTabs = 0;
+            c_.emitLine("vb6_SSTab_Init((void*)" + tsHwnd + ", "
+                      + std::to_string(tsTabs) + ", " + std::to_string(tsCur) + ", "
+                      + std::to_string(tsOrient) + ", " + std::to_string(tsStyle) + ", "
+                      + std::to_string(tsPerRow) + ", " + std::to_string(tsWrap) + ");");
+
+            // ①BeginProperty Tabs {…} → Tab1..TabN 的 Caption (VB6 实际形态)
+            for (const auto& tb : ctrl.propertyBlocks) {
+                if (tb.blockName != "Tabs") continue;
+                int ord = 0;
+                for (const auto& page : tb.nestedBlocks) {
+                    ord++;
+                    // TabN 的 N 是 1 基; 没写就按出现顺序 (VB6 一般都会写)。
+                    int idx = tsInt(page.properties, "Index", ord - 1);
+                    if (idx < 0) idx = 0;
+                    std::string cap = tsLit(page.properties, "Caption");
+                    if (cap.empty()) cap = tsLit(page.properties, "Text");
+                    c_.emitLine("vb6_SSTab_SetTabCaption((void*)" + tsHwnd + ", "
+                              + std::to_string(idx) + ", L\"" + cap + "\");");
+                }
+            }
+            // ②`TabCaption(n) = "…"` 直接写在属性行上 (手写 .frm 的形态)
+            for (const auto& kv : ctrl.properties) {
+                const std::string& k = kv.first;
+                if (k.size() < 12) continue;
+                if (_strnicmp(k.c_str(), "TabCaption", 10) != 0) continue;
+                size_t lp = k.find('(');
+                size_t rp = k.find(')');
+                if (lp == std::string::npos || rp == std::string::npos || rp <= lp + 1) continue;
+                int idx = atoi(k.substr(lp + 1, rp - lp - 1).c_str());
+                std::string raw = kv.second.type == FrmValueType::String ? kv.second.rawText : std::string();
+                if (raw.size() >= 2 && raw.front() == '"' && raw.back() == '"')
+                    raw = raw.substr(1, raw.size() - 2);
+                for (char& ch : raw) if (ch == '"') ch = '\'';
+                c_.emitLine("vb6_SSTab_SetTabCaption((void*)" + tsHwnd + ", "
+                          + std::to_string(idx) + ", L\"" + raw + "\");");
+            }
         }
 
         // P24 / Fix 182: .frx 设计期属性（Picture / TextBox.Text / ListBox.List）。

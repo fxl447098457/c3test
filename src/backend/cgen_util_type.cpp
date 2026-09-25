@@ -216,6 +216,21 @@ Vb6Type CCodeGen::inferExprType(Expr& expr) const {
                     }
                 }
             }
+            // P20-42: 对象是窗体上的已知控件时, 属性类型先问控件属性表。
+            // **不能**直接掉到下面的 lookupModule(memberName): 那是按成员**裸名**
+            // 查模块级符号, 凡是与模块级/内置符号同名的控件属性都会被顶掉。
+            // 实测 `SSTab1.Tab` 撞上返回 BSTR 的内置函数 `Tab` → 判成 String →
+            // Debug.Print 拼接不套 vb6_CStr(vb6_VariantFromValue(...)), 而 RTL 的
+            // vb6_SSTab_GetTab 返回 int32_t → 整数当 BSTR 指针解引用 → 0xC0000005。
+            if (ma.object && ma.object->kind == ASTNodeKind::IdentifierExpr) {
+                auto& objIdCtl = static_cast<IdentifierExpr&>(*ma.object);
+                std::string objLowerCtl = Symbol::toLower(objIdCtl.name);
+                auto itCtl = knownFormControls_.find(objLowerCtl);
+                if (itCtl != knownFormControls_.end()) {
+                    Vb6Type pt = controlPropType(itCtl->second, ma.memberName);
+                    if (pt != Vb6Type::Unknown) return pt;
+                }
+            }
             // 查找成员函数/属性的返回类型
             auto* memSym = symTab_.lookupModule(ma.memberName);
             if (memSym) return memSym->type;

@@ -173,10 +173,14 @@ FrmControlType FrmParser::parseControlType(const std::string& typeName) {
     if (lower.find("shdocvw") != std::string::npos) return FrmControlType::WebBrowser;
 
     // 常见第三方控件
+    if (lower.find("progressbar") != std::string::npos) return FrmControlType::ProgressBar;
     if (lower.find("toolbar") != std::string::npos) return FrmControlType::Toolbar;
     if (lower.find("statusbar") != std::string::npos) return FrmControlType::StatusBar;
     if (lower.find("commondialog") != std::string::npos) return FrmControlType::CommonDialog;
     if (lower.find("imagelist") != std::string::npos) return FrmControlType::ImageList;
+    // P20-42: SSTab (TabDlg.SSTab)。必须排在 imagelist 之后、Unknown 之前;
+    // "sstab" 是 TabDlg.SSTab / SSTab 两种写法的公共子串。
+    if (lower.find("sstab") != std::string::npos) return FrmControlType::SSTab;
 
     return FrmControlType::Unknown;
 }
@@ -198,6 +202,17 @@ const char* FrmParser::controlTypeToWin32Class(FrmControlType type) {
         case FrmControlType::VScrollBar:   return "SCROLLBAR";  // SBS_VERT样式
         case FrmControlType::Timer:        return nullptr;       // 不可见控件, 无窗口
         case FrmControlType::Image:        return "STATIC";     // SS_BITMAP
+        // ProgressBar: comctl32 通用控件类 (msctls_progress32)。
+        // 不加载 mscomctl.ocx —— 本机 InprocServer32 缺失, 且 32 位 inproc
+        // OCX 无法进 x64 进程; 改用 Win32 等价类复刻。
+        case FrmControlType::ProgressBar:  return "msctls_progress32";
+        // P20-40: StatusBar 用 comctl32 的 msctls_status32 复刻 (不加载 mscomctl.ocx)。
+        // 漏掉这个 case 会被当成"不可见控件"直接 continue, 窗口根本不创建。
+        case FrmControlType::StatusBar:    return "msctls_status32";
+        // P20-42: SSTab —— 与 StatusBar 不同, **SysTabControl32 是 comctl32 注册好的**
+        // (实测 x64/x86 进程里 GetClassInfoW 直接成功, InitCommonControlsEx 之前就在),
+        // 所以这里不需要 RTL 自注册兜底。
+        case FrmControlType::SSTab:        return "SysTabControl32";
         case FrmControlType::Menu:         return nullptr;       // 菜单, 非窗口
         case FrmControlType::WebBrowser:  return nullptr;       // WebView2, 运行时动态创建
         default:                           return nullptr;
@@ -221,6 +236,9 @@ const char* FrmParser::controlTypeToVb6Name(FrmControlType type) {
         case FrmControlType::HScrollBar:   return "HScrollBar";
         case FrmControlType::VScrollBar:   return "VScrollBar";
         case FrmControlType::Image:        return "Image";
+        case FrmControlType::ProgressBar:  return "ProgressBar";
+        case FrmControlType::StatusBar:    return "StatusBar";
+        case FrmControlType::SSTab:        return "SSTab";
         case FrmControlType::Shape:        return "Shape";
         case FrmControlType::Line:         return "Line";
         case FrmControlType::Menu:         return "Menu";

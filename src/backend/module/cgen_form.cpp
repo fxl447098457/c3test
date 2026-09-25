@@ -104,10 +104,14 @@ void CCodeGen::emitControlHandleDecls(const FrmFormDesc& frmDesc) {
         std::string ctrlLower = ctrl.controlName;
         std::transform(ctrlLower.begin(), ctrlLower.end(), ctrlLower.begin(), ::tolower);
         if (!ctrlLower.empty() && emitted.insert(ctrlLower).second) {
-            if (ctrl.controlType == FrmControlType::ImageList ||
-                ctrl.controlType == FrmControlType::Toolbar ||
-                ctrl.controlType == FrmControlType::StatusBar ||
+            // StatusBar 是**真窗口** (P20-40 起用 msctls_status32 复刻), 运行期路由
+            // 发给 RTL 的第一参就是 HWND 槽 vb6_hwnd_X —— 归到 vb6_com_ 家族会 C2065
+            // (声明的是 vb6_com_StatusBar1, 用出来的却是 vb6_hwnd_StatusBar1)。
+            // ImageList / Toolbar / CommonDialog 仍是 OCX 占位, 走 vb6_com_。
+            if (ctrl.controlType == FrmControlType::Toolbar ||
                 ctrl.controlType == FrmControlType::CommonDialog) {
+                c_.emitLine("static void* vb6_com_" + cIdent(ctrl.controlName) + " = NULL;  /* IDispatch* */");
+            } else if (ctrl.controlType == FrmControlType::ImageList) {
                 c_.emitLine("static void* vb6_com_" + cIdent(ctrl.controlName) + " = NULL;  /* IDispatch* */");
             } else if (knownControlArrays_.count(ctrlLower)) {
                 c_.emitLine("static vb6_CtrlArr vb6_arr_" + cIdent(ctrl.controlName) + ";");

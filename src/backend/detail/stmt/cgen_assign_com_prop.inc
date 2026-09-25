@@ -378,6 +378,22 @@
         isComMarker_ = false;
         std::string objExpr = std::move(comObjExpr_);
         std::string memberName = std::move(comMemberName_);
+        // P20-40: StatusBar 原生复刻的**链式写** `StatusBar1.Panels(i).Prop = v`。
+        // 必须在 vb6_ComSetProp 之前截住 —— 走 COM 就是拿 HWND 当 IDispatch 去
+        // PutProp, 链接都过、运行静默无效 (读那边早已改道, 写这边漏了就只错一半)。
+        {
+            std::string sbMem = memberName;
+            std::transform(sbMem.begin(), sbMem.end(), sbMem.begin(), ::tolower);
+            std::string sbHwnd, sbIdx;
+            std::string sbFn = statusBarPanelWriteFn(objExpr, sbMem, &sbHwnd, &sbIdx);
+            if (!sbFn.empty()) {
+                emitExpr(*node.value);
+                std::string sbVal = std::move(lastExpr_);
+                c_.emitLine(sbFn + "((void*)" + sbHwnd + ", " + sbIdx + ", " + sbVal + ");"
+                            "  /* StatusBar Panels write */");
+                return;
+            }
+        }
         emitExpr(*node.value);
         std::string valExpr = std::move(lastExpr_);
         std::string packFn = comPackExpr(*node.value);

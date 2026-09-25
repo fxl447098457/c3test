@@ -22,6 +22,22 @@
                 if (cwIt != child.properties.end()) cWidth = (int)cwIt->second.intValue;
                 auto chIt = child.properties.find("Height");
                 if (chIt != child.properties.end()) cHeight = (int)chIt->second.intValue;
+                // ---- P20-42: SSTab 容器 —— 页码只能从 Left 反推 ----
+                // VB6 把每页的子控件摆在同一份坐标里, 靠把**非活动页**子控件的 Left
+                // **减 75000 缇**推出可见区来隐藏 (微软 KB Q187562 / Q206904 明写)。
+                // .frm 里因此没有任何页号字段, 只能反推:
+                //       storedLeft = realLeft - 75000 * page
+                // 取让 realLeft 落回 [0, 75000) 的那个 page。阈值取 -37500 而不是 0,
+                // 是为了不把本来就有小负值 Left 的控件误判到下一页。
+                // 反推后**必须把 Left 改回真值**, 否则子控件会被摆到屏幕外 —— 这点
+                // 和 VB6 不同: VB6 运行时真的靠挪 Left 来切页, 我们改成登记页号 +
+                // ShowWindow, Left 保持设计期值, `Label1.Left` 才读得对。
+                int tsPage = 0;
+                if (container.controlType == FrmControlType::SSTab && cLeft < -37500) {
+                    tsPage = (int)(((long)(-cLeft) + 37500) / 75000);
+                    if (tsPage < 0) tsPage = 0;
+                    cLeft += 75000 * tsPage;
+                }
                 long childStyle = 0x40000000L | 0x10000000L;  // WS_CHILD | WS_VISIBLE
                 childStyle |= controlTypeStyleBits(child);  // 类型样式与顶层控件一致 (SS_NOTIFY/BS_GROUPBOX 等)
                 std::string childCaption = child.controlName;
@@ -42,6 +58,12 @@
                     + std::to_string(cLeft) + ", " + std::to_string(cTop) + ", "
                     + std::to_string(cWidth) + ", " + std::to_string(cHeight) + ","
                     + std::to_string(childCtrlId) + ", " + containerHwnd + ", hInstance);");
+                // SSTab: 登记"这个子控件属于第几页", 切页的显隐由 RTL 负责。
+                if (container.controlType == FrmControlType::SSTab) {
+                    c_.emitLine("vb6_SSTab_RegisterChild((void*)" + containerHwnd
+                              + ", (void*)vb6_hwnd_" + cIdent(child.controlName)
+                              + ", " + std::to_string(tsPage) + ");");
+                }
                 // 设计期 BorderStyle / Alignment (容器子控件)
                 emitDesignerStyleProps(child, "vb6_hwnd_" + cIdent(child.controlName));
                 emitControlFrxProps(child);  // Fix 182: 容器子控件同样加载 .frx 设计期图片/文本/列表
@@ -56,7 +78,8 @@
                 // 递归处理多层容器(Frame/PictureBox 内再嵌容器)
                 if (!child.children.empty() &&
                     (child.controlType == FrmControlType::Frame ||
-                     child.controlType == FrmControlType::PictureBox)) {
+                     child.controlType == FrmControlType::PictureBox ||
+                     child.controlType == FrmControlType::SSTab)) {
                     self(self, child, "vb6_hwnd_" + cIdent(child.controlName));
                 }
             }
@@ -64,7 +87,8 @@
         for (const auto& ctrl : frmDesc.formControl.children) {
             if (ctrl.children.empty()) continue;
             if (ctrl.controlType != FrmControlType::Frame &&
-                ctrl.controlType != FrmControlType::PictureBox) continue;
+                ctrl.controlType != FrmControlType::PictureBox &&
+                ctrl.controlType != FrmControlType::SSTab) continue;
             emitChildControls(emitChildControls, ctrl, "vb6_hwnd_" + cIdent(ctrl.controlName));
         }
     }
@@ -123,7 +147,8 @@
                     }
                     if (!child.children.empty() &&
                         (child.controlType == FrmControlType::Frame ||
-                         child.controlType == FrmControlType::PictureBox)) {
+                         child.controlType == FrmControlType::PictureBox ||
+                         child.controlType == FrmControlType::SSTab)) {
                         self(self, child);
                     }
                 }
@@ -131,7 +156,8 @@
             for (const auto& ctrl : frmDesc.formControl.children) {
                 if (!ctrl.children.empty() &&
                     (ctrl.controlType == FrmControlType::Frame ||
-                     ctrl.controlType == FrmControlType::PictureBox)) {
+                     ctrl.controlType == FrmControlType::PictureBox ||
+                     ctrl.controlType == FrmControlType::SSTab)) {
                     subclassContainerChildren(subclassContainerChildren, ctrl);
                 }
             }
@@ -143,7 +169,8 @@
     {
         auto emitForward142 = [&](auto&& self, const FrmControl& ctrl) -> void {
             if ((ctrl.controlType == FrmControlType::Frame ||
-                 ctrl.controlType == FrmControlType::PictureBox) && !ctrl.children.empty()) {
+                 ctrl.controlType == FrmControlType::PictureBox ||
+                 ctrl.controlType == FrmControlType::SSTab) && !ctrl.children.empty()) {
                 std::string nmLower = ctrl.controlName;
                 std::transform(nmLower.begin(), nmLower.end(), nmLower.begin(), ::tolower);
                 if (!knownControlArrays_.count(nmLower)) {

@@ -32,6 +32,22 @@ static const char* kBstrReturningCalls[] = {
     // 都当成"未找到"塞进 List3 (应为 List4)。
     "vb6_GetListItem(",
     "vb6_GetSelText(", "vb6_GetToolTipText(", "vb6_GetMenuCaption(",
+    // P20-39: ListImage.Key (原生复刻的 ImageList) —— 同上, C 签名是 void*、语义是 BSTR。
+    "vb6_GetImageListKeyAt(",
+    "vb6_GetImageListKeyByKey(",
+    // P20-40: StatusBar 的 Panels 取值函数同样是 `void*` 声明 / BSTR 语义
+    // (vb6_StatusBar_GetPanelText / Key / ToolTip / SimpleText ...) —— 漏登记
+    // 的表现很隐蔽: 数字类属性 (Count/Style/Width/MinWidth) 全对, 只有所有
+    // 字符串恒为空串, 一眼看去还像"面板没建起来"。
+    "vb6_StatusBar_GetPanelText",
+    "vb6_StatusBar_GetPanelTextByKey",
+    "vb6_StatusBar_GetPanelKey",
+    "vb6_StatusBar_GetPanelKeyByKey",
+    "vb6_StatusBar_GetPanelToolTip",
+    "vb6_StatusBar_GetSimpleText",
+    // P20-42: SSTab 的 TabCaption(i) —— C 签名 `void*`、语义 BSTR, 同一类。
+    // 漏登记时 Debug.Print 会打出空串, 看着像"页标题没设进去"。
+    "vb6_SSTab_GetTabCaption",
 };
 
 bool CCodeGen::isBstrReturningCall(const std::string& expr) {

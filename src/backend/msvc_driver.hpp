@@ -30,6 +30,14 @@ struct MsvcDriverOptions {
     bool entryIsMain = false;
     std::string typelibResFile;              // P6.13: .res file path (compiled resource)
     std::string versionInfoResFile;          // P23-05: VS_VERSION_INFO .res file path
+    std::string manifestResFile;             // 应用清单的 rc.exe 产物 (.res), 交给链接器
+                                             // —— 只是找不到 mt.exe 时的退路 (见下)。
+    std::string manifestXmlFile;             // 应用清单 XML 的**原文路径**: 链接成功后由
+                                             // driver 用 mt.exe 注入 `#1`。首选这条路,
+                                             // 因为 rc.exe 那份对 RT_MANIFEST yield 出
+                                             // type=88 而不是 24, 激活不了 comctl32 v6。
+                                             // 两者都不做旁挂 <exe>.manifest —— 后者会被
+                                             // 签名/复制/分发流程丢掉, 且改 exe 不触发重编。
     std::string userResFile;                // P23-03: User-specified .res file (from VBP ResFile=)
     std::string objDir;                      // P11.2: .obj intermediate directory
     std::string srcDir;                      // P11.2: generated .c/.h directory (/I include path)

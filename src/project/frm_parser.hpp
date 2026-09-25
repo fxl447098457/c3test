@@ -105,6 +105,8 @@ enum class FrmControlType {
     StatusBar,          // MSComctlLib.StatusBar
     CommonDialog,       // MSComDlg.CommonDialog
     ImageList,          // MSComctlLib.ImageList (ActiveX, COM后期绑定)
+    ProgressBar,        // MSComctlLib.ProgressBar — Win32 原生复刻 (msctls_progress32)
+    SSTab,              // TabDlg.SSTab — Win32 原生复刻 (SysTabControl32), P20-42
     Unknown,            // 未识别的控件类型
 };
 
@@ -220,6 +222,10 @@ private:
         const std::vector<std::string>& lines,
         size_t& lineIdx,
         const std::string& parentIndent = "");
+
+    // 解析控件内集合块的项行 `.ListImage(1, "k", "x.frx":0000)` → 一个 FrmPropertyBlock,
+    // 参数按 VB6 的位置语义挂成 properties (ListImage: Index/Key/Picture/Key2/Picture2)。
+    static FrmPropertyBlock parseCollectionItem(const std::string& line);
 
     // 解析 BeginProperty...EndProperty 块
     static FrmPropertyBlock parsePropertyBlock(

@@ -149,6 +149,11 @@ static const RtlFileEntry kRtlFiles[] = {
     { RTL_VB6FORMS_WEBVIEW_C,      "vb6forms_webview.c" },
     { RTL_VB6FORMS_WIDGET_C,       "vb6forms_widget.c" },
     { RTL_VB6FORMS_SHAPE_C,        "vb6forms_shape.c" },
+    { RTL_VB6FORMS_PROGRESS_C,     "vb6forms_progress.c" },
+    { RTL_VB6FORMS_IMAGELIST_C,    "vb6forms_imagelist.c" },
+    { RTL_VB6FORMS_STATUSBAR_C,    "vb6forms_statusbar.c" },
+    { RTL_VB6FORMS_SSTAB_C,        "vb6forms_sstab.c" },
+    { RTL_VB6FORMS_OLEDD_C,        "vb6forms_oledd.c" },
     { RTL_VB6FORMS_AXSITE_C,       "vb6forms_axsite.c" },
     { RTL_VB6FORMS_AXCONTAINER_C,  "vb6forms_axcontainer.c" },
     // vb6forms_axsite.c 按功能家族拆分 (2026-09-20): 内部头 + axsite/ 下 5 个族编译单元

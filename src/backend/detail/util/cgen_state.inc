@@ -399,6 +399,136 @@
     // key=小写控件名, value=vector<int>按控件ID顺序对应的Index
     std::unordered_map<std::string, std::vector<int>> controlIdToIndexMap_;
 
+    // P20-39: 原生复刻的 ImageList 控件槽 (形如 "vb6_com_ImageList1")。
+    // ImageList 无窗口, 复刻后它就是个 HIMAGELIST, 存在沿用下来的 vb6_com_<Name> 槽里。
+    // 用于把 `ImageList1.ListImages.Add/Remove/Clear`、`ListImages.Count`、
+    // `ListImages(i).Key`、`ImageList1.ImageWidth` 这些**字符串形态**的 COM 表达式
+    // 改道到 RTL 原生函数上。Toolbar/StatusBar/CommonDialog 这三个还是 OCX 占位, 不登记。
+    std::unordered_set<std::string> imageListVars_;
+    // objExpr 是否落在一个已登记的 ImageList 上。命中返回**裸控件名** (如 "ImageList1"),
+    // 否则返回空串。objExpr 有三种形态, 三种都要认:
+    //   ① 控件槽本身                       → vb6_com_ImageList1
+    //   ② .ListImages 集合                 → vb6_ComGetObjectProp(vb6_com_X, L"ListImages")
+    //   ③ ListImages(i) 的结果              → vb6_ComCallObject(②…, L"Item", (void*[]){…}, 1)
+    std::string imageListNameOfExpr(const std::string& objExpr) const {
+        const std::string head = "vb6_ComGetObjectProp(vb6_com_";
+        size_t p = objExpr.find(head);
+        if (p != std::string::npos) {
+            size_t q = objExpr.find(", L\"ListImages\")", p);
+            if (q != std::string::npos) {
+                std::string n = objExpr.substr(p + head.size(), q - (p + head.size()));
+                if (imageListVars_.count(n)) return n;
+            }
+        }
+        if (imageListVars_.count(objExpr)) return objExpr;
+        return "";
+    }
+    // 同一件事的"槽变量"形态 (RTL 各函数第一参要的是这个)。
+    std::string imageListSlotVarOfExpr(const std::string& objExpr) const {
+        std::string n = imageListNameOfExpr(objExpr);
+        return n.empty() ? "" : "vb6_com_" + n;
+    }
+
+    // P20-40: 原生复刻的 StatusBar 控件 (形如 StatusBar1)。与 ImageList 同构, 但
+    // **RTL 函数第一参要的是 HWND 槽 vb6_hwnd_X** (面板状态挂在窗口属性上), 不是
+    // vb6_com_X。集合表达式的三种形态:
+    //   ① 控件槽本身                 → vb6_hwnd_StatusBar1
+    //   ② .Panels 集合               → vb6_ComGetObjectProp(vb6_com_X, L"Panels")
+    //   ③ Panels(i) 的结果           → vb6_ComCallObject(②…, L"Item", (void*[]){…}, 1)
+    // ②③ 只要抠出**裸控件名**就够了 —— 面板函数都只认"HWND + 1 基下标",
+    // 下标另从 Item 的实参里抠 (与 ImageList 分支同一套手法)。
+    std::unordered_set<std::string> statusBarVars_;
+    std::string statusBarNameOfExpr(const std::string& objExpr) const {
+        // 集合形态有三种写法, 槽前缀各不相同但结构一致:
+        //   vb6_ComGetObjectProp(vb6_com_X, L"Panels")     OCX 占位期 / ImageList
+        //   vb6_ComCallObject(vb6_hwnd_X, L"Panels", …)     真窗口期链式下标
+        // 都按 `vb6_<X>` 抠, 再用 statusBarVars_ 核对是不是真 StatusBar
+        // (vb6_ComCallObject(vb6_hwnd_Form1, L"Controls") 会抠出 Form1, 核对刷掉)。
+        static const char* kHeads[] = { "vb6_ComGetObjectProp(vb6_", "vb6_ComCallObject(vb6_" };
+        for (const char* h : kHeads) {
+            size_t p = objExpr.find(h);
+            while (p != std::string::npos) {
+                size_t s = p + strlen(h);
+                size_t e = s;
+                while (e < objExpr.size()
+                       && (isalnum((unsigned char)objExpr[e]) || objExpr[e] == '_')) e++;
+                // 到标识符边界为止 —— 中间那层可能是 vb6_hwnd_X / vb6_com_X, 前缀
+                // 与裸控件名都吃进来了, 按空白切会连 "hwnd_" 一起留下 (比对必败)。
+                std::string n = objExpr.substr(s, e - s);
+                if (statusBarVars_.count(n)) return n;
+                // 槽前缀不止一种: 真窗口期是 `vb6_hwnd_X`, OCX 占位期是 `vb6_com_X`。
+                // 上面只吃掉了中间的 vb6_, 这里再剥一层 hwnd_/com_ 还原裸控件名。
+                static const char* kPrefixes[] = { "hwnd_", "com_", "arr_" };
+                for (const char* pf : kPrefixes) {
+                    size_t pl = strlen(pf);
+                    if (n.size() > pl && n.compare(0, pl, pf) == 0) {
+                        n = n.substr(pl);
+                        break;
+                    }
+                }
+                if (statusBarVars_.count(n)) return n;
+                p = objExpr.find(h, s);
+            }
+        }
+        if (statusBarVars_.count(objExpr)) return objExpr;
+        return "";
+    }
+    std::string statusBarHwndVarOfExpr(const std::string& objExpr) const {
+        std::string n = statusBarNameOfExpr(objExpr);
+        return n.empty() ? "" : "vb6_hwnd_" + n;
+    }
+    // P20-40: `StatusBar1.Panels(i).Prop = v` 的**写**目标。读那边在 resolveComValue
+    // 里改道了, 写这边不拦就会落到 vb6_ComSetProp(<HWND>, L"Text", …) —— 对假
+    // IDispatch (HWND) 调 PutProp, 链接都过、运行静默无效。返回 RTL 写入函数名,
+    // hwndOut/idxOut 出参拿槽与 1 基下标; 空串 = 不是 Panel 链式写。
+    std::string statusBarPanelWriteFn(const std::string& targetExpr,
+                                      const std::string& memLower,
+                                      std::string* hwndOut, std::string* idxOut) const {
+        static const struct { const char* vb; const char* fn; } kSbWriters[] = {
+            { "text",       "vb6_StatusBar_SetPanelText"     },
+            { "key",        "vb6_StatusBar_SetPanelKey"      },
+            { "width",      "vb6_StatusBar_SetPanelWidth"    },
+            { "minwidth",   "vb6_StatusBar_SetPanelMinWidth" },
+            { "autosize",   "vb6_StatusBar_SetPanelAutoSize" },
+            { "style",      "vb6_StatusBar_SetPanelStyle"    },
+            { "tooltiptext","vb6_StatusBar_SetPanelToolTip"  },
+        };
+        std::string hwnd = statusBarHwndVarOfExpr(targetExpr);
+        if (hwnd.empty()) return "";
+        std::string fn;
+        for (const auto& w : kSbWriters) {
+            if (memLower == w.vb) { fn = w.fn; break; }
+        }
+        if (fn.empty()) return "";
+        // 抠出面板下标。这里没有 `L"Item"` 那一层 —— 生成器把 Panels 当**默认成员**,
+        // 索引直接跟着它那一层的 `(void*[]){…}` 走 (形如
+        // `vb6_ComCallObject(vb6_hwnd_StatusBar1, L"Panels", (void*[]){vb6_ComPackInt(1)}, 1)`),
+        // 所以按参数包抠, 剥掉 vb6_ComPackInt(...) 只留数字。抠不到就返回空:
+        // 宁可什么都别发, 也别发个下标为空的坏调用。
+        std::string idx;
+        const std::string kArr = "(void*[]){";
+        size_t ia = targetExpr.find(kArr);
+        if (ia != std::string::npos) {
+            size_t open = ia + kArr.size();
+            size_t close = targetExpr.find('}', open);
+            if (close != std::string::npos) {
+                std::string argTxt = targetExpr.substr(open, close - open);
+                size_t lp = argTxt.find('(');
+                if (lp != std::string::npos) {
+                    size_t end = argTxt.find_first_of("),", lp + 1);
+                    idx = (end == std::string::npos) ? argTxt.substr(lp + 1)
+                                                     : argTxt.substr(lp + 1, end - lp - 1);
+                } else {
+                    idx = argTxt;
+                }
+            }
+        }
+        if (idx.empty()) return "";
+        if (hwndOut) *hwndOut = hwnd;
+        if (idxOut)  *idxOut  = idx;
+        return fn;
+    }
+
     // P6.6: ActiveX DLL模式
     bool isDll_ = false;                    // 编译为ActiveX DLL
     std::string dllProgId_;

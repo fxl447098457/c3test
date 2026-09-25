@@ -453,12 +453,75 @@
                     cIdent(ctrl.controlName) + "\");");
                 c_.emitLine("vb6_hwnd_" + cIdent(ctrl.controlName) + " = vb6_tmp_hwnd; }");
             }
+            // P20-39: ImageList 走**原生复刻** (comctl32 ImageList_* API), 不 CoCreateInstance。
+            // 三个理由: ①mscomctl.ocx 未注册 (缺 InprocServer32); ②32 位 inproc OCX 进不了
+            // x64 进程; ③ImageList 无窗口, 走 COM 还得养一个假 IDispatch, 而它的全部价值
+            // 就是给其它控件递 HIMAGELIST —— 原生句柄一步到位。
+            if (ctrl.controlType == FrmControlType::ImageList) {
+                std::string ilSlot = "vb6_com_" + cIdent(ctrl.controlName);
+                // 登记裸名 (不是 ilSlot): cgen_util_com.cpp 里的 imageListSlotOfExpr 是从
+                // `vb6_ComGetObjectProp(vb6_com_X, L"ListImages")` 里抠出 X 来比对的。
+                imageListVars_.insert(ctrl.controlName);
+                int ilW = 0, ilH = 0;
+                auto ilWIt = ctrl.properties.find("ImageWidth");
+                if (ilWIt != ctrl.properties.end() && ilWIt->second.intValue > 0)
+                    ilW = (int)ilWIt->second.intValue;
+                auto ilHIt = ctrl.properties.find("ImageHeight");
+                if (ilHIt != ctrl.properties.end() && ilHIt->second.intValue > 0)
+                    ilH = (int)ilHIt->second.intValue;
+                // 传槽的**地址** (vb6_ImageList_Create 会 malloc 并写回, 槽里放的是
+                // 复刻实例指针, 不是 HWND)。
+                c_.emitLine("vb6_ImageList_Create((void**)&" + ilSlot + ", "
+                          + std::to_string(ilW) + ", " + std::to_string(ilH) + ");");
+
+                // 设计期图片: .frm 的 Images 块里每个 ListImage 带
+                // `Picture = "<控件名>.frx":<偏移>`, 字节已由 FrxReader 读出并烤成 hex 数组。
+                // 块名两种都得认: 老解析器写的是 `BeginProperty Images {GUID}`, 而 P20-39
+                // 的集合块解析器按 VB6 原文取集合名 → `ListImages`。只认 "Images" 会让
+                // 设计期图片被整个跳过 (表现为 Count 从 2 掉成 0, 且不报任何错)。
+                for (const auto& block : ctrl.propertyBlocks) {
+                    if (block.blockName != "Images" && block.blockName != "ListImages") continue;
+                    int imgIdx = 0;
+                    for (const auto& listImg : block.nestedBlocks) {
+                        auto picIt = listImg.properties.find("Picture");
+                        if (picIt == listImg.properties.end()
+                            || picIt->second.type != FrmValueType::FrxReference) continue;
+                        FrxPictureData pic = FrxReader::readPicture(picIt->second.frxOffset, true);
+                        if (pic.data.empty()) continue;
+                        imgIdx++;
+                        std::string varName = "vb6_frx_imglist_" + cIdent(ctrl.controlName)
+                                            + "_" + std::to_string(imgIdx);
+                        h_.emitLine(bytesToHexArray(pic.data.data(), pic.data.size(), varName));
+                        std::string keyLit = "NULL";
+                        auto keyIt = listImg.properties.find("Key");
+                        if (keyIt != listImg.properties.end()
+                            && keyIt->second.type == FrmValueType::String) {
+                            std::string raw = keyIt->second.rawText;
+                            if (raw.size() >= 2 && raw.front() == '"' && raw.back() == '"') {
+                                std::string key = raw.substr(1, raw.size() - 2);
+                                for (char& ch : key) if (ch == '"') ch = '\'';
+                                keyLit = "L\"" + key + "\"";
+                            }
+                        }
+                        c_.emitLine("vb6_ImageList_AddDesignTimeImage((void*)" + ilSlot
+                                  + ", " + keyLit + ", " + varName + ", "
+                                  + varName + "_size);");
+                    }
+                    break;
+                }
+
+                ctrlId++;
+                continue;
+            }
             // ActiveX控件: CoCreateInstance
+            // 以下 **Toolbar / CommonDialog** 仍是 OCX 占位, 等 P20-40+ 逐个复刻。
+            // P20-40: **StatusBar 不在此列** —— 它是 msctls_status32 原生复刻, 必须落到下面
+            // 的常规创建路径 (vb6_CreateControl) 才有窗口; 走这里的 CoCreateInstance 会
+            // 直接 `continue` 掉, 窗口根本不创建, 属性全落 vb6_ComGetStringProp 静默答错。
             // P24-05: 优先用TypeLib中的CLSID直接生成代码, 避免ProgID不存在或错误
             // VB6 .frm的Begin行用CoClass名(如MSComctlLib.ImageList), 但真实ProgID可能不同(如MSComctlLib.ImageListCtrl)
             if (ctrl.controlType == FrmControlType::ImageList ||
                 ctrl.controlType == FrmControlType::Toolbar ||
-                ctrl.controlType == FrmControlType::StatusBar ||
                 ctrl.controlType == FrmControlType::CommonDialog) {
                 // 从符号表查找ComClass, 获取真实的CLSID或ProgID
                 std::string comVarName = "vb6_com_" + cIdent(ctrl.controlName);

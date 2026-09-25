@@ -276,11 +276,13 @@ bool MsvcDriver::compileAndLinkIncremental(const MsvcDriverOptions& options) {
     } else if (options.isGui) {
         if (!options.typelibResFile.empty()) linkCmd << " \"" << options.typelibResFile << "\"";
         if (!options.versionInfoResFile.empty()) linkCmd << " \"" << options.versionInfoResFile << "\"";
+        if (!options.manifestResFile.empty()) linkCmd << " \"" << options.manifestResFile << "\"";
         if (!options.userResFile.empty()) linkCmd << " \"" << options.userResFile << "\"";
-        linkCmd << " user32.lib gdi32.lib shell32.lib ole32.lib oleaut32.lib uuid.lib advapi32.lib";
+        linkCmd << " user32.lib gdi32.lib shell32.lib ole32.lib oleaut32.lib uuid.lib advapi32.lib comctl32.lib";
     } else {
         if (!options.typelibResFile.empty()) linkCmd << " \"" << options.typelibResFile << "\"";
         if (!options.versionInfoResFile.empty()) linkCmd << " \"" << options.versionInfoResFile << "\"";
+        if (!options.manifestResFile.empty()) linkCmd << " \"" << options.manifestResFile << "\"";
         if (!options.userResFile.empty()) linkCmd << " \"" << options.userResFile << "\"";
         linkCmd << " ole32.lib oleaut32.lib uuid.lib advapi32.lib user32.lib shell32.lib gdi32.lib";
     }

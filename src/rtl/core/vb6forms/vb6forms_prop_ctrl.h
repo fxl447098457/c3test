@@ -111,6 +111,128 @@ void vb6_SetLargeChange(void* hwnd, int change);
 int vb6_GetSmallChange(void* hwnd);
 void vb6_SetSmallChange(void* hwnd, int change);
 
+// P13.11b: ProgressBar properties (VB6 ProgressBar / msctls_progress32)
+// Min/Max/Value: VB6 默认 0 / 100 / 0
+// Orientation: 0 = ccOrientationHorizontal, 1 = ccOrientationVertical
+// Scrolling:   0 = ccScrollingSmooth, 1 = ccScrollingStandard (默认)
+// 见 vb6forms_progress.c —— 纯显示控件, 无事件无方法。
+int32_t vb6_GetProgressBarMin(void* hwnd);
+void vb6_SetProgressBarMin(void* hwnd, int32_t val);
+int32_t vb6_GetProgressBarMax(void* hwnd);
+void vb6_SetProgressBarMax(void* hwnd, int32_t val);
+int32_t vb6_GetProgressBarValue(void* hwnd);
+void vb6_SetProgressBarValue(void* hwnd, int32_t val);
+int32_t vb6_GetProgressBarOrientation(void* hwnd);
+void vb6_SetProgressBarOrientation(void* hwnd, int32_t val);
+int32_t vb6_GetProgressBarScrolling(void* hwnd);
+void vb6_SetProgressBarScrolling(void* hwnd, int32_t val);
+// 设计期灌值 (未写进 .frm 的属性传 -1); 控件创建后由生成代码调用一次
+void vb6_InitProgressBar(void* hwnd, int32_t min, int32_t max, int32_t value,
+                         int32_t orientation, int32_t scrolling);
+void vb6_ProgressBarPostCreate(void* hwnd);
+
+// P13.11c: ImageList properties (VB6 ImageList / comctl32 ImageList_* API)
+// 无窗口, 句柄存在 vb6_com_<Name> 那个 void* 槽里 (见 vb6forms_imagelist.c)。
+// slot 是生成代码里 `static void* vb6_com_<Name>` 的**地址** (ImageList 无窗口, 槽里
+// 存的是复刻实例指针而不是 HWND), Create 负责 malloc 并写回 *slot。
+void   vb6_ImageList_Create(void** slot, int32_t width, int32_t height);
+void   vb6_ImageList_Destroy(void* slot);
+int32_t vb6_GetImageListImageWidth(void* slot);
+void   vb6_SetImageListImageWidth(void* slot, int32_t val);
+int32_t vb6_GetImageListImageHeight(void* slot);
+void   vb6_SetImageListImageHeight(void* slot, int32_t val);
+// ListImages.Add(index, key, picture) —— picture 是 **LoadPicture() 返回活着的 IPicture
+// 对象** (VB6 StdPicture), 不是裸字节也不是用完即弃的句柄。本函数会 AddRef 一份长期持有,
+// 对应 Remove/Clear/销毁时 Release; 返回 VB6 语义的 1 基 Index。
+int32_t vb6_ImageList_AddPicture(void* slot, int32_t index, const wchar_t* key,
+                                 void* picture);
+// .frx 设计期图片: cgen 已把字节烤成 hex 数组
+int32_t vb6_ImageList_AddDesignTimeImage(void* slot, const wchar_t* key,
+                                         const void* data, int32_t size);
+// Remove(index 或 key); Clear()
+void   vb6_ImageList_RemoveImage(void* slot, const wchar_t* keyOrIndex, int32_t index);
+void   vb6_ImageList_RemoveAtIndex(void* slot, int32_t index);
+void   vb6_ImageList_ClearImages(void* slot);
+int32_t vb6_GetImageListCount(void* slot);        // ListImages.Count
+int32_t vb6_ImageListIndexAt(void* slot, int32_t index);  // ListImage.Index (传入/返回都是 1 基)
+// ListImages("KeyString") 按 Key 取项 —— 生成代码里 Item 的实参是宽字符串而不是下标
+void*  vb6_GetImageListKeyByKey(void* slot, const wchar_t* key);
+int32_t vb6_ImageListIndexByKey(void* slot, const wchar_t* key);
+void*  vb6_GetImageListKeyAt(void* slot, int32_t index);   // ListImage.Key (BSTR)
+void*  vb6_GetImageListHandle(void* slot);        // 真 HIMAGELIST, 供其它控件挂接
+
+// P13.11d: StatusBar properties (VB6 StatusBar / msctls_status32, 见 vb6forms_statusbar.c)
+// 复刻口径: **不加载 mscomctl.ocx**, 用 comctl32 的 msctls_status32 自己算面板文本
+// (SDK 10.0.19041.0 的 commctrl.h 里没有 SBT_CAPS/SBT_TIME/SBT_DATE, 这四个"系统面板"
+//  得在 RTL 里现算 + 自己装时钟)。
+// ===================== SSTab (P20-42) =====================
+//   TabDlg.SSTab 复刻: comctl32 的 SysTabControl32, 不加载 TABCTL32.OCX。
+//   Tab / TabCaption(i) / TabVisible(i) 的下标一律 **0 基** (与 VB6 集合的 1 基不同)。
+//   TabOrientation 0=上(默认) 1=下 2=左 3=右; TabStyle 0=选项卡对话框式 1=属性页式。
+//   **原型必须在这里声明**: 生成代码只 include 这一族头, 漏了就是 C 隐式声明返回 int,
+//   在 x64 下把 BSTR 指针截成 32 位 → 0xC0000005 (x86 反而"看起来正常", 极易漏诊)。
+void    vb6_SSTab_Init(void* hwnd, int32_t tabs, int32_t curTab, int32_t orientation,
+                       int32_t tabStyle, int32_t tabsPerRow, int32_t wordWrap);
+int32_t vb6_SSTab_GetTabs(void* hwnd);
+void    vb6_SSTab_SetTabs(void* hwnd, int32_t n);
+int32_t vb6_SSTab_GetTab(void* hwnd);
+void    vb6_SSTab_SetTab(void* hwnd, int32_t idx);
+void*   vb6_SSTab_GetTabCaption(void* hwnd, int32_t idx);          // BSTR
+void    vb6_SSTab_SetTabCaption(void* hwnd, int32_t idx, void* bstr);
+int32_t vb6_SSTab_GetTabVisible(void* hwnd, int32_t idx);          // VB6 True = -1
+void    vb6_SSTab_SetTabVisible(void* hwnd, int32_t idx, int32_t v);
+int32_t vb6_SSTab_GetTabOrientation(void* hwnd);
+void    vb6_SSTab_SetTabOrientation(void* hwnd, int32_t v);
+int32_t vb6_SSTab_GetTabStyle(void* hwnd);
+void    vb6_SSTab_SetTabStyle(void* hwnd, int32_t v);
+int32_t vb6_SSTab_GetTabsPerRow(void* hwnd);
+void    vb6_SSTab_SetTabsPerRow(void* hwnd, int32_t v);
+int32_t vb6_SSTab_GetWordWrap(void* hwnd);
+void    vb6_SSTab_SetWordWrap(void* hwnd, int32_t v);
+// 容器: 登记"某个子控件属于第 page 页", 切页时 RTL 只动可见性, 不动 Left
+void    vb6_SSTab_RegisterChild(void* hwnd, void* childHwnd, int32_t page);
+// 事件: 窗体 WndProc 收到 TCN_SELCHANGE 后调用, 返回**切换前**的页号
+int32_t vb6_SSTab_OnSelChange(void* hwnd);
+
+//   StatusBar: Align 0=None 1=Top 2=Bottom(默认) 3=Left 4=Right
+//              Style 0=sbrNormal(多面板, 默认) 1=sbrSimple(单格, 读 SimpleText)
+//   Panels.Add(index, key, text) 返回 **VB6 语义的 1 基 Index**; 插到中间时后面整体后移。
+//   Panels 的下标参数一律是 1 基 (生成代码传的就是 VB6 的 Index, RTL 第一步减一)。
+//   Panel.AutoSize: 0=sbrFixed 1=sbrSpring 2=sbrContents
+//   Panel.Style:   0=sbrText 1=sbrCaps 2=sbrNum 5=sbrTime 6=sbrDate
+void    vb6_StatusBar_Init(void* hwnd, int32_t style, int32_t align);
+void    vb6_StatusBar_Destroy(void* hwnd);
+int32_t vb6_StatusBar_GetStyle(void* hwnd);
+void    vb6_StatusBar_SetStyle(void* hwnd, int32_t val);
+void*   vb6_StatusBar_GetSimpleText(void* hwnd);          // BSTR, NULL = 空
+void    vb6_StatusBar_SetSimpleText(void* hwnd, const wchar_t* text);
+int32_t vb6_StatusBar_GetAlign(void* hwnd);
+void    vb6_StatusBar_SetAlign(void* hwnd, int32_t val);
+// --- Panels 集合 ---
+int32_t vb6_StatusBar_GetPanelsCount(void* hwnd);
+int32_t vb6_StatusBar_AddPanel(void* hwnd, int32_t index, const wchar_t* key,
+                               const wchar_t* text);
+void    vb6_StatusBar_RemovePanel(void* hwnd, const wchar_t* keyOrIndex, int32_t index);
+void    vb6_StatusBar_ClearPanels(void* hwnd);
+// --- 面板取值 (index 一律 1 基) ---
+void*   vb6_StatusBar_GetPanelText(void* hwnd, int32_t index);
+void*   vb6_StatusBar_GetPanelTextByKey(void* hwnd, const wchar_t* key);
+void*   vb6_StatusBar_GetPanelKey(void* hwnd, int32_t index);
+void*   vb6_StatusBar_GetPanelKeyByKey(void* hwnd, const wchar_t* key);
+void    vb6_StatusBar_SetPanelKey(void* hwnd, int32_t index, const wchar_t* key);
+void    vb6_StatusBar_SetPanelText(void* hwnd, int32_t index, const wchar_t* text);
+int32_t vb6_StatusBar_GetPanelIndexByKey(void* hwnd, const wchar_t* key);  // 0 = 未找到
+int32_t vb6_StatusBar_GetPanelWidth(void* hwnd, int32_t index);
+void    vb6_StatusBar_SetPanelWidth(void* hwnd, int32_t index, int32_t val);
+int32_t vb6_StatusBar_GetPanelMinWidth(void* hwnd, int32_t index);
+void    vb6_StatusBar_SetPanelMinWidth(void* hwnd, int32_t index, int32_t val);
+int32_t vb6_StatusBar_GetPanelAutoSize(void* hwnd, int32_t index);
+void    vb6_StatusBar_SetPanelAutoSize(void* hwnd, int32_t index, int32_t val);
+int32_t vb6_StatusBar_GetPanelStyle(void* hwnd, int32_t index);
+void    vb6_StatusBar_SetPanelStyle(void* hwnd, int32_t index, int32_t val);
+void*   vb6_StatusBar_GetPanelToolTip(void* hwnd, int32_t index);
+void    vb6_StatusBar_SetPanelToolTip(void* hwnd, int32_t index, const wchar_t* text);
+
 // P13.12: Timer properties
 // Interval: milliseconds (0=disabled)
 int vb6_GetTimerInterval(void* hwnd);

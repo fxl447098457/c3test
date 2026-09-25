@@ -1183,6 +1183,27 @@ if ($Category -in @("all", "run", "vbp")) {
     # 字符串相等比较要按 BSTR 处理 (RTL 声明是 void* → 曾判成 VariantObject, 比较恒假)。
     Test-Vbp "ctrlprop" "$Tests\ctrlprop\CtrlProp.vbp" @("CP1=2", "CP2=2", "CP3=1", "CP4=2", "CP5=2", "CTRLPROP-DONE")
 
+    # P20-38: ProgressBar 复刻 (msctls_progress32, 不加载 mscomctl.ocx)。
+    # PB11 盯 SetPropW 存 0 被当成"未设置"回落默认值的坑。
+    Test-Vbp "ctrlprogress" "$Tests\ctrlprogress\CtrlProgress.vbp" @(
+        "PB1=100", "PB2=0", "PB3=0", "PB4=1", "PB5=0", "PB6=40", "PB7=200",
+        "PB8=10", "PB9=-10", "PB10=1", "PB11=0", "CTRLPROGRESS-DONE")
+
+    # P20-39: ImageList 复刻 (comctl32 ImageList_* API, 不加载 mscomctl.ocx)。
+    # 图片三路来源: ①设计期 .frx 裸 DIB ②运行期 LoadPicture (VB6 StdPicture = 活着的
+    # IPicture) ③Remove/Clear 对混插集合的 key 表搬动。`ListImages("Key")` 按 Key 取项
+    # 也在这里 (Item 实参是宽字符串不是下标)。
+    # IL1~IL3 盯 .frx 记录布局: 16B GUID + magic + imgSize 必须让 readPicture 读到 808,
+    # GUID 少写一个字节就会整条记录后移、静默丢掉两张图 (不报任何错)。
+    # 三张 .bmp 是**运行期**由 LoadPicture 从 App.Path 读的, 必须拷进 $OutDir。
+    Copy-Item "$Tests\ctrlimagelist\*.bmp" $OutDir -Force
+    Test-Vbp "ctrlimagelist" "$Tests\ctrlimagelist\CtrlImageList.vbp" @(
+        "IL1-DTCOUNT=2", "IL2-DTKEY1=dt1", "IL3-DTKEY2=dt2", "IL4-ADDRT=3",
+        "IL5-COUNT=3", "IL6-AFTERRM=2", "IL7-KEY1=dt2", "IL8-AFTERRM2=1",
+        "IL9-KEY1=rt", "IL10-COUNT=2", "IL11-KEY1=first", "IL12-BYKEY=first",
+        "IL13-BYKEYIDX=1", "IL14-W=16", "IL15-SETW=32", "IL16-H=16",
+        "IL17-AFTERCLR=0", "CTRLIMAGELIST-DONE")
+
     # Fix 195: .frx 三种 blob 的真实布局 —— 字符串 (Text) / 字符串表 (List) /
     # 整数表 (ItemData)。旧 readIntList 按"每项 2B 整数"读 ItemData, 读到的是
     # 结构的字节本身, 任何工程都解出 1/304/12288 这串恒定假值 → 设计期 ItemData
@@ -1190,6 +1211,20 @@ if ($Category -in @("all", "run", "vbp")) {
     Test-Vbp "frxdata" "$Tests\frxdata\FrxData.vbp" @(
         "FD1=alpha|beta", "FD2=3", "FD3=1234", "FD4=5", "FD5=300", "FD6=-7",
         "FD7=OK", "FRXDATA-DONE")
+
+    # P20-40: StatusBar 复刻 (msctls_status32, 不加载 mscomctl.ocx)。
+    # comctl32 v5.82 / v6 都不注册 msctls_status32, 连 dwICC=0xFFFFFFFF 全开也补不上,
+    # 所以 RTL 自己注册一个同名真窗口类 (见 vb6_StatusBar_RegisterClass)。
+    # SB8/SB15 盯 sbrNum 面板的设计期 Text 不能被"系统自动显示"覆盖 (text / shown 两个字段);
+    # SB29/SB31 盯 Panels.Add 插到中间时 memmove 留下的悬垂副本 (双重释放 → ClearPanels 崩)。
+    Test-Vbp "ctrlstatusbar" "$Tests\ctrlstatusbar\CtrlStatusBar.vbp" @(
+        "SB1=3", "SB2=pr", "SB3=Ready", "SB4=0", "SB5=1", "SB6=40", "SB7=tp",
+        "SB8=Tip", "SB9=2", "SB10=120", "SB11=0", "SB12=NumLock state", "SB13=5",
+        "SB14=2", "SB15=Tip", "SB16=2", "SB17=0", "SB18=Simple text here",
+        "SB19=Changed", "SB20=0", "SB21=Busy", "SB22=4", "SB23=4", "SB24=extra",
+        "SB25=Extra", "SB26=2", "SB27=5", "SB28=ins", "SB29=tp", "SB30=4",
+        "SB31=tp", "SB32=4", "SB33=3", "SB35=77", "SB36=123", "SB37=0",
+        "SB38=hello", "SB39=6", "SB40=0", "CTRLSTATUSBAR-DONE")
 
     # --- Fix 195: 资源引用缺失不得静默, 且 --extract-frx 能把 .frx 取值导成 VB 代码 ---
     # 背景: VB6 把多行文本/图片甩进同名 .frx, .frm 里只留 `属性 = "X.frx":含偏移`。

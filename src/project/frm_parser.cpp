@@ -92,6 +92,68 @@ FrmPropertyBlock FrmParser::parsePropertyBlock(
 }
 
 // ============================================================
+// 控件内集合块的项行 (P20-39)
+// ============================================================
+// 形态: `.ListImage(1, "dt1", "CtrlImageList.frx":00000345)`
+//       `.Button(1, "New", "New", "New", 3)` 等
+// 参数按 VB6 的位置语义命名 —— 各控件集合的签名不同, 这里按最常见的 ImageList 口径
+// 命名, 其余控件 (.Button/.ListItem/.Node/.Panel) 后续按需加映射即可。
+
+static const char* kCollArgNames[5] = {
+    "Index", "Key", "Picture", "Key2", "Picture2"
+};
+
+FrmPropertyBlock FrmParser::parseCollectionItem(const std::string& line) {
+    FrmPropertyBlock item;
+
+    // 项名: '.' 与 '(' 之间那一截
+    size_t dot = line.find('.');
+    size_t open = line.find('(');
+    if (dot != std::string::npos && open != std::string::npos && open > dot) {
+        item.blockName = trim(line.substr(dot + 1, open - dot - 1));
+    } else {
+        item.blockName = "Item";
+    }
+
+    // 实参: 括号里的东西按**顶层逗号**切 (值里可能带逗号/frx 引用里没有, 但字符串里可能有)。
+    // **必须到第一个 ')' 为止**, 不能按行尾取 —— StatusBar 的 `Panels(1) = "Ready"` 行尾是
+    // 引号, 按行尾截会把 `1)      =   "Ready"` 整个当成实参, Index 于是解析不出来。
+    std::string args;
+    if (open != std::string::npos) {
+        size_t cp = line.find(')', open);
+        if (cp != std::string::npos && cp > open)
+            args = line.substr(open + 1, cp - open - 1);
+    }
+
+    // 尾随 `= "..."` 的默认实参 (VB6 的 StatusBar 就这么写 `Panels(1) = "Ready"`,
+    // 语义等价于 Text)。不接住的话这条文本会整条丢掉 —— 面板显示成空串。
+    // 从**闭括号之后**找第一个 '=': 这样实参内部的等号 (`"a=b"`) 不会被误当分隔符。
+    size_t closeParen = (open != std::string::npos) ? line.find(')', open) : std::string::npos;
+    size_t eq = (closeParen != std::string::npos) ? line.find('=', closeParen) : std::string::npos;
+    if (eq != std::string::npos && eq > open) {
+        FrmValue dv = parseValue(trim(line.substr(eq + 1)));
+        if (dv.type == FrmValueType::String) item.properties["Text"] = dv;
+    }
+
+    size_t start = 0;
+    int slot = 0;
+    while (start <= args.size() && slot < 5) {
+        size_t comma = args.find(',', start);
+        std::string one = (comma == std::string::npos)
+            ? args.substr(start) : args.substr(start, comma - start);
+        std::string t = trim(one);
+        if (!t.empty()) {
+            std::string keyName = kCollArgNames[slot];
+            item.properties[keyName] = parseValue(t);
+        }
+        if (comma == std::string::npos) break;
+        start = comma + 1;
+        slot++;
+    }
+    return item;
+}
+
+// ============================================================
 // 控件块解析 (Begin...End)
 // ============================================================
 
@@ -143,18 +205,112 @@ FrmControl FrmParser::parseControlBlock(
 
     ctrl.controlType = parseControlType(ctrl.controlTypeName);
 
+    // P20-39: 控件内的**集合块**。VB6 的 .frm 里它不是 Begin..End 也不是 BeginProperty,
+    // 而是「一条裸标题 + 若干 `.项(...)` 行 + 一个 End」:
+    //      ListImages
+    //         .ListImage(1, "dt1", "CtrlImageList.frx":00000000)
+    //      End
+    // 只认 Begin/BeginProperty 的话, 这里第一个 End 就把控件块提前收掉, 外层的 End
+    // 于是变成 `VB2002: unexpected token at module level: End`。
+    // 这条不只是 ImageList —— Toolbar.Buttons / ListView.ListItems+ColumnHeaders /
+    // TreeView.Nodes / StatusBar.Panels 全是这个形态, 后面的控件都要用。
+    FrmPropertyBlock coll;         // 正在累积的集合块
+    std::string     collName;      // 非空 = 已打开一个集合块, 等它的 End
+    size_t          collIndent = (size_t)-1;  // 集合块的缩进; (size_t)-1 = 尚未打开
+
     lineIdx++;  // 进入块体
 
     while (lineIdx < lines.size()) {
-        std::string curLine = trim(lines[lineIdx]);
+        const std::string& rawLine = lines[lineIdx];
+        std::string curLine = trim(rawLine);
+        // 缩进量 —— 判定 End 到底收的是集合还是控件, 只能靠它 (见下方 End 分支)。
+        size_t lineIndent = rawLine.size() - curLine.size();
 
         if (curLine.empty()) {
             lineIdx++;
             continue;
         }
 
-        // End — 结束当前控件块
+        // 集合块标题行: 控件体里不含 '=' 的**单个裸标识符** (ListImages/Buttons/Nodes/...)。
+        // 判定必须够窄, 宽松一点就会把 `End` / `Begin xxx` 这类块边界当成集合标题:
+        // 那会让控件块一路吃到 EOF, 代码段被整段吞掉 (生成物里 Form_Load 凭空消失)。
+        if (collName.empty() && curLine.find('=') == std::string::npos
+            && curLine.find('(') == std::string::npos
+            && curLine.find(' ') == std::string::npos
+            && curLine.find('\t') == std::string::npos
+            && curLine != "End"
+            && curLine.compare(0, 5, "Begin") != 0) {
+            collName = curLine;
+            coll = FrmPropertyBlock();
+            coll.blockName = curLine;
+            collIndent = lineIndent;
+            lineIdx++;
+            continue;
+        }
+
+        // 集合块的项行: `.ListImage(1, "dt1", "CtrlImageList.frx":00000000)`
+        // 也收**没有前导点号**的那种 —— VB6 的 StatusBar/Toolbar 就这么写
+        // `Panels(1) = "Ready"` / `Buttons(1) = "Open"`, 少了这条分支这些行会当成控件属性
+        // 挂到 StatusBar1 自己身上, 集合恒空且不报任何错。
+        // 收尾判定不能用 `back() == ')'` —— StatusBar 的 `Panels(1) = "Ready"` 以引号结尾。
+        // 只要括号里有实参就算项行 (尾部可以跟 `= "值"` 这种默认实参)。
+        if (curLine.size() > 1 && (curLine.front() == '.'
+                                   || (isalpha((unsigned char)curLine.front())
+                                       && curLine.find('(') != std::string::npos))
+            && curLine.find('(') != std::string::npos
+            && (curLine.back() == ')' || curLine.find('=') != std::string::npos)) {
+            if (collName.empty()) {
+                // 没有标题行也照样收下 —— 否则这些行 parsePropertyLine 判不出来,
+                // 会被静默丢掉 (表现为"设计期图片凭空少一张")。
+                collName = "Items";
+                coll = FrmPropertyBlock();
+                coll.blockName = collName;
+                collIndent = lineIndent;
+            }
+            FrmPropertyBlock item = parseCollectionItem(curLine);
+            coll.nestedBlocks.push_back(std::move(item));
+            lineIdx++;
+            continue;
+        }
+
+        // 集合块内 **子属性行**: `.Key = "k"` / `.Style = 1` / `.Text = "x"`。
+        // 必须挂到**上一项**身上, 挂到控件上就错了 (VB6 里这些属于 Panels(1) 而不是 StatusBar1)。
+        // 后续 Toolbar.Buttons / ListView.ListItems / TreeView.Nodes 全是这个形态, 现在不修
+        // 后面每个控件都要重踩一遍。
+        if (!collName.empty() && !coll.nestedBlocks.empty()
+            && curLine.size() > 1 && curLine.front() == '.' && curLine.find('=') != std::string::npos
+            && curLine.find('(') == std::string::npos) {
+            FrmValue sv;
+            std::string sk;
+            if (parsePropertyLine(curLine, sk, sv) && !sk.empty()) {
+                // parsePropertyLine 连前导点号一起返回 (`.Key` → ".Key"), 而生成侧按
+                // **不带点**的名字取 (与项行实参名表 kCollArgNames 的口径一致)。
+                if (!sk.empty() && sk.front() == '.') sk.erase(0, 1);
+                if (!sk.empty()) {
+                    coll.nestedBlocks.back().properties[sk] = sv;
+                    lineIdx++;
+                    continue;
+                }
+            }
+        }
+
+        // End — 收掉当前集合块, 或结束控件块。
+        // **只能靠缩进区分**: 一个控件里可以有多个集合 (StatusBar 的 Panels 就能有
+        // 好几项各自的 End), 只认 collName 的话第二组 End 会被当成"收集合", 控件块的
+        // 收尾 End 于是被吃掉 → 控件块一路 break 到 EOF → 后面的代码段整体被当代码解析,
+        // 报一连串 `VB2002: unexpected token at module level: End`。
         if (curLine == "End") {
+            // collIndent 是"打开集合的那一行"的缩进 (标题行, 没有标题行时取第一个项行)。
+            // VB6 把集合的收尾 End 写在与首行**同一列**上, 项与子属性再往里缩 3 格。
+            if (!collName.empty() && lineIndent == collIndent) {
+                if (coll.blockName.empty()) coll.blockName = collName;
+                ctrl.propertyBlocks.push_back(std::move(coll));
+                coll = FrmPropertyBlock();
+                collName.clear();
+                collIndent = (size_t)-1;
+                lineIdx++;
+                continue;
+            }
             lineIdx++;
             break;
         }

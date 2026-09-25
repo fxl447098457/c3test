@@ -262,6 +262,14 @@
     // 推断表达式的Vb6Type（简化版，用于Select Case等需要类型判断的场景）
     Vb6Type inferExprType(Expr& expr) const;
 
+    // P20-42: 窗体控件的**属性返回类型**。见 cgen_util_type.cpp 的 MemberAccessExpr
+    // 分支: 那里对 `对象.成员` 的兜底是 lookupModule(memberName), 只按成员**裸名**
+    // 查模块符号 —— 于是 `SSTab1.Tab` 会命中返回 BSTR 的内置函数 vb6_Tab 而被判成
+    // String, 生成码不给 vb6_CStr(vb6_VariantFromValue(...)) 包装, 而 RTL 的
+    // vb6_SSTab_GetTab 返回的是 int32_t → 整数被当 BSTR 指针解引用 → 0xC0000005。
+    // 返回 Unknown 表示"这张表不管", 调用方照旧走原有兜底。
+    Vb6Type controlPropType(FrmControlType ctrlType, const std::string& propName) const;
+
     // Fix 029: 严格 Variant 推断 — 仅当表达式"明确"为 Variant/Variant 数组时返回 true.
     // 与 inferExprType 不同: inferExprType 对内置函数/Udt 字段访问等无法识别的情况
     // 会回退到 Variant (默认值), 此处不认为那些是 Variant, 避免误用 vb6_VariantToXxx 包装.

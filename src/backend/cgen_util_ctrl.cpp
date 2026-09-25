@@ -13,6 +13,46 @@ namespace vb6c3 {
 // P7.5: 控件属性 → RTL读取函数名映射
 // ============================================================
 
+// ============================================================
+// P20-42: 控件属性 → 返回类型
+//
+// 为什么需要这张表: inferExprType 对 `对象.成员` 的兜底是 lookupModule(memberName),
+// 只按成员**裸名**查模块符号, 于是和模块级/内置符号同名的属性会被顶掉。
+// 实测 `SSTab1.Tab` 撞上内置函数 `Tab` (vb6_Tab 返回 BSTR) → 判成 Vb6Type::String
+// → 字符串拼接不套 vb6_CStr(vb6_VariantFromValue(...)) → int32_t 当 BSTR 解引用 → AV。
+//
+// 只对"会撞名"的属性登记即可: 其余属性继续走原有兜底 (lookupModule 找不到就返回
+// Variant, 由 _Generic 安全包装)。这里登记的都按 Long —— RTL 侧这些 getter 就是
+// int32_t, C 层口径一致。
+// ============================================================
+Vb6Type CCodeGen::controlPropType(FrmControlType ctrlType, const std::string& propName) const {
+    std::string p = propName;
+    std::transform(p.begin(), p.end(), p.begin(), ::tolower);
+
+    // ---- 通用属性 (所有控件都适用) ----
+    //
+    // **必须先于** SSTab 那段, 而且必须存在 —— 这不是 SSTab 一个控件的问题:
+    // `Left` / `Right` / `Mid` 全是 VB6 内置函数 (cgen_expr_ident_builtin.inc),
+    // 其中 Left/Right/Mid 返回 **String**。于是 `lblPage0.Left` 被判成 String →
+    // 生成码不套数值转换 → int 当 BSTR 解引用 → 0xC0000005。
+    // 实测 SSTab 夹具: TS1 的 SSTab1.Tabs 正常, TS22 的 lblPage0.Left 崩。
+    // 这几个 RTL getter 的 C 返回类型都是 int, 故一律 Long。
+    if (p == "left" || p == "top" || p == "width" || p == "height"
+        || p == "visible" || p == "enabled") {
+        return Vb6Type::Long;
+    }
+
+    if (ctrlType == FrmControlType::SSTab) {
+        // VB6 里 WordWrap 是 Boolean, 但 RTL 的 getter 给的是 VB6 的 True/-1,
+        // 与 Tabs/Tab 同为 int32_t —— 一律按 Long, C 层才对得上。
+        if (p == "tabs" || p == "tab" || p == "taborientation" || p == "tabstyle"
+            || p == "tabsperrow" || p == "wordwrap") {
+            return Vb6Type::Long;
+        }
+    }
+    return Vb6Type::Unknown;
+}
+
 std::string CCodeGen::getControlPropReadFn(FrmControlType ctrlType, const std::string& propName) const {
     std::string propLower = propName;
     std::transform(propLower.begin(), propLower.end(), propLower.begin(), ::tolower);
@@ -141,6 +181,41 @@ std::string CCodeGen::getControlPropReadFn(FrmControlType ctrlType, const std::s
         if (propLower == "stretch") return "vb6_GetImageStretch";  // P17.2
         if (propLower == "visible") return "vb6_GetControlVisible";
         if (propLower == "enabled") return "vb6_GetControlEnabled";
+        break;
+    case FrmControlType::ProgressBar:  // P20-38: 只读回来必须走 RTL,
+        // 否则会落到 vb6_ComGetStringProp 这条 COM 占位路径上, 静默返回空。
+        if (propLower == "min") return "vb6_GetProgressBarMin";
+        if (propLower == "max") return "vb6_GetProgressBarMax";
+        if (propLower == "value") return "vb6_GetProgressBarValue";
+        if (propLower == "orientation") return "vb6_GetProgressBarOrientation";
+        if (propLower == "scrolling") return "vb6_GetProgressBarScrolling";
+        if (propLower == "visible") return "vb6_GetControlVisible";
+        if (propLower == "enabled") return "vb6_GetControlEnabled";
+        break;
+    case FrmControlType::ImageList:  // P20-39: 读写都走原生 RTL, 不落 COM 占位路径
+        // ListImages 集合本身 (Count/Add/Remove/Item) 由 cgen_util_com.cpp 的
+        // resolveComValue 拦截改道, 这里只管 ImageList 自身的标量属性。
+        if (propLower == "imagewidth") return "vb6_GetImageListImageWidth";
+        if (propLower == "imageheight") return "vb6_GetImageListImageHeight";
+        break;
+    case FrmControlType::StatusBar:  // P20-40: 只读回来必须走 RTL, 否则落 COM 占位路径静默答错
+        if (propLower == "align") return "vb6_StatusBar_GetAlign";
+        if (propLower == "style") return "vb6_StatusBar_GetStyle";
+        if (propLower == "simpletext") return "vb6_StatusBar_GetSimpleText";
+        if (propLower == "visible") return "vb6_GetControlVisible";
+        if (propLower == "enabled") return "vb6_GetControlEnabled";
+        break;
+    case FrmControlType::SSTab:  // P20-42
+        // TabCaption(i)/TabVisible(i) 是**带下标的索引属性**, 不是标量;
+        // 走不了这张表 (表的入参只有 propLower), 见 cgen_expr_member_form_builtin.inc 的 TODO。
+        if (propLower == "tabs")           return "vb6_SSTab_GetTabs";
+        if (propLower == "tab")            return "vb6_SSTab_GetTab";
+        if (propLower == "taborientation") return "vb6_SSTab_GetTabOrientation";
+        if (propLower == "tabstyle")       return "vb6_SSTab_GetTabStyle";
+        if (propLower == "tabsperrow")     return "vb6_SSTab_GetTabsPerRow";
+        if (propLower == "wordwrap")       return "vb6_SSTab_GetWordWrap";
+        if (propLower == "visible")        return "vb6_GetControlVisible";
+        if (propLower == "enabled")        return "vb6_GetControlEnabled";
         break;
     case FrmControlType::Menu:  // P20-36
         if (propLower == "caption") return "vb6_GetMenuCaption";
@@ -279,6 +354,36 @@ std::string CCodeGen::getControlPropWriteFn(FrmControlType ctrlType, const std::
         if (propLower == "smallchange") return "vb6_SetSmallChange";
         if (propLower == "visible") return "vb6_SetControlVisible";
         if (propLower == "enabled") return "vb6_SetControlEnabled";
+        break;
+    case FrmControlType::ProgressBar:
+        if (propLower == "min") return "vb6_SetProgressBarMin";
+        if (propLower == "max") return "vb6_SetProgressBarMax";
+        if (propLower == "value") return "vb6_SetProgressBarValue";
+        if (propLower == "orientation") return "vb6_SetProgressBarOrientation";
+        if (propLower == "scrolling") return "vb6_SetProgressBarScrolling";
+        if (propLower == "visible") return "vb6_SetControlVisible";
+        if (propLower == "enabled") return "vb6_SetControlEnabled";
+        break;
+    case FrmControlType::ImageList:  // P20-39
+        if (propLower == "imagewidth") return "vb6_SetImageListImageWidth";
+        if (propLower == "imageheight") return "vb6_SetImageListImageHeight";
+        break;
+    case FrmControlType::StatusBar:  // P20-40
+        if (propLower == "align") return "vb6_StatusBar_SetAlign";
+        if (propLower == "style") return "vb6_StatusBar_SetStyle";
+        if (propLower == "simpletext") return "vb6_StatusBar_SetSimpleText";
+        if (propLower == "visible") return "vb6_SetControlVisible";
+        if (propLower == "enabled") return "vb6_SetControlEnabled";
+        break;
+    case FrmControlType::SSTab:  // P20-42
+        if (propLower == "tabs")           return "vb6_SSTab_SetTabs";
+        if (propLower == "tab")            return "vb6_SSTab_SetTab";
+        if (propLower == "taborientation") return "vb6_SSTab_SetTabOrientation";
+        if (propLower == "tabstyle")       return "vb6_SSTab_SetTabStyle";
+        if (propLower == "tabsperrow")     return "vb6_SSTab_SetTabsPerRow";
+        if (propLower == "wordwrap")       return "vb6_SSTab_SetWordWrap";
+        if (propLower == "visible")        return "vb6_SetControlVisible";
+        if (propLower == "enabled")        return "vb6_SetControlEnabled";
         break;
     case FrmControlType::Timer:
         if (propLower == "interval") return "vb6_SetTimerInterval";
@@ -466,6 +571,13 @@ bool CCodeGen::controlTypeClearsCaption(const FrmControl& ctrl) const {
 
 // P20-36: 生成控件属性访问的HWND参数 (Menu控件用GetMenu+menuId)
 std::string CCodeGen::makeCtrlHwndArg(const std::string& ctrlNameLower, FrmControlType ctrlType) const {
+    // P20-39: ImageList 走原生复刻, 槽里是复刻实例指针不是 HWND, 必须用 vb6_com_<Name>
+    // (emitControlHandleDecls 也是这么声明的) —— 发 vb6_hwnd_<Name> 就是 C2065。
+    if (ctrlType == FrmControlType::ImageList) {
+        auto it0 = knownFormControlOriginalNames_.find(ctrlNameLower);
+        std::string n0 = (it0 != knownFormControlOriginalNames_.end()) ? it0->second : ctrlNameLower;
+        return "vb6_com_" + cIdent(n0);
+    }
     if (ctrlType == FrmControlType::Menu) {
         auto menuIt = knownMenuIds_.find(ctrlNameLower);
         if (menuIt != knownMenuIds_.end()) {

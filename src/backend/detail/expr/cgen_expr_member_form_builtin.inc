@@ -287,9 +287,11 @@
                     }
                 }
                 // ActiveX控件 (ImageList等): 属性访问走COM后期绑定
+                // StatusBar 是**真窗口** (P20-40 起 msctls_status32 复刻), 槽就是 HWND,
+                // 必须走下面通用控件分支拿 vb6_hwnd_X —— 归到 vb6_com_X 家族会生成
+                // vb6_ComGetObjectProp(vb6_com_StatusBar1, …) 而那个变量并不存在 (C2065)。
                 if (itCtrl->second == FrmControlType::ImageList ||
                     itCtrl->second == FrmControlType::Toolbar ||
-                    itCtrl->second == FrmControlType::StatusBar ||
                     itCtrl->second == FrmControlType::CommonDialog) {
                     std::string memLower = node.memberName;
                     std::transform(memLower.begin(), memLower.end(), memLower.begin(), ::tolower);

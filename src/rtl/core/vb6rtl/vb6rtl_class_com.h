@@ -59,7 +59,12 @@ void vb6_DeleteSetting(BSTR appName, BSTR section, BSTR key);
 vb6_VARIANT vb6_GetAllSettings(BSTR appName, BSTR section);
 
 // P21-18: LoadPicture enhancement - OleLoadPicturePath for ICO/CUR/WMF/EMF/GIF/JPG/PNG
+// 返回 **活着的 IPicture 对象** (VB6 的 StdPicture), 调用方持有并在不需要时
+// vb6_ReleasePicture 释放 —— 不是"只剩句柄"的残骸。
 void* vb6_LoadPictureEx(BSTR pathname);
+// 取 picture 的图形句柄 (不销毁 picture); *kind 出 1=BITMAP 2=METAFILE 3=ICON
+void* vb6_PictureHandleOf(void* picture, int32_t* kind);
+void  vb6_ReleasePicture(void* picture);
 
 // ============================================================
 // COM 互操作 (P6)

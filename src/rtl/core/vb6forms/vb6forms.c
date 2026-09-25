@@ -38,6 +38,39 @@ static int g_modalResult = 0;      // 模态返回值
 // 返回0=允许关闭, 返回1=取消关闭 (对应VB6 vbCancel)
 typedef int (*vb6_FormUnloadCallback)(void);
 
+// ============================================================
+// comctl32 通用控件引导
+// ------------------------------------------------------------
+// VB6 的 ListView/TreeView/Toolbar/StatusBar/ProgressBar/ImageList 在 VB6 侧
+// 是 mscomctl.ocx 里的包装, 而它的渲染内核就是 comctl32.dll 的通用控件。
+// C3 不用 OCX (本机未注册 + 32 位 inproc 进不了 x64 进程), 直接用 Win32
+// 等价类复刻 —— 但通用控件类**必须**先经 InitCommonControlsEx 注册, 否则
+// CreateWindowExW("msctls_progress32", ...) 返回 NULL 且不报错。
+// 幂等; 唯一的副作用是加载 comctl32.dll。
+// ============================================================
+static int g_comCtlInited = 0;
+
+void vb6_ComCtl_Init(void) {
+#ifdef _WIN32
+    if (g_comCtlInited) return;
+    g_comCtlInited = 1;
+    INITCOMMONCONTROLSEX ice;
+    memset(&ice, 0, sizeof(ice));
+    ice.dwSize = sizeof(ice);
+    ice.dwICC = ICC_PROGRESS_CLASS | ICC_TAB_CLASSES | ICC_LISTVIEW_CLASSES
+              | ICC_TREEVIEW_CLASSES | ICC_BAR_CLASSES | ICC_COOL_CLASSES
+              | ICC_ANIMATE_CLASS | ICC_UPDOWN_CLASS | ICC_HOTKEY_CLASS
+              | ICC_DATE_CLASSES | ICC_WIN95_CLASSES;
+    InitCommonControlsEx(&ice);
+    // comctl32 只注册它自己那批类; msctls_status32 / msctls_toolbar32 这两个
+    // v5.82 与 v6 都不注册 (实测连 dwICC=0xFFFFFFFF 全开也没用), 由各控件的
+    // RTL 自己补注册 (vb6_StatusBar_RegisterClass 等)。
+    vb6_StatusBar_RegisterClass();
+#else
+    (void)g_comCtlInited;
+#endif
+}
+
 // 当前窗体的Unload回调 (每个窗体单独设置)
 static vb6_FormUnloadCallback g_formUnloadCb = NULL;
 
@@ -838,7 +871,13 @@ void vb6_UnloadForm(void* hwnd) {
     if (!hwnd) return;
     if (GetEnvironmentVariableW(L"C3_OCX_TRACE", NULL, 0) > 0)
         fprintf(stderr, "[C3_MODAL] UnloadForm hwnd=%p\n", hwnd);
-    DestroyWindow((HWND)hwnd);
+    // P20-43: **不能直接 DestroyWindow** —— 那会跳过 WM_CLOSE, 于是 VB 代码里的
+    // `Unload Me` 既不触发 Form_QueryUnload 也不触发 Form_Unload (实测 FrmEvents
+    // 夹具 EV21/EV22 整个消失)。改发 WM_CLOSE: 窗体的 WM_CLOSE 分支里已有完整的
+    // "QueryUnload(可取消) → Unload → DestroyWindow" 链, 语义与 VB6 一致
+    // (UnloadMode=0 vbFormControlMenu 那条路径)。不会递归: WM_CLOSE 分支只会
+    // DestroyWindow, 不会再发 WM_CLOSE。
+    SendMessageW((HWND)hwnd, WM_CLOSE, 0, 0);
 }
 
 // M22-Issue6: 窗体表面Print

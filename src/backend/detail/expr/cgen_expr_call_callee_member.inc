@@ -52,6 +52,32 @@
         std::string memLowerM = "m_" + memLower;
         bool handled = false;
 
+        // ---- P20-42: SSTab 的带下标索引属性 TabCaption(i) / TabVisible(i) ----
+        // 与 StatusBar 的 `Panels(i).Text` 不是一回事: 那个是"集合对象再取成员属性",
+        // 这里 TabCaption 是**控件自身的参数化属性**, VB6 写作 SSTab1.TabCaption(0)。
+        // 不拦就会掉到下面的 COM 派发, 生成 vb6_ComCall(vb6_hwnd_SSTab1, L"TabCaption", …)
+        // —— 可本机 hwnd 不是 IDispatch, 运行期静默答错或直接崩。
+        // 写完这一侧还要配 cgen_util_comwrite.cpp 的对应写分支 (Get→Set)。
+        if (maExpr.object && maExpr.object->kind == ASTNodeKind::IdentifierExpr
+            && node.positional.size() == 1) {
+            auto& objIdTs = static_cast<IdentifierExpr&>(*maExpr.object);
+            std::string objLowerTs = Symbol::toLower(objIdTs.name);
+            auto itCtlTs = knownFormControls_.find(objLowerTs);
+            if (itCtlTs != knownFormControls_.end()
+                && itCtlTs->second == FrmControlType::SSTab) {
+                std::string fnTs;
+                if (memLower == "tabcaption")      fnTs = "vb6_SSTab_GetTabCaption";
+                else if (memLower == "tabvisible") fnTs = "vb6_SSTab_GetTabVisible";
+                if (!fnTs.empty()) {
+                    emitExpr(*node.positional[0]);
+                    std::string idxTs = std::move(lastExpr_);
+                    lastExpr_ = fnTs + "(" + makeCtrlHwndArg(objLowerTs, itCtlTs->second)
+                              + ", " + idxTs + ")  /* SSTab indexed prop */";
+                    return;
+                }
+            }
+        }
+
         // ---- Pattern A/B: UDT 数组字段 ----
         // 仅当 maExpr.object 的 UDT 类型可推断 (IdentifierExpr / WithMemberExpr / 嵌套
         // MemberAccessExpr). inferUdtTypeOfExpr 找到 UDT C 类型 → 在 udtMembers 中查 member.

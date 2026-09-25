@@ -32,6 +32,11 @@ static void addFormsSources(MsvcDriverOptions& opts, const std::string& rtlDir) 
     opts.sourceFiles.push_back(rtlDir + "/vb6forms_widget.c");
     opts.sourceFiles.push_back(rtlDir + "/vb6forms_widget_prop.c");
     opts.sourceFiles.push_back(rtlDir + "/vb6forms_shape.c");
+    opts.sourceFiles.push_back(rtlDir + "/vb6forms_progress.c");
+    opts.sourceFiles.push_back(rtlDir + "/vb6forms_imagelist.c");
+    opts.sourceFiles.push_back(rtlDir + "/vb6forms_statusbar.c");
+    opts.sourceFiles.push_back(rtlDir + "/vb6forms_sstab.c");
+    opts.sourceFiles.push_back(rtlDir + "/vb6forms_oledd.c");
     // vb6forms_axsite.c 按功能家族拆 5 个编译单元 (2026-09-20): 伞文件本身不参与编译
     // 注意: axsite/ 下的 .c 解包后是平铺目录, 故这里写 basename 而非带子目录路径
     opts.sourceFiles.push_back(rtlDir + "/ax_site.c");
@@ -240,26 +245,53 @@ static bool versionDirGreater(const std::string& a, const std::string& b) {
     return va > vb;
 }
 
-static std::string findRcExeInSdkBin(const std::filesystem::path& binDir) {
+// rc.exe 与 mt.exe 同在 <SDK>\bin\<ver>\<arch>\ 下, 发现逻辑完全一致。
+// **只找 x64 这一份**: mt.exe 自身的位数与目标位数无关 —— 实测 x64 的 mt.exe
+// 注入 x86 的 exe 一样能把 comctl32 拉到 v6 (见 embedManifestViaMt 的实测记录);
+// 而 rc.exe 的位数在 rc 侧是有意义的 (x86 目标该用 x86 那份, 别混)。
+static std::string findToolInSdkBin(const std::filesystem::path& binDir, const char* tool) {
     std::error_code ec;
     if (!std::filesystem::exists(binDir, ec)) return std::string();
+    std::string exeName = std::string(tool) + ".exe";
     std::vector<std::string> vers;
     for (const auto& entry : std::filesystem::directory_iterator(binDir, ec)) {
         if (!entry.is_directory()) continue;
         std::error_code ec2;
-        if (std::filesystem::exists(entry.path() / "x64" / "rc.exe", ec2)) vers.push_back(entry.path().filename().string());
+        if (std::filesystem::exists(entry.path() / "x64" / exeName, ec2)) vers.push_back(entry.path().filename().string());
     }
     if (vers.empty()) return std::string();
     std::sort(vers.begin(), vers.end(), [](const std::string& a, const std::string& b) {
         return versionDirGreater(a, b);   // 大的在前
     });
-    return (binDir / vers.front() / "x64" / "rc.exe").string();
+    return (binDir / vers.front() / "x64" / exeName).string();
 }
 
-static std::string findRcExe() {
+static std::string findToolInPath(const char* tool) {
     std::error_code ec;
-    std::filesystem::path toolsRc = std::filesystem::current_path() / "tools" / "rc.exe";
-    if (std::filesystem::exists(toolsRc, ec)) return toolsRc.string();
+    std::string exeName = std::string(tool) + ".exe";
+    // PATH 上直接有的场合 (VS 开发者提示符把 <sdk>\bin\<ver>\x64 塞进 PATH)
+    if (const char* path = std::getenv("PATH"); path && path[0]) {
+        std::string p = path;
+        size_t start = 0;
+        while (start <= p.size()) {
+            size_t sep = p.find(';', start);
+            std::string dir = p.substr(start, sep == std::string::npos ? std::string::npos : sep - start);
+            if (!dir.empty()) {
+                std::filesystem::path cand = std::filesystem::path(dir) / exeName;
+                if (std::filesystem::exists(cand, ec)) return cand.string();
+            }
+            if (sep == std::string::npos) break;
+            start = sep + 1;
+        }
+    }
+    return std::string();
+}
+
+static std::string findTool(const char* tool) {
+    std::error_code ec;
+    std::string exeName = std::string(tool) + ".exe";
+    std::filesystem::path toolsCopy = std::filesystem::current_path() / "tools" / exeName;
+    if (std::filesystem::exists(toolsCopy, ec)) return toolsCopy.string();
 
     std::vector<std::filesystem::path> binDirs;
     if (const char* sdkDir = std::getenv("WindowsSdkDir"); sdkDir && sdkDir[0]) {
@@ -276,25 +308,86 @@ static std::string findRcExe() {
         binDirs.emplace_back(std::filesystem::path(std::string(drive) + "\\") / "Windows Kits" / "10" / "bin");
     }
     for (const auto& dir : binDirs) {
-        std::string rc = findRcExeInSdkBin(dir);
-        if (!rc.empty()) return rc;
+        std::string found = findToolInSdkBin(dir, tool);
+        if (!found.empty()) return found;
     }
-    // PATH 上直接有 rc.exe 的场合 (VS 开发者提示符把 <sdk>\bin\<ver>\x64 塞进 PATH)
-    if (const char* path = std::getenv("PATH"); path && path[0]) {
-        std::string p = path;
-        size_t start = 0;
-        while (start <= p.size()) {
-            size_t sep = p.find(';', start);
-            std::string dir = p.substr(start, sep == std::string::npos ? std::string::npos : sep - start);
-            if (!dir.empty()) {
-                std::filesystem::path cand = std::filesystem::path(dir) / "rc.exe";
-                if (std::filesystem::exists(cand, ec)) return cand.string();
-            }
-            if (sep == std::string::npos) break;
-            start = sep + 1;
-        }
+    return findToolInPath(tool);
+}
+
+static std::string findRcExe() { return findTool("rc"); }
+
+// mt.exe 与 rc.exe 是同一批工具, 发现方式共用。它的位数无关紧要。
+static std::string findMtExe() { return findTool("mt"); }
+
+// 应用清单在**链接完之后**用 mt.exe 注入 (P20-41 rev2)。
+//
+// 为什么不是 rc.exe → 链接器: rc 侧只为 RT_MANIFEST 留了字符串写法
+// `1 RT_MANIFEST "x"`, 而它把类型记成字符串名而非数值 (RT_MANIFEST **是 24**,
+// 不是 16 —— 16 是 RT_VERSION), 链接后资源目录是 named=1 / type=88(0x58),
+// Windows 激活上下文不认 → comctl32 停在 v5.82。
+// mt.exe 这条实测是通的, x64/x86 目标都验过:
+//   无清单对照  → comctl32 FileVersion 5.82.*.*
+//   mt.exe 注入 → comctl32 FileVersion 6.10.*.*   (即 v6)
+// 而且**不用把任何 .res 交给链接器**; mt.exe 自身的位数也不挑
+// (用 x64 那份给 x86 的 exe 注入同样生效)。
+//
+// 顺带记一条 mt.exe 的脾气, 见 embedManifestViaMt 尾部的体积复核:
+// 目标 PE 若完全没有资源目录, mt.exe **返回 0 却什么都不做**。
+static bool embedManifestViaMt(const std::string& exePath, const std::string& manifestXml, bool verbose) {
+    // 每个早退点都要喊一声: 静默不嵌 = 32/64 位出货悄悄退回 comctl32 v5.82,
+    // 而这类"看起来构建成功"的失败最难查。
+    if (exePath.empty() || manifestXml.empty()) {
+        std::cerr << "C3: warning: no exe path / manifest to embed" << std::endl;
+        return false;
     }
-    return std::string();
+    if (!existsUtf8(exePath) || !existsUtf8(manifestXml)) {
+        std::cerr << "C3: warning: manifest embed skipped, file missing (exe="
+                  << exePath << " manifest=" << manifestXml << ")" << std::endl;
+        return false;
+    }
+
+    std::string mtExe = findMtExe();
+    if (mtExe.empty()) {
+        std::cerr << "C3: warning: mt.exe not found, application manifest will not be embedded" << std::endl;
+        return false;
+    }
+    if (verbose) {
+        std::cout << "C3: MT exe: " << mtExe << std::endl;
+    }
+
+    // 资源 id 1 是激活上下文的约定入口。整串再包一层引号, 与 rc 那几处同款
+    // (否则 cmd /c 会把 mt.exe 路径剥坏)。
+    std::ostringstream mtArgs;
+    mtArgs << "\"" << mtExe << "\" -manifest \"" << manifestXml
+           << "\" -outputresource:\"" << exePath << ";#1\"";
+    if (verbose) {
+        std::cout << "C3: MT (manifest): " << mtArgs.str() << std::endl;
+    }
+    // mt.exe 的退出码不可靠: 目标 PE 若**完全没有资源目录**(ResourceDirRVA==0),
+    // 它照样返回 0, 但一个字节都没写进去。实测 n0.exe(32 位、无 .rsrc)跑完
+    // 仍是 ResourceDirRVA==0、文件体积不变。所以退出码之后必须复核体积:
+    // 没变大就说明这次注入是空转, 此时 activation context 拿不到清单,
+    // comctl32 会停在 v5.82 —— 必须喊出来, 不能让它假装成功。
+    std::uintmax_t sizeBefore = std::filesystem::file_size(utf8ToPath(exePath));
+
+    int ret = MsvcDriver::executeCommand("\"" + mtArgs.str() + "\"");
+    if (ret != 0) {
+        std::cerr << "C3: warning: mt.exe failed to embed the application manifest (exit " << ret << ")" << std::endl;
+        return false;
+    }
+
+    if (std::filesystem::file_size(utf8ToPath(exePath)) == sizeBefore) {
+        // 注入成功时一定会新长出 .rsrc, 体积不变几乎只可能是 mt.exe 空转。
+        std::cerr << "C3: warning: mt.exe reported success but the exe did not change "
+                  << "(" << sizeBefore << " bytes) -- the target probably has no resource "
+                  << "directory, and no manifest got in. comctl32 will stay v5.82." << std::endl;
+        return false;
+    }
+
+    if (verbose) {
+        std::cout << "C3: application manifest embedded: " << exePath << std::endl;
+    }
+    return true;
 }
 
 bool Driver::runLinker(const CompileOptions& options, const std::string& outputDir,
@@ -653,6 +746,95 @@ bool Driver::runLinker(const CompileOptions& options, const std::string& outputD
         }
     }
 
+        // P20-41: 应用清单走**资源**而不是旁挂 <exe>.manifest 文件。
+        // 旁挂形式有三个硬伤: ①构建系统不感知, 改清单不触发重编 ②复制/签名/分发时
+        // 容易丢, 丢掉就静默退回 comctl32 v5.82 ③同目录多份 exe 会互相串。
+        // 这里生成 `1 RT_MANIFEST` (资源 id 1 是激活上下文的约定入口) 编译进 exe。
+        // 用户自己带了 ResFile=.res 就交给他, 免得两份清单打架。
+    if (!options.isDll && userResFile_.empty()) {
+        std::string absInterDir3 = pathToUtf8(std::filesystem::absolute(utf8ToPath(intermediatesDir)));
+        std::string maniStem = projectBaseName_.empty() ? std::string("app") : projectBaseName_;
+        std::string maniName = maniStem + ".c3.manifest";
+        std::string maniPath = absInterDir3 + "\\" + maniName;
+        std::string maniRcPath = absInterDir3 + "\\" + maniStem + ".c3.rc";
+        {
+            // assemblyIdentity 的 name 建议与应用同名, 这里用工程基名。
+            std::string maniStemEsc = maniStem;
+            std::ofstream maniFile = ofstreamUtf8(maniPath, std::ios::out | std::ios::trunc);
+            if (maniFile) {
+                maniFile << "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n";
+                maniFile << "<assembly xmlns=\"urn:schemas-microsoft-com:asm.v1\" manifestVersion=\"1.0\">\n";
+                maniFile << "  <assemblyIdentity type=\"win32\" name=\"" << maniStemEsc
+                         << "\" version=\"1.0.0.0\" processorArchitecture=\"*\" />\n";
+                // comctl32 v6: 挂上之后 statusbar/toolbar 等通用控件才按 xp 之后的版本走
+                // (注意: v6 也**不注册** msctls_status32, 它仍需 RTL 自注册, 见
+                // vb6_StatusBar_RegisterClass —— 挂 v6 只解决主题与部分控件)。
+                maniFile << "  <dependency>\n";
+                maniFile << "    <dependentAssembly>\n";
+                maniFile << "      <assemblyIdentity type=\"win32\" name=\"Microsoft.Windows.Common-Controls\""
+                         << " version=\"6.0.0.0\" processorArchitecture=\"*\""
+                         << " publicKeyToken=\"6595b64144ccf1df\" language=\"*\" />\n";
+                maniFile << "    </dependentAssembly>\n";
+                maniFile << "  </dependency>\n";
+                maniFile << "</assembly>\n";
+            }
+        }
+
+        // 首选: 链接完之后用 mt.exe 后注入 (见 embedManifestViaMt 的实测记录)。
+        // 只有连 mt.exe 都找不着时才退回 rc.exe 交给链接器。
+        std::string mtExePath = findMtExe();
+        if (!mtExePath.empty() && existsUtf8(maniPath)) {
+            msvcOpts.manifestXmlFile = maniPath;
+            if (options.verbose) {
+                std::cout << "C3: application manifest will be injected after link: " << maniPath << std::endl;
+            }
+        } else {
+            std::ofstream maniRcFile = ofstreamUtf8(maniRcPath, std::ios::out | std::ios::trunc);
+            if (maniRcFile) {
+                maniRcFile << "#pragma code_page(65001)\n";
+                maniRcFile << "1 RT_MANIFEST \"" << maniName << "\"\n";
+            }
+
+            std::string rcExePath3 = findRcExe();
+            if (!rcExePath3.empty()) {
+                std::string maniResPath = absInterDir3 + "\\" + maniStem + ".c3.res";
+                std::ostringstream maniRcArgs;
+                maniRcArgs << "\"" << rcExePath3 << "\" /r /fo \"" << maniResPath << "\" \"" << maniRcPath << "\"";
+                if (options.verbose) {
+                    std::cout << "C3: RC (manifest): " << maniRcArgs.str() << std::endl;
+                }
+                // 与上面两处同款: 整串再包一层引号, 否则 cmd /c 会把 rc.exe 路径剥坏。
+                int maniRcRet = MsvcDriver::executeCommand("\"" + maniRcArgs.str() + "\"");
+                if (maniRcRet == 0 && existsUtf8(maniResPath)) {
+                    msvcOpts.manifestResFile = maniResPath;
+                    if (options.verbose) {
+                        std::cout << "C3: application manifest embedded: " << maniResPath << std::endl;
+                    }
+                    // 实测: rc.exe 这条路**恰恰是为 RT_MANIFEST 准备的写法不行** ——
+                    //   ① `1 16 "x.manifest"` 会被 rc 判成 VERSIONINFO 语法错 RC2167
+                    //      (RT_VERSION 也是 16), 任何数值型类型写法都被拒;
+                    //   ② 唯一能过的 `1 RT_MANIFEST "x"` 被 rc 记成**字符串类型名**,
+                    //      不是数值 24, 链接后资源目录里 type=88(0x58)、named=1,
+                    //      Windows 激活上下文不会去找 → comctl32 停在 v5.82。
+                    // 这跟 x86/x64 无关, 所以下面不再按 arch 分级告警: 走到这条退路
+                    // 就已经说明机器上没有 mt.exe, 静默退回 v5.82 是可接受的,
+                    // 但仍然喊一声(与 TypeLib/VERSIONINFO 两处一致, 不藏在 --verbose 后)。
+                    //
+                    // 存档一条被推翻过的错误结论, 免得以后有人再绕回来:x86 链接**并不是**
+                    // 丢 .res。旧判断来自 tests/ctrlstatusbar 那套 PE 解析脚本把 PE32 的
+                    // magic 写成了 0x107(正确是 0x10B), 于是所有 32 位产物的资源目录
+                    // 一律被读成 0, 看着就像"没嵌入"。实测 32 位 link.exe 的 .rsrc 正常写入。
+                    std::cerr << "C3: warning: manifest embedded via rc.exe, but that yields "
+                              << "type=88 instead of RT_MANIFEST(24); comctl32 will stay v5.82. "
+                              << "mt.exe was not found." << std::endl;
+                }
+            } else {
+                // 与 TypeLib / VERSIONINFO 两处一致: 不藏在 --verbose 后面。
+                std::cerr << "C3: rc.exe not found, application manifest will not be embedded" << std::endl;
+            }
+        }
+    }
+
         // P23-03: Pass user .res file to linker
     if (!userResFile_.empty() && std::filesystem::exists(utf8ToPath(userResFile_))) {
         msvcOpts.userResFile = userResFile_;
@@ -675,7 +857,17 @@ bool Driver::runLinker(const CompileOptions& options, const std::string& outputD
         std::cerr << "C3: error: RTL sources incomplete before compile (" << rtlDir << ")" << std::endl;
         return false;
     }
-    return msvc.compileAndLink(msvcOpts);
+    if (!msvc.compileAndLink(msvcOpts)) return false;
+
+    // 清单必须在链接成功之后注入 —— 它写的是刚产出的那个 exe。
+    // (compileAndLink 内部会分派到增量路径, 所以这一侧不必再单独处理。)
+    // 注意用 msvcOpts.outputFile 而不是 options.outputFile: 后者在没显式给 -o 时是空的,
+    // 前者在 runLinker 里已经落到 「outputDir/<基名><扩展名>」这一档 (见 423 行起)。
+    if (!msvcOpts.manifestXmlFile.empty()) {
+        embedManifestViaMt(msvcOpts.outputFile, msvcOpts.manifestXmlFile, options.verbose);
+    }
+
+    return true;
 }
 
 } // namespace vb6c3
