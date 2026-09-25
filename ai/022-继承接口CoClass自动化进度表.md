@@ -4,8 +4,8 @@
 > 每次运行开始先读本文件，结束前必须更新本文件（状态头 + 批次清单 + 运行日志）。
 > 规范输入: `ai/讨论记录/018-接口继承与CoClass设计思路.md`（含 tB 文档要点与分阶段设计思路全文）。
 
-STATUS: ALL_DONE             # NOT_STARTED | DESIGN | BUSY | IDLE | ALL_DONE
-LAST_RUN: 2026-09-26T04:10:00+08:00   # 本轮 = **029 内置控件线第二批 C29-1b（文件系统三控件 Drive/Dir/File）出完并过门 = 代码 `440129c`，门 Actions run #85（8/8 job 全绿）**。进度与读数记在 `ai\029-内置控件补全计划书.md` §九，本表只挂指针 + 换 GATE_BASELINE。
+STATUS: BUSY                # NOT_STARTED | DESIGN | BUSY | IDLE | ALL_DONE
+LAST_RUN: 2026-09-26T04:30:00+08:00   # 本轮 = **029 线换批**：C29-2（ProgressBar）**移交另一位作者**（用户 2026-09-26 指定），本线已把自己那 8 个文件的半成品从共享树里退干净并重建过 C3.exe（WIP 存 `.build\c292_progressbar_wip.patch`、判据工程 `.build\c292_fixture\`）。本轮做 **C29-9 CommonDialog**（用户在 TreeView 与它之间给的选项；选它的理由 = 它不吃 §三 D1 那套"成员对象"机制也不吃 WM_NOTIFY 通道，而 TreeView 的 `Nodes`/`Node` 两条前置（C29-3 立样、C29-4 通道）都还没建）。上一条 = C29-1b 出完并过门 = `440129c`，门 run #85（8/8 job 全绿）。自动运行见本行不足 55 分钟请立即跳过。
                # B21 交付一笔 = `2ddcc8b`（cgen 侧 15 文件 + 用例 32 条 + 手册 Boolean 页 + 分类护栏脚本
                # `.build\b21_emitc_guard.py`）。根因是两条不是一条、护栏 RED 一次的教训、以及顺带量出的 `Print #`
                # 那条，全在 **D70**；待拍板 5 就此收口，新撞出的一条记为待拍板 7（未拍板、未动手）。
