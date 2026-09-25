@@ -225,6 +225,12 @@ static HRESULT STDMETHODCALLTYPE ComObj_Invoke(vb6_ComObject* self, DISPID dispI
             if (coercedArgs) CoTaskMemFree(coercedArgs);
             return E_OUTOFMEMORY;
         }
+        // ai/022 B17: CoTaskMemAlloc 的内存**不是零**, 而下面收尾时对每个元素都调 VariantClear ——
+        // 走到"原样传下去"那一支 (`args[i] = src`) 的元素从没被 VariantInit 过, VariantClear 读到的是
+        // 垃圾 vt/指针: 指针恰好像个 BSTR/Dispatch 就去 free 一个野地址 ⇒ **堆损坏**
+        // (实测: 干净 runner 上 disp_probe 在第一次 Invoke 处 exit=0xC0000374 = STATUS_HEAP_CORRUPTION,
+        // 而本机复现不出来 —— 新建堆页恰好是 0 时它是良性的)。整段先清零, 后面各支再按需覆盖。
+        memset(coercedArgs, 0, (size_t)argc * sizeof(VARIANT));
         // DISPPARAMS args are in reverse order
         for (int i = 0; i < argc; i++) {
             VARIANT* src = &pDispParams->rgvarg[argc - 1 - i];
