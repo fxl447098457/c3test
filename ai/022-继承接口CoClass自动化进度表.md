@@ -5,78 +5,64 @@
 > 规范输入: `ai/讨论记录/018-接口继承与CoClass设计思路.md`（含 tB 文档要点与分阶段设计思路全文）。
 
 STATUS: IDLE             # NOT_STARTED | DESIGN | BUSY | IDLE | ALL_DONE
-LAST_RUN: 2026-09-25T08:34:00+08:00   # 本轮 = **B16 一格出完并过门（Actions run #62，head `578faa4`）**。
-               # 交付：**接口成员的对外调用契约** —— ① 薄面整条 canonical 化：`vb6_ivtbl_<I>` 的 IUnknown
-               # 前缀与契约槽、以及它们的实现函数，在 x86 下一律 `__stdcall`（BASE 的 x86 产物里一个
-               # 约定修饰都没有 = `__cdecl`，而 COM 规范是 `CC_STDCALL`；x64 下 MSVC 接受并忽略该修饰，
-               # 故一份生产码两架构通用）；② **类型库那一档如实发契约成员**（`cFuncs` = 2、每成员
-               # `oVft=(3+槽)*指针宽` / `callconv=stdcall` / 原生返回 vt，ByRef 建 `VT_PTR` 链）；
-               # ③ **位数 flag 跟 `--arch` 走**（`CreateTypeLib2(is64_ ? SYS_WIN64 : SYS_WIN32)`）——
-               # 存量库默认架构逐字节不变、`--arch x86` 只差 32 字节布局字（读数见 D63-3）；
-               # ④ 薄面出入口 `vb6_iv_thin_<C>`/`vb6_iv_claim_<C>`：接口 IID 的 QI 交**薄指针**，
-               # 包装器把底座引用交还**最后一个薄引用**（`IClassFactory::CreateInstance` 那种"QI 完就
-               # Release 包装器"的规范姿势下交出去的指针不悬空）。
-               # 三件测量与裁决落 **D63**；canonical 返回形状（`HRESULT` + `[out, retval]`）与
-               # 跨世界身份合一按"断不了先断形状"留给 **B17**（B16 判据⑤）。
-               # 上一轮 = **B15 已出完并过门（Actions run #59，8/8 job 绿，head `0caa3c5`）**。
-               # 门 head 里含用户的 Fix 192/193（`a4e8eb3`/`7e9b6bc`，merge `0caa3c5` 无冲突）。
+LAST_RUN: 2026-09-25T10:20:00+08:00   # 本轮 = **B17 一格出完并过门（Actions run #66，head `732c1f8`）**。
+               # 交付：**外部激活冒烟** —— ① 真注册（`DllRegisterServer` 写 HKCR）后，按 CLSID/ProgID
+               # `CoCreateInstance` 拿 `IDispatch`（= `CreateObject` 那条路）并按名调用**类的公有成员**得值；
+               # ② 按**接口 IID** 激活拿薄指针，外部客户按库里 `oVft` 直调契约槽得值（x86 + x64 双验）；
+               # ③ `DllUnregisterServer` 之后 CLSID/ProgID/TypeLib 三类键都不留。路上修掉两处**静默**缺陷：
+               # `rc.exe` 的发现面太窄（SDK 不在默认盘 ⇒ 类型库资源不嵌 ⇒ 注册表里没有 TypeLib 项）与
+               # `UnRegisterTypeLib` 实参顺序写反（⇒ 每次反注册都漏掉整棵 TypeLib 键）。两件测量与裁决落 **D64**；
+               # canonical 返回形状与跨世界身份合一按测量②**不做**（真按库里 oVft 直调的客户已经能用）。
+               # 上一轮 = **B16 一格出完并过门（Actions run #62，8/8 job 绿，head `578faa4`）**。
                # 自动运行见本行不足 55 分钟请立即跳过。
-LAST_COMMIT: 代码批 = 578faa4(B16)、941b6dc(B15)、0caa3c5(B15 门 head = 合并用户 Fix 192/193)、ddf4e9b(B14 测试批)、4534a83(B14 台账)、b10ec1a(B13e)、5d29a5c(B13e 台账)、9df23ba(B13d)、bd38798(B13c)、b1a8e58(B13b)、7b6570a+988c7cb(B13a；门 head = 合并 `9785f4f`)、7f829ee(B11/C05=B12)、b82a184+02d70fe(B11/C04)、c4aaa4c(B11/C03b)、e515d89(B11/C03a)、f0b820d(B11/C02)、e7c7a31(B11/C01)、3c5d8e6(B10)、9eb2ca7(B09c)、debb110(B09b)、02bac92(B09)   # **commit message 一律现写、不复用上批文本**；push 只推 `github/dev`（Actions 门），`origin`(gitcode) 与 `main` 不碰、**绝不建 MR**。
-CURRENT_BATCH: **B17 = 外部激活冒烟（真注册 + `CoCreateInstance` 早绑定 + `CreateObject`/IDispatch 晚绑定 双路）**
-               （**先读 D63（B16 三件测量与两条押后的裁决）、D60-4、D61-6，以及 004/013 里那两条验收模式的原文**。
-               B16 把进程内那条管线推到了"广告 == 应答 + 库里如实发契约"，但**没有一个真注册客户碰过它**：
-               `CreateObject` 走注册表、早绑定客户按库里的 `oVft` 直调 —— 两者至今只在本机 `--keep-for-debug`
-               的临时产物上被探针模拟过。本批就是把这两条路走通，走不通就把断在哪一级记清楚。）
-               1. 动手前先量两件（读数落 D64，范围按读数收窄，宁窄勿滥）：
-                  ① **注册与外部激活今天到底通不通**：把 `tests\test_activex_dll\` 那份现成模式
-                     （编译 DLL → `DllRegisterServer`（或 `regsvr32`）→ **外部** `CreateObject` 晚绑定断言，
-                     含 `tests\test_p613_typelib.bas`）在**新式接口宿主的 DLL**（`tests\cc_dll` 的 `CImpl`
-                     或一个手写 `CoClass` 块的工程）上重跑一遍，逐级记读数：CLSID 进没进注册表、ProgID
-                     对不对、`CreateObject` 拿到的是不是 IDispatch 包装器、库里契约那一档客户认不认。
-                     **顺手回答 B16 那第 4 项**：`DllRegisterServer` 一族对新式 CoClass/类工厂无需新改动
-                     （注册写入读的就是同一张服务器表、身份自 B13b 起走 `coclassIds_` 唯一出口；B16 的 A/B
-                     里 `.def`/exports/`.rc` 一字未动）—— 但这条只有**真跑一次**才算验收，读码不算。
-                  ② **早绑定那条路的外部读数**：`CoCreateInstance` + 按 `.tlb` 导入的接口直调契约槽
-                     （= B16 探针那条支路，但这次是**注册过的**、由系统装载的 DLL；x86 与 x64 各一次），
-                     并顺带回答「canonical 返回形状（`HRESULT` + `[out, retval]`）不改的话，一个真早绑定
-                     客户能不能用」—— 这个答案决定它是排进下一格还是永久不做（B16 只按"断不了先断形状"
-                     把它押后，没有断言它必须做）。
-               2. 判据（不许半接）：① 外部那三条验收（`test_p613_typelib` 那一族）在新式 CoClass 上**真绿**，
-                  且新式接口那一档的 IID/CLSID/ProgID 与 `.tlb`、服务器表三处同值（B13 那套"唯一出口"判据的
-                  外部队列版）；② 早绑定客户按库里 `oVft` 直调拿到正确返回值（x86 + x64 双验）；
-                  ③ **注册表可清理、用例不依赖机器上装过什么**（`DllUnregisterServer` 后不留
-                  `HKCU\Software\Classes` 残留；本机与干净 runner 都要能跑 —— 这条是 B17 能进回归的前提，
-                  写不成就只记读数、用例留在 `-RequiresCom` 一类门后）；④ 存量 DLL 的注册与激活行为一字不变；
-                  ⑤ 断不了的（canonical 返回形状 / 跨世界身份合一）继续只断形状并写清属谁。
-               3. 硬约束与基线：BASE = B16 收线 exe（md5 见 GATE_BASELINE 末行），
-                  护栏沿用 `.build/b16_sig.py` 那套白名单分类器（B16 的 `b16_emitc_guard.py`/`b16_ab_all.py`
-                  可直接改名复用，允许面按本批靶子重新声明）。
-               4. 门与规矩沿用：push 只推 `github/dev` + `git ls-remote` 核 sha；盯门
-                  `.build/wait_run2.py <sha> <秒>`；**门跑 Actions（本机只记快检）**；`.build` 里的临时
-                  `.ps1` 一律 ASCII only；套件在 CI 上用 **pwsh 7** 跑（`Join-Path` 4 参形式 PS 5.1 静默给空串，
-                  本地复现套件也必须用 pwsh）；行尾/编码按文件实测。
-               仍开（不在 B17）：**`ComObj_Invoke` 的 invkind fallback**（D61-6，会跨 Get/Let 打到对方；
-               收紧属口径题，等拍板）、`.bas` 里声明的新式接口在调用点认不出（D43 第三条）、B10 的三条
-               caller 侧洞、B06c（接口值作实参/进 Variant）、⑮d、祖先 Private UDT 进方法签名（D40 末①）、
+LAST_COMMIT: 代码批 = 732c1f8(B17 门后修堆损坏)、a5517fa(B17)、578faa4(B16)、941b6dc(B15)、0caa3c5(B15 门 head = 合并用户 Fix 192/193)、ddf4e9b(B14 测试批)、4534a83(B14 台账)、b10ec1a(B13e)、5d29a5c(B13e 台账)、9df23ba(B13d)、bd38798(B13c)、b1a8e58(B13b)、7b6570a+988c7cb(B13a；门 head = 合并 `9785f4f`)、7f829ee(B11/C05=B12)、b82a184+02d70fe(B11/C04)、c4aaa4c(B11/C03b)、e515d89(B11/C03a)、f0b820d(B11/C02)、e7c7a31(B11/C01)、3c5d8e6(B10)、9eb2ca7(B09c)、debb110(B09b)、02bac92(B09)   # **commit message 一律现写、不复用上批文本**；push 只推 `github/dev`（Actions 门），`origin`(gitcode) 与 `main` 不碰、**绝不建 MR**。
+CURRENT_BATCH: **B18 = 收口批：端到端示例工程 + 全量回归 + 设计文档归档 + STATUS=ALL_DONE**
+               （**先读 D64（B17 两件测量 + 两处静默缺陷的修复 + canonical 形状的裁决）、D63、D62，
+               以及 026 第五节的边界清单**。B01–B17 已把"tB 式 Interface/Inherits/CoClass 含完整 COM"
+               逐格交付；本批收口：把成果落成一个**能被人读的端到端示例**、把设计记录归档、跑一次
+               全量门，然后置 `STATUS=ALL_DONE`。）
+               1. **端到端示例工程**（位置按现有惯例定，建议 `tests\cc_demo\`）：一个工程同时用到
+                  `Interface` + `Implements`（含 `Via` 委托）+ `Inherits`/`Overrides` + `Protected` +
+                  `MyBase` + `CoClass` 块 + `As <块名>`/`New <块名>`。两条腿都要有读数：
+                  ① **语言层**同工程断言（沿用 `cc_act`/`cc_dll` 的 `CC*`/`EXT*` needle 形状）；
+                  ② **对外层**编译成 DLL 后走 B17 的现成助手（`Test-ComActivate` 整趟冒烟 +
+                     `Test-ComActivateClient` 注册→跑外部客户→反注册）。x86 + x64 双跑。
+               2. **归档**：把 018（设计思路）与 022 的设计记录并成一份可读文档（018 附录或新 023，
+                  归属与命名按用户口径定）；手册页（`Interface`/`Implements`/`Inherits`/`CoClass` 四页）
+                  逐页对照**实测行为**过一遍，把"仍未交付"收敛成 v1 边界（见下）。
+               3. **全量回归**：门跑 Actions（push `github/dev` + `git ls-remote` 核 sha +
+                  `.build/wait_run2.py <sha> <秒>` 盯）；本机只做快检（`--emit-c`/A/B + 新用例）。
+                  收线后把 `STATUS` 置 **ALL_DONE**，并在 GATE_BASELINE 记这一次的门号。
+               4. 规矩沿用：push 只推 `github/dev`；`.build` 里的临时 `.ps1` 一律 ASCII only；
+                  套件在 CI 上用 **pwsh 7** 跑；行尾/编码按文件实测（新 `.ps1` 带 BOM、用例 `.bas`/`.vbp`
+                  按同目录邻居的编码/行尾）。
+               仍开（收进 v1 边界，**不在 B18**）：**`ComObj_Invoke` 的 invkind fallback**（D61-6，等拍板）、
+               `.bas` 里声明的新式接口在调用点认不出（D43 第三条）、B10 的三条 caller 侧洞、
+               B06c（接口值作实参 / 进 Variant）、⑮d、祖先 Private UDT 进方法签名（D40 末①）、
                `com_entry` 基类 extern 的 `void*` 返回、`Class_Terminate` 在 EXE 里无触发点（D41）、
-               **canonical COM 返回形状**与**跨世界身份合一**（B16 按 D63-5/D63-6 押后，取舍看本批第 1 条②）。
-GATE_BASELINE: (Actions 级) c3test run **#62 [dev] = completed/success**（https://github.com/fxl447098457/c3test/actions/runs/36077118402；
-               head 已核 = `578faa4` = B16 代码；8 个 job 全绿（smoke 1、bas#1 24、bas#2 23、compile 10、syntax 119、asm 13+1SKIP、vbp 见下），
-               `Tests (vbp)` = **PASS=36 FAIL=0 SKIP=1 TOTAL=37**（上一批 33/0/1/34，+3 = 本批新增的三条；唯一 SKIP 仍是本机未注册的 `test_vbman`）。
-               本批新增两族用例在干净 runner 上全绿，判据四条都真跑：
-               `[TLB-CONTRACT] cc_dll_tlb_contract_x64 ... PASS (typelib advertises the shipped vtable)`、
-               `[TLB-CONTRACT] cc_dll_tlb_contract_x86 ... PASS`（x86 那条用 x86 读端，`oVft=12/16`）、
-               `[DISPATCH] cc_dll_dispatch_iface_only ... PASS (real in-proc IDispatch client)` 与 `_x86` 同批绿；
-               原有 `[TLB-ID] cc_dll_tlb_matches_table` / `cc_dll_identity_single_source` / B14 两条 `[DISPATCH]` 同批仍绿
-               ⇒ 库里那一档从"真接口 + 0 成员"换成"如实契约"，而对外那条真跑通路没坏。
-               本机侧同批证据（**不记本地门数**，理由见运行日志那两个坑）：`--emit-c` 17 件 `violations=0`（`__stdcall` 只出现在
-               声明/实现新式接口的工程、薄面那一对只出现在有接口宿主的工程，靠 `EXPECT_FIRING`/`EXPECT_THIN_HOSTS` 分开钉）；
-               全产物 A/B `unclassified=0`（只有 `cc_dll` 的 `.tlb` 1484→1624 属预期变化，存量工程 `.tlb` 逐字节不动）；
-               负控在 `pre_b16_C3.exe` 上 `pass=0 fail=2`（四条 needle 全 miss + 反面断言 `cFuncs=0` 命中）；
-               默认架构存量 `.tlb` 逐字节不变（md5 `87d34673`、diffbytes=0），`--arch x86` 差 **32 字节**、且差集与 BASE→NEW 的差集同址。
-               第 4 项（`DllRegisterServer` 一族接线）经读码 + A/B 判定**无需新改动**（注册写读同一张服务器表、身份自 B13b 起走
-               `coclassIds_` 唯一出口；`.def`/exports/`.rc` 一字未动），真注册的外部端到端验收归 **B17**。
-               收线 exe（= 门 head 的树）md5 `90129adbb5dbb3c5fca14fcc872dc0f2`，已存成下一批 BASE。 # 下一批 BASE = `.build/pre_b17_C3.exe`（md5 90129adbb5dbb3c5fca14fcc872dc0f2）。
+               canonical COM 返回形状（`HRESULT` + `[out, retval]`）、跨世界身份合一（B17 测量②裁决）。
+GATE_BASELINE: (Actions 级) c3test run **#66 [dev] = completed/success**（https://github.com/fxl447098457/c3test/actions/runs/36084765076；
+               head 已核 = `732c1f8` = B17 代码 `a5517fa` + 门后修的那条既有堆损坏 `732c1f8`；8 个 job 全绿，
+               `Tests (vbp)` = **PASS=39 FAIL=0 SKIP=1 TOTAL=40**（上一批 36/0/1/37，+3 = 本批新增的三条；
+               唯一 SKIP 仍是本机未注册的 `test_vbman`）；另 7 个 job：smoke 1/0/0、bas#1 24/0/0、bas#2 23/0/0、
+               compile 10/0/0、syntax 119/0/0、asm 13/0/1（SKIP 仍是环境项）、Build C3.exe 绿。
+               本批三条新用例在干净 runner 上全绿，**外部激活第一次被真注册客户走通**：
+               `[COMACT] cc_dll_external_activate ... PASS (registered, activated, cleaned up)`、
+               `[COMACT] cc_dll_external_activate_x86 ... PASS`、`[COMACT] cc_dll_late_client ... PASS
+               (external CreateObject client + cleanup)`；runner 上传的产物里客户 EXE 的 stdout 就是
+               `EXT1:OK / EXT2:OK / EXT-DONE`（`LateClient.out`）。既有那批同批仍绿：
+               `[TLB-CONTRACT] cc_dll_tlb_contract_x64/x86`、`[DISPATCH] cc_dll_dispatch_iface_only[_x86]`、
+               `[TLB-ID] cc_dll_tlb_matches_table`、`cc_dll_identity_single_source`。
+               **门的过程本身是一次收获**：第一次门（run #65 @ `a5517fa`）在**既有**用例 `ax_dll_dispatch_invoke`
+               上报 `exit=0xC0000374`（STATUS_HEAP_CORRUPTION，读数停在第一次 `Invoke` 前）—— 读码 + A/B 定位到
+               `ComObj_Invoke` 的 `coercedArgs`（`CoTaskMemAlloc` **不是零**）收尾被逐元素 `VariantClear`；
+               修复（分配后整段清零）后重跑即本行；同一份旧二进制的那次门重跑也是绿的 ⇒ 随堆状态偶发（非本批引入）。
+               本机侧同批证据（**不记本地门数**）：`--emit-c` 17 件逐字节全同（前端/cgen 一行没动）；
+               全产物 A/B `unclassified=0`（只差 `rtl/vb6comserver.c` 10 行 + `rtl/vb6comserver_obj.c` 6 行，
+               都在各自修的那段里）；资源目录读数 = NEW 带不带 `WindowsSdkDir` 都嵌 TypeLib+版本信息（ax_dll 4880 /
+               cc_dll 2504）、BASE 不带就不嵌（0，= 缺陷现场）；负控喂 `pre_b17_C3.exe` ⇒ `pass=0 fail=2`
+               （红的正是 `CLEAN_TYPELIB=STILL`）。收线 exe（含堆损坏修复）md5 `38f247e30ed5ac3513366c9733bf4dda`，
+               已存成下一批 BASE。 # 下一批 BASE = `.build/pre_b18_C3.exe`（md5 38f247e30ed5ac3513366c9733bf4dda）。
 ```
 
 > 重入保护：若运行开始时 STATUS=BUSY 且 LAST_RUN 距今不足 55 分钟，说明上一次运行可能仍在进行——本次**立即结束，不做任何修改**。
@@ -133,7 +119,7 @@ GATE_BASELINE: (Actions 级) c3test run **#62 [dev] = completed/success**（http
 | B14 | P6 | IDispatch 四件套接入新式接口（GetTypeInfo/GetIDsOfNames/Invoke + DispId 表） | ☑ **B14 已出，但范围被自己的测量重裁（D61）**：三件测量先行 —— ① **四件套本身是通的**（新探针 `tests\tools\disp_probe.c`：`LoadLibrary` + `DllGetClassObject` + `CreateInstance(IID_IDispatch)`，不查注册表；对真产物 `TestAXDLL.dll` 实测 `Add(2,40)=42`、`SetValue(7)`→`GetValue()=7`、`GetTypeInfo(0)` 回 coclass 那份（`kind=5`、`cFuncs`=0 是 coclass 常态）、未知名 `DISP_E_UNKNOWNNAME`）⇒ **缺的不是四件套，是成员面**；② 薄指针 `vb6_ivtbl_<I>` = `{QI,AddRef,Release,自有槽}`，**没有 IDispatch 那四槽** ⇒ 要接就是 dual/布局改动，且**必须排在 B15 之后**（先动它就重演 D60 的"广告 != 应答"）；③ `comDispid` 全工程只有一处生产者（`driver_codegen_dll_typelib.inc:186`，只收类模块 Public 成员）⇒ **契约成员从来不在这张表里**，要发只有"违口径 (b) 当公有发"（两边假绿）或"真接口 = B15"两条。本批交付 = 把 DLL 这条管线从"字节一致"升到"真调用得通"：探针 + 助手 `Test-DispatchInvoke`（`tests\disp_invoke.ps1`）+ 两条 gated 用例 `ax_dll_dispatch_invoke`（legacy 面真点通）与 `cc_dll_dispatch_iface_only`（只满足新式接口的类：**成员面必须为空** ⇒ `NAMES=ADD hr=0x80020006`；并把"接口 IID 由胖指针应答 `same=yes`"钉成实测事实 ⇒ B16 要改必须故意翻它）。**零编译器改动** ⇒ 产物逐字节不变（收线 exe md5 与开工同一枚），负控 = 换成不存在的 CLSID ⇒ `GETFACTORY hr=0x80040111` 判红（新助手先证明能红）。另登记一条没动的弱点（D61-6）：`ComObj_Invoke` 在 invkind 配不上时退回"第一个同 dispid 表项"，而 VB6 里 Get/Let 共享 dispid 是常态 ⇒ 收紧属口径题，等拍板 | `ddf4e9b` | |
 | B15 | P6 | 类型库导出：新式接口在库里发成真接口（`TKIND_INTERFACE`）+ 修"接口宿主被登记成假 coclass"的形状 | ☑ **B15 已出（代码 `941b6dc`，门 head = 合并 `0caa3c5`，Actions run #59 全绿）＝ 只交付"形状与身份那一半"**，成员面按读数刻意押到 B16（理由 D62-1 mode 8 + D62-3，见 CURRENT_BATCH 第 1 条①③）。四件测量落 D62，其中两条推翻既有判断：**① 接口成员的签名从来没到发码现场**（026/B02 口径：Interface 块只进 `Module::interfaces` 不进 `declarations` ⇒ 宿主 Class 符号 `memberNames` 恒空 ⇒ `_IProbe` 的 `cFuncs=0` 是这条路本来不通，D61-3 那条"DispId 表缺一处生产者"的根因订正）；**② `CreateTypeLib2` 的位数 flag 有字节后果**（同一份 `oVft=24`，`SYS_WIN64` 建库读回 24、`SYS_WIN32` 读回 48，两枚 flag 出的 `.tlb` md5 不同）⇒ 本批不动它，登记成 B16 的前置裁决。成立条件实测：`TKIND_INTERFACE` 拒 `FUNC_DISPATCH`（`0x800288BD`）、要 `FUNC_PUREVIRTUAL` + `oVft`；`VT_PTR` 不给 `lptdesc` 会让建库进程当场崩；0 槽真接口可建（mode 9）；coclass 引用真接口并标 DEFAULT 走得通（mode 5）。交付：`TypeLibBuilder::addVtableInterface`（新）+ `driver_codegen_dll_typelib.inc` 那条循环加接口宿主分叉（判据 = Pass E 命中且 `ifaces_` 有同名键，legacy 那条一行不动）⇒ 库里 `coclass IProbe`（一枚 `generateUuid(类名)` 另 mint 的假 CLSID + 一句"可创建"）与 0 成员 `_IProbe` 一并撤掉，换成 `kind=interface name=IProbe` 用 Pass E 那枚 IID；types 4→3、1648→1484 字节。判据换读法不放宽：`Test-TlbIdentitySingleSource` 通道 3 改读真接口行 + 两条**反面**断言（那两行再现即红），负控实测 old=RED(三条全中)/new=GREEN。护栏：16 件 `--emit-c` 逐字节 0 变化、全产物 A/B 只有 `cc_dll` 的 `.tlb` 变、两件存量 DLL 的库一字未动。根因一句话：那条循环是唯一没有 `isInterface` 过滤的 COM 消费者（对照 `cgen_util_dllentry_collect.inc:26`、`driver_codegen_dll_sync.inc:8`）。 | `941b6dc` | 门 #59（8 job 全绿，`Tests (vbp)` 33/0/1）+ `b15_emitc_guard.py` 16/16 + `b15_ab_all.py` 分类 0 + `b15_negctl.ps1` 负控 + `b15_measure1/8.ps1` 七种 mode 建库实测 |
 | B16 | P6 | **D62 重裁后的真身**：接口成员的对外调用契约（`vb6_ivtbl_<I>` canonical 化 → 库里那一档发成员）+ 类型库位数 flag/oVft 口径 + 薄指针 IDispatch 面与"胖应答瘦"的收法 + DllRegisterServer 一族对新式 CoClass/类工厂的接线与 x86/x64 双验 | ☑ **B16 已出（代码 `578faa4`，Actions run #62 全绿）** = ① **薄面整条 canonical 化**：`vb6_ivtbl_<I>` 的 IUnknown 前缀 + 契约槽 + 它们的实现函数在 x86 下一律 `__stdcall`（BASE 的 x86 产物 `grep -c __stdcall` = 0，NEW = 21；x64 上 MSVC 忽略该修饰 ⇒ 一份生产码两架构通用）；② **类型库那一档如实发契约成员**：`cFuncs` = 2（`Ping`/`Got`）、每成员 `oVft=(3+槽)*指针宽` / `callconv=stdcall` / 原生返回 vt、ByRef 建 `VT_PTR` 链；③ **位数 flag 跟 `--arch` 走**（`CreateTypeLib2(is64_ ? SYS_WIN64 : SYS_WIN32)`）—— 存量库默认架构逐字节不变、`--arch x86` 只差 32 个字节的位数布局字，x64/x86 两枚读端读数逐项相同（D63-3）；④ **薄面出入口** `vb6_iv_thin_<C>`/`vb6_iv_claim_<C>`：接口 IID 的 QI 交**薄指针**（B14 那条 `QI_EXTRA same=yes` 故意翻面）、包装器把底座引用交还**最后一个薄引用**（类工厂那种"QI 完就 Release 包装器"的规范姿势下交出去的指针不悬空）；⑤ **行里第 4 项（DllRegisterServer 一族接线）经读码 + A/B 判定无需新改动** —— 注册写入（`vb6comserver.c:62-171`）读的就是同一张服务器表、身份自 B13b 起走 `coclassIds_` 唯一出口，B16 的 A/B 里 `.def`/exports/`.rc` 一字未动；**真注册的外部端到端验收归 B17**（D63 与 B17 的 CURRENT_BATCH 都写明）。判据五条全对上读数：`cFuncs`/`oVft`/`callconv` 三样读数（新探针 `tests\tools\tlb_slots.cpp` 升格入库 + 两条 x64/x86 契约用例）+ x86 真跑 `VTBL_GET_AFTER=42` + 存量逐字节（17 件 `violations=0` / A/B `unclassified=0`）；canonical 返回形状与跨世界身份合一按"断不了先断形状"留 B17（D63-5，取舍看 B17 测量②）。 | `578faa4` | 门 #62（8 job 全绿）+ `b16_emitc_guard.py` 17 件 `violations=0` + `b16_ab_all.py` `unclassified=0`（只有 `cc_dll` 的 `.tlb` 1484→1624）+ 负控 `b16_negctl.ps1`（`pass=0 fail=2`，四条 needle 全 miss + 反面断言命中）+ 五条新用例 `b16_cases.ps1`（`pass=5 fail=0`）+ 迁移探针（默认架构 diffbytes=0 / x86 diffbytes=32） |
-| B17 | P6 | 外部激活冒烟验收（CoCreateInstance 早绑定 + CreateObject/IDispatch 晚绑定 双路） | ☐ | | |
+| B17 | P6 | 外部激活冒烟验收（CoCreateInstance 早绑定 + CreateObject/IDispatch 晚绑定 双路） | ☑ **B17 已出（代码 `a5517fa` + 门后修一条 `732c1f8`，Actions run #66 全绿）** = **对外那条管线第一次被真注册客户走通**，路上修掉两处一直存在的**静默**缺陷：① **`rc.exe` 的发现面太窄**（`driver_link.cpp`）—— 旧写法只认 `WindowsSdkDir` 环境变量与 `C:\Program Files (x86)\Windows Kits\10\bin`，SDK 装在别的盘（本机 = `D:\Windows Kits\10`，用户确认）就**静默不嵌**资源：实测 BASE 产出的 DLL 连 `.rsrc` 段都没有（数据目录 2 = `(0,0)`，NEW = `(4880)`/`(2504)`）⇒ 注册表里没有 TypeLib 项、外部工具按 LIBID 找不到库；改成与套件同一套探测（环境变量 → Program Files → 盘符 → PATH，目录内取版本号最大者，TypeLib 与版本信息两处共用），且"找不到 rc.exe"不再藏在 `--verbose` 后面；② **`vb6_UnregisterTypeLib` 的 `UnRegisterTypeLib` 实参顺序写反**（原型 `(libID, wVerMajor, wVerMinor, lcid, syskind)`，旧写法把 syskind 塞进 lcid 槽）⇒ 两个键都找错、函数失败，而本函数无条件返回 S_OK ⇒ **每次反注册都静默漏掉整棵 TypeLib 键**（实测：CLSID/ProgID 清干净、`TypeLib\{libid}` 还在）；按原型给对顺序并取库自己声明的 lcid/syskind（中性库记在 0x0409 下；x64 库 `syskind=3`、x86 库 `=1`，`.build/b17_tlbattr` 直接读 TLIBATTR 得到）。判据五条全对上读数：① 外部三条验收 —— `cc_dll_external_activate[_x86]`（注册四项 + `PROGID_LOOKUP same=yes` + `COCREATE_DISP ptr=OK` + `CALL=Twice result=42` + `COCREATE_IFACE` + `VTBL_GET_AFTER=42` + `CLEAN_*` 三类键 `gone`）与 `cc_dll_late_client`（**另一个进程**的 C3 客户 EXE：不引用 DLL，`CreateObject` + 晚绑定调用，`EXT1:OK`/`EXT2:OK`）；② 早绑定按库里 `oVft=(3+槽)*指针宽` 直调得 42，x86 + x64 双验；③ 注册表可清理（反注册后 CLSID/ProgID/TypeLib 三类键都不留，用例可重复跑 —— 修缺陷②之后才成立）；④ 存量行为不变（注册写同一张服务器表；`--emit-c` 17 件逐字节全同，全产物 A/B 只差 `rtl/vb6comserver.c` 的 10 行、全在反注册那段）；⑤ canonical 返回形状与跨世界身份合一按测量②**不做**。**晚绑定的边界**：契约成员是 `Private` ⇒ 类的默认面上按名点不到（`NAMES=Ping hr=0x80020006`，VB6 语义的应有读数，正面钉住）；为此 `CImpl.cls` 加了一个公有成员 `Twice`（B13b 那条 `methodCount` 针 0→1），于是同一类**两个面**并存：默认面走 `IDispatch` 晚绑定、接口面走契约槽早绑定。 | `a5517fa` + `732c1f8` | 门 #66（见 GATE_BASELINE）+ `.build/b17_ab_all.py`（A 段 `--emit-c` 17 件逐字节全同；B 段只差 `rtl/vb6comserver.c` 10 行；C 段资源目录：NEW 带不带 `WindowsSdkDir` 都嵌、BASE 不带就不嵌）+ 负控 `.build/b17_negctl.ps1` 喂 `pre_b17_C3.exe` ⇒ **pass=0 fail=2**（红的正是 `CLEAN_TYPELIB=STILL`）+ 三条新用例 `.build/b17_cases.ps1` ⇒ `pass=3 fail=0`（x64/x86 冒烟 + 外部客户）+ 门后补一条**既有潜伏缺陷**（`732c1f8`）：第一次门在既有用例 `ax_dll_dispatch_invoke` 上报 `exit=0xC0000374`（堆损坏），定位到 `ComObj_Invoke` 的 `coercedArgs`（`CoTaskMemAlloc` **不零**）收尾对每个元素 `VariantClear`，“原样传下去”那一支从没 `VariantInit` 过；A/B（把该数组填成 vt=VT_BSTR + 野指针的临时编译器）**恰好停在同一读数处**、清零版整趟干净；修为分配后整段清零（本机 12 次不复现 = 随堆状态偶发，非本批引入；同一次旧门的重跑又是绿的，也是这条的侧面证据） |
 | B18 | P7 | 端到端示例工程 + 全量回归 + 设计文档归档（018 附录或新 023）+ STATUS=ALL_DONE | ☐ | | |
 
 > 批次可按实施中发现的耦合度合并/拆分，但**阶段范围不得越界**；每次运行只推进能各自独立过门的批。
@@ -2868,6 +2854,90 @@ D54-② 那条"类变量永不 Release"不变式（对外一旦发 IDispatch/IUn
    （实测读到对象后面的堆、当场崩）；正确写法 `*(probe_ivtbl**)p`。另：崩溃型探针必须
    `setvbuf(stdout, NULL, _IONBF, 0)`，否则块缓冲把已打印的读数全吞掉（B15 那条 `Test-Path exe` 教训的同族）。
 
+**D64（B17 两件测量 + 两处静默缺陷的修复 + 外部激活判据：真注册、按 CLSID/接口 IID 的外部客户、晚绑定的边界）**
+
+1. **测量① = 注册与外部激活今天通不通（逐级记读数）**：新探针 `tests\tools\com_act_probe.c`
+   （自己调 `DllRegisterServer`，再让 COM 自己去找 `InprocServer32` 装载 DLL）跑出来的是
+   **"三级都对、一级断"**：
+   ① `DllRegisterServer` 写注册表这一级**通** —— `REG_CLSID_DEFAULT=OK CoDll.PG`、
+   `REG_INPROC_PATH=OK <dll>`、`REG_THREADING=OK Apartment`、`REG_PROGID_CLSID=OK {…}`，
+   CLSID/ProgID 两族键都落到了 HKLM\SOFTWARE\Classes（本机进程是管理员；非管理员会被 Windows
+   重定向到 HKCU\Software\Classes，两侧对称所以用例免管理员也能跑）；
+   ② `CLSIDFromProgID("CoDll.CImpl")`/`("CoDll.PG")` → 同一个 CLSID，`CoCreateInstance` 拿
+   `IID_IDispatch` 得包装器 —— `CreateObject` 那条路**通**；
+   ③ **断在类型库那一级**：`LoadTypeLibEx(<dll>)` 读不到内嵌库（`TYPELIB_LOAD=MISSING`），
+   于是 `TypeLib` 项根本没写进注册表 —— 外部工具按 LIBID 找不到这份契约。查下去是**两条静默缺陷**：
+   - **缺陷 A（link 期）**：`rc.exe` 的发现面太窄。`driver_link.cpp` 只认 `WindowsSdkDir`
+     环境变量与 `C:\Program Files (x86)\Windows Kits\10\bin`，而本机 SDK 在 **`D:\Windows Kits\10`**
+     ⇒ 找不到 rc.exe ⇒ `activex_dll_typelib.rc` 编不出 .res ⇒ **类型库与 VS_VERSION_INFO 都不嵌**。
+     实测：BASE 产出的 DLL 连 `.rsrc` 段都没有（数据目录 2 = `(0,0)`），NEW 为 `(4880)`（ax_dll）/
+     `(2504)`（cc_dll）。**旧写法在 CI 上看不出来**（GitHub runner 的 SDK 在默认盘），是本机才亮。
+     顺带：旧代码在 bin 目录里取"枚举到的最后一个"版本目录（结果随枚举顺序变），且"找不到 rc.exe"
+     只在 `--verbose` 下打印 —— 静默的质量损失，本轮改成始终打到 stderr。
+   - **缺陷 B（RTL）**：`vb6_UnregisterTypeLib` 调 `UnRegisterTypeLib` 时**实参顺序写反** ——
+     原型是 `(libID, wVerMajor, wVerMinor, lcid, syskind)`，旧写法写的是 `(…, SYS_WIN64, pAttr->lcid)`
+     ⇒ 两个键都找错、函数失败，而本函数**无条件返回 S_OK** ⇒ **每次反注册都静默漏掉整棵 TypeLib 键**。
+     实测（干净注册→反注册）：`CLSID\…`、`CoDll.PG\CLSID` 都清掉了，`TypeLib\{232C4D5F-…}` 还在。
+     修法 = 按原型给对顺序，并取**库自己声明**的 lcid/syskind（中性库 RegisterTypeLib 记在 `0x0409`
+     下 —— 实测 `pAttr->lcid = 0x0409`、x64 库 `syskind=3`、x86 库 `syskind=1`；另写一枚
+     `.build/b17_tlbattr` 探针直接读 TLIBATTR 得到这三个值，不靠猜）。
+2. **测量② = 早绑定那条路的外部读数，顺带回答 canonical 返回形状**：注册过的、由系统装载的 DLL
+   上，`CoCreateInstance(CLSID, …, IID_IProbe)` 拿到**薄指针**，客户按库里 `oVft=(3+槽)*指针宽`
+   直调契约槽 —— `VTBL_GET_BEFORE=0` → 槽 3 写 21 → `VTBL_GET_AFTER=42`，**x64 与 x86 各一遍**。
+   ⇒ 答案：**canonical 返回形状（`HRESULT` + `[out, retval]`）不做** —— 真按库里 oVft 直调的客户
+   已经能拿到值；那个形状只有"把接口当 dual 自动化接口用"才需要，与成员面（`GetIDsOfNames`）
+   是同一件事，属 v1 边界。跨世界身份合一也不做（外部客户拿到的 `IDispatch` 仍是包装器，
+   `IID_IUnknown` 与接口 IID 仍是两个指针值）—— 两条都写进手册。
+3. **晚绑定的边界（VB6 语义，不是缺陷）**：契约成员按 VB6 惯例是 `Private`，所以**类的默认面上
+   按名点不到它们**（`NAMES=Ping hr=0x80020006 DISP_E_UNKNOWNNAME`，`Got` 同）—— D61-3 已钉过
+   这条口径（"契约成员不会变成对外可点的 disp id"）。为了让"外部 `CreateObject` + 按名调用"那一族
+   （`test_p613_typelib` 的做法）有东西可点，`tests\cc_dll\CImpl.cls` 加了**一个公有成员**
+   `Public Function Twice(ByVal n As Long) As Long`：同一类于是**两个面**并存 —— 默认面（`_CImpl`
+   dispinterface，晚绑定按名走这条）与接口面（`IProbe` 的契约槽，早绑定走这条）。库与服务器表
+   自动跟上（`_CImpl` 多一条 `FUNC 0 memid=1 name=Twice`，服务器表 `methodCount 0→1` ⇒ B13b 那条
+   针跟着从 `0, /* methodCount */` 改成 `1, …`，广告==应答仍然成立）。
+4. **实施（两处修复 + 夹具一处增长，零布局改动）**：`driver_link.cpp` 新增 `findRcExe()`
+   （环境变量 → Program Files → 盘符扫描 → PATH，目录内取版本号最大者；TypeLib 与版本信息两处共用）
+   + 找不到时的 stderr 提示；`vb6comserver.c` 的反注册按原型给对实参；`tests\cc_dll_client\`
+   （客户 EXE 工程：`CreateObject` + 晚绑定调用，不引用 DLL）+ `tests\tools\com_act_probe.c`
+   + `tests\com_activate.ps1`（两条助手：整趟冒烟 / 注册→跑外部客户→反注册）。**不改发送器**：
+   `--emit-c` 17 件逐字节全同。
+5. **判据（五条对上读数）**：① 外部那三条验收在新式 CoClass 上真绿 ——
+   `cc_dll_external_activate[_x86]`（注册四项 + `PROGID_LOOKUP same=yes` + `COCREATE_DISP` +
+   `CALL=Twice result=42` + `COCREATE_IFACE` + `VTBL_GET_AFTER=42` + 三类键 `gone`）与
+   `cc_dll_late_client`（**另一个进程**的 C3 客户 EXE：`EXT1:OK`/`EXT2:OK`/`EXT-DONE`），
+   且接口那一档的 IID/CLSID/ProgID 与 `.tlb`、服务器表三处同值（身份自 B13b 起单源，本批只是
+   加了"外部队列"这一层读数）；② 早绑定按库里 oVft 直调拿到正确返回值，x86 + x64 双验；
+   ③ **注册表可清理**：反注册后 CLSID/ProgID/TypeLib 三类键都不留，用例可重复跑（修缺陷 B 之后
+   才成立）；④ 存量 DLL 的**注册与激活行为**不变（注册写的是同一张服务器表；`--emit-c` 与
+   `.tlb`/`.def`/`.rc` 全部逐字节同，见 6）；⑤ canonical 返回形状与跨世界身份合一按 2 只断形状
+   并写清属 v1 边界。
+6. **护栏与负控**：`.build/b17_ab_all.py` 三段 —— A) `--emit-c` **17 件逐字节全同**（前端/cgen
+   一行没动）；B) 全产物 A/B（双方都设 `WindowsSdkDir`，把这个变量按掉）：`.c/.h/.def/.rc/.tlb`
+   全同，**只有 `rtl/vb6comserver.c` 差 10 行、且全在反注册那段**；C) rc.exe 发现面：NEW 带不带
+   `WindowsSdkDir` **都嵌资源**（4880/2504），BASE 不带就不嵌（0）⇒ 缺陷 A 的因果链闭合。
+   负控 `.build/b17_negctl.ps1`：同一套用例喂收线前的 `pre_b17_C3.exe`（并给它 `WindowsSdkDir`，
+   把缺陷 A 按掉、只剩缺陷 B）⇒ **pass=0 fail=2**，红的正是 `CLEAN_TYPELIB=STILL`。
+7. **三条教训（下一批直接用）**：① **产品二进制跨构建不可比** —— `link.exe` 每次都写 PE 时间戳，
+   同一个 exe 连编两次 md5 都不同（实测 NEW-a/NEW-b），所以"产物字节 A/B"在这里没有区分力；
+   要看的是**资源目录在不在**（数据目录 2）与 **emitted 文件**（那两样是确定的）。② **探针的模式词
+   别写死在 `argv[5]`** —— `... <progid> reg` 这种少一个参数的写法会静默退化成"整趟跑"（注册完顺手
+   反注册），调用方以为已经注册好，下一个进程再激活就 429；已改成从 `argv[4]` 起扫。③ **GUI 子系统
+   exe 的未处理运行期错误会弹模态框**（RTL：有控制台走 stderr，没有就 `MessageBoxW`），套件里表现
+   为"跑超时被杀"这种最难查的红 ⇒ 客户夹具要 `On Error Resume Next`，把失败落到"FAIL null"这类
+   读数上让用例按缺 needle 判红（本机手工跑时真被这个框挡住过一次）。
+8. **门抓到的一条既有潜伏缺陷（本批修掉，代码 `732c1f8`）**：第一次门的 vbp job 在**既有**用例
+   `ax_dll_dispatch_invoke` 上 exit=**0xC0000374（STATUS_HEAP_CORRUPTION）**，读数正停在第一次
+   `Invoke` 前一行（`NAMES=ADD … dispid=2`）。读码定位：`ComObj_Invoke`
+   （`vb6comserver_obj.c`）用 `CoTaskMemAlloc` 拿 `coercedArgs`（**不是零**），收尾却对**每个**元素
+   调 `VariantClear`；走"原样传下去"那一支（`args[i] = src`，`VT_I4` 等）的元素从没 `VariantInit` 过
+   ⇒ `VariantClear` 读到垃圾 `vt`/指针，只要形状像 BSTR/Dispatch 就去 free 一个野地址。
+   **机制证明（A/B）**：把该数组临时填成"`vt=VT_BSTR` + 野指针"的编译器所产 DLL，探针**恰好停在同一个
+   读数处**（与 CI 现场一致）；清零版整趟干净。本机连跑 12 次不复现（新建堆页恰好为 0 时这条是良性的
+   ⇒ 随堆状态偶发），所以它不是本批引入，是本批新增的外部激活动作把它逼出来的 —— 修法 = 分配后整段
+   `memset(..., 0, argc * sizeof(VARIANT))`。这条也顺带解释了"同一批二进制在 CI 上偶发红"这类历史现象
+   的一种来源：**未初始化内存 + 收尾清理**的组合。
+
 ## 运行日志
 
 - 2026-09-23 建表：范围确认（含完整COM）、规范文档 018 入库、现状盘点完成。
@@ -3118,3 +3188,5 @@ D54-② 那条"类变量永不 Release"不变式（对外一旦发 IDispatch/IUn
 - 2026-09-25 04:51–07:00 **B15 一格出完并过门（Actions run #59，head `0caa3c5`）**：开工先做四件测量（读数与两条订正落 **D62**），按 D62-5 把范围收窄成"类型库的形状与身份那一半"后动工 —— `TypeLibBuilder::addVtableInterface`（`TKIND_INTERFACE` + Pass E 那枚 IID + 接口自己的名字，不收 `FCANCREATE`）+ `driver_codegen_dll_typelib.inc` 那条循环加接口宿主分叉，**撤掉** `coclass IProbe`（连带那枚谁也不认的 `generateUuid(类名)` mint 与"可创建"这句假广告）和 0 成员的 `_IProbe`。库里 types 4→3。判据换读法不放宽：`Test-TlbIdentitySingleSource` 通道 3 改读真接口行 + 两条反面断言，负控（`.build/b15_negctl.ps1`）实测旧库 RED 三条全中、新库 GREEN；`--emit-c` 16 件全同、全产物 A/B 只 `cc_dll` 的 `.tlb` 变。成员面（`cFuncs` 仍 0）连同 `CreateTypeLib2` 位数 flag 排 B16，理由都在 D62-1/D62-3 里有读数。代码提交 `941b6dc`；**门 head 是合并后的 `0caa3c5`**（用户在 `github/dev` 上的 Fix 192/193 —— `a4e8eb3` 元素类型为项目类的数组、`7e9b6bc` `TypeOf … Is <项目类>` —— merge 进来无冲突，两条已从本表"仍开"清单撤下并记在 CURRENT_BATCH 末）。收线 exe（merged tree）md5 `a7e41e5d…` 已存成 `.build/pre_b16_C3.exe`。 **本轮四条流程教训（都是自己的锅，记下来给后续批次）**：① **`Test-Path exe` 不是构建成功的判据** —— 一次 `cl` 失败但旧实验 exe 还在原地，脚本照样跑完，量出来的"③ flag 无后果"是**上一版二进制的读数**（重测后结论翻转，见 D62-3）；改成先删旧产物、再看 cl 输出里有没有 `error C`。② **PS 5.1 按 ANSI 读无 BOM 的 `.ps1` 时，行尾的中文字节会把换行吃掉** —— `.build` 里一个临时脚本的 `param()` 因此静默失效（参数全空、脚本空跑），临时脚本一律 ASCII only。③ **bash 传给 `powershell -File` 的 Windows 路径里反斜杠会被 MSYS 吃掉** —— `-OutputDirectory D:\c3…` 变成仓库根下一个 `c3.vb6.pro.build…` 目录；要么写 `"D:\\…"` 要么用正斜杠，且**别把带 `-File` 的调用当可以直接信 exit code**（同 B14 那条）。④ **本地全量/分类门这一轮两次作废**：第一次是自己 `rm -rf` 了正在被自己那次跑使用的产物目录（把 M7Test 与三条 DLL 用例弄成假红），第二次是默认 `output/` 与另两位写者的并发套件互踩（22 条假红）⇒ 本地只记快检（emit-c 护栏 / A/B / 负控 / 单工程 tlbprobe 读数），门数一律以 Actions 为准，这正是"门跑 Actions"的理由。
 
 - 2026-09-25 07:20–08:34 **B16 一格出完并过门（Actions run #62，head `578faa4`）**：开工先做三件测量（读数与裁决落 **D63**）—— ① **x86 调用约定今天不成立**：`--arch x86 --emit-c` 的产物里一个约定修饰都没有（`grep -c __stdcall` **BASE 0 / NEW 21**，`cc_dll`），而 COM 规范是 `CC_STDCALL` ⇒ 薄面整条 canonical 化；② **canonical 化的波及面**靠分类护栏逐条逼出来（`__stdcall` 只出现在声明/实现新式接口的工程、薄面那一对 `vb6_iv_thin_/vb6_iv_claim_` 只出现在**有接口宿主**的工程、服务器表每个 coclass 行多 `ifaceThinPtr`/`instanceClaimRelease` 两个字段 = 新式宿主填函数名、存量填 `NULL`），`cc_id` 只声明接口没有宿主 ⇒ 只有 `__stdcall`（护栏因此把 `EXPECT_FIRING` 与 `EXPECT_THIN_HOSTS` 分开写死）；③ **位数 flag 拍板跟 `--arch` 走**并把代价量到字节：默认架构存量库**逐字节不变**（md5 同 `87d34673`、diffbytes=0），`--arch x86` 只差 **32 个字节**（@20 头部位数声明字 `41`/`43` + 31 处布局字），且两架构的差集与 BASE→NEW 的差集**同址**、x64/x86 两枚读端读回的值逐项相同。实施**零布局改动**（D19 不入视野）：`cgen_iface_vtbl.cpp`（`__stdcall` + 薄面出入口）、`cgen_util_dllentry_collect/prelude/tables.inc`（表行两个新字段）、`vb6comserver.{h,c}` + `vb6rtl_class_com.h`（接口 IID 的 QI 交薄指针、包装器把底座引用交还最后一个薄引用）、`typelib_builder.{hpp,cpp}`（如实发契约 + flag 跟位数）、`driver_codegen_dll_typelib.inc`（喂 `IfaceView::slots`，= D62-2 认定的唯一事实面）。判据五条全上读数：新探针 `tests\tools\tlb_slots.cpp` 升格入库 + 助手 `tests\tlb_contract.ps1` 两条契约用例（x64 `oVft=24/32`、x86 `oVft=12/16`，**x86 那条必须用 x86 读端**）+ `tests\tools\disp_probe.c` 长一条按库里形状**直调 vtable 槽**的支路（`VTBL_GET_BEFORE=0` → 槽 3 写 21 → `VTBL_GET_AFTER=42`，x64 与 x86 各一条真跑用例）+ `QI_EXTRA same=yes→no` 的**故意翻面**（接口 IID 现在交薄指针）。护栏：`--emit-c` 17 件 `violations=0`、全产物 A/B `unclassified=0`（只有 `cc_dll` 的 `.tlb` 1484→1624 的预期变化）、负控在 `pre_b16_C3.exe` 上 `pass=0 fail=2`（四条 needle 全 miss + 反面断言 `cFuncs=0` 命中）。**三条流程教训**（写进 D63-8）：套件在 CI 上用 pwsh 7（`Join-Path` 4 参形式在 PS 5.1 下静默给空串 ⇒ 本地复现也得用 pwsh）、套件 `$env:LIB` 是 x64 在前（x86 助手链接要临时换 `$msvc.LibX86`，否则 LNK4272 + 10 个未解析外部）、探针直调薄指针的槽要**先解一层**（`*(probe_ivtbl**)p`；`((probe_ivtbl*)p)->Got(p)` 是拿指针当槽表，实测读到堆外当场崩）——顺带：崩溃型探针必须 `setvbuf(stdout, NULL, _IONBF, 0)`，否则块缓冲把已打印的读数全吞掉。行里第 4 项（DllRegisterServer 一族接线）经读码 + A/B 判定**无需新改动**（注册写入读同一张服务器表、身份自 B13b 起走唯一出口；`.def`/exports/`.rc` 一字未动），真注册的外部端到端验收归 **B17**。收线 exe（= 门 head 的树）md5 `90129adbb5dbb3c5fca14fcc872dc0f2`，已存成 `.build/pre_b17_C3.exe` 作下一批 BASE。
+
+- 2026-09-25 08:40–10:20 **B17 一格出完并过门（Actions run #66，head `732c1f8`）**：开工按批次要求先做两件测量（读数与裁决落 **D64**）—— ① **注册与外部激活逐级读数**：`DllRegisterServer` 那一级通（CLSID/ProgID/InprocServer32/ThreadingModel 四项都在），`CLSIDFromProgID` + `CoCreateInstance(IID_IDispatch)`（= `CreateObject` 那条路）通，**断在类型库那一级**（`LoadTypeLibEx` 读不到内嵌库 ⇒ 注册表里没有 TypeLib 项）；挖下去是**两条静默缺陷**：`rc.exe` 的发现面太窄（旧写法只认 `WindowsSdkDir` 与 `C:\Program Files (x86)\…`，而本机 SDK 在 `D:\Windows Kits\10` ⇒ 类型库与版本信息**都不嵌**，BASE 产物连 `.rsrc` 段都没有）与 `UnRegisterTypeLib` 的**实参顺序写反**（`lcid`/`syskind` 互换 ⇒ 反注册静默漏掉整棵 TypeLib 键、而 RTL 无条件返回 S_OK）。② **早绑定外部读数**：注册过的、由系统装载的 DLL 上按接口 IID 激活拿薄指针、按库里 `oVft` 直调契约槽得 42（x64 + x86）⇒ 顺带裁决 **canonical 返回形状不做**（真按 oVft 直调的客户已经能用）。实施 = 两处修复 + `tests\tools\com_act_probe.c`（升格入库）+ 助手 `tests\com_activate.ps1`（整趟冒烟 / 注册→跑外部客户→反注册）+ 夹具 `tests\cc_dll_client\`（C3 编出来的**外部**客户 EXE，走真实注册表链路）+ `CImpl.cls` 加一个公有成员 `Twice`（晚绑定要有东西可点；B13b 的 `methodCount` 针 0→1）。三条新用例进 vbp 回归（x64/x86 冒烟 + 外部客户）。护栏：`.build/b17_ab_all.py` 三段 —— `--emit-c` **17 件逐字节全同**、全产物 A/B 只差 `rtl/vb6comserver.c` 的 10 行（全在反注册那段）、**资源目录读数**（NEW 带不带 `WindowsSdkDir` 都嵌 = 修好了；BASE 不带就不嵌 = 缺陷现场）；负控 `.build/b17_negctl.ps1` 喂收线前的 `pre_b17_C3.exe` ⇒ **pass=0 fail=2**，红的正是 `CLEAN_TYPELIB=STILL`。**三条教训写进 D64-7**：产品二进制跨构建不可比（`link.exe` 写 PE 时间戳，同一个 exe 连编两次 md5 都不同 ⇒ 判据要看资源目录/emitted 文件）；探针的模式词别写死在 `argv[5]`（`… <progid> reg` 会静默退化成整趟跑，注册完顺手反注册 ⇒ 下一个进程再激活就 `429`）；GUI 子系统 exe 的未处理运行期错误会弹**模态框**（套件里表现为"跑超时被杀"）⇒ 客户夹具要 `On Error Resume Next` 把失败落到读数上（本机手工跑时真被这个框挡过一次）。**门后补一刀**：第一次门（#65）的 vbp job 在既有用例 `ax_dll_dispatch_invoke` 上报 exit=0xC0000374（堆损坏），读码 + A/B 把它定位成 `ComObj_Invoke` 的 `coercedArgs`未初始化就被 `VariantClear`（本机 12 次不复现 = 随堆状态偶发，非本批引入），修为整段清零（`732c1f8`）后重跑门 #66 全绿。收线 exe（含该修复）md5 `38f247e30ed5ac3513366c9733bf4dda`，已存成 `.build/pre_b18_C3.exe` 作下一批 BASE。
