@@ -975,6 +975,10 @@ if ($Category -in @("all", "run", "bas")) {
     Add-BasTest "test_rtl" "$Tests\test_rtl.bas"
     Add-BasTest "test_array" "$Tests\test_array.bas" @("wa-clone=22", "wa-ub=3", "wa-str=65", "wa-rt=65", "=== Array Tests PASSED ===")
     Add-BasTest "test_fileio" "$Tests\test_fileio.bas"
+    # --- Fix 197: RTL 文件 I/O 在非 ASCII 路径下必须工作 ---
+    # 源码纯 ASCII, 中文文件名在运行时用 ChrW 拼出, 检查 9 项 MkDir/Print#/Line Input/
+    # Write#/FileCopy/Kill/Name/ChDir/RmDir 全过 (缺一即 FAIL: 断言 needle 缺失)。
+    Add-BasTest "test_nonascii_fileio" "$Tests\test_nonascii_fileio.bas" @("NA1-MKDIR=Y", "NA2-PRINT-SIZE=Y", "NA3-ROUNDTRIP=Y", "NA4-WRITE=Y", "NA5-FILECOPY=Y", "NA6-KILL=Y", "NA7-NAME=Y", "NA8-CHDIR=Y", "NA9-RMDIR=Y", "NONASCII-FILEIO-DONE")
     Add-BasTest "test_error" "$Tests\test_error.bas"
     Add-BasTest "test_now" "$Tests\test_now.bas"
     Add-BasTest "test_getput" "$Tests\test_getput.bas" @("PASS1a", "PASS1b", "PASS1c", "PASS2", "PASS3", "PASS4")
