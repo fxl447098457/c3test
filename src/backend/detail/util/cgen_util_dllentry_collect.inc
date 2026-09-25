@@ -220,13 +220,18 @@
     entry.emitBlank();
 
     // 前向声明: 类结构体和工厂/销毁函数 (C语言需要struct关键字)
+    // Fix 186: 必须先集中发完所有类结构体的 typedef, 再发任何函数声明.
+    // 本文件既有 "struct X*" 用法, 也有裸 "X*" 用法 (主要是工程类实例返回值的
+    // extern 声明与其 _p 局部变量); typedef 若与其使用点交错, 声明靠前的使用点
+    // 仍会撞上未声明的裸名 → C2143/C2065, 整个 dll_entry.c 编译失败.
+    for (auto& cc : coClasses) {
+        std::string clsStruct = "vb6_cls_" + cIdent(cc.moduleName);
+        entry.emitLine("typedef struct " + clsStruct + " " + clsStruct + ";  /* forward decl */");
+    }
+    entry.emitBlank();
     for (auto& cc : coClasses) {
         std::string clsId = cIdent(cc.moduleName);
         std::string clsStruct = "vb6_cls_" + clsId;
-        // Fix 186: 必须同时发 typedef. 本文件既有 "struct X*" 用法, 也有裸 "X*"
-        // 用法 (主要是工程类实例返回值的 extern 声明与其 _p 局部变量); 只发标签
-        // 声明时裸名未声明 → C 语言下 C2143/C2065, 整个 dll_entry.c 编译失败.
-        entry.emitLine("typedef struct " + clsStruct + " " + clsStruct + ";  /* forward decl */");
         entry.emitLine("extern struct " + clsStruct + "* vb6_cls_" + clsId + "_New(void);");
         entry.emitLine("extern void vb6_cls_" + clsId + "_Destroy(struct " + clsStruct + "*);");
         // ai/022 B16: 新式接口那一面（薄指针出入口）由类模块自己的 TU 提供，见

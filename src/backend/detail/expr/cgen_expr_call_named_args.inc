@@ -43,19 +43,29 @@
                 } else {
                     // Fix 079: check if innerName is a ByRef param of the current function
                     bool piIsCurrentByRefParam = false;
+                    Vb6Type piCurPType189 = Vb6Type::Unknown;
                     if (currentProc_) {
                         for (auto& p : currentProc_->params) {
                             if (Symbol::toLower(p.name) == Symbol::toLower(innerName) && !p.isByVal && !p.isParamArray) {
                                 bool paramIsArray = (static_cast<uint16_t>(p.type) & static_cast<uint16_t>(Vb6Type::Array)) != 0;
                                 if (!paramIsArray) {
                                     piIsCurrentByRefParam = true;
+                                    piCurPType189 = p.type;
                                 }
                                 break;
                             }
                         }
                     }
                     if (piIsCurrentByRefParam) {
-                        argVal = innerName;
+                        // Fix 189: 被调方形参是 ByRef Variant 时不可直传 T*
+                        // (同位置实参路径 — vt 取到 T 的字节 → 0xC0000005)
+                        std::string piRep189;
+                        if (pi < calleeParams.size()
+                            && (calleeParams[pi].type == Vb6Type::Variant
+                                || calleeParams[pi].type == Vb6Type::Empty)) {
+                            piRep189 = wrapByRefVariantParamArg(innerName, piCurPType189);
+                        }
+                        argVal = piRep189.empty() ? innerName : piRep189;
                     } else {
                         argVal = "&" + innerName;
                     }
@@ -77,16 +87,26 @@
                     // Fix 079: If the simple identifier is a ByRef param of the current function,
                     // it's already a pointer (T*) — pass directly, don't add &.
                     bool piArgIsCurrentByRefParam = false;
+                    Vb6Type piArgCurPType189 = Vb6Type::Unknown;
                     if (currentProc_) {
                         for (auto& p : currentProc_->params) {
                             if (Symbol::toLower(p.name) == Symbol::toLower(argVal) && !p.isByVal && !p.isParamArray) {
                                 piArgIsCurrentByRefParam = true;
+                                piArgCurPType189 = p.type;
                                 break;
                             }
                         }
                     }
                     if (piArgIsCurrentByRefParam) {
                         // ByRef param of current function → already T*, pass directly
+                        // Fix 189: ByRef Variant 形参时需重打包 (见上)
+                        std::string piRep189b;
+                        if (pi < calleeParams.size()
+                            && (calleeParams[pi].type == Vb6Type::Variant
+                                || calleeParams[pi].type == Vb6Type::Empty)) {
+                            piRep189b = wrapByRefVariantParamArg(argVal, piArgCurPType189);
+                        }
+                        if (!piRep189b.empty()) argVal = piRep189b;
                     } else if (argVal == "NULL" || argVal == "0") {
                         // Fix 086: NULL/0 无可取址, 直接传空指针 (ByRef 形参收到 NULL)
                     } else if (isConstIdent(argVal)) {
@@ -153,7 +173,12 @@
                     orderedArgs[i] = "NULL";
                     // filled[i] stays false for actuallyPassed tracking
                 } else {
-                    orderedArgs[i] = defaultValue(calleeParams[i].type);
+                    // Fix 190: 缺省值须按形参传值方式包装 (ByRef → &(T){缺省值}).
+                    // 原先直接给 defaultValue(type) 的值, Optional ByRef String 会
+                    // 把 BSTR 值交给声明为 BSTR* 的形参 → 被调方解引用後 AV.
+                    orderedArgs[i] = defaultArgForParam(calleeParams[i].type,
+                                                        calleeParams[i].isByVal,
+                                                        calleeParams[i].defaultValueExpr);
                     // filled[i] stays false for actuallyPassed tracking
                 }
             }

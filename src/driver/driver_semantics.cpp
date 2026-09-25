@@ -395,6 +395,33 @@ bool Driver::runSemanticAnalysis(const CompileOptions& options) {
                             sym->sourceModule = otherModule->moduleName;
                             analyzer->symbolTable().defineExternal(std::move(sym));
                         }
+                        // Fix 197: 预注册枚举成员常量 — Optional 参数默认值 `= ucsSfdAll`
+                        // 经 evalOptionalDefault 查符号表发生在 Pass 1 期间, 而
+                        // runCrossModuleResolution 在其后才注入跨模块枚举成员, 不预注册
+                        // 则默认值回退类型零值 0 (vbman cTlsSocket.Create 的
+                        // EventMask=0 → WSAAsyncSelect 注销通知 → 永不 accept 实证).
+                        int64_t nextValue = 0;
+                        for (auto& member : enumDecl.members) {
+                            std::string mLower = Symbol::toLower(member->name);
+                            if (!analyzer->symbolTable().lookupModule(mLower)) {
+                                auto msym = std::make_unique<Symbol>(
+                                    SymbolKind::EnumMember, member->name,
+                                    Vb6Type::Long, member->loc, AccessLevel::Public
+                                );
+                                msym->isExternal = true;
+                                msym->sourceModule = otherModule->moduleName;
+                                msym->hasConstValue = true;
+                                msym->constType = Vb6Type::Long;
+                                int64_t evaluated = 0;
+                                if (member->value
+                                    && SemanticAnalyzer::evalEnumConstIntForDriver(member->value.get(), evaluated)) {
+                                    nextValue = evaluated;
+                                }
+                                msym->constIntValue = nextValue;
+                                nextValue++;
+                                analyzer->symbolTable().defineExternal(std::move(msym));
+                            }
+                        }
                     }
                 } else if (decl->kind == ASTNodeKind::TypeDecl) {
                     auto& typeDecl = static_cast<TypeDecl&>(*decl);

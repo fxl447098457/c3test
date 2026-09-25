@@ -11,6 +11,73 @@ namespace vb6c3 {
 // 由 src/semantics/semantic_analyzer_decl.cpp 拆出（2026-09-17），纯搬移、零行为改动。
 
 
+// Fix 191: 枚举成员值的整数常量求值.
+// 原实现只处理「字面量」与「-字面量」两种形态, 其余表达式一律静默忽略, 成员值
+// 退化成「上一个成员值 + 1」. 典型受害写法 `ucsSfdAll = 2 ^ 6 - 1` (= 63):
+//   ucsSfdRead=2^0, Write=2^1, Oob=2^2, Accept=2^3, Connect=2^4, Close=2^5,
+//   ucsSfdAll=2^6-1 → 依次退化为 0,1,2,3,4,5,6 → ucsSfdAll 变成 6 (缺 FD_ACCEPT 位).
+// 后果: `Optional ByVal EventMask As ... = ucsSfdAll` 的缺省值被写成 6,
+// WSAAsyncSelect 拿不到 FD_ACCEPT → 服务器永不 accept 连接.
+// 运算语义与后端 CCodeGen::tryEvalConstInt 保持一致 ('/' 为浮点除法故不求值).
+static bool evalEnumMemberConstInt(ASTNode* expr, int64_t& result) {
+    if (!expr) return false;
+
+    switch (expr->kind) {
+    case ASTNodeKind::LiteralExpr: {
+        auto* lit = static_cast<LiteralExpr*>(expr);
+        switch (lit->literalKind) {
+        case LiteralKind::Integer: result = lit->intValue;  return true;
+        case LiteralKind::Long:    result = lit->longValue; return true;
+        case LiteralKind::LongPtr: result = lit->longValue; return true;  // Fix 082: ^ 后缀
+        case LiteralKind::Boolean: result = lit->boolValue ? 1 : 0; return true;
+        default: return false;   // 浮点/字符串等不参与整数折叠
+        }
+    }
+    case ASTNodeKind::UnaryExpr: {
+        auto* unary = static_cast<UnaryExpr*>(expr);
+        int64_t v = 0;
+        if (!evalEnumMemberConstInt(unary->operand.get(), v)) return false;
+        switch (unary->op) {
+        case UnaryOp::Negate: result = -v;  return true;
+        case UnaryOp::Not:    result = ~v;  return true;
+        }
+        return false;
+    }
+    case ASTNodeKind::BinaryExpr: {
+        auto* bin = static_cast<BinaryExpr*>(expr);
+        int64_t l = 0, r = 0;
+        if (!evalEnumMemberConstInt(bin->left.get(), l)) return false;
+        if (!evalEnumMemberConstInt(bin->right.get(), r)) return false;
+        switch (bin->op) {
+        case BinaryOp::Add:    result = l + r; return true;
+        case BinaryOp::Sub:    result = l - r; return true;
+        case BinaryOp::Mul:    result = l * r; return true;
+        case BinaryOp::Div:    return false;  // VB6 '/' 是浮点除法, 不求整
+        case BinaryOp::IntDiv: if (r == 0) return false; result = l / r; return true;
+        case BinaryOp::Mod:    if (r == 0) return false; result = l % r; return true;
+        case BinaryOp::Pow: {
+            if (r < 0) return false;
+            int64_t base = l, exp = r, pw = 1;
+            while (exp > 0) {
+                if (exp & 1) pw *= base;
+                base *= base;
+                exp >>= 1;
+            }
+            result = pw;
+            return true;
+        }
+        case BinaryOp::Or:  result = l | r; return true;
+        case BinaryOp::And: result = l & r; return true;
+        case BinaryOp::Xor: result = l ^ r; return true;
+        default: return false;
+        }
+    }
+    default:
+        return false;
+    }
+}
+
+
 void SemanticAnalyzer::visit(TypeDecl& node) {
     // 泛型模板 (tB, G2): 不进符号表 —— 泛型器已按使用点注入特化副本,
     // 模板本体对下游不存在 (未实例化即被引用会在符号查找处自然失败).
@@ -89,22 +156,12 @@ void SemanticAnalyzer::visit(EnumDecl& node) {
 
             // 如果有显式值
             if (member->value) {
-                if (auto* lit = dynamic_cast<LiteralExpr*>(member->value.get())) {
-                    if (lit->literalKind == LiteralKind::Long ||
-                        lit->literalKind == LiteralKind::LongPtr)  // Fix 082: ^ 后缀
-                        nextValue = lit->longValue;
-                    else if (lit->literalKind == LiteralKind::Integer)
-                        nextValue = lit->intValue;
-                } else if (auto* unary = dynamic_cast<UnaryExpr*>(member->value.get())) {
-                    // Handle negative literals: -1, -42, etc.
-                    if (auto* inner = dynamic_cast<LiteralExpr*>(unary->operand.get())) {
-                        int64_t v = 0;
-                        if (inner->literalKind == LiteralKind::Long ||
-                        inner->literalKind == LiteralKind::LongPtr) v = inner->longValue;
-                        else if (inner->literalKind == LiteralKind::Integer) v = inner->intValue;
-                        if (unary->op == UnaryOp::Negate) nextValue = -v;
-                        else nextValue = v;
-                    }
+                // Fix 191: 统一走整数常量求值 (字面量 / -字面量 / 算术与位运算 / 幂),
+                // 求值失败才沿用「上一成员值 + 1」的 VB6 递增语义.
+                // Fix 082 合并决议: LongPtr (^ 后缀) 字面量纳入求值器.
+                int64_t evaluated = 0;
+                if (evalEnumMemberConstInt(member->value.get(), evaluated)) {
+                    nextValue = evaluated;
                 }
             }
             memberSym->constIntValue = nextValue;
@@ -222,6 +279,12 @@ void SemanticAnalyzer::visit(VariableDecl& node) {
 
 void SemanticAnalyzer::visit(ParameterDecl& node) {
     // 参数在SubDecl/FunctionDecl中处理
+}
+
+// Fix 197: 对外入口 — Driver 在 Pass 1 前预注册跨模块 Public 枚举成员时
+// 复用同一求值器 (evalOptionalDefault 查符号表发生在 Pass 1 期间).
+bool SemanticAnalyzer::evalEnumConstIntForDriver(ASTNode* expr, int64_t& result) {
+    return evalEnumMemberConstInt(expr, result);
 }
 
 } // namespace vb6c3
