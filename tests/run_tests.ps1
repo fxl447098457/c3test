@@ -128,6 +128,9 @@ $script:total = 0
 # tests\disp_invoke.ps1 用 tests\tools\disp_probe.c（LoadLibrary + DllGetClassObject）
 # 把产出的 DLL 真的按 IDispatch 调一遍，不再只比字节。
 . (Join-Path $PSScriptRoot "disp_invoke.ps1")
+# ai/022 B16: 类型库的「契约面」读数（tests\tools\tlb_slots.cpp）——
+# 库里那一档真接口发不发成员、槽偏移/调用约定对不对；x86 与 x64 各一条读数。
+. (Join-Path $PSScriptRoot "tlb_contract.ps1")
 
 # === COM 测试前: 检查相关 COM 组件是否已注册 ===
 # 仅当所需的 COM 组件已注册时, 才执行对应的 COM 测试 (例如 VBMANLIB)
@@ -1262,11 +1265,32 @@ if ($Category -in @("all", "run", "vbp")) {
     # instead of the empty `_IProbe` dispinterface, and the helper also asserts the two rows this
     # batch deleted stay deleted -- so reverting the shape turns this same case red.
     Test-TlbIdentitySingleSource "cc_dll_tlb_matches_table" "$Tests\cc_dll\CoDll.vbp" "CoDll" "CImpl" "IProbe" "{11112222-3333-4444-5555-666677778888}"
+    # ai/022 B16: 库里那一档真接口的**成员面**。B15 只摆正了形状与身份（cFuncs 仍是 0），
+    # 本批起它要如实发契约，两条读数（x64 / x86）各钉自己的槽偏移 —— 同一个 vtable，
+    # x86 客户端按 4 字节一步读到的槽 3/4 在 12/16，x64 客户端在 24/32；
+    # 「建库 flag 与目标位数不配」或「发成员却不发偏移」都会让其中一条红。
+    Test-TlbIfaceContract "cc_dll_tlb_contract_x64" "$Tests\cc_dll\CoDll.vbp" "CoDll" @(
+        "TYPE 0 kind=interface name=IProbe guid={F5CEF988-3217-6173-94B7-BB99C4B8CB81} cFuncs=2 cVars=0 cImplTypes=0 cbSizeInstance=8",
+        "FUNC 0 memid=1 name=Ping invkind=1 funckind=purevirtual callconv=stdcall oVft=24 cParams=1 ret=0x0018",
+        "PARAM 0 flags=0x0001 vt=0x0003",
+        "FUNC 1 memid=2 name=get_Got invkind=2 funckind=purevirtual callconv=stdcall oVft=32 cParams=0 ret=0x0003") @(
+        "name=IProbe guid={F5CEF988-3217-6173-94B7-BB99C4B8CB81} cFuncs=0",
+        "oVft=12",
+        "oVft=16")
+    Test-TlbIfaceContract "cc_dll_tlb_contract_x86" "$Tests\cc_dll\CoDll.vbp" "CoDll" @(
+        "TYPE 0 kind=interface name=IProbe guid={F5CEF988-3217-6173-94B7-BB99C4B8CB81} cFuncs=2 cVars=0 cImplTypes=0 cbSizeInstance=4",
+        "FUNC 0 memid=1 name=Ping invkind=1 funckind=purevirtual callconv=stdcall oVft=12 cParams=1 ret=0x0018",
+        "FUNC 1 memid=2 name=get_Got invkind=2 funckind=purevirtual callconv=stdcall oVft=16 cParams=0 ret=0x0003") @(
+        "oVft=24",
+        "oVft=32") "x86"
     # ai/022 B14: the DLL product finally gets a real caller. TestAXDLL.Calc is the legacy
     # face (Public members exist, so IDispatch must answer); cc_dll's CImpl only satisfies a
-    # modern interface, so its IDispatch member surface must be EMPTY (B13c ruling (b)), and
-    # the interface IID is answered by the fat pointer -- pinned here as a measured fact, so
-    # B15/B16 (real interface in the library / thin pointer out of QI) has to flip it on purpose.
+    # modern interface, so its IDispatch member surface must be EMPTY (B13c ruling (b)).
+    # B16 DID flip the second half of that pin on purpose: the interface IID now answers with
+    # the THIN pointer (same=no -- it is no longer the IDispatch wrapper), and the new
+    # CREATE_IFACE/VTBL_* readings call its contract slots by the library's shape. The slot
+    # numbers [3]=Ping, [4]=Got are the library's oVft=24/32 read back by tests\tools -- if the
+    # row's shape and the shipped vtable ever drift apart, VTBL_GET_AFTER stops being 42.
     Test-DispatchInvoke "ax_dll_dispatch_invoke" "$Tests\test_activex_dll\test_activex_dll.vbp" `
         "test_activex_dll" "{D84F362F-8EF1-D16D-8814-C16ADB700BAB}" @(
         "CREATE hr=0x00000000 ptr=OK",
@@ -1280,8 +1304,24 @@ if ($Category -in @("all", "run", "vbp")) {
         "CREATE hr=0x00000000 ptr=OK",
         "QI_IUNKNOWN hr=0x00000000 same=yes",
         "EXTRA_IID={F5CEF988-3217-6173-94B7-BB99C4B8CB81}",
-        "QI_EXTRA hr=0x00000000 same=yes") @(
+        "QI_EXTRA hr=0x00000000 same=no",
+        "CREATE_IFACE hr=0x00000000 ptr=OK",
+        "VTBL_GET_BEFORE=0",
+        "VTBL_GET_AFTER=42") @(
         "CALL=ADD") "{F5CEF988-3217-6173-94B7-BB99C4B8CB81}"
+    # ai/022 B16: 同一批断言在 x86 上再真跑一遍 —— 这是布局改动（vtable 槽 + 库里的偏移 +
+    # 调用约定）唯一的 x86 侧端到端读数：x86 探针按库里那形状直调槽 3/4，
+    # 若槽位置/调用约定/返回值任何一处对不上，VTBL_GET_AFTER 就不是 42。
+    Test-DispatchInvoke "cc_dll_dispatch_iface_only_x86" "$Tests\cc_dll\CoDll.vbp" `
+        "CoDll" "{11112222-3333-4444-5555-666677778888}" @(
+        "CREATE hr=0x00000000 ptr=OK",
+        "QI_IUNKNOWN hr=0x00000000 same=yes",
+        "QI_EXTRA hr=0x00000000 same=no",
+        "CREATE_IFACE hr=0x00000000 ptr=OK",
+        "VTBL_GET_BEFORE=0",
+        "VTBL_GET_AFTER=42",
+        "DONE") @(
+        "CALL=ADD") "{F5CEF988-3217-6173-94B7-BB99C4B8CB81}" "x86"
     Test-Vbp "test_vbman" "$Tests\test_vbman\test_vbman.vbp" @("P24-04a:OK", "P24-04b:OK", "P24-04:2/2") -Arch "x86" -RequiresCom "VBMANLIB.cVBMAN"
     $vbpSw.Stop()
     Write-Host "  (vbp/gui tests took $([Math]::Round($vbpSw.Elapsed.TotalSeconds))s)"

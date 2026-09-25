@@ -140,6 +140,15 @@
                 }
                 // P12.1: 收集 Implements 接口列表
                 info.implementsNames = sym->implementsNames;
+                // ai/022 B16: 本类是否实现**新式接口** —— 判据与 cgen_iface_vtbl 发码
+                // 时用的那条逐字相同（ivLookupIface 命中：登记表里有、链没断、有槽），
+                // 因为这一位决定 dll_entry.c 要不要引用 vb6_iv_thin_<类> /
+                // vb6_iv_claim_<类> 这两个符号（引用一处就必须发一处）。
+                // 注: dllCgen 的 ivreg_ 由 driver 在调用 generateDllEntry 前注入
+                // （driver_codegen_dll_typelib.inc），没注时这里恒 false = 退回胖路。
+                for (const auto& ifaceName : info.implementsNames) {
+                    if (ivLookupIface(ifaceName)) { info.hasNewStyleIface = true; break; }
+                }
                 // Fix 099: 收集显式 Public 字段 (semantic_analyzer 填的 publicFieldNames).
                 // 真 VB6 把类的 Public 字段暴露为 Property Get/Let; 此前 C3 完全不进
                 // IDispatch 表 → 客户端 GetIDsOfNames("Router") 失败 → vb6_ComGetProp
@@ -220,6 +229,15 @@
         entry.emitLine("typedef struct " + clsStruct + " " + clsStruct + ";  /* forward decl */");
         entry.emitLine("extern struct " + clsStruct + "* vb6_cls_" + clsId + "_New(void);");
         entry.emitLine("extern void vb6_cls_" + clsId + "_Destroy(struct " + clsStruct + "*);");
+        // ai/022 B16: 新式接口那一面（薄指针出入口）由类模块自己的 TU 提供，见
+        // cgen_iface_vtbl.cpp 的 emitIfaceImplTables 末尾. 只在真的发了这两个符号的
+        // 类上声明（判据同上），否则整行都不出现 —— 无新式接口的工程逐字节不变.
+        if (cc.hasNewStyleIface) {
+            entry.emitLine("extern void* vb6_iv_thin_" + clsId +
+                           "(void* instance, const void* riid);  /* B16: 接口 IID -> 薄指针 */");
+            entry.emitLine("extern void vb6_iv_claim_" + clsId +
+                           "(void* instance);  /* B16: COM 包装器放手, 退底座引用 */");
+        }
         // 类的方法函数前向声明
         for (size_t mi = 0; mi < cc.publicMethodNames.size(); mi++) {
             Symbol* methodSym = cc.publicMethodSyms[mi];

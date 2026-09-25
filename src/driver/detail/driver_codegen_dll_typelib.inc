@@ -22,6 +22,10 @@
         // 只接 DLL 这条 cgen —— EXE 的 com_entry.c 本批刻意不接线（理由见 D57）。
         dllCgen.setCoClassIdentityRegistry(&coclassIds_);
         dllCgen.setInterfaceIidMap(&ifaceIds_);  // ai/022 B13c: 非默认接口的 IID 也读同一张表
+        // ai/022 B16: 接口登记表 —— dll_entry 靠它判断"这个类的某个 Implements 是不是
+        // 新式接口"（是则引用 vb6_iv_thin_<类>/vb6_iv_claim_<类>），判据与类模块自身发码
+        // 时逐字相同（同一张 ivreg_）。
+        dllCgen.setInterfaceRegistry(&ifaces_);
         // Collect all symbol tables for cross-module Property lookup
         std::vector<SymbolTable*> allSymTabs;
         for (auto& analyzer : analyzers_) {
@@ -56,7 +60,8 @@
             // 不到时退化成 "<库名>.<类名>" —— 库名多一段后缀就会拼出 CLSIDFromProgID 查不
             // 到的 ProgID, 运行期 New 报 429 (0x800401F3)。
             // LIBID 种子保持不变: 改它会给已构建产物换一套 GUID, 与本次修复无关。
-            if (tlbBuilder.beginLib(tlbPath, libId, options.dllProgId + " TypeLib", options.dllProgId)) {
+            if (tlbBuilder.beginLib(tlbPath, libId, options.dllProgId + " TypeLib", options.dllProgId,
+                                   /*is64=*/options.arch != "x86")) {
                 int dispidCounter = 1;
                 std::set<std::string> processedClasses;
                 // 新式接口的 IID：与 vtable QI、dll_entry 的 IID 表读同一张 Pass E 表
@@ -97,16 +102,107 @@
                         // 消费者（对照 `cgen_util_dllentry_collect.inc:26`、`driver_codegen_dll_sync.inc:8`），
                         // 于是接口模块在 COM 表里不存在、却在库里占了一整行**可创建**的 coclass，
                         // CLSID 还是另一枚谁也不认的 mint（`generateUuid(类名)`）。
-                        // 成员面为什么这批发不了：`vb6_ivtbl_<I>` 的槽不是 canonical COM
-                        // （`CC_CDECL` + 原生返回值 + IUnknown 之后没有 IDispatch 前缀），照现状发进库
-                        // 就是重演 D60 的"广告 != 应答" ⇒ 与薄指针布局一起走 B16。
+                        // B16 起成员面如实发进去（见 addVtableInterface）：生成码自 B16 起整条薄面
+                        // 都是 `__stdcall`，与库里的 `CC_STDCALL` + `oVft=(3+槽号)*指针宽` 一一对应。
                         // 判据沿用 B13c 那一条（Pass E 命中 = 这个模块名就是一个新式接口），
                         // legacy 那条（被 `Implements` 点名但没有 Interface 块的类）一行不动。
                         {
                             const std::string ifaceRowIid = ifaceIidFromMap(clsSym.name);
                             auto ifaceIt = ifaces_.find(Symbol::toLower(clsSym.name));
                             if (!ifaceRowIid.empty() && ifaceIt != ifaces_.end()) {
-                                if (tlbBuilder.addVtableInterface(ifaceIt->second.name, ifaceRowIid)) {
+                                // 成员面 (B16)。三处口径都从 `IfaceView::slots` 来 —— 与生成码
+                                // `vb6_ivtbl_<I>` 读的是同一份、同一个顺序，所以槽号对得上：
+                                //   名字: COM 惯例 (Property 是 get_/put_/putref_ 前缀, 过程用声明里的
+                                //         大小写); 同名 Property 的 Get/Let/Set 共享一个 memid。
+                                //   类型: SimpleTypeRef 走类型表 (Long→VT_I4/String→VT_BSTR), 其余
+                                //         (无 As / 数组 / LongPtr / UDT / 工程类) 落 VT_VARIANT 兜底
+                                //         —— 这一档"类型保真"的缺口属 B17, 见 022 D63。
+                                std::vector<TypeLibBuilder::MethodInfo> vtableMembers;
+                                {
+                                    TypeSystem& ts = lastAnalyzer->typeSystem();
+                                    auto tlTypeOf = [&](const ASTNode* tr) -> Vb6Type {
+                                        if (!tr || tr->kind != ASTNodeKind::SimpleTypeRef) {
+                                            return Vb6Type::Variant;
+                                        }
+                                        return ts.resolveTypeName(
+                                            static_cast<const SimpleTypeRef*>(tr)->name);
+                                    };
+                                    std::map<std::string, int32_t> propMemid;
+                                    int32_t nextMemid = 1;
+                                    for (const IfaceSlotView& slot : ifaceIt->second.slots) {
+                                        const Decl* sig = slot.sig;
+                                        if (!sig) {
+                                            std::cerr << "C3: TypeLib vtable member skipped (no sig): "
+                                                      << ifaceIt->second.name << "." << slot.key
+                                                      << std::endl;
+                                            continue;
+                                        }
+                                        TypeLibBuilder::MethodInfo mi;
+                                        std::string base;
+                                        bool isGet = false, isPut = false, isPutRef = false;
+                                        const std::vector<std::unique_ptr<ParameterDecl>>* ps = nullptr;
+                                        switch (sig->kind) {
+                                            case ASTNodeKind::SubDecl: {
+                                                const SubDecl& d = static_cast<const SubDecl&>(*sig);
+                                                base = d.name;
+                                                mi.returnType = Vb6Type::Void;
+                                                ps = &d.params;
+                                                break;
+                                            }
+                                            case ASTNodeKind::FunctionDecl: {
+                                                const FunctionDecl& d = static_cast<const FunctionDecl&>(*sig);
+                                                base = d.name;
+                                                mi.returnType = tlTypeOf(d.returnType.get());
+                                                ps = &d.params;
+                                                break;
+                                            }
+                                            case ASTNodeKind::PropertyDecl: {
+                                                const PropertyDecl& d = static_cast<const PropertyDecl&>(*sig);
+                                                base = d.name;
+                                                isGet = d.propKind == ProcKind::PropertyGet;
+                                                isPut = d.propKind == ProcKind::PropertyLet;
+                                                isPutRef = d.propKind == ProcKind::PropertySet;
+                                                mi.returnType = isGet ? tlTypeOf(d.returnType.get())
+                                                                      : Vb6Type::Void;
+                                                ps = &d.params;
+                                                break;
+                                            }
+                                            default:
+                                                break;
+                                        }
+                                        mi.name = (isGet ? "get_" : (isPut ? "put_"
+                                                   : (isPutRef ? "putref_" : std::string()))) + base;
+                                        mi.isPropertyGet = isGet;
+                                        mi.isPropertyPut = isPut;
+                                        mi.isPropertyPutRef = isPutRef;
+                                        if (isGet || isPut || isPutRef) {
+                                            const std::string pkey = Symbol::toLower(base);
+                                            auto pm = propMemid.find(pkey);
+                                            if (pm != propMemid.end()) {
+                                                mi.dispid = pm->second;
+                                            } else {
+                                                mi.dispid = nextMemid++;
+                                                propMemid[pkey] = mi.dispid;
+                                            }
+                                        } else {
+                                            mi.dispid = nextMemid++;
+                                        }
+                                        if (ps) {
+                                            for (const auto& p : *ps) {
+                                                ParameterInfo pi;
+                                                pi.name = p->name;
+                                                pi.type = tlTypeOf(p->asType.get());
+                                                pi.isByVal = p->isByVal;
+                                                pi.isOptional = p->isOptional;
+                                                pi.isParamArray = p->isParamArray;
+                                                mi.params.push_back(pi);
+                                            }
+                                        }
+                                        vtableMembers.push_back(std::move(mi));
+                                    }
+                                }
+                                if (tlbBuilder.addVtableInterface(ifaceIt->second.name, ifaceRowIid,
+                                                                  vtableMembers)) {
                                     clsSym.comDefaultIfaceIid = ifaceRowIid;
                                     clsSym.comDefaultIfaceName = ifaceIt->second.name;
                                 } else {

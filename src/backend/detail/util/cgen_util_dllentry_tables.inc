@@ -257,6 +257,15 @@ std::string wideName = "L\"" + bareName + "\"";
             entry.emitLine("0,  /* eventCount */");
             entry.emitLine("NULL,  /* events */");
         }
+        // ai/022 B16: 新式接口那一面（薄指针 + 包装器放手桩）。两个指针同生同灭，
+        // 都只在"实现新式接口"的类上非空；其余类为 NULL = QI 与销毁走原来的胖路。
+        if (cc.hasNewStyleIface) {
+            entry.emitLine("vb6_iv_thin_" + clsId + ",  /* ifaceThinPtr */");
+            entry.emitLine("vb6_iv_claim_" + clsId + ",  /* instanceClaimRelease */");
+        } else {
+            entry.emitLine("NULL,  /* ifaceThinPtr (无新式接口: QI 走胖路) */");
+            entry.emitLine("NULL,  /* instanceClaimRelease */");
+        }
         entry.dedent();
         entry.emitLine("},");
     };

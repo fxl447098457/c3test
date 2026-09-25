@@ -33,6 +33,24 @@ static HRESULT STDMETHODCALLTYPE ComObj_QueryInterface(vb6_ComObject* self, REFI
     if (self->desc && self->desc->ifaceCount > 0 && self->desc->ifaceIids) {
         for (i = 0; i < self->desc->ifaceCount; i++) {
             if (IsEqualIID(riid, self->desc->ifaceIids[i])) {
+                // ai/022 B16: 新式接口 (Interface 块) 交回**薄指针** —— 首字段是
+                // vb6_ivtbl_<I>*, 槽 3 起是契约成员, 与类型库 TKIND_INTERFACE 那一条
+                // (cFuncs / oVft / CC_STDCALL) 同形. 这正是 B15 起对外广告的那一档,
+                // 所以"广告 == 应答"在接口这一档上成立 (D60-4 的"胖应答瘦"到此收口).
+                // 生命周期: 薄指针的引用记在实例自己的 __refcount 上 (B05), 包装器
+                // 最后一次 Release 会把底座引用交还 (见 ComObj_Release) → QI 之后立刻
+                // Release 包装器 (IClassFactory::CreateInstance 的规范姿势) 也安全.
+                if (self->desc->ifaceThinPtr && self->vb6Instance) {
+                    void* thin = self->desc->ifaceThinPtr(self->vb6Instance,
+                                                           self->desc->ifaceIids[i]);
+                    if (thin) {
+                        vb6_ivtbl_prefix* vt = *(vb6_ivtbl_prefix**)thin;
+                        vt->AddRef(thin);
+                        *ppv = thin;
+                        return S_OK;
+                    }
+                    /* 本类没实现这个新式接口 (provider 认 IID): 落到胖路 */
+                }
                 *ppv = self;  // dispinterface: same IDispatch pointer
                 self->vtable->AddRef(self);
                 return S_OK;
@@ -82,7 +100,14 @@ static ULONG STDMETHODCALLTYPE ComObj_Release(vb6_ComObject* self) {
     InterlockedDecrement(&g_vb6_cRef);
     if (count == 0) {
         // Call VB6 Class_Terminate + Destroy
-        if (self->desc && self->desc->destroyFunc && self->vb6Instance) {
+        // ai/022 B16: 实现了新式接口的类走 claim 那条 —— 包装器退掉自己的"底座引用",
+        // 实例若有薄引用在世则不销毁 (由最后一个薄引用的 Release 收尾), 否则当场销毁.
+        // 这与原来直接 destroyFunc 的结果在"没有薄引用"时完全一致 (底座 = _New/
+        // FromInstance 移交的那一次引用), 但把 `CreateInstance(IID_IProbe)` 这种
+        // "QI 完立刻 Release 包装器"的姿势从悬空指针救回来.
+        if (self->desc && self->desc->instanceClaimRelease && self->vb6Instance) {
+            self->desc->instanceClaimRelease(self->vb6Instance);
+        } else if (self->desc && self->desc->destroyFunc && self->vb6Instance) {
             self->desc->destroyFunc(self->vb6Instance);
         }
         self->vb6Instance = NULL;

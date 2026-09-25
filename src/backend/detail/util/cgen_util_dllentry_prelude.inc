@@ -26,6 +26,11 @@
         // 只在块是手写的（块名 != 类模块名）且 [ComCreatable(True)] 时非空 ——
         // 折算记录（C04）的名字恒等于类模块名，天然不会产生第二行。
         std::string groupProgId;
+        // ai/022 B16: 这个类有没有"新式接口"那一面（薄指针 + 包装器放手桩）。
+        // 判据必须是 cgen_iface_vtbl 的发码判据本身（ivLookupIface 命中），不能拿
+        // implementsNames 非空代替 —— legacy `Implements` 的类模块同样有名字，但
+        // 它那条路一个 vb6_iv_* 符号都不发，照抄会 LNK2019。
+        bool hasNewStyleIface = false;
     };
     std::vector<CoClassInfo> coClasses;
     // 组名档多出的行数（g_vb6_coclasses[] 的总行数 = coClasses.size() + extraGroupRows）
