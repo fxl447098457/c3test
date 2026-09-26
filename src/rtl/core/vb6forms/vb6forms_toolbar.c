@@ -622,15 +622,17 @@ void vb6_Toolbar_ClearButtons(void* hwnd) {
 //   ButtonMenuClick  → WM_NOTIFY,  hdr.code=TBN_DROPDOWN(-710), hdr.idFrom=同一个 idCommand
 //                      (只有 BTNS_DROPDOWN = VB6 的 Style 5 那种带下拉箭头的按钮发得出来)
 //
-// **为什么不向控件现问 idCommand**：试过节的两条路，都在本产品 (嵌了 Common-Controls 6.0
-// manifest 的产物) 里问不出东西 ——
-//   · `TB_GETBUTTON` 在不嵌 manifest 的独立探针里 rc=1 / idCommand=1..3 / 越界 rc=0，看着全对，
-//     而产物里同一句一条都不回 (探针与产物不同 comctl 版本这条老嫌疑，见 ai/029 §三 D3)；
-//   · `TB_GETBUTTONINFO + TBIF_COMMAND|TBIF_STYLE|TBIF_BYINDEX` 的实测读数是
-//     `rc=0/1/2 且结构体一个字段都没被填` (idx=1/2/3 ⇒ rc 恰好等于传进去的 wParam)，
-//     也就是这条 GET 压根不认 TBIF_COMMAND。⇒ 判据改用**表**：序号边界问 `vb6_TbBtnAt`、
-//     下拉位问 `b->style == 5`。这两条各自都能被读数证伪，而"控件里的 idCommand 就是槽号+1"
-//     由 `Buttons.Count`(TB_BUTTONCOUNT) 与表数一致 (TB34) 从另一侧钉住。
+// **为什么不向控件现问 idCommand**（两条路都试过，读数留在这里免得有人再试）：
+//   · `TB_GETBUTTON`（v4 那条，按 0 基索引）：独立探针里 rc=1 / idCommand=1..3 / 越界 rc=0
+//     看着全对，产物里同一句却一条都不回（事件读数全 N）。**探针与产物不同版本**这条老嫌疑
+//     (ai/029 §三 D3) 当场记过账；C29-V6 把编译期的 `_WIN32_IE` 统一到 v6 之后重问，**依旧不回**。
+//   · `TB_GETBUTTONINFO + TBIF_COMMAND|TBIF_STYLE|TBIF_BYINDEX`：临时 env 门控探针量到
+//     `idx=1 rc=0 id=-1`、`idx=2 rc=1 id=-1`、`idx=3 rc=2 id=-1` —— rc 恰好等于传进去的
+//     wParam，结构体一个字段都不填；**v6 声明下（`sizeof(TBBUTTONINFOW)` 44→48，证宏真生效）
+//     重问读数逐字相同** ⇒ 这条 GET 压根不读回 idCommand，与 comctl 版本无关。
+// ⇒ 判据改用**表**：序号边界问 `vb6_TbBtnAt`、下拉位问 `b->style == 5`。两条闸各自都能被读数
+//   证伪（TB31 / TB33），而"控件里的 idCommand 就是槽号+1"由 `Buttons.Count`(原生
+//   `TB_BUTTONCOUNT`) 与表数一致（TB34）从另一侧钉住。
 static Vb6TbBtn* vb6_TbSimTarget(void* hwnd, int32_t idx, int wantDropdown) {
     Vb6TbBtn* b = vb6_TbBtnAt(hwnd, idx);
     if (!b) return NULL;

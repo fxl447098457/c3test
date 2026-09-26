@@ -124,6 +124,10 @@ std::string flagsKeyFor(bool isRtl, const MsvcDriverOptions& o) {
         if (o.debugInfo) s += "|/Zi";
     }
     if (o.arch == "x86") s += "|/MT";
+    // C29-V6: 版本宏会改**声明面**(commctrl.h 在 _WIN32_IE>=0x0600 下给出 v6 的
+    // TBBUTTONINFOW/类名宏) ⇒ 产物不同，必须进键，否则缓存会把 v5 声明下编出的 obj
+    // 端给 v6 声明的编译 (ai/029 C29-5c 那条实测的正是这一族)。
+    s += "|ver=" C3_V6_VERSION_DEFS;
     return s;
 }
 
@@ -147,6 +151,9 @@ std::string compileFlagsFor(bool isRtl, const MsvcDriverOptions& o,
     }
     c << " /std:c11 /DUNICODE /D_UNICODE /utf-8 /D_CRT_SECURE_NO_WARNINGS"
          " /D_CRT_NONSTDC_NO_WARNINGS /W3";
+    // C29-V6: 与 msvc_driver.cpp 那条非增量路同一套版本宏 —— 两边都得有，否则"增量编出来
+    // 的产物"与"非增量编出来的"声明面不同。上面 flagsKeyFor 进键的就是这一串。
+    c << C3_V6_VERSION_DEFS;
     // P10 恢复: RTL 源码直接编译, /Gy 函数级链接配合 /OPT:REF 剔除未引用 RTL 代码
     c << " /Gy";
     if (o.arch == "x86") c << " /MT";

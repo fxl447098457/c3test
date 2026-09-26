@@ -92,6 +92,8 @@
 - `idCommand` 是 5a 建按钮时写进去的"槽号 + 1"，派发按同一个数回查表 ⇒ 控件、消息、表三边同源，任何一边错位都会当场读数翻红，不存在"收到通知就无脑回调"。
 - 工具栏在**同一窗体上有几枚都不串**：认来源靠的是 HWND，不是序号。
 
-判据怎么触发（这条会反复用到，写死在这里）：事件必须在 **`VB.Timer`** 里发 —— `Form_Load` 阶段派发被 `block events during form init` 拦掉，而 `Form_Activate` 在无头会话里永远不来。无头环境点不了鼠标，RTL 因此交两条**判据专用**方法 `Toolbar1.SimButtonClick i` / `SimButtonMenuClick i`：它们不直接调处理器，而是先向控件问那颗按钮的 `idCommand` 与 `fsStyle`（`TB_GETBUTTON`），再照真控件的样子把消息发给父窗 ⇒ 问不到（序号越界）或原生没有下拉位（普通按钮）就**不发**，"派发分支 + 序号换算 + `ButtonAt` 造对象"三段才算都被验到。
+判据怎么触发（这条会反复用到，写死在这里）：事件必须在 **`VB.Timer`** 里发 —— `Form_Load` 阶段派发被 `block events during form init` 拦掉，而 `Form_Activate` 在无头会话里永远不来。无头环境点不了鼠标，RTL 因此交两条**判据专用**方法 `Toolbar1.SimButtonClick i` / `SimButtonMenuClick i`：它们不直接调处理器，而是照真控件的样子把消息发给父窗（前者 `WM_COMMAND`，后者 `WM_NOTIFY`），所以"派发分支 + 序号换算 + `ButtonAt` 造对象"三段都被验到。发消息之前先过两道**表侧**的闸：序号在表里没有 ⇒ 不发（`SimButtonClick 9` 就是这条读数），要模拟下拉而那颗按钮 `Style <> 5` ⇒ 不发（真控件也不会为普通按钮发 `TBN_DROPDOWN`）。
+
+为什么闸问的是表而不是控件：本批试过 `TB_GETBUTTON` 与 `TB_GETBUTTONINFO`+`TBIF_COMMAND` 两条"现问控件 idCommand / fsStyle"的路，**在产物里都问不出**（后者实测 `rc` 恰好等于传进去的 wParam、结构体一个字段都不填；把编译期的 `_WIN32_IE` 统一到 v6 之后重问，读数逐字相同 —— 见 `ai/029` 的 C29-V6 那格）。所以"控件里的 `idCommand` 就是槽号+1"这条前提改由 `Buttons.Count`（原生 `TB_BUTTONCOUNT`）与表数一致从另一侧钉住（TB34）。
 
 判据在 `tests\ctrltoolbar\`（TB28-TB34 七条）：`SimButtonClick` 连点两颗 ⇒ 计数增量 2（TB28）、handler 里读到的 `Button.Key` 分别是那两颗（TB29，证的是对象指对了格）、另一枚工具栏的 handler 一次没进（TB30，认来源）、越界序号不进（TB31）、下拉按钮的 `SimButtonMenuClick` 进且 Key 对上（TB32）、普通按钮的下拉模拟**不发**（TB33）、事件面没抢走 5b 的集合读数与标量属性（TB34）。x86 与 x64 都跑。

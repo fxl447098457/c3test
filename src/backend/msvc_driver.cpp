@@ -170,6 +170,8 @@ bool MsvcDriver::compileAndLink(const MsvcDriverOptions& options) {
 
     // C11标准, Unicode, UTF-8源码编码, 禁用MSVC安全警告
     cmd << " /std:c11 /DUNICODE /D_UNICODE /utf-8 /D_CRT_SECURE_NO_WARNINGS /D_CRT_NONSTDC_NO_WARNINGS";
+    // C29-V6: 声明面与运行面统一成 comctl v6（理由与取值见 msvc_driver.hpp 那条注释）。
+    cmd << C3_V6_VERSION_DEFS;
 
     // 警告级别
     cmd << " /W3";
