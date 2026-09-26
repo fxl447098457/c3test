@@ -1563,6 +1563,18 @@ if ($Category -in @("all", "run", "vbp")) {
     Test-Vbp "c29imgobj" "$Tests\c29imagelistobj\C29ImgObj.vbp" $c29imgExpected
     Test-Vbp "c29imgobj_x86" "$Tests\c29imagelistobj\C29ImgObj.vbp" $c29imgExpected -Arch "x86"
 
+    # --- ai/029 C29-4: StatusBar 事件面 (PanelClick/PanelDblClick) ---
+    # 数据面 P20-40 已有 ctrlstatusbar 42 条; 这里盯事件: SimClick 是判据专用方法
+    # (RTL 程序化发真 WM_NOTIFY, 走完整派发链), handler 内真读/真写 Panel 对象成员。
+    $c29sbevtExpected = @(
+        "SB1-COUNT=3",
+        "EVT1-CLICK-INDEX=1", "EVT2-CLICK-TEXT=one", "EVT3-CLICK-KEY=p1", "EVT4-CLICK-AFTER=one!",
+        "EVT1-CLICK-INDEX=3", "EVT2-CLICK-TEXT=three", "EVT3-CLICK-KEY=p3", "EVT4-CLICK-AFTER=three!",
+        "EVT5-DBL-INDEX=2")
+    Test-Vbp "c29sbevt" "$Tests\c29statusbarevt\SbEvent.vbp" $c29sbevtExpected
+    Test-Vbp "c29sbevt_x86" "$Tests\c29statusbarevt\SbEvent.vbp" $c29sbevtExpected -Arch "x86"
+
+
     # --- ai/029 C29-7: ListView (数据面 + 事件面) ---
     # 数据面: ColumnHeaders.Add (标题) / ListItems.Add (数据) / SubItems(i) **1 基, 1 就是
     # 第 2 列** / 两个集合的 Count 与 For Each / 按 Key 与按下标取项 / 成员属性读写 /
@@ -1589,7 +1601,15 @@ if ($Category -in @("all", "run", "vbp")) {
         "pNM42->code == -108",
         "vb6_ListView_OnNotify((void*)vb6_hwnd_ListView1, -108",
         "vb6_ListView_ColumnHeaderAt((void*)vb6_hwnd_ListView1",
-        "_ItemClick(&vb6_lvItem7)", "_ColumnClick(&vb6_lvHdr7)")
+        "_ItemClick(vb6_lvItem7)", "_ColumnClick(vb6_lvHdr7)",
+        # C29-4: 事件回调改**传值** (ByVal 对象语义)。旧形状传 &obj 是 void**, 与
+        # handler 形参 void* 不符 —— 成员读拿"指针的地址"当 IDispatch, 必然 not found。
+        "extern void vb6_StatusBar1_PanelClick(void*);",
+        "vb6_StatusBar_PanelAt((void*)vb6_hwnd_StatusBar1, vb6_sbPnl4)",
+        "vb6_StatusBar1_PanelClick(vb6_sbPanel4)",
+        "vb6_StatusBar_OnNotify((void*)vb6_hwnd_StatusBar1, -2",
+        "vb6_StatusBar_OnNotify((void*)vb6_hwnd_StatusBar1, -6",
+        "vb6_StatusBar_SimClick((void*)vb6_hwnd_StatusBar1")
 
     # Fix 195: .frx 三种 blob 的真实布局 —— 字符串 (Text) / 字符串表 (List) /
     # 整数表 (ItemData)。旧 readIntList 按"每项 2B 整数"读 ItemData, 读到的是

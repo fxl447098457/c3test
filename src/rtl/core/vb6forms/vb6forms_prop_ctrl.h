@@ -358,6 +358,10 @@ int32_t vb6_StatusBar_GetAlign(void* hwnd);
 void    vb6_StatusBar_SetAlign(void* hwnd, int32_t val);
 // --- Panels 集合 ---
 int32_t vb6_StatusBar_GetPanelsCount(void* hwnd);
+// C29-4 事件面: NM_CLICK/NM_DBLCLK → 1 基面板号 (在 NMHDR.idFrom), 再取 Panel 对象回调。
+int32_t vb6_StatusBar_OnNotify(void* hwnd, int32_t code, void* lParam);
+void*   vb6_StatusBar_PanelAt(void* hwnd, int32_t index);
+void    vb6_StatusBar_SimClick(void* hwnd, int32_t panelIdx, int32_t dblClick);  /* 判据专用 */
 int32_t vb6_StatusBar_AddPanel(void* hwnd, int32_t index, const wchar_t* key,
                                const wchar_t* text);
 void    vb6_StatusBar_RemovePanel(void* hwnd, const wchar_t* keyOrIndex, int32_t index);
