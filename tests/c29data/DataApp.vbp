@@ -1,0 +1,6 @@
+Type=Exe
+Form=DataApp.frm
+IconForm="Form1"
+Startup="Form1"
+ExeName32="DataApp.exe"
+LinkIncremental=0

@@ -455,6 +455,37 @@
         std::string n = listViewNameOfExpr(objExpr);
         return n.empty() ? "" : "vb6_hwnd_" + n;
     }
+    // C29-Data: Data 控件 (不可见类 VB6_DATA 属性宿主, 登记裸控件名如 "Data1")。
+    // Recordset 链 (Data1.Recordset.Fields("x").Value / .MoveNext / .BOF) 全直译 RTL。
+    std::unordered_set<std::string> dataVars_;
+    // 从 vb6_Data_Self(vb6_hwnd_X) / vb6_Data_Self((void*)vb6_hwnd_X) 抠出裸槽名。
+    // ⚠ 控件属性分支发的形态**不带** (void*) 强转, 两种都要认。
+    std::string dataSelfHwndExpr(const std::string& objExpr) const {
+        const char* kHeads[] = { "vb6_Data_Self((void*)", "vb6_Data_Self(" };
+        for (const char* kHead : kHeads) {
+            size_t p = objExpr.find(kHead);
+            if (p == std::string::npos) continue;
+            size_t s = p + strlen(kHead);
+            if (s > 0 && objExpr.compare(s, 9, "vb6_hwnd_") != 0 && s > 0) {
+                // 允许中间有空白
+                while (s < objExpr.size() && objExpr[s] == ' ') s++;
+            }
+            size_t e = s;
+            while (e < objExpr.size() && (isalnum((unsigned char)objExpr[e]) || objExpr[e] == '_')) e++;
+            std::string n = objExpr.substr(s, e - s);
+            // ⚠ 扫出来的是完整槽名 "vb6_hwnd_Data1" —— 剥掉前缀再查表
+            if (n.size() > 9 && n.compare(0, 9, "vb6_hwnd_") == 0) n = n.substr(9);
+            if (dataVars_.count(n)) return "vb6_hwnd_" + n;
+        }
+        return "";
+    }
+    std::string dataNameOfExpr(const std::string& objExpr) const {
+        if (objExpr.size() > 9 && objExpr.compare(0, 9, "vb6_hwnd_") == 0) {
+            std::string n = objExpr.substr(9);
+            if (dataVars_.count(n)) return n;
+        }
+        return "";
+    }
     // C29-OLE: 真窗口的 OLE 容器控件 (登记裸控件名, 如 "OLE1")。
     // 方法 (CreateEmbed/CreateLink/DoVerb/Close/InsertObjDlg/SaveToFile/ReadFromFile/
     // Copy/Paste) 与属性读写全走 vb6_OleCon_*, 第一参是 HWND 槽 vb6_hwnd_X。

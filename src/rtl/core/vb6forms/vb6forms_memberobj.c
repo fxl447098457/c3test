@@ -57,11 +57,14 @@
 #define VB6_MEMK_LISTITEM       2
 #define VB6_MEMK_COLUMNHEADER   3
 #define VB6_MEMK_PANEL          4
+#define VB6_MEMK_RS             5   // Data.Recordset (C29-Data)
+#define VB6_MEMK_FIELD          6   // Recordset.Fields("x") 的 Field
 // 成员集合族 (Vb6MemColl)
 #define VB6_MEMCK_LISTIMAGES    1
 #define VB6_MEMCK_LISTITEMS     2
 #define VB6_MEMCK_COLUMNHEADERS 3
 #define VB6_MEMCK_PANELS        4
+// (Recordset/Field 不是集合, RS.Fields 是带参 GET 直接产 Field 对象)
 
 // ===================== 实例 =====================
 typedef struct Vb6MemObj {
@@ -109,6 +112,14 @@ static const wchar_t* kPanelNames[] = {
 // 三个集合同构: Count / Item / Add / Remove / Clear / _NewEnum
 static const wchar_t* kCollNames[] = {
     L"Count", L"Item", L"Add", L"Remove", L"Clear", L"_NewEnum", NULL };
+// C29-Data: Data.Recordset (方法与标量混排; DISPID = 下标+1)
+static const wchar_t* kRsNames[] = {
+    L"BOF", L"EOF", L"RecordCount", L"FieldCount", L"Fields",
+    L"MoveFirst", L"MoveLast", L"MoveNext", L"MovePrevious", L"Refresh",
+    L"CurrentRow", NULL };
+// Recordset.Fields("x") 的 Field
+static const wchar_t* kRsFieldNames[] = {
+    L"Name", L"Value", L"Index", NULL };
 
 // DISPID 明细 (与上面各表的顺序严格一致)
 #define VB6_MEMD_KEY        1
@@ -125,6 +136,22 @@ static const wchar_t* kCollNames[] = {
 #define VB6_MEMD_AUTOSIZE   6
 #define VB6_MEMD_STYLE      7
 #define VB6_MEMD_TOOLTIP    8
+// RS (kRsNames 顺序)
+#define VB6_MEMRS_BOF        1
+#define VB6_MEMRS_EOF        2
+#define VB6_MEMRS_RECORDCNT  3
+#define VB6_MEMRS_FIELDCNT   4
+#define VB6_MEMRS_FIELDS     5
+#define VB6_MEMRS_MOVEFIRST  6
+#define VB6_MEMRS_MOVELAST   7
+#define VB6_MEMRS_MOVENEXT   8
+#define VB6_MEMRS_MOVEPREV   9
+#define VB6_MEMRS_REFRESH    10
+#define VB6_MEMRS_CURROW     11
+// Field (kRsFieldNames 顺序)
+#define VB6_MEMF_NAME        1
+#define VB6_MEMF_VALUE       2
+#define VB6_MEMF_INDEX       3
 
 #define VB6_MEMCD_COUNT     1
 #define VB6_MEMCD_ITEM      2
@@ -140,6 +167,8 @@ static const wchar_t* const* memObjNamesOf(int32_t kind) {
     case VB6_MEMK_LISTITEM:     return kListItemNames;
     case VB6_MEMK_COLUMNHEADER: return kColumnHeaderNames;
     case VB6_MEMK_PANEL:        return kPanelNames;
+    case VB6_MEMK_RS:           return kRsNames;
+    case VB6_MEMK_FIELD:        return kRsFieldNames;
     default:                    return kListImageNames;
     }
 }
@@ -449,6 +478,85 @@ static HRESULT memInvokePanel(Vb6MemObj* p, int dispid, VARIANT* out) {
     return DISP_E_MEMBERNOTFOUND;
 }
 
+// C29-Data: Data.Recordset 的 Invoke。带参的 Fields("x") 在 dp 里 (PROPERTYGET 逆序)。
+static HRESULT memInvokeRs(Vb6MemObj* p, int dispid, VARIANT* out, DISPPARAMS* dp, WORD flags) {
+    if (memTrace()) fprintf(stderr, "[MOBJ-RS] dispid=%d flags=%04X owner=%p\n", dispid, (unsigned)flags, p->owner);
+    switch (dispid) {
+    case VB6_MEMRS_BOF:
+        memSetI4(out, vb6_Data_BOF(p->owner));
+        return S_OK;
+    case VB6_MEMRS_EOF:
+        memSetI4(out, vb6_Data_EOF(p->owner));
+        return S_OK;
+    case VB6_MEMRS_RECORDCNT:
+        memSetI4(out, vb6_Data_RecordCount(p->owner));
+        return S_OK;
+    case VB6_MEMRS_FIELDCNT:
+        memSetI4(out, vb6_Data_FieldCount(p->owner));
+        return S_OK;
+    case VB6_MEMRS_CURROW:
+        memSetI4(out, vb6_Data_CurrentRow(p->owner));
+        return S_OK;
+    case VB6_MEMRS_FIELDS: {
+        // PROPERTYGET 带参: 参数在 dp->rgvarg 逆序 (rgvarg[cArgs-1] 是第一个实参)
+        int32_t argc = dp ? (int32_t)dp->cArgs : 0;
+        if (argc < 1) { memSetEmpty(out); return DISP_E_PARAMNOTFOUND; }
+        VARIANT* a0 = &dp->rgvarg[argc - 1];
+        // 字段名/下标 —— 找到后产 **Field 对象** (VB6: Set f = rs.Fields("id"); f.Value)
+        const wchar_t* fname = memArgStr(a0);
+        int32_t fidx = 0;
+        int32_t allDigit = fname[0] != 0;
+        for (const wchar_t* q = fname; *q; q++)
+            if (!(*q >= L'0' && *q <= L'9')) { allDigit = 0; break; }
+        if (allDigit) fidx = (int32_t)wcstol(fname, NULL, 10);
+        else {
+            for (int c = 1; c <= vb6_Data_FieldCount(p->owner); c++) {
+                wchar_t tmp[64];
+                vb6_Data_FieldValue(p->owner, L"", tmp, 0);  /* noop, 占位 */
+                (void)tmp;
+                if (_wcsicmp(vb6_Data_FieldName(p->owner, c), fname) == 0) { fidx = c; break; }
+            }
+        }
+        if (fidx < 1) { memSetEmpty(out); return DISP_E_MEMBERNOTFOUND; }
+        Vb6MemObj* f = memObjNew(VB6_MEMK_FIELD, p->owner, fidx);
+        if (!f) { memSetEmpty(out); return E_OUTOFMEMORY; }
+        memSetObj(out, f);
+        return S_OK;
+    }
+    case VB6_MEMRS_MOVEFIRST: vb6_Data_MoveFirst(p->owner);    memSetEmpty(out); return S_OK;
+    case VB6_MEMRS_MOVELAST:  vb6_Data_MoveLast(p->owner);     memSetEmpty(out); return S_OK;
+    case VB6_MEMRS_MOVENEXT:  vb6_Data_MoveNext(p->owner);     memSetEmpty(out); return S_OK;
+    case VB6_MEMRS_MOVEPREV:  vb6_Data_MovePrevious(p->owner); memSetEmpty(out); return S_OK;
+    case VB6_MEMRS_REFRESH:   if (memTrace()) fprintf(stderr, "[MOBJ-RS] calling vb6_Data_Refresh owner=%p\n", p->owner);
+                              vb6_Data_Refresh(p->owner);      memSetEmpty(out); return S_OK;
+    default:
+        break;
+    }
+    return DISP_E_MEMBERNOTFOUND;
+}
+
+// C29-Data: Field (Name/Value/Index)
+static HRESULT memInvokeRsField(Vb6MemObj* p, int dispid, VARIANT* out) {
+    switch (dispid) {
+    case VB6_MEMF_NAME:
+        memSetStr(out, vb6_Data_FieldName(p->owner, p->index));
+        return S_OK;
+    case VB6_MEMF_VALUE: {
+        wchar_t vbuf[1024];
+        vb6_Data_FieldValueByIdx(p->owner, p->index, vbuf, 1024);
+        if (memTrace()) fprintf(stderr, "[MOBJ-F] idx=%d val=[%ls]\n", p->index, vbuf);
+        memSetStr(out, vbuf);
+        return S_OK;
+    }
+    case VB6_MEMF_INDEX:
+        memSetI4(out, p->index);
+        return S_OK;
+    default:
+        break;
+    }
+    return DISP_E_MEMBERNOTFOUND;
+}
+
 // 成员对象的**属性写** (只给可写的成员: ListItem.Text/Selected/Checked、ColumnHeader.Text/Width/Alignment)
 static void memObjPutProp(Vb6MemObj* p, int dispid, DISPPARAMS* dp) {
     if (!dp || dp->cArgs < 1) return;
@@ -555,6 +663,8 @@ static HRESULT STDMETHODCALLTYPE memObj_Invoke(IDispatch* This, DISPID dispid, R
     case VB6_MEMK_LISTITEM:     return memInvokeListItem(p, (int)dispid, out, dp);
     case VB6_MEMK_COLUMNHEADER: return memInvokeColumnHeader(p, (int)dispid, out);
     case VB6_MEMK_PANEL:        return memInvokePanel(p, (int)dispid, out);
+    case VB6_MEMK_RS:           return memInvokeRs(p, (int)dispid, out, dp, flags);
+    case VB6_MEMK_FIELD:        return memInvokeRsField(p, (int)dispid, out);
     default: break;
     }
     return DISP_E_MEMBERNOTFOUND;
@@ -854,6 +964,12 @@ void* vb6_ListView_ColumnHeaderAt(void* hwnd, int32_t index) {
     if (!hwnd || index < 1) return NULL;
     if (index > vb6_ListView_GetColumnCount(hwnd)) return NULL;
     return (void*)memObjNew(VB6_MEMK_COLUMNHEADER, hwnd, index);
+}
+
+// C29-Data: Data1.Recordset 的**真 IDispatch 对象** —— readFn 直接返回它,
+// 之后整条链 (BOF/EOF/RecordCount/Fields("x")/Move*) 走 C29-3 的晚绑定通道, cgen 零特例。
+void* vb6_MemberObj_NewRs(void* hwnd) {
+    return (void*)memObjNew(VB6_MEMK_RS, hwnd, 0);
 }
 
 // C29-4: StatusBar1_PanelClick(ByVal Panel As Panel) 的事件参数对象。

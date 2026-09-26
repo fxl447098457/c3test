@@ -595,6 +595,37 @@
                       + std::to_string(lvBool("LabelEdit")) + ");");
         }
 
+        // C29-Data: Data 控件设计期 —— DatabaseName/RecordSource/Connect 一次 Init 灌进去,
+        // Refresh 时才真开 (ODBC 连接是懒的)。随后:
+        //   ① 绑定收集: 全窗体 TextBox 的 DataSource/DataField → vb6_Data_Bind
+        //   ② Reposition 事件: handler 存在才发函数指针注册
+        if (ctrl.controlType == FrmControlType::Data) {
+            std::string dtNLower = ctrl.controlName;
+            std::transform(dtNLower.begin(), dtNLower.end(), dtNLower.begin(), ::tolower);
+            std::string dtHwnd = knownControlArrays_.count(dtNLower) ?
+                ("vb6_CtrlArr_GetAt(&vb6_arr_" + cIdent(ctrl.controlName) + ", " +
+                 std::to_string(ctrl.index >= 0 ? ctrl.index : 0) + ")") :
+                ("vb6_hwnd_" + cIdent(ctrl.controlName));
+            auto dtStr = [&](const std::string& k) -> std::string {
+                auto it = ctrl.properties.find(k);
+                if (it == ctrl.properties.end() || it->second.rawText.empty()) return "L""";
+                std::string raw = it->second.rawText;
+                if (raw.size() >= 2 && raw.front() == '"' && raw.back() == '"')
+                    raw = raw.substr(1, raw.size() - 2);
+                return "L\"" + escapeWideCString(raw) + "\"";
+            };
+            c_.emitLine("vb6_Data_Init((void*)" + dtHwnd + ", "
+                      + dtStr("DatabaseName") + ", "
+                      + dtStr("RecordSource") + ", "
+                      + dtStr("Connect") + ");");
+            // 绑定收集挪到 style_apply 循环外 (本控件段执行时被绑控件的 hwnd 可能还没创建)
+            // ② Reposition (函数指针注册 —— 不可见控件没有 WM_NOTIFY 可借)
+            if (symTab_.lookup(ctrl.controlName + "_Reposition")) {
+                std::string rpFn = cProcName(ctrl.controlName + "_Reposition", AccessLevel::Private);
+                c_.emitLine("vb6_Data_SetRepositionHandler((void*)" + dtHwnd + ", " + rpFn + ");");
+            }
+        }
+
         // C29-OLE: OLE 容器设计期 —— Class/OLETypeAllowed/SizeMode/DisplayAsIcon/
         // AutoActivate/AutoVerbMenu/BorderStyle/SourceDoc/SourceItem 一次 Init 灌进去。
         // 不灌的话 OLETypeAllowed 会错成 2 (vbOLEEither) 之外任意值、SizeMode 错成 0。
@@ -768,5 +799,38 @@
         emitControlFrxProps(ctrl);
 
 ctrlId++;
+    }
+
+    // C29-Data: 绑定收集独立 pass —— 必须在**所有**控件创建完之后 (被绑的
+    // TextBox 等 hwnd 此时才有效; per-ctrl 段里发射时目标 hwnd 还是 NULL,
+    // vb6_Data_Bind 静默丢弃, 实测 DT6 绑定读数空)。
+    for (const auto& dataCtrl : frmDesc.formControl.children) {
+        if (dataCtrl.controlType != FrmControlType::Data) continue;
+        std::string dNLower = dataCtrl.controlName;
+        std::transform(dNLower.begin(), dNLower.end(), dNLower.begin(), ::tolower);
+        std::string dHwnd = knownControlArrays_.count(dNLower) ?
+            ("vb6_CtrlArr_GetAt(&vb6_arr_" + cIdent(dataCtrl.controlName) + ", " +
+             std::to_string(dataCtrl.index >= 0 ? dataCtrl.index : 0) + ")") :
+            ("vb6_hwnd_" + cIdent(dataCtrl.controlName));
+        for (const auto& other : frmDesc.formControl.children) {
+            auto dsIt = other.properties.find("DataSource");
+            auto dfIt = other.properties.find("DataField");
+            if (dsIt == other.properties.end() || dfIt == other.properties.end()) continue;
+            std::string ds = dsIt->second.rawText;
+            if (ds.size() >= 2 && ds.front() == '"' && ds.back() == '"')
+                ds = ds.substr(1, ds.size() - 2);
+            if (ds != dataCtrl.controlName) continue;
+            std::string fldRaw = dfIt->second.rawText;
+            if (fldRaw.size() >= 2 && fldRaw.front() == '"' && fldRaw.back() == '"')
+                fldRaw = fldRaw.substr(1, fldRaw.size() - 2);
+            std::string oNLower = other.controlName;
+            std::transform(oNLower.begin(), oNLower.end(), oNLower.begin(), ::tolower);
+            std::string oHwnd = knownControlArrays_.count(oNLower) ?
+                ("vb6_CtrlArr_GetAt(&vb6_arr_" + cIdent(other.controlName) + ", " +
+                 std::to_string(other.index >= 0 ? other.index : 0) + ")") :
+                ("vb6_hwnd_" + cIdent(other.controlName));
+            c_.emitLine("vb6_Data_Bind((void*)" + dHwnd + ", (void*)" + oHwnd
+                      + ", L\"" + escapeWideCString(fldRaw) + "\");");
+        }
     }
 

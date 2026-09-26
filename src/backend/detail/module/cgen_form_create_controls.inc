@@ -26,7 +26,7 @@
     c_.emitBlank();
     // P20-35: 注册Shape/Line自定义窗口类
     {
-        bool hasShape = false, hasLine = false, hasCd = false, hasTmr = false, hasOle = false;
+        bool hasShape = false, hasLine = false, hasCd = false, hasTmr = false, hasOle = false, hasData = false;
         for (const auto& ctrl : frmDesc.formControl.children) {
             if (ctrl.controlType == FrmControlType::Shape) hasShape = true;
             if (ctrl.controlType == FrmControlType::Line) hasLine = true;
@@ -36,6 +36,8 @@
             if (ctrl.controlType == FrmControlType::Timer) hasTmr = true;  // C29-T
             // C29-OLE: 同理 —— VB6_OLECONTAINER 类先注册, 控件创建才有窗口。
             if (ctrl.controlType == FrmControlType::OLE) hasOle = true;
+            // C29-Data: 同理 —— VB6_DATA 类先注册。
+            if (ctrl.controlType == FrmControlType::Data) hasData = true;
         }
         if (hasShape || hasLine) {
             c_.emitLine("vb6_RegisterShapeLineClasses((void*)hInstance);");
@@ -48,6 +50,9 @@
         }
         if (hasOle) {
             c_.emitLine("vb6_RegisterOleConClass((void*)hInstance);");
+        }
+        if (hasData) {
+            c_.emitLine("vb6_RegisterDataClass((void*)hInstance);");
         }
     }
     // 为每个控件生成CreateWindow调用

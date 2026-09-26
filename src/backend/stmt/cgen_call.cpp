@@ -211,6 +211,27 @@ void CCodeGen::visit(CallStmt& node) {
                 c_.emitLine("vb6_ImageList_ClearImages((void*)" + ilSlot + ");");
                 return;
             }
+            // C29-Data: `Data1.Recordset.Refresh` 等 —— comObjExpr_ 是 vb6_Data_Self( 透传形态
+            // (recordset 走控件属性分支不设裸控件标记, 所以这里认前缀而不是查表)。
+            // 不拦就落 vb6_ComCall(vb6_Data_Self(...), L"Refresh") —— 对 ODBC 状态当 IDispatch 用。
+            if (comObjExpr_.find("vb6_Data_Self(") == 0) {
+                std::string dhD = dataSelfHwndExpr(comObjExpr_);
+                std::string mD = Symbol::toLower(comMemberName_);
+                if (!dhD.empty()) {
+                    std::string fnD;
+                    if (mD == "refresh")      fnD = "vb6_Data_Refresh";
+                    else if (mD == "movenext")     fnD = "vb6_Data_MoveNext";
+                    else if (mD == "moveprevious") fnD = "vb6_Data_MovePrevious";
+                    else if (mD == "movefirst")    fnD = "vb6_Data_MoveFirst";
+                    else if (mD == "movelast")     fnD = "vb6_Data_MoveLast";
+                    if (!fnD.empty()) {
+                        comObjExpr_.clear();
+                        comMemberName_.clear();
+                        c_.emitLine(fnD + "((void*)" + dhD + ");");
+                        return;
+                    }
+                }
+            }
             // P20-40: 同款 —— `StatusBar1.Panels.Clear` 无实参, 也必须在这条语句路径收尾。
             if (statusBarNameOfExpr(comObjExpr_) != ""
                 && Symbol::toLower(comMemberName_) == "clear") {

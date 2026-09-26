@@ -62,6 +62,8 @@
 213 RCDATA "../rtl/core/vb6forms/vb6forms_treeview.c"
 // C29-OLE: OLE 容器 (本地判据, 不进 CI)
 214 RCDATA "../rtl/core/vb6forms/vb6forms_olecon.c"
+// C29-Data: Data 控件 (ODBC 后端; 判据走 Text ISAM 零建库)
+216 RCDATA "../rtl/core/vb6forms/vb6forms_data.c"
 // ai/029 C29-5a: Toolbar (ToolbarWindow32 复刻, 不加载 MSCOMCTL.OCX) —— 顺延让位
 215 RCDATA "../rtl/core/vb6forms/vb6forms_toolbar.c"
 131 RCDATA "../rtl/core/vb6forms/vb6forms_axsite.c"

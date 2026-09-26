@@ -27,7 +27,11 @@
             objExpr.find("vb6_ListView_ListItems(") == 0 ||
             objExpr.find("vb6_ListView_ColumnHeaders(") == 0 ||
             // C29-OLE: `OLE1.Object` 返回嵌入对象的 IDispatch* —— 链 `.Something` 走晚绑定。
-            objExpr.find("vb6_OleCon_GetObject(") == 0) {
+            objExpr.find("vb6_OleCon_GetObject(") == 0 ||
+            // C29-Data: `Data1.Recordset` 的真 IDispatch (memberobj 的 RS 族)。
+            objExpr.find("vb6_Data_RecordsetObj(") == 0 ||
+            // C29-Data: Fields("x") 的求值结果 (FieldValueStr) 上再 .Value —— 透传。
+            objExpr.find("vb6_Data_FieldValueStr(") == 0) {
             // 链式COM: 设置COM标记, objExpr是中间对象表达式
             comObjExpr_ = objExpr;
             comMemberName_ = node.memberName;
@@ -93,6 +97,10 @@
         obj.find("vb6_ListView_ColumnHeaders(") == 0 ||
         // C29-OLE: `OLE1.Object` 同理。
         obj.find("vb6_OleCon_GetObject(") == 0 ||
+        // C29-Data: `Data1.Recordset` 的真 IDispatch 同理。
+        obj.find("vb6_Data_RecordsetObj(") == 0 ||
+        // C29-Data: FieldValueStr 上 .Value 同理。
+        obj.find("vb6_Data_FieldValueStr(") == 0 ||
         obj.find("vb6_PropertyPage_SelectedControls(") == 0) {
         // 对于vb6_ComCall/vb6_ComGetProp, 需要先解封为对象
         // 链式调用: ComCall返回VARIANT*, 需ComCallObject才能拿到IDispatch*

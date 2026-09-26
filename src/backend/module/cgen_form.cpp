@@ -80,6 +80,8 @@ void CCodeGen::emitFormFramework(const FrmFormDesc& frmDesc, Module& module) {
             if (c.controlType == FrmControlType::ListView) listViewVars_.insert(c.controlName);
             // C29-OLE: OLE 容器同 ListView 一样是真窗口, 方法/属性都按 HWND 槽认。
             if (c.controlType == FrmControlType::OLE) oleConVars_.insert(c.controlName);
+            // C29-Data: Data 控件同批登记。
+            if (c.controlType == FrmControlType::Data) dataVars_.insert(c.controlName);
             for (const auto& ch : c.children) regLV(ch);
         };
         regLV(frmDesc.formControl);

@@ -290,6 +290,15 @@ std::string CCodeGen::getControlPropReadFn(FrmControlType ctrlType, const std::s
         if (propLower == "visible")         return "vb6_GetControlVisible";
         if (propLower == "enabled")         return "vb6_GetControlEnabled";
         break;
+    case FrmControlType::Data:  // C29-Data: ODBC 后端
+        if (propLower == "recordset")    return "vb6_Data_RecordsetObj";  /* 真 IDispatch, 链走晚绑定 */
+        if (propLower == "databasename") return "vb6_Data_GetDatabaseName";
+        if (propLower == "recordsource") return "vb6_Data_GetRecordSource";
+        if (propLower == "connect")      return "vb6_Data_GetConnect";
+        if (propLower == "bof")          return "vb6_Data_BOF";
+        if (propLower == "eof")          return "vb6_Data_EOF";
+        if (propLower == "recordcount")  return "vb6_Data_RecordCount";
+        break;
     case FrmControlType::Menu:  // P20-36
         if (propLower == "caption") return "vb6_GetMenuCaption";
         if (propLower == "checked") return "vb6_GetMenuChecked";
@@ -573,6 +582,11 @@ std::string CCodeGen::getControlPropWriteFn(FrmControlType ctrlType, const std::
         if (propLower == "stretch") return "vb6_SetImageStretch";  // P17.2
         if (propLower == "visible") return "vb6_SetControlVisible";
         if (propLower == "enabled") return "vb6_SetControlEnabled";
+        break;
+    case FrmControlType::Data:  // C29-Data 写表 (三属性先存后 Refresh 用)
+        if (propLower == "databasename") return "vb6_Data_SetDatabaseName";
+        if (propLower == "recordsource") return "vb6_Data_SetRecordSource";
+        if (propLower == "connect")      return "vb6_Data_SetConnect";
         break;
     case FrmControlType::Menu:  // P20-36
         if (propLower == "caption") return "vb6_SetMenuCaption";

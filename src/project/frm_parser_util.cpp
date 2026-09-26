@@ -249,6 +249,8 @@ const char* FrmParser::controlTypeToWin32Class(FrmControlType type) {
         // OLE 容器 (C29-OLE): RTL 自注册类 (vb6forms_olecon.c vb6_RegisterOleConClass)。
         // 嵌入对象依赖目标机器的 OLE 服务器 ⇒ 判据只本地跑 (用户指示), 不进 CI。
         case FrmControlType::OLE:          return "VB6_OLECONTAINER";
+        // C29-Data: ODBC 后端的 Data 控件 (自注册不可见类, CommonDialog 属性宿主同款)。
+        case FrmControlType::Data:         return "VB6_DATA";
         case FrmControlType::Menu:         return nullptr;       // 菜单, 非窗口
         case FrmControlType::WebBrowser:  return nullptr;       // WebView2, 运行时动态创建
         default:                           return nullptr;

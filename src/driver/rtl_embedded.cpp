@@ -158,6 +158,7 @@ static const RtlFileEntry kRtlFiles[] = {
     { RTL_VB6FORMS_MEMBEROBJ_C,    "vb6forms_memberobj.c" },
     { RTL_VB6FORMS_TREEVIEW_C,     "vb6forms_treeview.c" },
     { RTL_VB6FORMS_OLECON_C,       "vb6forms_olecon.c" },
+    { RTL_VB6FORMS_DATA_C,         "vb6forms_data.c" },
     { RTL_VB6FORMS_TOOLBAR_C,      "vb6forms_toolbar.c" },
     { RTL_VB6FORMS_AXSITE_C,       "vb6forms_axsite.c" },
     { RTL_VB6FORMS_AXCONTAINER_C,  "vb6forms_axcontainer.c" },

@@ -276,6 +276,36 @@ int32_t vb6_ListView_OnNotify(void* hwnd, int32_t code, void* lParam);
 // 窗口类 VB6_OLECONTAINER 自注册 (vb6_OleCon_RegisterClasses, cgen 在窗体创建前发射)。
 // 嵌入对象依赖目标机器的 OLE 服务器 —— 判据用系统自带 Package (packager.dll, 双架构都有)。
 int       vb6_RegisterOleConClass(void* hInstance);                // 进程一次, 窗体创建前调
+// ===================== Data 控件 (C29-Data, 判据走 Text ISAM 零建库) =====================
+// 不可见类 VB6_DATA 自注册。后端 = odbc32.dll (系统自带, 动态加载);
+// provider 由用户 Connect 属性给完整 ODBC 连接串 (不替用户挑引擎)。
+int       vb6_RegisterDataClass(void* hInstance);
+void      vb6_Data_Init(void* hwnd, const wchar_t* databaseName, const wchar_t* recordSource,
+                        const wchar_t* connect);
+void      vb6_Data_SetDatabaseName(void* hwnd, const wchar_t* v);
+void      vb6_Data_SetRecordSource(void* hwnd, const wchar_t* v);
+void      vb6_Data_SetConnect(void* hwnd, const wchar_t* v);
+wchar_t*  vb6_Data_GetDatabaseName(void* hwnd);
+wchar_t*  vb6_Data_GetRecordSource(void* hwnd);
+wchar_t*  vb6_Data_GetConnect(void* hwnd);
+int       vb6_Data_Refresh(void* hwnd);
+int32_t   vb6_Data_BOF(void* hwnd);
+int32_t   vb6_Data_EOF(void* hwnd);
+int32_t   vb6_Data_RecordCount(void* hwnd);
+int32_t   vb6_Data_FieldCount(void* hwnd);
+int32_t   vb6_Data_CurrentRow(void* hwnd);
+void      vb6_Data_MoveFirst(void* hwnd);
+void      vb6_Data_MoveLast(void* hwnd);
+void      vb6_Data_MoveNext(void* hwnd);
+void      vb6_Data_MovePrevious(void* hwnd);
+wchar_t*  vb6_Data_FieldName(void* hwnd, int32_t idx);
+void      vb6_Data_FieldValue(void* hwnd, const wchar_t* nameOrIndex, wchar_t* out, int32_t outCap);
+void*     vb6_Data_Self(void* hwnd);                               /* Recordset 链透传 */
+wchar_t*  vb6_Data_FieldValueStr(void* hwnd, const wchar_t* nameOrIndex);  /* 静态缓冲 */
+void      vb6_Data_Bind(void* hwnd, void* ctlHwnd, const wchar_t* fieldName);
+void      vb6_Data_SetRepositionHandler(void* hwnd, void* fn);
+void*     vb6_Data_RecordsetObj(void* hwnd);                       /* Recordset 真 IDispatch */
+void      vb6_Data_FieldValueByIdx(void* hwnd, int32_t idx, wchar_t* out, int32_t outCap);
 void      vb6_OleCon_Init(void* hwnd, const wchar_t* cls, int oletTypeAllowed,
                           int sizeMode, int displayAsIcon, int autoActivate);
 int       vb6_OleCon_CreateEmbed(void* hwnd, const wchar_t* sourceDoc);  /* NULL=按 Class 新建 */
