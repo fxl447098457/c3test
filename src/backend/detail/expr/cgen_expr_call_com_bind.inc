@@ -18,7 +18,9 @@
                               // 槽才进这条"取集合属性 + Item"的路; 集合对象本身
                               // (vb6_TreeView_Nodes(…) 开头) 不能进, 否则 `Nodes.Add(…)`
                               // 会被当成"Add 属性 + Item 下标", 编成删不改的错形状。
-                              || !treeViewNameOfExpr(comObjExpr_).empty()))
+                              // C29-5b: Toolbar 的裸槽同理 (真窗口)。
+                              || !treeViewNameOfExpr(comObjExpr_).empty()
+                              || !toolbarNameOfExpr(comObjExpr_).empty()))
                       // C29-Data: Data1.Recordset 的透传形态 (Fields/Item 走 Step1+Item 路)。
                       || comObjExpr_.find("vb6_Data_Self(") == 0;
         if (axSlotObj && !node.positional.empty()) {
@@ -35,6 +37,11 @@
                     std::string bareIL = imageListNameOfExpr(axObjExpr);
                     if (!bareIL.empty())
                         collectionExpr = "vb6_ImageList_ListImages((void*)vb6_com_" + bareIL + ")";
+                } else if (Symbol::toLower(axMember) == "buttons") {
+                    // C29-5b: Toolbar1.Buttons —— 宿主槽是 vb6_hwnd_X (真窗口)。
+                    std::string bareTB = toolbarNameOfExpr(axObjExpr);
+                    if (!bareTB.empty())
+                        collectionExpr = "vb6_Toolbar_Buttons((void*)vb6_hwnd_" + bareTB + ")";
                 } else if (Symbol::toLower(axMember) == "nodes") {
                     // C29-8b: TreeView1.Nodes —— 宿主槽是 vb6_hwnd_X (真窗口)。
                     std::string bareTV = treeViewNameOfExpr(axObjExpr);

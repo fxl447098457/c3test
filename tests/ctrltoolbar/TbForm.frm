@@ -59,7 +59,12 @@ Option Explicit
 ' 是静默空转)。本批三面一起接上：创建那一刀、标量属性表、设计期 Buttons 逐条 TB_ADDBUTTONSW。
 ' 口径: Buttons.Count 的读数来自**原生 TB_BUTTONCOUNT**，不是我那张表自己报数 —— 所以它证的
 ' 是"设计期那三条真进了控件"。分隔符也计入原生按钮数 (与 VB6 一致)。
-' Button 对象那一族 ((i).Key/.Caption、Add、ButtonClick) 留 5b：它吃成员对象机制。
+' C29-5b 在这一格后面加了 15 条 Buttons/Button 读数 (TB13-TB27)：集合是真 IDispatch
+' (vb6forms_memberobj.c 的 BUTTONS 族)，Caption/Image/Enabled/Visible/Value 现问控件，
+' Key/Tag/ToolTipText/Style/Width 住 5a 那张表 (原生 fsStyle 分不出分隔符与占位符)。
+' 量到的一条 v6 坑：TB_ADDBUTTONSW 不吃调用方给的 fsState (建完读回 0) ⇒ Button.Enabled
+' 默认会是 False，建完补一条 TB_SETBUTTONINFOW 打回启用位 (TB19 就是这条读数)。
+' 还欠：ButtonClick/ButtonMenuClick 的 TBN_ 派发、ImageList 关联、真停靠与真自定义。
 
 Private Function TF(ByVal ok As Boolean) As String
     If ok Then TF = "Y" Else TF = "N"
@@ -103,6 +108,81 @@ Private Sub Form_Load()
     tb2.Enabled = True
     auxList.AddItem "one"
     Debug.Print "TB12=" & TF(auxList.ListCount = 1 And tb2.Enabled <> 0)
+
+    ' ============================================================
+    ' --- 5b: Buttons 集合与 Button 对象 (真 IDispatch, 复用 memberobj 那一族) ---
+    '     分界线: Caption / Image / Enabled / Visible / Value **现问控件**
+    '     (TB_GET/SETBUTTONINFOW), Key / Tag / ToolTipText / Style / Width 住 5a 那张表。
+    Dim b1 As Object, b2 As Object, b3 As Object
+    Set b1 = tb1.Buttons(1)
+    Set b2 = tb1.Buttons("save")
+    Set b3 = tb1.Buttons(3)
+    Debug.Print "TB13=" & TF(tb1.Buttons.Count = 3)
+
+    ' --- 14. 按 Key 取下标 + 下标取回同一格 ---
+    Dim sK1 As String
+    sK1 = b1.Key
+    Debug.Print "TB14=" & TF(b2.Index = 3 And sK1 = "open")
+
+    ' --- 15. Caption 是**问控件**问出来的 (TB_GETBUTTONINFOW 的 iString 真往返) ---
+    Dim sCap As String
+    sCap = b1.Caption
+    Debug.Print "TB15=" & TF(sCap = "Open")
+
+    ' --- 16. 表里那三条: ToolTipText / Style(含分隔符那一档) / Width ---
+    Dim sTip As String
+    sTip = b3.ToolTipText
+    Debug.Print "TB16=" & TF(sTip = "Save all")
+    Debug.Print "TB17=" & TF(b1.Style = 0 And tb1.Buttons(2).Style = 3)
+    Debug.Print "TB18=" & TF(tb1.Buttons(2).Width = 8)
+
+    ' --- 19. 默认态: 可点 + 可见 ---
+    Debug.Print "TB19=" & TF((b1.Enabled <> 0) And (b1.Visible <> 0))
+
+    ' --- 20. 写 Caption 后换一枚对象再读: 证 TB_SETBUTTONINFOW 真进了控件 ---
+    b1.Caption = "打开"
+    Dim b1b As Object
+    Dim sCap2 As String
+    Set b1b = tb1.Buttons(1)
+    sCap2 = b1b.Caption
+    Debug.Print "TB20=" & TF(sCap2 = "打开")
+
+    ' --- 21/22. Enabled 与 Visible 的反向可逆 (读的是 fsState 那两位) ---
+    b1.Enabled = False
+    Debug.Print "TB21=" & TF(b1.Enabled = 0)
+    b1.Enabled = True
+    b1.Visible = False
+    Debug.Print "TB22=" & TF((b1.Visible = 0) And (b1.Enabled <> 0))
+    b1.Visible = True
+
+    ' --- 23. Style 改成复选 + Value 勾上 (TBSTATE_CHECKED) ---
+    b3.Style = 1
+    b3.Value = True
+    Debug.Print "TB23=" & TF(b3.Value <> 0 And tb1.Buttons(3).Style = 1)
+
+    ' --- 24. 运行期 Add: 返回的就是 Button 对象, Index 接在末尾 ---
+    Dim bN As Object
+    Set bN = tb1.Buttons.Add(, "cut", "剪", 0, -1)
+    Debug.Print "TB24=" & TF(bN.Index = 4 And tb1.Buttons.Count = 4)
+
+    ' --- 25. For Each 走 _NewEnum, 顺序 = 集合序 ---
+    Dim e As Object
+    Dim n As Long
+    n = 0
+    For Each e In tb1.Buttons
+        n = n + 1
+    Next
+    Debug.Print "TB25=" & TF(n = 4)
+
+    ' --- 26. Remove 按 Key: 控件与表一起退格 (后面那几格的序号要跟着前移) ---
+    tb1.Buttons.Remove "open"
+    Dim sK2 As String
+    sK2 = tb1.Buttons(1).Key
+    Debug.Print "TB26=" & TF(tb1.Buttons.Count = 3 And sK2 = "")
+
+    ' --- 27. Clear + 集合这条路没把标量属性面抢走 ---
+    tb1.Buttons.Clear
+    Debug.Print "TB27=" & TF(tb1.Buttons.Count = 0 And tb2.Buttons.Count = 0 And tb1.TextStyle = 1)
 
     Debug.Print "CTRLTOOLBAR-DONE"
     Unload Me

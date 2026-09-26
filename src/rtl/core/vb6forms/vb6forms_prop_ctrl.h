@@ -544,6 +544,39 @@ void            vb6_TreeView_ClearNodes(void* hwnd);
 void*           vb6_TreeView_Nodes(void* hwnd);        // 集合对象 (真 IDispatch)
 void*           vb6_TreeView_NodeAt(void* hwnd, int32_t idx);   // 事件参数用
 
+// ===================== Toolbar 的 Buttons / Button (ai/029 C29-5b) =====================
+//   成员对象机制见 vb6forms_memberobj.c。分工按"原生答不答得了": Text / Image / Enabled /
+//   Visible 现问控件 (TB_GET/SETBUTTONINFOW，一律 TBIF_BYINDEX 按索引找 —— 靠 idCommand
+//   找会撞车: 分隔符在 VB6 里也能有 id)；Style / Key / Tag / ToolTipText / Width 住 5a 那张表
+//   (原生 fsStyle 分不出"占位符"，ToolTipText 的原生面要 TTN_GETDISPINFO，那格还没做)。
+//   字符串 getter 返回自有指针 (唯一消费者 memSetStr 当场拷)；越界: 整数族给 0/-1、字符串族空串。
+int32_t         vb6_Toolbar_ButtonCount(void* hwnd);
+int32_t         vb6_Toolbar_ButtonIndexByKey(void* hwnd, const wchar_t* key);
+const wchar_t*  vb6_Toolbar_GetButtonCaption(void* hwnd, int32_t idx);
+void            vb6_Toolbar_SetButtonCaption(void* hwnd, int32_t idx, const wchar_t* v);
+const wchar_t*  vb6_Toolbar_GetButtonKey(void* hwnd, int32_t idx);
+void            vb6_Toolbar_SetButtonKey(void* hwnd, int32_t idx, const wchar_t* v);
+const wchar_t*  vb6_Toolbar_GetButtonTag(void* hwnd, int32_t idx);
+void            vb6_Toolbar_SetButtonTag(void* hwnd, int32_t idx, const wchar_t* v);
+const wchar_t*  vb6_Toolbar_GetButtonToolTip(void* hwnd, int32_t idx);
+void            vb6_Toolbar_SetButtonToolTip(void* hwnd, int32_t idx, const wchar_t* v);
+int32_t         vb6_Toolbar_GetButtonStyle(void* hwnd, int32_t idx);
+void            vb6_Toolbar_SetButtonStyle(void* hwnd, int32_t idx, int32_t v);
+int32_t         vb6_Toolbar_GetButtonImage(void* hwnd, int32_t idx);
+void            vb6_Toolbar_SetButtonImage(void* hwnd, int32_t idx, int32_t v);
+int32_t         vb6_Toolbar_GetButtonEnabled(void* hwnd, int32_t idx);
+void            vb6_Toolbar_SetButtonEnabled(void* hwnd, int32_t idx, int32_t v);
+int32_t         vb6_Toolbar_GetButtonVisible(void* hwnd, int32_t idx);
+void            vb6_Toolbar_SetButtonVisible(void* hwnd, int32_t idx, int32_t v);
+int32_t         vb6_Toolbar_GetButtonWidth(void* hwnd, int32_t idx);
+void            vb6_Toolbar_SetButtonWidth(void* hwnd, int32_t idx, int32_t v);
+int32_t         vb6_Toolbar_RemoveButton(void* hwnd, int32_t idx);
+int32_t         vb6_Toolbar_GetButtonValue(void* hwnd, int32_t idx);
+void            vb6_Toolbar_SetButtonValue(void* hwnd, int32_t idx, int32_t v);
+void            vb6_Toolbar_ClearButtons(void* hwnd);
+void*           vb6_Toolbar_Buttons(void* hwnd);       // 集合对象 (真 IDispatch, 在 memberobj.c)
+void*           vb6_Toolbar_ButtonAt(void* hwnd, int32_t idx);   // 事件参数用
+
 #ifdef __cplusplus
 }
 #endif

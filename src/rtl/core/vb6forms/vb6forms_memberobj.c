@@ -60,12 +60,14 @@
 #define VB6_MEMK_RS             5   // Data.Recordset (C29-Data)
 #define VB6_MEMK_FIELD          6   // Recordset.Fields("x") 的 Field
 #define VB6_MEMK_NODE           7   // TreeView 的 Node (C29-8b)
+#define VB6_MEMK_BUTTON         8   // Toolbar 的 Button (C29-5b)
 // 成员集合族 (Vb6MemColl)
 #define VB6_MEMCK_LISTIMAGES    1
 #define VB6_MEMCK_LISTITEMS     2
 #define VB6_MEMCK_COLUMNHEADERS 3
 #define VB6_MEMCK_PANELS        4
 #define VB6_MEMCK_NODES         5   // TreeView 的 Nodes (C29-8b)
+#define VB6_MEMCK_BUTTONS       6   // Toolbar 的 Buttons (C29-5b)
 // (Recordset/Field 不是集合, RS.Fields 是带参 GET 直接产 Field 对象)
 
 // ===================== 实例 =====================
@@ -119,6 +121,13 @@ static const wchar_t* kNodeNames[] = {
     L"Parent", L"Child", L"Children", L"Next", L"Previous", L"Root",
     L"EnsureVisible", NULL };
 
+// C29-5b: Toolbar 的 Button。文本那条在 VB6 里叫 Caption (不是 Text)。
+// Width 登记了但**宽度真变不了** —— 原生 cx 只对分隔符起作用，普通按钮的宽度由
+// 图标与文字量出来；这条读数是"VB 侧请求值"，不是控件量出来的那个，注释里写明。
+static const wchar_t* kButtonNames[] = {
+    L"Key", L"Index", L"Caption", L"Tag", L"ToolTipText",
+    L"Style", L"Image", L"Enabled", L"Visible", L"Width", L"Value", NULL };
+
 // 三个集合同构: Count / Item / Add / Remove / Clear / _NewEnum
 static const wchar_t* kCollNames[] = {
     L"Count", L"Item", L"Add", L"Remove", L"Clear", L"_NewEnum", NULL };
@@ -157,6 +166,16 @@ static const wchar_t* kRsFieldNames[] = {
 #define VB6_MEMD_NODE_PREV      11
 #define VB6_MEMD_NODE_ROOT      12
 #define VB6_MEMD_NODE_ENSVIS    13
+// Button (kButtonNames 顺序; Key/Index 沿用上面同号的定义)
+#define VB6_MEMD_BTN_CAPTION   3
+#define VB6_MEMD_BTN_TAG       4
+#define VB6_MEMD_BTN_TIP       5
+#define VB6_MEMD_BTN_STYLE     6
+#define VB6_MEMD_BTN_IMAGE     7
+#define VB6_MEMD_BTN_ENABLED   8
+#define VB6_MEMD_BTN_VISIBLE   9
+#define VB6_MEMD_BTN_WIDTH    10
+#define VB6_MEMD_BTN_VALUE    11
 // RS (kRsNames 顺序)
 #define VB6_MEMRS_BOF        1
 #define VB6_MEMRS_EOF        2
@@ -189,6 +208,7 @@ static const wchar_t* const* memObjNamesOf(int32_t kind) {
     case VB6_MEMK_COLUMNHEADER: return kColumnHeaderNames;
     case VB6_MEMK_PANEL:        return kPanelNames;
     case VB6_MEMK_NODE:        return kNodeNames;
+    case VB6_MEMK_BUTTON:      return kButtonNames;
     case VB6_MEMK_RS:           return kRsNames;
     case VB6_MEMK_FIELD:        return kRsFieldNames;
     default:                    return kListImageNames;
@@ -280,6 +300,7 @@ static int32_t memCollCount(int32_t kind, void* owner) {
     case VB6_MEMCK_COLUMNHEADERS: return vb6_ListView_GetColumnCount(owner);
     case VB6_MEMCK_PANELS:        return vb6_StatusBar_GetPanelsCount(owner);
     case VB6_MEMCK_NODES:       return vb6_TreeView_NodeCount(owner);
+    case VB6_MEMCK_BUTTONS:    return vb6_Toolbar_ButtonCount(owner);
     default:                      return vb6_GetImageListCount(owner);
     }
 }
@@ -551,6 +572,50 @@ static HRESULT memInvokeNode(Vb6MemObj* p, int dispid, VARIANT* out) {
     return DISP_E_MEMBERNOTFOUND;
 }
 
+// C29-5b: Toolbar 的 Button。Caption / Image / Enabled / Visible / Value 现问控件
+// (TB_GETBUTTONINFOW)，Key / Tag / ToolTipText / Style / Width 问 5a 那张表 ——
+// 分界线是"原生答不答得了"，两边都不是第二份真相的复制品。
+static HRESULT memInvokeButton(Vb6MemObj* p, int dispid, VARIANT* out) {
+    switch (dispid) {
+    case VB6_MEMD_KEY:
+        memSetStr(out, vb6_Toolbar_GetButtonKey(p->owner, p->index));
+        return S_OK;
+    case VB6_MEMD_INDEX:
+        memSetI4(out, p->index);
+        return S_OK;
+    case VB6_MEMD_BTN_CAPTION:
+        memSetStr(out, vb6_Toolbar_GetButtonCaption(p->owner, p->index));
+        return S_OK;
+    case VB6_MEMD_BTN_TAG:
+        memSetStr(out, vb6_Toolbar_GetButtonTag(p->owner, p->index));
+        return S_OK;
+    case VB6_MEMD_BTN_TIP:
+        memSetStr(out, vb6_Toolbar_GetButtonToolTip(p->owner, p->index));
+        return S_OK;
+    case VB6_MEMD_BTN_STYLE:
+        memSetI4(out, vb6_Toolbar_GetButtonStyle(p->owner, p->index));
+        return S_OK;
+    case VB6_MEMD_BTN_IMAGE:
+        memSetI4(out, vb6_Toolbar_GetButtonImage(p->owner, p->index));
+        return S_OK;
+    case VB6_MEMD_BTN_ENABLED:
+        memSetI4(out, vb6_Toolbar_GetButtonEnabled(p->owner, p->index));
+        return S_OK;
+    case VB6_MEMD_BTN_VISIBLE:
+        memSetI4(out, vb6_Toolbar_GetButtonVisible(p->owner, p->index));
+        return S_OK;
+    case VB6_MEMD_BTN_WIDTH:
+        memSetI4(out, vb6_Toolbar_GetButtonWidth(p->owner, p->index));
+        return S_OK;
+    case VB6_MEMD_BTN_VALUE:
+        memSetI4(out, vb6_Toolbar_GetButtonValue(p->owner, p->index));
+        return S_OK;
+    default:
+        break;
+    }
+    return DISP_E_MEMBERNOTFOUND;
+}
+
 // C29-Data: Data.Recordset 的 Invoke。带参的 Fields("x") 在 dp 里 (PROPERTYGET 逆序)。
 static HRESULT memInvokeRs(Vb6MemObj* p, int dispid, VARIANT* out, DISPPARAMS* dp, WORD flags) {
     if (memTrace()) fprintf(stderr, "[MOBJ-RS] dispid=%d flags=%04X owner=%p\n", dispid, (unsigned)flags, p->owner);
@@ -684,6 +749,35 @@ static void memObjPutProp(Vb6MemObj* p, int dispid, DISPPARAMS* dp) {
         }
         return;
     }
+    if (p->kind == VB6_MEMK_BUTTON) {
+        switch (dispid) {
+        case VB6_MEMD_BTN_CAPTION:
+            vb6_Toolbar_SetButtonCaption(p->owner, p->index, memArgStr(v)); break;
+        case VB6_MEMD_BTN_TAG:
+            vb6_Toolbar_SetButtonTag(p->owner, p->index, memArgStr(v)); break;
+        case VB6_MEMD_BTN_TIP:
+            vb6_Toolbar_SetButtonToolTip(p->owner, p->index, memArgStr(v)); break;
+        case VB6_MEMD_KEY:
+            vb6_Toolbar_SetButtonKey(p->owner, p->index, memArgStr(v)); break;
+        case VB6_MEMD_BTN_STYLE:
+        case VB6_MEMD_BTN_IMAGE:
+        case VB6_MEMD_BTN_ENABLED:
+        case VB6_MEMD_BTN_VISIBLE:
+        case VB6_MEMD_BTN_WIDTH:
+        case VB6_MEMD_BTN_VALUE: {
+            int32_t iv = memVariantToI4(v);
+            if (dispid == VB6_MEMD_BTN_STYLE)  vb6_Toolbar_SetButtonStyle(p->owner, p->index, iv);
+            else if (dispid == VB6_MEMD_BTN_IMAGE)   vb6_Toolbar_SetButtonImage(p->owner, p->index, iv);
+            else if (dispid == VB6_MEMD_BTN_ENABLED) vb6_Toolbar_SetButtonEnabled(p->owner, p->index, iv);
+            else if (dispid == VB6_MEMD_BTN_VISIBLE) vb6_Toolbar_SetButtonVisible(p->owner, p->index, iv);
+            else if (dispid == VB6_MEMD_BTN_WIDTH)   vb6_Toolbar_SetButtonWidth(p->owner, p->index, iv);
+            else                                     vb6_Toolbar_SetButtonValue(p->owner, p->index, iv);
+            break;
+        }
+        default: break;
+        }
+        return;
+    }
     if (p->kind == VB6_MEMK_PANEL) {
         switch (dispid) {
         case VB6_MEMD_TEXT:
@@ -758,6 +852,7 @@ static HRESULT STDMETHODCALLTYPE memObj_Invoke(IDispatch* This, DISPID dispid, R
     case VB6_MEMK_COLUMNHEADER: return memInvokeColumnHeader(p, (int)dispid, out);
     case VB6_MEMK_PANEL:        return memInvokePanel(p, (int)dispid, out);
     case VB6_MEMK_NODE:        return memInvokeNode(p, (int)dispid, out);
+    case VB6_MEMK_BUTTON:      return memInvokeButton(p, (int)dispid, out);
     case VB6_MEMK_RS:           return memInvokeRs(p, (int)dispid, out, dp, flags);
     case VB6_MEMK_FIELD:        return memInvokeRsField(p, (int)dispid, out);
     default: break;
@@ -838,6 +933,17 @@ static int32_t memCollAdd(int32_t kind, void* owner, DISPPARAMS* dp, void** outO
         *outObj = o;
         return newIdx;
     }
+    case VB6_MEMCK_BUTTONS: {
+        int32_t newIdx = vb6_Toolbar_AddButton(owner, idx, key, memArgStr(a2),
+                                            memArgIsMissing(a3) ? 0 : memVariantToI4(a3),
+                                            memArgIsMissing(a4) ? -1 : memVariantToI4(a4),
+                                            NULL, 0);
+        if (newIdx <= 0) return 0;
+        Vb6MemObj* o = memObjNew(VB6_MEMK_BUTTON, owner, newIdx);
+        if (!o) return 0;
+        *outObj = o;
+        return newIdx;
+    }
     default:
         break;
     }
@@ -856,6 +962,8 @@ static void memCollRemove(int32_t kind, void* owner, DISPPARAMS* dp) {
             idx = vb6_ImageListIndexByKey(owner, key);
         else if (kind == VB6_MEMCK_NODES)
             idx = vb6_TreeView_NodeIndexByKey(owner, key);
+        else if (kind == VB6_MEMCK_BUTTONS)
+            idx = vb6_Toolbar_ButtonIndexByKey(owner, key);
         else
             idx = 0;   // ColumnHeader 没有按 Key 取 (扁平层没这条)
     }
@@ -864,6 +972,7 @@ static void memCollRemove(int32_t kind, void* owner, DISPPARAMS* dp) {
     case VB6_MEMCK_LISTITEMS:     vb6_ListView_RemoveItem(owner, idx); break;
     case VB6_MEMCK_COLUMNHEADERS: vb6_ListView_RemoveColumn(owner, idx); break;
     case VB6_MEMCK_NODES:         vb6_TreeView_RemoveNode(owner, idx); break;
+    case VB6_MEMCK_BUTTONS:     vb6_Toolbar_RemoveButton(owner, idx); break;
     case VB6_MEMCK_PANELS:        break;  /* P20-40 已有特例直译; 这里不重复 */
     default:                      vb6_ImageList_RemoveAtIndex(owner, idx); break;
     }
@@ -875,6 +984,7 @@ static void memCollClear(int32_t kind, void* owner) {
     case VB6_MEMCK_COLUMNHEADERS: vb6_ListView_ClearColumns(owner); break;
     case VB6_MEMCK_PANELS:        vb6_StatusBar_ClearPanels(owner); break;
     case VB6_MEMCK_NODES:       vb6_TreeView_ClearNodes(owner); break;
+    case VB6_MEMCK_BUTTONS:   vb6_Toolbar_ClearButtons(owner); break;
     default:                      vb6_ImageList_ClearImages(owner); break;
     }
 }
@@ -885,6 +995,7 @@ static int32_t memObjKindOfColl(int32_t collKind) {
     case VB6_MEMCK_COLUMNHEADERS: return VB6_MEMK_COLUMNHEADER;
     case VB6_MEMCK_PANELS:        return VB6_MEMK_PANEL;
     case VB6_MEMCK_NODES:       return VB6_MEMK_NODE;
+    case VB6_MEMCK_BUTTONS:   return VB6_MEMK_BUTTON;
     default:                      return VB6_MEMK_LISTIMAGE;
     }
 }
@@ -922,6 +1033,7 @@ static HRESULT STDMETHODCALLTYPE memColl_Invoke(IDispatch* This, DISPID dispid, 
             if (p->kind == VB6_MEMCK_LISTITEMS)      idx = vb6_ListView_GetItemIndexByKey(owner, (void*)key);
             else if (p->kind == VB6_MEMCK_LISTIMAGES) idx = vb6_ImageListIndexByKey(owner, key);
             else if (p->kind == VB6_MEMCK_NODES)      idx = vb6_TreeView_NodeIndexByKey(owner, key);
+            else if (p->kind == VB6_MEMCK_BUTTONS)  idx = vb6_Toolbar_ButtonIndexByKey(owner, key);
             else                                     idx = 0;
         }
         if (idx <= 0) { memSetEmpty(out); return S_OK; }
@@ -1110,6 +1222,20 @@ void* vb6_TreeView_NodeAt(void* hwnd, int32_t index) {
     if (!hwnd || index < 1) return NULL;
     if (index > vb6_TreeView_NodeCount(hwnd)) return NULL;
     return (void*)memObjNew(VB6_MEMK_NODE, hwnd, index);
+}
+
+// C29-5b: Toolbar1.Buttons —— owner 是 HWND，之后整条链走 C29-3 的晚绑定通道
+// (与 C29-8b 的 Nodes 同一 cheapest route，cgen 零特例)。
+void* vb6_Toolbar_Buttons(void* hwnd) {
+    if (!hwnd) return NULL;
+    return (void*)memCollNew(VB6_MEMCK_BUTTONS, hwnd);
+}
+
+// 事件参数用: ButtonClick(ByVal Button As Button) 要的是对象，不是下标。
+void* vb6_Toolbar_ButtonAt(void* hwnd, int32_t index) {
+    if (!hwnd || index < 1) return NULL;
+    if (index > vb6_Toolbar_ButtonCount(hwnd)) return NULL;
+    return (void*)memObjNew(VB6_MEMK_BUTTON, hwnd, index);
 }
 
 #endif // _WIN32

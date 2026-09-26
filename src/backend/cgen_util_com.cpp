@@ -21,17 +21,15 @@ std::string CCodeGen::resolveComValue(const std::string& unpackType) {
     std::string objExpr = std::move(comObjExpr_);
     std::string memberName = std::move(comMemberName_);
 
-    // C29-5a: Toolbar 原生复刻 —— 本批只改道 `Buttons.Count`，读数取自原生
-    // TB_BUTTONCOUNT，所以它是"设计期那些按钮真进了控件"的**控件侧**证据 (不是我那张表
-    // 自说自话)。Button 对象那一族 ((i).Key / .Caption / Add / ButtonClick) 留 5b。
-    // 位置跟上面 DataObject / ImageList / StatusBar 那几块同一侧：**赶在 P24-07 那段
-    // early-bound 决策之前**，否则 `Count` 会被当普通 COM 成员发成 vb6_ComGetProp。
-    {
-        std::string tbMem = memberName;
-        std::transform(tbMem.begin(), tbMem.end(), tbMem.begin(), ::tolower);
+    // C29-5b: `Toolbar1.Buttons` → **真集合对象** (C29-3 那套成员对象机制，与 8b 的
+    // Nodes 同一条 cheapest route)。5a 那只只改道 `Buttons.Count` 的特例钩子就此退休 ——
+    // Count 现在由集合自己答 (memberobj → vb6_Toolbar_ButtonCount → TB_BUTTONCOUNT)，
+    // 仍然是**控件侧**证据，不是我那张表自说自话。
+    // 位置照旧赶在 P24-07 那段 early-bound 决策之前，否则会被当普通 COM 成员发成 vb6_ComGetProp。
+    if (Symbol::toLower(memberName) == "buttons") {
         std::string tbName = toolbarNameOfExpr(objExpr);
-        if (!tbName.empty() && tbMem == "count") {
-            lastExpr_ = "vb6_Toolbar_GetButtonCount((void*)vb6_hwnd_" + tbName + ")";
+        if (!tbName.empty()) {
+            lastExpr_ = "vb6_Toolbar_Buttons((void*)vb6_hwnd_" + tbName + ")";
             isComMarker_ = false;
             return lastExpr_;
         }
@@ -616,6 +614,13 @@ std::string CCodeGen::resolveComMarkerForPack(const std::string& packFnHint) {
         std::string tvBare = treeViewNameOfExpr(objExpr);
         if (!tvBare.empty())
             return "vb6_TreeView_Nodes((void*)vb6_hwnd_" + tvBare + ")";
+    }
+
+    // C29-5b: `Toolbar1.Buttons` → 真集合对象 (同 resolveComValue 那条)。
+    if (Symbol::toLower(memName) == "buttons") {
+        std::string tbBare = toolbarNameOfExpr(objExpr);
+        if (!tbBare.empty())
+            return "vb6_Toolbar_Buttons((void*)vb6_hwnd_" + tbBare + ")";
     }
 
     // C29-OLE: `OLE1.Object` (被当实参/整体赋值的场合, 如 `Set o = OLE1.Object`)。

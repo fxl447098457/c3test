@@ -43,8 +43,36 @@
 
 设计期属性页里加的按钮（`Key` / `Caption` / `Style` / `ToolTipText` / 分隔符宽度）会逐条建进原生控件；`Image` 索引也原样记下，但**图标要等 `ImageList` 关联那一格**才显出来 —— 没关联时按钮一律"无图"，与 VB6 里不给工具栏配图标时的观感一致。
 
-尚未落地：`Buttons` 的逐项读写（`(i).Key` / `.Caption` / `Add` / `Remove`）、`Button` 对象、`ButtonClick` / `ButtonMenuClick` 事件、`ImageList` 关联、`Align` 的真停靠。这一族等 `ImageList` 那批要立起来的"成员对象"机制，见 `ai/029` §四。
+尚未落地（本页下一节 `C29-5b` 已把 `Buttons`/`Button` 接上）：`ButtonClick` / `ButtonMenuClick` 事件、`ImageList` 关联、真停靠（`Align`）、真自定义工具栏行为。设计期写在这些属性上的值目前**不会**报错，也**不会**见效。
 
 另两条与本页上文不同的地方：改之前这枚控件在 C3 里**连窗口都没有**（读任意属性都会 `C2065: vb6_hwnd_tb1 未声明的标识符` 而编不过），以及 `Debug.Print "" & CStr(Toolbar1.Buttons.Count)` 这种 `CStr(...)` 包一层的写法目前拿不到数（`&` 直接拼是正常的）—— 与本批无关的既有面，记在 `ai/029` §九。
 
 判据在 `tests\ctrltoolbar\`（TB1 认原生数到三条设计期按钮、TB2 认不被另一枚继承、TB3-TB4 认矩形按 `.frm`、TB5-TB7 认标量属性的设计期值与默认值、TB8-TB9 认运行期赋值可逆、TB10 认两枚不串、TB11-TB12 认通用属性面）。
+
+## 本项目的实现口径（ai/029 C29-5b：`Buttons` 集合与 `Button` 对象）
+
+`Toolbar1.Buttons` 是一枚**真的 `IDispatch` 集合对象**（与 TreeView 的 `Nodes`、ListView 的 `ListItems`、StatusBar 的 `Panels` 同一族机制，`src\rtl\core\vb6forms\vb6forms_memberobj.c`）。5a 那只只把 `Buttons.Count` 特例改道的钩子就此退休 —— 现在 `Count` 由集合自己答，而它问的还是原生 `TB_BUTTONCOUNT`。
+
+读数按"**原生答不答得了**"分家，这条分界线就是本项目的口径：
+
+| `Button` 的写法 | 落在哪里 | 说明 |
+| --- | --- | --- |
+| `Caption` | **现问控件**（`TB_GETBUTTONINFOW` / `TB_SETBUTTONINFOW`，`TBIF_TEXT`） | 文本存在控件自己的字符串表里（设计期那些 caption 也走 `TB_ADDSTRINGW`），所以"读到的是屏幕上的字"不是第二份抄本。VB6 里这条就叫 `Caption`，没有 `Text` |
+| `Image` | 现问控件（`TBIF_IMAGE`） | `-1` = 无图（原生 `I_IMAGENONE`）。图标要显形还欠 `ImageList` 关联那一格 |
+| `Enabled` / `Visible` / `Value` | 现问控件（`TBIF_STATE` 的 `TBSTATE_ENABLED` / `TBSTATE_HIDDEN` / `TBSTATE_CHECKED`） | `TBBUTTONINFO` 没有 stateMask 这一栏，写要先读后改 |
+| `Style` | 5a 那张表 | 原生 `fsStyle` 分不出**分隔符**（3）与**占位符**（4）—— 两者都发成 `BTNS_SEP`，只在宽度上不同。问原生就丢一档，所以 VB 侧那套 `0..5` 以表为准，写下去时同步换原生位 |
+| `Key` / `Tag` / `ToolTipText` / `Width` | 5a 那张表 | `Key` 不区分大小写地支持 `Buttons("key")` 与 `Buttons.Remove "key"`；`ToolTipText` 的原生面要在 `TTN_GETDISPINFO` 里回文本，那一格还没做；`Width` 是 **VB 侧请求值**（原生 `cx` 只对分隔符起作用，普通按钮的宽度由图标与文字量出来） |
+
+| 集合写法 | 读数 |
+| --- | --- |
+| `Toolbar1.Buttons.Count` | 原生 `TB_BUTTONCOUNT` |
+| `Toolbar1.Buttons(i)` / `Toolbar1.Buttons("key")` | 同一条 `Item`，下标与 Key 都收；取不到给 `Nothing` |
+| `Toolbar1.Buttons.Add([Index], [Key], [Caption], [Style], [Image])` | 返回 `Button` 对象；`Index` 是"插到第几格前面"，省略 = 追加。省略的实参发成 `vb6_ComPackMissing()` 而不是 0（0 会被当成"插到第 1 格前面"） |
+| `Toolbar1.Buttons.Remove(i 或 "key")` / `.Clear` | 控件与表**一起**退格；`Clear` 从后往前逐条 `TB_DELETEBUTTON`（正着删会跳格） |
+| `For Each b In Toolbar1.Buttons` | 走 `_NewEnum`，顺序 = 集合序 = 槽位序 |
+
+一处 v6 主题下的坑（写进了 RTL 注释）：**`TB_ADDBUTTONSW` / `TB_INSERTBUTTONW` 不吃调用方给的 `fsState`** —— 实测建完之后 `TB_GETBUTTONINFOW(TBIF_STATE)` 读回 `0`，连 `TBSTATE_ENABLED` 都没有，于是 `Button.Enabled` 的默认读数会是 `False`，与 VB6 相反。补法：建完再发一条 `TB_SETBUTTONINFOW` 把启用位打上去（`TB_SETBUTTONINFO` 那一路是认的）。同族前例：5a 记的"没先收 `TB_BUTTONSTRUCTSIZE` 就静默吞按钮"，以及 TreeView 8b 记的"`commctrl.h` 里根本没有 `TVM_SETITEMSTATE`"。
+
+还没做：`ButtonClick` / `ButtonMenuClick` 事件（要接 `TBN_*` 的 `WM_NOTIFY` 派发，与 TreeView 的 `NodeClick` 同一格欠账）、`ImageList` 关联、`Mask`、`MenuItem`、`StateImage`，以及真自定义工具栏行为（`AllowCustomize` 那位原生只在创建时起作用）。`Button.Description` 之类的成员**刻意不进名字表** —— 进去就是"看着支持、实则答错"。
+
+判据在 `tests\ctrltoolbar\`（TB13-TB27 十五条）：`Count`（TB13）、下标与 Key 两条取法（TB14）、**Caption 的控件侧往返**（TB15 读、TB20 写后再换一枚对象读）、ToolTipText/Style/Width 三条表侧读数（TB16-TB18）、默认启用与可见（TB19）、`Enabled`/`Visible` 反向可逆（TB21-TB22）、改 `Style` 为复选后 `Value` 勾得上（TB23）、运行期 `Add` 返回对象与序号（TB24）、`For Each`（TB25）、`Remove` 按 Key 后序号前移（TB26）、`Clear` 与"集合这条路没抢走标量属性"（TB27）。x86 与 x64 都跑。
