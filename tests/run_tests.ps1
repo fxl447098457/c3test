@@ -18,7 +18,11 @@ param(
     # 单条用例「运行」阶段的墙钟预算 (秒)。5s 在 -Jobs 20 的并行编译下会误杀: 4 vCPU runner 上
     # 被 cl/link 压住时, 健康的小 exe 也可能 >5s 才跑完 (实测卡住的进程只有 15ms CPU、线程 Ready)。
     # 真挂 (模态框/死锁) 靠这个上限兜底; 超时时会把 CPU 时间/状态/最后一行输出写进日志, 见下两处。
-    [int]$RunTimeoutSec = 60
+    [int]$RunTimeoutSec = 60,
+    # ai/030 T30-B(本地先行): 传了这个开关, 套件里每次**真实构建**才带 --incremental。
+    # 不传时 @IncArg 是空数组, 命令行逐字不变 (空数组 splat 的透明性单独验过: 输出与退出码都不动)。
+    # 默认路径 = 今天的默认路径。
+    [switch]$Incremental
 )
 
 $ErrorActionPreference = "SilentlyContinue"
@@ -31,6 +35,10 @@ $Tests = $PSScriptRoot
 # T0 拆分 (2026-09-20): 语法/冒烟用例 git mv 至 tests_github\t0_cases\, 跨目录引用同一份文件 (无副本)
 $GHTests = Join-Path $Tests "..\tests_github\t0_cases"
 $OutDir = if ($OutputDirectory) { $OutputDirectory } else { Join-Path $Root "output" }
+
+# ai/030 T30-B: 只有 -Incremental 时才有的实参; 见 param 处的说明。
+$IncArg = @()
+if ($Incremental) { $IncArg = @('--incremental') }
 # === 获取 MSVC 编译环境 (通用) ===
 # 设计原则: 不依赖 cmd.exe / vcvarsall 解析 (易因安全策略/编码/PATH 大小写失效),
 # 不硬编码 VS 版本 (2019/2022/2026 均可) 与 Windows SDK 版本号 (动态发现)。
@@ -184,7 +192,7 @@ function Test-Compile {
     $script:total++
     Write-Host -NoNewline "  [COMPILE] $Name ... "
     
-    $result = & $C3 $Source --output-dir $OutDir 2>&1
+    $result = & $C3 $Source --output-dir $OutDir @IncArg 2>&1
     $exitCode = $LASTEXITCODE
     
     if ($exitCode -eq 0) {
@@ -297,9 +305,9 @@ function Test-GuiVbp {
     $guiOut = Join-Path $OutDir $Name
     New-Item -ItemType Directory -Path $guiOut -Force | Out-Null
     if ($Arch) {
-        $compileResult = & $C3 $VbpFile --arch $Arch --output-dir $guiOut 2>&1
+        $compileResult = & $C3 $VbpFile --arch $Arch --output-dir $guiOut @IncArg 2>&1
     } else {
-        $compileResult = & $C3 $VbpFile --output-dir $guiOut 2>&1
+        $compileResult = & $C3 $VbpFile --output-dir $guiOut @IncArg 2>&1
     }
     if ($LASTEXITCODE -ne 0) {
         $script:fail++
@@ -384,9 +392,9 @@ function Test-Run {
     
     # 编译: 输入源文件, 经中间C代码 -> cl/link -> 生成目标 (默认输出到 output 目录)
     if ($Arch) {
-        $compileResult = & $C3 $Source --arch $Arch --output-dir $OutDir 2>&1
+        $compileResult = & $C3 $Source --arch $Arch --output-dir $OutDir @IncArg 2>&1
     } else {
-        $compileResult = & $C3 $Source --output-dir $OutDir 2>&1
+        $compileResult = & $C3 $Source --output-dir $OutDir @IncArg 2>&1
     }
     if ($LASTEXITCODE -ne 0) {
         $script:fail++
@@ -474,12 +482,13 @@ function Invoke-BasSetParallel {
         New-Item -ItemType Directory -Path $workDir -Force | Out-Null
         $c3 = $using:C3
         $runTimeoutMs = $using:runTimeoutMs
+        $incArg = $using:IncArg   # ai/030 T30-B: runspace 里够不到脚本变量
         $p = 0; $f = 0; $details = @()
         foreach ($it in $shardItems) {
             if ($it.Arch) {
-                $cr = & $c3 $it.Source --arch $it.Arch --output-dir $workDir 2>&1
+                $cr = & $c3 $it.Source --arch $it.Arch --output-dir $workDir @IncArg 2>&1
             } else {
-                $cr = & $c3 $it.Source --output-dir $workDir 2>&1
+                $cr = & $c3 $it.Source --output-dir $workDir @IncArg 2>&1
             }
             $ec = $LASTEXITCODE
             if ($ec -ne 0) { $f++; $details += "$($it.Name): compile FAIL"; continue }
@@ -577,9 +586,9 @@ function Test-Vbp {
 
     # 编译 VBP 工程: 输入 VBP 文件, 经 cl/link 生成可执行文件
     if ($Arch) {
-        $compileResult = & $C3 $VbpFile --arch $Arch --output-dir $OutDir 2>&1
+        $compileResult = & $C3 $VbpFile --arch $Arch --output-dir $OutDir @IncArg 2>&1
     } else {
-        $compileResult = & $C3 $VbpFile --output-dir $OutDir 2>&1
+        $compileResult = & $C3 $VbpFile --output-dir $OutDir @IncArg 2>&1
     }
     if ($LASTEXITCODE -ne 0) {
         $script:fail++
@@ -1289,9 +1298,9 @@ function Test-VbpDll {
     Write-Host -NoNewline "  [VBP-DLL] $Name ... "
 
     if ($Arch) {
-        $out = & $C3 $VbpFile --arch $Arch --output-dir $OutDir --keep-for-debug 2>&1
+        $out = & $C3 $VbpFile --arch $Arch --output-dir $OutDir --keep-for-debug @IncArg 2>&1
     } else {
-        $out = & $C3 $VbpFile --output-dir $OutDir --keep-for-debug 2>&1
+        $out = & $C3 $VbpFile --output-dir $OutDir --keep-for-debug @IncArg 2>&1
     }
     $exitCode = $LASTEXITCODE
     $logText = (($out | Out-String) -replace '\s+', ' ')
@@ -1505,7 +1514,7 @@ if ($Category -in @("all", "run", "vbp")) {
     $script:total++
     Write-Host -NoNewline "  [VBP] nonascii_path ... "
     $cnOut = Join-Path $cnDir "out"
-    $cnCompile = & $C3 (Join-Path $cnDir "FrxData.vbp") --output-dir $cnOut 2>&1
+    $cnCompile = & $C3 (Join-Path $cnDir "FrxData.vbp") --output-dir $cnOut @IncArg 2>&1
     $cnExe = Join-Path $cnOut "FrxData.exe"
     if ($LASTEXITCODE -ne 0 -or -not (Test-Path $cnExe)) {
         $script:fail++
