@@ -50,6 +50,7 @@ void WINAPI RtlZeroMemory(void*, size_t);
 #pragma comment(lib, "kernel32.lib")
 #pragma comment(lib, "winmm.lib")
 #pragma comment(lib, "comdlg32.lib")
+#pragma comment(lib, "winspool.lib")
 
 /* RtlMoveMemory */
 void __stdcall vb6_di_RtlMoveMemory(void* Destination, void* Source, intptr_t Length) {
@@ -614,6 +615,16 @@ intptr_t __stdcall vb6_di_GetUserDefaultLCID() {
 /* GetLocaleInfoW */
 intptr_t __stdcall vb6_di_GetLocaleInfoW(intptr_t LCID, intptr_t LCType, intptr_t lpLCData, intptr_t cchData) {
     return ((intptr_t (WINAPI *)(intptr_t, intptr_t, intptr_t, intptr_t))GetLocaleInfoW)(LCID, LCType, lpLCData, cchData);
+}
+
+/* GetLocaleInfoA — Task #44 SSTabEx cDlg.cls:51 */
+intptr_t __stdcall vb6_di_GetLocaleInfoA(intptr_t Locale, intptr_t LCType, intptr_t lpLCData, intptr_t cchData) {
+    return ((intptr_t (WINAPI *)(intptr_t, intptr_t, intptr_t, intptr_t))GetLocaleInfoA)(Locale, LCType, lpLCData, cchData);
+}
+
+/* DeviceCapabilitiesA (winspool.drv) — Task #44 SSTabEx cDlg.cls:24 */
+intptr_t __stdcall vb6_di_DeviceCapabilitiesA(intptr_t lpDeviceName, intptr_t lpPort, intptr_t iIndex, void* lpOutput, void* pDevMode) {
+    return ((intptr_t (WINAPI *)(intptr_t, intptr_t, intptr_t, void*, void*))DeviceCapabilitiesA)(lpDeviceName, lpPort, iIndex, lpOutput, pDevMode);
 }
 
 /* FreeLibrary */

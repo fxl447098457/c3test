@@ -137,6 +137,11 @@ void vb6_ConWriteErrW(const wchar_t* s, int len);
 // 整除
 int32_t vb6_IntDiv(int32_t a, int32_t b);
 
+// Task #44: VB6 '/' 与 Mod 的字面量 0 除数 → 运行期错误 11
+// (常量折叠 C2124 规避 + On Error Resume Next 语义, 见 vb6rtl.c 实现)
+double vb6_Num_Div(double a, double b);
+int32_t vb6_Num_Mod(int32_t a, int32_t b);
+
 // 幂运算
 double vb6_Pow(double base, double exp);
 
@@ -245,6 +250,15 @@ int32_t vb6_Printer_CurrentX(void);
 int32_t vb6_Printer_CurrentY(void);
 void   vb6_Printer_SetCurrentX(int32_t x);
 void   vb6_Printer_SetCurrentY(int32_t y);
+// Task #39: Printer / Printers 内置全局对象 (cDlg.cls ShowFont / IsPrinter)
+// vb6_Printer_Object: 默认打印机 DC 指针作哨兵 (懒创建, 无打印机时 NULL →
+//   `Printer Is Nothing` 判真, 调用方自然跳过 hDC 取用);
+// vb6_Printer_hDC: HDC 句柄 (Printer.hDC, ChooseFont.hDC 等 API 用);
+// vb6_Printers_Collection: 空 RTL Collection (vb6_ForEach_Init 原生支持,
+//   For Each 循环零次; 真实 EnumPrinters 枚举属后续增强)。
+void*  vb6_Printer_Object(void);
+void*  vb6_Printer_hDC(void);
+void*  vb6_Printers_Collection(void);
 
 // P18-C: Forms 集合
 int32_t vb6_Forms_Count(void);

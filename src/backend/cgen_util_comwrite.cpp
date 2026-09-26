@@ -177,9 +177,11 @@ bool CCodeGen::tryRewriteCOMLvalue(const std::string& target, const std::string&
     // value 不加 comPack: RTL 的 Set 形参是 void* bstr / int32_t, 直接给原表达式
     // (字符串侧此时已经是 vb6_BSTR_FromStr(...))。
     {
-        static const char* kTsGet[2] = { "vb6_SSTab_GetTabCaption(", "vb6_SSTab_GetTabVisible(" };
-        static const char* kTsSet[2] = { "vb6_SSTab_SetTabCaption(", "vb6_SSTab_SetTabVisible(" };
-        for (int tsI = 0; tsI < 2; tsI++) {
+        static const char* kTsGet[3] = { "vb6_SSTab_GetTabCaption(", "vb6_SSTab_GetTabVisible(",
+                                         "vb6_SSTab_GetTabToolTipText(" };
+        static const char* kTsSet[3] = { "vb6_SSTab_SetTabCaption(", "vb6_SSTab_SetTabVisible(",
+                                         "vb6_SSTab_SetTabToolTipText(" };
+        for (int tsI = 0; tsI < 3; tsI++) {
             std::string getPfx = kTsGet[tsI];
             if (target.compare(0, getPfx.size(), getPfx) != 0) continue;
             size_t tsOpen = target.find('(');

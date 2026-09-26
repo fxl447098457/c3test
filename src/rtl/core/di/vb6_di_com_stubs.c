@@ -180,6 +180,22 @@ intptr_t __stdcall vb6_di_GetFileTitleA(BSTR szFile, BSTR szTitle, intptr_t cbBu
 intptr_t __stdcall vb6_di_GetOpenFileNameA(void* file) {
     return ((intptr_t (WINAPI *)(void*))GetOpenFileNameA)(file);
 }
+/* ChooseFontA — Task #44 SSTabEx cDlg.cls:33 (comdlg32 字体对话框) */
+intptr_t __stdcall vb6_di_ChooseFontA(void* pChoosefont) {
+    return ((intptr_t (WINAPI *)(void*))ChooseFontA)(pChoosefont);
+}
+/* GetSaveFileNameA — Task #44 SSTabEx cDlg.cls:42 */
+intptr_t __stdcall vb6_di_GetSaveFileNameA(void* pOpenfilename) {
+    return ((intptr_t (WINAPI *)(void*))GetSaveFileNameA)(pOpenfilename);
+}
+/* PrintDlgA — Task #44 SSTabEx cDlg.cls:45 */
+intptr_t __stdcall vb6_di_PrintDlgA(void* pPrintdlg) {
+    return ((intptr_t (WINAPI *)(void*))PrintDlgA)(pPrintdlg);
+}
+/* CommDlgExtendedError — Task #44 SSTabEx cDlg.cls:49 */
+intptr_t __stdcall vb6_di_CommDlgExtendedError(void) {
+    return ((intptr_t (WINAPI *)(void))CommDlgExtendedError)();
+}
 /* OleTranslateColor */
 intptr_t __stdcall vb6_di_OleTranslateColor(intptr_t lOleColor, intptr_t lHPalette, intptr_t lColorRef) {
     return ((intptr_t (WINAPI *)(intptr_t, intptr_t, intptr_t))OleTranslateColor)(lOleColor, lHPalette, lColorRef);

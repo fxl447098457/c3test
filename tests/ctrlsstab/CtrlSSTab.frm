@@ -29,6 +29,7 @@ Begin VB.Form CtrlSSTab
       TabStyle        =   0
       TabsPerRow      =   3
       WordWrap        =   0
+      TabPic16(0)     =   "CtrlSSTab.frx":0000
       BeginProperty Tabs {1EF78043-95F0-11D0-B849-00A0C90DC8A9}
          NumTabs         =   3
          BeginProperty Tab1 {1EF78045-95F0-11D0-B849-00A0C90DC8A9}
@@ -109,6 +110,14 @@ Private Sub Form_Load()
     Debug.Print "TS12-PERROW=" & SSTab1.TabsPerRow
     SSTab1.WordWrap = -1
     Debug.Print "TS13-WRAP=" & SSTab1.WordWrap
+
+    ' Task #44: TabToolTipText(i) 读写回环 (在 Tabs=3 状态下做, TS14/TS16 会改页数)。
+    ' 未设过的页返回空串 —— SSTabEx 的属性语义是空, 不是报错。
+    SSTab1.TabToolTipText(0) = "tip0"
+    Debug.Print "TS31-TIP0=" & SSTab1.TabToolTipText(0)
+    SSTab1.TabToolTipText(2) = "tip2"
+    Debug.Print "TS32-TIP2=" & SSTab1.TabToolTipText(2)
+    Debug.Print "TS33-TIP1=" & SSTab1.TabToolTipText(1)
 
     ' 改页数: 先扩到 5, 再缩到 2 (缩容时活动页要跟着落回范围内)
     SSTab1.Tabs = 5

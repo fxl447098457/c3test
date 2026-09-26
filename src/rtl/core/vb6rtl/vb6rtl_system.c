@@ -475,6 +475,26 @@ int32_t vb6_Printer_CurrentY(void) { return g_printerCurrentY; }
 void vb6_Printer_SetCurrentX(int32_t x) { g_printerCurrentX = x; }
 void vb6_Printer_SetCurrentY(int32_t y) { g_printerCurrentY = y; }
 
+// Task #39: Printer / Printers 内置全局对象 (声明见 vb6rtl_builtin.h)。
+// cDlg.cls 的 `If Not Printer Is Nothing Then ... hDC = Printer.hDC` 与
+// `For Each iPrn In Printers` 此前分别生成 me->Printer (C2039) / Printers
+// (C2065) — 裸名拦截 (cgen_expr_ident_builtin.inc) 之后由此三个 RTL 入口承接。
+void* vb6_Printer_Object(void) {
+    vb6_Printer_EnsureDC();
+    return (void*)g_printerDC;
+}
+
+void* vb6_Printer_hDC(void) {
+    vb6_Printer_EnsureDC();
+    return (void*)g_printerDC;
+}
+
+void* vb6_Printers_Collection(void) {
+    // 空 RTL Collection — vb6_ForEach_Init 对 vb6_Collection_* 原生支持
+    // (vb6_Collection_IsCollection 分支), 集合空 → For Each 循环零次。
+    return vb6_Collection_New();
+}
+
 // ============================================================
 // P18-C: Forms 集合
 // ============================================================

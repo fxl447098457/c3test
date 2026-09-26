@@ -192,6 +192,9 @@ void*   vb6_SSTab_GetTabCaption(void* hwnd, int32_t idx);          // BSTR
 void    vb6_SSTab_SetTabCaption(void* hwnd, int32_t idx, void* bstr);
 int32_t vb6_SSTab_GetTabVisible(void* hwnd, int32_t idx);          // VB6 True = -1
 void    vb6_SSTab_SetTabVisible(void* hwnd, int32_t idx, int32_t v);
+// TabToolTipText(i): SSTabEx 每页悬停提示 (属性语义; 悬停气泡显示为 TODO)
+void*   vb6_SSTab_GetTabToolTipText(void* hwnd, int32_t idx);      // BSTR
+void    vb6_SSTab_SetTabToolTipText(void* hwnd, int32_t idx, void* bstr);
 int32_t vb6_SSTab_GetTabOrientation(void* hwnd);
 void    vb6_SSTab_SetTabOrientation(void* hwnd, int32_t v);
 int32_t vb6_SSTab_GetTabStyle(void* hwnd);
@@ -202,6 +205,9 @@ int32_t vb6_SSTab_GetWordWrap(void* hwnd);
 void    vb6_SSTab_SetWordWrap(void* hwnd, int32_t v);
 // 容器: 登记"某个子控件属于第 page 页", 切页时 RTL 只动可见性, 不动 Left
 void    vb6_SSTab_RegisterChild(void* hwnd, void* childHwnd, int32_t page);
+// SSTabEx 每页图标 (Task #44): TabPic16/20/24(i) 的图片字节, RTL 建 HIMAGELIST
+// 挂 TabCtrl 并在 item 上设 TCIF_IMAGE。mask 固定品红 (SSTabEx MaskColor 缺省)。
+void    vb6_SSTab_SetTabPicture(void* hwnd, int32_t idx, const void* data, int32_t size);
 // 事件: 窗体 WndProc 收到 TCN_SELCHANGE 后调用, 返回**切换前**的页号
 int32_t vb6_SSTab_OnSelChange(void* hwnd);
 

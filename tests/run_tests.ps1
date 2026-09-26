@@ -227,7 +227,13 @@ function Invoke-TestExe {
     # (scores.txt / test_output.txt / *.dat 等), 不同进程写入不同实时文件
     $stdoutFile = Join-Path $WorkDir "$Name.out"
     $stderrFile = Join-Path $WorkDir "$Name.err"
-    Remove-Item $stdoutFile, $stderrFile -ErrorAction SilentlyContinue
+    # #44: 逐条判存在再删, 不依赖 Remove-Item 对"路径不存在"的宽容度。
+    # 实证: 某些宿主(带 safe-delete 钩子的沙箱)把 Remove-Item 换成 fail-closed 版本,
+    # 目标不存在时抛**终止**异常 —— 客户进程因此一次都没跑, 表现为"零输出、
+    # 全部 needle 缺失", 且 detail 里看不出任何异常痕迹(最难查的一种红)。
+    foreach ($stale in @($stdoutFile, $stderrFile)) {
+        if (Test-Path $stale) { Remove-Item $stale -ErrorAction SilentlyContinue }
+    }
 
     $errors = @()
 
@@ -1803,6 +1809,7 @@ if ($Category -in @("all", "run", "vbp")) {
         "TS15-TABAFTERGROW=2", "TS16-TABS2=2", "TS17-TABAFTERSHRINK=1",
         "TS18-CAP0=常规", "TS19-CAP0B=改过", "TS20-VIS1=-1", "TS21-VIS1B=0",
         "TS22-P0LEFT=240", "TS23-P1LEFT=240", "TS24-P2LEFT=240",
+        "TS31-TIP0=tip0", "TS32-TIP2=tip2", "TS33-TIP1=",
         "TS25-TABVIS=-1", "TS26-AT0-P0VIS=-1 P1VIS=0 P2VIS=0",
         "TS27-AT1-P0VIS=0 P1VIS=-1 P2VIS=0", "TS28-AT2-P0VIS=0 P1VIS=0 P2VIS=-1",
         "TS29-SETTAB2=2", "TS29B-SETTAB0=0",
