@@ -38,6 +38,11 @@
                     if (tsPage < 0) tsPage = 0;
                     cLeft += 75000 * tsPage;
                 }
+                // C29-1a: Line 子控件的矩形 = 四端点的包围盒 (容器缇值)。不这样算会拿
+                // 默认的 2000x300 盖在兄弟控件上面 (顶层那条路同一个口径)。
+                if (child.controlType == FrmControlType::Line) {
+                    lineRectFromEndpoints(child, cLeft, cTop, cWidth, cHeight);
+                }
                 long childStyle = 0x40000000L | 0x10000000L;  // WS_CHILD | WS_VISIBLE
                 childStyle |= controlTypeStyleBits(child);  // 类型样式与顶层控件一致 (SS_NOTIFY/BS_GROUPBOX 等)
                 std::string childCaption = child.controlName;
@@ -64,6 +69,8 @@
                               + ", (void*)vb6_hwnd_" + cIdent(child.controlName)
                               + ", " + std::to_string(tsPage) + ");");
                 }
+                // C29-1a: 设计期外观属性 —— Frame / PictureBox 里的 Shape/Line 以前一条都不发
+                emitShapeLineProps(child, ctrlHwndExprForInit(child));
                 // 设计期 BorderStyle / Alignment (容器子控件)
                 emitDesignerStyleProps(child, "vb6_hwnd_" + cIdent(child.controlName));
                 emitControlFrxProps(child);  // Fix 182: 容器子控件同样加载 .frx 设计期图片/文本/列表

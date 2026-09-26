@@ -5,18 +5,21 @@
 > 规范输入: `ai/讨论记录/018-接口继承与CoClass设计思路.md`（含 tB 文档要点与分阶段设计思路全文）。
 
 STATUS: ALL_DONE             # NOT_STARTED | DESIGN | BUSY | IDLE | ALL_DONE
-LAST_RUN: 2026-09-25T11:35:00+08:00   # 本轮 = **B18 收口批出完并过门（Actions run #68，head `0413bb9`）—— 本线全部交付，STATUS = ALL_DONE**。
-               # 交付：`tests\cc_demo\` 端到端示例（同一份源集合编 EXE 与 DLL 两种形态：EXE 侧 DEMO1..DEMO12
-               # 把接口/Implements(+Via)/Inherits/Overrides/Protected/MyBase/CoClass 块/`As <组名>`/`New <组名>`/
-               # 工程内 CreateObject 改写/TypeOf 用全；DLL 侧注册后由**另一个进程**的 C3 客户 CreateObject 激活）
-               # + 归档文档 `ai\027-接口继承CoClass实施收口.md`（交付总览、语言/COM 要点、**12 条 v1 边界**、
-               # 怎么验、记录索引）+ 手册 CoClass 页的示例指引。写示例撞到两条 v1 边界（派生类自己 Implements
-               # 新式接口 = VB3022；EXE 的 CoClass 块不能 [ComCreatable] = VB3033）与一条易误读现象
-               # （`New <名字>` 不在工程内 ⇒ 静默按注册表创建，运行期 429）都记进 **D65**。
-               # 本批**零编译器改动**（`.build/C3.exe` 与 BASE 同 md5）⇒ 逐字节护栏由"编译器没变"这条代替。
-               # 上一轮 = **B17 一格出完并过门（Actions run #66，8/8 job 绿，head `732c1f8`）**。
+LAST_RUN: 2026-09-26T06:45:00+08:00   # 本轮 = **029 线两批**：① C29-9 CommonDialog 已收线（`e7f3352`，门 #86）；② 用户追加"把 timer 的精度做高一点" → 新立并做完 **C29-T（VB.Timer 运行期真触发 + winmm ms 级精度）= 代码 `f7b1d2d`，门 Actions run #88（8/8 job 全绿，18.6 分钟）**。③ 末尾按用户要求本地复跑另一位作者 CI 里三条超时的用例（test_ndarray_x86 / test_compat / test_types_x86）：三条**全绿**，运行阶段只用 84~1127 ms，慢的是编译阶段（22~43 s） 症状是那条 **5 s 预算**在 -Jobs 20 的 4 核 runner 上被并发 cl/link 饿死（主套件 B19 已为同一件事把预算改成 60s = `8174219`；那份 `tests_github` 副本还是 5s，按"清单漂移有人在修"不去动它）。进度与读数记在 `ai\029-内置控件补全计划书.md` §九。自动运行见本行不足 55 分钟请立即跳过。
+               # B21 交付一笔 = `2ddcc8b`（cgen 侧 15 文件 + 用例 32 条 + 手册 Boolean 页 + 分类护栏脚本
+               # `.build\b21_emitc_guard.py`）。根因是两条不是一条、护栏 RED 一次的教训、以及顺带量出的 `Print #`
+               # 那条，全在 **D70**；待拍板 5 就此收口，新撞出的一条记为待拍板 7（未拍板、未动手）。
+               # 上一轮 = **B20（ai/028：反引号原始多行串 + 串内插值，run #82 全绿，head `c2f7317`）**：需求出自
+               # `todo/vi.md`，**一切落在词法层**（无孔串折成与手写 `"..."` 同形的普通记号、有孔串展开成
+               # `( "文" & CStr( 式 ) & ... )` ⇒ parser / AST / semantics / cgen / RTL 零改动）；交付三笔 =
+               # `4c16f50` + `f8ec76e`（夹具按字节钉死 `-text`，防 CI 上四份塌成两份）+ `c2f7317`，读数见 **D68**/**D69**。
+               # 再上一轮 = **B19（控制台/管道编码 + 错误出口 + 套件超时预算，run #73）**；再往前 = B18 收口批（run #68）。
                # 自动运行见本行不足 55 分钟请立即跳过。
-LAST_COMMIT: 代码批 = 732c1f8(B17 门后修堆损坏)、a5517fa(B17)、578faa4(B16)、941b6dc(B15)、0caa3c5(B15 门 head = 合并用户 Fix 192/193)、ddf4e9b(B14 测试批)、4534a83(B14 台账)、b10ec1a(B13e)、5d29a5c(B13e 台账)、9df23ba(B13d)、bd38798(B13c)、b1a8e58(B13b)、7b6570a+988c7cb(B13a；门 head = 合并 `9785f4f`)、7f829ee(B11/C05=B12)、b82a184+02d70fe(B11/C04)、c4aaa4c(B11/C03b)、e515d89(B11/C03a)、f0b820d(B11/C02)、e7c7a31(B11/C01)、3c5d8e6(B10)、9eb2ca7(B09c)、debb110(B09b)、02bac92(B09)   # **commit message 一律现写、不复用上批文本**；push 只推 `github/dev`（Actions 门），`origin`(gitcode) 与 `main` 不碰、**绝不建 MR**。
+               # 另开一条线（2026-09-26，用户指定）：**内置控件补全** = `ai\029-内置控件补全计划书.md`（11 份控件说明里
+               # 缺的走 comctl32 原生窗口类，Data / OLE 容器明确不做）。进度与实测记在 029 §九，本表只挂这一行指针；
+               # 那条线动共用文件（`src/project/frm_parser*`、`src/backend/detail/module/cgen_form_*`、`src/rtl/core/vb6forms/*`、
+               # `tests/run_tests.ps1`）之前，先看本表 STATUS —— 若 BUSY 按同一套重入保护等静默，两条线不并行改同一文件。
+LAST_COMMIT: 代码批 = 2ddcc8b(B21 布尔可见性+装箱)、c2f7317(B20 插值)、4c16f50+f8ec76e(B20 多行串/夹具钉字节)、8174219(B19 套件超时/读数)、d4e53c2(B19 错误出口)、796220d(B19 控制台编码)、732c1f8(B17 门后修堆损坏)、a5517fa(B17)、578faa4(B16)、941b6dc(B15)、0caa3c5(B15 门 head = 合并用户 Fix 192/193)、ddf4e9b(B14 测试批)、4534a83(B14 台账)、b10ec1a(B13e)、5d29a5c(B13e 台账)、9df23ba(B13d)、bd38798(B13c)、b1a8e58(B13b)、7b6570a+988c7cb(B13a；门 head = 合并 `9785f4f`)、7f829ee(B11/C05=B12)、b82a184+02d70fe(B11/C04)、c4aaa4c(B11/C03b)、e515d89(B11/C03a)、f0b820d(B11/C02)、e7c7a31(B11/C01)、3c5d8e6(B10)、9eb2ca7(B09c)、debb110(B09b)、02bac92(B09)   # **commit message 一律现写、不复用上批文本**；push 只推 `github/dev`（Actions 门），`origin`(gitcode) 与 `main` 不碰、**绝不建 MR**。
 LAST_COMMIT: 代码批 = 0413bb9(B18)、732c1f8(B17 门后修堆损坏)、a5517fa(B17)、578faa4(B16)、941b6dc(B15)、0caa3c5(B15 门 head = 合并用户 Fix 192/193)、ddf4e9b(B14 测试批)、4534a83(B14 台账)、b10ec1a(B13e)、5d29a5c(B13e 台账)、9df23ba(B13d)、bd38798(B13c)、b1a8e58(B13b)、7b6570a+988c7cb(B13a；门 head = 合并 `9785f4f`)、7f829ee(B11/C05=B12)、b82a184+02d70fe(B11/C04)、c4aaa4c(B11/C03b)、e515d89(B11/C03a)、f0b820d(B11/C02)、e7c7a31(B11/C01)、3c5d8e6(B10)、9eb2ca7(B09c)、debb110(B09b)、02bac92(B09)   # **commit message 一律现写、不复用上批文本**；push 只推 `github/dev`（Actions 门），`origin`(gitcode) 与 `main` 不碰、**绝不建 MR**。
                含完整 COM）的收口文档 = `ai\027-接口继承CoClass实施收口.md`（交付总览表 + 语言/COM 两侧要点 +
                **v1 边界清单 12 条** + 怎么验 + 记录索引）；逐格过程与全部实测读数 = 本文件的设计记录 D1–D65。
@@ -32,25 +35,25 @@ LAST_COMMIT: 代码批 = 0413bb9(B18)、732c1f8(B17 门后修堆损坏)、a5517f
                4. **派生类自己 `Implements` 新式接口**（`VB3022`，B18 写示例时实测）与**经继承满足的接口契约**、
                   **继承来的 `Public` 字段对外 COM 暴露** —— 这三条要一起做（都在 stage 2.7 Pass D 与 3.4 的成员
                   合并那一片，028 类的工作量）。
+               5. **【已收 = B21，读数见 D70】`CStr(布尔)` 与 `&` / `Print` 两套读数不一致**（B20 写插值用例时实测；A/B 确认与本批无关，改前改后同读数）：`CStr(True)`、`CStr(1 > 0)`、`CStr(CBool(True))` 全回 `"-1"`，而同一个值走 `True & ""` 回 `"True"`（VB6 两处都回 `"True"`）；顺带 `TypeName(True)` 回 `"Long"`，VB6 回 `"Boolean"` ⇒ 布尔的"字符串形状"在 C3 里有两条路，且 `TypeName` 这一条也不对。**这条会直接咬到新语法**：`${flag}` 插值降级成 `CStr(flag)`，于是插值里的布尔与 `Debug.Print flag` 读数不一致。→ B21 收完：根因是**两条**（登记表看不见布尔 + 装箱按 C 类型选到 `VT_I2`/`VT_I4`），两条一起修完读数才合一；`tests\test_bool_display.bas` 32 条钉死，含 `Integer`/`Long`/`Byte` 的反向护栏。
+               6. **工程内类经 `CreateObject` 编译期改写后交给 `As Object`，按名点公有 `Function` 报 `vb6_ComCall: method "…" not found`**（早绑定 `Dim o As <类名>` 正常）—— B20 的 `tests\rawstr_proj\` 第一版就是这样写的，改成早绑定才通。与 B17 那条"契约成员是 Private ⇒ 默认面点不到"不是一回事：这里 `Note()` 是 `Public`。要么晚绑定那一面缺一块，要么改写出来的 VARIANT 类型标记不对 ⇒ 先量（外部注册 DLL 那条 `cc_dll_late_client` 是通的，所以缺口在"in-project 改写出来的对象"这一支）。
+               7. **`Print #` / `Write #` 的实参不分类型**（B21 顺手量出，`.build\b21_out\probe_print.bas`）：非 BSTR 的实参一律先 `vb6_Str((int32_t)x)` 再落盘 ⇒ 布尔写成 `-1`（VB6 是 `True`）、`3.5` 被截成 `3`（VB6 是 ` 3.5`）、`Write #1, True` 写成 `"-1"`（VB6 是 `#TRUE#`）。这条不是布尔专属，是 `Print #` 那一族缺按 VB 类型分派的那一层；B21 只收了 `CStr` / `Format` / `&` / `String` 形参 / Variant 装箱 / `Debug.Print` 六处出口，落盘这一处另开一批（会改存量工程的落盘字节）。
                规则沿用：push 只推 `github/dev`；门跑 Actions（`.build/wait_run2.py <sha> <秒>` 盯）；`.build` 里的
                临时 `.ps1` 一律 ASCII only；用例文件按同目录邻居的编码/行尾（`.bas`/`.vbp` = UTF-8+CRLF，
                `tests\*.ps1` = BOM+CRLF）。
-GATE_BASELINE: (Actions 级) c3test run **#68 [dev] = completed/success**（https://github.com/fxl447098457/c3test/actions/runs/36087191866；
-               head 已核 = `0413bb9` = B18 代码；8 个 job 全绿，`Tests (vbp)` = **PASS=43 FAIL=0 SKIP=1 TOTAL=44**
-               （上一批 39/0/1/40，+4 = 本批新增的四条；唯一 SKIP 仍是本机未注册的 `test_vbman`）；
-               另 7 个 job：smoke 1/0/0、bas#1 24/0/0、bas#2 23/0/0、compile 10/0/0、syntax 119/0/0、
-               asm 13/0/1（SKIP 仍是环境项）、Build C3.exe 绿。本批四条新用例在干净 runner 上全绿：
-               `[VBP] cc_demo_exe ... PASS`、`[VBP] cc_demo_exe_x86 ... PASS`（端到端示例的语言侧 13 条 needle，
-               x64+x86）、`[COMACT] cc_demo_dll_external ... PASS (external CreateObject client + cleanup)`、
-               `[COMACT] cc_demo_dll_external_x86 ... PASS`（同一份源集合的 DLL 形态：注册 → 另一个进程的
-               C3 客户 CreateObject → 反注册，三类键都不留）；既有那批同批仍绿（`cc_dll_external_activate[_x86]`、
-               `cc_dll_late_client`、`[TLB-CONTRACT]`、`[DISPATCH]`、`[TLB-ID]`、`cc_dll_identity_single_source`、
-               `itf_via_pair[_x86]`、`cls_inh_pair[_x86]`、`cc_act_pair[_x86]`）。
-               本批**零编译器改动**（`git status src/` 空、`.build/C3.exe` 与 BASE 同 md5）⇒ 逐字节/A-B 护栏
-               由"编译器没变"这条代替（先例 B14）。本机侧证据（**不记本地门数**）：`.build/b18_cases.ps1`
-               四条 `pass=4 fail=0`；跑完实测注册表里 DemoDll 与 CoDll 的 CLSID / ProgID / TypeLib 三类键**全部查无**
-               （`CLEAN_*` 三条断言的旁证）。收线 exe md5 `38f247e30ed5ac3513366c9733bf4dda`（= 本批 BASE）。
-               # 本线收口：B01–B18 全部交付，`STATUS: ALL_DONE`；收口文档 = `ai\027-接口继承CoClass实施收口.md`。
+GATE_BASELINE: (Actions 级) c3test run **#88 [dev] = completed/success**（head `f7b1d2d` = C29-T 那一笔，
+               8/8 job 全绿 = Build C3.exe + Tests(smoke/syntax/vbp/compile/asm/bas#1/bas#2)，
+               06:10→06:28 共 18.6 分钟；逐 job 用 `GET /runs/{id}/jobs` 核过）。
+               **门只认 "VB6 C3 Regression" 那条 workflow 的 run 号**：从 `f7b1d2d` 这次推送起，dev 上
+               多了另一位作者的 workflow "GitHub Tests T0+T1+T2"（它的 run #1 会同时被触发，编号体系
+               完全不同，别把它当门 —— 本轮它有一条 T1 红，红因见上面 LAST_RUN 那条 5s 预算的读数）。
+               本机同源读数：`-Category syntax` 129/0；30 件存量工程 `--emit-c` changed_lines=0；
+               `tests\c29timer` 10 条 tick 区间读数 x64 与 x86 各 10/10；BASE 负控 10 条全翻红
+               且每条对上症状（运行期开不起来=0、改 Interval 不生效=32、关掉还烧=16、精度地板=32）。
+               精度对照（1 秒墙钟窗口的 tick 数，名义=1000/Interval）：Interval=20 → 改前 29 / 改后 49，
+               =100 → 32 / 10，=5 → 32 / 198。
+               基线相对上一版（run #86，head `e7f3352` = C29-9）新增的用面：`tmtimer[_x86]`。
+               上一版基线 = run #86（C29-9）；再往前 = #85（C29-1b）、#84（C29-1a）。
 ```
 
 > 重入保护：若运行开始时 STATUS=BUSY 且 LAST_RUN 距今不足 55 分钟，说明上一次运行可能仍在进行——本次**立即结束，不做任何修改**。
@@ -109,6 +112,9 @@ GATE_BASELINE: (Actions 级) c3test run **#68 [dev] = completed/success**（http
 | B16 | P6 | **D62 重裁后的真身**：接口成员的对外调用契约（`vb6_ivtbl_<I>` canonical 化 → 库里那一档发成员）+ 类型库位数 flag/oVft 口径 + 薄指针 IDispatch 面与"胖应答瘦"的收法 + DllRegisterServer 一族对新式 CoClass/类工厂的接线与 x86/x64 双验 | ☑ **B16 已出（代码 `578faa4`，Actions run #62 全绿）** = ① **薄面整条 canonical 化**：`vb6_ivtbl_<I>` 的 IUnknown 前缀 + 契约槽 + 它们的实现函数在 x86 下一律 `__stdcall`（BASE 的 x86 产物 `grep -c __stdcall` = 0，NEW = 21；x64 上 MSVC 忽略该修饰 ⇒ 一份生产码两架构通用）；② **类型库那一档如实发契约成员**：`cFuncs` = 2（`Ping`/`Got`）、每成员 `oVft=(3+槽)*指针宽` / `callconv=stdcall` / 原生返回 vt、ByRef 建 `VT_PTR` 链；③ **位数 flag 跟 `--arch` 走**（`CreateTypeLib2(is64_ ? SYS_WIN64 : SYS_WIN32)`）—— 存量库默认架构逐字节不变、`--arch x86` 只差 32 个字节的位数布局字，x64/x86 两枚读端读数逐项相同（D63-3）；④ **薄面出入口** `vb6_iv_thin_<C>`/`vb6_iv_claim_<C>`：接口 IID 的 QI 交**薄指针**（B14 那条 `QI_EXTRA same=yes` 故意翻面）、包装器把底座引用交还**最后一个薄引用**（类工厂那种"QI 完就 Release 包装器"的规范姿势下交出去的指针不悬空）；⑤ **行里第 4 项（DllRegisterServer 一族接线）经读码 + A/B 判定无需新改动** —— 注册写入（`vb6comserver.c:62-171`）读的就是同一张服务器表、身份自 B13b 起走 `coclassIds_` 唯一出口，B16 的 A/B 里 `.def`/exports/`.rc` 一字未动；**真注册的外部端到端验收归 B17**（D63 与 B17 的 CURRENT_BATCH 都写明）。判据五条全对上读数：`cFuncs`/`oVft`/`callconv` 三样读数（新探针 `tests\tools\tlb_slots.cpp` 升格入库 + 两条 x64/x86 契约用例）+ x86 真跑 `VTBL_GET_AFTER=42` + 存量逐字节（17 件 `violations=0` / A/B `unclassified=0`）；canonical 返回形状与跨世界身份合一按"断不了先断形状"留 B17（D63-5，取舍看 B17 测量②）。 | `578faa4` | 门 #62（8 job 全绿）+ `b16_emitc_guard.py` 17 件 `violations=0` + `b16_ab_all.py` `unclassified=0`（只有 `cc_dll` 的 `.tlb` 1484→1624）+ 负控 `b16_negctl.ps1`（`pass=0 fail=2`，四条 needle 全 miss + 反面断言命中）+ 五条新用例 `b16_cases.ps1`（`pass=5 fail=0`）+ 迁移探针（默认架构 diffbytes=0 / x86 diffbytes=32） |
 | B17 | P6 | 外部激活冒烟验收（CoCreateInstance 早绑定 + CreateObject/IDispatch 晚绑定 双路） | ☑ **B17 已出（代码 `a5517fa` + 门后修一条 `732c1f8`，Actions run #66 全绿）** = **对外那条管线第一次被真注册客户走通**，路上修掉两处一直存在的**静默**缺陷：① **`rc.exe` 的发现面太窄**（`driver_link.cpp`）—— 旧写法只认 `WindowsSdkDir` 环境变量与 `C:\Program Files (x86)\Windows Kits\10\bin`，SDK 装在别的盘（本机 = `D:\Windows Kits\10`，用户确认）就**静默不嵌**资源：实测 BASE 产出的 DLL 连 `.rsrc` 段都没有（数据目录 2 = `(0,0)`，NEW = `(4880)`/`(2504)`）⇒ 注册表里没有 TypeLib 项、外部工具按 LIBID 找不到库；改成与套件同一套探测（环境变量 → Program Files → 盘符 → PATH，目录内取版本号最大者，TypeLib 与版本信息两处共用），且"找不到 rc.exe"不再藏在 `--verbose` 后面；② **`vb6_UnregisterTypeLib` 的 `UnRegisterTypeLib` 实参顺序写反**（原型 `(libID, wVerMajor, wVerMinor, lcid, syskind)`，旧写法把 syskind 塞进 lcid 槽）⇒ 两个键都找错、函数失败，而本函数无条件返回 S_OK ⇒ **每次反注册都静默漏掉整棵 TypeLib 键**（实测：CLSID/ProgID 清干净、`TypeLib\{libid}` 还在）；按原型给对顺序并取库自己声明的 lcid/syskind（中性库记在 0x0409 下；x64 库 `syskind=3`、x86 库 `=1`，`.build/b17_tlbattr` 直接读 TLIBATTR 得到）。判据五条全对上读数：① 外部三条验收 —— `cc_dll_external_activate[_x86]`（注册四项 + `PROGID_LOOKUP same=yes` + `COCREATE_DISP ptr=OK` + `CALL=Twice result=42` + `COCREATE_IFACE` + `VTBL_GET_AFTER=42` + `CLEAN_*` 三类键 `gone`）与 `cc_dll_late_client`（**另一个进程**的 C3 客户 EXE：不引用 DLL，`CreateObject` + 晚绑定调用，`EXT1:OK`/`EXT2:OK`）；② 早绑定按库里 `oVft=(3+槽)*指针宽` 直调得 42，x86 + x64 双验；③ 注册表可清理（反注册后 CLSID/ProgID/TypeLib 三类键都不留，用例可重复跑 —— 修缺陷②之后才成立）；④ 存量行为不变（注册写同一张服务器表；`--emit-c` 17 件逐字节全同，全产物 A/B 只差 `rtl/vb6comserver.c` 的 10 行、全在反注册那段）；⑤ canonical 返回形状与跨世界身份合一按测量②**不做**。**晚绑定的边界**：契约成员是 `Private` ⇒ 类的默认面上按名点不到（`NAMES=Ping hr=0x80020006`，VB6 语义的应有读数，正面钉住）；为此 `CImpl.cls` 加了一个公有成员 `Twice`（B13b 那条 `methodCount` 针 0→1），于是同一类**两个面**并存：默认面走 `IDispatch` 晚绑定、接口面走契约槽早绑定。 | `a5517fa` + `732c1f8` | 门 #66（见 GATE_BASELINE）+ `.build/b17_ab_all.py`（A 段 `--emit-c` 17 件逐字节全同；B 段只差 `rtl/vb6comserver.c` 10 行；C 段资源目录：NEW 带不带 `WindowsSdkDir` 都嵌、BASE 不带就不嵌）+ 负控 `.build/b17_negctl.ps1` 喂 `pre_b17_C3.exe` ⇒ **pass=0 fail=2**（红的正是 `CLEAN_TYPELIB=STILL`）+ 三条新用例 `.build/b17_cases.ps1` ⇒ `pass=3 fail=0`（x64/x86 冒烟 + 外部客户）+ 门后补一条**既有潜伏缺陷**（`732c1f8`）：第一次门在既有用例 `ax_dll_dispatch_invoke` 上报 `exit=0xC0000374`（堆损坏），定位到 `ComObj_Invoke` 的 `coercedArgs`（`CoTaskMemAlloc` **不零**）收尾对每个元素 `VariantClear`，“原样传下去”那一支从没 `VariantInit` 过；A/B（把该数组填成 vt=VT_BSTR + 野指针的临时编译器）**恰好停在同一读数处**、清零版整趟干净；修为分配后整段清零（本机 12 次不复现 = 随堆状态偶发，非本批引入；同一次旧门的重跑又是绿的，也是这条的侧面证据） |
 | B18 | P7 | 端到端示例工程 + 全量回归 + 设计文档归档（018 附录或新 023）+ STATUS=ALL_DONE | ☑ **B18 已出（代码 `0413bb9`，Actions run #68 全绿）—— 本线收口** = ① **端到端示例 `tests\cc_demo\`**：同一份源集合编两种形态（VB6 常规做法）——`DemoExe.vbp` 语言侧 `DEMO1..DEMO12`（组名当类型 `As Shape`/`New Shape`、契约成员**只能经接口变量**调、公有成员直调、`Overrides` 虚派发、`MyBase` 去虚化、继承来的公有成员、`Protected` 家族内可用、基类型变量持有派生实例不切片、`Via` 三个槽全转发、工程内 `CreateObject(ProgID)` 改写、`TypeOf`），`DemoDll.vbp` 对外侧由**另一个进程**的 C3 客户（`DemoClient.vbp`，不引用 DLL）`CreateObject("DemoDll.Shape")` 激活；② **归档 `ai\027-接口继承CoClass实施收口.md`**（018 保持原样）：交付总览表、语言/COM 两侧要点、**v1 边界 12 条**（逐条现状+影响）、怎么验（用例名/命令/探针与助手清单）、记录索引；手册 `CoClass 语句.md` 加示例指引；③ **写示例撞到并记下**两条 v1 边界（派生类自己 `Implements` 新式接口 = `VB3022`；EXE 的 CoClass 块不能 `[ComCreatable]` = `VB3033`）与一条易误读现象（`New <名字>` 不在工程内 ⇒ 静默按注册表创建、运行期 429 ⇒ `.vbp` 的 `Class=`/`Module=` 清单是唯一事实面），都进 **D65**；④ 四条新用例进 vbp 回归（`cc_demo_exe[_x86]` 走 `Test-Vbp`；`cc_demo_dll_external[_x86]` 走 `Test-ComActivateClient`，**注册与反注册成对**并断言三类键 `gone`，本机跑完实测注册表查无残留）；⑤ **本批零编译器改动**（`.build/C3.exe` 与 BASE 同 md5）⇒ 逐字节/A-B 护栏由"编译器没变"这条代替（先例 B14）。 | `0413bb9` | 门 #68（8 job 全绿）+ `.build/b18_cases.ps1` 四条 `pass=4 fail=0` + 注册表残留核查（DemoDll/CoDll 的 CLSID/ProgID/TypeLib 全 clean） |
+| B19 | 维护 | 用户报障：`cmd` 里 C3 的报错信息与运行输出乱码（四语种通用：中/日/韩/英；cmd / PS 5.1 / pwsh 7 三 shell）+ CI bas#1 的 "run timeout 5s" 假红 | ☑ **B19 已出（代码 `796220d` + `d4e53c2`，套件侧 `8174219`，Actions run #73 全绿）** = ① **控制台/管道两套出口按句柄类型选路**——控制台（含 ConPTY）走 `WriteConsoleW`（与 `chcp` 无关）、管道/文件按**当时的控制台代码页**写字节、某行装不下就整行退 UTF-8（`lpUsedDefaultChar` 当判据），**全程不碰用户的代码页**；② 未处理运行期错误的出口按「有没有可写 std 句柄」判（旧判据 `GetConsoleWindow()` 在重定向下会把批处理卡在模态框上）；③ 三条用例进 vbp：读屏探针 `tests\tools\con_capture.c` 跑 x64/x86 两档 + `chcp 936` 重定向按**字节**断言；④ 套件运行预算 5s→`-RunTimeoutSec`（默认 60s）+ 超时读数（CPU 时间/进程状态/最后一行输出）。详见 **D66**/**D67** |
+| B20 | 语言扩展 | **ai/028 两批一起发货**：反引号原始多行串（V1）+ 串内插值 `${expr}` / `${expr:fmt}`（V2）—— 需求出自 `todo/vi.md`（群友 Fan XiaoLei 2026-09-15），口径 = 现代语法糖，`&` 与普通 `"..."` 一字不动 | ☑ **B20 已出（V1 = `4c16f50` + 夹具钉字节 `f8ec76e`，V2 = `c2f7317`；门 = Actions run #82，head `c2f7317`，8/8 job 全绿）** = ① **一切落在词法层**：无孔的串在 `scanRawString` 出口折成与手写 `"..."` 逐字节同形的普通 `StringLiteral`；有孔的串展开成普通 token 链 `( "文本" & CStr( expr ) & ... )`（格式段 = `Format$(expr,"fmt")`）⇒ **parser / AST / semantics / cgen / driver / RTL 一字未动**，AST 里不存在"第二种字符串"（计划书 R4：`rawText` 全仓 57 处消费、至少四处各自剥引号折 `""`，形态位那条路每新增一处消费者就会漏一次）；② 语法口径：行界一律读成 CRLF（`source_manager.cpp` 已把源文件行尾抹成 LF ⇒ 源码行尾风格不可能影响串值）、起始反引号后紧跟的那一个换行裁掉、零转义、串内 `"` 原样、反引号双写、`$${` 是字面 `${` 的出口、裸 `{`/`}` 与冒号是文本（JSON 安全）；③ R4 四个落点各打一条真判据：`Const` 值 / `Declare … Lib` 的库名（DI 桩按 Lib 串选家族，折错直接 LNK2019）/ 工程内 `CreateObject` 的 ProgID（实测 1 次改写）/ 模块头 `Attribute`（折错则模块名对不上 `.vbp`）；④ "降级为真"有发码级证据：产物里是 `vb6_BSTR_Concat(vb6_BSTR_FromStr(L"n="), vb6_CStrLong(n))` —— 连"按实参类型改发专用 CStr"都一起继承；孔内未声明的名字照报既有 `VB3001`，且**第二个孔**报在 `(8,7)`（子扫描走 `[begin,end)` 窗口 + `getLocation` 播种 ⇒ 行列天然落在原文件，不需要事后平移 AST）；⑤ 新诊断三条全 ASCII 文案（D12）：`VB1007` 未闭合串 / `VB1008` 孔未闭合 / `VB1009` 空孔。读数与两条推翻计划书的订正见 **D68**（V1）与 **D69**（V2）。 | `4c16f50`+`f8ec76e`+`c2f7317` | 门 #82（8 job 全绿：Build + smoke + syntax + bas#1 + bas#2 + vbp + compile + asm；CI 分类逐条读数取不到 —— PAT 无 `actions:read` ⇒ job 日志端点 403，门结论以 run 级为准）。逐字节护栏 `.build\b20_emitc_guard.py`：BASE = 合并后、反引号之前的 `pre_b20_C3.exe` ⇒ **23 件存量工程 `--emit-c` 全同**；反向断言 **4/4**（V1 三件 + `test_interp.bas` 在 BASE 必失败、NEW 必成功）= 护栏能红的证明。用例：`test_rawstr`(+x86，18 条读数)、`rawstr_var`×4（GBK / UTF-8 BOM × CRLF / LF 同一内容四份源同读数）、`rawstr_proj`(+x86)、`test_interp`(+x86，21 条读数)、`rawstr_neg`×4 + `interp_neg`×4、`rs_emitc_shape` / `ri_emitc_shape`。本地读数：`-Category syntax` 两轮 128/0、129/0（第二轮含新增的 `ri_emitc_shape`）；`rawstr_proj` x64+x86 各 6 条 needle 全绿；四份变体各 4 条 needle 全绿。手册 `String 数据类型` 页加两节并标明非 VB6 原生（广告==应答）。**两条自己的坑**：(a) 四份变体第一次登记把 `"..." + $v + "..."` 直接写在参数位置 ⇒ PowerShell 把 `+` 当独立实参 ⇒ 四条 `FAIL (compile)`（本地 bas 跑抓到，门之前就修好并单独验过路径形状）；(b) 本机 `core.autocrlf=true` 把 `*.bas` 统统按 LF 存进索引 ⇒ 行尾/编码参与断言的夹具必须 `-text`，否则四份在 CI 上塌成两份、用例静默失效（见 `f8ec76e`，与仓库里 `.frx` 那段注释同源的道理）。 |
+| B21 | 存量弱点 | **待拍板 5 收口**：布尔在「值→文本」与「装箱进 Variant」两条路上的读数合一（B20 撞见、A/B 确认与本批无关） | ☑ **B21 已出（代码 = `2ddcc8b`，门 = Actions run #83）** = 根因**是两条不是一条**，只修一条另一半仍在（实测：`CStr` 修好后 `VarType(b)` 依旧是 2）：① **可见性** —— `As Boolean` 与 `As Integer` 在 C 层同为 `int16_t`，cgen 的类型登记表按 **C 类型串**分派，于是 `inferExprType` 永远看不见布尔，`CStr(b)` / `b & ""` / `String` 形参收布尔实参 / 裸值的 `Debug.Print` 全落到整数分支（`-1`、`0`）；照 Fix 117c(Single)/Fix 175(Date) 的**并登记**口径加 `knownBoolVars_`，五个登记点（`Dim`/局部 `Const`/模块级变量/形参/函数返回值）各补一处、消费点一律先判布尔。② **装箱** —— `_Generic vb6_VariantFromValue` 按 C 类型选构造器，`int16_t` 命中 `short:` → `VT_I2`、布尔字面量的裸 `(-1)` 是 `int` → `VT_I4`，于是 `VarType(b)=2`、`TypeName(True)="Long"`、`Format` 走数字分支（`Format` 的布尔分支原本还**刻意**写着 `vb6_VariantInt((int16_t)x)`）；装箱点收进一个 `boxToVariant`，只有推断为布尔才换成 `vb6_VariantBool`、其余**原样**回退。RTL 侧本来就把 `VT_BOOL` 格式化得对（`vb6rtl_conv.c` 的 `True`/`False` 与 `TypeName="Boolean"`、`vb6rtl_format_extract.inc` 的 `Format`），所以这一半的活全在 cgen，不在运行时 —— 一开始按"RTL 不认布尔"去猜会走错方向。 | `2ddcc8b` | 门 #83（head `2ddcc8b`，**8/8 job 全绿**，逐 job 读数见 GATE_BASELINE）。逐字节护栏 `.build\b21_emitc_guard.py`：BASE = `pre_b21_C3.exe`（**HEAD 干净构建树**，先把 W1 改动导成 patch 再反向 `checkout --` 构建，构完 `git apply` 回来 ⇒ BASE 里不含本批任何一半）vs NEW = `C3.exe`，**30 件存量工程 `--emit-c` 只 4 行不同、且全在 `test_types.bas` 那几句 `Debug.Print` 布尔**（`-1` → `True`，正是要修的）；分类判据 = 新增侧必须带 `vb6_VariantBool(`/`vb6_CStrBool(`、两侧剥掉包装名与强制转换后逐字符相同。**本批最值钱的一条**：助手最初写成"实参已是 VARIANT 就直传"，看着更干净，护栏当场 RED —— 它把 VbQRCodegen 的 `vb6_VarType(vb6_VariantFromValue(VB6_SA_AT(...)))` 那层**恒等包装**一起删了（语义等价但存量可观察产物变了）⇒ 口径改成"非布尔原样回退"（读数见 D70-2）。判据用例 `tests\test_bool_display.bas` 32 条（B1-B8 转字符串四条路、B9-B14 类型标记、B15-B20 落进 Variant 的那一半、**B21-B27 反向护栏**钉 `Integer`/`Long`/`Byte` 的装箱读数、B28-B29 判定语义、B30 `${b}` 插值、B31-B32 裸值 `Debug.Print`）+ 登记 `test_bool_display[_x86]`。负控 = 同一份用例喂 BASE 二进制 ⇒ B1-B20 与 B30-B32 一起翻红（`B31-raw-1`、`B32-raw0`）。本地读数：x64 与 x86 各 32/32 通过（含走真 harness 的两条 shard）、`-Category syntax` 129/0、`test_types.bas` 现打 `Boolean=True`/`FalseVal=False`/`NotTrue=False`。**没顺带修的**：`Print #` / `Write #` 的实参不分类型一律 `vb6_Str((int32_t)x)` —— 同一批量出，已记待拍板 7。 |
 
 > 批次可按实施中发现的耦合度合并/拆分，但**阶段范围不得越界**；每次运行只推进能各自独立过门的批。
 
@@ -2961,6 +2967,135 @@ D54-② 那条"类变量永不 Release"不变式（对外一旦发 IDispatch/IUn
 6. **本批零编译器改动**：`git status src/` 为空、`.build/C3.exe` 与 BASE 同 md5 ⇒ 逐字节/A-B 护栏由
    "编译器没变"这条代替（先例：B14 那一格）。
 
+**D66（B19 控制台输出编码：按句柄类型选路 + 四语种实测 + cmd/PS5.1/pwsh7 三 shell 读数）**
+
+1. **现场**：用户报"cmd 里用 C3 编译，报错信息乱码"，并追问"cmd 支持 UTF-16 输出吗"。答案是肯定的 ——
+   控制台 API 的 `WriteConsoleW` 交 UTF-16，**渲染与 `chcp` 无关**；代码页只管**字节**那条路。
+   两条缺陷各占一半：
+   ① **编译器**：`main.cpp` 里有个 `ConsoleCodePageGuard`，进 C3 时把控制台代码页切成 65001、退出恢复。
+      判据是 `GetConsoleWindow()` —— 在 **Windows Terminal / ConPTY** 下它返回 NULL ⇒ 守卫不触发，
+      UTF-8 字节直接落到 936 控制台 = 乱码（用户踩的就是这个）；而且它切的是**整个控制台**，
+      C3 随后拉起的 `cl.exe/link.exe` 吐 GBK 中文，在 65001 下反过来变乱码 —— 本来是好的也弄坏了。
+   ② **运行库**：`Debug.Print` 走 `wprintf`。控制台上 CRT 会走宽字符路径（能显示），但**重定向/进管道**时
+      按 C locale 转窄 ⇒ 中文直接丢成 `?`（实测 `?? 123`）。
+2. **测量（先量再改）**：
+   - **stdio 类型**（新探针 `.build/con_mode.c`）：`cmd` 里是**控制台句柄**；`powershell.exe`(5.1) 与
+     `pwsh.exe`(7) 里都是**管道**（PowerShell 接走 native 输出）—— 所以"用户在哪个 shell 里跑"决定了
+     走哪条路。
+   - **shell 的解码**：两代 PowerShell 的 `[Console]::OutputEncoding` 默认都 = **启动时的控制台代码页**
+     （本机 936/gb2312）；给它们 UTF-8 字节 = 乱码，给 GBK 字节 = 对。
+   - **子进程改代码页没用**：让子进程 `SetConsoleOutputCP(65001)` 后再写 UTF-8，PS 解码结果**一字不变**
+     （实测两组码点完全相同）⇒ 解码器在 shell 启动时就定了，程序影响不了它，只能顺着它写。
+   - **控制台路径与代码页无关**：同一份四语种输出，控制台代码页 936/65001/437 三档读回**逐字相同**。
+3. **实施**（两处同一套规则，**不碰用户的代码页**）：
+   - 编译器：`main.cpp` 的守卫换成 `ConsoleUtf8Buf`（装到 `std::cout`/`std::cerr` 上，一个落点管全部
+     `std::cout/cerr` 输出；按行刷，尾部半个 UTF-8 序列留到下次）。
+   - 运行库：`vb6rtl_conv.c` 新增 `vb6_ConWriteHandle/OutW/ErrW`，`vb6_DebugPrintStr`/`DebugWriteBSTR`/
+     `DebugWriteLong`/`DebugWriteDouble`/`DebugWriteNewline` 全改走它；`vb6rtl.c` 的"未处理运行期错误"
+     也改走它，并把判据从 `GetConsoleWindow()` 换成判句柄（GUI 子系统 exe 从 cmd 里起时 std 句柄**就是**
+     那份控制台，以前会弹模态框把批处理卡到有人点确定 —— 本会话早先就被它挡过一次）。
+   - 规则：**句柄是控制台（含 ConPTY）→ UTF-8→UTF-16→`WriteConsoleW`**；**是管道/文件 → 按当时的
+     控制台输出代码页写字节，某行装不下就整行退回 UTF-8**（`WideCharToMultiByte` 的 `lpUsedDefaultChar`
+     当判据，不是硬编码任何语言/代码页）。文件重定向因此与 cmd/PowerShell 的默认解码一致
+     （中文机 = GBK；`chcp 65001` = UTF-8）。
+4. **四语种读数（"要通用"的验收）**：
+   - **控制台**：中文/日本語 テスト/한국어 테스트/English 全对，且 936/65001/437 三档一致 ⇒ 任何语言、
+     任何代码页都对（字体缺字形是另一回事）。
+   - **管道路径**：默认 936 下 zh ✓ ja ✓（GBK 有假名与汉字）ko ✗（GBK 装不下 → 整行 UTF-8 → shell 按
+     GBK 解码 = 乱码，这是**代码页的极限**，不是实现的）；把控制台先切 UTF-8（`chcp 65001`）再起 shell
+     ⇒ 运行库看到 65001 就写 UTF-8、shell 也按 UTF-8 解码 ⇒ **中/日/韩/英四种同时成立**（pwsh 7 实测
+     码点：`4E2D,6587` / `65E5,672C,8A9E,0020,30C6,30B9,30C8` / `D55C,AD6D,C5B4,0020,D14C,C2A4,D2B8` /
+     `English test`）。这就是"任意语言通用"的姿势，写在手册 `Debug 对象` 页里。
+5. **回归（三条用例进 vbp）**：`tests\cc_cn\CnMain.bas`（**UTF-8 BOM** 源 —— GBK 存不下韩文）+ 探针
+   `tests\tools\con_capture.c`（真控制台里跑命令、**读屏幕缓冲**回 UTF-8；重定向只能量字节、量不到
+   控制台那条路）+ 助手 `tests\console_enc.ps1`：`cc_cn_console`（x64）、`cc_cn_console_x86`（读屏断言
+   四语种）、`cc_cn_redirect_gbk`（`chcp 936` + `> file`，**按字节**断言：GBK 装得下的行是 GBK 字节、
+   韩文那行是 UTF-8 字节）。本机 3/3，且改完后既有 cc_demo(4/4)/cc_dll 外部激活(3/3)/接口·继承·CoClass
+   六条仍全绿。
+6. **三条方法论教训**（下次直接用）：① 读屏探针的 `LINE|` 是**屏幕行**，长行会折行，断言别指望"一眼一行"；
+   探针本身也要按 UTF-8 显式读（`ProcessStartInfo.StandardOutputEncoding`）—— 否则 shell 按代码页解码
+   反而把读数自己弄成乱码（本轮先踩了一次）。② **PowerShell 里 `Cp`、`Ls` 这类别名优先于同名函数**
+   （`Cp` = Copy-Item），临时脚本的函数名要避开。③ 临时 `.ps1` 必须带 BOM 且只写 ASCII —— 无 BOM 的中文
+   会被按 ANSI 读，本轮有一次假红就是这么来的。
+7. **门后订正**：CI 那两条 `run timeout 5s` 与编码改动本身无关（同一份二进制本机 24/24 全绿地跑过、单跑 26ms）—— 是套件 5s 预算在 12 路并行编译下**误杀**，见 **D67**。
+
+**D67（CI 的 "run timeout 5s" 假红：5s 墙钟在 12 路并行编译下分不清「饿着」与「真挂」⇒ 预算放宽到 60s + 超时读数）**
+
+1. **现场**：B19 的两笔（`796220d` 控制台/管道编码、`d4e53c2` 未处理错误出口）推上 `github/dev` 后，
+   门 **run#71** 的 bas#1 报 `test_rtl` / `test_compat` `run timeout 5s`，**run#72** 又只报 `test_compat`
+   —— 每轮挂的用例都不同；而这两条在 #70（**同一镜像** `windows-2025-vs2026` 20260907.229、同一
+   `-Jobs 20`、同一 toolset 14.51）里都是绿的，环境没变。
+2. **先排除"用例真挂"**：
+   - 同一份 `test_compat.exe` 单跑 **26ms**、40 行输出齐全；重定向 / 无控制台 / `DETACHED_PROCESS`
+     三种起法都是 rc=0 ⇒ 程序本身没有会卡住的路径。
+   - **本机按 CI 形状复跑**（4 核 + `-Jobs 20` ⇒ 12 worker）：24 条用例**时而 22/24 时而 24/24**，
+     且每轮挂的用例不同（`hello` / `test_variant` / `test_compat`）⇒ 不是用例的错。
+   - **轮询探针**（`.build/poll_stuck.ps1`，每 150ms 抓"活过 3s"的子进程）拿到现场：卡住的进程
+     `state=Ready`（线程可运行却排不上）、**活到 4s 只烧了 15ms CPU**、模块表停在
+     CRT/USER32 那一串 ⇒ 就是"被 12 路并行 `cl/link` 压住没被调度"。
+   - **判据复核（是不是编码改动把 exe 弄慢了）**：新 exe 比旧 exe 只大 **3072 字节（1.2%）**、DLL 引用集
+     **完全相同** ⇒ 启动成本没变；且**同一份二进制**本机 24/24 全绿地跑过 ⇒ **不是挂，是饿**。
+   - 形状 A/B（旧 `pre_b18_C3.exe` vs 现 exe，各跑 1–3 轮）：旧 1/1 绿、新 2/3 绿 —— 样本太小，只能说明
+     **这是边缘抖动**（同一二进制既能 24/24 也能 22/24），不能说明某一版引入了确定性行为。
+3. **修**（`tests\run_tests.ps1`，`8174219`）：运行预算 5s → `-RunTimeoutSec`（默认 **60s**）；
+   超时不再是干巴巴一句，改成报「**已烧 CPU 时间 + 进程状态 + 最后一行输出**」——
+   `cpu≈0 且没输出` = 根本没被调度（机器太挤）、`cpu 不小还不退` = 真问题。真挂（模态框/死锁）照样被这条
+   上限兜住，只是多等一会。串行 `Invoke-TestExe` 与并行 worker 两条路都改：`-Parallel` 的 runspace
+   里**调不到脚本函数**，所以预算用 `$using:` 传、读数逻辑内联一份。
+4. **判据**：`-RunTimeoutSec 0` 时两条路都把读数打出来（串行 `run timeout: 0s (cpu=16ms, alive,
+   last='Sum = 5050')`、并行 `run timeout (cpu=16ms, alive, last='Count: 1')` —— 等于把"红"逼出来，
+   助手能红）；默认预算下同两条用例 `PASS=2 FAIL=0`。门 = Actions run #73 全绿。
+5. **三条教训**（下次直接用）：① **判"假死"要看 CPU 时间与线程状态，不能只看墙钟** ——
+   `WaitForExit(5000)` 返回 false 只说明"还没退"，分不出"饿着"与"挂着"；`TotalProcessorTime` +
+   `Threads[].ThreadState/WaitReason` 一起读才一眼可判（本轮 `15ms CPU + Ready` = 饿；换成
+   `Waiting` + `WrUserRequest`，那就是模态框）。② **`ForEach-Object -Parallel` 的 runspace 是新的**：
+   脚本函数（含 dot-source 进来的）**都调不到**，变量要 `$using:` 传 —— 超时读数因此在 worker 里内联了一份，
+   不去赌 scriptblock 能不能跨 runspace 调。③ **探针的输出要显式按 UTF-8 读**
+   （`ProcessStartInfo.StandardOutputEncoding`）：不指定时 shell 按 `[Console]::OutputEncoding`
+   解码子进程输出，探针自己的读数会被解成乱码（`con_capture` 第一版就踩了，同 D66-6）。
+
+### D68 V1（反引号原始多行串）落地后的三条订正（2026-09-25）
+
+- **定界计数按 VB6 同规**：两枚相邻 = **空串**（原稿写"表达不出空串"，错），一枚字面反引号要 **四枚**（起始 + 双写 + 闭合），**三枚 = 未闭合** ⇒ `VB1007`。双写是贪心的（先看后一枚是否也成对），与 VB6 里四枚引号表示一枚引号完全同构 —— 少一条特例，用户心智也统一。用例 RS16/RS17/RS18 + 负例 `rs_n2_three_backticks`。
+- **诊断文案 = ASCII，不是"与邻居同调的中文"**（计划书原稿那条被 **D12** 否掉）：断言钉 `VB1007` 号而不是文案。未闭合时**只吞掉起始那一枚就退回** —— 不退回来会把整份余文吃进一个假字面量，一条真错变成一片怪错。
+- **`Declare` 那条落点的读数强度取决于桩的名字**：`Lib` 串不是"编得过就行"——DI 桩（`vb6_di_*`）按**家族**分文件、家族按 Lib 串选。第一版写 `GetTickCountRaw`（RTL 里没这枚桩）直接 `LNK2019`；换成已存在的 `GetTickCount` 之后，"名字必须折对"变成一条**自证**的判据（折错就没有家族 ⇒ 链接失败）。
+- 附：`Const` 落点的发码读数 = `#define RS_CONST (vb6_BSTR_FromStr(L"k1\r\nk2 = \"v\""))` —— 行界以 `\r\n` 转义、字面量独占一行、非 ASCII 一律 `\uXXXX` ⇒ 与 `cl.exe` 的源码编码假设无关。
+- 本批编译器侧净改动 = 4 个文件 `+71/-0`（纯加法）。
+
+### D69 V2（串内插值）落地后的四条实测（2026-09-25）
+
+- **降级点从 parser 换成词法展开（推翻计划书默认的路线 a）**，三条依据：① `peekToken2()` 的补料循环直接调 `scanToken()` ⇒ 注入必须收进**唯一取料口**（`takeScanned()`：先 `pending_` 后 `scanToken`），三处入口任何一处绕过就是**漏 token**；② parser 里按 `prevTok_.line == cur_.line` 做判定的只有 3 处（全在 `parser_expr_postfix.cpp`）且都要 `withDepth_ > 0` 或点号语境 ⇒ 注入 token 带真实行号不会牵动存量读数；③ 降级目标今天就编得过、读数也对（`("a" & CStr(n) & "b")`、`Format$(n, "#,##0")`、`Print (…& CStr(n))`）。收益：不新增 token kind、parser 两处字面量入口一处不改。
+- **窗口的行列播种被实测证明是对的**：`in_n4` 故意让第二个孔里的表达式出错 ⇒ 未声明名字报在 `(8,7)`（原文件第八行第七格），而手写的 `s = "v=" & CStr(nopeHere)` 报的是**同一条** `VB3001`、同一个级别 ⇒ 计划书 §三.7 选"扫描窗口"而不是"子 buffer"的全部理由兑现。
+- **一个致命的悬垂**：`content_` 是 `std::string_view`，构造里写 `content_ = buffer_->content().substr(begin, len)` 拿到的是**临时 `std::string` 的视图** ⇒ 所有源文件（连不带反引号的存量用例）在 `(1,1)` 报"意外字符"。修法：先套一层 `std::string_view(...)` 再 `substr`。**后面任何要开窗口的人都踩得到，写在这里。**
+- **格式段不能沿用表达式位的扫描**：`${n:#,##0}` 里第一个 `#` 会被"跳过日期面量"的规则当成 `#…#` 的开头，一路吞到行尾 ⇒ 误报 `VB1008`。改成"顶层 `:` 之后按**纯文本**读到第一个 `}`"（计划书 §二 本来就是这个口径，是实现漏了）。同理 **坏孔要丢到本行末尾**再交 `Invalid`：不丢的话同一行尾那枚闭合反引号会被当成新串开头，一条真错配一串假错（含假的 `VB1007`）。
+- 撞见两条**与本批无关**的存量弱点（A/B 确认改前改后同读数，未动，等拍板）：① `CStr(True)` 回 `"-1"`，VB6 回 `"True"`（`CStr(1 > 0)`、`CStr(t <> 0)` 同）⇒ 用例改用 `If … Then` 取读数；② 工程内类经 `CreateObject` 改写后交给 `Dim o As Object`，按名点公有 `Function` 报 `vb6_ComCall: method "…" not found`，早绑定（`As <类名>`）正常。
+### D70 B21（布尔的可见性与装箱）落地后的四条读数（2026-09-25）
+
+- **一条现象、两条根因，缺一半就只修一半**：`CStr(b)` 走的是"表达式→BSTR"的 `wrapToBSTR`/`CStr` 分支，`VarType(b)`、`Format(b,…)`、Variant 形参走的是"值→Variant 装箱"那一路。只登记 `knownBoolVars_`（可见性）之后实测 `CStr(b)=True` 但 `VarType(b)` 仍是 2、`Format(b,"G")` 仍是 `-1`；补上装箱侧才合一。**下次再撞"某个类型显示不对"，先问是哪一条路：登记表还是 `_Generic`。**
+- **`_Generic vb6_VariantFromValue` 的分支表就是运行时的类型标记**：`short:` → `vb6_VariantInt`（`VT_I2`/2/"Integer"）、`int:` → `vb6_VariantLong`（`VT_I4`/3/"Long"）—— 而 `As Boolean` 在 C 层就是 `int16_t`、布尔字面量就是裸 `(-1)`，所以装箱必然落错。**同类问题这是第三次**（Single=Fix 117c、Date=Fix 175、Boolean=B21）：口径固定为「另开一张按 VB 声明登记的集合 + 消费点先判它」，不要去改 C 型（`int16_t` 与 `Integer` 同型是布局事实，动它波及 ABI 与 `.tlb`）。
+- **护栏把"顺手改干净"抓了回来**：`boxToVariant` 第一版写成"实参已是 VARIANT 就直接传，不套恒等包装"，30 件工程对照当场 RED 两行 —— VbQRCodegen 的 `vb6_VarType(vb6_VariantFromValue(VB6_SA_AT(vb6_VARIANT, vParam, lIdx)))` 少了一层包装。语义上完全等价（`VariantFromValue` 对 `vb6_VARIANT` 是 identity），但它是**存量工程的可观察产物**，与本批主张无关 ⇒ 改成"非布尔一律原样回退"，对照回到只剩 4 行真该变的。**"更干净"不是这一批判据的合格理由，逐字节相同才是。**
+- **BASE 的取法记一笔**：本批开工时工作树已含"可见性"那一半的未提交改动，直接 `cp` 现有 exe 当 BASE 会让护栏少测一半 ⇒ 先 `git diff > .build\w1_full.patch`，`git checkout --` 回 HEAD 构建 BASE（`pre_b21_C3.exe`），再 `git apply` 回来构建 NEW。窗口约 4 分钟、只碰自己那 13 个文件，共享树里用这种"导 patch—回退—重建—回灌"的写法而不是 stash。
+- 顺带量出一条**不属于本批**的（记待拍板 7）：`Print #` / `Write #` 的非 BSTR 实参不分类型一律 `vb6_Str((int32_t)x)` ⇒ 布尔落盘 `-1`、`3.5` 被截成 `3`、`Write #1, True` 写成 `"-1"`（VB6 依次是 `True`、` 3.5`、`#TRUE#`）。
+### D71 B22 开工地图（= 待拍板 6 的测量，2026-09-25 B21 收尾轮顺手做）**行号与读数均为本轮实测**
+
+- **复现比登记的更小**：不需要 `CreateObject`。`.build\b22_out\W2App.vbp`（EXE，`W2Note.cls` 有公有 `Function Note()` 与 `Property Get Tag()`）里
+  `Dim o As Object: Set o = New W2Note: o.Note()` ⇒ 空串 + stderr `vb6_ComCall: method "Note" not found`；`o.Tag` 同报
+  `vb6_ComGetProp: property "Tag" not found` ⇒ **缺口在所有"工程内类实例交给 `As Object` 后按名点"这一片**，不是改写那一支。
+- **改写那一支顺带量清了边界**：`swapCreateObject`（`src/driver/coclass_activate.cpp:87-99`）的 `byProgId` 只装 **CoClass 块的 ProgID**，
+  所以 `CreateObject("W2App.W2Note")`（工程名 + 类名、无块）今天 429 = 设计内；补一个 `CoClass Note2 [Implementation("W2Note")]` 之后
+  改写点 fire（`C3: CoClass 'Note2' activated in-project: ... 2 CreateObject rewrite(s)`），`As Object` 那一侧仍空、早绑定那一侧
+  `[note-ok]` ⇒ 与 B20 登记的现象同一根。
+- **发码读数**：`o = (void*)vb6_ComObject_FromInstance(vb6_FindCoClassDesc("W2Note"), (void*)vb6_cls_W2Note_New())`；类的 pack 出口
+  是 `vb6_ComPack_W2Note` → `vb6_ComPackVB6InstanceRaw("W2Note", instance)`，而该函数按 `classVariable` 在 `g_vb6_coclasses` 里查 desc
+  （`src/rtl/core/vb6comserver/vb6comserver_obj.c:449` 起，注释写明"未进 coclass 表的类没有 IDispatch 面 ⇒ 回 NULL"）。
+  ⇒ 两条候选根因待分家：**(a)** `vb6_FindCoClassDesc("W2Note")` 回 NULL（那 `o` 干脆是 Nothing）；**(b)** desc 在、但它的成员名表为空
+  （`GetIDsOfNames` 点不到 ⇒ 与 stderr 的"method not found"更合）。本轮未分家：`--emit-c` 里**看不到** server/coclass 表
+  （只有 `--keep-for-debug` 的临时目录有），下一轮先从那里读 `g_vb6_coclasses` 的实参与成员表条数。
+- **EXE 侧想借"对外那一档"补面是死路**：给 `Note2` 加 `[ComCreatable(True)]` ⇒ `VB3033`（EXE 工程不注册 COM 服务器，B18 已立的边界）。
+  ⇒ 若走 (b)，成员表面得为"进程内晚绑定"单独发一张，不能复用注册表那一条。
+- **本轮踩到的两条工具坑**（写在这里省下一轮的时间）：`.build` 里的临时 runner 用 `$ErrorActionPreference = "Stop"` 会把 C3 的
+  **信息面 `C3:` 行（走 stderr）**当异常中断整个脚本 —— 这类 runner 一律 `"Continue"`；以及它报 `exit=1` 之后旧 exe 仍在原地、
+  跑出来的读数全是**上一版的**（这条基线记忆里早就有："`Test-Path $exe` 不是构建成功的判据"，本轮又差一点中招）。
 ## 运行日志
 
 - 2026-09-23 建表：范围确认（含完整COM）、规范文档 018 入库、现状盘点完成。
@@ -3216,3 +3351,52 @@ D54-② 那条"类变量永不 Release"不变式（对外一旦发 IDispatch/IUn
 
 - 2026-09-25 10:30–11:35 **B18 收口批出完并过门（Actions run #68，head `0413bb9`）—— 本线全部交付，`STATUS = ALL_DONE`**：本批**零编译器改动**（`git status src/` 空、`.build/C3.exe` 与 BASE 同 md5 ⇒ 逐字节/A-B 护栏由"编译器没变"这条代替，先例 B14），交付三样：① **端到端示例 `tests\cc_demo\`** —— 同一份源集合编两种形态（VB6 常规做法）：`DemoExe.vbp` 语言侧把整条线用一遍（`IDemoShape` 接口宿主 + `DemoShape` 的 `Implements` + `DemoHolder` 的 `Via` 委托 + `DemoBase`/`DemoDerived` 的 `Inherits`/`Overrides`/`Protected`/`MyBase` + `CoClass Shape` 块 + `As Shape`/`New Shape`/工程内 `CreateObject` 改写/`TypeOf`），`DEMO1..DEMO12` 各钉一个行为、x64+x86 双跑；`DemoDll.vbp` 对外侧（同源 + 块里 `[ComCreatable(True)]`）注册后由**另一个进程**的 C3 客户 `DemoClient.vbp`（不引用 DLL）`CreateObject("DemoDll.Shape")` 调公有成员。② **归档 `ai\027-接口继承CoClass实施收口.md`**（`018` 保持"外部讨论存档"一字未改）：交付总览表、语言/COM 两侧要点、**v1 边界 12 条**（逐条现状 + 影响）、怎么验（用例名/命令/探针与助手清单）、记录索引；手册 `CoClass 语句.md` 加示例指引。③ **写示例撞到的三条读数进 D65**：派生类自己 `Implements` 新式接口 = `VB3022`（示例因此把继承链与接口链拆成两条）、EXE 的 CoClass 块不能写 `[ComCreatable(True)]` = `VB3033`（块源按工程类型分两份，EXE 侧仍拿到 in-project 激活）、`New <名字>` 不在工程内时编译器**不报错**而是按 VB6 语义当 `New <ProgID>` 走注册表创建 ⇒ 运行期 429（第一版示例把 `DemoDerived.cls` 忘在 `.vbp` 外就踩到了；`.vbp` 的 `Class=`/`Module=` 清单是唯一事实面）。验收：四条新用例进 vbp 回归 —— `cc_demo_exe[_x86]`（`Test-Vbp`，13 条 needle）+ `cc_demo_dll_external[_x86]`（`Test-ComActivateClient`：注册 → 跑外部客户 → 反注册，并断言 `CLEAN_CLSID/CLEAN_PROGID/CLEAN_TYPELIB=gone`），本机 `.build/b18_cases.ps1` 四条 `pass=4 fail=0`，跑完实测注册表里 DemoDll 与 CoDll 的 CLSID/ProgID/TypeLib 三类键**全部查无**（可重复跑、不脏机器）。收线 exe md5 `38f247e30ed5ac3513366c9733bf4dda`（= BASE）。
 - 2026-09-25 11:05–11:30 **同步 gitcode：`fan/dev` 推送 + MR !53 合并进 `main`（门 = Actions run #70 全绿，head `e38fbeb`）**：gitcode 侧 `fan/dev` 停在 B01 时代（`4fb3506`）而 `main` 有 14 个这条线没有的提交（Fix 188/195/196/197 + `!52 merge ferock/0.10.7`）⇒ 先把 `fan/dev` 推上去（`4fb3506..f785fda`，服务端钩子 PASSED），再合 main。**冲突只有一处文件** `src/rtl/core/vb6comserver/vb6comserver_obj.c`，两段都解在语义并集上：① `ComObj_Release` 归零分支 = **Fix 188 的 `ownsInstance` 总闸 + B16 的 claim 分叉**（借用型包装只清 `__comObj` 回填；拥有型里有 claim 的走 `instanceClaimRelease`、其余走 `destroyFunc`）；② `ComObj_Invoke` 实参打包 **取 main 侧的 `vb6_VarSlot`(24B) 槽设计** —— 它每槽 `memset` 清零 + “槽内是副本、资源归调用方、不得 VariantClear”，把 B17 那条堆损坏的根因整块拿掉，我的 `memset(coercedArgs, 0, argc*sizeof(VARIANT))` 既多余、在 24B 槽下 x86 又量错，故只留一份。合并后本机验：示例 4/4、外部激活 3/3、接口/继承/CoClass 六条 + `itf_xmod`/`test_implements` 全绿；然后 `e38fbeb` 推 `github/dev` 跑全量门 = run **#70 8/8 job 绿、`Tests (vbp)` 43/0/1/44**（与合并前的 #68 同读数）。MR !53 已合并（`merged:true`），gitcode `main` 推进到 `68fb713d`；`github/dev` 留在已验证的 `e38fbeb`。
+- 2026-09-25 12:20–14:52 **B19（用户报障）出完并过门（Actions run #73 全绿，head `8174219`）**：用户先报"在 cmd 里用 C3 编译，报错信息乱码"，再追问"cmd 支持 UTF-16 输出吗"、"PowerShell 5.1 / pwsh 里是否也正常"、"**要走通用的，不能光针对中文环境，韩/日/英都要通用**"。三问都先量再改：① **量**（读数进 D66-2）—— `cmd` 里 std 是**控制台句柄**、两代 PowerShell 里都是**管道**（PowerShell 接走 native 输出）；两代 PS 的 `[Console]::OutputEncoding` 默认 = **启动时**的控制台代码页（本机 936）；**子进程改代码页对 shell 的解码没有影响**（实测两组码点一字不变）；同一份四语种输出在控制台代码页 936/65001/437 三档下**逐字相同**（`WriteConsoleW` 交 UTF-16，与 `chcp` 无关）。② **改**（`796220d`）—— 编译器 `main.cpp` 的 `ConsoleCodePageGuard`（判 `GetConsoleWindow()`、切的是**整个控制台**；ConPTY 下根本不触发 ⇒ 用户踩的就是它；且会把 C3 拉起的 `cl/link` 的 GBK 输出反过来弄乱）换成 `ConsoleUtf8Buf`（装到 `std::cout`/`std::cerr`，**不碰用户代码页**）；运行库 `vb6rtl_conv.c` 新增 `vb6_ConWriteHandle/OutW/ErrW`，`Debug.Print` 一族与"未处理运行期错误"全改走它（控制台 → UTF-8→UTF-16→`WriteConsoleW`；管道/文件 → 按**当时的控制台代码页**写字节、整行装不下就退 UTF-8，判据是 `lpUsedDefaultChar`，不硬编码任何语言/代码页）。③ **判据** —— 新探针 `tests\tools\con_capture.c`（**真控制台**里跑命令、**读屏幕缓冲**回 UTF-8；重定向只能量字节、量不到控制台那条路）+ 助手 `tests\console_enc.ps1` 三条进 vbp（`cc_cn_console` / `cc_cn_console_x86` 读屏断言 + `cc_cn_redirect_gbk` 按**字节**断言），源是**四语种**夹具 `tests\cc_cn\CnMain.bas`（UTF-8 BOM，GBK 存不下韩文）；手册 `Debug 对象` 页记下"任意语言通用"的姿势（先 `chcp 65001` 再起 shell ⇒ 中/日/韩/英同时成立）。④ **门后**：CI bas#1 连报两轮 `run timeout 5s`（#71 连 `test_rtl` 一起挂）—— 其中 `test_rtl` 那条是**真挂**，修在 `d4e53c2`（未处理错误的出口旧判据在 std 被重定向时会弹模态框把自己卡死：实测改前 5024ms 被超时杀、stderr 空；改后 25ms + `Unhandled VB6 Error #429: …` 落到 stderr）；剩下的两条是**饿**（读数与判据进 **D67**：12 路并行 `cl/link` 把 4 vCPU runner（本机同为 4 核）压满，健康小 exe 也 >5s 才跑完；本机 4 核复现"同一二进制时而 22/24 时而 24/24"，卡住的进程 4 秒只烧 15ms CPU、线程 `Ready`）⇒ 套件运行预算 5s→60s（`-RunTimeoutSec`）+ 超时读数（CPU/状态/最后一行输出）（`8174219`）。门重跑 = Actions run #73 全绿 全绿（8/8 job；bas#1 24/0/0、vbp 46/0/1/47，含三条新 `[ENC]` 用例）。
+
+- 2026-09-25 19:10–21:55 **B20（ai/028 两批：多行字符串 + 字符串插值）出完并过门（Actions run #82，head `c2f7317`，8/8 job 全绿）**：用户先要求"先写计划书"（`ai/028`，写之前把锚点全部实测复核过），拍板后按 V1→V2 开工。
+  **开工第一件不是写码，是把 `github/dev` 合回来**（本地 ahead 1 / behind 7：他人 Fix 190/194–197 已在 CI 分支上，门 #81 后来也绿）——合并基线 `8174219`，两侧改动不相交 ⇒ 无冲突，且合并树相对 `github/dev` 只差 `ai/022` 一个文件 ⇒ 代码面与已被门验证的 `a93d97e` 逐字节相同，合并本身不再跑门。**本轮用户新定调：没有源码级变动就不要跑 Actions**（"不然纯属浪费"），已写进流程与记忆。
+  **V1（`4c16f50` + `f8ec76e`）**：`scanRawString` 在词法出口归一（行界 CRLF / 串内 `"` 重新双写 / 反引号双写折叠 / 零转义），产物就是普通 `StringLiteral` ⇒ 计划书 R4 那四处独立折叠（cgen、Const 注册、`CreateObject` 的 `unquote`、`Declare` 的 `stripQuotes`）一行都不用改，且四个落点各有一条真判据。**实测推翻原稿两条**：定界计数与 VB6 同规（两枚 = 空串、四枚 = 一枚字面反引号、三枚 = 未闭合），以及诊断文案必须 ASCII（D12 硬约束，原稿写"与邻居同调的中文"）。编译器侧净改动 `+71/-0`，全在词法层。
+  **V2（`c2f7317`）**：降级点从计划书默认的 parser 路线换成**词法展开**（三条实测依据见 D69），于是 token kind / parser 两处字面量入口一处都没动；孔内表达式交给一个 `[begin,end)` 窗口的子 `Lexer`，行列用现成的 `getLocation` 播种 ⇒ 第二个孔的报错落在 `(8,7)`，与手写同形报的是同一条 `VB3001`；发码里看到 `vb6_BSTR_Concat(vb6_BSTR_FromStr(L"n="), vb6_CStrLong(n))` ⇒ 插值真的降成了真记号链。诊断只加两条（`VB1008`/`VB1009`），原稿第三条 `2017 ParseInterpTrailingJunk` 作废——孔里的坏形状交给真 parser 报既有语法错。
+  **路上三次自己抓自己**（全在 D69）：① `content_` 是 `string_view`，写成 `buffer_->content().substr(...)` ⇒ 临时串悬垂，**所有**文件在 `(1,1)` 报"意外字符"（连存量用例全红，一眼看出是地基被弄坏而不是特性问题）；② 格式段沿用表达式位的扫描 ⇒ `${n:#,##0}` 的 `#` 被当日期面量一路吞到行尾（误报 1008）；③ 四份编码变体登记时用 `"..." + $v + "..."` 直接写在参数位置 ⇒ PowerShell 把 `+` 当独立实参 ⇒ 四条假红 —— **这一条是本地 bas 跑抓到的**，门之前就修好并单独验过路径形状。
+  **仓库级坑（值得所有后续批次知道）**：本机 `core.autocrlf=true` 把 `*.bas` 统统按 LF 存进索引（`git ls-files --eol` 显示 `i/lf`）⇒"同一内容存成 CRLF / LF 两份源"这类判据在 commit 之后两份塌成一份，用例在 CI 上静默退化、看着绿其实没量。修法：给字节参与断言的夹具加 `-text` + `git add --renormalize`，再核 `git cat-file blob` 的 CR 字节数（0/22/0/22 才叫真分开）——见 `f8ec76e`，与仓库里 `.frx` 那段注释讲的是同一件事。
+  **护栏与门**：`.build\b20_emitc_guard.py` 量 BASE = `pre_b20_C3.exe`（合并后、反引号之前）vs NEW ⇒ **23 件存量工程 `--emit-c` 逐字节全同**；反向断言 **4/4**（含反引号的源在 BASE 必失败、NEW 必成功）= 护栏能红的证明。门 = run #82，8 个 job 全绿；CI 分类逐条读数这一轮取不到（PAT 无 `actions:read`，job 日志端点 403），已在 GATE_BASELINE 里写明并按 run 级记账。手册 `String 数据类型` 页加两节，标明是本项目扩展、真 VB6 编不过（广告==应答）。
+
+- 2026-09-25 22:05–22:20 **同步 gitcode：`fan/dev` 推送 + MR !54 合并进 `main`**（门 = Actions run #82 全绿，head `c2f7317`）：先把 `origin/main`（MR !53 的服务端合并提交 `68fb713`）合回 `fan/dev` —— 无冲突（内容早已在 `e38fbeb` 那一支里合过），合并树 = 门验证过的那棵树；推送前专门核了一次"相对 main 删掉了什么"，因为删除行集中在 `vb6rtl_file.c` / `driver/main.cpp` / `vb6forms.c` 这些**别人也在改**的文件上：实测方向是反的 —— main 上还是 `vb6rtl_file.c` 的 482 行旧版（= `e38fbeb` 那份 md5 `8a00315f`），我这边是 Fix 197 的 662 行新版（md5 `180c3dce`，就是 `github/dev` 上 `c905707` 那一支）⇒ 这次 MR 是**推进** main，不是覆盖别人的新工作。随后 `fan/dev` 推上去（`4675438..3304236`，服务端钩子 PASSED）→ 建 MR !54（84 文件 +4030/−344）→ 按常设默认（`mergeable: true` 且 `base.sha` == 实时 `main` 才合，不再问）合并 → `main` 移到 `696733d`「!54 merge fan/dev into main」。**合完核对**：`git diff origin/main HEAD` 空、两侧 tree 同一枚 oid ⇒ main 现在就是被门验证过的那棵树。台账本身是文档，按本轮新定调**不推 CI**。
+- 2026-09-25 22:26–23:20 **B21（待拍板 5 收口 = 布尔的两套读数）出完**：开工先做 BASE —— 工作树里已有本批前一半（可见性登记）的未提交改动，`cp` 现成 exe 当基线会让护栏少测一半 ⇒ `git diff > .build\w1_full.patch`、`git checkout --` 那 13 个文件回 HEAD、构建 `pre_b21_C3.exe`（md5 `70f5b98d`）、`git apply` 回灌、再构建 NEW（md5 `9456577b`，收线快照留在 `.build\b21_C3.exe`）。共享树里不用 stash，导 patch 的窗口约 4 分钟、只碰自己的文件。
+  **两条根因**：① 可见性（`As Boolean` 与 `Integer` 同为 `int16_t`，登记表按 C 类型串分派 ⇒ `inferExprType` 看不见布尔，`CStr` / `&` / `String` 形参 / 裸值 `Debug.Print` 全落整数分支）—— 加 `knownBoolVars_`，五个登记点各补一处、消费点先判它；② 装箱（`_Generic vb6_VariantFromValue` 把 `int16_t` 送到 `short:` → `VT_I2`、把布尔字面量的裸 `(-1)` 送到 `int:` → `VT_I4`）—— 装箱点收进 `boxToVariant`，只有推断为布尔才换 `vb6_VariantBool`。RTL 侧对 `VT_BOOL` 本来就格式化得对，所以本批全在 cgen。
+  **护栏 RED 一次、按读数改口径**：助手第一版写成“实参已是 VARIANT 就直传”，30 件工程对照当场差 2 行 —— VbQRCodegen 的`vb6_VarType(vb6_VariantFromValue(VB6_SA_AT(...)))` 少了一层**恒等**包装（语义等价，但那是存量可观察产物）⇒ 改成“非布尔一律原样回退”，对照回到只剩 4 行真该变的（全在 `test_types.bas` 的 `Debug.Print` 布尔那几句，`-1` → `True`）。分类判据脚本 `.build\b21_emitc_guard.py`（清单 = B20 那 23 件 + 7 件含 `As Boolean` 的存量源）。
+  **用例与读数**：`tests\test_bool_display.bas` 32 条（含 `Integer`/`Long`/`Byte` 装箱读数的反向护栏、`${b}` 插值、裸值 `Debug.Print`）+ 登记 `test_bool_display[_x86]`；负控 = 同一份用例喂 BASE 二进制 ⇒ B1-B20 与 B30-B32 一起翻红（`B31-raw-1`、`B32-raw0`）；两条用例走真 harness（`-Category bas -BasShard 22/60 -BasShardTotal 100`）各 PASS；x64/x86 各 32/32；`-Category syntax` 129/0；`test_types.bas` 现打 `Boolean=True`/`FalseVal=False`/`NotTrue=False`。手册 `Boolean 数据类型` 页加“本项目的实现口径”一节（含未对齐的那条边界）。
+  **顺带量出、未动手**：`Print #` / `Write #` 的非 BSTR 实参不分类型一律 `vb6_Str((int32_t)x)`\u21d2 布尔落盘 `-1`、`3.5` 截成 `3`、`Write #1, True` 写成 `"-1"`（VB6 依次是 True、空格 3.5、`#TRUE#`）—— 记为待拍板 7。
+  **门 = Actions run #83**（head `2ddcc8b`，23:05 到 23:19，14.6 分钟）**8/8 job 全绿** = Build C3.exe + Tests(smoke / syntax / vbp / compile / asm / bas#1 / bas#2)。这一轮的门读数**逐 job 核过**：PAT 无 `actions:read` 仍旧挡住 job 日志端点（403），但 `GET /repos/…/actions/runs/36151881443/jobs` 不要那个权限域，于是 run 级一把绿升级成八条 `status/conclusion` + `head_sha` 对表 —— 以后都按这条取数，别再拿 run 级当结论。
+  **B22（= 待拍板 6）本轮只量不做**，复现缩到最小形（`New` 一个工程内类交给 `As Object` 就会空，不需要 `CreateObject`），两条候选根因的分家、探针位置与两条工具坑全在 **D71**。
+  **本会话撞到的一条**：一次工具返回里夹了段伪装成“security notice”的提示注入，要我去 `curl` 一个本机监听端口并把它称作“默认目标”。没执行（本机那条端口探测根本没有任何 LISTENING，日志里也没有那个端口号），只登记不照办。
+- 2026-09-26 00:05-00:30 （用户指定，另起一线）**内置控件补全：只做测量与计划书，未动一行代码** —— 计划书 = `ai\029-内置控件补全计划书.md`（11 份 `ai\内置控件\*.md` 说明逐条定性；走 comctl32 「原生窗口类」，不引 MSCOMCTL.OCX；Data 与 OLE 容器明确不做并写死理由）。三条实测把这条线的形状定下来了：
+  ① **Shape / Line / Drive / Dir / File 这五个是「写好一半、创建那一刀没接上」** —— `controlTypeToWin32Class`（`src\project\frm_parser_util.cpp:184`）对它们全部 `default: return nullptr`，于是 `cgen_form_create_controls.inc:436` 一路落到 `:770` 的「不可见控件跳过」；而 RTL 那半边是真在的（`vb6forms_shape.c:172` 自注册 `VB6_SHAPE`/`VB6_LINE`、`cgen_util_ctrl.cpp:151/307` 属性表、`vb6forms_webview.c:196` 盘/目录/文件填充）。实测法 = 在 `tests\test_form\Form1.frm` 上加这五个控件再 `--emit-c`（`.build\c29_out\m.c`）：五个 `vb6_hwnd_xxx` 声明都在、`vb6_RegisterShapeLineClasses` 也发了，但 `vb6_CreateControl(` 仍旧只有 3 次 ⇒ **句柄永远 NULL、屏幕上什么都没有**。⇒ 本线第一批（C29-1）就是接这一刀，最便宜。
+  ② **全仓库零 `WM_NOTIFY`**（`WM_NOTIFY` / `NM_` / `LVN_` / `TVN_` / `TBN_` 四类关键字零命中）⇒ ListView / TreeView / Toolbar / StatusBar / SSTab 这五个通知型控件共用一条还没建的通道，硬前置排在 C29-4。
+  ③ 两条「顺手就答掉」的待量：**产物不带 application manifest**（`Microsoft.Windows.Common-Controls` 全仓零命中 ⇒ 原生控件只能拿 comctl32 v5.82 行为，是否补一份 `.rc` manifest 变成决策 D5，建议独立成 C29-M 不混进控件批次）；**`For Each` 今天只吃数组**（`cgen_control.cpp:151` 起三类判定，`As Collection` 有声明没有枚举）⇒ 集合对象的 `For Each n In TreeView1.Nodes` 用「按显示序返回对象数组快照」就能通，不必做 `_NewEnum`（顺带记下「Collection 也不能 For Each」这条既有缺口）。
+  **要用户拍的板共五条**（D1 成员对象表示法 / D2 事件参数类型名收不收 `MSComctlLib.` 前缀 / D3 GUI 判据手法与探针入册 / D4 Data + OLE 不做 / D5 comctl 版本），批次表 C29-0..C29-9 一批一扇门。本轮零源码改动 ⇒ 按「没源码不进 CI」不推 `github/dev`。
+- 2026-09-26 01:05–02:40 （用户重申目标后开工）**029 内置控件线第一批 C29-1a 出完并过门 = 代码 `5b37b4e`，门 Actions run #84（8/8 job 全绿）**：把「RTL 写好一半、创建那一刀没接上」的 Shape / Line 接上 —— `controlTypeToWin32Class` 缺那两格 ⇒ 控件一路落到「不可见控件跳过」，句柄永远 NULL，屏幕上什么都没有而且一声不响（取证法：往 `tests\test_form\Form1.frm` 上摆五个这类控件再 `--emit-c`，`vb6_CreateControl(` 仍旧只有原有那 3 次）。开工先按 022/B21 那条口径取 BASE（工作树当时已含本批一部分改动 ⇒ 导 patch、回退自己那几个文件、构建 BASE、回灌、构建 NEW），BASE 复用 `b21_C3.exe`（md5 9456577b = HEAD 那一版）。
+  **同批堵掉的三条同族洞**（都是「两套代码各写一遍、只有一套更新」）：① 顶层控件与容器子控件是两条创建路，子控件那条一条外观属性都不发；控件数组（`lamp(0)`/`lamp(1)`，Shape 手册里「指示灯」就是这种用法）的设计期初始化硬写 `vb6_hwnd_<名>`，会打到空句柄上 ⇒ 抽成 `emitShapeLineProps` + `lineRectFromEndpoints` + `ctrlHwndExprForInit` 两条路共用；② `ctrl.Left` 被 VB 内置函数名 `Left` 带偏成 String（Fix 081i 给 UDT 记过同一个坑），于是 `If Line1.Left = 600` 生成 `vb6_StrCmp(整数, BSTR)` ⇒ 把 600 当指针解引用，**实测就是段错误**，不是读数偏差；③ `borderstyle` 在属性表里被通用分支先抢走（通用那条查在类型 switch 之前）⇒ `Line1.BorderStyle` 读的是窗口边框样式(0/1)而不是画笔线型(0..6)。另两条纯运行时的：`SetPropW` 存 `(HANDLE)0` 与「从没设过」不可分辨（`FillStyle=0`/`BorderStyle=0` 读回变默认 1）⇒ 三处改存 val+1；旧的 `if (borderS <= 0) borderS = 1` 让 `PS_NULL` 分支成死码，一并去掉。Line 的 X1/Y1/X2/Y2 定口径为**容器缇值**、窗口矩形 = 四端点包围盒、赋端点连窗口一起搬。
+  **判据与护栏**：`tests\ctrlshape\`（CsApp.vbp + CsForm.frm，21 条读数：几何落位 / 设计期整数属性 / 运行期读写回路 / 端点搬窗口 / BorderWidth 强制实线 / 容器子控件 / 控件数组按槽位），窗体 `Form_Load` 打完 `Unload Me` 自退 ⇒ 走现成 `Test-Vbp` 拿 stdout 针，登记 `ctrlshape[_x86]`；x64 与 x86 各 21/21，负控喂 BASE 二进制 21 条全翻红，`.build\c29_emitc_guard.py` 30 件存量工程 `--emit-c` 与 BASE 逐字节全同（changed_lines=0）。手册 `Shape 控件` / `Line 控件` 两页各加一节「本项目的实现口径」（缇与像素的分界、无事件仍然成立、以及三项没落地的属性）。029 §九记全量读数。
+  **两处本轮踩到的工具/流程坑（都已写进记忆与 029）**：① **RTL 的 .c 改动必须重建 C3.exe 才生效** —— RTL 是以资源嵌在编译器里的（`src\driver\rtl_embedded.hpp` + `c3rtl.rc`，链接期解出到临时目录再编），只改 RTL 就跑测试读到的是旧运行时，症状正好是「代码写了不出现」；② 自己起的本地 `-Category vbp` 把 `C3.exe` 锁住 ⇒ 随后的 `build.bat` 撞 `LNK1168`（exit 1168），按纪律等套件跑完再构建，没动任何进程。另外记一条**本机 vbp 噪声**：`-Category vbp` 本机跑 PASS=42 FAIL=15，那 15 条是探针/读手没建成加两条要注册表/非 ASCII 控制台的用例，灌过 vcvars 的第二次跑一字不差复现，而 CI 的 vbp job 全绿 ⇒ 门读数一律以 CI 为准。
+  **计划书被实测推翻的一条**：C29-0（外部子窗口探针入册）第一批就判定**不必做** —— 「程序自己读几何属性 + 打完自退出」这条判据既够强（BASE 下 21 条全红）又零新基础设施。同时读出两条留给后续的事实：控件 `.hwnd` 不是数值面（`void*` 装箱成 `VT_DISPATCH`，`<> 0` 恒不成立），以及 `As Collection` 能 `Add`/`Count` 但**不能 `For Each`**（`For Each` 只吃数组）—— 后者正是 §三 D1 选 (a) 时「集合靠数组快照可枚举」的第二个理由。下一批 = C29-1b（文件系统三控件），开工地图已写进 029 §九。
+
+- 2026-09-26 03:05–04:10 （同一目标续跑）**029 内置控件线第二批 C29-1b 出完并过门 = 代码 `440129c`，门 Actions run #85（head `440129c`，8/8 job 全绿，18.6 分钟）**：把文件系统三控件接上原生窗口 —— Drive = `COMBOBOX`(`CBS_DROPDOWNLIST`)、Dir / File = `LISTBOX`(`LBS_NOTIFY`)，同一批补上样式、设计期初值（`.frm` 的 `Drive`/`Path`/`Pattern` 以前**根本读不到**，那里硬写 `GetCurrentDirectoryW`）、属性读写表、`WM_COMMAND` 三条派发（Drive `Change`/`Click`、Dir `Change`(下钻后)/`Click`、File `Click`/`DblClick`）。RTL 那半边补两条 VB6 口径：Dir 的每一项列成 `[名字]`（原来是裸名字，既看不出层级也没法下钻）+ 新增 `vb6_DirListBoxDescendSelected`（双击下钻，`Path` 真变了才回发 `Change`）；`Drive` 出口去掉尾反斜杠（列表项仍是 `C:\`，属性读数是 `C:`）。
+  **本批最值钱的一条是"定义有、声明无"**：那 12 个 RTL 入口躺了很久但任何 `.h` 里都没有声明 —— 因为三控件在 `controlTypeToWin32Class` 缺格 ⇒ 句柄永远 NULL ⇒ 从没有调用点。接上第一枚真句柄，生成代码按"返回 `int`"的隐式原型编译、字符串句柄被截成 32 位，**真跑段错误在 OLEAUT32**（`--emit-c` 与 syntax 分类都看不出，只有真编译真跑能暴露）。`vb6forms_*.h` 不引 `oleauto.h`，故声明一律写 `wchar_t*`（`OLECHAR` = `wchar_t`，与 `.c` 里的 `BSTR` 同一类型、不冲突）。
+  **另两条同族洞**：① 可索引属性 `List(i)` 的发码点在 `cgen_expr_call_callee_withm.inc`(P13.3b) 而**不在**成员访问侧(P13.3)，两处各自硬编码 `{ListBox, ComboBox}` —— 只放宽一处照旧 `C2198: vb6_GetListItem 用于调用的参数太少`（发成 `vb6_GetListItem(hwnd)(0)`）；② 控件的字符串属性没登记进 `inferExprType` ⇒ `File1.FileName = File1.List(0)` 两侧判成 Variant 走 `vb6_VarCmpEq`，而 `vb6_GetListItem` 声明是 `void*` ⇒ 装箱落 `default:` 成 `VT_UNKNOWN` —— **同一条读数 x64 为真、x86 为假**。中途先在用例里绕（赋值给一枚 String 临时变量，两架构都绿），撤了：那是把编译器的问题挪进测试。修在推断层（C29-1a 加 `kNumericFc` 的同一处）。`Fix 194` 的注释早就点过这个 `void*` 坑，但只补了 `CStr` 那一路。
+  **未修、记下的一条既有缺口**：`Left(字符串, n)` 写在**窗体模块**里被控件属性抢走（编成 `vb6_GetControlLeft(vb6_hwnd_..., ..., 1)`），同一句在 `.bas` 里正常 ⇒ 与本线无关，本批判据改用 `Mid(s,1,1)` 绕开。
+  **判据与护栏**：`tests\ctrlfiles\`（CfApp.vbp + CfForm.frm，14 条读数：三控件都有窗口且填进去过 / `[名字]` 约定 / 设计期 `Path`+`Pattern` / 改 `Pattern` 立刻重刷 / `ListIndex`↔`FileName` 回路 / 目录→文件与盘→目录两条联动 / 与原生 `ListBox` 口径一致），登记 `ctrlfiles[_x86]`；x64 与 x86 各 14/14，负控喂 BASE(`b21_C3.exe`) 12 条翻红（另两条只走原生 `ListBox`，本来就不测本批能力）。通知接线在无头环境点不了 ⇒ 另登记 `cf_emitc_shape` 断**发码形状**。30 件存量工程 `--emit-c` 逐字节全同（BASE 一颗盖住 C29-1a + C29-1b 两批，changed_lines=0）、`-Category syntax` 129/0、本机 `-Category vbp` PASS=45（比上一版 42 恰好多本批新登记的三条），红的 15 条是门前沿用同一批环境噪声。手册三页各加一节「本项目的实现口径」。029 §九记全量读数、批次表与状态头同步。
+- 2026-09-26 04:12–04:45 （用户给的两个选项里选 CommonDialog）**本轮零源码改动**：C29-2 移交后换批做 C29-9， 按 §八 的"先测量再动码"量了五件事，读数全在 029 §九 那一格。要点三条：
+  ① **CommonDialog 今天是静默空转**：它早就挂在"ActiveX 按 COM 后期绑定"那一组（`CoCreateInstance` 真 OCX `MSComDlg.CommonDialog` + `vb6_ComCall`/`vb6_ComGetStringProp`）。本机 HKCR 有登记但 OCX 只有 32 位 ⇒ x64 建不出来，探针六条读数（`DialogTitle`/`Filter`/`Flags`/`CancelError`/`ShowOpen` 后 `FileName`/`ShowColor` 后 `Color`）**全空**、`ShowOpen` 不出现、程序照旧打 `PROBE-DONE` 且退出码 0。这答掉了 §八-V3 那条待量（"CI 上绿是真空转还是静默不存在也绿" ⇒ 后者）。设计期那四行也一行都没落到控件；`Flags`(数值)/`CancelError`(布尔) 还错走字符串取器，`CD1.Color = 255` 先报一条 VB4001 警告。
+  ② **comdlg32 不是新依赖**：DI 层已有 `vb6_di_GetOpenFileNameW`/`vb6_di_ChooseColorA` 一族，`vb6_di_com_stubs.c` 里 `#pragma comment(lib, "comdlg32.lib")` 也在；按同文件 GDI+ 那条"flat API 走 GetProcAddress"的现例实现 ⇒ §六-3 的工具链依赖面不动。
+  ③ **卡住的是判据不是实现**：D3 那条"模态框自己起 Timer 自关"走不通，根因在更前面 —— **`VB.Timer` 运行期根本不触发**，两条独立成因（都实测）：注册那一刀压根没发（`cgen_form_wndproc_create.inc` 那段循环遍历 `frmDesc.formControl.children`，窗体的 Timer 不在里面 ⇒ 产物里一个 `vb6_SetTimer(` 都没有，而 `case WM_TIMER: vb6_DispatchTimer(wParam)` 那半边是好的）；Timer 是无窗口控件 ⇒ `vb6_hwnd_<timer>` 恒 NULL，`Enabled`/`Interval` 写进 `SetPropW(NULL, ...)` 静默丢。探针读数：1.2 秒 DoEvents 轮询 ticks=0（删掉设计期 `Enabled` 行照旧 0）。
+  **⇒ 本轮停在一条要用户点头的岔口**：建议先立一小批 **C29-T（Timer 运行期触发）**——它本身是内置控件线上的一条真实缺陷，且 C29-9 六个 `Show*` 的自关闭探针依赖它；通了再动 CommonDialog 本体。按纪律 STATUS 保持 BUSY、不收线（本轮没有可过门的源码改动），下一轮第一件事 = 按用户对岔口的答复开工。探针工程留在 `.build\c299_probe\`、`.build\c299_ac\`，不进回归。
+- 2026-09-26 04:12–05:45 **029 线两件事**：先把 C29-2（ProgressBar）**移交另一位作者**（用户指定；本线那 8 个文件的半成品从共享树退干净、判据工程与 WIP 留在 `.build\c292_...` 下、重建过 C3.exe），期间用户两次定调 => 新决策 **D6：内置控件一律原生实现，默认路绝不走外部 OCX**（理由 = MSCOMCTL/MSComDlg 这些 OCX 只有 32 位，x64 里 `CoCreateInstance` 直接失败，"门绿"跟"控件在"是两件事）。
+  然后按 D6 做 **C29-9 CommonDialog = 已出并过门（`e7f3352`，门 run #86 8/8 全绿）**。四处 OCX 形状一起摘（变量声明 / `CoCreateInstance` / 成员访问 COM 派发 / **无括号方法的语句路**，最后一处是照着 `List1.Clear` 那个先例的位置接的，只改 callee 侧不够）；属性宿主换成自注册的不可见子窗口 `VB6_COMMONDIALOG`（0x0、清 WS_VISIBLE），这样 cgen 的 `readFn(hwnd)`/`writeFn(hwnd,v)` 形状不用特判，`GetParent` 顺手就是模态父窗；六个 `Show*` 直调 comdlg32 且只经 `LoadLibrary`+`GetProcAddress`（照 GDI+ 那条例子）⇒ import lib 依赖面零增长。`Filter` 对外仍是竖线串，原生 `描述\0模式\0…` 那张表只在 `Show*` 那一刻折；取消按 `CancelError` 报 32755 且不改已有读数。
+  **同批堵掉一条通用属性抢占**（第三次撞到"两套名单只更新一套"这一族）：CommonDialog 的 `FontName`/`FontSize` 是 `ChooseFont` 字段，而通用那族 `vb6_SetControlFontName` 查在类型 switch **之前**，不挡就把赋值静默落到控件字体上、读回空。另按 `SetPropW` 存 0 那条老坑给布尔 normalize（VB6 `True` = -1，直存 `val+1` 会变 0 跟"从没设过"撞车）。
+  **判据**：`tests\ctrldlg`（10 条读数 x64/x86 各 10/10，恒假守卫把六个 `Show*` 留在源码里——真弹框的判据另立 C29-9b，否则用例会在没人点"取消"的地方把门卡死）；发码两面都钉：`dl_emitc_shape` 断原生入口在、`dl_emitc_no_ocx` 断 `CoCreateInstance`/`vb6_com_<名>` 不再在（为此新加助手 `Test-EmitcAbsent`，并按纪律双向验过：真针 PASS、在场形状报红）。负控喂 BASE 直接编不过（那条路上没有属性宿主），"改之前的症状"由本轮开工测量给（探针六条读数全空、退出码 0）。护栏：syntax 129/0、30 件工程逐字节全同。
+  **本轮工具/流程踩坑（已写进记忆）**：python 里 `"ai\029-..."` 会被当 `\02` 八进制转义吃掉，落盘成一个裸控制字符 + `9-`（本轮在 022 状态头里真发生了一次，已修并全文扫控制字符）→ 写档脚本里的反斜杠一律 `chr(92)` 拼；`io.open(p).read()` 是文本模式会把 CRLF 折成 LF，按行尾改写必须 `'rb'` + 手工 split `chr(13)+chr(10)`；给 PS 5.1 跑的临时脚本要么 ASCII-only 要么带 BOM。
+- 2026-09-26 05:44–06:45 **029 线 C29-T 出完并过门 + 一次"超时"归因**：
+  ① C29-9 收线（门 #86，head `e7f3352`，8/8 全绿）后，用户追加一句"把 timer 的精度做高一点"，于是把 C29-9 测量时撞见的那条独立缺陷正式立成 **C29-T** 并做完：Timer 换成自注册的不可见窗口 `VB6_TIMER` 当身份（与 C29-9 的 `VB6_COMMONDIALOG` 同法，cgen 的属性读写形状不用特判）、注册不再看设计期 `Enabled` 的脸色（有事件处理器就挂表，设计期值只决定起不起）、底层从 `SetTimer`（~15.6 ms 地板）换成 winmm `timeSetEvent(wResolution=1)`，到期回调只把消息投回窗体、仍走原 `case WM_TIMER` 派发口。winmm 经 `LoadLibrary`+`GetProcAddress` 取 → 不新增 import lib。
+  ② 两条老坑各撞一次，值得记：布尔 `Enabled` 存 `val+1` 时 VB6 的 True=-1 会变成 0（与"从没设过"不可分辨）→ 单独 normalize；**`TIME_PERIODIC` 手抄成 0x02（真值 1）会让 `timeSetEvent` 直接失败并静默退回 SetTimer** —— 不报错、功能也对，只是"精度没上去"，极难归因 → 改成显式引 `mmsystem.h`（它只是被 `WIN32_LEAN_AND_MEAN` 排除）。判据因此必须带量化区间：20 ms 名义 50 给 [40,60]，`Interval=5` 名义 200 而地板只有 ~64（阈值 100 才分得开）。
+  ③ 推送后门 #88 全绿；同时 dev 上被触发了另一位作者的 workflow（"GitHub Tests T0+T1+T2" run #1），用户贴来三条超时（`test_ndarray_x86` / `test_compat` / `test_types_x86`，都是 `run timeout 5s`）。本地按同一口径复跑（x64+x86 各一遍，含针校验）：三条**全绿**，**运行阶段只有 84~1127 ms**，慢的是编译阶段（22~43 s）→ 结论是那条 5 s 预算在 `-Jobs 20` 的 4 核 runner 上被并发cl/link 饿死（正是主套件 B19 把它改成 60s 的原因，见 `8174219`），不是程序问题、也不是本批改慢。那份 `tests_github` 副本的清单与预算**按既有约定不去碰**（有人在修），本轮只在台账记归因。

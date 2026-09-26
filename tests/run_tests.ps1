@@ -749,6 +749,27 @@ function Test-CompileFail {
     }
 }
 
+# ai/028 V2: --emit-c 通路上断言"必须出现的读数" (退出码 0 + 每条 needle 都在)。
+# 语义层的检查 (未声明标识符 VB3001 一族) 在 --syntax-only 上根本看不见 —— 那条通路停在
+# parse 之后 —— 所以"孔里就是普通表达式"这条判据只能走 codegen 通路量。
+function Test-CodegenNote {
+    param([string]$Name, [array]$Sources, [array]$Needles, [array]$Absent = @())
+    $script:total++
+    Write-Host -NoNewline "  [CODEGEN-NOTE] $Name ... "
+    $text = Invoke-CodegenProj $Sources
+    $bad = @($Needles | Where-Object { -not $text.Contains($_) })
+    $hit = @($Absent | Where-Object { $text.Contains($_) })
+    if ($script:codegenProjExit -eq 0 -and $bad.Count -eq 0 -and $hit.Count -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host ("  exit=" + $script:codegenProjExit + " missing: " + ($bad -join ' | ') +
+                    " unexpected: " + ($hit -join ' | ')) -ForegroundColor DarkGray
+        if ($Verbose) { Write-Host $text }
+    }
+}
+
 function Test-Compile {
     param([string]$Name, [array]$Sources)
     $script:total++
@@ -761,6 +782,57 @@ function Test-Compile {
         $script:fail++
         Write-Host "FAIL" -ForegroundColor Red
         if ($Verbose) { Write-Host $text }
+    }
+}
+
+# ai/028 V1: --emit-c 的字面量形状断言 (故意不折叠空白 —— 行结构本身就是读数)。
+# 多行串必须在词法出口折成「一行 C 字面量 + \r\n 转义」; 真换行若漏进 C 源码就会把一枚
+# 字面量劈成两行, 于是「带字面量的行里未转义的双引号必须成对」就是这条判据的不变式。
+function Test-EmitcShape {
+    param([string]$Name, [array]$Sources, [array]$Needles)
+    $script:total++
+    Write-Host -NoNewline "  [EMITC-SHAPE] $Name ... "
+    $argList = (($Sources | ForEach-Object { '"' + $_ + '"' }) -join ' ')
+    $out = & cmd /c ('"' + $C3 + '" ' + $argList + ' --emit-c 2>&1')
+    $code = $LASTEXITCODE
+    $raw = ($out | Out-String)
+    $bad = @($Needles | Where-Object { -not $raw.Contains($_) })
+    $odd = 0
+    foreach ($ln in ($raw -split "`r?`n")) {
+        if ($ln.Contains('vb6_BSTR_FromStr(')) {
+            if (([regex]::Matches($ln, '(?<!\\)"')).Count % 2 -ne 0) { $odd++ }
+        }
+    }
+    if ($code -eq 0 -and $bad.Count -eq 0 -and $odd -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host ("  exit=" + $code + " missing: " + ($bad -join ' | ') +
+                    " odd-literal-lines=" + $odd) -ForegroundColor DarkGray
+        if ($Verbose) { Write-Host $raw }
+    }
+}
+
+# Test-EmitcShape 的反面：断 --emit-c 的输出里**没有**某些形状。用在 D6 那一类改动上
+# （"这一类控件不再走 OCX 晚绑定"）—— 只断"原生入口在"不够，残留的 OCX 形状会让两条路
+# 并存，读数目视上全绿、发码却还在 CoCreateInstance。
+function Test-EmitcAbsent {
+    param([string]$Name, [array]$Sources, [array]$Needles)
+    $script:total++
+    Write-Host -NoNewline "  [EMITC-ABSENT] $Name ... "
+    $argList = (($Sources | ForEach-Object { '"' + $_ + '"' }) -join ' ')
+    $out = & cmd /c ('"' + $C3 + '"' + ' ' + $argList + ' --emit-c 2>&1')
+    $code = $LASTEXITCODE
+    $raw = ($out | Out-String)
+    $hit = @($Needles | Where-Object { $raw.Contains($_) })
+    if ($code -eq 0 -and $hit.Count -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host ("  exit=" + $code + " 还在场: " + ($hit -join ' | ')) -ForegroundColor DarkGray
+        if ($Verbose) { Write-Host $raw }
     }
 }
 
@@ -845,6 +917,90 @@ function Test-Syntax {
 # ai/023 S01: vbp-level negative case. The package hard checks run in driver stage 0
 # (before the pipeline), so --syntax-only is enough: compile must FAIL and the output
 # must contain the given ASCII needle.
+# ai/030 T30-A: 内容寻址 obj store 的判据。用例跑在自己的 store 里 (C3 的缓存根取自
+# %LOCALAPPDATA%，拿不到才退回 <outputDir>/.c3obj)，于是这几条能精确断、不受机器上历史
+# 缓存摆布：空 store 首编必全 miss、次编必全命中 (缓存真跨构建复用)、换 -O 2 之后 RTL 那一族
+# 仍是一格不多 (RTL 的编译档与用户 -O 解耦) 而用户码必须多占一格 (键确实跟着优化档走)、
+# 三臂产物跑起来 stdout 逐字相同 (命中不改产物 —— 这条才是"敢默认开"的前提)。
+# 本机实测：冷编 24.5 s / 全命中 2.9 s / 换 -O 2 6.5 s / 换架构 x86 24.6 s。
+function Test-ObjCache {
+    param([string]$Name, [string]$Source)
+    $script:total++
+    Write-Host -NoNewline "  [OBJCACHE] $Name ... "
+    $reasons = @()
+    $outs = @('', '', '')
+    $rtl = @('', '', ''); $usr = @('', '', '')
+    $stem = [System.IO.Path]::GetFileNameWithoutExtension($Source)
+
+    $sandbox = Join-Path $OutDir ("{0}_store" -f $Name)
+    if (Test-Path $sandbox) { Remove-Item -Recurse -Force $sandbox }
+    New-Item -ItemType Directory -Force -Path $sandbox | Out-Null
+    $ladSaved = $env:LOCALAPPDATA
+    $env:LOCALAPPDATA = $sandbox
+    try {
+        for ($i = 0; $i -lt 3; $i++) {
+            # NB: 别拿 @(@(), @(), @('-O','2')) 枚举三臂 —— PS 把里面的空数组压平, 三臂会
+            # 悄悄变成 "-O" / "2" / 无 (踩过)。
+            $extra = @()
+            if ($i -eq 2) { $extra = @('-O', '2') }
+            $dir = Join-Path $OutDir ("{0}_{1}" -f $Name, $i)
+            if (Test-Path $dir) { Remove-Item -Recurse -Force $dir }
+            New-Item -ItemType Directory -Force -Path $dir | Out-Null
+            $c3Args = @($Source, '--output-dir', $dir, '--incremental') + $extra
+            $log = (& $C3 @c3Args 2>&1) | Out-String
+            if ($LASTEXITCODE -ne 0) { $reasons += ("build{0} rc={1}" -f $i, $LASTEXITCODE); continue }
+            $m = [regex]::Match($log, 'OBJCACHE rtl=(\d+)/(\d+) user=(\d+)/(\d+)')
+            if (-not $m.Success) { $reasons += ("build{0} 没读到 OBJCACHE 读数" -f $i); continue }
+            $rtl[$i] = ('{0}/{1}' -f [int]$m.Groups[1].Value, [int]$m.Groups[2].Value)
+            $usr[$i] = ('{0}/{1}' -f [int]$m.Groups[3].Value, [int]$m.Groups[4].Value)
+            $exe = Join-Path $dir ($stem + '.exe')
+            if (-not (Test-Path $exe)) { $reasons += ("build{0} 无 exe" -f $i); continue }
+            $run = Invoke-TestExe -ExePath $exe -WorkDir $dir -Name ("{0}run{1}" -f $Name, $i)
+            if (-not $run.Ok) { $reasons += ("build{0} 跑失败 {1}" -f $i, $run.Detail); continue }
+            $outs[$i] = ($run.Output -join "`n")
+        }
+    } finally {
+        $env:LOCALAPPDATA = $ladSaved
+    }
+
+    # 每个源占几格: 键 = 去掉尾部 _<hex> 之后的源名。
+    $store = Join-Path (Join-Path $sandbox 'C3') 'objcache'
+    $nUser = -1; $nRtl = 0
+    if (Test-Path $store) {
+        $slots = @{}
+        foreach ($f in [System.IO.Directory]::GetFiles($store)) {
+            $mm = [regex]::Match([System.IO.Path]::GetFileName($f), '^(.+)_[0-9a-f]{8,}\.obj$')
+            if (-not $mm.Success) { continue }
+            $k = $mm.Groups[1].Value
+            if ($slots.ContainsKey($k)) { $slots[$k] = $slots[$k] + 1 } else { $slots[$k] = 1 }
+        }
+        foreach ($k in $slots.Keys) {
+            if ($k -eq $stem) { $nUser = $slots[$k] }
+            elseif ($k -like 'vb6rtl*') { if ($slots[$k] -gt $nRtl) { $nRtl = $slots[$k] } }
+        }
+    }
+    $a = @($rtl[0].Split('/'))
+
+    if ($reasons.Count -eq 0) {
+        if ($a.Count -ne 2 -or [int]$a[1] -le 0) { $reasons += 'RTL 计数读不到 (读数形状变了?)' }
+        elseif ([int]$a[0] -ne 0) { $reasons += ("空 store 第一次竟命中 {0}" -f $rtl[0]) }
+        elseif ($rtl[1] -ne ('{0}/{0}' -f $a[1])) { $reasons += ("第二次没全命中: {0}" -f $rtl[1]) }
+        elseif ($rtl[2] -ne $rtl[1]) { $reasons += ("-O 2 之后 RTL 变了: {0} (解耦破了)" -f $rtl[2]) }
+        elseif ([int](@($usr[2].Split('/'))[0]) -ne 0) { $reasons += ("-O 2 竟复用了 /O0 的用户码 obj: {0}" -f $usr[2]) }
+        elseif ($nRtl -ne 1) { $reasons += ("RTL 占了 {0} 格 (与用户 -O 无关, 该只 1 格)" -f $nRtl) }
+        elseif ($nUser -ne 2) { $reasons += ("用户码 {1}.c 占了 {0} 格 (该是 /O0 与 /O2 两格)" -f $nUser, $stem) }
+        elseif ($outs[0] -ne $outs[1] -or $outs[1] -ne $outs[2]) { $reasons += '三臂产物输出不一致 (命中改了产物)' }
+    }
+    if ($reasons.Count -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host ("FAIL: " + ($reasons -join ' | ')) -ForegroundColor Red
+        if ($Verbose) { Write-Host ("  rtl=" + ($rtl -join ' ') + " user=" + ($usr -join ' ')) }
+    }
+}
+
 function Test-VbpFail {
     param([string]$Name, [string]$VbpFile, [string]$Needle)
     $script:total++
@@ -1014,6 +1170,12 @@ if ($Category -in @("all", "run", "bas")) {
     Add-BasTest "test_udt_assign" "$Tests\test_udt_assign.bas" @("A1=1;S1=hello;N1=42", "A2=99;S2=world;N2=7", "H1=11;HS1=alpha", "E1=5;ES1=five", "L1=2;LS1=hello", "UDT-ASSIGN-DONE")
     Add-BasTest "test_date_display" "$Tests\test_date_display.bas" @("D1-noserial=Y", "D2-year=Y", "D2b-notime=Y", "D3-nextday=Y", "D4-nextyear=Y", "D5-diff0=Y", "D6-param=Y", "D7-longparam=Y", "D8-cstr=Y", "D9-format=Y", "DATE-DONE")
     Add-BasTest "test_variant" "$Tests\test_variant.bas" @("PASS1a", "PASS1c", "PASS5", "Done")
+    # ai/022 W1: Boolean 的类型可见性 + 装箱口径。32 条读数逐条钉: 转字符串的四条路
+    # (B1-B8)、类型标记 (B9-B14)、落进 Variant 的那一半 (B15-B20)、反向护栏 —— Integer /
+    # Long / Byte 的装箱读数一个都不许跟着动 (B21-B27)、判定语义 (B28-B29)、插值 (B30)、
+    # 裸值 Debug.Print (B31-B32)。
+    $boolNeedles = @("BOOL-DONE") + (1..30 | ForEach-Object { "B$_=Y" }) + @("B31-rawTrue", "B32-rawFalse")
+    Add-BasTest "test_bool_display" "$Tests\test_bool_display.bas" $boolNeedles
     Write-Host ""
 
         # --- P5.5 数据类型兼容性测试 ---
@@ -1070,10 +1232,35 @@ if ($Category -in @("all", "run", "bas")) {
     # generic Function/Sub with explicit instantiation + call-site type inference.
     Add-BasTest "test_generics" "$Tests\test_generics.bas" @("G-A=12", "G-B=hi", "G-C=21 abc!", "G-D=10", "G-E=10", "G-F=ab", "G-G=20", "LEN=2", "G-H=0", "G-I=20", "GENERICS-DONE")
     Add-BasTest "test_generics_x86" "$Tests\test_generics.bas" @("G-A=12", "G-B=hi", "G-C=21 abc!", "G-D=10", "G-E=10", "G-F=ab", "G-G=20", "LEN=2", "G-H=0", "G-I=20", "GENERICS-DONE") -Arch "x86"
+    # --- ai/028 V1: 反引号原始多行串 (C3 扩展; 词法出口归一, 计划书 R4) ---
+    # 18 条读数逐字比掉「与手写的 VB6 串相等」。其中 RS14 = Const 落点、RS15 = Declare 的
+    # Lib 名落点 (DI 桩所属家族按 Lib 串选, 折错就 LNK2019)、RS16/17/18 = 定界计数。
+    $rsNeedles = @("RS01=OK", "RS02=OK", "RS03=OK", "RS04=OK", "RS05=OK", "RS06=OK",
+                   "RS07=OK", "RS08=OK", "RS09=OK", "RS10=OK", "RS11=OK", "RS12=OK",
+                   "RS13=OK", "RS14=OK", "RS15=OK", "RS16=OK", "RS17=OK", "RS18=OK",
+                   "RAWSTR-DONE")
+    Add-BasTest "test_rawstr" "$Tests\test_rawstr.bas" $rsNeedles
+    Add-BasTest "test_rawstr_x86" "$Tests\test_rawstr.bas" $rsNeedles -Arch "x86"    # ai/028 V2: 串内插值 (美元花括号开孔)。21 条读数逐条钉"与手写的 & CStr() / Format$
+    # 同读数" —— 展开在词法出口, 编译器下游看到的就是手写形 (计划书 R2/R4)。
+    $riNeedles = @("RI01=OK", "RI02=OK", "RI03=OK", "RI04=OK", "RI05=OK", "RI06=OK",
+                   "RI07=OK", "RI08=OK", "RI09=OK", "RI10=OK", "RI11=OK", "RI12=OK",
+                   "RI13=OK", "RI14=OK", "RI15=OK", "RI16=OK", "RI17=OK", "RI18=OK",
+                   "RI19=OK", "RI20=OK", "RI21=OK", "p=1234", "INTERP-DONE")
+    Add-BasTest "test_interp" "$Tests\test_interp.bas" $riNeedles
+    Add-BasTest "test_interp_x86" "$Tests\test_interp.bas" $riNeedles -Arch "x86"
+
+    # 同一份内容存成 4 种 (编码 x 行尾): 前一对量解码, 后一对量「行界归一成 CRLF」这条口径。
+    foreach ($v in @("rs_utf8bom_crlf", "rs_utf8bom_lf", "rs_gbk_crlf", "rs_gbk_lf")) {
+        # 参数位置上不能直接写 "..." + $v + "...": PowerShell 会把 + 当独立实参传进来
+        # (实测四份变体全成 FAIL (compile)，因为 $Source 只拿到目录)。$($v) 显式界定变量名。
+        Add-BasTest ("rs_var_" + $v) "$Tests\rawstr_var\$($v).bas" @("RV1=OK", "RV2=OK", "RV3=OK", "RV-DONE")
+    }
+
     # Interface (tB extension, ai/022 B01): contract-block syntax layer - the blocks
     # parse, the new keywords stay soft, and the codegen path is still untouched.
     Add-BasTest "test_interface" "$Tests\test_interface.bas" @("ITF-SOFT:12", "ITF-1:OK", "ITF-2:OK", "INTERFACE-DONE")
     Add-BasTest "test_interface_x86" "$Tests\test_interface.bas" @("ITF-SOFT:12", "ITF-1:OK", "ITF-2:OK", "INTERFACE-DONE") -Arch "x86"
+    Add-BasTest "test_bool_display_x86" "$Tests\test_bool_display.bas" $boolNeedles -Arch "x86"
 
     # 分片: CI 用多 runner 并行跑 bas 用例时, 各 runner 只取第 BasShard 片
     if ($BasShardTotal -gt 1) {
@@ -1202,6 +1389,82 @@ if ($Category -in @("all", "run", "vbp")) {
     # `vb6_SetControlText(hwnd, (BSTR)ListCount)` 直接段错误), 且 List(j) 参与
     # 字符串相等比较要按 BSTR 处理 (RTL 声明是 void* → 曾判成 VariantObject, 比较恒假)。
     Test-Vbp "ctrlprop" "$Tests\ctrlprop\CtrlProp.vbp" @("CP1=2", "CP2=2", "CP3=1", "CP4=2", "CP5=2", "CTRLPROP-DONE")
+    # ai/029 C29-1a: 接上 Shape / Line 的"创建那一刀" —— 改之前 controlTypeToWin32Class 对
+    # 这两个类型返回 nullptr, 控件被当"不可见控件"跳过, 句柄永远是 NULL, 屏幕上什么都没有 (029 §二-2)。
+    # 21 条读数: 设计期几何落位 (CS1-CS4)、设计期整数属性落位 (CS5-CS7)、运行期读写回路 (CS8-CS10)、Line 改端点连窗口一起搬 (CS11-CS14)、手册那条"笔宽不是 1 就强制实线"的规则 (CS15-CS16)、容器 (Frame) 内的那条创建路 (CS17-CS19)、控件数组按槽位走 (CS20-CS21)。
+    # 窗体自己 Unload Me 退出 => 走 Test-Vbp 拿 stdout 针,
+    # 不需要 Test-GuiVbp 那套"起窗不崩"的弱判据。负控: 喂 BASE 二进制 14 条全翻红。
+    $csNeedles = @("CTRLSHAPE-DONE") + (1..21 | ForEach-Object { "CS$_=Y" })
+    Test-Vbp "ctrlshape" "$Tests\ctrlshape\CsApp.vbp" $csNeedles
+    Test-Vbp "ctrlshape_x86" "$Tests\ctrlshape\CsApp.vbp" $csNeedles -Arch "x86"
+    # ai/029 C29-1b: 文件系统三控件 (Drive/Dir/File ListBox) 接上"创建那一刀"。
+    # 改之前这三类在 controlTypeToWin32Class 里缺格 => 句柄永远 NULL, RTL 那套 P20-37
+    # 的填充 helper 从来没被喂过句柄; 而且这些 RTL 入口没有任何头声明, 生成代码按
+    # "返回 int" 的隐式原型编译, 字符串句柄被截成 32 位 (真编译真跑才暴露的段错误)。
+    # 14 条读数: 三控件都有窗口且填进去过 (CF1-CF3)、Dir 的 [名字] 约定 (CF4)、
+    # 设计期 Path/Pattern 落位 (CF5-CF7)、改 Pattern 立刻重刷 (CF8-CF9)、
+    # ListIndex/FileName 回路 (CF10-CF11)、目录->文件与盘->目录两条联动 (CF12-CF13)、
+    # 与原生 ListBox 的读数口径一致 (CF14)。负控: 喂 BASE 二进制 CF1-CF10/12/13 翻红。
+    $cfNeedles = @("CTRLFILES-DONE") + (1..14 | ForEach-Object { "CF$_=Y" })
+    Test-Vbp "ctrlfiles" "$Tests\ctrlfiles\CfApp.vbp" $cfNeedles
+    Test-Vbp "ctrlfiles_x86" "$Tests\ctrlfiles\CfApp.vbp" $cfNeedles -Arch "x86"
+    # ai/029 C29-9 / 决策 D6：CommonDialog 换成原生 comdlg32，不再经 MSComDlg.OCX。
+    # 为什么必须换（实测）：那个 OCX 只有 32 位，x64 里 CoCreateInstance 直接失败，于是改之前
+    # 这枚控件是静默空转的 —— 探针六条属性读数全空、六个 Show* 一个都不出现，而程序照旧打完
+    # 尾针、退出码 0。10 条读数：设计期四行落位（DL1-DL4）/ Filter 竖线原样读回（DL5）/
+    # 另一枚不被继承（DL6-DL7）/ 运行期读写回路（DL8）/ 两枚不串（DL9）/ 六个 Show* 的发码形状（DL10）。
+    # DL10 用恒假守卫把调用留在源码里：真弹框的判据要一套"起窗 + 自关"的探针（下一小批 C29-9b），
+    # 否则用例会在没人点"取消"的地方把门卡死。负控：喂 BASE 二进制直接编不过
+    # （C2065: vb6_hwnd_dl2 未声明 —— 那条路上压根没有属性宿主）。
+    $dlNeedles = @("CTRLDLG-DONE") + (1..10 | ForEach-Object { "DL$_=Y" })
+    Test-Vbp "ctrldlg" "$Tests\ctrldlg\DlApp.vbp" $dlNeedles
+    Test-Vbp "ctrldlg_x86" "$Tests\ctrldlg\DlApp.vbp" $dlNeedles -Arch "x86"
+    # 发码两面都要钉：原生入口在场，OCX 那一族形状不许还在场（D6：摘一类少一类）。
+    Test-EmitcShape "dl_emitc_shape" @("$Tests\ctrldlg\DlApp.vbp") @(
+        'vb6_RegisterCommDialogClass((void*)hInstance);',
+        '"VB6_COMMONDIALOG", "",',
+        'vb6_CdShowOpen((void*)vb6_hwnd_dl1);',
+        'vb6_CdShowFont((void*)vb6_hwnd_dl1);',
+        'vb6_CdSetFlags((void*)vb6_hwnd_dl1, 528);'
+    )
+    # 反面断言走新助手 Test-EmitcAbsent：只断原生入口在不够 —— 两条路并存时读数目视全绿、
+    # 发码却还在 CoCreateInstance，正是本批要拆掉的东西。
+    Test-EmitcAbsent "dl_emitc_no_ocx" @("$Tests\ctrldlg\DlApp.vbp") @(
+        'vb6_com_dl1',
+        'CLSIDFromProgID',
+        'CoCreateInstance'
+    )
+    # 通知接线这一刀没法在无头环境里真点一下, 所以断的是发码形状: 三条 WM_COMMAND 派发
+    # (含 Dir 下钻的前置判定) + 设计期 Path/Pattern 落到初值。少了任何一条, 控件就是
+    # "能显示、不联动" —— 而 CF12/CF13 是手工调 Sub 证明的, 不看这里就没人盯接线。
+    # ai/029 C29-T: VB.Timer 运行期真触发 + 精度提到 ms 级。
+    # 改之前的实测（029 §九 C29-T 那一格）：设计期 Enabled=0 的 Timer 压根不挂表，于是
+    # Timer1.Enabled = True 落到 vb6_SetTimerEnabled(vb6_hwnd_<timer>, ...) —— Timer 是无窗口
+    # 控件、句柄恒 NULL => SetPropW(NULL,...) 静默丢；Interval 改了也没人重排周期；精度只有
+    # SetTimer 那一档 ~15.6 ms 地板（Interval=20 实得 34.5 ms/tick、Interval=5 封顶 ~64/tick）。
+    # 现在 Enabled/Interval 真的起停与重排，底层走 winmm timeSetEvent（LoadLibrary 取，
+    # 不新增 import lib；取不到才退回 SetTimer）。读数是"秒级墙钟窗口里的 tick 数带区间"：
+    # 20 ms 名义 50 次，允许 [40,60]。负控（BASE 二进制）10 条全翻红且每条对上症状：
+    # T2=0 开不起来 / T3=32 改了不生效 / T5=16 关掉还在烧 / T6=32 精度地板。
+    $tmNeedles = @("TIMERPROG-DONE") + (1..10 | ForEach-Object { "T$_=Y" })
+    Test-Vbp "tmtimer" "$Tests\c29timer\TmApp.vbp" $tmNeedles
+    Test-Vbp "tmtimer_x86" "$Tests\c29timer\TmApp.vbp" $tmNeedles -Arch "x86"
+    # ai/030 T30-A: 内容寻址 obj store —— 命中/解耦/不改产物三条一起断 (用例自带隔离 store)
+    Test-ObjCache "objcache" "$Tests\hello.bas"
+    Test-EmitcShape "cf_emitc_shape" @("$Tests\ctrlfiles\CfApp.vbp") @(
+        'extern void vb6_drvList_Change(); vb6_drvList_Change();',
+        'extern void vb6_dirList_Change(); vb6_dirList_Change();',
+        'extern void vb6_fileList_Click(); vb6_fileList_Click();',
+        'if (vb6_DirListBoxDescendSelected((void*)vb6_hwnd_dirList)) {',
+        'vb6_DirListBoxSetPath((void*)vb6_hwnd_dirList, vb6_BSTR_FromStr(L"C:\\Windows\\System32"));',
+        'vb6_FileListBoxSetPattern((void*)vb6_hwnd_fileList, vb6_BSTR_FromStr(L"*.dll"));'
+    )
+    # ai/028 V1 的另两个 R4 落点: 模块头 Attribute 的值与 CreateObject 的工程内 ProgID
+    # 都写成反引号串 —— 前者折错则模块名对不上 .vbp, 后者折错则没有改写、运行期变查注册表。
+    $rsProjNeedles = @("RP1=OK", "RP2=OK", "RP3=OK", "RP4=OK", "RP5=OK", "RP-DONE")
+    Test-Vbp "rawstr_proj" "$Tests\rawstr_proj\RsApp.vbp" $rsProjNeedles
+    Test-Vbp "rawstr_proj_x86" "$Tests\rawstr_proj\RsApp.vbp" $rsProjNeedles -Arch "x86"
+
 
     # P20-38: ProgressBar 复刻 (msctls_progress32, 不加载 mscomctl.ocx)。
     # PB11 盯 SetPropW 存 0 被当成"未设置"回落默认值的坑。
@@ -1284,6 +1547,45 @@ if ($Category -in @("all", "run", "vbp")) {
         "EV22-UNLOAD", "EV23-TERMINATE",
         "EV24-OLE-DROP=OLE-TEST-DROP EFF=1", "EV25-OLE-OVER",
         "EV26-DRAG-DONE", "EV27-STARTDRAG", "EV29-COMPLETE=3") -Env "C3_OLEDDB_TEST=1"
+
+    # --- P20-46: 控件字符串全程 W / 支持多国语言（用户要求）的源码面反例断言 ---
+    # 判据两条:
+    #   ① RTL 源码里不得**直接调 A 版 Win32 API** —— 编译已带 /DUNICODE /D_UNICODE /utf-8
+    #      (msvc_driver.cpp:172), 但不带后缀的宏与 A 版调用仍可能混进来。
+    #      `src/rtl/core/di/` 下的 **DI 桩除外**: 那是用户 `Declare ... Alias "xxxA"` 时
+    #      C3 提供的转发桩, 本来就该给 A 版。
+    #   ② 字体 charset 必须是 DEFAULT_CHARSET —— 写死 GB2312_CHARSET 之类会让系统在字体里
+    #      找不到韩文/俄文字形, 显示成方框 (Fix 190 的教训)。
+    $script:total++
+    Write-Host -NoNewline "  [SRC] widechar_only ... "
+    $rtlRoot = Join-Path (Split-Path $PSScriptRoot -Parent) "src\rtl\core"
+    $ansiBad = @()
+    if (Test-Path $rtlRoot) {
+        # 递归取文件再 Select-String —— `-Path '...\*\*.c'` 这种通配是匹配不到文件的,
+        # 那会让断言永远 PASS (假绿)。这里两向都验过: 不过滤 di/ 时必须命中。
+        $rtlFiles = Get-ChildItem -Path $rtlRoot -Recurse -File -Include *.c, *.cpp -ErrorAction SilentlyContinue |
+                    Where-Object { $_.FullName -notmatch '\\di\\' }
+        if ($rtlFiles) {
+            # 用 @() 强制数组: Select-String 只命中 1 条时返回标量, 直接 `$x += ...` 会
+            # "MatchInfo 没有 op_Addition" 而抛异常 (断言崩掉而不是判红) —— 两向验证抓到过。
+            $ansiBad = @(Select-String -Path $rtlFiles.FullName -ErrorAction SilentlyContinue `
+                -Pattern '\b(SendMessageA|PostMessageA|CreateWindowExA|RegisterClassA|DefWindowProcA|CallWindowProcA|GetWindowTextA|SetWindowTextA|GetClassNameA|DrawTextA|CreateFontA|LoadCursorA|LoadIconA)\s*\(' |
+                Where-Object { $_.Line -notmatch '^\s*(//|\*)' })
+            $ansiBad += @(Select-String -Path $rtlFiles.FullName -ErrorAction SilentlyContinue `
+                -Pattern '(GB2312_CHARSET|SHIFTJIS_CHARSET|HANGEUL_CHARSET|CHINESEBIG5_CHARSET)' |
+                Where-Object { $_.Line -notmatch '^\s*(//|\*)' })
+        }
+    }
+    if ($ansiBad.Count -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL (ANSI/非默认 charset 残留)" -ForegroundColor Red
+        $ansiBad | Select-Object -First 5 | ForEach-Object {
+            Write-Host ("    " + $_.Filename + ":" + $_.LineNumber + "  " + $_.Line.Trim()) -ForegroundColor Red
+        }
+    }
 
     # --- Fix 195: 资源引用缺失不得静默, 且 --extract-frx 能把 .frx 取值导成 VB 代码 ---
     # 背景: VB6 把多行文本/图片甩进同名 .frx, .frm 里只留 `属性 = "X.frx":含偏移`。
@@ -1934,6 +2236,55 @@ if ($Category -in @("all", "syntax")) {
     if (Test-Path "$Tests\cls_neg\ci_n18_overridable_in_interface.bas") {
         Test-SyntaxFail "ci_n18_overridable_in_iface" "$Tests\cls_neg\ci_n18_overridable_in_interface.bas" "must not carry a virtual modifier"
     }
+    # ai/028 V1 负例: 未闭合的反引号串 (表达式位与 Attribute 行两个入口) 与三枚反引号
+    # (想写一枚字面反引号但少写闭合符) 都报 1007。最后一条是 R1 的钉子 —— 普通的 "" 串
+    # 一律不许跨行、不许插值, 老诊断 1002 必须继续报, 否则就是新语法吃掉老语法。
+    $rsNeg = @(
+        @("rs_n1_unclosed", "rs_n1_unclosed.bas", "VB1007"),
+        @("rs_n2_three_backticks", "rs_n2_three_backticks.bas", "VB1007"),
+        @("rs_n3_plain_quote_oneline", "rs_n3_plain_quote_still_oneline.bas", "VB1002"),
+        @("rs_n4_unclosed_on_attr", "rs_n4_unclosed_on_attr.bas", "VB1007")
+    )
+    foreach ($c in $rsNeg) {
+        $rsNegPath = "$Tests\rawstr_neg\" + $c[1]
+        if (Test-Path $rsNegPath) {
+            Test-SyntaxFail $c[0] $rsNegPath $c[2]
+        } else {
+            Write-Host "  [SYNTAX-FAIL] $($c[0]) ... SKIP (missing case file)" -ForegroundColor DarkGray
+        }
+    }
+    # 发码形状判据: 字面量独占一行、行界以 \r\n 转义出现、非 ASCII 一律 \uXXXX
+    # (⇒ 与 cl.exe 的源码编码假设无关)。
+    # ai/028 V2 负例。前两条在词法层 (1008 = 孔没等到闭合的右花括号, 含"孔跨行"这种写法;
+    # 1009 = 空孔), --syntax-only 就够。后两条是 R2 的钉子: 孔里的表达式就是普通表达式,
+    # 未声明的名字照报既有的 VB3001。in_n4 特意让**第二个孔**出错 —— 报在 (8,7) 才证明
+    # 子扫描的窗口把行列播种做对了 (指回原文件, 不需要事后平移 AST)。
+    $inNeg = @(
+        @("in_n1_unclosed_hole", "in_n1_unclosed_hole.bas", "VB1008"),
+        @("in_n2_empty_hole", "in_n2_empty_hole.bas", "VB1009")
+    )
+    foreach ($c in $inNeg) {
+        $inNegPath = "$Tests\interp_neg\" + $c[1]
+        if (Test-Path $inNegPath) {
+            Test-SyntaxFail $c[0] $inNegPath $c[2]
+        } else {
+            Write-Host "  [SYNTAX-FAIL] $($c[0]) ... SKIP (missing case file)" -ForegroundColor DarkGray
+        }
+    }
+    Test-CodegenNote "in_n3_undeclared_in_hole" @("$Tests\interp_neg\in_n3_undeclared_in_hole.bas") @("VB3001", "nopeHere")
+    Test-CodegenNote "in_n4_second_hole_line" @("$Tests\interp_neg\in_n4_second_hole_line.bas") @("VB3001", "alsoNope", "(8,7)")
+    # ai/028 V2 的发码形状: 插值必须** literally ** 发成手写的 & CStr() / Format$ 形状 ——
+    # 注意第二枚读数挑的是 vb6_CStrLong (按实参类型改发专用 CStr), 这正是"降级成真 AST"
+    # 才继承得到的东西 (计划书 R2/R3 的实测面)。
+    Test-EmitcShape "ri_emitc_shape" @("$Tests\test_interp.bas") @(
+        'vb6_BSTR_Concat(vb6_BSTR_FromStr(L"n="), vb6_CStrLong(n))',
+        'vb6_Format(vb6_VariantLong(n), vb6_BSTR_FromStr(L"#,##0"))')
+    Test-EmitcShape "rs_emitc_shape" @("$Tests\test_rawstr.bas") @(
+        'vb6_BSTR_FromStr(L"line1\r\nline2")',
+        '#define RS_CONST (vb6_BSTR_FromStr(L"k1\r\nk2 = \"v\""))',
+        'vb6_BSTR_FromStr(L"\u59D3\u540D: \u5F20\u4E09\r\n\u5907\u6CE8: \"vip\"")',
+        'vb6_BSTR_FromStr(L"C:\\note\\{x}\\n")')
+
     # B07a positive guard: a base class in another module resolves and stays silent.
     if (Test-Path "$Tests\cls_neg\ci_pos_base.cls") {
         Test-SyntaxMulti "ci_pos_pair" @("$Tests\cls_neg\ci_pos_base.cls", "$Tests\cls_neg\ci_pos_derived.cls")

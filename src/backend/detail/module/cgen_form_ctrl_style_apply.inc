@@ -149,6 +149,39 @@
                 // (创建时读设计期属性容易与"未写即默认"的口径打架), 这里只给基类样式。
                 createCaption = "";   // 页标题走 TCM_INSERTITEM, 创建时不给标题
                 break;
+            case FrmControlType::DriveListBox:
+                // C29-1b: VB6 的 DriveListBox 外观就是"只能选、不能改"的组合框
+                style |= 0x0003L | kWsVscroll | kWsBorder;  // CBS_DROPDOWNLIST
+                createCaption = "";
+                break;
+            case FrmControlType::DirListBox:
+            case FrmControlType::FileListBox:
+                // 列表框同款: LBS_NOTIFY 才有 SELCHANGE / DBLCLK 通知可派
+                style |= kLbsNotify | kWsBorder | kWsVscroll;
+                createCaption = "";
+                break;
+            case FrmControlType::Shape:
+            case FrmControlType::Line:
+                // C29-1a: 自绘控件 (VB6_SHAPE / VB6_LINE)，无文本、无边框样式
+                createCaption = "";
+                break;
+            case FrmControlType::CommonDialog:
+                // D6 / C29-9: 这枚"控件"没有外观 —— 它是原生对话框的属性袋。
+                // 窗口照建（要有句柄存属性），但必须**不可见**：基础样式里有 WS_VISIBLE，
+                // 这里清掉，尺寸也由下面的 0x0 兜住。
+                createCaption = "";
+                style &= ~kWsVisible;
+                width = 0;
+                height = 0;
+                break;
+            case FrmControlType::Timer:
+                // C29-T: 与 CommonDialog 同一手法 —— Timer 要有句柄（当计时器的身份），
+                // 但绝不能有外观：不可见、0x0，且不吃 Tab 焦点。
+                createCaption = "";
+                style &= ~kWsVisible;
+                width = 0;
+                height = 0;
+                break;
             default:
                 break;
         }
@@ -158,6 +191,12 @@
                                 ctrl.controlType == FrmControlType::ComboBox);
         std::string delayedText = (ctrl.controlType == FrmControlType::TextBox) ? ctrlText : ctrlCaption;
         if (needDelayedText) createCaption = "";  // 创建时不传文本
+
+        // C29-1a: Line 在 VB6 里没有 Left/Top/Width/Height —— 窗口矩形就是 X1/Y1/X2/Y2
+        // (容器缇值) 的包围盒。不这样算, 控件会拿默认尺寸 1000x300 创建出来。
+        if (ctrl.controlType == FrmControlType::Line) {
+            lineRectFromEndpoints(ctrl, left, top, width, height);
+        }
 
         // 生成vb6_CreateControl调用
         // 生成vb6_CreateControl调用 (P7.6: 数组控件用CtrlArr_SetAt)
@@ -230,42 +269,69 @@
             }
         }
 
-        // P20-35: Shape/Line属性初始化 (从.frm属性设置)
-        if (ctrl.controlType == FrmControlType::Shape) {
-            std::string shw = "vb6_hwnd_" + cIdent(ctrl.controlName);
-            auto shIt = ctrl.properties.find("Shape"); if (shIt != ctrl.properties.end() && shIt->second.intValue != 0)
-                c_.emitLine("vb6_SetShapeType((void*)" + shw + ", " + std::to_string((int)shIt->second.intValue) + ");");
-            shIt = ctrl.properties.find("BorderWidth"); if (shIt != ctrl.properties.end() && shIt->second.intValue != 1)
-                c_.emitLine("vb6_SetShapeBorderWidth((void*)" + shw + ", " + std::to_string((int)shIt->second.intValue) + ");");
-            shIt = ctrl.properties.find("BorderStyle"); if (shIt != ctrl.properties.end() && shIt->second.intValue != 1)
-                c_.emitLine("vb6_SetShapeBorderStyle((void*)" + shw + ", " + std::to_string((int)shIt->second.intValue) + ");");
-            shIt = ctrl.properties.find("FillStyle"); if (shIt != ctrl.properties.end() && shIt->second.intValue != 1)
-                c_.emitLine("vb6_SetShapeFillStyle((void*)" + shw + ", " + std::to_string((int)shIt->second.intValue) + ");");
-        } else if (ctrl.controlType == FrmControlType::Line) {
-            std::string lhw = "vb6_hwnd_" + cIdent(ctrl.controlName);
-            auto lIt2 = ctrl.properties.find("X1"); if (lIt2 != ctrl.properties.end() && lIt2->second.intValue != 0)
-                c_.emitLine("vb6_SetLineX1((void*)" + lhw + ", " + std::to_string((int)lIt2->second.intValue) + ");");
-            lIt2 = ctrl.properties.find("Y1"); if (lIt2 != ctrl.properties.end() && lIt2->second.intValue != 0)
-                c_.emitLine("vb6_SetLineY1((void*)" + lhw + ", " + std::to_string((int)lIt2->second.intValue) + ");");
-            lIt2 = ctrl.properties.find("X2"); if (lIt2 != ctrl.properties.end())
-                c_.emitLine("vb6_SetLineX2((void*)" + lhw + ", " + std::to_string((int)lIt2->second.intValue) + ");");
-            lIt2 = ctrl.properties.find("Y2"); if (lIt2 != ctrl.properties.end())
-                c_.emitLine("vb6_SetLineY2((void*)" + lhw + ", " + std::to_string((int)lIt2->second.intValue) + ");");
-            lIt2 = ctrl.properties.find("BorderWidth"); if (lIt2 != ctrl.properties.end() && lIt2->second.intValue != 1)
-                c_.emitLine("vb6_SetLineBorderWidth((void*)" + lhw + ", " + std::to_string((int)lIt2->second.intValue) + ");");
-            lIt2 = ctrl.properties.find("BorderStyle"); if (lIt2 != ctrl.properties.end() && lIt2->second.intValue != 1)
-                c_.emitLine("vb6_SetLineBorderStyle((void*)" + lhw + ", " + std::to_string((int)lIt2->second.intValue) + ");");
-        }
+        // C29-1a: 设计期外观属性落到控件 (原来这里是一整段内联块; 容器子控件那条路共用同一个助手)
+        emitShapeLineProps(ctrl, ctrlHwndExprForInit(ctrl));
 
-        // P20-37: DriveListBox/DirListBox/FileListBox initial population
+        // P20-37 / C29-1b: 三控件的初值。设计期给了 Drive / Path / Pattern 就用它, 没给才
+        // 退回当前目录 (FileListBox 的 Pattern 缺省时由 RTL 回 "*.*")。顺序上先填表再设值,
+        // SetDrive / SetPath / SetPattern 自己会重刷列表。
         if (ctrl.controlType == FrmControlType::DriveListBox) {
-            c_.emitLine("vb6_DriveListBoxRefresh((void*)vb6_hwnd_" + cIdent(ctrl.controlName) + ");");
+            std::string p37Hwnd = "vb6_hwnd_" + cIdent(ctrl.controlName);
+            c_.emitLine("vb6_DriveListBoxRefresh((void*)" + p37Hwnd + ");");
+            auto dIt = ctrl.properties.find("Drive");
+            if (dIt != ctrl.properties.end() && dIt->second.type == FrmValueType::String) {
+                std::string dRaw = dIt->second.rawText;
+                if (dRaw.size() >= 2 && dRaw.front() == '"' && dRaw.back() == '"')
+                    dRaw = dRaw.substr(1, dRaw.size() - 2);
+                if (!dRaw.empty())
+                    c_.emitLine("vb6_DriveListBoxSetDrive((void*)" + p37Hwnd
+                                + ", vb6_BSTR_FromStr(L\"" + escapeWideCString(dRaw) + "\"));");
+            }
         } else if (ctrl.controlType == FrmControlType::DirListBox) {
-            c_.emitLine("{ wchar_t _p" + cIdent(ctrl.controlName) + "[MAX_PATH]; GetCurrentDirectoryW(MAX_PATH, _p" + cIdent(ctrl.controlName) + ");");
-            c_.emitLine("  vb6_DirListBoxSetPath((void*)vb6_hwnd_" + cIdent(ctrl.controlName) + ", _p" + cIdent(ctrl.controlName) + "); }");
+            std::string p37Var = "_p" + cIdent(ctrl.controlName);
+            std::string p37Hwnd2 = "vb6_hwnd_" + cIdent(ctrl.controlName);
+            auto pIt = ctrl.properties.find("Path");
+            bool hasPath = (pIt != ctrl.properties.end() && pIt->second.type == FrmValueType::String);
+            std::string pRaw;
+            if (hasPath) {
+                pRaw = pIt->second.rawText;
+                if (pRaw.size() >= 2 && pRaw.front() == '"' && pRaw.back() == '"')
+                    pRaw = pRaw.substr(1, pRaw.size() - 2);
+            }
+            if (hasPath && !pRaw.empty()) {
+                c_.emitLine("vb6_DirListBoxSetPath((void*)" + p37Hwnd2
+                            + ", vb6_BSTR_FromStr(L\"" + escapeWideCString(pRaw) + "\"));");
+            } else {
+                c_.emitLine("{ wchar_t " + p37Var + "[MAX_PATH]; GetCurrentDirectoryW(MAX_PATH, " + p37Var + ");");
+                c_.emitLine("  vb6_DirListBoxSetPath((void*)" + p37Hwnd2 + ", " + p37Var + "); }");
+            }
         } else if (ctrl.controlType == FrmControlType::FileListBox) {
-            c_.emitLine("{ wchar_t _p" + cIdent(ctrl.controlName) + "[MAX_PATH]; GetCurrentDirectoryW(MAX_PATH, _p" + cIdent(ctrl.controlName) + ");");
-            c_.emitLine("  vb6_FileListBoxSetPath((void*)vb6_hwnd_" + cIdent(ctrl.controlName) + ", _p" + cIdent(ctrl.controlName) + "); }");
+            std::string p37Var2 = "_p" + cIdent(ctrl.controlName);
+            std::string p37Hwnd3 = "vb6_hwnd_" + cIdent(ctrl.controlName);
+            auto qIt = ctrl.properties.find("Path");
+            bool hasQ = (qIt != ctrl.properties.end() && qIt->second.type == FrmValueType::String);
+            std::string qRaw;
+            if (hasQ) {
+                qRaw = qIt->second.rawText;
+                if (qRaw.size() >= 2 && qRaw.front() == '"' && qRaw.back() == '"')
+                    qRaw = qRaw.substr(1, qRaw.size() - 2);
+            }
+            if (hasQ && !qRaw.empty()) {
+                c_.emitLine("vb6_FileListBoxSetPath((void*)" + p37Hwnd3
+                            + ", vb6_BSTR_FromStr(L\"" + escapeWideCString(qRaw) + "\"));");
+            } else {
+                c_.emitLine("{ wchar_t " + p37Var2 + "[MAX_PATH]; GetCurrentDirectoryW(MAX_PATH, " + p37Var2 + ");");
+                c_.emitLine("  vb6_FileListBoxSetPath((void*)" + p37Hwnd3 + ", " + p37Var2 + "); }");
+            }
+            auto kIt = ctrl.properties.find("Pattern");
+            if (kIt != ctrl.properties.end() && kIt->second.type == FrmValueType::String) {
+                std::string kRaw = kIt->second.rawText;
+                if (kRaw.size() >= 2 && kRaw.front() == '"' && kRaw.back() == '"')
+                    kRaw = kRaw.substr(1, kRaw.size() - 2);
+                if (!kRaw.empty())
+                    c_.emitLine("vb6_FileListBoxSetPattern((void*)" + p37Hwnd3
+                                + ", vb6_BSTR_FromStr(L\"" + escapeWideCString(kRaw) + "\"));");
+            }
         }
 
         // ProgressBar 设计期属性 (Min/Max/Value/Orientation/Scrolling)。
@@ -481,6 +547,40 @@
             }
         }
 
+        // D6 / C29-9: CommonDialog 的设计期四行（VB6 会把用户填的属性原样存进 .frm）。
+        // 走的是刚建好的那枚不可见句柄，所以顺序上必须排在 vb6_hwnd_<名> 赋值之后 ——
+        // 这里就是那条不变式（同 C29-1a 的 emitShapeLineProps 一个位置）。
+        if (ctrl.controlType == FrmControlType::CommonDialog) {
+            std::string cdHwnd = "vb6_hwnd_" + cIdent(ctrl.controlName);
+            auto cdStr = [&](const char* key, const char* fn) {
+                auto it = ctrl.properties.find(key);
+                if (it == ctrl.properties.end() || it->second.type != FrmValueType::String) return;
+                std::string raw = it->second.rawText;
+                if (raw.size() >= 2 && raw.front() == '"' && raw.back() == '"')
+                    raw = raw.substr(1, raw.size() - 2);
+                c_.emitLine(std::string(fn) + "((void*)" + cdHwnd + ", vb6_BSTR_FromStr(L\""
+                            + escapeWideCString(raw) + "\"));");
+            };
+            auto cdInt = [&](const char* key, const char* fn) {
+                auto it = ctrl.properties.find(key);
+                if (it == ctrl.properties.end()) return;
+                c_.emitLine(std::string(fn) + "((void*)" + cdHwnd + ", "
+                            + std::to_string((int)it->second.intValue) + ");");
+            };
+            cdStr("Filter",      "vb6_CdSetFilter");
+            cdStr("DialogTitle", "vb6_CdSetDialogTitle");
+            cdStr("InitDir",     "vb6_CdSetInitDir");
+            cdStr("DefaultExt",  "vb6_CdSetDefaultExt");
+            cdStr("FileName",    "vb6_CdSetFileName");
+            cdStr("FontName",    "vb6_CdSetFontName");
+            cdInt("Flags",       "vb6_CdSetFlags");
+            cdInt("CancelError", "vb6_CdSetCancelError");
+            cdInt("Color",       "vb6_CdSetColor");
+            cdInt("Min",         "vb6_CdSetMin");
+            cdInt("Max",         "vb6_CdSetMax");
+            cdInt("Copies",      "vb6_CdSetCopies");
+            cdInt("FontSize",    "vb6_CdSetFontSize");
+        }
         // P24 / Fix 182: .frx 设计期属性（Picture / TextBox.Text / ListBox.List）。
         // 实现已抽到 cgen_form_create_controls.inc 的 emitControlFrxProps, 与容器子控件共用。
         emitControlFrxProps(ctrl);

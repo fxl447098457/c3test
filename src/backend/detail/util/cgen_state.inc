@@ -124,6 +124,13 @@
     // 消费点一律先判 Date, 以免既有 double 路径失去变量。
     std::unordered_set<std::string> knownDateVars_;
 
+    // ai/022 W1: `As Boolean` 在 C 层是 int16_t / VBABOOL, 与 Integer/Long 同一登记串
+    // ⇒ 只按 C 类型登记会让 inferExprType 永远看不见 Boolean: `CStr(b)`、`"x=" & b`、
+    // String 形参收 Boolean 实参都走 vb6_CStrLong → 打出 -1 而 VB6 打 "True"。
+    // 与 knownLongVars_ **并存**登记 (口径同 Fix 117c 的 Single / Fix 175 的 Date),
+    // 消费点一律先判 Boolean, 以免既有整数路径失去变量。
+    std::unordered_set<std::string> knownBoolVars_;
+
     // 已知Long/Integer/Boolean变量名集合 (小写) - 用于COM值解封类型推断
     std::unordered_set<std::string> knownLongVars_;
 

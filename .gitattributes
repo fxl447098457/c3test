@@ -14,3 +14,17 @@
 *.frx binary
 *.ctx binary
 *.pgx binary
+
+# ai/028 V1: 反引号原始串的行界/编码变体夹具 —— **字节本身就是被测对象**。
+# core.autocrlf=true 会把 *.bas 统统按 LF 存进索引 (实测 i/lf)，于是 checkout 时
+# 存成 CRLF 的那两份与存成 LF 的那两份在 CI 上变成同一份文件，"同一内容四种源
+# 读回同一个串"这条判据当场静默退化成两轴里的一轴 (上面 .frx 那段说的就是这种
+# 本机/CI 不一致)。`-text` 关掉两个方向的转换 ⇒ 工作区字节 == blob 字节。
+tests/rawstr_var/*.bas -text
+tests/rawstr_neg/*.bas -text
+tests/rawstr_proj/* -text
+tests/test_rawstr.bas -text
+# ai/028 V2 同理: 插值用例的**行号/列号**就是断言对象 (负例 n4 钉"第二个孔落在原文件
+# 第 8 行"), 行尾被改写就会挪位置。
+tests/interp_neg/*.bas -text
+tests/test_interp.bas -text

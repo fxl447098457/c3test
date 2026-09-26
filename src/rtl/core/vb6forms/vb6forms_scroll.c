@@ -143,6 +143,16 @@ void vb6_SetSmallChange(void* hwnd, int change) {
 // P13.12: Timer properties
 // ============================================================
 
+// P13.12 + C29-T: Timer properties
+//
+// 改之前这两个 setter 只往句柄上 SetPropW，而 Timer 是无窗口控件 ⇒ 句柄恒 NULL ⇒
+// `Timer1.Enabled = True` / `Timer1.Interval = 100` 全是静默空转（实测：运行期开启后
+// tick 数还是 0；改 Interval 后速率纹丝不动；关掉之后还在烧）。现在 setter 存住读数的
+// 同时真的驱动引擎（起 / 停 / 按新周期重排）。
+//
+// Enabled 的存储照 CommonDialog 那条 normalize：VB6 的 True 是 -1，直存 val+1 会变成 0，
+// 而 SetPropW 存 (HANDLE)0 与"从没设过"不可分辨 —— 于是 `Enabled = False` 读回 True。
+
 int vb6_GetTimerInterval(void* hwnd) {
     if (!hwnd) return 0;
     HANDLE hProp = GetPropW((HWND)hwnd, L"VB6_TimerInterval");
@@ -152,22 +162,23 @@ int vb6_GetTimerInterval(void* hwnd) {
 
 void vb6_SetTimerInterval(void* hwnd, int interval) {
     if (!hwnd) return;
+    if (interval < 0) interval = 0;
+    if (interval > 65535) interval = 65535;      // VB6 口径
     SetPropW((HWND)hwnd, L"VB6_TimerInterval", (HANDLE)(INT_PTR)interval);
-    // Timer hwnd is actually the timer ID stored as a property
-    // This is a design-time placeholder; actual timer manipulation
-    // goes through vb6_SetTimer/vb6_KillTimer
+    vb6_TimerSetPeriod(hwnd, interval);
 }
 
 int vb6_GetTimerEnabled(void* hwnd) {
-    if (!hwnd) return -1;  // VB6 default: True
+    if (!hwnd) return -1;  // VB6 默认: True
     HANDLE hProp = GetPropW((HWND)hwnd, L"VB6_TimerEnabled");
-    if (hProp) return (int)(INT_PTR)hProp;
+    if (hProp) return ((int)(INT_PTR)hProp - 1) ? -1 : 0;
     return -1;  // True
 }
 
 void vb6_SetTimerEnabled(void* hwnd, int enabled) {
     if (!hwnd) return;
-    SetPropW((HWND)hwnd, L"VB6_TimerEnabled", (HANDLE)(INT_PTR)enabled);
+    SetPropW((HWND)hwnd, L"VB6_TimerEnabled", (HANDLE)(INT_PTR)((enabled ? 1 : 0) + 1));
+    vb6_TimerSetEnabled(hwnd, enabled);
 }
 
 // ============================================================

@@ -343,6 +343,42 @@ void vb6_SetDefaultButton(void* hwnd, int isDefault);
 int vb6_GetCancelButton(void* hwnd);
 void vb6_SetCancelButton(void* hwnd, int isCancel);
 
+
+// ============================================================
+// C29-9 / D6: CommonDialog（原生 comdlg32，不走 MSComDlg.OCX）
+// ============================================================
+// 定义在 vb6forms_ctrl.c。**每个入口都要有声明** —— C29-1b 的教训：有定义没声明时
+// 生成代码按"返回 int"的隐式原型编译，字符串句柄被截成 32 位。
+// 本头不引 oleauto.h，故 BSTR 一律写成 wchar_t*（OLECHAR = wchar_t，同一类型）。
+
+// 属性宿主是一枚自注册的不可见子窗口 VB6_COMMONDIALOG（029 决策 D6）
+void vb6_RegisterCommDialogClass(void* hInstance);
+// C29-T: Timer 的身份类（不可见、0x0），CreateControls 开头注册。
+void vb6_RegisterTimerClass(void* hInstance);
+
+wchar_t* vb6_CdGetFilter(void* hwnd);      void vb6_CdSetFilter(void* hwnd, wchar_t* v);
+wchar_t* vb6_CdGetFileName(void* hwnd);    void vb6_CdSetFileName(void* hwnd, wchar_t* v);
+wchar_t* vb6_CdGetFileTitle(void* hwnd);   void vb6_CdSetFileTitle(void* hwnd, wchar_t* v);
+wchar_t* vb6_CdGetDialogTitle(void* hwnd); void vb6_CdSetDialogTitle(void* hwnd, wchar_t* v);
+wchar_t* vb6_CdGetInitDir(void* hwnd);     void vb6_CdSetInitDir(void* hwnd, wchar_t* v);
+wchar_t* vb6_CdGetDefaultExt(void* hwnd);  void vb6_CdSetDefaultExt(void* hwnd, wchar_t* v);
+wchar_t* vb6_CdGetFontName(void* hwnd);    void vb6_CdSetFontName(void* hwnd, wchar_t* v);
+int vb6_CdGetFlags(void* hwnd);            void vb6_CdSetFlags(void* hwnd, int v);
+int vb6_CdGetCancelError(void* hwnd);      void vb6_CdSetCancelError(void* hwnd, int v);
+int vb6_CdGetColor(void* hwnd);            void vb6_CdSetColor(void* hwnd, int v);
+int vb6_CdGetMin(void* hwnd);              void vb6_CdSetMin(void* hwnd, int v);
+int vb6_CdGetMax(void* hwnd);              void vb6_CdSetMax(void* hwnd, int v);
+int vb6_CdGetCopies(void* hwnd);           void vb6_CdSetCopies(void* hwnd, int v);
+int vb6_CdGetFontSize(void* hwnd);         void vb6_CdSetFontSize(void* hwnd, int v);
+
+// 六个 Show*：1 = 用户确认并已写回读数；0 = 取消（CancelError=True 时顺带报 32755）
+int vb6_CdShowOpen(void* hwnd);
+int vb6_CdShowSave(void* hwnd);
+int vb6_CdShowColor(void* hwnd);
+int vb6_CdShowFont(void* hwnd);
+int vb6_CdShowPrinter(void* hwnd);
+int vb6_CdShowAbout(void* hwnd);
+
 #ifdef __cplusplus
 }
 #endif

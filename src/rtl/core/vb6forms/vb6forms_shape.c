@@ -33,13 +33,16 @@ static LRESULT CALLBACK vb6_ShapeWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM 
 
         int shapeType = (int)(INT_PTR)GetPropW(hwnd, L"VB6_ShapeType");
         int borderW  = (int)(INT_PTR)GetPropW(hwnd, L"VB6_ShapeBorderWidth");
-        int borderS  = (int)(INT_PTR)GetPropW(hwnd, L"VB6_ShapeBorderStyle");
-        int fillS    = (int)(INT_PTR)GetPropW(hwnd, L"VB6_ShapeFillStyle");
+        // C29-1a: 这两枚属性存的是 val+1 (见 vb6forms_widget_prop.c 的说明), 取出来要减回去
+        HANDLE hBs = GetPropW(hwnd, L"VB6_ShapeBorderStyle");
+        HANDLE hFs = GetPropW(hwnd, L"VB6_ShapeFillStyle");
+        int borderS  = hBs ? (int)(INT_PTR)hBs - 1 : 1;
+        int fillS    = hFs ? (int)(INT_PTR)hFs - 1 : 1;
         int32_t borderC = (int32_t)(INT_PTR)GetPropW(hwnd, L"VB6_ShapeBorderColor");
         int32_t fillC   = (int32_t)(INT_PTR)GetPropW(hwnd, L"VB6_ShapeFillColor");
 
         if (borderW <= 0) borderW = 1;
-        if (borderS <= 0) borderS = 1;  /* 1=Solid */
+        if (borderS < 0) borderS = 1;  /* 旧写法把 0=Transparent 钳成 1, 下面 PS_NULL 分支成了死码 */
 
         /* 画笔: borderS映射 VB6: 0=Transparent,1=Solid,2=Dash,3=Dot,4=DashDot,5=DashDotDot,6=InsideSolid */
         int penStyle = PS_SOLID;
@@ -125,17 +128,25 @@ static LRESULT CALLBACK vb6_LineWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM l
         RECT rc;
         GetClientRect(hwnd, &rc);
 
-        /* Line属性: X1/Y1/X2/Y2 (像素坐标, 相对于控件区域) */
-        int x1 = (int)(INT_PTR)GetPropW(hwnd, L"VB6_LineX1");
-        int y1 = (int)(INT_PTR)GetPropW(hwnd, L"VB6_LineY1");
-        int x2 = (int)(INT_PTR)GetPropW(hwnd, L"VB6_LineX2");
-        int y2 = (int)(INT_PTR)GetPropW(hwnd, L"VB6_LineY2");
+        /* Line属性: X1/Y1/X2/Y2 存的是**容器缇值** (与 VB6 的 .frm / 运行期赋值同一口径),
+         * 控件窗口矩形 = 这四点的包围盒, 所以绘制时要先减掉包围盒原点再换算成像素。 */
+        int x1t = (int)(INT_PTR)GetPropW(hwnd, L"VB6_LineX1");
+        int y1t = (int)(INT_PTR)GetPropW(hwnd, L"VB6_LineY1");
+        int x2t = (int)(INT_PTR)GetPropW(hwnd, L"VB6_LineX2");
+        int y2t = (int)(INT_PTR)GetPropW(hwnd, L"VB6_LineY2");
+        int bx1 = (x1t < x2t) ? x1t : x2t, by1 = (y1t < y2t) ? y1t : y2t;
+        int x1 = vb6_TwipToX(x1t - bx1), y1 = vb6_TwipToY(y1t - by1);
+        int x2 = vb6_TwipToX(x2t - bx1), y2 = vb6_TwipToY(y2t - by1);
         int borderW = (int)(INT_PTR)GetPropW(hwnd, L"VB6_LineBorderWidth");
-        int borderS = (int)(INT_PTR)GetPropW(hwnd, L"VB6_LineBorderStyle");
+        HANDLE hLbs = GetPropW(hwnd, L"VB6_LineBorderStyle");
+        int borderS = hLbs ? (int)(INT_PTR)hLbs - 1 : 1;  /* 存的是 val+1, 见上 */
         int32_t borderC = (int32_t)(INT_PTR)GetPropW(hwnd, L"VB6_LineBorderColor");
 
         if (borderW <= 0) borderW = 1;
-        if (x2 == 0 && y2 == 0) { x2 = rc.right; y2 = rc.bottom; }  /* 默认左上到右下 */
+        /* 四点全为 0 (设计期没给坐标) 的退化形: 铺满控件矩形, 与旧行为一致 */
+        if (x1t == 0 && y1t == 0 && x2t == 0 && y2t == 0) {
+            x2 = rc.right; y2 = rc.bottom;
+        }
 
         int penStyle = PS_SOLID;
         if (borderS == 0) penStyle = PS_NULL;
@@ -195,6 +206,27 @@ void vb6_RegisterShapeLineClasses(void* hInstance) {
 // P20-35: Line属性 (X1/Y1/X2/Y2/BorderColor/BorderStyle/BorderWidth)
 // ============================================================
 
+/* VB6 的 Line 没有 Left/Top/Width/Height —— 位置完全由 X1/Y1/X2/Y2 (容器缇值) 决定,
+ * 控件窗口就是那四点的包围盒。赋任何一个端点都要重算包围盒并搬窗口, 否则
+ * "Line1.X2 = 2000" 只挪了画线的端点、窗口还停在原处 (画到裁剪区外就看不见)。 */
+static void vb6_LineApplyRect(HWND hwnd) {
+    int x1 = (int)(INT_PTR)GetPropW(hwnd, L"VB6_LineX1");
+    int y1 = (int)(INT_PTR)GetPropW(hwnd, L"VB6_LineY1");
+    int x2 = (int)(INT_PTR)GetPropW(hwnd, L"VB6_LineX2");
+    int y2 = (int)(INT_PTR)GetPropW(hwnd, L"VB6_LineY2");
+    int bw = (int)(INT_PTR)GetPropW(hwnd, L"VB6_LineBorderWidth");
+    if (bw < 1) bw = 1;
+    int left = (x1 < x2) ? x1 : x2, top = (y1 < y2) ? y1 : y2;
+    int wTw = (x1 < x2) ? x2 - x1 : x1 - x2, hTw = (y1 < y2) ? y2 - y1 : y1 - y2;
+    int px = vb6_TwipToX(left), py = vb6_TwipToY(top);
+    /* 细的那一维至少给到笔宽, 否则水平/垂直线被自己裁掉 */
+    int pw = vb6_TwipToX(wTw), ph = vb6_TwipToY(hTw);
+    if (wTw == 0) pw = bw; else if (pw < 1) pw = 1;
+    if (hTw == 0) ph = bw; else if (ph < 1) ph = 1;
+    SetWindowPos(hwnd, NULL, px, py, pw, ph, SWP_NOZORDER | SWP_NOACTIVATE);
+    InvalidateRect(hwnd, NULL, TRUE);
+}
+
 int32_t vb6_GetLineX1(void* hwnd) {
     if (!hwnd) return 0;
     HANDLE h = GetPropW((HWND)hwnd, L"VB6_LineX1");
@@ -203,7 +235,7 @@ int32_t vb6_GetLineX1(void* hwnd) {
 void vb6_SetLineX1(void* hwnd, int32_t val) {
     if (!hwnd) return;
     SetPropW((HWND)hwnd, L"VB6_LineX1", (HANDLE)(INT_PTR)val);
-    InvalidateRect((HWND)hwnd, NULL, TRUE);
+    vb6_LineApplyRect((HWND)hwnd);
 }
 int32_t vb6_GetLineY1(void* hwnd) {
     if (!hwnd) return 0;
@@ -213,7 +245,7 @@ int32_t vb6_GetLineY1(void* hwnd) {
 void vb6_SetLineY1(void* hwnd, int32_t val) {
     if (!hwnd) return;
     SetPropW((HWND)hwnd, L"VB6_LineY1", (HANDLE)(INT_PTR)val);
-    InvalidateRect((HWND)hwnd, NULL, TRUE);
+    vb6_LineApplyRect((HWND)hwnd);
 }
 int32_t vb6_GetLineX2(void* hwnd) {
     if (!hwnd) return 0;
@@ -223,7 +255,7 @@ int32_t vb6_GetLineX2(void* hwnd) {
 void vb6_SetLineX2(void* hwnd, int32_t val) {
     if (!hwnd) return;
     SetPropW((HWND)hwnd, L"VB6_LineX2", (HANDLE)(INT_PTR)val);
-    InvalidateRect((HWND)hwnd, NULL, TRUE);
+    vb6_LineApplyRect((HWND)hwnd);
 }
 int32_t vb6_GetLineY2(void* hwnd) {
     if (!hwnd) return 0;
@@ -233,7 +265,7 @@ int32_t vb6_GetLineY2(void* hwnd) {
 void vb6_SetLineY2(void* hwnd, int32_t val) {
     if (!hwnd) return;
     SetPropW((HWND)hwnd, L"VB6_LineY2", (HANDLE)(INT_PTR)val);
-    InvalidateRect((HWND)hwnd, NULL, TRUE);
+    vb6_LineApplyRect((HWND)hwnd);
 }
 int32_t vb6_GetLineBorderWidth(void* hwnd) {
     if (!hwnd) return 1;
@@ -245,16 +277,21 @@ void vb6_SetLineBorderWidth(void* hwnd, int32_t val) {
     if (val < 1) val = 1;
     if (val > 8192) val = 8192;
     SetPropW((HWND)hwnd, L"VB6_LineBorderWidth", (HANDLE)(INT_PTR)val);
+    /* C29-1a: 同 Shape —— 笔宽不是 1 时虚线族 (2..5) 强制回实线 (手册那条规则) */
+    if (val != 1) {
+        int32_t bsC29 = vb6_GetLineBorderStyle(hwnd);
+        if (bsC29 != 0 && bsC29 != 6) vb6_SetLineBorderStyle(hwnd, 1);
+    }
     InvalidateRect((HWND)hwnd, NULL, TRUE);
 }
 int32_t vb6_GetLineBorderStyle(void* hwnd) {
     if (!hwnd) return 1;
     HANDLE h = GetPropW((HWND)hwnd, L"VB6_LineBorderStyle");
-    return h ? (int32_t)(INT_PTR)h : 1;  /* Default: Solid */
+    return h ? (int32_t)(INT_PTR)h - 1 : 1;  /* C29-1a: 存的是 val+1 (0 与"没存过"不可分辨) */
 }
 void vb6_SetLineBorderStyle(void* hwnd, int32_t val) {
     if (!hwnd) return;
-    SetPropW((HWND)hwnd, L"VB6_LineBorderStyle", (HANDLE)(INT_PTR)val);
+    SetPropW((HWND)hwnd, L"VB6_LineBorderStyle", (HANDLE)(INT_PTR)(val + 1));
     InvalidateRect((HWND)hwnd, NULL, TRUE);
 }
 int32_t vb6_GetLineColor(void* hwnd) {

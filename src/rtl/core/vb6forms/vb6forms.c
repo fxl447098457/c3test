@@ -7,6 +7,10 @@
 #include <windows.h>
 #include <psapi.h>    /* K32GetModuleInformation (崩溃栈扫描) */
 #include <shellapi.h>
+// C29-T: timeSetEvent / TIME_PERIODIC 的声明处。这里踩过一次坑：常量手抄成 0x02（真值是 1）
+// 会让 timeSetEvent 直接失败并静默退回 SetTimer 那一档 15.6 ms 地板 => 用 SDK 头，不自己定义。
+#include <mmsystem.h>
+
 #include <commctrl.h>
 #endif
 
@@ -79,11 +83,19 @@ typedef void (*vb6_TimerCallback)(void);
 
 // Timer回调表 (控件ID → 回调函数)
 #define VB6_MAX_TIMERS 32
-static struct {
-    int timerId;
-    HWND hwnd;                  // P24-Timer: 关联的窗体句柄 (窗口关联定时器)
+// C29-T: 每一格多带三样东西 —— key(Timer 控件自己的不可见句柄, 运行期靠它找回这一格)、
+// period(当前周期) 与 winmm 那一档的句柄/标志。
+struct vb6_TimerSlot {
+    int   timerId;
+    HWND  hwnd;       // 派发窗 = 所属窗体 (case WM_TIMER 在它上面)
+    HWND  key;        // 身份窗 = Timer 控件自己的句柄
     vb6_TimerCallback callback;
-} g_timerTable[VB6_MAX_TIMERS];
+    UINT  period;     // ms
+    int   running;
+    int   useMm;      // 1 = winmm timeSetEvent, 0 = 退回 SetTimer
+    UINT  mmId;
+};
+static struct vb6_TimerSlot g_timerTable[VB6_MAX_TIMERS];
 static int g_timerCount = 0;
 
 // Fix 181: VB6 控件的默认字体是 **MS Sans Serif 8.25pt**，而现代 Windows 的
@@ -420,31 +432,125 @@ void vb6_ResetControlId(void) {
 // Timer管理
 // ============================================================
 
+// winmm 按需取（同一进程只载一次）。精度那一档的关键：SetTimer 的粒度地板是系统计时
+// 周期(~15.6 ms)，实测 Interval=20 只能拿到 ~34.5 ms/tick；winmm 的 timeSetEvent 配
+// wResolution=1 是 ms 级。winmm 只经 LoadLibrary + GetProcAddress 取（照 GDI+ /
+// comdlg32 那两条例子）=> 不新增 import lib；取不到就退回 SetTimer，功能不变、只是粗。
+// WIN32_LEAN_AND_MEAN 把 mmsystem.h 挡在外面了，所以常量按本文件既有的"固定数值"写法自带
+typedef UINT (WINAPI *vb6_pfnTimeSetEvent)(UINT, UINT, void (CALLBACK*)(UINT, UINT, DWORD, DWORD, DWORD), DWORD, DWORD);
+typedef UINT (WINAPI *vb6_pfnTimeKillEvent)(UINT);
+static vb6_pfnTimeSetEvent  vb6_pTimeSetEvent  = NULL;
+static vb6_pfnTimeKillEvent vb6_pTimeKillEvent = NULL;
+static int vb6_mmProbed = 0;
+
+static void vb6_MmProbe(void) {
+    if (vb6_mmProbed) return;
+    vb6_mmProbed = 1;
+    HMODULE h = LoadLibraryW(L"winmm.dll");
+    if (!h) return;
+    vb6_pTimeSetEvent  = (vb6_pfnTimeSetEvent)(void*)GetProcAddress(h, "timeSetEvent");
+    vb6_pTimeKillEvent = (vb6_pfnTimeKillEvent)(void*)GetProcAddress(h, "timeKillEvent");
+}
+
+static struct vb6_TimerSlot* vb6_SlotById(int id) {
+    for (int i = 0; i < g_timerCount; i++)
+        if (g_timerTable[i].timerId == id) return &g_timerTable[i];
+    return NULL;
+}
+
+// winmm 的回调跑在它自己的线程上，**不能**直接调 VB 的事件处理函数（生成代码里那个
+// 事件体属于 UI 线程）。所以只把到期事件投回派发窗，仍走原来的
+// case WM_TIMER -> vb6_DispatchTimer，语义与 SetTimer 一致，只是不再等 15.6 ms 的地板。
+static void CALLBACK vb6_MmThunk(UINT mmCssId, UINT msg, DWORD user, DWORD dw1, DWORD dw2) {
+    (void)mmCssId; (void)msg; (void)dw1; (void)dw2;
+    struct vb6_TimerSlot* e = vb6_SlotById((int)user);
+    if (e && e->running) PostMessageW(e->hwnd, WM_TIMER, (WPARAM)e->timerId, 0);
+}
+
+static void vb6_TimerStop(struct vb6_TimerSlot* e) {
+    if (!e->running) return;
+    if (e->useMm) {
+        if (vb6_pTimeKillEvent) vb6_pTimeKillEvent(e->mmId);
+        e->mmId = 0; e->useMm = 0;
+    } else {
+        KillTimer(e->hwnd, (UINT_PTR)e->timerId);
+    }
+    e->running = 0;
+}
+
+static void vb6_TimerStart(struct vb6_TimerSlot* e) {
+    // VB6 口径: Interval 合法域 1..65535，0 = 不跑
+    if (e->running || e->period == 0 || e->period > 65535) return;
+    vb6_MmProbe();
+    if (vb6_pTimeSetEvent) {
+        UINT id = vb6_pTimeSetEvent(e->period, 1, vb6_MmThunk, (DWORD)e->timerId, TIME_PERIODIC);
+        if (id != 0) { e->mmId = id; e->useMm = 1; e->running = 1; return; }
+    }
+    if (SetTimer(e->hwnd, (UINT_PTR)e->timerId, e->period, NULL)) e->running = 1;
+}
+
+// 挂一枚计时器。owner = 派发窗（窗体），key = Timer 控件自己的不可见句柄 ——
+// 有了 key，运行期 `Timer1.Enabled = True` / `Timer1.Interval = 100` 才找得回这一格。
+void vb6_TimerAttach(void* owner, void* key, int period, void* callback, int enabled) {
+    if (g_timerCount >= VB6_MAX_TIMERS) return;
+    if (period < 0) period = 0;
+    if (period > 65535) period = 65535;
+    struct vb6_TimerSlot* e = &g_timerTable[g_timerCount];
+    g_timerCount++;
+    e->timerId = g_nextControlId++;
+    e->hwnd = (HWND)owner;
+    e->key = (HWND)key;
+    e->callback = (vb6_TimerCallback)callback;
+    e->period = (UINT)period;
+    e->running = 0; e->useMm = 0; e->mmId = 0;
+    if (enabled) vb6_TimerStart(e);
+}
+
+// 运行期 Enabled（VB6 的 True 是 -1，别处传来的是非零值）
+void vb6_TimerSetEnabled(void* key, int enabled) {
+    for (int i = 0; i < g_timerCount; i++) {
+        struct vb6_TimerSlot* e = &g_timerTable[i];
+        if (e->key == (HWND)key) {
+            if (enabled) vb6_TimerStart(e); else vb6_TimerStop(e);
+            return;
+        }
+    }
+}
+
+// 运行期 Interval：改了立刻按新周期重排（VB6 就是这个行为，不是"下一轮才生效"）
+void vb6_TimerSetPeriod(void* key, int period) {
+    if (period < 0) period = 0;
+    if (period > 65535) period = 65535;
+    for (int i = 0; i < g_timerCount; i++) {
+        struct vb6_TimerSlot* e = &g_timerTable[i];
+        if (e->key == (HWND)key) {
+            int was = e->running;
+            vb6_TimerStop(e);
+            e->period = (UINT)period;
+            if (was) vb6_TimerStart(e);
+            return;
+        }
+    }
+}
+
+// 兼容旧入口：没有身份窗时派发窗自己当身份，建完即启。
 int vb6_SetTimer(void* hwnd, int interval, void* callback) {
     if (g_timerCount >= VB6_MAX_TIMERS) return -1;
     int id = g_nextControlId++;
-    g_timerTable[g_timerCount].timerId = id;
-    g_timerTable[g_timerCount].hwnd = (HWND)hwnd;
-    g_timerTable[g_timerCount].callback = (vb6_TimerCallback)callback;
+    struct vb6_TimerSlot* e = &g_timerTable[g_timerCount];
     g_timerCount++;
-    // P24-Timer: 使用窗口关联定时器, WM_TIMER由WndProc分发
-    SetTimer((HWND)hwnd, id, interval, NULL);
+    e->timerId = id; e->hwnd = (HWND)hwnd; e->key = (HWND)hwnd;
+    e->callback = (vb6_TimerCallback)callback;
+    e->period = (UINT)(interval > 65535 ? 65535 : (interval < 0 ? 0 : interval));
+    e->running = 0; e->useMm = 0; e->mmId = 0;
+    vb6_TimerStart(e);
     return id;
 }
 
 void vb6_KillTimer(int timerId) {
-    // P24-Timer: 鏌ユ壘鍏宠仈hwnd鐢ㄤ簬KillTimer
-    HWND killHwnd = NULL;
     for (int i = 0; i < g_timerCount; i++) {
         if (g_timerTable[i].timerId == timerId) {
-            killHwnd = g_timerTable[i].hwnd;
-            break;
-        }
-    }
-    KillTimer(killHwnd, timerId);
-    // 从回调表移除
-    for (int i = 0; i < g_timerCount; i++) {
-        if (g_timerTable[i].timerId == timerId) {
+            vb6_TimerStop(&g_timerTable[i]);
             g_timerTable[i] = g_timerTable[g_timerCount - 1];
             g_timerCount--;
             break;

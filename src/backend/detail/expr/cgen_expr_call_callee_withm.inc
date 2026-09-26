@@ -182,9 +182,15 @@
             std::string mcLower131 = mcId131.name;
             std::transform(mcLower131.begin(), mcLower131.end(), mcLower131.begin(), ::tolower);
             auto itCtrl131 = knownFormControls_.find(mcLower131);
+            // C29-1b: 文件系统三控件的原生窗口就是 LISTBOX / COMBOBOX, 可索引属性
+            // 与 ListBox 完全同一批 RTL 读函数, 所以拦截面必须一起放宽 —— 否则
+            // dirList.List(0) 落到成员读函数那条单参路径, 发成 vb6_GetListItem(hwnd)(0)。
             if (itCtrl131 != knownFormControls_.end()
                 && (itCtrl131->second == FrmControlType::ListBox
-                    || itCtrl131->second == FrmControlType::ComboBox)) {
+                    || itCtrl131->second == FrmControlType::ComboBox
+                    || itCtrl131->second == FrmControlType::DirListBox
+                    || itCtrl131->second == FrmControlType::FileListBox
+                    || itCtrl131->second == FrmControlType::DriveListBox)) {
                 std::string prop131 = maC131.memberName;
                 std::transform(prop131.begin(), prop131.end(), prop131.begin(), ::tolower);
                 const char* fn131 = nullptr;
@@ -321,6 +327,32 @@
                     idxArg = std::move(lastExpr_);
                 }
                 lastExpr_ = "vb6_GetListItem((void*)vb6_hwnd_" + ctrlName + ", " + idxArg + ")";
+                return;
+            }
+        }
+    }
+
+    // D6 / C29-9: CommonDialog.Show* → 原生 comdlg32 入口（成员侧打的是小写控件名）。
+    // 必须在这里消费掉标记，否则下面的通用 COM 绑定会编成运行期 no-op 的 vb6_ComCall。
+    if (isComMarker_) {
+        auto itCtrlCd = knownFormControls_.find(comObjExpr_);
+        if (itCtrlCd != knownFormControls_.end() &&
+            itCtrlCd->second == FrmControlType::CommonDialog) {
+            std::string mCd = comMemberName_;
+            if (mCd == "showopen" || mCd == "showsave" || mCd == "showcolor"
+                || mCd == "showfont" || mCd == "showprinter" || mCd == "showabout") {
+                isComMarker_ = false;
+                isEarlyBoundCom_ = false;
+                earlyBoundSym_ = nullptr;
+                std::string hwndCd = cIdent(knownFormControlOriginalNames_.count(comObjExpr_)
+                    ? knownFormControlOriginalNames_[comObjExpr_] : comObjExpr_);
+                comObjExpr_.clear();
+                comMemberName_.clear();
+                std::string fnCd = "vb6_CdShow"
+                    + std::string(1, (char)::toupper((unsigned char)mCd[4])) + mCd.substr(5);
+                c_.emitLine("{" + fnCd + "((void*)vb6_hwnd_" + hwndCd + ");}"
+                            "  /* CommonDialog." + mCd + " (原生 comdlg32) */");
+                lastExpr_ = "0";
                 return;
             }
         }

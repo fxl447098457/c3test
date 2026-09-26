@@ -111,8 +111,15 @@
             pIt = ctrl.properties.find("Enabled");
             if (pIt != ctrl.properties.end()) enabled = (int)pIt->second.intValue;
             std::string timerFn = cProcName(ctrl.controlName + "_Timer", AccessLevel::Private);
-            if (enabled) {
-                c_.emitLine("{ extern void " + timerFn + "(); vb6_SetTimer((void*)hwnd, " + std::to_string(interval) + ", (void*)" + timerFn + "); }");
+            // C29-T: 改之前"设计期 Enabled=0 就整段不发"，于是运行期 `Timer1.Enabled = True`
+            // 永远起不来（实测 tick 数 0）。现在只要有事件处理器就**照挂**，把设计期那个
+            // Enabled 当参数交给 RTL 决定起不起；key 传 Timer 控件自己的不可见句柄，
+            // 运行期的 Enabled/Interval 才找得回这一格。没处理器就没得派发，跳过（否则链接期
+            // 会引用一个不存在的 vb6_<名>_Timer）。
+            if (symTab_.lookup(ctrl.controlName + "_Timer")) {
+                c_.emitLine("{ extern void " + timerFn + "(); vb6_TimerAttach((void*)hwnd, vb6_hwnd_"
+                            + cIdent(ctrl.controlName) + ", " + std::to_string(interval) + ", (void*)"
+                            + timerFn + ", " + (enabled ? "-1" : "0") + "); }");
             }
         }
     }
@@ -242,6 +249,67 @@
                 c_.emitLine("if (id == " + std::to_string(ctrlId) + " && code == 2) {");
                 c_.indent();
                 c_.emitLine("{ extern void " + dblClickFn + "(); " + dblClickFn + "(); }");
+                c_.dedent();
+                c_.emitLine("}");
+            }
+        } else if (ctrl.controlType == FrmControlType::DriveListBox) {
+            // C29-1b: 换盘 = CBN_SELCHANGE(1) → Drive1_Change；VB6 同一条通知也发 Click，
+            // 所以两个处理器各自挂一次（有哪个就发哪个，缺一不报错）。
+            if (symTab_.lookup(ctrl.controlName + "_Change")) {
+                std::string drvChgFn = cProcName(ctrl.controlName + "_Change", AccessLevel::Private);
+                c_.emitLine("if (id == " + std::to_string(ctrlId) + " && code == 1) {");
+                c_.indent();
+                c_.emitLine("{ extern void " + drvChgFn + "(); " + drvChgFn + "(); }");
+                c_.dedent();
+                c_.emitLine("}");
+            }
+            if (symTab_.lookup(ctrl.controlName + "_Click")) {
+                std::string drvClkFn = cProcName(ctrl.controlName + "_Click", AccessLevel::Private);
+                c_.emitLine("if (id == " + std::to_string(ctrlId) + " && code == 1) {");
+                c_.indent();
+                c_.emitLine("{ extern void " + drvClkFn + "(); " + drvClkFn + "(); }");
+                c_.dedent();
+                c_.emitLine("}");
+            }
+        } else if (ctrl.controlType == FrmControlType::DirListBox) {
+            // C29-1b: 双击列表项 = 下钻一层。VB6 的 Dir1_Change 是"Path 真的变了"才发,
+            // 所以先让 RTL 试下钻、返回 1 才调处理器 —— 双击卷标行/空项不惊动事件。
+            if (symTab_.lookup(ctrl.controlName + "_Change")) {
+                std::string dirChgFn = cProcName(ctrl.controlName + "_Change", AccessLevel::Private);
+                std::string dirHwnd = ctrlHwndExprForInit(ctrl);
+                c_.emitLine("if (id == " + std::to_string(ctrlId) + " && code == 2) {");
+                c_.indent();
+                c_.emitLine("if (vb6_DirListBoxDescendSelected((void*)" + dirHwnd + ")) {");
+                c_.indent();
+                c_.emitLine("{ extern void " + dirChgFn + "(); " + dirChgFn + "(); }");
+                c_.dedent();
+                c_.emitLine("}");
+                c_.dedent();
+                c_.emitLine("}");
+            }
+            if (symTab_.lookup(ctrl.controlName + "_Click")) {
+                std::string dirClkFn = cProcName(ctrl.controlName + "_Click", AccessLevel::Private);
+                c_.emitLine("if (id == " + std::to_string(ctrlId) + " && code == 1) {");
+                c_.indent();
+                c_.emitLine("{ extern void " + dirClkFn + "(); " + dirClkFn + "(); }");
+                c_.dedent();
+                c_.emitLine("}");
+            }
+        } else if (ctrl.controlType == FrmControlType::FileListBox) {
+            // C29-1b: 选中文件 = LBN_SELCHANGE(1) → Click；双击 = LBN_DBLCLK(2) → DblClick
+            if (symTab_.lookup(ctrl.controlName + "_Click")) {
+                std::string fileClkFn = cProcName(ctrl.controlName + "_Click", AccessLevel::Private);
+                c_.emitLine("if (id == " + std::to_string(ctrlId) + " && code == 1) {");
+                c_.indent();
+                c_.emitLine("{ extern void " + fileClkFn + "(); " + fileClkFn + "(); }");
+                c_.dedent();
+                c_.emitLine("}");
+            }
+            if (symTab_.lookup(ctrl.controlName + "_DblClick")) {
+                std::string fileDblFn = cProcName(ctrl.controlName + "_DblClick", AccessLevel::Private);
+                c_.emitLine("if (id == " + std::to_string(ctrlId) + " && code == 2) {");
+                c_.indent();
+                c_.emitLine("{ extern void " + fileDblFn + "(); " + fileDblFn + "(); }");
                 c_.dedent();
                 c_.emitLine("}");
             }

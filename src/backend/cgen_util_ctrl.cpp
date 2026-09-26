@@ -64,8 +64,11 @@ std::string CCodeGen::getControlPropReadFn(FrmControlType ctrlType, const std::s
     if (propLower == "height") return "vb6_GetControlHeight";
     if (propLower == "hwnd") return "vb6_GetControlHwnd";
     // P13.1: Font properties (all visible controls with text)
-    if (propLower == "fontname") return "vb6_GetControlFontName";
-    if (propLower == "fontsize") return "vb6_GetControlFontSize";
+    // D6 / C29-9: CommonDialog 的 FontName / FontSize 是**对话框字段**（ChooseFont 的 LOGFONT），
+    // 不是控件字体 —— 这枚控件没有外观。通用那一组查在类型 switch **之前**，不挡就把
+    // `CD1.FontName = "Consolas"` 静默落到字体属性上（C29-1a 那条 borderstyle 被抢走同一类碰撞）。
+    if (propLower == "fontname" && ctrlType != FrmControlType::CommonDialog) return "vb6_GetControlFontName";
+    if (propLower == "fontsize" && ctrlType != FrmControlType::CommonDialog) return "vb6_GetControlFontSize";
     if (propLower == "fontbold") return "vb6_GetControlFontBold";
     if (propLower == "fontitalic") return "vb6_GetControlFontItalic";
     if (propLower == "fontunderline") return "vb6_GetControlFontUnderline";
@@ -87,7 +90,10 @@ std::string CCodeGen::getControlPropReadFn(FrmControlType ctrlType, const std::s
     if (propLower == "mousepointer") return "vb6_GetMousePointer";
     if (propLower == "mouseicon") return "vb6_GetMouseIcon";
     // P13.10: BorderStyle (all visible controls)
-    if (propLower == "borderstyle") return "vb6_GetBorderStyle";
+    // C29-1a: Shape/Line 的 BorderStyle 是"画笔线型"(0..6), 与窗口边框样式(0/1)同名
+    // 不同物 —— 让这两个类型走下面各自的 case, 否则读回来的永远是窗口那套。
+    if (propLower == "borderstyle" && ctrlType != FrmControlType::Shape
+        && ctrlType != FrmControlType::Line) return "vb6_GetBorderStyle";
 
     switch (ctrlType) {
     case FrmControlType::TextBox:
@@ -223,9 +229,56 @@ std::string CCodeGen::getControlPropReadFn(FrmControlType ctrlType, const std::s
         if (propLower == "enabled") return "vb6_GetMenuEnabled";
         if (propLower == "visible") return "vb6_GetMenuVisible";
         break;
+    // C29-1b: 文件系统三控件的专有成员。列表成员走 ListBox/ComboBox 那一族 helper
+    // (它们内部按窗口类分流 LB_* / CB_*), 所以 Drive 的组合框与 Dir/File 的列表框
+    // 共用同一批读函数, 不需要为这三类另写一套。
+    case FrmControlType::DriveListBox:
+        if (propLower == "drive") return "vb6_DriveListBoxDrive";
+        if (propLower == "text") return "vb6_GetControlText";
+        if (propLower == "listcount") return "vb6_GetListCount";
+        if (propLower == "listindex") return "vb6_GetListIndex";
+        if (propLower == "list") return "vb6_GetListItem";
+        if (propLower == "visible") return "vb6_GetControlVisible";
+        if (propLower == "enabled") return "vb6_GetControlEnabled";
+        break;
+    case FrmControlType::DirListBox:
+        if (propLower == "path") return "vb6_DirListBoxPath";
+        if (propLower == "listcount") return "vb6_GetListCount";
+        if (propLower == "listindex") return "vb6_GetListIndex";
+        if (propLower == "list") return "vb6_GetListItem";
+        if (propLower == "visible") return "vb6_GetControlVisible";
+        if (propLower == "enabled") return "vb6_GetControlEnabled";
+        break;
+    case FrmControlType::FileListBox:
+        if (propLower == "path") return "vb6_FileListBoxPath";
+        if (propLower == "pattern") return "vb6_FileListBoxPattern";
+        if (propLower == "filename") return "vb6_FileListBoxFileName";
+        if (propLower == "listcount") return "vb6_GetListCount";
+        if (propLower == "listindex") return "vb6_GetListIndex";
+        if (propLower == "list") return "vb6_GetListItem";
+        if (propLower == "visible") return "vb6_GetControlVisible";
+        if (propLower == "enabled") return "vb6_GetControlEnabled";
+        break;
+    // D6 / C29-9: CommonDialog —— 属性袋挂在那枚自注册的不可见窗口上，
+    // 读写口全部走 vb6_Cd* （原生 comdlg32，不再经 MSComDlg.OCX）。
+    case FrmControlType::CommonDialog:
+        if (propLower == "filter") return "vb6_CdGetFilter";
+        if (propLower == "filename") return "vb6_CdGetFileName";
+        if (propLower == "filetitle") return "vb6_CdGetFileTitle";
+        if (propLower == "dialogtitle") return "vb6_CdGetDialogTitle";
+        if (propLower == "initdir") return "vb6_CdGetInitDir";
+        if (propLower == "defaultext") return "vb6_CdGetDefaultExt";
+        if (propLower == "fontname") return "vb6_CdGetFontName";
+        if (propLower == "flags") return "vb6_CdGetFlags";
+        if (propLower == "cancelerror") return "vb6_CdGetCancelError";
+        if (propLower == "color") return "vb6_CdGetColor";
+        if (propLower == "min") return "vb6_CdGetMin";
+        if (propLower == "max") return "vb6_CdGetMax";
+        if (propLower == "copies") return "vb6_CdGetCopies";
+        if (propLower == "fontsize") return "vb6_CdGetFontSize";
+        break;
     case FrmControlType::Shape:  // P20-35
-        if (propLower == "shape") return "vb6_GetShapeType";
-        if (propLower == "borderwidth") return "vb6_GetShapeBorderWidth";
+        if (propLower == "shape") return "vb6_GetShapeType";        if (propLower == "borderwidth") return "vb6_GetShapeBorderWidth";
         if (propLower == "borderstyle") return "vb6_GetShapeBorderStyle";
         if (propLower == "fillstyle") return "vb6_GetShapeFillStyle";
         if (propLower == "bordercolor") return "vb6_GetShapeBorderColor";
@@ -262,8 +315,9 @@ std::string CCodeGen::getControlPropWriteFn(FrmControlType ctrlType, const std::
     if (propLower == "width") return "vb6_SetControlWidth";
     if (propLower == "height") return "vb6_SetControlHeight";
     // P13.1: Font properties (all visible controls with text)
-    if (propLower == "fontname") return "vb6_SetControlFontName";
-    if (propLower == "fontsize") return "vb6_SetControlFontSize";
+    // D6 / C29-9: 同上 —— CommonDialog 的 Font* 走它自己的属性袋（写侧）。
+    if (propLower == "fontname" && ctrlType != FrmControlType::CommonDialog) return "vb6_SetControlFontName";
+    if (propLower == "fontsize" && ctrlType != FrmControlType::CommonDialog) return "vb6_SetControlFontSize";
     if (propLower == "fontbold") return "vb6_SetControlFontBold";
     if (propLower == "fontitalic") return "vb6_SetControlFontItalic";
     if (propLower == "fontunderline") return "vb6_SetControlFontUnderline";
@@ -285,7 +339,10 @@ std::string CCodeGen::getControlPropWriteFn(FrmControlType ctrlType, const std::
     if (propLower == "mousepointer") return "vb6_SetMousePointer";
     if (propLower == "mouseicon") return "vb6_SetMouseIcon";
     // P13.10: BorderStyle (all visible controls)
-    if (propLower == "borderstyle") return "vb6_SetBorderStyle";
+    // C29-1a: Shape/Line 的 BorderStyle 是"画笔线型"(0..6), 与窗口边框样式(0/1)同名
+    // 不同物 —— 让这两个类型走下面各自的 case, 否则读回来的永远是窗口那套。
+    if (propLower == "borderstyle" && ctrlType != FrmControlType::Shape
+        && ctrlType != FrmControlType::Line) return "vb6_SetBorderStyle";
 
     switch (ctrlType) {
     case FrmControlType::TextBox:
@@ -408,6 +465,40 @@ std::string CCodeGen::getControlPropWriteFn(FrmControlType ctrlType, const std::
         if (propLower == "checked") return "vb6_SetMenuChecked";
         if (propLower == "enabled") return "vb6_SetMenuEnabled";
         if (propLower == "visible") return "vb6_SetMenuVisible";
+        break;
+    // C29-1b: 写侧同理 —— Path / Pattern / Drive 一赋就重刷列表 (RTL setter 内部
+    // 调 Refresh), 这正是 VB6 三控件联动的机制。
+    case FrmControlType::DriveListBox:
+        if (propLower == "drive") return "vb6_DriveListBoxSetDrive";
+        if (propLower == "text") return "vb6_SetControlText";
+        if (propLower == "listindex") return "vb6_SetListIndex";
+        break;
+    case FrmControlType::DirListBox:
+        if (propLower == "path") return "vb6_DirListBoxSetPath";
+        if (propLower == "listindex") return "vb6_SetListIndex";
+        break;
+    case FrmControlType::FileListBox:
+        if (propLower == "path") return "vb6_FileListBoxSetPath";
+        if (propLower == "pattern") return "vb6_FileListBoxSetPattern";
+        if (propLower == "filename") return "vb6_FileListBoxSetFileName";
+        if (propLower == "listindex") return "vb6_SetListIndex";
+        break;
+    // D6 / C29-9: CommonDialog 写侧（取消由 RTL 按 CancelError 决定报不报 32755）。
+    case FrmControlType::CommonDialog:
+        if (propLower == "filter") return "vb6_CdSetFilter";
+        if (propLower == "filename") return "vb6_CdSetFileName";
+        if (propLower == "filetitle") return "vb6_CdSetFileTitle";
+        if (propLower == "dialogtitle") return "vb6_CdSetDialogTitle";
+        if (propLower == "initdir") return "vb6_CdSetInitDir";
+        if (propLower == "defaultext") return "vb6_CdSetDefaultExt";
+        if (propLower == "fontname") return "vb6_CdSetFontName";
+        if (propLower == "flags") return "vb6_CdSetFlags";
+        if (propLower == "cancelerror") return "vb6_CdSetCancelError";
+        if (propLower == "color") return "vb6_CdSetColor";
+        if (propLower == "min") return "vb6_CdSetMin";
+        if (propLower == "max") return "vb6_CdSetMax";
+        if (propLower == "copies") return "vb6_CdSetCopies";
+        if (propLower == "fontsize") return "vb6_CdSetFontSize";
         break;
     case FrmControlType::Shape:  // P20-35
         if (propLower == "shape") return "vb6_SetShapeType";
@@ -566,7 +657,68 @@ long CCodeGen::controlTypeStyleBits(const FrmControl& ctrl) const {
 
 bool CCodeGen::controlTypeClearsCaption(const FrmControl& ctrl) const {
     return ctrl.controlType == FrmControlType::PictureBox ||
-           ctrl.controlType == FrmControlType::Image;
+           ctrl.controlType == FrmControlType::Image ||
+           // C29-1a: Shape / Line 是自绘控件, 窗口文字没有任何视觉效果, 但留着控件名
+           // 当 caption 会让子类化/工具提示那几条路把它当有文本的控件看待。
+           ctrl.controlType == FrmControlType::Shape ||
+           ctrl.controlType == FrmControlType::Line;
+}
+
+// C29-1a: Line 的窗口矩形就是四个端点的包围盒 (单位 = 容器缇值, 与 .frm 存的一致)。
+// 两条创建路 (顶层 / 容器子控件) 都调这里, 免得一边算对一边算成默认的 2000x300。
+void CCodeGen::lineRectFromEndpoints(const FrmControl& ctrl,
+                                     int& l, int& t, int& w, int& h) {
+    auto getTw = [&ctrl](const char* key) -> int {
+        auto it = ctrl.properties.find(key);
+        return (it != ctrl.properties.end()) ? (int)it->second.intValue : 0;
+    };
+    int x1 = getTw("X1"), y1 = getTw("Y1");
+    int x2 = getTw("X2"), y2 = getTw("Y2");
+    l = (x1 < x2) ? x1 : x2;
+    t = (y1 < y2) ? y1 : y2;
+    w = (x1 < x2) ? x2 - x1 : x1 - x2;
+    h = (y1 < y2) ? y2 - y1 : y1 - y2;
+    if (w < 1) w = 1;
+    if (h < 1) h = 1;
+}
+
+// C29-1a: 设计期外观属性落到控件上。值为 0 的那些 (Shape=0、FillStyle=0、BorderStyle=0)
+// 也照发 —— RTL 侧把这类枚举存成 val+1, 所以 0 不再等于"没设过"。
+// C29-1a: 设计期初始化用的句柄表达式 —— 控件数组 (如 ShapeLamp(0)/ShapeLamp(1)) 的
+// 句柄在 vb6_arr_<名> 里, 硬写 vb6_hwnd_<名> 会打到空句柄上 (SetProp 静默失败)。
+std::string CCodeGen::ctrlHwndExprForInit(const FrmControl& ctrl) const {
+    std::string lower = Symbol::toLower(ctrl.controlName);
+    if (knownControlArrays_.count(lower)) {
+        return "vb6_CtrlArr_GetAt(&vb6_arr_" + cIdent(ctrl.controlName) + ", "
+             + std::to_string(ctrl.index >= 0 ? ctrl.index : 0) + ")";
+    }
+    return "vb6_hwnd_" + cIdent(ctrl.controlName);
+}
+
+void CCodeGen::emitShapeLineProps(const FrmControl& ctrl, const std::string& hwndExpr) {
+    auto emitInt = [&](const char* prop, const char* fn, int skipWhen) {
+        auto it = ctrl.properties.find(prop);
+        if (it == ctrl.properties.end()) return;
+        int v = (int)it->second.intValue;
+        if (v == skipWhen) return;
+        c_.emitLine(std::string(fn) + "((void*)" + hwndExpr + ", " + std::to_string(v) + ");");
+    };
+    if (ctrl.controlType == FrmControlType::Shape) {
+        emitInt("Shape", "vb6_SetShapeType", -1);
+        emitInt("BorderWidth", "vb6_SetShapeBorderWidth", 1);
+        emitInt("BorderStyle", "vb6_SetShapeBorderStyle", 1);
+        emitInt("FillStyle", "vb6_SetShapeFillStyle", 1);
+        emitInt("FillColor", "vb6_SetShapeFillColor", 0);
+        emitInt("BorderColor", "vb6_SetShapeBorderColor", 0);
+    } else if (ctrl.controlType == FrmControlType::Line) {
+        emitInt("X1", "vb6_SetLineX1", -1);
+        emitInt("Y1", "vb6_SetLineY1", -1);
+        emitInt("X2", "vb6_SetLineX2", -1);
+        emitInt("Y2", "vb6_SetLineY2", -1);
+        emitInt("BorderWidth", "vb6_SetLineBorderWidth", 1);
+        emitInt("BorderStyle", "vb6_SetLineBorderStyle", 1);
+        emitInt("BorderColor", "vb6_SetLineColor", 0);
+    }
 }
 
 // P20-36: 生成控件属性访问的HWND参数 (Menu控件用GetMenu+menuId)
@@ -691,6 +843,18 @@ std::string CCodeGen::wrapVariantValue(ASTNode* valueNode, const std::string& cE
     // Fix 025: 默认改用 _Generic 多态宏 vb6_VariantFromValue, 让编译器按实参 C 类型
     // 自动选择 Variant 构造函数。覆盖标量/BSTR/void*/class ptr/vb6_SafeArray1D* 等所有
     // 已注册的 _Generic 选择器, 不再粗暴回退到 VariantLong (会把指针/BSTR 当 int 截断)。
+    return "vb6_VariantFromValue(" + cExpr + ")";
+}
+
+// Fix 198: 见 cgen_helpers.inc 声明处注释 —— 装箱点的布尔口径修正.
+std::string CCodeGen::boxToVariant(Expr* expr, const std::string& cExpr) const {
+    // 非布尔表达式必须逐字节退回原样 (vb6_VariantFromValue): 早退式的
+    // "已是 VARIANT 就不包" 看着更干净, 但它会把存量码也一起改了 (护栏实测
+    // VbQRCodegen 的 VB6_SA_AT 实参少了那层恒等包装) —— 本批只许动布尔。
+    if (expr && inferExprType(*expr) == Vb6Type::Boolean && !cExprIsVariant(cExpr)) {
+        // 形参是 int16_t: 显式收窄, 兼容 _Bool/int 两种 C 侧布尔表示.
+        return "vb6_VariantBool((int16_t)(" + cExpr + "))";
+    }
     return "vb6_VariantFromValue(" + cExpr + ")";
 }
 } // namespace vb6c3

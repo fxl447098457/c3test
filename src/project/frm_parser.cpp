@@ -254,10 +254,16 @@ FrmControl FrmParser::parseControlBlock(
         // 挂到 StatusBar1 自己身上, 集合恒空且不报任何错。
         // 收尾判定不能用 `back() == ')'` —— StatusBar 的 `Panels(1) = "Ready"` 以引号结尾。
         // 只要括号里有实参就算项行 (尾部可以跟 `= "值"` 这种默认实参)。
-        if (curLine.size() > 1 && (curLine.front() == '.'
-                                   || (isalpha((unsigned char)curLine.front())
-                                       && curLine.find('(') != std::string::npos))
+        // ⚠ 括号必须出现在 '=' **之前**（括号是键名上的下标）。只看"行里有 ( 且有 ="
+        // 会把**值里带括号**的普通属性行也吃进来：实测 `Filter = "文本 (*.txt)|*.txt"`
+        // 被判成集合项行 ⇒ Filter 从此不进 ctrl.properties ⇒ 设计期不写、读回空
+        // （ctrldlg 的 DL5=N 就是这么来的）。VB6 的 CommonDialog Filter/DialogTitle
+        // 里带括号极常见，属真 bug。合并引入，2026-09-26 修。
+        if (curLine.size() > 1
             && curLine.find('(') != std::string::npos
+            && (curLine.find('=') == std::string::npos
+                || curLine.find('(') < curLine.find('='))
+            && (curLine.front() == '.' || isalpha((unsigned char)curLine.front()))
             && (curLine.back() == ')' || curLine.find('=') != std::string::npos)) {
             if (collName.empty()) {
                 // 没有标题行也照样收下 —— 否则这些行 parsePropertyLine 判不出来,
@@ -279,7 +285,9 @@ FrmControl FrmParser::parseControlBlock(
         // 后面每个控件都要重踩一遍。
         if (!collName.empty() && !coll.nestedBlocks.empty()
             && curLine.size() > 1 && curLine.front() == '.' && curLine.find('=') != std::string::npos
-            && curLine.find('(') == std::string::npos) {
+            // 同款: 括号在 '=' 之后是**值**的一部分 (`.Text = "a (b)"`), 不该排除。
+            && (curLine.find('(') == std::string::npos
+                || curLine.find('(') > curLine.find('='))) {
             FrmValue sv;
             std::string sk;
             if (parsePropertyLine(curLine, sk, sv) && !sk.empty()) {

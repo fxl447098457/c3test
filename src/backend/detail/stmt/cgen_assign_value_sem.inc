@@ -157,7 +157,8 @@
         size_t argEnd = target.rfind(')');
         if (argStart != std::string::npos && argEnd != std::string::npos && argEnd > argStart) {
             std::string args = target.substr(argStart + 1, argEnd - argStart - 1);
-            c_.emitLine("vb6_VariantArraySet(" + args + ", vb6_VariantFromValue(" + value + "));");
+            c_.emitLine("vb6_VariantArraySet(" + args + ", "
+                        + boxToVariant(node.value.get(), value) + ");");
         } else {
             c_.emitLine(target + " = " + value + ";");
         }
@@ -165,7 +166,7 @@
         // Fix 038 Group 1: VB6_SA_AT(vb6_VARIANT, arr, idx) = value
         //   Variant 数组元素赋值: value 不是 VARIANT 时需要用 VariantFromValue 包装.
         //   vb6_VariantFromValue 对已存在的 VARIANT 是 identity (no-op), 安全.
-        c_.emitLine(target + " = vb6_VariantFromValue(" + value + ");");
+        c_.emitLine(target + " = " + boxToVariant(node.value.get(), value) + ";");
     } else {
         // Fix 178: 两端是同一「含所有权成员 UDT」(如 `Rows(i) = VBFlexGridDefaultCols`)
         // → C 结构体赋值/memcpy 都是浅拷贝, 成员会被两侧共享; 换生成的深拷贝函数。
@@ -412,7 +413,8 @@
                 tgtIsVariant091l = cExprIsVariant(target);
             }
             if (tgtIsVariant091l && !valueIsVariant && !value.empty()) {
-                value = "vb6_VariantFromValue(" + value + ")";
+                // Fix 198: 布尔值装箱走 VT_BOOL 而不是 _Generic 的 short 分支.
+                value = boxToVariant(node.value.get(), value);
             }
             // Fix 092w: Byte 数组目标 + 具体值 (StrConv/字符串) → 字节数组语义
             if (tgtIsByteArray092w && !tgtIsVariant091l && !value.empty()) {

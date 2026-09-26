@@ -43,6 +43,7 @@ void CCodeGen::visit(FunctionDecl& node) {
     knownDoubleVars_.clear();
     knownSingleVars_.clear();
     knownDateVars_.clear();   // Fix 175
+    knownBoolVars_.clear();     // ai/022 W1
     knownLongVars_.clear();
     knownLongPtrVars_.clear();  // Bug #2 fix: 也清空LongPtr集合
     knownVariantVars_.clear();
@@ -131,7 +132,11 @@ void CCodeGen::visit(FunctionDecl& node) {
                 // C 类型串分派会让 inferExprType 看不见 Date (打出序列号)。
                 if (paramType == Vb6Type::Date) knownDateVars_.insert(pLower);
             }
-            else if (paramType == Vb6Type::Long || paramType == Vb6Type::Integer || paramType == Vb6Type::Boolean) knownLongVars_.insert(pLower);
+            else if (paramType == Vb6Type::Long || paramType == Vb6Type::Integer || paramType == Vb6Type::Boolean) {
+                knownLongVars_.insert(pLower);
+                // ai/022 W1: 布尔形参另登记一份 (口径同 Fix 175 的 Date 形参)
+                if (paramType == Vb6Type::Boolean) knownBoolVars_.insert(pLower);
+            }
             // Bug #2 fix: LongPtr 参数注册到独立集合
             // Fix 084m: LongLong 同路 —— 二者都是标量整数 (intptr_t / int64_t), 表达式侧
             // 需要绕开 Variant 分派走直接 C 运算, 复用同一集合即可 (宽度由 C 整型提升决定)。
@@ -210,7 +215,11 @@ void CCodeGen::visit(FunctionDecl& node) {
     std::transform(funcRetLower.begin(), funcRetLower.end(), funcRetLower.begin(), ::tolower);
     if (funcRetVb6Type == Vb6Type::String) knownBstrVars_.insert(funcRetLower);
     else if (funcRetVb6Type == Vb6Type::Double) knownDoubleVars_.insert(funcRetLower);
-    else if (funcRetVb6Type == Vb6Type::Long || funcRetVb6Type == Vb6Type::Integer || funcRetVb6Type == Vb6Type::Boolean) knownLongVars_.insert(funcRetLower);
+    else if (funcRetVb6Type == Vb6Type::Long || funcRetVb6Type == Vb6Type::Integer || funcRetVb6Type == Vb6Type::Boolean) {
+        knownLongVars_.insert(funcRetLower);
+        // ai/022 W1: 返回布尔的函数, 结果拼进字符串/走 String 形参都要按 True/False 打
+        if (funcRetVb6Type == Vb6Type::Boolean) knownBoolVars_.insert(funcRetLower);
+    }
     // Bug #2 fix: LongPtr 返回值变量注册到独立集合
     // Fix 084m: LongLong 同路 (见参数处注释)
     else if (funcRetVb6Type == Vb6Type::LongPtr || funcRetVb6Type == Vb6Type::LongLong) knownLongPtrVars_.insert(funcRetLower);

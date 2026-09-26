@@ -280,10 +280,34 @@
                     }
                 }
                 // P13.3: ListBox/ComboBox method access (AddItem/RemoveItem/Clear/List)
-                if (itCtrl->second == FrmControlType::ListBox || itCtrl->second == FrmControlType::ComboBox) {
+                // C29-1b: 文件系统三控件本质就是这两类窗口 (Drive=组合框、Dir/File=列表框),
+                // 可索引属性 `Dir1.List(i)` 与 `File1.Clear` 之类走完全相同的一条路。
+                if (itCtrl->second == FrmControlType::ListBox || itCtrl->second == FrmControlType::ComboBox
+                    || itCtrl->second == FrmControlType::DirListBox
+                    || itCtrl->second == FrmControlType::FileListBox
+                    || itCtrl->second == FrmControlType::DriveListBox) {
                     std::string memLower = node.memberName;
                     std::transform(memLower.begin(), memLower.end(), memLower.begin(), ::tolower);
                     if (memLower == "additem" || memLower == "removeitem" || memLower == "clear" || memLower == "list") {
+                        comObjExpr_ = objLower;
+                        comMemberName_ = memLower;
+                        isComMarker_ = true;
+                        isEarlyBoundCom_ = false;
+                        earlyBoundSym_ = nullptr;
+                        lastExpr_ = objLower;
+                        return;
+                    }
+                }
+                // D6 / C29-9: CommonDialog 的六个 Show* —— 打标给
+                // cgen_expr_call_callee_withm.inc 消费（形状同 PictureBox.Print/Cls 那一刀：
+                // comObjExpr_ 存**小写控件名**，消费侧查 knownFormControls_ 拿类型后发
+                // vb6_CdShow*(hwnd)）。不这么做就会落到下面 Fix 023e/089d 那条通用兜底，
+                // 编成运行期 no-op 的 vb6_ComCall(hwnd, L"ShowOpen") —— 正是本批要拆的东西。
+                if (itCtrl->second == FrmControlType::CommonDialog) {
+                    std::string memLower = node.memberName;
+                    std::transform(memLower.begin(), memLower.end(), memLower.begin(), ::tolower);
+                    if (memLower == "showopen" || memLower == "showsave" || memLower == "showcolor"
+                        || memLower == "showfont" || memLower == "showprinter" || memLower == "showabout") {
                         comObjExpr_ = objLower;
                         comMemberName_ = memLower;
                         isComMarker_ = true;
@@ -313,12 +337,12 @@
                     }
                 }
                 // ActiveX控件 (ImageList等): 属性访问走COM后期绑定
-                // StatusBar 是**真窗口** (P20-40 起 msctls_status32 复刻), 槽就是 HWND,
-                // 必须走下面通用控件分支拿 vb6_hwnd_X —— 归到 vb6_com_X 家族会生成
-                // vb6_ComGetObjectProp(vb6_com_StatusBar1, …) 而那个变量并不存在 (C2065)。
+                // 合并(P20-40 + C29-9): **无窗口控件只剩 ImageList / Toolbar**。
+                // StatusBar (msctls_status32) 与 CommonDialog (VB6_COMMONDIALOG 属性宿主)
+                // 都是真窗口 ⇒ 走下面通用控件分支拿 vb6_hwnd_X; 归到 vb6_com_X 家族会生成
+                // vb6_ComGetObjectProp(vb6_com_X, …) 而那个变量并不存在 (C2065)。
                 if (itCtrl->second == FrmControlType::ImageList ||
-                    itCtrl->second == FrmControlType::Toolbar ||
-                    itCtrl->second == FrmControlType::CommonDialog) {
+                    itCtrl->second == FrmControlType::Toolbar) {
                     std::string memLower = node.memberName;
                     std::transform(memLower.begin(), memLower.end(), memLower.begin(), ::tolower);
                     std::string ctrlOrigName = knownFormControlOriginalNames_.count(objLower) ?

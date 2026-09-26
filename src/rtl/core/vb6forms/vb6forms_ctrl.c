@@ -428,3 +428,295 @@ void vb6_ControlPrint(void* hwnd, void* bstrText) {
     if (hOld) SelectObject(hdc, hOld);
     if (!fromPaint) ReleaseDC(hw, hdc);
 }
+
+
+// ============================================================
+// C29-9 / D6: CommonDialog —— 原生 comdlg32，**不再走 MSComDlg.OCX**
+// ============================================================
+// 为什么必须换：那个 OCX 只有 32 位，x64 进程里 CoCreateInstance 直接失败，于是
+// 今天这枚控件在 64 位下是静默空转（029 §九 给了实测读数：属性读回全空、ShowOpen
+// 不出现、退出码照旧 0）。
+//
+// 实现口径：
+//   * 属性宿主 = 一枚自注册的不可见子窗口 `VB6_COMMONDIALOG`（0x0、不带 WS_VISIBLE）。
+//     有了句柄，字符串/整数属性就照 DirListBox 那一族同一套 SetPropW 存法走，cgen 的
+//     "readFn(hwnd)" / "writeFn(hwnd, v)" 形状完全不用特判。
+//     整数一律存 val+1：SetPropW(hwnd, name, (HANDLE)0) 与"从没设过"不可分辨，
+//     而 Flags / Color / Min 的合法取值域含 0（C29-1a 那条教训）。
+//   * API 只经 LoadLibrary + GetProcAddress 取（照 vb6_di_com_stubs.c 里 GDI+ 那条例子）
+//     => 不给工具链加新的 import lib 依赖。
+//   * VB6 的 Filter 用竖线串，原生 OPENFILENAME 要 `\0` 分隔的成对表 —— 折叠集中在
+//     vb6_CdFoldFilter 一处做；读回时原样返回竖线串（VB6 的读数口径）。
+//   * 取消：CancelError=True 时报 32755（VB6 的 cdlCancel），且**不改**已有读数。
+
+#include <commdlg.h>
+
+// 本模块的头链没引 vb6rtl_array.h，而取消路径要报 VB6 的 32755 —— 不声明就会踩
+// "隐式原型"那一刀（C29-1b 刚被咬过：返回指针的函数按 int 取）。照 vb6com_internal.h 同法补一句。
+extern void vb6_RaiseError(int32_t errNum, void* description);
+
+static HMODULE vb6_ComDlgModule(void) {
+    static HMODULE hMod = NULL;
+    if (!hMod) hMod = LoadLibraryW(L"comdlg32.dll");
+    return hMod;
+}
+
+static const wchar_t* vb6_CdDupSrc(const wchar_t* s) { return s ? s : (const wchar_t*)L""; }
+
+static wchar_t* vb6_CdDupStr(const wchar_t* s) {
+    s = vb6_CdDupSrc(s);
+    size_t n = wcslen(s) + 1;
+    wchar_t* b = (wchar_t*)HeapAlloc(GetProcessHeap(), 0, n * sizeof(wchar_t));
+    if (b) wcscpy_s(b, n, s);
+    return b;
+}
+
+static wchar_t* vb6_CdGetStr(void* hwnd, const wchar_t* key) {
+    if (!hwnd) return SysAllocString(L"");
+    HANDLE h = GetPropW((HWND)hwnd, key);
+    return SysAllocString(h ? (const wchar_t*)h : (const wchar_t*)L"");
+}
+
+static void vb6_CdSetStr(void* hwnd, const wchar_t* key, const wchar_t* v) {
+    if (!hwnd) return;
+    HANDLE old = GetPropW((HWND)hwnd, key);
+    if (old) { RemovePropW((HWND)hwnd, key); HeapFree(GetProcessHeap(), 0, old); }
+    SetPropW((HWND)hwnd, key, vb6_CdDupStr(v));
+}
+
+static int vb6_CdGetInt(void* hwnd, const wchar_t* key, int dflt) {
+    if (!hwnd) return dflt;
+    HANDLE h = GetPropW((HWND)hwnd, key);
+    return h ? (int)(INT_PTR)h - 1 : dflt;
+}
+
+static void vb6_CdSetInt(void* hwnd, const wchar_t* key, int v) {
+    if (!hwnd) return;
+    SetPropW((HWND)hwnd, key, (HANDLE)(INT_PTR)(v + 1));
+}
+
+#define VB6_CD_STR(Name, Key)                                                \
+    wchar_t* vb6_CdGet##Name(void* hwnd) { return vb6_CdGetStr(hwnd, Key); }  \
+    void vb6_CdSet##Name(void* hwnd, wchar_t* v) { vb6_CdSetStr(hwnd, Key, v); }
+
+#define VB6_CD_INT(Name, Key, Dflt)                                          \
+    int vb6_CdGet##Name(void* hwnd) { return vb6_CdGetInt(hwnd, Key, Dflt); } \
+    void vb6_CdSet##Name(void* hwnd, int v) { vb6_CdSetInt(hwnd, Key, v); }
+
+VB6_CD_STR(Filter,      L"VB6_Cd_Filter")
+VB6_CD_STR(FileName,    L"VB6_Cd_FileName")
+VB6_CD_STR(FileTitle,   L"VB6_Cd_FileTitle")
+VB6_CD_STR(DialogTitle, L"VB6_Cd_DialogTitle")
+VB6_CD_STR(InitDir,     L"VB6_Cd_InitDir")
+VB6_CD_STR(DefaultExt,  L"VB6_Cd_DefaultExt")
+VB6_CD_STR(FontName,    L"VB6_Cd_FontName")
+VB6_CD_INT(Flags,       L"VB6_Cd_Flags",       0)
+// CancelError 是布尔：VB6 的 True 是 **-1**，而整数袋存的是 val+1（避开 SetPropW 存 0
+// 与"从没设过"不可分辨那一坑）⇒ -1 会被存成 0、读回来变成 False。这里单独 normalize：
+// 存 0/1 再 +1，读回按 VB6 口径给 0 / -1。
+int vb6_CdGetCancelError(void* hwnd) {
+    return vb6_CdGetInt(hwnd, L"VB6_Cd_CancelError", 0) ? -1 : 0;
+}
+void vb6_CdSetCancelError(void* hwnd, int v) {
+    vb6_CdSetInt(hwnd, L"VB6_Cd_CancelError", v ? 1 : 0);
+}
+
+VB6_CD_INT(Color,       L"VB6_Cd_Color",       0)
+VB6_CD_INT(Min,         L"VB6_Cd_Min",         0)
+VB6_CD_INT(Max,         L"VB6_Cd_Max",         0)
+VB6_CD_INT(Copies,      L"VB6_Cd_Copies",      1)
+VB6_CD_INT(FontSize,    L"VB6_Cd_FontSize",    0)
+
+#undef VB6_CD_STR
+#undef VB6_CD_INT
+
+// 自注册的不可见类。WndProc 什么都不做 —— 它只是属性袋，外加用 GetParent 拿模态父窗。
+static LRESULT CALLBACK vb6_CdWndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
+    return DefWindowProcW(h, m, w, l);
+}
+
+// C29-T: Timer 的身份类（同样不可见、同样只当句柄用 —— 计时器真正的状态在
+// vb6forms.c 的 g_timerTable 里，按这个句柄找回那一格）。
+static LRESULT CALLBACK vb6_TimerWndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
+    return DefWindowProcW(h, m, w, l);
+}
+
+void vb6_RegisterTimerClass(void* hInstance) {
+    static BOOL done = FALSE;
+    if (done) return;
+    WNDCLASSW wc;
+    ZeroMemory(&wc, sizeof(wc));
+    wc.lpfnWndProc   = vb6_TimerWndProc;
+    wc.hInstance     = (HINSTANCE)hInstance;
+    wc.lpszClassName = L"VB6_TIMER";
+    if (RegisterClassW(&wc)) done = TRUE;
+}
+
+void vb6_RegisterCommDialogClass(void* hInstance) {
+    static BOOL done = FALSE;
+    if (done) return;
+    WNDCLASSW wc;
+    ZeroMemory(&wc, sizeof(wc));
+    wc.lpfnWndProc   = vb6_CdWndProc;
+    wc.hInstance     = (HINSTANCE)hInstance;
+    wc.lpszClassName = L"VB6_COMMONDIALOG";
+    if (RegisterClassW(&wc)) done = TRUE;
+}
+
+// VB6 "文本 (*.txt)|*.txt|所有文件 (*.*)|*.*" -> 原生成对表（每段以 \0 结束、整体再补一个 \0）
+static void vb6_CdFoldFilter(const wchar_t* src, wchar_t* dst, size_t dstChars) {
+    size_t o = 0;
+    if (!src || !*src) { dst[0] = 0; dst[1] = 0; return; }
+    const wchar_t* p = src;
+    while (*p && o + 2 < dstChars) {
+        const wchar_t* bar = wcschr(p, L'|');
+        size_t len = bar ? (size_t)(bar - p) : wcslen(p);
+        if (len > dstChars - o - 2) len = dstChars - o - 2;
+        for (size_t i = 0; i < len; i++) dst[o++] = p[i];
+        dst[o++] = 0;                       // 段结束
+        if (!bar) break;                    // 落单的一段（VB6 要求描述与模式成对）
+        p = bar + 1;
+    }
+    dst[o] = 0;                             // 表结束
+}
+
+static HWND vb6_CdOwner(void* hwnd) {
+    HWND h = (HWND)hwnd;
+    HWND p = h ? GetParent(h) : NULL;
+    return p ? p : h;
+}
+
+static void vb6_CdCancel(void* hwnd) {
+    if (vb6_CdGetCancelError(hwnd))
+        vb6_RaiseError(32755, SysAllocString(L"Dialog was canceled by the user"));
+}
+
+static const wchar_t* vb6_CdBaseName(const wchar_t* full) {
+    const wchar_t* s = wcsrchr(full, L'\\');
+    if (!s) s = wcsrchr(full, L'/');
+    return s ? s + 1 : full;
+}
+
+int vb6_CdShowFile(void* hwnd, int saveAs) {
+    HMODULE m = vb6_ComDlgModule();
+    if (!hwnd || !m) return 0;
+    typedef BOOL (WINAPI *FnOFN)(LPOPENFILENAMEW);
+    FnOFN pFn = (FnOFN)(void*)GetProcAddress(m, saveAs ? "GetSaveFileNameW" : "GetOpenFileNameW");
+    if (!pFn) return 0;
+
+    wchar_t filter[2048];
+    wchar_t* filtVB = vb6_CdGetFilter(hwnd);
+    vb6_CdFoldFilter(filtVB, filter, 2048);
+    SysFreeString(filtVB);
+
+    wchar_t file[1024] = {0};
+    wchar_t title[1024] = {0};
+    wchar_t initDir[1024] = {0};
+    wchar_t defExt[64] = {0};
+    wchar_t* s;
+    s = vb6_CdGetFileName(hwnd);    wcsncpy_s(file, 1024, s, _TRUNCATE);  SysFreeString(s);
+    s = vb6_CdGetDialogTitle(hwnd); wcsncpy_s(title, 1024, s, _TRUNCATE); SysFreeString(s);
+    s = vb6_CdGetInitDir(hwnd);     wcsncpy_s(initDir, 1024, s, _TRUNCATE); SysFreeString(s);
+    s = vb6_CdGetDefaultExt(hwnd);  wcsncpy_s(defExt, 64, s, _TRUNCATE);  SysFreeString(s);
+
+    OPENFILENAMEW ofn;
+    ZeroMemory(&ofn, sizeof(ofn));
+    ofn.lStructSize = sizeof(ofn);
+    ofn.hwndOwner   = vb6_CdOwner(hwnd);
+    ofn.lpstrFilter = filter[0] ? filter : NULL;
+    ofn.lpstrFile   = file;
+    ofn.nMaxFile    = 1024;
+    ofn.lpstrInitialDir = initDir[0] ? initDir : NULL;
+    ofn.lpstrDefExt     = defExt[0] ? defExt : NULL;
+    ofn.lpstrTitle      = title[0] ? title : (saveAs ? L"Save As" : L"Open");
+    ofn.Flags = (DWORD)vb6_CdGetFlags(hwnd) | OFN_EXPLORER | OFN_HIDEREADONLY;
+    if (saveAs) ofn.Flags |= OFN_OVERWRITEPROMPT;
+
+    if (!pFn(&ofn)) { vb6_CdCancel(hwnd); return 0; }
+    vb6_CdSetStr(hwnd, L"VB6_Cd_FileName", file);
+    vb6_CdSetStr(hwnd, L"VB6_Cd_FileTitle", vb6_CdBaseName(file));
+    return 1;
+}
+
+int vb6_CdShowOpen(void* hwnd) { return vb6_CdShowFile(hwnd, 0); }
+int vb6_CdShowSave(void* hwnd) { return vb6_CdShowFile(hwnd, 1); }
+
+int vb6_CdShowColor(void* hwnd) {
+    HMODULE m = vb6_ComDlgModule();
+    if (!hwnd || !m) return 0;
+    typedef BOOL (WINAPI *FnCC)(LPCHOOSECOLORW);
+    FnCC pFn = (FnCC)(void*)GetProcAddress(m, "ChooseColorW");
+    if (!pFn) return 0;
+    static COLORREF g_cCustom[16] = {0};
+    CHOOSECOLORW cc;
+    ZeroMemory(&cc, sizeof(cc));
+    cc.lStructSize  = sizeof(cc);
+    cc.hwndOwner    = vb6_CdOwner(hwnd);
+    cc.rgbResult    = (COLORREF)vb6_CdGetColor(hwnd);
+    cc.lpCustColors = g_cCustom;
+    cc.Flags        = (DWORD)vb6_CdGetFlags(hwnd) | CC_ANYCOLOR | CC_RGBINIT;
+    if (!pFn(&cc)) { vb6_CdCancel(hwnd); return 0; }
+    vb6_CdSetColor(hwnd, (int)cc.rgbResult);
+    return 1;
+}
+
+int vb6_CdShowFont(void* hwnd) {
+    HMODULE m = vb6_ComDlgModule();
+    if (!hwnd || !m) return 0;
+    typedef BOOL (WINAPI *FnCF)(LPCHOOSEFONTW);
+    FnCF pFn = (FnCF)(void*)GetProcAddress(m, "ChooseFontW");
+    if (!pFn) return 0;
+    LOGFONTW lf;
+    ZeroMemory(&lf, sizeof(lf));
+    wchar_t face[64] = {0};
+    wchar_t* s = vb6_CdGetFontName(hwnd);
+    wcsncpy_s(face, 64, s, _TRUNCATE);
+    SysFreeString(s);
+    wcscpy_s(lf.lfFaceName, (size_t)_countof(lf.lfFaceName), face);
+
+    CHOOSEFONTW cf;
+    ZeroMemory(&cf, sizeof(cf));
+    cf.lStructSize = sizeof(cf);
+    cf.hwndOwner   = vb6_CdOwner(hwnd);
+    cf.lpLogFont   = &lf;
+    cf.iPointSize  = vb6_CdGetFontSize(hwnd) * 10;
+    cf.Flags       = (DWORD)vb6_CdGetFlags(hwnd) | CF_SCREENFONTS | CF_INITTOLOGFONTSTRUCT;
+    if (!pFn(&cf)) { vb6_CdCancel(hwnd); return 0; }
+    vb6_CdSetStr(hwnd, L"VB6_Cd_FontName", lf.lfFaceName);
+    vb6_CdSetFontSize(hwnd, (int)(cf.iPointSize / 10));
+    return 1;
+}
+
+int vb6_CdShowPrinter(void* hwnd) {
+    HMODULE m = vb6_ComDlgModule();
+    if (!hwnd || !m) return 0;
+    typedef BOOL (WINAPI *FnPD)(LPPRINTDLGW);
+    FnPD pFn = (FnPD)(void*)GetProcAddress(m, "PrintDlgW");
+    if (!pFn) return 0;
+    PRINTDLGW pd;
+    ZeroMemory(&pd, sizeof(pd));
+    pd.lStructSize = sizeof(pd);
+    pd.hwndOwner   = vb6_CdOwner(hwnd);
+    pd.Flags       = (DWORD)vb6_CdGetFlags(hwnd) | PD_RETURNDC;
+    pd.nCopies     = (WORD)vb6_CdGetCopies(hwnd);
+    pd.nFromPage   = (WORD)vb6_CdGetMin(hwnd);
+    pd.nToPage     = (WORD)vb6_CdGetMax(hwnd);
+    if (!pFn(&pd)) { vb6_CdCancel(hwnd); return 0; }
+    if (pd.hDC) DeleteDC(pd.hDC);           // v1 不把 DC 交给用户（Printer 对象另立批次）
+    vb6_CdSetCopies(hwnd, (int)pd.nCopies);
+    return 1;
+}
+
+int vb6_CdShowAbout(void* hwnd) {
+    HMODULE m = vb6_ComDlgModule();
+    if (!hwnd || !m) return 0;
+    typedef BOOL (WINAPI *FnSA)(HWND, LPCWSTR, LPCWSTR, HICON);
+    FnSA pFn = (FnSA)(void*)GetProcAddress(m, "ShellAboutW");
+    if (!pFn) return 0;
+    wchar_t* t = vb6_CdGetDialogTitle(hwnd);
+    BOOL ok = pFn(vb6_CdOwner(hwnd), (t && *t) ? t : (const wchar_t*)L"About",
+                  (const wchar_t*)L"", NULL);
+    SysFreeString(t);
+    if (!ok) vb6_CdCancel(hwnd);
+    return ok ? 1 : 0;
+}

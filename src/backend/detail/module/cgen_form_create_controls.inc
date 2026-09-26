@@ -26,13 +26,23 @@
     c_.emitBlank();
     // P20-35: 注册Shape/Line自定义窗口类
     {
-        bool hasShape = false, hasLine = false;
+        bool hasShape = false, hasLine = false, hasCd = false, hasTmr = false;
         for (const auto& ctrl : frmDesc.formControl.children) {
             if (ctrl.controlType == FrmControlType::Shape) hasShape = true;
             if (ctrl.controlType == FrmControlType::Line) hasLine = true;
+            // D6 / C29-9: CommonDialog 的属性宿主类要在这之前注册好，否则
+            // CreateWindowExW 拿不到类 ⇒ 句柄 NULL ⇒ 又回到"静默空转"那个症状。
+            if (ctrl.controlType == FrmControlType::CommonDialog) hasCd = true;
+            if (ctrl.controlType == FrmControlType::Timer) hasTmr = true;  // C29-T
         }
         if (hasShape || hasLine) {
             c_.emitLine("vb6_RegisterShapeLineClasses((void*)hInstance);");
+        }
+        if (hasCd) {
+            c_.emitLine("vb6_RegisterCommDialogClass((void*)hInstance);");
+        }
+        if (hasTmr) {
+            c_.emitLine("vb6_RegisterTimerClass((void*)hInstance);");
         }
     }
     // 为每个控件生成CreateWindow调用
@@ -520,9 +530,15 @@
             // 直接 `continue` 掉, 窗口根本不创建, 属性全落 vb6_ComGetStringProp 静默答错。
             // P24-05: 优先用TypeLib中的CLSID直接生成代码, 避免ProgID不存在或错误
             // VB6 .frm的Begin行用CoClass名(如MSComctlLib.ImageList), 但真实ProgID可能不同(如MSComctlLib.ImageListCtrl)
+            // D6 / C29-9: CommonDialog **已从这一组摘出** —— MSComDlg.OCX 只有 32 位，
+            // x64 里 CoCreateInstance 失败 ⇒ 整枚控件静默空转。它现在走上面那条普通
+            // 控件创建路（自注册的不可见类 VB6_COMMONDIALOG 当属性袋），六个 Show*
+            // 直接调 comdlg32。剩下这三类等各自批次到位后同样摘出去。
+            // 合并(P20-40 + C29-9): StatusBar 与 CommonDialog **都从这一组摘出**了
+            // (前者 msctls_status32 原生复刻、后者 VB6_COMMONDIALOG 属性宿主), 它们
+            // 落到下面的常规创建路 vb6_CreateControl 才有窗口。这里只剩无窗口的两类。
             if (ctrl.controlType == FrmControlType::ImageList ||
-                ctrl.controlType == FrmControlType::Toolbar ||
-                ctrl.controlType == FrmControlType::CommonDialog) {
+                ctrl.controlType == FrmControlType::Toolbar) {
                 // 从符号表查找ComClass, 获取真实的CLSID或ProgID
                 std::string comVarName = "vb6_com_" + cIdent(ctrl.controlName);
                 Symbol* comSym = lookupDotted(ctrl.controlTypeName);

@@ -14,7 +14,7 @@
 // DataObject 支持的格式: CF_TEXT / CF_UNICODETEXT / CF_HDROP (文件清单)。
 //
 // 自测: 环境变量 C3_OLEDDB_TEST=1 时, vb6_Init 之后由夹具调
-//   vb6_oleDD_SelfTest(const char* outPath)
+//   vb6_oleDD_SelfTest(const wchar_t* outPath)   <- 路径走宽 (多语言路径), 见下
 // 它建一个哑窗口、注册目标、直接调 IDropTarget 的 DragEnter/Drop (绕开
 // DoDragDrop 的模态循环 —— 无头环境没法真拖), 把结果写进 outPath。
 

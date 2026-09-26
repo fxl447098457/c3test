@@ -41,7 +41,8 @@
                 }
             }
             if (!argIsClassObj) {
-                argVal = "vb6_VariantFromValue(" + argVal + ")";
+                // Fix 198: 布尔实参按 VT_BOOL 装箱 (int16_t 走 _Generic 会得 VT_I2).
+                argVal = boxToVariant(node.positional[i].get(), argVal);
             } else if (i < node.positional.size()
                        && node.positional[i]->kind == ASTNodeKind::IdentifierExpr) {
                 // Fix 091s2: 实参是 Object/COM 变量 (void*) 而形参是 ByVal Variant
@@ -214,7 +215,8 @@
                     || argT86 == Vb6Type::Object || argBase86 == Vb6Type::Object
                     || argIsArr86;
                 if (scalarLike) {
-                    argVal = "vb6_VariantFromValue(" + argVal + ")";
+                    // Fix 198: 布尔实参 → VT_BOOL (_Generic 会按 int16_t 选 VT_I2).
+                    argVal = boxToVariant(node.positional[i].get(), argVal);
                 }
             }
         }

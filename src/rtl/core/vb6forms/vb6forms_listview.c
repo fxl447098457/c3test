@@ -514,7 +514,16 @@ void vb6_ListView_ClearItems(void* hwnd) {
 // ImageList 关联 (把 #9 ImageList 的真 HIMAGELIST 喂给控件)
 void vb6_ListView_SetImageList(void* hwnd, void* himl, int32_t which) {
     if (!hwnd) return;
-    // which: 0=Icons(LVSIL_NORMAL) 1=SmallIcons(LVSIL_SMALL) 2=ColumnHeaderIcons(LVSIL_HEADER)
-    WPARAM w = (which == 0) ? LVSIL_NORMAL : (which == 1) ? LVSIL_SMALL : LVSIL_HEADER;
-    SendMessageW((HWND)hwnd, LVM_SETIMAGELIST, w, (LPARAM)himl);
+    // which: 0=Icons 1=SmallIcons 2=ColumnHeaderIcons
+    // ⚠ 没有 `LVSIL_HEADER` 这个宏 (commctrl.h 只给 NORMAL/SMALL/STATE) —— 列头图标的
+    // ImageList 挂在 **header 控件**上, 所以 which==2 要先 LVM_GETHEADER 再 HDM_SETIMAGELIST。
+    // (一开始写成 LVSIL_HEADER -> C2065, 而这条只有**夹具编译 RTL** 时才暴露,
+    //  build.bat 只编 C++ 看不到。)
+    if (which == 2) {
+        HWND hh = (HWND)SendMessageW((HWND)hwnd, LVM_GETHEADER, 0, 0);
+        if (hh) SendMessageW(hh, HDM_SETIMAGELIST, 0, (LPARAM)himl);
+        return;
+    }
+    SendMessageW((HWND)hwnd, LVM_SETIMAGELIST,
+                 (which == 1) ? LVSIL_SMALL : LVSIL_NORMAL, (LPARAM)himl);
 }

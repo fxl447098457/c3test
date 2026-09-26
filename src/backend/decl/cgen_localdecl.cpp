@@ -165,6 +165,9 @@ void CCodeGen::emitLocalDeclCode(LocalDeclStmt& node) {
                 std::string lower = var.name;
                 std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
                 knownLongVars_.insert(lower);
+                // ai/022 W1: 另登记一份布尔 (口径同 Fix 175 的 Date), 消费点先判它
+                if (resolveArrayElemType(var.asType.get()) == Vb6Type::Boolean)
+                    knownBoolVars_.insert(lower);
             } else if (cType == "intptr_t") {
                 // Bug #2 fix: LongPtr变量注册到独立集合
                 std::string lower = var.name;
@@ -436,6 +439,9 @@ void CCodeGen::emitLocalDeclCode(LocalDeclStmt& node) {
                     knownBstrVars_.insert(lower);
             } else if (cType == "int32_t" || cType == "int16_t" || cType == "VBABOOL") {
                     knownLongVars_.insert(lower);
+                    // ai/022 W1: 同 Dim 分支 (Const 也吃这个读数)
+                    if (resolveArrayElemType(con.asType.get()) == Vb6Type::Boolean)
+                        knownBoolVars_.insert(lower);
                 } else if (cType == "intptr_t") {
                     // Bug #2 fix: LongPtr局部const变量注册到独立集合
                     knownLongPtrVars_.insert(lower);
