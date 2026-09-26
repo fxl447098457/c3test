@@ -1,0 +1,24 @@
+// ai/029 C29-M fixture material: a .res that carries **no** manifest.
+//
+// Why it exists: VB6 projects routinely set ResFile32= with a resource that only holds
+// icons / dialog templates / version info -- and NO RT_MANIFEST (in-repo example:
+// archive/vbman/src/RES/VBMANLIB.RES: 5 entries, zero manifest). The old yield rule only
+// asked "did the project give a ResFile", so those projects also lost the built-in
+// comctl v6 manifest => the product silently ran on v5.82. This fixture pins that hole.
+//
+// Deliberately no VERSIONINFO: C3 emits its own version_info.res from the .vbp, and two
+// VS_VERSION_INFO blobs would muddy a reading that is about the manifest, not versioning.
+//
+// Kept ASCII on purpose: rc.exe decodes comments in the active codepage.
+// Regenerate with make_res.bat in this directory; the .res itself is checked in.
+#include <windows.h>
+
+#define IDD_PROBE 101
+
+IDD_PROBE DIALOGEX 0, 0, 180, 90
+CAPTION "no-manifest fixture"
+STYLE DS_MODALFRAME | WS_POPUP
+FONT 8, "MS Sans Serif"
+BEGIN
+    PUSHBUTTON      "OK", IDOK, 60, 40, 60, 16
+END

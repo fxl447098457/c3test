@@ -584,6 +584,44 @@ function Invoke-BasSetParallel {
 }
 
 # === VBP 工程测试 (编译+链接+运行) ===
+# ai/029 C29-M: 断**产物里的应用清单**（不重建，拿 Test-Vbp 刚产出的那份 exe）。
+# 为什么在产物面上断：清单的作用全在运行期 —— 少了那条 #1 RT_MANIFEST，SxS 就把 comctl32
+# 解析成 System32 的 5.82，本线所有原生控件换成 v5 的类表与消息语义，而编译/链接/退出码
+# 全都好看（这条洞就是 C29-M 修的那件事）。
+# 断两样：`</assembly>` 的**个数**（两份 #1 会让加载器直接报错，所以"恰好一份"是硬要求，
+# 也是"内置那份有没有叠到用户那份上"的读数）+ 内容里的特征串（用户那份带 dpiAware，
+# 内置那份带 Microsoft.Windows.Common-Controls 但没有 dpiAware）。
+function Test-ProductManifest {
+    param(
+        [string]$Name,
+        [string]$ExeFile,
+        [int]$ManifestCount,
+        [string]$MustContain = "",
+        [string]$MustNotContain = ""
+    )
+    $script:total++
+    Write-Host -NoNewline "  [MANIFEST] $Name ... "
+    if (-not (Test-Path $ExeFile)) {
+        $script:fail++
+        Write-Host "FAIL (no exe: $ExeFile)" -ForegroundColor Red
+        return
+    }
+    $text = [System.Text.Encoding]::ASCII.GetString([System.IO.File]::ReadAllBytes($ExeFile))
+    $got = ([regex]::Matches($text, '</assembly>')).Count
+    $problems = @()
+    if ($got -ne $ManifestCount) { $problems += "清单数=$got 期望=$ManifestCount" }
+    if ($MustContain -and $text.IndexOf($MustContain) -lt 0) { $problems += "缺串 '$MustContain'" }
+    if ($MustNotContain -and $text.IndexOf($MustNotContain) -ge 0) { $problems += "不该有串 '$MustNotContain'" }
+    if ($problems.Count -gt 0) {
+        $script:fail++
+        $msg = "FAIL (" + ($problems -join '; ') + ")"
+        Write-Host $msg -ForegroundColor Red
+        return
+    }
+    $script:pass++
+    Write-Host "OK ($ManifestCount 份清单)" -ForegroundColor Green
+}
+
 function Test-Vbp {
     param(
         [string]$Name,
@@ -1586,6 +1624,17 @@ if ($Category -in @("all", "run", "vbp")) {
     $tbNeedles = @("CTRLTOOLBAR-DONE") + (1..34 | ForEach-Object { "TB$_=Y" })
     Test-Vbp "ctrltoolbar" "$Tests\ctrltoolbar\TbApp.vbp" $tbNeedles
     Test-Vbp "ctrltoolbar_x86" "$Tests\ctrltoolbar\TbApp.vbp" $tbNeedles -Arch "x86"
+    # ai/029 C29-M: 工程自带一份**不含清单**的 .res（ResFile32="no_manifest.res"，里面只有一条
+    # 对话框模板）时，内置那份 comctl v6 清单必须照样进产物。旧判据只看"给没给 ResFile"，
+    # 于是这种 VB6 里很常见的工程连内置的一起让掉 ⇒ 产物静默退回 v5.82（实测：BASE 编译器编
+    # 同一件夹具，产物 0 份清单；改后 1 份且是内置那份）。清单数=1 同时挡住"两份 #1 打架"。
+    $mfNeedles = @("CTRLMANIFEST-DONE", "CM1=Y", "CM2=Y", "CM3=Y")
+    Test-Vbp "ctrlmanifest" "$Tests\ctrlmanifest\MfApp.vbp" $mfNeedles
+    # 主判据：这份工程的 .res 里没有清单 ⇒ 产物必须仍然带**内置那一份**（改前 BASE 编出来是 0 份）。
+    # "恰好 1 份"同时挡住最坏的那种错：两份 #1 会让加载器直接报错。
+    Test-ProductManifest "ctrlmanifest_builtin" "$OutDir\MfApp.exe" 1 "Microsoft.Windows.Common-Controls" "dpiAware"
+    Test-Vbp "ctrlmanifest_x86" "$Tests\ctrlmanifest\MfApp.vbp" $mfNeedles -Arch "x86"
+    Test-ProductManifest "ctrlmanifest_builtin_x86" "$OutDir\MfApp.exe" 1 "Microsoft.Windows.Common-Controls" "dpiAware"
     # 发码面: 设计期四条逐参数钉 (含 -999 哨兵那条没写过的控件)、创建样式那个常量、
     # 反面断这枚控件不再走 vb6_com_ 槽 / CoCreateInstance / Buttons 的 COM 兜底。
     Test-EmitcShape "tb_emitc_shape" @("$Tests\ctrltoolbar\TbApp.vbp") @(
@@ -1927,6 +1976,16 @@ if ($Category -in @("all", "run", "vbp")) {
     Test-GuiVbp "VbQRCodegen" "$Tests\VbQRCodegen-master\test\Project1.vbp"
     # BalloonTooltips: form loads with controls + creates its common-controls tooltip windows (x64).
     Test-GuiVbp "BalloonTooltips" "$Tests\BalloonTooltips\prjBalloonTooltips.vbp" -ExeName "BalloonTooltips"
+    # ai/029 C29-M 的反面：这枚工程的 .res **自带** #1 清单（BalloonTooltips.rc 里
+    # `1 RT_MANIFEST "BalloonTooltips.exe.manifest"`，那段含 dpiAware/compatibility）
+    # ⇒ 必须"用他的、且只有一份"。`dpiAware` 只有用户那份里有，所以这条同时钉住
+    # "让位生效"与"内置那份没叠上去"（两份 #1 会让加载器直接报错）。
+    Test-ProductManifest "balloon_manifest_is_user_supplied" "$OutDir\BalloonTooltips.exe" 1 "dpiAware"
+    # ai/029 C29-M 的另一半：这份工程的 .res **自带** #1 清单（BalloonTooltips.rc 里
+    # `1 RT_MANIFEST "BalloonTooltips.exe.manifest"`，含 dpiAware/compatibility 那一大段），
+    # 所以必须"用他的、且只有一份"。清单数=1 就是"内置那份没叠上来"的读数（两份 #1 会让
+    # 加载器直接报错）；dpiAware 这个串只有用户那份里有 ⇒ 顺带钉住"赢的是他那份"。
+    Test-ProductManifest "balloon_manifest_is_user_supplied" "$OutDir\BalloonTooltips.exe" 1 "dpiAware"
     # Charts 2020 demo (3rd-party UserControl charts): windowless chart controls (x86 first;
     # x64 after LongPtr port of API pointers/handles in the .ctl/.cls sources).
     Test-GuiVbp "Charts2020" "$Tests\Charts 2020\Proyecto1.vbp" -Arch "x86" -AutoExitSec 3
