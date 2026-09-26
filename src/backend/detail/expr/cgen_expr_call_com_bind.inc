@@ -13,7 +13,12 @@
         // 当 IDispatch 用, 链接过、运行期读数全空。
         bool axSlotObj = comObjExpr_.find("vb6_com_") == 0
                       || (comObjExpr_.find("vb6_hwnd_") == 0
-                          && !listViewNameOfExpr(comObjExpr_).empty())
+                          && (!listViewNameOfExpr(comObjExpr_).empty()
+                              // C29-8b: `TreeView1.Nodes(1)` 的宿主槽同理 —— 只有**裸控件**
+                              // 槽才进这条"取集合属性 + Item"的路; 集合对象本身
+                              // (vb6_TreeView_Nodes(…) 开头) 不能进, 否则 `Nodes.Add(…)`
+                              // 会被当成"Add 属性 + Item 下标", 编成删不改的错形状。
+                              || !treeViewNameOfExpr(comObjExpr_).empty()))
                       // C29-Data: Data1.Recordset 的透传形态 (Fields/Item 走 Step1+Item 路)。
                       || comObjExpr_.find("vb6_Data_Self(") == 0;
         if (axSlotObj && !node.positional.empty()) {
@@ -30,6 +35,11 @@
                     std::string bareIL = imageListNameOfExpr(axObjExpr);
                     if (!bareIL.empty())
                         collectionExpr = "vb6_ImageList_ListImages((void*)vb6_com_" + bareIL + ")";
+                } else if (Symbol::toLower(axMember) == "nodes") {
+                    // C29-8b: TreeView1.Nodes —— 宿主槽是 vb6_hwnd_X (真窗口)。
+                    std::string bareTV = treeViewNameOfExpr(axObjExpr);
+                    if (!bareTV.empty())
+                        collectionExpr = "vb6_TreeView_Nodes((void*)vb6_hwnd_" + bareTV + ")";
                 } else {
                     // C29-7: ListView 的 ListItems / ColumnHeaders 同一口径。
                     // ⚠ 宿主槽是 **vb6_hwnd_X** (ListView 是真窗口), 不是 vb6_com_X。

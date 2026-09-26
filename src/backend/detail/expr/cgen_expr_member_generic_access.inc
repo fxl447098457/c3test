@@ -30,6 +30,8 @@
             objExpr.find("vb6_OleCon_GetObject(") == 0 ||
             // C29-Data: `Data1.Recordset` 的真 IDispatch (memberobj 的 RS 族)。
             objExpr.find("vb6_Data_RecordsetObj(") == 0 ||
+            // C29-8b: `TreeView1.Nodes` 的真 IDispatch 集合同理。
+            objExpr.find("vb6_TreeView_Nodes(") == 0 ||
             // C29-Data: Fields("x") 的求值结果 (FieldValueStr) 上再 .Value —— 透传。
             objExpr.find("vb6_Data_FieldValueStr(") == 0) {
             // 链式COM: 设置COM标记, objExpr是中间对象表达式
@@ -99,6 +101,8 @@
         obj.find("vb6_OleCon_GetObject(") == 0 ||
         // C29-Data: `Data1.Recordset` 的真 IDispatch 同理。
         obj.find("vb6_Data_RecordsetObj(") == 0 ||
+        // C29-8b: `TreeView1.Nodes` 的真 IDispatch 集合同理。
+        obj.find("vb6_TreeView_Nodes(") == 0 ||
         // C29-Data: FieldValueStr 上 .Value 同理。
         obj.find("vb6_Data_FieldValueStr(") == 0 ||
         obj.find("vb6_PropertyPage_SelectedControls(") == 0) {

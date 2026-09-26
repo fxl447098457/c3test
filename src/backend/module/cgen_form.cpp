@@ -82,6 +82,10 @@ void CCodeGen::emitFormFramework(const FrmFormDesc& frmDesc, Module& module) {
             if (c.controlType == FrmControlType::OLE) oleConVars_.insert(c.controlName);
             // C29-Data: Data 控件同批登记。
             if (c.controlType == FrmControlType::Data) dataVars_.insert(c.controlName);
+            // C29-8b: TreeView 同批登记 —— `tv1.Nodes` 那条链靠 treeViewVars_ 认出宿主,
+            // 才能改道到 vb6_TreeView_Nodes( 的真 IDispatch 集合 (不认就发
+            // vb6_ComGetObjectProp(vb6_hwnd_tv1, L"Nodes") = 拿 HWND 当 IDispatch 用)。
+            if (c.controlType == FrmControlType::TreeView) treeViewVars_.insert(c.controlName);
             for (const auto& ch : c.children) regLV(ch);
         };
         regLV(frmDesc.formControl);

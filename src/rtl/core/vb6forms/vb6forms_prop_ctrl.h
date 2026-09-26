@@ -511,6 +511,38 @@ void    vb6_Toolbar_SetAlign(void* hwnd, int32_t val);
 int     vb6_Toolbar_AddButton(void* hwnd, int32_t index, const wchar_t* key, const wchar_t* caption,
                               int32_t style, int32_t image, const wchar_t* tooltip, int32_t width);
 int32_t vb6_Toolbar_GetButtonCount(void* hwnd);   // TB_BUTTONCOUNT（原生侧真数）
+// ===================== TreeView 的 Nodes / Node (ai/029 C29-8b) =====================
+//   结构住在原生树里 (父子/兄弟一律 TVM_GETNEXTITEM 现问)，这张表只存原生给不出的东西：
+//   Key / Text / Tag / 两个图索引。集合序 = 插入序：Nodes(k)、Node.Index、For Each 都按它。
+//   字符串 getter 返回**表内自有指针** (唯一消费者 memSetStr 当场拷成 BSTR)，不是 SysAllocString。
+//   越界：整数族给 0，字符串族给空串 —— 与 VB6 "取不到就是 Nothing / """ 同读数。
+//   Bold / Sorted / RelativeX / Node.Style 这些扁平层还没做的成员，一律不登记。
+int32_t         vb6_TreeView_NodeCount(void* hwnd);
+int32_t         vb6_TreeView_AddNode(void* hwnd, int32_t relative, int32_t relationship,
+                                     const wchar_t* key, const wchar_t* text,
+                                     int32_t image, int32_t selImage);
+int32_t         vb6_TreeView_NodeIndexByKey(void* hwnd, const wchar_t* key);
+const wchar_t*  vb6_TreeView_GetNodeText(void* hwnd, int32_t idx);
+const wchar_t*  vb6_TreeView_GetNodeKey(void* hwnd, int32_t idx);
+const wchar_t*  vb6_TreeView_GetNodeTag(void* hwnd, int32_t idx);
+void            vb6_TreeView_SetNodeText(void* hwnd, int32_t idx, const wchar_t* v);
+void            vb6_TreeView_SetNodeKey(void* hwnd, int32_t idx, const wchar_t* v);
+void            vb6_TreeView_SetNodeTag(void* hwnd, int32_t idx, const wchar_t* v);
+int32_t         vb6_TreeView_GetNodeChecked(void* hwnd, int32_t idx);
+void            vb6_TreeView_SetNodeChecked(void* hwnd, int32_t idx, int32_t v);
+int32_t         vb6_TreeView_GetNodeExpanded(void* hwnd, int32_t idx);
+void            vb6_TreeView_SetNodeExpanded(void* hwnd, int32_t idx, int32_t v);
+int32_t         vb6_TreeView_GetNodeParent(void* hwnd, int32_t idx);
+int32_t         vb6_TreeView_GetNodeChild(void* hwnd, int32_t idx);
+int32_t         vb6_TreeView_GetNodeChildren(void* hwnd, int32_t idx);
+int32_t         vb6_TreeView_GetNodeNext(void* hwnd, int32_t idx);
+int32_t         vb6_TreeView_GetNodePrev(void* hwnd, int32_t idx);
+int32_t         vb6_TreeView_GetNodeRoot(void* hwnd, int32_t idx);
+void            vb6_TreeView_NodeEnsureVisible(void* hwnd, int32_t idx);
+int32_t         vb6_TreeView_RemoveNode(void* hwnd, int32_t idx);
+void            vb6_TreeView_ClearNodes(void* hwnd);
+void*           vb6_TreeView_Nodes(void* hwnd);        // 集合对象 (真 IDispatch)
+void*           vb6_TreeView_NodeAt(void* hwnd, int32_t idx);   // 事件参数用
 
 #ifdef __cplusplus
 }

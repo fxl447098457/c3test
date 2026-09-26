@@ -52,10 +52,10 @@
 #define TVS_TRACKSELECT    0x0200L
 #endif
 #ifndef TVM_SETINDENT
-#define TVM_SETINDENT      (WM_USER + 104)
+#define TVM_SETINDENT      (WM_USER + 7)
 #endif
 #ifndef TVM_GETINDENT
-#define TVM_GETINDENT      (WM_USER + 105)
+#define TVM_GETINDENT      (WM_USER + 6)
 #endif
 
 // TVM_SETINDENT 的合法域是 0..50 像素 (超界由控件钳掉), 缇换算后按同一上限钳,
@@ -166,4 +166,440 @@ void vb6_TreeView_Init(void* hwnd, int32_t lineStyle, int32_t indentation,
     if (hideSelection != -999) vb6_TreeView_SetHideSelection(hwnd, hideSelection);
 }
 
+/* ============================================================================
+ * C29-8b: Nodes / Node —— 集合面 (成员对象机制见 vb6forms_memberobj.c)
+ *
+ * 分工: **树的结构住在原生控件里** (父子/兄弟一律用 TVM_GETNEXTITEM 问), 本文件这张表只存
+ * 原生不给的东西: Key / Text / Tag / 勾选 / 加粗 / 两个图索引。理由: SysTreeView32 存不了
+ * 字符串 Key, 而自己再维护一份父子链就会与控件两真相 —— ListView 那族是"表当真相 + 整表重发",
+ * 树这边不必: 五个 relationship 全部能一对一翻成 TVM_INSERTITEMW 的 (hParent, insertAfter)。
+ *
+ * 两个"序"要分清 (VB6 语义):
+ *   - **集合序 = 插入序**: `Nodes(k)` / `Node.Index` / `For Each` 都按它。
+ *     计划书 §四 原本写"For Each 顺序 = 显示序"，但 VB6 的 `Node.Index` 文档口径是
+ *     "节点在集合中的位置"，让 `Nodes(k)` 与 `For Each` 用两个序会自相矛盾，所以统一按
+ *     集合序 (= Index 本身)，并把这条记进手册与本文件；正常使用 (自上而下逐层 Add) 下
+ *     两者本就重合。
+ *   - 显示序只在导航读数里出现，且它问的是控件 (Parent/Child/Next/Previous/Root)。
+ *
+ * 表容量: 静态 256 条 / 每枚控件 (HeapAlloc 增长留作后续；到顶返回 0，Add 失败可观察)。
+ * ========================================================================== */
+
+#ifndef TVM_INSERTITEMW
+#define TVM_INSERTITEMW   (WM_USER + 50)
+#endif
+#ifndef TVM_DELETEITEM
+#define TVM_DELETEITEM    (WM_USER + 1)
+#endif
+#ifndef TVM_GETNEXTITEM
+#define TVM_GETNEXTITEM   (WM_USER + 10)
+#endif
+#ifndef TVM_EXPAND
+#define TVM_EXPAND        (WM_USER + 2)
+#endif
+#ifndef TVM_GETITEMSTATE
+#define TVM_GETITEMSTATE  (WM_USER + 39)
+#endif
+#ifndef TVM_ENSUREVISIBLE
+#define TVM_ENSUREVISIBLE (WM_USER + 20)
+#endif
+#ifndef TVM_GETITEMW
+#define TVM_GETITEMW      (WM_USER + 62)
+#endif
+#ifndef TVM_SETITEMW
+#define TVM_SETITEMW      (WM_USER + 63)
+#endif
+#ifndef TVIF_TEXT
+#define TVIF_TEXT         0x0001
+#define TVIF_IMAGE        0x0002
+#define TVIF_PARAM        0x0004
+#define TVIF_STATE        0x0008
+#define TVIF_SELECTEDIMAGE 0x0020
+#endif
+#ifndef TVGN_ROOT
+#define TVGN_ROOT     0
+#define TVGN_NEXT     1
+#define TVGN_PREVIOUS 2
+#define TVGN_PARENT   3
+#define TVGN_CHILD    4
+#endif
+#ifndef TVI_ROOT
+#define TVI_ROOT    ((HTREEITEM)(INT_PTR)0xFFFF)
+#define TVI_FIRST   ((HTREEITEM)(INT_PTR)0x0000)
+#define TVI_LAST    ((HTREEITEM)(INT_PTR)0x0001)
+#define TVI_SORT    ((HTREEITEM)(INT_PTR)0x0002)
+#endif
+#ifndef TVIS_STATEIMAGEMASK
+#define TVIS_STATEIMAGEMASK 0xF000
+#endif
+
+// VB6 的 relationship (tvwFirst..tvwChild)，与 ai/内置控件/TreeView 控件.md 一致
+#define VB6_TVG_FIRST     0
+#define VB6_TVG_LAST      1
+#define VB6_TVG_NEXT      2
+#define VB6_TVG_PREVIOUS  3
+#define VB6_TVG_CHILD     4
+
+#define VB6_TV_NODE_MAX 256
+#define VB6_TV_MAX      16      /* 一窗体里的 TreeView 枚数 */
+
+typedef struct {
+    HTREEITEM h;
+    wchar_t*  key;
+    wchar_t*  text;
+    wchar_t*  tag;
+    int       bold;
+    int       image;       // 图索引 (未关联 ImageList 时只是存着, 不显形)
+    int       selImage;
+    int       used;
+} Vb6TvNode;
+
+typedef struct {
+    HWND      hwnd;
+    int       count;       // 在册条数
+    Vb6TvNode n[VB6_TV_NODE_MAX];
+} Vb6TvTree;
+
+static Vb6TvTree g_tvt[VB6_TV_MAX];
+static int g_tvtCount = 0;
+
+static Vb6TvTree* vb6_TvTree(HWND h) {
+    for (int i = 0; i < g_tvtCount; i++) if (g_tvt[i].hwnd == h) return &g_tvt[i];
+    if (g_tvtCount >= VB6_TV_MAX) return NULL;
+    Vb6TvTree* t = &g_tvt[g_tvtCount++];
+    ZeroMemory(t, sizeof(*t));
+    t->hwnd = h;
+    return t;
+}
+
+static wchar_t* vb6_TvStr(const wchar_t* s) {
+    if (!s || !*s) return NULL;
+    int n = lstrlenW(s);
+    wchar_t* p = (wchar_t*)HeapAlloc(GetProcessHeap(), 0, (size_t)(n + 1) * sizeof(wchar_t));
+    if (p) { CopyMemory(p, s, (size_t)n * sizeof(wchar_t)); p[n] = 0; }
+    return p;
+}
+
+static void vb6_TvFree(wchar_t** pp) {
+    if (*pp) { HeapFree(GetProcessHeap(), 0, *pp); *pp = NULL; }
+}
+
+static int vb6_TvIdxOfItem(Vb6TvTree* t, HTREEITEM h) {
+    if (!h) return 0;
+    for (int i = 0; i < VB6_TV_NODE_MAX; i++)
+        if (t->n[i].used && t->n[i].h == h) return i + 1;
+    return 0;
+}
+
+static HTREEITEM vb6_TvItemOfIdx(Vb6TvTree* t, int idx) {
+    // 集合序 = 插入序：第 k 条在册项，不是第 k 号槽。
+    if (!t || idx < 1) return NULL;
+    int seen = 0;
+    for (int i = 0; i < VB6_TV_NODE_MAX; i++) {
+        if (!t->n[i].used) continue;
+        if (++seen == idx) return t->n[i].h;
+    }
+    return NULL;
+}
+
+static int vb6_TvLiveCount(Vb6TvTree* t) {
+    int c = 0;
+    for (int i = 0; i < VB6_TV_NODE_MAX; i++) if (t->n[i].used) c++;
+    return c;
+}
+
+// 原生侧的兄弟/父子关系查询 (0 = 没有)
+static int vb6_TvRelIdx(Vb6TvTree* t, int idx, int flag) {
+    HTREEITEM h = vb6_TvItemOfIdx(t, idx);
+    if (!h) return 0;
+    HTREEITEM o = (HTREEITEM)(INT_PTR)SendMessageW(t->hwnd, TVM_GETNEXTITEM, flag, (LPARAM)h);
+    return vb6_TvIdxOfItem(t, o);
+}
+
+int32_t vb6_TreeView_NodeCount(void* hwnd) {
+    Vb6TvTree* t = hwnd ? vb6_TvTree((HWND)hwnd) : NULL;
+    return t ? (int32_t)vb6_TvLiveCount(t) : 0;
+}
+
+// Add([relative], [relationship], [key], [text]) → 1 基集合下标; 0 = 失败 (表满/参数错)
+// relative 传 1 基下标 (memberobj 那侧已把"按 Key 的相对项"换成下标)，0/负 = 没有相对项。
+int32_t vb6_TreeView_AddNode(void* hwnd, int32_t relative, int32_t relationship,
+                             const wchar_t* key, const wchar_t* text,
+                             int32_t image, int32_t selImage) {
+    if (!hwnd) return 0;
+    Vb6TvTree* t = vb6_TvTree((HWND)hwnd);
+    if (!t || vb6_TvLiveCount(t) >= VB6_TV_NODE_MAX) return 0;
+
+    int rel = (relative > 0) ? (int)relative : 0;
+    HTREEITEM hRel = rel ? vb6_TvItemOfIdx(t, rel) : NULL;
+    if (rel && !hRel) return 0;                 // 相对项不存在 → VB6 也是失败, 不猜
+
+    HTREEITEM hParent = TVI_ROOT;
+    HTREEITEM after   = TVI_LAST;
+    if (!hRel) {
+        // 没有相对项：一律挂在根上 (relationship 此时无意义)
+        hParent = TVI_ROOT;
+        after   = TVI_LAST;
+    } else {
+        switch (relationship) {
+        case VB6_TVG_FIRST:
+            hParent = (HTREEITEM)(INT_PTR)SendMessageW((HWND)hwnd, TVM_GETNEXTITEM,
+                                                       TVGN_PARENT, (LPARAM)hRel);
+            if (!hParent) hParent = TVI_ROOT;
+            after = TVI_FIRST;
+            break;
+        case VB6_TVG_LAST:
+            hParent = (HTREEITEM)(INT_PTR)SendMessageW((HWND)hwnd, TVM_GETNEXTITEM,
+                                                       TVGN_PARENT, (LPARAM)hRel);
+            if (!hParent) hParent = TVI_ROOT;
+            after = TVI_LAST;
+            break;
+        case VB6_TVG_NEXT:    hParent = (HTREEITEM)(INT_PTR)SendMessageW(
+                                   (HWND)hwnd, TVM_GETNEXTITEM, TVGN_PARENT, (LPARAM)hRel);
+                              if (!hParent) hParent = TVI_ROOT;
+                              after = hRel; break;
+        case VB6_TVG_PREVIOUS: {
+            hParent = (HTREEITEM)(INT_PTR)SendMessageW((HWND)hwnd, TVM_GETNEXTITEM,
+                                                       TVGN_PARENT, (LPARAM)hRel);
+            if (!hParent) hParent = TVI_ROOT;
+            HTREEITEM prev = (HTREEITEM)(INT_PTR)SendMessageW(
+                (HWND)hwnd, TVM_GETNEXTITEM, TVGN_PREVIOUS, (LPARAM)hRel);
+            after = prev ? prev : TVI_FIRST;
+            break;
+        }
+        case VB6_TVG_CHILD:
+        default:                                 // VB6 的默认关系就是 tvwChild
+            hParent = hRel;
+            after   = TVI_LAST;
+            break;
+        }
+    }
+
+    int slot = -1;
+    for (int i = 0; i < VB6_TV_NODE_MAX; i++) if (!t->n[i].used) { slot = i; break; }
+    if (slot < 0) return 0;
+
+    wchar_t txtBuf[512];
+    if (text && *text) wcsncpy_s(txtBuf, 512, text, _TRUNCATE);
+    else txtBuf[0] = 0;
+
+    TVINSERTSTRUCTW ins;
+    ZeroMemory(&ins, sizeof(ins));
+    ins.hParent = hParent;
+    ins.hInsertAfter = after;
+    ins.item.mask = TVIF_TEXT | TVIF_STATE | TVIF_PARAM;
+    ins.item.pszText = txtBuf;
+    ins.item.cchTextMax = 0;
+    // 复选框位开着才给状态图 (1 = 未勾)；否则留 0，免得往没勾选的控件上塞图号。
+    ins.item.state = (vb6_TvStyle(hwnd) & TVS_CHECKBOXES) ? (DWORD)(1 << 12) : 0;
+    ins.item.stateMask = TVIS_STATEIMAGEMASK;
+    ins.item.lParam = 0;
+    HTREEITEM h = (HTREEITEM)(INT_PTR)SendMessageW((HWND)hwnd, TVM_INSERTITEMW, 0, (LPARAM)&ins);
+    if (!h) return 0;
+
+    Vb6TvNode* nd = &t->n[slot];
+    nd->h = h; nd->key = vb6_TvStr(key); nd->text = vb6_TvStr(txtBuf); nd->tag = NULL;
+    nd->bold = 0; nd->image = (int)image; nd->selImage = (int)selImage; nd->used = 1;
+    t->count++;
+    // 集合序 = 插入序，槽位取"最小空位"⇒ 新条目前面那些槽必然全满，
+    // 它的集合序就是 slot+1。别拿在册条数当返回值：删过项之后两者会分叉。
+    return (int32_t)(slot + 1);
+}
+
+int32_t vb6_TreeView_NodeIndexByKey(void* hwnd, const wchar_t* key) {
+    Vb6TvTree* t = hwnd ? vb6_TvTree((HWND)hwnd) : NULL;
+    if (!t || !key || !*key) return 0;
+    int seen = 0;
+    for (int i = 0; i < VB6_TV_NODE_MAX; i++) {
+        if (!t->n[i].used) continue;
+        seen++;
+        if (t->n[i].key && lstrcmpiW(t->n[i].key, key) == 0) return (int32_t)seen;
+    }
+    return 0;
+}
+
+
+// ---------- 条目读数 (字符串一律 BSTR，与 StatusBar/ListView 那两族同口径) ----------
+static Vb6TvNode* vb6_TvNode(void* hwnd, int32_t idx) {
+    Vb6TvTree* t = hwnd ? vb6_TvTree((HWND)hwnd) : NULL;
+    if (!t || idx < 1) return NULL;
+    int seen = 0;
+    for (int i = 0; i < VB6_TV_NODE_MAX; i++) {
+        if (!t->n[i].used) continue;
+        if (++seen == (int)idx) return &t->n[i];
+    }
+    return NULL;
+}
+
+// 这三个 getter 返回**表内自有指针**，不是 BSTR：唯一的消费者是 memberobj 的 memSetStr，
+// 它当场拷成自己的 BSTR；换成 SysAllocString 只会多一笔"谁负责 VariantClear"的悬账。
+// 越界一律给空串而不是 NULL —— 成员对象读空字段在 VB6 里就是 ""。
+const wchar_t* vb6_TreeView_GetNodeText(void* hwnd, int32_t idx) {
+    Vb6TvNode* n = vb6_TvNode(hwnd, idx);
+    return (n && n->text) ? n->text : L"";
+}
+const wchar_t* vb6_TreeView_GetNodeKey(void* hwnd, int32_t idx) {
+    Vb6TvNode* n = vb6_TvNode(hwnd, idx);
+    return (n && n->key) ? n->key : L"";
+}
+const wchar_t* vb6_TreeView_GetNodeTag(void* hwnd, int32_t idx) {
+    Vb6TvNode* n = vb6_TvNode(hwnd, idx);
+    return (n && n->tag) ? n->tag : L"";
+}
+
+void vb6_TreeView_SetNodeText(void* hwnd, int32_t idx, const wchar_t* v) {
+    Vb6TvNode* n = vb6_TvNode(hwnd, idx);
+    if (!n) return;
+    vb6_TvFree(&n->text);
+    n->text = vb6_TvStr(v);
+    // 原生侧同步：不改控件的话读数是表里的新值、屏幕上还是旧字，正是本线一直防的分叉。
+    TVITEMW it;
+    ZeroMemory(&it, sizeof(it));
+    it.mask = TVIF_HANDLE | TVIF_TEXT;
+    it.hItem = n->h;
+    it.pszText = (LPWSTR)(v ? v : (wchar_t*)L"");
+    SendMessageW((HWND)hwnd, TVM_SETITEMW, 0, (LPARAM)&it);
+    InvalidateRect((HWND)hwnd, NULL, FALSE);
+}
+void vb6_TreeView_SetNodeKey(void* hwnd, int32_t idx, const wchar_t* v) {
+    Vb6TvNode* n = vb6_TvNode(hwnd, idx);
+    if (!n) return;
+    vb6_TvFree(&n->key);
+    n->key = vb6_TvStr(v);
+}
+void vb6_TreeView_SetNodeTag(void* hwnd, int32_t idx, const wchar_t* v) {
+    Vb6TvNode* n = vb6_TvNode(hwnd, idx);
+    if (!n) return;
+    vb6_TvFree(&n->tag);
+    n->tag = vb6_TvStr(v);
+}
+
+// ---------- 勾选 / 展开 ----------
+// 勾选住在原生 state image 里 (2 = 勾上)，所以读数与观感同源；没开 TVS_CHECKBOXES 时
+// 控件不会画方框，但位照样存着 —— 与 VB6 "先设 CheckBoxes=True 才看得到" 的次序一致。
+int32_t vb6_TreeView_GetNodeChecked(void* hwnd, int32_t idx) {
+    Vb6TvNode* n = vb6_TvNode(hwnd, idx);
+    if (!n) return 0;
+    DWORD st = (DWORD)(INT_PTR)SendMessageW((HWND)hwnd, TVM_GETITEMSTATE, (WPARAM)n->h,
+                                            (LPARAM)TVIS_STATEIMAGEMASK);
+    return (((st & TVIS_STATEIMAGEMASK) >> 12) == 2) ? -1 : 0;
+}
+void vb6_TreeView_SetNodeChecked(void* hwnd, int32_t idx, int32_t v) {
+    Vb6TvNode* n = vb6_TvNode(hwnd, idx);
+    if (!n) return;
+    TVITEMW it;
+    ZeroMemory(&it, sizeof(it));
+    // ⚠ 勾选态只能用 TVM_SETITEMW 写 —— **SDK 里根本没有 TVM_SETITEMSTATE 这条消息**
+    // (commctrl.h 只有 TVM_GETITEMSTATE = TV_FIRST+39)。8b 一开始"照 GET 的样子"发明了
+    // 一条 SETITEMSTATE, 编得过、跑得通、勾就是不亮 —— 未定义的 WM_USER+n 会被默认
+    // 窗口过程吞掉并返回 0, 一点动静都没有。
+    it.mask = TVIF_HANDLE | TVIF_STATE;
+    it.hItem = n->h;
+    it.stateMask = TVIS_STATEIMAGEMASK;
+    it.state = (DWORD)((v != 0 ? 2 : 1) << 12);
+    SendMessageW((HWND)hwnd, TVM_SETITEMW, 0, (LPARAM)&it);
+    InvalidateRect((HWND)hwnd, NULL, FALSE);
+}
+
+// 展开态同样住在原生位上 (TVIS_EXPANDED) —— 与 Checked 同一个理由：读数与屏幕同源。
+#ifndef TVIS_EXPANDED
+#define TVIS_EXPANDED 0x0020
+#endif
+#ifndef TVE_EXPAND
+#define TVE_EXPAND   0x0002
+#define TVE_COLLAPSE 0x0001
+#endif
+
+int32_t vb6_TreeView_GetNodeExpanded(void* hwnd, int32_t idx) {
+    Vb6TvNode* n = vb6_TvNode(hwnd, idx);
+    if (!n) return 0;
+    DWORD st = (DWORD)(INT_PTR)SendMessageW((HWND)hwnd, TVM_GETITEMSTATE, (WPARAM)n->h,
+                                            (LPARAM)TVIS_EXPANDED);
+    return (st & TVIS_EXPANDED) ? -1 : 0;
+}
+
+void vb6_TreeView_SetNodeExpanded(void* hwnd, int32_t idx, int32_t v) {
+    Vb6TvNode* n = vb6_TvNode(hwnd, idx);
+    if (!n) return;
+    SendMessageW((HWND)hwnd, TVM_EXPAND, (WPARAM)(v != 0 ? TVE_EXPAND : TVE_COLLAPSE),
+                 (LPARAM)n->h);
+}
+
+// ---------- 导航 (结构住在控件里，一律现问) ----------
+int32_t vb6_TreeView_GetNodeParent(void* hwnd, int32_t idx) { return vb6_TvRelIdx(vb6_TvTree((HWND)hwnd), idx, TVGN_PARENT); }
+int32_t vb6_TreeView_GetNodeChild(void* hwnd, int32_t idx)  { return vb6_TvRelIdx(vb6_TvTree((HWND)hwnd), idx, TVGN_CHILD); }
+int32_t vb6_TreeView_GetNodeNext(void* hwnd, int32_t idx)   { return vb6_TvRelIdx(vb6_TvTree((HWND)hwnd), idx, TVGN_NEXT); }
+int32_t vb6_TreeView_GetNodePrev(void* hwnd, int32_t idx)   { return vb6_TvRelIdx(vb6_TvTree((HWND)hwnd), idx, TVGN_PREVIOUS); }
+
+int32_t vb6_TreeView_GetNodeChildren(void* hwnd, int32_t idx) {
+    Vb6TvTree* t = hwnd ? vb6_TvTree((HWND)hwnd) : NULL;
+    if (!t) return 0;
+    int32_t c = 0;
+    for (int32_t k = vb6_TreeView_GetNodeChild(hwnd, idx); k; k = vb6_TreeView_GetNodeNext(hwnd, k)) c++;
+    return c;
+}
+
+// VB6 的 Root = **所属树的根祖先**：顶层节点问自己就返回自己 (不是"没有")。
+int32_t vb6_TreeView_GetNodeRoot(void* hwnd, int32_t idx) {
+    int32_t cur = idx;
+    if (!vb6_TvNode(hwnd, idx)) return 0;   // 越界不给"自己的下标"当根
+    for (;;) {
+        int32_t up = vb6_TreeView_GetNodeParent(hwnd, cur);
+        if (!up) return cur;
+        cur = up;
+    }
+}
+
+void vb6_TreeView_NodeEnsureVisible(void* hwnd, int32_t idx) {
+    Vb6TvNode* n = vb6_TvNode(hwnd, idx);
+    if (!n) return;
+    SendMessageW((HWND)hwnd, TVM_ENSUREVISIBLE, 0, (LPARAM)n->h);
+}
+
+// ---------- Remove / Clear ----------
+// 原生一次删掉整棵子树，所以表里要把"它的后代"一起标成不用 —— 漏了这一步，
+// 集合数与 Count 就会与屏幕上看到的不一致。
+int32_t vb6_TreeView_RemoveNode(void* hwnd, int32_t idx) {
+    Vb6TvTree* t = hwnd ? vb6_TvTree((HWND)hwnd) : NULL;
+    if (!t) return 0;
+    Vb6TvNode* n = vb6_TvNode(hwnd, idx);
+    if (!n) return 0;
+
+    // 后代：谁的祖先链上有 n->h 就一起完蛋。判据现问原生树，不另存一份父子。
+    int doomed[VB6_TV_NODE_MAX]; int dn = 0;
+    for (int i = 0; i < VB6_TV_NODE_MAX; i++) {
+        if (!t->n[i].used) continue;
+        HTREEITEM a = (HTREEITEM)(INT_PTR)SendMessageW((HWND)hwnd, TVM_GETNEXTITEM,
+                                                       TVGN_PARENT, (LPARAM)t->n[i].h);
+        while (a) {
+            if (a == n->h) { doomed[dn++] = i; break; }
+            a = (HTREEITEM)(INT_PTR)SendMessageW((HWND)hwnd, TVM_GETNEXTITEM,
+                                                 TVGN_PARENT, (LPARAM)a);
+        }
+    }
+    // 只发这一条删除：原生自己带走整棵子树。挨个删 doomed 会往已失效的 HTREEITEM
+    // 上发消息 (槽位回收后父项下标可能比子项大，"按表序反着删"并不成立)。
+    SendMessageW((HWND)hwnd, TVM_DELETEITEM, 0, (LPARAM)n->h);
+    doomed[dn++] = (int)(n - t->n);
+    for (int k = 0; k < dn; k++) {
+        int i = doomed[k];
+        if (!t->n[i].used) continue;
+        vb6_TvFree(&t->n[i].key); vb6_TvFree(&t->n[i].text); vb6_TvFree(&t->n[i].tag);
+        ZeroMemory(&t->n[i], sizeof(t->n[i]));
+        t->count--;
+    }
+    return -1;
+}
+
+void vb6_TreeView_ClearNodes(void* hwnd) {
+    Vb6TvTree* t = hwnd ? vb6_TvTree((HWND)hwnd) : NULL;
+    if (!t) return;
+    SendMessageW((HWND)hwnd, TVM_DELETEITEM, 0, (LPARAM)TVI_ROOT);
+    for (int i = 0; i < VB6_TV_NODE_MAX; i++) {
+        if (!t->n[i].used) continue;
+        vb6_TvFree(&t->n[i].key); vb6_TvFree(&t->n[i].text); vb6_TvFree(&t->n[i].tag);
+        ZeroMemory(&t->n[i], sizeof(t->n[i]));
+    }
+    t->count = 0;
+}
 #endif // _WIN32

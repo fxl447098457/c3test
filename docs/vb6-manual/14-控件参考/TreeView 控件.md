@@ -37,6 +37,31 @@
 
 上面这五条是**窗口样式位本身**，不是另存的一份副本：`CheckBoxes`、`HotTracking`、`LineStyle`、`HideSelection` 四条的 getter 直接读窗口的 `GWL_STYLE`，运行期赋值会连带重算布局并重绘，所以"读到的"与"画出来的"不会分叉。
 
-尚未落地（`Nodes` 那一族要等 `ImageList` 批立的"成员对象"机制，见 `ai/029` §四）：`Nodes` 集合与 `Node` 对象（`Add`/`Text`/`Key`/`Checked`/`Parent`/`Children`/`Expanded`/`EnsureVisible`/`Remove`）、`Style` 八种组合、`SelectedItem`、`LabelEdit`、`Sorted`、`PathSeparator`、`ImageList` 关联，以及 `NodeClick`/`Expand`/`Collapse` 等事件。设计期写在这些属性上的值目前**不会**报错，也**不会**见效。
+尚未落地（本页下一节 `C29-8b` 已把 `Nodes` 那一族接上）：`Style` 八种组合、`SelectedItem`、`LabelEdit`、`Sorted`、`ImageList` 关联，以及 `NodeClick`/`Expand`/`Collapse` 等事件。设计期写在这些属性上的值目前**不会**报错，也**不会**见效。
 
 判据在 `tests\ctrltreeview\`（TV1-TV5 认设计期五值、TV6-TV7 认默认值与"消息真打进窗口"、TV8-TV9 认运行期赋值可逆、TV10-TV11 认缇值往返、TV12 认通用属性面没被抢走）。
+
+## 本项目的实现口径（ai/029 C29-8b：`Nodes` 集合与 `Node` 对象）
+
+`TreeView1.Nodes` 是一个**真的 `IDispatch` 集合对象**（复用 `ImageList`/`ListView` 那一批立的成员对象机制，`src\rtl\core\vb6forms\vb6forms_memberobj.c`），不是先把节点抄进一张 VB 侧的表再算：
+
+- **结构只有一个真相**：父子与兄弟一律现问原生树（`TVM_GETNEXTITEM`），展开态问 `TVIS_EXPANDED`，勾选态问节点的 state image 位（`TVM_GETITEMSTATE`）。这张表只存原生给不出来的四样：`Key`、`Text`、`Tag`、两个图索引。所以"读到的"与"屏幕上画的"不会分叉。
+- **`Text` 写回去会同步到控件**（`TVM_SETITEMW` + 重绘）；只改表不改控件，正是本线一直防的那种假实现。
+
+| 写法 | 读数 |
+| --- | --- |
+| `Tree1.Nodes.Count` / `Node.Index` / `For Each n In Tree1.Nodes` | **集合序 = 插入序**。三条问的都是同一个序（不是显示序：原生控件按关系插入，插入序与视觉序可以不同，这一条是本项目定的口径） |
+| `Tree1.Nodes.Add([relative], [relationship], [key], [text], [image], [selectedimage])` | `relationship` 认 `0..4`（`tvwFirst`/`tvwLast`/`tvwBefore`/`tvwAfter`/`tvwChild`），缺省 = `tvwChild`；`relative` 给**下标或 Key 都收**。没有相对项时一律挂在根末尾。返回的就是 `Node` 对象 |
+| `Tree1.Nodes(i)` / `Tree1.Nodes("key")` | 同一条 `Item`，实参是下标还是宽字符串都认（Key 不区分大小写）。取不到给 `Nothing` |
+| `Node.Text` / `Key` / `Tag` | 可读可写；越界读给空串 |
+| `Node.Checked` | 节点的 state image 位（`2` = 勾上）。**没开 `CheckBoxes` 也写得进、读得出**，只是不画方框 —— 与 VB6"先设 `CheckBoxes=True` 才看得到"的次序一致 |
+| `Node.Expanded` | 读写都过原生（`TVM_EXPAND`）；`EnsureVisible` 会把父节点撑开，这条读数是控件自己做的 |
+| `Node.Parent` / `Child` / `Children` / `Next` / `Previous` | 现问原生树；`Children` 是**子节点个数**，其余给 1 基下标，没有就给 `0` |
+| `Node.Root` | 所属树的根祖先。**顶层节点返回自己**（VB6 同口径），越界返回 `0` |
+| `Tree1.Nodes.Remove(i 或 "key")` / `.Clear` | `Remove` 删的是**整棵子树**（原生删父本就带走子，表里跟着一起销），`Clear` 清表 |
+
+勾选态的写**只能走 `TVM_SETITEMW`**：`commctrl.h` 里根本没有 `TVM_SETITEMSTATE` 这条消息（只有 `TVM_GETITEMSTATE`）。照 getter 的样子"对称地"发明一条 SET，编得过、跑得通、勾就是不亮 —— 未定义的 `WM_USER+n` 会被默认窗口过程吞掉并返回 0，一点动静都没有。
+
+还没做的成员：`Bold`、`Sorted`、`RelativeX`、`Node.Style`、`Node.Button` —— 名字表里**刻意不登记**这些，登记了就是"看着支持、实则答错"（与 `ListView` 那族同一取舍）。
+
+判据在同一个工程里（`tests\ctrltreeview\`，TV13-TV27）：`Count`、`Add` 返回对象的 `Index`、下标与 Key 两条取法（TV13-TV15）、结构导航（TV16-TV18）、写回后换一枚对象再读（TV19）、勾选（TV20）、展开三态含 `EnsureVisible` 撑开父节点（TV21-TV23）、`For Each` 与集合序（TV24）、`Remove` 带走子树与 `Clear`（TV25-TV26）、以及"集合这条路没把标量属性面抢走"（TV27）。x86 与 x64 都跑。

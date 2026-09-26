@@ -92,6 +92,18 @@ std::string CCodeGen::resolveComValue(const std::string& unpackType) {
         }
     }
 
+    // C29-8b: `TreeView1.Nodes` → **真集合对象** (与 C29-7 的 ListView 同一口径、
+    // 同一个 vb6forms_memberobj.c 机制)。不拦就发 `vb6_ComGetObjectProp(vb6_hwnd_X,
+    // L"Nodes")` —— HWND 不是 IDispatch, 链接过、运行期读数全空。
+    if (Symbol::toLower(memberName) == "nodes") {
+        std::string tvBare = treeViewNameOfExpr(objExpr);
+        if (!tvBare.empty()) {
+            lastExpr_ = "vb6_TreeView_Nodes((void*)vb6_hwnd_" + tvBare + ")";
+            isComMarker_ = false;
+            return lastExpr_;
+        }
+    }
+
     // C29-OLE: `OLE1.Object` → 嵌入对象的 IDispatch (真 OLE 容器)。
     // 其它属性 (Class/OLEType/SizeMode…) 走属性表 (cgen_util_ctrl.cpp), 不在这拦。
     if (Symbol::toLower(memberName) == "object") {
@@ -596,6 +608,14 @@ std::string CCodeGen::resolveComMarkerForPack(const std::string& packFnHint) {
                     ? ("vb6_ListView_ListItems((void*)vb6_hwnd_" + lvBare + ")")
                     : ("vb6_ListView_ColumnHeaders((void*)vb6_hwnd_" + lvBare + ")");
         }
+    }
+
+    // C29-8b: `TreeView1.Nodes` → 真集合对象 (同 resolveComValue 那条)。走这条的是
+    // "集合被当实参 / 被整体赋值"的场合, 例如 `Set ns = TreeView1.Nodes`。
+    if (Symbol::toLower(memName) == "nodes") {
+        std::string tvBare = treeViewNameOfExpr(objExpr);
+        if (!tvBare.empty())
+            return "vb6_TreeView_Nodes((void*)vb6_hwnd_" + tvBare + ")";
     }
 
     // C29-OLE: `OLE1.Object` (被当实参/整体赋值的场合, 如 `Set o = OLE1.Object`)。

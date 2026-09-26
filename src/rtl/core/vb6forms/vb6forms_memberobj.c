@@ -59,11 +59,13 @@
 #define VB6_MEMK_PANEL          4
 #define VB6_MEMK_RS             5   // Data.Recordset (C29-Data)
 #define VB6_MEMK_FIELD          6   // Recordset.Fields("x") 的 Field
+#define VB6_MEMK_NODE           7   // TreeView 的 Node (C29-8b)
 // 成员集合族 (Vb6MemColl)
 #define VB6_MEMCK_LISTIMAGES    1
 #define VB6_MEMCK_LISTITEMS     2
 #define VB6_MEMCK_COLUMNHEADERS 3
 #define VB6_MEMCK_PANELS        4
+#define VB6_MEMCK_NODES         5   // TreeView 的 Nodes (C29-8b)
 // (Recordset/Field 不是集合, RS.Fields 是带参 GET 直接产 Field 对象)
 
 // ===================== 实例 =====================
@@ -109,6 +111,14 @@ static const wchar_t* kColumnHeaderNames[] = {
 static const wchar_t* kPanelNames[] = {
     L"Key", L"Index", L"Text", L"Width", L"MinWidth", L"AutoSize", L"Style",
     L"ToolTipText", NULL };
+// C29-8b: TreeView 的 Node。名字表顺序即 DISPID (下标 + 1)。
+// 只登记扁平层真做得动的成员: Bold / Sorted / RelativeX / Node.Style 一律不放,
+// 放进去就是「看着支持、实则答错」 (与 ListView 那族同一取舍)。
+static const wchar_t* kNodeNames[] = {
+    L"Key", L"Index", L"Text", L"Tag", L"Checked", L"Expanded",
+    L"Parent", L"Child", L"Children", L"Next", L"Previous", L"Root",
+    L"EnsureVisible", NULL };
+
 // 三个集合同构: Count / Item / Add / Remove / Clear / _NewEnum
 static const wchar_t* kCollNames[] = {
     L"Count", L"Item", L"Add", L"Remove", L"Clear", L"_NewEnum", NULL };
@@ -136,6 +146,17 @@ static const wchar_t* kRsFieldNames[] = {
 #define VB6_MEMD_AUTOSIZE   6
 #define VB6_MEMD_STYLE      7
 #define VB6_MEMD_TOOLTIP    8
+// Node (kNodeNames 顺序; Key/Index/Text 沿用上面同号的定义)
+#define VB6_MEMD_NODE_TAG       4
+#define VB6_MEMD_NODE_CHECKED   5
+#define VB6_MEMD_NODE_EXPANDED  6
+#define VB6_MEMD_NODE_PARENT    7
+#define VB6_MEMD_NODE_CHILD     8
+#define VB6_MEMD_NODE_CHILDREN  9
+#define VB6_MEMD_NODE_NEXT      10
+#define VB6_MEMD_NODE_PREV      11
+#define VB6_MEMD_NODE_ROOT      12
+#define VB6_MEMD_NODE_ENSVIS    13
 // RS (kRsNames 顺序)
 #define VB6_MEMRS_BOF        1
 #define VB6_MEMRS_EOF        2
@@ -167,6 +188,7 @@ static const wchar_t* const* memObjNamesOf(int32_t kind) {
     case VB6_MEMK_LISTITEM:     return kListItemNames;
     case VB6_MEMK_COLUMNHEADER: return kColumnHeaderNames;
     case VB6_MEMK_PANEL:        return kPanelNames;
+    case VB6_MEMK_NODE:        return kNodeNames;
     case VB6_MEMK_RS:           return kRsNames;
     case VB6_MEMK_FIELD:        return kRsFieldNames;
     default:                    return kListImageNames;
@@ -257,6 +279,7 @@ static int32_t memCollCount(int32_t kind, void* owner) {
     case VB6_MEMCK_LISTITEMS:     return vb6_ListView_GetItemCount(owner);
     case VB6_MEMCK_COLUMNHEADERS: return vb6_ListView_GetColumnCount(owner);
     case VB6_MEMCK_PANELS:        return vb6_StatusBar_GetPanelsCount(owner);
+    case VB6_MEMCK_NODES:       return vb6_TreeView_NodeCount(owner);
     default:                      return vb6_GetImageListCount(owner);
     }
 }
@@ -478,6 +501,56 @@ static HRESULT memInvokePanel(Vb6MemObj* p, int dispid, VARIANT* out) {
     return DISP_E_MEMBERNOTFOUND;
 }
 
+// C29-8b: TreeView 的 Node。导航读数 (Parent/Child/Children/Next/Previous/Root) 问的是
+// **原生树**, 字符串/勾选/展开问的是 treeview.c 那张表与原生 state 位 —— 没有第二份真相。
+static HRESULT memInvokeNode(Vb6MemObj* p, int dispid, VARIANT* out) {
+    switch (dispid) {
+    case VB6_MEMD_KEY:
+        memSetStr(out, vb6_TreeView_GetNodeKey(p->owner, p->index));
+        return S_OK;
+    case VB6_MEMD_INDEX:
+        memSetI4(out, p->index);
+        return S_OK;
+    case VB6_MEMD_TEXT:
+        memSetStr(out, vb6_TreeView_GetNodeText(p->owner, p->index));
+        return S_OK;
+    case VB6_MEMD_NODE_TAG:
+        memSetStr(out, vb6_TreeView_GetNodeTag(p->owner, p->index));
+        return S_OK;
+    case VB6_MEMD_NODE_CHECKED:
+        memSetI4(out, vb6_TreeView_GetNodeChecked(p->owner, p->index));
+        return S_OK;
+    case VB6_MEMD_NODE_EXPANDED:
+        memSetI4(out, vb6_TreeView_GetNodeExpanded(p->owner, p->index));
+        return S_OK;
+    case VB6_MEMD_NODE_PARENT:
+        memSetI4(out, vb6_TreeView_GetNodeParent(p->owner, p->index));
+        return S_OK;
+    case VB6_MEMD_NODE_CHILD:
+        memSetI4(out, vb6_TreeView_GetNodeChild(p->owner, p->index));
+        return S_OK;
+    case VB6_MEMD_NODE_CHILDREN:
+        memSetI4(out, vb6_TreeView_GetNodeChildren(p->owner, p->index));
+        return S_OK;
+    case VB6_MEMD_NODE_NEXT:
+        memSetI4(out, vb6_TreeView_GetNodeNext(p->owner, p->index));
+        return S_OK;
+    case VB6_MEMD_NODE_PREV:
+        memSetI4(out, vb6_TreeView_GetNodePrev(p->owner, p->index));
+        return S_OK;
+    case VB6_MEMD_NODE_ROOT:
+        memSetI4(out, vb6_TreeView_GetNodeRoot(p->owner, p->index));
+        return S_OK;
+    case VB6_MEMD_NODE_ENSVIS:
+        vb6_TreeView_NodeEnsureVisible(p->owner, p->index);
+        memSetEmpty(out);
+        return S_OK;
+    default:
+        break;
+    }
+    return DISP_E_MEMBERNOTFOUND;
+}
+
 // C29-Data: Data.Recordset 的 Invoke。带参的 Fields("x") 在 dp 里 (PROPERTYGET 逆序)。
 static HRESULT memInvokeRs(Vb6MemObj* p, int dispid, VARIANT* out, DISPPARAMS* dp, WORD flags) {
     if (memTrace()) fprintf(stderr, "[MOBJ-RS] dispid=%d flags=%04X owner=%p\n", dispid, (unsigned)flags, p->owner);
@@ -590,6 +663,27 @@ static void memObjPutProp(Vb6MemObj* p, int dispid, DISPPARAMS* dp) {
         }
         return;
     }
+    if (p->kind == VB6_MEMK_NODE) {
+        switch (dispid) {
+        case VB6_MEMD_TEXT:
+            vb6_TreeView_SetNodeText(p->owner, p->index, memArgStr(v));
+            break;
+        case VB6_MEMD_KEY:
+            vb6_TreeView_SetNodeKey(p->owner, p->index, memArgStr(v));
+            break;
+        case VB6_MEMD_NODE_TAG:
+            vb6_TreeView_SetNodeTag(p->owner, p->index, memArgStr(v));
+            break;
+        case VB6_MEMD_NODE_CHECKED:
+            vb6_TreeView_SetNodeChecked(p->owner, p->index, memVariantToI4(v));
+            break;
+        case VB6_MEMD_NODE_EXPANDED:
+            vb6_TreeView_SetNodeExpanded(p->owner, p->index, memVariantToI4(v));
+            break;
+        default: break;
+        }
+        return;
+    }
     if (p->kind == VB6_MEMK_PANEL) {
         switch (dispid) {
         case VB6_MEMD_TEXT:
@@ -663,6 +757,7 @@ static HRESULT STDMETHODCALLTYPE memObj_Invoke(IDispatch* This, DISPID dispid, R
     case VB6_MEMK_LISTITEM:     return memInvokeListItem(p, (int)dispid, out, dp);
     case VB6_MEMK_COLUMNHEADER: return memInvokeColumnHeader(p, (int)dispid, out);
     case VB6_MEMK_PANEL:        return memInvokePanel(p, (int)dispid, out);
+    case VB6_MEMK_NODE:        return memInvokeNode(p, (int)dispid, out);
     case VB6_MEMK_RS:           return memInvokeRs(p, (int)dispid, out, dp, flags);
     case VB6_MEMK_FIELD:        return memInvokeRsField(p, (int)dispid, out);
     default: break;
@@ -727,6 +822,22 @@ static int32_t memCollAdd(int32_t kind, void* owner, DISPPARAMS* dp, void** outO
         *outObj = o;
         return newIdx;
     }
+    case VB6_MEMCK_NODES: {
+        // Nodes.Add([relative], [relationship], [key], [text], [image], [selectedimage])
+        // relative 可以是下标也可以是 Key (VB6 两者都收)；Key 先换成下标再往下传。
+        const wchar_t* rKey = NULL;
+        int32_t rel = memParseIndexOrKey(memArg(dp, 0), &rKey);
+        if (rel < 0) rel = (rKey && *rKey) ? vb6_TreeView_NodeIndexByKey(owner, rKey) : 0;
+        int32_t relship = memArgIsMissing(a1) ? 4 /* tvwChild */ : memVariantToI4(a1);
+        int32_t newIdx = vb6_TreeView_AddNode(owner, rel, relship, memArgStr(a2), memArgStr(a3),
+                                            memArgIsMissing(a4) ? 0 : memVariantToI4(a4),
+                                            memArgIsMissing(memArg(dp, 5)) ? 0 : memVariantToI4(memArg(dp, 5)));
+        if (newIdx <= 0) return 0;
+        Vb6MemObj* o = memObjNew(VB6_MEMK_NODE, owner, newIdx);
+        if (!o) return 0;
+        *outObj = o;
+        return newIdx;
+    }
     default:
         break;
     }
@@ -743,6 +854,8 @@ static void memCollRemove(int32_t kind, void* owner, DISPPARAMS* dp) {
             idx = vb6_ListView_GetItemIndexByKey(owner, (void*)key);
         else if (kind == VB6_MEMCK_LISTIMAGES)
             idx = vb6_ImageListIndexByKey(owner, key);
+        else if (kind == VB6_MEMCK_NODES)
+            idx = vb6_TreeView_NodeIndexByKey(owner, key);
         else
             idx = 0;   // ColumnHeader 没有按 Key 取 (扁平层没这条)
     }
@@ -750,6 +863,7 @@ static void memCollRemove(int32_t kind, void* owner, DISPPARAMS* dp) {
     switch (kind) {
     case VB6_MEMCK_LISTITEMS:     vb6_ListView_RemoveItem(owner, idx); break;
     case VB6_MEMCK_COLUMNHEADERS: vb6_ListView_RemoveColumn(owner, idx); break;
+    case VB6_MEMCK_NODES:         vb6_TreeView_RemoveNode(owner, idx); break;
     case VB6_MEMCK_PANELS:        break;  /* P20-40 已有特例直译; 这里不重复 */
     default:                      vb6_ImageList_RemoveAtIndex(owner, idx); break;
     }
@@ -760,6 +874,7 @@ static void memCollClear(int32_t kind, void* owner) {
     case VB6_MEMCK_LISTITEMS:     vb6_ListView_ClearItems(owner); break;
     case VB6_MEMCK_COLUMNHEADERS: vb6_ListView_ClearColumns(owner); break;
     case VB6_MEMCK_PANELS:        vb6_StatusBar_ClearPanels(owner); break;
+    case VB6_MEMCK_NODES:       vb6_TreeView_ClearNodes(owner); break;
     default:                      vb6_ImageList_ClearImages(owner); break;
     }
 }
@@ -769,6 +884,7 @@ static int32_t memObjKindOfColl(int32_t collKind) {
     case VB6_MEMCK_LISTITEMS:     return VB6_MEMK_LISTITEM;
     case VB6_MEMCK_COLUMNHEADERS: return VB6_MEMK_COLUMNHEADER;
     case VB6_MEMCK_PANELS:        return VB6_MEMK_PANEL;
+    case VB6_MEMCK_NODES:       return VB6_MEMK_NODE;
     default:                      return VB6_MEMK_LISTIMAGE;
     }
 }
@@ -805,6 +921,7 @@ static HRESULT STDMETHODCALLTYPE memColl_Invoke(IDispatch* This, DISPID dispid, 
         if (r < 0 && key && *key) {
             if (p->kind == VB6_MEMCK_LISTITEMS)      idx = vb6_ListView_GetItemIndexByKey(owner, (void*)key);
             else if (p->kind == VB6_MEMCK_LISTIMAGES) idx = vb6_ImageListIndexByKey(owner, key);
+            else if (p->kind == VB6_MEMCK_NODES)      idx = vb6_TreeView_NodeIndexByKey(owner, key);
             else                                     idx = 0;
         }
         if (idx <= 0) { memSetEmpty(out); return S_OK; }
@@ -978,6 +1095,21 @@ void* vb6_StatusBar_PanelAt(void* hwnd, int32_t index) {
     if (!hwnd || index < 1) return NULL;
     if (index > vb6_StatusBar_GetPanelsCount(hwnd)) return NULL;
     return (void*)memObjNew(VB6_MEMK_PANEL, hwnd, index);
+}
+
+// C29-8b: TreeView1.Nodes —— owner 是 HWND (与 ListView / StatusBar 同)。
+// readFn 直接返回集合对象，之后整条链 (Count/Item/Add/Remove/For Each/Node.xxx)
+// 走 C29-3 的晚绑定通道，cgen 零特例 —— 与 C29-Data 同一 cheapest route。
+void* vb6_TreeView_Nodes(void* hwnd) {
+    if (!hwnd) return NULL;
+    return (void*)memCollNew(VB6_MEMCK_NODES, hwnd);
+}
+
+// 事件参数用: NodeClick(ByVal Node As Node) 要的是对象，不是下标。
+void* vb6_TreeView_NodeAt(void* hwnd, int32_t index) {
+    if (!hwnd || index < 1) return NULL;
+    if (index > vb6_TreeView_NodeCount(hwnd)) return NULL;
+    return (void*)memObjNew(VB6_MEMK_NODE, hwnd, index);
 }
 
 #endif // _WIN32

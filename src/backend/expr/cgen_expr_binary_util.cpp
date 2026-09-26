@@ -90,12 +90,18 @@ std::string CCodeGen::wrapToBSTR(const std::string& expr, Expr& node) {
         return "vb6_VariantToString(" + expr + ")";
     }
     // P24-01: COM属性返回int/double, 需转BSTR
-    if (expr.find("vb6_ComGetIntProp(") != std::string::npos ||
-        expr.find("vb6_ComVtableGetInt(") != std::string::npos) {
+    // ⚠ 必须是**顶层前缀**判定 (与 Fix 100a / 100d 同一族修法)。原来这里是未锚定的
+    // find(): 实参里带一个 COM 整数读的法向调用 —— 实测 `TF(tv1.Nodes.Count = 3)`,
+    // 其中 TF 是 `Function TF(...) As String` —— 会整条命中, 于是返回 String 的项目
+    // 函数被当数值处理, 发成 `vb6_CStrLong(vb6_TF(...))`: 把 BSTR 指针当数字打出来
+    // (读数全是一串 -99xxxxxxx)。
+    auto topHead = [&](const char* h) {
+        return expr.compare(0, strlen(h), h) == 0;
+    };
+    if (topHead("vb6_ComGetIntProp(") || topHead("vb6_ComVtableGetInt(")) {
         return "vb6_CStrLong(" + expr + ")";
     }
-    if (expr.find("vb6_ComGetDoubleProp(") != std::string::npos ||
-        expr.find("vb6_ComVtableGetDouble(") != std::string::npos) {
+    if (topHead("vb6_ComGetDoubleProp(") || topHead("vb6_ComVtableGetDouble(")) {
         return "vb6_CStrDbl(" + expr + ")";
     }
     // Fix 100a (原 092a 同族): 此处原为 expr.find("vb6_BSTR") != npos 的**未锚定子串**
