@@ -125,8 +125,8 @@ void CCodeGen::emitControlHandleDecls(const FrmFormDesc& frmDesc) {
             // msctls_status32 原生复刻) 与 CommonDialog (C29-9 起是自注册不可见类
             // VB6_COMMONDIALOG 属性宿主); 把这两个归回 vb6_com_ 家族会 C2065
             // (声明成 vb6_com_X, 用出来却是 vb6_hwnd_X)。
-            if (ctrl.controlType == FrmControlType::ImageList ||
-                ctrl.controlType == FrmControlType::Toolbar) {
+            // C29-5a: Toolbar 摘出 —— 它有真窗口，槽一律回到 vb6_hwnd_X 那一族。
+            if (ctrl.controlType == FrmControlType::ImageList) {
                 c_.emitLine("static void* vb6_com_" + cIdent(ctrl.controlName) + " = NULL;  /* IDispatch* */");
             } else if (knownControlArrays_.count(ctrlLower)) {
                 c_.emitLine("static vb6_CtrlArr vb6_arr_" + cIdent(ctrl.controlName) + ";");

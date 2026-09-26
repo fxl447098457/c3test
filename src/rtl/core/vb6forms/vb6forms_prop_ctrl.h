@@ -463,6 +463,25 @@ void    vb6_TreeView_SetHideSelection(void* hwnd, int32_t val);
 int32_t vb6_TreeView_GetIndentation(void* hwnd);
 void    vb6_TreeView_SetIndentation(void* hwnd, int32_t twips);
 
+// ===================== Toolbar (ai/029 C29-5a) =====================
+//   VB6 Toolbar 的窗口 + 标量属性 + 设计期按钮，原生 ToolbarWindow32（不加载 OCX）。
+//   ShowTips / TextStyle / AllowCustomize 的真值就是 GWL_STYLE 那几位；Align 存窗口属性
+//   （停靠引擎还没接）。按钮表在本文件自己的固定槽表里，TB_ADDBUTTONSW 按它整表重发。
+//   Buttons 的逐项 VB 侧读写与 ButtonClick 留给 5b（等成员对象机制）。True = -1。
+void    vb6_Toolbar_Init(void* hwnd, int32_t showTips, int32_t textStyle,
+                         int32_t allowCustomize, int32_t align);
+int32_t vb6_Toolbar_GetShowTips(void* hwnd);
+void    vb6_Toolbar_SetShowTips(void* hwnd, int32_t val);
+int32_t vb6_Toolbar_GetTextStyle(void* hwnd);
+void    vb6_Toolbar_SetTextStyle(void* hwnd, int32_t val);
+int32_t vb6_Toolbar_GetAllowCustomize(void* hwnd);
+void    vb6_Toolbar_SetAllowCustomize(void* hwnd, int32_t val);
+int32_t vb6_Toolbar_GetAlign(void* hwnd);
+void    vb6_Toolbar_SetAlign(void* hwnd, int32_t val);
+int     vb6_Toolbar_AddButton(void* hwnd, int32_t index, const wchar_t* key, const wchar_t* caption,
+                              int32_t style, int32_t image, const wchar_t* tooltip, int32_t width);
+int32_t vb6_Toolbar_GetButtonCount(void* hwnd);   // TB_BUTTONCOUNT（原生侧真数）
+
 #ifdef __cplusplus
 }
 #endif

@@ -225,6 +225,10 @@ const char* FrmParser::controlTypeToWin32Class(FrmControlType type) {
         // (实测 GetClassInfoW 直接成功), 不需要 StatusBar 那套自注册兜底。
         case FrmControlType::ListView:     return "SysListView32";
         case FrmControlType::TreeView:     return "SysTreeView32";
+        // C29-5a: Toolbar 同样是 comctl32 注册好的类 (ICC_BAR_CLASSES 在 vb6_ComCtl_Init
+        // 里早就请求过)。以前这格缺着 + 被"ImageList || Toolbar 走 CoCreateInstance"那一组
+        // 扣住 => 控件根本没窗口，读一个 tb1.Visible 就是 C2065: vb6_hwnd_tb1 未声明。
+        case FrmControlType::Toolbar:      return "ToolbarWindow32";
         // C29-1b: 文件系统三控件在 VB6 里本来就是公共控件的薄封装 —— Drive 是
         // CBS_DROPDOWNLIST 的组合框、Dir / File 是列表框。以前这三格缺映射, 创建流程
         // 把它们当"不可见控件"跳过, 于是 RTL 里那套 P20-37 填充 helper 从来没被喂过
@@ -273,6 +277,7 @@ const char* FrmParser::controlTypeToVb6Name(FrmControlType type) {
         case FrmControlType::SSTab:        return "SSTab";
         case FrmControlType::ListView:     return "ListView";
         case FrmControlType::TreeView:     return "TreeView";
+        case FrmControlType::Toolbar:      return "Toolbar";
         case FrmControlType::Shape:        return "Shape";
         case FrmControlType::Line:         return "Line";
         case FrmControlType::DriveListBox: return "DriveListBox";

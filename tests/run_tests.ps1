@@ -1506,6 +1506,35 @@ if ($Category -in @("all", "run", "vbp")) {
         'vb6_ComGetObjectProp(vb6_hwnd_tv1',
         'CoCreateInstance'
     )
+    # ai/029 C29-5a: Toolbar 换成原生 ToolbarWindow32（D6：不碰 MSCOMCTL.OCX）。
+    # 改之前这枚控件**连窗口都没有**：controlTypeToWin32Class 缺格，而且被"ImageList || Toolbar
+    # 走 CoCreateInstance"那一组扣住 (直接 continue) => vb6_hwnd_tb1 压根不声明 —— 实测读一个
+    # tb1.Visible 就是 `C2065: vb6_hwnd_tb1 未声明的标识符`，整件工程编不过。12 条读数：
+    # 设计期三条按钮进了控件 (TB1，问的是原生 TB_BUTTONCOUNT 不是我那张表)、没写的不被继承 (TB2)、
+    # 矩形按 .frm (TB3-TB4，证 CCS_NORESIZE|CCS_NOPARENTALIGN 那两位)、标量属性设计期与默认
+    # (TB5-TB7)、运行期可逆赋值 (TB8-TB9)、两枚不串 (TB10)、通用属性面 (TB11-TB12)。
+    # Visible 刻意不问: 无头跑里父窗从未 ShowWindow，任何子窗口的 Visible 读数都是假 (TreeView 那
+    # 条 TV1 同因)，换成与父窗无关的 Enabled 才问得出东西。
+    # 路上量到两条 v6 主题的坑，都写进了 RTL 注释: TB_RESET 之后 TB_ADDBUTTONSW 会返回 TRUE
+    # 却一个按钮都不加 (所以只 append/insert)；C3 的产物嵌了 Common-Controls 6.0 的 manifest，
+    # v6 工具栏**没被告知结构体尺寸就静默吞按钮** (不嵌 manifest 的独立 C 探针在 v5 下是好的)
+    # => 发按钮前先 TB_BUTTONSTRUCTSIZE。
+    $tbNeedles = @("CTRLTOOLBAR-DONE") + (1..12 | ForEach-Object { "TB$_=Y" })
+    Test-Vbp "ctrltoolbar" "$Tests\ctrltoolbar\TbApp.vbp" $tbNeedles
+    Test-Vbp "ctrltoolbar_x86" "$Tests\ctrltoolbar\TbApp.vbp" $tbNeedles -Arch "x86"
+    # 发码面: 设计期四条逐参数钉 (含 -999 哨兵那条没写过的控件)、创建样式那个常量、
+    # 反面断这枚控件不再走 vb6_com_ 槽 / CoCreateInstance / Buttons 的 COM 兜底。
+    Test-EmitcShape "tb_emitc_shape" @("$Tests\ctrltoolbar\TbApp.vbp") @(
+        'vb6_Toolbar_Init((void*)vb6_hwnd_tb1, -999, 1, -999, 2);',
+        'vb6_Toolbar_Init((void*)vb6_hwnd_tb2, -999, -999, -999, -999);',
+        'vb6_Toolbar_AddButton((void*)vb6_hwnd_tb1, 2, NULL, L"", 3, -1, NULL, 8);',
+        '1409288460L, 0L,'
+    )
+    Test-EmitcAbsent "tb_emitc_no_ocx" @("$Tests\ctrltoolbar\TbApp.vbp") @(
+        'vb6_com_tb1',
+        'CoCreateInstance',
+        'vb6_ComGetObjectProp(vb6_hwnd_tb1, L"Buttons")'
+    )
     # ai/028 V1 的另两个 R4 落点: 模块头 Attribute 的值与 CreateObject 的工程内 ProgID
     # 都写成反引号串 —— 前者折错则模块名对不上 .vbp, 后者折错则没有改写、运行期变查注册表。
     $rsProjNeedles = @("RP1=OK", "RP2=OK", "RP3=OK", "RP4=OK", "RP5=OK", "RP-DONE")

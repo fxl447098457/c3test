@@ -542,8 +542,9 @@
             // 合并(P20-40 + C29-9): StatusBar 与 CommonDialog **都从这一组摘出**了
             // (前者 msctls_status32 原生复刻、后者 VB6_COMMONDIALOG 属性宿主), 它们
             // 落到下面的常规创建路 vb6_CreateControl 才有窗口。这里只剩无窗口的两类。
-            if (ctrl.controlType == FrmControlType::ImageList ||
-                ctrl.controlType == FrmControlType::Toolbar) {
+            // C29-5a: **Toolbar 已从这一组摘出** —— 它现在走下面那条常规创建路
+            // (vb6_CreateControl) 才有真窗口；留在这里会被 continue 掉、句柄压根不声明。
+            if (ctrl.controlType == FrmControlType::ImageList) {
                 // 从符号表查找ComClass, 获取真实的CLSID或ProgID
                 std::string comVarName = "vb6_com_" + cIdent(ctrl.controlName);
                 Symbol* comSym = lookupDotted(ctrl.controlTypeName);

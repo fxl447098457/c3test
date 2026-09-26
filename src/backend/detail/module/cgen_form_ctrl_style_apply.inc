@@ -190,6 +190,16 @@
                 style |= 0x0002L | kWsBorder;   // TVS_HASLINES
                 createCaption = "";
                 break;
+            case FrmControlType::Toolbar:
+                // C29-5a: 原生 ToolbarWindow32 的默认观感两条 + **两位绝不能省**:
+                //   CCS_NORESIZE(0x4) | CCS_NOPARENTALIGN(0x8) —— 不给这两位，控件会无视
+                //   .frm 的 Left/Top/Width/Height 自己去重排父窗顶部那一条 (原生工具栏的
+                //   默认行为)，VB6 那种"放在窗体中间的一小条"就做不出来。
+                //   TBSTYLE_TOOLTIPS(0x100) = VB6 的 ShowTips 默认 True；TBSTYLE_FLAT(0x800)
+                //   是 VB6 6.0 的扁平观感。TextStyle/AllowCustomize 由下面的 Init 那条改。
+                style |= 0x0004L | 0x0008L | 0x0100L | 0x0800L;
+                createCaption = "";
+                break;
             default:
                 break;
         }
@@ -481,6 +491,74 @@
                 // **不要 break**: 一个控件里可以有多个同名的集合块 (StatusBar 的 Panels
                 // 一项一个块, 块名都是解析器兜底的 "Items"), break 会把第二项之后的
                 // 面板整个丢掉, 且不报任何错。
+            }
+        }
+
+        // C29-5a: Toolbar 设计期 —— Init 灌四条标量属性, 再把 Buttons 集合逐条建进
+        // 原生控件。未写进 .frm 的属性传 -999 = "不动" (口径与 C29-8a 一致: VB6 的
+        // True 就是 -1, 拿 -1 当哨兵等于 ShowTips 永远关不掉)。
+        if (ctrl.controlType == FrmControlType::Toolbar) {
+            toolbarVars_.insert(ctrl.controlName);   // 表达式侧认 `tb1.Buttons` 用
+            std::string tbNLower = ctrl.controlName;
+            std::transform(tbNLower.begin(), tbNLower.end(), tbNLower.begin(), ::tolower);
+            std::string tbHwnd = knownControlArrays_.count(tbNLower) ?
+                ("vb6_CtrlArr_GetAt(&vb6_arr_" + cIdent(ctrl.controlName) + ", " +
+                 std::to_string(ctrl.index >= 0 ? ctrl.index : 0) + ")") :
+                ("vb6_hwnd_" + cIdent(ctrl.controlName));
+
+            auto tbLit = [](const std::map<std::string, FrmValue>& mp, const std::string& k) {
+                auto it = mp.find(k);
+                if (it == mp.end() || it->second.type != FrmValueType::String) return std::string();
+                std::string raw = it->second.rawText;
+                if (raw.size() >= 2 && raw.front() == '"' && raw.back() == '"')
+                    raw = raw.substr(1, raw.size() - 2);
+                for (char& ch : raw) if (ch == '"') ch = '\'';
+                return raw;
+            };
+            auto tbInt = [](const std::map<std::string, FrmValue>& mp, const std::string& k) -> int {
+                auto it = mp.find(k);
+                return (it != mp.end()) ? (int)it->second.intValue : -1;
+            };
+
+            int tbTips = -999, tbCust = -999;
+            int tbText  = tbInt(ctrl.properties, "TextStyle");
+            int tbAlign = tbInt(ctrl.properties, "Align");
+            // 两条布尔归一到 VB6 的 -1/0; 没写在 .frm 里就保持 -999 (不动窗口)。
+            {
+                auto raw = ctrl.properties.find("ShowTips");
+                tbTips = (raw == ctrl.properties.end()) ? -999
+                       : ((raw->second.intValue != 0) ? -1 : 0);
+                raw = ctrl.properties.find("AllowCustomize");
+                tbCust = (raw == ctrl.properties.end()) ? -999
+                       : ((raw->second.intValue != 0) ? -1 : 0);
+            }
+            c_.emitLine("vb6_Toolbar_Init((void*)" + tbHwnd + ", "
+                      + std::to_string(tbTips) + ", " + std::to_string(tbText < 0 ? -999 : tbText) + ", "
+                      + std::to_string(tbCust) + ", " + std::to_string(tbAlign < 0 ? -999 : tbAlign) + ");");
+
+            for (const auto& block : ctrl.propertyBlocks) {
+                // 裸标题行 `Buttons` 时块名取标题; 一项一块的形态下解析器兜底成 "Items"。
+                if (block.blockName != "Buttons" && block.blockName != "Items") continue;
+                int ord = 0;
+                for (const auto& b : block.nestedBlocks) {
+                    ord++;
+                    int idx = tbInt(b.properties, "Index");
+                    if (idx <= 0) idx = ord;
+                    std::string cap  = tbLit(b.properties, "Text");        // 项的裸标题 = Caption
+                    std::string key  = tbLit(b.properties, "Key");
+                    std::string tip  = tbLit(b.properties, "ToolTipText");
+                    int st  = tbInt(b.properties, "Style");   if (st  < 0) st = 0;
+                    int img = tbInt(b.properties, "Image");   if (img < 0) img = -1;
+                    int wd  = tbInt(b.properties, "Width");   if (wd  < 0) wd = 0;
+                    c_.emitLine("vb6_Toolbar_AddButton((void*)" + tbHwnd + ", "
+                              + std::to_string(idx) + ", "
+                              + (key.empty() ? std::string("NULL") : ("L\"" + key + "\"")) + ", "
+                              + "L\"" + cap + "\", "
+                              + std::to_string(st) + ", " + std::to_string(img) + ", "
+                              + (tip.empty() ? std::string("NULL") : ("L\"" + tip + "\"")) + ", "
+                              + std::to_string(wd) + ");");
+                }
+                // 不 break: 一项一个块, 块名可能都是兜底的 "Items"。
             }
         }
 

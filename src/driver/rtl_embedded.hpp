@@ -174,6 +174,9 @@ enum RtlResourceID {
     RTL_VB6FORMS_TREEVIEW_C                = 213,
     // OLE 容器 (本地判据, 不进 CI —— 嵌入对象依赖目标机器的 OLE 服务器)
     RTL_VB6FORMS_OLECON_C                  = 214,
+
+    // ai/029 C29-5a: VB6 Toolbar 控件 (ToolbarWindow32 复刻, 不加载 MSCOMCTL.OCX)
+    RTL_VB6FORMS_TOOLBAR_C                 = 215,
 };
 
 // Session directory manager

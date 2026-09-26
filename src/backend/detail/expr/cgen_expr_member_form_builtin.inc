@@ -341,8 +341,9 @@
                 // StatusBar (msctls_status32) 与 CommonDialog (VB6_COMMONDIALOG 属性宿主)
                 // 都是真窗口 ⇒ 走下面通用控件分支拿 vb6_hwnd_X; 归到 vb6_com_X 家族会生成
                 // vb6_ComGetObjectProp(vb6_com_X, …) 而那个变量并不存在 (C2065)。
-                if (itCtrl->second == FrmControlType::ImageList ||
-                    itCtrl->second == FrmControlType::Toolbar) {
+                // C29-5a: Toolbar 摘出 —— 它有真窗口了，属性读写走 cgen_util_ctrl 那张表，
+                // 未登记的成员才落到下面那条通用 HWND 分支。
+                if (itCtrl->second == FrmControlType::ImageList) {
                     std::string memLower = node.memberName;
                     std::transform(memLower.begin(), memLower.end(), memLower.begin(), ::tolower);
                     std::string ctrlOrigName = knownFormControlOriginalNames_.count(objLower) ?
