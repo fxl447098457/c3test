@@ -1,6 +1,7 @@
 #include "semantics/semantic_analyzer.hpp"
 #include <algorithm>
 #include <cctype>
+#include <functional>
 #include <tuple>
 #include <initializer_list>
 #include "semantics/semantic_analyzer_internal.h"
@@ -171,6 +172,67 @@ void SemanticAnalyzer::registerConstant(ConstDecl& decl) {
                         if (sym->type == Vb6Type::Unknown)
                             sym->type = Vb6Type::Integer;
                     }
+                }
+            }
+        } else if (auto* bin43 = dynamic_cast<BinaryExpr*>(decl.value.get())) {
+            // Task #38: 整型字面量的位运算常量 (GHND = GMEM_MOVEABLE Or GMEM_ZEROINIT)。
+            // 此前 BinaryExpr 不推导 → sym->type 停留 Unknown → 兜底 Variant;
+            // 而 cgen 把它折叠成 #define GHND (66) (int), 使用点按 Variant 解包 →
+            // vb6_VariantToLong(66) C2440 (cDlg.cls GlobalAlloc/ChooseFont hGlobal)。
+            // 对两侧可求值 (字面量/一元负号) 的 Or/And/Xor 直接算出结果, 推导 Long —
+            // 与 cgen 的常量折叠同一口径, 使用点不再包 Variant 转换。
+            std::function<bool(Expr*, int64_t*)> fold43 =
+                [&](Expr* e, int64_t* out) -> bool {
+                if (auto* lit = dynamic_cast<LiteralExpr*>(e)) {
+                    if (lit->literalKind == LiteralKind::Integer) {
+                        *out = lit->intValue; return true;
+                    }
+                    if (lit->literalKind == LiteralKind::Long
+                        || lit->literalKind == LiteralKind::LongPtr) {
+                        *out = lit->longValue; return true;
+                    }
+                    return false;
+                }
+                if (auto* un = dynamic_cast<UnaryExpr*>(e)) {
+                    int64_t v = 0;
+                    if (un->op == UnaryOp::Negate && fold43(un->operand.get(), &v)) {
+                        *out = -v; return true;
+                    }
+                    return false;
+                }
+                // 常量引用: GHND = (GMEM_MOVEABLE Or GMEM_ZEROINIT) 的操作数是
+                // 本模块已注册的 Const (registerConstant 顺序执行, GMEM_* 在前,
+                // constIntValue 已就绪)。仅接受整型常量。
+                if (auto* id = dynamic_cast<IdentifierExpr*>(e)) {
+                    Symbol* cs = symTab_.lookup(id->name);
+                    if (cs && cs->kind == SymbolKind::Constant && cs->hasConstValue
+                        && (cs->constType == Vb6Type::Integer
+                            || cs->constType == Vb6Type::Long
+                            || cs->constType == Vb6Type::LongPtr
+                            || cs->constType == Vb6Type::Byte
+                            || cs->constType == Vb6Type::Boolean)) {
+                        *out = cs->constIntValue; return true;
+                    }
+                    return false;
+                }
+                return false;
+            };
+            if (bin43->op == BinaryOp::Or || bin43->op == BinaryOp::And
+                || bin43->op == BinaryOp::Xor) {
+                int64_t l43 = 0, r43 = 0;
+                if (fold43(bin43->left.get(), &l43)
+                    && fold43(bin43->right.get(), &r43)) {
+                    int64_t v43 = 0;
+                    switch (bin43->op) {
+                        case BinaryOp::Or:  v43 = l43 | r43; break;
+                        case BinaryOp::And: v43 = l43 & r43; break;
+                        default:            v43 = l43 ^ r43; break;
+                    }
+                    sym->hasConstValue = true;
+                    sym->constType = Vb6Type::Long;
+                    sym->constIntValue = v43;
+                    if (sym->type == Vb6Type::Unknown)
+                        sym->type = Vb6Type::Long;
                 }
             }
         }

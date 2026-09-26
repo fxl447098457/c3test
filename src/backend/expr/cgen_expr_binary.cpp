@@ -9,6 +9,35 @@ namespace vb6c3 {
 
 // --- cgen_expr_binary.cpp: 二元表达式求值 + BSTR 包装 + 二元运算符映射 ---
 
+// Task #44 (SSTabEx): 判断表达式是否为字面量 0 (含 -0)。
+// 用于 '/' 与 Mod 的零除数检测: 两侧都是常量时 MSVC 常量折叠 → C2124 被零除
+// (frmTest.c:1569 InIde "Debug.Print 1 / 0" 实证), 且 VB6 语义是运行期错误 11
+// 而非 IEEE inf —— 须改走 vb6_Num_Div / vb6_Num_Mod (函数调用不可折叠)。
+static bool isLiteralZeroDivisor44(const Expr* e) {
+    if (!e) return false;
+    if (e->kind == ASTNodeKind::LiteralExpr) {
+        auto* lit44 = static_cast<const LiteralExpr*>(e);
+        switch (lit44->literalKind) {
+            case LiteralKind::Integer:
+                return lit44->intValue == 0;
+            case LiteralKind::Long:
+            case LiteralKind::LongPtr:
+                return lit44->longValue == 0;
+            case LiteralKind::Single:
+                return lit44->floatValue == 0.0f;
+            case LiteralKind::Double:
+                return lit44->doubleValue == 0.0;
+            default:
+                return false;
+        }
+    }
+    if (e->kind == ASTNodeKind::UnaryExpr) {
+        auto* un44 = static_cast<const UnaryExpr*>(e);
+        if (un44->op == UnaryOp::Negate) return isLiteralZeroDivisor44(un44->operand.get());
+    }
+    return false;
+}
+
 // M22: 将非BSTR表达式包装为BSTR (用于字符串连接 & 运算符)
 void CCodeGen::visit(BinaryExpr& node) {
     emitExpr(*node.left);
@@ -139,6 +168,14 @@ void CCodeGen::visit(BinaryExpr& node) {
     // Fix 156: 操作数为 Variant 时 C 强转非法 (C2440 vb6_VARIANT→double),
     // 改走 vb6_VariantToDouble 提取 (与上方 IntDiv 的 Fix 084o 同构).
     if (node.op == BinaryOp::Div) {
+        // Task #44 (SSTabEx): 除数为字面量 0 时改走 vb6_Num_Div ——
+        // 两侧常量会被 MSVC 常量折叠 → C2124 (frmTest InIde "Debug.Print 1/0" 实证),
+        // 且 VB6 语义是运行期错误 11 而非 IEEE inf。
+        if (isLiteralZeroDivisor44(node.right.get())) {
+            lastExpr_ = "vb6_Num_Div((double)(" + toDoubleIfVariant(left, node.left.get())
+                      + "), (double)(" + toDoubleIfVariant(right, node.right.get()) + "))";
+            return;
+        }
         lastExpr_ = "((double)(" + toDoubleIfVariant(left, node.left.get())
                   + ") / (double)(" + toDoubleIfVariant(right, node.right.get()) + "))";
         return;
@@ -622,6 +659,11 @@ void CCodeGen::visit(BinaryExpr& node) {
     // Fix 108b: VB6 Mod 的语义是"操作数先转 Long 再取余"; C 的 % 不接受浮点
     // 操作数 (C2296). 这里显式取整, 与 VB6 一致.
     if (node.op == BinaryOp::Mod) {
+        // Task #44: 字面量 0 除数 → vb6_Num_Mod (常量折叠 C2124 + VB6 错误 11 语义, 同 Div)
+        if (isLiteralZeroDivisor44(node.right.get())) {
+            lastExpr_ = "vb6_Num_Mod((int32_t)(" + left + "), (int32_t)(" + right + "))";
+            return;
+        }
         lastExpr_ = "((int32_t)(" + left + ") % (int32_t)(" + right + "))";
         return;
     }

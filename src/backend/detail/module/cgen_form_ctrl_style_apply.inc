@@ -694,7 +694,10 @@
             int tsOrient   = tsInt(ctrl.properties, "TabOrientation", 0);
             int tsStyle    = tsInt(ctrl.properties, "TabStyle", 0);
             int tsPerRow   = tsInt(ctrl.properties, "TabsPerRow", 0);
-            int tsWrap     = tsInt(ctrl.properties, "WordWrap", 0);
+            // WordWrap 缺省 **True** (VB6 SSTab/SSTabEx 同): .frm 不写这行时 7 页
+            // 折成 TabsPerRow 行; 缺省 0 会让多页折叠成单行+滚动箭头
+            // (SSTabEx frmTest: 第二行 Label/Tab5/Tab6 不显示, 实证)。
+            int tsWrap     = tsInt(ctrl.properties, "WordWrap", 1);
             if (tsTabs < 0) tsTabs = 0;
             c_.emitLine("vb6_SSTab_Init((void*)" + tsHwnd + ", "
                       + std::to_string(tsTabs) + ", " + std::to_string(tsCur) + ", "

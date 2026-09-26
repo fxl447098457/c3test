@@ -2,6 +2,22 @@
 // 由 src/backend/module/cgen_form.cpp 拆出（2026-09-17），在函数体内被 #include，非独立编译单元。
 // 内容 = 原文件第 1773~1937 行，逐行未改。
 
+    // Task #41: 控件数组成员的句柄形态 — 声明侧 (emitControlHandleDecls) 对
+    // knownControlArrays_ 命中者只发 static vb6_CtrlArr vb6_arr_<名>, 不发
+    // vb6_hwnd_<名>。此前创建/引用一律直写 vb6_hwnd_<名> → C2065
+    // (SSTabEx frmTest: SSTabEx1 页容器 Picture2 是数组 → 4 处 C2065)。
+    // 创建改 vb6_CtrlArr_SetAt, 引用改 vb6_CtrlArr_GetAt (与
+    // cgen_form_create_controls.inc 的 UserControl 数组形态一致)。
+    // 定义在函数体层级: P14.4.2 容器子控件与 P18-F 子类化两块共用。
+    auto childHwndRead = [&](const FrmControl& c) -> std::string {
+        std::string cLower = Symbol::toLower(c.controlName);
+        if (knownControlArrays_.count(cLower)) {
+            return "vb6_CtrlArr_GetAt(&vb6_arr_" + cIdent(c.controlName) + ", "
+                 + std::to_string(c.index >= 0 ? c.index : 0) + ")";
+        }
+        return "vb6_hwnd_" + cIdent(c.controlName);
+    };
+
     // P14.4.2: 容器控件(Frame/PictureBox) - 创建容器的子控件(以容器 HWND 为父窗口)
     // 关键: .frm 中子控件坐标已是"相对容器的缇值", 且 vb6_CreateControl 内部会做缇→像素换算,
     //       因此这里必须直传原始缇值 —— 既不能减去容器偏移, 也不能再乘 15/10.
@@ -9,6 +25,28 @@
         int childCtrlId = 200;  // 容器子控件ID起始值(避免与顶层 100-199 冲突)
         auto emitChildControls = [&](auto&& self, const FrmControl& container,
                                      const std::string& containerHwnd) -> void {
+            // Task #44 (SSTabEx): `Tab(n).Control(i) = "名(下标)"` 是 VB6 IDE 写进 .frm
+            // 的**显式页归属**。SSTabEx 这类 Tabbed 控件把非活动页子控件**统一**停在
+            // real-75000 (与页码无关) —— 纯靠 Left 反推页码必错 (frmTest: 全推成 1,
+            // 真值 0/2/3/4)。先收集归属表, 键 = 小写 "名" 或 "名(下标)"。
+            std::map<std::string, int> tabMember44;
+            if (container.controlType == FrmControlType::SSTab) {
+                for (const auto& kv44 : container.properties) {
+                    const std::string& k44 = kv44.first;
+                    if (_strnicmp(k44.c_str(), "Tab(", 4) != 0) continue;
+                    size_t cl44 = k44.find(')');
+                    if (cl44 == std::string::npos
+                        || _strnicmp(k44.c_str() + cl44 + 1, ".Control(", 9) != 0) continue;
+                    int pg44 = atoi(k44.c_str() + 4);
+                    if (kv44.second.type != FrmValueType::String) continue;
+                    std::string v44 = kv44.second.rawText;
+                    if (v44.size() >= 2 && v44.front() == '"' && v44.back() == '"')
+                        v44 = v44.substr(1, v44.size() - 2);
+                    if (v44.empty()) continue;
+                    std::transform(v44.begin(), v44.end(), v44.begin(), ::tolower);
+                    tabMember44[v44] = pg44;
+                }
+            }
             for (const auto& child : container.children) {
                 if (child.controlType == FrmControlType::Menu) continue;
                 const char* childClass = FrmParser::controlTypeToWin32Class(child.controlType);
@@ -38,6 +76,15 @@
                     if (tsPage < 0) tsPage = 0;
                     cLeft += 75000 * tsPage;
                 }
+                // Task #44: 显式 Tab(n).Control(i) 归属优先于 Left 反推。
+                // Left 公式对"统一停 -75000"的 SSTabEx 恰好也能还原坐标 (恒得 1 页),
+                // 但**页号**必须以 .frm 声明为准。
+                if (container.controlType == FrmControlType::SSTab && !tabMember44.empty()) {
+                    std::string mk44 = Symbol::toLower(child.controlName);
+                    if (child.index >= 0) mk44 += "(" + std::to_string(child.index) + ")";
+                    auto mt44 = tabMember44.find(mk44);
+                    if (mt44 != tabMember44.end()) tsPage = mt44->second;
+                }
                 // C29-1a: Line 子控件的矩形 = 四端点的包围盒 (容器缇值)。不这样算会拿
                 // 默认的 2000x300 盖在兄弟控件上面 (顶层那条路同一个口径)。
                 if (child.controlType == FrmControlType::Line) {
@@ -57,22 +104,35 @@
                     if (raw.size() >= 2 && raw.front() == 0x22 && raw.back() == 0x22) childCaption = raw.substr(1, raw.size() - 2);
                 }
                 if (controlTypeClearsCaption(child)) childCaption = "";
-                c_.emitLine("vb6_hwnd_" + cIdent(child.controlName) + " = vb6_CreateControl("
-                    + "\"" + std::string(childClass) + "\", \"" + childCaption + "\","
-                    + std::to_string(childStyle) + "L, 0L,"
-                    + std::to_string(cLeft) + ", " + std::to_string(cTop) + ", "
-                    + std::to_string(cWidth) + ", " + std::to_string(cHeight) + ","
-                    + std::to_string(childCtrlId) + ", " + containerHwnd + ", hInstance);");
+                {
+                    std::string childLower41 = Symbol::toLower(child.controlName);
+                    std::string createArgs =
+                        "\"" + std::string(childClass) + "\", \"" + childCaption + "\","
+                        + std::to_string(childStyle) + "L, 0L,"
+                        + std::to_string(cLeft) + ", " + std::to_string(cTop) + ", "
+                        + std::to_string(cWidth) + ", " + std::to_string(cHeight) + ","
+                        + std::to_string(childCtrlId) + ", " + containerHwnd + ", hInstance";
+                    if (knownControlArrays_.count(childLower41)) {
+                        // Task #41: 数组成员 — 句柄写进 vb6_arr_<名> (声明侧无
+                        // vb6_hwnd_<名> 变量, 直赋值 C2065)
+                        c_.emitLine("vb6_CtrlArr_SetAt(&vb6_arr_" + cIdent(child.controlName)
+                            + ", " + std::to_string(child.index >= 0 ? child.index : 0)
+                            + ", vb6_CreateControl(" + createArgs + "));");
+                    } else {
+                        c_.emitLine("vb6_hwnd_" + cIdent(child.controlName)
+                            + " = vb6_CreateControl(" + createArgs + ");");
+                    }
+                }
                 // SSTab: 登记"这个子控件属于第几页", 切页的显隐由 RTL 负责。
                 if (container.controlType == FrmControlType::SSTab) {
                     c_.emitLine("vb6_SSTab_RegisterChild((void*)" + containerHwnd
-                              + ", (void*)vb6_hwnd_" + cIdent(child.controlName)
+                              + ", (void*)" + childHwndRead(child)
                               + ", " + std::to_string(tsPage) + ");");
                 }
                 // C29-1a: 设计期外观属性 —— Frame / PictureBox 里的 Shape/Line 以前一条都不发
                 emitShapeLineProps(child, ctrlHwndExprForInit(child));
                 // 设计期 BorderStyle / Alignment (容器子控件)
-                emitDesignerStyleProps(child, "vb6_hwnd_" + cIdent(child.controlName));
+                emitDesignerStyleProps(child, childHwndRead(child));
                 emitControlFrxProps(child);  // Fix 182: 容器子控件同样加载 .frx 设计期图片/文本/列表
                 // 注册控件名到knownFormControls_(供属性访问)
                 {
@@ -87,7 +147,7 @@
                     (child.controlType == FrmControlType::Frame ||
                      child.controlType == FrmControlType::PictureBox ||
                      child.controlType == FrmControlType::SSTab)) {
-                    self(self, child, "vb6_hwnd_" + cIdent(child.controlName));
+                    self(self, child, childHwndRead(child));
                 }
             }
         };
@@ -96,7 +156,7 @@
             if (ctrl.controlType != FrmControlType::Frame &&
                 ctrl.controlType != FrmControlType::PictureBox &&
                 ctrl.controlType != FrmControlType::SSTab) continue;
-            emitChildControls(emitChildControls, ctrl, "vb6_hwnd_" + cIdent(ctrl.controlName));
+            emitChildControls(emitChildControls, ctrl, childHwndRead(ctrl));
         }
     }
 
@@ -149,7 +209,8 @@
                         subEmitted.insert(childNameLower);
                         if (needsSubclass(child)) {
                             std::string subProcName = "vb6_ctrl_subproc_" + cIdent(child.controlName);
-                            c_.emitLine("vb6_InstallControlSubclass((void*)vb6_hwnd_" + cIdent(child.controlName) + ", (void*)" + subProcName + ");");
+                            // Task #41: 数组成员用 GetAt (声明侧无 vb6_hwnd_<名>)
+                            c_.emitLine("vb6_InstallControlSubclass((void*)" + childHwndRead(child) + ", (void*)" + subProcName + ");");
                         }
                     }
                     if (!child.children.empty() &&

@@ -205,6 +205,22 @@
         if (!_psSym) {
             _psSym = symTab_.lookupModuleByKind(_ma.memberName, SymbolKind::PropertyLet);
         }
+        // Task #43 守卫: object 是窗体控件且属性不属控件自有 UserControl 类时,
+        // member 是 OCX/控件属性 (Set SSTabEx1.Font = ...) — lookupModuleByKind
+        // 全局查找会误命中他类同名 PropertySet (cDlg.cls 的 Font), 收者/语义双错。
+        // 置空符号交给下方 COM SetRef 分支 (vb6_ComSetRef)。
+        if (_psSym && _ma.object && _ma.object->kind == ASTNodeKind::IdentifierExpr) {
+            std::string _oidG = Symbol::toLower(
+                static_cast<IdentifierExpr&>(*_ma.object).name);
+            if (knownFormControls_.count(_oidG)) {
+                auto _itUCG = knownUserControlCtrlVars_.find(_oidG);
+                bool _ucOwned = (_itUCG != knownUserControlCtrlVars_.end())
+                    && _psSym->isExternal
+                    && (Symbol::toLower(_psSym->sourceModule)
+                        == Symbol::toLower(_itUCG->second));
+                if (!_ucOwned) _psSym = nullptr;
+            }
+        }
         if (_psSym) {
             std::string _objClass = inferClassTypeOfExpr(*_ma.object);
             // Fix 084g-2: 外部注入的跨类属性符号 — 对象类型无法从符号表推断
@@ -247,6 +263,13 @@
                 }
                 emitExpr(*node.value);
                 std::string _valE = std::move(lastExpr_);
+                // Task #43: RHS 是窗体控件属性读 (Set iDlg.Font = SSTabEx1.Font)
+                // 时, Fix 023e/089d 兜底只留下裸 hwnd + isComMarker_ — 不消费则
+                // &(void*){hwnd} 被当对象指针存进属性, 后续解引用即崩。
+                // 与 cgen_assign_com_prop.inc Fix 110i 同一律, 对象属性按 Object 解。
+                if (isComMarker_) {
+                    _valE = resolveComValue("Object");
+                }
                 // Object 形参 (void** ByRef 槽): 对象指针实参包装为 &(void*){...}
                 // 复合字面量, 与 cgen_expr 的 ByRef 实参规则一致.
                 std::string _arg2 = _valE;

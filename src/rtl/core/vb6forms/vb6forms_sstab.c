@@ -180,10 +180,32 @@ static void sstabApplyRowMetrics(Vb6SSTab* t) {
     GetClientRect(t->hwnd, &rc);
     int w = rc.right - rc.left;
     if (w <= 0) return;
-    // 竖向标签下滚动方向不同, 这里按可视区间 / 每行数给最小宽。
-    int minW = w / t->tabsPerRow;
-    if (minW < 8) minW = 8;
-    TabCtrl_SetMinTabWidth(t->hwnd, minW);
+    // Task #44: VB6 SSTab 的行分组是**固定每行 tabsPerRow 个** (4+3), 不随
+    // caption 宽度变。comctl v6 (主题开) 换行按自然宽 + 主题内边距算, minTabWidth
+    // 只是显示下限 —— 调它换行点不动 (实测 3+4 纹丝不动)。多行时改用
+    // TCS_FIXEDWIDTH + 显式项宽 = 可用宽/perRow: 每行**恰好**容 perRow 个
+    // (4×W ≤ avail < 5×W 两侧余量都足), 单行 (count ≤ perRow) 保持自然宽。
+    LONG st = (LONG)GetWindowLongPtrW(t->hwnd, GWL_STYLE);
+    if (t->wordWrap && t->tabsPerRow > 0 && t->count > t->tabsPerRow) {
+        if (!(st & TCS_FIXEDWIDTH)) {
+            SetWindowLongPtrW(t->hwnd, GWL_STYLE, st | TCS_FIXEDWIDTH);
+        }
+        int minW = (w - 24) / t->tabsPerRow;   // 扣横向内边距 (DPI 余量)
+        if (minW < 8) minW = 8;
+        int h = 0;
+        RECT ir;
+        if (TabCtrl_GetItemRect(t->hwnd, 0, &ir) && ir.bottom > ir.top)
+            h = (int)(ir.bottom - ir.top);
+        TabCtrl_SetItemSize(t->hwnd, (LPARAM)minW, (LPARAM)h);
+    } else {
+        if (st & TCS_FIXEDWIDTH) {
+            SetWindowLongPtrW(t->hwnd, GWL_STYLE, st & ~TCS_FIXEDWIDTH);
+            TabCtrl_SetItemSize(t->hwnd, 0, 0);   // 回归自然宽
+        }
+        int minW = w / t->tabsPerRow;
+        if (minW < 8) minW = 8;
+        TabCtrl_SetMinTabWidth(t->hwnd, minW);
+    }
 }
 
 // 切页后按"登记的页号"开关子控件 —— 见文件头: 不动 Left, 只动可见性。
@@ -202,11 +224,31 @@ static void sstabRefreshChildren(Vb6SSTab* t) {
 
 // ===================== 初始化 =====================
 
+// Task #44: SSTab 行宽 (TabsPerRow → 最小标签宽) 依赖**客户区宽度**, 而 Init 时
+// 窗口尚未布局 (GetClientRect 宽 0) → 折行按 caption 自然宽走, 7 页折成 3+4 而
+// 非 VB6 的 4+3 (SSTabEx frmTest 实证)。挂一个内部子类过程, WM_SIZE 时重算。
+static LRESULT CALLBACK sstabSubclassProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
+    if (msg == WM_SIZE) {
+        Vb6SSTab* t = sstabFind(hwnd);
+        if (t) sstabApplyRowMetrics(t);
+    }
+    WNDPROC orig = (WNDPROC)GetPropW(hwnd, L"VB6_SSTab_OrigProc");
+    return orig ? CallWindowProcW(orig, hwnd, msg, wp, lp)
+                : DefWindowProcW(hwnd, msg, wp, lp);
+}
+
 void vb6_SSTab_Init(void* tabHwnd, int tabs, int curTab, int orientation, int tabStyle,
                     int tabsPerRow, int wordWrap) {
     if (!tabHwnd) return;
     Vb6SSTab* t = sstabEnsure((HWND)tabHwnd);
     if (!t) return;
+
+    // 内部子类 (只装一次): WM_SIZE → sstabApplyRowMetrics
+    if (!GetPropW(t->hwnd, L"VB6_SSTab_OrigProc")) {
+        WNDPROC op = (WNDPROC)SetWindowLongPtrW(t->hwnd, GWLP_WNDPROC,
+                                                (LONG_PTR)sstabSubclassProc);
+        if (op) SetPropW(t->hwnd, L"VB6_SSTab_OrigProc", (HANDLE)op);
+    }
 
     t->orientation = orientation;
     t->tabStyle = tabStyle;

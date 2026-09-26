@@ -312,6 +312,15 @@ ExprPtr Parser::parseIdentifierOrCall() {
     auto loc = currentLoc();
     auto nameTok = advance();
     std::string name = nameTok.text;
+    // Task #40: 使用点类型后缀剥离 — 与声明侧 (parseVariableDecl/parseConstDecl
+    // 的 Fix 028 stripTypeSuffix) 对齐。`dl& = ...` 的 token 文本含 &, cIdent
+    // 会把 & 改成 _ → dl_ (C2065, 而声明名是 dl)。$ 后缀同样剥: 声明 `Dim s$`
+    // 名为 s, 使用 s$ 不剥则成 s_ 双重不一致; builtinFuncs 的 $ 键由
+    // ident_builtin 的 lookupName strip 兜底 (input 补了无 $ 双键)。
+    {
+        auto suf40 = stripTypeSuffix(name);
+        if (!suf40.typeName.empty()) name = suf40.name;
+    }
     // 泛型使用点 (tB): Foo(Of Long)(x) —— 先把 (Of …) 尾巴扁进名字,
     // 剩下的 (...) 才由 parsePostfix 当作真正的实参表.
     tryFlattenGenericName(name);

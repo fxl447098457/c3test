@@ -71,7 +71,26 @@
                     objIsComVar092b = knownObjectVars_.count(objLower) > 0
                                       || knownTypedComVars_.count(objLower) > 0;
                 }
-                if (!objIsComVar092b && !knownUdtVars_.count(objLower) && objClassMatchesProp &&
+                // Task #43: 对象是窗体控件时, member 是 OCX/控件属性而非跨类
+                // PropertySet — lookupModuleByKind 全局查找会误命中他类同名属性:
+                //   SSTabEx1.Font = iDlg.Font
+                //     → vb6_cDlg_prop_set_Font(SSTabEx1, ...)  (接收者 C2065 裸名 +
+                //        属性语义整体错位)
+                // 控件自有 UserControl 类的属性 (VBFlexGrid1.CellPicture, 符号
+                // sourceModule == knownUserControlCtrlVars_ 类名) 仍走类路径;
+                // 其余控件属性交给下方 P6.2 COM SetProp — LHS 经 Fix 023e/089d
+                // 留 isComMarker_ (comObjExpr_ = 控件 hwnd) → vb6_ComSetProp。
+                bool formCtrlNotOwned43 = false;
+                if (knownFormControls_.count(objLower)) {
+                    formCtrlNotOwned43 = true;
+                    auto itUC43 = knownUserControlCtrlVars_.find(objLower);
+                    if (itUC43 != knownUserControlCtrlVars_.end() && propLetSym->isExternal
+                        && Symbol::toLower(propLetSym->sourceModule)
+                           == Symbol::toLower(itUC43->second)) {
+                        formCtrlNotOwned43 = false;  // 控件自有 UserControl 类属性
+                    }
+                }
+                if (!formCtrlNotOwned43 && !objIsComVar092b && !knownUdtVars_.count(objLower) && objClassMatchesProp &&
                     (!objClass.empty() || propLetSym->isExternal)) {
                     // 生成Property Let调用: vb6_prop_let_Name(obj, value)
                     std::string prefix = (propLetSym->kind == SymbolKind::PropertySet) ? "prop_set_" : "prop_let_";

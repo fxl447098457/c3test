@@ -227,7 +227,13 @@ function Invoke-TestExe {
     # (scores.txt / test_output.txt / *.dat 等), 不同进程写入不同实时文件
     $stdoutFile = Join-Path $WorkDir "$Name.out"
     $stderrFile = Join-Path $WorkDir "$Name.err"
-    Remove-Item $stdoutFile, $stderrFile -ErrorAction SilentlyContinue
+    # #44: 逐条判存在再删, 不依赖 Remove-Item 对"路径不存在"的宽容度。
+    # 实证: 某些宿主(带 safe-delete 钩子的沙箱)把 Remove-Item 换成 fail-closed 版本,
+    # 目标不存在时抛**终止**异常 —— 客户进程因此一次都没跑, 表现为"零输出、
+    # 全部 needle 缺失", 且 detail 里看不出任何异常痕迹(最难查的一种红)。
+    foreach ($stale in @($stdoutFile, $stderrFile)) {
+        if (Test-Path $stale) { Remove-Item $stale -ErrorAction SilentlyContinue }
+    }
 
     $errors = @()
 

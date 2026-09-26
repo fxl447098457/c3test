@@ -347,3 +347,92 @@
     addConst("vbKeyF14", Vb6Type::Long, 125);
     addConst("vbKeyF15", Vb6Type::Long, 126);
     addConst("vbKeyF16", Vb6Type::Long, 127);
+
+    // Fix 199: SSTabEx (TabExCtl.ocx, SSTab 替换控件) 公共枚举常量。
+    // 项目把 TabExCtl.SSTabEx 映射到内置 SSTab 复刻 (frm_parser 按 "sstab"
+    // 子串识别), 但 typelib 枚举缺失 → 每个引用点 C2065。值取自
+    // control-source/ctl/ctlSSTabEx.ctl 的 Public Enum 定义。
+    // ⚠ 修正 (#44 同日): 本块常量与 **同源控件的 typelib 枚举成员同名**
+    // (NewTab01.ocx / TabExCtl.ocx 都是 Sheridan 兼容命名, ssSizeNESW 等全系
+    // 通用)。typelib 枚举注册 (runTypeLibImport) 先于 registerBuiltins, 直接
+    // addConst 会在 analyze(模块1) 时撞已有 EnumMember → Scope::define 返回
+    // false → "重复声明" 刷屏 (Constant 不在 Fix 018 的静默跳过名单里)。
+    // 同值常量让位先注册者 —— first-wins, 与 Fix 018 的 EnumMember 跳过同口径。
+    // (本文件其余 addConst 无此问题: 每模块独立 SymbolTable, 各自 registerBuiltins
+    // 恰好一次; 只有"typelib 先注册了同名"这一种撞法。)
+    auto addConstIfAbsent44 = [&](const char* name, Vb6Type type, long long intVal) {
+        if (symTab_.lookupModule(Symbol::toLower(name))) return;
+        addConst(name, type, intVal);
+    };
+
+    // vbExTabOrientationConstants (Orientation)
+    addConstIfAbsent44("ssTabOrientationTop", Vb6Type::Long, 0);
+    addConstIfAbsent44("ssTabOrientationBottom", Vb6Type::Long, 1);
+    addConstIfAbsent44("ssTabOrientationLeft", Vb6Type::Long, 2);
+    addConstIfAbsent44("ssTabOrientationRight", Vb6Type::Long, 3);
+
+    // vbExMousePointerConstants (MousePointer)
+    addConstIfAbsent44("ssDefault", Vb6Type::Long, 0);
+    addConstIfAbsent44("ssArrow", Vb6Type::Long, 1);
+    addConstIfAbsent44("ssCross", Vb6Type::Long, 2);
+    addConstIfAbsent44("ssIBeam", Vb6Type::Long, 3);
+    addConstIfAbsent44("ssIcon", Vb6Type::Long, 4);
+    addConstIfAbsent44("ssSize", Vb6Type::Long, 5);
+    addConstIfAbsent44("ssSizeNESW", Vb6Type::Long, 6);
+    addConstIfAbsent44("ssSizeNS", Vb6Type::Long, 7);
+    addConstIfAbsent44("ssSizeNWSE", Vb6Type::Long, 8);
+    addConstIfAbsent44("ssSizeEW", Vb6Type::Long, 9);
+    addConstIfAbsent44("ssUpArrow", Vb6Type::Long, 10);
+    addConstIfAbsent44("ssHourglass", Vb6Type::Long, 11);
+    addConstIfAbsent44("ssNoDrop", Vb6Type::Long, 12);
+    addConstIfAbsent44("ssArrowHourglass", Vb6Type::Long, 13);
+    addConstIfAbsent44("ssArrowQuestion", Vb6Type::Long, 14);
+    addConstIfAbsent44("ssSizeAll", Vb6Type::Long, 15);
+    addConstIfAbsent44("ssCustom", Vb6Type::Long, 99);
+
+    // vbExOLEDropConstants (OLEDropMode)
+    addConstIfAbsent44("ssOLEDropNone", Vb6Type::Long, 0);
+    addConstIfAbsent44("ssOLEDropManual", Vb6Type::Long, 1);
+
+    // vbExStyleConstants (Style)
+    addConstIfAbsent44("ssStyleTabbedDialog", Vb6Type::Long, 0);
+    addConstIfAbsent44("ssStylePropertyPage", Vb6Type::Long, 1);
+    addConstIfAbsent44("ssStyleTabStrip", Vb6Type::Long, 2);
+
+    // vbExAutoYesNoConstants (ShowRowsInPerspective/WordWrap 等 Auto 三态)
+    addConstIfAbsent44("ssNo", Vb6Type::Long, 0);
+    addConstIfAbsent44("ssYes", Vb6Type::Long, 1);
+    addConstIfAbsent44("ssYNAuto", Vb6Type::Long, 2);
+
+    // vbExTabWidthStyleConstants (TabWidthStyle)
+    addConstIfAbsent44("ssTWSJustified", Vb6Type::Long, 0);
+    addConstIfAbsent44("ssTWSNonJustified", Vb6Type::Long, 1);
+    addConstIfAbsent44("ssTWSFixed", Vb6Type::Long, 2);
+    addConstIfAbsent44("ssTWSAuto", Vb6Type::Long, 3);
+
+    // vbExTabAppearanceConstants (TabAppearance)
+    addConstIfAbsent44("ssTAAuto", Vb6Type::Long, 0);
+    addConstIfAbsent44("ssTATabbedDialog", Vb6Type::Long, 1);
+    addConstIfAbsent44("ssTATabbedDialogRounded", Vb6Type::Long, 2);
+    addConstIfAbsent44("ssTAPropertyPage", Vb6Type::Long, 3);
+    addConstIfAbsent44("ssTAPropertyPageRounded", Vb6Type::Long, 4);
+
+    // vbExTabPictureAlignmentConstants (TabPictureAlignment)
+    addConstIfAbsent44("ssPicAlignBeforeCaption", Vb6Type::Long, 0);
+    addConstIfAbsent44("ssPicAlignCenteredBeforeCaption", Vb6Type::Long, 1);
+    addConstIfAbsent44("ssPicAlignAfterCaption", Vb6Type::Long, 2);
+    addConstIfAbsent44("ssPicAlignCenteredAfterCaption", Vb6Type::Long, 3);
+
+    // vbExAutoRelocateControlsConstants (AutoRelocateControls)
+    addConstIfAbsent44("ssRelocateNever", Vb6Type::Long, 0);
+    addConstIfAbsent44("ssRelocateAlways", Vb6Type::Long, 1);
+    addConstIfAbsent44("ssRelocateOnTabOrientationChange", Vb6Type::Long, 2);
+
+    // vbExTabHoverHighlightConstants (TabHoverHighlight)
+    addConstIfAbsent44("ssTHHNo", Vb6Type::Long, 0);
+    addConstIfAbsent44("ssTHHInstant", Vb6Type::Long, 1);
+    addConstIfAbsent44("ssTHHEffect", Vb6Type::Long, 2);
+
+    // vbExBackStyleConstants (BackStyle)
+    addConstIfAbsent44("ssTransparent", Vb6Type::Long, 0);
+    addConstIfAbsent44("ssOpaque", Vb6Type::Long, 1);

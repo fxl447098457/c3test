@@ -169,6 +169,9 @@
             if (memLower == "height") { lastExpr_ = "vb6_Printer_Height()"; return; }
             if (memLower == "currentx") { lastExpr_ = "vb6_Printer_CurrentX()"; return; }
             if (memLower == "currenty") { lastExpr_ = "vb6_Printer_CurrentY()"; return; }
+            // Task #39: Printer.hDC — ChooseFont/PrintDlg 的 hDC 字段来源
+            // (cDlg.cls ShowFont: tChooseFont.hDC = Printer.hDC)
+            if (memLower == "hdc") { lastExpr_ = "(void*)vb6_Printer_hDC()"; return; }
         }
 
         // P18-C: Forms 集合

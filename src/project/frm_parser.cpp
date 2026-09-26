@@ -259,24 +259,68 @@ FrmControl FrmParser::parseControlBlock(
         // 被判成集合项行 ⇒ Filter 从此不进 ctrl.properties ⇒ 设计期不写、读回空
         // （ctrldlg 的 DL5=N 就是这么来的）。VB6 的 CommonDialog Filter/DialogTitle
         // 里带括号极常见，属真 bug。合并引入，2026-09-26 修。
+        // ⚠ Task #44 (SSTabEx): `TabCaption(0) = "Theme"` / `TabVisible(2)` /
+        // `TabPic16(0)` 是 **控件自身的带下标属性**，`Tab(0).ControlCount = 1` /
+        // `Tab(0).Control(0) = "Picture2(0)"` 是 **点号分级的下标属性** —— 文本形态与
+        // StatusBar `Panels(1) = "Ready"` 的集合项行同形，但语义相反：吃成集合项会让
+        // 设计期 caption 全进 "Items" 集合 (SSTabEx frmTest: 标签条 7 页全空、页归属
+        // 只能靠 Left 反推)。排除判据：
+        //   ①键名(到'='前)含 '.' → Tab(n).Control* 形态；集合项行键名从不含点
+        //     (子属性行以 '.' **开头**，由下方专门的分支收)。
+        //   ②键名命中 SSTab 家族已知下标属性前缀 (TabCaption/TabVisible/TabPicNN)。
         if (curLine.size() > 1
             && curLine.find('(') != std::string::npos
             && (curLine.find('=') == std::string::npos
                 || curLine.find('(') < curLine.find('='))
             && (curLine.front() == '.' || isalpha((unsigned char)curLine.front()))
             && (curLine.back() == ')' || curLine.find('=') != std::string::npos)) {
-            if (collName.empty()) {
-                // 没有标题行也照样收下 —— 否则这些行 parsePropertyLine 判不出来,
-                // 会被静默丢掉 (表现为"设计期图片凭空少一张")。
-                collName = "Items";
-                coll = FrmPropertyBlock();
-                coll.blockName = collName;
-                collIndent = lineIndent;
+            {
+                std::string keyPart44 = curLine;
+                size_t eq44 = keyPart44.find('=');
+                if (eq44 != std::string::npos) keyPart44 = keyPart44.substr(0, eq44);
+                // trim (与 parsePropertyLine 的键口径一致)
+                size_t b44 = keyPart44.find_first_not_of(" \t\r\n");
+                size_t e44 = keyPart44.find_last_not_of(" \t\r\n");
+                keyPart44 = (b44 == std::string::npos) ? "" : keyPart44.substr(b44, e44 - b44 + 1);
+                // ⚠ 修正 (#44 收窄, 同日): 排除只该打 **标识符开头** 的复合键
+                // (Tab(0).Control(0) — 键名自身带点号分级)。**以 '.' 开头** 的行是
+                // VB6 集合块的成员条目 (`.ListImage(1, "dt1", …frx…)` 隶属上一行
+                // ListImages 集合头), 必须照旧走集合项路径 —— 上面的项行判据首句
+                // 就放行点开头行; "含点即排除" 曾把 ctrlimagelist 的两张设计期图
+                // 读成 0 (IL1-DTCOUNT=0, 全量回归实抓)。
+                bool dotted44 = (keyPart44.find('.') != std::string::npos)
+                             && (!keyPart44.empty() && keyPart44.front() != '.');
+                bool sstabIdx44 = false;
+                static const char* kSstabIdxProps44[] = {
+                    "TabCaption", "TabVisible", "TabPic16", "TabPic20", "TabPic24",
+                    "TabToolTipText"  // 预留; 现无下标形态, 命中也无害
+                };
+                if (!dotted44) {
+                    for (auto* p44 : kSstabIdxProps44) {
+                        size_t n44 = strlen(p44);
+                        if (_strnicmp(keyPart44.c_str(), p44, n44) == 0
+                            && keyPart44.size() > n44 && keyPart44[n44] == '(') {
+                            sstabIdx44 = true;
+                            break;
+                        }
+                    }
+                }
+                if (!dotted44 && !sstabIdx44) {
+                    if (collName.empty()) {
+                        // 没有标题行也照样收下 —— 否则这些行 parsePropertyLine 判不出来,
+                        // 会被静默丢掉 (表现为"设计期图片凭空少一张")。
+                        collName = "Items";
+                        coll = FrmPropertyBlock();
+                        coll.blockName = collName;
+                        collIndent = lineIndent;
+                    }
+                    FrmPropertyBlock item = parseCollectionItem(curLine);
+                    coll.nestedBlocks.push_back(std::move(item));
+                    lineIdx++;
+                    continue;
+                }
+                // dotted44 / sstabIdx44 → 落到普通属性行分支 (下方 parsePropertyLine)
             }
-            FrmPropertyBlock item = parseCollectionItem(curLine);
-            coll.nestedBlocks.push_back(std::move(item));
-            lineIdx++;
-            continue;
         }
 
         // 集合块内 **子属性行**: `.Key = "k"` / `.Style = 1` / `.Text = "x"`。

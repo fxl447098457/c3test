@@ -147,6 +147,18 @@ function Test-ComActivateClient {
             $run = Invoke-TestExe -ExePath $clientExe -WorkDir $OutDir -Name ([System.IO.Path]::GetFileNameWithoutExtension($ClientVbp))
             $clientOut = $run.Output
             if (-not $run.Ok) { $detail += "client run error: $($run.Detail)" }
+            # #44: 客户进程"跑了却一条输出都没有"是这类红最难查的一种 —— 退出码/通道/
+            # 原始字节一律进 detail, 免得只看到"missing: xxx"三行却不知道进程发生了什么。
+            # (实证: 宿主把 Remove-Item 换成 fail-closed 版本时, 客户一次都没被启动,
+            #  detail 里原先连异常痕迹都没有。)
+            if ($clientOut.Count -eq 0 -or $run.ExitCode -ne 0) {
+                $rawOut = Join-Path $OutDir "$([System.IO.Path]::GetFileNameWithoutExtension($ClientVbp)).out"
+                $rawErr = Join-Path $OutDir "$([System.IO.Path]::GetFileNameWithoutExtension($ClientVbp)).err"
+                $snip = "out=<no file>"
+                if (Test-Path $rawOut) { $snip = "out=[$(((Get-Content $rawOut -Raw) -replace '\s+',' ').Trim())]" }
+                if (Test-Path $rawErr) { $snip += " err=[$(((Get-Content $rawErr -Raw) -replace '\s+',' ').Trim())]" }
+                $detail += "client silent: exit=$($run.ExitCode) via=$($run.Detail) lines=$($clientOut.Count) $snip"
+            }
         }
     } finally {
         $unregText = ((& $probe $built.Dll $Clsid $ProgId "unreg") | Out-String)
