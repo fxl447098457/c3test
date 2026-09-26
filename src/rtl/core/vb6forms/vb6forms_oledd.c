@@ -496,17 +496,21 @@ int32_t vb6_OLEDrag_Start(void* hwnd, void* dataObj, int32_t allowedEffects) {
         ((void(*)(void**, int32_t*))t->srcCb[0])(&objPtr, &allowed);
         allowedEffects = allowed;
     }
-    // 无头联测 (C3_OLEDDB_TEST=1): **不调 DoDragDrop**。OleInitialize 成功后它会进
-    // 模态循环、等鼠标键释放, 无输入环境下永不返回 —— 实测挂 5 分钟 (真机无此问题)。
-    // 联测要验的是**源事件链**, 所以只跑 StartDrag (上面已调) 再以 allowedEffects
-    // 当"落下"结果调 CompleteDrag。真实拖动留给真机手工验证。
+    // ⚠ DoDragDrop 是**模态循环**, 只有真实按住鼠标键时才会自行结束
+    // (QueryContinueDrag 见键松开才返回 DRAGDROP_S_DROP)。所以两种情况下**不进**它:
+    //   ① 没按住左键 —— 程序化调用 / 无交互会话 (CI runner 就是这种): 实测 CI 上
+    //      空转满 60s 超时、CPU 59s (纯自旋)。VB6 里 OLEDrag 由 MouseMove 且按键触发,
+    //      真实拖动必然带左键, 所以这条不影响真机。
+    //   ② C3_OLEDDB_TEST=1 (无头联测) —— 只想验**源事件链**。
+    // 两者都只跑 StartDrag (上面已调) 再以 allowedEffects 当"落下"结果调 CompleteDrag。
     {
         static int headless44 = -1;
         if (headless44 < 0) {
             wchar_t f44[8] = { 0 };
             headless44 = (GetEnvironmentVariableW(L"C3_OLEDDB_TEST", f44, 8) > 0) ? 1 : 0;
         }
-        if (headless44) {
+        int noButton44 = (GetKeyState(VK_LBUTTON) & 0x8000) ? 0 : 1;
+        if (headless44 || noButton44) {
             if (t->srcCb[3]) { int32_t fe44 = allowedEffects; ((void(*)(int32_t*))t->srcCb[3])(&fe44); }
             return allowedEffects;
         }

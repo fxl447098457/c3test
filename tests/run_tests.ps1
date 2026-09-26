@@ -211,7 +211,8 @@ function Invoke-TestExe {
     param(
         [string]$ExePath,
         [string]$WorkDir,
-        [string]$Name
+        [string]$Name,
+        [hashtable]$EnvVars = @{}   # 显式注入子进程环境 (不依赖宿主进程级变量)
     )
 
     # 日志统一写入 output 目录: 使用 Open ... For Output 追加写入同一日志文件
@@ -231,6 +232,9 @@ function Invoke-TestExe {
         $psi.CreateNoWindow = $false
         $psi.RedirectStandardOutput = $true
         $psi.RedirectStandardError = $true
+        # P20-44: 显式注入子进程环境块 (RTL 的 GetEnvironmentVariableW 读的就是它)。
+        # 比只改宿主进程级变量可靠: 子进程的环境块在这里被直接写定。
+        foreach ($ek in $EnvVars.Keys) { $psi.EnvironmentVariables[$ek] = [string]$EnvVars[$ek] }
 
         $proc = [System.Diagnostics.Process]::Start($psi)
         $soTask = $proc.StandardOutput.ReadToEndAsync()
@@ -407,15 +411,17 @@ function Test-Run {
     # 运行冒烟测试: 校验输出 (详见 smoke 用例; 若超时则按 SKIP 处理)
     # 可选环境变量 (P20-44: frmevents 的 OLE 无头联测要 C3_OLEDDB_TEST=1 才驱动)
     $savedEnv = @{}
+    $envMap = @{}
     if ($Env) {
         foreach ($kv in $Env.Split(';')) {
             if (-not $kv) { continue }
             $pp = $kv.Split('=', 2)
+            $envMap[$pp[0]] = $pp[1]
             $savedEnv[$pp[0]] = [Environment]::GetEnvironmentVariable($pp[0])
-            [Environment]::SetEnvironmentVariable($pp[0], $pp[1])
+            [Environment]::SetEnvironmentVariable($pp[0], $pp[1])   # 兜底
         }
     }
-    $run = Invoke-TestExe -ExePath $exePath -WorkDir $OutDir -Name $baseName
+    $run = Invoke-TestExe -ExePath $exePath -WorkDir $OutDir -Name $baseName -EnvVars $envMap
     foreach ($k in $savedEnv.Keys) {
         [Environment]::SetEnvironmentVariable($k, $savedEnv[$k])
     }
