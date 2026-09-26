@@ -5,6 +5,11 @@ Begin VB.Form Form1
    ClientLeft      =   60
    ClientTop       =   345
    ClientWidth     =   5880
+   Begin VB.Timer Timer1
+      Interval        =   200
+      Left            =   4680
+      Top             =   480
+   End
    Begin VB.StatusBar StatusBar1
       Align           =   2
       Height          =   375
@@ -27,9 +32,11 @@ Private Sub Form_Load()
 End Sub
 
 ' 程序化真实点击: RTL SimClick 发真 WM_NOTIFY → 窗体派发 → handler (判据专用)。
-' ⚠ 必须放 Activate: dispatch 生成的分支有 `if (vb6_formLoading_X) break;`,
-' Form_Load 阶段窗体还没显示, 事件会被"block events during form init"拦掉。
-Private Sub Form_Activate()
+' ⚠ 必须放 **Timer** —— Form_Load 阶段被 "block events during form init" 拦掉;
+' Form_Activate 依赖窗口被**激活**, CI 无交互桌面的会话里窗口永远不激活 ⇒
+' 实测 GA #109 上 EVT 全缺。P20-42 的 sstab 夹具 (TS25..TS28) 已证明 Timer 在
+' CI 无头下可靠, 照那个先例走。
+Private Sub Timer1_Timer()
     Static done As Integer
     If done Then Exit Sub
     done = 1
