@@ -242,6 +242,9 @@ const char* FrmParser::controlTypeToWin32Class(FrmControlType type) {
         // 退出码照旧 0，见 029 §九）。这里给它一枚自注册的**不可见**类当属性宿主：
         // 有句柄才谈得上 SetPropW 存属性、GetParent 拿模态父窗（注册见 vb6forms_ctrl.c）。
         case FrmControlType::CommonDialog: return "VB6_COMMONDIALOG";
+        // OLE 容器 (C29-OLE): RTL 自注册类 (vb6forms_olecon.c vb6_RegisterOleConClass)。
+        // 嵌入对象依赖目标机器的 OLE 服务器 ⇒ 判据只本地跑 (用户指示), 不进 CI。
+        case FrmControlType::OLE:          return "VB6_OLECONTAINER";
         case FrmControlType::Menu:         return nullptr;       // 菜单, 非窗口
         case FrmControlType::WebBrowser:  return nullptr;       // WebView2, 运行时动态创建
         default:                           return nullptr;

@@ -66,6 +66,66 @@
         std::string objExpr = std::move(comObjExpr_);
         std::string memberName = std::move(comMemberName_);
 
+        // C29-OLE: OLE 容器的方法全走 vb6_OleCon_* (真 OLE 容器, 非 COM 占位)。
+        // objExpr = vb6_hwnd_X (OLE 容器是真窗口控件)。不拦的话会拼成
+        // `vb6_ComCall(vb6_hwnd_X, L"CreateEmbed", …)` —— 对 HWND 当 IDispatch 用。
+        if (!oleConNameOfExpr(objExpr).empty()) {
+            std::string oleSlot = "vb6_hwnd_" + oleConNameOfExpr(objExpr);
+            std::string oleMember = memberName;
+            std::transform(oleMember.begin(), oleMember.end(), oleMember.begin(), ::tolower);
+            std::vector<std::string> oa;
+            for (size_t i = 0; i < node.positional.size(); i++) {
+                emitExpr(*node.positional[i]);
+                oa.push_back(lastExpr_);
+            }
+            // VB6 的 CreateEmbed(SourceDoc, SourceItem) 两参都可省
+            auto oleArg = [&](size_t i, const char* dflt) -> std::string {
+                return (oa.size() > i && !oa[i].empty()) ? oa[i] : dflt;
+            };
+            if (oleMember == "createembed") {
+                lastExpr_ = "vb6_OleCon_CreateEmbed((void*)" + oleSlot + ", "
+                          + oleArg(0, "NULL") + ")";
+                return;
+            }
+            if (oleMember == "createlink") {
+                lastExpr_ = "vb6_OleCon_CreateLink((void*)" + oleSlot + ", "
+                          + oleArg(0, "NULL") + ", " + oleArg(1, "NULL") + ")";
+                return;
+            }
+            if (oleMember == "doverb") {
+                lastExpr_ = "vb6_OleCon_DoVerb((void*)" + oleSlot + ", "
+                          + (oa.empty() ? std::string("0") : oa[0]) + ")";
+                return;
+            }
+            if (oleMember == "close") {
+                lastExpr_ = "vb6_OleCon_Close((void*)" + oleSlot + ")";
+                return;
+            }
+            if (oleMember == "insertobjdlg") {
+                lastExpr_ = "vb6_OleCon_InsertObjDlg((void*)" + oleSlot + ")";
+                return;
+            }
+            if (oleMember == "savetofile") {
+                lastExpr_ = "vb6_OleCon_SaveToFile((void*)" + oleSlot + ", "
+                          + oleArg(0, "L\"\"") + ")";
+                return;
+            }
+            if (oleMember == "readfromfile") {
+                lastExpr_ = "vb6_OleCon_ReadFromFile((void*)" + oleSlot + ", "
+                          + oleArg(0, "L\"\"") + ")";
+                return;
+            }
+            if (oleMember == "copy") {
+                lastExpr_ = "vb6_OleCon_Copy((void*)" + oleSlot + ")";
+                return;
+            }
+            if (oleMember == "paste" || oleMember == "pastespecialdlg") {
+                lastExpr_ = "vb6_OleCon_Paste((void*)" + oleSlot + ")";
+                return;
+            }
+            // Delete / FetchVerbs 等暂未实现的先落默认 COM 路径 (会静默答空, 与 029 §六-2 同)。
+        }
+
         // P20-39: ImageList 原生复刻 —— ListImages.Add/Remove/Clear/Item 直接打在 RTL 上,
         // 不要去养一个假 IDispatch (mscomctl.ocx 未注册, 且 32 位 inproc OCX 进不了 x64 进程)。
         // 这里必须在通用 COM 分支**之前**拦下, 否则 next 步就会拼出

@@ -272,6 +272,38 @@ void    vb6_ListView_RemoveColumn(void* hwnd, int32_t idx);
 // C29-7 事件面: WM_NOTIFY 的 LVN_* → 1 基下标 (0 = 与本控件无关), 再由下标取成员对象。
 // 生成代码在 WM_NOTIFY 分支里用 (见 cgen_form_wndproc_dispatch.inc)。
 int32_t vb6_ListView_OnNotify(void* hwnd, int32_t code, void* lParam);
+// ===================== OLE 容器 (C29-OLE, 判据只本地跑不进 CI) =====================
+// 窗口类 VB6_OLECONTAINER 自注册 (vb6_OleCon_RegisterClasses, cgen 在窗体创建前发射)。
+// 嵌入对象依赖目标机器的 OLE 服务器 —— 判据用系统自带 Package (packager.dll, 双架构都有)。
+int       vb6_RegisterOleConClass(void* hInstance);                // 进程一次, 窗体创建前调
+void      vb6_OleCon_Init(void* hwnd, const wchar_t* cls, int oletTypeAllowed,
+                          int sizeMode, int displayAsIcon, int autoActivate);
+int       vb6_OleCon_CreateEmbed(void* hwnd, const wchar_t* sourceDoc);  /* NULL=按 Class 新建 */
+int       vb6_OleCon_CreateLink(void* hwnd, const wchar_t* sourceDoc, const wchar_t* sourceItem);
+int       vb6_OleCon_ReadFromFile(void* hwnd, const wchar_t* path);
+int       vb6_OleCon_SaveToFile(void* hwnd, const wchar_t* path);
+int       vb6_OleCon_DoVerb(void* hwnd, int verb);
+int       vb6_OleCon_Close(void* hwnd);
+void*     vb6_OleCon_GetObject(void* hwnd);                        // Object 属性 → IDispatch*
+int       vb6_OleCon_GetOleType(void* hwnd);                       // 0=嵌入 1=链接 2=无
+void      vb6_OleCon_Copy(void* hwnd);
+int       vb6_OleCon_Paste(void* hwnd);
+int       vb6_OleCon_InsertObjDlg(void* hwnd);
+int       vb6_OleCon_GetOLETypeAllowed(void* hwnd);
+void      vb6_OleCon_SetOLETypeAllowed(void* hwnd, int v);
+int       vb6_OleCon_GetSizeMode(void* hwnd);
+void      vb6_OleCon_SetSizeMode(void* hwnd, int v);
+int       vb6_OleCon_GetDisplayAsIcon(void* hwnd);
+void      vb6_OleCon_SetDisplayAsIcon(void* hwnd, int v);
+int       vb6_OleCon_GetAutoActivate(void* hwnd);
+void      vb6_OleCon_SetAutoActivate(void* hwnd, int v);
+int       vb6_OleCon_GetAutoVerbMenu(void* hwnd);
+void      vb6_OleCon_SetAutoVerbMenu(void* hwnd, int v);
+int       vb6_OleCon_GetBorderStyle(void* hwnd);
+void      vb6_OleCon_SetBorderStyle(void* hwnd, int v);
+wchar_t*  vb6_OleCon_GetClass(void* hwnd);
+wchar_t*  vb6_OleCon_GetSourceDoc(void* hwnd);
+wchar_t*  vb6_OleCon_GetSourceItem(void* hwnd);
 void*   vb6_ListView_ListItemAt(void* hwnd, int32_t index);
 void*   vb6_ListView_ColumnHeaderAt(void* hwnd, int32_t index);
 void*   vb6_ListView_GetColumnKey(void* hwnd, int32_t idx);

@@ -50,6 +50,18 @@ Vb6Type CCodeGen::controlPropType(FrmControlType ctrlType, const std::string& pr
             return Vb6Type::Long;
         }
     }
+    // C29-OLE: OLEType/OLETypeAllowed/SizeMode/AutoActivate 是 Long 语义 (枚举/布尔);
+    // Class/SourceDoc/SourceItem 是 String (RTL getter 返回 wchar_t*, 包装层会转 BSTR)。
+    if (ctrlType == FrmControlType::OLE) {
+        if (p == "oletype" || p == "oletypeallowed" || p == "sizemode"
+            || p == "autoactivate" || p == "displayasicon" || p == "autoverbmenu"
+            || p == "borderstyle") {
+            return Vb6Type::Long;
+        }
+        if (p == "class" || p == "sourcedoc" || p == "sourceitem") {
+            return Vb6Type::String;
+        }
+    }
     return Vb6Type::Unknown;
 }
 
@@ -242,6 +254,21 @@ std::string CCodeGen::getControlPropReadFn(FrmControlType ctrlType, const std::s
         if (propLower == "sortorder")          return "vb6_ListView_GetSortOrder";
         if (propLower == "visible")            return "vb6_GetControlVisible";
         if (propLower == "enabled")            return "vb6_GetControlEnabled";
+        break;
+    case FrmControlType::OLE:  // C29-OLE: OLEType/Class/SizeMode 等走 RTL (真 OLE 容器)
+        // Object 属性走晚绑定 (cgen_util_com.cpp 那条), 不在这张表。
+        if (propLower == "class")           return "vb6_OleCon_GetClass";
+        if (propLower == "oletype")         return "vb6_OleCon_GetOleType";
+        if (propLower == "oletypeallowed")  return "vb6_OleCon_GetOLETypeAllowed";
+        if (propLower == "sizemode")        return "vb6_OleCon_GetSizeMode";
+        if (propLower == "displayasicon")   return "vb6_OleCon_GetDisplayAsIcon";
+        if (propLower == "autoactivate")    return "vb6_OleCon_GetAutoActivate";
+        if (propLower == "autoverbmenu")    return "vb6_OleCon_GetAutoVerbMenu";
+        if (propLower == "borderstyle")     return "vb6_OleCon_GetBorderStyle";
+        if (propLower == "sourcedoc")       return "vb6_OleCon_GetSourceDoc";
+        if (propLower == "sourceitem")      return "vb6_OleCon_GetSourceItem";
+        if (propLower == "visible")         return "vb6_GetControlVisible";
+        if (propLower == "enabled")         return "vb6_GetControlEnabled";
         break;
     case FrmControlType::Menu:  // P20-36
         if (propLower == "caption") return "vb6_GetMenuCaption";
@@ -476,6 +503,14 @@ std::string CCodeGen::getControlPropWriteFn(FrmControlType ctrlType, const std::
         if (propLower == "sortorder")          return "vb6_ListView_SetSortOrder";
         if (propLower == "visible")            return "vb6_SetControlVisible";
         if (propLower == "enabled")            return "vb6_SetControlEnabled";
+        break;
+    case FrmControlType::OLE:  // C29-OLE 写表
+        if (propLower == "oletypeallowed") return "vb6_OleCon_SetOLETypeAllowed";
+        if (propLower == "sizemode")       return "vb6_OleCon_SetSizeMode";
+        if (propLower == "displayasicon")  return "vb6_OleCon_SetDisplayAsIcon";
+        if (propLower == "autoactivate")   return "vb6_OleCon_SetAutoActivate";
+        if (propLower == "autoverbmenu")   return "vb6_OleCon_SetAutoVerbMenu";
+        if (propLower == "borderstyle")    return "vb6_OleCon_SetBorderStyle";
         break;
     case FrmControlType::Timer:
         if (propLower == "interval") return "vb6_SetTimerInterval";

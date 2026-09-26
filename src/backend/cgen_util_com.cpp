@@ -57,6 +57,17 @@ std::string CCodeGen::resolveComValue(const std::string& unpackType) {
         }
     }
 
+    // C29-OLE: `OLE1.Object` → 嵌入对象的 IDispatch (真 OLE 容器)。
+    // 其它属性 (Class/OLEType/SizeMode…) 走属性表 (cgen_util_ctrl.cpp), 不在这拦。
+    if (Symbol::toLower(memberName) == "object") {
+        std::string ocBare = oleConNameOfExpr(objExpr);
+        if (!ocBare.empty()) {
+            lastExpr_ = "vb6_OleCon_GetObject((void*)vb6_hwnd_" + ocBare + ")";
+            isComMarker_ = false;
+            return lastExpr_;
+        }
+    }
+
     // C29-3: `ImageList1.ListImages` → **真集合对象** (原生复刻的成员集合, 见
     // vb6forms_memberobj.c)。必须排在下面那条 P20-39 分支之前: 那条管的是链上更外层的
     // 成员 (ListImages.Count / ListImages(i).Key), 这里要先把**集合本身**立起来。
@@ -550,6 +561,13 @@ std::string CCodeGen::resolveComMarkerForPack(const std::string& packFnHint) {
                     ? ("vb6_ListView_ListItems((void*)vb6_hwnd_" + lvBare + ")")
                     : ("vb6_ListView_ColumnHeaders((void*)vb6_hwnd_" + lvBare + ")");
         }
+    }
+
+    // C29-OLE: `OLE1.Object` (被当实参/整体赋值的场合, 如 `Set o = OLE1.Object`)。
+    if (Symbol::toLower(memName) == "object") {
+        std::string ocBare = oleConNameOfExpr(objExpr);
+        if (!ocBare.empty())
+            return "vb6_OleCon_GetObject((void*)vb6_hwnd_" + ocBare + ")";
     }
 
     // C29-3: `ImageList1.ListImages` → 真集合对象 (与 resolveComValue 那条同一口径)。

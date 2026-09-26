@@ -25,7 +25,9 @@
             objExpr.find("vb6_ImageList_ListImages(") == 0 ||
             // C29-7: ListView 的两个集合同理 —— 都是真 IDispatch, 成员与方法要走晚绑定。
             objExpr.find("vb6_ListView_ListItems(") == 0 ||
-            objExpr.find("vb6_ListView_ColumnHeaders(") == 0) {
+            objExpr.find("vb6_ListView_ColumnHeaders(") == 0 ||
+            // C29-OLE: `OLE1.Object` 返回嵌入对象的 IDispatch* —— 链 `.Something` 走晚绑定。
+            objExpr.find("vb6_OleCon_GetObject(") == 0) {
             // 链式COM: 设置COM标记, objExpr是中间对象表达式
             comObjExpr_ = objExpr;
             comMemberName_ = node.memberName;
@@ -89,6 +91,8 @@
         // C29-7: ListView 的 ListItems / ColumnHeaders 同理。
         obj.find("vb6_ListView_ListItems(") == 0 ||
         obj.find("vb6_ListView_ColumnHeaders(") == 0 ||
+        // C29-OLE: `OLE1.Object` 同理。
+        obj.find("vb6_OleCon_GetObject(") == 0 ||
         obj.find("vb6_PropertyPage_SelectedControls(") == 0) {
         // 对于vb6_ComCall/vb6_ComGetProp, 需要先解封为对象
         // 链式调用: ComCall返回VARIANT*, 需ComCallObject才能拿到IDispatch*

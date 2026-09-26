@@ -26,7 +26,7 @@
     c_.emitBlank();
     // P20-35: 注册Shape/Line自定义窗口类
     {
-        bool hasShape = false, hasLine = false, hasCd = false, hasTmr = false;
+        bool hasShape = false, hasLine = false, hasCd = false, hasTmr = false, hasOle = false;
         for (const auto& ctrl : frmDesc.formControl.children) {
             if (ctrl.controlType == FrmControlType::Shape) hasShape = true;
             if (ctrl.controlType == FrmControlType::Line) hasLine = true;
@@ -34,6 +34,8 @@
             // CreateWindowExW 拿不到类 ⇒ 句柄 NULL ⇒ 又回到"静默空转"那个症状。
             if (ctrl.controlType == FrmControlType::CommonDialog) hasCd = true;
             if (ctrl.controlType == FrmControlType::Timer) hasTmr = true;  // C29-T
+            // C29-OLE: 同理 —— VB6_OLECONTAINER 类先注册, 控件创建才有窗口。
+            if (ctrl.controlType == FrmControlType::OLE) hasOle = true;
         }
         if (hasShape || hasLine) {
             c_.emitLine("vb6_RegisterShapeLineClasses((void*)hInstance);");
@@ -43,6 +45,9 @@
         }
         if (hasTmr) {
             c_.emitLine("vb6_RegisterTimerClass((void*)hInstance);");
+        }
+        if (hasOle) {
+            c_.emitLine("vb6_RegisterOleConClass((void*)hInstance);");
         }
     }
     // 为每个控件生成CreateWindow调用

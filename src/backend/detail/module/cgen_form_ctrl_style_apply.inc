@@ -482,6 +482,42 @@
                       + std::to_string(lvBool("LabelEdit")) + ");");
         }
 
+        // C29-OLE: OLE 容器设计期 —— Class/OLETypeAllowed/SizeMode/DisplayAsIcon/
+        // AutoActivate/AutoVerbMenu/BorderStyle/SourceDoc/SourceItem 一次 Init 灌进去。
+        // 不灌的话 OLETypeAllowed 会错成 2 (vbOLEEither) 之外任意值、SizeMode 错成 0。
+        if (ctrl.controlType == FrmControlType::OLE) {
+            std::string ocNLower = ctrl.controlName;
+            std::transform(ocNLower.begin(), ocNLower.end(), ocNLower.begin(), ::tolower);
+            std::string ocHwnd = knownControlArrays_.count(ocNLower) ?
+                ("vb6_CtrlArr_GetAt(&vb6_arr_" + cIdent(ctrl.controlName) + ", " +
+                 std::to_string(ctrl.index >= 0 ? ctrl.index : 0) + ")") :
+                ("vb6_hwnd_" + cIdent(ctrl.controlName));
+            auto ocInt = [](const std::map<std::string, FrmValue>& mp, const std::string& k, int defv) -> int {
+                auto it = mp.find(k);
+                if (it == mp.end()) return defv;
+                return (int)it->second.intValue;
+            };
+            auto ocStr = [&](const std::string& k) -> std::string {
+                auto it = ctrl.properties.find(k);
+                if (it == ctrl.properties.end() || it->second.rawText.empty()) return "L\"\"";
+                // rawText 是含引号的原始文本 ("xxx"); 剥掉外层引号后交给转义助手
+                std::string raw = it->second.rawText;
+                if (raw.size() >= 2 && raw.front() == '"' && raw.back() == '"')
+                    raw = raw.substr(1, raw.size() - 2);
+                return "L\"" + escapeWideCString(raw) + "\"";
+            };
+            c_.emitLine("vb6_OleCon_Init((void*)" + ocHwnd + ", "
+                      + ocStr("Class") + ", "
+                      + std::to_string(ocInt(ctrl.properties, "OLETypeAllowed", 2)) + ", "
+                      + std::to_string(ocInt(ctrl.properties, "SizeMode", 0)) + ", "
+                      + std::to_string(ocInt(ctrl.properties, "DisplayAsIcon", 0) != 0 ? 1 : 0) + ", "
+                      + std::to_string(ocInt(ctrl.properties, "AutoActivate", 2)) + ", "
+                      + std::to_string(ocInt(ctrl.properties, "AutoVerbMenu", 1) != 0 ? 1 : 0) + ", "
+                      + std::to_string(ocInt(ctrl.properties, "BorderStyle", 0)) + ", "
+                      + ocStr("SourceDoc") + ", "
+                      + ocStr("SourceItem") + ");");
+        }
+
         // P20-42: SSTab 设计期 —— 一次 Init 灌进 Tabs/Tab/TabOrientation/TabStyle/
         // TabsPerRow/WordWrap, 再逐页灌 Caption。
         // 页标题的 .frm 形态支持两种: ①VB6 实际写的 BeginProperty Tabs {…} 块里

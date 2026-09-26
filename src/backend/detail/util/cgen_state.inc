@@ -455,6 +455,18 @@
         std::string n = listViewNameOfExpr(objExpr);
         return n.empty() ? "" : "vb6_hwnd_" + n;
     }
+    // C29-OLE: 真窗口的 OLE 容器控件 (登记裸控件名, 如 "OLE1")。
+    // 方法 (CreateEmbed/CreateLink/DoVerb/Close/InsertObjDlg/SaveToFile/ReadFromFile/
+    // Copy/Paste) 与属性读写全走 vb6_OleCon_*, 第一参是 HWND 槽 vb6_hwnd_X。
+    std::unordered_set<std::string> oleConVars_;
+    // objExpr 是否落在一个已登记的 OLE 容器上 (返回裸控件名, 否则空串)。
+    std::string oleConNameOfExpr(const std::string& objExpr) const {
+        if (objExpr.size() > 9 && objExpr.compare(0, 9, "vb6_hwnd_") == 0) {
+            std::string n = objExpr.substr(9);
+            if (oleConVars_.count(n)) return n;
+        }
+        return "";
+    }
     // objExpr 是否落在一个已登记的 ImageList 上。命中返回**裸控件名** (如 "ImageList1"),
     // 否则返回空串。objExpr 有三种形态, 三种都要认:
     //   ① 控件槽本身                       → vb6_com_ImageList1
