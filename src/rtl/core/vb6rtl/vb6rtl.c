@@ -213,6 +213,7 @@ int32_t vb6_VariantToLong(vb6_VARIANT v) {
         case vb6_vtByte:    return (int32_t)v.bVal;
         case vb6_vtInteger: return (int32_t)v.iVal;
         case vb6_vtLong:    return v.lVal;
+        case VT_I8:         return (int32_t)v.llVal;  /* Task #44: VT_I8 进 Long 按 C 截断语义 */
         case vb6_vtSingle:  return (int32_t)round(v.fltVal);
         case vb6_vtDouble:  return (int32_t)round(v.dblVal);
         case vb6_vtCurrency:return (int32_t)(v.cyVal / 10000);
@@ -251,6 +252,7 @@ int16_t vb6_VariantToBool(vb6_VARIANT v) {
         case vb6_vtByte:     return v.bVal ? -1 : 0;
         case vb6_vtInteger:  return v.iVal ? -1 : 0;
         case vb6_vtLong:     return v.lVal ? -1 : 0;
+        case VT_I8:          return v.llVal ? -1 : 0;  /* Task #44: LongLong/LongPtr 64 位 */
         case vb6_vtSingle:   return v.fltVal != 0.0f ? -1 : 0;
         case vb6_vtDouble:   return v.dblVal != 0.0 ? -1 : 0;
         case vb6_vtCurrency: return v.cyVal ? -1 : 0;
@@ -270,6 +272,7 @@ double vb6_VariantToDouble(vb6_VARIANT v) {
         case vb6_vtByte:    return (double)v.bVal;
         case vb6_vtInteger: return (double)v.iVal;
         case vb6_vtLong:    return (double)v.lVal;
+        case VT_I8:         return (double)v.llVal;  /* Task #44: LongLong/LongPtr 64 位 */
         case vb6_vtSingle:  return (double)v.fltVal;
         case vb6_vtDouble:  return v.dblVal;
         case vb6_vtCurrency:return (double)v.cyVal / 10000.0;

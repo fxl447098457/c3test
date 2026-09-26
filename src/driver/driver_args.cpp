@@ -43,9 +43,21 @@ std::pair<CompileOptions, int> Driver::parseArgs(int argc, char* argv[]) {
         }
         else if (arg == "--target" && i + 1 < argc) {
             opts.target = argv[++i];
+            // Task #44: --target 此前**只存不用** (`opts.target` 全工程无人消费), 于是
+            // `--target win-x86` 是个静默空操作 —— 产出的仍是 x64 exe (实测 PE
+            // machine=0x8664 / magic=0x020B, 与 --arch x86 的 0x14c/0x010B 差一个字长)。
+            // 32 位 VB6 工程的 x86 复验会被这种假绿整个骗过去。这里把 win-x86/win-x64
+            // 映射到真正的位数开关 arch; 显式 --arch 优先, 其余取值照旧给出警告。
+            if (opts.target == "win-x86" || opts.target == "win-x64") {
+                if (!opts.archExplicit) opts.arch = (opts.target == "win-x86") ? "x86" : "x64";
+            } else {
+                std::cerr << "C3: warning: --target " << opts.target
+                          << " does not select an architecture; use --arch x86|x64" << std::endl;
+            }
         }
         else if (arg == "--arch" && i + 1 < argc) {
             opts.arch = argv[++i];
+            opts.archExplicit = true;
             if (opts.arch != "x86" && opts.arch != "x64") {
                 std::cerr << "C3: --arch must be x86 or x64 (got: " << opts.arch << ")" << std::endl;
                 resultCode = 1;

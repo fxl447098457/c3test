@@ -31,6 +31,15 @@
             numVal = expr.dblVal; isNumeric = 1; break;
         case vb6_vtSingle:
             numVal = (double)expr.fltVal; isNumeric = 1; break;
+        // Task #44: VT_I8 = LongLong / x64 的 LongPtr(intptr_t)。此前缺此分支 →
+        // 落 default 返回**空串** (Fix 084m 注释已记)。包装侧 (vb6rtl_variant.h 的
+        // _Generic long long:) 现已统一产出 VT_I8, 这里必须接住, 否则 x64 下
+        // CStr(LongPtr) 仍是空串 (实测 PtrProbe 打 "Q=" 而非 "Q=4294967296")。
+        // 无格式串时走 vb6_CStrLongLong 的 %lld 精确十进制 —— 转 double 会在
+        // >2^53 处丢精度; 带格式串才进通用数值分支 (此时用户已要求数值语义)。
+        case (vb6_vartype)VT_I8:
+            if (!fmt) return vb6_CStrLongLong(expr.llVal);
+            numVal = (double)expr.llVal; isNumeric = 1; break;
         case vb6_vtByte:
             numVal = (double)expr.bVal; isNumeric = 1; break;
         case vb6_vtCurrency:
