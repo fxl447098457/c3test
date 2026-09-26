@@ -116,9 +116,13 @@ jobs:
       # run_tests.ps1 内: 纯 .bas 用例支持 -Jobs 并行 (每个 worker 独立输出目录) 与
       # -BasShard 分片 (CI 用多 runner 并行跑 bas 用例); VBP/GUI 用例始终串行
       # (GUI 窗口效果无法通过自动校验并行确认).
+      # ai/030 §六/§十: 加 -Incremental ⇒ 每个 job 里只有第一例真编那 65 个 RTL .c，其余吃
+      # 内容寻址的 obj store（本机实测：单工程 22.0 s → 2.8 s，15 例 bas 282 s → 36 s）。
+      # store 是 runner 本地的、跑完即弃 ⇒ 产 obj 的机器与用 obj 的机器同一台，不跨机错配。
+      # 编译器自己的默认路径仍是关的；要退回今天这条老路，删掉这个开关即可。
       - name: "Run regression (${{ matrix.category }}${{ matrix.shard && format(' #{0}', matrix.shard) || '' }})"
         shell: pwsh
-        run: pwsh -NoProfile -ExecutionPolicy Bypass -File tests/run_tests.ps1 -Category ${{ matrix.category }} -Jobs 20 ${{ matrix.category == 'bas' && format('-BasShard {0} -BasShardTotal 2', matrix.shard) || '' }} -Verbose
+        run: pwsh -NoProfile -ExecutionPolicy Bypass -File tests/run_tests.ps1 -Category ${{ matrix.category }} -Jobs 20 ${{ matrix.category == 'bas' && format('-BasShard {0} -BasShardTotal 2', matrix.shard) || '' }} -Incremental -Verbose
 
       - name: Upload test logs
         if: always()

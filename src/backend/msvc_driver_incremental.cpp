@@ -345,6 +345,12 @@ bool MsvcDriver::compileAndLinkIncremental(const MsvcDriverOptions& options) {
     // cl /link 路径共用同一个追加函数, 保证增量/非增量两条路径的链接输入一致。
     appendUserLibInputs(linkCmd, options);
     if (options.arch == "x86") linkCmd << " /MACHINE:X86";
+    // P24-09 把 x86 的 RTL 与用户码都按 /MT 编 (obj 里带 /DEFAULTLIB:LIBCMT)，而这条链接路
+    // 是直接叫 link.exe —— 不做处理时 linker 自己按默认的 /MD 档去配 msvcrt.lib，于是
+    // LNK4098 (msvcrt 与 libcmt 冲突) + LNK2019 找不到 __except_handler4_common (SEH4 是 x86
+    // 独有，x64 不报)。默认路径经 cl /link 链接，cl 会替我们把这条配平 —— 所以只有增量路会翻，
+    // 而 --incremental 在 ai/030 T30-B 之前从没进过任何回归，这个洞就一直没被踩过。见 030 §10.7。
+    if (options.arch == "x86") linkCmd << " /NODEFAULTLIB:msvcrt.lib";
     if (options.debugInfo) linkCmd << " /DEBUG /MAP";
 
     std::string linkRsp = objDir + "/_c3_link_args.rsp";

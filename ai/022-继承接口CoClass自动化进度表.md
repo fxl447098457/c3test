@@ -5,7 +5,9 @@
 > 规范输入: `ai/讨论记录/018-接口继承与CoClass设计思路.md`（含 tB 文档要点与分阶段设计思路全文）。
 
 STATUS: ALL_DONE             # NOT_STARTED | DESIGN | BUSY | IDLE | ALL_DONE
-LAST_RUN: 2026-09-26T06:45:00+08:00   # 本轮 = **029 线两批**：① C29-9 CommonDialog 已收线（`e7f3352`，门 #86）；② 用户追加"把 timer 的精度做高一点" → 新立并做完 **C29-T（VB.Timer 运行期真触发 + winmm ms 级精度）= 代码 `f7b1d2d`，门 Actions run #88（8/8 job 全绿，18.6 分钟）**。③ 末尾按用户要求本地复跑另一位作者 CI 里三条超时的用例（test_ndarray_x86 / test_compat / test_types_x86）：三条**全绿**，运行阶段只用 84~1127 ms，慢的是编译阶段（22~43 s） 症状是那条 **5 s 预算**在 -Jobs 20 的 4 核 runner 上被并发 cl/link 饿死（主套件 B19 已为同一件事把预算改成 60s = `8174219`；那份 `tests_github` 副本还是 5s，按"清单漂移有人在修"不去动它）。进度与读数记在 `ai\029-内置控件补全计划书.md` §九。自动运行见本行不足 55 分钟请立即跳过。
+LAST_RUN: 2026-09-26T12:13:11+08:00   # 本轮 = **ai/030 T30-B 接进 GA**：ci.yml 的回归步骤加 `-Incremental`（`c3739b5`）→ 门 **#94 红**（`test_delegate_x86` LNK1120：增量那条链接路直接叫 link.exe，没配 /MT 的 CRT）→ 修 `39ecaeb`（x86 链接补 `/NODEFAULTLIB:msvcrt.lib`）→ 门 **#96 绿**，**wall 19m19s → 12m10s（−37%）**，vbp 930→544 s、bas 344→219 / 374→235 s。本地入口 dev.ps1/test.bat 也已默认吃 缓存（`41ce0fd`）。新账 #77/#78 见 030 §10.5/§10.7。
+               # 上一轮 = 2026-09-26T10:59:52+08:00（ai/030 两批：T30-A 内容寻址 obj store + 套件开关；其原注释链保留在下面）
+               # 上一轮 = 2026-09-26T06:45:00+08:00（= 本轮之前的收线时刻，其原注释链保留在下面）
                # B21 交付一笔 = `2ddcc8b`（cgen 侧 15 文件 + 用例 32 条 + 手册 Boolean 页 + 分类护栏脚本
                # `.build\b21_emitc_guard.py`）。根因是两条不是一条、护栏 RED 一次的教训、以及顺带量出的 `Print #`
                # 那条，全在 **D70**；待拍板 5 就此收口，新撞出的一条记为待拍板 7（未拍板、未动手）。
@@ -20,7 +22,7 @@ LAST_RUN: 2026-09-26T06:45:00+08:00   # 本轮 = **029 线两批**：① C29-9 C
                # 那条线动共用文件（`src/project/frm_parser*`、`src/backend/detail/module/cgen_form_*`、`src/rtl/core/vb6forms/*`、
                # `tests/run_tests.ps1`）之前，先看本表 STATUS —— 若 BUSY 按同一套重入保护等静默，两条线不并行改同一文件。
 LAST_COMMIT: 代码批 = 2ddcc8b(B21 布尔可见性+装箱)、c2f7317(B20 插值)、4c16f50+f8ec76e(B20 多行串/夹具钉字节)、8174219(B19 套件超时/读数)、d4e53c2(B19 错误出口)、796220d(B19 控制台编码)、732c1f8(B17 门后修堆损坏)、a5517fa(B17)、578faa4(B16)、941b6dc(B15)、0caa3c5(B15 门 head = 合并用户 Fix 192/193)、ddf4e9b(B14 测试批)、4534a83(B14 台账)、b10ec1a(B13e)、5d29a5c(B13e 台账)、9df23ba(B13d)、bd38798(B13c)、b1a8e58(B13b)、7b6570a+988c7cb(B13a；门 head = 合并 `9785f4f`)、7f829ee(B11/C05=B12)、b82a184+02d70fe(B11/C04)、c4aaa4c(B11/C03b)、e515d89(B11/C03a)、f0b820d(B11/C02)、e7c7a31(B11/C01)、3c5d8e6(B10)、9eb2ca7(B09c)、debb110(B09b)、02bac92(B09)   # **commit message 一律现写、不复用上批文本**；push 只推 `github/dev`（Actions 门），`origin`(gitcode) 与 `main` 不碰、**绝不建 MR**。
-LAST_COMMIT: 代码批 = 0413bb9(B18)、732c1f8(B17 门后修堆损坏)、a5517fa(B17)、578faa4(B16)、941b6dc(B15)、0caa3c5(B15 门 head = 合并用户 Fix 192/193)、ddf4e9b(B14 测试批)、4534a83(B14 台账)、b10ec1a(B13e)、5d29a5c(B13e 台账)、9df23ba(B13d)、bd38798(B13c)、b1a8e58(B13b)、7b6570a+988c7cb(B13a；门 head = 合并 `9785f4f`)、7f829ee(B11/C05=B12)、b82a184+02d70fe(B11/C04)、c4aaa4c(B11/C03b)、e515d89(B11/C03a)、f0b820d(B11/C02)、e7c7a31(B11/C01)、3c5d8e6(B10)、9eb2ca7(B09c)、debb110(B09b)、02bac92(B09)   # **commit message 一律现写、不复用上批文本**；push 只推 `github/dev`（Actions 门），`origin`(gitcode) 与 `main` 不碰、**绝不建 MR**。
+# （上一轮的 LAST_COMMIT，降为注释：本文件只允许一个 LAST_COMMIT 键） 代码批 = 0413bb9(B18)、732c1f8(B17 门后修堆损坏)、a5517fa(B17)、578faa4(B16)、941b6dc(B15)、0caa3c5(B15 门 head = 合并用户 Fix 192/193)、ddf4e9b(B14 测试批)、4534a83(B14 台账)、b10ec1a(B13e)、5d29a5c(B13e 台账)、9df23ba(B13d)、bd38798(B13c)、b1a8e58(B13b)、7b6570a+988c7cb(B13a；门 head = 合并 `9785f4f`)、7f829ee(B11/C05=B12)、b82a184+02d70fe(B11/C04)、c4aaa4c(B11/C03b)、e515d89(B11/C03a)、f0b820d(B11/C02)、e7c7a31(B11/C01)、3c5d8e6(B10)、9eb2ca7(B09c)、debb110(B09b)、02bac92(B09)   # **commit message 一律现写、不复用上批文本**；push 只推 `github/dev`（Actions 门），`origin`(gitcode) 与 `main` 不碰、**绝不建 MR**。
                含完整 COM）的收口文档 = `ai\027-接口继承CoClass实施收口.md`（交付总览表 + 语言/COM 两侧要点 +
                **v1 边界清单 12 条** + 怎么验 + 记录索引）；逐格过程与全部实测读数 = 本文件的设计记录 D1–D65。
                **若还要继续推进，下面是边界清单里值得单独立项的几条**（都不是本线的"未做完"，是明确划出去的）：
@@ -41,7 +43,7 @@ LAST_COMMIT: 代码批 = 0413bb9(B18)、732c1f8(B17 门后修堆损坏)、a5517f
                规则沿用：push 只推 `github/dev`；门跑 Actions（`.build/wait_run2.py <sha> <秒>` 盯）；`.build` 里的
                临时 `.ps1` 一律 ASCII only；用例文件按同目录邻居的编码/行尾（`.bas`/`.vbp` = UTF-8+CRLF，
                `tests\*.ps1` = BOM+CRLF）。
-GATE_BASELINE: (Actions 级) c3test run **#88 [dev] = completed/success**（head `f7b1d2d` = C29-T 那一笔，
+GATE_BASELINE: (Actions 级) c3test run **#96 [dev] = completed/success**（head `39ecaeb`，8/8 job 全绿，**wall 730s = 12m10s**，对照上一基线 #91 的 1159s = 19m19s：vbp 930→544s、bas #1 344→219s、bas #2 374→235s、asm 114→83s，compile/syntax 不动（那两组不构建，见 #78））。中间那笔 **#94 = failure** 不是回归，是本批换来的真证据：它抓出增量链接路缺 CRT 配平，已在 `39ecaeb` 修掉。
                8/8 job 全绿 = Build C3.exe + Tests(smoke/syntax/vbp/compile/asm/bas#1/bas#2)，
                06:10→06:28 共 18.6 分钟；逐 job 用 `GET /runs/{id}/jobs` 核过）。
                **门只认 "VB6 C3 Regression" 那条 workflow 的 run 号**：从 `f7b1d2d` 这次推送起，dev 上
@@ -3400,3 +3402,28 @@ D54-② 那条"类变量永不 Release"不变式（对外一旦发 IDispatch/IUn
   ① C29-9 收线（门 #86，head `e7f3352`，8/8 全绿）后，用户追加一句"把 timer 的精度做高一点"，于是把 C29-9 测量时撞见的那条独立缺陷正式立成 **C29-T** 并做完：Timer 换成自注册的不可见窗口 `VB6_TIMER` 当身份（与 C29-9 的 `VB6_COMMONDIALOG` 同法，cgen 的属性读写形状不用特判）、注册不再看设计期 `Enabled` 的脸色（有事件处理器就挂表，设计期值只决定起不起）、底层从 `SetTimer`（~15.6 ms 地板）换成 winmm `timeSetEvent(wResolution=1)`，到期回调只把消息投回窗体、仍走原 `case WM_TIMER` 派发口。winmm 经 `LoadLibrary`+`GetProcAddress` 取 → 不新增 import lib。
   ② 两条老坑各撞一次，值得记：布尔 `Enabled` 存 `val+1` 时 VB6 的 True=-1 会变成 0（与"从没设过"不可分辨）→ 单独 normalize；**`TIME_PERIODIC` 手抄成 0x02（真值 1）会让 `timeSetEvent` 直接失败并静默退回 SetTimer** —— 不报错、功能也对，只是"精度没上去"，极难归因 → 改成显式引 `mmsystem.h`（它只是被 `WIN32_LEAN_AND_MEAN` 排除）。判据因此必须带量化区间：20 ms 名义 50 给 [40,60]，`Interval=5` 名义 200 而地板只有 ~64（阈值 100 才分得开）。
   ③ 推送后门 #88 全绿；同时 dev 上被触发了另一位作者的 workflow（"GitHub Tests T0+T1+T2" run #1），用户贴来三条超时（`test_ndarray_x86` / `test_compat` / `test_types_x86`，都是 `run timeout 5s`）。本地按同一口径复跑（x64+x86 各一遍，含针校验）：三条**全绿**，**运行阶段只有 84~1127 ms**，慢的是编译阶段（22~43 s）→ 结论是那条 5 s 预算在 `-Jobs 20` 的 4 核 runner 上被并发cl/link 饿死（正是主套件 B19 把它改成 60s 的原因，见 `8174219`），不是程序问题、也不是本批改慢。那份 `tests_github` 副本的清单与预算**按既有约定不去碰**（有人在修），本轮只在台账记归因。
+### D72 ai/030 两批落地后的读数与两条新账（2026-09-26）
+
+- **读数**：暖 obj store 下一次构建 2.8 s（冷编 22.0 s）；15 例 bas 分片一趟 282 s -> 36 s；
+  同一入口 `dev.ps1 -TestCategory smoke` 带开关 7 s / `-NoObjCache` 21 s。整组 vbp 带开关
+  `PASS=67 FAIL=0 SKIP=1 TOTAL=68`，与门 #91（不带开关）同口径逐字相同。
+- **`-O 2` 那臂 RTL 仍 65/65 命中、用户码 0/2**：RTL 的编译档与用户优化档确实解耦了；
+  `--arch x86` 独立一格，首编全 miss、再编全命中，6 条 x86 vbp 无回退链。
+- **新账 #78**：`Test-Compile` 在 run_tests.ps1 里定义了两次（190 真构建 / 762 只做 --emit-c），
+  后者覆盖前者 => `-Category compile` 根本不构建（5 s、10 例全 PASS、零产物）。本批没顺手改名，
+  因为会动到 ai/028 那批的断言语义。
+- **新账 #77**：`findClExe()` 返回字面量 `cl.exe`，所以 toolsetTag 在"非 dev shell + 没预灌 env"
+  时退化成常量 `"cl.exe|"` => "cl 版本进键"这句目前没有内容撑着。随包带 obj（T30-D）之前必须补。
+### D73 把 -Incremental 接进 GA 的三条读数（2026-09-26）
+
+- **门确实变快**：#91（不带开关）wall 19m19s → #96（带开关）wall **12m10s，−37%**。分组：
+  vbp 930→544 s、bas #1 344→219 s、bas #2 374→235 s、asm 114→83 s；smoke/compile/syntax 基本
+  不动（后两组本就不构建 —— 见 #78）。没到本机那个 7.8× 是因为每个 job 仍付一次冷编 RTL
+  (~20 s)，加上跑阶段/链接/20 路争 4 vCPU。
+- **#94 的红是这批最值钱的一步**：`test_delegate_x86` LNK1120。根因不在缓存正确性，而在增量
+  那条路**直接叫 link.exe**（编译/链接拆两步，`cl /link` 用不了），linker 按默认 /MD 配 msvcrt，
+  与 obj 的 `LIBCMT`（x86 走 /MT，P24-09）打架，x86 独有的 `__except_handler4_common` 落空。
+  `dumpbin /directives` 定位；修 = 镜像编译侧判据补 `/NODEFAULTLIB:msvcrt.lib`。这洞潜伏多久
+  无从得知，因为 `--incremental` 在接进 GA 之前从没被任何回归跑过。
+- **教训入账**：新路径"本地跑绿"不等于覆盖到 —— 我本地跑了 15 例 bas + 整组 vbp 都没碰到
+  delegate 的 x86×msvcrt 组合。判据要靠让门去跑新路，不是靠扩大本地抽查。

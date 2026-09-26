@@ -19,8 +19,21 @@ if errorlevel 1 (
 set "CAT=%1"
 if "%CAT%"=="" set "CAT=all"
 
+REM ai/030 sec.10: local runs use the content-addressed obj store (RTL is not recompiled
+REM per case: measured 282s -> 36s on a 15-case bas shard). The compiler's own default is
+REM untouched -- this entry point passes the switch explicitly. Set C3_NO_OBJCACHE=1 to
+REM reproduce exactly what GA does.
+set "INC=-Incremental"
+if not "%C3_NO_OBJCACHE%"=="" set "INC="
+
+REM Set C3_TEST_OUTDIR to build/verify into a private directory. The suite otherwise uses
+REM the repo default output\, which several people share on this working tree at once --
+REM concurrent runs stepping on each other's artifacts produced false reds before.
+set "OD="
+if not "%C3_TEST_OUTDIR%"=="" set "OD=-OutputDirectory %C3_TEST_OUTDIR%"
+
 if "%2"=="" (
-    powershell -ExecutionPolicy Bypass -File "%~dp0..\tests\run_tests.ps1" -Category %CAT%
+    powershell -ExecutionPolicy Bypass -File "%~dp0..\tests\run_tests.ps1" -Category %CAT% %INC% %OD%
 ) else (
-    powershell -ExecutionPolicy Bypass -File "%~dp0..\tests\run_tests.ps1" -Category %CAT% -Verbose:%2
+    powershell -ExecutionPolicy Bypass -File "%~dp0..\tests\run_tests.ps1" -Category %CAT% -Verbose:%2 %INC% %OD%
 )
