@@ -109,6 +109,9 @@
 #ifndef TB_SETBUTTONINFOW
 #define TB_SETBUTTONINFOW   (WM_USER + 64)
 #endif
+#ifndef TBN_DROPDOWN
+#define TBN_DROPDOWN        (0 - 710)     // TBN_FIRST(0-700) - 10
+#endif
 #ifndef TBIF_IMAGE
 #define TBIF_IMAGE          0x00000001
 #endif
@@ -607,6 +610,55 @@ void vb6_Toolbar_ClearButtons(void* hwnd) {
     }
     t->nNative = 0;
     InvalidateRect((HWND)hwnd, NULL, TRUE);
+}
+
+
+// ---------------- C29-5c: 两条按钮事件的判据辅助 ----------------
+// 无头环境点不了鼠标，而直接调 handler 会绕开整条派发链。这里的做法是**照真控件的样子把
+// 消息发给父窗**，让 cgen 那两处派发分支各跑一遍 (手法照 C29-8c 的 TvSendNotify)。
+//
+// **两条事件不在同一条通道上** —— 原先 #89 记的"跟 TreeView 一样共用 WM_NOTIFY"只对了一半：
+//   ButtonClick      → WM_COMMAND, LOWORD(wParam)=按钮的 idCommand, HIWORD=0, lParam=工具栏 HWND
+//   ButtonMenuClick  → WM_NOTIFY,  hdr.code=TBN_DROPDOWN(-710), hdr.idFrom=同一个 idCommand
+//                      (只有 BTNS_DROPDOWN = VB6 的 Style 5 那种带下拉箭头的按钮发得出来)
+//
+// **为什么不向控件现问 idCommand**：试过节的两条路，都在本产品 (嵌了 Common-Controls 6.0
+// manifest 的产物) 里问不出东西 ——
+//   · `TB_GETBUTTON` 在不嵌 manifest 的独立探针里 rc=1 / idCommand=1..3 / 越界 rc=0，看着全对，
+//     而产物里同一句一条都不回 (探针与产物不同 comctl 版本这条老嫌疑，见 ai/029 §三 D3)；
+//   · `TB_GETBUTTONINFO + TBIF_COMMAND|TBIF_STYLE|TBIF_BYINDEX` 的实测读数是
+//     `rc=0/1/2 且结构体一个字段都没被填` (idx=1/2/3 ⇒ rc 恰好等于传进去的 wParam)，
+//     也就是这条 GET 压根不认 TBIF_COMMAND。⇒ 判据改用**表**：序号边界问 `vb6_TbBtnAt`、
+//     下拉位问 `b->style == 5`。这两条各自都能被读数证伪，而"控件里的 idCommand 就是槽号+1"
+//     由 `Buttons.Count`(TB_BUTTONCOUNT) 与表数一致 (TB34) 从另一侧钉住。
+static Vb6TbBtn* vb6_TbSimTarget(void* hwnd, int32_t idx, int wantDropdown) {
+    Vb6TbBtn* b = vb6_TbBtnAt(hwnd, idx);
+    if (!b) return NULL;
+    // 真控件不会为普通按钮发 TBN_DROPDOWN，判据也不发 —— 否则那条读数成了自证。
+    if (wantDropdown && b->style != 5) return NULL;
+    if (!wantDropdown && b->style == 3) return NULL;   // 分隔符按不动
+    return b;
+}
+
+void vb6_Toolbar_SimButtonClick(void* hwnd, int32_t idx) {
+    HWND parent;
+    if (!vb6_TbSimTarget(hwnd, idx, 0)) return;
+    parent = GetParent((HWND)hwnd);
+    if (!parent) return;
+    SendMessageW(parent, WM_COMMAND, (WPARAM)MAKEWPARAM((WORD)idx, 0), (LPARAM)(HWND)hwnd);
+}
+
+void vb6_Toolbar_SimButtonMenuClick(void* hwnd, int32_t idx) {
+    NMTOOLBARW nt;
+    HWND parent;
+    if (!vb6_TbSimTarget(hwnd, idx, 1)) return;
+    parent = GetParent((HWND)hwnd);
+    if (!parent) return;
+    ZeroMemory(&nt, sizeof(nt));
+    nt.hdr.hwndFrom = (HWND)hwnd;
+    nt.hdr.idFrom   = (UINT_PTR)idx;
+    nt.hdr.code     = (DWORD)TBN_DROPDOWN;
+    SendMessageW(parent, WM_NOTIFY, 0, (LPARAM)&nt);
 }
 
 

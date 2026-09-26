@@ -79,6 +79,13 @@
                 anyNotify = true;
                 break;
             }
+            // C29-5c: Toolbar 只有 _ButtonMenuClick 走这条 (TBN_DROPDOWN)；
+            // _ButtonClick 在 WM_COMMAND 那一路 (见 cgen_form_wndproc_create.inc)。
+            if (ctrl.controlType == FrmControlType::Toolbar) {
+                if (!symTab_.lookup(ctrl.controlName + "_ButtonMenuClick")) continue;
+                anyNotify = true;
+                break;
+            }
         }
         if (anyNotify) {
             c_.emitLine("case WM_NOTIFY: {");
@@ -260,6 +267,30 @@
                     c_.dedent();
                     c_.emitLine("}");
                 }
+            }
+            // ---- C29-5c: Toolbar 的 ButtonMenuClick ----
+            // TBN_DROPDOWN(-710) 只有带下拉箭头的按钮 (VB6 的 Style 5 = BTNS_DROPDOWN) 发得
+            // 出来；hdr.idFrom 就是那颗按钮的 idCommand —— 与 WM_COMMAND 那一路同一个值，
+            // 所以造对象照用 vb6_Toolbar_ButtonAt:
+            //   Sub Toolbar1_ButtonMenuClick(ByVal Button As Button)
+            for (const auto& ctrl : frmDesc.formControl.children) {
+                if (ctrl.controlType != FrmControlType::Toolbar) continue;
+                auto* mcSym = symTab_.lookup(ctrl.controlName + "_ButtonMenuClick");
+                if (!mcSym) continue;
+                std::string mcNameLower = ctrl.controlName;
+                std::transform(mcNameLower.begin(), mcNameLower.end(), mcNameLower.begin(), ::tolower);
+                std::string tbHwndVar = knownControlArrays_.count(mcNameLower)
+                    ? ("vb6_CtrlArr_GetAt(&vb6_arr_" + cIdent(ctrl.controlName) + ", 0)")
+                    : ("vb6_hwnd_" + cIdent(ctrl.controlName));
+                std::string mcFn = cProcName(mcSym->name, AccessLevel::Private);
+                c_.emitLine("if (pNM42->code == -710 && (void*)pNM42->hwndFrom == " + tbHwndVar + ") {");
+                c_.indent();
+                c_.emitLine("extern void " + mcFn + "(void*);");
+                c_.emitLine("void* vb6_tbMenuBtn5c = vb6_Toolbar_ButtonAt((void*)" + tbHwndVar
+                            + ", (int32_t)pNM42->idFrom);");
+                c_.emitLine("if (vb6_tbMenuBtn5c) " + mcFn + "(vb6_tbMenuBtn5c);");
+                c_.dedent();
+                c_.emitLine("}");
             }
             c_.emitLine("break;");
             c_.dedent();

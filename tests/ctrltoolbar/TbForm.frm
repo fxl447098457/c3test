@@ -44,6 +44,11 @@ Begin VB.Form TbForm
       Top             =   1200
       Width           =   1200
    End
+   Begin VB.Timer evtTimer 
+      Interval        =   200
+      Left            =   240
+      Top             =   1920
+   End
 End
 Attribute VB_Name = "TbForm"
 Attribute VB_GlobalNameSpace = False
@@ -64,7 +69,17 @@ Option Explicit
 ' Key/Tag/ToolTipText/Style/Width 住 5a 那张表 (原生 fsStyle 分不出分隔符与占位符)。
 ' 量到的一条 v6 坑：TB_ADDBUTTONSW 不吃调用方给的 fsState (建完读回 0) ⇒ Button.Enabled
 ' 默认会是 False，建完补一条 TB_SETBUTTONINFOW 打回启用位 (TB19 就是这条读数)。
-' 还欠：ButtonClick/ButtonMenuClick 的 TBN_ 派发、ImageList 关联、真停靠与真自定义。
+' 还欠：ImageList 关联、真停靠与真自定义。
+' C29-5c 接上两条按钮事件的派发 (TB28-TB34)。**两条不在同一条通道上**：ButtonClick 走
+' WM_COMMAND (LOWORD=按钮的 idCommand、HIWORD=0、lParam=工具栏 HWND)，ButtonMenuClick 走
+' WM_NOTIFY 的 TBN_DROPDOWN(-710)，且只有 Style 5 (带下拉箭头) 那颗按钮发得出来。
+
+Private gClicks As Long
+Private gMenu As Long
+Private gOther As Long
+Private gHitOne As Long
+Private gHitTwo As Long
+Private gHitMenu As Long
 
 Private Function TF(ByVal ok As Boolean) As String
     If ok Then TF = "Y" Else TF = "N"
@@ -184,6 +199,67 @@ Private Sub Form_Load()
     tb1.Buttons.Clear
     Debug.Print "TB27=" & TF(tb1.Buttons.Count = 0 And tb2.Buttons.Count = 0 And tb1.TextStyle = 1)
 
+    ' TB28-TB34 与 DONE/Unload 一起挪到下面的 evtTimer_Timer —— Form_Load 阶段派发被拦掉
+End Sub
+
+' 派发链的触发点: Form_Load 里 block events during form init，Form_Activate 在无头会话里
+' 永远不来 ⇒ 照 C29-8c / C29-4 的先例放 Timer。计数一律问**增量**。
+Private Sub evtTimer_Timer()
+    Static done As Integer
+    If done Then Exit Sub
+    done = 1
+
+    ' TB27 把 Buttons 清干净了，所以事件判据自己重建目标按钮 —— 顺带这也证"派发查的是活着的
+    ' 表": 表空的时候 Sim 一条都打不进 handler。第三颗是 Style 5 (带下拉箭头)，
+    ' 只有它发得出 TBN_DROPDOWN。
+    tb1.Buttons.Add , "one", "甲", 0, -1
+    tb1.Buttons.Add , "two", "乙", 0, -1
+    tb1.Buttons.Add , "menu", "丁", 5, -1
+
+    Dim baseClick As Long, baseMenu As Long
+    baseClick = gClicks
+    baseMenu = gMenu
+
+    tb1.SimButtonClick 1
+    tb1.SimButtonClick 2
+    Debug.Print "TB28=" & TF(gClicks - baseClick = 2)
+    ' handler 里真读了 Button.Key ⇒ 造出来的那枚对象就是被点的那一颗，不是"调过一次就算数"
+    Debug.Print "TB29=" & TF(gHitOne = 1 And gHitTwo = 1)
+    ' 消息的来源是 tb1 (WM_COMMAND 的 lParam / WM_NOTIFY 的 hwndFrom) ⇒ 另一枚工具栏的
+    ' handler 一次都不该进
+    Debug.Print "TB30=" & TF(gOther = 0 And tb2.Buttons.Count = 0)
+    ' 序号越界: 原生 TB_GETBUTTON 问不到那颗按钮 ⇒ 消息压根不发
+    tb1.SimButtonClick 9
+    Debug.Print "TB31=" & TF(gClicks - baseClick = 2)
+
+    tb1.SimButtonMenuClick 3
+    Debug.Print "TB32=" & TF(gMenu - baseMenu = 1 And gHitMenu = 1)
+    ' 普通按钮 (Style 0) 身上没有下拉箭头 ⇒ 真控件不会为它发 TBN_DROPDOWN，判据也不发
+    tb1.SimButtonMenuClick 1
+    Debug.Print "TB33=" & TF(gMenu - baseMenu = 1)
+    ' 事件面没把 5b 那套集合读数与标量属性面抢走
+    Debug.Print "TB34=" & TF(tb1.Buttons.Count = 3 And tb1.TextStyle = 1 And tb1.Align = 2)
+
     Debug.Print "CTRLTOOLBAR-DONE"
     Unload Me
+End Sub
+
+Private Sub tb1_ButtonClick(ByVal Button As Button)
+    Dim sK As String
+    gClicks = gClicks + 1
+    sK = Button.Key
+    If sK = "one" Then gHitOne = 1
+    If sK = "two" Then gHitTwo = 1
+End Sub
+
+Private Sub tb1_ButtonMenuClick(ByVal Button As Button)
+    Dim sK As String
+    gMenu = gMenu + 1
+    sK = Button.Key
+    If sK = "menu" Then gHitMenu = 1
+End Sub
+
+' tb2 一枚对照 handler: 它不该被 tb1 的消息打进来 (TB30 问的就是这个 gOther)
+Private Sub tb2_ButtonClick(ByVal Button As Button)
+    gOther = gOther + 1
 End Sub

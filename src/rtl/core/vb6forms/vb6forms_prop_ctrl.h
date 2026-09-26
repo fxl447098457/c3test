@@ -583,6 +583,11 @@ void            vb6_Toolbar_SetButtonValue(void* hwnd, int32_t idx, int32_t v);
 void            vb6_Toolbar_ClearButtons(void* hwnd);
 void*           vb6_Toolbar_Buttons(void* hwnd);       // 集合对象 (真 IDispatch, 在 memberobj.c)
 void*           vb6_Toolbar_ButtonAt(void* hwnd, int32_t idx);   // 事件参数用
+// C29-5c: 两条按钮事件的判据助手 (只对父窗发消息，走真派发)。ButtonClick 走
+// WM_COMMAND(id=控件的 idCommand, code=0, lParam=工具栏)，ButtonMenuClick 走
+// WM_NOTIFY(TBN_DROPDOWN=-710, hdr.idFrom=同一个 id)。
+void            vb6_Toolbar_SimButtonClick(void* hwnd, int32_t idx);
+void            vb6_Toolbar_SimButtonMenuClick(void* hwnd, int32_t idx);
 
 #ifdef __cplusplus
 }

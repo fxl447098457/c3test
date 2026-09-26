@@ -23,8 +23,13 @@
         if (comObjExpr_.find("vb6_hwnd_") == 0) {
             std::string tvBare = comObjExpr_.substr(9);
             std::string tvMem = Symbol::toLower(comMemberName_);
-            if (treeViewVars_.count(tvBare)
-                && (tvMem == "simnodeclick" || tvMem == "simexpand")) {
+            bool tvSim = treeViewVars_.count(tvBare) > 0
+                && (tvMem == "simnodeclick" || tvMem == "simexpand");
+            // C29-5c: 工具栏那两条判据方法同形 (SimButtonClick → WM_COMMAND,
+            // SimButtonMenuClick → WM_NOTIFY/TBN_DROPDOWN，两条都发给父窗)。
+            bool tbSim = !toolbarNameOfExpr(comObjExpr_).empty()
+                && (tvMem == "simbuttonclick" || tvMem == "simbuttonmenuclick");
+            if (tvSim || tbSim) {
                 isComMarker_ = false;
                 std::vector<std::string> sa;
                 for (size_t i = 0; i < node.positional.size(); i++) {
@@ -35,7 +40,11 @@
                 std::string a1 = sa.size() > 1 ? sa[1] : std::string("0");
                 lastExpr_ = (tvMem == "simnodeclick")
                     ? ("vb6_TreeView_SimNodeClick((void*)" + comObjExpr_ + ", " + a0 + ")")
-                    : ("vb6_TreeView_SimExpand((void*)" + comObjExpr_ + ", " + a0 + ", " + a1 + ")");
+                    : (tvMem == "simexpand")
+                    ? ("vb6_TreeView_SimExpand((void*)" + comObjExpr_ + ", " + a0 + ", " + a1 + ")")
+                    : (tvMem == "simbuttonclick")
+                    ? ("vb6_Toolbar_SimButtonClick((void*)" + comObjExpr_ + ", " + a0 + ")")
+                    : ("vb6_Toolbar_SimButtonMenuClick((void*)" + comObjExpr_ + ", " + a0 + ")");
                 comObjExpr_.clear();
                 comMemberName_.clear();
                 return;
