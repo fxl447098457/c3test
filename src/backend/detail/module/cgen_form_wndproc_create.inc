@@ -19,10 +19,16 @@
     if (std::getenv("C3_OCX_NO_PAINT") == nullptr) {
         c_.emitLine("vb6_OcxHost_PaintAll((void*)hwnd, (void*)_vb6_hdc);  /* Fix 143d: 无窗口/窗口化 OCX 绘制 */");
     }
-    // Form_Paint 事件 (若有)
-    if (symTab_.lookup(formName + "_Paint")) {
-        c_.emitLine("{ extern void " + cProcName(formName + "_Paint", AccessLevel::Private) + "(); "
-                    + cProcName(formName + "_Paint", AccessLevel::Private) + "(); }");
+    // Form_Paint 事件 (若有) —— P20-43: 调用名取**符号真名**。此前写死
+    // formName + "_Paint", 而用户写的是 `Form_Paint` → 定义是 vb6_Form_Paint,
+    // 调用却发 vb6_<窗体名>_Paint → LNK2019 (与 Activate/DblClick 同一处缺陷)。
+    {
+        auto* paintSym43 = symTab_.lookup(formName + "_Paint");
+        if (!paintSym43) paintSym43 = symTab_.lookup("Form_Paint");
+        if (paintSym43) {
+            std::string paintFn43 = cProcName(paintSym43->name, AccessLevel::Private);
+            c_.emitLine("{ extern void " + paintFn43 + "(); " + paintFn43 + "(); }");
+        }
     }
     c_.emitLine("EndPaint(hwnd, &_vb6_ps);");
     c_.emitLine("break;");
@@ -105,8 +111,15 @@
             pIt = ctrl.properties.find("Enabled");
             if (pIt != ctrl.properties.end()) enabled = (int)pIt->second.intValue;
             std::string timerFn = cProcName(ctrl.controlName + "_Timer", AccessLevel::Private);
-            if (enabled) {
-                c_.emitLine("{ extern void " + timerFn + "(); vb6_SetTimer((void*)hwnd, " + std::to_string(interval) + ", (void*)" + timerFn + "); }");
+            // C29-T: 改之前"设计期 Enabled=0 就整段不发"，于是运行期 `Timer1.Enabled = True`
+            // 永远起不来（实测 tick 数 0）。现在只要有事件处理器就**照挂**，把设计期那个
+            // Enabled 当参数交给 RTL 决定起不起；key 传 Timer 控件自己的不可见句柄，
+            // 运行期的 Enabled/Interval 才找得回这一格。没处理器就没得派发，跳过（否则链接期
+            // 会引用一个不存在的 vb6_<名>_Timer）。
+            if (symTab_.lookup(ctrl.controlName + "_Timer")) {
+                c_.emitLine("{ extern void " + timerFn + "(); vb6_TimerAttach((void*)hwnd, vb6_hwnd_"
+                            + cIdent(ctrl.controlName) + ", " + std::to_string(interval) + ", (void*)"
+                            + timerFn + ", " + (enabled ? "-1" : "0") + "); }");
             }
         }
     }
@@ -146,6 +159,23 @@
     if (formLoadSym) {
         c_.emitLine("case 0x7FF0: {");
         c_.indent();
+        // P20-43: Form_Initialize —— VB6 语义是"窗体实例创建时触发一次, 早于 Load"。
+        // 我们的 Load 是 PostMessage 延迟的, 所以挂在同一条 0x7FF0 里、Load 之前,
+        // 用 static 标志保证整个进程只走一次 (0x7FF0 理论上只会到一次, 保险起见)。
+        {
+            auto* initSym43 = symTab_.lookup(formName + "_Initialize");
+            if (!initSym43) initSym43 = symTab_.lookup("Form_Initialize");
+            if (initSym43) {
+                std::string initFn = cProcName(initSym43->name, AccessLevel::Private);
+                c_.emitLine("static int vb6_formInited_" + cIdent(formName) + " = 0;");
+                c_.emitLine("if (!vb6_formInited_" + cIdent(formName) + ") {");
+                c_.indent();
+                c_.emitLine("vb6_formInited_" + cIdent(formName) + " = 1;");
+                c_.emitLine("{ extern void " + initFn + "(); " + initFn + "(); }");
+                c_.dedent();
+                c_.emitLine("}");
+            }
+        }
         c_.emitLine("{ /* Form_Load (deferred from WM_CREATE) */ extern void " + formLoadFn + "(); " + formLoadFn + "(); }");
         // Fix 112: Load 完成后再触发首次 Form_Resize (与 VB6 的 Load→Resize 顺序一致)
         c_.emitLine("vb6_formLoaded_" + cIdent(formName) + " = 1;");
@@ -219,6 +249,67 @@
                 c_.emitLine("if (id == " + std::to_string(ctrlId) + " && code == 2) {");
                 c_.indent();
                 c_.emitLine("{ extern void " + dblClickFn + "(); " + dblClickFn + "(); }");
+                c_.dedent();
+                c_.emitLine("}");
+            }
+        } else if (ctrl.controlType == FrmControlType::DriveListBox) {
+            // C29-1b: 换盘 = CBN_SELCHANGE(1) → Drive1_Change；VB6 同一条通知也发 Click，
+            // 所以两个处理器各自挂一次（有哪个就发哪个，缺一不报错）。
+            if (symTab_.lookup(ctrl.controlName + "_Change")) {
+                std::string drvChgFn = cProcName(ctrl.controlName + "_Change", AccessLevel::Private);
+                c_.emitLine("if (id == " + std::to_string(ctrlId) + " && code == 1) {");
+                c_.indent();
+                c_.emitLine("{ extern void " + drvChgFn + "(); " + drvChgFn + "(); }");
+                c_.dedent();
+                c_.emitLine("}");
+            }
+            if (symTab_.lookup(ctrl.controlName + "_Click")) {
+                std::string drvClkFn = cProcName(ctrl.controlName + "_Click", AccessLevel::Private);
+                c_.emitLine("if (id == " + std::to_string(ctrlId) + " && code == 1) {");
+                c_.indent();
+                c_.emitLine("{ extern void " + drvClkFn + "(); " + drvClkFn + "(); }");
+                c_.dedent();
+                c_.emitLine("}");
+            }
+        } else if (ctrl.controlType == FrmControlType::DirListBox) {
+            // C29-1b: 双击列表项 = 下钻一层。VB6 的 Dir1_Change 是"Path 真的变了"才发,
+            // 所以先让 RTL 试下钻、返回 1 才调处理器 —— 双击卷标行/空项不惊动事件。
+            if (symTab_.lookup(ctrl.controlName + "_Change")) {
+                std::string dirChgFn = cProcName(ctrl.controlName + "_Change", AccessLevel::Private);
+                std::string dirHwnd = ctrlHwndExprForInit(ctrl);
+                c_.emitLine("if (id == " + std::to_string(ctrlId) + " && code == 2) {");
+                c_.indent();
+                c_.emitLine("if (vb6_DirListBoxDescendSelected((void*)" + dirHwnd + ")) {");
+                c_.indent();
+                c_.emitLine("{ extern void " + dirChgFn + "(); " + dirChgFn + "(); }");
+                c_.dedent();
+                c_.emitLine("}");
+                c_.dedent();
+                c_.emitLine("}");
+            }
+            if (symTab_.lookup(ctrl.controlName + "_Click")) {
+                std::string dirClkFn = cProcName(ctrl.controlName + "_Click", AccessLevel::Private);
+                c_.emitLine("if (id == " + std::to_string(ctrlId) + " && code == 1) {");
+                c_.indent();
+                c_.emitLine("{ extern void " + dirClkFn + "(); " + dirClkFn + "(); }");
+                c_.dedent();
+                c_.emitLine("}");
+            }
+        } else if (ctrl.controlType == FrmControlType::FileListBox) {
+            // C29-1b: 选中文件 = LBN_SELCHANGE(1) → Click；双击 = LBN_DBLCLK(2) → DblClick
+            if (symTab_.lookup(ctrl.controlName + "_Click")) {
+                std::string fileClkFn = cProcName(ctrl.controlName + "_Click", AccessLevel::Private);
+                c_.emitLine("if (id == " + std::to_string(ctrlId) + " && code == 1) {");
+                c_.indent();
+                c_.emitLine("{ extern void " + fileClkFn + "(); " + fileClkFn + "(); }");
+                c_.dedent();
+                c_.emitLine("}");
+            }
+            if (symTab_.lookup(ctrl.controlName + "_DblClick")) {
+                std::string fileDblFn = cProcName(ctrl.controlName + "_DblClick", AccessLevel::Private);
+                c_.emitLine("if (id == " + std::to_string(ctrlId) + " && code == 2) {");
+                c_.indent();
+                c_.emitLine("{ extern void " + fileDblFn + "(); " + fileDblFn + "(); }");
                 c_.dedent();
                 c_.emitLine("}");
             }

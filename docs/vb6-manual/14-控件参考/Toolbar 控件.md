@@ -27,3 +27,24 @@
 通过对每个 **Button** 对象的 **ToolTipText** 描述进行编程可进一步增强可用性。为显示工具提示，必须将 **ShowTips** 属性设置为 **True**。当用户调用“自定义工具栏”对话框时，单击按钮就会导致在对话框中显示按钮的描述；这种描述可通过设置 **Description** 属性来编程实现。
 
 **发行注意**   **Toolbar** 控件是一组ActiveX 控件的一部分，这组自定义控件可在文件 MSCOMCTL.OCX 中找到。为在应用程序中使用 **Toolbar** 控件，必须将文件 MSCOMCTL.OCX 添加到工程中。在发行应用程序时，应将文件 MSCOMCTL.OCX 安装到用户的 Microsoft Windows 的SYSTEM 或 System32 ( Windows NT 平台上)的文件夹。关于怎样将一个 ActiveX 控件添加到工程中去的详细信息，请参阅《部件工具指南*》*中的“加载 ActiveX 控件”。
+
+## 本项目的实现口径（ai/029 C29-5a）
+
+`Toolbar` 在原生的 **`ToolbarWindow32`**（comctl32 自带窗口类）上实现，语法面与本页上文一致。本页上文那条"必须将 MSCOMCTL.OCX 添加到工程"的发行注意**在本项目里不适用**：该 OCX 只有 32 位，64 位工程加载不了。
+
+| 写法 | 读数 |
+| --- | --- |
+| `Toolbar1.ShowTips` | 默认 `True`；真值就是窗口的 `TBSTYLE_TOOLTIPS` 位 |
+| `Toolbar1.TextStyle` | `0` = 文字在图标下方（默认）、`1` = 文字在右侧（`TBSTYLE_LIST`）|
+| `Toolbar1.AllowCustomize` | 对应窗口的 `CCS_ADJUSTABLE` 位。该位原生只在**创建时**起作用，所以运行期改它读得回、真拖拽自定义还没生效 |
+| `Toolbar1.Align` | 存的是 VB6 那一套 `0..4`，默认 `1`（靠上）。**停靠行为还没接**：控件按 `.frm` 的 `Left/Top/Width/Height` 摆放 |
+| `Toolbar1.Buttons.Count` | 问的是控件自己（`TB_BUTTONCOUNT`），所以设计期那些按钮**没真进控件就数不到**；分隔符也计入 |
+| `Toolbar1.Visible` / `Enabled` / `Left` / `Top` / `Width` / `Height` / `Font*` / `ForeColor` / `BackColor` | 与其它可见控件同一套读法 |
+
+设计期属性页里加的按钮（`Key` / `Caption` / `Style` / `ToolTipText` / 分隔符宽度）会逐条建进原生控件；`Image` 索引也原样记下，但**图标要等 `ImageList` 关联那一格**才显出来 —— 没关联时按钮一律"无图"，与 VB6 里不给工具栏配图标时的观感一致。
+
+尚未落地：`Buttons` 的逐项读写（`(i).Key` / `.Caption` / `Add` / `Remove`）、`Button` 对象、`ButtonClick` / `ButtonMenuClick` 事件、`ImageList` 关联、`Align` 的真停靠。这一族等 `ImageList` 那批要立起来的"成员对象"机制，见 `ai/029` §四。
+
+另两条与本页上文不同的地方：改之前这枚控件在 C3 里**连窗口都没有**（读任意属性都会 `C2065: vb6_hwnd_tb1 未声明的标识符` 而编不过），以及 `Debug.Print "" & CStr(Toolbar1.Buttons.Count)` 这种 `CStr(...)` 包一层的写法目前拿不到数（`&` 直接拼是正常的）—— 与本批无关的既有面，记在 `ai/029` §九。
+
+判据在 `tests\ctrltoolbar\`（TB1 认原生数到三条设计期按钮、TB2 认不被另一枚继承、TB3-TB4 认矩形按 `.frm`、TB5-TB7 认标量属性的设计期值与默认值、TB8-TB9 认运行期赋值可逆、TB10 认两枚不串、TB11-TB12 认通用属性面）。

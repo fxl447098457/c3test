@@ -45,12 +45,101 @@
         }
     }
 
+    // ============================================================
+    // P20-44: OLE 拖放的方法调用 —— 两种形状 (独立于下面的 positional 大门,
+    // 因为 X.OLEDrag 通常**无实参**, `!node.positional.empty()` 挡不住它):
+    //   ① DataObject 形参的方法: Data.SetData(v) / Data.Files(i) / Data.Clear()
+    //   ② 控件的拖动方法:        X.OLEDrag
+    // 都不能掉 COM 派发 (本机 hwnd 不是 IDispatch)。
+    // ============================================================
+    if (node.callee && node.callee->kind == ASTNodeKind::MemberAccessExpr) {
+        auto& maDD = static_cast<MemberAccessExpr&>(*node.callee);
+        if (maDD.object && maDD.object->kind == ASTNodeKind::IdentifierExpr
+            && node.named.empty() && node.positional.size() <= 1) {
+            auto& objIdDD = static_cast<IdentifierExpr&>(*maDD.object);
+            std::string objLowerDD = Symbol::toLower(objIdDD.name);
+            std::string memLowerDD = Symbol::toLower(maDD.memberName);
+            // ① DataObject 形参方法
+            if (dataObjectParams_.count(objLowerDD)) {
+                std::string ddArg = "(void*)(*" + objIdDD.name + ")";
+                if (memLowerDD == "setdata" && node.positional.size() == 1) {
+                    emitExpr(*node.positional[0]);
+                    lastExpr_ = "{ vb6_oleDD_SetText(" + ddArg + ", "
+                              + std::move(lastExpr_) + "); (void)0; }";
+                    return;
+                }
+                if (memLowerDD == "clear" && node.positional.empty()) {
+                    lastExpr_ = "{ vb6_oleDD_Clear(" + ddArg + "); (void)0; }";
+                    return;
+                }
+                if (memLowerDD == "files" && node.positional.size() == 1) {
+                    emitExpr(*node.positional[0]);
+                    lastExpr_ = "vb6_oleDD_GetFileBstr(" + ddArg + ", "
+                              + std::move(lastExpr_) + ")  /* DataObject.Files(i) */";
+                    return;
+                }
+            }
+            // ② 控件的 OLEDrag 方法 → 造 DataObject(控件文本) + 源事件注册 + DoDragDrop
+            auto itCtlDD = knownFormControls_.find(objLowerDD);
+            if (itCtlDD != knownFormControls_.end() && memLowerDD == "oledrag") {
+                std::string hwndDD = makeCtrlHwndArg(objLowerDD, itCtlDD->second);
+                static const char* ddSrcEv[4] = { "_OLEStartDrag", "_OLESetData",
+                                                  "_OLEGiveFeedback", "_OLECompleteDrag" };
+                std::string regDD;
+                for (int ddK = 0; ddK < 4; ddK++) {
+                    auto* ddSym = symTab_.lookup(objIdDD.name + ddSrcEv[ddK]);
+                    if (!ddSym) continue;
+                    std::string ddFn = cProcName(ddSym->name, AccessLevel::Private);
+                    regDD += "  { extern void " + ddFn + "(); vb6_OLEDrop_SetHandler("
+                           + hwndDD + ", " + std::to_string(ddK + 2) + ", (void*)" + ddFn + "); }" + "\n";
+                }
+                std::string allowedDD = "3";   // 默认 vbCFCopy|vbCFMove
+                if (node.positional.size() == 1) {
+                    emitExpr(*node.positional[0]);
+                    allowedDD = std::move(lastExpr_);
+                }
+                lastExpr_ = (std::string)"{ void* ddObj44 = (void*)vb6_oleDD_MakeDataObject("
+                          "vb6_GetControlText(" + hwndDD + "), NULL, 0);" + "\n"
+                          + regDD
+                          + "  vb6_OLEDrag_Start((void*)" + hwndDD + ", ddObj44, "
+                          + allowedDD + "); }";
+                return;
+            }
+        }
+    }
+
     if (node.callee && node.callee->kind == ASTNodeKind::MemberAccessExpr
         && !node.positional.empty() && node.named.empty()) {
         auto& maExpr = static_cast<MemberAccessExpr&>(*node.callee);
         std::string memLower = Symbol::toLower(maExpr.memberName);
         std::string memLowerM = "m_" + memLower;
         bool handled = false;
+
+        // ---- P20-42: SSTab 的带下标索引属性 TabCaption(i) / TabVisible(i) ----
+        // 与 StatusBar 的 `Panels(i).Text` 不是一回事: 那个是"集合对象再取成员属性",
+        // 这里 TabCaption 是**控件自身的参数化属性**, VB6 写作 SSTab1.TabCaption(0)。
+        // 不拦就会掉到下面的 COM 派发, 生成 vb6_ComCall(vb6_hwnd_SSTab1, L"TabCaption", …)
+        // —— 可本机 hwnd 不是 IDispatch, 运行期静默答错或直接崩。
+        // 写完这一侧还要配 cgen_util_comwrite.cpp 的对应写分支 (Get→Set)。
+        if (maExpr.object && maExpr.object->kind == ASTNodeKind::IdentifierExpr
+            && node.positional.size() == 1) {
+            auto& objIdTs = static_cast<IdentifierExpr&>(*maExpr.object);
+            std::string objLowerTs = Symbol::toLower(objIdTs.name);
+            auto itCtlTs = knownFormControls_.find(objLowerTs);
+            if (itCtlTs != knownFormControls_.end()
+                && itCtlTs->second == FrmControlType::SSTab) {
+                std::string fnTs;
+                if (memLower == "tabcaption")      fnTs = "vb6_SSTab_GetTabCaption";
+                else if (memLower == "tabvisible") fnTs = "vb6_SSTab_GetTabVisible";
+                if (!fnTs.empty()) {
+                    emitExpr(*node.positional[0]);
+                    std::string idxTs = std::move(lastExpr_);
+                    lastExpr_ = fnTs + "(" + makeCtrlHwndArg(objLowerTs, itCtlTs->second)
+                              + ", " + idxTs + ")  /* SSTab indexed prop */";
+                    return;
+                }
+            }
+        }
 
         // ---- Pattern A/B: UDT 数组字段 ----
         // 仅当 maExpr.object 的 UDT 类型可推断 (IdentifierExpr / WithMemberExpr / 嵌套

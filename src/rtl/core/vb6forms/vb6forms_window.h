@@ -86,6 +86,12 @@ void vb6_ResetControlId(void);
 // 返回: 定时器ID (用于vb6_KillTimer)
 int vb6_SetTimer(void* hwnd, int interval, void* callback);
 
+// C29-T: 运行期可开/停/改周期的计时器三件套。owner = 派发窗（窗体），key = Timer 控件
+// 自己的不可见句柄 —— 没有 key 就没有"运行期找得回这一格"，那正是改之前的症状。
+// 精度：winmm timeSetEvent（ms 级，取不到则退回 SetTimer）。
+void vb6_TimerAttach(void* owner, void* key, int period, void* callback, int enabled);
+void vb6_TimerSetEnabled(void* key, int enabled);
+void vb6_TimerSetPeriod(void* key, int period);
 // 销毁定时器
 void vb6_KillTimer(int timerId);
 

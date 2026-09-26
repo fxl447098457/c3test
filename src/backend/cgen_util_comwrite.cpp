@@ -170,6 +170,29 @@ bool CCodeGen::tryRewriteCOMLvalue(const std::string& target, const std::string&
         return out;
     };
 
+    // ---- P20-42: SSTab 索引属性的写 ----
+    // 读侧 (cgen_expr_call_callee_member.inc) 已把 `SSTab1.TabCaption(0)` 改道成
+    // vb6_SSTab_GetTabCaption(hwnd, 0) —— 它既不是左值, 也不带 vb6_ComCall 前缀,
+    // 下面的 Pattern A 匹配不到。所以这里把 Get 换回对应的 Set, 原样带上实参。
+    // value 不加 comPack: RTL 的 Set 形参是 void* bstr / int32_t, 直接给原表达式
+    // (字符串侧此时已经是 vb6_BSTR_FromStr(...))。
+    {
+        static const char* kTsGet[2] = { "vb6_SSTab_GetTabCaption(", "vb6_SSTab_GetTabVisible(" };
+        static const char* kTsSet[2] = { "vb6_SSTab_SetTabCaption(", "vb6_SSTab_SetTabVisible(" };
+        for (int tsI = 0; tsI < 2; tsI++) {
+            std::string getPfx = kTsGet[tsI];
+            if (target.compare(0, getPfx.size(), getPfx) != 0) continue;
+            size_t tsOpen = target.find('(');
+            size_t tsClose = target.rfind(')');
+            if (tsOpen == std::string::npos || tsClose == std::string::npos
+                || tsClose < tsOpen) continue;
+            std::string tsArgs = target.substr(tsOpen + 1, tsClose - tsOpen - 1);
+            c_.emitLine(std::string(kTsSet[tsI]) + tsArgs + ", " + value
+                        + ");  /* SSTab indexed prop assignment */");
+            return true;
+        }
+    }
+
     // ---- Pattern A: vb6_ComCall(obj, L"Item", args, n) = value ----
     // vb6_ComCall 返回 VARIANT*, 不是左值. 改走 vb6_ComSetPropArg (内部
     // DISPATCH_PROPERTYPUT|PUTREF).

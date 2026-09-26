@@ -18,7 +18,11 @@ param(
     # 单条用例「运行」阶段的墙钟预算 (秒)。5s 在 -Jobs 20 的并行编译下会误杀: 4 vCPU runner 上
     # 被 cl/link 压住时, 健康的小 exe 也可能 >5s 才跑完 (实测卡住的进程只有 15ms CPU、线程 Ready)。
     # 真挂 (模态框/死锁) 靠这个上限兜底; 超时时会把 CPU 时间/状态/最后一行输出写进日志, 见下两处。
-    [int]$RunTimeoutSec = 60
+    [int]$RunTimeoutSec = 60,
+    # ai/030 T30-B(本地先行): 传了这个开关, 套件里每次**真实构建**才带 --incremental。
+    # 不传时 @IncArg 是空数组, 命令行逐字不变 (空数组 splat 的透明性单独验过: 输出与退出码都不动)。
+    # 默认路径 = 今天的默认路径。
+    [switch]$Incremental
 )
 
 $ErrorActionPreference = "SilentlyContinue"
@@ -31,6 +35,10 @@ $Tests = $PSScriptRoot
 # T0 拆分 (2026-09-20): 语法/冒烟用例 git mv 至 tests_github\t0_cases\, 跨目录引用同一份文件 (无副本)
 $GHTests = Join-Path $Tests "..\tests_github\t0_cases"
 $OutDir = if ($OutputDirectory) { $OutputDirectory } else { Join-Path $Root "output" }
+
+# ai/030 T30-B: 只有 -Incremental 时才有的实参; 见 param 处的说明。
+$IncArg = @()
+if ($Incremental) { $IncArg = @('--incremental') }
 # === 获取 MSVC 编译环境 (通用) ===
 # 设计原则: 不依赖 cmd.exe / vcvarsall 解析 (易因安全策略/编码/PATH 大小写失效),
 # 不硬编码 VS 版本 (2019/2022/2026 均可) 与 Windows SDK 版本号 (动态发现)。
@@ -184,7 +192,7 @@ function Test-Compile {
     $script:total++
     Write-Host -NoNewline "  [COMPILE] $Name ... "
     
-    $result = & $C3 $Source --output-dir $OutDir 2>&1
+    $result = & $C3 $Source --output-dir $OutDir @IncArg 2>&1
     $exitCode = $LASTEXITCODE
     
     if ($exitCode -eq 0) {
@@ -211,7 +219,8 @@ function Invoke-TestExe {
     param(
         [string]$ExePath,
         [string]$WorkDir,
-        [string]$Name
+        [string]$Name,
+        [hashtable]$EnvVars = @{}   # 显式注入子进程环境 (不依赖宿主进程级变量)
     )
 
     # 日志统一写入 output 目录: 使用 Open ... For Output 追加写入同一日志文件
@@ -231,6 +240,9 @@ function Invoke-TestExe {
         $psi.CreateNoWindow = $false
         $psi.RedirectStandardOutput = $true
         $psi.RedirectStandardError = $true
+        # P20-44: 显式注入子进程环境块 (RTL 的 GetEnvironmentVariableW 读的就是它)。
+        # 比只改宿主进程级变量可靠: 子进程的环境块在这里被直接写定。
+        foreach ($ek in $EnvVars.Keys) { $psi.EnvironmentVariables[$ek] = [string]$EnvVars[$ek] }
 
         $proc = [System.Diagnostics.Process]::Start($psi)
         $soTask = $proc.StandardOutput.ReadToEndAsync()
@@ -297,9 +309,9 @@ function Test-GuiVbp {
     $guiOut = Join-Path $OutDir $Name
     New-Item -ItemType Directory -Path $guiOut -Force | Out-Null
     if ($Arch) {
-        $compileResult = & $C3 $VbpFile --arch $Arch --output-dir $guiOut 2>&1
+        $compileResult = & $C3 $VbpFile --arch $Arch --output-dir $guiOut @IncArg 2>&1
     } else {
-        $compileResult = & $C3 $VbpFile --output-dir $guiOut 2>&1
+        $compileResult = & $C3 $VbpFile --output-dir $guiOut @IncArg 2>&1
     }
     if ($LASTEXITCODE -ne 0) {
         $script:fail++
@@ -384,9 +396,9 @@ function Test-Run {
     
     # 编译: 输入源文件, 经中间C代码 -> cl/link -> 生成目标 (默认输出到 output 目录)
     if ($Arch) {
-        $compileResult = & $C3 $Source --arch $Arch --output-dir $OutDir 2>&1
+        $compileResult = & $C3 $Source --arch $Arch --output-dir $OutDir @IncArg 2>&1
     } else {
-        $compileResult = & $C3 $Source --output-dir $OutDir 2>&1
+        $compileResult = & $C3 $Source --output-dir $OutDir @IncArg 2>&1
     }
     if ($LASTEXITCODE -ne 0) {
         $script:fail++
@@ -405,7 +417,22 @@ function Test-Run {
     }
     
     # 运行冒烟测试: 校验输出 (详见 smoke 用例; 若超时则按 SKIP 处理)
-    $run = Invoke-TestExe -ExePath $exePath -WorkDir $OutDir -Name $baseName
+    # 可选环境变量 (P20-44: frmevents 的 OLE 无头联测要 C3_OLEDDB_TEST=1 才驱动)
+    $savedEnv = @{}
+    $envMap = @{}
+    if ($Env) {
+        foreach ($kv in $Env.Split(';')) {
+            if (-not $kv) { continue }
+            $pp = $kv.Split('=', 2)
+            $envMap[$pp[0]] = $pp[1]
+            $savedEnv[$pp[0]] = [Environment]::GetEnvironmentVariable($pp[0])
+            [Environment]::SetEnvironmentVariable($pp[0], $pp[1])   # 兜底
+        }
+    }
+    $run = Invoke-TestExe -ExePath $exePath -WorkDir $OutDir -Name $baseName -EnvVars $envMap
+    foreach ($k in $savedEnv.Keys) {
+        [Environment]::SetEnvironmentVariable($k, $savedEnv[$k])
+    }
     if (-not $run.Ok) {
         $script:fail++
         Write-Host "FAIL (run error)" -ForegroundColor Red
@@ -474,12 +501,13 @@ function Invoke-BasSetParallel {
         New-Item -ItemType Directory -Path $workDir -Force | Out-Null
         $c3 = $using:C3
         $runTimeoutMs = $using:runTimeoutMs
+        $incArg = $using:IncArg   # ai/030 T30-B: runspace 里够不到脚本变量
         $p = 0; $f = 0; $details = @()
         foreach ($it in $shardItems) {
             if ($it.Arch) {
-                $cr = & $c3 $it.Source --arch $it.Arch --output-dir $workDir 2>&1
+                $cr = & $c3 $it.Source --arch $it.Arch --output-dir $workDir @IncArg 2>&1
             } else {
-                $cr = & $c3 $it.Source --output-dir $workDir 2>&1
+                $cr = & $c3 $it.Source --output-dir $workDir @IncArg 2>&1
             }
             $ec = $LASTEXITCODE
             if ($ec -ne 0) { $f++; $details += "$($it.Name): compile FAIL"; continue }
@@ -562,7 +590,8 @@ function Test-Vbp {
         [string]$VbpFile,
         [string[]]$ExpectedOutputs,
         [string]$Arch = "",           # 可选架构参数 (x86/x64)
-        [string]$RequiresCom = ""     # 依赖的 COM ProgId (未注册则 SKIP, 否则 FAIL)
+        [string]$RequiresCom = "",    # 依赖的 COM ProgId (未注册则 SKIP, 否则 FAIL)
+        [string]$Env = ""             # 可选环境变量, "K1=V1;K2=V2" (跑 exe 前设, 跑完还原)
     )
     $script:total++
     Write-Host -NoNewline "  [VBP] $Name ... "
@@ -577,9 +606,9 @@ function Test-Vbp {
 
     # 编译 VBP 工程: 输入 VBP 文件, 经 cl/link 生成可执行文件
     if ($Arch) {
-        $compileResult = & $C3 $VbpFile --arch $Arch --output-dir $OutDir 2>&1
+        $compileResult = & $C3 $VbpFile --arch $Arch --output-dir $OutDir @IncArg 2>&1
     } else {
-        $compileResult = & $C3 $VbpFile --output-dir $OutDir 2>&1
+        $compileResult = & $C3 $VbpFile --output-dir $OutDir @IncArg 2>&1
     }
     if ($LASTEXITCODE -ne 0) {
         $script:fail++
@@ -597,8 +626,20 @@ function Test-Vbp {
         return
     }
 
+    # 可选环境变量 "K1=V1;K2=V2" → 显式注入子进程环境块 (RTL 用 GetEnvironmentVariableW 读它)。
+    # ⚠ Test-Vbp 曾经声明了 $Env 却忘了往下传 ⇒ 调用点写的 -Env 被静默吞掉: frmevents 的
+    # OLE 无头联测 (C3_OLEDDB_TEST=1) 在 CI 上从不启用, 症状是 EV24/EV25 缺失 → FAIL
+    # (output mismatch)。这是脚本 bug, 不是编译器回归 —— 同一形态的判断先查这里。
+    $envMap = @{}
+    if ($Env) {
+        foreach ($kv in $Env.Split(';')) {
+            if (-not $kv) { continue }
+            $pp = $kv.Split('=', 2)
+            if ($pp.Count -eq 2) { $envMap[$pp[0]] = $pp[1] }
+        }
+    }
     # 编译失败则标记 FAIL (compile); 生成物缺失标记 FAIL (no exe)
-    $run = Invoke-TestExe -ExePath $exePath -WorkDir $OutDir -Name $baseName
+    $run = Invoke-TestExe -ExePath $exePath -WorkDir $OutDir -Name $baseName -EnvVars $envMap
     if (-not $run.Ok) {
         $script:fail++
         Write-Host "FAIL (run error)" -ForegroundColor Red
@@ -794,6 +835,28 @@ function Test-EmitcShape {
     }
 }
 
+# Test-EmitcShape 的反面：断 --emit-c 的输出里**没有**某些形状。用在 D6 那一类改动上
+# （"这一类控件不再走 OCX 晚绑定"）—— 只断"原生入口在"不够，残留的 OCX 形状会让两条路
+# 并存，读数目视上全绿、发码却还在 CoCreateInstance。
+function Test-EmitcAbsent {
+    param([string]$Name, [array]$Sources, [array]$Needles)
+    $script:total++
+    Write-Host -NoNewline "  [EMITC-ABSENT] $Name ... "
+    $argList = (($Sources | ForEach-Object { '"' + $_ + '"' }) -join ' ')
+    $out = & cmd /c ('"' + $C3 + '"' + ' ' + $argList + ' --emit-c 2>&1')
+    $code = $LASTEXITCODE
+    $raw = ($out | Out-String)
+    $hit = @($Needles | Where-Object { $raw.Contains($_) })
+    if ($code -eq 0 -and $hit.Count -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host ("  exit=" + $code + " 还在场: " + ($hit -join ' | ')) -ForegroundColor DarkGray
+        if ($Verbose) { Write-Host $raw }
+    }
+}
+
 function Test-SyntaxFail {
     param([string]$Name, [string]$Source, [string]$Needle)
     $script:total++
@@ -875,6 +938,90 @@ function Test-Syntax {
 # ai/023 S01: vbp-level negative case. The package hard checks run in driver stage 0
 # (before the pipeline), so --syntax-only is enough: compile must FAIL and the output
 # must contain the given ASCII needle.
+# ai/030 T30-A: 内容寻址 obj store 的判据。用例跑在自己的 store 里 (C3 的缓存根取自
+# %LOCALAPPDATA%，拿不到才退回 <outputDir>/.c3obj)，于是这几条能精确断、不受机器上历史
+# 缓存摆布：空 store 首编必全 miss、次编必全命中 (缓存真跨构建复用)、换 -O 2 之后 RTL 那一族
+# 仍是一格不多 (RTL 的编译档与用户 -O 解耦) 而用户码必须多占一格 (键确实跟着优化档走)、
+# 三臂产物跑起来 stdout 逐字相同 (命中不改产物 —— 这条才是"敢默认开"的前提)。
+# 本机实测：冷编 24.5 s / 全命中 2.9 s / 换 -O 2 6.5 s / 换架构 x86 24.6 s。
+function Test-ObjCache {
+    param([string]$Name, [string]$Source)
+    $script:total++
+    Write-Host -NoNewline "  [OBJCACHE] $Name ... "
+    $reasons = @()
+    $outs = @('', '', '')
+    $rtl = @('', '', ''); $usr = @('', '', '')
+    $stem = [System.IO.Path]::GetFileNameWithoutExtension($Source)
+
+    $sandbox = Join-Path $OutDir ("{0}_store" -f $Name)
+    if (Test-Path $sandbox) { Remove-Item -Recurse -Force $sandbox }
+    New-Item -ItemType Directory -Force -Path $sandbox | Out-Null
+    $ladSaved = $env:LOCALAPPDATA
+    $env:LOCALAPPDATA = $sandbox
+    try {
+        for ($i = 0; $i -lt 3; $i++) {
+            # NB: 别拿 @(@(), @(), @('-O','2')) 枚举三臂 —— PS 把里面的空数组压平, 三臂会
+            # 悄悄变成 "-O" / "2" / 无 (踩过)。
+            $extra = @()
+            if ($i -eq 2) { $extra = @('-O', '2') }
+            $dir = Join-Path $OutDir ("{0}_{1}" -f $Name, $i)
+            if (Test-Path $dir) { Remove-Item -Recurse -Force $dir }
+            New-Item -ItemType Directory -Force -Path $dir | Out-Null
+            $c3Args = @($Source, '--output-dir', $dir, '--incremental') + $extra
+            $log = (& $C3 @c3Args 2>&1) | Out-String
+            if ($LASTEXITCODE -ne 0) { $reasons += ("build{0} rc={1}" -f $i, $LASTEXITCODE); continue }
+            $m = [regex]::Match($log, 'OBJCACHE rtl=(\d+)/(\d+) user=(\d+)/(\d+)')
+            if (-not $m.Success) { $reasons += ("build{0} 没读到 OBJCACHE 读数" -f $i); continue }
+            $rtl[$i] = ('{0}/{1}' -f [int]$m.Groups[1].Value, [int]$m.Groups[2].Value)
+            $usr[$i] = ('{0}/{1}' -f [int]$m.Groups[3].Value, [int]$m.Groups[4].Value)
+            $exe = Join-Path $dir ($stem + '.exe')
+            if (-not (Test-Path $exe)) { $reasons += ("build{0} 无 exe" -f $i); continue }
+            $run = Invoke-TestExe -ExePath $exe -WorkDir $dir -Name ("{0}run{1}" -f $Name, $i)
+            if (-not $run.Ok) { $reasons += ("build{0} 跑失败 {1}" -f $i, $run.Detail); continue }
+            $outs[$i] = ($run.Output -join "`n")
+        }
+    } finally {
+        $env:LOCALAPPDATA = $ladSaved
+    }
+
+    # 每个源占几格: 键 = 去掉尾部 _<hex> 之后的源名。
+    $store = Join-Path (Join-Path $sandbox 'C3') 'objcache'
+    $nUser = -1; $nRtl = 0
+    if (Test-Path $store) {
+        $slots = @{}
+        foreach ($f in [System.IO.Directory]::GetFiles($store)) {
+            $mm = [regex]::Match([System.IO.Path]::GetFileName($f), '^(.+)_[0-9a-f]{8,}\.obj$')
+            if (-not $mm.Success) { continue }
+            $k = $mm.Groups[1].Value
+            if ($slots.ContainsKey($k)) { $slots[$k] = $slots[$k] + 1 } else { $slots[$k] = 1 }
+        }
+        foreach ($k in $slots.Keys) {
+            if ($k -eq $stem) { $nUser = $slots[$k] }
+            elseif ($k -like 'vb6rtl*') { if ($slots[$k] -gt $nRtl) { $nRtl = $slots[$k] } }
+        }
+    }
+    $a = @($rtl[0].Split('/'))
+
+    if ($reasons.Count -eq 0) {
+        if ($a.Count -ne 2 -or [int]$a[1] -le 0) { $reasons += 'RTL 计数读不到 (读数形状变了?)' }
+        elseif ([int]$a[0] -ne 0) { $reasons += ("空 store 第一次竟命中 {0}" -f $rtl[0]) }
+        elseif ($rtl[1] -ne ('{0}/{0}' -f $a[1])) { $reasons += ("第二次没全命中: {0}" -f $rtl[1]) }
+        elseif ($rtl[2] -ne $rtl[1]) { $reasons += ("-O 2 之后 RTL 变了: {0} (解耦破了)" -f $rtl[2]) }
+        elseif ([int](@($usr[2].Split('/'))[0]) -ne 0) { $reasons += ("-O 2 竟复用了 /O0 的用户码 obj: {0}" -f $usr[2]) }
+        elseif ($nRtl -ne 1) { $reasons += ("RTL 占了 {0} 格 (与用户 -O 无关, 该只 1 格)" -f $nRtl) }
+        elseif ($nUser -ne 2) { $reasons += ("用户码 {1}.c 占了 {0} 格 (该是 /O0 与 /O2 两格)" -f $nUser, $stem) }
+        elseif ($outs[0] -ne $outs[1] -or $outs[1] -ne $outs[2]) { $reasons += '三臂产物输出不一致 (命中改了产物)' }
+    }
+    if ($reasons.Count -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host ("FAIL: " + ($reasons -join ' | ')) -ForegroundColor Red
+        if ($Verbose) { Write-Host ("  rtl=" + ($rtl -join ' ') + " user=" + ($usr -join ' ')) }
+    }
+}
+
 function Test-VbpFail {
     param([string]$Name, [string]$VbpFile, [string]$Needle)
     $script:total++
@@ -1044,6 +1191,12 @@ if ($Category -in @("all", "run", "bas")) {
     Add-BasTest "test_udt_assign" "$Tests\test_udt_assign.bas" @("A1=1;S1=hello;N1=42", "A2=99;S2=world;N2=7", "H1=11;HS1=alpha", "E1=5;ES1=five", "L1=2;LS1=hello", "UDT-ASSIGN-DONE")
     Add-BasTest "test_date_display" "$Tests\test_date_display.bas" @("D1-noserial=Y", "D2-year=Y", "D2b-notime=Y", "D3-nextday=Y", "D4-nextyear=Y", "D5-diff0=Y", "D6-param=Y", "D7-longparam=Y", "D8-cstr=Y", "D9-format=Y", "DATE-DONE")
     Add-BasTest "test_variant" "$Tests\test_variant.bas" @("PASS1a", "PASS1c", "PASS5", "Done")
+    # ai/022 W1: Boolean 的类型可见性 + 装箱口径。32 条读数逐条钉: 转字符串的四条路
+    # (B1-B8)、类型标记 (B9-B14)、落进 Variant 的那一半 (B15-B20)、反向护栏 —— Integer /
+    # Long / Byte 的装箱读数一个都不许跟着动 (B21-B27)、判定语义 (B28-B29)、插值 (B30)、
+    # 裸值 Debug.Print (B31-B32)。
+    $boolNeedles = @("BOOL-DONE") + (1..30 | ForEach-Object { "B$_=Y" }) + @("B31-rawTrue", "B32-rawFalse")
+    Add-BasTest "test_bool_display" "$Tests\test_bool_display.bas" $boolNeedles
     Write-Host ""
 
         # --- P5.5 数据类型兼容性测试 ---
@@ -1128,6 +1281,7 @@ if ($Category -in @("all", "run", "bas")) {
     # parse, the new keywords stay soft, and the codegen path is still untouched.
     Add-BasTest "test_interface" "$Tests\test_interface.bas" @("ITF-SOFT:12", "ITF-1:OK", "ITF-2:OK", "INTERFACE-DONE")
     Add-BasTest "test_interface_x86" "$Tests\test_interface.bas" @("ITF-SOFT:12", "ITF-1:OK", "ITF-2:OK", "INTERFACE-DONE") -Arch "x86"
+    Add-BasTest "test_bool_display_x86" "$Tests\test_bool_display.bas" $boolNeedles -Arch "x86"
 
     # 分片: CI 用多 runner 并行跑 bas 用例时, 各 runner 只取第 BasShard 片
     if ($BasShardTotal -gt 1) {
@@ -1176,9 +1330,9 @@ function Test-VbpDll {
     Write-Host -NoNewline "  [VBP-DLL] $Name ... "
 
     if ($Arch) {
-        $out = & $C3 $VbpFile --arch $Arch --output-dir $OutDir --keep-for-debug 2>&1
+        $out = & $C3 $VbpFile --arch $Arch --output-dir $OutDir --keep-for-debug @IncArg 2>&1
     } else {
-        $out = & $C3 $VbpFile --output-dir $OutDir --keep-for-debug 2>&1
+        $out = & $C3 $VbpFile --output-dir $OutDir --keep-for-debug @IncArg 2>&1
     }
     $exitCode = $LASTEXITCODE
     $logText = (($out | Out-String) -replace '\s+', ' ')
@@ -1256,12 +1410,231 @@ if ($Category -in @("all", "run", "vbp")) {
     # `vb6_SetControlText(hwnd, (BSTR)ListCount)` 直接段错误), 且 List(j) 参与
     # 字符串相等比较要按 BSTR 处理 (RTL 声明是 void* → 曾判成 VariantObject, 比较恒假)。
     Test-Vbp "ctrlprop" "$Tests\ctrlprop\CtrlProp.vbp" @("CP1=2", "CP2=2", "CP3=1", "CP4=2", "CP5=2", "CTRLPROP-DONE")
+    # ai/029 C29-1a: 接上 Shape / Line 的"创建那一刀" —— 改之前 controlTypeToWin32Class 对
+    # 这两个类型返回 nullptr, 控件被当"不可见控件"跳过, 句柄永远是 NULL, 屏幕上什么都没有 (029 §二-2)。
+    # 21 条读数: 设计期几何落位 (CS1-CS4)、设计期整数属性落位 (CS5-CS7)、运行期读写回路 (CS8-CS10)、Line 改端点连窗口一起搬 (CS11-CS14)、手册那条"笔宽不是 1 就强制实线"的规则 (CS15-CS16)、容器 (Frame) 内的那条创建路 (CS17-CS19)、控件数组按槽位走 (CS20-CS21)。
+    # 窗体自己 Unload Me 退出 => 走 Test-Vbp 拿 stdout 针,
+    # 不需要 Test-GuiVbp 那套"起窗不崩"的弱判据。负控: 喂 BASE 二进制 14 条全翻红。
+    $csNeedles = @("CTRLSHAPE-DONE") + (1..21 | ForEach-Object { "CS$_=Y" })
+    Test-Vbp "ctrlshape" "$Tests\ctrlshape\CsApp.vbp" $csNeedles
+    Test-Vbp "ctrlshape_x86" "$Tests\ctrlshape\CsApp.vbp" $csNeedles -Arch "x86"
+    # ai/029 C29-1b: 文件系统三控件 (Drive/Dir/File ListBox) 接上"创建那一刀"。
+    # 改之前这三类在 controlTypeToWin32Class 里缺格 => 句柄永远 NULL, RTL 那套 P20-37
+    # 的填充 helper 从来没被喂过句柄; 而且这些 RTL 入口没有任何头声明, 生成代码按
+    # "返回 int" 的隐式原型编译, 字符串句柄被截成 32 位 (真编译真跑才暴露的段错误)。
+    # 14 条读数: 三控件都有窗口且填进去过 (CF1-CF3)、Dir 的 [名字] 约定 (CF4)、
+    # 设计期 Path/Pattern 落位 (CF5-CF7)、改 Pattern 立刻重刷 (CF8-CF9)、
+    # ListIndex/FileName 回路 (CF10-CF11)、目录->文件与盘->目录两条联动 (CF12-CF13)、
+    # 与原生 ListBox 的读数口径一致 (CF14)。负控: 喂 BASE 二进制 CF1-CF10/12/13 翻红。
+    $cfNeedles = @("CTRLFILES-DONE") + (1..14 | ForEach-Object { "CF$_=Y" })
+    Test-Vbp "ctrlfiles" "$Tests\ctrlfiles\CfApp.vbp" $cfNeedles
+    Test-Vbp "ctrlfiles_x86" "$Tests\ctrlfiles\CfApp.vbp" $cfNeedles -Arch "x86"
+    # ai/029 C29-9 / 决策 D6：CommonDialog 换成原生 comdlg32，不再经 MSComDlg.OCX。
+    # 为什么必须换（实测）：那个 OCX 只有 32 位，x64 里 CoCreateInstance 直接失败，于是改之前
+    # 这枚控件是静默空转的 —— 探针六条属性读数全空、六个 Show* 一个都不出现，而程序照旧打完
+    # 尾针、退出码 0。10 条读数：设计期四行落位（DL1-DL4）/ Filter 竖线原样读回（DL5）/
+    # 另一枚不被继承（DL6-DL7）/ 运行期读写回路（DL8）/ 两枚不串（DL9）/ 六个 Show* 的发码形状（DL10）。
+    # DL10 用恒假守卫把调用留在源码里：真弹框的判据要一套"起窗 + 自关"的探针（下一小批 C29-9b），
+    # 否则用例会在没人点"取消"的地方把门卡死。负控：喂 BASE 二进制直接编不过
+    # （C2065: vb6_hwnd_dl2 未声明 —— 那条路上压根没有属性宿主）。
+    $dlNeedles = @("CTRLDLG-DONE") + (1..10 | ForEach-Object { "DL$_=Y" })
+    Test-Vbp "ctrldlg" "$Tests\ctrldlg\DlApp.vbp" $dlNeedles
+    Test-Vbp "ctrldlg_x86" "$Tests\ctrldlg\DlApp.vbp" $dlNeedles -Arch "x86"
+    # 发码两面都要钉：原生入口在场，OCX 那一族形状不许还在场（D6：摘一类少一类）。
+    Test-EmitcShape "dl_emitc_shape" @("$Tests\ctrldlg\DlApp.vbp") @(
+        'vb6_RegisterCommDialogClass((void*)hInstance);',
+        '"VB6_COMMONDIALOG", "",',
+        'vb6_CdShowOpen((void*)vb6_hwnd_dl1);',
+        'vb6_CdShowFont((void*)vb6_hwnd_dl1);',
+        'vb6_CdSetFlags((void*)vb6_hwnd_dl1, 528);'
+    )
+    # 反面断言走新助手 Test-EmitcAbsent：只断原生入口在不够 —— 两条路并存时读数目视全绿、
+    # 发码却还在 CoCreateInstance，正是本批要拆掉的东西。
+    Test-EmitcAbsent "dl_emitc_no_ocx" @("$Tests\ctrldlg\DlApp.vbp") @(
+        'vb6_com_dl1',
+        'CLSIDFromProgID',
+        'CoCreateInstance'
+    )
+    # 通知接线这一刀没法在无头环境里真点一下, 所以断的是发码形状: 三条 WM_COMMAND 派发
+    # (含 Dir 下钻的前置判定) + 设计期 Path/Pattern 落到初值。少了任何一条, 控件就是
+    # "能显示、不联动" —— 而 CF12/CF13 是手工调 Sub 证明的, 不看这里就没人盯接线。
+    # ai/029 C29-T: VB.Timer 运行期真触发 + 精度提到 ms 级。
+    # 改之前的实测（029 §九 C29-T 那一格）：设计期 Enabled=0 的 Timer 压根不挂表，于是
+    # Timer1.Enabled = True 落到 vb6_SetTimerEnabled(vb6_hwnd_<timer>, ...) —— Timer 是无窗口
+    # 控件、句柄恒 NULL => SetPropW(NULL,...) 静默丢；Interval 改了也没人重排周期；精度只有
+    # SetTimer 那一档 ~15.6 ms 地板（Interval=20 实得 34.5 ms/tick、Interval=5 封顶 ~64/tick）。
+    # 现在 Enabled/Interval 真的起停与重排，底层走 winmm timeSetEvent（LoadLibrary 取，
+    # 不新增 import lib；取不到才退回 SetTimer）。读数是"秒级墙钟窗口里的 tick 数带区间"：
+    # 20 ms 名义 50 次，允许 [40,60]。负控（BASE 二进制）10 条全翻红且每条对上症状：
+    # T2=0 开不起来 / T3=32 改了不生效 / T5=16 关掉还在烧 / T6=32 精度地板。
+    $tmNeedles = @("TIMERPROG-DONE") + (1..10 | ForEach-Object { "T$_=Y" })
+    Test-Vbp "tmtimer" "$Tests\c29timer\TmApp.vbp" $tmNeedles
+    Test-Vbp "tmtimer_x86" "$Tests\c29timer\TmApp.vbp" $tmNeedles -Arch "x86"
+    # ai/030 T30-A: 内容寻址 obj store —— 命中/解耦/不改产物三条一起断 (用例自带隔离 store)
+    Test-ObjCache "objcache" "$Tests\hello.bas"
+    Test-EmitcShape "cf_emitc_shape" @("$Tests\ctrlfiles\CfApp.vbp") @(
+        'extern void vb6_drvList_Change(); vb6_drvList_Change();',
+        'extern void vb6_dirList_Change(); vb6_dirList_Change();',
+        'extern void vb6_fileList_Click(); vb6_fileList_Click();',
+        'if (vb6_DirListBoxDescendSelected((void*)vb6_hwnd_dirList)) {',
+        'vb6_DirListBoxSetPath((void*)vb6_hwnd_dirList, vb6_BSTR_FromStr(L"C:\\Windows\\System32"));',
+        'vb6_FileListBoxSetPattern((void*)vb6_hwnd_fileList, vb6_BSTR_FromStr(L"*.dll"));'
+    )
+    # ai/029 C29-8a: TreeView 的标量属性面换原生 SysTreeView32（D6：不碰 MSCOMCTL.OCX）。
+    # 改之前的实测（029 §九 前置测量）：这枚控件**窗口本来就建得出来**（controlTypeToWin32Class
+    # 早就有格，几何读数对），缺的是属性面 —— cgen 读写表里 TreeView 零格，属性一律落到
+    # "未知属性"的通用兜底 vb6_ComGetObjectProp(裸 HWND, "…")，于是 tv1.CheckBoxes 读回空串、
+    # 写进去静默丢，而 .frm 里的 CheckBoxes/LineStyle/Indentation 一个字节都不发。
+    # 12 条读数：设计期五值落位（TV1-TV5）/ 没写过就是 VB6 默认（TV6）/ 默认缩进是从真窗口
+    # 问出来的（TV7，句柄为空只会读到 0）/ 运行期赋值 + 反向可逆（TV8-TV9）/
+    # Indentation 的缇值往返与超界（TV10-TV11）/ 通用属性面没被抢走（TV12）。
+    # 负控：把 tv1 的五行设计期值整体取反（CheckBoxes/HotTracking 0、LineStyle 0、
+    # Indentation 500、HideSelection -1）后 TV1-TV5 全翻 N，而 tv2 那七条纹丝不动 ——
+    # 读数问的是那五个值，不是一句常绿。
+    $tvNeedles = @("TREEVIEW-DONE") + (1..12 | ForEach-Object { "TV$_=Y" })
+    Test-Vbp "ctrltreeview" "$Tests\ctrltreeview\TvfApp.vbp" $tvNeedles
+    Test-Vbp "ctrltreeview_x86" "$Tests\ctrltreeview\TvfApp.vbp" $tvNeedles -Arch "x86"
+    # 发码面两面都钉：设计期 Init 逐参数钉（含 -999 那条哨兵：VB6 的 True 就是 -1，
+    # 用 -1 当"未写"等于设计期永远勾不上复选框），创建样式位钉 TVS_HASLINES|WS_BORDER，
+    # 反面断这枚控件的属性不许再走 COM 兜底、工程里不许再出现 CoCreateInstance。
+    Test-EmitcShape "tv_emitc_shape" @("$Tests\ctrltreeview\TvfApp.vbp") @(
+        'vb6_TreeView_Init((void*)vb6_hwnd_tv1, 1, 300, -1, -1, 0);',
+        'vb6_TreeView_Init((void*)vb6_hwnd_tv2, -999, -999, -999, -999, -999);',
+        '1417674754L, 0L,'
+    )
+    Test-EmitcAbsent "tv_emitc_no_com_fallback" @("$Tests\ctrltreeview\TvfApp.vbp") @(
+        'vb6_ComGetObjectProp(vb6_hwnd_tv1',
+        'CoCreateInstance'
+    )
+    # ai/029 C29-5a: Toolbar 换成原生 ToolbarWindow32（D6：不碰 MSCOMCTL.OCX）。
+    # 改之前这枚控件**连窗口都没有**：controlTypeToWin32Class 缺格，而且被"ImageList || Toolbar
+    # 走 CoCreateInstance"那一组扣住 (直接 continue) => vb6_hwnd_tb1 压根不声明 —— 实测读一个
+    # tb1.Visible 就是 `C2065: vb6_hwnd_tb1 未声明的标识符`，整件工程编不过。12 条读数：
+    # 设计期三条按钮进了控件 (TB1，问的是原生 TB_BUTTONCOUNT 不是我那张表)、没写的不被继承 (TB2)、
+    # 矩形按 .frm (TB3-TB4，证 CCS_NORESIZE|CCS_NOPARENTALIGN 那两位)、标量属性设计期与默认
+    # (TB5-TB7)、运行期可逆赋值 (TB8-TB9)、两枚不串 (TB10)、通用属性面 (TB11-TB12)。
+    # Visible 刻意不问: 无头跑里父窗从未 ShowWindow，任何子窗口的 Visible 读数都是假 (TreeView 那
+    # 条 TV1 同因)，换成与父窗无关的 Enabled 才问得出东西。
+    # 路上量到两条 v6 主题的坑，都写进了 RTL 注释: TB_RESET 之后 TB_ADDBUTTONSW 会返回 TRUE
+    # 却一个按钮都不加 (所以只 append/insert)；C3 的产物嵌了 Common-Controls 6.0 的 manifest，
+    # v6 工具栏**没被告知结构体尺寸就静默吞按钮** (不嵌 manifest 的独立 C 探针在 v5 下是好的)
+    # => 发按钮前先 TB_BUTTONSTRUCTSIZE。
+    $tbNeedles = @("CTRLTOOLBAR-DONE") + (1..12 | ForEach-Object { "TB$_=Y" })
+    Test-Vbp "ctrltoolbar" "$Tests\ctrltoolbar\TbApp.vbp" $tbNeedles
+    Test-Vbp "ctrltoolbar_x86" "$Tests\ctrltoolbar\TbApp.vbp" $tbNeedles -Arch "x86"
+    # 发码面: 设计期四条逐参数钉 (含 -999 哨兵那条没写过的控件)、创建样式那个常量、
+    # 反面断这枚控件不再走 vb6_com_ 槽 / CoCreateInstance / Buttons 的 COM 兜底。
+    Test-EmitcShape "tb_emitc_shape" @("$Tests\ctrltoolbar\TbApp.vbp") @(
+        'vb6_Toolbar_Init((void*)vb6_hwnd_tb1, -999, 1, -999, 2);',
+        'vb6_Toolbar_Init((void*)vb6_hwnd_tb2, -999, -999, -999, -999);',
+        'vb6_Toolbar_AddButton((void*)vb6_hwnd_tb1, 2, NULL, L"", 3, -1, NULL, 8);',
+        '1409288460L, 0L,'
+    )
+    Test-EmitcAbsent "tb_emitc_no_ocx" @("$Tests\ctrltoolbar\TbApp.vbp") @(
+        'vb6_com_tb1',
+        'CoCreateInstance',
+        'vb6_ComGetObjectProp(vb6_hwnd_tb1, L"Buttons")'
+    )
     # ai/028 V1 的另两个 R4 落点: 模块头 Attribute 的值与 CreateObject 的工程内 ProgID
     # 都写成反引号串 —— 前者折错则模块名对不上 .vbp, 后者折错则没有改写、运行期变查注册表。
     $rsProjNeedles = @("RP1=OK", "RP2=OK", "RP3=OK", "RP4=OK", "RP5=OK", "RP-DONE")
     Test-Vbp "rawstr_proj" "$Tests\rawstr_proj\RsApp.vbp" $rsProjNeedles
     Test-Vbp "rawstr_proj_x86" "$Tests\rawstr_proj\RsApp.vbp" $rsProjNeedles -Arch "x86"
 
+
+    # P20-38: ProgressBar 复刻 (msctls_progress32, 不加载 mscomctl.ocx)。
+    # PB11 盯 SetPropW 存 0 被当成"未设置"回落默认值的坑。
+    # P20-43 修正: 期望串必须与夹具 Debug.Print 的**完整标签**逐字一致
+    # (此前登记成缩写 "PB1=100", 夹具打的是 "PB1-MAX=100" -> GA 报 output mismatch,
+    #  内容其实全对 —— 纯粹是注册表与夹具漂移)。
+    Test-Vbp "ctrlprogress" "$Tests\ctrlprogress\CtrlProgress.vbp" @(
+        "PB1-MAX=100", "PB2-MIN=0", "PB3-VALUE=0", "PB4-SCROLLSTD=1",
+        "PB5-ORIENTH=0", "PB6-SET40=40", "PB7-MAX200=200", "PB8-D2MAX=10",
+        "PB9-D2MIN=-10", "PB10-D2ORI=1", "PB11-D2SCR=0", "CTRLPROGRESS-DONE")
+
+    # P20-39: ImageList 复刻 (comctl32 ImageList_* API, 不加载 mscomctl.ocx)。
+    # 图片三路来源: ①设计期 .frx 裸 DIB ②运行期 LoadPicture (VB6 StdPicture = 活着的
+    # IPicture) ③Remove/Clear 对混插集合的 key 表搬动。`ListImages("Key")` 按 Key 取项
+    # 也在这里 (Item 实参是宽字符串不是下标)。
+    # IL1~IL3 盯 .frx 记录布局: 16B GUID + magic + imgSize 必须让 readPicture 读到 808,
+    # GUID 少写一个字节就会整条记录后移、静默丢掉两张图 (不报任何错)。
+    # 三张 .bmp 是**运行期**由 LoadPicture 从 App.Path 读的, 必须拷进 $OutDir。
+    Copy-Item "$Tests\ctrlimagelist\*.bmp" $OutDir -Force
+    Test-Vbp "ctrlimagelist" "$Tests\ctrlimagelist\CtrlImageList.vbp" @(
+        "IL1-DTCOUNT=2", "IL2-DTKEY1=dt1", "IL3-DTKEY2=dt2", "IL4-ADDRT=3",
+        "IL5-COUNT=3", "IL6-AFTERRM=2", "IL7-KEY1=dt2", "IL8-AFTERRM2=1",
+        "IL9-KEY1=rt", "IL10-COUNT=2", "IL11-KEY1=first", "IL12-BYKEY=first",
+        "IL13-BYKEYIDX=1", "IL14-W=16", "IL15-SETW=32", "IL16-H=16",
+        "IL17-AFTERCLR=0", "CTRLIMAGELIST-DONE")
+    # C29-3 顺手补的覆盖: 这条以前**从来没有 x86 版本**。而 C29-3 撞出来的那个越界写
+    # 恰恰只在 x86 暴露 (sizeof(vb6_VARIANT)=24 vs Windows VARIANT=16 → 写坏堆),
+    # x64 因为两个尺寸恰好相等而"绿得可疑"。控件类的判据必须双架构。
+    Test-Vbp "ctrlimagelist_x86" "$Tests\ctrlimagelist\CtrlImageList.vbp" @(
+        "IL1-DTCOUNT=2", "IL2-DTKEY1=dt1", "IL3-DTKEY2=dt2", "IL4-ADDRT=3",
+        "IL5-COUNT=3", "IL6-AFTERRM=2", "IL7-KEY1=dt2", "IL8-AFTERRM2=1",
+        "IL9-KEY1=rt", "IL10-COUNT=2", "IL11-KEY1=first", "IL12-BYKEY=first",
+        "IL13-BYKEYIDX=1", "IL14-W=16", "IL15-SETW=32", "IL16-H=16",
+        "IL17-AFTERCLR=0", "CTRLIMAGELIST-DONE") -Arch "x86"
+
+    # --- ai/029 C29-3: 控件"成员对象"机制立样 (ImageList 的 ListImages / ListImage) ---
+    # 四条验收 (计划书原文): ① Set img = ListImages.Add(, "Open", LoadPicture(..))
+    # ② img.Key ③ ListImages.Count ④ For Each。
+    # 口径 = 计划书 D1: 集合与成员对象都是**真 IDispatch** (vb6forms_memberobj.c),
+    # 所以 `As Object` 的晚绑定吃的是同一个对象 (MO4 专测这条), `For Each` 由
+    # _NewEnum 走标准 IEnumVARIANT。老写法 `n = .Add(..)` 仍按 VB6 取默认属性 Index
+    # (Let 侧 memObjLetScalar_ 转换) —— 旧夹具 ctrlimagelist 的 IL4/IL10 盯这条。
+    # 三张 bmp 复用 ctrlimagelist 那批 (上面已 Copy-Item 进 $OutDir)。
+    $c29imgExpected = @(
+        "MO1-ADD-KEY=Open", "MO2-ADD-IDX=1", "MO3-COUNT=1",
+        "MO4-KEY2=Close", "MO5-COUNT=2", "MO6-ITEM1-KEY=Open",
+        "MO7-ITEMKEY-IDX=2", "MO8-FOREACH=Open,Close,",
+        "MO9-AFTERRM=1", "MO10-FOREACH2=Close,", "MO11-AFTERCLEAR=0")
+    Test-Vbp "c29imgobj" "$Tests\c29imagelistobj\C29ImgObj.vbp" $c29imgExpected
+    Test-Vbp "c29imgobj_x86" "$Tests\c29imagelistobj\C29ImgObj.vbp" $c29imgExpected -Arch "x86"
+
+    # --- ai/029 C29-4: StatusBar 事件面 (PanelClick/PanelDblClick) ---
+    # 数据面 P20-40 已有 ctrlstatusbar 42 条; 这里盯事件: SimClick 是判据专用方法
+    # (RTL 程序化发真 WM_NOTIFY, 走完整派发链), handler 内真读/真写 Panel 对象成员。
+    $c29sbevtExpected = @(
+        "SB1-COUNT=3",
+        "EVT1-CLICK-INDEX=1", "EVT2-CLICK-TEXT=one", "EVT3-CLICK-KEY=p1", "EVT4-CLICK-AFTER=one!",
+        "EVT1-CLICK-INDEX=3", "EVT2-CLICK-TEXT=three", "EVT3-CLICK-KEY=p3", "EVT4-CLICK-AFTER=three!",
+        "EVT5-DBL-INDEX=2")
+    Test-Vbp "c29sbevt" "$Tests\c29statusbarevt\SbEvent.vbp" $c29sbevtExpected
+    Test-Vbp "c29sbevt_x86" "$Tests\c29statusbarevt\SbEvent.vbp" $c29sbevtExpected -Arch "x86"
+
+
+    # --- ai/029 C29-7: ListView (数据面 + 事件面) ---
+    # 数据面: ColumnHeaders.Add (标题) / ListItems.Add (数据) / SubItems(i) **1 基, 1 就是
+    # 第 2 列** / 两个集合的 Count 与 For Each / 按 Key 与按下标取项 / 成员属性读写 /
+    # ListView 自身的 View(3=报表) 与 GridLines。
+    # 口径: 集合与成员对象都走 C29-3 立起来的**真 IDispatch** (vb6forms_memberobj.c),
+    # 所以 `Set itm = .ListItems.Add(..)` 之后 itm.Text / itm.SubItems(1) / itm.Selected
+    # 全走晚绑定; ListView 是**真窗口**, owner 是 vb6_hwnd_X (ImageList 那族是 vb6_com_X)。
+    $c29lvExpected = @(
+        "LV1-COL-KEY=c1", "LV2-COL-TEXT=姓名", "LV3-COL-IDX=1", "LV4-COLWIDTH=1200",
+        "LV5-COLCOUNT=2", "LV6-ITEM-KEY=r1", "LV7-ITEM-TEXT=张三", "LV8-ITEM-IDX=1",
+        "LV9-SUB1=销售部", "LV10-ITEMCOUNT=2", "LV11-FOREACH=张三/销售部,李四/技术部,",
+        "LV12-COLS=姓名,部门,", "LV13-VIEW=3", "LV14-GRID=1", "LV15-BYKEY=李四",
+        "LV16-ITEM1=张三", "LV17-SEL=-1", "LV18-COLW=900", "LV19-AFTERRM=1",
+        "LV20-AFTERCLEAR=0")
+    Test-Vbp "c29listview" "$Tests\c29listview\C29ListView.vbp" $c29lvExpected
+    Test-Vbp "c29listview_x86" "$Tests\c29listview\C29ListView.vbp" $c29lvExpected -Arch "x86"
+    # 事件接线: 无头环境点不了鼠标 (生成代码里 LV21/LV22 只有真点击才会打),
+    # 但"WM_NOTIFY 分支 → OnNotify 换算 → 取成员对象 → 回调"这条链必须在**生成代码里
+    # 看得见** —— 少了任何一环都是"接线了却没生效", 而运行期完全静默。
+    Test-EmitcShape "lv_emitc_events" @("$Tests\c29listview\C29ListView.vbp") @(
+        "pNM42->code == -114",
+        "vb6_ListView_OnNotify((void*)vb6_hwnd_ListView1, -114",
+        "vb6_ListView_ListItemAt((void*)vb6_hwnd_ListView1",
+        "pNM42->code == -108",
+        "vb6_ListView_OnNotify((void*)vb6_hwnd_ListView1, -108",
+        "vb6_ListView_ColumnHeaderAt((void*)vb6_hwnd_ListView1",
+        "_ItemClick(vb6_lvItem7)", "_ColumnClick(vb6_lvHdr7)")
+        # C29-4: 事件回调改**传值** (ByVal 对象语义)。旧形状传 &obj 是 void**, 与
+        # handler 形参 void* 不符 —— 成员读拿"指针的地址"当 IDispatch, 必然 not found。
+        # StatusBar 的 WM_NOTIFY 派发形状由 c29sbevt (SbEvent.vbp, 真有 StatusBar) 覆盖 ——
+        # 本 ListView 夹具没有 StatusBar, 在此断言恒缺 (曾误挂于此致 GA vbp 红)。
 
     # Fix 195: .frx 三种 blob 的真实布局 —— 字符串 (Text) / 字符串表 (List) /
     # 整数表 (ItemData)。旧 readIntList 按"每项 2B 整数"读 ItemData, 读到的是
@@ -1270,6 +1643,94 @@ if ($Category -in @("all", "run", "vbp")) {
     Test-Vbp "frxdata" "$Tests\frxdata\FrxData.vbp" @(
         "FD1=alpha|beta", "FD2=3", "FD3=1234", "FD4=5", "FD5=300", "FD6=-7",
         "FD7=OK", "FRXDATA-DONE")
+
+    # P20-40: StatusBar 复刻 (msctls_status32, 不加载 mscomctl.ocx)。
+    # comctl32 v5.82 / v6 都不注册 msctls_status32, 连 dwICC=0xFFFFFFFF 全开也补不上,
+    # 所以 RTL 自己注册一个同名真窗口类 (见 vb6_StatusBar_RegisterClass)。
+    # SB8/SB15 盯 sbrNum 面板的设计期 Text 不能被"系统自动显示"覆盖 (text / shown 两个字段);
+    # SB29/SB31 盯 Panels.Add 插到中间时 memmove 留下的悬垂副本 (双重释放 → ClearPanels 崩)。
+    # P20-43 修正: 同 ctrlprogress —— 期望串与夹具完整标签逐字一致。
+    # SB0 是已知局限 (vb6_GetControlHwnd 直返入参, Me.hwnd 在 Debug.Print 里为空),
+    # SB34-LASTKEY= 为空是对的 (第 3 格是没给 Key 的时间面板)。
+    Test-Vbp "ctrlstatusbar" "$Tests\ctrlstatusbar\CtrlStatusBar.vbp" @(
+        "SB0-HWND= CAP=CtrlStatusBar CL=", "SB1-COUNT=3", "SB2-KEY1=pr",
+        "SB3-TEXT1=Ready", "SB4-STYLE1=0", "SB5-AUTOSZ1=1", "SB6-MINW1=40",
+        "SB7-KEY2=tp", "SB8-TEXT2=Tip", "SB9-STYLE2=2", "SB10-W2=120",
+        "SB11-AUTOSZ2=0", "SB12-TIP2=NumLock state", "SB13-STYLE3=5",
+        "SB14-IDXBYKEY=2", "SB15-TEXTBYKEY=Tip", "SB16-ALIGN=2", "SB17-STYLE=0",
+        "SB18-SIMPLE2=Simple text here", "SB19-SIMPLE2B=Changed", "SB20-STYLE2B=0",
+        "SB21-SETTEXT=Busy", "SB22-ADDIDX=4", "SB23-COUNT2=4", "SB24-NEWKEY=extra",
+        "SB25-NEWTEXT=Extra", "SB26-INSERT=2", "SB27-COUNT3=5", "SB28-IDXP2=ins",
+        "SB29-IDXP3=tp", "SB30-AFTERRM=4", "SB31-P2KEY=tp", "SB32-COUNT4=4",
+        "SB33-AFTERRM2=3", "SB34-LASTKEY=", "SB35-SETMINW=77", "SB36-SETW=123",
+        "SB37-SETAUTOSZ=0", "SB38-SETTIP=hello", "SB39-SETSTYLE=6",
+        "SB40-AFTERCLR=0", "CTRLSTATUSBAR-DONE")
+
+    # --- P20-42: SSTab (SysTabControl32 复刻) ---
+    # 期望串取自夹具真实输出 (别缩写标签)。TS25..TS28 是切页显隐: vb6_GetControlVisible
+    # 走 IsWindowVisible 沿父链传播, 所以断言放在 Timer 里 (窗体已显示之后)。
+    # TS30 是 Click(PreviousTab), 由 RTL 在程序化改 Tab 时补发的 TCN_SELCHANGE 触发。
+    Test-Vbp "ctrlsstab" "$Tests\ctrlsstab\CtrlSSTab.vbp" @(
+        "TS1-TABS=3", "TS2-TAB=1", "TS3-ORIENT=0", "TS4-STYLE=0", "TS5-PERROW=3",
+        "TS6-WRAP=0", "TS7-SET0=0", "TS8-SET2=2", "TS9-OOR=2", "TS10-ORIENT=1",
+        "TS11-STYLE=1", "TS12-PERROW=4", "TS13-WRAP=-1", "TS14-TABS5=5",
+        "TS15-TABAFTERGROW=2", "TS16-TABS2=2", "TS17-TABAFTERSHRINK=1",
+        "TS18-CAP0=常规", "TS19-CAP0B=改过", "TS20-VIS1=-1", "TS21-VIS1B=0",
+        "TS22-P0LEFT=240", "TS23-P1LEFT=240", "TS24-P2LEFT=240",
+        "TS25-TABVIS=-1", "TS26-AT0-P0VIS=-1 P1VIS=0 P2VIS=0",
+        "TS27-AT1-P0VIS=0 P1VIS=-1 P2VIS=0", "TS28-AT2-P0VIS=0 P1VIS=0 P2VIS=-1",
+        "TS29-SETTAB2=2", "TS29B-SETTAB0=0",
+        "CTRLSSTAB-DONE", "CTRLSSTAB-VISDONE", "CTRLSSTAB-CLICKDONE")
+
+    # --- P20-43/44: 窗体事件面 + OLE 拖放 (目标侧 Drop + 源侧 OLEDrag) ---
+    # **要 -Env**: OLE 的那几条断言靠 C3_OLEDDB_TEST=1 驱动 —— 无头环境没法真拖
+    # (DoDragDrop 要真实鼠标键状态), RTL 在该变量下改走"直接 fire IDropTarget 方法 /
+    # 只跑源事件链"的联测路径。EV24 的 X 坐标随屏幕布局变, 所以只断言到 EFF=1。
+    Test-Vbp "frmevents" "$Tests\frmevents\FrmEvents.vbp" @(
+        "EV01-INIT", "EV02-LOAD", "EV03-RESIZE", "EV04-ACTIVATE", "EV05-PAINT",
+        "EV06-GOTFOCUS", "EV19-TIMER-FIRED", "EV20-LOOPDONE", "EV21-QUERYUNLOAD",
+        "EV22-UNLOAD", "EV23-TERMINATE",
+        "EV24-OLE-DROP=OLE-TEST-DROP EFF=1", "EV25-OLE-OVER",
+        "EV26-DRAG-DONE", "EV27-STARTDRAG", "EV29-COMPLETE=3") -Env "C3_OLEDDB_TEST=1"
+
+    # --- P20-46: 控件字符串全程 W / 支持多国语言（用户要求）的源码面反例断言 ---
+    # 判据两条:
+    #   ① RTL 源码里不得**直接调 A 版 Win32 API** —— 编译已带 /DUNICODE /D_UNICODE /utf-8
+    #      (msvc_driver.cpp:172), 但不带后缀的宏与 A 版调用仍可能混进来。
+    #      `src/rtl/core/di/` 下的 **DI 桩除外**: 那是用户 `Declare ... Alias "xxxA"` 时
+    #      C3 提供的转发桩, 本来就该给 A 版。
+    #   ② 字体 charset 必须是 DEFAULT_CHARSET —— 写死 GB2312_CHARSET 之类会让系统在字体里
+    #      找不到韩文/俄文字形, 显示成方框 (Fix 190 的教训)。
+    $script:total++
+    Write-Host -NoNewline "  [SRC] widechar_only ... "
+    $rtlRoot = Join-Path (Split-Path $PSScriptRoot -Parent) "src\rtl\core"
+    $ansiBad = @()
+    if (Test-Path $rtlRoot) {
+        # 递归取文件再 Select-String —— `-Path '...\*\*.c'` 这种通配是匹配不到文件的,
+        # 那会让断言永远 PASS (假绿)。这里两向都验过: 不过滤 di/ 时必须命中。
+        $rtlFiles = Get-ChildItem -Path $rtlRoot -Recurse -File -Include *.c, *.cpp -ErrorAction SilentlyContinue |
+                    Where-Object { $_.FullName -notmatch '\\di\\' }
+        if ($rtlFiles) {
+            # 用 @() 强制数组: Select-String 只命中 1 条时返回标量, 直接 `$x += ...` 会
+            # "MatchInfo 没有 op_Addition" 而抛异常 (断言崩掉而不是判红) —— 两向验证抓到过。
+            $ansiBad = @(Select-String -Path $rtlFiles.FullName -ErrorAction SilentlyContinue `
+                -Pattern '\b(SendMessageA|PostMessageA|CreateWindowExA|RegisterClassA|DefWindowProcA|CallWindowProcA|GetWindowTextA|SetWindowTextA|GetClassNameA|DrawTextA|CreateFontA|LoadCursorA|LoadIconA)\s*\(' |
+                Where-Object { $_.Line -notmatch '^\s*(//|\*)' })
+            $ansiBad += @(Select-String -Path $rtlFiles.FullName -ErrorAction SilentlyContinue `
+                -Pattern '(GB2312_CHARSET|SHIFTJIS_CHARSET|HANGEUL_CHARSET|CHINESEBIG5_CHARSET)' |
+                Where-Object { $_.Line -notmatch '^\s*(//|\*)' })
+        }
+    }
+    if ($ansiBad.Count -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL (ANSI/非默认 charset 残留)" -ForegroundColor Red
+        $ansiBad | Select-Object -First 5 | ForEach-Object {
+            Write-Host ("    " + $_.Filename + ":" + $_.LineNumber + "  " + $_.Line.Trim()) -ForegroundColor Red
+        }
+    }
 
     # --- Fix 195: 资源引用缺失不得静默, 且 --extract-frx 能把 .frx 取值导成 VB 代码 ---
     # 背景: VB6 把多行文本/图片甩进同名 .frx, .frm 里只留 `属性 = "X.frx":含偏移`。
@@ -1322,7 +1783,7 @@ if ($Category -in @("all", "run", "vbp")) {
     $script:total++
     Write-Host -NoNewline "  [VBP] nonascii_path ... "
     $cnOut = Join-Path $cnDir "out"
-    $cnCompile = & $C3 (Join-Path $cnDir "FrxData.vbp") --output-dir $cnOut 2>&1
+    $cnCompile = & $C3 (Join-Path $cnDir "FrxData.vbp") --output-dir $cnOut @IncArg 2>&1
     $cnExe = Join-Path $cnOut "FrxData.exe"
     if ($LASTEXITCODE -ne 0 -or -not (Test-Path $cnExe)) {
         $script:fail++
@@ -1654,6 +2115,21 @@ if ($Category -in @("all", "run", "vbp")) {
     Test-CnConsoleOutput "cc_cn_console_x86" $cnSample $cnNeedles "x86"
     Test-CnRedirectOutput "cc_cn_redirect_gbk" $cnSample 936
     Test-Vbp "test_vbman" "$Tests\test_vbman\test_vbman.vbp" @("P24-04a:OK", "P24-04b:OK", "P24-04:2/2") -Arch "x86" -RequiresCom "VBMANLIB.cVBMAN"
+    # ai/029 C29-9b: 这两条放在**整组最后**。它们会多开两个窗体 + 真模态对话框，而
+    # frmevents 的拖放点是**按窗口位置现算**的 —— 实测每次启动级联偏移约 26 px
+    # (单跑 X=-40；把我的探针用例跑在它前面 → -118；连跑三次 → -144/-170/-196)。
+    # 偏移累积到 GA 的桌面几何上就足以让拖放落不进目标窗 ⇒ EV24/EV25 整条不出现。
+    # 跑在最后 = 我引入的偏移不再影响任何用例。测试本体的脆弱点(没把窗口位置钉住)
+    # 不在本批范围，已记进 029 §九 C29-9b 那一格。
+    # ai/029 C29-9b：上面那两条**不弹框**（恒假守卫），真弹框由这两条补 —— 环境变量
+    # C3_CDPROBE=1 才走弹框那条路（夹具里 `If Environ("C3_CDPROBE")="1"`），RTL 侧的一次性
+    # 线程只认本线程创建的 #32770，发 WM_COMMAND/IDCANCEL 等价于"用户点了取消"。于是
+    # DL11(取消报 32755) / DL12(取消不改进数) / DL13(模态循环真跑过 ≥30ms) / DL14
+    # (CancelError=False 时静默返回) 四条能断。不设 env 时这四行根本不打印，上面那 10 条
+    # 的形状逐字不变 —— 卡死风险也只在这两条里，而它们由 -RunTimeoutSec 兜底。
+    $dlProbeNeedles = @("CTRLDLG-DONE") + (1..14 | ForEach-Object { "DL$_=Y" })
+    Test-Vbp "ctrldlg_probe" "$Tests\ctrldlg\DlApp.vbp" $dlProbeNeedles -Env "C3_CDPROBE=1"
+    Test-Vbp "ctrldlg_probe_x86" "$Tests\ctrldlg\DlApp.vbp" $dlProbeNeedles -Env "C3_CDPROBE=1" -Arch "x86"
     $vbpSw.Stop()
     Write-Host "  (vbp/gui tests took $([Math]::Round($vbpSw.Elapsed.TotalSeconds))s)"
     Write-Host ""

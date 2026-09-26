@@ -1,0 +1,6 @@
+Type=Exe
+Form=SbEvent.frm
+IconForm="Form1"
+Startup="Form1"
+ExeName32="SbEvent.exe"
+LinkIncremental=0

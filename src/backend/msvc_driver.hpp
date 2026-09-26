@@ -30,15 +30,25 @@ struct MsvcDriverOptions {
     bool entryIsMain = false;
     std::string typelibResFile;              // P6.13: .res file path (compiled resource)
     std::string versionInfoResFile;          // P23-05: VS_VERSION_INFO .res file path
+    std::string manifestResFile;             // 应用清单的 rc.exe 产物 (.res), 交给链接器
+                                             // —— 只是找不到 mt.exe 时的退路 (见下)。
+    std::string manifestXmlFile;             // 应用清单 XML 的**原文路径**: 链接成功后由
+                                             // driver 用 mt.exe 注入 `#1`。首选这条路,
+                                             // 因为 rc.exe 那份对 RT_MANIFEST yield 出
+                                             // type=88 而不是 24, 激活不了 comctl32 v6。
+                                             // 两者都不做旁挂 <exe>.manifest —— 后者会被
+                                             // 签名/复制/分发流程丢掉, 且改 exe 不触发重编。
     std::string userResFile;                // P23-03: User-specified .res file (from VBP ResFile=)
     std::string objDir;                      // P11.2: .obj intermediate directory
     std::string srcDir;                      // P11.2: generated .c/.h directory (/I include path)
     std::string arch = "x64";               // DualArch: x64 or x86 — target binary architecture
 
-    // 增量编译 (opt3): 基于内容哈希的obj级缓存。
-    // cacheDir 存放复用的 .obj 与 cache.txt 索引，跨运行持久。
+    // 增量编译 (ai/030 T30-A 改写): **内容寻址**的 obj store —— obj 文件名里就带着键
+    // (架构 + 工具串 + 源与其本地 include 的内容)，没有索引文件，也就没有"交替编两个
+    // 项目互相抹记录"和"索引非原子重写"。查不到 = 自己编，错配的 obj 不可能被用错。
+    // RTL 那一族用固定编译档 (不吃用户 -O/-g, /I 只给 rtlDir) ⇒ 跨工程共享同一格。
     bool incremental = false;
-    std::string incrementalCacheDir;         // 持久obj缓存目录 (如 <outputDir>/.c3obj)
+    std::string incrementalCacheDir;         // store 拿不到 %LOCALAPPDATA% 时的回退目录
 
     // === ai/024 T02: 用户静态库 (归档) ===
     // 由 driver 从 LibSearchPaths 解析得到 —— Declare 的 `Lib "x.lib"` 静态形态

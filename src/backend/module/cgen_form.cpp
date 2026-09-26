@@ -68,6 +68,24 @@ static std::string escapeCString(const std::string& s) {
 // 逐行未改 → 零行为改动；切点全落在原函数体的分节注释处（相对花括号深度 0）。
 
 void CCodeGen::emitFormFramework(const FrmFormDesc& frmDesc, Module& module) {
+    // C29-7: **必须在生成任何代码之前登记**哪些控件是 ListView —— 下面各片段会查
+    // listViewVars_ 来决定 `ListView1.ListItems` 走"真集合对象"还是退化路径。
+    // ⚠ 别把这个登记挪进 emitDesignerControlDecls: 那个函数是在
+    // cgen_base_generate_decl_pass.inc 的**第 46 行**调用的, 而本函数在第 40 行 ——
+    // 也就是"窗体代码全生成完了才登记", listViewVars_ 永远是空的。
+    // (实测症状: 生成出来还是 `vb6_ComGetObjectProp(vb6_hwnd_ListView1, …)`,
+    //  对 HWND 当 IDispatch 用 → 运行期读数全空。)
+    {
+        std::function<void(const FrmControl&)> regLV = [&](const FrmControl& c) {
+            if (c.controlType == FrmControlType::ListView) listViewVars_.insert(c.controlName);
+            // C29-OLE: OLE 容器同 ListView 一样是真窗口, 方法/属性都按 HWND 槽认。
+            if (c.controlType == FrmControlType::OLE) oleConVars_.insert(c.controlName);
+            // C29-Data: Data 控件同批登记。
+            if (c.controlType == FrmControlType::Data) dataVars_.insert(c.controlName);
+            for (const auto& ch : c.children) regLV(ch);
+        };
+        regLV(frmDesc.formControl);
+    }
 #include "backend/detail/module/cgen_form_prelude.inc"
 #include "backend/detail/module/cgen_form_ctrl_registry.inc"
 #include "backend/detail/module/cgen_form_wndproc_subclass.inc"
@@ -104,10 +122,13 @@ void CCodeGen::emitControlHandleDecls(const FrmFormDesc& frmDesc) {
         std::string ctrlLower = ctrl.controlName;
         std::transform(ctrlLower.begin(), ctrlLower.end(), ctrlLower.begin(), ::tolower);
         if (!ctrlLower.empty() && emitted.insert(ctrlLower).second) {
-            if (ctrl.controlType == FrmControlType::ImageList ||
-                ctrl.controlType == FrmControlType::Toolbar ||
-                ctrl.controlType == FrmControlType::StatusBar ||
-                ctrl.controlType == FrmControlType::CommonDialog) {
+            // 合并(P20-45 + C29-9): **无窗口控件只有 ImageList / Toolbar** —— 它们的槽是
+            // 实例指针 vb6_com_X。其余控件一律 vb6_hwnd_X, 含 StatusBar (P20-40 起是
+            // msctls_status32 原生复刻) 与 CommonDialog (C29-9 起是自注册不可见类
+            // VB6_COMMONDIALOG 属性宿主); 把这两个归回 vb6_com_ 家族会 C2065
+            // (声明成 vb6_com_X, 用出来却是 vb6_hwnd_X)。
+            // C29-5a: Toolbar 摘出 —— 它有真窗口，槽一律回到 vb6_hwnd_X 那一族。
+            if (ctrl.controlType == FrmControlType::ImageList) {
                 c_.emitLine("static void* vb6_com_" + cIdent(ctrl.controlName) + " = NULL;  /* IDispatch* */");
             } else if (knownControlArrays_.count(ctrlLower)) {
                 c_.emitLine("static vb6_CtrlArr vb6_arr_" + cIdent(ctrl.controlName) + ";");

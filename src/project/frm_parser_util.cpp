@@ -173,10 +173,18 @@ FrmControlType FrmParser::parseControlType(const std::string& typeName) {
     if (lower.find("shdocvw") != std::string::npos) return FrmControlType::WebBrowser;
 
     // 常见第三方控件
+    if (lower.find("progressbar") != std::string::npos) return FrmControlType::ProgressBar;
     if (lower.find("toolbar") != std::string::npos) return FrmControlType::Toolbar;
     if (lower.find("statusbar") != std::string::npos) return FrmControlType::StatusBar;
     if (lower.find("commondialog") != std::string::npos) return FrmControlType::CommonDialog;
     if (lower.find("imagelist") != std::string::npos) return FrmControlType::ImageList;
+    // P20-42: SSTab (TabDlg.SSTab)。必须排在 imagelist 之后、Unknown 之前;
+    // "sstab" 是 TabDlg.SSTab / SSTab 两种写法的公共子串。
+    if (lower.find("sstab") != std::string::npos) return FrmControlType::SSTab;
+    // P20-45/46: ListView / TreeView。按字符串长短排: 先 listview 再 treeview,
+    // 两者互不为子串, 但都排在 sstab 之后以免误吃。
+    if (lower.find("listview") != std::string::npos) return FrmControlType::ListView;
+    if (lower.find("treeview") != std::string::npos) return FrmControlType::TreeView;
 
     return FrmControlType::Unknown;
 }
@@ -196,8 +204,53 @@ const char* FrmParser::controlTypeToWin32Class(FrmControlType type) {
         case FrmControlType::PictureBox:   return "STATIC";     // SS_BITMAP样式
         case FrmControlType::HScrollBar:   return "SCROLLBAR";  // SBS_HORZ样式
         case FrmControlType::VScrollBar:   return "SCROLLBAR";  // SBS_VERT样式
-        case FrmControlType::Timer:        return nullptr;       // 不可见控件, 无窗口
+        // C29-T: Timer 以前是"无窗口"控件 ⇒ 生成代码里的 vb6_hwnd_<timer> 恒 NULL，
+        // 于是 `Timer1.Enabled = True` 这类运行期写法落到 SetPropW(NULL,...) 被静默丢。
+        // 现在给它一枚自注册的**不可见**窗口当身份（注册见 vb6forms.c 的
+        // vb6_RegisterTimerClass），Enabled/Interval 才找得回自己那一格计时器。
+        case FrmControlType::Timer:        return "VB6_TIMER";
         case FrmControlType::Image:        return "STATIC";     // SS_BITMAP
+        // ProgressBar: comctl32 通用控件类 (msctls_progress32)。
+        // 不加载 mscomctl.ocx —— 本机 InprocServer32 缺失, 且 32 位 inproc
+        // OCX 无法进 x64 进程; 改用 Win32 等价类复刻。
+        case FrmControlType::ProgressBar:  return "msctls_progress32";
+        // P20-40: StatusBar 用 comctl32 的 msctls_status32 复刻 (不加载 mscomctl.ocx)。
+        // 漏掉这个 case 会被当成"不可见控件"直接 continue, 窗口根本不创建。
+        case FrmControlType::StatusBar:    return "msctls_status32";
+        // P20-42: SSTab —— 与 StatusBar 不同, **SysTabControl32 是 comctl32 注册好的**
+        // (实测 x64/x86 进程里 GetClassInfoW 直接成功, InitCommonControlsEx 之前就在),
+        // 所以这里不需要 RTL 自注册兜底。
+        case FrmControlType::SSTab:        return "SysTabControl32";
+        // P20-45/46: ListView/TreeView —— 与 SSTab 同型, **comctl32 已注册**
+        // (实测 GetClassInfoW 直接成功), 不需要 StatusBar 那套自注册兜底。
+        case FrmControlType::ListView:     return "SysListView32";
+        case FrmControlType::TreeView:     return "SysTreeView32";
+        // C29-5a: Toolbar 同样是 comctl32 注册好的类 (ICC_BAR_CLASSES 在 vb6_ComCtl_Init
+        // 里早就请求过)。以前这格缺着 + 被"ImageList || Toolbar 走 CoCreateInstance"那一组
+        // 扣住 => 控件根本没窗口，读一个 tb1.Visible 就是 C2065: vb6_hwnd_tb1 未声明。
+        case FrmControlType::Toolbar:      return "ToolbarWindow32";
+        // C29-1b: 文件系统三控件在 VB6 里本来就是公共控件的薄封装 —— Drive 是
+        // CBS_DROPDOWNLIST 的组合框、Dir / File 是列表框。以前这三格缺映射, 创建流程
+        // 把它们当"不可见控件"跳过, 于是 RTL 里那套 P20-37 填充 helper 从来没被喂过
+        // 一个真句柄 (与 Shape/Line 同一类洞, 见 029 §二-2)。
+        case FrmControlType::DriveListBox:   return "COMBOBOX";
+        case FrmControlType::DirListBox:     return "LISTBOX";
+        case FrmControlType::FileListBox:    return "LISTBOX";
+        // C29-1a: Shape/Line 是 VB6 的"轻量图形控件"，RTL 里自注册了这两个类
+        // (vb6forms_shape.c: vb6_RegisterShapeLineClasses → VB6_SHAPE / VB6_LINE)，
+        // 但这里一直缺映射 ⇒ 创建流程把控件当"不可见控件"跳过，句柄永远是 NULL。
+        case FrmControlType::Shape:        return "VB6_SHAPE";
+        case FrmControlType::Line:         return "VB6_LINE";
+        // D6 / C29-9: CommonDialog **不再走 MSComDlg.OCX** —— 那控件只有 32 位，x64 里
+        // CoCreateInstance 直接失败，今天整枚控件是静默空转（读数全空、Show* 不出现、
+        // 退出码照旧 0，见 029 §九）。这里给它一枚自注册的**不可见**类当属性宿主：
+        // 有句柄才谈得上 SetPropW 存属性、GetParent 拿模态父窗（注册见 vb6forms_ctrl.c）。
+        case FrmControlType::CommonDialog: return "VB6_COMMONDIALOG";
+        // OLE 容器 (C29-OLE): RTL 自注册类 (vb6forms_olecon.c vb6_RegisterOleConClass)。
+        // 嵌入对象依赖目标机器的 OLE 服务器 ⇒ 判据只本地跑 (用户指示), 不进 CI。
+        case FrmControlType::OLE:          return "VB6_OLECONTAINER";
+        // C29-Data: ODBC 后端的 Data 控件 (自注册不可见类, CommonDialog 属性宿主同款)。
+        case FrmControlType::Data:         return "VB6_DATA";
         case FrmControlType::Menu:         return nullptr;       // 菜单, 非窗口
         case FrmControlType::WebBrowser:  return nullptr;       // WebView2, 运行时动态创建
         default:                           return nullptr;
@@ -221,8 +274,17 @@ const char* FrmParser::controlTypeToVb6Name(FrmControlType type) {
         case FrmControlType::HScrollBar:   return "HScrollBar";
         case FrmControlType::VScrollBar:   return "VScrollBar";
         case FrmControlType::Image:        return "Image";
+        case FrmControlType::ProgressBar:  return "ProgressBar";
+        case FrmControlType::StatusBar:    return "StatusBar";
+        case FrmControlType::SSTab:        return "SSTab";
+        case FrmControlType::ListView:     return "ListView";
+        case FrmControlType::TreeView:     return "TreeView";
+        case FrmControlType::Toolbar:      return "Toolbar";
         case FrmControlType::Shape:        return "Shape";
         case FrmControlType::Line:         return "Line";
+        case FrmControlType::DriveListBox: return "DriveListBox";
+        case FrmControlType::DirListBox:     return "DirListBox";
+        case FrmControlType::FileListBox:    return "FileListBox";
         case FrmControlType::Menu:         return "Menu";
         case FrmControlType::WebBrowser:  return "WebBrowser";
         default:                           return "Control";

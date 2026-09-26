@@ -41,3 +41,41 @@
 **注意** 无法指定对话框显示在什么地方。
 
 **详细信息** 要查看各对话的帮助主题，单击“请参阅”。
+
+## 本项目的实现口径（ai/029 C29-9 / 决策 D6）
+
+CommonDialog 走**原生 comdlg32**（`GetOpenFileNameW` / `GetSaveFileNameW` / `ChooseColorW` /
+`ChooseFontW` / `PrintDlgW` / `ShellAboutW`），**不再经 MSComDlg.OCX**。原因很硬：那个 OCX 只有
+32 位，在 64 位进程里 `CoCreateInstance` 直接失败，于是改之前这枚控件是**静默空转**的 —— 属性读回
+全空、六个 `Show*` 一个都不出现，而程序照旧正常退出。API 只经 `LoadLibrary` + `GetProcAddress`
+取得，不给工具链添新的 import lib。
+
+语法面与本页上文一致：
+
+| 写法 | 读数 |
+| --- | --- |
+| `CommonDialog1.Filter` | **原样读回竖线串**（VB6 口径）。原生那套 `描述\0模式\0…\0\0` 成对表只在
+  调 `Show*` 的那一刻折叠出来，不外露 |
+| `CommonDialog1.Flags` | 就是原生 `OFN_*` / `CC_*` / `CF_*` / `PD_*` 那一位（VB6 本来也是透传），
+  原值读写，含 0 |
+| `CommonDialog1.FileName` | 确认后是**全路径**；`FileTitle` 是同一次的裸文件名（含扩展名） |
+| `CommonDialog1.CancelError` | 布尔：`True` 读回 `-1`。取消时报 **32755**（VB6 的 `cdlCancel`）；
+  为 `False` 时取消静默返回，且**不改**任何已有读数 |
+| `CommonDialog1.DialogTitle` / `InitDir` / `DefaultExt` / `Color` / `FontName` / `FontSize` /
+  `Min` / `Max` / `Copies` | 属性袋挂在一枚自注册的**不可见**子窗口（`VB6_COMMONDIALOG`）上；
+  设计期写进 `.frm` 的这几行在建窗之后原样落到袋里，两枚控件互不串 |
+
+三条与 VB6 有差距的地方，写在这里免得按 VB6 去期待：
+
+1. `ShowPrinter` 目前只把结果收回 `Copies`（以及 `Min`/`Max` 当页范围），**不返回 `Printer` 对象、
+   也拿不到 DC** —— 拿到就 `DeleteDC` 了。打印那半属于"Printer 对象"这条独立线，未随本批做。
+2. `ShowFont` 只回 `FontName` / `FontSize`；`FontBold` / `FontItalic` / `FontUnderline` /
+   `FontStrikeThru` 四个**没接**（原生 `LOGFONT` 里都有，缺的是把它们接成 CommonDialog 的属性面）。
+3. `Color` 对话框的**自定义色板**（`ColorDialog.CustomColors`）不落袋：原生那份 16 格数组是运行时
+   私有的，本批只在进程内静态持有，不作为 VB6 属性对外。
+
+判据在 `tests\ctrldlg\`（10 条读数：设计期四行落位、`Filter` 原样读回、另一枚不被继承、
+运行期读写回路、两枚不串、六个 `Show*` 的发码形状），登记 `ctrldlg[_x86]`；发码两面都钉 ——
+`dl_emitc_shape` 断原生入口在场，`dl_emitc_no_ocx` 断 `CoCreateInstance` / `vb6_com_<名>` 那一族
+形状**不再在场**。"对话框真出现 + 取消报 32755" 需要一套起窗自关的探针，记在下一小批 C29-9b，
+所以本批判据里的 `Show*` 用恒假守卫留在源码中（发码看得见、运行期不弹）。

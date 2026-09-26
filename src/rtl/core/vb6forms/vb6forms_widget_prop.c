@@ -174,32 +174,43 @@ void vb6_SetShapeBorderWidth(void* hwnd, int32_t val) {
     if (val < 1) val = 1;
     if (val > 8192) val = 8192;
     SetPropW((HWND)hwnd, L"VB6_ShapeBorderWidth", (HANDLE)(INT_PTR)val);
+    /* C29-1a: 手册那条 VB6 规则 —— BorderWidth 不是 1 而 BorderStyle 又不是 0(透明) 或
+     * 6(内实线) 时, BorderStyle 被强制回 1(实线): GDI 的 PS_DASH/PS_DOT 在笔宽大于 1 时
+     * 本来就画成实线, 属性读数跟着走, 不出现"读回虚线、画出实线"。 */
+    if (val != 1) {
+        int32_t bsC29 = vb6_GetShapeBorderStyle(hwnd);
+        if (bsC29 != 0 && bsC29 != 6) vb6_SetShapeBorderStyle(hwnd, 1);
+    }
     InvalidateRect((HWND)hwnd, NULL, TRUE);
 }
 
 int32_t vb6_GetShapeBorderStyle(void* hwnd) {
     if (!hwnd) return 1;
     HANDLE hProp = GetPropW((HWND)hwnd, L"VB6_ShapeBorderStyle");
-    if (hProp) return (int32_t)(INT_PTR)hProp;
+    // C29-1a: 存的是 val+1 —— SetPropW 把 (HANDLE)0 存进去后 GetPropW 回 NULL, 与"从没设过"
+    // 完全不可分辨, 于是 VB6 里合法的 0 (=Transparent) 会被读成默认值 1。
+    if (hProp) return (int32_t)(INT_PTR)hProp - 1;
     return 1;  // Default: Solid
 }
 
 void vb6_SetShapeBorderStyle(void* hwnd, int32_t val) {
     if (!hwnd) return;
-    SetPropW((HWND)hwnd, L"VB6_ShapeBorderStyle", (HANDLE)(INT_PTR)val);
+    SetPropW((HWND)hwnd, L"VB6_ShapeBorderStyle", (HANDLE)(INT_PTR)(val + 1));
     InvalidateRect((HWND)hwnd, NULL, TRUE);
 }
 
 int32_t vb6_GetShapeFillStyle(void* hwnd) {
     if (!hwnd) return 1;
     HANDLE hProp = GetPropW((HWND)hwnd, L"VB6_ShapeFillStyle");
-    if (hProp) return (int32_t)(INT_PTR)hProp;
+    // C29-1a: 存的是 val+1 —— SetPropW 把 (HANDLE)0 存进去后 GetPropW 回 NULL, 与"从没设过"
+    // 完全不可分辨, 于是 VB6 里合法的 0 (=Transparent) 会被读成默认值 1。
+    if (hProp) return (int32_t)(INT_PTR)hProp - 1;
     return 1;  // Default: Transparent
 }
 
 void vb6_SetShapeFillStyle(void* hwnd, int32_t val) {
     if (!hwnd) return;
-    SetPropW((HWND)hwnd, L"VB6_ShapeFillStyle", (HANDLE)(INT_PTR)val);
+    SetPropW((HWND)hwnd, L"VB6_ShapeFillStyle", (HANDLE)(INT_PTR)(val + 1));
     InvalidateRect((HWND)hwnd, NULL, TRUE);
 }
 

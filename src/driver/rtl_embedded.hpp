@@ -152,6 +152,33 @@ enum RtlResourceID {
     // Fix 160y: DI 转发桩未带 vb6_di_lib 标记的杂项符号 (Imm 输入法 / version /
     // TransparentBlt / msvbvm60 运行时) — gen_di_stubs.ps1 归入 unknown 族
     RTL_VB6_DI_UNKNOWN_STUBS_C             = 205,
+
+    // P20-38: VB6 ProgressBar 控件 (msctls_progress32 复刻, 不加载 mscomctl.ocx)
+    RTL_VB6FORMS_PROGRESS_C                = 206,
+    RTL_VB6FORMS_IMAGELIST_C               = 207,
+
+    // P20-40: VB6 StatusBar 控件 (msctls_status32 复刻, 不加载 mscomctl.ocx)
+    RTL_VB6FORMS_STATUSBAR_C               = 208,
+
+    // P20-42: VB6 SSTab 控件 (SysTabControl32 复刻, 不加载 TABCTL32.OCX)
+    RTL_VB6FORMS_SSTAB_C                   = 209,
+
+    // P20-44: OLE 拖放 (IDataObject/IDropSource/IDropTarget 复刻)
+    RTL_VB6FORMS_OLEDD_C                   = 210,
+
+    // P20-45: VB6 ListView 控件 (SysListView32 复刻, 不加载 MSCOMCTL.OCX)
+    RTL_VB6FORMS_LISTVIEW_C                = 211,
+    // C29-3: 控件"成员对象/成员集合"的真 IDispatch (ListImages 立样)
+    RTL_VB6FORMS_MEMBEROBJ_C               = 212,
+    // ai/029 C29-8a: TreeView 标量属性面 (dev 原用 212, 合并后顺延让位)
+    RTL_VB6FORMS_TREEVIEW_C                = 213,
+    // OLE 容器 (本地判据, 不进 CI —— 嵌入对象依赖目标机器的 OLE 服务器)
+    RTL_VB6FORMS_OLECON_C                  = 214,
+    // Data 控件 (ODBC 后端)
+    RTL_VB6FORMS_DATA_C                    = 216,
+
+    // ai/029 C29-5a: VB6 Toolbar 控件 (ToolbarWindow32 复刻, 不加载 MSCOMCTL.OCX)
+    RTL_VB6FORMS_TOOLBAR_C                 = 215,
 };
 
 // Session directory manager

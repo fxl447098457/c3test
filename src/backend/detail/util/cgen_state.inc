@@ -124,6 +124,13 @@
     // 消费点一律先判 Date, 以免既有 double 路径失去变量。
     std::unordered_set<std::string> knownDateVars_;
 
+    // ai/022 W1: `As Boolean` 在 C 层是 int16_t / VBABOOL, 与 Integer/Long 同一登记串
+    // ⇒ 只按 C 类型登记会让 inferExprType 永远看不见 Boolean: `CStr(b)`、`"x=" & b`、
+    // String 形参收 Boolean 实参都走 vb6_CStrLong → 打出 -1 而 VB6 打 "True"。
+    // 与 knownLongVars_ **并存**登记 (口径同 Fix 117c 的 Single / Fix 175 的 Date),
+    // 消费点一律先判 Boolean, 以免既有整数路径失去变量。
+    std::unordered_set<std::string> knownBoolVars_;
+
     // 已知Long/Integer/Boolean变量名集合 (小写) - 用于COM值解封类型推断
     std::unordered_set<std::string> knownLongVars_;
 
@@ -133,6 +140,11 @@
 
     // P8.4: 已知Variant变量名集合 (小写) - 用于赋值时包装值
     std::unordered_set<std::string> knownVariantVars_;
+    // P20-44: 处理器形参里 `As DataObject` 的名字 (小写)。这些形参在 C 里是
+    // void** (指向 DataObject), 其成员访问 (Data.GetText 等) 必须改道 RTL。
+    // **为什么不用 symTab_**: codegen 生成处理器体时形参不在符号表 (实测 lookup
+    // found=0), 只能在注册参数的同一循环里顺手收进集合。
+    std::unordered_set<std::string> dataObjectParams_;
 
     // Fix 091m: 模块级 Variant 变量名集合 (小写). knownVariantVars_ 在每个过程
     // 开始时 clear(), 模块级变量 (如 ToolsLogs: Dim EnumLevelNames As Variant)
@@ -398,6 +410,258 @@
     // P7.6: 控件数组名 → 控件ID映射 (控件ID → 数组Index, 用于事件分发)
     // key=小写控件名, value=vector<int>按控件ID顺序对应的Index
     std::unordered_map<std::string, std::vector<int>> controlIdToIndexMap_;
+
+    // P20-39: 原生复刻的 ImageList 控件槽 (形如 "vb6_com_ImageList1")。
+    // ImageList 无窗口, 复刻后它就是个 HIMAGELIST, 存在沿用下来的 vb6_com_<Name> 槽里。
+    // 用于把 `ImageList1.ListImages.Add/Remove/Clear`、`ListImages.Count`、
+    // `ListImages(i).Key`、`ImageList1.ImageWidth` 这些**字符串形态**的 COM 表达式
+    // 改道到 RTL 原生函数上。Toolbar/StatusBar/CommonDialog 这三个还是 OCX 占位, 不登记。
+    std::unordered_set<std::string> imageListVars_;
+    // C29-3: 当前右值是否落在 **Let 赋值**（`n = ...`）上。Let 与 Set 对成员对象的
+    // 语义不同: `n = ListImages.Add(..)` 在 VB6 里取的是 ListImage 的**默认属性**
+    // (`Index`), 而 `Set img = ListImages.Add(..)` 拿对象本身。两者走的是两个不同的
+    // visit (AssignmentStmt vs SetStmt), 天然分开 —— 所以这个标志只在 Let 期间置真。
+    bool memObjLetScalar_ = false;
+
+    // C29-7: 原生复刻的 ListView 控件 (登记裸控件名, 如 "ListView1")。
+    // ⚠ ListView 是**真窗口**, 所以 RTL 各函数第一参要的是 **HWND 槽 vb6_hwnd_X** ——
+    // 与 ImageList 那族的 vb6_com_X (无窗口, 槽里是复刻实例指针) 不同, 别照抄。
+    std::unordered_set<std::string> listViewVars_;
+    // objExpr 是否落在一个已登记的 ListView 上 (返回裸控件名, 否则空串)。
+    // 形态: ① 裸槽 vb6_hwnd_X
+    //       ② 集合对象 vb6_ListView_ListItems((void*)vb6_hwnd_X) / ...ColumnHeaders(...)
+    //       ③ Item 结果 vb6_ComCallObject(②, L"Item", …) —— ③ 靠 ② 的子串命中
+    std::string listViewNameOfExpr(const std::string& objExpr) const {
+        static const char* kHeads[] = {
+            "vb6_ListView_ListItems((void*)vb6_hwnd_",
+            "vb6_ListView_ColumnHeaders((void*)vb6_hwnd_" };
+        for (const char* h : kHeads) {
+            size_t p = objExpr.find(h);
+            if (p == std::string::npos) continue;
+            size_t s = p + strlen(h);
+            size_t e = s;
+            while (e < objExpr.size()
+                   && (isalnum((unsigned char)objExpr[e]) || objExpr[e] == '_')) e++;
+            std::string n = objExpr.substr(s, e - s);
+            if (listViewVars_.count(n)) return n;
+        }
+        if (objExpr.size() > 9 && objExpr.compare(0, 9, "vb6_hwnd_") == 0) {
+            std::string n = objExpr.substr(9);
+            if (listViewVars_.count(n)) return n;
+        }
+        return "";
+    }
+    std::string listViewHwndVarOfExpr(const std::string& objExpr) const {
+        std::string n = listViewNameOfExpr(objExpr);
+        return n.empty() ? "" : "vb6_hwnd_" + n;
+    }
+    // C29-Data: Data 控件 (不可见类 VB6_DATA 属性宿主, 登记裸控件名如 "Data1")。
+    // Recordset 链 (Data1.Recordset.Fields("x").Value / .MoveNext / .BOF) 全直译 RTL。
+    std::unordered_set<std::string> dataVars_;
+    // 从 vb6_Data_Self(vb6_hwnd_X) / vb6_Data_Self((void*)vb6_hwnd_X) 抠出裸槽名。
+    // ⚠ 控件属性分支发的形态**不带** (void*) 强转, 两种都要认。
+    std::string dataSelfHwndExpr(const std::string& objExpr) const {
+        const char* kHeads[] = { "vb6_Data_Self((void*)", "vb6_Data_Self(" };
+        for (const char* kHead : kHeads) {
+            size_t p = objExpr.find(kHead);
+            if (p == std::string::npos) continue;
+            size_t s = p + strlen(kHead);
+            if (s > 0 && objExpr.compare(s, 9, "vb6_hwnd_") != 0 && s > 0) {
+                // 允许中间有空白
+                while (s < objExpr.size() && objExpr[s] == ' ') s++;
+            }
+            size_t e = s;
+            while (e < objExpr.size() && (isalnum((unsigned char)objExpr[e]) || objExpr[e] == '_')) e++;
+            std::string n = objExpr.substr(s, e - s);
+            // ⚠ 扫出来的是完整槽名 "vb6_hwnd_Data1" —— 剥掉前缀再查表
+            if (n.size() > 9 && n.compare(0, 9, "vb6_hwnd_") == 0) n = n.substr(9);
+            if (dataVars_.count(n)) return "vb6_hwnd_" + n;
+        }
+        return "";
+    }
+    std::string dataNameOfExpr(const std::string& objExpr) const {
+        if (objExpr.size() > 9 && objExpr.compare(0, 9, "vb6_hwnd_") == 0) {
+            std::string n = objExpr.substr(9);
+            if (dataVars_.count(n)) return n;
+        }
+        return "";
+    }
+    // C29-OLE: 真窗口的 OLE 容器控件 (登记裸控件名, 如 "OLE1")。
+    // 方法 (CreateEmbed/CreateLink/DoVerb/Close/InsertObjDlg/SaveToFile/ReadFromFile/
+    // Copy/Paste) 与属性读写全走 vb6_OleCon_*, 第一参是 HWND 槽 vb6_hwnd_X。
+    std::unordered_set<std::string> oleConVars_;
+    // objExpr 是否落在一个已登记的 OLE 容器上 (返回裸控件名, 否则空串)。
+    std::string oleConNameOfExpr(const std::string& objExpr) const {
+        if (objExpr.size() > 9 && objExpr.compare(0, 9, "vb6_hwnd_") == 0) {
+            std::string n = objExpr.substr(9);
+            if (oleConVars_.count(n)) return n;
+        }
+        return "";
+    }
+    // objExpr 是否落在一个已登记的 ImageList 上。命中返回**裸控件名** (如 "ImageList1"),
+    // 否则返回空串。objExpr 有三种形态, 三种都要认:
+    //   ① 控件槽本身                       → vb6_com_ImageList1
+    //   ② .ListImages 集合                 → vb6_ComGetObjectProp(vb6_com_X, L"ListImages")
+    //   ③ ListImages(i) 的结果              → vb6_ComCallObject(②…, L"Item", (void*[]){…}, 1)
+    std::string imageListNameOfExpr(const std::string& objExpr) const {
+        const std::string head = "vb6_ComGetObjectProp(vb6_com_";
+        size_t p = objExpr.find(head);
+        if (p != std::string::npos) {
+            size_t q = objExpr.find(", L\"ListImages\")", p);
+            if (q != std::string::npos) {
+                std::string n = objExpr.substr(p + head.size(), q - (p + head.size()));
+                if (imageListVars_.count(n)) return n;
+            }
+        }
+        // C29-3: 两个新形态 ——
+        //   ④ 裸槽 `vb6_com_X`: MemberAccess 的 object 就是控件标识符时的形态
+        //      (cgen_expr_member_form_builtin.inc:350 设的就是它)。上面 ② 是"已经被
+        //      包成 ComGetObjectProp"之后的形态, 两条路都会来, 所以两个都要认。
+        //   ⑤ 真集合对象 `vb6_ImageList_ListImages((void*)vb6_com_X)` —— 本批新增。
+        // ⑤ 的串里**含** ④ 的前缀, 所以先判 ⑤ 再判 ④。
+        {
+            static const std::string kHead = "vb6_ImageList_ListImages((void*)vb6_com_";
+            size_t p2 = objExpr.find(kHead);
+            if (p2 != std::string::npos) {
+                size_t s = p2 + kHead.size();
+                size_t e = s;
+                while (e < objExpr.size()
+                       && (isalnum((unsigned char)objExpr[e]) || objExpr[e] == '_')) e++;
+                std::string n = objExpr.substr(s, e - s);
+                if (imageListVars_.count(n)) return n;
+            }
+        }
+        if (objExpr.size() > 8 && objExpr.compare(0, 8, "vb6_com_") == 0) {
+            std::string n = objExpr.substr(8);
+            if (imageListVars_.count(n)) return n;
+        }
+        if (imageListVars_.count(objExpr)) return objExpr;
+        return "";
+    }
+    // 同一件事的"槽变量"形态 (RTL 各函数第一参要的是这个)。
+    std::string imageListSlotVarOfExpr(const std::string& objExpr) const {
+        std::string n = imageListNameOfExpr(objExpr);
+        return n.empty() ? "" : "vb6_com_" + n;
+    }
+
+    // P20-40: 原生复刻的 StatusBar 控件 (形如 StatusBar1)。与 ImageList 同构, 但
+    // **RTL 函数第一参要的是 HWND 槽 vb6_hwnd_X** (面板状态挂在窗口属性上), 不是
+    // vb6_com_X。集合表达式的三种形态:
+    //   ① 控件槽本身                 → vb6_hwnd_StatusBar1
+    //   ② .Panels 集合               → vb6_ComGetObjectProp(vb6_com_X, L"Panels")
+    //   ③ Panels(i) 的结果           → vb6_ComCallObject(②…, L"Item", (void*[]){…}, 1)
+    // ②③ 只要抠出**裸控件名**就够了 —— 面板函数都只认"HWND + 1 基下标",
+    // 下标另从 Item 的实参里抠 (与 ImageList 分支同一套手法)。
+    std::unordered_set<std::string> statusBarVars_;
+    std::string statusBarNameOfExpr(const std::string& objExpr) const {
+        // 集合形态有三种写法, 槽前缀各不相同但结构一致:
+        //   vb6_ComGetObjectProp(vb6_com_X, L"Panels")     OCX 占位期 / ImageList
+        //   vb6_ComCallObject(vb6_hwnd_X, L"Panels", …)     真窗口期链式下标
+        // 都按 `vb6_<X>` 抠, 再用 statusBarVars_ 核对是不是真 StatusBar
+        // (vb6_ComCallObject(vb6_hwnd_Form1, L"Controls") 会抠出 Form1, 核对刷掉)。
+        static const char* kHeads[] = { "vb6_ComGetObjectProp(vb6_", "vb6_ComCallObject(vb6_" };
+        for (const char* h : kHeads) {
+            size_t p = objExpr.find(h);
+            while (p != std::string::npos) {
+                size_t s = p + strlen(h);
+                size_t e = s;
+                while (e < objExpr.size()
+                       && (isalnum((unsigned char)objExpr[e]) || objExpr[e] == '_')) e++;
+                // 到标识符边界为止 —— 中间那层可能是 vb6_hwnd_X / vb6_com_X, 前缀
+                // 与裸控件名都吃进来了, 按空白切会连 "hwnd_" 一起留下 (比对必败)。
+                std::string n = objExpr.substr(s, e - s);
+                if (statusBarVars_.count(n)) return n;
+                // 槽前缀不止一种: 真窗口期是 `vb6_hwnd_X`, OCX 占位期是 `vb6_com_X`。
+                // 上面只吃掉了中间的 vb6_, 这里再剥一层 hwnd_/com_ 还原裸控件名。
+                static const char* kPrefixes[] = { "hwnd_", "com_", "arr_" };
+                for (const char* pf : kPrefixes) {
+                    size_t pl = strlen(pf);
+                    if (n.size() > pl && n.compare(0, pl, pf) == 0) {
+                        n = n.substr(pl);
+                        break;
+                    }
+                }
+                if (statusBarVars_.count(n)) return n;
+                p = objExpr.find(h, s);
+            }
+        }
+        if (statusBarVars_.count(objExpr)) return objExpr;
+        return "";
+    }
+    // C29-5a: Toolbar 的裸名登记 (设计期发射那侧 insert)。认法比 StatusBar 那套窄得多 ——
+    // Toolbar 已经有真窗口，集合表达式的槽一定是 `vb6_hwnd_<裸名>`，不必再抠 vb6_com_ 前缀。
+    // 名字比对要过一道**标识符边界**检查: 只 find 子串的话 `vb6_hwnd_tb1` 会命中
+    // `vb6_hwnd_tb10` 的表达式 (两枚工具栏同窗体就翻车)。
+    std::unordered_set<std::string> toolbarVars_;
+    std::string toolbarNameOfExpr(const std::string& objExpr) const {
+        for (const auto& n : toolbarVars_) {
+            const std::string hwnd = "vb6_hwnd_" + n;
+            size_t p0 = objExpr.find(hwnd);
+            while (p0 != std::string::npos) {
+                size_t e = p0 + hwnd.size();
+                if (e >= objExpr.size() || !(isalnum((unsigned char)objExpr[e]) || objExpr[e] == '_'))
+                    return n;
+                p0 = objExpr.find(hwnd, e);
+            }
+        }
+        if (toolbarVars_.count(objExpr)) return objExpr;
+        return "";
+    }
+    std::string statusBarHwndVarOfExpr(const std::string& objExpr) const {
+        std::string n = statusBarNameOfExpr(objExpr);
+        return n.empty() ? "" : "vb6_hwnd_" + n;
+    }
+    // P20-40: `StatusBar1.Panels(i).Prop = v` 的**写**目标。读那边在 resolveComValue
+    // 里改道了, 写这边不拦就会落到 vb6_ComSetProp(<HWND>, L"Text", …) —— 对假
+    // IDispatch (HWND) 调 PutProp, 链接都过、运行静默无效。返回 RTL 写入函数名,
+    // hwndOut/idxOut 出参拿槽与 1 基下标; 空串 = 不是 Panel 链式写。
+    std::string statusBarPanelWriteFn(const std::string& targetExpr,
+                                      const std::string& memLower,
+                                      std::string* hwndOut, std::string* idxOut) const {
+        static const struct { const char* vb; const char* fn; } kSbWriters[] = {
+            { "text",       "vb6_StatusBar_SetPanelText"     },
+            { "key",        "vb6_StatusBar_SetPanelKey"      },
+            { "width",      "vb6_StatusBar_SetPanelWidth"    },
+            { "minwidth",   "vb6_StatusBar_SetPanelMinWidth" },
+            { "autosize",   "vb6_StatusBar_SetPanelAutoSize" },
+            { "style",      "vb6_StatusBar_SetPanelStyle"    },
+            { "tooltiptext","vb6_StatusBar_SetPanelToolTip"  },
+        };
+        std::string hwnd = statusBarHwndVarOfExpr(targetExpr);
+        if (hwnd.empty()) return "";
+        std::string fn;
+        for (const auto& w : kSbWriters) {
+            if (memLower == w.vb) { fn = w.fn; break; }
+        }
+        if (fn.empty()) return "";
+        // 抠出面板下标。这里没有 `L"Item"` 那一层 —— 生成器把 Panels 当**默认成员**,
+        // 索引直接跟着它那一层的 `(void*[]){…}` 走 (形如
+        // `vb6_ComCallObject(vb6_hwnd_StatusBar1, L"Panels", (void*[]){vb6_ComPackInt(1)}, 1)`),
+        // 所以按参数包抠, 剥掉 vb6_ComPackInt(...) 只留数字。抠不到就返回空:
+        // 宁可什么都别发, 也别发个下标为空的坏调用。
+        std::string idx;
+        const std::string kArr = "(void*[]){";
+        size_t ia = targetExpr.find(kArr);
+        if (ia != std::string::npos) {
+            size_t open = ia + kArr.size();
+            size_t close = targetExpr.find('}', open);
+            if (close != std::string::npos) {
+                std::string argTxt = targetExpr.substr(open, close - open);
+                size_t lp = argTxt.find('(');
+                if (lp != std::string::npos) {
+                    size_t end = argTxt.find_first_of("),", lp + 1);
+                    idx = (end == std::string::npos) ? argTxt.substr(lp + 1)
+                                                     : argTxt.substr(lp + 1, end - lp - 1);
+                } else {
+                    idx = argTxt;
+                }
+            }
+        }
+        if (idx.empty()) return "";
+        if (hwndOut) *hwndOut = hwnd;
+        if (idxOut)  *idxOut  = idx;
+        return fn;
+    }
 
     // P6.6: ActiveX DLL模式
     bool isDll_ = false;                    // 编译为ActiveX DLL

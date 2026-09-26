@@ -7,12 +7,57 @@
     if (isComMarker_) {
         // ActiveX控件COM属性: 先获取属性对象, 再用Item(idx)索引
         // comObjExpr_以"vb6_com_"开头 = ActiveX控件变量
-        if (comObjExpr_.find("vb6_com_") == 0 && !node.positional.empty()) {
+        // C29-7: ListView 是**真窗口** (`vb6_hwnd_X`), 而 ImageList 是 `vb6_com_X` ——
+        // 这条"控件属性对象 + Item(idx)"的路两种槽都要认, 否则 `ListView1.ListItems(1)`
+        // 会被拼成 `vb6_ComCallObject(vb6_hwnd_ListView1, L"ListItems", …)` —— 对 HWND
+        // 当 IDispatch 用, 链接过、运行期读数全空。
+        bool axSlotObj = comObjExpr_.find("vb6_com_") == 0
+                      || (comObjExpr_.find("vb6_hwnd_") == 0
+                          && !listViewNameOfExpr(comObjExpr_).empty())
+                      // C29-Data: Data1.Recordset 的透传形态 (Fields/Item 走 Step1+Item 路)。
+                      || comObjExpr_.find("vb6_Data_Self(") == 0;
+        if (axSlotObj && !node.positional.empty()) {
             std::string axObjExpr = std::move(comObjExpr_);
             std::string axMember = std::move(comMemberName_);
             isComMarker_ = false;
             // Step 1: 获取属性对象 (如 ListImages 集合)
-            std::string collectionExpr = "vb6_ComGetObjectProp(" + axObjExpr + ", L\"" + axMember + "\")";
+            // C29-3: ImageList 的 ListImages 是**真集合对象** (原生复刻, 见
+            // vb6forms_memberobj.c), 不能对它发 vb6_ComGetObjectProp —— vb6_com_X 槽里
+            // 放的是 HIMAGELIST 实例指针不是 IDispatch, 那样做等于拿垃圾当 vtable。
+            std::string collectionExpr;
+            {
+                if (Symbol::toLower(axMember) == "listimages") {
+                    std::string bareIL = imageListNameOfExpr(axObjExpr);
+                    if (!bareIL.empty())
+                        collectionExpr = "vb6_ImageList_ListImages((void*)vb6_com_" + bareIL + ")";
+                } else {
+                    // C29-7: ListView 的 ListItems / ColumnHeaders 同一口径。
+                    // ⚠ 宿主槽是 **vb6_hwnd_X** (ListView 是真窗口), 不是 vb6_com_X。
+                    std::string memLV = Symbol::toLower(axMember);
+                    if (memLV == "listitems" || memLV == "columnheaders") {
+                        std::string bareLV = listViewNameOfExpr(axObjExpr);
+                        if (!bareLV.empty())
+                            collectionExpr = (memLV == "listitems")
+                                ? ("vb6_ListView_ListItems((void*)vb6_hwnd_" + bareLV + ")")
+                                : ("vb6_ListView_ColumnHeaders((void*)vb6_hwnd_" + bareLV + ")");
+                    }
+                }
+                if (collectionExpr.empty())
+                    collectionExpr = "vb6_ComGetObjectProp(" + axObjExpr + ", L\"" + axMember + "\")";
+            }
+            // C29-Data: `Recordset.Fields("name")` —— 取值即 FieldValueStr (不是集合 Item)。
+            // memberName 在 axSlotObj 路径上是 axMember (如 "Fields"), 实参 0 是字段名/下标。
+            if (Symbol::toLower(axMember) == "fields") {
+                std::string dhD = dataSelfHwndExpr(axObjExpr);
+                if (!dhD.empty()) {
+                    emitExpr(*node.positional[0]);
+                    std::string a0 = lastExpr_;
+                    bool allNum = !a0.empty() && a0.find_first_not_of("0123456789") == std::string::npos;
+                    if (allNum) a0 = "L\"" + a0 + "\"";
+                    lastExpr_ = "vb6_Data_FieldValueStr((void*)" + dhD + ", " + a0 + ")";
+                    return;
+                }
+            }
             // Step 2: 调用 Item(idx) 获取集合中的元素
             std::vector<std::string> packedArgs;
             for (size_t i = 0; i < node.positional.size(); i++) {
@@ -35,6 +80,256 @@
         isComMarker_ = false;  // 消费标记
         std::string objExpr = std::move(comObjExpr_);
         std::string memberName = std::move(comMemberName_);
+
+        // C29-Data: Data1.Recordset 的调用面 —— Fields("name")(→FieldValueStr) 与
+        // MoveFirst/Last/Next/Previous/Refresh。objExpr 是 vb6_Data_Self( 透传形态。
+        if (objExpr.find("vb6_Data_Self(") == 0) {
+            if (getenv("C3_CG_TRACE")) {
+                FILE* tf = fopen("C:/Users/Administrator/Documents/c3.vb6.pro/.temp/cg3.log", "a");
+                if (tf) { fprintf(tf, "[COMBIND-DATA] member=[%s]\n", memberName.c_str()); fclose(tf); }
+            }
+            std::string dtM = Symbol::toLower(memberName);
+            std::vector<std::string> da;
+            for (size_t i = 0; i < node.positional.size(); i++) {
+                emitExpr(*node.positional[i]);
+                da.push_back(lastExpr_);
+            }
+            if (dtM == "fields") {
+                // VB6: Fields("name") / Fields(1) —— 取值即 FieldValueStr
+                std::string a0 = da.empty() ? std::string("L\"\"") : da[0];
+                // 数字下标转宽字面量 (FieldValueStr 的参数是 nameOrIndex 统一收宽串)
+                if (!a0.empty() && a0.find_first_not_of("0123456789") == std::string::npos)
+                    a0 = "L\"" + a0 + "\"";
+                lastExpr_ = "vb6_Data_FieldValueStr(" + objExpr + ", " + a0 + ")";
+                return;
+            }
+            if (dtM == "movenext")     { lastExpr_ = "vb6_Data_MoveNext(" + objExpr + ")"; return; }
+            if (dtM == "moveprevious") { lastExpr_ = "vb6_Data_MovePrevious(" + objExpr + ")"; return; }
+            if (dtM == "movefirst")    { lastExpr_ = "vb6_Data_MoveFirst(" + objExpr + ")"; return; }
+            if (dtM == "movelast")     { lastExpr_ = "vb6_Data_MoveLast(" + objExpr + ")"; return; }
+            if (dtM == "refresh")      { lastExpr_ = "vb6_Data_Refresh(" + objExpr + ")"; return; }
+        }
+        // C29-4: StatusBar1.SimClick n, dbl —— **判据专用**方法 (无头环境点不了鼠标,
+        // RTL 的 vb6_StatusBar_SimClick 程序化发一条真实 WM_NOTIFY, 走完整派发链)。
+        // 不对应任何 VB6 语义, 写进 ai/029 边界。
+        if (objExpr.find("vb6_hwnd_") == 0) {
+            std::string sbBare = objExpr.substr(9);
+            if (statusBarVars_.count(sbBare) &&
+                (Symbol::toLower(memberName) == "simclick")) {
+                std::vector<std::string> sa;
+                for (size_t i = 0; i < node.positional.size(); i++) {
+                    emitExpr(*node.positional[i]);
+                    sa.push_back(lastExpr_);
+                }
+                lastExpr_ = "vb6_StatusBar_SimClick((void*)" + objExpr + ", "
+                          + (sa.size() > 0 ? sa[0] : std::string("0")) + ", "
+                          + (sa.size() > 1 ? sa[1] : std::string("0")) + ")";
+                return;
+            }
+        }
+        // C29-OLE: OLE 容器的方法全走 vb6_OleCon_* (真 OLE 容器, 非 COM 占位)。
+        // objExpr = vb6_hwnd_X (OLE 容器是真窗口控件)。不拦的话会拼成
+        // `vb6_ComCall(vb6_hwnd_X, L"CreateEmbed", …)` —— 对 HWND 当 IDispatch 用。
+        if (!oleConNameOfExpr(objExpr).empty()) {
+            std::string oleSlot = "vb6_hwnd_" + oleConNameOfExpr(objExpr);
+            std::string oleMember = memberName;
+            std::transform(oleMember.begin(), oleMember.end(), oleMember.begin(), ::tolower);
+            std::vector<std::string> oa;
+            for (size_t i = 0; i < node.positional.size(); i++) {
+                emitExpr(*node.positional[i]);
+                oa.push_back(lastExpr_);
+            }
+            // VB6 的 CreateEmbed(SourceDoc, SourceItem) 两参都可省
+            auto oleArg = [&](size_t i, const char* dflt) -> std::string {
+                return (oa.size() > i && !oa[i].empty()) ? oa[i] : dflt;
+            };
+            if (oleMember == "createembed") {
+                lastExpr_ = "vb6_OleCon_CreateEmbed((void*)" + oleSlot + ", "
+                          + oleArg(0, "NULL") + ")";
+                return;
+            }
+            if (oleMember == "createlink") {
+                lastExpr_ = "vb6_OleCon_CreateLink((void*)" + oleSlot + ", "
+                          + oleArg(0, "NULL") + ", " + oleArg(1, "NULL") + ")";
+                return;
+            }
+            if (oleMember == "doverb") {
+                lastExpr_ = "vb6_OleCon_DoVerb((void*)" + oleSlot + ", "
+                          + (oa.empty() ? std::string("0") : oa[0]) + ")";
+                return;
+            }
+            if (oleMember == "close") {
+                lastExpr_ = "vb6_OleCon_Close((void*)" + oleSlot + ")";
+                return;
+            }
+            if (oleMember == "insertobjdlg") {
+                lastExpr_ = "vb6_OleCon_InsertObjDlg((void*)" + oleSlot + ")";
+                return;
+            }
+            if (oleMember == "savetofile") {
+                lastExpr_ = "vb6_OleCon_SaveToFile((void*)" + oleSlot + ", "
+                          + oleArg(0, "L\"\"") + ")";
+                return;
+            }
+            if (oleMember == "readfromfile") {
+                lastExpr_ = "vb6_OleCon_ReadFromFile((void*)" + oleSlot + ", "
+                          + oleArg(0, "L\"\"") + ")";
+                return;
+            }
+            if (oleMember == "copy") {
+                lastExpr_ = "vb6_OleCon_Copy((void*)" + oleSlot + ")";
+                return;
+            }
+            if (oleMember == "paste" || oleMember == "pastespecialdlg") {
+                lastExpr_ = "vb6_OleCon_Paste((void*)" + oleSlot + ")";
+                return;
+            }
+            // Delete / FetchVerbs 等暂未实现的先落默认 COM 路径 (会静默答空, 与 029 §六-2 同)。
+        }
+
+        // P20-39: ImageList 原生复刻 —— ListImages.Add/Remove/Clear/Item 直接打在 RTL 上,
+        // 不要去养一个假 IDispatch (mscomctl.ocx 未注册, 且 32 位 inproc OCX 进不了 x64 进程)。
+        // 这里必须在通用 COM 分支**之前**拦下, 否则 next 步就会拼出
+        // `vb6_ComCall(vb6_ComGetObjectProp(vb6_com_X, L"ListImages"), L"Add", ...)`。
+        {
+            std::string ilMember = memberName;
+            std::transform(ilMember.begin(), ilMember.end(), ilMember.begin(), ::tolower);
+            // objExpr 是 `vb6_ComGetObjectProp(vb6_com_X, L"ListImages")`(都在 ② 形态上),
+            // 所以按裸控件名认, 不能直接比 objExpr。
+            if (!imageListNameOfExpr(objExpr).empty()) {
+                if (ilMember == "add") {
+                    std::vector<std::string> a;
+                    for (size_t i = 0; i < node.positional.size(); i++) {
+                        emitExpr(*node.positional[i]);
+                        a.push_back(lastExpr_);
+                    }
+                    // VB6: ListImages.Add(index, key, picture) —— 位置对应, 缺的省掉
+                    int32_t ilIdx = 0;
+                    std::string ilKey = "NULL";
+                    std::string ilPic = "NULL";
+                    if (a.size() > 0) {
+                        size_t pd = a[0].find('(');
+                        std::string first = (pd != std::string::npos) ? a[0].substr(pd + 1) : a[0];
+                        bool isNum = !first.empty();
+                        for (char ch : first) if (!isdigit((unsigned char)ch)) { isNum = false; break; }
+                        if (isNum) ilIdx = (int32_t)atol(first.c_str());
+                    }
+                    std::string ilSlot = "vb6_com_" + imageListNameOfExpr(objExpr);
+                    if (a.size() > 1) ilKey = a[1];
+                    if (a.size() > 2) ilPic = a[2];
+                    // C29-3: Add **返回 ListImage 对象** (VB6 语义: `Set img = .Add(..)`),
+                    // 不再是 int 下标 —— 旧实现返回下标时 `Set img` 接住的是个立即数,
+                    // `img.Key` 会拿它当指针解引用 (0xC000041D)。
+                    std::string ilAddCall = "vb6_ImageList_ListImages_Add((void*)" + ilSlot + ", "
+                              + std::to_string(ilIdx) + ", (const wchar_t*)(" + ilKey + "), "
+                              + ilPic + ")";
+                    // 老写法 `n = .Add(..)` (Let, 非 Set): VB6 取的是 ListImage 的
+                    // **默认属性 Index** —— 不转的话就是 `void*` 赋给整型, C 直接编不过。
+                    lastExpr_ = memObjLetScalar_
+                              ? ("vb6_ComGetIntProp(" + ilAddCall + ", L\"Index\")")
+                              : ilAddCall;
+                    return;
+                }
+                if (ilMember == "remove") {
+                    std::string ilSlot = "vb6_com_" + imageListNameOfExpr(objExpr);
+                    std::string rmArg = "NULL";
+                    for (size_t i = 0; i < node.positional.size(); i++) {
+                        emitExpr(*node.positional[i]);
+                        rmArg = lastExpr_;
+                        break;
+                    }
+                    // VB6 的 Remove 两种都吃: 数字按下标、字符串按 Key。
+                    // 数字必须走下标版 —— 转成 wchar_t* 会解引用地址 1, 直接崩。
+                    bool rmIsNum = false;
+                    {
+                        size_t lp = rmArg.find('(');
+                        std::string t = (lp != std::string::npos) ? rmArg.substr(lp + 1) : rmArg;
+                        size_t end = t.find_first_of("),", 0);
+                        if (end != std::string::npos) t = t.substr(0, end);
+                        rmIsNum = !t.empty();
+                        for (char ch : t) if (!isdigit((unsigned char)ch)) { rmIsNum = false; break; }
+                    }
+                    if (rmIsNum) {
+                        lastExpr_ = "vb6_ImageList_RemoveAtIndex((void*)" + ilSlot + ", " + rmArg + ")";
+                    } else {
+                        lastExpr_ = "vb6_ImageList_RemoveImage((void*)" + ilSlot
+                                  + ", (const wchar_t*)(" + rmArg + "), 0)";
+                    }
+                    return;
+                }
+                if (ilMember == "clear") {
+                    std::string ilSlot = "vb6_com_" + imageListNameOfExpr(objExpr);
+                    lastExpr_ = "vb6_ImageList_ClearImages((void*)" + ilSlot + ")";
+                    return;
+                }
+            }
+        }
+
+        // P20-40: StatusBar 原生复刻 —— Panels.Add/Remove/Clear 直接打在 RTL 上。
+        // 同样必须在通用 COM 分支**之前**拦下, 否则会拼出
+        // `vb6_ComCall(vb6_ComGetObjectProp(vb6_com_X, L"Panels"), L"Add", ...)`。
+        {
+            std::string sbMember = memberName;
+            std::transform(sbMember.begin(), sbMember.end(), sbMember.begin(), ::tolower);
+            std::string sbHwnd = statusBarHwndVarOfExpr(objExpr);
+            if (!sbHwnd.empty()) {
+                if (sbMember == "add") {
+                    std::vector<std::string> a;
+                    for (size_t i = 0; i < node.positional.size() && i < 3; i++) {
+                        emitExpr(*node.positional[i]);
+                        a.push_back(lastExpr_);
+                    }
+                    // Panels.Add([index], [key], [text]) —— VB6 的位置对应, 缺的省掉。
+                    int32_t sbIdx = 0;
+                    std::string sbKey = "NULL";
+                    std::string sbTxt = "L\"\"";
+                    if (a.size() > 0) {
+                        size_t pd = a[0].find('(');
+                        std::string first = (pd != std::string::npos) ? a[0].substr(pd + 1) : a[0];
+                        bool isNum = !first.empty();
+                        for (char ch : first) if (!isdigit((unsigned char)ch)) { isNum = false; break; }
+                        if (isNum) sbIdx = (int32_t)atol(first.c_str());
+                    }
+                    if (a.size() > 1 && !a[1].empty() && a[1] != "vb6_ComPackMissing(...)") sbKey = a[1];
+                    if (a.size() > 2 && !a[2].empty() && a[2] != "vb6_ComPackMissing(...)") sbTxt = a[2];
+                    lastExpr_ = "vb6_StatusBar_AddPanel((void*)" + sbHwnd + ", "
+                              + std::to_string(sbIdx) + ", (const wchar_t*)(" + sbKey + "), "
+                              + sbTxt + ")";
+                    return;
+                }
+                if (sbMember == "remove") {
+                    std::string rmArg = "0";
+                    for (size_t i = 0; i < node.positional.size(); i++) {
+                        emitExpr(*node.positional[i]);
+                        rmArg = lastExpr_;
+                        break;
+                    }
+                    // 与 ImageList.Remove 同样的坑: 数字必须走下标版, 转成 wchar_t*
+                    // 会把地址 1 当字符串解引用, 直接崩。
+                    bool rmIsNum = false;
+                    {
+                        size_t lp = rmArg.find('(');
+                        std::string t = (lp != std::string::npos) ? rmArg.substr(lp + 1) : rmArg;
+                        size_t end = t.find_first_of("),", 0);
+                        if (end != std::string::npos) t = t.substr(0, end);
+                        rmIsNum = !t.empty();
+                        for (char ch : t) if (!isdigit((unsigned char)ch)) { rmIsNum = false; break; }
+                    }
+                    if (rmIsNum) {
+                        lastExpr_ = "vb6_StatusBar_RemovePanel((void*)" + sbHwnd
+                                  + ", NULL, " + rmArg + ")";
+                    } else {
+                        lastExpr_ = "vb6_StatusBar_RemovePanel((void*)" + sbHwnd
+                                  + ", (const wchar_t*)(" + rmArg + "), 0)";
+                    }
+                    return;
+                }
+                if (sbMember == "clear") {
+                    lastExpr_ = "vb6_StatusBar_ClearPanels((void*)" + sbHwnd + ")";
+                    return;
+                }
+            }
+        }
 
         // Fix 057: Me.Controls.Add(ProgID, Name) → vb6_Form_ControlsAdd(hwnd, L"ProgID", L"Name")
         // 检测链式COM: objExpr = "vb6_ComGetObjectProp(vb6_hwnd_Form1, L"Controls")", memberName = "Add"

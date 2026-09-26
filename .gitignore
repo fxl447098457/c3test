@@ -136,3 +136,4 @@ scripts/_tmp_*.bat
 
 # 二分定位调试产物 (bisect*.vbp): 不属于门禁用例
 **/bisect*.vbp
+tests/ctrlstatusbar/run*.out

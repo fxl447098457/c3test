@@ -152,6 +152,12 @@ void CCodeGen::visit(CallStmt& node) {
                                     // Fix 091r: 判定改用 isVariantVal091r (含
                                     // knownVariantVars_/类字段 兜底).
                                     c_.emitLine("vb6_DebugWriteBSTR(vb6_VariantToString(" + val + "));");
+                                } else if (inferExprType(*call.positional[j]) == Vb6Type::Boolean) {
+                                    // Fix 198: Debug.Print b (b As Boolean) 落到下面的
+                                    // DebugWriteLong 会打成 -1/0 —— VB6 打 True/False,
+                                    // 与 CStr / `&` 拼接同一口径 (同一个值两条路读数不同,
+                                    // 正是 ai/022 待拍板 5 的那处不一致)。
+                                    c_.emitLine("vb6_DebugWriteBSTR(vb6_CStrBool(" + val + "));");
                                 } else {
                                     // 整数/布尔值, 用DebugWriteLong输出
                                     c_.emitLine("vb6_DebugWriteLong((int32_t)(" + val + "));");
@@ -193,6 +199,69 @@ void CCodeGen::visit(CallStmt& node) {
         // COM调用检测 (P6.2): isComMarker_标志
         if (isComMarker_) {
             isComMarker_ = false;
+            // P20-39: ImageList 原生复刻 —— **无实参**的 `ImageList1.ListImages.Clear`
+            // 走不到 visit(IndexOrCallExpr&), 是在这条语句路径上收尾的。这里必须同样拦一道,
+            // 否则掉回 vb6_ComCall(vb6_ComGetObjectProp(...), L"Clear", NULL, 0) 的假 IDispatch。
+            // (cgen_expr_call_com_bind.inc 那条管带实参的 Add/Remove, 两条并行, 别只挂一头。)
+            if (imageListNameOfExpr(comObjExpr_) != ""
+                && Symbol::toLower(comMemberName_) == "clear") {
+                std::string ilSlot = "vb6_com_" + imageListNameOfExpr(comObjExpr_);
+                comObjExpr_.clear();
+                comMemberName_.clear();
+                c_.emitLine("vb6_ImageList_ClearImages((void*)" + ilSlot + ");");
+                return;
+            }
+            // C29-Data: `Data1.Recordset.Refresh` 等 —— comObjExpr_ 是 vb6_Data_Self( 透传形态
+            // (recordset 走控件属性分支不设裸控件标记, 所以这里认前缀而不是查表)。
+            // 不拦就落 vb6_ComCall(vb6_Data_Self(...), L"Refresh") —— 对 ODBC 状态当 IDispatch 用。
+            if (comObjExpr_.find("vb6_Data_Self(") == 0) {
+                std::string dhD = dataSelfHwndExpr(comObjExpr_);
+                std::string mD = Symbol::toLower(comMemberName_);
+                if (!dhD.empty()) {
+                    std::string fnD;
+                    if (mD == "refresh")      fnD = "vb6_Data_Refresh";
+                    else if (mD == "movenext")     fnD = "vb6_Data_MoveNext";
+                    else if (mD == "moveprevious") fnD = "vb6_Data_MovePrevious";
+                    else if (mD == "movefirst")    fnD = "vb6_Data_MoveFirst";
+                    else if (mD == "movelast")     fnD = "vb6_Data_MoveLast";
+                    if (!fnD.empty()) {
+                        comObjExpr_.clear();
+                        comMemberName_.clear();
+                        c_.emitLine(fnD + "((void*)" + dhD + ");");
+                        return;
+                    }
+                }
+            }
+            // P20-40: 同款 —— `StatusBar1.Panels.Clear` 无实参, 也必须在这条语句路径收尾。
+            if (statusBarNameOfExpr(comObjExpr_) != ""
+                && Symbol::toLower(comMemberName_) == "clear") {
+                std::string sbHwnd = "vb6_hwnd_" + statusBarNameOfExpr(comObjExpr_);
+                comObjExpr_.clear();
+                comMemberName_.clear();
+                c_.emitLine("vb6_StatusBar_ClearPanels((void*)" + sbHwnd + ");");
+                return;
+            }
+            // D6 / C29-9: 无括号的 `CommonDialog1.ShowOpen` —— 与 List1.Clear 同一条
+            // 语句路。不接这里的话会落到下面 `vb6_ComCall(dl1, L"ShowOpen")`：既编不过
+            // (裸控制名)，也正是本批要拆掉的 OCX 形状。
+            {
+                auto itCd = knownFormControls_.find(comObjExpr_);
+                std::string mCd = Symbol::toLower(comMemberName_);
+                if (itCd != knownFormControls_.end()
+                    && itCd->second == FrmControlType::CommonDialog
+                    && (mCd == "showopen" || mCd == "showsave" || mCd == "showcolor"
+                        || mCd == "showfont" || mCd == "showprinter" || mCd == "showabout")) {
+                    std::string hwndCd = cIdent(knownFormControlOriginalNames_.count(comObjExpr_)
+                        ? knownFormControlOriginalNames_[comObjExpr_] : comObjExpr_);
+                    std::string fnCd = "vb6_CdShow"
+                        + std::string(1, (char)::toupper((unsigned char)mCd[4])) + mCd.substr(5);
+                    comObjExpr_.clear();
+                    comMemberName_.clear();
+                    c_.emitLine(fnCd + "((void*)vb6_hwnd_" + hwndCd + ");"
+                                "  /* CommonDialog." + mCd + " (原生 comdlg32) */");
+                    return;
+                }
+            }
             // Fix 086: 无括号的控件方法调用 (List1.Clear) — 与 IndexOrCallExpr
             // 的 P13.3 处理一致, 生成 vb6_ClearList(vb6_hwnd_Listx), 而非
             // vb6_ComCall(list1,...) 裸控制名 (C2065).

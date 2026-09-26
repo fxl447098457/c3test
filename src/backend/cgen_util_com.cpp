@@ -21,6 +21,259 @@ std::string CCodeGen::resolveComValue(const std::string& unpackType) {
     std::string objExpr = std::move(comObjExpr_);
     std::string memberName = std::move(comMemberName_);
 
+    // C29-5a: Toolbar 原生复刻 —— 本批只改道 `Buttons.Count`，读数取自原生
+    // TB_BUTTONCOUNT，所以它是"设计期那些按钮真进了控件"的**控件侧**证据 (不是我那张表
+    // 自说自话)。Button 对象那一族 ((i).Key / .Caption / Add / ButtonClick) 留 5b。
+    // 位置跟上面 DataObject / ImageList / StatusBar 那几块同一侧：**赶在 P24-07 那段
+    // early-bound 决策之前**，否则 `Count` 会被当普通 COM 成员发成 vb6_ComGetProp。
+    {
+        std::string tbMem = memberName;
+        std::transform(tbMem.begin(), tbMem.end(), tbMem.begin(), ::tolower);
+        std::string tbName = toolbarNameOfExpr(objExpr);
+        if (!tbName.empty() && tbMem == "count") {
+            lastExpr_ = "vb6_Toolbar_GetButtonCount((void*)vb6_hwnd_" + tbName + ")";
+            isComMarker_ = false;
+            return lastExpr_;
+        }
+    }
+
+    // P20-44: OLE 拖放的 **DataObject 形参**成员 —— `Data.GetText` 等。
+    // 处理器形参 `void** Data` 不是 IDispatch, 掉 COM 派发运行期必炸/答错。
+    // **必须放在 early-bound 分支之前**: DataObject 是 COM 类, early-bound 会先
+    // 命中并发 ComGetStringProp (实测踩过, 拦截放后面根本到不了)。
+    // DataObject 指针 = *Data, 所以 RTL 调用首参是 `(void*)(*Data)`。
+    {
+        std::string ddLower = Symbol::toLower(objExpr);
+        auto* ddSym = symTab_.lookup(ddLower);
+        // **形参**的 `As <类型>` 原文记在 srcTypeName (tB B08c 那条), 变量声明才记
+        // variableTypeName —— 两边都看, 否则处理器形参永远判不中 (实测踩过)。
+        if (ddSym && !ddSym->srcTypeName.empty()
+            && Symbol::toLower(ddSym->srcTypeName) == "dataobject") {
+            std::string memDD = Symbol::toLower(memberName);
+            std::string ddArg = "(void*)(*" + objExpr + ")";
+            if (memDD == "gettext")      { lastExpr_ = "vb6_oleDD_GetText(" + ddArg + ")"; isComMarker_ = false; return lastExpr_; }
+            if (memDD == "getfilecount") { lastExpr_ = "vb6_oleDD_GetFileCount(" + ddArg + ")"; isComMarker_ = false; return lastExpr_; }
+        }
+    }
+
+    // C29-Data: `Data1.Recordset.<标量成员>` 直译 —— objExpr 是 vb6_Data_Self( 透传形态。
+    // (Fields("x")/Move* 是调用不是属性, 在 cgen_expr_call_com_bind.inc 拦。)
+    if (objExpr.find("vb6_Data_FieldValueStr(") == 0) {
+        // Fields("x").Value: 值就是 FieldValueStr 本身
+        std::string dtLower = Symbol::toLower(memberName);
+        if (dtLower == "value") { lastExpr_ = objExpr; isComMarker_ = false; return lastExpr_; }
+    }
+    if (objExpr.find("vb6_Data_Self(") == 0) {
+        std::string dtLower = Symbol::toLower(memberName);
+        if (dtLower == "bof")         { lastExpr_ = "vb6_Data_BOF(" + objExpr + ")"; isComMarker_ = false; return lastExpr_; }
+        if (dtLower == "eof")         { lastExpr_ = "vb6_Data_EOF(" + objExpr + ")"; isComMarker_ = false; return lastExpr_; }
+        if (dtLower == "recordcount") { lastExpr_ = "vb6_Data_RecordCount(" + objExpr + ")"; isComMarker_ = false; return lastExpr_; }
+        if (dtLower == "fieldcount")  { lastExpr_ = "vb6_Data_FieldCount(" + objExpr + ")"; isComMarker_ = false; return lastExpr_; }
+        if (dtLower == "value" || dtLower == "recordset") {
+            // Fields("x").Value 的 .Value: FieldValueStr 就是值本身, 透传不包装
+            lastExpr_ = objExpr; isComMarker_ = false; return lastExpr_;
+        }
+    }
+
+    // C29-7: `ListView1.ListItems` / `.ColumnHeaders` → **真集合对象** (与 C29-3 的
+    // ImageList.ListImages 同一口径)。ListView 是**真窗口**, 宿主槽是 vb6_hwnd_X,
+    // 不是 ImageList 那种 vb6_com_X 实例指针。
+    {
+        std::string lvLower = Symbol::toLower(memberName);
+        if (lvLower == "listitems" || lvLower == "columnheaders") {
+            std::string lvBare = listViewNameOfExpr(objExpr);
+            if (!lvBare.empty()) {
+                lastExpr_ = (lvLower == "listitems")
+                    ? ("vb6_ListView_ListItems((void*)vb6_hwnd_" + lvBare + ")")
+                    : ("vb6_ListView_ColumnHeaders((void*)vb6_hwnd_" + lvBare + ")");
+                isComMarker_ = false;
+                return lastExpr_;
+            }
+        }
+    }
+
+    // C29-OLE: `OLE1.Object` → 嵌入对象的 IDispatch (真 OLE 容器)。
+    // 其它属性 (Class/OLEType/SizeMode…) 走属性表 (cgen_util_ctrl.cpp), 不在这拦。
+    if (Symbol::toLower(memberName) == "object") {
+        std::string ocBare = oleConNameOfExpr(objExpr);
+        if (!ocBare.empty()) {
+            lastExpr_ = "vb6_OleCon_GetObject((void*)vb6_hwnd_" + ocBare + ")";
+            isComMarker_ = false;
+            return lastExpr_;
+        }
+    }
+
+    // C29-3: `ImageList1.ListImages` → **真集合对象** (原生复刻的成员集合, 见
+    // vb6forms_memberobj.c)。必须排在下面那条 P20-39 分支之前: 那条管的是链上更外层的
+    // 成员 (ListImages.Count / ListImages(i).Key), 这里要先把**集合本身**立起来。
+    // 不拦就会发 `vb6_ComGetObjectProp(vb6_com_X, L"ListImages")` —— 而 ImageList 无窗口,
+    // vb6_com_X 槽里放的是 HIMAGELIST 实例指针 (不是 IDispatch), 对它做属性读 =
+    // 运行期拿垃圾当 vtable 用。
+    {
+        std::string liLower = Symbol::toLower(memberName);
+        if (liLower == "listimages") {
+            std::string liBare = imageListNameOfExpr(objExpr);
+            if (!liBare.empty()) {
+                lastExpr_ = "vb6_ImageList_ListImages((void*)vb6_com_" + liBare + ")";
+                isComMarker_ = false;
+                return lastExpr_;
+            }
+        }
+    }
+
+    // P20-39: ImageList 原生复刻 —— 把集合/属性读改道到 RTL。
+    // 放在两个 COM 分支**之前**, 否则 Count 会走默认 BSTR 解包、Key 会走 ComCallObject。
+    {
+        std::string memLower = memberName;
+        std::transform(memLower.begin(), memLower.end(), memLower.begin(), ::tolower);
+        std::string slot = imageListSlotVarOfExpr(objExpr);
+        if (slot.empty()) { }
+        else if (memLower == "count") {
+            lastExpr_ = "vb6_GetImageListCount((void*)" + slot + ")";
+            isComMarker_ = false;
+            return lastExpr_;
+        } else {
+            // ListImages(i).Key / .Index: 从 Item 的第一个实参里抠下标 (只支持字面量)
+            std::string num;
+            std::string argTxt;   // Item 的实参原文, 下标/Key 两路都要用, 提到外层留着
+            size_t ia = objExpr.find("L\"Item\", (void*[]){");
+            if (ia != std::string::npos) {
+                size_t open = ia + strlen("L\"Item\", (void*[]){");
+                size_t close = objExpr.find('}', open);
+                argTxt = objExpr.substr(open, close - open);
+                // 形如 "vb6_ComPackInt(1)" 或直接的 "1": 抠 '(' 之后到 ')' / ',' 之前
+                size_t lp = argTxt.find('(');
+                if (lp != std::string::npos) {
+                    size_t end = argTxt.find_first_of("),", lp + 1);
+                    num = (end == std::string::npos) ? argTxt.substr(lp + 1)
+                                                     : argTxt.substr(lp + 1, end - lp - 1);
+                } else {
+                    num = argTxt;
+                }
+                bool isNum = !num.empty();
+                for (char c : num) if (!isdigit((unsigned char)c)) { isNum = false; break; }
+                if (!isNum) num.clear();
+            }
+            // `ListImages("SomeKey")` 是 VB6 的按 Key 取项, 实参是宽字符串不是下标。
+            // 同一条 Item 实参两种形态都得认, 否则掉回假 IDispatch 路径。
+            std::string keyLit;
+            if (num.empty()) {
+                size_t qs = argTxt.find("L\"");
+                if (qs != std::string::npos) {
+                    size_t qe = argTxt.find('"', qs + 2);
+                    if (qe != std::string::npos) {
+                        keyLit = argTxt.substr(qs + 2, qe - qs - 2);
+                        // 转义引号收尾 (VB6 `""` 在 C 里就是 `\"`)
+                        if (!keyLit.empty() && keyLit.back() == '\\') keyLit.pop_back();
+                    }
+                }
+            }
+            if (!num.empty() && memLower == "key") {
+                lastExpr_ = "vb6_GetImageListKeyAt((void*)" + slot + ", " + num + ")";
+                isComMarker_ = false;
+                return lastExpr_;
+            }
+            if (!num.empty() && memLower == "index") {   // ListImage.Index (1 基)
+                lastExpr_ = "vb6_ImageListIndexAt((void*)" + slot + ", " + num + ")";
+                isComMarker_ = false;
+                return lastExpr_;
+            }
+            if (!keyLit.empty() && memLower == "key") {
+                lastExpr_ = "vb6_GetImageListKeyByKey((void*)" + slot
+                          + ", (const wchar_t*)(vb6_BSTR_FromStr(L\"" + keyLit + "\")))";
+                isComMarker_ = false;
+                return lastExpr_;
+            }
+            if (!keyLit.empty() && memLower == "index") {
+                lastExpr_ = "vb6_ImageListIndexByKey((void*)" + slot
+                          + ", (const wchar_t*)(vb6_BSTR_FromStr(L\"" + keyLit + "\")))";
+                isComMarker_ = false;
+                return lastExpr_;
+            }
+        }
+    }
+
+    // P20-40: StatusBar 原生复刻 —— Panels.Count 与 Panels(i).成员 改道到 RTL。
+    // 与上面 ImageList 分支同一套手法, 只是槽是 HWND、下标要从 Item 实参里抠。
+    {
+        std::string memLower = memberName;
+        std::transform(memLower.begin(), memLower.end(), memLower.begin(), ::tolower);
+        std::string hwnd = statusBarHwndVarOfExpr(objExpr);
+        if (!hwnd.empty()) {
+            if (memLower == "count") {
+                lastExpr_ = "vb6_StatusBar_GetPanelsCount((void*)" + hwnd + ")";
+                isComMarker_ = false;
+                return lastExpr_;
+            }
+            // 抠 Item 的实参: 字面量下标, 或 `Panels("Key")` 那种宽字符串 Key。
+            // 注意没有独立的 `L"Item"` 层 —— Panels 被生成器当**默认成员**, 索引跟着
+            // 它那一层的 `(void*[]){…}` 走, 所以按参数包抠再剥 vb6_ComPackInt(...)。
+            std::string idx;
+            std::string keyLit;
+            const std::string kArr = "(void*[]){";
+            size_t ia = objExpr.find(kArr);
+            if (ia != std::string::npos) {
+                size_t open = ia + kArr.size();
+                size_t close = objExpr.find('}', open);
+                if (close != std::string::npos) {
+                    std::string argTxt = objExpr.substr(open, close - open);
+                    size_t lp = argTxt.find('(');
+                    if (lp != std::string::npos) {
+                        size_t end = argTxt.find_first_of("),", lp + 1);
+                        idx = (end == std::string::npos) ? argTxt.substr(lp + 1)
+                                                         : argTxt.substr(lp + 1, end - lp - 1);
+                    } else {
+                        idx = argTxt;
+                    }
+                    bool isNum = !idx.empty();
+                    for (char c : idx) if (!isdigit((unsigned char)c)) { isNum = false; break; }
+                    if (!isNum) idx.clear();
+                    if (idx.empty()) {
+                        size_t qs = argTxt.find("L\"");
+                        if (qs != std::string::npos) {
+                            size_t qe = argTxt.find('"', qs + 2);
+                            if (qe != std::string::npos)
+                                keyLit = argTxt.substr(qs + 2, qe - qs - 2);
+                        }
+                    }
+                }
+            }
+            auto sbGet = [&](const char* fn) {
+                return std::string(fn) + "((void*)" + hwnd + ", " + idx + ")";
+            };
+            // Key 形态走 *ByKey 两路之一, 没抠出下标就退回按下标那版 (下标为空串时
+            // RTL 会越界, 宁可编译期宁可什么都不发也别发坏代码 —— 这里退化成按 Key 查)。
+            auto sbFinishByKey = [&](const char* byIdx, const char* byKey) {
+                isComMarker_ = false;
+                if (!keyLit.empty())
+                    lastExpr_ = std::string(byKey) + "((void*)" + hwnd
+                              + ", (const wchar_t*)(vb6_BSTR_FromStr(L\"" + keyLit + "\")))";
+                else
+                    lastExpr_ = std::string(byIdx) + "((void*)" + hwnd + ", " + idx + ")";
+                return lastExpr_;
+            };
+            if (memLower == "key")   { lastExpr_ = sbFinishByKey("vb6_StatusBar_GetPanelKey",
+                                                                  "vb6_StatusBar_GetPanelKeyByKey");
+                                       isComMarker_ = false; return lastExpr_; }
+            if (memLower == "text")  { lastExpr_ = sbFinishByKey("vb6_StatusBar_GetPanelText",
+                                                                  "vb6_StatusBar_GetPanelTextByKey");
+                                       isComMarker_ = false; return lastExpr_; }
+            if (memLower == "index") { lastExpr_ = sbFinishByKey("vb6_StatusBar_GetPanelIndexByKey",
+                                                                  "vb6_StatusBar_GetPanelIndexByKey");
+                                       isComMarker_ = false; return lastExpr_; }
+            if (memLower == "width")        { lastExpr_ = sbGet("vb6_StatusBar_GetPanelWidth");
+                                              isComMarker_ = false; return lastExpr_; }
+            if (memLower == "minwidth")     { lastExpr_ = sbGet("vb6_StatusBar_GetPanelMinWidth");
+                                              isComMarker_ = false; return lastExpr_; }
+            if (memLower == "autosize")     { lastExpr_ = sbGet("vb6_StatusBar_GetPanelAutoSize");
+                                              isComMarker_ = false; return lastExpr_; }
+            if (memLower == "style")        { lastExpr_ = sbGet("vb6_StatusBar_GetPanelStyle");
+                                              isComMarker_ = false; return lastExpr_; }
+            if (memLower == "tooltiptext")  { lastExpr_ = sbGet("vb6_StatusBar_GetPanelToolTip");
+                                              isComMarker_ = false; return lastExpr_; }
+        }
+    }
+
     // P24-07: 早期绑定推断 — 利用TypeLib签名的returnType决策
     if (isEarlyBoundCom_ && earlyBoundSym_) {
         isEarlyBoundCom_ = false;
@@ -316,6 +569,52 @@ std::string CCodeGen::resolveComMarkerForPack(const std::string& packFnHint) {
     isComMarker_ = false;
     std::string objExpr = std::move(comObjExpr_);
     std::string memName = std::move(comMemberName_);
+
+    // P20-44: **DataObject 形参**成员在参数打包路径也要拦 —— Debug.Print 的实参
+    // 打包走的就是这里 (resolveComValue 只管"取值语句"那条路)。形参 `As <类型>`
+    // 原文记在 srcTypeName, 变量声明才记 variableTypeName。
+    {
+        std::string ddLower = Symbol::toLower(objExpr);
+        auto* ddSym = symTab_.lookup(ddLower);
+        if (ddSym && !ddSym->srcTypeName.empty()
+            && Symbol::toLower(ddSym->srcTypeName) == "dataobject") {
+            std::string memDD = Symbol::toLower(memName);
+            std::string ddArg = "(void*)(*" + objExpr + ")";
+            if (memDD == "gettext")      return "vb6_oleDD_GetText(" + ddArg + ")";
+            if (memDD == "getfilecount") return "vb6_oleDD_GetFileCount(" + ddArg + ")";
+        }
+    }
+
+    // C29-7: `ListView1.ListItems` / `.ColumnHeaders` → 真集合对象 (同 resolveComValue)。
+    // 走这条的是"集合被当实参 / 被整体赋值"的场合, 例如 `Set c = ListView1.ListItems`。
+    {
+        std::string lvLower = Symbol::toLower(memName);
+        if (lvLower == "listitems" || lvLower == "columnheaders") {
+            std::string lvBare = listViewNameOfExpr(objExpr);
+            if (!lvBare.empty())
+                return (lvLower == "listitems")
+                    ? ("vb6_ListView_ListItems((void*)vb6_hwnd_" + lvBare + ")")
+                    : ("vb6_ListView_ColumnHeaders((void*)vb6_hwnd_" + lvBare + ")");
+        }
+    }
+
+    // C29-OLE: `OLE1.Object` (被当实参/整体赋值的场合, 如 `Set o = OLE1.Object`)。
+    if (Symbol::toLower(memName) == "object") {
+        std::string ocBare = oleConNameOfExpr(objExpr);
+        if (!ocBare.empty())
+            return "vb6_OleCon_GetObject((void*)vb6_hwnd_" + ocBare + ")";
+    }
+
+    // C29-3: `ImageList1.ListImages` → 真集合对象 (与 resolveComValue 那条同一口径)。
+    // 走这条的是"集合被当实参 / 被整体赋值"的场合, 例如 `Set c = ImageList1.ListImages`。
+    {
+        std::string liLower = Symbol::toLower(memName);
+        if (liLower == "listimages") {
+            std::string liBare = imageListNameOfExpr(objExpr);
+            if (!liBare.empty())
+                return "vb6_ImageList_ListImages((void*)vb6_com_" + liBare + ")";
+        }
+    }
 
     // 前期绑定: 利用签名确定返回类型
     if (isEarlyBoundCom_ && earlyBoundSym_) {

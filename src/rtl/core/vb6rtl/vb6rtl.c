@@ -140,6 +140,24 @@ void vb6_Init(void) {
         AddVectoredExceptionHandler(1, vb6_CrashTraceVEH);
     }
 #endif
+    // P20-44: OLE 拖放 RTL 自测 —— 环境变量 C3_OLEDDB_TEST=1 时, 把
+    // IDataObject/IDropTarget 的 DragEnter/DragOver/Drop 走一遍并写结果文件。
+    // 无头环境没法真拖 (DoDragDrop 是模态循环), 直接调 IDropTarget 的方法才测得动。
+    {
+        // 用 W 版取环境变量: 输出路径可能含非 ASCII (fwprintf/_wfopen 全宽链路)
+        wchar_t oleOut43[MAX_PATH] = { 0 };
+        wchar_t oleFlag43[8] = { 0 };
+        if (GetEnvironmentVariableW(L"C3_OLEDDB_TEST", oleFlag43, 8) > 0) {
+            if (!GetEnvironmentVariableW(L"C3_OLEDDB_TEST_OUT", oleOut43, MAX_PATH))
+                lstrcpyW(oleOut43, L"oledd_test.txt");
+            extern int32_t vb6_oleDD_SelfTest(const wchar_t* outPath);
+            vb6_oleDD_SelfTest(oleOut43);
+        }
+    }
+    // comctl32 通用控件注册 (ProgressBar/StatusBar/Toolbar/ListView/TreeView)。
+    // 必须在任何通用控件 CreateWindowExW 之前 —— 否则类未注册,
+    // CreateWindowExW 静默返回 NULL (GetLastError()==1400), 控件凭空消失。
+    vb6_ComCtl_Init();
     // 初始化COM库 (实现在vb6com.c中)
     vb6_ComInit();
 }

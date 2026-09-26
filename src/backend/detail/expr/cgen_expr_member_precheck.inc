@@ -20,6 +20,54 @@
         }
         return;
     }
+    // ============================================================
+    // P20-44: OLE 拖放的 **DataObject 形参**成员 —— `Data.GetText` / `Data.GetFileCount`。
+    // 处理器形参 `void** Data` 不是 IDispatch, 掉 COM 派发运行期必崩 (实测 0xC0000005)。
+    // **必须放在 visit(MemberAccessExpr&) 的最前面**: DataObject 是 COM 类, 走到
+    // form_builtin / generic_access / resolveComValue / resolveComMarkerForPack
+    // 任何一条都会发 ComGetStringProp (实测三条路都拦过、全被更早的分支抢走)。
+    // 判据是 dataObjectParams_ (cgen_decl_func.cpp 注册参数时收的), **不能查 symTab_**
+    // —— codegen 生成处理器体时形参不在符号表 (实测 lookup found=0)。
+    // DataObject 指针 = *Data, 所以 RTL 调用首参是 `(void*)(*Data)`。
+    // ============================================================
+    if (node.object && node.object->kind == ASTNodeKind::IdentifierExpr) {
+        auto& ddObj44 = static_cast<IdentifierExpr&>(*node.object);
+        std::string ddLower44 = Symbol::toLower(ddObj44.name);
+        auto* ddSym44 = symTab_.lookup(ddLower44);
+        if (dataObjectParams_.count(ddLower44)) {
+            std::string memDD44 = Symbol::toLower(node.memberName);
+            std::string ddArg44 = "(void*)(*" + ddObj44.name + ")";
+            if (memDD44 == "gettext")      { lastExpr_ = "vb6_oleDD_GetText(" + ddArg44 + ")"; return; }
+            if (memDD44 == "getfilecount") { lastExpr_ = "vb6_oleDD_GetFileCount(" + ddArg44 + ")"; return; }
+            // Data.Files (非调用形态, 后面跟 .Count): 留尾部注释标记, 外层 MemberAccess
+            // 的 generic path 消费它 (搜 oleDD-files)。
+            if (memDD44 == "files")        { lastExpr_ = ddArg44 + " /* oleDD-files */"; return; }
+        }
+        // ---- P20-44: 控件的 OLEDrag 方法 (无实参形态) ----
+        // 语句 `X.OLEDrag` 的 callee 求值会走到这里 (visit 最前), 比 com_bind 的
+        // "无参数 → ComCall" 分支早。实参形态 (allowedEffects) 走 call_callee_member。
+        auto itCtlDDp = knownFormControls_.find(ddLower44);
+        if (itCtlDDp != knownFormControls_.end()
+            && Symbol::toLower(node.memberName) == "oledrag") {
+            std::string hwndDDp = makeCtrlHwndArg(ddLower44, itCtlDDp->second);
+            static const char* ddSrcEvP[4] = { "_OLEStartDrag", "_OLESetData",
+                                               "_OLEGiveFeedback", "_OLECompleteDrag" };
+            std::string regDDp;
+            for (int ddK = 0; ddK < 4; ddK++) {
+                auto* ddSym = symTab_.lookup(ddObj44.name + ddSrcEvP[ddK]);
+                if (!ddSym) continue;
+                std::string ddFn = cProcName(ddSym->name, AccessLevel::Private);
+                regDDp += "  { extern void " + ddFn + "(); vb6_OLEDrop_SetHandler("
+                        + hwndDDp + ", " + std::to_string(ddK + 2) + ", (void*)" + ddFn + "); }\n";
+            }
+            lastExpr_ = (std::string)"{ void* ddObj44 = (void*)vb6_oleDD_MakeDataObject("
+                      "vb6_GetControlText(" + hwndDDp + "), NULL, 0);\n"
+                      + regDDp
+                      + "  vb6_OLEDrag_Start((void*)" + hwndDDp + ", ddObj44, 3); }";
+            return;
+        }
+    }
+
     // Fix 010k: Err/builtin object member access — check FIRST before anything else
     // This must be at the very top to avoid any other code path consuming the node
     if (node.object && node.object->kind == ASTNodeKind::IdentifierExpr) {
