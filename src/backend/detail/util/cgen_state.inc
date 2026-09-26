@@ -422,6 +422,39 @@
     // (`Index`), 而 `Set img = ListImages.Add(..)` 拿对象本身。两者走的是两个不同的
     // visit (AssignmentStmt vs SetStmt), 天然分开 —— 所以这个标志只在 Let 期间置真。
     bool memObjLetScalar_ = false;
+
+    // C29-7: 原生复刻的 ListView 控件 (登记裸控件名, 如 "ListView1")。
+    // ⚠ ListView 是**真窗口**, 所以 RTL 各函数第一参要的是 **HWND 槽 vb6_hwnd_X** ——
+    // 与 ImageList 那族的 vb6_com_X (无窗口, 槽里是复刻实例指针) 不同, 别照抄。
+    std::unordered_set<std::string> listViewVars_;
+    // objExpr 是否落在一个已登记的 ListView 上 (返回裸控件名, 否则空串)。
+    // 形态: ① 裸槽 vb6_hwnd_X
+    //       ② 集合对象 vb6_ListView_ListItems((void*)vb6_hwnd_X) / ...ColumnHeaders(...)
+    //       ③ Item 结果 vb6_ComCallObject(②, L"Item", …) —— ③ 靠 ② 的子串命中
+    std::string listViewNameOfExpr(const std::string& objExpr) const {
+        static const char* kHeads[] = {
+            "vb6_ListView_ListItems((void*)vb6_hwnd_",
+            "vb6_ListView_ColumnHeaders((void*)vb6_hwnd_" };
+        for (const char* h : kHeads) {
+            size_t p = objExpr.find(h);
+            if (p == std::string::npos) continue;
+            size_t s = p + strlen(h);
+            size_t e = s;
+            while (e < objExpr.size()
+                   && (isalnum((unsigned char)objExpr[e]) || objExpr[e] == '_')) e++;
+            std::string n = objExpr.substr(s, e - s);
+            if (listViewVars_.count(n)) return n;
+        }
+        if (objExpr.size() > 9 && objExpr.compare(0, 9, "vb6_hwnd_") == 0) {
+            std::string n = objExpr.substr(9);
+            if (listViewVars_.count(n)) return n;
+        }
+        return "";
+    }
+    std::string listViewHwndVarOfExpr(const std::string& objExpr) const {
+        std::string n = listViewNameOfExpr(objExpr);
+        return n.empty() ? "" : "vb6_hwnd_" + n;
+    }
     // objExpr 是否落在一个已登记的 ImageList 上。命中返回**裸控件名** (如 "ImageList1"),
     // 否则返回空串。objExpr 有三种形态, 三种都要认:
     //   ① 控件槽本身                       → vb6_com_ImageList1

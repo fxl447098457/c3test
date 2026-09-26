@@ -22,7 +22,10 @@
             // C29-3: 原生复刻的控件成员集合 (ImageList.ListImages 那一族) 返回的也是
             // 真 IDispatch —— 必须当 COM 对象继续访问, 否则拼出 `X.Count` (X 是 void*
             // 表达式) → 直接是 C 语法错。
-            objExpr.find("vb6_ImageList_ListImages(") == 0) {
+            objExpr.find("vb6_ImageList_ListImages(") == 0 ||
+            // C29-7: ListView 的两个集合同理 —— 都是真 IDispatch, 成员与方法要走晚绑定。
+            objExpr.find("vb6_ListView_ListItems(") == 0 ||
+            objExpr.find("vb6_ListView_ColumnHeaders(") == 0) {
             // 链式COM: 设置COM标记, objExpr是中间对象表达式
             comObjExpr_ = objExpr;
             comMemberName_ = node.memberName;
@@ -83,6 +86,9 @@
         obj.find("vb6_CreateObject(") == 0 ||
         // C29-3: 同上 —— 原生复刻的成员集合 (ImageList.ListImages) 也是 COM 对象。
         obj.find("vb6_ImageList_ListImages(") == 0 ||
+        // C29-7: ListView 的 ListItems / ColumnHeaders 同理。
+        obj.find("vb6_ListView_ListItems(") == 0 ||
+        obj.find("vb6_ListView_ColumnHeaders(") == 0 ||
         obj.find("vb6_PropertyPage_SelectedControls(") == 0) {
         // 对于vb6_ComCall/vb6_ComGetProp, 需要先解封为对象
         // 链式调用: ComCall返回VARIANT*, 需ComCallObject才能拿到IDispatch*

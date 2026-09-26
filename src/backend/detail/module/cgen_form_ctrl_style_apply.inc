@@ -449,6 +449,39 @@
             }
         }
 
+        // C29-7: ListView 设计期 —— View/GridLines/FullRowSelect/MultiSelect/CheckBoxes/
+        // HideColumnHeaders/AllowColumnReorder/LabelEdit 一次 Init 灌进去。
+        // 不灌就是"空壳": comctl32 的 SysListView32 默认是**图标视图**, 于是设计期写了
+        // View=3 (报表) 也照样看不见列 —— 实测读数 LV13-VIEW=0 而不是 3。
+        if (ctrl.controlType == FrmControlType::ListView) {
+            std::string lvNLower = ctrl.controlName;
+            std::transform(lvNLower.begin(), lvNLower.end(), lvNLower.begin(), ::tolower);
+            std::string lvHwnd = knownControlArrays_.count(lvNLower) ?
+                ("vb6_CtrlArr_GetAt(&vb6_arr_" + cIdent(ctrl.controlName) + ", " +
+                 std::to_string(ctrl.index >= 0 ? ctrl.index : 0) + ")") :
+                ("vb6_hwnd_" + cIdent(ctrl.controlName));
+            auto lvInt = [](const std::map<std::string, FrmValue>& mp, const std::string& k, int defv) -> int {
+                auto it = mp.find(k);
+                if (it == mp.end()) return defv;
+                return (int)it->second.intValue;
+            };
+            // VB6 的 True 是 -1; 这些布尔属性按"非 0 即真"归一化后再发。
+            auto lvBool = [&](const std::string& k) -> int {
+                return lvInt(ctrl.properties, k, 0) != 0 ? 1 : 0;
+            };
+            int lvView = lvInt(ctrl.properties, "View", 0);
+            if (lvView < 0 || lvView > 3) lvView = 0;
+            c_.emitLine("vb6_ListView_Init((void*)" + lvHwnd + ", "
+                      + std::to_string(lvView) + ", "
+                      + std::to_string(lvBool("GridLines")) + ", "
+                      + std::to_string(lvBool("FullRowSelect")) + ", "
+                      + std::to_string(lvBool("MultiSelect")) + ", "
+                      + std::to_string(lvBool("CheckBoxes")) + ", "
+                      + std::to_string(lvBool("HideColumnHeaders")) + ", "
+                      + std::to_string(lvBool("AllowColumnReorder")) + ", "
+                      + std::to_string(lvBool("LabelEdit")) + ");");
+        }
+
         // P20-42: SSTab 设计期 —— 一次 Init 灌进 Tabs/Tab/TabOrientation/TabStyle/
         // TabsPerRow/WordWrap, 再逐页灌 Caption。
         // 页标题的 .frm 形态支持两种: ①VB6 实际写的 BeginProperty Tabs {…} 块里

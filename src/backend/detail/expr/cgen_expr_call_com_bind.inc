@@ -7,7 +7,14 @@
     if (isComMarker_) {
         // ActiveX控件COM属性: 先获取属性对象, 再用Item(idx)索引
         // comObjExpr_以"vb6_com_"开头 = ActiveX控件变量
-        if (comObjExpr_.find("vb6_com_") == 0 && !node.positional.empty()) {
+        // C29-7: ListView 是**真窗口** (`vb6_hwnd_X`), 而 ImageList 是 `vb6_com_X` ——
+        // 这条"控件属性对象 + Item(idx)"的路两种槽都要认, 否则 `ListView1.ListItems(1)`
+        // 会被拼成 `vb6_ComCallObject(vb6_hwnd_ListView1, L"ListItems", …)` —— 对 HWND
+        // 当 IDispatch 用, 链接过、运行期读数全空。
+        bool axSlotObj = comObjExpr_.find("vb6_com_") == 0
+                      || (comObjExpr_.find("vb6_hwnd_") == 0
+                          && !listViewNameOfExpr(comObjExpr_).empty());
+        if (axSlotObj && !node.positional.empty()) {
             std::string axObjExpr = std::move(comObjExpr_);
             std::string axMember = std::move(comMemberName_);
             isComMarker_ = false;
@@ -21,6 +28,17 @@
                     std::string bareIL = imageListNameOfExpr(axObjExpr);
                     if (!bareIL.empty())
                         collectionExpr = "vb6_ImageList_ListImages((void*)vb6_com_" + bareIL + ")";
+                } else {
+                    // C29-7: ListView 的 ListItems / ColumnHeaders 同一口径。
+                    // ⚠ 宿主槽是 **vb6_hwnd_X** (ListView 是真窗口), 不是 vb6_com_X。
+                    std::string memLV = Symbol::toLower(axMember);
+                    if (memLV == "listitems" || memLV == "columnheaders") {
+                        std::string bareLV = listViewNameOfExpr(axObjExpr);
+                        if (!bareLV.empty())
+                            collectionExpr = (memLV == "listitems")
+                                ? ("vb6_ListView_ListItems((void*)vb6_hwnd_" + bareLV + ")")
+                                : ("vb6_ListView_ColumnHeaders((void*)vb6_hwnd_" + bareLV + ")");
+                    }
                 }
                 if (collectionExpr.empty())
                     collectionExpr = "vb6_ComGetObjectProp(" + axObjExpr + ", L\"" + axMember + "\")";

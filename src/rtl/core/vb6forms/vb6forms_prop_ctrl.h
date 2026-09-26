@@ -267,6 +267,13 @@ void    vb6_ListView_SetColumnText(void* hwnd, int32_t idx, void* bstr);
 int32_t vb6_ListView_GetColumnWidth(void* hwnd, int32_t idx);
 void    vb6_ListView_SetColumnWidth(void* hwnd, int32_t idx, int32_t w);
 int32_t vb6_ListView_GetColumnAlign(void* hwnd, int32_t idx);
+void    vb6_ListView_SetColumnAlign(void* hwnd, int32_t idx, int32_t val);
+void    vb6_ListView_RemoveColumn(void* hwnd, int32_t idx);
+// C29-7 事件面: WM_NOTIFY 的 LVN_* → 1 基下标 (0 = 与本控件无关), 再由下标取成员对象。
+// 生成代码在 WM_NOTIFY 分支里用 (见 cgen_form_wndproc_dispatch.inc)。
+int32_t vb6_ListView_OnNotify(void* hwnd, int32_t code, void* lParam);
+void*   vb6_ListView_ListItemAt(void* hwnd, int32_t index);
+void*   vb6_ListView_ColumnHeaderAt(void* hwnd, int32_t index);
 void*   vb6_ListView_GetColumnKey(void* hwnd, int32_t idx);
 int32_t vb6_ListView_GetColumnIndexByKey(void* hwnd, void* keyBstr);
 void    vb6_ListView_ClearColumns(void* hwnd);
@@ -290,6 +297,18 @@ int32_t vb6_ListView_GetSelectedIndex(void* hwnd);
 void    vb6_ListView_RemoveItem(void* hwnd, int32_t idx);
 void    vb6_ListView_ClearItems(void* hwnd);
 void    vb6_ListView_SetImageList(void* hwnd, void* himl, int32_t which);
+
+// ---- C29-7: ListView 成员对象入口 (真 IDispatch, 见 vb6forms_memberobj.c) ----
+//   ListView1.ListItems / .ColumnHeaders 返回**集合对象**; 它们的 Add 返回**成员对象**
+//   (ListItem / ColumnHeader), 于是 `Set itm = .ListItems.Add(..)` 之后
+//   `itm.Text` / `itm.SubItems(i)` / `itm.Selected` 全部走晚绑定。
+//   ⚠ owner 这里传的是 **HWND** —— 与 ImageList 那族 (vb6_com_X 实例指针) 不同。
+void*   vb6_ListView_ListItems(void* hwnd);
+void*   vb6_ListView_ListItems_Add(void* hwnd, int32_t index, const wchar_t* key,
+                                   const wchar_t* text, int32_t icon, int32_t smallIcon);
+void*   vb6_ListView_ColumnHeaders(void* hwnd);
+void*   vb6_ListView_ColumnHeaders_Add(void* hwnd, int32_t index, const wchar_t* key,
+                                       const wchar_t* text, int32_t width, int32_t align);
 
 //   StatusBar: Align 0=None 1=Top 2=Bottom(默认) 3=Left 4=Right
 //              Style 0=sbrNormal(多面板, 默认) 1=sbrSimple(单格, 读 SimpleText)

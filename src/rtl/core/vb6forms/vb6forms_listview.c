@@ -307,6 +307,14 @@ void vb6_ListView_SetColumnWidth(void* hwnd, int32_t idx, int32_t w) {
     v->cols[idx - 1].width = (int)w;
     lvSyncAll(v);
 }
+// 列对齐 (0=左 1=右 2=居中 —— VB6 的 lvwColumnLeft/Right/Center)
+void vb6_ListView_SetColumnAlign(void* hwnd, int32_t idx, int32_t val) {
+    Vb6ListView* v = lvFind((HWND)hwnd);
+    if (!v || idx < 1 || idx > v->colCount) return;
+    v->cols[idx - 1].align = (int)val;
+    lvSyncAll(v);
+}
+
 int32_t vb6_ListView_GetColumnAlign(void* hwnd, int32_t idx) {
     Vb6ListView* v = lvFind((HWND)hwnd);
     if (!v || idx < 1 || idx > v->colCount) return 0;
@@ -326,6 +334,22 @@ int32_t vb6_ListView_GetColumnIndexByKey(void* hwnd, void* keyBstr) {
         if (v->cols[i].key && !lstrcmpW(v->cols[i].key, k)) return i + 1;
     return 0;
 }
+// ColumnHeaders.Remove(i) —— 删掉第 i 列 (1 基)。与 IlRemoveAt 同一条纪律:
+// 尾巴上那份的内存已经搬走/释放过了, 只能补一个空壳, **不能再 free 一遍**。
+void vb6_ListView_RemoveColumn(void* hwnd, int32_t idx) {
+    Vb6ListView* v = lvFind((HWND)hwnd);
+    if (!v || idx < 1 || idx > v->colCount) return;
+    int at = (int)idx - 1;
+    lvFreeW(v->cols[at].key);
+    lvFreeW(v->cols[at].text);
+    if (at + 1 < v->colCount)
+        memmove(&v->cols[at], &v->cols[at + 1],
+                sizeof(Vb6LVCol) * (v->colCount - at - 1));
+    ZeroMemory(&v->cols[v->colCount - 1], sizeof(Vb6LVCol));
+    v->colCount--;
+    lvSyncAll(v);
+}
+
 void vb6_ListView_ClearColumns(void* hwnd) {
     Vb6ListView* v = lvFind((HWND)hwnd);
     if (!v) return;
@@ -512,6 +536,31 @@ void vb6_ListView_ClearItems(void* hwnd) {
 }
 
 // ImageList 关联 (把 #9 ImageList 的真 HIMAGELIST 喂给控件)
+// ===================== C29-7: 事件通知换算 =====================
+// 把一条 WM_NOTIFY 的 LVN_* 换算成 VB6 语义的 **1 基下标** (0 = 这条通知与我们无关)。
+// 生成代码在 WM_NOTIFY 分支里按控件句柄匹配 hwndFrom, 再拿这个下标去取成员对象,
+// 最后调 <控件名>_ItemClick / _ColumnClick。
+// 两个通知都带 NMLISTVIEW:
+//   LVN_ITEMACTIVATE (-114): iItem    = 被双击/回车激活的那一行
+//   LVN_COLUMNCLICK  (-108): iSubItem = 被点击的那一列
+// **不用** LVN_ITEMCHANGED: 它在"程序化 SetItemSelected/Checked"时也会发, 会被当成
+// 用户点击 (VB6 的 ItemClick 只在用户动作时发), 判据里容易假绿。
+int32_t vb6_ListView_OnNotify(void* hwnd, int32_t code, void* lParam) {
+    if (!hwnd || !lParam) return 0;
+    NMLISTVIEW* nmlv = (NMLISTVIEW*)lParam;
+    // hwndFrom 必须就是本控件 —— 父窗会收到所有子控件的 WM_NOTIFY。
+    if ((HWND)nmlv->hdr.hwndFrom != (HWND)hwnd) return 0;
+    switch (code) {
+    case LVN_ITEMACTIVATE:
+        return (nmlv->iItem >= 0) ? nmlv->iItem + 1 : 0;
+    case LVN_COLUMNCLICK:
+        return (nmlv->iSubItem >= 0) ? nmlv->iSubItem + 1 : 0;
+    default:
+        break;
+    }
+    return 0;
+}
+
 void vb6_ListView_SetImageList(void* hwnd, void* himl, int32_t which) {
     if (!hwnd) return;
     // which: 0=Icons 1=SmallIcons 2=ColumnHeaderIcons

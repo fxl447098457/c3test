@@ -1537,6 +1537,34 @@ if ($Category -in @("all", "run", "vbp")) {
     Test-Vbp "c29imgobj" "$Tests\c29imagelistobj\C29ImgObj.vbp" $c29imgExpected
     Test-Vbp "c29imgobj_x86" "$Tests\c29imagelistobj\C29ImgObj.vbp" $c29imgExpected -Arch "x86"
 
+    # --- ai/029 C29-7: ListView (数据面 + 事件面) ---
+    # 数据面: ColumnHeaders.Add (标题) / ListItems.Add (数据) / SubItems(i) **1 基, 1 就是
+    # 第 2 列** / 两个集合的 Count 与 For Each / 按 Key 与按下标取项 / 成员属性读写 /
+    # ListView 自身的 View(3=报表) 与 GridLines。
+    # 口径: 集合与成员对象都走 C29-3 立起来的**真 IDispatch** (vb6forms_memberobj.c),
+    # 所以 `Set itm = .ListItems.Add(..)` 之后 itm.Text / itm.SubItems(1) / itm.Selected
+    # 全走晚绑定; ListView 是**真窗口**, owner 是 vb6_hwnd_X (ImageList 那族是 vb6_com_X)。
+    $c29lvExpected = @(
+        "LV1-COL-KEY=c1", "LV2-COL-TEXT=姓名", "LV3-COL-IDX=1", "LV4-COLWIDTH=1200",
+        "LV5-COLCOUNT=2", "LV6-ITEM-KEY=r1", "LV7-ITEM-TEXT=张三", "LV8-ITEM-IDX=1",
+        "LV9-SUB1=销售部", "LV10-ITEMCOUNT=2", "LV11-FOREACH=张三/销售部,李四/技术部,",
+        "LV12-COLS=姓名,部门,", "LV13-VIEW=3", "LV14-GRID=1", "LV15-BYKEY=李四",
+        "LV16-ITEM1=张三", "LV17-SEL=-1", "LV18-COLW=900", "LV19-AFTERRM=1",
+        "LV20-AFTERCLEAR=0")
+    Test-Vbp "c29listview" "$Tests\c29listview\C29ListView.vbp" $c29lvExpected
+    Test-Vbp "c29listview_x86" "$Tests\c29listview\C29ListView.vbp" $c29lvExpected -Arch "x86"
+    # 事件接线: 无头环境点不了鼠标 (生成代码里 LV21/LV22 只有真点击才会打),
+    # 但"WM_NOTIFY 分支 → OnNotify 换算 → 取成员对象 → 回调"这条链必须在**生成代码里
+    # 看得见** —— 少了任何一环都是"接线了却没生效", 而运行期完全静默。
+    Test-EmitcShape "lv_emitc_events" @("$Tests\c29listview\C29ListView.vbp") @(
+        "pNM42->code == -114",
+        "vb6_ListView_OnNotify((void*)vb6_hwnd_ListView1, -114",
+        "vb6_ListView_ListItemAt((void*)vb6_hwnd_ListView1",
+        "pNM42->code == -108",
+        "vb6_ListView_OnNotify((void*)vb6_hwnd_ListView1, -108",
+        "vb6_ListView_ColumnHeaderAt((void*)vb6_hwnd_ListView1",
+        "_ItemClick(&vb6_lvItem7)", "_ColumnClick(&vb6_lvHdr7)")
+
     # Fix 195: .frx 三种 blob 的真实布局 —— 字符串 (Text) / 字符串表 (List) /
     # 整数表 (ItemData)。旧 readIntList 按"每项 2B 整数"读 ItemData, 读到的是
     # 结构的字节本身, 任何工程都解出 1/304/12288 这串恒定假值 → 设计期 ItemData

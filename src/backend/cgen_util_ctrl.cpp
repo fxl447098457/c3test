@@ -223,6 +223,26 @@ std::string CCodeGen::getControlPropReadFn(FrmControlType ctrlType, const std::s
         if (propLower == "visible")        return "vb6_GetControlVisible";
         if (propLower == "enabled")        return "vb6_GetControlEnabled";
         break;
+    case FrmControlType::ListView:  // C29-7
+        // ListItems / ColumnHeaders 是**集合**, 走成员对象那条路
+        // (cgen_util_com.cpp 的 resolveComValue / resolveComMarkerForPack 拦截改道);
+        // 这张表只管 ListView 自身的标量属性。
+        // 不登记就会落到 vb6_ComGetStringProp 这个 COM 占位路径上静默答空 ——
+        // 与 ProgressBar / StatusBar 那两批同一条纪律。
+        if (propLower == "view")               return "vb6_ListView_GetView";
+        if (propLower == "gridlines")          return "vb6_ListView_GetGridLines";
+        if (propLower == "fullrowselect")      return "vb6_ListView_GetFullRowSelect";
+        if (propLower == "multiselect")        return "vb6_ListView_GetMultiSelect";
+        if (propLower == "checkboxes")         return "vb6_ListView_GetCheckBoxes";
+        if (propLower == "hidecolumnheaders")  return "vb6_ListView_GetHideColumnHeaders";
+        if (propLower == "allowcolumnreorder") return "vb6_ListView_GetAllowColumnReorder";
+        if (propLower == "labeledit")          return "vb6_ListView_GetLabelEdit";
+        if (propLower == "sorted")             return "vb6_ListView_GetSorted";
+        if (propLower == "sortkey")            return "vb6_ListView_GetSortKey";
+        if (propLower == "sortorder")          return "vb6_ListView_GetSortOrder";
+        if (propLower == "visible")            return "vb6_GetControlVisible";
+        if (propLower == "enabled")            return "vb6_GetControlEnabled";
+        break;
     case FrmControlType::Menu:  // P20-36
         if (propLower == "caption") return "vb6_GetMenuCaption";
         if (propLower == "checked") return "vb6_GetMenuChecked";
@@ -441,6 +461,21 @@ std::string CCodeGen::getControlPropWriteFn(FrmControlType ctrlType, const std::
         if (propLower == "wordwrap")       return "vb6_SSTab_SetWordWrap";
         if (propLower == "visible")        return "vb6_SetControlVisible";
         if (propLower == "enabled")        return "vb6_SetControlEnabled";
+        break;
+    case FrmControlType::ListView:  // C29-7
+        if (propLower == "view")               return "vb6_ListView_SetView";
+        if (propLower == "gridlines")          return "vb6_ListView_SetGridLines";
+        if (propLower == "fullrowselect")      return "vb6_ListView_SetFullRowSelect";
+        if (propLower == "multiselect")        return "vb6_ListView_SetMultiSelect";
+        if (propLower == "checkboxes")         return "vb6_ListView_SetCheckBoxes";
+        if (propLower == "hidecolumnheaders")  return "vb6_ListView_SetHideColumnHeaders";
+        if (propLower == "allowcolumnreorder") return "vb6_ListView_SetAllowColumnReorder";
+        if (propLower == "labeledit")          return "vb6_ListView_SetLabelEdit";
+        if (propLower == "sorted")             return "vb6_ListView_SetSorted";
+        if (propLower == "sortkey")            return "vb6_ListView_SetSortKey";
+        if (propLower == "sortorder")          return "vb6_ListView_SetSortOrder";
+        if (propLower == "visible")            return "vb6_SetControlVisible";
+        if (propLower == "enabled")            return "vb6_SetControlEnabled";
         break;
     case FrmControlType::Timer:
         if (propLower == "interval") return "vb6_SetTimerInterval";

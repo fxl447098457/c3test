@@ -40,6 +40,23 @@ std::string CCodeGen::resolveComValue(const std::string& unpackType) {
         }
     }
 
+    // C29-7: `ListView1.ListItems` / `.ColumnHeaders` → **真集合对象** (与 C29-3 的
+    // ImageList.ListImages 同一口径)。ListView 是**真窗口**, 宿主槽是 vb6_hwnd_X,
+    // 不是 ImageList 那种 vb6_com_X 实例指针。
+    {
+        std::string lvLower = Symbol::toLower(memberName);
+        if (lvLower == "listitems" || lvLower == "columnheaders") {
+            std::string lvBare = listViewNameOfExpr(objExpr);
+            if (!lvBare.empty()) {
+                lastExpr_ = (lvLower == "listitems")
+                    ? ("vb6_ListView_ListItems((void*)vb6_hwnd_" + lvBare + ")")
+                    : ("vb6_ListView_ColumnHeaders((void*)vb6_hwnd_" + lvBare + ")");
+                isComMarker_ = false;
+                return lastExpr_;
+            }
+        }
+    }
+
     // C29-3: `ImageList1.ListImages` → **真集合对象** (原生复刻的成员集合, 见
     // vb6forms_memberobj.c)。必须排在下面那条 P20-39 分支之前: 那条管的是链上更外层的
     // 成员 (ListImages.Count / ListImages(i).Key), 这里要先把**集合本身**立起来。
@@ -519,6 +536,19 @@ std::string CCodeGen::resolveComMarkerForPack(const std::string& packFnHint) {
             std::string ddArg = "(void*)(*" + objExpr + ")";
             if (memDD == "gettext")      return "vb6_oleDD_GetText(" + ddArg + ")";
             if (memDD == "getfilecount") return "vb6_oleDD_GetFileCount(" + ddArg + ")";
+        }
+    }
+
+    // C29-7: `ListView1.ListItems` / `.ColumnHeaders` → 真集合对象 (同 resolveComValue)。
+    // 走这条的是"集合被当实参 / 被整体赋值"的场合, 例如 `Set c = ListView1.ListItems`。
+    {
+        std::string lvLower = Symbol::toLower(memName);
+        if (lvLower == "listitems" || lvLower == "columnheaders") {
+            std::string lvBare = listViewNameOfExpr(objExpr);
+            if (!lvBare.empty())
+                return (lvLower == "listitems")
+                    ? ("vb6_ListView_ListItems((void*)vb6_hwnd_" + lvBare + ")")
+                    : ("vb6_ListView_ColumnHeaders((void*)vb6_hwnd_" + lvBare + ")");
         }
     }
 
