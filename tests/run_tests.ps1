@@ -617,8 +617,20 @@ function Test-Vbp {
         return
     }
 
+    # 可选环境变量 "K1=V1;K2=V2" → 显式注入子进程环境块 (RTL 用 GetEnvironmentVariableW 读它)。
+    # ⚠ Test-Vbp 曾经声明了 $Env 却忘了往下传 ⇒ 调用点写的 -Env 被静默吞掉: frmevents 的
+    # OLE 无头联测 (C3_OLEDDB_TEST=1) 在 CI 上从不启用, 症状是 EV24/EV25 缺失 → FAIL
+    # (output mismatch)。这是脚本 bug, 不是编译器回归 —— 同一形态的判断先查这里。
+    $envMap = @{}
+    if ($Env) {
+        foreach ($kv in $Env.Split(';')) {
+            if (-not $kv) { continue }
+            $pp = $kv.Split('=', 2)
+            if ($pp.Count -eq 2) { $envMap[$pp[0]] = $pp[1] }
+        }
+    }
     # 编译失败则标记 FAIL (compile); 生成物缺失标记 FAIL (no exe)
-    $run = Invoke-TestExe -ExePath $exePath -WorkDir $OutDir -Name $baseName
+    $run = Invoke-TestExe -ExePath $exePath -WorkDir $OutDir -Name $baseName -EnvVars $envMap
     if (-not $run.Ok) {
         $script:fail++
         Write-Host "FAIL (run error)" -ForegroundColor Red
