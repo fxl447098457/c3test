@@ -171,6 +171,9 @@ enum RtlResourceID {
 
     // ai/029 C29-8a: VB6 TreeView 控件的标量属性面 (SysTreeView32 复刻, 不加载 OCX)
     RTL_VB6FORMS_TREEVIEW_C                = 212,
+
+    // ai/029 C29-5a: VB6 Toolbar 控件 (ToolbarWindow32 复刻, 不加载 MSCOMCTL.OCX)
+    RTL_VB6FORMS_TOOLBAR_C                 = 213,
 };
 
 // Session directory manager

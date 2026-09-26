@@ -485,6 +485,25 @@
         if (statusBarVars_.count(objExpr)) return objExpr;
         return "";
     }
+    // C29-5a: Toolbar 的裸名登记 (设计期发射那侧 insert)。认法比 StatusBar 那套窄得多 ——
+    // Toolbar 已经有真窗口，集合表达式的槽一定是 `vb6_hwnd_<裸名>`，不必再抠 vb6_com_ 前缀。
+    // 名字比对要过一道**标识符边界**检查: 只 find 子串的话 `vb6_hwnd_tb1` 会命中
+    // `vb6_hwnd_tb10` 的表达式 (两枚工具栏同窗体就翻车)。
+    std::unordered_set<std::string> toolbarVars_;
+    std::string toolbarNameOfExpr(const std::string& objExpr) const {
+        for (const auto& n : toolbarVars_) {
+            const std::string hwnd = "vb6_hwnd_" + n;
+            size_t p0 = objExpr.find(hwnd);
+            while (p0 != std::string::npos) {
+                size_t e = p0 + hwnd.size();
+                if (e >= objExpr.size() || !(isalnum((unsigned char)objExpr[e]) || objExpr[e] == '_'))
+                    return n;
+                p0 = objExpr.find(hwnd, e);
+            }
+        }
+        if (toolbarVars_.count(objExpr)) return objExpr;
+        return "";
+    }
     std::string statusBarHwndVarOfExpr(const std::string& objExpr) const {
         std::string n = statusBarNameOfExpr(objExpr);
         return n.empty() ? "" : "vb6_hwnd_" + n;

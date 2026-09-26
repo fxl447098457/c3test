@@ -56,6 +56,7 @@
 210 RCDATA "../rtl/core/vb6forms/vb6forms_oledd.c"
 211 RCDATA "../rtl/core/vb6forms/vb6forms_listview.c"
 212 RCDATA "../rtl/core/vb6forms/vb6forms_treeview.c"
+213 RCDATA "../rtl/core/vb6forms/vb6forms_toolbar.c"
 131 RCDATA "../rtl/core/vb6forms/vb6forms_axsite.c"
 198 RCDATA "../rtl/core/vb6forms/vb6forms_axcontainer.c"
 // vb6forms_axsite.c 按功能家族拆分 (2026-09-20): 内部头 + 5 个族编译单元

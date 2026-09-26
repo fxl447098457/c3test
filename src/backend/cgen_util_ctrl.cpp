@@ -59,6 +59,17 @@ Vb6Type CCodeGen::controlPropType(FrmControlType ctrlType, const std::string& pr
             return Vb6Type::Long;
         }
     }
+    if (ctrlType == FrmControlType::Toolbar) {
+        // C29-5a: 同一口径 —— 这四条的 RTL getter 都是 int32_t, 判成 Variant/String
+        // 就跟 C 层不匹配 (SSTab1.Tab 那次 AV 的同族)。
+        if (p == "showtips" || p == "textstyle" || p == "allowcustomize" || p == "align") {
+            return Vb6Type::Long;
+        }
+        // `tb1.Buttons.Count` 的读函数在 cgen_util_com.cpp 里改道, 那条路不查控件属性表,
+        // 于是成员名 "count" 单独进来 —— 不登记成 Long 就被装箱, `Count = 3` 恒假
+        // (实测: 值是对的 3, 打出来却是空串, 比较也全 N)。
+        if (ctrlType == FrmControlType::Toolbar && p == "count") return Vb6Type::Long;
+    }
     return Vb6Type::Unknown;
 }
 
@@ -278,6 +289,17 @@ std::string CCodeGen::getControlPropReadFn(FrmControlType ctrlType, const std::s
         if (propLower == "checkboxes") return "vb6_TreeView_GetCheckBoxes";
         if (propLower == "hottracking") return "vb6_TreeView_GetHotTracking";
         if (propLower == "hideselection") return "vb6_TreeView_GetHideSelection";
+        if (propLower == "visible") return "vb6_GetControlVisible";
+        if (propLower == "enabled") return "vb6_GetControlEnabled";
+        break;
+    // C29-5a: Toolbar 的标量属性面。改之前这枚控件连窗口都没有 (被"ImageList || Toolbar
+    // 走 CoCreateInstance"那一组扣住)，读一个 tb1.Visible 就是 C2065: vb6_hwnd_tb1 未声明。
+    // ShowTips / TextStyle / AllowCustomize 的真值在 GWL_STYLE 上，Align 存窗口属性。
+    case FrmControlType::Toolbar:
+        if (propLower == "showtips") return "vb6_Toolbar_GetShowTips";
+        if (propLower == "textstyle") return "vb6_Toolbar_GetTextStyle";
+        if (propLower == "allowcustomize") return "vb6_Toolbar_GetAllowCustomize";
+        if (propLower == "align") return "vb6_Toolbar_GetAlign";
         if (propLower == "visible") return "vb6_GetControlVisible";
         if (propLower == "enabled") return "vb6_GetControlEnabled";
         break;
@@ -513,6 +535,15 @@ std::string CCodeGen::getControlPropWriteFn(FrmControlType ctrlType, const std::
         if (propLower == "checkboxes") return "vb6_TreeView_SetCheckBoxes";
         if (propLower == "hottracking") return "vb6_TreeView_SetHotTracking";
         if (propLower == "hideselection") return "vb6_TreeView_SetHideSelection";
+        if (propLower == "visible") return "vb6_SetControlVisible";
+        if (propLower == "enabled") return "vb6_SetControlEnabled";
+        break;
+    // C29-5a: Toolbar 写侧 (与读侧同一批四条 + 通用两条)。
+    case FrmControlType::Toolbar:
+        if (propLower == "showtips") return "vb6_Toolbar_SetShowTips";
+        if (propLower == "textstyle") return "vb6_Toolbar_SetTextStyle";
+        if (propLower == "allowcustomize") return "vb6_Toolbar_SetAllowCustomize";
+        if (propLower == "align") return "vb6_Toolbar_SetAlign";
         if (propLower == "visible") return "vb6_SetControlVisible";
         if (propLower == "enabled") return "vb6_SetControlEnabled";
         break;

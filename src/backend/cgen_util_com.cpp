@@ -21,6 +21,22 @@ std::string CCodeGen::resolveComValue(const std::string& unpackType) {
     std::string objExpr = std::move(comObjExpr_);
     std::string memberName = std::move(comMemberName_);
 
+    // C29-5a: Toolbar 原生复刻 —— 本批只改道 `Buttons.Count`，读数取自原生
+    // TB_BUTTONCOUNT，所以它是"设计期那些按钮真进了控件"的**控件侧**证据 (不是我那张表
+    // 自说自话)。Button 对象那一族 ((i).Key / .Caption / Add / ButtonClick) 留 5b。
+    // 位置跟上面 DataObject / ImageList / StatusBar 那几块同一侧：**赶在 P24-07 那段
+    // early-bound 决策之前**，否则 `Count` 会被当普通 COM 成员发成 vb6_ComGetProp。
+    {
+        std::string tbMem = memberName;
+        std::transform(tbMem.begin(), tbMem.end(), tbMem.begin(), ::tolower);
+        std::string tbName = toolbarNameOfExpr(objExpr);
+        if (!tbName.empty() && tbMem == "count") {
+            lastExpr_ = "vb6_Toolbar_GetButtonCount((void*)vb6_hwnd_" + tbName + ")";
+            isComMarker_ = false;
+            return lastExpr_;
+        }
+    }
+
     // P20-44: OLE 拖放的 **DataObject 形参**成员 —— `Data.GetText` 等。
     // 处理器形参 `void** Data` 不是 IDispatch, 掉 COM 派发运行期必炸/答错。
     // **必须放在 early-bound 分支之前**: DataObject 是 COM 类, early-bound 会先
