@@ -131,6 +131,7 @@
                 std::string fnTs;
                 if (memLower == "tabcaption")      fnTs = "vb6_SSTab_GetTabCaption";
                 else if (memLower == "tabvisible") fnTs = "vb6_SSTab_GetTabVisible";
+                else if (memLower == "tabtooltiptext") fnTs = "vb6_SSTab_GetTabToolTipText";
                 if (!fnTs.empty()) {
                     emitExpr(*node.positional[0]);
                     std::string idxTs = std::move(lastExpr_);

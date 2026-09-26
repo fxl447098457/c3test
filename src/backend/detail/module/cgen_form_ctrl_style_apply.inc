@@ -735,6 +735,35 @@
                 c_.emitLine("vb6_SSTab_SetTabCaption((void*)" + tsHwnd + ", "
                           + std::to_string(idx) + ", L\"" + raw + "\");");
             }
+
+            // ③TabPic16/20/24(n) = "frmTest.frx":xxxx —— SSTabEx 的每页标签图标
+            // (Task #44 参考截图: Theme/Frame/Other/Cmd 四页有图标, 其余页没有)。
+            // 三档尺寸是同一张图 (16/20/24px, .frx 条目与 ImageList 同构: StdPicture
+            // GUID + 'lt' magic + 长度 → readPicture 走 isImageList=true 的 28B 头剥离)。
+            // 96DPI 优先取 16 档, 缺档顺延 20/24 (RTL 侧 imagelist 固定 16x16)。
+            if (frxLoaded && tsTabs > 0) {
+                auto tsPicVal = [&](int px, int idx2) -> const FrmValue* {
+                    auto it = ctrl.properties.find(
+                        "TabPic" + std::to_string(px) + "(" + std::to_string(idx2) + ")");
+                    if (it == ctrl.properties.end()) return nullptr;
+                    if (it->second.type != FrmValueType::FrxReference) return nullptr;
+                    return &it->second;
+                };
+                for (int idx2 = 0; idx2 < tsTabs; idx2++) {
+                    const FrmValue* pv = tsPicVal(16, idx2);
+                    if (!pv) pv = tsPicVal(20, idx2);
+                    if (!pv) pv = tsPicVal(24, idx2);
+                    if (!pv) continue;
+                    auto pic = FrxReader::readPicture(pv->frxOffset, true);
+                    if (pic.data.empty()) continue;
+                    std::string varName = "vb6_frx_tabpic_" + cIdent(ctrl.controlName)
+                                        + "_" + std::to_string(idx2);
+                    h_.emitLine(bytesToHexArray(pic.data.data(), pic.data.size(), varName));
+                    c_.emitLine("vb6_SSTab_SetTabPicture((void*)" + tsHwnd + ", "
+                              + std::to_string(idx2) + ", " + varName + ", "
+                              + varName + "_size);");
+                }
+            }
         }
 
         // P20-44: OLE 拖放目标侧 —— OLEDropMode<>0 时注册为放置目标。

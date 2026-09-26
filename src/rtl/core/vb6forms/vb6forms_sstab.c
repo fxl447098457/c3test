@@ -66,7 +66,12 @@ typedef struct {
 typedef struct {
     HWND         hwnd;         // SysTabControl32
     wchar_t**    captions;     // 平行表: 每页标题
+    wchar_t**    tips;         // 平行表: 每页 ToolTipText (SSTabEx TabToolTipText(i))
     int*         visible;      // 平行表: 每页可见与否
+    int*         images;       // 平行表: 每页图标在 himl 里的下标, -1=无
+                                // (Task #44: SSTabEx TabPic16/20/24(i) —— 参考截图
+                                //  Theme/Frame/Other/Cmd 四页带 16px 图标)
+    HIMAGELIST   himl;         // 挂到 TabCtrl 上的真 image list (首次 SetTabPicture 惰性建)
     int          count;        // 页数 (逻辑页总数, 含被 TabVisible 藏掉的)
     int          cur;          // 当前活动页 (逻辑号, 0 基)
     int          prev;         // 上一次活动页 —— Click(PreviousTab) 要这个值
@@ -131,6 +136,8 @@ static int sstabViewToLogical(const Vb6SSTab* t, int view) {
 }
 
 // 重建全部可见标签项。改了任何影响布局的样式之后必须走一遍 —— 否则旧 item 尺寸不重算。
+// Task #44: 有 image list 时 item 要带 TCIF_IMAGE —— 没有 image 的页不设 iImage,
+// comctl32 就不画图标 (不能填 0, 0 是第一张图的合法下标)。
 static void sstabRebuildVisibleTabs(Vb6SSTab* t) {
     if (!t || !t->hwnd) return;
     TabCtrl_DeleteAllItems(t->hwnd);
@@ -141,6 +148,10 @@ static void sstabRebuildVisibleTabs(Vb6SSTab* t) {
         ZeroMemory(&ti, sizeof(ti));
         ti.mask = TCIF_TEXT;
         ti.pszText = t->captions[i] ? t->captions[i] : (wchar_t*)L"";
+        if (t->himl && t->images && t->images[i] >= 0) {
+            ti.mask |= TCIF_IMAGE;
+            ti.iImage = t->images[i];
+        }
         TabCtrl_InsertItem(t->hwnd, TabCtrl_GetItemCount(t->hwnd), &ti);
     }
 }
@@ -262,14 +273,29 @@ void vb6_SSTab_Init(void* tabHwnd, int tabs, int curTab, int orientation, int ta
         HeapFree(GetProcessHeap(), 0, t->captions);
         t->captions = NULL;
     }
+    if (t->tips) {
+        for (int i = 0; i < t->count; i++)
+            if (t->tips[i]) HeapFree(GetProcessHeap(), 0, t->tips[i]);
+        HeapFree(GetProcessHeap(), 0, t->tips);
+        t->tips = NULL;
+    }
     if (t->visible) { HeapFree(GetProcessHeap(), 0, t->visible); t->visible = NULL; }
+    if (t->images)  { HeapFree(GetProcessHeap(), 0, t->images);  t->images = NULL; }
     t->count = 0;
 
     if (tabs > 0) {
         t->captions = (wchar_t**)HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(wchar_t*) * tabs);
+        t->tips = (wchar_t**)HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(wchar_t*) * tabs);
         t->visible = (int*)HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(int) * tabs);
-        if (t->captions && t->visible) {
-            for (int i = 0; i < tabs; i++) { t->captions[i] = NULL; t->visible[i] = 1; }
+        t->images = (int*)HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(int) * tabs);
+        // images 缺省 0 会指向 image list 的**第一张图** (合法下标), 必须 -1 = 无图标
+        if (t->captions && t->tips && t->visible && t->images) {
+            for (int i = 0; i < tabs; i++) {
+                t->captions[i] = NULL;
+                t->tips[i] = NULL;
+                t->visible[i] = 1;
+                t->images[i] = -1;
+            }
             t->count = tabs;
         }
     }
@@ -305,30 +331,49 @@ static void sstabAfterVisualChange(Vb6SSTab* t) {
 static void sstabResize(Vb6SSTab* t, int n) {
     if (!t || n < 0 || n == t->count) return;
     wchar_t** nc = NULL;
+    wchar_t** nt = NULL;
     int* nv = NULL;
+    int* ni = NULL;
     if (n > 0) {
         nc = (wchar_t**)HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(wchar_t*) * n);
+        nt = (wchar_t**)HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(wchar_t*) * n);
         nv = (int*)HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(int) * n);
-        if (!nc || !nv) {
+        ni = (int*)HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(int) * n);
+        if (!nc || !nt || !nv || !ni) {
             if (nc) HeapFree(GetProcessHeap(), 0, nc);
+            if (nt) HeapFree(GetProcessHeap(), 0, nt);
             if (nv) HeapFree(GetProcessHeap(), 0, nv);
+            if (ni) HeapFree(GetProcessHeap(), 0, ni);
             return;
         }
         int keep = (n < t->count) ? n : t->count;
-        for (int i = 0; i < keep; i++) { nc[i] = t->captions[i]; nv[i] = t->visible[i]; }
+        for (int i = 0; i < keep; i++) {
+            nc[i] = t->captions[i];
+            nt[i] = t->tips ? t->tips[i] : NULL;
+            nv[i] = t->visible[i];
+            ni[i] = t->images ? t->images[i] : -1;
+        }
         // 缩容时**必须**显式释放被截掉那几页的字符串 (否则泄漏), 且只能释放
-        // 超出新长度的那些 —— 保留段已经搬进 nc, 不能碰。
-        for (int i = keep; i < t->count; i++)
+        // 超出新长度的那些 —— 保留段已经搬进 nc/nt, 不能碰。
+        for (int i = keep; i < t->count; i++) {
             if (t->captions[i]) HeapFree(GetProcessHeap(), 0, t->captions[i]);
-        for (int i = keep; i < n; i++) nv[i] = 1;
+            if (t->tips && t->tips[i]) HeapFree(GetProcessHeap(), 0, t->tips[i]);
+        }
+        for (int i = keep; i < n; i++) { nv[i] = 1; ni[i] = -1; }
     } else {
-        for (int i = 0; i < t->count; i++)
+        for (int i = 0; i < t->count; i++) {
             if (t->captions[i]) HeapFree(GetProcessHeap(), 0, t->captions[i]);
+            if (t->tips && t->tips[i]) HeapFree(GetProcessHeap(), 0, t->tips[i]);
+        }
     }
     if (t->captions) HeapFree(GetProcessHeap(), 0, t->captions);
+    if (t->tips) HeapFree(GetProcessHeap(), 0, t->tips);
     if (t->visible) HeapFree(GetProcessHeap(), 0, t->visible);
+    if (t->images) HeapFree(GetProcessHeap(), 0, t->images);
     t->captions = nc;
+    t->tips = nt;
     t->visible = nv;
+    t->images = ni;
     t->count = n;
     if (t->cur >= n) t->cur = (n > 0) ? n - 1 : 0;
 }
@@ -412,6 +457,26 @@ void vb6_SSTab_SetTabCaption(void* tabHwnd, int32_t idx, void* bstr) {
         ti.mask = TCIF_TEXT;
         ti.pszText = t->captions[idx] ? t->captions[idx] : (wchar_t*)L"";
         TabCtrl_SetItem(t->hwnd, view, &ti);
+    }
+}
+
+// TabToolTipText(i): SSTabEx 的每页悬停提示。属性语义先保住 (读回设计/运行所存的值);
+// 真正的鼠标悬停气泡要 TCS_TOOLTIPS + TTN_GETDISPINFO 派发, 见文件尾 TODO。
+void* vb6_SSTab_GetTabToolTipText(void* tabHwnd, int32_t idx) {
+    Vb6SSTab* t = sstabFind((HWND)tabHwnd);
+    if (!t || idx < 0 || idx >= t->count) return (void*)vb6_BSTR_Empty();
+    return (void*)vb6_BSTR_FromStr(t->tips && t->tips[idx] ? t->tips[idx] : L"");
+}
+
+void vb6_SSTab_SetTabToolTipText(void* tabHwnd, int32_t idx, void* bstr) {
+    Vb6SSTab* t = sstabFind((HWND)tabHwnd);
+    if (!t || idx < 0 || idx >= t->count || !t->tips) return;
+    const wchar_t* s = (const wchar_t*)bstr;
+    if (t->tips[idx]) { HeapFree(GetProcessHeap(), 0, t->tips[idx]); t->tips[idx] = NULL; }
+    if (s && *s) {
+        int n = (int)lstrlenW(s);
+        wchar_t* cp = (wchar_t*)HeapAlloc(GetProcessHeap(), 0, sizeof(wchar_t) * (n + 1));
+        if (cp) { memcpy(cp, s, sizeof(wchar_t) * n); cp[n] = 0; t->tips[idx] = cp; }
     }
 }
 
@@ -529,6 +594,47 @@ int32_t vb6_SSTab_OnSelChange(void* tabHwnd) {
     t->cur = logical;
     sstabRefreshChildren(t);
     return (int32_t)prev;
+}
+
+// ===================== 属性: TabPicture(i) — SSTabEx 每页图标 (Task #44) =====================
+//
+// .frm 的 TabPic16/20/24(i) = "xxx.frx":偏移 是 SSTabEx 的三档设计期位图 (16/20/24px),
+// codegen 读出字节后逐页喂进来。这里建一把**真 HIMAGELIST** 挂到 SysTabControl32 上
+// (TabCtrl_SetImageList), sstabRebuildVisibleTabs 插 item 时带 TCIF_IMAGE ——
+// 参考截图 (sstabex.png) 里 Theme/Frame/Other/Cmd 四页标签左侧的图标就是这么来的。
+//
+// mask 口径: SSTabEx 的 MaskColor 缺省 = 品红 (&HFF00FF, 参考截图 MaskColor 色块同色),
+// frmTest.frx 的 TabPic 位图四角实测就是 (255,0,255) → ImageList_AddMasked 用品红抠背景。
+// 图标区固定 16x16 (96DPI 走 TabPic16 档; codegen 优先取 16, 缺档顺延 20/24, 大图被缩)。
+void vb6_SSTab_SetTabPicture(void* tabHwnd, int32_t idx, const void* data, int32_t size) {
+    Vb6SSTab* t = sstabFind((HWND)tabHwnd);
+    if (!t || !t->hwnd || !t->images || idx < 0 || idx >= t->count) return;
+    if (!data || size <= 0) return;
+
+    if (!t->himl) {
+        t->himl = ImageList_Create(16, 16, ILC_COLOR32 | ILC_MASK, 4, 8);
+        if (!t->himl) return;
+        TabCtrl_SetImageList(t->hwnd, t->himl);
+    }
+
+    // vb6_LoadPictureFromMemory: BMP → 复制出的 HBITMAP (所有权归调用方); ICO → HICON。
+    void* pic = vb6_LoadPictureFromMemory(data, size);
+    if (!pic) return;
+    BITMAP bm;
+    if (GetObjectW((HBITMAP)pic, sizeof(bm), &bm) == 0) {
+        // 不是 HBITMAP (ICO/CURSOR 等) → ImageList_AddMasked 吃不了。TabPic 实际只存
+        // BMP (.frx 实证), 这里丢弃并按语义清理句柄 (DestroyIcon 对位图句柄无害失败)。
+        DestroyIcon((HICON)pic);
+        return;
+    }
+    int imgIdx = ImageList_AddMasked(t->himl, (HBITMAP)pic, RGB(255, 0, 255));
+    DeleteObject((HBITMAP)pic);
+    if (imgIdx < 0) return;
+    t->images[idx] = imgIdx;
+
+    // 图标改变标签内容区尺寸 → 重建 item (带 TCIF_IMAGE) + 重算行宽/行高。
+    // 不走 SetTab: 选中页不该因为贴图变化而跳。
+    sstabAfterVisualChange(t);
 }
 
 #endif  // _WIN32
