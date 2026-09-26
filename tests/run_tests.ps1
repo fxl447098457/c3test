@@ -1630,15 +1630,11 @@ if ($Category -in @("all", "run", "vbp")) {
         "pNM42->code == -108",
         "vb6_ListView_OnNotify((void*)vb6_hwnd_ListView1, -108",
         "vb6_ListView_ColumnHeaderAt((void*)vb6_hwnd_ListView1",
-        "_ItemClick(vb6_lvItem7)", "_ColumnClick(vb6_lvHdr7)",
+        "_ItemClick(vb6_lvItem7)", "_ColumnClick(vb6_lvHdr7)")
         # C29-4: 事件回调改**传值** (ByVal 对象语义)。旧形状传 &obj 是 void**, 与
         # handler 形参 void* 不符 —— 成员读拿"指针的地址"当 IDispatch, 必然 not found。
-        "extern void vb6_StatusBar1_PanelClick(void*);",
-        "vb6_StatusBar_PanelAt((void*)vb6_hwnd_StatusBar1, vb6_sbPnl4)",
-        "vb6_StatusBar1_PanelClick(vb6_sbPanel4)",
-        "vb6_StatusBar_OnNotify((void*)vb6_hwnd_StatusBar1, -2",
-        "vb6_StatusBar_OnNotify((void*)vb6_hwnd_StatusBar1, -6",
-        "vb6_StatusBar_SimClick((void*)vb6_hwnd_StatusBar1")
+        # StatusBar 的 WM_NOTIFY 派发形状由 c29sbevt (SbEvent.vbp, 真有 StatusBar) 覆盖 ——
+        # 本 ListView 夹具没有 StatusBar, 在此断言恒缺 (曾误挂于此致 GA vbp 红)。
 
     # Fix 195: .frx 三种 blob 的真实布局 —— 字符串 (Text) / 字符串表 (List) /
     # 整数表 (ItemData)。旧 readIntList 按"每项 2B 整数"读 ItemData, 读到的是
