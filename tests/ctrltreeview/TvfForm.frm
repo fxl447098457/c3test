@@ -27,6 +27,11 @@ Begin VB.Form TvfForm
       Top             =   240
       Width           =   2100
    End
+   Begin VB.Timer evtTimer 
+      Interval        =   200
+      Left            =   240
+      Top             =   1920
+   End
 End
 Attribute VB_Name = "TvfForm"
 Attribute VB_GlobalNameSpace = False
@@ -46,6 +51,17 @@ Option Explicit
 ' 就是"消息真打进了控件"，与本线"窗口存在性靠读数证"的口径一致。
 ' Nodes / Style / LabelEdit / Sorted 与事件不在本批 (8a)：Nodes/Node 那一大半在 8b 接上
 ' (TV13..TV27)，Style / LabelEdit / Sorted / NodeClick 还欠着。
+
+' C29-8c: 事件面 (NodeClick / Expand / Collapse) 走父窗的 WM_NOTIFY，判据靠 RTL 的
+' Sim* 助手程序化发**真通知** —— 无头环境点不了鼠标，而直接调 handler 会绕开整条派发链。
+' ⚠ Sim* 是**判据专用**助手 (与 C29-4 的 StatusBar.SimClick 同一先例)，不对应任何 VB6 语义。
+Private gClicks As Long
+Private gHitB As Long
+Private gHitC As Long
+Private gExpands As Long
+Private gCollapses As Long
+Private gExpText As String
+Private gOther As Long
 
 Private Function TF(ByVal ok As Boolean) As String
     If ok Then TF = "Y" Else TF = "N"
@@ -167,6 +183,72 @@ Private Sub Form_Load()
     ' --- 18. 集合是**独立于控件属性面**的一条路: 标量读数没被 Nodes 抢走 ---
     Debug.Print "TV27=" & TF(tv1.CheckBoxes <> 0 And tv2.Nodes.Count = 0)
 
+    ' DONE 与 Unload 挪到 evtTimer_Timer —— 事件必须在窗体载入完之后才派发得动
+End Sub
+
+' 派发链的触发点: Form_Load 阶段被 block events during form init 拦掉，Form_Activate 在无头
+' 会话里永远不来 (GA #109 实测) => 照 C29-4/P20-42 的先例放 Timer。
+Private Sub evtTimer_Timer()
+    Static done As Integer
+    If done Then Exit Sub
+    done = 1
+
+    ' Form_Load 的最后两栏 (TV25/TV26) 把表清干净了，所以事件判据自己重建目标树 ——
+    ' 顺便这条也是"通知换算问的是活着的表"的证据: 表空的时候 Sim 打不进 handler。
+    tv1.Nodes.Add , , "a", "根甲"
+    tv1.Nodes.Add "a", 4, "b", "子乙"
+    tv1.Nodes.Add , , "c", "根丙"
+
+    ' 计数一律问**增量**: 光 Form_Load 那半截就把真通知发出来过 (下面 TV33 钉它)，
+    ' 拿绝对值比就会把两件事混在一起。
+    Dim baseClick As Long, baseExp As Long, baseCol As Long
+    baseClick = gClicks
+    baseExp = gExpands
+    baseCol = gCollapses
+
+    ' 下面 TV33 钉的是"控件自己发的通知也走完了同一条派发链":
+    ' 实测到这里 gExpands 已经是 2 (TV21 那条 Expanded=True 与 TV23 那条
+    ' EnsureVisible 各撑开一次，原生就发了 TVN_ITEMEXPANDEDW)。
+    Debug.Print "TV33=" & TF(gExpands >= 2)
+
+    tv1.SimNodeClick 2
+    tv1.SimNodeClick 3
+    Debug.Print "TV28=" & TF(gClicks - baseClick = 2)
+    Debug.Print "TV29=" & TF(gHitB = 1 And gHitC = 1)
+    ' 通知是从 tv1 发的：另一枚树不该收到任何东西
+    Debug.Print "TV30=" & TF(gOther = 0 And tv2.Nodes.Count = 0)
+
+    tv1.SimExpand 1, True
+    tv1.SimExpand 1, False
+    Debug.Print "TV31=" & TF(gExpands - baseExp = 1 And gCollapses - baseCol = 1)
+    Debug.Print "TV32=" & TF(gExpText = "根甲")
+
     Debug.Print "TREEVIEW-DONE"
     Unload Me
+End Sub
+
+' handler 里**真读** Node 对象的成员: 证的是造出来的那枚对象指向被点的那一格，
+' 而不是 handler 被调了一次就算数。
+Private Sub tv1_NodeClick(ByVal Node As Node)
+    Dim sK As String
+    gClicks = gClicks + 1
+    sK = Node.Key
+    If sK = "b" Then gHitB = 1
+    If sK = "c" Then gHitC = 1
+End Sub
+
+Private Sub tv1_Expand(ByVal Node As Node)
+    Dim sT As String
+    gExpands = gExpands + 1
+    sT = Node.Text
+    gExpText = sT
+End Sub
+
+Private Sub tv1_Collapse(ByVal Node As Node)
+    gCollapses = gCollapses + 1
+End Sub
+
+' tv2 一枚对照 handler: 它不该被 tv1 的通知打进来 (TV30 问的就是这个 gOther)
+Private Sub tv2_NodeClick(ByVal Node As Node)
+    gOther = gOther + 1
 End Sub

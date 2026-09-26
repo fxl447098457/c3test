@@ -602,4 +602,83 @@ void vb6_TreeView_ClearNodes(void* hwnd) {
     }
     t->count = 0;
 }
+/* ============================================================================
+ * C29-8c: TreeView 的通知派发 (NodeClick / Expand / Collapse)
+ *   通道与 C29-7 ListView、C29-4 StatusBar 同一条 (父窗的 WM_NOTIFY)。
+ *   码值与本机的 10.0.19041 SDK commctrl.h 对过：TVN_FIRST = (0U-400U)，
+ *   TVN_SELCHANGEDW = TVN_FIRST-51 = -451、TVN_ITEMEXPANDEDW = TVN_FIRST-55 = -455
+ *   (那条 -400 系的是 **W** 版；老的 A 版号段不同，本仓库产物一律 Unicode)。
+ *   通知负载是 NMTREEVIEWW：`itemNew.hItem` 就是"这次涉及的那个节点"，
+ *   所以换算只问那张表 (句柄→1 基序号)，不另存一份节点身份。
+ * ==========================================================================*/
+
+#ifndef TVN_SELCHANGEDW
+#define TVN_SELCHANGEDW   (-451)
+#endif
+#ifndef TVN_ITEMEXPANDEDW
+#define TVN_ITEMEXPANDEDW (-455)
+#endif
+
+// vb6_TvTree 会**顺手开一格** (那是给控件首次使用者设计的)；通知换算只做查询，
+// 绝不能因为收到一条别家的 WM_NOTIFY 就占掉一枚槽位。
+static Vb6TvTree* vb6_TvFind(HWND h) {
+    for (int i = 0; i < g_tvtCount; i++) if (g_tvt[i].hwnd == h) return &g_tvt[i];
+    return NULL;
+}
+// 通知折成 1 基节点序号 (0 = 这个句柄不在册 / 不是本控件的节点)。
+int32_t vb6_TreeView_NotifyNodeIndex(void* hwnd, void* nmTreeViewW) {
+    if (!hwnd || !nmTreeViewW) return 0;
+    NMTREEVIEWW* nv = (NMTREEVIEWW*)nmTreeViewW;
+    Vb6TvTree* t = vb6_TvFind((HWND)hwnd);
+    if (!t) return 0;
+    return (int32_t)vb6_TvIdxOfItem(t, nv->itemNew.hItem);
+}
+
+// 展开还是折回。**只认这两个明确的 action 值**: 认不出的一律给 999 —— 派发那侧
+// 两个分支分别比 == -1 / == 0，于是"认不出"两边都不接。
+// (原来写成"带 TVE_COLLAPSE 就是折回，否则算展开"，结果 TVN_SELCHANGED 那条通知
+//  的 action 字段没填 TVE_COLLAPSE ⇒ NodeClick 顺手把 Expand 也点了一次，实测读数
+//  gExpands 白涨两条。布尔式地猜一个三态字段就是这种下场。)
+int32_t vb6_TreeView_NotifyExpanded(void* nmTreeViewW) {
+    if (!nmTreeViewW) return 999;
+    NMTREEVIEWW* nv = (NMTREEVIEWW*)nmTreeViewW;
+    if (nv->action == TVE_EXPAND) return -1;
+    if (nv->action == TVE_COLLAPSE) return 0;
+    return 999;
+}
+
+// ---------------- 判据辅助 (写进 ai/029 边界，不对应任何 VB6 语义) ----------------
+// 无头环境点不了鼠标，而直接调 handler 会绕开整条派发链 —— 只有从真窗口消息进来，
+// 才验得到"派发分支 + 通知换算 + NodeAt 造对象"三段都接上了。手法照 C29-4 的 SimClick。
+// action 由调用方**原样**给 (NodeClick 那条填 0 ⇒ NotifyExpanded 认不出 = 999，
+// 展开/折回两个分支都不接 —— 上一条注释里那个"布尔式猜三态"的坑不再复发)。
+static void vb6_TvSendNotify(HWND hwnd, int32_t idx, int32_t code, UINT action) {
+    NMTREEVIEWW nv;
+    Vb6TvTree* t = hwnd ? vb6_TvFind(hwnd) : NULL;
+    HTREEITEM h = t ? vb6_TvItemOfIdx(t, idx) : NULL;
+    if (!h) return;
+    ZeroMemory(&nv, sizeof(nv));
+    nv.hdr.hwndFrom = hwnd;
+    nv.hdr.idFrom   = (UINT_PTR)idx;
+    nv.hdr.code     = (DWORD)code;
+    nv.action       = action;
+    nv.itemNew.mask = TVIF_HANDLE;
+    nv.itemNew.hItem = h;
+    HWND parent = GetParent(hwnd);
+    if (!parent) parent = hwnd;
+    SendMessageW(parent, WM_NOTIFY, 0, (LPARAM)&nv);
+}
+
+void vb6_TreeView_SimNodeClick(void* hwnd, int32_t nodeIdx) {
+    if (nodeIdx < 1) return;
+    vb6_TvSendNotify((HWND)hwnd, nodeIdx, TVN_SELCHANGEDW, 0);   /* 通知里没有 action 这一说 */
+}
+
+void vb6_TreeView_SimExpand(void* hwnd, int32_t nodeIdx, int32_t expanded) {
+    if (nodeIdx < 1) return;
+    vb6_TvSendNotify((HWND)hwnd, nodeIdx, TVN_ITEMEXPANDEDW,
+                     (expanded ? (UINT)TVE_EXPAND : (UINT)TVE_COLLAPSE));
+}
+
+
 #endif // _WIN32

@@ -543,6 +543,13 @@ int32_t         vb6_TreeView_RemoveNode(void* hwnd, int32_t idx);
 void            vb6_TreeView_ClearNodes(void* hwnd);
 void*           vb6_TreeView_Nodes(void* hwnd);        // 集合对象 (真 IDispatch)
 void*           vb6_TreeView_NodeAt(void* hwnd, int32_t idx);   // 事件参数用
+// C29-8c: 通知派发 (父窗 WM_NOTIFY)。码值与 10.0.19041 SDK 对过:
+// TVN_SELCHANGEDW = -451、TVN_ITEMEXPANDEDW = -455。
+int32_t         vb6_TreeView_NotifyNodeIndex(void* hwnd, void* nmTreeViewW);
+int32_t         vb6_TreeView_NotifyExpanded(void* nmTreeViewW);   // -1 展开 / 0 折回 / 999 认不出
+void            vb6_TreeView_SimNodeClick(void* hwnd, int32_t nodeIdx);   // 判据专用
+void            vb6_TreeView_SimExpand(void* hwnd, int32_t nodeIdx, int32_t expanded);
+
 
 // ===================== Toolbar 的 Buttons / Button (ai/029 C29-5b) =====================
 //   成员对象机制见 vb6forms_memberobj.c。分工按"原生答不答得了": Text / Image / Enabled /

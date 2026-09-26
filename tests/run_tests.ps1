@@ -1509,7 +1509,18 @@ if ($Category -in @("all", "run", "vbp")) {
     #      TV20 不红正是这条读数的价值：勾选态是节点的 state image 位，**没开 TVS_CHECKBOXES
     #      也照样写得进、读得出**（只是屏幕上不画方框）—— 与 VB6 "先设 CheckBoxes=True 才
     #      看得到" 的次序口径一致，实测就是这么钉住的。
-    $tvNeedles = @("TREEVIEW-DONE") + (1..27 | ForEach-Object { "TV$_=Y" })
+    # ai/029 C29-8c: 再加 6 条事件读数 (TV28-TV33)。NodeClick / Expand / Collapse 走父窗的
+    # WM_NOTIFY (P20-42 那条通道，C29-7/C29-4 已各自接过一半)，通知里的 itemNew.hItem 由 RTL
+    # 折成 1 基节点序号，再交 vb6_TreeView_NodeAt 造对象回调 —— 处理器参数就是 Node 对象。
+    # 触发用 RTL 的 Sim* 助手 (C29-4 的 SimClick 同一先例，判据专用、不对应 VB6 语义)，
+    # 且必须放 Timer: Form_Load 阶段被 block events during form init 拦掉、Form_Activate 无头不来。
+    # TV33 是把一件"意外"钉成读数: 光 Form_Load 自己改 Expanded / EnsureVisible 就真发出过
+    # 两条 TVN_ITEMEXPANDEDW (实测到这里 gExpands 已是 2) —— 真控件发的通知与 Sim 发的走同一条链。
+    # 因此 TV28/TV31 一律问**增量**，不问绝对值 (拿绝对值比会把两件事混在一起，踩过)。
+    # 负控两条 (红在哪几条量过): ① Sim 的节点下标换成一个不存在的 (99/98) => 红 TV28、TV29，
+    #   其余纹丝不动 (证派发真去表里查过节点)；② 摘掉 tv1_Expand 处理器 => 红 TV33、TV31、TV32，
+    #   NodeClick 那几条照旧 Y (分支是按处理器存在性建的)。
+    $tvNeedles = @("TREEVIEW-DONE") + (1..33 | ForEach-Object { "TV$_=Y" })
     Test-Vbp "ctrltreeview" "$Tests\ctrltreeview\TvfApp.vbp" $tvNeedles
     Test-Vbp "ctrltreeview_x86" "$Tests\ctrltreeview\TvfApp.vbp" $tvNeedles -Arch "x86"
     # 发码面两面都钉：设计期 Init 逐参数钉（含 -999 那条哨兵：VB6 的 True 就是 -1，
@@ -1525,13 +1536,22 @@ if ($Category -in @("all", "run", "vbp")) {
         # 变成 tvwFirst)、以及"下标/Key 都发同一条 Item"。
         'vb6_ComCallObject(vb6_TreeView_Nodes((void*)vb6_hwnd_tv1), L"Item", (void*[]){vb6_ComPackInt(2)}, 1)',
         'L"Add", (void*[]){vb6_ComPackMissing(), vb6_ComPackMissing(), vb6_ComPackBSTR(vb6_BSTR_FromStr(L"a"))',
-        'vb6_ComSetProp(ndA, L"Checked", vb6_ComPackBool((-1)))'
+        'vb6_ComSetProp(ndA, L"Checked", vb6_ComPackBool((-1)))',
+        # C29-8c: 派发面的三条针 —— Sim 助手发的是 RTL 直调 (不是 COM 派发)、WM_NOTIFY 分支
+        # 按码值 + hwndFrom 双条件建、展开/折回靠 action 三态分流 (999 = 认不出，两边都不接)。
+        'vb6_TreeView_SimNodeClick((void*)vb6_hwnd_tv1, 2);',
+        'if (pNM42->code == -451 && (void*)pNM42->hwndFrom == vb6_hwnd_tv1) {',
+        'vb6_TreeView_NotifyExpanded((void*)lParam) == -1'
     )
     Test-EmitcAbsent "tv_emitc_no_com_fallback" @("$Tests\ctrltreeview\TvfApp.vbp") @(
         'vb6_ComGetObjectProp(vb6_hwnd_tv1',
         # C29-8b: 更具体的一条 —— Nodes 这一格一旦被摘掉，就会退回"拿 HWND 当 IDispatch
         # 问它要 Nodes 属性"的假路径 (链接过、运行期整棵树一句话都读不出来)。
         'vb6_ComGetObjectProp(vb6_hwnd_tv1, L"Nodes")',
+        # C29-8c: Sim* 这类判据方法一旦被下面那条 axSlotObj 分支先吃掉，就会编成
+        # 「取 SimNodeClick 属性 + Item 下标」—— 编得过、跑起来什么都不发 (实测踩过，
+        # 修法是把钩子抢在那条分支之前)。这条断言就是别让那个形状再回来。
+        'vb6_ComGetObjectProp(vb6_hwnd_tv1, L"SimNodeClick")',
         'CoCreateInstance'
     )
     # ai/029 C29-5a: Toolbar 换成原生 ToolbarWindow32（D6：不碰 MSCOMCTL.OCX）。
