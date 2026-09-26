@@ -1980,12 +1980,9 @@ if ($Category -in @("all", "run", "vbp")) {
     # `1 RT_MANIFEST "BalloonTooltips.exe.manifest"`，那段含 dpiAware/compatibility）
     # ⇒ 必须"用他的、且只有一份"。`dpiAware` 只有用户那份里有，所以这条同时钉住
     # "让位生效"与"内置那份没叠上去"（两份 #1 会让加载器直接报错）。
-    Test-ProductManifest "balloon_manifest_is_user_supplied" "$OutDir\BalloonTooltips.exe" 1 "dpiAware"
-    # ai/029 C29-M 的另一半：这份工程的 .res **自带** #1 清单（BalloonTooltips.rc 里
-    # `1 RT_MANIFEST "BalloonTooltips.exe.manifest"`，含 dpiAware/compatibility 那一大段），
-    # 所以必须"用他的、且只有一份"。清单数=1 就是"内置那份没叠上来"的读数（两份 #1 会让
-    # 加载器直接报错）；dpiAware 这个串只有用户那份里有 ⇒ 顺带钉住"赢的是他那份"。
-    Test-ProductManifest "balloon_manifest_is_user_supplied" "$OutDir\BalloonTooltips.exe" 1 "dpiAware"
+    # 路径注意：Test-GuiVbp 的产物落在 `output\<用例名>\` 下（不是 $OutDir 根），
+    # 第一版我按 $OutDir\BalloonTooltips.exe 断 ⇒ CI 直接 FAIL (no exe) —— 记下来。
+    Test-ProductManifest "balloon_manifest_is_user_supplied" "$OutDir\BalloonTooltips\BalloonTooltips.exe" 1 "dpiAware"
     # Charts 2020 demo (3rd-party UserControl charts): windowless chart controls (x86 first;
     # x64 after LongPtr port of API pointers/handles in the .ctl/.cls sources).
     Test-GuiVbp "Charts2020" "$Tests\Charts 2020\Proyecto1.vbp" -Arch "x86" -AutoExitSec 3
