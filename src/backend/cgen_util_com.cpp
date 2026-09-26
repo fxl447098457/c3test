@@ -40,6 +40,24 @@ std::string CCodeGen::resolveComValue(const std::string& unpackType) {
         }
     }
 
+    // C29-3: `ImageList1.ListImages` → **真集合对象** (原生复刻的成员集合, 见
+    // vb6forms_memberobj.c)。必须排在下面那条 P20-39 分支之前: 那条管的是链上更外层的
+    // 成员 (ListImages.Count / ListImages(i).Key), 这里要先把**集合本身**立起来。
+    // 不拦就会发 `vb6_ComGetObjectProp(vb6_com_X, L"ListImages")` —— 而 ImageList 无窗口,
+    // vb6_com_X 槽里放的是 HIMAGELIST 实例指针 (不是 IDispatch), 对它做属性读 =
+    // 运行期拿垃圾当 vtable 用。
+    {
+        std::string liLower = Symbol::toLower(memberName);
+        if (liLower == "listimages") {
+            std::string liBare = imageListNameOfExpr(objExpr);
+            if (!liBare.empty()) {
+                lastExpr_ = "vb6_ImageList_ListImages((void*)vb6_com_" + liBare + ")";
+                isComMarker_ = false;
+                return lastExpr_;
+            }
+        }
+    }
+
     // P20-39: ImageList 原生复刻 —— 把集合/属性读改道到 RTL。
     // 放在两个 COM 分支**之前**, 否则 Count 会走默认 BSTR 解包、Key 会走 ComCallObject。
     {
@@ -501,6 +519,17 @@ std::string CCodeGen::resolveComMarkerForPack(const std::string& packFnHint) {
             std::string ddArg = "(void*)(*" + objExpr + ")";
             if (memDD == "gettext")      return "vb6_oleDD_GetText(" + ddArg + ")";
             if (memDD == "getfilecount") return "vb6_oleDD_GetFileCount(" + ddArg + ")";
+        }
+    }
+
+    // C29-3: `ImageList1.ListImages` → 真集合对象 (与 resolveComValue 那条同一口径)。
+    // 走这条的是"集合被当实参 / 被整体赋值"的场合, 例如 `Set c = ImageList1.ListImages`。
+    {
+        std::string liLower = Symbol::toLower(memName);
+        if (liLower == "listimages") {
+            std::string liBare = imageListNameOfExpr(objExpr);
+            if (!liBare.empty())
+                return "vb6_ImageList_ListImages((void*)vb6_com_" + liBare + ")";
         }
     }
 

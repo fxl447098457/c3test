@@ -161,6 +161,17 @@ int32_t vb6_ImageListIndexByKey(void* slot, const wchar_t* key);
 void*  vb6_GetImageListKeyAt(void* slot, int32_t index);   // ListImage.Key (BSTR)
 void*  vb6_GetImageListHandle(void* slot);        // 真 HIMAGELIST, 供其它控件挂接
 
+// C29-3: ListImages 集合 / ListImage 成员对象 —— **真 IDispatch** (见 vb6forms_memberobj.c)。
+// 这是 ai/029 D1 "成员对象走真 IDispatch" 的立样: `Set itm = ...Add(..)` / `itm.Key` /
+// `For Each n In ListImages` 都靠它。后面 ListView(ListItems/ColumnHeaders) / TreeView(Nodes)
+// / StatusBar(Panels) / Toolbar(Buttons) 按同一形状继续挂 kind。
+// **原型必须在这里声明** (同下面 SSTab 那条注释): 生成代码只 include 这一族头,
+// 漏了就是 C 隐式声明返回 int → x64 把指针截成 32 位 → 0xC0000005。
+void*  vb6_ImageList_ListImages(void* slot);               // ImageList1.ListImages → 集合对象
+void*  vb6_ImageList_ListImages_Add(void* slot, int32_t index, const wchar_t* key, void* pic);
+                                                           // ListImages.Add(..) → ListImage 对象
+void*  vb6_ImageList_PictureAt(void* slot, int32_t index);  // ListImage.Picture (1 基)
+
 // P13.11d: StatusBar properties (VB6 StatusBar / msctls_status32, 见 vb6forms_statusbar.c)
 // 复刻口径: **不加载 mscomctl.ocx**, 用 comctl32 的 msctls_status32 自己算面板文本
 // (SDK 10.0.19041.0 的 commctrl.h 里没有 SBT_CAPS/SBT_TIME/SBT_DATE, 这四个"系统面板"

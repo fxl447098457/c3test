@@ -168,6 +168,8 @@ enum RtlResourceID {
 
     // P20-45: VB6 ListView 控件 (SysListView32 复刻, 不加载 MSCOMCTL.OCX)
     RTL_VB6FORMS_LISTVIEW_C                = 211,
+    // C29-3: 控件"成员对象/成员集合"的真 IDispatch (ListImages 立样)
+    RTL_VB6FORMS_MEMBEROBJ_C               = 212,
 };
 
 // Session directory manager

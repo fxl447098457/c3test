@@ -12,7 +12,19 @@
             std::string axMember = std::move(comMemberName_);
             isComMarker_ = false;
             // Step 1: 获取属性对象 (如 ListImages 集合)
-            std::string collectionExpr = "vb6_ComGetObjectProp(" + axObjExpr + ", L\"" + axMember + "\")";
+            // C29-3: ImageList 的 ListImages 是**真集合对象** (原生复刻, 见
+            // vb6forms_memberobj.c), 不能对它发 vb6_ComGetObjectProp —— vb6_com_X 槽里
+            // 放的是 HIMAGELIST 实例指针不是 IDispatch, 那样做等于拿垃圾当 vtable。
+            std::string collectionExpr;
+            {
+                if (Symbol::toLower(axMember) == "listimages") {
+                    std::string bareIL = imageListNameOfExpr(axObjExpr);
+                    if (!bareIL.empty())
+                        collectionExpr = "vb6_ImageList_ListImages((void*)vb6_com_" + bareIL + ")";
+                }
+                if (collectionExpr.empty())
+                    collectionExpr = "vb6_ComGetObjectProp(" + axObjExpr + ", L\"" + axMember + "\")";
+            }
             // Step 2: 调用 Item(idx) 获取集合中的元素
             std::vector<std::string> packedArgs;
             for (size_t i = 0; i < node.positional.size(); i++) {
@@ -66,9 +78,17 @@
                     std::string ilSlot = "vb6_com_" + imageListNameOfExpr(objExpr);
                     if (a.size() > 1) ilKey = a[1];
                     if (a.size() > 2) ilPic = a[2];
-                    lastExpr_ = "vb6_ImageList_AddPicture((void*)" + ilSlot + ", "
+                    // C29-3: Add **返回 ListImage 对象** (VB6 语义: `Set img = .Add(..)`),
+                    // 不再是 int 下标 —— 旧实现返回下标时 `Set img` 接住的是个立即数,
+                    // `img.Key` 会拿它当指针解引用 (0xC000041D)。
+                    std::string ilAddCall = "vb6_ImageList_ListImages_Add((void*)" + ilSlot + ", "
                               + std::to_string(ilIdx) + ", (const wchar_t*)(" + ilKey + "), "
                               + ilPic + ")";
+                    // 老写法 `n = .Add(..)` (Let, 非 Set): VB6 取的是 ListImage 的
+                    // **默认属性 Index** —— 不转的话就是 `void*` 赋给整型, C 直接编不过。
+                    lastExpr_ = memObjLetScalar_
+                              ? ("vb6_ComGetIntProp(" + ilAddCall + ", L\"Index\")")
+                              : ilAddCall;
                     return;
                 }
                 if (ilMember == "remove") {

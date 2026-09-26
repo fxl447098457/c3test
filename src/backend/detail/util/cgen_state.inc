@@ -417,6 +417,11 @@
     // `ListImages(i).Key`、`ImageList1.ImageWidth` 这些**字符串形态**的 COM 表达式
     // 改道到 RTL 原生函数上。Toolbar/StatusBar/CommonDialog 这三个还是 OCX 占位, 不登记。
     std::unordered_set<std::string> imageListVars_;
+    // C29-3: 当前右值是否落在 **Let 赋值**（`n = ...`）上。Let 与 Set 对成员对象的
+    // 语义不同: `n = ListImages.Add(..)` 在 VB6 里取的是 ListImage 的**默认属性**
+    // (`Index`), 而 `Set img = ListImages.Add(..)` 拿对象本身。两者走的是两个不同的
+    // visit (AssignmentStmt vs SetStmt), 天然分开 —— 所以这个标志只在 Let 期间置真。
+    bool memObjLetScalar_ = false;
     // objExpr 是否落在一个已登记的 ImageList 上。命中返回**裸控件名** (如 "ImageList1"),
     // 否则返回空串。objExpr 有三种形态, 三种都要认:
     //   ① 控件槽本身                       → vb6_com_ImageList1
@@ -431,6 +436,28 @@
                 std::string n = objExpr.substr(p + head.size(), q - (p + head.size()));
                 if (imageListVars_.count(n)) return n;
             }
+        }
+        // C29-3: 两个新形态 ——
+        //   ④ 裸槽 `vb6_com_X`: MemberAccess 的 object 就是控件标识符时的形态
+        //      (cgen_expr_member_form_builtin.inc:350 设的就是它)。上面 ② 是"已经被
+        //      包成 ComGetObjectProp"之后的形态, 两条路都会来, 所以两个都要认。
+        //   ⑤ 真集合对象 `vb6_ImageList_ListImages((void*)vb6_com_X)` —— 本批新增。
+        // ⑤ 的串里**含** ④ 的前缀, 所以先判 ⑤ 再判 ④。
+        {
+            static const std::string kHead = "vb6_ImageList_ListImages((void*)vb6_com_";
+            size_t p2 = objExpr.find(kHead);
+            if (p2 != std::string::npos) {
+                size_t s = p2 + kHead.size();
+                size_t e = s;
+                while (e < objExpr.size()
+                       && (isalnum((unsigned char)objExpr[e]) || objExpr[e] == '_')) e++;
+                std::string n = objExpr.substr(s, e - s);
+                if (imageListVars_.count(n)) return n;
+            }
+        }
+        if (objExpr.size() > 8 && objExpr.compare(0, 8, "vb6_com_") == 0) {
+            std::string n = objExpr.substr(8);
+            if (imageListVars_.count(n)) return n;
         }
         if (imageListVars_.count(objExpr)) return objExpr;
         return "";

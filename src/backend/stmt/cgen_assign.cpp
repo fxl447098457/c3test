@@ -17,10 +17,15 @@ namespace vb6c3 {
 // 它们不是独立编译单元，单独 include 会编译不过。片段局部变量原样不动，逐行未改 → 零行为改动。
 
 void CCodeGen::visit(AssignmentStmt& node) {
+    // C29-3: Let 赋值期间成员对象要取默认属性 (见 memObjLetScalar_ 的说明)。
+    // `Set` 语句走 visit(SetStmt&)，不受影响。
+    bool savedLetScalar = memObjLetScalar_;
+    memObjLetScalar_ = true;
 #include "backend/detail/stmt/cgen_assign_stmt_special.inc"
 #include "backend/detail/stmt/cgen_assign_prop_write.inc"
 #include "backend/detail/stmt/cgen_assign_com_prop.inc"
 #include "backend/detail/stmt/cgen_assign_value_sem.inc"
+    memObjLetScalar_ = savedLetScalar;
 }
 
 
