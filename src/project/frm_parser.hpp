@@ -107,6 +107,8 @@ enum class FrmControlType {
     ImageList,          // MSComctlLib.ImageList (ActiveX, COM后期绑定)
     ProgressBar,        // MSComctlLib.ProgressBar — Win32 原生复刻 (msctls_progress32)
     SSTab,              // TabDlg.SSTab — Win32 原生复刻 (SysTabControl32), P20-42
+    ListView,           // MSComctlLib.ListView — Win32 原生复刻 (SysListView32), P20-45
+    TreeView,           // MSComctlLib.TreeView — Win32 原生复刻 (SysTreeView32), P20-46
     Unknown,            // 未识别的控件类型
 };
 

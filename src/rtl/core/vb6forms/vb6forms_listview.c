@@ -1,0 +1,520 @@
+// vb6forms_listview.c - P20-45: VB6 ListView 控件的原生复刻
+//
+// 路线: **不加载 MSCOMCTL.OCX**, 用 comctl32 的 SysListView32 复刻等价功能与事件。
+//   SysListView32 是 comctl32 注册好的窗口类 (x64/x86 实测 GetClassInfoW 直接成功),
+//   所以**不需要** StatusBar 那套 RTL 自注册兜底。
+//
+// 设计要点: **自己那张表才是唯一真相**, SysListView32 只是显示。
+//   理由: LVM_GETITEMTEXT 在 x64 跨进程/不同 comctl 版本下取文本有坑, 而设计期灌进去的
+//   文本按 VB6 语义要能**原样读回**(Debug.Print ListView1.ListItems(1).Text)。所以
+//   写入时同时改表 + 刷 UI; 读取一律读表。改动后 lvSyncAll() 重建列与行 (数据量小,
+//   重建最省心), 再按表的 selected/checked 恢复状态。
+//
+// 下标口径 (VB6):
+//   - ColumnHeaders(i) / ListItems(i)  **1 基**
+//   - ListItem.SubItems(i)             **1 基, 且 i=1 对应第 2 列** (第 1 列是 Text)
+//   - ColumnHeaders.Add 的 index 是**插入位** (省略/0 = 追加)
+//
+// 依赖: 只 include 同族头 (生成代码包含的那一族) + 平铺的 vb6rtl_bstr.h。
+
+#include <windows.h>
+#include <commctrl.h>
+#include "vb6forms.h"
+#include "vb6forms_internal.h"
+#include "vb6rtl_bstr.h"
+
+#ifndef _WIN32
+#error "vb6forms_listview.c 只支持 Win32"
+#endif
+
+#define VB6_LV_MAX 32
+
+// ---------------- 列头 ----------------
+typedef struct {
+    wchar_t* key;
+    wchar_t* text;
+    int      width;
+    int      align;      // 0=左 1=右 2=居中 (lvwColumnLeft/Right/Center)
+} Vb6LVCol;
+
+// ---------------- 行 ----------------
+typedef struct {
+    wchar_t*  key;
+    wchar_t*  text;      // 第 1 列
+    wchar_t*  tag;
+    wchar_t** subs;      // 第 2..n 列 (subs[0] = 第 2 列)
+    int       subCount;
+    int       subCap;
+    int       icon;
+    int       smallIcon;
+    int       selected;
+    int       checked;
+} Vb6LVItem;
+
+typedef struct {
+    HWND hwnd;
+    int  view;              // 0=lvwIcon 1=lvwSmallIcon 2=lvwList 3=lvwReport
+    int  gridLines;
+    int  fullRowSelect;
+    int  multiSelect;
+    int  checkBoxes;
+    int  hideHeaders;
+    int  allowColReorder;
+    int  labelEdit;
+    int  sorted;
+    int  sortKey;
+    int  sortOrder;
+    Vb6LVCol*  cols;  int colCount,  colCap;
+    Vb6LVItem* items; int itemCount, itemCap;
+    void* cb[2];            // 0=ItemClick 1=ColumnClick (WM_NOTIFY 分发用)
+} Vb6ListView;
+
+static Vb6ListView g_lvs[VB6_LV_MAX];
+static int g_lvCount = 0;
+
+static Vb6ListView* lvFind(HWND h) {
+    for (int i = 0; i < g_lvCount; i++) if (g_lvs[i].hwnd == h) return &g_lvs[i];
+    return NULL;
+}
+
+static Vb6ListView* lvEnsure(HWND h) {
+    Vb6ListView* v = lvFind(h);
+    if (v) return v;
+    if (g_lvCount >= VB6_LV_MAX) return NULL;
+    v = &g_lvs[g_lvCount++];
+    ZeroMemory(v, sizeof(*v));
+    v->hwnd = h;
+    v->view = 3;            // VB6 默认 lvwReport? 实际默认 0(lvwIcon); C3 取 0 与 VB6 一致
+    v->view = 0;
+    v->sortOrder = 0;
+    return v;
+}
+
+// ---- 小工具: 宽串复制到堆 (自己管) ----
+static wchar_t* lvDupW(const wchar_t* s) {
+    if (!s) return NULL;
+    int n = lstrlenW(s);
+    wchar_t* p = (wchar_t*)HeapAlloc(GetProcessHeap(), 0, (n + 1) * sizeof(wchar_t));
+    if (!p) return NULL;
+    memcpy(p, s, n * sizeof(wchar_t));
+    p[n] = 0;
+    return p;
+}
+static void lvFreeW(wchar_t* p) { if (p) HeapFree(GetProcessHeap(), 0, p); }
+static void lvSetW(wchar_t** dst, const wchar_t* src) {
+    if (*dst) { lvFreeW(*dst); *dst = NULL; }
+    if (src) *dst = lvDupW(src);
+}
+
+// ---------------- UI 同步 ----------------
+// 列: LVM_INSERTCOLUMNW; 行: LVM_INSERTITEMW + LVM_SETITEMW(iSubItem=1..)
+static void lvSyncAll(Vb6ListView* v) {
+    if (!v || !v->hwnd || !IsWindow(v->hwnd)) return;
+    SendMessageW(v->hwnd, LVM_DELETEALLITEMS, 0, 0);
+    // 列 (仅报表视图有意义, 但先建; 切视图时 ListView 自己会用)
+    LVCOLUMNW col;
+    for (int i = 0; i < v->colCount; i++) {
+        ZeroMemory(&col, sizeof(col));
+        col.mask = LVCF_TEXT | LVCF_WIDTH | LVCF_SUBITEM | LVCF_FMT;
+        col.pszText = v->cols[i].text ? v->cols[i].text : (wchar_t*)L"";
+        col.cx = v->cols[i].width;
+        col.iSubItem = i;
+        col.fmt = (v->cols[i].align == 1) ? LVCFMT_RIGHT
+                : (v->cols[i].align == 2) ? LVCFMT_CENTER : LVCFMT_LEFT;
+        // 覆盖同位置已有列 (重建时按序插入即可)
+        SendMessageW(v->hwnd, LVM_INSERTCOLUMNW, (WPARAM)i, (LPARAM)&col);
+    }
+    // 行
+    for (int r = 0; r < v->itemCount; r++) {
+        Vb6LVItem* it = &v->items[r];
+        LVITEMW li;
+        ZeroMemory(&li, sizeof(li));
+        li.mask = LVIF_TEXT;
+        li.iItem = r;
+        li.iSubItem = 0;
+        li.pszText = it->text ? it->text : (wchar_t*)L"";
+        SendMessageW(v->hwnd, LVM_INSERTITEMW, 0, (LPARAM)&li);
+        for (int s = 0; s < it->subCount; s++) {
+            LVITEMW si;
+            ZeroMemory(&si, sizeof(si));
+            si.mask = LVIF_TEXT;
+            si.iItem = r;
+            si.iSubItem = s + 1;                 // SubItems(1) = 第 2 列
+            si.pszText = it->subs[s] ? it->subs[s] : (wchar_t*)L"";
+            SendMessageW(v->hwnd, LVM_SETITEMW, 0, (LPARAM)&si);
+        }
+        if (it->selected || it->checked) {
+            SendMessageW(v->hwnd, LVM_SETITEMSTATE, (WPARAM)r, (LPARAM)&(LVITEMW){
+                .mask = LVIF_STATE,
+                .state = (UINT)((it->selected ? LVIS_SELECTED : 0) | (it->checked ? LVIS_STATEIMAGEMASK : 0)),
+                .stateMask = LVIS_SELECTED | LVIS_STATEIMAGEMASK });
+        }
+    }
+}
+
+// 把标量属性刷到窗口 (GWL_STYLE 位 + LVM_SETEXTENDEDLISTVIEWSTYLE)
+static void lvApplyStyle(Vb6ListView* v) {
+    if (!v || !v->hwnd) return;
+    LONG_PTR st = GetWindowLongPtrW(v->hwnd, GWL_STYLE);
+    st &= ~(LONG_PTR)(LVS_TYPEMASK | LVS_SINGLESEL | LVS_NOCOLUMNHEADER);
+    switch (v->view) {
+        case 0:  st |= LVS_ICON;       break;
+        case 1:  st |= LVS_SMALLICON;  break;
+        case 2:  st |= LVS_LIST;       break;
+        default: st |= LVS_REPORT;     break;
+    }
+    if (!v->multiSelect) st |= LVS_SINGLESEL;
+    if (v->hideHeaders)  st |= LVS_NOCOLUMNHEADER;
+    SetWindowLongPtrW(v->hwnd, GWL_STYLE, st);
+    DWORD ex = (DWORD)SendMessageW(v->hwnd, LVM_GETEXTENDEDLISTVIEWSTYLE, 0, 0);
+    ex &= ~(LVS_EX_GRIDLINES | LVS_EX_FULLROWSELECT | LVS_EX_CHECKBOXES | LVS_EX_HEADERDRAGDROP);
+    if (v->gridLines)      ex |= LVS_EX_GRIDLINES;
+    if (v->fullRowSelect)  ex |= LVS_EX_FULLROWSELECT;
+    if (v->checkBoxes)     ex |= LVS_EX_CHECKBOXES;
+    if (v->allowColReorder) ex |= LVS_EX_HEADERDRAGDROP;
+    SendMessageW(v->hwnd, LVM_SETEXTENDEDLISTVIEWSTYLE, 0, (LPARAM)ex);
+    SendMessageW(v->hwnd, LVM_SETEXTENDEDLISTVIEWSTYLE, ex, (LPARAM)ex);  // 生效 (双调用模式)
+}
+
+// ---------------- 入口: 设计期一次性初始化 ----------------
+// 参数顺序 = .frm 里各个设计期属性的常见集合; 生成器按名字取好再传进来。
+void vb6_ListView_Init(void* hwnd, int32_t view, int32_t gridLines, int32_t fullRowSelect,
+                       int32_t multiSelect, int32_t checkBoxes, int32_t hideHeaders,
+                       int32_t allowColReorder, int32_t labelEdit) {
+    if (!hwnd) return;
+    Vb6ListView* v = lvEnsure((HWND)hwnd);
+    if (!v) return;
+    v->view = (int)view;
+    v->gridLines = (int)gridLines;
+    v->fullRowSelect = (int)fullRowSelect;
+    v->multiSelect = (int)multiSelect;
+    v->checkBoxes = (int)checkBoxes;
+    v->hideHeaders = (int)hideHeaders;
+    v->allowColReorder = (int)allowColReorder;
+    v->labelEdit = (int)labelEdit;
+    lvApplyStyle(v);
+}
+
+// ---------------- 标量属性 读 ----------------
+int32_t vb6_ListView_GetView(void* hwnd)            { Vb6ListView* v = lvFind((HWND)hwnd); return v ? v->view : 0; }
+int32_t vb6_ListView_GetGridLines(void* hwnd)       { Vb6ListView* v = lvFind((HWND)hwnd); return v ? v->gridLines : 0; }
+int32_t vb6_ListView_GetFullRowSelect(void* hwnd)   { Vb6ListView* v = lvFind((HWND)hwnd); return v ? v->fullRowSelect : 0; }
+int32_t vb6_ListView_GetMultiSelect(void* hwnd)     { Vb6ListView* v = lvFind((HWND)hwnd); return v ? v->multiSelect : 0; }
+int32_t vb6_ListView_GetCheckBoxes(void* hwnd)      { Vb6ListView* v = lvFind((HWND)hwnd); return v ? v->checkBoxes : 0; }
+int32_t vb6_ListView_GetHideColumnHeaders(void* hwnd) { Vb6ListView* v = lvFind((HWND)hwnd); return v ? v->hideHeaders : 0; }
+int32_t vb6_ListView_GetAllowColumnReorder(void* hwnd) { Vb6ListView* v = lvFind((HWND)hwnd); return v ? v->allowColReorder : 0; }
+int32_t vb6_ListView_GetLabelEdit(void* hwnd)       { Vb6ListView* v = lvFind((HWND)hwnd); return v ? v->labelEdit : 0; }
+int32_t vb6_ListView_GetSorted(void* hwnd)          { Vb6ListView* v = lvFind((HWND)hwnd); return v ? v->sorted : 0; }
+int32_t vb6_ListView_GetSortKey(void* hwnd)         { Vb6ListView* v = lvFind((HWND)hwnd); return v ? v->sortKey : 0; }
+int32_t vb6_ListView_GetSortOrder(void* hwnd)       { Vb6ListView* v = lvFind((HWND)hwnd); return v ? v->sortOrder : 0; }
+
+// ---------------- 标量属性 写 ----------------
+void vb6_ListView_SetView(void* hwnd, int32_t val) {
+    Vb6ListView* v = lvFind((HWND)hwnd); if (!v) return;
+    v->view = (int)val; lvApplyStyle(v);
+}
+void vb6_ListView_SetGridLines(void* hwnd, int32_t val)         { Vb6ListView* v = lvFind((HWND)hwnd); if (v) { v->gridLines = (int)val; lvApplyStyle(v); } }
+void vb6_ListView_SetFullRowSelect(void* hwnd, int32_t val)     { Vb6ListView* v = lvFind((HWND)hwnd); if (v) { v->fullRowSelect = (int)val; lvApplyStyle(v); } }
+void vb6_ListView_SetMultiSelect(void* hwnd, int32_t val)       { Vb6ListView* v = lvFind((HWND)hwnd); if (v) { v->multiSelect = (int)val; lvApplyStyle(v); } }
+void vb6_ListView_SetCheckBoxes(void* hwnd, int32_t val)        { Vb6ListView* v = lvFind((HWND)hwnd); if (v) { v->checkBoxes = (int)val; lvApplyStyle(v); lvSyncAll(v); } }
+void vb6_ListView_SetHideColumnHeaders(void* hwnd, int32_t val) { Vb6ListView* v = lvFind((HWND)hwnd); if (v) { v->hideHeaders = (int)val; lvApplyStyle(v); } }
+void vb6_ListView_SetAllowColumnReorder(void* hwnd, int32_t val) { Vb6ListView* v = lvFind((HWND)hwnd); if (v) { v->allowColReorder = (int)val; lvApplyStyle(v); } }
+void vb6_ListView_SetLabelEdit(void* hwnd, int32_t val)         { Vb6ListView* v = lvFind((HWND)hwnd); if (v) v->labelEdit = (int)val; }
+void vb6_ListView_SetSorted(void* hwnd, int32_t val) {
+    Vb6ListView* v = lvFind((HWND)hwnd); if (!v) return;
+    v->sorted = (int)val;
+    // VB6: Sorted=True 立即按 SortKey/SortOrder 排序。用表排, 再重建 UI, 保持一致。
+    if (v->sorted && v->itemCount > 1) {
+        for (int i = 1; i < v->itemCount; i++) {
+            Vb6LVItem tmp = v->items[i];
+            int j = i - 1;
+            while (j >= 0) {
+                const wchar_t* a = NULL; const wchar_t* b = NULL;
+                if (v->sortKey <= 0) { a = v->items[j].text; b = tmp.text; }
+                else {
+                    int si = v->sortKey - 1;   // SortKey 1 => SubItems(1)
+                    a = (si < v->items[j].subCount) ? v->items[j].subs[si] : L"";
+                    b = (si < tmp.subCount)         ? tmp.subs[si]         : L"";
+                }
+                int cmp = lstrcmpW(a ? a : L"", b ? b : L"");
+                if (v->sortOrder == 1) cmp = -cmp;
+                if (cmp <= 0) break;
+                v->items[j + 1] = v->items[j];
+                j--;
+            }
+            v->items[j + 1] = tmp;
+        }
+    }
+    lvSyncAll(v);
+}
+void vb6_ListView_SetSortKey(void* hwnd, int32_t val)   { Vb6ListView* v = lvFind((HWND)hwnd); if (v) v->sortKey = (int)val; }
+void vb6_ListView_SetSortOrder(void* hwnd, int32_t val) { Vb6ListView* v = lvFind((HWND)hwnd); if (v) v->sortOrder = (int)val; }
+
+// ---------------- 列头集合 ----------------
+int32_t vb6_ListView_GetColumnCount(void* hwnd) {
+    Vb6ListView* v = lvFind((HWND)hwnd); return v ? v->colCount : 0;
+}
+
+// ColumnHeaders.Add [index], [key], [text], [width], [alignment]
+// idx 是**插入位** (1 基); <=0 或 > count 时追加 (VB6 语义)。
+int32_t vb6_ListView_AddColumn(void* hwnd, int32_t idx, void* keyBstr, void* textBstr,
+                               int32_t width, int32_t align) {
+    Vb6ListView* v = lvEnsure((HWND)hwnd);
+    if (!v) return 0;
+    if (v->colCount + 1 > v->colCap) {
+        int nc = v->colCap ? v->colCap * 2 : 8;
+        Vb6LVCol* na;
+        if (v->cols) na = (Vb6LVCol*)HeapReAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY,
+                                                 v->cols, sizeof(Vb6LVCol) * nc);
+        else         na = (Vb6LVCol*)HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY,
+                                                sizeof(Vb6LVCol) * nc);
+        if (!na) return 0;
+        v->cols = na; v->colCap = nc;
+    }
+    int at = (idx >= 1 && idx <= v->colCount) ? (int)idx - 1 : v->colCount;
+    if (at < v->colCount)
+        memmove(&v->cols[at + 1], &v->cols[at], sizeof(Vb6LVCol) * (v->colCount - at));
+    ZeroMemory(&v->cols[at], sizeof(Vb6LVCol));
+    lvSetW(&v->cols[at].key, (const wchar_t*)keyBstr);
+    lvSetW(&v->cols[at].text, (const wchar_t*)textBstr);
+    v->cols[at].width = (int)width;
+    v->cols[at].align = (int)align;
+    v->colCount++;
+    lvSyncAll(v);
+    return at + 1;   // 返回 1 基 Index
+}
+
+// 列头文本/宽度 (1 基)
+void* vb6_ListView_GetColumnText(void* hwnd, int32_t idx) {
+    Vb6ListView* v = lvFind((HWND)hwnd);
+    if (!v || idx < 1 || idx > v->colCount || !v->cols[idx - 1].text) return (void*)vb6_BSTR_Empty();
+    return (void*)vb6_BSTR_FromStr(v->cols[idx - 1].text);
+}
+void vb6_ListView_SetColumnText(void* hwnd, int32_t idx, void* bstr) {
+    Vb6ListView* v = lvFind((HWND)hwnd);
+    if (!v || idx < 1 || idx > v->colCount) return;
+    lvSetW(&v->cols[idx - 1].text, (const wchar_t*)bstr);
+    lvSyncAll(v);
+}
+int32_t vb6_ListView_GetColumnWidth(void* hwnd, int32_t idx) {
+    Vb6ListView* v = lvFind((HWND)hwnd);
+    if (!v || idx < 1 || idx > v->colCount) return 0;
+    return v->cols[idx - 1].width;
+}
+void vb6_ListView_SetColumnWidth(void* hwnd, int32_t idx, int32_t w) {
+    Vb6ListView* v = lvFind((HWND)hwnd);
+    if (!v || idx < 1 || idx > v->colCount) return;
+    v->cols[idx - 1].width = (int)w;
+    lvSyncAll(v);
+}
+int32_t vb6_ListView_GetColumnAlign(void* hwnd, int32_t idx) {
+    Vb6ListView* v = lvFind((HWND)hwnd);
+    if (!v || idx < 1 || idx > v->colCount) return 0;
+    return v->cols[idx - 1].align;
+}
+// 列头 Key / Index (反查)
+void* vb6_ListView_GetColumnKey(void* hwnd, int32_t idx) {
+    Vb6ListView* v = lvFind((HWND)hwnd);
+    if (!v || idx < 1 || idx > v->colCount || !v->cols[idx - 1].key) return (void*)vb6_BSTR_Empty();
+    return (void*)vb6_BSTR_FromStr(v->cols[idx - 1].key);
+}
+int32_t vb6_ListView_GetColumnIndexByKey(void* hwnd, void* keyBstr) {
+    Vb6ListView* v = lvFind((HWND)hwnd);
+    if (!v || !keyBstr) return 0;
+    const wchar_t* k = (const wchar_t*)keyBstr;
+    for (int i = 0; i < v->colCount; i++)
+        if (v->cols[i].key && !lstrcmpW(v->cols[i].key, k)) return i + 1;
+    return 0;
+}
+void vb6_ListView_ClearColumns(void* hwnd) {
+    Vb6ListView* v = lvFind((HWND)hwnd);
+    if (!v) return;
+    for (int i = 0; i < v->colCount; i++) { lvFreeW(v->cols[i].key); lvFreeW(v->cols[i].text); }
+    v->colCount = 0;
+    SendMessageW(v->hwnd, LVM_DELETEALLITEMS, 0, 0);
+}
+// ---------------- ListItems (行) ----------------
+int32_t vb6_ListView_GetItemCount(void* hwnd) {
+    Vb6ListView* v = lvFind((HWND)hwnd); return v ? v->itemCount : 0;
+}
+
+// 行内 sub 槽扩容: 首次 HeapAlloc (HeapReAlloc 传 NULL 无效 —— 与 StatusBar 同一个坑)
+static int lvItemEnsureSub(Vb6LVItem* it, int need) {
+    if (need <= it->subCap) return 1;
+    int nc = it->subCap ? it->subCap : 4;
+    while (nc < need) nc *= 2;
+    wchar_t** na;
+    if (it->subs) {
+        na = (wchar_t**)HeapReAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY,
+                                    it->subs, sizeof(wchar_t*) * nc);
+    } else {
+        na = (wchar_t**)HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY,
+                                  sizeof(wchar_t*) * nc);
+    }
+    if (!na) return 0;
+    it->subs = na;
+    it->subCap = nc;
+    return 1;
+}
+
+// ListItems.Add [index], [key], [text], [icon], [smallicon] → 返回 1 基 Index
+int32_t vb6_ListView_AddItem(void* hwnd, int32_t idx, void* keyBstr, void* textBstr,
+                             int32_t icon, int32_t smallIcon) {
+    Vb6ListView* v = lvEnsure((HWND)hwnd);
+    if (!v) return 0;
+    if (v->itemCount + 1 > v->itemCap) {
+        int nc = v->itemCap ? v->itemCap * 2 : 8;
+        Vb6LVItem* na;
+        if (v->items) {
+            na = (Vb6LVItem*)HeapReAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY,
+                                         v->items, sizeof(Vb6LVItem) * nc);
+        } else {
+            na = (Vb6LVItem*)HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY,
+                                       sizeof(Vb6LVItem) * nc);
+        }
+        if (!na) return 0;
+        v->items = na;
+        v->itemCap = nc;
+    }
+    int at = (idx >= 1 && idx <= v->itemCount) ? (int)idx - 1 : v->itemCount;
+    if (at < v->itemCount)
+        memmove(&v->items[at + 1], &v->items[at], sizeof(Vb6LVItem) * (v->itemCount - at));
+    ZeroMemory(&v->items[at], sizeof(Vb6LVItem));
+    lvSetW(&v->items[at].key, (const wchar_t*)keyBstr);
+    lvSetW(&v->items[at].text, (const wchar_t*)textBstr);
+    v->items[at].icon = (int)icon;
+    v->items[at].smallIcon = (int)smallIcon;
+    v->itemCount++;
+    lvSyncAll(v);
+    return at + 1;
+}
+
+void* vb6_ListView_GetItemText(void* hwnd, int32_t idx) {
+    Vb6ListView* v = lvFind((HWND)hwnd);
+    if (!v || idx < 1 || idx > v->itemCount || !v->items[idx - 1].text)
+        return (void*)vb6_BSTR_Empty();
+    return (void*)vb6_BSTR_FromStr(v->items[idx - 1].text);
+}
+void vb6_ListView_SetItemText(void* hwnd, int32_t idx, void* bstr) {
+    Vb6ListView* v = lvFind((HWND)hwnd);
+    if (!v || idx < 1 || idx > v->itemCount) return;
+    lvSetW(&v->items[idx - 1].text, (const wchar_t*)bstr);
+    lvSyncAll(v);
+}
+void* vb6_ListView_GetItemKey(void* hwnd, int32_t idx) {
+    Vb6ListView* v = lvFind((HWND)hwnd);
+    if (!v || idx < 1 || idx > v->itemCount || !v->items[idx - 1].key)
+        return (void*)vb6_BSTR_Empty();
+    return (void*)vb6_BSTR_FromStr(v->items[idx - 1].key);
+}
+void vb6_ListView_SetItemKey(void* hwnd, int32_t idx, void* bstr) {
+    Vb6ListView* v = lvFind((HWND)hwnd);
+    if (!v || idx < 1 || idx > v->itemCount) return;
+    lvSetW(&v->items[idx - 1].key, (const wchar_t*)bstr);
+}
+int32_t vb6_ListView_GetItemIndexByKey(void* hwnd, void* keyBstr) {
+    Vb6ListView* v = lvFind((HWND)hwnd);
+    if (!v || !keyBstr) return 0;
+    const wchar_t* k = (const wchar_t*)keyBstr;
+    if (!*k) return 0;
+    for (int i = 0; i < v->itemCount; i++)
+        if (v->items[i].key && !lstrcmpW(v->items[i].key, k)) return i + 1;
+    return 0;
+}
+
+// SubItems(i): **i 从 1 开始, i=1 就是第 2 列** (第 1 列是 Text)
+void* vb6_ListView_GetItemSub(void* hwnd, int32_t idx, int32_t sub) {
+    Vb6ListView* v = lvFind((HWND)hwnd);
+    if (!v || idx < 1 || idx > v->itemCount || sub < 1) return (void*)vb6_BSTR_Empty();
+    Vb6LVItem* it = &v->items[idx - 1];
+    if (sub > it->subCount || !it->subs[sub - 1]) return (void*)vb6_BSTR_Empty();
+    return (void*)vb6_BSTR_FromStr(it->subs[sub - 1]);
+}
+void vb6_ListView_SetItemSub(void* hwnd, int32_t idx, int32_t sub, void* bstr) {
+    Vb6ListView* v = lvFind((HWND)hwnd);
+    if (!v || idx < 1 || idx > v->itemCount || sub < 1) return;
+    Vb6LVItem* it = &v->items[idx - 1];
+    if (!lvItemEnsureSub(it, sub)) return;
+    lvSetW(&it->subs[sub - 1], (const wchar_t*)bstr);
+    if (sub > it->subCount) it->subCount = sub;
+    lvSyncAll(v);
+}
+int32_t vb6_ListView_GetItemSubCount(void* hwnd, int32_t idx) {
+    Vb6ListView* v = lvFind((HWND)hwnd);
+    if (!v || idx < 1 || idx > v->itemCount) return 0;
+    return v->items[idx - 1].subCount;
+}
+int32_t vb6_ListView_GetItemSelected(void* hwnd, int32_t idx) {
+    Vb6ListView* v = lvFind((HWND)hwnd);
+    if (!v || idx < 1 || idx > v->itemCount) return 0;
+    return v->items[idx - 1].selected ? -1 : 0;      // VB6 True = -1
+}
+void vb6_ListView_SetItemSelected(void* hwnd, int32_t idx, int32_t val) {
+    Vb6ListView* v = lvFind((HWND)hwnd);
+    if (!v || idx < 1 || idx > v->itemCount) return;
+    v->items[idx - 1].selected = val ? 1 : 0;
+    LVITEMW st;
+    ZeroMemory(&st, sizeof(st));
+    st.mask = LVIF_STATE;
+    st.state = (UINT)(val ? LVIS_SELECTED : 0);
+    st.stateMask = LVIS_SELECTED;
+    SendMessageW(v->hwnd, LVM_SETITEMSTATE, (WPARAM)(idx - 1), (LPARAM)&st);
+}
+int32_t vb6_ListView_GetItemChecked(void* hwnd, int32_t idx) {
+    Vb6ListView* v = lvFind((HWND)hwnd);
+    if (!v || idx < 1 || idx > v->itemCount) return 0;
+    return v->items[idx - 1].checked ? -1 : 0;
+}
+void vb6_ListView_SetItemChecked(void* hwnd, int32_t idx, int32_t val) {
+    Vb6ListView* v = lvFind((HWND)hwnd);
+    if (!v || idx < 1 || idx > v->itemCount) return;
+    v->items[idx - 1].checked = val ? 1 : 0;
+    lvSyncAll(v);
+}
+// SelectedItem.Index: 第一个选中行 (无则 0)
+int32_t vb6_ListView_GetSelectedIndex(void* hwnd) {
+    Vb6ListView* v = lvFind((HWND)hwnd);
+    if (!v) return 0;
+    for (int i = 0; i < v->itemCount; i++) if (v->items[i].selected) return i + 1;
+    return 0;
+}
+void vb6_ListView_RemoveItem(void* hwnd, int32_t idx) {
+    Vb6ListView* v = lvFind((HWND)hwnd);
+    if (!v || idx < 1 || idx > v->itemCount) return;
+    int at = (int)idx - 1;
+    Vb6LVItem* it = &v->items[at];
+    lvFreeW(it->key);
+    lvFreeW(it->text);
+    lvFreeW(it->tag);
+    for (int s = 0; s < it->subCount; s++) lvFreeW(it->subs[s]);
+    if (it->subs) HeapFree(GetProcessHeap(), 0, it->subs);
+    // 向上搬: 尾部那份已被搬到 at, 只能 memset 空壳, 绝不能再 free (StatusBar 的教训)
+    if (at < v->itemCount - 1)
+        memmove(&v->items[at], &v->items[at + 1], sizeof(Vb6LVItem) * (v->itemCount - at - 1));
+    ZeroMemory(&v->items[v->itemCount - 1], sizeof(Vb6LVItem));
+    v->itemCount--;
+    lvSyncAll(v);
+}
+void vb6_ListView_ClearItems(void* hwnd) {
+    Vb6ListView* v = lvFind((HWND)hwnd);
+    if (!v) return;
+    for (int i = 0; i < v->itemCount; i++) {
+        Vb6LVItem* it = &v->items[i];
+        lvFreeW(it->key);
+        lvFreeW(it->text);
+        lvFreeW(it->tag);
+        for (int s = 0; s < it->subCount; s++) lvFreeW(it->subs[s]);
+        if (it->subs) HeapFree(GetProcessHeap(), 0, it->subs);
+        ZeroMemory(it, sizeof(*it));
+    }
+    v->itemCount = 0;
+    SendMessageW(v->hwnd, LVM_DELETEALLITEMS, 0, 0);
+}
+
+// ImageList 关联 (把 #9 ImageList 的真 HIMAGELIST 喂给控件)
+void vb6_ListView_SetImageList(void* hwnd, void* himl, int32_t which) {
+    if (!hwnd) return;
+    // which: 0=Icons(LVSIL_NORMAL) 1=SmallIcons(LVSIL_SMALL) 2=ColumnHeaderIcons(LVSIL_HEADER)
+    WPARAM w = (which == 0) ? LVSIL_NORMAL : (which == 1) ? LVSIL_SMALL : LVSIL_HEADER;
+    SendMessageW((HWND)hwnd, LVM_SETIMAGELIST, w, (LPARAM)himl);
+}

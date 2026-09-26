@@ -165,6 +165,9 @@ enum RtlResourceID {
 
     // P20-44: OLE 拖放 (IDataObject/IDropSource/IDropTarget 复刻)
     RTL_VB6FORMS_OLEDD_C                   = 210,
+
+    // P20-45: VB6 ListView 控件 (SysListView32 复刻, 不加载 MSCOMCTL.OCX)
+    RTL_VB6FORMS_LISTVIEW_C                = 211,
 };
 
 // Session directory manager

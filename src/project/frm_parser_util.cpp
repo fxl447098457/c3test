@@ -181,6 +181,10 @@ FrmControlType FrmParser::parseControlType(const std::string& typeName) {
     // P20-42: SSTab (TabDlg.SSTab)。必须排在 imagelist 之后、Unknown 之前;
     // "sstab" 是 TabDlg.SSTab / SSTab 两种写法的公共子串。
     if (lower.find("sstab") != std::string::npos) return FrmControlType::SSTab;
+    // P20-45/46: ListView / TreeView。按字符串长短排: 先 listview 再 treeview,
+    // 两者互不为子串, 但都排在 sstab 之后以免误吃。
+    if (lower.find("listview") != std::string::npos) return FrmControlType::ListView;
+    if (lower.find("treeview") != std::string::npos) return FrmControlType::TreeView;
 
     return FrmControlType::Unknown;
 }
@@ -213,6 +217,10 @@ const char* FrmParser::controlTypeToWin32Class(FrmControlType type) {
         // (实测 x64/x86 进程里 GetClassInfoW 直接成功, InitCommonControlsEx 之前就在),
         // 所以这里不需要 RTL 自注册兜底。
         case FrmControlType::SSTab:        return "SysTabControl32";
+        // P20-45/46: ListView/TreeView —— 与 SSTab 同型, **comctl32 已注册**
+        // (实测 GetClassInfoW 直接成功), 不需要 StatusBar 那套自注册兜底。
+        case FrmControlType::ListView:     return "SysListView32";
+        case FrmControlType::TreeView:     return "SysTreeView32";
         case FrmControlType::Menu:         return nullptr;       // 菜单, 非窗口
         case FrmControlType::WebBrowser:  return nullptr;       // WebView2, 运行时动态创建
         default:                           return nullptr;
@@ -239,6 +247,8 @@ const char* FrmParser::controlTypeToVb6Name(FrmControlType type) {
         case FrmControlType::ProgressBar:  return "ProgressBar";
         case FrmControlType::StatusBar:    return "StatusBar";
         case FrmControlType::SSTab:        return "SSTab";
+        case FrmControlType::ListView:     return "ListView";
+        case FrmControlType::TreeView:     return "TreeView";
         case FrmControlType::Shape:        return "Shape";
         case FrmControlType::Line:         return "Line";
         case FrmControlType::Menu:         return "Menu";

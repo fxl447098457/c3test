@@ -217,6 +217,69 @@ void    vb6_oleDD_SetText(void* dataObj, void* bstrText);
 void    vb6_oleDD_Clear(void* dataObj);
 void*   vb6_oleDD_GetFileBstr(void* dataObj, int32_t idx);
 
+// ===================== ListView (P20-45) =====================
+//   **全部原型必须在这里**: 生成代码只 include 这一族头。漏一个 = C 隐式声明返回 int
+//   = x64 把指针截成 32 位 (实测过, 崩在第一次解引用)。
+//   下标口径: ColumnHeaders/ListItems **1 基**; SubItems(i) **1 基且 i=1 是第 2 列**;
+//   ColumnHeaders.Add 的 index 是插入位 (<=0 追加)。True 一律 = -1。
+void    vb6_ListView_Init(void* hwnd, int32_t view, int32_t gridLines, int32_t fullRowSelect,
+                          int32_t multiSelect, int32_t checkBoxes, int32_t hideHeaders,
+                          int32_t allowColReorder, int32_t labelEdit);
+int32_t vb6_ListView_GetView(void* hwnd);
+int32_t vb6_ListView_GetGridLines(void* hwnd);
+int32_t vb6_ListView_GetFullRowSelect(void* hwnd);
+int32_t vb6_ListView_GetMultiSelect(void* hwnd);
+int32_t vb6_ListView_GetCheckBoxes(void* hwnd);
+int32_t vb6_ListView_GetHideColumnHeaders(void* hwnd);
+int32_t vb6_ListView_GetAllowColumnReorder(void* hwnd);
+int32_t vb6_ListView_GetLabelEdit(void* hwnd);
+int32_t vb6_ListView_GetSorted(void* hwnd);
+int32_t vb6_ListView_GetSortKey(void* hwnd);
+int32_t vb6_ListView_GetSortOrder(void* hwnd);
+void    vb6_ListView_SetView(void* hwnd, int32_t val);
+void    vb6_ListView_SetGridLines(void* hwnd, int32_t val);
+void    vb6_ListView_SetFullRowSelect(void* hwnd, int32_t val);
+void    vb6_ListView_SetMultiSelect(void* hwnd, int32_t val);
+void    vb6_ListView_SetCheckBoxes(void* hwnd, int32_t val);
+void    vb6_ListView_SetHideColumnHeaders(void* hwnd, int32_t val);
+void    vb6_ListView_SetAllowColumnReorder(void* hwnd, int32_t val);
+void    vb6_ListView_SetLabelEdit(void* hwnd, int32_t val);
+void    vb6_ListView_SetSorted(void* hwnd, int32_t val);
+void    vb6_ListView_SetSortKey(void* hwnd, int32_t val);
+void    vb6_ListView_SetSortOrder(void* hwnd, int32_t val);
+//   列头
+int32_t vb6_ListView_GetColumnCount(void* hwnd);
+int32_t vb6_ListView_AddColumn(void* hwnd, int32_t idx, void* keyBstr, void* textBstr,
+                               int32_t width, int32_t align);
+void*   vb6_ListView_GetColumnText(void* hwnd, int32_t idx);
+void    vb6_ListView_SetColumnText(void* hwnd, int32_t idx, void* bstr);
+int32_t vb6_ListView_GetColumnWidth(void* hwnd, int32_t idx);
+void    vb6_ListView_SetColumnWidth(void* hwnd, int32_t idx, int32_t w);
+int32_t vb6_ListView_GetColumnAlign(void* hwnd, int32_t idx);
+void*   vb6_ListView_GetColumnKey(void* hwnd, int32_t idx);
+int32_t vb6_ListView_GetColumnIndexByKey(void* hwnd, void* keyBstr);
+void    vb6_ListView_ClearColumns(void* hwnd);
+//   行 + SubItems
+int32_t vb6_ListView_GetItemCount(void* hwnd);
+int32_t vb6_ListView_AddItem(void* hwnd, int32_t idx, void* keyBstr, void* textBstr,
+                             int32_t icon, int32_t smallIcon);
+void*   vb6_ListView_GetItemText(void* hwnd, int32_t idx);
+void    vb6_ListView_SetItemText(void* hwnd, int32_t idx, void* bstr);
+void*   vb6_ListView_GetItemKey(void* hwnd, int32_t idx);
+void    vb6_ListView_SetItemKey(void* hwnd, int32_t idx, void* bstr);
+int32_t vb6_ListView_GetItemIndexByKey(void* hwnd, void* keyBstr);
+void*   vb6_ListView_GetItemSub(void* hwnd, int32_t idx, int32_t sub);
+void    vb6_ListView_SetItemSub(void* hwnd, int32_t idx, int32_t sub, void* bstr);
+int32_t vb6_ListView_GetItemSubCount(void* hwnd, int32_t idx);
+int32_t vb6_ListView_GetItemSelected(void* hwnd, int32_t idx);
+void    vb6_ListView_SetItemSelected(void* hwnd, int32_t idx, int32_t val);
+int32_t vb6_ListView_GetItemChecked(void* hwnd, int32_t idx);
+void    vb6_ListView_SetItemChecked(void* hwnd, int32_t idx, int32_t val);
+int32_t vb6_ListView_GetSelectedIndex(void* hwnd);
+void    vb6_ListView_RemoveItem(void* hwnd, int32_t idx);
+void    vb6_ListView_ClearItems(void* hwnd);
+void    vb6_ListView_SetImageList(void* hwnd, void* himl, int32_t which);
+
 //   StatusBar: Align 0=None 1=Top 2=Bottom(默认) 3=Left 4=Right
 //              Style 0=sbrNormal(多面板, 默认) 1=sbrSimple(单格, 读 SimpleText)
 //   Panels.Add(index, key, text) 返回 **VB6 语义的 1 基 Index**; 插到中间时后面整体后移。
