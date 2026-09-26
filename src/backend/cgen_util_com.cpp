@@ -56,6 +56,52 @@ std::string CCodeGen::resolveComValue(const std::string& unpackType) {
         }
     }
 
+    // C29-7: `ListView1.ListItems` / `.ColumnHeaders` → **真集合对象** (与 C29-3 的
+    // ImageList.ListImages 同一口径)。ListView 是**真窗口**, 宿主槽是 vb6_hwnd_X,
+    // 不是 ImageList 那种 vb6_com_X 实例指针。
+    {
+        std::string lvLower = Symbol::toLower(memberName);
+        if (lvLower == "listitems" || lvLower == "columnheaders") {
+            std::string lvBare = listViewNameOfExpr(objExpr);
+            if (!lvBare.empty()) {
+                lastExpr_ = (lvLower == "listitems")
+                    ? ("vb6_ListView_ListItems((void*)vb6_hwnd_" + lvBare + ")")
+                    : ("vb6_ListView_ColumnHeaders((void*)vb6_hwnd_" + lvBare + ")");
+                isComMarker_ = false;
+                return lastExpr_;
+            }
+        }
+    }
+
+    // C29-OLE: `OLE1.Object` → 嵌入对象的 IDispatch (真 OLE 容器)。
+    // 其它属性 (Class/OLEType/SizeMode…) 走属性表 (cgen_util_ctrl.cpp), 不在这拦。
+    if (Symbol::toLower(memberName) == "object") {
+        std::string ocBare = oleConNameOfExpr(objExpr);
+        if (!ocBare.empty()) {
+            lastExpr_ = "vb6_OleCon_GetObject((void*)vb6_hwnd_" + ocBare + ")";
+            isComMarker_ = false;
+            return lastExpr_;
+        }
+    }
+
+    // C29-3: `ImageList1.ListImages` → **真集合对象** (原生复刻的成员集合, 见
+    // vb6forms_memberobj.c)。必须排在下面那条 P20-39 分支之前: 那条管的是链上更外层的
+    // 成员 (ListImages.Count / ListImages(i).Key), 这里要先把**集合本身**立起来。
+    // 不拦就会发 `vb6_ComGetObjectProp(vb6_com_X, L"ListImages")` —— 而 ImageList 无窗口,
+    // vb6_com_X 槽里放的是 HIMAGELIST 实例指针 (不是 IDispatch), 对它做属性读 =
+    // 运行期拿垃圾当 vtable 用。
+    {
+        std::string liLower = Symbol::toLower(memberName);
+        if (liLower == "listimages") {
+            std::string liBare = imageListNameOfExpr(objExpr);
+            if (!liBare.empty()) {
+                lastExpr_ = "vb6_ImageList_ListImages((void*)vb6_com_" + liBare + ")";
+                isComMarker_ = false;
+                return lastExpr_;
+            }
+        }
+    }
+
     // P20-39: ImageList 原生复刻 —— 把集合/属性读改道到 RTL。
     // 放在两个 COM 分支**之前**, 否则 Count 会走默认 BSTR 解包、Key 会走 ComCallObject。
     {
@@ -517,6 +563,37 @@ std::string CCodeGen::resolveComMarkerForPack(const std::string& packFnHint) {
             std::string ddArg = "(void*)(*" + objExpr + ")";
             if (memDD == "gettext")      return "vb6_oleDD_GetText(" + ddArg + ")";
             if (memDD == "getfilecount") return "vb6_oleDD_GetFileCount(" + ddArg + ")";
+        }
+    }
+
+    // C29-7: `ListView1.ListItems` / `.ColumnHeaders` → 真集合对象 (同 resolveComValue)。
+    // 走这条的是"集合被当实参 / 被整体赋值"的场合, 例如 `Set c = ListView1.ListItems`。
+    {
+        std::string lvLower = Symbol::toLower(memName);
+        if (lvLower == "listitems" || lvLower == "columnheaders") {
+            std::string lvBare = listViewNameOfExpr(objExpr);
+            if (!lvBare.empty())
+                return (lvLower == "listitems")
+                    ? ("vb6_ListView_ListItems((void*)vb6_hwnd_" + lvBare + ")")
+                    : ("vb6_ListView_ColumnHeaders((void*)vb6_hwnd_" + lvBare + ")");
+        }
+    }
+
+    // C29-OLE: `OLE1.Object` (被当实参/整体赋值的场合, 如 `Set o = OLE1.Object`)。
+    if (Symbol::toLower(memName) == "object") {
+        std::string ocBare = oleConNameOfExpr(objExpr);
+        if (!ocBare.empty())
+            return "vb6_OleCon_GetObject((void*)vb6_hwnd_" + ocBare + ")";
+    }
+
+    // C29-3: `ImageList1.ListImages` → 真集合对象 (与 resolveComValue 那条同一口径)。
+    // 走这条的是"集合被当实参 / 被整体赋值"的场合, 例如 `Set c = ImageList1.ListImages`。
+    {
+        std::string liLower = Symbol::toLower(memName);
+        if (liLower == "listimages") {
+            std::string liBare = imageListNameOfExpr(objExpr);
+            if (!liBare.empty())
+                return "vb6_ImageList_ListImages((void*)vb6_com_" + liBare + ")";
         }
     }
 

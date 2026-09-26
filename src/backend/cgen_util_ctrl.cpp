@@ -50,6 +50,18 @@ Vb6Type CCodeGen::controlPropType(FrmControlType ctrlType, const std::string& pr
             return Vb6Type::Long;
         }
     }
+    // C29-OLE: OLEType/OLETypeAllowed/SizeMode/AutoActivate 是 Long 语义 (枚举/布尔);
+    // Class/SourceDoc/SourceItem 是 String (RTL getter 返回 wchar_t*, 包装层会转 BSTR)。
+    if (ctrlType == FrmControlType::OLE) {
+        if (p == "oletype" || p == "oletypeallowed" || p == "sizemode"
+            || p == "autoactivate" || p == "displayasicon" || p == "autoverbmenu"
+            || p == "borderstyle") {
+            return Vb6Type::Long;
+        }
+        if (p == "class" || p == "sourcedoc" || p == "sourceitem") {
+            return Vb6Type::String;
+        }
+    }
     if (ctrlType == FrmControlType::TreeView) {
         // C29-8a: 同理 —— vb6_TreeView_Get* 全是 int32_t (布尔按 VB6 的 -1/0 给)。
         // 不登记就走 inferExprType 的兜底, 那条按成员裸名查符号, 判成 Variant/String
@@ -242,6 +254,41 @@ std::string CCodeGen::getControlPropReadFn(FrmControlType ctrlType, const std::s
         if (propLower == "wordwrap")       return "vb6_SSTab_GetWordWrap";
         if (propLower == "visible")        return "vb6_GetControlVisible";
         if (propLower == "enabled")        return "vb6_GetControlEnabled";
+        break;
+    case FrmControlType::ListView:  // C29-7
+        // ListItems / ColumnHeaders 是**集合**, 走成员对象那条路
+        // (cgen_util_com.cpp 的 resolveComValue / resolveComMarkerForPack 拦截改道);
+        // 这张表只管 ListView 自身的标量属性。
+        // 不登记就会落到 vb6_ComGetStringProp 这个 COM 占位路径上静默答空 ——
+        // 与 ProgressBar / StatusBar 那两批同一条纪律。
+        if (propLower == "view")               return "vb6_ListView_GetView";
+        if (propLower == "gridlines")          return "vb6_ListView_GetGridLines";
+        if (propLower == "fullrowselect")      return "vb6_ListView_GetFullRowSelect";
+        if (propLower == "multiselect")        return "vb6_ListView_GetMultiSelect";
+        if (propLower == "checkboxes")         return "vb6_ListView_GetCheckBoxes";
+        if (propLower == "hidecolumnheaders")  return "vb6_ListView_GetHideColumnHeaders";
+        if (propLower == "allowcolumnreorder") return "vb6_ListView_GetAllowColumnReorder";
+        if (propLower == "labeledit")          return "vb6_ListView_GetLabelEdit";
+        if (propLower == "sorted")             return "vb6_ListView_GetSorted";
+        if (propLower == "sortkey")            return "vb6_ListView_GetSortKey";
+        if (propLower == "sortorder")          return "vb6_ListView_GetSortOrder";
+        if (propLower == "visible")            return "vb6_GetControlVisible";
+        if (propLower == "enabled")            return "vb6_GetControlEnabled";
+        break;
+    case FrmControlType::OLE:  // C29-OLE: OLEType/Class/SizeMode 等走 RTL (真 OLE 容器)
+        // Object 属性走晚绑定 (cgen_util_com.cpp 那条), 不在这张表。
+        if (propLower == "class")           return "vb6_OleCon_GetClass";
+        if (propLower == "oletype")         return "vb6_OleCon_GetOleType";
+        if (propLower == "oletypeallowed")  return "vb6_OleCon_GetOLETypeAllowed";
+        if (propLower == "sizemode")        return "vb6_OleCon_GetSizeMode";
+        if (propLower == "displayasicon")   return "vb6_OleCon_GetDisplayAsIcon";
+        if (propLower == "autoactivate")    return "vb6_OleCon_GetAutoActivate";
+        if (propLower == "autoverbmenu")    return "vb6_OleCon_GetAutoVerbMenu";
+        if (propLower == "borderstyle")     return "vb6_OleCon_GetBorderStyle";
+        if (propLower == "sourcedoc")       return "vb6_OleCon_GetSourceDoc";
+        if (propLower == "sourceitem")      return "vb6_OleCon_GetSourceItem";
+        if (propLower == "visible")         return "vb6_GetControlVisible";
+        if (propLower == "enabled")         return "vb6_GetControlEnabled";
         break;
     case FrmControlType::Menu:  // P20-36
         if (propLower == "caption") return "vb6_GetMenuCaption";
@@ -485,6 +532,29 @@ std::string CCodeGen::getControlPropWriteFn(FrmControlType ctrlType, const std::
         if (propLower == "wordwrap")       return "vb6_SSTab_SetWordWrap";
         if (propLower == "visible")        return "vb6_SetControlVisible";
         if (propLower == "enabled")        return "vb6_SetControlEnabled";
+        break;
+    case FrmControlType::ListView:  // C29-7
+        if (propLower == "view")               return "vb6_ListView_SetView";
+        if (propLower == "gridlines")          return "vb6_ListView_SetGridLines";
+        if (propLower == "fullrowselect")      return "vb6_ListView_SetFullRowSelect";
+        if (propLower == "multiselect")        return "vb6_ListView_SetMultiSelect";
+        if (propLower == "checkboxes")         return "vb6_ListView_SetCheckBoxes";
+        if (propLower == "hidecolumnheaders")  return "vb6_ListView_SetHideColumnHeaders";
+        if (propLower == "allowcolumnreorder") return "vb6_ListView_SetAllowColumnReorder";
+        if (propLower == "labeledit")          return "vb6_ListView_SetLabelEdit";
+        if (propLower == "sorted")             return "vb6_ListView_SetSorted";
+        if (propLower == "sortkey")            return "vb6_ListView_SetSortKey";
+        if (propLower == "sortorder")          return "vb6_ListView_SetSortOrder";
+        if (propLower == "visible")            return "vb6_SetControlVisible";
+        if (propLower == "enabled")            return "vb6_SetControlEnabled";
+        break;
+    case FrmControlType::OLE:  // C29-OLE 写表
+        if (propLower == "oletypeallowed") return "vb6_OleCon_SetOLETypeAllowed";
+        if (propLower == "sizemode")       return "vb6_OleCon_SetSizeMode";
+        if (propLower == "displayasicon")  return "vb6_OleCon_SetDisplayAsIcon";
+        if (propLower == "autoactivate")   return "vb6_OleCon_SetAutoActivate";
+        if (propLower == "autoverbmenu")   return "vb6_OleCon_SetAutoVerbMenu";
+        if (propLower == "borderstyle")    return "vb6_OleCon_SetBorderStyle";
         break;
     case FrmControlType::Timer:
         if (propLower == "interval") return "vb6_SetTimerInterval";

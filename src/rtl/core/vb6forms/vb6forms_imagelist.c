@@ -62,6 +62,11 @@ static void IlPicRelease(void* pic) {
     if (pic) vb6_ReleasePicture(pic);
 }
 
+// C29-3: ListImage.Picture 要交给调用方一份**独立引用** (见 vb6_ImageList_PictureAt)。
+static void IlPicAddRef(void* pic) {
+    if (pic) ((IUnknown*)pic)->lpVtbl->AddRef((IUnknown*)pic);
+}
+
 static void IlEntClear(Vb6ImageEntry* e) {
     if (!e) return;
     free(e->key); e->key = NULL;
@@ -347,6 +352,17 @@ void* vb6_GetImageListKeyAt(void* slot, int32_t index) {
     int i = (int)index - 1;
     if (!il || i < 0 || i >= il->count || !il->ents[i].key) return NULL;
     return (void*)vb6_BSTR_FromStr(il->ents[i].key);
+}
+
+// ListImage.Picture (传 1 基 Index) —— 返回活着的 IPicture* (VB6 的 StdPicture)。
+// 槽里那份是**宿主长期持有**的引用, 这里再 AddRef 一份给调用方: 否则宿主 Remove 掉
+// 这张图的那一刻, 调用方手里的指针就悬垂了 (C29-3 的成员对象会把它包进 VARIANT)。
+void* vb6_ImageList_PictureAt(void* slot, int32_t index) {
+    Vb6ImageList* il = (Vb6ImageList*)slot;
+    int i = (int)index - 1;
+    if (!il || i < 0 || i >= il->count || !il->ents[i].pic) return NULL;
+    IlPicAddRef(il->ents[i].pic);
+    return il->ents[i].pic;
 }
 
 // ListImages("KeyString") —— VB6 允许**按 Key 取项**, 生成的表达式里 Item 的实参是个

@@ -55,8 +55,15 @@
 209 RCDATA "../rtl/core/vb6forms/vb6forms_sstab.c"
 210 RCDATA "../rtl/core/vb6forms/vb6forms_oledd.c"
 211 RCDATA "../rtl/core/vb6forms/vb6forms_listview.c"
-212 RCDATA "../rtl/core/vb6forms/vb6forms_treeview.c"
-213 RCDATA "../rtl/core/vb6forms/vb6forms_toolbar.c"
+// C29-3: 控件"成员对象/成员集合"的真 IDispatch (ListImages 立样)
+212 RCDATA "../rtl/core/vb6forms/vb6forms_memberobj.c"
+// ai/029 C29-8a: TreeView 标量属性面 (SysTreeView32 复刻) —— 原本 dev 侧也用了 212,
+// 合并后顺延 (撞号裁决惯例: 先到者保号, 后来者让位)
+213 RCDATA "../rtl/core/vb6forms/vb6forms_treeview.c"
+// C29-OLE: OLE 容器 (本地判据, 不进 CI)
+214 RCDATA "../rtl/core/vb6forms/vb6forms_olecon.c"
+// ai/029 C29-5a: Toolbar (ToolbarWindow32 复刻, 不加载 MSCOMCTL.OCX) —— 顺延让位
+215 RCDATA "../rtl/core/vb6forms/vb6forms_toolbar.c"
 131 RCDATA "../rtl/core/vb6forms/vb6forms_axsite.c"
 198 RCDATA "../rtl/core/vb6forms/vb6forms_axcontainer.c"
 // vb6forms_axsite.c 按功能家族拆分 (2026-09-20): 内部头 + 5 个族编译单元

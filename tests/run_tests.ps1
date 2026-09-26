@@ -1566,6 +1566,59 @@ if ($Category -in @("all", "run", "vbp")) {
         "IL9-KEY1=rt", "IL10-COUNT=2", "IL11-KEY1=first", "IL12-BYKEY=first",
         "IL13-BYKEYIDX=1", "IL14-W=16", "IL15-SETW=32", "IL16-H=16",
         "IL17-AFTERCLR=0", "CTRLIMAGELIST-DONE")
+    # C29-3 顺手补的覆盖: 这条以前**从来没有 x86 版本**。而 C29-3 撞出来的那个越界写
+    # 恰恰只在 x86 暴露 (sizeof(vb6_VARIANT)=24 vs Windows VARIANT=16 → 写坏堆),
+    # x64 因为两个尺寸恰好相等而"绿得可疑"。控件类的判据必须双架构。
+    Test-Vbp "ctrlimagelist_x86" "$Tests\ctrlimagelist\CtrlImageList.vbp" @(
+        "IL1-DTCOUNT=2", "IL2-DTKEY1=dt1", "IL3-DTKEY2=dt2", "IL4-ADDRT=3",
+        "IL5-COUNT=3", "IL6-AFTERRM=2", "IL7-KEY1=dt2", "IL8-AFTERRM2=1",
+        "IL9-KEY1=rt", "IL10-COUNT=2", "IL11-KEY1=first", "IL12-BYKEY=first",
+        "IL13-BYKEYIDX=1", "IL14-W=16", "IL15-SETW=32", "IL16-H=16",
+        "IL17-AFTERCLR=0", "CTRLIMAGELIST-DONE") -Arch "x86"
+
+    # --- ai/029 C29-3: 控件"成员对象"机制立样 (ImageList 的 ListImages / ListImage) ---
+    # 四条验收 (计划书原文): ① Set img = ListImages.Add(, "Open", LoadPicture(..))
+    # ② img.Key ③ ListImages.Count ④ For Each。
+    # 口径 = 计划书 D1: 集合与成员对象都是**真 IDispatch** (vb6forms_memberobj.c),
+    # 所以 `As Object` 的晚绑定吃的是同一个对象 (MO4 专测这条), `For Each` 由
+    # _NewEnum 走标准 IEnumVARIANT。老写法 `n = .Add(..)` 仍按 VB6 取默认属性 Index
+    # (Let 侧 memObjLetScalar_ 转换) —— 旧夹具 ctrlimagelist 的 IL4/IL10 盯这条。
+    # 三张 bmp 复用 ctrlimagelist 那批 (上面已 Copy-Item 进 $OutDir)。
+    $c29imgExpected = @(
+        "MO1-ADD-KEY=Open", "MO2-ADD-IDX=1", "MO3-COUNT=1",
+        "MO4-KEY2=Close", "MO5-COUNT=2", "MO6-ITEM1-KEY=Open",
+        "MO7-ITEMKEY-IDX=2", "MO8-FOREACH=Open,Close,",
+        "MO9-AFTERRM=1", "MO10-FOREACH2=Close,", "MO11-AFTERCLEAR=0")
+    Test-Vbp "c29imgobj" "$Tests\c29imagelistobj\C29ImgObj.vbp" $c29imgExpected
+    Test-Vbp "c29imgobj_x86" "$Tests\c29imagelistobj\C29ImgObj.vbp" $c29imgExpected -Arch "x86"
+
+    # --- ai/029 C29-7: ListView (数据面 + 事件面) ---
+    # 数据面: ColumnHeaders.Add (标题) / ListItems.Add (数据) / SubItems(i) **1 基, 1 就是
+    # 第 2 列** / 两个集合的 Count 与 For Each / 按 Key 与按下标取项 / 成员属性读写 /
+    # ListView 自身的 View(3=报表) 与 GridLines。
+    # 口径: 集合与成员对象都走 C29-3 立起来的**真 IDispatch** (vb6forms_memberobj.c),
+    # 所以 `Set itm = .ListItems.Add(..)` 之后 itm.Text / itm.SubItems(1) / itm.Selected
+    # 全走晚绑定; ListView 是**真窗口**, owner 是 vb6_hwnd_X (ImageList 那族是 vb6_com_X)。
+    $c29lvExpected = @(
+        "LV1-COL-KEY=c1", "LV2-COL-TEXT=姓名", "LV3-COL-IDX=1", "LV4-COLWIDTH=1200",
+        "LV5-COLCOUNT=2", "LV6-ITEM-KEY=r1", "LV7-ITEM-TEXT=张三", "LV8-ITEM-IDX=1",
+        "LV9-SUB1=销售部", "LV10-ITEMCOUNT=2", "LV11-FOREACH=张三/销售部,李四/技术部,",
+        "LV12-COLS=姓名,部门,", "LV13-VIEW=3", "LV14-GRID=1", "LV15-BYKEY=李四",
+        "LV16-ITEM1=张三", "LV17-SEL=-1", "LV18-COLW=900", "LV19-AFTERRM=1",
+        "LV20-AFTERCLEAR=0")
+    Test-Vbp "c29listview" "$Tests\c29listview\C29ListView.vbp" $c29lvExpected
+    Test-Vbp "c29listview_x86" "$Tests\c29listview\C29ListView.vbp" $c29lvExpected -Arch "x86"
+    # 事件接线: 无头环境点不了鼠标 (生成代码里 LV21/LV22 只有真点击才会打),
+    # 但"WM_NOTIFY 分支 → OnNotify 换算 → 取成员对象 → 回调"这条链必须在**生成代码里
+    # 看得见** —— 少了任何一环都是"接线了却没生效", 而运行期完全静默。
+    Test-EmitcShape "lv_emitc_events" @("$Tests\c29listview\C29ListView.vbp") @(
+        "pNM42->code == -114",
+        "vb6_ListView_OnNotify((void*)vb6_hwnd_ListView1, -114",
+        "vb6_ListView_ListItemAt((void*)vb6_hwnd_ListView1",
+        "pNM42->code == -108",
+        "vb6_ListView_OnNotify((void*)vb6_hwnd_ListView1, -108",
+        "vb6_ListView_ColumnHeaderAt((void*)vb6_hwnd_ListView1",
+        "_ItemClick(&vb6_lvItem7)", "_ColumnClick(&vb6_lvHdr7)")
 
     # Fix 195: .frx 三种 blob 的真实布局 —— 字符串 (Text) / 字符串表 (List) /
     # 整数表 (ItemData)。旧 readIntList 按"每项 2B 整数"读 ItemData, 读到的是

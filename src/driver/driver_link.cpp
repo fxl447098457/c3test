@@ -38,8 +38,10 @@ static void addFormsSources(MsvcDriverOptions& opts, const std::string& rtlDir) 
     opts.sourceFiles.push_back(rtlDir + "/vb6forms_sstab.c");
     opts.sourceFiles.push_back(rtlDir + "/vb6forms_oledd.c");
     opts.sourceFiles.push_back(rtlDir + "/vb6forms_listview.c");
+    opts.sourceFiles.push_back(rtlDir + "/vb6forms_memberobj.c");
     // ai/029 C29-8a: TreeView 标量属性面（原生 SysTreeView32）
     opts.sourceFiles.push_back(rtlDir + "/vb6forms_treeview.c");
+    opts.sourceFiles.push_back(rtlDir + "/vb6forms_olecon.c");
     // ai/029 C29-5a: Toolbar 的窗口与设计期按钮（原生 ToolbarWindow32）
     opts.sourceFiles.push_back(rtlDir + "/vb6forms_toolbar.c");
     // vb6forms_axsite.c 按功能家族拆 5 个编译单元 (2026-09-20): 伞文件本身不参与编译

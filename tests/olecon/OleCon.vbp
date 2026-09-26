@@ -1,0 +1,8 @@
+Type=Exe
+Form=OleCon.frm
+IconForm="Form1"
+Startup="Form1"
+ExeName32="OleCon.exe"
+LinkIncremental=0
+CacheOLE=0
+ManifestType=0

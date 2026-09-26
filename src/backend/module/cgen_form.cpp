@@ -68,6 +68,22 @@ static std::string escapeCString(const std::string& s) {
 // 逐行未改 → 零行为改动；切点全落在原函数体的分节注释处（相对花括号深度 0）。
 
 void CCodeGen::emitFormFramework(const FrmFormDesc& frmDesc, Module& module) {
+    // C29-7: **必须在生成任何代码之前登记**哪些控件是 ListView —— 下面各片段会查
+    // listViewVars_ 来决定 `ListView1.ListItems` 走"真集合对象"还是退化路径。
+    // ⚠ 别把这个登记挪进 emitDesignerControlDecls: 那个函数是在
+    // cgen_base_generate_decl_pass.inc 的**第 46 行**调用的, 而本函数在第 40 行 ——
+    // 也就是"窗体代码全生成完了才登记", listViewVars_ 永远是空的。
+    // (实测症状: 生成出来还是 `vb6_ComGetObjectProp(vb6_hwnd_ListView1, …)`,
+    //  对 HWND 当 IDispatch 用 → 运行期读数全空。)
+    {
+        std::function<void(const FrmControl&)> regLV = [&](const FrmControl& c) {
+            if (c.controlType == FrmControlType::ListView) listViewVars_.insert(c.controlName);
+            // C29-OLE: OLE 容器同 ListView 一样是真窗口, 方法/属性都按 HWND 槽认。
+            if (c.controlType == FrmControlType::OLE) oleConVars_.insert(c.controlName);
+            for (const auto& ch : c.children) regLV(ch);
+        };
+        regLV(frmDesc.formControl);
+    }
 #include "backend/detail/module/cgen_form_prelude.inc"
 #include "backend/detail/module/cgen_form_ctrl_registry.inc"
 #include "backend/detail/module/cgen_form_wndproc_subclass.inc"

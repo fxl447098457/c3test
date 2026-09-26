@@ -161,6 +161,17 @@ int32_t vb6_ImageListIndexByKey(void* slot, const wchar_t* key);
 void*  vb6_GetImageListKeyAt(void* slot, int32_t index);   // ListImage.Key (BSTR)
 void*  vb6_GetImageListHandle(void* slot);        // 真 HIMAGELIST, 供其它控件挂接
 
+// C29-3: ListImages 集合 / ListImage 成员对象 —— **真 IDispatch** (见 vb6forms_memberobj.c)。
+// 这是 ai/029 D1 "成员对象走真 IDispatch" 的立样: `Set itm = ...Add(..)` / `itm.Key` /
+// `For Each n In ListImages` 都靠它。后面 ListView(ListItems/ColumnHeaders) / TreeView(Nodes)
+// / StatusBar(Panels) / Toolbar(Buttons) 按同一形状继续挂 kind。
+// **原型必须在这里声明** (同下面 SSTab 那条注释): 生成代码只 include 这一族头,
+// 漏了就是 C 隐式声明返回 int → x64 把指针截成 32 位 → 0xC0000005。
+void*  vb6_ImageList_ListImages(void* slot);               // ImageList1.ListImages → 集合对象
+void*  vb6_ImageList_ListImages_Add(void* slot, int32_t index, const wchar_t* key, void* pic);
+                                                           // ListImages.Add(..) → ListImage 对象
+void*  vb6_ImageList_PictureAt(void* slot, int32_t index);  // ListImage.Picture (1 基)
+
 // P13.11d: StatusBar properties (VB6 StatusBar / msctls_status32, 见 vb6forms_statusbar.c)
 // 复刻口径: **不加载 mscomctl.ocx**, 用 comctl32 的 msctls_status32 自己算面板文本
 // (SDK 10.0.19041.0 的 commctrl.h 里没有 SBT_CAPS/SBT_TIME/SBT_DATE, 这四个"系统面板"
@@ -256,6 +267,45 @@ void    vb6_ListView_SetColumnText(void* hwnd, int32_t idx, void* bstr);
 int32_t vb6_ListView_GetColumnWidth(void* hwnd, int32_t idx);
 void    vb6_ListView_SetColumnWidth(void* hwnd, int32_t idx, int32_t w);
 int32_t vb6_ListView_GetColumnAlign(void* hwnd, int32_t idx);
+void    vb6_ListView_SetColumnAlign(void* hwnd, int32_t idx, int32_t val);
+void    vb6_ListView_RemoveColumn(void* hwnd, int32_t idx);
+// C29-7 事件面: WM_NOTIFY 的 LVN_* → 1 基下标 (0 = 与本控件无关), 再由下标取成员对象。
+// 生成代码在 WM_NOTIFY 分支里用 (见 cgen_form_wndproc_dispatch.inc)。
+int32_t vb6_ListView_OnNotify(void* hwnd, int32_t code, void* lParam);
+// ===================== OLE 容器 (C29-OLE, 判据只本地跑不进 CI) =====================
+// 窗口类 VB6_OLECONTAINER 自注册 (vb6_OleCon_RegisterClasses, cgen 在窗体创建前发射)。
+// 嵌入对象依赖目标机器的 OLE 服务器 —— 判据用系统自带 Package (packager.dll, 双架构都有)。
+int       vb6_RegisterOleConClass(void* hInstance);                // 进程一次, 窗体创建前调
+void      vb6_OleCon_Init(void* hwnd, const wchar_t* cls, int oletTypeAllowed,
+                          int sizeMode, int displayAsIcon, int autoActivate);
+int       vb6_OleCon_CreateEmbed(void* hwnd, const wchar_t* sourceDoc);  /* NULL=按 Class 新建 */
+int       vb6_OleCon_CreateLink(void* hwnd, const wchar_t* sourceDoc, const wchar_t* sourceItem);
+int       vb6_OleCon_ReadFromFile(void* hwnd, const wchar_t* path);
+int       vb6_OleCon_SaveToFile(void* hwnd, const wchar_t* path);
+int       vb6_OleCon_DoVerb(void* hwnd, int verb);
+int       vb6_OleCon_Close(void* hwnd);
+void*     vb6_OleCon_GetObject(void* hwnd);                        // Object 属性 → IDispatch*
+int       vb6_OleCon_GetOleType(void* hwnd);                       // 0=嵌入 1=链接 2=无
+void      vb6_OleCon_Copy(void* hwnd);
+int       vb6_OleCon_Paste(void* hwnd);
+int       vb6_OleCon_InsertObjDlg(void* hwnd);
+int       vb6_OleCon_GetOLETypeAllowed(void* hwnd);
+void      vb6_OleCon_SetOLETypeAllowed(void* hwnd, int v);
+int       vb6_OleCon_GetSizeMode(void* hwnd);
+void      vb6_OleCon_SetSizeMode(void* hwnd, int v);
+int       vb6_OleCon_GetDisplayAsIcon(void* hwnd);
+void      vb6_OleCon_SetDisplayAsIcon(void* hwnd, int v);
+int       vb6_OleCon_GetAutoActivate(void* hwnd);
+void      vb6_OleCon_SetAutoActivate(void* hwnd, int v);
+int       vb6_OleCon_GetAutoVerbMenu(void* hwnd);
+void      vb6_OleCon_SetAutoVerbMenu(void* hwnd, int v);
+int       vb6_OleCon_GetBorderStyle(void* hwnd);
+void      vb6_OleCon_SetBorderStyle(void* hwnd, int v);
+wchar_t*  vb6_OleCon_GetClass(void* hwnd);
+wchar_t*  vb6_OleCon_GetSourceDoc(void* hwnd);
+wchar_t*  vb6_OleCon_GetSourceItem(void* hwnd);
+void*   vb6_ListView_ListItemAt(void* hwnd, int32_t index);
+void*   vb6_ListView_ColumnHeaderAt(void* hwnd, int32_t index);
 void*   vb6_ListView_GetColumnKey(void* hwnd, int32_t idx);
 int32_t vb6_ListView_GetColumnIndexByKey(void* hwnd, void* keyBstr);
 void    vb6_ListView_ClearColumns(void* hwnd);
@@ -279,6 +329,18 @@ int32_t vb6_ListView_GetSelectedIndex(void* hwnd);
 void    vb6_ListView_RemoveItem(void* hwnd, int32_t idx);
 void    vb6_ListView_ClearItems(void* hwnd);
 void    vb6_ListView_SetImageList(void* hwnd, void* himl, int32_t which);
+
+// ---- C29-7: ListView 成员对象入口 (真 IDispatch, 见 vb6forms_memberobj.c) ----
+//   ListView1.ListItems / .ColumnHeaders 返回**集合对象**; 它们的 Add 返回**成员对象**
+//   (ListItem / ColumnHeader), 于是 `Set itm = .ListItems.Add(..)` 之后
+//   `itm.Text` / `itm.SubItems(i)` / `itm.Selected` 全部走晚绑定。
+//   ⚠ owner 这里传的是 **HWND** —— 与 ImageList 那族 (vb6_com_X 实例指针) 不同。
+void*   vb6_ListView_ListItems(void* hwnd);
+void*   vb6_ListView_ListItems_Add(void* hwnd, int32_t index, const wchar_t* key,
+                                   const wchar_t* text, int32_t icon, int32_t smallIcon);
+void*   vb6_ListView_ColumnHeaders(void* hwnd);
+void*   vb6_ListView_ColumnHeaders_Add(void* hwnd, int32_t index, const wchar_t* key,
+                                       const wchar_t* text, int32_t width, int32_t align);
 
 //   StatusBar: Align 0=None 1=Top 2=Bottom(默认) 3=Left 4=Right
 //              Style 0=sbrNormal(多面板, 默认) 1=sbrSimple(单格, 读 SimpleText)

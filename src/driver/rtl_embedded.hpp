@@ -168,12 +168,15 @@ enum RtlResourceID {
 
     // P20-45: VB6 ListView 控件 (SysListView32 复刻, 不加载 MSCOMCTL.OCX)
     RTL_VB6FORMS_LISTVIEW_C                = 211,
-
-    // ai/029 C29-8a: VB6 TreeView 控件的标量属性面 (SysTreeView32 复刻, 不加载 OCX)
-    RTL_VB6FORMS_TREEVIEW_C                = 212,
+    // C29-3: 控件"成员对象/成员集合"的真 IDispatch (ListImages 立样)
+    RTL_VB6FORMS_MEMBEROBJ_C               = 212,
+    // ai/029 C29-8a: TreeView 标量属性面 (dev 原用 212, 合并后顺延让位)
+    RTL_VB6FORMS_TREEVIEW_C                = 213,
+    // OLE 容器 (本地判据, 不进 CI —— 嵌入对象依赖目标机器的 OLE 服务器)
+    RTL_VB6FORMS_OLECON_C                  = 214,
 
     // ai/029 C29-5a: VB6 Toolbar 控件 (ToolbarWindow32 复刻, 不加载 MSCOMCTL.OCX)
-    RTL_VB6FORMS_TOOLBAR_C                 = 213,
+    RTL_VB6FORMS_TOOLBAR_C                 = 215,
 };
 
 // Session directory manager

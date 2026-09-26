@@ -51,10 +51,19 @@
     {
         bool anyNotify = false;
         for (const auto& ctrl : frmDesc.formControl.children) {
-            if (ctrl.controlType != FrmControlType::SSTab) continue;
-            if (!symTab_.lookup(ctrl.controlName + "_Click")) continue;
-            anyNotify = true;
-            break;
+            if (ctrl.controlType == FrmControlType::SSTab) {
+                if (!symTab_.lookup(ctrl.controlName + "_Click")) continue;
+                anyNotify = true;
+                break;
+            }
+            // C29-7: ListView 的 ItemClick / ColumnClick 也走这条 WM_NOTIFY。
+            // 两个事件共用一个 case 分支, 只要有一个处理器存在就得把分支建起来。
+            if (ctrl.controlType == FrmControlType::ListView) {
+                if (!symTab_.lookup(ctrl.controlName + "_ItemClick") &&
+                    !symTab_.lookup(ctrl.controlName + "_ColumnClick")) continue;
+                anyNotify = true;
+                break;
+            }
         }
         if (anyNotify) {
             c_.emitLine("case WM_NOTIFY: {");
@@ -89,6 +98,61 @@
                 c_.emitLine("}");
                 c_.dedent();
                 c_.emitLine("}");
+            }
+            // ---- C29-7: ListView 的 ItemClick / ColumnClick ----
+            // 两个事件都从 WM_NOTIFY 来; RTL 的 vb6_ListView_OnNotify 把通知换算成
+            // **1 基下标**, 再按下标取成员对象回调 —— VB6 的事件参数是**对象**:
+            //   Sub ListView1_ItemClick(ByVal Item As ListItem)
+            //   Sub ListView1_ColumnClick(ByVal ColumnHeader As ColumnHeader)
+            // 生成的回调形参因此是 void** (对象指针的地址)。
+            for (const auto& ctrl : frmDesc.formControl.children) {
+                if (ctrl.controlType != FrmControlType::ListView) continue;
+                auto* icSym = symTab_.lookup(ctrl.controlName + "_ItemClick");
+                auto* ccSym = symTab_.lookup(ctrl.controlName + "_ColumnClick");
+                if (!icSym && !ccSym) continue;
+                std::string lvNameLower = ctrl.controlName;
+                std::transform(lvNameLower.begin(), lvNameLower.end(), lvNameLower.begin(), ::tolower);
+                std::string lvHwndVar = knownControlArrays_.count(lvNameLower)
+                    ? ("vb6_CtrlArr_GetAt(&vb6_arr_" + cIdent(ctrl.controlName) + ", 0)")
+                    : ("vb6_hwnd_" + cIdent(ctrl.controlName));
+                if (icSym) {
+                    // LVN_ITEMACTIVATE = LVN_FIRST - 14 = -114 (双击/回车激活一行)
+                    std::string icFn = cProcName(icSym->name, AccessLevel::Private);
+                    c_.emitLine("if (pNM42->code == -114 && (void*)pNM42->hwndFrom == "
+                                + lvHwndVar + ") {");
+                    c_.indent();
+                    c_.emitLine("extern void " + icFn + "(void**);");
+                    c_.emitLine("int32_t vb6_lvIdx7 = vb6_ListView_OnNotify((void*)"
+                                + lvHwndVar + ", -114, (void*)lParam);");
+                    c_.emitLine("if (vb6_lvIdx7 > 0) {");
+                    c_.indent();
+                    c_.emitLine("void* vb6_lvItem7 = vb6_ListView_ListItemAt((void*)"
+                                + lvHwndVar + ", vb6_lvIdx7);");
+                    c_.emitLine("if (vb6_lvItem7) " + icFn + "(&vb6_lvItem7);");
+                    c_.dedent();
+                    c_.emitLine("}");
+                    c_.dedent();
+                    c_.emitLine("}");
+                }
+                if (ccSym) {
+                    // LVN_COLUMNCLICK = LVN_FIRST - 8 = -108 (点列头)
+                    std::string ccFn = cProcName(ccSym->name, AccessLevel::Private);
+                    c_.emitLine("if (pNM42->code == -108 && (void*)pNM42->hwndFrom == "
+                                + lvHwndVar + ") {");
+                    c_.indent();
+                    c_.emitLine("extern void " + ccFn + "(void**);");
+                    c_.emitLine("int32_t vb6_lvCol7 = vb6_ListView_OnNotify((void*)"
+                                + lvHwndVar + ", -108, (void*)lParam);");
+                    c_.emitLine("if (vb6_lvCol7 > 0) {");
+                    c_.indent();
+                    c_.emitLine("void* vb6_lvHdr7 = vb6_ListView_ColumnHeaderAt((void*)"
+                                + lvHwndVar + ", vb6_lvCol7);");
+                    c_.emitLine("if (vb6_lvHdr7) " + ccFn + "(&vb6_lvHdr7);");
+                    c_.dedent();
+                    c_.emitLine("}");
+                    c_.dedent();
+                    c_.emitLine("}");
+                }
             }
             c_.emitLine("break;");
             c_.dedent();
