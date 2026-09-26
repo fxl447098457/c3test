@@ -897,6 +897,90 @@ function Test-Syntax {
 # ai/023 S01: vbp-level negative case. The package hard checks run in driver stage 0
 # (before the pipeline), so --syntax-only is enough: compile must FAIL and the output
 # must contain the given ASCII needle.
+# ai/030 T30-A: 内容寻址 obj store 的判据。用例跑在自己的 store 里 (C3 的缓存根取自
+# %LOCALAPPDATA%，拿不到才退回 <outputDir>/.c3obj)，于是这几条能精确断、不受机器上历史
+# 缓存摆布：空 store 首编必全 miss、次编必全命中 (缓存真跨构建复用)、换 -O 2 之后 RTL 那一族
+# 仍是一格不多 (RTL 的编译档与用户 -O 解耦) 而用户码必须多占一格 (键确实跟着优化档走)、
+# 三臂产物跑起来 stdout 逐字相同 (命中不改产物 —— 这条才是"敢默认开"的前提)。
+# 本机实测：冷编 24.5 s / 全命中 2.9 s / 换 -O 2 6.5 s / 换架构 x86 24.6 s。
+function Test-ObjCache {
+    param([string]$Name, [string]$Source)
+    $script:total++
+    Write-Host -NoNewline "  [OBJCACHE] $Name ... "
+    $reasons = @()
+    $outs = @('', '', '')
+    $rtl = @('', '', ''); $usr = @('', '', '')
+    $stem = [System.IO.Path]::GetFileNameWithoutExtension($Source)
+
+    $sandbox = Join-Path $OutDir ("{0}_store" -f $Name)
+    if (Test-Path $sandbox) { Remove-Item -Recurse -Force $sandbox }
+    New-Item -ItemType Directory -Force -Path $sandbox | Out-Null
+    $ladSaved = $env:LOCALAPPDATA
+    $env:LOCALAPPDATA = $sandbox
+    try {
+        for ($i = 0; $i -lt 3; $i++) {
+            # NB: 别拿 @(@(), @(), @('-O','2')) 枚举三臂 —— PS 把里面的空数组压平, 三臂会
+            # 悄悄变成 "-O" / "2" / 无 (踩过)。
+            $extra = @()
+            if ($i -eq 2) { $extra = @('-O', '2') }
+            $dir = Join-Path $OutDir ("{0}_{1}" -f $Name, $i)
+            if (Test-Path $dir) { Remove-Item -Recurse -Force $dir }
+            New-Item -ItemType Directory -Force -Path $dir | Out-Null
+            $c3Args = @($Source, '--output-dir', $dir, '--incremental') + $extra
+            $log = (& $C3 @c3Args 2>&1) | Out-String
+            if ($LASTEXITCODE -ne 0) { $reasons += ("build{0} rc={1}" -f $i, $LASTEXITCODE); continue }
+            $m = [regex]::Match($log, 'OBJCACHE rtl=(\d+)/(\d+) user=(\d+)/(\d+)')
+            if (-not $m.Success) { $reasons += ("build{0} 没读到 OBJCACHE 读数" -f $i); continue }
+            $rtl[$i] = ('{0}/{1}' -f [int]$m.Groups[1].Value, [int]$m.Groups[2].Value)
+            $usr[$i] = ('{0}/{1}' -f [int]$m.Groups[3].Value, [int]$m.Groups[4].Value)
+            $exe = Join-Path $dir ($stem + '.exe')
+            if (-not (Test-Path $exe)) { $reasons += ("build{0} 无 exe" -f $i); continue }
+            $run = Invoke-TestExe -ExePath $exe -WorkDir $dir -Name ("{0}run{1}" -f $Name, $i)
+            if (-not $run.Ok) { $reasons += ("build{0} 跑失败 {1}" -f $i, $run.Detail); continue }
+            $outs[$i] = ($run.Output -join "`n")
+        }
+    } finally {
+        $env:LOCALAPPDATA = $ladSaved
+    }
+
+    # 每个源占几格: 键 = 去掉尾部 _<hex> 之后的源名。
+    $store = Join-Path (Join-Path $sandbox 'C3') 'objcache'
+    $nUser = -1; $nRtl = 0
+    if (Test-Path $store) {
+        $slots = @{}
+        foreach ($f in [System.IO.Directory]::GetFiles($store)) {
+            $mm = [regex]::Match([System.IO.Path]::GetFileName($f), '^(.+)_[0-9a-f]{8,}\.obj$')
+            if (-not $mm.Success) { continue }
+            $k = $mm.Groups[1].Value
+            if ($slots.ContainsKey($k)) { $slots[$k] = $slots[$k] + 1 } else { $slots[$k] = 1 }
+        }
+        foreach ($k in $slots.Keys) {
+            if ($k -eq $stem) { $nUser = $slots[$k] }
+            elseif ($k -like 'vb6rtl*') { if ($slots[$k] -gt $nRtl) { $nRtl = $slots[$k] } }
+        }
+    }
+    $a = @($rtl[0].Split('/'))
+
+    if ($reasons.Count -eq 0) {
+        if ($a.Count -ne 2 -or [int]$a[1] -le 0) { $reasons += 'RTL 计数读不到 (读数形状变了?)' }
+        elseif ([int]$a[0] -ne 0) { $reasons += ("空 store 第一次竟命中 {0}" -f $rtl[0]) }
+        elseif ($rtl[1] -ne ('{0}/{0}' -f $a[1])) { $reasons += ("第二次没全命中: {0}" -f $rtl[1]) }
+        elseif ($rtl[2] -ne $rtl[1]) { $reasons += ("-O 2 之后 RTL 变了: {0} (解耦破了)" -f $rtl[2]) }
+        elseif ([int](@($usr[2].Split('/'))[0]) -ne 0) { $reasons += ("-O 2 竟复用了 /O0 的用户码 obj: {0}" -f $usr[2]) }
+        elseif ($nRtl -ne 1) { $reasons += ("RTL 占了 {0} 格 (与用户 -O 无关, 该只 1 格)" -f $nRtl) }
+        elseif ($nUser -ne 2) { $reasons += ("用户码 {1}.c 占了 {0} 格 (该是 /O0 与 /O2 两格)" -f $nUser, $stem) }
+        elseif ($outs[0] -ne $outs[1] -or $outs[1] -ne $outs[2]) { $reasons += '三臂产物输出不一致 (命中改了产物)' }
+    }
+    if ($reasons.Count -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host ("FAIL: " + ($reasons -join ' | ')) -ForegroundColor Red
+        if ($Verbose) { Write-Host ("  rtl=" + ($rtl -join ' ') + " user=" + ($usr -join ' ')) }
+    }
+}
+
 function Test-VbpFail {
     param([string]$Name, [string]$VbpFile, [string]$Needle)
     $script:total++
@@ -1345,6 +1429,8 @@ if ($Category -in @("all", "run", "vbp")) {
     $tmNeedles = @("TIMERPROG-DONE") + (1..10 | ForEach-Object { "T$_=Y" })
     Test-Vbp "tmtimer" "$Tests\c29timer\TmApp.vbp" $tmNeedles
     Test-Vbp "tmtimer_x86" "$Tests\c29timer\TmApp.vbp" $tmNeedles -Arch "x86"
+    # ai/030 T30-A: 内容寻址 obj store —— 命中/解耦/不改产物三条一起断 (用例自带隔离 store)
+    Test-ObjCache "objcache" "$Tests\hello.bas"
     Test-EmitcShape "cf_emitc_shape" @("$Tests\ctrlfiles\CfApp.vbp") @(
         'extern void vb6_drvList_Change(); vb6_drvList_Change();',
         'extern void vb6_dirList_Change(); vb6_dirList_Change();',

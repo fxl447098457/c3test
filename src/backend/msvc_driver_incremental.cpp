@@ -8,6 +8,11 @@
 #include <unordered_map>
 #include <vector>
 #include <string>
+#include <cstdlib>
+
+#ifdef _WIN32
+#include <windows.h>
+#endif
 
 namespace vb6c3 {
 
@@ -78,6 +83,83 @@ std::vector<std::string> collectLocalIncludes(const std::string& cPath, const st
     return incs;
 }
 
+// === ai/030 T30-A: 内容寻址的 obj store ===
+// 与旧方案 (cacheDir + cache.txt 索引) 的三条分别：
+//  1) RTL 那一族 .c 用**固定**的一套编译档编：与用户 -O/-g 无关，且 include 路径只给
+//     rtlDir。⇒ RTL obj 只由 {架构, 工具串, RTL 源与其本地 include 的内容} 决定，一份
+//     缓存服务所有工程/所有产物形态；工程里放一个同名 vb6rtl.h 也抢不动 (旧路径的 /I 与
+//     依赖解析都**先查 srcDir**，见 ai/030 §四)。
+//  2) obj 文件名里带键哈希 ⇒ 没有索引文件，也就没有"交替编两个项目互相抹记录"、
+//     "cache.txt trunc 非原子重写"这两件事。键不对就是查不到，查不到就自己编 ——
+//     **错配的 obj 不可能被"用错"，只可能被"没用上"**，这是随包带缓存 (T30-D) 敢做的条件。
+//  3) store 落在 %LOCALAPPDATA%\C3\objcache ⇒ 跨输出目录、跨项目共享。
+std::string objStoreDir(const std::string& fallback) {
+#ifdef _WIN32
+    wchar_t buf[1024];
+    DWORD n = GetEnvironmentVariableW(L"LOCALAPPDATA", buf,
+                                      static_cast<DWORD>(sizeof(buf) / sizeof(buf[0])));
+    if (n > 0 && n < sizeof(buf) / sizeof(buf[0])) {
+        std::string base = pathToUtf8(std::filesystem::path(buf));
+        if (!base.empty()) return base + "/C3/objcache";
+    }
+#endif
+    return fallback;
+}
+
+// 工具串: cl.exe 全路径自带 VC 版本号 (.../MSVC/14.xx.yyyyy/bin/Hostx64/x64/cl.exe);
+// 调用方环境里有 INCLUDE 时, 连 Windows SDK 的版本目录一起进 (dev shell 里跑 / 做完
+// T30-C 每进程捕获一次 vcvars 环境之后, 这条总是成立)。
+std::string toolsetTag(const std::string& clPath) {
+    const char* inc = std::getenv("INCLUDE");
+    return clPath + "|" + (inc ? inc : "");
+}
+
+// 一个 .c 真正生效的编译档。**路径类**选项一律不进键 —— 会话临时目录每次编译都换,
+// 进了就永远不命中; 那些内容 (RTL 源/头) 本来就有独立哈希盖着。
+std::string flagsKeyFor(bool isRtl, const MsvcDriverOptions& o) {
+    std::string s = std::string(isRtl ? "rtl-fixed" : "user") + "|" + o.arch;
+    if (isRtl) s += "|/Od";   // RTL 固定档: 用户的 -O 与 -g 都不改它
+    else {
+        s += "|/O" + std::to_string(o.optimizationLevel);
+        if (o.debugInfo) s += "|/Zi";
+    }
+    if (o.arch == "x86") s += "|/MT";
+    return s;
+}
+
+// 真正给 cl 的编译档 (与 flagsKeyFor 一一对应, 只差 /I 的路径)
+std::string compileFlagsFor(bool isRtl, const MsvcDriverOptions& o,
+                            const std::string& rtlDir, const std::string& srcDir) {
+    std::ostringstream c;
+    if (isRtl) {
+        if (!rtlDir.empty()) c << " /I\"" << rtlDir << "\"";
+        c << " /Od";
+    } else {
+        if (!rtlDir.empty()) c << " /I\"" << rtlDir << "\"";
+        if (!srcDir.empty()) c << " /I\"" << srcDir << "\"";
+        switch (o.optimizationLevel) {
+            case 0: c << " /Od"; break;
+            case 1: c << " /O1"; break;
+            case 2: c << " /O2"; break;
+            case 3: c << " /Ox"; break;
+        }
+        if (o.debugInfo) c << " /Zi";
+    }
+    c << " /std:c11 /DUNICODE /D_UNICODE /utf-8 /D_CRT_SECURE_NO_WARNINGS"
+         " /D_CRT_NONSTDC_NO_WARNINGS /W3";
+    // P10 恢复: RTL 源码直接编译, /Gy 函数级链接配合 /OPT:REF 剔除未引用 RTL 代码
+    c << " /Gy";
+    if (o.arch == "x86") c << " /MT";
+    return c.str();
+}
+
+// src 是否属于 RTL 那一族 (由 driver 从 exe 里解包出来的目录)
+bool isRtlSource(const std::string& src, const std::string& rtlDir) {
+    if (rtlDir.empty()) return false;
+    if (src.compare(0, rtlDir.size(), rtlDir) != 0) return false;
+    return src.size() > rtlDir.size() && (src[rtlDir.size()] == '/' || src[rtlDir.size()] == '\\');
+}
+
 } // namespace
 
 // opt3: 增量编译 — 基于内容哈希的 obj 级缓存。
@@ -96,104 +178,76 @@ bool MsvcDriver::compileAndLinkIncremental(const MsvcDriverOptions& options) {
     if (objDir.empty()) objDir = ".";
     std::string tmpLogPath = objDir + "/_c3_msvc_out.txt";
 
-    // 持久缓存目录
+    // 缓存目录: 全局 store (%LOCALAPPDATA%\C3\objcache), 拿不到就退回 <outputDir>/.c3obj
     std::string cacheDir = options.incrementalCacheDir;
     if (cacheDir.empty()) cacheDir = objDir;
+    std::string store = objStoreDir(cacheDir);
     std::error_code ec;
-    std::filesystem::create_directories(utf8ToPath(cacheDir), ec);
-    std::string cacheFile = cacheDir + "/cache.txt";
+    std::filesystem::create_directories(utf8ToPath(store), ec);
+    const std::string toolset = toolsetTag(cl);
 
-    // 编译选项指纹: 选项变化(优化级别/架构/DLL标志等)会使全部缓存失效
-    std::string optsFp = hashString(
-        options.arch + "|" +
-        std::to_string(options.isDll ? 1 : 0) + "|" +
-        std::to_string(options.isGui ? 1 : 0) + "|" +
-        std::to_string(options.optimizationLevel) + "|" +
-        std::to_string(options.debugInfo ? 1 : 0));
+    // 两批: RTL 组用固定档 (跨工程共享一份), 用户码组跟着 -O/-g 走
+    std::vector<std::string> reusedObjs;   // 命中的 obj = store 里的路径
+    struct Pending { std::string src, objPath, storePath; };
+    std::vector<Pending> rtlTodo, userTodo;
+    int rtlHits = 0, userHits = 0;
 
-    // 读缓存: objName -> record
-    std::unordered_map<std::string, std::string> cache;
-    {
-        std::ifstream f = ifstreamUtf8(cacheFile);
-        std::string line;
-        while (std::getline(f, line)) {
-            size_t tab = line.find('\t');
-            if (tab != std::string::npos) {
-                cache[line.substr(0, tab)] = line.substr(tab + 1);
-            }
-        }
-    }
-
-    // 公共编译选项 (不含 /Fe /Fo /MP /c 与源文件)
-    std::ostringstream common;
-    common << cl;
-    if (!options.rtlDir.empty()) common << " /I\"" << options.rtlDir << "\"";
-    if (!options.srcDir.empty()) common << " /I\"" << options.srcDir << "\"";
-    switch (options.optimizationLevel) {
-        case 0: common << " /Od"; break;
-        case 1: common << " /O1"; break;
-        case 2: common << " /O2"; break;
-        case 3: common << " /Ox"; break;
-    }
-    if (options.debugInfo) common << " /Zi";
-    common << " /std:c11 /DUNICODE /D_UNICODE /utf-8 /D_CRT_SECURE_NO_WARNINGS /D_CRT_NONSTDC_NO_WARNINGS";
-    common << " /W3";
-    // P10 恢复: RTL 源码直接编译, /Gy 函数级链接配合 /OPT:REF 剔除未引用 RTL 代码
-    common << " /Gy";
-    if (options.arch == "x86") common << " /MT";
-
-    // 增量判断
-    std::vector<std::string> toCompile;   // 需要重编译的 .c
-    std::vector<std::string> reusedObjs;  // 缓存命中的 obj 完整路径 (cacheDir)
-    std::vector<std::string> newObjs;     // 新编译 obj 的预测路径 (objDir)
-    std::unordered_map<std::string, std::string> newCache; // objName -> record
-    int hitCount = 0;
     for (const auto& src : options.sourceFiles) {
         std::filesystem::path sp(utf8ToPath(src));
-        std::string objName = pathToUtf8(sp.stem()) + ".obj";
-        std::string srcHash = hashFile(src);
-        if (srcHash.empty()) {  // 读不到源文件: 必须编译
-            toCompile.push_back(src);
-            newObjs.push_back(objDir + "/" + objName);
-            continue;
-        }
-        auto incs = collectLocalIncludes(src, options.srcDir, options.rtlDir);
+        std::string stem = pathToUtf8(sp.stem());
+        bool isRtl = isRtlSource(src, options.rtlDir);
+        // RTL 组的本地 include 只在 rtlDir 内解析: 工程里放同名头抢不动 (ai/030 §四)
+        auto incs = collectLocalIncludes(src, isRtl ? std::string() : options.srcDir,
+                                         options.rtlDir);
         std::string deps;
         for (auto& inc : incs) deps += hashFile(inc);
-        std::string record = srcHash + " " + hashString(deps) + " " + optsFp;
-        newCache[objName] = record;
-        std::string cachedObj = cacheDir + "/" + objName;
-        if (cache.count(objName) && cache[objName] == record &&
-            std::filesystem::exists(utf8ToPath(cachedObj))) {
-            reusedObjs.push_back(cachedObj);
-            hitCount++;
-        } else {
-            toCompile.push_back(src);
-            newObjs.push_back(objDir + "/" + objName);
+        std::string srcHash = hashFile(src);
+        std::string key = srcHash.empty()
+            ? std::string()
+            : hashString(flagsKeyFor(isRtl, options) + "|" + toolset + "|" + srcHash +
+                         "|" + hashString(deps) + "|" + stem);
+        std::string storePath = key.empty() ? std::string()
+                                            : store + "/" + stem + "_" + key + ".obj";
+        std::error_code kec;
+        if (!storePath.empty() && std::filesystem::exists(utf8ToPath(storePath), kec)) {
+            reusedObjs.push_back(storePath);
+            if (isRtl) rtlHits++; else userHits++;
+            continue;
         }
+        std::string foDir = objDir + (isRtl ? "/rtl" : "/usr");
+        Pending p{src, foDir + "/" + stem + ".obj", storePath};
+        (isRtl ? rtlTodo : userTodo).push_back(p);
     }
+    const int totalSrcs = static_cast<int>(options.sourceFiles.size());
+    const int hitCount = rtlHits + userHits;
+
+    // ASCII 读数: 命中面走这条 (可被断言), 中文那条留给人看
+    std::cerr << "C3: OBJCACHE rtl=" << rtlHits << "/" << (rtlHits + static_cast<int>(rtlTodo.size()))
+              << " user=" << userHits << "/" << (userHits + static_cast<int>(userTodo.size()))
+              << " total=" << hitCount << "/" << totalSrcs << std::endl;
 
     if (options.verbose) {
-        std::cout << "C3: 增量编译: " << hitCount << "/" << options.sourceFiles.size()
-                  << " 个源文件命中缓存, 跳过编译" << std::endl;
+        std::cout << "C3: 增量编译: " << hitCount << "/" << totalSrcs
+                  << " 个源文件命中缓存, 跳过编译 (store: " << store << ")" << std::endl;
     }
 
-    // === 编译需要重编的 .c (仅这些) ===
-    if (!toCompile.empty()) {
+    // === 编译需要重编的 .c —— 按组各一次: 两组的编译档不同, 不能共用一条 cl 命令 ===
+    auto runBatch = [&](const std::vector<Pending>& todo, const std::string& foDir,
+                        bool isRtl) -> bool {
+        if (todo.empty()) return true;
         std::ostringstream compileCmd;
-        compileCmd << common.str() << " /MP /c";
-        if (!options.outputFile.empty()) {
-            compileCmd << " /Fo\"" << objDir << "/\"";
-        }
-        for (const auto& src : toCompile) {
-            compileCmd << " \"" << src << "\"";
-        }
-        std::string rspPath = objDir + "/_c3_cl_args.rsp";
+        compileCmd << cl << compileFlagsFor(isRtl, options, options.rtlDir, options.srcDir)
+                   << " /MP /c /Fo\"" << foDir << "/\"";
+        for (const auto& t : todo) compileCmd << " \"" << t.src << "\"";
+        std::error_code mkec;
+        std::filesystem::create_directories(utf8ToPath(foDir), mkec);
+        std::string rspPath = objDir + (isRtl ? "/_c3_cl_rtl.rsp" : "/_c3_cl_user.rsp");
         // Fix 196: UTF-16LE+BOM (cl/link 按系统 ANSI 代码页读 @rsp, 见 msvc_driver.hpp)
         writeMsvcResponseFile(rspPath, compileCmd.str().substr(cl.length()));
         std::string vcvarsPrefix = buildVcvarsPrefix(arch);
         std::string fullCmd = vcvarsPrefix + cl + " @\"" + rspPath + "\" > \"" + tmpLogPath + "\" 2>&1";
         int ret = executeCommand(fullCmd);
+        std::filesystem::remove(rspPath, std::error_code());
         if (ret != 0) {
             std::string outputDirForLog;
             if (!options.outputFile.empty()) {
@@ -219,33 +273,34 @@ bool MsvcDriver::compileAndLinkIncremental(const MsvcDriverOptions& options) {
             std::cerr << "C3: 编译失败 (exit code " << ret << ")" << std::endl;
             std::cerr << "C3: 错误日志已保存: " << errorLogPath << std::endl;
             std::filesystem::remove(tmpLogPath, std::error_code());
-            std::filesystem::remove(rspPath, std::error_code());
             return false;
         }
-        std::filesystem::remove(tmpLogPath, std::error_code());
-        std::filesystem::remove(rspPath, std::error_code());
-
-        // 复制新 obj 到持久缓存目录
-        for (const auto& src : toCompile) {
-            std::filesystem::path sp(utf8ToPath(src));
-            std::string objName = pathToUtf8(sp.stem()) + ".obj";
-            std::string srcObj = objDir + "/" + objName;
-            std::string dstObj = cacheDir + "/" + objName;
-            if (std::filesystem::exists(utf8ToPath(srcObj))) {
-                std::error_code ec2;
-                std::filesystem::copy_file(utf8ToPath(srcObj), utf8ToPath(dstObj),
-                                           std::filesystem::copy_options::overwrite_existing, ec2);
-            }
+        // 原子进 store: 同目录先拷临时名再改名 (同一分区, 不跨卷)。
+        // 键就是内容哈希 ⇒ 并发放同一格是写同样字节, 谁先到位都算对 (ai/030 §六 T30-A)。
+        const std::string pidTag = std::to_string(static_cast<unsigned long>(GetCurrentProcessId()));
+        for (const auto& t : todo) {
+            if (t.storePath.empty()) continue;
+            std::error_code iec;
+            if (!std::filesystem::exists(utf8ToPath(t.objPath), iec)) continue;
+            if (std::filesystem::exists(utf8ToPath(t.storePath), iec)) continue;
+            std::string tmp = t.storePath + "." + pidTag + ".tmp";
+            std::error_code cec;
+            std::filesystem::copy_file(utf8ToPath(t.objPath), utf8ToPath(tmp),
+                                       std::filesystem::copy_options::overwrite_existing, cec);
+            if (cec) continue;
+            std::filesystem::rename(utf8ToPath(tmp), utf8ToPath(t.storePath), cec);
+            if (cec) std::filesystem::remove(utf8ToPath(tmp), std::error_code());
         }
-    }
+        return true;
+    };
 
-    // 更新缓存索引 (总是写, 保证新模块/新记录持久)
-    {
-        std::ofstream f = ofstreamUtf8(cacheFile, std::ios::out | std::ios::trunc);
-        for (auto& kv : newCache) {
-            f << kv.first << "\t" << kv.second << "\n";
-        }
-    }
+    std::vector<std::string> newObjs;   // 本批新编出来的 obj (链接输入)
+    bool built = runBatch(rtlTodo, objDir + "/rtl", true);
+    if (built) built = runBatch(userTodo, objDir + "/usr", false);
+    for (const auto& t : rtlTodo)  newObjs.push_back(t.objPath);
+    for (const auto& t : userTodo) newObjs.push_back(t.objPath);
+    std::filesystem::remove(tmpLogPath, std::error_code());
+    if (!built) return false;
 
     // === 链接 (所有 obj: 复用的 + 新编译的) ===
     // 注意: 拆分为两步后编译阶段无源文件, cl /link 不会进入链接模式(D8003),

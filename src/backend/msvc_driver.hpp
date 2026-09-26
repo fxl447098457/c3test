@@ -35,10 +35,12 @@ struct MsvcDriverOptions {
     std::string srcDir;                      // P11.2: generated .c/.h directory (/I include path)
     std::string arch = "x64";               // DualArch: x64 or x86 — target binary architecture
 
-    // 增量编译 (opt3): 基于内容哈希的obj级缓存。
-    // cacheDir 存放复用的 .obj 与 cache.txt 索引，跨运行持久。
+    // 增量编译 (ai/030 T30-A 改写): **内容寻址**的 obj store —— obj 文件名里就带着键
+    // (架构 + 工具串 + 源与其本地 include 的内容)，没有索引文件，也就没有"交替编两个
+    // 项目互相抹记录"和"索引非原子重写"。查不到 = 自己编，错配的 obj 不可能被用错。
+    // RTL 那一族用固定编译档 (不吃用户 -O/-g, /I 只给 rtlDir) ⇒ 跨工程共享同一格。
     bool incremental = false;
-    std::string incrementalCacheDir;         // 持久obj缓存目录 (如 <outputDir>/.c3obj)
+    std::string incrementalCacheDir;         // store 拿不到 %LOCALAPPDATA% 时的回退目录
 
     // === ai/024 T02: 用户静态库 (归档) ===
     // 由 driver 从 LibSearchPaths 解析得到 —— Declare 的 `Lib "x.lib"` 静态形态

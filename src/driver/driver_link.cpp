@@ -489,7 +489,8 @@ bool Driver::runLinker(const CompileOptions& options, const std::string& outputD
         }
     }
 
-    // opt3: 增量编译 — obj级缓存目录放在输出目录下, 跨运行持久
+    // ai/030 T30-A: obj store 的根取自 %LOCALAPPDATA%\C3\objcache (跨工程/跨输出目录共享);
+    // 这里给的只是**拿不到 LOCALAPPDATA 时的回退目录**，不再是缓存本体。
     msvcOpts.incremental = options.incremental;
     msvcOpts.incrementalCacheDir = outputDir + "/.c3obj";
 
