@@ -591,6 +591,71 @@ static void vb6_CdCancel(void* hwnd) {
         vb6_RaiseError(32755, SysAllocString(L"Dialog was canceled by the user"));
 }
 
+// ai/029 C29-9b: 「起窗自关」探针 —— 让模态对话框这条判据能在无头环境里跑。
+// 只有环境变量 C3_CDPROBE=1 才上膛，不设时这条路完全不存在（现有 ctrldlg 用例逐字不变）。
+// 线程只认**本线程**创建的 #32770（EnumThreadWindows），所以不会去关别人的窗；发过去的
+// WM_COMMAND/IDCANCEL 就是「用户点了取消」那条出口。于是「对话框真出现过」这条判据的断点
+// 就是取消出口本身：框没出现 ⇒ 没人取消 ⇒ CancelError 不会报 32755。找不到就不动，
+// 那种情况由套件的 -RunTimeoutSec 兜底（用例阶段最多 60 s）。
+typedef struct { DWORD tid; } vb6_CdProbeArgs;
+
+static volatile LONG vb6_CdProbeFired = 0;
+static volatile LONG vb6_CdProbeStop = 0;
+
+static BOOL CALLBACK vb6_CdProbeEnum(HWND h, LPARAM lp) {
+    wchar_t cls[16] = {0};
+    (void)lp;
+    if (GetClassNameW(h, cls, 16) > 0 && wcscmp(cls, L"#32770") == 0) {
+        PostMessageW(h, WM_COMMAND, (WPARAM)IDCANCEL, MAKELPARAM(BN_CLICKED, 0));
+        InterlockedExchange(&vb6_CdProbeFired, 1);
+        return FALSE;
+    }
+    return TRUE;
+}
+
+static DWORD WINAPI vb6_CdProbeProc(LPVOID arg) {
+    vb6_CdProbeArgs a = *(vb6_CdProbeArgs*)arg;
+    free(arg);
+    for (int i = 0; i < 400; i++) {           // 最多等约 4 s
+        BOOL found = FALSE;
+        EnumThreadWindows(a.tid, vb6_CdProbeEnum, (LPARAM)&found);
+        if (found || InterlockedCompareExchange(&vb6_CdProbeStop, 0, 0)) break;
+        Sleep(10);
+    }
+    return 0;
+}
+
+static int vb6_CdProbeOn(void) {
+    static int cached = -1;
+    if (cached < 0) {
+        wchar_t b[8];
+        cached = (GetEnvironmentVariableW(L"C3_CDPROBE", b, 8) > 0) ? 1 : 0;
+    }
+    return cached;
+}
+
+// 返回句柄表示已上膛（调用方要 CloseHandle）；0 = 不上膛。
+static HANDLE vb6_CdProbeArm(void) {
+    if (!vb6_CdProbeOn()) return 0;
+    InterlockedExchange(&vb6_CdProbeStop, 0);
+    vb6_CdProbeArgs* a = (vb6_CdProbeArgs*)malloc(sizeof(vb6_CdProbeArgs));
+    if (!a) return 0;
+    a->tid = GetCurrentThreadId();
+    DWORD id = 0;
+    HANDLE h = CreateThread(NULL, 0, vb6_CdProbeProc, a, 0, &id);
+    if (!h) free(a);
+    return h;
+}
+
+// 撤膛必须真撤：上一发的线程若没命中，会一直轮到 4 s，可能把**下一发** Show* 的框关掉。
+static void vb6_CdProbeDisarm(HANDLE h) {
+    if (h) {
+        InterlockedExchange(&vb6_CdProbeStop, 1);
+        WaitForSingleObject(h, 2000);
+        CloseHandle(h);
+    }
+}
+
 static const wchar_t* vb6_CdBaseName(const wchar_t* full) {
     const wchar_t* s = wcsrchr(full, L'\\');
     if (!s) s = wcsrchr(full, L'/');
@@ -632,7 +697,10 @@ int vb6_CdShowFile(void* hwnd, int saveAs) {
     ofn.Flags = (DWORD)vb6_CdGetFlags(hwnd) | OFN_EXPLORER | OFN_HIDEREADONLY;
     if (saveAs) ofn.Flags |= OFN_OVERWRITEPROMPT;
 
-    if (!pFn(&ofn)) { vb6_CdCancel(hwnd); return 0; }
+    HANDLE probe = vb6_CdProbeArm();
+    int shown = pFn(&ofn);
+    vb6_CdProbeDisarm(probe);
+    if (!shown) { vb6_CdCancel(hwnd); return 0; }
     vb6_CdSetStr(hwnd, L"VB6_Cd_FileName", file);
     vb6_CdSetStr(hwnd, L"VB6_Cd_FileTitle", vb6_CdBaseName(file));
     return 1;
@@ -655,7 +723,10 @@ int vb6_CdShowColor(void* hwnd) {
     cc.rgbResult    = (COLORREF)vb6_CdGetColor(hwnd);
     cc.lpCustColors = g_cCustom;
     cc.Flags        = (DWORD)vb6_CdGetFlags(hwnd) | CC_ANYCOLOR | CC_RGBINIT;
-    if (!pFn(&cc)) { vb6_CdCancel(hwnd); return 0; }
+    HANDLE probe = vb6_CdProbeArm();
+    int shown = pFn(&cc);
+    vb6_CdProbeDisarm(probe);
+    if (!shown) { vb6_CdCancel(hwnd); return 0; }
     vb6_CdSetColor(hwnd, (int)cc.rgbResult);
     return 1;
 }
@@ -681,7 +752,10 @@ int vb6_CdShowFont(void* hwnd) {
     cf.lpLogFont   = &lf;
     cf.iPointSize  = vb6_CdGetFontSize(hwnd) * 10;
     cf.Flags       = (DWORD)vb6_CdGetFlags(hwnd) | CF_SCREENFONTS | CF_INITTOLOGFONTSTRUCT;
-    if (!pFn(&cf)) { vb6_CdCancel(hwnd); return 0; }
+    HANDLE probe = vb6_CdProbeArm();
+    int shown = pFn(&cf);
+    vb6_CdProbeDisarm(probe);
+    if (!shown) { vb6_CdCancel(hwnd); return 0; }
     vb6_CdSetStr(hwnd, L"VB6_Cd_FontName", lf.lfFaceName);
     vb6_CdSetFontSize(hwnd, (int)(cf.iPointSize / 10));
     return 1;
@@ -701,7 +775,10 @@ int vb6_CdShowPrinter(void* hwnd) {
     pd.nCopies     = (WORD)vb6_CdGetCopies(hwnd);
     pd.nFromPage   = (WORD)vb6_CdGetMin(hwnd);
     pd.nToPage     = (WORD)vb6_CdGetMax(hwnd);
-    if (!pFn(&pd)) { vb6_CdCancel(hwnd); return 0; }
+    HANDLE probe = vb6_CdProbeArm();
+    int shown = pFn(&pd);
+    vb6_CdProbeDisarm(probe);
+    if (!shown) { vb6_CdCancel(hwnd); return 0; }
     if (pd.hDC) DeleteDC(pd.hDC);           // v1 不把 DC 交给用户（Printer 对象另立批次）
     vb6_CdSetCopies(hwnd, (int)pd.nCopies);
     return 1;

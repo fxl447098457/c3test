@@ -43,6 +43,10 @@ Option Explicit
 ' 这里刻意**不弹真框**（弹框要另一套"起窗 + 自关"的判据，见 029 三 D3），
 ' 断的是：设计期初值落位 / 属性读写回路 / 两枚互不串 / 取消出口按 CancelError 报 32755。
 
+' ai/029 C29-9b: 弹框那条判据要一个"过了多久"的量尺 —— 探针是自关线程, 模态循环真跑过
+' 才可能烧掉几十毫秒; GetTickCount 走 Declare, 不引新 import lib。
+Declare Function GetTickCount Lib "kernel32" () As Long
+
 Private Function TF(ByVal ok As Boolean) As String
     If ok Then TF = "Y" Else TF = "N"
 End Function
@@ -88,6 +92,36 @@ Private Sub Form_Load()
     If noPop = 1 Then dl1.ShowAbout
     Debug.Print "DL10=" & TF(noPop = 0)
 
+    ' --- 11..14 C29-9b: 真弹框 + 起窗自关探针。只在 C3_CDPROBE=1 时走这条路 —— 不设
+    '     环境变量时这四行**根本不打印**，所以 C29-9 那 10 条读数的形状与顺序逐字不变。
+    '     探针在 RTL 侧(vb6forms_ctrl.c)：一次性线程只认本线程创建的 #32770，发
+    '     WM_COMMAND/IDCANCEL，等价于"用户点了取消"。于是断点就是取消出口本身 ——
+    '     框没出现 ⇒ 没人取消 ⇒ 32755 不会报。
+    Dim probe As Long
+    probe = 0
+    If Environ("C3_CDPROBE") = "1" Then probe = 1
+
+    Dim dp As Long, el As Long, t0 As Long, silent As Long
+    dp = 0
+    el = 0
+    silent = 0
+    If probe = 1 Then
+        dl2.FileName = "C:\keep.txt"           ' 取消不该动已有读数
+        t0 = GetTickCount()
+        dl1.ShowOpen                           ' dl1 的 CancelError 设计期就是 True
+        If Err.Number = 32755 Then dp = 1
+        el = GetTickCount() - t0
+        Err.Clear
+        Debug.Print "DL11=" & TF(dp = 1)                         ' 取消出口真触发
+        Debug.Print "DL12=" & TF(dl2.FileName = "C:\keep.txt")  ' 取消不改进数
+        Debug.Print "DL13=" & TF(el >= 30)                       ' 模态循环真跑过
+
+        dl2.CancelError = False                ' 这一枚不报 CancelError ⇒ 静默返回
+        dl2.ShowSave
+        If Err.Number = 0 Then silent = 1
+        Err.Clear
+        Debug.Print "DL14=" & TF(silent = 1)
+    End If
     Debug.Print "CTRLDLG-DONE"
     Unload Me
 End Sub
