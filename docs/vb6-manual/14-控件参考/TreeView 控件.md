@@ -21,3 +21,22 @@
 **TreeView** 控件使用由 **ImageList** 属性指定的 **ImageList** 控件，来存储显示于 **Node** 对象的位图和图标。任何时刻，**TreeView** 控件只能使用一个 **ImageList**。这意味着，当 **TreeView** 控件的 **Style** 属性被设置成显示图像的样式时，**TreeView** 控件中每一项的旁边都有一个同样大小的图像。
 
 **发行注意 TreeView** 控件是 MSCOMCTL.OCX 文件中的一组 ActiveX 控件的一部分。为了在应用程序中使用 **TreeView** 控件，必须将 MSCOMCTL.OCX 文件添加到工程中。在发行应用程序时，要在用户的 Microsoft Windows System 或 System32 目录中安装 MSCOMCTL.OCX 文件。
+
+## 本项目的实现口径（ai/029 C29-8a）
+
+`TreeView` 在原生的 **`SysTreeView32`**（comctl32 自带窗口类）上实现，语法面与本页上文一致。本页上文那条"必须将 MSCOMCTL.OCX 添加到工程"的发行注意**在本项目里不适用**：该 OCX 只有 32 位，64 位工程加载不了，所以本项目不引它。
+
+| 写法 | 读数 |
+| --- | --- |
+| `Tree1.LineStyle` | `0` = `tvwTreeLines`（画树线，根层不画）、`1` = `tvwRootLines`（根层也画）。设计期写在哪一版就是哪一版 |
+| `Tree1.CheckBoxes` | `True` 时每个节点带复选框；读回 `True`/`False`（`-1`/`0`） |
+| `Tree1.HotTracking` | `True` 时鼠标悬停的节点标题呈超链接样式 |
+| `Tree1.HideSelection` | 默认 `True` = 控件失焦时不画选中项；`False` 对应 Win32 的"失焦仍显示选中" |
+| `Tree1.Indentation` | 单位是**缇**（与 `Left`/`Width` 一致），写进去多少就读回多少；下发给控件时换算成像素，像素侧上限 50 px 会钳，但 VB 侧读数不被改写 |
+| `Tree1.Visible` / `Enabled` / `Left` / `Top` / `Width` / `Height` / `Font*` / `ForeColor` / `BackColor` | 与其它可见控件同一套读法 |
+
+上面这五条是**窗口样式位本身**，不是另存的一份副本：`CheckBoxes`、`HotTracking`、`LineStyle`、`HideSelection` 四条的 getter 直接读窗口的 `GWL_STYLE`，运行期赋值会连带重算布局并重绘，所以"读到的"与"画出来的"不会分叉。
+
+尚未落地（`Nodes` 那一族要等 `ImageList` 批立的"成员对象"机制，见 `ai/029` §四）：`Nodes` 集合与 `Node` 对象（`Add`/`Text`/`Key`/`Checked`/`Parent`/`Children`/`Expanded`/`EnsureVisible`/`Remove`）、`Style` 八种组合、`SelectedItem`、`LabelEdit`、`Sorted`、`PathSeparator`、`ImageList` 关联，以及 `NodeClick`/`Expand`/`Collapse` 等事件。设计期写在这些属性上的值目前**不会**报错，也**不会**见效。
+
+判据在 `tests\ctrltreeview\`（TV1-TV5 认设计期五值、TV6-TV7 认默认值与"消息真打进窗口"、TV8-TV9 认运行期赋值可逆、TV10-TV11 认缇值往返、TV12 认通用属性面没被抢走）。

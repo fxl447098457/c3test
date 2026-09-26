@@ -155,6 +155,7 @@ static const RtlFileEntry kRtlFiles[] = {
     { RTL_VB6FORMS_SSTAB_C,        "vb6forms_sstab.c" },
     { RTL_VB6FORMS_OLEDD_C,        "vb6forms_oledd.c" },
     { RTL_VB6FORMS_LISTVIEW_C,     "vb6forms_listview.c" },
+    { RTL_VB6FORMS_TREEVIEW_C,     "vb6forms_treeview.c" },
     { RTL_VB6FORMS_AXSITE_C,       "vb6forms_axsite.c" },
     { RTL_VB6FORMS_AXCONTAINER_C,  "vb6forms_axcontainer.c" },
     // vb6forms_axsite.c 按功能家族拆分 (2026-09-20): 内部头 + axsite/ 下 5 个族编译单元
