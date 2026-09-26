@@ -64,6 +64,13 @@
                 anyNotify = true;
                 break;
             }
+            // C29-4: StatusBar 的 PanelClick / PanelDblClick 同理。
+            if (ctrl.controlType == FrmControlType::StatusBar) {
+                if (!symTab_.lookup(ctrl.controlName + "_PanelClick") &&
+                    !symTab_.lookup(ctrl.controlName + "_PanelDblClick")) continue;
+                anyNotify = true;
+                break;
+            }
         }
         if (anyNotify) {
             c_.emitLine("case WM_NOTIFY: {");
@@ -121,14 +128,14 @@
                     c_.emitLine("if (pNM42->code == -114 && (void*)pNM42->hwndFrom == "
                                 + lvHwndVar + ") {");
                     c_.indent();
-                    c_.emitLine("extern void " + icFn + "(void**);");
+                    c_.emitLine("extern void " + icFn + "(void*);");
                     c_.emitLine("int32_t vb6_lvIdx7 = vb6_ListView_OnNotify((void*)"
                                 + lvHwndVar + ", -114, (void*)lParam);");
                     c_.emitLine("if (vb6_lvIdx7 > 0) {");
                     c_.indent();
                     c_.emitLine("void* vb6_lvItem7 = vb6_ListView_ListItemAt((void*)"
                                 + lvHwndVar + ", vb6_lvIdx7);");
-                    c_.emitLine("if (vb6_lvItem7) " + icFn + "(&vb6_lvItem7);");
+                    c_.emitLine("if (vb6_lvItem7) " + icFn + "(vb6_lvItem7);");
                     c_.dedent();
                     c_.emitLine("}");
                     c_.dedent();
@@ -140,14 +147,52 @@
                     c_.emitLine("if (pNM42->code == -108 && (void*)pNM42->hwndFrom == "
                                 + lvHwndVar + ") {");
                     c_.indent();
-                    c_.emitLine("extern void " + ccFn + "(void**);");
+                    c_.emitLine("extern void " + ccFn + "(void*);");
                     c_.emitLine("int32_t vb6_lvCol7 = vb6_ListView_OnNotify((void*)"
                                 + lvHwndVar + ", -108, (void*)lParam);");
                     c_.emitLine("if (vb6_lvCol7 > 0) {");
                     c_.indent();
                     c_.emitLine("void* vb6_lvHdr7 = vb6_ListView_ColumnHeaderAt((void*)"
                                 + lvHwndVar + ", vb6_lvCol7);");
-                    c_.emitLine("if (vb6_lvHdr7) " + ccFn + "(&vb6_lvHdr7);");
+                    c_.emitLine("if (vb6_lvHdr7) " + ccFn + "(vb6_lvHdr7);");
+                    c_.dedent();
+                    c_.emitLine("}");
+                    c_.dedent();
+                    c_.emitLine("}");
+                }
+            }
+            // ---- C29-4: StatusBar 的 PanelClick / PanelDblClick ----
+            // 原生 status bar 把**1 基面板号放在 NMHDR.idFrom**。RTL 的
+            // vb6_StatusBar_OnNotify 校验 hwndFrom 并把 idFrom 折成返回值;
+            // 再拿它造 Panel 对象 (vb6_StatusBar_PanelAt) 回调 —— VB6 的参数是对象:
+            //   Sub StatusBar1_PanelClick(ByVal Panel As Panel)
+            // 形状与上面 ListView 那两条完全同构。
+            for (const auto& ctrl : frmDesc.formControl.children) {
+                if (ctrl.controlType != FrmControlType::StatusBar) continue;
+                auto* pcSym = symTab_.lookup(ctrl.controlName + "_PanelClick");
+                auto* pdSym = symTab_.lookup(ctrl.controlName + "_PanelDblClick");
+                if (!pcSym && !pdSym) continue;
+                std::string sbNameLower = ctrl.controlName;
+                std::transform(sbNameLower.begin(), sbNameLower.end(), sbNameLower.begin(), ::tolower);
+                std::string sbHwndVar = knownControlArrays_.count(sbNameLower)
+                    ? ("vb6_CtrlArr_GetAt(&vb6_arr_" + cIdent(ctrl.controlName) + ", 0)")
+                    : ("vb6_hwnd_" + cIdent(ctrl.controlName));
+                // (code, handler) 对: NM_CLICK=-2 → PanelClick, NM_DBLCLK=-6 → PanelDblClick
+                for (auto evt : { std::make_pair(-2, pcSym), std::make_pair(-6, pdSym) }) {
+                    if (!evt.second) continue;
+                    std::string fn = cProcName(evt.second->name, AccessLevel::Private);
+                    c_.emitLine("if (pNM42->code == " + std::to_string(evt.first)
+                                + " && (void*)pNM42->hwndFrom == " + sbHwndVar + ") {");
+                    c_.indent();
+                    c_.emitLine("extern void " + fn + "(void*);");
+                    c_.emitLine("int32_t vb6_sbPnl4 = vb6_StatusBar_OnNotify((void*)"
+                                + sbHwndVar + ", " + std::to_string(evt.first)
+                                + ", (void*)lParam);");
+                    c_.emitLine("if (vb6_sbPnl4 > 0) {");
+                    c_.indent();
+                    c_.emitLine("void* vb6_sbPanel4 = vb6_StatusBar_PanelAt((void*)"
+                                + sbHwndVar + ", vb6_sbPnl4);");
+                    c_.emitLine("if (vb6_sbPanel4) " + fn + "(vb6_sbPanel4);");
                     c_.dedent();
                     c_.emitLine("}");
                     c_.dedent();

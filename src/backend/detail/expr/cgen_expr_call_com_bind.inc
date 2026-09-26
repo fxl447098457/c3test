@@ -66,6 +66,24 @@
         std::string objExpr = std::move(comObjExpr_);
         std::string memberName = std::move(comMemberName_);
 
+        // C29-4: StatusBar1.SimClick n, dbl —— **判据专用**方法 (无头环境点不了鼠标,
+        // RTL 的 vb6_StatusBar_SimClick 程序化发一条真实 WM_NOTIFY, 走完整派发链)。
+        // 不对应任何 VB6 语义, 写进 ai/029 边界。
+        if (objExpr.find("vb6_hwnd_") == 0) {
+            std::string sbBare = objExpr.substr(9);
+            if (statusBarVars_.count(sbBare) &&
+                (Symbol::toLower(memberName) == "simclick")) {
+                std::vector<std::string> sa;
+                for (size_t i = 0; i < node.positional.size(); i++) {
+                    emitExpr(*node.positional[i]);
+                    sa.push_back(lastExpr_);
+                }
+                lastExpr_ = "vb6_StatusBar_SimClick((void*)" + objExpr + ", "
+                          + (sa.size() > 0 ? sa[0] : std::string("0")) + ", "
+                          + (sa.size() > 1 ? sa[1] : std::string("0")) + ")";
+                return;
+            }
+        }
         // C29-OLE: OLE 容器的方法全走 vb6_OleCon_* (真 OLE 容器, 非 COM 占位)。
         // objExpr = vb6_hwnd_X (OLE 容器是真窗口控件)。不拦的话会拼成
         // `vb6_ComCall(vb6_hwnd_X, L"CreateEmbed", …)` —— 对 HWND 当 IDispatch 用。

@@ -684,6 +684,35 @@ int32_t vb6_StatusBar_GetPanelsCount(void* hwnd) {
     return sb ? (int32_t)sb->count : 0;
 }
 
+// C29-4: WM_NOTIFY 换算 —— PanelClick/PanelDblClick 的事件源。
+// 原生 status bar 的点击通知: NM_CLICK(-2) / NM_DBLCLK(-6), **1 基面板号放在
+// NMHDR.idFrom**。返回 1 基下标 (0 = 与本控件无关/不是点击通知), cgen 侧用
+// `> 0` 兜住, 再拿它调 vb6_StatusBar_PanelAt 造 Panel 对象回调。
+int32_t vb6_StatusBar_OnNotify(void* hwnd, int32_t code, void* lParam) {
+    if (!hwnd || !lParam) return 0;
+    NMHDR* nm = (NMHDR*)lParam;
+    if (nm->hwndFrom != (HWND)hwnd) return 0;   // 父窗会收到所有子控件的 WM_NOTIFY
+    if (code == -2 /*NM_CLICK*/ || code == -6 /*NM_DBLCLK*/)
+        return (int32_t)nm->idFrom;
+    return 0;
+}
+
+// C29-4 判据辅助: **程序化**构造一次真实点击 (NM_CLICK/NM_DBLCLK 发给父窗的
+// WM_NOTIFY)。无头环境点不了鼠标, 而直接调 handler 会绕开派发链 —— 只有从
+// 真窗口消息进来才验得到"派发分支 + OnNotify 换算 + PanelAt 造对象"整条链。
+// 判据专用 (写进 ai/029 边界), 不对应任何 VB6 语义。
+void vb6_StatusBar_SimClick(void* hwnd, int32_t panelIdx, int32_t dblClick) {
+    NMHDR nm;
+    if (!hwnd || panelIdx < 1) return;
+    memset(&nm, 0, sizeof(nm));
+    nm.hwndFrom = (HWND)hwnd;
+    nm.idFrom = (UINT_PTR)panelIdx;
+    nm.code = dblClick ? -6 : -2;
+    HWND parent = GetParent((HWND)hwnd);
+    if (!parent) parent = (HWND)hwnd;
+    SendMessageW(parent, WM_NOTIFY, 0, (LPARAM)&nm);
+}
+
 // Panels.Add([index], [key], [text]) —— 返回 VB6 语义的 1 基 Index, 插入失败返回 0。
 int32_t vb6_StatusBar_AddPanel(void* hwnd, int32_t index, const wchar_t* key,
                                const wchar_t* text) {

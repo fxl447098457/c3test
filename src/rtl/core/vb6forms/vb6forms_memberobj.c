@@ -17,6 +17,9 @@
 //   VB6_MEMK_LISTIMAGE    / VB6_MEMCK_LISTIMAGES     ImageList  owner = vb6_com_X(复刻实例指针)
 //   VB6_MEMK_LISTITEM     / VB6_MEMCK_LISTITEMS      ListView   owner = vb6_hwnd_X(HWND)
 //   VB6_MEMK_COLUMNHEADER / VB6_MEMCK_COLUMNHEADERS  ListView   owner = vb6_hwnd_X(HWND)
+//   VB6_MEMK_PANEL        / VB6_MEMCK_PANELS         StatusBar  owner = vb6_hwnd_X(HWND)
+//     (C29-4: PanelClick/PanelDblClick 的事件参数是 Panel 对象 —— 标量面/集合面
+//      P20-40 已用特例直译通了, 这里只为**事件参数**立对象, 不抢集合那条路。)
 //
 // ⚠ **owner 的语义按族不同**: ImageList 无窗口, 槽里放的是复刻实例指针; ListView 是真窗口,
 // 槽里就是 HWND。各族自己解释那个 void* (名字表/分派里一起做)。
@@ -53,10 +56,12 @@
 #define VB6_MEMK_LISTIMAGE      1
 #define VB6_MEMK_LISTITEM       2
 #define VB6_MEMK_COLUMNHEADER   3
+#define VB6_MEMK_PANEL          4
 // 成员集合族 (Vb6MemColl)
 #define VB6_MEMCK_LISTIMAGES    1
 #define VB6_MEMCK_LISTITEMS     2
 #define VB6_MEMCK_COLUMNHEADERS 3
+#define VB6_MEMCK_PANELS        4
 
 // ===================== 实例 =====================
 typedef struct Vb6MemObj {
@@ -97,6 +102,10 @@ static const wchar_t* kListItemNames[] = {
 // ListView 的 ColumnHeader。同理不收 SubItemIndex。
 static const wchar_t* kColumnHeaderNames[] = {
     L"Key", L"Index", L"Text", L"Width", L"Alignment", NULL };
+// C29-4: StatusBar 的 Panel (事件参数)。数据面照 vb6forms_statusbar.c 的 getter/setter。
+static const wchar_t* kPanelNames[] = {
+    L"Key", L"Index", L"Text", L"Width", L"MinWidth", L"AutoSize", L"Style",
+    L"ToolTipText", NULL };
 // 三个集合同构: Count / Item / Add / Remove / Clear / _NewEnum
 static const wchar_t* kCollNames[] = {
     L"Count", L"Item", L"Add", L"Remove", L"Clear", L"_NewEnum", NULL };
@@ -111,6 +120,11 @@ static const wchar_t* kCollNames[] = {
 #define VB6_MEMD_SELECTED   5
 #define VB6_MEMD_ALIGNMENT  5   // ColumnHeader.Alignment
 #define VB6_MEMD_CHECKED    6
+// Panel (kPanelNames 顺序: Key,Index,Text,Width,MinWidth,AutoSize,Style,ToolTipText)
+#define VB6_MEMD_MINWIDTH   5
+#define VB6_MEMD_AUTOSIZE   6
+#define VB6_MEMD_STYLE      7
+#define VB6_MEMD_TOOLTIP    8
 
 #define VB6_MEMCD_COUNT     1
 #define VB6_MEMCD_ITEM      2
@@ -125,6 +139,7 @@ static const wchar_t* const* memObjNamesOf(int32_t kind) {
     switch (kind) {
     case VB6_MEMK_LISTITEM:     return kListItemNames;
     case VB6_MEMK_COLUMNHEADER: return kColumnHeaderNames;
+    case VB6_MEMK_PANEL:        return kPanelNames;
     default:                    return kListImageNames;
     }
 }
@@ -212,6 +227,7 @@ static int32_t memCollCount(int32_t kind, void* owner) {
     switch (kind) {
     case VB6_MEMCK_LISTITEMS:     return vb6_ListView_GetItemCount(owner);
     case VB6_MEMCK_COLUMNHEADERS: return vb6_ListView_GetColumnCount(owner);
+    case VB6_MEMCK_PANELS:        return vb6_StatusBar_GetPanelsCount(owner);
     default:                      return vb6_GetImageListCount(owner);
     }
 }
@@ -400,6 +416,39 @@ static HRESULT memInvokeColumnHeader(Vb6MemObj* p, int dispid, VARIANT* out) {
     return DISP_E_MEMBERNOTFOUND;
 }
 
+// C29-4: StatusBar 的 Panel (事件参数)。数据面照 vb6forms_statusbar.c 的 getter/setter。
+static HRESULT memInvokePanel(Vb6MemObj* p, int dispid, VARIANT* out) {
+    switch (dispid) {
+    case VB6_MEMD_KEY:
+        memSetStr(out, (const wchar_t*)vb6_StatusBar_GetPanelKey(p->owner, p->index));
+        return S_OK;
+    case VB6_MEMD_INDEX:
+        memSetI4(out, p->index);
+        return S_OK;
+    case VB6_MEMD_TEXT:
+        memSetStr(out, (const wchar_t*)vb6_StatusBar_GetPanelText(p->owner, p->index));
+        return S_OK;
+    case VB6_MEMD_WIDTH:
+        memSetI4(out, vb6_StatusBar_GetPanelWidth(p->owner, p->index));
+        return S_OK;
+    case VB6_MEMD_MINWIDTH:
+        memSetI4(out, vb6_StatusBar_GetPanelMinWidth(p->owner, p->index));
+        return S_OK;
+    case VB6_MEMD_AUTOSIZE:
+        memSetI4(out, vb6_StatusBar_GetPanelAutoSize(p->owner, p->index));
+        return S_OK;
+    case VB6_MEMD_STYLE:
+        memSetI4(out, vb6_StatusBar_GetPanelStyle(p->owner, p->index));
+        return S_OK;
+    case VB6_MEMD_TOOLTIP:
+        memSetStr(out, (const wchar_t*)vb6_StatusBar_GetPanelToolTip(p->owner, p->index));
+        return S_OK;
+    default:
+        break;
+    }
+    return DISP_E_MEMBERNOTFOUND;
+}
+
 // 成员对象的**属性写** (只给可写的成员: ListItem.Text/Selected/Checked、ColumnHeader.Text/Width/Alignment)
 static void memObjPutProp(Vb6MemObj* p, int dispid, DISPPARAMS* dp) {
     if (!dp || dp->cArgs < 1) return;
@@ -429,6 +478,33 @@ static void memObjPutProp(Vb6MemObj* p, int dispid, DISPPARAMS* dp) {
                 vb6_ListView_SetItemSub(p->owner, p->index, sub, (void*)memArgStr(v));
             break;
         }
+        default: break;
+        }
+        return;
+    }
+    if (p->kind == VB6_MEMK_PANEL) {
+        switch (dispid) {
+        case VB6_MEMD_TEXT:
+            vb6_StatusBar_SetPanelText(p->owner, p->index, (void*)memArgStr(v));
+            break;
+        case VB6_MEMD_WIDTH:
+            vb6_StatusBar_SetPanelWidth(p->owner, p->index, memVariantToI4(v));
+            break;
+        case VB6_MEMD_MINWIDTH:
+            vb6_StatusBar_SetPanelMinWidth(p->owner, p->index, memVariantToI4(v));
+            break;
+        case VB6_MEMD_AUTOSIZE:
+            vb6_StatusBar_SetPanelAutoSize(p->owner, p->index, memVariantToI4(v));
+            break;
+        case VB6_MEMD_STYLE:
+            vb6_StatusBar_SetPanelStyle(p->owner, p->index, memVariantToI4(v));
+            break;
+        case VB6_MEMD_KEY:
+            vb6_StatusBar_SetPanelKey(p->owner, p->index, (void*)memArgStr(v));
+            break;
+        case VB6_MEMD_TOOLTIP:
+            vb6_StatusBar_SetPanelToolTip(p->owner, p->index, (void*)memArgStr(v));
+            break;
         default: break;
         }
         return;
@@ -478,6 +554,7 @@ static HRESULT STDMETHODCALLTYPE memObj_Invoke(IDispatch* This, DISPID dispid, R
     case VB6_MEMK_LISTIMAGE:    return memInvokeListImage(p, (int)dispid, out);
     case VB6_MEMK_LISTITEM:     return memInvokeListItem(p, (int)dispid, out, dp);
     case VB6_MEMK_COLUMNHEADER: return memInvokeColumnHeader(p, (int)dispid, out);
+    case VB6_MEMK_PANEL:        return memInvokePanel(p, (int)dispid, out);
     default: break;
     }
     return DISP_E_MEMBERNOTFOUND;
@@ -563,6 +640,7 @@ static void memCollRemove(int32_t kind, void* owner, DISPPARAMS* dp) {
     switch (kind) {
     case VB6_MEMCK_LISTITEMS:     vb6_ListView_RemoveItem(owner, idx); break;
     case VB6_MEMCK_COLUMNHEADERS: vb6_ListView_RemoveColumn(owner, idx); break;
+    case VB6_MEMCK_PANELS:        break;  /* P20-40 已有特例直译; 这里不重复 */
     default:                      vb6_ImageList_RemoveAtIndex(owner, idx); break;
     }
 }
@@ -571,6 +649,7 @@ static void memCollClear(int32_t kind, void* owner) {
     switch (kind) {
     case VB6_MEMCK_LISTITEMS:     vb6_ListView_ClearItems(owner); break;
     case VB6_MEMCK_COLUMNHEADERS: vb6_ListView_ClearColumns(owner); break;
+    case VB6_MEMCK_PANELS:        vb6_StatusBar_ClearPanels(owner); break;
     default:                      vb6_ImageList_ClearImages(owner); break;
     }
 }
@@ -579,6 +658,7 @@ static int32_t memObjKindOfColl(int32_t collKind) {
     switch (collKind) {
     case VB6_MEMCK_LISTITEMS:     return VB6_MEMK_LISTITEM;
     case VB6_MEMCK_COLUMNHEADERS: return VB6_MEMK_COLUMNHEADER;
+    case VB6_MEMCK_PANELS:        return VB6_MEMK_PANEL;
     default:                      return VB6_MEMK_LISTIMAGE;
     }
 }
@@ -774,6 +854,14 @@ void* vb6_ListView_ColumnHeaderAt(void* hwnd, int32_t index) {
     if (!hwnd || index < 1) return NULL;
     if (index > vb6_ListView_GetColumnCount(hwnd)) return NULL;
     return (void*)memObjNew(VB6_MEMK_COLUMNHEADER, hwnd, index);
+}
+
+// C29-4: StatusBar1_PanelClick(ByVal Panel As Panel) 的事件参数对象。
+// 1 基下标来自 NMHDR.idFrom (原生 status bar 约定)。
+void* vb6_StatusBar_PanelAt(void* hwnd, int32_t index) {
+    if (!hwnd || index < 1) return NULL;
+    if (index > vb6_StatusBar_GetPanelsCount(hwnd)) return NULL;
+    return (void*)memObjNew(VB6_MEMK_PANEL, hwnd, index);
 }
 
 #endif // _WIN32
