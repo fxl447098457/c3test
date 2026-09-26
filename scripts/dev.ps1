@@ -12,6 +12,7 @@
 param(
     [switch]$SkipBuild,
     [switch]$SkipTest,
+    [switch]$NoObjCache,
     [string]$TestCategory = "all"
 )
 
@@ -69,7 +70,15 @@ if (-not $SkipBuild) {
 # --- 测试 ---
 if (-not $SkipTest) {
     Write-Host "--- Test ($TestCategory) ---" -ForegroundColor Yellow
-    & "$ProjectDir\tests\run_tests.ps1" -Category $TestCategory
+    # ai/030 §十: 本地这条默认吃 obj store (RTL 不再每例重编, 一趟 bas 实测 282 s → 36 s)。
+    # 编译器自己的默认路径没动 —— 变的是这里显式传开关; 要复现 GA 那条路加 -NoObjCache。
+    # (别用数组 splat 传这串: @('-Category', $x, '-Incremental') 会被按位置绑定, -Incremental
+    #  会撞进第 4 个形参 $Jobs ⇒ "Cannot convert value '-Incremental' to type Int32"。)
+    if ($NoObjCache) {
+        & "$ProjectDir\tests\run_tests.ps1" -Category $TestCategory
+    } else {
+        & "$ProjectDir\tests\run_tests.ps1" -Category $TestCategory -Incremental
+    }
     if ($LASTEXITCODE -ne 0) {
         Write-Host "[FAIL] Tests failed" -ForegroundColor Red
         exit 1
