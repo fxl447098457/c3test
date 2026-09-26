@@ -48,6 +48,19 @@
         return;
     }
 
+    // P20-44: DataObject.Files 的外层 —— `Data.Files.Count`。内层 precheck 给的
+    // lastExpr_ 带尾部标记 "/* oleDD-files */", 这里消费它。
+    {
+        static const char* kFilesMark = " /* oleDD-files */";
+        size_t fm = obj.find(kFilesMark);
+        if (fm != std::string::npos) {
+            std::string ddArg = obj.substr(0, fm);
+            std::string memFiles = Symbol::toLower(node.memberName);
+            if (memFiles == "count") { lastExpr_ = "vb6_oleDD_GetFileCount(" + ddArg + ")"; return; }
+            if (memFiles == "item")  { lastExpr_ = ddArg; return; }  // Files(i) 走 IndexOrCall 拦截
+        }
+    }
+
     // 链式COM检测2: object求值结果是COM对象表达式
     // (从IndexOrCallExpr产生的COM调用结果, 是void*类型的IDispatch*)
     // Fix 153: vb6_PropertyPage_SelectedControls(0) 返回 void* (被编辑控件引用),

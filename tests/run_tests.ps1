@@ -405,7 +405,20 @@ function Test-Run {
     }
     
     # 运行冒烟测试: 校验输出 (详见 smoke 用例; 若超时则按 SKIP 处理)
+    # 可选环境变量 (P20-44: frmevents 的 OLE 无头联测要 C3_OLEDDB_TEST=1 才驱动)
+    $savedEnv = @{}
+    if ($Env) {
+        foreach ($kv in $Env.Split(';')) {
+            if (-not $kv) { continue }
+            $pp = $kv.Split('=', 2)
+            $savedEnv[$pp[0]] = [Environment]::GetEnvironmentVariable($pp[0])
+            [Environment]::SetEnvironmentVariable($pp[0], $pp[1])
+        }
+    }
     $run = Invoke-TestExe -ExePath $exePath -WorkDir $OutDir -Name $baseName
+    foreach ($k in $savedEnv.Keys) {
+        [Environment]::SetEnvironmentVariable($k, $savedEnv[$k])
+    }
     if (-not $run.Ok) {
         $script:fail++
         Write-Host "FAIL (run error)" -ForegroundColor Red
@@ -562,7 +575,8 @@ function Test-Vbp {
         [string]$VbpFile,
         [string[]]$ExpectedOutputs,
         [string]$Arch = "",           # 可选架构参数 (x86/x64)
-        [string]$RequiresCom = ""     # 依赖的 COM ProgId (未注册则 SKIP, 否则 FAIL)
+        [string]$RequiresCom = "",    # 依赖的 COM ProgId (未注册则 SKIP, 否则 FAIL)
+        [string]$Env = ""             # 可选环境变量, "K1=V1;K2=V2" (跑 exe 前设, 跑完还原)
     )
     $script:total++
     Write-Host -NoNewline "  [VBP] $Name ... "
@@ -1237,6 +1251,33 @@ if ($Category -in @("all", "run", "vbp")) {
         "SB33-AFTERRM2=3", "SB34-LASTKEY=", "SB35-SETMINW=77", "SB36-SETW=123",
         "SB37-SETAUTOSZ=0", "SB38-SETTIP=hello", "SB39-SETSTYLE=6",
         "SB40-AFTERCLR=0", "CTRLSTATUSBAR-DONE")
+
+    # --- P20-42: SSTab (SysTabControl32 复刻) ---
+    # 期望串取自夹具真实输出 (别缩写标签)。TS25..TS28 是切页显隐: vb6_GetControlVisible
+    # 走 IsWindowVisible 沿父链传播, 所以断言放在 Timer 里 (窗体已显示之后)。
+    # TS30 是 Click(PreviousTab), 由 RTL 在程序化改 Tab 时补发的 TCN_SELCHANGE 触发。
+    Test-Vbp "ctrlsstab" "$Tests\ctrlsstab\CtrlSSTab.vbp" @(
+        "TS1-TABS=3", "TS2-TAB=1", "TS3-ORIENT=0", "TS4-STYLE=0", "TS5-PERROW=3",
+        "TS6-WRAP=0", "TS7-SET0=0", "TS8-SET2=2", "TS9-OOR=2", "TS10-ORIENT=1",
+        "TS11-STYLE=1", "TS12-PERROW=4", "TS13-WRAP=-1", "TS14-TABS5=5",
+        "TS15-TABAFTERGROW=2", "TS16-TABS2=2", "TS17-TABAFTERSHRINK=1",
+        "TS18-CAP0=常规", "TS19-CAP0B=改过", "TS20-VIS1=-1", "TS21-VIS1B=0",
+        "TS22-P0LEFT=240", "TS23-P1LEFT=240", "TS24-P2LEFT=240",
+        "TS25-TABVIS=-1", "TS26-AT0-P0VIS=-1 P1VIS=0 P2VIS=0",
+        "TS27-AT1-P0VIS=0 P1VIS=-1 P2VIS=0", "TS28-AT2-P0VIS=0 P1VIS=0 P2VIS=-1",
+        "TS29-SETTAB2=2", "TS29B-SETTAB0=0",
+        "CTRLSSTAB-DONE", "CTRLSSTAB-VISDONE", "CTRLSSTAB-CLICKDONE")
+
+    # --- P20-43/44: 窗体事件面 + OLE 拖放 (目标侧 Drop + 源侧 OLEDrag) ---
+    # **要 -Env**: OLE 的那几条断言靠 C3_OLEDDB_TEST=1 驱动 —— 无头环境没法真拖
+    # (DoDragDrop 要真实鼠标键状态), RTL 在该变量下改走"直接 fire IDropTarget 方法 /
+    # 只跑源事件链"的联测路径。EV24 的 X 坐标随屏幕布局变, 所以只断言到 EFF=1。
+    Test-Vbp "frmevents" "$Tests\frmevents\FrmEvents.vbp" @(
+        "EV01-INIT", "EV02-LOAD", "EV03-RESIZE", "EV04-ACTIVATE", "EV05-PAINT",
+        "EV06-GOTFOCUS", "EV19-TIMER-FIRED", "EV20-LOOPDONE", "EV21-QUERYUNLOAD",
+        "EV22-UNLOAD", "EV23-TERMINATE",
+        "EV24-OLE-DROP=OLE-TEST-DROP EFF=1", "EV25-OLE-OVER",
+        "EV26-DRAG-DONE", "EV27-STARTDRAG", "EV29-COMPLETE=3") -Env "C3_OLEDDB_TEST=1"
 
     # --- Fix 195: 资源引用缺失不得静默, 且 --extract-frx 能把 .frx 取值导成 VB 代码 ---
     # 背景: VB6 把多行文本/图片甩进同名 .frx, .frm 里只留 `属性 = "X.frx":含偏移`。

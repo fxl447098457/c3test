@@ -39,6 +39,32 @@
             std::string ddArg44 = "(void*)(*" + ddObj44.name + ")";
             if (memDD44 == "gettext")      { lastExpr_ = "vb6_oleDD_GetText(" + ddArg44 + ")"; return; }
             if (memDD44 == "getfilecount") { lastExpr_ = "vb6_oleDD_GetFileCount(" + ddArg44 + ")"; return; }
+            // Data.Files (非调用形态, 后面跟 .Count): 留尾部注释标记, 外层 MemberAccess
+            // 的 generic path 消费它 (搜 oleDD-files)。
+            if (memDD44 == "files")        { lastExpr_ = ddArg44 + " /* oleDD-files */"; return; }
+        }
+        // ---- P20-44: 控件的 OLEDrag 方法 (无实参形态) ----
+        // 语句 `X.OLEDrag` 的 callee 求值会走到这里 (visit 最前), 比 com_bind 的
+        // "无参数 → ComCall" 分支早。实参形态 (allowedEffects) 走 call_callee_member。
+        auto itCtlDDp = knownFormControls_.find(ddLower44);
+        if (itCtlDDp != knownFormControls_.end()
+            && Symbol::toLower(node.memberName) == "oledrag") {
+            std::string hwndDDp = makeCtrlHwndArg(ddLower44, itCtlDDp->second);
+            static const char* ddSrcEvP[4] = { "_OLEStartDrag", "_OLESetData",
+                                               "_OLEGiveFeedback", "_OLECompleteDrag" };
+            std::string regDDp;
+            for (int ddK = 0; ddK < 4; ddK++) {
+                auto* ddSym = symTab_.lookup(ddObj44.name + ddSrcEvP[ddK]);
+                if (!ddSym) continue;
+                std::string ddFn = cProcName(ddSym->name, AccessLevel::Private);
+                regDDp += "  { extern void " + ddFn + "(); vb6_OLEDrop_SetHandler("
+                        + hwndDDp + ", " + std::to_string(ddK + 2) + ", (void*)" + ddFn + "); }\n";
+            }
+            lastExpr_ = (std::string)"{ void* ddObj44 = (void*)vb6_oleDD_MakeDataObject("
+                      "vb6_GetControlText(" + hwndDDp + "), NULL, 0);\n"
+                      + regDDp
+                      + "  vb6_OLEDrag_Start((void*)" + hwndDDp + ", ddObj44, 3); }";
+            return;
         }
     }
 

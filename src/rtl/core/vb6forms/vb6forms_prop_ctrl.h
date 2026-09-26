@@ -204,9 +204,18 @@ void    vb6_OLEDrop_Revoke(void* hwnd);
 void    vb6_OLEDrop_RevokeAll(void);
 void    vb6_OLEDrop_SetHandler(void* hwnd, int32_t kind, void* cb);
 //   DataObject 取值 (GetText 返回 BSTR 副本)
+//   造 DataObject (目标/源两侧都用): text 可空; files/fileCount 是 CF_HDROP 清单。
+//   **必须有原型**: 生成码会这样调 —— 漏原型 = 隐式 int = x64 指针截断 (实测崩)。
+void*   vb6_oleDD_MakeDataObject(const wchar_t* text, wchar_t** files, int32_t fileCount);
 void*   vb6_oleDD_GetText(void* dataObj);
 int32_t vb6_oleDD_GetFileCount(void* dataObj);
 const wchar_t* vb6_oleDD_GetFile(void* dataObj, int32_t idx);
+//   源侧: X.OLEDrag → 造 DataObject(控件文本) + 注册源事件 + DoDragDrop。
+//   源事件 (SetHandler kind 2..5): OLEStartDrag/OLESetData/OLEGiveFeedback/OLECompleteDrag
+int32_t vb6_OLEDrag_Start(void* hwnd, void* dataObj, int32_t allowedEffects);
+void    vb6_oleDD_SetText(void* dataObj, void* bstrText);
+void    vb6_oleDD_Clear(void* dataObj);
+void*   vb6_oleDD_GetFileBstr(void* dataObj, int32_t idx);
 
 //   StatusBar: Align 0=None 1=Top 2=Bottom(默认) 3=Left 4=Right
 //              Style 0=sbrNormal(多面板, 默认) 1=sbrSimple(单格, 读 SimpleText)

@@ -167,6 +167,10 @@ Private Sub tmrDrive_Timer()
     ElseIf ticks >= 2 Then
         tmrDrive.Enabled = False
         Debug.Print "EV20-LOOPDONE"
+    ' ---- P20-44 源侧: OLEDrag 方法 + 源事件 (无头下 DoDragDrop 立即返回) ----
+    txtDrop.OLEDrag
+    Debug.Print "EV26-DRAG-DONE"
+
         Unload Me
     End If
 End Sub
@@ -194,6 +198,19 @@ Private Sub txtDrop_OLEDragOver(Data As DataObject, Effect As Long, Button As In
         done = 1
         Debug.Print "EV25-OLE-OVER"
     End If
+End Sub
+
+Private Sub txtDrop_OLEStartDrag(Data As DataObject, AllowedEffects As Long)
+    Debug.Print "EV27-STARTDRAG"
+    Data.SetData "SRC-TEXT"
+End Sub
+
+Private Sub txtDrop_OLEGiveFeedback(Effect As Long, Button As Integer, Shift As Integer, X As Single, Y As Single)
+    Debug.Print "EV28-GIVEFBK"
+End Sub
+
+Private Sub txtDrop_OLECompleteDrag(Effect As Long)
+    Debug.Print "EV29-COMPLETE=" & Effect
 End Sub
 
 Private Sub Form_Terminate()

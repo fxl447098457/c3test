@@ -226,7 +226,10 @@ static IDataObjectVtbl kDataObjVtbl = {
 };
 
 // 造一个填好文本/文件的 IDataObject。失败返回 NULL。
-IDataObject* vb6_oleDD_MakeDataObject(const wchar_t* text, wchar_t** files, int fileCount) {
+// 返回 **void\*** (接口指针的裸表示): 统一 RTL 口径, 头文件不必 include ole2.h。
+// ⚠ 必须在 vb6forms_prop_ctrl.h 里有原型 —— 漏了就 C 隐式 int, x64 把指针截成
+// 32 位 (实测 dataObj=0xFFFFFFFF90FE65A0 → SetText 里解引用崩)。
+void* vb6_oleDD_MakeDataObject(const wchar_t* text, wchar_t** files, int fileCount) {
     Vb6DataObj* d = (Vb6DataObj*)HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(Vb6DataObj));
     if (!d) return NULL;
     if (text && *text) {
@@ -250,7 +253,7 @@ IDataObject* vb6_oleDD_MakeDataObject(const wchar_t* text, wchar_t** files, int 
     if (!o) { dataObjFree(d); return NULL; }
     o->vt.lpVtbl = &kDataObjVtbl;
     o->d = d;
-    return &o->vt;
+    return (void*)&o->vt;
 }
 
 // 取出 DataObject 里的文本 (给 VB 的 Data.GetText 用)
@@ -306,8 +309,10 @@ static HRESULT WINAPI ds_GiveFeedback(IDropSource* self, DWORD eff) {
     (void)self; (void)eff; return DRAGDROP_S_USEDEFAULTCURSORS;
 }
 
+static HRESULT WINAPI src_GiveFeedbackCb(IDropSource* self, DWORD eff);  // 定义在目标回调表之后
+
 static IDropSourceVtbl kDropSrcVtbl = {
-    ds_QueryInterface, ds_AddRef, ds_Release, ds_QueryContinueDrag, ds_GiveFeedback
+    ds_QueryInterface, ds_AddRef, ds_Release, ds_QueryContinueDrag, src_GiveFeedbackCb
 };
 
 // ===================== 目标: 事件回调表 =====================
@@ -319,11 +324,17 @@ typedef void (*Vb6OLEDropCb)(void** dataObj, int32_t* effect, int16_t* button,
                              int16_t* shift, float* x, float* y);
 #define VB6_OLECB_OVER 0
 #define VB6_OLECB_DROP 1
+// P20-44 源侧: 处理器签名各不相同, 所以存 void* 按各自形状 cast 调用。
+#define VB6_OLESRC_STARTDRAG  2   // void X(void** Data, int32_t* AllowedEffects)
+#define VB6_OLESRC_SETDATA    3   // void X(void** Data, int16_t* DataFormat)
+#define VB6_OLESRC_GIVEFEEDBK 4   // void X(int32_t* Effect, int16_t* Button, int16_t* Shift, float* X, float* Y)
+#define VB6_OLESRC_COMPLETED  5   // void X(int32_t* Effect)
 
 #define VB6_OLETARGET_MAX 32
 typedef struct {
     HWND hwnd;
     Vb6OLEDropCb cb[2];
+    void* srcCb[4];        // 源侧: [0]=StartDrag [1]=SetData [2]=GiveFeedback [3]=CompleteDrag
 } Vb6OLETarget;
 
 static Vb6OLETarget g_targets[VB6_OLETARGET_MAX];
@@ -335,15 +346,41 @@ static Vb6OLETarget* targetFind(HWND h) {
 }
 
 void vb6_OLEDrop_SetHandler(void* hwnd, int32_t kind, void* cb) {
-    if (!hwnd || kind < 0 || kind > 1) return;
+    if (!hwnd || kind < 0 || kind > 5) return;
     Vb6OLETarget* t = targetFind((HWND)hwnd);
     if (!t) {
         if (g_targetCount >= VB6_OLETARGET_MAX) return;
         t = &g_targets[g_targetCount++];
         t->hwnd = (HWND)hwnd;
     }
-    t->cb[kind] = (Vb6OLEDropCb)cb;
+    if (kind <= 1) t->cb[kind] = (Vb6OLEDropCb)cb;
+    else t->srcCb[kind - 2] = cb;   // 源侧四事件 (签名各异, 调用点按形状 cast)
 }
+
+// ===================== 源侧: OLEDrag / DoDragDrop (P20-44) =====================
+// VB6 用法: 通常在 MouseMove 里手动调 `X.OLEDrag` (或 OLEDragMode=1 自动)。
+// 这里封装 DoDragDrop 的模态循环; 源事件在循环前后/中回调:
+//   OLEStartDrag(Data, AllowedEffects)  循环前 (可往 Data 里塞数据)
+//   OLEGiveFeedback(Effect, ...)        循环中每次 GiveFeedback
+//   OLECompleteDrag(Effect)             循环后 (Effect = 最终效果, 0=未落下)
+static HRESULT g_srcPendingGive = S_OK;
+static HWND g_srcActiveHwnd = NULL;          // 当前拖动的源控件
+static IDataObject* g_srcDataObj = NULL;     // 当前拖动的数据对象 (引用在调用方)
+
+static HRESULT WINAPI src_GiveFeedbackCb(IDropSource* self, DWORD eff) {
+    (void)self;
+    if (g_srcActiveHwnd && g_srcDataObj) {
+        Vb6OLETarget* t = targetFind(g_srcActiveHwnd);
+        if (t && t->srcCb[2]) {
+            int32_t e = (int32_t)eff; int16_t b2 = 0, s2 = 0; float x = 0, y = 0;
+            void* objPtr = (void*)g_srcDataObj;
+            ((void(*)(int32_t*, int16_t*, int16_t*, float*, float*))t->srcCb[2])
+                (&e, &b2, &s2, &x, &y);
+        }
+    }
+    return DRAGDROP_S_USEDEFAULTCURSORS;
+}
+
 
 // ===================== IDropTarget =====================
 
@@ -436,6 +473,102 @@ int32_t vb6_OLEDrop_Register(void* hwnd) {
     return 1;
 }
 
+// ---------------- 源侧入口 ----------------
+// X.OLEDrag 的落地: 造好 DataObject 后调这里。allowedEffects 用 VB6 常量
+// (1=Copy 2=Move, 位组合)。返回最终效果 (DoDragDrop 的 dwOutEffect)。
+int32_t vb6_OLEDrag_Start(void* hwnd, void* dataObj, int32_t allowedEffects) {
+    if (!hwnd || !dataObj) return 0;
+    // DoDragDrop 要求当前线程已 OleInitialize —— 没初始化返回 CO_E_NOTINITIALIZED
+    // (0x800401F0), 拖动静默不发生。LoadPicture 那条路会初始化, 纯拖放场景不会。
+    // (vb6_OleEnsureInit 是 vb6rtl_com.c 里的 static, 跨不了编译单元 —— 自己来一次。
+    //  重复调用无害: S_FALSE / RPC_E_CHANGED_MODE 都算"已初始化"。)
+    { static int oleInit44 = 0; if (!oleInit44) { oleInit44 = 1; OleInitialize(NULL); } }
+    // 无处理器时也要能拖 (VB6 的 OLEDrag 不要求写 OLEStartDrag)
+    Vb6OLETarget* t = targetFind((HWND)hwnd);
+    if (!t) {
+        if (g_targetCount >= VB6_OLETARGET_MAX) return 0;
+        t = &g_targets[g_targetCount++];
+        t->hwnd = (HWND)hwnd;
+    }
+    if (t->srcCb[0]) {   // OLEStartDrag(Data, AllowedEffects)
+        void* objPtr = dataObj;
+        int32_t allowed = allowedEffects;
+        ((void(*)(void**, int32_t*))t->srcCb[0])(&objPtr, &allowed);
+        allowedEffects = allowed;
+    }
+    // 无头联测 (C3_OLEDDB_TEST=1): **不调 DoDragDrop**。OleInitialize 成功后它会进
+    // 模态循环、等鼠标键释放, 无输入环境下永不返回 —— 实测挂 5 分钟 (真机无此问题)。
+    // 联测要验的是**源事件链**, 所以只跑 StartDrag (上面已调) 再以 allowedEffects
+    // 当"落下"结果调 CompleteDrag。真实拖动留给真机手工验证。
+    {
+        static int headless44 = -1;
+        if (headless44 < 0) {
+            wchar_t f44[8] = { 0 };
+            headless44 = (GetEnvironmentVariableW(L"C3_OLEDDB_TEST", f44, 8) > 0) ? 1 : 0;
+        }
+        if (headless44) {
+            if (t->srcCb[3]) { int32_t fe44 = allowedEffects; ((void(*)(int32_t*))t->srcCb[3])(&fe44); }
+            return allowedEffects;
+        }
+    }
+    g_srcActiveHwnd = (HWND)hwnd;
+    g_srcDataObj = (IDataObject*)dataObj;
+    // DropSource: 每次 DoDragDrop 造一个 (引用计数归 DoDragDrop/我们各管一段)
+    Vb6DropSrc* src = (Vb6DropSrc*)HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(Vb6DropSrc));
+    if (!src) { g_srcActiveHwnd = NULL; g_srcDataObj = NULL; return 0; }
+    src->vt.lpVtbl = &kDropSrcVtbl;
+    src->refs = 1;
+    DWORD outEffect = (DWORD)allowedEffects;
+    HRESULT hr = DoDragDrop((IDataObject*)dataObj, &src->vt,
+                            (DWORD)allowedEffects, &outEffect);
+    src->vt.lpVtbl->Release(&src->vt);
+    if (t->srcCb[3]) {   // OLECompleteDrag(Effect)
+        int32_t finalE = (hr == DRAGDROP_S_DROP) ? (int32_t)outEffect : 0;
+        ((void(*)(int32_t*))t->srcCb[3])(&finalE);
+    }
+    g_srcActiveHwnd = NULL;
+    g_srcDataObj = NULL;
+    return (hr == DRAGDROP_S_DROP) ? (int32_t)outEffect : 0;
+}
+
+// Data.SetData: 直接换文本 (CF_UNICODETEXT)。文件/其它格式后续按需扩。
+void vb6_oleDD_SetText(void* dataObj, void* bstrText) {
+    // ⚠ 入参是 **IDataObject 接口指针** (&o->vt), 不是 Vb6DataObj —— 数据结构在 o->d。
+    // 直接当 Vb6DataObj* 用会把 vt.lpVtbl 当 text 指针 free → 0xC0000005 (实测踩过)。
+    Vb6IDataObj* o = (Vb6IDataObj*)dataObj;
+    if (!o || !o->d) return;
+    Vb6DataObj* d = o->d;
+    if (d->text) HeapFree(GetProcessHeap(), 0, d->text);
+    d->text = NULL;
+    UINT len = SysStringLen((BSTR)bstrText);
+    if (len) {
+        d->text = (wchar_t*)HeapAlloc(GetProcessHeap(), 0, (len + 1) * sizeof(wchar_t));
+        memcpy(d->text, (const wchar_t*)bstrText, len * sizeof(wchar_t));
+        d->text[len] = 0;
+    }
+}
+
+// Data.Clear
+void vb6_oleDD_Clear(void* dataObj) {
+    Vb6IDataObj* o = (Vb6IDataObj*)dataObj;   // 同上: 接口指针 -> o->d
+    if (!o || !o->d) return;
+    Vb6DataObj* d = o->d;
+    if (d->text) { HeapFree(GetProcessHeap(), 0, d->text); d->text = NULL; }
+    if (d->files) {
+        for (int i = 0; i < d->fileCount; i++)
+            if (d->files[i]) HeapFree(GetProcessHeap(), 0, d->files[i]);
+        HeapFree(GetProcessHeap(), 0, d->files);
+        d->files = NULL; d->fileCount = 0;
+    }
+}
+
+// Data.Files(i): 返回 BSTR 副本 (同 GetText 的口径)
+void* vb6_oleDD_GetFileBstr(void* dataObj, int32_t idx) {
+    const wchar_t* f = vb6_oleDD_GetFile((IDataObject*)dataObj, idx);
+    if (!f) return (void*)vb6_BSTR_Empty();
+    return (void*)vb6_BSTR_FromStr(f);
+}
+
 // 窗体销毁时统一撤销所有已注册目标 —— 逐个 Revoke 比记"哪个还活着"简单可靠。
 void vb6_OLEDrop_RevokeAll(void) {
     for (int i = 0; i < g_targetCount; i++) {
@@ -467,7 +600,6 @@ static void testFireCb(void** dataObj, int32_t* effect, int16_t* button,
 }
 
 void vb6_oleDD_FireTestDropAtRegistered(void) {
-    fprintf(stderr, "[OLE44] fire begin, targets=%d\n", g_targetCount);
     for (int i = 0; i < g_targetCount; i++) {
         HWND h = g_targets[i].hwnd;
         if (!h) continue;
@@ -482,7 +614,6 @@ void vb6_oleDD_FireTestDropAtRegistered(void) {
         t->vt.lpVtbl->DragEnter(&t->vt, obj, MK_LBUTTON, pt, &eff);
         eff = DROPEFFECT_COPY;
         t->vt.lpVtbl->Drop(&t->vt, obj, MK_LBUTTON, pt, &eff);
-        fprintf(stderr, "[OLE44] fired hwnd=%p eff=%lu\n", (void*)h, (unsigned long)eff);
         obj->lpVtbl->Release(obj);
         HeapFree(GetProcessHeap(), 0, t);
     }
