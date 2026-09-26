@@ -64,10 +64,25 @@
                 anyNotify = true;
                 break;
             }
+            // C29-8c: TreeView 的三条通知事件同理 (NodeClick / Expand / Collapse)。
+            if (ctrl.controlType == FrmControlType::TreeView) {
+                if (!symTab_.lookup(ctrl.controlName + "_NodeClick") &&
+                    !symTab_.lookup(ctrl.controlName + "_Expand") &&
+                    !symTab_.lookup(ctrl.controlName + "_Collapse")) continue;
+                anyNotify = true;
+                break;
+            }
             // C29-4: StatusBar 的 PanelClick / PanelDblClick 同理。
             if (ctrl.controlType == FrmControlType::StatusBar) {
                 if (!symTab_.lookup(ctrl.controlName + "_PanelClick") &&
                     !symTab_.lookup(ctrl.controlName + "_PanelDblClick")) continue;
+                anyNotify = true;
+                break;
+            }
+            // C29-5c: Toolbar 只有 _ButtonMenuClick 走这条 (TBN_DROPDOWN)；
+            // _ButtonClick 在 WM_COMMAND 那一路 (见 cgen_form_wndproc_create.inc)。
+            if (ctrl.controlType == FrmControlType::Toolbar) {
+                if (!symTab_.lookup(ctrl.controlName + "_ButtonMenuClick")) continue;
                 anyNotify = true;
                 break;
             }
@@ -198,6 +213,84 @@
                     c_.dedent();
                     c_.emitLine("}");
                 }
+
+            }
+            // ---- C29-8c: TreeView 的 NodeClick / Expand / Collapse ----
+            // TVN_SELCHANGEDW(-451) 走 NodeClick；TVN_ITEMEXPANDEDW(-455) 按 action 分给
+            // Expand / Collapse。通知负载 NMTREEVIEWW 里的 itemNew.hItem 由 RTL 折成 1 基
+            // 节点序号，再拿 vb6_TreeView_NodeAt 造出 Node 对象回调 —— VB6 的处理器参数就
+            // 是这个对象:
+            //   Sub TreeView1_NodeClick(ByVal Node As Node)
+            //   Sub TreeView1_Expand(ByVal Node As Node)   /   _Collapse 同形
+            // 形状与上面 ListView / StatusBar 那两条完全同构 (共用同一个 anyNotify 分支)。
+            for (const auto& ctrl : frmDesc.formControl.children) {
+                if (ctrl.controlType != FrmControlType::TreeView) continue;
+                auto* ncSym = symTab_.lookup(ctrl.controlName + "_NodeClick");
+                auto* exSym = symTab_.lookup(ctrl.controlName + "_Expand");
+                auto* coSym = symTab_.lookup(ctrl.controlName + "_Collapse");
+                if (!ncSym && !exSym && !coSym) continue;
+                std::string tvNameLower = ctrl.controlName;
+                std::transform(tvNameLower.begin(), tvNameLower.end(), tvNameLower.begin(), ::tolower);
+                std::string tvHwndVar = knownControlArrays_.count(tvNameLower)
+                    ? ("vb6_CtrlArr_GetAt(&vb6_arr_" + cIdent(ctrl.controlName) + ", 0)")
+                    : ("vb6_hwnd_" + cIdent(ctrl.controlName));
+                // wantExp == 999 = 这条不看 action (NodeClick)；否则 -1 = 展开、0 = 折回。
+                struct TvEvt { int32_t code; Symbol* sym; const char* tag; int32_t wantExp; };
+                TvEvt tvEvts[] = {
+                    { -451, ncSym, "nc8c", 999 },
+                    { -455, exSym, "ex8c",  -1 },
+                    { -455, coSym, "co8c",   0 } };
+                for (const TvEvt& ev : tvEvts) {
+                    if (!ev.sym) continue;
+                    std::string fn = cProcName(ev.sym->name, AccessLevel::Private);
+                    // ev.tag 是 const char* —— 与字面量直接相加就是"两个指针相加" (C2110)，
+                    // 先把中段包成 std::string 再拼。
+                    std::string vIdx = std::string("vb6_tvIdx8c_") + ev.tag;
+                    std::string vNode = std::string("vb6_tvNode8c_") + ev.tag;
+                    c_.emitLine("if (pNM42->code == " + std::to_string(ev.code)
+                                + " && (void*)pNM42->hwndFrom == " + tvHwndVar + ") {");
+                    c_.indent();
+                    c_.emitLine("extern void " + fn + "(void*);");
+                    c_.emitLine("int32_t " + vIdx + " = vb6_TreeView_NotifyNodeIndex((void*)"
+                                + tvHwndVar + ", (void*)lParam);");
+                    if (ev.wantExp == 999)
+                        c_.emitLine("if (" + vIdx + " > 0) {");
+                    else
+                        c_.emitLine("if (" + vIdx + " > 0 && vb6_TreeView_NotifyExpanded("
+                                    + "(void*)lParam) == " + std::to_string(ev.wantExp) + ") {");
+                    c_.indent();
+                    c_.emitLine("void* " + vNode + " = vb6_TreeView_NodeAt((void*)"
+                                + tvHwndVar + ", " + vIdx + ");");
+                    c_.emitLine("if (" + vNode + ") " + fn + "(" + vNode + ");");
+                    c_.dedent();
+                    c_.emitLine("}");
+                    c_.dedent();
+                    c_.emitLine("}");
+                }
+            }
+            // ---- C29-5c: Toolbar 的 ButtonMenuClick ----
+            // TBN_DROPDOWN(-710) 只有带下拉箭头的按钮 (VB6 的 Style 5 = BTNS_DROPDOWN) 发得
+            // 出来；hdr.idFrom 就是那颗按钮的 idCommand —— 与 WM_COMMAND 那一路同一个值，
+            // 所以造对象照用 vb6_Toolbar_ButtonAt:
+            //   Sub Toolbar1_ButtonMenuClick(ByVal Button As Button)
+            for (const auto& ctrl : frmDesc.formControl.children) {
+                if (ctrl.controlType != FrmControlType::Toolbar) continue;
+                auto* mcSym = symTab_.lookup(ctrl.controlName + "_ButtonMenuClick");
+                if (!mcSym) continue;
+                std::string mcNameLower = ctrl.controlName;
+                std::transform(mcNameLower.begin(), mcNameLower.end(), mcNameLower.begin(), ::tolower);
+                std::string tbHwndVar = knownControlArrays_.count(mcNameLower)
+                    ? ("vb6_CtrlArr_GetAt(&vb6_arr_" + cIdent(ctrl.controlName) + ", 0)")
+                    : ("vb6_hwnd_" + cIdent(ctrl.controlName));
+                std::string mcFn = cProcName(mcSym->name, AccessLevel::Private);
+                c_.emitLine("if (pNM42->code == -710 && (void*)pNM42->hwndFrom == " + tbHwndVar + ") {");
+                c_.indent();
+                c_.emitLine("extern void " + mcFn + "(void*);");
+                c_.emitLine("void* vb6_tbMenuBtn5c = vb6_Toolbar_ButtonAt((void*)" + tbHwndVar
+                            + ", (int32_t)pNM42->idFrom);");
+                c_.emitLine("if (vb6_tbMenuBtn5c) " + mcFn + "(vb6_tbMenuBtn5c);");
+                c_.dedent();
+                c_.emitLine("}");
             }
             c_.emitLine("break;");
             c_.dedent();

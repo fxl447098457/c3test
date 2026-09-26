@@ -607,6 +607,24 @@
         if (toolbarVars_.count(objExpr)) return objExpr;
         return "";
     }
+    // C29-8b: TreeView 的裸名登记 (emitFormFramework 开头统一插, 含容器子控件)。
+    // 认法照 toolbarNameOfExpr: 真窗口 ⇒ 集合表达式的槽只会是 `vb6_hwnd_<裸名>`,
+    // 并且比对要过一道标识符边界 (tv1 不能命中 tv10)。
+    std::unordered_set<std::string> treeViewVars_;
+    std::string treeViewNameOfExpr(const std::string& objExpr) const {
+        for (const auto& n : treeViewVars_) {
+            const std::string hwnd = "vb6_hwnd_" + n;
+            size_t p0 = objExpr.find(hwnd);
+            while (p0 != std::string::npos) {
+                size_t e = p0 + hwnd.size();
+                if (e >= objExpr.size() || !(isalnum((unsigned char)objExpr[e]) || objExpr[e] == '_'))
+                    return n;
+                p0 = objExpr.find(hwnd, e);
+            }
+        }
+        if (treeViewVars_.count(objExpr)) return objExpr;
+        return "";
+    }
     std::string statusBarHwndVarOfExpr(const std::string& objExpr) const {
         std::string n = statusBarNameOfExpr(objExpr);
         return n.empty() ? "" : "vb6_hwnd_" + n;

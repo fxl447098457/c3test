@@ -11,9 +11,56 @@
         // 这条"控件属性对象 + Item(idx)"的路两种槽都要认, 否则 `ListView1.ListItems(1)`
         // 会被拼成 `vb6_ComCallObject(vb6_hwnd_ListView1, L"ListItems", …)` —— 对 HWND
         // 当 IDispatch 用, 链接过、运行期读数全空。
+        // C29-8c: TreeView1.SimNodeClick n / .SimExpand n, expanded —— **判据专用**方法
+        // (与 C29-4 的 StatusBar.SimClick 同一先例: 无头环境点不了鼠标，RTL 程序化发一条
+        // 真 WM_NOTIFY，整条"派发分支 + 通知换算 + NodeAt 造对象"才算被验到)。不对应任何
+        // VB6 语义，写进 ai/029 边界。
+        // ⚠ 必须抢在下面那条 axSlotObj 分支**之前**: 那条现在是"裸控件槽 + 取属性 + Item"
+        // 的形状 (C29-8b 把 TreeView/Toolbar 的裸槽放了进去)，而 `tv1.SimNodeClick 2` 长得
+        // 一模一样 —— 不抢先就被吞成 ComCallObject(getprop "SimNodeClick", Item(2)):
+        // 编得过、跑起来什么都不发 (实测踩过)。这里也不能用后面那两个 objExpr/memberName，
+        // 此刻还在 marker 形态上，读 comObjExpr_/comMemberName_。
+        if (comObjExpr_.find("vb6_hwnd_") == 0) {
+            std::string tvBare = comObjExpr_.substr(9);
+            std::string tvMem = Symbol::toLower(comMemberName_);
+            bool tvSim = treeViewVars_.count(tvBare) > 0
+                && (tvMem == "simnodeclick" || tvMem == "simexpand");
+            // C29-5c: 工具栏那两条判据方法同形 (SimButtonClick → WM_COMMAND,
+            // SimButtonMenuClick → WM_NOTIFY/TBN_DROPDOWN，两条都发给父窗)。
+            bool tbSim = !toolbarNameOfExpr(comObjExpr_).empty()
+                && (tvMem == "simbuttonclick" || tvMem == "simbuttonmenuclick");
+            if (tvSim || tbSim) {
+                isComMarker_ = false;
+                std::vector<std::string> sa;
+                for (size_t i = 0; i < node.positional.size(); i++) {
+                    emitExpr(*node.positional[i]);
+                    sa.push_back(lastExpr_);
+                }
+                std::string a0 = sa.size() > 0 ? sa[0] : std::string("0");
+                std::string a1 = sa.size() > 1 ? sa[1] : std::string("0");
+                lastExpr_ = (tvMem == "simnodeclick")
+                    ? ("vb6_TreeView_SimNodeClick((void*)" + comObjExpr_ + ", " + a0 + ")")
+                    : (tvMem == "simexpand")
+                    ? ("vb6_TreeView_SimExpand((void*)" + comObjExpr_ + ", " + a0 + ", " + a1 + ")")
+                    : (tvMem == "simbuttonclick")
+                    ? ("vb6_Toolbar_SimButtonClick((void*)" + comObjExpr_ + ", " + a0 + ")")
+                    : ("vb6_Toolbar_SimButtonMenuClick((void*)" + comObjExpr_ + ", " + a0 + ")");
+                comObjExpr_.clear();
+                comMemberName_.clear();
+                return;
+            }
+        }
+
         bool axSlotObj = comObjExpr_.find("vb6_com_") == 0
                       || (comObjExpr_.find("vb6_hwnd_") == 0
-                          && !listViewNameOfExpr(comObjExpr_).empty())
+                          && (!listViewNameOfExpr(comObjExpr_).empty()
+                              // C29-8b: `TreeView1.Nodes(1)` 的宿主槽同理 —— 只有**裸控件**
+                              // 槽才进这条"取集合属性 + Item"的路; 集合对象本身
+                              // (vb6_TreeView_Nodes(…) 开头) 不能进, 否则 `Nodes.Add(…)`
+                              // 会被当成"Add 属性 + Item 下标", 编成删不改的错形状。
+                              // C29-5b: Toolbar 的裸槽同理 (真窗口)。
+                              || !treeViewNameOfExpr(comObjExpr_).empty()
+                              || !toolbarNameOfExpr(comObjExpr_).empty()))
                       // C29-Data: Data1.Recordset 的透传形态 (Fields/Item 走 Step1+Item 路)。
                       || comObjExpr_.find("vb6_Data_Self(") == 0;
         if (axSlotObj && !node.positional.empty()) {
@@ -30,6 +77,16 @@
                     std::string bareIL = imageListNameOfExpr(axObjExpr);
                     if (!bareIL.empty())
                         collectionExpr = "vb6_ImageList_ListImages((void*)vb6_com_" + bareIL + ")";
+                } else if (Symbol::toLower(axMember) == "buttons") {
+                    // C29-5b: Toolbar1.Buttons —— 宿主槽是 vb6_hwnd_X (真窗口)。
+                    std::string bareTB = toolbarNameOfExpr(axObjExpr);
+                    if (!bareTB.empty())
+                        collectionExpr = "vb6_Toolbar_Buttons((void*)vb6_hwnd_" + bareTB + ")";
+                } else if (Symbol::toLower(axMember) == "nodes") {
+                    // C29-8b: TreeView1.Nodes —— 宿主槽是 vb6_hwnd_X (真窗口)。
+                    std::string bareTV = treeViewNameOfExpr(axObjExpr);
+                    if (!bareTV.empty())
+                        collectionExpr = "vb6_TreeView_Nodes((void*)vb6_hwnd_" + bareTV + ")";
                 } else {
                     // C29-7: ListView 的 ListItems / ColumnHeaders 同一口径。
                     // ⚠ 宿主槽是 **vb6_hwnd_X** (ListView 是真窗口), 不是 vb6_com_X。
@@ -127,6 +184,7 @@
                 return;
             }
         }
+
         // C29-OLE: OLE 容器的方法全走 vb6_OleCon_* (真 OLE 容器, 非 COM 占位)。
         // objExpr = vb6_hwnd_X (OLE 容器是真窗口控件)。不拦的话会拼成
         // `vb6_ComCall(vb6_hwnd_X, L"CreateEmbed", …)` —— 对 HWND 当 IDispatch 用。

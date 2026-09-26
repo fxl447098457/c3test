@@ -113,6 +113,7 @@ add_library(vb6c3-core STATIC
     src/semantics/semantic_analyzer_builtin.cpp
     src/project/vbp_parser.cpp
     src/driver/driver_pack.cpp
+    src/driver/res_inventory.cpp  # ai/029 C29-M: .res 资源目录解析（清单让位判据）
     src/project/package_manifest.cpp   # ai/023 S01: package.c3d 清单解析
     src/project/frm_parser.cpp
     src/project/frm_parser_util.cpp

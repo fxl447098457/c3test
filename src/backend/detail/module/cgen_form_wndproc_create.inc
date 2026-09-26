@@ -385,6 +385,30 @@
         }
     }
 
+    // C29-5c: Toolbar 的 ButtonClick —— 原生工具栏报按钮点击**不走 WM_NOTIFY**，而是按
+    // 标准做法给父窗发 WM_COMMAND: LOWORD(wParam)=按钮的 idCommand (5a 写的是"槽号+1")、
+    // HIWORD=0、lParam=工具栏自己的 HWND。所以按 lParam 认来源、按 id 取按钮，两条都来自
+    // 同一个 idCommand ⇒ 派发与表错位会当场翻红:
+    //   Sub Toolbar1_ButtonClick(ByVal Button As Button)
+    // (_ButtonMenuClick 才走 WM_NOTIFY 的 TBN_DROPDOWN，见 cgen_form_wndproc_dispatch.inc。)
+    for (const auto& ctrl : frmDesc.formControl.children) {
+        if (ctrl.controlType != FrmControlType::Toolbar) continue;
+        if (!symTab_.lookup(ctrl.controlName + "_ButtonClick")) continue;
+        std::string tbFn5c = cProcName(ctrl.controlName + "_ButtonClick", AccessLevel::Private);
+        std::string tbSrc5c = ctrlHwndExprForInit(ctrl);
+        c_.emitLine("{");
+        c_.indent();
+        c_.emitLine("HWND vb6_tbSrc5c = (HWND)" + tbSrc5c + ";");
+        c_.emitLine("if (code == 0 && (HWND)lParam == vb6_tbSrc5c) {");
+        c_.indent();
+        c_.emitLine("void* vb6_tbBtn5c = vb6_Toolbar_ButtonAt((void*)vb6_tbSrc5c, id);");
+        c_.emitLine("if (vb6_tbBtn5c) { extern void " + tbFn5c + "(void*); " + tbFn5c + "(vb6_tbBtn5c); }");
+        c_.dedent();
+        c_.emitLine("}");
+        c_.dedent();
+        c_.emitLine("}");
+    }
+
     // P16: WithEvents控件事件分发 (按HWND匹配, 在标准命名handler之后)
     // 对于每个WithEvents控件变量, 检查其HWND是否匹配lParam, 是则调用对应handler
     if (!knownWithEventsCtrlVars_.empty()) {

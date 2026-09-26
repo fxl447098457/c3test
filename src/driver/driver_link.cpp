@@ -3,6 +3,7 @@
 //   原第 2080~2418 行
 
 #include "driver/driver.hpp"
+#include "driver/res_inventory.hpp"   // ai/029 C29-M: 让位判据要问那份 .res 里有没有 #1 清单
 #include "common/diagnostics.hpp"
 #include "common/encoding.hpp"
 #include "ast/ast.hpp"
@@ -935,8 +936,35 @@ bool Driver::runLinker(const CompileOptions& options, const std::string& outputD
         // 旁挂形式有三个硬伤: ①构建系统不感知, 改清单不触发重编 ②复制/签名/分发时
         // 容易丢, 丢掉就静默退回 comctl32 v5.82 ③同目录多份 exe 会互相串。
         // 这里生成 `1 RT_MANIFEST` (资源 id 1 是激活上下文的约定入口) 编译进 exe。
-        // 用户自己带了 ResFile=.res 就交给他, 免得两份清单打架。
-    if (!options.isDll && userResFile_.empty()) {
+        //
+        // C29-M: 让位的判据从"工程给了 ResFile= 没有"改成"**那份 .res 里到底有没有 #1 清单**"。
+        // 旧写法把两件事混成一件: 用户带一份只放图标/版本信息的 .res (VB6 里很常见) 就被当成
+        // "他自己管清单", 于是内置那份一起让掉 ⇒ 产物**静默**退回 v5.82 (实测素材:
+        // archive/vbman/src/RES/VBMANLIB.RES，5 条资源、零清单)。
+        // 现在的口径 = 用户提供的清单**优先**，没有就**用内置的**；两份 #1 才是真不能发生的事
+        // (加载器直接报错)，所以解析不出结论时**保守让位** —— 与旧行为一致，绝不叠加。
+    {
+        bool userHasManifest = false;
+        if (!userResFile_.empty()) {
+            ResFileProbe probe;
+            if (probe.loadFromPath(userResFile_)) {
+                userHasManifest = probe.hasAppManifest;
+                // 走 stderr 的 `C3:` 行：note 级信息在成功的编译里不会整体打印出来，
+                // stdout 那一路更不稳 ⇒ 判据要能在这轮构建里被 grep 到就得走这里。
+                std::cerr << "C3: application manifest: "
+                          << (userHasManifest
+                                  ? "user-supplied .res carries #1 -> using theirs"
+                                  : "user .res has no #1 (" + probe.why + ") -> injecting the built-in one")
+                          << std::endl;
+            } else {
+                userHasManifest = true;    // 认不动 ⇒ 保守让位 (见上)
+                std::cerr << "C3: warning: cannot parse ResFile (" << probe.why
+                          << "); yielding to it instead of risking two #1 manifests. "
+                          << "If the product looks like comctl32 v5, drop ResFile or add a manifest."
+                          << std::endl;
+            }
+        }
+        if (!options.isDll && !userHasManifest) {
         std::string absInterDir3 = pathToUtf8(std::filesystem::absolute(utf8ToPath(intermediatesDir)));
         std::string maniStem = projectBaseName_.empty() ? std::string("app") : projectBaseName_;
         std::string maniName = maniStem + ".c3.manifest";
@@ -1019,6 +1047,7 @@ bool Driver::runLinker(const CompileOptions& options, const std::string& outputD
             }
         }
     }
+    }   // C29-M: 上面这段"要不要注内置清单"的判断整体收成一块，userHasManifest 不外泄
 
         // P23-03: Pass user .res file to linker
     if (!userResFile_.empty() && std::filesystem::exists(utf8ToPath(userResFile_))) {
