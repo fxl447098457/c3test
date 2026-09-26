@@ -5,7 +5,8 @@
 > 规范输入: `ai/讨论记录/018-接口继承与CoClass设计思路.md`（含 tB 文档要点与分阶段设计思路全文）。
 
 STATUS: ALL_DONE             # NOT_STARTED | DESIGN | BUSY | IDLE | ALL_DONE
-LAST_RUN: 2026-09-26T10:59:52+08:00   # 本轮 = **ai/030 两批**：T30-A 内容寻址 obj store（`d9ccdbb`，门 **#91** 8/8 全绿，用例 objcache 进 run/vbp 组）+ 套件与本地入口接通（`ad5254e` + `41ce0fd`，默认关/GA 未动）。实测：单工程 22.0 s -> 2.8 s，15 例 bas 282 s -> 36 s，dev.ps1 smoke 7 s vs 21 s。两条新账记在 030 §10.5/§10.6（`Test-Compile` 重名遮蔽 -> #78；toolsetTag 实质为空 -> #77）。
+LAST_RUN: 2026-09-26T12:13:11+08:00   # 本轮 = **ai/030 T30-B 接进 GA**：ci.yml 的回归步骤加 `-Incremental`（`c3739b5`）→ 门 **#94 红**（`test_delegate_x86` LNK1120：增量那条链接路直接叫 link.exe，没配 /MT 的 CRT）→ 修 `39ecaeb`（x86 链接补 `/NODEFAULTLIB:msvcrt.lib`）→ 门 **#96 绿**，**wall 19m19s → 12m10s（−37%）**，vbp 930→544 s、bas 344→219 / 374→235 s。本地入口 dev.ps1/test.bat 也已默认吃 缓存（`41ce0fd`）。新账 #77/#78 见 030 §10.5/§10.7。
+               # 上一轮 = 2026-09-26T10:59:52+08:00（ai/030 两批：T30-A 内容寻址 obj store + 套件开关；其原注释链保留在下面）
                # 上一轮 = 2026-09-26T06:45:00+08:00（= 本轮之前的收线时刻，其原注释链保留在下面）
                # B21 交付一笔 = `2ddcc8b`（cgen 侧 15 文件 + 用例 32 条 + 手册 Boolean 页 + 分类护栏脚本
                # `.build\b21_emitc_guard.py`）。根因是两条不是一条、护栏 RED 一次的教训、以及顺带量出的 `Print #`
@@ -42,7 +43,7 @@ LAST_COMMIT: 代码批 = 2ddcc8b(B21 布尔可见性+装箱)、c2f7317(B20 插�
                规则沿用：push 只推 `github/dev`；门跑 Actions（`.build/wait_run2.py <sha> <秒>` 盯）；`.build` 里的
                临时 `.ps1` 一律 ASCII only；用例文件按同目录邻居的编码/行尾（`.bas`/`.vbp` = UTF-8+CRLF，
                `tests\*.ps1` = BOM+CRLF）。
-GATE_BASELINE: (Actions 级) c3test run **#91 [dev] = completed/success**（head `d9ccdbb`，8/8 job 全绿：Build C3.exe + bas #1/#2 + syntax + asm + smoke + compile + vbp；vbp 组 PASS=67 FAIL=0 SKIP=1 TOTAL=68）；上一基线 #88（head `f7b1d2d`）。本轮另两笔 `ad5254e`/`41ce0fd` 只有 harness 与脚本入口，**无源码级变动故未占 Actions**。
+GATE_BASELINE: (Actions 级) c3test run **#96 [dev] = completed/success**（head `39ecaeb`，8/8 job 全绿，**wall 730s = 12m10s**，对照上一基线 #91 的 1159s = 19m19s：vbp 930→544s、bas #1 344→219s、bas #2 374→235s、asm 114→83s，compile/syntax 不动（那两组不构建，见 #78））。中间那笔 **#94 = failure** 不是回归，是本批换来的真证据：它抓出增量链接路缺 CRT 配平，已在 `39ecaeb` 修掉。
                8/8 job 全绿 = Build C3.exe + Tests(smoke/syntax/vbp/compile/asm/bas#1/bas#2)，
                06:10→06:28 共 18.6 分钟；逐 job 用 `GET /runs/{id}/jobs` 核过）。
                **门只认 "VB6 C3 Regression" 那条 workflow 的 run 号**：从 `f7b1d2d` 这次推送起，dev 上
@@ -3413,3 +3414,16 @@ D54-② 那条"类变量永不 Release"不变式（对外一旦发 IDispatch/IUn
   因为会动到 ai/028 那批的断言语义。
 - **新账 #77**：`findClExe()` 返回字面量 `cl.exe`，所以 toolsetTag 在"非 dev shell + 没预灌 env"
   时退化成常量 `"cl.exe|"` => "cl 版本进键"这句目前没有内容撑着。随包带 obj（T30-D）之前必须补。
+### D73 把 -Incremental 接进 GA 的三条读数（2026-09-26）
+
+- **门确实变快**：#91（不带开关）wall 19m19s → #96（带开关）wall **12m10s，−37%**。分组：
+  vbp 930→544 s、bas #1 344→219 s、bas #2 374→235 s、asm 114→83 s；smoke/compile/syntax 基本
+  不动（后两组本就不构建 —— 见 #78）。没到本机那个 7.8× 是因为每个 job 仍付一次冷编 RTL
+  (~20 s)，加上跑阶段/链接/20 路争 4 vCPU。
+- **#94 的红是这批最值钱的一步**：`test_delegate_x86` LNK1120。根因不在缓存正确性，而在增量
+  那条路**直接叫 link.exe**（编译/链接拆两步，`cl /link` 用不了），linker 按默认 /MD 配 msvcrt，
+  与 obj 的 `LIBCMT`（x86 走 /MT，P24-09）打架，x86 独有的 `__except_handler4_common` 落空。
+  `dumpbin /directives` 定位；修 = 镜像编译侧判据补 `/NODEFAULTLIB:msvcrt.lib`。这洞潜伏多久
+  无从得知，因为 `--incremental` 在接进 GA 之前从没被任何回归跑过。
+- **教训入账**：新路径"本地跑绿"不等于覆盖到 —— 我本地跑了 15 例 bas + 整组 vbp 都没碰到
+  delegate 的 x86×msvcrt 组合。判据要靠让门去跑新路，不是靠扩大本地抽查。
