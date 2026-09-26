@@ -170,8 +170,10 @@ enum RtlResourceID {
     RTL_VB6FORMS_LISTVIEW_C                = 211,
     // C29-3: 控件"成员对象/成员集合"的真 IDispatch (ListImages 立样)
     RTL_VB6FORMS_MEMBEROBJ_C               = 212,
+    // ai/029 C29-8a: TreeView 标量属性面 (dev 原用 212, 合并后顺延让位)
+    RTL_VB6FORMS_TREEVIEW_C                = 213,
     // OLE 容器 (本地判据, 不进 CI —— 嵌入对象依赖目标机器的 OLE 服务器)
-    RTL_VB6FORMS_OLECON_C                  = 213,
+    RTL_VB6FORMS_OLECON_C                  = 214,
 };
 
 // Session directory manager

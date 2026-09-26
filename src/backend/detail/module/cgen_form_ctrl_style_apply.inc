@@ -182,6 +182,14 @@
                 width = 0;
                 height = 0;
                 break;
+            case FrmControlType::TreeView:
+                // C29-8a: SysTreeView32 的创建路早就有 (controlTypeToWin32Class 有格)，
+                // 缺的是属性面。这里只给 VB6 的**默认观感**: LineStyle=0 (画树线、根层不画)
+                // + BorderStyle=1 (Fixed)。其余四位由设计期 Init 那条补 (下面 vb6_TreeView_Init)。
+                // WS_BORDER: 与 ListBox/Dir/File 同口径，否则 VB6 那圈凹边框没了。
+                style |= 0x0002L | kWsBorder;   // TVS_HASLINES
+                createCaption = "";
+                break;
             default:
                 break;
         }
@@ -365,6 +373,33 @@
                       + std::to_string(pbgMin) + ", " + std::to_string(pbgMax) + ", "
                       + std::to_string(pbgVal) + ", " + std::to_string(pbgOri) + ", "
                       + std::to_string(pbgScr) + ");");
+        }
+
+        // C29-8a: TreeView 设计期初值 (LineStyle / Indentation / CheckBoxes / HotTracking /
+        // HideSelection)。哨兵用 **-999** 而不是 ProgressBar 那套 -1: VB6 的布尔属性序列化成
+        // `CheckBoxes = -1`，-1 恰好就是 True，拿它当"未写"等于设计期永远勾不上复选框。
+        // 全部未写时这条 Init 是个空转 —— 照样发，为的是发码形状稳定 (emitc 断言要看它)。
+        if (ctrl.controlType == FrmControlType::TreeView) {
+            std::string tvLower = ctrl.controlName;
+            std::transform(tvLower.begin(), tvLower.end(), tvLower.begin(), ::tolower);
+            std::string tvHwnd = knownControlArrays_.count(tvLower) ?
+                ("vb6_CtrlArr_GetAt(&vb6_arr_" + cIdent(ctrl.controlName) + ", " +
+                 std::to_string(ctrl.index >= 0 ? ctrl.index : 0) + ")") :
+                ("vb6_hwnd_" + cIdent(ctrl.controlName));
+            int tvLineStyle = -999, tvIndent = -999, tvChk = -999, tvHot = -999, tvHide = -999;
+            auto tvGet = [&](const char* key, int& slot) {
+                auto tvIt = ctrl.properties.find(key);
+                if (tvIt != ctrl.properties.end()) slot = (int)tvIt->second.intValue;
+            };
+            tvGet("LineStyle", tvLineStyle);
+            tvGet("Indentation", tvIndent);
+            tvGet("CheckBoxes", tvChk);
+            tvGet("HotTracking", tvHot);
+            tvGet("HideSelection", tvHide);
+            c_.emitLine("vb6_TreeView_Init((void*)" + tvHwnd + ", "
+                      + std::to_string(tvLineStyle) + ", " + std::to_string(tvIndent) + ", "
+                      + std::to_string(tvChk) + ", " + std::to_string(tvHot) + ", "
+                      + std::to_string(tvHide) + ");");
         }
 
         // P20-40: StatusBar 设计期 —— Init 一次, 再按 Panels 集合逐项灌进去。

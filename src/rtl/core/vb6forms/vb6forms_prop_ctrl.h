@@ -441,6 +441,24 @@ int vb6_CdShowFont(void* hwnd);
 int vb6_CdShowPrinter(void* hwnd);
 int vb6_CdShowAbout(void* hwnd);
 
+// ===================== TreeView (ai/029 C29-8a) =====================
+//   VB6 TreeView 的标量属性面，原生 SysTreeView32（不加载 MSCOMCTL.OCX）。
+//   四条样式位属性的**真值就是 GWL_STYLE 那几位**（getter 直接读窗口），不是另存一份表；
+//   Indentation 例外（VB6 侧缇 / Win32 侧像素，缇值存窗口属性）。True = -1。
+//   Style / LabelEdit / Sorted / PathSeparator / Nodes 一族不在这一格里（C29-8b）。
+void    vb6_TreeView_Init(void* hwnd, int32_t lineStyle, int32_t indentation,
+                          int32_t checkboxes, int32_t hotTracking, int32_t hideSelection);
+int32_t vb6_TreeView_GetLineStyle(void* hwnd);
+void    vb6_TreeView_SetLineStyle(void* hwnd, int32_t val);
+int32_t vb6_TreeView_GetCheckBoxes(void* hwnd);
+void    vb6_TreeView_SetCheckBoxes(void* hwnd, int32_t val);
+int32_t vb6_TreeView_GetHotTracking(void* hwnd);
+void    vb6_TreeView_SetHotTracking(void* hwnd, int32_t val);
+int32_t vb6_TreeView_GetHideSelection(void* hwnd);
+void    vb6_TreeView_SetHideSelection(void* hwnd, int32_t val);
+int32_t vb6_TreeView_GetIndentation(void* hwnd);
+void    vb6_TreeView_SetIndentation(void* hwnd, int32_t twips);
+
 #ifdef __cplusplus
 }
 #endif

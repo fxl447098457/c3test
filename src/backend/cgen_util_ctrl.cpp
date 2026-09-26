@@ -62,6 +62,15 @@ Vb6Type CCodeGen::controlPropType(FrmControlType ctrlType, const std::string& pr
             return Vb6Type::String;
         }
     }
+    if (ctrlType == FrmControlType::TreeView) {
+        // C29-8a: 同理 —— vb6_TreeView_Get* 全是 int32_t (布尔按 VB6 的 -1/0 给)。
+        // 不登记就走 inferExprType 的兜底, 那条按成员裸名查符号, 判成 Variant/String
+        // 都不匹配 C 侧的 int32_t (SSTab1.Tab 撞内置 Tab 那次 AV 的同族)。
+        if (p == "linestyle" || p == "indentation" || p == "checkboxes"
+            || p == "hottracking" || p == "hideselection") {
+            return Vb6Type::Long;
+        }
+    }
     return Vb6Type::Unknown;
 }
 
@@ -303,6 +312,19 @@ std::string CCodeGen::getControlPropReadFn(FrmControlType ctrlType, const std::s
         if (propLower == "listcount") return "vb6_GetListCount";
         if (propLower == "listindex") return "vb6_GetListIndex";
         if (propLower == "list") return "vb6_GetListItem";
+        if (propLower == "visible") return "vb6_GetControlVisible";
+        if (propLower == "enabled") return "vb6_GetControlEnabled";
+        break;
+    // C29-8a: TreeView 的标量属性面。之前这类零格 ⇒ 全部落到"未知属性"的通用兜底
+    // vb6_ComGetStringProp(裸 HWND, L"CheckBoxes") —— 读回空串、写进去静默丢 (029 §九)。
+    // 这四条的真值在窗口样式位上 (RTL 读 GWL_STYLE)，Indentation 的缇值存窗口属性。
+    // Style / LabelEdit / Sorted / PathSeparator / Nodes 一族留 C29-8b (等成员对象机制)。
+    case FrmControlType::TreeView:
+        if (propLower == "linestyle") return "vb6_TreeView_GetLineStyle";
+        if (propLower == "indentation") return "vb6_TreeView_GetIndentation";
+        if (propLower == "checkboxes") return "vb6_TreeView_GetCheckBoxes";
+        if (propLower == "hottracking") return "vb6_TreeView_GetHotTracking";
+        if (propLower == "hideselection") return "vb6_TreeView_GetHideSelection";
         if (propLower == "visible") return "vb6_GetControlVisible";
         if (propLower == "enabled") return "vb6_GetControlEnabled";
         break;
@@ -552,6 +574,17 @@ std::string CCodeGen::getControlPropWriteFn(FrmControlType ctrlType, const std::
         if (propLower == "pattern") return "vb6_FileListBoxSetPattern";
         if (propLower == "filename") return "vb6_FileListBoxSetFileName";
         if (propLower == "listindex") return "vb6_SetListIndex";
+        break;
+    // C29-8a: TreeView 写侧。四条样式位的 setter 会连带 SWP_FRAMECHANGED + 重绘
+    // (复选框位改的是每个节点的度量)，所以运行期赋值立刻见效，不是"只改了张表"。
+    case FrmControlType::TreeView:
+        if (propLower == "linestyle") return "vb6_TreeView_SetLineStyle";
+        if (propLower == "indentation") return "vb6_TreeView_SetIndentation";
+        if (propLower == "checkboxes") return "vb6_TreeView_SetCheckBoxes";
+        if (propLower == "hottracking") return "vb6_TreeView_SetHotTracking";
+        if (propLower == "hideselection") return "vb6_TreeView_SetHideSelection";
+        if (propLower == "visible") return "vb6_SetControlVisible";
+        if (propLower == "enabled") return "vb6_SetControlEnabled";
         break;
     // D6 / C29-9: CommonDialog 写侧（取消由 RTL 按 CancelError 决定报不报 32755）。
     case FrmControlType::CommonDialog:
