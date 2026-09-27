@@ -137,6 +137,50 @@
             }
         };
 
+        // Fix 161c: 上面那条 AST 判据**只够判"语句层面是不是可赋值位置"**, 不足以保证
+        // 生成出来的 C 表达式本身是左值。反例 (Charts 2020 / LabelPlus / PropPagLP):
+        //   CreateWindowEx(..., "Edit", LabelPlus1.Caption, ...)
+        // 第 3 个实参 AST 是 MemberAccessExpr (判 true), 但它是**后期绑定 COM 属性读**,
+        // argVal 被换成 vb6_VariantToString(vb6_VariantFromComResult(vb6_ComGetProp(...)))
+        // —— 纯右值。登记回写后生成
+        //   vb6_BSTR_Assign(&(vb6_VariantToString(...)), ...)
+        // → error C2102: "&"要求左值 (PropPagLP.c:279)。
+        // 所以登记前**必须再看一眼生成串**: 只有当它是纯左值形态 (标识符 / 字段链 /
+        // 解引用 / VB6_SA_AT / me->) 时才回写; 任何含函数调用的一律视为临时值, 与
+        // VB6 "临时表达式收不到回写" 的语义一致。
+        // 口径与下方 Fix 090k/090q 的 isLValue 判定保持同源 (标识符/./->/[]/解引用)。
+        auto isCLvalueExpr161c = [](const std::string& e) -> bool {
+            size_t s = 0;
+            while (s < e.size() && (e[s] == ' ' || e[s] == '\t')) s++;
+            if (s >= e.size()) return false;
+            // 值宏 / 字面量: 非左值
+            if (e.compare(s, 5, "NULL") == 0) return false;
+            if (e[s] == '"' || e[s] == 'L' || std::isdigit(static_cast<unsigned char>(e[s]))) return false;
+            // 允许的前导形态: 标识符 / (*p) 解引用 / &x / VB6_SA_AT(
+            bool deref = false;
+            if (e[s] == '&') { return false; }              // 已是取址结果, 不能再 &
+            if (e[s] == '(' && s + 1 < e.size() && e[s + 1] == '*') {
+                deref = true; s++;
+            }
+            if (!(std::isalpha(static_cast<unsigned char>(e[s])) || e[s] == '_')) return false;
+            // 扫描: 括号外只允许 标识符字符 / . / -> / [] 下标; 出现 '(' 即函数调用 ⇒ 右值
+            int sub = 0;
+            for (size_t ci = s; ci < e.size(); ci++) {
+                char c = e[ci];
+                if (c == '[') { sub++; continue; }
+                if (c == ']') { if (sub == 0) return false; sub--; continue; }
+                if (sub > 0) continue;
+                if (c == '(') return false;                  // 函数调用/强制转换 ⇒ 非左值
+                if (std::isalnum(static_cast<unsigned char>(c)) || c == '_') continue;
+                if (c == '.' || c == '-') continue;
+                if (c == '>') continue;
+                if (c == ' ' || c == '\t') continue;
+                return false;
+            }
+            (void)deref;
+            return true;
+        };
+
         // M22: Declare ANSI函数 - ByVal String参数需要BSTR->ANSI转换
         // 生成临时char*变量, 调用后释放, 无内存泄露
         if (isDeclareAnsiCall && i < calleeParams.size() && calleeParams[i].isByVal
@@ -157,7 +201,7 @@
             // 临时表达式 (如 String$(256,0)) 在 VB6 里也收不到回写, 保持一致。
             // 容量取实参当前字符串长度 (VB6 缓冲语义的近似; cap<=0 则由 NUL 定长)。
             if (i < node.positional.size() && isAssignableOutTarget161b(node.positional[i].get())
-                && !cExprIsVariant(argVal)) {
+                && !cExprIsVariant(argVal) && isCLvalueExpr161c(argVal)) {
                 // 回写目标须是 BSTR 左值 (交给 vb6_BSTR_Assign 的 BSTR*)
                 ansiOutParams_.push_back({ansiVar, argVal, "0"});  // cap=0: 由 NUL 定长
             }
@@ -194,7 +238,7 @@
             ansiTempsToFree_.push_back(ansiVarR);
             // 登记回写: 目标为原左值 (仅当可赋值且非 Variant)
             if (i < node.positional.size() && isAssignableOutTarget161b(node.positional[i].get())
-                && !cExprIsVariant(argVal)) {
+                && !cExprIsVariant(argVal) && isCLvalueExpr161c(argVal)) {
                 ansiOutParams_.push_back({ansiVarR, argVal, "0"});
             }
             argVal = ansiVarR;  // 已是 char* —— 正是 A 版 API 要的 LPSTR (见下方 isByRef 抑制)

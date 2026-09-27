@@ -1270,6 +1270,10 @@ if ($Category -in @("all", "run", "bas")) {
     # 对照: ByRef UDT 路径本来就正常 (证明"出参读法不通"不适用于 UDT)
     Add-BasTest "test_declare_byref_udt_out" "$Tests\declare_out\declare_byref_udt_out.bas" @("hr=0")
     Add-BasTest "test_declare_cwex_ansi" "$Tests\declare_out\declare_cwex_ansi.bas" @("hwnd-ok=Y")
+    # Fix 161c: Declare A 版 ByVal String 实参是**字面量 / 内联 COM 属性读**。
+    # 修复前出参回写只按 AST 种类判左值, MemberAccessExpr 判 true 但生成的是
+    # vb6_VariantToString(...) 右值 → &(右值) → C2102, 真实工程 Charts 2020 编译失败。
+    Add-BasTest "test_declare_cwex_lit_com" "$Tests\declare_out\declare_cwex_lit_com.bas" @("lit-com-hwnd-ok=Y", "lit-only-hwnd-ok=Y")
     Write-Host ""
 
     # --- P5.7 语法/语义检查用例组 ---
