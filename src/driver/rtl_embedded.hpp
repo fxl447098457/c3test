@@ -182,6 +182,9 @@ enum RtlResourceID {
 
     // ai/029 C29-DT-a: VB6 DTPicker 控件 (SysDateTimePick32 复刻, 不加载 MSCOMCT2.OCX)
     RTL_VB6FORMS_DTPICKER_C                = 217,
+
+    // ai/029 C29-MV-a: VB6 MonthView 控件 (SysMonthCal32 复刻, 同样不加载 MSCOMCT2.OCX)
+    RTL_VB6FORMS_MONTHVIEW_C               = 218,
 };
 
 // Session directory manager

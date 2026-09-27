@@ -50,6 +50,8 @@ static void addFormsSources(MsvcDriverOptions& opts, const std::string& rtlDir) 
     // 这条是**第四处**登记：.rc + CMakeLists + rtl_embedded 那张名字表只管"解包到临时目录"，
     // 少了这里这一行，解包成功、cl 却根本不编它 ⇒ 全线 LNK2019 找不到 vb6_DTP_*（实测踩过）。
     opts.sourceFiles.push_back(rtlDir + "/vb6forms_dtpicker.c");
+    // ai/029 C29-MV-a: MonthView —— 同样是第四处登记，少这一行就是全线 LNK2019 找不到 vb6_MV_*
+    opts.sourceFiles.push_back(rtlDir + "/vb6forms_monthview.c");
     // vb6forms_axsite.c 按功能家族拆 5 个编译单元 (2026-09-20): 伞文件本身不参与编译
     // 注意: axsite/ 下的 .c 解包后是平铺目录, 故这里写 basename 而非带子目录路径
     opts.sourceFiles.push_back(rtlDir + "/ax_site.c");

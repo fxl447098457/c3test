@@ -188,6 +188,9 @@ FrmControlType FrmParser::parseControlType(const std::string& typeName) {
     // C29-DT: DTPicker (MSComCtl2.DTPicker)。"dtpicker" 与上面任何一条互不为子串,
     // 且 VB6 那侧只有这一种写法 (ProgID 也是 MSComCtl2.DTPicker.1), 排在 Unknown 前即可。
     if (lower.find("dtpicker") != std::string::npos) return FrmControlType::DTPicker;
+    // C29-MV: MonthView (MSComCtl2.MonthView)。与上面几条互不为子串（"monthview" 里既没有
+    // "listview" 也没有 "treeview"），排在 Unknown 前即可。
+    if (lower.find("monthview") != std::string::npos) return FrmControlType::MonthView;
 
     return FrmControlType::Unknown;
 }
@@ -232,6 +235,10 @@ const char* FrmParser::controlTypeToWin32Class(FrmControlType type) {
         // DATETIMEPICK_CLASSW)。类已由 vb6forms.c:67 那次 InitCommonControlsEx 的
         // ICC_DATE_CLASSES 请求过 ⇒ 与 TreeView/SSTab 同型, 不需要 RTL 自注册兜底。
         case FrmControlType::DTPicker:     return "SysDateTimePick32";
+        // C29-MV: MonthView —— comctl32 注册的 SysMonthCal32（头里 MONTHCAL_CLASSW），
+        // 与 DTPicker 同一族，类同样由 vb6forms.c 那次 InitCommonControlsEx 的
+        // ICC_DATE_CLASSES 请求过 ⇒ 不需要 RTL 自注册兜底。
+        case FrmControlType::MonthView:    return "SysMonthCal32";
         // C29-5a: Toolbar 同样是 comctl32 注册好的类 (ICC_BAR_CLASSES 在 vb6_ComCtl_Init
         // 里早就请求过)。以前这格缺着 + 被"ImageList || Toolbar 走 CoCreateInstance"那一组
         // 扣住 => 控件根本没窗口，读一个 tb1.Visible 就是 C2065: vb6_hwnd_tb1 未声明。
@@ -287,6 +294,7 @@ const char* FrmParser::controlTypeToVb6Name(FrmControlType type) {
         case FrmControlType::ListView:     return "ListView";
         case FrmControlType::TreeView:     return "TreeView";
         case FrmControlType::DTPicker:     return "DTPicker";
+        case FrmControlType::MonthView:    return "MonthView";
         case FrmControlType::Toolbar:      return "Toolbar";
         case FrmControlType::Shape:        return "Shape";
         case FrmControlType::Line:         return "Line";

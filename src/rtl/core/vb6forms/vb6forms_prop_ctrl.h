@@ -639,6 +639,38 @@ void    vb6_DTP_SimChange(void* hwnd);
 void    vb6_DTP_SimDropDown(void* hwnd);
 void    vb6_DTP_SimCloseUp(void* hwnd);
 
+// ===================== MonthView (ai/029 C29-MV-a) =====================
+//   VB6 MonthView 的窗口 + 样式 + 标量属性面，原生 SysMonthCal32（不加载 MSCOMCT2.OCX）。
+//   MultiSelect / ShowWeekNumbers / ShowToday 三位是样式位（ShowToday 与 MCS_NOTODAY **反**）；
+//   MaxSelCount 与五色一律真往返过控件。Date 型那三格（Value / SelStart / SelEnd）留 MV-b，
+//   MCN_SELCHANGE 那条事件（VB6 的 DateClick）留 MV-c。
+void    vb6_MV_Init(void* hwnd, int32_t rows, int32_t cols, int32_t maxSelCount);
+int32_t vb6_MV_GetMultiSelect(void* hwnd);
+void    vb6_MV_SetMultiSelect(void* hwnd, int32_t on);
+int32_t vb6_MV_GetShowWeekNumbers(void* hwnd);
+void    vb6_MV_SetShowWeekNumbers(void* hwnd, int32_t on);
+int32_t vb6_MV_GetShowToday(void* hwnd);
+void    vb6_MV_SetShowToday(void* hwnd, int32_t on);
+int32_t vb6_MV_GetMaxSelCount(void* hwnd);
+void    vb6_MV_SetMaxSelCount(void* hwnd, int32_t n);
+// 三条控件侧读数：前两条 = MCM_GETMINREQRECT（装下**一个**月要多大），第三条 =
+// MCM_GETCALENDARCOUNT（眼下真画了几个月）。都是 C3 扩展名，不冒充 VB6 属性。
+int32_t vb6_MV_MinReqWidth(void* hwnd);
+int32_t vb6_MV_MinReqHeight(void* hwnd);
+int32_t vb6_MV_GetMonthCount(void* hwnd);
+int32_t vb6_MV_GetBackColor(void* hwnd);
+void    vb6_MV_SetBackColor(void* hwnd, int32_t val);
+int32_t vb6_MV_GetForeColor(void* hwnd);
+void    vb6_MV_SetForeColor(void* hwnd, int32_t val);
+int32_t vb6_MV_GetTitleBackColor(void* hwnd);
+void    vb6_MV_SetTitleBackColor(void* hwnd, int32_t val);
+int32_t vb6_MV_GetTitleForeColor(void* hwnd);
+void    vb6_MV_SetTitleForeColor(void* hwnd, int32_t val);
+int32_t vb6_MV_GetTrailingForeColor(void* hwnd);
+void    vb6_MV_SetTrailingForeColor(void* hwnd, int32_t val);
+int32_t vb6_MV_GetMonthBackColor(void* hwnd);   // MCSC_MONTHBK（VB6 官方属性面里的第六格配色）
+void    vb6_MV_SetMonthBackColor(void* hwnd, int32_t val);
+
 #ifdef __cplusplus
 }
 #endif

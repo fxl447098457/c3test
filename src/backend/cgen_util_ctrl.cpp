@@ -88,6 +88,19 @@ Vb6Type CCodeGen::controlPropType(FrmControlType ctrlType, const std::string& pr
         if (p == "value" || p == "mindate" || p == "maxdate") return Vb6Type::Date;
         if (p == "hasdate") return Vb6Type::Long;
     }
+    if (ctrlType == FrmControlType::MonthView) {
+        // C29-MV-a: 同一口径 —— vb6_MV_Get* 的 getter 全是 int32_t（布尔按 VB6 的 -1/0 给，
+        // 色值是 COLORREF 那个 32 位），漏登记就会落到兜底那条按成员裸名查符号的路，
+        // 判成 Variant/String 就跟 C 层不匹配（SSTab1.Tab 那次 AV 的同族）。
+        // Value / SelStart / SelEnd 是 Date 型，由 MV-b 那格登记。
+        if (p == "multiselect" || p == "showweeknumbers" || p == "showtoday"
+            || p == "maxselcount" || p == "backcolor" || p == "forecolor"
+            || p == "titlebackcolor" || p == "titleforecolor" || p == "trailingforecolor"
+            || p == "monthbackcolor" || p == "minreqwidth" || p == "minreqheight"
+            || p == "monthcount") {
+            return Vb6Type::Long;
+        }
+    }
     if (ctrlType == FrmControlType::Toolbar) {
         // C29-5a: 同一口径 —— 这四条的 RTL getter 都是 int32_t, 判成 Variant/String
         // 就跟 C 层不匹配 (SSTab1.Tab 那次 AV 的同族)。
@@ -389,6 +402,26 @@ std::string CCodeGen::getControlPropReadFn(FrmControlType ctrlType, const std::s
         if (propLower == "visible") return "vb6_GetControlVisible";
         if (propLower == "enabled") return "vb6_GetControlEnabled";
         break;
+    // C29-MV-a: MonthView 读侧。样式三位 + MaxSelCount + 五色，全部直读控件；
+    // 三条 C3 扩展读数（MinReqWidth / MinReqHeight / MonthCount）是**控件侧**证据，
+    // 判据靠它们把"样式位写进去了"升级成"控件真按那位在画"。
+    case FrmControlType::MonthView:
+        if (propLower == "multiselect") return "vb6_MV_GetMultiSelect";
+        if (propLower == "showweeknumbers") return "vb6_MV_GetShowWeekNumbers";
+        if (propLower == "showtoday") return "vb6_MV_GetShowToday";
+        if (propLower == "maxselcount") return "vb6_MV_GetMaxSelCount";
+        if (propLower == "backcolor") return "vb6_MV_GetBackColor";
+        if (propLower == "forecolor") return "vb6_MV_GetForeColor";
+        if (propLower == "titlebackcolor") return "vb6_MV_GetTitleBackColor";
+        if (propLower == "titleforecolor") return "vb6_MV_GetTitleForeColor";
+        if (propLower == "trailingforecolor") return "vb6_MV_GetTrailingForeColor";
+        if (propLower == "monthbackcolor") return "vb6_MV_GetMonthBackColor";
+        if (propLower == "minreqwidth") return "vb6_MV_MinReqWidth";
+        if (propLower == "minreqheight") return "vb6_MV_MinReqHeight";
+        if (propLower == "monthcount") return "vb6_MV_GetMonthCount";
+        if (propLower == "visible") return "vb6_GetControlVisible";
+        if (propLower == "enabled") return "vb6_GetControlEnabled";
+        break;
     // C29-5a: Toolbar 的标量属性面。改之前这枚控件连窗口都没有 (被"ImageList || Toolbar
     // 走 CoCreateInstance"那一组扣住)，读一个 tb1.Visible 就是 C2065: vb6_hwnd_tb1 未声明。
     // ShowTips / TextStyle / AllowCustomize 的真值在 GWL_STYLE 上，Align 存窗口属性。
@@ -681,6 +714,23 @@ std::string CCodeGen::getControlPropWriteFn(FrmControlType ctrlType, const std::
         if (propLower == "hasdate") return "vb6_DTP_SetHasDate";
         if (propLower == "mindate") return "vb6_DTP_SetMinDate";
         if (propLower == "maxdate") return "vb6_DTP_SetMaxDate";
+        if (propLower == "visible") return "vb6_SetControlVisible";
+        if (propLower == "enabled") return "vb6_SetControlEnabled";
+        break;
+    // C29-MV-a: MonthView 写侧 (与读侧同一批)。样式那三位的 setter 是"尽力而为"—— 它们是
+    // 创建参数，运行期落不落地由夹具的读数说；MonthRows/MonthColumns 刻意不给写口（多月
+    // 平铺在原生里等于"窗口多大"，运行期改它得连带挪窗，那是另一格的事）。
+    case FrmControlType::MonthView:
+        if (propLower == "multiselect") return "vb6_MV_SetMultiSelect";
+        if (propLower == "showweeknumbers") return "vb6_MV_SetShowWeekNumbers";
+        if (propLower == "showtoday") return "vb6_MV_SetShowToday";
+        if (propLower == "maxselcount") return "vb6_MV_SetMaxSelCount";
+        if (propLower == "backcolor") return "vb6_MV_SetBackColor";
+        if (propLower == "forecolor") return "vb6_MV_SetForeColor";
+        if (propLower == "titlebackcolor") return "vb6_MV_SetTitleBackColor";
+        if (propLower == "titleforecolor") return "vb6_MV_SetTitleForeColor";
+        if (propLower == "trailingforecolor") return "vb6_MV_SetTrailingForeColor";
+        if (propLower == "monthbackcolor") return "vb6_MV_SetMonthBackColor";
         if (propLower == "visible") return "vb6_SetControlVisible";
         if (propLower == "enabled") return "vb6_SetControlEnabled";
         break;

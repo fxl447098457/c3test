@@ -1664,6 +1664,43 @@ if ($Category -in @("all", "run", "vbp")) {
         'vb6_ComGetObjectProp(vb6_hwnd_dt1, L"SimChange")',
         'CoCreateInstance'
     )
+    # ai/029 C29-MV-a: MonthView 换成原生 SysMonthCal32（D6：不碰 MSCOMCT2.OCX，32 位进不了 x64）。
+    # 22 条读数的分工：
+    #   MV1-MV4   创建样式进窗口（四枚各一种设计期组合：MultiSelect+MaxSelCount+多月 / 全默认 /
+    #             周号 / 不要今天），mv2 那条同时是"没写的不被继承"的对照
+    #   MV5-MV6   多月平铺问**控件自己**：MCM_GETCALENDARCOUNT 说 mv1 眼下画了 2 个月、mv2 画 1 个
+    #   MV7-MV10  MCM_GETMINREQRECT 的控件侧尺寸：周号加宽、今天那一行加高、多月不改单月的最小尺寸
+    #   MV11-MV17 六色逐格读写 + 改一格其余五格不动（MCSC_ 序号撞车的负控）+ 两枚控件各自一格
+    #   MV18-MV20 MaxSelCount 真往返过控件；**没挂 MCS_MULTISELECT 的那枚写不进去**（写完读回还是
+    #             原生默认的 1）—— 这一条比 GWL_STYLE 硬，问的是控件按没按那位办事
+    #   MV21      运行期改 ShowToday：样式位落得下**且**控件的最小尺寸跟着变（与 DTPicker 那两位
+    #             被抹回去相反，MV 这一族运行期是有效的 —— 两枚控件的边界各量各的，不互相外推）
+    #   MV22      通用属性面 + 两枚不串台
+    # 本机读数：x64 与 x86 各 22/22；原始读数（`R=` 那行，针之外）：默认上限 1 / 写 9 之后仍 1，
+    # 单月最小尺寸 218×178，带周号 242 宽，去掉今天那一行 159 高。
+    $mvNeedles = @("CTRLMONTHVIEW-DONE") + (1..22 | ForEach-Object { "MV$_=Y" })
+    Test-Vbp "ctrlmonthview" "$Tests\ctrlmonthview\MvfApp.vbp" $mvNeedles
+    Test-Vbp "ctrlmonthview_x86" "$Tests\ctrlmonthview\MvfApp.vbp" $mvNeedles -Arch "x86"
+    # 发码两面都钉：类名 + 四条创建样式位逐枚钉（1409286146 = 基+MULTISELECT / 1409286148 = 基+
+    # WEEKNUMBERS / 1409286160 = 基+NOTODAY，注意 ShowToday 与原生那位是**反**的：.frm 写 False
+    # 才挂上去），设计期 Init 连多月与 MaxSelCount 一起钉；反面断这枚控件不许再走 COM 兜底。
+    Test-EmitcShape "mv_emitc_shape" @("$Tests\ctrlmonthview\MvfApp.vbp") @(
+        '"SysMonthCal32", "",',
+        '1409286146L, 0L,',
+        '1409286148L, 0L,',
+        '1409286160L, 0L,',
+        'vb6_MV_Init((void*)vb6_hwnd_mv1, 1, 2, 7);',
+        'vb6_MV_Init((void*)vb6_hwnd_mv2, 1, 1, -999);',
+        'vb6_MV_SetMaxSelCount(vb6_hwnd_mv1, 3);',
+        'vb6_MV_SetShowToday(vb6_hwnd_mv4, (-1));',
+        'vb6_MV_GetMonthCount(vb6_hwnd_mv2'
+    )
+    Test-EmitcAbsent "mv_emitc_no_com_fallback" @("$Tests\ctrlmonthview\MvfApp.vbp") @(
+        'vb6_ComGetObjectProp(vb6_hwnd_mv1',
+        'vb6_ComSetObjectProp(vb6_hwnd_mv2',
+        'vb6_ComGetObjectProp(vb6_hwnd_mv3, L"MaxSelCount")',
+        'CoCreateInstance'
+    )
     # ai/029 C29-5a: Toolbar 换成原生 ToolbarWindow32（D6：不碰 MSCOMCTL.OCX）。
     # 改之前这枚控件**连窗口都没有**：controlTypeToWin32Class 缺格，而且被"ImageList || Toolbar
     # 走 CoCreateInstance"那一组扣住 (直接 continue) => vb6_hwnd_tb1 压根不声明 —— 实测读一个

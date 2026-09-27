@@ -216,6 +216,26 @@
                 if (dtUp  != -999 && dtUp  != 0) style |= 0x0001L;   // DTS_UPDOWN
                 break;
             }
+            case FrmControlType::MonthView: {
+                // C29-MV-a: SysMonthCal32 的三位样式一律从 .frm 立进创建参数。
+                //   MultiSelect=→MCS_MULTISELECT(0x2)  ShowWeekNumbers=→MCS_WEEKNUMBERS(0x4)
+                //   ShowToday=False→MCS_NOTODAY(0x10)  —— 注意 ShowToday 与原生那位是**反**的，
+                // 所以只有明确写 False 才挂 NOTODAY；没写就不动（原生默认显示 today 那一行）。
+                // 不加 WS_BORDER：月历自带主题边框，再套一圈就是两道框（与 DTPicker 同因）。
+                createCaption = "";
+                auto mvProp = [&](const char* key, int& slot) {
+                    auto it = ctrl.properties.find(key);
+                    if (it != ctrl.properties.end()) slot = (int)it->second.intValue;
+                };
+                int mvMulti = -999, mvWeek = -999, mvToday = -999;
+                mvProp("MultiSelect", mvMulti);
+                mvProp("ShowWeekNumbers", mvWeek);
+                mvProp("ShowToday", mvToday);
+                if (mvMulti != -999 && mvMulti != 0) style |= 0x0002L;
+                if (mvWeek  != -999 && mvWeek  != 0) style |= 0x0004L;
+                if (mvToday != -999 && mvToday == 0) style |= 0x0010L;
+                break;
+            }
             case FrmControlType::Toolbar:
                 // C29-5a: 原生 ToolbarWindow32 的默认观感两条 + **两位绝不能省**:
                 //   CCS_NORESIZE(0x4) | CCS_NOPARENTALIGN(0x8) —— 不给这两位，控件会无视
@@ -472,6 +492,31 @@
                 esc += ch;
             }
             c_.emitLine("vb6_DTP_Init((void*)" + dtHwnd + ", L\"" + esc + "\");");
+        }
+
+        // C29-MV-a: MonthView 设计期的多月平铺。原生没有"行/列"这条消息 —— 平铺几个月完全
+        // 由**窗口矩形多大**决定（CommCtrl.h 6361 行那段注释就是这么教的），所以 Init 按
+        // MonthRows×MonthColumns 把矩形乘出来、交给 MCM_SIZERECTTOMIN 撑到真装得下，再挪一次窗。
+        // 1×1（或 .frm 没写）时 RTL 直接返回，发码形状照旧稳定 —— emitc 断言要看这一条存在。
+        if (ctrl.controlType == FrmControlType::MonthView) {
+            std::string mvLower = ctrl.controlName;
+            std::transform(mvLower.begin(), mvLower.end(), mvLower.begin(), ::tolower);
+            std::string mvHwnd = knownControlArrays_.count(mvLower) ?
+                ("vb6_CtrlArr_GetAt(&vb6_arr_" + cIdent(ctrl.controlName) + ", " +
+                 std::to_string(ctrl.index >= 0 ? ctrl.index : 0) + ")") :
+                ("vb6_hwnd_" + cIdent(ctrl.controlName));
+            int mvRows = 1, mvCols = 1, mvMax = -999;
+            auto mvIt = ctrl.properties.find("MonthRows");
+            if (mvIt != ctrl.properties.end()) mvRows = (int)mvIt->second.intValue;
+            mvIt = ctrl.properties.find("MonthColumns");
+            if (mvIt != ctrl.properties.end()) mvCols = (int)mvIt->second.intValue;
+            mvIt = ctrl.properties.find("MaxSelCount");
+            if (mvIt != ctrl.properties.end()) mvMax = (int)mvIt->second.intValue;
+            if (mvRows < 1) mvRows = 1;
+            if (mvCols < 1) mvCols = 1;
+            c_.emitLine("vb6_MV_Init((void*)" + mvHwnd + ", "
+                        + std::to_string(mvRows) + ", " + std::to_string(mvCols) + ", "
+                        + std::to_string(mvMax) + ");");
         }
 
         // P20-40: StatusBar 设计期 —— Init 一次, 再按 Panels 集合逐项灌进去。
