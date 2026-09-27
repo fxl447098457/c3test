@@ -428,10 +428,55 @@ void vb6_RTB_SetSelHangingIndent(void* hwnd, int32_t twips) {
 // 而不是"什么都不做" —— 原生自己的默认是**不折行**，与 VB6 相反（见上面那段）。
 // 哨兵为什么不是 -1：VB6 的布尔在 .frm 里就序列化成 -1 = True，用 -1 当"未写"会把
 // "写着 True 的那一条"读成没写（本线 5a/8a 同一口径）。
+// 事件面（C29-RT-d）：ENM_SELCHANGE **必须**在这里显式开 —— 三件事都是探针量出来的
+// （.build\rtdprobe5.c，六种"建窗时机 × 掩码写法"组合各跑一份，读数 .build\rtdprobe5_c*_s*.txt）：
+//   ① 建好不动掩码 ⇒ 选区变化一条通知都不发（s0 三格全 0）；Msftedit 的默认事件掩码是**空**的。
+//   ② 整枚 32 位掩码塞 wParam、lParam 传 0 ⇒ 也发不出来（s1 与 s0 逐字相同）。原生这条只认
+//      wParam 的**低 16 位**，高 16 位要靠 lParam 那个指针进出 —— 而 ENM_SELCHANGE = 0x00080000
+//      恰好整枚都在高位上，写错这一句就是"永远收不到 SelChange"。
+//   ③ 与之对照，文本变化的 EN_UPDATE(0x0400=1024) **不受掩码管**：s0/s1 里 WM_SETTEXT 照样发它。
+//      （也别指望老的那条 EN_CHANGE=768：六份读数里它一次都没出现过。）
+// 这条写在 Init 里而不是各 setter 里：掩码是控件的常驻状态，且这一刻还在 formLoading 挡派发
+// （见 cgen 那条 `if (vb6_formLoading_…) break;`），它顺手 provoke 的那一条 1024 会被丢掉。
 void vb6_RTB_Init(void* hwnd, int32_t wordWrap, int32_t readOnly) {
     if (!hwnd) return;
     vb6_RTB_SetWordWrap(hwnd, wordWrap == -999 ? -1 : wordWrap);
     if (readOnly != -999) vb6_RTB_SetReadOnly(hwnd, readOnly);
+    {
+        DWORD hi = (DWORD)(ENM_SELCHANGE >> 16);   /* 0x00080000 >> 16 = 8，进的是掩码高位 */
+        SendMessageW((HWND)hwnd, EM_SETEVENTMASK,
+                     (WPARAM)(DWORD)(ENM_CHANGE | ENM_UPDATE), (LPARAM)&hi);
+    }
+}
+
+// 判据专用（C29-RT-d，与 vb6_MV_SimDateClick / vb6_DTP_Sim* 同先例）：替原生控件把一条
+// **真**通知发到父窗，让"认来源 → 按 code 分流 → 调处理器"三段派发被真的消息喂一遍。
+// 为什么这条事件需要它、而 Change 不需要：EN_SELCHANGE 在**同一份产物、同一个夹具**上都不
+// 稳定 —— 三次连跑里 1 次走 WM_NOTIFY/1794、2 次走 WM_COMMAND/1815（读数 .build\rtdmin_out\tr_*.txt，
+// 裸码由临时探针打出来），程序化 EM_EXSETSEL 有时一条都不发。也就是说 SelChange 的
+// "原生自发"这一路今天给不出可依赖的判据，只能自己造通知；Change 那一路（EN_UPDATE，见夹具
+// RT-d 的说明）是稳的，判据走真属性写。
+// code = 1794 → WM_NOTIFY（负载 SELCHANGE：选区现值从 EM_EXGETSEL 拿）；
+// 其余（1815 那一族）→ WM_COMMAND，wParam 高字 = code、lParam = 控件自己，与裸码一致。
+void vb6_RTB_SimNotify(void* hwnd, int32_t code) {
+    HWND h = (HWND)hwnd;
+    HWND p;
+    INT_PTR id;
+    if (!h) return;
+    p = GetParent(h);
+    if (!p) return;
+    id = (INT_PTR)GetWindowLongPtrW(h, GWLP_ID);
+    if (code == EN_SELCHANGE) {
+        SELCHANGE sc;
+        ZeroMemory(&sc, sizeof(sc));
+        sc.nmhdr.hwndFrom = h;
+        sc.nmhdr.idFrom = (UINT_PTR)id;
+        sc.nmhdr.code = (UINT)code;
+        SendMessageW(h, EM_EXGETSEL, 0, (LPARAM)&sc.chrg);
+        SendMessageW(p, WM_NOTIFY, (WPARAM)id, (LPARAM)&sc);
+    } else {
+        SendMessageW(p, WM_COMMAND, MAKEWPARAM((WORD)id, (WORD)code), (LPARAM)h);
+    }
 }
 
 
@@ -556,7 +601,7 @@ void vb6_RTB_SetTextRTF(void* hwnd, void* bstr) {
     if (!a) return;
     WideCharToMultiByte(CP_ACP, 0, w, -1, a, an, NULL, NULL);
     /* 流尾**要带上那个 NUL**：探针把同一份 RTF 的尾 NUL 剪掉就五组全成空控件，
-       带着就五组全成（.buildtprobe7.ps1 的 A..E，母本 220 字节含 NUL、灌完回读 219）
+       带着就五组全成（.build\rtprobe7.ps1 的 A..E，母本 220 字节含 NUL、灌完回读 219）
        ⇒ SF_RTF 的解析器要看见结尾的 0 才收尾。 */
     vb6_RtbStreamIn((HWND)hwnd, SF_RTF, a, (size_t)an);
     free(a);

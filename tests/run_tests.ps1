@@ -1785,7 +1785,7 @@ if ($Category -in @("all", "run", "vbp")) {
     # PFM_OFFSETINDENT 会把整段推走（实测 720 → 960），不是悬挂。
     # BASE（本批之前的编译器）同一件夹具 = 20 绿 / 38 红：RT33-RT58 里 16 条当场红，剩下 10 条是
     # "应当为 0 / 应当相等"那类反向针（什么都不实现也满足它们）—— 与 DT/MV 每次的分布同型。
-    $rtNeedles = @("CTRLRICHTEXT-DONE") + (1..79 | ForEach-Object { "RT$_=Y" })
+    $rtNeedles = @("CTRLRICHTEXT-DONE") + (1..89 | ForEach-Object { "RT$_=Y" })
     Test-Vbp "ctrlrichtextbox" "$Tests\ctrlrichtextbox\RtfApp.vbp" $rtNeedles
     Test-Vbp "ctrlrichtextbox_x86" "$Tests\ctrlrichtextbox\RtfApp.vbp" $rtNeedles -Arch "x86"
     # 发码正面：类名 + 四位创建样式逐枚钉（1409286148 = 基+ES_MULTILINE，rt2 全默认；
@@ -1831,7 +1831,17 @@ if ($Category -in @("all", "run", "vbp")) {
         'vb6_RTB_SetSelIndent(vb6_hwnd_rt2, 720);',
         'vb6_RTB_SetSelRightIndent(vb6_hwnd_rt2, 1440);',
         'vb6_RTB_SetSelHangingIndent(vb6_hwnd_rt2, 360);',
-        'vb6_RTB_GetSelHangingIndent(vb6_hwnd_rt2'
+        'vb6_RTB_GetSelHangingIndent(vb6_hwnd_rt2',
+        # C29-RT-d: 两条事件的派发形状。Change 走 WM_COMMAND/1024(EN_UPDATE，**不是** EDIT 那
+        # 条 768)；SelChange 两条通道各一条 arm（WM_COMMAND/1815 与 WM_NOTIFY/1794），
+        # 判据侧 SimNotify 的发码形状也钉死 —— 标记没被语句路消费掉的症状就是运行期一声不响。
+        'if (id == 100 && code == 1024) {',
+        'if (id == 102 && code == 1024) {',
+        'if (id == 100 && code == 1815) {',
+        'if (pNM42->code == 1794 && (void*)pNM42->hwndFrom == vb6_hwnd_rt1) {',
+        'extern void vb6_rt1_Change(); vb6_rt1_Change();',
+        'extern void vb6_rt3_SelChange(); vb6_rt3_SelChange();',
+        '{ vb6_RTB_SimNotify((void*)vb6_hwnd_rt1, (int32_t)1794); }'
     )
     # 反面：这枚控件不许再走 COM 后期绑定；而 ScrollBars 那四位**不许有写口** ——
     # 事后写只有外观、没有量程，发一条"写得动但什么都不改"的 setter 比不发更难查。
@@ -1846,6 +1856,8 @@ if ($Category -in @("all", "run", "vbp")) {
         'vb6_ComGetObjectProp(vb6_hwnd_rt4, L"TextRTF")',
         'vb6_ComSetObjectProp(vb6_hwnd_rt3, L"TextRTF"',
         'vb6_ComCall(vb6_hwnd_rt3, L"LoadFile"',
+        # RT-d：SimNotify 也不许落回"把 HWND 当 IDispatch"那条假路
+        'vb6_ComCall(vb6_hwnd_rt1, L"SimNotify"',
         'vb6_RTB_SetScrollBars',
         # RT-b：格式面也不许退回 COM 兜底（一条都不许）
         'vb6_ComGetObjectProp(vb6_hwnd_rt2, L"SelBold")',

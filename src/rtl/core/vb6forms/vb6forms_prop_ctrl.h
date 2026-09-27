@@ -697,6 +697,7 @@ void    vb6_MV_SimDateClick(void* hwnd, double serial);
 //   类注册靠 vb6_ComCtl_Init 里那次 LoadLibraryW（不在 comctl32 的 ICC_* 体系里）。
 //   Sel* 的格式面（粗/斜/颜色/字体/对齐/缩进）留 RT-b，TextRTF/Find 留 RT-c，事件留 RT-d。
 void    vb6_RTB_Init(void* hwnd, int32_t wordWrap, int32_t readOnly);  // 设计期两条；-999 = 没写
+void    vb6_RTB_SimNotify(void* hwnd, int32_t code);   // 判据专用：替控件发一条真通知（RT-d）
 int32_t vb6_RTB_GetSelStart(void* hwnd);
 void    vb6_RTB_SetSelStart(void* hwnd, int32_t v);
 int32_t vb6_RTB_GetSelLength(void* hwnd);

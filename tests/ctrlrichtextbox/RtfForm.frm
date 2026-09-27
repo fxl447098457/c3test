@@ -44,6 +44,11 @@ Begin VB.Form RtfForm
       Top             =   2160
       Width           =   4200
    End
+   Begin VB.Timer evtTimer 
+      Interval        =   200
+      Left            =   4680
+      Top             =   3600
+   End
 End
 Attribute VB_Name = "RtfForm"
 Attribute VB_GlobalNameSpace = False
@@ -57,7 +62,7 @@ Option Explicit
 '
 ' 本格范围 = 窗口 + 创建样式 + 文本/选区/只读/上限/滚动条/换行面。
 ' Sel* 的**格式**面（粗斜体下划线删除线、颜色、字体、字号、对齐、缩进）留 RT-b；
-' TextRTF + LoadFile/SaveFile + Find 留 RT-c；Change / SelChange 两条事件留 RT-d。
+' TextRTF + LoadFile/SaveFile + Find 留 RT-c；Change / SelChange 两条事件 = RT-d（文件末尾）。
 '
 ' 四枚控件的分工：rt1 = 设计期四位齐全（两种滚动条 + 换行关 + 边框 + 初值文本）、
 ' rt2 = 全默认（"原生自己是什么"的对照，也是文本/选区那一段的试验台）、
@@ -79,6 +84,14 @@ Option Explicit
 '     抬到了文本长度（读数 20 -> 30），EM_REPLACESEL 同样穿过去。所以 RT27 钉的是"赋值会突破
 '     上限"这条原生行为（VB6 的 OCX 在这里是截断），不是假装它钳得住。默认读数折 0 = "不限"
 '     （原生默认上限实测就是 32767，不是天文数字）。
+
+' RT-d 的事件计数：模块级 —— 事件处理器是窗体过程，看不见 Form_Load 里的局部变量。
+' 判据一律比**增量**，不比绝对值：载入那半截往四枚控件里回写过多少文本，本批不想知道。
+Private gChg1 As Long
+Private gSel1 As Long
+Private gChg3 As Long
+Private gSel3 As Long
+Private gLenAt As Long
 
 Private Function TF(ByVal ok As Boolean) As String
     If ok Then TF = "Y" Else TF = "N"
@@ -405,6 +418,103 @@ Private Sub Form_Load()
     Debug.Print "B=" & rt1.BorderStyle & "/" & rt2.BorderStyle & "/" & rt3.BorderStyle
     Debug.Print "F=" & rt2.SelFontSize & "/" & rt2.SelFontName & "/" & rt2.SelColor _
                 & "/" & rt2.SelAlignment & "/" & rt2.SelIndent & "/" & Len(rt2.Text)
+
+    ' DONE 与 Unload 在 evtTimer_Timer —— 事件判据得等窗体载入完再跑（照 C29-DT-c 的先例）。
+End Sub
+
+' ---------------- C29-RT-d: Change / SelChange 两条事件 ----------------
+' 为什么要 Timer：WM_COMMAND / WM_NOTIFY 两段派发开头都有一句 `if (vb6_formLoading_) break;`
+' —— 载入期间立起来的那些控件写文本会发通知，但那一会儿一律丢掉，事件判据只能在载入之后跑。
+' 为什么要 DoEvents：原生这枚把文本变更通知（EN_UPDATE=1024）**排在重绘之后**，
+' `rt1.Text = x` 当下计数不动、过一次消息循环才 +1（三次连跑的裸码读数 （裸码读数见 .build/rtdmin_out 里的 tr_1.txt 至 tr_3.txt，
+' 三次跑逐行对照：通知都到了，只是通道不同）。
+' 这与 VB6 那颗 OCX 的同步 raise 不同，RT82/RT83 就是钉这个时机差的。
+' SelChange 反过来：它**不能**靠真属性写来当判据 —— 同一条"选区变了"，产物里连跑三次
+' 1 次走 WM_NOTIFY/1794、2 次走 WM_COMMAND/1815，还有一次一条都不发（同一份 exe，无随机输入）。
+' 拿它写计数针就是台后翻红，所以那两条 arm 各用 vb6_RTB_SimNotify 喂一条**真**通知钉住
+' （判据专用助手，与 DT-c 的 SimChange / MV-c 的 SimDateClick 同先例）。
+Private Sub evtTimer_Timer()
+    Static done As Integer
+    Dim c0 As Long, c3 As Long, d As Long
+    Dim s0 As Long, s3 As Long, e2 As Long, a1 As Long
+    If done Then Exit Sub
+    done = 1
+
+    c0 = gChg1: c3 = gChg3: s0 = gSel1: s3 = gSel3
+    ' 增量起点打在针之外：判据红了好分辨是"没发"还是"多发了"
+    Debug.Print "E=" & c0 & "/" & c3 & "/" & s0 & "/" & s3
+
+    ' --- 80..82 时机：写 Text 的当下不发，过一轮消息循环才发，而且发时文本已是新那份 ---
+    rt1.Text = "post-load-write"
+    Debug.Print "RT80=" & TF(gChg1 = c0)
+    DoEvents
+    Debug.Print "RT81=" & TF(gChg1 - c0 = 1)
+    Debug.Print "RT82=" & TF(gLenAt = 15)
+    ' --- 83: 同值再写仍算"变了"（原生不比对旧值，VB6 那条赋值同样发）---
+    d = gChg1
+    rt1.Text = "post-load-write"
+    DoEvents
+    Debug.Print "RT83=" & TF(gChg1 - d = 1)
+    ' --- 84: SelText 赋值走 EM_REPLACESEL，那一条也发 Change ---
+    d = gChg1
+    rt1.SelStart = 0
+    rt1.SelLength = 4
+    rt1.SelText = "POST"
+    DoEvents
+    ' 这里刻意不写 Left(rt1.Text, 4)：窗体模块里 Left(...) 会被抢去当**窗体的 Left 属性**
+    ' （台账 #68 那条未修缺陷，本批踩实过一次：写出来当场 0xC0000005），换成 InStr 问前缀。
+    Debug.Print "RT84=" & TF(gChg1 - d = 1 And InStr(rt1.Text, "POST") = 1)
+    ' --- 85: TextRTF 赋值走 EM_STREAMIN，那条发不发 Change（原始读数 E2）---
+    d = gChg1
+    rt1.TextRTF = rt3.TextRTF
+    DoEvents
+    e2 = gChg1 - d
+    Debug.Print "E2=" & e2
+    ' --- 85: 只读那枚（rt3）程序化写照样发；认来源 —— rt1 的账不许记到 rt3 头上 ---
+    d = gChg3
+    rt3.Text = "readonly-still-notifies"
+    DoEvents
+    Debug.Print "RT85=" & TF(gChg3 - d = 1 And gChg1 - c0 = 3 + e2)
+    ' --- 87..88 两条 arm 各钉一条：SimNotify 造的是真通知、走真派发 ---
+    d = gSel1
+    rt1.SimNotify(1794)
+    Debug.Print "RT86=" & TF(gSel1 - d = 1)
+    rt1.SimNotify(1815)
+    Debug.Print "RT87=" & TF(gSel1 - d = 2)
+    ' --- 88: 认来源 —— 通知从 rt3 发出，rt1 的处理器一次都不该动 ---
+    ' 两头都不夹 DoEvents：SimNotify 是同步发通知的，而原生自发的那几条只有过消息循环才落地
+    ' （E3 里 gSel1 已经涨到 7 就是这些自发通知），夹一次泵就把"别人家的"通知算进这一格。
+    d = gSel3
+    a1 = gSel1
+    rt3.SimNotify(1794)
+    rt3.SimNotify(1815)
+    Debug.Print "RT88=" & TF(gSel3 - d = 2 And gSel1 = a1)
+    ' --- 89: 与文本无关的属性写不该惊动 Change ---
+    d = gChg1
+    rt1.MaxLength = 200
+    DoEvents
+    Debug.Print "RT89=" & TF(gChg1 - d = 0)
+    Debug.Print "E3=" & (gChg1 - c0) & "/" & (gSel1 - s0) & "/" & (gChg3 - c3) & "/" & (gSel3 - s3)
+
     Debug.Print "CTRLRICHTEXT-DONE"
     Unload Me
+End Sub
+
+' 两条处理器在 VB6 里都没有参数（Sub RichTextBox1_Change() / _SelChange()）——
+' 所以发出来的回调形参表是空的，与 DT-c 那三条同形、与 MV-c 那条带 double 的不同。
+Private Sub rt1_Change()
+    gChg1 = gChg1 + 1
+    gLenAt = Len(rt1.Text)
+End Sub
+
+Private Sub rt1_SelChange()
+    gSel1 = gSel1 + 1
+End Sub
+
+Private Sub rt3_Change()
+    gChg3 = gChg3 + 1
+End Sub
+
+Private Sub rt3_SelChange()
+    gSel3 = gSel3 + 1
 End Sub

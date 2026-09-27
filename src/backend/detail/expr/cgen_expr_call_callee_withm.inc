@@ -405,7 +405,8 @@
             itRtb->second == FrmControlType::RichTextBox) {
             std::string mRtb = comMemberName_;
             for (auto& chR : mRtb) chR = (char)::tolower((unsigned char)chR);
-            if (mRtb == "loadfile" || mRtb == "savefile" || mRtb == "find") {
+            if (mRtb == "loadfile" || mRtb == "savefile" || mRtb == "find"
+                || mRtb == "simnotify") {
                 std::string hwndRtb = cIdent(knownFormControlOriginalNames_.count(comObjExpr_)
                     ? knownFormControlOriginalNames_[comObjExpr_] : comObjExpr_);
                 // 标记必须**先清掉再发实参**：留着的话实参里任何一个字面量都会被上面那套
@@ -423,6 +424,16 @@
                     argRtb.push_back(lastExpr_);
                 }
                 std::string aTxt = argRtb.size() > 0 ? argRtb[0] : std::string("L\"\"");
+                if (mRtb == "simnotify") {
+                    // 判据专用的一条（RT-d，与 DT-c 的 SimChange / MV-c 的 SimDateClick 同先例）：
+                    // 造一条**真**通知发给父窗，把"认来源 + 分流 + 调用"三段派发都喂一遍。
+                    // 这里非 VB6 语义，不进手册的方法表。
+                    c_.emitLine("{ vb6_RTB_SimNotify((void*)vb6_hwnd_" + hwndRtb + ", (int32_t)"
+                                + (argRtb.size() > 0 ? argRtb[0] : std::string("1794")) + "); }"
+                                "  /* RichTextBox.SimNotify (判据专用, 非 VB6) */");
+                    lastExpr_ = "0";
+                    return;
+                }
                 if (mRtb == "find") {
                     lastExpr_ = "vb6_RTB_Find((void*)vb6_hwnd_" + hwndRtb + ", " + aTxt
                               + ", " + (argRtb.size() > 1 ? argRtb[1] : std::string("-1"))

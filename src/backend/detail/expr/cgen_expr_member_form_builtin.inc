@@ -343,7 +343,8 @@
                 if (itCtrl->second == FrmControlType::RichTextBox) {
                     std::string memLower = node.memberName;
                     std::transform(memLower.begin(), memLower.end(), memLower.begin(), ::tolower);
-                    if (memLower == "loadfile" || memLower == "savefile" || memLower == "find") {
+                    if (memLower == "loadfile" || memLower == "savefile" || memLower == "find"
+                        || memLower == "simnotify") {
                         comObjExpr_ = objLower;
                         comMemberName_ = memLower;
                         isComMarker_ = true;
