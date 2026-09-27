@@ -604,6 +604,16 @@ void    vb6_DTP_Init(void* hwnd, const wchar_t* customFormat);
 // C3 扩展（不是 VB6 属性）：DTM_GETIDEALSIZE 问控件自己算的"装得下当前格式"的宽度，
 // 用来把"格式位真选中了哪一档"从"我们自己的掩码读数"换成控件侧读数。
 int32_t vb6_DTP_IdealWidth(void* hwnd);
+// C29-DT-b：Date 型值面。VB 的 Date 在 C3 里就是 double 序列号，所以签名一律 double。
+// HasDate 是本项目的扩展读数（原生 GDT_NONE 那一态在 VB6 是 Value = Null，double 装不了 Null）。
+double  vb6_DTP_GetValue(void* hwnd);
+void    vb6_DTP_SetValue(void* hwnd, double serial);
+int32_t vb6_DTP_HasDate(void* hwnd);
+void    vb6_DTP_SetHasDate(void* hwnd, int32_t on);
+double  vb6_DTP_GetMinDate(void* hwnd);
+void    vb6_DTP_SetMinDate(void* hwnd, double serial);
+double  vb6_DTP_GetMaxDate(void* hwnd);
+void    vb6_DTP_SetMaxDate(void* hwnd, double serial);
 int32_t vb6_DTP_GetFormat(void* hwnd);
 void    vb6_DTP_SetFormat(void* hwnd, int32_t val);
 wchar_t* vb6_DTP_GetCustomFormat(void* hwnd);

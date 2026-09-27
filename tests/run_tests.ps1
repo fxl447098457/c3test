@@ -1607,13 +1607,15 @@ if ($Category -in @("all", "run", "vbp")) {
     #   DT12-DT14 CustomFormat 与 dtpCustom 那一位（原生只有 DTM_SETFORMATW、没有 Get 对称项 ⇒ 串自存）
     #   DT15-DT21 下拉月历五色：逐格读回 + 改一格其余四格不动（序号撞车的负控）+ 两枚控件各自一格
     #   DT22-DT24 设计期 CustomFormat 那条字符串路（.frm 里带引号 → 去引号 → 当 C 字面量发）
+    #   DT25-DT36（C29-DT-b）Date 值面：Value/MinDate/MaxDate 往返、改一端不动另一端、越界被控件拒绝
+    #     （值保持原样，不是钳到边界）、以及未勾那一态（原生仍回填内部日期 ⇒ GetValue 认返回标志回 0）
     # 两条量出来的口径（原文写在夹具头注释里）：① CheckBox / UpDown 只能在**创建时**给（子窗口
     # 的创建参数，事后写 GWL_STYLE 会被控件抹回 —— DT11 就是钉这条边界的针，做成真运行期切换时
     # 它必须翻红）；Format 切档运行期倒是有效（DT9/DT10）。② 光读 GWL_STYLE 会自洽地假绿（SDK 的
     # DTS_TIMEFORMAT=0x9 自带 bit0=UPDOWN），所以格式类判据一律配一条 DTM_GETIDEALSIZE 控件侧读数。
     # 本机读数：x64 与 x86 各 24/24（宽度 143/64/95/121 两架构逐字相同）；
     # 拿修复前的编译器（c298c_base_C3.exe）跑同一件夹具 = 19 红 / 2 绿，红的正是样式与属性那一批。
-    $dtNeedles = @("CTRLDATETIME-DONE") + (1..24 | ForEach-Object { "DT$_=Y" })
+    $dtNeedles = @("CTRLDATETIME-DONE") + (1..36 | ForEach-Object { "DT$_=Y" })
     Test-Vbp "ctrldatetime" "$Tests\ctrldatetime\DtfApp.vbp" $dtNeedles
     Test-Vbp "ctrldatetime_x86" "$Tests\ctrldatetime\DtfApp.vbp" $dtNeedles -Arch "x86"
     # 发码面两面都钉：创建样式位逐枚钉（1409286150 = 长日期+复选框；1409286153 = 时间位+UpDown 位，
@@ -1625,11 +1627,18 @@ if ($Category -in @("all", "run", "vbp")) {
         '1409286153L, 0L,',
         'vb6_DTP_Init((void*)vb6_hwnd_dt4, L"yyyy-MM-dd HH:mm");',
         'vb6_DTP_SetCheckBox(vb6_hwnd_dt2, (-1));',
-        'vb6_DTP_SetCustomFormat(vb6_hwnd_dt2, vb6_BSTR_FromStr(L"yyyy-MM-dd"));'
+        'vb6_DTP_SetCustomFormat(vb6_hwnd_dt2, vb6_BSTR_FromStr(L"yyyy-MM-dd"));',
+        # C29-DT-b：Date 走的是**裸 double 变量**（`Dim d As Date` 发成 `double d`），
+        # 不经过任何装箱 —— 这条针就是别让值面哪天退回 VARIANT 形状而没人察觉。
+        'vb6_DTP_SetValue(vb6_hwnd_dt2, dReq);',
+        'vb6_DTP_GetValue(vb6_hwnd_dt2',
+        'vb6_DTP_SetHasDate(vb6_hwnd_dt1, 0);'
     )
     Test-EmitcAbsent "dt_emitc_no_com_fallback" @("$Tests\ctrldatetime\DtfApp.vbp") @(
         'vb6_ComGetObjectProp(vb6_hwnd_dt1',
         'vb6_ComSetObjectProp(vb6_hwnd_dt1',
+        # DT-b 的 Value 也不许再走 COM 兜底（那正是它改之前整枚控件的默认下场）
+        'vb6_ComGetObjectProp(vb6_hwnd_dt2, L"Value")',
         'CoCreateInstance'
     )
     # ai/029 C29-5a: Toolbar 换成原生 ToolbarWindow32（D6：不碰 MSCOMCTL.OCX）。

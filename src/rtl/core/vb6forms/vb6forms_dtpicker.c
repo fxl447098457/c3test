@@ -222,6 +222,150 @@ void    vb6_DTP_SetCalendarTitleBackColor(void* hwnd, int32_t v)    { vb6_DtpSet
 int32_t vb6_DTP_GetCalendarTitleForeColor(void* hwnd)   { return vb6_DtpGetColor(hwnd, VB6_DTP_MC_TITLETEXT); }
 void    vb6_DTP_SetCalendarTitleForeColor(void* hwnd, int32_t v)    { vb6_DtpSetColor(hwnd, VB6_DTP_MC_TITLETEXT, v); }
 
+// ---------------- Value / MinDate / MaxDate（C29-DT-b）----------------
+// VB 的 Date 在 C3 里就是 double 序列号（`Dim d As Date` 发成 `double d`，`Now` 直接回 double，
+// 实测见 029 §九 本格），所以这三个属性的 C 签名一律 double <-> 原生 SYSTEMTIME，
+// 换算用 oleaut32 那一对现成的 VariantTimeToSystemTime / SystemTimeToVariantTime
+// （RTL 里早有直接调用先例：vb6rtl_format.c:91）。
+//
+// 勾掉复选框那一态（原生 GDT_NONE）在 VB6 里是 `Value = Null`。本项目不能拿 double 装 Null，
+// 于是拆成两条读数：Value 在未勾时回 0，另开一条本项目扩展 `HasDate`（-1/0）问"到底有没有值"。
+#ifndef DTM_GETSYSTEMTIME
+#define DTM_GETSYSTEMTIME           (0x1000 + 1)
+#endif
+#ifndef DTM_SETSYSTEMTIME
+#define DTM_SETSYSTEMTIME           (0x1000 + 2)
+#endif
+#ifndef DTM_GETRANGE
+#define DTM_GETRANGE                (0x1000 + 3)
+#endif
+#ifndef DTM_SETRANGE
+#define DTM_SETRANGE                (0x1000 + 4)
+#endif
+#ifndef GDTR_MIN
+#define GDTR_MIN                    0x0001
+#endif
+#ifndef GDTR_MAX
+#define GDTR_MAX                    0x0002
+#endif
+#ifndef GDT_ERROR
+#define GDT_ERROR                   (DWORD)-1
+#endif
+#ifndef GDT_VALID
+#define GDT_VALID                   0
+#endif
+#ifndef GDT_NONE
+#define GDT_NONE                    1
+#endif
+
+static void vb6_DtpZero(SYSTEMTIME* st) { memset(st, 0, sizeof(*st)); }
+
+// SYSTEMTIME -> VB Date。原生月历的取值域比 VB 的 Date 下限宽（1601 起 vs 100 起），
+// 换算失败或出界时回 0 而不是负数 —— 负数在 VB 侧是非法 Date，会把"问不出"伪装成"一个怪值"。
+static double vb6_DtpToSerial(const SYSTEMTIME* st) {
+    double v = 0.0;
+    if (!SystemTimeToVariantTime((LPSYSTEMTIME)st, &v) || v < 0.0) return 0.0;
+    return v;
+}
+
+static int vb6_DtpFromSerial(double serial, SYSTEMTIME* st) {
+    vb6_DtpZero(st);
+    return VariantTimeToSystemTime(serial, st) ? 1 : 0;
+}
+
+int32_t vb6_DTP_HasDate(void* hwnd) {
+    SYSTEMTIME st;
+    if (!hwnd) return 0;
+    vb6_DtpZero(&st);
+    return SendMessageW((HWND)hwnd, DTM_GETSYSTEMTIME, 0, (LPARAM)&st) == (LRESULT)GDT_NONE ? 0 : -1;
+}
+
+// 实测一条不好猜的行为：**未勾（GDT_NONE）时 DTM_GETSYSTEMTIME 照样回填一个日期**
+// （本机是 36494，既不是原值也不是今天）。所以这里必须认返回标志，不能只问"消息成没成" ——
+// 认了才有 VB6 那句 `Value = Null` 的等价读数（本项目 Value 是 double ⇒ 未勾回 0）。
+double vb6_DTP_GetValue(void* hwnd) {
+    SYSTEMTIME st;
+    LRESULT r;
+    if (!hwnd) return 0.0;
+    vb6_DtpZero(&st);
+    r = SendMessageW((HWND)hwnd, DTM_GETSYSTEMTIME, 0, (LPARAM)&st);
+    if (r == (LRESULT)GDT_ERROR || r == (LRESULT)GDT_NONE) return 0.0;
+    return vb6_DtpToSerial(&st);
+}
+
+// 写值一律按"有值"下发（GDT_VALID）：带复选框的那枚勾上，正是 VB6 里给 Value 赋值的观感。
+// 换算失败（NaN、越界）时**什么都不发** —— 发一个钳到边界的日子会比不动更糟：
+// 读数与屏幕都变了，却没人要求过它变。
+void vb6_DTP_SetValue(void* hwnd, double serial) {
+    SYSTEMTIME st;
+    if (!hwnd) return;
+    if (!vb6_DtpFromSerial(serial, &st)) return;
+    SendMessageW((HWND)hwnd, DTM_SETSYSTEMTIME, (WPARAM)GDT_VALID, (LPARAM)&st);
+}
+
+// 范围端点：原生是一张 (min, max) 表 + 两位有效标志，所以改一端必须先把**整张表**读回来，
+// 换掉那一格，再连着标志一起发 —— 直接只发 GDTR_MIN 会把另一端清成未设。
+static void vb6_DtpSetEnd(void* hwnd, DWORD which, double serial) {
+    SYSTEMTIME st[2];
+    DWORD have;
+    if (!hwnd) return;
+    vb6_DtpZero(&st[0]);
+    vb6_DtpZero(&st[1]);
+    have = (DWORD)(DWORD_PTR)SendMessageW((HWND)hwnd, DTM_GETRANGE, 0, (LPARAM)&st[0]);
+    if (have == (DWORD)GDT_ERROR) have = 0;
+    if (!vb6_DtpFromSerial(serial, &st[which == GDTR_MIN ? 0 : 1])) return;
+    SendMessageW((HWND)hwnd, DTM_SETRANGE, (WPARAM)(have | which), (LPARAM)&st[0]);
+}
+
+static double vb6_DtpGetEnd(void* hwnd, DWORD which) {
+    SYSTEMTIME st[2];
+    DWORD have;
+    if (!hwnd) return 0.0;
+    vb6_DtpZero(&st[0]);
+    vb6_DtpZero(&st[1]);
+    have = (DWORD)(DWORD_PTR)SendMessageW((HWND)hwnd, DTM_GETRANGE, 0, (LPARAM)&st[0]);
+    if (have == (DWORD)GDT_ERROR || !(have & which)) return 0.0;
+    return vb6_DtpToSerial(&st[which == GDTR_MIN ? 0 : 1]);
+}
+
+// HasDate 的写侧 = VB6 那个 `Value = Null` 的等价杠杆（本项目 Value 是 double，装不了 Null，
+// 于是"无日期"这一态另起一条布尔读数，读写都在这条上）。置 False 发 GDT_NONE，
+// 置 True 用当前值发一次 GDT_VALID 把勾找回（值本身不动 —— 原生在 GDT_NONE 下仍留着旧日期）。
+// 取消勾选前把**当天那个值**存进窗口属性，勾回来时用它下发 —— 原生在 NONE 态回填的是它
+// 自己的内部日期（见上），照它走的话"取消再勾回"会把用户原来选的那天换掉。
+static const wchar_t kDtpStashedValue[] = L"VB6_DTP_StashedValue";
+
+void vb6_DTP_SetHasDate(void* hwnd, int32_t on) {
+    SYSTEMTIME st;
+    HANDLE h;
+    double v;
+    if (!hwnd) return;
+    if (!on) {
+        v = vb6_DTP_GetValue(hwnd);
+        if (v != 0.0) {
+            h = GetPropW((HWND)hwnd, kDtpStashedValue);
+            if (!h) SetPropW((HWND)hwnd, kDtpStashedValue, (HANDLE)HeapAlloc(GetProcessHeap(), 0, sizeof(double)));
+            h = GetPropW((HWND)hwnd, kDtpStashedValue);
+            if (h) *(double*)h = v;
+        }
+        SendMessageW((HWND)hwnd, DTM_SETSYSTEMTIME, (WPARAM)GDT_NONE, 0);
+        return;
+    }
+    h = GetPropW((HWND)hwnd, kDtpStashedValue);
+    if (h) {
+        vb6_DTP_SetValue(hwnd, *(double*)h);
+        return;
+    }
+    vb6_DtpZero(&st);
+    if (SendMessageW((HWND)hwnd, DTM_GETSYSTEMTIME, 0, (LPARAM)&st) == (LRESULT)GDT_ERROR) return;
+    SendMessageW((HWND)hwnd, DTM_SETSYSTEMTIME, (WPARAM)GDT_VALID, (LPARAM)&st);
+}
+
+void vb6_DTP_SetMinDate(void* hwnd, double serial) { vb6_DtpSetEnd(hwnd, GDTR_MIN, serial); }
+double vb6_DTP_GetMinDate(void* hwnd) { return vb6_DtpGetEnd(hwnd, GDTR_MIN); }
+void vb6_DTP_SetMaxDate(void* hwnd, double serial) { vb6_DtpSetEnd(hwnd, GDTR_MAX, serial); }
+double vb6_DTP_GetMaxDate(void* hwnd) { return vb6_DtpGetEnd(hwnd, GDTR_MAX); }
+
 // ---------------- 设计期初值 ----------------
 // 只剩 CustomFormat 一条。CheckBox / UpDown **只能在创建时给**（它们是复选框/微调按钮那两枚
 // 子窗口的创建参数，事后写 GWL_STYLE 会被控件抹回去 —— 判据读数记在 029 §九 本格），

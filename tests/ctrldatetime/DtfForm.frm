@@ -75,6 +75,7 @@ End Function
 Private Sub Form_Load()
     Dim bkg As Long, txt As Long, trl As Long, tbk As Long, ttx As Long
     Dim wLong As Long, wTime As Long, w0 As Long, w1 As Long
+    Dim dReq As Date
     ' 五个色值刻意取"三字节都不同且都很小"的组合：系统默认色是 0xFFFFFF / 0 / 0x808080
     ' 那一族，任何一个恰好撞上都会让 DT20 那条"控件之间不共享"变成假绿或假红。
     bkg = 66051: txt = 263430: trl = 460809: tbk = 658188: ttx = 855567
@@ -139,6 +140,35 @@ Private Sub Form_Load()
     Debug.Print "DT22=" & TF(dt4.Format = 3)
     Debug.Print "DT23=" & TF(dt4.CustomFormat = "yyyy-MM-dd HH:mm")
     Debug.Print "DT24=" & TF(dt4.IdealWidth > w0)
+
+    ' --- 25..36 C29-DT-b：Date 值面（Value / MinDate / MaxDate + "无日期"那一态）---
+    ' 换算是 oleaut32 那一对现成函数（VariantTimeToSystemTime / SystemTimeToVariantTime）。
+    ' VB 侧 Date 就是 double 序列号，所以 43894 这种整数序列直接当日期用（= 2020-03-04）。
+    ' DT30 / DT31 两条按**实测真值**写（原先各猜错过一次，见 029 §九 本格）：
+    '   · 设一个低于 MinDate 的日期，控件**直接拒绝、值保持原样**，不是钳到 MinDate；
+    '   · DTS_SHOWNONE 那枚**创建时是勾上的**（HasDate=-1、Value=今天），不是未勾。
+    Debug.Print "DT25=" & TF(Int(dt2.Value) = Int(Now))
+    dReq = 43894
+    dt2.Value = dReq
+    Debug.Print "DT26=" & TF(CLng(dt2.Value) = 43894)
+    dt2.MinDate = 43831
+    Debug.Print "DT27=" & TF(CLng(dt2.MinDate) = 43831)
+    dt2.MaxDate = 44999
+    Debug.Print "DT28=" & TF(CLng(dt2.MaxDate) = 44999)
+    ' 改一端必须不动另一端（原生是一张 (min,max) 表 + 有效位标志；只发 GDTR_MIN 会清掉 max）
+    Debug.Print "DT29=" & TF(CLng(dt2.MinDate) = 43831)
+    dt2.Value = 40000
+    Debug.Print "DT30=" & TF(CLng(dt2.Value) = 43894)
+    Debug.Print "DT31=" & TF(dt1.HasDate = -1 And Int(dt1.Value) = Int(Now))
+    dt1.Value = 43894
+    Debug.Print "DT32=" & TF(dt1.HasDate = -1 And CLng(dt1.Value) = 43894)
+    dt1.HasDate = False
+    ' 未勾这一态原生仍回填一个内部日期（本机 36494）⇒ GetValue 必须认返回标志才回 0
+    Debug.Print "DT33=" & TF(dt1.HasDate = 0 And dt1.Value = 0)
+    dt1.HasDate = True
+    Debug.Print "DT34=" & TF(dt1.HasDate = -1 And CLng(dt1.Value) = 43894)
+    Debug.Print "DT35=" & TF(dt3.MinDate = 0 And dt3.MaxDate = 0)
+    Debug.Print "DT36=" & TF(CLng(dt3.Value) <> CLng(dt2.Value))
 
     Debug.Print "CTRLDATETIME-DONE"
     Unload Me

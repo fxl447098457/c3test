@@ -81,6 +81,12 @@ Vb6Type CCodeGen::controlPropType(FrmControlType ctrlType, const std::string& pr
             return Vb6Type::Long;
         }
         if (p == "customformat") return Vb6Type::String;
+        // C29-DT-b: 三条 Date 型属性。登记成 Date 而不是让它落到兜底 —— Date 在 C 层就是
+        // double（`Dim d As Date` 实测发成 `double d`），不登记的话 inferExprType 那条按成员
+        // 裸名查符号的兜底会判成 Variant/String，与 RTL 侧的 double 返回值不匹配（TreeView
+        // 那批同款坑，见上方注释）。HasDate 是本项目的扩展读数，Long。
+        if (p == "value" || p == "mindate" || p == "maxdate") return Vb6Type::Date;
+        if (p == "hasdate") return Vb6Type::Long;
     }
     if (ctrlType == FrmControlType::Toolbar) {
         // C29-5a: 同一口径 —— 这四条的 RTL getter 都是 int32_t, 判成 Variant/String
@@ -375,6 +381,11 @@ std::string CCodeGen::getControlPropReadFn(FrmControlType ctrlType, const std::s
         // C3 扩展（只读）：控件自己算的"装得下当前格式"宽度，判据用它把"格式真选中了吗"
         // 从自家人读数换成控件侧读数。VB6 没有这条，写侧刻意不登记。
         if (propLower == "idealwidth") return "vb6_DTP_IdealWidth";
+        // C29-DT-b 的读侧（Date 三条 + 扩展 HasDate）。
+        if (propLower == "value") return "vb6_DTP_GetValue";
+        if (propLower == "hasdate") return "vb6_DTP_HasDate";
+        if (propLower == "mindate") return "vb6_DTP_GetMinDate";
+        if (propLower == "maxdate") return "vb6_DTP_GetMaxDate";
         if (propLower == "visible") return "vb6_GetControlVisible";
         if (propLower == "enabled") return "vb6_GetControlEnabled";
         break;
@@ -664,6 +675,12 @@ std::string CCodeGen::getControlPropWriteFn(FrmControlType ctrlType, const std::
         if (propLower == "calendartrailingforecolor") return "vb6_DTP_SetCalendarTrailingForeColor";
         if (propLower == "calendartitlebackcolor") return "vb6_DTP_SetCalendarTitleBackColor";
         if (propLower == "calendartitleforecolor") return "vb6_DTP_SetCalendarTitleForeColor";
+        // C29-DT-b 的写侧。HasDate 刻意不给写口（它是原生 GDT_NONE 那一态的读数，
+        // 要"清空"请用 CheckBox 那枚勾选框，写它会把读数与观感拆成两张皮）。
+        if (propLower == "value") return "vb6_DTP_SetValue";
+        if (propLower == "hasdate") return "vb6_DTP_SetHasDate";
+        if (propLower == "mindate") return "vb6_DTP_SetMinDate";
+        if (propLower == "maxdate") return "vb6_DTP_SetMaxDate";
         if (propLower == "visible") return "vb6_SetControlVisible";
         if (propLower == "enabled") return "vb6_SetControlEnabled";
         break;
