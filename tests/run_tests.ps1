@@ -2537,6 +2537,48 @@ if ($Category -in @("all", "run", "vbp")) {
     $dlProbeNeedles = @("CTRLDLG-DONE") + (1..14 | ForEach-Object { "DL$_=Y" })
     Test-Vbp "ctrldlg_probe" "$Tests\ctrldlg\DlApp.vbp" $dlProbeNeedles -Env "C3_CDPROBE=1"
     Test-Vbp "ctrldlg_probe_x86" "$Tests\ctrldlg\DlApp.vbp" $dlProbeNeedles -Env "C3_CDPROBE=1" -Arch "x86"
+
+    # ai/029 C29-WS-a：Winsock 走原生 Winsock2（不加载 MSWINSCK.OCX）。判据 = 同进程两枚控件
+    # 的 **UDP 回环一来一回**（端口交给系统挑：Bind 0 后读 LocalPort；地址写死 127.0.0.1），
+    # 所以既不碰外网、也不跟 CI 上别的作业抢固定端口。等事件一律"一步一个 Timer tick"
+    # （第一版拿 DoEvents 连泵 60 次等包到，本机就假红过一次 —— 见 029 §九 本格）。
+    # 注册放在整个 vbp 块**最后**：这条会真的建窗（不可见的身份窗 + 一枚窗体），而 C29-9b
+    # 量过"多开一窗就让后面的按位置算点心的用例翻红"，排最后就不会再影响任何用例。
+    $wsNeedles = @("CTRLWINSOCK-DONE") + (1..24 | ForEach-Object { "WS$_=Y" })
+    Test-Vbp "ctrlwinsock" "$Tests\ctrlwinsock\WsApp.vbp" $wsNeedles
+    Test-Vbp "ctrlwinsock_x86" "$Tests\ctrlwinsock\WsApp.vbp" $wsNeedles -Arch "x86"
+    # 发码正面：类名 + 不可见 0x0 的创建参数（与 Timer 同一枚 style 值）+ 设计期 Create/Init
+    # 三条 + 事件回调注册的序号 + 四条方法的发码形状（含 GetData 出参取址、缺省 type/maxLen）。
+    Test-EmitcShape "ws_emitc_shape" @("$Tests\ctrlwinsock\WsApp.vbp") @(
+        '"VB6_WINSOCK", "",',
+        '1140850688L, 0L,',
+        'vb6_RegisterWinsockClass((void*)hInstance);',
+        'vb6_Ws_Create((void*)vb6_hwnd_wsA);',
+        'vb6_Ws_SetProtocol((void*)vb6_hwnd_wsA, 1);',
+        'vb6_Ws_SetProtocol((void*)vb6_hwnd_wsC, 0);',
+        'vb6_Ws_SetRemoteHost((void*)vb6_hwnd_wsA, L"");',
+        'vb6_Ws_SetEventHandler((void*)vb6_hwnd_wsA, 2, (void*)vb6_wsA_DataArrival); }',
+        'vb6_Ws_SetEventHandler((void*)vb6_hwnd_wsB, 6, (void*)vb6_wsB_StateChanged); }',
+        'vb6_Ws_Bind((void*)vb6_hwnd_wsA, (int32_t)0, L"");',
+        'vb6_Ws_SendData((void*)vb6_hwnd_wsA, vb6_BSTR_FromStr(L"hello-B"));',
+        'vb6_Ws_GetData((void*)vb6_hwnd_wsB, &gGotB, 0, (-1));',
+        'vb6_Ws_PeekData((void*)vb6_hwnd_wsB, &gPeek, 0, (-1));',
+        'vb6_Ws_Close((void*)vb6_hwnd_wsA);',
+        'vb6_Ws_GetState(vb6_hwnd_wsC',
+        'vb6_Ws_GetLocalPort(vb6_hwnd_wsB'
+    )
+    # 反面：一条都不许落回"把 HWND 当 IDispatch 用"那条假路（本线踩过三次的那声不响），
+    # LocalPort / LocalIP 也**不许有写口** —— 那两格在 VB6 就是运行期只读（端口归 Bind 管、
+    # 地址归系统定），发一条"写得动但什么都不改"的 setter 比不发更难查（RT-a 的 ScrollBars 同口径）。
+    Test-EmitcAbsent "ws_emitc_no_com_fallback" @("$Tests\ctrlwinsock\WsApp.vbp") @(
+        'vb6_ComCall(vb6_hwnd_wsA, L"close"',
+        'vb6_ComCall(vb6_hwnd_wsA, L"SendData"',
+        'vb6_ComCall(vb6_hwnd_wsB, L"GetData"',
+        'vb6_ComGetObjectProp(vb6_hwnd_wsB, L"LocalPort")',
+        'vb6_Ws_SetLocalPort',
+        'vb6_Ws_SetLocalIP',
+        'vb6_Ws_TraceCmd'
+    )
     $vbpSw.Stop()
     Write-Host "  (vbp/gui tests took $([Math]::Round($vbpSw.Elapsed.TotalSeconds))s)"
     Write-Host ""

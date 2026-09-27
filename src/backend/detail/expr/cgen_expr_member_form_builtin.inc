@@ -340,6 +340,24 @@
                 // cgen_expr_call_callee_withm.inc 消费（形状同 CommonDialog.Show* 那一刀：
                 // comObjExpr_ 存**小写控件名**，消费侧查 knownFormControls_ 拿类型后发 vb6_RTB_*）。
                 // 少了这一刀就落到下面的通用兜底 ⇒ vb6_ComCall(vb6_hwnd_rt1, L"Find", ...) 一声不响。
+                // C29-WS-a: Winsock 的方法（Bind / SendData / GetData / PeekData / Close）
+                // 同一族打标。TCP 那三条（Listen / Accept / Connect）在 WS-b 才加进来 ——
+                // 现在加就等于发一条空函数调用，正是本线反复踩的"编得过、运行期一声不响"。
+                if (itCtrl->second == FrmControlType::Winsock) {
+                    std::string wsMemLower = node.memberName;
+                    std::transform(wsMemLower.begin(), wsMemLower.end(), wsMemLower.begin(), ::tolower);
+                    if (wsMemLower == "bind" || wsMemLower == "senddata"
+                        || wsMemLower == "getdata" || wsMemLower == "peekdata"
+                        || wsMemLower == "close") {
+                        comObjExpr_ = objLower;
+                        comMemberName_ = wsMemLower;
+                        isComMarker_ = true;
+                        isEarlyBoundCom_ = false;
+                        earlyBoundSym_ = nullptr;
+                        lastExpr_ = objLower;
+                        return;
+                    }
+                }
                 if (itCtrl->second == FrmControlType::RichTextBox) {
                     std::string memLower = node.memberName;
                     std::transform(memLower.begin(), memLower.end(), memLower.begin(), ::tolower);

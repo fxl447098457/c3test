@@ -752,6 +752,70 @@ void    vb6_RTB_SetSelRightIndent(void* hwnd, int32_t twips);
 int32_t vb6_RTB_GetSelHangingIndent(void* hwnd);   // = -dxOffset（原生用负值表示首行外凸）
 void    vb6_RTB_SetSelHangingIndent(void* hwnd, int32_t twips);
 
+// ===================== Winsock (ai/029 C29-WS) =====================
+//   VB6 Winsock 控件的原生落点 = Winsock2（ws2_32），**不加载 MSWINSCK.OCX**（32 位 inproc）。
+//   这枚控件无外观但**要有一枚真在收通知的窗口**：WSAAsyncSelect 把 FD_* 投到控件自己的窗口上，
+//   所以它是本线里唯一 WndProc 不是裸 DefWindowProc 的自注册窗（Timer / CommonDialog 那两枚只是属性袋）。
+//   三条量出来的契约（读数记在 029 §九 C29-WS）：事件种类只认消息 lParam 的低字
+//   （async-select 下 WSAEnumNetworkEvents 回空）、连接失败的错误码要赶在枚举之前读 SO_ERROR、
+//   FD_CLOSE 会带着没读完的尾巴到 ⇒ 先 drain 再发 Close。
+//   本格（WS-a）= 身份窗 + 实例表 + 事件槽 + 状态/属性面 + UDP 一整轮；
+//   TCP 的 Listen/Accept/Connect 归 WS-b，Error / SendProgress / Byte 数组那一形归 WS-c。
+
+// VB6 Winsock 的 state 属性那一族数值（照 MSWINSCK 的编号，不自己发明）
+#define VB6_WS_CLOSED          0   // sckClosed
+#define VB6_WS_OPEN            1   // sckOpen（UDP 绑好之后）
+#define VB6_WS_LISTENING       2   // sckListening
+#define VB6_WS_CONN_PENDING    3   // sckConnectionPending
+#define VB6_WS_RESOLVING_HOST  4   // sckResolvingHost
+#define VB6_WS_HOST_RESOLVED   5   // sckHostResolved
+#define VB6_WS_CONNECTING      6   // sckConnecting
+#define VB6_WS_CONNECTED       7   // sckConnected
+#define VB6_WS_CLOSING         8   // sckClosing
+#define VB6_WS_ERROR           9   // sckError
+#define VB6_WS_TCP             0   // Protocol: sckTCPProtocol（VB6 默认）
+#define VB6_WS_UDP             1   // Protocol: sckUDPProtocol
+#define VB6_WS_DT_STRING       0   // GetData 的 type：vbString（默认那一形）
+#define VB6_WS_DT_BYTEARRAY    1   // vbByte() —— WS-c 再做
+
+// 事件槽序号：cgen 发的是**字面量**，顺序不许改（改了要连发码与 emitc 针一起改）
+#define VB6_WS_EV_CONNECT          0   // Sub Winsock1_Connect()
+#define VB6_WS_EV_CLOSE            1   // Sub Winsock1_Close()
+#define VB6_WS_EV_DATAARRIVAL      2   // Sub Winsock1_DataArrival(ByVal bytesTotal As Long)
+#define VB6_WS_EV_CONNREQUEST      3   // Sub Winsock1_ConnectionRequest(ByVal requestID As Long)
+#define VB6_WS_EV_SENDCOMPLETE     4   // Sub Winsock1_SendComplete()
+#define VB6_WS_EV_SENDPROGRESS     5   // Sub Winsock1_SendProgress(ByVal bytesSent As Long)
+#define VB6_WS_EV_STATECHANGED     6   // Sub Winsock1_StateChanged(ByVal State As Integer)
+#define VB6_WS_EV_ERROR            7   // Sub Winsock1_Error(...) —— WS-c
+#define VB6_WS_EV_COUNT            8
+
+void  vb6_RegisterWinsockClass(void* hInstance);
+void* vb6_Ws_Create(void* hwnd);                      // 把身份窗认进实例表
+void  vb6_Ws_Destroy(void* hwnd);
+void  vb6_Ws_SetEventHandler(void* hwnd, int32_t kind, void* fn);
+
+int32_t     vb6_Ws_GetProtocol(void* hwnd);
+void        vb6_Ws_SetProtocol(void* hwnd, int32_t v);
+int32_t     vb6_Ws_GetState(void* hwnd);
+int32_t     vb6_Ws_GetLocalPort(void* hwnd);
+const void* vb6_Ws_GetLocalIP(void* hwnd);            // BSTR（未绑 = 空串）
+const void* vb6_Ws_GetRemoteHost(void* hwnd);         // BSTR
+void        vb6_Ws_SetRemoteHost(void* hwnd, const void* bstr);
+int32_t     vb6_Ws_GetRemotePort(void* hwnd);
+void        vb6_Ws_SetRemotePort(void* hwnd, int32_t v);
+int32_t     vb6_Ws_GetBytesReceived(void* hwnd);
+int32_t     vb6_Ws_GetByteTransferred(void* hwnd);
+
+void    vb6_Ws_Bind(void* hwnd, int32_t port, const void* ip /* BSTR，可空 */);
+void    vb6_Ws_Listen(void* hwnd);                     // WS-b
+void    vb6_Ws_Accept(void* hwnd, int32_t requestId);  // WS-b
+void    vb6_Ws_Connect(void* hwnd);                    // WS-b
+void    vb6_Ws_SendData(void* hwnd, const void* data /* BSTR */);
+int32_t vb6_Ws_GetData(void* hwnd, void* outBstr /* BSTR* */, int32_t type, int32_t maxLen);
+int32_t vb6_Ws_PeekData(void* hwnd, void* outBstr, int32_t type, int32_t maxLen);
+void    vb6_Ws_Close(void* hwnd);
+
+
 #ifdef __cplusplus
 }
 #endif

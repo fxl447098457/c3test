@@ -127,6 +127,15 @@ Vb6Type CCodeGen::controlPropType(FrmControlType ctrlType, const std::string& pr
         // 走 cgen_expr_call_callee_withm.inc 那条改道。
         if (p == "textrtf") return Vb6Type::String;
     }
+    if (ctrlType == FrmControlType::Winsock) {
+        // C29-WS-a: 与 C 层签名对齐是这里的唯一目的 —— 六条 getter 回 int32_t ⇒ Long，
+        // 两条回 BSTR ⇒ String（判成数值就是把指针当数读，SSTab1.Tab 那一族同型缺陷）。
+        if (p == "protocol" || p == "state" || p == "localport" || p == "remoteport"
+            || p == "bytesreceived" || p == "bytetransferred") {
+            return Vb6Type::Long;
+        }
+        if (p == "localip" || p == "remotehost") return Vb6Type::String;
+    }
     if (ctrlType == FrmControlType::Toolbar) {
         // C29-5a: 同一口径 —— 这四条的 RTL getter 都是 int32_t, 判成 Variant/String
         // 就跟 C 层不匹配 (SSTab1.Tab 那次 AV 的同族)。
@@ -351,6 +360,16 @@ std::string CCodeGen::getControlPropReadFn(FrmControlType ctrlType, const std::s
         if (propLower == "sourceitem")      return "vb6_OleCon_GetSourceItem";
         if (propLower == "visible")         return "vb6_GetControlVisible";
         if (propLower == "enabled")         return "vb6_GetControlEnabled";
+        break;
+    case FrmControlType::Winsock:  // C29-WS-a: Winsock2 复刻；状态一切以 RTL 实例表为准
+        if (propLower == "protocol")       return "vb6_Ws_GetProtocol";
+        if (propLower == "state")          return "vb6_Ws_GetState";
+        if (propLower == "localport")      return "vb6_Ws_GetLocalPort";
+        if (propLower == "localip")        return "vb6_Ws_GetLocalIP";
+        if (propLower == "remotehost")     return "vb6_Ws_GetRemoteHost";
+        if (propLower == "remoteport")     return "vb6_Ws_GetRemotePort";
+        if (propLower == "bytesreceived")  return "vb6_Ws_GetBytesReceived";
+        if (propLower == "bytetransferred") return "vb6_Ws_GetByteTransferred";
         break;
     case FrmControlType::Data:  // C29-Data: ODBC 后端
         if (propLower == "recordset")    return "vb6_Data_RecordsetObj";  /* 真 IDispatch, 链走晚绑定 */
@@ -730,6 +749,13 @@ std::string CCodeGen::getControlPropWriteFn(FrmControlType ctrlType, const std::
         if (propLower == "stretch") return "vb6_SetImageStretch";  // P17.2
         if (propLower == "visible") return "vb6_SetControlVisible";
         if (propLower == "enabled") return "vb6_SetControlEnabled";
+        break;
+    case FrmControlType::Winsock:  // C29-WS-a 写表。LocalPort / LocalIP **没有写口**：
+        // VB6 那两格是"运行期只读"的（LocalPort 由 Bind 决定、LocalIP 由系统定），
+        // 发一条"写得动但其实什么都不改"的 setter 比不发更难查（RT-a 的 ScrollBars 同口径）。
+        if (propLower == "protocol")   return "vb6_Ws_SetProtocol";
+        if (propLower == "remotehost") return "vb6_Ws_SetRemoteHost";
+        if (propLower == "remoteport") return "vb6_Ws_SetRemotePort";
         break;
     case FrmControlType::Data:  // C29-Data 写表 (三属性先存后 Refresh 用)
         if (propLower == "databasename") return "vb6_Data_SetDatabaseName";

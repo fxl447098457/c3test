@@ -27,6 +27,7 @@
     // P20-35: 注册Shape/Line自定义窗口类
     {
         bool hasShape = false, hasLine = false, hasCd = false, hasTmr = false, hasOle = false, hasData = false;
+        bool hasWs = false;   // C29-WS-a
         for (const auto& ctrl : frmDesc.formControl.children) {
             if (ctrl.controlType == FrmControlType::Shape) hasShape = true;
             if (ctrl.controlType == FrmControlType::Line) hasLine = true;
@@ -38,6 +39,9 @@
             if (ctrl.controlType == FrmControlType::OLE) hasOle = true;
             // C29-Data: 同理 —— VB6_DATA 类先注册。
             if (ctrl.controlType == FrmControlType::Data) hasData = true;
+            // C29-WS: 同理 —— VB6_WINSOCK 类要先注册。差别只在**这枚的 WndProc 有逻辑**
+            // （WSAAsyncSelect 的 FD_* 投在它自己的窗口上），不是又一枚属性袋。
+            if (ctrl.controlType == FrmControlType::Winsock) hasWs = true;
         }
         if (hasShape || hasLine) {
             c_.emitLine("vb6_RegisterShapeLineClasses((void*)hInstance);");
@@ -53,6 +57,9 @@
         }
         if (hasData) {
             c_.emitLine("vb6_RegisterDataClass((void*)hInstance);");
+        }
+        if (hasWs) {
+            c_.emitLine("vb6_RegisterWinsockClass((void*)hInstance);");
         }
     }
     // 为每个控件生成CreateWindow调用

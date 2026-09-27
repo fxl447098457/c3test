@@ -182,6 +182,16 @@
                 width = 0;
                 height = 0;
                 break;
+            case FrmControlType::Winsock:
+                // C29-WS-a: 又一枚"无外观但有身份"的控件，外形处理与 Timer 完全同法。
+                // **实质差别在窗口过程**：Timer 那枚的 WndProc 是裸 DefWindowProc（纯属性袋），
+                // 而 Winsock 的身份窗要**真的收 WSAAsyncSelect 投来的 FD_\***（通知投给它自己，
+                // 不是父窗）⇒ 类注册在 RTL（vb6_RegisterWinsockClass），那里才是有逻辑的一头。
+                createCaption = "";
+                style &= ~kWsVisible;
+                width = 0;
+                height = 0;
+                break;
             case FrmControlType::TreeView:
                 // C29-8a: SysTreeView32 的创建路早就有 (controlTypeToWin32Class 有格)，
                 // 缺的是属性面。这里只给 VB6 的**默认观感**: LineStyle=0 (画树线、根层不画)
@@ -582,6 +592,60 @@
             if (roIt != ctrl.properties.end()) rtRO = (roIt->second.intValue != 0) ? 1 : 0;
             c_.emitLine("vb6_RTB_Init((void*)" + rtHwnd + ", " + std::to_string(rtWW)
                         + ", " + std::to_string(rtRO) + ");");
+        }
+
+        // C29-WS-a: Winsock 设计期。这枚控件的一切状态都在 RTL 的实例表里（socket / 状态机 /
+        // 接收缓冲），所以这里只做三件事：把窗口认进表、灌 .frm 上写的那几条、把存在的事件
+        // 处理器注册成函数指针 —— 网络通知走不了 WM_COMMAND / WM_NOTIFY（那是"往父窗投"那一路），
+        // 只能是 Timer / Data / OLEDrop 那种"注册回调"的形状（029 §九 C29-WS 记了为什么）。
+        if (ctrl.controlType == FrmControlType::Winsock) {
+            std::string wsLower = ctrl.controlName;
+            std::transform(wsLower.begin(), wsLower.end(), wsLower.begin(), ::tolower);
+            std::string wsHwnd = knownControlArrays_.count(wsLower) ?
+                ("vb6_CtrlArr_GetAt(&vb6_arr_" + cIdent(ctrl.controlName) + ", " +
+                 std::to_string(ctrl.index >= 0 ? ctrl.index : 0) + ")") :
+                ("vb6_hwnd_" + cIdent(ctrl.controlName));
+            auto wsInt = [&](const char* k, int dflt) -> int {
+                auto it = ctrl.properties.find(k);
+                return (it == ctrl.properties.end()) ? dflt : (int)it->second.intValue;
+            };
+            auto wsStr = [&](const char* k) -> std::string {
+                auto it = ctrl.properties.find(k);
+                if (it == ctrl.properties.end() || it->second.rawText.empty()) return "L\"\"";
+                std::string raw = it->second.rawText;
+                if (raw.size() >= 2 && raw.front() == '\"' && raw.back() == '\"')
+                    raw = raw.substr(1, raw.size() - 2);
+                return "L\"" + escapeWideCString(raw) + "\"";
+            };
+            c_.emitLine("vb6_Ws_Create((void*)" + wsHwnd + ");");
+            c_.emitLine("vb6_Ws_SetProtocol((void*)" + wsHwnd + ", "
+                        + std::to_string(wsInt("Protocol", 0)) + ");");
+            c_.emitLine("vb6_Ws_SetRemoteHost((void*)" + wsHwnd + ", " + wsStr("RemoteHost") + ");");
+            c_.emitLine("vb6_Ws_SetRemotePort((void*)" + wsHwnd + ", "
+                        + std::to_string(wsInt("RemotePort", 0)) + ");");
+            // 事件槽：序号是 vb6forms_prop_ctrl.h 里那组 VB6_WS_EV_*，发的是字面量。
+            // 处理器形参表**照 VB6 的 ByVal 签名发**（ByVal ⇒ 原样传值；这条在 MV-c 那格
+            // 用 x86 才验出来过：形状写错时 x64 读数照旧正确）。
+            struct WsEvt { const char* suffix; int kind; const char* proto; };
+            static const WsEvt wsEvts[] = {
+                { "_Connect",            0, "" },
+                { "_Close",              1, "" },
+                { "_DataArrival",        2, "int32_t" },
+                { "_ConnectionRequest",  3, "int32_t" },
+                { "_SendComplete",       4, "" },
+                { "_SendProgress",       5, "int32_t" },
+                { "_StateChanged",       6, "int16_t" }
+            };
+            for (const WsEvt& ev : wsEvts) {
+                auto* sy = symTab_.lookup(ctrl.controlName + ev.suffix);
+                if (!sy) continue;
+                std::string evFn = cProcName(sy->name, AccessLevel::Private);
+                std::string argDecl = std::string(ev.proto);
+                c_.emitLine("{ extern void " + evFn + "("
+                            + (argDecl.empty() ? std::string("void") : argDecl) + ");");
+                c_.emitLine("  vb6_Ws_SetEventHandler((void*)" + wsHwnd + ", "
+                            + std::to_string(ev.kind) + ", (void*)" + evFn + "); }");
+            }
         }
 
         // P20-40: StatusBar 设计期 —— Init 一次, 再按 Panels 集合逐项灌进去。

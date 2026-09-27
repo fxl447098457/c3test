@@ -392,6 +392,61 @@
         }
     }
 
+    // --- C29-WS-a: Winsock 的 Bind / SendData / GetData / PeekData / Close ---
+    // 同一族"标记必须在这里消费掉"的形状（不消费就落到 vb6_ComCall —— 本线踩过三次的那声不响）。
+    // GetData / PeekData 的**出参**是这里唯一的新形状：VB6 那两第一条实参是被写回来的变量，
+    // 所以发 `&<变量名>`；实参不是光秃秃的标识符时（属性、数组元素、常量…）发 NULL 让 RTL 安全返回 0
+    // —— VB6 在那里同样编不过，只是我们给不出那条编译期诊断（记进 029 §九 本格）。
+    if (isComMarker_) {
+        auto itWs = knownFormControls_.find(comObjExpr_);
+        if (itWs != knownFormControls_.end() &&
+            itWs->second == FrmControlType::Winsock) {
+            std::string mWs = comMemberName_;
+            static const char* kWsKnown[] = { "bind", "senddata", "getdata", "peekdata", "close" };
+            bool knownWs = false;
+            for (const char* k : kWsKnown) if (mWs == k) { knownWs = true; break; }
+            if (knownWs) {
+                std::string hwndWs = cIdent(knownFormControlOriginalNames_.count(comObjExpr_)
+                    ? knownFormControlOriginalNames_[comObjExpr_] : comObjExpr_);
+                isComMarker_ = false;
+                isEarlyBoundCom_ = false;
+                earlyBoundSym_ = nullptr;
+                comObjExpr_.clear();
+                comMemberName_.clear();
+                std::vector<std::string> argWs;
+                for (size_t i = 0; i < node.positional.size(); i++) {
+                    emitExpr(*node.positional[i]);
+                    argWs.push_back(lastExpr_);
+                }
+                auto isBareIdent = [](const std::string& t) {
+                    if (t.empty() || !(std::isalpha((unsigned char)t[0]) || t[0] == '_')) return false;
+                    for (char ch : t)
+                        if (!(std::isalnum((unsigned char)ch) || ch == '_')) return false;
+                    return true;
+                };
+                std::string preWs = "(void*)vb6_hwnd_" + hwndWs;
+                if (mWs == "close") {
+                    lastExpr_ = "vb6_Ws_Close(" + preWs + ")";
+                } else if (mWs == "bind") {
+                    std::string port = argWs.size() > 0 ? ("(int32_t)" + argWs[0]) : std::string("0");
+                    std::string ip = argWs.size() > 1 ? argWs[1] : std::string("L\"\"");
+                    lastExpr_ = "vb6_Ws_Bind(" + preWs + ", " + port + ", " + ip + ")";
+                } else if (mWs == "senddata") {
+                    lastExpr_ = "vb6_Ws_SendData(" + preWs + ", "
+                              + (argWs.size() > 0 ? argWs[0] : std::string("L\"\"")) + ")";
+                } else {
+                    std::string out = (!argWs.empty() && isBareIdent(argWs[0]))
+                                    ? ("&" + argWs[0]) : std::string("((void*)0)");
+                    std::string ty = argWs.size() > 1 ? ("(int32_t)" + argWs[1]) : std::string("0");
+                    std::string mx = argWs.size() > 2 ? ("(int32_t)" + argWs[2]) : std::string("(-1)");
+                    lastExpr_ = std::string(mWs == "getdata" ? "vb6_Ws_GetData(" : "vb6_Ws_PeekData(")
+                              + preWs + ", " + out + ", " + ty + ", " + mx + ")";
+                }
+                return;
+            }
+        }
+    }
+
     // --- C29-RT-c: RichTextBox 的 LoadFile / SaveFile / Find ---
     // 三条都是 VB6 真方法（不是判据专用），走的仍是原生消息 + RTL 出口（D6：不碰 OCX）。
     // 与 CommonDialog / Data 两族同一个坑：语句路不进 com_bind，标记必须在这里消费掉，
