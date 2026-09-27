@@ -290,8 +290,11 @@ int vb6_GetBorderStyle(void* hwnd) {
     WCHAR className[256] = {0};
     GetClassNameW(hw, className, 256);
 
-    if (wcsicmp(className, L"Edit") == 0) {
-        // TextBox: 0=None(No border), 1=Fixed Single
+    // C29-RT-a: RICHEDIT50W（RichTextBox）与 Edit 同一条边框路 —— 它的边框就是 WS_EX_CLIENTEDGE。
+    // 不走这条就落到下面那个"存属性"的兜底分支，而 SetPropW(0) 等于把属性**删掉**
+    //（GetPropW 回 NULL ⇒ 读回来永远是默认 1），BorderStyle=None 就永远设不上。
+    if (wcsicmp(className, L"Edit") == 0 || wcsicmp(className, L"RICHEDIT50W") == 0) {
+        // TextBox / RichTextBox: 0=None(No border), 1=Fixed Single
         LONG style = GetWindowLongW(hw, GWL_EXSTYLE);
         return (style & WS_EX_CLIENTEDGE) ? 1 : 0;
     }
@@ -312,8 +315,8 @@ void vb6_SetBorderStyle(void* hwnd, int style) {
     WCHAR className[256] = {0};
     GetClassNameW(hw, className, 256);
 
-    if (wcsicmp(className, L"Edit") == 0) {
-        // TextBox: only 0 or 1
+    if (wcsicmp(className, L"Edit") == 0 || wcsicmp(className, L"RICHEDIT50W") == 0) {
+        // TextBox / RichTextBox: only 0 or 1
         LONG exStyle = GetWindowLongW(hw, GWL_EXSTYLE);
         if (style == 0) {
             exStyle &= ~WS_EX_CLIENTEDGE;

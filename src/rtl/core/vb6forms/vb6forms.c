@@ -66,6 +66,12 @@ void vb6_ComCtl_Init(void) {
               | ICC_ANIMATE_CLASS | ICC_UPDOWN_CLASS | ICC_HOTKEY_CLASS
               | ICC_DATE_CLASSES | ICC_WIN95_CLASSES;
     InitCommonControlsEx(&ice);
+    // C29-RT: RichTextBox 的类**不在 comctl32 里** —— RICHEDIT50W 由 Msftedit.dll 在
+    // DllMain 里注册（实测：LoadLibrary 之后 GetClassInfoW 才问得到）。这与上面那批
+    // ICC_* 是两条路子：InitCommonControlsEx 管不到它。老通道 riched20.dll
+    // （RichEdit20W）留着兜底，加载失败就什么类都没有 ⇒ 控件窗口建不出来 ⇒ 判据整批红
+    // （刻意的：宁可响亮地失败，也不要静默空转 —— 那正是 OCX 那路今天的样子）。
+    if (!LoadLibraryW(L"Msftedit.dll")) LoadLibraryW(L"riched20.dll");
     // comctl32 只注册它自己那批类; msctls_status32 / msctls_toolbar32 这两个
     // v5.82 与 v6 都不注册 (实测连 dwICC=0xFFFFFFFF 全开也没用), 由各控件的
     // RTL 自己补注册 (vb6_StatusBar_RegisterClass 等)。

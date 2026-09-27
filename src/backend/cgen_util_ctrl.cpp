@@ -103,6 +103,17 @@ Vb6Type CCodeGen::controlPropType(FrmControlType ctrlType, const std::string& pr
         // C29-MV-b：Date 那三格与 DTPicker 同一条口径（C 层就是裸 double，不装箱）。
         if (p == "value" || p == "selstart" || p == "selend") return Vb6Type::Date;
     }
+    if (ctrlType == FrmControlType::RichTextBox) {
+        // C29-RT-a: 同一口径。vb6_RTB_Get* 除 SelText 外全是 int32_t（布尔按 VB6 的 -1/0 给，
+        // ScrollBars 是枚举、两条量程是数值）；SelText 的 getter 返回 wchar_t* ⇒ String。
+        // Text 不在这里 —— 它走通用那条 vb6_GetControlText（与 TextBox 同一格）。
+        if (p == "selstart" || p == "sellength" || p == "readonly" || p == "maxlength"
+            || p == "scrollbars" || p == "wordwrap" || p == "vscrollrange"
+            || p == "hscrollrange") {
+            return Vb6Type::Long;
+        }
+        if (p == "seltext") return Vb6Type::String;
+    }
     if (ctrlType == FrmControlType::Toolbar) {
         // C29-5a: 同一口径 —— 这四条的 RTL getter 都是 int32_t, 判成 Variant/String
         // 就跟 C 层不匹配 (SSTab1.Tab 那次 AV 的同族)。
@@ -434,6 +445,24 @@ std::string CCodeGen::getControlPropReadFn(FrmControlType ctrlType, const std::s
         if (propLower == "visible") return "vb6_GetControlVisible";
         if (propLower == "enabled") return "vb6_GetControlEnabled";
         break;
+    // C29-RT-a: RichTextBox 读侧。Text 走通用那条（与 TextBox 同一格 vb6_GetControlText），
+    // BorderStyle 也走通用那条窗口边框读数 —— 原生这枚控件的边框在 WS_EX_CLIENTEDGE 上，
+    // 通用 getter 认它（实测见夹具 RT5/RT6 两条）。
+    case FrmControlType::RichTextBox:
+        if (propLower == "text") return "vb6_GetControlText";
+        if (propLower == "selstart") return "vb6_RTB_GetSelStart";
+        if (propLower == "sellength") return "vb6_RTB_GetSelLength";
+        if (propLower == "seltext") return "vb6_RTB_GetSelText";
+        if (propLower == "readonly") return "vb6_RTB_GetReadOnly";
+        if (propLower == "maxlength") return "vb6_RTB_GetMaxLength";
+        if (propLower == "scrollbars") return "vb6_RTB_GetScrollBars";
+        if (propLower == "wordwrap") return "vb6_RTB_GetWordWrap";
+        // C3 扩展读数（不是 VB6 属性）：控件自己的滚动量程 —— "滚动条活没活"的硬证人。
+        if (propLower == "vscrollrange") return "vb6_RTB_GetVScrollRange";
+        if (propLower == "hscrollrange") return "vb6_RTB_GetHScrollRange";
+        if (propLower == "visible") return "vb6_GetControlVisible";
+        if (propLower == "enabled") return "vb6_GetControlEnabled";
+        break;
     // C29-5a: Toolbar 的标量属性面。改之前这枚控件连窗口都没有 (被"ImageList || Toolbar
     // 走 CoCreateInstance"那一组扣住)，读一个 tb1.Visible 就是 C2065: vb6_hwnd_tb1 未声明。
     // ShowTips / TextStyle / AllowCustomize 的真值在 GWL_STYLE 上，Align 存窗口属性。
@@ -755,6 +784,20 @@ std::string CCodeGen::getControlPropWriteFn(FrmControlType ctrlType, const std::
         if (propLower == "visible") return "vb6_SetControlVisible";
         if (propLower == "enabled") return "vb6_SetControlEnabled";
         break;
+    // C29-RT-a: RichTextBox 写侧。ScrollBars 刻意**没有**写口 —— 它是滚动条子窗口的创建参数，
+    // 事后 SetWindowLong 只有外观、量程停在默认（探针量出来的，见 029 §九 本格）；发一条
+    // "写了但没用"的 setter 比不发更难查，所以运行期一律读回设计期那个值。
+    case FrmControlType::RichTextBox:
+        if (propLower == "text") return "vb6_SetControlText";
+        if (propLower == "selstart") return "vb6_RTB_SetSelStart";
+        if (propLower == "sellength") return "vb6_RTB_SetSelLength";
+        if (propLower == "seltext") return "vb6_RTB_SetSelText";
+        if (propLower == "readonly") return "vb6_RTB_SetReadOnly";
+        if (propLower == "maxlength") return "vb6_RTB_SetMaxLength";
+        if (propLower == "wordwrap") return "vb6_RTB_SetWordWrap";
+        if (propLower == "visible") return "vb6_SetControlVisible";
+        if (propLower == "enabled") return "vb6_SetControlEnabled";
+        break;
     // C29-5a: Toolbar 写侧 (与读侧同一批四条 + 通用两条)。
     case FrmControlType::Toolbar:
         if (propLower == "showtips") return "vb6_Toolbar_SetShowTips";
@@ -822,6 +865,7 @@ void CCodeGen::emitDesignerStyleProps(const FrmControl& ctrl, const std::string&
         case FrmControlType::PictureBox:
         case FrmControlType::Image:
         case FrmControlType::TextBox:
+        case FrmControlType::RichTextBox:   // C29-RT-a: 原生这枚的边框就在 WS_EX_CLIENTEDGE 上
             c_.emitLine("vb6_SetBorderStyle(" + hw + ", " + std::to_string((int)bsIt->second.intValue) + ");");
             break;
         default:
@@ -874,6 +918,20 @@ long CCodeGen::controlTypeStyleBits(const FrmControl& ctrl) const {
                 int sb = (int)sbIt->second.intValue;
                 if (sb == 1 || sb == 3) style |= kWsVscroll;
                 if (sb == 2 || sb == 3) style |= kWsHscroll;
+            }
+            break;
+        }
+        // C29-RT-a: 与顶层那条创建样式**同一口径**（容器子控件走的就是这条路，账 #83）。
+        // 注意枚举与上面的 TextBox 相反：VB6 文档里 RichTextBox 的 ScrollBars 是
+        // 0 无 / 1 水平 / 2 垂直 / 3 两者，TextBox 那一格把 1/2 用反了（既有缺陷，未修）。
+        case FrmControlType::RichTextBox: {
+            style |= kEsMulti;
+            auto sbIt = ctrl.properties.find("ScrollBars");
+            if (sbIt != ctrl.properties.end()) {
+                int sb = (int)sbIt->second.intValue;
+                if (sb == 1 || sb == 3) style |= kWsHscroll;
+                if (sb == 2 || sb == 3) style |= kWsVscroll;
+                if (sb != 0) style |= 0x00002000L;   // ES_DISABLENOSCROLL（与顶层那条同）
             }
             break;
         }
