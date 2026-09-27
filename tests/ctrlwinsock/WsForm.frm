@@ -97,6 +97,21 @@ Private gConnT As Long          ' wsT 的 Connect 事件次数（握手完成那
 Private gArrS As Long           ' wsS 的 DataArrival 次数
 Private gTotS As Long           ' wsS 各次 bytesTotal 的合计
 Private gClsS As Long           ' wsS 的 Close 事件次数
+Private gProgSum As Long        ' wsT 的 SendProgress 累计字节数（**总长度**才是判据，截数不是）
+Private gProgN As Long          ' wsT 的 SendProgress 次数（证人用，不当判据）
+Private gDoneT As Long          ' wsT 的 SendComplete 次数
+Private gProg0 As Long          ' 大 payload 那一笔开始前的 gProgSum（前面的小发送也算在里面）
+Private gDone0 As Long          ' 同上，SendComplete 的起点
+Private gArrE As Long           ' wsE 的 DataArrival 次数（证人用）
+Private gReqE As Long           ' wsE 的 ConnectionRequest 次数
+Private gReqEId As Long         ' wsE 最近一次的 requestID
+Private gGotE As String         ' wsE 每次 DataArrival 当场取走的那一段
+Private gGotEAll As String      ' 拼起来的全部内容与 payload 直接比（`=`，不吃 Len()）
+Private gGotEBytes As Long      ' wsE 累计取到的字节数
+Private gBig As String          ' WS-d 那轮的大 payload
+Private k As Integer            ' 拼 gBig 的循环变量
+Private gWant As Long           ' payload 的字节数（2^20，写死当尺，不用 Len 量自己（#115））
+Private gWait As Long           ' 等前提成立的原地等拍计数（见 evtTimer_Timer 顶上那道闸）
 Private gErrCnt As Long         ' wsD 的 Error 事件次数
 Private gErrN As Long           ' 最近一次 Error 带回来的编号
 Private gErrD2 As String        ' 用 `Description & ""` 复制走的描述：RTL 放掉原串之后仍要读得到
@@ -127,6 +142,19 @@ End Sub
 ' ---------------- C29-WS-a: UDP 一整轮（一步一 tick） ----------------
 Private Sub evtTimer_Timer()
     Static step As Integer
+
+    ' --- 通用闸：FD_ACCEPT 落在哪一拍上没有承诺、一笔 1 MiB 什么时候发完也没有承诺，把判据钉在**固定拍号**上 = 随机红
+    '     （本文件在 x64 上复跑时就红过一次：第二轮的受理晚到了一拍，后面五条一起倒）。前提没到就原地等下一拍，
+    '     上限 60 拍（Timer = 120ms ⇒ 约 7s）；超上限照样往下走 ⇒ 判据会红，但不会把整件夹具拖到 run timeout。
+    Dim gateOk As Boolean
+    gateOk = True
+    If step = 20 Or step = 21 Then gateOk = (gReqE >= 1)
+    If step = 25 Then gateOk = (gDoneT > gDone0 And gGotEBytes >= gWant)
+    If Not gateOk Then
+        gWait = gWait + 1
+        If gWait < 60 Then Exit Sub
+    End If
+    gWait = 0
     Dim s As String
 
     If step = 0 Then
@@ -272,7 +300,7 @@ Private Sub evtTimer_Timer()
         ' 堆块，比如 "WS38="）。要留就得 & "" 复制走，WS40 钉的正是这条。
         Debug.Print "W=" & gErrCnt & "/" & gErrN & "/" & gErrSC & "/" & gErrHC & "/" & gErrCD
     ElseIf step = 17 Then
-        Debug.Print "WS40=" & TF(Len(gErrD2) > 0 And wsD.State = 9)
+        Debug.Print "WS40=" & TF(gErrD2 <> "" And wsD.State = 9)
         ' 出错之后用户显式 Close 就回 sckClosed（State 不会自己从 9 爬回去）
         wsD.Close
         wsE.Close
@@ -285,8 +313,45 @@ Private Sub evtTimer_Timer()
         Debug.Print "W=" & gReqS & "/" & gReq1 & "/" & gClsS & "/" & wsS.State
         Debug.Print "P=" & gPA & "/" & gPB & "/" & gPS & "/" & gStB & "/" & gArrA & "/" & gArrB
         Debug.Print "P2=" & gConnT & "/" & gConnS & "/" & gArrS & "/" & gTotS & "/" & gReq2
-    End If
-    If step = 17 Then
+    ElseIf step = 18 Then
+        ' ===================== C29-WS-d: 一笔大过内核发送缓冲的 SendData =====================
+        ' 老控件在这一格的形态是"界面卡死在阻塞 send 上"或"剩下的静默丢"。C3 的填法：一次交不完
+        ' 就进这条控件自己的发送队列 + 挂 FD_WRITE，边交边报 SendProgress，全交完报 SendComplete。
+        wsE.Bind 0
+        wsE.Listen
+        Debug.Print "WS42=" & TF(wsE.State = 2 And wsE.LocalPort > 0)
+    ElseIf step = 19 Then
+        gBig = "x"
+        For k = 1 To 20
+            gBig = gBig & gBig              ' 2^20 个字符，全 ASCII ⇒ 字节数 = 字符数 = 1048576
+        Next k
+        gWant = 1048576                     ' 刻意大到内核两端缓冲装不下 ⇒ 真走发送队列
+        wsT.RemoteHost = "127.0.0.1"
+        wsT.RemotePort = wsE.LocalPort
+        wsT.Connect
+        Debug.Print "WS43=" & TF(wsT.State = 7 And gConnT = 2)
+    ElseIf step = 20 Then
+        ' 走到这一步时上面那道闸已经保证 FD_ACCEPT 到了（没到就一直等，最多 60 拍）。
+        If gReqE >= 1 Then wsE.Accept gReqEId
+    ElseIf step = 21 Then
+        If gReqE >= 1 And wsE.State <> 7 Then wsE.Accept gReqEId
+        Debug.Print "WS44=" & TF(gReqE = 1 And gReqEId > 0)
+        Debug.Print "WS45=" & TF(wsE.State = 7 And gArrE = 0)
+    ElseIf step = 22 Then
+        gProg0 = gProgSum                   ' 前几轮的小发送也算过账，判据一律问增量
+        gDone0 = gDoneT
+        wsT.SendData gBig                   ' 交出去就走，不在这里等内核
+    ElseIf step = 25 Then
+        ' 三条判据全部问**总量**：SendProgress 的字节合计 = payload 长度（分了几截是内核缓冲
+        ' 大小的函数，不算承诺，与 WS-a 那格"两笔 UDP 合并成一次 DataArrival"同一条教训）；
+        ' SendComplete 一笔一次；接收侧按事件参数 bytesTotal 累计，内容与 payload 直接比。
+        Debug.Print "WS46=" & TF(gProgSum - gProg0 = gWant And wsT.ByteTransferred = gWant)
+        Debug.Print "WS47=" & TF(gDoneT - gDone0 = 1 And gGotEBytes = gWant)
+        Debug.Print "WS48=" & TF(gGotEAll = gBig)
+        wsT.Close
+        wsE.Close
+        Debug.Print "W=" & gProgSum & "/" & gProgN & "/" & gDoneT & "/" & gGotEBytes
+        Debug.Print "P3=" & gReqE & "/" & gReqEId & "/" & gWant
         Debug.Print "CTRLWINSOCK-DONE"
         Unload Me
     End If
@@ -348,6 +413,28 @@ Private Sub wsD_Error(ByVal Number As Integer, Description As String, ByVal Scod
     gErrHC = HelpContext
     gErrCD = CancelDisplay
     CancelDisplay = True
+End Sub
+
+' ---------------- C29-WS-d：发送侧两条事件 + 第二对服务端的三面 ----------------
+Private Sub wsT_SendProgress(ByVal bytesSent As Long)
+    gProgSum = gProgSum + bytesSent
+    gProgN = gProgN + 1
+End Sub
+
+Private Sub wsT_SendComplete()
+    gDoneT = gDoneT + 1
+End Sub
+
+Private Sub wsE_ConnectionRequest(ByVal requestID As Long)
+    gReqE = gReqE + 1
+    gReqEId = requestID
+End Sub
+
+Private Sub wsE_DataArrival(ByVal bytesTotal As Long)
+    gArrE = gArrE + 1
+    wsE.GetData gGotE                     ' 当场取走：接收侧也一次读干净，窗口不会堆爆
+    gGotEAll = gGotEAll & gGotE
+    gGotEBytes = gGotEBytes + bytesTotal  ' 计数吃事件参数，不用 Len(模块级 String)（#115）
 End Sub
 
 Private Sub wsT_Connect()
