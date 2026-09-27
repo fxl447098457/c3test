@@ -105,6 +105,12 @@ Private gDone0 As Long          ' 同上，SendComplete 的起点
 Private gArrE As Long           ' wsE 的 DataArrival 次数（证人用）
 Private gReqE As Long           ' wsE 的 ConnectionRequest 次数
 Private gReqEId As Long         ' wsE 最近一次的 requestID
+Private gReqEId2 As Long        ' 第二条连接的 requestID（WS-f 那格的主证人）
+Private gClsE As Long           ' wsE 的 Close 事件次数（数据面空出来的证人）
+Private gReqE3 As Long           ' 第三条连接的 requestID（数据面**还被占着**的时候来的那一条）
+Private gGotG As String          ' 第三条连接上取回来的内容
+Private gPES As Long           ' wsE 这一轮真正在听的那个端口（gPE 是撞口那一轮的，别混）
+Private gGotF As String         ' 第二条连接上拿回来的内容
 Private gGotE As String         ' wsE 每次 DataArrival 当场取走的那一段
 Private gGotEAll As String      ' 拼起来的全部内容与 payload 直接比（`=`，不吃 Len()）
 Private gGotEBytes As Long      ' wsE 累计取到的字节数
@@ -164,6 +170,12 @@ Private Sub evtTimer_Timer()
     If step = 25 Then gateOk = (gDoneT > gDone0 And gGotEBytes >= gWant)
     If step = 27 Then gateOk = (wsB.BytesReceived >= 5)
     If step = 28 Then gateOk = (wsB.BytesReceived >= 7)
+    If step = 29 Then gateOk = (gClsE >= 1)
+    If step = 30 Then gateOk = (gReqE >= 2)
+    If step = 32 Then gateOk = (wsT.BytesReceived >= 9)
+    If step = 33 Then gateOk = (gReqE >= 3)
+    If step = 35 Then gateOk = (gClsE >= 2)
+    If step = 36 Then gateOk = (wsT2.BytesReceived >= 9)
     If Not gateOk Then
         gWait = gWait + 1
         If gWait < 25 Then Exit Sub
@@ -334,6 +346,7 @@ Private Sub evtTimer_Timer()
         ' 就进这条控件自己的发送队列 + 挂 FD_WRITE，边交边报 SendProgress，全交完报 SendComplete。
         wsE.Bind 0
         wsE.Listen
+        gPES = wsE.LocalPort
         Debug.Print "WS42=" & TF(wsE.State = 2 And wsE.LocalPort > 0)
     ElseIf step = 19 Then
         gBig = "x"
@@ -363,8 +376,7 @@ Private Sub evtTimer_Timer()
         Debug.Print "WS46=" & TF(gProgSum - gProg0 = gWant And wsT.ByteTransferred = gWant)
         Debug.Print "WS47=" & TF(gDoneT - gDone0 = 1 And gGotEBytes = gWant)
         Debug.Print "WS48=" & TF(gGotEAll = gBig)
-        wsT.Close
-        wsE.Close
+        wsT.Close                          ' 只关客户端那头；wsE 的监听面留给下面 WS-f 那一轮
         Debug.Print "W=" & gProgSum & "/" & gProgN & "/" & gDoneT & "/" & gGotEBytes
         Debug.Print "P3=" & gReqE & "/" & gReqEId & "/" & gWant
         ' 本轮只把"发送侧两条事件"钉下；取数的 Byte 那一形在下面的 WS-e 那轮
@@ -395,6 +407,56 @@ Private Sub evtTimer_Timer()
         wsB.Close
         gNB = (UBound(gBytes) - LBound(gBytes) + 1) * 100 + (UBound(gPart) - LBound(gPart) + 1) * 10              + (UBound(gRest) - LBound(gRest) + 1)
         Debug.Print "W1=" & gNB & "/" & gArrB
+        ' 第一条连接已在上面关掉，这里只把 UDP 那一轮收尾
+    ElseIf step = 29 Then
+        ' ============= C29-WS-f：第二条连接（旧账"受理过一条之后 FD_ACCEPT 不再来"的定性重量）=============
+        ' 之前的结论是把判据写在固定拍号上量出来的，而 WS-d 那一跑证明了"到达的拍号也是时序"
+        ' （门 #165 红的就是这条）⇒ 现在用闸等到事件真到再问。这一格若是绿的，多客户端就从
+        ' "不可用"升级成"同一枚控件串行可用"。
+        Debug.Print "WS55=" & TF(gClsE >= 1 And wsT.State = 0)
+        wsT.RemoteHost = "127.0.0.1"
+        wsT.RemotePort = gPES
+        wsT.Connect
+        Debug.Print "W9=" & wsT.State & "/" & gConnT & "/" & gPES & "/" & wsE.LocalPort
+        Debug.Print "WS56=" & TF(wsT.State = 7 And gConnT = 3)
+    ElseIf step = 30 Then
+        Debug.Print "WS57=" & TF(gReqE = 2 And gReqEId2 > 0 And gReqEId2 <> gReqEId)
+        Debug.Print "W2=" & gReqE & "/" & gReqEId & "/" & gReqEId2 & "/" & gClsE & "/" & wsE.State
+        If gReqEId2 > 0 Then wsE.Accept gReqEId2
+    ElseIf step = 31 Then
+        Debug.Print "WS58=" & TF(wsE.State = 7)
+        wsE.SendData "second-ok"
+    ElseIf step = 32 Then
+        wsT.GetData gGotF
+        Debug.Print "WS59=" & TF(gGotF = "second-ok")
+        ' 关键的一问：**数据面还被第二条占着**的时候，第三条连接的请求到不到？（VB6 要控件数组
+        ' 绕的就是这个，而 C3 的监听面与数据面是分开的 ⇒ 监听根本没停过）
+        wsT2.Close                          ' WS-b 那一轮它还连着：先收干净，否则 Connect 被拒是**对的**
+        wsT2.RemoteHost = "127.0.0.1"
+        wsT2.RemotePort = gPES
+        wsT2.Connect
+        Debug.Print "W5=" & wsT2.State & "/" & wsT2.LocalPort & "/" & gPES & "/" & wsE.LocalPort & "/" & gErrN & "/" & gErrCnt
+        Debug.Print "WS60=" & TF(wsT2.State = 7)
+    ElseIf step = 33 Then
+        Debug.Print "WS61=" & TF(gReqE = 3 And gReqE3 > 0 And gReqE3 <> gReqEId2)
+        Debug.Print "WS62=" & TF(wsE.State = 7)
+        wsE.Accept gReqE3
+        ' 占着的时候受理：按 VB6 的口径应当被拒、并且不搅动状态
+        Debug.Print "WS63=" & TF(wsE.State = 7)
+    ElseIf step = 34 Then
+        wsT.Close                          ' 收掉第二条，把数据面空出来
+    ElseIf step = 35 Then
+        wsE.Accept gReqE3                  ' 空出来之后受理同一条：这才是"排队不丢"的证人
+        Debug.Print "WS64=" & TF(wsE.State = 7)
+        wsE.SendData "third-ok"
+    ElseIf step = 36 Then
+        wsT2.GetData gGotG
+        Debug.Print "WS65=" & TF(gGotG = "third-ok")
+        Debug.Print "W3=" & gReqE & "/" & gReqEId2 & "/" & gReqE3 & "/" & gClsE & "/" & wsE.State
+        wsE.Close
+        wsT.Close
+        wsT2.Close
+        Debug.Print "W4=" & gArrE & "/" & gDoneT & "/" & gConnT
         Debug.Print "CTRLWINSOCK-DONE"
         Unload Me
     End If
@@ -470,7 +532,17 @@ End Sub
 
 Private Sub wsE_ConnectionRequest(ByVal requestID As Long)
     gReqE = gReqE + 1
-    gReqEId = requestID
+    If gReqE = 1 Then
+        gReqEId = requestID
+    ElseIf gReqE = 2 Then
+        gReqEId2 = requestID
+    Else
+        gReqE3 = requestID
+    End If
+End Sub
+
+Private Sub wsE_Close()
+    gClsE = gClsE + 1
 End Sub
 
 Private Sub wsE_DataArrival(ByVal bytesTotal As Long)
