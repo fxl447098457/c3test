@@ -2617,7 +2617,7 @@ if ($Category -in @("all", "run", "vbp")) {
     # （第一版拿 DoEvents 连泵 60 次等包到，本机就假红过一次 —— 见 029 §九 本格）。
     # 注册放在整个 vbp 块**最后**：这条会真的建窗（不可见的身份窗 + 一枚窗体），而 C29-9b
     # 量过"多开一窗就让后面的按位置算点心的用例翻红"，排最后就不会再影响任何用例。
-    $wsNeedles = @("CTRLWINSOCK-DONE") + (1..48 | ForEach-Object { "WS$_=Y" })
+    $wsNeedles = @("CTRLWINSOCK-DONE") + (1..54 | ForEach-Object { "WS$_=Y" })
     Test-Vbp "ctrlwinsock" "$Tests\ctrlwinsock\WsApp.vbp" $wsNeedles
     Test-Vbp "ctrlwinsock_x86" "$Tests\ctrlwinsock\WsApp.vbp" $wsNeedles -Arch "x86"
     # 发码正面：类名 + 不可见 0x0 的创建参数（与 Timer 同一枚 style 值）+ 设计期 Create/Init
@@ -2650,7 +2650,9 @@ if ($Category -in @("all", "run", "vbp")) {
         # WS-d：发送侧两条事件的注册序号（4 = SendComplete、5 = SendProgress）
         'vb6_Ws_SetEventHandler((void*)vb6_hwnd_wsT, 4, (void*)vb6_wsT_SendComplete); }',
         'vb6_Ws_SetEventHandler((void*)vb6_hwnd_wsT, 5, (void*)vb6_wsT_SendProgress); }',
-        'vb6_Ws_SetEventHandler((void*)vb6_hwnd_wsE, 3, (void*)vb6_wsE_ConnectionRequest); }'
+        'vb6_Ws_SetEventHandler((void*)vb6_hwnd_wsE, 3, (void*)vb6_wsE_ConnectionRequest); }',
+        'vb6_Ws_GetData((void*)vb6_hwnd_wsB, &gBytes, (int32_t)8209, (-1))',
+        'vb6_Ws_GetData((void*)vb6_hwnd_wsB, &gPart, (int32_t)8209, (int32_t)3)'
     )
     # 反面：一条都不许落回"把 HWND 当 IDispatch 用"那条假路（本线踩过三次的那声不响），
     # LocalPort / LocalIP 也**不许有写口** —— 那两格在 VB6 就是运行期只读（端口归 Bind 管、

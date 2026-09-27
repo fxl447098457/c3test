@@ -135,6 +135,9 @@
     addConst("vbDecimal", Vb6Type::Long, 14);
     addConst("vbUserDefinedType", Vb6Type::Long, 36);
     addConst("vbArray", Vb6Type::Long, 8192);
+    // VB6 里 `Winsock.GetData b, vbByteArray` 这类写法直接把 8209 当常量用；
+    // 表里已经有 vbArray(8192) 与 vbByte(17)，唯独缺这个合成值 ⇒ 补上。
+    addConst("vbByteArray", Vb6Type::Long, 8209);   // VT_ARRAY|VT_UI1
     addConst("vbDataObject", Vb6Type::Long, 13);
 
     // MsgBox additional constants

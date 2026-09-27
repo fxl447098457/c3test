@@ -24,6 +24,8 @@
 
 #include "vb6forms.h"
 #include "vb6forms_internal.h"
+#include "vb6rtl_variant.h"   /* vb6rtl_array.h 里要 vb6_VARIANT，先后顺序不能反 */
+#include "vb6rtl_array.h"   /* vb6_SafeArray1D / Create1D / Destroy1D（ GetData 的 Byte 那一形要） */
 #include <oleauto.h>   /* SysAllocString / SysFreeString / SysReAllocStringLen */
 #include <string.h>
 #include <wchar.h>
@@ -42,6 +44,7 @@
 #define VB6_WS_RX_MAX        (1u << 20)   // 单枚控件接收缓冲的天花板（1 MB），超了就丢新的
 #define VB6_WS_TX_MAX        (8u << 20)   // 发送队列的上限（8 MB）：装不下就报 WSAENOBUFS，不静默丢
 #define VB6_WS_TX_CHUNK      (1u << 16)   // 一次 send 最多交 64 KB —— SendProgress 因此有"进度"的意义
+#define VB6_WS_T_BYTEARRAY 8209  // vbByteArray = VT_ARRAY|VT_UI1(8192+17)：GetData/PeekData 的 Byte 数组那一形
 
 typedef void (*vb6_WsCbVoid)(void);
 typedef void (*vb6_WsCbLong)(int32_t);          // DataArrival / ConnectionRequest（ByVal As Long）
@@ -900,30 +903,55 @@ static BSTR vb6_WsTake(struct vb6_WsInstance* e, int32_t maxLen) {
     return (BSTR)SysAllocStringLen(NULL, 0);   /* 空串：与 vb6_BSTR_Empty 同物，这枚 TU 没引那个头 */
 }
 
-int32_t vb6_Ws_GetData(void* hwnd, void* outBstr, int32_t type, int32_t maxLen) {
+// Byte 那一形的取数：把 [rxHead, rxHead+take) 这段**原始字节**装成一枚新的 vb6_sa_byte 数组交给调用方。
+// VB6 的形态就是"控件把那个变量的数组描述符换掉"，所以旧的那枚由我们销毁（不销就是每取一次漏一块）；
+// 只销 signature 对得上的 1D 把手（Fix 082g 那枚魔数就是为这种场合准备的）。
+// take = 0 给的是 count=0 的空数组（UBound=-1、LBound=0 ⇒ `UBound-LBound+1` 读出 0，
+// 与 VB6"没数据就是空数组"同形）。consume = 0 是 PeekData 那一半：形状照做，但缓冲的头不动。
+static int32_t vb6_WsTakeBytes(struct vb6_WsInstance* e, void* out, int32_t maxLen, int consume) {
+    vb6_SafeArray1D** dst = (vb6_SafeArray1D**)out;
+    vb6_SafeArray1D* arr;
+    uint32_t take = e->rxLen;
+    if (maxLen > 0 && (uint32_t)maxLen < take) take = (uint32_t)maxLen;
+    arr = vb6_SafeArrayCreate1D(vb6_sa_byte, 0, (int32_t)take - 1);
+    if (!arr) return 0;
+    if (take) memcpy(arr->data, e->rx + e->rxHead, take);
+    if (consume) {
+        e->rxHead += take;
+        e->rxLen -= take;
+        if (!e->rxLen) e->rxHead = 0;
+    }
+    if (*dst && (*dst)->signature == 0x5A1D) vb6_SafeArrayDestroy1D(*dst);
+    *dst = arr;
+    return (int32_t)take;
+}
+
+int32_t vb6_Ws_GetData(void* hwnd, void* out, int32_t type, int32_t maxLen) {
     struct vb6_WsInstance* e = vb6_WsOf((HWND)hwnd);
     BSTR got;
-    (void)type;                              // Byte 数组那一形在 WS-c；现在只有 String
-    if (!e || !outBstr) return 0;
+    if (!e || !out) return 0;
+    // vbByteArray(8209 = VT_ARRAY|VT_UI1) 那一形：交出去的是**线上那串字节本身**，
+    // 不过码页翻译 —— 这正是它与 String 那一形的全部区别（String 那形在 vb6_WsTake 里过 ACP）。
+    if (type == VB6_WS_T_BYTEARRAY) return vb6_WsTakeBytes(e, out, maxLen, 1);
     got = vb6_WsTake(e, maxLen);
-    *(BSTR*)outBstr = got;
+    *(BSTR*)out = got;
     return (int32_t)SysStringLen(got);
 }
 
-int32_t vb6_Ws_PeekData(void* hwnd, void* outBstr, int32_t type, int32_t maxLen) {
+int32_t vb6_Ws_PeekData(void* hwnd, void* out, int32_t type, int32_t maxLen) {
     struct vb6_WsInstance* e = vb6_WsOf((HWND)hwnd);
     uint32_t head, len;
-    BSTR out;
-    (void)type;
-    if (!e || !outBstr) return 0;
+    BSTR res;
+    if (!e || !out) return 0;
+    if (type == VB6_WS_T_BYTEARRAY) return vb6_WsTakeBytes(e, out, maxLen, 0);
     head = e->rxHead; len = e->rxLen;
     if (maxLen > 0 && (uint32_t)maxLen < len) len = (uint32_t)maxLen;
     {
         int wn = MultiByteToWideChar(CP_ACP, 0, e->rx + head, (int)len, NULL, 0);
-        out = SysAllocStringLen(NULL, wn > 0 ? wn : 0);
-        if (out && wn > 0) MultiByteToWideChar(CP_ACP, 0, e->rx + head, (int)len, out, wn);
+        res = SysAllocStringLen(NULL, wn > 0 ? wn : 0);
+        if (res && wn > 0) MultiByteToWideChar(CP_ACP, 0, e->rx + head, (int)len, res, wn);
     }
-    *(BSTR*)outBstr = out;                   // **不消费**：这是 PeekData 与 GetData 唯一的差别
+    *(BSTR*)out = res;                       // **不消费**：这是 PeekData 与 GetData 唯一的差别
     return (int32_t)len;
 }
 

@@ -24,7 +24,7 @@
 
 ---
 
-## C3 的实现面（C29-WS-a / WS-b / WS-c / WS-d 已做：身份窗 + 状态机 + 属性面 + UDP 一整轮 + TCP 一整轮 + Error + 发送面两条事件）
+## C3 的实现面（C29-WS-a 到 WS-e 已做：身份窗 + 状态机 + 属性面 + UDP 一整轮 + TCP 一整轮 + Error + 发送面两条事件 + 取数两个形）
 
 C3 里 **Winsock 不走 `MSWINSCK.OCX`**（本页没写、但 VB6 工程发布清单里那条"把 ocx 装进 System32"
 的要求在 C3 不存在）：那颗 OCX 是 32 位 inproc 服务器，64 位进程里 `CoCreateInstance` 直接失败。
@@ -45,7 +45,7 @@ C3 把它复刻成**原生 Winsock2**（`ws2_32.dll`，`winsock2.h` / `ws2tcpip.
 | `W.Accept requestID` | 从兜里（`FD_ACCEPT` 时已 `accept` 好的队列）领出那条连接，挂上读写通知 |
 | `W.Connect` | 解析 `RemoteHost` → **逐条候选地址试到通为止**（见下面第 3 条） |
 | `W.SendData s` | UDP：一次 `sendto` 发完即走；TCP：**进队列就走**，内核装不下的那些留在控件自己的发送队列里，随 `FD_WRITE` 分块泵出去，边交边报 `SendProgress`、交完报 `SendComplete`（见下面第 8 条）。线格式 = 本机 ANSI 码页 |
-| `W.GetData v[, type][, maxlen]` | 从缓冲取；缺省 = 全取走。`type` 那一形的 Byte 数组**还没做** |
+| `W.GetData v[, type][, maxlen]` | 从缓冲取；缺省 = 全取走。`v` 是字符串时过一道本机码页；`v()` 是 Byte 数组、`type` 写 `vbByteArray`(8209) 时给的是**线上那串字节本身**，不过码页，而且控件**重建那枚数组**（LBound 回 0，没数据就是空数组） |
 | `W.PeekData v` | 同一把尺，但**不消费** —— 这是它与 `GetData` 唯一的差别 |
 | `W.Close` | 关掉这条控件的两张面（监听 + 数据），兜里排队的连接一起撤 |
 | `W_Bind` 撞口 / `W_Connect` 连不上 | `Error(Number, Description, Scode, Source, HelpFile, HelpContext, CancelDisplay)` + `State` 落 `sckError`(9) |
@@ -95,5 +95,5 @@ C3 把它复刻成**原生 Winsock2**（`ws2_32.dll`，`winsock2.h` / `ws2tcpip.
 
 ### 还没做的一格
 
-`GetData` 的 Byte 数组那一形（目前只有字符串/数值）；**多客户端**（原因参见上面第 9 条）。
-UDP 的广播（`sckBroadcast`）也没接。
+`GetData` 的 Byte 数组那一形**已做**（C29-WS-e）。剩：**多客户端**（原因参见上面第 9 条）
+与 UDP 广播（`sckBroadcast`）。

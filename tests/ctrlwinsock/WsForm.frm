@@ -111,6 +111,11 @@ Private gGotEBytes As Long      ' wsE 累计取到的字节数
 Private gBig As String          ' WS-d 那轮的大 payload
 Private k As Integer            ' 拼 gBig 的循环变量
 Private gWant As Long           ' payload 的字节数（2^20，写死当尺，不用 Len 量自己（#115））
+Private gBytes() As Byte        ' WS-e： GetData 的 Byte 那一形原始字节
+Private gPart() As Byte         ' 带 maxLen 的那一取
+Private gRest() As Byte         ' 剩下那截的再取
+Private gNil() As Byte          ' 取完之后再取一次（空数组）
+Private gNB As Long             ' 证人：三轮取到的元素个数
 Private gWait As Long           ' 等前提成立的原地等拍计数（见 evtTimer_Timer 顶上那道闸）
 Private gErrCnt As Long         ' wsD 的 Error 事件次数
 Private gErrN As Long           ' 最近一次 Error 带回来的编号
@@ -157,6 +162,8 @@ Private Sub evtTimer_Timer()
     If step = 14 Then gateOk = (gClsS >= 1)
     If step = 20 Or step = 21 Then gateOk = (gReqE >= 1)
     If step = 25 Then gateOk = (gDoneT > gDone0 And gGotEBytes >= gWant)
+    If step = 27 Then gateOk = (wsB.BytesReceived >= 5)
+    If step = 28 Then gateOk = (wsB.BytesReceived >= 7)
     If Not gateOk Then
         gWait = gWait + 1
         If gWait < 25 Then Exit Sub
@@ -360,6 +367,34 @@ Private Sub evtTimer_Timer()
         wsE.Close
         Debug.Print "W=" & gProgSum & "/" & gProgN & "/" & gDoneT & "/" & gGotEBytes
         Debug.Print "P3=" & gReqE & "/" & gReqEId & "/" & gWant
+        ' 本轮只把"发送侧两条事件"钉下；取数的 Byte 那一形在下面的 WS-e 那轮
+    ElseIf step = 26 Then
+        ' ======================= C29-WS-e: GetData 的 Byte 数组那一形 =======================
+        ' 这一形的区别不是“取得动作不同”，而是**取出来的东西不同**：String 那形过一道本机码页，
+        ' Byte 那形给的是线上那串字节本身，而且 VB6 是**控件重建那个数组**（LBound 回 0）。
+        ' 载荷一律纯 ASCII（任何码页下都是逐字节相等），否则字节数随 CI 的 ACP 变（同账 #79 那族）。
+        wsA.Bind 0
+        wsA.RemoteHost = "127.0.0.1"
+        wsA.RemotePort = gPB
+        wsA.SendData "abcde"
+    ElseIf step = 27 Then
+        wsB.GetData gBytes, vbByteArray
+        wsB.GetData gNil, vbByteArray
+        Debug.Print "WS49=" & TF(UBound(gBytes) - LBound(gBytes) + 1 = 5 And LBound(gBytes) = 0)
+        Debug.Print "WS50=" & TF(gBytes(0) = 97 And gBytes(4) = 101)
+        Debug.Print "WS51=" & TF(UBound(gNil) - LBound(gNil) + 1 = 0 And wsB.BytesReceived = 0)
+        wsA.SendData "abcdefg"
+    ElseIf step = 28 Then
+        ' 带 maxLen 的那一取：VB6 只给前三个字节，剩下四个必须还在缓冲里（不丢不重）
+        wsB.GetData gPart, vbByteArray, 3
+        Debug.Print "WS52=" & TF(UBound(gPart) - LBound(gPart) + 1 = 3 And gPart(2) = 99)
+        Debug.Print "WS53=" & TF(wsB.BytesReceived = 4)
+        wsB.GetData gRest, vbByteArray
+        Debug.Print "WS54=" & TF(UBound(gRest) - LBound(gRest) + 1 = 4 And gRest(0) = 100 And gRest(3) = 103)
+        wsA.Close
+        wsB.Close
+        gNB = (UBound(gBytes) - LBound(gBytes) + 1) * 100 + (UBound(gPart) - LBound(gPart) + 1) * 10              + (UBound(gRest) - LBound(gRest) + 1)
+        Debug.Print "W1=" & gNB & "/" & gArrB
         Debug.Print "CTRLWINSOCK-DONE"
         Unload Me
     End If
