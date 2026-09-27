@@ -64,6 +64,7 @@ Private gGot2 As String         ' 紧接着第二次 GetData 拿到的内容
 Private gPeek As String         ' PeekData 拿到的内容
 Private gGot3 As String         ' 再 GetData 拿到的内容
 Private gGot4 As String         ' 两段连发拼回来的内容
+Private gGot5 As String         ' 关掉之后"不该再来"的那一次取读
 Private gPA As Long             ' 两枚控件各自被系统挑中的端口（跨 tick 要用，不能放局部）
 Private gPB As Long
 
@@ -117,26 +118,26 @@ Private Sub evtTimer_Timer()
         Debug.Print "WS14=" & TF(gPeek = "peek-me" And wsB.BytesReceived = 7)
         wsB.GetData gGot3
         Debug.Print "WS15=" & TF(gGot3 = "peek-me" And wsB.BytesReceived = 0)
-        ' 连发两段：UDP 是一条一封，两笔到达 ⇒ 两次 DataArrival；缓冲拼接由 RTL 负责
+        ' 连发两段：两笔都得拿回来。**几笔到达不算判据** —— 见下面 WS17 那段
         wsA.SendData "AB"
         wsA.SendData "CD"
     ElseIf step = 4 Then
         ' --- 16..17 VB6 那条"收到之后 RemoteHost 就是发件人"的语义：wsB 的 RemotePort 在 .frm
         '      里没写过（=0），收到 wsA 的包之后应当等于 A 自己那枚自动挑的端口 ⇒ 回信不用
-        '      谁去告诉 A 它的端口是多少。BytesReceived 此刻是两笔的合计 ---
+        '      谁去告诉 A 它的端口是多少 ---
         Debug.Print "WS16=" & TF(wsB.RemotePort = gPA And gPA > 0)
-        ' 实测：两笔连发（"AB" / "CD"）落在**同一次** FD_READ 里被一次读干净 ⇒
-        ' gArrB 是 3 不是 4，而 bytesTotal 是合计的 4。UDP 的报文边界在这里合并掉了 ——
-        ' 这是"通知里一次读到干净"那条设计的直接后果（换来的代价：不靠对端节奏），
-        ' 需要保边界的项目要把每一笔拆成"读一笔、发一次事件"，那是另一档事（记进 029）。
-        Debug.Print "WS17=" & TF(gArrB = 3 And wsB.BytesReceived = 4)
+        ' 两笔连发的判据问**内容**（"ABCD" 都在、取完就空），不问事件条数：同一对报文在
+        ' x64 上落在同一次 FD_READ 里（本机 gArrB=3），在 CI 的 x86 作业上分成两次（gArrB=4）
+        ' —— 合不合并只取决于那一次 drain 有没有抢到干净，是时序不是语义。第一版把 3 写成了
+        ' 判据，门 #159 的 x86 那格就红在这里（证人面仍在 P= 那行报 gArrB）。
         wsB.GetData gGot4
+        Debug.Print "WS17=" & TF(gGot4 = "ABCD" And wsB.BytesReceived = 0)
         wsB.RemoteHost = "127.0.0.1"
         wsB.RemotePort = gPA
         wsB.SendData "hi-A"
     ElseIf step = 5 Then
         ' --- 18..19 回信到了 A：A 的 DataArrival + A 那侧也把发件地址记了下来（同一族语义）---
-        Debug.Print "WS18=" & TF(gArrA = 1 And gTotA = 4)
+        Debug.Print "WS18=" & TF(gArrA >= 1 And gTotA = 4)
         Debug.Print "WS19=" & TF(wsA.RemoteHost = "127.0.0.1" And wsA.RemotePort = gPB)
         wsA.GetData s
         Debug.Print "WS20=" & TF(s = "hi-A")
@@ -147,7 +148,9 @@ Private Sub evtTimer_Timer()
         wsA.RemotePort = gPB
         wsA.SendData "after-close"
     ElseIf step = 6 Then
-        Debug.Print "WS22=" & TF(gArrB = 3 And wsB.BytesReceived = 0)
+        ' --- 22..24 关掉之后再发：不该有东西到达 wsB（取回来还是空串），也不该有 Close 事件 ---
+        wsB.GetData gGot5
+        Debug.Print "WS22=" & TF(gGot5 = "" And wsB.BytesReceived = 0)
         Debug.Print "WS23=" & TF(wsA.State = 0 And gClsB = 0)
         ' --- 23..24 两条通道各自独立：wsA 的一整轮里 wsB 的 Close 事件一次都不该来；
         '      而 Close 之后 wsA 的 LocalPort 读数保持它绑过的那个（VB6：Close 不清身份）---
