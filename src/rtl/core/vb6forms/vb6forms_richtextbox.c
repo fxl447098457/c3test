@@ -207,6 +207,221 @@ void vb6_RTB_SetWordWrap(void* hwnd, int32_t on) {
     if (h) *(int32_t*)h = on ? -1 : 0;
 }
 
+// ---------------- C29-RT-b：Sel* 的格式面 ----------------
+// 三态怎么问出来的（探针 `.build/rtprobe4.c`，本机读数）：EM_GETCHARFORMAT / EM_GETPARAFORMAT
+// 把返回的 dwMask 里**选区内不一致**那些位**清掉** —— 只问一位时最干净：
+//   全加粗 (20..26 只涂斜体那格反过来看) mask=0xFFFFFFFF / 跨边界 mask=0xFFFFFFFD（那一位没了）
+//   全文（多种属性都参差）mask=0x1FFFFFF1
+// 字符面这条**返回值就等于那张掩码**（rc=-3 即 0xFFFFFFFD），段落面不等（要读结构体里的 dwMask）。
+// VB6 混合回 Null，本项目按布尔给 ⇒ 混合 = False（VB6 文档自己也教 `If .SelBold = True`，
+// 而 `Null = True` 本来就是假，所以两种口径在常见写法下等价）。
+#ifndef CFM_BOLD
+#define CFM_BOLD        0x00000001
+#define CFM_ITALIC      0x00000002
+#define CFM_UNDERLINE   0x00000004
+#define CFM_STRIKEOUT   0x00000008
+#define CFM_COLOR       0x40000000
+#define CFM_FACE        0x20000000
+#define CFM_SIZE        0x80000000
+#define CFE_BOLD        0x00000001
+#define CFE_ITALIC      0x00000002
+#define CFE_UNDERLINE   0x00000004
+#define CFE_STRIKEOUT   0x00000008
+#define CFE_AUTOCOLOR   0x40000000
+#endif
+#ifndef PFA_LEFT
+#define PFA_LEFT        1
+#define PFA_RIGHT       2
+#define PFA_CENTER      3
+#endif
+#ifndef PFM_ALIGNMENT
+#define PFM_ALIGNMENT       0x00000008
+#define PFM_OFFSET          0x00000004
+#define PFM_RIGHTINDENT     0x00000002
+#define PFM_STARTINDENT     0x00000001
+#endif
+
+// 读一位字符效果：掩码里那一位在 = 一致（按 effects 给 True/False），不在 = 混合（给 False）。
+static int32_t vb6_RtbGetEffect(void* hwnd, DWORD bit) {
+    CHARFORMAT2W cf;
+    if (!hwnd) return 0;
+    ZeroMemory(&cf, sizeof(cf));
+    cf.cbSize = sizeof(cf);
+    cf.dwMask = bit;
+    SendMessageW((HWND)hwnd, EM_GETCHARFORMAT, (WPARAM)SCF_SELECTION, (LPARAM)&cf);
+    if (!(cf.dwMask & bit)) return 0;                 /* 混合 ⇒ 本项目按 False 给 */
+    return (cf.dwEffects & bit) ? -1 : 0;
+}
+
+static void vb6_RtbSetEffect(void* hwnd, DWORD bit, int32_t on) {
+    CHARFORMAT2W cf;
+    if (!hwnd) return;
+    ZeroMemory(&cf, sizeof(cf));
+    cf.cbSize = sizeof(cf);
+    cf.dwMask = bit;
+    cf.dwEffects = on ? bit : 0;
+    SendMessageW((HWND)hwnd, EM_SETCHARFORMAT, SCF_SELECTION, (LPARAM)&cf);
+}
+
+int32_t vb6_RTB_GetSelBold(void* hwnd)      { return vb6_RtbGetEffect(hwnd, CFM_BOLD); }
+void    vb6_RTB_SetSelBold(void* hwnd, int32_t on)      { vb6_RtbSetEffect(hwnd, CFM_BOLD, on); }
+int32_t vb6_RTB_GetSelItalic(void* hwnd)    { return vb6_RtbGetEffect(hwnd, CFM_ITALIC); }
+void    vb6_RTB_SetSelItalic(void* hwnd, int32_t on)    { vb6_RtbSetEffect(hwnd, CFM_ITALIC, on); }
+int32_t vb6_RTB_GetSelUnderline(void* hwnd) { return vb6_RtbGetEffect(hwnd, CFM_UNDERLINE); }
+void    vb6_RTB_SetSelUnderline(void* hwnd, int32_t on) { vb6_RtbSetEffect(hwnd, CFM_UNDERLINE, on); }
+int32_t vb6_RTB_GetSelStrikethru(void* hwnd){ return vb6_RtbGetEffect(hwnd, CFM_STRIKEOUT); }
+void    vb6_RTB_SetSelStrikethru(void* hwnd, int32_t on){ vb6_RtbSetEffect(hwnd, CFM_STRIKEOUT, on); }
+
+// SelColor：显式色的判据是**自动色那一位被清掉**（CFE_AUTOCOLOR 与 CFM_COLOR 同位，量过的）。
+// 没涂过色 = 自动色 ⇒ 读回控件自己的前景色（与 VB6 一致：那时 SelColor 就是 ForeColor）。
+// 混合（掩码里没有 CFM_COLOR）⇒ 回 0，与布尔那几条同一口径。
+extern int vb6_GetControlForeColor(void* hwnd);
+
+int32_t vb6_RTB_GetSelColor(void* hwnd) {
+    CHARFORMAT2W cf;
+    if (!hwnd) return 0;
+    ZeroMemory(&cf, sizeof(cf));
+    cf.cbSize = sizeof(cf);
+    cf.dwMask = CFM_COLOR;
+    SendMessageW((HWND)hwnd, EM_GETCHARFORMAT, (WPARAM)SCF_SELECTION, (LPARAM)&cf);
+    if (!(cf.dwMask & CFM_COLOR)) return 0;                       /* 混合 */
+    if (cf.dwEffects & CFE_AUTOCOLOR)                             /* 自动色 */
+        return (int32_t)vb6_GetControlForeColor(hwnd);
+    return (int32_t)(cf.crTextColor & 0x00FFFFFF);
+}
+
+void vb6_RTB_SetSelColor(void* hwnd, int32_t colorRef) {
+    CHARFORMAT2W cf;
+    if (!hwnd) return;
+    ZeroMemory(&cf, sizeof(cf));
+    cf.cbSize = sizeof(cf);
+    cf.dwMask = CFM_COLOR;
+    cf.dwEffects = 0;                     /* 清掉 CFE_AUTOCOLOR = 改成显式色 */
+    cf.crTextColor = (COLORREF)(colorRef & 0x00FFFFFF);
+    SendMessageW((HWND)hwnd, EM_SETCHARFORMAT, SCF_SELECTION, (LPARAM)&cf);
+}
+
+// SelFontName / SelFontSize：原生字号单位是 **1/20 磅**（yHeight），混合时回 ""/0。
+wchar_t* vb6_RTB_GetSelFontName(void* hwnd) {
+    CHARFORMAT2W cf;
+    if (!hwnd) return SysAllocString(L"");
+    ZeroMemory(&cf, sizeof(cf));
+    cf.cbSize = sizeof(cf);
+    cf.dwMask = CFM_FACE;
+    SendMessageW((HWND)hwnd, EM_GETCHARFORMAT, (WPARAM)SCF_SELECTION, (LPARAM)&cf);
+    if (!(cf.dwMask & CFM_FACE)) return SysAllocString(L"");      /* 混合 */
+    cf.szFaceName[31] = 0;
+    return SysAllocString(cf.szFaceName);
+}
+
+void vb6_RTB_SetSelFontName(void* hwnd, void* bstr) {
+    CHARFORMAT2W cf;
+    if (!hwnd) return;
+    ZeroMemory(&cf, sizeof(cf));
+    cf.cbSize = sizeof(cf);
+    cf.dwMask = CFM_FACE;
+    if (bstr) lstrcpynW(cf.szFaceName, (const wchar_t*)bstr, 32);
+    SendMessageW((HWND)hwnd, EM_SETCHARFORMAT, SCF_SELECTION, (LPARAM)&cf);
+}
+
+float vb6_RTB_GetSelFontSize(void* hwnd) {
+    CHARFORMAT2W cf;
+    if (!hwnd) return 0.0f;
+    ZeroMemory(&cf, sizeof(cf));
+    cf.cbSize = sizeof(cf);
+    cf.dwMask = CFM_SIZE;
+    SendMessageW((HWND)hwnd, EM_GETCHARFORMAT, (WPARAM)SCF_SELECTION, (LPARAM)&cf);
+    if (!(cf.dwMask & CFM_SIZE)) return 0.0f;                     /* 混合 */
+    return (float)cf.yHeight / 20.0f;
+}
+
+void vb6_RTB_SetSelFontSize(void* hwnd, float points) {
+    CHARFORMAT2W cf;
+    if (!hwnd) return;
+    ZeroMemory(&cf, sizeof(cf));
+    cf.cbSize = sizeof(cf);
+    cf.dwMask = CFM_SIZE;
+    cf.yHeight = (LONG)(points * 20.0f + 0.5f);
+    SendMessageW((HWND)hwnd, EM_SETCHARFORMAT, SCF_SELECTION, (LPARAM)&cf);
+}
+
+// 段落三项：dwMask 里读回的那一位才是"一致"的凭据（这条与字符面同型，只是**不能拿 rc 当掩码**）。
+static PARAFORMAT2 vb6_RtbGetPara(void* hwnd, DWORD ask) {
+    PARAFORMAT2 pf;
+    ZeroMemory(&pf, sizeof(pf));
+    pf.cbSize = sizeof(pf);
+    pf.dwMask = ask;
+    if (hwnd) SendMessageW((HWND)hwnd, EM_GETPARAFORMAT, (WPARAM)SCF_SELECTION, (LPARAM)&pf);
+    return pf;
+}
+
+static void vb6_RtbSetPara(void* hwnd, DWORD ask, const PARAFORMAT2* src) {
+    PARAFORMAT2 pf;
+    if (!hwnd) return;
+    pf = *src;
+    pf.cbSize = sizeof(pf);
+    pf.dwMask = ask;
+    SendMessageW((HWND)hwnd, EM_SETPARAFORMAT, SCF_SELECTION, (LPARAM)&pf);
+}
+
+// SelAlignment：VB6 是 0 左 / 1 中 / 2 右，原生是 PFA_LEFT=1 / PFA_CENTER=3 / PFA_RIGHT=2
+// —— **两套数**，必须折算（不折算的话"居中"会被读成"右对齐"）。混合 ⇒ 0（左）。
+int32_t vb6_RTB_GetSelAlignment(void* hwnd) {
+    PARAFORMAT2 pf = vb6_RtbGetPara(hwnd, PFM_ALIGNMENT);
+    if (!(pf.dwMask & PFM_ALIGNMENT)) return 0;
+    switch (pf.wAlignment) {
+        case PFA_CENTER: return 1;
+        case PFA_RIGHT:  return 2;
+        default:         return 0;
+    }
+}
+
+void vb6_RTB_SetSelAlignment(void* hwnd, int32_t align) {
+    PARAFORMAT2 pf;
+    ZeroMemory(&pf, sizeof(pf));
+    pf.cbSize = sizeof(pf);
+    pf.wAlignment = (align == 1) ? PFA_CENTER : (align == 2) ? PFA_RIGHT : PFA_LEFT;
+    vb6_RtbSetPara(hwnd, PFM_ALIGNMENT, &pf);
+}
+
+// 三个缩进：原生单位是 twips（1/20 磅），与 VB6 那三条同名属性的单位一致，直接对传。
+// 悬挂缩进在原生里是 **dxOffset 取负**（首行往外凸）；探针量到别用 PFM_OFFSETINDENT ——
+// 那条是把整段往右推（写 240 之后 dxStartIndent 从 720 变 960），不是悬挂。
+int32_t vb6_RTB_GetSelIndent(void* hwnd) {
+    PARAFORMAT2 pf = vb6_RtbGetPara(hwnd, PFM_STARTINDENT);
+    return (pf.dwMask & PFM_STARTINDENT) ? (int32_t)pf.dxStartIndent : 0;
+}
+void vb6_RTB_SetSelIndent(void* hwnd, int32_t twips) {
+    PARAFORMAT2 pf;
+    ZeroMemory(&pf, sizeof(pf));
+    pf.cbSize = sizeof(pf);
+    pf.dxStartIndent = (LONG)twips;
+    vb6_RtbSetPara(hwnd, PFM_STARTINDENT, &pf);
+}
+int32_t vb6_RTB_GetSelRightIndent(void* hwnd) {
+    PARAFORMAT2 pf = vb6_RtbGetPara(hwnd, PFM_RIGHTINDENT);
+    return (pf.dwMask & PFM_RIGHTINDENT) ? (int32_t)pf.dxRightIndent : 0;
+}
+void vb6_RTB_SetSelRightIndent(void* hwnd, int32_t twips) {
+    PARAFORMAT2 pf;
+    ZeroMemory(&pf, sizeof(pf));
+    pf.cbSize = sizeof(pf);
+    pf.dxRightIndent = (LONG)twips;
+    vb6_RtbSetPara(hwnd, PFM_RIGHTINDENT, &pf);
+}
+int32_t vb6_RTB_GetSelHangingIndent(void* hwnd) {
+    PARAFORMAT2 pf = vb6_RtbGetPara(hwnd, PFM_OFFSET);
+    if (!(pf.dwMask & PFM_OFFSET)) return 0;
+    return (pf.dxOffset < 0) ? (int32_t)(-pf.dxOffset) : 0;
+}
+void vb6_RTB_SetSelHangingIndent(void* hwnd, int32_t twips) {
+    PARAFORMAT2 pf;
+    ZeroMemory(&pf, sizeof(pf));
+    pf.cbSize = sizeof(pf);
+    pf.dxOffset = (LONG)(twips > 0 ? -twips : 0);
+    vb6_RtbSetPara(hwnd, PFM_OFFSET, &pf);
+}
+
 // ---------------- 设计期初值 ----------------
 // ScrollBars 在 cgen 那侧立进创建参数（事后写只有外观、没有量程），所以 Init 里只剩
 // WordWrap 与 ReadOnly 两条。-999 = .frm 没写 ⇒ 下发 VB6 的那个默认（换行开、可编辑），

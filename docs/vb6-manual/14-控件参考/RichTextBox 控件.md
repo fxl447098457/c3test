@@ -73,9 +73,33 @@ C3 里 **RichTextBox 不走 `Richtx32.ocx`**（上面那条"必须把 OCX 加进
 落到"存窗口属性"那条兜底分支，而 `SetPropW(0)` 等于删属性 ⇒ `BorderStyle = None` 永远设不上、
 而且恒读回默认 1。
 
-### 还没做的三格
+### C3 的实现面（续）：`Sel*` 的格式面（C29-RT-b 已做）
 
-`SelBold` / `SelColor` / `SelFontName` / `SelAlignment` / `SelIndent` 那一批**格式**面，
-`TextRTF` + `LoadFile` / `SaveFile` + `Find`，以及 `Change` / `SelChange` 两条事件（后者是
-工具栏按钮状态跟着选区刷新的关键）—— 本版本尚未实现，读写会落到未登记属性的兜底路。
-OLE 对象嵌入与 `SelPrint` 同样不在计划内。
+| 写法 | C3 里实际发生的事 |
+| --- | --- |
+| `RT.SelBold` / `SelItalic` / `SelUnderline` / `SelStrikethru` | `EM_SET/GETCHARFORMAT` + `CHARFORMAT2W` 的 `CFM_/CFE_BOLD\|ITALIC\|UNDERLINE\|STRIKEOUT`（`SCF_SELECTION`，只作用在选中那段上） |
+| `RT.SelColor` | `CFM_COLOR`；**没涂色时读回的是控件自己的前景色**（原生那一位是"自动色"，与 VB6 观感一致），涂过才回显式值 |
+| `RT.SelFontName` | `CFM_FACE` + `szFaceName`（回 `String`） |
+| `RT.SelFontSize` | `CFM_SIZE` + `yHeight`，**原生单位是 1/20 磅**，C3 折成磅（设 14 读回 14） |
+| `RT.SelAlignment` | `EM_SET/GETPARAFORMAT` 的 `PFM_ALIGNMENT`；**VB6 的 0左/1中/2右 对原生 1/3/2，两套数不一样** |
+| `RT.SelIndent` / `SelRightIndent` / `SelHangingIndent` | `PFM_STARTINDENT` / `PFM_RIGHTINDENT` / `PFM_OFFSET`，单位 = twips；悬挂在原生里是 `dxOffset` **取负** |
+
+三条要注意的口径：
+
+1. **混合状态读回来是"没有"**。选区里一半加粗一半不加粗时，原生会把 `dwMask` 里那一位清掉
+   （问得出"混合"），但本语言的 `Integer/Boolean` 装不了 VB6 的 `Null` ⇒ C3 一律按 `False` 给。
+   这与 VB6 文档教的写法等价（`If RT.SelBold = True` 在 `Null` 下本来就是假），
+   但 `If Not RT.SelBold Then` 在 VB6 里会报 94、在 C3 里会进分支 —— 从 VB6 搬代码时留意。
+2. **别用原生那条"按偏移量缩进"的消息做悬挂缩进**：`PFM_OFFSETINDENT` 实测是把整段往右推
+   （起始缩进 720 变 960），不是首行外凸。C3 用 `PFM_OFFSET` 取负值实现，读写都是"悬挂的磅数"。
+3. **段落的格式属性不跨段串台**：`SelAlignment` / 三个缩进作用在选区**所在的段**上，
+   选区跨段时读回来是"混合"⇒ 按 `0` 给。想让整段都改，先把插入点放进那一段（或整段选中）。
+
+新控件的默认字体不是 12 磅，而是**继承窗体的字体**（本机是 8.25 磅 MS Sans Serif），
+所以"没设过字号时 `SelFontSize` 是多少"这种针不能写死数 —— 要问就与同一枚控件的 `FontSize` 比。
+
+### 还没做的两格
+
+`TextRTF` + `LoadFile` / `SaveFile` + `Find`（RT-c），以及 `Change` / `SelChange` 两条事件（RT-d ——
+它们是"工具栏按钮状态跟着选区刷新"的关键，两条走的还是不同的通知通道）。
+`SelPrint` 与 OLE 对象嵌入 / 拖放不在计划内。

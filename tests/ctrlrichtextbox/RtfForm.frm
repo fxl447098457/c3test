@@ -206,11 +206,127 @@ Private Sub Form_Load()
     rt4.Enabled = False
     Debug.Print "RT32=" & TF(rt4.Enabled = False And rt3.Enabled = -1)
 
+    ' ============ C29-RT-b：Sel* 的格式面（字符 + 段落）============
+    ' 三态问法（探针 rtprobe4 量出来的）：EM_GETCHARFORMAT / EM_GETPARAFORMAT 会把"选区内不一致"
+    ' 那一位从返回的 dwMask 里清掉（只问 italic 时：全一致 mask=0xFFFFFFFF、跨界 mask=0xFFFFFFFD）。
+    ' 本项目没有 Null 可回 ⇒ 混合一律按"没有"那一头给（False / 0 / 空串）；这与 VB6 文档教的
+    ' `If .SelBold = True` 写法等价（`Null = True` 本来就是假）。RT35/RT42/RT47/RT56 钉这条口径。
+    Dim s1b As String
+    Dim a1 As Long, b1 As Long, c1 As Long, d1 As Long
+    Dim col As Long
+    s1b = "AAAA BBBB" & vbCrLf & "CCCC DDDD" & vbCrLf & "EEEE FFFF" & vbCrLf
+    rt2.Text = s1b
+    ' 段落起点一律 InStr 现算 —— 原生怎么数那个段落符不写死（写死就会随控件版本飘，同 MV-b 那条纪律）
+    a1 = InStr(rt2.Text, "AAAA") - 1
+    b1 = InStr(rt2.Text, "BBBB") - 1
+    c1 = InStr(rt2.Text, "CCCC") - 1
+    d1 = InStr(rt2.Text, "DDDD") - 1
+    col = 12345678
+
+    ' --- 33..36 加粗：默认全假 → 涂一段 → 问跨界（混合）→ 问没涂的那段 ---
+    rt2.SelStart = a1
+    rt2.SelLength = 4
+    Debug.Print "RT33=" & TF(rt2.SelBold = 0 And rt2.SelItalic = 0 _
+                           And rt2.SelUnderline = 0 And rt2.SelStrikethru = 0)
+    rt2.SelBold = True
+    Debug.Print "RT34=" & TF(rt2.SelBold = -1)
+    rt2.SelStart = a1
+    rt2.SelLength = 6
+    Debug.Print "RT35=" & TF(rt2.SelBold = 0)
+    rt2.SelStart = b1
+    rt2.SelLength = 2
+    Debug.Print "RT36=" & TF(rt2.SelBold = 0)
+
+    ' --- 37..39 斜体 / 下划线 / 删除线各管各的（涂在两段不同文字上，互不牵连）+ 可逆 ---
+    rt2.SelStart = c1
+    rt2.SelLength = 4
+    rt2.SelItalic = True
+    rt2.SelStart = d1
+    rt2.SelLength = 4
+    rt2.SelUnderline = True
+    rt2.SelStrikethru = True
+    Debug.Print "RT37=" & TF(rt2.SelUnderline = -1 And rt2.SelStrikethru = -1 _
+                           And rt2.SelItalic = 0 And rt2.SelBold = 0)
+    rt2.SelStart = c1
+    rt2.SelLength = 4
+    Debug.Print "RT38=" & TF(rt2.SelItalic = -1 And rt2.SelUnderline = 0)
+    rt2.SelItalic = False
+    ' 撤掉斜体只动那一位：同一段的下划线（没涂过）与自动色读数都不该跟着变
+    Debug.Print "RT39=" & TF(rt2.SelItalic = 0 And rt2.SelUnderline = 0 _
+                           And rt2.SelColor = rt2.ForeColor)
+
+    ' --- 40..43 颜色：没涂 = 自动色（读回控件自己的 ForeColor）；涂了 = 原值往返；跨界 = 0 ---
+    rt2.SelStart = b1
+    rt2.SelLength = 2
+    Debug.Print "RT40=" & TF(rt2.SelColor = rt2.ForeColor)
+    rt2.SelStart = a1
+    rt2.SelLength = 4
+    rt2.SelColor = col
+    Debug.Print "RT41=" & TF(rt2.SelColor = col)
+    rt2.SelStart = a1
+    rt2.SelLength = 6
+    Debug.Print "RT42=" & TF(rt2.SelColor = 0)
+    rt1.SelStart = 0
+    rt1.SelLength = 3
+    Debug.Print "RT43=" & TF(rt1.SelColor = rt1.ForeColor)
+
+    ' --- 44..47 字体名 / 字号（原生字号单位是 1/20 磅 ⇒ RTL 折成磅）---
+    rt2.SelStart = b1
+    rt2.SelLength = 2
+    Debug.Print "RT44=" & TF(Len(rt2.SelFontName) > 0)
+    rt2.SelFontName = "Courier New"
+    Debug.Print "RT45=" & TF(rt2.SelFontName = "Courier New")
+    rt2.SelFontSize = 14
+    Debug.Print "RT46=" & TF(Int(rt2.SelFontSize * 10 + 0.5) = 140)
+    rt2.SelStart = a1
+    rt2.SelLength = 6
+    Debug.Print "RT47=" & TF(rt2.SelFontSize = 0 And Len(rt2.SelFontName) = 0)
+
+    ' --- 48..52 段落对齐：VB6 0左/1中/2右 <-> 原生 PFA_LEFT=1/CENTER=3/RIGHT=2（两套数）---
+    rt2.SelStart = a1
+    rt2.SelLength = 4
+    Debug.Print "RT48=" & TF(rt2.SelAlignment = 0)
+    rt2.SelAlignment = 1
+    Debug.Print "RT49=" & TF(rt2.SelAlignment = 1)
+    rt2.SelAlignment = 2
+    Debug.Print "RT50=" & TF(rt2.SelAlignment = 2)
+    ' 一段的对齐不许串到另一段
+    rt2.SelStart = c1
+    rt2.SelLength = 4
+    rt2.SelAlignment = 1
+    rt2.SelStart = a1
+    rt2.SelLength = 4
+    Debug.Print "RT51=" & TF(rt2.SelAlignment = 2)
+    rt2.SelStart = c1
+    rt2.SelLength = 4
+    Debug.Print "RT52=" & TF(rt2.SelAlignment = 1)
+
+    ' --- 53..56 三个缩进：单位 = twips；悬挂 = 原生 dxOffset 取负（PFM_OFFSETINDENT 会把整段推走，别用）---
+    rt2.SelIndent = 720
+    rt2.SelRightIndent = 1440
+    rt2.SelHangingIndent = 360
+    Debug.Print "RT53=" & TF(rt2.SelIndent = 720)
+    Debug.Print "RT54=" & TF(rt2.SelRightIndent = 1440)
+    Debug.Print "RT55=" & TF(rt2.SelHangingIndent = 360)
+    ' 跨段问 = 混合 ⇒ 一律 0（第二段有缩进、第一/三段没有）
+    rt2.SelStart = 0
+    rt2.SelLength = Len(rt2.Text)
+    Debug.Print "RT56=" & TF(rt2.SelIndent = 0 And rt2.SelHangingIndent = 0)
+
+    ' --- 57..58 格式面不许动文本；通用面仍可逆 ---
+    rt2.SelStart = a1
+    rt2.SelLength = 4
+    Debug.Print "RT57=" & TF(rt2.Text = s1b)
+    rt4.Enabled = True
+    Debug.Print "RT58=" & TF(rt4.Enabled = -1 And rt3.Enabled = -1)
+
     ' 原始读数打在针之外：四位样式 / 边框 / 四个量程 / 上限被抬后的读数 / 长度
     Debug.Print "W=" & s1 & "/" & s2 & "/" & s3 & "/" & s4
     Debug.Print "S=" & v3 & "/" & v2 & "/" & rt1.VScrollRange & "/" & h4 & "/" & h2
     Debug.Print "L=" & L1 & "/" & L2 & "/" & Len(rt2.Text) & "/" & rt1.MaxLength
     Debug.Print "B=" & rt1.BorderStyle & "/" & rt2.BorderStyle & "/" & rt3.BorderStyle
+    Debug.Print "F=" & rt2.SelFontSize & "/" & rt2.SelFontName & "/" & rt2.SelColor _
+                & "/" & rt2.SelAlignment & "/" & rt2.SelIndent & "/" & Len(rt2.Text)
     Debug.Print "CTRLRICHTEXT-DONE"
     Unload Me
 End Sub

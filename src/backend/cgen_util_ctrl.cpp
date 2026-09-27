@@ -113,6 +113,15 @@ Vb6Type CCodeGen::controlPropType(FrmControlType ctrlType, const std::string& pr
             return Vb6Type::Long;
         }
         if (p == "seltext") return Vb6Type::String;
+        // C29-RT-b: 格式面。布尔四条 + 对齐 + 三个缩进 + 色值 = int32_t ⇒ Long；
+        // 字号 getter 是 float（与通用那条 FontSize 同一口径）；FontName 的 getter 回 BSTR。
+        if (p == "selbold" || p == "selitalic" || p == "selunderline" || p == "selstrikethru"
+            || p == "selcolor" || p == "selalignment" || p == "selindent"
+            || p == "selrightindent" || p == "selhangingindent") {
+            return Vb6Type::Long;
+        }
+        if (p == "selfontsize") return Vb6Type::Single;
+        if (p == "selfontname") return Vb6Type::String;
     }
     if (ctrlType == FrmControlType::Toolbar) {
         // C29-5a: 同一口径 —— 这四条的 RTL getter 都是 int32_t, 判成 Variant/String
@@ -460,6 +469,19 @@ std::string CCodeGen::getControlPropReadFn(FrmControlType ctrlType, const std::s
         // C3 扩展读数（不是 VB6 属性）：控件自己的滚动量程 —— "滚动条活没活"的硬证人。
         if (propLower == "vscrollrange") return "vb6_RTB_GetVScrollRange";
         if (propLower == "hscrollrange") return "vb6_RTB_GetHScrollRange";
+        // C29-RT-b 的读侧（格式面九条 + 字体名/字号）。混合态一律回"没有"那一头（False / 0 / 空串），
+        // 判据靠"只涂一半再问跨界"钉住它（RT33-RT48）。
+        if (propLower == "selbold") return "vb6_RTB_GetSelBold";
+        if (propLower == "selitalic") return "vb6_RTB_GetSelItalic";
+        if (propLower == "selunderline") return "vb6_RTB_GetSelUnderline";
+        if (propLower == "selstrikethru") return "vb6_RTB_GetSelStrikethru";
+        if (propLower == "selcolor") return "vb6_RTB_GetSelColor";
+        if (propLower == "selfontname") return "vb6_RTB_GetSelFontName";
+        if (propLower == "selfontsize") return "vb6_RTB_GetSelFontSize";
+        if (propLower == "selalignment") return "vb6_RTB_GetSelAlignment";
+        if (propLower == "selindent") return "vb6_RTB_GetSelIndent";
+        if (propLower == "selrightindent") return "vb6_RTB_GetSelRightIndent";
+        if (propLower == "selhangingindent") return "vb6_RTB_GetSelHangingIndent";
         if (propLower == "visible") return "vb6_GetControlVisible";
         if (propLower == "enabled") return "vb6_GetControlEnabled";
         break;
@@ -795,6 +817,18 @@ std::string CCodeGen::getControlPropWriteFn(FrmControlType ctrlType, const std::
         if (propLower == "readonly") return "vb6_RTB_SetReadOnly";
         if (propLower == "maxlength") return "vb6_RTB_SetMaxLength";
         if (propLower == "wordwrap") return "vb6_RTB_SetWordWrap";
+        // C29-RT-b 的写侧（与读侧同一批十一条）。
+        if (propLower == "selbold") return "vb6_RTB_SetSelBold";
+        if (propLower == "selitalic") return "vb6_RTB_SetSelItalic";
+        if (propLower == "selunderline") return "vb6_RTB_SetSelUnderline";
+        if (propLower == "selstrikethru") return "vb6_RTB_SetSelStrikethru";
+        if (propLower == "selcolor") return "vb6_RTB_SetSelColor";
+        if (propLower == "selfontname") return "vb6_RTB_SetSelFontName";
+        if (propLower == "selfontsize") return "vb6_RTB_SetSelFontSize";
+        if (propLower == "selalignment") return "vb6_RTB_SetSelAlignment";
+        if (propLower == "selindent") return "vb6_RTB_SetSelIndent";
+        if (propLower == "selrightindent") return "vb6_RTB_SetSelRightIndent";
+        if (propLower == "selhangingindent") return "vb6_RTB_SetSelHangingIndent";
         if (propLower == "visible") return "vb6_SetControlVisible";
         if (propLower == "enabled") return "vb6_SetControlEnabled";
         break;
