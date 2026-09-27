@@ -238,6 +238,22 @@ Private Sub evtTimer_Timer()
     mv3.SimDateClick(d0 + 5)
     Debug.Print "MV37=" & TF(e1 - b1 = 2 And gClick2 - b2 = 1)
 
+    ' --- 38..40 值面必须是**整数日**（针一律按数值比，不取整）---
+    '     comctl **6** 会把**当前挂钟时间**混进 MCM_GETCURSEL 回来的 SYSTEMTIME 里（本机实测
+    '     发 43894 回 43894.765127，而不挂 manifest 的那份回 43894.000000）⇒ 不抹平则
+    '     `CLng(mv.Value)` 下午进位、上午不进位，而 CI 那批跑在上午 ⇒ 门一直拦不住。
+    '     第 40 条另钉止端：控件把 hi 存成【当日 23:59:59.9】，旧写法 `-1.0` 读回的是
+    '     46270.999988 那种数（BASE 那轮的 `D=` 原始行就是这个），只有靠 `CLng` 才读对；
+    '     现在两端都必须是整日。
+    mv2.Value = 43894
+    Debug.Print "MV38=" & TF(mv2.Value = 43894)
+    mv2.Value = 44562.75
+    Debug.Print "MV39=" & TF(mv2.Value = 44562)
+    mv1.SelStart = d0 + 3
+    mv1.SelEnd = d0 + 5
+    Debug.Print "MV40=" & TF(mv1.SelStart = d0 + 3 And mv1.SelEnd = d0 + 5)
+    Debug.Print "D=" & CDbl(mv2.Value) & "/" & CDbl(mv1.SelStart) & "/" & CDbl(mv1.SelEnd)
+
     Debug.Print "E=" & (gClick1 - b1) & "/" & (gClick2 - b2) & "/" & CLng(gGot1)
     Debug.Print "CTRLMONTHVIEW-DONE"
     Unload Me

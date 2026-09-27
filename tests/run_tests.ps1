@@ -1698,7 +1698,7 @@ if ($Category -in @("all", "run", "vbp")) {
     # 留绿的五条（MV4/MV9/MV17/MV28/MV31）全是"应当为 0 / 应当相等"那类**边界针** ——
     # 什么都不实现的空控件也满足它们，所以这几条不承担"验货"，只承担"别把边界改回去"；
     # 真正盘货的是另外 28 条。（记下来是免得下一个人把"BASE 有 5 绿"读成判据松。）
-    $mvNeedles = @("CTRLMONTHVIEW-DONE") + (1..37 | ForEach-Object { "MV$_=Y" })
+    $mvNeedles = @("CTRLMONTHVIEW-DONE") + (1..40 | ForEach-Object { "MV$_=Y" })
     Test-Vbp "ctrlmonthview" "$Tests\ctrlmonthview\MvfApp.vbp" $mvNeedles
     Test-Vbp "ctrlmonthview_x86" "$Tests\ctrlmonthview\MvfApp.vbp" $mvNeedles -Arch "x86"
     # 发码两面都钉：类名 + 四条创建样式位逐枚钉（1409286146 = 基+MULTISELECT / 1409286148 = 基+

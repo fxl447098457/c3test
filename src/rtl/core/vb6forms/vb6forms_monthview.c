@@ -226,12 +226,26 @@ void    vb6_MV_SetMonthBackColor(void* hwnd, int32_t v)  { vb6_MvSetColor(hwnd, 
 #define MCM_SETSELRANGE    (0x1000 + 6)
 #endif
 
+// VB6 的 Value / SelStart / SelEnd 都是**纯日期**（月历没有"时分"这一格），而原生 comctl
+// **6** 在 `MCM_GETCURSEL` 回来的 SYSTEMTIME 里把**当前挂钟时间**填进四个时间字段 ——
+// 本机实测（`.build\mcsel6b_out.txt`，同一份源码编两份、只改挂不挂 v6 manifest）：
+// 发 43894 回来 `2020-03-04 18:21:47.128` = 序列号 43894.765127，而不挂 manifest 的那份
+// 回 `2020-03-04 00:00:00.000` = 43894.000000。 ⇒ 不抹平就是**下午红、上午绿**：
+// `CLng(mv.Value)` 在 0.765 那一头进位成 43895，而 CI 那批跑在上午（分数 < 0.5）照旧绿，
+// 所以这道门一直拦不住它。日期面一律归到"那一天"。
+static double vb6_MvDaySerial(const SYSTEMTIME* st) {
+    SYSTEMTIME d;
+    d = *st;
+    d.wHour = 0; d.wMinute = 0; d.wSecond = 0; d.wMilliseconds = 0;
+    return vb6_DateToSerial(&d);
+}
+
 double vb6_MV_GetValue(void* hwnd) {
     SYSTEMTIME st;
     if (!hwnd) return 0.0;
     vb6_DateZero(&st);
     if (!SendMessageW((HWND)hwnd, MCM_GETCURSEL, 0, (LPARAM)&st)) return 0.0;
-    return vb6_DateToSerial(&st);
+    return vb6_MvDaySerial(&st);
 }
 
 void vb6_MV_SetValue(void* hwnd, double serial) {
@@ -255,22 +269,23 @@ double vb6_MV_GetSelStart(void* hwnd) {
     SYSTEMTIME rg[2];
     int32_t ok;
     vb6_MvGetSelRange(hwnd, rg, &ok);
-    return ok ? vb6_DateToSerial(&rg[0]) : 0.0;
+    return ok ? vb6_MvDaySerial(&rg[0]) : 0.0;
 }
 
 double vb6_MV_GetSelEnd(void* hwnd) {
     SYSTEMTIME rg[2];
     int32_t ok;
-    double v;
     vb6_MvGetSelRange(hwnd, rg, &ok);
     if (!ok) return 0.0;
-    v = vb6_DateToSerial(&rg[1]);
-    if (v <= 0.0) return 0.0;
-    /* 实测的一条不对称（写两端再读回来，止端恒比写入值多一天；控件内部把范围存成
-       [起, 止+1) 那种半开区间，而 GETSELRANGE 原样把内部值吐回来）。VB6 的
-       SelStart / SelEnd 两头都是**闭区间**（单点选中时二者相等），所以这里折回一天 ——
-       折完"写进去什么就读回来什么"，而 MaxSelCount 那条夹取也才按天数算得对。 */
-    return v - 1.0;
+    /* 止端这一格实测过两版 comctl（同一份探针挂/不挂 v6 manifest 各跑一遍，读数
+       `.build\mcsel6b_out.txt`，写进 lo=46268 / hi=46272）：**v6 回 `2026-09-07 23:59:59.9`**
+       （序列号 46272.999988），**v5 回 `2026-09-07 00:00`**（46272.000000）⇒ 两版存的都正好是
+       **被选中的最后一天**，差别只在那截时间。台账与这文件旧注释里那句"控件内部存成
+       [起, 止+1) 的半开区间、止端恒比写入值多一天"是**误读** —— 那是把 23:59 那截经 `CLng`
+       进位之后看到的 46273 当成了控件里的数。所以这里不折天，只**抹时间**（同 `Value`
+       那一条助手）：旧写法 `-1.0` 在 v6 上得到 46270.999988 这种数，只有靠 `CLng` 四舍五入
+       才碰巧读对，`If mv.SelEnd = d` 按数值比恒差一天（MV40 就是钉这条）。 */
+    return vb6_MvDaySerial(&rg[1]);
 }
 
 // 改一端 = 读回整张表 → 换掉那一格 → 两格一起发回去。
@@ -299,7 +314,7 @@ void vb6_MV_SetSelEnd(void* hwnd, double serial)   { vb6_MvSetSelEnd(hwnd, 1, se
 double vb6_MV_NotifyDate(void* nmSelChange) {
     NMSELCHANGE* sc = (NMSELCHANGE*)nmSelChange;
     if (!sc) return 0.0;
-    return vb6_DateToSerial(&sc->stSelStart);
+    return vb6_MvDaySerial(&sc->stSelStart);
 }
 
 // 判据专用（不对应任何 VB6 语义，见 029 §九 本格）：无头环境点不了鼠标，而直接调 handler
