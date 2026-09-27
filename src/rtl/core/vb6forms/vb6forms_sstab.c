@@ -296,25 +296,12 @@ void vb6_SSTab_Init(void* tabHwnd, int tabs, int curTab, int orientation, int ta
         }
     }
 
-    // 防闪烁 (第三步, 用户实测: 前两步后 tab 头仍在闪):
-    // 窗体与 tab 控件各自的"擦除→重画"中间态直接上了屏幕 —— 治本手段是给
-    // **顶层窗体**加 WS_EX_COMPOSITED: Windows 会把整棵窗口树 (窗体+全部子控件)
-    // 以自底向上+双缓冲方式合成完再一次性呈现, 任何控件的擦除中间态都到不了屏幕。
-    // 这是 Win32 治闪烁的官方扩展样式, 与前两步互补 (那两步治控件自己的擦除,
-    // 这一步治窗体↔控件/控件↔控件之间的合成时序闪)。代价只是合成多一层缓冲,
-    // 表单类程序无感。挂在 SSTab 的根窗体上, 不动没用到 SSTab 的窗体。
-    {
-        HWND root = GetAncestor(t->hwnd, GA_ROOT);
-        if (root) {
-            LONG_PTR ex = GetWindowLongPtrW(root, GWL_EXSTYLE);
-            if (!(ex & WS_EX_COMPOSITED)) {
-                SetWindowLongPtrW(root, GWL_EXSTYLE, ex | WS_EX_COMPOSITED);
-                SetWindowPos(root, NULL, 0, 0, 0, 0,
-                             SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER |
-                             SWP_NOACTIVATE | SWP_FRAMECHANGED);
-            }
-        }
-    }
+    // 防闪烁 (第三步遗留结论, 已移除 WS_EX_COMPOSITED):
+    // 曾给顶层窗体加 WS_EX_COMPOSITED 治"窗体↔控件合成时序闪", 但它把整棵窗口树
+    // 转入重定向合成 —— DWM 合成时向子控件要内容走 WM_PRINTCLIENT 而非 WM_PAINT,
+    // 自绘 Frame 等不响应 WM_PRINTCLIENT 的控件被画成未初始化黑块 (用户实测回归)。
+    // 且闪烁真根因是外部定时器同值赋值触发全量重建 (见各 setter 的幂等早退),
+    // 与合成时序无关 → COMPOSITED 弊大于利, 移除。
 
     t->orientation = orientation;
     t->tabStyle = tabStyle;
