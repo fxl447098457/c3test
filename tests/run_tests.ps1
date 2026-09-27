@@ -1759,7 +1759,16 @@ if ($Category -in @("all", "run", "vbp")) {
     # 顺带修了一条同族既有缺陷：vb6_Get/SetBorderStyle 只认 "Edit" 类，RICHEDIT50W 落到"存属性"
     # 那条兜底分支，而 SetPropW(0) 等于**删属性**（GetPropW 回 NULL ⇒ 恒读默认 1）⇒ BorderStyle=None
     # 永远设不上（RT5/RT6 就是它的正负两面）。
-    $rtNeedles = @("CTRLRICHTEXT-DONE") + (1..32 | ForEach-Object { "RT$_=Y" })
+    # ---- C29-RT-b（同一件夹具往后接 RT33..RT58）= Sel* 的格式面 ----
+    # 三态问法（第三/四轮探针）：EM_GETCHARFORMAT / EM_GETPARAFORMAT 把"选区内不一致"那一位从返回的
+    # dwMask 里清掉（只问 italic：全一致 0xFFFFFFFF、跨界 0xFFFFFFFD；字符面连返回值都等于那张掩码）。
+    # 本项目没有 Null 可回 ⇒ 混合一律按"没有"那一头（False / 0 / 空串）—— 与 VB6 教的 `= True` 等价。
+    # 两条折算也是这格量出来的：字号原生单位 1/20 磅（RT46 读回 14）、对齐 VB6 0左/1中/2右 对原生
+    # 1/3/2（不折算就会把"居中"读成"右对齐"，RT49/RT50 钉住）；悬挂缩进用 PFM_OFFSET 取负，
+    # PFM_OFFSETINDENT 会把整段推走（实测 720 → 960），不是悬挂。
+    # BASE（本批之前的编译器）同一件夹具 = 20 绿 / 38 红：RT33-RT58 里 16 条当场红，剩下 10 条是
+    # "应当为 0 / 应当相等"那类反向针（什么都不实现也满足它们）—— 与 DT/MV 每次的分布同型。
+    $rtNeedles = @("CTRLRICHTEXT-DONE") + (1..58 | ForEach-Object { "RT$_=Y" })
     Test-Vbp "ctrlrichtextbox" "$Tests\ctrlrichtextbox\RtfApp.vbp" $rtNeedles
     Test-Vbp "ctrlrichtextbox_x86" "$Tests\ctrlrichtextbox\RtfApp.vbp" $rtNeedles -Arch "x86"
     # 发码正面：类名 + 四位创建样式逐枚钉（1409286148 = 基+ES_MULTILINE，rt2 全默认；
@@ -1781,7 +1790,22 @@ if ($Category -in @("all", "run", "vbp")) {
         'vb6_RTB_SetWordWrap(vb6_hwnd_rt3, (-1));',
         'vb6_RTB_SetMaxLength(vb6_hwnd_rt2, 20);',
         'vb6_RTB_GetVScrollRange(vb6_hwnd_rt3',
-        'vb6_RTB_GetHScrollRange(vb6_hwnd_rt4'
+        'vb6_RTB_GetHScrollRange(vb6_hwnd_rt4',
+        # RT-b：四条效果走 CHARFORMAT2W 的同一族 setter（布尔按 VB6 的 -1/0 发），
+        # 颜色/字体名/字号/对齐/三缩进各一条 —— 全部钉"裸调用 + 裸数值"，不许出现装箱。
+        'vb6_RTB_SetSelBold(vb6_hwnd_rt2, (-1));',
+        'vb6_RTB_SetSelUnderline(vb6_hwnd_rt2, (-1));',
+        'vb6_RTB_SetSelStrikethru(vb6_hwnd_rt2, (-1));',
+        'vb6_RTB_GetSelItalic(vb6_hwnd_rt2',
+        'vb6_RTB_SetSelColor(vb6_hwnd_rt2, col);',
+        'vb6_RTB_SetSelFontName(vb6_hwnd_rt2, vb6_BSTR_FromStr(L"Courier New"));',
+        'vb6_RTB_SetSelFontSize(vb6_hwnd_rt2, 14);',
+        'vb6_RTB_GetSelFontSize(vb6_hwnd_rt2',
+        'vb6_RTB_SetSelAlignment(vb6_hwnd_rt2, 2);',
+        'vb6_RTB_SetSelIndent(vb6_hwnd_rt2, 720);',
+        'vb6_RTB_SetSelRightIndent(vb6_hwnd_rt2, 1440);',
+        'vb6_RTB_SetSelHangingIndent(vb6_hwnd_rt2, 360);',
+        'vb6_RTB_GetSelHangingIndent(vb6_hwnd_rt2'
     )
     # 反面：这枚控件不许再走 COM 后期绑定；而 ScrollBars 那四位**不许有写口** ——
     # 事后写只有外观、没有量程，发一条"写得动但什么都不改"的 setter 比不发更难查。
@@ -1790,6 +1814,10 @@ if ($Category -in @("all", "run", "vbp")) {
         'vb6_ComSetObjectProp(vb6_hwnd_rt2',
         'vb6_ComGetObjectProp(vb6_hwnd_rt3, L"MaxLength")',
         'vb6_RTB_SetScrollBars',
+        # RT-b：格式面也不许退回 COM 兜底（一条都不许）
+        'vb6_ComGetObjectProp(vb6_hwnd_rt2, L"SelBold")',
+        'vb6_ComSetObjectProp(vb6_hwnd_rt2, L"SelColor"',
+        'vb6_ComSetObjectProp(vb6_hwnd_rt2, L"SelAlignment"',
         'CoCreateInstance'
     )
     # ai/029 C29-5a: Toolbar 换成原生 ToolbarWindow32（D6：不碰 MSCOMCTL.OCX）。
