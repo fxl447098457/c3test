@@ -58,7 +58,22 @@ System32"的要求在 C3 不存在）：那颗 OCX 是 32 位 inproc 服务器�
 两条本项目扩展读数（不是 VB6 属性，别当 VB6 代码往回搬）：**`MonthCount`**（眼下画了几个月）、
 **`MinReqWidth` / `MinReqHeight`**（`MCM_GETMINREQRECT` 那个"装得下一个月"的最小尺寸）。
 
-还欠的：`Value` / `SelStart` / `SelEnd` 三格 Date 值面（下一格）、以及核心事件
-**`DateClick(DateSelected As Date)`** —— 原生对应的是 `MCN_SELCHANGE`（-749），负载里带
-SYSTEMTIME，所以派发要折算成 Date，形状与 `DTPicker` 那三条无参事件不同形。
+### C3 的实现面（续）：`Value` / `SelStart` / `SelEnd`（C29-MV-b 已做）
+
+三条都是 Date（本语言里 `Date` 就是一个 double 序列号），换算走 oleaut32 那对现成函数。
+两条原生行为会咬人，写代码前先看：
+
+1. **`Value` 与 `SelStart`/`SelEnd` 两张表互斥**：`MultiSelect = True` 之后 `Value` 问不出
+   也写不进（原生那两条 `MCM_GET/SETCURSEL` 直接失败，读数回 `0`）；不开多选时反过来 ——
+   范围表问不出（`SelStart`/`SelEnd` 回 `0`）。所以"要不要范围选择"决定了你能读哪一组，
+   这条与 VB6 那颗 OCX 的模型一致。
+2. **范围只能落在当前显示的那一个自然月里**。跨到没显示的月份会被控件夹掉（实测会把
+   止端夹回与起端同一天）；`MCM_SETMAXSELCOUNT` 的上限也真的管得住 —— 窗口贴着上限时，
+   "往里扩"的那一端被原样顶回去，不会把已经选好的那头挪走。
+
+止端两头都是**闭区间**：写 `SelEnd = #2026-9-6#` 之后读回来还是它（控件内部把范围存成
+半开区间，RTL 折回了一天）。
+
+还欠的：核心事件 **`DateClick(DateSelected As Date)`**（原生 `MCN_SELCHANGE` = -749，
+负载带 SYSTEMTIME ⇒ 派发要折算成 Date，形状与 `DateTimePicker` 那页的三条无参事件不同形）。
 `DateDblClick` 原生**没有**对应通知（公共控件头里没有双击那一条），刻意不做。
