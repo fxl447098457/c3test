@@ -63,4 +63,13 @@ typedef struct vb6_CollEnum {
 // 枚举器 vtable (定义在 vb6com_collection_enum.c; coll_doNewEnum 用它装配实例)
 extern IEnumVARIANTVtbl g_collEnumVtbl;
 
+// ============================================================
+// Fix 160-com: 免注册分派辅助声明 (定义在 vb6com_invoke.c)
+// ============================================================
+// 免注册 GetIDsOfNames (For Each 等直接路径)
+HRESULT vb6_ComGetIdsOfNames(IDispatch* pDisp, const wchar_t* name, DISPID* pDispid);
+// 免注册 Invoke 总入口 (ITypeInfo 驱动, 无 TI 映射时落回 IDispatch::Invoke)
+HRESULT vb6_ComInvoke(IDispatch* pDisp, DISPID dispid, WORD wFlags,
+                      DISPPARAMS* dp, VARIANT* result, EXCEPINFO* excep, UINT* argErr);
+
 #endif // VB6C3_VB6COM_INTERNAL_H

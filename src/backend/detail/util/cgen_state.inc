@@ -64,6 +64,9 @@
     // 同名局部变量 (如 cColl 的 Dim A As New cCollection vs JsonStr 的
     // Const A) 残留 knownNewVars_ → const 变量被注入 auto-instantiate (C2166).
     std::unordered_map<std::string, std::string> moduleNewVars_;
+    // Fix 090v-com: 前期绑定COM变量C类型 (小写key → 如 "vb6_ComIface_IChilkatJsonObject*"),
+    // 供 Dim As New 守卫把 vb6_NewObject 的 void* 正确转型到类型化接口指针.
+    std::unordered_map<std::string, std::string> knownTypedComVarCType_;
 
     // Fix 054: 模块级变量延迟初始化语句 (C2099: 文件作用域变量不能用运行时函数调用初始化)
     std::vector<std::string> moduleInitStmts_;

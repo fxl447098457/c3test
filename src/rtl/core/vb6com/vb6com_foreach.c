@@ -46,14 +46,12 @@ void* vb6_ForEach_Init(void* disp) {
     {
         DISPID dispidCount = 0;
         OLECHAR* countName = L"Count";
-        HRESULT hr2 = pDisp->lpVtbl->GetIDsOfNames(pDisp, &IID_NULL, &countName, 1,
-            LOCALE_USER_DEFAULT, &dispidCount);
+        HRESULT hr2 = vb6_ComGetIdsOfNames(pDisp, countName, &dispidCount);
         if (SUCCEEDED(hr2) && dispidCount > 0) {
             DISPPARAMS dpC = { NULL, NULL, 0, 0 };
             VARIANT vCount;
             VariantInit(&vCount);
-            hr2 = pDisp->lpVtbl->Invoke(pDisp, dispidCount,
-                &IID_NULL, LOCALE_USER_DEFAULT,
+            hr2 = vb6_ComInvoke(pDisp, dispidCount,
                 DISPATCH_PROPERTYGET | DISPATCH_METHOD,
                 &dpC, &vCount, NULL, NULL);
             if (SUCCEEDED(hr2) && (V_VT(&vCount) == VT_I4 || V_VT(&vCount) == VT_I2)) {
@@ -68,8 +66,7 @@ void* vb6_ForEach_Init(void* disp) {
     VARIANT result;
     VariantInit(&result);
 
-    HRESULT hr = pDisp->lpVtbl->Invoke(pDisp, (DISPID)-4,
-        &IID_NULL, LOCALE_USER_DEFAULT,
+    HRESULT hr = vb6_ComInvoke(pDisp, (DISPID)-4,
         DISPATCH_METHOD | DISPATCH_PROPERTYGET,
         &dp, &result, NULL, NULL);
 
@@ -77,11 +74,9 @@ void* vb6_ForEach_Init(void* disp) {
         // Try named invocation as fallback
         OLECHAR* names[] = { L"_NewEnum" };
         DISPID dispid;
-        hr = pDisp->lpVtbl->GetIDsOfNames(pDisp, &IID_NULL, names, 1,
-            LOCALE_USER_DEFAULT, &dispid);
+        hr = vb6_ComGetIdsOfNames(pDisp, names[0], &dispid);
         if (SUCCEEDED(hr)) {
-            hr = pDisp->lpVtbl->Invoke(pDisp, dispid,
-                &IID_NULL, LOCALE_USER_DEFAULT,
+            hr = vb6_ComInvoke(pDisp, dispid,
                 DISPATCH_METHOD | DISPATCH_PROPERTYGET,
                 &dp, &result, NULL, NULL);
         }

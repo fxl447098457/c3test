@@ -22,7 +22,14 @@ void CCodeGen::visit(CallStmt& node) {
                     std::string memLower = member.memberName;
                     std::transform(memLower.begin(), memLower.end(), memLower.begin(), ::tolower);
 
-                    if (objLower == "debug" && memLower == "print") {
+                    // Fix 161: Console.WriteLine/.Write 复用 Debug.Print 的"逐参转 BSTR
+                    // 后输出"路径 (两者都是语句式输出调用, 参数需按 BSTR 转换; 区别仅在
+                    // 换行/输出函数)。Console.Write 不换行, WriteLine 换行。
+                    const bool isConsoleWrite = (objLower == "console" &&
+                        (memLower == "writeline" || memLower == "write"));
+                    const bool isConsoleWriteLine = (objLower == "console" && memLower == "writeline");
+
+                    if ((objLower == "debug" && memLower == "print") || isConsoleWrite) {
                         // Debug.Print: 逐参数输出, 最后换行
                         // 每个参数转为BSTR后用vb6_DebugWriteBSTR输出
                         if (call.positional.empty()) {
@@ -35,7 +42,9 @@ void CCodeGen::visit(CallStmt& node) {
                                 "vb6_Trim", "vb6_LTrim", "vb6_RTrim", "vb6_Chr",
                                 "vb6_Str", "vb6_CStr", "vb6_Format", "vb6_Hex", "vb6_Oct",
                                 "vb6_Replace", "vb6_Space", "vb6_String", "vb6_StrReverse",
-                                "vb6_BSTR_Concat", "vb6_BSTR_Empty", "vb6_App_Path", "vb6_App_EXEName", "vb6_App_HelpFile", "vb6_Command", "vb6_CurDir", "vb6_Environ", "vb6_Dir", "vb6_IIfBSTR", "vb6_GetControlText", "vb6_GetControlCaption"
+                                "vb6_BSTR_Concat", "vb6_BSTR_Empty", "vb6_App_Path", "vb6_App_EXEName", "vb6_App_HelpFile", "vb6_Command", "vb6_CurDir", "vb6_Environ", "vb6_Dir", "vb6_IIfBSTR", "vb6_GetControlText", "vb6_GetControlCaption",
+                                "vb6_ComCallBSTR",  // Fix 160-com-byref: 早期绑定COM方法返回BSTR (StringOf/StringAt 等) — 按BSTR打印
+                                "vb6_Console_ReadLine", "vb6_Console_ReadKey"  // Fix 161: Console 输入返回 BSTR
                             };
                             auto isBstrExpr = [&](const std::string& expr) -> bool {
                                 for (auto& prefix : bstrFuncs) {
@@ -163,7 +172,10 @@ void CCodeGen::visit(CallStmt& node) {
                                     c_.emitLine("vb6_DebugWriteLong((int32_t)(" + val + "));");
                                 }
                             }
-                            c_.emitLine("vb6_DebugWriteNewline();");
+                            // Fix 161: Console.Write 不换行; Debug.Print / Console.WriteLine 换行
+                            if (!isConsoleWrite || isConsoleWriteLine) {
+                                c_.emitLine("vb6_DebugWriteNewline();");
+                            }
                         }
                         return;
                     }

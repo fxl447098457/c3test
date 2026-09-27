@@ -234,6 +234,7 @@ void CCodeGen::visit(VariableDecl& node) {
             std::string lower = node.name;
             std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
             knownTypedComVars_[lower] = comSym;
+            knownTypedComVarCType_[lower] = cType;  // Fix 090v-com: 供 As New 守卫转型
             knownObjectVars_.erase(lower);  // 优先前期绑定
             // Dim As New ComClass 自动实例化 (P14.3.1扩展)
             if (node.isNew && comSym->kind == SymbolKind::ComClass) {

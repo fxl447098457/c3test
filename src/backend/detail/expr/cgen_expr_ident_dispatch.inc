@@ -44,6 +44,14 @@
         return;
     }
 
+    // Fix 161: 裸 Console 内置全局对象 (对齐 twinBASIC)。成员 (.WriteLine/
+    // .Write/.ReadLine/.ReadKey/.Read) 由 MemberAccessExpr 的 Console 分支处理;
+    // 裸名本身极少单独使用, 给个哨兵值避免落到未定义标识符。
+    if (lower == "console") {
+        lastExpr_ = "(void*)0";
+        return;
+    }
+
     // Task #39: 裸 Printer / Printers 内置全局对象。
     // cDlg.cls ShowFont: `If Not Printer Is Nothing Then ... tChooseFont.hDC =
     // Printer.hDC`; IsPrinter: `For Each iPrn In Printers` — 必须在符号解析

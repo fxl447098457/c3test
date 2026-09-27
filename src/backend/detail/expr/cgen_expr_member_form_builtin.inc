@@ -180,6 +180,22 @@
             if (memLower == "item") { lastExpr_ = "(int32_t)(intptr_t)vb6_Forms_Item"; return; }
         }
 
+        // Fix 161: Console 对象 (对齐 twinBASIC) —— 控制台 I/O 的现代口径。
+        //   Console.WriteLine([text]) / Console.Write(text)  输出 (走 vb6_ConWriteOutW,
+        //    控制台 WriteConsoleW / 管道按代码页, 中文不乱)
+        //   Console.ReadLine() As String   读一行
+        //   Console.ReadKey()  As String   读一个键 (取行首字符)
+        //   Console.Read()     As String   同 ReadKey (twinBASIC 无换行等待的简化口径)
+        // stdin 侧由 vb6_ConReadLine 按 GetConsoleMode 分流 (控制台 ReadConsoleW /
+        // 管道 ReadFile+代码页), 修掉此前裸 fgetws 把管道字节当 UTF-16 的必然乱码。
+        if (objLower == "console") {
+            if (memLower == "writeline")  { lastExpr_ = "vb6_Console_WriteLine"; return; }
+            if (memLower == "write")      { lastExpr_ = "vb6_Console_Write"; return; }
+            if (memLower == "readline")   { lastExpr_ = "vb6_Console_ReadLine()"; return; }
+            if (memLower == "readkey")    { lastExpr_ = "vb6_Console_ReadKey()"; return; }
+            if (memLower == "read")       { lastExpr_ = "vb6_Console_ReadKey()"; return; }
+        }
+
         // P7.5+P7.6: 窗体控件属性读取
         // 情况1: ctrl.Property (非数组) → vb6_GetControlXxx(vb6_hwnd_ctrl)
         // 情况2: ctrlArr(idx).Property (数组) → vb6_GetControlXxx(vb6_CtrlArr_GetAt(&vb6_arr_ctrl, idx))

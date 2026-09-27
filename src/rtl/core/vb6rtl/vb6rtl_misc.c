@@ -373,32 +373,188 @@ vb6_VARIANT vb6_IIfVariant(int32_t cond, vb6_VARIANT truepart, vb6_VARIANT false
     else      { vb6_VariantClear(&truepart);  return falsepart; }
 }
 
-/* InputBox: 简化实现 - 使用控制台输入 (非GUI环境) */
+/* ============================================================
+ * Fix 161: 控制台输入原语 (stdin 侧的多语言/多来源正确处理)
+ *
+ * 背景 —— 输出侧 vb6_ConWriteHandle 早已按"控制台 vs 管道"分流:
+ *   控制台 → WriteConsoleW (宽字符直通, 与 chcp 无关)
+ *   管道   → 按 GetConsoleOutputCP() 转字节
+ * 输入侧此前只有 vb6_InputBox 的裸 fgetws(stdin): CRT 一律按 UTF-16 解析,
+ * 于是**管道/重定向输入的字节被当 UTF-16 码元拼接** ⇒ ASCII 'AB'(0x41,0x42)
+ * 读成 U+4241, GBK/UTF-8 中文同样全错。这不是"显示乱码", 是真读错。
+ *
+ * 本组函数把输出侧同一判据 (GetConsoleMode) 用到 stdin:
+ *   真控制台 → ReadConsoleW   (键盘本就是 UTF-16)
+ *   管道/重定向 → ReadFile 拿字节 → MultiByteToWideChar(GetConsoleCP() ?: ACP)
+ *                装不下 (如 437 要读中文) 退回 UTF-8
+ * 与输出侧口径对称。
+ * ============================================================ */
+
+/* 判别 stdin 是否为真控制台 (键盘)。返回 1=控制台, 0=管道/重定向/无效。 */
+int32_t vb6_ConInputIsConsole(void) {
+#ifdef _WIN32
+    DWORD mode = 0;
+    HANDLE h = GetStdHandle(STD_INPUT_HANDLE);
+    if (h == NULL || h == INVALID_HANDLE_VALUE) return 0;
+    return GetConsoleMode(h, &mode) ? 1 : 0;
+#else
+    return isatty(0) ? 1 : 0;
+#endif
+}
+
+/* 从 stdin 读一行: 返回不含行尾符的 BSTR; EOF 且无内容时返回空 BSTR。
+ * 控制台与管道两条路径都收敛到"宽字符结果"。 */
+BSTR vb6_ConReadLine(void) {
+#ifdef _WIN32
+    HANDLE hIn = GetStdHandle(STD_INPUT_HANDLE);
+    DWORD mode = 0;
+    if (hIn == NULL || hIn == INVALID_HANDLE_VALUE) return vb6_BSTR_Empty();
+
+    /* 可增长宽字符缓冲 (动态拼接, 覆盖长行) */
+    size_t cap = 128, len = 0;
+    wchar_t* out = (wchar_t*)malloc(cap * sizeof(wchar_t));
+    if (!out) return vb6_BSTR_Empty();
+
+    if (GetConsoleMode(hIn, &mode)) {
+        /* ---- 真控制台: 键盘输入本就是 UTF-16 码元 ---- */
+        for (;;) {
+            wchar_t wc = 0;
+            DWORD got = 0;
+            if (!ReadConsoleW(hIn, &wc, 1, &got, NULL) || got == 0) break; /* EOF */
+            if (wc == L'\n' || wc == L'\r') break;                        /* 行尾 */
+            if (len + 1 >= cap) {
+                cap *= 2;
+                wchar_t* nb = (wchar_t*)realloc(out, cap * sizeof(wchar_t));
+                if (!nb) break;
+                out = nb;
+            }
+            out[len++] = wc;
+        }
+    } else {
+        /* ---- 管道/重定向: 字节流, 按控制台输入代码页解码 ----
+         * 逐块读入原始字节, 行尾 LF 结束; 最后整体转宽字符 (避免多字节
+         * 序列被块边界切断)。 */
+        size_t bcap = 256, blen = 0;
+        char* bytes = (char*)malloc(bcap);
+        if (!bytes) { free(out); return vb6_BSTR_Empty(); }
+        for (;;) {
+            char c = 0;
+            DWORD got = 0;
+            if (!ReadFile(hIn, &c, 1, &got, NULL) || got == 0) break; /* EOF */
+            if (c == '\n') break;
+            if (c == '\r') continue;                                   /* 兼容 CRLF */
+            if (blen + 1 >= bcap) {
+                bcap *= 2;
+                char* nb = (char*)realloc(bytes, bcap);
+                if (!nb) break;
+                bytes = nb;
+            }
+            bytes[blen++] = c;
+        }
+        if (blen > 0) {
+            UINT cp = GetConsoleCP();
+            int need;
+            if (!cp) cp = GetACP();
+            need = MultiByteToWideChar(cp, 0, bytes, (int)blen, NULL, 0);
+            if (need <= 0) {
+                /* 代码页装不下 → 退 UTF-8, 不丢字 */
+                cp = CP_UTF8;
+                need = MultiByteToWideChar(cp, 0, bytes, (int)blen, NULL, 0);
+            }
+            if (need > 0) {
+                if ((size_t)need + 1 > cap) {
+                    cap = (size_t)need + 1;
+                    wchar_t* nb = (wchar_t*)realloc(out, cap * sizeof(wchar_t));
+                    if (nb) out = nb; else need = 0;
+                }
+                if (need > 0) {
+                    MultiByteToWideChar(cp, 0, bytes, (int)blen, out, need);
+                    len = (size_t)need;
+                }
+            }
+        }
+        free(bytes);
+    }
+
+    out[len] = L'\0';
+    BSTR result = vb6_BSTR_FromStr(out);
+    free(out);
+    return result;
+#else
+    /* 非 Windows: CRT 窄字节 + 按 locale, 走 fgetws 亦可; 保持简单 */
+    wchar_t buf[1024];
+    if (fgetws(buf, 1024, stdin)) {
+        int32_t l = (int32_t)wcslen(buf);
+        while (l > 0 && (buf[l-1] == L'\n' || buf[l-1] == L'\r')) buf[--l] = L'\0';
+        return vb6_BSTR_FromStr(buf);
+    }
+    return vb6_BSTR_Empty();
+#endif
+}
+
+/* 从 stdin 读一个字符 (键盘/管道同一路径, 取首字符)。EOF 返回空 BSTR。 */
+BSTR vb6_ConReadKey(void) {
+    BSTR line = vb6_ConReadLine();
+    BSTR result;
+    if (!line || vb6_BSTR_Len(line) == 0) {
+        if (line) vb6_BSTR_Free(line);
+        return vb6_BSTR_Empty();
+    }
+    /* 取首个字符 (宽字符安全的左截断) */
+    result = vb6_Left(line, 1);
+    vb6_BSTR_Free(line);
+    return result;
+}
+
+/* ============================================================
+ * Fix 161: Console 对象 (对齐 twinBASIC)
+ *   Console.WriteLine / Console.Write  → 输出 (复用 vb6_ConWriteOutW)
+ *   Console.ReadLine / .ReadKey / .Read → 输入 (复用 vb6_ConReadLine/ConReadKey)
+ * 输出走控制台/管道分流 (WriteConsoleW vs 代码页字节), 输入同理 (ReadConsoleW
+ * vs ReadFile+代码页), 与 DEB.PRINT / InputBox 同一口径, 中文不乱。
+ * ============================================================ */
+
+void vb6_Console_Write(BSTR s) {
+    if (s) vb6_ConWriteOutW((const wchar_t*)s, (int)vb6_BSTR_Len(s));
+}
+
+void vb6_Console_WriteLine(BSTR s) {
+    if (s) vb6_ConWriteOutW((const wchar_t*)s, (int)vb6_BSTR_Len(s));
+    vb6_ConWriteOutW(L"\r\n", 2);
+}
+
+BSTR vb6_Console_ReadLine(void) {
+    return vb6_ConReadLine();
+}
+
+BSTR vb6_Console_ReadKey(void) {
+    return vb6_ConReadKey();
+}
+
+/* InputBox: 简化实现 - 使用控制台输入 (非GUI环境)
+ * Fix 161: 改用 vb6_ConReadLine —— 原 fgetws(stdin) 在管道输入下必乱码。 */
 BSTR vb6_InputBox(BSTR prompt, BSTR title, BSTR defaultstr, int32_t xpos, int32_t ypos, BSTR helpfile, int32_t context) {
     (void)title; (void)xpos; (void)ypos; (void)helpfile; (void)context;
-    /* 输出提示 */
+    /* 输出提示 (走 Debug.Print 同一条控制台/管道分流路径, 中文不乱) */
     if (prompt) {
-        fwprintf(stdout, L"%ls", prompt);
-        fwprintf(stdout, L"\r\n");
+        vb6_ConWriteOutW((const wchar_t*)prompt, (int)vb6_BSTR_Len(prompt));
+        vb6_ConWriteOutW(L"\r\n", 2);
     }
     /* 显示默认值提示 */
     if (defaultstr && vb6_BSTR_Len(defaultstr) > 0) {
-        fwprintf(stdout, L"[%ls] ", defaultstr);
+        vb6_ConWriteOutW(L"[", 1);
+        vb6_ConWriteOutW((const wchar_t*)defaultstr, (int)vb6_BSTR_Len(defaultstr));
+        vb6_ConWriteOutW(L"] ", 2);
     }
-    fwprintf(stdout, L"> ");
-    fflush(stdout);
-    /* 读取一行输入 */
-    wchar_t buf[1024];
-    if (fgetws(buf, 1024, stdin)) {
-        /* 去掉尾部换行 */
-        int32_t len = (int32_t)wcslen(buf);
-        while (len > 0 && (buf[len-1] == L'\n' || buf[len-1] == L'\r')) {
-            buf[--len] = L'\0';
-        }
-        if (len == 0 && defaultstr) return vb6_BSTR_FromStr(defaultstr);
-        return vb6_BSTR_FromStr(buf);
+    vb6_ConWriteOutW(L"> ", 2);
+
+    /* 读取一行 (控制台/管道双路径正确解码) */
+    BSTR line = vb6_ConReadLine();
+    if (line && vb6_BSTR_Len(line) > 0) {
+        return line;
     }
-    /* 读取失败则返回默认值 */
+    if (line) vb6_BSTR_Free(line);
+    /* 空行/EOF 则返回默认值 */
     if (defaultstr) return vb6_BSTR_FromStr(defaultstr);
     return vb6_BSTR_Empty();
 }

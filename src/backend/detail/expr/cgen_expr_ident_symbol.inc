@@ -145,6 +145,13 @@
                     const std::string& _progId = itCom->second->comProgId.empty() ? itCom->second->name : itCom->second->comProgId;
                     newExpr = "(void*)vb6_NewObject(L\"" + _progId + "\")";
                 }
+                // Fix 090v-com: 类型化COM接口指针 (vb6_ComIface_X*) 转型:
+                // vb6_NewObject 返回 void*, 直接赋给类型化指针在 C 下是约束违例 → 编译失败.
+                if (knownTypedComVarCType_.count(lower)) {
+                    std::string _t = knownTypedComVarCType_[lower];
+                    if (!_t.empty() && _t.back() == '*') _t.pop_back();
+                    if (_t.find("vb6_ComIface_") != std::string::npos) newExpr = "(" + _t + ")" + newExpr;
+                }
             } else {
                 newExpr = "vb6_cls_" + itNew->second + "_New()";
             }
@@ -176,6 +183,13 @@
                 if (newExpr.empty()) {
                     const std::string& _progId = itCom->second->comProgId.empty() ? itCom->second->name : itCom->second->comProgId;
                     newExpr = "(void*)vb6_NewObject(L\"" + _progId + "\")";
+                }
+                // Fix 090v-com: 类型化COM接口指针 (vb6_ComIface_X*) 转型:
+                // vb6_NewObject 返回 void*, 直接赋给类型化指针在 C 下是约束违例 → 编译失败.
+                if (knownTypedComVarCType_.count(lower)) {
+                    std::string _t = knownTypedComVarCType_[lower];
+                    if (!_t.empty() && _t.back() == '*') _t.pop_back();
+                    if (_t.find("vb6_ComIface_") != std::string::npos) newExpr = "(" + _t + ")" + newExpr;
                 }
             } else {
                 newExpr = "vb6_cls_" + itNew->second + "_New()";

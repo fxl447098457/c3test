@@ -78,6 +78,19 @@ void* vb6_ComPackObject(void* obj) {
     return (void*)pv;
 }
 
+// Fix 160-com-byref: ByRef 对象出参封装.
+// ppObj 是调用方 void* 变量的地址; 生成的 VARIANT 为 VT_DISPATCH|VT_BYREF,
+// 其 ppdispVal 指向调用方变量。IDispatch::Invoke 把新对象指针写回 *ppObj,
+// 调用方变量即持有新方法返回的对象 (Chilkat ObjectOf2/ArrayOf2 等出参语义)。
+// 注意: 不做 AddRef —— 变量本身已是有效引用, ByRef 仅传递地址。
+void* vb6_ComPackObjectRef(void** ppObj) {
+    VARIANT* pv = (VARIANT*)calloc(1, sizeof(VARIANT));
+    VariantInit(pv);
+    pv->vt = VT_DISPATCH | VT_BYREF;
+    pv->ppdispVal = (IDispatch**)ppObj;
+    return (void*)pv;
+}
+
 // Fix 104: 将"省略的实参"封装为 VARIANT (VT_ERROR + DISP_E_PARAMNOTFOUND).
 // VB6 对 IDispatch 调用省略实参时 (obj.Method a, , c) 传的正是该值, 接收方据此
 // 把"未提供"与"显式传 0/空串"区分开. 直接丢弃省略实参会让后续实参前移 (参数错位).

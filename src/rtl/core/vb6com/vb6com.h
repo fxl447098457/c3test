@@ -29,7 +29,14 @@ typedef struct Vb6ComLib {
     const wchar_t* clsidStr;     /* "{XXXXXXXX-...}" — 来自 TYPEATTR->guid, 免注册可得 */
     const wchar_t* coclassName;  /* "MyClass" — progid 缺失时的末段名兜底匹配 */
     const wchar_t* fileName;     /* "bin\mylib.dll" — 相对 exe, 不依赖 CWD */
+    ITypeInfo*     dispIface;    /* 免注册默认调度接口 ITypeInfo (vb6_ComLibRegister 加载, 无注册表);
+                                     非 NULL 时 vb6_getDispid 经它解析 DISPID, 绕过对象自身
+                                     的 GetIDsOfNames (Chilkat 等 typelib 驱动 IDispatch 无需注册 TLB) */
 } Vb6ComLib;
+
+/* 免注册 COM 对象 → 默认调度接口 ITypeInfo 查找 (vb6_getDispid 用来解析 DISPID).
+ * 命中返回 AddRef 过的 ITypeInfo*, 调用方应 Release; 未命中返回 NULL. */
+ITypeInfo* vb6_ComLibLookupTypeInfo(void* disp);
 
 // 注册组件表 (cgen 生成, 入口点调用一次). count 超过 256 截断并打 stderr 警告.
 void vb6_ComLibRegister(const Vb6ComLib* libs, int count);
@@ -73,6 +80,11 @@ void* vb6_ComPackDouble(double val);
 
 // 将void*(IDispatch*)封装为VARIANT (用于对象参数)
 void* vb6_ComPackObject(void* obj);
+
+// Fix 160-com-byref: 将对象变量的地址封装为 VT_DISPATCH|VT_BYREF VARIANT,
+// 用于 COM 方法的 ByRef 对象出参 (如 Chilkat ObjectOf2/ArrayOf2 的 obj/array 形参)。
+// ppObj 指向调用方的 void* 变量; Invoke 写入新指针后, 调用方变量即持有新对象。
+void* vb6_ComPackObjectRef(void** ppObj);
 
 // Fix 104: 将"省略的实参"封装为 VARIANT (VT_ERROR + DISP_E_PARAMNOTFOUND).
 // VB6 遇到 obj.Method a, , c 这类省略实参时, 对该形参位置传的正是这个值 ——

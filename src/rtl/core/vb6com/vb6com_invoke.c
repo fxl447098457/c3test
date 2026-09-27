@@ -64,13 +64,67 @@ static DISPID vb6_getDispid(IDispatch* pDisp, const wchar_t* name) {
             return vb6_dispid_cache[i].dispid;
         }
     }
-    if (!vb6_ComIsDispatchable(pDisp)) return DISPID_UNKNOWN;
+    if (!vb6_ComIsDispatchable(pDisp)) {
+        if (GetEnvironmentVariableW(L"C3_COM_TRACE", NULL, 0) > 0) {
+            fwprintf(stderr, L"[C3_COM] getDispid(\"%ls\"): NOT dispatchable (rejected by vb6_ComIsDispatchable)\n", name);
+            fflush(stderr);
+        }
+        return DISPID_UNKNOWN;
+    }
 
-    // 调用GetIDsOfNames
+    /* Fix 160-com: 免注册 typelib 驱动 IDispatch (Chilkat 等) 在 TLB 未注册时,
+     * 自身 GetIDsOfNames 返回 TYPE_E_LIBNOTREGISTERED。改从 C3 预载的 ITypeInfo
+     * (LoadTypeLibEx REGKIND_NONE, 不写注册表) 解析 DISPID —— 真正免注册。
+     * 对象→ITypeInfo 映射在 comLibCreateLocal 创建时登记; 未命中返回 NULL,
+     * 落回下方常规 GetIDsOfNames, 行为不变。 */
+    {
+        ITypeInfo* ti160 = vb6_ComLibLookupTypeInfo((void*)pDisp);
+        if (ti160) {
+            LPOLESTR tiNames160[1] = { (LPOLESTR)name };
+            MEMBERID memid160 = 0;
+            HRESULT hrTI = ti160->lpVtbl->GetIDsOfNames(ti160, tiNames160, 1, &memid160);
+            ti160->lpVtbl->Release(ti160);
+            if (SUCCEEDED(hrTI)) {
+                DISPID dispid = (DISPID)memid160;
+                if (vb6_dispid_cache_count < VB6_DISPID_CACHE_SIZE) {
+                    vb6_dispid_cache[vb6_dispid_cache_count].obj = (void*)pDisp;
+                    wcsncpy(vb6_dispid_cache[vb6_dispid_cache_count].name, name, 63);
+                    vb6_dispid_cache[vb6_dispid_cache_count].name[63] = L'\0';
+                    vb6_dispid_cache[vb6_dispid_cache_count].dispid = dispid;
+                    vb6_dispid_cache_count++;
+                }
+                return dispid;
+            }
+        }
+    }
+
+    // 调用GetIDsOfNames.
+    // 不少COM对象(如 Chilkat ActiveX)的 IDispatch::GetIDsOfNames 只认
+    // LOCALE_SYSTEM_DEFAULT(0x800) 或 LOCALE_NEUTRAL(0), 对 LOCALE_USER_DEFAULT(0x400)
+    // 返回 DISP_E_UNKNOWNNAME —— 表现就是属性/方法全部 "not found". 依次在多个
+    // LCID 上重试, 任一命中即用, 避免这类对象静默失效. 顺序: 先 USER(标准), 再
+    // SYSTEM / NEUTRAL, 兼容标准对象与严格对象.
     DISPID dispid;
     LPOLESTR names[1] = { (LPOLESTR)name };
-    HRESULT hr = pDisp->lpVtbl->GetIDsOfNames(pDisp, &IID_NULL, names, 1,
-                                               LOCALE_USER_DEFAULT, &dispid);
+    static const LCID tryLcids[] = { LOCALE_USER_DEFAULT, LOCALE_SYSTEM_DEFAULT, LOCALE_NEUTRAL, 0 };
+    HRESULT hr = DISP_E_UNKNOWNNAME;
+    for (int li = 0; li < 4; li++) {
+        hr = pDisp->lpVtbl->GetIDsOfNames(pDisp, &IID_NULL, names, 1,
+                                          tryLcids[li], &dispid);
+        if (GetEnvironmentVariableW(L"C3_COM_TRACE", NULL, 0) > 0) {
+            fwprintf(stderr, L"[C3_COM] getDispid(\"%ls\") lcid=0x%04lX hr=0x%08lX dispid=%ld\n",
+                     name, (unsigned long)tryLcids[li], (unsigned long)hr, (long)dispid);
+            fflush(stderr);
+        }
+        if (SUCCEEDED(hr)) {
+            if (li != 0 && GetEnvironmentVariableW(L"C3_COM_TRACE", NULL, 0) > 0) {
+                fwprintf(stderr, L"[C3_COM] GetIDsOfNames(\"%ls\") ok with lcid 0x%04lX (USER failed)\n",
+                         name, (unsigned long)tryLcids[li]);
+                fflush(stderr);
+            }
+            break;
+        }
+    }
     if (FAILED(hr)) return DISPID_UNKNOWN;
 
     // 存入缓存
@@ -83,6 +137,40 @@ static DISPID vb6_getDispid(IDispatch* pDisp, const wchar_t* name) {
     }
 
     return dispid;
+}
+
+// ============================================================
+// Fix 160-com: 免注册分派辅助 (ITypeInfo 驱动, 完全不依赖注册表)
+// ============================================================
+
+/* 免注册 GetIDsOfNames: 若对象是 C3 ComLib 免注册创建的, 优先用预载的
+ * ITypeInfo (LoadTypeLibEx REGKIND_NONE 内存副本) 解析 DISPID, 否则退回
+ * 对象自身 GetIDsOfNames。供 For Each 等直接调用路径使用。 */
+HRESULT vb6_ComGetIdsOfNames(IDispatch* pDisp, const wchar_t* name, DISPID* pDispid) {
+    ITypeInfo* ti = vb6_ComLibLookupTypeInfo((void*)pDisp);
+    if (ti) {
+        LPOLESTR tn[1] = { (LPOLESTR)name };
+        MEMBERID mid = 0;
+        HRESULT hr = ti->lpVtbl->GetIDsOfNames(ti, tn, 1, &mid);
+        ti->lpVtbl->Release(ti);
+        if (SUCCEEDED(hr)) { *pDispid = (DISPID)mid; return hr; }
+    }
+    LPOLESTR on[1] = { (LPOLESTR)name };
+    return pDisp->lpVtbl->GetIDsOfNames(pDisp, &IID_NULL, on, 1, LOCALE_USER_DEFAULT, pDispid);
+}
+
+/* 免注册 Invoke 总入口: 若对象是 C3 ComLib 免注册创建的, 走 ITypeInfo::Invoke
+ * (内存中 TLB 副本), 绕开对象自身因 TLB 未注册而失败的 IDispatch::Invoke;
+ * 普通注册表组件无 TI 映射, 落回 IDispatch::Invoke, 行为不变。 */
+HRESULT vb6_ComInvoke(IDispatch* pDisp, DISPID dispid, WORD wFlags,
+                      DISPPARAMS* dp, VARIANT* result, EXCEPINFO* excep, UINT* argErr) {
+    ITypeInfo* ti = vb6_ComLibLookupTypeInfo((void*)pDisp);
+    if (ti) {
+        HRESULT hr = ti->lpVtbl->Invoke(ti, (void*)pDisp, dispid, wFlags, dp, result, excep, argErr);
+        ti->lpVtbl->Release(ti);
+        return hr;
+    }
+    return pDisp->lpVtbl->Invoke(pDisp, dispid, &IID_NULL, LOCALE_USER_DEFAULT, wFlags, dp, result, excep, argErr);
 }
 
 // COM方法调用 (返回VARIANT*, 调用方需vb6_ComVarClear释放)
@@ -162,8 +250,7 @@ void* vb6_ComCall(void* disp, const wchar_t* methodName,
     memset(&excep, 0, sizeof(excep));
     UINT argErr = 0;
 
-    HRESULT hr = pDisp->lpVtbl->Invoke(pDisp, dispid, &IID_NULL,
-        LOCALE_USER_DEFAULT, DISPATCH_METHOD | DISPATCH_PROPERTYGET, &dp, result, &excep, &argErr);
+    HRESULT hr = vb6_ComInvoke(pDisp, dispid, DISPATCH_METHOD | DISPATCH_PROPERTYGET, &dp, result, &excep, &argErr);
 
     if (GetEnvironmentVariableW(L"C3_OCX_TRACE", NULL, 0) > 0)
         fprintf(stderr, "[C3_COM] Call '%ls' hr=0x%08lX vt=%d\n",
@@ -178,6 +265,9 @@ void* vb6_ComCall(void* disp, const wchar_t* methodName,
     // 清理参数副本 (dp.rgvarg是浅拷贝, VariantClear会释放内部的BSTR/对象)
     if (dp.rgvarg) {
         for (UINT i = 0; i < dp.cArgs; i++) {
+            // Fix 160-com-byref: VT_BYREF 出参指向调用方存储, 引用归调用方所有,
+            // 这里不能 VariantClear (否则会Release掉方法新写入的对象, 或释放调用方变量)。
+            if (dp.rgvarg[i].vt & VT_BYREF) continue;
             VariantClear(&dp.rgvarg[i]);
         }
         free(dp.rgvarg);
@@ -227,8 +317,7 @@ void* vb6_ComCallByDispid(void* disp, int32_t dispid,
     memset(&excep, 0, sizeof(excep));
     UINT argErr = 0;
 
-    HRESULT hr = pDisp->lpVtbl->Invoke(pDisp, (DISPID)dispid, &IID_NULL,
-        LOCALE_USER_DEFAULT, DISPATCH_METHOD | DISPATCH_PROPERTYGET, &dp, result, &excep, &argErr);
+    HRESULT hr = vb6_ComInvoke(pDisp, (DISPID)dispid, DISPATCH_METHOD | DISPATCH_PROPERTYGET, &dp, result, &excep, &argErr);
 
     if (FAILED(hr)) {
         vb6_ComCheckError(hr, &excep, L"ComCallByDispid");
@@ -237,6 +326,8 @@ void* vb6_ComCallByDispid(void* disp, int32_t dispid,
 
     if (dp.rgvarg) {
         for (UINT i = 0; i < dp.cArgs; i++) {
+            // Fix 160-com-byref: ByRef 出参指向调用方存储, 不释放其引用。
+            if (dp.rgvarg[i].vt & VT_BYREF) continue;
             VariantClear(&dp.rgvarg[i]);
         }
         free(dp.rgvarg);
@@ -325,8 +416,7 @@ void* vb6_ComGetProp(void* disp, const wchar_t* propName) {
     memset(&excep, 0, sizeof(excep));
     UINT argErr = 0;
 
-    HRESULT hr = pDisp->lpVtbl->Invoke(pDisp, dispid, &IID_NULL,
-        LOCALE_USER_DEFAULT, (DISPATCH_METHOD | DISPATCH_PROPERTYGET), &dp, result, &excep, &argErr);
+    HRESULT hr = vb6_ComInvoke(pDisp, dispid, (DISPATCH_METHOD | DISPATCH_PROPERTYGET), &dp, result, &excep, &argErr);
 
     if (GetEnvironmentVariableW(L"C3_OCX_TRACE", NULL, 0) > 0)
         fprintf(stderr, "[C3_COM] GetProp '%ls' hr=0x%08lX vt=%d\n",
@@ -377,9 +467,7 @@ void* vb6_ComGetPropArg(void* disp, const wchar_t* propName,
     memset(&excep, 0, sizeof(excep));
     UINT argErr = 0;
 
-    HRESULT hr = pDisp->lpVtbl->Invoke(pDisp, dispid, &IID_NULL,
-        LOCALE_USER_DEFAULT, DISPATCH_METHOD | DISPATCH_PROPERTYGET,
-        &dp, result, &excep, &argErr);
+    HRESULT hr = vb6_ComInvoke(pDisp, dispid, DISPATCH_METHOD | DISPATCH_PROPERTYGET, &dp, result, &excep, &argErr);
 
     if (FAILED(hr)) {
         vb6_ComCheckError(hr, &excep, L"ComGetPropArg");
@@ -471,8 +559,7 @@ void vb6_ComSetProp(void* disp, const wchar_t* propName, void* value_void) {
     memset(&excep, 0, sizeof(excep));
     UINT argErr = 0;
 
-    HRESULT hr = pDisp->lpVtbl->Invoke(pDisp, dispid, &IID_NULL,
-        LOCALE_USER_DEFAULT, DISPATCH_PROPERTYPUT, &dp, NULL, &excep, &argErr);
+    HRESULT hr = vb6_ComInvoke(pDisp, dispid, DISPATCH_PROPERTYPUT, &dp, NULL, &excep, &argErr);
 
     if (FAILED(hr)) {
         vb6_ComCheckError(hr, &excep, L"ComSetProp");
@@ -518,8 +605,7 @@ void vb6_ComSetPropArg(void* disp, const wchar_t* propName, void** args, int32_t
     memset(&excep, 0, sizeof(excep));
     UINT argErr = 0;
 
-    HRESULT hr = pDisp->lpVtbl->Invoke(pDisp, dispid, &IID_NULL,
-        LOCALE_USER_DEFAULT, DISPATCH_PROPERTYPUT, &dp, NULL, &excep, &argErr);
+    HRESULT hr = vb6_ComInvoke(pDisp, dispid, DISPATCH_PROPERTYPUT, &dp, NULL, &excep, &argErr);
 
     /* 清理: 释放索引参数的堆VARIANT和索引数组, 以及value */
     for (int32_t i = 0; i < argc; i++) free(args[i]);
@@ -560,11 +646,9 @@ void vb6_ComSetRef(void* disp, const wchar_t* propName, void* objRef) {
     UINT argErr = 0;
 
     // 优先尝试PROPERTYPUTREF, 失败则回退PROPERTYPUT
-    HRESULT hr = pDisp->lpVtbl->Invoke(pDisp, dispid, &IID_NULL,
-        LOCALE_USER_DEFAULT, DISPATCH_PROPERTYPUTREF, &dp, NULL, &excep, &argErr);
+    HRESULT hr = vb6_ComInvoke(pDisp, dispid, DISPATCH_PROPERTYPUTREF, &dp, NULL, &excep, &argErr);
     if (FAILED(hr)) {
-        hr = pDisp->lpVtbl->Invoke(pDisp, dispid, &IID_NULL,
-            LOCALE_USER_DEFAULT, DISPATCH_PROPERTYPUT, &dp, NULL, &excep, &argErr);
+        hr = vb6_ComInvoke(pDisp, dispid, DISPATCH_PROPERTYPUT, &dp, NULL, &excep, &argErr);
     }
 
     if (FAILED(hr)) {

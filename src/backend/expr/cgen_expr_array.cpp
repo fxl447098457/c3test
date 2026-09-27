@@ -77,7 +77,7 @@ Vb6Type CCodeGen::resolveArrayElemType(ASTNode* typeRef) const {
             }
             static const std::unordered_set<std::string> vb6BuiltinObjTypes = {
                 "collection", "forms", "errobject", "app", "screen", "printer", "clipboard",
-                "control", "form"
+                "control", "form", "console"  // Fix 161: Console (twinBASIC 口径)
             };
             if (vb6BuiltinObjTypes.count(nmLower0)) return Vb6Type::Object;
         }
