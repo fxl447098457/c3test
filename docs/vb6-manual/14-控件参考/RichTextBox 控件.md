@@ -27,3 +27,55 @@
 标准 **TextBox** 控件用到的所有属性、事件和方法，**RichTextBox** 控件几乎都能支持，例如 **MaxLength、** **MultiLine**、 **ScrollBars、** **SelLength、** **SelStart** 和 **SelText**。对于那些可以使用 **TextBox** 控件的应用程序，也可以很容易地使用 **RichTextBox** 控件。而且，**RichTextBox** 控件并没有和标准 **TextBox** 控件一样具有 64K 字符容量的限制。
 
 **发行注意** 为了能在应用程序中使用 **RichTextBox** 控件，必须把Richtx32.ocx 文件添加到工程中。因此，在应用程序发行时，Richtx32.ocx 文件就应安装在 Microsoft Windows 的 SYSTEM 目录内。有关怎样把自定义控件添加到工程中的详细内容，请参阅《程序员指南》。
+
+---
+
+## C3 的实现面（C29-RT-a 已做：窗口 + 创建样式 + 文本/选区/只读/上限/滚动条/换行）
+
+C3 里 **RichTextBox 不走 `Richtx32.ocx`**（上面那条"必须把 OCX 加进工程、发布时装到 SYSTEM
+目录"的要求在 C3 不存在）：那颗 OCX 是 32 位 inproc 服务器，64 位进程里 `CoCreateInstance`
+直接失败。C3 把它复刻成 **Msftedit.dll 注册的 `RICHEDIT50W`**，语法与属性名照 VB6，不链 OCX。
+一个通道差别：这枚类**不在 comctl32 的 `ICC_*` 体系里**，所以 RTL 在初始化公共控件之后
+另外 `LoadLibraryW(L"Msftedit.dll")` 一次（拿不到就退回 `riched20.dll`）。
+
+| 写法 | C3 里实际发生的事 |
+| --- | --- |
+| `RT.Text` | 通用那条 `WM_GETTEXT` / `WM_SETTEXT`（与 TextBox 同一对函数） |
+| `RT.SelStart` / `SelLength` | `EM_EXGETSEL` / `EM_EXSETSEL` 那张 `(起,止)` 表；越界由控件夹到文末 |
+| `RT.SelText` | 读 `EM_GETSELTEXT`（空选区读回空串），写 `EM_REPLACESEL`（有选区=替换，空选区=插入） |
+| `RT.ReadOnly` | `EM_SETREADONLY`（**运行期有效**，设计期那条走 Init） |
+| `RT.MaxLength` | `EM_SET/GETLIMITTEXT`；`0` = 不限（映射到原生的默认上限 32767） |
+| `RT.ScrollBars` | 创建参数 `WS_HSCROLL` / `WS_VSCROLL` + `ES_DISABLENOSCROLL`；枚举照 VB6：**0 无 / 1 水平 / 2 垂直 / 3 两者** |
+| `RT.WordWrap` | `EM_SETTARGETDEVICE`（见下面第 3 条） |
+| `RT.BorderStyle` | 与 TextBox 同一条 `WS_EX_CLIENTEDGE` 路 |
+
+四条量出来的口径，写代码时要按它们想：
+
+1. **`ScrollBars` 只能创建时给，所以它没有写口**。原生这枚控件把滚动条当自己的东西管：
+   内容不需要滚动时它连样式位一起把 bar 拆掉（实测：空文本下 `WS_VSCROLL` 读回 0，灌 60 行
+   又自己回来），所以 C3 在创建时一并挂 `ES_DISABLENOSCROLL` 让样式位稳定。而**事后**
+   `SetWindowLong` 加那两位只有外观（客户区让位、看着像有），滚动量程停在默认的 0..100
+   —— 滚不动。因此 `RT.ScrollBars = 2` 这种**运行期赋值**在本实现里不发任何东西，读数
+   恒等于设计期那一位。要问"滚动条到底活没活"，读本项目扩展的 **`VScrollRange` /
+   `HScrollRange`**（`GetScrollInfo` 的 nMax）：真挂着的那枚随内容长过 100，没挂的那枚不动。
+2. **`MaxLength` 只管用户键盘输入，管不住 `Text =` 赋值**。限 20 再赋 30 个字符，控件把上限
+   抬到了文本长度（读数从 20 变 30），程序化 `SelText =` 同样穿过去。VB6 那颗 OCX 在赋值时
+   会截断，这里不会 —— 别指望它当输入长度的护栏。
+3. **`WordWrap` 的原生方向与常见片段相反**：`EM_SETTARGETDEVICE` 的 lParam 才是目标 DC，
+   传 `NULL` = 折到**本窗客户区**宽（= VB6 的 `True`），传 `GetDC(控件)` = 目标宽度变成整屏
+   （实际不折行）。原生从没调过这条时是"不折"，与 VB6 默认相反 ⇒ C3 在设计期没写
+   `WordWrap` 时也显式下发一次 `True`。`EM_SET/GETWRAPMODE` 在这枚上问不出也设不动，
+   所以这一位是**自存**的（与 `DTPicker.CustomFormat` 同一条路）。
+4. **`SelStart` 按 UTF-16 代码单元计数**（与 EDIT 控件同口径）：代理对（emoji 那一类）算 2，
+   不要当 VB6 的"字符数"来读。
+
+两条同族既有缺陷顺手一并修了：`BorderStyle` 的读写此前只认 `"Edit"` 类名，`RICHEDIT50W`
+落到"存窗口属性"那条兜底分支，而 `SetPropW(0)` 等于删属性 ⇒ `BorderStyle = None` 永远设不上、
+而且恒读回默认 1。
+
+### 还没做的三格
+
+`SelBold` / `SelColor` / `SelFontName` / `SelAlignment` / `SelIndent` 那一批**格式**面，
+`TextRTF` + `LoadFile` / `SaveFile` + `Find`，以及 `Change` / `SelChange` 两条事件（后者是
+工具栏按钮状态跟着选区刷新的关键）—— 本版本尚未实现，读写会落到未登记属性的兜底路。
+OLE 对象嵌入与 `SelPrint` 同样不在计划内。

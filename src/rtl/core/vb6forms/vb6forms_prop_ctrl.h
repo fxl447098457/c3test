@@ -682,6 +682,29 @@ void    vb6_MV_SetSelEnd(void* hwnd, double serial);
 double  vb6_MV_NotifyDate(void* nmSelChange);
 void    vb6_MV_SimDateClick(void* hwnd, double serial);
 
+// ===================== RichTextBox (ai/029 C29-RT-a) =====================
+//   VB6 RichTextBox 的窗口 + 创建样式 + 文本/选区面，原生 Msftedit.dll 的 RICHEDIT50W。
+//   类注册靠 vb6_ComCtl_Init 里那次 LoadLibraryW（不在 comctl32 的 ICC_* 体系里）。
+//   Sel* 的格式面（粗/斜/颜色/字体/对齐/缩进）留 RT-b，TextRTF/Find 留 RT-c，事件留 RT-d。
+void    vb6_RTB_Init(void* hwnd, int32_t wordWrap, int32_t readOnly);  // 设计期两条；-999 = 没写
+int32_t vb6_RTB_GetSelStart(void* hwnd);
+void    vb6_RTB_SetSelStart(void* hwnd, int32_t v);
+int32_t vb6_RTB_GetSelLength(void* hwnd);
+void    vb6_RTB_SetSelLength(void* hwnd, int32_t v);
+wchar_t* vb6_RTB_GetSelText(void* hwnd);
+void    vb6_RTB_SetSelText(void* hwnd, void* bstr);
+int32_t vb6_RTB_GetReadOnly(void* hwnd);
+void    vb6_RTB_SetReadOnly(void* hwnd, int32_t on);
+int32_t vb6_RTB_GetMaxLength(void* hwnd);
+void    vb6_RTB_SetMaxLength(void* hwnd, int32_t v);
+int32_t vb6_RTB_GetScrollBars(void* hwnd);   // 0 无 / 1 水平 / 2 垂直 / 3 两者
+// C3 扩展（不是 VB6 属性）：控件自己的滚动量程 —— "滚动条到底活没活"的唯一硬证人
+// （事后写 WS_VSCROLL 只有外观、量程停在默认值，见 029 §九 本格）。
+int32_t vb6_RTB_GetVScrollRange(void* hwnd);
+int32_t vb6_RTB_GetHScrollRange(void* hwnd);
+int32_t vb6_RTB_GetWordWrap(void* hwnd);    // 原生没有 Get 对称项 ⇒ 自存窗口属性
+void    vb6_RTB_SetWordWrap(void* hwnd, int32_t on);
+
 #ifdef __cplusplus
 }
 #endif

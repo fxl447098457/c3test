@@ -236,6 +236,30 @@
                 if (mvToday != -999 && mvToday == 0) style |= 0x0010L;
                 break;
             }
+            case FrmControlType::RichTextBox: {
+                // C29-RT-a: RICHEDIT50W 的创建样式。
+                //   · ES_MULTILINE 一律挂上：原生这枚控件不是多行就没有滚动条一说（与 TextBox
+                //     不同，VB6 的 RichTextBox 本身就是多行的）。
+                //   · ScrollBars 从 .frm 立进创建参数，**不走运行期 setter** —— 探针量出来事后
+                //     SetWindowLong 只有外观（客户区让位 21px）、滚动量程停在默认 0..100，
+                //     内容真实高度 0..504 滚不动。RTL 侧的 VScrollRange/HScrollRange 就是这条
+                //     结论的证人，夹具 RT7-RT10 读它。
+                //   · 枚举口径按 VB6 文档：0 无 / 1 水平 / 2 垂直 / 3 两者。**与上面 TextBox
+                //     那一格相反** —— 那一格把 1 当垂直、2 当水平（既有缺陷，本格不顺手改，
+                //     账记在 029 §九）。
+                createCaption = "";
+                style |= kEsMulti;
+                auto rtSb = ctrl.properties.find("ScrollBars");
+                if (rtSb != ctrl.properties.end()) {
+                    int sb = (int)rtSb->second.intValue;
+                    if (sb == 1 || sb == 3) style |= kWsHscroll;
+                    if (sb == 2 || sb == 3) style |= kWsVscroll;
+                    // ES_DISABLENOSCROLL：不挂它，控件在"内容暂时不需要滚动"时把 bar 连样式位
+                    // 一起拆掉（实测空文本下 GWL_STYLE 那两位读回 0），ScrollBars 就没法答。
+                    if (sb != 0) style |= 0x00002000L;
+                }
+                break;
+            }
             case FrmControlType::Toolbar:
                 // C29-5a: 原生 ToolbarWindow32 的默认观感两条 + **两位绝不能省**:
                 //   CCS_NORESIZE(0x4) | CCS_NOPARENTALIGN(0x8) —— 不给这两位，控件会无视
@@ -251,9 +275,13 @@
         }
 
         // Bug3-Fix: TextBox/ComboBox 延迟设置初始文本，避免 EN_CHANGE 在句柄赋值前触发
+        // C29-RT-a: RichTextBox 同因加入 —— 它也是文本控件，.frm 里的初值走 Text 那一条。
         bool needDelayedText = (ctrl.controlType == FrmControlType::TextBox ||
-                                ctrl.controlType == FrmControlType::ComboBox);
-        std::string delayedText = (ctrl.controlType == FrmControlType::TextBox) ? ctrlText : ctrlCaption;
+                                ctrl.controlType == FrmControlType::ComboBox ||
+                                ctrl.controlType == FrmControlType::RichTextBox);
+        std::string delayedText = (ctrl.controlType == FrmControlType::TextBox ||
+                                   ctrl.controlType == FrmControlType::RichTextBox)
+                                      ? ctrlText : ctrlCaption;
         if (needDelayedText) createCaption = "";  // 创建时不传文本
 
         // C29-1a: Line 在 VB6 里没有 Left/Top/Width/Height —— 窗口矩形就是 X1/Y1/X2/Y2
@@ -517,6 +545,26 @@
             c_.emitLine("vb6_MV_Init((void*)" + mvHwnd + ", "
                         + std::to_string(mvRows) + ", " + std::to_string(mvCols) + ", "
                         + std::to_string(mvMax) + ");");
+        }
+
+        // C29-RT-a: RichTextBox 设计期。ScrollBars 已经立在创建参数里（事后写没有量程），
+        // BorderStyle 由上面那条通用 emitDesignerStyleProps 管，WordWrap 原生没有 Get 对称项
+        // ⇒ RTL 自存窗口属性。-999 = .frm 没写（VB6 布尔的 True 就是 -1，不能拿它当哨兵）。
+        // 未写时这条照发（RTL 直接返回）—— 发码形状稳定，emitc 断言要看它。
+        if (ctrl.controlType == FrmControlType::RichTextBox) {
+            std::string rtLower = ctrl.controlName;
+            std::transform(rtLower.begin(), rtLower.end(), rtLower.begin(), ::tolower);
+            std::string rtHwnd = knownControlArrays_.count(rtLower) ?
+                ("vb6_CtrlArr_GetAt(&vb6_arr_" + cIdent(ctrl.controlName) + ", " +
+                 std::to_string(ctrl.index >= 0 ? ctrl.index : 0) + ")") :
+                ("vb6_hwnd_" + cIdent(ctrl.controlName));
+            int rtWW = -999, rtRO = -999;
+            auto wwIt = ctrl.properties.find("WordWrap");
+            if (wwIt != ctrl.properties.end()) rtWW = (wwIt->second.intValue != 0) ? 1 : 0;
+            auto roIt = ctrl.properties.find("ReadOnly");
+            if (roIt != ctrl.properties.end()) rtRO = (roIt->second.intValue != 0) ? 1 : 0;
+            c_.emitLine("vb6_RTB_Init((void*)" + rtHwnd + ", " + std::to_string(rtWW)
+                        + ", " + std::to_string(rtRO) + ");");
         }
 
         // P20-40: StatusBar 设计期 —— Init 一次, 再按 Panels 集合逐项灌进去。

@@ -185,6 +185,9 @@ enum RtlResourceID {
 
     // ai/029 C29-MV-a: VB6 MonthView 控件 (SysMonthCal32 复刻, 同样不加载 MSCOMCT2.OCX)
     RTL_VB6FORMS_MONTHVIEW_C               = 218,
+
+    // ai/029 C29-RT-a: VB6 RichTextBox 控件 (原生 RICHEDIT50W, 不加载 RICHTX32.OCX)
+    RTL_VB6FORMS_RICHTEXTBOX_C             = 219,
 };
 
 // Session directory manager
