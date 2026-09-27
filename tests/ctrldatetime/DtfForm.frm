@@ -42,6 +42,11 @@ Begin VB.Form DtfForm
       Top             =   1680
       Width           =   2400
    End
+   Begin VB.Timer evtTimer 
+      Interval        =   200
+      Left            =   240
+      Top             =   2160
+   End
 End
 Attribute VB_Name = "DtfForm"
 Attribute VB_GlobalNameSpace = False
@@ -66,7 +71,18 @@ Option Explicit
 '     自洽地假绿。所以 DT6-DT10 全部配**控件侧**读数：DTM_GETIDEALSIZE（问控件自己算的
 '     "装得下当前格式"的宽度），长日期明显比时间宽，宽度对上了才叫格式真选中。
 '
-' Date 型那三格（Value / MinDate / MaxDate）与 DTN_* 事件面都不在这一格里。
+' Date 型那三格在 C29-DT-b（下面 25..36）。DTN_* 事件面（Change / DropDown / CloseUp）
+' 由 evtTimer 那一截验，见文件末尾。
+'
+' 事件判据为什么全在 Timer 里、而且一律比**增量**：Form_Load 那半截自己就往控件写了好几回
+' 值（DT26/DT30/DT32..DT34），原生要是因此自发 DTN_DATETIMECHANGE，计数在进 Timer 之前就已经
+' 不是 0 了 —— 拿绝对值比会把"我们写的"和"Sim 发的"两件事混在一起（E= 那条原始读数就是留给
+' 这一眼分辨的）。
+
+Private gChg1 As Long
+Private gDrp1 As Long
+Private gClu1 As Long
+Private gChg2 As Long
 
 Private Function TF(ByVal ok As Boolean) As String
     If ok Then TF = "Y" Else TF = "N"
@@ -170,6 +186,70 @@ Private Sub Form_Load()
     Debug.Print "DT35=" & TF(dt3.MinDate = 0 And dt3.MaxDate = 0)
     Debug.Print "DT36=" & TF(CLng(dt3.Value) <> CLng(dt2.Value))
 
+    ' DONE 与 Unload 在 evtTimer_Timer —— 事件判据得等窗体载入完再跑 (照 C29-8c 的先例)。
+End Sub
+
+' ---------------- C29-DT-c: DTN_* 事件面 ----------------
+' Sim* 是**判据专用**助手 (与 C29-8c 的 TreeView.SimNodeClick / C29-4 的 StatusBar.SimClick
+' 同一先例)，不对应任何 VB6 语义：无头环境点不了鼠标、也没有"用户拨了一下日期"这回事，
+' 而直接调 handler 会绕开整条派发链 —— 只有从真 WM_NOTIFY 进父窗，才验得到
+' "case WM_NOTIFY + 按 code 分流 + 按 hwndFrom 认来源"三段都接上了。
+Private Sub evtTimer_Timer()
+    Static done As Integer
+    Dim b1 As Long, b2 As Long, b3 As Long, b4 As Long
+    Dim n41 As Long
+    If done Then Exit Sub
+    done = 1
+
+    b1 = gChg1: b2 = gDrp1: b3 = gClu1: b4 = gChg2
+    ' 原始计数打在针之外，判据红了好对账
+    Debug.Print "E=" & b1 & "/" & b2 & "/" & b3 & "/" & b4
+
+    ' --- 37. Change：Sim 发一条真通知，handler 走一次 ---
+    dt1.SimChange()
+    Debug.Print "DT37=" & TF(gChg1 - b1 = 1)
+
+    ' --- 38..39 分流：弹/收各自那一格加，且都不许顺手把 Change 也点一次 ---
+    dt1.SimDropDown()
+    dt1.SimCloseUp()
+    Debug.Print "DT38=" & TF(gDrp1 - b2 = 1 And gClu1 - b3 = 1)
+    Debug.Print "DT39=" & TF(gChg1 - b1 = 1)
+
+    ' --- 40. 认来源：通知从 dt2 发出，dt1 的 handler 不该动 ---
+    dt2.SimChange()
+    Debug.Print "DT40=" & TF(gChg2 - b4 = 1 And gChg1 - b1 = 1)
+
+    ' --- 41..42 运行期"程序化赋值"到底自不自发通知（实测，不是推的）：
+    ' DT41 数的是 `dt2.Value = 43900` 之后 gChg2 又涨了几次。本机量到的答案是**一次都不涨**
+    ' (n41 停在 SimChange 那一次的 1) —— 原生 SysDateTimePick32 对 DTM_SETSYSTEMTIME 不发
+    ' DTN_DATETIMECHANGE，那条通知只由用户交互驱动。这里刻意照原生、不伪造：VB6 那颗 OCX 里
+    ' Value 赋值会 raise Change，哪天要做那条齐平，就得在 vb6_DTP_SetValue 里补发一条，
+    ' 届时 DT41 必须翻红逼人来改这条断言（它就是这条口径的哨兵）。
+    ' DT42 钉另一半：CheckBox 那条写在 DT11 已证明是空转，所以它一下都不许加。
+    dt2.Value = 43900
+    n41 = gChg2 - b4
+    Debug.Print "DT41=" & TF(n41 = 1)
+    dt2.CheckBox = True
+    Debug.Print "DT42=" & TF(gChg2 - b4 = n41)
+
+    Debug.Print "E2=" & n41
     Debug.Print "CTRLDATETIME-DONE"
     Unload Me
+End Sub
+
+' VB6 这三条处理器都没有参数，所以生成的回调形参表是空的 (与 ListView 那两条 void* 不同)。
+Private Sub dt1_Change()
+    gChg1 = gChg1 + 1
+End Sub
+
+Private Sub dt1_DropDown()
+    gDrp1 = gDrp1 + 1
+End Sub
+
+Private Sub dt1_CloseUp()
+    gClu1 = gClu1 + 1
+End Sub
+
+Private Sub dt2_Change()
+    gChg2 = gChg2 + 1
 End Sub

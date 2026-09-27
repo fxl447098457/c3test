@@ -86,6 +86,14 @@
                 anyNotify = true;
                 break;
             }
+            // C29-DT-c: DTPicker 的三条 DTN_* 通知同理 (Change / DropDown / CloseUp)。
+            if (ctrl.controlType == FrmControlType::DTPicker) {
+                if (!symTab_.lookup(ctrl.controlName + "_Change") &&
+                    !symTab_.lookup(ctrl.controlName + "_DropDown") &&
+                    !symTab_.lookup(ctrl.controlName + "_CloseUp")) continue;
+                anyNotify = true;
+                break;
+            }
         }
         if (anyNotify) {
             c_.emitLine("case WM_NOTIFY: {");
@@ -291,6 +299,37 @@
                 c_.emitLine("if (vb6_tbMenuBtn5c) " + mcFn + "(vb6_tbMenuBtn5c);");
                 c_.dedent();
                 c_.emitLine("}");
+            }
+            // ---- C29-DT-c: DTPicker 的 Change / DropDown / CloseUp ----
+            // 三条都由 DTN_* 通知来 (SDK: DTN_FIRST2 = (0U-753U)，本机那份头逐条对过)：
+            //   DTN_DATETIMECHANGE = -759   DTN_DROPDOWN = -754   DTN_CLOSEUP = -753
+            // 与 ListView / TreeView 那两条的**关键差别**：VB6 的这三个处理器都没有参数
+            //   Sub DTPicker1_Change()   /   _DropDown()   /   _CloseUp()
+            // 所以不需要按负载造成员对象，认来源 (hwndFrom) + 分流 (code) 就是全部工作。
+            // DTN_DATETIMECHANGE 的负载里那位 dwFlags (GDT_VALID / GDT_NONE) 这里刻意**不读**:
+            // VB6 的 Change 对"勾掉复选框"和"拨了日期"一视同仁，两条都是"值变了"。
+            for (const auto& ctrl : frmDesc.formControl.children) {
+                if (ctrl.controlType != FrmControlType::DTPicker) continue;
+                struct DtEvt { int32_t code; const char* evt; const char* tag; };
+                const DtEvt dtEvts[] = { { -759, "_Change", "chg" },
+                                         { -754, "_DropDown", "drp" },
+                                         { -753, "_CloseUp", "clu" } };
+                std::string dtNameLower = ctrl.controlName;
+                std::transform(dtNameLower.begin(), dtNameLower.end(), dtNameLower.begin(), ::tolower);
+                std::string dtHwndVar = knownControlArrays_.count(dtNameLower)
+                    ? ("vb6_CtrlArr_GetAt(&vb6_arr_" + cIdent(ctrl.controlName) + ", 0)")
+                    : ("vb6_hwnd_" + cIdent(ctrl.controlName));
+                for (const DtEvt& ev : dtEvts) {
+                    auto* evSym = symTab_.lookup(ctrl.controlName + ev.evt);
+                    if (!evSym) continue;
+                    std::string dtFn = cProcName(evSym->name, AccessLevel::Private);
+                    c_.emitLine("if (pNM42->code == " + std::to_string(ev.code)
+                                + " && (void*)pNM42->hwndFrom == " + dtHwndVar + ") {");
+                    c_.indent();
+                    c_.emitLine("{ extern void " + dtFn + "(); " + dtFn + "(); }");
+                    c_.dedent();
+                    c_.emitLine("}");
+                }
             }
             c_.emitLine("break;");
             c_.dedent();

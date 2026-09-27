@@ -625,6 +625,24 @@
         if (treeViewVars_.count(objExpr)) return objExpr;
         return "";
     }
+    // C29-DT-c: DTPicker 的裸名登记。认法照 treeViewNameOfExpr —— 它也是真窗口，
+    // 判据方法 (SimChange/SimDropDown/SimCloseUp) 的宿主槽只会是 `vb6_hwnd_<裸名>`，
+    // 名字比对同样要过标识符边界 (dt1 不能命中 dt10)。
+    std::unordered_set<std::string> dtpickerVars_;
+    std::string dtpickerNameOfExpr(const std::string& objExpr) const {
+        for (const auto& n : dtpickerVars_) {
+            const std::string hwnd = "vb6_hwnd_" + n;
+            size_t p0 = objExpr.find(hwnd);
+            while (p0 != std::string::npos) {
+                size_t e = p0 + hwnd.size();
+                if (e >= objExpr.size() || !(isalnum((unsigned char)objExpr[e]) || objExpr[e] == '_'))
+                    return n;
+                p0 = objExpr.find(hwnd, e);
+            }
+        }
+        if (dtpickerVars_.count(objExpr)) return objExpr;
+        return "";
+    }
     std::string statusBarHwndVarOfExpr(const std::string& objExpr) const {
         std::string n = statusBarNameOfExpr(objExpr);
         return n.empty() ? "" : "vb6_hwnd_" + n;

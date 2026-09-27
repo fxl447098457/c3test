@@ -389,4 +389,68 @@ int32_t vb6_DTP_IdealWidth(void* hwnd) {
     return (int32_t)sz.cx;
 }
 
+// ---------------- 判据辅助 (写进 ai/029 边界，不对应任何 VB6 语义) ----------------
+// 无头环境点不了鼠标、也没有"用户拨了一下日期"这回事，而直接调 handler 会绕开整条派发链 ——
+// 只有从真 WM_NOTIFY 进父窗，才验得到"case WM_NOTIFY + 按 code 分流 + 按 hwndFrom 认来源"
+// 三段都接上了。手法照 C29-8c 的 vb6_TreeView_SimNodeClick / C29-4 的 SimClick。
+//
+// 三条码值同样抄自那份头 (DTN_FIRST2 = (0U-753U))：
+//   DTN_DATETIMECHANGE = DTN_FIRST2 - 6 = -759   (负载 = NMDATETIMECHANGE{nmhdr, dwFlags, st})
+//   DTN_DROPDOWN       = DTN_FIRST2 - 1 = -754   (负载除 NMHDR 外没有字段)
+//   DTN_CLOSEUP        = DTN_FIRST2     = -753   (同上)
+// 后两条头里连 NMDTDROPDOWN / NMDCLOSEUP 都没定义 ⇒ 只发一张 NMHDR，不自己编结构体。
+// SimChange 的负载按**控件当前状态**现问现填（DTM_GETSYSTEMTIME 的返回值就是 dwFlags），
+// 于是这条伪造的通知与控件自己发的那条同形 —— 两条形不同，派发段却必须都接得上。
+#ifndef DTN_DATETIMECHANGE
+#define DTN_DATETIMECHANGE            (-759L)
+#endif
+#ifndef DTN_DROPDOWN
+#define DTN_DROPDOWN                  (-754L)
+#endif
+#ifndef DTN_CLOSEUP
+#define DTN_CLOSEUP                   (-753L)
+#endif
+
+static void vb6_DtpSendNotify(HWND hwnd, DWORD code, const NMDATETIMECHANGE* payload) {
+    HWND parent;
+    if (!hwnd) return;
+    parent = GetParent(hwnd);
+    if (!parent) parent = hwnd;
+    if (payload) {
+        SendMessageW(parent, WM_NOTIFY, 0, (LPARAM)payload);
+    } else {
+        NMHDR h;
+        memset(&h, 0, sizeof(h));
+        h.hwndFrom = hwnd;
+        h.idFrom   = (UINT_PTR)GetWindowLongPtrW(hwnd, GWLP_ID);
+        h.code     = code;
+        SendMessageW(parent, WM_NOTIFY, 0, (LPARAM)&h);
+    }
+}
+
+void vb6_DTP_SimChange(void* hwnd) {
+    NMDATETIMECHANGE nc;
+    SYSTEMTIME st;
+    LRESULT r;
+    if (!hwnd) return;
+    memset(&nc, 0, sizeof(nc));
+    vb6_DtpZero(&st);
+    r = SendMessageW((HWND)hwnd, DTM_GETSYSTEMTIME, 0, (LPARAM)&st);
+    nc.nmhdr.hwndFrom = (HWND)hwnd;
+    nc.nmhdr.idFrom   = (UINT_PTR)GetWindowLongPtrW((HWND)hwnd, GWLP_ID);
+    nc.nmhdr.code     = (DWORD)DTN_DATETIMECHANGE;
+    /* GDT_ERROR 也照 GDT_VALID 填：这条只是"值变了"的通知，不是查询 */
+    nc.dwFlags = (r == (LRESULT)GDT_NONE) ? (DWORD)GDT_NONE : (DWORD)GDT_VALID;
+    if (nc.dwFlags == (DWORD)GDT_VALID) nc.st = st;
+    vb6_DtpSendNotify((HWND)hwnd, (DWORD)DTN_DATETIMECHANGE, &nc);
+}
+
+void vb6_DTP_SimDropDown(void* hwnd) {
+    vb6_DtpSendNotify((HWND)hwnd, (DWORD)DTN_DROPDOWN, NULL);
+}
+
+void vb6_DTP_SimCloseUp(void* hwnd) {
+    vb6_DtpSendNotify((HWND)hwnd, (DWORD)DTN_CLOSEUP, NULL);
+}
+
 #endif /* _WIN32 */

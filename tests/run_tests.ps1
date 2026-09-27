@@ -1609,13 +1609,22 @@ if ($Category -in @("all", "run", "vbp")) {
     #   DT22-DT24 设计期 CustomFormat 那条字符串路（.frm 里带引号 → 去引号 → 当 C 字面量发）
     #   DT25-DT36（C29-DT-b）Date 值面：Value/MinDate/MaxDate 往返、改一端不动另一端、越界被控件拒绝
     #     （值保持原样，不是钳到边界）、以及未勾那一态（原生仍回填内部日期 ⇒ GetValue 认返回标志回 0）
+    #   DT37-DT42（C29-DT-c）DTN_* 事件面：三条各派发一次（Change/DropDown/CloseUp 码值 -759/-754/-753，
+    #     两两撞车的负控就是"发 DropDown 时 Change 计数不许动"）、Sim 从 dt2 发而 dt1 的 handler 不许动
+    #     （hwndFrom 认来源）、以及**控件自己**发的通知也走同一条链（DT41 拨日期看得见增量、DT42 那条
+    #     空转的 CheckBox 写一下都不许加）。计数一律比增量：Form_Load 半截就写过好几回值。
     # 两条量出来的口径（原文写在夹具头注释里）：① CheckBox / UpDown 只能在**创建时**给（子窗口
     # 的创建参数，事后写 GWL_STYLE 会被控件抹回 —— DT11 就是钉这条边界的针，做成真运行期切换时
     # 它必须翻红）；Format 切档运行期倒是有效（DT9/DT10）。② 光读 GWL_STYLE 会自洽地假绿（SDK 的
     # DTS_TIMEFORMAT=0x9 自带 bit0=UPDOWN），所以格式类判据一律配一条 DTM_GETIDEALSIZE 控件侧读数。
-    # 本机读数：x64 与 x86 各 24/24（宽度 143/64/95/121 两架构逐字相同）；
-    # 拿修复前的编译器（c298c_base_C3.exe）跑同一件夹具 = 19 红 / 2 绿，红的正是样式与属性那一批。
-    $dtNeedles = @("CTRLDATETIME-DONE") + (1..36 | ForEach-Object { "DT$_=Y" })
+    # 本机读数：x64 与 x86 各 42/42（宽度 143/64/95/121 与事件计数两架构逐字相同）；
+    # 拿 DT-a 之前的编译器（c298c_base_C3.exe，那时无原生 DTPicker）跑同一件夹具 = 37 红 / 5 绿，
+    # 绿的正是五条"负向"读数 (DT11/DT21/DT33/DT35/DT42 —— 都成立在"什么都没发生"上)。
+    # DT-c 还有一条更紧的负控：Sim 钩子接上前（同一件夹具、同一个新编译器，只是调用点少写
+    # 一对括号 ⇒ 整条语句被当属性读丢掉），DT37-DT40 四条当场红、接上就绿。
+    # ⚠ 判据方法的写法有讲究：`dt1.SimChange`（不带括号）在语义层是**属性读**，发码一条都不发；
+    # 必须写 `dt1.SimChange()` 才走调用路。这条由上面那条针 (vb6_DTP_SimChange…) 钉住。
+    $dtNeedles = @("CTRLDATETIME-DONE") + (1..42 | ForEach-Object { "DT$_=Y" })
     Test-Vbp "ctrldatetime" "$Tests\ctrldatetime\DtfApp.vbp" $dtNeedles
     Test-Vbp "ctrldatetime_x86" "$Tests\ctrldatetime\DtfApp.vbp" $dtNeedles -Arch "x86"
     # 发码面两面都钉：创建样式位逐枚钉（1409286150 = 长日期+复选框；1409286153 = 时间位+UpDown 位，
@@ -1632,13 +1641,27 @@ if ($Category -in @("all", "run", "vbp")) {
         # 不经过任何装箱 —— 这条针就是别让值面哪天退回 VARIANT 形状而没人察觉。
         'vb6_DTP_SetValue(vb6_hwnd_dt2, dReq);',
         'vb6_DTP_GetValue(vb6_hwnd_dt2',
-        'vb6_DTP_SetHasDate(vb6_hwnd_dt1, 0);'
+        'vb6_DTP_SetHasDate(vb6_hwnd_dt1, 0);',
+        # C29-DT-c：派发那三分支的形状（码值撞在同一个负数段里，写错一位就静默不派发，
+        # 所以三条各钉一条，且钉的是"码值 + 认来源的那枚句柄"这一整对）。
+        'pNM42->code == -759 && (void*)pNM42->hwndFrom == vb6_hwnd_dt1',
+        'pNM42->code == -754 && (void*)pNM42->hwndFrom == vb6_hwnd_dt1',
+        'pNM42->code == -753 && (void*)pNM42->hwndFrom == vb6_hwnd_dt1',
+        'pNM42->code == -759 && (void*)pNM42->hwndFrom == vb6_hwnd_dt2',
+        'vb6_DTP_SimChange((void*)vb6_hwnd_dt1)',
+        'vb6_DTP_SimCloseUp((void*)vb6_hwnd_dt1)',
+        # 处理器调用名的解析也钉一条：形参表必须是空的（VB6 这三条都没有参数），
+        # 写错成带参就会在链接期 LNK2019、而编 C 阶段看不出任何异常。
+        'extern void vb6_dt1_Change();'
     )
     Test-EmitcAbsent "dt_emitc_no_com_fallback" @("$Tests\ctrldatetime\DtfApp.vbp") @(
         'vb6_ComGetObjectProp(vb6_hwnd_dt1',
         'vb6_ComSetObjectProp(vb6_hwnd_dt1',
         # DT-b 的 Value 也不许再走 COM 兜底（那正是它改之前整枚控件的默认下场）
         'vb6_ComGetObjectProp(vb6_hwnd_dt2, L"Value")',
+        # DT-c 的三条判据方法一旦被下面那条 axSlotObj 分支先吃掉，就会编成
+        # 「取 SimChange 属性 + Item 下标」—— 编得过、跑起来什么都不发（C29-8c 实测踩过）。
+        'vb6_ComGetObjectProp(vb6_hwnd_dt1, L"SimChange")',
         'CoCreateInstance'
     )
     # ai/029 C29-5a: Toolbar 换成原生 ToolbarWindow32（D6：不碰 MSCOMCTL.OCX）。

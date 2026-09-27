@@ -632,6 +632,12 @@ int32_t vb6_DTP_GetCalendarTitleBackColor(void* hwnd);
 void    vb6_DTP_SetCalendarTitleBackColor(void* hwnd, int32_t val);
 int32_t vb6_DTP_GetCalendarTitleForeColor(void* hwnd);
 void    vb6_DTP_SetCalendarTitleForeColor(void* hwnd, int32_t val);
+// C29-DT-c：判据专用助手（不对应任何 VB6 语义，见 029 §九 本格）。无头环境点不了鼠标，
+// 这三条由 RTL 程序化向父窗发真 WM_NOTIFY(DTN_*CHANGE / DROPDOWN / CLOSEUP)，
+// 整条"case WM_NOTIFY + code 分流 + hwndFrom 认来源"才算被验到。
+void    vb6_DTP_SimChange(void* hwnd);
+void    vb6_DTP_SimDropDown(void* hwnd);
+void    vb6_DTP_SimCloseUp(void* hwnd);
 
 #ifdef __cplusplus
 }

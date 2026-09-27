@@ -29,7 +29,12 @@
             // SimButtonMenuClick → WM_NOTIFY/TBN_DROPDOWN，两条都发给父窗)。
             bool tbSim = !toolbarNameOfExpr(comObjExpr_).empty()
                 && (tvMem == "simbuttonclick" || tvMem == "simbuttonmenuclick");
-            if (tvSim || tbSim) {
+            // C29-DT-c: DTPicker 的三条同形 (SimChange → DTN_DATETIMECHANGE、
+            // SimDropDown → DTN_DROPDOWN、SimCloseUp → DTN_CLOSEUP，三条都发给父窗)。
+            // 全部**无参** —— VB6 那三个处理器没有参数，所以不需要下面那两个 a0/a1。
+            bool dtSim = dtpickerVars_.count(tvBare) > 0
+                && (tvMem == "simchange" || tvMem == "simdropdown" || tvMem == "simcloseup");
+            if (tvSim || tbSim || dtSim) {
                 isComMarker_ = false;
                 std::vector<std::string> sa;
                 for (size_t i = 0; i < node.positional.size(); i++) {
@@ -38,7 +43,12 @@
                 }
                 std::string a0 = sa.size() > 0 ? sa[0] : std::string("0");
                 std::string a1 = sa.size() > 1 ? sa[1] : std::string("0");
-                lastExpr_ = (tvMem == "simnodeclick")
+                lastExpr_ = dtSim
+                    ? (std::string(tvMem == "simchange"   ? "vb6_DTP_SimChange"
+                           : tvMem == "simdropdown"       ? "vb6_DTP_SimDropDown"
+                                                          : "vb6_DTP_SimCloseUp")
+                       + "((void*)" + comObjExpr_ + ")")
+                    : (tvMem == "simnodeclick")
                     ? ("vb6_TreeView_SimNodeClick((void*)" + comObjExpr_ + ", " + a0 + ")")
                     : (tvMem == "simexpand")
                     ? ("vb6_TreeView_SimExpand((void*)" + comObjExpr_ + ", " + a0 + ", " + a1 + ")")
