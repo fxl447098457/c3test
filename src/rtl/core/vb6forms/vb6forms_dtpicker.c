@@ -224,9 +224,10 @@ void    vb6_DTP_SetCalendarTitleForeColor(void* hwnd, int32_t v)    { vb6_DtpSet
 
 // ---------------- Value / MinDate / MaxDate（C29-DT-b）----------------
 // VB 的 Date 在 C3 里就是 double 序列号（`Dim d As Date` 发成 `double d`，`Now` 直接回 double，
-// 实测见 029 §九 本格），所以这三个属性的 C 签名一律 double <-> 原生 SYSTEMTIME，
-// 换算用 oleaut32 那一对现成的 VariantTimeToSystemTime / SystemTimeToVariantTime
-// （RTL 里早有直接调用先例：vb6rtl_format.c:91）。
+// 实测见 029 §九 本格），所以这三个属性的 C 签名一律 double <-> 原生 SYSTEMTIME。
+// 那对换算助手（vb6_DateZero / vb6_DateToSerial / vb6_DateFromSerial）本来定义在本文件，
+// C29-MV-b 的 MonthView 成了第二个用户 ⇒ 挪进 vb6forms_internal.h 共享（照那组 UTF-8 转码
+// 助手的放法：文件级 static 不跨编译单元可见）。
 //
 // 勾掉复选框那一态（原生 GDT_NONE）在 VB6 里是 `Value = Null`。本项目不能拿 double 装 Null，
 // 于是拆成两条读数：Value 在未勾时回 0，另开一条本项目扩展 `HasDate`（-1/0）问"到底有没有值"。
@@ -258,25 +259,10 @@ void    vb6_DTP_SetCalendarTitleForeColor(void* hwnd, int32_t v)    { vb6_DtpSet
 #define GDT_NONE                    1
 #endif
 
-static void vb6_DtpZero(SYSTEMTIME* st) { memset(st, 0, sizeof(*st)); }
-
-// SYSTEMTIME -> VB Date。原生月历的取值域比 VB 的 Date 下限宽（1601 起 vs 100 起），
-// 换算失败或出界时回 0 而不是负数 —— 负数在 VB 侧是非法 Date，会把"问不出"伪装成"一个怪值"。
-static double vb6_DtpToSerial(const SYSTEMTIME* st) {
-    double v = 0.0;
-    if (!SystemTimeToVariantTime((LPSYSTEMTIME)st, &v) || v < 0.0) return 0.0;
-    return v;
-}
-
-static int vb6_DtpFromSerial(double serial, SYSTEMTIME* st) {
-    vb6_DtpZero(st);
-    return VariantTimeToSystemTime(serial, st) ? 1 : 0;
-}
-
 int32_t vb6_DTP_HasDate(void* hwnd) {
     SYSTEMTIME st;
     if (!hwnd) return 0;
-    vb6_DtpZero(&st);
+    vb6_DateZero(&st);
     return SendMessageW((HWND)hwnd, DTM_GETSYSTEMTIME, 0, (LPARAM)&st) == (LRESULT)GDT_NONE ? 0 : -1;
 }
 
@@ -287,10 +273,10 @@ double vb6_DTP_GetValue(void* hwnd) {
     SYSTEMTIME st;
     LRESULT r;
     if (!hwnd) return 0.0;
-    vb6_DtpZero(&st);
+    vb6_DateZero(&st);
     r = SendMessageW((HWND)hwnd, DTM_GETSYSTEMTIME, 0, (LPARAM)&st);
     if (r == (LRESULT)GDT_ERROR || r == (LRESULT)GDT_NONE) return 0.0;
-    return vb6_DtpToSerial(&st);
+    return vb6_DateToSerial(&st);
 }
 
 // 写值一律按"有值"下发（GDT_VALID）：带复选框的那枚勾上，正是 VB6 里给 Value 赋值的观感。
@@ -299,7 +285,7 @@ double vb6_DTP_GetValue(void* hwnd) {
 void vb6_DTP_SetValue(void* hwnd, double serial) {
     SYSTEMTIME st;
     if (!hwnd) return;
-    if (!vb6_DtpFromSerial(serial, &st)) return;
+    if (!vb6_DateFromSerial(serial, &st)) return;
     SendMessageW((HWND)hwnd, DTM_SETSYSTEMTIME, (WPARAM)GDT_VALID, (LPARAM)&st);
 }
 
@@ -309,11 +295,11 @@ static void vb6_DtpSetEnd(void* hwnd, DWORD which, double serial) {
     SYSTEMTIME st[2];
     DWORD have;
     if (!hwnd) return;
-    vb6_DtpZero(&st[0]);
-    vb6_DtpZero(&st[1]);
+    vb6_DateZero(&st[0]);
+    vb6_DateZero(&st[1]);
     have = (DWORD)(DWORD_PTR)SendMessageW((HWND)hwnd, DTM_GETRANGE, 0, (LPARAM)&st[0]);
     if (have == (DWORD)GDT_ERROR) have = 0;
-    if (!vb6_DtpFromSerial(serial, &st[which == GDTR_MIN ? 0 : 1])) return;
+    if (!vb6_DateFromSerial(serial, &st[which == GDTR_MIN ? 0 : 1])) return;
     SendMessageW((HWND)hwnd, DTM_SETRANGE, (WPARAM)(have | which), (LPARAM)&st[0]);
 }
 
@@ -321,11 +307,11 @@ static double vb6_DtpGetEnd(void* hwnd, DWORD which) {
     SYSTEMTIME st[2];
     DWORD have;
     if (!hwnd) return 0.0;
-    vb6_DtpZero(&st[0]);
-    vb6_DtpZero(&st[1]);
+    vb6_DateZero(&st[0]);
+    vb6_DateZero(&st[1]);
     have = (DWORD)(DWORD_PTR)SendMessageW((HWND)hwnd, DTM_GETRANGE, 0, (LPARAM)&st[0]);
     if (have == (DWORD)GDT_ERROR || !(have & which)) return 0.0;
-    return vb6_DtpToSerial(&st[which == GDTR_MIN ? 0 : 1]);
+    return vb6_DateToSerial(&st[which == GDTR_MIN ? 0 : 1]);
 }
 
 // HasDate 的写侧 = VB6 那个 `Value = Null` 的等价杠杆（本项目 Value 是 double，装不了 Null，
@@ -356,7 +342,7 @@ void vb6_DTP_SetHasDate(void* hwnd, int32_t on) {
         vb6_DTP_SetValue(hwnd, *(double*)h);
         return;
     }
-    vb6_DtpZero(&st);
+    vb6_DateZero(&st);
     if (SendMessageW((HWND)hwnd, DTM_GETSYSTEMTIME, 0, (LPARAM)&st) == (LRESULT)GDT_ERROR) return;
     SendMessageW((HWND)hwnd, DTM_SETSYSTEMTIME, (WPARAM)GDT_VALID, (LPARAM)&st);
 }
@@ -434,7 +420,7 @@ void vb6_DTP_SimChange(void* hwnd) {
     LRESULT r;
     if (!hwnd) return;
     memset(&nc, 0, sizeof(nc));
-    vb6_DtpZero(&st);
+    vb6_DateZero(&st);
     r = SendMessageW((HWND)hwnd, DTM_GETSYSTEMTIME, 0, (LPARAM)&st);
     nc.nmhdr.hwndFrom = (HWND)hwnd;
     nc.nmhdr.idFrom   = (UINT_PTR)GetWindowLongPtrW((HWND)hwnd, GWLP_ID);

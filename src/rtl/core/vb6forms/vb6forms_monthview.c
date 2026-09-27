@@ -6,8 +6,8 @@
 //   vb6forms.c 那次 InitCommonControlsEx 的 ICC_DATE_CLASSES 请求过 ⇒ 与 DTPicker/TreeView
 //   同型，不需要 RTL 自注册兜底。
 //
-// 本格只管标量面，Date 型那三格（Value / SelStart / SelEnd）留 C29-MV-b，
-// MCN_SELCHANGE(-749) 那条事件（VB6 的 DateClick）留 C29-MV-c。
+// 1..22 行那些函数 = MV-a 的标量面；Date 型那三格（Value / SelStart / SelEnd）在下面的
+// MV-b 段里；MCN_SELCHANGE(-749) 那条事件（VB6 的 DateClick）留 C29-MV-c。
 //
 // VB6 属性 → 原生落点（数值全部抄自 D:\Windows Kits\10\Include\10.0.19041.0\um\CommCtrl.h）：
 //   MultiSelect      0x0002 MCS_MULTISELECT   （样式位；副作用可被控件侧读数问到：
@@ -207,5 +207,84 @@ void    vb6_MV_SetTrailingForeColor(void* hwnd, int32_t v) { vb6_MvSetColor(hwnd
 // TitleBackColor / TitleForeColor / TrailingForeColor）⇒ 这一格不是 C3 扩展，是第六条真名。
 int32_t vb6_MV_GetMonthBackColor(void* hwnd)   { return vb6_MvGetColor(hwnd, VB6_MCSC_MONTHBK); }
 void    vb6_MV_SetMonthBackColor(void* hwnd, int32_t v)  { vb6_MvSetColor(hwnd, VB6_MCSC_MONTHBK, v); }
+
+// ---------------- Value / SelStart / SelEnd（C29-MV-b）----------------
+// Date <-> SYSTEMTIME 走 vb6forms_internal.h 那组共用助手（与 DTPicker 同一对换算）。
+// 原生两条消息正好对上 VB6 的两格：MCM_GET/SETCURSEL = Value（单选/焦点那一格），
+// MCM_GET/SETSELRANGE = SelStart/SelEnd（**一张两端表** ⇒ 改一端必须像 DTPicker 的范围端点
+// 那样先读回整张表、换掉那一格、两格一起发回去，只发一端会把另一端拆掉）。
+#ifndef MCM_GETCURSEL
+#define MCM_GETCURSEL      (0x1000 + 1)
+#endif
+#ifndef MCM_SETCURSEL
+#define MCM_SETCURSEL      (0x1000 + 2)
+#endif
+#ifndef MCM_GETSELRANGE
+#define MCM_GETSELRANGE    (0x1000 + 5)
+#endif
+#ifndef MCM_SETSELRANGE
+#define MCM_SETSELRANGE    (0x1000 + 6)
+#endif
+
+double vb6_MV_GetValue(void* hwnd) {
+    SYSTEMTIME st;
+    if (!hwnd) return 0.0;
+    vb6_DateZero(&st);
+    if (!SendMessageW((HWND)hwnd, MCM_GETCURSEL, 0, (LPARAM)&st)) return 0.0;
+    return vb6_DateToSerial(&st);
+}
+
+void vb6_MV_SetValue(void* hwnd, double serial) {
+    SYSTEMTIME st;
+    if (!hwnd) return;
+    if (!vb6_DateFromSerial(serial, &st)) return;
+    SendMessageW((HWND)hwnd, MCM_SETCURSEL, 0, (LPARAM)&st);
+}
+
+// 整张范围表读回来。问不出来（没挂 MCS_MULTISELECT 的控件答不答，由判据读数说）
+// 就把两格留 0 并回 ok=0，让调用方区分"问不出"与"答案是 1900 年那天"。
+static void vb6_MvGetSelRange(void* hwnd, SYSTEMTIME* rg, int32_t* ok) {
+    if (ok) *ok = 0;
+    vb6_DateZero(&rg[0]);
+    vb6_DateZero(&rg[1]);
+    if (!hwnd) return;
+    if (SendMessageW((HWND)hwnd, MCM_GETSELRANGE, 0, (LPARAM)rg)) *ok = 1;
+}
+
+double vb6_MV_GetSelStart(void* hwnd) {
+    SYSTEMTIME rg[2];
+    int32_t ok;
+    vb6_MvGetSelRange(hwnd, rg, &ok);
+    return ok ? vb6_DateToSerial(&rg[0]) : 0.0;
+}
+
+double vb6_MV_GetSelEnd(void* hwnd) {
+    SYSTEMTIME rg[2];
+    int32_t ok;
+    double v;
+    vb6_MvGetSelRange(hwnd, rg, &ok);
+    if (!ok) return 0.0;
+    v = vb6_DateToSerial(&rg[1]);
+    if (v <= 0.0) return 0.0;
+    /* 实测的一条不对称（写两端再读回来，止端恒比写入值多一天；控件内部把范围存成
+       [起, 止+1) 那种半开区间，而 GETSELRANGE 原样把内部值吐回来）。VB6 的
+       SelStart / SelEnd 两头都是**闭区间**（单点选中时二者相等），所以这里折回一天 ——
+       折完"写进去什么就读回来什么"，而 MaxSelCount 那条夹取也才按天数算得对。 */
+    return v - 1.0;
+}
+
+// 改一端 = 读回整张表 → 换掉那一格 → 两格一起发回去。
+static void vb6_MvSetSelEnd(void* hwnd, int which, double serial) {
+    SYSTEMTIME rg[2], next;
+    int32_t ok;
+    if (!hwnd) return;
+    if (!vb6_DateFromSerial(serial, &next)) return;
+    vb6_MvGetSelRange(hwnd, rg, &ok);
+    rg[which] = next;
+    SendMessageW((HWND)hwnd, MCM_SETSELRANGE, 0, (LPARAM)rg);
+}
+
+void vb6_MV_SetSelStart(void* hwnd, double serial) { vb6_MvSetSelEnd(hwnd, 0, serial); }
+void vb6_MV_SetSelEnd(void* hwnd, double serial)   { vb6_MvSetSelEnd(hwnd, 1, serial); }
 
 #endif /* _WIN32 */

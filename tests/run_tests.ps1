@@ -1676,9 +1676,24 @@ if ($Category -in @("all", "run", "vbp")) {
     #   MV21      运行期改 ShowToday：样式位落得下**且**控件的最小尺寸跟着变（与 DTPicker 那两位
     #             被抹回去相反，MV 这一族运行期是有效的 —— 两枚控件的边界各量各的，不互相外推）
     #   MV22      通用属性面 + 两枚不串台
-    # 本机读数：x64 与 x86 各 22/22；原始读数（`R=` 那行，针之外）：默认上限 1 / 写 9 之后仍 1，
-    # 单月最小尺寸 218×178，带周号 242 宽，去掉今天那一行 159 高。
-    $mvNeedles = @("CTRLMONTHVIEW-DONE") + (1..22 | ForEach-Object { "MV$_=Y" })
+    #   MV23-MV31（C29-MV-b）Date 值面。两条量出来的硬边界决定了这一批的形状：
+    #     ① **两张表互斥** —— 没挂 MCS_MULTISELECT 时 MCM_GET/SETCURSEL 有效而 GET/SELRANGE
+    #        一律失败，挂了正好反过来 ⇒ MV28 钉非多选那侧读不出范围、MV31 钉多选那侧读不出
+    #        Value（两条合起来才是这条互斥，单钉一条会放过"只实现了一半"的改动）；
+    #     ② SETSELRANGE 收的是**闭区间**、控件内部存成半开、GETSELRANGE 原样吐内部值 ⇒
+    #        不折回来止端恒比写入值多一天（GetSelEnd 折一天；MV26/MV27 钉往返与"改一端不动
+    #        另一端"）；MV32/MV33 钉 MaxSelCount 真夹得住范围、而且夹的是"往里扩"那头、
+    #        不挤掉已经选好的那端。
+    #     判据一律以"本月 1 号"为基准推日期，不写死 —— 原生只让在**当前显示的那一个月**里选，
+    #     写死就会在 CI 的未知日期上于月初/月末随机红（同一条纪律见 022 账 #79）。
+    # 本机读数：x64 与 x86 各 33/33；原始读数两架构逐字相同
+    # （`R=1/1 218/242/178/159` = 默认上限/写后仍、单月最小尺寸 218×178、带周号 242 宽、
+    #   去掉今天那一行 159 高；`S=` 那行给范围与本月 1 号）。
+    # 负控 = 拿 DT/MV 之前的二进制（.build/c298c_base_C3.exe）跑同一件夹具 = 28 红 / 5 绿。
+    # 留绿的五条（MV4/MV9/MV17/MV28/MV31）全是"应当为 0 / 应当相等"那类**边界针** ——
+    # 什么都不实现的空控件也满足它们，所以这几条不承担"验货"，只承担"别把边界改回去"；
+    # 真正盘货的是另外 28 条。（记下来是免得下一个人把"BASE 有 5 绿"读成判据松。）
+    $mvNeedles = @("CTRLMONTHVIEW-DONE") + (1..33 | ForEach-Object { "MV$_=Y" })
     Test-Vbp "ctrlmonthview" "$Tests\ctrlmonthview\MvfApp.vbp" $mvNeedles
     Test-Vbp "ctrlmonthview_x86" "$Tests\ctrlmonthview\MvfApp.vbp" $mvNeedles -Arch "x86"
     # 发码两面都钉：类名 + 四条创建样式位逐枚钉（1409286146 = 基+MULTISELECT / 1409286148 = 基+
@@ -1693,12 +1708,19 @@ if ($Category -in @("all", "run", "vbp")) {
         'vb6_MV_Init((void*)vb6_hwnd_mv2, 1, 1, -999);',
         'vb6_MV_SetMaxSelCount(vb6_hwnd_mv1, 3);',
         'vb6_MV_SetShowToday(vb6_hwnd_mv4, (-1));',
-        'vb6_MV_GetMonthCount(vb6_hwnd_mv2'
+        'vb6_MV_GetMonthCount(vb6_hwnd_mv2',
+        # MV-b：Date 走**裸 double / 裸算术式**，一个装箱都不过（同 DT-b 那条纪律）。
+        'vb6_MV_SetValue(vb6_hwnd_mv2, 44562.75);',
+        'vb6_MV_SetSelStart(vb6_hwnd_mv1, (d0 + 1))',
+        'vb6_MV_GetSelEnd(vb6_hwnd_mv1'
     )
     Test-EmitcAbsent "mv_emitc_no_com_fallback" @("$Tests\ctrlmonthview\MvfApp.vbp") @(
         'vb6_ComGetObjectProp(vb6_hwnd_mv1',
         'vb6_ComSetObjectProp(vb6_hwnd_mv2',
         'vb6_ComGetObjectProp(vb6_hwnd_mv3, L"MaxSelCount")',
+        # 值面那三格也不许退回 COM 兜底
+        'vb6_ComSetObjectProp(vb6_hwnd_mv2, L"Value"',
+        'vb6_ComGetObjectProp(vb6_hwnd_mv1, L"SelEnd")',
         'CoCreateInstance'
     )
     # ai/029 C29-5a: Toolbar 换成原生 ToolbarWindow32（D6：不碰 MSCOMCTL.OCX）。

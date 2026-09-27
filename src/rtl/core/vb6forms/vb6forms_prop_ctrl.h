@@ -670,6 +670,14 @@ int32_t vb6_MV_GetTrailingForeColor(void* hwnd);
 void    vb6_MV_SetTrailingForeColor(void* hwnd, int32_t val);
 int32_t vb6_MV_GetMonthBackColor(void* hwnd);   // MCSC_MONTHBK（VB6 官方属性面里的第六格配色）
 void    vb6_MV_SetMonthBackColor(void* hwnd, int32_t val);
+// C29-MV-b：Date 值面。Value = MCM_GET/SETCURSEL；SelStart / SelEnd 是原生那张
+// (起, 止) 两端表的两个读数，所以改一端由 RTL 读回整张表再发回去（只发一端会拆掉另一端）。
+double  vb6_MV_GetValue(void* hwnd);
+void    vb6_MV_SetValue(void* hwnd, double serial);
+double  vb6_MV_GetSelStart(void* hwnd);
+void    vb6_MV_SetSelStart(void* hwnd, double serial);
+double  vb6_MV_GetSelEnd(void* hwnd);
+void    vb6_MV_SetSelEnd(void* hwnd, double serial);
 
 #ifdef __cplusplus
 }

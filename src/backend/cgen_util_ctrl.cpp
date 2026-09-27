@@ -100,6 +100,8 @@ Vb6Type CCodeGen::controlPropType(FrmControlType ctrlType, const std::string& pr
             || p == "monthcount") {
             return Vb6Type::Long;
         }
+        // C29-MV-b：Date 那三格与 DTPicker 同一条口径（C 层就是裸 double，不装箱）。
+        if (p == "value" || p == "selstart" || p == "selend") return Vb6Type::Date;
     }
     if (ctrlType == FrmControlType::Toolbar) {
         // C29-5a: 同一口径 —— 这四条的 RTL getter 都是 int32_t, 判成 Variant/String
@@ -419,6 +421,10 @@ std::string CCodeGen::getControlPropReadFn(FrmControlType ctrlType, const std::s
         if (propLower == "minreqwidth") return "vb6_MV_MinReqWidth";
         if (propLower == "minreqheight") return "vb6_MV_MinReqHeight";
         if (propLower == "monthcount") return "vb6_MV_GetMonthCount";
+        // C29-MV-b 的读侧（Date 三条）。
+        if (propLower == "value") return "vb6_MV_GetValue";
+        if (propLower == "selstart") return "vb6_MV_GetSelStart";
+        if (propLower == "selend") return "vb6_MV_GetSelEnd";
         if (propLower == "visible") return "vb6_GetControlVisible";
         if (propLower == "enabled") return "vb6_GetControlEnabled";
         break;
@@ -731,6 +737,10 @@ std::string CCodeGen::getControlPropWriteFn(FrmControlType ctrlType, const std::
         if (propLower == "titleforecolor") return "vb6_MV_SetTitleForeColor";
         if (propLower == "trailingforecolor") return "vb6_MV_SetTrailingForeColor";
         if (propLower == "monthbackcolor") return "vb6_MV_SetMonthBackColor";
+        // C29-MV-b 的写侧（Date 三条；两端表改一端由 RTL 读回整张再发回去）。
+        if (propLower == "value") return "vb6_MV_SetValue";
+        if (propLower == "selstart") return "vb6_MV_SetSelStart";
+        if (propLower == "selend") return "vb6_MV_SetSelEnd";
         if (propLower == "visible") return "vb6_SetControlVisible";
         if (propLower == "enabled") return "vb6_SetControlEnabled";
         break;

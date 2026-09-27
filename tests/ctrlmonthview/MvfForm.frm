@@ -53,8 +53,8 @@ Option Explicit
 ' ai/029 C29-MV-a：VB6 MonthView 走**原生** SysMonthCal32（不加载 MSCOMCT2.OCX —— 它是
 ' 32 位 inproc，x64 进程里 CoCreateInstance 直接失败，见 029 §三 D6）。
 '
-' 本格只管"窗口 + 样式 + 标量属性面"。Date 型那三格（Value / SelStart / SelEnd）留 MV-b，
-' MCN_SELCHANGE(-749) 那条事件（VB6 的 DateClick）留 MV-c。
+' 1..22 格 = "窗口 + 样式 + 标量属性面"；23..33 是 C29-MV-b 的 Date 值面
+' （Value / SelStart / SelEnd）。MCN_SELCHANGE(-749) 那条事件（VB6 的 DateClick）留 MV-c。
 '
 ' 三条与 DTPicker 不同的量出来的事实，判据的形状就是被它们决定的：
 '  ① **多月平铺不是一个开关，而是"窗口多大"**。原生没有"给几行几列"这条消息 —— 头 6361 行
@@ -78,6 +78,8 @@ Private Function TF(ByVal ok As Boolean) As String
 End Function
 
 Private Sub Form_Load()
+    Dim k As Long
+    Dim d0 As Long
     Dim bkg As Long, txt As Long, trl As Long, tbk As Long, ttx As Long, mbk As Long
     Dim w2 As Long, w3 As Long, h2 As Long, h4 As Long
     Dim n2 As Long, n4 As Long
@@ -145,6 +147,51 @@ Private Sub Form_Load()
     ' --- 22 通用属性面 + 两枚不串台 ---
     mv3.Enabled = False
     Debug.Print "MV22=" & TF(mv3.Enabled = False And mv2.Enabled = -1)
+
+    ' --- 23..33 C29-MV-b：Date 值面（Value = 单选那格；SelStart/SelEnd = 原生那张两端表）---
+    ' 换算与 DTPicker 同一对助手（oleaut32 的 VariantTimeToSystemTime / SystemTimeToVariantTime），
+    ' VB 侧 Date 就是 double 序列号，所以 43894 这种整数序列直接当日期用（= 2020-03-04）。
+    '
+    ' 两条拿 C 探针量出来的硬边界，判据的形状是它们决定的（读数见 029 §九 本格）：
+    '  ① **两张表互斥**：没挂 MCS_MULTISELECT ⇒ MCM_GET/SETCURSEL 有效、MCM_GET/SELRANGE 一律
+    '     失败；挂了 ⇒ 正好反过来。所以 `Value` 与 `SelStart`/`SelEnd` 谁问得出来，
+    '     由那枚样式位决定（MV28 钉非多选那侧，MV31 钉多选那侧，两条合起来才是这条互斥）。
+    '  ② SETSELRANGE 只在**当前显示的那一个月**里挑日子，跨月会被夹（探针里 2020-03 的两天
+    '     夹成同一天）。所以判据一律以"本月 1 号"为基准往外推，不写死日期 —— CI 上跑的日期
+    '     未知，写死就会在月初/月末随机红（同一条纪律见 022 账 #79）。
+    d0 = Int(Now) - Day(Now) + 1
+    Debug.Print "MV23=" & TF(Int(mv2.Value) = Int(Now))
+    mv2.Value = 43894
+    Debug.Print "MV24=" & TF(CLng(mv2.Value) = 43894)
+    mv2.Value = 44562
+    Debug.Print "MV25=" & TF(CLng(mv2.Value) = 44562 And CLng(mv3.Value) <> CLng(mv2.Value))
+    mv1.MaxSelCount = 30
+    mv1.SelStart = d0 + 1
+    mv1.SelEnd = d0 + 5
+    Debug.Print "MV26=" & TF(CLng(mv1.SelStart) = d0 + 1 And CLng(mv1.SelEnd) = d0 + 5)
+    ' 改一端必须不动另一端（原生是一张 (起,止) 表；只发一端会把另一端拆成 0 年那天）
+    mv1.SelStart = d0 + 3
+    Debug.Print "MV27=" & TF(CLng(mv1.SelStart) = d0 + 3 And CLng(mv1.SelEnd) = d0 + 5)
+    ' 非多选的那枚：范围表问不出、也写不进（两格都回 0，写完还是 0）
+    mv2.SelStart = d0 + 1
+    Debug.Print "MV28=" & TF(mv2.SelStart = 0 And mv2.SelEnd = 0)
+    Debug.Print "MV29=" & TF(Int(mv3.Value) = Int(Now))
+    ' 原生月历只有"天"这一格 ⇒ 一天的分数部分落不到控件上，读回来是那天零点
+    mv2.Value = 44562.75
+    Debug.Print "MV30=" & TF(CLng(mv2.Value) = 44562)
+    ' 多选那枚反过来：Value 这条问不通（GET/SETCURSEL 在 MCS_MULTISELECT 下直接失败 ⇒ 回 0）
+    mv1.Value = 43894
+    Debug.Print "MV31=" & TF(mv1.Value = 0)
+    ' 上限到底管不管得住范围：收到 3 天再要 7 天 ⇒ 夹完应当正好 3 天（夹的是哪一端由读数说）
+    mv1.MaxSelCount = 3
+    mv1.SelStart = d0 + 1
+    mv1.SelEnd = d0 + 7
+    k = CLng(mv1.SelEnd) - CLng(mv1.SelStart) + 1
+    Debug.Print "MV32=" & TF(k = 3)
+    ' 量出来的夹取方向：窗口已经贴着上限时，**往里扩**的那一端会被原样顶回去（这一格两端
+    ' 都不动），而不是把另一头挤掉 —— 所以钉的是"上限管得住，且不会悄悄挪走已经选好的那头"。
+    Debug.Print "MV33=" & TF(CLng(mv1.SelEnd) = d0 + 5 And CLng(mv1.SelStart) = d0 + 3)
+    Debug.Print "S=" & k & "/" & CLng(mv1.SelEnd) & "/" & CLng(mv2.SelStart) & "/" & d0
 
     Debug.Print "CTRLMONTHVIEW-DONE"
     Unload Me
