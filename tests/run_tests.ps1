@@ -1274,6 +1274,27 @@ if ($Category -in @("all", "run", "bas")) {
     # 修复前出参回写只按 AST 种类判左值, MemberAccessExpr 判 true 但生成的是
     # vb6_VariantToString(...) 右值 → &(右值) → C2102, 真实工程 Charts 2020 编译失败。
     Add-BasTest "test_declare_cwex_lit_com" "$Tests\declare_out\declare_cwex_lit_com.bas" @("lit-com-hwnd-ok=Y", "lit-only-hwnd-ok=Y")
+
+    # ai/029:429 那条"未登记的控件属性按数值读漏裸指针"（Fix 161d）。
+    # 两条路: Select Case (cgen_select.cpp 无参 resolveComValue ⇒ 默认 BSTR, 而
+    # tempType 是 int32_t) 与 Not (cgen_expr.cpp 的 UnaryOp::Not 落 (int32_t)(operand);
+    # Fix 092r 当时只补了 Negate)。同族的 Fix 092n(For)/092r(Negate) 早修过。
+    # 只有**未登记**属性中招 —— 已登记的走 getControlPropReadFn 专属 getter。
+    # 靶子选 TreeView.Caption: 未登记 **且宿主答得出值**(GetWindowTextW ⇒ 真 BSTR,
+    # 非 NULL) ⇒ 基线截出的指针低位非 0, 判据能红。(用 Style 会假绿: 宿主答 Empty
+    # ⇒ StringProp 给 NULL ⇒ 截成 0, 与修复后同值 —— 实测踩过。)
+    # 判据一律取**值**: 基线 `~(指针低位)` 也是非 0, `If Not x` 的真假分不出来。
+    $cpNeedles = @("P-SEL0=Y", "P-NOT=Y", "P-NOTVAL=-1",
+                   "P-REG-SEL=Y", "P-REG-NOT=Y", "P-GEN-SEL=Y", "CTRLPROP-DONE")
+    Add-BasTest "test_ctrlprop" "$Tests\ctrlprop\PropApp.vbp" $cpNeedles
+    Add-BasTest "test_ctrlprop_x86" "$Tests\ctrlprop\PropApp.vbp" $cpNeedles -Arch "x86"
+    # 源码面双保险: 生成串里不得再出现"指针返回函数被当数值"的两种形状。
+    Test-EmitcAbsent "cp_emitc_no_ptr_as_num" @("$Tests\ctrlprop\PropApp.vbp") @(
+        '(int32_t)(vb6_ComGetStringProp(',      # Not / 取负那条的 cast
+        '(int32_t)(vb6_ComGetObjectProp(',
+        '_vb6_select_0 = vb6_ComGetStringProp(',  # Select Case 的 int32_t temp 那条
+        '_vb6_select_0 = vb6_ComGetObjectProp('
+    )
     Write-Host ""
 
     # --- P5.7 语法/语义检查用例组 ---
