@@ -319,6 +319,23 @@
                     // — 消费标记以避免裸对象实参 C2440 与跨过程泄漏.
                     if (isComMarker_) resolveComValue("BSTR");
                     std::string valExpr = std::move(lastExpr_);
+                    // Fix 186: 裸属性写入 (类内 `FontName = sTmp`, 无 obj 前缀) 的 RHS
+                    // 此前原样传值, 但 Property Let 值形参 VB6 默认 ByRef → C 形参是
+                    // BSTR*/int32_t* 等 — BSTR 值被当地址解引用, 读字符串头 4 字节当
+                    // 指针 → 0xC0000005 (cDlg.cls `FontName = sByteArrayToString(...)`,
+                    // av read target=0x53004D 即 UTF-16 "MS"). 与 With 路径 Fix 185
+                    // 同款 packLetValueArg 打包; 限定本类属性 (isClassModule_ &&
+                    // !isExternal, 与下方 funcName 生成的分支对齐, 保证打包所用参数表
+                    // 与被调函数名同源) — lookupModuleByKind 可能全局命中他类同名属性
+                    // (Fix 158h 教训), external 符号维持原发射不介入.
+                    if (isClassModule_ && !propSym->isExternal
+                        && propSym->kind == SymbolKind::PropertyLet
+                        && !propSym->params.empty()
+                        && (propSym->params.back().type == Vb6Type::Variant
+                            || !propSym->params.back().isByVal)) {
+                        valExpr = packLetValueArg(propSym->params.back(),
+                                                  node.value.get(), valExpr);
+                    }
                     c_.emitLine(funcName + (isClassModule_ ? "((void*)me, " : "(") + valExpr + ");  /* Property Let/Set (bare) */");
                     return;
                 }

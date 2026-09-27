@@ -258,6 +258,17 @@ static LRESULT CALLBACK sstabSubclassProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM
         FillRect(hdc, &rc, br);
         return 1;
     }
+    if (msg == WM_CTLCOLORSTATIC) {
+        // Fix 187: 页内 STATIC 类子控件 (picTabBackColor 等色块, parent=SSTab
+        // 窗口) 通过 WM_CTLCOLORSTATIC 向本容器要底色 — 此前不处理走原生默认,
+        // vb6_SetControlBackColor 写的 VB6_BackColor 属性无人消费。与主窗体
+        // WndProc 同款: 仅在子控件显式 Set 过 VB6_BackColor 时接管。
+        HWND child = (HWND)lp;
+        if (child && GetPropW(child, L"VB6_BackColorSet")) {
+            LRESULT br187 = vb6_ApplyCtlColorStatic((HDC)wp, child);
+            if (br187) return br187;
+        }
+    }
     if (msg == WM_SIZE) {
         Vb6SSTab* t = sstabFind(hwnd);
         if (t) sstabApplyRowMetrics(t);
@@ -693,6 +704,63 @@ void vb6_SSTab_SetTabPicture(void* tabHwnd, int32_t idx, const void* data, int32
     // 图标改变标签内容区尺寸 → 重建 item (带 TCIF_IMAGE) + 重算行宽/行高。
     // 不走 SetTab: 选中页不该因为贴图变化而跳。
     sstabAfterVisualChange(t);
+}
+
+// ===================== 属性: SSTabEx 颜色族 (Task #44) =====================
+// 参照 ctlSSTabEx.ctl (SSTabEx-main/control-source) 的真实缺省:
+//   MaskColor       = &HFF00FF 品红常量 (ctl:2661)
+//   TabBackColor    = Ambient.BackColor (ctl:2667) — 宿主容器背景色
+//   TabSelBackColor = Ambient.BackColor (ctl:2668)
+//   TabSelForeColor = ForeColor 缺省 = Ambient.ForeColor (ctl:2646) — 宿主容器前景色
+// (BackColor/ForeColor 本身是通用控件属性, cgen 直接走 vb6_Get/SetControlBackColor
+//  窗口属性链不落本表; 其缺省 BTNFACE/黑 恰与 Ambient 一致, 实测吻合。)
+// Ambient 实取: GetParent(宿主窗体) 的控件级颜色 —— frmTest 窗体无设计色时
+// vb6_GetControlBackColor 返回 GetSysColor(COLOR_BTNFACE), 与 VB6 &H8000000F 等效。
+// 不接这批表的话 cgen 发 vb6_ComGetStringProp/ComSetProp(裸 HWND, L"TabBackColor")
+// → 读静默答空 / 写静默丢 (029 §九同款, 生成 C 实证)。
+static int32_t sstabAmbientColor(HWND hwnd, int fore) {
+    HWND par = GetParent(hwnd);
+    if (!par) par = GetAncestor(hwnd, GA_ROOT);
+    return fore ? vb6_GetControlForeColor(par) : vb6_GetControlBackColor(par);
+}
+static int32_t sstabGetColorProp(HWND hwnd, const wchar_t* prop, int32_t dflt) {
+    HANDLE h = GetPropW(hwnd, prop);
+    return h ? (int32_t)(INT_PTR)h : dflt;
+}
+int32_t vb6_SSTab_GetMaskColor(void* tabHwnd) {
+    if (!tabHwnd) return 0;
+    return sstabGetColorProp((HWND)tabHwnd, L"VB6_SS_MaskColor", 0xFF00FF);
+}
+void vb6_SSTab_SetMaskColor(void* tabHwnd, int32_t c) {
+    if (!tabHwnd) return;
+    SetPropW((HWND)tabHwnd, L"VB6_SS_MaskColor", (HANDLE)(INT_PTR)c);
+}
+int32_t vb6_SSTab_GetTabBackColor(void* tabHwnd) {
+    if (!tabHwnd) return 0;
+    return sstabGetColorProp((HWND)tabHwnd, L"VB6_SS_TabBackColor",
+                             sstabAmbientColor((HWND)tabHwnd, 0));
+}
+void vb6_SSTab_SetTabBackColor(void* tabHwnd, int32_t c) {
+    if (!tabHwnd) return;
+    SetPropW((HWND)tabHwnd, L"VB6_SS_TabBackColor", (HANDLE)(INT_PTR)c);
+}
+int32_t vb6_SSTab_GetTabSelBackColor(void* tabHwnd) {
+    if (!tabHwnd) return 0;
+    return sstabGetColorProp((HWND)tabHwnd, L"VB6_SS_TabSelBackColor",
+                             sstabAmbientColor((HWND)tabHwnd, 0));
+}
+void vb6_SSTab_SetTabSelBackColor(void* tabHwnd, int32_t c) {
+    if (!tabHwnd) return;
+    SetPropW((HWND)tabHwnd, L"VB6_SS_TabSelBackColor", (HANDLE)(INT_PTR)c);
+}
+int32_t vb6_SSTab_GetTabSelForeColor(void* tabHwnd) {
+    if (!tabHwnd) return 0;
+    return sstabGetColorProp((HWND)tabHwnd, L"VB6_SS_TabSelForeColor",
+                             sstabAmbientColor((HWND)tabHwnd, 1));
+}
+void vb6_SSTab_SetTabSelForeColor(void* tabHwnd, int32_t c) {
+    if (!tabHwnd) return;
+    SetPropW((HWND)tabHwnd, L"VB6_SS_TabSelForeColor", (HANDLE)(INT_PTR)c);
 }
 
 #endif  // _WIN32

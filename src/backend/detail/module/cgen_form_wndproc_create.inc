@@ -155,6 +155,25 @@
         }
     }
 
+    // Fix 187: STATIC 类子控件 (picBackColor 等色块/Label) 通过 WM_CTLCOLORSTATIC
+    // 向父窗要底色/前景刷 — 此前主窗体 WndProc 不处理, vb6_SetControlBackColor
+    // 写的 VB6_BackColor 属性无人消费 → 颜色对话框 OK 后色块不变色
+    // (Test.exe "颜色没有写入到颜色对话左边的控件里")。RTL 统一入口
+    // vb6_ApplyCtlColorStatic 仅在子控件显式 Set 过 VB6_BackColor 时接管,
+    // 其余情形 break 到 DefWindowProcW 维持原生外观。
+    c_.emitLine("case WM_CTLCOLORSTATIC: {");
+    c_.indent();
+    c_.emitLine("HWND vb6_clrchld = (HWND)lParam;");
+    c_.emitLine("if (vb6_clrchld && GetPropW(vb6_clrchld, L\"VB6_BackColorSet\")) {");
+    c_.indent();
+    c_.emitLine("LRESULT vb6_br187 = vb6_ApplyCtlColorStatic((HDC)wParam, vb6_clrchld);");
+    c_.emitLine("if (vb6_br187) return vb6_br187;");
+    c_.dedent();
+    c_.emitLine("}");
+    c_.emitLine("break;");
+    c_.dedent();
+    c_.emitLine("}");
+
     // Fix 058: 处理延迟的 Form_Load (WM_USER+0x100 = 0x7FF0)
     if (formLoadSym) {
         c_.emitLine("case 0x7FF0: {");
