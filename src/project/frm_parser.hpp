@@ -109,6 +109,7 @@ enum class FrmControlType {
     SSTab,              // TabDlg.SSTab — Win32 原生复刻 (SysTabControl32), P20-42
     ListView,           // MSComctlLib.ListView — Win32 原生复刻 (SysListView32), P20-45
     TreeView,           // MSComctlLib.TreeView — Win32 原生复刻 (SysTreeView32), P20-46
+    DTPicker,           // MSComCtl2.DTPicker — Win32 原生复刻 (SysDateTimePick32), C29-DT
     Unknown,            // 未识别的控件类型
 };
 

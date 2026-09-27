@@ -66,6 +66,8 @@
 216 RCDATA "../rtl/core/vb6forms/vb6forms_data.c"
 // ai/029 C29-5a: Toolbar (ToolbarWindow32 复刻, 不加载 MSCOMCTL.OCX) —— 顺延让位
 215 RCDATA "../rtl/core/vb6forms/vb6forms_toolbar.c"
+// ai/029 C29-DT-a: DTPicker (SysDateTimePick32 复刻, 不加载 MSCOMCT2.OCX)
+217 RCDATA "../rtl/core/vb6forms/vb6forms_dtpicker.c"
 131 RCDATA "../rtl/core/vb6forms/vb6forms_axsite.c"
 198 RCDATA "../rtl/core/vb6forms/vb6forms_axcontainer.c"
 // vb6forms_axsite.c 按功能家族拆分 (2026-09-20): 内部头 + 5 个族编译单元

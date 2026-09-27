@@ -46,6 +46,10 @@ static void addFormsSources(MsvcDriverOptions& opts, const std::string& rtlDir) 
     opts.sourceFiles.push_back(rtlDir + "/vb6forms_data.c");
     // ai/029 C29-5a: Toolbar 的窗口与设计期按钮（原生 ToolbarWindow32）
     opts.sourceFiles.push_back(rtlDir + "/vb6forms_toolbar.c");
+    // ai/029 C29-DT-a: DTPicker 的窗口与标量属性面（原生 SysDateTimePick32）。
+    // 这条是**第四处**登记：.rc + CMakeLists + rtl_embedded 那张名字表只管"解包到临时目录"，
+    // 少了这里这一行，解包成功、cl 却根本不编它 ⇒ 全线 LNK2019 找不到 vb6_DTP_*（实测踩过）。
+    opts.sourceFiles.push_back(rtlDir + "/vb6forms_dtpicker.c");
     // vb6forms_axsite.c 按功能家族拆 5 个编译单元 (2026-09-20): 伞文件本身不参与编译
     // 注意: axsite/ 下的 .c 解包后是平铺目录, 故这里写 basename 而非带子目录路径
     opts.sourceFiles.push_back(rtlDir + "/ax_site.c");

@@ -185,6 +185,9 @@ FrmControlType FrmParser::parseControlType(const std::string& typeName) {
     // 两者互不为子串, 但都排在 sstab 之后以免误吃。
     if (lower.find("listview") != std::string::npos) return FrmControlType::ListView;
     if (lower.find("treeview") != std::string::npos) return FrmControlType::TreeView;
+    // C29-DT: DTPicker (MSComCtl2.DTPicker)。"dtpicker" 与上面任何一条互不为子串,
+    // 且 VB6 那侧只有这一种写法 (ProgID 也是 MSComCtl2.DTPicker.1), 排在 Unknown 前即可。
+    if (lower.find("dtpicker") != std::string::npos) return FrmControlType::DTPicker;
 
     return FrmControlType::Unknown;
 }
@@ -225,6 +228,10 @@ const char* FrmParser::controlTypeToWin32Class(FrmControlType type) {
         // (实测 GetClassInfoW 直接成功), 不需要 StatusBar 那套自注册兜底。
         case FrmControlType::ListView:     return "SysListView32";
         case FrmControlType::TreeView:     return "SysTreeView32";
+        // C29-DT: DTPicker —— comctl32 注册的 SysDateTimePick32 (头 6653 行
+        // DATETIMEPICK_CLASSW)。类已由 vb6forms.c:67 那次 InitCommonControlsEx 的
+        // ICC_DATE_CLASSES 请求过 ⇒ 与 TreeView/SSTab 同型, 不需要 RTL 自注册兜底。
+        case FrmControlType::DTPicker:     return "SysDateTimePick32";
         // C29-5a: Toolbar 同样是 comctl32 注册好的类 (ICC_BAR_CLASSES 在 vb6_ComCtl_Init
         // 里早就请求过)。以前这格缺着 + 被"ImageList || Toolbar 走 CoCreateInstance"那一组
         // 扣住 => 控件根本没窗口，读一个 tb1.Visible 就是 C2065: vb6_hwnd_tb1 未声明。
@@ -279,6 +286,7 @@ const char* FrmParser::controlTypeToVb6Name(FrmControlType type) {
         case FrmControlType::SSTab:        return "SSTab";
         case FrmControlType::ListView:     return "ListView";
         case FrmControlType::TreeView:     return "TreeView";
+        case FrmControlType::DTPicker:     return "DTPicker";
         case FrmControlType::Toolbar:      return "Toolbar";
         case FrmControlType::Shape:        return "Shape";
         case FrmControlType::Line:         return "Line";

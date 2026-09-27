@@ -595,6 +595,34 @@ void*           vb6_Toolbar_ButtonAt(void* hwnd, int32_t idx);   // 事件参数
 void            vb6_Toolbar_SimButtonClick(void* hwnd, int32_t idx);
 void            vb6_Toolbar_SimButtonMenuClick(void* hwnd, int32_t idx);
 
+// ===================== DTPicker (ai/029 C29-DT-a) =====================
+//   VB6 DTPicker 的窗口 + 样式 + 标量属性面，原生 SysDateTimePick32（不加载 MSCOMCT2.OCX）。
+//   Format(0/1/2) / CheckBox / UpDown **只能在创建时给**（实测：事后写样式位被控件抹回），
+//   所以它们由 cgen 立进 vb6_CreateControl 的样式参数；这里的 Init 只下发 CustomFormat
+//   （DTM_SETFORMATW 是真运行期消息）。Value / MinDate / MaxDate 是 Date 型，留 C29-DT-b。
+void    vb6_DTP_Init(void* hwnd, const wchar_t* customFormat);
+// C3 扩展（不是 VB6 属性）：DTM_GETIDEALSIZE 问控件自己算的"装得下当前格式"的宽度，
+// 用来把"格式位真选中了哪一档"从"我们自己的掩码读数"换成控件侧读数。
+int32_t vb6_DTP_IdealWidth(void* hwnd);
+int32_t vb6_DTP_GetFormat(void* hwnd);
+void    vb6_DTP_SetFormat(void* hwnd, int32_t val);
+wchar_t* vb6_DTP_GetCustomFormat(void* hwnd);
+void    vb6_DTP_SetCustomFormat(void* hwnd, void* bstr);
+int32_t vb6_DTP_GetCheckBox(void* hwnd);
+void    vb6_DTP_SetCheckBox(void* hwnd, int32_t val);
+int32_t vb6_DTP_GetUpDown(void* hwnd);
+void    vb6_DTP_SetUpDown(void* hwnd, int32_t val);
+int32_t vb6_DTP_GetCalendarBackColor(void* hwnd);
+void    vb6_DTP_SetCalendarBackColor(void* hwnd, int32_t val);
+int32_t vb6_DTP_GetCalendarForeColor(void* hwnd);
+void    vb6_DTP_SetCalendarForeColor(void* hwnd, int32_t val);
+int32_t vb6_DTP_GetCalendarTrailingForeColor(void* hwnd);
+void    vb6_DTP_SetCalendarTrailingForeColor(void* hwnd, int32_t val);
+int32_t vb6_DTP_GetCalendarTitleBackColor(void* hwnd);
+void    vb6_DTP_SetCalendarTitleBackColor(void* hwnd, int32_t val);
+int32_t vb6_DTP_GetCalendarTitleForeColor(void* hwnd);
+void    vb6_DTP_SetCalendarTitleForeColor(void* hwnd, int32_t val);
+
 #ifdef __cplusplus
 }
 #endif

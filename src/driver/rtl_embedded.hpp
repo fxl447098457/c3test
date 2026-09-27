@@ -179,6 +179,9 @@ enum RtlResourceID {
 
     // ai/029 C29-5a: VB6 Toolbar 控件 (ToolbarWindow32 复刻, 不加载 MSCOMCTL.OCX)
     RTL_VB6FORMS_TOOLBAR_C                 = 215,
+
+    // ai/029 C29-DT-a: VB6 DTPicker 控件 (SysDateTimePick32 复刻, 不加载 MSCOMCT2.OCX)
+    RTL_VB6FORMS_DTPICKER_C                = 217,
 };
 
 // Session directory manager

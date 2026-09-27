@@ -71,6 +71,17 @@ Vb6Type CCodeGen::controlPropType(FrmControlType ctrlType, const std::string& pr
             return Vb6Type::Long;
         }
     }
+    if (ctrlType == FrmControlType::DTPicker) {
+        // C29-DT-a: 同一条纪律 —— vb6_DTP_Get* 除 CustomFormat 外全是 int32_t
+        // (布尔按 VB6 的 -1/0 给); CustomFormat 的 getter 返回 wchar_t* ⇒ String。
+        if (p == "format" || p == "checkbox" || p == "updown"
+            || p == "calendarbackcolor" || p == "calendarforecolor"
+            || p == "calendartrailingforecolor" || p == "calendartitlebackcolor"
+            || p == "calendartitleforecolor" || p == "idealwidth") {
+            return Vb6Type::Long;
+        }
+        if (p == "customformat") return Vb6Type::String;
+    }
     if (ctrlType == FrmControlType::Toolbar) {
         // C29-5a: 同一口径 —— 这四条的 RTL getter 都是 int32_t, 判成 Variant/String
         // 就跟 C 层不匹配 (SSTab1.Tab 那次 AV 的同族)。
@@ -348,6 +359,25 @@ std::string CCodeGen::getControlPropReadFn(FrmControlType ctrlType, const std::s
         if (propLower == "visible") return "vb6_GetControlVisible";
         if (propLower == "enabled") return "vb6_GetControlEnabled";
         break;
+    // C29-DT-a: DTPicker 的标量属性面 (原生 SysDateTimePick32)。登记之前这枚控件走的是
+    // "第三方 OCX 按 COM 后期绑定"那一组 (MSComCtl2 在工程里没引用类型库时连符号都查不到)
+    // ⇒ 属性读回空、写进去静默丢。这里除 CustomFormat 外全按 int32_t 走，与类型登记表同批。
+    case FrmControlType::DTPicker:
+        if (propLower == "format") return "vb6_DTP_GetFormat";
+        if (propLower == "customformat") return "vb6_DTP_GetCustomFormat";
+        if (propLower == "checkbox") return "vb6_DTP_GetCheckBox";
+        if (propLower == "updown") return "vb6_DTP_GetUpDown";
+        if (propLower == "calendarbackcolor") return "vb6_DTP_GetCalendarBackColor";
+        if (propLower == "calendarforecolor") return "vb6_DTP_GetCalendarForeColor";
+        if (propLower == "calendartrailingforecolor") return "vb6_DTP_GetCalendarTrailingForeColor";
+        if (propLower == "calendartitlebackcolor") return "vb6_DTP_GetCalendarTitleBackColor";
+        if (propLower == "calendartitleforecolor") return "vb6_DTP_GetCalendarTitleForeColor";
+        // C3 扩展（只读）：控件自己算的"装得下当前格式"宽度，判据用它把"格式真选中了吗"
+        // 从自家人读数换成控件侧读数。VB6 没有这条，写侧刻意不登记。
+        if (propLower == "idealwidth") return "vb6_DTP_IdealWidth";
+        if (propLower == "visible") return "vb6_GetControlVisible";
+        if (propLower == "enabled") return "vb6_GetControlEnabled";
+        break;
     // C29-5a: Toolbar 的标量属性面。改之前这枚控件连窗口都没有 (被"ImageList || Toolbar
     // 走 CoCreateInstance"那一组扣住)，读一个 tb1.Visible 就是 C2065: vb6_hwnd_tb1 未声明。
     // ShowTips / TextStyle / AllowCustomize 的真值在 GWL_STYLE 上，Align 存窗口属性。
@@ -619,6 +649,21 @@ std::string CCodeGen::getControlPropWriteFn(FrmControlType ctrlType, const std::
         if (propLower == "checkboxes") return "vb6_TreeView_SetCheckBoxes";
         if (propLower == "hottracking") return "vb6_TreeView_SetHotTracking";
         if (propLower == "hideselection") return "vb6_TreeView_SetHideSelection";
+        if (propLower == "visible") return "vb6_SetControlVisible";
+        if (propLower == "enabled") return "vb6_SetControlEnabled";
+        break;
+    // C29-DT-a: DTPicker 写侧 (与读侧同一批)。Format / CheckBox / UpDown 的 setter 会连带
+    // SWP_FRAMECHANGED + 重绘 (格式变了显示区宽度就得重算)，CustomFormat 发 DTM_SETFORMATW。
+    case FrmControlType::DTPicker:
+        if (propLower == "format") return "vb6_DTP_SetFormat";
+        if (propLower == "customformat") return "vb6_DTP_SetCustomFormat";
+        if (propLower == "checkbox") return "vb6_DTP_SetCheckBox";
+        if (propLower == "updown") return "vb6_DTP_SetUpDown";
+        if (propLower == "calendarbackcolor") return "vb6_DTP_SetCalendarBackColor";
+        if (propLower == "calendarforecolor") return "vb6_DTP_SetCalendarForeColor";
+        if (propLower == "calendartrailingforecolor") return "vb6_DTP_SetCalendarTrailingForeColor";
+        if (propLower == "calendartitlebackcolor") return "vb6_DTP_SetCalendarTitleBackColor";
+        if (propLower == "calendartitleforecolor") return "vb6_DTP_SetCalendarTitleForeColor";
         if (propLower == "visible") return "vb6_SetControlVisible";
         if (propLower == "enabled") return "vb6_SetControlEnabled";
         break;
