@@ -111,6 +111,17 @@ c_.emitLine("switch(vb6_gosub_stack[--vb6_gosub_sp]) {");
                 break;
         }
 
+        // Fix 161b-decl-out: Declare A 版 ByVal String 的**出参回写**。
+        // VB6 语义: ByVal String 是"可写缓冲", 被调用方写入的字节要按 NUL 截断
+        // 回写成新 String (GetUserName/GetModuleFileName 靠这条工作)。C3 侧实参是
+        // vb6_BSTR_ToANSI() 临时副本, 故在此把副本回写回原左值 —— 必须**先于**
+        // FreeANSI (下面那段) 执行。目标为 BSTR 左值 → 用 vb6_BSTR_Assign(BSTR*, ...)。
+        for (auto& op : ansiOutParams_) {
+            c_.emitLine("vb6_BSTR_Assign(&(" + op.targetExpr + "), "
+                        "vb6_BSTR_FromANSIBuf(" + op.tempVar + ", " + op.capExpr + "));");
+        }
+        ansiOutParams_.clear();
+
         // M22: 释放Declare ANSI函数的临时char*变量 (每条语句后统一清理, 无内存泄露)
         for (auto& ansiVar : ansiTempsToFree_) {
             c_.emitLine("vb6_FreeANSI(" + ansiVar + ");");

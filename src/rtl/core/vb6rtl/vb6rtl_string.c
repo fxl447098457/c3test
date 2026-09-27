@@ -418,12 +418,30 @@ BSTR vb6_Space(int32_t n) {
 
 BSTR vb6_String(int32_t n, int32_t charCode) {
     if (n <= 0) return vb6_BSTR_Empty();
+#ifdef _WIN32
+    // Fix 161b-decl-out: 必须用 SysAllocStringLen 造**定长** BSTR, 不能走
+    // vb6_BSTR_FromStr (= SysAllocString)。后者按 NUL 定长 —— `String$(260, 0)`
+    // (VB6 里声明 Declare 出参缓冲的标准写法) 首字符就是 L'\0', SysAllocString
+    // 会返回**长度 0** 的 BSTR。此后 Declare A 版 API (GetUserNameA/
+    // GetModuleFileNameA) 按 nSize 往缓冲里写十几~几十字节 ⇒ 堆越界写 ⇒
+    // STATUS_HEAP_CORRUPTION (0xC0000374), 且崩溃点漂移 (实测缓冲越小越易命中)。
+    // 注意 charCode 可以是 0 —— 定长语义必须保住这 n 个 L'\0' (VB6 里 String$(n,0)
+    // 是"n 个 NUL 的字符串", Len() 也是 n)。
+    {
+        BSTR result = SysAllocStringLen(NULL, (UINT)n);
+        if (!result) return vb6_BSTR_Empty();
+        for (int32_t i = 0; i < n; i++) result[i] = (wchar_t)charCode;
+        result[n] = L'\0';
+        return result;
+    }
+#else
     wchar_t* buf = (wchar_t*)malloc((n + 1) * sizeof(wchar_t));
     for (int32_t i = 0; i < n; i++) buf[i] = (wchar_t)charCode;
     buf[n] = L'\0';
     BSTR result = vb6_BSTR_FromStr(buf);
     free(buf);
     return result;
+#endif
 }
 
 // P21-29: Spc — 打印定位函数 (VB6: Print #1, Spc(5); "x"), 返回 n 个空格

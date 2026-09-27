@@ -260,9 +260,27 @@
     // 判断: 函数名或Alias以'A'结尾 (如 GetWindowTextA, Alias "WritePrivateProfileStringA")
     std::unordered_set<std::string> knownDeclareAnsi_;
 
+    // Fix 161b-decl-out: Declare VB名(小写) → Alias 导出名 (保留原大小写)。
+    // 由来: VB6 `Declare Function GetUserName Lib "advapi32" Alias "GetUserNameA"`
+    // 里 VB 名 GetUserName 恰好被 SDK WinBase.h `#define GetUserName GetUserNameW`
+    // 抢占 —— 生成的 `#ifndef GetUserName` 守卫为假 ⇒ 调用点 `GetUserName(x)` 被
+    // SDK 宏改写成 **GetUserNameW**(宽版), 而我们按 VB6 语义已生成 ANSI 编组的
+    // char* 缓冲 → 窄缓冲交给宽 API, 写入 UTF-16 (每字符隔一个 NUL), 回读只得到
+    // 首字符 (t1 实测 name=[A])。修法: 有 Alias 时调用点用 Alias 名 (GetUserNameA),
+    // 天然绕开 SDK 的 A/W 宏。
+    std::unordered_map<std::string, std::string> declareAliasMap_;
+
     // M22: ANSI临时变量待释放列表 (变量名) + 计数器
     // 在Declare ANSI函数调用前声明临时char*变量, 调用后立即FreeANSI
     std::vector<std::string> ansiTempsToFree_;
+    // Fix 161b-decl-out: Declare A 版 ByVal String **出参回写**登记表。
+    // VB6 语义: ByVal String 当缓冲时, 被调用方写入的字节必须按 NUL 截断回写成
+    // 新 String (GetUserName/GetModuleFileName 正是靠这条工作)。C3 原先只生成
+    // `char* _ansi_N = vb6_BSTR_ToANSI(buf); Call(_ansi_N,...); FreeANSI(_ansi_N);`
+    // —— API 写的是临时副本, 原 BSTR 一字未动 ⇒ 出参读回恒空 (t1/t2 实测)。
+    // 每条: { 临时char*变量名, 回写目标左值表达式, 缓冲容量表达式(可空) }。
+    struct AnsiOutParam { std::string tempVar; std::string targetExpr; std::string capExpr; };
+    std::vector<AnsiOutParam> ansiOutParams_;
     int ansiCounter_ = 0;
     int vcmpCounter_ = 0;  // P25: Variant比较临时变量计数器
 

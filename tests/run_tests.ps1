@@ -1257,6 +1257,23 @@ if ($Category -in @("all", "run", "bas")) {
     Add-BasTest "test_types" "$Tests\test_types.bas"
     Add-BasTest "test_control" "$Tests\test_control.bas"
     Add-BasTest "test_declare" "$Tests\test_declare.bas"
+    # --- Fix 161b-decl-out: Declare A 版 API 的 String 出参回写 + SDK A/W 宏抢占 ---
+    # ByVal String 当可写缓冲 (GetUserName/GetModuleFileName 形态) 必须能回读;
+    # VB 名恰是 SDK A/W 宏名 (GetUserName→#define GetUserName GetUserNameW) 时,
+    # 必须有显式 Alias 才走 vb6_di_ 桩绕开宏; CreateWindowExA 类名不得乱码。
+    # 期望挂在本批自己的夹具上 (避免"期望挂错夹具"的假红)。
+    # ⚠ 断言用 `-like "*$expected*"` 匹配, 而 [ ] 是 PS 通配符的字符集 —— 期望串里
+    #   不得出现方括号 (夹具因此额外打印无括号的稳定标记行)。
+    Add-BasTest "test_declare_byval_string_out" "$Tests\declare_out\declare_byval_string_out.bas" @("byval-name-ok=Y")
+    Add-BasTest "test_declare_gmn_path_out" "$Tests\declare_out\declare_gmn_path_out.bas" @("gmn-path-ok=Y")
+    Add-BasTest "test_declare_byref_string_out" "$Tests\declare_out\declare_byref_string_out.bas" @("byref-name-ok=Y")
+    # 对照: ByRef UDT 路径本来就正常 (证明"出参读法不通"不适用于 UDT)
+    Add-BasTest "test_declare_byref_udt_out" "$Tests\declare_out\declare_byref_udt_out.bas" @("hr=0")
+    Add-BasTest "test_declare_cwex_ansi" "$Tests\declare_out\declare_cwex_ansi.bas" @("hwnd-ok=Y")
+    # Fix 161c: Declare A 版 ByVal String 实参是**字面量 / 内联 COM 属性读**。
+    # 修复前出参回写只按 AST 种类判左值, MemberAccessExpr 判 true 但生成的是
+    # vb6_VariantToString(...) 右值 → &(右值) → C2102, 真实工程 Charts 2020 编译失败。
+    Add-BasTest "test_declare_cwex_lit_com" "$Tests\declare_out\declare_cwex_lit_com.bas" @("lit-com-hwnd-ok=Y", "lit-only-hwnd-ok=Y")
     Write-Host ""
 
     # --- P5.7 语法/语义检查用例组 ---
