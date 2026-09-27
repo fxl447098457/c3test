@@ -43,4 +43,19 @@
 1. **`CheckBox` 与 `UpDown` 只能在设计期给**。这两位是复选框 / 微调按钮那两枚**子窗口**的创建参数，控件只在 `WM_CREATE` 读一次；运行期赋值改的是窗口样式位，控件会立刻把它们抹回去 —— 于是 `DTP1.CheckBox = True` 之后 `DTP1.CheckBox` 读回 `False`。想要这两种外观，请在设计期勾上（回归里的 `DT11` 那条针就是钉这个行为的：谁做出真运行期切换，它会翻红，届时请回来改本节）。
 2. **`Format` 运行期切档是有效的**。判据不信"样式位写进去了"这种自家人读数 —— SDK 常数 `DTS_TIMEFORMAT = 0x0009` 本身就带着 `DTS_UPDOWN` 那一位，只对自己的掩码看永远说"我写对了"。所以每一条格式类判据都配一条上表 `IdealWidth` 的控件侧宽度读数。
 
-还不在这格里（后续批）：`Value` / `MinDate` / `MaxDate` 这三条 Date 型属性，以及 `Change` / `DropDown` / `CloseUp` 三个事件。
+## 本项目的实现口径（ai/029 C29-DT-b：`Value` / `MinDate` / `MaxDate`）
+
+三条 Date 型属性走原生 `DTM_GETSYSTEMTIME` / `DTM_SETSYSTEMTIME` / `DTM_GETRANGE` / `DTM_SETRANGE`，换算用 oleaut32 的 `VariantTimeToSystemTime` / `SystemTimeToVariantTime`。本项目的 `Date` 在生成代码里就是**一个 double 序列号**（`Dim d As Date` 直接发成 `double d`），所以这三条不经过任何装箱：
+
+| 写法 | 读数 |
+| --- | --- |
+| `DTP1.Value` | Date。刚建好 = 今天；赋值后按"年/月/日"读回的就是所赋的那天 |
+| `DTP1.MinDate` / `MaxDate` | Date。**没设过时读回 0**（原生那一位有效标志没立） |
+
+三条与 VB6 有差的行为，都是量出来的：
+
+1. **越出范围的赋值被控件拒绝、值保持原样**，不是钳到边界。`MinDate = #2020-1-1#` 之后再写 `Value = #2009-6-12#`，读回来仍是原来那天。
+2. **改一端不动另一端**：原生范围是一张 `(min, max)` 加两位有效标志，只发 `GDTR_MIN` 会把 max 清成未设，所以本项目读回整张表、只换要改那格、再连着标志一起发回去。
+3. **"无日期"那一态（`CheckBox` 勾掉）在 VB6 是 `Value = Null`**，而本项目的 `Value` 是 double，装不了 Null。因此拆开两条读数：`Value` 在未勾时读回 `0`，另给一条本项目扩展读数 **`HasDate`**（写 `HasDate = False` 取消勾选、写 `True` 勾回）。**取消前那天会被记住**，勾回来还是它 —— 原生在 `GDT_NONE` 态下回填的是它自己的内部日期（本机实测 36494），不记账就会串值。
+
+还剩：`Change` / `DropDown` / `CloseUp` 三个事件（下一格）。
