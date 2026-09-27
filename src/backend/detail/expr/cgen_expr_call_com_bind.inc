@@ -34,7 +34,10 @@
             // 全部**无参** —— VB6 那三个处理器没有参数，所以不需要下面那两个 a0/a1。
             bool dtSim = dtpickerVars_.count(tvBare) > 0
                 && (tvMem == "simchange" || tvMem == "simdropdown" || tvMem == "simcloseup");
-            if (tvSim || tbSim || dtSim) {
+            // C29-MV-c: MonthView 的判据方法同形 (SimDateClick d → MCN_SELCHANGE 发给父窗)。
+            // 它**带一个 Date 参数**（DT-c 那三条无参，所以那里 a0 用不上）。
+            bool mvSim = monthviewVars_.count(tvBare) > 0 && tvMem == "simdateclick";
+            if (tvSim || tbSim || dtSim || mvSim) {
                 isComMarker_ = false;
                 std::vector<std::string> sa;
                 for (size_t i = 0; i < node.positional.size(); i++) {
@@ -43,7 +46,9 @@
                 }
                 std::string a0 = sa.size() > 0 ? sa[0] : std::string("0");
                 std::string a1 = sa.size() > 1 ? sa[1] : std::string("0");
-                lastExpr_ = dtSim
+                lastExpr_ = mvSim
+                    ? ("vb6_MV_SimDateClick((void*)" + comObjExpr_ + ", " + a0 + ")")
+                    : dtSim
                     ? (std::string(tvMem == "simchange"   ? "vb6_DTP_SimChange"
                            : tvMem == "simdropdown"       ? "vb6_DTP_SimDropDown"
                                                           : "vb6_DTP_SimCloseUp")

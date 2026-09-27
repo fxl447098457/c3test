@@ -86,6 +86,8 @@ void CCodeGen::emitFormFramework(const FrmFormDesc& frmDesc, Module& module) {
             // 认出宿主是真窗口槽, 才能改道到 vb6_DTP_Sim*(HWND)。不认就退化成
             // "拿 HWND 当 IDispatch 问它要 SimChange 属性": 编得过、跑起来什么都不发。
             if (c.controlType == FrmControlType::DTPicker) dtpickerVars_.insert(c.controlName);
+            // C29-MV-c: MonthView 同批登记（判据方法 SimDateClick 的宿主槽是真窗口）。
+            if (c.controlType == FrmControlType::MonthView) monthviewVars_.insert(c.controlName);
             // C29-8b: TreeView 同批登记 —— `tv1.Nodes` 那条链靠 treeViewVars_ 认出宿主,
             // 才能改道到 vb6_TreeView_Nodes( 的真 IDispatch 集合 (不认就发
             // vb6_ComGetObjectProp(vb6_hwnd_tv1, L"Nodes") = 拿 HWND 当 IDispatch 用)。

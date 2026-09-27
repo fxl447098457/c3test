@@ -42,6 +42,11 @@ Begin VB.Form MvfForm
       Top             =   2760
       Width           =   2520
    End
+   Begin VB.Timer evtTimer 
+      Interval        =   200
+      Left            =   240
+      Top             =   4440
+   End
 End
 Attribute VB_Name = "MvfForm"
 Attribute VB_GlobalNameSpace = False
@@ -72,6 +77,10 @@ Option Explicit
 '  ④ 与 DTPicker 相反的一条：这三位样式**运行期写是有效的**（MV21 用 MCM_GETMINREQRECT 的高
 '     度跟着变来证）。DTS_SHOWNONE 那两位会被控件抹回去，MCS_ 这三位不会 —— 所以 MonthView
 '     没有"只能创建时给"这条边界，设计期照旧立进创建参数只是为了让观感从第一帧就对。
+
+Private gClick1 As Long
+Private gClick2 As Long
+Private gGot1 As Date
 
 Private Function TF(ByVal ok As Boolean) As String
     If ok Then TF = "Y" Else TF = "N"
@@ -193,6 +202,56 @@ Private Sub Form_Load()
     Debug.Print "MV33=" & TF(CLng(mv1.SelEnd) = d0 + 5 And CLng(mv1.SelStart) = d0 + 3)
     Debug.Print "S=" & k & "/" & CLng(mv1.SelEnd) & "/" & CLng(mv2.SelStart) & "/" & d0
 
+    ' DONE 与 Unload 在 evtTimer_Timer —— 事件判据得等窗体载入完再跑 (照 C29-DT-c 的先例)。
+End Sub
+
+' ---------------- C29-MV-c: DateClick（原生 MCN_SELCHANGE）----------------
+' SimDateClick 是**判据专用**助手（与 DT-c 的 SimChange 同一先例）：无头环境点不了鼠标，
+' 而直接调 handler 会绕开整条派发链 —— 只有从真 WM_NOTIFY 进父窗，才验得到
+' "case WM_NOTIFY + code 分流 + hwndFrom 认来源 + 负载折算成 Date"四段都接上了。
+Private Sub evtTimer_Timer()
+    Static done As Integer
+    Dim b1 As Long, b2 As Long, d0 As Long, e1 As Long
+    If done Then Exit Sub
+    done = 1
+
+    b1 = gClick1: b2 = gClick2
+    d0 = Int(Now) - Day(Now) + 1
+
+    ' --- 34. 走完整派发链，且**参数就是负载里那一天**（折算与属性读数同一把尺）---
+    mv1.SimDateClick(d0 + 4)
+    Debug.Print "MV34=" & TF(gClick1 - b1 = 1 And CLng(gGot1) = d0 + 4)
+
+    ' --- 35. 认来源：通知从 mv2 发出，mv1 的 handler 不许动 ---
+    mv2.SimDateClick(d0 + 6)
+    Debug.Print "MV35=" & TF(gClick1 - b1 = 1 And gClick2 - b2 = 1)
+
+    ' --- 36. 程序化改选不叫 DateClick（原生那条通知只由用户交互驱动，与 DT-c 的 Change 同型）---
+    mv2.Value = d0 + 8
+    mv1.SelStart = d0 + 9
+    mv1.SelEnd = d0 + 11
+    Debug.Print "MV36=" & TF(gClick1 - b1 = 1 And gClick2 - b2 = 1)
+
+    ' --- 37. 另一枚控件的处理器不许被这条通道顺带叫起来（mv3 没写 DateClick）---
+    mv1.SimDateClick(d0 + 5)
+    e1 = gClick1
+    mv3.SimDateClick(d0 + 5)
+    Debug.Print "MV37=" & TF(e1 - b1 = 2 And gClick2 - b2 = 1)
+
+    Debug.Print "E=" & (gClick1 - b1) & "/" & (gClick2 - b2) & "/" & CLng(gGot1)
     Debug.Print "CTRLMONTHVIEW-DONE"
     Unload Me
+End Sub
+
+' VB6 的签名是 Sub MonthView1_DateClick(ByVal DateSelected As Date) —— 与 DT-c 那三条
+' 无参事件的**关键差别**：这条带一个 Date 参数，要按负载折算再传。传法跟着 ByVal 走
+' （ByVal ⇒ 原样传值；Form_MouseDown 那批没写 ByVal 的才是 int16_t*/float* 指针）——
+' 这条形状写错时 x64 侥幸读得出正确日期、x86 直接错值，所以 MV34 两架构都得跑。
+Private Sub mv1_DateClick(ByVal DateSelected As Date)
+    gClick1 = gClick1 + 1
+    gGot1 = DateSelected
+End Sub
+
+Private Sub mv2_DateClick(ByVal DateSelected As Date)
+    gClick2 = gClick2 + 1
 End Sub

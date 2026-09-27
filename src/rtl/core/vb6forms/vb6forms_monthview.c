@@ -287,4 +287,40 @@ static void vb6_MvSetSelEnd(void* hwnd, int which, double serial) {
 void vb6_MV_SetSelStart(void* hwnd, double serial) { vb6_MvSetSelEnd(hwnd, 0, serial); }
 void vb6_MV_SetSelEnd(void* hwnd, double serial)   { vb6_MvSetSelEnd(hwnd, 1, serial); }
 
+// ---------------- 通知换算与判据助手 (C29-MV-c) ----------------
+// VB6 的 `DateClick(ByVal DateSelected As Date)` 对应原生一条 MCN_SELCHANGE(-749)，
+// 负载 = NMSELCHANGE{nmhdr, stSelStart, stSelEnd}（头 6577 行）。派发那头只要**那一天**，
+// 所以这里把负载折成一个 Date（double 序列号）；问不出来回 0（同 DT-b 的口径：
+// 0 = "没有值"，绝不回负数冒充一个怪日期）。
+#ifndef MCN_SELCHANGE
+#define MCN_SELCHANGE      (-749L)
+#endif
+
+double vb6_MV_NotifyDate(void* nmSelChange) {
+    NMSELCHANGE* sc = (NMSELCHANGE*)nmSelChange;
+    if (!sc) return 0.0;
+    return vb6_DateToSerial(&sc->stSelStart);
+}
+
+// 判据专用（不对应任何 VB6 语义，见 029 §九 本格）：无头环境点不了鼠标，而直接调 handler
+// 会绕开整条派发链 —— 只有从真 WM_NOTIFY 进父窗，才验得到"case WM_NOTIFY + code 分流 +
+// hwndFrom 认来源 + 负载折算"四段都接上了。手法照 C29-DT-c 的 vb6_DTP_SimChange。
+// 负载按**调用方给的那一天**填，两端填同一个值（= VB6 单点选中时 SelStart == SelEnd 那一态）。
+void vb6_MV_SimDateClick(void* hwnd, double serial) {
+    NMSELCHANGE sc;
+    SYSTEMTIME st;
+    HWND parent;
+    if (!hwnd) return;
+    if (!vb6_DateFromSerial(serial, &st)) return;
+    memset(&sc, 0, sizeof(sc));
+    sc.nmhdr.hwndFrom = (HWND)hwnd;
+    sc.nmhdr.idFrom   = (UINT_PTR)GetWindowLongPtrW((HWND)hwnd, GWLP_ID);
+    sc.nmhdr.code     = (DWORD)MCN_SELCHANGE;
+    sc.stSelStart = st;
+    sc.stSelEnd   = st;
+    parent = GetParent((HWND)hwnd);
+    if (!parent) parent = (HWND)hwnd;
+    SendMessageW(parent, WM_NOTIFY, 0, (LPARAM)&sc);
+}
+
 #endif /* _WIN32 */

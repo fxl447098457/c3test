@@ -643,6 +643,22 @@
         if (dtpickerVars_.count(objExpr)) return objExpr;
         return "";
     }
+    // C29-MV-c: MonthView 的裸名登记（判据方法 SimDateClick 靠它认宿主是真窗口槽）。
+    std::unordered_set<std::string> monthviewVars_;
+    std::string monthviewNameOfExpr(const std::string& objExpr) const {
+        for (const auto& n : monthviewVars_) {
+            const std::string hwnd = "vb6_hwnd_" + n;
+            size_t p0 = objExpr.find(hwnd);
+            while (p0 != std::string::npos) {
+                size_t e = p0 + hwnd.size();
+                if (e >= objExpr.size() || !(isalnum((unsigned char)objExpr[e]) || objExpr[e] == '_'))
+                    return n;
+                p0 = objExpr.find(hwnd, e);
+            }
+        }
+        if (monthviewVars_.count(objExpr)) return objExpr;
+        return "";
+    }
     std::string statusBarHwndVarOfExpr(const std::string& objExpr) const {
         std::string n = statusBarNameOfExpr(objExpr);
         return n.empty() ? "" : "vb6_hwnd_" + n;

@@ -1686,14 +1686,19 @@ if ($Category -in @("all", "run", "vbp")) {
     #        不挤掉已经选好的那端。
     #     判据一律以"本月 1 号"为基准推日期，不写死 —— 原生只让在**当前显示的那一个月**里选，
     #     写死就会在 CI 的未知日期上于月初/月末随机红（同一条纪律见 022 账 #79）。
-    # 本机读数：x64 与 x86 各 33/33；原始读数两架构逐字相同
+    #   MV33-MV37（C29-MV-c）DateClick（原生 MCN_SELCHANGE = -749）：MV34 走完整派发链**且参数
+    #     就是负载里那一天**（这条同时是 ABI 针 —— ByVal 参数按值传，写成指针形状时 x64 侥幸对、
+    #     x86 当场错值，实测踩过）；MV35 认来源（从 mv2 发的不许叫 mv1）；MV36 钉"程序化改选
+    #     不叫 DateClick"（原生只由用户交互驱动，与 DT-c 的 Change 同型口径）；MV37 钉没写
+    #     处理器的那枚控件发了通知也不许把别人的 handler 顺带叫起来。
+    # 本机读数：x64 与 x86 各 37/37；原始读数两架构逐字相同
     # （`R=1/1 218/242/178/159` = 默认上限/写后仍、单月最小尺寸 218×178、带周号 242 宽、
-    #   去掉今天那一行 159 高；`S=` 那行给范围与本月 1 号）。
-    # 负控 = 拿 DT/MV 之前的二进制（.build/c298c_base_C3.exe）跑同一件夹具 = 28 红 / 5 绿。
+    #   去掉今天那一行 159 高；`E=2/1/46271` = 两条事件计数 + 最后收到的日期序列）。
+    # 负控 = 拿 DT/MV 之前的二进制（.build/c298c_base_C3.exe）跑同一件夹具 = 32 红 / 5 绿。
     # 留绿的五条（MV4/MV9/MV17/MV28/MV31）全是"应当为 0 / 应当相等"那类**边界针** ——
     # 什么都不实现的空控件也满足它们，所以这几条不承担"验货"，只承担"别把边界改回去"；
     # 真正盘货的是另外 28 条。（记下来是免得下一个人把"BASE 有 5 绿"读成判据松。）
-    $mvNeedles = @("CTRLMONTHVIEW-DONE") + (1..33 | ForEach-Object { "MV$_=Y" })
+    $mvNeedles = @("CTRLMONTHVIEW-DONE") + (1..37 | ForEach-Object { "MV$_=Y" })
     Test-Vbp "ctrlmonthview" "$Tests\ctrlmonthview\MvfApp.vbp" $mvNeedles
     Test-Vbp "ctrlmonthview_x86" "$Tests\ctrlmonthview\MvfApp.vbp" $mvNeedles -Arch "x86"
     # 发码两面都钉：类名 + 四条创建样式位逐枚钉（1409286146 = 基+MULTISELECT / 1409286148 = 基+
@@ -1712,7 +1717,13 @@ if ($Category -in @("all", "run", "vbp")) {
         # MV-b：Date 走**裸 double / 裸算术式**，一个装箱都不过（同 DT-b 那条纪律）。
         'vb6_MV_SetValue(vb6_hwnd_mv2, 44562.75);',
         'vb6_MV_SetSelStart(vb6_hwnd_mv1, (d0 + 1))',
-        'vb6_MV_GetSelEnd(vb6_hwnd_mv1'
+        'vb6_MV_GetSelEnd(vb6_hwnd_mv1',
+        # MV-c：派发那一条钉"码值 + 认来源的那枚句柄"这一整对，处理器签名钉**按值收 Date**
+        # （ByVal 的 ABI；写成指针形状时 x64 侥幸能跑、x86 错值，所以两头都得钉）。
+        'pNM42->code == -749 && (void*)pNM42->hwndFrom == vb6_hwnd_mv1',
+        'extern void vb6_mv1_DateClick(double);',
+        'vb6_mv1_DateClick(vb6_MV_NotifyDate((void*)lParam));',
+        'vb6_MV_SimDateClick((void*)vb6_hwnd_mv1, (d0 + 4))'
     )
     Test-EmitcAbsent "mv_emitc_no_com_fallback" @("$Tests\ctrlmonthview\MvfApp.vbp") @(
         'vb6_ComGetObjectProp(vb6_hwnd_mv1',
@@ -1721,6 +1732,9 @@ if ($Category -in @("all", "run", "vbp")) {
         # 值面那三格也不许退回 COM 兜底
         'vb6_ComSetObjectProp(vb6_hwnd_mv2, L"Value"',
         'vb6_ComGetObjectProp(vb6_hwnd_mv1, L"SelEnd")',
+        # MV-c：判据方法一旦被 axSlotObj 那条分支先吃掉，就编成「取 SimDateClick 属性 +
+        # Item 下标」—— 编得过、跑起来什么都不发（C29-8c / DT-c 各踩过一次）。
+        'vb6_ComGetObjectProp(vb6_hwnd_mv1, L"SimDateClick")',
         'CoCreateInstance'
     )
     # ai/029 C29-5a: Toolbar 换成原生 ToolbarWindow32（D6：不碰 MSCOMCTL.OCX）。

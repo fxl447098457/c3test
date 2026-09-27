@@ -94,6 +94,12 @@
                 anyNotify = true;
                 break;
             }
+            // C29-MV-c: MonthView 的 DateClick (原生 MCN_SELCHANGE) 同理。
+            if (ctrl.controlType == FrmControlType::MonthView) {
+                if (!symTab_.lookup(ctrl.controlName + "_DateClick")) continue;
+                anyNotify = true;
+                break;
+            }
         }
         if (anyNotify) {
             c_.emitLine("case WM_NOTIFY: {");
@@ -330,6 +336,33 @@
                     c_.dedent();
                     c_.emitLine("}");
                 }
+            }
+            // ---- C29-MV-c: MonthView 的 DateClick ----
+            // 原生一条 MCN_SELCHANGE(-749)，负载 NMSELCHANGE{nmhdr, stSelStart, stSelEnd}。
+            // 与 DT-c 那三条的**关键差别**：VB6 这条处理器带一个 Date 参数
+            //   Sub MonthView1_DateClick(ByVal DateSelected As Date)
+            // ⇒ 要把负载折成 Date（vb6_MV_NotifyDate 干这件事）再传出去。
+            // ⚠ **ABI 由 ByVal 决定**（实测：形状写错时 x64 侥幸读数正确、x86 当场错值）——
+            //   cgen_decl_proc.cpp:94 那条规则是"ByVal ⇒ 原样传值，非 ByVal(即 ByRef) ⇒ 传指针",
+            //   所以 Form_MouseDown 那批**没写 ByVal** 的参数才是 int16_t*/float*, 而这条
+            //   `ByVal DateSelected As Date` 的定义发的是 `double DateSelected` ⇒ 按值传。
+            for (const auto& ctrl : frmDesc.formControl.children) {
+                if (ctrl.controlType != FrmControlType::MonthView) continue;
+                auto* mvSym = symTab_.lookup(ctrl.controlName + "_DateClick");
+                if (!mvSym) continue;
+                std::string mvNLower = ctrl.controlName;
+                std::transform(mvNLower.begin(), mvNLower.end(), mvNLower.begin(), ::tolower);
+                std::string mvNHwnd = knownControlArrays_.count(mvNLower)
+                    ? ("vb6_CtrlArr_GetAt(&vb6_arr_" + cIdent(ctrl.controlName) + ", 0)")
+                    : ("vb6_hwnd_" + cIdent(ctrl.controlName));
+                std::string mvFn = cProcName(mvSym->name, AccessLevel::Private);
+                c_.emitLine("if (pNM42->code == -749 && (void*)pNM42->hwndFrom == "
+                            + mvNHwnd + ") {");
+                c_.indent();
+                c_.emitLine("extern void " + mvFn + "(double);");
+                c_.emitLine(mvFn + "(vb6_MV_NotifyDate((void*)lParam));");
+                c_.dedent();
+                c_.emitLine("}");
             }
             c_.emitLine("break;");
             c_.dedent();

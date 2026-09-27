@@ -678,6 +678,9 @@ double  vb6_MV_GetSelStart(void* hwnd);
 void    vb6_MV_SetSelStart(void* hwnd, double serial);
 double  vb6_MV_GetSelEnd(void* hwnd);
 void    vb6_MV_SetSelEnd(void* hwnd, double serial);
+// C29-MV-c：MCN_SELCHANGE(-749) 的负载折算 + 判据专用助手（不对应任何 VB6 语义）。
+double  vb6_MV_NotifyDate(void* nmSelChange);
+void    vb6_MV_SimDateClick(void* hwnd, double serial);
 
 #ifdef __cplusplus
 }
