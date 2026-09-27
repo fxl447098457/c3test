@@ -52,6 +52,8 @@ static void addFormsSources(MsvcDriverOptions& opts, const std::string& rtlDir) 
     opts.sourceFiles.push_back(rtlDir + "/vb6forms_dtpicker.c");
     // ai/029 C29-MV-a: MonthView —— 同样是第四处登记，少这一行就是全线 LNK2019 找不到 vb6_MV_*
     opts.sourceFiles.push_back(rtlDir + "/vb6forms_monthview.c");
+    // ai/029 C29-RT-a: RichTextBox —— 第四处登记，少这行就是全线 LNK2019 找不到 vb6_RTB_*
+    opts.sourceFiles.push_back(rtlDir + "/vb6forms_richtextbox.c");
     // vb6forms_axsite.c 按功能家族拆 5 个编译单元 (2026-09-20): 伞文件本身不参与编译
     // 注意: axsite/ 下的 .c 解包后是平铺目录, 故这里写 basename 而非带子目录路径
     opts.sourceFiles.push_back(rtlDir + "/ax_site.c");

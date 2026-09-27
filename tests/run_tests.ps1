@@ -1257,6 +1257,19 @@ if ($Category -in @("all", "run", "bas")) {
     Add-BasTest "test_types" "$Tests\test_types.bas"
     Add-BasTest "test_control" "$Tests\test_control.bas"
     Add-BasTest "test_declare" "$Tests\test_declare.bas"
+    # --- Fix 161b-decl-out: Declare A 版 API 的 String 出参回写 + SDK A/W 宏抢占 ---
+    # ByVal String 当可写缓冲 (GetUserName/GetModuleFileName 形态) 必须能回读;
+    # VB 名恰是 SDK A/W 宏名 (GetUserName→#define GetUserName GetUserNameW) 时,
+    # 必须有显式 Alias 才走 vb6_di_ 桩绕开宏; CreateWindowExA 类名不得乱码。
+    # 期望挂在本批自己的夹具上 (避免"期望挂错夹具"的假红)。
+    # ⚠ 断言用 `-like "*$expected*"` 匹配, 而 [ ] 是 PS 通配符的字符集 —— 期望串里
+    #   不得出现方括号 (夹具因此额外打印无括号的稳定标记行)。
+    Add-BasTest "test_declare_byval_string_out" "$Tests\declare_out\declare_byval_string_out.bas" @("byval-name-ok=Y")
+    Add-BasTest "test_declare_gmn_path_out" "$Tests\declare_out\declare_gmn_path_out.bas" @("gmn-path-ok=Y")
+    Add-BasTest "test_declare_byref_string_out" "$Tests\declare_out\declare_byref_string_out.bas" @("byref-name-ok=Y")
+    # 对照: ByRef UDT 路径本来就正常 (证明"出参读法不通"不适用于 UDT)
+    Add-BasTest "test_declare_byref_udt_out" "$Tests\declare_out\declare_byref_udt_out.bas" @("hr=0")
+    Add-BasTest "test_declare_cwex_ansi" "$Tests\declare_out\declare_cwex_ansi.bas" @("hwnd-ok=Y")
     Write-Host ""
 
     # --- P5.7 语法/语义检查用例组 ---
@@ -1698,7 +1711,7 @@ if ($Category -in @("all", "run", "vbp")) {
     # 留绿的五条（MV4/MV9/MV17/MV28/MV31）全是"应当为 0 / 应当相等"那类**边界针** ——
     # 什么都不实现的空控件也满足它们，所以这几条不承担"验货"，只承担"别把边界改回去"；
     # 真正盘货的是另外 28 条。（记下来是免得下一个人把"BASE 有 5 绿"读成判据松。）
-    $mvNeedles = @("CTRLMONTHVIEW-DONE") + (1..37 | ForEach-Object { "MV$_=Y" })
+    $mvNeedles = @("CTRLMONTHVIEW-DONE") + (1..40 | ForEach-Object { "MV$_=Y" })
     Test-Vbp "ctrlmonthview" "$Tests\ctrlmonthview\MvfApp.vbp" $mvNeedles
     Test-Vbp "ctrlmonthview_x86" "$Tests\ctrlmonthview\MvfApp.vbp" $mvNeedles -Arch "x86"
     # 发码两面都钉：类名 + 四条创建样式位逐枚钉（1409286146 = 基+MULTISELECT / 1409286148 = 基+
@@ -1735,6 +1748,89 @@ if ($Category -in @("all", "run", "vbp")) {
         # MV-c：判据方法一旦被 axSlotObj 那条分支先吃掉，就编成「取 SimDateClick 属性 +
         # Item 下标」—— 编得过、跑起来什么都不发（C29-8c / DT-c 各踩过一次）。
         'vb6_ComGetObjectProp(vb6_hwnd_mv1, L"SimDateClick")',
+        'CoCreateInstance'
+    )
+    # ai/029 C29-RT-a: RichTextBox 换成原生 Msftedit.dll 的 RICHEDIT50W（D6：不碰 RICHTX32.OCX）。
+    # 改之前这枚控件同样**连窗口都没有**（controlTypeToWin32Class 缺格）⇒ 属性读全靠"什么都不写
+    # 也满足"的那副样子：负控（.build/c298c_base_C3.exe，DT/MV 之前的二进制）跑同一件夹具
+    # = **22 红 / 10 绿**，留绿的十条（RT2/4/6/7/12/15/16/21/26/27）全是"读回 0 / 空 / 反向判断"
+    # 那一类；其中 rt1.VScrollRange 在 BASE 下**连数都没打出来**（原始行 `S=0/0//0/0` 那个空位
+    # = 账 #82 那条既有缺陷：未登记的控件属性按数值读会漏裸指针）。真跑：x64 与 x86 各 32/32。
+    #
+    # 三条量出来的口径决定了这一批为什么长这样（三轮 C 探针 `.build/rtprobe3.c`，读数在 029 §九）：
+    #   ① **滚动条归控件管，样式位会被它自己抹掉** —— 创建时给了 WS_VSCROLL，空文本下 GWL_STYLE
+    #      那两位就没了（不需要滚动就把 bar 连样式位一起拆），灌 60 行才自己回来。所以 cgen 一并挂
+    #      ES_DISABLENOSCROLL(0x2000) 让位稳定；而**事后** SetWindowLong 加那两位只有外观、量程停在
+    #      默认 0..100（内容真高 0..1281）⇒ 这四位刻意**没有写口**，判据除样式位还配一条控件自己的
+    #      读数 VScrollRange/HScrollRange（RT11-RT15：挂 bar 的两枚随内容长过 100、没挂的那枚不动）。
+    #   ② ReadOnly 走 EM_SETREADONLY 事后有效 —— 与 ① 正相反，同一枚控件里两种属性各有各的
+    #      "事后行不行"，不许互相外推。
+    #   ③ WordWrap 的原生方向与网上那段经典片段**相反**：EM_SETTARGETDEVICE 的 lParam 才是目标 DC，
+    #      NULL = 折到本窗客户区宽（= VB6 的 True），传 GetDC(本窗) = 目标宽变成整屏（不折）。
+    #      原生从没调过这条时是"不折"，与 VB6 默认相反 ⇒ 设计期没写也要显式下发一次 True。
+    #      EM_SET/GETWRAPMODE 在这枚上问不出也设不动（mode 恒读 0）⇒ 只能自存窗口属性。
+    # 顺带修了一条同族既有缺陷：vb6_Get/SetBorderStyle 只认 "Edit" 类，RICHEDIT50W 落到"存属性"
+    # 那条兜底分支，而 SetPropW(0) 等于**删属性**（GetPropW 回 NULL ⇒ 恒读默认 1）⇒ BorderStyle=None
+    # 永远设不上（RT5/RT6 就是它的正负两面）。
+    # ---- C29-RT-b（同一件夹具往后接 RT33..RT58）= Sel* 的格式面 ----
+    # 三态问法（第三/四轮探针）：EM_GETCHARFORMAT / EM_GETPARAFORMAT 把"选区内不一致"那一位从返回的
+    # dwMask 里清掉（只问 italic：全一致 0xFFFFFFFF、跨界 0xFFFFFFFD；字符面连返回值都等于那张掩码）。
+    # 本项目没有 Null 可回 ⇒ 混合一律按"没有"那一头（False / 0 / 空串）—— 与 VB6 教的 `= True` 等价。
+    # 两条折算也是这格量出来的：字号原生单位 1/20 磅（RT46 读回 14）、对齐 VB6 0左/1中/2右 对原生
+    # 1/3/2（不折算就会把"居中"读成"右对齐"，RT49/RT50 钉住）；悬挂缩进用 PFM_OFFSET 取负，
+    # PFM_OFFSETINDENT 会把整段推走（实测 720 → 960），不是悬挂。
+    # BASE（本批之前的编译器）同一件夹具 = 20 绿 / 38 红：RT33-RT58 里 16 条当场红，剩下 10 条是
+    # "应当为 0 / 应当相等"那类反向针（什么都不实现也满足它们）—— 与 DT/MV 每次的分布同型。
+    $rtNeedles = @("CTRLRICHTEXT-DONE") + (1..58 | ForEach-Object { "RT$_=Y" })
+    Test-Vbp "ctrlrichtextbox" "$Tests\ctrlrichtextbox\RtfApp.vbp" $rtNeedles
+    Test-Vbp "ctrlrichtextbox_x86" "$Tests\ctrlrichtextbox\RtfApp.vbp" $rtNeedles -Arch "x86"
+    # 发码正面：类名 + 四位创建样式逐枚钉（1409286148 = 基+ES_MULTILINE，rt2 全默认；
+    # 1411391492 = 基+VSCROLL+DISABLENOSCROLL / 1410342916 = 基+HSCROLL+DISABLENOSCROLL /
+    # 1412440068 = 基+两个+DISABLENOSCROLL），设计期 Init 连 WordWrap/ReadOnly 一起钉（-999 = 没写），
+    # 初值文本钉"句柄赋值之后才发"那一条，选区/上限/量程读数钉走的是原生 getter 而不是 COM 兜底。
+    Test-EmitcShape "rt_emitc_shape" @("$Tests\ctrlrichtextbox\RtfApp.vbp") @(
+        '"RICHEDIT50W", "",',
+        '1412440068L, 0L,',
+        '1409286148L, 0L,',
+        '1411391492L, 0L,',
+        '1410342916L, 0L,',
+        'vb6_RTB_Init((void*)vb6_hwnd_rt1, 0, -999);',
+        'vb6_RTB_Init((void*)vb6_hwnd_rt2, -999, -999);',
+        'vb6_RTB_Init((void*)vb6_hwnd_rt3, -999, 1);',
+        'vb6_SetBorderStyle((void*)vb6_hwnd_rt1, 1);',
+        'SendMessageW((HWND)vb6_hwnd_rt1, WM_SETTEXT, 0, (LPARAM)L"DesignText-Alpha");',
+        'vb6_RTB_SetSelText(vb6_hwnd_rt2, vb6_BSTR_FromStr(L"XY"));',
+        'vb6_RTB_SetWordWrap(vb6_hwnd_rt3, (-1));',
+        'vb6_RTB_SetMaxLength(vb6_hwnd_rt2, 20);',
+        'vb6_RTB_GetVScrollRange(vb6_hwnd_rt3',
+        'vb6_RTB_GetHScrollRange(vb6_hwnd_rt4',
+        # RT-b：四条效果走 CHARFORMAT2W 的同一族 setter（布尔按 VB6 的 -1/0 发），
+        # 颜色/字体名/字号/对齐/三缩进各一条 —— 全部钉"裸调用 + 裸数值"，不许出现装箱。
+        'vb6_RTB_SetSelBold(vb6_hwnd_rt2, (-1));',
+        'vb6_RTB_SetSelUnderline(vb6_hwnd_rt2, (-1));',
+        'vb6_RTB_SetSelStrikethru(vb6_hwnd_rt2, (-1));',
+        'vb6_RTB_GetSelItalic(vb6_hwnd_rt2',
+        'vb6_RTB_SetSelColor(vb6_hwnd_rt2, col);',
+        'vb6_RTB_SetSelFontName(vb6_hwnd_rt2, vb6_BSTR_FromStr(L"Courier New"));',
+        'vb6_RTB_SetSelFontSize(vb6_hwnd_rt2, 14);',
+        'vb6_RTB_GetSelFontSize(vb6_hwnd_rt2',
+        'vb6_RTB_SetSelAlignment(vb6_hwnd_rt2, 2);',
+        'vb6_RTB_SetSelIndent(vb6_hwnd_rt2, 720);',
+        'vb6_RTB_SetSelRightIndent(vb6_hwnd_rt2, 1440);',
+        'vb6_RTB_SetSelHangingIndent(vb6_hwnd_rt2, 360);',
+        'vb6_RTB_GetSelHangingIndent(vb6_hwnd_rt2'
+    )
+    # 反面：这枚控件不许再走 COM 后期绑定；而 ScrollBars 那四位**不许有写口** ——
+    # 事后写只有外观、没有量程，发一条"写得动但什么都不改"的 setter 比不发更难查。
+    Test-EmitcAbsent "rt_emitc_no_com_fallback" @("$Tests\ctrlrichtextbox\RtfApp.vbp") @(
+        'vb6_ComGetObjectProp(vb6_hwnd_rt1',
+        'vb6_ComSetObjectProp(vb6_hwnd_rt2',
+        'vb6_ComGetObjectProp(vb6_hwnd_rt3, L"MaxLength")',
+        'vb6_RTB_SetScrollBars',
+        # RT-b：格式面也不许退回 COM 兜底（一条都不许）
+        'vb6_ComGetObjectProp(vb6_hwnd_rt2, L"SelBold")',
+        'vb6_ComSetObjectProp(vb6_hwnd_rt2, L"SelColor"',
+        'vb6_ComSetObjectProp(vb6_hwnd_rt2, L"SelAlignment"',
         'CoCreateInstance'
     )
     # ai/029 C29-5a: Toolbar 换成原生 ToolbarWindow32（D6：不碰 MSCOMCTL.OCX）。

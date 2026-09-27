@@ -475,6 +475,7 @@ std::string CCodeGen::comPackExpr(Expr& expr) {
         // 对两种情况都正确, 因此优先它是安全的.
         if (knownVariantVars_.count(lower)) return "vb6_ComPackValue";
         if (knownObjectVars_.count(lower)) return "vb6_ComPackObject";
+        if (knownTypedComVars_.count(lower)) return "vb6_ComPackObject";  // Fix 160-com-byref: 早期绑定COM变量也是对象 (void*/接口指针), 按对象打包
         if (knownBstrVars_.count(lower)) return "vb6_ComPackBSTR";
         if (knownDoubleVars_.count(lower)) return "vb6_ComPackDouble";
         if (knownLongVars_.count(lower)) return "vb6_ComPackInt";

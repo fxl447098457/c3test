@@ -692,6 +692,55 @@ void    vb6_MV_SetSelEnd(void* hwnd, double serial);
 double  vb6_MV_NotifyDate(void* nmSelChange);
 void    vb6_MV_SimDateClick(void* hwnd, double serial);
 
+// ===================== RichTextBox (ai/029 C29-RT-a) =====================
+//   VB6 RichTextBox 的窗口 + 创建样式 + 文本/选区面，原生 Msftedit.dll 的 RICHEDIT50W。
+//   类注册靠 vb6_ComCtl_Init 里那次 LoadLibraryW（不在 comctl32 的 ICC_* 体系里）。
+//   Sel* 的格式面（粗/斜/颜色/字体/对齐/缩进）留 RT-b，TextRTF/Find 留 RT-c，事件留 RT-d。
+void    vb6_RTB_Init(void* hwnd, int32_t wordWrap, int32_t readOnly);  // 设计期两条；-999 = 没写
+int32_t vb6_RTB_GetSelStart(void* hwnd);
+void    vb6_RTB_SetSelStart(void* hwnd, int32_t v);
+int32_t vb6_RTB_GetSelLength(void* hwnd);
+void    vb6_RTB_SetSelLength(void* hwnd, int32_t v);
+wchar_t* vb6_RTB_GetSelText(void* hwnd);
+void    vb6_RTB_SetSelText(void* hwnd, void* bstr);
+int32_t vb6_RTB_GetReadOnly(void* hwnd);
+void    vb6_RTB_SetReadOnly(void* hwnd, int32_t on);
+int32_t vb6_RTB_GetMaxLength(void* hwnd);
+void    vb6_RTB_SetMaxLength(void* hwnd, int32_t v);
+int32_t vb6_RTB_GetScrollBars(void* hwnd);   // 0 无 / 1 水平 / 2 垂直 / 3 两者
+// C3 扩展（不是 VB6 属性）：控件自己的滚动量程 —— "滚动条到底活没活"的唯一硬证人
+// （事后写 WS_VSCROLL 只有外观、量程停在默认值，见 029 §九 本格）。
+int32_t vb6_RTB_GetVScrollRange(void* hwnd);
+int32_t vb6_RTB_GetHScrollRange(void* hwnd);
+int32_t vb6_RTB_GetWordWrap(void* hwnd);    // 原生没有 Get 对称项 ⇒ 自存窗口属性
+void    vb6_RTB_SetWordWrap(void* hwnd, int32_t on);
+
+// ---- C29-RT-b：Sel* 的格式面（字符九条走 CHARFORMAT2W，段落四条走 PARAFORMAT2）----
+//   三态口径：原生把"选区内不一致"的属性在返回的 dwMask 里清掉 ⇒ 问得出混合；本项目没有
+//   Null 可回，混合一律按"没有"那一头给（False / 0 / 空串），与 VB6 常见写法 `= True` 等价。
+int32_t vb6_RTB_GetSelBold(void* hwnd);
+void    vb6_RTB_SetSelBold(void* hwnd, int32_t on);
+int32_t vb6_RTB_GetSelItalic(void* hwnd);
+void    vb6_RTB_SetSelItalic(void* hwnd, int32_t on);
+int32_t vb6_RTB_GetSelUnderline(void* hwnd);
+void    vb6_RTB_SetSelUnderline(void* hwnd, int32_t on);
+int32_t vb6_RTB_GetSelStrikethru(void* hwnd);
+void    vb6_RTB_SetSelStrikethru(void* hwnd, int32_t on);
+int32_t vb6_RTB_GetSelColor(void* hwnd);    // 自动色 ⇒ 回控件自己的 ForeColor
+void    vb6_RTB_SetSelColor(void* hwnd, int32_t colorRef);
+wchar_t* vb6_RTB_GetSelFontName(void* hwnd);
+void    vb6_RTB_SetSelFontName(void* hwnd, void* bstr);
+float   vb6_RTB_GetSelFontSize(void* hwnd); // 原生单位是 1/20 磅，这里折算成磅
+void    vb6_RTB_SetSelFontSize(void* hwnd, float points);
+int32_t vb6_RTB_GetSelAlignment(void* hwnd);   // VB6 0左/1中/2右 <-> 原生 1/3/2，要折算
+void    vb6_RTB_SetSelAlignment(void* hwnd, int32_t align);
+int32_t vb6_RTB_GetSelIndent(void* hwnd);      // 三条缩进单位 = twips（原生 dx* 口径）
+void    vb6_RTB_SetSelIndent(void* hwnd, int32_t twips);
+int32_t vb6_RTB_GetSelRightIndent(void* hwnd);
+void    vb6_RTB_SetSelRightIndent(void* hwnd, int32_t twips);
+int32_t vb6_RTB_GetSelHangingIndent(void* hwnd);   // = -dxOffset（原生用负值表示首行外凸）
+void    vb6_RTB_SetSelHangingIndent(void* hwnd, int32_t twips);
+
 #ifdef __cplusplus
 }
 #endif

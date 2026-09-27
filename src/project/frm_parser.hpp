@@ -111,6 +111,7 @@ enum class FrmControlType {
     TreeView,           // MSComctlLib.TreeView — Win32 原生复刻 (SysTreeView32), P20-46
     DTPicker,           // MSComCtl2.DTPicker — Win32 原生复刻 (SysDateTimePick32), C29-DT
     MonthView,          // MSComCtl2.MonthView — Win32 原生复刻 (SysMonthCal32), C29-MV
+    RichTextBox,        // MSFT_TextBox.RichTextBox — Win32 原生复刻 (RICHEDIT50W), C29-RT
     Unknown,            // 未识别的控件类型
 };
 

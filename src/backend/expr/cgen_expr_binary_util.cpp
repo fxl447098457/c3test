@@ -22,6 +22,7 @@ static const char* kBstrReturningCalls[] = {
     "vb6_Format(", "vb6_StrConv(", "vb6_Str(", "vb6_String(", "vb6_Space(",
     "vb6_Replace(",
     "vb6_Dir(", "vb6_Command(", "vb6_Environ(", "vb6_CurDir(", "vb6_InputBox(",
+    "vb6_Console_ReadLine(", "vb6_Console_ReadKey(",  // Fix 161: Console 输入返回 BSTR
     "vb6_ErrDescription(", "vb6_ErrSource(",
     "vb6_App_Path(", "vb6_App_EXEName(", "vb6_App_HelpFile(",
     "vb6_GetControlText(", "vb6_GetControlCaption(",

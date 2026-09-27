@@ -134,6 +134,21 @@ void vb6_DebugWriteNewline(void);      // 输出换行
 void vb6_ConWriteOutW(const wchar_t* s, int len);
 void vb6_ConWriteErrW(const wchar_t* s, int len);
 
+// Fix 161: 控制台输入原语 (stdin 侧) —— 与上面的输出侧对称:
+//   真控制台(键盘) → ReadConsoleW  (本就是 UTF-16)
+//   管道/重定向     → ReadFile 字节 → MultiByteToWideChar(GetConsoleCP() ?: ACP)
+// 原 vb6_InputBox 用裸 fgetws(stdin) 会把管道字节当 UTF-16 解析 ⇒ ASCII/中文
+// 全部读错(不是显示乱码)。VB6 侧无对应关键字, 供宿主/夹具 Declare 或 RTL 内部调用。
+int32_t vb6_ConInputIsConsole(void);  // 1=控制台键盘, 0=管道/重定向
+BSTR vb6_ConReadLine(void);           // 读一行(不含行尾); 无输入时返回空 BSTR
+BSTR vb6_ConReadKey(void);            // 读一个字符(取行首字符)
+
+// Fix 161: Console 对象 (对齐 twinBASIC) —— VB6 侧 `Console.ReadLine()` 等
+void vb6_Console_Write(BSTR s);
+void vb6_Console_WriteLine(BSTR s);
+BSTR vb6_Console_ReadLine(void);
+BSTR vb6_Console_ReadKey(void);
+
 // 整除
 int32_t vb6_IntDiv(int32_t a, int32_t b);
 

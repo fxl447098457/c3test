@@ -66,6 +66,29 @@ void vb6_ComCtl_Init(void) {
               | ICC_ANIMATE_CLASS | ICC_UPDOWN_CLASS | ICC_HOTKEY_CLASS
               | ICC_DATE_CLASSES | ICC_WIN95_CLASSES;
     InitCommonControlsEx(&ice);
+    // C29-RT: RichTextBox 的类**不在 comctl32 里** —— RICHEDIT50W 由 Msftedit.dll 在
+    // DllMain 里注册（实测：LoadLibrary 之后 GetClassInfoExW 才问得到）。这与上面那批
+    // ICC_* 是两条路子：InitCommonControlsEx 管不到它。
+    // 原来这里还挂了一句 "LoadLibrary(riched20.dll) 兜底" —— 本机 x64+x86 各测一遍
+    // （读数：.build\richcls_out.txt）：riched20.dll 只注册 RichEdit20W，问 RICHEDIT50W
+    // 回 err=1411（类不存在），而发码里的类名是写死的字面量 ⇒ 那句是个**假出口**：加载
+    // 成功也照样建不出窗口，只是把"依赖缺失"伪装成"已经处理过了"。现在不兜底，改成当场
+    // 喊出来（真缺 Msftedit 的场景 = Server Core / 精简镜像；带 GUI 的机器上它一直在，
+    // SysWOW64 里也有 32 位那份）。VB6 自己的 RichTextBox 6.0 同样硬依赖 Msftedit。
+    {
+        HMODULE richMod = LoadLibraryW(L"Msftedit.dll");
+        WNDCLASSEXW richCls;
+        memset(&richCls, 0, sizeof(richCls));
+        richCls.cbSize = sizeof(richCls);
+        if (!richMod) {
+            fprintf(stderr, "[C3_FORMS] Msftedit.dll not loadable (err=%lu): no RICHEDIT50W class"
+                            " => every RichTextBox will have no window\n",
+                    (unsigned long)GetLastError());
+        } else if (!GetClassInfoExW(richMod, L"RICHEDIT50W", &richCls)) {
+            fprintf(stderr, "[C3_FORMS] Msftedit.dll loaded but RICHEDIT50W is not registered"
+                            " (err=%lu)\n", (unsigned long)GetLastError());
+        }
+    }
     // comctl32 只注册它自己那批类; msctls_status32 / msctls_toolbar32 这两个
     // v5.82 与 v6 都不注册 (实测连 dwICC=0xFFFFFFFF 全开也没用), 由各控件的
     // RTL 自己补注册 (vb6_StatusBar_RegisterClass 等)。

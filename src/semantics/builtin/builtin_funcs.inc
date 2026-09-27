@@ -18,6 +18,7 @@
     addObj("Printer");
     addObj("Forms");
     addObj("Clipboard");
+    addObj("Console");  // Fix 161: Console 对象 (对齐 twinBASIC) —— 控制台 I/O
 
     // 内置函数 (声明为 Function 符号, 避免未声明错误)
     auto addBuiltinFunc = [&](const char* name, Vb6Type retType) {

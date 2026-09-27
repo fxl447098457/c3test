@@ -3,6 +3,13 @@
 // at user-program build time. The P11.3 pre-compiled .lib scheme was
 // reverted: c3 is open source, no source protection needed.
 // 26 .h headers + 67 .c sources + 13 .inc fragments (all arch-neutral) = 106 resources.
+// Fix 161-console: Console 对象 (twinBASIC 口径) + stdin 双路径 (控制台 ReadConsoleW /
+// 管道 ReadFile+代码页); vb6_InputBox 弃 fgetws 改走 vb6_ConReadLine。
+// Fix 161b-decl-out: Declare A 版 ByVal String 出参回写 —— 新增 vb6_BSTR_FromANSIBuf
+// (vb6rtl_bstr.h), cgen 登记 ansiOutParams_ 并在语句收尾回写原 BSTR。
+// Fix 161b-decl-out(2): 定长 BSTR 语义 —— vb6_String(n,0) 与 vb6_BSTR_FromBSTR 原先
+// 都走 SysAllocString (按 NUL 定长), `String$(260, 0)` 被截成 Len=0 ⇒ Declare A 版
+// API 按 nSize 写 1 字节缓冲 ⇒ 堆越界 0xC0000374。改用 SysAllocStringLen 全量。
 // 2026-09-17 源文件按家族分目录: core/vb6rtl|vb6com|vb6comserver|vb6forms|di/,
 // 解包后仍是平铺目录（RTL 内部 include 一律 basename，不受源目录影响）。
 // Runtime: FindResource/LoadResource extract to temp session directory
@@ -31,6 +38,9 @@
 114 RCDATA "../rtl/core/vb6comserver/vb6comserver_pci.c"
 
 // vb6com 按 COM 调用层次拆分 (P6): 内部共享头 + 各层实现
+// Fix 160-com (2026-09-27): vb6com_invoke.c 增免注册 ITypeInfo 分派, 强制重新嵌入 RTL
+// Fix 160-com-byref (2026-09-27): vb6com_pack.c 增 ComPackObjectRef + invoke 清理跳过 VT_BYREF
+// Fix 160-com-clean (2026-09-27): vb6com_invoke.c 移除崩溃排查临时 trace, 强制重新嵌入 RTL
 115 RCDATA "../rtl/core/vb6com/vb6com_internal.h"
 116 RCDATA "../rtl/core/vb6com/vb6com_invoke.c"
 117 RCDATA "../rtl/core/vb6com/vb6com_pack.c"
@@ -70,6 +80,8 @@
 217 RCDATA "../rtl/core/vb6forms/vb6forms_dtpicker.c"
 // ai/029 C29-MV-a: MonthView (SysMonthCal32 复刻, 同样不加载 MSCOMCT2.OCX)
 218 RCDATA "../rtl/core/vb6forms/vb6forms_monthview.c"
+// ai/029 C29-RT-a: RichTextBox (原生 RICHEDIT50W, 不加载 RICHTX32.OCX)
+219 RCDATA "../rtl/core/vb6forms/vb6forms_richtextbox.c"
 131 RCDATA "../rtl/core/vb6forms/vb6forms_axsite.c"
 198 RCDATA "../rtl/core/vb6forms/vb6forms_axcontainer.c"
 // vb6forms_axsite.c 按功能家族拆分 (2026-09-20): 内部头 + 5 个族编译单元

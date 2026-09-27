@@ -395,28 +395,32 @@ BSTR vb6_MonthName(int32_t month, int32_t abbreviate) {
     return vb6_BSTR_FromStr(name);
 }
 
+// Fix 161: 原先三个 FormatXxx 都用 `swprintf(buf, 64, L"%%.%df", numDigits)` 想拼出
+// "%.2f" —— 但 `%%` 在 printf 家族里是**字面百分号**, 拼出的 buf 不是可再用的格式串。
+// 实测 FormatPercent 把上次结果当格式反复解析 → "123456.7856.7856.78..." 无限重复。
+// 正解 = 直接用宽度精度参数 `%.*f`, 一次成型, 不再二次套用。
+//
+// 注: FormatCurrency 的 `¥`(U+00A5) 前缀**本来就没坏** —— 曾经看到的 "гд" 是终端
+// 误解码: 936 下 vb6_ConWriteHandle 正确写出 GBK 双字节 A3A4(即全角"￥"),
+// 65001 下写出 UTF-8 C2A5; 码点探针实测 BSTR 内首字符恒为 U+00A5。别当 bug 修。
 BSTR vb6_FormatCurrency(double value, int32_t numDigits, int32_t incLeading, int32_t useParens, int32_t groupDigits) {
     (void)incLeading; (void)useParens; (void)groupDigits;
-    wchar_t buf[64];
-    swprintf(buf, 64, L"%%.%df", numDigits >= 0 ? numDigits : 2);
-    /* Use currency symbol prefix */
-    wchar_t fmtBuf[80];
-    swprintf(fmtBuf, 80, buf, value);
-    wchar_t result[84] = L"\x00a5";  /* Yen/ Yuan sign as default currency */
-    wcscat(result, fmtBuf);
+    if (numDigits < 0) numDigits = 2;
+    wchar_t numBuf[64];
+    swprintf(numBuf, 64, L"%.*f", (int)numDigits, value);
+    wchar_t result[80] = L"\x00a5";  /* Yen/ Yuan sign as default currency */
+    wcscat(result, numBuf);
     return vb6_BSTR_FromStr(result);
 }
 
 BSTR vb6_FormatNumber(double value, int32_t numDigits, int32_t incLeading, int32_t useParens, int32_t groupDigits) {
     (void)incLeading; (void)useParens; (void)groupDigits;
-    wchar_t buf[64];
+    wchar_t numBuf[64];
     if (numDigits < 0) numDigits = 2;
+    swprintf(numBuf, 64, L"%.*f", (int)numDigits, value);
     /* Format with grouping if requested */
     if (groupDigits) {
         /* Simple grouping: insert commas every 3 digits */
-        swprintf(buf, 64, L"%%.%df", numDigits);
-        wchar_t numBuf[64];
-        swprintf(numBuf, 64, buf, value);
         /* Find decimal point */
         wchar_t* dot = wcschr(numBuf, L'.');
         int intLen = dot ? (int)(dot - numBuf) : (int)wcslen(numBuf);
@@ -433,17 +437,15 @@ BSTR vb6_FormatNumber(double value, int32_t numDigits, int32_t incLeading, int32
         if (signLen) { memmove(outBuf + 1, outBuf, (wcslen(outBuf) + 1) * sizeof(wchar_t)); outBuf[0] = L'-'; }
         return vb6_BSTR_FromStr(outBuf);
     }
-    swprintf(buf, 64, L"%%.%df", numDigits);
-    swprintf(buf, 64, buf, value);  /* reuse buf for result */
-    return vb6_BSTR_FromStr(buf);
+    return vb6_BSTR_FromStr(numBuf);
 }
 
 BSTR vb6_FormatPercent(double value, int32_t numDigits, int32_t incLeading, int32_t useParens, int32_t groupDigits) {
     (void)incLeading; (void)useParens; (void)groupDigits;
-    wchar_t buf[64];
     if (numDigits < 0) numDigits = 2;
-    swprintf(buf, 64, L"%%.%df%%%%", numDigits);
-    swprintf(buf, 64, buf, value * 100.0);
+    wchar_t buf[64];
+    /* 百分比: 值 ×100 再加 '%' —— 用 %.*f 直接成型, 不套用二次格式串 */
+    swprintf(buf, 64, L"%.*f%%", (int)numDigits, value * 100.0);
     return vb6_BSTR_FromStr(buf);
 }
 

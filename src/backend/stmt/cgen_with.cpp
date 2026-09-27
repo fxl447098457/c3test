@@ -223,7 +223,8 @@ void CCodeGen::visit(WithStmt& node) {
             if (withInfo.kind == WithObjKind::Unknown) {
                 if (objNameLower == "err" || objNameLower == "app" ||
                     objNameLower == "screen" || objNameLower == "printer" ||
-                    objNameLower == "clipboard" || objNameLower == "debug") {
+                    objNameLower == "clipboard" || objNameLower == "debug" ||
+                    objNameLower == "console") {  // Fix 161: Console (twinBASIC 口径)
                     withInfo.kind = WithObjKind::BuiltinObject;
                     withInfo.ctrlOrigName = objNameLower;  // store lowercase name
                 }

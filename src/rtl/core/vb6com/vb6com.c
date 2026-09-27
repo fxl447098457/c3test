@@ -7,6 +7,7 @@
 
 #include <stdlib.h>
 #include <string.h>
+#include <oleauto.h>   // ITypeLib / ITypeInfo / LoadTypeLibEx / REGKIND_NONE
 
 
 // P24-08: COM错误传播 — 将HRESULT/EXCEPINFO转换为VB6运行时错误
@@ -344,6 +345,93 @@ static int comLibTraceEnabled(void) {
     return cached;
 }
 
+/* ============================================================
+ * Fix 160-com: 免注册 typelib 缓存 — 让 typelib 驱动的 IDispatch
+ * (如 Chilkat) 在 TLB 未注册时也能 GetIDsOfNames/Invoke 成功.
+ * C3 在 vb6_ComLibRegister 时按 DLL 路径去重 LoadTypeLib(REGKIND_NONE)
+ * (不写注册表), 取出每个 coclass 的默认调度接口 ITypeInfo; 对象创建时
+ * 把 对象指针→ITypeInfo 记进 g_comlibObjTI; vb6_getDispid 据此解析
+ * DISPID, 绕开对象自身因 TLB 缺失而失败的 GetIDsOfNames.
+ * ============================================================ */
+#define VB6_COMLIB_TLIBMEM_MAX 32
+static struct { wchar_t path[MAX_PATH * 2]; ITypeLib* tlib; } g_comLibTLBCache[VB6_COMLIB_TLIBMEM_MAX];
+static int g_comLibTLBCacheCount = 0;
+
+#define VB6_COMLIB_OBJTI_MAX 1024
+static struct { void* disp; ITypeInfo* ti; } g_comlibObjTI[VB6_COMLIB_OBJTI_MAX];
+static int g_comlibObjTICount = 0;
+
+static ITypeLib* comLibGetTypeLib(const wchar_t* dllPath) {
+    if (!dllPath || !*dllPath) return NULL;
+    for (int i = 0; i < g_comLibTLBCacheCount; i++)
+        if (_wcsicmp(g_comLibTLBCache[i].path, dllPath) == 0)
+            return g_comLibTLBCache[i].tlib;
+    if (g_comLibTLBCacheCount >= VB6_COMLIB_TLIBMEM_MAX) return NULL;
+    ITypeLib* pTLib = NULL;
+    HRESULT hr = LoadTypeLibEx((LPOLESTR)dllPath, REGKIND_NONE, &pTLib);
+    if (FAILED(hr) || !pTLib) {
+        if (comLibTraceEnabled())
+            fwprintf(stderr, L"[C3_COM]   LoadTypeLibEx(%ls) failed: 0x%08lX (DISPID 将退回对象自身 GetIDsOfNames)\n",
+                     dllPath, (unsigned long)hr);
+        return NULL;
+    }
+    wcscpy(g_comLibTLBCache[g_comLibTLBCacheCount].path, dllPath);
+    g_comLibTLBCache[g_comLibTLBCacheCount].tlib = pTLib;  /* 进程期持有, 退出时随进程释放 */
+    g_comLibTLBCacheCount++;
+    return pTLib;
+}
+
+/* 取 coclass 的默认(非 source)调度接口 ITypeInfo —— 用于免注册解析 DISPID. */
+static ITypeInfo* comLibLoadDispIface(const wchar_t* dllPath, REFCLSID rclsid) {
+    ITypeLib* pTLib = comLibGetTypeLib(dllPath);
+    if (!pTLib) return NULL;
+    ITypeInfo* pCoclass = NULL;
+    if (FAILED(pTLib->lpVtbl->GetTypeInfoOfGuid(pTLib, rclsid, &pCoclass)) || !pCoclass)
+        return NULL;
+    ITypeInfo* result = NULL;
+    TYPEATTR* pTA = NULL;
+    if (SUCCEEDED(pCoclass->lpVtbl->GetTypeAttr(pCoclass, &pTA))) {
+        UINT cImpl = pTA->cImplTypes;
+        for (UINT i = 0; i < cImpl && !result; i++) {
+            INT flags = 0;
+            if (SUCCEEDED(pCoclass->lpVtbl->GetImplTypeFlags(pCoclass, i, &flags))) {
+                if ((flags & IMPLTYPEFLAG_FDEFAULT) && !(flags & IMPLTYPEFLAG_FSOURCE)) {
+                    HREFTYPE ref = 0;
+                    if (SUCCEEDED(pCoclass->lpVtbl->GetRefTypeOfImplType(pCoclass, i, &ref)))
+                        pCoclass->lpVtbl->GetRefTypeInfo(pCoclass, ref, &result);
+                }
+            }
+        }
+        pCoclass->lpVtbl->ReleaseTypeAttr(pCoclass, pTA);
+    }
+    pCoclass->lpVtbl->Release(pCoclass);
+    if (result) result->lpVtbl->AddRef(result);  /* 返回独立引用, 由 g_comLibs 表项持有 */
+    return result;
+}
+
+/* 免注册对象 → 默认调度接口 ITypeInfo (getDispid 解析用). 命中返回 AddRef 过的
+ * ITypeInfo*, 调用方须 Release; 未命中返回 NULL. */
+ITypeInfo* vb6_ComLibLookupTypeInfo(void* disp) {
+    if (!disp) return NULL;
+    for (int i = 0; i < g_comlibObjTICount; i++) {
+        if (g_comlibObjTI[i].disp == disp && g_comlibObjTI[i].ti) {
+            g_comlibObjTI[i].ti->lpVtbl->AddRef(g_comlibObjTI[i].ti);
+            return g_comlibObjTI[i].ti;
+        }
+    }
+    return NULL;
+}
+
+/* 记录 免注册对象 → 默认调度接口 ITypeInfo (COM 单线程 STA, 无需加锁). */
+static void comLibRegisterObjTI(void* disp, ITypeInfo* ti) {
+    if (!disp || !ti) return;
+    if (g_comlibObjTICount >= VB6_COMLIB_OBJTI_MAX) return;
+    ti->lpVtbl->AddRef(ti);  /* 映射项持有独立引用 */
+    g_comlibObjTI[g_comlibObjTICount].disp = disp;
+    g_comlibObjTI[g_comlibObjTICount].ti = ti;
+    g_comlibObjTICount++;
+}
+
 void vb6_ComLibRegister(const Vb6ComLib* libs, int count) {
     if (!libs || count <= 0) return;
     if (count > VB6_MAX_COMLIBS) {
@@ -355,6 +443,35 @@ void vb6_ComLibRegister(const Vb6ComLib* libs, int count) {
     g_comLibCount = count;
     if (comLibTraceEnabled())
         fprintf(stderr, "[C3_COM]   registered %d component(s) from ComLib=\n", count);
+
+    /* Fix 160-com: 预载每个 coclass 的默认调度接口 ITypeInfo (免注册 TLB 解析用).
+     * 仅按 DLL 路径去重 LoadTypeLibEx 一次; 失败则 dispIface=NULL, 后续退回对象自身
+     * GetIDsOfNames (对 TLB 已注册/标准组件零影响). */
+    {
+        wchar_t exeDir[MAX_PATH]; exeDir[0] = 0;
+        DWORD n = GetModuleFileNameW(NULL, exeDir, MAX_PATH);
+        if (n > 0 && n < MAX_PATH) {
+            wchar_t* es = wcsrchr(exeDir, L'\\');
+            if (es) es[1] = 0; else exeDir[0] = 0;
+        }
+        for (int i = 0; i < g_comLibCount; i++) {
+            g_comLibs[i].dispIface = NULL;
+            const wchar_t* fn = g_comLibs[i].fileName;
+            if (!fn || !*fn) continue;
+            wchar_t full[MAX_PATH * 2]; full[0] = 0;
+            int isAbs = (wcschr(fn, L':') != NULL) || (fn[0] == L'\\');
+            if (exeDir[0] && !isAbs && wcslen(exeDir) + wcslen(fn) + 1 < MAX_PATH * 2) {
+                wcscpy(full, exeDir); wcscat(full, fn);
+            } else {
+                wcscpy(full, fn);
+            }
+            CLSID clsid;
+            if (SUCCEEDED(CLSIDFromString((LPOLESTR)g_comLibs[i].clsidStr, &clsid)))
+                g_comLibs[i].dispIface = comLibLoadDispIface(full, &clsid);
+            if (comLibTraceEnabled() && g_comLibs[i].dispIface)
+                fwprintf(stderr, L"[C3_COM]   cached dispIface for %ls\n", g_comLibs[i].progId);
+        }
+    }
 }
 
 /* 表查找:
@@ -499,6 +616,9 @@ static void* comLibCreateLocal(const Vb6ComLib* e) {
     hr = pUnk->lpVtbl->QueryInterface(pUnk, &IID_IDispatch, (void**)&pDisp);
     pUnk->lpVtbl->Release(pUnk);
     if (FAILED(hr) || !pDisp) return NULL;
+    /* Fix 160-com: 登记 对象→默认调度接口 ITypeInfo, 供 vb6_getDispid /
+     * vb6_ComInvoke 免注册解析 DISPID 与分派 (TLB 未注册时 Chilkat 等仍可用). */
+    if (e->dispIface) comLibRegisterObjTI((void*)pDisp, e->dispIface);
     return (void*)pDisp;
 }
 
