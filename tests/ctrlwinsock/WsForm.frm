@@ -34,6 +34,14 @@ Begin VB.Form WsForm
       Left            =   120
       Top             =   3120
    End
+   Begin MSWinsockLib.Winsock wsD 
+      Left            =   120
+      Top             =   3720
+   End
+   Begin MSWinsockLib.Winsock wsE 
+      Left            =   120
+      Top             =   4320
+   End
    Begin VB.Timer evtTimer 
       Interval        =   120
       Left            =   4680
@@ -89,6 +97,16 @@ Private gConnT As Long          ' wsT 的 Connect 事件次数（握手完成那
 Private gArrS As Long           ' wsS 的 DataArrival 次数
 Private gTotS As Long           ' wsS 各次 bytesTotal 的合计
 Private gClsS As Long           ' wsS 的 Close 事件次数
+Private gErrCnt As Long         ' wsD 的 Error 事件次数
+Private gErrN As Long           ' 最近一次 Error 带回来的编号
+Private gErrD2 As String        ' 用 `Description & ""` 复制走的描述：RTL 放掉原串之后仍要读得到
+Private gErrSC As Long          ' Scode（第三参）
+Private gErrHC As Long          ' HelpContext（第六参）
+Private gErrCD As Integer       ' 进来时 CancelDisplay 的值
+Private gErrL1 As Long          ' Len(Description)
+Private gErrL2 As Long          ' Len(Source)
+Private gErrL3 As Long          ' Len(HelpFile)
+Private gPE As Long             ' wsE 占住的端口
 Private gGotS As String         ' 服务端取回的内容
 Private gGotT As String         ' 客户端取回的内容
 
@@ -231,6 +249,34 @@ Private Sub evtTimer_Timer()
         ' --- 34 服务端的**数据面**收到过 FD_CLOSE ⇒ Close 事件 + 状态回 0（"关得干净"的证人）---
         Debug.Print "WS34=" & TF(gClsS >= 1 And wsS.State = 0)
     ElseIf step = 15 Then
+        ' ======================= C29-WS-c: Error 事件 =======================
+        ' 撞口：wsE 先占一个口，wsD 再绑同一个口 ⇒ 当场 10048。
+        ' 这条同时也是"不设 SO_REUSEADDR"的证人（探针 wsprobe14 Q1/Q2：设了的话第二枚**静默成功**）
+        wsE.Bind 0
+        gPE = wsE.LocalPort
+        wsD.Bind gPE
+        Debug.Print "WS36=" & TF(gErrCnt = 1 And gErrN = 10048)
+        Debug.Print "WS37=" & TF(wsD.State = 9)          ' sckError
+    ElseIf step = 16 Then
+        ' 查不到名字：保留域 .invalid ⇒ 11001（wsprobe14 Q6：rc 与 WSA 同值）
+        wsD.RemoteHost = "no-such-host.invalid"
+        wsD.RemotePort = 80
+        wsD.Connect
+        Debug.Print "WS38=" & TF(gErrCnt = 2 And gErrN = 11001)
+        ' 七参数里那两格 String：ByVal 的 Source 与 ByRef 的 Description 都要真拿到东西
+        ' （Description 空串 = RTL 那侧 FormatMessage 没接上；Source 空 = ByVal BSTR 传坏了）
+        Debug.Print "WS39=" & TF(gErrL2 = 7 And gErrL1 > 0 And gErrL3 = 0)
+        ' 参数**当场**是好的：Source 的长度就是 "Winsock" 那 7 个字符、Description 非空、HelpFile 空。
+        ' 但**别把这两枚 String 参数存进模块变量** —— 形参赋值发的是指针拷贝（不复制、不加引用），
+        ' RTL 在调用返回后就放掉原串 ⇒ 存下来的那一格是悬垂指针（本批实测：读出来是别人用过的
+        ' 堆块，比如 "WS38="）。要留就得 & "" 复制走，WS40 钉的正是这条。
+        Debug.Print "W=" & gErrCnt & "/" & gErrN & "/" & gErrSC & "/" & gErrHC & "/" & gErrCD
+    ElseIf step = 17 Then
+        Debug.Print "WS40=" & TF(Len(gErrD2) > 0 And wsD.State = 9)
+        ' 出错之后用户显式 Close 就回 sckClosed（State 不会自己从 9 爬回去）
+        wsD.Close
+        wsE.Close
+        Debug.Print "WS41=" & TF(wsD.State = 0)
         ' 第二条连接的 ConnectionRequest 这一格**量出来收不到**：探针里同样的顺序
         ' （accept 完第一条、把它读完再关，然后第二条进来）FD_ACCEPT 会再投一次，
         ' 产品里同一枚控件的窗口从此不再收到任何 FD_ACCEPT（裸码 trace 记在 029 §九
@@ -239,6 +285,8 @@ Private Sub evtTimer_Timer()
         Debug.Print "W=" & gReqS & "/" & gReq1 & "/" & gClsS & "/" & wsS.State
         Debug.Print "P=" & gPA & "/" & gPB & "/" & gPS & "/" & gStB & "/" & gArrA & "/" & gArrB
         Debug.Print "P2=" & gConnT & "/" & gConnS & "/" & gArrS & "/" & gTotS & "/" & gReq2
+    End If
+    If step = 17 Then
         Debug.Print "CTRLWINSOCK-DONE"
         Unload Me
     End If
@@ -285,6 +333,21 @@ End Sub
 
 Private Sub wsS_Connect()
     gConnS = gConnS + 1
+End Sub
+
+Private Sub wsD_Error(ByVal Number As Integer, Description As String, ByVal Scode As Long, _
+                      ByVal Source As String, ByVal HelpFile As String, ByVal HelpContext As Long, _
+                      CancelDisplay As Boolean)
+    gErrCnt = gErrCnt + 1
+    gErrN = Number
+    gErrD2 = Description & ""
+    gErrL1 = Len(Description)
+    gErrL2 = Len(Source)
+    gErrL3 = Len(HelpFile)
+    gErrSC = Scode
+    gErrHC = HelpContext
+    gErrCD = CancelDisplay
+    CancelDisplay = True
 End Sub
 
 Private Sub wsT_Connect()

@@ -279,6 +279,51 @@ static void vb6_WsRaiseConnRequest(struct vb6_WsInstance* e, int32_t id) {
     if (e->cb[VB6_WS_EV_CONNREQUEST]) ((vb6_WsCbLong)e->cb[VB6_WS_EV_CONNREQUEST])(id);
 }
 
+// 错误文本问系统要（FormatMessage 的 socket 那一段）。拿不到也要给一条非空串：
+// Description 是 ByRef，处理器读到空串会以为「没有描述」。
+static BSTR vb6_WsErrMsg(int err) {
+    wchar_t* buf = NULL;
+    DWORD n;
+    BSTR out;
+    n = FormatMessageW(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM
+                       | FORMAT_MESSAGE_IGNORE_INSERTS,
+                       NULL, (DWORD)err, 0, (wchar_t*)&buf, 0, NULL);
+    if (n && buf) {
+        while (n && (buf[n - 1] == 13 || buf[n - 1] == 10)) buf[--n] = 0;   /* 去掉结尾 CR LF */
+        out = SysAllocStringLen(buf, n);
+        LocalFree(buf);
+        if (out) return out;
+    }
+    {
+        wchar_t tmp[40];
+        int i = wsprintfW(tmp, L"socket error %d", err);
+        return SysAllocStringLen(tmp, i > 0 ? i : 0);
+    }
+}
+
+// 出错那一格的统一出口：记下编号、翻成 sckError(9)、再发 Error 事件。
+// **没有处理器也要翻 State** —— 否则 State 的读数就与「有没有写那条 Sub」耦合上了。
+// 七参数的形状照发码侧生成的原型（--emit-c 实测）：
+//   void f(int16_t Number, BSTR* Description, int32_t Scode, BSTR Source,
+//          BSTR HelpFile, int32_t HelpContext, int16_t* CancelDisplay)
+// ByRef 那两格是指针（Description / CancelDisplay），其余按值 —— 这条只有 x86 验得出来。
+static void vb6_WsFail(struct vb6_WsInstance* e, int err) {
+    BSTR desc, src, hf;
+    int16_t cancel = 0;
+    if (!e) return;
+    e->lastErr = err;
+    vb6_WsSetState(e, VB6_WS_ERROR);
+    if (!e->cb[VB6_WS_EV_ERROR]) return;
+    desc = vb6_WsErrMsg(err);
+    src = SysAllocString(L"Winsock");
+    hf = (BSTR)SysAllocStringLen(NULL, 0);
+    if (!desc || !src || !hf) { SysFreeString(desc); SysFreeString(src); SysFreeString(hf); return; }
+    ((void (*)(int16_t, void*, int32_t, void*, void*, int32_t, int16_t*))
+        e->cb[VB6_WS_EV_ERROR])((int16_t)err, (void*)&desc, 0, (void*)src, (void*)hf, 0, &cancel);
+    // Description 是 ByRef ⇒ 释放「回来那一枚」，不是进去那一枚（处理器可以换掉它）。
+    SysFreeString(desc); SysFreeString(src); SysFreeString(hf);
+}
+
 // UDP 的"对端"：没 Connect 这一步，发往 RemoteHost:RemotePort；收到谁的算谁的（VB6 同）
 static int vb6_WsUdpTarget(struct vb6_WsInstance* e, struct sockaddr_storage* ss, int* slen) {
     ZeroMemory(ss, sizeof(*ss));
@@ -479,15 +524,19 @@ void vb6_Ws_Bind(void* hwnd, int32_t port, const void* ip) {
 
     s = socket(family, (e->protocol == VB6_WS_UDP) ? SOCK_DGRAM : SOCK_STREAM,
                (e->protocol == VB6_WS_UDP) ? IPPROTO_UDP : IPPROTO_TCP);
-    if (s == INVALID_SOCKET) { e->lastErr = WSAGetLastError(); vb6_WsSetState(e, VB6_WS_ERROR); return; }
-    setsockopt(s, SOL_SOCKET, SO_REUSEADDR, (char*)&on, sizeof(on));
+    if (s == INVALID_SOCKET) { vb6_WsFail(e, WSAGetLastError()); return; }
+    /* 刻意**不设** SO_REUSEADDR：设了之后两枚控件绑同一个 UDP 口，第二枚静默成功
+       （Windows 的 SO_REUSEADDR 允许抢口，而包只有一份落点）—— 那是老控件没有的坑。
+       不设 = 撞口当场 10048，Error 事件才报得出来；而实测「关掉再重绑同一个口」
+       两种设法都成功（wsprobe14 Q3/Q4），所以这条没有快速重启的代价。 */
+    (void)on;
 
     if (family == AF_INET6) {
         struct sockaddr_in6* a = (struct sockaddr_in6*)&ss;
         a->sin6_family = AF_INET6;
         a->sin6_port = htons((u_short)port);
         if (ipw[0] && wcscmp(ipw, L"*") && !InetPtonW(AF_INET6, ipw, &a->sin6_addr)) {
-            closesocket(s); vb6_WsSetState(e, VB6_WS_ERROR); return;
+            closesocket(s); vb6_WsFail(e, WSAEADDRNOTAVAIL); return;
         }
         slen = sizeof(struct sockaddr_in6);
     } else {
@@ -495,14 +544,14 @@ void vb6_Ws_Bind(void* hwnd, int32_t port, const void* ip) {
         a->sin_family = AF_INET;
         a->sin_port = htons((u_short)port);
         if (ipw[0] && wcscmp(ipw, L"*") && !InetPtonW(AF_INET, ipw, &a->sin_addr)) {
-            closesocket(s); vb6_WsSetState(e, VB6_WS_ERROR); return;
+            closesocket(s); vb6_WsFail(e, WSAEADDRNOTAVAIL); return;
         }
         slen = sizeof(struct sockaddr_in);
     }
     if (bind(s, (struct sockaddr*)&ss, slen) == SOCKET_ERROR) {
-        e->lastErr = WSAGetLastError();               // 撞已用端口 = 10048（实测）
+        int err = WSAGetLastError();                   // 撞已用端口 = 10048（wsprobe14 Q1）
         closesocket(s);
-        vb6_WsSetState(e, VB6_WS_ERROR);
+        vb6_WsFail(e, err);
         return;
     }
     {
@@ -569,9 +618,10 @@ void vb6_Ws_Listen(void* hwnd) {
     if (!e || e->protocol != VB6_WS_TCP) return;   // UDP 没有"监听"这一格
     if (e->sock == INVALID_SOCKET) return;         // 得先 Bind 定下本地端口（VB6 同：否则报错）
     if (listen(e->sock, SOMAXCONN) != 0) {
-        e->lastErr = WSAGetLastError();
-        closesocket(e->sock); e->sock = INVALID_SOCKET;
-        vb6_WsSetState(e, VB6_WS_ERROR);
+        SOCKET ls = e->sock;
+        int lerr = WSAGetLastError();                  // 同上：先抓号，再关
+        closesocket(ls); e->sock = INVALID_SOCKET;
+        vb6_WsFail(e, lerr);
         return;
     }
     e->listenSock = e->sock;
@@ -635,9 +685,8 @@ void vb6_Ws_Connect(void* hwnd) {
     hints.ai_protocol = IPPROTO_TCP;
     vb6_WsItow(e->remotePort, svc);
     if (GetAddrInfoW(e->remoteHost, svc, &hints, &res) != 0) {
-        e->lastErr = WSAGetLastError();          // 查不到名字 = 11001（实测）⇒ Error 事件归 WS-c
+        vb6_WsFail(e, WSAHOST_NOT_FOUND);   // 查不到名字 = 11001（wsprobe14 Q6：rc 与 WSA 同值）
         if (bound != INVALID_SOCKET) closesocket(bound);
-        vb6_WsSetState(e, VB6_WS_CLOSED);
         return;
     }
     vb6_WsSetState(e, VB6_WS_HOST_RESOLVED);
@@ -696,8 +745,7 @@ void vb6_Ws_Connect(void* hwnd) {
     FreeAddrInfoW(res);
     if (bound != INVALID_SOCKET) closesocket(bound);   // 那条绑好的没派上用场（家族全对不上）
     if (!ok) {
-        e->lastErr = lastErr;
-        vb6_WsSetState(e, VB6_WS_CLOSED);      // VB6：连不上回 sckClosed，同时发 Error（WS-c）
+        vb6_WsFail(e, lastErr);      // 连不上 = sckError + Error（不是静默回 sckClosed）
         return;
     }
     e->bytesReceived = 0; e->rxLen = e->rxHead = 0;   // 上一轮（若有）的读数不带进这一轮

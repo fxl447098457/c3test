@@ -48,6 +48,7 @@ C3 把它复刻成**原生 Winsock2**（`ws2_32.dll`，`winsock2.h` / `ws2tcpip.
 | `W.GetData v[, type][, maxlen]` | 从缓冲取；缺省 = 全取走。`type` 那一形的 Byte 数组**还没做** |
 | `W.PeekData v` | 同一把尺，但**不消费** —— 这是它与 `GetData` 唯一的差别 |
 | `W.Close` | 关掉这条控件的两张面（监听 + 数据），兜里排队的连接一起撤 |
+| `W_Bind` 撞口 / `W_Connect` 连不上 | `Error(Number, Description, Scode, Source, HelpFile, HelpContext, CancelDisplay)` + `State` 落 `sckError`(9) |
 
 四条量出来的口径，写代码时要按它们想：
 
@@ -70,9 +71,21 @@ C3 把它复刻成**原生 Winsock2**（`ws2_32.dll`，`winsock2.h` / `ws2tcpip.
    `FD_ACCEPT` 在 C3 的产物里送不到（同一套顺序的独立 C 探针能收到两条），所以
    **多客户端现在不可用**，见下面"还没做的一格"。
 
+5. **`Error` 事件的 `Number` 就是 Winsock 错误码本身**（`10048` 撞口、`11001` 查不到名字、
+   `10061` 被拒…），`Description` 是系统给的那句本地化文本（`FormatMessage`），`Source` 恒为
+   `"Winsock"`、`Scode` / `HelpFile` / `HelpContext` 是占位。出错时 `State` 一律落到 `sckError`(9)，
+   **要回 `sckClosed` 得自己 `Close`** —— 与 VB6 那侧"错误之后自己爬回 0"的传闻不同，这里不猜。
+6. **绑同一个口会被当场拒**（不设 `SO_REUSEADDR`）：两枚控件 `Bind` 同一个端口，第二枚直接
+   `Error 10048`。这是刻意选的：Windows 的 `SO_REUSEADDR` 语义是"允许抢口"，留着它就会
+   "两枚都自称绑上了同一个口、而包只有一份收得到"那种查不出来的坑（实测见 `ai/029` §九 WS-c）。
+7. **`Error` 处理器里那两枚 String 参数别直接存起来**：`gDesc = Description` 这种赋值目前发的是
+   **裸指针拷贝**（不复制、不加引用），而 RTL 在处理器返回后就释放原串 ⇒ 存下来的那一格是悬垂指针。
+   要留就用 `gDesc = Description & ""`（拼接才是真拷贝）。这条已另立缺陷，见 `ai/029`。
+
 ### 还没做的一格
 
-`Error` / `SendComplete` / `SendProgress` 三条事件（槽位与序号已在 RTL 表里留着）；`GetData` 的
+`SendComplete` / `SendProgress` 两条事件（槽位与序号已在 RTL 表里留着，要接 `FD_WRITE`，
+顺带才能解决异步 socket 上 `send` 的部分发送）；`GetData` 的
 Byte 数组那一形；**多客户端**（控件数组那条路）—— 这一条卡在实测上：同一枚控件受理过一条连接
 之后，第二条连接的 `FD_ACCEPT` 在 C3 的产物里送不到（同一套顺序的独立 C 探针能收到两条），
 原因未定位，见 `ai/029` §九 C29-WS-b。

@@ -634,7 +634,12 @@
                 { "_ConnectionRequest",  3, "int32_t" },
                 { "_SendComplete",       4, "" },
                 { "_SendProgress",       5, "int32_t" },
-                { "_StateChanged",       6, "int16_t" }
+                { "_StateChanged",       6, "int16_t" },
+                // Error 那一形七参数，形状照生成的处理器原型（--emit-c 实测）：
+                //   void f(int16_t, BSTR*, int32_t, BSTR, BSTR, int32_t, int16_t*)
+                // ByRef 的两格（Description / CancelDisplay）是指针 —— 写错在 x64 上看不出来，
+                // 只有 x86 会当场错值（本线 MV-c 那条纪律）。
+                { "_Error",              7, "int16_t, BSTR*, int32_t, BSTR, BSTR, int32_t, int16_t*" }
             };
             for (const WsEvt& ev : wsEvts) {
                 auto* sy = symTab_.lookup(ctrl.controlName + ev.suffix);
