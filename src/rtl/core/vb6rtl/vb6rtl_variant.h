@@ -77,6 +77,15 @@ static inline vb6_VARIANT vb6_VariantLong(int32_t val) {
     v.vt = vb6_vtLong; v.lVal = val; return v;
 }
 
+// Task #44: VT_I8 (LongLong / x64 的 LongPtr=intptr_t) 整型包装。
+// 此前 _Generic 的 long long: 落 vb6_VariantLong(int32_t) —— x64 下 LongPtr 变量
+// 装 2^32 被**静默截成 0**。x64 上 intptr_t 就是 long long, _Generic 分不开
+// LongLong 与 LongPtr, 两者语义都是 64 位, 统一包成 VT_I8 才不丢位。
+static inline vb6_VARIANT vb6_VariantLongLong(int64_t val) {
+    vb6_VARIANT v; memset(&v, 0, sizeof(v));
+    v.vt = (vb6_vartype)VT_I8; v.llVal = val; return v;
+}
+
 static inline vb6_VARIANT vb6_VariantDouble(double val) {
     vb6_VARIANT v; memset(&v, 0, sizeof(v));
     v.vt = vb6_vtDouble; v.dblVal = val; return v;
@@ -141,7 +150,7 @@ static inline vb6_VARIANT vb6_VariantIdentity(vb6_VARIANT v) { return v; }
     unsigned int:         vb6_VariantLong, \
     long:                 vb6_VariantLong, \
     unsigned long:        vb6_VariantLong, \
-    long long:            vb6_VariantLong, \
+    long long:            vb6_VariantLongLong, \
     unsigned long long:   vb6_VariantLong, \
     wchar_t:              vb6_VariantLong, \
     float:                vb6_VariantDouble, \
@@ -162,7 +171,7 @@ static inline vb6_VARIANT vb6_VariantIdentity(vb6_VARIANT v) { return v; }
     unsigned int:         vb6_VariantLong, \
     long:                 vb6_VariantLong, \
     unsigned long:        vb6_VariantLong, \
-    long long:            vb6_VariantLong, \
+    long long:            vb6_VariantLongLong, \
     unsigned long long:   vb6_VariantLong, \
     wchar_t:              vb6_VariantLong, \
     float:                vb6_VariantDouble, \

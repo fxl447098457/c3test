@@ -490,6 +490,11 @@ intptr_t __stdcall vb6_di_WinHelpW(intptr_t hWnd, intptr_t lpHelpFile, intptr_t 
     return ((intptr_t (WINAPI *)(intptr_t, intptr_t, intptr_t, intptr_t))WinHelpW)(hWnd, lpHelpFile, wCommand, dwData);
 }
 
+/* WinHelpA — Task #44 SSTabEx cDlg.cls:36 */
+intptr_t __stdcall vb6_di_WinHelpA(intptr_t hWnd, intptr_t lpHelpFile, intptr_t wCommand, intptr_t dwData) {
+    return ((intptr_t (WINAPI *)(intptr_t, intptr_t, intptr_t, intptr_t))WinHelpA)(hWnd, lpHelpFile, wCommand, dwData);
+}
+
 /* FindWindowW */
 intptr_t __stdcall vb6_di_FindWindowW(intptr_t lpClassName, intptr_t lpWindowName) {
     return ((intptr_t (WINAPI *)(intptr_t, intptr_t))FindWindowW)(lpClassName, lpWindowName);

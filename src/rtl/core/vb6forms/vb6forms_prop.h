@@ -76,6 +76,11 @@ void vb6_SetControlForeColor(void* hwnd, int color);
 int vb6_GetControlBackColor(void* hwnd);
 void vb6_SetControlBackColor(void* hwnd, int color);
 
+// Fix 187: WM_CTLCOLORSTATIC 统一应用 — 子控件 Set 过 VB6_BackColor 时
+// 应用 Fore/Back 色并返回背景刷; 未设色返回 0 (调用方走 DefWindowProcW)。
+// 主窗体 WndProc (生成代码) 与 SSTab 容器子类共用。
+LRESULT vb6_ApplyCtlColorStatic(HDC hdc, HWND child);
+
 
 #ifdef __cplusplus
 }

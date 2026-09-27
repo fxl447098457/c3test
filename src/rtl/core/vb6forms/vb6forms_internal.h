@@ -11,6 +11,35 @@
 #include "vb6forms.h"
 
 #include <stdlib.h>   /* malloc (Fix 190 转码助手) */
+#include <string.h>   /* memset (下面的 VB Date 换算助手) */
+#include <oleauto.h>  /* VariantTimeToSystemTime / SystemTimeToVariantTime (VB Date 换算助手) */
+
+// ============================================================
+// VB Date <-> 原生 SYSTEMTIME 的共用换算（C29-DT-b 先放在 dtpicker 里，
+// C29-MV-b 的 MonthView 是第二个用户 ⇒ 挪到这里共享；放法照上面那组
+// static inline 助手 —— 文件级 static 不跨编译单元可见）
+//
+// VB 的 Date 在 C3 里就是 double 序列号（`Dim d As Date` 发成 `double d`、
+// `Now` 直接回 double），所以两族控件的属性签名一律 double <-> SYSTEMTIME，
+// 换算交给 oleaut32 那一对现成函数（RTL 里的直接调用先例：vb6rtl_format.c:91）。
+//
+// ⚠ 出界或换算失败一律回 **0**，不回负数：负数在 VB 侧是非法 Date，
+// 那会把"问不出值"伪装成"一个怪值"，判据就再也分不出这两种情况。
+// ============================================================
+static inline void vb6_DateZero(SYSTEMTIME* st) { memset(st, 0, sizeof(*st)); }
+
+static inline double vb6_DateToSerial(const SYSTEMTIME* st) {
+    double v = 0.0;
+    if (!st) return 0.0;
+    if (!SystemTimeToVariantTime((LPSYSTEMTIME)st, &v) || v < 0.0) return 0.0;
+    return v;
+}
+
+static inline int vb6_DateFromSerial(double serial, SYSTEMTIME* st) {
+    if (!st) return 0;
+    vb6_DateZero(st);
+    return VariantTimeToSystemTime(serial, st) ? 1 : 0;
+}
 
 // --- 跨族共享的内部状态 (定义在 vb6forms.c) ---
 // 应用实例句柄 (vb6_SetAppInstance 设置, 多处属性设置与控件创建需要)

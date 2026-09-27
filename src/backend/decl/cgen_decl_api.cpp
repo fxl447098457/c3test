@@ -125,6 +125,12 @@ void CCodeGen::visit(DeclareDecl& node) {
     if (libLower == "olepro32") {
         libForLink = "oleaut32";
     }
+    // Task #44 (SSTabEx): winspool.drv 的 DLL 文件名带 .drv, 但 SDK 导入库叫
+    // winspool.lib (um/x86、um/x64 均无 winspool.drv.lib) → 按 DLL 名拼 .lib
+    // 会 LNK1104 "无法打开文件 winspool.drv.lib"。映射到 SDK 库名 (同 olepro32)。
+    if (libLower == "winspool.drv") {
+        libForLink = "winspool";
+    }
     // ai/024 T02: 静态路**不**发 pragma (见上方 isStaticDecl 注释之二)。
     // olepro32→oleaut32 的重映射只对动态导入库有意义, 静态路自然也不适用。
     if (!isVb6RuntimeLib && !isNoImportLib && !isStaticDecl) {

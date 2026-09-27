@@ -37,6 +37,52 @@
 
 上面这五条是**窗口样式位本身**，不是另存的一份副本：`CheckBoxes`、`HotTracking`、`LineStyle`、`HideSelection` 四条的 getter 直接读窗口的 `GWL_STYLE`，运行期赋值会连带重算布局并重绘，所以"读到的"与"画出来的"不会分叉。
 
-尚未落地（`Nodes` 那一族要等 `ImageList` 批立的"成员对象"机制，见 `ai/029` §四）：`Nodes` 集合与 `Node` 对象（`Add`/`Text`/`Key`/`Checked`/`Parent`/`Children`/`Expanded`/`EnsureVisible`/`Remove`）、`Style` 八种组合、`SelectedItem`、`LabelEdit`、`Sorted`、`PathSeparator`、`ImageList` 关联，以及 `NodeClick`/`Expand`/`Collapse` 等事件。设计期写在这些属性上的值目前**不会**报错，也**不会**见效。
+尚未落地（`Nodes` 一族由本页 `C29-8b` 那节接上、三条事件由 `C29-8c` 那节接上）：`Style` 八种组合、`SelectedItem`、`LabelEdit`、`Sorted`、`ImageList` 关联。设计期写在这些属性上的值目前**不会**报错，也**不会**见效。
 
 判据在 `tests\ctrltreeview\`（TV1-TV5 认设计期五值、TV6-TV7 认默认值与"消息真打进窗口"、TV8-TV9 认运行期赋值可逆、TV10-TV11 认缇值往返、TV12 认通用属性面没被抢走）。
+
+## 本项目的实现口径（ai/029 C29-8b：`Nodes` 集合与 `Node` 对象）
+
+`TreeView1.Nodes` 是一个**真的 `IDispatch` 集合对象**（复用 `ImageList`/`ListView` 那一批立的成员对象机制，`src\rtl\core\vb6forms\vb6forms_memberobj.c`），不是先把节点抄进一张 VB 侧的表再算：
+
+- **结构只有一个真相**：父子与兄弟一律现问原生树（`TVM_GETNEXTITEM`），展开态问 `TVIS_EXPANDED`，勾选态问节点的 state image 位（`TVM_GETITEMSTATE`）。这张表只存原生给不出来的四样：`Key`、`Text`、`Tag`、两个图索引。所以"读到的"与"屏幕上画的"不会分叉。
+- **`Text` 写回去会同步到控件**（`TVM_SETITEMW` + 重绘）；只改表不改控件，正是本线一直防的那种假实现。
+
+| 写法 | 读数 |
+| --- | --- |
+| `Tree1.Nodes.Count` / `Node.Index` / `For Each n In Tree1.Nodes` | **集合序 = 插入序**。三条问的都是同一个序（不是显示序：原生控件按关系插入，插入序与视觉序可以不同，这一条是本项目定的口径） |
+| `Tree1.Nodes.Add([relative], [relationship], [key], [text], [image], [selectedimage])` | `relationship` 认 `0..4`（`tvwFirst`/`tvwLast`/`tvwBefore`/`tvwAfter`/`tvwChild`），缺省 = `tvwChild`；`relative` 给**下标或 Key 都收**。没有相对项时一律挂在根末尾。返回的就是 `Node` 对象 |
+| `Tree1.Nodes(i)` / `Tree1.Nodes("key")` | 同一条 `Item`，实参是下标还是宽字符串都认（Key 不区分大小写）。取不到给 `Nothing` |
+| `Node.Text` / `Key` / `Tag` | 可读可写；越界读给空串 |
+| `Node.Checked` | 节点的 state image 位（`2` = 勾上）。**没开 `CheckBoxes` 也写得进、读得出**，只是不画方框 —— 与 VB6"先设 `CheckBoxes=True` 才看得到"的次序一致 |
+| `Node.Expanded` | 读写都过原生（`TVM_EXPAND`）；`EnsureVisible` 会把父节点撑开，这条读数是控件自己做的 |
+| `Node.Parent` / `Child` / `Children` / `Next` / `Previous` | 现问原生树；`Children` 是**子节点个数**，其余给 1 基下标，没有就给 `0` |
+| `Node.Root` | 所属树的根祖先。**顶层节点返回自己**（VB6 同口径），越界返回 `0` |
+| `Tree1.Nodes.Remove(i 或 "key")` / `.Clear` | `Remove` 删的是**整棵子树**（原生删父本就带走子，表里跟着一起销），`Clear` 清表 |
+
+勾选态的写**只能走 `TVM_SETITEMW`**：`commctrl.h` 里根本没有 `TVM_SETITEMSTATE` 这条消息（只有 `TVM_GETITEMSTATE`）。照 getter 的样子"对称地"发明一条 SET，编得过、跑得通、勾就是不亮 —— 未定义的 `WM_USER+n` 会被默认窗口过程吞掉并返回 0，一点动静都没有。
+
+还没做的成员：`Bold`、`Sorted`、`RelativeX`、`Node.Style`、`Node.Button` —— 名字表里**刻意不登记**这些，登记了就是"看着支持、实则答错"（与 `ListView` 那族同一取舍）。
+
+判据在同一个工程里（`tests\ctrltreeview\`，TV13-TV27）：`Count`、`Add` 返回对象的 `Index`、下标与 Key 两条取法（TV13-TV15）、结构导航（TV16-TV18）、写回后换一枚对象再读（TV19）、勾选（TV20）、展开三态含 `EnsureVisible` 撑开父节点（TV21-TV23）、`For Each` 与集合序（TV24）、`Remove` 带走子树与 `Clear`（TV25-TV26）、以及"集合这条路没把标量属性面抢走"（TV27）。x86 与 x64 都跑。
+
+## 本项目的实现口径（ai/029 C29-8c：`NodeClick` / `Expand` / `Collapse`）
+
+三条事件都走**父窗的 `WM_NOTIFY`**（与 `ListView1.ItemClick`、`StatusBar1.PanelClick`、SSTab 的 `Click` 同一条通道，`TVN_FIRST = (0U-400U)` ⇒ `TVN_SELCHANGEDW = -451`、`TVN_ITEMEXPANDEDW = -455`，码值与本机 10.0.19041 的 `commctrl.h` 对过）：
+
+| 通知 | 处理器 | 参数 |
+| --- | --- | --- |
+| `TVN_SELCHANGEDW` | `Tree1_NodeClick(ByVal Node As Node)` | 通知负载 `NMTREEVIEWW.itemNew.hItem` → RTL 折成 1 基节点序号 → `vb6_TreeView_NodeAt` 造出那枚 `Node` 对象 |
+| `TVN_ITEMEXPANDEDW` | `Tree1_Expand` / `Tree1_Collapse`（同一条通知按 `action` 分流） | 同上 |
+
+三条口径值得记：
+
+- **分支是按处理器存在性建的**：`.frm` 里没写 `Tree1_Expand` 就不会有那条 `if`，写了就一定接得住。
+- **`action` 是三态不是布尔**：只认明确的 `TVE_EXPAND` / `TVE_COLLAPSE`，认不出的一律给"两边都不接"。原先写成"带 `TVE_COLLAPSE` 就是折回，否则算展开"，于是 `TVN_SELCHANGED` 那条**根本没填 action** 的通知被当成展开 —— 一次 `NodeClick` 顺手把 `Expand` 也点了一次（实测计数白涨两条）。
+- **真控件自己发的通知与判据助手发的走同一条链**：`Node.Expanded = True`、`EnsureVisible` 都会让原生树自己发出 `TVN_ITEMEXPANDEDW`，处理器照样被调到（TV33 钉的就是这条）。所以事件计数一律问**增量**，不问绝对值。
+
+判据专用的一对助手（**不对应任何 VB6 语义**，写进 `ai/029` 边界）：`Tree1.SimNodeClick n` 与 `Tree1.SimExpand n, expanded`（与 C29-4 的 `StatusBar1.SimClick` 同形）—— 无头会话里点不了鼠标，而直接调处理器会绕开整条派发链，所以由 RTL 程序化地 `SendMessageW(GetParent(...), WM_NOTIFY, ...)` 发一条真通知，把"派发分支 + 通知换算 + 造对象"三段一起验掉。触发点必须放 **`Timer`**：`Form_Load` 阶段被 `block events during form init` 拦掉，`Form_Activate` 在无头桌面里根本不来（C29-4 的 `SbEvent` 就是这么在 GA 上红的）。
+
+仍然没有的：**`ButtonClick`（Toolbar）走的是 `WM_COMMAND`** 而不是这条通道（按钮的 `idCommand` 就是 1 基序号），那是另一格；`LabelEdit`/`Sorted`/`Style` 八种组合/`ImageList` 关联/`SelectedItem` 也还没有 —— 设计期写在这些属性上的值不报错，也不见效。
+
+判据：`tests\ctrltreeview\` 的 TV28-TV33（六条，x86 与 x64 都跑）。发码面 `tv_emitc_shape` 钉了 Sim 助手的直调形状、`-451 + hwndFrom` 那条分支条件、以及 action 三态分流；`tv_emitc_no_com_fallback` 另加一条断 absent：`vb6_ComGetObjectProp(vb6_hwnd_tv1, L"SimNodeClick")` —— 那是"判据方法被集合下标分支先吃掉"的错形状，编得过、跑起来什么都不发。

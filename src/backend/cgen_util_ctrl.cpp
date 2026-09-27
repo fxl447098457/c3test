@@ -71,6 +71,38 @@ Vb6Type CCodeGen::controlPropType(FrmControlType ctrlType, const std::string& pr
             return Vb6Type::Long;
         }
     }
+    if (ctrlType == FrmControlType::DTPicker) {
+        // C29-DT-a: 同一条纪律 —— vb6_DTP_Get* 除 CustomFormat 外全是 int32_t
+        // (布尔按 VB6 的 -1/0 给); CustomFormat 的 getter 返回 wchar_t* ⇒ String。
+        if (p == "format" || p == "checkbox" || p == "updown"
+            || p == "calendarbackcolor" || p == "calendarforecolor"
+            || p == "calendartrailingforecolor" || p == "calendartitlebackcolor"
+            || p == "calendartitleforecolor" || p == "idealwidth") {
+            return Vb6Type::Long;
+        }
+        if (p == "customformat") return Vb6Type::String;
+        // C29-DT-b: 三条 Date 型属性。登记成 Date 而不是让它落到兜底 —— Date 在 C 层就是
+        // double（`Dim d As Date` 实测发成 `double d`），不登记的话 inferExprType 那条按成员
+        // 裸名查符号的兜底会判成 Variant/String，与 RTL 侧的 double 返回值不匹配（TreeView
+        // 那批同款坑，见上方注释）。HasDate 是本项目的扩展读数，Long。
+        if (p == "value" || p == "mindate" || p == "maxdate") return Vb6Type::Date;
+        if (p == "hasdate") return Vb6Type::Long;
+    }
+    if (ctrlType == FrmControlType::MonthView) {
+        // C29-MV-a: 同一口径 —— vb6_MV_Get* 的 getter 全是 int32_t（布尔按 VB6 的 -1/0 给，
+        // 色值是 COLORREF 那个 32 位），漏登记就会落到兜底那条按成员裸名查符号的路，
+        // 判成 Variant/String 就跟 C 层不匹配（SSTab1.Tab 那次 AV 的同族）。
+        // Value / SelStart / SelEnd 是 Date 型，由 MV-b 那格登记。
+        if (p == "multiselect" || p == "showweeknumbers" || p == "showtoday"
+            || p == "maxselcount" || p == "backcolor" || p == "forecolor"
+            || p == "titlebackcolor" || p == "titleforecolor" || p == "trailingforecolor"
+            || p == "monthbackcolor" || p == "minreqwidth" || p == "minreqheight"
+            || p == "monthcount") {
+            return Vb6Type::Long;
+        }
+        // C29-MV-b：Date 那三格与 DTPicker 同一条口径（C 层就是裸 double，不装箱）。
+        if (p == "value" || p == "selstart" || p == "selend") return Vb6Type::Date;
+    }
     if (ctrlType == FrmControlType::Toolbar) {
         // C29-5a: 同一口径 —— 这四条的 RTL getter 都是 int32_t, 判成 Variant/String
         // 就跟 C 层不匹配 (SSTab1.Tab 那次 AV 的同族)。
@@ -252,6 +284,12 @@ std::string CCodeGen::getControlPropReadFn(FrmControlType ctrlType, const std::s
         if (propLower == "tabstyle")       return "vb6_SSTab_GetTabStyle";
         if (propLower == "tabsperrow")     return "vb6_SSTab_GetTabsPerRow";
         if (propLower == "wordwrap")       return "vb6_SSTab_GetWordWrap";
+        // P20-44 颜色族: 缺省 Ambient(宿主容器)/品红, 见 vb6forms_sstab.c。
+        // 不登记会落 vb6_ComGetStringProp 裸 HWND 占位路径静默答空 (同 ProgressBar 纪律)。
+        if (propLower == "maskcolor")        return "vb6_SSTab_GetMaskColor";
+        if (propLower == "tabbackcolor")     return "vb6_SSTab_GetTabBackColor";
+        if (propLower == "tabselbackcolor")  return "vb6_SSTab_GetTabSelBackColor";
+        if (propLower == "tabselforecolor")  return "vb6_SSTab_GetTabSelForeColor";
         if (propLower == "visible")        return "vb6_GetControlVisible";
         if (propLower == "enabled")        return "vb6_GetControlEnabled";
         break;
@@ -345,6 +383,54 @@ std::string CCodeGen::getControlPropReadFn(FrmControlType ctrlType, const std::s
         if (propLower == "checkboxes") return "vb6_TreeView_GetCheckBoxes";
         if (propLower == "hottracking") return "vb6_TreeView_GetHotTracking";
         if (propLower == "hideselection") return "vb6_TreeView_GetHideSelection";
+        if (propLower == "visible") return "vb6_GetControlVisible";
+        if (propLower == "enabled") return "vb6_GetControlEnabled";
+        break;
+    // C29-DT-a: DTPicker 的标量属性面 (原生 SysDateTimePick32)。登记之前这枚控件走的是
+    // "第三方 OCX 按 COM 后期绑定"那一组 (MSComCtl2 在工程里没引用类型库时连符号都查不到)
+    // ⇒ 属性读回空、写进去静默丢。这里除 CustomFormat 外全按 int32_t 走，与类型登记表同批。
+    case FrmControlType::DTPicker:
+        if (propLower == "format") return "vb6_DTP_GetFormat";
+        if (propLower == "customformat") return "vb6_DTP_GetCustomFormat";
+        if (propLower == "checkbox") return "vb6_DTP_GetCheckBox";
+        if (propLower == "updown") return "vb6_DTP_GetUpDown";
+        if (propLower == "calendarbackcolor") return "vb6_DTP_GetCalendarBackColor";
+        if (propLower == "calendarforecolor") return "vb6_DTP_GetCalendarForeColor";
+        if (propLower == "calendartrailingforecolor") return "vb6_DTP_GetCalendarTrailingForeColor";
+        if (propLower == "calendartitlebackcolor") return "vb6_DTP_GetCalendarTitleBackColor";
+        if (propLower == "calendartitleforecolor") return "vb6_DTP_GetCalendarTitleForeColor";
+        // C3 扩展（只读）：控件自己算的"装得下当前格式"宽度，判据用它把"格式真选中了吗"
+        // 从自家人读数换成控件侧读数。VB6 没有这条，写侧刻意不登记。
+        if (propLower == "idealwidth") return "vb6_DTP_IdealWidth";
+        // C29-DT-b 的读侧（Date 三条 + 扩展 HasDate）。
+        if (propLower == "value") return "vb6_DTP_GetValue";
+        if (propLower == "hasdate") return "vb6_DTP_HasDate";
+        if (propLower == "mindate") return "vb6_DTP_GetMinDate";
+        if (propLower == "maxdate") return "vb6_DTP_GetMaxDate";
+        if (propLower == "visible") return "vb6_GetControlVisible";
+        if (propLower == "enabled") return "vb6_GetControlEnabled";
+        break;
+    // C29-MV-a: MonthView 读侧。样式三位 + MaxSelCount + 五色，全部直读控件；
+    // 三条 C3 扩展读数（MinReqWidth / MinReqHeight / MonthCount）是**控件侧**证据，
+    // 判据靠它们把"样式位写进去了"升级成"控件真按那位在画"。
+    case FrmControlType::MonthView:
+        if (propLower == "multiselect") return "vb6_MV_GetMultiSelect";
+        if (propLower == "showweeknumbers") return "vb6_MV_GetShowWeekNumbers";
+        if (propLower == "showtoday") return "vb6_MV_GetShowToday";
+        if (propLower == "maxselcount") return "vb6_MV_GetMaxSelCount";
+        if (propLower == "backcolor") return "vb6_MV_GetBackColor";
+        if (propLower == "forecolor") return "vb6_MV_GetForeColor";
+        if (propLower == "titlebackcolor") return "vb6_MV_GetTitleBackColor";
+        if (propLower == "titleforecolor") return "vb6_MV_GetTitleForeColor";
+        if (propLower == "trailingforecolor") return "vb6_MV_GetTrailingForeColor";
+        if (propLower == "monthbackcolor") return "vb6_MV_GetMonthBackColor";
+        if (propLower == "minreqwidth") return "vb6_MV_MinReqWidth";
+        if (propLower == "minreqheight") return "vb6_MV_MinReqHeight";
+        if (propLower == "monthcount") return "vb6_MV_GetMonthCount";
+        // C29-MV-b 的读侧（Date 三条）。
+        if (propLower == "value") return "vb6_MV_GetValue";
+        if (propLower == "selstart") return "vb6_MV_GetSelStart";
+        if (propLower == "selend") return "vb6_MV_GetSelEnd";
         if (propLower == "visible") return "vb6_GetControlVisible";
         if (propLower == "enabled") return "vb6_GetControlEnabled";
         break;
@@ -539,6 +625,11 @@ std::string CCodeGen::getControlPropWriteFn(FrmControlType ctrlType, const std::
         if (propLower == "tabstyle")       return "vb6_SSTab_SetTabStyle";
         if (propLower == "tabsperrow")     return "vb6_SSTab_SetTabsPerRow";
         if (propLower == "wordwrap")       return "vb6_SSTab_SetWordWrap";
+        // P20-44 颜色族 (写): 不登记会落 vb6_ComSetProp 裸 HWND 泛化写 → 静默丢。
+        if (propLower == "maskcolor")        return "vb6_SSTab_SetMaskColor";
+        if (propLower == "tabbackcolor")     return "vb6_SSTab_SetTabBackColor";
+        if (propLower == "tabselbackcolor")  return "vb6_SSTab_SetTabSelBackColor";
+        if (propLower == "tabselforecolor")  return "vb6_SSTab_SetTabSelForeColor";
         if (propLower == "visible")        return "vb6_SetControlVisible";
         if (propLower == "enabled")        return "vb6_SetControlEnabled";
         break;
@@ -619,6 +710,48 @@ std::string CCodeGen::getControlPropWriteFn(FrmControlType ctrlType, const std::
         if (propLower == "checkboxes") return "vb6_TreeView_SetCheckBoxes";
         if (propLower == "hottracking") return "vb6_TreeView_SetHotTracking";
         if (propLower == "hideselection") return "vb6_TreeView_SetHideSelection";
+        if (propLower == "visible") return "vb6_SetControlVisible";
+        if (propLower == "enabled") return "vb6_SetControlEnabled";
+        break;
+    // C29-DT-a: DTPicker 写侧 (与读侧同一批)。Format / CheckBox / UpDown 的 setter 会连带
+    // SWP_FRAMECHANGED + 重绘 (格式变了显示区宽度就得重算)，CustomFormat 发 DTM_SETFORMATW。
+    case FrmControlType::DTPicker:
+        if (propLower == "format") return "vb6_DTP_SetFormat";
+        if (propLower == "customformat") return "vb6_DTP_SetCustomFormat";
+        if (propLower == "checkbox") return "vb6_DTP_SetCheckBox";
+        if (propLower == "updown") return "vb6_DTP_SetUpDown";
+        if (propLower == "calendarbackcolor") return "vb6_DTP_SetCalendarBackColor";
+        if (propLower == "calendarforecolor") return "vb6_DTP_SetCalendarForeColor";
+        if (propLower == "calendartrailingforecolor") return "vb6_DTP_SetCalendarTrailingForeColor";
+        if (propLower == "calendartitlebackcolor") return "vb6_DTP_SetCalendarTitleBackColor";
+        if (propLower == "calendartitleforecolor") return "vb6_DTP_SetCalendarTitleForeColor";
+        // C29-DT-b 的写侧。HasDate 刻意不给写口（它是原生 GDT_NONE 那一态的读数，
+        // 要"清空"请用 CheckBox 那枚勾选框，写它会把读数与观感拆成两张皮）。
+        if (propLower == "value") return "vb6_DTP_SetValue";
+        if (propLower == "hasdate") return "vb6_DTP_SetHasDate";
+        if (propLower == "mindate") return "vb6_DTP_SetMinDate";
+        if (propLower == "maxdate") return "vb6_DTP_SetMaxDate";
+        if (propLower == "visible") return "vb6_SetControlVisible";
+        if (propLower == "enabled") return "vb6_SetControlEnabled";
+        break;
+    // C29-MV-a: MonthView 写侧 (与读侧同一批)。样式那三位的 setter 是"尽力而为"—— 它们是
+    // 创建参数，运行期落不落地由夹具的读数说；MonthRows/MonthColumns 刻意不给写口（多月
+    // 平铺在原生里等于"窗口多大"，运行期改它得连带挪窗，那是另一格的事）。
+    case FrmControlType::MonthView:
+        if (propLower == "multiselect") return "vb6_MV_SetMultiSelect";
+        if (propLower == "showweeknumbers") return "vb6_MV_SetShowWeekNumbers";
+        if (propLower == "showtoday") return "vb6_MV_SetShowToday";
+        if (propLower == "maxselcount") return "vb6_MV_SetMaxSelCount";
+        if (propLower == "backcolor") return "vb6_MV_SetBackColor";
+        if (propLower == "forecolor") return "vb6_MV_SetForeColor";
+        if (propLower == "titlebackcolor") return "vb6_MV_SetTitleBackColor";
+        if (propLower == "titleforecolor") return "vb6_MV_SetTitleForeColor";
+        if (propLower == "trailingforecolor") return "vb6_MV_SetTrailingForeColor";
+        if (propLower == "monthbackcolor") return "vb6_MV_SetMonthBackColor";
+        // C29-MV-b 的写侧（Date 三条；两端表改一端由 RTL 读回整张再发回去）。
+        if (propLower == "value") return "vb6_MV_SetValue";
+        if (propLower == "selstart") return "vb6_MV_SetSelStart";
+        if (propLower == "selend") return "vb6_MV_SetSelEnd";
         if (propLower == "visible") return "vb6_SetControlVisible";
         if (propLower == "enabled") return "vb6_SetControlEnabled";
         break;

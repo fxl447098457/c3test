@@ -160,6 +160,8 @@ static const RtlFileEntry kRtlFiles[] = {
     { RTL_VB6FORMS_OLECON_C,       "vb6forms_olecon.c" },
     { RTL_VB6FORMS_DATA_C,         "vb6forms_data.c" },
     { RTL_VB6FORMS_TOOLBAR_C,      "vb6forms_toolbar.c" },
+    { RTL_VB6FORMS_DTPICKER_C,     "vb6forms_dtpicker.c" },
+    { RTL_VB6FORMS_MONTHVIEW_C,    "vb6forms_monthview.c" },
     { RTL_VB6FORMS_AXSITE_C,       "vb6forms_axsite.c" },
     { RTL_VB6FORMS_AXCONTAINER_C,  "vb6forms_axcontainer.c" },
     // vb6forms_axsite.c 按功能家族拆分 (2026-09-20): 内部头 + axsite/ 下 5 个族编译单元

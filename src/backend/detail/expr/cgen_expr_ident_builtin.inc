@@ -9,6 +9,8 @@
         {"msgbox",   "vb6_MsgBox"},
         {"unload",   "vb6_UnloadForm"},
         {"inputbox", "vb6_InputBox"},
+        {"input",    "vb6_InputString"},  // Task #40: parseIdentifierOrCall 剥 $ 后
+                                          // Input$ 到达此处的键名是 input (双键兜底)
         {"input$",  "vb6_InputString"},  // P15.4: Input function
         {"format",   "vb6_Format"},
         {"cstr",     "vb6_CStr"},
@@ -182,6 +184,9 @@
         {"getallsettings", "vb6_GetAllSettings"},
 
     };
+
+    // Task #39: 裸 Printer / Printers 拦截已上移到 ident_dispatch (符号解析之前,
+    // 类模块 me-> 字段规则会先吃掉裸名 — 见 dispatch 段 Task #39 注释)。
 
     // Fix 048: Strip $ type suffix before builtin lookup (Mid$ -> mid, Left$ -> left, etc.)
     std::string lookupName = lower;

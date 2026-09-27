@@ -192,6 +192,9 @@ void*   vb6_SSTab_GetTabCaption(void* hwnd, int32_t idx);          // BSTR
 void    vb6_SSTab_SetTabCaption(void* hwnd, int32_t idx, void* bstr);
 int32_t vb6_SSTab_GetTabVisible(void* hwnd, int32_t idx);          // VB6 True = -1
 void    vb6_SSTab_SetTabVisible(void* hwnd, int32_t idx, int32_t v);
+// TabToolTipText(i): SSTabEx 每页悬停提示 (属性语义; 悬停气泡显示为 TODO)
+void*   vb6_SSTab_GetTabToolTipText(void* hwnd, int32_t idx);      // BSTR
+void    vb6_SSTab_SetTabToolTipText(void* hwnd, int32_t idx, void* bstr);
 int32_t vb6_SSTab_GetTabOrientation(void* hwnd);
 void    vb6_SSTab_SetTabOrientation(void* hwnd, int32_t v);
 int32_t vb6_SSTab_GetTabStyle(void* hwnd);
@@ -200,8 +203,21 @@ int32_t vb6_SSTab_GetTabsPerRow(void* hwnd);
 void    vb6_SSTab_SetTabsPerRow(void* hwnd, int32_t v);
 int32_t vb6_SSTab_GetWordWrap(void* hwnd);
 void    vb6_SSTab_SetWordWrap(void* hwnd, int32_t v);
+// SSTabEx 颜色族 (Task #44): MaskColor 缺省品红, Tab* 色缺省 Ambient(宿主容器)。
+// BackColor/ForeColor 走通用窗口属性链, 不在此表。
+int32_t vb6_SSTab_GetMaskColor(void* hwnd);
+void    vb6_SSTab_SetMaskColor(void* hwnd, int32_t c);
+int32_t vb6_SSTab_GetTabBackColor(void* hwnd);
+void    vb6_SSTab_SetTabBackColor(void* hwnd, int32_t c);
+int32_t vb6_SSTab_GetTabSelBackColor(void* hwnd);
+void    vb6_SSTab_SetTabSelBackColor(void* hwnd, int32_t c);
+int32_t vb6_SSTab_GetTabSelForeColor(void* hwnd);
+void    vb6_SSTab_SetTabSelForeColor(void* hwnd, int32_t c);
 // 容器: 登记"某个子控件属于第 page 页", 切页时 RTL 只动可见性, 不动 Left
 void    vb6_SSTab_RegisterChild(void* hwnd, void* childHwnd, int32_t page);
+// SSTabEx 每页图标 (Task #44): TabPic16/20/24(i) 的图片字节, RTL 建 HIMAGELIST
+// 挂 TabCtrl 并在 item 上设 TCIF_IMAGE。mask 固定品红 (SSTabEx MaskColor 缺省)。
+void    vb6_SSTab_SetTabPicture(void* hwnd, int32_t idx, const void* data, int32_t size);
 // 事件: 窗体 WndProc 收到 TCN_SELCHANGE 后调用, 返回**切换前**的页号
 int32_t vb6_SSTab_OnSelChange(void* hwnd);
 
@@ -511,6 +527,170 @@ void    vb6_Toolbar_SetAlign(void* hwnd, int32_t val);
 int     vb6_Toolbar_AddButton(void* hwnd, int32_t index, const wchar_t* key, const wchar_t* caption,
                               int32_t style, int32_t image, const wchar_t* tooltip, int32_t width);
 int32_t vb6_Toolbar_GetButtonCount(void* hwnd);   // TB_BUTTONCOUNT（原生侧真数）
+// ===================== TreeView 的 Nodes / Node (ai/029 C29-8b) =====================
+//   结构住在原生树里 (父子/兄弟一律 TVM_GETNEXTITEM 现问)，这张表只存原生给不出的东西：
+//   Key / Text / Tag / 两个图索引。集合序 = 插入序：Nodes(k)、Node.Index、For Each 都按它。
+//   字符串 getter 返回**表内自有指针** (唯一消费者 memSetStr 当场拷成 BSTR)，不是 SysAllocString。
+//   越界：整数族给 0，字符串族给空串 —— 与 VB6 "取不到就是 Nothing / """ 同读数。
+//   Bold / Sorted / RelativeX / Node.Style 这些扁平层还没做的成员，一律不登记。
+int32_t         vb6_TreeView_NodeCount(void* hwnd);
+int32_t         vb6_TreeView_AddNode(void* hwnd, int32_t relative, int32_t relationship,
+                                     const wchar_t* key, const wchar_t* text,
+                                     int32_t image, int32_t selImage);
+int32_t         vb6_TreeView_NodeIndexByKey(void* hwnd, const wchar_t* key);
+const wchar_t*  vb6_TreeView_GetNodeText(void* hwnd, int32_t idx);
+const wchar_t*  vb6_TreeView_GetNodeKey(void* hwnd, int32_t idx);
+const wchar_t*  vb6_TreeView_GetNodeTag(void* hwnd, int32_t idx);
+void            vb6_TreeView_SetNodeText(void* hwnd, int32_t idx, const wchar_t* v);
+void            vb6_TreeView_SetNodeKey(void* hwnd, int32_t idx, const wchar_t* v);
+void            vb6_TreeView_SetNodeTag(void* hwnd, int32_t idx, const wchar_t* v);
+int32_t         vb6_TreeView_GetNodeChecked(void* hwnd, int32_t idx);
+void            vb6_TreeView_SetNodeChecked(void* hwnd, int32_t idx, int32_t v);
+int32_t         vb6_TreeView_GetNodeExpanded(void* hwnd, int32_t idx);
+void            vb6_TreeView_SetNodeExpanded(void* hwnd, int32_t idx, int32_t v);
+int32_t         vb6_TreeView_GetNodeParent(void* hwnd, int32_t idx);
+int32_t         vb6_TreeView_GetNodeChild(void* hwnd, int32_t idx);
+int32_t         vb6_TreeView_GetNodeChildren(void* hwnd, int32_t idx);
+int32_t         vb6_TreeView_GetNodeNext(void* hwnd, int32_t idx);
+int32_t         vb6_TreeView_GetNodePrev(void* hwnd, int32_t idx);
+int32_t         vb6_TreeView_GetNodeRoot(void* hwnd, int32_t idx);
+void            vb6_TreeView_NodeEnsureVisible(void* hwnd, int32_t idx);
+int32_t         vb6_TreeView_RemoveNode(void* hwnd, int32_t idx);
+void            vb6_TreeView_ClearNodes(void* hwnd);
+void*           vb6_TreeView_Nodes(void* hwnd);        // 集合对象 (真 IDispatch)
+void*           vb6_TreeView_NodeAt(void* hwnd, int32_t idx);   // 事件参数用
+// C29-8c: 通知派发 (父窗 WM_NOTIFY)。码值与 10.0.19041 SDK 对过:
+// TVN_SELCHANGEDW = -451、TVN_ITEMEXPANDEDW = -455。
+int32_t         vb6_TreeView_NotifyNodeIndex(void* hwnd, void* nmTreeViewW);
+int32_t         vb6_TreeView_NotifyExpanded(void* nmTreeViewW);   // -1 展开 / 0 折回 / 999 认不出
+void            vb6_TreeView_SimNodeClick(void* hwnd, int32_t nodeIdx);   // 判据专用
+void            vb6_TreeView_SimExpand(void* hwnd, int32_t nodeIdx, int32_t expanded);
+
+
+// ===================== Toolbar 的 Buttons / Button (ai/029 C29-5b) =====================
+//   成员对象机制见 vb6forms_memberobj.c。分工按"原生答不答得了": Text / Image / Enabled /
+//   Visible 现问控件 (TB_GET/SETBUTTONINFOW，一律 TBIF_BYINDEX 按索引找 —— 靠 idCommand
+//   找会撞车: 分隔符在 VB6 里也能有 id)；Style / Key / Tag / ToolTipText / Width 住 5a 那张表
+//   (原生 fsStyle 分不出"占位符"，ToolTipText 的原生面要 TTN_GETDISPINFO，那格还没做)。
+//   字符串 getter 返回自有指针 (唯一消费者 memSetStr 当场拷)；越界: 整数族给 0/-1、字符串族空串。
+int32_t         vb6_Toolbar_ButtonCount(void* hwnd);
+int32_t         vb6_Toolbar_ButtonIndexByKey(void* hwnd, const wchar_t* key);
+const wchar_t*  vb6_Toolbar_GetButtonCaption(void* hwnd, int32_t idx);
+void            vb6_Toolbar_SetButtonCaption(void* hwnd, int32_t idx, const wchar_t* v);
+const wchar_t*  vb6_Toolbar_GetButtonKey(void* hwnd, int32_t idx);
+void            vb6_Toolbar_SetButtonKey(void* hwnd, int32_t idx, const wchar_t* v);
+const wchar_t*  vb6_Toolbar_GetButtonTag(void* hwnd, int32_t idx);
+void            vb6_Toolbar_SetButtonTag(void* hwnd, int32_t idx, const wchar_t* v);
+const wchar_t*  vb6_Toolbar_GetButtonToolTip(void* hwnd, int32_t idx);
+void            vb6_Toolbar_SetButtonToolTip(void* hwnd, int32_t idx, const wchar_t* v);
+int32_t         vb6_Toolbar_GetButtonStyle(void* hwnd, int32_t idx);
+void            vb6_Toolbar_SetButtonStyle(void* hwnd, int32_t idx, int32_t v);
+int32_t         vb6_Toolbar_GetButtonImage(void* hwnd, int32_t idx);
+void            vb6_Toolbar_SetButtonImage(void* hwnd, int32_t idx, int32_t v);
+int32_t         vb6_Toolbar_GetButtonEnabled(void* hwnd, int32_t idx);
+void            vb6_Toolbar_SetButtonEnabled(void* hwnd, int32_t idx, int32_t v);
+int32_t         vb6_Toolbar_GetButtonVisible(void* hwnd, int32_t idx);
+void            vb6_Toolbar_SetButtonVisible(void* hwnd, int32_t idx, int32_t v);
+int32_t         vb6_Toolbar_GetButtonWidth(void* hwnd, int32_t idx);
+void            vb6_Toolbar_SetButtonWidth(void* hwnd, int32_t idx, int32_t v);
+int32_t         vb6_Toolbar_RemoveButton(void* hwnd, int32_t idx);
+int32_t         vb6_Toolbar_GetButtonValue(void* hwnd, int32_t idx);
+void            vb6_Toolbar_SetButtonValue(void* hwnd, int32_t idx, int32_t v);
+void            vb6_Toolbar_ClearButtons(void* hwnd);
+void*           vb6_Toolbar_Buttons(void* hwnd);       // 集合对象 (真 IDispatch, 在 memberobj.c)
+void*           vb6_Toolbar_ButtonAt(void* hwnd, int32_t idx);   // 事件参数用
+// C29-5c: 两条按钮事件的判据助手 (只对父窗发消息，走真派发)。ButtonClick 走
+// WM_COMMAND(id=控件的 idCommand, code=0, lParam=工具栏)，ButtonMenuClick 走
+// WM_NOTIFY(TBN_DROPDOWN=-710, hdr.idFrom=同一个 id)。
+void            vb6_Toolbar_SimButtonClick(void* hwnd, int32_t idx);
+void            vb6_Toolbar_SimButtonMenuClick(void* hwnd, int32_t idx);
+
+// ===================== DTPicker (ai/029 C29-DT-a) =====================
+//   VB6 DTPicker 的窗口 + 样式 + 标量属性面，原生 SysDateTimePick32（不加载 MSCOMCT2.OCX）。
+//   Format(0/1/2) / CheckBox / UpDown **只能在创建时给**（实测：事后写样式位被控件抹回），
+//   所以它们由 cgen 立进 vb6_CreateControl 的样式参数；这里的 Init 只下发 CustomFormat
+//   （DTM_SETFORMATW 是真运行期消息）。Value / MinDate / MaxDate 是 Date 型，留 C29-DT-b。
+void    vb6_DTP_Init(void* hwnd, const wchar_t* customFormat);
+// C3 扩展（不是 VB6 属性）：DTM_GETIDEALSIZE 问控件自己算的"装得下当前格式"的宽度，
+// 用来把"格式位真选中了哪一档"从"我们自己的掩码读数"换成控件侧读数。
+int32_t vb6_DTP_IdealWidth(void* hwnd);
+// C29-DT-b：Date 型值面。VB 的 Date 在 C3 里就是 double 序列号，所以签名一律 double。
+// HasDate 是本项目的扩展读数（原生 GDT_NONE 那一态在 VB6 是 Value = Null，double 装不了 Null）。
+double  vb6_DTP_GetValue(void* hwnd);
+void    vb6_DTP_SetValue(void* hwnd, double serial);
+int32_t vb6_DTP_HasDate(void* hwnd);
+void    vb6_DTP_SetHasDate(void* hwnd, int32_t on);
+double  vb6_DTP_GetMinDate(void* hwnd);
+void    vb6_DTP_SetMinDate(void* hwnd, double serial);
+double  vb6_DTP_GetMaxDate(void* hwnd);
+void    vb6_DTP_SetMaxDate(void* hwnd, double serial);
+int32_t vb6_DTP_GetFormat(void* hwnd);
+void    vb6_DTP_SetFormat(void* hwnd, int32_t val);
+wchar_t* vb6_DTP_GetCustomFormat(void* hwnd);
+void    vb6_DTP_SetCustomFormat(void* hwnd, void* bstr);
+int32_t vb6_DTP_GetCheckBox(void* hwnd);
+void    vb6_DTP_SetCheckBox(void* hwnd, int32_t val);
+int32_t vb6_DTP_GetUpDown(void* hwnd);
+void    vb6_DTP_SetUpDown(void* hwnd, int32_t val);
+int32_t vb6_DTP_GetCalendarBackColor(void* hwnd);
+void    vb6_DTP_SetCalendarBackColor(void* hwnd, int32_t val);
+int32_t vb6_DTP_GetCalendarForeColor(void* hwnd);
+void    vb6_DTP_SetCalendarForeColor(void* hwnd, int32_t val);
+int32_t vb6_DTP_GetCalendarTrailingForeColor(void* hwnd);
+void    vb6_DTP_SetCalendarTrailingForeColor(void* hwnd, int32_t val);
+int32_t vb6_DTP_GetCalendarTitleBackColor(void* hwnd);
+void    vb6_DTP_SetCalendarTitleBackColor(void* hwnd, int32_t val);
+int32_t vb6_DTP_GetCalendarTitleForeColor(void* hwnd);
+void    vb6_DTP_SetCalendarTitleForeColor(void* hwnd, int32_t val);
+// C29-DT-c：判据专用助手（不对应任何 VB6 语义，见 029 §九 本格）。无头环境点不了鼠标，
+// 这三条由 RTL 程序化向父窗发真 WM_NOTIFY(DTN_*CHANGE / DROPDOWN / CLOSEUP)，
+// 整条"case WM_NOTIFY + code 分流 + hwndFrom 认来源"才算被验到。
+void    vb6_DTP_SimChange(void* hwnd);
+void    vb6_DTP_SimDropDown(void* hwnd);
+void    vb6_DTP_SimCloseUp(void* hwnd);
+
+// ===================== MonthView (ai/029 C29-MV-a) =====================
+//   VB6 MonthView 的窗口 + 样式 + 标量属性面，原生 SysMonthCal32（不加载 MSCOMCT2.OCX）。
+//   MultiSelect / ShowWeekNumbers / ShowToday 三位是样式位（ShowToday 与 MCS_NOTODAY **反**）；
+//   MaxSelCount 与五色一律真往返过控件。Date 型那三格（Value / SelStart / SelEnd）留 MV-b，
+//   MCN_SELCHANGE 那条事件（VB6 的 DateClick）留 MV-c。
+void    vb6_MV_Init(void* hwnd, int32_t rows, int32_t cols, int32_t maxSelCount);
+int32_t vb6_MV_GetMultiSelect(void* hwnd);
+void    vb6_MV_SetMultiSelect(void* hwnd, int32_t on);
+int32_t vb6_MV_GetShowWeekNumbers(void* hwnd);
+void    vb6_MV_SetShowWeekNumbers(void* hwnd, int32_t on);
+int32_t vb6_MV_GetShowToday(void* hwnd);
+void    vb6_MV_SetShowToday(void* hwnd, int32_t on);
+int32_t vb6_MV_GetMaxSelCount(void* hwnd);
+void    vb6_MV_SetMaxSelCount(void* hwnd, int32_t n);
+// 三条控件侧读数：前两条 = MCM_GETMINREQRECT（装下**一个**月要多大），第三条 =
+// MCM_GETCALENDARCOUNT（眼下真画了几个月）。都是 C3 扩展名，不冒充 VB6 属性。
+int32_t vb6_MV_MinReqWidth(void* hwnd);
+int32_t vb6_MV_MinReqHeight(void* hwnd);
+int32_t vb6_MV_GetMonthCount(void* hwnd);
+int32_t vb6_MV_GetBackColor(void* hwnd);
+void    vb6_MV_SetBackColor(void* hwnd, int32_t val);
+int32_t vb6_MV_GetForeColor(void* hwnd);
+void    vb6_MV_SetForeColor(void* hwnd, int32_t val);
+int32_t vb6_MV_GetTitleBackColor(void* hwnd);
+void    vb6_MV_SetTitleBackColor(void* hwnd, int32_t val);
+int32_t vb6_MV_GetTitleForeColor(void* hwnd);
+void    vb6_MV_SetTitleForeColor(void* hwnd, int32_t val);
+int32_t vb6_MV_GetTrailingForeColor(void* hwnd);
+void    vb6_MV_SetTrailingForeColor(void* hwnd, int32_t val);
+int32_t vb6_MV_GetMonthBackColor(void* hwnd);   // MCSC_MONTHBK（VB6 官方属性面里的第六格配色）
+void    vb6_MV_SetMonthBackColor(void* hwnd, int32_t val);
+// C29-MV-b：Date 值面。Value = MCM_GET/SETCURSEL；SelStart / SelEnd 是原生那张
+// (起, 止) 两端表的两个读数，所以改一端由 RTL 读回整张表再发回去（只发一端会拆掉另一端）。
+double  vb6_MV_GetValue(void* hwnd);
+void    vb6_MV_SetValue(void* hwnd, double serial);
+double  vb6_MV_GetSelStart(void* hwnd);
+void    vb6_MV_SetSelStart(void* hwnd, double serial);
+double  vb6_MV_GetSelEnd(void* hwnd);
+void    vb6_MV_SetSelEnd(void* hwnd, double serial);
+// C29-MV-c：MCN_SELCHANGE(-749) 的负载折算 + 判据专用助手（不对应任何 VB6 语义）。
+double  vb6_MV_NotifyDate(void* nmSelChange);
+void    vb6_MV_SimDateClick(void* hwnd, double serial);
 
 #ifdef __cplusplus
 }

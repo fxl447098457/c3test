@@ -309,9 +309,12 @@
                     c_.emitLine(writeFn + "(" + makeCtrlHwndArg(objLower, itCtrl->second) + ", " + valExpr + ");  /* Control Property */");
                     return;
                 }
-                diag_.warn(DiagnosticID::CodeGenUnsupportedFeature, SourceLocation{},
-                    std::string("P7.5: Unknown control property write '") + objId.name + "." + maExpr.memberName +
-                    "' for control type, generating struct field access (may not compile)");
+                // Task #43: writeFn 为空时不再告警落穿 — 控件属性 (如 SSTabEx1.Font /
+                // SSTabEx1.TabHeight 等 OCX 增强/自定义属性) 由后续 P6.2 COM 晚绑定
+                // 路径接管: LHS emitExpr 经 Fix 023e/089d 留 isComMarker_ (comObjExpr_
+                // = 控件 hwnd) → vb6_ComSetProp(hwnd, L"Prop", packed)。
+                // 前提是 P6.7 (cgen_assign_prop_write.inc) 的控件守卫已把这些形态
+                // 从类 PropertySet 误接路径上拦下 (Task #43, 2026-02)。
             }
         }
     }

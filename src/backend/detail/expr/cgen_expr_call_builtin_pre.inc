@@ -339,11 +339,131 @@
         std::string lenLower = lenIdent.name;
         std::transform(lenLower.begin(), lenLower.end(), lenLower.begin(), ::tolower);
         if (lenLower == "len" && node.positional.size() == 1) {
+            // VB6 口径 (真 VB6 实测): Len 的实参不是 String 就必须**能落到变量上** ——
+            // 非 String 的 Len 取的是"存储宽度", 字面量没有存储宽度可言, 真 VB6 直接
+            // 编译错误 "Variable required - can't assign to this expression"
+            // (Len(1234) / Len(234.5) 均报错; Len("1234")=4 合法)。
+            // 此前 C3 静默把它字符串化再数字符 (Len(1234)=4 纯属巧合, Len(234.5)=5)。
+            if (node.positional[0]->kind == ASTNodeKind::LiteralExpr) {
+                auto& lit44 = static_cast<LiteralExpr&>(*node.positional[0]);
+                if (lit44.literalKind != LiteralKind::String) {
+                    // 复用既有的 CodeGenUnsupportedFeature (4001): 不新增诊断号位。
+                    diag_.error(DiagnosticID::CodeGenUnsupportedFeature, node.positional[0]->loc,
+                        "Len argument must be a variable or a String expression; "
+                        "a numeric/date literal has no storage width");
+                    lastExpr_ = "(0)";
+                    return;
+                }
+            }
             std::string udtCType = inferUdtTypeOfExpr(*node.positional[0]);
             if (!udtCType.empty()) {
                 emitExpr(*node.positional[0]);
                 lastExpr_ = "((int32_t)sizeof(" + lastExpr_ + "))";
                 return;
+            }
+            // Task #44 探针发现: Len(数值) = **该类型的存储宽度** (Long→4, Integer→2, ...),
+            // 不是"十进制位数"。此前落进 vb6_Len(BSTR) 通用路径 → 实参先被 vb6_CStrLong
+            // 转成字符串再数字符, `Len(h)` (h=33489972) 打出 8, VB6 语义是 4。
+            // 与 Fix 125 (LenB 数值→sizeof) / Fix 038 (Len UDT→sizeof) 同族, 在实参
+            // 字符串化之前拦截。Variant/字符串实参不在此列 (走原路径)。
+            // VB6 口径 (用户拿真 VB6 实测, 2026-09-27): 非 String 的 Len **必须吃变量**
+            // —— 它要的是"存储宽度", 数值字面量/表达式在真 VB6 里直接编译错误
+            // "变量要求 - 不能赋值到该表达式" (Len(1234) 报错; Len("1234")=4 合法,
+            // 因为 String 走的是字符数那条语义)。
+            // 所以下面两条只对**变量形态** (标识符 / 成员访问) 生效。
+            // 复合表达式 (Len(a+1) / Len(Foo())) 落回原 vb6_Len 路径 —— 与本次改动前
+            // 逐字相同, 零回归。真 VB6 对这些也报错, 但"函数调用返回数值"与"数组元素"
+            // 在 AST 层不易区分 (Len(mCustomColors(0)) 是合法的), 误报会打断编译,
+            // 故只把**字面量**这一 unambiguous 的形状做成硬报错 (见上, 3043)。
+            const bool lenArgIsVar44 =
+                node.positional[0]->kind == ASTNodeKind::IdentifierExpr
+                || node.positional[0]->kind == ASTNodeKind::MemberAccessExpr;
+            Vb6Type tLen44 = inferExprType(*node.positional[0]);
+            // Task #44 (SSTabEx "..."): 数组元素下标访问 (Len(mCustomColors(0)))
+            // 同样是"变量形态" —— VB6 语义 Len(数组元素) = **元素类型的存储宽度**
+            // (Long → 4)。此前 IndexOrCallExpr 被排除在 lenArgIsVar44 之外, 落回
+            // vb6_Len 通用路径: 实参先被 vb6_CStrLong 字符串化再**数字符** →
+            // 元素值 0 打出 "0" → Len=1。真实场景: cDlg.ShowColor 的
+            // lCustomColorSize = Len(mCustomColors(0))*16 → GlobalAlloc(16),
+            // 而 ChooseColorA 按 16 个 Long 写 64 字节 → 堆越界 48 字节 →
+            // 0xC000041D (SSTabEx "..." 按钮一点即退, 实测)。
+            // 判"下标访问的是数组"而非函数调用, 双查口径同 For Each 源判定
+            // (cgen_control.cpp): knownArrays_ 命中, 或符号表 Variable+isArray。
+            // 普通函数调用 Len(Foo()) 两者皆不满足 → 维持落回原路径的既有口径。
+            Vb6Type tArrElem44 = Vb6Type::Unknown;
+            if (node.positional[0]->kind == ASTNodeKind::IndexOrCallExpr) {
+                auto& call44 = static_cast<IndexOrCallExpr&>(*node.positional[0]);
+                if (call44.callee && call44.callee->kind == ASTNodeKind::IdentifierExpr) {
+                    std::string arrName44 = Symbol::toLower(
+                        static_cast<IdentifierExpr&>(*call44.callee).name);
+                    if (knownArrays_.count(arrName44)) {
+                        tArrElem44 = arrayElemTypes_[arrName44];
+                    } else {
+                        Symbol* sym44 = symTab_.lookup(arrName44);
+                        if (!sym44) sym44 = symTab_.lookupModule(arrName44);
+                        if (sym44 && sym44->kind == SymbolKind::Variable && sym44->isArray) {
+                            // 数组符号的 type 带 Array 位 (mapType 依它生成
+                            // SafeArray), 元素类型 = 去 Array 位的基础类型
+                            // (口径同 cgen_base_type.cpp mapType)。
+                            tArrElem44 = static_cast<Vb6Type>(
+                                static_cast<uint16_t>(sym44->type)
+                                & ~static_cast<uint16_t>(Vb6Type::Array));
+                        }
+                    }
+                }
+            }
+            const bool lenArrElemIsNumeric44 =
+                tArrElem44 == Vb6Type::Byte     || tArrElem44 == Vb6Type::Boolean ||
+                tArrElem44 == Vb6Type::Integer  || tArrElem44 == Vb6Type::Long ||
+                tArrElem44 == Vb6Type::LongPtr  || tArrElem44 == Vb6Type::LongLong ||
+                tArrElem44 == Vb6Type::Single   || tArrElem44 == Vb6Type::Double ||
+                tArrElem44 == Vb6Type::Currency || tArrElem44 == Vb6Type::Date;
+            if (lenArrElemIsNumeric44) {
+                emitExpr(*node.positional[0]);
+                // 数组元素表达式 (VB6_SA_AT 展开成 ((T*)data)[i-lBound] 或
+                // Byte 数组的指针下标) 已是左值形态, sizeof 取其 C 存储宽度 ——
+                // 与标量分支同口径; sizeof 不求值, 下标副作用不被重复执行。
+                lastExpr_ = "((int32_t)sizeof(" + lastExpr_ + "))";
+                return;
+            }
+            // 只拦**标量数值**; String / Variant / Object / 未知一律走原 vb6_Len 路径。
+            const bool lenIsNumeric44 =
+                lenArgIsVar44 && (
+                tLen44 == Vb6Type::Byte     || tLen44 == Vb6Type::Boolean ||
+                tLen44 == Vb6Type::Integer  || tLen44 == Vb6Type::Long ||
+                tLen44 == Vb6Type::LongPtr  || tLen44 == Vb6Type::LongLong ||
+                tLen44 == Vb6Type::Single   || tLen44 == Vb6Type::Double ||
+                tLen44 == Vb6Type::Currency || tLen44 == Vb6Type::Date);
+            if (lenIsNumeric44) {
+                emitExpr(*node.positional[0]);
+                // 用 sizeof(实参) 而**不是**按 Vb6Type 查字节数表:
+                //   knownLongVars_ 把 Integer/Long/Byte 并进同一个登记桶 (C 型分别是
+                //   int16_t/int32_t/uint8_t 但登记串同), inferExprType 对 `Dim i As
+                //   Integer` 也返回 Long → 查表会把 Len(i) 判成 4 (VB6 是 2)。
+                //   sizeof 直接取 C 侧真实存储宽度, 与 VB6 "Len(数值)=存储字节数" 同义。
+                // 顺带修掉既有崩溃: `Dim b As Byte` 不落任何登记桶 → 此前漏拦 →
+                //   vb6_Len(uint8_t) 把 200 当 BSTR 指针解引用 → 0xC0000005 (LEN-BYTE 实测)。
+                // sizeof 不求值其操作数, 故 Len(Foo()) 不会重复调用 (VB6 会求值一次;
+                // 数值实参求值无可观测副作用的场景占绝大多数, 这里取不崩优先)。
+                lastExpr_ = "((int32_t)sizeof(" + lastExpr_ + "))";
+                return;
+            }
+            // Byte / Currency / LongLong / 枚举 之类**不落任何登记桶**
+            // (cgen_localdecl.cpp:160-186 只登记 BSTR / int32_t|int16_t|VBABOOL /
+            // intptr_t / ComIface / vb6_VARIANT), inferExprType 对它们返回 Unknown,
+            // 上面拦不住 → `Dim b As Byte: b = 200: Len(b)` 生成 vb6_Len(uint8_t),
+            // 把 200 当 BSTR 指针解引用 → 0xC0000005 (LEN-BYTE 实测, 既有 bug)。
+            // 对"确认不是字符串/Variant/对象"的裸标识符兜底 sizeof:
+            // 字符串侧 knownBstrVars_ 在声明处必登记 (mapTypeRef→"BSTR"), 不会误伤。
+            if (node.positional[0]->kind == ASTNodeKind::IdentifierExpr) {
+                std::string low44 = Symbol::toLower(
+                    static_cast<IdentifierExpr&>(*node.positional[0]).name);
+                if (!knownBstrVars_.count(low44) && !knownVariantVars_.count(low44)
+                    && !knownObjectVars_.count(low44)) {
+                    emitExpr(*node.positional[0]);
+                    lastExpr_ = "((int32_t)sizeof(" + lastExpr_ + "))";
+                    return;
+                }
             }
         }
     }

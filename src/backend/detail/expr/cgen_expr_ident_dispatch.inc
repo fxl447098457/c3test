@@ -44,6 +44,23 @@
         return;
     }
 
+    // Task #39: 裸 Printer / Printers 内置全局对象。
+    // cDlg.cls ShowFont: `If Not Printer Is Nothing Then ... tChooseFont.hDC =
+    // Printer.hDC`; IsPrinter: `For Each iPrn In Printers` — 必须在符号解析
+    // (ident_symbol 的 me-> 字段规则) 之前拦截, 否则类模块内裸名被当类字段
+    // (me->Printer → C2039 "Printer 不是 vb6_cls_cDlg 成员") / 裸 Printers
+    // → C2065。Printer → RTL DC 哨兵 (无打印机为 NULL, `Is Nothing` 判真);
+    // Printers → 空 RTL Collection (vb6_ForEach_Init 原生支持)。
+    // 成员访问 (.hDC/.Print 等) 由 MemberAccessExpr 的 Printer 分支处理。
+    if (lower == "printer") {
+        lastExpr_ = "vb6_Printer_Object()";
+        return;
+    }
+    if (lower == "printers") {
+        lastExpr_ = "vb6_Printers_Collection()";
+        return;
+    }
+
     // M22: 检查是否是当前函数名 — VB6语义歧义
     // - 作为IndexOrCallExpr的callee(函数调用) → 返回函数过程名
     // - 作为普通表达式(返回值引用) → 返回返回值变量

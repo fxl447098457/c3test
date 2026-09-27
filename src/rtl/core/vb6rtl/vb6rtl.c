@@ -213,6 +213,7 @@ int32_t vb6_VariantToLong(vb6_VARIANT v) {
         case vb6_vtByte:    return (int32_t)v.bVal;
         case vb6_vtInteger: return (int32_t)v.iVal;
         case vb6_vtLong:    return v.lVal;
+        case VT_I8:         return (int32_t)v.llVal;  /* Task #44: VT_I8 进 Long 按 C 截断语义 */
         case vb6_vtSingle:  return (int32_t)round(v.fltVal);
         case vb6_vtDouble:  return (int32_t)round(v.dblVal);
         case vb6_vtCurrency:return (int32_t)(v.cyVal / 10000);
@@ -251,6 +252,7 @@ int16_t vb6_VariantToBool(vb6_VARIANT v) {
         case vb6_vtByte:     return v.bVal ? -1 : 0;
         case vb6_vtInteger:  return v.iVal ? -1 : 0;
         case vb6_vtLong:     return v.lVal ? -1 : 0;
+        case VT_I8:          return v.llVal ? -1 : 0;  /* Task #44: LongLong/LongPtr 64 位 */
         case vb6_vtSingle:   return v.fltVal != 0.0f ? -1 : 0;
         case vb6_vtDouble:   return v.dblVal != 0.0 ? -1 : 0;
         case vb6_vtCurrency: return v.cyVal ? -1 : 0;
@@ -270,6 +272,7 @@ double vb6_VariantToDouble(vb6_VARIANT v) {
         case vb6_vtByte:    return (double)v.bVal;
         case vb6_vtInteger: return (double)v.iVal;
         case vb6_vtLong:    return (double)v.lVal;
+        case VT_I8:         return (double)v.llVal;  /* Task #44: LongLong/LongPtr 64 位 */
         case vb6_vtSingle:  return (double)v.fltVal;
         case vb6_vtDouble:  return v.dblVal;
         case vb6_vtCurrency:return (double)v.cyVal / 10000.0;
@@ -436,6 +439,23 @@ void vb6_ErrRaise(int32_t errNum, BSTR source, BSTR description) {
 
 void vb6_ErrRaiseNumber(int32_t errNum) {
     vb6_ErrRaise(errNum, NULL, NULL);
+}
+
+// Task #44 (SSTabEx): VB6 '/' 与 Mod 的零除数语义是运行期错误 11 ("Division by zero"),
+// 不是 IEEE inf。除数为字面量 0 时 cgen 强制走这两个 helper:
+//  (a) 两侧都是常量时 MSVC 会常量折叠 → C2124 被零除 (frmTest.c:1569 InIde
+//      "Debug.Print 1 / 0" 实证); 换成函数调用即不可折叠。
+//  (b) 走 vb6_ErrRaise: On Error Resume Next 下静默置 Err.Number=11 —— InIde 的
+//      "除零探测错误处理"技巧依赖此行为; 无错误处理时按 VB6 弹框/退出。
+// 变量除数仍走裸 C 除法 (IEEE inf) —— 运行期语义缺口与 vb6_IntDiv 的 TODO 同源。
+double vb6_Num_Div(double a, double b) {
+    if (b == 0.0) { vb6_ErrRaiseNumber(11); return 0.0; }
+    return a / b;
+}
+
+int32_t vb6_Num_Mod(int32_t a, int32_t b) {
+    if (b == 0) { vb6_ErrRaiseNumber(11); return 0; }
+    return a % b;
 }
 // ============================================================
 // P24-Bug2: Variant比较函数

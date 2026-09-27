@@ -191,11 +191,17 @@ static void vb6_ImagePaintHelper(HWND hwnd, HDC hdc) {
     RECT rc;
     GetClientRect(hwnd, &rc);
 
+    /* Fix 187: 背景 = VB6_BackColor 属性色 (VB6 PictureBox 语义)。
+     * 原先硬编码 COLOR_BTNFACE — BackColor 写入 (vb6_SetControlBackColor)
+     * 后绘制路径读不到, 色块永远不变色。无属性时回落 BTNFACE (Image 默认)。 */
     int stretch = (int)(INT_PTR)GetPropW(hwnd, L"VB6_Stretch");
-
-    /* Default background: system button face (control background). */
-    HBRUSH hBg = (HBRUSH)GetSysColorBrush(COLOR_BTNFACE);
-    FillRect(hdc, &rc, hBg);
+    {
+        COLORREF bg187 = (COLORREF)vb6_GetControlBackColor(hwnd);
+        if (bg187 & 0x80000000L) bg187 = GetSysColor(bg187 & 0xFF);
+        HBRUSH hBg = CreateSolidBrush(bg187);
+        FillRect(hdc, &rc, hBg);
+        DeleteObject(hBg);
+    }
 
     /* Preferred path: retained COM IPicture (from SetControlPictureFromCom).
      * Works for bitmap, icon, and metafile uniformly via IPicture::Render. */
@@ -269,6 +275,11 @@ static LRESULT CALLBACK vb6_ImageSubclassProc(HWND hwnd, UINT msg, WPARAM wp, LP
         PAINTSTRUCT ps;
         HDC hdc = BeginPaint(hwnd, &ps);
         if (hdc) {
+            if (GetEnvironmentVariableA("C3_FORMS_TRACE", NULL, 0) > 0)
+                fprintf(stderr, "[C3_F187] ImagePaint hwnd=%p bg=%06X set=%d\r\n",
+                        (void*)hwnd,
+                        (unsigned)(UINT_PTR)GetPropW(hwnd, L"VB6_BackColor") & 0xFFFFFFu,
+                        GetPropW(hwnd, L"VB6_BackColorSet") ? 1 : 0);
             vb6_ImagePaintHelper(hwnd, hdc);
             EndPaint(hwnd, &ps);
         }
@@ -309,4 +320,7 @@ void vb6_InstallImageSubclass(void* hwnd) {
     if (GetPropW(hw, L"VB6_OrigProc")) return;
     WNDPROC origProc = (WNDPROC)SetWindowLongPtrW(hw, GWLP_WNDPROC, (LONG_PTR)vb6_ImageSubclassProc);
     if (origProc) SetPropW(hw, L"VB6_OrigProc", (HANDLE)origProc);
+    if (GetEnvironmentVariableA("C3_FORMS_TRACE", NULL, 0) > 0)
+        fprintf(stderr, "[C3_F187] InstallImageSubclass hwnd=%p orig=%p installed=%d\r\n",
+                (void*)hw, (void*)origProc, origProc ? 1 : 0);
 }

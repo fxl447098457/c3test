@@ -13,6 +13,17 @@
 
 namespace vb6c3 {
 
+// C29-V6: comctl **声明面**统一到 v6 —— 与运行面对齐（driver_link.cpp 给每个产物嵌
+// Common-Controls **6.0** 的 manifest，而 `_WIN32_IE` 从前从来没设过 ⇒ `commctrl.h` 给的是
+// v5 时代的声明：实测不带它连 `TOOLBARCLASS32W` 都不给、`sizeof(TBBUTTONINFOW)` 是 44 而不是
+// 带 `iIdealWidth` 的 48）。⇒ 手写常量与 SDK 声明从此同源，控件收到的 cbSize 就是它自己那一版。
+// **刻意只动 `_WIN32_IE`**：`WINVER` / `_WIN32_WINNT` 沿用 SDK 默认，一并写死会把 RTL 已经在
+// 用的较新 API 声明关掉 —— 那是另一码事。
+// 一条要说老实的：这批**没有**修好任何坏读数（C29-5c 那两条"向控件现问"在 v6 声明下读数逐字
+// 相同、5a 的 fsState 补偿拿掉照样红，两处负控见 ai/029 的 C29-V6 那格）。它买的是"以后不再
+// 出现这一类分叉"。
+#define C3_V6_VERSION_DEFS " /D_WIN32_IE=0x0600"
+
 struct MsvcDriverOptions {
     std::vector<std::string> sourceFiles;  // .c file paths
     std::string outputFile;                 // output .exe/.dll path

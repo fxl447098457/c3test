@@ -240,6 +240,17 @@ std::unique_ptr<VariableDecl> Parser::parseVariableDecl(AccessLevel access, bool
         asType = parseTypeRef();
     }
 
+    // Task #40: VB6 类型后缀即类型声明 (`Dim dl&` ≡ `Dim dl As Long`)。
+    // Fix 028 只剥名不注类型 (旧注释称避免引入 C2440), 变量落默认 Variant —
+    // 结果 cDlg.cls GetLocaleMeasureSystem 的 dl/nullpos 走 Variant 链路:
+    // 使用点 `dl& = GetLocaleInfo(...)` 在 cgen 里发 dl_ (cIdent 吃 &) +
+    // Variant 解包, C2440/C2065 双炸。此处无 As Type 时按后缀补声明类型
+    // ($→String %→Integer &→Long !→Single #→Double @→Currency, 映射与
+    // stripTypeSuffix 一致), 与使用点剥后缀 (parseIdentifierOrCall) 配套。
+    if (!asType && !suffixInfo.typeName.empty()) {
+        asType = std::make_unique<SimpleTypeRef>(loc, suffixInfo.typeName);
+    }
+
     ExprPtr initializer;
     if (match(TokenKind::Equals)) {
         initializer = parseExpression();

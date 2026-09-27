@@ -3,6 +3,7 @@
 //   原第 2080~2418 行
 
 #include "driver/driver.hpp"
+#include "driver/res_inventory.hpp"   // ai/029 C29-M: 让位判据要问那份 .res 里有没有 #1 清单
 #include "common/diagnostics.hpp"
 #include "common/encoding.hpp"
 #include "ast/ast.hpp"
@@ -45,6 +46,12 @@ static void addFormsSources(MsvcDriverOptions& opts, const std::string& rtlDir) 
     opts.sourceFiles.push_back(rtlDir + "/vb6forms_data.c");
     // ai/029 C29-5a: Toolbar 的窗口与设计期按钮（原生 ToolbarWindow32）
     opts.sourceFiles.push_back(rtlDir + "/vb6forms_toolbar.c");
+    // ai/029 C29-DT-a: DTPicker 的窗口与标量属性面（原生 SysDateTimePick32）。
+    // 这条是**第四处**登记：.rc + CMakeLists + rtl_embedded 那张名字表只管"解包到临时目录"，
+    // 少了这里这一行，解包成功、cl 却根本不编它 ⇒ 全线 LNK2019 找不到 vb6_DTP_*（实测踩过）。
+    opts.sourceFiles.push_back(rtlDir + "/vb6forms_dtpicker.c");
+    // ai/029 C29-MV-a: MonthView —— 同样是第四处登记，少这一行就是全线 LNK2019 找不到 vb6_MV_*
+    opts.sourceFiles.push_back(rtlDir + "/vb6forms_monthview.c");
     // vb6forms_axsite.c 按功能家族拆 5 个编译单元 (2026-09-20): 伞文件本身不参与编译
     // 注意: axsite/ 下的 .c 解包后是平铺目录, 故这里写 basename 而非带子目录路径
     opts.sourceFiles.push_back(rtlDir + "/ax_site.c");
@@ -326,6 +333,182 @@ static std::string findRcExe() { return findTool("rc"); }
 
 // mt.exe 与 rc.exe 是同一批工具, 发现方式共用。它的位数无关紧要。
 static std::string findMtExe() { return findTool("mt"); }
+
+// ============================================================
+// (#44 rev2, SSTabEx 实证 2026-09-27): 用户 .res 里 RT_MANIFEST 的
+// processorArchitecture 归一化。
+//
+// 坑的实证链: VB6 IDE 生成的 manifest 恒写 processorArchitecture="x86"
+// (VB6 本身 32 位)。x64 宿主带 x86 标记的 Common-Controls 依赖 → SxS 激活
+// 上下文创建失败 → 进程初始化即 APP_INIT_FAILURE (0xC0000145), 栈顶
+// ntdll!NtRaiseHardError。交互桌面会弹"无法启动"框; 无头/自动化桌面连框都
+// 没人点 → 表现为"启动即挂死、零窗口、Responding=True"(MainWindowHandle=0
+// 时 Responding 恒真, 假绿)。SSTabEx Test.exe 两次启动都这样, 把 exe 内
+// manifest 的 x86 原位改成 "*" 后窗口立即出来 —— 因果闭环。
+//
+// 规则: 只在【标记与目标位数冲突】时把该属性改写为 "*" (SxS 通配语义):
+//   x64 目标撞 x86/ia64 改;  x86 目标撞 amd64/ia64 改; 其余原样。
+// 输出写到中间目录副本, 绝不动用户原文件; 无 RT_MANIFEST / 无冲突 →
+// 返回空串, 调用方直传原文件。
+//
+// .res 格式要点 (VisualStyleManifest.res 实测校准): 每条目 =
+//   DWORD DataSize + DWORD HeaderSize + header body(HeaderSize-8) + data
+//   + pad 到 4 对齐 (下一条目起点的对齐; 末条目 pad 可省)。
+// HeaderSize **含开头 8 字节**(marker 条目 ds=0 hs=32, body 恰 24 字节)。
+// 数值型 Type/Name = WORD 0xFFFF + WORD id (RT_MANIFEST: 0xFFFF,0x0018;
+// 资源 id 1 是激活上下文约定入口)。
+// ============================================================
+static bool fixManifestArchAttrsInPlace(std::string& xml, const std::string& arch) {
+    // 目标 arch → 需要改掉的标记集
+    auto lc = [](std::string s) {
+        for (auto& c : s) c = static_cast<char>(::tolower(static_cast<unsigned char>(c)));
+        return s;
+    };
+    std::string target = lc(arch);
+    const char* bad[2] = {nullptr, nullptr};
+    if (target == "x64") { bad[0] = "x86"; bad[1] = "ia64"; }
+    else if (target == "x86") { bad[0] = "amd64"; bad[1] = "ia64"; }
+    if (!bad[0]) return false;
+
+    // 编码探测: UTF-16LE 时 ASCII 字节后跟 0x00; 否则按字节 (ASCII/UTF-8)
+    bool utf16 = false;
+    for (size_t i = 1; i + 1 < xml.size() && i < 64; i += 2) {
+        if (xml[i] == '\0' && xml[i - 1] != '\0') { utf16 = true; break; }
+        if (xml[i] != '\0') break;
+    }
+    size_t step = utf16 ? 2 : 1;
+    // 属性名比较**大小写不敏感** — XML 实际写的是 processorArchitecture (大写 A),
+    // attr 常量已全小写, 这里把输入侧小写化; attr 本身是 ASCII, tolower 按字节即可
+    auto eqAt = [&](size_t off, const char* s) {
+        for (size_t i = 0; s[i]; ++i) {
+            if (off + i * step + (step - 1) >= xml.size()) return false;
+            char c = xml[off + i * step];
+            if (static_cast<char>(::tolower(static_cast<unsigned char>(c))) != s[i]) return false;
+            if (utf16 && xml[off + i * step + 1] != '\0') return false;
+        }
+        return true;
+    };
+    const std::string attr = "processorarchitecture";
+    // 值读取: attr 后跳空白, '=', 跳空白, '"', 读到 '"'
+    auto skipWs = [&](size_t& o) {
+        while (o < xml.size() && (xml[o] == ' ' || xml[o] == '\t' || xml[o] == '\r' || xml[o] == '\n')) o += step;
+    };
+    std::string out;
+    bool changed = false;
+    size_t pos = 0;
+    // 扫描**全部**出现 — manifest 里 assembly 自身 identity 与 dependency 各有一个
+    // processorArchitecture, 实测两处都标 x86 (VisualStyleManifest.res), 都要改
+    while (pos < xml.size()) {
+        // 属性名前必有 '<' 或空白, 直接试 eqAt; 误命中风险由
+        // 后续 '=' + '"' 结构校验兜住
+        if (eqAt(pos, attr.c_str())) {
+            size_t q = pos + attr.size() * step;
+            skipWs(q);
+            if (q < xml.size() && xml[q] == '=') {
+                q += step;
+                skipWs(q);
+                if (q < xml.size() && xml[q] == '"') {
+                    q += step;
+                    size_t v0 = q;
+                    while (q < xml.size() && xml[q] != '"') q += step;
+                    if (q < xml.size()) {
+                        // 提取值 (按字节)
+                        std::string val;
+                        for (size_t o = v0; o < q; o += step) val.push_back(xml[o]);
+                        std::string vlc = lc(val);
+                        if ((bad[0] && vlc == bad[0]) || (bad[1] && vlc == bad[1])) {
+                            out.append(xml, pos, v0 - pos);       // 属性名..'"/值前
+                            if (utf16) out.push_back('*'), out.push_back('\0');
+                            else out.push_back('*');
+                            changed = true;
+                            pos = q;                              // 从收尾 '"' 继续, 不丢属性后文
+                            continue;
+                        }
+                    }
+                }
+            }
+        }
+        // 未命中: 原样带过本字节
+        if (utf16) {
+            out.push_back(xml[pos]);
+            if (pos + 1 < xml.size()) out.push_back(xml[pos + 1]);
+        } else out.push_back(xml[pos]);
+        pos += step;
+    }
+    if (changed) xml.swap(out);
+    return changed;
+}
+
+// 返回归一化副本路径; 无需修改时返回空串 (调用方直传原文件)。
+static std::string normalizeUserResForArch(const std::string& resPathUtf8,
+                                           const std::string& arch,
+                                           const std::string& interDirUtf8,
+                                           bool verbose) {
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    if (resPathUtf8.empty() || !fs::exists(utf8ToPath(resPathUtf8), ec)) return {};
+
+    std::ifstream f(utf8ToPath(resPathUtf8), std::ios::binary);
+    if (!f) return {};
+    std::string in((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+    if (in.size() < 8) return {};
+
+    auto rd16 = [&](size_t o) -> uint16_t {
+        return uint16_t(uint8_t(in[o]) | (uint16_t(uint8_t(in[o + 1])) << 8));
+    };
+    auto rd32 = [&](size_t o) -> uint32_t {
+        return uint32_t(uint8_t(in[o])) | (uint32_t(uint8_t(in[o + 1])) << 8)
+             | (uint32_t(uint8_t(in[o + 2])) << 16) | (uint32_t(uint8_t(in[o + 3])) << 24);
+    };
+
+    std::string out;
+    int fixedCount = 0;
+    size_t off = 0;
+    bool corrupt = false;
+    while (off + 8 <= in.size()) {
+        uint32_t ds = rd32(off), hs = rd32(off + 4);
+        if (hs < 24 || (uint64_t)off + hs > in.size()
+            || (uint64_t)off + hs + (uint64_t)ds > in.size()) {
+            corrupt = true;   // 结构不认识: 整体放弃, 保持直传
+            break;
+        }
+        size_t body = off + 8, dataOff = off + hs;
+        bool isManifest = (rd16(body) == 0xFFFF && rd16(body + 2) == 24);
+        out.append(in, off, hs);   // ds + hs + header body 原样
+        if (isManifest) {
+            std::string xml = in.substr(dataOff, ds);
+            if (fixManifestArchAttrsInPlace(xml, arch)) {
+                ++fixedCount;
+                uint32_t nds = (uint32_t)xml.size();
+                out[off + 0] = uint8_t(nds);
+                out[off + 1] = uint8_t(nds >> 8);
+                out[off + 2] = uint8_t(nds >> 16);
+                out[off + 3] = uint8_t(nds >> 24);
+            }
+            out.append(xml);
+        } else {
+            out.append(in, dataOff, ds);
+        }
+        while (out.size() & 3) out.push_back('\0');
+        off = (size_t(dataOff) + ds + 3) & ~size_t(3);
+    }
+    if (corrupt || fixedCount == 0) return {};
+
+    // 副本放中间目录, 与 C3 自己生成的 .res 同居
+    fs::path inter = fs::absolute(utf8ToPath(interDirUtf8), ec);
+    std::string base = utf8ToPath(resPathUtf8).filename().u8string();
+    std::string copyName = base + ".c3.archfix.res";
+    std::string copyPath = pathToUtf8(inter / utf8ToPath(copyName));
+    std::ofstream o(utf8ToPath(copyPath), std::ios::binary | std::ios::trunc);
+    if (!o) return {};
+    o.write(out.data(), std::streamsize(out.size()));
+    if (!o) return {};
+    if (verbose) {
+        std::cout << "C3: user .res manifest arch normalized for " << arch
+                  << " target (" << fixedCount << " attr): " << copyPath << std::endl;
+    }
+    return copyPath;
+}
 
 // 应用清单在**链接完之后**用 mt.exe 注入 (P20-41 rev2)。
 //
@@ -759,8 +942,35 @@ bool Driver::runLinker(const CompileOptions& options, const std::string& outputD
         // 旁挂形式有三个硬伤: ①构建系统不感知, 改清单不触发重编 ②复制/签名/分发时
         // 容易丢, 丢掉就静默退回 comctl32 v5.82 ③同目录多份 exe 会互相串。
         // 这里生成 `1 RT_MANIFEST` (资源 id 1 是激活上下文的约定入口) 编译进 exe。
-        // 用户自己带了 ResFile=.res 就交给他, 免得两份清单打架。
-    if (!options.isDll && userResFile_.empty()) {
+        //
+        // C29-M: 让位的判据从"工程给了 ResFile= 没有"改成"**那份 .res 里到底有没有 #1 清单**"。
+        // 旧写法把两件事混成一件: 用户带一份只放图标/版本信息的 .res (VB6 里很常见) 就被当成
+        // "他自己管清单", 于是内置那份一起让掉 ⇒ 产物**静默**退回 v5.82 (实测素材:
+        // archive/vbman/src/RES/VBMANLIB.RES，5 条资源、零清单)。
+        // 现在的口径 = 用户提供的清单**优先**，没有就**用内置的**；两份 #1 才是真不能发生的事
+        // (加载器直接报错)，所以解析不出结论时**保守让位** —— 与旧行为一致，绝不叠加。
+    {
+        bool userHasManifest = false;
+        if (!userResFile_.empty()) {
+            ResFileProbe probe;
+            if (probe.loadFromPath(userResFile_)) {
+                userHasManifest = probe.hasAppManifest;
+                // 走 stderr 的 `C3:` 行：note 级信息在成功的编译里不会整体打印出来，
+                // stdout 那一路更不稳 ⇒ 判据要能在这轮构建里被 grep 到就得走这里。
+                std::cerr << "C3: application manifest: "
+                          << (userHasManifest
+                                  ? "user-supplied .res carries #1 -> using theirs"
+                                  : "user .res has no #1 (" + probe.why + ") -> injecting the built-in one")
+                          << std::endl;
+            } else {
+                userHasManifest = true;    // 认不动 ⇒ 保守让位 (见上)
+                std::cerr << "C3: warning: cannot parse ResFile (" << probe.why
+                          << "); yielding to it instead of risking two #1 manifests. "
+                          << "If the product looks like comctl32 v5, drop ResFile or add a manifest."
+                          << std::endl;
+            }
+        }
+        if (!options.isDll && !userHasManifest) {
         std::string absInterDir3 = pathToUtf8(std::filesystem::absolute(utf8ToPath(intermediatesDir)));
         std::string maniStem = projectBaseName_.empty() ? std::string("app") : projectBaseName_;
         std::string maniName = maniStem + ".c3.manifest";
@@ -843,12 +1053,19 @@ bool Driver::runLinker(const CompileOptions& options, const std::string& outputD
             }
         }
     }
+    }   // C29-M: 上面这段"要不要注内置清单"的判断整体收成一块，userHasManifest 不外泄
 
         // P23-03: Pass user .res file to linker
     if (!userResFile_.empty() && std::filesystem::exists(utf8ToPath(userResFile_))) {
-        msvcOpts.userResFile = userResFile_;
+        // (#44 rev2): x64 宿主 + 用户 manifest 的 x86 标记 = 进程初始化失败
+        // (SSTabEx 实证, 见 normalizeUserResForArch 注释)。冲突时用归一化副本。
+        std::string resForLink = userResFile_;
+        std::string normRes = normalizeUserResForArch(userResFile_, options.arch,
+                                                       intermediatesDir, options.verbose);
+        if (!normRes.empty()) resForLink = normRes;
+        msvcOpts.userResFile = resForLink;
         if (options.verbose) {
-            std::cout << "C3: User resource file: " << userResFile_ << std::endl;
+            std::cout << "C3: User resource file: " << resForLink << std::endl;
         }
     }
 

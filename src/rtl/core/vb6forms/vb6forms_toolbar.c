@@ -74,12 +74,14 @@
 #ifndef I_IMAGENONE
 #define I_IMAGENONE        (-2)
 #endif
-// 工具栏的消息与结构体在低 _WIN32_IE 下**整组缺席** (实测 10.0.19041 SDK + 本仓的
-// 编译档就是这样)：TB_RESET/TB_ADDSTRINGW/TB_ADDBUTTONSW/TBBUTTONW 全要自带。
-// TBBUTTONW 的字段序照 SDK commctrl.h —— 布局错了就是"消息发出去了、按钮全是乱的"。
-#ifndef TB_RESET
-#define TB_RESET            (WM_USER + 37)
-#endif
+// 本文件用的消息与结构体一律**与 SDK 头核对过** (`.build/tbprobe2` 那件探针在
+// 与 RTL 同一套编译档下量的): `TB_ADDSTRINGW`(+77) / `TB_AUTOSIZE`(+33) /
+// `TB_GETBUTTONINFOW`(+63) / `TB_SETBUTTONINFOW`(+64) / `TBIF_*` / `TBBUTTONINFOW`
+// 在 10.0.19041 的 commctrl.h 里**都是无条件给的** ⇒ 下面这些 #ifndef 其实是死代码,
+// 留着只为"万一换低档头"。**它们一旦存在就必须是对的** —— 5a 当初把 TB_ADDSTRINGW 写成
+// +137、TB_AUTOSIZE 写成 +27，全靠 SDK 已定义才没咬人 (同族事故见 8b 的 TVM_SETITEMSTATE)。
+// 另: **`TB_RESET` 在这份头里根本没有** (comctl 早已移除)，5a 试过那条路并写下了"不能用
+// TB_RESET"的结论，那个 #define 只是残留 ⇒ 现在删掉；Clear 走逐条 TB_DELETEBUTTON。
 #ifndef TB_BUTTONCOUNT
 #define TB_BUTTONCOUNT      (WM_USER + 24)
 #endif
@@ -87,7 +89,7 @@
 #define TB_BUTTONSTRUCTSIZE (WM_USER + 30)
 #endif
 #ifndef TB_ADDSTRINGW
-#define TB_ADDSTRINGW       (WM_USER + 137)
+#define TB_ADDSTRINGW       (WM_USER + 77)
 #endif
 #ifndef TB_ADDBUTTONSW
 #define TB_ADDBUTTONSW      (WM_USER + 68)
@@ -96,7 +98,40 @@
 #define TB_INSERTBUTTONW    (WM_USER + 67)
 #endif
 #ifndef TB_AUTOSIZE
-#define TB_AUTOSIZE         (WM_USER + 27)
+#define TB_AUTOSIZE         (WM_USER + 33)
+#endif
+#ifndef TB_DELETEBUTTON
+#define TB_DELETEBUTTON     (WM_USER + 22)
+#endif
+#ifndef TB_GETBUTTONINFOW
+#define TB_GETBUTTONINFOW   (WM_USER + 63)
+#endif
+#ifndef TB_SETBUTTONINFOW
+#define TB_SETBUTTONINFOW   (WM_USER + 64)
+#endif
+#ifndef TBN_DROPDOWN
+#define TBN_DROPDOWN        (0 - 710)     // TBN_FIRST(0-700) - 10
+#endif
+#ifndef TBIF_IMAGE
+#define TBIF_IMAGE          0x00000001
+#endif
+#ifndef TBIF_TEXT
+#define TBIF_TEXT           0x00000002
+#endif
+#ifndef TBIF_STATE
+#define TBIF_STATE          0x00000004
+#endif
+#ifndef TBIF_STYLE
+#define TBIF_STYLE          0x00000008
+#endif
+#ifndef TBIF_SIZE
+#define TBIF_SIZE           0x00000040
+#endif
+#ifndef TBIF_BYINDEX
+#define TBIF_BYINDEX        0x80000000
+#endif
+#ifndef TBSTATE_HIDDEN
+#define TBSTATE_HIDDEN      0x0008
 #endif
 #ifndef _TBBUTTON_DEFINED
 #define _TBBUTTON_DEFINED
@@ -120,6 +155,7 @@ typedef struct {
     wchar_t* key;
     wchar_t* caption;
     wchar_t* tooltip;
+    wchar_t* tag;        // 5b: VB6 的 Button.Tag (原生没有对应物，只能自己存)
     int      style;      // VB6 那一套 0..5 (不是 BTNS_*)
     int      image;      // ImageList 索引, -1 = 无
     int      width;      // VB6 请求宽度 (缇), 分隔符直接用它的像素值
@@ -156,6 +192,10 @@ static wchar_t* vb6_TbDup(const wchar_t* s) {
     wchar_t* p = (wchar_t*)HeapAlloc(GetProcessHeap(), 0, (size_t)(n + 1) * sizeof(wchar_t));
     if (p) { CopyMemory(p, s, (size_t)n * sizeof(wchar_t)); p[n] = 0; }
     return p;
+}
+
+static void vb6_TbFree(wchar_t** pp) {
+    if (*pp) { HeapFree(GetProcessHeap(), 0, *pp); *pp = NULL; }
 }
 
 static DWORD vb6_TbStyle(void* hwnd) {
@@ -241,7 +281,12 @@ int vb6_Toolbar_AddButton(void* hwnd, int32_t index, const wchar_t* key, const w
                    (size_t)(t->btnCount - slot) * sizeof(Vb6TbBtn));
     }
     Vb6TbBtn* b = &t->btn[slot];
+    // 上面那次 MoveMemory 把 btn[slot..] 整体**按值**上移一格 —— 槽里的指针此刻被
+    // slot 与 slot+1 共同指着，下面逐字段覆盖才把老指针交给 slot+1 独占。tag 是新加的
+    // 字段，也必须在这里显式清掉，否则它就成了同一块堆的两任主人 (5b 的 Tag 写进去
+    // 再 Remove/Clear 就是二次释放)。
     b->key = vb6_TbDup(key); b->caption = vb6_TbDup(caption); b->tooltip = vb6_TbDup(tooltip);
+    b->tag = NULL;
     b->style = (int)style; b->image = (int)image; b->width = (int)width;
     t->btnCount++;
 
@@ -269,9 +314,28 @@ int vb6_Toolbar_AddButton(void* hwnd, int32_t index, const wchar_t* key, const w
     LRESULT ok = (slot >= t->nNative)
         ? SendMessageW((HWND)hwnd, TB_ADDBUTTONSW, 1, (LPARAM)&bt)
         : SendMessageW((HWND)hwnd, TB_INSERTBUTTONW, (WPARAM)slot, (LPARAM)&bt);
+    if (!ok) {                                  // 控件没收下 ⇒ 表也要退回去，别让两边分叉
+        vb6_TbFree(&b->key); vb6_TbFree(&b->caption); vb6_TbFree(&b->tooltip);
+        MoveMemory(&t->btn[slot], &t->btn[slot + 1],
+                   (size_t)(t->btnCount - slot) * sizeof(Vb6TbBtn));
+        t->btnCount--;
+        return 0;
+    }
     if (slot >= t->nNative) t->nNative = slot + 1;
+    // **v6 的 TB_ADDBUTTONSW / TB_INSERTBUTTONW 不吃调用方给的 fsState**: 实测建完之后
+    // TB_GETBUTTONINFOW(TBIF_STATE) 读回 0 (连 TBSTATE_ENABLED 都没有)，于是 5b 的
+    // `Button.Enabled` 默认读数会是 False —— 与 VB6 相反。建完补一条 SETBUTTONINFO
+    // 把启用位打上去 (SETBUTTONINFO 那一路是认的：5b 的 TB21/TB22 就是它的读数)。
+    if (!sep) {
+        TBBUTTONINFOW si;
+        ZeroMemory(&si, sizeof(si));
+        si.cbSize  = sizeof(TBBUTTONINFOW);
+        si.dwMask  = TBIF_STATE | TBIF_BYINDEX;
+        si.fsState = TBSTATE_ENABLED;
+        SendMessageW((HWND)hwnd, TB_SETBUTTONINFOW, (WPARAM)slot, (LPARAM)&si);
+    }
     InvalidateRect((HWND)hwnd, NULL, TRUE);
-    return ok ? -1 : 0;
+    return slot + 1;                            // 5b: Buttons.Add 的返回值 = 1 基序号
 }
 
 // 原生侧的按钮数 —— 判据用它证"设计期那几条真进了控件"（VB 侧的 Buttons.Count 属于 5b）。
@@ -290,5 +354,314 @@ void vb6_Toolbar_Init(void* hwnd, int32_t showTips, int32_t textStyle,
     if (allowCustomize != -999) vb6_Toolbar_SetAllowCustomize(hwnd, allowCustomize);
     if (align          != -999) vb6_Toolbar_SetAlign(hwnd, align);
 }
+
+/* ============================================================================
+ * C29-5b: Buttons 集合与 Button 对象 —— 复用 vb6forms_memberobj.c 那套真 IDispatch
+ * 成员对象机制 (与 C29-3 ImageList / C29-7 ListView / C29-4 Panel / C29-8b Node 同族)。
+ * 集合入口 vb6_Toolbar_Buttons() 由 memberobj.c 提供，本文件只交数据面。
+ *
+ * 读数分两处，分界线是"原生答不答得了"：
+ *   Text / Enabled / Visible / Image  —— **现问控件** (TB_GETBUTTONINFOW)，改也同步下去
+ *   Style / Key / Tag / ToolTipText / Width —— 住在 5a 那张表里
+ * Style 为什么不走原生：原生 fsStyle 分不出"分隔符"(BTNS_SEP) 与"占位符"(VB6 的 4 ——
+ * 5a 把两者都发成 BTNS_SEP，只在 iBitmap/cx 里带宽度)，问原生就丢一档。ToolTipText 是
+ * VB 侧字符串 (原生要在 TTN_GETDISPINFO 里回文本，那是 ButtonClick 那一格的事)。
+ *
+ * 一律按**索引**找按钮 (TBIF_BYINDEX)：idCommand 虽然发的是 1 基序号，但分隔符在 VB6 里
+ * 也可以有 id，靠 id 找会撞车。
+ * ==========================================================================*/
+
+#define VB6_TB_TEXT_MAX 256
+// 唯一的消费者是 memberobj 的 memSetStr，它当场拷成自己的 BSTR；单线程 UI 代码，
+// 一个静态缓冲足够 (与 8b 那几个"表内自有指针"同一口径)。
+static wchar_t g_tbText[VB6_TB_TEXT_MAX];
+
+static Vb6TbBtn* vb6_TbBtnAt(void* hwnd, int32_t idx) {
+    if (!hwnd || idx < 1) return NULL;
+    Vb6Toolbar* t = vb6_TbFind((HWND)hwnd);
+    if (!t || idx > t->btnCount) return NULL;
+    return &t->btn[idx - 1];
+}
+
+static BOOL vb6_TbGetInfo(HWND h, int32_t idx, TBBUTTONINFOW* bi, DWORD mask) {
+    ZeroMemory(bi, sizeof(*bi));
+    bi->cbSize    = sizeof(TBBUTTONINFOW);
+    bi->dwMask    = mask | TBIF_BYINDEX;
+    bi->idCommand = (int)idx - 1;        // TBIF_BYINDEX ⇒ 这一栏是 0 基索引
+    return SendMessageW(h, TB_GETBUTTONINFOW, (WPARAM)idx - 1, (LPARAM)bi) != (LRESULT)-1;
+}
+
+static BOOL vb6_TbSetInfo(HWND h, int32_t idx, TBBUTTONINFOW* bi) {
+    if (!h) return FALSE;
+    bi->cbSize = sizeof(TBBUTTONINFOW);
+    bi->dwMask |= TBIF_BYINDEX;
+    SendMessageW(h, TB_BUTTONSTRUCTSIZE, (WPARAM)sizeof(TBBUTTONW), 0);   // v6 前置，幂等
+    BOOL ok = SendMessageW(h, TB_SETBUTTONINFOW, (WPARAM)idx - 1, (LPARAM)bi) != 0;
+    InvalidateRect(h, NULL, FALSE);
+    return ok;
+}
+
+int32_t vb6_Toolbar_ButtonCount(void* hwnd) {
+    return vb6_Toolbar_GetButtonCount(hwnd);          // 就是 TB_BUTTONCOUNT，不另数一遍表
+}
+
+int32_t vb6_Toolbar_ButtonIndexByKey(void* hwnd, const wchar_t* key) {
+    if (!hwnd || !key || !*key) return 0;
+    Vb6Toolbar* t = vb6_TbFind((HWND)hwnd);
+    if (!t) return 0;
+    for (int i = 0; i < t->btnCount; i++)
+        if (t->btn[i].key && lstrcmpiW(t->btn[i].key, key) == 0) return (int32_t)(i + 1);
+    return 0;
+}
+
+// ---------------- Text / Image / Enabled / Visible：现问控件 ----------------
+const wchar_t* vb6_Toolbar_GetButtonCaption(void* hwnd, int32_t idx) {
+    g_tbText[0] = 0;
+    if (!hwnd) return g_tbText;
+    wchar_t buf[VB6_TB_TEXT_MAX];
+    buf[0] = 0;
+    TBBUTTONINFOW bi;
+    ZeroMemory(&bi, sizeof(bi));
+    bi.cbSize    = sizeof(TBBUTTONINFOW);
+    bi.dwMask    = TBIF_TEXT | TBIF_BYINDEX;
+    bi.idCommand = (int)idx - 1;
+    bi.pszText   = buf;
+    bi.cchText   = VB6_TB_TEXT_MAX;
+    // pszText 必须**一上来就带缓冲**：TB_GETBUTTONINFOW 只填它指的那块内存，
+    // 先问一次"有没有"再问文本是错的用法 (第一趟就会往 NULL 里写)。
+    if (SendMessageW((HWND)hwnd, TB_GETBUTTONINFOW, (WPARAM)idx - 1, (LPARAM)&bi) != (LRESULT)-1)
+        lstrcpynW(g_tbText, buf, VB6_TB_TEXT_MAX);
+    return g_tbText;
+}
+
+void vb6_Toolbar_SetButtonCaption(void* hwnd, int32_t idx, const wchar_t* v) {
+    Vb6TbBtn* b = vb6_TbBtnAt(hwnd, idx);
+    if (!b) return;
+    vb6_TbFree(&b->caption);
+    b->caption = vb6_TbDup(v);                       // 表里那份跟着走，Remove/清表要放它
+    TBBUTTONINFOW bi;
+    ZeroMemory(&bi, sizeof(bi));
+    bi.dwMask  = TBIF_TEXT;
+    bi.pszText = (LPWSTR)(v ? v : (wchar_t*)L"");
+    vb6_TbSetInfo((HWND)hwnd, idx, &bi);
+}
+
+int32_t vb6_Toolbar_GetButtonImage(void* hwnd, int32_t idx) {
+    if (!hwnd) return -1;
+    TBBUTTONINFOW bi;
+    if (!vb6_TbGetInfo((HWND)hwnd, idx, &bi, TBIF_IMAGE)) return -1;
+    return (bi.iImage == (int)I_IMAGENONE) ? -1 : (int32_t)bi.iImage;
+}
+
+void vb6_Toolbar_SetButtonImage(void* hwnd, int32_t idx, int32_t v) {
+    Vb6TbBtn* b = vb6_TbBtnAt(hwnd, idx);
+    if (!b) return;
+    b->image = (int)v;
+    TBBUTTONINFOW bi;
+    ZeroMemory(&bi, sizeof(bi));
+    bi.dwMask = TBIF_IMAGE;
+    bi.iImage = (v >= 0) ? (int)v : (int)I_IMAGENONE;
+    vb6_TbSetInfo((HWND)hwnd, idx, &bi);
+}
+
+int32_t vb6_Toolbar_GetButtonEnabled(void* hwnd, int32_t idx) {
+    if (!hwnd) return 0;
+    TBBUTTONINFOW bi;
+    return vb6_TbGetInfo((HWND)hwnd, idx, &bi, TBIF_STATE) && (bi.fsState & TBSTATE_ENABLED) ? -1 : 0;
+}
+
+void vb6_Toolbar_SetButtonEnabled(void* hwnd, int32_t idx, int32_t v) {
+    if (!hwnd) return;
+    TBBUTTONINFOW bi;
+    if (!vb6_TbGetInfo((HWND)hwnd, idx, &bi, TBIF_STATE)) return;
+    bi.fsState = (BYTE)((v != 0) ? (bi.fsState | TBSTATE_ENABLED)
+                                 : (bi.fsState & (BYTE)~TBSTATE_ENABLED));
+    bi.dwMask  = TBIF_STATE;
+    vb6_TbSetInfo((HWND)hwnd, idx, &bi);
+}
+
+int32_t vb6_Toolbar_GetButtonVisible(void* hwnd, int32_t idx) {
+    if (!hwnd) return -1;
+    TBBUTTONINFOW bi;
+    if (!vb6_TbGetInfo((HWND)hwnd, idx, &bi, TBIF_STATE)) return 0;
+    return (bi.fsState & TBSTATE_HIDDEN) ? 0 : -1;
+}
+
+void vb6_Toolbar_SetButtonVisible(void* hwnd, int32_t idx, int32_t v) {
+    if (!hwnd) return;
+    TBBUTTONINFOW bi;
+    if (!vb6_TbGetInfo((HWND)hwnd, idx, &bi, TBIF_STATE)) return;
+    bi.fsState = (BYTE)((v != 0) ? (bi.fsState & (BYTE)~TBSTATE_HIDDEN)
+                                 : (bi.fsState | TBSTATE_HIDDEN));
+    bi.dwMask  = TBIF_STATE;
+    vb6_TbSetInfo((HWND)hwnd, idx, &bi);
+}
+
+// ---------------- Style / Key / Tag / ToolTipText / Width：住在表里 ----------------
+int32_t vb6_Toolbar_GetButtonStyle(void* hwnd, int32_t idx) {
+    Vb6TbBtn* b = vb6_TbBtnAt(hwnd, idx);
+    return b ? (int32_t)b->style : -1;
+}
+
+void vb6_Toolbar_SetButtonStyle(void* hwnd, int32_t idx, int32_t v) {
+    Vb6TbBtn* b = vb6_TbBtnAt(hwnd, idx);
+    if (!b) return;
+    b->style = (int)v;                               // VB 那一套 0..5 (占位符只有表里分得出)
+    TBBUTTONINFOW bi;
+    ZeroMemory(&bi, sizeof(bi));
+    bi.dwMask  = TBIF_STYLE;
+    bi.fsStyle = (BYTE)vb6_TbNativeStyle((int)v);
+    vb6_TbSetInfo((HWND)hwnd, idx, &bi);
+}
+
+const wchar_t* vb6_Toolbar_GetButtonKey(void* hwnd, int32_t idx) {
+    Vb6TbBtn* b = vb6_TbBtnAt(hwnd, idx);
+    return (b && b->key) ? b->key : L"";
+}
+void vb6_Toolbar_SetButtonKey(void* hwnd, int32_t idx, const wchar_t* v) {
+    Vb6TbBtn* b = vb6_TbBtnAt(hwnd, idx);
+    if (!b) return;
+    vb6_TbFree(&b->key);
+    b->key = vb6_TbDup(v);
+}
+const wchar_t* vb6_Toolbar_GetButtonTag(void* hwnd, int32_t idx) {
+    Vb6TbBtn* b = vb6_TbBtnAt(hwnd, idx);
+    return (b && b->tag) ? b->tag : L"";
+}
+void vb6_Toolbar_SetButtonTag(void* hwnd, int32_t idx, const wchar_t* v) {
+    Vb6TbBtn* b = vb6_TbBtnAt(hwnd, idx);
+    if (!b) return;
+    vb6_TbFree(&b->tag);
+    b->tag = vb6_TbDup(v);
+}
+const wchar_t* vb6_Toolbar_GetButtonToolTip(void* hwnd, int32_t idx) {
+    Vb6TbBtn* b = vb6_TbBtnAt(hwnd, idx);
+    return (b && b->tooltip) ? b->tooltip : L"";
+}
+void vb6_Toolbar_SetButtonToolTip(void* hwnd, int32_t idx, const wchar_t* v) {
+    Vb6TbBtn* b = vb6_TbBtnAt(hwnd, idx);
+    if (!b) return;
+    vb6_TbFree(&b->tooltip);
+    b->tooltip = vb6_TbDup(v);
+}
+int32_t vb6_Toolbar_GetButtonWidth(void* hwnd, int32_t idx) {
+    Vb6TbBtn* b = vb6_TbBtnAt(hwnd, idx);
+    return b ? (int32_t)b->width : 0;
+}
+void vb6_Toolbar_SetButtonWidth(void* hwnd, int32_t idx, int32_t v) {
+    Vb6TbBtn* b = vb6_TbBtnAt(hwnd, idx);
+    if (!b) return;
+    b->width = (int)v;
+    TBBUTTONINFOW bi;
+    ZeroMemory(&bi, sizeof(bi));
+    bi.dwMask = TBIF_SIZE;
+    bi.cx     = (WORD)v;
+    vb6_TbSetInfo((HWND)hwnd, idx, &bi);
+}
+
+// Value = VB6 那一套里"复选按钮勾上没有"，落在原生 TBSTATE_CHECKED 位上 (与 Enabled/
+// Visible 同一族：读改写整个 fsState，TBBUTTONINFO 没有 stateMask 这一栏)。
+#ifndef TBSTATE_CHECKED
+#define TBSTATE_CHECKED   0x0001
+#endif
+int32_t vb6_Toolbar_GetButtonValue(void* hwnd, int32_t idx) {
+    if (!hwnd) return 0;
+    TBBUTTONINFOW bi;
+    return vb6_TbGetInfo((HWND)hwnd, idx, &bi, TBIF_STATE) && (bi.fsState & TBSTATE_CHECKED) ? -1 : 0;
+}
+
+void vb6_Toolbar_SetButtonValue(void* hwnd, int32_t idx, int32_t v) {
+    if (!hwnd) return;
+    TBBUTTONINFOW bi;
+    if (!vb6_TbGetInfo((HWND)hwnd, idx, &bi, TBIF_STATE)) return;
+    bi.fsState = (BYTE)((v != 0) ? (bi.fsState | TBSTATE_CHECKED)
+                                 : (bi.fsState & (BYTE)~TBSTATE_CHECKED));
+    bi.dwMask  = TBIF_STATE;
+    vb6_TbSetInfo((HWND)hwnd, idx, &bi);
+}
+
+// ---------------- Remove / Clear ----------------
+// 控件与表一起退格：先 TB_DELETEBUTTON (按索引)，再把表里那一格往后挪。
+// 与 8b 的 RemoveNode 同一理由 —— 只动一边，Count 与屏幕立刻分叉。
+int32_t vb6_Toolbar_RemoveButton(void* hwnd, int32_t idx) {
+    Vb6Toolbar* t = hwnd ? vb6_TbFind((HWND)hwnd) : NULL;
+    if (!t || idx < 1 || idx > t->btnCount) return 0;
+    SendMessageW((HWND)hwnd, TB_BUTTONSTRUCTSIZE, (WPARAM)sizeof(TBBUTTONW), 0);
+    if (!SendMessageW((HWND)hwnd, TB_DELETEBUTTON, (WPARAM)idx - 1, 0)) return 0;
+    Vb6TbBtn* b = &t->btn[idx - 1];
+    vb6_TbFree(&b->key); vb6_TbFree(&b->caption); vb6_TbFree(&b->tooltip); vb6_TbFree(&b->tag);
+    MoveMemory(&t->btn[idx - 1], &t->btn[idx],
+               (size_t)(t->btnCount - idx) * sizeof(Vb6TbBtn));
+    t->btnCount--;
+    if (t->nNative > 0) t->nNative--;
+    InvalidateRect((HWND)hwnd, NULL, TRUE);
+    return -1;
+}
+
+void vb6_Toolbar_ClearButtons(void* hwnd) {
+    Vb6Toolbar* t = hwnd ? vb6_TbFind((HWND)hwnd) : NULL;
+    if (!t) return;
+    // 从后往前删：TB_DELETEBUTTON 按索引，正着删会把后面的格一个个跳过去。
+    while (t->btnCount > 0) {
+        if (!SendMessageW((HWND)hwnd, TB_DELETEBUTTON, (WPARAM)t->btnCount - 1, 0)) break;
+        Vb6TbBtn* b = &t->btn[t->btnCount - 1];
+        vb6_TbFree(&b->key); vb6_TbFree(&b->caption); vb6_TbFree(&b->tooltip); vb6_TbFree(&b->tag);
+        t->btnCount--;
+    }
+    t->nNative = 0;
+    InvalidateRect((HWND)hwnd, NULL, TRUE);
+}
+
+
+// ---------------- C29-5c: 两条按钮事件的判据辅助 ----------------
+// 无头环境点不了鼠标，而直接调 handler 会绕开整条派发链。这里的做法是**照真控件的样子把
+// 消息发给父窗**，让 cgen 那两处派发分支各跑一遍 (手法照 C29-8c 的 TvSendNotify)。
+//
+// **两条事件不在同一条通道上** —— 原先 #89 记的"跟 TreeView 一样共用 WM_NOTIFY"只对了一半：
+//   ButtonClick      → WM_COMMAND, LOWORD(wParam)=按钮的 idCommand, HIWORD=0, lParam=工具栏 HWND
+//   ButtonMenuClick  → WM_NOTIFY,  hdr.code=TBN_DROPDOWN(-710), hdr.idFrom=同一个 idCommand
+//                      (只有 BTNS_DROPDOWN = VB6 的 Style 5 那种带下拉箭头的按钮发得出来)
+//
+// **为什么不向控件现问 idCommand**（两条路都试过，读数留在这里免得有人再试）：
+//   · `TB_GETBUTTON`（v4 那条，按 0 基索引）：独立探针里 rc=1 / idCommand=1..3 / 越界 rc=0
+//     看着全对，产物里同一句却一条都不回（事件读数全 N）。**探针与产物不同版本**这条老嫌疑
+//     (ai/029 §三 D3) 当场记过账；C29-V6 把编译期的 `_WIN32_IE` 统一到 v6 之后重问，**依旧不回**。
+//   · `TB_GETBUTTONINFO + TBIF_COMMAND|TBIF_STYLE|TBIF_BYINDEX`：临时 env 门控探针量到
+//     `idx=1 rc=0 id=-1`、`idx=2 rc=1 id=-1`、`idx=3 rc=2 id=-1` —— rc 恰好等于传进去的
+//     wParam，结构体一个字段都不填；**v6 声明下（`sizeof(TBBUTTONINFOW)` 44→48，证宏真生效）
+//     重问读数逐字相同** ⇒ 这条 GET 压根不读回 idCommand，与 comctl 版本无关。
+// ⇒ 判据改用**表**：序号边界问 `vb6_TbBtnAt`、下拉位问 `b->style == 5`。两条闸各自都能被读数
+//   证伪（TB31 / TB33），而"控件里的 idCommand 就是槽号+1"由 `Buttons.Count`(原生
+//   `TB_BUTTONCOUNT`) 与表数一致（TB34）从另一侧钉住。
+static Vb6TbBtn* vb6_TbSimTarget(void* hwnd, int32_t idx, int wantDropdown) {
+    Vb6TbBtn* b = vb6_TbBtnAt(hwnd, idx);
+    if (!b) return NULL;
+    // 真控件不会为普通按钮发 TBN_DROPDOWN，判据也不发 —— 否则那条读数成了自证。
+    if (wantDropdown && b->style != 5) return NULL;
+    if (!wantDropdown && b->style == 3) return NULL;   // 分隔符按不动
+    return b;
+}
+
+void vb6_Toolbar_SimButtonClick(void* hwnd, int32_t idx) {
+    HWND parent;
+    if (!vb6_TbSimTarget(hwnd, idx, 0)) return;
+    parent = GetParent((HWND)hwnd);
+    if (!parent) return;
+    SendMessageW(parent, WM_COMMAND, (WPARAM)MAKEWPARAM((WORD)idx, 0), (LPARAM)(HWND)hwnd);
+}
+
+void vb6_Toolbar_SimButtonMenuClick(void* hwnd, int32_t idx) {
+    NMTOOLBARW nt;
+    HWND parent;
+    if (!vb6_TbSimTarget(hwnd, idx, 1)) return;
+    parent = GetParent((HWND)hwnd);
+    if (!parent) return;
+    ZeroMemory(&nt, sizeof(nt));
+    nt.hdr.hwndFrom = (HWND)hwnd;
+    nt.hdr.idFrom   = (UINT_PTR)idx;
+    nt.hdr.code     = (DWORD)TBN_DROPDOWN;
+    SendMessageW(parent, WM_NOTIFY, 0, (LPARAM)&nt);
+}
+
 
 #endif // _WIN32

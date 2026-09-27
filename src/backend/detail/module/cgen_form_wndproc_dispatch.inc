@@ -64,10 +64,39 @@
                 anyNotify = true;
                 break;
             }
+            // C29-8c: TreeView 的三条通知事件同理 (NodeClick / Expand / Collapse)。
+            if (ctrl.controlType == FrmControlType::TreeView) {
+                if (!symTab_.lookup(ctrl.controlName + "_NodeClick") &&
+                    !symTab_.lookup(ctrl.controlName + "_Expand") &&
+                    !symTab_.lookup(ctrl.controlName + "_Collapse")) continue;
+                anyNotify = true;
+                break;
+            }
             // C29-4: StatusBar 的 PanelClick / PanelDblClick 同理。
             if (ctrl.controlType == FrmControlType::StatusBar) {
                 if (!symTab_.lookup(ctrl.controlName + "_PanelClick") &&
                     !symTab_.lookup(ctrl.controlName + "_PanelDblClick")) continue;
+                anyNotify = true;
+                break;
+            }
+            // C29-5c: Toolbar 只有 _ButtonMenuClick 走这条 (TBN_DROPDOWN)；
+            // _ButtonClick 在 WM_COMMAND 那一路 (见 cgen_form_wndproc_create.inc)。
+            if (ctrl.controlType == FrmControlType::Toolbar) {
+                if (!symTab_.lookup(ctrl.controlName + "_ButtonMenuClick")) continue;
+                anyNotify = true;
+                break;
+            }
+            // C29-DT-c: DTPicker 的三条 DTN_* 通知同理 (Change / DropDown / CloseUp)。
+            if (ctrl.controlType == FrmControlType::DTPicker) {
+                if (!symTab_.lookup(ctrl.controlName + "_Change") &&
+                    !symTab_.lookup(ctrl.controlName + "_DropDown") &&
+                    !symTab_.lookup(ctrl.controlName + "_CloseUp")) continue;
+                anyNotify = true;
+                break;
+            }
+            // C29-MV-c: MonthView 的 DateClick (原生 MCN_SELCHANGE) 同理。
+            if (ctrl.controlType == FrmControlType::MonthView) {
+                if (!symTab_.lookup(ctrl.controlName + "_DateClick")) continue;
                 anyNotify = true;
                 break;
             }
@@ -198,6 +227,142 @@
                     c_.dedent();
                     c_.emitLine("}");
                 }
+
+            }
+            // ---- C29-8c: TreeView 的 NodeClick / Expand / Collapse ----
+            // TVN_SELCHANGEDW(-451) 走 NodeClick；TVN_ITEMEXPANDEDW(-455) 按 action 分给
+            // Expand / Collapse。通知负载 NMTREEVIEWW 里的 itemNew.hItem 由 RTL 折成 1 基
+            // 节点序号，再拿 vb6_TreeView_NodeAt 造出 Node 对象回调 —— VB6 的处理器参数就
+            // 是这个对象:
+            //   Sub TreeView1_NodeClick(ByVal Node As Node)
+            //   Sub TreeView1_Expand(ByVal Node As Node)   /   _Collapse 同形
+            // 形状与上面 ListView / StatusBar 那两条完全同构 (共用同一个 anyNotify 分支)。
+            for (const auto& ctrl : frmDesc.formControl.children) {
+                if (ctrl.controlType != FrmControlType::TreeView) continue;
+                auto* ncSym = symTab_.lookup(ctrl.controlName + "_NodeClick");
+                auto* exSym = symTab_.lookup(ctrl.controlName + "_Expand");
+                auto* coSym = symTab_.lookup(ctrl.controlName + "_Collapse");
+                if (!ncSym && !exSym && !coSym) continue;
+                std::string tvNameLower = ctrl.controlName;
+                std::transform(tvNameLower.begin(), tvNameLower.end(), tvNameLower.begin(), ::tolower);
+                std::string tvHwndVar = knownControlArrays_.count(tvNameLower)
+                    ? ("vb6_CtrlArr_GetAt(&vb6_arr_" + cIdent(ctrl.controlName) + ", 0)")
+                    : ("vb6_hwnd_" + cIdent(ctrl.controlName));
+                // wantExp == 999 = 这条不看 action (NodeClick)；否则 -1 = 展开、0 = 折回。
+                struct TvEvt { int32_t code; Symbol* sym; const char* tag; int32_t wantExp; };
+                TvEvt tvEvts[] = {
+                    { -451, ncSym, "nc8c", 999 },
+                    { -455, exSym, "ex8c",  -1 },
+                    { -455, coSym, "co8c",   0 } };
+                for (const TvEvt& ev : tvEvts) {
+                    if (!ev.sym) continue;
+                    std::string fn = cProcName(ev.sym->name, AccessLevel::Private);
+                    // ev.tag 是 const char* —— 与字面量直接相加就是"两个指针相加" (C2110)，
+                    // 先把中段包成 std::string 再拼。
+                    std::string vIdx = std::string("vb6_tvIdx8c_") + ev.tag;
+                    std::string vNode = std::string("vb6_tvNode8c_") + ev.tag;
+                    c_.emitLine("if (pNM42->code == " + std::to_string(ev.code)
+                                + " && (void*)pNM42->hwndFrom == " + tvHwndVar + ") {");
+                    c_.indent();
+                    c_.emitLine("extern void " + fn + "(void*);");
+                    c_.emitLine("int32_t " + vIdx + " = vb6_TreeView_NotifyNodeIndex((void*)"
+                                + tvHwndVar + ", (void*)lParam);");
+                    if (ev.wantExp == 999)
+                        c_.emitLine("if (" + vIdx + " > 0) {");
+                    else
+                        c_.emitLine("if (" + vIdx + " > 0 && vb6_TreeView_NotifyExpanded("
+                                    + "(void*)lParam) == " + std::to_string(ev.wantExp) + ") {");
+                    c_.indent();
+                    c_.emitLine("void* " + vNode + " = vb6_TreeView_NodeAt((void*)"
+                                + tvHwndVar + ", " + vIdx + ");");
+                    c_.emitLine("if (" + vNode + ") " + fn + "(" + vNode + ");");
+                    c_.dedent();
+                    c_.emitLine("}");
+                    c_.dedent();
+                    c_.emitLine("}");
+                }
+            }
+            // ---- C29-5c: Toolbar 的 ButtonMenuClick ----
+            // TBN_DROPDOWN(-710) 只有带下拉箭头的按钮 (VB6 的 Style 5 = BTNS_DROPDOWN) 发得
+            // 出来；hdr.idFrom 就是那颗按钮的 idCommand —— 与 WM_COMMAND 那一路同一个值，
+            // 所以造对象照用 vb6_Toolbar_ButtonAt:
+            //   Sub Toolbar1_ButtonMenuClick(ByVal Button As Button)
+            for (const auto& ctrl : frmDesc.formControl.children) {
+                if (ctrl.controlType != FrmControlType::Toolbar) continue;
+                auto* mcSym = symTab_.lookup(ctrl.controlName + "_ButtonMenuClick");
+                if (!mcSym) continue;
+                std::string mcNameLower = ctrl.controlName;
+                std::transform(mcNameLower.begin(), mcNameLower.end(), mcNameLower.begin(), ::tolower);
+                std::string tbHwndVar = knownControlArrays_.count(mcNameLower)
+                    ? ("vb6_CtrlArr_GetAt(&vb6_arr_" + cIdent(ctrl.controlName) + ", 0)")
+                    : ("vb6_hwnd_" + cIdent(ctrl.controlName));
+                std::string mcFn = cProcName(mcSym->name, AccessLevel::Private);
+                c_.emitLine("if (pNM42->code == -710 && (void*)pNM42->hwndFrom == " + tbHwndVar + ") {");
+                c_.indent();
+                c_.emitLine("extern void " + mcFn + "(void*);");
+                c_.emitLine("void* vb6_tbMenuBtn5c = vb6_Toolbar_ButtonAt((void*)" + tbHwndVar
+                            + ", (int32_t)pNM42->idFrom);");
+                c_.emitLine("if (vb6_tbMenuBtn5c) " + mcFn + "(vb6_tbMenuBtn5c);");
+                c_.dedent();
+                c_.emitLine("}");
+            }
+            // ---- C29-DT-c: DTPicker 的 Change / DropDown / CloseUp ----
+            // 三条都由 DTN_* 通知来 (SDK: DTN_FIRST2 = (0U-753U)，本机那份头逐条对过)：
+            //   DTN_DATETIMECHANGE = -759   DTN_DROPDOWN = -754   DTN_CLOSEUP = -753
+            // 与 ListView / TreeView 那两条的**关键差别**：VB6 的这三个处理器都没有参数
+            //   Sub DTPicker1_Change()   /   _DropDown()   /   _CloseUp()
+            // 所以不需要按负载造成员对象，认来源 (hwndFrom) + 分流 (code) 就是全部工作。
+            // DTN_DATETIMECHANGE 的负载里那位 dwFlags (GDT_VALID / GDT_NONE) 这里刻意**不读**:
+            // VB6 的 Change 对"勾掉复选框"和"拨了日期"一视同仁，两条都是"值变了"。
+            for (const auto& ctrl : frmDesc.formControl.children) {
+                if (ctrl.controlType != FrmControlType::DTPicker) continue;
+                struct DtEvt { int32_t code; const char* evt; const char* tag; };
+                const DtEvt dtEvts[] = { { -759, "_Change", "chg" },
+                                         { -754, "_DropDown", "drp" },
+                                         { -753, "_CloseUp", "clu" } };
+                std::string dtNameLower = ctrl.controlName;
+                std::transform(dtNameLower.begin(), dtNameLower.end(), dtNameLower.begin(), ::tolower);
+                std::string dtHwndVar = knownControlArrays_.count(dtNameLower)
+                    ? ("vb6_CtrlArr_GetAt(&vb6_arr_" + cIdent(ctrl.controlName) + ", 0)")
+                    : ("vb6_hwnd_" + cIdent(ctrl.controlName));
+                for (const DtEvt& ev : dtEvts) {
+                    auto* evSym = symTab_.lookup(ctrl.controlName + ev.evt);
+                    if (!evSym) continue;
+                    std::string dtFn = cProcName(evSym->name, AccessLevel::Private);
+                    c_.emitLine("if (pNM42->code == " + std::to_string(ev.code)
+                                + " && (void*)pNM42->hwndFrom == " + dtHwndVar + ") {");
+                    c_.indent();
+                    c_.emitLine("{ extern void " + dtFn + "(); " + dtFn + "(); }");
+                    c_.dedent();
+                    c_.emitLine("}");
+                }
+            }
+            // ---- C29-MV-c: MonthView 的 DateClick ----
+            // 原生一条 MCN_SELCHANGE(-749)，负载 NMSELCHANGE{nmhdr, stSelStart, stSelEnd}。
+            // 与 DT-c 那三条的**关键差别**：VB6 这条处理器带一个 Date 参数
+            //   Sub MonthView1_DateClick(ByVal DateSelected As Date)
+            // ⇒ 要把负载折成 Date（vb6_MV_NotifyDate 干这件事）再传出去。
+            // ⚠ **ABI 由 ByVal 决定**（实测：形状写错时 x64 侥幸读数正确、x86 当场错值）——
+            //   cgen_decl_proc.cpp:94 那条规则是"ByVal ⇒ 原样传值，非 ByVal(即 ByRef) ⇒ 传指针",
+            //   所以 Form_MouseDown 那批**没写 ByVal** 的参数才是 int16_t*/float*, 而这条
+            //   `ByVal DateSelected As Date` 的定义发的是 `double DateSelected` ⇒ 按值传。
+            for (const auto& ctrl : frmDesc.formControl.children) {
+                if (ctrl.controlType != FrmControlType::MonthView) continue;
+                auto* mvSym = symTab_.lookup(ctrl.controlName + "_DateClick");
+                if (!mvSym) continue;
+                std::string mvNLower = ctrl.controlName;
+                std::transform(mvNLower.begin(), mvNLower.end(), mvNLower.begin(), ::tolower);
+                std::string mvNHwnd = knownControlArrays_.count(mvNLower)
+                    ? ("vb6_CtrlArr_GetAt(&vb6_arr_" + cIdent(ctrl.controlName) + ", 0)")
+                    : ("vb6_hwnd_" + cIdent(ctrl.controlName));
+                std::string mvFn = cProcName(mvSym->name, AccessLevel::Private);
+                c_.emitLine("if (pNM42->code == -749 && (void*)pNM42->hwndFrom == "
+                            + mvNHwnd + ") {");
+                c_.indent();
+                c_.emitLine("extern void " + mvFn + "(double);");
+                c_.emitLine(mvFn + "(vb6_MV_NotifyDate((void*)lParam));");
+                c_.dedent();
+                c_.emitLine("}");
             }
             c_.emitLine("break;");
             c_.dedent();

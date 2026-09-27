@@ -44,6 +44,11 @@ Begin VB.Form TbForm
       Top             =   1200
       Width           =   1200
    End
+   Begin VB.Timer evtTimer 
+      Interval        =   200
+      Left            =   240
+      Top             =   1920
+   End
 End
 Attribute VB_Name = "TbForm"
 Attribute VB_GlobalNameSpace = False
@@ -59,7 +64,22 @@ Option Explicit
 ' 是静默空转)。本批三面一起接上：创建那一刀、标量属性表、设计期 Buttons 逐条 TB_ADDBUTTONSW。
 ' 口径: Buttons.Count 的读数来自**原生 TB_BUTTONCOUNT**，不是我那张表自己报数 —— 所以它证的
 ' 是"设计期那三条真进了控件"。分隔符也计入原生按钮数 (与 VB6 一致)。
-' Button 对象那一族 ((i).Key/.Caption、Add、ButtonClick) 留 5b：它吃成员对象机制。
+' C29-5b 在这一格后面加了 15 条 Buttons/Button 读数 (TB13-TB27)：集合是真 IDispatch
+' (vb6forms_memberobj.c 的 BUTTONS 族)，Caption/Image/Enabled/Visible/Value 现问控件，
+' Key/Tag/ToolTipText/Style/Width 住 5a 那张表 (原生 fsStyle 分不出分隔符与占位符)。
+' 量到的一条 v6 坑：TB_ADDBUTTONSW 不吃调用方给的 fsState (建完读回 0) ⇒ Button.Enabled
+' 默认会是 False，建完补一条 TB_SETBUTTONINFOW 打回启用位 (TB19 就是这条读数)。
+' 还欠：ImageList 关联、真停靠与真自定义。
+' C29-5c 接上两条按钮事件的派发 (TB28-TB34)。**两条不在同一条通道上**：ButtonClick 走
+' WM_COMMAND (LOWORD=按钮的 idCommand、HIWORD=0、lParam=工具栏 HWND)，ButtonMenuClick 走
+' WM_NOTIFY 的 TBN_DROPDOWN(-710)，且只有 Style 5 (带下拉箭头) 那颗按钮发得出来。
+
+Private gClicks As Long
+Private gMenu As Long
+Private gOther As Long
+Private gHitOne As Long
+Private gHitTwo As Long
+Private gHitMenu As Long
 
 Private Function TF(ByVal ok As Boolean) As String
     If ok Then TF = "Y" Else TF = "N"
@@ -104,6 +124,142 @@ Private Sub Form_Load()
     auxList.AddItem "one"
     Debug.Print "TB12=" & TF(auxList.ListCount = 1 And tb2.Enabled <> 0)
 
+    ' ============================================================
+    ' --- 5b: Buttons 集合与 Button 对象 (真 IDispatch, 复用 memberobj 那一族) ---
+    '     分界线: Caption / Image / Enabled / Visible / Value **现问控件**
+    '     (TB_GET/SETBUTTONINFOW), Key / Tag / ToolTipText / Style / Width 住 5a 那张表。
+    Dim b1 As Object, b2 As Object, b3 As Object
+    Set b1 = tb1.Buttons(1)
+    Set b2 = tb1.Buttons("save")
+    Set b3 = tb1.Buttons(3)
+    Debug.Print "TB13=" & TF(tb1.Buttons.Count = 3)
+
+    ' --- 14. 按 Key 取下标 + 下标取回同一格 ---
+    Dim sK1 As String
+    sK1 = b1.Key
+    Debug.Print "TB14=" & TF(b2.Index = 3 And sK1 = "open")
+
+    ' --- 15. Caption 是**问控件**问出来的 (TB_GETBUTTONINFOW 的 iString 真往返) ---
+    Dim sCap As String
+    sCap = b1.Caption
+    Debug.Print "TB15=" & TF(sCap = "Open")
+
+    ' --- 16. 表里那三条: ToolTipText / Style(含分隔符那一档) / Width ---
+    Dim sTip As String
+    sTip = b3.ToolTipText
+    Debug.Print "TB16=" & TF(sTip = "Save all")
+    Debug.Print "TB17=" & TF(b1.Style = 0 And tb1.Buttons(2).Style = 3)
+    Debug.Print "TB18=" & TF(tb1.Buttons(2).Width = 8)
+
+    ' --- 19. 默认态: 可点 + 可见 ---
+    Debug.Print "TB19=" & TF((b1.Enabled <> 0) And (b1.Visible <> 0))
+
+    ' --- 20. 写 Caption 后换一枚对象再读: 证 TB_SETBUTTONINFOW 真进了控件 ---
+    b1.Caption = "打开"
+    Dim b1b As Object
+    Dim sCap2 As String
+    Set b1b = tb1.Buttons(1)
+    sCap2 = b1b.Caption
+    Debug.Print "TB20=" & TF(sCap2 = "打开")
+
+    ' --- 21/22. Enabled 与 Visible 的反向可逆 (读的是 fsState 那两位) ---
+    b1.Enabled = False
+    Debug.Print "TB21=" & TF(b1.Enabled = 0)
+    b1.Enabled = True
+    b1.Visible = False
+    Debug.Print "TB22=" & TF((b1.Visible = 0) And (b1.Enabled <> 0))
+    b1.Visible = True
+
+    ' --- 23. Style 改成复选 + Value 勾上 (TBSTATE_CHECKED) ---
+    b3.Style = 1
+    b3.Value = True
+    Debug.Print "TB23=" & TF(b3.Value <> 0 And tb1.Buttons(3).Style = 1)
+
+    ' --- 24. 运行期 Add: 返回的就是 Button 对象, Index 接在末尾 ---
+    Dim bN As Object
+    Set bN = tb1.Buttons.Add(, "cut", "剪", 0, -1)
+    Debug.Print "TB24=" & TF(bN.Index = 4 And tb1.Buttons.Count = 4)
+
+    ' --- 25. For Each 走 _NewEnum, 顺序 = 集合序 ---
+    Dim e As Object
+    Dim n As Long
+    n = 0
+    For Each e In tb1.Buttons
+        n = n + 1
+    Next
+    Debug.Print "TB25=" & TF(n = 4)
+
+    ' --- 26. Remove 按 Key: 控件与表一起退格 (后面那几格的序号要跟着前移) ---
+    tb1.Buttons.Remove "open"
+    Dim sK2 As String
+    sK2 = tb1.Buttons(1).Key
+    Debug.Print "TB26=" & TF(tb1.Buttons.Count = 3 And sK2 = "")
+
+    ' --- 27. Clear + 集合这条路没把标量属性面抢走 ---
+    tb1.Buttons.Clear
+    Debug.Print "TB27=" & TF(tb1.Buttons.Count = 0 And tb2.Buttons.Count = 0 And tb1.TextStyle = 1)
+
+    ' TB28-TB34 与 DONE/Unload 一起挪到下面的 evtTimer_Timer —— Form_Load 阶段派发被拦掉
+End Sub
+
+' 派发链的触发点: Form_Load 里 block events during form init，Form_Activate 在无头会话里
+' 永远不来 ⇒ 照 C29-8c / C29-4 的先例放 Timer。计数一律问**增量**。
+Private Sub evtTimer_Timer()
+    Static done As Integer
+    If done Then Exit Sub
+    done = 1
+
+    ' TB27 把 Buttons 清干净了，所以事件判据自己重建目标按钮 —— 顺带这也证"派发查的是活着的
+    ' 表": 表空的时候 Sim 一条都打不进 handler。第三颗是 Style 5 (带下拉箭头)，
+    ' 只有它发得出 TBN_DROPDOWN。
+    tb1.Buttons.Add , "one", "甲", 0, -1
+    tb1.Buttons.Add , "two", "乙", 0, -1
+    tb1.Buttons.Add , "menu", "丁", 5, -1
+
+    Dim baseClick As Long, baseMenu As Long
+    baseClick = gClicks
+    baseMenu = gMenu
+
+    tb1.SimButtonClick 1
+    tb1.SimButtonClick 2
+    Debug.Print "TB28=" & TF(gClicks - baseClick = 2)
+    ' handler 里真读了 Button.Key ⇒ 造出来的那枚对象就是被点的那一颗，不是"调过一次就算数"
+    Debug.Print "TB29=" & TF(gHitOne = 1 And gHitTwo = 1)
+    ' 消息的来源是 tb1 (WM_COMMAND 的 lParam / WM_NOTIFY 的 hwndFrom) ⇒ 另一枚工具栏的
+    ' handler 一次都不该进
+    Debug.Print "TB30=" & TF(gOther = 0 And tb2.Buttons.Count = 0)
+    ' 序号越界: 原生 TB_GETBUTTON 问不到那颗按钮 ⇒ 消息压根不发
+    tb1.SimButtonClick 9
+    Debug.Print "TB31=" & TF(gClicks - baseClick = 2)
+
+    tb1.SimButtonMenuClick 3
+    Debug.Print "TB32=" & TF(gMenu - baseMenu = 1 And gHitMenu = 1)
+    ' 普通按钮 (Style 0) 身上没有下拉箭头 ⇒ 真控件不会为它发 TBN_DROPDOWN，判据也不发
+    tb1.SimButtonMenuClick 1
+    Debug.Print "TB33=" & TF(gMenu - baseMenu = 1)
+    ' 事件面没把 5b 那套集合读数与标量属性面抢走
+    Debug.Print "TB34=" & TF(tb1.Buttons.Count = 3 And tb1.TextStyle = 1 And tb1.Align = 2)
+
     Debug.Print "CTRLTOOLBAR-DONE"
     Unload Me
+End Sub
+
+Private Sub tb1_ButtonClick(ByVal Button As Button)
+    Dim sK As String
+    gClicks = gClicks + 1
+    sK = Button.Key
+    If sK = "one" Then gHitOne = 1
+    If sK = "two" Then gHitTwo = 1
+End Sub
+
+Private Sub tb1_ButtonMenuClick(ByVal Button As Button)
+    Dim sK As String
+    gMenu = gMenu + 1
+    sK = Button.Key
+    If sK = "menu" Then gHitMenu = 1
+End Sub
+
+' tb2 一枚对照 handler: 它不该被 tb1 的消息打进来 (TB30 问的就是这个 gOther)
+Private Sub tb2_ButtonClick(ByVal Button As Button)
+    gOther = gOther + 1
 End Sub

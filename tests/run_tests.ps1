@@ -227,7 +227,13 @@ function Invoke-TestExe {
     # (scores.txt / test_output.txt / *.dat 等), 不同进程写入不同实时文件
     $stdoutFile = Join-Path $WorkDir "$Name.out"
     $stderrFile = Join-Path $WorkDir "$Name.err"
-    Remove-Item $stdoutFile, $stderrFile -ErrorAction SilentlyContinue
+    # #44: 逐条判存在再删, 不依赖 Remove-Item 对"路径不存在"的宽容度。
+    # 实证: 某些宿主(带 safe-delete 钩子的沙箱)把 Remove-Item 换成 fail-closed 版本,
+    # 目标不存在时抛**终止**异常 —— 客户进程因此一次都没跑, 表现为"零输出、
+    # 全部 needle 缺失", 且 detail 里看不出任何异常痕迹(最难查的一种红)。
+    foreach ($stale in @($stdoutFile, $stderrFile)) {
+        if (Test-Path $stale) { Remove-Item $stale -ErrorAction SilentlyContinue }
+    }
 
     $errors = @()
 
@@ -584,6 +590,44 @@ function Invoke-BasSetParallel {
 }
 
 # === VBP 工程测试 (编译+链接+运行) ===
+# ai/029 C29-M: 断**产物里的应用清单**（不重建，拿 Test-Vbp 刚产出的那份 exe）。
+# 为什么在产物面上断：清单的作用全在运行期 —— 少了那条 #1 RT_MANIFEST，SxS 就把 comctl32
+# 解析成 System32 的 5.82，本线所有原生控件换成 v5 的类表与消息语义，而编译/链接/退出码
+# 全都好看（这条洞就是 C29-M 修的那件事）。
+# 断两样：`</assembly>` 的**个数**（两份 #1 会让加载器直接报错，所以"恰好一份"是硬要求，
+# 也是"内置那份有没有叠到用户那份上"的读数）+ 内容里的特征串（用户那份带 dpiAware，
+# 内置那份带 Microsoft.Windows.Common-Controls 但没有 dpiAware）。
+function Test-ProductManifest {
+    param(
+        [string]$Name,
+        [string]$ExeFile,
+        [int]$ManifestCount,
+        [string]$MustContain = "",
+        [string]$MustNotContain = ""
+    )
+    $script:total++
+    Write-Host -NoNewline "  [MANIFEST] $Name ... "
+    if (-not (Test-Path $ExeFile)) {
+        $script:fail++
+        Write-Host "FAIL (no exe: $ExeFile)" -ForegroundColor Red
+        return
+    }
+    $text = [System.Text.Encoding]::ASCII.GetString([System.IO.File]::ReadAllBytes($ExeFile))
+    $got = ([regex]::Matches($text, '</assembly>')).Count
+    $problems = @()
+    if ($got -ne $ManifestCount) { $problems += "清单数=$got 期望=$ManifestCount" }
+    if ($MustContain -and $text.IndexOf($MustContain) -lt 0) { $problems += "缺串 '$MustContain'" }
+    if ($MustNotContain -and $text.IndexOf($MustNotContain) -ge 0) { $problems += "不该有串 '$MustNotContain'" }
+    if ($problems.Count -gt 0) {
+        $script:fail++
+        $msg = "FAIL (" + ($problems -join '; ') + ")"
+        Write-Host $msg -ForegroundColor Red
+        return
+    }
+    $script:pass++
+    Write-Host "OK ($ManifestCount 份清单)" -ForegroundColor Green
+}
+
 function Test-Vbp {
     param(
         [string]$Name,
@@ -1491,7 +1535,36 @@ if ($Category -in @("all", "run", "vbp")) {
     # 负控：把 tv1 的五行设计期值整体取反（CheckBoxes/HotTracking 0、LineStyle 0、
     # Indentation 500、HideSelection -1）后 TV1-TV5 全翻 N，而 tv2 那七条纹丝不动 ——
     # 读数问的是那五个值，不是一句常绿。
-    $tvNeedles = @("TREEVIEW-DONE") + (1..12 | ForEach-Object { "TV$_=Y" })
+    #
+    # ai/029 C29-8b: 同一个工程再加 15 条 Nodes/Node 读数（TV13-TV27），复用 C29-3 那套
+    # 真 IDispatch 成员对象机制（vb6forms_memberobj.c），**结构一律现问原生树**：
+    #   TV13 Count / TV14 Add 返回对象的 Index / TV15 下标取与按 Key 取（同一条 Item 两种实参）
+    #   TV16 Child+Children / TV17 Parent+Next+Previous / TV18 Root（顶层返回自己、非顶层返回根祖先）
+    #   TV19 Text/Tag 写回后换一枚对象再读（证同步进了控件，不是变量里存的串）
+    #   TV20 Checked（原生 state image：TVM_SETITEMW 写、TVM_GETITEMSTATE 问）
+    #   TV21-TV23 Expanded 开-关-以及 EnsureVisible 把父节点撑开（TVM_ENSUREVISIBLE 的真行为）
+    #   TV24 For Each 走 _NewEnum，且顺序 == 集合序 == 插入序（口径见 029 §九）
+    #   TV25 Remove "a" 带走整棵子树（原生删父即删子，表要跟住）/ TV26 Clear / TV27 集合这条路
+    #   没把标量属性面抢走（CheckBoxes 读数与另一枚空表控件的 Count）
+    # 负控两条，**都实测过各自红在哪几条**（不是推的）：
+    #   ① `tv1.Nodes.Remove "a"` 换成一个不存在的 Key "zz" → 只红 **TV25**。TV26 常绿是
+    #      设计上就该这样：后面那句 Clear 照样把表清空，Count 仍是 0 —— 别把它算进负控。
+    #   ② .frm 里 tv1 的 `CheckBoxes = -1` 取反成 0 → 红 **TV1 与 TV27**，而 **TV20 不红**。
+    #      TV20 不红正是这条读数的价值：勾选态是节点的 state image 位，**没开 TVS_CHECKBOXES
+    #      也照样写得进、读得出**（只是屏幕上不画方框）—— 与 VB6 "先设 CheckBoxes=True 才
+    #      看得到" 的次序口径一致，实测就是这么钉住的。
+    # ai/029 C29-8c: 再加 6 条事件读数 (TV28-TV33)。NodeClick / Expand / Collapse 走父窗的
+    # WM_NOTIFY (P20-42 那条通道，C29-7/C29-4 已各自接过一半)，通知里的 itemNew.hItem 由 RTL
+    # 折成 1 基节点序号，再交 vb6_TreeView_NodeAt 造对象回调 —— 处理器参数就是 Node 对象。
+    # 触发用 RTL 的 Sim* 助手 (C29-4 的 SimClick 同一先例，判据专用、不对应 VB6 语义)，
+    # 且必须放 Timer: Form_Load 阶段被 block events during form init 拦掉、Form_Activate 无头不来。
+    # TV33 是把一件"意外"钉成读数: 光 Form_Load 自己改 Expanded / EnsureVisible 就真发出过
+    # 两条 TVN_ITEMEXPANDEDW (实测到这里 gExpands 已是 2) —— 真控件发的通知与 Sim 发的走同一条链。
+    # 因此 TV28/TV31 一律问**增量**，不问绝对值 (拿绝对值比会把两件事混在一起，踩过)。
+    # 负控两条 (红在哪几条量过): ① Sim 的节点下标换成一个不存在的 (99/98) => 红 TV28、TV29，
+    #   其余纹丝不动 (证派发真去表里查过节点)；② 摘掉 tv1_Expand 处理器 => 红 TV33、TV31、TV32，
+    #   NodeClick 那几条照旧 Y (分支是按处理器存在性建的)。
+    $tvNeedles = @("TREEVIEW-DONE") + (1..33 | ForEach-Object { "TV$_=Y" })
     Test-Vbp "ctrltreeview" "$Tests\ctrltreeview\TvfApp.vbp" $tvNeedles
     Test-Vbp "ctrltreeview_x86" "$Tests\ctrltreeview\TvfApp.vbp" $tvNeedles -Arch "x86"
     # 发码面两面都钉：设计期 Init 逐参数钉（含 -999 那条哨兵：VB6 的 True 就是 -1，
@@ -1500,10 +1573,168 @@ if ($Category -in @("all", "run", "vbp")) {
     Test-EmitcShape "tv_emitc_shape" @("$Tests\ctrltreeview\TvfApp.vbp") @(
         'vb6_TreeView_Init((void*)vb6_hwnd_tv1, 1, 300, -1, -1, 0);',
         'vb6_TreeView_Init((void*)vb6_hwnd_tv2, -999, -999, -999, -999, -999);',
-        '1417674754L, 0L,'
+        '1417674754L, 0L,',
+        # C29-8b: `tv1.Nodes` 必须立成**真 IDispatch 集合对象** (vb6forms_memberobj.c 的
+        # NODES 族)。这三条钉的是发码形状里最容易退回的三处: 宿主槽 (真窗口 = vb6_hwnd_
+        # 而非 vb6_com_)、Add 的 Missing 打包 (省略实参不能编成 0，否则 relationship 静默
+        # 变成 tvwFirst)、以及"下标/Key 都发同一条 Item"。
+        'vb6_ComCallObject(vb6_TreeView_Nodes((void*)vb6_hwnd_tv1), L"Item", (void*[]){vb6_ComPackInt(2)}, 1)',
+        'L"Add", (void*[]){vb6_ComPackMissing(), vb6_ComPackMissing(), vb6_ComPackBSTR(vb6_BSTR_FromStr(L"a"))',
+        'vb6_ComSetProp(ndA, L"Checked", vb6_ComPackBool((-1)))',
+        # C29-8c: 派发面的三条针 —— Sim 助手发的是 RTL 直调 (不是 COM 派发)、WM_NOTIFY 分支
+        # 按码值 + hwndFrom 双条件建、展开/折回靠 action 三态分流 (999 = 认不出，两边都不接)。
+        'vb6_TreeView_SimNodeClick((void*)vb6_hwnd_tv1, 2);',
+        'if (pNM42->code == -451 && (void*)pNM42->hwndFrom == vb6_hwnd_tv1) {',
+        'vb6_TreeView_NotifyExpanded((void*)lParam) == -1'
     )
     Test-EmitcAbsent "tv_emitc_no_com_fallback" @("$Tests\ctrltreeview\TvfApp.vbp") @(
         'vb6_ComGetObjectProp(vb6_hwnd_tv1',
+        # C29-8b: 更具体的一条 —— Nodes 这一格一旦被摘掉，就会退回"拿 HWND 当 IDispatch
+        # 问它要 Nodes 属性"的假路径 (链接过、运行期整棵树一句话都读不出来)。
+        'vb6_ComGetObjectProp(vb6_hwnd_tv1, L"Nodes")',
+        # C29-8c: Sim* 这类判据方法一旦被下面那条 axSlotObj 分支先吃掉，就会编成
+        # 「取 SimNodeClick 属性 + Item 下标」—— 编得过、跑起来什么都不发 (实测踩过，
+        # 修法是把钩子抢在那条分支之前)。这条断言就是别让那个形状再回来。
+        'vb6_ComGetObjectProp(vb6_hwnd_tv1, L"SimNodeClick")',
+        'CoCreateInstance'
+    )
+    # ai/029 C29-DT-a: DTPicker 换成原生 SysDateTimePick32（D6：不碰 MSCOMCT2.OCX，32 位进不了 x64）。
+    # 改之前这枚控件走的是"第三方 OCX 按 COM 后期绑定"那一组 => 工程没引用类型库时连符号都查不到，
+    # 属性读回空、写进去静默丢，而编译与退出码全都好看。24 条读数的分工：
+    #   DT1-DT5  创建样式进窗口（三枚各一种设计期组合：长日期+CheckBox / 全默认 / 时间+UpDown）
+    #   DT6-DT8  控件侧读数 DTM_GETIDEALSIZE：长日期明显比时间宽，且三枚各自算各自的
+    #   DT9-DT11 运行期切档时"样式位"与"控件自己算的宽度"**一起**跟着改（只动一边就是假绿）
+    #   DT12-DT14 CustomFormat 与 dtpCustom 那一位（原生只有 DTM_SETFORMATW、没有 Get 对称项 ⇒ 串自存）
+    #   DT15-DT21 下拉月历五色：逐格读回 + 改一格其余四格不动（序号撞车的负控）+ 两枚控件各自一格
+    #   DT22-DT24 设计期 CustomFormat 那条字符串路（.frm 里带引号 → 去引号 → 当 C 字面量发）
+    #   DT25-DT36（C29-DT-b）Date 值面：Value/MinDate/MaxDate 往返、改一端不动另一端、越界被控件拒绝
+    #     （值保持原样，不是钳到边界）、以及未勾那一态（原生仍回填内部日期 ⇒ GetValue 认返回标志回 0）
+    #   DT37-DT42（C29-DT-c）DTN_* 事件面：三条各派发一次（Change/DropDown/CloseUp 码值 -759/-754/-753，
+    #     两两撞车的负控就是"发 DropDown 时 Change 计数不许动"）、Sim 从 dt2 发而 dt1 的 handler 不许动
+    #     （hwndFrom 认来源）、以及**控件自己**发的通知也走同一条链（DT41 拨日期看得见增量、DT42 那条
+    #     空转的 CheckBox 写一下都不许加）。计数一律比增量：Form_Load 半截就写过好几回值。
+    # 两条量出来的口径（原文写在夹具头注释里）：① CheckBox / UpDown 只能在**创建时**给（子窗口
+    # 的创建参数，事后写 GWL_STYLE 会被控件抹回 —— DT11 就是钉这条边界的针，做成真运行期切换时
+    # 它必须翻红）；Format 切档运行期倒是有效（DT9/DT10）。② 光读 GWL_STYLE 会自洽地假绿（SDK 的
+    # DTS_TIMEFORMAT=0x9 自带 bit0=UPDOWN），所以格式类判据一律配一条 DTM_GETIDEALSIZE 控件侧读数。
+    # 本机读数：x64 与 x86 各 42/42（宽度 143/64/95/121 与事件计数两架构逐字相同）；
+    # 拿 DT-a 之前的编译器（c298c_base_C3.exe，那时无原生 DTPicker）跑同一件夹具 = 37 红 / 5 绿，
+    # 绿的正是五条"负向"读数 (DT11/DT21/DT33/DT35/DT42 —— 都成立在"什么都没发生"上)。
+    # DT-c 还有一条更紧的负控：Sim 钩子接上前（同一件夹具、同一个新编译器，只是调用点少写
+    # 一对括号 ⇒ 整条语句被当属性读丢掉），DT37-DT40 四条当场红、接上就绿。
+    # ⚠ 判据方法的写法有讲究：`dt1.SimChange`（不带括号）在语义层是**属性读**，发码一条都不发；
+    # 必须写 `dt1.SimChange()` 才走调用路。这条由上面那条针 (vb6_DTP_SimChange…) 钉住。
+    $dtNeedles = @("CTRLDATETIME-DONE") + (1..42 | ForEach-Object { "DT$_=Y" })
+    Test-Vbp "ctrldatetime" "$Tests\ctrldatetime\DtfApp.vbp" $dtNeedles
+    Test-Vbp "ctrldatetime_x86" "$Tests\ctrldatetime\DtfApp.vbp" $dtNeedles -Arch "x86"
+    # 发码面两面都钉：创建样式位逐枚钉（1409286150 = 长日期+复选框；1409286153 = 时间位+UpDown 位，
+    # 合起来恰好就是 SDK 的 DTS_TIMEFORMAT 0x9 —— 那条撞车在发码里留个可见的痕迹），
+    # 反面断这枚控件的属性不许再走 COM 兜底、工程里不许再出现 CoCreateInstance。
+    Test-EmitcShape "dt_emitc_shape" @("$Tests\ctrldatetime\DtfApp.vbp") @(
+        '"SysDateTimePick32", "",',
+        '1409286150L, 0L,',
+        '1409286153L, 0L,',
+        'vb6_DTP_Init((void*)vb6_hwnd_dt4, L"yyyy-MM-dd HH:mm");',
+        'vb6_DTP_SetCheckBox(vb6_hwnd_dt2, (-1));',
+        'vb6_DTP_SetCustomFormat(vb6_hwnd_dt2, vb6_BSTR_FromStr(L"yyyy-MM-dd"));',
+        # C29-DT-b：Date 走的是**裸 double 变量**（`Dim d As Date` 发成 `double d`），
+        # 不经过任何装箱 —— 这条针就是别让值面哪天退回 VARIANT 形状而没人察觉。
+        'vb6_DTP_SetValue(vb6_hwnd_dt2, dReq);',
+        'vb6_DTP_GetValue(vb6_hwnd_dt2',
+        'vb6_DTP_SetHasDate(vb6_hwnd_dt1, 0);',
+        # C29-DT-c：派发那三分支的形状（码值撞在同一个负数段里，写错一位就静默不派发，
+        # 所以三条各钉一条，且钉的是"码值 + 认来源的那枚句柄"这一整对）。
+        'pNM42->code == -759 && (void*)pNM42->hwndFrom == vb6_hwnd_dt1',
+        'pNM42->code == -754 && (void*)pNM42->hwndFrom == vb6_hwnd_dt1',
+        'pNM42->code == -753 && (void*)pNM42->hwndFrom == vb6_hwnd_dt1',
+        'pNM42->code == -759 && (void*)pNM42->hwndFrom == vb6_hwnd_dt2',
+        'vb6_DTP_SimChange((void*)vb6_hwnd_dt1)',
+        'vb6_DTP_SimCloseUp((void*)vb6_hwnd_dt1)',
+        # 处理器调用名的解析也钉一条：形参表必须是空的（VB6 这三条都没有参数），
+        # 写错成带参就会在链接期 LNK2019、而编 C 阶段看不出任何异常。
+        'extern void vb6_dt1_Change();'
+    )
+    Test-EmitcAbsent "dt_emitc_no_com_fallback" @("$Tests\ctrldatetime\DtfApp.vbp") @(
+        'vb6_ComGetObjectProp(vb6_hwnd_dt1',
+        'vb6_ComSetObjectProp(vb6_hwnd_dt1',
+        # DT-b 的 Value 也不许再走 COM 兜底（那正是它改之前整枚控件的默认下场）
+        'vb6_ComGetObjectProp(vb6_hwnd_dt2, L"Value")',
+        # DT-c 的三条判据方法一旦被下面那条 axSlotObj 分支先吃掉，就会编成
+        # 「取 SimChange 属性 + Item 下标」—— 编得过、跑起来什么都不发（C29-8c 实测踩过）。
+        'vb6_ComGetObjectProp(vb6_hwnd_dt1, L"SimChange")',
+        'CoCreateInstance'
+    )
+    # ai/029 C29-MV-a: MonthView 换成原生 SysMonthCal32（D6：不碰 MSCOMCT2.OCX，32 位进不了 x64）。
+    # 22 条读数的分工：
+    #   MV1-MV4   创建样式进窗口（四枚各一种设计期组合：MultiSelect+MaxSelCount+多月 / 全默认 /
+    #             周号 / 不要今天），mv2 那条同时是"没写的不被继承"的对照
+    #   MV5-MV6   多月平铺问**控件自己**：MCM_GETCALENDARCOUNT 说 mv1 眼下画了 2 个月、mv2 画 1 个
+    #   MV7-MV10  MCM_GETMINREQRECT 的控件侧尺寸：周号加宽、今天那一行加高、多月不改单月的最小尺寸
+    #   MV11-MV17 六色逐格读写 + 改一格其余五格不动（MCSC_ 序号撞车的负控）+ 两枚控件各自一格
+    #   MV18-MV20 MaxSelCount 真往返过控件；**没挂 MCS_MULTISELECT 的那枚写不进去**（写完读回还是
+    #             原生默认的 1）—— 这一条比 GWL_STYLE 硬，问的是控件按没按那位办事
+    #   MV21      运行期改 ShowToday：样式位落得下**且**控件的最小尺寸跟着变（与 DTPicker 那两位
+    #             被抹回去相反，MV 这一族运行期是有效的 —— 两枚控件的边界各量各的，不互相外推）
+    #   MV22      通用属性面 + 两枚不串台
+    #   MV23-MV31（C29-MV-b）Date 值面。两条量出来的硬边界决定了这一批的形状：
+    #     ① **两张表互斥** —— 没挂 MCS_MULTISELECT 时 MCM_GET/SETCURSEL 有效而 GET/SELRANGE
+    #        一律失败，挂了正好反过来 ⇒ MV28 钉非多选那侧读不出范围、MV31 钉多选那侧读不出
+    #        Value（两条合起来才是这条互斥，单钉一条会放过"只实现了一半"的改动）；
+    #     ② SETSELRANGE 收的是**闭区间**、控件内部存成半开、GETSELRANGE 原样吐内部值 ⇒
+    #        不折回来止端恒比写入值多一天（GetSelEnd 折一天；MV26/MV27 钉往返与"改一端不动
+    #        另一端"）；MV32/MV33 钉 MaxSelCount 真夹得住范围、而且夹的是"往里扩"那头、
+    #        不挤掉已经选好的那端。
+    #     判据一律以"本月 1 号"为基准推日期，不写死 —— 原生只让在**当前显示的那一个月**里选，
+    #     写死就会在 CI 的未知日期上于月初/月末随机红（同一条纪律见 022 账 #79）。
+    #   MV33-MV37（C29-MV-c）DateClick（原生 MCN_SELCHANGE = -749）：MV34 走完整派发链**且参数
+    #     就是负载里那一天**（这条同时是 ABI 针 —— ByVal 参数按值传，写成指针形状时 x64 侥幸对、
+    #     x86 当场错值，实测踩过）；MV35 认来源（从 mv2 发的不许叫 mv1）；MV36 钉"程序化改选
+    #     不叫 DateClick"（原生只由用户交互驱动，与 DT-c 的 Change 同型口径）；MV37 钉没写
+    #     处理器的那枚控件发了通知也不许把别人的 handler 顺带叫起来。
+    # 本机读数：x64 与 x86 各 37/37；原始读数两架构逐字相同
+    # （`R=1/1 218/242/178/159` = 默认上限/写后仍、单月最小尺寸 218×178、带周号 242 宽、
+    #   去掉今天那一行 159 高；`E=2/1/46271` = 两条事件计数 + 最后收到的日期序列）。
+    # 负控 = 拿 DT/MV 之前的二进制（.build/c298c_base_C3.exe）跑同一件夹具 = 32 红 / 5 绿。
+    # 留绿的五条（MV4/MV9/MV17/MV28/MV31）全是"应当为 0 / 应当相等"那类**边界针** ——
+    # 什么都不实现的空控件也满足它们，所以这几条不承担"验货"，只承担"别把边界改回去"；
+    # 真正盘货的是另外 28 条。（记下来是免得下一个人把"BASE 有 5 绿"读成判据松。）
+    $mvNeedles = @("CTRLMONTHVIEW-DONE") + (1..37 | ForEach-Object { "MV$_=Y" })
+    Test-Vbp "ctrlmonthview" "$Tests\ctrlmonthview\MvfApp.vbp" $mvNeedles
+    Test-Vbp "ctrlmonthview_x86" "$Tests\ctrlmonthview\MvfApp.vbp" $mvNeedles -Arch "x86"
+    # 发码两面都钉：类名 + 四条创建样式位逐枚钉（1409286146 = 基+MULTISELECT / 1409286148 = 基+
+    # WEEKNUMBERS / 1409286160 = 基+NOTODAY，注意 ShowToday 与原生那位是**反**的：.frm 写 False
+    # 才挂上去），设计期 Init 连多月与 MaxSelCount 一起钉；反面断这枚控件不许再走 COM 兜底。
+    Test-EmitcShape "mv_emitc_shape" @("$Tests\ctrlmonthview\MvfApp.vbp") @(
+        '"SysMonthCal32", "",',
+        '1409286146L, 0L,',
+        '1409286148L, 0L,',
+        '1409286160L, 0L,',
+        'vb6_MV_Init((void*)vb6_hwnd_mv1, 1, 2, 7);',
+        'vb6_MV_Init((void*)vb6_hwnd_mv2, 1, 1, -999);',
+        'vb6_MV_SetMaxSelCount(vb6_hwnd_mv1, 3);',
+        'vb6_MV_SetShowToday(vb6_hwnd_mv4, (-1));',
+        'vb6_MV_GetMonthCount(vb6_hwnd_mv2',
+        # MV-b：Date 走**裸 double / 裸算术式**，一个装箱都不过（同 DT-b 那条纪律）。
+        'vb6_MV_SetValue(vb6_hwnd_mv2, 44562.75);',
+        'vb6_MV_SetSelStart(vb6_hwnd_mv1, (d0 + 1))',
+        'vb6_MV_GetSelEnd(vb6_hwnd_mv1',
+        # MV-c：派发那一条钉"码值 + 认来源的那枚句柄"这一整对，处理器签名钉**按值收 Date**
+        # （ByVal 的 ABI；写成指针形状时 x64 侥幸能跑、x86 错值，所以两头都得钉）。
+        'pNM42->code == -749 && (void*)pNM42->hwndFrom == vb6_hwnd_mv1',
+        'extern void vb6_mv1_DateClick(double);',
+        'vb6_mv1_DateClick(vb6_MV_NotifyDate((void*)lParam));',
+        'vb6_MV_SimDateClick((void*)vb6_hwnd_mv1, (d0 + 4))'
+    )
+    Test-EmitcAbsent "mv_emitc_no_com_fallback" @("$Tests\ctrlmonthview\MvfApp.vbp") @(
+        'vb6_ComGetObjectProp(vb6_hwnd_mv1',
+        'vb6_ComSetObjectProp(vb6_hwnd_mv2',
+        'vb6_ComGetObjectProp(vb6_hwnd_mv3, L"MaxSelCount")',
+        # 值面那三格也不许退回 COM 兜底
+        'vb6_ComSetObjectProp(vb6_hwnd_mv2, L"Value"',
+        'vb6_ComGetObjectProp(vb6_hwnd_mv1, L"SelEnd")',
+        # MV-c：判据方法一旦被 axSlotObj 那条分支先吃掉，就编成「取 SimDateClick 属性 +
+        # Item 下标」—— 编得过、跑起来什么都不发（C29-8c / DT-c 各踩过一次）。
+        'vb6_ComGetObjectProp(vb6_hwnd_mv1, L"SimDateClick")',
         'CoCreateInstance'
     )
     # ai/029 C29-5a: Toolbar 换成原生 ToolbarWindow32（D6：不碰 MSCOMCTL.OCX）。
@@ -1519,21 +1750,61 @@ if ($Category -in @("all", "run", "vbp")) {
     # 却一个按钮都不加 (所以只 append/insert)；C3 的产物嵌了 Common-Controls 6.0 的 manifest，
     # v6 工具栏**没被告知结构体尺寸就静默吞按钮** (不嵌 manifest 的独立 C 探针在 v5 下是好的)
     # => 发按钮前先 TB_BUTTONSTRUCTSIZE。
-    $tbNeedles = @("CTRLTOOLBAR-DONE") + (1..12 | ForEach-Object { "TB$_=Y" })
+    # ai/029 C29-5b: 同一个工程再加 15 条 Buttons/Button 读数 (TB13-TB27)。集合是**真 IDispatch**
+    # (vb6forms_memberobj.c 的 BUTTONS 族，与 8b 的 Nodes 同一条 cheapest route)。分界: Caption /
+    # Image / Enabled / Visible / Value 现问控件 (TB_GET/SETBUTTONINFOW)，Key / Tag / ToolTipText /
+    # Style / Width 住 5a 那张表 (原生 fsStyle 分不出「占位符」那一档，ToolTipText 的原生面要
+    # TTN_GETDISPINFO)。TB15 那条尤其值钱: 它证的是**设计期 caption 真进了控件的字符串表**
+    # (iString 往返)，5a 只数过按钮个数、没验过文字。
+    # 路上量到一条 v6 主题坑: TB_ADDBUTTONSW **不吃调用方给的 fsState** (实测建完读回 0，
+    # 连 TBSTATE_ENABLED 都没有) ⇒ Button.Enabled 的默认读数会是 False，与 VB6 相反；
+    # 建完补一条 TB_SETBUTTONINFOW 把启用位打上去 (TB19 就是这条的读数)。
+    # 负控两条 (红在哪几条是**量出来的**，不是推的): ① `tb1.Buttons.Remove "open"` 换成
+    #   一个不存在的 Key => **只红 TB26** (TB27 常绿是对的: 后面 Clear 照样把两边清空)。
+    #   ② .frm 里把 tb1 的 `TextStyle` 从 1 改成 0 => 红 **TB5、TB10、TB27** —— 前两条是
+    #   5a 的设计期/默认对照，第三条正是"集合那条路没把标量属性面抢走"的读数。
+    # C29-5c 加 TB28-TB34 (两条按钮事件)。**两条不在同一条通道上**: ButtonClick 走
+    #   WM_COMMAND(id=控件的 idCommand, code=0, lParam=工具栏)，ButtonMenuClick 走
+    #   WM_NOTIFY(TBN_DROPDOWN=-710, hdr.idFrom=同一个 id)，且只有 Style 5 那颗发得出 (TB33)。
+    $tbNeedles = @("CTRLTOOLBAR-DONE") + (1..34 | ForEach-Object { "TB$_=Y" })
     Test-Vbp "ctrltoolbar" "$Tests\ctrltoolbar\TbApp.vbp" $tbNeedles
     Test-Vbp "ctrltoolbar_x86" "$Tests\ctrltoolbar\TbApp.vbp" $tbNeedles -Arch "x86"
+    # ai/029 C29-M: 工程自带一份**不含清单**的 .res（ResFile32="no_manifest.res"，里面只有一条
+    # 对话框模板）时，内置那份 comctl v6 清单必须照样进产物。旧判据只看"给没给 ResFile"，
+    # 于是这种 VB6 里很常见的工程连内置的一起让掉 ⇒ 产物静默退回 v5.82（实测：BASE 编译器编
+    # 同一件夹具，产物 0 份清单；改后 1 份且是内置那份）。清单数=1 同时挡住"两份 #1 打架"。
+    $mfNeedles = @("CTRLMANIFEST-DONE", "CM1=Y", "CM2=Y", "CM3=Y")
+    Test-Vbp "ctrlmanifest" "$Tests\ctrlmanifest\MfApp.vbp" $mfNeedles
+    # 主判据：这份工程的 .res 里没有清单 ⇒ 产物必须仍然带**内置那一份**（改前 BASE 编出来是 0 份）。
+    # "恰好 1 份"同时挡住最坏的那种错：两份 #1 会让加载器直接报错。
+    Test-ProductManifest "ctrlmanifest_builtin" "$OutDir\MfApp.exe" 1 "Microsoft.Windows.Common-Controls" "dpiAware"
+    Test-Vbp "ctrlmanifest_x86" "$Tests\ctrlmanifest\MfApp.vbp" $mfNeedles -Arch "x86"
+    Test-ProductManifest "ctrlmanifest_builtin_x86" "$OutDir\MfApp.exe" 1 "Microsoft.Windows.Common-Controls" "dpiAware"
     # 发码面: 设计期四条逐参数钉 (含 -999 哨兵那条没写过的控件)、创建样式那个常量、
     # 反面断这枚控件不再走 vb6_com_ 槽 / CoCreateInstance / Buttons 的 COM 兜底。
     Test-EmitcShape "tb_emitc_shape" @("$Tests\ctrltoolbar\TbApp.vbp") @(
         'vb6_Toolbar_Init((void*)vb6_hwnd_tb1, -999, 1, -999, 2);',
         'vb6_Toolbar_Init((void*)vb6_hwnd_tb2, -999, -999, -999, -999);',
         'vb6_Toolbar_AddButton((void*)vb6_hwnd_tb1, 2, NULL, L"", 3, -1, NULL, 8);',
+        # C29-5b: 三条发码形状针 —— 集合对象本体 (真 IDispatch 的入口，宿主槽必须是
+        # vb6_hwnd_ 而不是 vb6_com_)、按 Key 取下标、Button 属性写落到 COM 派发上。
+        # 第二条还钉住「省略的实参要发成 Missing 而不是 0」—— 0 会被当成插到第 1 格前面。
+        'vb6_ComCallObject(vb6_Toolbar_Buttons((void*)vb6_hwnd_tb1), L"Item", (void*[]){vb6_ComPackBSTR(vb6_BSTR_FromStr(L"save"))}, 1)',
+        'vb6_ComCallObject(vb6_Toolbar_Buttons((void*)vb6_hwnd_tb1), L"Add", (void*[]){vb6_ComPackMissing(), vb6_ComPackBSTR(vb6_BSTR_FromStr(L"cut"))',
+        'vb6_ComSetProp(b1, L"Enabled", vb6_ComPackBool(0))',
+        # C29-5c: 两条按钮事件各钉一条发码形状 —— 第一条是 WM_COMMAND 那一路按 lParam 认
+        # 来源、按 id 取按钮；第二条是 WM_NOTIFY 那一路的 TBN_DROPDOWN 分支；第三条钉 Sim
+        # 走的是 RTL 直调 (不是"取属性 + Item"那条被吞成静默空转的路，见 8c 的教训)。
+        'void* vb6_tbBtn5c = vb6_Toolbar_ButtonAt((void*)vb6_tbSrc5c, id);',
+        'if (pNM42->code == -710 && (void*)pNM42->hwndFrom == vb6_hwnd_tb1) {',
+        'vb6_Toolbar_SimButtonClick((void*)vb6_hwnd_tb1, 1);',
         '1409288460L, 0L,'
     )
     Test-EmitcAbsent "tb_emitc_no_ocx" @("$Tests\ctrltoolbar\TbApp.vbp") @(
         'vb6_com_tb1',
         'CoCreateInstance',
-        'vb6_ComGetObjectProp(vb6_hwnd_tb1, L"Buttons")'
+        'vb6_ComGetObjectProp(vb6_hwnd_tb1, L"Buttons")',
+        'vb6_ComGetObjectProp(vb6_hwnd_tb1, L"SimButtonClick")'
     )
     # ai/028 V1 的另两个 R4 落点: 模块头 Attribute 的值与 CreateObject 的工程内 ProgID
     # 都写成反引号串 —— 前者折错则模块名对不上 .vbp, 后者折错则没有改写、运行期变查注册表。
@@ -1677,6 +1948,7 @@ if ($Category -in @("all", "run", "vbp")) {
         "TS15-TABAFTERGROW=2", "TS16-TABS2=2", "TS17-TABAFTERSHRINK=1",
         "TS18-CAP0=常规", "TS19-CAP0B=改过", "TS20-VIS1=-1", "TS21-VIS1B=0",
         "TS22-P0LEFT=240", "TS23-P1LEFT=240", "TS24-P2LEFT=240",
+        "TS31-TIP0=tip0", "TS32-TIP2=tip2", "TS33-TIP1=",
         "TS25-TABVIS=-1", "TS26-AT0-P0VIS=-1 P1VIS=0 P2VIS=0",
         "TS27-AT1-P0VIS=0 P1VIS=-1 P2VIS=0", "TS28-AT2-P0VIS=0 P1VIS=0 P2VIS=-1",
         "TS29-SETTAB2=2", "TS29B-SETTAB0=0",
@@ -1850,6 +2122,13 @@ if ($Category -in @("all", "run", "vbp")) {
     Test-GuiVbp "VbQRCodegen" "$Tests\VbQRCodegen-master\test\Project1.vbp"
     # BalloonTooltips: form loads with controls + creates its common-controls tooltip windows (x64).
     Test-GuiVbp "BalloonTooltips" "$Tests\BalloonTooltips\prjBalloonTooltips.vbp" -ExeName "BalloonTooltips"
+    # ai/029 C29-M 的反面：这枚工程的 .res **自带** #1 清单（BalloonTooltips.rc 里
+    # `1 RT_MANIFEST "BalloonTooltips.exe.manifest"`，那段含 dpiAware/compatibility）
+    # ⇒ 必须"用他的、且只有一份"。`dpiAware` 只有用户那份里有，所以这条同时钉住
+    # "让位生效"与"内置那份没叠上去"（两份 #1 会让加载器直接报错）。
+    # 路径注意：Test-GuiVbp 的产物落在 `output\<用例名>\` 下（不是 $OutDir 根），
+    # 第一版我按 $OutDir\BalloonTooltips.exe 断 ⇒ CI 直接 FAIL (no exe) —— 记下来。
+    Test-ProductManifest "balloon_manifest_is_user_supplied" "$OutDir\BalloonTooltips\BalloonTooltips.exe" 1 "dpiAware"
     # Charts 2020 demo (3rd-party UserControl charts): windowless chart controls (x86 first;
     # x64 after LongPtr port of API pointers/handles in the .ctl/.cls sources).
     Test-GuiVbp "Charts2020" "$Tests\Charts 2020\Proyecto1.vbp" -Arch "x86" -AutoExitSec 3

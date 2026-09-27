@@ -168,7 +168,8 @@ intptr_t __stdcall vb6_di_CryptDecrypt(intptr_t hKey, intptr_t hHash, intptr_t F
     return ((intptr_t (WINAPI *)(intptr_t, intptr_t, intptr_t, intptr_t, void*, int32_t*))CryptDecrypt)(hKey, hHash, Final, dwFlags, pbData, pdwDataLen);
 }
 
-/* ChooseColorA */
+/* ChooseColorA —— Declare/Alias 语义按字面映射: Alias "ChooseColorA" 走 A 版,
+ * 只有 declarewide 形态才走 W (用户指令 2026-09-27)。勿在此擅自 A→W。 */
 intptr_t __stdcall vb6_di_ChooseColorA(void* pChoosecolor) {
     return ((intptr_t (WINAPI *)(void*))ChooseColorA)(pChoosecolor);
 }
@@ -179,6 +180,22 @@ intptr_t __stdcall vb6_di_GetFileTitleA(BSTR szFile, BSTR szTitle, intptr_t cbBu
 /* GetOpenFileNameA */
 intptr_t __stdcall vb6_di_GetOpenFileNameA(void* file) {
     return ((intptr_t (WINAPI *)(void*))GetOpenFileNameA)(file);
+}
+/* ChooseFontA — Task #44 SSTabEx cDlg.cls:33 (comdlg32 字体对话框) */
+intptr_t __stdcall vb6_di_ChooseFontA(void* pChoosefont) {
+    return ((intptr_t (WINAPI *)(void*))ChooseFontA)(pChoosefont);
+}
+/* GetSaveFileNameA — Task #44 SSTabEx cDlg.cls:42 */
+intptr_t __stdcall vb6_di_GetSaveFileNameA(void* pOpenfilename) {
+    return ((intptr_t (WINAPI *)(void*))GetSaveFileNameA)(pOpenfilename);
+}
+/* PrintDlgA — Task #44 SSTabEx cDlg.cls:45 */
+intptr_t __stdcall vb6_di_PrintDlgA(void* pPrintdlg) {
+    return ((intptr_t (WINAPI *)(void*))PrintDlgA)(pPrintdlg);
+}
+/* CommDlgExtendedError — Task #44 SSTabEx cDlg.cls:49 */
+intptr_t __stdcall vb6_di_CommDlgExtendedError(void) {
+    return ((intptr_t (WINAPI *)(void))CommDlgExtendedError)();
 }
 /* OleTranslateColor */
 intptr_t __stdcall vb6_di_OleTranslateColor(intptr_t lOleColor, intptr_t lHPalette, intptr_t lColorRef) {

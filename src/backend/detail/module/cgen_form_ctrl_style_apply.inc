@@ -190,6 +190,52 @@
                 style |= 0x0002L | kWsBorder;   // TVS_HASLINES
                 createCaption = "";
                 break;
+            case FrmControlType::DTPicker: {
+                // C29-DT-a: SysDateTimePick32 的三条样式属性一律从 .frm 立进**创建参数**。
+                // 为什么不能事后 SET（实测，读数见 tests\ctrldatetime 的 W 那行与 DT9-DT11）：
+                //   · CheckBox / UpDown 是复选框/微调按钮那两枚**子窗口**的创建参数，控件只在
+                //     WM_CREATE 读一次；事后写 GWL_STYLE，它立刻把这两位抹回去 ⇒ 只能创建时给。
+                //   · Format 切档运行期倒是有效，但设计期本来就该在创建时对，所以三条同一条路。
+                // 不加 WS_BORDER：日期框自带主题边框（TreeView/ListBox 那几枚要边框是因为原生
+                // 类自己不画），再套一圈就是两道框。
+                createCaption = "";
+                auto dtProp = [&](const char* key, int& slot) {
+                    auto it = ctrl.properties.find(key);
+                    if (it != ctrl.properties.end()) slot = (int)it->second.intValue;
+                };
+                int dtFmt = -999, dtChk = -999, dtUp = -999;
+                dtProp("Format", dtFmt);
+                dtProp("CheckBox", dtChk);
+                dtProp("UpDown", dtUp);
+                // VB6 的 dtpFormat 0..3：0 短日期(=原生 0) / 1 长日期 / 2 时间 / 3 自定义。
+                // 3 不改格式位（画成什么由 CustomFormat 决定），与 vb6_DTP_SetFormat 同一口径。
+                if (dtFmt == 1) style |= 0x0004L;          // DTS_LONGDATEFORMAT
+                else if (dtFmt == 2) style |= 0x0008L;     // DTS_TIMEFORMAT 的格式段(0x9 的 bit3；
+                                                           //   bit0 是 UPDOWN 那位，不在这儿塞)
+                if (dtChk != -999 && dtChk != 0) style |= 0x0002L;   // DTS_SHOWNONE
+                if (dtUp  != -999 && dtUp  != 0) style |= 0x0001L;   // DTS_UPDOWN
+                break;
+            }
+            case FrmControlType::MonthView: {
+                // C29-MV-a: SysMonthCal32 的三位样式一律从 .frm 立进创建参数。
+                //   MultiSelect=→MCS_MULTISELECT(0x2)  ShowWeekNumbers=→MCS_WEEKNUMBERS(0x4)
+                //   ShowToday=False→MCS_NOTODAY(0x10)  —— 注意 ShowToday 与原生那位是**反**的，
+                // 所以只有明确写 False 才挂 NOTODAY；没写就不动（原生默认显示 today 那一行）。
+                // 不加 WS_BORDER：月历自带主题边框，再套一圈就是两道框（与 DTPicker 同因）。
+                createCaption = "";
+                auto mvProp = [&](const char* key, int& slot) {
+                    auto it = ctrl.properties.find(key);
+                    if (it != ctrl.properties.end()) slot = (int)it->second.intValue;
+                };
+                int mvMulti = -999, mvWeek = -999, mvToday = -999;
+                mvProp("MultiSelect", mvMulti);
+                mvProp("ShowWeekNumbers", mvWeek);
+                mvProp("ShowToday", mvToday);
+                if (mvMulti != -999 && mvMulti != 0) style |= 0x0002L;
+                if (mvWeek  != -999 && mvWeek  != 0) style |= 0x0004L;
+                if (mvToday != -999 && mvToday == 0) style |= 0x0010L;
+                break;
+            }
             case FrmControlType::Toolbar:
                 // C29-5a: 原生 ToolbarWindow32 的默认观感两条 + **两位绝不能省**:
                 //   CCS_NORESIZE(0x4) | CCS_NOPARENTALIGN(0x8) —— 不给这两位，控件会无视
@@ -247,6 +293,23 @@
                  std::to_string(ctrl.index >= 0 ? ctrl.index : 0) + ")") :
                 ("vb6_hwnd_" + cIdent(ctrl.controlName));
             emitDesignerStyleProps(ctrl, dsHwnd);
+
+            // Fix 187: 设计期 ForeColor/BackColor — 此前从未发射, .frm 的初始色
+            // 全部落空 (picBackColor &H00F8CCB1& 淡蓝被显示成 BTNFACE 灰, 颜色
+            // 对话框 OK 后才第一次 Set)。&H8000000C& 这类系统色经低位截断保留
+            // 0x80000000 位, RTL 侧按 GetSysColor 解析。
+            {
+                auto bcIt187 = ctrl.properties.find("BackColor");
+                if (bcIt187 != ctrl.properties.end() && bcIt187->second.type == FrmValueType::Integer) {
+                    c_.emitLine("vb6_SetControlBackColor((void*)" + dsHwnd + ", "
+                                + std::to_string((int)(unsigned int)bcIt187->second.intValue) + ");  /* design BackColor */");
+                }
+                auto fcIt187 = ctrl.properties.find("ForeColor");
+                if (fcIt187 != ctrl.properties.end() && fcIt187->second.type == FrmValueType::Integer) {
+                    c_.emitLine("vb6_SetControlForeColor((void*)" + dsHwnd + ", "
+                                + std::to_string((int)(unsigned int)fcIt187->second.intValue) + ");  /* design ForeColor */");
+                }
+            }
         }
 
         // Bug3-Fix: 延迟设置 TextBox/ComboBox 的初始文本（在句柄赋值之后）
@@ -410,6 +473,67 @@
                       + std::to_string(tvLineStyle) + ", " + std::to_string(tvIndent) + ", "
                       + std::to_string(tvChk) + ", " + std::to_string(tvHot) + ", "
                       + std::to_string(tvHide) + ");");
+        }
+
+        // C29-DT-a: DTPicker 设计期 CustomFormat 下发。Format / CheckBox / UpDown 三条
+        // **不进这条 Init** —— 实测样式位事后写会被控件抹回去（见上面创建样式那一段的注释），
+        // 所以它们在上面的样式 switch 里就立好了。未写 CustomFormat 时这条是空转（发空串），
+        // 照样发 —— 为的是发码形状稳定（emitc 断言要看它）。
+        if (ctrl.controlType == FrmControlType::DTPicker) {
+            std::string dtLower = ctrl.controlName;
+            std::transform(dtLower.begin(), dtLower.end(), dtLower.begin(), ::tolower);
+            std::string dtHwnd = knownControlArrays_.count(dtLower) ?
+                ("vb6_CtrlArr_GetAt(&vb6_arr_" + cIdent(ctrl.controlName) + ", " +
+                 std::to_string(ctrl.index >= 0 ? ctrl.index : 0) + ")") :
+                ("vb6_hwnd_" + cIdent(ctrl.controlName));
+            std::string dtCustom;
+            auto cfIt = ctrl.properties.find("CustomFormat");
+            if (cfIt != ctrl.properties.end()) {
+                // .frm 里的 rawText 带外层引号，且 VB 用 "" 表示串内的一个引号。
+                // FrmParser::unquote 是 private（实测 C2248），这里就地剥一遍。
+                std::string raw = cfIt->second.rawText;
+                if (raw.size() >= 2 && raw.front() == '"' && raw.back() == '"') {
+                    std::string inner = raw.substr(1, raw.size() - 2);
+                    for (size_t k = 0; k < inner.size(); ++k) {
+                        if (inner[k] == '"' && k + 1 < inner.size() && inner[k + 1] == '"') continue;
+                        dtCustom += inner[k];
+                    }
+                } else {
+                    dtCustom = raw;
+                }
+            }
+            // C 字面量里的转义：反斜杠与双引号都过一遍，免得格式串里写 `"a\"b"` 把发码撑破。
+            std::string esc;
+            for (char ch : dtCustom) {
+                if (ch == '\\' || ch == '"') esc += '\\';
+                esc += ch;
+            }
+            c_.emitLine("vb6_DTP_Init((void*)" + dtHwnd + ", L\"" + esc + "\");");
+        }
+
+        // C29-MV-a: MonthView 设计期的多月平铺。原生没有"行/列"这条消息 —— 平铺几个月完全
+        // 由**窗口矩形多大**决定（CommCtrl.h 6361 行那段注释就是这么教的），所以 Init 按
+        // MonthRows×MonthColumns 把矩形乘出来、交给 MCM_SIZERECTTOMIN 撑到真装得下，再挪一次窗。
+        // 1×1（或 .frm 没写）时 RTL 直接返回，发码形状照旧稳定 —— emitc 断言要看这一条存在。
+        if (ctrl.controlType == FrmControlType::MonthView) {
+            std::string mvLower = ctrl.controlName;
+            std::transform(mvLower.begin(), mvLower.end(), mvLower.begin(), ::tolower);
+            std::string mvHwnd = knownControlArrays_.count(mvLower) ?
+                ("vb6_CtrlArr_GetAt(&vb6_arr_" + cIdent(ctrl.controlName) + ", " +
+                 std::to_string(ctrl.index >= 0 ? ctrl.index : 0) + ")") :
+                ("vb6_hwnd_" + cIdent(ctrl.controlName));
+            int mvRows = 1, mvCols = 1, mvMax = -999;
+            auto mvIt = ctrl.properties.find("MonthRows");
+            if (mvIt != ctrl.properties.end()) mvRows = (int)mvIt->second.intValue;
+            mvIt = ctrl.properties.find("MonthColumns");
+            if (mvIt != ctrl.properties.end()) mvCols = (int)mvIt->second.intValue;
+            mvIt = ctrl.properties.find("MaxSelCount");
+            if (mvIt != ctrl.properties.end()) mvMax = (int)mvIt->second.intValue;
+            if (mvRows < 1) mvRows = 1;
+            if (mvCols < 1) mvCols = 1;
+            c_.emitLine("vb6_MV_Init((void*)" + mvHwnd + ", "
+                        + std::to_string(mvRows) + ", " + std::to_string(mvCols) + ", "
+                        + std::to_string(mvMax) + ");");
         }
 
         // P20-40: StatusBar 设计期 —— Init 一次, 再按 Panels 集合逐项灌进去。
@@ -694,7 +818,10 @@
             int tsOrient   = tsInt(ctrl.properties, "TabOrientation", 0);
             int tsStyle    = tsInt(ctrl.properties, "TabStyle", 0);
             int tsPerRow   = tsInt(ctrl.properties, "TabsPerRow", 0);
-            int tsWrap     = tsInt(ctrl.properties, "WordWrap", 0);
+            // WordWrap 缺省 **True** (VB6 SSTab/SSTabEx 同): .frm 不写这行时 7 页
+            // 折成 TabsPerRow 行; 缺省 0 会让多页折叠成单行+滚动箭头
+            // (SSTabEx frmTest: 第二行 Label/Tab5/Tab6 不显示, 实证)。
+            int tsWrap     = tsInt(ctrl.properties, "WordWrap", 1);
             if (tsTabs < 0) tsTabs = 0;
             c_.emitLine("vb6_SSTab_Init((void*)" + tsHwnd + ", "
                       + std::to_string(tsTabs) + ", " + std::to_string(tsCur) + ", "
@@ -731,6 +858,35 @@
                 for (char& ch : raw) if (ch == '"') ch = '\'';
                 c_.emitLine("vb6_SSTab_SetTabCaption((void*)" + tsHwnd + ", "
                           + std::to_string(idx) + ", L\"" + raw + "\");");
+            }
+
+            // ③TabPic16/20/24(n) = "frmTest.frx":xxxx —— SSTabEx 的每页标签图标
+            // (Task #44 参考截图: Theme/Frame/Other/Cmd 四页有图标, 其余页没有)。
+            // 三档尺寸是同一张图 (16/20/24px, .frx 条目与 ImageList 同构: StdPicture
+            // GUID + 'lt' magic + 长度 → readPicture 走 isImageList=true 的 28B 头剥离)。
+            // 96DPI 优先取 16 档, 缺档顺延 20/24 (RTL 侧 imagelist 固定 16x16)。
+            if (frxLoaded && tsTabs > 0) {
+                auto tsPicVal = [&](int px, int idx2) -> const FrmValue* {
+                    auto it = ctrl.properties.find(
+                        "TabPic" + std::to_string(px) + "(" + std::to_string(idx2) + ")");
+                    if (it == ctrl.properties.end()) return nullptr;
+                    if (it->second.type != FrmValueType::FrxReference) return nullptr;
+                    return &it->second;
+                };
+                for (int idx2 = 0; idx2 < tsTabs; idx2++) {
+                    const FrmValue* pv = tsPicVal(16, idx2);
+                    if (!pv) pv = tsPicVal(20, idx2);
+                    if (!pv) pv = tsPicVal(24, idx2);
+                    if (!pv) continue;
+                    auto pic = FrxReader::readPicture(pv->frxOffset, true);
+                    if (pic.data.empty()) continue;
+                    std::string varName = "vb6_frx_tabpic_" + cIdent(ctrl.controlName)
+                                        + "_" + std::to_string(idx2);
+                    h_.emitLine(bytesToHexArray(pic.data.data(), pic.data.size(), varName));
+                    c_.emitLine("vb6_SSTab_SetTabPicture((void*)" + tsHwnd + ", "
+                              + std::to_string(idx2) + ", " + varName + ", "
+                              + varName + "_size);");
+                }
             }
         }
 

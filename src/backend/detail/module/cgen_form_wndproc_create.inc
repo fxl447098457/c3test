@@ -155,6 +155,25 @@
         }
     }
 
+    // Fix 187: STATIC 类子控件 (picBackColor 等色块/Label) 通过 WM_CTLCOLORSTATIC
+    // 向父窗要底色/前景刷 — 此前主窗体 WndProc 不处理, vb6_SetControlBackColor
+    // 写的 VB6_BackColor 属性无人消费 → 颜色对话框 OK 后色块不变色
+    // (Test.exe "颜色没有写入到颜色对话左边的控件里")。RTL 统一入口
+    // vb6_ApplyCtlColorStatic 仅在子控件显式 Set 过 VB6_BackColor 时接管,
+    // 其余情形 break 到 DefWindowProcW 维持原生外观。
+    c_.emitLine("case WM_CTLCOLORSTATIC: {");
+    c_.indent();
+    c_.emitLine("HWND vb6_clrchld = (HWND)lParam;");
+    c_.emitLine("if (vb6_clrchld && GetPropW(vb6_clrchld, L\"VB6_BackColorSet\")) {");
+    c_.indent();
+    c_.emitLine("LRESULT vb6_br187 = vb6_ApplyCtlColorStatic((HDC)wParam, vb6_clrchld);");
+    c_.emitLine("if (vb6_br187) return vb6_br187;");
+    c_.dedent();
+    c_.emitLine("}");
+    c_.emitLine("break;");
+    c_.dedent();
+    c_.emitLine("}");
+
     // Fix 058: 处理延迟的 Form_Load (WM_USER+0x100 = 0x7FF0)
     if (formLoadSym) {
         c_.emitLine("case 0x7FF0: {");
@@ -383,6 +402,30 @@
                 walkCmdChildren142(walkCmdChildren142, ctrl);
             }
         }
+    }
+
+    // C29-5c: Toolbar 的 ButtonClick —— 原生工具栏报按钮点击**不走 WM_NOTIFY**，而是按
+    // 标准做法给父窗发 WM_COMMAND: LOWORD(wParam)=按钮的 idCommand (5a 写的是"槽号+1")、
+    // HIWORD=0、lParam=工具栏自己的 HWND。所以按 lParam 认来源、按 id 取按钮，两条都来自
+    // 同一个 idCommand ⇒ 派发与表错位会当场翻红:
+    //   Sub Toolbar1_ButtonClick(ByVal Button As Button)
+    // (_ButtonMenuClick 才走 WM_NOTIFY 的 TBN_DROPDOWN，见 cgen_form_wndproc_dispatch.inc。)
+    for (const auto& ctrl : frmDesc.formControl.children) {
+        if (ctrl.controlType != FrmControlType::Toolbar) continue;
+        if (!symTab_.lookup(ctrl.controlName + "_ButtonClick")) continue;
+        std::string tbFn5c = cProcName(ctrl.controlName + "_ButtonClick", AccessLevel::Private);
+        std::string tbSrc5c = ctrlHwndExprForInit(ctrl);
+        c_.emitLine("{");
+        c_.indent();
+        c_.emitLine("HWND vb6_tbSrc5c = (HWND)" + tbSrc5c + ";");
+        c_.emitLine("if (code == 0 && (HWND)lParam == vb6_tbSrc5c) {");
+        c_.indent();
+        c_.emitLine("void* vb6_tbBtn5c = vb6_Toolbar_ButtonAt((void*)vb6_tbSrc5c, id);");
+        c_.emitLine("if (vb6_tbBtn5c) { extern void " + tbFn5c + "(void*); " + tbFn5c + "(vb6_tbBtn5c); }");
+        c_.dedent();
+        c_.emitLine("}");
+        c_.dedent();
+        c_.emitLine("}");
     }
 
     // P16: WithEvents控件事件分发 (按HWND匹配, 在标准命名handler之后)
