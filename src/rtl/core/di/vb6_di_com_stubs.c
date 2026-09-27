@@ -168,7 +168,8 @@ intptr_t __stdcall vb6_di_CryptDecrypt(intptr_t hKey, intptr_t hHash, intptr_t F
     return ((intptr_t (WINAPI *)(intptr_t, intptr_t, intptr_t, intptr_t, void*, int32_t*))CryptDecrypt)(hKey, hHash, Final, dwFlags, pbData, pdwDataLen);
 }
 
-/* ChooseColorA */
+/* ChooseColorA —— Declare/Alias 语义按字面映射: Alias "ChooseColorA" 走 A 版,
+ * 只有 declarewide 形态才走 W (用户指令 2026-09-27)。勿在此擅自 A→W。 */
 intptr_t __stdcall vb6_di_ChooseColorA(void* pChoosecolor) {
     return ((intptr_t (WINAPI *)(void*))ChooseColorA)(pChoosecolor);
 }

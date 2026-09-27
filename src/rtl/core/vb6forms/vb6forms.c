@@ -421,6 +421,18 @@ void* vb6_CreateControl(const char* win32Class, const char* controlName,
                         itemH, ph, itemH + listPx, (int)(rr.bottom - rr.top));
             }
         }
+
+        // Fix 187: PictureBox/Image = STATIC+SS_BITMAP, 由 RTL 自绘接管
+        // (vb6_ImageSubclassProc: 先按 VB6_BackColor 属性填背景, 再画 Picture)。
+        // 此前无图 PictureBox 是裸 SS_BITMAP STATIC — 无文字 STATIC 的
+        // WM_CTLCOLORSTATIC 擦背景路径可走, BackColor 写了没人消费
+        // (Test.exe 颜色对话框 OK 后色块不变色的第三层根因)。
+        // 生成器对 PictureBox/Image 固定发 SS_BITMAP(0x0E), 用它识别;
+        // Label 是 SS_LEFT|SS_NOTIFY 不含该位, 不受影响。
+        if (_stricmp(win32Class, "STATIC") == 0
+            && ((style & 0x0000000FL) == 0x0000000EL)) {  // SS_BITMAP
+            vb6_InstallImageSubclass(hwnd);
+        }
     }
 
     return (void*)hwnd;

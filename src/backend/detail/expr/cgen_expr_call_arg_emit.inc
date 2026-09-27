@@ -193,6 +193,73 @@
                     }
                 }
             }
+            // Task #44 根因3: UDT 内 inline 定长数组作为整体数组引用传给动态数组
+            // 形参 (`sByteArrayToString(tLogFont.lfFaceName())`, 形参
+            // `abBytes() As Byte` → C 形参 vb6_SafeArray1D**)。inline uint8_t[N]
+            // 的地址被硬当 SafeArray 载体指针的指针 → 函数体内 (*abBytes) 把
+            // lfFaceName 前 4 字节 "MS S" (0x5320534d, comdlg32 写回的字体名)
+            // 当指针解引用 → 0xC0000005 (SSTabEx 字体对话框 IDOK 确认实测)。
+            // 修复: 调用点包装栈上临时 SafeArray 头 (复合字面量, full-expression
+            // 生存期覆盖调用, 与既有 &(vb6_VARIANT){...} 手法同族) 指向 inline
+            // 存储 —— LBound/UBound/元素访问全部语义正确。
+            // 判定三要件: 实参是空括号整体引用 + callee 是 UDT 字段访问 + 该成员
+            // 在 UDT 符号表里 arraySize>0 (inline 定长)。UDT 内动态数组成员
+            // (isArrayDynamic, C 字段是 vb6_SafeArray1D*) 与类实例数组字段
+            // (me->X) 不命中, 走各自正确路径不受影响。
+            // lBound=0 与 UDT 定长数组的元素访问口径一致 (cgen 生成 lfFaceName[i]
+            // 直接 C 下标, 不做 lower 偏移), elemSize 用 sizeof(首元素) 对 UDT
+            // 元素同样成立。
+            if (calleeParamIsArray && !wholeArr158 && node.positional[i]
+                && node.positional[i]->kind == ASTNodeKind::IndexOrCallExpr) {
+                auto& callWrap44 = static_cast<IndexOrCallExpr&>(*node.positional[i]);
+                if (callWrap44.positional.empty() && callWrap44.callee
+                    && callWrap44.callee->kind == ASTNodeKind::MemberAccessExpr) {
+                    auto& maWrap44 = static_cast<MemberAccessExpr&>(*callWrap44.callee);
+                    if (maWrap44.object) {
+                        std::string udtCType44 = inferUdtTypeOfExpr(*maWrap44.object);
+                        const std::string prefix44 = "vb6_type_";
+                        if (udtCType44.size() > prefix44.size()
+                            && udtCType44.compare(0, prefix44.size(), prefix44) == 0) {
+                            Symbol* udtSym44 = symTab_.lookupModule(
+                                udtCType44.substr(prefix44.size()));
+                            if (udtSym44 && udtSym44->kind == SymbolKind::UserDefinedType) {
+                                std::string memWrap44 = Symbol::toLower(maWrap44.memberName);
+                                for (auto& mi44 : udtSym44->udtMembers) {
+                                    if (Symbol::toLower(mi44.name) != memWrap44) continue;
+                                    if (mi44.arraySize > 0) {
+                                        // 字段序: signature, elemType, elemSize,
+                                        // lBound, uBound, count, data, isDynamic
+                                        // (vb6rtl_array.h vb6_SafeArray1D)。
+                                        // 个数用 sizeof(数组)/sizeof(元素) 由 C 编译器
+                                        // 自算 —— 语义层 UdtMemberInfo.arraySize 目前
+                                        // 只是"是定长数组"的占位 (=1), 不是元素个数。
+                                        Vb6Type elemT44 = static_cast<Vb6Type>(
+                                            static_cast<uint16_t>(calleeParams[i].type)
+                                            & ~static_cast<uint16_t>(Vb6Type::Array));
+                                        std::string cnt44 =
+                                            "(int32_t)(sizeof(" + argVal
+                                            + ")/sizeof((" + argVal + ")[0]))";
+                                        // 形参是 vb6_SafeArray1D** (指向"载体指针变量"
+                                        // 的指针), 函数体 (*abBytes) 先解一层。所以不能
+                                        // 只传 &(结构字面量) (那是 SafeArray1D*, 解一层
+                                        // 会把 signature 0x5A1D 当指针 → AV 读 0x5a1d,
+                                        // 首版实测) —— 外面再包一层"1 元素指针数组字面量"
+                                        // 取址, 得到真正的 SafeArray1D**。两个复合字面量
+                                        // 都在最外层 full-expression 内生存, 覆盖调用。
+                                        argVal = "&(vb6_SafeArray1D*[]){&(vb6_SafeArray1D){0x5A1D, "
+                                            + mapSaElemType(elemT44)
+                                            + ", (int32_t)sizeof((" + argVal + ")[0])"
+                                            + ", 0, (" + cnt44 + " - 1), " + cnt44
+                                            + ", (void*)(" + argVal + "), 0}}";
+                                        wholeArr158 = true;
+                                    }
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
             if (wholeArr158) {
                 // 已重写为单个取址形式, 跳过下方 ByRef 分发.
             } else if (argVal.size() > 3 && argVal.substr(0, 2) == "(*" && argVal.back() == ')') {
