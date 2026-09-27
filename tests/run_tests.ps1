@@ -1274,6 +1274,20 @@ if ($Category -in @("all", "run", "bas")) {
     # 修复前出参回写只按 AST 种类判左值, MemberAccessExpr 判 true 但生成的是
     # vb6_VariantToString(...) 右值 → &(右值) → C2102, 真实工程 Charts 2020 编译失败。
     Add-BasTest "test_declare_cwex_lit_com" "$Tests\declare_out\declare_cwex_lit_com.bas" @("lit-com-hwnd-ok=Y", "lit-only-hwnd-ok=Y")
+
+    # ai/029:429 那条"未登记的控件属性按数值读漏裸指针"（Fix 161d）。
+    # 两条路: Select Case (cgen_select.cpp 无参 resolveComValue ⇒ 默认 BSTR, 而
+    # tempType 是 int32_t) 与 Not (cgen_expr.cpp 的 UnaryOp::Not 落 (int32_t)(operand);
+    # Fix 092r 当时只补了 Negate)。同族的 Fix 092n(For)/092r(Negate) 早修过。
+    # 只有**未登记**属性中招 —— 已登记的走 getControlPropReadFn 专属 getter。
+    # 靶子选 TreeView.Caption: 未登记 **且宿主答得出值**(GetWindowTextW ⇒ 真 BSTR,
+    # 非 NULL) ⇒ 基线截出的指针低位非 0, 判据能红。(用 Style 会假绿: 宿主答 Empty
+    # ⇒ StringProp 给 NULL ⇒ 截成 0, 与修复后同值 —— 实测踩过。)
+    # 判据一律取**值**: 基线 `~(指针低位)` 也是非 0, `If Not x` 的真假分不出来。
+    $cpNeedles = @("P-SEL0=Y", "P-NOT=Y", "P-NOTVAL=-1",
+                   "P-REG-SEL=Y", "P-REG-NOT=Y", "P-GEN-SEL=Y", "CTRLPROP-DONE")
+    Add-BasTest "test_ctrlprop" "$Tests\ctrlprop\PropApp.vbp" $cpNeedles
+    Add-BasTest "test_ctrlprop_x86" "$Tests\ctrlprop\PropApp.vbp" $cpNeedles -Arch "x86"
     Write-Host ""
 
     # --- P5.7 语法/语义检查用例组 ---
@@ -1614,6 +1628,43 @@ if ($Category -in @("all", "run", "vbp")) {
         # 修法是把钩子抢在那条分支之前)。这条断言就是别让那个形状再回来。
         'vb6_ComGetObjectProp(vb6_hwnd_tv1, L"SimNodeClick")',
         'CoCreateInstance'
+    )
+
+    # ai/029:429 + Fix 161d —— 源码面双保险: 生成串里不得再出现"指针返回函数被当数值"。
+    # (这一条原先被放在 bas 段, 现挪到 vbp 段与其余 Test-Emitc* 同段 —— 它一直在 PASS,
+    #  只是归属类别与惯例不一致; 挪动后由 vbp job 执行。)
+    Test-EmitcAbsent "cp_emitc_no_ptr_as_num" @("$Tests\ctrlprop\PropApp.vbp") @(
+        '(int32_t)(vb6_ComGetStringProp(',        # Not / 取负那条的 cast
+        '(int32_t)(vb6_ComGetObjectProp(',
+        '_vb6_select_0 = vb6_ComGetStringProp(',  # Select Case 的 int32_t temp 那条
+        '_vb6_select_0 = vb6_ComGetObjectProp('
+    )
+
+    # Fix 161e: MsgBox 首参是**数值**时必须转字符串 (VB6 隐式转换: MsgBox 7 就显示 "7")。
+    # 此前 cgen_expr_call_conv_output.inc 只包装了 COM 读 / Variant 两类形态，纯数值
+    # (Len(...) 返回值 / 数值变量 / 字面量 / 算术表达式 / 浮点 / 布尔) 一条都没包
+    # ⇒ int32_t(double/bool) 直接当 BSTR 指针传给 vb6_MsgBox1 ⇒ **弹窗是空的**
+    # (地址 7、123 不可读; 真读得到时显示的也是垃圾)。修复: 未被认领的形态统一过
+    # wrapToBSTR (cgen_expr_binary_util.cpp:81)，它按 inferExprType 分流且 String 原样返回。
+    # ⚠ 判据走**源码面**而非运行时: MsgBox 是模态 MessageBoxW，无头环境会阻塞线程
+    #   (见本文件上面那条注释「运行中弹 MsgBox 的用例需获得前台焦点」)。
+    #   所以 tests/msgbox_num.bas 只喂 --emit-c，不登记为运行用例。
+    Test-EmitcShape "mb_emitc_num_wrapped" @("$Tests\msgbox_num.bas") @(
+        'vb6_MsgBox1(vb6_CStrLong(vb6_Len(',    # Len 返回值 (int32_t)
+        'vb6_MsgBox1(vb6_CStrLong(n))',         # 数值变量
+        'vb6_MsgBox1(vb6_CStrLong(123))',       # 数值字面量
+        'vb6_MsgBox1(vb6_CStrLong((n + 1)))',   # 算术表达式
+        'vb6_MsgBox1(vb6_CStrDbl(d))',          # 浮点
+        'vb6_MsgBox1(vb6_CStrBool(b))',         # 布尔
+        'vb6_MsgBox1(s)'                        # 字符串: 必须原样, 不得被误包
+    )
+    Test-EmitcAbsent "mb_emitc_no_bare_num" @("$Tests\msgbox_num.bas") @(
+        'vb6_MsgBox1(vb6_Len(',    # 裸数值函数返回值
+        'vb6_MsgBox1(n)',          # 裸数值变量
+        'vb6_MsgBox1(123)',        # 裸字面量
+        'vb6_MsgBox1((n + 1))',    # 裸算术表达式
+        'vb6_MsgBox1(d)',          # 裸浮点
+        'vb6_MsgBox1(b)'           # 裸布尔
     )
     # ai/029 C29-DT-a: DTPicker 换成原生 SysDateTimePick32（D6：不碰 MSCOMCT2.OCX，32 位进不了 x64）。
     # 改之前这枚控件走的是"第三方 OCX 按 COM 后期绑定"那一组 => 工程没引用类型库时连符号都查不到，

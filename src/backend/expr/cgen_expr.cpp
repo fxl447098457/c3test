@@ -258,6 +258,26 @@ void CCodeGen::visit(UnaryExpr& node) {
             // Fix 039: VB6 Not = 位取反 (C: ~), cast to int32_t for non-integer
             // operands (double from vb6_Pow, pointer from BSTR/void*/SafeArray*)
             // Fix 039b: For Variant operands, use vb6_VariantToLong() instead.
+            // Fix 161d: `Not <未登记控件属性>` —— 通用兜底读回的是 **指针**
+            // (vb6_ComGetStringProp → wchar_t*), 下面那条 `(int32_t)(指针)` 就成了
+            // "非空判定"(恒真), 而 VB6 的 Not 是逐位取反。实测 ppProgressCircular.pag:536
+            //   If Not oPC.ShowAnimation Then
+            // 生成 `(~(int32_t)(vb6_ComGetStringProp(me->oPC, L"ShowAnimation")))` ——
+            // 与 Fix 092n(For)/092r(Negate) 同一族, 那两处当时各补一刀, Not 这刀漏了。
+            // 口径照 092r: 认出指针返回函数就换**数值读**重来, 不做事后 cast。
+            if (operand.find("vb6_ComGetStringProp(") == 0) {
+                std::string innerNot = operand.substr(std::strlen("vb6_ComGetStringProp("));
+                if (!innerNot.empty() && innerNot.back() == ')') innerNot.pop_back();
+                // 数值属性读回 int32_t: ~(-1)=0(True→False), ~0=-1(False→True), 正是 VB6 语义
+                lastExpr_ = "(~vb6_ComGetIntProp(" + innerNot + "))";
+                break;
+            }
+            if (operand.find("vb6_ComGetObjectProp(") == 0) {
+                // 对象指针不能按整数逐位取反 (void* → int32_t 是截断): 退化成非空判定,
+                // 至少类型安全、不把指针当数值。VB6 里 `Not <对象>` 本身是类型错。
+                lastExpr_ = "(((intptr_t)(" + operand + ") != 0) ? 0 : -1)";
+                break;
+            }
             if (cExprIsVariant(operand)) {
                 lastExpr_ = "(~vb6_VariantToLong(" + operand + "))";
             } else if (node.operand && node.operand->kind == ASTNodeKind::IdentifierExpr) {
