@@ -1316,6 +1316,11 @@ if ($Category -in @("all", "run", "bas")) {
     Add-BasTest "test_com_default_prop" "$Tests\test_com_default_prop.bas" @("DP-1:OK", "DP-4:OK", "P24-10: 4/4")
     Add-BasTest "test_com_optional" "$Tests\test_com_optional.bas" @("OP-1:OK", "OP-4:OK", "P24-11: 4/4")
     Add-BasTest "test_bstr_concat_scalar" "$Tests\test_bstr_concat_scalar.bas" @("BCS:16/16")
+    # 账 #115: Len() 的"存储宽度"兜底桶把模块级 String 也吞了 (knownBstrVars_ 每过程入口 clear,
+    # 只有局部声明/形参进表) => `Len(gS)` 发成 sizeof(gS): x64 读 8、x86 读 4。两条架构各真跑一次,
+    # 因为**修复前的读数本身随架构变** —— 只跑默认架构就看不见这半个症状。
+    Add-BasTest "test_len_width" "$Tests\test_len_width.bas" @("LW1=7", "LW2=5", "LW3=5", "LW4=2", "LW5=5", "LW6=5", "LW7=4", "LW8=2", "LW9=1", "LW10=10", "LW11=0", "LW12=5")
+    Add-BasTest "test_len_width_x86" "$Tests\test_len_width.bas" @("LW1=7", "LW2=5", "LW3=5", "LW4=2", "LW5=5", "LW6=5", "LW7=4", "LW8=2", "LW9=1", "LW10=10", "LW11=0", "LW12=5") -Arch "x86"
     # Fix 190: Declare "As Any" ByRef 的下标链实参必须取地址, 不能把元素值当指针
     Add-BasTest "test_asany_subscript" "$Tests\test_asany_subscript.bas" @("WITH-SUB=Y", "EXPR-SUB=Y", "SCALAR=Y", "CHAIN=Y", "ASANY-DONE")
     # Delegate (tB extension): typed function pointers, stdcall/cdecl thunks, both arches
@@ -1665,6 +1670,22 @@ if ($Category -in @("all", "run", "vbp")) {
         'vb6_MsgBox1((n + 1))',    # 裸算术表达式
         'vb6_MsgBox1(d)',          # 裸浮点
         'vb6_MsgBox1(b)'           # 裸布尔
+    )
+
+    # 账 #115: `Len(<裸标识符>)` 的"stor-宽度兜底桶"把**模块级 String**也吞了(knownBstrVars_ 每过程入口 clear，
+    # 只有局部声明/形参进表) ⇒ 发成 (int32_t)sizeof(gS)。发码面钉两边：模块级 String 必须走 vb6_Len，
+    # 而**数值型变量照旧走 sizeof**(Task #44 的 SSTabEx/ChooseColor 堆越界就是靠它救回来的，别把那一半改坏)。
+    Test-EmitcShape "len_emitc_width" @("$Tests\test_len_width.bas") @(
+        'vb6_CStrLong(vb6_Len(gS))',                    # 模块级 String：字符数
+        'vb6_CStrLong(vb6_Len(gE))',                    # 模块级空串：0
+        'vb6_CStrLong(vb6_Len(lS))',                    # 局部 String
+        'vb6_CStrLong(((int32_t)sizeof(gL))))',         # Long：存储宽度
+        'vb6_CStrLong(((int32_t)sizeof(gI))))',         # Integer：存储宽度
+        'vb6_CStrLong(((int32_t)sizeof(gB))))'          # Byte：存储宽度(LEN-BYTE 那条崩溃的反证)
+    )
+    Test-EmitcAbsent "len_emitc_no_ptr_width" @("$Tests\test_len_width.bas") @(
+        '((int32_t)sizeof(gS))',                        # 修复前的形状：x64 读 8、x86 读 4
+        '((int32_t)sizeof(gE))'
     )
     # ai/029 C29-DT-a: DTPicker 换成原生 SysDateTimePick32（D6：不碰 MSCOMCT2.OCX，32 位进不了 x64）。
     # 改之前这枚控件走的是"第三方 OCX 按 COM 后期绑定"那一组 => 工程没引用类型库时连符号都查不到，
