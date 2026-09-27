@@ -62,8 +62,54 @@ void CCodeGen::emitClassFactory(Module& module) {
                 else if (vtype == Vb6Type::Long || vtype == Vb6Type::Integer || vtype == Vb6Type::Boolean) knownLongVars_.insert(lower);
                 else if (vtype == Vb6Type::Double || vtype == Vb6Type::Single) knownDoubleVars_.insert(lower);
             }
-            if (var.isDynamicArray || !var.dimensions.empty()) {
+            if (var.isDynamicArray) {
+                // 动态数组 `Dim x() As T`: ReDim 前不分配 (VB6 语义), NULL 起步
                 c_.emitLine("me->" + field + " = NULL;");
+            } else if (!var.dimensions.empty()) {
+                // 定长数组成员: VB6 **每个实例创建时自动分配** (每个实例一份)。
+                // 此前只置 NULL —— 类成员数组从未分配, Class_Initialize 里首次读写
+                // (cDlg.cls 的 InitCustomColors) 解引用 NULL SafeArray → AV 读 0xC
+                // (Task #44 SSTabEx "..." 按钮 cDlg.ShowColor 实测 0xC0000005)。
+                // 模块级 (cgen_decl_var.cpp) / 过程局部 (cgen_localdecl.cpp) 都有
+                // 创建逻辑, 唯类实例成员漏了 —— 补齐。Destroy 侧已有 vb6_SA_Destroy
+                // (本文件 _Destroy 循环), 生命周期闭环。
+                int dimCount44 = (int)var.dimensions.size();
+                Vb6Type elemType44 = resolveArrayElemType(var.asType.get());
+                std::string saElem44 = mapSaElemType(elemType44);
+                std::string udtC44 = resolveArrayUdtElemCType(var.asType.get());
+                if (dimCount44 == 1) {
+                    auto& dim44 = var.dimensions[0];
+                    std::string lb44 = "0", ub44 = "0";
+                    if (dim44.lower) { emitExpr(*dim44.lower); lb44 = std::move(lastExpr_); }
+                    if (dim44.upper) { emitExpr(*dim44.upper); ub44 = std::move(lastExpr_); }
+                    if (!udtC44.empty()) {
+                        // UDT 元素: 字段类型 SafeArray1D*, _Udt 版创建 (口径同
+                        // cgen_localdecl.cpp:73), 销毁走 vb6_SA_Destroy 通用路径
+                        c_.emitLine("me->" + field + " = vb6_SafeArrayReDim1D_Udt((int32_t)sizeof(" + udtC44 + "), " + lb44 + ", " + ub44 + ");");
+                    } else {
+                        c_.emitLine("me->" + field + " = vb6_SafeArrayCreate1D(" + saElem44 + ", " + lb44 + ", " + ub44 + ");");
+                    }
+                } else {
+                    // 多维: 字段类型 SafeArrayND* (cgen_base_generate_c_open.inc:97)
+                    std::string bounds44 = "_cbounds_" + field;
+                    c_.emitLine("vb6_SafeArrayBound " + bounds44 + "[] = {");
+                    c_.indent();
+                    for (int d44 = 0; d44 < dimCount44; d44++) {
+                        auto& dim44 = var.dimensions[d44];
+                        std::string lb44 = "0", ub44 = "0";
+                        if (dim44.lower) { emitExpr(*dim44.lower); lb44 = std::move(lastExpr_); }
+                        if (dim44.upper) { emitExpr(*dim44.upper); ub44 = std::move(lastExpr_); }
+                        std::string tr44 = (d44 < dimCount44 - 1) ? "," : "";
+                        c_.emitLine("{" + lb44 + ", (" + ub44 + " - " + lb44 + " + 1)}" + tr44);
+                    }
+                    c_.dedent();
+                    c_.emitLine("};");
+                    if (!udtC44.empty()) {
+                        c_.emitLine("me->" + field + " = vb6_SafeArrayReDimND_Udt((int32_t)sizeof(" + udtC44 + "), " + std::to_string(dimCount44) + ", " + bounds44 + ");");
+                    } else {
+                        c_.emitLine("me->" + field + " = vb6_SafeArrayCreateND(" + saElem44 + ", " + std::to_string(dimCount44) + ", " + bounds44 + ");");
+                    }
+                }
             } else if (var.asType) {
                 Vb6Type fvt = resolveArrayElemType(var.asType.get());
                 // Fix 084m: 字段C类型为指针 (void*/vb6_ComIface_X*/vb6_cls_X*/vb6_SafeArray1D*)
