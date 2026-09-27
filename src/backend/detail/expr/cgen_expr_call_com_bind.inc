@@ -528,17 +528,56 @@
                 const auto& sig = it->second;
                 std::string returnType = mapType(sig.returnType);
                 std::vector<std::string> packedArgs;
+                // Fix 160-com-byref: ByRef 对象出参 (Chilkat ObjectOf2/ArrayOf2 的 obj/arr 形参)。
+                // 这类形参 type=Object 且 !isByVal; 调用方必须以 void** 形式把变量地址传出,
+                // 才能接住方法写入的新对象指针 (VT_DISPATCH|VT_BYREF)。仅当实参是简单对象变量
+                // (已知 ComClass/Object 变量) 时才取址 —— 表达式出参需临时量, 超出本修复范围,
+                // 退化为按值打包以维持既有行为, 不引入编译错误。
+                auto isKnownObjectVarName = [&](const std::string& e) -> bool {
+                    std::string l = e;
+                    std::transform(l.begin(), l.end(), l.begin(), ::tolower);
+                    return knownObjectVars_.count(l) || knownTypedComVars_.count(l);
+                };
+                auto byRefObjectParamAt = [&](size_t pos) -> bool {
+                    if (pos < sig.params.size()) {
+                        const auto& p = sig.params[pos];
+                        // Fix 160-com-byref: COM 对象指针形参 (VT_PTR(VT_DISPATCH)) 在 C3 类型映射里
+                        // 常落到 Variant, 故不苛求 type==Object, 只要求方向非 In (Out/InOut)。
+                        // 真正的对象判定交给实参侧 isKnownObjectVarName —— 非对象实参不会走此分支。
+                        return !p.isByVal;
+                    }
+                    return false;
+                };
+                auto byRefObjectParamNamed = [&](const std::string& nm) -> bool {
+                    std::string nl = Symbol::toLower(nm);
+                    for (const auto& p : sig.params)
+                        if (Symbol::toLower(p.name) == nl && !p.isByVal && p.type == Vb6Type::Object)
+                            return true;
+                    return false;
+                };
                 for (size_t i = 0; i < node.positional.size(); i++) {
                     std::string packFn = comPackExpr(*node.positional[i]);
                     emitExpr(*node.positional[i]);
                     { std::string resolved = resolveComMarkerForPack(packFn); if (!resolved.empty()) lastExpr_ = resolved; }
-                    packedArgs.push_back(packFn + "(" + lastExpr_ + ")");
+                    if (byRefObjectParamAt(i)
+                        && node.positional[i]->kind == ASTNodeKind::IdentifierExpr
+                        && isKnownObjectVarName(lastExpr_)) {
+                        packedArgs.push_back("vb6_ComPackObjectRef((void**)&" + lastExpr_ + ")");
+                    } else {
+                        packedArgs.push_back(packFn + "(" + lastExpr_ + ")");
+                    }
                 }
                 for (auto& named : node.named) {
                     std::string packFn = comPackExpr(*named.value);
                     emitExpr(*named.value);
                     { std::string resolved = resolveComMarkerForPack(packFn); if (!resolved.empty()) lastExpr_ = resolved; }
-                    packedArgs.push_back(packFn + "(" + lastExpr_ + ")");
+                    if (byRefObjectParamNamed(named.name)
+                        && named.value->kind == ASTNodeKind::IdentifierExpr
+                        && isKnownObjectVarName(lastExpr_)) {
+                        packedArgs.push_back("vb6_ComPackObjectRef((void**)&" + lastExpr_ + ")");
+                    } else {
+                        packedArgs.push_back(packFn + "(" + lastExpr_ + ")");
+                    }
                 }
                 int32_t argc = (int32_t)packedArgs.size();
                 std::string argsArray = "(void*[]){";

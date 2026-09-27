@@ -280,6 +280,19 @@ void CCodeGen::emitLocalDeclCode(LocalDeclStmt& node) {
                 }
                 if (clsSym && (clsSym->kind == SymbolKind::ComClass || clsSym->kind == SymbolKind::ComInterface)) {
                     isLocalComIfaceType = true;
+                    // Fix 090v-com: 前期绑定COM变量C类型缓存 (供 As New 守卫转型)
+                    {
+                        std::string lower = var.name;
+                        std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+                        knownTypedComVarCType_[lower] = cType;
+                    }
+                    // Fix 090v-com: Dim As New ComClass 局部变量自动实例化守卫
+                    // (clsSym->kind==Class 分支不含 COM 类, 这里补注册, 否则 json.Version 永为 NULL)
+                    if (var.isNew && clsSym->kind == SymbolKind::ComClass) {
+                        std::string lower = var.name;
+                        std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+                        knownNewVars_[lower] = cIdent(clsSym->name);
+                    }
                 }
                 // 检查是否是UDT类型
                 auto* udtSym = lookupDotted(simple.name);
