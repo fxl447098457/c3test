@@ -274,22 +274,27 @@ void CCodeGen::visit(CallStmt& node) {
                     return;
                 }
             }
-            // C29-WS-a: 无实参的 Winsock 方法（`Winsock1.Close`）也走这条语句路 —— 与上面
-            // CommonDialog.Show* 同族。带实参那三条（Bind / SendData / GetData / PeekData）
-            // 在 cgen_expr_call_callee_withm.inc 收尾，两边都缺一头就是
+            // C29-WS-a/b: 无实参的 Winsock 方法（`Winsock1.Close` / `.Listen` / `Winsock1.Connect`）
+            // 也走这条语句路 —— 与上面 CommonDialog.Show* 同族。带实参那四条（Bind / SendData /
+            // GetData / PeekData / Accept）在 cgen_expr_call_callee_withm.inc 收尾，两边都缺一头就是
             // `vb6_ComCall(wsa, L"close", NULL, 0)`：裸控制名 ⇒ C2065，或者更糟 —— 编得过、
             // 运行期一声不响（本线踩过三次的那同一条）。
             {
                 auto itWs = knownFormControls_.find(comObjExpr_);
                 std::string mWs = Symbol::toLower(comMemberName_);
-                if (itWs != knownFormControls_.end()
-                    && itWs->second == FrmControlType::Winsock && mWs == "close") {
+                const char* fnWs = nullptr;
+                if (itWs != knownFormControls_.end() && itWs->second == FrmControlType::Winsock) {
+                    if (mWs == "close")        fnWs = "vb6_Ws_Close";
+                    else if (mWs == "listen")  fnWs = "vb6_Ws_Listen";
+                    else if (mWs == "connect") fnWs = "vb6_Ws_Connect";
+                }
+                if (fnWs) {
                     std::string hwndWs = cIdent(knownFormControlOriginalNames_.count(comObjExpr_)
                         ? knownFormControlOriginalNames_[comObjExpr_] : comObjExpr_);
                     comObjExpr_.clear();
                     comMemberName_.clear();
-                    c_.emitLine("vb6_Ws_Close((void*)vb6_hwnd_" + hwndWs + ");"
-                                "  /* Winsock.close (原生 Winsock2) */");
+                    c_.emitLine(std::string(fnWs) + "((void*)vb6_hwnd_" + hwndWs + ");"
+                                "  /* Winsock." + mWs + " (原生 Winsock2) */");
                     return;
                 }
             }

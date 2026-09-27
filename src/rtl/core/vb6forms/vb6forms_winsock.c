@@ -1,11 +1,12 @@
-// vb6forms_winsock.c — ai/029 C29-WS-a: VB6 Winsock 控件的原生落点（Winsock2）第一档
+// vb6forms_winsock.c — ai/029 C29-WS: VB6 Winsock 控件的原生落点（Winsock2）
 //
 // 本格范围 = 控件身份（不可见窗 + **真在收通知的 WndProc**）+ 实例表 + 事件槽 + 状态与属性面
 //   + **UDP 一整轮**（Bind / SendData / GetData / PeekData / Close + DataArrival / StateChanged）。
-// TCP 的 Listen / Accept / Connect 留 WS-b（服务端与客户端互为前提，拆不开就一起做），
-// Error / SendProgress / SendComplete / Byte 数组那一形 GetData 留 WS-c。
+// TCP 的 Listen / ConnectionRequest / Accept / Connect（服务端与客户端互为前提，拆不开就
+// 一起做）由 WS-b 接上；Error / SendProgress / SendComplete / Byte 数组那一形 GetData 留 WS-c。
 //
-// 三条决定这里形状的测量（理由与读数在 vb6forms_winsock.h 头上与 029 §九）：
+// 三条决定这里形状的测量（理由与读数在 vb6forms_prop_ctrl.h 头上与 029 §九；
+// WS-b 量的第四条 —— 事件属于哪条 socket 只能问 wParam —— 记在下面 TCP 三面那一节的头上）：
 //   ① 事件种类读消息 lParam 低字，不读 WSAEnumNetworkEvents；
 //   ② FD_CLOSE 会带着未读的尾巴到 ⇒ 先 drain 再发 Close；
 //   ③ 还剩数据没读时 Winsock 自己会重投 FD_READ ⇒ RTL 一次读到干净，用户不调 GetData
@@ -44,9 +45,21 @@ typedef void (*vb6_WsCbVoid)(void);
 typedef void (*vb6_WsCbLong)(int32_t);          // DataArrival / ConnectionRequest（ByVal As Long）
 typedef void (*vb6_WsCbInt)(int16_t);           // StateChanged（ByVal As Integer）
 
+// 已 accept、还等用户 Accept(requestID) 来领的那条连接。监听面一次 FD_ACCEPT 挂一节。
+struct vb6_WsPending {
+    SOCKET                 sock;
+    int32_t                reqId;
+    struct vb6_WsPending*  next;
+};
+
 struct vb6_WsInstance {
     HWND     hwnd;                 // 身份窗（也是通知的目标窗）；NULL = 空槽
-    SOCKET   sock;
+    SOCKET   sock;                 // 数据面（客户端连出去的、或 Accept 受理进来的那一条）
+    SOCKET   listenSock;           // 服务端监听面。与 sock **分开**存 —— 这是老坑的填法之一：
+                                   // `Accept(requestID)` 把待受理socket 挪进 sock，监听面照旧活着，
+                                   // 所以"同一个控件自己 Accept 之后就不再收新连接"这件事不会发生。
+    struct vb6_WsPending* pending; // 已 accept、等用户 Accept() 来领的队列（FIFO）
+    int32_t  nextReqId;            // 交给 ConnectionRequest(requestID) 的号（只增不减，非 0）
     int32_t  protocol;             // VB6_WS_TCP / VB6_WS_UDP
     int32_t  state;                // VB6_WS_* 那一族
     int32_t  lastErr;              // 最近一次 WSA 错误码（State=sckError 时的编号）
@@ -81,12 +94,43 @@ static struct vb6_WsInstance* vb6_WsOf(HWND h) {
     return NULL;
 }
 
+// 一条 socket 属于哪枚控件。WS-b 之后同一枚控件可能**同时**挂着两条 socket（监听面 +
+// 数据面），二者都往同一个窗、同一个私有号投通知 ⇒ 只能问 wParam（实测 = 触发的那个
+// SOCKET）。已 closesocket 的旧句柄落不进任何一条 ⇒ 回 NULL，那条通知就地丢掉。
+static struct vb6_WsInstance* vb6_WsOfSocket(HWND h, SOCKET s) {
+    struct vb6_WsInstance* e = vb6_WsOf(h);
+    if (!e) return NULL;
+    if (s != INVALID_SOCKET && (s == e->sock || s == e->listenSock)) return e;
+    return NULL;
+}
+
+static void vb6_WsFreePending(struct vb6_WsInstance* e) {
+    struct vb6_WsPending* p = e->pending;
+    while (p) { struct vb6_WsPending* n = p->next; closesocket(p->sock); free(p); p = n; }
+    e->pending = NULL;
+}
+
+static struct vb6_WsPending* vb6_WsTakePending(struct vb6_WsInstance* e, int32_t id) {
+    struct vb6_WsPending** pp = &e->pending;
+    while (*pp) {
+        if ((*pp)->reqId == id) {
+            struct vb6_WsPending* hit = *pp;
+            *pp = hit->next;
+            hit->next = NULL;
+            return hit;
+        }
+        pp = &(*pp)->next;
+    }
+    return NULL;
+}
+
 static struct vb6_WsInstance* vb6_WsSlot(HWND h) {
     int i;
     for (i = 0; i < VB6_WS_MAX; i++) if (!g_ws[i].hwnd) {
         ZeroMemory(&g_ws[i], sizeof(g_ws[i]));
         g_ws[i].hwnd = h;
         g_ws[i].sock = INVALID_SOCKET;
+        g_ws[i].listenSock = INVALID_SOCKET;
         g_ws[i].protocol = VB6_WS_TCP;      // VB6 的默认
         g_ws[i].state = VB6_WS_CLOSED;
         return &g_ws[i];
@@ -169,6 +213,27 @@ static void vb6_WsRememberPeer(struct vb6_WsInstance* e, struct sockaddr* from, 
     e->remotePort = (int32_t)port;
 }
 
+// 连上之后把本地的两只读数问回来：LocalPort + LocalIP（getsockname）。没连上/没绑过时
+// 保持 0 / 空串 —— 从没建过的 socket 问 getsockname 本来就是失败的（实测）。
+static void vb6_WsFillLocal(struct vb6_WsInstance* e) {
+    struct sockaddr_storage ss;
+    int l = sizeof(ss), i;
+    char txt[64];
+    ULONG n = (ULONG)sizeof(txt);
+    e->localPort = 0; e->localIP[0] = 0;
+    if (e->sock == INVALID_SOCKET) return;
+    if (getsockname(e->sock, (struct sockaddr*)&ss, &l) != 0) return;
+    e->localPort = ntohs(ss.ss_family == AF_INET6 ? ((struct sockaddr_in6*)&ss)->sin6_port
+                                                  : ((struct sockaddr_in*)&ss)->sin_port);
+    txt[0] = 0;
+    if (WSAAddressToStringA((struct sockaddr*)&ss, l, NULL, txt, &n) != 0) return;
+    for (i = 0; txt[i] && i < 63; i++) e->localIP[i] = (wchar_t)(unsigned char)txt[i];
+    e->localIP[i] = 0;
+    // "127.0.0.1:54241" / "[::1]:54241" ⇒ 只要地址那一半，从最后一个冒号截（IPv6 的组冒号在括号里）
+    while (i > 0 && e->localIP[i - 1] != L':') i--;
+    if (i > 0) { e->localIP[i - 1] = 0; if (i - 1 > 0 && e->localIP[i - 2] == L']') e->localIP[i - 2] = 0; }
+}
+
 // 把 FD_READ 之后"还能读的"全部读进缓冲：一次读干净 = ③ 那条坑不再复发。
 static void vb6_WsDrain(struct vb6_WsInstance* e) {
     char tmp[8192];
@@ -191,7 +256,9 @@ static void vb6_WsDrain(struct vb6_WsInstance* e) {
         vb6_WsRxAppend(e, tmp, got);
         total += got;
     }
-    if (total > 0) e->bytesReceived = total;
+    // 每次通知只报**这一份**新到的字节。归零不是收尾好看：TCP 的 FD_CLOSE 那一格会先 drain
+    // 一次（②），若上一笔的计数还挂着，就会凭空多发一次 DataArrival。
+    e->bytesReceived = (total > 0) ? total : 0;
 }
 
 static void vb6_WsRaiseData(struct vb6_WsInstance* e) {
@@ -202,6 +269,14 @@ static void vb6_WsRaiseData(struct vb6_WsInstance* e) {
 static void vb6_WsRaiseClose(struct vb6_WsInstance* e) {
     vb6_WsSetState(e, VB6_WS_CLOSED);
     if (e->cb[VB6_WS_EV_CLOSE]) ((vb6_WsCbVoid)e->cb[VB6_WS_EV_CLOSE])();
+}
+
+static void vb6_WsRaiseConnect(struct vb6_WsInstance* e) {
+    if (e->cb[VB6_WS_EV_CONNECT]) ((vb6_WsCbVoid)e->cb[VB6_WS_EV_CONNECT])();
+}
+
+static void vb6_WsRaiseConnRequest(struct vb6_WsInstance* e, int32_t id) {
+    if (e->cb[VB6_WS_EV_CONNREQUEST]) ((vb6_WsCbLong)e->cb[VB6_WS_EV_CONNREQUEST])(id);
 }
 
 // UDP 的"对端"：没 Connect 这一步，发往 RemoteHost:RemotePort；收到谁的算谁的（VB6 同）
@@ -235,7 +310,8 @@ static int vb6_WsUdpTarget(struct vb6_WsInstance* e, struct sockaddr_storage* ss
 static LRESULT CALLBACK vb6_WsWndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     struct vb6_WsInstance* e;
     if (m == WM_WS_NOTIFY) {
-        e = vb6_WsOf(h);
+        SOCKET s = (SOCKET)(UINT_PTR)w;      // 实测：wParam = 触发这条事件的那条 socket
+        e = vb6_WsOfSocket(h, s);
         if (!e) return 0;
         switch (LOWORD(l)) {           // ① 事件种类只认这里
             case FD_READ:
@@ -243,6 +319,7 @@ static LRESULT CALLBACK vb6_WsWndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
                 vb6_WsRaiseData(e);
                 break;
             case FD_CLOSE:
+                if (s == e->listenSock) break;   // 监听面没有"对端关了"这一说
                 // ② FD_CLOSE 允许带着没读完的尾巴到（实测还剩 7 字节）⇒ 先 drain、
                 //   把这一批作为一次 DataArrival 交出去，再发 Close。VB6 那颗 OCX 在这里丢数据。
                 vb6_WsDrain(e);
@@ -250,8 +327,30 @@ static LRESULT CALLBACK vb6_WsWndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
                 if (e->sock != INVALID_SOCKET) { closesocket(e->sock); e->sock = INVALID_SOCKET; }
                 vb6_WsRaiseClose(e);
                 break;
+            case FD_ACCEPT: {
+                // 监听面来客：先把这条连接收进兜里（accept 是 Winsock 要求的，不做连接就丢了），
+                // 再发 ConnectionRequest(requestID)。此刻**不动** sock / state —— 用户可能压根
+                // 不 Accept，或者要 Load 一枚新的控件数组元素来 Accept（两条路都留着）。
+                struct vb6_WsPending* node;
+                struct vb6_WsPending** pp;
+                SOCKET p = accept(e->listenSock, NULL, NULL);
+                if (p == INVALID_SOCKET) { e->lastErr = WSAGetLastError(); break; }
+                WSAAsyncSelect(p, e->hwnd, WM_WS_NOTIFY, 0);
+                // 清完子 socket 那份**再**重登记监听面：Winsock 的口径是"FD_ACCEPT 报一次就
+                // 缴械，直到 accept() 重新武装"，而 accept() 与上面那条清选择都在同一趟里，
+                // 谁先把这条补回来没有保证 ⇒ 显式补一次，不赌。
+                WSAAsyncSelect(e->listenSock, e->hwnd, WM_WS_NOTIFY, FD_ACCEPT);   // 清掉可能继承来的事件选择
+                node = (struct vb6_WsPending*)malloc(sizeof(struct vb6_WsPending));
+                if (!node) { closesocket(p); break; }
+                node->sock = p; node->next = NULL;
+                node->reqId = ++e->nextReqId;      // 只增不减、恒非 0（VB6 的 requestID 同形状）
+                for (pp = &e->pending; *pp; pp = &(*pp)->next) { }
+                *pp = node;
+                vb6_WsRaiseConnRequest(e, node->reqId);
+                break;
+            }
             default:
-                break;                          // FD_ACCEPT / FD_CONNECT / FD_WRITE 归 WS-b
+                break;                          // FD_WRITE 那一档（SendComplete / SendProgress）归 WS-c
         }
         return 0;
     }
@@ -280,6 +379,8 @@ void* vb6_Ws_Create(void* hwnd) {
 void vb6_Ws_Destroy(void* hwnd) {
     struct vb6_WsInstance* e = vb6_WsOf((HWND)hwnd);
     if (!e) return;
+    vb6_WsFreePending(e);
+    if (e->listenSock != INVALID_SOCKET) { closesocket(e->listenSock); e->listenSock = INVALID_SOCKET; }
     if (e->sock != INVALID_SOCKET) { closesocket(e->sock); e->sock = INVALID_SOCKET; }
     free(e->rx);
     e->rx = NULL; e->rxCap = e->rxLen = e->rxHead = 0;
@@ -303,7 +404,7 @@ int32_t vb6_Ws_GetProtocol(void* hwnd) {
 void vb6_Ws_SetProtocol(void* hwnd, int32_t v) {
     struct vb6_WsInstance* e = vb6_WsOf((HWND)hwnd);
     if (!e) return;
-    if (e->sock != INVALID_SOCKET) return;   // VB6：已建套接字后改 Protocol 会报错，这里保持不动
+    if (e->sock != INVALID_SOCKET || e->listenSock != INVALID_SOCKET) return;   // VB6：已建套接字后改 Protocol 会报错，这里保持不动
     e->protocol = (v == VB6_WS_UDP) ? VB6_WS_UDP : VB6_WS_TCP;
 }
 
@@ -366,6 +467,9 @@ void vb6_Ws_Bind(void* hwnd, int32_t port, const void* ip) {
 
     if (!e) return;
     vb6_WsEnsureWsa();
+    // 重新 Bind = 换一条全新的 socket：两条面都先撤（否则老的监听口还占着那个端口）
+    vb6_WsFreePending(e);
+    if (e->listenSock != INVALID_SOCKET) { closesocket(e->listenSock); e->listenSock = INVALID_SOCKET; }
     if (e->sock != INVALID_SOCKET) { closesocket(e->sock); e->sock = INVALID_SOCKET; }
 
     ZeroMemory(&ss, sizeof(ss));
@@ -428,9 +532,178 @@ void vb6_Ws_Bind(void* hwnd, int32_t port, const void* ip) {
     vb6_WsSetState(e, (e->protocol == VB6_WS_UDP) ? VB6_WS_OPEN : VB6_WS_CLOSED);
 }
 
-void vb6_Ws_Listen(void* hwnd) { (void)hwnd; }      // WS-b
-void vb6_Ws_Accept(void* hwnd, int32_t id) { (void)hwnd; (void)id; }
-void vb6_Ws_Connect(void* hwnd) { (void)hwnd; }      // WS-b
+// ---------------- TCP 三面：Listen / Accept / Connect（C29-WS-b）----------------
+//
+// 一条 socket 只有一张"面"：监听面（listenSock）负责收新连接，数据面（sock）负责说话。
+// 老控件把这两件事塞进同一条 socket ⇒ 服务端 Accept 一条之后就再也听不了，必须开控件数组
+// 绕。这里分开存，所以**同一个控件可以一边听一边跟已连上的客户往来**（多客户端仍建议
+// Load 数组元素，每条连接一份状态才清楚，但不是必须）。
+//
+// Connect 这一侧量到的两条决定了它的形状（探针 wsprobe1/5/8）：
+//   · getaddrinfo("localhost") 回**两条**：先 ::1 再 127.0.0.1 ⇒ 只试第一条会把纯 IPv4 的
+//     监听端配错地址（本机那个监听端就是 IPv4 的，第一条必然被拒）⇒ 这里逐条试到通为止。
+//   · 挂了 WSAAsyncSelect 的 socket 上 select() 问不出东西，所以**先试通再挂通知**：
+//     非阻塞 connect + select(可写) + getsockopt(SO_ERROR) 三条合起来判成败（V4 那格实测），
+//     每条候选最多等 VB6_WS_CONNECT_MS。回环上"被拒"是立刻返回的，等满的只有防火墙丢包那种。
+
+#define VB6_WS_CONNECT_MS  750      // 单个候选地址的握手上限
+#define VB6_WS_CONNECT_MAX 8        // 一条不中就换下一条，最多试这么多条
+
+static int vb6_WsSockErrOf(SOCKET s) {
+    int err = 0, len = sizeof(err);
+    getsockopt(s, SOL_SOCKET, SO_ERROR, (char*)&err, &len);
+    return err;
+}
+
+static void vb6_WsItow(int v, wchar_t* dst) {
+    wchar_t tmp[12];
+    int i = 0, j = 0;
+    if (v < 0) v = 0;
+    do { tmp[i++] = (wchar_t)(L'0' + v % 10); v /= 10; } while (v);
+    while (i) dst[j++] = tmp[--i];
+    dst[j] = 0;
+}
+
+void vb6_Ws_Listen(void* hwnd) {
+    struct vb6_WsInstance* e = vb6_WsOf((HWND)hwnd);
+    if (!e || e->protocol != VB6_WS_TCP) return;   // UDP 没有"监听"这一格
+    if (e->sock == INVALID_SOCKET) return;         // 得先 Bind 定下本地端口（VB6 同：否则报错）
+    if (listen(e->sock, SOMAXCONN) != 0) {
+        e->lastErr = WSAGetLastError();
+        closesocket(e->sock); e->sock = INVALID_SOCKET;
+        vb6_WsSetState(e, VB6_WS_ERROR);
+        return;
+    }
+    e->listenSock = e->sock;
+    e->sock = INVALID_SOCKET;
+    WSAAsyncSelect(e->listenSock, e->hwnd, WM_WS_NOTIFY, FD_ACCEPT);
+    vb6_WsSetState(e, VB6_WS_LISTENING);
+}
+
+void vb6_Ws_Accept(void* hwnd, int32_t id) {
+    struct vb6_WsInstance* e = vb6_WsOf((HWND)hwnd);
+    struct vb6_WsPending* node;
+    u_long one = 1;
+    if (!e) return;
+    if (e->listenSock == INVALID_SOCKET) return;   // 没在听 ⇒ 无从受理
+    if (e->sock != INVALID_SOCKET) return;         // 数据面已被占（VB6 在这里报错）
+    node = vb6_WsTakePending(e, id);
+    if (!node) { e->lastErr = WSAEINVAL; return; } // 号对不上：不是本控件发出去的那批
+    e->sock = node->sock;
+    free(node);
+    // 握手到受理之间对手可能已经发了东西。这条 socket 默认是阻塞的，直接 recv 会**挂死**，
+    // 所以先转非阻塞读干净（③ 那条：一次读到没数据为止），再把通知挂上。
+    ioctlsocket(e->sock, FIONBIO, &one);
+    vb6_WsDrain(e);
+    one = 0;
+    WSAAsyncSelect(e->sock, e->hwnd, WM_WS_NOTIFY, FD_READ | FD_CLOSE);
+    ioctlsocket(e->sock, FIONBIO, &one);     // 挂在通知之后：send 走阻塞口径，一次发全
+    vb6_WsSetState(e, VB6_WS_CONNECTED);
+    if (e->bytesReceived > 0) vb6_WsRaiseData(e);
+    // 监听面**不动**：这条控件接完客户还继续听，新的 ConnectionRequest 照发。
+    // State 只有一个格子，按 VB6 的口径给数据面那半（sckConnected）⇒ "还在不在听"问 State 问不出。
+    vb6_WsRaiseConnect(e);   // VB6 只在客户端那一侧明确发 Connect；这里受理后同样发一次，C3 口径
+}
+
+void vb6_Ws_Connect(void* hwnd) {
+    struct vb6_WsInstance* e = vb6_WsOf((HWND)hwnd);
+    ADDRINFOW hints, *res = NULL, *ai;
+    wchar_t svc[8];
+    SOCKET bound = INVALID_SOCKET;
+    int keepPort = 0, tried = 0, ok = 0;
+    int lastErr = 0;
+
+    if (!e) return;
+    vb6_WsEnsureWsa();
+    if (e->protocol != VB6_WS_TCP) return;                 // UDP 不需要握手（直接 SendData）
+    if (e->remoteHost[0] == 0) { e->lastErr = WSAEINVAL; return; }
+    if (e->listenSock != INVALID_SOCKET) return;           // 正在听：要当客户端得先 Close
+
+    // "先 Bind 再 Connect"是 VB6 定本地端口的写法 ⇒ 那条已经绑好的 socket 直接拿来握手
+    // （家族对得上时）。所有权先交给局部变量，循环里统一关；它身上的通知要先摘掉 ——
+    // 挂着 WSAAsyncSelect 的 socket 问不出 select()（这节头上第②条）。
+    bound = e->sock;
+    keepPort = (bound != INVALID_SOCKET) ? e->localPort : 0;
+    if (bound != INVALID_SOCKET) {
+        e->sock = INVALID_SOCKET;
+        WSAAsyncSelect(bound, e->hwnd, WM_WS_NOTIFY, 0);
+    }
+    vb6_WsSetState(e, VB6_WS_RESOLVING_HOST);
+    ZeroMemory(&hints, sizeof(hints));
+    hints.ai_family = AF_UNSPEC;
+    hints.ai_socktype = SOCK_STREAM;
+    hints.ai_protocol = IPPROTO_TCP;
+    vb6_WsItow(e->remotePort, svc);
+    if (GetAddrInfoW(e->remoteHost, svc, &hints, &res) != 0) {
+        e->lastErr = WSAGetLastError();          // 查不到名字 = 11001（实测）⇒ Error 事件归 WS-c
+        if (bound != INVALID_SOCKET) closesocket(bound);
+        vb6_WsSetState(e, VB6_WS_CLOSED);
+        return;
+    }
+    vb6_WsSetState(e, VB6_WS_HOST_RESOLVED);
+    vb6_WsSetState(e, VB6_WS_CONNECTING);
+
+    for (ai = res; ai && tried < VB6_WS_CONNECT_MAX; ai = ai->ai_next) {
+        SOCKET s;
+        struct timeval tv;
+        fd_set wf;
+        u_long one = 1;
+
+        if (ai->ai_family != AF_INET && ai->ai_family != AF_INET6) continue;
+        tried++;
+        if (bound != INVALID_SOCKET) {
+            if ((int32_t)ai->ai_family != e->family) continue;   // 绑好的那条不属于这个家族
+            s = bound; bound = INVALID_SOCKET;                  // 复用：本地端口已经是它要的那个
+        } else {
+            s = socket(ai->ai_family, ai->ai_socktype, ai->ai_protocol);
+            if (s == INVALID_SOCKET) { lastErr = WSAGetLastError(); continue; }
+            if (keepPort) {
+                struct sockaddr_storage any;
+                ZeroMemory(&any, sizeof(any));
+                if (ai->ai_family == AF_INET) {
+                    struct sockaddr_in* a = (struct sockaddr_in*)&any;
+                    a->sin_family = AF_INET; a->sin_port = htons((u_short)keepPort);
+                } else {
+                    struct sockaddr_in6* a = (struct sockaddr_in6*)&any;
+                    a->sin6_family = AF_INET6; a->sin6_port = htons((u_short)keepPort);
+                }
+                if (bind(s, (struct sockaddr*)&any,
+                         ai->ai_family == AF_INET ? sizeof(struct sockaddr_in)
+                                                  : sizeof(struct sockaddr_in6)) != 0) {
+                    lastErr = WSAGetLastError(); closesocket(s); continue;
+                }
+            }
+        }
+        ioctlsocket(s, FIONBIO, &one);                  // 非阻塞：connect 立刻回，成败问 SO_ERROR
+        if (connect(s, ai->ai_addr, (int)ai->ai_addrlen) != 0) {
+            if (WSAGetLastError() != WSAEWOULDBLOCK) {
+                lastErr = WSAGetLastError(); closesocket(s); continue;
+            }
+        }
+        FD_ZERO(&wf); FD_SET(s, &wf);
+        tv.tv_sec = 0; tv.tv_usec = VB6_WS_CONNECT_MS * 1000;
+        if (select(0, NULL, &wf, NULL, &tv) <= 0) { lastErr = WSAETIMEDOUT; closesocket(s); continue; }
+        if ((lastErr = vb6_WsSockErrOf(s)) != 0) { closesocket(s); continue; }
+        // 通了才挂通知（挂早了 select 与 async select 会打架）；数据在队列里 Winsock 自己会投
+        // FD_READ（③ 那条实测），所以握手期间对手已经发来的东西不会漏。
+        e->sock = s;
+        e->family = (int32_t)ai->ai_family;
+        WSAAsyncSelect(s, e->hwnd, WM_WS_NOTIFY, FD_READ | FD_CLOSE);
+        vb6_WsFillLocal(e);
+        ok = 1;
+        break;
+    }
+    FreeAddrInfoW(res);
+    if (bound != INVALID_SOCKET) closesocket(bound);   // 那条绑好的没派上用场（家族全对不上）
+    if (!ok) {
+        e->lastErr = lastErr;
+        vb6_WsSetState(e, VB6_WS_CLOSED);      // VB6：连不上回 sckClosed，同时发 Error（WS-c）
+        return;
+    }
+    e->bytesReceived = 0; e->rxLen = e->rxHead = 0;   // 上一轮（若有）的读数不带进这一轮
+    vb6_WsSetState(e, VB6_WS_CONNECTED);
+    vb6_WsRaiseConnect(e);
+}
 
 void vb6_Ws_SendData(void* hwnd, const void* data) {
     struct vb6_WsInstance* e = vb6_WsOf((HWND)hwnd);
@@ -511,6 +784,8 @@ int32_t vb6_Ws_PeekData(void* hwnd, void* outBstr, int32_t type, int32_t maxLen)
 void vb6_Ws_Close(void* hwnd) {
     struct vb6_WsInstance* e = vb6_WsOf((HWND)hwnd);
     if (!e) return;
+    vb6_WsFreePending(e);
+    if (e->listenSock != INVALID_SOCKET) { closesocket(e->listenSock); e->listenSock = INVALID_SOCKET; }
     if (e->sock != INVALID_SOCKET) { closesocket(e->sock); e->sock = INVALID_SOCKET; }
     e->rxLen = e->rxHead = 0;
     e->bytesReceived = 0;

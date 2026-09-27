@@ -392,7 +392,7 @@
         }
     }
 
-    // --- C29-WS-a: Winsock 的 Bind / SendData / GetData / PeekData / Close ---
+    // --- C29-WS-a/b: Winsock 的 Bind / SendData / GetData / PeekData / Close / Listen / Connect / Accept ---
     // 同一族"标记必须在这里消费掉"的形状（不消费就落到 vb6_ComCall —— 本线踩过三次的那声不响）。
     // GetData / PeekData 的**出参**是这里唯一的新形状：VB6 那两第一条实参是被写回来的变量，
     // 所以发 `&<变量名>`；实参不是光秃秃的标识符时（属性、数组元素、常量…）发 NULL 让 RTL 安全返回 0
@@ -402,7 +402,8 @@
         if (itWs != knownFormControls_.end() &&
             itWs->second == FrmControlType::Winsock) {
             std::string mWs = comMemberName_;
-            static const char* kWsKnown[] = { "bind", "senddata", "getdata", "peekdata", "close" };
+            static const char* kWsKnown[] = { "bind", "senddata", "getdata", "peekdata",
+                                              "close", "listen", "connect", "accept" };
             bool knownWs = false;
             for (const char* k : kWsKnown) if (mWs == k) { knownWs = true; break; }
             if (knownWs) {
@@ -427,6 +428,13 @@
                 std::string preWs = "(void*)vb6_hwnd_" + hwndWs;
                 if (mWs == "close") {
                     lastExpr_ = "vb6_Ws_Close(" + preWs + ")";
+                } else if (mWs == "listen") {
+                    lastExpr_ = "vb6_Ws_Listen(" + preWs + ")";
+                } else if (mWs == "connect") {
+                    lastExpr_ = "vb6_Ws_Connect(" + preWs + ")";
+                } else if (mWs == "accept") {
+                    lastExpr_ = "vb6_Ws_Accept(" + preWs + ", "
+                              + (argWs.size() > 0 ? ("(int32_t)" + argWs[0]) : std::string("0")) + ")";
                 } else if (mWs == "bind") {
                     std::string port = argWs.size() > 0 ? ("(int32_t)" + argWs[0]) : std::string("0");
                     std::string ip = argWs.size() > 1 ? argWs[1] : std::string("L\"\"");
