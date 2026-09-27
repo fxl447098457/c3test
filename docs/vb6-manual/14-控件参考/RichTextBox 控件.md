@@ -36,7 +36,10 @@ C3 里 **RichTextBox 不走 `Richtx32.ocx`**（上面那条"必须把 OCX 加进
 目录"的要求在 C3 不存在）：那颗 OCX 是 32 位 inproc 服务器，64 位进程里 `CoCreateInstance`
 直接失败。C3 把它复刻成 **Msftedit.dll 注册的 `RICHEDIT50W`**，语法与属性名照 VB6，不链 OCX。
 一个通道差别：这枚类**不在 comctl32 的 `ICC_*` 体系里**，所以 RTL 在初始化公共控件之后
-另外 `LoadLibraryW(L"Msftedit.dll")` 一次（拿不到就退回 `riched20.dll`）。
+另外 `LoadLibraryW(L"Msftedit.dll")` 一次。它没有备胎：实测 `riched20.dll`（老通道）只注册
+`RichEdit20W`，问它要 `RICHEDIT50W` 回 `err=1411`（类不存在），而发码里的类名是写死的字面量
+⇒ 换 dll 并不能把窗口建出来。真拿不到时 RTL 在 stderr 喊一条 `[C3_FORMS] ...`，控件窗口
+不存在、判据整批红（刻意的：宁可响亮地失败，也不要静默空转）。
 
 | 写法 | C3 里实际发生的事 |
 | --- | --- |
