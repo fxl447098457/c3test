@@ -284,6 +284,12 @@ std::string CCodeGen::getControlPropReadFn(FrmControlType ctrlType, const std::s
         if (propLower == "tabstyle")       return "vb6_SSTab_GetTabStyle";
         if (propLower == "tabsperrow")     return "vb6_SSTab_GetTabsPerRow";
         if (propLower == "wordwrap")       return "vb6_SSTab_GetWordWrap";
+        // P20-44 颜色族: 缺省 Ambient(宿主容器)/品红, 见 vb6forms_sstab.c。
+        // 不登记会落 vb6_ComGetStringProp 裸 HWND 占位路径静默答空 (同 ProgressBar 纪律)。
+        if (propLower == "maskcolor")        return "vb6_SSTab_GetMaskColor";
+        if (propLower == "tabbackcolor")     return "vb6_SSTab_GetTabBackColor";
+        if (propLower == "tabselbackcolor")  return "vb6_SSTab_GetTabSelBackColor";
+        if (propLower == "tabselforecolor")  return "vb6_SSTab_GetTabSelForeColor";
         if (propLower == "visible")        return "vb6_GetControlVisible";
         if (propLower == "enabled")        return "vb6_GetControlEnabled";
         break;
@@ -619,6 +625,11 @@ std::string CCodeGen::getControlPropWriteFn(FrmControlType ctrlType, const std::
         if (propLower == "tabstyle")       return "vb6_SSTab_SetTabStyle";
         if (propLower == "tabsperrow")     return "vb6_SSTab_SetTabsPerRow";
         if (propLower == "wordwrap")       return "vb6_SSTab_SetWordWrap";
+        // P20-44 颜色族 (写): 不登记会落 vb6_ComSetProp 裸 HWND 泛化写 → 静默丢。
+        if (propLower == "maskcolor")        return "vb6_SSTab_SetMaskColor";
+        if (propLower == "tabbackcolor")     return "vb6_SSTab_SetTabBackColor";
+        if (propLower == "tabselbackcolor")  return "vb6_SSTab_SetTabSelBackColor";
+        if (propLower == "tabselforecolor")  return "vb6_SSTab_SetTabSelForeColor";
         if (propLower == "visible")        return "vb6_SetControlVisible";
         if (propLower == "enabled")        return "vb6_SetControlEnabled";
         break;

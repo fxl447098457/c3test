@@ -354,15 +354,63 @@ void vb6_SetControlForeColor(void* hwnd, int color) {
 
 int vb6_GetControlBackColor(void* hwnd) {
     if (!hwnd) return 0;
-    HANDLE hProp = GetPropW((HWND)hwnd, L"VB6_BackColor");
-    if (hProp) return (int)(INT_PTR)hProp;
+    // Fix 187: 判「Set 过」要用独立哨兵 (VB6_BackColorSet) — 黑色 0x000000
+    // 经 (HANDLE) 转换是 NULL, 若只判值属性, 黑色会被当「未设置」回落到
+    // GetSysColor(COLOR_BTNFACE) → 颜色对话框选黑 OK 后色块永远显示灰
+    // (Test.exe 实测: BG 属性写入成功但色块像素不变, 就是这条路)。
+    if (GetPropW((HWND)hwnd, L"VB6_BackColorSet"))
+        return (int)(INT_PTR)GetPropW((HWND)hwnd, L"VB6_BackColor");
     return (int)(INT_PTR)GetSysColor(COLOR_BTNFACE);  // Default
 }
 
 void vb6_SetControlBackColor(void* hwnd, int color) {
     if (!hwnd) return;
     SetPropW((HWND)hwnd, L"VB6_BackColor", (HANDLE)(INT_PTR)color);
+    // Fix 187: 「Set 过」哨兵必须独立于值本身 — color=0 (黑色) 经
+    // (HANDLE)(INT_PTR)0 转换后是 NULL, 与「未设置」同构, 宿主判空检查会把
+    // 黑色误判为未设置 (颜色对话框默认选黑 → OK 后色块不动的直接原因)。
+    SetPropW((HWND)hwnd, L"VB6_BackColorSet", (HANDLE)1);
+    // Fix 187: 背景色变化后必须失效 WM_CTLCOLORSTATIC 侧的刷子缓存
+    // (vb6_ApplyCtlColorStatic 缓存在 VB6_BgBrush), 否则色块变完一次颜色后
+    // 再变其他颜色永远显示第一把刷子。
+    HBRUSH oldBr = (HBRUSH)GetPropW((HWND)hwnd, L"VB6_BgBrush");
+    if (oldBr) {
+        DeleteObject(oldBr);
+        RemovePropW((HWND)hwnd, L"VB6_BgBrush");
+    }
+    if (GetEnvironmentVariableA("C3_FORMS_TRACE", NULL, 0) > 0)
+        fprintf(stderr, "[C3_F187] SetBackColor hwnd=%p color=%06X\r\n",
+                hwnd, (unsigned)color & 0xFFFFFFu);
     InvalidateRect((HWND)hwnd, NULL, TRUE);
+}
+
+// ============================================================
+// Fix 187: WM_CTLCOLORSTATIC 统一应用 (主窗体 WndProc / SSTab 容器共用)
+// ------------------------------------------------------------
+// VB6_BackColor/ForeColor 窗口属性此前只有 uc 宿主窗口消费
+// (uc_host_window.c WM_CTLCOLORSTATIC), 主窗体直接子控件 (picBackColor 等
+// STATIC 类色块) 与 SSTab 页内子控件的宿主 (生成窗体 WndProc /
+// sstabSubclassProc) 均不处理 → vb6_SetControlBackColor 只写了属性 +
+// InvalidateRect, 重绘路径读不到 → 色块永远默认底色 (Test.exe 颜色对话框
+// OK 后 "颜色没有写入到颜色对话左边的控件里")。
+// 约定: 仅当子控件 Set 过 VB6_BackColor 属性时才接管; 否则返回 0 由调用方
+// break 到 DefWindowProcW 维持原生外观。
+// ============================================================
+LRESULT vb6_ApplyCtlColorStatic(HDC hdc, HWND child) {
+    if (!hdc || !child) return 0;
+    // Fix 187: 只看 Set 哨兵, 不看值 — color=0 (黑) 的值属性是 NULL, 但它是合法色。
+    if (!GetPropW(child, L"VB6_BackColorSet")) return 0;  // 未显式设色 → 调用方走默认绘制
+    COLORREF bg = (COLORREF)(INT_PTR)GetPropW(child, L"VB6_BackColor");
+    COLORREF fg = (COLORREF)vb6_GetControlForeColor((void*)child);
+    if (bg & 0x80000000L) bg = GetSysColor(bg & 0xFF);
+    SetTextColor(hdc, fg);
+    SetBkColor(hdc, bg);
+    HBRUSH br = (HBRUSH)GetPropW(child, L"VB6_BgBrush");
+    if (!br) {
+        br = CreateSolidBrush(bg);
+        SetPropW(child, L"VB6_BgBrush", (HANDLE)br);
+    }
+    return (LRESULT)br;
 }
 
 // ============================================================

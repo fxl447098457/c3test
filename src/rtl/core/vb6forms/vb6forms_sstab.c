@@ -239,6 +239,36 @@ static void sstabRefreshChildren(Vb6SSTab* t) {
 // 窗口尚未布局 (GetClientRect 宽 0) → 折行按 caption 自然宽走, 7 页折成 3+4 而
 // 非 VB6 的 4+3 (SSTabEx frmTest 实证)。挂一个内部子类过程, WM_SIZE 时重算。
 static LRESULT CALLBACK sstabSubclassProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
+    if (msg == WM_ERASEBKGND) {
+        // 防闪烁 (第三步): 上一版"直接 return 1 跳过擦除"治好了页内容, 却暴露了
+        // 新问题 —— 多行标签 (TCS_MULTILINE, 3+4 两行) 时**与显示区相邻的那一行**
+        // 主题绘制要先擦"行间缝隙/标签背后"再画按钮, 跳过统一擦底后新旧像素交替,
+        // 用户实测: 上面 3 个不闪、下面 4 个闪 (闪的正是紧贴显示区那行)。
+        // 解法: 不跳过擦除, 改为**用父窗体注册类的背景刷擦全客户区**。主题标签区
+        // 底色本就是窗体背景色 (非主题路径 SysTabControl32 也是向父窗口要
+        // WM_CTLCOLORSTATIC 拿底色), 擦除色与绘制后的底色一致 → 擦/画跳变不可见
+        // → 不闪; 页内子控件仍由 WS_CLIPCHILDREN 保护, 不会被这层擦除波及。
+        HDC hdc = (HDC)wp;
+        RECT rc;
+        GetClientRect(hwnd, &rc);
+        HBRUSH br = NULL;
+        HWND parent = GetParent(hwnd);
+        if (parent) br = (HBRUSH)GetClassLongPtrW(parent, GCLP_HBRBACKGROUND);
+        if (!br) br = (HBRUSH)GetSysColorBrush(COLOR_BTNFACE);
+        FillRect(hdc, &rc, br);
+        return 1;
+    }
+    if (msg == WM_CTLCOLORSTATIC) {
+        // Fix 187: 页内 STATIC 类子控件 (picTabBackColor 等色块, parent=SSTab
+        // 窗口) 通过 WM_CTLCOLORSTATIC 向本容器要底色 — 此前不处理走原生默认,
+        // vb6_SetControlBackColor 写的 VB6_BackColor 属性无人消费。与主窗体
+        // WndProc 同款: 仅在子控件显式 Set 过 VB6_BackColor 时接管。
+        HWND child = (HWND)lp;
+        if (child && GetPropW(child, L"VB6_BackColorSet")) {
+            LRESULT br187 = vb6_ApplyCtlColorStatic((HDC)wp, child);
+            if (br187) return br187;
+        }
+    }
     if (msg == WM_SIZE) {
         Vb6SSTab* t = sstabFind(hwnd);
         if (t) sstabApplyRowMetrics(t);
@@ -260,6 +290,29 @@ void vb6_SSTab_Init(void* tabHwnd, int tabs, int curTab, int orientation, int ta
                                                 (LONG_PTR)sstabSubclassProc);
         if (op) SetPropW(t->hwnd, L"VB6_SSTab_OrigProc", (HANDLE)op);
     }
+
+    // 防闪烁 (SSTabEx frmTest 实测: 内容最多的左页最明显):
+    // 页内子控件是 SysTabControl32 的**子窗口** (cgen_form_frame_menu.inc 用
+    // containerHwnd 当父)。tab 控件自身没 WS_CLIPCHILDREN 时, 它每次重绘显示区
+    // 背景会把子控件区域一并擦掉再让子控件重画 → 切页/悬停时页面内容闪烁。
+    // 补上裁剪样式即可 (SST_STYLE_MASK 不含这两位, 后面 sstabReapplyStyle 的
+    // SetWindowLongPtr 不会把它洗掉)。
+    {
+        LONG cs = (LONG)GetWindowLongPtrW(t->hwnd, GWL_STYLE);
+        if (!(cs & WS_CLIPCHILDREN)) {
+            SetWindowLongPtrW(t->hwnd, GWL_STYLE, cs | WS_CLIPCHILDREN | WS_CLIPSIBLINGS);
+            SetWindowPos(t->hwnd, NULL, 0, 0, 0, 0,
+                         SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER |
+                         SWP_FRAMECHANGED | SWP_NOACTIVATE);
+        }
+    }
+
+    // 防闪烁 (第三步遗留结论, 已移除 WS_EX_COMPOSITED):
+    // 曾给顶层窗体加 WS_EX_COMPOSITED 治"窗体↔控件合成时序闪", 但它把整棵窗口树
+    // 转入重定向合成 —— DWM 合成时向子控件要内容走 WM_PRINTCLIENT 而非 WM_PAINT,
+    // 自绘 Frame 等不响应 WM_PRINTCLIENT 的控件被画成未初始化黑块 (用户实测回归)。
+    // 且闪烁真根因是外部定时器同值赋值触发全量重建 (见各 setter 的幂等早退),
+    // 与合成时序无关 → COMPOSITED 弊大于利, 移除。
 
     t->orientation = orientation;
     t->tabStyle = tabStyle;
@@ -386,6 +439,11 @@ int32_t vb6_SSTab_GetTabs(void* tabHwnd) {
 void vb6_SSTab_SetTabs(void* tabHwnd, int32_t n) {
     Vb6SSTab* t = sstabFind((HWND)tabHwnd);
     if (!t) return;
+    // VB6/OCX 语义: 同值赋值是 no-op —— SSTabEx frmTest 的 tmrUpdate 每 1.5s
+    // 执行 Tabs = 7 (值不变), OCX 直接返回; 这里若照常 sstabAfterVisualChange
+    // 会把整个 tab 控件 DeleteAllItems+重建+子控件整轮隐藏/显示 → 带图标的那行
+    // 标签每 1.5s 闪一次 (用户实测 Theme/Frame/Other/Cmd 闪)。必须幂等早退。
+    if ((int)n == t->count) return;
     sstabResize(t, (int)n);
     sstabAfterVisualChange(t);
 }
@@ -443,6 +501,10 @@ void vb6_SSTab_SetTabCaption(void* tabHwnd, int32_t idx, void* bstr) {
     Vb6SSTab* t = sstabFind((HWND)tabHwnd);
     if (!t || idx < 0 || idx >= t->count) return;
     const wchar_t* s = (const wchar_t*)bstr;
+    // 同文本 no-op: TabCtrl_SetItem 即使文字没变也会重绘该项,
+    // 演示代码循环写同一标题时会闪标签。
+    if ((s && *s) == (t->captions[idx] != NULL) &&
+        (!s || !*s || wcscmp(s, t->captions[idx]) == 0)) return;
     if (t->captions[idx]) { HeapFree(GetProcessHeap(), 0, t->captions[idx]); t->captions[idx] = NULL; }
     if (s && *s) {
         int n = (int)lstrlenW(s);
@@ -489,7 +551,9 @@ int32_t vb6_SSTab_GetTabVisible(void* tabHwnd, int32_t idx) {
 void vb6_SSTab_SetTabVisible(void* tabHwnd, int32_t idx, int32_t v) {
     Vb6SSTab* t = sstabFind((HWND)tabHwnd);
     if (!t || idx < 0 || idx >= t->count || !t->visible) return;
-    t->visible[idx] = v ? 1 : 0;
+    int nv = v ? 1 : 0;
+    if (t->visible[idx] == nv) return;      // 同值赋值 no-op
+    t->visible[idx] = nv;
     if (t->cur == idx && !t->visible[idx]) {
         int first = -1;
         for (int i = 0; i < t->count; i++) if (t->visible[i]) { first = i; break; }
@@ -509,6 +573,7 @@ int32_t vb6_SSTab_GetTabOrientation(void* tabHwnd) {
 void vb6_SSTab_SetTabOrientation(void* tabHwnd, int32_t v) {
     Vb6SSTab* t = sstabFind((HWND)tabHwnd);
     if (!t || v < 0 || v > 3) return;
+    if (t->orientation == (int)v) return;   // 同值赋值 no-op (防演示代码循环触发重绘)
     t->orientation = (int)v;
     sstabAfterVisualChange(t);
 }
@@ -521,6 +586,7 @@ int32_t vb6_SSTab_GetTabStyle(void* tabHwnd) {
 void vb6_SSTab_SetTabStyle(void* tabHwnd, int32_t v) {
     Vb6SSTab* t = sstabFind((HWND)tabHwnd);
     if (!t || v < 0 || v > 1) return;
+    if (t->tabStyle == (int)v) return;      // 同值赋值 no-op
     t->tabStyle = (int)v;
     sstabAfterVisualChange(t);
 }
@@ -533,6 +599,7 @@ int32_t vb6_SSTab_GetTabsPerRow(void* tabHwnd) {
 void vb6_SSTab_SetTabsPerRow(void* tabHwnd, int32_t v) {
     Vb6SSTab* t = sstabFind((HWND)tabHwnd);
     if (!t || v < 0) return;
+    if (t->tabsPerRow == (int)v) return;    // 同值赋值 no-op
     t->tabsPerRow = (int)v;
     sstabApplyRowMetrics(t);
 }
@@ -545,7 +612,9 @@ int32_t vb6_SSTab_GetWordWrap(void* tabHwnd) {
 void vb6_SSTab_SetWordWrap(void* tabHwnd, int32_t v) {
     Vb6SSTab* t = sstabFind((HWND)tabHwnd);
     if (!t) return;
-    t->wordWrap = v ? 1 : 0;
+    int nv = v ? 1 : 0;
+    if (t->wordWrap == nv) return;          // 同值赋值 no-op
+    t->wordWrap = nv;
     sstabAfterVisualChange(t);
 }
 
@@ -635,6 +704,63 @@ void vb6_SSTab_SetTabPicture(void* tabHwnd, int32_t idx, const void* data, int32
     // 图标改变标签内容区尺寸 → 重建 item (带 TCIF_IMAGE) + 重算行宽/行高。
     // 不走 SetTab: 选中页不该因为贴图变化而跳。
     sstabAfterVisualChange(t);
+}
+
+// ===================== 属性: SSTabEx 颜色族 (Task #44) =====================
+// 参照 ctlSSTabEx.ctl (SSTabEx-main/control-source) 的真实缺省:
+//   MaskColor       = &HFF00FF 品红常量 (ctl:2661)
+//   TabBackColor    = Ambient.BackColor (ctl:2667) — 宿主容器背景色
+//   TabSelBackColor = Ambient.BackColor (ctl:2668)
+//   TabSelForeColor = ForeColor 缺省 = Ambient.ForeColor (ctl:2646) — 宿主容器前景色
+// (BackColor/ForeColor 本身是通用控件属性, cgen 直接走 vb6_Get/SetControlBackColor
+//  窗口属性链不落本表; 其缺省 BTNFACE/黑 恰与 Ambient 一致, 实测吻合。)
+// Ambient 实取: GetParent(宿主窗体) 的控件级颜色 —— frmTest 窗体无设计色时
+// vb6_GetControlBackColor 返回 GetSysColor(COLOR_BTNFACE), 与 VB6 &H8000000F 等效。
+// 不接这批表的话 cgen 发 vb6_ComGetStringProp/ComSetProp(裸 HWND, L"TabBackColor")
+// → 读静默答空 / 写静默丢 (029 §九同款, 生成 C 实证)。
+static int32_t sstabAmbientColor(HWND hwnd, int fore) {
+    HWND par = GetParent(hwnd);
+    if (!par) par = GetAncestor(hwnd, GA_ROOT);
+    return fore ? vb6_GetControlForeColor(par) : vb6_GetControlBackColor(par);
+}
+static int32_t sstabGetColorProp(HWND hwnd, const wchar_t* prop, int32_t dflt) {
+    HANDLE h = GetPropW(hwnd, prop);
+    return h ? (int32_t)(INT_PTR)h : dflt;
+}
+int32_t vb6_SSTab_GetMaskColor(void* tabHwnd) {
+    if (!tabHwnd) return 0;
+    return sstabGetColorProp((HWND)tabHwnd, L"VB6_SS_MaskColor", 0xFF00FF);
+}
+void vb6_SSTab_SetMaskColor(void* tabHwnd, int32_t c) {
+    if (!tabHwnd) return;
+    SetPropW((HWND)tabHwnd, L"VB6_SS_MaskColor", (HANDLE)(INT_PTR)c);
+}
+int32_t vb6_SSTab_GetTabBackColor(void* tabHwnd) {
+    if (!tabHwnd) return 0;
+    return sstabGetColorProp((HWND)tabHwnd, L"VB6_SS_TabBackColor",
+                             sstabAmbientColor((HWND)tabHwnd, 0));
+}
+void vb6_SSTab_SetTabBackColor(void* tabHwnd, int32_t c) {
+    if (!tabHwnd) return;
+    SetPropW((HWND)tabHwnd, L"VB6_SS_TabBackColor", (HANDLE)(INT_PTR)c);
+}
+int32_t vb6_SSTab_GetTabSelBackColor(void* tabHwnd) {
+    if (!tabHwnd) return 0;
+    return sstabGetColorProp((HWND)tabHwnd, L"VB6_SS_TabSelBackColor",
+                             sstabAmbientColor((HWND)tabHwnd, 0));
+}
+void vb6_SSTab_SetTabSelBackColor(void* tabHwnd, int32_t c) {
+    if (!tabHwnd) return;
+    SetPropW((HWND)tabHwnd, L"VB6_SS_TabSelBackColor", (HANDLE)(INT_PTR)c);
+}
+int32_t vb6_SSTab_GetTabSelForeColor(void* tabHwnd) {
+    if (!tabHwnd) return 0;
+    return sstabGetColorProp((HWND)tabHwnd, L"VB6_SS_TabSelForeColor",
+                             sstabAmbientColor((HWND)tabHwnd, 1));
+}
+void vb6_SSTab_SetTabSelForeColor(void* tabHwnd, int32_t c) {
+    if (!tabHwnd) return;
+    SetPropW((HWND)tabHwnd, L"VB6_SS_TabSelForeColor", (HANDLE)(INT_PTR)c);
 }
 
 #endif  // _WIN32

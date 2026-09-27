@@ -1,0 +1,8 @@
+Type=Exe
+Form=frmMain.frm
+Class=cDlg; cDlg.cls
+Name=dbgdlg
+HelpFile=""
+CommandLine=""
+Name="dbgdlg"
+Startup="frmMain"

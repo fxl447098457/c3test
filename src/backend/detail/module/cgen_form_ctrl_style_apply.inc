@@ -293,6 +293,23 @@
                  std::to_string(ctrl.index >= 0 ? ctrl.index : 0) + ")") :
                 ("vb6_hwnd_" + cIdent(ctrl.controlName));
             emitDesignerStyleProps(ctrl, dsHwnd);
+
+            // Fix 187: 设计期 ForeColor/BackColor — 此前从未发射, .frm 的初始色
+            // 全部落空 (picBackColor &H00F8CCB1& 淡蓝被显示成 BTNFACE 灰, 颜色
+            // 对话框 OK 后才第一次 Set)。&H8000000C& 这类系统色经低位截断保留
+            // 0x80000000 位, RTL 侧按 GetSysColor 解析。
+            {
+                auto bcIt187 = ctrl.properties.find("BackColor");
+                if (bcIt187 != ctrl.properties.end() && bcIt187->second.type == FrmValueType::Integer) {
+                    c_.emitLine("vb6_SetControlBackColor((void*)" + dsHwnd + ", "
+                                + std::to_string((int)(unsigned int)bcIt187->second.intValue) + ");  /* design BackColor */");
+                }
+                auto fcIt187 = ctrl.properties.find("ForeColor");
+                if (fcIt187 != ctrl.properties.end() && fcIt187->second.type == FrmValueType::Integer) {
+                    c_.emitLine("vb6_SetControlForeColor((void*)" + dsHwnd + ", "
+                                + std::to_string((int)(unsigned int)fcIt187->second.intValue) + ");  /* design ForeColor */");
+                }
+            }
         }
 
         // Bug3-Fix: 延迟设置 TextBox/ComboBox 的初始文本（在句柄赋值之后）

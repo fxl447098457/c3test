@@ -203,6 +203,16 @@ int32_t vb6_SSTab_GetTabsPerRow(void* hwnd);
 void    vb6_SSTab_SetTabsPerRow(void* hwnd, int32_t v);
 int32_t vb6_SSTab_GetWordWrap(void* hwnd);
 void    vb6_SSTab_SetWordWrap(void* hwnd, int32_t v);
+// SSTabEx 颜色族 (Task #44): MaskColor 缺省品红, Tab* 色缺省 Ambient(宿主容器)。
+// BackColor/ForeColor 走通用窗口属性链, 不在此表。
+int32_t vb6_SSTab_GetMaskColor(void* hwnd);
+void    vb6_SSTab_SetMaskColor(void* hwnd, int32_t c);
+int32_t vb6_SSTab_GetTabBackColor(void* hwnd);
+void    vb6_SSTab_SetTabBackColor(void* hwnd, int32_t c);
+int32_t vb6_SSTab_GetTabSelBackColor(void* hwnd);
+void    vb6_SSTab_SetTabSelBackColor(void* hwnd, int32_t c);
+int32_t vb6_SSTab_GetTabSelForeColor(void* hwnd);
+void    vb6_SSTab_SetTabSelForeColor(void* hwnd, int32_t c);
 // 容器: 登记"某个子控件属于第 page 页", 切页时 RTL 只动可见性, 不动 Left
 void    vb6_SSTab_RegisterChild(void* hwnd, void* childHwnd, int32_t page);
 // SSTabEx 每页图标 (Task #44): TabPic16/20/24(i) 的图片字节, RTL 建 HIMAGELIST
