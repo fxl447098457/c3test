@@ -90,6 +90,8 @@ void CCodeGen::visit(DeclareDecl& node) {
         } else {
             knownDeclareAnsi_.insert(funcLower);
         }
+        // Fix 161b-decl-out: Alias→调用点 的登记推迟到下方 cExportedIdent 定址之后
+        // (映射里要存 vb6_di_<清洗名> 全名, 而不是裸 Alias)。
     }
 
     // Fix 092z-2: VB6/VBA 运行时库 (msvbvm60 等) 不生成 #pragma comment(lib, ...)
@@ -181,6 +183,21 @@ void CCodeGen::visit(DeclareDecl& node) {
     // ai/024 T02: 动态路保留 `vb6_di_` 命名空间 (转发桩桥到真实 API); 静态路直接用
     // **真实导出名** —— 归档里就是这么叫的, 少一层跳转, 也少一处要生成的桩。
     std::string cExportedIdent = isStaticDecl ? sanitizedExport : ("vb6_di_" + sanitizedExport);
+
+    // Fix 161b-decl-out: 登记 VB名(小写) → **调用点名** (cExportedIdent 全名)。
+    // 目的: VB6 `Declare Function GetUserName Lib "advapi32" Alias "GetUserNameA"`
+    // 的 VB 名恰是 SDK 的 A/W 宏名 (WinBase.h `#define GetUserName GetUserNameW`)。
+    // cgen 为避 SDK 冲突生成的 `#ifndef GetUserName` 守卫为假 ⇒ 调用点被 SDK 宏
+    // 改写成宽版 GetUserNameW, 而我们按 VB6 语义生成 ANSI(char*) 编组 → 窄缓冲交给
+    // 宽 API (t1 实测出参只回读首字符 'A'; t6 CreateWindowEx 直接建窗失败 hwnd=0)。
+    // 用 cExportedIdent (= vb6_di_GetUserNameA / vb6_di_ord_410) 作调用点, 天然绕开
+    // SDK 的 A/W 宏, 且对上 RTL 转发桩 (序号别名也因此落成 vb6_di_ord_410)。
+    // 静态路直接用真实导出名, 无 SDK 宏抢占问题 → 不登记。
+    if (!aliasName.empty() && aliasName != node.name && !isStaticDecl) {
+        std::string funcLower2 = node.name;
+        std::transform(funcLower2.begin(), funcLower2.end(), funcLower2.begin(), ::tolower);
+        declareAliasMap_[funcLower2] = cExportedIdent;
+    }
 
     // 2026-09-17: 把 Lib 家族写进生成头, 供 scripts/gen_di_stubs.ps1 按 DLL 家族
     // 把转发桩拆成多个文件。此前生成器只能靠外部的"未解析符号清单"决定要产出哪些

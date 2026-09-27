@@ -5,6 +5,8 @@
 // 26 .h headers + 67 .c sources + 13 .inc fragments (all arch-neutral) = 106 resources.
 // Fix 161-console: Console 对象 (twinBASIC 口径) + stdin 双路径 (控制台 ReadConsoleW /
 // 管道 ReadFile+代码页); vb6_InputBox 弃 fgetws 改走 vb6_ConReadLine。
+// Fix 161b-decl-out: Declare A 版 ByVal String 出参回写 —— 新增 vb6_BSTR_FromANSIBuf
+// (vb6rtl_bstr.h), cgen 登记 ansiOutParams_ 并在语句收尾回写原 BSTR。
 // 2026-09-17 源文件按家族分目录: core/vb6rtl|vb6com|vb6comserver|vb6forms|di/,
 // 解包后仍是平铺目录（RTL 内部 include 一律 basename，不受源目录影响）。
 // Runtime: FindResource/LoadResource extract to temp session directory

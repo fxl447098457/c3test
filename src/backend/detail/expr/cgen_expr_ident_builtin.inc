@@ -260,7 +260,18 @@
         }
         // Declare函数: 使用VB6函数名的cIdent形式 (通过#define映射到导出名)
         if (sym->kind == SymbolKind::DeclareSub || sym->kind == SymbolKind::DeclareFunc) {
-            lastExpr_ = cIdent(node.name);
+            // Fix 161b-decl-out: 有显式 Alias 时**用 Alias 名**发射。原因: VB 名
+            // 可能恰是 SDK 的 A/W 宏名 (WinBase.h `#define GetUserName GetUserNameW`),
+            // 此时 cgen 生成的 `#ifndef GetUserName` 守卫为假 ⇒ 调用点被 SDK 宏改写
+            // 成宽版, 而我们按 VB6 语义生成的是 ANSI(char*) 编组 → 窄缓冲交给宽 API,
+            // 写入 UTF-16 后按 NUL 截断只读到首字符。用 Alias 名 (GetUserNameA) 天然
+            // 绕开 SDK 的 A/W 宏。
+            auto itAlias = declareAliasMap_.find(lower);
+            if (itAlias != declareAliasMap_.end()) {
+                lastExpr_ = itAlias->second;  // 已清洗好的 C 标识符 (含 ord_ 前缀等)
+            } else {
+                lastExpr_ = cIdent(node.name);
+            }
         } else if (sym->isExternal) {
             // 跨模块函数: 使用 vb6_<ModuleName>_<ProcName> 格式
             // (O3: 跨模块重载变体 — 语义层选定后缀在此消费, 与定义侧 _ov<fp> 同规则)

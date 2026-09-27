@@ -552,6 +552,25 @@ intptr_t __stdcall vb6_di_GetModuleFileNameW(intptr_t hModule, intptr_t lpFileNa
     return ((intptr_t (WINAPI *)(intptr_t, intptr_t, intptr_t))GetModuleFileNameW)(hModule, lpFileName, nSize);
 }
 
+/* GetUserNameA / GetUserNameW (advapi32)
+ * Fix 161b-decl-out: VB6 `Declare Function GetUserName Lib "advapi32" Alias "GetUserNameA"`
+ * 的 VB 名恰是 SDK 的 A/W 宏名 —— 调用点改用 Alias 全名 (vb6_di_GetUserNameA) 后
+ * 必须真有这条桩, 否则 LNK2019。参数按 C3 生成原型 (ByVal String 已转 ANSI char*)
+ * 收成 intptr_t, 转发 1:1 (同 GetModuleFileNameW 的写法)。 */
+intptr_t __stdcall vb6_di_GetUserNameA(intptr_t lpBuffer, intptr_t pnSize) {
+    return ((intptr_t (WINAPI *)(intptr_t, intptr_t))GetUserNameA)(lpBuffer, pnSize);
+}
+intptr_t __stdcall vb6_di_GetUserNameW(intptr_t lpBuffer, intptr_t pnSize) {
+    return ((intptr_t (WINAPI *)(intptr_t, intptr_t))GetUserNameW)(lpBuffer, pnSize);
+}
+
+/* GetModuleFileNameA (kernel32)
+ * Fix 161b-decl-out: 同 GetUserNameA —— VB 名 GetModuleFileName 无 SDK 宏抢占,
+ * 但 Alias "A" 显式给出时调用点走 Alias 全名, 需对应桩。 */
+intptr_t __stdcall vb6_di_GetModuleFileNameA(intptr_t hModule, intptr_t lpFileName, intptr_t nSize) {
+    return ((intptr_t (WINAPI *)(intptr_t, intptr_t, intptr_t))GetModuleFileNameA)(hModule, lpFileName, nSize);
+}
+
 /* GetSystemWindowsDirectoryW */
 intptr_t __stdcall vb6_di_GetSystemWindowsDirectoryW(intptr_t lpBuffer, intptr_t nSize) {
     return ((intptr_t (WINAPI *)(intptr_t, intptr_t))GetSystemWindowsDirectoryW)(lpBuffer, nSize);
