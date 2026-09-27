@@ -155,7 +155,8 @@
         bool builtinGlobalObj092z = false;
         if (maExpr.object && maExpr.object->kind == ASTNodeKind::IdentifierExpr) {
             static const std::unordered_set<std::string> builtinGlobalObjs092z = {
-                "clipboard", "screen", "printer", "forms", "debug", "err", "app"};
+                "clipboard", "screen", "printer", "forms", "debug", "err", "app",
+                "console"};  // Fix 161: Console 对象 (对齐 twinBASIC)
             builtinGlobalObj092z = builtinGlobalObjs092z.count(
                 Symbol::toLower(static_cast<IdentifierExpr&>(*maExpr.object).name)) > 0;
         }
