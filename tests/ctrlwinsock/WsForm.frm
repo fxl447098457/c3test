@@ -145,14 +145,21 @@ Private Sub evtTimer_Timer()
 
     ' --- 通用闸：FD_ACCEPT 落在哪一拍上没有承诺、一笔 1 MiB 什么时候发完也没有承诺，把判据钉在**固定拍号**上 = 随机红
     '     （本文件在 x64 上复跑时就红过一次：第二轮的受理晚到了一拍，后面五条一起倒）。前提没到就原地等下一拍，
-    '     上限 60 拍（Timer = 120ms ⇒ 约 7s）；超上限照样往下走 ⇒ 判据会红，但不会把整件夹具拖到 run timeout。
+    '     上限 25 拍（Timer = 120 ms ⇒ 约 3 s，九个闸全触发也不到 60 s 的运行上限）；超上限照样往下走
     Dim gateOk As Boolean
     gateOk = True
+    If step = 1 Or step = 3 Then gateOk = (wsB.BytesReceived >= 7)
+    If step = 4 Then gateOk = (gTotB >= 18)
+    If step = 5 Then gateOk = (gTotA >= 4)
+    If step = 8 Then gateOk = (gReqS >= 1)
+    If step = 10 Then gateOk = (gTotS >= 5)
+    If step = 11 Then gateOk = (wsT.BytesReceived >= 5)
+    If step = 14 Then gateOk = (gClsS >= 1)
     If step = 20 Or step = 21 Then gateOk = (gReqE >= 1)
     If step = 25 Then gateOk = (gDoneT > gDone0 And gGotEBytes >= gWant)
     If Not gateOk Then
         gWait = gWait + 1
-        If gWait < 60 Then Exit Sub
+        If gWait < 25 Then Exit Sub
     End If
     gWait = 0
     Dim s As String
@@ -177,6 +184,7 @@ Private Sub evtTimer_Timer()
         Debug.Print "WS11=" & TF(wsB.LocalPort = gPB And wsA.LocalPort = gPA)
         wsB.GetData gGotB
         wsB.GetData gGot2
+        Debug.Print "W0=" & gArrB & "/" & gTotB & "/" & wsB.BytesReceived
     ElseIf step = 2 Then
         ' --- 12..13 取走就消费掉；再取是空串（VB6 的 GetData 同口径，不是"读不到"而是"没了"）---
         Debug.Print "WS12=" & TF(gGotB = "hello-B" And wsB.BytesReceived = 0)
