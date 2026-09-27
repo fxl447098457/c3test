@@ -122,6 +122,10 @@ Vb6Type CCodeGen::controlPropType(FrmControlType ctrlType, const std::string& pr
         }
         if (p == "selfontsize") return Vb6Type::Single;
         if (p == "selfontname") return Vb6Type::String;
+        // C29-RT-c: TextRTF 的 getter 回 wchar_t* ⇒ String（判成数值就是把指针当数读，
+        // SSTab1.Tab 那一族同型）。LoadFile / SaveFile / Find 是**方法**，不在属性表里，
+        // 走 cgen_expr_call_callee_withm.inc 那条改道。
+        if (p == "textrtf") return Vb6Type::String;
     }
     if (ctrlType == FrmControlType::Toolbar) {
         // C29-5a: 同一口径 —— 这四条的 RTL getter 都是 int32_t, 判成 Variant/String
@@ -462,6 +466,8 @@ std::string CCodeGen::getControlPropReadFn(FrmControlType ctrlType, const std::s
         if (propLower == "selstart") return "vb6_RTB_GetSelStart";
         if (propLower == "sellength") return "vb6_RTB_GetSelLength";
         if (propLower == "seltext") return "vb6_RTB_GetSelText";
+        // C29-RT-c: 整串 RTF = EM_STREAMOUT + SF_RTF。
+        if (propLower == "textrtf") return "vb6_RTB_GetTextRTF";
         if (propLower == "readonly") return "vb6_RTB_GetReadOnly";
         if (propLower == "maxlength") return "vb6_RTB_GetMaxLength";
         if (propLower == "scrollbars") return "vb6_RTB_GetScrollBars";
@@ -829,6 +835,8 @@ std::string CCodeGen::getControlPropWriteFn(FrmControlType ctrlType, const std::
         if (propLower == "selindent") return "vb6_RTB_SetSelIndent";
         if (propLower == "selrightindent") return "vb6_RTB_SetSelRightIndent";
         if (propLower == "selhangingindent") return "vb6_RTB_SetSelHangingIndent";
+        // C29-RT-c: 写 TextRTF = EM_STREAMIN(SF_RTF)；RTL 那边先全选再灌 ⇒ 语义是"换掉内容"。
+        if (propLower == "textrtf") return "vb6_RTB_SetTextRTF";
         if (propLower == "visible") return "vb6_SetControlVisible";
         if (propLower == "enabled") return "vb6_SetControlEnabled";
         break;

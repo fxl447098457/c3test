@@ -101,8 +101,29 @@ C3 里 **RichTextBox 不走 `Richtx32.ocx`**（上面那条"必须把 OCX 加进
 新控件的默认字体不是 12 磅，而是**继承窗体的字体**（本机是 8.25 磅 MS Sans Serif），
 所以"没设过字号时 `SelFontSize` 是多少"这种针不能写死数 —— 要问就与同一枚控件的 `FontSize` 比。
 
-### 还没做的两格
+### C3 的实现面（续）：`TextRTF` / `LoadFile` / `SaveFile` / `Find`（C29-RT-c 已做）
 
-`TextRTF` + `LoadFile` / `SaveFile` + `Find`（RT-c），以及 `Change` / `SelChange` 两条事件（RT-d ——
-它们是"工具栏按钮状态跟着选区刷新"的关键，两条走的还是不同的通知通道）。
+| 写法 | C3 里实际发生的事 |
+| --- | --- |
+| `RT.TextRTF` | 读 `EM_STREAMOUT(SF_RTF)`；写 `EM_STREAMIN(SF_RTF)`，写之前先全选 ⇒ 语义是**换掉内容**（不是往选区里追加） |
+| `RT.SaveFile path[, type]` | `type` 0 = rtfRTF（缺省）、1 = rtfText；整串用 `CreateFileW` 落盘 |
+| `RT.LoadFile path[, type]` | 反向；`type` 缺省 0 |
+| `RT.Find(s[, start][, end][, flags])` | `EM_FINDTEXTEXW`；命中回**起点**（与 `SelStart` 同一把尺），问不出回 `-1`。`flags` 用 VB6 那两位（1 整词 / 2 区分大小写），原生 `FR_WHOLEWORD=2`、`FR_MATCHCASE=4` 由 RTL 逐位折算 |
+
+五条本机量出来的口径（探针 `.buildtprobe5.c` / `rtprobe6.c` / `rtprobe7.c`，x64 与 x86 逐字相同）：
+
+1. **`TextRTF` 串的头里带本机 ANSI 码页**（实测 `ansicpg936`、`deflangfe2052`）⇒ 别拿这串当身份比字节。
+   判据一律问"前缀 `{tf1` + 正文在里面 + 同一枚控件连问两次自比"。
+2. **`Find` 缺省 `start` = `-1` 是"从当前选区起点起找"** ⇒ 连问同一句两次结果会不同（游标被前一次挪走）。
+   要固定起点就写 `Find(s, 0)`。
+3. **命中只看起点在不在范围里**：`Find("alpha", 0, 10)` 与 `(0, 11)` 都回 5 —— 尾巴跨过右端不算越界。
+4. `LoadFile` 找不到文件时**内容保持原样**（原生拒绝，不钳位、不清空）。VB6 那两条 Sub 靠运行期错误报告
+   失败，本项目还没有那条通道 ⇒ 现在是"静默保持原样"，读不回错误码。
+5. VB6 的 `LoadFile` 还能收一个**已打开的文件号**（`FreeFile` 那一族）。C3 这一格只做路径字符串那一形，
+   文件号那一形刻意不做（边界记在 ai/029）。
+
+### 还没做的一格
+
+`Change` / `SelChange` 两条事件（RT-d —— 它们是"工具栏按钮状态跟着选区刷新"的关键，
+两条走的还是不同的通知通道：`EN_CHANGE` 走 `WM_COMMAND`、`EN_SELCHANGE` 走 `WM_NOTIFY`）。
 `SelPrint` 与 OLE 对象嵌入 / 拖放不在计划内。

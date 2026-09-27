@@ -392,6 +392,53 @@
         }
     }
 
+    // --- C29-RT-c: RichTextBox 的 LoadFile / SaveFile / Find ---
+    // 三条都是 VB6 真方法（不是判据专用），走的仍是原生消息 + RTL 出口（D6：不碰 OCX）。
+    // 与 CommonDialog / Data 两族同一个坑：语句路不进 com_bind，标记必须在这里消费掉，
+    // 否则落回通用兜底 = vb6_ComCall(vb6_hwnd_rt1, L"Find") —— 把 HWND 当 IDispatch 用，
+    // 编得过、链接过、运行期一声不响（本线踩过三次）。
+    // 可选实参按 VB6 的缺省填：fileType 缺省 0 = rtfRTF；Find 的 start/end 缺省 -1
+    // （原生 CHARRANGE 里 -1 = "用当前选区起点" / "到文末"），flags 缺省 0。
+    if (isComMarker_) {
+        auto itRtb = knownFormControls_.find(comObjExpr_);
+        if (itRtb != knownFormControls_.end() &&
+            itRtb->second == FrmControlType::RichTextBox) {
+            std::string mRtb = comMemberName_;
+            for (auto& chR : mRtb) chR = (char)::tolower((unsigned char)chR);
+            if (mRtb == "loadfile" || mRtb == "savefile" || mRtb == "find") {
+                std::string hwndRtb = cIdent(knownFormControlOriginalNames_.count(comObjExpr_)
+                    ? knownFormControlOriginalNames_[comObjExpr_] : comObjExpr_);
+                // 标记必须**先清掉再发实参**：留着的话实参里任何一个字面量都会被上面那套
+                // "COM 属性读"的形状捡走 —— 实测 `rt4.Find("alph", 0, -1, 1)` 的第三个实参
+                // 被发成 `(-vb6_ComGetIntProp(rt4, L"find"))`（裸控制名 ⇒ C2065）。PictureBox.Print
+                // 那刀的注释（Fix 143）就是同一个坑，它是在发完之后再补消费，这里直接先把状态清空。
+                isComMarker_ = false;
+                isEarlyBoundCom_ = false;
+                earlyBoundSym_ = nullptr;
+                comObjExpr_.clear();
+                comMemberName_.clear();
+                std::vector<std::string> argRtb;
+                for (size_t i = 0; i < node.positional.size(); i++) {
+                    emitExpr(*node.positional[i]);
+                    argRtb.push_back(lastExpr_);
+                }
+                std::string aTxt = argRtb.size() > 0 ? argRtb[0] : std::string("L\"\"");
+                if (mRtb == "find") {
+                    lastExpr_ = "vb6_RTB_Find((void*)vb6_hwnd_" + hwndRtb + ", " + aTxt
+                              + ", " + (argRtb.size() > 1 ? argRtb[1] : std::string("-1"))
+                              + ", " + (argRtb.size() > 2 ? argRtb[2] : std::string("-1"))
+                              + ", " + (argRtb.size() > 3 ? argRtb[3] : std::string("0")) + ")";
+                } else {
+                    lastExpr_ = std::string(mRtb == "loadfile" ? "vb6_RTB_LoadFile("
+                                                               : "vb6_RTB_SaveFile(")
+                              + "(void*)vb6_hwnd_" + hwndRtb + ", " + aTxt + ", "
+                              + (argRtb.size() > 1 ? argRtb[1] : std::string("0")) + ")";
+                }
+                return;
+            }
+        }
+    }
+
     // Fix 185: PictureBox.Print / PictureBox.Cls → RTL 控件绘制入口。
     // 成员侧 (cgen_expr_member_form_builtin.inc) 把 comObjExpr_ 存成小写控件名，
     // 所以这里查 knownFormControls_ 拿得到类型。本片段 include 在

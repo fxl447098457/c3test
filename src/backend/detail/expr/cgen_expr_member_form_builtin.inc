@@ -336,6 +336,23 @@
                         return;
                     }
                 }
+                // C29-RT-c: RichTextBox 的 LoadFile / SaveFile / Find —— 打标给
+                // cgen_expr_call_callee_withm.inc 消费（形状同 CommonDialog.Show* 那一刀：
+                // comObjExpr_ 存**小写控件名**，消费侧查 knownFormControls_ 拿类型后发 vb6_RTB_*）。
+                // 少了这一刀就落到下面的通用兜底 ⇒ vb6_ComCall(vb6_hwnd_rt1, L"Find", ...) 一声不响。
+                if (itCtrl->second == FrmControlType::RichTextBox) {
+                    std::string memLower = node.memberName;
+                    std::transform(memLower.begin(), memLower.end(), memLower.begin(), ::tolower);
+                    if (memLower == "loadfile" || memLower == "savefile" || memLower == "find") {
+                        comObjExpr_ = objLower;
+                        comMemberName_ = memLower;
+                        isComMarker_ = true;
+                        isEarlyBoundCom_ = false;
+                        earlyBoundSym_ = nullptr;
+                        lastExpr_ = objLower;
+                        return;
+                    }
+                }
                 // Fix 185: PictureBox 的 Print/Cls 是**绘制**方法, 不是 COM 成员。
                 // 必须落在下面 Fix 023e/089d 兜底**之前**: 兜底把 comObjExpr_ 设成
                 // HWND 表达式(:296), 调用侧 knownFormControls_.find() 就拿不到控件

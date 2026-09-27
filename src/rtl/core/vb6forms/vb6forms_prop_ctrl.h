@@ -737,6 +737,16 @@ void    vb6_RTB_SetSelAlignment(void* hwnd, int32_t align);
 int32_t vb6_RTB_GetSelIndent(void* hwnd);      // 三条缩进单位 = twips（原生 dx* 口径）
 void    vb6_RTB_SetSelIndent(void* hwnd, int32_t twips);
 int32_t vb6_RTB_GetSelRightIndent(void* hwnd);
+// C29-RT-c: TextRTF / LoadFile / SaveFile / Find —— 全走 EM_STREAMOUT / EM_STREAMIN +
+// EM_FINDTEXTEXW 那三条原生入口。TextRTF 的串里带本机 ANSI 码页那一格（实测 ansicpg936），
+// 判据不许按字节比；LoadFile/SaveFile 的 fileType = VB6 那一套 0 rtfRTF / 1 rtfText；Find 的
+// flags 用 VB6 的位（1 整词 / 2 区分大小写），原生 FR_WHOLEWORD=2、FR_MATCHCASE=4 由 RTL 折算。
+wchar_t* vb6_RTB_GetTextRTF(void* hwnd);
+void     vb6_RTB_SetTextRTF(void* hwnd, void* bstr);
+int32_t  vb6_RTB_LoadFile(void* hwnd, const wchar_t* path, int32_t fileType);
+int32_t  vb6_RTB_SaveFile(void* hwnd, const wchar_t* path, int32_t fileType);
+int32_t  vb6_RTB_Find(void* hwnd, const wchar_t* text, int32_t start, int32_t end, int32_t flags);
+
 void    vb6_RTB_SetSelRightIndent(void* hwnd, int32_t twips);
 int32_t vb6_RTB_GetSelHangingIndent(void* hwnd);   // = -dxOffset（原生用负值表示首行外凸）
 void    vb6_RTB_SetSelHangingIndent(void* hwnd, int32_t twips);

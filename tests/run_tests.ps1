@@ -1785,7 +1785,7 @@ if ($Category -in @("all", "run", "vbp")) {
     # PFM_OFFSETINDENT 会把整段推走（实测 720 → 960），不是悬挂。
     # BASE（本批之前的编译器）同一件夹具 = 20 绿 / 38 红：RT33-RT58 里 16 条当场红，剩下 10 条是
     # "应当为 0 / 应当相等"那类反向针（什么都不实现也满足它们）—— 与 DT/MV 每次的分布同型。
-    $rtNeedles = @("CTRLRICHTEXT-DONE") + (1..58 | ForEach-Object { "RT$_=Y" })
+    $rtNeedles = @("CTRLRICHTEXT-DONE") + (1..79 | ForEach-Object { "RT$_=Y" })
     Test-Vbp "ctrlrichtextbox" "$Tests\ctrlrichtextbox\RtfApp.vbp" $rtNeedles
     Test-Vbp "ctrlrichtextbox_x86" "$Tests\ctrlrichtextbox\RtfApp.vbp" $rtNeedles -Arch "x86"
     # 发码正面：类名 + 四位创建样式逐枚钉（1409286148 = 基+ES_MULTILINE，rt2 全默认；
@@ -1807,6 +1807,15 @@ if ($Category -in @("all", "run", "vbp")) {
         'vb6_RTB_SetWordWrap(vb6_hwnd_rt3, (-1));',
         'vb6_RTB_SetMaxLength(vb6_hwnd_rt2, 20);',
         'vb6_RTB_GetVScrollRange(vb6_hwnd_rt3',
+        # C29-RT-c: TextRTF 读写两面 + 三条方法的发码形状（含两个可选实参缺省填什么）
+        'vb6_RTB_GetTextRTF(vb6_hwnd_rt4)',
+        'vb6_RTB_SetTextRTF(vb6_hwnd_rt3, sRtf);',
+        'vb6_RTB_SaveFile((void*)vb6_hwnd_rt4, sPath, 0);',
+        'vb6_RTB_LoadFile((void*)vb6_hwnd_rt3, sPath, 0);',
+        'vb6_RTB_SaveFile((void*)vb6_hwnd_rt4, sPath2, 1);',
+        'vb6_RTB_LoadFile((void*)vb6_hwnd_rt3, sPath2, 1);',
+        'vb6_RTB_Find((void*)vb6_hwnd_rt4, vb6_BSTR_FromStr(L"alph"), 0, (-1), 1)',
+        'vb6_RTB_Find((void*)vb6_hwnd_rt4, vb6_BSTR_FromStr(L"nope-not-here"), -1, -1, 0)',
         'vb6_RTB_GetHScrollRange(vb6_hwnd_rt4',
         # RT-b：四条效果走 CHARFORMAT2W 的同一族 setter（布尔按 VB6 的 -1/0 发），
         # 颜色/字体名/字号/对齐/三缩进各一条 —— 全部钉"裸调用 + 裸数值"，不许出现装箱。
@@ -1830,6 +1839,13 @@ if ($Category -in @("all", "run", "vbp")) {
         'vb6_ComGetObjectProp(vb6_hwnd_rt1',
         'vb6_ComSetObjectProp(vb6_hwnd_rt2',
         'vb6_ComGetObjectProp(vb6_hwnd_rt3, L"MaxLength")',
+
+        # C29-RT-c 的反面：三条方法与 TextRTF 都不许再落回拿 HWND 当 IDispatch 那条假路
+        # （打了标记却没在语句路消费掉的症状就是编得过、运行期一声不响 —— 本线踩过三次）。
+        'vb6_ComCall(vb6_hwnd_rt4, L"Find"',
+        'vb6_ComGetObjectProp(vb6_hwnd_rt4, L"TextRTF")',
+        'vb6_ComSetObjectProp(vb6_hwnd_rt3, L"TextRTF"',
+        'vb6_ComCall(vb6_hwnd_rt3, L"LoadFile"',
         'vb6_RTB_SetScrollBars',
         # RT-b：格式面也不许退回 COM 兜底（一条都不许）
         'vb6_ComGetObjectProp(vb6_hwnd_rt2, L"SelBold")',

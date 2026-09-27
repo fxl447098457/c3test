@@ -320,6 +320,84 @@ Private Sub Form_Load()
     rt4.Enabled = True
     Debug.Print "RT58=" & TF(rt4.Enabled = -1 And rt3.Enabled = -1)
 
+    ' --- 59..78 C29-RT-c：TextRTF / SaveFile / LoadFile / Find ---
+    ' 四条量出来的口径（探针 .build\rtprobe5.c 与 .build\rtprobe6.c，两架构逐字相同）：
+    '   ① EM_STREAMOUT(SF_RTF) 出来的串**头里带本机 ANSI 码页**（实测 ansicpg936、
+    '      deflangfe2052）⇒ 判据一律问"前缀 + 正文在里面 + 两次自比"，不许按字节比死。
+    '   ② EM_STREAMIN 那枚回调**返回值非零 = 中止**，而且那个值原样落进 dwError —— 第一版
+    '      照直觉返回"搬掉的字节数"，四组读数一律 rc=0 / 控件里一个字都没有 = 静默空控件。
+    '   ③ VB6 的 Find flags（1 整词 / 2 区分大小写）与原生 FR_WHOLEWORD=2 / FR_MATCHCASE=4
+    '      **不同位** ⇒ 不折算的症状是"区分大小写被当成整词"。RT75/RT76 一起夹这两个开关。
+    '   ④ 命中回起点（与本控件 SelStart 同一把尺），未命中回 -1。
+    Dim sRtf As String
+    Dim sPath As String
+    Dim sPath2 As String
+    rt4.Text = "Zeta alpha cold again"
+    sRtf = rt4.TextRTF
+    Debug.Print "RT59=" & TF(InStr(sRtf, "{\rtf1") = 1)
+    Debug.Print "RT60=" & TF(InStr(sRtf, "Zeta alpha cold again") > 0)
+    Debug.Print "RT61=" & TF(rt4.TextRTF = sRtf)
+    Debug.Print "RT62=" & TF(rt3.TextRTF <> sRtf)
+    ' 写 TextRTF 是**换掉内容**（RTL 那边先全选再灌；不选全就变成往当前选区里插 = 追加）
+    rt3.Text = "STALE-CONTENT"
+    rt3.TextRTF = sRtf
+    Debug.Print "RT63=" & TF(rt3.Text = rt4.Text)
+    Debug.Print "RT64=" & TF(InStr(rt3.TextRTF, "STALE") = 0)
+    Debug.Print "RT65=" & TF(InStr(rt3.TextRTF, "{\rtf1") = 1 And InStr(rt3.TextRTF, "Zeta") > 0)
+    ' 格式随 RTF 一起走：给 rt4 的 "alpha" 涂粗，换到 rt3 之后同一段仍读回粗、另一段仍不粗
+    rt4.SelStart = 5
+    rt4.SelLength = 5
+    rt4.SelBold = True
+    sRtf = rt4.TextRTF
+    rt3.TextRTF = sRtf
+    rt3.SelStart = 5
+    rt3.SelLength = 5
+    Debug.Print "RT66=" & TF(rt3.SelBold = -1)
+    rt3.SelStart = 0
+    rt3.SelLength = 4
+    Debug.Print "RT67=" & TF(rt3.SelBold = 0)
+    ' 落盘再读回（0 = rtfRTF）：文本、格式、长度三样都得跟着回来
+    sPath = Environ("TEMP") & "\c3_rtc_save.rtf"
+    rt4.SaveFile sPath, 0
+    rt3.Text = "STALE3"
+    rt3.LoadFile sPath, 0
+    Debug.Print "RT68=" & TF(FileLen(sPath) > 0 And rt3.Text = "Zeta alpha cold again")
+    rt3.SelStart = 5
+    rt3.SelLength = 5
+    Debug.Print "RT69=" & TF(rt3.SelBold = -1 And rt3.TextRTF = rt4.TextRTF)
+    ' 纯文本那一档（1 = rtfText）：文件里不该再有 RTF 控制字，也就必然比 rtf 那份短
+    sPath2 = Environ("TEMP") & "\c3_rtc_save.txt"
+    rt4.SaveFile sPath2, 1
+    Debug.Print "RT70=" & TF(FileLen(sPath2) > 0 And FileLen(sPath2) < FileLen(sPath))
+    rt3.Text = "STALE4"
+    rt3.LoadFile sPath2, 1
+    Debug.Print "RT71=" & TF(rt3.Text = "Zeta alpha cold again" And InStr(rt3.TextRTF, "{\rtf1") = 1)
+    Kill sPath
+    Kill sPath2
+    ' Find：起点、多次连问互不影响、未命中
+    rt4.Text = "Zeta alpha cold again"
+    Debug.Print "RT72=" & TF(rt4.Find("alpha", 0) = 5 And rt4.Find("Zeta", 0) = 0)
+    Debug.Print "RT73=" & TF(rt4.Find("again", 0) = 16 And rt4.Find("cold", 0) = 11)
+    Debug.Print "RT74=" & TF(rt4.Find("nope-not-here") = -1 And rt4.Find("alpha", 6) = -1)
+    ' 两个 flag 各钉一条：整词（"alpha cold" 跨两词 ⇒ 整词下不该命中）与区分大小写
+    ' 整词那条要用**词中间**的子串：原生查的是命中两端是不是词边界，"alpha cold" 这种
+    ' 跨词短语自己就是整词，拿它测不出 flag（第一版就写错在这里）。
+    Debug.Print "RT75=" & TF(rt4.Find("alph", 0, -1, 1) = -1 And rt4.Find("alph", 0) = 5)
+    Debug.Print "RT76=" & TF(rt4.Find("ALPHA", 0, -1, 2) = -1 And rt4.Find("alpha", 0, -1, 2) = 5)
+    Debug.Print "RT77=" & TF(rt4.Find("ALPHA", 0) = 5)
+    ' 范围右端是**不含**的那一头（探针里命中 "Alpha" 回 chrg=(0,5)）
+    ' 右端那一格先只打原始读数（end 到底含不含命中末尾，量出来再写针）
+    ' 量出来的右端语义：命中只看**起点**在不在范围里，跨过右端的尾巴不算越界
+    Debug.Print "RT78=" & TF(rt4.Find("alpha", 0, 10) = 5 And rt4.Find("alpha", 0, 11) = 5)
+    Debug.Print "G=" & rt4.Find("alpha", 0, 10) & "/" & rt4.Find("alpha", 0, 11)
+    ' 缺省 start 不许把上一次的选区当成 0：这里先把选区挪到文末，再只给文本
+    rt4.SelStart = Len(rt4.Text)
+    rt4.SelLength = 0
+    Debug.Print "RT79=" & TF(rt4.Find("alpha") = -1 And rt4.Find("alpha", 0) = 5)
+    ' 针之外：TextRTF 的头 24 个字符 + 两份长度（RTF 串里带机器码页那一格，别处不许当判据）
+    Debug.Print "T=" & Mid(sRtf, 1, 24) & "/" & Len(sRtf) & "/" & Len(rt3.TextRTF)
+
+
     ' 原始读数打在针之外：四位样式 / 边框 / 四个量程 / 上限被抬后的读数 / 长度
     Debug.Print "W=" & s1 & "/" & s2 & "/" & s3 & "/" & s4
     Debug.Print "S=" & v3 & "/" & v2 & "/" & rt1.VScrollRange & "/" & h4 & "/" & h2
