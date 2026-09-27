@@ -239,6 +239,25 @@ static void sstabRefreshChildren(Vb6SSTab* t) {
 // 窗口尚未布局 (GetClientRect 宽 0) → 折行按 caption 自然宽走, 7 页折成 3+4 而
 // 非 VB6 的 4+3 (SSTabEx frmTest 实证)。挂一个内部子类过程, WM_SIZE 时重算。
 static LRESULT CALLBACK sstabSubclassProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
+    if (msg == WM_ERASEBKGND) {
+        // 防闪烁 (第三步): 上一版"直接 return 1 跳过擦除"治好了页内容, 却暴露了
+        // 新问题 —— 多行标签 (TCS_MULTILINE, 3+4 两行) 时**与显示区相邻的那一行**
+        // 主题绘制要先擦"行间缝隙/标签背后"再画按钮, 跳过统一擦底后新旧像素交替,
+        // 用户实测: 上面 3 个不闪、下面 4 个闪 (闪的正是紧贴显示区那行)。
+        // 解法: 不跳过擦除, 改为**用父窗体注册类的背景刷擦全客户区**。主题标签区
+        // 底色本就是窗体背景色 (非主题路径 SysTabControl32 也是向父窗口要
+        // WM_CTLCOLORSTATIC 拿底色), 擦除色与绘制后的底色一致 → 擦/画跳变不可见
+        // → 不闪; 页内子控件仍由 WS_CLIPCHILDREN 保护, 不会被这层擦除波及。
+        HDC hdc = (HDC)wp;
+        RECT rc;
+        GetClientRect(hwnd, &rc);
+        HBRUSH br = NULL;
+        HWND parent = GetParent(hwnd);
+        if (parent) br = (HBRUSH)GetClassLongPtrW(parent, GCLP_HBRBACKGROUND);
+        if (!br) br = (HBRUSH)GetSysColorBrush(COLOR_BTNFACE);
+        FillRect(hdc, &rc, br);
+        return 1;
+    }
     if (msg == WM_SIZE) {
         Vb6SSTab* t = sstabFind(hwnd);
         if (t) sstabApplyRowMetrics(t);
@@ -259,6 +278,42 @@ void vb6_SSTab_Init(void* tabHwnd, int tabs, int curTab, int orientation, int ta
         WNDPROC op = (WNDPROC)SetWindowLongPtrW(t->hwnd, GWLP_WNDPROC,
                                                 (LONG_PTR)sstabSubclassProc);
         if (op) SetPropW(t->hwnd, L"VB6_SSTab_OrigProc", (HANDLE)op);
+    }
+
+    // 防闪烁 (SSTabEx frmTest 实测: 内容最多的左页最明显):
+    // 页内子控件是 SysTabControl32 的**子窗口** (cgen_form_frame_menu.inc 用
+    // containerHwnd 当父)。tab 控件自身没 WS_CLIPCHILDREN 时, 它每次重绘显示区
+    // 背景会把子控件区域一并擦掉再让子控件重画 → 切页/悬停时页面内容闪烁。
+    // 补上裁剪样式即可 (SST_STYLE_MASK 不含这两位, 后面 sstabReapplyStyle 的
+    // SetWindowLongPtr 不会把它洗掉)。
+    {
+        LONG cs = (LONG)GetWindowLongPtrW(t->hwnd, GWL_STYLE);
+        if (!(cs & WS_CLIPCHILDREN)) {
+            SetWindowLongPtrW(t->hwnd, GWL_STYLE, cs | WS_CLIPCHILDREN | WS_CLIPSIBLINGS);
+            SetWindowPos(t->hwnd, NULL, 0, 0, 0, 0,
+                         SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER |
+                         SWP_FRAMECHANGED | SWP_NOACTIVATE);
+        }
+    }
+
+    // 防闪烁 (第三步, 用户实测: 前两步后 tab 头仍在闪):
+    // 窗体与 tab 控件各自的"擦除→重画"中间态直接上了屏幕 —— 治本手段是给
+    // **顶层窗体**加 WS_EX_COMPOSITED: Windows 会把整棵窗口树 (窗体+全部子控件)
+    // 以自底向上+双缓冲方式合成完再一次性呈现, 任何控件的擦除中间态都到不了屏幕。
+    // 这是 Win32 治闪烁的官方扩展样式, 与前两步互补 (那两步治控件自己的擦除,
+    // 这一步治窗体↔控件/控件↔控件之间的合成时序闪)。代价只是合成多一层缓冲,
+    // 表单类程序无感。挂在 SSTab 的根窗体上, 不动没用到 SSTab 的窗体。
+    {
+        HWND root = GetAncestor(t->hwnd, GA_ROOT);
+        if (root) {
+            LONG_PTR ex = GetWindowLongPtrW(root, GWL_EXSTYLE);
+            if (!(ex & WS_EX_COMPOSITED)) {
+                SetWindowLongPtrW(root, GWL_EXSTYLE, ex | WS_EX_COMPOSITED);
+                SetWindowPos(root, NULL, 0, 0, 0, 0,
+                             SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER |
+                             SWP_NOACTIVATE | SWP_FRAMECHANGED);
+            }
+        }
     }
 
     t->orientation = orientation;
@@ -386,6 +441,11 @@ int32_t vb6_SSTab_GetTabs(void* tabHwnd) {
 void vb6_SSTab_SetTabs(void* tabHwnd, int32_t n) {
     Vb6SSTab* t = sstabFind((HWND)tabHwnd);
     if (!t) return;
+    // VB6/OCX 语义: 同值赋值是 no-op —— SSTabEx frmTest 的 tmrUpdate 每 1.5s
+    // 执行 Tabs = 7 (值不变), OCX 直接返回; 这里若照常 sstabAfterVisualChange
+    // 会把整个 tab 控件 DeleteAllItems+重建+子控件整轮隐藏/显示 → 带图标的那行
+    // 标签每 1.5s 闪一次 (用户实测 Theme/Frame/Other/Cmd 闪)。必须幂等早退。
+    if ((int)n == t->count) return;
     sstabResize(t, (int)n);
     sstabAfterVisualChange(t);
 }
@@ -443,6 +503,10 @@ void vb6_SSTab_SetTabCaption(void* tabHwnd, int32_t idx, void* bstr) {
     Vb6SSTab* t = sstabFind((HWND)tabHwnd);
     if (!t || idx < 0 || idx >= t->count) return;
     const wchar_t* s = (const wchar_t*)bstr;
+    // 同文本 no-op: TabCtrl_SetItem 即使文字没变也会重绘该项,
+    // 演示代码循环写同一标题时会闪标签。
+    if ((s && *s) == (t->captions[idx] != NULL) &&
+        (!s || !*s || wcscmp(s, t->captions[idx]) == 0)) return;
     if (t->captions[idx]) { HeapFree(GetProcessHeap(), 0, t->captions[idx]); t->captions[idx] = NULL; }
     if (s && *s) {
         int n = (int)lstrlenW(s);
@@ -489,7 +553,9 @@ int32_t vb6_SSTab_GetTabVisible(void* tabHwnd, int32_t idx) {
 void vb6_SSTab_SetTabVisible(void* tabHwnd, int32_t idx, int32_t v) {
     Vb6SSTab* t = sstabFind((HWND)tabHwnd);
     if (!t || idx < 0 || idx >= t->count || !t->visible) return;
-    t->visible[idx] = v ? 1 : 0;
+    int nv = v ? 1 : 0;
+    if (t->visible[idx] == nv) return;      // 同值赋值 no-op
+    t->visible[idx] = nv;
     if (t->cur == idx && !t->visible[idx]) {
         int first = -1;
         for (int i = 0; i < t->count; i++) if (t->visible[i]) { first = i; break; }
@@ -509,6 +575,7 @@ int32_t vb6_SSTab_GetTabOrientation(void* tabHwnd) {
 void vb6_SSTab_SetTabOrientation(void* tabHwnd, int32_t v) {
     Vb6SSTab* t = sstabFind((HWND)tabHwnd);
     if (!t || v < 0 || v > 3) return;
+    if (t->orientation == (int)v) return;   // 同值赋值 no-op (防演示代码循环触发重绘)
     t->orientation = (int)v;
     sstabAfterVisualChange(t);
 }
@@ -521,6 +588,7 @@ int32_t vb6_SSTab_GetTabStyle(void* tabHwnd) {
 void vb6_SSTab_SetTabStyle(void* tabHwnd, int32_t v) {
     Vb6SSTab* t = sstabFind((HWND)tabHwnd);
     if (!t || v < 0 || v > 1) return;
+    if (t->tabStyle == (int)v) return;      // 同值赋值 no-op
     t->tabStyle = (int)v;
     sstabAfterVisualChange(t);
 }
@@ -533,6 +601,7 @@ int32_t vb6_SSTab_GetTabsPerRow(void* tabHwnd) {
 void vb6_SSTab_SetTabsPerRow(void* tabHwnd, int32_t v) {
     Vb6SSTab* t = sstabFind((HWND)tabHwnd);
     if (!t || v < 0) return;
+    if (t->tabsPerRow == (int)v) return;    // 同值赋值 no-op
     t->tabsPerRow = (int)v;
     sstabApplyRowMetrics(t);
 }
@@ -545,7 +614,9 @@ int32_t vb6_SSTab_GetWordWrap(void* tabHwnd) {
 void vb6_SSTab_SetWordWrap(void* tabHwnd, int32_t v) {
     Vb6SSTab* t = sstabFind((HWND)tabHwnd);
     if (!t) return;
-    t->wordWrap = v ? 1 : 0;
+    int nv = v ? 1 : 0;
+    if (t->wordWrap == nv) return;          // 同值赋值 no-op
+    t->wordWrap = nv;
     sstabAfterVisualChange(t);
 }
 
