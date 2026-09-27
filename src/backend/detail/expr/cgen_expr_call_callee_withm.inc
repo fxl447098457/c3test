@@ -392,6 +392,127 @@
         }
     }
 
+    // --- C29-WS-a/b: Winsock 的 Bind / SendData / GetData / PeekData / Close / Listen / Connect / Accept ---
+    // 同一族"标记必须在这里消费掉"的形状（不消费就落到 vb6_ComCall —— 本线踩过三次的那声不响）。
+    // GetData / PeekData 的**出参**是这里唯一的新形状：VB6 那两第一条实参是被写回来的变量，
+    // 所以发 `&<变量名>`；实参不是光秃秃的标识符时（属性、数组元素、常量…）发 NULL 让 RTL 安全返回 0
+    // —— VB6 在那里同样编不过，只是我们给不出那条编译期诊断（记进 029 §九 本格）。
+    if (isComMarker_) {
+        auto itWs = knownFormControls_.find(comObjExpr_);
+        if (itWs != knownFormControls_.end() &&
+            itWs->second == FrmControlType::Winsock) {
+            std::string mWs = comMemberName_;
+            static const char* kWsKnown[] = { "bind", "senddata", "getdata", "peekdata",
+                                              "close", "listen", "connect", "accept" };
+            bool knownWs = false;
+            for (const char* k : kWsKnown) if (mWs == k) { knownWs = true; break; }
+            if (knownWs) {
+                std::string hwndWs = cIdent(knownFormControlOriginalNames_.count(comObjExpr_)
+                    ? knownFormControlOriginalNames_[comObjExpr_] : comObjExpr_);
+                isComMarker_ = false;
+                isEarlyBoundCom_ = false;
+                earlyBoundSym_ = nullptr;
+                comObjExpr_.clear();
+                comMemberName_.clear();
+                std::vector<std::string> argWs;
+                for (size_t i = 0; i < node.positional.size(); i++) {
+                    emitExpr(*node.positional[i]);
+                    argWs.push_back(lastExpr_);
+                }
+                auto isBareIdent = [](const std::string& t) {
+                    if (t.empty() || !(std::isalpha((unsigned char)t[0]) || t[0] == '_')) return false;
+                    for (char ch : t)
+                        if (!(std::isalnum((unsigned char)ch) || ch == '_')) return false;
+                    return true;
+                };
+                std::string preWs = "(void*)vb6_hwnd_" + hwndWs;
+                if (mWs == "close") {
+                    lastExpr_ = "vb6_Ws_Close(" + preWs + ")";
+                } else if (mWs == "listen") {
+                    lastExpr_ = "vb6_Ws_Listen(" + preWs + ")";
+                } else if (mWs == "connect") {
+                    lastExpr_ = "vb6_Ws_Connect(" + preWs + ")";
+                } else if (mWs == "accept") {
+                    lastExpr_ = "vb6_Ws_Accept(" + preWs + ", "
+                              + (argWs.size() > 0 ? ("(int32_t)" + argWs[0]) : std::string("0")) + ")";
+                } else if (mWs == "bind") {
+                    std::string port = argWs.size() > 0 ? ("(int32_t)" + argWs[0]) : std::string("0");
+                    std::string ip = argWs.size() > 1 ? argWs[1] : std::string("L\"\"");
+                    lastExpr_ = "vb6_Ws_Bind(" + preWs + ", " + port + ", " + ip + ")";
+                } else if (mWs == "senddata") {
+                    lastExpr_ = "vb6_Ws_SendData(" + preWs + ", "
+                              + (argWs.size() > 0 ? argWs[0] : std::string("L\"\"")) + ")";
+                } else {
+                    std::string out = (!argWs.empty() && isBareIdent(argWs[0]))
+                                    ? ("&" + argWs[0]) : std::string("((void*)0)");
+                    std::string ty = argWs.size() > 1 ? ("(int32_t)" + argWs[1]) : std::string("0");
+                    std::string mx = argWs.size() > 2 ? ("(int32_t)" + argWs[2]) : std::string("(-1)");
+                    lastExpr_ = std::string(mWs == "getdata" ? "vb6_Ws_GetData(" : "vb6_Ws_PeekData(")
+                              + preWs + ", " + out + ", " + ty + ", " + mx + ")";
+                }
+                return;
+            }
+        }
+    }
+
+    // --- C29-RT-c: RichTextBox 的 LoadFile / SaveFile / Find ---
+    // 三条都是 VB6 真方法（不是判据专用），走的仍是原生消息 + RTL 出口（D6：不碰 OCX）。
+    // 与 CommonDialog / Data 两族同一个坑：语句路不进 com_bind，标记必须在这里消费掉，
+    // 否则落回通用兜底 = vb6_ComCall(vb6_hwnd_rt1, L"Find") —— 把 HWND 当 IDispatch 用，
+    // 编得过、链接过、运行期一声不响（本线踩过三次）。
+    // 可选实参按 VB6 的缺省填：fileType 缺省 0 = rtfRTF；Find 的 start/end 缺省 -1
+    // （原生 CHARRANGE 里 -1 = "用当前选区起点" / "到文末"），flags 缺省 0。
+    if (isComMarker_) {
+        auto itRtb = knownFormControls_.find(comObjExpr_);
+        if (itRtb != knownFormControls_.end() &&
+            itRtb->second == FrmControlType::RichTextBox) {
+            std::string mRtb = comMemberName_;
+            for (auto& chR : mRtb) chR = (char)::tolower((unsigned char)chR);
+            if (mRtb == "loadfile" || mRtb == "savefile" || mRtb == "find"
+                || mRtb == "simnotify") {
+                std::string hwndRtb = cIdent(knownFormControlOriginalNames_.count(comObjExpr_)
+                    ? knownFormControlOriginalNames_[comObjExpr_] : comObjExpr_);
+                // 标记必须**先清掉再发实参**：留着的话实参里任何一个字面量都会被上面那套
+                // "COM 属性读"的形状捡走 —— 实测 `rt4.Find("alph", 0, -1, 1)` 的第三个实参
+                // 被发成 `(-vb6_ComGetIntProp(rt4, L"find"))`（裸控制名 ⇒ C2065）。PictureBox.Print
+                // 那刀的注释（Fix 143）就是同一个坑，它是在发完之后再补消费，这里直接先把状态清空。
+                isComMarker_ = false;
+                isEarlyBoundCom_ = false;
+                earlyBoundSym_ = nullptr;
+                comObjExpr_.clear();
+                comMemberName_.clear();
+                std::vector<std::string> argRtb;
+                for (size_t i = 0; i < node.positional.size(); i++) {
+                    emitExpr(*node.positional[i]);
+                    argRtb.push_back(lastExpr_);
+                }
+                std::string aTxt = argRtb.size() > 0 ? argRtb[0] : std::string("L\"\"");
+                if (mRtb == "simnotify") {
+                    // 判据专用的一条（RT-d，与 DT-c 的 SimChange / MV-c 的 SimDateClick 同先例）：
+                    // 造一条**真**通知发给父窗，把"认来源 + 分流 + 调用"三段派发都喂一遍。
+                    // 这里非 VB6 语义，不进手册的方法表。
+                    c_.emitLine("{ vb6_RTB_SimNotify((void*)vb6_hwnd_" + hwndRtb + ", (int32_t)"
+                                + (argRtb.size() > 0 ? argRtb[0] : std::string("1794")) + "); }"
+                                "  /* RichTextBox.SimNotify (判据专用, 非 VB6) */");
+                    lastExpr_ = "0";
+                    return;
+                }
+                if (mRtb == "find") {
+                    lastExpr_ = "vb6_RTB_Find((void*)vb6_hwnd_" + hwndRtb + ", " + aTxt
+                              + ", " + (argRtb.size() > 1 ? argRtb[1] : std::string("-1"))
+                              + ", " + (argRtb.size() > 2 ? argRtb[2] : std::string("-1"))
+                              + ", " + (argRtb.size() > 3 ? argRtb[3] : std::string("0")) + ")";
+                } else {
+                    lastExpr_ = std::string(mRtb == "loadfile" ? "vb6_RTB_LoadFile("
+                                                               : "vb6_RTB_SaveFile(")
+                              + "(void*)vb6_hwnd_" + hwndRtb + ", " + aTxt + ", "
+                              + (argRtb.size() > 1 ? argRtb[1] : std::string("0")) + ")";
+                }
+                return;
+            }
+        }
+    }
+
     // Fix 185: PictureBox.Print / PictureBox.Cls → RTL 控件绘制入口。
     // 成员侧 (cgen_expr_member_form_builtin.inc) 把 comObjExpr_ 存成小写控件名，
     // 所以这里查 knownFormControls_ 拿得到类型。本片段 include 在

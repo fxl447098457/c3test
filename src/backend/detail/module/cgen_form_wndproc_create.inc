@@ -252,6 +252,36 @@
                 c_.dedent();
                 c_.emitLine("}");
             }
+        }
+        else if (ctrl.controlType == FrmControlType::RichTextBox) {
+            // C29-RT-d: RichTextBox 的 Change **不在 768 这一格** —— 上面那条是 EDIT 控件的
+            // EN_CHANGE，Msftedit 一次都不发它（探针六份读数里 768 出现 0 次）。它发的是
+            // EN_UPDATE(0x0400=1024)，而且**不受事件掩码管**（掩码全 0 也照发），所以这条
+            // 不需要 vb6_RTB_Init 那步配合（对照：同一条 Init 里的 ENM_SELCHANGE 少一句就哑）。
+            // 读数 .build\rtdprobe5_c*_s*.txt；程序化写 Text 也算"变了"，与 VB6 一致。
+            // ⚠ 但**时机**与 VB6 不同：这一条要等重绘才落地 —— `Text = x` 之后得过一次消息循环
+            //   才收得到（夹具里那句 DoEvents 因此是判据的一部分，不 DoEvents 计数还是旧的）。
+            if (symTab_.lookup(ctrl.controlName + "_Change")) {
+                std::string rtbChgFn = cProcName(ctrl.controlName + "_Change", AccessLevel::Private);
+                c_.emitLine("if (id == " + std::to_string(ctrlId) + " && code == 1024) {");
+                c_.indent();
+                c_.emitLine("{ extern void " + rtbChgFn + "(); " + rtbChgFn + "(); }");
+                c_.dedent();
+                c_.emitLine("}");
+            }
+            // C29-RT-d: SelChange 的**第二条通道**（与下面 WM_NOTIFY 那一条同一个事件）。
+            // 同一份产物、同一个夹具连跑三次：选区通知 1 次走 WM_NOTIFY/1794、2 次走
+            // WM_COMMAND/1815（0x0717，SDK 头里没有这枚码）；裸码读数 .build\rtdmin_out\tr_*.txt。
+            // 两条 arm 都接上，事件才谈得上"会来"；一条事件双发会让计数变 2 当场翻红，所以
+            // 双发不可能被这两条 arm 一起放过。判据用 vb6_RTB_SimNotify 各钉一条。
+            if (symTab_.lookup(ctrl.controlName + "_SelChange")) {
+                std::string rtbSelFn = cProcName(ctrl.controlName + "_SelChange", AccessLevel::Private);
+                c_.emitLine("if (id == " + std::to_string(ctrlId) + " && code == 1815) {");
+                c_.indent();
+                c_.emitLine("{ extern void " + rtbSelFn + "(); " + rtbSelFn + "(); }");
+                c_.dedent();
+                c_.emitLine("}");
+            }
         } else if (ctrl.controlType == FrmControlType::ListBox) {
             // P14.4.1: LBN_SELCHANGE (code=1) -> _Click() (仅当处理器存在时)
             if (symTab_.lookup(ctrl.controlName + "_Click")) {

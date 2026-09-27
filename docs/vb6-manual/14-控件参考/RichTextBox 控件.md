@@ -101,8 +101,52 @@ C3 里 **RichTextBox 不走 `Richtx32.ocx`**（上面那条"必须把 OCX 加进
 新控件的默认字体不是 12 磅，而是**继承窗体的字体**（本机是 8.25 磅 MS Sans Serif），
 所以"没设过字号时 `SelFontSize` 是多少"这种针不能写死数 —— 要问就与同一枚控件的 `FontSize` 比。
 
+### C3 的实现面（续）：`TextRTF` / `LoadFile` / `SaveFile` / `Find`（C29-RT-c 已做）
+
+| 写法 | C3 里实际发生的事 |
+| --- | --- |
+| `RT.TextRTF` | 读 `EM_STREAMOUT(SF_RTF)`；写 `EM_STREAMIN(SF_RTF)`，写之前先全选 ⇒ 语义是**换掉内容**（不是往选区里追加） |
+| `RT.SaveFile path[, type]` | `type` 0 = rtfRTF（缺省）、1 = rtfText；整串用 `CreateFileW` 落盘 |
+| `RT.LoadFile path[, type]` | 反向；`type` 缺省 0 |
+| `RT.Find(s[, start][, end][, flags])` | `EM_FINDTEXTEXW`；命中回**起点**（与 `SelStart` 同一把尺），问不出回 `-1`。`flags` 用 VB6 那两位（1 整词 / 2 区分大小写），原生 `FR_WHOLEWORD=2`、`FR_MATCHCASE=4` 由 RTL 逐位折算 |
+
+五条本机量出来的口径（探针 `.build\rtprobe5.c` / `rtprobe6.c` / `rtprobe7.c`，x64 与 x86 逐字相同）：
+
+1. **`TextRTF` 串的头里带本机 ANSI 码页**（实测 `ansicpg936`、`deflangfe2052`）⇒ 别拿这串当身份比字节。
+   判据一律问"前缀 `{\rtf1` + 正文在里面 + 同一枚控件连问两次自比"。
+2. **`Find` 缺省 `start` = `-1` 是"从当前选区起点起找"** ⇒ 连问同一句两次结果会不同（游标被前一次挪走）。
+   要固定起点就写 `Find(s, 0)`。
+3. **命中只看起点在不在范围里**：`Find("alpha", 0, 10)` 与 `(0, 11)` 都回 5 —— 尾巴跨过右端不算越界。
+4. `LoadFile` 找不到文件时**内容保持原样**（原生拒绝，不钳位、不清空）。VB6 那两条 Sub 靠运行期错误报告
+   失败，本项目还没有那条通道 ⇒ 现在是"静默保持原样"，读不回错误码。
+5. VB6 的 `LoadFile` 还能收一个**已打开的文件号**（`FreeFile` 那一族）。C3 这一格只做路径字符串那一形，
+   文件号那一形刻意不做（边界记在 ai/029）。
+
+### C3 的实现面（续）：`Change` / `SelChange` 两条事件（C29-RT-d 已做）
+
+| 事件 | 原生通知 | C3 接的是 |
+| --- | --- | --- |
+| `RT_Change()` | `EN_UPDATE` = 0x0400 = **1024**，走 `WM_COMMAND` 的高字 | 该控件 id 相同且 `code == 1024` ⇒ 调 `<控件名>_Change` |
+| `RT_SelChange()` | `EN_SELCHANGE` = 0x0702 = **1794**，走 `WM_NOTIFY`；同一事件有时走 `WM_COMMAND` 的 **1815** | 两条通道都接：`WM_NOTIFY` 那条按 `hwndFrom` 认来源，`WM_COMMAND` 那条按 id + code |
+
+五条本机量出来的口径（判据 `tests/ctrlrichtextbox` 的 RT80..RT89，x64 与 x86 各 89 针全绿）：
+
+1. **`EN_CHANGE`(768) 这枚控件从来不发**。768 是 `TextBox`（EDIT 控件）那一格的事件码，
+   RichTextBox 发的是 1024 —— 同一个"文本变了"，两枚控件两个码，别互相外推。
+2. **`Change` 到达的时机与 VB6 不同**：原生把它排在**重绘**之后。`RT.Text = "abc"` 的下一行去读
+   计数还是旧值，过一次消息循环（`DoEvents`）才 +1；到得了的时候文本已是新那份。
+   从 VB6 搬"改完文本立刻依赖 `Change` 已跑过"的代码要留意这一拍。
+3. **`SelChange` 要先开事件掩码**：`ENM_SELCHANGE` = 0x00080000 **整枚都在高 16 位**，
+   而 `EM_SETEVENTMASK` 只从 `wParam` 收低 16 位 —— 高位必须经 `lParam` 那个指针进出。
+   不开就是"设了 `SelStart` 一声不响"。C3 在建窗那步（`vb6_RTB_Init`）统一开，用户侧不用管。
+4. **`SelChange` 的通道不稳定，而且会整条不发**：同一份产物、同一个夹具连跑三次，
+   1 次走 `WM_NOTIFY`/1794、2 次走 `WM_COMMAND`/1815，另有一次一条都不发（无随机输入）。
+   所以"程序化设选区 ⇒ 一定收到 `SelChange`"今天不能作为判据；两条通道都接上，
+   是为了真发生通知时处理器一定会被调到。手工拖动 / 键盘改选区那一路不受这条影响。
+5. **发 `Change` 的写法**：`Text =`（同值重写也算"变了"）、`SelText =`、`TextRTF =`、`LoadFile`
+   都发；`MaxLength =` 不发。只读（`ReadOnly = True`）那枚程序化写文本照样发。
+
 ### 还没做的两格
 
-`TextRTF` + `LoadFile` / `SaveFile` + `Find`（RT-c），以及 `Change` / `SelChange` 两条事件（RT-d ——
-它们是"工具栏按钮状态跟着选区刷新"的关键，两条走的还是不同的通知通道）。
-`SelPrint` 与 OLE 对象嵌入 / 拖放不在计划内。
+`SelPrint` 与 OLE 对象嵌入 / 拖放不在计划内。工具栏按钮状态跟着选区刷新那类界面，
+在 C3 里现在可以写 `RT_SelChange`，但要记得第 4 条那个"程序化改选区可能不发"的口子。

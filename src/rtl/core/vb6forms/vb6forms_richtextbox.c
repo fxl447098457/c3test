@@ -428,10 +428,271 @@ void vb6_RTB_SetSelHangingIndent(void* hwnd, int32_t twips) {
 // 而不是"什么都不做" —— 原生自己的默认是**不折行**，与 VB6 相反（见上面那段）。
 // 哨兵为什么不是 -1：VB6 的布尔在 .frm 里就序列化成 -1 = True，用 -1 当"未写"会把
 // "写着 True 的那一条"读成没写（本线 5a/8a 同一口径）。
+// 事件面（C29-RT-d）：ENM_SELCHANGE **必须**在这里显式开 —— 三件事都是探针量出来的
+// （.build\rtdprobe5.c，六种"建窗时机 × 掩码写法"组合各跑一份，读数 .build\rtdprobe5_c*_s*.txt）：
+//   ① 建好不动掩码 ⇒ 选区变化一条通知都不发（s0 三格全 0）；Msftedit 的默认事件掩码是**空**的。
+//   ② 整枚 32 位掩码塞 wParam、lParam 传 0 ⇒ 也发不出来（s1 与 s0 逐字相同）。原生这条只认
+//      wParam 的**低 16 位**，高 16 位要靠 lParam 那个指针进出 —— 而 ENM_SELCHANGE = 0x00080000
+//      恰好整枚都在高位上，写错这一句就是"永远收不到 SelChange"。
+//   ③ 与之对照，文本变化的 EN_UPDATE(0x0400=1024) **不受掩码管**：s0/s1 里 WM_SETTEXT 照样发它。
+//      （也别指望老的那条 EN_CHANGE=768：六份读数里它一次都没出现过。）
+// 这条写在 Init 里而不是各 setter 里：掩码是控件的常驻状态，且这一刻还在 formLoading 挡派发
+// （见 cgen 那条 `if (vb6_formLoading_…) break;`），它顺手 provoke 的那一条 1024 会被丢掉。
 void vb6_RTB_Init(void* hwnd, int32_t wordWrap, int32_t readOnly) {
     if (!hwnd) return;
     vb6_RTB_SetWordWrap(hwnd, wordWrap == -999 ? -1 : wordWrap);
     if (readOnly != -999) vb6_RTB_SetReadOnly(hwnd, readOnly);
+    {
+        DWORD hi = (DWORD)(ENM_SELCHANGE >> 16);   /* 0x00080000 >> 16 = 8，进的是掩码高位 */
+        SendMessageW((HWND)hwnd, EM_SETEVENTMASK,
+                     (WPARAM)(DWORD)(ENM_CHANGE | ENM_UPDATE), (LPARAM)&hi);
+    }
 }
+
+// 判据专用（C29-RT-d，与 vb6_MV_SimDateClick / vb6_DTP_Sim* 同先例）：替原生控件把一条
+// **真**通知发到父窗，让"认来源 → 按 code 分流 → 调处理器"三段派发被真的消息喂一遍。
+// 为什么这条事件需要它、而 Change 不需要：EN_SELCHANGE 在**同一份产物、同一个夹具**上都不
+// 稳定 —— 三次连跑里 1 次走 WM_NOTIFY/1794、2 次走 WM_COMMAND/1815（读数 .build\rtdmin_out\tr_*.txt，
+// 裸码由临时探针打出来），程序化 EM_EXSETSEL 有时一条都不发。也就是说 SelChange 的
+// "原生自发"这一路今天给不出可依赖的判据，只能自己造通知；Change 那一路（EN_UPDATE，见夹具
+// RT-d 的说明）是稳的，判据走真属性写。
+// code = 1794 → WM_NOTIFY（负载 SELCHANGE：选区现值从 EM_EXGETSEL 拿）；
+// 其余（1815 那一族）→ WM_COMMAND，wParam 高字 = code、lParam = 控件自己，与裸码一致。
+void vb6_RTB_SimNotify(void* hwnd, int32_t code) {
+    HWND h = (HWND)hwnd;
+    HWND p;
+    INT_PTR id;
+    if (!h) return;
+    p = GetParent(h);
+    if (!p) return;
+    id = (INT_PTR)GetWindowLongPtrW(h, GWLP_ID);
+    if (code == EN_SELCHANGE) {
+        SELCHANGE sc;
+        ZeroMemory(&sc, sizeof(sc));
+        sc.nmhdr.hwndFrom = h;
+        sc.nmhdr.idFrom = (UINT_PTR)id;
+        sc.nmhdr.code = (UINT)code;
+        SendMessageW(h, EM_EXGETSEL, 0, (LPARAM)&sc.chrg);
+        SendMessageW(p, WM_NOTIFY, (WPARAM)id, (LPARAM)&sc);
+    } else {
+        SendMessageW(p, WM_COMMAND, MAKEWPARAM((WORD)id, (WORD)code), (LPARAM)h);
+    }
+}
+
+
+// ---------------- TextRTF / LoadFile / SaveFile / Find（C29-RT-c）----------------
+// 原生这一族只有一个入口：EM_STREAMOUT / EM_STREAMIN + EDITSTREAM 那枚回调。三条量出来的
+// 契约（探针 .build\rtprobe6.c，读数 .build\rtprobe6b_out.txt = 挂 v6 清单的产物形状，
+// x64 与 x86 逐字相同）：
+//   (1) **回调的返回值非零 = 中止**，而且那个值原样落进 EDITSTREAM.dwError —— 第一版照直觉
+//       "返回搬掉的字节数"，四组读数一律 rc=0 / dwError=230 / 控件里一个字都没有（症状与
+//       "根本没调"一模一样，光看 rc 看不出来）。改成"字节数只走 *pcb、返回值一律 0"之后：
+//       SF_RTF 灌回 rc=32 / dwError=0，文本与 RTF 都回到母本那 230 字节。
+//   (2) 流出来的 RTF **头里带本机 ANSI 码页与中文键盘语言**（实测 "{\rtf1\ansi\ansicpg936
+//       \deff0\nouicompat\deflang1033\deflangfe2052..."）⇒ TextRTF 不许按字节比，判据一律问
+//       "前缀 + round-trip + 两次自比"。非 ASCII 由控件自己逃生成 \uN，串本身仍是 7 位为主
+//       —— 但码页那一格随机器变。
+//   (3) SF_RTF 的 rc **不是字节数**（喂 230 字节回来 rc=32 = 落进去的字符数）⇒ 别拿它当量。
+//
+// 三条 FR_ 常数在 SDK 的 richedit.h 里**没有**（那里只有 FR_MATCHDIAC 一族），值抄 MSDN 的
+// EM_FINDTEXT 文档，并且**按行为验过**（.build\rtprobe5_out.txt）：同一枚控件找 "ol"，
+// FR_WHOLEWORD(2) 回 -1 而不带它回 7；找 "alpha" 带 FR_MATCHCASE(4) 跳过开头那枚大写
+// Alpha、命中 20 ⇒ 两条位含义与文档一致。VB6 的两个常数与原生**不同位**（rtfWholeWord=1
+// → FR_WHOLEWORD=2、rtfMatchCase=2 → FR_MATCHCASE=4），所以 flags 要逐位映射；不映射的症状
+// 是"区分大小写被当成整词"。
+#ifndef FR_DOWN
+#define FR_DOWN       0x00000001L
+#define FR_WHOLEWORD  0x00000002L
+#define FR_MATCHCASE  0x00000004L
+#endif
+#ifndef EM_FINDTEXTEXW
+#define EM_FINDTEXTEXW (WM_USER + 124)
+#endif
+
+typedef struct { char* p; size_t cap; size_t len; } vb6_RtbBuf;          /* 流出的收束缓冲 */
+typedef struct { const char* p; size_t len; size_t pos; } vb6_RtbSrc;    /* 流入的字节源 */
+
+static DWORD CALLBACK vb6_RtbSinkCb(DWORD_PTR cookie, LPBYTE buff, long cb, long* pcb) {
+    vb6_RtbBuf* b = (vb6_RtbBuf*)cookie;
+    size_t need;
+    char* np;
+    *pcb = 0;
+    if (cb <= 0) return 0;
+    need = b->len + (size_t)cb + 1;
+    if (need > b->cap) {
+        size_t want = b->cap ? b->cap : 1024;
+        while (want < need) want *= 2;
+        np = (char*)realloc(b->p, want);
+        if (!np) return 1;                  /* 中止：缓冲都分配不出来，别装成功 */
+        b->p = np; b->cap = want;
+    }
+    memcpy(b->p + b->len, buff, (size_t)cb);
+    b->len += (size_t)cb;
+    b->p[b->len] = 0;
+    *pcb = cb;
+    return 0;
+}
+
+static DWORD CALLBACK vb6_RtbSrcCb(DWORD_PTR cookie, LPBYTE buff, long cb, long* pcb) {
+    vb6_RtbSrc* s = (vb6_RtbSrc*)cookie;
+    size_t n;
+    *pcb = 0;
+    if (cb <= 0) return 0;
+    n = s->len - s->pos;
+    if (n > (size_t)cb) n = (size_t)cb;
+    if (n) { memcpy(buff, s->p + s->pos, n); s->pos += n; }
+    /* 搬了几格**必须写进 *pcb**：只填缓冲区而不报数，控件按"读到 0 字节 = 文件结束"处理
+       ⇒ 选区被清掉、内容一个字不进来，症状与"没调"一样（本文件契约(1)说的就是这一族，
+       写注释的人自己还是踩了一次）。 */
+    *pcb = (long)n;
+    return 0;                               /* 一律 0：非零 = 中止，见上面契约(1) */
+}
+
+// 整串流出去（fmt = SF_RTF / SF_TEXT）。拿到的是堆上一份宽字符副本，由调用方 SysFreeString。
+static wchar_t* vb6_RtbStreamOut(HWND h, UINT fmt) {
+    vb6_RtbBuf b;
+    EDITSTREAM es;
+    wchar_t* w = NULL;
+    int wn;
+    ZeroMemory(&b, sizeof(b));
+    ZeroMemory(&es, sizeof(es));
+    es.dwCookie = (DWORD_PTR)&b;
+    es.pfnCallback = vb6_RtbSinkCb;
+    SendMessageW(h, EM_STREAMOUT, fmt, (LPARAM)&es);
+    if (!b.p) return SysAllocString(L"");
+    /* 这条流是 **ANSI 字节流**（头里就写着 ansicpg），所以按 CP_ACP 折成宽字符。
+       这里不能套 vb6_u8ToWideDup —— 那一条是 UTF-8 优先，中文那一段会折散。 */
+    wn = MultiByteToWideChar(CP_ACP, 0, b.p, -1, NULL, 0);
+    if (wn > 1) {
+        w = (wchar_t*)SysAllocStringLen(NULL, wn - 1);
+        if (w) MultiByteToWideChar(CP_ACP, 0, b.p, -1, w, wn);
+    }
+    free(b.p);
+    return w ? w : SysAllocString(L"");
+}
+
+static void vb6_RtbStreamIn(HWND h, UINT fmt, const char* bytes, size_t len) {
+    vb6_RtbSrc s;
+    EDITSTREAM es;
+    s.p = bytes; s.len = len; s.pos = 0;
+    ZeroMemory(&es, sizeof(es));
+    es.dwCookie = (DWORD_PTR)&s;
+    es.pfnCallback = vb6_RtbSrcCb;
+    es.dwError = 0;
+    /* 先全选：VB6 的 LoadFile / 给 TextRTF 赋值都是"把内容换掉"，而原生 EM_STREAMIN 是
+       "灌进当前选区" ⇒ 选区留在文末就变成追加。 */
+    SendMessageW(h, EM_SETSEL, 0, -1);
+    SendMessageW(h, EM_STREAMIN, fmt, (LPARAM)&es);
+}
+
+wchar_t* vb6_RTB_GetTextRTF(void* hwnd) {
+    if (!hwnd) return SysAllocString(L"");
+    return vb6_RtbStreamOut((HWND)hwnd, SF_RTF);
+}
+
+void vb6_RTB_SetTextRTF(void* hwnd, void* bstr) {
+    const wchar_t* w = (const wchar_t*)bstr;
+    char* a;
+    int an;
+    if (!hwnd || !w) return;
+    an = WideCharToMultiByte(CP_ACP, 0, w, -1, NULL, 0, NULL, NULL);
+    if (an <= 1) return;
+    a = (char*)malloc((size_t)an);
+    if (!a) return;
+    WideCharToMultiByte(CP_ACP, 0, w, -1, a, an, NULL, NULL);
+    /* 流尾**要带上那个 NUL**：探针把同一份 RTF 的尾 NUL 剪掉就五组全成空控件，
+       带着就五组全成（.build\rtprobe7.ps1 的 A..E，母本 220 字节含 NUL、灌完回读 219）
+       ⇒ SF_RTF 的解析器要看见结尾的 0 才收尾。 */
+    vb6_RtbStreamIn((HWND)hwnd, SF_RTF, a, (size_t)an);
+    free(a);
+}
+
+// LoadFile / SaveFile 的 filetype：VB6 = 0 rtfRTF / 1 rtfText（官方那页的示例与
+// ai\内置控件 那张表同一口径）。返回 0 = 成、非 0 = Win32 错误码 —— VB6 那两条是 Sub，
+// 失败靠运行期错误，本项目还没有那条通道，所以把码留着给判据（以及以后的 Err 面）用。
+static int32_t vb6_RtbReadWhole(const wchar_t* path, char** out, size_t* outLen) {
+    HANDLE f;
+    DWORD size, got = 0;
+    char* buf;
+    *out = NULL; *outLen = 0;
+    if (!path || !path[0]) return -1;
+    f = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL,
+                    OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (f == INVALID_HANDLE_VALUE) return (int32_t)GetLastError();
+    size = GetFileSize(f, NULL);
+    if (size == INVALID_FILE_SIZE) { DWORD e = (DWORD)GetLastError(); CloseHandle(f); return (int32_t)e; }
+    buf = (char*)malloc((size_t)size + 1);
+    if (!buf) { CloseHandle(f); return -1; }
+    if (size && !ReadFile(f, buf, size, &got, NULL)) {
+        DWORD e = (DWORD)GetLastError(); free(buf); CloseHandle(f); return (int32_t)e;
+    }
+    CloseHandle(f);
+    buf[got] = 0;
+    *out = buf; *outLen = (size_t)got;
+    return 0;
+}
+
+static int32_t vb6_RtbWriteWhole(const wchar_t* path, const char* bytes, size_t len) {
+    HANDLE f;
+    DWORD put = 0;
+    if (!path || !path[0]) return -1;
+    f = CreateFileW(path, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (f == INVALID_HANDLE_VALUE) return (int32_t)GetLastError();
+    if (len && !WriteFile(f, bytes, (DWORD)len, &put, NULL)) {
+        DWORD e = (DWORD)GetLastError(); CloseHandle(f); return (int32_t)e;
+    }
+    CloseHandle(f);
+    return (put == (DWORD)len) ? 0 : -1;
+}
+
+int32_t vb6_RTB_LoadFile(void* hwnd, const wchar_t* path, int32_t fileType) {
+    char* bytes = NULL;
+    size_t len = 0;
+    int32_t rc;
+    if (!hwnd) return -1;
+    rc = vb6_RtbReadWhole(path, &bytes, &len);
+    if (rc) return rc;
+    vb6_RtbStreamIn((HWND)hwnd, fileType == 1 ? SF_TEXT : SF_RTF, bytes, len);
+    free(bytes);
+    return 0;
+}
+
+int32_t vb6_RTB_SaveFile(void* hwnd, const wchar_t* path, int32_t fileType) {
+    vb6_RtbBuf b;
+    EDITSTREAM es;
+    int32_t rc;
+    if (!hwnd) return -1;
+    ZeroMemory(&b, sizeof(b));
+    ZeroMemory(&es, sizeof(es));
+    es.dwCookie = (DWORD_PTR)&b;
+    es.pfnCallback = vb6_RtbSinkCb;
+    SendMessageW((HWND)hwnd, EM_STREAMOUT, fileType == 1 ? SF_TEXT : SF_RTF, (LPARAM)&es);
+    rc = vb6_RtbWriteWhole(path, b.p ? b.p : "", b.len);
+    free(b.p);
+    return rc;
+}
+
+// Find(text, start, end, flags)：命中回**起点**（原生 cpMin，与本控件 SelStart 同一把尺），
+// 问不出回 -1。范围就是原生那张 CHARRANGE（end 传 -1 = 到文末）；VB6 的 start/end 两个
+// 缺省值由 cgen 那侧填（-1 = 全文）。
+int32_t vb6_RTB_Find(void* hwnd, const wchar_t* text, int32_t start, int32_t end, int32_t flags) {
+    FINDTEXTEXW ft;
+    int32_t rc;
+    if (!hwnd || !text || !text[0]) return -1;
+    /* 刻意**不动选区**（既不存也不复）：原生这条查询自己干了什么，由夹具量完再决定要不要
+       齐平 VB6 —— 先写"恢复原选区"就是拿没量过的行为当已知（EM_FINDTEXT 与 EM_FINDTEXTEX
+       在动不动选区这件事上并不一样）。命中回起点，未命中一律回 -1。 */
+    ZeroMemory(&ft, sizeof(ft));
+    ft.chrg.cpMin = (LONG)start;
+    ft.chrg.cpMax = (LONG)end;
+    ft.lpstrText = (LPCWSTR)text;
+    rc = (int32_t)SendMessageW((HWND)hwnd, EM_FINDTEXTEXW,
+                               (WPARAM)(FR_DOWN
+                                        | ((flags & 1) ? (int32_t)FR_WHOLEWORD : 0)
+                                        | ((flags & 2) ? (int32_t)FR_MATCHCASE  : 0)),
+                               (LPARAM)&ft);
+    return rc < 0 ? -1 : rc;
+}
+
 
 #endif /* _WIN32 */

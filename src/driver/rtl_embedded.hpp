@@ -188,6 +188,7 @@ enum RtlResourceID {
 
     // ai/029 C29-RT-a: VB6 RichTextBox 控件 (原生 RICHEDIT50W, 不加载 RICHTX32.OCX)
     RTL_VB6FORMS_RICHTEXTBOX_C             = 219,
+    RTL_VB6FORMS_WINSOCK_C                 = 220,
 };
 
 // Session directory manager

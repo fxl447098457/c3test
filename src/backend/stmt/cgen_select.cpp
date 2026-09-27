@@ -15,7 +15,22 @@ void CCodeGen::visit(SelectCaseStmt& node) {
     bool isFloatSelect = TypeSystem::isFloat(testType);
 
     emitExpr(*node.testExpr);
-    if (isComMarker_) resolveComValue();
+    if (isComMarker_) {
+        // Fix 161d: 解锁类型必须与下面 tempType **同源**。原先这里是无参调用 ⇒ 走
+        // resolveComValue 的默认参数 "BSTR" ⇒ vb6_ComGetStringProp 返回 wchar_t*,
+        // 而 tempType 对非字符串测试是 int32_t ⇒ `int32_t v = (wchar_t*)ptr` ——
+        // **裸指针被当数值**(x86 截断成低 32 位打出 -1916936344 一类值; x64 是
+        // C4047 warning)。这就是 ai/029:429 记的"未登记控件属性按数值读漏裸指针",
+        // 只有**未登记**属性中招: 已登记属性走 getControlPropReadFn 的专属 getter
+        // (返回 int32_t), 根本不进这个 marker 分支。
+        // 同族的两个先例: Fix 092n (For 的 start/end/step) 与 Fix 092r (UnaryExpr),
+        // 口径一致 —— 按目标类型解锁, 不按"默认最通用"解锁。
+        // 注: 未登记属性的 inferExprType 兜底是 Variant ⇒ isString/isFloat 均为假
+        // ⇒ 落 Long 分支, 与 tempType=int32_t 对齐; 读不到值时 getter 给 0。
+        if (isStringSelect)      resolveComValue("BSTR");
+        else if (isFloatSelect)  resolveComValue("Double");
+        else                     resolveComValue("Long");
+    }
     std::string testVar = lastExpr_;
 
     // 为test创建临时变量

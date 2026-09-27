@@ -195,6 +195,9 @@ FrmControlType FrmParser::parseControlType(const std::string& typeName) {
     // （库里名前缀是 msft_textbox，中间没有 "vb."），所以放在 textbox 之后也安全；
     // 排在 Unknown 前即可。VB6 里另有写法 RichTextBox.RichTextBox.6 之类，同样命中这条。
     if (lower.find("richtextbox") != std::string::npos) return FrmControlType::RichTextBox;
+    // C29-WS: Winsock (MSWinsockLib.Winsock / Winsock. 各种写法都收)。"winsock" 与上面任何一条
+    // 互不为子串，排在 Unknown 前即可。VB6 侧另有 ProgID 写法 MSWinsockLib.Winsock.1，同样命中。
+    if (lower.find("winsock") != std::string::npos) return FrmControlType::Winsock;
 
     return FrmControlType::Unknown;
 }
@@ -273,6 +276,9 @@ const char* FrmParser::controlTypeToWin32Class(FrmControlType type) {
         case FrmControlType::OLE:          return "VB6_OLECONTAINER";
         // C29-Data: ODBC 后端的 Data 控件 (自注册不可见类, CommonDialog 属性宿主同款)。
         case FrmControlType::Data:         return "VB6_DATA";
+        // C29-WS: Winsock —— 无外观，但**这枚的窗口要真收 WSAAsyncSelect 的 FD_\***，
+        // 不像 Timer / CommonDialog 只是属性袋（类注册在 vb6forms_winsock.c）。
+        case FrmControlType::Winsock:       return "VB6_WINSOCK";
         case FrmControlType::Menu:         return nullptr;       // 菜单, 非窗口
         case FrmControlType::WebBrowser:  return nullptr;       // WebView2, 运行时动态创建
         default:                           return nullptr;

@@ -1274,6 +1274,27 @@ if ($Category -in @("all", "run", "bas")) {
     # 修复前出参回写只按 AST 种类判左值, MemberAccessExpr 判 true 但生成的是
     # vb6_VariantToString(...) 右值 → &(右值) → C2102, 真实工程 Charts 2020 编译失败。
     Add-BasTest "test_declare_cwex_lit_com" "$Tests\declare_out\declare_cwex_lit_com.bas" @("lit-com-hwnd-ok=Y", "lit-only-hwnd-ok=Y")
+
+    # ai/029:429 那条"未登记的控件属性按数值读漏裸指针"（Fix 161d）。
+    # 两条路: Select Case (cgen_select.cpp 无参 resolveComValue ⇒ 默认 BSTR, 而
+    # tempType 是 int32_t) 与 Not (cgen_expr.cpp 的 UnaryOp::Not 落 (int32_t)(operand);
+    # Fix 092r 当时只补了 Negate)。同族的 Fix 092n(For)/092r(Negate) 早修过。
+    # 只有**未登记**属性中招 —— 已登记的走 getControlPropReadFn 专属 getter。
+    # 靶子选 TreeView.Caption: 未登记 **且宿主答得出值**(GetWindowTextW ⇒ 真 BSTR,
+    # 非 NULL) ⇒ 基线截出的指针低位非 0, 判据能红。(用 Style 会假绿: 宿主答 Empty
+    # ⇒ StringProp 给 NULL ⇒ 截成 0, 与修复后同值 —— 实测踩过。)
+    # 判据一律取**值**: 基线 `~(指针低位)` 也是非 0, `If Not x` 的真假分不出来。
+    $cpNeedles = @("P-SEL0=Y", "P-NOT=Y", "P-NOTVAL=-1",
+                   "P-REG-SEL=Y", "P-REG-NOT=Y", "P-GEN-SEL=Y", "CTRLPROP-DONE")
+    Add-BasTest "test_ctrlprop" "$Tests\ctrlprop\PropApp.vbp" $cpNeedles
+    Add-BasTest "test_ctrlprop_x86" "$Tests\ctrlprop\PropApp.vbp" $cpNeedles -Arch "x86"
+    # 源码面双保险: 生成串里不得再出现"指针返回函数被当数值"的两种形状。
+    Test-EmitcAbsent "cp_emitc_no_ptr_as_num" @("$Tests\ctrlprop\PropApp.vbp") @(
+        '(int32_t)(vb6_ComGetStringProp(',      # Not / 取负那条的 cast
+        '(int32_t)(vb6_ComGetObjectProp(',
+        '_vb6_select_0 = vb6_ComGetStringProp(',  # Select Case 的 int32_t temp 那条
+        '_vb6_select_0 = vb6_ComGetObjectProp('
+    )
     Write-Host ""
 
     # --- P5.7 语法/语义检查用例组 ---
@@ -1785,7 +1806,7 @@ if ($Category -in @("all", "run", "vbp")) {
     # PFM_OFFSETINDENT 会把整段推走（实测 720 → 960），不是悬挂。
     # BASE（本批之前的编译器）同一件夹具 = 20 绿 / 38 红：RT33-RT58 里 16 条当场红，剩下 10 条是
     # "应当为 0 / 应当相等"那类反向针（什么都不实现也满足它们）—— 与 DT/MV 每次的分布同型。
-    $rtNeedles = @("CTRLRICHTEXT-DONE") + (1..58 | ForEach-Object { "RT$_=Y" })
+    $rtNeedles = @("CTRLRICHTEXT-DONE") + (1..89 | ForEach-Object { "RT$_=Y" })
     Test-Vbp "ctrlrichtextbox" "$Tests\ctrlrichtextbox\RtfApp.vbp" $rtNeedles
     Test-Vbp "ctrlrichtextbox_x86" "$Tests\ctrlrichtextbox\RtfApp.vbp" $rtNeedles -Arch "x86"
     # 发码正面：类名 + 四位创建样式逐枚钉（1409286148 = 基+ES_MULTILINE，rt2 全默认；
@@ -1807,6 +1828,15 @@ if ($Category -in @("all", "run", "vbp")) {
         'vb6_RTB_SetWordWrap(vb6_hwnd_rt3, (-1));',
         'vb6_RTB_SetMaxLength(vb6_hwnd_rt2, 20);',
         'vb6_RTB_GetVScrollRange(vb6_hwnd_rt3',
+        # C29-RT-c: TextRTF 读写两面 + 三条方法的发码形状（含两个可选实参缺省填什么）
+        'vb6_RTB_GetTextRTF(vb6_hwnd_rt4)',
+        'vb6_RTB_SetTextRTF(vb6_hwnd_rt3, sRtf);',
+        'vb6_RTB_SaveFile((void*)vb6_hwnd_rt4, sPath, 0);',
+        'vb6_RTB_LoadFile((void*)vb6_hwnd_rt3, sPath, 0);',
+        'vb6_RTB_SaveFile((void*)vb6_hwnd_rt4, sPath2, 1);',
+        'vb6_RTB_LoadFile((void*)vb6_hwnd_rt3, sPath2, 1);',
+        'vb6_RTB_Find((void*)vb6_hwnd_rt4, vb6_BSTR_FromStr(L"alph"), 0, (-1), 1)',
+        'vb6_RTB_Find((void*)vb6_hwnd_rt4, vb6_BSTR_FromStr(L"nope-not-here"), -1, -1, 0)',
         'vb6_RTB_GetHScrollRange(vb6_hwnd_rt4',
         # RT-b：四条效果走 CHARFORMAT2W 的同一族 setter（布尔按 VB6 的 -1/0 发），
         # 颜色/字体名/字号/对齐/三缩进各一条 —— 全部钉"裸调用 + 裸数值"，不许出现装箱。
@@ -1822,7 +1852,17 @@ if ($Category -in @("all", "run", "vbp")) {
         'vb6_RTB_SetSelIndent(vb6_hwnd_rt2, 720);',
         'vb6_RTB_SetSelRightIndent(vb6_hwnd_rt2, 1440);',
         'vb6_RTB_SetSelHangingIndent(vb6_hwnd_rt2, 360);',
-        'vb6_RTB_GetSelHangingIndent(vb6_hwnd_rt2'
+        'vb6_RTB_GetSelHangingIndent(vb6_hwnd_rt2',
+        # C29-RT-d: 两条事件的派发形状。Change 走 WM_COMMAND/1024(EN_UPDATE，**不是** EDIT 那
+        # 条 768)；SelChange 两条通道各一条 arm（WM_COMMAND/1815 与 WM_NOTIFY/1794），
+        # 判据侧 SimNotify 的发码形状也钉死 —— 标记没被语句路消费掉的症状就是运行期一声不响。
+        'if (id == 100 && code == 1024) {',
+        'if (id == 102 && code == 1024) {',
+        'if (id == 100 && code == 1815) {',
+        'if (pNM42->code == 1794 && (void*)pNM42->hwndFrom == vb6_hwnd_rt1) {',
+        'extern void vb6_rt1_Change(); vb6_rt1_Change();',
+        'extern void vb6_rt3_SelChange(); vb6_rt3_SelChange();',
+        '{ vb6_RTB_SimNotify((void*)vb6_hwnd_rt1, (int32_t)1794); }'
     )
     # 反面：这枚控件不许再走 COM 后期绑定；而 ScrollBars 那四位**不许有写口** ——
     # 事后写只有外观、没有量程，发一条"写得动但什么都不改"的 setter 比不发更难查。
@@ -1830,6 +1870,15 @@ if ($Category -in @("all", "run", "vbp")) {
         'vb6_ComGetObjectProp(vb6_hwnd_rt1',
         'vb6_ComSetObjectProp(vb6_hwnd_rt2',
         'vb6_ComGetObjectProp(vb6_hwnd_rt3, L"MaxLength")',
+
+        # C29-RT-c 的反面：三条方法与 TextRTF 都不许再落回拿 HWND 当 IDispatch 那条假路
+        # （打了标记却没在语句路消费掉的症状就是编得过、运行期一声不响 —— 本线踩过三次）。
+        'vb6_ComCall(vb6_hwnd_rt4, L"Find"',
+        'vb6_ComGetObjectProp(vb6_hwnd_rt4, L"TextRTF")',
+        'vb6_ComSetObjectProp(vb6_hwnd_rt3, L"TextRTF"',
+        'vb6_ComCall(vb6_hwnd_rt3, L"LoadFile"',
+        # RT-d：SimNotify 也不许落回"把 HWND 当 IDispatch"那条假路
+        'vb6_ComCall(vb6_hwnd_rt1, L"SimNotify"',
         'vb6_RTB_SetScrollBars',
         # RT-b：格式面也不许退回 COM 兜底（一条都不许）
         'vb6_ComGetObjectProp(vb6_hwnd_rt2, L"SelBold")',
@@ -2509,6 +2558,61 @@ if ($Category -in @("all", "run", "vbp")) {
     $dlProbeNeedles = @("CTRLDLG-DONE") + (1..14 | ForEach-Object { "DL$_=Y" })
     Test-Vbp "ctrldlg_probe" "$Tests\ctrldlg\DlApp.vbp" $dlProbeNeedles -Env "C3_CDPROBE=1"
     Test-Vbp "ctrldlg_probe_x86" "$Tests\ctrldlg\DlApp.vbp" $dlProbeNeedles -Env "C3_CDPROBE=1" -Arch "x86"
+
+    # ai/029 C29-WS-a/b/c：Winsock 走原生 Winsock2（不加载 MSWINSCK.OCX）。判据 = 同进程几枚控件
+    # 的 **UDP 回环一来一回** + **TCP 一整轮**（Listen / ConnectionRequest / Accept / Connect），
+    # 端口一律交给系统挑：Bind 0 后读 LocalPort；地址写死 127.0.0.1 / localhost，
+    # 所以既不碰外网、也不跟 CI 上别的作业抢固定端口。等事件一律"一步一个 Timer tick"
+    # （第一版拿 DoEvents 连泵 60 次等包到，本机就假红过一次 —— 见 029 §九 本格）。
+    # 注册放在整个 vbp 块**最后**：这条会真的建窗（不可见的身份窗 + 一枚窗体），而 C29-9b
+    # 量过"多开一窗就让后面的按位置算点心的用例翻红"，排最后就不会再影响任何用例。
+    $wsNeedles = @("CTRLWINSOCK-DONE") + (1..41 | ForEach-Object { "WS$_=Y" })
+    Test-Vbp "ctrlwinsock" "$Tests\ctrlwinsock\WsApp.vbp" $wsNeedles
+    Test-Vbp "ctrlwinsock_x86" "$Tests\ctrlwinsock\WsApp.vbp" $wsNeedles -Arch "x86"
+    # 发码正面：类名 + 不可见 0x0 的创建参数（与 Timer 同一枚 style 值）+ 设计期 Create/Init
+    # 三条 + 事件回调注册的序号 + 四条方法的发码形状（含 GetData 出参取址、缺省 type/maxLen）。
+    Test-EmitcShape "ws_emitc_shape" @("$Tests\ctrlwinsock\WsApp.vbp") @(
+        '"VB6_WINSOCK", "",',
+        '1140850688L, 0L,',
+        'vb6_RegisterWinsockClass((void*)hInstance);',
+        'vb6_Ws_Create((void*)vb6_hwnd_wsA);',
+        'vb6_Ws_SetProtocol((void*)vb6_hwnd_wsA, 1);',
+        'vb6_Ws_SetProtocol((void*)vb6_hwnd_wsC, 0);',
+        'vb6_Ws_SetRemoteHost((void*)vb6_hwnd_wsA, L"");',
+        'vb6_Ws_SetEventHandler((void*)vb6_hwnd_wsA, 2, (void*)vb6_wsA_DataArrival); }',
+        'vb6_Ws_SetEventHandler((void*)vb6_hwnd_wsB, 6, (void*)vb6_wsB_StateChanged); }',
+        'vb6_Ws_Bind((void*)vb6_hwnd_wsA, (int32_t)0, L"");',
+        'vb6_Ws_SendData((void*)vb6_hwnd_wsA, vb6_BSTR_FromStr(L"hello-B"));',
+        'vb6_Ws_GetData((void*)vb6_hwnd_wsB, &gGotB, 0, (-1));',
+        'vb6_Ws_PeekData((void*)vb6_hwnd_wsB, &gPeek, 0, (-1));',
+        'vb6_Ws_Close((void*)vb6_hwnd_wsA);',
+        'vb6_Ws_Listen((void*)vb6_hwnd_wsS);',
+        'vb6_Ws_Connect((void*)vb6_hwnd_wsT);',
+        'vb6_Ws_Accept((void*)vb6_hwnd_wsS, (int32_t)gReq1);',
+        'vb6_Ws_SetEventHandler((void*)vb6_hwnd_wsS, 3, (void*)vb6_wsS_ConnectionRequest); }',
+        'vb6_Ws_GetState(vb6_hwnd_wsC',
+        'vb6_Ws_GetLocalPort(vb6_hwnd_wsB',
+        # Error 那一格七参数，形状本身就是一条针：ByRef 的两格（Description / CancelDisplay）
+        # 必须是指针 —— 写成按值在 x64 上照样"读得像对的"，只有这条发码针 + x86 真跑拦得住。
+        'static void vb6_wsD_Error(int16_t Number, BSTR* Description, int32_t Scode, BSTR Source, BSTR HelpFile, int32_t HelpContext, int16_t* CancelDisplay)',
+        'vb6_Ws_SetEventHandler((void*)vb6_hwnd_wsD, 7, (void*)vb6_wsD_Error); }'
+    )
+    # 反面：一条都不许落回"把 HWND 当 IDispatch 用"那条假路（本线踩过三次的那声不响），
+    # LocalPort / LocalIP 也**不许有写口** —— 那两格在 VB6 就是运行期只读（端口归 Bind 管、
+    # 地址归系统定），发一条"写得动但什么都不改"的 setter 比不发更难查（RT-a 的 ScrollBars 同口径）。
+    Test-EmitcAbsent "ws_emitc_no_com_fallback" @("$Tests\ctrlwinsock\WsApp.vbp") @(
+        'vb6_ComCall(vb6_hwnd_wsA, L"close"',
+        'vb6_ComCall(vb6_hwnd_wsA, L"SendData"',
+        'vb6_ComCall(vb6_hwnd_wsB, L"GetData"',
+        'vb6_ComCall(vb6_hwnd_wsS, L"Listen"',
+        'vb6_ComCall(vb6_hwnd_wsT, L"Connect"',
+        'vb6_ComCall(vb6_hwnd_wsS, L"Accept"',
+        'vb6_ComGetObjectProp(vb6_hwnd_wsB, L"LocalPort")',
+        'vb6_Ws_SetLocalPort',
+        'vb6_Ws_SetLocalIP',
+        'vb6_Ws_TraceCmd',
+        'vb6_ComCall(vb6_hwnd_wsD, L"Bind"'
+    )
     $vbpSw.Stop()
     Write-Host "  (vbp/gui tests took $([Math]::Round($vbpSw.Elapsed.TotalSeconds))s)"
     Write-Host ""
