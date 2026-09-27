@@ -100,6 +100,13 @@
                 anyNotify = true;
                 break;
             }
+            // C29-RT-d: RichTextBox 的 SelChange (原生 EN_SELCHANGE) 同理。
+            // 前提在 RTL 那侧：ENM_SELCHANGE 得由 vb6_RTB_Init 显式开（默认掩码是空的）。
+            if (ctrl.controlType == FrmControlType::RichTextBox) {
+                if (!symTab_.lookup(ctrl.controlName + "_SelChange")) continue;
+                anyNotify = true;
+                break;
+            }
         }
         if (anyNotify) {
             c_.emitLine("case WM_NOTIFY: {");
@@ -361,6 +368,30 @@
                 c_.indent();
                 c_.emitLine("extern void " + mvFn + "(double);");
                 c_.emitLine(mvFn + "(vb6_MV_NotifyDate((void*)lParam));");
+                c_.dedent();
+                c_.emitLine("}");
+            }
+            // ---- C29-RT-d: RichTextBox 的 SelChange ----
+            // EN_SELCHANGE = 0x0702 = 1794（richedit.h:526，**正数** —— 这一族的码都不取负，
+            // 与 DTN_*/MCN_*/TVN_* 那批 (0U-n) 反着来，抄惯 comctl32 的人最容易在这里写错号）。
+            // VB6 这条处理器没有参数（Sub RichTextBox1_SelChange()），所以又不需要造负载对象。
+            // 掩码前提见 vb6_RTB_Init 那段；同一事件的 WM_COMMAND/1815 那条 arm 在
+            // cgen_form_wndproc_create.inc —— 原生到底走哪一条不稳定（实测同产物连跑三次
+            // 1 次 1794 / 2 次 1815），所以两条都接；判据各钉一条，见夹具的 SimNotify 那几行。
+            for (const auto& ctrl : frmDesc.formControl.children) {
+                if (ctrl.controlType != FrmControlType::RichTextBox) continue;
+                auto* rtSelSym = symTab_.lookup(ctrl.controlName + "_SelChange");
+                if (!rtSelSym) continue;
+                std::string rtLower42 = ctrl.controlName;
+                std::transform(rtLower42.begin(), rtLower42.end(), rtLower42.begin(), ::tolower);
+                std::string rtNHwnd = knownControlArrays_.count(rtLower42)
+                    ? ("vb6_CtrlArr_GetAt(&vb6_arr_" + cIdent(ctrl.controlName) + ", 0)")
+                    : ("vb6_hwnd_" + cIdent(ctrl.controlName));
+                std::string rtSelFn = cProcName(rtSelSym->name, AccessLevel::Private);
+                c_.emitLine("if (pNM42->code == 1794 && (void*)pNM42->hwndFrom == "
+                            + rtNHwnd + ") {");
+                c_.indent();
+                c_.emitLine("{ extern void " + rtSelFn + "(); " + rtSelFn + "(); }");
                 c_.dedent();
                 c_.emitLine("}");
             }

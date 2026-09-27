@@ -112,6 +112,7 @@ enum class FrmControlType {
     DTPicker,           // MSComCtl2.DTPicker — Win32 原生复刻 (SysDateTimePick32), C29-DT
     MonthView,          // MSComCtl2.MonthView — Win32 原生复刻 (SysMonthCal32), C29-MV
     RichTextBox,        // MSFT_TextBox.RichTextBox — Win32 原生复刻 (RICHEDIT50W), C29-RT
+    Winsock,            // MSWinsockLib.Winsock — Winsock2 原生复刻 (无外观控件), C29-WS
     Unknown,            // 未识别的控件类型
 };
 
