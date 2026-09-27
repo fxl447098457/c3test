@@ -59,7 +59,19 @@ static inline BSTR vb6_BSTR_FromStr(const wchar_t* s) {
 static inline BSTR vb6_BSTR_FromBSTR(BSTR bstr) {
     if (!bstr) return vb6_BSTR_Empty();
 #ifdef _WIN32
-    return SysAllocString(bstr);
+    // Fix 161b-decl-out: 必须按 SysStringLen 全量复制, 不能用 SysAllocString ——
+    // 后者按 NUL 定长, 会把含内嵌 NUL 的字符串 (VB6 里 `String$(260, 0)` 这种
+    // Declare 出参缓冲的标准写法, Len() 应为 260) 截成 0 长度。此前
+    // `vb6_BSTR_Assign(&buf, vb6_String(260, 0))` 正是经此把 260 丢成 0,
+    // 后续 A 版 API 按 nSize=260 往只有 1 字节的缓冲写 ⇒ 堆越界 (0xC0000374)。
+    {
+        UINT len = SysStringLen(bstr);
+        BSTR r = SysAllocStringLen(NULL, len);
+        if (!r) return vb6_BSTR_Empty();
+        if (len) memcpy(r, bstr, (size_t)len * sizeof(WCHAR));
+        r[len] = L'\0';
+        return r;
+    }
 #else
     return vb6_BSTR_FromStr(bstr);
 #endif

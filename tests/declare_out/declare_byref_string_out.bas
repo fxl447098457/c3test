@@ -15,4 +15,10 @@ Public Sub Main()
     GetUserNameB buf, n
     Debug.Print "len="; n
     Debug.Print "name=["; Left$(buf, n - 1); "]"
+    ' 断言用稳定标记 (run_tests 的 -like 断言里 [ ] 是通配符字符集, 不可用括号串)。
+    If Len(Left$(buf, n - 1)) > 0 Then
+        Debug.Print "byref-name-ok=Y"
+    Else
+        Debug.Print "byref-name-ok=N"
+    End If
 End Sub

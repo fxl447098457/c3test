@@ -92,6 +92,51 @@
         }
         std::string argVal = std::move(lastExpr_);
 
+        // Fix 161b-decl-out: Declare A 版 String 出参回写 —— 判断实参是否为"可赋值左值"。
+        // 变量 / 成员访问 / With 成员 = 左值; IndexOrCallExpr 要再分: callee 是**数组变量**
+        // 才可赋值, 是 Sub/Function/Declare*/Property 则是函数调用 (如 `String$(256, 0)`),
+        // VB6 里这种临时值收不到回写 —— 且生成 `&(vb6_String(...))` 会直接 C2102 "&"要求左值。
+        auto isAssignableOutTarget161b = [&](Expr* pa) -> bool {
+            if (!pa) return false;
+            switch (pa->kind) {
+                case ASTNodeKind::IdentifierExpr:
+                case ASTNodeKind::MemberAccessExpr:
+                case ASTNodeKind::WithMemberExpr:
+                    return true;
+                case ASTNodeKind::IndexOrCallExpr: {
+                    auto* ice = static_cast<IndexOrCallExpr*>(pa);
+                    if (!ice || !ice->callee) return false;
+                    if (ice->callee->kind != ASTNodeKind::IdentifierExpr) {
+                        // obj.Method(...) / obj.Prop(...) 也当调用处理 (成员方法不常见于
+                        // 出参缓冲位); 数组的成员访问形态无实际用例, 保守判为不可赋值。
+                        return false;
+                    }
+                    auto* ce = static_cast<IdentifierExpr*>(ice->callee.get());
+                    const Symbol* cs = symTab_.lookup(ce->name);
+                    if (!cs) return false;
+                    switch (cs->kind) {
+                        case SymbolKind::Sub:
+                        case SymbolKind::Function:
+                        case SymbolKind::DeclareSub:
+                        case SymbolKind::DeclareFunc:
+                        case SymbolKind::PropertyGet:
+                        case SymbolKind::PropertyLet:
+                        case SymbolKind::PropertySet:
+                        case SymbolKind::ComClass:
+                        case SymbolKind::ComInterface:
+                        case SymbolKind::ComModule:
+                        case SymbolKind::ComGlobalNs:
+                        case SymbolKind::Class:
+                            return false;   // 函数/过程调用, 非左值
+                        default:
+                            return true;    // 数组变量 arr(i) 等
+                    }
+                }
+                default:
+                    return false;
+            }
+        };
+
         // M22: Declare ANSI函数 - ByVal String参数需要BSTR->ANSI转换
         // 生成临时char*变量, 调用后释放, 无内存泄露
         if (isDeclareAnsiCall && i < calleeParams.size() && calleeParams[i].isByVal
@@ -111,28 +156,10 @@
             // 正是靠这条)。仅当实参是**可赋值左值**(变量/数组元素)才回写 ——
             // 临时表达式 (如 String$(256,0)) 在 VB6 里也收不到回写, 保持一致。
             // 容量取实参当前字符串长度 (VB6 缓冲语义的近似; cap<=0 则由 NUL 定长)。
-            {
-                std::string outTargetExpr = argVal;
-                std::string outCapExpr;
-                bool isLValue = false;
-                if (i < node.positional.size() && node.positional[i]) {
-                    Expr* pa = node.positional[i].get();
-                    if (pa) {
-                        // 变量 / 数组元素 / 成员访问 视为可赋值左值
-                        ASTNodeKind k = pa->kind;
-                        if (k == ASTNodeKind::IdentifierExpr
-                            || k == ASTNodeKind::MemberAccessExpr
-                            || k == ASTNodeKind::WithMemberExpr
-                            || k == ASTNodeKind::IndexOrCallExpr) {
-                            isLValue = true;
-                        }
-                    }
-                }
-                if (isLValue && !cExprIsVariant(outTargetExpr)) {
-                    // 回写目标须是 BSTR 左值 (交给 vb6_BSTR_Assign 的 BSTR*)
-                    outCapExpr = "0";  // 由 NUL 定长
-                    ansiOutParams_.push_back({ansiVar, outTargetExpr, outCapExpr});
-                }
+            if (i < node.positional.size() && isAssignableOutTarget161b(node.positional[i].get())
+                && !cExprIsVariant(argVal)) {
+                // 回写目标须是 BSTR 左值 (交给 vb6_BSTR_Assign 的 BSTR*)
+                ansiOutParams_.push_back({ansiVar, argVal, "0"});  // cap=0: 由 NUL 定长
             }
             argVal = ansiVar;
         }
@@ -153,7 +180,6 @@
             }
         }
 
-        // Fix 161b-decl-out: Declare A 版 **ByRef String** 形参 —— VB6 语义同
         // ByVal String: 传 ANSI 缓冲的**地址**, 被调用方写入后按 NUL 截断回写。
         // C3 原先把 BSTR 变量的地址 (&buf, 即 BSTR*=wchar_t**) 直接交给期望 LPSTR
         // 的 A 版 API → 类型错配, 出参读不回来 (t5 实测 name=[)。这里改为生成
@@ -167,13 +193,9 @@
             c_.emitLine("char* " + ansiVarR + " = vb6_BSTR_ToANSI_cap(" + srcExpr + ");  /* Fix 161b: ByRef String 可写缓冲, 按 BSTR 全长转 */");
             ansiTempsToFree_.push_back(ansiVarR);
             // 登记回写: 目标为原左值 (仅当可赋值且非 Variant)
-            if (i < node.positional.size() && node.positional[i]) {
-                ASTNodeKind kR = node.positional[i]->kind;
-                if ((kR == ASTNodeKind::IdentifierExpr || kR == ASTNodeKind::MemberAccessExpr
-                     || kR == ASTNodeKind::WithMemberExpr || kR == ASTNodeKind::IndexOrCallExpr)
-                    && !cExprIsVariant(argVal)) {
-                    ansiOutParams_.push_back({ansiVarR, argVal, "0"});
-                }
+            if (i < node.positional.size() && isAssignableOutTarget161b(node.positional[i].get())
+                && !cExprIsVariant(argVal)) {
+                ansiOutParams_.push_back({ansiVarR, argVal, "0"});
             }
             argVal = ansiVarR;  // 已是 char* —— 正是 A 版 API 要的 LPSTR (见下方 isByRef 抑制)
         }

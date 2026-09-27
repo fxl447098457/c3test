@@ -18,5 +18,11 @@ Public Sub Main()
     Dim h As Long
     h = CreateWindowEx(0, "STATIC", "hello", 0, 0, 0, 100, 50, 0, 0, 0, 0)
     Debug.Print "hwnd="; h
-    If h <> 0 Then DestroyWindow h
+    ' 判据必须是稳定标记: hwnd 的绝对值因进程而异, 只断言 0/非 0。
+    If h <> 0 Then
+        Debug.Print "hwnd-ok=Y"
+        DestroyWindow h
+    Else
+        Debug.Print "hwnd-ok=N"
+    End If
 End Sub

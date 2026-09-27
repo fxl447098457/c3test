@@ -14,4 +14,11 @@ Public Sub Main()
     n = GetModuleFileName(0, buf, 260)
     Debug.Print "n="; n
     Debug.Print "path=["; Left$(buf, n); "]"
+    ' 断言用稳定标记 (run_tests 的 -like 断言里 [ ] 是通配符字符集, 不可用括号串)。
+    ' 路径以驱动器字母开头且长度 > 3 即视为成功回读。
+    If n > 3 Then
+        Debug.Print "gmn-path-ok=Y"
+    Else
+        Debug.Print "gmn-path-ok=N"
+    End If
 End Sub
