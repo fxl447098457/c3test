@@ -74,6 +74,15 @@ System32"的要求在 C3 不存在）：那颗 OCX 是 32 位 inproc 服务器�
 止端两头都是**闭区间**：写 `SelEnd = #2026-9-6#` 之后读回来还是它（控件内部把范围存成
 半开区间，RTL 折回了一天）。
 
-还欠的：核心事件 **`DateClick(DateSelected As Date)`**（原生 `MCN_SELCHANGE` = -749，
-负载带 SYSTEMTIME ⇒ 派发要折算成 Date，形状与 `DateTimePicker` 那页的三条无参事件不同形）。
-`DateDblClick` 原生**没有**对应通知（公共控件头里没有双击那一条），刻意不做。
+### C3 的实现面（续）：`DateClick`（C29-MV-c 已做 ⇒ 这一族到此收口）
+
+```vb
+Private Sub MonthView1_DateClick(ByVal DateSelected As Date)
+    DTPicker1.Value = DateSelected      ' 联动
+End Sub
+```
+
+原生对应一条 `MCN_SELCHANGE`（-749），负载里带所选那天，派发时折算成 Date 传进来。
+两条要注意：① **程序化改选不会触发它**（写 `Value` / `SelStart` / `SelEnd` 都不叫），
+原生那条通知只由用户交互驱动 —— 与 `DateTimePicker` 的 `Change` 同一条口径；
+② `DateDblClick` 原生**没有**对应通知（公共控件头里没有双击那条 `MCN_`），刻意不做。
