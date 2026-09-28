@@ -301,8 +301,10 @@ int vb6_GetBorderStyle(void* hwnd) {
     // Form/ComboBox/ListBox: store as property
     // 账 #107: 这里存的是 val+1，不是 val —— SetPropW(hw, name, (HANDLE)0) 等于把属性**删掉**
     //（RemoveProp 的语义），于是 BorderStyle = 0 (None) 对所有非 Edit / 非 Static 控件都设不上：
-    // 写进去当场消失，GetPropW 回 NULL ⇒ 读回来是默认 1。同一族在 Fix 187（BackColor 的黑色）
-    // 与 CommonDialog（"整数一律存 val+1"）里各修过一次，口径 here 取后者。
+    // 写进去当场消失，GetPropW 回 NULL ⇒ 读回来是下面那段"按类名/样式猜默认值"的结果
+    //（ListBox 实测读回 2 —— LISTBOX 的 WS_BORDER 被那把 WS_OVERLAPPEDWINDOW 尺当成了 CAPTION）。
+    // 同一族在 Fix 187（BackColor 的黑色，用独立哨兵）与 CommonDialog（"整数一律存 val+1"）里
+    // 各修过一次，这里取后者。
     HANDLE hProp = GetPropW(hw, L"VB6_BorderStyle");
     if (hProp) return (int)(INT_PTR)hProp - 1;
     // Form default is 2 (Sizable)
