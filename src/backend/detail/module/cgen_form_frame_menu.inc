@@ -180,7 +180,13 @@
                 || symTab_.lookup(ctrl.controlName + "_KeyDown")
                 || symTab_.lookup(ctrl.controlName + "_KeyUp")
               || symTab_.lookup(ctrl.controlName + "_Validate")
-                || symTab_.lookup(ctrl.controlName + "_MouseHover");
+                || symTab_.lookup(ctrl.controlName + "_MouseHover")
+                // C29-SL-d: 这一趟**装不装**子类化的判据与上面发不发 arm 的判据是两份表,
+                // 原先少了 _Click ⇒ 处理器发了出来却永远没人给它送消息（实测：ctrlfiles 的
+                // fileList 子类过程在产物里定义得好好的, 一次都没被 install）。
+                // 排除表与非它不可的理由同 subclass 那一趟。
+                || (!controlClickFromNativeNotify(ctrl.controlType) &&
+                    symTab_.lookup(ctrl.controlName + "_Click"));
         };
         std::unordered_set<std::string> subEmitted;
         // 顶层控件

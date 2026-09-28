@@ -425,4 +425,31 @@ void vb6_Slider_SimNotify(void* hwnd, int32_t code, int32_t pos) {
                  (LPARAM)hw);
 }
 
+/* 判据专用（不对应 VB6 语义，与上面 SimNotify / DT-c 的 SimChange 同先例）：
+ * 把一条**常规事件**的原生消息放进控件自己的队列。为什么只能这样：无头环境点不了鼠标，
+ * 而真手势在本机也不稳（.build/slprobe/slmeasure10.c 里 SetForegroundWindow 需要
+ * 先敲一次 ALT 才生效，且合成点击偶尔落在激活切换上被吃掉）。
+ * 实测（同一目录 slmeasure11.c，逐条 PostMessage 后看子类过程与父窗）：
+ *   · WM_LBUTTONUP     → 子类过程收到，父窗**一条通知都不发**、值不动 ⇒ Click 不牵连 Change/Scroll；
+ *   · WM_LBUTTONDBLCLK → 同上，只有这一条消息 ⇒ DblClick 与 Click 是两档，不互带；
+ *   · WM_KEYDOWN(VK_LEFT=37) → 子类过程收到，**控件真的动**（50→48，line 档 = 2）
+ *     并发父窗 code=0；跟着的 WM_KEYUP 发 code=8、值不再动
+ *     ⇒ 按键走的就是 SL-c 那条原生通道，Change 会因为值变了而跟一次（夹具按增量数）。
+ * kind: 0=Click 1=DblClick 2=KeyDown 3=KeyUp；wParam 只有按键那两档有意义（VB6 的
+ * KeyCode 就是它，VK_LEFT 与 vbKeyLeft 同为 37）。
+ * 用 SendMessage 而不是 PostMessage：两条实测读数逐字相同（同一枚探针各走一遍，
+ * .build/slprobe/sl11_out.txt 的 P* 与 S* 两段），而同步那一条**判据不用夹 DoEvents**
+ * —— 夹具在 SimStdEvent 之后紧跟着就读计数器，异步的那条会读到旧值。 */
+void vb6_Slider_SimStdEvent(void* hwnd, int32_t kind, int32_t wParam) {
+    UINT m;
+    if (!hwnd) return;
+    switch (kind) {
+    case 0:  m = WM_LBUTTONUP;     break;
+    case 1:  m = WM_LBUTTONDBLCLK; break;
+    case 2:  m = WM_KEYDOWN;       break;
+    default: m = WM_KEYUP;         break;
+    }
+    SendMessageW((HWND)hwnd, m, (WPARAM)wParam, MAKELPARAM(40, 12));
+}
+
 #endif /* _WIN32 */

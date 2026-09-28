@@ -70,6 +70,16 @@ Begin VB.Form SlidForm
       _ExtentX        =   3528
       _ExtentY        =   706
    End
+   Begin MSComctlLib.Slider sld6 
+      Height          =   400
+      Left            =   2280
+      SmallChange     =   1
+      TabIndex        =   5
+      Top             =   1680
+      Width           =   1200
+      _ExtentX        =   2117
+      _ExtentY        =   706
+   End
 End
 Attribute VB_Name = "SlidForm"
 Attribute VB_GlobalNameSpace = False
@@ -176,6 +186,40 @@ Private Sub tGo_Timer()
     Debug.Print "SC10-setval=" & TF(gChg1 - b1 = 3 And gScr1 - b2 = 4)
     sld1.SimNotify(5, 66)           ' SetValue 已把基准推到 66 ⇒ 这条同值通知不该被当成"变了"
     Debug.Print "SC11-baseline=" & TF(gChg1 - b1 = 3 And gScr1 - b2 = 5)
+    ' ---- C29-SL-d: 常规事件面（Click / DblClick / KeyDown / KeyUp）----
+    ' SimStdEvent 也是**判据专用**助手（与上面 SimNotify 同先例）：把一条常规事件的原生
+    ' 消息**同步**送进控件自己的过程（SendMessage；实测与 PostMessage 的读数逐字相同，
+    ' 只是同步那条不必在两次调用之间夹 DoEvents）。探针 .build/slprobe/slmeasure10.c
+    ' （真手势）+ 11.c（合成，P* 与 S* 两段）：
+    '   · 控件的 WM_LBUTTONUP / WM_LBUTTONDBLCLK 都经过它的子类过程 ⇒ Click / DblClick 有落点；
+    '   · 裸的一条 UP / DBLCLK **不**惊动父窗那条通道（值不动 ⇒ Change、Scroll 都不跟）；
+    '   · 按键那条**控件真动**（VK_LEFT 走 SmallChange 一档）并发父窗 code=0 ⇒ Change 跟一次；
+    '     紧跟的 KEYUP 发 code=8、值不再动 ⇒ KeyUp 不该顺带点着 Change；
+    '   · 真按下时控件自己就把焦点抢过去了（10.c：DOWN 之后跟着 SETFOCUS、"focus after click=1"）
+    '     ⇒ 键那两条不靠 WS_TABSTOP 也到得了（Tab 导航本身在账 #83）。
+    Dim c0 As Long, d0 As Long, k0 As Long, u0 As Long, x0 As Long
+    sld6.Value = 50
+    c0 = gClk6: d0 = gDbl6: k0 = gKeyD6: u0 = gKeyUp6: x0 = gChg6
+    Debug.Print "SD0=" & c0 & "/" & d0 & "/" & k0 & "/" & u0 & "/" & x0
+    sld6.SimStdEvent(0, 0)          ' 抬起：只该点 Click
+    Debug.Print "SD1-click=" & TF(gClk6 - c0 = 1 And gDbl6 - d0 = 0 And gChg6 - x0 = 0)
+    sld6.SimStdEvent(1, 0)          ' 双击：只该点 DblClick，Click 不再涨（两档不互带）
+    Debug.Print "SD2-dbl=" & TF(gDbl6 - d0 = 1 And gClk6 - c0 = 1)
+    gKeyC6 = -1
+    sld6.SimStdEvent(2, 37)         ' VK_LEFT = vbKeyLeft = 37：KeyDown + 控件真动 + Change 跟一次
+    Debug.Print "SD3-keydown=" & TF(gKeyD6 - k0 = 1 And gKeyC6 = 37 And gChg6 - x0 = 1)
+    Debug.Print "SD4-value=" & CStr(sld6.Value)
+    sld6.SimStdEvent(3, 37)         ' 抬键：只点 KeyUp，值不再动
+    Debug.Print "SD5-keyup=" & TF(gKeyUp6 - u0 = 1 And gChg6 - x0 = 1 And sld6.Value = 49)
+    sld3.SimStdEvent(0, 0)          ' 认来源：没挂 handler 的那枚被"点"，sld6 的计数一条都不许动
+    Debug.Print "SD6-isolate=" & TF(gClk6 - c0 = 1 And gKeyUp6 - u0 = 1)
+    ' SD7 是**装不装那一趟**的证人：sld2 只有 Click 与 Change 两个处理器，而 Change 走的是
+    ' 父窗那条 WM_VSCROLL（与子类化无关），所以在改之前它压根不会被子类化 —— 处理器编得出来、
+    ' 没人给它送消息（实测：BASE 的产物里既没有 sld2 的子类过程、也没有 install 那一行）。
+    Dim y0 As Long
+    y0 = gClk2
+    sld2.SimStdEvent(0, 0)
+    Debug.Print "SD7-install=" & TF(gClk2 - y0 = 1)
     Debug.Print "SLIDER-DONE"
     Unload Me
 End Sub
@@ -191,4 +235,40 @@ End Sub
 
 Private Sub sld2_Change()
     gChg2 = gChg2 + 1
+End Sub
+
+' C29-SL-d: 常规事件那四条的计数器，加一条 Change（按键会让控件真动，所以它是"顺带的证人"）。
+Private gClk6 As Long
+Private gDbl6 As Long
+Private gKeyD6 As Long
+Private gKeyUp6 As Long
+Private gChg6 As Long
+Private gKeyC6 As Long
+Private gClk2 As Long
+
+Private Sub sld6_Click()
+    gClk6 = gClk6 + 1
+End Sub
+
+Private Sub sld6_DblClick()
+    gDbl6 = gDbl6 + 1
+End Sub
+
+Private Sub sld6_KeyDown(KeyCode As Integer, Shift As Integer)
+    gKeyD6 = gKeyD6 + 1
+    gKeyC6 = KeyCode
+End Sub
+
+Private Sub sld6_KeyUp(KeyCode As Integer, Shift As Integer)
+    gKeyUp6 = gKeyUp6 + 1
+End Sub
+
+Private Sub sld6_Change()
+    gChg6 = gChg6 + 1
+End Sub
+
+' SD7 的那枚证人：sld2 除 Change（走父窗那条通道）之外只有 sld2_Click 这一条 ⇒ 它是否被
+' 子类化，完全由「装不装那一趟」认不认 _Click 决定（计数器在上面的 SL-d 那块里）。
+Private Sub sld2_Click()
+    gClk2 = gClk2 + 1
 End Sub

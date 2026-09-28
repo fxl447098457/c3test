@@ -62,3 +62,19 @@
 
 **程序化写 `Value` 不会触发 `Change`**：实测 `TBM_SETPOS` / `TBM_SETRANGE` 一条通知都不发，本项目刻意照原生、不伪造（VB6 那颗 OCX 里这一走会 raise）。判据里 `SC10`/`SC11` 是这条口径的哨兵，哪天要齐平就得翻红逼人来拍。
 
+## 本项目的实现口径（ai/029 C29-SL-d：常规事件面 `Click` / `DblClick` / `KeyDown` / `KeyUp`）
+
+这一档**不走父窗那两条滚动通知**，走的是控件自己的子类过程（子类化换的是那一枚 HWND 的 `WNDPROC`，所以发给这个窗口的每一条消息都先过我们这一段，再转给原生过程）。
+
+| 写法 | 原生落点与实现 |
+| --- | --- |
+| `Slider1_Click()` | `WM_LBUTTONUP`。实测真手势的下/抬两条都会到子类过程；裸的一条抬起**不会**惊动父窗那条通道（值不动 ⇒ `Change`、`Scroll` 都不跟） |
+| `Slider1_DblClick()` | `WM_LBUTTONDBLCLK`，与 `Click` 是两档：合成一条双击消息只点 `DblClick`，`Click` 的计数不涨 |
+| `Slider1_KeyDown(KeyCode, Shift)` | `WM_KEYDOWN`，`KeyCode` 就是 `wParam`（`VK_LEFT` 与 `vbKeyLeft` 同为 37）。**按键会让控件真动**（走 `SmallChange` 那一档）并发父窗 `TB_LINEUP(0)` ⇒ `Change` 会顺带跟一次；紧跟的 `WM_KEYUP` 发 `TB_ENDTRACK(8)`、值不再动 |
+| `Slider1_KeyUp(KeyCode, Shift)` | `WM_KEYUP`，同上 |
+
+三条实测口径值得记：
+
+1. **不需要 `WS_TABSTOP` 也能收到按键**：原生轨道条在 `WM_LBUTTONDOWN` 里自己就把焦点抢过去了（实测：按下之后跟着一条 `WM_SETFOCUS`，"focus after click = 控件"）。所以"按一下方向键调音量"这种写法在本项目里是真的会跑。但 **Tab 键导航本身仍然不通** —— 主消息循环没有 `IsDialogMessage`，而且所有控件的创建样式都没挂 `WS_TABSTOP`（`Slider1.TabStop` 因此答 `False`）；那一整片缺口记在账 #83，不在本格。
+2. **`Click` 这一档是通用的、不是 Slider 专属**：以前"控件级 `_Click` 处理器"只有那种会往父窗发原生通知的控件（命令按钮 / 复选 / 单选 / 列表 / 组合框 / 文件系统三件套 / SSTab / 工具栏）才会被接上，其余控件（Label / Image / PictureBox / Frame / TextBox / 滚动条 / Slider）的 `xxx_Click` 是**编得过、永远不被调用**的死代码。本格把这些补上了，同时按上表把那批"已有原生 Click 来源"的控件排除掉 —— 否则一次点击会从两条路各发一次。
+3. **`Slider1.SimStdEvent(kind, wParam)` 是判据专用助手，不是 VB6 方法**（与 `SimNotify` / `DTPicker.SimChange` / `RichTextBox.SimNotify` 同先例）：`kind` 0=Click 1=DblClick 2=KeyDown 3=KeyUp，把对应的那条原生消息**同步**送进控件自己的过程。无头环境点不了鼠标，而直接调处理器会绕开整条派发链。

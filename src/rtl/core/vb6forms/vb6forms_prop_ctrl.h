@@ -867,6 +867,11 @@ int32_t vb6_Slider_FireChange(void* hwnd);
 // 先把控件的值推到 pos（真拖与真键鼠都是"控件先动、再发通知"），再按原生那一档发一条
 // 真通知进父窗 —— 直接调 handler 会绕开整条派发链，验不到分发那三段。
 void    vb6_Slider_SimNotify(void* hwnd, int32_t code, int32_t pos);
+// C29-SL-d 判据专用：把一条常规事件的原生消息放进控件自己的队列
+// （kind 0=WM_LBUTTONUP 1=WM_LBUTTONDBLCLK 2=WM_KEYDOWN 3=WM_KEYUP，wParam 只对按键两档
+//  有意义）。实测 slmeasure10/11.c：真手势的下/抬都会过控件的子类过程，而裸的一条
+// LBUTTONUP / DBLCLK 不会惊动父窗那条通道（不牵连 Change/Scroll），按键那条会真的动值。
+void    vb6_Slider_SimStdEvent(void* hwnd, int32_t kind, int32_t wParam);
 
 
 #ifdef __cplusplus

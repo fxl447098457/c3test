@@ -39,6 +39,7 @@
             bool hasKeyDown = false;
             bool hasKeyUp = false;
             bool hasDblClick = false;
+            bool hasClick = false;     // C29-SL-d: 子类化那一条路补上的常规 Click
             bool hasMouseHover = false;
             bool hasValidate = false;
             bool hasPaint = false;   // Fix 185: 控件级 _Paint (PictureBox.Print/Cls 的落点)
@@ -94,6 +95,10 @@
             info.hasKeyDown = symTab_.lookup(ctrl.controlName + "_KeyDown") != nullptr;
             info.hasKeyUp = symTab_.lookup(ctrl.controlName + "_KeyUp") != nullptr;
             info.hasDblClick = symTab_.lookup(ctrl.controlName + "_DblClick") != nullptr;
+            // C29-SL-d: 只有**没有原生 Click 来源**的类型才由这一档补上（排除表与逐条来源
+            // 见 controlClickFromNativeNotify 的定义处），否则同一次点击会双发。
+            info.hasClick = !controlClickFromNativeNotify(ctrl.controlType) &&
+                            symTab_.lookup(ctrl.controlName + "_Click") != nullptr;
             info.hasMouseHover = symTab_.lookup(ctrl.controlName + "_MouseHover") != nullptr;
             // Fix 185: 控件级 _Paint。原先整个控件家族都没有 WM_PAINT 转发，
             // MainForm.c 里的 vb6_MainForm_Picture2_Paint 是死代码。只接 PictureBox
@@ -104,7 +109,7 @@
             // 只要有任一子类化事件需求就加入列表
             if (info.hasGotFocus || info.hasLostFocus || info.hasMouseEnter || info.hasMouseLeave ||
                 info.hasMouseDown || info.hasMouseUp || info.hasMouseMove ||
-                info.hasKeyPress || info.hasKeyDown || info.hasKeyUp || info.hasDblClick || info.hasValidate || info.hasMouseHover || info.hasPaint) {
+                info.hasKeyPress || info.hasKeyDown || info.hasKeyUp || info.hasDblClick || info.hasClick || info.hasValidate || info.hasMouseHover || info.hasPaint) {
                 subclassCtrls.push_back(std::move(info));
             }
         }
@@ -148,12 +153,15 @@
                 info.hasKeyDown = symTab_.lookup(child.controlName + "_KeyDown") != nullptr;
                 info.hasKeyUp = symTab_.lookup(child.controlName + "_KeyUp") != nullptr;
                 info.hasDblClick = symTab_.lookup(child.controlName + "_DblClick") != nullptr;
+                // C29-SL-d: 同顶层那一趟的口径（排除表见 controlClickFromNativeNotify）。
+                info.hasClick = !controlClickFromNativeNotify(child.controlType) &&
+                                symTab_.lookup(child.controlName + "_Click") != nullptr;
                 info.hasMouseHover = symTab_.lookup(child.controlName + "_MouseHover") != nullptr;
                 info.hasPaint = (child.controlType == FrmControlType::PictureBox) &&
                                 (symTab_.lookup(child.controlName + "_Paint") != nullptr);  // Fix 185
                 if (info.hasGotFocus || info.hasLostFocus || info.hasMouseEnter || info.hasMouseLeave ||
                     info.hasMouseDown || info.hasMouseUp || info.hasMouseMove ||
-                    info.hasKeyPress || info.hasKeyDown || info.hasKeyUp || info.hasDblClick || info.hasValidate || info.hasMouseHover || info.hasPaint) {
+                    info.hasKeyPress || info.hasKeyDown || info.hasKeyUp || info.hasDblClick || info.hasClick || info.hasValidate || info.hasMouseHover || info.hasPaint) {
                     subclassCtrls.push_back(std::move(info));
                 }
             }
@@ -328,6 +336,17 @@
             if (info.hasDblClick) {
                 std::string fn = cProcName(info.ctrlName + "_DblClick", AccessLevel::Private);
                 c_.emitLine("if (msg == WM_LBUTTONDBLCLK) { extern void " + fn + "(); " + fn + "(); }");
+            }
+            // C29-SL-d: 常规 Click (WM_LBUTTONUP)。VB6 的 Click 是"按下并抬起"之后发的，
+            // 抬起这一条就是它的原生落点（探针 .build/slprobe/slmeasure10.c 实测：真手势的
+            // WM_LBUTTONDOWN / WM_LBUTTONUP 都会经过控件自己的子类过程 —— 子类化换的是
+            // WNDPROC，那条 hwnd 的每条消息都先过我们这一段；而原生轨道条自己在
+            // button-down 里就把焦点抢过去了，所以按键那两条 arm 不需要 WS_TABSTOP 也到得了）。
+            // 只发给**没有原生 Click 来源**的控件（那批由 BN_CLICKED / *_SELCHANGE /
+            // TCN_SELCHANGE 供，见 controlClickFromNativeNotify），否则一次点击双发。
+            if (info.hasClick) {
+                std::string fn = cProcName(info.ctrlName + "_Click", AccessLevel::Private);
+                c_.emitLine("if (msg == WM_LBUTTONUP) { extern void " + fn + "(); " + fn + "(); }");
             }
 
             // P20-12: WM_VB6_RESTOREFOCUS - restore focus after Validate cancel

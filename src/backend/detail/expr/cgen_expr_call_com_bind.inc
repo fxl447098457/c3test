@@ -39,7 +39,11 @@
             bool mvSim = monthviewVars_.count(tvBare) > 0 && tvMem == "simdateclick";
             // C29-SL-c: Slider 的判据方法同形 (SimNotify code, pos → 原生那一档的
             // WM_HSCROLL/WM_VSCROLL 发给父窗)，**带两个整型参数**。
-            bool slSim = !sliderNameOfExpr(comObjExpr_).empty() && tvMem == "simnotify";
+            // C29-SL-d: SimStdEvent kind, wParam 同形（把一条常规事件的消息放进控件自己的
+            // 队列），形参表与 SimNotify 一样是两个整型，所以共用这一支。
+            bool slSim = !sliderNameOfExpr(comObjExpr_).empty()
+                && (tvMem == "simnotify" || tvMem == "simstdevent");
+            bool slStd = slSim && tvMem == "simstdevent";
             if (tvSim || tbSim || dtSim || mvSim || slSim) {
                 isComMarker_ = false;
                 std::vector<std::string> sa;
@@ -49,7 +53,9 @@
                 }
                 std::string a0 = sa.size() > 0 ? sa[0] : std::string("0");
                 std::string a1 = sa.size() > 1 ? sa[1] : std::string("0");
-                lastExpr_ = slSim
+                lastExpr_ = slStd
+                    ? ("vb6_Slider_SimStdEvent((void*)" + comObjExpr_ + ", " + a0 + ", " + a1 + ")")
+                    : slSim
                     ? ("vb6_Slider_SimNotify((void*)" + comObjExpr_ + ", " + a0 + ", " + a1 + ")")
                     : mvSim
                     ? ("vb6_MV_SimDateClick((void*)" + comObjExpr_ + ", " + a0 + ")")

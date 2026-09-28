@@ -269,6 +269,13 @@
     // (Shape/Line 的设计期初始化以前硬写 vb6_hwnd_*, 控件数组那条路会打到空句柄上)
     std::string ctrlHwndExprForInit(const FrmControl& ctrl) const;
 
+    // C29-SL-d: 该控件的 Click 是否已由原生通知（BN_CLICKED / *_SELCHANGE /
+    // TCN_SELCHANGE …）送出。子类化那一路补 Click 档时必须按它排除，否则双发。
+    // 定义与逐条来源清单在 cgen_util_ctrl.cpp；两个使用点分别是
+    // cgen_form_wndproc_subclass.inc（发不发这条 arm）与 cgen_form_frame_menu.inc
+    // （要不要装子类化）。
+    static bool controlClickFromNativeNotify(FrmControlType ctrlType);
+
     // P11.7: 返回控件类型的默认属性名 (如 TextBox->"Text", Label->"Caption")
     // 空字符串表示该控件类型无默认属性
     static const char* getDefaultPropertyName(FrmControlType ctrlType);

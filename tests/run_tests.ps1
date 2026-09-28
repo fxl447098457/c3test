@@ -1670,7 +1670,11 @@ if ($Category -in @("all", "run", "vbp")) {
         'vb6_Left(vb6_GetListItem((void*)vb6_hwnd_auxList, 0)'      # 账 #68: 裸 Left 是函数, 不是窗体属性
     )
     Test-EmitcAbsent "cf_emitc_no_stolen_left" @("$Tests\ctrlfiles\CfApp.vbp") @(
-        'vb6_GetControlLeft(vb6_hwnd_CfForm, '
+        'vb6_GetControlLeft(vb6_hwnd_CfForm, ',
+        # C29-SL-d: fileList 的 Click 只有 WM_COMMAND/SELCHANGE 那一条来源。子类化那一路
+        # 补上 Click 档之后必须把它排除掉（见 controlClickFromNativeNotify），否则一次点击
+        # 双发；这条针钉的就是「那一路没有替它再挂一条」。
+        'if (msg == WM_LBUTTONUP) { extern void vb6_fileList_Click();'
     )
     # ai/029 C29-8a: TreeView 的标量属性面换原生 SysTreeView32（D6：不碰 MSCOMCTL.OCX）。
     # 改之前的实测（029 §九 前置测量）：这枚控件**窗口本来就建得出来**（controlTypeToWin32Class
@@ -1834,7 +1838,17 @@ if ($Category -in @("all", "run", "vbp")) {
                      # 会在同值的第二条 5 与 SetValue 之后那条上各多发一次。
                      "SC1-track=Y", "SC2-same=Y", "SC3-next=Y", "SC4-posit=Y", "SC5-endtrk=Y",
                      "SC6-line=Y", "SC7-value=54", "SC8-vert=Y", "SC9-isolate=Y",
-                     "SC10-setval=Y", "SC11-baseline=Y")
+                     "SC10-setval=Y", "SC11-baseline=Y",
+                     # C29-SL-d 常规事件面（SD0 是原始证人行、不进针）。四条各自的
+                     # 分法由读数钉住：SD1 钉「抬起只点 Click、不牵连 Change」，SD2 钉
+                     # 「双击是单独一档、不顺带再点一次 Click」，SD3 钉「按键那条真的
+                     # 动了控件」（KeyCode=37 与 Change 各一次），SD5 钉「抬键不再动值」，
+                     # SD6 是认来源那条（没挂 handler 的那枚被点，别人一条都不许涨）。
+                     "SD1-click=Y", "SD2-dbl=Y", "SD3-keydown=Y", "SD4-value=49",
+                     "SD5-keyup=Y", "SD6-isolate=Y",
+                     # SD7 是「装不装那一趟」的证人：sld2 除 Change（走父窗那条通道）外
+                     # 只有 Click 一条，改之前它压根不会被子类化 ⇒ 处理器编得出来、没人送消息。
+                     "SD7-install=Y")
     Test-Vbp "ctrlslider" "$Tests\ctrlslider\SlidApp.vbp" $slidNeedles
     Test-Vbp "ctrlslider_x86" "$Tests\ctrlslider\SlidApp.vbp" $slidNeedles -Arch "x86"
     Test-EmitcShape "sl_emitc_native" @("$Tests\ctrlslider\SlidApp.vbp") @(
@@ -1861,7 +1875,16 @@ if ($Category -in @("all", "run", "vbp")) {
         'vb6_Slider_FireChange((void*)vb6_hwnd_sld1)',
         'if (scrollCode == 4 || scrollCode == 5)',
         'vb6_Slider_SimNotify((void*)vb6_hwnd_sld1, 5, 40)',
-        'vb6_Slider_SimNotify((void*)vb6_hwnd_sld2, 5, 30)'
+        'vb6_Slider_SimNotify((void*)vb6_hwnd_sld2, 5, 30)',
+        # C29-SL-d: 常规事件那三档 arm + 「只有 Click 处理器也照样装子类化」那一步。
+        # 装不装是第二份判据（frame_menu 那一趟），原先漏了 _Click ⇒ arm 发出来没人送消息。
+        'if (msg == WM_LBUTTONUP) { extern void vb6_sld6_Click(); vb6_sld6_Click(); }',
+        'if (msg == WM_LBUTTONDBLCLK) { extern void vb6_sld6_DblClick(); vb6_sld6_DblClick(); }',
+        'if (msg == WM_KEYDOWN) {',
+        'vb6_InstallControlSubclass((void*)vb6_hwnd_sld6, (void*)vb6_ctrl_subproc_sld6);',
+        'vb6_Slider_SimStdEvent((void*)vb6_hwnd_sld6, 2, 37)',
+        'if (msg == WM_LBUTTONUP) { extern void vb6_sld2_Click(); vb6_sld2_Click(); }',
+        'vb6_InstallControlSubclass((void*)vb6_hwnd_sld2, (void*)vb6_ctrl_subproc_sld2);'
     )
     Test-EmitcAbsent "sl_emitc_no_com_fallback" @("$Tests\ctrlslider\SlidApp.vbp") @(
         'vb6_ComGetProp(vb6_hwnd_sld1',      # 兜底那条"拿 HWND 当 IDispatch"不许回来
@@ -1871,6 +1894,9 @@ if ($Category -in @("all", "run", "vbp")) {
         # —— 编得过、跑起来什么都不发（C29-8c 实测踩过）。
         'vb6_ComGetObjectProp(vb6_hwnd_sld1, L"SimNotify")',
         'vb6_ComCall(vb6_hwnd_sld1, L"SimNotify"',
+        # C29-SL-d: 同一条坑的第二枚判据方法（SimStdEvent）。
+        'vb6_ComGetObjectProp(vb6_hwnd_sld6, L"SimStdEvent")',
+        'vb6_ComCall(vb6_hwnd_sld6, L"SimStdEvent"',
         'CoCreateInstance'
     )
 

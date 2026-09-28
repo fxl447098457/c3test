@@ -1245,6 +1245,37 @@ std::string CCodeGen::ctrlHwndExprForInit(const FrmControl& ctrl) const {
     return "vb6_hwnd_" + cIdent(ctrl.controlName);
 }
 
+// C29-SL-d: 这个控件的 `Click` 是不是已经由**原生通知**送进来了。
+// 子类化那条路（`cgen_form_wndproc_subclass.inc`）本来没有 Click 这一档 —— 补上之后
+// 必须把"已经有别的 Click 来源"的类型排除掉，否则同一次点击会调两次 handler：
+// 一条来自原生通知（下表第二列），一条来自控件自己的 WM_LBUTTONUP。
+// 逐条来源（都在本文件/cgen_form_wndproc_create.inc/cgen_form_wndproc_dispatch.inc 里）：
+//   CommandButton/CheckBox/OptionButton -> WM_COMMAND BN_CLICKED
+//   ListBox/FileListBox/DirListBox/DriveListBox/ComboBox -> WM_COMMAND *_SELCHANGE
+//   SSTab -> WM_NOTIFY TCN_SELCHANGE（带 PreviousTab 实参，形参表都不一样）
+//   Toolbar -> WM_COMMAND（ButtonClick 那一档，见 cgen_form_wndproc_create.inc）
+//   Menu -> 菜单命令那条路（cgen_form_menu.cpp），且 Menu 压根不子类化
+// 反过来，Label/Image/PictureBox/Frame/TextBox/ScrollBar/Slider 这些**没有**任何
+// 原生 Click 通知的，才由子类化那一档补上。
+bool CCodeGen::controlClickFromNativeNotify(FrmControlType ctrlType) {
+    switch (ctrlType) {
+    case FrmControlType::CommandButton:
+    case FrmControlType::CheckBox:
+    case FrmControlType::OptionButton:
+    case FrmControlType::ListBox:
+    case FrmControlType::ComboBox:
+    case FrmControlType::DriveListBox:
+    case FrmControlType::DirListBox:
+    case FrmControlType::FileListBox:
+    case FrmControlType::SSTab:
+    case FrmControlType::Toolbar:
+    case FrmControlType::Menu:
+        return true;
+    default:
+        return false;
+    }
+}
+
 void CCodeGen::emitShapeLineProps(const FrmControl& ctrl, const std::string& hwndExpr) {
     auto emitInt = [&](const char* prop, const char* fn, int skipWhen) {
         auto it = ctrl.properties.find(prop);
