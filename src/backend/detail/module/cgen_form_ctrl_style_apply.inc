@@ -60,8 +60,14 @@
                     auto sbIt = ctrl.properties.find("ScrollBars");
                     if (sbIt != ctrl.properties.end()) {
                         int sb = (int)sbIt->second.intValue;
-                        if (sb == 1 || sb == 3) style |= kWsVscroll;  // Vertical
-                        if (sb == 2 || sb == 3) style |= kWsHscroll;  // Horizontal
+                        // 账 #108: VB6 的枚举是 0 无 / 1 水平 / 2 垂直 / 3 两者 —— 这里原先
+                        // 1↔2 用反了（与 RichTextBox 那一格两套方向）。证人不是文档而是
+                        // VB6 自己存出来的 .frm：tests/VBFlexGridDemo/InputForm.frm 19 行
+                        // `Begin VB.TextBox Text2` 下挂着 `ScrollBars = 2  'Vertical`。
+                        // 读侧 vb6_GetScrollBars 一直按 VB6 口径推（HSCROLL→1、VSCROLL→2），
+                        // 所以写侧反着的结果是"设计期设 2、读回 1"——往返不自洽，不是观感问题。
+                        if (sb == 1 || sb == 3) style |= kWsHscroll;  // Horizontal
+                        if (sb == 2 || sb == 3) style |= kWsVscroll;  // Vertical
                     }
                 }
                 break;

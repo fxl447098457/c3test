@@ -23,6 +23,24 @@ Begin VB.Form CtrlProp
       Top             =   2160
       Width           =   2000
    End
+   Begin VB.TextBox txtH 
+      MultiLine       =   -1  'True
+      ScrollBars      =   1  'Horizontal
+      Height          =   600
+      Left            =   240
+      TabIndex        =   6
+      Top             =   2880
+      Width           =   2000
+   End
+   Begin VB.TextBox txtV 
+      MultiLine       =   -1  'True
+      ScrollBars      =   2  'Vertical
+      Height          =   600
+      Left            =   240
+      TabIndex        =   7
+      Top             =   3600
+      Width           =   2000
+   End
    Begin VB.TextBox txtOne 
       Height          =   300
       Left            =   240
@@ -98,6 +116,9 @@ Private Sub Form_Load()
     txtOne.Text = List1.ListCount
     Debug.Print "CP4=" & lblSingle.Caption
     Debug.Print "CP5=" & txtOne.Text
+    Debug.Print "CP6=" & txtH.ScrollBars
+    Debug.Print "CP7=" & txtV.ScrollBars
+    Debug.Print "CP8=" & txtOne.ScrollBars
     Debug.Print "CTRLPROP-DONE"
     Unload Me
 End Sub

@@ -984,14 +984,17 @@ long CCodeGen::controlTypeStyleBits(const FrmControl& ctrl) const {
             auto sbIt = ctrl.properties.find("ScrollBars");
             if (sbIt != ctrl.properties.end()) {
                 int sb = (int)sbIt->second.intValue;
-                if (sb == 1 || sb == 3) style |= kWsVscroll;
-                if (sb == 2 || sb == 3) style |= kWsHscroll;
+                // 账 #108: 与顶层那条同一处错、同一处修法 —— VB6 是 1 水平 / 2 垂直
+                // (证人：tests/VBFlexGridDemo/InputForm.frm 里 VB6 自己存的
+                //  `ScrollBars = 2  'Vertical`)。
+                if (sb == 1 || sb == 3) style |= kWsHscroll;
+                if (sb == 2 || sb == 3) style |= kWsVscroll;
             }
             break;
         }
         // C29-RT-a: 与顶层那条创建样式**同一口径**（容器子控件走的就是这条路，账 #83）。
-        // 注意枚举与上面的 TextBox 相反：VB6 文档里 RichTextBox 的 ScrollBars 是
-        // 0 无 / 1 水平 / 2 垂直 / 3 两者，TextBox 那一格把 1/2 用反了（既有缺陷，未修）。
+        // 枚举按 VB6 文档：0 无 / 1 水平 / 2 垂直 / 3 两者 —— 与上面的 TextBox 那一格现在一致
+        // （账 #108 之前 TextBox 把 1/2 用反了，两条控件同名不同向）。
         case FrmControlType::RichTextBox: {
             style |= kEsMulti;
             auto sbIt = ctrl.properties.find("ScrollBars");
