@@ -13,10 +13,6 @@
 
     // BSTR赋值检测: 如果目标是BSTR变量, 使用vb6_BSTR_Assign防止悬垂指针和双重释放
     bool targetIsBstr = false;
-    // 账 #113: 目标是**这一格才认出来**的 String (模块级变量 —— 它不进 knownBstrVars_) 时,
-    // 值那侧是自有临时的话走 AssignMove; 老路径 (局部/形参/UDT String 字段) 的行文一字不动,
-    // 免得把"局部串赋值"整片发码面一起翻掉。
-    bool bstrTargetViaTypeQuery = false;
     {
         // 检查目标是否是已知BSTR变量 (me->field 或 模块级变量)
         std::string checkName = target;
@@ -53,7 +49,6 @@
         if (!targetIsBstr && node.target->kind == ASTNodeKind::IdentifierExpr
             && inferExprType(*node.target) == Vb6Type::String) {
             targetIsBstr = true;
-            bstrTargetViaTypeQuery = true;
         }
     }
     // P8.4: Variant赋值检测 - 如果目标是Variant变量, 用Variant构造函数包装值
@@ -129,16 +124,26 @@
                 value = "vb6_ByteArrayToString(" + value + ")";
             }
         }
-        // 账 #113: 值是不是"自有的临时串" —— 字面量 / 拼接 / 返回 String 的工程函数或
-        // Property Get (返回变量 vb6_ret_* 在入口处已按值语义拷过)。变量、形参、成员字段、
-        // 数组元素都是**借来的**, 只能深拷贝。这里之所以要分: 模块级目标以前那句裸赋值
-        // `gS = <临时>;` 是所有权转移 (不泄漏), 一律改 Assign 会**给每个模块级字面量赋值
-        // 凭空加一次临时串泄漏**(旧值也没释放)。
+        // 账 #113 / #119: 值是不是"自有的临时串" —— **字符串**字面量 / 拼接 / 返回 String 的
+        // 工程函数或 Property Get (返回变量 vb6_ret_* 在入口处已按值语义拷过)。变量、形参、
+        // 成员字段、数组元素都是**借来的**, 只能深拷贝。
+        // #119 之前这条判据只服务模块级目标 (#113 那格为了少翻发码面刻意加了
+        // `bstrTargetViaTypeQuery` 那道闸), 局部/形参/UDT String 字段三条老路一律 Assign
+        // ⇒ 每句从自有临时来的赋值都漏一只堆块 (`s = Left(x,2)` 就是 64 字符 + 块头那种
+        // 146 字节级的漏, 循环里就是纯漏, 旧值要等下一次赋值才被释放)。
+        // 铺开的底气是这一轮把 RTL 全扫了一遍: 77 枚 `BSTR` 返回函数里只有 3 枚发的是**借来
+        // 的**指针 (vb6_ErrDescription / vb6_ErrSource 直接回 vb6_err 那两个字段、
+        // vb6_ho_variantToBstr 回 v->bstrVal), 而它们都只能以成员访问的形态到达
+        // (`Err.Description`), 下面的 IdentifierExpr 那一支根本捡不到 ⇒ 不会被误判自有。
+        // 字面量那支限定成 LiteralKind::String: 数值/布尔字面量赋给 String 目标这一格发的是
+        // 裸数字 (`vb6_BSTR_Assign(&s, 123)` → cl C2440, 已另立一账), 把它标成自有只会把
+        // "当场编译不响"变成"存进一只假指针", 不能顺手动。
         bool valueOwned113 = false;
         if (node.value) {
             switch (node.value->kind) {
                 case ASTNodeKind::LiteralExpr:
-                    valueOwned113 = true;
+                    valueOwned113 = (static_cast<LiteralExpr&>(*node.value).literalKind
+                                     == LiteralKind::String);
                     break;
                 case ASTNodeKind::BinaryExpr: {
                     auto& vb113 = static_cast<BinaryExpr&>(*node.value);
@@ -160,7 +165,7 @@
                     break;
             }
         }
-        if (bstrTargetViaTypeQuery && valueOwned113) {
+        if (valueOwned113) {
             c_.emitLine("vb6_BSTR_AssignMove(&" + target + ", " + value + ");");
         } else {
             c_.emitLine("vb6_BSTR_Assign(&" + target + ", " + value + ");");

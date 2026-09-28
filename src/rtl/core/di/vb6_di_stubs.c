@@ -365,3 +365,19 @@ typedef int (CALLBACK* vb6_di_WNDENUMPROC)(void*, intptr_t);
 intptr_t __stdcall vb6_di_EnumWindows(intptr_t lpEnumFunc, intptr_t lParam) {
     return (intptr_t)EnumWindows((vb6_di_WNDENUMPROC)(uintptr_t)lpEnumFunc, (LPARAM)lParam);
 }
+
+/* K32GetProcessMemoryInfo (kernel32) — 手写单桩 (同上, 不重跑 gen_di_stubs)。
+   第二参是调用方的 UDT 指针, C3 生成的原型是 `vb6_type_<名>*`, 这里收 void* 即可
+   (两份声明在不同编译单元, 链接只看符号名)。走 LoadLibrary 而不是直接调, 是为了
+   不给产物新增导入库依赖 —— 本仓的 Declare 一律不要求系统 .lib。 */
+typedef BOOL (WINAPI* vb6_di_K32GetProcessMemoryInfo_fn)(HANDLE, void*, DWORD);
+intptr_t __stdcall vb6_di_K32GetProcessMemoryInfo(intptr_t hProcess, void* ppmc, intptr_t cb) {
+    static vb6_di_K32GetProcessMemoryInfo_fn pfn = NULL;
+    if (!pfn) {
+        HMODULE h = GetModuleHandleW(L"kernel32.dll");
+        if (!h) h = LoadLibraryW(L"kernel32.dll");
+        if (h) pfn = (vb6_di_K32GetProcessMemoryInfo_fn)GetProcAddress(h, "K32GetProcessMemoryInfo");
+    }
+    if (pfn) return (intptr_t)pfn((HANDLE)(uintptr_t)hProcess, ppmc, (DWORD)cb);
+    return 0;
+}

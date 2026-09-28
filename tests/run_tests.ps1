@@ -1327,6 +1327,12 @@ if ($Category -in @("all", "run", "bas")) {
     # BASE 实测：S113-A 读回的是扰动串（0123456789ABCDEF）、S113-C 为空；NEW 两处都对。
     Add-BasTest "test_str_alias" "$Tests\test_str_alias.bas" @("S113-A=PAYLOAD-0123456789", "S113-B=18", "S113-C=SECOND-ONE", "S113-D=36", "S113-E=LITERAL-OK", "S113-F=ABC", "S113-G=FROM-FUNC", "S113-DONE")
     Add-BasTest "test_str_alias_x86" "$Tests\test_str_alias.bas" @("S113-A=PAYLOAD-0123456789", "S113-B=18", "S113-C=SECOND-ONE", "S113-D=36", "S113-E=LITERAL-OK", "S113-F=ABC", "S113-G=FROM-FUNC", "S113-DONE") -Arch "x86"
+    # 账 #119: 局部/形参 String 目标的临时串泄漏。判据 = K32GetProcessMemoryInfo 的
+    # PagefileUsage **增量**(10 万次 `s = Left(gBig, 64)`, 阈值 2MB; 修复前那 10 万只是纯漏,
+    # 量级 15MB), 加上五条所有权语义护栏 (借用/别名/ByRef 写穿/拼接链/反复赋值不互踩)。
+    # api1/api2 两条是自带的失效负控: 读不到内存就把判据打成 N, 免得"自己减自己"假绿。
+    Add-BasTest "test_str_leak" "$Tests\test_str_leak.bas" @("S119-api1=1", "S119-api2=1", "S119-leak-ok=Y", "S119-borrow=[SHARED-ME]", "S119-func-len=5", "S119-concat=[ABC]", "S119-byref-len=3 head=[C]", "S119-chain=[AAABBB]", "S119-DONE")
+    Add-BasTest "test_str_leak_x86" "$Tests\test_str_leak.bas" @("S119-api1=1", "S119-api2=1", "S119-leak-ok=Y", "S119-borrow=[SHARED-ME]", "S119-func-len=5", "S119-concat=[ABC]", "S119-byref-len=3 head=[C]", "S119-chain=[AAABBB]", "S119-DONE") -Arch "x86"
     # Fix 190: Declare "As Any" ByRef 的下标链实参必须取地址, 不能把元素值当指针
     Add-BasTest "test_asany_subscript" "$Tests\test_asany_subscript.bas" @("WITH-SUB=Y", "EXPR-SUB=Y", "SCALAR=Y", "CHAIN=Y", "ASANY-DONE")
     # Delegate (tB extension): typed function pointers, stdcall/cdecl thunks, both arches
@@ -1719,6 +1725,20 @@ if ($Category -in @("all", "run", "vbp")) {
     Test-EmitcAbsent "fixedstr_emitc_no_ice" @("$Tests\test_fixedstr_decl.bas") @(
         '(ICE)',                                        # ICE 兜底文案: 出现即本批又崩了
         '((int32_t)sizeof(gT))'                         # 别把定长串的 Len 折成指针宽
+    )
+    # 账 #119: AssignMove 铺到局部/形参/ByRef 写穿三类目标 (以前只有模块级目标走这条)。
+    # 这四行是"机制本体"的直接断言 —— 真跑那只 S119-leak-ok 只说结果, 这里钉的是发码形状:
+    #   136 行那条循环体 (Left 的自有临时) / 定长串 String$ / ByRef 形参解引用目标
+    #   / 借用侧 (变量赋给变量) 必须**留在**深拷贝 —— 它错了就是悬垂, 不是泄漏。
+    Test-EmitcShape "strleak_emitc_move" @("$Tests\test_str_leak.bas") @(
+        'vb6_BSTR_AssignMove(&s, vb6_Left(gBig, 64));',
+        'vb6_BSTR_AssignMove(&t, vb6_String((*n), 67));',
+        'vb6_BSTR_AssignMove(&(*o), vb6_MakeTag((&(int32_t){3})));',
+        'vb6_BSTR_Assign(&d, s);'
+    )
+    Test-EmitcAbsent "strleak_emitc_no_move_borrowed" @("$Tests\test_str_leak.bas") @(
+        'vb6_BSTR_AssignMove(&d, s);',                  # 借来的值绝不能被"移动"走
+        'vb6_BSTR_AssignMove(&vb6_ret_MakeTag, t);'     # 返回变量同理 (t 是局部, 还要用)
     )
     # ai/029 C29-DT-a: DTPicker 换成原生 SysDateTimePick32（D6：不碰 MSCOMCT2.OCX，32 位进不了 x64）。
     # 改之前这枚控件走的是"第三方 OCX 按 COM 后期绑定"那一组 => 工程没引用类型库时连符号都查不到，
