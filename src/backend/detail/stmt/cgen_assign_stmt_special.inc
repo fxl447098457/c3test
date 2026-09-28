@@ -188,6 +188,16 @@
                 if (memName == "currentx") { c_.emitLine("vb6_Printer_SetCurrentX((int32_t)(" + lastExpr_ + "));"); return; }
                 if (memName == "currenty") { c_.emitLine("vb6_Printer_SetCurrentY((int32_t)(" + lastExpr_ + "));"); return; }
             }
+            // Fix 161f: Screen.MousePointer 全局写入 (CWaitCursor 等类里用)。
+            // 早先目标 emitExpr 走读路径生成 vb6_Screen_MousePointer() = ... →
+            // C2106 "=" 左操作数必须为左值 (extlist CWaitCursor.cls 实测)。
+            if (objName == "screen") {
+                if (memName == "mousepointer") {
+                    emitExpr(*node.value);
+                    c_.emitLine("vb6_Screen_SetMousePointer((int32_t)(" + lastExpr_ + "));");
+                    return;
+                }
+            }
         }
 
         // M22: Me.Property = expr — 窗体模块中Me的属性赋值 (如 Me.Caption = myName)
@@ -251,7 +261,7 @@
                             // `Label1(0).Caption = List1.ListCount` 原先直传 int32 →
                             // 非 0 时被当指针解引用 (0xC000041D), 为 0 时静默不生效。
                             valExpr = controlPropValueExpr(writeFn, valExpr, *node.value);
-                            c_.emitLine(writeFn + "(vb6_CtrlArr_GetAt(&vb6_arr_" + cIdent(arrId.name) + ", " + idxArg + "), " + valExpr + ");  /* Control Array Property */");
+                            c_.emitLine(writeFn + "(" + ctrlArrWriteCalleeArgs(writeFn, arrId.name, idxArg) + ", " + valExpr + ");  /* Control Array Property */");
                             return;
                         }
                     }
@@ -277,6 +287,21 @@
                         c_.emitLine(writeFn + "(" + weVarName + ", " + valExpr + ");  /* WithEvents ctrl prop write */");
                         return;
                     }
+                }
+            }
+            // Fix 161f-extlist: `lv.View = 3` / `lv.Sorted = False` —— lv 是**形参/
+            // 局部持有的 ListView** (`Sub RefillList(lv As ListView)`)。槽变量本身就是
+            // HWND, 走控件属性写表 (与上方 knownFormControls_ 同一口径, 只是 hwnd 实参
+            // 用裸槽名而非 vb6_hwnd_ 前缀)。不认就落到后续 COM 晚绑定
+            // `vb6_ComSetProp(lv, L"View", …)` —— 拿 HWND 当 IDispatch, 静默无效。
+            if (listViewSlotVars_.count(objLower)) {
+                std::string writeFnLv = getControlPropWriteFn(FrmControlType::ListView, maExpr.memberName);
+                if (!writeFnLv.empty()) {
+                    emitExpr(*node.value);
+                    std::string valExprLv = std::move(lastExpr_);
+                    valExprLv = controlPropValueExpr(writeFnLv, valExprLv, *node.value);
+                    c_.emitLine(writeFnLv + "((void*)" + objLower + ", " + valExprLv + ");  /* ListView slot prop write */");
+                    return;
                 }
             }
             auto itCtrl = knownFormControls_.find(objLower);

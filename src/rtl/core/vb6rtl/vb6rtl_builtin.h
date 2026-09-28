@@ -254,6 +254,9 @@ void*  vb6_Screen_ActiveControl(void);  // Active control HWND
 void*  vb6_Screen_ActiveForm(void);     // Active form HWND
 int32_t vb6_Screen_TwipsPerPixelX(void);
 int32_t vb6_Screen_TwipsPerPixelY(void);
+// Fix 161f: Screen.MousePointer 全局读/写 (非控件级)
+int32_t vb6_Screen_MousePointer(void);
+void    vb6_Screen_SetMousePointer(int32_t pointer);
 
 // P18-C: Printer 对象
 void   vb6_Printer_Print(BSTR text);
@@ -272,6 +275,12 @@ void   vb6_Printer_SetCurrentY(int32_t y);
 // vb6_Printers_Collection: 空 RTL Collection (vb6_ForEach_Init 原生支持,
 //   For Each 循环零次; 真实 EnumPrinters 枚举属后续增强)。
 void*  vb6_Printer_Object(void);
+
+// Fix <vbeclipse>: vb6_Screen_Object — Screen 全局对象哨兵 (NULL)。
+// .Width/.MouseX 等已登记成员在 MemberAccess 分支直接发 vb6_Screen_Xxx();
+// 未登记成员赋值落 NULL 槽语义, 无害。
+void*  vb6_Screen_Object(void);
+extern void* vb6_Screen_MouseIcon;         // Fix <vbeclipse>: Screen.MouseIcon 读写槽
 void*  vb6_Printer_hDC(void);
 void*  vb6_Printers_Collection(void);
 

@@ -247,6 +247,22 @@ bool SymbolTable::define(std::unique_ptr<Symbol> sym) {
         }
     }
 
+    // Fix <vbeclipse>: 类模块允许与类同名的成员 (PopupMenu.cls 里 `Public Sub
+    // PopupMenu(...)`) —— VB6 合法。类自符号 (SymbolKind::Class, semantic_analyzer
+    // 预先 define 进模块作用域) 让位给成员: 裸键换成成员符号, 类本身仍可经
+    // lookupModule/全局作用域解析。
+    {
+        auto itSelf = current_->symbols_.find(lowerName);
+        if (itSelf != current_->symbols_.end() && itSelf->second
+            && itSelf->second->kind == SymbolKind::Class
+            && (sym->kind == SymbolKind::Sub || sym->kind == SymbolKind::Function
+                || isPropertyKind(sym->kind))) {
+            diag_.warn(DiagnosticID::SemDuplicateDeclaration, loc,
+                "类成员与类同名: '" + lowerName + "' (VB6 允许, 成员让类符号让位)");
+            current_->symbols_.erase(itSelf);
+        }
+    }
+
     if (!current_->define(std::move(sym), keyOverride)) {
         diag_.error(DiagnosticID::SemDuplicateDeclaration, loc,
             "重复声明: \x27" + lowerName + "\x27");

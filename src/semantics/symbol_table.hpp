@@ -514,11 +514,25 @@ public:
     // 遍历模块级符号, 返回所有 isExternal=true 的 sourceModule
     std::unordered_set<std::string> getExternalModuleNames() const;
 
+    // Fix <vbeclipse>: VB6 隐式变量声明 (工程未写 Option Explicit 时, 首次使用的
+    // 裸标识符自动成为 Variant 局部变量)。语义层登记 "<module>$<proc>" → 名字集,
+    // 发码层在过程序言按此预声明 C 局部。
+    void addImplicitVar(const std::string& moduleLower, const std::string& procLower,
+                        const std::string& varName) {
+        implicitVars_["<mod>" + moduleLower + "$" + procLower].insert(varName);
+    }
+    const std::unordered_set<std::string>* implicitVarsFor(const std::string& moduleLower,
+                                                           const std::string& procLower) const {
+        auto it = implicitVars_.find("<mod>" + moduleLower + "$" + procLower);
+        return it == implicitVars_.end() ? nullptr : &it->second;
+    }
+
 private:
     Diagnostics& diag_;
     Scope* moduleScope_;
     Scope* current_;
     std::vector<std::unique_ptr<Scope>> scopes_;
+    std::unordered_map<std::string, std::unordered_set<std::string>> implicitVars_;
 };
 
 } // namespace vb6c3

@@ -93,9 +93,23 @@ void CCodeGen::visit(WithStmt& node) {
         }
 
         if (!objNameLower.empty()) {
-            // P16: WithEvents控件 (优先于普通控件)
+            // Fix 161f-extlist: `With lv` —— lv 是**形参/局部持有的 ListView**
+            // (`Sub RefillList(lv As ListView)`)。ListView 是真窗口, C 侧槽变量本身
+            // 就是 HWND (调用点传的就是 vb6_hwnd_ListView1), 所以:
+            //   HWND _vb6_with_N = lv;      ← 不是 (void*)(*lv)
+            // 再把 _vb6_with_N 登记进 listViewSlotVars_, 让 .ListItems/.ColumnHeaders
+            // 走 listViewHwndExprOf → vb6_ListView_ListItems((void*)_vb6_with_N)。
+            // 否则落 COMObject 路径: `void* _vb6_with_N = (void*)(*lv)` +
+            // vb6_ComGetObjectProp(_vb6_with_N, L"ListItems") —— 拿 HWND 当 IDispatch
+            // 用, 编得过、运行期 0 行 0 列 (extlist RefillList 实测)。
+            bool isLvSlot161f = listViewSlotVars_.count(objNameLower) > 0;
             auto itWE = knownWithEventsCtrlVars_.find(objNameLower);
-            if (itWE != knownWithEventsCtrlVars_.end()) {
+            if (isLvSlot161f) {
+                withInfo.kind = WithObjKind::COMObject;  // 让 .ListItems 走 COM 标记链
+                withInfo.ctrlType = FrmControlType::ListView;
+                withInfo.ctrlOrigName = objNameLower;
+                tempType = "HWND";
+            } else if (itWE != knownWithEventsCtrlVars_.end()) {  // P16: WithEvents控件 (优先于普通控件)
                 withInfo.kind = WithObjKind::WithEventsCtrl;
                 withInfo.ctrlType = itWE->second;
                 auto itOrig = knownWithEventsCtrlOrigNames_.find(objNameLower);
@@ -567,6 +581,17 @@ void CCodeGen::visit(WithStmt& node) {
 
     withObjectVars_.push_back(tempVar);
 
+    // Fix 161f-extlist: With 目标是 ListView 槽 (形参/局部) 时, 把 _vb6_with_N 本身
+    // 也登记为 ListView 槽 —— 体 `.ListItems` / `.ColumnHeaders` 生成的 comObjExpr_
+    // 就是这个 tempVar, 登记后 listViewHwndExprOf 才能把它解析成 HWND。
+    // 弹出时 (下方 pop_back) 必须撤销登记, 否则同名 tempVar 在后续函数复用 → 假命中。
+    bool lvSlotRegistered161f = false;
+    if (withInfo.ctrlType == FrmControlType::ListView
+        && withInfo.kind == WithObjKind::COMObject) {
+        std::string tvLower161f = Symbol::toLower(tempVar);
+        lvSlotRegistered161f = listViewSlotVars_.insert(tvLower161f).second;
+    }
+
     c_.emitLine("{");
     c_.indent();
     emitStmtList(node.body);
@@ -575,6 +600,7 @@ void CCodeGen::visit(WithStmt& node) {
 
     withObjectVars_.pop_back();
     withObjectInfoStack_.pop_back();
+    if (lvSlotRegistered161f) listViewSlotVars_.erase(Symbol::toLower(tempVar));
 }
 
 

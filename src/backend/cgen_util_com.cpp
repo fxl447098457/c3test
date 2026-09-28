@@ -79,11 +79,11 @@ std::string CCodeGen::resolveComValue(const std::string& unpackType) {
     {
         std::string lvLower = Symbol::toLower(memberName);
         if (lvLower == "listitems" || lvLower == "columnheaders") {
-            std::string lvBare = listViewNameOfExpr(objExpr);
-            if (!lvBare.empty()) {
+            std::string lvHwnd = listViewHwndExprOf(objExpr);
+            if (!lvHwnd.empty()) {
                 lastExpr_ = (lvLower == "listitems")
-                    ? ("vb6_ListView_ListItems((void*)vb6_hwnd_" + lvBare + ")")
-                    : ("vb6_ListView_ColumnHeaders((void*)vb6_hwnd_" + lvBare + ")");
+                    ? ("vb6_ListView_ListItems((void*)" + lvHwnd + ")")
+                    : ("vb6_ListView_ColumnHeaders((void*)" + lvHwnd + ")");
                 isComMarker_ = false;
                 return lastExpr_;
             }
@@ -97,6 +97,14 @@ std::string CCodeGen::resolveComValue(const std::string& unpackType) {
         std::string tvBare = treeViewNameOfExpr(objExpr);
         if (!tvBare.empty()) {
             lastExpr_ = "vb6_TreeView_Nodes((void*)vb6_hwnd_" + tvBare + ")";
+            isComMarker_ = false;
+            return lastExpr_;
+        }
+        // Fix <vbeclipse>: 跨窗体 TreeView (`frmViewViews.tvwViews.Nodes`) ——
+        // objExpr 是控件句柄访问器文本, 在 externalTreeViewAccs_ 里登记过。
+        auto itExtTv = externalTreeViewAccs_.find(objExpr);
+        if (itExtTv != externalTreeViewAccs_.end()) {
+            lastExpr_ = "vb6_TreeView_Nodes((void*)" + itExtTv->second + ")";
             isComMarker_ = false;
             return lastExpr_;
         }
@@ -601,11 +609,11 @@ std::string CCodeGen::resolveComMarkerForPack(const std::string& packFnHint) {
     {
         std::string lvLower = Symbol::toLower(memName);
         if (lvLower == "listitems" || lvLower == "columnheaders") {
-            std::string lvBare = listViewNameOfExpr(objExpr);
-            if (!lvBare.empty())
+            std::string lvHwnd = listViewHwndExprOf(objExpr);
+            if (!lvHwnd.empty())
                 return (lvLower == "listitems")
-                    ? ("vb6_ListView_ListItems((void*)vb6_hwnd_" + lvBare + ")")
-                    : ("vb6_ListView_ColumnHeaders((void*)vb6_hwnd_" + lvBare + ")");
+                    ? ("vb6_ListView_ListItems((void*)" + lvHwnd + ")")
+                    : ("vb6_ListView_ColumnHeaders((void*)" + lvHwnd + ")");
         }
     }
 
@@ -615,6 +623,9 @@ std::string CCodeGen::resolveComMarkerForPack(const std::string& packFnHint) {
         std::string tvBare = treeViewNameOfExpr(objExpr);
         if (!tvBare.empty())
             return "vb6_TreeView_Nodes((void*)vb6_hwnd_" + tvBare + ")";
+        auto itExtTv = externalTreeViewAccs_.find(objExpr);
+        if (itExtTv != externalTreeViewAccs_.end())
+            return "vb6_TreeView_Nodes((void*)" + itExtTv->second + ")";
     }
 
     // C29-5b: `Toolbar1.Buttons` → 真集合对象 (同 resolveComValue 那条)。

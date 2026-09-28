@@ -416,6 +416,17 @@
             break;
         }
         case WithObjKind::COMObject: {
+            // Fix 161f-extlist: With 目标是 ListView 槽 (形参/局部) —— 走控件属性写表,
+            // 不发 vb6_ComSetProp (那是拿 HWND 当 IDispatch 用, 静默无效)。
+            if (info.ctrlType == FrmControlType::ListView) {
+                std::string writeFnLv = getControlPropWriteFn(FrmControlType::ListView, wmExpr.memberName);
+                if (!writeFnLv.empty()) {
+                    emitExpr(*node.value);
+                    std::string valExprLv = controlPropValueExpr(writeFnLv, lastExpr_, *node.value);
+                    c_.emitLine(writeFnLv + "((void*)" + tempVar + ", " + valExprLv + ");  /* With ListView slot prop write */");
+                    return;
+                }
+            }
             emitExpr(*node.value);
             std::string valExpr = std::move(lastExpr_);
             std::string packFn = comPackExpr(*node.value);

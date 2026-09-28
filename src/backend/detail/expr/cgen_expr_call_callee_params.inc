@@ -156,6 +156,10 @@
         if (maExpr.object && maExpr.object->kind == ASTNodeKind::IdentifierExpr) {
             static const std::unordered_set<std::string> builtinGlobalObjs092z = {
                 "clipboard", "screen", "printer", "forms", "debug", "err", "app",
+                // Fix <vbeclipse>: UserControl.Controls 集合 — 禁止 lookupModule 兜底
+                // 把 .Item/.Add/.Remove 抢挂到工程里恰好有同名方法的类 (List) 上
+                // (实测: Controls.Item(p) → vb6_List_Item((*p)), 接收者被首参顶掉)。
+                "controls",
                 "console"};  // Fix 161: Console 对象 (对齐 twinBASIC)
             builtinGlobalObj092z = builtinGlobalObjs092z.count(
                 Symbol::toLower(static_cast<IdentifierExpr&>(*maExpr.object).name)) > 0;

@@ -110,7 +110,14 @@ void CCodeGen::visit(PropertyDecl& node) {
             auto& simpleP = static_cast<SimpleTypeRef&>(*p->asType);
             std::string pLower = p->name;
             std::transform(pLower.begin(), pLower.end(), pLower.begin(), ::tolower);
-            auto* pSym = symTab_.lookupModule(simpleP.name);
+            // Fix 161f: 同 cgen_decl_func.cpp — 限定名 (ComctlLib.ColumnHeader) 用
+            // lookupTypeSymbol 按全名→末段查, 与 mapTypeRef 同口径。
+            auto* pSym = lookupTypeSymbol(simpleP.name);
+            if (!pSym) {
+                size_t pDot161f = simpleP.name.find('.');
+                if (pDot161f != std::string::npos)
+                    pSym = lookupTypeSymbol(simpleP.name.substr(pDot161f + 1));
+            }
             if (pSym && pSym->kind == SymbolKind::UserDefinedType) {
                 knownUdtVars_[pLower] = "vb6_type_" + cIdent(simpleP.name);
             } else if (pSym && pSym->kind == SymbolKind::Class) {
@@ -122,6 +129,9 @@ void CCodeGen::visit(PropertyDecl& node) {
             if (pSym2 && pSym2->kind == SymbolKind::Class && pSym2->isInterface) {
                 knownIfaceVars_[pLower] = pSym2->name;
             }
+            // Fix 161f: `lv As ListView` 形参槽就是 HWND —— 同 cgen_decl_func.cpp。
+            if (Symbol::toLower(simpleP.name).find("listview") != std::string::npos)
+                listViewSlotVars_.insert(pLower);
             // 注册BSTR/Double/Long类型参数到类型跟踪集合
             Vb6Type paramType = typeSys_.resolveTypeName(simpleP.name);
             if (paramType == Vb6Type::String) knownBstrVars_.insert(pLower);
@@ -254,6 +264,22 @@ void CCodeGen::visit(PropertyDecl& node) {
     }
     // Fix 086: 先将块内 Dim/Const 提升到过程顶部 (VB6 局部声明是过程级作用域)
     hoistLocalDecls(node.body);
+    // Fix <vbeclipse>: VB6 隐式变量 (无 Option Explicit 时未声明即使用) ——
+    // 语义层登记的名字在此预声明为 Variant C 局部并注册 knownVariantVars_。
+    if (currentProc_) {
+        auto* impl = symTab_.implicitVarsFor(Symbol::toLower(moduleName_),
+                                             Symbol::toLower(currentProc_->name));
+        if (impl) {
+            for (const auto& n : *impl) {
+                std::string nLower = Symbol::toLower(n);
+                if (!knownLocalVars_.count(nLower)) {
+                    knownLocalVars_.insert(nLower);
+                    knownVariantVars_.insert(nLower);
+                    c_.emitLine("vb6_VARIANT " + cIdent(n) + " = vb6_VariantEmpty();  /* 隐式变量 */");
+                }
+            }
+        }
+    }
     emitStmtList(node.body);
 
     // M22: 释放ANSI临时变量
@@ -272,6 +298,11 @@ void CCodeGen::visit(PropertyDecl& node) {
     }
     c_.dedent();
 
+    // Fix <vbeclipse>: 复原过程内被 #undef 的 Win32 宏 (隐式变量名隔离)
+    for (const auto& n : implicitMacroNames_) {
+        c_.emitLine("#pragma pop_macro(\"" + n + "\")");
+    }
+    implicitMacroNames_.clear();
     // 清理返回值变量和currentProc_
     if (node.propKind == ProcKind::PropertyGet) {
         currentReturnVar_ = "";

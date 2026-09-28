@@ -49,6 +49,8 @@ int vb6_GetControlWidth(void* hwnd);
 void vb6_SetControlWidth(void* hwnd, int width);
 int vb6_GetControlHeight(void* hwnd);
 void vb6_SetControlHeight(void* hwnd, int height);
+// Fix 162a: obj.Move l[,t[,w[,h]]] —— twips 进; mask 位 1=L 2=T 4=W 8=H, 缺失位不变
+void vb6_ControlMove(void* hwnd, double l, double t, double w, double h, int mask);
 
 // P11.8: hWnd attribute (read-only, returns the Win32 HWND as pointer)
 void* vb6_GetControlHwnd(void* hwnd);
@@ -84,6 +86,12 @@ void vb6_SetControlBackColor(void* hwnd, int color);
 // 应用 Fore/Back 色并返回背景刷; 未设色返回 0 (调用方走 DefWindowProcW)。
 // 主窗体 WndProc (生成代码) 与 SSTab 容器子类共用。
 LRESULT vb6_ApplyCtlColorStatic(HDC hdc, HWND child);
+
+// Fix 162f-extlist: WM_CTLCOLORBTN 统一答复 (Button 类子控件要背景刷) ——
+// CheckBox/OptionButton 返回 HOLLOW_BRUSH (透明); Frame(BS_GROUPBOX) 返回
+// **父窗底色的实心刷** (经典 groupbox 标题的 FillRect 底, 空刷会露出自身白底)。
+// 同族调用方: 生成窗体 WndProc 的 WM_CTLCOLORBTN 分支 + Frame 子类化过程。
+LRESULT vb6_CtlColorBtnBrush(HWND child, HWND parent);
 
 
 #ifdef __cplusplus

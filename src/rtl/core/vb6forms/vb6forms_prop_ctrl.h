@@ -488,6 +488,7 @@ int vb6_CdGetMin(void* hwnd);              void vb6_CdSetMin(void* hwnd, int v);
 int vb6_CdGetMax(void* hwnd);              void vb6_CdSetMax(void* hwnd, int v);
 int vb6_CdGetCopies(void* hwnd);           void vb6_CdSetCopies(void* hwnd, int v);
 int vb6_CdGetFontSize(void* hwnd);         void vb6_CdSetFontSize(void* hwnd, int v);
+int vb6_CdGetFilterIndex(void* hwnd);      void vb6_CdSetFilterIndex(void* hwnd, int v);
 
 // 六个 Show*：1 = 用户确认并已写回读数；0 = 取消（CancelError=True 时顺带报 32755）
 int vb6_CdShowOpen(void* hwnd);

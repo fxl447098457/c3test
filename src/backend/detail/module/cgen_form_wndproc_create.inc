@@ -45,23 +45,19 @@
     c_.emitLine("vb6_Forms_Register((void*)hwnd);");
 
     // P24: Form.Icon from .frx - load and set window icon
-    {
-        auto iconIt = frmDesc.formControl.properties.find("Icon");
-        if (iconIt != frmDesc.formControl.properties.end() && iconIt->second.type == FrmValueType::FrxReference && frxLoaded) {
-            std::string varName = "vb6_frx_icon_" + cIdent(formName);
-            c_.emitLine("{ void* vb6_icon = vb6_LoadIconFromMemory(" + varName + ", " + varName + "_size);");
-            c_.emitLine("  if (vb6_icon) { SendMessageW(hwnd, WM_SETICON, ICON_BIG, (LPARAM)vb6_icon);");
-            c_.emitLine("    SendMessageW(hwnd, WM_SETICON, ICON_SMALL, (LPARAM)vb6_icon); } }");
-        }
+    // Fix 161f: 判定用 prelude 算好的 formIconHasData_ (readPicture 非空),
+    // 与数组生成同一判定, 避免"引用发了、数组没生成"的 C2065。
+    if (formIconHasData_) {
+        std::string varName = "vb6_frx_icon_" + cIdent(formName);
+        c_.emitLine("{ void* vb6_icon = vb6_LoadIconFromMemory(" + varName + ", " + varName + "_size);");
+        c_.emitLine("  if (vb6_icon) { SendMessageW(hwnd, WM_SETICON, ICON_BIG, (LPARAM)vb6_icon);");
+        c_.emitLine("    SendMessageW(hwnd, WM_SETICON, ICON_SMALL, (LPARAM)vb6_icon); } }");
     }
     // P24: Form.Picture from .frx - load and store as window property (for WM_PAINT)
-    {
-        auto picIt2 = frmDesc.formControl.properties.find("Picture");
-        if (picIt2 != frmDesc.formControl.properties.end() && picIt2->second.type == FrmValueType::FrxReference && frxLoaded) {
-            std::string varName = "vb6_frx_bgpic_" + cIdent(formName);
-            c_.emitLine("{ void* vb6_bgpic = vb6_LoadPictureFromMemory(" + varName + ", " + varName + "_size);");
-            c_.emitLine("  if (vb6_bgpic) SetPropW(hwnd, L\"VB6_Picture\", (HANDLE)vb6_bgpic); }");
-        }
+    if (formPicHasData_) {
+        std::string varName = "vb6_frx_bgpic_" + cIdent(formName);
+        c_.emitLine("{ void* vb6_bgpic = vb6_LoadPictureFromMemory(" + varName + ", " + varName + "_size);");
+        c_.emitLine("  if (vb6_bgpic) SetPropW(hwnd, L\"VB6_Picture\", (HANDLE)vb6_bgpic); }");
     }
 
     // P20-40: 从.frm属性初始化Form属性
@@ -173,6 +169,17 @@
     c_.emitLine("break;");
     c_.dedent();
     c_.emitLine("}");
+
+    // Fix 162f-extlist: WM_CTLCOLORBTN —— Button 类子控件 (CheckBox/OptionButton/
+    // Frame) 经这条消息向**父窗**要绘制刷子。
+    //   CheckBox/OptionButton → 透明 (VB6: 文字直接坐在父窗灰底上, 不遮相邻框线);
+    //   Frame(BS_GROUPBOX)    → **父窗底色的实心刷** —— 经典 groupbox 标题先
+    //     FillRect 再 DrawText, 空刷会让标题后露一条**白块** (Fix 162f 实测)。
+    // 统一走 RTL vb6_CtlColorBtnBrush (按子控件样式分流 + 实心刷按控件缓存)。
+    c_.emitLine("case WM_CTLCOLORBTN:");
+    c_.indent();
+    c_.emitLine("return vb6_CtlColorBtnBrush((HWND)lParam, hwnd);  /* Fix 162f: 按钮类背景刷 */");
+    c_.dedent();
 
     // Fix 058: 处理延迟的 Form_Load (WM_USER+0x100 = 0x7FF0)
     if (formLoadSym) {

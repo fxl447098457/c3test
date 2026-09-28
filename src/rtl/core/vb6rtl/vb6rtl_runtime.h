@@ -62,6 +62,9 @@ static inline void vb6_DebugPrint(BSTR s) {
 
 // vb6_LoadResData — LoadResData (returns empty Variant, resource loading not supported)
 vb6_VARIANT vb6_LoadResData(int32_t resourceId, int32_t resourceType);
+// Fix <vbeclipse>: LoadResPicture / LoadResString (stub, empty Variant)
+vb6_VARIANT vb6_LoadResPicture(int32_t resourceId, int32_t resourceType);
+vb6_VARIANT vb6_LoadResString(int32_t resourceId);
 
 #ifdef __cplusplus
 }

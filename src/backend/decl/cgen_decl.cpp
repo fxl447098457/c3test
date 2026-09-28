@@ -515,7 +515,21 @@ void CCodeGen::visit(ConstDecl& node) {
         } else if (cType == "double") {
             knownDoubleVars_.insert(lower);
         } else if (cType == "vb6_VARIANT") {
-            knownVariantVars_.insert(lower);
+            // Fix 161f: 无 As Type 的 Const (Private Const LVM_GETHEADER = ...) 的
+            // cType 是 mapTypeRef(nullptr) = "vb6_VARIANT"。但 VB6 语义上无类型
+            // **整型** Const 在数值上下文就是数值 — 落 knownVariantVars_ 会让
+            // Declare 调用的实参发射包 vb6_VariantToLong(<int 宏>) → C2440
+            // "无法从 int 转换为 vb6_VARIANT" (extlist MListView SendMessage 实测)。
+            // 整数可折叠的登记 knownLongVars_; 字符串/浮点仍按 Variant (旧路径)。
+            int64_t cv161f = 0;
+            if (node.value && tryEvalConstInt(node.value.get(), cv161f)) {
+                knownLongVars_.insert(lower);
+                // Fix 161f (续): 过程级集合会被 clear, 必须另存一份模块级表,
+                // 供标识符内联数值使用。
+                moduleIntConstValues_[lower] = cv161f;
+            } else {
+                knownVariantVars_.insert(lower);
+            }
         }
     }
 

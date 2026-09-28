@@ -227,6 +227,18 @@ intptr_t __stdcall vb6_di_timeGetTime() {
     return ((intptr_t (WINAPI *)(void))timeGetTime)();
 }
 
+/* timeGetDevCaps (winmm) — Fix 161f extlist CStopWatch.cls:23.
+ * 用户声明的 TIMECAPS 是**自己的** Type (wPeriodMin/wPeriodMax As Long = 两个
+ * int32_t, 共 8 字节), 与 mmsystem.h 的同名结构布局一致; 这里按 void* 转发,
+ * 只保证指针原样传给 API。C3 的 ByRef Long 槽位在 C 侧就是 int32_t, 故
+ * uSize 用一个 TIMECAPS 的尺寸即可。
+ * 注意: 生成的原型是 `intptr_t __stdcall vb6_di_timeGetDevCaps(void*, intptr_t)`,
+ * 首个形参在调用点是 UDT 指针 (void* 语义), 不能写成 intptr_t 会告警截断风险,
+ * 但为了与生成头完全一致用 void*。 */
+intptr_t __stdcall vb6_di_timeGetDevCaps(void* lpTimeCaps, intptr_t uSize) {
+    return ((intptr_t (WINAPI *)(void*, uint32_t))timeGetDevCaps)(lpTimeCaps, (uint32_t)uSize);
+}
+
 /* CreatePipe */
 intptr_t __stdcall vb6_di_CreatePipe(int32_t* phReadPipe, int32_t* phWritePipe, void* lpPipeAttributes, intptr_t nSize) {
     return ((intptr_t (WINAPI *)(int32_t*, int32_t*, void*, intptr_t))CreatePipe)(phReadPipe, phWritePipe, lpPipeAttributes, nSize);

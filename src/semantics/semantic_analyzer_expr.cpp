@@ -159,6 +159,17 @@ void SemanticAnalyzer::visit(IdentifierExpr& node) {
         } else if (optionExplicit_ && pass_ == 2) {
             diag_.warn(DiagnosticID::SemUndeclaredIdentifier, node.loc,
                 "未声明的标识符: '" + node.name + "' (可能来自其他模块)");
+        } else if (pass_ == 2 && !optionExplicit_ && currentProc_ && currentModule_) {
+            // Fix <vbeclipse>: VB6 隐式变量声明 — 工程未写 Option Explicit 时,
+            // 首次使用的裸标识符按 Variant 局部变量成立 (PopupMenu.cls 的
+            // Key/Text/msf_hilite 即真实案例)。登记进本过程作用域与隐式表
+            // (供发码侧在过程序言预声明 C 局部), 不再留成未定义裸名。
+            auto v = std::make_unique<Symbol>(SymbolKind::Variable, node.name,
+                Vb6Type::Variant, node.loc, AccessLevel::Private);
+            v->isReferenced = true;
+            symTab_.define(std::move(v));
+            symTab_.addImplicitVar(Symbol::toLower(currentModule_->moduleName),
+                                   Symbol::toLower(currentProc_->name), node.name);
         }
         lastExprType_ = Vb6Type::Variant;  // 宽松模式: 推导为Variant
     }

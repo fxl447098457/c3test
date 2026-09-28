@@ -389,6 +389,37 @@
             c_.emitLine("SendMessageW((HWND)" + hwndVar + ", WM_SETTEXT, 0, (LPARAM)L\"" + delayedText + "\");");
         }
 
+        // Fix 162c-extlist: CheckBox/OptionButton 设计期 Value —— .frm 里
+        // `Value = -1  'True` 此前从不消费, Option1(0) 默认选中态丢失
+        // (extlist 参考图第一个单选钮是实心点, 我们全空)。VB6 的 Value 只有两态,
+        // 非 0 即勾上 → BM_SETCHECK(BST_CHECKED)。
+        if (ctrl.controlType == FrmControlType::CheckBox ||
+            ctrl.controlType == FrmControlType::OptionButton) {
+            auto vIt162c = ctrl.properties.find("Value");
+            if (vIt162c != ctrl.properties.end() && vIt162c->second.intValue != 0) {
+                std::string vNLower = ctrl.controlName; std::transform(vNLower.begin(), vNLower.end(), vNLower.begin(), ::tolower);
+                std::string vHwnd = knownControlArrays_.count(vNLower) ?
+                    ("vb6_CtrlArr_GetAt(&vb6_arr_" + cIdent(ctrl.controlName) + ", " +
+                     std::to_string(ctrl.index >= 0 ? ctrl.index : 0) + ")") :
+                    ("vb6_hwnd_" + cIdent(ctrl.controlName));
+                c_.emitLine("vb6_SetCheckValue((void*)" + vHwnd + ", 1);  /* design Value=True */");
+            }
+        }
+
+        // Fix 162c-extlist: Label 设计期 AutoSize=True —— 此前从不消费
+        // (extlist 的 Label2/3/4 按设计期 caption "Label2" 的宽度留在原地)。
+        if (ctrl.controlType == FrmControlType::Label) {
+            auto asIt162c = ctrl.properties.find("AutoSize");
+            if (asIt162c != ctrl.properties.end() && asIt162c->second.intValue != 0) {
+                std::string asNLower = ctrl.controlName; std::transform(asNLower.begin(), asNLower.end(), asNLower.begin(), ::tolower);
+                std::string asHwnd = knownControlArrays_.count(asNLower) ?
+                    ("vb6_CtrlArr_GetAt(&vb6_arr_" + cIdent(ctrl.controlName) + ", " +
+                     std::to_string(ctrl.index >= 0 ? ctrl.index : 0) + ")") :
+                    ("vb6_hwnd_" + cIdent(ctrl.controlName));
+                c_.emitLine("vb6_SetLabelAutoSize((void*)" + asHwnd + ", -1);  /* design AutoSize */");
+            }
+        }
+
         // P20-12: CausesValidation property from .frm (default=True, only set when explicitly False)
         {
             auto cvIt = ctrl.properties.find("CausesValidation");

@@ -166,6 +166,14 @@
     // 模块级声明时登记, 过程开始时回灌.
     std::unordered_set<std::string> moduleVariantVars_;
 
+    // Fix 161f: 无 As Type 但**整数可折叠**的 Const (小写名 → 折叠值)。
+    // 这类 Const 在符号表里 type = Variant (未指定类型)，而 C 侧已 emit 成
+    // `#define NAME (4127)` —— 过程入口 known*Vars_ 被 clear 后重新按符号表
+    // 判定会得到 Variant，于是调用实参被包成 vb6_VariantToLong(LVM_GETHEADER)
+    // → C2440 "无法从 int 转换为 vb6_VARIANT" (extlist MListView SendMessage)。
+    // 登记后标识符直接内联数值，与已有 `As Long` Const 的内联口径一致。
+    std::unordered_map<std::string, int64_t> moduleIntConstValues_;
+
     // Fix 091p: 类模块/窗体字段中的 Variant 名字集合 (小写). 类字段同样在过程
     // 开始时不可见 (knownVariantVars_ 被 clear), 但字段访问形如 me->field,
     // 前缀明确, 故单独成集合, 只在 me-> 形态下参与判定, 避免污染裸名判定.
@@ -284,6 +292,8 @@
     // M22: ANSI临时变量待释放列表 (变量名) + 计数器
     // 在Declare ANSI函数调用前声明临时char*变量, 调用后立即FreeANSI
     std::vector<std::string> ansiTempsToFree_;
+    // Fix <vbeclipse>: 本过程被 push_macro/#undef 隔离的隐式变量名 (出过程 pop 复原)
+    std::vector<std::string> implicitMacroNames_;
     // Fix 161b-decl-out: Declare A 版 ByVal String **出参回写**登记表。
     // VB6 语义: ByVal String 当缓冲时, 被调用方写入的字节必须按 NUL 截断回写成
     // 新 String (GetUserName/GetModuleFileName 正是靠这条工作)。C3 原先只生成
@@ -430,6 +440,8 @@
     // P20-36: 菜单项ID映射 (小写菜单名 → menuId, 与emitMenuItem/emitMenuClickDispatch一致)
     std::unordered_map<std::string, int> knownMenuIds_;
     std::string knownMenuFormHwnd_;  // 当前窗体HWND变量名 (如 "vb6_hwnd_Form1")
+    // Fix <vbeclipse>: 菜单控件数组基址 (小写菜单名 → 首元素 menuId)
+    std::unordered_map<std::string, int> knownMenuArrayBaseIds_;
 
     // P7.5: 窗体名 (小写)，用于识别 Form.Caption 等窗体自身属性
     std::string knownFormName_;
@@ -458,12 +470,22 @@
     // C29-7: 原生复刻的 ListView 控件 (登记裸控件名, 如 "ListView1")。
     // ⚠ ListView 是**真窗口**, 所以 RTL 各函数第一参要的是 **HWND 槽 vb6_hwnd_X** ——
     // 与 ImageList 那族的 vb6_com_X (无窗口, 槽里是复刻实例指针) 不同, 别照抄。
-    std::unordered_set<std::string> listViewVars_;
-    // objExpr 是否落在一个已登记的 ListView 上 (返回裸控件名, 否则空串)。
+    std::unordered_set<std::string> listViewVars_;    // objExpr 是否落在一个已登记的 ListView 上 (返回裸控件名, 否则空串)。
     // 形态: ① 裸槽 vb6_hwnd_X
     //       ② 集合对象 vb6_ListView_ListItems((void*)vb6_hwnd_X) / ...ColumnHeaders(...)
     //       ③ Item 结果 vb6_ComCallObject(②, L"Item", …) —— ③ 靠 ② 的子串命中
-    std::string listViewNameOfExpr(const std::string& objExpr) const {
+    // Fix 161f: 形参/局部变量持有 ListView 的名集合 (`Sub RefillList(lv As ListView)`)。
+    // 这类槽在 C 侧**本身就是 HWND** (调用点传的实参就是 vb6_hwnd_ListView1),
+    // 与控件名集合 listViewVars_ (那是窗体设计期控件, 要拼 vb6_hwnd_<名>) 分开存,
+    // 因为拼法不同 —— 形参直接就是槽变量名, 不能再加 vb6_hwnd_ 前缀。
+    std::unordered_set<std::string> listViewSlotVars_;
+
+    // 返回该 objExpr 对应的 **ListView HWND 表达式** (可直接当 (void*) 实参用)。
+    // 形态: ① 裸槽 vb6_hwnd_X (设计期控件)
+    //       ② 集合对象 vb6_ListView_ListItems((void*)vb6_hwnd_X) / ...ColumnHeaders(...)
+    //       ③ Item 结果 vb6_ComCallObject(②, L"Item", …) —— ③ 靠 ② 的子串命中
+    //       ④ Fix 161f: 裸形参/局部变量名 (lv / (*lv)) —— 本身就是 HWND
+    std::string listViewHwndExprOf(const std::string& objExpr) const {
         static const char* kHeads[] = {
             "vb6_ListView_ListItems((void*)vb6_hwnd_",
             "vb6_ListView_ColumnHeaders((void*)vb6_hwnd_" };
@@ -475,17 +497,31 @@
             while (e < objExpr.size()
                    && (isalnum((unsigned char)objExpr[e]) || objExpr[e] == '_')) e++;
             std::string n = objExpr.substr(s, e - s);
-            if (listViewVars_.count(n)) return n;
+            if (listViewVars_.count(n)) return "vb6_hwnd_" + n;
+            if (listViewSlotVars_.count(n)) return n;   // 形参本身就是 HWND
         }
         if (objExpr.size() > 9 && objExpr.compare(0, 9, "vb6_hwnd_") == 0) {
             std::string n = objExpr.substr(9);
-            if (listViewVars_.count(n)) return n;
+            if (listViewVars_.count(n)) return "vb6_hwnd_" + n;
+        }
+        // Fix 161f: 裸形参/局部名 (lv) 或 ByRef 解引用 ((*lv)) —— C 侧已是 HWND。
+        {
+            std::string b = objExpr;
+            if (b.size() > 4 && b[0] == '(' && b[1] == '*' && b.back() == ')')
+                b = b.substr(2, b.size() - 3);
+            size_t sp = b.find_first_of(" \t");
+            if (sp != std::string::npos) b = b.substr(0, sp);
+            if (!b.empty() && listViewSlotVars_.count(b)) return b;
         }
         return "";
     }
+    // 兼容旧调用点: 只要一个"是 ListView 宿主"的真假判据。
+    bool isListViewHostExpr(const std::string& objExpr) const {
+        return !listViewHwndExprOf(objExpr).empty();
+    }
+    // Fix 161f: 保留旧名做别名, 老调用点 (frmLVStyles 系列的 C29-7 路径) 语义不变。
     std::string listViewHwndVarOfExpr(const std::string& objExpr) const {
-        std::string n = listViewNameOfExpr(objExpr);
-        return n.empty() ? "" : "vb6_hwnd_" + n;
+        return listViewHwndExprOf(objExpr);
     }
     // C29-Data: Data 控件 (不可见类 VB6_DATA 属性宿主, 登记裸控件名如 "Data1")。
     // Recordset 链 (Data1.Recordset.Fields("x").Value / .MoveNext / .BOF) 全直译 RTL。
@@ -657,6 +693,10 @@
         if (treeViewVars_.count(objExpr)) return objExpr;
         return "";
     }
+    // Fix <vbeclipse>: 跨窗体 TreeView。`frmViewViews.tvwViews` 解析成控件句柄
+    // 访问器 `vb6_form_ctrl_<Form>_<Ctrl>()` 时在这里登记 (键=值=访问器文本),
+    // 供 Nodes 集合两条路 (resolveComMember / resolveComValue) 认领。
+    mutable std::unordered_map<std::string, std::string> externalTreeViewAccs_;
     // C29-DT-c: DTPicker 的裸名登记。认法照 treeViewNameOfExpr —— 它也是真窗口，
     // 判据方法 (SimChange/SimDropDown/SimCloseUp) 的宿主槽只会是 `vb6_hwnd_<裸名>`，
     // 名字比对同样要过标识符边界 (dt1 不能命中 dt10)。

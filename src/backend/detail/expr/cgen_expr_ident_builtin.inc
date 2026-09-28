@@ -177,6 +177,9 @@
         {"mirr",           "vb6_MIRR"},
         // Fix 048: LoadResData
         {"loadresdata", "vb6_LoadResData"},
+        // Fix <vbeclipse>: LoadResPicture / LoadResString (VbEclipse modResources)
+        {"loadrespicture", "vb6_LoadResPicture"},
+        {"loadresstring", "vb6_LoadResString"},
         // P20-37: Registry functions
         {"savesetting",    "vb6_SaveSetting"},
         {"getsetting",     "vb6_GetSetting"},
@@ -391,6 +394,7 @@
             //   PropertyChanged "PictureColorize"
             // 此前落到未解析兜底 → 裸符号 ScaleX/AsyncRead/PropertyChanged
             // → LNK2019 (Charts 2020 LabelPlus/ucChartArea/... ).
+            {"controls", "Controls"},  // Fix <vbeclipse>: UserControl.Controls 集合
             {"scalex", "ScaleX"},
             {"scaley", "ScaleY"},
             {"asyncread", "AsyncRead"},

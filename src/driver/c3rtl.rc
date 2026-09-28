@@ -3,6 +3,51 @@
 // at user-program build time. The P11.3 pre-compiled .lib scheme was
 // reverted: c3 is open source, no source protection needed.
 // 26 .h headers + 67 .c sources + 13 .inc fragments (all arch-neutral) = 106 resources.
+// Fix 162f-extlist: WM_CTLCOLORBTN 改走 RTL vb6_CtlColorBtnBrush —— Frame(BS_GROUPBOX)
+// 标题的 FillRect 底需要**父窗底色的实心刷** (此前空刷 → 标题后露白块); 复选/单选仍空刷。
+// 窗体 WndProc (cgen_form_wndproc_create.inc) + Frame 子类化 (vb6forms.c) 同口径。
+// vb6forms_ctrl.c + vb6forms_prop.h。
+// Fix 163-extlist: 所有 BUTTON 类控件关 comctl6 视觉样式 (vb6_DisableControlTheme) ——
+// 带样式的命令按钮/单选钮由主题绘制器渲染文字 (主题字体 + ClearType), 比窗体标题/
+// 复选框的 MS Sans Serif 8.25pt 点阵明显模糊; 关样式后统一走经典 GDI 文本渲染。
+// vb6forms.c。
+// Fix 162e-extlist: WM_CTLCOLORBTN 统一返回 HOLLOW_BRUSH (VB6 透明语义) ——
+// (1) 生成窗体 WndProc (cgen_form_wndproc_create.inc): CheckBox/OptionButton/
+//     Frame 标题的文字背景不再实色填充, 透出父窗灰底, 不遮相邻控件框线;
+// (2) vb6_GroupBoxSubclassProc 同口径分支 (Frame 内 checkbox 的直接父窗是 Frame)。
+// 命令按钮忽略该刷子, 不受影响。
+// Fix 162d-extlist: (1) groupbox 关主题后补子类化 WM_ERASEBKGND 填父窗体底色 ——
+// 窗体 WS_CLIPCHILDREN (Fix 124) + 经典 groupbox 不填内部 → Frame 内部是
+// "从未画过"的白; VB6 观感 = 内部透出 BackColor (vb6_GroupBoxSubclassProc)。
+// (2) cgen_form_frame_menu.inc 容器子控件路径补发设计期 Value/AutoSize
+// (Fix 162c 只覆盖顶层路径, Frame 里的 Option1/Label 仍落空), Caption 缺省
+// 同口径改 ""。vb6forms.c + cgen_form_frame_menu.inc。
+// Fix 162c-extlist: 对照 VB6 参考图补四处观感 —— (1) Frame(BS_GROUPBOX) 关主题,
+// 修主题版 groupbox 白底把 240 灰 label 衬成色块; (2) ColumnHeaders.Add 省略
+// width 的固定默认宽 72→115 (参考图 144px 物理 = 125% DPI, 修正 DPI 标定);
+// (3) medium date 中文环境走 yy-MM-dd; (4) 设计期 Option/Check Value=True 与
+// Label AutoSize 落地, Caption 缺省改 "" (Frame2 不再显示控件名)。
+// vb6forms.c / vb6forms_listview.c / vb6rtl_format.c + cgen 两处 .inc。
+// Fix 162b-extlist: Format 命名日期/时间格式补全 —— "medium date"/"medium time"/
+// "general date" 加入命名表 (原先被当用户格式串逐字符解析 → "12e14u12" 乱码);
+// 新增 vb6_fmtNamedDateTime 走 locale API/VB6 规格 (short date→DATE_SHORTDATE、
+// medium date→d-MMM-yy、medium time→hh:mm tt、short time→HH:mm...), 并在
+// VT_DATE 与数值两条入口接入 (原先 short date/short time/long time 落数值
+// 分支输出序列号 "45331")。vb6rtl_format.c + format_parse/format_extract.inc。
+// Fix 161f-extlist: Screen.MousePointer 全局读/写 (vb6_Screen_MousePointer/
+// vb6_Screen_SetMousePointer, vb6rtl_system.c/builtin.h) —— 类模块 (CWaitCursor)
+// 里的 Screen 全局对象早先落 me->Screen → C2039。
+// Fix 162a-extlist: `obj.Move l[,t[,w[,h]]]` 语言级方法 (vb6_ControlMove,
+// vb6forms_ctrl.c/prop.h) —— 之前落 vb6_ComGetObjectProp(hwnd,L"Move") 必失败,
+// Form_Load/Form_Resize 布局全静默失效 (ListView 停在设计宽、只 5 列可见)。
+// Fix 161f-extlist(3): ListView lvSyncAll 全量重建 → **增量同步** (syncedCols/
+// syncedRows + lvSyncCell), 修 RefillList(500行×10列) O(n²) 卡死窗口 (打不开)。
+// Fix 161f-extlist(4): ColumnHeaders.Add 省略 width (Missing) 时用 **固定默认列宽
+// 72px** (VB6 行为, 定标自基准截图 10 列等宽 144px@2x) —— 原先折成 0 导致 10 列
+// 全 0 像素宽、500 行不可见。同时补 SetColumnWidth 的真下发 (LVM_SETCOLUMNWIDTH),
+// 否则 Flip/Adjust 改宽无效; lvSyncFull 补 LVM_DELETECOLUMN, 否则重同步列翻倍。
+// Fix 161f-extlist(2): di/win32 桩补 vb6_di_timeGetDevCaps (winmm) —— Declare
+// Lib "winmm.dll" 的 timeGetDevCaps 无转发桩 ⇒ LNK2019 (CStopWatch.cls:23)。
 // Fix 161-console: Console 对象 (twinBASIC 口径) + stdin 双路径 (控制台 ReadConsoleW /
 // 管道 ReadFile+代码页); vb6_InputBox 弃 fgetws 改走 vb6_ConReadLine。
 // Fix 161b-decl-out: Declare A 版 ByVal String 出参回写 —— 新增 vb6_BSTR_FromANSIBuf

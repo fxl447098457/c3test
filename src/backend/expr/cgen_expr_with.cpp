@@ -36,6 +36,22 @@ void CCodeGen::visit(WithMemberExpr& node) {
             lastExpr_ = tempVar + "  /* With COM ." + node.memberName + " */";
             return;
         }
+        // Fix <vbeclipse>: With <CommonDialog> 块内的 .ShowOpen / .ShowSave / …
+        // 与成员侧 cgen_expr_member 的 CD 那一刀同构：打 com 标记（这里存的是
+        // With 临时变量名，消费侧见 cgen_expr_call_callee_withm.inc）。不接的
+        // 话落到 warn 兜底 → `tempVar.ShowOpen()` → C2039 "不是 HWND__ 的成员"。
+        if (info.ctrlType == FrmControlType::CommonDialog) {
+            if (memLower == "showopen" || memLower == "showsave" || memLower == "showcolor"
+                || memLower == "showfont" || memLower == "showprinter" || memLower == "showabout") {
+                comObjExpr_ = tempVar;
+                comMemberName_ = node.memberName;
+                isComMarker_ = true;
+                isEarlyBoundCom_ = false;
+                earlyBoundSym_ = nullptr;
+                lastExpr_ = tempVar + "  /* With CD ." + node.memberName + " */";
+                return;
+            }
+        }
         // .Property → vb6_GetControlXxx(tempVar) or Menu prop
         std::string readFn = getControlPropReadFn(info.ctrlType, node.memberName);
         if (!readFn.empty()) {
@@ -64,6 +80,19 @@ void CCodeGen::visit(WithMemberExpr& node) {
         return;
     }
     case WithObjKind::COMObject: {
+        // Fix 161f-extlist: With 目标是 ListView 槽 (形参/局部) —— `.View` / `.hWnd`
+        // / `.Sorted` 等标量属性走控件读表, 不让它落 COM 晚绑定
+        // (vb6_ComGetStringProp(_vb6_with_N, L"hWnd") = 拿 HWND 当 IDispatch →
+        //  hWnd 读回 Empty ⇒ 下游 SendMessage 全打 0; extlist MListViewEx 实测)。
+        // 集合成员 (.ListItems/.ColumnHeaders) 不在这张表, 保持 COM 标记链
+        // (下游 cgen_expr_call_com_bind.inc 的 listViewHwndExprOf 会认这枚 temp)。
+        if (info.ctrlType == FrmControlType::ListView) {
+            std::string readFnLv = getControlPropReadFn(FrmControlType::ListView, node.memberName);
+            if (!readFnLv.empty()) {
+                lastExpr_ = readFnLv + "((void*)" + tempVar + ")  /* With ListView slot .Property */";
+                return;
+            }
+        }
         // .Property → 设置COM标记，让下游(IndexOrCallExpr/AssignmentStmt)处理
         comObjExpr_ = tempVar;
         comMemberName_ = node.memberName;

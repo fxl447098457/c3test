@@ -108,6 +108,53 @@
         }
     }
 
+    // ============================================================
+    // Fix 162a: X.Move l[, t[, w[, h]]] —— VB6 语言级方法 (Form/控件通用)。
+    // 之前落 vb6_ComGetObjectProp(hwnd, L"Move") → 在 HWND 上取属性必失败,
+    // Form_Load/Form_Resize 的布局全部静默失效 (extlist 实测: ListView 停在
+    // 设计宽 5835 twips 只 5 列可见; 基准 VB6 里被 Move 拉到全宽 10 列全见)。
+    // 生成 vb6_ControlMove(hwnd, L,T,W,H, mask); mask 位 1=L 2=T 4=W 8=H,
+    // RTL 侧缺失位保持当前值, 单位 twips 与 Left/Top/Width/Height 一致。
+    // ============================================================
+    if (node.callee && node.callee->kind == ASTNodeKind::MemberAccessExpr) {
+        auto& maMV = static_cast<MemberAccessExpr&>(*node.callee);
+        if (Symbol::toLower(maMV.memberName) == "move" && node.named.empty()
+            && node.positional.size() <= 4 && maMV.object) {
+            std::string hwndMV;
+            if (maMV.object->kind == ASTNodeKind::IdentifierExpr) {
+                auto& objIdMV = static_cast<IdentifierExpr&>(*maMV.object);
+                std::string objLowerMV = Symbol::toLower(objIdMV.name);
+                auto itCtlMV = knownFormControls_.find(objLowerMV);
+                if (itCtlMV != knownFormControls_.end()) {
+                    hwndMV = makeCtrlHwndArg(objLowerMV, itCtlMV->second);
+                } else if (listViewSlotVars_.count(objLowerMV)) {
+                    hwndMV = objLowerMV;   // Fix 161f: 槽变量本身就是 HWND
+                } else if (objLowerMV == "me") {   // 保险: Me 被归为 IdentifierExpr 的解析器
+                    auto itOrigMV = knownFormControlOriginalNames_.find(knownFormName_);
+                    hwndMV = "vb6_hwnd_" + (itOrigMV != knownFormControlOriginalNames_.end()
+                                            ? cIdent(itOrigMV->second) : moduleName_);
+                }
+            } else if (maMV.object->kind == ASTNodeKind::MeExpr
+                       && isFormModule_ && !knownFormName_.empty()) {
+                auto itOrigMV = knownFormControlOriginalNames_.find(knownFormName_);
+                hwndMV = "vb6_hwnd_" + (itOrigMV != knownFormControlOriginalNames_.end()
+                                        ? cIdent(itOrigMV->second) : moduleName_);
+            }
+            if (!hwndMV.empty()) {
+                std::string aMV[4] = {"0", "0", "0", "0"};
+                for (size_t i = 0; i < node.positional.size(); i++) {
+                    emitExpr(*node.positional[i]);
+                    aMV[i] = std::move(lastExpr_);
+                }
+                int maskMV = (1 << (int)node.positional.size()) - 1;
+                lastExpr_ = "{ vb6_ControlMove(" + hwndMV + ", " + aMV[0] + ", "
+                          + aMV[1] + ", " + aMV[2] + ", " + aMV[3] + ", "
+                          + std::to_string(maskMV) + "); (void)0; }";
+                return;
+            }
+        }
+    }
+
     if (node.callee && node.callee->kind == ASTNodeKind::MemberAccessExpr
         && !node.positional.empty() && node.named.empty()) {
         auto& maExpr = static_cast<MemberAccessExpr&>(*node.callee);

@@ -701,13 +701,17 @@
         if (hasMouseUp || hasFormClick43) {
             c_.emitLine("case WM_LBUTTONUP: case WM_RBUTTONUP: case WM_MBUTTONUP: {");
             c_.indent();
-            c_.emitLine("{ int16_t vb6_button = 0; int16_t vb6_shift = 0;");
-            c_.emitLine("if (msg == WM_LBUTTONUP) vb6_button = 1;");
-            c_.emitLine("else if (msg == WM_RBUTTONUP) vb6_button = 2;");
-            c_.emitLine("else if (msg == WM_MBUTTONUP) vb6_button = 4;");
-            c_.emitLine("if (wParam & MK_SHIFT) vb6_shift |= 1; if (wParam & MK_CONTROL) vb6_shift |= 2; if (GetKeyState(VK_MENU) & 0x8000) vb6_shift |= 4;");
-            c_.emitLine("float vb6_x = (float)(int16_t)LOWORD(lParam); float vb6_y = (float)(int16_t)HIWORD(lParam);");
+            // Fix 161f: 参数计算裸块只在真有 Form_MouseUp 处理器时才发。
+            // 此前 "{ int16_t vb6_button ... " 的闭合 "}" 挂在 MouseUp 调用行尾,
+            // 工程"只有 Form_Click 没有 Form_MouseUp"时裸块永不闭合 ⇒ 后续所有
+            // 函数定义被吞进 WndProc ⇒ C2143/C2065 雪崩 (extlist 实测)。
             if (hasMouseUp) {
+                c_.emitLine("{ int16_t vb6_button = 0; int16_t vb6_shift = 0;");
+                c_.emitLine("if (msg == WM_LBUTTONUP) vb6_button = 1;");
+                c_.emitLine("else if (msg == WM_RBUTTONUP) vb6_button = 2;");
+                c_.emitLine("else if (msg == WM_MBUTTONUP) vb6_button = 4;");
+                c_.emitLine("if (wParam & MK_SHIFT) vb6_shift |= 1; if (wParam & MK_CONTROL) vb6_shift |= 2; if (GetKeyState(VK_MENU) & 0x8000) vb6_shift |= 4;");
+                c_.emitLine("float vb6_x = (float)(int16_t)LOWORD(lParam); float vb6_y = (float)(int16_t)HIWORD(lParam);");
                 c_.emitLine("extern void " + mouseUpFn + "(int16_t*, int16_t*, float*, float*); " + mouseUpFn + "(&vb6_button, &vb6_shift, &vb6_x, &vb6_y); }");
             }
             // P20-43: 同一条消息里补 Form_Click (有处理器才发)

@@ -2,6 +2,21 @@
 // 由 src/backend/expr/cgen_expr_member.cpp 拆出（2026-09-17），在函数体内被 #include，非独立编译单元。
 // 内容 = 原文件第 13~131 行，逐行未改。
 
+    // Fix <vbeclipse>: UserControl.Controls 集合 (裸 `Controls.Item(k)` / `.Add(...)`
+    // / For Each 形态的 `.Count`) —— 必须在一切类感知解析之前拦截, 否则工程里
+    // 恰好有同名方法的类 (List.Item / List.Remove / List.Add) 会把成员抢挂过去,
+    // 接收者被首参顶掉 (ucPerspective 实测: Controls.Item(p) → vb6_List_Item((*p)))。
+    // RTL 侧 vb6_UserControl_Controls 暂为 NULL 全局, 后期绑定 no-op (编译先行)。
+    if (isDesignerModule_ && node.object && node.object->kind == ASTNodeKind::IdentifierExpr
+        && Symbol::toLower(static_cast<IdentifierExpr&>(*node.object).name) == "controls") {
+        comObjExpr_ = "(void*)vb6_UserControl_Controls";
+        comMemberName_ = node.memberName;
+        isComMarker_ = true;
+        isEarlyBoundCom_ = false;
+        earlyBoundSym_ = nullptr;
+        lastExpr_ = "(void*)vb6_UserControl_Controls";
+        return;
+    }
     // Fix 086: AddressOf 模块限定函数 (AddressOf ToolsTlsThunks.pvCallCollectionItem)
     // — 解析器将 `ToolsTlsThunks.pvCallCollectionItem` 交给 AddressOfExpr(仅取
     // object名) + 外层MemberAccessExpr(成员名). 此前生成非法的

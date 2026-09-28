@@ -69,6 +69,34 @@ CompileResult Driver::compile(const CompileOptions& options) {
 
             // 展开源文件列表 (将相对路径转为绝对路径)
             effectiveOpts.sourceFiles.clear();
+            // Fix <vbeclipse>: Object=*\A<工程>.vbp 私有控件工程引用 ——
+            // 被引工程的全部源码 (.bas/.cls/.frm/.ctl) 并入本次编译, 其公开
+            // 枚举/类/模块符号随之可见 (VB6 私有控件工程引用的语义)。
+            // 相对路径以【被引 vbp 所在目录】为基准, 与 VB6 一致。
+            for (const auto& refPath : project.projectRefs) {
+                auto refAbs = project.resolvePath(refPath);
+                if (!std::filesystem::exists(refAbs)) {
+                    diag_->warn(DiagnosticID::CodeGenUnsupportedFeature, SourceLocation{},
+                                "Project reference not found: " + pathToUtf8(refAbs));
+                    continue;
+                }
+                VbpProject refProject = VbpParser::parse(pathToUtf8(refAbs));
+                for (const auto& entry : refProject.sources) {
+                    effectiveOpts.sourceFiles.push_back(
+                        pathToUtf8(refProject.resolvePath(entry.filePath)));
+                }
+                for (const auto& entry : refProject.sources) {
+                    if (!entry.clsidStr.empty()) {
+                        std::string lowerName = entry.moduleName;
+                        std::transform(lowerName.begin(), lowerName.end(), lowerName.begin(), ::tolower);
+                        classClsidMap_[lowerName] = entry.clsidStr;
+                    }
+                }
+                if (options.verbose) {
+                    std::cout << "C3: project reference " << refPath
+                              << " (" << refProject.sources.size() << " 个源文件)" << std::endl;
+                }
+            }
             for (const auto& entry : project.sources) {
                 auto absPath = project.resolvePath(entry.filePath);
                 effectiveOpts.sourceFiles.push_back(pathToUtf8(absPath));

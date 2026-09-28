@@ -240,6 +240,15 @@
     std::string getControlPropWriteFn(FrmControlType ctrlType, const std::string& propName) const;
     // P20-36: 生成控件属性访问的HWND参数 (Menu控件用GetMenu+menuId)
     std::string makeCtrlHwndArg(const std::string& ctrlNameLower, FrmControlType ctrlType) const;
+    // Fix <vbeclipse>: 控件数组属性写的 callee 实参串。普通控件 = CtrlArr_GetAt(...);
+    // 菜单 (vb6_SetMenu* 三参: HMENU, menuId, 值) = "(GetMenu((HWND)窗体), 基址+下标)"。
+    std::string ctrlArrWriteCalleeArgs(const std::string& writeFn,
+                                       const std::string& arrOrigName,
+                                       const std::string& idxArg) const;
+    // Fix <vbeclipse>: 在其他窗体的设计器描述里找控件 (frmViewViews.tvwViews)。
+    // 命中返回该控件描述, 否则 nullptr。designerFiles_ 未设 / 非窗体名都返回 nullptr。
+    const FrmControl* findExternalFormControl(const std::string& formName,
+                                              const std::string& ctrlName) const;
 
     // 应用 .frm 设计期样式属性 (BorderStyle / Alignment)。顶层控件与容器子控件共用，
     // hwndExpr 为控件句柄表达式 (如 "vb6_hwnd_Foo")。

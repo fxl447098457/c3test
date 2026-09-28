@@ -521,6 +521,18 @@ vb6_VARIANT vb6_LoadResData(int32_t resourceId, int32_t resourceType) {
     vb6_VARIANT v; memset(&v, 0, sizeof(v)); return v;  /* empty Variant */
 }
 
+// Fix <vbeclipse>: LoadResPicture / LoadResString — stub (同 LoadResData 口径:
+// 资源段加载暂不支持, 返回 empty Variant; 调用侧拿到 Nothing/空串不崩)
+vb6_VARIANT vb6_LoadResPicture(int32_t resourceId, int32_t resourceType) {
+    (void)resourceId; (void)resourceType;
+    vb6_VARIANT v; memset(&v, 0, sizeof(v)); return v;
+}
+
+vb6_VARIANT vb6_LoadResString(int32_t resourceId) {
+    (void)resourceId;
+    vb6_VARIANT v; memset(&v, 0, sizeof(v)); return v;
+}
+
 // ============================================================
 // Fix 093a: P21-14 / P21-15 — SavePicture / Load 语句
 // (vb6rtl.h 早已声明, 但 RTL 里一直没有实现 → LNK2019)
@@ -578,6 +590,8 @@ int32_t vb6_UserControl_BackColor = 0;
 int32_t vb6_UserControl_ForeColor = 0;
 int16_t vb6_UserControl_RightToLeft = 0;
 void*   vb6_UserControl_ParentControls = NULL;
+void*   vb6_UserControl_Controls = NULL;
+void*   vb6_Screen_MouseIcon = NULL;       // Fix <vbeclipse>: Screen.MouseIcon 槽   // Fix <vbeclipse>: UserControl.Controls (集合未建模, 恒 NULL)
 vb6_ComIface_Font* vb6_UserControl_Font = &g_vb6_UserControl_FontObj;
 struct vb6_UserControl_Ambient_Type vb6_UserControl_Ambient = { &g_vb6_UserControl_FontObj };
 

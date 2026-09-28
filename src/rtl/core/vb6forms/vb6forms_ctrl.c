@@ -164,6 +164,31 @@ void vb6_SetControlHeight(void* hwnd, int height) {
     SetWindowPos((HWND)hwnd, NULL, 0, 0, rc.right - rc.left, vb6_TwipToY(height), SWP_NOMOVE | SWP_NOZORDER);
 }
 
+// Fix 162a-extlist: VB6 `obj.Move Left[, Top[, Width[, Height]]]` —— 语言级方法
+// (Form/控件通用), 之前落 vb6_ComGetObjectProp(hwnd, L"Move") 必失败, 导致
+// Form_Resize 布局全废 (extlist 的 ListView 停在设计宽, 只有 5 列可见)。
+// 单位 twips (与 Left/Top/Width/Height 属性一致); mask 位 1=Left 2=Top
+// 4=Width 8=Height, 未给的参数保持当前值。子控件用父客户区坐标,
+// 顶层窗口 (Form) 用屏幕坐标 —— 与对应属性 setter 的坐标空间一致。
+void vb6_ControlMove(void* hwnd, double L, double T, double W, double H, int mask) {
+    HWND hW = (HWND)hwnd;
+    if (!hW || !IsWindow(hW)) return;
+    BOOL child = (GetWindowLongW(hW, GWL_STYLE) & WS_CHILD) != 0;
+    RECT rc;
+    GetWindowRect(hW, &rc);
+    if (child) {
+        POINT p0 = { rc.left, rc.top }, p1 = { rc.right, rc.bottom };
+        ScreenToClient(GetParent(hW), &p0);
+        ScreenToClient(GetParent(hW), &p1);
+        rc.left = p0.x; rc.top = p0.y; rc.right = p1.x; rc.bottom = p1.y;
+    }
+    int x = (mask & 1) ? vb6_TwipToX((int)(L + (L >= 0 ? 0.5 : -0.5))) : rc.left;
+    int y = (mask & 2) ? vb6_TwipToY((int)(T + (T >= 0 ? 0.5 : -0.5))) : rc.top;
+    int w = (mask & 4) ? vb6_TwipToX((int)(W + (W >= 0 ? 0.5 : -0.5))) : rc.right - rc.left;
+    int h = (mask & 8) ? vb6_TwipToY((int)(H + (H >= 0 ? 0.5 : -0.5))) : rc.bottom - rc.top;
+    SetWindowPos(hW, NULL, x, y, w, h, SWP_NOZORDER | SWP_NOACTIVATE);
+}
+
 // P11.8: hWnd attribute (read-only)
 void* vb6_GetControlHwnd(void* hwnd) {
     return hwnd;  // Already the HWND
@@ -429,6 +454,45 @@ LRESULT vb6_ApplyCtlColorStatic(HDC hdc, HWND child) {
 }
 
 // ============================================================
+// Fix 162f-extlist: WM_CTLCOLORBTN 统一答复 (按钮类子控件的背景刷)
+// ------------------------------------------------------------
+// Button 类 (BUTTON 窗口类) 通过 WM_CTLCOLORBTN 向**父窗**要绘制用刷子。分两种:
+//   (1) CheckBox / OptionButton: VB6 语义 = **透明**。之前返回 HOLLOW_BRUSH 即可,
+//       因为它们的文字直接坐在父窗底色上, 用空刷 → 不画背景 → 透出父窗灰底。
+//   (2) Frame (BS_GROUPBOX): 经典 (关主题后) groupbox 的**标题**由 BUTTON 绘制器
+//       先 `FillRect(标题矩形, 该刷子)` 再 `DrawText` —— 返回 HOLLOW_BRUSH 会让
+//       这块矩形**什么都不填**, 于是露出 groupbox 自身窗口的底色 (经典 BUTTON 是
+//       白), 表现为标题后面一条**白色填充块** (用户实测)。VB6 里 Frame 标题是坐在
+//       父窗 BackColor 上的 ⇒ 这里必须返回**父窗底色的实心刷** (通常 240 灰)。
+// 判据: 子控件的 GWL_STYLE & 0xF == BS_GROUPBOX(0x7)。其余 Button 类仍走空刷。
+// 实心刷缓存在子控件窗口属性上 (按控件一份, 值变了由 vb6_SetControlBackColor 失效)。
+// ============================================================
+LRESULT vb6_CtlColorBtnBrush(HWND child, HWND parent) {
+    LONG_PTR st = child ? GetWindowLongPtrW(child, GWL_STYLE) : 0;
+    if ((st & 0x0000000FL) != 0x7L) {
+        // 非 groupbox: CheckBox/OptionButton/命令按钮 → 透明语义 (空刷)。
+        return (LRESULT)GetStockObject(HOLLOW_BRUSH);
+    }
+    // groupbox: 标题底 = 父窗 BackColor (未显式设色时回落 BTNFACE = 240 灰)。
+    COLORREF bg = parent ? (COLORREF)vb6_GetControlBackColor((void*)parent)
+                         : GetSysColor(COLOR_BTNFACE);
+    if (bg & 0x80000000L) bg = GetSysColor(bg & 0xFF);
+    HBRUSH br = (HBRUSH)GetPropW(child, L"VB6_GbCapBrush");
+    if (br) {
+        // 缓存命中: 若父窗底色已变, 需要重建 (色值存在 VB6_GbCapColor 上)。
+        COLORREF cached = (COLORREF)(INT_PTR)GetPropW(child, L"VB6_GbCapColor");
+        if (cached == bg) return (LRESULT)br;
+        DeleteObject(br);
+        RemovePropW(child, L"VB6_GbCapBrush");
+    }
+    br = CreateSolidBrush(bg);
+    if (!br) return (LRESULT)GetStockObject(HOLLOW_BRUSH);
+    SetPropW(child, L"VB6_GbCapBrush", (HANDLE)br);
+    SetPropW(child, L"VB6_GbCapColor", (HANDLE)(INT_PTR)bg);
+    return (LRESULT)br;
+}
+
+// ============================================================
 // Fix 185: 控件级绘制入口 PictureBox.Print / PictureBox.Cls
 // ============================================================
 //
@@ -589,6 +653,8 @@ VB6_CD_INT(Min,         L"VB6_Cd_Min",         0)
 VB6_CD_INT(Max,         L"VB6_Cd_Max",         0)
 VB6_CD_INT(Copies,      L"VB6_Cd_Copies",      1)
 VB6_CD_INT(FontSize,    L"VB6_Cd_FontSize",    0)
+// Fix <vbeclipse>: FilterIndex (1 基, 默认 1) —— OPENFILENAME.nFilterIndex 直通
+VB6_CD_INT(FilterIndex, L"VB6_Cd_FilterIndex", 1)
 
 #undef VB6_CD_STR
 #undef VB6_CD_INT
@@ -759,6 +825,7 @@ int vb6_CdShowFile(void* hwnd, int saveAs) {
     ofn.lpstrTitle      = title[0] ? title : (saveAs ? L"Save As" : L"Open");
     ofn.Flags = (DWORD)vb6_CdGetFlags(hwnd) | OFN_EXPLORER | OFN_HIDEREADONLY;
     if (saveAs) ofn.Flags |= OFN_OVERWRITEPROMPT;
+    ofn.nFilterIndex = (DWORD)vb6_CdGetFilterIndex(hwnd);
 
     HANDLE probe = vb6_CdProbeArm();
     int shown = pFn(&ofn);

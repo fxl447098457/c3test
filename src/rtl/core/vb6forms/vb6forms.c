@@ -367,6 +367,107 @@ void* vb6_CreateFormWindowB(const char* className, const char* formName,
     return (void*)hwnd;
 }
 
+// Fix 162d-extlist: 经典 groupbox（Fix 162c 关主题后）只画蚀刻框、不填内部；
+// 而窗体带 WS_CLIPCHILDREN（Fix 124）时窗体重绘不往子控件矩形下涂底色，
+// Frame 内部就成了"从未画过"的白色（实测 (255,255,255)，VB6 参考图是 240 灰）。
+// VB6 观感 = Frame 内部透出窗体 BackColor → 子类化 WM_ERASEBKGND，
+// 用父窗体底色填（vb6_GetControlBackColor 未显式设置时回落 BTNFACE，
+// 与 VB6 默认 &H8000000F 等效）。
+// Fix 163-extlist: 关掉一个控件的 comctl6 视觉样式 (SetWindowTheme(hwnd,L"",L""))。
+// 为什么要关: 带视觉样式的 Button 类 (命令按钮/单选钮) 的**文字**由主题绘制器渲染 ——
+// 它用主题自己的字体并在 ClearType 下描边, 结果明显比窗体标题/MS Sans Serif 点阵糊。
+// ⚠ 复选框在本机实测**没有**被主题化 (原生就清晰), 但单选钮、命令按钮被主题化了
+// (单选钮圆点是蓝色 = 主题标记), 二者视觉不一致。统一关样式后都退回经典 GDI
+// 文本渲染 (走我们下发的 MS Sans Serif 8.25pt + NONANTIALIASED), 与标题/复选框齐平。
+// ⚠ 这也正是经典 Windows 9x/VB6 的观感 —— VB6 运行时本来就禁用该控件的主题。
+// uxtheme 走 LoadLibrary 动态取 (不新增 import lib, 与 Frame 的处理同路子)。
+static void vb6_DisableControlTheme(HWND hwnd) {
+    HMODULE themeDll = LoadLibraryW(L"uxtheme.dll");
+    if (!themeDll) return;
+    typedef HRESULT (WINAPI *pfnSetTheme)(HWND, LPCWSTR, LPCWSTR);
+    pfnSetTheme setTheme = (pfnSetTheme)(void*)GetProcAddress(themeDll, "SetWindowTheme");
+    if (setTheme) setTheme(hwnd, L"", L"");
+    FreeLibrary(themeDll);
+}
+
+// Fix 162f-extlist: 取 groupbox 的标题底色 (父窗 BackColor, 未设回落 BTNFACE)。
+static COLORREF vb6_GBoxTitleBg(HWND hwnd) {
+    HWND parent = GetParent(hwnd);
+    COLORREF bg = parent ? (COLORREF)vb6_GetControlBackColor((void*)parent)
+                         : GetSysColor(COLOR_BTNFACE);
+    if (bg & 0x80000000L) bg = GetSysColor(bg & 0xFF);
+    return bg;
+}
+
+static LRESULT CALLBACK vb6_GroupBoxSubclassProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
+    WNDPROC orig = (WNDPROC)GetPropW(hwnd, L"VB6_GBox_OrigProc");
+    if (msg == WM_ERASEBKGND) {
+        COLORREF bg = vb6_GBoxTitleBg(hwnd);
+        RECT rc;
+        GetClientRect(hwnd, &rc);
+        HBRUSH br = CreateSolidBrush(bg);
+        if (br) { FillRect((HDC)wp, &rc, br); DeleteObject(br); }
+        return 1;
+    }
+    // Fix 162f-extlist: 经典 groupbox (关主题后) 画标题时, 标题底用的是**系统默认
+    // 白刷** (不是 WM_CTLCOLORBTN, 它只发给命令按钮; 实测 Frame 根本不发这条) ——
+    // 于是标题后面留一条**纯白填充带** (用户实测 (255,255,255), 周围是 240 灰)。
+    // VB6 里 Frame 标题坐在父窗 BackColor 上 ⇒ 这里自己接管绘制:
+    //   ① 先把整个客户区填成父窗底色 (灰);
+    //   ② 让原过程画蚀刻边框 + 标题文字 (此时标题底已是灰);
+    //   ③ 再单独把**标题文字下面那条带**重新填灰 (对付它在白底上画的文字残影)。
+    // 判据: 只对有非空 Caption 的 groupbox 这么干 (空标题 Frame2 无此带)。
+    if (msg == WM_PAINT) {
+        wchar_t cap[256] = {0};
+        GetWindowTextW(hwnd, cap, 256);
+        LRESULT r = orig ? CallWindowProcW(orig, hwnd, msg, wp, lp)
+                         : DefWindowProcW(hwnd, msg, wp, lp);
+        if (cap[0]) {
+            HDC hdc = GetDC(hwnd);
+            if (hdc) {
+                RECT rc; GetClientRect(hwnd, &rc);
+                // 标题带高度: 用当前字体算 (经典 groupbox 标题约一行高)。
+                HFONT hf = (HFONT)SendMessageW(hwnd, WM_GETFONT, 0, 0);
+                HFONT old = hf ? (HFONT)SelectObject(hdc, hf) : NULL;
+                TEXTMETRICW tm; ZeroMemory(&tm, sizeof(tm));
+                GetTextMetricsW(hdc, &tm);
+                int th = tm.tmHeight + 2;
+                // 标题起点: 经典 groupbox 标题缩进 ~7px (含 3px 蚀刻间距)。
+                int tx = 7;
+                SIZE sz = {0, 0};
+                GetTextExtentPoint32W(hdc, cap, lstrlenW(cap), &sz);
+                COLORREF bg = vb6_GBoxTitleBg(hwnd);
+                RECT trc = { tx - 1, 0, tx + sz.cx + 1, th };
+                // 先擦掉白色底 + 白底上画的文字, 再以灰底重画文字。
+                HBRUSH br = CreateSolidBrush(bg);
+                if (br) { FillRect(hdc, &trc, br); DeleteObject(br); }
+                SetBkMode(hdc, TRANSPARENT);
+                SetTextColor(hdc, GetSysColor(COLOR_BTNTEXT));
+                RECT trc2 = { tx, 0, tx + sz.cx + 2, th };
+                DrawTextW(hdc, cap, -1, &trc2, DT_LEFT | DT_SINGLELINE | DT_VCENTER);
+                if (old) SelectObject(hdc, old);
+                ReleaseDC(hwnd, hdc);
+            }
+        }
+        return r;
+    }
+    if (msg == WM_CTLCOLORBTN) {
+        // Fix 162e-extlist: Frame 内的 CheckBox/OptionButton 向本 Frame 要背景刷 ——
+        // 与窗体侧同口径 (见 vb6_CtlColorBtnBrush): 复选框/单选钮走空刷 (透明),
+        // 嵌套 groupbox 走本 Frame 底色的实心刷。
+        return vb6_CtlColorBtnBrush((HWND)lp, hwnd);
+    }
+    if (msg == WM_DESTROY) {
+        if (orig) {
+            RemovePropW(hwnd, L"VB6_GBox_OrigProc");
+            SetWindowLongPtrW(hwnd, GWLP_WNDPROC, (LONG_PTR)orig);
+        }
+        return 0;
+    }
+    return orig ? CallWindowProcW(orig, hwnd, msg, wp, lp)
+                : DefWindowProcW(hwnd, msg, wp, lp);
+}
+
 // ============================================================
 // 控件创建
 // ============================================================
@@ -416,6 +517,26 @@ void* vb6_CreateControl(const char* win32Class, const char* controlName,
             );
         }
         SendMessage(hwnd, WM_SETFONT, (WPARAM)hFont, MAKELPARAM(FALSE, 0));
+
+        // Fix 162c-extlist: Frame(BS_GROUPBOX) 关掉 comctl6 主题化 —— 主题版的
+        // groupbox 会用白色填掉整个内部 (子控件的 240 灰底反而成了色块), VB6
+        // 参考图是经典蚀刻边框 + 透出窗体 BTNFACE 底色。classic groupbox
+        // 内部透明, 观感与 VB6 一致。
+        // Fix 163-extlist: **所有 BUTTON 类**都关样式 —— 命令按钮/单选钮的主题文字
+        // 渲染比 MS Sans Serif 点阵糊 (见 vb6_DisableControlTheme 注释)。
+        // 复选框本机未被主题化, 关掉是无害的 no-op; 关样式统一了整族观感。
+        if (_stricmp(win32Class, "BUTTON") == 0) {
+            vb6_DisableControlTheme(hwnd);
+        }
+        // Fix 162d-extlist: Frame 关主题后内部不再白填, 但也没有人涂底色了 ——
+        // 子类化补上"填父窗体底色"(见 vb6_GroupBoxSubclassProc 注释)。
+        if (((style & 0x0000000FL) == 0x7L) && _stricmp(win32Class, "BUTTON") == 0) {
+            if (!GetPropW(hwnd, L"VB6_GBox_OrigProc")) {
+                WNDPROC gOrig = (WNDPROC)SetWindowLongPtrW(hwnd, GWLP_WNDPROC,
+                                                           (LONG_PTR)vb6_GroupBoxSubclassProc);
+                if (gOrig) SetPropW(hwnd, L"VB6_GBox_OrigProc", (HANDLE)gOrig);
+            }
+        }
 
         /* Fix 145: ComboBox 下拉列表高度.
          * Win32 的 ComboBox 窗口高度 = 显示行 + 下拉列表高度; 而 .frm 里

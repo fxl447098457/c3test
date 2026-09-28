@@ -632,6 +632,7 @@ std::string CCodeGen::getControlPropReadFn(FrmControlType ctrlType, const std::s
         if (propLower == "max") return "vb6_CdGetMax";
         if (propLower == "copies") return "vb6_CdGetCopies";
         if (propLower == "fontsize") return "vb6_CdGetFontSize";
+        if (propLower == "filterindex") return "vb6_CdGetFilterIndex";
         break;
     case FrmControlType::Shape:  // P20-35
         if (propLower == "shape") return "vb6_GetShapeType";        if (propLower == "borderwidth") return "vb6_GetShapeBorderWidth";
@@ -1003,6 +1004,7 @@ std::string CCodeGen::getControlPropWriteFn(FrmControlType ctrlType, const std::
         if (propLower == "max") return "vb6_CdSetMax";
         if (propLower == "copies") return "vb6_CdSetCopies";
         if (propLower == "fontsize") return "vb6_CdSetFontSize";
+        if (propLower == "filterindex") return "vb6_CdSetFilterIndex";
         break;
     case FrmControlType::Shape:  // P20-35
         if (propLower == "shape") return "vb6_SetShapeType";
@@ -1381,6 +1383,12 @@ void CCodeGen::emitShapeLineProps(const FrmControl& ctrl, const std::string& hwn
 
 // P20-36: 生成控件属性访问的HWND参数 (Menu控件用GetMenu+menuId)
 std::string CCodeGen::makeCtrlHwndArg(const std::string& ctrlNameLower, FrmControlType ctrlType) const {
+    // Fix 161f-extlist: 形参/局部持有的 ListView (`Sub RefillList(lv As ListView)`) ——
+    // 槽变量**本身就是 HWND** (调用点传的就是 vb6_hwnd_ListView1), 不能再拼
+    // vb6_hwnd_ 前缀 (那样会 C2065 `vb6_hwnd_lv` 未声明)。与设计期控件名区分开。
+    if (ctrlType == FrmControlType::ListView && listViewSlotVars_.count(ctrlNameLower)) {
+        return ctrlNameLower;
+    }
     // P20-39: ImageList 走原生复刻, 槽里是复刻实例指针不是 HWND, 必须用 vb6_com_<Name>
     // (emitControlHandleDecls 也是这么声明的) —— 发 vb6_hwnd_<Name> 就是 C2065。
     if (ctrlType == FrmControlType::ImageList) {
@@ -1397,6 +1405,47 @@ std::string CCodeGen::makeCtrlHwndArg(const std::string& ctrlNameLower, FrmContr
     auto origIt = knownFormControlOriginalNames_.find(ctrlNameLower);
     std::string origName = (origIt != knownFormControlOriginalNames_.end()) ? origIt->second : ctrlNameLower;
     return "vb6_hwnd_" + cIdent(origName);
+}
+
+// Fix <vbeclipse>: 控件数组属性写的 callee 实参串。
+// 普通控件: vb6_CtrlArr_GetAt(&vb6_arr_X, idx) (单参);
+// 菜单数组: vb6_SetMenu* 是 (HMENU, menuId, 值) 三参 —— 菜单元素没有 HWND,
+// 必须发 (GetMenu((HWND)窗体), 基址+下标), 否则 C2198 "用于调用的参数太少"。
+std::string CCodeGen::ctrlArrWriteCalleeArgs(const std::string& writeFn,
+                                             const std::string& arrOrigName,
+                                             const std::string& idxArg) const {
+    if (writeFn.rfind("vb6_SetMenu", 0) == 0) {
+        std::string arrLower = arrOrigName;
+        std::transform(arrLower.begin(), arrLower.end(), arrLower.begin(), ::tolower);
+        auto itBase = knownMenuArrayBaseIds_.find(arrLower);
+        std::string idExpr = (itBase != knownMenuArrayBaseIds_.end())
+            ? std::to_string(itBase->second) + " + (" + idxArg + ")"
+            : idxArg;
+        return "(void*)GetMenu((HWND)" + knownMenuFormHwnd_ + "), " + idExpr;
+    }
+    return "vb6_CtrlArr_GetAt(&vb6_arr_" + cIdent(arrOrigName) + ", " + idxArg + ")";
+}
+
+// Fix <vbeclipse>: 在其他窗体的设计器描述里找控件 (frmViewViews.tvwViews)。
+const FrmControl* CCodeGen::findExternalFormControl(const std::string& formName,
+                                                    const std::string& ctrlName) const {
+    if (!designerFiles_ || formName.empty() || ctrlName.empty()) return nullptr;
+    for (const auto& kv : *designerFiles_) {
+        if (Symbol::toLower(kv.first) != Symbol::toLower(formName)) continue;
+        const FrmControl* hit = nullptr;
+        std::function<void(const FrmControl&)> walk = [&](const FrmControl& c) {
+            if (hit) return;
+            if (!c.controlName.empty()
+                && Symbol::toLower(c.controlName) == Symbol::toLower(ctrlName)) {
+                hit = &c;
+                return;
+            }
+            for (const auto& ch : c.children) walk(ch);
+        };
+        walk(kv.second.form.formControl);
+        return hit;
+    }
+    return nullptr;
 }
 
 const char* CCodeGen::getDefaultPropertyName(FrmControlType ctrlType) {

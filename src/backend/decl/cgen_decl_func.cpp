@@ -107,8 +107,17 @@ void CCodeGen::visit(FunctionDecl& node) {
             // P20-44: `As DataObject` 形参 → 记入 dataObjectParams_, 成员访问改道 RTL
             if (Symbol::toLower(simpleP.name) == "dataobject")
                 dataObjectParams_.insert(pLower);
-            auto* pSym = symTab_.lookupModule(simpleP.name);
-
+            // Fix 161f: 带命名空间限定的 COM 形参类型 (ComctlLib.ColumnHeader /
+            // MSComctlLib.ListImage 等) — 用与 mapTypeRef **同一个**类型查找
+            // (lookupTypeSymbol, 含 $ty 回退) 按全名→末段逐个试; 早先用
+            // symTab_.lookupModule(全名) 查不中 ⇒ 形参不进 knownTypedComVars_
+            // ⇒ 成员读落 M22 裸名 vb6_ColumnHeader_Index → C2065
+            // (extlist ListView1_ColumnClick 实测)。
+            std::string pLookup161f = simpleP.name;
+            size_t pDot161f = pLookup161f.find('.');
+            if (pDot161f != std::string::npos) pLookup161f = pLookup161f.substr(pDot161f + 1);
+            auto* pSym = lookupTypeSymbol(simpleP.name);
+            if (!pSym && pLookup161f != simpleP.name) pSym = lookupTypeSymbol(pLookup161f);
             if (pSym && pSym->kind == SymbolKind::UserDefinedType) {
                 knownUdtVars_[pLower] = "vb6_type_" + cIdent(simpleP.name);
             } else if (pSym && pSym->kind == SymbolKind::Class) {
@@ -116,10 +125,19 @@ void CCodeGen::visit(FunctionDecl& node) {
             } else if (pSym && (pSym->kind == SymbolKind::ComClass || pSym->kind == SymbolKind::ComInterface)) {
                 knownTypedComVars_[pLower] = pSym;
             }
-            auto* pSym2 = symTab_.lookup(simpleP.name);
+            auto* pSym2 = symTab_.lookup(pLookup161f);
             if (pSym2 && pSym2->kind == SymbolKind::Class && pSym2->isInterface) {
                 knownIfaceVars_[pLower] = pSym2->name;
             }
+            // Fix 161f: `Sub RefillList(lv As ListView)` —— 形参类型名就是内置
+            // ListView 控件 (含 ComctlLib.ListView 这种限定写法, 与
+            // frm_parser_util.cpp:186 的 `lower.find("listview")` 同口径)。
+            // 这类槽在 C 侧**本身就是 HWND** (调用点传 vb6_hwnd_ListView1),
+            // 登记后 `lv.ListItems` / `With lv` 才能改道 vb6_ListView_ListItems(lv)
+            // 的真集合对象; 不登记就落 vb6_ComGetObjectProp(lv, …) = 拿 HWND 当
+            // IDispatch 用 —— 编得过, 运行期集合全空 (extlist: 窗口起来但 0 行)。
+            if (Symbol::toLower(simpleP.name).find("listview") != std::string::npos)
+                listViewSlotVars_.insert(pLower);
             // 注册BSTR/Double/Long类型参数到类型跟踪集合
             Vb6Type paramType = typeSys_.resolveTypeName(simpleP.name);
             if (paramType == Vb6Type::String) knownBstrVars_.insert(pLower);
@@ -329,6 +347,22 @@ void CCodeGen::visit(FunctionDecl& node) {
     // 生成过程体 (P14.1.2: 传入hasResume_以启用resume点生成)
     // Fix 086: 先将块内 Dim/Const 提升到过程顶部 (VB6 局部声明是过程级作用域)
     hoistLocalDecls(node.body);
+    // Fix <vbeclipse>: VB6 隐式变量 (无 Option Explicit 时未声明即使用) ——
+    // 语义层登记的名字在此预声明为 Variant C 局部并注册 knownVariantVars_。
+    if (currentProc_) {
+        auto* impl = symTab_.implicitVarsFor(Symbol::toLower(moduleName_),
+                                             Symbol::toLower(currentProc_->name));
+        if (impl) {
+            for (const auto& n : *impl) {
+                std::string nLower = Symbol::toLower(n);
+                if (!knownLocalVars_.count(nLower)) {
+                    knownLocalVars_.insert(nLower);
+                    knownVariantVars_.insert(nLower);
+                    c_.emitLine("vb6_VARIANT " + cIdent(n) + " = vb6_VariantEmpty();  /* 隐式变量 */");
+                }
+            }
+        }
+    }
     emitStmtList(node.body, hasResume_);
 
         // P12.3: 恢复调用者的错误处理状态
@@ -361,6 +395,11 @@ void CCodeGen::visit(FunctionDecl& node) {
         c_.emitLine("}");
     }
 
+    // Fix <vbeclipse>: 复原过程内被 #undef 的 Win32 宏 (隐式变量名隔离)
+    for (const auto& n : implicitMacroNames_) {
+        c_.emitLine("#pragma pop_macro(\"" + n + "\")");
+    }
+    implicitMacroNames_.clear();
     currentProc_ = nullptr;
 
     currentProc_ = nullptr;

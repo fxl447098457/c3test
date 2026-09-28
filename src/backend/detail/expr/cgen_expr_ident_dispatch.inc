@@ -69,6 +69,16 @@
         return;
     }
 
+    // Fix <vbeclipse>: 裸 Screen 内置全局对象 — 类模块内 (ucPerspective.ctl
+    // `Screen.MouseIcon = ...`) 不能被 me->Screen 类字段回退吃掉 (C2039)。
+    // 成员访问 (.Width/.MouseIcon/...) 由 MemberAccessExpr 的 Screen 分支处理,
+    // 这里只给全局哨兵; Screen.MouseIcon 等未登记成员给可写全局槽语义
+    // (RTL vb6_Screen_* 全局, 未建模成员赋值无害)。
+    if (lower == "screen") {
+        lastExpr_ = "vb6_Screen_Object()";
+        return;
+    }
+
     // M22: 检查是否是当前函数名 — VB6语义歧义
     // - 作为IndexOrCallExpr的callee(函数调用) → 返回函数过程名
     // - 作为普通表达式(返回值引用) → 返回返回值变量

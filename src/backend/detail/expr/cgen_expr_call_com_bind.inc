@@ -77,16 +77,18 @@
             }
         }
 
+        // C29-8b/C29-5b: TreeView / Toolbar 的**裸控件**槽也进这条"取集合属性 + Item"
+        // 的路; 集合对象本身 (vb6_TreeView_Nodes(…) 开头) 不能进, 否则
+        // `Nodes.Add(…)` 会被当成"Add 属性 + Item 下标", 编成删不改的错形状。
+        // Fix 161f: `lv.ListItems(1)` —— 形参/局部槽 (lv As ListView) 本身就是
+        // HWND, 不是 vb6_hwnd_ 前缀形态, 必须单独认, 否则落
+        // vb6_ComGetObjectProp(lv, L"ListItems") = 拿 HWND 当 IDispatch 用
+        // (extlist RefillList 实测: 窗口起来但 0 行)。
         bool axSlotObj = comObjExpr_.find("vb6_com_") == 0
-                      || (comObjExpr_.find("vb6_hwnd_") == 0
-                          && (!listViewNameOfExpr(comObjExpr_).empty()
-                              // C29-8b: `TreeView1.Nodes(1)` 的宿主槽同理 —— 只有**裸控件**
-                              // 槽才进这条"取集合属性 + Item"的路; 集合对象本身
-                              // (vb6_TreeView_Nodes(…) 开头) 不能进, 否则 `Nodes.Add(…)`
-                              // 会被当成"Add 属性 + Item 下标", 编成删不改的错形状。
-                              // C29-5b: Toolbar 的裸槽同理 (真窗口)。
-                              || !treeViewNameOfExpr(comObjExpr_).empty()
-                              || !toolbarNameOfExpr(comObjExpr_).empty()))
+                      || comObjExpr_.find("vb6_hwnd_") == 0
+                      || isListViewHostExpr(comObjExpr_)
+                      || !treeViewNameOfExpr(comObjExpr_).empty()
+                      || !toolbarNameOfExpr(comObjExpr_).empty()
                       // C29-Data: Data1.Recordset 的透传形态 (Fields/Item 走 Step1+Item 路)。
                       || comObjExpr_.find("vb6_Data_Self(") == 0;
         if (axSlotObj && !node.positional.empty()) {
@@ -113,16 +115,23 @@
                     std::string bareTV = treeViewNameOfExpr(axObjExpr);
                     if (!bareTV.empty())
                         collectionExpr = "vb6_TreeView_Nodes((void*)vb6_hwnd_" + bareTV + ")";
+                    // Fix <vbeclipse>: 跨窗体 TreeView (`frmViewViews.tvwViews.Nodes`) —
+                    // 宿主槽是控件句柄访问器文本。
+                    if (collectionExpr.empty()) {
+                        auto itExtTv = externalTreeViewAccs_.find(axObjExpr);
+                        if (itExtTv != externalTreeViewAccs_.end())
+                            collectionExpr = "vb6_TreeView_Nodes((void*)" + itExtTv->second + ")";
+                    }
                 } else {
                     // C29-7: ListView 的 ListItems / ColumnHeaders 同一口径。
                     // ⚠ 宿主槽是 **vb6_hwnd_X** (ListView 是真窗口), 不是 vb6_com_X。
                     std::string memLV = Symbol::toLower(axMember);
                     if (memLV == "listitems" || memLV == "columnheaders") {
-                        std::string bareLV = listViewNameOfExpr(axObjExpr);
-                        if (!bareLV.empty())
+                        std::string lvHwnd = listViewHwndExprOf(axObjExpr);
+                        if (!lvHwnd.empty())
                             collectionExpr = (memLV == "listitems")
-                                ? ("vb6_ListView_ListItems((void*)vb6_hwnd_" + bareLV + ")")
-                                : ("vb6_ListView_ColumnHeaders((void*)vb6_hwnd_" + bareLV + ")");
+                                ? ("vb6_ListView_ListItems((void*)" + lvHwnd + ")")
+                                : ("vb6_ListView_ColumnHeaders((void*)" + lvHwnd + ")");
                     }
                 }
                 if (collectionExpr.empty())

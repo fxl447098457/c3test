@@ -31,6 +31,12 @@ Vb6Type CCodeGen::inferExprType(Expr& expr) const {
             // 优先检查已知的变量类型集合 (局部变量在符号表中作用域可能不可达)
             std::string lower = id.name;
             std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+            // Fix 161f: 无 As Type 但整数可折叠的 Const (符号表里 type=Variant)。
+            // C 侧已 emit 成 `#define NAME (4127)`, 标识符也内联为数值; 若这里
+            // 仍答 Variant, Declare 调用的实参会被包成
+            // vb6_VariantToLong(LVM_GETHEADER) → C2440 "无法从 int 转换为
+            // vb6_VARIANT" (extlist MListView SendMessage 实测)。按 Long 答。
+            if (moduleIntConstValues_.count(lower)) return Vb6Type::Long;
             if (knownBstrVars_.count(lower)) return Vb6Type::String;
             if (knownSingleVars_.count(lower)) return Vb6Type::Single;
             // Fix 175: Date 必须先于 Double 判 (Date 变量同时登记在 knownDoubleVars_
@@ -398,6 +404,10 @@ bool CCodeGen::isDefinitelyVariantExpr(Expr& expr, bool* isArrOut) const {
                 // 无法区分 Variant 与 Variant(), 视作普通 Variant
                 return true;
             }
+            // Fix 161f: 无 As Type 但整数可折叠的 Const — 符号表里 type=Variant,
+            // 走下面的回退会被当成 Variant 表达式。C 侧是数值 (见 inferExprType
+            // 同 Fix), 不是 Variant (extlist MListView SendMessage 实参 C2440)。
+            if (moduleIntConstValues_.count(lower)) return false;
             // Fix 049b: 如果已知为非 Variant 具体类型 (BSTR/Long/Double),
             // 不应回退到符号表查找 (可能命中其他模块的同名 Variant 符号)
             // 账 #123: 补 Byte 那一档。缺它时局部 `Dim bt As Byte` 掉到下面的符号表回退 ⇒
@@ -562,6 +572,10 @@ std::string CCodeGen::getRuntimeParamCType(const std::string& funcName, size_t p
         {"vb6_ArrayGetLong",    {"vb6_SafeArray1D*", "int32_t"}},
         {"vb6_ArrayGetBSTR",    {"vb6_SafeArray1D*", "int32_t"}},
         {"vb6_ArrayGetDouble",  {"vb6_SafeArray1D*", "int32_t"}},
+        // Fix <vbeclipse>: Unload / LoadPicture — 形参是对象指针 (HWND / IDispatch);
+        // 实参是 COM 后期绑定读数 (VARIANT) 时按此表解包 (vb6_UnloadForm(l_View.View))。
+        {"vb6_UnloadForm",      {"void*"}},
+        {"vb6_LoadPictureEx",   {"BSTR"}},
         {"vb6_ArrayGetVariant", {"vb6_SafeArray1D*", "int32_t"}},
         // BSTR 操作
         {"vb6_BSTR_Assign",     {"BSTR*", "BSTR"}},

@@ -327,6 +327,26 @@
                 if (knownDoubleVars_.count(lo124)) tgtCt124 = "double";
                 else if (knownLongVars_.count(lo124)) tgtCt124 = "int32_t";
                 else if (knownBstrVars_.count(lo124)) tgtCt124 = "BSTR";
+                // Fix 161f: 上述集合在**每个过程入口被 clear** (cgen_decl_func.cpp:48
+                // 起), 模块级变量 Ax As Long 进过程后就没了集合条目 → 走不到按 CLong
+                // 提取的分支, 直接 `x = vb6_VariantFromComResult(...)` → C2440
+                // "无法从 vb6_VARIANT 转换为 int32_t" (extlist MListViewEx
+                // `m_lvHWnd = lv.hWnd` 实测)。模块级变量仍在符号表里, 回查一次:
+                // 只在目标是裸标识符且命中 Variant/未知时按声明类型补判。
+                if (tgtCt124.empty() && node.target
+                    && node.target->kind == ASTNodeKind::IdentifierExpr) {
+                    switch (inferExprType(*node.target)) {
+                    case Vb6Type::Long: case Vb6Type::ULong: case Vb6Type::Integer:
+                    case Vb6Type::Byte: case Vb6Type::Boolean:
+                        tgtCt124 = "int32_t"; break;
+                    case Vb6Type::Double: case Vb6Type::Single:
+                    case Vb6Type::Currency: case Vb6Type::Date:
+                        tgtCt124 = "double"; break;
+                    case Vb6Type::String:
+                        tgtCt124 = "BSTR"; break;
+                    default: break;
+                    }
+                }
             }
             if (tgtCt124 == "double" || tgtCt124 == "float") {
                 c_.emitLine(target + " = vb6_VariantToDouble(" + unwrapped + ");");
@@ -471,6 +491,26 @@
                     } else if (knownArrays_.count(idLower)) {
                         // Fix 086: 数组目标 (vb6_SafeArray1D*) + Variant值
                         convertedValue = "vb6_VariantToSafeArray1D(" + value + ")";
+                    }
+                }
+                // Fix 161f: 上述集合在**每个过程入口被 clear** (见 cgen_decl_func.cpp:48
+                // 起), 模块级标量 (如 `Private m_lvHWnd As Long`) 进过程后就没有了集合
+                // 条目, 上述判定全落空 → 生成 `m_lvHWnd = vb6_VariantFromComResult(...)`
+                // → C2440 "无法从 vb6_VARIANT 转换为 int32_t"
+                // (extlist MListViewEx LVSortK `m_lvHWnd = lv.hWnd` 实测)。
+                // 模块级变量仍在符号表里, 回查声明类型补一次提取。
+                if (convertedValue == value && node.target
+                    && node.target->kind == ASTNodeKind::IdentifierExpr) {
+                    switch (inferExprType(*node.target)) {
+                    case Vb6Type::Long: case Vb6Type::ULong: case Vb6Type::Integer:
+                    case Vb6Type::Byte: case Vb6Type::Boolean:
+                        convertedValue = "vb6_VariantToLong(" + value + ")"; break;
+                    case Vb6Type::Double: case Vb6Type::Single:
+                    case Vb6Type::Currency: case Vb6Type::Date:
+                        convertedValue = "vb6_VariantToDouble(" + value + ")"; break;
+                    case Vb6Type::String:
+                        convertedValue = "vb6_VariantToString(" + value + ")"; break;
+                    default: break;
                     }
                 }
                 }

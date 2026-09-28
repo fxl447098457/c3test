@@ -871,7 +871,11 @@
 
         // 提取控件属性
         int left = 0, top = 0, width = 1000, height = 300;
-        std::string ctrlCaption = ctrl.controlName;  // 默认Caption=控件名
+        // Fix 162c-extlist: Caption 缺省 = "" 而不是控件名 —— VB6 的 .frm 只在
+        // Caption 非默认值时才写盘, Frame/Label/按钮 的持久化默认值都是空串
+        // (控件名只是 IDE 插入时的初始值)。此前回落控件名, extlist 的 Frame2
+        // 没写 Caption, 运行时标题栏凭空多出 "Frame2" 字样, 与 VB6 参考图不符。
+        std::string ctrlCaption;  // 默认 Caption="" (Fix 162c)
         std::string ctrlText;  // TextBox的Text属性
 
         auto propIt = ctrl.properties.find("Left");

@@ -70,6 +70,21 @@
         // Fix 081d: 仅对整型/浮点/布尔常量内联数值; 字符串常量(hasConstValue=true
         // 但 constType==String) 必须走正常标识符路径, 引用 #define 宏名, 否则
         // constIntValue==0 被错误输出为 "0".
+        // Fix 161f: 未写 As Type 的 Const 在符号表里 constType=Variant (且实测
+        // hasConstValue=0), 走不到下面的 constType 分支; 但它的值已在
+        // visit(ConstDecl) 折叠成功 (C 侧 emit 成 `#define NAME (4127)`), 登记在
+        // moduleIntConstValues_. 若发裸宏名, 下游按符号表判型会得到 Variant →
+        // 实参被包成 vb6_VariantToLong(LVM_GETHEADER) → C2440 "无法从 int 转换为
+        // vb6_VARIANT" (extlist MListView SendMessage 实测)。故**先查这张表**,
+        // 按已折叠整数值内联, 与 `As Long` Const 同口径。字符串 Const 不会进这张
+        // 表 (tryEvalConstInt 对字符串失败), 故无 081d 误伤。
+        {
+            auto itCV161f = moduleIntConstValues_.find(lower);
+            if (itCV161f != moduleIntConstValues_.end()) {
+                lastExpr_ = std::to_string(itCV161f->second);
+                return;
+            }
+        }
         if (foundSym->kind == SymbolKind::Constant && foundSym->hasConstValue) {
             if (foundSym->constType == Vb6Type::Long || foundSym->constType == Vb6Type::Integer
                 || foundSym->constType == Vb6Type::Boolean || foundSym->constType == Vb6Type::Byte

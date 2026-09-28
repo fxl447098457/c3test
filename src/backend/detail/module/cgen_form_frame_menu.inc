@@ -92,7 +92,9 @@
                 }
                 long childStyle = 0x40000000L | 0x10000000L;  // WS_CHILD | WS_VISIBLE
                 childStyle |= controlTypeStyleBits(child);  // 类型样式与顶层控件一致 (SS_NOTIFY/BS_GROUPBOX 等)
-                std::string childCaption = child.controlName;
+                // Fix 162d-extlist: Caption 缺省 = "" 与顶层路径 (create_controls.inc
+                // Fix 162c) 同口径 —— VB6 只在 Caption 非默认时写盘, 缺省回落空串。
+                std::string childCaption;
                 auto ccIt = child.properties.find("Caption");
                 if (ccIt != child.properties.end() && ccIt->second.type == FrmValueType::String) {
                     std::string raw = ccIt->second.rawText;
@@ -133,8 +135,29 @@
                 emitShapeLineProps(child, ctrlHwndExprForInit(child));
                 // 设计期 BorderStyle / Alignment (容器子控件)
                 emitDesignerStyleProps(child, childHwndRead(child));
+
                 emitDesignerStateProps(child, childHwndRead(child));  // 账 #125: 与顶层同口径
                 emitDesignerStringProps(child, childHwndRead(child));  // 账 #142: 同上（第二条创建路）
+
+                // 账 #125: 与顶层同口径 (Enabled / Visible / CheckBox·OptionButton 的 Value)
+                emitDesignerStateProps(child, childHwndRead(child));
+                // Fix 162d-extlist (VbEclipse 批次): 容器子控件此前**从不**走 style_apply
+                // 那条路 —— Label2-4.AutoSize=-1 全部落空 (顶层路径 Fix 162c 只覆盖顶层控件)。
+                // 这里按同一口径补发 Label 的 AutoSize: 度量文本宽度并 SetWindowPos。
+                // 注: 同批次原本还带一段 CheckBox/OptionButton 的 Value 补发, 现已由上面
+                // emitDesignerStateProps 覆盖, 且那版更准 —— 它认 CheckBox 的 Grayed(2)
+                // 并且先判 properties 的 type 是不是 Integer, 这里不再重复发。
+                {
+                    auto asIt162d = child.properties.find("AutoSize");
+                    if (asIt162d != child.properties.end() &&
+                        asIt162d->second.type == FrmValueType::Integer &&
+                        asIt162d->second.intValue != 0 &&
+                        child.controlType == FrmControlType::Label) {
+                        c_.emitLine("vb6_SetLabelAutoSize((void*)" + childHwndRead(child)
+                                  + ", -1);  /* design AutoSize */");
+                    }
+                }
+
                 emitControlFrxProps(child);  // Fix 182: 容器子控件同样加载 .frx 设计期图片/文本/列表
                 // 注册控件名到knownFormControls_(供属性访问)
                 {

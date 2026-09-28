@@ -56,6 +56,7 @@ extern int32_t vb6_UserControl_BackColor;      // OLE_COLOR
 extern int32_t vb6_UserControl_ForeColor;      // OLE_COLOR
 extern int16_t vb6_UserControl_RightToLeft;    // TriState: 0/1/-1
 extern void*   vb6_UserControl_ParentControls; // Controls 集合 (For Each)
+extern void*   vb6_UserControl_Controls;       // Fix <vbeclipse>: UserControl.Controls (未建模, NULL)
 // Fix 109: Font 是**对象指针** (生成代码把它作为 vb6_ComIface_Font* 实参传递,
 // 同时对它做 `.成员` 访问 —— 成员访问由生成端改写为 '->', 见 CodeEmitter::emitLine).
 extern vb6_ComIface_Font* vb6_UserControl_Font;

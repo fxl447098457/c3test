@@ -115,7 +115,14 @@ void CCodeGen::visit(SubDecl& node) {
             // 窗体事件处理器走的是本文件不是 func.cpp, 漏这里就收不到)。
             if (Symbol::toLower(simpleP.name) == "dataobject")
                 dataObjectParams_.insert(pLower);
-            auto* pSym = symTab_.lookupModule(simpleP.name);
+            // Fix 161f: 同 cgen_decl_func.cpp — 限定名 (ComctlLib.ColumnHeader) 用
+            // lookupTypeSymbol 按全名→末段查, 与 mapTypeRef 同口径。
+            auto* pSym = lookupTypeSymbol(simpleP.name);
+            if (!pSym) {
+                size_t pDot161f = simpleP.name.find('.');
+                if (pDot161f != std::string::npos)
+                    pSym = lookupTypeSymbol(simpleP.name.substr(pDot161f + 1));
+            }
             if (pSym && pSym->kind == SymbolKind::UserDefinedType) {
                 knownUdtVars_[pLower] = "vb6_type_" + cIdent(simpleP.name);
             } else if (pSym && pSym->kind == SymbolKind::Class) {
@@ -128,6 +135,9 @@ void CCodeGen::visit(SubDecl& node) {
             if (pSym2 && pSym2->kind == SymbolKind::Class && pSym2->isInterface) {
                 knownIfaceVars_[pLower] = pSym2->name;
             }
+            // Fix 161f: `lv As ListView` 形参槽就是 HWND —— 同 cgen_decl_func.cpp。
+            if (Symbol::toLower(simpleP.name).find("listview") != std::string::npos)
+                listViewSlotVars_.insert(pLower);
             // 注册BSTR/Double/Long类型参数到类型跟踪集合
             Vb6Type paramType = typeSys_.resolveTypeName(simpleP.name);
             if (paramType == Vb6Type::String) knownBstrVars_.insert(pLower);
@@ -261,6 +271,28 @@ void CCodeGen::visit(SubDecl& node) {
     // 生成过程体 (P14.1.2: 传入hasResume_以启用resume点生成)
     // Fix 086: 先将块内 Dim/Const 提升到过程顶部 (VB6 局部声明是过程级作用域)
     hoistLocalDecls(node.body);
+    // Fix <vbeclipse>: VB6 隐式变量 (无 Option Explicit 时未声明即使用) ——
+    // 语义层登记的名字在此预声明为 Variant C 局部并注册 knownVariantVars_。
+    implicitMacroNames_.clear();
+    if (currentProc_) {
+        auto* impl = symTab_.implicitVarsFor(Symbol::toLower(moduleName_),
+                                             Symbol::toLower(currentProc_->name));
+        if (impl) {
+            for (const auto& n : *impl) {
+                std::string nLower = Symbol::toLower(n);
+                if (!knownLocalVars_.count(nLower)) {
+                    knownLocalVars_.insert(nLower);
+                    knownVariantVars_.insert(nLower);
+                    // Fix <vbeclipse>: 隐式变量名可能撞 Win32 宏 (PopupMenu.cls 的
+                    // MF_BYPOSITION)。过程内 push_macro/undef 隔离, 出过程 pop 复原。
+                    c_.emitLine("#pragma push_macro(\"" + n + "\")");
+                    c_.emitLine("#undef " + n);
+                    implicitMacroNames_.push_back(n);
+                    c_.emitLine("vb6_VARIANT " + cIdent(n) + " = vb6_VariantEmpty();  /* 隐式变量 */");
+                }
+            }
+        }
+    }
     emitStmtList(node.body, hasResume_);
 
         // P12.3: 恢复调用者的错误处理状态
@@ -293,6 +325,12 @@ void CCodeGen::visit(SubDecl& node) {
         c_.emitLine("}");
     }
 
+    // Fix <vbeclipse>: 复原过程内被 #undef 的 Win32 宏 (隐式变量名隔离)
+    for (const auto& n : implicitMacroNames_) {
+        c_.emitLine("#pragma pop_macro(\"" + n + "\")");
+    }
+    implicitMacroNames_.clear();
+    currentProc_ = nullptr;
     currentProc_ = nullptr;
     inStaticProc_ = false;
     hasGoSub_ = false;
