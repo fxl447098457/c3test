@@ -165,13 +165,28 @@ $script:total = 0
 #
 # 可复现性: 一个 job 只跑一个 category, 且 vbp/GUI 始终串行 ⇒ 同一次提交下第 k 片的
 # 内容每次都一样, 不会这次归 1 片那次归 2 片。
+#
+# **分组**: vbp 里有几处用例靠 $OutDir 里的文件互相接续 (先编出 exe, 后一条再去查那个 exe)。
+# 纯取模会把这一对拆到两个 runner, 后一条就报 "no exe" —— 头一次分片就是这么红的
+# (run 36423080858: vbp #1/#2/#3 挂在 frx_extract_content / ctrlmanifest_builtin /
+# balloon_manifest_is_user_supplied 三处)。所以带 Group 的调用按**组首次出现时占到的槽**
+# 定位, 同组永远落同一片; 原本的隐式顺序依赖就此变成代码里写明的事实。
 $script:VbpCaseNo = 0
 $script:VbpSkipped = 0
+$script:VbpGroupSlot = @{}
 function Enter-VbpShard {
+    param([string]$Group = "")
     if ($VbpShardTotal -le 1) { return $true }   # 不分片: 计数器都不必动
-    $script:VbpCaseNo++
+    if ($Group -ne "" -and $script:VbpGroupSlot.ContainsKey($Group)) {
+        $slot = $script:VbpGroupSlot[$Group]     # 同组复用首次的槽
+    } elseif ($Group -ne "") {
+        $slot = $script:VbpCaseNo++
+        $script:VbpGroupSlot[$Group] = $slot
+    } else {
+        $slot = $script:VbpCaseNo++
+    }
     $mine = $VbpShard - 1
-    if (((($script:VbpCaseNo - 1) % $VbpShardTotal)) -eq $mine) { return $true }
+    if (($slot % $VbpShardTotal) -eq $mine) { return $true }
     $script:VbpSkipped++
     return $false
 }
@@ -341,9 +356,9 @@ function Invoke-TestExe {
 # GUI smoke: require a visible main window, then close only the process we launch.
 # This checks startup, not screenshot correctness or QR decoding.
 function Test-GuiVbp {
-    param([string]$Name, [string]$VbpFile, [string]$ExeName = "", [string]$Arch = "", [int]$AutoExitSec = 0)
+    param([string]$Name, [string]$VbpFile, [string]$ExeName = "", [string]$Arch = "", [int]$AutoExitSec = 0, [string]$ShardGroup = "")
     # vbp 分片: 本片不跑这例 —— 闸门必须在任何副作用之前 (建目录/起进程)。
-    if (-not (Enter-VbpShard)) { return }
+    if (-not (Enter-VbpShard -Group $ShardGroup)) { return }
     $script:total++
     Write-Host -NoNewline "  [GUI] $Name ... "
     $guiOut = Join-Path $OutDir $Name
@@ -637,10 +652,11 @@ function Test-ProductManifest {
         [string]$ExeFile,
         [int]$ManifestCount,
         [string]$MustContain = "",
-        [string]$MustNotContain = ""
+        [string]$MustNotContain = "",
+        [string]$ShardGroup = ""   # 见 Enter-VbpShard: 与别的用例靠产物接续时同组同片
     )
     # vbp 分片: 本片不跑这例 —— 闸门必须在任何副作用之前 (建目录/起进程)。
-    if (-not (Enter-VbpShard)) { return }
+    if (-not (Enter-VbpShard -Group $ShardGroup)) { return }
     $script:total++
     Write-Host -NoNewline "  [MANIFEST] $Name ... "
     if (-not (Test-Path $ExeFile)) {
@@ -671,10 +687,12 @@ function Test-Vbp {
         [string[]]$ExpectedOutputs,
         [string]$Arch = "",           # 可选架构参数 (x86/x64)
         [string]$RequiresCom = "",    # 依赖的 COM ProgId (未注册则 SKIP, 否则 FAIL)
-        [string]$Env = ""             # 可选环境变量, "K1=V1;K2=V2" (跑 exe 前设, 跑完还原)
+        [string]$Env = "",            # 可选环境变量, "K1=V1;K2=V2" (跑 exe 前设, 跑完还原)
+        [string]$ShardGroup = ""      # vbp 分片组名 (见 Enter-VbpShard): 与别的用例靠 $OutDir 里的
+                                      # 文件接续时, 同组用例必须落同一片, 否则后一条报 "no exe"
     )
     # vbp 分片: 本片不跑这例 —— 闸门必须在任何副作用之前 (建目录/起进程)。
-    if (-not (Enter-VbpShard)) { return }
+    if (-not (Enter-VbpShard -Group $ShardGroup)) { return }
     $script:total++
     Write-Host -NoNewline "  [VBP] $Name ... "
 
@@ -1167,9 +1185,9 @@ function Test-VbpWarn {
 
 # ai/023 S05/S06: generic CLI check — exit 0 and output contains needle.
 function Test-CliOk {
-    param([string]$Name, [string[]]$C3Args, [string]$Needle)
+    param([string]$Name, [string[]]$C3Args, [string]$Needle, [string]$ShardGroup = "")
     # vbp 分片: 本片不跑这例 —— 闸门必须在任何副作用之前 (建目录/起进程)。
-    if (-not (Enter-VbpShard)) { return }
+    if (-not (Enter-VbpShard -Group $ShardGroup)) { return }
     $script:total++
     Write-Host -NoNewline "  [CLI] $Name ... "
     $result = & cmd /c (('"' + $C3 + '" ' + ($C3Args -join ' ') + ' 2>&1'))
@@ -2175,12 +2193,12 @@ if ($Category -in @("all", "run", "vbp")) {
     # 于是这种 VB6 里很常见的工程连内置的一起让掉 ⇒ 产物静默退回 v5.82（实测：BASE 编译器编
     # 同一件夹具，产物 0 份清单；改后 1 份且是内置那份）。清单数=1 同时挡住"两份 #1 打架"。
     $mfNeedles = @("CTRLMANIFEST-DONE", "CM1=Y", "CM2=Y", "CM3=Y")
-    Test-Vbp "ctrlmanifest" "$Tests\ctrlmanifest\MfApp.vbp" $mfNeedles
+    Test-Vbp "ctrlmanifest" "$Tests\ctrlmanifest\MfApp.vbp" $mfNeedles -ShardGroup "mfapp"
     # 主判据：这份工程的 .res 里没有清单 ⇒ 产物必须仍然带**内置那一份**（改前 BASE 编出来是 0 份）。
     # "恰好 1 份"同时挡住最坏的那种错：两份 #1 会让加载器直接报错。
-    Test-ProductManifest "ctrlmanifest_builtin" "$OutDir\MfApp.exe" 1 "Microsoft.Windows.Common-Controls" "dpiAware"
-    Test-Vbp "ctrlmanifest_x86" "$Tests\ctrlmanifest\MfApp.vbp" $mfNeedles -Arch "x86"
-    Test-ProductManifest "ctrlmanifest_builtin_x86" "$OutDir\MfApp.exe" 1 "Microsoft.Windows.Common-Controls" "dpiAware"
+    Test-ProductManifest "ctrlmanifest_builtin" "$OutDir\MfApp.exe" 1 "Microsoft.Windows.Common-Controls" "dpiAware" -ShardGroup "mfapp"
+    Test-Vbp "ctrlmanifest_x86" "$Tests\ctrlmanifest\MfApp.vbp" $mfNeedles -Arch "x86" -ShardGroup "mfapp"
+    Test-ProductManifest "ctrlmanifest_builtin_x86" "$OutDir\MfApp.exe" 1 "Microsoft.Windows.Common-Controls" "dpiAware" -ShardGroup "mfapp"
     # 发码面: 设计期四条逐参数钉 (含 -999 哨兵那条没写过的控件)、创建样式那个常量、
     # 反面断这枚控件不再走 vb6_com_ 槽 / CoCreateInstance / Buttons 的 COM 兜底。
     Test-EmitcShape "tb_emitc_shape" @("$Tests\ctrltoolbar\TbApp.vbp") @(
@@ -2423,11 +2441,11 @@ if ($Category -in @("all", "run", "vbp")) {
     New-Item -ItemType Directory -Path $frxExDir | Out-Null
     Copy-Item "$Tests\frxdata\FrxData.frm" $frxExDir
     Copy-Item "$Tests\frxdata\FrxData.frx" $frxExDir
-    Test-CliOk "frx_extract" @("`"$frxExDir\FrxData.frm`"", "--extract-frx") ".frx.bas"
+    Test-CliOk "frx_extract" @("`"$frxExDir\FrxData.frm`"", "--extract-frx") ".frx.bas" -ShardGroup "frx"
 
     # 导出内容: 文本(多行拼接) / 列表项 / 列表项数据 三类都要落到普通 VB 语句上
     $frxExOut = Join-Path $frxExDir "FrxData.frx.bas"
-    if (Enter-VbpShard) {
+    if (Enter-VbpShard -Group "frx") {
         $script:total++
         Write-Host -NoNewline "  [CLI] frx_extract_content ... "
         if ((Test-Path $frxExOut) -and
@@ -2530,14 +2548,14 @@ if ($Category -in @("all", "run", "vbp")) {
     # QR code project (tests\VbQRCodegen-master): form loads, sets Image1.Picture via Stretch
     Test-GuiVbp "VbQRCodegen" "$Tests\VbQRCodegen-master\test\Project1.vbp"
     # BalloonTooltips: form loads with controls + creates its common-controls tooltip windows (x64).
-    Test-GuiVbp "BalloonTooltips" "$Tests\BalloonTooltips\prjBalloonTooltips.vbp" -ExeName "BalloonTooltips"
+    Test-GuiVbp "BalloonTooltips" "$Tests\BalloonTooltips\prjBalloonTooltips.vbp" -ExeName "BalloonTooltips" -ShardGroup "balloon"
     # ai/029 C29-M 的反面：这枚工程的 .res **自带** #1 清单（BalloonTooltips.rc 里
     # `1 RT_MANIFEST "BalloonTooltips.exe.manifest"`，那段含 dpiAware/compatibility）
     # ⇒ 必须"用他的、且只有一份"。`dpiAware` 只有用户那份里有，所以这条同时钉住
     # "让位生效"与"内置那份没叠上去"（两份 #1 会让加载器直接报错）。
     # 路径注意：Test-GuiVbp 的产物落在 `output\<用例名>\` 下（不是 $OutDir 根），
     # 第一版我按 $OutDir\BalloonTooltips.exe 断 ⇒ CI 直接 FAIL (no exe) —— 记下来。
-    Test-ProductManifest "balloon_manifest_is_user_supplied" "$OutDir\BalloonTooltips\BalloonTooltips.exe" 1 "dpiAware"
+    Test-ProductManifest "balloon_manifest_is_user_supplied" "$OutDir\BalloonTooltips\BalloonTooltips.exe" 1 "dpiAware" -ShardGroup "balloon"
     # Charts 2020 demo (3rd-party UserControl charts): windowless chart controls (x86 first;
     # x64 after LongPtr port of API pointers/handles in the .ctl/.cls sources).
     Test-GuiVbp "Charts2020" "$Tests\Charts 2020\Proyecto1.vbp" -Arch "x86" -AutoExitSec 3
