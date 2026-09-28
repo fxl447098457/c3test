@@ -26,6 +26,10 @@ void vb6_SetControlText(void* hwnd, void* bstr);
 // Value属性 (CheckBox/OptionButton: 0=Unchecked, 1=Checked, 2=Grayed)
 int vb6_GetCheckValue(void* hwnd);
 void vb6_SetCheckValue(void* hwnd, int value);
+// 账 #128-b: OptionButton 单开一对 —— VB6 那边它的 Value 是 Boolean(读回 -1/0)，
+// 而 CheckBox 的是三态 Integer；写侧必须把非 0 折回 BST_CHECKED(1)，因为 BM_SETCHECK 不吃 -1。
+int vb6_GetOptionValue(void* hwnd);
+void vb6_SetOptionValue(void* hwnd, int value);
 
 // Visible属性
 int vb6_GetControlVisible(void* hwnd);

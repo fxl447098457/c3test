@@ -163,6 +163,23 @@ Vb6Type CCodeGen::controlPropType(FrmControlType ctrlType, const std::string& pr
         // 走 cgen_expr_call_callee_withm.inc 那条改道。
         if (p == "textrtf") return Vb6Type::String;
     }
+    if (ctrlType == FrmControlType::ListView) {
+        // 账 #128-b: 这六位在 VB6 是 Boolean，RTL 侧现在也真的答 -1/0（存进去就归一化，见
+        // vb6forms_listview.c）。以前它们**根本没登记** ⇒ 走 inferExprType 的兜底、被当成
+        // 数值装箱，`CStr(ListView1.GridLines)` 打的是 1 而不是 True。
+        // 数值那几位（View / SortKey / SortOrder / LabelEdit / Sorted）刻意**不跟着登记**：
+        // 它们要么是枚举要么口径待拍，继续走今天那条装箱路，发码一字不动。
+        if (p == "gridlines" || p == "fullrowselect" || p == "multiselect"
+            || p == "checkboxes" || p == "hidecolumnheaders" || p == "allowcolumnreorder") {
+            return Vb6Type::Boolean;
+        }
+    }
+    if (ctrlType == FrmControlType::OptionButton) {
+        // 账 #128-b: OptionButton.Value 单开了一对专桩（读映射成 -1/0、写把非 0 折回
+        // BST_CHECKED —— BM_SETCHECK 不吃 -1），所以这里才敢登 Boolean。
+        // CheckBox.Value **不动** —— VB6 那边它是三态 Integer(0/1/2)，本来就是数值档。
+        if (p == "value") return Vb6Type::Boolean;
+    }
     if (ctrlType == FrmControlType::Winsock) {
         // C29-WS-a: 与 C 层签名对齐是这里的唯一目的 —— 六条 getter 回 int32_t ⇒ Long，
         // 两条回 BSTR ⇒ String（判成数值就是把指针当数读，SSTab1.Tab 那一族同型缺陷）。
@@ -273,8 +290,13 @@ std::string CCodeGen::getControlPropReadFn(FrmControlType ctrlType, const std::s
         if (propLower == "enabled") return "vb6_GetControlEnabled";
         break;
     case FrmControlType::CheckBox:
-    case FrmControlType::OptionButton:
+        // CheckBox.Value 在 VB6 是**三态 Integer**(0/1/2)，继续走直接搬 BM_GETCHECK 的那对。
         if (propLower == "value") return "vb6_GetCheckValue";
+    case FrmControlType::OptionButton:
+        // 账 #128-b: OptionButton.Value 在 VB6 是 Boolean，单开一对专桩。
+        // 注意这里**不能再让两个 case 共用同一段函数体**：第一版就把专桩写在了共用体里，
+        // 结果连 CheckBox 也一起被换掉，灰态(2)直接被吃掉、变成 -1（本地自检抚住的）。
+        if (propLower == "value") return "vb6_GetOptionValue";
         if (propLower == "caption") return "vb6_GetControlText";
         if (propLower == "visible") return "vb6_GetControlVisible";
         if (propLower == "enabled") return "vb6_GetControlEnabled";
@@ -707,8 +729,9 @@ std::string CCodeGen::getControlPropWriteFn(FrmControlType ctrlType, const std::
         if (propLower == "enabled") return "vb6_SetControlEnabled";
         break;
     case FrmControlType::CheckBox:
-    case FrmControlType::OptionButton:
         if (propLower == "value") return "vb6_SetCheckValue";
+    case FrmControlType::OptionButton:
+        if (propLower == "value") return "vb6_SetOptionValue";
         if (propLower == "caption") return "vb6_SetControlText";
         if (propLower == "visible") return "vb6_SetControlVisible";
         if (propLower == "enabled") return "vb6_SetControlEnabled";
@@ -1060,7 +1083,7 @@ void CCodeGen::emitDesignerStateProps(const FrmControl& ctrl, const std::string&
                             + ");  /* design Value=" + std::to_string(v) + " */");
             }
         } else if (ctrl.controlType == FrmControlType::OptionButton && v != 0) {
-            c_.emitLine("vb6_SetCheckValue(" + hw + ", 1);  /* design Value=True */");
+            c_.emitLine("vb6_SetOptionValue(" + hw + ", 1);  /* design Value=True(账 #128-b 专桩) */");
         }
     }
 }

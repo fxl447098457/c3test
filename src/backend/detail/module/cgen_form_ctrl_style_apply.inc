@@ -871,8 +871,10 @@
                 return (int)it->second.intValue;
             };
             // VB6 的 True 是 -1; 这些布尔属性按"非 0 即真"归一化后再发。
+            // 账 #128-b: 归一化成 **-1** 而不是 1 —— 与其余控件那几族(TreeView/MonthView/Slider)
+            // 发的那一档对齐，也让 RTL 里"存进去就是 VB6 的那一个数"这条不变量成立。
             auto lvBool = [&](const std::string& k) -> int {
-                return lvInt(ctrl.properties, k, 0) != 0 ? 1 : 0;
+                return lvInt(ctrl.properties, k, 0) != 0 ? -1 : 0;
             };
             int lvView = lvInt(ctrl.properties, "View", 0);
             if (lvView < 0 || lvView > 3) lvView = 0;

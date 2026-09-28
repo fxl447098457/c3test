@@ -61,6 +61,21 @@ void vb6_SetCheckValue(void* hwnd, int value) {
     SendMessageW((HWND)hwnd, BM_SETCHECK, (WPARAM)value, 0);
 }
 
+// 账 #128-b: OptionButton 的 Value 在 VB6 是 **Boolean**，而 CheckBox 的是 **三态 Integer**
+// (0/1/2) —— 两边原先共用上面那一对。共用不能翻类型：把 getter 改成答 -1 会把 CheckBox 的
+// 2(灰) 那档吃掉，把 setter 改成"非 0 就 -1"更糟 —— **BM_SETCHECK 只认 0/1/2**，
+// 递 -1 进去按钮状态直接坏掉。所以这里单开一对：读把 BST_CHECKED 映射成 VB6 的 True(-1)，
+// 写把任意非 0 折回 BST_CHECKED(1)。
+int vb6_GetOptionValue(void* hwnd) {
+    if (!hwnd) return 0;
+    return (SendMessageW((HWND)hwnd, BM_GETCHECK, 0, 0) == BST_CHECKED) ? -1 : 0;
+}
+
+void vb6_SetOptionValue(void* hwnd, int value) {
+    if (!hwnd) return;
+    SendMessageW((HWND)hwnd, BM_SETCHECK, (WPARAM)(value ? BST_CHECKED : BST_UNCHECKED), 0);
+}
+
 int vb6_GetControlVisible(void* hwnd) {
     if (!hwnd) return 0;
     return IsWindowVisible((HWND)hwnd) ? -1 : 0;  // VB6: True=-1

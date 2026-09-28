@@ -160,6 +160,11 @@ Private Sub tProbe_Timer()
     Debug.Print "DS9=" & CStr(VarType(v)) & CStr(v)
     v = cbHidOut.Visible
     Debug.Print "DS10=" & CStr(VarType(v)) & CStr(v)
+    ' 账 #128-b: OptionButton.Value 归 Boolean(读回 -1/0、写非 0 折回 BST_CHECKED)。
+    ' obDef 设计期没写 Value、obOn 写了 True —— 两个方向各一面;DS12 是比较面。
+    v = obOn.Value
+    Debug.Print "DS11=" & CStr(obDef.Value) & "/" & TypeName(obOn.Value) & "/" & CStr(VarType(v))
+    Debug.Print "DS12=" & TF(obOn.Value = True And obDef.Value = False)
     Debug.Print "CTRLSTATE-DONE"
     Unload Me
 End Sub

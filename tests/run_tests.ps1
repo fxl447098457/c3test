@@ -1777,8 +1777,8 @@ if ($Category -in @("all", "run", "vbp")) {
     #   是 **11 (VT_BOOL)**（修复前 TypeName=Long、VarType=3）。DS5 仍是数字档：OptionButton
     #   的 Value 在 VB6 也是 Boolean，今天还没登记（记在 029 §九，另格）。
     $cstNeedles = @("CTRLSTATE-DONE", "DS1=11", "DS2=FalseFalse", "DS3=FalseFalse",
-                    "DS4=0TrueTrue", "DS5=01", "DS6=YYY", "DS7=True",
-                    "DS8=Boolean11False", "DS9=11True", "DS10=11False")
+                    "DS4=0TrueTrue", "DS5=FalseTrue", "DS6=YYY", "DS7=True",
+                    "DS8=Boolean11False", "DS9=11True", "DS10=11False", "DS11=False/Boolean/11", "DS12=Y")
     Test-Vbp "ctrlstate" "$Tests\ctrlstate\CtrlState.vbp" $cstNeedles
     Test-Vbp "ctrlstate_x86" "$Tests\ctrlstate\CtrlState.vbp" $cstNeedles -Arch "x86"
     Test-EmitcShape "cs_emitc_state" @("$Tests\ctrlstate\CtrlState.vbp") @(
@@ -1788,14 +1788,15 @@ if ($Category -in @("all", "run", "vbp")) {
         'vb6_SetControlEnabled((void*)vb6_hwnd_cbDisOut, 0);',
         'vb6_SetControlVisible((void*)vb6_hwnd_cbHidIn, 0);',
         'vb6_SetControlVisible((void*)vb6_hwnd_cbHidOut, 0);',
-        'vb6_SetCheckValue((void*)vb6_hwnd_obOn, 1);',   # OptionButton 的 Value=-1 折成 BST_CHECKED
+        'vb6_SetOptionValue((void*)vb6_hwnd_obOn, 1);',   # OptionButton 的 Value=-1 折成 BST_CHECKED
         # 账 #124: 控件布尔属性按 Boolean 解封 —— CStr 折成 vb6_CStrBool，装箱走 vb6_VariantBool。
         # 修复前这两处分别是 vb6_CStrLong 与 vb6_VariantFromValue（TypeName 也就跟着给 Long）。
         # 装箱那两处形状不同是有意的：赋值点走 wrapVariantValue（不加窄化），
         # 实参点（TypeName 那条）走 boxToVariant（自带 (int16_t) 收窄）。
         'vb6_CStrBool(vb6_GetControlEnabled(',
         'vb6_VariantBool((int16_t)(vb6_GetControlEnabled(',
-        'v = vb6_VariantBool(vb6_GetControlVisible('
+        'v = vb6_VariantBool(vb6_GetControlVisible(',
+        'vb6_CStrBool(vb6_GetOptionValue('
     )
     Test-EmitcAbsent "cs_emitc_selectivity" @("$Tests\ctrlstate\CtrlState.vbp") @(
         'vb6_SetCheckValue((void*)vb6_hwnd_cbDef',      # 没写 Value 的复选框不许被设
@@ -1803,7 +1804,8 @@ if ($Category -in @("all", "run", "vbp")) {
         'vb6_SetControlVisible((void*)vb6_hwnd_fr',     # Frame 自己也不许被藏
         # 账 #124: 这两条是修复前的形状（布尔属性被当 Long）—— 一回来判据就得红。
         'vb6_CStrLong(vb6_GetControlEnabled(',
-        'vb6_CStrLong(vb6_GetControlVisible('
+        'vb6_CStrLong(vb6_GetControlVisible(',
+        'vb6_SetCheckValue((void*)vb6_hwnd_obOn'
     )
 
     # ai/029 C29-SL-a: Slider (原生 msctls_trackbar32)。登记之前这枚控件**连窗口都没建**
@@ -2400,9 +2402,9 @@ if ($Category -in @("all", "run", "vbp")) {
         "LV1-COL-KEY=c1", "LV2-COL-TEXT=姓名", "LV3-COL-IDX=1", "LV4-COLWIDTH=1200",
         "LV5-COLCOUNT=2", "LV6-ITEM-KEY=r1", "LV7-ITEM-TEXT=张三", "LV8-ITEM-IDX=1",
         "LV9-SUB1=销售部", "LV10-ITEMCOUNT=2", "LV11-FOREACH=张三/销售部,李四/技术部,",
-        "LV12-COLS=姓名,部门,", "LV13-VIEW=3", "LV14-GRID=1", "LV15-BYKEY=李四",
+        "LV12-COLS=姓名,部门,", "LV13-VIEW=3", "LV14-GRID=True", "LV15-BYKEY=李四",
         "LV16-ITEM1=张三", "LV17-SEL=-1", "LV18-COLW=900", "LV19-AFTERRM=1",
-        "LV20-AFTERCLEAR=0")
+        "LV20-AFTERCLEAR=0", "LV23=True/Boolean/True", "LV24=EQ", "LV25=False/False")
     Test-Vbp "c29listview" "$Tests\c29listview\C29ListView.vbp" $c29lvExpected
     Test-Vbp "c29listview_x86" "$Tests\c29listview\C29ListView.vbp" $c29lvExpected -Arch "x86"
     # 事件接线: 无头环境点不了鼠标 (生成代码里 LV21/LV22 只有真点击才会打),
@@ -2415,7 +2417,9 @@ if ($Category -in @("all", "run", "vbp")) {
         "pNM42->code == -108",
         "vb6_ListView_OnNotify((void*)vb6_hwnd_ListView1, -108",
         "vb6_ListView_ColumnHeaderAt((void*)vb6_hwnd_ListView1",
-        "_ItemClick(vb6_lvItem7)", "_ColumnClick(vb6_lvHdr7)")
+        "_ItemClick(vb6_lvItem7)", "_ColumnClick(vb6_lvHdr7)",
+        'vb6_CStrBool(vb6_ListView_GetGridLines(',
+        'vb6_CStrBool(vb6_ListView_GetMultiSelect(')
         # C29-4: 事件回调改**传值** (ByVal 对象语义)。旧形状传 &obj 是 void**, 与
         # handler 形参 void* 不符 —— 成员读拿"指针的地址"当 IDispatch, 必然 not found。
         # StatusBar 的 WM_NOTIFY 派发形状由 c29sbevt (SbEvent.vbp, 真有 StatusBar) 覆盖 ——

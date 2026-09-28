@@ -185,12 +185,15 @@ void vb6_ListView_Init(void* hwnd, int32_t view, int32_t gridLines, int32_t full
     Vb6ListView* v = lvEnsure((HWND)hwnd);
     if (!v) return;
     v->view = (int)view;
-    v->gridLines = (int)gridLines;
-    v->fullRowSelect = (int)fullRowSelect;
-    v->multiSelect = (int)multiSelect;
-    v->checkBoxes = (int)checkBoxes;
-    v->hideHeaders = (int)hideHeaders;
-    v->allowColReorder = (int)allowColReorder;
+    // 账 #128-b: 这六位是布尔 ⇒ **存进去就先归化成 VB6 的 -1/0**。以前是"写什么存什么"，
+    // 于是设计期发的 1 会原样读回 1 —— 类型面一旦说自己是 Boolean，`X = True` 这条比较
+    // 就恒假（1 ≠ -1）。归一化放在存这一头，getter 仍是直答控件里的那个数，不多折一层。
+    v->gridLines = gridLines ? -1 : 0;
+    v->fullRowSelect = fullRowSelect ? -1 : 0;
+    v->multiSelect = multiSelect ? -1 : 0;
+    v->checkBoxes = checkBoxes ? -1 : 0;
+    v->hideHeaders = hideHeaders ? -1 : 0;
+    v->allowColReorder = allowColReorder ? -1 : 0;
     v->labelEdit = (int)labelEdit;
     lvApplyStyle(v);
 }
@@ -213,12 +216,12 @@ void vb6_ListView_SetView(void* hwnd, int32_t val) {
     Vb6ListView* v = lvFind((HWND)hwnd); if (!v) return;
     v->view = (int)val; lvApplyStyle(v);
 }
-void vb6_ListView_SetGridLines(void* hwnd, int32_t val)         { Vb6ListView* v = lvFind((HWND)hwnd); if (v) { v->gridLines = (int)val; lvApplyStyle(v); } }
-void vb6_ListView_SetFullRowSelect(void* hwnd, int32_t val)     { Vb6ListView* v = lvFind((HWND)hwnd); if (v) { v->fullRowSelect = (int)val; lvApplyStyle(v); } }
-void vb6_ListView_SetMultiSelect(void* hwnd, int32_t val)       { Vb6ListView* v = lvFind((HWND)hwnd); if (v) { v->multiSelect = (int)val; lvApplyStyle(v); } }
-void vb6_ListView_SetCheckBoxes(void* hwnd, int32_t val)        { Vb6ListView* v = lvFind((HWND)hwnd); if (v) { v->checkBoxes = (int)val; lvApplyStyle(v); lvSyncAll(v); } }
-void vb6_ListView_SetHideColumnHeaders(void* hwnd, int32_t val) { Vb6ListView* v = lvFind((HWND)hwnd); if (v) { v->hideHeaders = (int)val; lvApplyStyle(v); } }
-void vb6_ListView_SetAllowColumnReorder(void* hwnd, int32_t val) { Vb6ListView* v = lvFind((HWND)hwnd); if (v) { v->allowColReorder = (int)val; lvApplyStyle(v); } }
+void vb6_ListView_SetGridLines(void* hwnd, int32_t val)         { Vb6ListView* v = lvFind((HWND)hwnd); if (v) { v->gridLines = val ? -1 : 0; lvApplyStyle(v); } }
+void vb6_ListView_SetFullRowSelect(void* hwnd, int32_t val)     { Vb6ListView* v = lvFind((HWND)hwnd); if (v) { v->fullRowSelect = val ? -1 : 0; lvApplyStyle(v); } }
+void vb6_ListView_SetMultiSelect(void* hwnd, int32_t val)       { Vb6ListView* v = lvFind((HWND)hwnd); if (v) { v->multiSelect = val ? -1 : 0; lvApplyStyle(v); } }
+void vb6_ListView_SetCheckBoxes(void* hwnd, int32_t val)        { Vb6ListView* v = lvFind((HWND)hwnd); if (v) { v->checkBoxes = val ? -1 : 0; lvApplyStyle(v); lvSyncAll(v); } }
+void vb6_ListView_SetHideColumnHeaders(void* hwnd, int32_t val) { Vb6ListView* v = lvFind((HWND)hwnd); if (v) { v->hideHeaders = val ? -1 : 0; lvApplyStyle(v); } }
+void vb6_ListView_SetAllowColumnReorder(void* hwnd, int32_t val) { Vb6ListView* v = lvFind((HWND)hwnd); if (v) { v->allowColReorder = val ? -1 : 0; lvApplyStyle(v); } }
 void vb6_ListView_SetLabelEdit(void* hwnd, int32_t val)         { Vb6ListView* v = lvFind((HWND)hwnd); if (v) v->labelEdit = (int)val; }
 void vb6_ListView_SetSorted(void* hwnd, int32_t val) {
     Vb6ListView* v = lvFind((HWND)hwnd); if (!v) return;
