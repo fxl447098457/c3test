@@ -13,6 +13,10 @@
 
     // BSTR赋值检测: 如果目标是BSTR变量, 使用vb6_BSTR_Assign防止悬垂指针和双重释放
     bool targetIsBstr = false;
+    // 账 #113: 目标是**这一格才认出来**的 String (模块级变量 —— 它不进 knownBstrVars_) 时,
+    // 值那侧是自有临时的话走 AssignMove; 老路径 (局部/形参/UDT String 字段) 的行文一字不动,
+    // 免得把"局部串赋值"整片发码面一起翻掉。
+    bool bstrTargetViaTypeQuery = false;
     {
         // 检查目标是否是已知BSTR变量 (me->field 或 模块级变量)
         std::string checkName = target;
@@ -38,6 +42,19 @@
         // 里 148/148 行读到同一个 "149"/列头, 写 "ZZZ" 后读回是指针数值。
         // 交给下方 targetIsBstr 分支 → vb6_BSTR_Assign (释放旧值 + 深拷贝)。
         if (!targetIsBstr && udtFieldIsBstrInCTarget(target)) targetIsBstr = true;
+        // 账 #113: 模块级 String 变量不进 knownBstrVars_ —— 那张表在每过程入口 clear
+        // (cgen_decl_func.cpp:43 / cgen_decl_proc.cpp:51), 只有局部声明与形参进表。
+        // 于是 `gS = s`(String 形参) 一路落到最底下的裸赋值 `gS = s;` —— 存下来的是
+        // **调用方那只临时串的地址**, 过程一返回 RTL 就释放 ⇒ 再读是别人用过的堆块
+        // (WS-c 实测读出过 "WS38=" / "Y")。用符号表那把尺对**裸标识符目标**补问一次
+        // (inferExprType 的 IdentifierExpr 分支认得模块级变量)。
+        // 只认 IdentifierExpr: 成员/控件属性目标另有各条专门通道 (cgen_assign_stmt_special.inc
+        // 里那些), 放进来会把它们的发码面抢掉。
+        if (!targetIsBstr && node.target->kind == ASTNodeKind::IdentifierExpr
+            && inferExprType(*node.target) == Vb6Type::String) {
+            targetIsBstr = true;
+            bstrTargetViaTypeQuery = true;
+        }
     }
     // P8.4: Variant赋值检测 - 如果目标是Variant变量, 用Variant构造函数包装值
     bool targetIsVariant = false;
@@ -112,7 +129,42 @@
                 value = "vb6_ByteArrayToString(" + value + ")";
             }
         }
-        c_.emitLine("vb6_BSTR_Assign(&" + target + ", " + value + ");");
+        // 账 #113: 值是不是"自有的临时串" —— 字面量 / 拼接 / 返回 String 的工程函数或
+        // Property Get (返回变量 vb6_ret_* 在入口处已按值语义拷过)。变量、形参、成员字段、
+        // 数组元素都是**借来的**, 只能深拷贝。这里之所以要分: 模块级目标以前那句裸赋值
+        // `gS = <临时>;` 是所有权转移 (不泄漏), 一律改 Assign 会**给每个模块级字面量赋值
+        // 凭空加一次临时串泄漏**(旧值也没释放)。
+        bool valueOwned113 = false;
+        if (node.value) {
+            switch (node.value->kind) {
+                case ASTNodeKind::LiteralExpr:
+                    valueOwned113 = true;
+                    break;
+                case ASTNodeKind::BinaryExpr: {
+                    auto& vb113 = static_cast<BinaryExpr&>(*node.value);
+                    valueOwned113 = (vb113.op == BinaryOp::Concat || vb113.op == BinaryOp::Add);
+                    break;
+                }
+                case ASTNodeKind::IndexOrCallExpr: {
+                    auto& vc113 = static_cast<IndexOrCallExpr&>(*node.value);
+                    if (vc113.callee && vc113.callee->kind == ASTNodeKind::IdentifierExpr) {
+                        auto* vSym113 = symTab_.lookup(
+                            static_cast<IdentifierExpr&>(*vc113.callee).name);
+                        valueOwned113 = (vSym113
+                                         && (vSym113->kind == SymbolKind::Function
+                                             || vSym113->kind == SymbolKind::PropertyGet));
+                    }
+                    break;
+                }
+                default:
+                    break;
+            }
+        }
+        if (bstrTargetViaTypeQuery && valueOwned113) {
+            c_.emitLine("vb6_BSTR_AssignMove(&" + target + ", " + value + ");");
+        } else {
+            c_.emitLine("vb6_BSTR_Assign(&" + target + ", " + value + ");");
+        }
     } else if (targetIsVariant) {
         // P8.4: 包装值为vb6_VARIANT, 先释放旧BSTR
         std::string wrappedValue = wrapVariantValue(node.value.get(), value);

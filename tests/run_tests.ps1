@@ -1321,6 +1321,12 @@ if ($Category -in @("all", "run", "bas")) {
     # 因为**修复前的读数本身随架构变** —— 只跑默认架构就看不见这半个症状。
     Add-BasTest "test_len_width" "$Tests\test_len_width.bas" @("LW1=7", "LW2=5", "LW3=5", "LW4=2", "LW5=5", "LW6=5", "LW7=4", "LW8=2", "LW9=1", "LW10=10", "LW11=0", "LW12=5")
     Add-BasTest "test_len_width_x86" "$Tests\test_len_width.bas" @("LW1=7", "LW2=5", "LW3=5", "LW4=2", "LW5=5", "LW6=5", "LW7=4", "LW8=2", "LW9=1", "LW10=10", "LW11=0", "LW12=5") -Arch "x86"
+    # 账 #113: String 形参/局部变量存进**模块变量**必须是拷贝。
+    # 修复前 `gS = s;` 存的是调用方那只 BSTR 的地址，调用方一改写自己的变量
+    # 就悬垂 —— 本例先用 Churn 把那块已释放的堆块盖掉，不扰动的话悬垂也会"读对"。
+    # BASE 实测：S113-A 读回的是扰动串（0123456789ABCDEF）、S113-C 为空；NEW 两处都对。
+    Add-BasTest "test_str_alias" "$Tests\test_str_alias.bas" @("S113-A=PAYLOAD-0123456789", "S113-B=18", "S113-C=SECOND-ONE", "S113-D=36", "S113-E=LITERAL-OK", "S113-F=ABC", "S113-G=FROM-FUNC", "S113-DONE")
+    Add-BasTest "test_str_alias_x86" "$Tests\test_str_alias.bas" @("S113-A=PAYLOAD-0123456789", "S113-B=18", "S113-C=SECOND-ONE", "S113-D=36", "S113-E=LITERAL-OK", "S113-F=ABC", "S113-G=FROM-FUNC", "S113-DONE") -Arch "x86"
     # Fix 190: Declare "As Any" ByRef 的下标链实参必须取地址, 不能把元素值当指针
     Add-BasTest "test_asany_subscript" "$Tests\test_asany_subscript.bas" @("WITH-SUB=Y", "EXPR-SUB=Y", "SCALAR=Y", "CHAIN=Y", "ASANY-DONE")
     # Delegate (tB extension): typed function pointers, stdcall/cdecl thunks, both arches
