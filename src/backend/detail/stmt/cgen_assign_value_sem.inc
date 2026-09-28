@@ -109,6 +109,10 @@
         // BSTR → 按 UTF-16LE 字节还原为字符串. 不能把数组指针当 BSTR 交给
         // vb6_BSTR_Assign (SysStringLen 会读数组前的堆元数据当长度 → 堆损坏).
         // 场景: LabelPlus.ctl `Property Get Caption() As String: Caption = m_Caption`.
+        // 记账这一支改没改成 (给下面 #122 那支看): 值本身是 Byte() 数组 ⇒ inferExprType 会
+        // 报 Byte, 但那已经是**转好的字符串**了, 再套一层 CStrByte 是错的 (实测把
+        // LabelPlus 的 `Caption = m_Caption` 发成 vb6_CStrByte(vb6_ByteArrayToString(..)))。
+        bool wrappedByteArr140 = false;
         if (!valueIsVariant) {
             std::string rhs140 = value;
             if (rhs140.compare(0, 4, "me->") == 0) rhs140 = rhs140.substr(4);
@@ -122,6 +126,32 @@
                 && (knownByteArrayVars_.count(rhs140l)
                     || classByteArrayMembers_.count(rhs140l))) {
                 value = "vb6_ByteArrayToString(" + value + ")";
+                wrappedByteArr140 = true;
+            }
+        }
+        // 账 #122: VB6 在**赋值那一刻**就做隐式 CStr —— `Dim s As String: s = 123` 合法，
+        // 而这一格以前把值原样交给 vb6_BSTR_Assign。后果分两种，别当成同一种：
+        //   整型那半 (Long/Integer/Boolean/Byte) 在 C 里只是警告 (int → BSTR 形参)，数字被
+        //     当指针存进 String 变量，**第一次读/释放就崩** —— 实测修复前二进制 `s = n` 是
+        //     BUILD-RC=0 而跑起来 SIGSEGV (rc=139)，所以它不是"编不过"，是静默埋雷;
+        //   浮点/日期那半 (Double/Currency/Date) 才是响的 cl `error C2440 无法从 double
+        //     转换为 BSTR`。
+        // 这一支只在 inferExprType 认得出的**标量**类型上折 (isScalarImplicitStr159:
+        // Integer/Long/Single/Double/Byte/Boolean/Currency/Date)，String/Variant/Object/
+        // 未知一律不介入。正因为整型那半今天过得去，本批的护栏不是"现存工程零改动"而是
+        // "改动必须逐条解释得清": 实测 7 枚存量工程里 6 枚逐字节相同，Charts 2020 只剩
+        // `sDiplay = CLng(me->m_Value)` 那一行 —— 那是一处真实修复而非回归。
+        // 复用形参那条路 (Fix 159-B) 的同一个 wrapToBSTR, 不另开一套折算表。
+        // 上面两支 (Variant 提取 / Byte() 还原) 已经把值转成了字符串, 不能再套一层。
+        bool wrapped122 = false;
+        if (!valueIsVariant && !wrappedByteArr140 && node.value) {
+            Vb6Type vt122 = inferExprType(*node.value);
+            if (isScalarImplicitStr159(vt122)) {
+                std::string w122 = wrapToBSTR(value, *node.value);
+                if (w122 != value) {
+                    value = w122;
+                    wrapped122 = true;
+                }
             }
         }
         // 账 #113 / #119: 值是不是"自有的临时串" —— **字符串**字面量 / 拼接 / 返回 String 的
@@ -165,7 +195,8 @@
                     break;
             }
         }
-        if (valueOwned113) {
+        // #122 折出来的 `vb6_CStrXxx(...)` 是刚 alloc 的新块, 与字面量/拼接同属"自有"。
+        if (valueOwned113 || wrapped122) {
             c_.emitLine("vb6_BSTR_AssignMove(&" + target + ", " + value + ");");
         } else {
             c_.emitLine("vb6_BSTR_Assign(&" + target + ", " + value + ");");

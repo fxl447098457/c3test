@@ -1333,6 +1333,13 @@ if ($Category -in @("all", "run", "bas")) {
     # api1/api2 两条是自带的失效负控: 读不到内存就把判据打成 N, 免得"自己减自己"假绿。
     Add-BasTest "test_str_leak" "$Tests\test_str_leak.bas" @("S119-api1=1", "S119-api2=1", "S119-leak-ok=Y", "S119-borrow=SHARED-ME", "S119-func-len=5", "S119-concat=ABC", "S119-byref-len=3 head=C", "S119-chain=AAABBB", "S119-DONE")
     Add-BasTest "test_str_leak_x86" "$Tests\test_str_leak.bas" @("S119-api1=1", "S119-api2=1", "S119-leak-ok=Y", "S119-borrow=SHARED-ME", "S119-func-len=5", "S119-concat=ABC", "S119-byref-len=3 head=C", "S119-chain=AAABBB", "S119-DONE") -Arch "x86"
+    # 账 #122: String 目标赋值的隐式 CStr。修复前整型那半是**静默**把数字当 BSTR 指针存
+    # (实测 BASE 二进制 `s = n` 编得过、跑起来 SIGSEGV), 浮点/日期那半才是响的 cl C2440。
+    # 19 条读数全部取自真实输出; 针面不带方括号 (原因见 test_str_leak 上面那条注释)。
+    # date 那条不比字面文本 (随区域设置变), 只比"同一折算路的两个来源"是否一致。
+    $cnumNeedles = @("S122-lit=123", "S122-long=42", "S122-dbl=2.5", "S122-byte=65", "S122-cbyte=65", "S122-asc=65", "S122-bool=True", "S122-expr=43", "S122-len=4", "S122-ubound=3", "S122-date-ok=Y", "S122-str-left=ABC", "S122-str-ucase=XY", "S122-str-func=MMMM", "S122-func-num=21", "S122-concat=n=42 d=2.5", "S122-borrow=SHARED", "S122-loop=20042", "S122-DONE")
+    Add-BasTest "test_str_cnum_assign" "$Tests\test_str_cnum_assign.bas" $cnumNeedles
+    Add-BasTest "test_str_cnum_assign_x86" "$Tests\test_str_cnum_assign.bas" $cnumNeedles -Arch "x86"
     # Fix 190: Declare "As Any" ByRef 的下标链实参必须取地址, 不能把元素值当指针
     Add-BasTest "test_asany_subscript" "$Tests\test_asany_subscript.bas" @("WITH-SUB=Y", "EXPR-SUB=Y", "SCALAR=Y", "CHAIN=Y", "ASANY-DONE")
     # Delegate (tB extension): typed function pointers, stdcall/cdecl thunks, both arches
@@ -1739,6 +1746,21 @@ if ($Category -in @("all", "run", "vbp")) {
     Test-EmitcAbsent "strleak_emitc_no_move_borrowed" @("$Tests\test_str_leak.bas") @(
         'vb6_BSTR_AssignMove(&d, s);',                  # 借来的值绝不能被"移动"走
         'vb6_BSTR_AssignMove(&vb6_ret_MakeTag, t);'     # 返回变量同理 (t 是局部, 还要用)
+    )
+    # 账 #122: 赋值那一刻的隐式 CStr。四条钉"该折的折了" (字面量/变量/浮点/内置标量函数),
+    # 三条钉"不该折的一条都没动": 返回串的工程函数、返回串的内置函数、以及 Fix 140 那条
+    # Byte() 数组还原 —— 最后这条是本轮护栏抓出来的真回归 (Charts 2020 的 Caption 那一行
+    # 一度被发成 vb6_CStrByte(vb6_ByteArrayToString(..))), 出现即复发。
+    Test-EmitcShape "cnum_emitc_wrapped" @("$Tests\test_str_cnum_assign.bas") @(
+        'vb6_BSTR_AssignMove(&s, vb6_CStrLong(123));',
+        'vb6_BSTR_AssignMove(&s, vb6_CStrDbl(d));',
+        'vb6_BSTR_AssignMove(&s, vb6_CStrBool(bo));',
+        'vb6_BSTR_AssignMove(&s, vb6_CStrLong(vb6_Len(vb6_BSTR_FromStr(L"abcd"))));'
+    )
+    Test-EmitcAbsent "cnum_emitc_no_overwrap" @("$Tests\test_str_cnum_assign.bas") @(
+        'vb6_CStrLong(vb6_MakeStr(',                    # 返回 String 的工程函数不许当数值折
+        'vb6_CStrLong(vb6_Left(',                       # 返回 String 的内置函数同理
+        'vb6_CStrByte(vb6_ByteArrayToString('           # Fix 140 那支转完就是字符串了
     )
     # ai/029 C29-DT-a: DTPicker 换成原生 SysDateTimePick32（D6：不碰 MSCOMCT2.OCX，32 位进不了 x64）。
     # 改之前这枚控件走的是"第三方 OCX 按 COM 后期绑定"那一组 => 工程没引用类型库时连符号都查不到，
