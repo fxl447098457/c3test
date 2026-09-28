@@ -255,7 +255,8 @@ Private Sub evtTimer_Timer()
     Debug.Print "D=" & CDbl(mv2.Value) & "/" & CDbl(mv1.SelStart) & "/" & CDbl(mv1.SelEnd)
 
     Debug.Print "E=" & (gClick1 - b1) & "/" & (gClick2 - b2) & "/" & CLng(gGot1)
-    Debug.Print "CTRLMONTHVIEW-DONE"
+        Debug.Print "MV41=" & CStr(mv1.MultiSelect) & "/" & CStr(mv4.ShowToday) & "/" & TypeName(mv1.MultiSelect)
+Debug.Print "CTRLMONTHVIEW-DONE"
     Unload Me
 End Sub
 

@@ -166,7 +166,8 @@ Private Sub tmrCheck_Timer()
     Debug.Print "TS29-SETTAB2=" & SSTab1.Tab
     SSTab1.Tab = 0
     Debug.Print "TS29B-SETTAB0=" & SSTab1.Tab
-    Debug.Print "CTRLSSTAB-CLICKDONE"
+    Debug.Print "TS34=" & CStr(SSTab1.WordWrap) & "/" & TypeName(SSTab1.WordWrap) & "/" & VarType(SSTab1.WordWrap)
+Debug.Print "CTRLSSTAB-CLICKDONE"
     Unload Me
 End Sub
 

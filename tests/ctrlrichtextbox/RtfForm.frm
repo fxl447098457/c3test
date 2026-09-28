@@ -496,7 +496,8 @@ Private Sub evtTimer_Timer()
     Debug.Print "RT89=" & TF(gChg1 - d = 0)
     Debug.Print "E3=" & (gChg1 - c0) & "/" & (gSel1 - s0) & "/" & (gChg3 - c3) & "/" & (gSel3 - s3)
 
-    Debug.Print "CTRLRICHTEXT-DONE"
+        Debug.Print "RT90=" & CStr(rt3.ReadOnly) & "/" & CStr(rt1.WordWrap) & "/" & TypeName(rt3.ReadOnly)
+Debug.Print "CTRLRICHTEXT-DONE"
     Unload Me
 End Sub
 

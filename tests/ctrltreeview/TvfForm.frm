@@ -229,7 +229,8 @@ Private Sub evtTimer_Timer()
     Debug.Print "TV31=" & TF(gExpands - baseExp = 1 And gCollapses - baseCol = 1)
     Debug.Print "TV32=" & TF(gExpText = "根甲")
 
-    Debug.Print "TREEVIEW-DONE"
+        Debug.Print "TV38=" & CStr(tv1.CheckBoxes) & "/" & CStr(tv1.HideSelection) & "/" & TypeName(tv1.HotTracking)
+Debug.Print "TREEVIEW-DONE"
     Unload Me
 End Sub
 

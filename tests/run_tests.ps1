@@ -1720,6 +1720,8 @@ if ($Category -in @("all", "run", "vbp")) {
     #   数值成员 (Index/Children) 照旧走 int 档，两档一起改是错的。TV34 保留旧的局部变量
     #   形态，两版都 Y，证升级没把那条路径弄丢。
     $tvNeedles += @("TV34=Y", "TV35=Y", "TV36=N", "TV37=Y")
+    # 128-a: CheckBoxes / HideSelection / HotTracking 归 Boolean 档之后的三个面
+    $tvNeedles += @("TV38=True/False/Boolean")
     Test-Vbp "ctrltreeview" "$Tests\ctrltreeview\TvfApp.vbp" $tvNeedles
     Test-Vbp "ctrltreeview_x86" "$Tests\ctrltreeview\TvfApp.vbp" $tvNeedles -Arch "x86"
     # 发码面两面都钉：设计期 Init 逐参数钉（含 -999 那条哨兵：VB6 的 True 就是 -1，
@@ -1745,7 +1747,8 @@ if ($Category -in @("all", "run", "vbp")) {
         'vb6_CStr(vb6_VariantFromValue(vb6_ComGetStringProp(vb6_ComCallObject(vb6_TreeView_Nodes(',
         # 同一条判据的选择性那一半: 数值成员 (Index) 照旧走 int 档 —— 这条在修复前后都在,
         # 它的作用是挡住"为了修字符串把两档一起改成 BSTR"那种反向过度修正。
-        'vb6_ComGetIntProp(vb6_ComCallObject(vb6_TreeView_Nodes((void*)vb6_hwnd_tv1), L"Item", (void*[]){vb6_ComPackInt(2)}, 1), L"Index")'
+        'vb6_ComGetIntProp(vb6_ComCallObject(vb6_TreeView_Nodes((void*)vb6_hwnd_tv1), L"Item", (void*[]){vb6_ComPackInt(2)}, 1), L"Index")',
+        'vb6_CStrBool(vb6_TreeView_GetCheckBoxes('
     )
     Test-EmitcAbsent "tv_emitc_no_com_fallback" @("$Tests\ctrltreeview\TvfApp.vbp") @(
         'vb6_ComGetObjectProp(vb6_hwnd_tv1',
@@ -1759,7 +1762,8 @@ if ($Category -in @("all", "run", "vbp")) {
         # 账 #88: 这条是 BASE 上 TV15/TV35/TV36 三处的实际发码形状 —— 字符串成员被按数值
         # 解包后再 CStrLong (拿 BSTR 指针当数字与字面量比，恒 False)。它一回来判据就得红。
         'vb6_CStrLong(vb6_ComGetIntProp(vb6_ComCallObject(vb6_TreeView_Nodes(',
-        'CoCreateInstance'
+        'CoCreateInstance',
+        'vb6_CStrLong(vb6_TreeView_GetCheckBoxes('
     )
 
     # 账 #125 (设计期 Enabled / Visible / CheckBox·OptionButton 的 Value): 两条创建路各一份 ——
@@ -2012,6 +2016,8 @@ if ($Category -in @("all", "run", "vbp")) {
     # ⚠ 判据方法的写法有讲究：`dt1.SimChange`（不带括号）在语义层是**属性读**，发码一条都不发；
     # 必须写 `dt1.SimChange()` 才走调用路。这条由上面那条针 (vb6_DTP_SimChange…) 钉住。
     $dtNeedles = @("CTRLDATETIME-DONE") + (1..42 | ForEach-Object { "DT$_=Y" })
+    # 128-a: CheckBox 的 CStr / TypeName / VarType 三个面 (VB6 要 True/Boolean/11)
+    $dtNeedles += @("DT43=True/Boolean/11")
     Test-Vbp "ctrldatetime" "$Tests\ctrldatetime\DtfApp.vbp" $dtNeedles
     Test-Vbp "ctrldatetime_x86" "$Tests\ctrldatetime\DtfApp.vbp" $dtNeedles -Arch "x86"
     # 发码面两面都钉：创建样式位逐枚钉（1409286150 = 长日期+复选框；1409286153 = 时间位+UpDown 位，
@@ -2039,7 +2045,8 @@ if ($Category -in @("all", "run", "vbp")) {
         'vb6_DTP_SimCloseUp((void*)vb6_hwnd_dt1)',
         # 处理器调用名的解析也钉一条：形参表必须是空的（VB6 这三条都没有参数），
         # 写错成带参就会在链接期 LNK2019、而编 C 阶段看不出任何异常。
-        'extern void vb6_dt1_Change();'
+        'extern void vb6_dt1_Change();',
+        'vb6_CStrBool(vb6_DTP_GetCheckBox('
     )
     Test-EmitcAbsent "dt_emitc_no_com_fallback" @("$Tests\ctrldatetime\DtfApp.vbp") @(
         'vb6_ComGetObjectProp(vb6_hwnd_dt1',
@@ -2049,7 +2056,8 @@ if ($Category -in @("all", "run", "vbp")) {
         # DT-c 的三条判据方法一旦被下面那条 axSlotObj 分支先吃掉，就会编成
         # 「取 SimChange 属性 + Item 下标」—— 编得过、跑起来什么都不发（C29-8c 实测踩过）。
         'vb6_ComGetObjectProp(vb6_hwnd_dt1, L"SimChange")',
-        'CoCreateInstance'
+        'CoCreateInstance',
+        'vb6_CStrLong(vb6_DTP_GetCheckBox('
     )
     # ai/029 C29-MV-a: MonthView 换成原生 SysMonthCal32（D6：不碰 MSCOMCT2.OCX，32 位进不了 x64）。
     # 22 条读数的分工：
@@ -2086,6 +2094,8 @@ if ($Category -in @("all", "run", "vbp")) {
     # 什么都不实现的空控件也满足它们，所以这几条不承担"验货"，只承担"别把边界改回去"；
     # 真正盘货的是另外 28 条。（记下来是免得下一个人把"BASE 有 5 绿"读成判据松。）
     $mvNeedles = @("CTRLMONTHVIEW-DONE") + (1..40 | ForEach-Object { "MV$_=Y" })
+    # 128-a: MultiSelect / ShowToday 的 CStr 与 TypeName (ShowToday 此时已被 MV21 打开)
+    $mvNeedles += @("MV41=True/True/Boolean")
     Test-Vbp "ctrlmonthview" "$Tests\ctrlmonthview\MvfApp.vbp" $mvNeedles
     Test-Vbp "ctrlmonthview_x86" "$Tests\ctrlmonthview\MvfApp.vbp" $mvNeedles -Arch "x86"
     # 发码两面都钉：类名 + 四条创建样式位逐枚钉（1409286146 = 基+MULTISELECT / 1409286148 = 基+
@@ -2110,7 +2120,8 @@ if ($Category -in @("all", "run", "vbp")) {
         'pNM42->code == -749 && (void*)pNM42->hwndFrom == vb6_hwnd_mv1',
         'extern void vb6_mv1_DateClick(double);',
         'vb6_mv1_DateClick(vb6_MV_NotifyDate((void*)lParam));',
-        'vb6_MV_SimDateClick((void*)vb6_hwnd_mv1, (d0 + 4))'
+        'vb6_MV_SimDateClick((void*)vb6_hwnd_mv1, (d0 + 4))',
+        'vb6_CStrBool(vb6_MV_GetMultiSelect('
     )
     Test-EmitcAbsent "mv_emitc_no_com_fallback" @("$Tests\ctrlmonthview\MvfApp.vbp") @(
         'vb6_ComGetObjectProp(vb6_hwnd_mv1',
@@ -2122,7 +2133,8 @@ if ($Category -in @("all", "run", "vbp")) {
         # MV-c：判据方法一旦被 axSlotObj 那条分支先吃掉，就编成「取 SimDateClick 属性 +
         # Item 下标」—— 编得过、跑起来什么都不发（C29-8c / DT-c 各踩过一次）。
         'vb6_ComGetObjectProp(vb6_hwnd_mv1, L"SimDateClick")',
-        'CoCreateInstance'
+        'CoCreateInstance',
+        'vb6_CStrLong(vb6_MV_GetMultiSelect('
     )
     # ai/029 C29-RT-a: RichTextBox 换成原生 Msftedit.dll 的 RICHEDIT50W（D6：不碰 RICHTX32.OCX）。
     # 改之前这枚控件同样**连窗口都没有**（controlTypeToWin32Class 缺格）⇒ 属性读全靠"什么都不写
@@ -2156,6 +2168,8 @@ if ($Category -in @("all", "run", "vbp")) {
     # BASE（本批之前的编译器）同一件夹具 = 20 绿 / 38 红：RT33-RT58 里 16 条当场红，剩下 10 条是
     # "应当为 0 / 应当相等"那类反向针（什么都不实现也满足它们）—— 与 DT/MV 每次的分布同型。
     $rtNeedles = @("CTRLRICHTEXT-DONE") + (1..89 | ForEach-Object { "RT$_=Y" })
+    # 128-a: ReadOnly / WordWrap 的 CStr 与 TypeName (rt1 设计期就没开换行)
+    $rtNeedles += @("RT90=True/False/Boolean")
     Test-Vbp "ctrlrichtextbox" "$Tests\ctrlrichtextbox\RtfApp.vbp" $rtNeedles
     Test-Vbp "ctrlrichtextbox_x86" "$Tests\ctrlrichtextbox\RtfApp.vbp" $rtNeedles -Arch "x86"
     # 发码正面：类名 + 四位创建样式逐枚钉（1409286148 = 基+ES_MULTILINE，rt2 全默认；
@@ -2211,7 +2225,8 @@ if ($Category -in @("all", "run", "vbp")) {
         'if (pNM42->code == 1794 && (void*)pNM42->hwndFrom == vb6_hwnd_rt1) {',
         'extern void vb6_rt1_Change(); vb6_rt1_Change();',
         'extern void vb6_rt3_SelChange(); vb6_rt3_SelChange();',
-        '{ vb6_RTB_SimNotify((void*)vb6_hwnd_rt1, (int32_t)1794); }'
+        '{ vb6_RTB_SimNotify((void*)vb6_hwnd_rt1, (int32_t)1794); }',
+        'vb6_CStrBool(vb6_RTB_GetReadOnly('
     )
     # 反面：这枚控件不许再走 COM 后期绑定；而 ScrollBars 那四位**不许有写口** ——
     # 事后写只有外观、没有量程，发一条"写得动但什么都不改"的 setter 比不发更难查。
@@ -2233,7 +2248,8 @@ if ($Category -in @("all", "run", "vbp")) {
         'vb6_ComGetObjectProp(vb6_hwnd_rt2, L"SelBold")',
         'vb6_ComSetObjectProp(vb6_hwnd_rt2, L"SelColor"',
         'vb6_ComSetObjectProp(vb6_hwnd_rt2, L"SelAlignment"',
-        'CoCreateInstance'
+        'CoCreateInstance',
+        'vb6_CStrLong(vb6_RTB_GetReadOnly('
     )
     # ai/029 C29-5a: Toolbar 换成原生 ToolbarWindow32（D6：不碰 MSCOMCTL.OCX）。
     # 改之前这枚控件**连窗口都没有**：controlTypeToWin32Class 缺格，而且被"ImageList || Toolbar
@@ -2443,8 +2459,8 @@ if ($Category -in @("all", "run", "vbp")) {
     # TS30 是 Click(PreviousTab), 由 RTL 在程序化改 Tab 时补发的 TCN_SELCHANGE 触发。
     Test-Vbp "ctrlsstab" "$Tests\ctrlsstab\CtrlSSTab.vbp" @(
         "TS1-TABS=3", "TS2-TAB=1", "TS3-ORIENT=0", "TS4-STYLE=0", "TS5-PERROW=3",
-        "TS6-WRAP=0", "TS7-SET0=0", "TS8-SET2=2", "TS9-OOR=2", "TS10-ORIENT=1",
-        "TS11-STYLE=1", "TS12-PERROW=4", "TS13-WRAP=-1", "TS14-TABS5=5",
+        "TS6-WRAP=False", "TS7-SET0=0", "TS8-SET2=2", "TS9-OOR=2", "TS10-ORIENT=1",
+        "TS11-STYLE=1", "TS12-PERROW=4", "TS13-WRAP=True", "TS14-TABS5=5",
         "TS15-TABAFTERGROW=2", "TS16-TABS2=2", "TS17-TABAFTERSHRINK=1",
         "TS18-CAP0=常规", "TS19-CAP0B=改过", "TS20-VIS1=-1", "TS21-VIS1B=0",
         "TS22-P0LEFT=240", "TS23-P1LEFT=240", "TS24-P2LEFT=240",
@@ -2452,6 +2468,7 @@ if ($Category -in @("all", "run", "vbp")) {
         "TS25-TABVIS=True", "TS26-AT0-P0VIS=True P1VIS=False P2VIS=False",
         "TS27-AT1-P0VIS=False P1VIS=True P2VIS=False", "TS28-AT2-P0VIS=False P1VIS=False P2VIS=True",
         "TS29-SETTAB2=2", "TS29B-SETTAB0=0",
+        "TS34=True/Boolean/11",
         "CTRLSSTAB-DONE", "CTRLSSTAB-VISDONE", "CTRLSSTAB-CLICKDONE")
 
     # --- P20-43/44: 窗体事件面 + OLE 拖放 (目标侧 Drop + 源侧 OLEDrag) ---

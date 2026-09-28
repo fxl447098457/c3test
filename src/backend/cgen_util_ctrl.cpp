@@ -50,12 +50,13 @@ Vb6Type CCodeGen::controlPropType(FrmControlType ctrlType, const std::string& pr
     }
 
     if (ctrlType == FrmControlType::SSTab) {
-        // VB6 里 WordWrap 是 Boolean, 但 RTL 的 getter 给的是 VB6 的 True/-1,
-        // 与 Tabs/Tab 同为 int32_t —— 一律按 Long, C 层才对得上。
         if (p == "tabs" || p == "tab" || p == "taborientation" || p == "tabstyle"
-            || p == "tabsperrow" || p == "wordwrap") {
+            || p == "tabsperrow") {
             return Vb6Type::Long;
         }
+        // 账 #128: WordWrap 在 VB6 是 Boolean，而 `vb6_SSTab_GetWordWrap` 给的就是 -1/0
+        // （实测见 029 §#128）⇒ 与 #124 那两条同档，`CStr` 打 True/False、装箱走 VT_BOOL。
+        if (p == "wordwrap") return Vb6Type::Boolean;
     }
     // C29-OLE: OLEType/OLETypeAllowed/SizeMode/AutoActivate 是 Long 语义 (枚举/布尔);
     // Class/SourceDoc/SourceItem 是 String (RTL getter 返回 wchar_t*, 包装层会转 BSTR)。
@@ -73,20 +74,26 @@ Vb6Type CCodeGen::controlPropType(FrmControlType ctrlType, const std::string& pr
         // C29-8a: 同理 —— vb6_TreeView_Get* 全是 int32_t (布尔按 VB6 的 -1/0 给)。
         // 不登记就走 inferExprType 的兜底, 那条按成员裸名查符号, 判成 Variant/String
         // 都不匹配 C 侧的 int32_t (SSTab1.Tab 撞内置 Tab 那次 AV 的同族)。
-        if (p == "linestyle" || p == "indentation" || p == "checkboxes"
-            || p == "hottracking" || p == "hideselection") {
+        if (p == "linestyle" || p == "indentation") {
             return Vb6Type::Long;
+        }
+        // 账 #128: 这三条 getter 走 `vb6_TvBitAsVbBool` ⇒ 答的就是 VB6 的 -1/0，
+        // 所以它们与 #124 那两条同档（以前跟着"全是 int32_t"那一句一起吃 Long）。
+        if (p == "checkboxes" || p == "hottracking" || p == "hideselection") {
+            return Vb6Type::Boolean;
         }
     }
     if (ctrlType == FrmControlType::DTPicker) {
         // C29-DT-a: 同一条纪律 —— vb6_DTP_Get* 除 CustomFormat 外全是 int32_t
         // (布尔按 VB6 的 -1/0 给); CustomFormat 的 getter 返回 wchar_t* ⇒ String。
-        if (p == "format" || p == "checkbox" || p == "updown"
+        if (p == "format" || p == "updown"
             || p == "calendarbackcolor" || p == "calendarforecolor"
             || p == "calendartrailingforecolor" || p == "calendartitlebackcolor"
             || p == "calendartitleforecolor" || p == "idealwidth") {
             return Vb6Type::Long;
         }
+        // 账 #128: CheckBox 的 getter 是 `vb6_DtpBitAsVbBool` ⇒ -1/0，VB6 那边也是 Boolean。
+        if (p == "checkbox") return Vb6Type::Boolean;
         if (p == "customformat") return Vb6Type::String;
         // C29-DT-b: 三条 Date 型属性。登记成 Date 而不是让它落到兜底 —— Date 在 C 层就是
         // double（`Dim d As Date` 实测发成 `double d`），不登记的话 inferExprType 那条按成员
@@ -100,12 +107,16 @@ Vb6Type CCodeGen::controlPropType(FrmControlType ctrlType, const std::string& pr
         // 色值是 COLORREF 那个 32 位），漏登记就会落到兜底那条按成员裸名查符号的路，
         // 判成 Variant/String 就跟 C 层不匹配（SSTab1.Tab 那次 AV 的同族）。
         // Value / SelStart / SelEnd 是 Date 型，由 MV-b 那格登记。
-        if (p == "multiselect" || p == "showweeknumbers" || p == "showtoday"
-            || p == "maxselcount" || p == "backcolor" || p == "forecolor"
+        if (p == "maxselcount" || p == "backcolor" || p == "forecolor"
             || p == "titlebackcolor" || p == "titleforecolor" || p == "trailingforecolor"
             || p == "monthbackcolor" || p == "minreqwidth" || p == "minreqheight"
             || p == "monthcount") {
             return Vb6Type::Long;
+        }
+        // 账 #128: 这三条就是样式位读数，getter 实测答 -1/0（ShowToday 还是**反**的那一位）
+        // ⇒ 归 Boolean，与 #124 / SL-b 的 SelectRange 同一口径。
+        if (p == "multiselect" || p == "showweeknumbers" || p == "showtoday") {
+            return Vb6Type::Boolean;
         }
         // C29-MV-b：Date 那三格与 DTPicker 同一条口径（C 层就是裸 double，不装箱）。
         if (p == "value" || p == "selstart" || p == "selend") return Vb6Type::Date;
@@ -129,11 +140,14 @@ Vb6Type CCodeGen::controlPropType(FrmControlType ctrlType, const std::string& pr
         // C29-RT-a: 同一口径。vb6_RTB_Get* 除 SelText 外全是 int32_t（布尔按 VB6 的 -1/0 给，
         // ScrollBars 是枚举、两条量程是数值）；SelText 的 getter 返回 wchar_t* ⇒ String。
         // Text 不在这里 —— 它走通用那条 vb6_GetControlText（与 TextBox 同一格）。
-        if (p == "selstart" || p == "sellength" || p == "readonly" || p == "maxlength"
-            || p == "scrollbars" || p == "wordwrap" || p == "vscrollrange"
+        if (p == "selstart" || p == "sellength" || p == "maxlength"
+            || p == "scrollbars" || p == "vscrollrange"
             || p == "hscrollrange") {
             return Vb6Type::Long;
         }
+        // 账 #128: ReadOnly 读样式位、WordWrap 是自存但**写侧就归化成 -1/0**（setter 里
+        // `*(int32_t*)h = on ? -1 : 0`）⇒ 两条答的都是 VB6 的 True/False。
+        if (p == "readonly" || p == "wordwrap") return Vb6Type::Boolean;
         if (p == "seltext") return Vb6Type::String;
         // C29-RT-b: 格式面。布尔四条 + 对齐 + 三个缩进 + 色值 = int32_t ⇒ Long；
         // 字号 getter 是 float（与通用那条 FontSize 同一口径）；FontName 的 getter 回 BSTR。
