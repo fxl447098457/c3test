@@ -206,8 +206,15 @@ void CCodeGen::visit(PropertyDecl& node) {
             //     vb6_ret_CellFontSize = vb6_VariantFromComResult(vb6_ComCall(...))
             //   → VBFlexGrid.c 32210/32212 两条 C2440 (vb6_VARIANT→float)。
             currentReturnCType_ = retType;
-            Vb6Type retVb6Type = typeSys_.resolveTypeName(
-                static_cast<SimpleTypeRef*>(node.returnType.get())->name);
+            // 账 #116 同族 (与 cgen_decl_func.cpp 那处一字一样): 定长串返回类型的节点是
+            // FixedStringTypeRef, 按 SimpleTypeRef 读 name 就是把指针当字符串 ⇒ 天文数字的分配。
+            Vb6Type retVb6Type = Vb6Type::Variant;
+            if (node.returnType->kind == ASTNodeKind::SimpleTypeRef) {
+                retVb6Type = typeSys_.resolveTypeName(
+                    static_cast<SimpleTypeRef*>(node.returnType.get())->name);
+            } else if (node.returnType->kind == ASTNodeKind::FixedStringTypeRef) {
+                retVb6Type = Vb6Type::String;
+            }
             // Fix 038/054: UDT 返回值不能用 = 0 初始化 (C2440), 改用 {0}
             // 修复: 仅检查 C 类型名前缀即可 (typeSys 可能将 UDT 解析为 Unknown/Variant)
             std::string initVal = defaultValue(retVb6Type);

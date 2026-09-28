@@ -201,7 +201,18 @@ void CCodeGen::visit(FunctionDecl& node) {
     std::string retType = mapTypeRef(node.returnType.get());
     currentReturnVar_ = "vb6_ret_" + cIdent(node.name);
     currentReturnCType_ = retType;  // Fix 054: 保存返回类型C名称, 供With块UDT检测
-    Vb6Type funcRetVb6Type = node.returnType ? typeSys_.resolveTypeName(static_cast<SimpleTypeRef*>(node.returnType.get())->name) : Vb6Type::Variant;
+    // 账 #116 同族: returnType 也可以是 FixedStringTypeRef (`Function F() As String * 5`),
+    // 把它当 SimpleTypeRef 读 name 会拿 unique_ptr 的字节当 std::string ⇒ 张口要几十 GB。
+    // 语义层 (semantic_analyzer_typeref.cpp:146) 对定长串回的就是 String, 这里同口径;
+    // 只有 SimpleTypeRef 才真的持有 name。
+    Vb6Type funcRetVb6Type = Vb6Type::Variant;
+    if (node.returnType && node.returnType->kind == ASTNodeKind::SimpleTypeRef) {
+        funcRetVb6Type = typeSys_.resolveTypeName(
+            static_cast<SimpleTypeRef*>(node.returnType.get())->name);
+    } else if (node.returnType &&
+               node.returnType->kind == ASTNodeKind::FixedStringTypeRef) {
+        funcRetVb6Type = Vb6Type::String;
+    }
     // Fix 038/054: UDT 返回值不能用 = 0 初始化 (C2440), 改用 {0} 零初始化
     // 修复: 仅检查 C 类型名前缀即可 (typeSys 可能将 UDT 解析为 Unknown/Variant)
     {

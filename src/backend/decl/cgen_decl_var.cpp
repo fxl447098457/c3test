@@ -392,9 +392,23 @@ void CCodeGen::visit(VariableDecl& node) {
         } else if (isEnumType) {  // Fix 010q
             initVal = "0";
         } else {
-            initVal = defaultValue(
-                node.asType ? typeSys_.resolveTypeName(static_cast<SimpleTypeRef*>(node.asType.get())->name) : Vb6Type::Variant
-            );
+            // 账 #116: 这一句原先无条件 `static_cast<SimpleTypeRef*>(node.asType.get())->name`,
+            // 而定长串 `As String * N` 的 typeRef 是 **FixedStringTypeRef** —— 把它的
+            // `ExprPtr length` 当成 `std::string` 读, 那个"长度"其实是一个堆指针, 于是拷贝
+            // 字符串时张口就要几十 GB: operator new 失败 → std::bad_alloc → 无人接住 →
+            // abort() (退出码 3, 零诊断, 调试版 CRT 还弹模态框)。
+            // 只有 kinds 判过才转: 定长串就是 String, 其余复合形 (数组) 早在这条分支之前
+            // 已经处理掉了, 落到这里的非 SimpleTypeRef 只有定长串这一种。
+            Vb6Type asType = Vb6Type::Variant;
+            if (node.asType) {
+                if (node.asType->kind == ASTNodeKind::SimpleTypeRef) {
+                    asType = typeSys_.resolveTypeName(
+                        static_cast<SimpleTypeRef*>(node.asType.get())->name);
+                } else if (node.asType->kind == ASTNodeKind::FixedStringTypeRef) {
+                    asType = Vb6Type::String;
+                }
+            }
+            initVal = defaultValue(asType);
         }
         // M22: 文件作用域BSTR初始化不能用函数调用(vb6_BSTR_Empty), 用NULL替代
         if (initVal == "vb6_BSTR_Empty()") initVal = "NULL";

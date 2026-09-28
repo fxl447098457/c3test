@@ -1687,6 +1687,27 @@ if ($Category -in @("all", "run", "vbp")) {
         '((int32_t)sizeof(gS))',                        # 修复前的形状：x64 读 8、x86 读 4
         '((int32_t)sizeof(gE))'
     )
+
+    # 账 #116: `Dim X As String * N` 的 typeRef 是 FixedStringTypeRef，而三处发码点
+    # (cgen_decl_var.cpp / cgen_decl_func.cpp / cgen_decl_prop.cpp) 把它按 SimpleTypeRef 读 ->name
+    # —— 读到的其实是节点里的 `ExprPtr length`，那个"长度"是个堆指针 ⇒ 拷字符串时张口要几十 GB
+    # ⇒ std::bad_alloc 没人接 → abort()：退出码 3、零诊断，调试版 CRT 还弹一个前台模态框
+    # (把跑夹具的人的会话整个卡住)。BASE 上这个文件**一行 C 都不发**，所以下面每条形状读数
+    # 本身就是修复前的红点；再补一条 ICE 文案的缺席断言，防这一族以后换个形态回来。
+    # 口径：本用例只钉"六个定长串落点都能正常发码"。VB6 那套空格补齐/截断语义还欠着
+    # (模块级与 UDT 成员这两处发的仍是普通动态串)，所以刻意不做成运行用例。
+    Test-EmitcShape "fixedstr_emitc_decl" @("$Tests\test_fixedstr_decl.bas") @(
+        'BSTR gT = NULL;',                              # 模块级：崩溃就崩在这一行发不出来
+        'BSTR vb6_F(void) {',                           # Function 返回类型那一处
+        'void vb6_S(BSTR x);',                          # 形参那一处
+        'BSTR f;',                                    # UDT 成员
+        'BSTR lT = vb6_BSTR_FixedSTR(4);',              # 局部仍走补空格那条(唯一补的一条)
+        'vb6_DebugWriteLong((int32_t)(vb6_Len(gT)));'   # 模块级 String 的 Len 照旧是字符数
+    )
+    Test-EmitcAbsent "fixedstr_emitc_no_ice" @("$Tests\test_fixedstr_decl.bas") @(
+        '(ICE)',                                        # ICE 兜底文案: 出现即本批又崩了
+        '((int32_t)sizeof(gT))'                         # 别把定长串的 Len 折成指针宽
+    )
     # ai/029 C29-DT-a: DTPicker 换成原生 SysDateTimePick32（D6：不碰 MSCOMCT2.OCX，32 位进不了 x64）。
     # 改之前这枚控件走的是"第三方 OCX 按 COM 后期绑定"那一组 => 工程没引用类型库时连符号都查不到，
     # 属性读回空、写进去静默丢，而编译与退出码全都好看。24 条读数的分工：
