@@ -139,14 +139,6 @@
     std::unordered_set<std::string> knownByteVars_;
     std::unordered_set<std::string> knownBoolVars_;
 
-    // ai/009 §5.10 (P3, 溢出检查): `As Byte` 在 C 层是 uint8_t, 与 Integer/Long
-    // 的 int16_t/int32_t 都不是同一串 ⇒ 原先既没进 knownLongVars_, 也没有自己的集合,
-    // 局部 Byte 标量在 inferExprType 里只能落到符号表兜底, 常常答 Unknown。收窄赋值
-    // 因此拿不到目标类型, `a = -1` 就被 C 静默截成 255。本集合补上这条信息。
-    // 注意 Byte 只需自己一份: 目标宽度由 C 类型唯一确定 (uint8_t 只可能来自 Byte),
-    // 不像 Boolean 要和 Integer 共用 int16_t 才需要 knownBoolVars_ 那种并存登记。
-    std::unordered_set<std::string> knownByteVars_;
-
     // Integer 与 Long 共用 knownLongVars_ (C 侧都是整数, 见下面那一份), 收窄检查
     // 却要分出 16 位的 Integer 范围, 否则 `i As Integer: i = 40000` 会被当成 Long
     // 放行 (实测不报错)。口径同上面 knownBoolVars_ 的并存登记: 与 knownLongVars_
