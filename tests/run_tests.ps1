@@ -1265,7 +1265,7 @@ if ($Category -in @("all", "run", "bas")) {
     # ⚠ 断言用 `-like "*$expected*"` 匹配, 而 [ ] 是 PS 通配符的字符集 —— 期望串里
     #   不得出现方括号 (夹具因此额外打印无括号的稳定标记行)。
     Add-BasTest "test_declare_byval_string_out" "$Tests\declare_out\declare_byval_string_out.bas" @("byval-name-ok=Y")
-    Add-BasTest "test_declare_gmn_path_out" "$Tests\declare_out\declare_gmn_path_out.bas" @("gmn-path-ok=Y")
+    Add-BasTest "test_declare_gmn_path_out" "$Tests\declare_out\declare_gmn_path_out.bas" @("gmn-path-ok=Y", "gmn-fixed-ok=Y")
     Add-BasTest "test_declare_byref_string_out" "$Tests\declare_out\declare_byref_string_out.bas" @("byref-name-ok=Y")
     # 对照: ByRef UDT 路径本来就正常 (证明"出参读法不通"不适用于 UDT)
     Add-BasTest "test_declare_byref_udt_out" "$Tests\declare_out\declare_byref_udt_out.bas" @("hr=0")
