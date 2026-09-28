@@ -948,6 +948,48 @@ void CCodeGen::emitDesignerStyleProps(const FrmControl& ctrl, const std::string&
     }
 }
 
+// 账 #125: 设计期 Enabled / Visible / Value 三件此前**两条创建路都没打到窗口上**
+// (实测: 生成码里 BM_SETCHECK / EnableWindow / ShowWindow 各 0 次, 运行期一律读回默认值)。
+// 只在 .frm **显式写过**这一项时才发: 没写的控件逐字节维持今天的行为。
+// True/可见/未勾是 Win32 创建出来的默认观感, 所以三条都只在"反面"发一条。
+void CCodeGen::emitDesignerStateProps(const FrmControl& ctrl, const std::string& hwndExpr) {
+    switch (ctrl.controlType) {
+    case FrmControlType::Timer:   // 无窗口控件, Enabled 由 C29-T 那条路管
+    case FrmControlType::Menu:    // 菜单项走 EnableMenuItem, 不是窗口状态
+    case FrmControlType::ImageList:
+        return;
+    default:
+        break;
+    }
+    const std::string hw = "(void*)" + hwndExpr;
+
+    auto enIt = ctrl.properties.find("Enabled");
+    if (enIt != ctrl.properties.end() && enIt->second.type == FrmValueType::Integer
+        && enIt->second.intValue == 0) {
+        c_.emitLine("vb6_SetControlEnabled(" + hw + ", 0);  /* design Enabled=False */");
+    }
+
+    auto viIt = ctrl.properties.find("Visible");
+    if (viIt != ctrl.properties.end() && viIt->second.type == FrmValueType::Integer
+        && viIt->second.intValue == 0) {
+        c_.emitLine("vb6_SetControlVisible(" + hw + ", 0);  /* design Visible=False */");
+    }
+
+    auto vaIt = ctrl.properties.find("Value");
+    if (vaIt != ctrl.properties.end() && vaIt->second.type == FrmValueType::Integer) {
+        const int v = (int)vaIt->second.intValue;
+        if (ctrl.controlType == FrmControlType::CheckBox) {
+            // VB6: 0=Unchecked 1=Checked 2=Grayed —— 0 就是创建默认, 不发
+            if (v == 1 || v == 2) {
+                c_.emitLine("vb6_SetCheckValue(" + hw + ", " + std::to_string(v)
+                            + ");  /* design Value=" + std::to_string(v) + " */");
+            }
+        } else if (ctrl.controlType == FrmControlType::OptionButton && v != 0) {
+            c_.emitLine("vb6_SetCheckValue(" + hw + ", 1);  /* design Value=True */");
+        }
+    }
+}
+
 // 控件类型的 Win32 样式位。取值与 cgen_form_ctrl_style_apply.inc 保持一致。
 // 顶层控件与容器子控件共用，避免容器内子控件缺失类型样式。
 long CCodeGen::controlTypeStyleBits(const FrmControl& ctrl) const {

@@ -1682,6 +1682,33 @@ if ($Category -in @("all", "run", "vbp")) {
         'CoCreateInstance'
     )
 
+    # 账 #125 (设计期 Enabled / Visible / CheckBox·OptionButton 的 Value): 两条创建路各一份 ——
+    #   Frame 里的子控件 (cbIn/cbDisIn/cbHidIn) 与顶层同形状 (cbOut/cbDisOut/cbHidOut)。
+    #   **判据纪律**: Visible 只能在窗体真显示之后问 —— Form_Load 里父窗还没 Show，
+    #   IsWindowVisible 对任何控件都返回假 (第一版探针就这么假绿过)，所以读数在 Timer 里。
+    #   DS4/DS5 是**选择性**那一半: 没写过这三项的控件 (cbDef/obDef) 必须照旧 —— 不勾、
+    #   不藏、不灰，Frame 仍可见；少了它，把"每个控件都设一遍"的写错了也照样绿。
+    #   DS2/DS3 现在读的是 `0/Fals`(-1 之外的那一档) —— 等账 #124 (控件布尔属性读回 int)
+    #   修好，这两条会按 VB6 口径变成 False 的字面量，届时一起改。
+    $csNeedles = @("CTRLSTATE-DONE", "DS1=11", "DS2=00", "DS3=00", "DS4=0-1-1",
+                   "DS5=01", "DS6=YYY", "DS7=-1")
+    Test-Vbp "ctrlstate" "$Tests\ctrlstate\CtrlState.vbp" $csNeedles
+    Test-Vbp "ctrlstate_x86" "$Tests\ctrlstate\CtrlState.vbp" $csNeedles -Arch "x86"
+    Test-EmitcShape "cs_emitc_state" @("$Tests\ctrlstate\CtrlState.vbp") @(
+        'vb6_SetCheckValue((void*)vb6_hwnd_cbIn, 1);',    # 子控件 Value=1
+        'vb6_SetCheckValue((void*)vb6_hwnd_cbOut, 1);',   # 顶层 Value=1
+        'vb6_SetControlEnabled((void*)vb6_hwnd_cbDisIn, 0);',
+        'vb6_SetControlEnabled((void*)vb6_hwnd_cbDisOut, 0);',
+        'vb6_SetControlVisible((void*)vb6_hwnd_cbHidIn, 0);',
+        'vb6_SetControlVisible((void*)vb6_hwnd_cbHidOut, 0);',
+        'vb6_SetCheckValue((void*)vb6_hwnd_obOn, 1);'    # OptionButton 的 Value=-1 折成 BST_CHECKED
+    )
+    Test-EmitcAbsent "cs_emitc_selectivity" @("$Tests\ctrlstate\CtrlState.vbp") @(
+        'vb6_SetCheckValue((void*)vb6_hwnd_cbDef',      # 没写 Value 的复选框不许被设
+        'vb6_SetControlVisible((void*)vb6_hwnd_lbOut',  # 没写 Visible 的标签不许被藏
+        'vb6_SetControlVisible((void*)vb6_hwnd_fr'      # Frame 自己也不许被藏
+    )
+
     # ai/029:429 + Fix 161d —— 源码面双保险: 生成串里不得再出现"指针返回函数被当数值"。
     # (这一条原先被放在 bas 段, 现挪到 vbp 段与其余 Test-Emitc* 同段 —— 它一直在 PASS,
     #  只是归属类别与惯例不一致; 挪动后由 vbp job 执行。)

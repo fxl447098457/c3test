@@ -133,6 +133,7 @@
                 emitShapeLineProps(child, ctrlHwndExprForInit(child));
                 // 设计期 BorderStyle / Alignment (容器子控件)
                 emitDesignerStyleProps(child, childHwndRead(child));
+                emitDesignerStateProps(child, childHwndRead(child));  // 账 #125: 与顶层同口径
                 emitControlFrxProps(child);  // Fix 182: 容器子控件同样加载 .frx 设计期图片/文本/列表
                 // 注册控件名到knownFormControls_(供属性访问)
                 {

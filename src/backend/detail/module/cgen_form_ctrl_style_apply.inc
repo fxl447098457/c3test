@@ -337,6 +337,7 @@
                  std::to_string(ctrl.index >= 0 ? ctrl.index : 0) + ")") :
                 ("vb6_hwnd_" + cIdent(ctrl.controlName));
             emitDesignerStyleProps(ctrl, dsHwnd);
+            emitDesignerStateProps(ctrl, dsHwnd);  // 账 #125: Enabled / Visible / Value
 
             // Fix 187: 设计期 ForeColor/BackColor — 此前从未发射, .frm 的初始色
             // 全部落空 (picBackColor &H00F8CCB1& 淡蓝被显示成 BTNFACE 灰, 颜色

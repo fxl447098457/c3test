@@ -245,6 +245,10 @@
     // hwndExpr 为控件句柄表达式 (如 "vb6_hwnd_Foo")。
     void emitDesignerStyleProps(const FrmControl& ctrl, const std::string& hwndExpr);
 
+    // 账 #125: 应用 .frm 设计期的**状态**三件 (Enabled / Visible / CheckBox·OptionButton 的 Value)。
+    // 顶层控件与容器子控件两条创建路共用; hwndExpr 同 emitDesignerStyleProps。
+    void emitDesignerStateProps(const FrmControl& ctrl, const std::string& hwndExpr);
+
     // 返回控件类型相关的 Win32 样式位 (BS_*/SS_*/ES_*/CBS_*/LBS_*/WS_BORDER...)。
     // 顶层控件与容器(Frame/PictureBox)子控件必须使用同一套逻辑，否则子控件缺
     // SS_NOTIFY/BS_GROUPBOX 等样式会导致外观/交互 (含 tooltip) 异常。
