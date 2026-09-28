@@ -115,9 +115,15 @@ Vb6Type CCodeGen::controlPropType(FrmControlType ctrlType, const std::string& pr
         // 兜底那条按成员裸名查符号的路，判成 Variant/String 跟 C 层不匹配（SSTab1.Tab 那次
         // AV 的同族）。值面那几条（Min/Max/Value/Small·LargeChange/Sel*）由 SL-b 登记。
         if (p == "orientation" || p == "tickfrequency"
-            || p == "travelisvert" || p == "tickpresent") {
+            || p == "travelisvert" || p == "tickpresent"
+            || p == "min" || p == "max" || p == "value"
+            || p == "smallchange" || p == "largechange"
+            || p == "selstart" || p == "selend") {
             return Vb6Type::Long;
         }
+        // SelectRange 在 VB6 是 Boolean ⇒ 按 #124 那条口径登记（getter 给的就是 -1/0），
+        // 这样 `CStr(sld.SelectRange)` 打 True/False、装箱走 VT_BOOL。
+        if (p == "selectrange") return Vb6Type::Boolean;
     }
     if (ctrlType == FrmControlType::RichTextBox) {
         // C29-RT-a: 同一口径。vb6_RTB_Get* 除 SelText 外全是 int32_t（布尔按 VB6 的 -1/0 给，
@@ -503,6 +509,15 @@ std::string CCodeGen::getControlPropReadFn(FrmControlType ctrlType, const std::s
         if (propLower == "tickfrequency") return "vb6_Slider_GetTickFrequency";
         if (propLower == "travelisvert") return "vb6_Slider_TravelIsVert";
         if (propLower == "tickpresent") return "vb6_Slider_TickPresent";
+        // C29-SL-b 的读侧（值面）。全部直问控件，只有 TickFrequency 因原生问不出而自存。
+        if (propLower == "min") return "vb6_Slider_GetMin";
+        if (propLower == "max") return "vb6_Slider_GetMax";
+        if (propLower == "value") return "vb6_Slider_GetValue";
+        if (propLower == "smallchange") return "vb6_Slider_GetSmallChange";
+        if (propLower == "largechange") return "vb6_Slider_GetLargeChange";
+        if (propLower == "selectrange") return "vb6_Slider_GetSelectRange";
+        if (propLower == "selstart") return "vb6_Slider_GetSelStart";
+        if (propLower == "selend") return "vb6_Slider_GetSelEnd";
         if (propLower == "visible") return "vb6_GetControlVisible";
         if (propLower == "enabled") return "vb6_GetControlEnabled";
         break;
@@ -872,6 +887,15 @@ std::string CCodeGen::getControlPropWriteFn(FrmControlType ctrlType, const std::
     case FrmControlType::Slider:
         if (propLower == "orientation") return "vb6_Slider_SetOrientation";
         if (propLower == "tickfrequency") return "vb6_Slider_SetTickFrequency";
+        // C29-SL-b 的写侧（值面）。
+        if (propLower == "min") return "vb6_Slider_SetMin";
+        if (propLower == "max") return "vb6_Slider_SetMax";
+        if (propLower == "value") return "vb6_Slider_SetValue";
+        if (propLower == "smallchange") return "vb6_Slider_SetSmallChange";
+        if (propLower == "largechange") return "vb6_Slider_SetLargeChange";
+        if (propLower == "selectrange") return "vb6_Slider_SetSelectRange";
+        if (propLower == "selstart") return "vb6_Slider_SetSelStart";
+        if (propLower == "selend") return "vb6_Slider_SetSelEnd";
         if (propLower == "visible") return "vb6_SetControlVisible";
         if (propLower == "enabled") return "vb6_SetControlEnabled";
         break;

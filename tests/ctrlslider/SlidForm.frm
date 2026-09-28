@@ -43,6 +43,33 @@ Begin VB.Form SlidForm
       _ExtentX        =   3528
       _ExtentY        =   706
    End
+   Begin MSComctlLib.Slider sld4 
+      Height          =   400
+      LargeChange     =   8
+      Left            =   120
+      Max             =   100
+      Min             =   10
+      SelStart        =   20
+      SelEnd          =   60
+      SelectRange     =   -1   'True
+      SmallChange     =   2
+      TabIndex        =   3
+      TickFrequency   =   5
+      Top             =   1200
+      Value           =   42
+      Width           =   2000
+      _ExtentX        =   3528
+      _ExtentY        =   706
+   End
+   Begin MSComctlLib.Slider sld5 
+      Height          =   400
+      Left            =   120
+      TabIndex        =   4
+      Top             =   1680
+      Width           =   2000
+      _ExtentX        =   3528
+      _ExtentY        =   706
+   End
 End
 Attribute VB_Name = "SlidForm"
 Attribute VB_GlobalNameSpace = False
@@ -87,6 +114,31 @@ Private Sub tGo_Timer()
     Debug.Print "SL10-flipback=" & CStr(sld1.Orientation) & CStr(sld1.TravelIsVert)
     sld1.Enabled = False
     Debug.Print "SL11-en=" & CStr(sld1.Enabled) & CStr(sld3.Enabled)
+    ' ---- C29-SL-b 值面：sld4 设计期写满、sld5 什么都没写（默认档照原生答，不猜 VB6 文档）----
+    Debug.Print "SB1-range=" & CStr(sld4.Min) & "/" & CStr(sld4.Max)
+    Debug.Print "SB2-value=" & CStr(sld4.Value)
+    ' SB3 是 **Init 参数顺序的证人**：先立 range(10..100) 再立 page=8。顺序反过来就会被
+    ' range 那次重算把 page 顶成 18（探针实测），这条读数就会变成 2/18。
+    Debug.Print "SB3-changes=" & CStr(sld4.SmallChange) & "/" & CStr(sld4.LargeChange)
+    Debug.Print "SB4-sel=" & CStr(sld4.SelStart) & "/" & CStr(sld4.SelEnd) _
+        & "/" & CStr(sld4.SelectRange)
+    sld4.Value = 500
+    Debug.Print "SB5-clampmax=" & CStr(sld4.Value)
+    sld4.Value = 5
+    Debug.Print "SB6-clampmin=" & CStr(sld4.Value)
+    sld4.Max = 40
+    Debug.Print "SB7-shrink=" & CStr(sld4.Min) & "/" & CStr(sld4.Max) & "/" & CStr(sld4.Value)
+    sld4.SelectRange = False
+    Debug.Print "SB8-selrange-off=" & CStr(sld4.SelectRange)
+    Debug.Print "SB9-defaults=" & CStr(sld5.Min) & "/" & CStr(sld5.Max) & "/" _
+        & CStr(sld5.SmallChange) & "/" & CStr(sld5.LargeChange) & "/" & CStr(sld5.Value) & "/" _
+        & CStr(sld5.TickFrequency)
+    ' 起点越过终点时两端互相顶（原生不接受反向区段）
+    sld5.SelectRange = True
+    sld5.SelStart = 30
+    sld5.SelEnd = 70
+    sld5.SelStart = 80
+    Debug.Print "SB10-push=" & CStr(sld5.SelStart) & "/" & CStr(sld5.SelEnd)
     Debug.Print "SLIDER-DONE"
     Unload Me
 End Sub

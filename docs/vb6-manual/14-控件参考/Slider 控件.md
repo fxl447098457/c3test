@@ -33,3 +33,17 @@
 **本批还没有的一面**（`Min` / `Max` / `Value` / `SmallChange` / `LargeChange` / `SelStart` / `SelEnd` / `SelectRange` 与 `Change` / `Scroll` 两条事件）在 ai/029 的 C29-SL-b / SL-c 两格里排；`TickStyle` 四档与原生 `TBS_TOP`/`BOTTOM`/`LEFT`/`RIGHT`/`BOTH`/`NOTICKS` 的对应**本机拿不到 VB6 枚举真值**（OCX 未注册、类型库读不到），刻意没有实现，等口径再补。
 
 **两个坑（实测踩过的）**：① 判方向**别问 `TBM_GETCHANNELRECT`** —— 它返回的矩形永远把行程长度放在 x 分量上，水平杆与垂直杆答同一组数，量它等于什么都没量；② `TBM_GETTHUMBRECT` / `GETCHANNELRECT` 的**返回值不是成功标志**（实测返回 0 而矩形填得好好的），只看矩形内容。
+
+## 本项目的实现口径（ai/029 C29-SL-b：`Min` / `Max` / `Value` / `Small·LargeChange` / `Sel*`）
+
+值面**全部直问直发控件**，没有一格自存。原生对应：`TBM_SETRANGE`/`GETRANGEMIN`/`GETRANGEMAX`、`TBM_SETPOS`/`GETPOS`、`TBM_SETLINESIZE`/`GETLINESIZE`、`TBM_SETPAGESIZE`/`GETPAGESIZE`、`TBM_SETSEL`/`GETSELSTART`/`GETSELEND`；`SelectRange` 是样式位 `TBS_ENABLESELRANGE`。
+
+| 写法 | 读数与实现 |
+| --- | --- |
+| `Slider1.Min` / `.Max` | 原生这条消息只吃 **16 位**（`lParam` 是两个半字；实测 40000 会截成 -25536），所以下发前钳到 ±32767，**读回也是那一个钳过的值** —— 答出去的与控件真走得动的始终是同一个数。VB6 的 `Min`/`Max` 是 Long，超界那一档怎么办本机拿不到真值，押后 |
+| `Slider1.Value` | `TBM_SETPOS`/`GETPOS`。**越界交给控件钳**（量程 10..100 时 `Value = 500` 读回 100、`= 5` 读回 10），我们不自己钳第二遍 |
+| `Slider1.SmallChange` / `.LargeChange` | 原生 line / page 尺寸，真往返。实测默认档是 **1 / 20**（VB6 文档写 1 / 5）：小的一条对得上，大的那条本项目**照原生答 20**，不拿文档去改控件的读数 —— 等拿到 VB6 真值再拍 |
+| `Slider1.SelectRange` | 样式位 `TBS_ENABLESELRANGE`，**运行期可改**（实测关掉之后 `CStr` 就答 `False`）。类型是 Boolean，所以 `CStr(sld.SelectRange)` 打 `True`/`False`、装箱是 `VT_BOOL` |
+| `Slider1.SelStart` / `.SelEnd` | 只有 `SelectRange = True` 时设进去才生效（实测没挂那位时 `TBM_SETSEL` 答不回来）。原生"没设过"答 `-1` ⇒ getter 折成 **0**（无区段）。两端互相顶：起点越过终点时终点跟上来 |
+
+**改设计期值面要注意顺序**：动 range 会让控件连带重算 `pos`、`page`、`selstart`（实测把 range 从 0..100 收到 10..100，`page` 从 20 变 18、`selstart` 跟到 10）。`vb6_Slider_Init` 的参数序因此是定死的：**range → line/page → pos → 刻度 → Sel**。

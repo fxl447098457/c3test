@@ -576,11 +576,11 @@
             c_.emitLine("vb6_DTP_Init((void*)" + dtHwnd + ", L\"" + esc + "\");");
         }
 
-        // C29-SL-a: Slider 设计期的 TickFrequency 下发。Orientation **不在这里** ——
-        // 实测事后写样式位不生效（channel 矩形长短边不变），它立在上面的创建样式那一段。
-        // 哨兵 -999 = .frm 没写过这一项（同 vb6_TreeView_Init 那条：拿 -1 当"未写"
-        // 会让设计期永远设不上合法的 0/-1 那一档）。没写也照发一条空转的 Init，
-        // 为的是发码形状稳定（emitc 断言要看它）。
+        // C29-SL-a/b: Slider 设计期值面下发（Init 十参，-999 哨兵 = .frm 没写过 ⇒ 那一条消息
+        // 不发，保持控件默认；Init 本身照发，让发码形状稳定 —— 同 vb6_TreeView_Init 那条）。
+        // 参数顺序不是随便排的，是 .build/slprobe/slmeasure6.c 量出来的：改 range 会把 pos 顶到
+        // 新下限、把 page 从 20 重算成 18、把 selstart 跟到新下限 ⇒ range → line/page → pos →
+        // 刻度 → Sel 这个序，任何一端先动都会把后面的吃掉。
         if (ctrl.controlType == FrmControlType::Slider) {
             std::string slLower = ctrl.controlName;
             std::transform(slLower.begin(), slLower.end(), slLower.begin(), ::tolower);
@@ -588,11 +588,16 @@
                 ("vb6_CtrlArr_GetAt(&vb6_arr_" + cIdent(ctrl.controlName) + ", " +
                  std::to_string(ctrl.index >= 0 ? ctrl.index : 0) + ")") :
                 ("vb6_hwnd_" + cIdent(ctrl.controlName));
-            int slFreq = -999;
-            auto tfIt = ctrl.properties.find("TickFrequency");
-            if (tfIt != ctrl.properties.end()) slFreq = (int)tfIt->second.intValue;
+            auto slProp = [&](const char* key) -> std::string {
+                auto it = ctrl.properties.find(key);
+                if (it == ctrl.properties.end()) return "-999";
+                return std::to_string((long long)(int)it->second.intValue) + "L";
+            };
             c_.emitLine("vb6_Slider_Init((void*)" + slHwnd + ", "
-                        + std::to_string(slFreq) + "L);");
+                        + slProp("Min") + ", " + slProp("Max") + ", " + slProp("Value") + ", "
+                        + slProp("SmallChange") + ", " + slProp("LargeChange") + ", "
+                        + slProp("TickFrequency") + ", " + slProp("SelStart") + ", "
+                        + slProp("SelEnd") + ", " + slProp("SelectRange") + ");");
         }
 
         // C29-MV-a: MonthView 设计期的多月平铺。原生没有"行/列"这条消息 —— 平铺几个月完全

@@ -824,11 +824,32 @@ void    vb6_Ws_Close(void* hwnd);
 //     * TickFrequency 原生**没有回读**（GETTIC 答不出、GETTICPOS 与频率无关）⇒ 自存读回，
 //       写侧真下发 TBM_SETTICFREQ；"有没有刻度"用 TickPresent（GETTICPOS(0) != -1）证。
 //   值面 (Min/Max/Value/Small·LargeChange/Sel*) 留 C29-SL-b，事件留 C29-SL-c。
-void    vb6_Slider_Init(void* hwnd, long tickFrequency);
+void    vb6_Slider_Init(void* hwnd, long min, long max, long value,
+                        long smallChange, long largeChange, long tickFrequency,
+                        long selStart, long selEnd, long selectRange);
 int32_t vb6_Slider_GetOrientation(void* hwnd);
 void    vb6_Slider_SetOrientation(void* hwnd, int32_t orientation);
 int32_t vb6_Slider_GetTickFrequency(void* hwnd);
 void    vb6_Slider_SetTickFrequency(void* hwnd, int32_t freq);
+// C29-SL-b：值面。**全部直问直发控件**（只有 TickFrequency 因原生问不出而自存，见上）。
+// Min/Max 下发前钳到 16 位（原生这条消息的 lParam 是两个 16 位半字，实测超界会截断），
+// 读回就是那一个钳过的值 ⇒ "答出去的"与"控件真走得动的"始终同一个数。
+int32_t vb6_Slider_GetMin(void* hwnd);
+int32_t vb6_Slider_GetMax(void* hwnd);
+void    vb6_Slider_SetMin(void* hwnd, int32_t v);
+void    vb6_Slider_SetMax(void* hwnd, int32_t v);
+int32_t vb6_Slider_GetValue(void* hwnd);
+void    vb6_Slider_SetValue(void* hwnd, int32_t v);       // 越界由控件钳位（实测 150→100、-5→10）
+int32_t vb6_Slider_GetSmallChange(void* hwnd);            // TBM_GET/SETLINESIZE
+void    vb6_Slider_SetSmallChange(void* hwnd, int32_t v);
+int32_t vb6_Slider_GetLargeChange(void* hwnd);             // TBM_GET/SETPAGESIZE
+void    vb6_Slider_SetLargeChange(void* hwnd, int32_t v);
+int32_t vb6_Slider_GetSelectRange(void* hwnd);             // 样式位 TBS_ENABLESELRANGE（运行期可改，实测）
+void    vb6_Slider_SetSelectRange(void* hwnd, int32_t on);
+int32_t vb6_Slider_GetSelStart(void* hwnd);                // 原生答 (UINT)-1（没设过）时折成 0
+int32_t vb6_Slider_GetSelEnd(void* hwnd);
+void    vb6_Slider_SetSelStart(void* hwnd, int32_t v);
+void    vb6_Slider_SetSelEnd(void* hwnd, int32_t v);
 // C3 扩展（不是 VB6 属性）：两条控件侧证人，判据用它把"样式位写进去了"升级成
 // "控件真按那一档在走"。**别用 TBM_GETCHANNELRECT 判方向** —— 实测它的 rect 永远把行程
 // 长度放在 x 分量，水平杆与竖直杆答同一组数（第一发探针就这么误判过一次）。

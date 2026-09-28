@@ -1816,21 +1816,34 @@ if ($Category -in @("all", "run", "vbp")) {
     #   SL11-en=FalseTrue:          #124 的布尔面 + 选择性 (另一枚没动的仍可读回 True)。
     $slidNeedles = @("SLIDER-DONE", "SL1-vis=True", "SL2-ori=0", "SL3-freq=10",
                      "SL4-travel=0", "SL5-tick=-1", "SL6-vertori=11", "SL7-nofreq=00",
-                     "SL8-freqset=5", "SL9-flip=11", "SL10-flipback=00", "SL11-en=FalseTrue")
+                     "SL8-freqset=5", "SL9-flip=11", "SL10-flipback=00", "SL11-en=FalseTrue",
+                     # C29-SL-b 值面（读数取自本机真跑; SB3 是 Init 参数顺序的证人,
+                     # SB9 是「什么都没写就照原生答」的证人 —— LargeChange 原生默认 20,
+                     # VB6 文档那条 5 本机拿不到真值, 所以**不自作主张折成 5**, 见 029）
+                     "SB1-range=10/100", "SB2-value=42", "SB3-changes=2/8", "SB4-sel=20/60/True",
+                     "SB5-clampmax=100", "SB6-clampmin=10", "SB7-shrink=10/40/10",
+                     "SB8-selrange-off=False", "SB9-defaults=0/100/1/20/0/0", "SB10-push=80/80")
     Test-Vbp "ctrlslider" "$Tests\ctrlslider\SlidApp.vbp" $slidNeedles
     Test-Vbp "ctrlslider_x86" "$Tests\ctrlslider\SlidApp.vbp" $slidNeedles -Arch "x86"
     Test-EmitcShape "sl_emitc_native" @("$Tests\ctrlslider\SlidApp.vbp") @(
         '"msctls_trackbar32", "",',
         '1409286145L, 0L,',                                        # 横杆: TBS_AUTOTICKS, 无 TBS_VERT
         '1409286147L, 0L,',                                        # 竖杆: 多挂 TBS_VERT(0x2)
-        'vb6_Slider_Init((void*)vb6_hwnd_sld1, 10L);',             # 写了的 TickFrequency 下发
-        'vb6_Slider_Init((void*)vb6_hwnd_sld3, -999L);',           # 没写的走 -999 哨兵空转
+        'vb6_Slider_Init((void*)vb6_hwnd_sld1, -999, -999, -999, -999, -999, 10L, -999, -999, -999);',
+        'vb6_Slider_Init((void*)vb6_hwnd_sld4, 10L, 100L, 42L, 2L, 8L, 5L, 20L, 60L, -1L);',
+        'vb6_Slider_Init((void*)vb6_hwnd_sld5, -999, -999, -999, -999, -999, -999, -999, -999, -999);',
         'vb6_Slider_SetOrientation(vb6_hwnd_sld1, 1);',
-        'vb6_Slider_TravelIsVert(vb6_hwnd_sld2'
+        'vb6_Slider_TravelIsVert(vb6_hwnd_sld2',
+        # SL-b: 运行期值面 setter/getter 直发控件, 没有一格自存
+        'vb6_Slider_SetMax(vb6_hwnd_sld4, 40);',
+        'vb6_Slider_SetSelectRange(vb6_hwnd_sld4, 0);',
+        'vb6_CStrLong(vb6_Slider_GetMin(vb6_hwnd_sld4',
+        'vb6_CStrBool(vb6_Slider_GetSelectRange('                  # #124 那条布尔口径
     )
     Test-EmitcAbsent "sl_emitc_no_com_fallback" @("$Tests\ctrlslider\SlidApp.vbp") @(
         'vb6_ComGetProp(vb6_hwnd_sld1',      # 兜底那条"拿 HWND 当 IDispatch"不许回来
         'vb6_ComSetProp(vb6_hwnd_sld1',
+        'vb6_ComGetProp(vb6_hwnd_sld4',      # 值面同样不许回来
         'CoCreateInstance'
     )
 

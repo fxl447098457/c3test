@@ -44,35 +44,18 @@
 #define VB6_SLD_HORZ 0
 #define VB6_SLD_VERT 1
 
-#ifndef TBS_AUTOTICKS
-#define TBS_AUTOTICKS  0x0001
+// 刻意**不写** `#ifndef TBS_xxx / #define ...` 那一族兜底宏：上一版手写的
+// `#define TBM_GETTHUMBRECT (WM_USER + 17)` 与 SDK 头对不上（头里 GETTHUMBRECT 是 +25，
+// +17 是 TBM_GETSELSTART）—— 只因 commctrl.h 先定义了它，#ifndef 才没盖上去。
+// 本文件全程 #include <commctrl.h>，消息名一律用头里的，不再抄第二份编号表。
+#ifndef VB6_SLD_UNSET
+#define VB6_SLD_UNSET (-999)     // 设计期"没写过"那一档的哨兵（同 vb6_TreeView_Init）
 #endif
-#ifndef TBS_VERT
-#define TBS_VERT       0x0002
+#ifndef VB6_SLD_I16MIN
+#define VB6_SLD_I16MIN (-32768)
 #endif
-#ifndef TBM_SETTICFREQ
-#define TBM_SETTICFREQ   (WM_USER + 20)
-#endif
-#ifndef TBM_GETTICPOS
-#define TBM_GETTICPOS    (WM_USER + 15)
-#endif
-#ifndef TBM_GETTHUMBRECT
-#define TBM_GETTHUMBRECT (WM_USER + 17)
-#endif
-#ifndef TBM_CLEARTICS
-#define TBM_CLEARTICS    (WM_USER + 9)
-#endif
-#ifndef TBM_GETRANGEMIN
-#define TBM_GETRANGEMIN  (WM_USER + 1)
-#endif
-#ifndef TBM_GETRANGEMAX
-#define TBM_GETRANGEMAX  (WM_USER + 2)
-#endif
-#ifndef TBM_GETPOS
-#define TBM_GETPOS       (WM_USER)
-#endif
-#ifndef TBM_SETPOS
-#define TBM_SETPOS       (WM_USER + 5)
+#ifndef VB6_SLD_I16MAX
+#define VB6_SLD_I16MAX 32767
 #endif
 
 // --- 自存槽（+1 偏移，同 vb6forms_progress.c 那条：SetPropW(hw,name,NULL) 看着像"存了个空值"，
@@ -91,17 +74,85 @@ static LONG vb6_SdGetProp(void* hwnd, const wchar_t* name, LONG def) {
     return h ? ((LONG)(INT_PTR)h - 1) : def;
 }
 
-// 设计期下发。哨兵 -999 = .frm 里**没写过**这一项 ⇒ 一条消息都不发，保持控件默认
+// 换一次帧：实测样式位（Orientation / EnableSelRange）写完要配这一脚，控件才真按新位重排
+// （SetWindowPos 传原尺寸，只挂 NOZORDER|NOMOVE|FRAMECHANGED）。
+static void vb6_SdReframe(HWND hw) {
+    RECT wr;
+    GetWindowRect(hw, &wr);
+    SetWindowPos(hw, NULL, 0, 0, (int)(wr.right - wr.left), (int)(wr.bottom - wr.top),
+                 SWP_NOZORDER | SWP_NOMOVE | SWP_FRAMECHANGED);
+}
+
+// 设计期下发（SL-a 只有 tickFrequency 一参，SL-b 把它扩成完整值面）。
+// 哨兵 -999 = .frm 里**没写过**这一项 ⇒ 那一条消息都不发，保持控件默认
 // （同 vb6_TreeView_Init：拿 -1 当"未写"会让设计期永远设不上合法的 0/-1 那一档）。
-// Orientation 不走这里 —— 它是创建参数，cgen 直接立进 vb6_CreateControl 的样式位。
-void vb6_Slider_Init(void* hwnd, long tickFrequency) {
+// 顺序是量出来的，不能换：
+//   1) range 先立 —— 实测 `TBM_SETRANGE(10,100)` 会把 `pos` 顶到下限 10、把 `page` 从 20
+//      重算成 18、把 `selstart` 跟到 10；先设值再设 range 就会被这三处连带改动吃掉；
+//   2) line/page 再设 —— 它们同样会被 range 重算，必须在 range 之后；
+//   3) pos 第三（量程已定，越界由控件钳位 —— 实测 SETPOS(150)→100、(-5)→10）；
+//   4) 刻度与 Sel 最后。
+// Orientation 不走这里 —— 它是创建参数，cgen 立进 vb6_CreateControl 的样式位。
+void vb6_Slider_Init(void* hwnd, long min, long max, long value,
+                     long smallChange, long largeChange, long tickFrequency,
+                     long selStart, long selEnd, long selectRange) {
+    HWND hw;
+    long lo, hi, curLo, curHi;
     if (!hwnd) return;
-    if (tickFrequency == -999) return;
-    vb6_SdSetProp(hwnd, kSdTickFreq, (LONG)tickFrequency);
-    if (tickFrequency > 0) {
-        // 先清再设：控件自带的默认刻度不清掉的话，新旧两套刻度会叠在一起画。
-        SendMessageW((HWND)hwnd, TBM_CLEARTICS, TRUE, 0);
-        SendMessageW((HWND)hwnd, TBM_SETTICFREQ, (WPARAM)tickFrequency, 0);
+    hw = (HWND)hwnd;
+    // 只有 .frm **真写过** Min/Max 才发 range：控件当前值要先读出来当另一端。
+    // （踩过的坑：早先写成"没写就从当前值取"再比 `lo != min` 判要不要发 —— 那比较拿
+    //  当前值与哨兵 -999 比，永远不等 ⇒ 每枚 Slider 都被重发一次 range，而重发 range
+    //  会把 page 从 20 重算成 18、把刻度画出来 ⇒ 什么都没写的控件也"自己长出刻度"。）
+    curLo = (long)SendMessageW(hw, TBM_GETRANGEMIN, 0, 0);
+    curHi = (long)SendMessageW(hw, TBM_GETRANGEMAX, 0, 0);
+    if (min != VB6_SLD_UNSET || max != VB6_SLD_UNSET) {
+        lo = (min == VB6_SLD_UNSET) ? curLo : min;
+        hi = (max == VB6_SLD_UNSET) ? curHi : max;
+        // VB6 的 Min/Max 是 Long，原生这条消息的 lParam 是两个 16 位半字（实测
+        // MAKELONG(40000,50000) 读回 -25536/-15536 = 截断）⇒ 先钳到 i16 再下发，
+        // 这样"我们答出去的数"与"控件真走得动的数"是同一个。超界那一档 VB6 怎么办：
+        // 本机 OCX 未注册、拿不到真值 ⇒ 押后（见 029）。
+        if (lo < VB6_SLD_I16MIN) lo = VB6_SLD_I16MIN;
+        if (lo > VB6_SLD_I16MAX) lo = VB6_SLD_I16MAX;
+        if (hi < VB6_SLD_I16MIN) hi = VB6_SLD_I16MIN;
+        if (hi > VB6_SLD_I16MAX) hi = VB6_SLD_I16MAX;
+        if (hi < lo) hi = lo;
+        if (lo != curLo || hi != curHi) {
+            SendMessageW(hw, TBM_SETRANGE, TRUE, MAKELONG((WORD)(SHORT)lo, (WORD)(SHORT)hi));
+        }
+    }
+    if (smallChange != VB6_SLD_UNSET && smallChange >= 0) {
+        SendMessageW(hw, TBM_SETLINESIZE, TRUE, (WPARAM)smallChange);
+    }
+    if (largeChange != VB6_SLD_UNSET && largeChange >= 0) {
+        SendMessageW(hw, TBM_SETPAGESIZE, TRUE, (WPARAM)largeChange);
+    }
+    if (value != VB6_SLD_UNSET) {
+        SendMessageW(hw, TBM_SETPOS, TRUE, (WPARAM)value);
+    }
+    if (tickFrequency != VB6_SLD_UNSET) {
+        vb6_SdSetProp(hwnd, kSdTickFreq, (LONG)tickFrequency);
+        if (tickFrequency > 0) {
+            // 先清再设：控件自带的默认刻度不清掉的话，新旧两套刻度会叠在一起画。
+            SendMessageW(hw, TBM_CLEARTICS, TRUE, 0);
+            SendMessageW(hw, TBM_SETTICFREQ, (WPARAM)tickFrequency, 0);
+        }
+    }
+    if (selectRange != VB6_SLD_UNSET && selectRange != 0) {
+        LONG st = (LONG)GetWindowLongPtrW(hw, GWL_STYLE);
+        if (!(st & TBS_ENABLESELRANGE)) {
+            SetWindowLongPtrW(hw, GWL_STYLE, st | TBS_ENABLESELRANGE);
+            vb6_SdReframe(hw);
+        }
+    }
+    if (selStart != VB6_SLD_UNSET || selEnd != VB6_SLD_UNSET) {
+        long a = (selStart == VB6_SLD_UNSET)
+                     ? vb6_Slider_GetSelStart(hwnd) : selStart;
+        long b = (selEnd == VB6_SLD_UNSET)
+                     ? vb6_Slider_GetSelEnd(hwnd) : selEnd;
+        if (a > b) a = b;                     // 原生不接受反向区段
+        SendMessageW(hw, TBM_SETSEL, TRUE, MAKELONG((WORD)(SHORT)a, (WORD)(SHORT)b));
     }
 }
 
@@ -169,6 +220,155 @@ void vb6_Slider_SetTickFrequency(void* hwnd, int freq) {
         SendMessageW((HWND)hwnd, TBM_CLEARTICS, TRUE, 0);
         SendMessageW((HWND)hwnd, TBM_SETTICFREQ, (WPARAM)freq, 0);
     }
+}
+
+/* ======================= C29-SL-b: 值面 ======================= *
+ * 全部直问直发控件，**一格自存都没有**（自存的只有 TickFrequency —— 原生问不出，见上）。
+ * 四条实测口径（.build/slprobe/slmeasure6.c）：
+ *   · 默认档：min=0 max=100、pos=0、**line=1 page=20**、selstart=0 selend=0。
+ *     （VB6 文档给的是 SmallChange=1 / LargeChange=5：小那条对得上，大那条原生是 20，
+ *      "没写过 LargeChange 时读回 20 还是折成 5"本机 OCX 未注册、拿不到 VB6 真值 ⇒ 押后，
+ *      这里一律**照原生答 20**，不自作主张改成 5。）
+ *   · 改 range 会把三样东西一起重算：pos 顶到新下限、page 从 20 变 18、selstart 跟到下限
+ *     ⇒ 所以 Init 的顺序是 range → line/page → pos → 刻度 → Sel（见 vb6_Slider_Init 上面）。
+ *   · 收窄 range 时 pos 由控件自己钳位（实测 80 → 收到 0..50 之后读回 50）。
+ *   · `TBM_GETSELSTART/END` 在**清掉/没设过**时答 **(UINT)-1**（实测 CLEARSEL 之后）
+ *     ⇒ 本 getter 把那一个折算成 0（"无区段"），免得 VB6 侧冒出个 -1 的起点。
+ */
+
+// VB6 的 Min/Max 是 Long，原生这条消息只有 16 位（实测超界被截成别的数）。
+// 下发前钳到 i16，读回也是那一个钳过的值 ⇒ "答出去的"与"控件真走得动的"始终是同一个数。
+int vb6_Slider_GetMin(void* hwnd) {
+    if (!hwnd) return 0;
+    return (int)SendMessageW((HWND)hwnd, TBM_GETRANGEMIN, 0, 0);
+}
+
+int vb6_Slider_GetMax(void* hwnd) {
+    if (!hwnd) return 0;
+    return (int)SendMessageW((HWND)hwnd, TBM_GETRANGEMAX, 0, 0);
+}
+
+static void vb6_SdSetRange(void* hwnd, LONG lo, LONG hi) {
+    LONG a, b;
+    if (!hwnd) return;
+    a = (LONG)SendMessageW((HWND)hwnd, TBM_GETRANGEMIN, 0, 0);
+    b = (LONG)SendMessageW((HWND)hwnd, TBM_GETRANGEMAX, 0, 0);
+    if (lo == a && hi == b) return;          // 幂等: 不重发, 免得 range 一动就连带重算
+    SendMessageW((HWND)hwnd, TBM_SETRANGE, TRUE,
+                 MAKELONG((WORD)(SHORT)lo, (WORD)(SHORT)hi));
+}
+
+void vb6_Slider_SetMin(void* hwnd, int v) {
+    LONG hi;
+    if (!hwnd) return;
+    if (v < VB6_SLD_I16MIN) v = VB6_SLD_I16MIN;
+    if (v > VB6_SLD_I16MAX) v = VB6_SLD_I16MAX;
+    hi = (LONG)SendMessageW((HWND)hwnd, TBM_GETRANGEMAX, 0, 0);
+    if (v > hi) hi = v;                 // 原生不接受 min > max
+    vb6_SdSetRange(hwnd, (LONG)v, hi);
+}
+
+void vb6_Slider_SetMax(void* hwnd, int v) {
+    LONG lo;
+    if (!hwnd) return;
+    if (v < VB6_SLD_I16MIN) v = VB6_SLD_I16MIN;
+    if (v > VB6_SLD_I16MAX) v = VB6_SLD_I16MAX;
+    lo = (LONG)SendMessageW((HWND)hwnd, TBM_GETRANGEMIN, 0, 0);
+    if (v < lo) lo = v;
+    vb6_SdSetRange(hwnd, lo, (LONG)v);
+}
+
+int vb6_Slider_GetValue(void* hwnd) {
+    if (!hwnd) return 0;
+    return (int)SendMessageW((HWND)hwnd, TBM_GETPOS, 0, 0);
+}
+
+void vb6_Slider_SetValue(void* hwnd, int v) {
+    if (!hwnd) return;
+    // 越界**不自己钳**：实测控件就钳（150→100、-5→10），让控件答这一档。
+    SendMessageW((HWND)hwnd, TBM_SETPOS, TRUE, (WPARAM)v);
+}
+
+int vb6_Slider_GetSmallChange(void* hwnd) {
+    if (!hwnd) return 0;
+    return (int)SendMessageW((HWND)hwnd, TBM_GETLINESIZE, 0, 0);
+}
+
+void vb6_Slider_SetSmallChange(void* hwnd, int v) {
+    if (!hwnd) return;
+    SendMessageW((HWND)hwnd, TBM_SETLINESIZE, TRUE, (WPARAM)v);
+}
+
+int vb6_Slider_GetLargeChange(void* hwnd) {
+    if (!hwnd) return 0;
+    return (int)SendMessageW((HWND)hwnd, TBM_GETPAGESIZE, 0, 0);
+}
+
+void vb6_Slider_SetLargeChange(void* hwnd, int v) {
+    if (!hwnd) return;
+    SendMessageW((HWND)hwnd, TBM_SETPAGESIZE, TRUE, (WPARAM)v);
+}
+
+// SelectRange = 原生样式位 TBS_ENABLESELRANGE。实测**运行期改这一位有效**（补挂之后
+// SETSEL 才答得回来、且换帧后区段画出来）⇒ 写口登记；挂上时按当前 Sel 重发一次 SETSEL，
+// 否则位是挂上了、区段还是空的。
+int vb6_Slider_GetSelectRange(void* hwnd) {
+    if (!hwnd) return 0;
+    return ((GetWindowLongPtrW((HWND)hwnd, GWL_STYLE) & TBS_ENABLESELRANGE) != 0) ? -1 : 0;
+}
+
+void vb6_Slider_SetSelectRange(void* hwnd, int on) {
+    LONG st;
+    if (!hwnd) return;
+    st = (LONG)GetWindowLongPtrW((HWND)hwnd, GWL_STYLE);
+    if (on) {
+        if (st & TBS_ENABLESELRANGE) return;
+        SetWindowLongPtrW((HWND)hwnd, GWL_STYLE, st | TBS_ENABLESELRANGE);
+        vb6_SdReframe((HWND)hwnd);
+        // 补挂之后按当前两端重发一次：原生那两位在没挂时 SETSEL 是不生效的（实测）。
+        {
+            LONG a = vb6_Slider_GetSelStart(hwnd);
+            LONG b = vb6_Slider_GetSelEnd(hwnd);
+            if (a > b) a = b;
+            SendMessageW((HWND)hwnd, TBM_SETSEL, TRUE, MAKELONG((WORD)(SHORT)a, (WORD)(SHORT)b));
+        }
+    } else {
+        if (!(st & TBS_ENABLESELRANGE)) return;
+        SetWindowLongPtrW((HWND)hwnd, GWL_STYLE, st & ~(LONG)TBS_ENABLESELRANGE);
+        vb6_SdReframe((HWND)hwnd);
+    }
+}
+
+int vb6_Slider_GetSelStart(void* hwnd) {
+    LONG v;
+    if (!hwnd) return 0;
+    v = (LONG)SendMessageW((HWND)hwnd, TBM_GETSELSTART, 0, 0);
+    return (v == -1) ? 0 : (int)v;      // 实测"没设过/已 CLEARSEL"答 (UINT)-1 ⇒ 折成 0
+}
+
+int vb6_Slider_GetSelEnd(void* hwnd) {
+    LONG v;
+    if (!hwnd) return 0;
+    v = (LONG)SendMessageW((HWND)hwnd, TBM_GETSELEND, 0, 0);
+    return (v == -1) ? 0 : (int)v;
+}
+
+// VB6 那侧 SelStart 不能大于 SelEnd（区段是闭区间）。两端各自 setter 时**互相顶**：
+// 设起点超过终点 ⇒ 终点跟上来（原生 SETSELSTART 会自己夹，实测分开发 15/60 正常往返）。
+void vb6_Slider_SetSelStart(void* hwnd, int v) {
+    LONG hi;
+    if (!hwnd) return;
+    hi = vb6_Slider_GetSelEnd(hwnd);
+    if (v > hi) hi = v;
+    SendMessageW((HWND)hwnd, TBM_SETSEL, TRUE, MAKELONG((WORD)(SHORT)v, (WORD)(SHORT)hi));
+}
+
+void vb6_Slider_SetSelEnd(void* hwnd, int v) {
+    LONG lo;
+    if (!hwnd) return;
+    lo = vb6_Slider_GetSelStart(hwnd);
+    if (v < lo) lo = v;
+    SendMessageW((HWND)hwnd, TBM_SETSEL, TRUE, MAKELONG((WORD)(SHORT)lo, (WORD)(SHORT)v));
 }
 
 #endif /* _WIN32 */
