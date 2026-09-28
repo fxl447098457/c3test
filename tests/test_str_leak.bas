@@ -6,6 +6,11 @@
 '
 ' 剩下的六条是语义护栏: AssignMove 换了所有权, 但不许换掉"赋值取的是当时那份值"的语义,
 ' 所以借用(变量/形参赋值)、别名(先抄后改)、ByRef 写穿、拼接链、返回串的过程这五条都逐条读数。
+'
+' 读数一律**不带方括号**: 套件用 PowerShell 的 -like 比针 (见 run_tests.ps1 的
+' "output mismatch" 那一支), 而 -like 把 [ABC] 当**字符类** (匹配 A/B/C 中的一个字符),
+' 针面写 [ABC] 就永远匹配不上 —— 门 #178 正是这么红的 (产品读数全对, 针自己不可能绿)。
+
 
 Option Explicit
 
@@ -73,7 +78,7 @@ Sub Main()
     s = "SHARED-ME"
     d = s
     s = "CHANGED"
-    Debug.Print "S119-borrow=["; d; "]"
+    Debug.Print "S119-borrow="; d
 
     ' (2) 自有侧换所有权之后再读, 值本身必须还在(不是悬垂也不是清零)
     s = MakeTag(5)
@@ -81,18 +86,18 @@ Sub Main()
 
     ' (3) 拼接链
     u = "A" & "B" & "C"
-    Debug.Print "S119-concat=["; u; "]"
+    Debug.Print "S119-concat="; u
 
     ' (4) ByRef 写穿
     got = "OLD"
     SetOut got
-    Debug.Print "S119-byref-len="; Len(got); " head=["; Left(got, 1); "]"
+    Debug.Print "S119-byref-len="; Len(got); " head="; Left(got, 1)
 
     ' (5) 同一只变量反复赋值不互相踩
     s = "AAA"
     s = s & "BBB"
     s = UCase(s)
-    Debug.Print "S119-chain=["; s; "]"
+    Debug.Print "S119-chain="; s
 
     ' (6) 泄漏引擎跑完之后进程还得能正常收尾(所有权改错当场就堆损坏)
     Debug.Print "S119-DONE"

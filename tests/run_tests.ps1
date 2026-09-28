@@ -1331,8 +1331,8 @@ if ($Category -in @("all", "run", "bas")) {
     # PagefileUsage **增量**(10 万次 `s = Left(gBig, 64)`, 阈值 2MB; 修复前那 10 万只是纯漏,
     # 量级 15MB), 加上五条所有权语义护栏 (借用/别名/ByRef 写穿/拼接链/反复赋值不互踩)。
     # api1/api2 两条是自带的失效负控: 读不到内存就把判据打成 N, 免得"自己减自己"假绿。
-    Add-BasTest "test_str_leak" "$Tests\test_str_leak.bas" @("S119-api1=1", "S119-api2=1", "S119-leak-ok=Y", "S119-borrow=[SHARED-ME]", "S119-func-len=5", "S119-concat=[ABC]", "S119-byref-len=3 head=[C]", "S119-chain=[AAABBB]", "S119-DONE")
-    Add-BasTest "test_str_leak_x86" "$Tests\test_str_leak.bas" @("S119-api1=1", "S119-api2=1", "S119-leak-ok=Y", "S119-borrow=[SHARED-ME]", "S119-func-len=5", "S119-concat=[ABC]", "S119-byref-len=3 head=[C]", "S119-chain=[AAABBB]", "S119-DONE") -Arch "x86"
+    Add-BasTest "test_str_leak" "$Tests\test_str_leak.bas" @("S119-api1=1", "S119-api2=1", "S119-leak-ok=Y", "S119-borrow=SHARED-ME", "S119-func-len=5", "S119-concat=ABC", "S119-byref-len=3 head=C", "S119-chain=AAABBB", "S119-DONE")
+    Add-BasTest "test_str_leak_x86" "$Tests\test_str_leak.bas" @("S119-api1=1", "S119-api2=1", "S119-leak-ok=Y", "S119-borrow=SHARED-ME", "S119-func-len=5", "S119-concat=ABC", "S119-byref-len=3 head=C", "S119-chain=AAABBB", "S119-DONE") -Arch "x86"
     # Fix 190: Declare "As Any" ByRef 的下标链实参必须取地址, 不能把元素值当指针
     Add-BasTest "test_asany_subscript" "$Tests\test_asany_subscript.bas" @("WITH-SUB=Y", "EXPR-SUB=Y", "SCALAR=Y", "CHAIN=Y", "ASANY-DONE")
     # Delegate (tB extension): typed function pointers, stdcall/cdecl thunks, both arches
