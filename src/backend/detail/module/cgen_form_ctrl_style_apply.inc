@@ -252,6 +252,26 @@
                 if (mvToday != -999 && mvToday == 0) style |= 0x0010L;
                 break;
             }
+            case FrmControlType::Slider: {
+                // C29-SL-a: msctls_trackbar32 的创建样式。
+                //   · Orientation: 0=sldHorizontal(默认) / 1=sldVertical → TBS_VERT(0x0002)。
+                //     立在创建参数里，但**不是只能创建时给** —— 探针实测运行期写 TBS_VERT +
+                //     SWP_FRAMECHANGED 之后滑块的位移轴真的跟着换（与"创建时就是垂直"逐字相同），
+                //     所以写侧也登记了 setter（见 cgen_util_ctrl.cpp 的 Slider 那一格）。
+                //     ⚠ 第一发探针拿 TBM_GETCHANNELRECT 的长短边判方向，得出过"运行期改不动"的
+                //     错结论 —— 那条消息的 rect 永远把行程长度放在 x 分量，压根不随方向旋转。
+                //   · TBS_AUTOTICKS(0x0001) 一律挂上：VB6 的 Slider 默认就画刻度。
+                //     TickStyle 那四档与 TBS_TOP/BOTTOM/LEFT/RIGHT/BOTH/NOTICKS 的对应
+                //     **本机拿不到 VB6 真值**（OCX 未注册、typelib 读不到），刻意不做，
+                //     押后等口径（见 029 §九 C29-SL-0 那一格末）。
+                createCaption = "";
+                style |= 0x0001L;                       // TBS_AUTOTICKS
+                auto slOr = ctrl.properties.find("Orientation");
+                if (slOr != ctrl.properties.end() && (int)slOr->second.intValue != 0) {
+                    style |= 0x0002L;                   // TBS_VERT
+                }
+                break;
+            }
             case FrmControlType::RichTextBox: {
                 // C29-RT-a: RICHEDIT50W 的创建样式。
                 //   · ES_MULTILINE 一律挂上：原生这枚控件不是多行就没有滚动条一说（与 TextBox
@@ -554,6 +574,25 @@
                 esc += ch;
             }
             c_.emitLine("vb6_DTP_Init((void*)" + dtHwnd + ", L\"" + esc + "\");");
+        }
+
+        // C29-SL-a: Slider 设计期的 TickFrequency 下发。Orientation **不在这里** ——
+        // 实测事后写样式位不生效（channel 矩形长短边不变），它立在上面的创建样式那一段。
+        // 哨兵 -999 = .frm 没写过这一项（同 vb6_TreeView_Init 那条：拿 -1 当"未写"
+        // 会让设计期永远设不上合法的 0/-1 那一档）。没写也照发一条空转的 Init，
+        // 为的是发码形状稳定（emitc 断言要看它）。
+        if (ctrl.controlType == FrmControlType::Slider) {
+            std::string slLower = ctrl.controlName;
+            std::transform(slLower.begin(), slLower.end(), slLower.begin(), ::tolower);
+            std::string slHwnd = knownControlArrays_.count(slLower) ?
+                ("vb6_CtrlArr_GetAt(&vb6_arr_" + cIdent(ctrl.controlName) + ", " +
+                 std::to_string(ctrl.index >= 0 ? ctrl.index : 0) + ")") :
+                ("vb6_hwnd_" + cIdent(ctrl.controlName));
+            int slFreq = -999;
+            auto tfIt = ctrl.properties.find("TickFrequency");
+            if (tfIt != ctrl.properties.end()) slFreq = (int)tfIt->second.intValue;
+            c_.emitLine("vb6_Slider_Init((void*)" + slHwnd + ", "
+                        + std::to_string(slFreq) + "L);");
         }
 
         // C29-MV-a: MonthView 设计期的多月平铺。原生没有"行/列"这条消息 —— 平铺几个月完全

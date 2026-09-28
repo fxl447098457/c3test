@@ -110,6 +110,15 @@ Vb6Type CCodeGen::controlPropType(FrmControlType ctrlType, const std::string& pr
         // C29-MV-b：Date 那三格与 DTPicker 同一条口径（C 层就是裸 double，不装箱）。
         if (p == "value" || p == "selstart" || p == "selend") return Vb6Type::Date;
     }
+    if (ctrlType == FrmControlType::Slider) {
+        // C29-SL-a: vb6_Slider_Get* 全是 int32_t（两条证人读数也是数值），不登记就落到
+        // 兜底那条按成员裸名查符号的路，判成 Variant/String 跟 C 层不匹配（SSTab1.Tab 那次
+        // AV 的同族）。值面那几条（Min/Max/Value/Small·LargeChange/Sel*）由 SL-b 登记。
+        if (p == "orientation" || p == "tickfrequency"
+            || p == "travelisvert" || p == "tickpresent") {
+            return Vb6Type::Long;
+        }
+    }
     if (ctrlType == FrmControlType::RichTextBox) {
         // C29-RT-a: 同一口径。vb6_RTB_Get* 除 SelText 外全是 int32_t（布尔按 VB6 的 -1/0 给，
         // ScrollBars 是枚举、两条量程是数值）；SelText 的 getter 返回 wchar_t* ⇒ String。
@@ -484,6 +493,19 @@ std::string CCodeGen::getControlPropReadFn(FrmControlType ctrlType, const std::s
         if (propLower == "visible") return "vb6_GetControlVisible";
         if (propLower == "enabled") return "vb6_GetControlEnabled";
         break;
+    // C29-SL-a: Slider 读侧（原生 msctls_trackbar32）。登记之前这枚控件整个走
+    // "第三方 OCX 按 COM 后期绑定"那一组，实测**连窗口都没建**（frm_parser_util 那张
+    // 按子串匹配的表里没有 "slider" ⇒ Unknown ⇒ 创建流程跳过），属性读回全空、写进去静默丢。
+    // 两条 C3 扩展读数（TravelIsVert / TickPresent）是**控件侧证人**，判据靠它们把
+    // "样式位写进去了"升级成"控件真按那一档在走"（channel 矩形那条是假证人，实测过）。
+    case FrmControlType::Slider:
+        if (propLower == "orientation") return "vb6_Slider_GetOrientation";
+        if (propLower == "tickfrequency") return "vb6_Slider_GetTickFrequency";
+        if (propLower == "travelisvert") return "vb6_Slider_TravelIsVert";
+        if (propLower == "tickpresent") return "vb6_Slider_TickPresent";
+        if (propLower == "visible") return "vb6_GetControlVisible";
+        if (propLower == "enabled") return "vb6_GetControlEnabled";
+        break;
     // C29-RT-a: RichTextBox 读侧。Text 走通用那条（与 TextBox 同一格 vb6_GetControlText），
     // BorderStyle 也走通用那条窗口边框读数 —— 原生这枚控件的边框在 WS_EX_CLIENTEDGE 上，
     // 通用 getter 认它（实测见夹具 RT5/RT6 两条）。
@@ -842,6 +864,14 @@ std::string CCodeGen::getControlPropWriteFn(FrmControlType ctrlType, const std::
         if (propLower == "value") return "vb6_MV_SetValue";
         if (propLower == "selstart") return "vb6_MV_SetSelStart";
         if (propLower == "selend") return "vb6_MV_SetSelEnd";
+        if (propLower == "visible") return "vb6_SetControlVisible";
+        if (propLower == "enabled") return "vb6_SetControlEnabled";
+        break;
+    // C29-SL-a: Slider 写侧。Orientation 实测**运行期改有效**（写 TBS_VERT + SetWindowPos 换帧
+    // 之后滑块位移轴跟着换，见 vb6forms_slider.c 文件头第 2 条）；两条证人读数刻意不给写口。
+    case FrmControlType::Slider:
+        if (propLower == "orientation") return "vb6_Slider_SetOrientation";
+        if (propLower == "tickfrequency") return "vb6_Slider_SetTickFrequency";
         if (propLower == "visible") return "vb6_SetControlVisible";
         if (propLower == "enabled") return "vb6_SetControlEnabled";
         break;

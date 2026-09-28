@@ -816,6 +816,27 @@ int32_t vb6_Ws_PeekData(void* hwnd, void* outBstr, int32_t type, int32_t maxLen)
 void    vb6_Ws_Close(void* hwnd);
 
 
+// ===================== Slider (ai/029 C29-SL-a) =====================
+//   VB6 Slider 的窗口 + 创建样式 + 标量属性面，原生 msctls_trackbar32（不加载 MSCOMCTL.OCX）。
+//   四条实测口径写在 vb6forms_slider.c 的文件头（探针 .build/slprobe/），最要紧的两条：
+//     * Orientation 事后写样式位**不生效**（channel 矩形长短边纹丝不动）⇒ 只能创建时给；
+//       GetOrientation 答的是自存那一档，判据必须**另问** ChannelIsVert 那条控件侧证人。
+//     * TickFrequency 原生**没有回读**（GETTIC 答不出、GETTICPOS 与频率无关）⇒ 自存读回，
+//       写侧真下发 TBM_SETTICFREQ；"有没有刻度"用 TickPresent（GETTICPOS(0) != -1）证。
+//   值面 (Min/Max/Value/Small·LargeChange/Sel*) 留 C29-SL-b，事件留 C29-SL-c。
+void    vb6_Slider_Init(void* hwnd, long tickFrequency);
+int32_t vb6_Slider_GetOrientation(void* hwnd);
+void    vb6_Slider_SetOrientation(void* hwnd, int32_t orientation);
+int32_t vb6_Slider_GetTickFrequency(void* hwnd);
+void    vb6_Slider_SetTickFrequency(void* hwnd, int32_t freq);
+// C3 扩展（不是 VB6 属性）：两条控件侧证人，判据用它把"样式位写进去了"升级成
+// "控件真按那一档在走"。**别用 TBM_GETCHANNELRECT 判方向** —— 实测它的 rect 永远把行程
+// 长度放在 x 分量，水平杆与竖直杆答同一组数（第一发探针就这么误判过一次）。
+// TravelIsVert 的正解是把滑块推到量程两端各读一次 TBM_GETTHUMBRECT，看位移落在哪根轴。
+int32_t vb6_Slider_TravelIsVert(void* hwnd);
+int32_t vb6_Slider_TickPresent(void* hwnd);
+
+
 #ifdef __cplusplus
 }
 #endif

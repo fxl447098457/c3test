@@ -1802,6 +1802,38 @@ if ($Category -in @("all", "run", "vbp")) {
         'vb6_CStrLong(vb6_GetControlVisible('
     )
 
+    # ai/029 C29-SL-a: Slider (原生 msctls_trackbar32)。登记之前这枚控件**连窗口都没建**
+    # (探针 .build/slprobe 实测: CreateControls 里没有它、vb6_hwnd_sld1 恒 NULL,
+    #  属性读回全空、写进去静默丢、退出码照旧 0)。
+    # 读数取自真跑输出。三枚控件的分工 ——
+    #   sld1 (TickFrequency=10, 横): SL1 窗口真在、SL2+SL4 属性与**证人**一致、SL3+SL5 频率与"有没有刻度";
+    #   sld2 (Orientation=1, 竖):   SL6=11 —— 创建时那一档样式位与控件自己的滑块形状对上;
+    #   sld3 (什么都没写):          SL7=00 ⇒ TickFrequency 自存 0 **且控件确实没画刻度**
+    #                               (实测: 光挂 TBS_AUTOTICKS 不给 TBM_SETTICFREQ 是不画刻度的);
+    #   SL9=11 / SL10=00:           运行期翻向**真的生效** (第一发探针拿 TBM_GETCHANNELRECT
+    #                               判方向, 得出过"改不动"的错结论 —— 那条消息的 rect 永远把
+    #                               行程长度放在 x 分量, 横竖答同一组数; 订正见 029 §九 C29-SL-0);
+    #   SL11-en=FalseTrue:          #124 的布尔面 + 选择性 (另一枚没动的仍可读回 True)。
+    $slidNeedles = @("SLIDER-DONE", "SL1-vis=True", "SL2-ori=0", "SL3-freq=10",
+                     "SL4-travel=0", "SL5-tick=-1", "SL6-vertori=11", "SL7-nofreq=00",
+                     "SL8-freqset=5", "SL9-flip=11", "SL10-flipback=00", "SL11-en=FalseTrue")
+    Test-Vbp "ctrlslider" "$Tests\ctrlslider\SlidApp.vbp" $slidNeedles
+    Test-Vbp "ctrlslider_x86" "$Tests\ctrlslider\SlidApp.vbp" $slidNeedles -Arch "x86"
+    Test-EmitcShape "sl_emitc_native" @("$Tests\ctrlslider\SlidApp.vbp") @(
+        '"msctls_trackbar32", "",',
+        '1409286145L, 0L,',                                        # 横杆: TBS_AUTOTICKS, 无 TBS_VERT
+        '1409286147L, 0L,',                                        # 竖杆: 多挂 TBS_VERT(0x2)
+        'vb6_Slider_Init((void*)vb6_hwnd_sld1, 10L);',             # 写了的 TickFrequency 下发
+        'vb6_Slider_Init((void*)vb6_hwnd_sld3, -999L);',           # 没写的走 -999 哨兵空转
+        'vb6_Slider_SetOrientation(vb6_hwnd_sld1, 1);',
+        'vb6_Slider_TravelIsVert(vb6_hwnd_sld2'
+    )
+    Test-EmitcAbsent "sl_emitc_no_com_fallback" @("$Tests\ctrlslider\SlidApp.vbp") @(
+        'vb6_ComGetProp(vb6_hwnd_sld1',      # 兜底那条"拿 HWND 当 IDispatch"不许回来
+        'vb6_ComSetProp(vb6_hwnd_sld1',
+        'CoCreateInstance'
+    )
+
     # ai/029:429 + Fix 161d —— 源码面双保险: 生成串里不得再出现"指针返回函数被当数值"。
     # (这一条原先被放在 bas 段, 现挪到 vbp 段与其余 Test-Emitc* 同段 —— 它一直在 PASS,
     #  只是归属类别与惯例不一致; 挪动后由 vbp job 执行。)
