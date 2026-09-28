@@ -1389,6 +1389,20 @@ if ($Category -in @("all", "run", "bas")) {
     Add-BasTest "test_interface_x86" "$Tests\test_interface.bas" @("ITF-SOFT:12", "ITF-1:OK", "ITF-2:OK", "INTERFACE-DONE") -Arch "x86"
     Add-BasTest "test_bool_display_x86" "$Tests\test_bool_display.bas" $boolNeedles -Arch "x86"
 
+    # ai/009 5.10 (P3, 溢出检查): 窄整型收窄赋值越界必须报 Error 6, 边界值 (255 /
+    # -32768 / 32767 / 2147483647) 必须**不**报 —— 两个方向都锁, 后者防"把合法
+    # 程序改成编不过"这种比不检查更糟的回归。
+    $ovfNeedles = @(
+        "OVF-OK b-1 err=6", "OVF-OK b-256 err=6", "OVF-OK b-255 err=0", "OVF-OK b-0 err=0",
+        "OVF-OK i-40000 err=6", "OVF-OK i-i32max err=6", "OVF-OK i-min err=0", "OVF-OK i-max err=0",
+        "OVF-OK l-5e9 err=6", "OVF-OK l-min err=0", "OVF-OK l-max err=0",
+        "OVF-OK cb-300 err=6", "OVF-OK cb-200 err=0",
+        "OVF-OK ci-40000 err=6", "OVF-OK ci-30000 err=0",
+        "OVF-VAL b=255 i=-32768 l=2147483647", "OVF-VAL2 b=0 i=32767",
+        "OVF-GOTO err=6", "OVERFLOW-DONE")
+    Add-BasTest "test_overflow" "$Tests\test_overflow.bas" $ovfNeedles
+    Add-BasTest "test_overflow_x86" "$Tests\test_overflow.bas" $ovfNeedles -Arch "x86"
+
     # 分片: CI 用多 runner 并行跑 bas 用例时, 各 runner 只取第 BasShard 片
     if ($BasShardTotal -gt 1) {
         if ($BasShard -lt 1 -or $BasShard -gt $BasShardTotal) {

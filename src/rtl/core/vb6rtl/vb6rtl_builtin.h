@@ -293,6 +293,11 @@ BSTR vb6_InputBox(BSTR prompt, BSTR title, BSTR defaultstr, int32_t xpos, int32_
 // 类型转换 (补充)
 int16_t vb6_CBool(double v);
 uint8_t vb6_CByte(double v);
+// 溢出检查收窄 (VB6 Error 6): 值越界时 vb6_RaiseError(6, "Overflow"),
+// 可被 On Error 捕获; 范围内原样窄化。ai/009 §5.10 P3。
+uint8_t vb6_ChkByte(int32_t v);
+int16_t vb6_ChkInt(int32_t v);
+int32_t vb6_ChkLong(int64_t v);
 float vb6_CSng(double v);
 double vb6_CDate(vb6_VARIANT v);
 BSTR vb6_Hex(int32_t n);

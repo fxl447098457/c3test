@@ -60,6 +60,13 @@ Vb6Type CCodeGen::inferExprType(Expr& expr) const {
                 return Vb6Type::Double;
             if (lit.literalKind == LiteralKind::Boolean) return Vb6Type::Boolean;
             if (lit.literalKind == LiteralKind::Date) return Vb6Type::Date;
+            // 装不进 32 位的 Long 字面量, cgen 实际发的是 64 位 (LL 后缀), 这里
+            // 必须跟着答 LongLong。原先一律答 Long, 于是收窄检查把它当成"装得下"
+            // 跳过 —— `l As Long: l = -9223372036854775807` 就从 Error 6 变成
+            // 静默截成 1。类型口径要和实际发出的位宽一致, 否则检查等于没做。
+            if (lit.literalKind == LiteralKind::Long
+                && (lit.longValue < INT32_MIN || lit.longValue > INT32_MAX))
+                return Vb6Type::LongLong;
             return Vb6Type::Long;
         }
         case ASTNodeKind::BinaryExpr: {
@@ -826,6 +833,62 @@ std::string CCodeGen::wrapWholeArrayAssign(const std::string& target,
              + elemUdt.substr(9) + "_v)";
     }
     return "vb6_ArrayAssign1D(" + target + ", " + rhs + ")";
+}
+
+// ============================================================
+// ai/009 §5.10 (P3) 溢出检查
+// ============================================================
+// 判"右值类型是否可能越出目标范围"。用**比特宽**比, 而不是逐类型列白名单:
+// 目标宽度以外的整型、以及一切浮点 (Single/Double/Currency/Date), 都能越界;
+// 目标宽度以内的 (含 Boolean —— 值域只有 -1/0), 永远不可能, 套检查纯属噪声。
+// Unknown/Variant 一律按"可能越界"算 —— 宁可多查, 不可漏查, 因为漏查就是静默错编。
+static int cgenIntBits(Vb6Type t) {
+    switch (t) {
+    case Vb6Type::Byte: case Vb6Type::Boolean: return 8;
+    case Vb6Type::Integer: return 16;
+    case Vb6Type::Long: case Vb6Type::ULong:
+    case Vb6Type::Single: case Vb6Type::LongPtr: return 32;
+    // Currency/Date 在 C 侧是 double, LongLong/LongPtr 是 64 位整数, 都可能越界
+    case Vb6Type::Double: case Vb6Type::Currency: case Vb6Type::Date:
+    case Vb6Type::LongLong: return 64;
+    default: return 0;   // Unknown / Variant / String / Object ... 由调用点决定
+    }
+}
+
+std::string CCodeGen::narrowCheckAssign(Expr* target, Expr* value,
+                                        const std::string& cValue) const {
+    if (!target || cValue.empty()) return cValue;
+    // 目标只认裸标量标识符。成员/数组/属性写入各自另有类型解析链, 猜错会把
+    // 合法赋值判成越界 (那比不检查更糟), 保持改动前的行为。
+    if (target->kind != ASTNodeKind::IdentifierExpr) return cValue;
+
+    // 这里**故意不复用** inferExprType 来定目标类型: 它把 Integer 答成 Long、
+    // 把 Byte 答成 Variant/Unknown, 那是几十个消费点共同依赖的既有口径, 动它
+    // 等于给 Debug.Print / Variant 装箱等一整条链换答案。这里只为溢出检查
+    // 单独查一遍精确的窄整型, 顺带靠这个局部性把影响面关在收窄赋值里。
+    Vb6Type tt;
+    auto& id = static_cast<IdentifierExpr&>(*target);
+    std::string lower = id.name;
+    std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+    if (knownByteVars_.count(lower))        tt = Vb6Type::Byte;
+    else if (knownIntVars_.count(lower))    tt = Vb6Type::Integer;
+    else if (knownBoolVars_.count(lower))   return cValue;   // 值域只有 -1/0
+    else if (knownLongVars_.count(lower))   tt = Vb6Type::Long;
+    else                                    tt = inferExprType(*target);
+
+    const char* fn = nullptr;
+    int tgtBits = 0;
+    switch (tt) {
+    case Vb6Type::Byte:    fn = "vb6_ChkByte"; tgtBits = 8;  break;
+    case Vb6Type::Integer: fn = "vb6_ChkInt";  tgtBits = 16; break;
+    case Vb6Type::Long:    fn = "vb6_ChkLong"; tgtBits = 32; break;
+    default: return cValue;
+    }
+
+    int srcBits = value ? cgenIntBits(inferExprType(*value)) : 0;
+    if (srcBits != 0 && srcBits <= tgtBits) return cValue;   // 装得下, 不套
+
+    return std::string(fn) + "(" + cValue + ")";
 }
 
 } // namespace vb6c3

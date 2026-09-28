@@ -52,6 +52,7 @@ void CCodeGen::visit(PropertyDecl& node) {
     knownDateVars_.clear();   // Fix 175
     knownBoolVars_.clear();     // ai/022 W1
     knownByteVars_.clear();     // 账 #123
+    knownIntVars_.clear();       // ai/009 5.10
     knownLongVars_.clear();
     knownLongPtrVars_.clear();  // Bug #2 fix: 也清空LongPtr集合
     knownVariantVars_.clear();
