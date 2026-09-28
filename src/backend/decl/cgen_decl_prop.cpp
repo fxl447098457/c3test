@@ -208,7 +208,7 @@ void CCodeGen::visit(PropertyDecl& node) {
             currentReturnCType_ = retType;
             // 账 #116 同族 (与 cgen_decl_func.cpp 那处一字一样): 定长串返回类型的节点是
             // FixedStringTypeRef, 按 SimpleTypeRef 读 name 就是把指针当字符串 ⇒ 天文数字的分配。
-            Vb6Type retVb6Type = Vb6Type::Variant;
+            Vb6Type retVb6Type = Vb6Type::Unknown;   // 数组等复合形: '0' 就是它的空值
             if (node.returnType->kind == ASTNodeKind::SimpleTypeRef) {
                 retVb6Type = typeSys_.resolveTypeName(
                     static_cast<SimpleTypeRef*>(node.returnType.get())->name);

@@ -397,10 +397,13 @@ void CCodeGen::visit(VariableDecl& node) {
             // `ExprPtr length` 当成 `std::string` 读, 那个"长度"其实是一个堆指针, 于是拷贝
             // 字符串时张口就要几十 GB: operator new 失败 → std::bad_alloc → 无人接住 →
             // abort() (退出码 3, 零诊断, 调试版 CRT 还弹模态框)。
-            // 只有 kinds 判过才转: 定长串就是 String, 其余复合形 (数组) 早在这条分支之前
-            // 已经处理掉了, 落到这里的非 SimpleTypeRef 只有定长串这一种。
-            Vb6Type asType = Vb6Type::Variant;
+            // 只有 kinds 判过才转。**非 SimpleTypeRef 一律回 Unknown 而不是 Variant**:
+            // 修好之前那条瞎读路径的"实际效果"就是 Unknown (`resolveTypeName` 查不到那个乱码名),
+            // 而它印出来是 `0` —— 数组那类 `vb6_SafeArray1D*` 要的正是这个空指针; 改成 Variant
+            // 会发 `vb6_VariantEmpty()`, 两个 GUI 存量工程立刻 C2440 (VARIANT ↔ SafeArray1D*)。
+            Vb6Type asType = Vb6Type::Variant;   // 无 As 子句
             if (node.asType) {
+                asType = Vb6Type::Unknown;
                 if (node.asType->kind == ASTNodeKind::SimpleTypeRef) {
                     asType = typeSys_.resolveTypeName(
                         static_cast<SimpleTypeRef*>(node.asType.get())->name);

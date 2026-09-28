@@ -8,6 +8,7 @@
 Option Explicit
 
 Dim gT As String * 8
+Dim gArr(3) As Long      ' 数组: 空值必须是 0 (即空指针), 不能是 vb6_VariantEmpty()
 
 Type Rec
     f As String * 8
