@@ -1750,12 +1750,15 @@ if ($Category -in @("all", "run", "vbp")) {
     #   IsWindowVisible 对任何控件都返回假 (第一版探针就这么假绿过)，所以读数在 Timer 里。
     #   DS4/DS5 是**选择性**那一半: 没写过这三项的控件 (cbDef/obDef) 必须照旧 —— 不勾、
     #   不藏、不灰，Frame 仍可见；少了它，把"每个控件都设一遍"的写错了也照样绿。
-    #   DS2/DS3 现在读的是 `0/Fals`(-1 之外的那一档) —— 等账 #124 (控件布尔属性读回 int)
-    #   修好，这两条会按 VB6 口径变成 False 的字面量，届时一起改。
-    $csNeedles = @("CTRLSTATE-DONE", "DS1=11", "DS2=00", "DS3=00", "DS4=0-1-1",
-                   "DS5=01", "DS6=YYY", "DS7=-1")
-    Test-Vbp "ctrlstate" "$Tests\ctrlstate\CtrlState.vbp" $csNeedles
-    Test-Vbp "ctrlstate_x86" "$Tests\ctrlstate\CtrlState.vbp" $csNeedles -Arch "x86"
+    #   DS2/DS3 是账 #124 的**主判据**: 控件布尔属性归 Boolean 之后 CStr 打 False/True
+    #   （修复前是 -1/0）；DS8/DS9 钉另两个消费面 —— TypeName 给出 "Boolean"、装箱 VarType
+    #   是 **11 (VT_BOOL)**（修复前 TypeName=Long、VarType=3）。DS5 仍是数字档：OptionButton
+    #   的 Value 在 VB6 也是 Boolean，今天还没登记（记在 029 §九，另格）。
+    $cstNeedles = @("CTRLSTATE-DONE", "DS1=11", "DS2=FalseFalse", "DS3=FalseFalse",
+                    "DS4=0TrueTrue", "DS5=01", "DS6=YYY", "DS7=True",
+                    "DS8=Boolean11False", "DS9=11True", "DS10=11False")
+    Test-Vbp "ctrlstate" "$Tests\ctrlstate\CtrlState.vbp" $cstNeedles
+    Test-Vbp "ctrlstate_x86" "$Tests\ctrlstate\CtrlState.vbp" $cstNeedles -Arch "x86"
     Test-EmitcShape "cs_emitc_state" @("$Tests\ctrlstate\CtrlState.vbp") @(
         'vb6_SetCheckValue((void*)vb6_hwnd_cbIn, 1);',    # 子控件 Value=1
         'vb6_SetCheckValue((void*)vb6_hwnd_cbOut, 1);',   # 顶层 Value=1
@@ -1763,12 +1766,22 @@ if ($Category -in @("all", "run", "vbp")) {
         'vb6_SetControlEnabled((void*)vb6_hwnd_cbDisOut, 0);',
         'vb6_SetControlVisible((void*)vb6_hwnd_cbHidIn, 0);',
         'vb6_SetControlVisible((void*)vb6_hwnd_cbHidOut, 0);',
-        'vb6_SetCheckValue((void*)vb6_hwnd_obOn, 1);'    # OptionButton 的 Value=-1 折成 BST_CHECKED
+        'vb6_SetCheckValue((void*)vb6_hwnd_obOn, 1);',   # OptionButton 的 Value=-1 折成 BST_CHECKED
+        # 账 #124: 控件布尔属性按 Boolean 解封 —— CStr 折成 vb6_CStrBool，装箱走 vb6_VariantBool。
+        # 修复前这两处分别是 vb6_CStrLong 与 vb6_VariantFromValue（TypeName 也就跟着给 Long）。
+        # 装箱那两处形状不同是有意的：赋值点走 wrapVariantValue（不加窄化），
+        # 实参点（TypeName 那条）走 boxToVariant（自带 (int16_t) 收窄）。
+        'vb6_CStrBool(vb6_GetControlEnabled(',
+        'vb6_VariantBool((int16_t)(vb6_GetControlEnabled(',
+        'v = vb6_VariantBool(vb6_GetControlVisible('
     )
     Test-EmitcAbsent "cs_emitc_selectivity" @("$Tests\ctrlstate\CtrlState.vbp") @(
         'vb6_SetCheckValue((void*)vb6_hwnd_cbDef',      # 没写 Value 的复选框不许被设
         'vb6_SetControlVisible((void*)vb6_hwnd_lbOut',  # 没写 Visible 的标签不许被藏
-        'vb6_SetControlVisible((void*)vb6_hwnd_fr'      # Frame 自己也不许被藏
+        'vb6_SetControlVisible((void*)vb6_hwnd_fr',     # Frame 自己也不许被藏
+        # 账 #124: 这两条是修复前的形状（布尔属性被当 Long）—— 一回来判据就得红。
+        'vb6_CStrLong(vb6_GetControlEnabled(',
+        'vb6_CStrLong(vb6_GetControlVisible('
     )
 
     # ai/029:429 + Fix 161d —— 源码面双保险: 生成串里不得再出现"指针返回函数被当数值"。
@@ -2341,6 +2354,8 @@ if ($Category -in @("all", "run", "vbp")) {
     # --- P20-42: SSTab (SysTabControl32 复刻) ---
     # 期望串取自夹具真实输出 (别缩写标签)。TS25..TS28 是切页显隐: vb6_GetControlVisible
     # 走 IsWindowVisible 沿父链传播, 所以断言放在 Timer 里 (窗体已显示之后)。
+    # 账 #124 起这几条打 True/False —— `.Visible` 在类型 oracle 里归 Boolean (VB6 口径),
+    # 以前按 Long 打 -1/0。TS20/TS21 (TabVisible) 与 TS25B (Tabs) 不受影响: 它们是 int 属性。
     # TS30 是 Click(PreviousTab), 由 RTL 在程序化改 Tab 时补发的 TCN_SELCHANGE 触发。
     Test-Vbp "ctrlsstab" "$Tests\ctrlsstab\CtrlSSTab.vbp" @(
         "TS1-TABS=3", "TS2-TAB=1", "TS3-ORIENT=0", "TS4-STYLE=0", "TS5-PERROW=3",
@@ -2350,8 +2365,8 @@ if ($Category -in @("all", "run", "vbp")) {
         "TS18-CAP0=常规", "TS19-CAP0B=改过", "TS20-VIS1=-1", "TS21-VIS1B=0",
         "TS22-P0LEFT=240", "TS23-P1LEFT=240", "TS24-P2LEFT=240",
         "TS31-TIP0=tip0", "TS32-TIP2=tip2", "TS33-TIP1=",
-        "TS25-TABVIS=-1", "TS26-AT0-P0VIS=-1 P1VIS=0 P2VIS=0",
-        "TS27-AT1-P0VIS=0 P1VIS=-1 P2VIS=0", "TS28-AT2-P0VIS=0 P1VIS=0 P2VIS=-1",
+        "TS25-TABVIS=True", "TS26-AT0-P0VIS=True P1VIS=False P2VIS=False",
+        "TS27-AT1-P0VIS=False P1VIS=True P2VIS=False", "TS28-AT2-P0VIS=False P1VIS=False P2VIS=True",
         "TS29-SETTAB2=2", "TS29B-SETTAB0=0",
         "CTRLSSTAB-DONE", "CTRLSSTAB-VISDONE", "CTRLSSTAB-CLICKDONE")
 

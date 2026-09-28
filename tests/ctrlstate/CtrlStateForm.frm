@@ -142,14 +142,24 @@ Private Sub Form_Load()
 End Sub
 
 Private Sub tProbe_Timer()
+    Dim v As Variant
     tProbe.Enabled = False
     Debug.Print "DS1=" & CStr(cbIn.Value) & CStr(cbOut.Value)          ' 设计期 Value=1（两条路）
-    Debug.Print "DS2=" & CStr(cbDisIn.Enabled) & CStr(cbDisOut.Enabled) ' 设计期 Enabled=0
-    Debug.Print "DS3=" & CStr(cbHidIn.Visible) & CStr(cbHidOut.Visible) ' 设计期 Visible=0
+    Debug.Print "DS2=" & CStr(cbDisIn.Enabled) & CStr(cbDisOut.Enabled) ' 设计期 Enabled=0；账 #124 后打 FalseFalse
+    Debug.Print "DS3=" & CStr(cbHidIn.Visible) & CStr(cbHidOut.Visible) ' 设计期 Visible=0；账 #124 后打 FalseFalse
     Debug.Print "DS4=" & CStr(cbDef.Value) & CStr(cbDef.Visible) & CStr(cbDef.Enabled)
-    Debug.Print "DS5=" & CStr(obDef.Value) & CStr(obOn.Value)           ' OptionButton 两个方向
+    Debug.Print "DS5=" & CStr(obDef.Value) & CStr(obOn.Value)           ' OptionButton 两个方向（VB6 是 Boolean，今仍数字档：见 029）
     Debug.Print "DS6=" & TF(fr.Visible) & TF(lbIn.Caption = "内标") & TF(lbOut.Caption = "外标")
     Debug.Print "DS7=" & CStr(obDef.Enabled)
+    ' 账 #124: 控件布尔属性要在四个消费面都是 Boolean —— CStr 见 DS2/DS3、TypeName 与
+    ' 装箱（VarType 11 = VT_BOOL）在这里、比较面在 DS6 的 TF(...)。VarType 11 是关键读数：
+    ' 类型 oracle 归 Boolean 之后装箱才走 vb6_VariantBool（VB6 的 Enabled 装出来就是 VT_BOOL）。
+    v = cbDisOut.Enabled
+    Debug.Print "DS8=" & TypeName(cbDisOut.Enabled) & CStr(VarType(v)) & CStr(v)
+    v = cbDef.Enabled
+    Debug.Print "DS9=" & CStr(VarType(v)) & CStr(v)
+    v = cbHidOut.Visible
+    Debug.Print "DS10=" & CStr(VarType(v)) & CStr(v)
     Debug.Print "CTRLSTATE-DONE"
     Unload Me
 End Sub

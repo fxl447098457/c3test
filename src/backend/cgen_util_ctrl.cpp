@@ -37,9 +37,16 @@ Vb6Type CCodeGen::controlPropType(FrmControlType ctrlType, const std::string& pr
     // 生成码不套数值转换 → int 当 BSTR 解引用 → 0xC0000005。
     // 实测 SSTab 夹具: TS1 的 SSTab1.Tabs 正常, TS22 的 lblPage0.Left 崩。
     // 这几个 RTL getter 的 C 返回类型都是 int, 故一律 Long。
-    if (p == "left" || p == "top" || p == "width" || p == "height"
-        || p == "visible" || p == "enabled") {
+    // 账 #124: `Enabled` / `Visible` 在 VB6 那边是 **Boolean** —— 以前和左/上/宽/高一起
+    // 按 Long 登记, 于是 `CStr(cb.Enabled)` 折成 vb6_CStrLong 打出 -1、装箱成 VT_I4,
+    // 而 VB6 打 "True"、装 VT_BOOL(11)。两个 RTL getter 的 C 返回型是 int 无妨:
+    // 所有消费面都按"VB6 的 -1/0"取值, 需要窄化的地方 (boxToVariant / wrapVariantValue)
+    // 自带 (int16_t) 显式收窄。
+    if (p == "left" || p == "top" || p == "width" || p == "height") {
         return Vb6Type::Long;
+    }
+    if (p == "visible" || p == "enabled") {
+        return Vb6Type::Boolean;
     }
 
     if (ctrlType == FrmControlType::SSTab) {
