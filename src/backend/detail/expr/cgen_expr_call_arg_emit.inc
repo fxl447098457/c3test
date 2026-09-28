@@ -62,6 +62,24 @@
             isComMarker_ = false;
             std::string objExpr = std::move(comObjExpr_);
             std::string memName = std::move(comMemberName_);
+            // Fix <vbeclipse>: COM 成员访问的接收者是 Variant 时先提取对象指针。
+            //   obj_dispatch 只在 knownVariantVars_ 分支 (P24-04) 包了
+            //   vb6_VariantToObject(&var); 落到 typed/object 分支的 Variant 局部
+            //   变量 (如 ucTabStrip.ctl For-Each 推断对象名?? l_Tab As Variant
+            //   保存 Tab 对象, .Left/.Width 读) 会裸交给 vb6_ComGet*Prop → C2172
+            //   "实参不是指针" (ucTabStrip.c 312/314/387). 函数调用结果也是
+            //   Variant (vb6_List_Item(...)) 时用 vb6_VariantToObjectVal 提取.
+            {
+                std::string ojTrim = objExpr;
+                while (ojTrim.size() >= 2 && ojTrim.front() == '(' && ojTrim.back() == ')')
+                    ojTrim = ojTrim.substr(1, ojTrim.size() - 2);
+                std::string ojLower = Symbol::toLower(ojTrim);
+                if (knownVariantVars_.count(ojLower)) {
+                    objExpr = "vb6_VariantToObject(&" + objExpr + ")";
+                } else if (cExprIsVariant(objExpr)) {
+                    objExpr = "vb6_VariantToObjectVal(" + objExpr + ")";
+                }
+            }
             if (isEarlyBoundCom_ && earlyBoundSym_) {
                 isEarlyBoundCom_ = false;
                 const Symbol* comSym = earlyBoundSym_;
@@ -222,6 +240,22 @@
                 || at175 == Vb6Type::Boolean || at175 == Vb6Type::LongPtr) {
                 argVal = wrapToBSTR(argVal, *node.positional[i]);
             }
+        }
+
+        // Fix 210: 用户 Sub/Function/Property 的 **ByVal Variant 形参**收到标量实参
+        // (`List.Item(i)` / `List.Item(sKey)`, 形参是 `ByVal Index As Variant`)。
+        // C 侧形参是 vb6_VARIANT (按值), 裸传 int32_t → C2440 "无法从 int32_t
+        // 转换为 vb6_VARIANT" (VbEclipse ucPerspective 实测 14 处:
+        // `With l_Perspective.Folders` / `.Item(i)`)。VB6 这里要把实参装箱进 Variant。
+        // 用 RTL 的 vb6_VariantFromValue: 它是 _Generic, 按实参 C 类型选构造器,
+        // 且实参**已经是** vb6_VARIANT 时走 vb6_VariantIdentity (原样透传), 所以
+        // 不必先判 cExprIsVariant —— 装了也无害, 还能顺带修掉推断成 Variant 的
+        // 标量 (CStrDbl/LenB 那类), 与 Fix 024 的用法一致。
+        if (!isDeclareAnsiCall && i < calleeParams.size() && calleeParams[i].isByVal
+            && (calleeParams[i].type == Vb6Type::Variant
+                || calleeParams[i].type == Vb6Type::Empty)
+            && !cExprIsVariant(argVal)) {
+            argVal = "vb6_VariantFromValue(" + argVal + ")";
         }
 
         // ByVal String: 传 ANSI 缓冲的**地址**, 被调用方写入后按 NUL 截断回写。

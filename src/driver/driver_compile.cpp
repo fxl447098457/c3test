@@ -310,10 +310,21 @@ CompileResult Driver::compile(const CompileOptions& options) {
             }
 
             // P6.6: 从VBP工程类型推断是否为ActiveX DLL
-            if (!effectiveOpts.isDll && project.projectType == VbpProjectType::ActiveXDLL) {
+            // Fix <vbeclipse>: `Type=Control` (ActiveX 控件, .ocx) **也是** DLL —— VB6 里
+            // 控件工程产出的是 COM 服务器 DLL, 只是扩展名与 Type=DLL 不同. 此前只认
+            // ActiveXDLL, 控件工程因此走 isGui 分支 → 链接命令发 `/SUBSYSTEM:WINDOWS`
+            // 且不带 /DLL → CRT 去找 WinMain, 而生成端发的是 ActiveX DLL 入口
+            // (com_entry.c: DllGetClassObject/DllRegisterServer/...) → LNK2019 WinMain
+            // 无法解析. ActiveXControl 与 ActiveXDLL 同样置 isDll, 扩展名由 outputExt 决定.
+            if (!effectiveOpts.isDll &&
+                (project.projectType == VbpProjectType::ActiveXDLL ||
+                 project.projectType == VbpProjectType::ActiveXControl)) {
                 effectiveOpts.isDll = true;
                 if (effectiveOpts.verbose) {
-                    std::cout << "C3: 检测到ActiveX DLL工程 (Type=DLL)" << std::endl;
+                    std::cout << "C3: 检测到ActiveX DLL工程 (Type="
+                              << (project.projectType == VbpProjectType::ActiveXControl
+                                      ? "Control" : "DLL")
+                              << ")" << std::endl;
                 }
             }
             // ProgID前缀: 优先CLI指定, 否则用工程名

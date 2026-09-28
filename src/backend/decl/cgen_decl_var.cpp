@@ -205,6 +205,37 @@ void CCodeGen::visit(VariableDecl& node) {
         knownFixedStringLen_[fsLower] = lastExpr_;
     }
 
+    // vbeclipse: 声明类型名是**工程类**但被本模块同名成员遮蔽时的补注册.
+    //
+    // 上面那段 Class 分支用 lookupModuleDotted(simple.name) 判工程类, 而每模块一张
+    // SymbolTable —— 同名成员会遮蔽跨模块类名. vbeclipse 实测两种形态:
+    //   ucSplitBar.ctl `Private WithEvents SplitBar As SplitBar`
+    //     → 类型名被字段自身 (SymbolKind::Variable) 占位;
+    //   ucCaption.ctl `Private WithEvents m_PopupMenu As PopupMenu`
+    //     → 类型名被同名 Sub 占位 (SymbolKind::Sub).
+    // Class 分支判不中 → mapTypeRef 回落 void* → 下面注册进 knownObjectVars_ →
+    // `With SplitBar` 走 COM 后期绑定, .SplitterMouseDown 的 RECT 结构体实参被
+    // vb6_ComPackInt 打包 (C2440), 运行期还会拿 C 结构体当 IDispatch 解 vtable.
+    // 工程级类名表不受遮蔽, 是这类判定的唯一正确来源 (与 driver 侧
+    // projectClassNames 同源, 见 setProjectClassNames 注释).
+    if (node.asType && node.asType->kind == ASTNodeKind::SimpleTypeRef && cType == "void*") {
+        auto& shadowed = static_cast<SimpleTypeRef&>(*node.asType);
+        std::string projCls = projectClassNameOf(shadowed.name);
+        if (!projCls.empty() &&
+            knownClassVars_.find(Symbol::toLower(node.name)) == knownClassVars_.end() &&
+            knownIfaceVars_.find(Symbol::toLower(node.name)) == knownIfaceVars_.end()) {
+            std::string lower = node.name;
+            std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+            knownClassVars_[lower] = projCls;
+            knownObjectVars_.erase(lower);
+            if (node.isWithEvents) knownWithEventsVars_[lower] = projCls;
+            if (node.isNew) {
+                knownNewVars_[lower] = cIdent(projCls);
+                moduleNewVars_[lower] = cIdent(projCls);
+            }
+        }
+    }
+
     // 检查是否是Object类型变量 → 注册到 knownObjectVars_ (COM后期绑定)
     if (cType == "void*") {  // Object类型映射为void*
         std::string lower = node.name;

@@ -47,6 +47,20 @@ std::string CCodeGen::inferClassTypeOfExpr(const ASTNode& expr) const {
                     return sym->variableTypeName;
                 }
             }
+            // Fix <vbeclipse>: 上面符号表路径全落空时, 该标识符的名字**本身就是一个
+            // 工程类** → 按该工程类推断 (VB6 语义: 工程内定义优先于宿主同名符号)。
+            // 用 projectClassNameOf (driver 注入的工程类名表) 判, 而不是顺着符号表
+            // 逐级查 Class/ComClass: 名字被同名符号占满时符号表根本查不到类。
+            // ucPerspective.ctl `CreateFolder(ByRef Folder As Folder, ...)` 实测
+            // symTab_.lookup("Folder") 两次都返回宿主同名 PropertyGet(kind=4) 而非
+            // coclass (消费作用域里 "folder" 键是 ComClass, 名字被占满), 于是
+            // Folder.Views / Folder.FolderId 整条跨模块属性链推不出类, With 块
+            // className 留空 → 块内 .IsEmpty 套当前模块前缀 → vb6_ucPerspective_IsEmpty。
+            // 放在最后: 局部变量/参数/属性各自的判定优先, 不会把与类同名的**局部
+            // 变量**误当类 (已知局部走 knownClassVars_ 与 Variable/Parameter 分支)。
+            // 表里没有的名字行为完全不变。
+            const std::string projClsVbe = projectClassNameOf(id.name);
+            if (!projClsVbe.empty()) return projClsVbe;
             return "";
         }
         case ASTNodeKind::IndexOrCallExpr: {
@@ -160,6 +174,18 @@ std::string CCodeGen::inferClassTypeOfExpr(const ASTNode& expr) const {
                             return itF->second;
                         }
                     }
+                }
+                // Fix <vbeclipse>: .X 是 With 目标类的属性(返回项目类)而非字段/
+                // 标量 (ucPerspective.ctl `With l_ucFolder` 内 `.Views.IsEmpty`,
+                // Views 是 Property Get 返回 List 类) → 用返回类推断, 否则外层
+                // .IsEmpty/.Count/.Item 落到类兜底 `->` 字段 → C2039 / Item 乱绑
+                // (vb6_ucFolder_prop_get_Views->Item(...)). getClassMethodReturnType
+                // 仅对真实项目 Class 返回类名 (String/Long 属性返回 ""), 对纯字段
+                // /标量属性维持 info.className 原行为 (Fix 085b 语义不变).
+                {
+                    std::string retClsFromProp =
+                        getClassMethodReturnType(info.className, wmRef.memberName);
+                    if (!retClsFromProp.empty()) return retClsFromProp;
                 }
                 // .X 非数据字段 (方法/属性等) → 维持原行为: With 目标类自身
                 // (Fix 085b 在调用链推断处对 callee=WithMemberExpr 已按方法返回类

@@ -348,6 +348,43 @@ void CCodeGen::visit(WithStmt& node) {
                     withInfo.kind = WithObjKind::ClassInstance;
                 }
             }
+            // Fix <vbeclipse>: MAE 目标是「宿主类的属性 Get」而非数据字段时, 上面
+            // classVoidFieldMap_/classTypedFieldMap_ 都查不到 → kind 落到**空
+            // className** 的 ClassInstance。ucPerspective.ctl `With Folder.Views`
+            // (Folder 是 ByRef Folder 类形参, Views 是 Folder 类的 Property Get
+            // As List) 即此形: 块内 .IsEmpty 被 cgen_expr_with.cpp 的 className
+            // 为空兜底 (symTab_.lookupModule 全局捡同名成员) 套上**当前模块**前缀
+            // → vb6_ucPerspective_IsEmpty (LNK2019); .Count/.Item 只是碰巧唯一命中
+            // List 类才显得正常。
+            // 与 inferClassTypeOfExpr 的 MemberAccessExpr 分支对齐, 用
+            // getClassMethodReturnType 取属性返回类。该函数仅对真实项目 Class
+            // 返回类名, String/Long 等标量属性返回 "" (Fix 085b 语义不变)。
+            //
+            // 触发条件是 **className 为空** 而非 kind==Unknown: 上面的
+            // symTab_.lookupModule(memberName) 兜底在 memSym->type==Object 而
+            // variableTypeName 为空时, 会把 kind 置成 ClassInstance 却留下空
+            // className — 只判 Unknown 抓不到。
+            // (l_Folder.Views 等能工作是因 knownClassVars_ 里恰好有别的过程登记过
+            //  名为 "views" 的 List 变量, 属巧合, 不可依赖。)
+            const bool needHostCls113 =
+                (withInfo.kind == WithObjKind::ClassInstance && withInfo.className.empty())
+                || (withInfo.kind == WithObjKind::Unknown);
+            if (needHostCls113) {
+                // Fix <vbeclipse>: `<host>.<PropertyGet>` 且推断不出宿主类时, 用该
+                // PropertyGet 的返回类型当 With 块类 (见 getClassMethodReturnType 中
+                // 同名 Fix 的说明: 跨模块 PropertyGet 的 type 常记 Variant, 靠
+                // variableTypeName 才能取到返回类). 治 `With Folder.Views` 推不出
+                // List → 块内 .IsEmpty 落到模块级兜底 → vb6_ucPerspective_IsEmpty.
+                std::string retClsProp = hostCls90s.empty()
+                    ? std::string()
+                    : getClassMethodReturnType(hostCls90s, memberLower);
+                if (!retClsProp.empty()) {
+                    withInfo.kind = WithObjKind::ClassInstance;
+                    withInfo.className = cIdent(retClsProp);
+                    tempType = "vb6_cls_" + withInfo.className + "*";
+                    withInfo.ctrlOrigName = withInfo.className;
+                }
+            }
         }
 
         // --- Fix 010n: IndexOrCallExpr (With arr(idx) / With func()) ---
@@ -567,7 +604,28 @@ void CCodeGen::visit(WithStmt& node) {
                 //     → (void*)vb6_VariantFromComResult(vb6_ComCall(...)) C2440
                 //       "无法从 vb6_VARIANT 转换为 void *";
                 // 仅当 C 级确认是 vb6_VARIANT 时改用 VariantToObjectVal 提取.
-                if (cExprIsVariant(lastExpr_)) {
+                // vbeclipse: 本分支原先只认 cExprIsVariant 的**字符串前缀**, 裸名
+                // Variant 局部 (如 ucPerspective.ctl Refresh 的
+                // `Dim l_ucFolder As Variant` + `With l_ucFolder`) 一律落 573 直转
+                // → C2440 ×8 (ucPerspective.c 1953/1983/2036/2054/2078/2096/2126/2146
+                // `void* _vb6_with_N = (void*)l_ucFolder`). isDefinitelyVariantExpr
+                // 入口处也可能被 lookupModule 的同名符号误导 (Fix 049b 同款陷阱),
+                // 故与上方 090e 同口径: knownVariantVars_ 裸名 + me-> classVariantMembers_。
+                bool withIsVariantVal092j = cExprIsVariant(lastExpr_);
+                if (!withIsVariantVal092j) {
+                    std::string lower092j = lastExpr_;
+                    std::transform(lower092j.begin(), lower092j.end(),
+                                   lower092j.begin(), ::tolower);
+                    if (knownVariantVars_.count(lower092j)) {
+                        withIsVariantVal092j = true;
+                    } else if (lower092j.compare(0, 4, "me->") == 0) {
+                        std::string mem092j = lower092j.substr(4);
+                        if (classVariantMembers_.count(mem092j)) {
+                            withIsVariantVal092j = true;
+                        }
+                    }
+                }
+                if (withIsVariantVal092j) {
                     c_.emitLine(tempType + " " + tempVar + " = vb6_VariantToObjectVal(" + lastExpr_ + ")  /* With object ref */;");
                 } else {
                     c_.emitLine(tempType + " " + tempVar + " = (" + tempType + ")" + lastExpr_ + "  /* With object ref */;");

@@ -214,6 +214,11 @@
             // (无括号引用 / 0 参) 不经过该 fixup，需在此处补。
             } else if (lower == "curdir") {
                 lastExpr_ = "vb6_CurDir(NULL)";
+            // Fix <vbeclipse>: LoadPicture() 无参 (Screen.MouseIcon = LoadPicture())
+            // → vb6_LoadPictureEx(BSTR) 需 1 参, 补 NULL (=空图片). 与 call 路径
+            // fixup (cgen_expr_call_builtin_fixup.inc) 同口径.
+            } else if (lower == "loadpicture") {
+                lastExpr_ = "vb6_LoadPictureEx(NULL)";
             } else {
                 lastExpr_ = it->second + "()";
             }
@@ -379,7 +384,17 @@
     // vb6_PropertyPage_*). 只在 sym == nullptr (模块作用域无同名符号) 且不是已知
     // 过程局部变量时生效, 因此 `Dim hDC As Long` 的真实局部用法 (DrawText /
     // GetWindowsDPI) 不受影响; 表外的名字维持原样 (仍留 C2065, 不引入新错误).
-    if (isDesignerModule_ && !sym && !knownLocalVars_.count(lower)) {
+    // Fix <vbeclipse>: `Controls` 在 .ctl/.pag 里无条件是宿主集合, 优先于任何同名符号。
+    // 与本表其余条目 (hDC/ScaleWidth/...) 不同, 那些必须靠 `!sym` 保住
+    // `Dim hDC As Long` 之类的真实局部用法; 而 `Controls` 是 VB6 保留的宿主成员名,
+    // 用户不可能在本模块声明同名局部, driver 的跨模块 CoClass 登记却会在本模块
+    // 作用域留下一个 ComClass(17) 符号 (ucTabStrip 实测) → `!sym` 被否 → 发射裸
+    // `Controls` → C2065 (ucTabStrip.c For Each l_Ctrl In Controls)。
+    // 成员访问形态 (Controls.Item/Add/Remove) 由 cgen_expr_member_precheck.inc 在
+    // 符号解析前拦截, 不受影响。
+    const bool reservedHostObj = (lower == "controls");
+    if (isDesignerModule_ && !knownLocalVars_.count(lower)
+        && (!sym || reservedHostObj)) {
         static const std::unordered_map<std::string, std::string> kUserControlHostMembers = {
             {"hdc", "hDC"},
             {"scalewidth", "ScaleWidth"},

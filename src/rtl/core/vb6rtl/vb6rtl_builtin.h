@@ -79,6 +79,8 @@ BSTR vb6_CStrLongFromVariant(vb6_VARIANT x);   // Fix 158q: _Generic 兜底的 V
 // Fix 084m: LongLong → String (64 位, 不截断; vb6_Format 不认 VT_I8, 故独立实现)
 BSTR vb6_CStrLongLong(int64_t x);
 BSTR vb6_CStrDbl(double x);
+BSTR vb6_CStrDblFromBSTR(BSTR s);      // vbeclipse: BSTR 实参 (后期绑定 COM 数值属性读) → vb6_Val 解析
+BSTR vb6_CStrDblFromVariant(vb6_VARIANT v);  // Fix 158q 同款: _Generic 的 Variant 解包入口
 // Fix 117c: Single 专用 (VT_R4, 7 位有效数字 + 最短往返)
 BSTR vb6_CStrSingle(float x);
 BSTR vb6_CStrBool(int16_t x);
@@ -398,6 +400,14 @@ static inline int32_t vb6_CLngPtr(void* p) { return (int32_t)(intptr_t)p; }
 #define vb6_CStrLong(x) _Generic((x), \
     vb6_VARIANT: vb6_CStrLongFromVariant, \
     default: vb6_CStrLong)((x))
+// vbeclipse: CStrDbl 补 BSTR/Variant 分派 (默认分支不变, 老调用点行为一致).
+// 背景: 后期绑定 COM 数值属性在拼接语境下被 codegen 读成 vb6_ComGetStringProp
+// (BSTR), 而 vb6_CStrDbl 原签名只收 double → C2440 (ucPerspective.c 3333/3384/
+// 3453/3504).
+#define vb6_CStrDbl(x) _Generic((x), \
+    BSTR: vb6_CStrDblFromBSTR, \
+    vb6_VARIANT: vb6_CStrDblFromVariant, \
+    default: vb6_CStrDbl)((x))
 #define vb6_CLng(x) _Generic((x), \
     vb6_VARIANT: vb6_CLngV, \
     BSTR: vb6_CLngBSTR, \

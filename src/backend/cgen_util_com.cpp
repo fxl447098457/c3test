@@ -422,6 +422,26 @@ std::string CCodeGen::canonicalClassFieldName(const std::string& className,
 }
 
 
+// Fix <vbeclipse>: 宿主伪对象成员名规范化 (见 cgen_helpers.inc 声明注释).
+std::string CCodeGen::canonicalHostPseudoMember(const std::string& pseudoObj,
+                                                const std::string& memberName) const {
+    if (memberName.empty()) return memberName;
+    static const std::pair<const char*, const char*> kUserControlCanon[] = {
+        {"hdc", "hDC"},
+    };
+    const std::string pj = Symbol::toLower(pseudoObj);
+    if (pj != "usercontrol" && pj != "ambient"
+        && pj != "extender" && pj != "propertypage") {
+        return memberName;
+    }
+    const std::string want = Symbol::toLower(memberName);
+    for (const auto& kv : kUserControlCanon) {
+        if (want == kv.first) return kv.second;
+    }
+    return memberName;
+}
+
+
 // Fix 093a: 当前类是否声明了同名成员字段 — 裸标识符赋值 (`field = value`) 时,
 // 本类字段优先于从全局符号表捡到的外部同名 Property Let/Set (VB6 里同一类中
 // 字段与属性不可能同名). 典型: cClientCallback.cls 的 `recvBuffer = data`

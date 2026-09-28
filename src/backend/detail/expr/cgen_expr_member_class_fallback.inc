@@ -30,8 +30,14 @@
         // 例: obj = "me->m_oSocket" → trailingLower = "m_osocket"
         //     obj = "vb6_x()->y"     → trailingLower = "y"
         //     obj = "(*p).field"     → trailingLower = "field"
+        // Fix <vbeclipse>: 对象表达式是**函数调用结果** (vb6_List_Item(me->m_Tabs, ...))
+        // → 禁止尾部标识符回退 (把 m_tabs 误当类实例 → .ViewId 发成 `->ViewId`
+        // 且调用实参被丢 → C2039 + C2198). 调用结果整体交给 Variant/COM 通道
+        // (P24-04/voidptr_com) 按 rvalue 处理. 仅 `.field` 形态 (结尾是字段名)
+        // 才允许 Fix 014 启发式.
+        bool objIsCallExpr090 = (!objLower.empty() && objLower.back() == ')');
         std::string trailingLower;
-        if (itClassVar == knownClassVars_.end()) {
+        if (!objIsCallExpr090 && itClassVar == knownClassVars_.end()) {
             size_t lastArrow = objLower.rfind("->");
             size_t lastDot = objLower.rfind('.');
             size_t start = std::string::npos;
@@ -255,6 +261,15 @@
             std::string udtChainType = inferUdtTypeOfExpr(*node.object);
             if (!udtChainType.empty()) {
                 lastExpr_ = appendUdtObjFieldMarker(obj, udtChainType, node.memberName);
+            } else if (cExprIsVariant(obj)
+                       || obj.rfind("vb6_List_", 0) == 0) {
+                // Fix <vbeclipse>: Variant 表达式 (vb6_List_Item(...) 返回 vb6_VARIANT)
+                // 上的 COM 属性读取 → 取回对象后用 ComGetProp 晚绑定, 避免
+                // `.ViewId`/`->ViewId` → C2039 (ucTabStrip.c:260 / ucPerspective.c:331).
+                // List.* 属函数返回对象型Variant, rfind 兜底 variantPrefixes 表缺失项.
+                std::string memLit = std::string("L\"") + node.memberName + "\"";
+                lastExpr_ = std::string("vb6_VariantFromComResult(vb6_ComGetProp(vb6_VariantToObjectVal(")
+                          + obj + "), " + memLit + "))";
             } else {
                 lastExpr_ = obj + "." + cIdent(node.memberName);
             }

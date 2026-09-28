@@ -371,6 +371,67 @@ std::string CCodeGen::makePropertySignature(PropertyDecl& node) {
 }
 
 // ============================================================
+// 接口类成员的默认实现 (Fix <vbeclipse>)
+// ============================================================
+
+// Fix <vbeclipse>: VB6 接口 (`Attribute VB_Exposed = True`) 的成员声明没有实现体,
+// 但 `Public m_Scheme As New IScheme` (modPublic.bas:12) 会**实例化接口本身** ——
+// VB6 语义下, 接口的 `Public Property Get X()` 就是它的默认实现. 生成端此前按
+// "接口成员是抽象的" 跳过 (P6.4), 前提是接口不可实例化; `As New` 打破该前提:
+// 调用方 (ucTab/ucButton/ucPerspective) 生成的 `vb6_IScheme_prop_get_BackColor(m_Scheme)`
+// 既无原型也无实体 → 链接期 LNK2001 "无法解析的外部符号" ×26.
+//
+// 这里补默认实现: Getter/Function 返回类型零值, Sub/Property Let/Set 空操作.
+// 真实实现由实现类 (SchemeWinXP 等, 经 vb6_ivtbl_IScheme_for_<C> 槽表) 提供, 两者
+// 名字不同 (vb6_SchemeWinXP_prop_get_BackColor vs vb6_IScheme_prop_get_BackColor),
+// 不冲突 —— 走的是"接口自带默认实现"这条独立通道, 与实现类无关.
+// 与 vb6rtl_userctl.h:56 既有口径一致: 无容器/无实现时返回空值即可满足编译链接.
+void CCodeGen::emitIfaceMemberStub(const SubDecl&, const std::string& sig, bool /*returnsValue*/) {
+    c_.emitLine(sig + " {");
+    c_.emitLine("    (void)me;");
+    c_.emitLine("}");
+    c_.emitBlank();
+}
+
+void CCodeGen::emitIfaceMemberStub(const FunctionDecl& fn, const std::string& sig, bool) {
+    const std::string ret = fn.returnType ? mapTypeRef(fn.returnType.get()) : "vb6_VARIANT";
+    emitIfaceStubBody(sig, ret);
+}
+
+void CCodeGen::emitIfaceMemberStub(const PropertyDecl& pn, const std::string& sig, bool) {
+    if (pn.propKind != ProcKind::PropertyGet) {  // Let/Set 无返回值 → 空操作
+        c_.emitLine(sig + " {");
+        c_.emitLine("    (void)me;");
+        c_.emitLine("}");
+        c_.emitBlank();
+        return;
+    }
+    const std::string ret = pn.returnType ? mapTypeRef(pn.returnType.get()) : "vb6_VARIANT";
+    emitIfaceStubBody(sig, ret);
+}
+
+// 返回类型零值: 标量/指针统一 `return 0;` (C 里 0 是合法空指针常量);
+// 结构体 (Variant 等) 不能用 0 → 零初始化复合字面量.
+void CCodeGen::emitIfaceStubBody(const std::string& sig, const std::string& retType) {
+    const bool isVoid = (retType == "void");
+    const bool isStruct = (retType == "vb6_VARIANT" || retType.compare(0, 7, "struct ") == 0);
+    c_.emitLine(sig + " {");
+    if (!isVoid) {
+        c_.emitLine(std::string("    (void)me;"));
+        if (isStruct) {
+            c_.emitLine("    " + retType + " vb6_iface_stub_z_ = {0};");
+            c_.emitLine("    return vb6_iface_stub_z_;");
+        } else {
+            c_.emitLine("    return 0;");
+        }
+    } else {
+        c_.emitLine("    (void)me;");
+    }
+    c_.emitLine("}");
+    c_.emitBlank();
+}
+
+// ============================================================
 // 类工厂函数生成
 // ============================================================
 

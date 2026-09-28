@@ -196,9 +196,25 @@ BSTR vb6_CStrLong(int32_t x) {
 BSTR vb6_CStrLongFromVariant(vb6_VARIANT v) {
     return vb6_CStrLong(vb6_VariantToLong(v));
 }
+#ifdef vb6_CStrDbl
+#undef vb6_CStrDbl   // vb6rtl_builtin.h 的 _Generic 宏在这里必须关闭, 否则函数定义被宏改写
+#endif
 BSTR vb6_CStrDbl(double x) {
     vb6_VARIANT v; memset(&v, 0, sizeof(v)); v.vt = (vb6_vartype)VT_R8; v.dblVal = x;
     return vb6_Format(v, NULL);
+}
+// vbeclipse: 后期绑定 COM 读到的数值属性, codegen 会发成
+//   vb6_CStrDbl(vb6_ComGetStringProp(_vb6_with_N, L"Ratio"))
+// (BSTR 实参), 而本函数原签名只收 double → msbuild_vs C2440 ×4
+// (ucPerspective.c 3333/3384/3453/3504; Folder.cls `Property Get Ratio() As Double`).
+// 与 Fix 158q 的 vb6_CStrLongFromVariant 同款思路: 补一个 BSTR 入口, 由
+// vb6rtl_builtin.h 的 _Generic 按实参 C 类型分派. BSTR → double 走 vb6_Val
+// (与 vb6_CDblBSTR 同一条口径).
+BSTR vb6_CStrDblFromBSTR(BSTR s) {
+    return vb6_CStrDbl(vb6_Val(s));
+}
+BSTR vb6_CStrDblFromVariant(vb6_VARIANT v) {
+    return vb6_CStrDbl(vb6_VariantToDouble(v));
 }
 // Fix 084m: LongLong (恒 64 位有符号) → String。
 //   为什么另开一个函数而不复用 vb6_CStrLong: vb6_Format 不认识 VT_I8 (它只覆盖

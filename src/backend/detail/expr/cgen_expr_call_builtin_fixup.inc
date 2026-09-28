@@ -216,6 +216,17 @@
         }
     }
 
+    // Fix <vbeclipse>: LoadPicture() — VB6 允许**无参**调用 (取回"空图片", 常用于
+    // `Screen.MouseIcon = LoadPicture()` 复位鼠标指针; ucPerspective.ctl:596/600)。
+    // RTL 签名是 vb6_LoadPictureEx(BSTR pathname) (1 参), 0 参调用 → C2198 参数太少
+    // (ucPerspective.c:467/472)。补 NULL: vb6_LoadPictureEx 遇 NULL 直接返回 NULL,
+    // 正是"空图片"的语义。
+    if (callee == "vb6_LoadPictureEx") {
+        if (args.empty()) {
+            argList = "NULL";
+        }
+    }
+
     // P14.2.2: Dir - VB6 allows 1-arg Dir(pattern) → vb6_Dir(pattern, 0)
     if (callee == "vb6_Dir") {
         if (args.size() == 1) {

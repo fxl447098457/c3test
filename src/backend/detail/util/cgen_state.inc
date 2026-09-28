@@ -833,6 +833,10 @@
     // 继承字段与前缀布局、转发桩都由 view 的 inhFields/inhProcs 驱动 (stage 3.4 回填).
     const ClassChainRegistry* clsreg_ = nullptr;
 
+    // 工程级类名表 (小写类名 → 原大小写类名, driver 注入). 本模块符号表会被同名成员
+    // 遮蔽, 判"某类型名是不是工程类"只能问这张表 (详见 setProjectClassNames 注释).
+    const std::unordered_map<std::string, std::string>* projClassNames_ = nullptr;
+
     // CoClass 身份 (tB, ai/022 B13b): stage 2.7 Pass E 求出的唯一出口 (coclassIds_)。
     // 只有 generateDllEntry 读它 —— 产品里的 CLSID / 默认接口 IID / 组名 ProgID 一律
     // 从这里取，prelude 里那两枚 lambda 退成"读不到块的类"的兜底路径。

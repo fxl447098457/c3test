@@ -526,6 +526,67 @@
                                     + val090h + ");  /* With class prop_let_ (Fix 090h) */");
                         return;
                     }
+                    // Fix <vbeclipse>: findClassMemberCallParams 也会漏 (SplitBar.cls
+                    // 的 `Property Let Orientation` 生成 vb6_SplitBar_prop_let_Orientation,
+                    // 但语义层 Class 符号的 memberParams/memberProcKinds 未记录该属性 →
+                    // 090h 走不到 → 字段写 `_vb6_with_1->Orientation` → C2039
+                    // "Orientation 不是 vb6_cls_SplitBar 的成员" (ucSplitBar.ctl:148
+                    // `With SplitBar: .Orientation = m_Orientation`). 用
+                    // resolveClassMemberCall 兜底 (它查运行期类成员解析, 与属性函数名
+                    // 生成一源, 能找到 prop_let_).
+                    {
+                        std::string rc090h = resolveClassMemberCall(canonCls090h,
+                                                                    wmExpr.memberName);
+                        if (!rc090h.empty()
+                            && rc090h.find("_prop_let_") != std::string::npos) {
+                            emitExpr(*node.value);
+                            std::vector<ParameterInfo> p090h;
+                            bool b090h = false;
+                            if (findClassMemberCallParams(canonCls090h, wmExpr.memberName,
+                                                          p090h, b090h)
+                                && !p090h.empty()
+                                && (p090h.back().type == Vb6Type::Variant
+                                    || !p090h.back().isByVal)) {
+                                lastExpr_ = packLetValueArg(p090h.back(),
+                                                            node.value.get(), lastExpr_);
+                            }
+                            c_.emitLine(rc090h + "(" + tempVar + ", " + lastExpr_
+                                        + ");  /* With class prop_let_ (vbeclipse) */");
+                            return;
+                        }
+                    }
+                }
+                // Fix <vbeclipse>: SplitBar.cls 类符号被 ucSplitBar.ctl 同名控件
+                // 字段遮蔽 (ucSplitBar.h:140 `void* SplitBar;`) → resolveClassMemberCall/
+                // findClassMemberCallParams 均失效 → 上面 090h/FnRet 兜底落空 → 字段写
+                // `_vb6_with_1->Orientation` C2039. 成员不是该类的数据字段
+                // (classTypedFieldMap_ 无此项) → 按 090h 同一命名约定直发
+                // vb6_<Cls>_prop_let_<Member>(With, value) (SplitBar.h 已生成
+                // vb6_SplitBar_prop_let_Orientation(vb6_cls_SplitBar*, int32_t)).
+                {
+                    bool isDataField090c = false;
+                    if (classTypedFieldMap_) {
+                        auto itCf090c = classTypedFieldMap_->find(info.className);
+                        if (itCf090c != classTypedFieldMap_->end()
+                            && itCf090c->second.count(
+                                Symbol::toLower(wmExpr.memberName)))
+                            isDataField090c = true;
+                    }
+                    if (!isDataField090c && !info.className.empty()) {
+                        std::string canonCls090c = info.className;
+                        if (symTab_.moduleScope()) {
+                            auto clsIt090c = symTab_.moduleScope()->symbols().find(
+                                Symbol::toLower(info.className));
+                            if (clsIt090c != symTab_.moduleScope()->symbols().end()
+                                && clsIt090c->second->kind == SymbolKind::Class)
+                                canonCls090c = clsIt090c->second->name;
+                        }
+                        emitExpr(*node.value);
+                        c_.emitLine("vb6_" + cIdent(canonCls090c) + "_prop_let_"
+                                    + cIdent(wmExpr.memberName) + "(" + tempVar + ", "
+                                    + lastExpr_ + ");  /* With class prop_let_ direct (vbeclipse) */");
+                        return;
+                    }
                 }
                 // 既无Let也无Set → 视为数据字段写: tempVar->member = value
                 emitExpr(*node.value);

@@ -258,6 +258,13 @@ std::string CCodeGen::getControlPropReadFn(FrmControlType ctrlType, const std::s
     // 不同物 —— 让这两个类型走下面各自的 case, 否则读回来的永远是窗口那套。
     if (propLower == "borderstyle" && ctrlType != FrmControlType::Shape
         && ctrlType != FrmControlType::Line) return "vb6_GetBorderStyle";
+    // Fix <vbeclipse>: ScaleWidth/ScaleHeight 是**所有**控件的通用属性 (不只 Form) —
+    // ucTabStrip.ctl 的 `With picButtons` 里读 ScaleWidth/ScaleHeight 落到 HWND 结构体
+    // 字段上 → C2039: "ScaleWidth" 不是 "HWND__" 的成员 (×3, 同式还带出 vb6_ControlMove
+    // 的 C2198). 放在 switch 之前, 与 Tag/MousePointer 同口径 (RTL: vb6forms_widget.c
+    // 的 vb6_GetScaleWidth/Height, 声明在 vb6forms_prop_form.h, 由 vb6forms.h 传递可见).
+    if (propLower == "scalewidth") return "vb6_GetScaleWidth";
+    if (propLower == "scaleheight") return "vb6_GetScaleHeight";
 
     switch (ctrlType) {
     case FrmControlType::TextBox:

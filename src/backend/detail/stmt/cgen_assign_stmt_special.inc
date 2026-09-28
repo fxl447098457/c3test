@@ -365,6 +365,15 @@
             if (!isVarName && knownObjectVars_.count(objLower)) isVarName = true;
             if (!isVarName && knownTypedComVars_.count(objLower)) isVarName = true;
             if (!isVarName && knownIfaceVars_.count(objLower)) isVarName = true;
+            // Fix <vbeclipse>: 本模块自己的 Property Get 也是合法"对象表达式"
+            // (ucSplitBar.ctl:161 `Folder.Relationship` / :176
+            //   `Folder.Ratio = NewRatio` — Folder 是 Property Get 返回 Folder 类)。
+            // 原状 objSym=PropertyGet 不被当变量 → "Module.var" 回退 → 接收者丢:
+            //   `Ratio = NewRatio` 裸名 C2065 (ucSplitBar.c:204)。属性目标后交给
+            //   prop_write/com_prop 路径按类属性写 vb6_Folder_prop_let_Ratio(...)。
+            //   与 m22 的 PropertyGet 变量化 (cgen_expr_member_m22_module.inc:27-31) 对齐。
+            if (!isVarName && objSym && objSym->kind == SymbolKind::PropertyGet
+                && !objSym->isExternal) isVarName = true;
 
             // tB Inherits (ai/022 B09): `MyBase.X = v` 走基类面上的 Property Let / 数据字段。
             // 落到下面的 Module.var 回退就是 `vb6_MyBase_X = v` (C2065 未声明)。
@@ -390,6 +399,43 @@
                 if (!curLower084o.empty() && objLower == curLower084o
                     && currentReturnVar_.size() > 8
                     && (isUdtRet084o || isClsRet084o)) {
+                    // Fix <vbeclipse>: 函数返回**类实例**时, 其成员若是 Property Let
+                    // (Perspective.cls `Public Property Let PerspectiveId`), 不是结构体
+                    // 字段 → 走类属性写 vb6_<Cls>_prop_let_<M>((void*)ret, val), 否则
+                    // `ret->PerspectiveId` 对 vb6_cls_Perspective 无此成员 → C2039
+                    // (ucPerspective.c:1391 `p.PerspectiveId = PerspectiveId`).
+                    if (isClsRet084o) {
+                        std::string ct084o = currentReturnCType_;
+                        while (!ct084o.empty()
+                               && (ct084o.back() == '*' || ct084o.back() == ' ' || ct084o.back() == '\t'))
+                            ct084o.pop_back();
+                        std::string cls084o;
+                        if (ct084o.size() > 8 && ct084o.compare(0, 8, "vb6_cls_") == 0)
+                            cls084o = ct084o.substr(8);
+                        if (!cls084o.empty()) {
+                            std::string fn084o = resolveClassMemberCall(cls084o, maExpr.memberName);
+                            // Fix <vbeclipse>: resolveClassMemberCall 按读方向优先返回
+                            // vb6_Perspective_prop_get_PerspectiveId (Perspective.cls Get/Let
+                            // 双方向), 写方向须改写为 _prop_let_ — 否则 "_prop_let_" 检查
+                            // 不过 → 落到 FnRetUdt 字段写 `ret->PerspectiveId` C2039.
+                            if (!fn084o.empty()
+                                && fn084o.find("_prop_") != std::string::npos) {
+                                std::string let084o = fn084o;
+                                std::size_t pg084o = let084o.find("_prop_get_");
+                                if (pg084o != std::string::npos)
+                                    let084o = let084o.substr(0, pg084o) + "_prop_let_"
+                                            + let084o.substr(pg084o + 10);
+                                emitExpr(*node.value);
+                                std::string val084o = std::move(lastExpr_);
+                                Vb6Type valT084o = inferExprType(*node.value);
+                                if ((valT084o == Vb6Type::Variant) || cExprIsVariant(val084o))
+                                    val084o = "vb6_VariantToString(" + val084o + ")";
+                                c_.emitLine(let084o + "((void*)" + currentReturnVar_ + ", "
+                                            + val084o + ");  /* FnRetCls prop_let." + maExpr.memberName + " */");
+                                return;
+                            }
+                        }
+                    }
                     // 查返回 UDT 的字段类型 (与 inferUdtFieldVb6Type 相同的 udtMembers 查询)
                     std::string udtName084o = isUdtRet084o ? currentReturnCType_.substr(9) : std::string();
                     Symbol* udtSym084o = isUdtRet084o ? symTab_.lookupModule(udtName084o) : nullptr;

@@ -138,6 +138,14 @@
     // 生成Property签名 (不含函数体)
     std::string makePropertySignature(PropertyDecl& node);
 
+    // Fix <vbeclipse>: 接口类成员的**默认实现** (VB6 `Public x As New <Interface>`
+    // 实例化接口本身 → 接口成员声明即默认实现, 非抽象). 有返回值的发 `return 零值;`,
+    // 其余发空操作体. 实现见 cgen_decl_prop.cpp.
+    void emitIfaceMemberStub(const SubDecl& node, const std::string& sig, bool returnsValue);
+    void emitIfaceMemberStub(const FunctionDecl& node, const std::string& sig, bool returnsValue);
+    void emitIfaceMemberStub(const PropertyDecl& node, const std::string& sig, bool returnsValue);
+    void emitIfaceStubBody(const std::string& sig, const std::string& retType);
+
     // 生成类工厂函数 (New/Destroy)
     void emitClassFactory(Module& module);
     // Fix 099: 生成 Public 字段的 COM 读写访问器 (ActiveX DLL 专用, 见 cgen_com.cpp)
@@ -445,6 +453,14 @@
     // Fix 093a: 当前类是否声明了同名成员字段 (裸标识符赋值时字段优先于外部同名
     // Property Let/Set).
     bool isOwnClassField(const std::string& memberName) const;
+
+    // Fix <vbeclipse>: 宿主伪对象 (UserControl/Ambient/Extender/PropertyPage) 成员名
+    // 规范化 — RTL 的符号名是手写约定 (vb6_UserControl_hDC), VB6 源码拼写可以不
+    // 同 (`UserControl.hDc`), C 符号大小写敏感 → C2065 未声明的标识符.
+    // 例: ucButton.ctl:64 / ucCaption.ctl:119 / ucTab.ctl:92 写 hDc, RTL 只有 hDC.
+    // 非宿主伪对象 / 表中无此项时原样返回.
+    std::string canonicalHostPseudoMember(const std::string& pseudoObj,
+                                           const std::string& memberName) const;
 
     // Fix 010r-16: COM/Property-Get 左值重写辅助
     // 当赋值语句(Let/Set/Assignment fallback)的 LHS 是非常量 C 表达式(非左值)时,

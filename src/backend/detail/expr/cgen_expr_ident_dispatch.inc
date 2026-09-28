@@ -79,6 +79,21 @@
         return;
     }
 
+    // Fix <vbeclipse>: 裸 Parent 内建对象 (UserControl 的宿主, VB6 声明 As Object)。
+    // 与 Screen/Printer/Err 同口径放在内建对象段 (必须在符号解析之前), 否则
+    // ucButton.ctl:74 `Set ParentObject = Parent` 落到未解析兜底 → 裸 `Parent`
+    // C2065。成员访问不在这里处理, 各走各自通道:
+    //   带括号调用 Parent.EventRaise(a, b) → cgen_expr_call_callee_member.inc
+    //     的后期绑定分支 (vb6_ComCall(vb6_UC_ParentObject(), ...));
+    //   无括号语句 Parent.Refresh          → 同一分支的零实参形态;
+    //   属性写 Parent.Active = True        → cgen_assign_host_pseudo.inc
+    //     (vb6_ComSetProp(vb6_UC_ParentObject(), ...));
+    //   .hWnd/.Icon.Handle/.Move 链         → cgen_base.cpp 的 fixupUserControlParentChain。
+    if (lower == "parent" && isDesignerModule_ && !knownLocalVars_.count(lower)) {
+        lastExpr_ = "vb6_UC_ParentObject()";
+        return;
+    }
+
     // M22: 检查是否是当前函数名 — VB6语义歧义
     // - 作为IndexOrCallExpr的callee(函数调用) → 返回函数过程名
     // - 作为普通表达式(返回值引用) → 返回返回值变量

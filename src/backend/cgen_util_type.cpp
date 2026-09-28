@@ -524,6 +524,14 @@ bool CCodeGen::cExprIsVariant(const std::string& cExpr) const {
         "vb6_LoadResData(",       // Fix 090bz: VBA LoadResData → vb6_VARIANT;
                                  //   Dim D() As Byte: D = LoadResData(...) 赋值
                                  //   需 VariantToSafeArray1D 提取 (cLang LoadData/LoadInfo C2440).
+        // vbeclipse: LoadResPicture 与 LoadResData 同族, RTL 签名都是
+        //   vb6_VARIANT vb6_LoadResPicture(int32_t, int32_t) (vb6rtl_runtime.h:66 /
+        //   vb6rtl_com.c:526). 不登记会让
+        //   `Function getResourceIcon(...) As IPictureDisp` 的
+        //   `Set getResourceIcon = LoadResPicture(...)` 直接 `vb6_ret_X =
+        //   vb6_LoadResPicture(...)` → C2440 (modResources.c 22/24/33). 登记后走
+        //   Set 的 Fix 038b-6 分支包 vb6_VariantToObjectVal 提取对象指针.
+        "vb6_LoadResPicture(",
         "vb6_DispCallByVtbl(",  // Fix 068: DispCallByVtbl returns Variant
         // Fix 110w: VB6 CallByName 返回 vb6_VARIANT (见 vb6rtl_class_com.h) —
         // 参与算术/关系运算或需 BSTR 时必须按 Variant 处理, 否则 C2088

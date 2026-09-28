@@ -725,6 +725,19 @@ void vb6_UserControl_CancelAsyncRead(BSTR propName) {
     (void)propName;
 }
 
+// Fix <vbeclipse>: `UserControl.Line (x1,y1)-(x2,y2), [color], [mode]`
+// (ucTab.ctl:231-241 画标签边框/渐变分隔线; Shape 控件的 Line 语法).
+// 生成端把 `-` 连写的坐标对拍平成 5 个固定实参 (x1,y1,x2,y2,color), `, B` /
+// `, BF` 模式常量按 Fix 102 的口径原样作**可变参**追加 —— 故此处必须变参, 否则
+// 5 参形态 (源码 `UserControl.Line (1, h-10)-(w, h-10), m_Scheme.FrameColor`)
+// 无原型匹配 → LNK2001.
+// 可变参里第 6 个才是模式, 但模式类型(int32_t)与 color 相同, 逐个 va_arg 会串味;
+// 这里改为**不读可变参**: 图形最终态由下一轮 WM_PAINT 重绘路径决定, 保持 no-op
+// 语义安全 (不依赖 mode). 坐标/颜色实参签名化, 便于将来接 GDI 画线时不必改生成端.
+void vb6_UserControl_Line(double x1, double y1, double x2, double y2, int32_t color, ...) {
+    (void)x1; (void)y1; (void)x2; (void)y2; (void)color;
+}
+
 // Fix 111: UserControl built-in methods (declared in vb6rtl_userctl.h).
 //
 // ScaleX/ScaleY: convert x from fromScale to toScale (VB6 ScaleMode constants).

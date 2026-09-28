@@ -10,6 +10,26 @@ namespace vb6c3 {
 
 void CCodeGen::visit(CallStmt& node) {
     if (node.callee) {
+        // Fix <vbeclipse>: 无括号语句式 `Parent.<方法>` (ucSplitBar.ctl:138
+        // `Parent.Refresh`) 的 callee 是**裸 MemberAccessExpr** (无实参的 paren-less
+        // 调用不进 IndexOrCallExpr, 见下方 Fix 090g 注释), 走到 emitExpr 时
+        // asCallCallee_=true 只能交出函数名 → 落到 class_module.inc 优先级3 的
+        // "模块名.成员" 回退 → `vb6_Parent_Refresh();` C2065 (ucSplitBar.c:205)。
+        // `Parent` 是 VB6 内建的 As Object 宿主对象, 成员调用本就是 IDispatch
+        // 后期绑定, 这里直接发 vb6_ComCall(vb6_UC_ParentObject(), L"<成员>", NULL, 0)。
+        // (带实参的形态走 cgen_expr_call_callee_member.inc 的 IndexOrCallExpr 分支。)
+        if (node.callee->kind == ASTNodeKind::MemberAccessExpr && isDesignerModule_) {
+            auto& maParCs = static_cast<MemberAccessExpr&>(*node.callee);
+            if (maParCs.object && maParCs.object->kind == ASTNodeKind::IdentifierExpr
+                && Symbol::toLower(
+                       static_cast<IdentifierExpr&>(*maParCs.object).name) == "parent"
+                && !knownLocalVars_.count("parent")) {
+                c_.emitLine("vb6_ComCall(vb6_UC_ParentObject(), L\""
+                            + escapeWideCString(maParCs.memberName)
+                            + "\", NULL, 0);  /* Parent.<method> */");
+                return;
+            }
+        }
         // 检测 Debug.Print 调用: 特殊处理多参数输出
         if (node.callee->kind == ASTNodeKind::IndexOrCallExpr) {
             auto& call = static_cast<IndexOrCallExpr&>(*node.callee);
@@ -496,6 +516,21 @@ void CCodeGen::visit(CallStmt& node) {
             std::string cls090g = inferClassTypeOfExpr(*maExpr090g.object);
             std::vector<ParameterInfo> params090g;
             bool builtin090g = false;
+            // Fix <vbeclipse>: 类实例上不存在该方法 (ucPerspective.ctl:1837
+            //   `l_ucFolder.ZOrder` — l_ucFolder As ucFolder, UserControl 类的
+            //   struct 实例), 成员路径发成 `l_ucFolder->ZOrder /* class var ...
+            //   field */` + 调用括号 → C2223 "-> 左侧必须指向结构/联合". 类里没有
+            //   该成员函数就根本没有正确 C 形态 (没有 HWND, ZOrder 于容器 z-序不可
+            //   建模), 发安全空操作并保留引用, 避免静默丢引用/未用告警.
+            if (!cls090g.empty()
+                && params090g.empty() && !builtin090g
+                && resolveClassMemberCall(cls090g, maExpr090g.memberName).empty()) {
+                emitExpr(*maExpr090g.object);
+                c_.emitLine("(void)" + lastExpr_ + ";  /* vbeclipse: "
+                            + maExpr090g.memberName
+                            + " 未建模于 " + cls090g + ", 空操作 */");
+                return;
+            }
             if (!cls090g.empty()
                 && findClassMemberCallParams(cls090g, maExpr090g.memberName,
                                              params090g, builtin090g)

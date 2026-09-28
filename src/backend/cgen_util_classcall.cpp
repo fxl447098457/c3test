@@ -417,9 +417,30 @@ std::string CCodeGen::getClassMethodReturnType(const std::string& className,
 
         if (sym->kind == SymbolKind::Function || sym->kind == SymbolKind::PropertyGet) {
             // 仅 Function/PropertyGet 有返回值
-            if (sym->type == Vb6Type::Object && !sym->variableTypeName.empty()) {
-                // Fix 015 semantic_analyzer 已在该 Function 的 variableTypeName 记录返回类名
-                return canonicalClassName(sym->variableTypeName);
+            // Fix <vbeclipse>: 返回类名的权威字段是 variableTypeName (见 Fix 015:
+            // semantic_analyzer 在 Function/PropertyGet 符号上记录返回类名), 判据不应
+            // 绑死在 type==Object 上。driver 跨模块注入的跨模块 PropertyGet 符号 type
+            // 常记为 Variant (type=12) 而非 Object — 如 Folder.Views As List
+            // (views$pg kind=PropertyGet type=Variant variableTypeName="List"),
+            // 旧判据整条链断 → `With Folder.Views` 拿不到类, 其内 .IsEmpty 落到
+            // cgen_expr_with.cpp 的空 className 兜底并套当前模块前缀 →
+            // vb6_ucPerspective_IsEmpty (LNK2019).
+            // 收紧口径: variableTypeName 非空, 且 (a) type==Object (原行为) 或
+            // (b) 该名在作用域内确实解析为项目 Class 符号 (排除 String/Long/UDT/Enum
+            // 等非类命名类型, 链应在此终止) — 与下方 Phase B 同一校验口径.
+            if (!sym->variableTypeName.empty()) {
+                bool retIsClass = false;
+                for (const auto& [rk, rs] : symTab_.moduleScope()->symbols()) {
+                    if (rs->kind != SymbolKind::Class) continue;
+                    if (Symbol::toLower(rs->name) == Symbol::toLower(sym->variableTypeName)) {
+                        retIsClass = true;
+                        break;
+                    }
+                }
+                if (sym->type == Vb6Type::Object || retIsClass) {
+                    // Fix 015 semantic_analyzer 已在该 Function 的 variableTypeName 记录返回类名
+                    return canonicalClassName(sym->variableTypeName);
+                }
             }
             // Fix 088e: 符号匹配但注入的 type 记录不完整 (PropertyGet 返回类实例
             // 如 RecvBuffer As cByteBuffer, 注入符号 type 未标 Object/变量类型名空)

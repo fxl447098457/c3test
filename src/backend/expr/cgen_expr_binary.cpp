@@ -328,6 +328,18 @@ void CCodeGen::visit(BinaryExpr& node) {
             std::string t = s;
             while (t.size() >= 2 && t.front() == '(' && t.back() == ')')
                 t = t.substr(1, t.size() - 2);
+            // Fix <vbeclipse>: 枚举常量 (vb6_enum_eMsgWhen_MSG_BEFORE) 被当作
+            // Variant 比较左值取址 → C2101 "常量上的&" (MagneticWnd.ctl
+            // `eMsgWhen.MSG_BEFORE = When`, 枚举成员无 constIntValue 时以
+            // vb6_enum_<Mod>_<Member> 裸名发出)。isConstIdent 只认 #define 宏,
+            // 认不出 vb6_enum_*. 枚举成员不可取址, 也不能当 vb6_VARIANT* 传
+            // (vb6_VarCmpLongEq(vb6_VARIANT*, int32_t)), 构造可寻址的
+            // vb6_VARIANT 临时变量 (同下方 rvalue 通道的 _vcmp_N 模式).
+            if (t.rfind("vb6_enum_", 0) == 0) {
+                std::string tmp = "_vcmp_" + std::to_string(vcmpCounter_++);
+                c_.emitLine("vb6_VARIANT " + tmp + " = vb6_VariantLong(" + s + ");");
+                return "&" + tmp;
+            }
             if (simpIdent158n(t) && !isConstIdent(t)) return "&" + s;
             if (t.rfind("VB6_SA_AT(", 0) == 0) return "&" + s;
             // Fix 158u: Variant 比较左值语义落在 COM 对象指针成员 (me->VBFlexGrid
@@ -475,7 +487,10 @@ void CCodeGen::visit(BinaryExpr& node) {
                 if (rActual == Vb6Type::Long || rActual == Vb6Type::Integer || rActual == Vb6Type::Boolean || rActual == Vb6Type::LongPtr) {
                     // P25: left可能是VARIANT rvalue(vb6_VariantFromComResult), 需要临时变量
                     // Fix 084aa: 常量宏 (#define) 不可取址 → 视为非左值走临时变量
-                    bool leftIsLvalue = !left.empty() && (std::isalpha(static_cast<unsigned char>(left[0])) || left[0] == '_') && !isConstIdent(left);
+                    // Fix <vbeclipse>: 枚举常量 (vb6_enum_*) 也是裸标识符但不可取址 —
+                    // isConstIdent 只认 #define 宏, 认不出 vb6_enum_MsgWhen_MSG_BEFORE →
+                    // `&vb6_enum_...` C2101 (MagneticWnd.ctl `eMsgWhen.MSG_BEFORE = When`)
+                    bool leftIsLvalue = !left.empty() && (std::isalpha(static_cast<unsigned char>(left[0])) || left[0] == '_') && !isConstIdent(left) && left.rfind("vb6_enum_", 0) != 0;
                     if (leftIsLvalue) { for (char c : left) { if (!std::isalnum(static_cast<unsigned char>(c)) && c != '_') { leftIsLvalue = false; break; } } }
                     if (leftIsLvalue) {
                         lastExpr_ = "(vb6_VarCmpLong" + cmpFn + "(&" + left + ", " + scalarArg158m(right) + "))";
@@ -506,7 +521,8 @@ void CCodeGen::visit(BinaryExpr& node) {
                         default: revCmpFn = cmpFn; break;  // Eq/Ne是对称的
                     }
                     // Fix 084aa: 常量宏不可取址 → 视为非左值
-                    bool rightIsLvalue = !right.empty() && (std::isalpha(static_cast<unsigned char>(right[0])) || right[0] == '_') && !isConstIdent(right);
+                    // Fix <vbeclipse>: 枚举常量 (vb6_enum_*) 同样不可取址 (对称于 493 行)
+                    bool rightIsLvalue = !right.empty() && (std::isalpha(static_cast<unsigned char>(right[0])) || right[0] == '_') && !isConstIdent(right) && right.rfind("vb6_enum_", 0) != 0;
                     if (rightIsLvalue) { for (char c : right) { if (!std::isalnum(static_cast<unsigned char>(c)) && c != '_') { rightIsLvalue = false; break; } } }
                     if (rightIsLvalue) {
                         lastExpr_ = "(vb6_VarCmpLong" + revCmpFn + "(&" + right + ", " + scalarArg158m(left) + "))";

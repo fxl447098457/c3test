@@ -113,6 +113,24 @@ bool CCodeGen::tryEmitChainedComWrite(Expr* targetNode, Expr* valueNode) {
     emitExpr(*valueNode);
     std::string valExpr25 = std::move(lastExpr_);
     std::string packVal25 = comPackExpr(*valueNode);
+    // Fix <vbeclipse>: 实参本身是 COM 属性读 (`.RefId` / `.Ratio` 这类 With 块内
+    // 成员) 时, emitExpr 只留下接收者对象表达式, 成员名还挂在 comMemberName_ 上。
+    // 不消费就整体丢失 —— 生成的 vb6_ComPackBSTR(_vb6_with_1) 把接收者当值打包,
+    // 而 frmViewSnapshot.frm:106-107
+    //   li.SubItems(1) = .RefId   → vb6_ComPackBSTR(vb6_VariantFromComResult(vb6_ComCall(_vb6_with_1, L"RefId", NULL, 0)))
+    // 的实参已是 vb6_VARIANT 结构体, 与 packer 期望的 const wchar_t* / double 不匹配
+    // → C2440 (4 处: 181/182/205/206)。
+    // 与 cgen_assign_com_prop.inc 同名 Fix 110i 同一处理: 按 packer 反推解封类型后
+    // resolveComValue, 得到 vb6_ComGetXxxProp(receiver) 这类与 packer 匹配的标量。
+    if (isComMarker_) {
+        std::string hint25 = "BSTR";
+        if (packVal25 == "vb6_ComPackDouble") hint25 = "Double";
+        else if (packVal25 == "vb6_ComPackInt") hint25 = "Long";
+        else if (packVal25 == "vb6_ComPackObject") hint25 = "Object";
+        else if (packVal25 == "vb6_ComPackValue") hint25 = "Variant";
+        resolveComValue(hint25);
+        valExpr25 = std::move(lastExpr_);
+    }
     c_.emitLine("vb6_ComSetPropArg(" + accExpr25 + ", " + defMemLit25 + ", "
                 + arrOut25 + ", " + std::to_string(argcOut25) + ", "
                 + packVal25 + "(" + valExpr25 + "));  /* COM chained default-prop assign (P25b) */");

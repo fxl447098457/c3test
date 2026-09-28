@@ -218,6 +218,26 @@
                     calleeParamsFound = true;
                 }
             }
+            // Fix 210b: With 目标是 void* / className 未知的 ClassInstance (如
+            // `With l_Perspective.Folders` / `With Folder.Views`, With 临时变量落在
+            // void*) 时, WithMemberExpr 实际由 cgen_expr_with.cpp:191-209 按名字
+            // lookupModule 解析成熟知成员函数 (实测 .Item → vb6_List_Item, 形参
+            // ByVal Variant Index). calleeParams 不填 → Fix 210 装箱不生效 →
+            // 4x int32_t/int → vb6_VARIANT C2440 (ucPerspective.c 1807 等).
+            // 与发射侧同源取符号 (name-match), 让装箱/缺省参数补齐对齐.
+            if (!calleeParamsFound && info.kind == WithObjKind::ClassInstance) {
+                Symbol* wmSym210b = symTab_.lookupModule(wmExpr.memberName);
+                if (!wmSym210b) wmSym210b = symTab_.lookup(wmExpr.memberName);
+                if (wmSym210b && (wmSym210b->kind == SymbolKind::Sub
+                    || wmSym210b->kind == SymbolKind::Function
+                    || wmSym210b->kind == SymbolKind::PropertyGet
+                    || wmSym210b->kind == SymbolKind::PropertyLet
+                    || wmSym210b->kind == SymbolKind::PropertySet)) {
+                    calleeParams = wmSym210b->params;
+                    calleeIsBuiltin = wmSym210b->isBuiltin;
+                    calleeParamsFound = true;
+                }
+            }
         }
     }
 
