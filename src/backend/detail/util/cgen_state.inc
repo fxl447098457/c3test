@@ -6,6 +6,13 @@
     const TypeSystem& typeSys_;
     bool verbose_;
 
+    // 枚举成员值求值时的**同枚举兄弟成员表** (VbEclipse 批次): 小写成员名 → 常量值。
+    // 语义层 visit(EnumDecl) 把兄弟成员定成 SymbolKind::EnumMember, 但那是**按模块**建的表,
+    // 而 cgen 这一层拿到的是当前模块的 symTab_ —— 私有枚举的兄弟名在这里查不到,
+    // tryEvalConstInt 于是走"回退 emitExpr", 吐出裸 `MSG_AFTER` (C2065/C2057 满屏)。
+    // 这里按枚举自己的成员表就地折叠, 不依赖符号表可见性; 非空时优先于 symTab_ 查找。
+    std::map<std::string, int64_t> enumSiblingConsts_;
+
     // Fix 056b: 清理过程内局部数组注册, 保留模块级/类成员数组 (跨过程需要)
     // 过程开始时清空knownArrays_会丢失模块级UDT数组的arrayUdtElemTypes_注册,
     // 导致访问时元素类型回退vb6_VARIANT (MSVC C2440).

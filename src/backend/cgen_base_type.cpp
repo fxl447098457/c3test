@@ -442,8 +442,21 @@ bool CCodeGen::tryEvalConstInt(ASTNode* expr, int64_t& result) {
         return false;
     }
     case ASTNodeKind::IdentifierExpr: {
-        // Fix 010c: 查找符号表中的常量 (跨模块Public Const)
         auto* id = static_cast<IdentifierExpr*>(expr);
+        // 同枚举兄弟成员优先 (VbEclipse 批次): `MSG_BOTH = MSG_AFTER Or MSG_BEFORE` 里
+        // 的裸兄弟名在 cgen 这一层用 symTab_ 查不到 (见 cgen_state.inc 注释), 不先查这张
+        // 表就会走回退路径吐出裸标识符 → C2065/C2057。
+        if (!enumSiblingConsts_.empty()) {
+            // 走 cIdent: 引用侧也可能带方括号转义 (`[MSG_AFTER]`), 与建表侧同形才查得到
+            std::string low = cIdent(id->name);
+            for (auto& c : low) c = (char)tolower(c);
+            auto sib = enumSiblingConsts_.find(low);
+            if (sib != enumSiblingConsts_.end()) {
+                result = sib->second;
+                return true;
+            }
+        }
+        // Fix 010c: 查找符号表中的常量 (跨模块Public Const)
         auto* sym = symTab_.lookup(id->name);
         if (sym && sym->kind == SymbolKind::Constant && sym->hasConstValue) {
             result = sym->constIntValue;
