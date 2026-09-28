@@ -40,19 +40,37 @@ static bool isLiteralZeroDivisor44(const Expr* e) {
 
 // M22: 将非BSTR表达式包装为BSTR (用于字符串连接 & 运算符)
 void CCodeGen::visit(BinaryExpr& node) {
+    // 账 #88: 非 & 的那一路以前一律按 "Long" 解封 COM 读 —— 字符串成员因此在**比较**里
+    // 被发成 vb6_ComGetIntProp + vb6_CStrLong (拿 BSTR 指针当数字去和字面量比) ⇒ 恒 False。
+    // 实测 `tv1.Nodes(2).Text = "子乙"` 读回 N，而把同一个值先存进局部 String 变量再比是 Y。
+    // 口径只看**对侧**: 等值/大小比较且对侧是字符串 (字面量或推得出 String) ⇒ 这一侧按 BSTR
+    // 解封; 算术 (+ - * / 等) 与其余情形维持 "Long" 不动 —— 那些形状今天都是好的。
+    auto isCmp88 = [](BinaryOp op) {
+        return op == BinaryOp::Eq || op == BinaryOp::Neq || op == BinaryOp::Lt
+            || op == BinaryOp::Gt || op == BinaryOp::Le || op == BinaryOp::Ge;
+    };
+    auto hint88 = [&](const ExprPtr& sib) -> const char* {
+        if (!sib || !isCmp88(node.op)) return "Long";
+        if (sib->kind == ASTNodeKind::LiteralExpr
+            && static_cast<const LiteralExpr&>(*sib).literalKind == LiteralKind::String) {
+            return "BSTR";
+        }
+        if (inferExprType(*sib) == Vb6Type::String) return "BSTR";
+        return "Long";
+    };
     emitExpr(*node.left);
     // COM标记解析: 如果左操作数是COM属性, 解析为值
     // P24-02: 算术运算默认Long解包
     if (isComMarker_) {
         if (node.op == BinaryOp::Concat) resolveComValue();
-        else resolveComValue("Long");
+        else resolveComValue(hint88(node.right));
     }
     std::string left = std::move(lastExpr_);
     emitExpr(*node.right);
     // COM标记解析: 如果右操作数是COM属性, 解析为值
     if (isComMarker_) {
         if (node.op == BinaryOp::Concat) resolveComValue();
-        else resolveComValue("Long");
+        else resolveComValue(hint88(node.left));
     }
     std::string right = std::move(lastExpr_);
 

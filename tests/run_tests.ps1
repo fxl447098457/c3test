@@ -1633,6 +1633,13 @@ if ($Category -in @("all", "run", "vbp")) {
     #   其余纹丝不动 (证派发真去表里查过节点)；② 摘掉 tv1_Expand 处理器 => 红 TV33、TV31、TV32，
     #   NodeClick 那几条照旧 Y (分支是按处理器存在性建的)。
     $tvNeedles = @("TREEVIEW-DONE") + (1..33 | ForEach-Object { "TV$_=Y" })
+    # 账 #88 (比较上下文里字符串成员被按数值解包): TV34-TV37 四条。分工 ——
+    #   TV15 从"先取进局部变量"改回**直接**比 (`ndIx.Text = "子乙"`) ⇒ BASE 上它是 N (红)，
+    #   TV35 同理钉链式形态 (`tv1.Nodes(2).Text` / `.Key`)；TV36 是"必须仍然 N"的负向闸
+    #   (拿另一个节点的字面量比，防上面那两条变成恒真)；TV37 钉**选择性** —— 同一条链上的
+    #   数值成员 (Index/Children) 照旧走 int 档，两档一起改是错的。TV34 保留旧的局部变量
+    #   形态，两版都 Y，证升级没把那条路径弄丢。
+    $tvNeedles += @("TV34=Y", "TV35=Y", "TV36=N", "TV37=Y")
     Test-Vbp "ctrltreeview" "$Tests\ctrltreeview\TvfApp.vbp" $tvNeedles
     Test-Vbp "ctrltreeview_x86" "$Tests\ctrltreeview\TvfApp.vbp" $tvNeedles -Arch "x86"
     # 发码面两面都钉：设计期 Init 逐参数钉（含 -999 那条哨兵：VB6 的 True 就是 -1，
@@ -1653,7 +1660,12 @@ if ($Category -in @("all", "run", "vbp")) {
         # 按码值 + hwndFrom 双条件建、展开/折回靠 action 三态分流 (999 = 认不出，两边都不接)。
         'vb6_TreeView_SimNodeClick((void*)vb6_hwnd_tv1, 2);',
         'if (pNM42->code == -451 && (void*)pNM42->hwndFrom == vb6_hwnd_tv1) {',
-        'vb6_TreeView_NotifyExpanded((void*)lParam) == -1'
+        'vb6_TreeView_NotifyExpanded((void*)lParam) == -1',
+        # 账 #88: 比较上下文里字符串成员必须按 BSTR 解包 (TV35 那条链式形态)。
+        'vb6_CStr(vb6_VariantFromValue(vb6_ComGetStringProp(vb6_ComCallObject(vb6_TreeView_Nodes(',
+        # 同一条判据的选择性那一半: 数值成员 (Index) 照旧走 int 档 —— 这条在修复前后都在,
+        # 它的作用是挡住"为了修字符串把两档一起改成 BSTR"那种反向过度修正。
+        'vb6_ComGetIntProp(vb6_ComCallObject(vb6_TreeView_Nodes((void*)vb6_hwnd_tv1), L"Item", (void*[]){vb6_ComPackInt(2)}, 1), L"Index")'
     )
     Test-EmitcAbsent "tv_emitc_no_com_fallback" @("$Tests\ctrltreeview\TvfApp.vbp") @(
         'vb6_ComGetObjectProp(vb6_hwnd_tv1',
@@ -1664,6 +1676,9 @@ if ($Category -in @("all", "run", "vbp")) {
         # 「取 SimNodeClick 属性 + Item 下标」—— 编得过、跑起来什么都不发 (实测踩过，
         # 修法是把钩子抢在那条分支之前)。这条断言就是别让那个形状再回来。
         'vb6_ComGetObjectProp(vb6_hwnd_tv1, L"SimNodeClick")',
+        # 账 #88: 这条是 BASE 上 TV15/TV35/TV36 三处的实际发码形状 —— 字符串成员被按数值
+        # 解包后再 CStrLong (拿 BSTR 指针当数字与字面量比，恒 False)。它一回来判据就得红。
+        'vb6_CStrLong(vb6_ComGetIntProp(vb6_ComCallObject(vb6_TreeView_Nodes(',
         'CoCreateInstance'
     )
 
