@@ -13,7 +13,21 @@
             formHwnd = "vb6_hwnd_" + moduleName_;
         }
         std::string readFn = getControlPropReadFn(FrmControlType::Form, node.name);
-        if (!readFn.empty()) {
+        // 账 #68: VB6 里裸 `Left(s, n)` 是**内置函数**（窗体的 Left 属性必须写 Me.Left）。
+        // 这条分支对"与窗体属性同名的裸标识符"一律按属性读，而 Left 恰好两头都占 ⇒
+        // `Left(x, 1)` 发成 vb6_GetControlLeft(hwnd) 再被调用方拼上实参：编得过、运行期
+        // 读的是窗体坐标（C29-1b 那轮还踩成 0xC0000005）。**函数调用上下文里让内置函数赢**：
+        // 符号表把 VB6 内置函数登记成 isBuiltin 的 Function（实测 Left ⇒ kind=Function
+        // builtin=1），所以这是一条"问表"的规则，不是硬编码名单。值上下文（`x = Left`）
+        // 照旧是窗体属性。
+        bool builtinCallWins68 = false;
+        if (asCallCallee_ && !readFn.empty()) {
+            Symbol* bs68 = symTab_.lookup(node.name);
+            if (!bs68) bs68 = symTab_.lookupModule(node.name);
+            builtinCallWins68 = (bs68 && bs68->isBuiltin
+                                 && bs68->kind == SymbolKind::Function);
+        }
+        if (!readFn.empty() && !builtinCallWins68) {
             lastExpr_ = readFn + "(" + formHwnd + ")";
             return;
         }

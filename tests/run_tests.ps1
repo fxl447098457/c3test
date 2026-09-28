@@ -1512,7 +1512,9 @@ if ($Category -in @("all", "run", "vbp")) {
     # 设计期 Path/Pattern 落位 (CF5-CF7)、改 Pattern 立刻重刷 (CF8-CF9)、
     # ListIndex/FileName 回路 (CF10-CF11)、目录->文件与盘->目录两条联动 (CF12-CF13)、
     # 与原生 ListBox 的读数口径一致 (CF14)。负控: 喂 BASE 二进制 CF1-CF10/12/13 翻红。
-    $cfNeedles = @("CTRLFILES-DONE") + (1..14 | ForEach-Object { "CF$_=Y" })
+    # 账 #68: CF15/CF16 = 窗体模块里裸 Left(...) / Right(...) 走内置函数 (窗体的 Left 属性要写 Me.Left);
+    # 修复前 Left 被属性抢走 (发成 vb6_GetControlLeft(hwnd) 再拼实参), 同一棵树上这两条当场红。
+    $cfNeedles = @("CTRLFILES-DONE") + (1..16 | ForEach-Object { "CF$_=Y" })
     Test-Vbp "ctrlfiles" "$Tests\ctrlfiles\CfApp.vbp" $cfNeedles
     Test-Vbp "ctrlfiles_x86" "$Tests\ctrlfiles\CfApp.vbp" $cfNeedles -Arch "x86"
     # ai/029 C29-9 / 决策 D6：CommonDialog 换成原生 comdlg32，不再经 MSComDlg.OCX。
@@ -1564,7 +1566,11 @@ if ($Category -in @("all", "run", "vbp")) {
         'extern void vb6_fileList_Click(); vb6_fileList_Click();',
         'if (vb6_DirListBoxDescendSelected((void*)vb6_hwnd_dirList)) {',
         'vb6_DirListBoxSetPath((void*)vb6_hwnd_dirList, vb6_BSTR_FromStr(L"C:\\Windows\\System32"));',
-        'vb6_FileListBoxSetPattern((void*)vb6_hwnd_fileList, vb6_BSTR_FromStr(L"*.dll"));'
+        'vb6_FileListBoxSetPattern((void*)vb6_hwnd_fileList, vb6_BSTR_FromStr(L"*.dll"));',
+        'vb6_Left(vb6_GetListItem((void*)vb6_hwnd_auxList, 0)'      # 账 #68: 裸 Left 是函数, 不是窗体属性
+    )
+    Test-EmitcAbsent "cf_emitc_no_stolen_left" @("$Tests\ctrlfiles\CfApp.vbp") @(
+        'vb6_GetControlLeft(vb6_hwnd_CfForm, '
     )
     # ai/029 C29-8a: TreeView 的标量属性面换原生 SysTreeView32（D6：不碰 MSCOMCTL.OCX）。
     # 改之前的实测（029 §九 前置测量）：这枚控件**窗口本来就建得出来**（controlTypeToWin32Class
