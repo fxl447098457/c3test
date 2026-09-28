@@ -1822,7 +1822,13 @@ if ($Category -in @("all", "run", "vbp")) {
                      # VB6 文档那条 5 本机拿不到真值, 所以**不自作主张折成 5**, 见 029）
                      "SB1-range=10/100", "SB2-value=42", "SB3-changes=2/8", "SB4-sel=20/60/True",
                      "SB5-clampmax=100", "SB6-clampmin=10", "SB7-shrink=10/40/10",
-                     "SB8-selrange-off=False", "SB9-defaults=0/100/1/20/0/0", "SB10-push=80/80")
+                     "SB8-selrange-off=False", "SB9-defaults=0/100/1/20/0/0", "SB10-push=80/80",
+                     # C29-SL-c 事件面（SC0 是原始证人行、不进针；分法与理由见 029 §C29-SL-c）。
+                     # SC2/SC11 是「Change 按值比、不按码表枚举」的两条鉴别针 —— 拿码表硬枚举
+                     # 会在同值的第二条 5 与 SetValue 之后那条上各多发一次。
+                     "SC1-track=Y", "SC2-same=Y", "SC3-next=Y", "SC4-posit=Y", "SC5-endtrk=Y",
+                     "SC6-line=Y", "SC7-value=54", "SC8-vert=Y", "SC9-isolate=Y",
+                     "SC10-setval=Y", "SC11-baseline=Y")
     Test-Vbp "ctrlslider" "$Tests\ctrlslider\SlidApp.vbp" $slidNeedles
     Test-Vbp "ctrlslider_x86" "$Tests\ctrlslider\SlidApp.vbp" $slidNeedles -Arch "x86"
     Test-EmitcShape "sl_emitc_native" @("$Tests\ctrlslider\SlidApp.vbp") @(
@@ -1840,10 +1846,25 @@ if ($Category -in @("all", "run", "vbp")) {
         'vb6_CStrLong(vb6_Slider_GetMin(vb6_hwnd_sld4',
         'vb6_CStrBool(vb6_Slider_GetSelectRange('                  # #124 那条布尔口径
     )
+    # C29-SL-c: 事件派发那一段的形状。钉的是"认来源的那枚句柄 + 分流那一档"这一整对 ——
+    # Slider 与 ScrollBar 共用一扇 case WM_HSCROLL/WM_VSCROLL 的门，写错句柄比对比就是静默不派发。
+    Test-EmitcShape "sl_emitc_events" @("$Tests\ctrlslider\SlidApp.vbp") @(
+        'case WM_HSCROLL:',
+        'if (scrollHwnd == (void*)vb6_hwnd_sld1) {',
+        'if (scrollHwnd == (void*)vb6_hwnd_sld2) {',   # 竖杆接的是同一扇门（发的是 WM_VSCROLL）
+        'vb6_Slider_FireChange((void*)vb6_hwnd_sld1)',
+        'if (scrollCode == 4 || scrollCode == 5)',
+        'vb6_Slider_SimNotify((void*)vb6_hwnd_sld1, 5, 40)',
+        'vb6_Slider_SimNotify((void*)vb6_hwnd_sld2, 5, 30)'
+    )
     Test-EmitcAbsent "sl_emitc_no_com_fallback" @("$Tests\ctrlslider\SlidApp.vbp") @(
         'vb6_ComGetProp(vb6_hwnd_sld1',      # 兜底那条"拿 HWND 当 IDispatch"不许回来
         'vb6_ComSetProp(vb6_hwnd_sld1',
         'vb6_ComGetProp(vb6_hwnd_sld4',      # 值面同样不许回来
+        # SL-c: 判据方法一旦被 axSlotObj 那支先吃掉，就编成「取 SimNotify 属性 + Item 下标」
+        # —— 编得过、跑起来什么都不发（C29-8c 实测踩过）。
+        'vb6_ComGetObjectProp(vb6_hwnd_sld1, L"SimNotify")',
+        'vb6_ComCall(vb6_hwnd_sld1, L"SimNotify"',
         'CoCreateInstance'
     )
 

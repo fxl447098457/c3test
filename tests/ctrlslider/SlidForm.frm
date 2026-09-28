@@ -96,6 +96,12 @@ Private Function TF(ByVal ok As Boolean) As String
     If ok Then TF = "Y" Else TF = "N"
 End Function
 
+' C29-SL-c: 三条计数针（两条 Change + 一条 Scroll）。事件断言一律**只数增量**，
+' 不拿绝对值比 —— 原生自发的那几条什么时候到、到几条，不由我们定。
+Private gChg1 As Long
+Private gScr1 As Long
+Private gChg2 As Long
+
 Private Sub tGo_Timer()
     tGo.Enabled = False
     Debug.Print "SL1-vis=" & CStr(sld1.Visible)
@@ -139,6 +145,50 @@ Private Sub tGo_Timer()
     sld5.SelEnd = 70
     sld5.SelStart = 80
     Debug.Print "SB10-push=" & CStr(sld5.SelStart) & "/" & CStr(sld5.SelEnd)
+    ' ---- C29-SL-c: 事件面（Change / Scroll 走 WM_HSCROLL / WM_VSCROLL 那一条通道）----
+    ' SimNotify 是**判据专用**助手（与 DT-c 的 SimChange / MV-c 的 SimDateClick / RT-d 的
+    ' SimNotify 同先例）：无头环境点不了鼠标，而直接调 handler 会绕开整条派发链 ——
+    ' 它先把值推到 pos（真手势都是控件先动、再发通知），再按原生那一档发一条**真**消息进父窗。
+    ' 码值/通道/wParam 布局全部实测（探针 .build/slprobe/slmeasure7.c 与 8.c）：
+    '   横杆发 WM_HSCROLL、竖杆发 WM_VSCROLL；LOWORD = TB_* 码，5/4 那两档的值在 HIWORD；
+    '   一次真拖 = 5×N → 4 → 8；方向键 = 0 → 8；程序化 SETPOS/SETRANGE 一条都不发。
+    Dim b1 As Long, b2 As Long, b3 As Long
+    sld1.Value = 20                 ' 先把基准摆明（程序化赋值不发通知，SC10 钉这条）
+    b1 = gChg1: b2 = gScr1: b3 = gChg2
+    Debug.Print "SC0=" & b1 & "/" & b2 & "/" & b3
+    sld1.SimNotify(5, 40)           ' TB_THUMBTRACK：值 20→40 ⇒ Change 一次；滑块那两档 ⇒ Scroll 一次
+    Debug.Print "SC1-track=" & TF(gChg1 - b1 = 1 And gScr1 - b2 = 1)
+    sld1.SimNotify(5, 40)           ' 同值再来一条（拖动不足一像素的那种）：Scroll 涨、Change 不涨
+    Debug.Print "SC2-same=" & TF(gChg1 - b1 = 1 And gScr1 - b2 = 2)
+    sld1.SimNotify(5, 55)           ' 拖拽中连续触发就是这一串 5 ⇒ Change 跟着涨到 2
+    Debug.Print "SC3-next=" & TF(gChg1 - b1 = 2 And gScr1 - b2 = 3)
+    sld1.SimNotify(4, 55)           ' TB_THUMBPOSITION（落点与当前同值）⇒ 只算 Scroll
+    Debug.Print "SC4-posit=" & TF(gChg1 - b1 = 2 And gScr1 - b2 = 4)
+    sld1.SimNotify(8, 55)           ' TB_ENDTRACK 是"收尾"那条，不带新值 ⇒ 两条都不许点
+    Debug.Print "SC5-endtrk=" & TF(gChg1 - b1 = 2 And gScr1 - b2 = 4)
+    sld1.SimNotify(0, 54)           ' TB_LINEUP（方向键那一档）：值动了 ⇒ Change；不是滑块档 ⇒ Scroll 不涨
+    Debug.Print "SC6-line=" & TF(gChg1 - b1 = 3 And gScr1 - b2 = 4)
+    Debug.Print "SC7-value=" & CStr(sld1.Value)
+    sld2.SimNotify(5, 30)           ' 竖杆：同一条 case、发的是 WM_VSCROLL（sld2 只挂 Change）
+    Debug.Print "SC8-vert=" & TF(gChg2 - b3 = 1)
+    Debug.Print "SC9-isolate=" & TF(gChg1 - b1 = 3 And gScr1 - b2 = 4)
+    sld1.Value = 66                 ' 程序化赋值**不发**通知（实测；DT41 同型的哨兵，哪天齐平就得翻红）
+    Debug.Print "SC10-setval=" & TF(gChg1 - b1 = 3 And gScr1 - b2 = 4)
+    sld1.SimNotify(5, 66)           ' SetValue 已把基准推到 66 ⇒ 这条同值通知不该被当成"变了"
+    Debug.Print "SC11-baseline=" & TF(gChg1 - b1 = 3 And gScr1 - b2 = 5)
     Debug.Print "SLIDER-DONE"
     Unload Me
+End Sub
+
+' VB6 这两条处理器都没有参数（与 DT-c 那三条同形），所以生成的回调形参表是空的。
+Private Sub sld1_Change()
+    gChg1 = gChg1 + 1
+End Sub
+
+Private Sub sld1_Scroll()
+    gScr1 = gScr1 + 1
+End Sub
+
+Private Sub sld2_Change()
+    gChg2 = gChg2 + 1
 End Sub

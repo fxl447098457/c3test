@@ -37,7 +37,10 @@
             // C29-MV-c: MonthView 的判据方法同形 (SimDateClick d → MCN_SELCHANGE 发给父窗)。
             // 它**带一个 Date 参数**（DT-c 那三条无参，所以那里 a0 用不上）。
             bool mvSim = monthviewVars_.count(tvBare) > 0 && tvMem == "simdateclick";
-            if (tvSim || tbSim || dtSim || mvSim) {
+            // C29-SL-c: Slider 的判据方法同形 (SimNotify code, pos → 原生那一档的
+            // WM_HSCROLL/WM_VSCROLL 发给父窗)，**带两个整型参数**。
+            bool slSim = !sliderNameOfExpr(comObjExpr_).empty() && tvMem == "simnotify";
+            if (tvSim || tbSim || dtSim || mvSim || slSim) {
                 isComMarker_ = false;
                 std::vector<std::string> sa;
                 for (size_t i = 0; i < node.positional.size(); i++) {
@@ -46,7 +49,9 @@
                 }
                 std::string a0 = sa.size() > 0 ? sa[0] : std::string("0");
                 std::string a1 = sa.size() > 1 ? sa[1] : std::string("0");
-                lastExpr_ = mvSim
+                lastExpr_ = slSim
+                    ? ("vb6_Slider_SimNotify((void*)" + comObjExpr_ + ", " + a0 + ", " + a1 + ")")
+                    : mvSim
                     ? ("vb6_MV_SimDateClick((void*)" + comObjExpr_ + ", " + a0 + ")")
                     : dtSim
                     ? (std::string(tvMem == "simchange"   ? "vb6_DTP_SimChange"

@@ -539,6 +539,9 @@
     bool hasScrollBar = false;
     for (const auto& ctrl : frmDesc.formControl.children) {
         if (ctrl.controlType == FrmControlType::HScrollBar || ctrl.controlType == FrmControlType::VScrollBar) { hasScrollBar = true; break; }
+        // C29-SL-c: Slider 走的就是这一条通道（实测：横杆发 WM_HSCROLL、竖杆发 WM_VSCROLL，
+        // lParam = 控件句柄）⇒ 同一扇门，认来源的写法也照抄 ScrollBar 那一套。
+        if (ctrl.controlType == FrmControlType::Slider) { hasScrollBar = true; break; }
     }
     if (hasScrollBar) {
     c_.emitLine("{ void* scrollHwnd = (void*)lParam; int scrollCode = LOWORD(wParam);");
@@ -556,6 +559,30 @@
             c_.dedent();
             c_.emitLine("}");
         }
+    }
+    // C29-SL-c: Slider 的 Change / Scroll —— 同一条通道、同一扇认来源的门。
+    // 两条分法都在 RTL 那边定（029 §C29-SL-c 有实测理由）：Change 问"值真的变了没"
+    // （`vb6_Slider_FireChange` 自带基准，拖拽中那串 TB_THUMBTRACK 因此连续触发），
+    // Scroll 只认滑块那两档（4/5），与上面 ScrollBar 已发货的口径同一档。
+    for (const auto& ctrl : frmDesc.formControl.children) {
+        if (ctrl.controlType != FrmControlType::Slider) continue;
+        std::string slHwnd = "vb6_hwnd_" + cIdent(ctrl.controlName);
+        std::string slScrollFn = cProcName(ctrl.controlName + "_Scroll", AccessLevel::Private);
+        std::string slChangeFn = cProcName(ctrl.controlName + "_Change", AccessLevel::Private);
+        bool slHasScroll = symTab_.lookup(ctrl.controlName + "_Scroll") != nullptr;
+        bool slHasChange = symTab_.lookup(ctrl.controlName + "_Change") != nullptr;
+        if (!slHasScroll && !slHasChange) continue;
+        c_.emitLine("if (scrollHwnd == (void*)" + slHwnd + ") {");
+        c_.indent();
+        // FireChange 只在**真挂了 Change 处理器**时才调：它会推进基准，白调一次等于吞掉一条 Change。
+        if (slHasChange)
+            c_.emitLine("if (vb6_Slider_FireChange((void*)" + slHwnd + ")) { extern void "
+                        + slChangeFn + "(); " + slChangeFn + "(); }");
+        if (slHasScroll)
+            c_.emitLine("if (scrollCode == 4 || scrollCode == 5) { extern void "
+                        + slScrollFn + "(); " + slScrollFn + "(); }");
+        c_.dedent();
+        c_.emitLine("}");
     }
     c_.emitLine("}");
     }

@@ -823,7 +823,7 @@ void    vb6_Ws_Close(void* hwnd);
 //       GetOrientation 答的是自存那一档，判据必须**另问** ChannelIsVert 那条控件侧证人。
 //     * TickFrequency 原生**没有回读**（GETTIC 答不出、GETTICPOS 与频率无关）⇒ 自存读回，
 //       写侧真下发 TBM_SETTICFREQ；"有没有刻度"用 TickPresent（GETTICPOS(0) != -1）证。
-//   值面 (Min/Max/Value/Small·LargeChange/Sel*) 留 C29-SL-b，事件留 C29-SL-c。
+//   值面 (Min/Max/Value/Small·LargeChange/Sel*) 与事件面 (Change / Scroll) 分别在下面 SL-b / SL-c 两段。
 void    vb6_Slider_Init(void* hwnd, long min, long max, long value,
                         long smallChange, long largeChange, long tickFrequency,
                         long selStart, long selEnd, long selectRange);
@@ -856,6 +856,17 @@ void    vb6_Slider_SetSelEnd(void* hwnd, int32_t v);
 // TravelIsVert 的正解是把滑块推到量程两端各读一次 TBM_GETTHUMBRECT，看位移落在哪根轴。
 int32_t vb6_Slider_TravelIsVert(void* hwnd);
 int32_t vb6_Slider_TickPresent(void* hwnd);
+// C29-SL-c：事件面。Slider 与 ScrollBar 共用同一条通道 —— 控件给**父窗**发 WM_HSCROLL（横杆）
+// / WM_VSCROLL（竖杆），wParam 低字是 TB_* 码、高字带当前值，lParam 就是控件句柄
+// （实测 .build/slprobe/slmeasure7/8.c：真拖一次收到 5×N → 4 → 8；方向键收到 0 → 8；
+//  而程序化 TBM_SETPOS / TBM_SETRANGE 一条都不发）。
+// FireChange：VB6 口径是"Value 改变即触发 Change，拖拽过程中连续触发"⇒ 以"自上次派发以来
+// 控件的值真的动了"为判据，返回 -1 表示变了并已把基准推进。
+int32_t vb6_Slider_FireChange(void* hwnd);
+// 判据专用助手（与 DTPicker.SimChange / TreeView.SimNodeClick 同先例，不对应 VB6 语义）：
+// 先把控件的值推到 pos（真拖与真键鼠都是"控件先动、再发通知"），再按原生那一档发一条
+// 真通知进父窗 —— 直接调 handler 会绕开整条派发链，验不到分发那三段。
+void    vb6_Slider_SimNotify(void* hwnd, int32_t code, int32_t pos);
 
 
 #ifdef __cplusplus

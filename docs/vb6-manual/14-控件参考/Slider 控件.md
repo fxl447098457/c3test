@@ -47,3 +47,18 @@
 | `Slider1.SelStart` / `.SelEnd` | 只有 `SelectRange = True` 时设进去才生效（实测没挂那位时 `TBM_SETSEL` 答不回来）。原生"没设过"答 `-1` ⇒ getter 折成 **0**（无区段）。两端互相顶：起点越过终点时终点跟上来 |
 
 **改设计期值面要注意顺序**：动 range 会让控件连带重算 `pos`、`page`、`selstart`（实测把 range 从 0..100 收到 10..100，`page` 从 20 变 18、`selstart` 跟到 10）。`vb6_Slider_Init` 的参数序因此是定死的：**range → line/page → pos → 刻度 → Sel**。
+
+## 本项目的实现口径（ai/029 C29-SL-c：`Change` / `Scroll` 两条事件）
+
+两条事件**不走 `WM_NOTIFY`**，走的是与 ScrollBar 同一条通道：控件给**父窗**发 `WM_HSCROLL`（横杆）或 `WM_VSCROLL`（竖杆），`LOWORD(wParam)` 是原生的 `TB_*` 码、`HIWORD(wParam)` 带当前值、`lParam` 就是控件句柄（派发按它认来源）。
+
+一次真拖拽实测是这一串：`TB_THUMBTRACK(5)`×N → `TB_THUMBPOSITION(4)` → `TB_ENDTRACK(8)`；方向键是 `TB_LINEUP(0)` → `TB_ENDTRACK(8)`。
+
+| 写法 | 触发与实现 |
+| --- | --- |
+| `Slider1_Change()` | 按"**值真的变了**"发（控件当前值 vs 上次派发时的基准）。所以拖拽过程中那一串 5 会连续触发，而落点那条 4 与收尾那条 8 不会再多发一次 |
+| `Slider1_Scroll()` | 只认滑块那两档（码 4 / 5），与本项目 HScrollBar / VScrollBar 已发货的口径同一档（同一条原生通道不允许两套分法）。"点轨道 / 按方向键算不算 Scroll" 本机拿不到 VB6 真值 ⇒ 押后 |
+| `Slider1.SimNotify(code, pos)` | **判据专用助手，不是 VB6 方法**（与 `DTPicker.SimChange` / `MonthView.SimDateClick` / `RichTextBox.SimNotify` 同先例）：先把值推到 `pos`（真手势都是控件先动、再发通知），再按原生那一档发一条**真**消息进父窗 |
+
+**程序化写 `Value` 不会触发 `Change`**：实测 `TBM_SETPOS` / `TBM_SETRANGE` 一条通知都不发，本项目刻意照原生、不伪造（VB6 那颗 OCX 里这一走会 raise）。判据里 `SC10`/`SC11` 是这条口径的哨兵，哪天要齐平就得翻红逼人来拍。
+

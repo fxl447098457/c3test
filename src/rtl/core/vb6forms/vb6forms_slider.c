@@ -3,8 +3,8 @@
 // 复刻口径: 用 comctl32 的 msctls_trackbar32 复刻 VB6 Slider 的等价行为,
 // **不加载任何 OCX** (mscomctl.ocx 在本机未注册, 且 32 位 inproc 无法进 x64 进程)。
 //
-// 本文件是 **SL-a**: 窗口 + 创建样式 + 标量属性面。值面 (Min/Max/Value/Small·LargeChange/
-// Sel*) 归 SL-b, 事件归 SL-c。
+// 本文件按格长厚：**SL-a** = 窗口 + 创建样式 + 标量属性面，**SL-b** = 值面
+// (Min/Max/Value/Small·LargeChange/Sel*)，**SL-c** = Change / Scroll 两条事件（文末那一节）。
 //
 // 实测口径 (.build/slprobe/slmeasure*.c, x64 真跑; 全文抄在 ai/029 §九 C29-SL-0 那一格):
 //   1) **方向的正解**: TBM_GETCHANNELRECT 的 rect 永远把行程长度放在 **x 分量** ——
@@ -62,6 +62,9 @@
 //     而 GetPropW 对"未设置"与"存了 0"都返回 NULL —— 不偏移就会把 `TickFrequency = 0`
 //     这种合法值当成未设置，静默答回默认）---
 static const wchar_t kSdTickFreq[] = L"VB6_SD_TickFrequency";
+// C29-SL-c：Change 的基准值（上一次派发时控件是多少）。与 TickFrequency 同一档自存理由：
+// 原生没有任何"上次值"可问，而 GetPropW 对未设置与存了 0 都答 NULL ⇒ 走 +1 偏移那套。
+static const wchar_t kSdLastPos[] = L"VB6_SD_LastPos";
 
 static void vb6_SdSetProp(void* hwnd, const wchar_t* name, LONG val) {
     if (!hwnd) return;
@@ -154,6 +157,8 @@ void vb6_Slider_Init(void* hwnd, long min, long max, long value,
         if (a > b) a = b;                     // 原生不接受反向区段
         SendMessageW(hw, TBM_SETSEL, TRUE, MAKELONG((WORD)(SHORT)a, (WORD)(SHORT)b));
     }
+    // C29-SL-c：把设计期落定之后的那一个值记成 Change 的基准（后面每次派发都跟它比）。
+    vb6_SdSetProp(hwnd, kSdLastPos, (LONG)(int)SendMessageW(hw, TBM_GETPOS, 0, 0));
 }
 
 // VB6 属性面：读样式位那一档（运行期写也走样式位，实测有效 —— 见文件头第 2 条）。
@@ -287,6 +292,9 @@ void vb6_Slider_SetValue(void* hwnd, int v) {
     if (!hwnd) return;
     // 越界**不自己钳**：实测控件就钳（150→100、-5→10），让控件答这一档。
     SendMessageW((HWND)hwnd, TBM_SETPOS, TRUE, (WPARAM)v);
+    // C29-SL-c：程序化赋值**不发**通知（实测 TBM_SETPOS / TBM_SETRANGE 一条都不给父窗），
+    // 所以这一趟也不该欠下一条 Change：基准跟着推进，后面来一条同值的通知才不会误报"变了"。
+    vb6_SdSetProp(hwnd, kSdLastPos, (LONG)(int)SendMessageW((HWND)hwnd, TBM_GETPOS, 0, 0));
 }
 
 int vb6_Slider_GetSmallChange(void* hwnd) {
@@ -369,6 +377,52 @@ void vb6_Slider_SetSelEnd(void* hwnd, int v) {
     lo = vb6_Slider_GetSelStart(hwnd);
     if (v < lo) lo = v;
     SendMessageW((HWND)hwnd, TBM_SETSEL, TRUE, MAKELONG((WORD)(SHORT)lo, (WORD)(SHORT)v));
+}
+
+/* ======================= C29-SL-c: 事件面 ======================= *
+ * 通道实测（.build/slprobe/slmeasure7.c / 8.c，x64 真跑，父窗 WndProc 逐条记 wParam）：
+ *   · Slider 与 ScrollBar 同一条道 —— 控件给**父窗**发 WM_HSCROLL（横杆）/ WM_VSCROLL（竖杆），
+ *     不走 WM_NOTIFY；`lParam` 就是控件句柄（派发按它认来源），`LOWORD(wParam)` 是 TB_* 码。
+ *   · **值在高字**：一次真拖收到 5×N（TB_THUMBTRACK，高字 30,32,35,37,40,42,45,47,49 一路跟着
+ *     控件走）→ 4（TB_THUMBPOSITION，高字 = 落点 49）→ 8（TB_ENDTRACK，高字 0）。
+ *     所以"拖拽中 Change 连续触发"在原生这边就是那一串 5。
+ *   · 方向键（VK_LEFT）收到 0（TB_LINEUP）→ 8，**控件先动**（70→69，动的正是 line 那一格）再发。
+ *   · 程序化 `TBM_SETPOS` / `TBM_SETRANGE` **一条都不发**（实测 delta=0）⇒ 与 DT-c 的 `DT41` 同型：
+ *     VB6 那颗 OCX 里 Value 赋值会 raise Change，这里刻意照原生、不伪造，夹具 SC 那一条是哨兵。
+ * 两条 VB6 事件的分法：
+ *   · `Change` 按"**值真的变了**"发（文档原话是 Value 改变即触发、拖拽中连续触发）。拿码表硬枚举
+ *     也能凑出同样的序列，但 8（ENDTRACK）与 4（POSITION）都不带新值，用基准比一次就够，
+ *     不必记一张"哪些码算变"的表 —— 何况 TB_THUMBTRACK 连发两个同值（拖动不足一像素）时，
+ *     按码表会多发一次 Change，按值比不会。
+ *   · `Scroll` 只认滑块那两档（4 / 5），与仓里 HScrollBar/VScrollBar 已发货的口径**同一档**
+ *     （那两条用的就是 `scrollCode == 5 || == 4`）；同一原生通道不允许两套分法，
+ *     "点轨道/按方向键算不算 Scroll"本机拿不到 VB6 真值 ⇒ 押后，见 029。
+ */
+
+int32_t vb6_Slider_FireChange(void* hwnd) {
+    LONG pos, last;
+    if (!hwnd) return 0;
+    pos = (LONG)SendMessageW((HWND)hwnd, TBM_GETPOS, 0, 0);
+    // 没有基准（Init 之前就来通知）时把当前值当基准 ⇒ 这一条不算变，下一口才开始比。
+    last = vb6_SdGetProp(hwnd, kSdLastPos, pos);
+    if (pos == last) return 0;
+    vb6_SdSetProp(hwnd, kSdLastPos, pos);
+    return -1;                       // VB6: True = -1
+}
+
+void vb6_Slider_SimNotify(void* hwnd, int32_t code, int32_t pos) {
+    HWND hw, parent;
+    if (!hwnd) return;
+    hw = (HWND)hwnd;
+    // 真手势（拖、键、点轨道）都是**控件先动、再发通知**，所以先把值推到 pos ——
+    // 高字里带的那个数与控件当时的值必须是同一个，否则判据就在考我们自己的表。
+    SendMessageW(hw, TBM_SETPOS, TRUE, (WPARAM)pos);
+    parent = GetParent(hw);
+    if (!parent) return;
+    SendMessageW(parent,
+                 (vb6_Slider_GetOrientation(hwnd) != VB6_SLD_HORZ) ? WM_VSCROLL : WM_HSCROLL,
+                 MAKEWPARAM((WORD)(SHORT)code, (WORD)(SHORT)pos),
+                 (LPARAM)hw);
 }
 
 #endif /* _WIN32 */
