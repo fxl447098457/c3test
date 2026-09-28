@@ -40,6 +40,9 @@ Vb6Type CCodeGen::inferExprType(Expr& expr) const {
             // ai/022 W1: 必须先于 knownLongVars_ 判 (口径同 Fix 175 的 Date) ——
             // As Boolean 的 C 型与 Integer 同串, 只按 C 类型登记就永远看不见布尔。
             if (knownBoolVars_.count(lower)) return Vb6Type::Boolean;
+            // 账 #123: 口径同 Fix 175 的 Date / W1 的 Boolean —— 登记过就必须由这张表答 Byte,
+            // 让局部/形参 Byte 与模块级 Byte (走符号表那条支路) 给出同一份答案。
+            if (knownByteVars_.count(lower)) return Vb6Type::Byte;
             if (knownLongVars_.count(lower)) return Vb6Type::Long;
             if (knownLongPtrVars_.count(lower)) return Vb6Type::LongPtr;
             if (knownVariantVars_.count(lower)) return Vb6Type::Variant;
@@ -390,8 +393,12 @@ bool CCodeGen::isDefinitelyVariantExpr(Expr& expr, bool* isArrOut) const {
             }
             // Fix 049b: 如果已知为非 Variant 具体类型 (BSTR/Long/Double),
             // 不应回退到符号表查找 (可能命中其他模块的同名 Variant 符号)
+            // 账 #123: 补 Byte 那一档。缺它时局部 `Dim bt As Byte` 掉到下面的符号表回退 ⇒
+            // 被判成 Variant ⇒ 比较发成 vb6_VarCmpLongEq(&bt, …) (拿 1 字节对象的地址当
+            // vb6_VARIANT* 传) ⇒ 实测 `(bt = 65)` 返回 False。
             if (knownBstrVars_.count(lower) || knownLongVars_.count(lower)
-                || knownDoubleVars_.count(lower) || knownSingleVars_.count(lower)) {
+                || knownDoubleVars_.count(lower) || knownSingleVars_.count(lower)
+                || knownByteVars_.count(lower)) {
                 return false;
             }
             // 符号表查询

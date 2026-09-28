@@ -132,6 +132,11 @@
     // String 形参收 Boolean 实参都走 vb6_CStrLong → 打出 -1 而 VB6 打 "True"。
     // 与 knownLongVars_ **并存**登记 (口径同 Fix 117c 的 Single / Fix 175 的 Date),
     // 消费点一律先判 Boolean, 以免既有整数路径失去变量。
+    // 账 #123: 局部/形参 As Byte 的专属登记表 (口径同上 knownBoolVars_ 那条 ai/022 W1)。
+    // As Byte 的 C 型是 uint8_t, 不匹配既有的 int32_t|int16_t|VBABOOL 那一支, 所以以前
+    // 它进不了任何 knownXxxVars_ ⇒ inferExprType 答 Unknown、isDefinitelyVariantExpr 又回退
+    // 去查符号表 ⇒ 比较被当 VARIANT 取地址 (实测 `(bt = 65)` 今天返回 False)。
+    std::unordered_set<std::string> knownByteVars_;
     std::unordered_set<std::string> knownBoolVars_;
 
     // 已知Long/Integer/Boolean变量名集合 (小写) - 用于COM值解封类型推断

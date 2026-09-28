@@ -161,6 +161,11 @@ void CCodeGen::emitLocalDeclCode(LocalDeclStmt& node) {
                 std::string lower = var.name;
                 std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
                 knownBstrVars_.insert(lower);
+            } else if (cType == "uint8_t") {
+                // 账 #123: As Byte 的 C 型就是 uint8_t, 上面任何一支都不匹配 ⇒ 以前谁也没登记它
+                std::string lower = var.name;
+                std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+                knownByteVars_.insert(lower);
             } else if (cType == "int32_t" || cType == "int16_t" || cType == "VBABOOL") {
                 std::string lower = var.name;
                 std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
@@ -450,6 +455,9 @@ void CCodeGen::emitLocalDeclCode(LocalDeclStmt& node) {
                 std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
                 if (cType == "BSTR") {
                     knownBstrVars_.insert(lower);
+            } else if (cType == "uint8_t") {
+                    // 账 #123: 局部 Const As Byte 同 Dim 分支
+                    knownByteVars_.insert(lower);
             } else if (cType == "int32_t" || cType == "int16_t" || cType == "VBABOOL") {
                     knownLongVars_.insert(lower);
                     // ai/022 W1: 同 Dim 分支 (Const 也吃这个读数)

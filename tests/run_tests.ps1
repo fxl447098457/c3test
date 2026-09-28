@@ -1340,6 +1340,13 @@ if ($Category -in @("all", "run", "bas")) {
     $cnumNeedles = @("S122-lit=123", "S122-long=42", "S122-dbl=2.5", "S122-byte=65", "S122-cbyte=65", "S122-asc=65", "S122-bool=True", "S122-expr=43", "S122-len=4", "S122-ubound=3", "S122-date-ok=Y", "S122-str-left=ABC", "S122-str-ucase=XY", "S122-str-func=MMMM", "S122-func-num=21", "S122-concat=n=42 d=2.5", "S122-borrow=SHARED", "S122-loop=20042", "S122-DONE")
     Add-BasTest "test_str_cnum_assign" "$Tests\test_str_cnum_assign.bas" $cnumNeedles
     Add-BasTest "test_str_cnum_assign_x86" "$Tests\test_str_cnum_assign.bas" $cnumNeedles -Arch "x86"
+    # 账 #123: 局部/形参/局部Const 的 As Byte 在类型推断里以前完全不可见 (C 型 uint8_t 不匹配
+    # 任何登记分支)。三件后果: 赋给 String 崩 (SIGSEGV)、等值比较**静默给错答案**
+    # (vb6_VarCmpLongEq(&bt,…) 拿 1 字节地址当 vb6_VARIANT*)、装箱 VT_I4 而非 VT_UI1。
+    # 26 条读数全取自真实输出, x64 与 x86 逐字相同; 针面不带方括号。
+    $byteNeedles = @("B1-cmp-eq-true=True", "B2-cmp-eq-false=False", "B3-cmp-lt=True", "B4-cmp-module-eq=True", "B5-cmp-const-eq=True", "B6-str-local=65", "B7-str-module=66", "B8-str-const=70", "B9-str-len=2", "B10-pack-local=17", "B11-pack-module=17", "B12-pack-const=17", "B13-pack-cbyte=17", "B14-pack-param=17", "B15-packed-val=67", "B16-param-byval-eq=EQ200", "B17-param-byval-ne=NE200", "B18-byref-writethru=201", "B19-byref-cmp=True", "B20-arith=204", "B21-print=66", "B22-mixed-lt=True", "B23-mixed-sum=1066", "B24-loop-pack=3", "B25-loop-val=202", "B26-DONE")
+    Add-BasTest "test_byte_visible" "$Tests\test_byte_visible.bas" $byteNeedles
+    Add-BasTest "test_byte_visible_x86" "$Tests\test_byte_visible.bas" $byteNeedles -Arch "x86"
     # Fix 190: Declare "As Any" ByRef 的下标链实参必须取地址, 不能把元素值当指针
     Add-BasTest "test_asany_subscript" "$Tests\test_asany_subscript.bas" @("WITH-SUB=Y", "EXPR-SUB=Y", "SCALAR=Y", "CHAIN=Y", "ASANY-DONE")
     # Delegate (tB extension): typed function pointers, stdcall/cdecl thunks, both arches
@@ -1761,6 +1768,21 @@ if ($Category -in @("all", "run", "vbp")) {
         'vb6_CStrLong(vb6_MakeStr(',                    # 返回 String 的工程函数不许当数值折
         'vb6_CStrLong(vb6_Left(',                       # 返回 String 的内置函数同理
         'vb6_CStrByte(vb6_ByteArrayToString('           # Fix 140 那支转完就是字符串了
+    )
+    # 账 #123: 发码面钉"Byte 可见"。四条钉该出现的形状 (装箱带收窄、赋 String 走 CStrByte、
+    # 比较走直接 C 比较而不是取地址), 三条钉那两种**修复前**的形状不许再出现 —— 尤其
+    # vb6_VarCmpLongEq(&bt,…) 这一族: 助手签名是 (vb6_VARIANT*, int32_t), 拿 1 字节对象的
+    # 地址当 16 字节 VARIANT 传, 它一出现就是"读邻居栈当 vt"的静默错答案回来了。
+    Test-EmitcShape "byte_emitc_visible" @("$Tests\test_byte_visible.bas") @(
+        'v = vb6_VariantByte((uint8_t)(bt));',
+        'v = vb6_VariantByte((uint8_t)(gb));',
+        'vb6_BSTR_AssignMove(&s, vb6_CStrByte(bt));',
+        'vb6_CStrBool((-(bt == 65)))'
+    )
+    Test-EmitcAbsent "byte_emitc_no_variant_addr" @("$Tests\test_byte_visible.bas") @(
+        'vb6_VarCmpLongEq(&bt,',                        # 局部 Byte 不许再被当 VARIANT 取地址
+        'vb6_VarCmpLongEq(&b,',                         # 形参同 (B16 那形修复前就是这条)
+        'vb6_VariantLong(bt)'                           # 装箱不许退成 VT_I4
     )
     # ai/029 C29-DT-a: DTPicker 换成原生 SysDateTimePick32（D6：不碰 MSCOMCT2.OCX，32 位进不了 x64）。
     # 改之前这枚控件走的是"第三方 OCX 按 COM 后期绑定"那一组 => 工程没引用类型库时连符号都查不到，

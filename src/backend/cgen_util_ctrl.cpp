@@ -1225,7 +1225,13 @@ std::string CCodeGen::wrapVariantValue(ASTNode* valueNode, const std::string& cE
             case Vb6Type::Double:
             case Vb6Type::Single:    return "vb6_VariantDouble(" + cExpr + ")";
             case Vb6Type::Boolean:   return "vb6_VariantBool(" + cExpr + ")";
-            case Vb6Type::Byte:      return "vb6_VariantLong(" + cExpr + ")";
+            // 账 #123: Byte 的装箱档位以前是 vb6_VariantLong ⇒ VT_I4=3, 而 VB6 要 **VT_UI1=17**
+            // (RTL 里 vb6_VariantByte 就是 17 那一档: v.vt = vb6_vtByte)。实测修复前
+            // `v = 模块级Byte` 与 `v = CByte(67)` 都读回 3; 局部 Byte 反而是 17 —— 因为它在
+            // inferExprType 里不可见、掉到下面的 _Generic (`unsigned char: vb6_VariantByte`)。
+            // 所以这条不是为新登记的 Byte 补功能, 而是把这条**预存的错**一并改对, 三形同值。
+            // 显式收窄同 boxToVariant 那条布尔的写法 (C 侧 Byte 载体可能是 uint8_t 或 int32_t)。
+            case Vb6Type::Byte:      return "vb6_VariantByte((uint8_t)(" + cExpr + "))";
             case Vb6Type::Date:      return "vb6_VariantDouble(" + cExpr + ")";
             case Vb6Type::Currency:  return "vb6_VariantDouble(" + cExpr + ")";
             default: break;

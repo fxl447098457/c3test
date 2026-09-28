@@ -45,6 +45,7 @@ void CCodeGen::visit(FunctionDecl& node) {
     knownSingleVars_.clear();
     knownDateVars_.clear();   // Fix 175
     knownBoolVars_.clear();     // ai/022 W1
+    knownByteVars_.clear();     // 账 #123
     knownLongVars_.clear();
     knownLongPtrVars_.clear();  // Bug #2 fix: 也清空LongPtr集合
     knownVariantVars_.clear();
@@ -133,10 +134,15 @@ void CCodeGen::visit(FunctionDecl& node) {
                 // C 类型串分派会让 inferExprType 看不见 Date (打出序列号)。
                 if (paramType == Vb6Type::Date) knownDateVars_.insert(pLower);
             }
-            else if (paramType == Vb6Type::Long || paramType == Vb6Type::Integer || paramType == Vb6Type::Boolean) {
+            else if (paramType == Vb6Type::Long || paramType == Vb6Type::Integer || paramType == Vb6Type::Boolean
+                     || paramType == Vb6Type::Byte) {
                 knownLongVars_.insert(pLower);
                 // ai/022 W1: 布尔形参另登记一份 (口径同 Fix 175 的 Date 形参)
                 if (paramType == Vb6Type::Boolean) knownBoolVars_.insert(pLower);
+                // 账 #123: Byte 形参一并进这一支 (口径同 ai/022 W1 的 Boolean —— C 型不同串
+                // 就永远看不见 ⇒ 比较被当 Variant 取地址)。另登记一份到 knownByteVars_,
+                // inferExprType 先判 Byte 那张表, 所以这里进 knownLongVars_ 不会把它读成 Long。
+                if (paramType == Vb6Type::Byte) knownByteVars_.insert(pLower);
             }
             // Bug #2 fix: LongPtr 参数注册到独立集合
             // Fix 084m: LongLong 同路 —— 二者都是标量整数 (intptr_t / int64_t), 表达式侧
