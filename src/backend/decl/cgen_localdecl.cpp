@@ -173,6 +173,9 @@ void CCodeGen::emitLocalDeclCode(LocalDeclStmt& node) {
                 // ai/022 W1: 另登记一份布尔 (口径同 Fix 175 的 Date), 消费点先判它
                 if (resolveArrayElemType(var.asType.get()) == Vb6Type::Boolean)
                     knownBoolVars_.insert(lower);
+                // ai/009 5.10: 另登记一份 Integer, 收窄检查才分得出 16 位范围
+                if (resolveArrayElemType(var.asType.get()) == Vb6Type::Integer)
+                    knownIntVars_.insert(lower);
             } else if (cType == "intptr_t") {
                 // Bug #2 fix: LongPtr变量注册到独立集合
                 std::string lower = var.name;

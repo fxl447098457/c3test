@@ -478,7 +478,10 @@
             // Fix 170: 整体数组目标 (`A() = expr`) 右侧若非新建载体则深拷贝, 不制造别名
             if (tgtIsWholeArray170)
                 convertedValue = wrapWholeArrayAssign(target, convertedValue, node.target.get());
-            c_.emitLine(target + " = " + convertedValue + ";");
+            // ai/009 5.10: 窄整型目标 (`Byte`/`Integer`/`Long`) 收窄赋值前查溢出。
+            // 整体数组目标不是整型, narrowCheckAssign 内部按目标类型判掉, 不会套上。
+            c_.emitLine(target + " = " + narrowCheckAssign(node.target.get(), node.value.get(),
+                                                             convertedValue) + ";");
         } else {
             // Fix 091l: Variant 目标 ← 具体类型值 (SafeArray1D*/数组载体/标量/COM 结果).
             // C 侧目标是 vb6_VARIANT 结构体, 直接赋 SafeArray1D* 等 → C2440
@@ -511,6 +514,8 @@
             // Fix 170: 整体数组目标 (`A() = expr`) 右侧若非新建载体则深拷贝, 不制造别名
             if (tgtIsWholeArray170 && !value.empty())
                 value = wrapWholeArrayAssign(target, value, node.target.get());
-            c_.emitLine(target + " = " + value + ";");
+            // ai/009 5.10: 同上, Variant 目标分支同样收窄检查
+            c_.emitLine(target + " = " + narrowCheckAssign(node.target.get(), node.value.get(),
+                                                             value) + ";");
         }
     }

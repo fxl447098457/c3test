@@ -287,6 +287,14 @@
     // 推断表达式的Vb6Type（简化版，用于Select Case等需要类型判断的场景）
     Vb6Type inferExprType(Expr& expr) const;
 
+    // ai/009 §5.10 (P3): 给**窄整型目标**的赋值右值套上溢出检查 (vb6_ChkByte/
+    // ChkInt/ChkLong), 越界即 run-time error 6。原先这类赋值是裸 `t = v;`, 由 C
+    // 静默截断 (`a As Byte: a = -1` ⇒ a=255)。
+    // 只在右值类型**可能**超出目标范围时套; 同宽/更窄的右值套上去是恒真的噪声。
+    // 目标限 IdentifierExpr —— 成员访问/数组下标的目标类型另有一整套解析, 不在
+    // 这里猜 (返回原值 = 不套检查, 与改动前的行为一致)。
+    std::string narrowCheckAssign(Expr* target, Expr* value, const std::string& cValue) const;
+
     // P20-42: 窗体控件的**属性返回类型**。见 cgen_util_type.cpp 的 MemberAccessExpr
     // 分支: 那里对 `对象.成员` 的兜底是 lookupModule(memberName), 只按成员**裸名**
     // 查模块符号 —— 于是 `SSTab1.Tab` 会命中返回 BSTR 的内置函数 vb6_Tab 而被判成

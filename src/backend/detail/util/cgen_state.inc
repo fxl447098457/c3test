@@ -139,6 +139,12 @@
     std::unordered_set<std::string> knownByteVars_;
     std::unordered_set<std::string> knownBoolVars_;
 
+    // Integer 与 Long 共用 knownLongVars_ (C 侧都是整数, 见下面那一份), 收窄检查
+    // 却要分出 16 位的 Integer 范围, 否则 `i As Integer: i = 40000` 会被当成 Long
+    // 放行 (实测不报错)。口径同上面 knownBoolVars_ 的并存登记: 与 knownLongVars_
+    // **并存**, 消费点先判它, 以免既有整数路径失去变量。
+    std::unordered_set<std::string> knownIntVars_;
+
     // 已知Long/Integer/Boolean变量名集合 (小写) - 用于COM值解封类型推断
     std::unordered_set<std::string> knownLongVars_;
 

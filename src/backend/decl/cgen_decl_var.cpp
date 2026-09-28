@@ -311,6 +311,11 @@ void CCodeGen::visit(VariableDecl& node) {
         std::string lower = node.name;
         std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
         knownBstrVars_.insert(lower);
+    } else if (cType == "uint8_t") {
+        // ai/009 §5.10: 模块级 Byte 走独立集合 (口径同 cgen_localdecl.cpp 的 Dim 分支)
+        std::string lower = node.name;
+        std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+        knownByteVars_.insert(lower);
     } else if (cType == "int32_t" || cType == "int16_t" || cType == "VBABOOL") {
         std::string lower = node.name;
         std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
@@ -318,6 +323,9 @@ void CCodeGen::visit(VariableDecl& node) {
         // ai/022 W1: 模块级 As Boolean 同型, 需另登记 (口径同上处 Dim 分支)
         if (resolveArrayElemType(node.asType.get()) == Vb6Type::Boolean)
             knownBoolVars_.insert(lower);
+        // ai/009 5.10: 模块级 As Integer 同型, 收窄检查需分出 16 位范围
+        if (resolveArrayElemType(node.asType.get()) == Vb6Type::Integer)
+            knownIntVars_.insert(lower);
     } else if (cType == "vb6_VARIANT") {
         // P8.4: 记录Variant类型局部变量
         std::string lower = node.name;

@@ -126,14 +126,44 @@ float vb6_Rnd(int32_t seed) {
 // 转换函数
 // ============================================================
 
+// ============================================================
+// 溢出检查 (Error 6)
+// ============================================================
+// VB6 对窄整型 (Byte/Integer/Long) 的**收窄赋值**是查表的: 值落在目标范围外就抛
+// run-time error 6 "Overflow", 由 `On Error Resume Next` / `On Error GoTo` 正常捕获。
+// 此前这一族是纯 C 截断 (`uint8_t a = 0; a = (-1);` ⇒ a=255), 即 ai/009 §5.10
+// 记的那条 P3 缺口 —— 用户写 `a = -1` 得到 255 而不是报错, 属静默错编。
+// 范围值取自 VB6 手册: Byte 0~255 / Integer -32768~32767 / Long -2147483648~2147483647。
+//
+// 口径说明 (与 VB6 的两处差别, 都是**已知取舍**, 不是漏):
+//   (1) 取整仍沿用既有的 round() (半值远离零), 不改 —— CInt 的银行家舍入是另一条账,
+//       改它会动到全部既有读数。
+//   (2) `On Error Resume Next` 下 vb6_RaiseError 提前返回, 此时本函数返回**被截断**的
+//       值并真的存进目标; VB6 那边是**放弃这次赋值、目标保持原值**。表达式的形状
+//       (而不是语句块) 决定了这个差别: 同一个 vb6_ChkXxx 要同时服务赋值 / 函数返回 /
+//       For 界 / 数组下标, 没法在那些位置发多语句块。相对"完全不检查", 这已经
+//       收窄到只差 Resume Next 下的存值。
+static int32_t vb6_OvfChk(int64_t v, int64_t lo, int64_t hi) {
+    if (v < lo || v > hi) vb6_RaiseError(6, vb6_BSTR_FromStr(L"Overflow"));
+    return (int32_t)v;
+}
+uint8_t vb6_ChkByte(int32_t v) { return (uint8_t)vb6_OvfChk(v, 0, 255); }
+int16_t vb6_ChkInt(int32_t v)  { return (int16_t)vb6_OvfChk(v, -32768, 32767); }
+int32_t vb6_ChkLong(int64_t v) {
+    return (int32_t)vb6_OvfChk(v, -2147483647LL - 1, 2147483647LL);
+}
+
 #ifdef vb6_CInt
 #undef vb6_CInt      // vb6rtl_builtin.h 的 _Generic 宏在定义处必须关闭
 #endif
-int16_t vb6_CInt(double x) { return (int16_t)round(x); }
+// CInt/CLng/CByte 在 VB6 里同样查表 (`CByte(300)` = Error 6), 不是截断。
+int16_t vb6_CInt(double x) { return (int16_t)vb6_OvfChk((int64_t)round(x), -32768, 32767); }
 #ifdef vb6_CLng
 #undef vb6_CLng
 #endif
-int32_t vb6_CLng(double x) { return (int32_t)round(x); }
+int32_t vb6_CLng(double x) {
+    return (int32_t)vb6_OvfChk((int64_t)round(x), -2147483647LL - 1, 2147483647LL);
+}
 #ifdef vb6_CDbl
 #undef vb6_CDbl
 #endif
@@ -490,7 +520,11 @@ int16_t vb6_CBool(double v) {
 }
 
 uint8_t vb6_CByte(double v) {
-    return (uint8_t)(int32_t)v;
+    // 范围按既有的**截断**值算 (取整本身是另一条账, 见文件头口径 (1));
+    // 截断前若已越界, 截断后又会绕回合法值 (-1 -> 255), 所以只能查截断前。
+    int32_t t = (int32_t)v;
+    (void)vb6_OvfChk(t, 0, 255);
+    return (uint8_t)t;
 }
 
 float vb6_CSng(double v) {

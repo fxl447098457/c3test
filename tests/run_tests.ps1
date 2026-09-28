@@ -15,6 +15,8 @@ param(
     [int]$Jobs = 1,          # >1 时并行运行纯 .bas 用例 (每 worker 独立输出目录); GUI/VBP 始终串行
     [int]$BasShard = 0,      # bas 分片当前编号 (1..BasShardTotal); 0=不分片整队跑
     [int]$BasShardTotal = 1, # bas 分片总数 (供 CI 用多 runner 并行跑 bas 用例)
+    [int]$VbpShard = 0,      # vbp 分片当前编号 (1..VbpShardTotal); 0=不分片整队跑
+    [int]$VbpShardTotal = 1, # vbp 分片总数 (供 CI 用多 runner 并行跑 vbp 用例)
     # 单条用例「运行」阶段的墙钟预算 (秒)。5s 在 -Jobs 20 的并行编译下会误杀: 4 vCPU runner 上
     # 被 cl/link 压住时, 健康的小 exe 也可能 >5s 才跑完 (实测卡住的进程只有 15ms CPU、线程 Ready)。
     # 真挂 (模态框/死锁) 靠这个上限兜底; 超时时会把 CPU 时间/状态/最后一行输出写进日志, 见下两处。
@@ -150,6 +152,36 @@ $script:pass = 0
 $script:fail = 0
 $script:skip = 0
 $script:total = 0
+
+# vbp 分片闸门: 每个 CI job 只跑 vbp 队列的 1/N, 把那条 12.8 min 的关键路径摊到 N 个
+# runner 上 (实测 123 例 / 714s, 最慢一例 41s, 分布很平 ⇒ 分片收益几乎线性)。
+#
+# 按**调用次序取模**而不是切段, 两个理由:
+#   1. vbp 的用例是就地写在分类块里的一条条 Test-* 调用, 没有 bas 那样的 $basQueue 可切。
+#      按次序就不必把上百个调用点重排成数据 —— 改动面小一个数量级, 也就不会碰到那些
+#      内联断言块里的细节 (它们只能整体包 if, 不能像函数体那样提前 return)。
+#   2. 不需要知道用例总数。加一条 vbp 用例不用同步改任何常数, 也就不会出现
+#      "总数写死、加了用例就静默漏跑" —— 分片漏跑 = 覆盖面静默缩小, 是最坏的一类退化。
+#
+# 可复现性: 一个 job 只跑一个 category, 且 vbp/GUI 始终串行 ⇒ 同一次提交下第 k 片的
+# 内容每次都一样, 不会这次归 1 片那次归 2 片。
+$script:VbpCaseNo = 0
+$script:VbpSkipped = 0
+function Enter-VbpShard {
+    if ($VbpShardTotal -le 1) { return $true }   # 不分片: 计数器都不必动
+    $script:VbpCaseNo++
+    $mine = $VbpShard - 1
+    if (((($script:VbpCaseNo - 1) % $VbpShardTotal)) -eq $mine) { return $true }
+    $script:VbpSkipped++
+    return $false
+}
+if ($VbpShardTotal -gt 1) {
+    if ($VbpShard -lt 1 -or $VbpShard -gt $VbpShardTotal) {
+        Write-Host "[ERROR] VbpShard 需在 1..VbpShardTotal" -ForegroundColor Red
+        exit 1
+    }
+    Write-Host "  (vbp shard ${VbpShard}/${VbpShardTotal})" -ForegroundColor Cyan
+}
 # ai/022 B13c: 类型库 / COM 服务器表 / 接口 vtable ä¸条通道是否同值,
 # 取读数的助手单独一个文件（tests\tlb_identity.ps1）。它只用 $C3/$Tests/$OutDir,
 # 这里都已经就位。
@@ -310,6 +342,8 @@ function Invoke-TestExe {
 # This checks startup, not screenshot correctness or QR decoding.
 function Test-GuiVbp {
     param([string]$Name, [string]$VbpFile, [string]$ExeName = "", [string]$Arch = "", [int]$AutoExitSec = 0)
+    # vbp 分片: 本片不跑这例 —— 闸门必须在任何副作用之前 (建目录/起进程)。
+    if (-not (Enter-VbpShard)) { return }
     $script:total++
     Write-Host -NoNewline "  [GUI] $Name ... "
     $guiOut = Join-Path $OutDir $Name
@@ -605,6 +639,8 @@ function Test-ProductManifest {
         [string]$MustContain = "",
         [string]$MustNotContain = ""
     )
+    # vbp 分片: 本片不跑这例 —— 闸门必须在任何副作用之前 (建目录/起进程)。
+    if (-not (Enter-VbpShard)) { return }
     $script:total++
     Write-Host -NoNewline "  [MANIFEST] $Name ... "
     if (-not (Test-Path $ExeFile)) {
@@ -637,6 +673,8 @@ function Test-Vbp {
         [string]$RequiresCom = "",    # 依赖的 COM ProgId (未注册则 SKIP, 否则 FAIL)
         [string]$Env = ""             # 可选环境变量, "K1=V1;K2=V2" (跑 exe 前设, 跑完还原)
     )
+    # vbp 分片: 本片不跑这例 —— 闸门必须在任何副作用之前 (建目录/起进程)。
+    if (-not (Enter-VbpShard)) { return }
     $script:total++
     Write-Host -NoNewline "  [VBP] $Name ... "
 
@@ -855,6 +893,8 @@ function Test-Compile {
 # 字面量劈成两行, 于是「带字面量的行里未转义的双引号必须成对」就是这条判据的不变式。
 function Test-EmitcShape {
     param([string]$Name, [array]$Sources, [array]$Needles)
+    # vbp 分片: 本片不跑这例 —— 闸门必须在任何副作用之前 (建目录/起进程)。
+    if (-not (Enter-VbpShard)) { return }
     $script:total++
     Write-Host -NoNewline "  [EMITC-SHAPE] $Name ... "
     $argList = (($Sources | ForEach-Object { '"' + $_ + '"' }) -join ' ')
@@ -884,6 +924,8 @@ function Test-EmitcShape {
 # 并存，读数目视上全绿、发码却还在 CoCreateInstance。
 function Test-EmitcAbsent {
     param([string]$Name, [array]$Sources, [array]$Needles)
+    # vbp 分片: 本片不跑这例 —— 闸门必须在任何副作用之前 (建目录/起进程)。
+    if (-not (Enter-VbpShard)) { return }
     $script:total++
     Write-Host -NoNewline "  [EMITC-ABSENT] $Name ... "
     $argList = (($Sources | ForEach-Object { '"' + $_ + '"' }) -join ' ')
@@ -990,6 +1032,8 @@ function Test-Syntax {
 # 本机实测：冷编 24.5 s / 全命中 2.9 s / 换 -O 2 6.5 s / 换架构 x86 24.6 s。
 function Test-ObjCache {
     param([string]$Name, [string]$Source)
+    # vbp 分片: 本片不跑这例 —— 闸门必须在任何副作用之前 (建目录/起进程)。
+    if (-not (Enter-VbpShard)) { return }
     $script:total++
     Write-Host -NoNewline "  [OBJCACHE] $Name ... "
     $reasons = @()
@@ -1124,6 +1168,8 @@ function Test-VbpWarn {
 # ai/023 S05/S06: generic CLI check — exit 0 and output contains needle.
 function Test-CliOk {
     param([string]$Name, [string[]]$C3Args, [string]$Needle)
+    # vbp 分片: 本片不跑这例 —— 闸门必须在任何副作用之前 (建目录/起进程)。
+    if (-not (Enter-VbpShard)) { return }
     $script:total++
     Write-Host -NoNewline "  [CLI] $Name ... "
     $result = & cmd /c (('"' + $C3 + '" ' + ($C3Args -join ' ') + ' 2>&1'))
@@ -1389,6 +1435,20 @@ if ($Category -in @("all", "run", "bas")) {
     Add-BasTest "test_interface_x86" "$Tests\test_interface.bas" @("ITF-SOFT:12", "ITF-1:OK", "ITF-2:OK", "INTERFACE-DONE") -Arch "x86"
     Add-BasTest "test_bool_display_x86" "$Tests\test_bool_display.bas" $boolNeedles -Arch "x86"
 
+    # ai/009 5.10 (P3, 溢出检查): 窄整型收窄赋值越界必须报 Error 6, 边界值 (255 /
+    # -32768 / 32767 / 2147483647) 必须**不**报 —— 两个方向都锁, 后者防"把合法
+    # 程序改成编不过"这种比不检查更糟的回归。
+    $ovfNeedles = @(
+        "OVF-OK b-1 err=6", "OVF-OK b-256 err=6", "OVF-OK b-255 err=0", "OVF-OK b-0 err=0",
+        "OVF-OK i-40000 err=6", "OVF-OK i-i32max err=6", "OVF-OK i-min err=0", "OVF-OK i-max err=0",
+        "OVF-OK l-5e9 err=6", "OVF-OK l-min err=0", "OVF-OK l-max err=0",
+        "OVF-OK cb-300 err=6", "OVF-OK cb-200 err=0",
+        "OVF-OK ci-40000 err=6", "OVF-OK ci-30000 err=0",
+        "OVF-VAL b=255 i=-32768 l=2147483647", "OVF-VAL2 b=0 i=32767",
+        "OVF-GOTO err=6", "OVERFLOW-DONE")
+    Add-BasTest "test_overflow" "$Tests\test_overflow.bas" $ovfNeedles
+    Add-BasTest "test_overflow_x86" "$Tests\test_overflow.bas" $ovfNeedles -Arch "x86"
+
     # 分片: CI 用多 runner 并行跑 bas 用例时, 各 runner 只取第 BasShard 片
     if ($BasShardTotal -gt 1) {
         if ($BasShard -lt 1 -or $BasShard -gt $BasShardTotal) {
@@ -1432,6 +1492,8 @@ function Test-VbpDll {
         [string[]]$LogNeedles = @(),   # asserted against the compiler's own output
         [string]$Arch = ""
     )
+    # vbp 分片: 本片不跑这例 —— 闸门必须在任何副作用之前 (建目录/起进程)。
+    if (-not (Enter-VbpShard)) { return }
     $script:total++
     Write-Host -NoNewline "  [VBP-DLL] $Name ... "
 
@@ -2312,24 +2374,26 @@ if ($Category -in @("all", "run", "vbp")) {
     #      C3 提供的转发桩, 本来就该给 A 版。
     #   ② 字体 charset 必须是 DEFAULT_CHARSET —— 写死 GB2312_CHARSET 之类会让系统在字体里
     #      找不到韩文/俄文字形, 显示成方框 (Fix 190 的教训)。
-    $script:total++
-    Write-Host -NoNewline "  [SRC] widechar_only ... "
-    $rtlRoot = Join-Path (Split-Path $PSScriptRoot -Parent) "src\rtl\core"
-    $ansiBad = @()
-    if (Test-Path $rtlRoot) {
-        # 递归取文件再 Select-String —— `-Path '...\*\*.c'` 这种通配是匹配不到文件的,
-        # 那会让断言永远 PASS (假绿)。这里两向都验过: 不过滤 di/ 时必须命中。
-        $rtlFiles = Get-ChildItem -Path $rtlRoot -Recurse -File -Include *.c, *.cpp -ErrorAction SilentlyContinue |
-                    Where-Object { $_.FullName -notmatch '\\di\\' }
-        if ($rtlFiles) {
-            # 用 @() 强制数组: Select-String 只命中 1 条时返回标量, 直接 `$x += ...` 会
-            # "MatchInfo 没有 op_Addition" 而抛异常 (断言崩掉而不是判红) —— 两向验证抓到过。
-            $ansiBad = @(Select-String -Path $rtlFiles.FullName -ErrorAction SilentlyContinue `
-                -Pattern '\b(SendMessageA|PostMessageA|CreateWindowExA|RegisterClassA|DefWindowProcA|CallWindowProcA|GetWindowTextA|SetWindowTextA|GetClassNameA|DrawTextA|CreateFontA|LoadCursorA|LoadIconA)\s*\(' |
-                Where-Object { $_.Line -notmatch '^\s*(//|\*)' })
-            $ansiBad += @(Select-String -Path $rtlFiles.FullName -ErrorAction SilentlyContinue `
-                -Pattern '(GB2312_CHARSET|SHIFTJIS_CHARSET|HANGEUL_CHARSET|CHINESEBIG5_CHARSET)' |
-                Where-Object { $_.Line -notmatch '^\s*(//|\*)' })
+    if (Enter-VbpShard) {
+        $script:total++
+        Write-Host -NoNewline "  [SRC] widechar_only ... "
+        $rtlRoot = Join-Path (Split-Path $PSScriptRoot -Parent) "src\rtl\core"
+        $ansiBad = @()
+        if (Test-Path $rtlRoot) {
+            # 递归取文件再 Select-String —— `-Path '...\*\*.c'` 这种通配是匹配不到文件的,
+            # 那会让断言永远 PASS (假绿)。这里两向都验过: 不过滤 di/ 时必须命中。
+            $rtlFiles = Get-ChildItem -Path $rtlRoot -Recurse -File -Include *.c, *.cpp -ErrorAction SilentlyContinue |
+                        Where-Object { $_.FullName -notmatch '\\di\\' }
+            if ($rtlFiles) {
+                # 用 @() 强制数组: Select-String 只命中 1 条时返回标量, 直接 `$x += ...` 会
+                # "MatchInfo 没有 op_Addition" 而抛异常 (断言崩掉而不是判红) —— 两向验证抓到过。
+                $ansiBad = @(Select-String -Path $rtlFiles.FullName -ErrorAction SilentlyContinue `
+                    -Pattern '\b(SendMessageA|PostMessageA|CreateWindowExA|RegisterClassA|DefWindowProcA|CallWindowProcA|GetWindowTextA|SetWindowTextA|GetClassNameA|DrawTextA|CreateFontA|LoadCursorA|LoadIconA)\s*\(' |
+                    Where-Object { $_.Line -notmatch '^\s*(//|\*)' })
+                $ansiBad += @(Select-String -Path $rtlFiles.FullName -ErrorAction SilentlyContinue `
+                    -Pattern '(GB2312_CHARSET|SHIFTJIS_CHARSET|HANGEUL_CHARSET|CHINESEBIG5_CHARSET)' |
+                    Where-Object { $_.Line -notmatch '^\s*(//|\*)' })
+            }
         }
     }
     if ($ansiBad.Count -eq 0) {
@@ -2363,18 +2427,20 @@ if ($Category -in @("all", "run", "vbp")) {
 
     # 导出内容: 文本(多行拼接) / 列表项 / 列表项数据 三类都要落到普通 VB 语句上
     $frxExOut = Join-Path $frxExDir "FrxData.frx.bas"
-    $script:total++
-    Write-Host -NoNewline "  [CLI] frx_extract_content ... "
-    if ((Test-Path $frxExOut) -and
-        (Select-String -Path $frxExOut -Pattern 'Text1\.Text = "alpha" & vbCrLf & "beta"' -Quiet) -and
-        (Select-String -Path $frxExOut -Pattern 'List1\.AddItem "1234"' -Quiet) -and
-        (Select-String -Path $frxExOut -Pattern 'List1\.ItemData\(1\) = 300' -Quiet)) {
-        $script:pass++
-        Write-Host "PASS" -ForegroundColor Green
-    } else {
-        $script:fail++
-        Write-Host "FAIL" -ForegroundColor Red
-        if ($Verbose) { Get-Content $frxExOut -ErrorAction SilentlyContinue }
+    if (Enter-VbpShard) {
+        $script:total++
+        Write-Host -NoNewline "  [CLI] frx_extract_content ... "
+        if ((Test-Path $frxExOut) -and
+            (Select-String -Path $frxExOut -Pattern 'Text1\.Text = "alpha" & vbCrLf & "beta"' -Quiet) -and
+            (Select-String -Path $frxExOut -Pattern 'List1\.AddItem "1234"' -Quiet) -and
+            (Select-String -Path $frxExOut -Pattern 'List1\.ItemData\(1\) = 300' -Quiet)) {
+            $script:pass++
+            Write-Host "PASS" -ForegroundColor Green
+        } else {
+            $script:fail++
+            Write-Host "FAIL" -ForegroundColor Red
+            if ($Verbose) { Get-Content $frxExOut -ErrorAction SilentlyContinue }
+        }
     }
 
     # --- Fix 196: 非 ASCII (中文) 路径下的完整编译 + 运行 ---
@@ -2391,29 +2457,31 @@ if ($Category -in @("all", "run", "vbp")) {
     if (Test-Path $cnDir) { Remove-Item $cnDir -Recurse -Force }
     New-Item -ItemType Directory -Path $cnDir | Out-Null
     Copy-Item "$Tests\frxdata\*" $cnDir
-    $script:total++
-    Write-Host -NoNewline "  [VBP] nonascii_path ... "
-    $cnOut = Join-Path $cnDir "out"
-    $cnCompile = & $C3 (Join-Path $cnDir "FrxData.vbp") --output-dir $cnOut @IncArg 2>&1
-    $cnExe = Join-Path $cnOut "FrxData.exe"
-    if ($LASTEXITCODE -ne 0 -or -not (Test-Path $cnExe)) {
-        $script:fail++
-        Write-Host "FAIL (compile in non-ASCII path)" -ForegroundColor Red
-        if ($Verbose) { Write-Host ($cnCompile | Out-String) }
-    } else {
-        # 光能链接还不够: 跑起来核对取值, 顺带证明同目录下的 .frx 也按宽路径读到了
-        $cnRun = Invoke-TestExe -ExePath $cnExe -WorkDir $cnOut -Name "FrxDataCn"
-        $cnOk = $cnRun.Ok
-        foreach ($needle in @("FD1=alpha|beta", "FD4=5", "FD6=-7", "FRXDATA-DONE")) {
-            if (-not ($cnRun.Output | Where-Object { $_ -like "*$needle*" })) { $cnOk = $false }
-        }
-        if ($cnOk) {
-            $script:pass++
-            Write-Host "PASS" -ForegroundColor Green
-        } else {
+    if (Enter-VbpShard) {
+        $script:total++
+        Write-Host -NoNewline "  [VBP] nonascii_path ... "
+        $cnOut = Join-Path $cnDir "out"
+        $cnCompile = & $C3 (Join-Path $cnDir "FrxData.vbp") --output-dir $cnOut @IncArg 2>&1
+        $cnExe = Join-Path $cnOut "FrxData.exe"
+        if ($LASTEXITCODE -ne 0 -or -not (Test-Path $cnExe)) {
             $script:fail++
-            Write-Host "FAIL (non-ASCII path run)" -ForegroundColor Red
-            if ($Verbose) { Write-Host ("    " + $cnRun.Detail); Write-Host ($cnRun.Output -join "`n") }
+            Write-Host "FAIL (compile in non-ASCII path)" -ForegroundColor Red
+            if ($Verbose) { Write-Host ($cnCompile | Out-String) }
+        } else {
+            # 光能链接还不够: 跑起来核对取值, 顺带证明同目录下的 .frx 也按宽路径读到了
+            $cnRun = Invoke-TestExe -ExePath $cnExe -WorkDir $cnOut -Name "FrxDataCn"
+            $cnOk = $cnRun.Ok
+            foreach ($needle in @("FD1=alpha|beta", "FD4=5", "FD6=-7", "FRXDATA-DONE")) {
+                if (-not ($cnRun.Output | Where-Object { $_ -like "*$needle*" })) { $cnOk = $false }
+            }
+            if ($cnOk) {
+                $script:pass++
+                Write-Host "PASS" -ForegroundColor Green
+            } else {
+                $script:fail++
+                Write-Host "FAIL (non-ASCII path run)" -ForegroundColor Red
+                if ($Verbose) { Write-Host ("    " + $cnRun.Detail); Write-Host ($cnRun.Output -join "`n") }
+            }
         }
     }
 
@@ -2432,26 +2500,28 @@ if ($Category -in @("all", "run", "vbp")) {
     if (Test-Path $cnOddDir) { Remove-Item $cnOddDir -Recurse -Force }
     New-Item -ItemType Directory -Path $cnOddDir | Out-Null
     Copy-Item "$Tests\frxdata\FrxData.frm" $cnOddDir      # 故意**不**拷 .frx
-    $script:total++
-    Write-Host -NoNewline "  [VBP] nonascii_missing_frx ... "
-    $oddOut = Join-Path $cnOddDir "out"
-    $oddLog = (& $C3 (Join-Path $cnOddDir "FrxData.frm") --emit-c --output-dir $oddOut 2>&1 | Out-String)
-    $oddRc = $LASTEXITCODE
-    if ($oddRc -eq 3) {
-        $script:fail++
-        Write-Host "FAIL (abort() 复现: exit=3)" -ForegroundColor Red
-        if ($Verbose) { Write-Host $oddLog }
-    } elseif ($oddRc -ne 0) {
-        $script:fail++
-        Write-Host "FAIL (exit=$oddRc)" -ForegroundColor Red
-        if ($Verbose) { Write-Host $oddLog }
-    } elseif ($oddLog -notlike "*VB4004*") {
-        $script:fail++
-        Write-Host "FAIL (缺 .frx 却未报 VB4004)" -ForegroundColor Red
-        if ($Verbose) { Write-Host $oddLog }
-    } else {
-        $script:pass++
-        Write-Host "PASS" -ForegroundColor Green
+    if (Enter-VbpShard) {
+        $script:total++
+        Write-Host -NoNewline "  [VBP] nonascii_missing_frx ... "
+        $oddOut = Join-Path $cnOddDir "out"
+        $oddLog = (& $C3 (Join-Path $cnOddDir "FrxData.frm") --emit-c --output-dir $oddOut 2>&1 | Out-String)
+        $oddRc = $LASTEXITCODE
+        if ($oddRc -eq 3) {
+            $script:fail++
+            Write-Host "FAIL (abort() 复现: exit=3)" -ForegroundColor Red
+            if ($Verbose) { Write-Host $oddLog }
+        } elseif ($oddRc -ne 0) {
+            $script:fail++
+            Write-Host "FAIL (exit=$oddRc)" -ForegroundColor Red
+            if ($Verbose) { Write-Host $oddLog }
+        } elseif ($oddLog -notlike "*VB4004*") {
+            $script:fail++
+            Write-Host "FAIL (缺 .frx 却未报 VB4004)" -ForegroundColor Red
+            if ($Verbose) { Write-Host $oddLog }
+        } else {
+            $script:pass++
+            Write-Host "PASS" -ForegroundColor Green
+        }
     }
 
     Test-Vbp "M6Test" "$Tests\M6Test.vbp" @("M6A:OK", "M6B:OK", "M6C:OK", "M6D:OK", "M6 PASSED")
@@ -2816,6 +2886,11 @@ if ($Category -in @("all", "run", "vbp")) {
     )
     $vbpSw.Stop()
     Write-Host "  (vbp/gui tests took $([Math]::Round($vbpSw.Elapsed.TotalSeconds))s)"
+# 分片时把"本片跑了几个/让给别人几个"打出来: 四个 shard 的 ran+skipped 之和必须等于不分片时的
+# TOTAL。哪一片的数对不上, 一眼能看出来 —— 分片漏跑是静默的, 没有这行就只能靠猜。
+if ($VbpShardTotal -gt 1) {
+    Write-Host "  (vbp shard ${VbpShard}/${VbpShardTotal}: ran $script:VbpCaseNo, skipped $script:VbpSkipped)" -ForegroundColor Cyan
+}
     Write-Host ""
 }
 
