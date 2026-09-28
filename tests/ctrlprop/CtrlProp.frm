@@ -119,6 +119,14 @@ Private Sub Form_Load()
     Debug.Print "CP6=" & txtH.ScrollBars
     Debug.Print "CP7=" & txtV.ScrollBars
     Debug.Print "CP8=" & txtOne.ScrollBars
+    ' 账 #108/#107 两条一起钉：ScrollBars 的往返 + BorderStyle=None 设得上去
+    ' （List1 是 ListBox，走的正是 vb6forms_style.c 那个"存窗口属性"兜底分支）
+    List1.BorderStyle = 0
+    Debug.Print "CP9=" & List1.BorderStyle
+    List1.BorderStyle = 1
+    Debug.Print "CP10=" & List1.BorderStyle
+    List1.BorderStyle = 0
+    Debug.Print "CP11=" & List1.BorderStyle
     Debug.Print "CTRLPROP-DONE"
     Unload Me
 End Sub

@@ -299,8 +299,12 @@ int vb6_GetBorderStyle(void* hwnd) {
         return (style & WS_EX_CLIENTEDGE) ? 1 : 0;
     }
     // Form/ComboBox/ListBox: store as property
+    // 账 #107: 这里存的是 val+1，不是 val —— SetPropW(hw, name, (HANDLE)0) 等于把属性**删掉**
+    //（RemoveProp 的语义），于是 BorderStyle = 0 (None) 对所有非 Edit / 非 Static 控件都设不上：
+    // 写进去当场消失，GetPropW 回 NULL ⇒ 读回来是默认 1。同一族在 Fix 187（BackColor 的黑色）
+    // 与 CommonDialog（"整数一律存 val+1"）里各修过一次，口径 here 取后者。
     HANDLE hProp = GetPropW(hw, L"VB6_BorderStyle");
-    if (hProp) return (int)(INT_PTR)hProp;
+    if (hProp) return (int)(INT_PTR)hProp - 1;
     // Form default is 2 (Sizable)
     if (wcsicmp(className, L"VB6_Form") == 0 || 
         GetWindowLongW(hw, GWL_STYLE) & WS_OVERLAPPEDWINDOW) {
@@ -337,10 +341,10 @@ void vb6_SetBorderStyle(void* hwnd, int style) {
         SetWindowLongW(hw, GWL_STYLE, gstyle);
         SetWindowPos(hw, NULL, 0, 0, 0, 0,
             SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER);
-        SetPropW(hw, L"VB6_BorderStyle", (HANDLE)(INT_PTR)style);
+        SetPropW(hw, L"VB6_BorderStyle", (HANDLE)(INT_PTR)(style + 1));
         InvalidateRect(hw, NULL, TRUE);
     } else {
         // Store as property for other controls
-        SetPropW(hw, L"VB6_BorderStyle", (HANDLE)(INT_PTR)style);
+        SetPropW(hw, L"VB6_BorderStyle", (HANDLE)(INT_PTR)(style + 1));
     }
 }
