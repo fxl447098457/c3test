@@ -261,6 +261,15 @@
     // 顶层与容器子控件两条创建路各自都要它，所以单独一处折算、两处调用（账 #83）。
     long sliderStyleBits(const FrmControl& ctrl) const;
 
+    // C29-SL-l（账 #143）: 控件的**零实参方法**（`SetFocus` / Slider 的 `ClearSel` 这一族）。
+    // 一形带括号（走表达式路）、一形不带（走语句路），两条码头都调这两个函数，
+    // 免得又只接一头、留下编得过而运行期一声不响的那条静默空转。
+    // objExpr 两种形态都认：`vb6_hwnd_List1`（表达式路）与裸小写名 `list1`（语句路）。
+    bool formCtrlSlot(const std::string& objExpr, FrmControlType& outType,
+                      std::string& outHwndExpr) const;
+    std::string controlZeroArgMethod(FrmControlType ctrlType,
+                                     const std::string& memberLower) const;
+
     // VB6 PictureBox/Image 的 STATIC 控件不显示 Caption (标题在创建时应清空)。
     bool controlTypeClearsCaption(const FrmControl& ctrl) const;
 

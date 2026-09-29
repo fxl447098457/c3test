@@ -1905,7 +1905,13 @@ if ($Category -in @("all", "run", "vbp")) {
                      # SK1 刻意只当证人不当红针：BASE 上 Text 走的是"拿 HWND 当 IDispatch 问
                      # 它要 Text 属性"那支，串照样回得来，所以这一条两边都是 VOL/String/8。
                      "SK1-text=VOL/String/8", "SK2-off=N/N", "SK3-show=Y/VOL/Y",
-                     "SK4-hide=N", "SK5-pos=1/Y", "SK6-num=33/33/Y", "SK7-end=N/0")
+                     "SK4-hide=N", "SK5-pos=1/Y", "SK6-num=33/33/Y", "SK7-end=N/0",
+                     # C29-SL-l（账 #143）: 控件的**零实参方法**两形。证人问的是焦点自己 ——
+                     # sld6 那对 GotFocus/LostFocus 只有 WM_SETFOCUS 真到才涨（每步先把焦点
+                     # 挪到没挂处理器的 sld1，再问增量：SetFocus 落在已有焦点的窗口上不重发）。
+                     # SN3 钉不带括号的 ClearSel：以前那一形掉 vb6_ComCall(裸 HWND, L"ClearSel")，
+                     # 编得过、跑起来一声不响，区段一点没动。
+                     "SN1-bare=Y/0", "SN2-paren=Y/Y", "SN3-clearsel=0/0")
     Test-Vbp "ctrlslider" "$Tests\ctrlslider\SlidApp.vbp" $slidNeedles
     Test-Vbp "ctrlslider_x86" "$Tests\ctrlslider\SlidApp.vbp" $slidNeedles -Arch "x86"
     Test-EmitcShape "sl_emitc_native" @("$Tests\ctrlslider\SlidApp.vbp") @(
@@ -1952,7 +1958,11 @@ if ($Category -in @("all", "run", "vbp")) {
         'vb6_Slider_SetText(vb6_hwnd_sld3',
         'vb6_Slider_SetTextPosition(vb6_hwnd_sld3, 1);',
         'vb6_Slider_BubbleVisible(vb6_hwnd_sld3',
-        'vb6_Slider_BubbleText(vb6_hwnd_sld3'
+        'vb6_Slider_BubbleText(vb6_hwnd_sld3',
+        # C29-SL-l: 两条码头共用一张表 ⇒ 带括号与不带括号都发同一条专桩（裸形多一条注释）。
+        'vb6_SetControlFocus((void*)vb6_hwnd_sld5);  /* setfocus */',
+        'vb6_SetControlFocus((void*)vb6_hwnd_sld6);',
+        'vb6_Slider_ClearSel((void*)vb6_hwnd_sld4);  /* clearsel */'
     )
     # C29-SL-c: 事件派发那一段的形状。钉的是"认来源的那枚句柄 + 分流那一档"这一整对 ——
     # Slider 与 ScrollBar 共用一扇 case WM_HSCROLL/WM_VSCROLL 的门，写错句柄比对比就是静默不派发。
@@ -2017,6 +2027,11 @@ if ($Category -in @("all", "run", "vbp")) {
         'vb6_ComSetProp(vb6_hwnd_sld3, L"Text"',
         'vb6_ComGetProp(vb6_hwnd_sld3, L"BubbleVisible")',
         'vb6_ComGetStringProp(vb6_hwnd_sld1, L"BubbleText")',
+        # C29-SL-l: SetFocus 两形在登记之前**都**落这扇兜底门（BASE 逐条命中，NEW 归零）。
+        # 不带括号那一形落的是语句路那条，带括号那一形落的是表达式路那条 —— 只接一头
+        # 就会留一条「编得过、跑了、什么都没发生」，本线踩过三次。
+        'vb6_ComCall(vb6_hwnd_sld5, L"SetFocus"',
+        'vb6_ComCall(vb6_hwnd_sld6, L"SetFocus"',
         'CoCreateInstance'
     )
 

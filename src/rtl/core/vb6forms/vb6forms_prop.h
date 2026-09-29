@@ -39,6 +39,13 @@ void vb6_SetControlVisible(void* hwnd, int visible);
 int vb6_GetControlEnabled(void* hwnd);
 void vb6_SetControlEnabled(void* hwnd, int enabled);
 
+// C29-SL-l（账 #143）: VB6 的 `控件.SetFocus`。之前这一形从没登记过，两形（带括号与不带括号）
+// 都落进 vb6_ComCall(裸 HWND, L"SetFocus", NULL, 0) —— 原生控件槽里是句柄不是 IDispatch，
+// 于是编得过、链接得过、跑起来一声不响。RTL 就一句 SetFocus(hwnd)（焦点属于线程输入队列，
+// 与窗口可见/激活无关，所以无头跑里也真能拿到 —— C29-SL-g 的 SimStdEvent kind=4 走同一条路，
+// 实测会发 WM_SETFOCUS）。拿不到焦点时原生就是回 NULL 什么都不做，本项目不伪造、不重试。
+void vb6_SetControlFocus(void* hwnd);
+
 // P11.8: Position/Size attributes (all visible controls, in pixels)
 // VB6 uses twips internally, but Win32 uses pixels; RTL handles conversion
 int vb6_GetControlLeft(void* hwnd);

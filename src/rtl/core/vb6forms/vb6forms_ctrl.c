@@ -95,6 +95,16 @@ void vb6_SetControlEnabled(void* hwnd, int enabled) {
     if (!hwnd) return;
     EnableWindow((HWND)hwnd, enabled ? TRUE : FALSE);
 }
+
+// C29-SL-l（账 #143）：VB6 的 `控件.SetFocus`。原生就一句 SetFocus(hwnd) —— 它动的是**本线程
+// 输入队列里的焦点**，与窗口可见/激活无关，所以无头跑里照样有效（C29-SL-g 的 SimStdEvent
+// kind=4 走的就是这一句，实测会发出 WM_SETFOCUS 并点亮控件自己的 _GotFocus）。
+// 拿不到焦点的那几种（控件被禁用、窗口不属于本线程）原生就是回 NULL 什么都不做，
+// 本项目**不伪造、不重试** —— 真 VB6 在那里是 raise 一个错误号，而我们还没有运行期错误面。
+void vb6_SetControlFocus(void* hwnd) {
+    if (!hwnd) return;
+    SetFocus((HWND)hwnd);
+}
 // Position/size properties use twips on both reads and writes.
 // Codegen calls these getters directly without pixel-to-twip conversion.
 // Match the existing vb6_TwipToX/Y setters (15 twips per logical pixel).

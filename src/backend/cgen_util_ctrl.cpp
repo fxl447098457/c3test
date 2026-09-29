@@ -1237,6 +1237,82 @@ long CCodeGen::sliderStyleBits(const FrmControl& ctrl) const {
     return style;
 }
 
+// C29-SL-l（账 #143）: 把一条"控件对象表达式"折成 (控件类型, 那枚窗口的 C 表达式)。
+// 三种形态都要认，因为控件方法的发码有两条码头：
+//   · 表达式路给 `vb6_hwnd_List1`（裸槽，visit(IndexOrCallExpr) 的 marker）；
+//   · 语句路给裸小写名 `list1`（`List1.Clear` 那族已有的几支就按这个查）；
+//   · 控件数组给 `vb6_CtrlArr_GetAt(&vb6_hwnd_txtSearch, (Index))` —— GetAt 回的就是那枚
+//     HWND（`vb6forms_ctrlarr.c` 里存的就是句柄），所以整条表达式直接当窗口用。
+// 认不出（不是控件、或者槽后面还挂着成员/下标）就回 false，让调用方落回原来的兜底。
+bool CCodeGen::formCtrlSlot(const std::string& objExpr, FrmControlType& outType,
+                            std::string& outHwndExpr) const {
+    static const std::string kSlot = "vb6_hwnd_";
+    static const std::string kArr  = "vb6_CtrlArr_GetAt(&vb6_hwnd_";
+    std::string bare;
+    if (objExpr.compare(0, kArr.size(), kArr) == 0) {
+        size_t e = objExpr.find(',', kArr.size());
+        if (e == std::string::npos) return false;
+        bare = objExpr.substr(kArr.size(), e - kArr.size());
+        outHwndExpr = objExpr;
+    } else if (objExpr.compare(0, kSlot.size(), kSlot) == 0 && objExpr.size() > kSlot.size()) {
+        if (objExpr.find_first_of("[(.", kSlot.size()) != std::string::npos) return false;
+        bare = objExpr.substr(kSlot.size());
+        outHwndExpr = objExpr;
+    } else if (objExpr.find_first_of("[(.") == std::string::npos) {
+        bare = objExpr;
+    } else {
+        return false;
+    }
+    std::string lower = Symbol::toLower(bare);
+    auto it = knownFormControls_.find(lower);
+    if (it == knownFormControls_.end()) return false;
+    outType = it->second;
+    if (outHwndExpr.empty()) {
+        auto org = knownFormControlOriginalNames_.find(lower);
+        outHwndExpr = kSlot + cIdent(org != knownFormControlOriginalNames_.end()
+                                        ? org->second : bare);
+    }
+    return true;
+}
+
+// C29-SL-l（账 #143）: 控件的**零实参方法**名表（命中回 C 里的函数名，否则空串）。
+// 焦点面只给"真能拿焦点"的那批窗口型控件 —— Label / Image / Shape / Line / Timer / Menu /
+// Data / OLE / CommonDialog / Winsock / ImageList / StatusBar / ProgressBar 刻意不接：
+// 真 VB6 在那里是 raise 一个错误号，而本项目还没有运行期错误面，"什么都不做"比伪造成功诚实。
+std::string CCodeGen::controlZeroArgMethod(FrmControlType ctrlType,
+                                          const std::string& memberLower) const {
+    if (memberLower == "setfocus") {
+        switch (ctrlType) {
+            case FrmControlType::CommandButton:
+            case FrmControlType::TextBox:
+            case FrmControlType::CheckBox:
+            case FrmControlType::OptionButton:
+            case FrmControlType::ListBox:
+            case FrmControlType::ComboBox:
+            case FrmControlType::PictureBox:
+            case FrmControlType::HScrollBar:
+            case FrmControlType::VScrollBar:
+            case FrmControlType::DriveListBox:
+            case FrmControlType::DirListBox:
+            case FrmControlType::FileListBox:
+            case FrmControlType::Slider:
+            case FrmControlType::TreeView:
+            case FrmControlType::ListView:
+            case FrmControlType::Toolbar:
+            case FrmControlType::SSTab:
+            case FrmControlType::DTPicker:
+            case FrmControlType::MonthView:
+            case FrmControlType::RichTextBox:
+                return "vb6_SetControlFocus";
+            default:
+                return "";
+        }
+    }
+    if (memberLower == "clearsel" && ctrlType == FrmControlType::Slider)
+        return "vb6_Slider_ClearSel";
+    return "";
+}
+
 // 控件类型的 Win32 样式位。取值与 cgen_form_ctrl_style_apply.inc 保持一致。
 // 顶层控件与容器子控件共用，避免容器内子控件缺失类型样式。
 long CCodeGen::controlTypeStyleBits(const FrmControl& ctrl) const {

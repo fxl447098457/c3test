@@ -401,6 +401,35 @@ Private Sub tGo_Timer()
         & "/" & TF(sld1.BubbleVisible)
     sld1.SimNotify(8, 33)
     Debug.Print "SK7-end=" & TF(sld1.BubbleVisible) & "/" & CStr(sld1.TextPosition)
+    ' ---- C29-SL-l: 控件的**零实参方法**两形（账 #143）----
+    ' 之前 `Slider1.SetFocus` 这类写法（连不带括号的那一形）从没登记过，两形都落进
+    ' vb6_ComCall(裸 HWND, L"SetFocus", NULL, 0) —— 原生控件槽里是句柄不是 IDispatch，
+    ' 于是编得过、链接得过、跑起来一声不响。现在两条码头共用一张表，判据问的是**焦点自己**：
+    ' sld6 那对 GotFocus/LostFocus 计数器（SG 块留下的现成证人）只有 WM_SETFOCUS 真到才涨。
+    ' 每次都要先把焦点挪开再问增量 —— SetFocus 落在**已经有焦点**的窗口上不会重发 WM_SETFOCUS。
+    ' 落点刻意选 sld5：**启用**、又没挂任何焦点处理器。第一版这里用 sld1，而 sld1 在
+    ' SL11 那一步被 Enabled = False 了 —— 禁用窗口拿不到焦点（Win32 语义，原生就是回 NULL），
+    ' 于是焦点从没离开过 sld6，SN2 两条增量双双读成 N（判据自伤，不是产品红）。
+    Dim gf0 As Long, gf1 As Long, gl0 As Long, gl1 As Long
+    sld5.SetFocus                      ' 先把焦点放到**没挂处理器**的那枚上（当基线）
+    gf0 = gGot6
+    gl0 = gLost6
+    sld6.SetFocus                      ' **不带括号**那一形
+    Debug.Print "SN1-bare=" & TF(gGot6 > gf0) & "/" & CStr(gLost6 - gl0)
+    gf1 = gGot6
+    gl1 = gLost6
+    sld5.SetFocus()                    ' **带括号**那一形先把焦点拿走 ⇒ sld6 该发 LostFocus
+    sld6.SetFocus()                    ' 再带括号回来 ⇒ 该发 GotFocus（两形同一条原生路）
+    Debug.Print "SN2-paren=" & TF(gLost6 > gl1) & "/" & TF(gGot6 > gf1)
+    ' ClearSel 的**不带括号**那一形：SI4 钉的是带括号的，那条早就通了；这一形以前掉兜底。
+    sld4.SelectRange = True
+    sld4.Min = 10
+    sld4.Max = 100
+    sld4.SelStart = 20
+    sld4.SelLength = 10
+    sld4.ClearSel
+    Debug.Print "SN3-clearsel=" & CStr(sld4.SelLength) & "/" & CStr(sld4.SelStart)
+
     Debug.Print "SLIDER-DONE"
     Unload Me
 End Sub
