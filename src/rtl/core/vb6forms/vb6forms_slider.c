@@ -590,4 +590,193 @@ void vb6_Slider_ClearSel(void* hwnd) {
     SendMessageW((HWND)hwnd, TBM_CLEARSEL, TRUE, 0);
 }
 
+/* ======================= C29-SL-k: Text 气泡 + TextPosition ======================= *
+ * 类型库（.build/slprobe/sltlb.cpp）：ISlider 的 **Text = 0x0010，VT_BSTR**，文档原话
+ * "the string displayed in the ToolTip as the slider's position changes"；
+ * **TextPosition = 0x0011**，枚举 TextPositionConstants { sldAboveLeft = 0, sldBelowRight = 1 }。
+ *
+ * 走哪条道是量出来的（.build/slprobe/slmeasure17.c，同一份源码编两份、一份用 mt.exe 挂
+ * Common-Controls 6.0 清单 —— v5/v6 的差别这一格是决定性的）：
+ *   · **轨道条自己那枚 TBS_TOOLTIPS 气泡服务不了自定义串**：它自带 1 条工具，
+ *     `TTM_POP` 在无头里什么都不触发（可见性 0、一条 notify 都不发），文本也是它自己画的数字。
+ *     而且 TBS_TOOLTIPS **只有创建时给才建得出那枚气泡**（事后写样式位留着但 TBM_GETTOOLTIPS 恒 0
+ *     —— 与 DTPicker 的 DTS_SHOWNONE 同族），运行期 RTL 只拿得到 HWND，补不回来。
+ *   · **我们自己持一枚 tooltip 宿主 + TRACK 工具是通的**：v6 下 `TTM_ADDTOOLW` 返回 1、
+ *     `TTM_GETTOOLCOUNT` 跟着涨、`TTM_TRACKACTIVATE(TRUE)` 之后 **`IsWindowVisible` 就是 1**
+ *     （无头也摆得出来），`TTM_GETTEXTW` 能把宿主里的文本原样读回来。
+ *     ⇒ 这三条正好是判据要的三把尺：可见性、宿主文本、气泡顶点。
+ *   · **v5 下 `TTM_ADDTOOLW` 直接返回 0**（同一份代码）—— 上一格账 #148 差点被这条探针骗了，
+ *     所以这格的判据一律写在产物里，不写在探针里。
+ *
+ * 两条口径要记：① **不复用 P13.8 那枚共享宿主** —— 那枚按 (父窗, 控件句柄) 存的是 `ToolTipText`
+ * 的悬停文本，气泡写同一格会互相覆盖，而 VB6 这两条本来就是分开的两样东西；
+ * ② `Text` 空着的时候气泡显示**当前的值**（原生那颗就是画数字），写了就用写的串 ——
+ * VB6 文档那句只说"显示这个串"，没说两者怎么共存，本机 OCX 跑不起来拿不到真值，这里按①②实现并把
+ * 这一条标成"我们的口径"。
+ */
+
+static const wchar_t kSdBubbleText[] = L"VB6_SD_Text";        // BSTR 堆拷贝（同 ToolTipText 那族）
+static const wchar_t kSdTextPos[]    = L"VB6_SD_TextPosition";  // 0=上/左，1=下/右
+
+static HWND vb6_Slider_BubbleHost(HWND owner) {
+    static HWND s_hwnd = NULL;
+    if (!s_hwnd) {
+        s_hwnd = CreateWindowExW(0, TOOLTIPS_CLASSW, NULL,
+                                 WS_POPUP | TTS_NOPREFIX | TTS_ALWAYSTIP,
+                                 CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT,
+                                 owner, NULL, GetModuleHandleW(NULL), NULL);
+    }
+    return s_hwnd;
+}
+
+// 这一次要显示的文本：Text 非空用它，否则用当前的值（原生那颗画的就是数字）。
+#define VB6_SLD_BUBBLE_GETPOS (-0x7FFFFFFF)   // 0=现问控件，正数=拖动里带过来的新值
+static void vb6_Slider_BubbleString(void* hwnd, wchar_t* buf, int cch, int valueIfUnknown) {
+    HANDLE h = GetPropW((HWND)hwnd, kSdBubbleText);
+    buf[0] = 0;
+    if (h && (BSTR)h && SysStringLen((BSTR)h)) {
+        lstrcpynW(buf, (LPCWSTR)h, cch);
+        return;
+    }
+    if (valueIfUnknown == VB6_SLD_BUBBLE_GETPOS) valueIfUnknown = (int)SendMessageW((HWND)hwnd, TBM_GETPOS, 0, 0);
+    wsprintfW(buf, L"%d", valueIfUnknown);
+}
+
+// 把工具挂上去 / 换文本。TTM_ADDTOOLW 只发一次，之后一律 UPDATE。
+static void vb6_Slider_BubbleSetTool(void* hwnd, const wchar_t* text) {
+    HWND owner = GetParent((HWND)hwnd);
+    HWND host = vb6_Slider_BubbleHost(owner);
+    TOOLINFOW ti;
+    if (!host) return;
+    memset(&ti, 0, sizeof(ti));
+    ti.cbSize = sizeof(ti);
+    ti.uFlags = TTF_IDISHWND | TTF_SUBCLASS | TTF_TRACK | TTF_ABSOLUTE;
+    ti.hwnd = owner;
+    ti.uId = (UINT_PTR)hwnd;
+    ti.lpszText = (LPWSTR)text;
+    if (!SendMessageW(host, TTM_UPDATETIPTEXTW, 0, (LPARAM)&ti)) {
+        SendMessageW(host, TTM_ADDTOOLW, 0, (LPARAM)&ti);
+    }
+}
+
+// VB6: Slider.Text（读写，BSTR）。
+wchar_t* vb6_Slider_GetText(void* hwnd) {
+    if (!hwnd) return SysAllocString(L"");
+    HANDLE h = GetPropW((HWND)hwnd, kSdBubbleText);
+    return SysAllocString(h ? (LPCWSTR)h : L"");
+}
+
+void vb6_Slider_SetText(void* hwnd, void* bstrText) {
+    BSTR old;
+    BSTR copy = NULL;
+    wchar_t disp[128];
+    if (!hwnd) return;
+    old = (BSTR)GetPropW((HWND)hwnd, kSdBubbleText);
+    if (old) { SysFreeString(old); RemovePropW((HWND)hwnd, kSdBubbleText); }
+    if (bstrText) copy = SysAllocString((BSTR)bstrText);
+    if (copy) SetPropW((HWND)hwnd, kSdBubbleText, (HANDLE)copy);
+    // 立刻把宿主里的文本也换成新的：读回来才算"到控件了"而不是"到我们口袋里了"。
+    vb6_Slider_BubbleString(hwnd, disp, (int)(sizeof(disp) / sizeof(disp[0])), VB6_SLD_BUBBLE_GETPOS);
+    vb6_Slider_BubbleSetTool(hwnd, disp);
+}
+
+// VB6: Slider.TextPosition（读写，0 = sldAboveLeft / 1 = sldBelowRight）。
+// 原生没有这条消息（那颗气泡摆哪儿是控件自己定的），所以这一档是自存 + 我们摆放时用。
+int vb6_Slider_GetTextPosition(void* hwnd) {
+    return (int)vb6_SdGetProp(hwnd, kSdTextPos, 0);
+}
+
+void vb6_Slider_SetTextPosition(void* hwnd, int pos) {
+    if (!hwnd) return;
+    vb6_SdSetProp(hwnd, kSdTextPos, (LONG)((pos == 1) ? 1 : 0));
+}
+
+// 把工具填成"这枚滑杆的那一条"，供 ACTIVATE / 读回用。
+static void vb6_Slider_BubbleFillTool(void* hwnd, TOOLINFOW* ti) {
+    wchar_t disp[128];
+    memset(ti, 0, sizeof(*ti));
+    ti->cbSize = sizeof(*ti);
+    ti->uFlags = TTF_IDISHWND | TTF_SUBCLASS | TTF_TRACK | TTF_ABSOLUTE;
+    ti->hwnd = GetParent((HWND)hwnd);
+    ti->uId = (UINT_PTR)hwnd;
+    vb6_Slider_BubbleString(hwnd, disp, (int)(sizeof(disp) / sizeof(disp[0])), VB6_SLD_BUBBLE_GETPOS);
+    ti->lpszText = disp;      // 只在下面这一次调用里用，ACTIVATE 不读它
+}
+
+// 派发那边每收到一条滚动通知就问一次：4/5（滑块那两档）把气泡摆出来，8（ENDTRACK）收回去。
+// 认不出是轨道条的（同一扇门 ScrollBar 也走这里）直接不管 —— 用类名判，不靠调用方记类型。
+void vb6_Slider_BubbleNotify(void* hwnd, int code, int value) {
+    HWND host;
+    RECT th;
+    POINT p;
+    wchar_t disp[128];
+    TOOLINFOW ti;
+    LONG step;
+    if (!hwnd) return;
+    {
+        wchar_t cls[32];
+        cls[0] = 0;
+        GetClassNameW((HWND)hwnd, cls, 30);
+        if (lstrcmpW(cls, L"msctls_trackbar32") != 0) return;
+    }
+    host = vb6_Slider_BubbleHost(GetParent((HWND)hwnd));
+    if (!host) return;
+    vb6_Slider_BubbleString(hwnd, disp, (int)(sizeof(disp) / sizeof(disp[0])), value > 0 ? value : VB6_SLD_BUBBLE_GETPOS);
+    if (code == 8) {                       // TB_ENDTRACK：收尾，气泡收回去
+        vb6_Slider_BubbleFillTool(hwnd, &ti);
+        SendMessageW(host, TTM_TRACKACTIVATE, FALSE, (LPARAM)&ti);
+        return;
+    }
+    if (code != 4 && code != 5) return;    // 只有滑块那两档摆气泡（与 Scroll 的分法同一档）
+    vb6_Slider_BubbleSetTool(hwnd, disp);
+    SendMessageW(hwnd, TBM_GETTHUMBRECT, 0, (LPARAM)&th);
+    p.x = th.left;
+    p.y = th.top;
+    ClientToScreen((HWND)hwnd, &p);
+    step = vb6_Slider_GetTextPosition(hwnd) == 1 ? (LONG)(th.bottom - th.top) + 6 : -24;
+    SendMessageW(host, TTM_TRACKPOSITION, 0, MAKELPARAM(p.x, p.y + step));
+    vb6_Slider_BubbleFillTool(hwnd, &ti);
+    SendMessageW(host, TTM_TRACKACTIVATE, TRUE, (LPARAM)&ti);
+}
+
+// 判据证人（C3 扩展，不是 VB6 属性）：气泡此刻摆没摆出来（实测无头也答 1）。
+int vb6_Slider_BubbleVisible(void* hwnd) {
+    HWND host;
+    if (!hwnd) return 0;
+    host = vb6_Slider_BubbleHost(GetParent((HWND)hwnd));
+    return (host && IsWindowVisible(host)) ? -1 : 0;   // VB6: True = -1
+}
+
+// 判据证人：气泡的**上边**（TextPosition 两档的差别就落在这里；夹具用相对高低判，
+// 不钉绝对像素 —— 那随 DPI/主题变，与 TickStyle 那一格同一条教训）。
+int vb6_Slider_BubbleTop(void* hwnd) {
+    HWND host;
+    RECT r;
+    if (!hwnd) return -1;
+    host = vb6_Slider_BubbleHost(GetParent((HWND)hwnd));
+    if (!host) return -1;
+    r.left = r.top = r.right = r.bottom = 0;
+    GetWindowRect(host, &r);
+    return (int)r.top;
+}
+
+// 判据证人：宿主里此刻挂着的那句文本（问的是 tooltip 控件，不是我们的窗口属性）。
+wchar_t* vb6_Slider_BubbleText(void* hwnd) {
+    static wchar_t buf[128];
+    HWND host;
+    TOOLINFOW ti;
+    buf[0] = 0;
+    if (!hwnd) return SysAllocString(L"");
+    host = vb6_Slider_BubbleHost(GetParent((HWND)hwnd));
+    if (!host) return SysAllocString(L"");
+    vb6_Slider_BubbleFillTool(hwnd, &ti);
+    ti.lpszText = buf;
+    buf[0] = 0;
+    /* TTM_GETTEXT 的返回值不能当成败判据：实测 v6 下它**回 0 而文本照样复制进缓冲**
+       （探针 .build/slprobe/slmeasure18.c：GETTEXTW rc=0 text=<VOL>）⇒ 只看缓冲。
+       与账 #148 那枚 ToolTipRegistered 同一处坑、同一个修法。 */
+    SendMessageW(host, TTM_GETTEXTW, 0, (LPARAM)&ti);
+    return SysAllocString(buf);
+}
+
 #endif /* _WIN32 */

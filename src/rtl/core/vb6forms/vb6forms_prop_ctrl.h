@@ -884,6 +884,19 @@ int32_t vb6_Slider_ChannelTop(void* hwnd);
 int32_t vb6_Slider_GetSelLength(void* hwnd);
 void    vb6_Slider_SetSelLength(void* hwnd, int32_t len);
 void    vb6_Slider_ClearSel(void* hwnd);
+// C29-SL-k：VB6 的 `Text`（0x0010，BSTR —— 文档原话"滑块位置变化时那颗 ToolTip 里显示的串"）与
+// `TextPosition`（0x0011，枚举 sldAboveLeft=0 / sldBelowRight=1）。走的是我们自己持的一枚
+// TRACK 型 tooltip（轨道条自带那枚 TBS_TOOLTIPS 服务不了自定义串，而且只在创建时才建 ——
+// 实测 .build/slprobe/slmeasure17.c 的 v5/v6 两份）。派发那边一条 BubbleNotify 管摆出/收回。
+// 三条判据证人都是 C3 扩展（不是 VB6 属性）：摆没摆出来、气泡上边、宿主里此刻那句文本。
+wchar_t* vb6_Slider_GetText(void* hwnd);
+void     vb6_Slider_SetText(void* hwnd, void* bstrText);
+int32_t  vb6_Slider_GetTextPosition(void* hwnd);
+void     vb6_Slider_SetTextPosition(void* hwnd, int32_t pos);
+void     vb6_Slider_BubbleNotify(void* hwnd, int32_t code, int32_t value);
+int32_t  vb6_Slider_BubbleVisible(void* hwnd);
+int32_t  vb6_Slider_BubbleTop(void* hwnd);
+wchar_t* vb6_Slider_BubbleText(void* hwnd);
 // C29-SL-c：事件面。Slider 与 ScrollBar 共用同一条通道 —— 控件给**父窗**发 WM_HSCROLL（横杆）
 // / WM_VSCROLL（竖杆），wParam 低字是 TB_* 码、高字带当前值，lParam 就是控件句柄
 // （实测 .build/slprobe/slmeasure7/8.c：真拖一次收到 5×N → 4 → 8；方向键收到 0 → 8；

@@ -549,6 +549,17 @@
     }
     if (hasScrollBar) {
     c_.emitLine("{ void* scrollHwnd = (void*)lParam; int scrollCode = LOWORD(wParam);");
+    // C29-SL-k: VB6 的 Slider 在拖滑块时把那颗气泡摆出来（ISlider.Text = 0x0010 就是气泡里那句
+    // 串），而原生轨道条自己那枚 TBS_TOOLTIPS 服务不了自定义串（实测 slmeasure17.c：它自带一条
+    // 工具、TTM_POP 无头里什么都不触发）⇒ 气泡由 RTL 自己持一枚 TRACK 型 tooltip 来摆。
+    // 这一条**只发一次、不按控件展开**：RTL 里按窗口类名把 ScrollBar 筛掉。值取 wParam 高字
+    // （实测 4/5 两档带新值、8 那档为 0 ⇒ 传 0 时 RTL 自己现问 TBM_GETPOS）。
+    bool hasSlider = false;
+    for (const auto& ctrl : frmDesc.formControl.children) {
+        if (ctrl.controlType == FrmControlType::Slider) { hasSlider = true; break; }
+    }
+    if (hasSlider)
+        c_.emitLine("vb6_Slider_BubbleNotify(scrollHwnd, scrollCode, HIWORD(wParam));");
     for (const auto& ctrl : frmDesc.formControl.children) {
         if (ctrl.controlType == FrmControlType::HScrollBar || ctrl.controlType == FrmControlType::VScrollBar) {
             std::string ctrlHwnd = "vb6_hwnd_" + cIdent(ctrl.controlName);

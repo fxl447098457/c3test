@@ -156,6 +156,11 @@ Vb6Type CCodeGen::controlPropType(FrmControlType ctrlType, const std::string& pr
         if (p == "selectrange") return Vb6Type::Boolean;
         // 账 #148 的判据证人同样是 -1/0 ⇒ 同一档。
         if (p == "tooltipregistered") return Vb6Type::Boolean;
+        // C29-SL-k：`Text` 在类型库里是 VT_BSTR（那颗气泡里的串，**不是**窗口标题），
+        // `BubbleText` 读的是 tooltip 宿主里的工具文本 ⇒ 两条都是 String 档。
+        if (p == "text" || p == "bubbletext") return Vb6Type::String;
+        if (p == "bubblevisible") return Vb6Type::Boolean;      // -1/0
+        if (p == "textposition" || p == "bubbletop") return Vb6Type::Long;
     }
     if (ctrlType == FrmControlType::RichTextBox) {
         // C29-RT-a: 同一口径。vb6_RTB_Get* 除 SelText 外全是 int32_t（布尔按 VB6 的 -1/0 给，
@@ -581,6 +586,14 @@ std::string CCodeGen::getControlPropReadFn(FrmControlType ctrlType, const std::s
         if (propLower == "channeltop") return "vb6_Slider_ChannelTop";
         // 账 #148 的判据证人（**不是 VB6 属性**）：tooltip 宿主里到底有没有这枚控件的工具。
         if (propLower == "tooltipregistered") return "vb6_ToolTipRegistered";
+        // C29-SL-k: VB6 的 Slider.Text 是**气泡里那句串**（类型库 VT_BSTR，0x0010），
+        // 不是窗口标题 —— 这一格把它从通用的 vb6_GetControlText 那支抢过来自己实现。
+        // 三条 Bubble* 是判据证人（C3 扩展）：问的是 tooltip 宿主自己，不是我们的窗口属性。
+        if (propLower == "text") return "vb6_Slider_GetText";
+        if (propLower == "textposition") return "vb6_Slider_GetTextPosition";
+        if (propLower == "bubblevisible") return "vb6_Slider_BubbleVisible";
+        if (propLower == "bubbletop") return "vb6_Slider_BubbleTop";
+        if (propLower == "bubbletext") return "vb6_Slider_BubbleText";
         // C29-SL-i: VB6 选区那一对的第二条（SelStart + SelLength，类型库 dispid 0x0007/0x0008）。
         if (propLower == "sellength") return "vb6_Slider_GetSelLength";
         if (propLower == "visible") return "vb6_GetControlVisible";
@@ -967,6 +980,10 @@ std::string CCodeGen::getControlPropWriteFn(FrmControlType ctrlType, const std::
         if (propLower == "tickstyle") return "vb6_Slider_SetTickStyle";
         // C29-SL-i: SelLength 写侧 = 起点不动、终点 = 起点 + 长度（远端超量程由控件夹住，实测）。
         if (propLower == "sellength") return "vb6_Slider_SetSelLength";
+        // C29-SL-k: Text 写的是气泡串（同时把宿主里那条工具的文本换掉）；TextPosition 自存
+        // 一枚 0/1（原生没有这条消息），摆气泡时用它定上/下。
+        if (propLower == "text") return "vb6_Slider_SetText";
+        if (propLower == "textposition") return "vb6_Slider_SetTextPosition";
         if (propLower == "visible") return "vb6_SetControlVisible";
         if (propLower == "enabled") return "vb6_SetControlEnabled";
         break;

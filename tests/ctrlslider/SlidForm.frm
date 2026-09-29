@@ -373,6 +373,34 @@ Private Sub tGo_Timer()
     ' 设过的 sld5 都该 Y，从没设过的 sld1 该 N（要是三条齐 Y 就说明这枚证人问不出东西）。
     Debug.Print "SJ1-reg=" & TF(sld3.ToolTipRegistered) & "/" & TF(sld5.ToolTipRegistered) _
         & "/" & TF(sld1.ToolTipRegistered)
+    ' ---- C29-SL-k: Text 气泡 + TextPosition（VB6 那一面：ISlider.Text 0x0010 BSTR /
+    '      TextPosition 0x0011 = sldAboveLeft 0 / sldBelowRight 1）----
+    ' 气泡不走轨道条自带的 TBS_TOOLTIPS（那颗服务不了自定义串，而且只在创建时才建），
+    ' 走 RTL 自己持的一枚 TRACK 型 tooltip ⇒ 三条判据问的都是**宿主**而不是我们的窗口属性：
+    ' BubbleVisible（IsWindowVisible）、BubbleText（TTM_GETTEXT 读回）、BubbleTop（气泡上边）。
+    ' 摆动它的是派发里那条 BubbleNotify：4/5 摆出来、8 收回去（与 Scroll 的分法同一档）。
+    Dim bt0 As Long, bt1 As Long
+    sld3.Text = "VOL"
+    Debug.Print "SK1-text=" & sld3.Text & "/" & TypeName(sld3.Text) & "/" & CStr(VarType(sld3.Text))
+    Debug.Print "SK2-off=" & TF(sld3.BubbleVisible) & "/" & TF(sld1.BubbleVisible)
+    sld3.SimNotify(5, 40)
+    bt0 = sld3.BubbleTop
+    Debug.Print "SK3-show=" & TF(sld3.BubbleVisible) & "/" & sld3.BubbleText & "/" & TF(bt0 > 0)
+    sld3.SimNotify(8, 40)
+    Debug.Print "SK4-hide=" & TF(sld3.BubbleVisible)
+    sld3.TextPosition = 1
+    sld3.SimNotify(5, 40)
+    bt1 = sld3.BubbleTop
+    Debug.Print "SK5-pos=" & CStr(sld3.TextPosition) & "/" & TF(bt1 > bt0)
+    sld3.SimNotify(8, 40)
+    sld3.TextPosition = 0
+    ' SK6：Text 空着 ⇒ 气泡里就是当前的值（原生那颗画的就是数字，这条是我们的口径，
+    '      VB6 两者怎么共存本机拿不到真值）。sld1 从没写过 Text，拖到 33。
+    sld1.SimNotify(5, 33)
+    Debug.Print "SK6-num=" & sld1.BubbleText & "/" & CStr(sld1.Value) _
+        & "/" & TF(sld1.BubbleVisible)
+    sld1.SimNotify(8, 33)
+    Debug.Print "SK7-end=" & TF(sld1.BubbleVisible) & "/" & CStr(sld1.TextPosition)
     Debug.Print "SLIDER-DONE"
     Unload Me
 End Sub

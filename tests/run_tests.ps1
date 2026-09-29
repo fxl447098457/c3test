@@ -1896,7 +1896,16 @@ if ($Category -in @("all", "run", "vbp")) {
                      # TTM_GETTEXT 读回来：运行期设过的 sld3、设计期设过的 sld5 都是 Y，
                      # 从没设过的 sld1 是 N（第三格是负控：三条齐 Y 就说明证人问不出东西）。
                      # BASE 上整条是 N/N/N —— 未登记时读回来是对象、折成数值恒假。
-                     "SJ1-reg=Y/Y/N")
+                     "SJ1-reg=Y/Y/N",
+                     # C29-SL-k 的 Text 气泡。SK3 是这格的心脏：拖一档之后**宿主自己**答
+                     # "可见"并且把 "VOL" 原样读回来（TTM_GETTEXT 问的是 tooltip 控件，
+                     # 不是我们的窗口属性）；SK4 钉 ENDTRACK 收回去；SK5 钉 TextPosition
+                     # 两档摆的位置不同（只比高低、不钉绝对像素 —— 与 TickStyle 同一教训）；
+                     # SK6 钉 Text 空着时气泡里就是当前的值；SK7 钉收尾之后一切都归位。
+                     # SK1 刻意只当证人不当红针：BASE 上 Text 走的是"拿 HWND 当 IDispatch 问
+                     # 它要 Text 属性"那支，串照样回得来，所以这一条两边都是 VOL/String/8。
+                     "SK1-text=VOL/String/8", "SK2-off=N/N", "SK3-show=Y/VOL/Y",
+                     "SK4-hide=N", "SK5-pos=1/Y", "SK6-num=33/33/Y", "SK7-end=N/0")
     Test-Vbp "ctrlslider" "$Tests\ctrlslider\SlidApp.vbp" $slidNeedles
     Test-Vbp "ctrlslider_x86" "$Tests\ctrlslider\SlidApp.vbp" $slidNeedles -Arch "x86"
     Test-EmitcShape "sl_emitc_native" @("$Tests\ctrlslider\SlidApp.vbp") @(
@@ -1936,7 +1945,14 @@ if ($Category -in @("all", "run", "vbp")) {
         'vb6_CStrLong(vb6_Slider_GetSelLength(vb6_hwnd_sld4',
         'vb6_Slider_Init((void*)vb6_hwnd_sld6, -999, -999, -999, 1L, -999, -999, 25L, 40L, -1L);',
         # SJ-j: 证人走登记过的那条 getter（不再被折成「装箱 + 转数值」那一趟）。
-        'vb6_ToolTipRegistered(vb6_hwnd_sld3'
+        'vb6_ToolTipRegistered(vb6_hwnd_sld3',
+        # C29-SL-k: 派发里那一条**只发一次、不按控件展开**（RTL 里按类名筛掉 ScrollBar），
+        # 再加 Text / TextPosition 的读写与一条证人。
+        'vb6_Slider_BubbleNotify(scrollHwnd, scrollCode, HIWORD(wParam));',
+        'vb6_Slider_SetText(vb6_hwnd_sld3',
+        'vb6_Slider_SetTextPosition(vb6_hwnd_sld3, 1);',
+        'vb6_Slider_BubbleVisible(vb6_hwnd_sld3',
+        'vb6_Slider_BubbleText(vb6_hwnd_sld3'
     )
     # C29-SL-c: 事件派发那一段的形状。钉的是"认来源的那枚句柄 + 分流那一档"这一整对 ——
     # Slider 与 ScrollBar 共用一扇 case WM_HSCROLL/WM_VSCROLL 的门，写错句柄比对比就是静默不派发。
@@ -1994,6 +2010,13 @@ if ($Category -in @("all", "run", "vbp")) {
         'vb6_ComCall(vb6_hwnd_sld4, L"ClearSel"',
         'vb6_ComGetProp(vb6_hwnd_sld3, L"ToolTipRegistered")',
         'vb6_ComGetProp(vb6_hwnd_sld7, L"TickStyle")',
+        # C29-SL-k: Text / TextPosition / 三条证人在登记之前全落那扇兜底门（BASE 逐条命中）。
+        # 注意 Text 那支在 BASE 上回的是**字符串属性读**，串照样拿得到 —— 所以红的是气泡
+        # 那三条，不是 SK1。
+        'vb6_ComGetStringProp(vb6_hwnd_sld3, L"Text")',
+        'vb6_ComSetProp(vb6_hwnd_sld3, L"Text"',
+        'vb6_ComGetProp(vb6_hwnd_sld3, L"BubbleVisible")',
+        'vb6_ComGetStringProp(vb6_hwnd_sld1, L"BubbleText")',
         'CoCreateInstance'
     )
 
