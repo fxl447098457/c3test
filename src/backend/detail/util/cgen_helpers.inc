@@ -257,6 +257,10 @@
     // SS_NOTIFY/BS_GROUPBOX 等样式会导致外观/交互 (含 tooltip) 异常。
     long controlTypeStyleBits(const FrmControl& ctrl) const;
 
+    // C29-SL-h: Slider 的创建样式位（TBS_AUTOTICKS / TBS_VERT / TickStyle 那三位）。
+    // 顶层与容器子控件两条创建路各自都要它，所以单独一处折算、两处调用（账 #83）。
+    long sliderStyleBits(const FrmControl& ctrl) const;
+
     // VB6 PictureBox/Image 的 STATIC 控件不显示 Caption (标题在创建时应清空)。
     bool controlTypeClearsCaption(const FrmControl& ctrl) const;
 

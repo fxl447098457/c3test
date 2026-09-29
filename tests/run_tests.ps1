@@ -1867,7 +1867,20 @@ if ($Category -in @("all", "run", "vbp")) {
                      "SE14-emptytag=/end",
                      # C29-SL-g 焦点面。改之前 SG1/SG2/SG3/SG4 四条在 BASE 上逐条是 N
                      # （四类白名单不含 Slider，处理器编得出来没人送消息）。SG0 是原始证人行。
-                     "SG1-got=Y", "SG2-move=Y", "SG3-back=Y", "SG4-isolate=Y")
+                     "SG1-got=Y", "SG2-move=Y", "SG3-back=Y", "SG4-isolate=Y",
+                     # C29-SL-h TickStyle 四档（枚举真值读自 OCX 自带的类型库）。
+                     # SH2/SH3/SH6 钉的是「控件几何真的跟着那一档动」—— chan.top 与
+                     # ts=0 基线比高低；1 与 2 之间不写几何断言（本机两处读数顺序相反，
+                     # 探针 40px 答 20/19、夹具 400 缇答 18/19），两档只靠样式位读回区分。
+                     # SH4 是 ts=3 唯一的证人（GetNumTicks=0；TickPresent 在那一档照旧答有）。
+                     # SH7 钉越界归 0，SH8 钉类型档（Long / VT_I4，与 Orientation 同档）。
+                     # SH0-geom 那行是绝对像素，只做证人、不登记 —— 登记等于把本机钉进判据。
+                     "SH1-base=0/Y", "SH2-top=1/Y", "SH3-both=2/Y", "SH4-none=3/0/Y",
+                     "SH5-back=0/Y/Y", "SH6-dt=2/Y", "SH7-oob=0", "SH8-type=Long/3",
+                     # SH9 是**第二条创建路**（容器子控件）的证人：sld7 挂在 Frame 里，
+                     # 那条路以前对 Slider 一格样式都不挂（BASE 实测创建参数 1342177280 =
+                     # 只有 WS_CHILD|WS_VISIBLE，连 TBS_AUTOTICKS 都没有）。
+                     "SH9-child=1/Y")
     Test-Vbp "ctrlslider" "$Tests\ctrlslider\SlidApp.vbp" $slidNeedles
     Test-Vbp "ctrlslider_x86" "$Tests\ctrlslider\SlidApp.vbp" $slidNeedles -Arch "x86"
     Test-EmitcShape "sl_emitc_native" @("$Tests\ctrlslider\SlidApp.vbp") @(
@@ -1889,6 +1902,17 @@ if ($Category -in @("all", "run", "vbp")) {
         'vb6_BSTR_Concat(vb6_BSTR_FromStr(L"SE2-tag="), vb6_GetControlTag(vb6_hwnd_sld3)',
         'vb6_SetToolTipText((void*)vb6_hwnd_sld5, L"dtip");',
         'vb6_SetControlTag((void*)vb6_hwnd_sld5, L"dtag");'                  # #124 那条布尔口径
+        # C29-SL-h: 设计期那一条 TickStyle=2 必须出现在**创建参数**里（1409286145 那枚是
+        # TBS_AUTOTICKS，多挂 TBS_BOTH=0x8 才是 1409286153）—— 只写自存不算下发到窗口。
+        # 读侧走 CStrLong（登记成 Long 档 ⇒ CStr 不再被折成 Variant 那一趟）；写侧直接 setter。
+        '1409286153L, 0L,',
+        'vb6_Slider_SetTickStyle(vb6_hwnd_sld3, 2);',
+        'vb6_Slider_SetTickStyle(vb6_hwnd_sld3, 9);',
+        'vb6_CStrLong(vb6_Slider_GetTickStyle(vb6_hwnd_sld3',
+        'vb6_Slider_GetNumTicks(vb6_hwnd_sld3',
+        'vb6_Slider_ChannelTop(vb6_hwnd_sld3',
+        # 容器里那枚滑杆的创建参数: 1342177280(BASE, 一位不挂) + 0x5 = TBS_AUTOTICKS|TBS_TOP
+        '1342177285L, 0L,'
     )
     # C29-SL-c: 事件派发那一段的形状。钉的是"认来源的那枚句柄 + 分流那一档"这一整对 ——
     # Slider 与 ScrollBar 共用一扇 case WM_HSCROLL/WM_VSCROLL 的门，写错句柄比对比就是静默不派发。
@@ -1932,6 +1956,13 @@ if ($Category -in @("all", "run", "vbp")) {
         'vb6_CStr(vb6_VariantFromValue(vb6_GetControlTag',
         'vb6_SetControlTag((void*)vb6_hwnd_sld1',   # 账 #142: Tag="" 不发
         'vb6_ComCall(vb6_hwnd_sld6, L"SimStdEvent"',
+        # C29-SL-h: TickStyle / GetNumTicks / ChannelTop 三条登记之前全部落到那扇兜底门
+        # —— 拿裸 HWND 当 IDispatch：编得过、跑得动、什么都不发生（BASE 实测逐条命中）。
+        'vb6_ComGetProp(vb6_hwnd_sld3, L"TickStyle")',
+        'vb6_ComSetProp(vb6_hwnd_sld3, L"TickStyle"',
+        'vb6_ComGetIntProp(vb6_hwnd_sld3, L"GetNumTicks")',
+        'vb6_ComGetIntProp(vb6_hwnd_sld3, L"ChannelTop")',
+        'vb6_ComGetProp(vb6_hwnd_sld7, L"TickStyle")',
         'CoCreateInstance'
     )
 

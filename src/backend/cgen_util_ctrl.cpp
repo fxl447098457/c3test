@@ -143,7 +143,10 @@ Vb6Type CCodeGen::controlPropType(FrmControlType ctrlType, const std::string& pr
             || p == "travelisvert" || p == "tickpresent"
             || p == "min" || p == "max" || p == "value"
             || p == "smallchange" || p == "largechange"
-            || p == "selstart" || p == "selend") {
+            || p == "selstart" || p == "selend"
+            // C29-SL-h: 三条都是数值（TickStyle 在类型库里是 VT_USERDEFINED 的那张枚举，
+            // VB6 侧读回来就是 0..3 这一个数，与 Orientation 同档）。
+            || p == "tickstyle" || p == "getnumticks" || p == "channeltop") {
             return Vb6Type::Long;
         }
         // SelectRange 在 VB6 是 Boolean ⇒ 按 #124 那条口径登记（getter 给的就是 -1/0），
@@ -568,6 +571,10 @@ std::string CCodeGen::getControlPropReadFn(FrmControlType ctrlType, const std::s
         if (propLower == "selectrange") return "vb6_Slider_GetSelectRange";
         if (propLower == "selstart") return "vb6_Slider_GetSelStart";
         if (propLower == "selend") return "vb6_Slider_GetSelEnd";
+        // C29-SL-h: TickStyle 四档 + GetNumTicks（VB6 只读那一面），加一条判据证人 ChannelTop。
+        if (propLower == "tickstyle") return "vb6_Slider_GetTickStyle";
+        if (propLower == "getnumticks") return "vb6_Slider_GetNumTicks";
+        if (propLower == "channeltop") return "vb6_Slider_ChannelTop";
         if (propLower == "visible") return "vb6_GetControlVisible";
         if (propLower == "enabled") return "vb6_GetControlEnabled";
         break;
@@ -947,6 +954,9 @@ std::string CCodeGen::getControlPropWriteFn(FrmControlType ctrlType, const std::
         if (propLower == "selectrange") return "vb6_Slider_SetSelectRange";
         if (propLower == "selstart") return "vb6_Slider_SetSelStart";
         if (propLower == "selend") return "vb6_Slider_SetSelEnd";
+        // C29-SL-h: TickStyle 运行期写有效（实测写位 + 换帧之后的每一条形与创建时带那一位逐字
+        // 相同）。GetNumTicks / ChannelTop 两条刻意不给写口 —— 前者 VB6 就是只读。
+        if (propLower == "tickstyle") return "vb6_Slider_SetTickStyle";
         if (propLower == "visible") return "vb6_SetControlVisible";
         if (propLower == "enabled") return "vb6_SetControlEnabled";
         break;
@@ -1165,6 +1175,41 @@ bool CCodeGen::controlFocusFromNativeNotify(FrmControlType ctrlType) {
     }
 }
 
+// C29-SL-a/h: Slider 的创建样式位 —— **两条创建路共用这一处**（顶层那条在
+// cgen_form_ctrl_style_apply.inc 的 Slider 分支，容器子控件那条走下面的
+// controlTypeStyleBits，账 #83 说的就是这两张表会各写各的）。
+// 取值与 vb6forms_slider.c 里的 getter 同一档：
+//   · TBS_AUTOTICKS(0x0001) 一律挂上：VB6 的 Slider 默认就画刻度。
+//   · Orientation 0=水平 / 1=垂直 → TBS_VERT(0x0002)。
+//   · TickStyle 四档 → TBS_TOP(0x0004) / TBS_BOTH(0x0008) / TBS_NOTICKS(0x0010)，
+//     0=sldBottomRight 就是那三位全清（TBS_BOTTOM==TBS_RIGHT==0）。四档的数值是
+//     从 OCX 自带的类型库读出来的（探针 .build/slprobe/sltlb.cpp），不是猜的；
+//     每一档在控件侧的证人实测于 .build/slprobe/slmeasure12.c。
+long CCodeGen::sliderStyleBits(const FrmControl& ctrl) const {
+    constexpr long kTbsAutoTicks = 0x0001L;
+    constexpr long kTbsVert      = 0x0002L;
+    constexpr long kTbsTop       = 0x0004L;   // == TBS_LEFT
+    constexpr long kTbsBoth      = 0x0008L;
+    constexpr long kTbsNoTicks   = 0x0010L;
+    constexpr long kTbsPosMask   = kTbsTop | kTbsBoth | kTbsNoTicks;
+
+    long style = kTbsAutoTicks;
+    auto slOr = ctrl.properties.find("Orientation");
+    if (slOr != ctrl.properties.end() && (int)slOr->second.intValue != 0) style |= kTbsVert;
+    auto slTs = ctrl.properties.find("TickStyle");
+    if (slTs != ctrl.properties.end()) {
+        long pos = 0;
+        switch ((int)slTs->second.intValue) {
+            case 1: pos = kTbsTop; break;
+            case 2: pos = kTbsBoth; break;
+            case 3: pos = kTbsNoTicks; break;
+            default: pos = 0; break;   // 0 与越界值都落"下半/右半"那一档（与 setter 同口径）
+        }
+        style = (style & ~kTbsPosMask) | pos;
+    }
+    return style;
+}
+
 // 控件类型的 Win32 样式位。取值与 cgen_form_ctrl_style_apply.inc 保持一致。
 // 顶层控件与容器子控件共用，避免容器内子控件缺失类型样式。
 long CCodeGen::controlTypeStyleBits(const FrmControl& ctrl) const {
@@ -1275,6 +1320,12 @@ long CCodeGen::controlTypeStyleBits(const FrmControl& ctrl) const {
             break;
         case FrmControlType::Image:
             style |= kSsBitmap | kSsCenterImg;
+            break;
+        // C29-SL-h: 此前这条路**压根没有 Slider 这一格** —— 容器里的滑杆连 TBS_AUTOTICKS 都没
+        // 挂上（账 #83 那条"顶层专有项没铺到第二条创建路"的一个具体落点）。折算共用
+        // sliderStyleBits，不留第二份表。
+        case FrmControlType::Slider:
+            style |= sliderStyleBits(ctrl);
             break;
         default:
             break;

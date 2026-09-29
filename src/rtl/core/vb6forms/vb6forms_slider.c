@@ -4,7 +4,8 @@
 // **不加载任何 OCX** (mscomctl.ocx 在本机未注册, 且 32 位 inproc 无法进 x64 进程)。
 //
 // 本文件按格长厚：**SL-a** = 窗口 + 创建样式 + 标量属性面，**SL-b** = 值面
-// (Min/Max/Value/Small·LargeChange/Sel*)，**SL-c** = Change / Scroll 两条事件（文末那一节）。
+// (Min/Max/Value/Small·LargeChange/Sel*)，**SL-c** = Change / Scroll 两条事件（文末那一节），
+// **SL-h** = TickStyle 四档 + GetNumTicks（最末那一节）。
 //
 // 实测口径 (.build/slprobe/slmeasure*.c, x64 真跑; 全文抄在 ai/029 §九 C29-SL-0 那一格):
 //   1) **方向的正解**: TBM_GETCHANNELRECT 的 rect 永远把行程长度放在 **x 分量** ——
@@ -26,8 +27,10 @@
 //
 // VB6 枚举（本文件用到的这一档）：
 //   Orientation: 0 = sldHorizontal（默认），1 = sldVertical
-//   TickStyle 四档与 TBS_ 的对应 **本机拿不到 VB6 真值**（OCX 未注册、typelib 读不到），
-//   刻意不实现，已按 #120 那条口径押后等裁决 —— 别照猜的枚举写代码。
+//   TickStyle:   0 = sldBottomRight, 1 = sldTopLeft, 2 = sldBoth, 3 = sldNoTicks
+//     （SL-h 起这不再是我猜的：四档与它的数值是从 **MSCOMCTL.OCX 自带的那张类型库**读出来的，
+//      探针 `.build/slprobe/sltlb.cpp` 走 `LoadTypeLibEx(路径, REGKIND_NONE)` —— 不需要注册，
+//      OCX 在 System32 里就有。对应关系与实测证人见下面 C29-SL-h 那一格。）
 
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
@@ -457,5 +460,86 @@ void vb6_Slider_SimStdEvent(void* hwnd, int32_t kind, int32_t wParam) {
     }
     SendMessageW((HWND)hwnd, m, (WPARAM)wParam, MAKELPARAM(40, 12));
 }
+
+/* ======================= C29-SL-h: TickStyle 四档 + GetNumTicks ======================= *
+ * VB6 那一档的真值不是猜的 —— 从 MSCOMCTL.OCX 自带的类型库直接读出来的
+ * （探针 .build/slprobe/sltlb.cpp：LoadTypeLibEx(路径, REGKIND_NONE, &tl)，不用注册）：
+ *     TickStyleConstants { sldBottomRight = 0, sldTopLeft = 1, sldBoth = 2, sldNoTicks = 3 }
+ *     ISlider::TickStyle 的 dispid = 0x0009，型别是 VT_USERDEFINED（就是这张枚举）
+ *     ISlider::GetNumTicks 的 dispid = 0x000f，型别 VT_I4，**只有 propget**（VB6 也是只读）
+ *
+ * 与原生样式位是一张 1:1 的表，不是凑的：commctrl.h 里
+ *     TBS_BOTTOM == TBS_RIGHT == 0x0000   TBS_TOP == TBS_LEFT == 0x0004
+ *     TBS_BOTH   == 0x0008               TBS_NOTICKS == 0x0010
+ * VB6 那两条合名（"BottomRight"/"TopLeft"）念的就是"水平看下半、垂直看右半"，
+ * 与上面那两行同值异名的样式位正好对上。
+ *
+ * 四档在控件侧各有证人，实测于 .build/slprobe/slmeasure12.c（x64 真跑，150x40、range 0..100、
+ * freq=10、pos=50；chan=通道矩形、thumb=滑块矩形）：
+ *     ts=0  chan.top=10  thumb.top=2   numTics=11
+ *     ts=1  chan.top=20  thumb.top=10  numTics=11
+ *     ts=2  chan.top=19  thumb.top=10  numTics=11
+ *     ts=3  chan.top=10  thumb.top=2   numTics=0     <- 与 ts=0 只差 numTics 这一维
+ *   · 所以 **ts=3 的证人是 GetNumTicks**，另外三档靠 chan.top 的**相对高低**分（1 > 2 > 0）。
+ *     ⚠ 但 **1 与 2 谁高谁低不稳**：同一枚探针在 40px 高答 20/19，夹具那枚 400 缇（26~27px）
+ *     答 18/19 —— 顺序反过来了。所以判据只用「与 ts=0 不同」这一维，1/2 之间不写几何断言，
+ *     两档的区分只靠样式位读回（本文件那对 getter/setter）。
+ *   · 另一条要记住：`TickPresent`（GETTICPOS(0) != -1）在 NOTICKS 下**照旧答"有刻度"**
+ *     （实测仍是 14，刻度只是不画、表还在）⇒ 它看不见 ts=3，别拿它当四档的判据。
+ *   · **运行期写样式位 + 换帧**之后的每一条形与"创建时就带那一位"**逐字相同**（12.c 的
+ *     Q2 那一段，含来回切四档）⇒ 这一格与 Orientation 同一条口径：不是只能创建时给。
+ *
+ * 越界值（4、-1…）怎么办：写侧只认 1/2/3 那三位，其余一律落成"下半/右半"那一档（=0），
+ * 读侧读的是窗口当前的样式位 ⇒ 与 Orientation 同一口径，**答出去的数就是窗口真在走的那一档**，
+ * 不自存、不猜 VB6 会不会报错（OCX 没注册、跑不起来，那条真值本机拿不到）。
+ */
+
+// VB6: Slider.TickStyle（读写）。四档就是样式位的三种组合 + "无刻度"。
+int vb6_Slider_GetTickStyle(void* hwnd) {
+    LONG st;
+    if (!hwnd) return 0;
+    st = (LONG)GetWindowLongPtrW((HWND)hwnd, GWL_STYLE);
+    if (st & TBS_NOTICKS) return 3;   // sldNoTicks（这一位压倒其余两位）
+    if (st & TBS_BOTH) return 2;      // sldBoth
+    if (st & TBS_TOP) return 1;       // sldTopLeft（竖杆时同一位念作 TBS_LEFT）
+    return 0;                          // sldBottomRight
+}
+
+void vb6_Slider_SetTickStyle(void* hwnd, int tickStyle) {
+    LONG st;
+    RECT wr;
+    if (!hwnd) return;
+    st = (LONG)GetWindowLongPtrW((HWND)hwnd, GWL_STYLE);
+    st &= ~(LONG)(TBS_TOP | TBS_BOTH | TBS_NOTICKS);
+    if (tickStyle == 1)      st |= TBS_TOP;
+    else if (tickStyle == 2) st |= TBS_BOTH;
+    else if (tickStyle == 3) st |= TBS_NOTICKS;
+    SetWindowLongPtrW((HWND)hwnd, GWL_STYLE, st);
+    // 与 Orientation 同一脚：光写样式不重排（实测对照组在 12.c —— 不 FRAMECHANGED 就停在旧布局）
+    GetWindowRect((HWND)hwnd, &wr);
+    SetWindowPos((HWND)hwnd, NULL, 0, 0, (int)(wr.right - wr.left), (int)(wr.bottom - wr.top),
+                 SWP_NOZORDER | SWP_NOMOVE | SWP_FRAMECHANGED);
+}
+
+// VB6: Slider.GetNumTicks（只读，dispid 0x000f）—— "当前看得见几条刻度"。
+// 原生这条消息在 NOTICKS 下真答 0（实测），所以它同时是 ts=3 那一档的控件侧证人。
+int vb6_Slider_GetNumTicks(void* hwnd) {
+    if (!hwnd) return 0;
+    return (int)SendMessageW((HWND)hwnd, TBM_GETNUMTICS, 0, 0);
+}
+
+// C3 扩展（不是 VB6 属性，判据专用）：通道矩形的**上边**。
+// ts=0/1/2 三档的差别只在刻度画在哪一侧，而那一侧一换，通道就被顶下去几像素（实测
+// 10 / 20 / 19）。夹具用的是**相对高低**而不是绝对像素 —— 绝对值会随主题与控件高度变。
+int vb6_Slider_ChannelTop(void* hwnd) {
+    RECT ch;
+    if (!hwnd) return -1;
+    ch.left = ch.top = ch.right = ch.bottom = 0;
+    SendMessageW((HWND)hwnd, TBM_GETCHANNELRECT, 0, (LPARAM)&ch);
+    return (int)ch.top;
+}
+
+// 设计期那一档**只走创建样式位**这一条路（cgen 里两条创建路共用 sliderStyleBits 那一处折算），
+// 所以这里刻意不再发一次 setter —— 同一件事不留第二份表。
 
 #endif /* _WIN32 */

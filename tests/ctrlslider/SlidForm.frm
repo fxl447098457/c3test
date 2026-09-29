@@ -1,12 +1,12 @@
 VERSION 5.00
 Begin VB.Form SlidForm 
    Caption         =   "SlidForm"
-   ClientHeight    =   2400
+   ClientHeight    =   3200
    ClientLeft      =   120
    ClientTop       =   465
    ClientWidth     =   4200
    LinkTopic       =   "SlidForm"
-   ScaleHeight     =   2400
+   ScaleHeight     =   3200
    ScaleWidth      =   4200
    Begin VB.Timer tGo 
       Enabled         =   -1   'True
@@ -67,6 +67,7 @@ Begin VB.Form SlidForm
       Left            =   120
       TabIndex        =   4
       Tag             =   "dtag"
+      TickStyle       =   2
       Top             =   1680
       ToolTipText     =   "dtip"
       Width           =   2000
@@ -82,6 +83,24 @@ Begin VB.Form SlidForm
       Width           =   1200
       _ExtentX        =   2117
       _ExtentY        =   706
+   End
+   Begin VB.Frame frmTickBox 
+      Caption         =   "tickbox"
+      Height          =   1000
+      Left            =   120
+      TabIndex        =   6
+      Top             =   2160
+      Width           =   2400
+      Begin MSComctlLib.Slider sld7 
+         Height          =   400
+         Left            =   120
+         TabIndex        =   7
+         TickStyle       =   1
+         Top             =   240
+         Width           =   2000
+         _ExtentX        =   3528
+         _ExtentY        =   706
+      End
    End
 End
 Attribute VB_Name = "SlidForm"
@@ -268,6 +287,47 @@ Private Sub tGo_Timer()
     Debug.Print "SG3-back=" & TF(gGot6 - f0 = 2 And gGot3 - f2 = 1)
     sld3.SimStdEvent(4, 0)          ' 认来源：sld6 的 LostFocus 只跟着它自己失焦涨
     Debug.Print "SG4-isolate=" & TF(gLost6 - f1 = 2 And gGot3 - f2 = 2 And gGot6 - f0 = 2)
+    ' ---- C29-SL-h: TickStyle 四档（数值读自 OCX 自带的类型库，不是猜的）----
+    ' 0=sldBottomRight(那三位样式位全清) 1=sldTopLeft(TBS_TOP) 2=sldBoth(TBS_BOTH)
+    ' 3=sldNoTicks(TBS_NOTICKS)。判据一律用**相对高低**，不钉绝对像素 —— chan.top 的绝对值
+    ' 随主题与控件高度变（探针 slmeasure12.c 在 40px 高：chan.top 10/20/19/10、thumb.top
+    ' 2/10/10/2、numTics 11/11/11/0；夹具这一枚是 400 缇 = 26~27px，见 SH0 那行原始读数）。
+    ' **两档之间不可分的那一对**：1 与 2 的几何只差一两个像素，而且**谁高谁低本机都不稳**
+    ' （探针 40px 高：chan.top 20 / 19；夹具这一枚 400 缇：18 / 19 —— 顺序正好相反，第一版把
+    ' "1 > 2 > 0" 写进判据，SH3 就是这么翻红的）⇒ 1/2 两档之间没有稳的几何维度，只能靠样式位
+    ' 读回区分；控件侧稳的维度是「与 0 那档不同」+「3 那档 numTics=0」。
+    ' ts=3 与 ts=0 在几何上同形 ⇒ 它唯一的证人是 GetNumTicks=0；而 TickPresent 在那一档
+    ' **照旧答「有刻度」**（刻度只是不画、那张表还在，实测 GETTICPOS(0) 仍是 14），别拿它当判据。
+    Dim ct0 As Long, ct1 As Long, ct2 As Long, ct3 As Long
+    ct0 = sld3.ChannelTop
+    Debug.Print "SH1-base=" & CStr(sld3.TickStyle) & "/" & TF(sld3.GetNumTicks > 0)
+    sld3.TickStyle = 1
+    ct1 = sld3.ChannelTop
+    Debug.Print "SH2-top=" & CStr(sld3.TickStyle) & "/" & TF(ct1 > ct0)
+    sld3.TickStyle = 2
+    ct2 = sld3.ChannelTop
+    Debug.Print "SH3-both=" & CStr(sld3.TickStyle) & "/" & TF(ct2 > ct0)
+    sld3.TickStyle = 3
+    ct3 = sld3.ChannelTop
+    Debug.Print "SH4-none=" & CStr(sld3.TickStyle) & "/" & CStr(sld3.GetNumTicks) & "/" & TF(ct3 = ct0)
+    sld3.TickStyle = 0
+    Debug.Print "SH5-back=" & CStr(sld3.TickStyle) & "/" & TF(sld3.ChannelTop = ct0) & "/" & TF(sld3.GetNumTicks > 0)
+    ' SH0 是**原始几何证人行**（四档的 chan.top 绝对值），刻意不登记成针 —— 登记等于把本机
+    ' 像素钉进判据。它存在的意义是：哪天两根断言同时变 N，看这行就知道是几何没了还是通道换了。
+    Debug.Print "SH0-geom=" & ct0 & "/" & ct1 & "/" & ct2 & "/" & ct3
+    ' SH6 是**设计期那一条到没到窗口**的证人：sld5 在 .frm 里写的是 TickStyle = 2，而它与 sld3
+    ' 同尺寸（2000x400），所以可以直接比 chan.top 高低 —— 只读回一个自存的数不算数。
+    Debug.Print "SH6-dt=" & CStr(sld5.TickStyle) & "/" & TF(sld5.ChannelTop > ct0)
+    ' SH7 是越界那一档：写侧只认 1/2/3，其余落 0 ⇒ 答出去的数就是窗口真在走的那一档
+    ' （与 Orientation 同一口径，不自存、不猜 VB6 会不会报错 —— OCX 跑不起来，那条真值本机拿不到）。
+    sld3.TickStyle = 9
+    Debug.Print "SH7-oob=" & CStr(sld3.TickStyle)
+    Debug.Print "SH8-type=" & TypeName(sld3.TickStyle) & "/" & CStr(VarType(sld3.TickStyle))
+    ' SH9 是**第二条创建路**的证人：sld7 挂在 Frame 里，而那条路以前对 Slider 一格样式都不挂
+    ' （连默认的 TBS_AUTOTICKS 都没有，设计期写的 TickStyle 更没人下发 —— 账 #83 的一个具体落点）。
+    ' 它与 sld3 同尺寸（2000x400），所以直接拿 chan.top 与 ct0（sld3 在 ts=0 那档的基线）比高低：
+    ' 读回 1 只证到样式位，`chan.top > ct0` 才证到控件真按那一档重排了。
+    Debug.Print "SH9-child=" & CStr(sld7.TickStyle) & "/" & TF(sld7.ChannelTop > ct0)
     Debug.Print "SLIDER-DONE"
     Unload Me
 End Sub

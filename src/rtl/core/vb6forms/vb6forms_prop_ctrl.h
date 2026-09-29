@@ -862,6 +862,17 @@ void    vb6_Slider_SetSelEnd(void* hwnd, int32_t v);
 // TravelIsVert 的正解是把滑块推到量程两端各读一次 TBM_GETTHUMBRECT，看位移落在哪根轴。
 int32_t vb6_Slider_TravelIsVert(void* hwnd);
 int32_t vb6_Slider_TickPresent(void* hwnd);
+// C29-SL-h：TickStyle 四档。VB6 那一张枚举的真值是从 OCX 自带的类型库读出来的
+// （0=sldBottomRight 1=sldTopLeft 2=sldBoth 3=sldNoTicks，探针 .build/slprobe/sltlb.cpp），
+// 与原生样式位 1:1（TBS_TOP==TBS_LEFT==0x4、TBS_BOTH==0x8、TBS_NOTICKS==0x10）。
+// 读侧读窗口当前的样式位 ⇒ 答出去的数就是窗口真在走的那一档（与 Orientation 同口径）。
+// GetNumTicks 是 VB6 那一面（dispid 0x000f，只读）；ChannelTop 是 C3 扩展的判据证人
+// —— ts=3 只能用 GetNumTicks 证（TickPresent 在那一档照旧答"有"，实测），
+// 0/1/2 三档靠 chan.top 的相对高低分。四条读数实测于 .build/slprobe/slmeasure12.c。
+int32_t vb6_Slider_GetTickStyle(void* hwnd);
+void    vb6_Slider_SetTickStyle(void* hwnd, int32_t tickStyle);
+int32_t vb6_Slider_GetNumTicks(void* hwnd);
+int32_t vb6_Slider_ChannelTop(void* hwnd);
 // C29-SL-c：事件面。Slider 与 ScrollBar 共用同一条通道 —— 控件给**父窗**发 WM_HSCROLL（横杆）
 // / WM_VSCROLL（竖杆），wParam 低字是 TB_* 码、高字带当前值，lParam 就是控件句柄
 // （实测 .build/slprobe/slmeasure7/8.c：真拖一次收到 5×N → 4 → 8；方向键收到 0 → 8；
