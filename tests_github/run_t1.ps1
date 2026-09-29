@@ -3,7 +3,7 @@
 # 触发: .github/workflows/ci_t0.yml 的 t1 job (needs: t0, 复用 T0 构建的 C3.exe artifact)
 # 内容两段:
 #   1. bas 类 33 个: 编译 + 运行 + 输出断言; x64/x86 双架构 (31 个双跑 + 2 个原生 x86
-#      专用项 = 64 任务; -Jobs 并行, PS7 ForEach-Object -Parallel, 5s 超时)
+#      专用项 = 64 任务; -Jobs 并行, PS7 ForEach-Object -Parallel, -RunTimeoutSec 超时)
 #   2. compile 类 10 个: 只编译不运行 (comprehensive x2 + 8 个窗体 .frm)
 # 与 tests\run_tests.ps1 的关系: 用例 2026-09-20 cp 自 tests\ (复制而非引用) ——
 #   方向是 tests_github 自包含、后续废弃 tests\; 因此本脚本自带清单与引擎,
@@ -21,7 +21,12 @@ param(
     [switch]$Verbose,
     [int]$Jobs = 1,        # >1 时 bas 用例并行 (每 worker 独立输出目录); 默认 1 走今天的路径
     [int]$Shard = 0,       # 分片当前编号 (1..ShardTotal); 0 = 不分片整队跑 (供 CI 多 runner 并行)
-    [int]$ShardTotal = 1   # 分片总数
+    [int]$ShardTotal = 1,  # 分片总数
+    [int]$RunTimeoutSec = 60   # 单条用例跑 exe 的墙钟预算。默认 60 与 tests\run_tests.ps1
+                               # 的 -RunTimeoutSec 同值 (那里从 5s 提到 60s 就是为这个原因)。
+                               # 实测: -Jobs 8 下 test_rtl_x86 空闲 0.03s 跑完, 却在 5s 预算
+                               # 下被判 run timeout —— 预算是给并行负载留余量的, 不是给空闲机
+                               # 定的; 5s 会把**负载**造成的慢误判成**代码**造成的挂。
 )
 
 $ErrorActionPreference = "SilentlyContinue"
@@ -179,11 +184,15 @@ function Invoke-BasSetParallel {
     }
     if ($shards.Count -eq 0) { return }
 
+    # ⚠ -Parallel 的 runspace 够不到脚本变量 ⇒ 超时预算用 $using: 传进去 (同 run_tests.ps1)
+    $runTimeoutMs = $RunTimeoutSec * 1000
+
     $results = $shards | ForEach-Object -Parallel {
         $shardItems = $_[0]
         $workDir    = $_[1]
         New-Item -ItemType Directory -Path $workDir -Force | Out-Null
         $c3 = $using:C3Path
+        $runTimeoutMs = $using:runTimeoutMs
         $p = 0; $f = 0; $details = @()
         foreach ($it in $shardItems) {
             if ($it.Arch) {
@@ -223,10 +232,10 @@ function Invoke-BasSetParallel {
                 $proc = [System.Diagnostics.Process]::Start($psi)
                 $soTask = $proc.StandardOutput.ReadToEndAsync()
                 $seTask = $proc.StandardError.ReadToEndAsync()
-                if (-not $proc.WaitForExit(5000)) {
+                if (-not $proc.WaitForExit($runTimeoutMs)) {
                     try { $proc.Kill() } catch { }
                     $proc.WaitForExit()
-                    $f++; $details += "$($it.Name): run timeout 5s"; continue
+                    $f++; $details += "$($it.Name): run timeout $($runTimeoutMs)ms"; continue
                 }
                 [IO.File]::WriteAllText($stdoutFile, [string]$soTask.Result, [Text.Encoding]::Default)
                 [IO.File]::WriteAllText($stderrFile, [string]$seTask.Result, [Text.Encoding]::Default)
