@@ -298,6 +298,13 @@
     // （容器自己也可以是子控件：嵌在 Frame 里的 Frame 走第二条路）。
     long controlContainerExStyleBit(const FrmControl& ctrl) const;
 
+    // 账 #158（按钮那一半）: BUTTON 类的焦点通知（`BN_SETFOCUS=6` / `BN_KILLFOCUS=7`）只有创建时
+    // 挂了 `BS_NOTIFY` 才会往父窗发（裸码实测 `.build/bnnotify/bnnotify.c`，两枚按钮只差这一位）。
+    // 两条创建路共用这一处判断（顶层 + 容器子控件）。`BN_CLICKED` 不需要这一位，
+    // 所以按钮的 `_Click` 一直是通的——但挂上这一位之后，通知里多了 6/7，
+    // 所以 Click 那条 arm 必须开始按 `code == 0` 过滤（见 create 那一趟）。
+    long controlButtonNotifyStyleBit(const FrmControl& ctrl) const;
+
     // 账 #157: VB6 把窗体显示出来时，焦点交给**这枚窗体里 TabIndex 最小的那枚拿得到焦点的控件**
     // （不是创建顺序 —— `.frm` 里控件的书写顺序与 TabIndex 常常相反，实测探针里 cmdB 先创建、
     //  cmdA 才是 TabIndex=0）。这一份**留在发码期算**（账 #160 之后运行期已经有了 `VB6_TabIndex`，

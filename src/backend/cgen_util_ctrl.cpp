@@ -1289,7 +1289,10 @@ void CCodeGen::emitDesignerTabIndexProp(const FrmControl& ctrl, const std::strin
 // `cgen_form_wndproc_dispatch.inc`），三份里都写着同一份四类白名单
 // （PictureBox/Frame/Label/Image），而 TextBox/ComboBox/ListBox/命令按钮那批走的是另一条路：
 // 父窗的 `WM_COMMAND` 通知码（见 dispatch 那一趟开头：EN_SETFOCUS=256 / EN_KILLFOCUS=512、
-// CBN_=1024/2048、LBN_=4/5、BN_=6/7）。于是剩下的所有窗口态控件 —— **Slider 首当其冲**，
+// CBN_=3/4、LBN_=4/5、BN_=6/7）。**Combo 那两位在账 #158 之前一直写成 1024/2048** ——
+// 那是 CBEM_*（发给 ComboBoxEx 窗口的消息号，永远不会作为 notification code 出现），
+// 所以 ComboBox 的焦点通知从能编事件那天起就没触发过（订正见 dispatch 那一趟的注记）。
+// 于是剩下的所有窗口态控件 —— **Slider 首当其冲**，
 // 还有 ListView / TreeView / DTPicker / MonthView / RichTextBox / 两个滚动条 / 文件系统三件套 ——
 // 的 `_GotFocus` / `_LostFocus` 是编得过、永不触发的死处理器（轨道条那两条实测过：原生只往父窗发
 // `WM_HSCROLL`，焦点变化一律以 `WM_SETFOCUS` / `WM_KILLFOCUS` 到**控件自己**的过程中，
@@ -1307,6 +1310,26 @@ bool CCodeGen::controlFocusFromNativeNotify(FrmControlType ctrlType) {
         return true;
     default:
         return false;
+    }
+}
+
+// 账 #158（按钮那一半）: BUTTON 类要挂上 `BS_NOTIFY` 才会把焦点变化作为
+// `WM_COMMAND` 的 `BN_SETFOCUS=6` / `BN_KILLFOCUS=7` 报给父窗。裸码探针
+// `.build/bnnotify/bnnotify.c`（同一父窗两枚按钮，只差这一位）实测：挂了的那枚，
+// 无论程序化 `SetFocus` 还是对话框管理器（`IsDialogMessage` + VK_TAB）都把 6/7 送到父窗；
+// 没挂的那枚一条都不送（而 `BN_CLICKED=0` 不需要这一位，所以按钮的 `_Click` 一直是通的）。
+// 两条创建路共用这一处判断（顶层那条在 cgen_form_ctrl_style_apply.inc，容器子控件
+// 那条在 cgen_form_frame_menu.inc）——与 #83(a) 的 `WS_TABSTOP`、#83(b2) 的
+// `WS_EX_CONTROLPARENT` 同一族：判据只写一遍，两处各调一次。
+long CCodeGen::controlButtonNotifyStyleBit(const FrmControl& ctrl) const {
+    constexpr long kBsNotify = 0x00004000L;  // BS_NOTIFY（SDK 头里的实测值 = 16384）
+    switch (ctrl.controlType) {
+    case FrmControlType::CommandButton:
+    case FrmControlType::CheckBox:
+    case FrmControlType::OptionButton:
+        return kBsNotify;
+    default:
+        return 0L;
     }
 }
 

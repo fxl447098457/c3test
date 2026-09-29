@@ -307,6 +307,10 @@
         // 账 #83(a)（C29-SL-r）: VB6 默认 TabStop = True，而这一位以前两条创建路都没立
         // （读数见 029 的 C29-SL-r-0）。判断只在 controlTabStopStyleBit 一处，容器那趟共用。
         style |= controlTabStopStyleBit(ctrl);
+
+        // 账 #158（按钮那一半）: BUTTON 类不挂 `BS_NOTIFY` 就不把焦点变化作为 `WM_COMMAND`
+        // 报给父窗（裸码实测见 `controlButtonNotifyStyleBit` 的定义处）。判断只在那一处，容器那趟共用。
+        style |= controlButtonNotifyStyleBit(ctrl);
         // 账 #83(b2): 容器挂 WS_EX_CONTROLPARENT —— 没有这一位，`IsDialogMessage` 不会
         // 走进 Frame/PictureBox/SSTab，里面的控件连 tab 序都进不了（顶层这一条路）。
         exStyle |= controlContainerExStyleBit(ctrl);

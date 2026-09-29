@@ -97,6 +97,8 @@
                 long childStyle = 0x40000000L | 0x10000000L;  // WS_CHILD | WS_VISIBLE
                 childStyle |= controlTypeStyleBits(child);  // 类型样式与顶层控件一致 (SS_NOTIFY/BS_GROUPBOX 等)
                 childStyle |= controlTabStopStyleBit(child);  // 账 #83(a): TabStop 默认位与顶层同一处判断
+                // 账 #158: 按钮族的焦点通知同样要这一位（两条创建路共用一个出口）
+                childStyle |= controlButtonNotifyStyleBit(child);
                 // Fix 162d-extlist: Caption 缺省 = "" 与顶层路径 (create_controls.inc
                 // Fix 162c) 同口径 —— VB6 只在 Caption 非默认时写盘, 缺省回落空串。
                 std::string childCaption;
