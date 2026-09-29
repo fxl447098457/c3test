@@ -95,6 +95,16 @@ void vb6_SetControlEnabled(void* hwnd, int enabled) {
     if (!hwnd) return;
     EnableWindow((HWND)hwnd, enabled ? TRUE : FALSE);
 }
+
+// C29-SL-l（账 #143）：VB6 的 `控件.SetFocus`。原生就一句 SetFocus(hwnd) —— 它动的是**本线程
+// 输入队列里的焦点**，与窗口可见/激活无关，所以无头跑里照样有效（C29-SL-g 的 SimStdEvent
+// kind=4 走的就是这一句，实测会发出 WM_SETFOCUS 并点亮控件自己的 _GotFocus）。
+// 拿不到焦点的那几种（控件被禁用、窗口不属于本线程）原生就是回 NULL 什么都不做，
+// 本项目**不伪造、不重试** —— 真 VB6 在那里是 raise 一个错误号，而我们还没有运行期错误面。
+void vb6_SetControlFocus(void* hwnd) {
+    if (!hwnd) return;
+    SetFocus((HWND)hwnd);
+}
 // Position/size properties use twips on both reads and writes.
 // Codegen calls these getters directly without pixel-to-twip conversion.
 // Match the existing vb6_TwipToX/Y setters (15 twips per logical pixel).
@@ -254,8 +264,48 @@ void vb6_SetControlFontName(void* hwnd, void* bstrName) {
     vb6_SetControlFontFromLogFont(hwnd, &lf);
 }
 
+// C29-SL-q（账 #154）: 设计期那一条走这一支 —— `.frm` 里的字体名在生成码里是一枚 C 宽字符字面量，
+// 不是一枚 BSTR，而上面那支要 `SysStringLen` 量长度，喂字面量会把串尾之后的内存算进去。
+// （不改用 `vb6_BSTR_FromStr` 现造一枚：那要么在发码里漏一枚串 —— 本仓刚为同类临时串开过 #119。）
+void vb6_SetControlFontNameW(void* hwnd, const wchar_t* name) {
+    LOGFONTW lf;
+    int len;
+    if (!hwnd || !name || !name[0]) return;
+    if (!vb6_GetControlLogFont(hwnd, &lf)) {
+        memset(&lf, 0, sizeof(lf));
+        lf.lfHeight = -13;  // Default ~10pt
+        lf.lfCharSet = DEFAULT_CHARSET;
+        lf.lfOutPrecision = OUT_DEFAULT_PRECIS;
+        lf.lfClipPrecision = CLIP_DEFAULT_PRECIS;
+        lf.lfQuality = DEFAULT_QUALITY;
+        lf.lfPitchAndFamily = DEFAULT_PITCH | FF_DONTCARE;
+    }
+    len = lstrlenW(name);
+    if (len > LF_FACESIZE - 1) len = LF_FACESIZE - 1;
+    memcpy(lf.lfFaceName, name, len * sizeof(WCHAR));
+    lf.lfFaceName[len] = L'\0';
+    vb6_SetControlFontFromLogFont(hwnd, &lf);
+}
+
+// C29-SL-p（`ai/内置控件/Slider 控件（滑杆）.md` §4 那条例子量出来的，探针 .build/slfont）:
+// 点号 → 像素是**有损**的一步（96 DPI 下 1pt = 1.3333px，字体高度只能取整），所以旧写法
+// 从窗口反算会把请求值量化掉：写 8 读回 8.25、写 10 读回 9.75、写 14 读回 14.25。
+// 窗口表示不了的那一半按**请求值自存**（与 Slider 的 TickFrequency / TextPosition 同一族口径）。
+// Set 旗标不能省：`SetPropW(hwnd, name, 0)` 等于删属性（账 #107 踩过），而 0.0f 的位就是 0 ——
+// 少了这一枚，写 0 那一档会静默变回"没设过"。
+static const wchar_t kFontPtProp[]    = L"VB6_FontPt";
+static const wchar_t kFontPtSetProp[] = L"VB6_FontPtSet";
+
 float vb6_GetControlFontSize(void* hwnd) {
     LOGFONTW lf;
+    float pt;
+    DWORD bits;
+    if (!hwnd) return 0.0f;
+    if (GetPropW((HWND)hwnd, kFontPtSetProp)) {
+        bits = (DWORD)(DWORD_PTR)GetPropW((HWND)hwnd, kFontPtProp);
+        memcpy(&pt, &bits, sizeof(pt));
+        return pt;
+    }
     if (!vb6_GetControlLogFont(hwnd, &lf)) return 0.0f;
     HDC hdc = GetDC(NULL);
     int dpi = GetDeviceCaps(hdc, LOGPIXELSY);
@@ -263,6 +313,15 @@ float vb6_GetControlFontSize(void* hwnd) {
     if (dpi <= 0) dpi = 96;
     int heightPx = lf.lfHeight < 0 ? -lf.lfHeight : lf.lfHeight;
     return (float)heightPx * 72.0f / (float)dpi;
+}
+
+// C29-SL-p 的判据证人（**不是 VB6 属性**，与 TickPresent / TravelIsVert / ToolTipRegistered 同族）:
+// 窗口现在真在用的字体像素高度。有了它，字号那条判据才是两头的 —— 自存的数读回来当然还是自存的数，
+// 只有问窗口才知道这次 WM_SETFONT 到底发没发出去。
+int vb6_ControlFontPixelHeight(void* hwnd) {
+    LOGFONTW lf;
+    if (!vb6_GetControlLogFont(hwnd, &lf)) return 0;
+    return lf.lfHeight < 0 ? -lf.lfHeight : lf.lfHeight;
 }
 
 void vb6_SetControlFontSize(void* hwnd, float sizePt) {
@@ -283,6 +342,12 @@ void vb6_SetControlFontSize(void* hwnd, float sizePt) {
     // Convert points to pixel height (negative for character height)
     lf.lfHeight = -(int)(sizePt * (float)dpi / 72.0f + 0.5f);
     vb6_SetControlFontFromLogFont(hwnd, &lf);
+    {
+        DWORD bits;
+        memcpy(&bits, &sizePt, sizeof(bits));
+        SetPropW((HWND)hwnd, kFontPtProp, (HANDLE)(DWORD_PTR)bits);
+        SetPropW((HWND)hwnd, kFontPtSetProp, (HANDLE)1);
+    }
 }
 
 int vb6_GetControlFontBold(void* hwnd) {

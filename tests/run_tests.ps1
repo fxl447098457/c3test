@@ -1882,7 +1882,83 @@ if ($Category -in @("all", "run", "vbp")) {
                      "SE14-emptytag=/end",
                      # C29-SL-g 焦点面。改之前 SG1/SG2/SG3/SG4 四条在 BASE 上逐条是 N
                      # （四类白名单不含 Slider，处理器编得出来没人送消息）。SG0 是原始证人行。
-                     "SG1-got=Y", "SG2-move=Y", "SG3-back=Y", "SG4-isolate=Y")
+                     "SG1-got=Y", "SG2-move=Y", "SG3-back=Y", "SG4-isolate=Y",
+                     # C29-SL-h TickStyle 四档（枚举真值读自 OCX 自带的类型库）。
+                     # SH2/SH3/SH6 钉的是「控件几何真的跟着那一档动」—— chan.top 与
+                     # ts=0 基线比高低；1 与 2 之间不写几何断言（本机两处读数顺序相反，
+                     # 探针 40px 答 20/19、夹具 400 缇答 18/19），两档只靠样式位读回区分。
+                     # SH4 是 ts=3 唯一的证人（GetNumTicks=0；TickPresent 在那一档照旧答有）。
+                     # SH7 钉越界归 0，SH8 钉类型档（Long / VT_I4，与 Orientation 同档）。
+                     # SH0-geom 那行是绝对像素，只做证人、不登记 —— 登记等于把本机钉进判据。
+                     "SH1-base=0/Y", "SH2-top=1/Y", "SH3-both=2/Y", "SH4-none=3/0/Y",
+                     "SH5-back=0/Y/Y", "SH6-dt=2/Y", "SH7-oob=0", "SH8-type=Long/3",
+                     # SH9 是**第二条创建路**（容器子控件）的证人：sld7 挂在 Frame 里，
+                     # 那条路以前对 Slider 一格样式都不挂（BASE 实测创建参数 1342177280 =
+                     # 只有 WS_CHILD|WS_VISIBLE，连 TBS_AUTOTICKS 都没有）。
+                     "SH9-child=1/Y",
+                     # C29-SL-i 选区面（类型库：SelStart 0x0007 + SelLength 0x0008 + 方法
+                     # ClearSel 0x000e；VB6 那一面没有 SelEnd 这个名字）。SI2 钉「写长度时起点
+                     # 不动」，SI3 钉「远端由控件夹进量程」，SI4+SI4b 钉「清空之后两端是 0，
+                     # 而紧接着写长度不该静默什么都不发生」（空态锚量程下限，与控件自己那一态一致），
+                     # SI5/SI6 钉「没挂 SelectRange 就是写不进去，我们不伪造」，SI9 钉设计期那一对
+                     # （.frm 只写 SelStart+SelLength 时由 cgen 折成 (起, 止) 下发）。
+                     "SI1-len=40", "SI2-set=20/30/10", "SI3-clamp=20/100/80",
+                     "SI4-clear=0/0/0", "SI4b-reafter=10/5", "SI5-nobit=0/False",
+                     "SI6-nobit2=0", "SI7-neg=0", "SI8-type=Long/3", "SI9-dt=25/40/15",
+                     # SJ1 是**账 #148** 那条疑点的答案：ToolTipText 的"存回来"早有判据，
+                     # "注册进宿主"这一步以前没人验过。裸编探针（无 v6 manifest ⇒ comctl v5）
+                     # 里 TTM_ADDTOOLW 直接返回失败，但那不能定罪产品 —— 产物里问宿主
+                     # TTM_GETTEXT 读回来：运行期设过的 sld3、设计期设过的 sld5 都是 Y，
+                     # 从没设过的 sld1 是 N（第三格是负控：三条齐 Y 就说明证人问不出东西）。
+                     # BASE 上整条是 N/N/N —— 未登记时读回来是对象、折成数值恒假。
+                     "SJ1-reg=Y/Y/N",
+                     # C29-SL-k 的 Text 气泡。SK3 是这格的心脏：拖一档之后**宿主自己**答
+                     # "可见"并且把 "VOL" 原样读回来（TTM_GETTEXT 问的是 tooltip 控件，
+                     # 不是我们的窗口属性）；SK4 钉 ENDTRACK 收回去；SK5 钉 TextPosition
+                     # 两档摆的位置不同（只比高低、不钉绝对像素 —— 与 TickStyle 同一教训）；
+                     # SK6 钉 Text 空着时气泡里就是当前的值；SK7 钉收尾之后一切都归位。
+                     # SK1 刻意只当证人不当红针：BASE 上 Text 走的是"拿 HWND 当 IDispatch 问
+                     # 它要 Text 属性"那支，串照样回得来，所以这一条两边都是 VOL/String/8。
+                     "SK1-text=VOL/String/8", "SK2-off=N/N", "SK3-show=Y/VOL/Y",
+                     "SK4-hide=N", "SK5-pos=1/Y", "SK6-num=33/33/Y", "SK7-end=N/0",
+                     # C29-SL-l（账 #143）: 控件的**零实参方法**两形。证人问的是焦点自己 ——
+                     # sld6 那对 GotFocus/LostFocus 只有 WM_SETFOCUS 真到才涨（每步先把焦点
+                     # 挪到没挂处理器的 sld1，再问增量：SetFocus 落在已有焦点的窗口上不重发）。
+                     # SN3 钉不带括号的 ClearSel：以前那一形掉 vb6_ComCall(裸 HWND, L"ClearSel")，
+                     # 编得过、跑起来一声不响，区段一点没动。
+                     "SN1-bare=Y/0", "SN2-paren=Y/Y", "SN3-clearsel=0/0",
+                     # C29-SL-m（账 #150）: With 块里的控件方法三形。这一形在 BASE 上是**编译不过**
+                     # （不是读数差），所以三条都是整件工程级的红。
+                     "SN4-with-bare=Y", "SN5-with-paren=Y/Y", "SN6-with-clearsel=0/0",
+                     # C29-SL-n（账 #141）: 一枚**只挂 `_DblClick`** 的滑杆（sld8）。
+                     # 第二格钉 arm 传进来的 Cancel —— VB6 的签名是 `Sub X_DblClick(Cancel As Integer)`,
+                     # 以前 arm 写死无参调用, 按标准签名写的处理器直接编不过（C2198）。
+                     "SN7-dblone=1/0",
+                     # C29-SL-o（账 #83 的 Slider 半边）: sld7 在 .frm 里写的这批值面属性，
+                     # BASE 那条容器路**一条都不下发** ⇒ 整段读出原生默认档
+                     # （BASE 实测 SO1=0/100/0/1 / SO2=20/0 / SO3=0/0/N，与 SB9-defaults 逐字同）。
+                     # 判据不是"看着非零"：同一批属性在顶层那枚 sld4 上是 SB1=10/100 / SB2=42 /
+                     # SB3=2/8 / SI9=25/40/15，两条路现在必须给出同一串数（SelLength 那格还顺带
+                     # 钉住折叠后的 SelectRange 真立起来了）。
+                     "SO1-child=10/100/42/2", "SO2-child-page=8/5", "SO3-child-sel=20/15/Y",
+                     # C29-SL-p（说明 §4 那条例子量出来的）: FontSize 以前从窗口的整数像素高度**反算**
+                     # 点号回来 ⇒ 写 8 读回 8.25、写 10 读回 9.75、写 14 读回 14.25（96 DPI 下 1pt =
+                     # 1.3333px，往返必然落格）。现在请求值按窗口自存。SP1 那两条刻意**只钉前半**
+                     # （`SP1b-round14=14/` 是个前缀）：后半那枚 txtG 从没设过字体、走的是反算那一支，
+                     # 它的数是 DPI 的函数（本机 8.25 = 系统默认 11px），钉死等于把本机写进判据。
+                     # SP2 第一格问的是**窗口**（证人 FontPixelHeight，只比相对高低）—— 自存的数
+                     # 读回来当然还是自存的数，光问它就是 #148 那条自洽假绿。
+                     # SP3 老实标成**行为钉**（BASE 也读 0）：0pt 折算成 lfHeight=0，反算也是 0，
+                     # 两边同数 —— 它防的是「SetPropW(0) 等于删属性」那一条（账 #107）被人改回去。
+                     "SP1-round=10", "SP1b-round14=14/", "SP2-real=Y", "SP3-zero=0",
+                     # C29-SL-q（账 #154）: `.frm` 里写的设计期 `FontName` / `FontSize` 以前整条丢掉
+                     # （BASE 同夹具：SQ1=`/8.25`、SQ2=`8.25`、SQ3=`N`），两条创建路现在都发
+                     # （txtH 在窗体上、txtI 在 Frame 里 —— 这一族栽过几次"只接一头"）。
+                     # SQ1 那格还顺带钉住**读侧**的一条旧坏：`FontName` 没登记成 String 档时
+                     # `Print ... & ctl.FontName` 打的是空串，而 `Len(...)` 直接拿指针、答得对
+                     # （探针里 "Consolas" 读成 8）—— 同一枚属性两种答案，就是没登记的证状。
+                     # SQ3 问的是窗口（证人只比相对高低），BASE 那枚即使字体真换了也读不出名字。
+                     "SQ1-dt=Arial/20", "SQ2-child-dt=20", "SQ3-real=Y")
     Test-Vbp "ctrlslider" "$Tests\ctrlslider\SlidApp.vbp" $slidNeedles
     Test-Vbp "ctrlslider_x86" "$Tests\ctrlslider\SlidApp.vbp" $slidNeedles -Arch "x86"
     Test-EmitcShape "sl_emitc_native" @("$Tests\ctrlslider\SlidApp.vbp") @(
@@ -1904,10 +1980,68 @@ if ($Category -in @("all", "run", "vbp")) {
         'vb6_BSTR_Concat(vb6_BSTR_FromStr(L"SE2-tag="), vb6_GetControlTag(vb6_hwnd_sld3)',
         'vb6_SetToolTipText((void*)vb6_hwnd_sld5, L"dtip");',
         'vb6_SetControlTag((void*)vb6_hwnd_sld5, L"dtag");'                  # #124 那条布尔口径
+        # C29-SL-h: 设计期那一条 TickStyle=2 必须出现在**创建参数**里（1409286145 那枚是
+        # TBS_AUTOTICKS，多挂 TBS_BOTH=0x8 才是 1409286153）—— 只写自存不算下发到窗口。
+        # 读侧走 CStrLong（登记成 Long 档 ⇒ CStr 不再被折成 Variant 那一趟）；写侧直接 setter。
+        '1409286153L, 0L,',
+        'vb6_Slider_SetTickStyle(vb6_hwnd_sld3, 2);',
+        'vb6_Slider_SetTickStyle(vb6_hwnd_sld3, 9);',
+        'vb6_CStrLong(vb6_Slider_GetTickStyle(vb6_hwnd_sld3',
+        'vb6_Slider_GetNumTicks(vb6_hwnd_sld3',
+        'vb6_Slider_ChannelTop(vb6_hwnd_sld3',
+        # 容器里那枚滑杆的创建参数: 1342177280(BASE, 一位不挂) + 0x5 = TBS_AUTOTICKS|TBS_TOP
+        '1342177285L, 0L,',
+        # C29-SL-i: 三条 Sel 面各钉一枚形状，外加设计期那一对折出来的 Init 参数
+        # （BASE 上那一条第 9 参是 -999 —— SelLength 整条被丢，读回来是空区段）。
+        'vb6_Slider_ClearSel((void*)vb6_hwnd_sld4)',
+        'vb6_Slider_SetSelLength(vb6_hwnd_sld4, 10)',
+        'vb6_CStrLong(vb6_Slider_GetSelLength(vb6_hwnd_sld4',
+        'vb6_Slider_Init((void*)vb6_hwnd_sld6, -999, -999, -999, 1L, -999, -999, 25L, 40L, -1L);',
+        # SJ-j: 证人走登记过的那条 getter（不再被折成「装箱 + 转数值」那一趟）。
+        'vb6_ToolTipRegistered(vb6_hwnd_sld3',
+        # C29-SL-k: 派发里那一条**只发一次、不按控件展开**（RTL 里按类名筛掉 ScrollBar），
+        # 再加 Text / TextPosition 的读写与一条证人。
+        'vb6_Slider_BubbleNotify(scrollHwnd, scrollCode, HIWORD(wParam));',
+        'vb6_Slider_SetText(vb6_hwnd_sld3',
+        'vb6_Slider_SetTextPosition(vb6_hwnd_sld3, 1);',
+        'vb6_Slider_BubbleVisible(vb6_hwnd_sld3',
+        'vb6_Slider_BubbleText(vb6_hwnd_sld3',
+        # C29-SL-l: 两条码头共用一张表 ⇒ 带括号与不带括号都发同一条专桩（裸形多一条注释）。
+        'vb6_SetControlFocus((void*)vb6_hwnd_sld5);  /* setfocus */',
+        'vb6_SetControlFocus((void*)vb6_hwnd_sld6);',
+        'vb6_Slider_ClearSel((void*)vb6_hwnd_sld4);  /* clearsel */',
+        # C29-SL-m: With 那一帧的接收者就是入口那枚 HWND（两形都走 pendingChainObj_ 协议）。
+        'vb6_SetControlFocus((void*)_vb6_with_0);',
+        'vb6_Slider_ClearSel((void*)_vb6_with_2);',
+        # C29-SL-o（账 #83 的 Slider 半边）: 容器子控件那条创建路以前**压根不发这一条**
+        # ⇒ 这里没有可禁的反面形状（BASE 的 emit 里 sld7 只有 CreateControl 那一行），
+        # 红的是这一条正向针 + 三条真跑读数（A/B 实测见 029 那格）。第 9 参是 35L：
+        # .frm 只写 SelStart=20 + SelLength=15，终点由同一处出口折出来。
+        'vb6_Slider_Init((void*)vb6_hwnd_sld7, 10L, 100L, 42L, 2L, 8L, 5L, 20L, 35L, -1L);',
+        # C29-SL-p: 写侧形状没动（发码面看不出这次改的是**读侧自存**），钉这一条是防有人把
+        # 请求值又改成按窗口反算的那一支；证人那条读侧必须是登记过的专桩。
+        'vb6_SetControlFontSize(vb6_hwnd_txtF, 26);',
+        'vb6_ControlFontPixelHeight(vb6_hwnd_txtF',
+        # C29-SL-q（账 #154）: 设计期字体三条形状 —— 顶层两条（Size + Name）、容器那一条（Size）。
+        # Name 走新的 W 支（`.frm` 里的字体名在生成码里是 C 字面量，不是 BSTR，喂给上面那支
+        # 会让 SysStringLen 去量字面量之后的内存）；发序是先 Size 后 Name（Name 那支在窗口没有
+        # 字体时先造 -13 的底子，反过来会把字号盖掉）。
+        'vb6_SetControlFontSize((void*)vb6_hwnd_txtH, 20.000000f);  /* design FontSize */',
+        'vb6_SetControlFontNameW((void*)vb6_hwnd_txtH, L"Arial");  /* design FontName */',
+        'vb6_SetControlFontSize((void*)vb6_hwnd_txtI, 20.000000f);  /* design FontSize */',
+        # 读侧 String 档：与 ToolTipText / Tag 同一形状（直接进 Concat，不再装箱）。
+        'vb6_BSTR_Concat(vb6_BSTR_FromStr(L"SQ1-dt="), vb6_GetControlFontName(vb6_hwnd_txtH)'
     )
     # C29-SL-c: 事件派发那一段的形状。钉的是"认来源的那枚句柄 + 分流那一档"这一整对 ——
     # Slider 与 ScrollBar 共用一扇 case WM_HSCROLL/WM_VSCROLL 的门，写错句柄比对比就是静默不派发。
     Test-EmitcShape "sl_emitc_events" @("$Tests\ctrlslider\SlidApp.vbp") @(
+        # C29-SL-n（账 #141）: 「装不装」三份表共用一处判据之后, 只挂 `_DblClick` 的控件
+        # 也会被子类化并在退出时拆掉（以前 arm 生成了却没人 install = 处理器永不触发）。
+        # 两形各钉一条: 带 Cancel 的按声明签名发 `fn(&vb6_dblcancel)`, 无参声明仍发 `fn()`。
+        'vb6_InstallControlSubclass((void*)vb6_hwnd_sld8, (void*)vb6_ctrl_subproc_sld8);',
+        'vb6_RemoveControlSubclass((void*)vb6_hwnd_sld8);',
+        'int16_t vb6_dblcancel = 0; extern void vb6_sld8_DblClick(int16_t*); vb6_sld8_DblClick(&vb6_dblcancel);',
+        'extern void vb6_sld6_DblClick(); vb6_sld6_DblClick();',
         'case WM_HSCROLL:',
         'if (scrollHwnd == (void*)vb6_hwnd_sld1) {',
         'if (scrollHwnd == (void*)vb6_hwnd_sld2) {',   # 竖杆接的是同一扇门（发的是 WM_VSCROLL）
@@ -1947,6 +2081,38 @@ if ($Category -in @("all", "run", "vbp")) {
         'vb6_CStr(vb6_VariantFromValue(vb6_GetControlTag',
         'vb6_SetControlTag((void*)vb6_hwnd_sld1',   # 账 #142: Tag="" 不发
         'vb6_ComCall(vb6_hwnd_sld6, L"SimStdEvent"',
+        # C29-SL-h: TickStyle / GetNumTicks / ChannelTop 三条登记之前全部落到那扇兜底门
+        # —— 拿裸 HWND 当 IDispatch：编得过、跑得动、什么都不发生（BASE 实测逐条命中）。
+        'vb6_ComGetProp(vb6_hwnd_sld3, L"TickStyle")',
+        'vb6_ComSetProp(vb6_hwnd_sld3, L"TickStyle"',
+        'vb6_ComGetIntProp(vb6_hwnd_sld3, L"GetNumTicks")',
+        'vb6_ComGetIntProp(vb6_hwnd_sld3, L"ChannelTop")',
+        # C29-SL-i: 没登记之前 SelLength 走属性兜底、ClearSel 走方法兜底 —— 三条在 BASE 上
+        # 逐条命中，在 NEW 上归零。（第四条候选 vb6_ComGetObjectProp(..., L"ClearSel") 在
+        # BASE 上本来就不出现，方法那一形落的是 vb6_ComCall，所以不拿来当针。）
+        'vb6_ComGetProp(vb6_hwnd_sld4, L"SelLength")',
+        'vb6_ComSetProp(vb6_hwnd_sld4, L"SelLength"',
+        'vb6_ComCall(vb6_hwnd_sld4, L"ClearSel"',
+        'vb6_ComGetProp(vb6_hwnd_sld3, L"ToolTipRegistered")',
+        'vb6_ComGetProp(vb6_hwnd_sld7, L"TickStyle")',
+        # C29-SL-k: Text / TextPosition / 三条证人在登记之前全落那扇兜底门（BASE 逐条命中）。
+        # 注意 Text 那支在 BASE 上回的是**字符串属性读**，串照样拿得到 —— 所以红的是气泡
+        # 那三条，不是 SK1。
+        'vb6_ComGetStringProp(vb6_hwnd_sld3, L"Text")',
+        'vb6_ComSetProp(vb6_hwnd_sld3, L"Text"',
+        'vb6_ComGetProp(vb6_hwnd_sld3, L"BubbleVisible")',
+        'vb6_ComGetStringProp(vb6_hwnd_sld1, L"BubbleText")',
+        # C29-SL-l: SetFocus 两形在登记之前**都**落这扇兜底门（BASE 逐条命中，NEW 归零）。
+        # 不带括号那一形落的是语句路那条，带括号那一形落的是表达式路那条 —— 只接一头
+        # 就会留一条「编得过、跑了、什么都没发生」，本线踩过三次。
+        'vb6_ComCall(vb6_hwnd_sld5, L"SetFocus"',
+        'vb6_ComCall(vb6_hwnd_sld6, L"SetFocus"',
+        # C29-SL-q: `FontName` 归到 String 档之前的那支装箱 —— 打印面先装箱再 CStr，打出来是空串，
+        # 而 `Len(...)` 那一面直接拿指针、答得对（"Consolas" 读出 8），所以这条旧坏一直没被看见。
+        'vb6_CStr(vb6_VariantFromValue(vb6_GetControlFontName(',
+        # C29-SL-p: 证人没登记之前，`txtF.FontPixelHeight` 落的就是这扇兜底门 —— 拿裸 HWND 当
+        # IDispatch 问它要一个不存在的属性（BASE 实测逐字命中，NEW 归零 ⇒ 这条反向针能红）。
+        'vb6_ComGetIntProp(vb6_hwnd_txtF, L"FontPixelHeight")',
         'CoCreateInstance'
     )
 

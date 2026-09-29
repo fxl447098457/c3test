@@ -253,23 +253,17 @@
                 break;
             }
             case FrmControlType::Slider: {
-                // C29-SL-a: msctls_trackbar32 的创建样式。
-                //   · Orientation: 0=sldHorizontal(默认) / 1=sldVertical → TBS_VERT(0x0002)。
-                //     立在创建参数里，但**不是只能创建时给** —— 探针实测运行期写 TBS_VERT +
-                //     SWP_FRAMECHANGED 之后滑块的位移轴真的跟着换（与"创建时就是垂直"逐字相同），
-                //     所以写侧也登记了 setter（见 cgen_util_ctrl.cpp 的 Slider 那一格）。
-                //     ⚠ 第一发探针拿 TBM_GETCHANNELRECT 的长短边判方向，得出过"运行期改不动"的
-                //     错结论 —— 那条消息的 rect 永远把行程长度放在 x 分量，压根不随方向旋转。
+                // C29-SL-a/h: msctls_trackbar32 的创建样式。折算整个搬进 sliderStyleBits
+                // （上面 controlTypeStyleBits 的 Slider 那一格共用它）—— 顶层这条路过去自己
+                // 写一份、容器子控件那条路一份都没写，正是账 #83 说的那两张表各写各的。
+                // 三条实测口径抄在 vb6forms_slider.c 的 C29-SL-h 那一格与 029 §九：
+                //   · Orientation 运行期写样式位**是有效的**（第一发探针拿 channel 矩形判
+                //     方向，得出过"只能创建时给"的错结论 —— 那条消息不随方向旋转）。
                 //   · TBS_AUTOTICKS(0x0001) 一律挂上：VB6 的 Slider 默认就画刻度。
-                //     TickStyle 那四档与 TBS_TOP/BOTTOM/LEFT/RIGHT/BOTH/NOTICKS 的对应
-                //     **本机拿不到 VB6 真值**（OCX 未注册、typelib 读不到），刻意不做，
-                //     押后等口径（见 029 §九 C29-SL-0 那一格末）。
+                //   · TickStyle 四档 ↔ TBS_TOP(0x4)/BOTH(0x8)/NOTICKS(0x10)/那三位全清，
+                //     数值读自 OCX 自带的类型库（探针 .build/slprobe/sltlb.cpp），非猜。
                 createCaption = "";
-                style |= 0x0001L;                       // TBS_AUTOTICKS
-                auto slOr = ctrl.properties.find("Orientation");
-                if (slOr != ctrl.properties.end() && (int)slOr->second.intValue != 0) {
-                    style |= 0x0002L;                   // TBS_VERT
-                }
+                style |= sliderStyleBits(ctrl);
                 break;
             }
             case FrmControlType::RichTextBox: {
@@ -359,6 +353,7 @@
             emitDesignerStyleProps(ctrl, dsHwnd);
             emitDesignerStateProps(ctrl, dsHwnd);  // 账 #125: Enabled / Visible / Value
             emitDesignerStringProps(ctrl, dsHwnd);  // 账 #142: ToolTipText / Tag（非空才发）
+            emitDesignerFontProps(ctrl, dsHwnd);    // 账 #154: FontName / FontSize（写过才发）
 
             // Fix 187: 设计期 ForeColor/BackColor — 此前从未发射, .frm 的初始色
             // 全部落空 (picBackColor &H00F8CCB1& 淡蓝被显示成 BTNFACE 灰, 颜色
@@ -608,11 +603,9 @@
             c_.emitLine("vb6_DTP_Init((void*)" + dtHwnd + ", L\"" + esc + "\");");
         }
 
-        // C29-SL-a/b: Slider 设计期值面下发（Init 十参，-999 哨兵 = .frm 没写过 ⇒ 那一条消息
-        // 不发，保持控件默认；Init 本身照发，让发码形状稳定 —— 同 vb6_TreeView_Init 那条）。
-        // 参数顺序不是随便排的，是 .build/slprobe/slmeasure6.c 量出来的：改 range 会把 pos 顶到
-        // 新下限、把 page 从 20 重算成 18、把 selstart 跟到新下限 ⇒ range → line/page → pos →
-        // 刻度 → Sel 这个序，任何一端先动都会把后面的吃掉。
+        // C29-SL-a/b: Slider 设计期值面下发。C29-SL-o 起这段本身搬进 emitSliderDesignTimeInit
+        // （账 #83 的 Slider 半边 —— 容器子控件那条创建路以前压根不发这一条，参数序与 -999
+        // 哨兵的口径只在这一处，别在这里复制第二份）。
         if (ctrl.controlType == FrmControlType::Slider) {
             std::string slLower = ctrl.controlName;
             std::transform(slLower.begin(), slLower.end(), slLower.begin(), ::tolower);
@@ -620,16 +613,7 @@
                 ("vb6_CtrlArr_GetAt(&vb6_arr_" + cIdent(ctrl.controlName) + ", " +
                  std::to_string(ctrl.index >= 0 ? ctrl.index : 0) + ")") :
                 ("vb6_hwnd_" + cIdent(ctrl.controlName));
-            auto slProp = [&](const char* key) -> std::string {
-                auto it = ctrl.properties.find(key);
-                if (it == ctrl.properties.end()) return "-999";
-                return std::to_string((long long)(int)it->second.intValue) + "L";
-            };
-            c_.emitLine("vb6_Slider_Init((void*)" + slHwnd + ", "
-                        + slProp("Min") + ", " + slProp("Max") + ", " + slProp("Value") + ", "
-                        + slProp("SmallChange") + ", " + slProp("LargeChange") + ", "
-                        + slProp("TickFrequency") + ", " + slProp("SelStart") + ", "
-                        + slProp("SelEnd") + ", " + slProp("SelectRange") + ");");
+            emitSliderDesignTimeInit(ctrl, slHwnd);
         }
 
         // C29-MV-a: MonthView 设计期的多月平铺。原生没有"行/列"这条消息 —— 平铺几个月完全

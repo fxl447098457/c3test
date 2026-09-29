@@ -1,13 +1,48 @@
 VERSION 5.00
 Begin VB.Form SlidForm 
    Caption         =   "SlidForm"
-   ClientHeight    =   2400
+   ClientHeight    =   3200
    ClientLeft      =   120
    ClientTop       =   465
    ClientWidth     =   4200
    LinkTopic       =   "SlidForm"
-   ScaleHeight     =   2400
+   ScaleHeight     =   3200
    ScaleWidth      =   4200
+   Begin MSComctlLib.Slider sld8 
+      Height          =   400
+      Left            =   2400
+      TabIndex        =   7
+      Top             =   1680
+      Width           =   1600
+      _ExtentX        =   2822
+      _ExtentY        =   706
+   End
+   Begin VB.TextBox txtF 
+      Height          =   400
+      Left            =   2560
+      TabIndex        =   8
+      Text            =   "F"
+      Top             =   2400
+      Width           =   1400
+   End
+   Begin VB.TextBox txtG 
+      Height          =   400
+      Left            =   2560
+      TabIndex        =   9
+      Text            =   "G"
+      Top             =   2880
+      Width           =   1400
+   End
+   Begin VB.TextBox txtH 
+      FontName        =   "Arial"
+      FontSize        =   20
+      Height          =   300
+      Left            =   3600
+      TabIndex        =   10
+      Text            =   "H"
+      Top             =   120
+      Width           =   500
+   End
    Begin VB.Timer tGo 
       Enabled         =   -1   'True
       Interval        =   60
@@ -67,6 +102,7 @@ Begin VB.Form SlidForm
       Left            =   120
       TabIndex        =   4
       Tag             =   "dtag"
+      TickStyle       =   2
       Top             =   1680
       ToolTipText     =   "dtip"
       Width           =   2000
@@ -76,12 +112,51 @@ Begin VB.Form SlidForm
    Begin MSComctlLib.Slider sld6 
       Height          =   400
       Left            =   2280
+      SelLength       =   15
+      SelStart        =   25
+      SelectRange     =   -1   'True
       SmallChange     =   1
       TabIndex        =   5
       Top             =   1680
       Width           =   1200
       _ExtentX        =   2117
       _ExtentY        =   706
+   End
+   Begin VB.Frame frmTickBox 
+      Caption         =   "tickbox"
+      Height          =   1000
+      Left            =   120
+      TabIndex        =   6
+      Top             =   2160
+      Width           =   2400
+      Begin MSComctlLib.Slider sld7 
+         Height          =   400
+         LargeChange     =   8
+         Left            =   120
+         Max             =   100
+         Min             =   10
+         SelLength       =   15
+         SelStart        =   20
+         SelectRange     =   -1   'True
+         SmallChange     =   2
+         TabIndex        =   7
+         TickFrequency   =   5
+         TickStyle       =   1
+         Top             =   240
+         Value           =   42
+         Width           =   2000
+         _ExtentX        =   3528
+         _ExtentY        =   706
+      End
+      Begin VB.TextBox txtI 
+         FontSize        =   20
+         Height          =   300
+         Left            =   120
+         TabIndex        =   11
+         Text            =   "I"
+         Top             =   720
+         Width           =   900
+      End
    End
 End
 Attribute VB_Name = "SlidForm"
@@ -268,6 +343,217 @@ Private Sub tGo_Timer()
     Debug.Print "SG3-back=" & TF(gGot6 - f0 = 2 And gGot3 - f2 = 1)
     sld3.SimStdEvent(4, 0)          ' 认来源：sld6 的 LostFocus 只跟着它自己失焦涨
     Debug.Print "SG4-isolate=" & TF(gLost6 - f1 = 2 And gGot3 - f2 = 2 And gGot6 - f0 = 2)
+    ' ---- C29-SL-h: TickStyle 四档（数值读自 OCX 自带的类型库，不是猜的）----
+    ' 0=sldBottomRight(那三位样式位全清) 1=sldTopLeft(TBS_TOP) 2=sldBoth(TBS_BOTH)
+    ' 3=sldNoTicks(TBS_NOTICKS)。判据一律用**相对高低**，不钉绝对像素 —— chan.top 的绝对值
+    ' 随主题与控件高度变（探针 slmeasure12.c 在 40px 高：chan.top 10/20/19/10、thumb.top
+    ' 2/10/10/2、numTics 11/11/11/0；夹具这一枚是 400 缇 = 26~27px，见 SH0 那行原始读数）。
+    ' **两档之间不可分的那一对**：1 与 2 的几何只差一两个像素，而且**谁高谁低本机都不稳**
+    ' （探针 40px 高：chan.top 20 / 19；夹具这一枚 400 缇：18 / 19 —— 顺序正好相反，第一版把
+    ' "1 > 2 > 0" 写进判据，SH3 就是这么翻红的）⇒ 1/2 两档之间没有稳的几何维度，只能靠样式位
+    ' 读回区分；控件侧稳的维度是「与 0 那档不同」+「3 那档 numTics=0」。
+    ' ts=3 与 ts=0 在几何上同形 ⇒ 它唯一的证人是 GetNumTicks=0；而 TickPresent 在那一档
+    ' **照旧答「有刻度」**（刻度只是不画、那张表还在，实测 GETTICPOS(0) 仍是 14），别拿它当判据。
+    Dim ct0 As Long, ct1 As Long, ct2 As Long, ct3 As Long
+    ct0 = sld3.ChannelTop
+    Debug.Print "SH1-base=" & CStr(sld3.TickStyle) & "/" & TF(sld3.GetNumTicks > 0)
+    sld3.TickStyle = 1
+    ct1 = sld3.ChannelTop
+    Debug.Print "SH2-top=" & CStr(sld3.TickStyle) & "/" & TF(ct1 > ct0)
+    sld3.TickStyle = 2
+    ct2 = sld3.ChannelTop
+    Debug.Print "SH3-both=" & CStr(sld3.TickStyle) & "/" & TF(ct2 > ct0)
+    sld3.TickStyle = 3
+    ct3 = sld3.ChannelTop
+    Debug.Print "SH4-none=" & CStr(sld3.TickStyle) & "/" & CStr(sld3.GetNumTicks) & "/" & TF(ct3 = ct0)
+    sld3.TickStyle = 0
+    Debug.Print "SH5-back=" & CStr(sld3.TickStyle) & "/" & TF(sld3.ChannelTop = ct0) & "/" & TF(sld3.GetNumTicks > 0)
+    ' SH0 是**原始几何证人行**（四档的 chan.top 绝对值），刻意不登记成针 —— 登记等于把本机
+    ' 像素钉进判据。它存在的意义是：哪天两根断言同时变 N，看这行就知道是几何没了还是通道换了。
+    Debug.Print "SH0-geom=" & ct0 & "/" & ct1 & "/" & ct2 & "/" & ct3
+    ' SH6 是**设计期那一条到没到窗口**的证人：sld5 在 .frm 里写的是 TickStyle = 2，而它与 sld3
+    ' 同尺寸（2000x400），所以可以直接比 chan.top 高低 —— 只读回一个自存的数不算数。
+    Debug.Print "SH6-dt=" & CStr(sld5.TickStyle) & "/" & TF(sld5.ChannelTop > ct0)
+    ' SH7 是越界那一档：写侧只认 1/2/3，其余落 0 ⇒ 答出去的数就是窗口真在走的那一档
+    ' （与 Orientation 同一口径，不自存、不猜 VB6 会不会报错 —— OCX 跑不起来，那条真值本机拿不到）。
+    sld3.TickStyle = 9
+    Debug.Print "SH7-oob=" & CStr(sld3.TickStyle)
+    Debug.Print "SH8-type=" & TypeName(sld3.TickStyle) & "/" & CStr(VarType(sld3.TickStyle))
+    ' SH9 是**第二条创建路**的证人：sld7 挂在 Frame 里，而那条路以前对 Slider 一格样式都不挂
+    ' （连默认的 TBS_AUTOTICKS 都没有，设计期写的 TickStyle 更没人下发 —— 账 #83 的一个具体落点）。
+    ' 它与 sld3 同尺寸（2000x400），所以直接拿 chan.top 与 ct0（sld3 在 ts=0 那档的基线）比高低：
+    ' 读回 1 只证到样式位，`chan.top > ct0` 才证到控件真按那一档重排了。
+    Debug.Print "SH9-child=" & CStr(sld7.TickStyle) & "/" & TF(sld7.ChannelTop > ct0)
+    ' ---- C29-SL-i: SelLength / ClearSel（类型库读出来的 VB6 那一面）----
+    ' 类型库给的是 SelStart(0x0007) + **SelLength**(0x0008) 这一对，另有一条方法 ClearSel(0x000e)。
+    ' VB6 那一面**没有 SelEnd 这个名字**（上面 SB 段用的那条是 SL-b 按原生 TBM_SETSELEND 自己加的）。
+    ' 三条实测口径（探针 slmeasure13.c，量程 10..100）写进了 RTL 的注释，这里各钉一条：
+    '   · **没碰过的控件 GETSELSTART 答的是量程下限、GETSELEND 答 0** ⇒ 终点比起点小，
+    '     拿减法会得出负长度 ⇒ SI1 钉「空选区就是 0」；
+    '   · 远端超量程由**控件夹住**（SI3 写 900 只到上限 100），我们不再钳第二遍；
+    '   · CLEARSEL 之后两端都答 -1 ⇒ 读数折成 0，而**紧接着写 SelLength 不该静默什么都不发生**
+    '     （SI4b 就是钉这一条：空态下锚量程下限，与控件自己那一态一致）。
+    ' sld4 在上面 SB 段被改过 Max 与 SelectRange，这里先摆回一个明确的起点（判据自带前提）。
+    sld4.SelectRange = True
+    sld4.Min = 10
+    sld4.Max = 100
+    sld4.SelStart = 20
+    sld4.SelEnd = 60
+    Debug.Print "SI1-len=" & CStr(sld4.SelLength)
+    sld4.SelLength = 10
+    Debug.Print "SI2-set=" & CStr(sld4.SelStart) & "/" & CStr(sld4.SelEnd) & "/" & CStr(sld4.SelLength)
+    sld4.SelLength = 900
+    Debug.Print "SI3-clamp=" & CStr(sld4.SelStart) & "/" & CStr(sld4.SelEnd) & "/" & CStr(sld4.SelLength)
+    sld4.ClearSel()
+    Debug.Print "SI4-clear=" & CStr(sld4.SelLength) & "/" & CStr(sld4.SelStart) & "/" & CStr(sld4.SelEnd)
+    sld4.SelLength = 5
+    Debug.Print "SI4b-reafter=" & CStr(sld4.SelStart) & "/" & CStr(sld4.SelLength)
+    ' SI5/SI6 是「不伪造」那一条：sld3 没挂 SelectRange，原生整条 SETSEL 不生效（实测），
+    ' 所以写进去读回来还是 0 —— 与 SelStart/SelEnd 在 SL-b 里同一口径。
+    Debug.Print "SI5-nobit=" & CStr(sld3.SelLength) & "/" & CStr(sld3.SelectRange)
+    sld3.SelLength = 7
+    Debug.Print "SI6-nobit2=" & CStr(sld3.SelLength)
+    sld4.SelLength = -3
+    Debug.Print "SI7-neg=" & CStr(sld4.SelLength)
+    Debug.Print "SI8-type=" & TypeName(sld4.SelLength) & "/" & CStr(VarType(sld4.SelLength))
+    ' SI9 是**设计期那一条到没到窗口**的证人：sld6 的 .frm 写的是一对 VB6 名字（SelStart 25 +
+    ' SelLength 15），而原生只有 (起, 止) 那一条消息 ⇒ cgen 在设计期那一趟折成 (25, 40)。
+    ' 改之前 SelLength 整条被丢（创建参数里只有 -999），读回来是空区段 —— 与账 #142 同一形状。
+    Debug.Print "SI9-dt=" & CStr(sld6.SelStart) & "/" & CStr(sld6.SelEnd) & "/" & CStr(sld6.SelLength)
+    ' SJ1 是**账 #148 的疑点**：ToolTipText 那条一直只验了"存回来的串"，没验过"到底注册进
+    ' tooltip 宿主没有"。裸编探针（无 v6 manifest ⇒ 走 v5）里 TTM_ADDTOOLW 直接返回失败，
+    ' 但那不能定罪产品 —— 这里改问宿主 TTM_GETTEXT，三枚一起读：运行期设过的 sld3、设计期
+    ' 设过的 sld5 都该 Y，从没设过的 sld1 该 N（要是三条齐 Y 就说明这枚证人问不出东西）。
+    Debug.Print "SJ1-reg=" & TF(sld3.ToolTipRegistered) & "/" & TF(sld5.ToolTipRegistered) _
+        & "/" & TF(sld1.ToolTipRegistered)
+    ' ---- C29-SL-k: Text 气泡 + TextPosition（VB6 那一面：ISlider.Text 0x0010 BSTR /
+    '      TextPosition 0x0011 = sldAboveLeft 0 / sldBelowRight 1）----
+    ' 气泡不走轨道条自带的 TBS_TOOLTIPS（那颗服务不了自定义串，而且只在创建时才建），
+    ' 走 RTL 自己持的一枚 TRACK 型 tooltip ⇒ 三条判据问的都是**宿主**而不是我们的窗口属性：
+    ' BubbleVisible（IsWindowVisible）、BubbleText（TTM_GETTEXT 读回）、BubbleTop（气泡上边）。
+    ' 摆动它的是派发里那条 BubbleNotify：4/5 摆出来、8 收回去（与 Scroll 的分法同一档）。
+    Dim bt0 As Long, bt1 As Long
+    sld3.Text = "VOL"
+    Debug.Print "SK1-text=" & sld3.Text & "/" & TypeName(sld3.Text) & "/" & CStr(VarType(sld3.Text))
+    Debug.Print "SK2-off=" & TF(sld3.BubbleVisible) & "/" & TF(sld1.BubbleVisible)
+    sld3.SimNotify(5, 40)
+    bt0 = sld3.BubbleTop
+    Debug.Print "SK3-show=" & TF(sld3.BubbleVisible) & "/" & sld3.BubbleText & "/" & TF(bt0 > 0)
+    sld3.SimNotify(8, 40)
+    Debug.Print "SK4-hide=" & TF(sld3.BubbleVisible)
+    sld3.TextPosition = 1
+    sld3.SimNotify(5, 40)
+    bt1 = sld3.BubbleTop
+    Debug.Print "SK5-pos=" & CStr(sld3.TextPosition) & "/" & TF(bt1 > bt0)
+    sld3.SimNotify(8, 40)
+    sld3.TextPosition = 0
+    ' SK6：Text 空着 ⇒ 气泡里就是当前的值（原生那颗画的就是数字，这条是我们的口径，
+    '      VB6 两者怎么共存本机拿不到真值）。sld1 从没写过 Text，拖到 33。
+    sld1.SimNotify(5, 33)
+    Debug.Print "SK6-num=" & sld1.BubbleText & "/" & CStr(sld1.Value) _
+        & "/" & TF(sld1.BubbleVisible)
+    sld1.SimNotify(8, 33)
+    Debug.Print "SK7-end=" & TF(sld1.BubbleVisible) & "/" & CStr(sld1.TextPosition)
+    ' ---- C29-SL-l: 控件的**零实参方法**两形（账 #143）----
+    ' 之前 `Slider1.SetFocus` 这类写法（连不带括号的那一形）从没登记过，两形都落进
+    ' vb6_ComCall(裸 HWND, L"SetFocus", NULL, 0) —— 原生控件槽里是句柄不是 IDispatch，
+    ' 于是编得过、链接得过、跑起来一声不响。现在两条码头共用一张表，判据问的是**焦点自己**：
+    ' sld6 那对 GotFocus/LostFocus 计数器（SG 块留下的现成证人）只有 WM_SETFOCUS 真到才涨。
+    ' 每次都要先把焦点挪开再问增量 —— SetFocus 落在**已经有焦点**的窗口上不会重发 WM_SETFOCUS。
+    ' 落点刻意选 sld5：**启用**、又没挂任何焦点处理器。第一版这里用 sld1，而 sld1 在
+    ' SL11 那一步被 Enabled = False 了 —— 禁用窗口拿不到焦点（Win32 语义，原生就是回 NULL），
+    ' 于是焦点从没离开过 sld6，SN2 两条增量双双读成 N（判据自伤，不是产品红）。
+    Dim gf0 As Long, gf1 As Long, gl0 As Long, gl1 As Long
+    sld5.SetFocus                      ' 先把焦点放到**没挂处理器**的那枚上（当基线）
+    gf0 = gGot6
+    gl0 = gLost6
+    sld6.SetFocus                      ' **不带括号**那一形
+    Debug.Print "SN1-bare=" & TF(gGot6 > gf0) & "/" & CStr(gLost6 - gl0)
+    gf1 = gGot6
+    gl1 = gLost6
+    sld5.SetFocus()                    ' **带括号**那一形先把焦点拿走 ⇒ sld6 该发 LostFocus
+    sld6.SetFocus()                    ' 再带括号回来 ⇒ 该发 GotFocus（两形同一条原生路）
+    Debug.Print "SN2-paren=" & TF(gLost6 > gl1) & "/" & TF(gGot6 > gf1)
+    ' ClearSel 的**不带括号**那一形：SI4 钉的是带括号的，那条早就通了；这一形以前掉兜底。
+    sld4.SelectRange = True
+    sld4.Min = 10
+    sld4.Max = 100
+    sld4.SelStart = 20
+    sld4.SelLength = 10
+    sld4.ClearSel
+    Debug.Print "SN3-clearsel=" & CStr(sld4.SelLength) & "/" & CStr(sld4.SelStart)
+
+    ' ---- C29-SL-m（账 #150）: With 块里的控件**方法** ----
+    ' 这一形以前不是"读数不对"，是**整件工程编译不过**：With 的成员访问只认属性，方法名落到
+    ' 那条"未知属性"兜底，发成 `_vb6_with_0.SetFocus()` —— HWND 是 struct 指针，`.成员` 非法
+    ' （BASE 实测：BUILD-RC=1 + 三条 VB4001 "Unknown control property '.X' in With block"）。
+    ' 焦点面还是问 sld6 那对计数器、只问增量；落点用**启用**的控件（sld5/sld4，理由见 SN1 那段）。
+    Dim gf2 As Long, gf3 As Long, gl2 As Long
+    sld5.SetFocus()                    ' 先把焦点挪开 —— 目标已有焦点时 SetFocus 不重发 WM_SETFOCUS
+    gf2 = gGot6
+    With sld6
+        .SetFocus                      ' With 里**不带括号**那一形
+    End With
+    Debug.Print "SN4-with-bare=" & TF(gGot6 > gf2)
+    gf3 = gGot6
+    gl2 = gLost6
+    With sld5
+        .SetFocus()                    ' With 里**带括号**那一形：焦点走掉才发 LostFocus
+    End With
+    Debug.Print "SN5-with-paren=" & TF(gLost6 > gl2) & "/" & TF(gGot6 = gf3)
+    With sld4
+        .SelStart = 20
+        .SelLength = 10
+        .ClearSel()                    ' 方法与属性赋值混在同一个 With 块里
+    End With
+    Debug.Print "SN6-with-clearsel=" & CStr(sld4.SelLength) & "/" & CStr(sld4.SelStart)
+
+    ' ---- C29-SL-n（账 #141）: 只挂 `_DblClick` 的那枚也该被装 ----
+    ' 驱动走已发货的那条形（SimStdEvent kind=1 = 一条真 WM_LBUTTONDBLCLK 进控件自己的过程），
+    ' 本批零新增方法接线 ⇒ 红点只可能在“装不装”那一趟。
+    sld8.SimStdEvent(1, 0)
+    Debug.Print "SN7-dblone=" & CStr(gDbl8) & "/" & CStr(gDblCancel)
+
+    ' ---- C29-SL-o（账 #83 的 Slider 半边）: 容器子控件的设计期**值面** ----
+    ' sld7 挂在 Frame 里 ⇒ 走的是第二条创建路，而那条路以前一条 vb6_Slider_Init 都不发：
+    ' .frm 里写的 Min/Max/Value/… 整条丢掉，控件就停在原生默认档（BASE 实测读出默认）。
+    ' 判据形状 = 与顶层那条路**同一批 .frm 属性**逐字对上（探针 ChildProbe 顶层那枚的读数），
+    ' 不是"看着非零就算过"。LargeChange 读回不等于写进去的那个数是控件自己的口径
+    ' （见 SL-0 那批测量），所以这一格刻意把原值与读回值同时钉住 —— 数字变了就红。
+    ' SelEnd 那格是**折出来的**（.frm 里只写 SelStart + SelLength，终点 = 起点 + 长度），
+    ' 顶层那趟有的折叠，容器这一路必须有同一条 —— 复制一份发码不算接上。
+    Debug.Print "SO1-child=" & CStr(sld7.Min) & "/" & CStr(sld7.Max) & "/" & CStr(sld7.Value) & "/" & CStr(sld7.SmallChange)
+    Debug.Print "SO2-child-page=" & CStr(sld7.LargeChange) & "/" & CStr(sld7.TickFrequency)
+    Debug.Print "SO3-child-sel=" & CStr(sld7.SelStart) & "/" & CStr(sld7.SelLength) & "/" & TF(sld7.SelectRange)
+
+    ' ---- C29-SL-p（说明 §4 那条例子量出来的）: FontSize 存什么读什么 ----
+    ' 点号 → 像素是有损的一步（96 DPI 下 1pt = 1.3333px），旧写法从窗口 LOGFONT 反算，
+    ' 于是写 8 读回 8.25、写 10 读回 9.75、写 14 读回 14.25（探针 .build/slfont 那张表）。
+    ' 现在请求值按窗口自存，未设过的控件仍走反算（行为一字不动）。
+    ' SP2 是**第二头**：自存的数读回来当然还是自存的数，那一条问不出窗口 —— 所以要同时问
+    ' 一次像素高度（证人 FontPixelHeight，C3 扩展读数），而且只比**相对**高低、不钉绝对像素
+    ' （与 ChannelTop / TickStyle 那条同一教训：换 DPI 就换数）。
+    ' SP3 钉的是 0 那一档：SetPropW(0) 等于删属性（账 #107），少了那枚 Set 旗标，
+    ' 写 0 会静默变回"没设过"、读回来是系统默认字号。
+    txtF.FontSize = 8
+    txtF.FontSize = 10
+    Debug.Print "SP1-round=" & CStr(txtF.FontSize)
+    txtF.FontSize = 14
+    Debug.Print "SP1b-round14=" & CStr(txtF.FontSize) & "/" & CStr(txtG.FontSize)
+    txtF.FontSize = 26
+    Debug.Print "SP2-real=" & TF(txtF.FontPixelHeight > 2 * txtG.FontPixelHeight) & "/" & CStr(txtF.FontSize)
+    txtF.FontSize = 0
+    Debug.Print "SP3-zero=" & CStr(txtF.FontSize)
+
+    ' ---- C29-SL-q（账 #154）: .frm 写的设计期字体**到不到窗口** ----
+    ' 探针 .build/slfont 量的：一枚写 FontName=Consolas + FontSize=14 的文本框运行时读回 空串/8.25，
+    ' 另一枚写 FontSize=20 的读回 8.25、窗口像素高度还是默认的 11 ⇒ 解析侧留了这两条属性
+    ' （frm_parser.cpp 原样存进 properties），缺的只是发码那一步 —— 与 #125 / #142 同一形状。
+    ' txtH 在窗体上（第一条创建路）、txtI 在 Frame 里（第二条）—— 这一族栽过几次"只接一头"，
+    ' 所以两条路各钉一枚。SQ3 问的是**窗口**（证人 FontPixelHeight，只比相对高低，不钉绝对像素）。
+    Debug.Print "SQ1-dt=" & txtH.FontName & "/" & CStr(txtH.FontSize)
+    Debug.Print "SQ2-child-dt=" & CStr(txtI.FontSize)
+    Debug.Print "SQ3-real=" & TF(txtH.FontPixelHeight > 2 * txtG.FontPixelHeight)
     Debug.Print "SLIDER-DONE"
     Unload Me
 End Sub
@@ -334,6 +620,17 @@ End Sub
 
 ' SD7 的那枚证人：sld2 除 Change（走父窗那条通道）之外只有 sld2_Click 这一条 ⇒ 它是否被
 ' 子类化，完全由「装不装那一趟」认不认 _Click 决定（计数器在上面的 SL-d 那块里）。
+Private gDbl8 As Long
+Private gDblCancel As Long
+
+' C29-SL-n（账 #141）: 这枚滑杆**只挂 `_DblClick` 一条**处理器 —— 装的判据以前少这一形，
+' 于是子类过程与 WM_LBUTTONDBLCLK 那条 arm 都生成了却没人 install，处理器编得过、永不触发。
+' （sld6 也挂 DblClick，但它同时挂着 Click/KeyDown ⇒ 被顺带装上，看不出这一形死了。）
+Private Sub sld8_DblClick(Cancel As Integer)
+    gDbl8 = gDbl8 + 1
+    gDblCancel = Cancel
+End Sub
+
 Private Sub sld2_Click()
     gClk2 = gClk2 + 1
 End Sub

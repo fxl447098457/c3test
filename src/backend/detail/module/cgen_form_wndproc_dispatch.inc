@@ -443,23 +443,11 @@
         // 不同步就是"装了不拆"或"发了不装"。C29-SL-g 把三份一起对齐：焦点档改成按
         // "有没有另一条原生来源"排除，并补上 C29-SL-d 那一条 `_Click`（上一批只同步了
         // 前两份，这一份漏了 —— 漏了不会崩，只是拆的时候少拆一枚，记在这里免得再漏）。
+        // C29-SL-n（账 #141）: 这份「要不要子类化」原本在这里又抄了一遍，而且比发 arm 那一趟
+        // 少了 `_DblClick` 与 `_Paint` ⇒ 只挂这两条处理器之一的控件，子类过程与消息臂都生成了、
+        // 却一次也没被 install（编得过、永不触发）。三份现在共用 controlNeedsSubclass。
         auto needsSubclass = [&](const FrmControl& ctrl) -> bool {
-            return (!controlFocusFromNativeNotify(ctrl.controlType) &&
-                    (symTab_.lookup(ctrl.controlName + "_GotFocus") ||
-                     symTab_.lookup(ctrl.controlName + "_LostFocus")))
-                || symTab_.lookup(ctrl.controlName + "_MouseEnter")
-                || symTab_.lookup(ctrl.controlName + "_MouseLeave")
-                || symTab_.lookup(ctrl.controlName + "_MouseDown")
-                || symTab_.lookup(ctrl.controlName + "_MouseUp")
-                || symTab_.lookup(ctrl.controlName + "_MouseMove")
-                || symTab_.lookup(ctrl.controlName + "_KeyPress")
-                || symTab_.lookup(ctrl.controlName + "_KeyDown")
-                || symTab_.lookup(ctrl.controlName + "_KeyUp")
-              || symTab_.lookup(ctrl.controlName + "_Validate")
-                || symTab_.lookup(ctrl.controlName + "_MouseHover")
-                // C29-SL-d 的那一条：只挂 `_Click` 的控件也会被装，拆的时候同一张表得认。
-                || (!controlClickFromNativeNotify(ctrl.controlType) &&
-                    symTab_.lookup(ctrl.controlName + "_Click"));
+            return controlNeedsSubclass(ctrl);
         };
         std::unordered_set<std::string> subEmitted;
         for (const auto& ctrl : frmDesc.formControl.children) {
@@ -549,6 +537,17 @@
     }
     if (hasScrollBar) {
     c_.emitLine("{ void* scrollHwnd = (void*)lParam; int scrollCode = LOWORD(wParam);");
+    // C29-SL-k: VB6 的 Slider 在拖滑块时把那颗气泡摆出来（ISlider.Text = 0x0010 就是气泡里那句
+    // 串），而原生轨道条自己那枚 TBS_TOOLTIPS 服务不了自定义串（实测 slmeasure17.c：它自带一条
+    // 工具、TTM_POP 无头里什么都不触发）⇒ 气泡由 RTL 自己持一枚 TRACK 型 tooltip 来摆。
+    // 这一条**只发一次、不按控件展开**：RTL 里按窗口类名把 ScrollBar 筛掉。值取 wParam 高字
+    // （实测 4/5 两档带新值、8 那档为 0 ⇒ 传 0 时 RTL 自己现问 TBM_GETPOS）。
+    bool hasSlider = false;
+    for (const auto& ctrl : frmDesc.formControl.children) {
+        if (ctrl.controlType == FrmControlType::Slider) { hasSlider = true; break; }
+    }
+    if (hasSlider)
+        c_.emitLine("vb6_Slider_BubbleNotify(scrollHwnd, scrollCode, HIWORD(wParam));");
     for (const auto& ctrl : frmDesc.formControl.children) {
         if (ctrl.controlType == FrmControlType::HScrollBar || ctrl.controlType == FrmControlType::VScrollBar) {
             std::string ctrlHwnd = "vb6_hwnd_" + cIdent(ctrl.controlName);

@@ -44,7 +44,18 @@
             bool slSim = !sliderNameOfExpr(comObjExpr_).empty()
                 && (tvMem == "simnotify" || tvMem == "simstdevent");
             bool slStd = slSim && tvMem == "simstdevent";
-            if (tvSim || tbSim || dtSim || mvSim || slSim) {
+            // C29-SL-i: ClearSel 是 **VB6 真方法**（类型库 ISlider dispid 0x000e，无参），
+            // 不是判据助手。走同一支改道是因为它同样会被 axSlotObj 那支先吃掉 —— 落回兜底就编成
+            // 「取 clearsel 属性 + 丢掉结果」，跑起来一声不响（账 #143 记的就是这一族的语句形）。
+            // C29-SL-l: 这一族扩成一张表（`controlZeroArgMethod`）—— **带括号**在这一形收尾、
+            // **不带括号**在 cgen_call.cpp 的语句路收尾，两条码头共用同一张表。只接一头就是
+            // 账 #143 那条"编得过、跑了、什么都没发生"（本线踩过三次的那同一条）。
+            std::string zaHwnd;
+            FrmControlType zaType = FrmControlType::Unknown;
+            std::string zaFn = formCtrlSlot(comObjExpr_, zaType, zaHwnd)
+                ? controlZeroArgMethod(zaType, tvMem) : std::string();
+            bool slClear = !zaFn.empty();
+            if (tvSim || tbSim || dtSim || mvSim || slSim || slClear) {
                 isComMarker_ = false;
                 std::vector<std::string> sa;
                 for (size_t i = 0; i < node.positional.size(); i++) {
@@ -53,7 +64,9 @@
                 }
                 std::string a0 = sa.size() > 0 ? sa[0] : std::string("0");
                 std::string a1 = sa.size() > 1 ? sa[1] : std::string("0");
-                lastExpr_ = slStd
+                lastExpr_ = slClear
+                    ? (zaFn + "((void*)" + zaHwnd + ")")
+                    : slStd
                     ? ("vb6_Slider_SimStdEvent((void*)" + comObjExpr_ + ", " + a0 + ", " + a1 + ")")
                     : slSim
                     ? ("vb6_Slider_SimNotify((void*)" + comObjExpr_ + ", " + a0 + ", " + a1 + ")")

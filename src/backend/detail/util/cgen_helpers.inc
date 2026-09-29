@@ -269,10 +269,45 @@
     // 顶层控件与容器子控件两条创建路共用；只在 .frm 写了非空值时发。
     void emitDesignerStringProps(const FrmControl& ctrl, const std::string& hwndExpr);
 
+    // 账 #154（C29-SL-q）: 设计期 `FontName` / `FontSize` 打到窗口上。
+    // 与 #125 / #142 同一形状 —— **两条创建路都要调**（顶层那趟与容器子控件那趟），只接一头就是本线踩过几次的那声不响。
+    void emitDesignerFontProps(const FrmControl& ctrl, const std::string& hwndExpr);
+
     // 返回控件类型相关的 Win32 样式位 (BS_*/SS_*/ES_*/CBS_*/LBS_*/WS_BORDER...)。
     // 顶层控件与容器(Frame/PictureBox)子控件必须使用同一套逻辑，否则子控件缺
     // SS_NOTIFY/BS_GROUPBOX 等样式会导致外观/交互 (含 tooltip) 异常。
     long controlTypeStyleBits(const FrmControl& ctrl) const;
+
+    // C29-SL-h: Slider 的创建样式位（TBS_AUTOTICKS / TBS_VERT / TickStyle 那三位）。
+    // 顶层与容器子控件两条创建路各自都要它，所以单独一处折算、两处调用（账 #83）。
+    long sliderStyleBits(const FrmControl& ctrl) const;
+
+    // C29-SL-l（账 #143）: 控件的**零实参方法**（`SetFocus` / Slider 的 `ClearSel` 这一族）。
+    // 一形带括号（走表达式路）、一形不带（走语句路），两条码头都调这两个函数，
+    // 免得又只接一头、留下编得过而运行期一声不响的那条静默空转。
+    // objExpr 两种形态都认：`vb6_hwnd_List1`（表达式路）与裸小写名 `list1`（语句路）。
+    bool formCtrlSlot(const std::string& objExpr, FrmControlType& outType,
+                      std::string& outHwndExpr) const;
+    std::string controlZeroArgMethod(FrmControlType ctrlType,
+                                     const std::string& memberLower) const;
+
+    // C29-SL-n（账 #141）: 「这枚控件要不要子类化」的**唯一一份**判据。
+    // 这一趟原本被抄成三份：发 arm 的 `cgen_form_wndproc_subclass.inc`（按 info.hasXxx 汇总）、
+    // 装的 `cgen_form_frame_menu.inc`、拆的 `cgen_form_wndproc_dispatch.inc` —— 后两份各写一遍，
+    // 实测两份都**少了 `_DblClick` 与 `_Paint`**：只挂 `xxx_DblClick` 的控件，子类过程与
+    // `WM_LBUTTONDBLCLK` 那一条 arm 在产物里生成得好好的，却**一次都没被 install**
+    // ⇒ 处理器编得过、永不触发（`Slider` 首当其冲，本页 §3 就写着 DblClick）。
+    // ⚠ 内容与发 arm 那一趟的 info.hasXxx 逐条对应，**两边一起改**才有意义；
+    //   焦点与 Click 那两条必须带排除表，否则同一次操作会从两条路各发一次（C29-SL-g / SL-d）。
+    bool controlNeedsSubclass(const FrmControl& ctrl) const;
+
+    // C29-SL-o（账 #83 的 Slider 半边）: Slider 的**设计期值面**下发。
+    // 这段原本内联在 cgen_form_ctrl_style_apply.inc（只有顶层控件走得到），容器
+    // （Frame / PictureBox / SSTab）里的子滑杆拿不到 ⇒ `.frm` 写的 Min/Max/Value/
+    // Small·LargeChange/TickFrequency/Sel* 整条丢（实测顶层读回 10/100/42/2/9/5、
+    // Frame 内读回 0/100/0/1/20/0 = 原生默认档）。抽出来两条创建路共用，hwndExpr 由调用方给
+    // （顶层那趟自己算槽、子控件那趟用 childHwndRead）。
+    void emitSliderDesignTimeInit(const FrmControl& ctrl, const std::string& hwndExpr);
 
     // VB6 PictureBox/Image 的 STATIC 控件不显示 Caption (标题在创建时应清空)。
     bool controlTypeClearsCaption(const FrmControl& ctrl) const;

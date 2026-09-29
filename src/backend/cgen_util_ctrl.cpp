@@ -62,6 +62,14 @@ Vb6Type CCodeGen::controlPropType(FrmControlType ctrlType, const std::string& pr
     if (p == "tooltiptext" || p == "tag") {
         return Vb6Type::String;
     }
+    // 账 #154（C29-SL-q）: `FontName` 以前**根本没登记**，于是同一枚属性两种答案 ——
+    // `Len(Text1.FontName)` 直接拿指针、答得对（探针里 "Consolas" 读出 8），而
+    // `Debug.Print ... & Text1.FontName` 先装箱再 CStr、打出来是空串。看着像"字体名没设上"，
+    // 其实窗口里早就换上了（同一枚控件的 FontPixelHeight 证人当场翻案）。
+    // CommonDialog 那一条的 getter 也回字符串（vb6_CdGetFontName，ChooseFont 的字段），同一档。
+    if (p == "fontname") {
+        return Vb6Type::String;
+    }
 
     if (ctrlType == FrmControlType::SSTab) {
         if (p == "tabs" || p == "tab" || p == "taborientation" || p == "tabstyle"
@@ -143,12 +151,24 @@ Vb6Type CCodeGen::controlPropType(FrmControlType ctrlType, const std::string& pr
             || p == "travelisvert" || p == "tickpresent"
             || p == "min" || p == "max" || p == "value"
             || p == "smallchange" || p == "largechange"
-            || p == "selstart" || p == "selend") {
+            || p == "selstart" || p == "selend"
+            // C29-SL-h: 三条都是数值（TickStyle 在类型库里是 VT_USERDEFINED 的那张枚举，
+            // VB6 侧读回来就是 0..3 这一个数，与 Orientation 同档）。
+            || p == "tickstyle" || p == "getnumticks" || p == "channeltop"
+            // C29-SL-i: VB6 选区那一对的第二条（SelStart + SelLength，两条 VT_I4）。
+            || p == "sellength") {
             return Vb6Type::Long;
         }
         // SelectRange 在 VB6 是 Boolean ⇒ 按 #124 那条口径登记（getter 给的就是 -1/0），
         // 这样 `CStr(sld.SelectRange)` 打 True/False、装箱走 VT_BOOL。
         if (p == "selectrange") return Vb6Type::Boolean;
+        // 账 #148 的判据证人同样是 -1/0 ⇒ 同一档。
+        if (p == "tooltipregistered") return Vb6Type::Boolean;
+        // C29-SL-k：`Text` 在类型库里是 VT_BSTR（那颗气泡里的串，**不是**窗口标题），
+        // `BubbleText` 读的是 tooltip 宿主里的工具文本 ⇒ 两条都是 String 档。
+        if (p == "text" || p == "bubbletext") return Vb6Type::String;
+        if (p == "bubblevisible") return Vb6Type::Boolean;      // -1/0
+        if (p == "textposition" || p == "bubbletop") return Vb6Type::Long;
     }
     if (ctrlType == FrmControlType::RichTextBox) {
         // C29-RT-a: 同一口径。vb6_RTB_Get* 除 SelText 外全是 int32_t（布尔按 VB6 的 -1/0 给，
@@ -233,6 +253,11 @@ std::string CCodeGen::getControlPropReadFn(FrmControlType ctrlType, const std::s
     // `CD1.FontName = "Consolas"` 静默落到字体属性上（C29-1a 那条 borderstyle 被抢走同一类碰撞）。
     if (propLower == "fontname" && ctrlType != FrmControlType::CommonDialog) return "vb6_GetControlFontName";
     if (propLower == "fontsize" && ctrlType != FrmControlType::CommonDialog) return "vb6_GetControlFontSize";
+    // C29-SL-p 的判据证人（**不是 VB6 属性**，只给读侧、不给写口）：窗口真在用的字体像素高度。
+    // 需要它是因为自存把"存什么读什么"做对了之后，读回来那个数已经问不出窗口了 ——
+    // 与 TickPresent / TravelIsVert / ToolTipRegistered 同族（#148 那条"证人问不出东西"的教训）。
+    if (propLower == "fontpixelheight" && ctrlType != FrmControlType::CommonDialog)
+        return "vb6_ControlFontPixelHeight";
     if (propLower == "fontbold") return "vb6_GetControlFontBold";
     if (propLower == "fontitalic") return "vb6_GetControlFontItalic";
     if (propLower == "fontunderline") return "vb6_GetControlFontUnderline";
@@ -575,6 +600,22 @@ std::string CCodeGen::getControlPropReadFn(FrmControlType ctrlType, const std::s
         if (propLower == "selectrange") return "vb6_Slider_GetSelectRange";
         if (propLower == "selstart") return "vb6_Slider_GetSelStart";
         if (propLower == "selend") return "vb6_Slider_GetSelEnd";
+        // C29-SL-h: TickStyle 四档 + GetNumTicks（VB6 只读那一面），加一条判据证人 ChannelTop。
+        if (propLower == "tickstyle") return "vb6_Slider_GetTickStyle";
+        if (propLower == "getnumticks") return "vb6_Slider_GetNumTicks";
+        if (propLower == "channeltop") return "vb6_Slider_ChannelTop";
+        // 账 #148 的判据证人（**不是 VB6 属性**）：tooltip 宿主里到底有没有这枚控件的工具。
+        if (propLower == "tooltipregistered") return "vb6_ToolTipRegistered";
+        // C29-SL-k: VB6 的 Slider.Text 是**气泡里那句串**（类型库 VT_BSTR，0x0010），
+        // 不是窗口标题 —— 这一格把它从通用的 vb6_GetControlText 那支抢过来自己实现。
+        // 三条 Bubble* 是判据证人（C3 扩展）：问的是 tooltip 宿主自己，不是我们的窗口属性。
+        if (propLower == "text") return "vb6_Slider_GetText";
+        if (propLower == "textposition") return "vb6_Slider_GetTextPosition";
+        if (propLower == "bubblevisible") return "vb6_Slider_BubbleVisible";
+        if (propLower == "bubbletop") return "vb6_Slider_BubbleTop";
+        if (propLower == "bubbletext") return "vb6_Slider_BubbleText";
+        // C29-SL-i: VB6 选区那一对的第二条（SelStart + SelLength，类型库 dispid 0x0007/0x0008）。
+        if (propLower == "sellength") return "vb6_Slider_GetSelLength";
         if (propLower == "visible") return "vb6_GetControlVisible";
         if (propLower == "enabled") return "vb6_GetControlEnabled";
         break;
@@ -955,6 +996,15 @@ std::string CCodeGen::getControlPropWriteFn(FrmControlType ctrlType, const std::
         if (propLower == "selectrange") return "vb6_Slider_SetSelectRange";
         if (propLower == "selstart") return "vb6_Slider_SetSelStart";
         if (propLower == "selend") return "vb6_Slider_SetSelEnd";
+        // C29-SL-h: TickStyle 运行期写有效（实测写位 + 换帧之后的每一条形与创建时带那一位逐字
+        // 相同）。GetNumTicks / ChannelTop 两条刻意不给写口 —— 前者 VB6 就是只读。
+        if (propLower == "tickstyle") return "vb6_Slider_SetTickStyle";
+        // C29-SL-i: SelLength 写侧 = 起点不动、终点 = 起点 + 长度（远端超量程由控件夹住，实测）。
+        if (propLower == "sellength") return "vb6_Slider_SetSelLength";
+        // C29-SL-k: Text 写的是气泡串（同时把宿主里那条工具的文本换掉）；TextPosition 自存
+        // 一枚 0/1（原生没有这条消息），摆气泡时用它定上/下。
+        if (propLower == "text") return "vb6_Slider_SetText";
+        if (propLower == "textposition") return "vb6_Slider_SetTextPosition";
         if (propLower == "visible") return "vb6_SetControlVisible";
         if (propLower == "enabled") return "vb6_SetControlEnabled";
         break;
@@ -1147,6 +1197,57 @@ void CCodeGen::emitDesignerStringProps(const FrmControl& ctrl, const std::string
     emitOne("Tag", "vb6_SetControlTag");
 }
 
+// 账 #154（C29-SL-q，从 `ai/内置控件/Slider 控件（滑杆）.md` §4 那条例子顺带量出来的）:
+// 设计期的 `FontName` / `FontSize` 此前**两条创建路都没打到窗口上** —— 探针 `.build/slfont` 里
+// 一枚写 Consolas+14 的文本框运行时读回 空串/8.25，另一枚写 20 的读回 8.25、窗口像素高度还是默认的 11。
+// 解析侧是留着这两条的（`frm_parser.cpp:388` 原样存进 `ctrl.properties`），缺的只有发码这一步
+// ⇒ 与 #125（Enabled/Visible/Value）、#142（ToolTipText/Tag）同一形状：运行期赋值一直是好的。
+// 只在 `.frm` **显式写过**时发，没写的控件逐字节维持今天的行为。
+// 发序是 先 Size 后 Name：两支 setter 都是"读当前 LOGFONT、只改自己那一格"，而 Name 那支在窗口
+// 本来没有字体时会先造一枚 `-13`（≈10pt）的底子 —— 把 Size 放在前面就不会被它盖掉。
+void CCodeGen::emitDesignerFontProps(const FrmControl& ctrl, const std::string& hwndExpr) {
+    switch (ctrl.controlType) {
+    case FrmControlType::Timer:         // 无窗口控件：字体没有落脚的地方
+    case FrmControlType::Menu:          // 菜单项的字体是 owner-draw 的事，不是窗口字体
+    case FrmControlType::ImageList:     // 不是窗口
+    case FrmControlType::CommonDialog:  // 它的 Font* 是 ChooseFont 的 LOGFONT 字段（D6 口径），
+                                        // 已由上面那条 cdStr/cdInt 分支发过，这里再发就是两遍
+        return;
+    default:
+        break;
+    }
+    const std::string hw = "(void*)" + hwndExpr;
+
+    auto szIt = ctrl.properties.find("FontSize");
+    if (szIt != ctrl.properties.end()) {
+        double pt = -1.0;
+        if (szIt->second.type == FrmValueType::Float) pt = szIt->second.floatValue;
+        else if (szIt->second.type == FrmValueType::Integer) pt = (double)szIt->second.intValue;
+        // 0 与负数不是字号（VB6 的设计期也不会写这种数），发了只会把窗口打成"默认字体"那一档。
+        if (pt > 0.0) {
+            c_.emitLine("vb6_SetControlFontSize(" + hw + ", " + std::to_string(pt)
+                        + "f);  /* design FontSize */");
+        }
+    }
+
+    auto nmIt = ctrl.properties.find("FontName");
+    if (nmIt != ctrl.properties.end() && nmIt->second.type == FrmValueType::String) {
+        std::string raw = nmIt->second.rawText;   // .frm 里的原始文本，含首尾双引号
+        if (raw.size() >= 2 && raw.front() == '"' && raw.back() == '"')
+            raw = raw.substr(1, raw.size() - 2);
+        if (!raw.empty()) {
+            std::string esc;
+            for (size_t i = 0; i < raw.size(); i++) {
+                char ch = raw[i];
+                if (ch == '"' || ch == '\\') esc += '\\';
+                esc += ch;
+            }
+            c_.emitLine("vb6_SetControlFontNameW(" + hw + ", L\"" + esc
+                        + "\");  /* design FontName */");
+        }
+    }
+}
+
 // C29-SL-g: 这个控件的 **焦点事件**（`GotFocus` / `LostFocus`）是不是已经由原生通知送进来了。
 // 与上一条同型的问题在焦点这一档更隐蔽：仓里同一句判据被抄成了**三份表**（发 arm 的
 // `cgen_form_wndproc_subclass.inc`、装子类的 `cgen_form_frame_menu.inc`、拆子类的
@@ -1172,6 +1273,176 @@ bool CCodeGen::controlFocusFromNativeNotify(FrmControlType ctrlType) {
     default:
         return false;
     }
+}
+
+// C29-SL-a/h: Slider 的创建样式位 —— **两条创建路共用这一处**（顶层那条在
+// cgen_form_ctrl_style_apply.inc 的 Slider 分支，容器子控件那条走下面的
+// controlTypeStyleBits，账 #83 说的就是这两张表会各写各的）。
+// 取值与 vb6forms_slider.c 里的 getter 同一档：
+//   · TBS_AUTOTICKS(0x0001) 一律挂上：VB6 的 Slider 默认就画刻度。
+//   · Orientation 0=水平 / 1=垂直 → TBS_VERT(0x0002)。
+//   · TickStyle 四档 → TBS_TOP(0x0004) / TBS_BOTH(0x0008) / TBS_NOTICKS(0x0010)，
+//     0=sldBottomRight 就是那三位全清（TBS_BOTTOM==TBS_RIGHT==0）。四档的数值是
+//     从 OCX 自带的类型库读出来的（探针 .build/slprobe/sltlb.cpp），不是猜的；
+//     每一档在控件侧的证人实测于 .build/slprobe/slmeasure12.c。
+long CCodeGen::sliderStyleBits(const FrmControl& ctrl) const {
+    constexpr long kTbsAutoTicks = 0x0001L;
+    constexpr long kTbsVert      = 0x0002L;
+    constexpr long kTbsTop       = 0x0004L;   // == TBS_LEFT
+    constexpr long kTbsBoth      = 0x0008L;
+    constexpr long kTbsNoTicks   = 0x0010L;
+    constexpr long kTbsPosMask   = kTbsTop | kTbsBoth | kTbsNoTicks;
+
+    long style = kTbsAutoTicks;
+    auto slOr = ctrl.properties.find("Orientation");
+    if (slOr != ctrl.properties.end() && (int)slOr->second.intValue != 0) style |= kTbsVert;
+    auto slTs = ctrl.properties.find("TickStyle");
+    if (slTs != ctrl.properties.end()) {
+        long pos = 0;
+        switch ((int)slTs->second.intValue) {
+            case 1: pos = kTbsTop; break;
+            case 2: pos = kTbsBoth; break;
+            case 3: pos = kTbsNoTicks; break;
+            default: pos = 0; break;   // 0 与越界值都落"下半/右半"那一档（与 setter 同口径）
+        }
+        style = (style & ~kTbsPosMask) | pos;
+    }
+    return style;
+}
+
+// C29-SL-l（账 #143）: 把一条"控件对象表达式"折成 (控件类型, 那枚窗口的 C 表达式)。
+// 三种形态都要认，因为控件方法的发码有两条码头：
+//   · 表达式路给 `vb6_hwnd_List1`（裸槽，visit(IndexOrCallExpr) 的 marker）；
+//   · 语句路给裸小写名 `list1`（`List1.Clear` 那族已有的几支就按这个查）；
+//   · 控件数组给 `vb6_CtrlArr_GetAt(&vb6_hwnd_txtSearch, (Index))` —— GetAt 回的就是那枚
+//     HWND（`vb6forms_ctrlarr.c` 里存的就是句柄），所以整条表达式直接当窗口用。
+// 认不出（不是控件、或者槽后面还挂着成员/下标）就回 false，让调用方落回原来的兜底。
+bool CCodeGen::formCtrlSlot(const std::string& objExpr, FrmControlType& outType,
+                            std::string& outHwndExpr) const {
+    static const std::string kSlot = "vb6_hwnd_";
+    static const std::string kArr  = "vb6_CtrlArr_GetAt(&vb6_hwnd_";
+    std::string bare;
+    if (objExpr.compare(0, kArr.size(), kArr) == 0) {
+        size_t e = objExpr.find(',', kArr.size());
+        if (e == std::string::npos) return false;
+        bare = objExpr.substr(kArr.size(), e - kArr.size());
+        outHwndExpr = objExpr;
+    } else if (objExpr.compare(0, kSlot.size(), kSlot) == 0 && objExpr.size() > kSlot.size()) {
+        if (objExpr.find_first_of("[(.", kSlot.size()) != std::string::npos) return false;
+        bare = objExpr.substr(kSlot.size());
+        outHwndExpr = objExpr;
+    } else if (objExpr.find_first_of("[(.") == std::string::npos) {
+        bare = objExpr;
+    } else {
+        return false;
+    }
+    std::string lower = Symbol::toLower(bare);
+    auto it = knownFormControls_.find(lower);
+    if (it == knownFormControls_.end()) return false;
+    outType = it->second;
+    if (outHwndExpr.empty()) {
+        auto org = knownFormControlOriginalNames_.find(lower);
+        outHwndExpr = kSlot + cIdent(org != knownFormControlOriginalNames_.end()
+                                        ? org->second : bare);
+    }
+    return true;
+}
+
+// C29-SL-l（账 #143）: 控件的**零实参方法**名表（命中回 C 里的函数名，否则空串）。
+// 焦点面只给"真能拿焦点"的那批窗口型控件 —— Label / Image / Shape / Line / Timer / Menu /
+// Data / OLE / CommonDialog / Winsock / ImageList / StatusBar / ProgressBar 刻意不接：
+// 真 VB6 在那里是 raise 一个错误号，而本项目还没有运行期错误面，"什么都不做"比伪造成功诚实。
+std::string CCodeGen::controlZeroArgMethod(FrmControlType ctrlType,
+                                          const std::string& memberLower) const {
+    if (memberLower == "setfocus") {
+        switch (ctrlType) {
+            case FrmControlType::CommandButton:
+            case FrmControlType::TextBox:
+            case FrmControlType::CheckBox:
+            case FrmControlType::OptionButton:
+            case FrmControlType::ListBox:
+            case FrmControlType::ComboBox:
+            case FrmControlType::PictureBox:
+            case FrmControlType::HScrollBar:
+            case FrmControlType::VScrollBar:
+            case FrmControlType::DriveListBox:
+            case FrmControlType::DirListBox:
+            case FrmControlType::FileListBox:
+            case FrmControlType::Slider:
+            case FrmControlType::TreeView:
+            case FrmControlType::ListView:
+            case FrmControlType::Toolbar:
+            case FrmControlType::SSTab:
+            case FrmControlType::DTPicker:
+            case FrmControlType::MonthView:
+            case FrmControlType::RichTextBox:
+                return "vb6_SetControlFocus";
+            default:
+                return "";
+        }
+    }
+    if (memberLower == "clearsel" && ctrlType == FrmControlType::Slider)
+        return "vb6_Slider_ClearSel";
+    return "";
+}
+
+// C29-SL-n（账 #141）: 「这枚控件要不要子类化」的唯一一份判据 —— 内容与
+// `cgen_form_wndproc_subclass.inc` 汇总 info.hasXxx 那一趟逐条对应（改一边就得改另一边，
+// 否则又回到"arm 发了、没人 install"那一形）。装的那趟在 `cgen_form_frame_menu.inc`、
+// 拆的那趟在 `cgen_form_wndproc_dispatch.inc`，两边各自抄了一份，实测**两份都漏了
+// `_DblClick` 与 `_Paint`** ⇒ 只挂这两条处理器之一的控件，子类过程与消息臂都生成得好好的，
+// 一次也没被 install（处理器编得过、永不触发）。
+bool CCodeGen::controlNeedsSubclass(const FrmControl& ctrl) const {
+    auto has = [&](const char* ev) {
+        return symTab_.lookup(ctrl.controlName + std::string(ev)) != nullptr;
+    };
+    // 焦点：只有一枚控件**没有**另一条原生来源（父窗 WM_COMMAND 那批码）时才由子类过程供，
+    // 否则同一次焦点变化会两边各发一次（C29-SL-g）。
+    if (!controlFocusFromNativeNotify(ctrl.controlType)
+        && (has("_GotFocus") || has("_LostFocus"))) return true;
+    if (has("_MouseEnter") || has("_MouseLeave") || has("_MouseHover")
+        || has("_MouseDown") || has("_MouseUp") || has("_MouseMove")
+        || has("_KeyPress") || has("_KeyDown") || has("_KeyUp")
+        || has("_Validate")) return true;
+    // C29-SL-n: 这两条以前只有发 arm 那份认，装/拆两份都漏。
+    if (has("_DblClick")) return true;
+    // VB6 里有绘制表面的控件才有 Paint 语义，本线只接 PictureBox（Fix 185 的口径，与 arm 那趟一致）。
+    if (ctrl.controlType == FrmControlType::PictureBox && has("_Paint")) return true;
+    // 同上：`_Click` 只在没有原生 Click 来源时才由子类过程补（C29-SL-d）。
+    if (!controlClickFromNativeNotify(ctrl.controlType) && has("_Click")) return true;
+    return false;
+}
+
+// C29-SL-o（账 #83 的 Slider 半边）: Slider 的设计期值面 —— 两条创建路共用这一处。
+// 参数顺序不是随便排的，是 .build/slprobe/slmeasure6.c 量出来的：改 range 会把 pos 顶到新下限、
+// 把 page 从 20 重算成 18、把 selstart 跟到新下限 ⇒ range → line/page → pos → 刻度 → Sel
+// 这个序，任何一端先动都会把后面的吃掉。-999 哨兵 = .frm 没写过 ⇒ 那一条消息不发（保持控件默认），
+// 而 Init 本身照发 —— 发码形状稳定，emitc 断言要看它（同 vb6_TreeView_Init 那条）。
+void CCodeGen::emitSliderDesignTimeInit(const FrmControl& ctrl, const std::string& hwndExpr) {
+    auto slProp = [&](const char* key) -> std::string {
+        auto it = ctrl.properties.find(key);
+        if (it == ctrl.properties.end()) return "-999";
+        return std::to_string((long long)(int)it->second.intValue) + "L";
+    };
+    // C29-SL-i: VB6 那一面的选区是 **SelStart + SelLength**（类型库 dispid 0x0007/0x0008），
+    // SelEnd 是我们 SL-b 按原生 TBM_SETSELEND 自己加的名字。所以 .frm 里只写了前两条时
+    // 这里折一次：终点 = 起点 + 长度 —— 否则真 VB6 工程的 SelLength 在设计期就被整条丢掉
+    // （运行期那条写口一直是好的，缺口只在创建那一趟）。
+    // 只在**两条都写了**的时候折：起点没写就不知道拿什么当锚，宁可不折也不猜一个起点出来下发。
+    std::string slEndArg = slProp("SelEnd");
+    if (slEndArg == "-999") {
+        auto ssIt = ctrl.properties.find("SelStart");
+        auto slIt = ctrl.properties.find("SelLength");
+        if (ssIt != ctrl.properties.end() && slIt != ctrl.properties.end()) {
+            slEndArg = std::to_string((long long)(int)ssIt->second.intValue
+                                      + (int)slIt->second.intValue) + "L";
+        }
+    }
+    c_.emitLine("vb6_Slider_Init((void*)" + hwndExpr + ", "
+                + slProp("Min") + ", " + slProp("Max") + ", " + slProp("Value") + ", "
+                + slProp("SmallChange") + ", " + slProp("LargeChange") + ", "
+                + slProp("TickFrequency") + ", " + slProp("SelStart") + ", "
+                + slEndArg + ", " + slProp("SelectRange") + ");");
 }
 
 // 控件类型的 Win32 样式位。取值与 cgen_form_ctrl_style_apply.inc 保持一致。
@@ -1284,6 +1555,12 @@ long CCodeGen::controlTypeStyleBits(const FrmControl& ctrl) const {
             break;
         case FrmControlType::Image:
             style |= kSsBitmap | kSsCenterImg;
+            break;
+        // C29-SL-h: 此前这条路**压根没有 Slider 这一格** —— 容器里的滑杆连 TBS_AUTOTICKS 都没
+        // 挂上（账 #83 那条"顶层专有项没铺到第二条创建路"的一个具体落点）。折算共用
+        // sliderStyleBits，不留第二份表。
+        case FrmControlType::Slider:
+            style |= sliderStyleBits(ctrl);
             break;
         default:
             break;

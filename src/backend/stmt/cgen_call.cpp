@@ -364,6 +364,25 @@ void CCodeGen::visit(CallStmt& node) {
                     return;
                 }
             }
+            // C29-SL-l（账 #143）: **不带括号**的控件零实参方法 —— `Text1.SetFocus` /
+            // `Slider1.ClearSel` 这一形由 parser 直接交付 CallStmt(callee=MemberAccessExpr)，
+            // 到不了上面那条表达式路，所以在这里用同一张表再拦一次（`controlZeroArgMethod`）。
+            // 不接这头的形状是 `vb6_ComCall(裸 HWND, L"SetFocus", NULL, 0)`：对假 IDispatch 发
+            // Invoke ⇒ 编得过、链接过、跑起来一声不响，零诊断。
+            {
+                std::string zaHwnd;
+                FrmControlType zaType = FrmControlType::Unknown;
+                std::string zaMem = Symbol::toLower(comMemberName_);
+                if (formCtrlSlot(comObjExpr_, zaType, zaHwnd)) {
+                    std::string zaFn = controlZeroArgMethod(zaType, zaMem);
+                    if (!zaFn.empty()) {
+                        comObjExpr_.clear();
+                        comMemberName_.clear();
+                        c_.emitLine(zaFn + "((void*)" + zaHwnd + ");  /* " + zaMem + " */");
+                        return;
+                    }
+                }
+            }
             // 无括号的COM方法调用: obj.Method → vb6_ComCall(obj, L"Method", NULL, 0)
             callExpr = "vb6_ComCall(" + comObjExpr_ + ", L\"" + comMemberName_ + "\", NULL, 0)";
             comObjExpr_.clear();

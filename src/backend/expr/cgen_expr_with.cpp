@@ -64,6 +64,25 @@ void CCodeGen::visit(WithMemberExpr& node) {
             }
             return;
         }
+        // C29-SL-m（账 #150）: With 块里的控件**零实参方法** —— `With sldA : .ClearSel : End With`。
+        // 以前成员名不分属性还是方法，方法也落到下面那条"未知属性"兜底，发成
+        // `tempVar.方法名()` —— HWND 是 struct 指针，那是**编译错**（实测构建失败 exit 2，
+        // 伴 VB4001），不是运行期静默空转。表与两条码头共用（controlZeroArgMethod），
+        // 控件类型直接用 With 入口那一帧记着的 ctrlType，不再回头查名字。
+        std::string zaFnW = controlZeroArgMethod(info.ctrlType, memLower);
+        if (!zaFnW.empty()) {
+            // 两形都要照顾：带括号的 `.SetFocus()` 走到这里时 asCallCallee_=true，
+            // 直接交付完整调用文本会被调用点再补一对括号 ⇒ `f(hwnd)()`（实测过，非法 C）。
+            // 所以照 ClassInstance 那条 Fix 090s 的协议：交付裸函数名 + pendingChainObj_，
+            // 由调用点把 this（就是 With 入口那枚 HWND）拼进实参表。
+            if (asCallCallee_) {
+                pendingChainObj_ = "(void*)" + tempVar;
+                lastExpr_ = zaFnW;
+            } else {
+                lastExpr_ = zaFnW + "(" + tempVar + ")  /* With ctrl .Method */";
+            }
+            return;
+        }
         diag_.warn(DiagnosticID::CodeGenUnsupportedFeature, SourceLocation{},
             std::string("P17.1: Unknown control property '.'") + node.memberName + "' in With block");
         lastExpr_ = tempVar + "." + cIdent(node.memberName);
