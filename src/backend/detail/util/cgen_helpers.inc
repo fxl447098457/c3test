@@ -273,10 +273,37 @@
     // 与 #125 / #142 同一形状 —— **两条创建路都要调**（顶层那趟与容器子控件那趟），只接一头就是本线踩过几次的那声不响。
     void emitDesignerFontProps(const FrmControl& ctrl, const std::string& hwndExpr);
 
+    // 账 #160: 设计期 `TabIndex` 下发到窗口（存窗口属性 `VB6_TabIndex`）。
+    // `.frm` 写了照发的，没写用 `declarationIndex`（同一父窗内的声明序号）兜底 ——
+    // 兜成 0 会让多枚控件同时声称 TabIndex=0。两条创建路都要调。
+    void emitDesignerTabIndexProp(const FrmControl& ctrl, const std::string& hwndExpr,
+                                  long declarationIndex);
+
     // 返回控件类型相关的 Win32 样式位 (BS_*/SS_*/ES_*/CBS_*/LBS_*/WS_BORDER...)。
     // 顶层控件与容器(Frame/PictureBox)子控件必须使用同一套逻辑，否则子控件缺
     // SS_NOTIFY/BS_GROUPBOX 等样式会导致外观/交互 (含 tooltip) 异常。
     long controlTypeStyleBits(const FrmControl& ctrl) const;
+
+    // 账 #83(a)（C29-SL-r，读数见 029 的 `C29-SL-r-0`）: 创建时要不要立 `WS_TABSTOP`。
+    // VB6 的 `TabStop` 默认是 True，而这个位在**两条创建路上以前都没立过**（backend 里这个常量
+    // 一次都没出现过）⇒ 所有控件读回 False、模态窗体里 Tab 不走。两处调用（顶层 + 容器子控件），
+    // 拿不到焦点的那几类不立，`.frm` 显式写了 `TabStop` 的按写的来。
+    long controlTabStopStyleBit(const FrmControl& ctrl) const;
+
+    // 账 #83(b2): 容器（Frame / PictureBox / SSTab）要不要挂 `WS_EX_CONTROLPARENT`。
+    // `IsDialogMessage`（账 #83(b1) 刚给主泵接上）默认只看**活动窗口的直接子窗口**，
+    // 不走进没挂这一位的容器 ⇒ 容器里的控件压根进不了 tab 序（实测站点序列
+    // `cmdIn1 → cmdTop2 → cmdTop1`，Frame 里的 cmdIn2/cmdDeep 一步都不到）。
+    // 容器清单与 `cgen_form_frame_menu.inc` 里那条递归清单同一族 —— **两条创建路都要挂**
+    // （容器自己也可以是子控件：嵌在 Frame 里的 Frame 走第二条路）。
+    long controlContainerExStyleBit(const FrmControl& ctrl) const;
+
+    // 账 #157: VB6 把窗体显示出来时，焦点交给**这枚窗体里 TabIndex 最小的那枚拿得到焦点的控件**
+    // （不是创建顺序 —— `.frm` 里控件的书写顺序与 TabIndex 常常相反，实测探针里 cmdB 先创建、
+    //  cmdA 才是 TabIndex=0）。这一份**留在发码期算**（账 #160 之后运行期已经有了 `VB6_TabIndex`，
+    //  可选改运行时；挪过去要连带把排除表与"每父窗自己编号"的口径一起搬，不值当为省一行发码去冒这个险）。
+    // 算出来的目标一次性存到窗体句柄上，由 RTL 的 `vb6_ShowForm` 在激活之后应用。
+    void emitFormInitialFocus(const FrmControl& formNode);
 
     // C29-SL-h: Slider 的创建样式位（TBS_AUTOTICKS / TBS_VERT / TickStyle 那三位）。
     // 顶层与容器子控件两条创建路各自都要它，所以单独一处折算、两处调用（账 #83）。

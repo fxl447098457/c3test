@@ -70,6 +70,12 @@ Vb6Type CCodeGen::controlPropType(FrmControlType ctrlType, const std::string& pr
     if (p == "fontname") {
         return Vb6Type::String;
     }
+    // 账 #83(a) 的读侧那半（与 #124 / #136 同一族）：`vb6_GetTabStop` 答的就是 VB6 的 -1/0，
+    // 但以前没登记 ⇒ `CStr(Check1.TabStop)` 打的是 `-1`/`0`、`If ... Then` 靠装箱碰巧对。
+    // 登记成 Boolean 之后打印面就是 True/False（探针 `.build/sltab` 里 VarType 读回 3 = Integer 就是没登记的证状）。
+    if (p == "tabstop") {
+        return Vb6Type::Boolean;
+    }
 
     if (ctrlType == FrmControlType::SSTab) {
         if (p == "tabs" || p == "tab" || p == "taborientation" || p == "tabstyle"
@@ -1248,6 +1254,35 @@ void CCodeGen::emitDesignerFontProps(const FrmControl& ctrl, const std::string& 
     }
 }
 
+// 账 #160: 设计期的 `TabIndex` 下发到窗口。RTL 侧那一对 `vb6_GetTabIndex` / `vb6_SetTabIndex`
+// （`vb6forms_style.c:86/93`，存成窗口属性 `VB6_TabIndex`， getter 没存过时答 0）早就齐了，
+// 缺的只有"创建时没人发"这一刀 ⇒ `.frm` 里写着 `TabIndex = 4`，运行期 `Ctl.TabIndex` 读回 0。
+// 口径两条：① `.frm` 写了就照写的发（**每个父窗自己从 0 编号**，VB6 就是这样的 —— 框架里的
+// 控件不占窗体那一串的号）；② 没写用**声明序号**兜底（VB6 存盘时从不省这一行，省了的都是
+// 手写夹具；兜成 0 会让好几枚控件同时声称自己是 0，兜成声明序至少是个全序）。
+// 与 #125 / #142 / #154 / #83 同一形状：**两条创建路都要调**，只接一头就是本线踩过几次的那声不响。
+void CCodeGen::emitDesignerTabIndexProp(const FrmControl& ctrl, const std::string& hwndExpr,
+                                        long declarationIndex) {
+    switch (ctrl.controlType) {
+    case FrmControlType::Timer:         // 无窗口控件：号没地方存
+    case FrmControlType::Menu:          // 菜单项不参与 tab 序
+    case FrmControlType::ImageList:     // 不是窗口
+    case FrmControlType::CommonDialog:  // 不是窗口
+    case FrmControlType::Data:          // 不是窗口
+    case FrmControlType::Unknown:
+        return;
+    default:
+        break;
+    }
+    long tabIndex = declarationIndex;
+    auto it = ctrl.properties.find("TabIndex");
+    if (it != ctrl.properties.end() && it->second.type == FrmValueType::Integer) {
+        tabIndex = (long)it->second.intValue;
+    }
+    c_.emitLine("vb6_SetTabIndex((void*)" + hwndExpr + ", " + std::to_string(tabIndex)
+                + ");  /* 账 #160: design TabIndex */");
+}
+
 // C29-SL-g: 这个控件的 **焦点事件**（`GotFocus` / `LostFocus`）是不是已经由原生通知送进来了。
 // 与上一条同型的问题在焦点这一档更隐蔽：仓里同一句判据被抄成了**三份表**（发 arm 的
 // `cgen_form_wndproc_subclass.inc`、装子类的 `cgen_form_frame_menu.inc`、拆子类的
@@ -1443,6 +1478,103 @@ void CCodeGen::emitSliderDesignTimeInit(const FrmControl& ctrl, const std::strin
                 + slProp("SmallChange") + ", " + slProp("LargeChange") + ", "
                 + slProp("TickFrequency") + ", " + slProp("SelStart") + ", "
                 + slEndArg + ", " + slProp("SelectRange") + ");");
+}
+
+// 账 #83(a)（C29-SL-r）: VB6 的 `TabStop` 默认 True，而本项目**两条创建路以前都不立 WS_TABSTOP**
+// —— 探针 `.build/sltab` 实测：顶层按钮（`.frm` 没写 TabStop）读回 0、Frame 里的按钮与文本框也读回 0，
+// 只有"`.frm` 写了 `TabStop = 0`"那一枚碰巧对（因为它要的就是 0）。RTL 那边其实一直按"默认 True"写的
+// （`vb6_GetTabStop` 里 `!hwnd` 就回 -1），缺的只是创建时把这一位立上。
+// 读侧就是 `GetWindowLong(GWL_STYLE) & WS_TABSTOP` ⇒ 问的是窗口自己，我们没有另存一份。
+// 排除的是拿不到焦点的那几类；`Unknown`（uc 实例与没登记的 OCX）也不立 —— 那些可能压根没有窗口。
+long CCodeGen::controlTabStopStyleBit(const FrmControl& ctrl) const {
+    constexpr long kWsTabStop = 0x00010000L;
+    auto tsIt = ctrl.properties.find("TabStop");
+    if (tsIt != ctrl.properties.end() && tsIt->second.type == FrmValueType::Integer) {
+        return tsIt->second.intValue != 0 ? kWsTabStop : 0L;
+    }
+    switch (ctrl.controlType) {
+    case FrmControlType::Label:
+    case FrmControlType::Image:
+    case FrmControlType::Shape:
+    case FrmControlType::Line:
+    case FrmControlType::Frame:
+    case FrmControlType::Timer:
+    case FrmControlType::Menu:
+    case FrmControlType::Data:
+    case FrmControlType::OLE:
+    case FrmControlType::ImageList:
+    case FrmControlType::CommonDialog:
+    case FrmControlType::Form:
+    case FrmControlType::MDIForm:
+    case FrmControlType::Unknown:
+        return 0L;
+    default:
+        return kWsTabStop;
+    }
+}
+
+// 账 #83(b2): 容器窗口挂 `WS_EX_CONTROLPARENT`，对话框管理器才肯走进它。
+// 清单与 `cgen_form_frame_menu.inc` 里那条递归（Frame/PictureBox/SSTab）一致 ——
+// 只有这三类在发子控件，给别的类型挂上只会让窗口多一个用不上的扩展位。
+// 两条创建路都要吃这个出口：顶层那条（容器直接摆在窗体上）与容器子控件那条
+// （容器嵌在另一枚容器里）—— "只接一头"是本线踩过多次的那一声不响。
+long CCodeGen::controlContainerExStyleBit(const FrmControl& ctrl) const {
+    constexpr long kWsExControlParent = 0x00040000L;  // WS_EX_CONTROLPARENT
+    switch (ctrl.controlType) {
+    case FrmControlType::Frame:
+    case FrmControlType::PictureBox:
+    case FrmControlType::SSTab:
+        return kWsExControlParent;
+    default:
+        return 0L;
+    }
+}
+
+// 账 #157: 为什么这一份留在发码期算，声明处的注释有交代。这里只做**选择**，并把选中那枚的句柄
+// 变量名交给窗体的 WM_CREATE 发一句 `vb6_Form_SetInitialFocus`。
+// 选择口径 = VB6：`TabIndex` 最小、且拿得到焦点（`controlTabStopStyleBit` 那一族排除 +
+// 显式 `TabStop = False` 不算）、设计期没被藏起来 / 没被禁用的那枚；同序号按创建顺序取先。
+void CCodeGen::emitFormInitialFocus(const FrmControl& formNode) {
+    const FrmControl* best = nullptr;
+    long bestTabIndex = 0;
+    long bestOrder = 0;
+    long order = 0;
+
+    std::function<void(const FrmControl&)> walk;
+    walk = [&](const FrmControl& node) {
+        for (const auto& ctrl : node.children) {
+            const long orderHere = order++;
+            bool takesFocus = controlTabStopStyleBit(ctrl) != 0;
+            auto visIt = ctrl.properties.find("Visible");
+            if (visIt != ctrl.properties.end() && visIt->second.type == FrmValueType::Integer
+                && visIt->second.intValue == 0) takesFocus = false;
+            auto enIt = ctrl.properties.find("Enabled");
+            if (enIt != ctrl.properties.end() && enIt->second.type == FrmValueType::Integer
+                && enIt->second.intValue == 0) takesFocus = false;
+            long tabIndex = 0;
+            auto tiIt = ctrl.properties.find("TabIndex");
+            if (tiIt != ctrl.properties.end() && tiIt->second.type == FrmValueType::Integer)
+                tabIndex = tiIt->second.intValue;
+            if (takesFocus && (!best || tabIndex < bestTabIndex
+                               || (tabIndex == bestTabIndex && orderHere < bestOrder))) {
+                best = &ctrl;
+                bestTabIndex = tabIndex;
+                bestOrder = orderHere;
+            }
+            // Frame / PictureBox 里的子控件也在这枚窗体的 tab 序里，所以容器本身被排除掉
+            // 之后仍要继续往里走。
+            walk(ctrl);
+        }
+    };
+    walk(formNode);
+    if (!best) return;
+
+    // 句柄表达式必须走 `ctrlHwndExprForInit` —— 控件数组（如 txtSearch(0)）的句柄在
+    // `vb6_arr_<名>` 里，硬写 `vb6_hwnd_<名>_0` 会引用一个不存在的全局（NewTab 实测：
+    // error C2065 未声明的标识符 'vb6_hwnd_txtSearch_0'）。
+    c_.emitLine("vb6_Form_SetInitialFocus((void*)hwnd, (void*)" + ctrlHwndExprForInit(*best)
+                + ");  /* 账 #157: 显示时把焦点交给 " + best->controlName
+                + "（TabIndex=" + std::to_string(bestTabIndex) + "） */");
 }
 
 // 控件类型的 Win32 样式位。取值与 cgen_form_ctrl_style_apply.inc 保持一致。

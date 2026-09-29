@@ -119,6 +119,10 @@
             }
         }
     }
+    // 账 #157: VB6 显示窗体时把焦点交给 TabIndex 最小那枚。目标在发码期算好（运行期排不出序 ——
+    // 设计期的 TabIndex 从没下发到窗口），存到窗体句柄上，由 vb6_ShowForm 在激活之后应用一次。
+    // 放在 Timer 那一趟之后：此时每枚控件的句柄全局已经赋完了。
+    emitFormInitialFocus(frmDesc.formControl);
     c_.emitLine("break;");
     c_.dedent();
     c_.emitLine("}");

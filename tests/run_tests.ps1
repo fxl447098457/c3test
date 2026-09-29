@@ -373,6 +373,28 @@ function Invoke-TestExe {
     }
 }
 
+# 账 #166: 产物名只有**一个权威** —— `.vbp` 里的 `ExeName32`。驱动落盘用的就是它
+# (`src/driver/driver_compile.cpp:88`：优先 `ExeName32` 的 stem，缺键才回落到 vbp 文件名)，
+# 而这里以前默认取**文件名** —— 两个权威管同一个名字。不一致时的症状很有欺骗性：本地手动跑
+# (跑的是那个不一致的名字) 退出码与读数全对，只有门禁两条架构一起 `FAIL (no exe)`
+# (门 #218 的 tabwalk 就是这么红的)。VB6 对这个键可写 "Foo" 也可写 "Foo.exe"，两种都折成 stem。
+# `-ExeName` 降级成**显式覆盖**（只剩 BalloonTooltips 一处用它，因为那个工程的名字确实不同）。
+function Resolve-VbpExeBase {
+    param([string]$VbpFile, [string]$ExeName = "")
+    if ($ExeName) { return [IO.Path]::GetFileNameWithoutExtension($ExeName) }
+    $stem = [IO.Path]::GetFileNameWithoutExtension($VbpFile)
+    if (Test-Path $VbpFile) {
+        foreach ($ln in (Get-Content $VbpFile)) {
+            if ($ln -match '^\s*ExeName32\s*=\s*(.+?)\s*$') {
+                $v = $Matches[1].Trim().Trim('"').Trim()
+                if ($v) { $stem = [IO.Path]::GetFileNameWithoutExtension($v) }
+                break
+            }
+        }
+    }
+    return $stem
+}
+
 # GUI smoke: require a visible main window, then close only the process we launch.
 # This checks startup, not screenshot correctness or QR decoding.
 function Test-GuiVbp {
@@ -402,8 +424,8 @@ function Test-GuiVbp {
             Copy-Item -Force $_.FullName $guiOut | Out-Null
         }
     }
-    # VBP ExeName32 may differ from the vbp file name; pass -ExeName to override.
-    $exeBase = if ($ExeName) { $ExeName } else { [IO.Path]::GetFileNameWithoutExtension($VbpFile) }
+    # 账 #166: 名字走单一权威 `Resolve-VbpExeBase`（读 .vbp 的 ExeName32），不再各算各的。
+    $exeBase = Resolve-VbpExeBase -VbpFile $VbpFile -ExeName $ExeName
     $exe = Join-Path $guiOut ($exeBase + ".exe")
     $proc = $null
     try {
@@ -758,11 +780,21 @@ function Test-Vbp {
     }
 
     # 处理 VBP 编译输出: 校验是否包含 expected 输出 (可含多个子串)
-    $baseName = [System.IO.Path]::GetFileNameWithoutExtension($VbpFile)
+    # 账 #166: 名字走单一权威 `Resolve-VbpExeBase`（读 .vbp 的 ExeName32）。以前这里只认**文件名**，
+    # 连 `-ExeName` 的口子都没有 ⇒ 凡 ExeName32 与文件名不同的工程，本地看不出、门禁必红。
+    $baseName = Resolve-VbpExeBase -VbpFile $VbpFile
     $exePath = Join-Path $OutDir "$baseName.exe"
     if (-not (Test-Path $exePath)) {
         $script:fail++
+        # 哨兵：把"按什么名字找的 / .vbp 里声明的是什么"一起打出来，下次这类红一句话就能定位
+        $declared = '(no ExeName32 key)'
+        if (Test-Path $VbpFile) {
+            foreach ($ln0 in (Get-Content $VbpFile)) {
+                if ($ln0 -match '^\s*ExeName32\s*=\s*(.+?)\s*$') { $declared = $Matches[1].Trim(); break }
+            }
+        }
         Write-Host "FAIL (no exe)" -ForegroundColor Red
+        Write-Host ("    找的是 " + $exePath + " ；vbp 文件名=" + [IO.Path]::GetFileNameWithoutExtension($VbpFile) + " ；声明的 ExeName32=" + $declared) -ForegroundColor Red
         return
     }
 
@@ -1595,7 +1627,8 @@ function Test-VbpDll {
         return
     }
 
-    $baseName = [System.IO.Path]::GetFileNameWithoutExtension($VbpFile)
+    # 账 #166: DLL 那侧同理 —— 驱动命名用的还是 ExeName32，这里以前只认文件名。
+    $baseName = Resolve-VbpExeBase -VbpFile $VbpFile
     $dllPath = Join-Path $OutDir "$baseName.dll"
     if (-not (Test-Path $dllPath)) {
         $script:fail++
@@ -1722,9 +1755,125 @@ if ($Category -in @("all", "run", "vbp")) {
     # 不新增 import lib；取不到才退回 SetTimer）。读数是"秒级墙钟窗口里的 tick 数带区间"：
     # 20 ms 名义 50 次，允许 [40,60]。负控（BASE 二进制）10 条全翻红且每条对上症状：
     # T2=0 开不起来 / T3=32 改了不生效 / T5=16 关掉还在烧 / T6=32 精度地板。
-    $tmNeedles = @("TIMERPROG-DONE") + (1..10 | ForEach-Object { "T$_=Y" })
+    # 账 #156 加 T11/T12（第二枚窗体 TmForm2，自己一枚 20ms 的 Timer）：计时器 id 原来
+    # 取自控件 id 那个计数器，而编译器每建一枚窗体都发一次 vb6_ResetControlId() ⇒ 第二枚
+    # 窗体的 Timer 与第一枚的第一枚 Timer 同号，派发按 id 查表又是"先建的那格先命中"，
+    # 于是第二枚的事件过程一次都不跑、第一枚的速率翻倍。负控读数：T11=N/0、T12=N/61
+    # （第一枚那 1 秒里名义只有 10 拍）。两条故意用差 5 倍的周期，翻红时差的是量级不是抖动。
+    $tmNeedles = @("TIMERPROG-DONE") + (1..12 | ForEach-Object { "T$_=Y" })
     Test-Vbp "tmtimer" "$Tests\c29timer\TmApp.vbp" $tmNeedles
     Test-Vbp "tmtimer_x86" "$Tests\c29timer\TmApp.vbp" $tmNeedles -Arch "x86"
+    # 账 #157: 窗体显示时把焦点交给**这枚窗体里 TabIndex 最小的那枚拿得到焦点的控件**（VB6 口径）。
+    # 改之前的实测读数（029 的「s-0 第 2 条改口径」）：窗体确实是活动/前台窗、SetFocus 本身也能落地，
+    # 缺的就是"显示时没人给焦点"那一步 —— 焦点停在**窗体自己**那一层。负控读数：M1=N、D1=N，
+    # D2..D7 在 BASE 上也是 Y（那六条是防伪证的：把选择改成"第一枚创建的/最后的/Label/禁用的/藏起来的"
+    # 都会让其中某枚翻红，而它们不证明本批那一刀）。夹具 ModalDlg 里 cmdA 的 TabIndex=4 却是赢家 ——
+    # 前面压着 TabIndex 0(Label)/1(TabStop=False)/2(Enabled=False)/3(Visible=False) 四枚排除，
+    # 而且 cmdA 是 .frm 里**最后声明**的那枚 ⇒ "照创建顺序挑"给出的是 cmdB，与正确答案不同。
+    # 读数全走 LongPtr 形参（HexEq/NotEq 两个助手）：控件 `.hwnd` 的装箱那条路是坏的（账 #159），
+    # 直接写 GetFocus() = ctl.hwnd 会恒假 —— 又一次判据自伤，绕开它才叫测到东西。
+    # 账 #83(b) 的第一半（主泵走 IsDialogMessage）用同一个夹具的 MW* 那一相来断：
+    # 每拍读一次焦点、再往它 post 一对 VK_TAB。判据**故意不问跳的顺序** —— `IsDialogMessage`
+    # 按 z-order（≈创建顺序）走，不是 VB6 的 TabIndex 顺序（实测站点序列
+    # txtMain → cmdY → cmdX → txtSecond → 回头），顺序那一刀另记账 #163。这里钉三件事：
+    # 四枚可聚焦的**都走到**（MW-new=4）、**回头落在起点**（MW-repeat=txtMain）、
+    # 回到起点前走过 3 枚新站（MW-hops=3）。改之前焦点压根不动 ⇒ MW-new=1。
+    # 同一份产物还带一条开关侧负控：`C3_OCX_NO_DLGMSG=1` 把泵里这一句关掉 ⇒ MW-new 回到 1
+    # （本地实测；开关与模态那条循环共用，先例 Fix 144b）。
+    $mdNeedles = @("MODAL-DONE", "M1-startup=Y", "M2-returned=Y", "D1-first=Y",
+                    "D2-notB=Y", "D3-notLbl=Y", "D4-notOff=Y", "D5-notDis=Y",
+                    "D6-notHidden=Y", "D7-ticks=Y",
+                    "MW-new=4/repeat=txtMain/hops=3")
+    Test-Vbp "modal" "$Tests\modal\ModalApp.vbp" $mdNeedles
+    Test-Vbp "modal_x86" "$Tests\modal\ModalApp.vbp" $mdNeedles -Arch "x86"
+    Test-EmitcShape "md_emitc_focus" @("$Tests\modal\ModalApp.vbp") @(
+        'vb6_Form_SetInitialFocus((void*)hwnd, (void*)vb6_hwnd_cmdA);',    # 模态窗体：四枚排除之后那枚
+        'vb6_Form_SetInitialFocus((void*)hwnd, (void*)vb6_hwnd_txtMain);'  # 启动窗体：跳过 TabIndex=0 的 Label
+    )
+    Test-EmitcAbsent "md_emitc_skip" @("$Tests\modal\ModalApp.vbp") @(
+        'vb6_Form_SetInitialFocus((void*)hwnd, (void*)vb6_hwnd_lblHead',   # Label 拿不到焦点
+        'vb6_Form_SetInitialFocus((void*)hwnd, (void*)vb6_hwnd_cmdOff',    # 显式 TabStop=False
+        'vb6_Form_SetInitialFocus((void*)hwnd, (void*)vb6_hwnd_cmdDis',    # 设计期禁用
+        'vb6_Form_SetInitialFocus((void*)hwnd, (void*)vb6_hwnd_txtHidden', # 设计期藏起来
+        'vb6_Form_SetInitialFocus((void*)hwnd, (void*)vb6_hwnd_cmdB',      # 它是第一个声明的，不是 tab 序里的目标
+        'vb6_Form_SetInitialFocus((void*)hwnd, (void*)vb6_hwnd_lblMain',   # 启动窗体那枚 Label 同理
+        'vb6_Form_SetInitialFocus((void*)hwnd, (void*)vb6_hwnd_t2',        # Timer 不配当焦点目标
+        'vb6_Form_SetInitialFocus((void*)hwnd, (void*)vb6_hwnd_tMain'
+    )
+    # 账 #83(b2): 容器的扩展样式位 `WS_EX_CONTROLPARENT`(262144) 两条创建路都接上 ——
+    # 正面三条 = 顶层 Frame / 顶层 PictureBox / **容器里的容器**（Frame2 在 Frame1 里，走的正是
+    # 第二条创建路）；反面两条 = 普通子控件与顶层按钮不许挂（这一位只属于容器）。
+    # ⚠ 运行期那一半**还没通**：样式确实落到窗口上了（`EX-fr / EX-f2 / EX-pic` 三条读数都是 262144），
+    #   而产物里 `IsDialogMessage` 照样不走进容器 —— 裸 Win32 探针同一棵树（`.build/cp2`）会走，
+    #   WS_GROUP / 创建顺序 / 容器挂 comctl32 子类 / Common-Controls 6.0 清单四种候选都实测排除，
+    #   差在哪没查到，记 **账 #165**。所以 `in2=N / deep=N / inpic=N` 是**缺陷读数**、不是判据胜利：
+    #   #165 落地那天这三条必须翻成 Y —— 它们**红了就是那条账结了**。
+    # ⚠ 夹具自己的坑，先写在这条路上别踩第二次：`TabWalkApp.vbp` 的 `ExeName32` **必须等于 vbp 文件名**，
+    #   否则 `Test-Vbp` 按 vbp 名去找 exe ⇒ 本地怎么都过（我手动跑的是 TabWalk.exe）、CI 两条架构一起
+    #   `FAIL (no exe)`（门 #218 就是这么红的）。要么改名一致，要么显式传 `-ExeName`。
+    $twNeedles = @("TABWALK-DONE", "TW-walked=Y", "TW-top=Y", "TW-shy=Y",
+                    "TW-in1=Y/in2=N", "TW-deep=N/inpic=N", "TW-picstop=N")
+    Test-Vbp "tabwalk" "$Tests\tabwalk\TabWalkApp.vbp" $twNeedles
+    Test-Vbp "tabwalk_x86" "$Tests\tabwalk\TabWalkApp.vbp" $twNeedles -Arch "x86"
+    Test-EmitcShape "tw_emitc_cparent" @("$Tests\tabwalk\TabWalkApp.vbp") @(
+        '1409286151L, 262144L,',          # 顶层 Frame（Frame1 与 optFrame 两处）
+        '1417740814L, 262144L,',          # 顶层 PictureBox
+        '1342177287L, 262144L,'           # 容器里的容器 —— 第二条创建路也给了这一位
+    )
+    Test-EmitcAbsent "tw_emitc_notplain" @("$Tests\tabwalk\TabWalkApp.vbp") @(
+        '1342242816L, 262144L,',          # 容器里的普通按钮不该挂这一位
+        '1409351680L, 262144L,'           # 顶层按钮同样不该挂
+    )
+    # 账 #166: 这条用例**本身就是那条红的固化** —— 工程文件叫 `NameProbe.vbp`，而产物叫
+    # `RenamedProbe.exe`（`.vbp` 里 `ExeName32="RenamedProbe.exe"`，故意与文件名不同、还带后缀）。
+    # 改之前 `Test-Vbp` 按文件名去找 `NameProbe.exe` ⇒ `FAIL (no exe)`；改之后走单一权威
+    # `Resolve-VbpExeBase`（读 .vbp 现值，缺键才回落文件名）⇒ 正常。
+    # ⇒ **这是一条能红的针**：把 resolver 摘掉/改回文件名口径，它立刻红回去，不用等门。
+    Test-Vbp "exename" "$Tests\exename\NameProbe.vbp" @("EXENAME-DONE", "NP-ok=Y")
+    # 账 #160 = C29-TI: 设计期 `TabIndex` 下发到窗口。RTL 那一对 (`vb6_GetTabIndex`/`vb6_SetTabIndex`，
+    # 存窗口属性 `VB6_TabIndex`，没存过时 getter 答 0) 早就在，缺的只有"创建时没人发"这一刀
+    # ⇒ 改之前 `.frm` 写着 `TabIndex = 5`、运行期读回 0。四档判据各管一件事：
+    #   TI-explicit = 写了的照发（5/2/1，故意与声明顺序相反 ⇒ "照创建顺序编号"会全读成别的数）
+    #   TI-in       = **每个父窗自己从 0 编号**（框架里那两枚读 0/9，不占窗体那一串的号）
+    #   TI-fallback = 没写的用同一父窗内的声明序号兜底（picBox=3、lblIn=1、cmdSix=5）——
+    #                 兜成 0 会让好几枚同时声称自己是 0，所以这一档必须钉在"能分辨"的位置上
+    #   TI-runtime  = 运行期赋值照样生效（setter 那条路没被发码期那一句盖死）
+    # 发码面：正面三条（顶层显式值 / 顶层兜底值 / **第二条创建路**容器里那枚），
+    # 反面两条（Timer 那类无窗口的不发；窗体自己那枚 `hwnd` 也不该被发）。
+    $tiNeedles = @("TABINDEX-DONE", "TI-explicit=5/2/1", "TI-in=0/9",
+                    "TI-fallback=3/1/5", "TI-runtime=40/Y")
+    Test-Vbp "ctrltabindex" "$Tests\ctrltabindex\TiApp.vbp" $tiNeedles
+    Test-Vbp "ctrltabindex_x86" "$Tests\ctrltabindex\TiApp.vbp" $tiNeedles -Arch "x86"
+    Test-EmitcShape "ti_emitc_design" @("$Tests\ctrltabindex\TiApp.vbp") @(
+        'vb6_SetTabIndex((void*)vb6_hwnd_cmdFive, 5);',   # 显式值（它其实是第 2 个声明的）
+        'vb6_SetTabIndex((void*)vb6_hwnd_cmdSix, 5);',    # 没写 ⇒ 兜同一父窗内的声明序号
+        'vb6_SetTabIndex((void*)vb6_hwnd_cmdIn9, 9);'      # 容器里那枚 —— 走的正是第二条创建路
+    )
+    Test-EmitcAbsent "ti_emitc_nowindow" @("$Tests\ctrltabindex\TiApp.vbp") @(
+        'vb6_SetTabIndex((void*)vb6_hwnd_t1',             # Timer 没有窗口，号没地方存
+        'vb6_SetTabIndex((void*)hwnd,'                     # 窗体自己那枚句柄不该被发号
+    )
+    # 账 #158 的 Combo 那一半：`_GotFocus` / `_LostFocus` 以前**永远不触发** —— 发码那两支撑的是
+    # `code == 1024 / 2048`，而那是 CBEM_*（发给 ComboBoxEx 的消息号），不是 WM_COMMAND 的
+    # notification code；真码是 `CBN_SETFOCUS=3` / `CBN_KILLFOCUS=4`。同一段里 EN_=256/512、
+    # LBN_=4/5、BN_=6/7 三张表本来就是对的，只有 Combo 这一格抄错。
+    # A/B 实测（同一份夹具，两份编译器）：BASE 是 `CF-cb1=0/0`、`CF-cb2=0/0/1`（**Validate 一直是活的**，
+    # 它走另一条派发），NEW 是 `1/1` 与 `1/1/1`；两份里 `CF-lb` / `CF-tx` 都是 `1/1` ⇒ 邻座那两张表
+    # 没被带坏。`CF-cross` 是串台检查：LBN_SETFOCUS 与 CBN_KILLFOCUS **同为 4**，全靠 `id ==` 过滤
+    # 分开 —— 谁把那道过滤挪走，这一条当场红。
+    $cbNeedles = @("COMBOFOCUS-DONE", "CF-cb1=1/1", "CF-cb2=1/1/1", "CF-lb=1/1",
+                    "CF-tx=1/1", "CF-each=Y", "CF-cross=Y")
+    Test-Vbp "combofocus" "$Tests\combofocus\CbApp.vbp" $cbNeedles
+    Test-Vbp "combofocus_x86" "$Tests\combofocus\CbApp.vbp" $cbNeedles -Arch "x86"
+    Test-EmitcShape "cb_emitc_codes" @("$Tests\combofocus\CbApp.vbp") @(
+        'if (id == 104 && code == 3) { extern void vb6_cb2_GotFocus();',              # CBN_SETFOCUS
+        'if (id == 105 && code == 4) { extern void vb6_cb1_LostFocus();',             # CBN_KILLFOCUS
+        'if (id == 104 && code == 4 && !GetPropW((HWND)lParam, L"VB6_ValidateCancel")) {'  # 带 Validate 的那一份发码
+    )
+    Test-EmitcAbsent "cb_emitc_wrongtable" @("$Tests\combofocus\CbApp.vbp") @(
+        'code == 1024',     # CBEM_SETTBILLOS（或 RTB 的 EN_UPDATE）—— 本工程里没有这些控件
+        'code == 2048'
+    )
     # ai/030 T30-A: 内容寻址 obj store —— 命中/解耦/不改产物三条一起断 (用例自带隔离 store)
     Test-ObjCache "objcache" "$Tests\hello.bas"
     Test-EmitcShape "cf_emitc_shape" @("$Tests\ctrlfiles\CfApp.vbp") @(
@@ -1801,7 +1950,7 @@ if ($Category -in @("all", "run", "vbp")) {
     Test-EmitcShape "tv_emitc_shape" @("$Tests\ctrltreeview\TvfApp.vbp") @(
         'vb6_TreeView_Init((void*)vb6_hwnd_tv1, 1, 300, -1, -1, 0);',
         'vb6_TreeView_Init((void*)vb6_hwnd_tv2, -999, -999, -999, -999, -999);',
-        '1417674754L, 0L,',
+        '1417740290L, 0L,',
         # C29-8b: `tv1.Nodes` 必须立成**真 IDispatch 集合对象** (vb6forms_memberobj.c 的
         # NODES 族)。这三条钉的是发码形状里最容易退回的三处: 宿主槽 (真窗口 = vb6_hwnd_
         # 而非 vb6_com_)、Add 的 Missing 打包 (省略实参不能编成 0，否则 relationship 静默
@@ -1849,7 +1998,12 @@ if ($Category -in @("all", "run", "vbp")) {
     #   的 Value 在 VB6 也是 Boolean，今天还没登记（记在 029 §九，另格）。
     $cstNeedles = @("CTRLSTATE-DONE", "DS1=11", "DS2=FalseFalse", "DS3=FalseFalse",
                     "DS4=0TrueTrue", "DS5=FalseTrue", "DS6=YYY", "DS7=True",
-                    "DS8=Boolean11False", "DS9=11True", "DS10=11False", "DS11=False/Boolean/11", "DS12=Y")
+                    "DS8=Boolean11False", "DS9=11True", "DS10=11False", "DS11=False/Boolean/11", "DS12=Y",
+                    # 账 #83(a)（C29-SL-r）: VB6 的 TabStop 默认 True，而两条创建路以前都不立
+                    # WS_TABSTOP ⇒ BASE 上 ST1 整条是 `0/0/0/0`、ST2 是 `3/Long`（读数见 029 的
+                    # C29-SL-r-0）。四格分别是 顶层 / 容器里 / 容器里那枚 Label（拿不到焦点，不该立）/
+                    # 显式写了 `TabStop = 0` 的那枚。读的是窗口 GWL_STYLE，没有自存 ⇒ 不是自洽假绿。
+                    "ST1-tab=True/True/False/False", "ST2-bool=11/Boolean")
     Test-Vbp "ctrlstate" "$Tests\ctrlstate\CtrlState.vbp" $cstNeedles
     Test-Vbp "ctrlstate_x86" "$Tests\ctrlstate\CtrlState.vbp" $cstNeedles -Arch "x86"
     Test-EmitcShape "cs_emitc_state" @("$Tests\ctrlstate\CtrlState.vbp") @(
@@ -1869,6 +2023,16 @@ if ($Category -in @("all", "run", "vbp")) {
         'v = vb6_VariantBool(vb6_GetControlVisible(',
         'vb6_CStrBool(vb6_GetOptionValue('
     )
+    Test-EmitcShape "cs_emitc_tabstop" @("$Tests\ctrlstate\CtrlState.vbp") @(
+        # 账 #83(a): 立位是**进创建参数**的（不是建好再 SetWindowLong），所以两条创建路各钉一枚。
+        # BASE 上这两串一个都没有（那一趟所有控件都不立位）⇒ 能红。
+        '1409351683L, 0L,',        # 顶层 CheckBox：1409286147 + WS_TABSTOP
+        '1342242819L, 0L,',        # Frame 里的 CheckBox：1342177283 + 同一条 —— 第二条创建路
+        # 显式写了 `TabStop = 0` 的那枚**保持不立**。这一串在 BASE 上也在（那时谁都不立），
+        # 所以它是行为钉、红不了 —— 防的是以后有人把"默认立"写成"一律立"。
+        '1409286147L, 0L,',
+        'vb6_CStrBool(vb6_GetTabStop('      # 读侧归到 Boolean 档（#124 同族）
+    )
     Test-EmitcAbsent "cs_emitc_selectivity" @("$Tests\ctrlstate\CtrlState.vbp") @(
         'vb6_SetCheckValue((void*)vb6_hwnd_cbDef',      # 没写 Value 的复选框不许被设
         'vb6_SetControlVisible((void*)vb6_hwnd_lbOut',  # 没写 Visible 的标签不许被藏
@@ -1877,6 +2041,12 @@ if ($Category -in @("all", "run", "vbp")) {
         'vb6_CStrLong(vb6_GetControlEnabled(',
         'vb6_CStrLong(vb6_GetControlVisible(',
         'vb6_SetCheckValue((void*)vb6_hwnd_obOn'
+    )
+    Test-EmitcAbsent "cs_emitc_tabstop_off" @("$Tests\ctrlstate\CtrlState.vbp") @(
+        # 账 #83(a) 的反面：拿不到焦点的这两类**不许**被立上 WS_TABSTOP
+        # （Label = 1409286400、Frame = 1409286151，各自 +65536 那两串如果出现就说明排除表被改坏）。
+        '1409351936L, 0L,',        # Label 立了位 —— 不该出现
+        '1409351687L, 0L,'         # Frame 立了位 —— 不该出现
     )
 
     # ai/029 C29-SL-a: Slider (原生 msctls_trackbar32)。登记之前这枚控件**连窗口都没建**
@@ -2013,8 +2183,8 @@ if ($Category -in @("all", "run", "vbp")) {
     Test-Vbp "ctrlslider_x86" "$Tests\ctrlslider\SlidApp.vbp" $slidNeedles -Arch "x86"
     Test-EmitcShape "sl_emitc_native" @("$Tests\ctrlslider\SlidApp.vbp") @(
         '"msctls_trackbar32", "",',
-        '1409286145L, 0L,',                                        # 横杆: TBS_AUTOTICKS, 无 TBS_VERT
-        '1409286147L, 0L,',                                        # 竖杆: 多挂 TBS_VERT(0x2)
+        '1409351681L, 0L,',                                        # 横杆: TBS_AUTOTICKS, 无 TBS_VERT
+        '1409351683L, 0L,',                                        # 竖杆: 多挂 TBS_VERT(0x2)
         'vb6_Slider_Init((void*)vb6_hwnd_sld1, -999, -999, -999, -999, -999, 10L, -999, -999, -999);',
         'vb6_Slider_Init((void*)vb6_hwnd_sld4, 10L, 100L, 42L, 2L, 8L, 5L, 20L, 60L, -1L);',
         'vb6_Slider_Init((void*)vb6_hwnd_sld5, -999, -999, -999, -999, -999, -999, -999, -999, -999);',
@@ -2033,14 +2203,14 @@ if ($Category -in @("all", "run", "vbp")) {
         # C29-SL-h: 设计期那一条 TickStyle=2 必须出现在**创建参数**里（1409286145 那枚是
         # TBS_AUTOTICKS，多挂 TBS_BOTH=0x8 才是 1409286153）—— 只写自存不算下发到窗口。
         # 读侧走 CStrLong（登记成 Long 档 ⇒ CStr 不再被折成 Variant 那一趟）；写侧直接 setter。
-        '1409286153L, 0L,',
+        '1409351689L, 0L,',
         'vb6_Slider_SetTickStyle(vb6_hwnd_sld3, 2);',
         'vb6_Slider_SetTickStyle(vb6_hwnd_sld3, 9);',
         'vb6_CStrLong(vb6_Slider_GetTickStyle(vb6_hwnd_sld3',
         'vb6_Slider_GetNumTicks(vb6_hwnd_sld3',
         'vb6_Slider_ChannelTop(vb6_hwnd_sld3',
         # 容器里那枚滑杆的创建参数: 1342177280(BASE, 一位不挂) + 0x5 = TBS_AUTOTICKS|TBS_TOP
-        '1342177285L, 0L,',
+        '1342242821L, 0L,',
         # C29-SL-i: 三条 Sel 面各钉一枚形状，外加设计期那一对折出来的 Init 参数
         # （BASE 上那一条第 9 参是 -999 —— SelLength 整条被丢，读回来是空区段）。
         'vb6_Slider_ClearSel((void*)vb6_hwnd_sld4)',
@@ -2319,8 +2489,8 @@ if ($Category -in @("all", "run", "vbp")) {
     # 反面断这枚控件的属性不许再走 COM 兜底、工程里不许再出现 CoCreateInstance。
     Test-EmitcShape "dt_emitc_shape" @("$Tests\ctrldatetime\DtfApp.vbp") @(
         '"SysDateTimePick32", "",',
-        '1409286150L, 0L,',
-        '1409286153L, 0L,',
+        '1409351686L, 0L,',
+        '1409351689L, 0L,',
         'vb6_DTP_Init((void*)vb6_hwnd_dt4, L"yyyy-MM-dd HH:mm");',
         'vb6_DTP_SetCheckBox(vb6_hwnd_dt2, (-1));',
         'vb6_DTP_SetCustomFormat(vb6_hwnd_dt2, vb6_BSTR_FromStr(L"yyyy-MM-dd"));',
@@ -2397,9 +2567,9 @@ if ($Category -in @("all", "run", "vbp")) {
     # 才挂上去），设计期 Init 连多月与 MaxSelCount 一起钉；反面断这枚控件不许再走 COM 兜底。
     Test-EmitcShape "mv_emitc_shape" @("$Tests\ctrlmonthview\MvfApp.vbp") @(
         '"SysMonthCal32", "",',
-        '1409286146L, 0L,',
-        '1409286148L, 0L,',
-        '1409286160L, 0L,',
+        '1409351682L, 0L,',
+        '1409351684L, 0L,',
+        '1409351696L, 0L,',
         'vb6_MV_Init((void*)vb6_hwnd_mv1, 1, 2, 7);',
         'vb6_MV_Init((void*)vb6_hwnd_mv2, 1, 1, -999);',
         'vb6_MV_SetMaxSelCount(vb6_hwnd_mv1, 3);',
@@ -2472,10 +2642,10 @@ if ($Category -in @("all", "run", "vbp")) {
     # 初值文本钉"句柄赋值之后才发"那一条，选区/上限/量程读数钉走的是原生 getter 而不是 COM 兜底。
     Test-EmitcShape "rt_emitc_shape" @("$Tests\ctrlrichtextbox\RtfApp.vbp") @(
         '"RICHEDIT50W", "",',
-        '1412440068L, 0L,',
-        '1409286148L, 0L,',
-        '1411391492L, 0L,',
-        '1410342916L, 0L,',
+        '1412505604L, 0L,',
+        '1409351684L, 0L,',
+        '1411457028L, 0L,',
+        '1410408452L, 0L,',
         'vb6_RTB_Init((void*)vb6_hwnd_rt1, 0, -999);',
         'vb6_RTB_Init((void*)vb6_hwnd_rt2, -999, -999);',
         'vb6_RTB_Init((void*)vb6_hwnd_rt3, -999, 1);',
@@ -2606,7 +2776,7 @@ if ($Category -in @("all", "run", "vbp")) {
         'void* vb6_tbBtn5c = vb6_Toolbar_ButtonAt((void*)vb6_tbSrc5c, id);',
         'if (pNM42->code == -710 && (void*)pNM42->hwndFrom == vb6_hwnd_tb1) {',
         'vb6_Toolbar_SimButtonClick((void*)vb6_hwnd_tb1, 1);',
-        '1409288460L, 0L,'
+        '1409353996L, 0L,'
     )
     Test-EmitcAbsent "tb_emitc_no_ocx" @("$Tests\ctrltoolbar\TbApp.vbp") @(
         'vb6_com_tb1',

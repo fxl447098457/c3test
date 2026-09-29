@@ -33,6 +33,14 @@
 // 全局变量
 HINSTANCE g_hInstance = NULL;
 static int g_nextControlId = 100;  // 控件ID从100开始 (1-99保留给菜单)
+// 账 #156: 计时器 id **不能**跟着控件 id 走。控件 id 每建一枚窗体就复位一次
+// (cgen_form_create_controls.inc 发 vb6_ResetControlId())，而 g_timerTable 是进程内
+// 一张表、派发只按 id 找 (`vb6_SlotById`)。两者共用一个计数器 ⇒ 第二枚窗体的 Timer
+// 一定拿到与第一枚相同的 id，于是：
+//   1) 第一枚 Timer 若已被 Enabled=False 停掉，winmm 回调查到的那一格 running=0 ⇒ 一次都不投;
+//   2) 若还活着，WM_TIMER 会投到**前一枚窗体**、跑前一枚窗体的事件过程。
+// ⇒ 计时器要自己一枚永不复位的计数器。id 只在 WM_TIMER 这一路用，与控件/菜单 id 不同命名空间。
+static int g_nextTimerId = 1000;
 
 // 模态窗体状态
 static HWND g_modalOwner = NULL;   // 被禁用的父窗口 (模态时)
@@ -653,7 +661,7 @@ void vb6_TimerAttach(void* owner, void* key, int period, void* callback, int ena
     if (period > 65535) period = 65535;
     struct vb6_TimerSlot* e = &g_timerTable[g_timerCount];
     g_timerCount++;
-    e->timerId = g_nextControlId++;
+    e->timerId = g_nextTimerId++;
     e->hwnd = (HWND)owner;
     e->key = (HWND)key;
     e->callback = (vb6_TimerCallback)callback;
@@ -692,7 +700,7 @@ void vb6_TimerSetPeriod(void* key, int period) {
 // 兼容旧入口：没有身份窗时派发窗自己当身份，建完即启。
 int vb6_SetTimer(void* hwnd, int interval, void* callback) {
     if (g_timerCount >= VB6_MAX_TIMERS) return -1;
-    int id = g_nextControlId++;
+    int id = g_nextTimerId++;
     struct vb6_TimerSlot* e = &g_timerTable[g_timerCount];
     g_timerCount++;
     e->timerId = id; e->hwnd = (HWND)hwnd; e->key = (HWND)hwnd;
@@ -787,10 +795,22 @@ int vb6_MessageLoop(void) {
                 }
             }
         } else {
+            // 账 #83(b)：主泵也要走对话框式键盘导航，否则**普通（非模态）窗体按 Tab 不动**。
+            // 模态那条循环本来就走了（`vb6_ShowForm` 里 `IsDialogMessageW`），实测在那儿
+            // VK_TAB 真跳格（029 的「C29-FS-a 之后一测」），差的只有这一条泵。
+            // 落点是 `GetActiveWindow()` —— Tab 是给"用户正在打字的那枚窗体"用的，
+            // 拿 msg.hwnd 当对话框会把子控件句柄当容器传进去，找不着下一站。
+            // 与模态那条同一个开关 `C3_OCX_NO_DLGMSG=1` 关掉：`IsDialogMessage` 会
+            // **吞掉**它处理的那条按键消息，所以 `_KeyDown`/`_KeyPress` 里想看见 VK_TAB 的
+            // 用法会被这一刀改变行为（存量实测：语料里 0 处这么写）。
+            int useDlgMsgMain = (GetEnvironmentVariableW(L"C3_OCX_NO_DLGMSG", NULL, 0) <= 0);
             while (GetMessage(&msg, NULL, 0, 0)) {
                 // P24-Timer: WM_TIMER现在由WndProc分发, 消息循环不再拦截
-                TranslateMessage(&msg);
-                DispatchMessage(&msg);
+                HWND act = useDlgMsgMain ? GetActiveWindow() : NULL;
+                if (!act || !IsDialogMessageW(act, &msg)) {
+                    TranslateMessage(&msg);
+                    DispatchMessage(&msg);
+                }
             }
         }
     }
@@ -1053,6 +1073,19 @@ static void vb6_installCrashTrace(void) {
     }
 }
 
+// 账 #157: 编译器算好的"这枚窗体显示时该把焦点交给谁"（VB6 = TabIndex 最小那枚拿得到焦点的
+// 控件，不是创建顺序 —— `.frm` 里控件的书写顺序与 TabIndex 常常相反）。存在窗体句柄上，
+// **应用一次就销掉**：之后再 Show 这枚窗体，焦点该回到用户停下的地方，而不是每次都被抢回首枚 tabstop。
+void vb6_Form_SetInitialFocus(void* hwnd, void* target) {
+    if (!hwnd || !target) return;
+    SetPropW((HWND)hwnd, L"VB6_InitFocus", (HANDLE)target);
+}
+
+static void vb6_ApplyInitialFocus(HWND hwnd) {
+    HWND t = (HWND)RemovePropW(hwnd, L"VB6_InitFocus");
+    if (t && IsWindow(t)) SetFocus(t);
+}
+
 void vb6_ShowForm(void* hwnd, int modal) {
     vb6_installCrashTrace();
     if (GetEnvironmentVariableW(L"C3_OCX_TRACE", NULL, 0) > 0) {
@@ -1101,6 +1134,9 @@ void vb6_ShowForm(void* hwnd, int modal) {
         }
     }
     SetActiveWindow((HWND)hwnd);
+    // 账 #157: VB6 在窗体激活之后把焦点交给第一枚 tabstop。这一步必须在激活之后 ——
+    // 实测 (029 的 `s-0 第 2 条改口径`)：在 Form_Activate 里 SetFocus 会被随后的激活流程收回。
+    vb6_ApplyInitialFocus((HWND)hwnd);
 
     if (modal) {
         int traceModal = (GetEnvironmentVariableW(L"C3_OCX_TRACE", NULL, 0) > 0);
