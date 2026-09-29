@@ -36,9 +36,12 @@ Frame（以及 `PictureBox` / `SSTab`）里的控件走的是**第二条创建�
 > `txtMain → cmdY → cmdX → txtSecond → 回 txtMain`。⚠ 走的是 **z-order（≈创建顺序）不是 `TabIndex` 顺序**
 > —— VB6 那个口径还差一刀，记账 #163。框架这一层另有一刀**还没补**：
 > 实测（探针 `.build/slfr`，tab 序 0=cmdA、1=cmdB、2=Frame 里 3/4 两枚按钮，每拍 post 一对
-> `VK_TAB`）站点序列是 `A → B → A → B` —— 对话框管理器**不走进框架**（也不停在框架本身），
-> 因为容器没带 `WS_EX_CONTROLPARENT`。所以框架里的控件要参与跳格，得先补那一位（账 #83(b2)；
-> 夹具 `tests/tabwalk` 已把改前 baseline 钉住：从 Frame 里的 `cmdIn1` 起步只走得到
-> `cmdIn1, cmdTop2, cmdTop1`，`cmdIn2` 与嵌在框架里的框架那枚 `cmdDeep` 一步不到）。
+> `VK_TAB`）站点序列是 `A → B → A → B` —— 对话框管理器**不走进框架**（也不停在框架本身）。
+> 容器缺的那一位 `WS_EX_CONTROLPARENT` **现在两条创建路都发了**（账 #83(b2) = C29-FS-c，
+> 夹具 `tests/tabwalk`），运行期也确认落到了框架窗口上（`EX-fr=262144`），可**跳格照样进不了框架**：
+> 裸 Win32 探针（`.build/cp2`）用同一棵树会走进 `A → B → …`，而 `IsDialogMessage` 在产物里认下了那条
+> 消息（`handled=1`）却把焦点交给窗体级的下一枚。`WS_GROUP` / 容器孩子的创建顺序 / 容器挂 comctl32
+> 子类 / 窗体自己也带这一位 / Common-Controls 6.0 清单五种候选已逐个实测排除，根因没查到，记 **账 #165**。
+> ⇒ **现状：框架里的控件参与不了键盘跳格**，运行期用 `SetFocus` 直接给焦点仍然是通的。
 > 运行期现给焦点是通的：`CmdOk.SetFocus` 实测落地（探针那枚按钮不在框架里 —— 框架里的子控件这一形本批没重测）。
 > 但按到之后 `_GotFocus` 不会发 —— 那是账 #158：Windows 对 BUTTON 的程序化 SetFocus 不发 `BN_SETFOCUS`。
