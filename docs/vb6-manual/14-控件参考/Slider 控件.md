@@ -30,7 +30,7 @@
 | `Slider1.TickPresent` | **本项目的扩展读数，不是 VB6 属性**：`TBM_GETTICPOS(0)` 问"当前到底画没画刻度"。实测光挂 `TBS_AUTOTICKS` 而不给 `TBM_SETTICFREQ` 是**不画**刻度的（默认频率 0） |
 | `Enabled` / `Visible` | 通用窗口状态（`EnableWindow` / `ShowWindow`），读回是 VB6 的 `True`/`False` |
 
-**本批还没有的一面**（`Min` / `Max` / `Value` / `SmallChange` / `LargeChange` / `SelStart` / `SelEnd` / `SelectRange` 与 `Change` / `Scroll` 两条事件）在 ai/029 的 C29-SL-b / SL-c 两格里排；`TickStyle` 四档与原生 `TBS_TOP`/`BOTTOM`/`LEFT`/`RIGHT`/`BOTH`/`NOTICKS` 的对应**本机拿不到 VB6 枚举真值**（OCX 未注册、类型库读不到），刻意没有实现，等口径再补。
+**本批还没有的一面**（`Min` / `Max` / `Value` / `SmallChange` / `LargeChange` / `SelStart` / `SelEnd` / `SelectRange` 与 `Change` / `Scroll` 两条事件）在 ai/029 的 C29-SL-b / SL-c 两格里排；`TickStyle` 四档当时写着"本机拿不到 VB6 枚举真值（OCX 未注册、类型库读不到）"—— **那句是错的**，见下面 C29-SL-h 那一格：类型库不必注册就能从文件里读，四档与它的数值都已按真值实现。
 
 **两个坑（实测踩过的）**：① 判方向**别问 `TBM_GETCHANNELRECT`** —— 它返回的矩形永远把行程长度放在 x 分量上，水平杆与垂直杆答同一组数，量它等于什么都没量；② `TBM_GETTHUMBRECT` / `GETCHANNELRECT` 的**返回值不是成功标志**（实测返回 0 而矩形填得好好的），只看矩形内容。
 
@@ -40,7 +40,7 @@
 
 | 写法 | 读数与实现 |
 | --- | --- |
-| `Slider1.Min` / `.Max` | 原生这条消息只吃 **16 位**（`lParam` 是两个半字；实测 40000 会截成 -25536），所以下发前钳到 ±32767，**读回也是那一个钳过的值** —— 答出去的与控件真走得动的始终是同一个数。VB6 的 `Min`/`Max` 是 Long，超界那一档怎么办本机拿不到真值，押后 |
+| `Slider1.Min` / `.Max` | 原生这条消息只吃 **16 位**（`lParam` 是两个半字；实测 40000 会截成 -25536），所以下发前钳到 ±32767，**读回也是那一个钳过的值** —— 答出去的与控件真走得动的始终是同一个数。VB6 的 `Min`/`Max` 是 Long（类型库里这一对写的是 `VT_I4`，见下面 C29-SL-h 那一格），超界那一档 OCX 怎么办本机拿不到真值（跑不起来），押后 |
 | `Slider1.Value` | `TBM_SETPOS`/`GETPOS`。**越界交给控件钳**（量程 10..100 时 `Value = 500` 读回 100、`= 5` 读回 10），我们不自己钳第二遍 |
 | `Slider1.SmallChange` / `.LargeChange` | 原生 line / page 尺寸，真往返。实测默认档是 **1 / 20**（VB6 文档写 1 / 5）：小的一条对得上，大的那条本项目**照原生答 20**，不拿文档去改控件的读数 —— 等拿到 VB6 真值再拍 |
 | `Slider1.SelectRange` | 样式位 `TBS_ENABLESELRANGE`，**运行期可改**（实测关掉之后 `CStr` 就答 `False`）。类型是 Boolean，所以 `CStr(sld.SelectRange)` 打 `True`/`False`、装箱是 `VT_BOOL` |
@@ -99,3 +99,34 @@
 返回型改 `wchar_t*`，消费面统一。
 
 **设计期那一条也接上了（ai/029 C29-SL-f）**：`.frm` 里写的 `ToolTipText = "..."` / `Tag = "..."` 会在建好窗口之后发一次对应的 setter（两条创建路共用同一趟），所以读回来就是 `.frm` 里那个值；写了空串或干脆没写都**不发**（与默认读数同为 `""`，多发一条只是改产物）。资源引用形态（`"frmTest.frx":0000`）不是文本，跳过不发。
+
+## 本项目的实现口径（ai/029 C29-SL-h：`TickStyle` 四档 + `GetNumTicks`）
+
+**先把"拿不到 VB6 真值"那一句订正掉**：OCX 里嵌的那张类型库**不需要注册**就能读 —— 用
+`LoadTypeLibEx` 传 `REGKIND_NONE` 加上文件路径，132 张类型表全出来了（探针 `.build/slprobe/sltlb.cpp`，
+x86 编、按路径读文件）。`TickStyleConstants` 的四个成员名与
+数值就是这么读出来的，不是照文档猜的。
+
+| 写法 | 读数与实现 |
+| --- | --- |
+| `Slider1.TickStyle` | VB6 枚举 `TickStyleConstants`：`0 = sldBottomRight`（默认，那三位样式位全清）、`1 = sldTopLeft`（`TBS_TOP`；同一位在竖杆上念作 `TBS_LEFT`）、`2 = sldBoth`（`TBS_BOTH`）、`3 = sldNoTicks`（`TBS_NOTICKS`）。读写都是**窗口当前的样式位**，不是自存：`CStr` 打 0..3、`TypeName` 答 `Long`、`VarType` 答 `3`。越界值（`4`、`-1`…）落 `0` 那一档 ⇒ 答出去的就是控件真在走的那一档（与 `Orientation` 同一口径） |
+| 设计期 `TickStyle = 2` | 直接进 `CreateWindow` 的样式参数。折算只有一处（`sliderStyleBits`），**两条创建路共用**：顶层控件与容器（Frame / PictureBox）里的子控件都算。以前第二条创建路对 Slider **一格样式都不挂**（创建参数实测是 `1342177280` = 只有 `WS_CHILD|WS_VISIBLE`，连默认的 `TBS_AUTOTICKS` 都没有）—— 账 #83 那条缺口的一个具体落点，本批顺手补上 |
+| `Slider1.GetNumTicks` | VB6 那一面（dispid `0x000f`、只有 propget ⇒ 只读），就是原生 `TBM_GETNUMTICS`。它同时是 `TickStyle = 3` 唯一的控件侧证人：实测那一位一挂，读数从 11 变 0，而 `TickPresent`（`TBM_GETTICPOS(0)`）**照旧答"有刻度"**（刻度只是不画、那张表还在） |
+| `Slider1.ChannelTop` | **本项目的扩展读数，不是 VB6 属性**：`TBM_GETCHANNELRECT` 矩形的上边。刻度画在哪一侧，通道就被顶下去几像素，判据用它证"这一档真到了控件、而且控件真按它重排了" |
+
+三条实测口径值得记：
+
+1. **`TickStyle = 1` 与 `= 2` 之间没有稳的几何维度**：两档的通道位置只差一两个像素，而且**谁高谁低
+   随控件高度翻面**（探针在 40px 高答 20 / 19，夹具那枚 400 缇答 18 / 19）。判据因此只写"与 `0` 那档
+   不同"，1/2 两档的区分全靠样式位读回 —— 第一版把 "1 > 2 > 0" 写进判据，当场就翻红了。
+2. **运行期写这一档是真有效的**：写样式位 + 一次 `SWP_FRAMECHANGED` 之后，每一条形与"创建时就带那
+   一位"**逐字相同**（来回切四档也一样）；只写样式位不换帧则停在旧布局，看着像没生效。
+3. **竖杆上那一位念 `TBS_LEFT`**：commctrl 里 `TBS_TOP == TBS_LEFT == 0x0004`、
+   `TBS_BOTTOM == TBS_RIGHT == 0x0000`，VB6 那两条合名（BottomRight / TopLeft）照着这一点起 ——
+   所以这张对应表是 1:1 的，不是凑的。
+
+**类型库顺带读出来、本项目还没做的几面**：`SelLength`（dispid `0x0008` —— VB6 的选区其实是
+`SelStart` + `SelLength`，`SelEnd` 这个名字是本项目早先自己加的）、`ClearSel`（`0x000e`，方法）、
+`Text`（`0x0010`，BSTR：拖动时那颗气泡里显示的字符串）与 `TextPosition`（`0x0011`，枚举
+`sldAboveLeft = 0` / `sldBelowRight = 1`），再加事件面的 `KeyPress` / `MouseDown` / `MouseMove` /
+`MouseUp`。分别记在账 #146、#147 与 #141。
