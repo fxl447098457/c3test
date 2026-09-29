@@ -940,6 +940,19 @@ static void vb6_installCrashTrace(void) {
     }
 }
 
+// 账 #157: 编译器算好的"这枚窗体显示时该把焦点交给谁"（VB6 = TabIndex 最小那枚拿得到焦点的
+// 控件，不是创建顺序 —— `.frm` 里控件的书写顺序与 TabIndex 常常相反）。存在窗体句柄上，
+// **应用一次就销掉**：之后再 Show 这枚窗体，焦点该回到用户停下的地方，而不是每次都被抢回首枚 tabstop。
+void vb6_Form_SetInitialFocus(void* hwnd, void* target) {
+    if (!hwnd || !target) return;
+    SetPropW((HWND)hwnd, L"VB6_InitFocus", (HANDLE)target);
+}
+
+static void vb6_ApplyInitialFocus(HWND hwnd) {
+    HWND t = (HWND)RemovePropW(hwnd, L"VB6_InitFocus");
+    if (t && IsWindow(t)) SetFocus(t);
+}
+
 void vb6_ShowForm(void* hwnd, int modal) {
     vb6_installCrashTrace();
     if (GetEnvironmentVariableW(L"C3_OCX_TRACE", NULL, 0) > 0) {
@@ -988,6 +1001,9 @@ void vb6_ShowForm(void* hwnd, int modal) {
         }
     }
     SetActiveWindow((HWND)hwnd);
+    // 账 #157: VB6 在窗体激活之后把焦点交给第一枚 tabstop。这一步必须在激活之后 ——
+    // 实测 (029 的 `s-0 第 2 条改口径`)：在 Form_Activate 里 SetFocus 会被随后的激活流程收回。
+    vb6_ApplyInitialFocus((HWND)hwnd);
 
     if (modal) {
         int traceModal = (GetEnvironmentVariableW(L"C3_OCX_TRACE", NULL, 0) > 0);

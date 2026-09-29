@@ -267,6 +267,13 @@
     // 拿不到焦点的那几类不立，`.frm` 显式写了 `TabStop` 的按写的来。
     long controlTabStopStyleBit(const FrmControl& ctrl) const;
 
+    // 账 #157: VB6 把窗体显示出来时，焦点交给**这枚窗体里 TabIndex 最小的那枚拿得到焦点的控件**
+    // （不是创建顺序 —— `.frm` 里控件的书写顺序与 TabIndex 常常相反，实测探针里 cmdB 先创建、
+    //  cmdA 才是 TabIndex=0）。这一份**只能在发码期算**：设计期的 `TabIndex` 从来没下发到窗口
+    // （生成代码里一处 `vb6_SetTabIndex` 都没有），运行期拿 `VB6_TabIndex` 排不出序 —— 那条另记账。
+    // 算出来的目标一次性存到窗体句柄上，由 RTL 的 `vb6_ShowForm` 在激活之后应用。
+    void emitFormInitialFocus(const FrmControl& formNode);
+
     // C29-SL-h: Slider 的创建样式位（TBS_AUTOTICKS / TBS_VERT / TickStyle 那三位）。
     // 顶层与容器子控件两条创建路各自都要它，所以单独一处折算、两处调用（账 #83）。
     long sliderStyleBits(const FrmControl& ctrl) const;

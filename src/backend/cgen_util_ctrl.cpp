@@ -1475,6 +1475,52 @@ long CCodeGen::controlTabStopStyleBit(const FrmControl& ctrl) const {
     }
 }
 
+// 账 #157: 声明处的注释讲了为什么必须在发码期算。这里只做**选择**，并把选中那枚的句柄
+// 变量名交给窗体的 WM_CREATE 发一句 `vb6_Form_SetInitialFocus`。
+// 选择口径 = VB6：`TabIndex` 最小、且拿得到焦点（`controlTabStopStyleBit` 那一族排除 +
+// 显式 `TabStop = False` 不算）、设计期没被藏起来 / 没被禁用的那枚；同序号按创建顺序取先。
+void CCodeGen::emitFormInitialFocus(const FrmControl& formNode) {
+    const FrmControl* best = nullptr;
+    long bestTabIndex = 0;
+    long bestOrder = 0;
+    long order = 0;
+
+    std::function<void(const FrmControl&)> walk;
+    walk = [&](const FrmControl& node) {
+        for (const auto& ctrl : node.children) {
+            const long orderHere = order++;
+            bool takesFocus = controlTabStopStyleBit(ctrl) != 0;
+            auto visIt = ctrl.properties.find("Visible");
+            if (visIt != ctrl.properties.end() && visIt->second.type == FrmValueType::Integer
+                && visIt->second.intValue == 0) takesFocus = false;
+            auto enIt = ctrl.properties.find("Enabled");
+            if (enIt != ctrl.properties.end() && enIt->second.type == FrmValueType::Integer
+                && enIt->second.intValue == 0) takesFocus = false;
+            long tabIndex = 0;
+            auto tiIt = ctrl.properties.find("TabIndex");
+            if (tiIt != ctrl.properties.end() && tiIt->second.type == FrmValueType::Integer)
+                tabIndex = tiIt->second.intValue;
+            if (takesFocus && (!best || tabIndex < bestTabIndex
+                               || (tabIndex == bestTabIndex && orderHere < bestOrder))) {
+                best = &ctrl;
+                bestTabIndex = tabIndex;
+                bestOrder = orderHere;
+            }
+            // Frame / PictureBox 里的子控件也在这枚窗体的 tab 序里，所以容器本身被排除掉
+            // 之后仍要继续往里走。
+            walk(ctrl);
+        }
+    };
+    walk(formNode);
+    if (!best) return;
+
+    std::string hwndVar = "vb6_hwnd_" + cIdent(best->controlName);
+    if (best->index >= 0) hwndVar += "_" + std::to_string(best->index);
+    c_.emitLine("vb6_Form_SetInitialFocus((void*)hwnd, (void*)" + hwndVar
+                + ");  /* 账 #157: 显示时把焦点交给 " + best->controlName
+                + "（TabIndex=" + std::to_string(bestTabIndex) + "） */");
+}
+
 // 控件类型的 Win32 样式位。取值与 cgen_form_ctrl_style_apply.inc 保持一致。
 // 顶层控件与容器子控件共用，避免容器内子控件缺失类型样式。
 long CCodeGen::controlTypeStyleBits(const FrmControl& ctrl) const {
