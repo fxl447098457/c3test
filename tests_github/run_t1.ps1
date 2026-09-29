@@ -11,14 +11,22 @@
 # 环境: 环境变量 C3_VCVARSALL 优先 (vcvarsall.bat 完整路径), 缺省 vswhere 自动发现,
 #       用法见 scripts\README.md。仅限 Windows + PowerShell 7 (并行需要)。
 # 用法: pwsh -File tests_github\run_t1.ps1 [-C3Path .build\C3.exe] [-Jobs 20] [-Verbose]
+#       [-Shard K -ShardTotal M]
+#   -Jobs 1 (默认) = 今天的执行路径 (输出不变); >1 时 bas 用例在**本 runner 内**并行 (每 worker
+#   独立输出目录)。-Shard/-ShardTotal (默认 0/1 = 不分片) 供 CI 把 bas 切给**多 runner** 并行,
+#   compile 段与冒烟一样只由 shard 1 跑。清单守卫始终对完整 33/64 校验, 再切执行集。
 
 param(
     [string]$C3Path = "",
     [switch]$Verbose,
-    [int]$Jobs = 1
+    [int]$Jobs = 1,        # >1 时 bas 用例并行 (每 worker 独立输出目录); 默认 1 走今天的路径
+    [int]$Shard = 0,       # 分片当前编号 (1..ShardTotal); 0 = 不分片整队跑 (供 CI 多 runner 并行)
+    [int]$ShardTotal = 1   # 分片总数
 )
 
 $ErrorActionPreference = "SilentlyContinue"
+# <shared-shard>: 分片算法在 shard.ps1 (三个门禁脚本共用, 不要在这里再抄一遍)
+. (Join-Path $PSScriptRoot "shard.ps1")
 
 $Root = Split-Path -Parent $PSScriptRoot
 if (-not $C3Path) { $C3Path = Join-Path $Root ".build\C3.exe" }
@@ -231,7 +239,12 @@ function Invoke-BasSetParallel {
                 $runOut = @(Get-Content $stdoutFile -ErrorAction SilentlyContinue)
                 $allMatch = $true
                 foreach ($exp in $it.Expected) {
-                    $found = $runOut | Where-Object { $_ -like "*$exp*" }
+                    # ⚠ 这段跑在 -Parallel 的 runspace 里, 调不到脚本函数 ⇒ 字面判定必须内联。
+                    # 用字面子串 (忽略大小写) 而非 -like: needle 里的 [ ] * ? 会被当通配符 (见 run_tests.ps1 Test-NeedleHit)
+                    $found = $false
+                    foreach ($l in @($runOut)) {
+                        if ($null -ne $l -and ([string]$l).IndexOf($exp, [StringComparison]::OrdinalIgnoreCase) -ge 0) { $found = $true; break }
+                    }
                     if (-not $found) { $allMatch = $false; break }
                 }
                 if ($allMatch) { $p++ } else {
@@ -255,8 +268,14 @@ function Invoke-BasSetParallel {
     }
     $sumPass = ($results | Measure-Object -Property Pass -Sum).Sum
     $sumFail = ($results | Measure-Object -Property Fail -Sum).Sum
+    Assert-ParallelRan -Items $Items -Results $results -Label "bas"
     Write-Host "  (parallel: $($results.Count) worker(s), pass=$sumPass fail=$sumFail)"
 }
+
+# === 分片 (CI 多 runner 并行): 各 runner 只执行 fullQueue 的第 Shard 片 (按调用次序连续切片) ===
+# 33/64 清单守卫在上面已对**完整**清单跑过, 这里只切"执行集", 每个 runner 仍会先校验清单完整。
+# 分片算法见 shard.ps1 (三个脚本共用): ShardTotal<=1 原样返回, >1 按清单次序连续切片
+$fullQueue = @(Select-ShardSlice -Items $fullQueue -Shard $Shard -ShardTotal $ShardTotal -Label "bas")
 
 Invoke-BasSetParallel -Items $fullQueue -Jobs $Jobs
 Write-Host ""
@@ -264,8 +283,6 @@ Write-Host ""
 # ============================================================
 # 段 2: compile 类 10 个 (只编译不运行: comprehensive x2 + 窗体 .frm x8)
 # ============================================================
-Write-Host "--- Compile Tests (bas x2 + form x8) ---" -ForegroundColor Yellow
-
 function Test-Compile {
     param([string]$Name, [string]$Source)
     Write-Host -NoNewline "  [COMPILE] $Name ... "
@@ -283,21 +300,28 @@ function Test-Compile {
     }
 }
 
-Test-Compile "test_comprehensive" (Join-Path $CasesDir "test_comprehensive.bas")
-Test-Compile "test_comprehensive2" (Join-Path $CasesDir "test_comprehensive2.bas")
+# compile 段 (10 个, 只编译) 是固定小项: 分片时只由 shard 1 负责, 其余片跳过 (不减检查)
+if (($ShardTotal -gt 1) -and ($Shard -ne 1)) {
+    Write-Host "--- Compile Tests: 由 shard 1 负责, 本片跳过 ---" -ForegroundColor DarkGray
+} else {
+    Write-Host "--- Compile Tests (bas x2 + form x8) ---" -ForegroundColor Yellow
 
-$formTests = @(
-    "empty_form.frm",
-    "form_test_p74.frm",
-    "form_test_p75.frm",
-    "form_test_p76.frm",
-    "form_test_p78.frm",
-    "form_test_p79.frm",
-    "form_test_m8.frm",
-    "form_mdi_parent.frm"
-)
-foreach ($t in $formTests) {
-    Test-Compile ([IO.Path]::GetFileNameWithoutExtension($t)) (Join-Path $CasesDir $t)
+    Test-Compile "test_comprehensive" (Join-Path $CasesDir "test_comprehensive.bas")
+    Test-Compile "test_comprehensive2" (Join-Path $CasesDir "test_comprehensive2.bas")
+
+    $formTests = @(
+        "empty_form.frm",
+        "form_test_p74.frm",
+        "form_test_p75.frm",
+        "form_test_p76.frm",
+        "form_test_p78.frm",
+        "form_test_p79.frm",
+        "form_test_m8.frm",
+        "form_mdi_parent.frm"
+    )
+    foreach ($t in $formTests) {
+        Test-Compile ([IO.Path]::GetFileNameWithoutExtension($t)) (Join-Path $CasesDir $t)
+    }
 }
 Write-Host ""
 

@@ -585,7 +585,22 @@ function Invoke-BasSetParallel {
                 $cr = & $c3 $it.Source --output-dir $workDir @IncArg 2>&1
             }
             $ec = $LASTEXITCODE
-            if ($ec -ne 0) { $f++; $details += "$($it.Name): compile FAIL"; continue }
+            if ($ec -ne 0) {
+                $f++
+                # 可观测性约定 (同下面的 output mismatch): 编译失败必须带实际错误行。
+                # 以前只报 "compile FAIL" —— 编译输出既不落盘也不在 CI 工件里 (工件只收
+                # output/**/*.out 与 *.err, 那两份是**运行**期的 stdout/stderr), 于是
+                # GA 上一条编译红根本无从判断是哪一条 C 错误 (实测 test_variant_boxing
+                # 在 CI 上 compile FAIL、本地同一条命令干净, 来回三轮都拿不到信息)。
+                $ce = @($cr | ForEach-Object { [string]$_ } | Where-Object { $_ -match 'error C\d+' } | Select-Object -First 2)
+                if ($ce.Count -gt 0) {
+                    $details += "$($it.Name): compile FAIL :: " + ($ce -join " | ")
+                } else {
+                    $tail = @($cr | ForEach-Object { [string]$_ } | Select-Object -Last 2)
+                    $details += "$($it.Name): compile FAIL (exit $ec, 无 error C 行) :: " + ($tail -join " / ")
+                }
+                continue
+            }
 
             $baseName = [IO.Path]::GetFileNameWithoutExtension($it.Source)
             $exePath = Join-Path $workDir "$baseName.exe"
