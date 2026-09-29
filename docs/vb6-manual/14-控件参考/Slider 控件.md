@@ -200,3 +200,35 @@ x86 编、按路径读文件）。`TickStyleConstants` 的四个成员名与
    写在产物里（`SK1`…`SK7`），探针只用来定机制。
 4. **`Text` 空着时气泡打数字、写了就用写的串**这一条是**本项目的口径**：VB6 文档只说"显示这个串"，
    没说两者怎么共存，那颗 32 位 OCX 在本机跑不起来拿不到真值。哪天拿到 VB6 真值要翻，红的是 `SK6`。
+
+## 本项目的实现口径（ai/029 C29-SL-l：控件的**零实参方法**两形同归）
+
+VB6 里 `Slider1.ClearSel` 与 `Text1.SetFocus` 都允许**不带括号**写。本项目把控件的零实参方法收成
+一张表（`controlZeroArgMethod`），两条发码码头共用：带括号那一形在表达式路收尾，不带括号那一形在
+语句路收尾 —— 只接一头就会留下"编得过、跑了、什么都没发生"。
+
+| 写法 | 发码 |
+| --- | --- |
+| `Slider1.ClearSel` / `.ClearSel()` | 两形都是 `vb6_Slider_ClearSel((void*)vb6_hwnd_Slider1);` |
+| `Text1.SetFocus` / `Text1.SetFocus()` | 两形都是 `vb6_SetControlFocus((void*)vb6_hwnd_Text1);` |
+
+`vb6_SetControlFocus` 在 RTL 里就一句 `SetFocus(hwnd)`（带空守卫）。焦点属于**线程输入队列**，与窗口
+可见/激活无关，所以无头跑里也真能拿到焦点（`SimStdEvent kind=4` 走同一条路，实测会发 `WM_SETFOCUS`）。
+拿不到焦点的那几种（控件被禁用、窗口不属于本线程）原生就是回 `NULL` 什么都不做 —— 本项目**不伪造、
+不重试**：真 VB6 在那里 raise 一个错误号，而我们还没有运行期错误面。
+
+**哪些控件接、哪些刻意不接**：`Label / Image / Shape / Line / Timer / Menu / Data / OLE /
+CommonDialog / Winsock / ImageList / StatusBar / ProgressBar / Form` 都不接（`Form` 有自己的
+`SetFocus` 那条路）。控件数组那一形（`txtSearch(Index).SetFocus`）也接 —— 认得
+`vb6_CtrlArr_GetAt(&vb6_hwnd_txtSearch, Index)` 这种宿主表达式。
+
+**一条订正**（本格实测翻出来的，别再照旧账写）：`SetFocus` 这一形**以前在运行期也是响的**，
+响在 RTL 的宿主对象应答表上（Fix 112，`uc_hostmodel_call.inc` 里有一条按名字应答的
+`SetFocus(obj)`）—— 发码是 `vb6_ComCall(裸 HWND, L"SetFocus", NULL, 0)`，而那条调用在进
+`IDispatch` 之前会先问"这是不是我们的真窗口"，是就按 Win32 语义应答。所以改道换来的是**不再拿
+HWND 当假 IDispatch 去问那张表**（也省一次 `VARIANT` 分配/释放），读数逐字没变。
+真正一声不响的是**表里没有的那些名字**，`ClearSel` 就是一个：改之前那句"清空选区"跑了、区段一点没动、
+零诊断（夹具 `SN3` 前后读数 `10/20` → `0/0`）。
+⇒ 判据里 `SN1`/`SN2` 因此只当**行为钉**（红不了，但会把"焦点面被改坏"拦下来），能红的是 `SN3`
+与发码那一正一反（存量工程 `VBFlexGridDemo` 里 31 处 `vb6_ComCall(…, L"SetFocus")` 在新编译器上
+只剩 1 处 —— 剩下的那处是 `Me.SetFocus`，走的是窗体自己那条路，不归这张表）。
