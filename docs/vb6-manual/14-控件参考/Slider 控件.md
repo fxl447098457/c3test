@@ -232,3 +232,16 @@ HWND 当假 IDispatch 去问那张表**（也省一次 `VARIANT` 分配/释放�
 ⇒ 判据里 `SN1`/`SN2` 因此只当**行为钉**（红不了，但会把"焦点面被改坏"拦下来），能红的是 `SN3`
 与发码那一正一反（存量工程 `VBFlexGridDemo` 里 31 处 `vb6_ComCall(…, L"SetFocus")` 在新编译器上
 只剩 1 处 —— 剩下的那处是 `Me.SetFocus`，走的是窗体自己那条路，不归这张表）。
+
+**`With` 块里的控件方法（ai/029 C29-SL-l / SL-m 两格补齐）**
+
+`With Slider1 … End With` 里既能写属性也能写方法，两形（带括号与不带括号）都接好了：
+
+| 写法 | 结果 |
+| --- | --- |
+| `With Slider1: .Min = 8: .Max = 72: .Value = 12: .TickFrequency = 8` | 全部落到 `vb6_Slider_Set*(_vb6_with_N, …)`，读回就是那些值（说明 §4 那个例子实测通：`W1=12/8/72`、`W2=1/8/8`、`W3=2/9`） |
+| `With Slider1: .SetFocus` / `.ClearSel()` | `vb6_SetControlFocus((void*)_vb6_with_N);` / `vb6_Slider_ClearSel((void*)_vb6_with_N);` —— **这一形以前是编译不过**（发成 `_vb6_with_0.SetFocus()`，`HWND` 是 struct 指针），不是运行期没反应 |
+
+每一层 `With` 有自己的临时量（`_vb6_with_0`、`_vb6_with_1`…），所以嵌套是栈式的：
+内层里的 `.X` 绑的是**最内层**那一帧（与 VB6 同），要动外层那个控件就写它的**全名**。
+`With` 块里的**带实参**控件方法（例如判据助手 `.SimNotify(5, 40)`）还没接，写全名 `Slider1.SimNotify(5, 40)` 即可。
