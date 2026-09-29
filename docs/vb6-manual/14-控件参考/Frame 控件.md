@@ -26,7 +26,7 @@ Frame（以及 `PictureBox` / `SSTab`）里的控件走的是**第二条创建�
 | `Text` / `Caption`、`Enabled` / `Visible` / `Value`、`ToolTipText` / `Tag` | 早已对齐（账 #125 / #142） |
 | Slider 的 `Min` / `Max` / `Value` / `TickFrequency` / `Sel*` | 对齐（C29-SL-o，两条路共用同一处出口） |
 | `FontName` / `FontSize` | 对齐（账 #154；设计期写的字体现在会打到窗口上） |
-| `TabIndex` / `TabStop` | `TabStop` 默认 `True`（VB6 一致），且**框架里的控件与外面一样**立这一位（账 #83(a)）；`Label` / `Image` / `Shape` / `Line` / `Frame` 自己拿不到焦点，不立 |
+| `TabIndex` / `TabStop` | `TabStop` 默认 `True`（VB6 一致），且**框架里的控件与外面一样**立这一位（账 #83(a)）；`Label` / `Image` / `Shape` / `Line` / `Frame` 自己拿不到焦点，不立。`TabIndex` 现在**设计期那个数会下发到窗口**（账 #160）：`.frm` 写了就照发的，没写用**同一父窗内的声明序号**兜底；框架里的控件**自己从 0 编号**（不占窗体那一串的号），所以运行期 `Ctl.TabIndex` 读回的就是 `.frm` 里那个数 —— 以前每一枚都读 0 |
 | 窗体显示时的初始焦点 | 焦点交给**这枚窗体里 TabIndex 最小的那枚拿得到焦点的控件**（账 #157）。容器里的控件也算在内 —— 选目标时递归整棵控件树；设计期 `Enabled=False` / `Visible=False` 或写了 `TabStop=False` 的会被跳过。只应用**一次**（应用一次是本批选的口径）：之后再 Show 这枚窗体，不会把焦点从用户停下的地方抢回来；"再 Show 之后焦点回到上次那枚"这一形**没实测** |
 
 > **键盘导航的现状**（三条都是实测，不是推的）：样式位立上了（账 #83(a)）、窗体显示时焦点自己就落在

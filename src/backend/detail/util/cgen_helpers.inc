@@ -283,8 +283,8 @@
 
     // 账 #157: VB6 把窗体显示出来时，焦点交给**这枚窗体里 TabIndex 最小的那枚拿得到焦点的控件**
     // （不是创建顺序 —— `.frm` 里控件的书写顺序与 TabIndex 常常相反，实测探针里 cmdB 先创建、
-    //  cmdA 才是 TabIndex=0）。这一份**只能在发码期算**：设计期的 `TabIndex` 从来没下发到窗口
-    // （生成代码里一处 `vb6_SetTabIndex` 都没有），运行期拿 `VB6_TabIndex` 排不出序 —— 那条另记账。
+    //  cmdA 才是 TabIndex=0）。这一份**留在发码期算**（账 #160 之后运行期已经有了 `VB6_TabIndex`，
+    //  可选改运行时；挪过去要连带把排除表与"每父窗自己编号"的口径一起搬，不值当为省一行发码去冒这个险）。
     // 算出来的目标一次性存到窗体句柄上，由 RTL 的 `vb6_ShowForm` 在激活之后应用。
     void emitFormInitialFocus(const FrmControl& formNode);
 

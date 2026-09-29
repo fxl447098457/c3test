@@ -1521,7 +1521,7 @@ long CCodeGen::controlContainerExStyleBit(const FrmControl& ctrl) const {
     }
 }
 
-// 账 #157: 声明处的注释讲了为什么必须在发码期算。这里只做**选择**，并把选中那枚的句柄
+// 账 #157: 为什么这一份留在发码期算，声明处的注释有交代。这里只做**选择**，并把选中那枚的句柄
 // 变量名交给窗体的 WM_CREATE 发一句 `vb6_Form_SetInitialFocus`。
 // 选择口径 = VB6：`TabIndex` 最小、且拿得到焦点（`controlTabStopStyleBit` 那一族排除 +
 // 显式 `TabStop = False` 不算）、设计期没被藏起来 / 没被禁用的那枚；同序号按创建顺序取先。
