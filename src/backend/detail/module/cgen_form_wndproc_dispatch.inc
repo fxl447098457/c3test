@@ -4,8 +4,13 @@
 
     // P18-B: GotFocus/LostFocus events (EN_SETFOCUS/EN_KILLFOCUS/CBN_SETFOCUS/CBN_KILLFOCUS)
     {
-        ctrlId = 100;
-        for (const auto& ctrl : frmDesc.formControl.children) {
+        // 账 #158：这张焦点码表**只写一遍**，顶层与容器子控件**两条创建路共用**。以前只有顶层
+        // 那一趟（ID 100+）⇒ 放在 Frame/PictureBox 里的按钮与文本框连 arm 都没发过
+        // —— 发码侧的读数：同一份 `.frm`，`cmdTop_GotFocus` 有 `id == 101 && code == 6`、
+        // `cmdIn_GotFocus` 一条都没有（容器子控件的 ID 从 200 起，那一趟根本没被遍历）。
+        // ID 口径与创建循环一致（跳过 Menu 与没有 Win32 窗口类的控件，DFS 顺序同步）。
+        auto emitFocusArms158 = [&](const FrmControl& ctrl, int focusId) {
+            int ctrlId = focusId;
             std::string gotFn = cProcName(ctrl.controlName + "_GotFocus", AccessLevel::Private);
             std::string lostFn = cProcName(ctrl.controlName + "_LostFocus", AccessLevel::Private);
             bool hasGot = symTab_.lookup(ctrl.controlName + "_GotFocus") != nullptr;
@@ -37,7 +42,32 @@
                 // Label: no GotFocus/LostFocus in VB6 (windowless control)
                 // PictureBox: GotFocus/LostFocus handled via subclassing (P18-F)
             }
+        };
+        ctrlId = 100;
+        for (const auto& ctrl : frmDesc.formControl.children) {
+            emitFocusArms158(ctrl, ctrlId);
             ctrlId++;
+        }
+        int childFocusId158 = 200;
+        auto walkFocusChildren158 = [&](auto&& self, const FrmControl& container) -> void {
+            for (const auto& child : container.children) {
+                if (child.controlType == FrmControlType::Menu) continue;
+                if (!FrmParser::controlTypeToWin32Class(child.controlType)) continue;
+                emitFocusArms158(child, childFocusId158);
+                childFocusId158++;
+                if (!child.children.empty() &&
+                    (child.controlType == FrmControlType::Frame ||
+                     child.controlType == FrmControlType::PictureBox)) {
+                    self(self, child);
+                }
+            }
+        };
+        for (const auto& ctrl : frmDesc.formControl.children) {
+            if (!ctrl.children.empty() &&
+                (ctrl.controlType == FrmControlType::Frame ||
+                 ctrl.controlType == FrmControlType::PictureBox)) {
+                walkFocusChildren158(walkFocusChildren158, ctrl);
+            }
         }
     }
     c_.emitLine("break;");

@@ -233,7 +233,9 @@
             ctrl.controlType == FrmControlType::OptionButton) {
             if (symTab_.lookup(ctrl.controlName + "_Click")) {
                 std::string clickFn = cProcName(ctrl.controlName + "_Click", AccessLevel::Private);
-                c_.emitLine("if (id == " + std::to_string(ctrlId) + ") {");
+                // 账 #158：**只认 BN_CLICKED=0** —— 按钮族现在挂了 `BS_NOTIFY`，同一个 id 还会
+                // 携着 `code=6/7`（焦点变化）进来，不过滤就把一次焦点移动算成一次点击。
+                c_.emitLine("if (id == " + std::to_string(ctrlId) + " && code == 0) {");
                 c_.indent();
                 if (isArrayCtrl) {
                     // 控件数组: 事件处理带Index参数

@@ -1809,6 +1809,37 @@ if ($Category -in @("all", "run", "vbp")) {
         'code == 1024',     # CBEM_SETTBILLOS（或 RTB 的 EN_UPDATE）—— 本工程里没有这些控件
         'code == 2048'
     )
+
+    # C29-BN-a: CommandButton / CheckBox / OptionButton `_GotFocus` / `_LostFocus` never fired
+    # -- but the code table they use (BN_SETFOCUS=6 / BN_KILLFOCUS=7) was always right.  What was
+    # missing is the creation-time style bit BS_NOTIFY: a BUTTON without it never reports focus
+    # changes to its parent (bare-Win32 probe .build/bnnotify/bnnotify.c: two buttons differing
+    # only in that bit).  BN_CLICKED does not need it, which is why button _Click always worked.
+    # Same measurement found a second gap: the focus code table only walked top-level children
+    # (IDs 100+), so controls inside a Frame/PictureBox (IDs 200+) got no arm at all -- now one
+    # lambda serves both creation roads.  And because the same id now also carries code=6/7,
+    # the _Click arm must filter on code == 0 -- BF-noclick pins exactly that.
+    # A/B (same fixture, two compilers; x64 and x86 logs cmp byte-for-byte identical):
+    #   BASE: BF-cmd=0/0 BF-chk=0/0 BF-opt=0/0 BF-tx=1/1 BF-in=0/0 BF-intx=0/0 BF-each=N
+    #   NEW : all six counters 1/1, BF-both=Y (both roads read the same numbers), BF-noclick=Y,
+    #         BF-each=Y
+    $bfNeedles = @("BTNFOCUS-DONE", "BF-cmd=1/1", "BF-chk=1/1", "BF-opt=1/1", "BF-tx=1/1",
+                    "BF-in=1/1", "BF-intx=1/1", "BF-both=Y", "BF-noclick=Y", "BF-each=Y")
+    Test-Vbp "btnfocus" "$Tests\btnfocus\BfApp.vbp" $bfNeedles
+    Test-Vbp "btnfocus_x86" "$Tests\btnfocus\BfApp.vbp" $bfNeedles -Arch "x86"
+    Test-EmitcShape "bf_emitc_bothroads" @("$Tests\btnfocus\BfApp.vbp") @(
+        'if (id == 106 && code == 6) { extern void vb6_cmdA_GotFocus();',
+        'if (id == 200 && code == 6) { extern void vb6_cmdIn_GotFocus();',
+        'if (id == 201 && code == 256) { extern void vb6_txtIn_GotFocus();',
+        'if (id == 106 && code == 0) {',
+        'vb6_CreateControl("BUTTON", "IN",1342259200L',
+        '1409368064L, 0L,'
+    )
+    Test-EmitcAbsent "bf_emitc_oldshape" @("$Tests\btnfocus\BfApp.vbp") @(
+        'if (id == 106) {',
+        'vb6_CreateControl("BUTTON", "IN",1342242816L',
+        '1409351680L, 0L,'
+    )
     # ai/030 T30-A: 内容寻址 obj store —— 命中/解耦/不改产物三条一起断 (用例自带隔离 store)
     Test-ObjCache "objcache" "$Tests\hello.bas"
     Test-EmitcShape "cf_emitc_shape" @("$Tests\ctrlfiles\CfApp.vbp") @(
