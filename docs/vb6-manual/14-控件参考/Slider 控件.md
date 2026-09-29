@@ -245,3 +245,26 @@ HWND 当假 IDispatch 去问那张表**（也省一次 `VARIANT` 分配/释放�
 每一层 `With` 有自己的临时量（`_vb6_with_0`、`_vb6_with_1`…），所以嵌套是栈式的：
 内层里的 `.X` 绑的是**最内层**那一帧（与 VB6 同），要动外层那个控件就写它的**全名**。
 `With` 块里的**带实参**控件方法（例如判据助手 `.SimNotify(5, 40)`）还没接，写全名 `Slider1.SimNotify(5, 40)` 即可。
+
+## 本项目的实现口径（ai/029 C29-SL-n：控件级 `_DblClick` 这一形整条修好）
+
+本页上文 §3 写的"常规：Click、DblClick、KeyDown/KeyUp"里，`DblClick` 这一形以前是**两种坏**：
+
+1. **只挂 `Slider1_DblClick` 的滑杆从来没被子类化** ——"要不要子类化"这一判断被抄成了三份
+   （发消息臂的一份、装的一份、拆的两份都漏了 `_DblClick`），于是子类过程与
+   `WM_LBUTTONDBLCLK` 那条臂在产物里生成了，却一次也没被 install ⇒ 处理器编得过、永不触发。
+   现在三份共用一处判据（`controlNeedsSubclass`），装/拆/arm 不可能再各说一遍。
+2. **按 VB6 标准签名写就编译不过** —— 消息臂以前写死成无参调用：
+   `extern void vb6_Slider1_DblClick(); vb6_Slider1_DblClick();`
+   而 VB6 的签名是 `Sub Slider1_DblClick(Cancel As Integer)` ⇒ `error C2198: 用于调用的参数太多`。
+   现在**按处理器自己声明的形参数**发：声明了 `Cancel` 就发
+   `int16_t vb6_dblcancel = 0; …DblClick(&vb6_dblcancel);`，写成无参的存量代码仍发 `…DblClick()`。
+
+| 写法 | 触发 |
+| --- | --- |
+| `Slider1_DblClick(Cancel As Integer)` | 控件自己的 `WM_LBUTTONDBLCLK`（经子类过程，与 `Click` 两档、互不牵连）。`Cancel` 进来是 `0`；原生轨道条没有"默认动作"可取消，所以我们只把这枚局部量交给你写、**不回读** |
+| `Slider1_MouseDown/MouseUp/MouseMove(Button, Shift, X, Y)`、`Slider1_KeyPress(KeyAscii)` | 一直是通的（这三条形以前就在"装不装"那两份表里），本批把它们与 `_DblClick` 归到同一处判据 |
+
+`Slider1_Paint` **仍然不接**：本项目的 `_Paint` 只给有绘制表面的控件（PictureBox）——
+原生轨道条自己画自己，我们不去伪造一次绘制回调。（真 VB6 里这颗 OCX 到底发不发 Paint，本机拿不到真值：
+那颗 OCX 只有 32 位、在 64 位进程里跑不起来。哪天要接，红的是"发了两次绘制"这种形状，先想清楚再动。）
