@@ -353,6 +353,28 @@ function Invoke-TestExe {
     }
 }
 
+# 账 #166: 产物名只有**一个权威** —— `.vbp` 里的 `ExeName32`。驱动落盘用的就是它
+# (`src/driver/driver_compile.cpp:88`：优先 `ExeName32` 的 stem，缺键才回落到 vbp 文件名)，
+# 而这里以前默认取**文件名** —— 两个权威管同一个名字。不一致时的症状很有欺骗性：本地手动跑
+# (跑的是那个不一致的名字) 退出码与读数全对，只有门禁两条架构一起 `FAIL (no exe)`
+# (门 #218 的 tabwalk 就是这么红的)。VB6 对这个键可写 "Foo" 也可写 "Foo.exe"，两种都折成 stem。
+# `-ExeName` 降级成**显式覆盖**（只剩 BalloonTooltips 一处用它，因为那个工程的名字确实不同）。
+function Resolve-VbpExeBase {
+    param([string]$VbpFile, [string]$ExeName = "")
+    if ($ExeName) { return [IO.Path]::GetFileNameWithoutExtension($ExeName) }
+    $stem = [IO.Path]::GetFileNameWithoutExtension($VbpFile)
+    if (Test-Path $VbpFile) {
+        foreach ($ln in (Get-Content $VbpFile)) {
+            if ($ln -match '^\s*ExeName32\s*=\s*(.+?)\s*$') {
+                $v = $Matches[1].Trim().Trim('"').Trim()
+                if ($v) { $stem = [IO.Path]::GetFileNameWithoutExtension($v) }
+                break
+            }
+        }
+    }
+    return $stem
+}
+
 # GUI smoke: require a visible main window, then close only the process we launch.
 # This checks startup, not screenshot correctness or QR decoding.
 function Test-GuiVbp {
@@ -382,8 +404,8 @@ function Test-GuiVbp {
             Copy-Item -Force $_.FullName $guiOut | Out-Null
         }
     }
-    # VBP ExeName32 may differ from the vbp file name; pass -ExeName to override.
-    $exeBase = if ($ExeName) { $ExeName } else { [IO.Path]::GetFileNameWithoutExtension($VbpFile) }
+    # 账 #166: 名字走单一权威 `Resolve-VbpExeBase`（读 .vbp 的 ExeName32），不再各算各的。
+    $exeBase = Resolve-VbpExeBase -VbpFile $VbpFile -ExeName $ExeName
     $exe = Join-Path $guiOut ($exeBase + ".exe")
     $proc = $null
     try {
@@ -718,11 +740,21 @@ function Test-Vbp {
     }
 
     # 处理 VBP 编译输出: 校验是否包含 expected 输出 (可含多个子串)
-    $baseName = [System.IO.Path]::GetFileNameWithoutExtension($VbpFile)
+    # 账 #166: 名字走单一权威 `Resolve-VbpExeBase`（读 .vbp 的 ExeName32）。以前这里只认**文件名**，
+    # 连 `-ExeName` 的口子都没有 ⇒ 凡 ExeName32 与文件名不同的工程，本地看不出、门禁必红。
+    $baseName = Resolve-VbpExeBase -VbpFile $VbpFile
     $exePath = Join-Path $OutDir "$baseName.exe"
     if (-not (Test-Path $exePath)) {
         $script:fail++
+        # 哨兵：把"按什么名字找的 / .vbp 里声明的是什么"一起打出来，下次这类红一句话就能定位
+        $declared = '(no ExeName32 key)'
+        if (Test-Path $VbpFile) {
+            foreach ($ln0 in (Get-Content $VbpFile)) {
+                if ($ln0 -match '^\s*ExeName32\s*=\s*(.+?)\s*$') { $declared = $Matches[1].Trim(); break }
+            }
+        }
         Write-Host "FAIL (no exe)" -ForegroundColor Red
+        Write-Host ("    找的是 " + $exePath + " ；vbp 文件名=" + [IO.Path]::GetFileNameWithoutExtension($VbpFile) + " ；声明的 ExeName32=" + $declared) -ForegroundColor Red
         return
     }
 
@@ -1530,7 +1562,8 @@ function Test-VbpDll {
         return
     }
 
-    $baseName = [System.IO.Path]::GetFileNameWithoutExtension($VbpFile)
+    # 账 #166: DLL 那侧同理 —— 驱动命名用的还是 ExeName32，这里以前只认文件名。
+    $baseName = Resolve-VbpExeBase -VbpFile $VbpFile
     $dllPath = Join-Path $OutDir "$baseName.dll"
     if (-not (Test-Path $dllPath)) {
         $script:fail++
@@ -1726,6 +1759,12 @@ if ($Category -in @("all", "run", "vbp")) {
         '1342242816L, 262144L,',          # 容器里的普通按钮不该挂这一位
         '1409351680L, 262144L,'           # 顶层按钮同样不该挂
     )
+    # 账 #166: 这条用例**本身就是那条红的固化** —— 工程文件叫 `NameProbe.vbp`，而产物叫
+    # `RenamedProbe.exe`（`.vbp` 里 `ExeName32="RenamedProbe.exe"`，故意与文件名不同、还带后缀）。
+    # 改之前 `Test-Vbp` 按文件名去找 `NameProbe.exe` ⇒ `FAIL (no exe)`；改之后走单一权威
+    # `Resolve-VbpExeBase`（读 .vbp 现值，缺键才回落文件名）⇒ 正常。
+    # ⇒ **这是一条能红的针**：把 resolver 摘掉/改回文件名口径，它立刻红回去，不用等门。
+    Test-Vbp "exename" "$Tests\exename\NameProbe.vbp" @("EXENAME-DONE", "NP-ok=Y")
     # ai/030 T30-A: 内容寻址 obj store —— 命中/解耦/不改产物三条一起断 (用例自带隔离 store)
     Test-ObjCache "objcache" "$Tests\hello.bas"
     Test-EmitcShape "cf_emitc_shape" @("$Tests\ctrlfiles\CfApp.vbp") @(
