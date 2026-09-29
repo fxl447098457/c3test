@@ -239,8 +239,25 @@ void vb6_SetControlFontName(void* hwnd, void* bstrName) {
     vb6_SetControlFontFromLogFont(hwnd, &lf);
 }
 
+// C29-SL-p（`ai/内置控件/Slider 控件（滑杆）.md` §4 那条例子量出来的，探针 .build/slfont）:
+// 点号 → 像素是**有损**的一步（96 DPI 下 1pt = 1.3333px，字体高度只能取整），所以旧写法
+// 从窗口反算会把请求值量化掉：写 8 读回 8.25、写 10 读回 9.75、写 14 读回 14.25。
+// 窗口表示不了的那一半按**请求值自存**（与 Slider 的 TickFrequency / TextPosition 同一族口径）。
+// Set 旗标不能省：`SetPropW(hwnd, name, 0)` 等于删属性（账 #107 踩过），而 0.0f 的位就是 0 ——
+// 少了这一枚，写 0 那一档会静默变回"没设过"。
+static const wchar_t kFontPtProp[]    = L"VB6_FontPt";
+static const wchar_t kFontPtSetProp[] = L"VB6_FontPtSet";
+
 float vb6_GetControlFontSize(void* hwnd) {
     LOGFONTW lf;
+    float pt;
+    DWORD bits;
+    if (!hwnd) return 0.0f;
+    if (GetPropW((HWND)hwnd, kFontPtSetProp)) {
+        bits = (DWORD)(DWORD_PTR)GetPropW((HWND)hwnd, kFontPtProp);
+        memcpy(&pt, &bits, sizeof(pt));
+        return pt;
+    }
     if (!vb6_GetControlLogFont(hwnd, &lf)) return 0.0f;
     HDC hdc = GetDC(NULL);
     int dpi = GetDeviceCaps(hdc, LOGPIXELSY);
@@ -248,6 +265,15 @@ float vb6_GetControlFontSize(void* hwnd) {
     if (dpi <= 0) dpi = 96;
     int heightPx = lf.lfHeight < 0 ? -lf.lfHeight : lf.lfHeight;
     return (float)heightPx * 72.0f / (float)dpi;
+}
+
+// C29-SL-p 的判据证人（**不是 VB6 属性**，与 TickPresent / TravelIsVert / ToolTipRegistered 同族）:
+// 窗口现在真在用的字体像素高度。有了它，字号那条判据才是两头的 —— 自存的数读回来当然还是自存的数，
+// 只有问窗口才知道这次 WM_SETFONT 到底发没发出去。
+int vb6_ControlFontPixelHeight(void* hwnd) {
+    LOGFONTW lf;
+    if (!vb6_GetControlLogFont(hwnd, &lf)) return 0;
+    return lf.lfHeight < 0 ? -lf.lfHeight : lf.lfHeight;
 }
 
 void vb6_SetControlFontSize(void* hwnd, float sizePt) {
@@ -268,6 +294,12 @@ void vb6_SetControlFontSize(void* hwnd, float sizePt) {
     // Convert points to pixel height (negative for character height)
     lf.lfHeight = -(int)(sizePt * (float)dpi / 72.0f + 0.5f);
     vb6_SetControlFontFromLogFont(hwnd, &lf);
+    {
+        DWORD bits;
+        memcpy(&bits, &sizePt, sizeof(bits));
+        SetPropW((HWND)hwnd, kFontPtProp, (HANDLE)(DWORD_PTR)bits);
+        SetPropW((HWND)hwnd, kFontPtSetProp, (HANDLE)1);
+    }
 }
 
 int vb6_GetControlFontBold(void* hwnd) {

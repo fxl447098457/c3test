@@ -245,6 +245,11 @@ std::string CCodeGen::getControlPropReadFn(FrmControlType ctrlType, const std::s
     // `CD1.FontName = "Consolas"` 静默落到字体属性上（C29-1a 那条 borderstyle 被抢走同一类碰撞）。
     if (propLower == "fontname" && ctrlType != FrmControlType::CommonDialog) return "vb6_GetControlFontName";
     if (propLower == "fontsize" && ctrlType != FrmControlType::CommonDialog) return "vb6_GetControlFontSize";
+    // C29-SL-p 的判据证人（**不是 VB6 属性**，只给读侧、不给写口）：窗口真在用的字体像素高度。
+    // 需要它是因为自存把"存什么读什么"做对了之后，读回来那个数已经问不出窗口了 ——
+    // 与 TickPresent / TravelIsVert / ToolTipRegistered 同族（#148 那条"证人问不出东西"的教训）。
+    if (propLower == "fontpixelheight" && ctrlType != FrmControlType::CommonDialog)
+        return "vb6_ControlFontPixelHeight";
     if (propLower == "fontbold") return "vb6_GetControlFontBold";
     if (propLower == "fontitalic") return "vb6_GetControlFontItalic";
     if (propLower == "fontunderline") return "vb6_GetControlFontUnderline";

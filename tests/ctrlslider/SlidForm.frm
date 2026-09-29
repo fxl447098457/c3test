@@ -17,6 +17,22 @@ Begin VB.Form SlidForm
       _ExtentX        =   2822
       _ExtentY        =   706
    End
+   Begin VB.TextBox txtF 
+      Height          =   400
+      Left            =   2560
+      TabIndex        =   8
+      Text            =   "F"
+      Top             =   2400
+      Width           =   1400
+   End
+   Begin VB.TextBox txtG 
+      Height          =   400
+      Left            =   2560
+      TabIndex        =   9
+      Text            =   "G"
+      Top             =   2880
+      Width           =   1400
+   End
    Begin VB.Timer tGo 
       Enabled         =   -1   'True
       Interval        =   60
@@ -490,6 +506,25 @@ Private Sub tGo_Timer()
     Debug.Print "SO1-child=" & CStr(sld7.Min) & "/" & CStr(sld7.Max) & "/" & CStr(sld7.Value) & "/" & CStr(sld7.SmallChange)
     Debug.Print "SO2-child-page=" & CStr(sld7.LargeChange) & "/" & CStr(sld7.TickFrequency)
     Debug.Print "SO3-child-sel=" & CStr(sld7.SelStart) & "/" & CStr(sld7.SelLength) & "/" & TF(sld7.SelectRange)
+
+    ' ---- C29-SL-p（说明 §4 那条例子量出来的）: FontSize 存什么读什么 ----
+    ' 点号 → 像素是有损的一步（96 DPI 下 1pt = 1.3333px），旧写法从窗口 LOGFONT 反算，
+    ' 于是写 8 读回 8.25、写 10 读回 9.75、写 14 读回 14.25（探针 .build/slfont 那张表）。
+    ' 现在请求值按窗口自存，未设过的控件仍走反算（行为一字不动）。
+    ' SP2 是**第二头**：自存的数读回来当然还是自存的数，那一条问不出窗口 —— 所以要同时问
+    ' 一次像素高度（证人 FontPixelHeight，C3 扩展读数），而且只比**相对**高低、不钉绝对像素
+    ' （与 ChannelTop / TickStyle 那条同一教训：换 DPI 就换数）。
+    ' SP3 钉的是 0 那一档：SetPropW(0) 等于删属性（账 #107），少了那枚 Set 旗标，
+    ' 写 0 会静默变回"没设过"、读回来是系统默认字号。
+    txtF.FontSize = 8
+    txtF.FontSize = 10
+    Debug.Print "SP1-round=" & CStr(txtF.FontSize)
+    txtF.FontSize = 14
+    Debug.Print "SP1b-round14=" & CStr(txtF.FontSize) & "/" & CStr(txtG.FontSize)
+    txtF.FontSize = 26
+    Debug.Print "SP2-real=" & TF(txtF.FontPixelHeight > 2 * txtG.FontPixelHeight) & "/" & CStr(txtF.FontSize)
+    txtF.FontSize = 0
+    Debug.Print "SP3-zero=" & CStr(txtF.FontSize)
     Debug.Print "SLIDER-DONE"
     Unload Me
 End Sub

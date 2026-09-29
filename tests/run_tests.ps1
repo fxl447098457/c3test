@@ -1925,7 +1925,17 @@ if ($Category -in @("all", "run", "vbp")) {
                      # 判据不是"看着非零"：同一批属性在顶层那枚 sld4 上是 SB1=10/100 / SB2=42 /
                      # SB3=2/8 / SI9=25/40/15，两条路现在必须给出同一串数（SelLength 那格还顺带
                      # 钉住折叠后的 SelectRange 真立起来了）。
-                     "SO1-child=10/100/42/2", "SO2-child-page=8/5", "SO3-child-sel=20/15/Y")
+                     "SO1-child=10/100/42/2", "SO2-child-page=8/5", "SO3-child-sel=20/15/Y",
+                     # C29-SL-p（说明 §4 那条例子量出来的）: FontSize 以前从窗口的整数像素高度**反算**
+                     # 点号回来 ⇒ 写 8 读回 8.25、写 10 读回 9.75、写 14 读回 14.25（96 DPI 下 1pt =
+                     # 1.3333px，往返必然落格）。现在请求值按窗口自存。SP1 那两条刻意**只钉前半**
+                     # （`SP1b-round14=14/` 是个前缀）：后半那枚 txtG 从没设过字体、走的是反算那一支，
+                     # 它的数是 DPI 的函数（本机 8.25 = 系统默认 11px），钉死等于把本机写进判据。
+                     # SP2 第一格问的是**窗口**（证人 FontPixelHeight，只比相对高低）—— 自存的数
+                     # 读回来当然还是自存的数，光问它就是 #148 那条自洽假绿。
+                     # SP3 老实标成**行为钉**（BASE 也读 0）：0pt 折算成 lfHeight=0，反算也是 0，
+                     # 两边同数 —— 它防的是「SetPropW(0) 等于删属性」那一条（账 #107）被人改回去。
+                     "SP1-round=10", "SP1b-round14=14/", "SP2-real=Y", "SP3-zero=0")
     Test-Vbp "ctrlslider" "$Tests\ctrlslider\SlidApp.vbp" $slidNeedles
     Test-Vbp "ctrlslider_x86" "$Tests\ctrlslider\SlidApp.vbp" $slidNeedles -Arch "x86"
     Test-EmitcShape "sl_emitc_native" @("$Tests\ctrlslider\SlidApp.vbp") @(
@@ -1984,7 +1994,11 @@ if ($Category -in @("all", "run", "vbp")) {
         # ⇒ 这里没有可禁的反面形状（BASE 的 emit 里 sld7 只有 CreateControl 那一行），
         # 红的是这一条正向针 + 三条真跑读数（A/B 实测见 029 那格）。第 9 参是 35L：
         # .frm 只写 SelStart=20 + SelLength=15，终点由同一处出口折出来。
-        'vb6_Slider_Init((void*)vb6_hwnd_sld7, 10L, 100L, 42L, 2L, 8L, 5L, 20L, 35L, -1L);'
+        'vb6_Slider_Init((void*)vb6_hwnd_sld7, 10L, 100L, 42L, 2L, 8L, 5L, 20L, 35L, -1L);',
+        # C29-SL-p: 写侧形状没动（发码面看不出这次改的是**读侧自存**），钉这一条是防有人把
+        # 请求值又改成按窗口反算的那一支；证人那条读侧必须是登记过的专桩。
+        'vb6_SetControlFontSize(vb6_hwnd_txtF, 26);',
+        'vb6_ControlFontPixelHeight(vb6_hwnd_txtF'
     )
     # C29-SL-c: 事件派发那一段的形状。钉的是"认来源的那枚句柄 + 分流那一档"这一整对 ——
     # Slider 与 ScrollBar 共用一扇 case WM_HSCROLL/WM_VSCROLL 的门，写错句柄比对比就是静默不派发。
@@ -2061,6 +2075,9 @@ if ($Category -in @("all", "run", "vbp")) {
         # 就会留一条「编得过、跑了、什么都没发生」，本线踩过三次。
         'vb6_ComCall(vb6_hwnd_sld5, L"SetFocus"',
         'vb6_ComCall(vb6_hwnd_sld6, L"SetFocus"',
+        # C29-SL-p: 证人没登记之前，`txtF.FontPixelHeight` 落的就是这扇兜底门 —— 拿裸 HWND 当
+        # IDispatch 问它要一个不存在的属性（BASE 实测逐字命中，NEW 归零 ⇒ 这条反向针能红）。
+        'vb6_ComGetIntProp(vb6_hwnd_txtF, L"FontPixelHeight")',
         'CoCreateInstance'
     )
 

@@ -67,6 +67,9 @@ void vb6_SetControlFontName(void* hwnd, void* bstrName);
 // FontSize: returns VB6 Single (points) as float
 float vb6_GetControlFontSize(void* hwnd);
 void vb6_SetControlFontSize(void* hwnd, float sizePt);
+// C29-SL-p 判据证人（不是 VB6 属性）：窗口真在用的字体像素高度。
+// 字号那条判据只问自存的数就是自洽假绿，得同时问窗口一次（#148 那条教训）。
+int vb6_ControlFontPixelHeight(void* hwnd);
 // FontBold: VB6 True=-1, False=0
 int vb6_GetControlFontBold(void* hwnd);
 void vb6_SetControlFontBold(void* hwnd, int bold);
