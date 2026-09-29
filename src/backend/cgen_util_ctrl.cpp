@@ -1514,9 +1514,10 @@ void CCodeGen::emitFormInitialFocus(const FrmControl& formNode) {
     walk(formNode);
     if (!best) return;
 
-    std::string hwndVar = "vb6_hwnd_" + cIdent(best->controlName);
-    if (best->index >= 0) hwndVar += "_" + std::to_string(best->index);
-    c_.emitLine("vb6_Form_SetInitialFocus((void*)hwnd, (void*)" + hwndVar
+    // 句柄表达式必须走 `ctrlHwndExprForInit` —— 控件数组（如 txtSearch(0)）的句柄在
+    // `vb6_arr_<名>` 里，硬写 `vb6_hwnd_<名>_0` 会引用一个不存在的全局（NewTab 实测：
+    // error C2065 未声明的标识符 'vb6_hwnd_txtSearch_0'）。
+    c_.emitLine("vb6_Form_SetInitialFocus((void*)hwnd, (void*)" + ctrlHwndExprForInit(*best)
                 + ");  /* 账 #157: 显示时把焦点交给 " + best->controlName
                 + "（TabIndex=" + std::to_string(bestTabIndex) + "） */");
 }
