@@ -165,3 +165,38 @@ x86 编、按路径读文件）。`TickStyleConstants` 的四个成员名与
    `vb6_ComCall(裸 HWND, L"ClearSel", …)` —— BASE 实测就是这样：那句"清空"跑了、区段一点没动、零诊断。
    目前接的是**调用形** `sld1.ClearSel()`；不带括号那一形（VB6 也允许写 `Slider1.ClearSel`）仍然会被
    当成属性读掉，那一整片记在账 #143。
+
+## 本项目的实现口径（ai/029 C29-SL-k：`Text` 气泡与 `TextPosition`）
+
+类型库里那两条是 declaration-side 的真值：**`Text` = dispid `0x0010`、`VT_BSTR`**，文档原话
+"the string displayed in the ToolTip as the slider's position changes"；**`TextPosition` = `0x0011`**，
+枚举 `TextPositionConstants { sldAboveLeft = 0, sldBelowRight = 1 }`。所以 `Slider1.Text` **不是窗口标题**，
+是拖动时那颗气泡里显示的串 —— 这一格把它从通用的 `vb6_GetControlText`（`GetWindowText`）那支抢过来自己实现。
+行为面（气泡怎么摆、什么时候摆）探针量，见下表下面那四条。
+
+| 写法 | 读数与实现 |
+| --- | --- |
+| `Slider1.Text` | 存一份 BSTR 拷贝在窗口属性里，**同时把 tooltip 宿主里那条工具的文本一起换掉** ⇒ 读回来问的是宿主而不是我们的口袋。没写过就读回空串（VB6 同）；但气泡在 `Text` 空着时打的是**当前的值**（原生那颗本来就画数字） |
+| `Slider1.TextPosition` | `0 = sldAboveLeft`（默认，摆在滑块上侧）、`1 = sldBelowRight`（下侧）。**原生没有这条消息**（气泡摆哪儿是控件自己定的）⇒ 自存 0/1、摆的时候用它定偏移；越界读落 `0` 那一档，与 `TickStyle` 同口径 |
+| `Slider1.BubbleVisible` | **本项目的扩展读数，不是 VB6 属性**：`IsWindowVisible` 问气泡宿主此刻摆没摆出来（实测无头也答 `True`） |
+| `Slider1.BubbleTop` | **扩展读数**：宿主窗口的上边。**只用来比两档的高低**，不钉绝对像素 |
+| `Slider1.BubbleText` | **扩展读数**：`TTM_GETTEXTW` 问宿主里此刻挂着的那句文本 |
+
+摆的时机与 `Change`/`Scroll` 是同一条通道（父窗那两条 `WM_HSCROLL`/`WM_VSCROLL`）：`TB_THUMBPOSITION(4)`
+与 `TB_THUMBTRACK(5)` 摆、`TB_ENDTRACK(8)` 收，其余档（点轨道、方向键）不动气泡 —— 与 `Scroll` 事件同一分法。
+派发那一行**只发一次、不按控件展开**，RTL 里按窗口类名把 ScrollBar 筛掉；容器（Frame / PictureBox）里的
+子滑杆这一路还没接（连它的 `Change`/`Scroll` 派发一起记在账 #83 那一族）。
+
+1. **原生轨道条自己那枚 `TBS_TOOLTIPS` 服务不了自定义串**：它自带一条工具、文本是它自己画的数字，
+   `TTM_POP` 在无头里什么都不触发（可见性 0、一条 notify 都不发）。而且 `TBS_TOOLTIPS` **只有创建时给
+   才建得出那枚气泡**（事后写样式位留着，但 `TBM_GETTOOLTIPS` 恒 0 —— 与 DTPicker 的 `DTS_SHOWNONE` 同族），
+   而运行期 RTL 只拿得到 HWND，补不回来 ⇒ 气泡改由 RTL 自持一枚 `TTS_ALWAYSTIP` 宿主 +
+   `TTF_TRACK|TTF_ABSOLUTE` 工具来摆（v6 下 `TTM_ADDTOOLW` 回 1、`TTM_GETTOOLCOUNT` 跟着涨、
+   `TTM_TRACKACTIVATE(TRUE)` 之后 `IsWindowVisible` 就答 1）。
+2. **`TTM_GETTEXT` 的返回值不是成功标志**：实测 `rc=0` 而文本照样复制进缓冲 ⇒ 证人只看缓冲。
+   与上一格 `ToolTipRegistered`（账 #148）是同一处坑、同一个修法。
+3. **这一格的探针是反着骗人的**：同一份源码编两份，不挂 Common-Controls 6.0 清单那份（v5）
+   `TTM_ADDTOOLW` **直接返回 0**，挂上才回 1。上一格差点据此报出一条假缺陷，所以本格的判据全部
+   写在产物里（`SK1`…`SK7`），探针只用来定机制。
+4. **`Text` 空着时气泡打数字、写了就用写的串**这一条是**本项目的口径**：VB6 文档只说"显示这个串"，
+   没说两者怎么共存，那颗 32 位 OCX 在本机跑不起来拿不到真值。哪天拿到 VB6 真值要翻，红的是 `SK6`。
