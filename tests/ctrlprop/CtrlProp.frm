@@ -127,6 +127,19 @@ Private Sub Form_Load()
     Debug.Print "CP10=" & List1.BorderStyle
     List1.BorderStyle = 0
     Debug.Print "CP11=" & List1.BorderStyle
+    ' 账 #142(C29-SL-e): 通用字符串属性 ToolTipText / Tag 的档位在**通用段**登记，
+    ' 所以证人不能只有 Slider 一枚 —— 这里各来一枚 Label 与 TextBox（改之前这两条 CStr
+    ' 打空、TypeName 答 "Object"，因为 RTL getter 是 `void*` 而装箱表把"其他指针"送对象）。
+    lblSingle.ToolTipText = "ltt"
+    txtOne.Tag = "xtt"
+    Debug.Print "CP12=" & CStr(lblSingle.ToolTipText) & "/" & TypeName(lblSingle.ToolTipText)
+    Debug.Print "CP13=" & CStr(txtOne.Tag) & "/" & TypeName(txtOne.Tag)
+    If txtOne.Tag = "xtt" Then
+        Debug.Print "CP14=yes"
+    Else
+        Debug.Print "CP14=no"
+    End If
+    Debug.Print "CP15=" & CStr(List1.ToolTipText) & "/end"
     Debug.Print "CTRLPROP-DONE"
     Unload Me
 End Sub

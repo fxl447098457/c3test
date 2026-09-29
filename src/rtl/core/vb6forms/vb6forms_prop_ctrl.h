@@ -76,11 +76,17 @@ int vb6_GetCausesValidation(void* hwnd);
 void vb6_SetCausesValidation(void* hwnd, int causes);
 
 // P13.8: ToolTipText (returns BSTR)
-void* vb6_GetToolTipText(void* hwnd);
+// C29-SL-d/e: 返回型写 **wchar_t\*** 而不是 `void*` —— 装箱那一步是 C11 `_Generic`
+// （`vb6rtl_variant.h` 那张表把"其他指针 void*/class*/type*"送到 `vb6_VariantObject`），
+// 写 `void*` 就把一条字符串属性装成了对象：实测 `CStr(Slider1.ToolTipText)` 打空、
+// `TypeName(...)` 答 "Object"。`wchar_t*` 命中表里的 BSTR 那一条 ⇒ VT_BSTR(8)。
+// 与已经对的 `vb6_GetControlText` 同型。（`vb6_GetMouseIcon` / `vb6_GetControlHwnd`
+// 刻意继续写 `void*` —— 那两条本来就是对象，装成对象是对的。）
+wchar_t* vb6_GetToolTipText(void* hwnd);
 void vb6_SetToolTipText(void* hwnd, void* bstrText);
 
-// P13.9: Tag (returns BSTR, stored as window property)
-void* vb6_GetControlTag(void* hwnd);
+// P13.9: Tag (returns BSTR, stored as window property) —— 返回型同上一条的理由。
+wchar_t* vb6_GetControlTag(void* hwnd);
 void vb6_SetControlTag(void* hwnd, void* bstrTag);
 
 // P13.7: MousePointer/MouseIcon (all visible controls)

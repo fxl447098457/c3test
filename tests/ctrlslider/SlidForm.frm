@@ -66,6 +66,7 @@ Begin VB.Form SlidForm
       Left            =   120
       TabIndex        =   4
       Top             =   1680
+      ToolTipText     =   "dtip"
       Width           =   2000
       _ExtentX        =   3528
       _ExtentY        =   706
@@ -220,6 +221,28 @@ Private Sub tGo_Timer()
     y0 = gClk2
     sld2.SimStdEvent(0, 0)
     Debug.Print "SD7-install=" & TF(gClk2 - y0 = 1)
+    ' ---- C29-SL-e: 通用字符串属性面（ToolTipText / Tag）----
+    ' 这两条以前压根不在类型表里，而 RTL getter 又声明成 `void*` ⇒ 装箱那一步（C11 _Generic
+    ' 的表把"其他指针"送去 VariantObject）把字符串当**对象**装。实测（探针 .build/sltt，
+    ' 改之前）：CStr 打空、TypeName 答 "Object"、`If Slider1.Tag = "tag1"` 答假，
+    ' 而同一枚属性的 Len / InStr 那些**直接拿指针**的面却是对的 —— 两种答案就是没登记的证状。
+    ' 登记成 String（+ getter 的 C 返回型改 wchar_t*）之后消费面统一。SE9 是"没写过就是空串"
+    ' 那一条默认档，SE10 是 .frm 里设计期那条到没到窗口（VB6 会到；没到就是设计期那一趟的缺口）。
+    Dim sTip As String
+    sld3.ToolTipText = "abc"
+    sld3.Tag = "t9"
+    Debug.Print "SE1-tip=" & CStr(sld3.ToolTipText)
+    Debug.Print "SE2-tag=" & CStr(sld3.Tag)
+    Debug.Print "SE3-tn=" & TypeName(sld3.ToolTipText)
+    Debug.Print "SE4-vt=" & CStr(VarType(sld3.Tag))
+    Debug.Print "SE5-len=" & CStr(Len(sld3.ToolTipText))
+    Debug.Print "SE6-eqtag=" & TF(sld3.Tag = "t9")
+    Debug.Print "SE7-eqtip=" & TF(sld3.ToolTipText = "abc")
+    sTip = sld3.ToolTipText
+    Debug.Print "SE8-assign=" & CStr(Len(sTip)) & "/" & sTip
+    Debug.Print "SE9-unset=" & CStr(sld1.ToolTipText) & "/" & CStr(sld1.Tag)
+    Debug.Print "SE10-dt=" & CStr(sld5.ToolTipText)
+    Debug.Print "SE11-cat=" & "v=" & sld3.Tag
     Debug.Print "SLIDER-DONE"
     Unload Me
 End Sub

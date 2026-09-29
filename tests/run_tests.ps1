@@ -1595,7 +1595,8 @@ if ($Category -in @("all", "run", "vbp")) {
     # Fix 194: 控件属性的字符串写入值必须转 BSTR (控件数组元素具名属性曾生成
     # `vb6_SetControlText(hwnd, (BSTR)ListCount)` 直接段错误), 且 List(j) 参与
     # 字符串相等比较要按 BSTR 处理 (RTL 声明是 void* → 曾判成 VariantObject, 比较恒假)。
-    Test-Vbp "ctrlprop" "$Tests\ctrlprop\CtrlProp.vbp" @("CP1=2", "CP2=2", "CP3=1", "CP4=2", "CP5=2", "CP6=1", "CP7=2", "CP8=0", "CP9=0", "CP10=1", "CP11=0", "CTRLPROP-DONE")
+    Test-Vbp "ctrlprop" "$Tests\ctrlprop\CtrlProp.vbp" @("CP1=2", "CP2=2", "CP3=1", "CP4=2", "CP5=2", "CP6=1", "CP7=2", "CP8=0", "CP9=0", "CP10=1", "CP11=0", "CTRLPROP-DONE",
+        "CP12=ltt/String", "CP13=xtt/String", "CP14=yes", "CP15=/end")
     # ai/029 C29-1a: 接上 Shape / Line 的"创建那一刀" —— 改之前 controlTypeToWin32Class 对
     # 这两个类型返回 nullptr, 控件被当"不可见控件"跳过, 句柄永远是 NULL, 屏幕上什么都没有 (029 §二-2)。
     # 21 条读数: 设计期几何落位 (CS1-CS4)、设计期整数属性落位 (CS5-CS7)、运行期读写回路 (CS8-CS10)、Line 改端点连窗口一起搬 (CS11-CS14)、手册那条"笔宽不是 1 就强制实线"的规则 (CS15-CS16)、容器 (Frame) 内的那条创建路 (CS17-CS19)、控件数组按槽位走 (CS20-CS21)。
@@ -1848,7 +1849,16 @@ if ($Category -in @("all", "run", "vbp")) {
                      "SD5-keyup=Y", "SD6-isolate=Y",
                      # SD7 是「装不装那一趟」的证人：sld2 除 Change（走父窗那条通道）外
                      # 只有 Click 一条，改之前它压根不会被子类化 ⇒ 处理器编得出来、没人送消息。
-                     "SD7-install=Y")
+                     "SD7-install=Y",
+                     # C29-SL-e 通用字符串属性面。SE1/SE2/SE3/SE4/SE6/SE11 六条是改之前
+                     # 就能翻红的（两条 getter 声明成 `void*`，而装箱那张 _Generic 表把
+                     # "其他指针"送去 VariantObject：CStr 打空、TypeName 答 Object、
+                     # VarType 答 9、Tag 的比较答假）；SE5/SE7/SE8/SE9 四条本来就直接拿
+                     # 指针、改之前也对，留着当形状证人。SE10（.frm 里设计期那一条）不登记
+                     # —— 它现在读回来是空的，登记等于把错的口径钉死，另记账 #142。
+                     "SE1-tip=abc", "SE2-tag=t9", "SE3-tn=String", "SE4-vt=8",
+                     "SE5-len=3", "SE6-eqtag=Y", "SE7-eqtip=Y", "SE8-assign=3/abc",
+                     "SE9-unset=/", "SE11-cat=v=t9")
     Test-Vbp "ctrlslider" "$Tests\ctrlslider\SlidApp.vbp" $slidNeedles
     Test-Vbp "ctrlslider_x86" "$Tests\ctrlslider\SlidApp.vbp" $slidNeedles -Arch "x86"
     Test-EmitcShape "sl_emitc_native" @("$Tests\ctrlslider\SlidApp.vbp") @(
@@ -1864,7 +1874,10 @@ if ($Category -in @("all", "run", "vbp")) {
         'vb6_Slider_SetMax(vb6_hwnd_sld4, 40);',
         'vb6_Slider_SetSelectRange(vb6_hwnd_sld4, 0);',
         'vb6_CStrLong(vb6_Slider_GetMin(vb6_hwnd_sld4',
-        'vb6_CStrBool(vb6_Slider_GetSelectRange('                  # #124 那条布尔口径
+        'vb6_CStrBool(vb6_Slider_GetSelectRange(',
+        # C29-SL-e: 归到 String 档之后 CStr 被折掉，两条读侧直接用 getter
+        'vb6_BSTR_Concat(vb6_BSTR_FromStr(L"SE1-tip="), vb6_GetToolTipText(vb6_hwnd_sld3)',
+        'vb6_BSTR_Concat(vb6_BSTR_FromStr(L"SE2-tag="), vb6_GetControlTag(vb6_hwnd_sld3)'                  # #124 那条布尔口径
     )
     # C29-SL-c: 事件派发那一段的形状。钉的是"认来源的那枚句柄 + 分流那一档"这一整对 ——
     # Slider 与 ScrollBar 共用一扇 case WM_HSCROLL/WM_VSCROLL 的门，写错句柄比对比就是静默不派发。
@@ -1896,6 +1909,9 @@ if ($Category -in @("all", "run", "vbp")) {
         'vb6_ComCall(vb6_hwnd_sld1, L"SimNotify"',
         # C29-SL-d: 同一条坑的第二枚判据方法（SimStdEvent）。
         'vb6_ComGetObjectProp(vb6_hwnd_sld6, L"SimStdEvent")',
+        # C29-SL-e: 改之前的两条形状（BASE 上逐条命中，所以这两条反向针能红）
+        'vb6_CStr(vb6_VariantFromValue(vb6_GetToolTipText',
+        'vb6_CStr(vb6_VariantFromValue(vb6_GetControlTag',
         'vb6_ComCall(vb6_hwnd_sld6, L"SimStdEvent"',
         'CoCreateInstance'
     )

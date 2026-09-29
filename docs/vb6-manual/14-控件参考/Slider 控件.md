@@ -78,3 +78,22 @@
 1. **不需要 `WS_TABSTOP` 也能收到按键**：原生轨道条在 `WM_LBUTTONDOWN` 里自己就把焦点抢过去了（实测：按下之后跟着一条 `WM_SETFOCUS`，"focus after click = 控件"）。所以"按一下方向键调音量"这种写法在本项目里是真的会跑。但 **Tab 键导航本身仍然不通** —— 主消息循环没有 `IsDialogMessage`，而且所有控件的创建样式都没挂 `WS_TABSTOP`（`Slider1.TabStop` 因此答 `False`）；那一整片缺口记在账 #83，不在本格。
 2. **`Click` 这一档是通用的、不是 Slider 专属**：以前"控件级 `_Click` 处理器"只有那种会往父窗发原生通知的控件（命令按钮 / 复选 / 单选 / 列表 / 组合框 / 文件系统三件套 / SSTab / 工具栏）才会被接上，其余控件（Label / Image / PictureBox / Frame / TextBox / 滚动条 / Slider）的 `xxx_Click` 是**编得过、永远不被调用**的死代码。本格把这些补上了，同时按上表把那批"已有原生 Click 来源"的控件排除掉 —— 否则一次点击会从两条路各发一次。
 3. **`Slider1.SimStdEvent(kind, wParam)` 是判据专用助手，不是 VB6 方法**（与 `SimNotify` / `DTPicker.SimChange` / `RichTextBox.SimNotify` 同先例）：`kind` 0=Click 1=DblClick 2=KeyDown 3=KeyUp，把对应的那条原生消息**同步**送进控件自己的过程。无头环境点不了鼠标，而直接调处理器会绕开整条派发链。
+
+## 本项目的实现口径（ai/029 C29-SL-e：`ToolTipText` 与 `Tag`）
+
+这两条是**所有可见控件通用**的属性（不只 Slider），本项目走同一对 RTL 入口：
+`vb6_SetToolTipText` 把文本存进窗口属性 `VB6_ToolTipText`，并顺手把它注册到共享的 tooltip 控件
+（`TOOLTIPS_CLASS`，`TTS_ALWAYSTIP`）；`vb6_SetControlTag` 同理存 `VB6_Tag`。
+
+| 写法 | 读数与实现 |
+| --- | --- |
+| `Slider1.ToolTipText = "音量"` | 存一份拷贝（`SysAllocString`）并注册工具项；`CStr(Slider1.ToolTipText)` 打回 `音量`、`TypeName` 答 `String`、`VarType` 答 `8`。**没写过就读答案是空串**（VB6 同） |
+| `Slider1.Tag = "sld-a"` | 同上，存在窗口属性里；`If Slider1.Tag = "sld-a"` 走字符串比较 |
+
+两条以前都坏在**档位**上：读写面早就登记了，但类型表里没有它们，而 getter 的 C 返回型写 `void*`
+⇒ 装箱那张 `_Generic` 表把"其他指针"送去 `VariantObject`，于是 `CStr` 打空、`TypeName` 答 `Object`、
+`Tag` 的比较答假，而同一枚属性的 `Len` / `InStr` / 赋值这几条反而是对的。现在归到 `String` 档、
+返回型改 `wchar_t*`，消费面统一。
+
+**已知缺口（记账，未修）**：`.frm` 里设计期写的 `ToolTipText = "..."` 目前不会下发到窗口，
+运行期读回来是空串；运行期赋值不受影响。

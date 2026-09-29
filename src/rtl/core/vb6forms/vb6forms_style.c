@@ -145,7 +145,7 @@ static HWND vb6_GetToolTipCtrl(void) {
     return s_hwndTT;
 }
 
-void* vb6_GetToolTipText(void* hwnd) {
+wchar_t* vb6_GetToolTipText(void* hwnd) {
     if (!hwnd) return SysAllocString(L"");
     HANDLE hProp = GetPropW((HWND)hwnd, L"VB6_ToolTipText");
     if (!hProp) return SysAllocString(L"");
@@ -189,7 +189,7 @@ void vb6_SetToolTipText(void* hwnd, void* bstrText) {
 // P13.9: Tag
 // ============================================================
 
-void* vb6_GetControlTag(void* hwnd) {
+wchar_t* vb6_GetControlTag(void* hwnd) {
     if (!hwnd) return SysAllocString(L"");
     HANDLE hProp = GetPropW((HWND)hwnd, L"VB6_Tag");
     if (!hProp) return SysAllocString(L"");

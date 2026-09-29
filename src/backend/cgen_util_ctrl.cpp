@@ -48,6 +48,20 @@ Vb6Type CCodeGen::controlPropType(FrmControlType ctrlType, const std::string& pr
     if (p == "visible" || p == "enabled") {
         return Vb6Type::Boolean;
     }
+    // C29-SL-e: `ToolTipText` / `Tag` 是 VB6 的 **String** 通用属性，但两条 RTL getter 原本
+    // 声明成 `void*`，而装箱那一步用的是 C11 `_Generic`（`vb6rtl_variant.h` 的表：
+    // "其他指针 (void*/class*/type*) -> VariantObject"）⇒ 裸指针被当**对象**装箱。
+    // 实测（探针工程 .build/sltt，改之前）：`CStr(Slider1.ToolTipText)` 打**空**、
+    // `TypeName(...)` 答 **"Object"**、`If Slider1.Tag = "tag1"` 答**假**（那一条比
+    // ToolTipText 更绕：比较面先装箱再 CStr，等于拿 "" 去比），而 `Len(...)` 与
+    // `InStr(...)` 这些**直接拿指针**的面反而是对的 —— 同一枚属性两种答案，就是没登记的证状。
+    // 登记成 String 之后所有消费面统一按 BSTR 取值（与 `vb6_GetControlText` 那条同档），
+    // RTL 侧的返回型也一起改成 `wchar_t*`，让**万一**还剩的装箱落到 VT_BSTR。
+    // 同一段里 `MouseIcon` / `Hwnd` 的 getter 也是 `void*`，但那两条**本来就是对象**，
+    // 装箱成对象是对的（FlexGrid 的 `CellPicture` 同型），刻意不动。
+    if (p == "tooltiptext" || p == "tag") {
+        return Vb6Type::String;
+    }
 
     if (ctrlType == FrmControlType::SSTab) {
         if (p == "tabs" || p == "tab" || p == "taborientation" || p == "tabstyle"
