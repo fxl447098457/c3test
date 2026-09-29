@@ -17,9 +17,12 @@
                     if (hasGot) c_.emitLine("if (id == " + std::to_string(ctrlId) + " && code == 256) { extern void " + gotFn + "(); " + gotFn + "(); }");
                     if (hasLost) { if (hasValidate) c_.emitLine("if (id == " + std::to_string(ctrlId) + " && code == 512 && !GetPropW((HWND)lParam, L\"VB6_ValidateCancel\")) { extern void " + lostFn + "(); " + lostFn + "(); }"); else c_.emitLine("if (id == " + std::to_string(ctrlId) + " && code == 512) { extern void " + lostFn + "(); " + lostFn + "(); }"); }
                 } else if (ctrl.controlType == FrmControlType::ComboBox) {
-                    // CBN_SETFOCUS=1024, CBN_KILLFOCUS=2048
-                    if (hasGot) c_.emitLine("if (id == " + std::to_string(ctrlId) + " && code == 1024) { extern void " + gotFn + "(); " + gotFn + "(); }");
-                    if (hasLost) { if (hasValidate) c_.emitLine("if (id == " + std::to_string(ctrlId) + " && code == 2048 && !GetPropW((HWND)lParam, L\"VB6_ValidateCancel\")) { extern void " + lostFn + "(); " + lostFn + "(); }"); else c_.emitLine("if (id == " + std::to_string(ctrlId) + " && code == 2048) { extern void " + lostFn + "(); " + lostFn + "(); }"); }
+                    // 账 #158：这里原本发的是 1024 / 2048 —— 那是 **CBEM_*（发给 ComboBoxEx 窗口的
+                    // 消息号）**，根本不是 WM_COMMAND 的 notification code，所以这两个分支永远等不到。
+                    // 真正的码表是 `CBN_SETFOCUS=3` / `CBN_KILLFOCUS=4`（对照同一段里
+                    // EN_=256/512、LBN_=4/5、BN_=6/7 都是对的 —— 只有 Combo 这一格抄错了表）。
+                    if (hasGot) c_.emitLine("if (id == " + std::to_string(ctrlId) + " && code == 3) { extern void " + gotFn + "(); " + gotFn + "(); }");
+                    if (hasLost) { if (hasValidate) c_.emitLine("if (id == " + std::to_string(ctrlId) + " && code == 4 && !GetPropW((HWND)lParam, L\"VB6_ValidateCancel\")) { extern void " + lostFn + "(); " + lostFn + "(); }"); else c_.emitLine("if (id == " + std::to_string(ctrlId) + " && code == 4) { extern void " + lostFn + "(); " + lostFn + "(); }"); }
                 } else if (ctrl.controlType == FrmControlType::ListBox) {
                     // LBN_SETFOCUS=4, LBN_KILLFOCUS=5
                     if (hasGot) c_.emitLine("if (id == " + std::to_string(ctrlId) + " && code == 4) { extern void " + gotFn + "(); " + gotFn + "(); }");
