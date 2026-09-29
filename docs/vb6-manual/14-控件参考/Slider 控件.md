@@ -44,7 +44,7 @@
 | `Slider1.Value` | `TBM_SETPOS`/`GETPOS`。**越界交给控件钳**（量程 10..100 时 `Value = 500` 读回 100、`= 5` 读回 10），我们不自己钳第二遍 |
 | `Slider1.SmallChange` / `.LargeChange` | 原生 line / page 尺寸，真往返。实测默认档是 **1 / 20**（VB6 文档写 1 / 5）：小的一条对得上，大的那条本项目**照原生答 20**，不拿文档去改控件的读数 —— 等拿到 VB6 真值再拍 |
 | `Slider1.SelectRange` | 样式位 `TBS_ENABLESELRANGE`，**运行期可改**（实测关掉之后 `CStr` 就答 `False`）。类型是 Boolean，所以 `CStr(sld.SelectRange)` 打 `True`/`False`、装箱是 `VT_BOOL` |
-| `Slider1.SelStart` / `.SelEnd` | 只有 `SelectRange = True` 时设进去才生效（实测没挂那位时 `TBM_SETSEL` 答不回来）。原生"没设过"答 `-1` ⇒ getter 折成 **0**（无区段）。两端互相顶：起点越过终点时终点跟上来 |
+| `Slider1.SelStart` / `.SelEnd` | 只有 `SelectRange = True` 时设进去才生效（实测没挂那位时 `TBM_SETSEL` 答不回来）。原生"没设过"答 `-1` ⇒ getter 折成 **0**（无区段）。两端互相顶：起点越过终点时终点跟上来。**注意 `SelEnd` 不是 VB6 的名字** —— 类型库里那一对话是 `SelStart` + `SelLength`（见下面 C29-SL-i 那一格），`SelEnd` 是本项目按原生 `TBM_SETSELEND` 加的口，因为存量代码在用就留着了 |
 
 **改设计期值面要注意顺序**：动 range 会让控件连带重算 `pos`、`page`、`selstart`（实测把 range 从 0..100 收到 10..100，`page` 从 20 变 18、`selstart` 跟到 10）。`vb6_Slider_Init` 的参数序因此是定死的：**range → line/page → pos → 刻度 → Sel**。
 
@@ -130,3 +130,30 @@ x86 编、按路径读文件）。`TickStyleConstants` 的四个成员名与
 `Text`（`0x0010`，BSTR：拖动时那颗气泡里显示的字符串）与 `TextPosition`（`0x0011`，枚举
 `sldAboveLeft = 0` / `sldBelowRight = 1`），再加事件面的 `KeyPress` / `MouseDown` / `MouseMove` /
 `MouseUp`。分别记在账 #146、#147 与 #141。
+
+## 本项目的实现口径（ai/029 C29-SL-i：选区的 VB6 那一面 —— `SelLength` 与 `ClearSel`）
+
+类型库（`ISlider` 的 dispid 表）给的是 **`SelStart`(0x0007) + `SelLength`(0x0008)** 这一对，两条都 `VT_I4`，
+另有一条方法 **`ClearSel`(0x000e)**，文档原话 "Sets the SelLength to 0"。**VB6 那一面没有 `SelEnd` 这个名字** ——
+本页上文表格里那条 `SelEnd` 是本项目早先（C29-SL-b）按原生 `TBM_SETSELEND` 自己加的口，因为存量夹具在用，
+留着不撤，这一格把 VB6 真的那一对照着补上。
+
+| 写法 | 读数与实现 |
+| --- | --- |
+| `Slider1.SelLength` | **起点不动、终点 = 起点 + 长度**，走原生 `TBM_SETSEL`；读回是两端之差，**空区段一律 0**。远端超出量程时由**控件夹住**（实测量程 10..100 写 900 落 100），我们不钳第二遍。类型档是 `Long`（`CStr` 打数字、`VarType` 答 `3`） |
+| `Slider1.ClearSel()` | 直发 `TBM_CLEARSEL`。清完之后 `SelStart` / `SelEnd` / `SelLength` 三条都读回 `0`（原生那两端答 `-1`，本项目折成 0，与 SL-b 同一条） |
+| 设计期 `SelStart = 25` + `SelLength = 15` | `.frm` 写的是 VB6 那一对时，创建那一趟折成 `(起, 止) = (25, 40)` 下发。**改之前 `SelLength` 整条被丢**（创建参数里那一位恒 `-999`），真 VB6 工程的选区建起来就是空的 —— 运行期写口一直是好的，缺口只在设计期那一趟，与 `ToolTipText`/`Tag`（账 #142）同一形状 |
+
+三条实测口径（探针 `.build/slprobe/slmeasure13.c`，量程 10..100）：
+
+1. **"没碰过"与"已清空"是两种空态，起点还不一样**：从没写过的控件 `GETSELSTART` 答的是**量程下限**（实测 10）
+   而 `GETSELEND` 答 0（终点比起点小 ⇒ 拿减法会得负数，所以长度折成 0）；`ClearSel` 之后两端都答 `-1`。
+   所以 `SetSelLength` 在"没有选区"那一态**锚量程下限**（与控件自己那一态一致），而不是锚折叠出来的 0 ——
+   否则 `ClearSel()` 之后紧跟一句 `SelLength = 5` 会被量程夹成 `(10,10)`，读回来还是 0：
+   一条"编得过、跑了、什么都没发生"的静默 no-op，本项目最忌这一形。夹具里 `SI4b` 专钉这条。
+2. **没挂 `SelectRange` 就是写不进去**（实测整条 `TBM_SETSEL` 不生效），本项目**不伪造**：`SI5`/`SI6` 钉的是
+   "写 7 读回 0"，而不是假装存了一份。与 `SelStart`/`SelEnd` 在 SL-b 里的口径同一档。
+3. **`ClearSel` 是方法不是属性**，发码要走控件方法那一支改道；落回兜底就编成
+   `vb6_ComCall(裸 HWND, L"ClearSel", …)` —— BASE 实测就是这样：那句"清空"跑了、区段一点没动、零诊断。
+   目前接的是**调用形** `sld1.ClearSel()`；不带括号那一形（VB6 也允许写 `Slider1.ClearSel`）仍然会被
+   当成属性读掉，那一整片记在账 #143。
