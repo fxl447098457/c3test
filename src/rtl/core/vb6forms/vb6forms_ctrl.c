@@ -239,6 +239,29 @@ void vb6_SetControlFontName(void* hwnd, void* bstrName) {
     vb6_SetControlFontFromLogFont(hwnd, &lf);
 }
 
+// C29-SL-q（账 #154）: 设计期那一条走这一支 —— `.frm` 里的字体名在生成码里是一枚 C 宽字符字面量，
+// 不是一枚 BSTR，而上面那支要 `SysStringLen` 量长度，喂字面量会把串尾之后的内存算进去。
+// （不改用 `vb6_BSTR_FromStr` 现造一枚：那要么在发码里漏一枚串 —— 本仓刚为同类临时串开过 #119。）
+void vb6_SetControlFontNameW(void* hwnd, const wchar_t* name) {
+    LOGFONTW lf;
+    int len;
+    if (!hwnd || !name || !name[0]) return;
+    if (!vb6_GetControlLogFont(hwnd, &lf)) {
+        memset(&lf, 0, sizeof(lf));
+        lf.lfHeight = -13;  // Default ~10pt
+        lf.lfCharSet = DEFAULT_CHARSET;
+        lf.lfOutPrecision = OUT_DEFAULT_PRECIS;
+        lf.lfClipPrecision = CLIP_DEFAULT_PRECIS;
+        lf.lfQuality = DEFAULT_QUALITY;
+        lf.lfPitchAndFamily = DEFAULT_PITCH | FF_DONTCARE;
+    }
+    len = lstrlenW(name);
+    if (len > LF_FACESIZE - 1) len = LF_FACESIZE - 1;
+    memcpy(lf.lfFaceName, name, len * sizeof(WCHAR));
+    lf.lfFaceName[len] = L'\0';
+    vb6_SetControlFontFromLogFont(hwnd, &lf);
+}
+
 // C29-SL-p（`ai/内置控件/Slider 控件（滑杆）.md` §4 那条例子量出来的，探针 .build/slfont）:
 // 点号 → 像素是**有损**的一步（96 DPI 下 1pt = 1.3333px，字体高度只能取整），所以旧写法
 // 从窗口反算会把请求值量化掉：写 8 读回 8.25、写 10 读回 9.75、写 14 读回 14.25。

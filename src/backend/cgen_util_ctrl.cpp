@@ -62,6 +62,14 @@ Vb6Type CCodeGen::controlPropType(FrmControlType ctrlType, const std::string& pr
     if (p == "tooltiptext" || p == "tag") {
         return Vb6Type::String;
     }
+    // 账 #154（C29-SL-q）: `FontName` 以前**根本没登记**，于是同一枚属性两种答案 ——
+    // `Len(Text1.FontName)` 直接拿指针、答得对（探针里 "Consolas" 读出 8），而
+    // `Debug.Print ... & Text1.FontName` 先装箱再 CStr、打出来是空串。看着像"字体名没设上"，
+    // 其实窗口里早就换上了（同一枚控件的 FontPixelHeight 证人当场翻案）。
+    // CommonDialog 那一条的 getter 也回字符串（vb6_CdGetFontName，ChooseFont 的字段），同一档。
+    if (p == "fontname") {
+        return Vb6Type::String;
+    }
 
     if (ctrlType == FrmControlType::SSTab) {
         if (p == "tabs" || p == "tab" || p == "taborientation" || p == "tabstyle"
@@ -1178,6 +1186,57 @@ void CCodeGen::emitDesignerStringProps(const FrmControl& ctrl, const std::string
     };
     emitOne("ToolTipText", "vb6_SetToolTipText");
     emitOne("Tag", "vb6_SetControlTag");
+}
+
+// 账 #154（C29-SL-q，从 `ai/内置控件/Slider 控件（滑杆）.md` §4 那条例子顺带量出来的）:
+// 设计期的 `FontName` / `FontSize` 此前**两条创建路都没打到窗口上** —— 探针 `.build/slfont` 里
+// 一枚写 Consolas+14 的文本框运行时读回 空串/8.25，另一枚写 20 的读回 8.25、窗口像素高度还是默认的 11。
+// 解析侧是留着这两条的（`frm_parser.cpp:388` 原样存进 `ctrl.properties`），缺的只有发码这一步
+// ⇒ 与 #125（Enabled/Visible/Value）、#142（ToolTipText/Tag）同一形状：运行期赋值一直是好的。
+// 只在 `.frm` **显式写过**时发，没写的控件逐字节维持今天的行为。
+// 发序是 先 Size 后 Name：两支 setter 都是"读当前 LOGFONT、只改自己那一格"，而 Name 那支在窗口
+// 本来没有字体时会先造一枚 `-13`（≈10pt）的底子 —— 把 Size 放在前面就不会被它盖掉。
+void CCodeGen::emitDesignerFontProps(const FrmControl& ctrl, const std::string& hwndExpr) {
+    switch (ctrl.controlType) {
+    case FrmControlType::Timer:         // 无窗口控件：字体没有落脚的地方
+    case FrmControlType::Menu:          // 菜单项的字体是 owner-draw 的事，不是窗口字体
+    case FrmControlType::ImageList:     // 不是窗口
+    case FrmControlType::CommonDialog:  // 它的 Font* 是 ChooseFont 的 LOGFONT 字段（D6 口径），
+                                        // 已由上面那条 cdStr/cdInt 分支发过，这里再发就是两遍
+        return;
+    default:
+        break;
+    }
+    const std::string hw = "(void*)" + hwndExpr;
+
+    auto szIt = ctrl.properties.find("FontSize");
+    if (szIt != ctrl.properties.end()) {
+        double pt = -1.0;
+        if (szIt->second.type == FrmValueType::Float) pt = szIt->second.floatValue;
+        else if (szIt->second.type == FrmValueType::Integer) pt = (double)szIt->second.intValue;
+        // 0 与负数不是字号（VB6 的设计期也不会写这种数），发了只会把窗口打成"默认字体"那一档。
+        if (pt > 0.0) {
+            c_.emitLine("vb6_SetControlFontSize(" + hw + ", " + std::to_string(pt)
+                        + "f);  /* design FontSize */");
+        }
+    }
+
+    auto nmIt = ctrl.properties.find("FontName");
+    if (nmIt != ctrl.properties.end() && nmIt->second.type == FrmValueType::String) {
+        std::string raw = nmIt->second.rawText;   // .frm 里的原始文本，含首尾双引号
+        if (raw.size() >= 2 && raw.front() == '"' && raw.back() == '"')
+            raw = raw.substr(1, raw.size() - 2);
+        if (!raw.empty()) {
+            std::string esc;
+            for (size_t i = 0; i < raw.size(); i++) {
+                char ch = raw[i];
+                if (ch == '"' || ch == '\\') esc += '\\';
+                esc += ch;
+            }
+            c_.emitLine("vb6_SetControlFontNameW(" + hw + ", L\"" + esc
+                        + "\");  /* design FontName */");
+        }
+    }
 }
 
 // C29-SL-g: 这个控件的 **焦点事件**（`GotFocus` / `LostFocus`）是不是已经由原生通知送进来了。

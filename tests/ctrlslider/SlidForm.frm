@@ -33,6 +33,16 @@ Begin VB.Form SlidForm
       Top             =   2880
       Width           =   1400
    End
+   Begin VB.TextBox txtH 
+      FontName        =   "Arial"
+      FontSize        =   20
+      Height          =   300
+      Left            =   3600
+      TabIndex        =   10
+      Text            =   "H"
+      Top             =   120
+      Width           =   500
+   End
    Begin VB.Timer tGo 
       Enabled         =   -1   'True
       Interval        =   60
@@ -137,6 +147,15 @@ Begin VB.Form SlidForm
          Width           =   2000
          _ExtentX        =   3528
          _ExtentY        =   706
+      End
+      Begin VB.TextBox txtI 
+         FontSize        =   20
+         Height          =   300
+         Left            =   120
+         TabIndex        =   11
+         Text            =   "I"
+         Top             =   720
+         Width           =   900
       End
    End
 End
@@ -525,6 +544,16 @@ Private Sub tGo_Timer()
     Debug.Print "SP2-real=" & TF(txtF.FontPixelHeight > 2 * txtG.FontPixelHeight) & "/" & CStr(txtF.FontSize)
     txtF.FontSize = 0
     Debug.Print "SP3-zero=" & CStr(txtF.FontSize)
+
+    ' ---- C29-SL-q（账 #154）: .frm 写的设计期字体**到不到窗口** ----
+    ' 探针 .build/slfont 量的：一枚写 FontName=Consolas + FontSize=14 的文本框运行时读回 空串/8.25，
+    ' 另一枚写 FontSize=20 的读回 8.25、窗口像素高度还是默认的 11 ⇒ 解析侧留了这两条属性
+    ' （frm_parser.cpp 原样存进 properties），缺的只是发码那一步 —— 与 #125 / #142 同一形状。
+    ' txtH 在窗体上（第一条创建路）、txtI 在 Frame 里（第二条）—— 这一族栽过几次"只接一头"，
+    ' 所以两条路各钉一枚。SQ3 问的是**窗口**（证人 FontPixelHeight，只比相对高低，不钉绝对像素）。
+    Debug.Print "SQ1-dt=" & txtH.FontName & "/" & CStr(txtH.FontSize)
+    Debug.Print "SQ2-child-dt=" & CStr(txtI.FontSize)
+    Debug.Print "SQ3-real=" & TF(txtH.FontPixelHeight > 2 * txtG.FontPixelHeight)
     Debug.Print "SLIDER-DONE"
     Unload Me
 End Sub

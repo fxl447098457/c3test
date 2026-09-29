@@ -252,6 +252,10 @@
     // 顶层控件与容器子控件两条创建路共用；只在 .frm 写了非空值时发。
     void emitDesignerStringProps(const FrmControl& ctrl, const std::string& hwndExpr);
 
+    // 账 #154（C29-SL-q）: 设计期 `FontName` / `FontSize` 打到窗口上。
+    // 与 #125 / #142 同一形状 —— **两条创建路都要调**（顶层那趟与容器子控件那趟），只接一头就是本线踩过几次的那声不响。
+    void emitDesignerFontProps(const FrmControl& ctrl, const std::string& hwndExpr);
+
     // 返回控件类型相关的 Win32 样式位 (BS_*/SS_*/ES_*/CBS_*/LBS_*/WS_BORDER...)。
     // 顶层控件与容器(Frame/PictureBox)子控件必须使用同一套逻辑，否则子控件缺
     // SS_NOTIFY/BS_GROUPBOX 等样式会导致外观/交互 (含 tooltip) 异常。

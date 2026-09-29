@@ -1935,7 +1935,15 @@ if ($Category -in @("all", "run", "vbp")) {
                      # 读回来当然还是自存的数，光问它就是 #148 那条自洽假绿。
                      # SP3 老实标成**行为钉**（BASE 也读 0）：0pt 折算成 lfHeight=0，反算也是 0，
                      # 两边同数 —— 它防的是「SetPropW(0) 等于删属性」那一条（账 #107）被人改回去。
-                     "SP1-round=10", "SP1b-round14=14/", "SP2-real=Y", "SP3-zero=0")
+                     "SP1-round=10", "SP1b-round14=14/", "SP2-real=Y", "SP3-zero=0",
+                     # C29-SL-q（账 #154）: `.frm` 里写的设计期 `FontName` / `FontSize` 以前整条丢掉
+                     # （BASE 同夹具：SQ1=`/8.25`、SQ2=`8.25`、SQ3=`N`），两条创建路现在都发
+                     # （txtH 在窗体上、txtI 在 Frame 里 —— 这一族栽过几次"只接一头"）。
+                     # SQ1 那格还顺带钉住**读侧**的一条旧坏：`FontName` 没登记成 String 档时
+                     # `Print ... & ctl.FontName` 打的是空串，而 `Len(...)` 直接拿指针、答得对
+                     # （探针里 "Consolas" 读成 8）—— 同一枚属性两种答案，就是没登记的证状。
+                     # SQ3 问的是窗口（证人只比相对高低），BASE 那枚即使字体真换了也读不出名字。
+                     "SQ1-dt=Arial/20", "SQ2-child-dt=20", "SQ3-real=Y")
     Test-Vbp "ctrlslider" "$Tests\ctrlslider\SlidApp.vbp" $slidNeedles
     Test-Vbp "ctrlslider_x86" "$Tests\ctrlslider\SlidApp.vbp" $slidNeedles -Arch "x86"
     Test-EmitcShape "sl_emitc_native" @("$Tests\ctrlslider\SlidApp.vbp") @(
@@ -1998,7 +2006,16 @@ if ($Category -in @("all", "run", "vbp")) {
         # C29-SL-p: 写侧形状没动（发码面看不出这次改的是**读侧自存**），钉这一条是防有人把
         # 请求值又改成按窗口反算的那一支；证人那条读侧必须是登记过的专桩。
         'vb6_SetControlFontSize(vb6_hwnd_txtF, 26);',
-        'vb6_ControlFontPixelHeight(vb6_hwnd_txtF'
+        'vb6_ControlFontPixelHeight(vb6_hwnd_txtF',
+        # C29-SL-q（账 #154）: 设计期字体三条形状 —— 顶层两条（Size + Name）、容器那一条（Size）。
+        # Name 走新的 W 支（`.frm` 里的字体名在生成码里是 C 字面量，不是 BSTR，喂给上面那支
+        # 会让 SysStringLen 去量字面量之后的内存）；发序是先 Size 后 Name（Name 那支在窗口没有
+        # 字体时先造 -13 的底子，反过来会把字号盖掉）。
+        'vb6_SetControlFontSize((void*)vb6_hwnd_txtH, 20.000000f);  /* design FontSize */',
+        'vb6_SetControlFontNameW((void*)vb6_hwnd_txtH, L"Arial");  /* design FontName */',
+        'vb6_SetControlFontSize((void*)vb6_hwnd_txtI, 20.000000f);  /* design FontSize */',
+        # 读侧 String 档：与 ToolTipText / Tag 同一形状（直接进 Concat，不再装箱）。
+        'vb6_BSTR_Concat(vb6_BSTR_FromStr(L"SQ1-dt="), vb6_GetControlFontName(vb6_hwnd_txtH)'
     )
     # C29-SL-c: 事件派发那一段的形状。钉的是"认来源的那枚句柄 + 分流那一档"这一整对 ——
     # Slider 与 ScrollBar 共用一扇 case WM_HSCROLL/WM_VSCROLL 的门，写错句柄比对比就是静默不派发。
@@ -2075,6 +2092,9 @@ if ($Category -in @("all", "run", "vbp")) {
         # 就会留一条「编得过、跑了、什么都没发生」，本线踩过三次。
         'vb6_ComCall(vb6_hwnd_sld5, L"SetFocus"',
         'vb6_ComCall(vb6_hwnd_sld6, L"SetFocus"',
+        # C29-SL-q: `FontName` 归到 String 档之前的那支装箱 —— 打印面先装箱再 CStr，打出来是空串，
+        # 而 `Len(...)` 那一面直接拿指针、答得对（"Consolas" 读出 8），所以这条旧坏一直没被看见。
+        'vb6_CStr(vb6_VariantFromValue(vb6_GetControlFontName(',
         # C29-SL-p: 证人没登记之前，`txtF.FontPixelHeight` 落的就是这扇兜底门 —— 拿裸 HWND 当
         # IDispatch 问它要一个不存在的属性（BASE 实测逐字命中，NEW 归零 ⇒ 这条反向针能红）。
         'vb6_ComGetIntProp(vb6_hwnd_txtF, L"FontPixelHeight")',

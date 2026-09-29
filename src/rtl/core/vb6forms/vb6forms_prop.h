@@ -64,6 +64,8 @@ void* vb6_GetControlHwnd(void* hwnd);
 // FontName: returns BSTR (caller responsible for SysFreeString)
 void* vb6_GetControlFontName(void* hwnd);
 void vb6_SetControlFontName(void* hwnd, void* bstrName);
+// C29-SL-q（账 #154）: 设计期那一条 —— 字体名是生成码里的 C 字面量，不是 BSTR。
+void vb6_SetControlFontNameW(void* hwnd, const wchar_t* name);
 // FontSize: returns VB6 Single (points) as float
 float vb6_GetControlFontSize(void* hwnd);
 void vb6_SetControlFontSize(void* hwnd, float sizePt);
