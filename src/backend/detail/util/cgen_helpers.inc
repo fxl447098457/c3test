@@ -280,6 +280,14 @@
     //   焦点与 Click 那两条必须带排除表，否则同一次操作会从两条路各发一次（C29-SL-g / SL-d）。
     bool controlNeedsSubclass(const FrmControl& ctrl) const;
 
+    // C29-SL-o（账 #83 的 Slider 半边）: Slider 的**设计期值面**下发。
+    // 这段原本内联在 cgen_form_ctrl_style_apply.inc（只有顶层控件走得到），容器
+    // （Frame / PictureBox / SSTab）里的子滑杆拿不到 ⇒ `.frm` 写的 Min/Max/Value/
+    // Small·LargeChange/TickFrequency/Sel* 整条丢（实测顶层读回 10/100/42/2/9/5、
+    // Frame 内读回 0/100/0/1/20/0 = 原生默认档）。抽出来两条创建路共用，hwndExpr 由调用方给
+    // （顶层那趟自己算槽、子控件那趟用 childHwndRead）。
+    void emitSliderDesignTimeInit(const FrmControl& ctrl, const std::string& hwndExpr);
+
     // VB6 PictureBox/Image 的 STATIC 控件不显示 Caption (标题在创建时应清空)。
     bool controlTypeClearsCaption(const FrmControl& ctrl) const;
 

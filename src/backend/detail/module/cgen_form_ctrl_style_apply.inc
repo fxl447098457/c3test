@@ -571,11 +571,9 @@
             c_.emitLine("vb6_DTP_Init((void*)" + dtHwnd + ", L\"" + esc + "\");");
         }
 
-        // C29-SL-a/b: Slider 设计期值面下发（Init 十参，-999 哨兵 = .frm 没写过 ⇒ 那一条消息
-        // 不发，保持控件默认；Init 本身照发，让发码形状稳定 —— 同 vb6_TreeView_Init 那条）。
-        // 参数顺序不是随便排的，是 .build/slprobe/slmeasure6.c 量出来的：改 range 会把 pos 顶到
-        // 新下限、把 page 从 20 重算成 18、把 selstart 跟到新下限 ⇒ range → line/page → pos →
-        // 刻度 → Sel 这个序，任何一端先动都会把后面的吃掉。
+        // C29-SL-a/b: Slider 设计期值面下发。C29-SL-o 起这段本身搬进 emitSliderDesignTimeInit
+        // （账 #83 的 Slider 半边 —— 容器子控件那条创建路以前压根不发这一条，参数序与 -999
+        // 哨兵的口径只在这一处，别在这里复制第二份）。
         if (ctrl.controlType == FrmControlType::Slider) {
             std::string slLower = ctrl.controlName;
             std::transform(slLower.begin(), slLower.end(), slLower.begin(), ::tolower);
@@ -583,31 +581,7 @@
                 ("vb6_CtrlArr_GetAt(&vb6_arr_" + cIdent(ctrl.controlName) + ", " +
                  std::to_string(ctrl.index >= 0 ? ctrl.index : 0) + ")") :
                 ("vb6_hwnd_" + cIdent(ctrl.controlName));
-            auto slProp = [&](const char* key) -> std::string {
-                auto it = ctrl.properties.find(key);
-                if (it == ctrl.properties.end()) return "-999";
-                return std::to_string((long long)(int)it->second.intValue) + "L";
-            };
-            // C29-SL-i: VB6 那一面的选区是 **SelStart + SelLength**（类型库 dispid 0x0007/0x0008），
-            // SelEnd 是我们 SL-b 按原生 TBM_SETSELEND 自己加的名字。所以 .frm 里只写了前两条时
-            // 这里折一次：终点 = 起点 + 长度 —— 否则真 VB6 工程的 SelLength 在设计期就被整条丢掉
-            // （运行期那条写口是好的，缺口只在创建那一趟，与账 #142 同一形状）。
-            // 只在**两条都写了**的时候折：起点没写就不知道拿什么当锚（原生"空态"的起点是量程下限，
-            // 而上限也可能是默认档），宁可不折也不猜一个起点出来下发。
-            std::string slEndArg = slProp("SelEnd");
-            if (slEndArg == "-999") {
-                auto ssIt = ctrl.properties.find("SelStart");
-                auto slIt = ctrl.properties.find("SelLength");
-                if (ssIt != ctrl.properties.end() && slIt != ctrl.properties.end()) {
-                    slEndArg = std::to_string((long long)(int)ssIt->second.intValue
-                                              + (int)slIt->second.intValue) + "L";
-                }
-            }
-            c_.emitLine("vb6_Slider_Init((void*)" + slHwnd + ", "
-                        + slProp("Min") + ", " + slProp("Max") + ", " + slProp("Value") + ", "
-                        + slProp("SmallChange") + ", " + slProp("LargeChange") + ", "
-                        + slProp("TickFrequency") + ", " + slProp("SelStart") + ", "
-                        + slEndArg + ", " + slProp("SelectRange") + ");");
+            emitSliderDesignTimeInit(ctrl, slHwnd);
         }
 
         // C29-MV-a: MonthView 设计期的多月平铺。原生没有"行/列"这条消息 —— 平铺几个月完全

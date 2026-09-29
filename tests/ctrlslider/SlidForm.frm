@@ -105,10 +105,19 @@ Begin VB.Form SlidForm
       Width           =   2400
       Begin MSComctlLib.Slider sld7 
          Height          =   400
+         LargeChange     =   8
          Left            =   120
+         Max             =   100
+         Min             =   10
+         SelLength       =   15
+         SelStart        =   20
+         SelectRange     =   -1   'True
+         SmallChange     =   2
          TabIndex        =   7
+         TickFrequency   =   5
          TickStyle       =   1
          Top             =   240
+         Value           =   42
          Width           =   2000
          _ExtentX        =   3528
          _ExtentY        =   706
@@ -469,6 +478,18 @@ Private Sub tGo_Timer()
     ' 本批零新增方法接线 ⇒ 红点只可能在“装不装”那一趟。
     sld8.SimStdEvent(1, 0)
     Debug.Print "SN7-dblone=" & CStr(gDbl8) & "/" & CStr(gDblCancel)
+
+    ' ---- C29-SL-o（账 #83 的 Slider 半边）: 容器子控件的设计期**值面** ----
+    ' sld7 挂在 Frame 里 ⇒ 走的是第二条创建路，而那条路以前一条 vb6_Slider_Init 都不发：
+    ' .frm 里写的 Min/Max/Value/… 整条丢掉，控件就停在原生默认档（BASE 实测读出默认）。
+    ' 判据形状 = 与顶层那条路**同一批 .frm 属性**逐字对上（探针 ChildProbe 顶层那枚的读数），
+    ' 不是"看着非零就算过"。LargeChange 读回不等于写进去的那个数是控件自己的口径
+    ' （见 SL-0 那批测量），所以这一格刻意把原值与读回值同时钉住 —— 数字变了就红。
+    ' SelEnd 那格是**折出来的**（.frm 里只写 SelStart + SelLength，终点 = 起点 + 长度），
+    ' 顶层那趟有的折叠，容器这一路必须有同一条 —— 复制一份发码不算接上。
+    Debug.Print "SO1-child=" & CStr(sld7.Min) & "/" & CStr(sld7.Max) & "/" & CStr(sld7.Value) & "/" & CStr(sld7.SmallChange)
+    Debug.Print "SO2-child-page=" & CStr(sld7.LargeChange) & "/" & CStr(sld7.TickFrequency)
+    Debug.Print "SO3-child-sel=" & CStr(sld7.SelStart) & "/" & CStr(sld7.SelLength) & "/" & TF(sld7.SelectRange)
     Debug.Print "SLIDER-DONE"
     Unload Me
 End Sub

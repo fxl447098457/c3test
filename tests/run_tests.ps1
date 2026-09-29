@@ -1918,7 +1918,14 @@ if ($Category -in @("all", "run", "vbp")) {
                      # C29-SL-n（账 #141）: 一枚**只挂 `_DblClick`** 的滑杆（sld8）。
                      # 第二格钉 arm 传进来的 Cancel —— VB6 的签名是 `Sub X_DblClick(Cancel As Integer)`,
                      # 以前 arm 写死无参调用, 按标准签名写的处理器直接编不过（C2198）。
-                     "SN7-dblone=1/0")
+                     "SN7-dblone=1/0",
+                     # C29-SL-o（账 #83 的 Slider 半边）: sld7 在 .frm 里写的这批值面属性，
+                     # BASE 那条容器路**一条都不下发** ⇒ 整段读出原生默认档
+                     # （BASE 实测 SO1=0/100/0/1 / SO2=20/0 / SO3=0/0/N，与 SB9-defaults 逐字同）。
+                     # 判据不是"看着非零"：同一批属性在顶层那枚 sld4 上是 SB1=10/100 / SB2=42 /
+                     # SB3=2/8 / SI9=25/40/15，两条路现在必须给出同一串数（SelLength 那格还顺带
+                     # 钉住折叠后的 SelectRange 真立起来了）。
+                     "SO1-child=10/100/42/2", "SO2-child-page=8/5", "SO3-child-sel=20/15/Y")
     Test-Vbp "ctrlslider" "$Tests\ctrlslider\SlidApp.vbp" $slidNeedles
     Test-Vbp "ctrlslider_x86" "$Tests\ctrlslider\SlidApp.vbp" $slidNeedles -Arch "x86"
     Test-EmitcShape "sl_emitc_native" @("$Tests\ctrlslider\SlidApp.vbp") @(
@@ -1972,7 +1979,12 @@ if ($Category -in @("all", "run", "vbp")) {
         'vb6_Slider_ClearSel((void*)vb6_hwnd_sld4);  /* clearsel */',
         # C29-SL-m: With 那一帧的接收者就是入口那枚 HWND（两形都走 pendingChainObj_ 协议）。
         'vb6_SetControlFocus((void*)_vb6_with_0);',
-        'vb6_Slider_ClearSel((void*)_vb6_with_2);'
+        'vb6_Slider_ClearSel((void*)_vb6_with_2);',
+        # C29-SL-o（账 #83 的 Slider 半边）: 容器子控件那条创建路以前**压根不发这一条**
+        # ⇒ 这里没有可禁的反面形状（BASE 的 emit 里 sld7 只有 CreateControl 那一行），
+        # 红的是这一条正向针 + 三条真跑读数（A/B 实测见 029 那格）。第 9 参是 35L：
+        # .frm 只写 SelStart=20 + SelLength=15，终点由同一处出口折出来。
+        'vb6_Slider_Init((void*)vb6_hwnd_sld7, 10L, 100L, 42L, 2L, 8L, 5L, 20L, 35L, -1L);'
     )
     # C29-SL-c: 事件派发那一段的形状。钉的是"认来源的那枚句柄 + 分流那一档"这一整对 ——
     # Slider 与 ScrollBar 共用一扇 case WM_HSCROLL/WM_VSCROLL 的门，写错句柄比对比就是静默不派发。

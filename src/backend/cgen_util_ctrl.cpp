@@ -1340,6 +1340,38 @@ bool CCodeGen::controlNeedsSubclass(const FrmControl& ctrl) const {
     return false;
 }
 
+// C29-SL-o（账 #83 的 Slider 半边）: Slider 的设计期值面 —— 两条创建路共用这一处。
+// 参数顺序不是随便排的，是 .build/slprobe/slmeasure6.c 量出来的：改 range 会把 pos 顶到新下限、
+// 把 page 从 20 重算成 18、把 selstart 跟到新下限 ⇒ range → line/page → pos → 刻度 → Sel
+// 这个序，任何一端先动都会把后面的吃掉。-999 哨兵 = .frm 没写过 ⇒ 那一条消息不发（保持控件默认），
+// 而 Init 本身照发 —— 发码形状稳定，emitc 断言要看它（同 vb6_TreeView_Init 那条）。
+void CCodeGen::emitSliderDesignTimeInit(const FrmControl& ctrl, const std::string& hwndExpr) {
+    auto slProp = [&](const char* key) -> std::string {
+        auto it = ctrl.properties.find(key);
+        if (it == ctrl.properties.end()) return "-999";
+        return std::to_string((long long)(int)it->second.intValue) + "L";
+    };
+    // C29-SL-i: VB6 那一面的选区是 **SelStart + SelLength**（类型库 dispid 0x0007/0x0008），
+    // SelEnd 是我们 SL-b 按原生 TBM_SETSELEND 自己加的名字。所以 .frm 里只写了前两条时
+    // 这里折一次：终点 = 起点 + 长度 —— 否则真 VB6 工程的 SelLength 在设计期就被整条丢掉
+    // （运行期那条写口一直是好的，缺口只在创建那一趟）。
+    // 只在**两条都写了**的时候折：起点没写就不知道拿什么当锚，宁可不折也不猜一个起点出来下发。
+    std::string slEndArg = slProp("SelEnd");
+    if (slEndArg == "-999") {
+        auto ssIt = ctrl.properties.find("SelStart");
+        auto slIt = ctrl.properties.find("SelLength");
+        if (ssIt != ctrl.properties.end() && slIt != ctrl.properties.end()) {
+            slEndArg = std::to_string((long long)(int)ssIt->second.intValue
+                                      + (int)slIt->second.intValue) + "L";
+        }
+    }
+    c_.emitLine("vb6_Slider_Init((void*)" + hwndExpr + ", "
+                + slProp("Min") + ", " + slProp("Max") + ", " + slProp("Value") + ", "
+                + slProp("SmallChange") + ", " + slProp("LargeChange") + ", "
+                + slProp("TickFrequency") + ", " + slProp("SelStart") + ", "
+                + slEndArg + ", " + slProp("SelectRange") + ");");
+}
+
 // 控件类型的 Win32 样式位。取值与 cgen_form_ctrl_style_apply.inc 保持一致。
 // 顶层控件与容器子控件共用，避免容器内子控件缺失类型样式。
 long CCodeGen::controlTypeStyleBits(const FrmControl& ctrl) const {

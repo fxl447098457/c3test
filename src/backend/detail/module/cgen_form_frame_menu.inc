@@ -136,6 +136,12 @@
                 emitDesignerStateProps(child, childHwndRead(child));  // 账 #125: 与顶层同口径
                 emitDesignerStringProps(child, childHwndRead(child));  // 账 #142: 同上（第二条创建路）
                 emitControlFrxProps(child);  // Fix 182: 容器子控件同样加载 .frx 设计期图片/文本/列表
+                // C29-SL-o（账 #83 的 Slider 半边）: 设计期值面以前只在顶层那条路发 ——
+                // Frame 里的 Slider 光有窗口，Min/Max/Value 那一批整条丢掉。共用同一个出口，
+                // 参数序与哨兵口径不写第二份。
+                if (child.controlType == FrmControlType::Slider) {
+                    emitSliderDesignTimeInit(child, childHwndRead(child));
+                }
                 // 注册控件名到knownFormControls_(供属性访问)
                 {
                     std::string childNameLower = child.controlName;
