@@ -279,6 +279,18 @@
                 std::string params = "struct " + clsStruct + "*";
                 for (auto& p : methodSym->params) {
                     std::string pType = mapType(p.type);
+                    // <vbeclipse>: 上面 Fix 184 只把**返回类型**的工程类补对了, 形参是
+                    // 同一处毛病: `Sub Wire(ByVal h As DemoShape)` 的 p.type 是 Variant
+                    // (类名在符号表里就丢了), mapType 只能给 vb6_VARIANT, 于是本文件的
+                    // extern 与类模块发的定义 (vb6_cls_DemoShape*) ABI 不符; 调用点照着
+                    // extern 那份把类指针装箱成 VARIANT → C2440 (实测 cc_demo/itf_via/
+                    // cls_inh/modulemethod 一系)。判定和调用点共用 cParamClassPtrType
+                    // 这一处权威（它内部就是 mapTypeRef，不是第二份表），并同 Fix 184
+                    // 带 `struct` 关键字免声明顺序依赖 —— 原型与实参打包不会再次分叉。
+                    const std::string pClsPtr = cParamClassPtrType(p);
+                    if (pType == "vb6_VARIANT" && !pClsPtr.empty()) {
+                        pType = "struct " + pClsPtr;
+                    }
                     if (!p.isByVal) {
                         // ByRef → C指针 (与 cgen_decl.cpp 函数定义一致)
                         pType += "*";
@@ -341,7 +353,17 @@
                 std::string missing;
                 if (prm.isByVal) {
                     // 从VARIANT中提取ByVal值
-                    if (pType == Vb6Type::Long || pType == Vb6Type::Integer ||
+                    // <vbeclipse>: 工程类形参的槽 —— 与上面 extern 那处同一个权威
+                    // (cParamClassPtrType)。DISPPARAMS 送来的是 VT_DISPATCH, 旧代码按
+                    // "Variant 槽"整份 VARIANT 结构透传, 而定义侧形参是 vb6_cls_X* ⇒
+                    // C2440 (实测 com_entry.c 的 vb6_DemoHolder_Wire)。这里剥出实例指针
+                    // 再交出去, 与**调用点**那条直传路径同一个口径。
+                    const std::string cpCls = cParamClassPtrType(prm);
+                    if (!cpCls.empty() && cpCls.compare(0, 8, "vb6_cls_") == 0) {
+                        provided = "(" + cpCls + ")vb6_ComObject_GetInstance("
+                                   "((VARIANT*)args[" + idx + "])->pdispVal)";
+                        missing = "NULL";
+                    } else if (pType == Vb6Type::Long || pType == Vb6Type::Integer ||
                         pType == Vb6Type::Byte) {
                         provided = "((VARIANT*)args[" + idx + "])->lVal";
                         missing = "0";

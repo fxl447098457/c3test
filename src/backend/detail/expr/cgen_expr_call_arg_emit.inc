@@ -254,6 +254,9 @@
         if (!isDeclareAnsiCall && i < calleeParams.size() && calleeParams[i].isByVal
             && (calleeParams[i].type == Vb6Type::Variant
                 || calleeParams[i].type == Vb6Type::Empty)
+            // <vbeclipse>: 工程类形参的槽 p.type 也是 Variant (见 arg_variant 同一处注释),
+            // 这里不能装箱 —— 判据共用 cParamClassPtrType, 与 dll 入口的 extern 同源。
+            && cParamClassPtrType(calleeParams[i]).empty()
             && !cExprIsVariant(argVal)) {
             // 装箱一律走 boxToVariant 这一处权威 (按 VB 声明类型选 ctor)。
             // 直接手写 vb6_VariantFromValue 是让 C 的 _Generic 猜类型: VB 的 Boolean

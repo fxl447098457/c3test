@@ -394,6 +394,27 @@
     // 已是 VARIANT 的表达式再按 VB 类型装一层, 换来 C2440 + C2198。
     bool cExprIsVariantCarrier(const std::string& cExpr) const;
 
+    // <vbeclipse>: 只有声明名（没有 AST 类型引用）时的 C 类型入口 —— 合成一次
+    // SimpleTypeRef 走 mapTypeRef, 不复制那份映射。dll/COM 入口的 extern 原型用它，
+    // 以便工程类形参与类模块的定义给出同一个类型。详见 cgen_base_type.cpp 定义处注释。
+    std::string cTypeForDeclaredTypeName(const std::string& name);
+
+    // <vbeclipse>: 该形参槽在 **C 侧**是否收工程类/接口的**实例指针**。是 → 返回那个
+    // 指针类型 (mapTypeRef 的原样结果, 不含 ByRef 的再取址)；否 → 空串。
+    // 为什么单独立一条：`Sub Wire(ByVal h As DemoShape)` 这种形参在符号表里 p.type 就是
+    // Vb6Type::Variant（类名只留在 p.typeRefName），于是全代码库那句
+    // `calleeParams[i].type == Vb6Type::Variant` 会把它当 Variant 槽 —— 调用点装箱成
+    // vb6_VARIANT、类模块的定义却是 vb6_cls_DemoShape* ⇒ C2440。所有"这个槽要不要装箱"
+    // 的判断都必须再过这一道，否则原型和调用点各按各的理解写（本条就是那次分叉的收口）。
+    // 只认 vb6_cls_ / vb6_ivref_ 两档：legacy 接口的 vb6_iface_<I>（非指针）和 COM 的
+    // vb6_ComIface_X* 一律返回空串 = 维持本改动之前的行为，不在这里顺手扩大。
+    std::string cParamClassPtrType(const ParameterInfo& p);
+
+    // <vbeclipse>: 配套 cParamClassPtrType 的**交付**侧：实参要放进那个类槽时该怎么发。
+    // clsPtr 为空 (= 不是类槽) 时原样返回，所以调用点写成 argVal = deliverToClassSlot(...)
+    // 是不分支的一句，不必每个站点各写一遍"是类槽就跳过装箱"。
+    std::string deliverToClassSlot(const std::string& clsPtr, const std::string& argVal) const;
+
     // Fix 038b: 运行时函数参数 C 类型查找表 — 当 calleeParams 为空 (运行时/内置函数)
     // 时, 通过函数名和参数索引查找期望的 C 类型. 返回空字符串表示未知.
     // 用于在函数调用参数生成时插入类型转换 (VARIANT→具体, 具体→VARIANT).
