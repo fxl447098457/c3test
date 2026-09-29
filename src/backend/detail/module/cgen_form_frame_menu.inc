@@ -47,7 +47,11 @@
                     tabMember44[v44] = pg44;
                 }
             }
+            // 账 #160: 容器里的 TabIndex 是**这套号自己从 0 编**（VB6 就是这样编号 —— 框架里的
+            // 控件不占窗体那一串的号）。没写的那几枚用同一父窗内的声明序号兜底。
+            long childTi = -1;
             for (const auto& child : container.children) {
+                childTi++;
                 if (child.controlType == FrmControlType::Menu) continue;
                 const char* childClass = FrmParser::controlTypeToWin32Class(child.controlType);
                 if (!childClass) continue;
@@ -140,6 +144,7 @@
                 emitDesignerStateProps(child, childHwndRead(child));  // 账 #125: 与顶层同口径
                 emitDesignerStringProps(child, childHwndRead(child));  // 账 #142: 同上（第二条创建路）
                 emitDesignerFontProps(child, childHwndRead(child));    // 账 #154: 同上（字体两条也两路都发）
+                emitDesignerTabIndexProp(child, childHwndRead(child), childTi);  // 账 #160: 第二条创建路同样要发这一句
                 emitControlFrxProps(child);  // Fix 182: 容器子控件同样加载 .frx 设计期图片/文本/列表
                 // C29-SL-o（账 #83 的 Slider 半边）: 设计期值面以前只在顶层那条路发 ——
                 // Frame 里的 Slider 光有窗口，Min/Max/Value 那一批整条丢掉。共用同一个出口，

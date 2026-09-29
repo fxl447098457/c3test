@@ -210,7 +210,11 @@
             }
     };
 
+    // 账 #160: 声明序号 —— 设计期没写 `TabIndex` 时的回落值（见 emitDesignerTabIndexProp）。
+    // 自增放在循环体第一句：这条循环里有多处 `continue`，放末尾会让后面的控件集体少一号。
+    int tabIndexFallback = -1;
     for (const auto& ctrl : frmDesc.formControl.children) {
+        tabIndexFallback++;
         // Fix 112: 工程内 UserControl (.ctl) 子控件 — 实例化到宿主子窗口.
         // 此前这类 controlTypeToWin32Class()==nullptr 的非 ActiveX 类型直接 continue,
         // Form2 上的 ucChartBar1 等从未创建 → vb6_ComCall(NULL,...) 被丢弃 → 白板窗体.

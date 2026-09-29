@@ -1245,6 +1245,35 @@ void CCodeGen::emitDesignerFontProps(const FrmControl& ctrl, const std::string& 
     }
 }
 
+// 账 #160: 设计期的 `TabIndex` 下发到窗口。RTL 侧那一对 `vb6_GetTabIndex` / `vb6_SetTabIndex`
+// （`vb6forms_style.c:86/93`，存成窗口属性 `VB6_TabIndex`， getter 没存过时答 0）早就齐了，
+// 缺的只有"创建时没人发"这一刀 ⇒ `.frm` 里写着 `TabIndex = 4`，运行期 `Ctl.TabIndex` 读回 0。
+// 口径两条：① `.frm` 写了就照写的发（**每个父窗自己从 0 编号**，VB6 就是这样的 —— 框架里的
+// 控件不占窗体那一串的号）；② 没写用**声明序号**兜底（VB6 存盘时从不省这一行，省了的都是
+// 手写夹具；兜成 0 会让好几枚控件同时声称自己是 0，兜成声明序至少是个全序）。
+// 与 #125 / #142 / #154 / #83 同一形状：**两条创建路都要调**，只接一头就是本线踩过几次的那声不响。
+void CCodeGen::emitDesignerTabIndexProp(const FrmControl& ctrl, const std::string& hwndExpr,
+                                        long declarationIndex) {
+    switch (ctrl.controlType) {
+    case FrmControlType::Timer:         // 无窗口控件：号没地方存
+    case FrmControlType::Menu:          // 菜单项不参与 tab 序
+    case FrmControlType::ImageList:     // 不是窗口
+    case FrmControlType::CommonDialog:  // 不是窗口
+    case FrmControlType::Data:          // 不是窗口
+    case FrmControlType::Unknown:
+        return;
+    default:
+        break;
+    }
+    long tabIndex = declarationIndex;
+    auto it = ctrl.properties.find("TabIndex");
+    if (it != ctrl.properties.end() && it->second.type == FrmValueType::Integer) {
+        tabIndex = (long)it->second.intValue;
+    }
+    c_.emitLine("vb6_SetTabIndex((void*)" + hwndExpr + ", " + std::to_string(tabIndex)
+                + ");  /* 账 #160: design TabIndex */");
+}
+
 // C29-SL-g: 这个控件的 **焦点事件**（`GotFocus` / `LostFocus`）是不是已经由原生通知送进来了。
 // 与上一条同型的问题在焦点这一档更隐蔽：仓里同一句判据被抄成了**三份表**（发 arm 的
 // `cgen_form_wndproc_subclass.inc`、装子类的 `cgen_form_frame_menu.inc`、拆子类的

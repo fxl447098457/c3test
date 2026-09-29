@@ -256,6 +256,12 @@
     // 与 #125 / #142 同一形状 —— **两条创建路都要调**（顶层那趟与容器子控件那趟），只接一头就是本线踩过几次的那声不响。
     void emitDesignerFontProps(const FrmControl& ctrl, const std::string& hwndExpr);
 
+    // 账 #160: 设计期 `TabIndex` 下发到窗口（存窗口属性 `VB6_TabIndex`）。
+    // `.frm` 写了照发的，没写用 `declarationIndex`（同一父窗内的声明序号）兜底 ——
+    // 兜成 0 会让多枚控件同时声称 TabIndex=0。两条创建路都要调。
+    void emitDesignerTabIndexProp(const FrmControl& ctrl, const std::string& hwndExpr,
+                                  long declarationIndex);
+
     // 返回控件类型相关的 Win32 样式位 (BS_*/SS_*/ES_*/CBS_*/LBS_*/WS_BORDER...)。
     // 顶层控件与容器(Frame/PictureBox)子控件必须使用同一套逻辑，否则子控件缺
     // SS_NOTIFY/BS_GROUPBOX 等样式会导致外观/交互 (含 tooltip) 异常。
