@@ -154,6 +154,8 @@ Vb6Type CCodeGen::controlPropType(FrmControlType ctrlType, const std::string& pr
         // SelectRange 在 VB6 是 Boolean ⇒ 按 #124 那条口径登记（getter 给的就是 -1/0），
         // 这样 `CStr(sld.SelectRange)` 打 True/False、装箱走 VT_BOOL。
         if (p == "selectrange") return Vb6Type::Boolean;
+        // 账 #148 的判据证人同样是 -1/0 ⇒ 同一档。
+        if (p == "tooltipregistered") return Vb6Type::Boolean;
     }
     if (ctrlType == FrmControlType::RichTextBox) {
         // C29-RT-a: 同一口径。vb6_RTB_Get* 除 SelText 外全是 int32_t（布尔按 VB6 的 -1/0 给，
@@ -577,6 +579,8 @@ std::string CCodeGen::getControlPropReadFn(FrmControlType ctrlType, const std::s
         if (propLower == "tickstyle") return "vb6_Slider_GetTickStyle";
         if (propLower == "getnumticks") return "vb6_Slider_GetNumTicks";
         if (propLower == "channeltop") return "vb6_Slider_ChannelTop";
+        // 账 #148 的判据证人（**不是 VB6 属性**）：tooltip 宿主里到底有没有这枚控件的工具。
+        if (propLower == "tooltipregistered") return "vb6_ToolTipRegistered";
         // C29-SL-i: VB6 选区那一对的第二条（SelStart + SelLength，类型库 dispid 0x0007/0x0008）。
         if (propLower == "sellength") return "vb6_Slider_GetSelLength";
         if (propLower == "visible") return "vb6_GetControlVisible";

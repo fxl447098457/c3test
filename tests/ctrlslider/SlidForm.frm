@@ -367,6 +367,12 @@ Private Sub tGo_Timer()
     ' SelLength 15），而原生只有 (起, 止) 那一条消息 ⇒ cgen 在设计期那一趟折成 (25, 40)。
     ' 改之前 SelLength 整条被丢（创建参数里只有 -999），读回来是空区段 —— 与账 #142 同一形状。
     Debug.Print "SI9-dt=" & CStr(sld6.SelStart) & "/" & CStr(sld6.SelEnd) & "/" & CStr(sld6.SelLength)
+    ' SJ1 是**账 #148 的疑点**：ToolTipText 那条一直只验了"存回来的串"，没验过"到底注册进
+    ' tooltip 宿主没有"。裸编探针（无 v6 manifest ⇒ 走 v5）里 TTM_ADDTOOLW 直接返回失败，
+    ' 但那不能定罪产品 —— 这里改问宿主 TTM_GETTEXT，三枚一起读：运行期设过的 sld3、设计期
+    ' 设过的 sld5 都该 Y，从没设过的 sld1 该 N（要是三条齐 Y 就说明这枚证人问不出东西）。
+    Debug.Print "SJ1-reg=" & TF(sld3.ToolTipRegistered) & "/" & TF(sld5.ToolTipRegistered) _
+        & "/" & TF(sld1.ToolTipRegistered)
     Debug.Print "SLIDER-DONE"
     Unload Me
 End Sub

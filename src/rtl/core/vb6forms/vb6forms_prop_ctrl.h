@@ -84,6 +84,9 @@ void vb6_SetCausesValidation(void* hwnd, int causes);
 // 刻意继续写 `void*` —— 那两条本来就是对象，装成对象是对的。）
 wchar_t* vb6_GetToolTipText(void* hwnd);
 void vb6_SetToolTipText(void* hwnd, void* bstrText);
+// C29-SL-j 判据证人（账 #148，**不是 VB6 属性**）：问共享 tooltip 宿主 TTM_GETTEXT，
+// 能把这枚控件的工具文本读回来 = 登记成立（存一份拷贝那一步 SE/CP 早有判据，登记那一步没有）。
+int32_t vb6_ToolTipRegistered(void* hwnd);
 
 // P13.9: Tag (returns BSTR, stored as window property) —— 返回型同上一条的理由。
 wchar_t* vb6_GetControlTag(void* hwnd);

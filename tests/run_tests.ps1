@@ -1889,7 +1889,14 @@ if ($Category -in @("all", "run", "vbp")) {
                      # （.frm 只写 SelStart+SelLength 时由 cgen 折成 (起, 止) 下发）。
                      "SI1-len=40", "SI2-set=20/30/10", "SI3-clamp=20/100/80",
                      "SI4-clear=0/0/0", "SI4b-reafter=10/5", "SI5-nobit=0/False",
-                     "SI6-nobit2=0", "SI7-neg=0", "SI8-type=Long/3", "SI9-dt=25/40/15")
+                     "SI6-nobit2=0", "SI7-neg=0", "SI8-type=Long/3", "SI9-dt=25/40/15",
+                     # SJ1 是**账 #148** 那条疑点的答案：ToolTipText 的"存回来"早有判据，
+                     # "注册进宿主"这一步以前没人验过。裸编探针（无 v6 manifest ⇒ comctl v5）
+                     # 里 TTM_ADDTOOLW 直接返回失败，但那不能定罪产品 —— 产物里问宿主
+                     # TTM_GETTEXT 读回来：运行期设过的 sld3、设计期设过的 sld5 都是 Y，
+                     # 从没设过的 sld1 是 N（第三格是负控：三条齐 Y 就说明证人问不出东西）。
+                     # BASE 上整条是 N/N/N —— 未登记时读回来是对象、折成数值恒假。
+                     "SJ1-reg=Y/Y/N")
     Test-Vbp "ctrlslider" "$Tests\ctrlslider\SlidApp.vbp" $slidNeedles
     Test-Vbp "ctrlslider_x86" "$Tests\ctrlslider\SlidApp.vbp" $slidNeedles -Arch "x86"
     Test-EmitcShape "sl_emitc_native" @("$Tests\ctrlslider\SlidApp.vbp") @(
@@ -1927,7 +1934,9 @@ if ($Category -in @("all", "run", "vbp")) {
         'vb6_Slider_ClearSel((void*)vb6_hwnd_sld4)',
         'vb6_Slider_SetSelLength(vb6_hwnd_sld4, 10)',
         'vb6_CStrLong(vb6_Slider_GetSelLength(vb6_hwnd_sld4',
-        'vb6_Slider_Init((void*)vb6_hwnd_sld6, -999, -999, -999, 1L, -999, -999, 25L, 40L, -1L);'
+        'vb6_Slider_Init((void*)vb6_hwnd_sld6, -999, -999, -999, 1L, -999, -999, 25L, 40L, -1L);',
+        # SJ-j: 证人走登记过的那条 getter（不再被折成「装箱 + 转数值」那一趟）。
+        'vb6_ToolTipRegistered(vb6_hwnd_sld3'
     )
     # C29-SL-c: 事件派发那一段的形状。钉的是"认来源的那枚句柄 + 分流那一档"这一整对 ——
     # Slider 与 ScrollBar 共用一扇 case WM_HSCROLL/WM_VSCROLL 的门，写错句柄比对比就是静默不派发。
@@ -1983,6 +1992,7 @@ if ($Category -in @("all", "run", "vbp")) {
         'vb6_ComGetProp(vb6_hwnd_sld4, L"SelLength")',
         'vb6_ComSetProp(vb6_hwnd_sld4, L"SelLength"',
         'vb6_ComCall(vb6_hwnd_sld4, L"ClearSel"',
+        'vb6_ComGetProp(vb6_hwnd_sld3, L"ToolTipRegistered")',
         'vb6_ComGetProp(vb6_hwnd_sld7, L"TickStyle")',
         'CoCreateInstance'
     )
