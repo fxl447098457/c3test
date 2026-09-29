@@ -32,7 +32,9 @@ Frame（以及 `PictureBox` / `SSTab`）里的控件走的是**第二条创建�
 > **键盘导航的现状**（三条都是实测，不是推的）：样式位立上了（账 #83(a)）、窗体显示时焦点自己就落在
 > 第一枚 tabstop（账 #157）之后，**模态窗体里按 Tab 已经真跳格**（往当前焦点 post 一对 `VK_TAB`，
 > 下一拍焦点就到了下一枚 —— `IsDialogMessageW` 那条路是通的）。**普通（非模态）窗体还不会动**：
-> 那条泵没调 `IsDialogMessage`，就差这一刀（账 #83(b) / 任务 #155）。框架里的控件要不要
-> `WS_EX_CONTROLPARENT` 才让对话框管理器走进去，**还没实测**（探针里没有容器）。
+> 那条泵没调 `IsDialogMessage`，就差这一刀（账 #83(b) / 任务 #155）。框架这一层还另有一刀：
+> 实测（探针 `.build/slfr`，tab 序 0=cmdA、1=cmdB、2=Frame 里 3/4 两枚按钮，每拍 post 一对
+> `VK_TAB`）站点序列是 `A → B → A → B` —— 对话框管理器**不走进框架**（也不停在框架本身），
+> 因为容器没带 `WS_EX_CONTROLPARENT`。所以框架里的控件要参与跳格，得先补那一位。
 > 运行期现给焦点是通的：`CmdOk.SetFocus` 实测落地（探针那枚按钮不在框架里 —— 框架里的子控件这一形本批没重测）。
 > 但按到之后 `_GotFocus` 不会发 —— 那是账 #158：Windows 对 BUTTON 的程序化 SetFocus 不发 `BN_SETFOCUS`。
