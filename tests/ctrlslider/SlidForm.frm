@@ -18,6 +18,7 @@ Begin VB.Form SlidForm
       Height          =   400
       Left            =   120
       TabIndex        =   0
+      Tag             =   ""
       TickFrequency   =   10
       Top             =   120
       Width           =   2000
@@ -65,6 +66,7 @@ Begin VB.Form SlidForm
       Height          =   400
       Left            =   120
       TabIndex        =   4
+      Tag             =   "dtag"
       Top             =   1680
       ToolTipText     =   "dtip"
       Width           =   2000
@@ -242,6 +244,13 @@ Private Sub tGo_Timer()
     Debug.Print "SE8-assign=" & CStr(Len(sTip)) & "/" & sTip
     Debug.Print "SE9-unset=" & CStr(sld1.ToolTipText) & "/" & CStr(sld1.Tag)
     Debug.Print "SE10-dt=" & CStr(sld5.ToolTipText)
+    Debug.Print "SE12-dttag=" & CStr(sld5.Tag)
+    sld5.ToolTipText = "rt"
+    sld5.Tag = ""
+    Debug.Print "SE13-over=" & CStr(sld5.ToolTipText) & "/" & CStr(sld5.Tag)
+    sld5.ToolTipText = "dtip"
+    sld5.Tag = "dtag"
+    Debug.Print "SE14-emptytag=" & CStr(sld1.Tag) & "/end"
     Debug.Print "SE11-cat=" & "v=" & sld3.Tag
     Debug.Print "SLIDER-DONE"
     Unload Me

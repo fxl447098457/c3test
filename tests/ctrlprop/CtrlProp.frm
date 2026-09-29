@@ -43,6 +43,7 @@ Begin VB.Form CtrlProp
    End
    Begin VB.TextBox txtOne 
       Height          =   300
+      ToolTipText     =   "dtxt"
       Left            =   240
       TabIndex        =   2
       Text            =   "T"
@@ -69,6 +70,7 @@ Begin VB.Form CtrlProp
    End
    Begin VB.Label lblSingle 
       Caption         =   "S"
+      Tag             =   "dtagL"
       Height          =   300
       Left            =   240
       TabIndex        =   5
@@ -140,6 +142,12 @@ Private Sub Form_Load()
         Debug.Print "CP14=no"
     End If
     Debug.Print "CP15=" & CStr(List1.ToolTipText) & "/end"
+    ' 账 #142: 设计期那两条字符串属性的证人（通用段被**两条创建路**共用，非 Slider 的控件也得证一次）
+    Debug.Print "CP16=" & CStr(lblSingle.Tag) & "/" & CStr(lblSingle.ToolTipText)
+    Debug.Print "CP17=" & CStr(txtOne.ToolTipText) & "/" & CStr(txtOne.Tag)
+    txtOne.ToolTipText = ""
+    Debug.Print "CP18=" & CStr(txtOne.ToolTipText) & "/" & CStr(txtOne.Text)
+
     Debug.Print "CTRLPROP-DONE"
     Unload Me
 End Sub

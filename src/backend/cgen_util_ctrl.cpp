@@ -1102,6 +1102,42 @@ void CCodeGen::emitDesignerStateProps(const FrmControl& ctrl, const std::string&
     }
 }
 
+// 账 #142: 设计期的 `ToolTipText` / `Tag` 此前**两条创建路都没发**（实测：`.frm` 里写了
+// `ToolTipText = "dtip"`，运行期读回来是空串 —— 属性行解析到了、就是没人发射）。
+// 两条口径：
+//   · **只在显式写了非空值时才发**。空串与"没写过"在 VB6 里读数同为 `""`，而运行期那一步会把
+//     值存进窗口属性**并往共享 tooltip 控件注册一条工具** —— 多发一条 = 改产物去做一件语义上
+//     零的事。与 #125 那三条"反面才发"是同一条纪律。
+//   · 值面**不转小写**（`Symbol::toLower` 是给标识符用的，转了就改坏用户写的文本），只补
+//     C 字面量要的两个转义：反斜杠先走，双引号后走。
+//   · **只认 `FrmValueType::String`**。真实的 VB6 .frm 会把资源引用写进这两条属性
+//     （`ToolTipText=   "frmTest.frx":0000`），解析器把那种行归成 `FrxReference` 而不是
+//     `String` ⇒ 这里直接跳过。顺带挡掉两件事：把 `frmTest.frx":0000` 当字面文本发出去
+//     （转义后是个假字符串），以及以后有人给 `FrxReference` 补 `.frx` 解析时把类型比较
+//     写成 `== FrmValueType::FrxReference`（那会把引用当文本灌进 `SysAllocString`）。
+void CCodeGen::emitDesignerStringProps(const FrmControl& ctrl, const std::string& hwndExpr) {
+    const std::string hw = "(void*)" + hwndExpr;
+    auto emitOne = [&](const char* key, const char* fn) {
+        auto it = ctrl.properties.find(key);
+        if (it == ctrl.properties.end()) return;
+        if (it->second.type != FrmValueType::String) return;
+        std::string raw = it->second.rawText;   // .frm 里的原始文本，含首尾双引号
+        if (raw.size() >= 2 && raw.front() == '"' && raw.back() == '"')
+            raw = raw.substr(1, raw.size() - 2);
+        if (raw.empty()) return;
+        std::string esc;
+        for (size_t i = 0; i < raw.size(); i++) {
+            char ch = raw[i];
+            if (ch == '"' || ch == '\\') esc += '\\';
+            esc += ch;
+        }
+        c_.emitLine(std::string(fn) + "(" + hw + ", L\"" + esc + "\");  /* design "
+                    + key + " */");
+    };
+    emitOne("ToolTipText", "vb6_SetToolTipText");
+    emitOne("Tag", "vb6_SetControlTag");
+}
+
 // 控件类型的 Win32 样式位。取值与 cgen_form_ctrl_style_apply.inc 保持一致。
 // 顶层控件与容器子控件共用，避免容器内子控件缺失类型样式。
 long CCodeGen::controlTypeStyleBits(const FrmControl& ctrl) const {

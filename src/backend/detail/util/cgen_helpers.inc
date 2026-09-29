@@ -248,6 +248,9 @@
     // 账 #125: 应用 .frm 设计期的**状态**三件 (Enabled / Visible / CheckBox·OptionButton 的 Value)。
     // 顶层控件与容器子控件两条创建路共用; hwndExpr 同 emitDesignerStyleProps。
     void emitDesignerStateProps(const FrmControl& ctrl, const std::string& hwndExpr);
+    // 账 #142: 设计期那两条**字符串**属性（ToolTipText / Tag）的发码。与上面那条一样被
+    // 顶层控件与容器子控件两条创建路共用；只在 .frm 写了非空值时发。
+    void emitDesignerStringProps(const FrmControl& ctrl, const std::string& hwndExpr);
 
     // 返回控件类型相关的 Win32 样式位 (BS_*/SS_*/ES_*/CBS_*/LBS_*/WS_BORDER...)。
     // 顶层控件与容器(Frame/PictureBox)子控件必须使用同一套逻辑，否则子控件缺
