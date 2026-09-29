@@ -252,6 +252,22 @@ function Test-Compile {
     }
 }
 
+# 判据匹配器 —— 唯一一处, 按字面子串比。
+# 旧代码在 4 个点各自写 -like 通配匹配, 而 [ ] * ? 在 needle 里会被当成通配符:
+# 输出本来带方括号的读数 (例如 Join(Array("a","b"), "|") 打出的 [a|b]) 永远匹配不上,
+# 因为 [ab] 被解释成"取一个字符的字符集"。上一批 Fix 161b-decl-out 撞上同一件事后
+# 改的是夹具 (另打一行无括号标记) 并留了一条警告注释 —— 那是让测试迁就工具,
+# 下一个带方括号的读数还会再红一次。这里把语义钉死: needle 是字面子串。
+# 注: 脚本里另有一批 .Contains 比较点, 语义与本函数一致 (同为字面), 不动。
+function Test-NeedleHit {
+    param($Lines, [string]$Needle)
+    foreach ($l in @($Lines)) {
+        if ($null -eq $l) { continue }
+        if (([string]$l).Contains($Needle)) { return $true }
+    }
+    return $false
+}
+
 # === 编译测试 (能生成 exe 但没有 Main, 仅验证编译通过) ===
 # 返回 @{ Ok; ExitCode; Output; Detail } 供调用方判定编译/运行结果
 #
@@ -500,7 +516,7 @@ function Test-Run {
     if ($ExpectedOutputs -and $ExpectedOutputs.Count -gt 0) {
         $allMatch = $true
         foreach ($expected in $ExpectedOutputs) {
-            $found = $runOutput | Where-Object { $_ -like "*$expected*" }
+            $found = Test-NeedleHit -Lines $runOutput -Needle $expected
             if (-not $found) {
                 $allMatch = $false
                 break
@@ -614,7 +630,7 @@ function Invoke-BasSetParallel {
                 $runOut = @(Get-Content $stdoutFile -ErrorAction SilentlyContinue)
                 $allMatch = $true
                 foreach ($exp in $it.Expected) {
-                    $found = $runOut | Where-Object { $_ -like "*$exp*" }
+                    $found = Test-NeedleHit -Lines $runOut -Needle $exp
                     if (-not $found) { $allMatch = $false; break }
                 }
                 if ($allMatch) { $p++ } else { $f++; $details += "$($it.Name): output mismatch" }
@@ -752,7 +768,7 @@ function Test-Vbp {
     if ($ExpectedOutputs -and $ExpectedOutputs.Count -gt 0) {
         $allMatch = $true
         foreach ($expected in $ExpectedOutputs) {
-            $found = $runOutput | Where-Object { $_ -like "*$expected*" }
+            $found = Test-NeedleHit -Lines $runOutput -Needle $expected
             if (-not $found) {
                 $allMatch = $false
                 break
@@ -1341,7 +1357,7 @@ if ($Category -in @("all", "run", "bas")) {
     # VB 名恰是 SDK A/W 宏名 (GetUserName→#define GetUserName GetUserNameW) 时,
     # 必须有显式 Alias 才走 vb6_di_ 桩绕开宏; CreateWindowExA 类名不得乱码。
     # 期望挂在本批自己的夹具上 (避免"期望挂错夹具"的假红)。
-    # ⚠ 断言用 `-like "*$expected*"` 匹配, 而 [ ] 是 PS 通配符的字符集 —— 期望串里
+    # 判据匹配现在由 Test-NeedleHit 做字面比 (方框号不再是通配符), 故此不必再用无括号的替代标记行。
     #   不得出现方括号 (夹具因此额外打印无括号的稳定标记行)。
     Add-BasTest "test_declare_byval_string_out" "$Tests\declare_out\declare_byval_string_out.bas" @("byval-name-ok=Y")
     Add-BasTest "test_declare_gmn_path_out" "$Tests\declare_out\declare_gmn_path_out.bas" @("gmn-path-ok=Y", "gmn-fixed-ok=Y")
@@ -2834,7 +2850,7 @@ if ($Category -in @("all", "run", "vbp")) {
             $cnRun = Invoke-TestExe -ExePath $cnExe -WorkDir $cnOut -Name "FrxDataCn"
             $cnOk = $cnRun.Ok
             foreach ($needle in @("FD1=alpha|beta", "FD4=5", "FD6=-7", "FRXDATA-DONE")) {
-                if (-not ($cnRun.Output | Where-Object { $_ -like "*$needle*" })) { $cnOk = $false }
+                if (-not (Test-NeedleHit -Lines $cnRun.Output -Needle $needle)) { $cnOk = $false }
             }
             if ($cnOk) {
                 $script:pass++

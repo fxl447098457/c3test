@@ -1768,7 +1768,8 @@ std::string CCodeGen::wrapVariantValue(ASTNode* valueNode, const std::string& cE
         if (lit.literalKind == LiteralKind::Null) return "vb6_VariantNull()";
         if (lit.literalKind == LiteralKind::Empty) return "vb6_VariantEmpty()";
         if (lit.literalKind == LiteralKind::Boolean) {
-            return std::string("vb6_VariantBool(") + cExpr + ")";
+            // 与 boxToVariant 的 Boolean 档同一个写法 (显式收窄), 免得两份表各写一形
+            return "vb6_VariantBool((int16_t)(" + cExpr + "))";
         }
     }
 
@@ -1805,7 +1806,8 @@ std::string CCodeGen::wrapVariantValue(ASTNode* valueNode, const std::string& cE
             case Vb6Type::Integer:   return "vb6_VariantLong(" + cExpr + ")";
             case Vb6Type::Double:
             case Vb6Type::Single:    return "vb6_VariantDouble(" + cExpr + ")";
-            case Vb6Type::Boolean:   return "vb6_VariantBool(" + cExpr + ")";
+            // 同 boxToVariant 的 Boolean 档写法 (显式收窄), 两份表不再各成一形
+            case Vb6Type::Boolean:   return "vb6_VariantBool((int16_t)(" + cExpr + "))";
             // 账 #123: Byte 的装箱档位以前是 vb6_VariantLong ⇒ VT_I4=3, 而 VB6 要 **VT_UI1=17**
             // (RTL 里 vb6_VariantByte 就是 17 那一档: v.vt = vb6_vtByte)。实测修复前
             // `v = 模块级Byte` 与 `v = CByte(67)` 都读回 3; 局部 Byte 反而是 17 —— 因为它在
@@ -1837,10 +1839,12 @@ std::string CCodeGen::wrapVariantValue(ASTNode* valueNode, const std::string& cE
         return "vb6_VariantArray(" + cExpr + ")";
     }
     
-    // Fix 025: 默认改用 _Generic 多态宏 vb6_VariantFromValue, 让编译器按实参 C 类型
-    // 自动选择 Variant 构造函数。覆盖标量/BSTR/void*/class ptr/vb6_SafeArray1D* 等所有
-    // 已注册的 _Generic 选择器, 不再粗暴回退到 VariantLong (会把指针/BSTR 当 int 截断)。
-    return "vb6_VariantFromValue(" + cExpr + ")";
+    // Fix 025: 默认档 —— 现在**只**经由 boxToVariant 这一处权威发出。
+    // 为什么: 装箱表以前有两份并行 (本函数的 switch + boxToVariant), 账 #123 只在
+    // 这一份修了 Byte、Fix 198 只在那一份修了 Boolean, 于是"某一档对不对"取决于
+    // 表达式走了哪条路 (实测 dt1.CheckBox 走实参装箱那条 → 读回 Long/3)。
+    // 现在两个入口共用一处收尾, 新增档位只需要改 boxToVariant。
+    return boxToVariant(static_cast<Expr*>(valueNode), cExpr);
 }
 
 // Fix 198: 见 cgen_helpers.inc 声明处注释 —— 装箱点的布尔口径修正.

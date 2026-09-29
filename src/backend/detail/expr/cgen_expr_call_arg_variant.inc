@@ -52,7 +52,8 @@
                 std::string on091s2 = Symbol::toLower(
                     static_cast<IdentifierExpr&>(*node.positional[i]).name);
                 if (knownObjectVars_.count(on091s2) || knownTypedComVars_.count(on091s2)) {
-                    argVal = "vb6_VariantFromValue(" + argVal + ")";
+                    // 同 arg_emit 那一处: 装箱只走 boxToVariant 这一权威 (见该处注释)
+                    argVal = boxToVariant(node.positional[i].get(), argVal);
                 }
             }
         }

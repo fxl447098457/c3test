@@ -255,7 +255,13 @@
             && (calleeParams[i].type == Vb6Type::Variant
                 || calleeParams[i].type == Vb6Type::Empty)
             && !cExprIsVariant(argVal)) {
-            argVal = "vb6_VariantFromValue(" + argVal + ")";
+            // 装箱一律走 boxToVariant 这一处权威 (按 VB 声明类型选 ctor)。
+            // 直接手写 vb6_VariantFromValue 是让 C 的 _Generic 猜类型: VB 的 Boolean
+            // 在 C 侧是 int32_t/int16_t, 于是 VarType(True) 报 3(Long) 而不是 11
+            // (实测 DT43 / MV41 / test_bool_display 三条同时红)。
+            argVal = boxToVariant(i < node.positional.size() ? node.positional[i].get()
+                                                             : nullptr,
+                                  argVal);
         }
 
         // ByVal String: 传 ANSI 缓冲的**地址**, 被调用方写入后按 NUL 截断回写。

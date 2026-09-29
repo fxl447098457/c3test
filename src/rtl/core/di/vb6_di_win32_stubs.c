@@ -3,7 +3,7 @@
 // Win32 forwarding stubs for VB6 `Declare ... Lib "x"` (Fix 076 scheme: C3 emits
 // `extern <ret> __stdcall vb6_di_<alias>(...)` and the RTL implements it).
 //
-// Family: win32   (libs: kernel32, winmm)   stubs: 447
+// Family: win32   (libs: kernel32, winmm)   stubs: 466
 //
 // Each stub reproduces C3's own generated prototype verbatim (that is the ABI the
 // caller uses: ByVal Long is widened to intptr_t, ByVal Single stays float, ByRef
@@ -12,7 +12,7 @@
 // types while preserving the register/memory passing class of every argument.
 //
 // generated from: a C3 compile session (pass -SessionDir to regenerate)
-// date: 2026-09-29 03:51
+// date: 2026-09-29 23:10
 //
 // Hand-maintained special cases stay in vb6_di_stubs.c (ordinals, msvbvm60 runtime,
 // dynamically loaded DLLs). Re-run the generator after a build exposes new symbols.
@@ -51,39 +51,14 @@ void WINAPI RtlZeroMemory(void*, size_t);
 #pragma comment(lib, "winmm.lib")
 #pragma comment(lib, "comdlg32.lib")
 
-/* GetTickCount */
-intptr_t __stdcall vb6_di_GetTickCount() {
-    return ((intptr_t (WINAPI *)(void))GetTickCount)();
-}
-
-/* RtlMoveMemory */
-void __stdcall vb6_di_RtlMoveMemory(void* Destination, void* Source, intptr_t Length) {
-    ((void (WINAPI *)(void*, void*, intptr_t))RtlMoveMemory)(Destination, Source, Length);
-}
-
 /* GetModuleHandleA */
 intptr_t __stdcall vb6_di_GetModuleHandleA(BSTR lpModuleName) {
     return ((intptr_t (WINAPI *)(BSTR))GetModuleHandleA)(lpModuleName);
 }
 
-/* GetProcAddress */
-intptr_t __stdcall vb6_di_GetProcAddress(intptr_t hModule, BSTR lpProcName) {
-    return ((intptr_t (WINAPI *)(intptr_t, BSTR))GetProcAddress)(hModule, lpProcName);
-}
-
-/* GlobalAlloc */
-intptr_t __stdcall vb6_di_GlobalAlloc(intptr_t wFlags, intptr_t dwBytes) {
-    return ((intptr_t (WINAPI *)(intptr_t, intptr_t))GlobalAlloc)(wFlags, dwBytes);
-}
-
-/* GlobalFree */
-intptr_t __stdcall vb6_di_GlobalFree(intptr_t hMem) {
-    return ((intptr_t (WINAPI *)(intptr_t))GlobalFree)(hMem);
-}
-
-/* VirtualProtect */
-intptr_t __stdcall vb6_di_VirtualProtect(void* lpAddress, intptr_t dwSize, intptr_t flNewProtect, int32_t* lpflOldProtect) {
-    return ((intptr_t (WINAPI *)(void*, intptr_t, intptr_t, int32_t*))VirtualProtect)(lpAddress, dwSize, flNewProtect, lpflOldProtect);
+/* GetModuleFileNameA */
+intptr_t __stdcall vb6_di_GetModuleFileNameA(intptr_t hModule, BSTR lpFilename, intptr_t nSize) {
+    return ((intptr_t (WINAPI *)(intptr_t, BSTR, intptr_t))GetModuleFileNameA)(hModule, lpFilename, nSize);
 }
 
 /* BuildCommDCBA */
@@ -242,6 +217,10 @@ intptr_t __stdcall vb6_di_GetModuleFileNameW(intptr_t hModule, intptr_t lpFileNa
 intptr_t __stdcall vb6_di_GetModuleHandleW(intptr_t lpModuleName) {
     return ((intptr_t (WINAPI *)(intptr_t))GetModuleHandleW)(lpModuleName);
 }
+/* GetProcAddress */
+intptr_t __stdcall vb6_di_GetProcAddress(intptr_t hModule, BSTR lpProcName) {
+    return ((intptr_t (WINAPI *)(intptr_t, BSTR))GetProcAddress)(hModule, lpProcName);
+}
 /* GetProcessHeap */
 intptr_t __stdcall vb6_di_GetProcessHeap() {
     return ((intptr_t (WINAPI *)(void))GetProcessHeap)();
@@ -265,6 +244,10 @@ void __stdcall vb6_di_GetSystemTime(void* lpSystemTime) {
 /* GetSystemWindowsDirectoryW */
 intptr_t __stdcall vb6_di_GetSystemWindowsDirectoryW(intptr_t lpBuffer, intptr_t nSize) {
     return ((intptr_t (WINAPI *)(intptr_t, intptr_t))GetSystemWindowsDirectoryW)(lpBuffer, nSize);
+}
+/* GetTickCount */
+intptr_t __stdcall vb6_di_GetTickCount() {
+    return ((intptr_t (WINAPI *)(void))GetTickCount)();
 }
 /* GetTimeZoneInformation */
 intptr_t __stdcall vb6_di_GetTimeZoneInformation(void* utc_lpTimeZoneInformation) {
@@ -293,6 +276,14 @@ intptr_t __stdcall vb6_di_GetVolumeInformationW(intptr_t lpRootPathName, intptr_
 /* GetVolumePathNameW */
 intptr_t __stdcall vb6_di_GetVolumePathNameW(intptr_t lpFileName, intptr_t lpVolumePathName, intptr_t cch) {
     return ((intptr_t (WINAPI *)(intptr_t, intptr_t, intptr_t))GetVolumePathNameW)(lpFileName, lpVolumePathName, cch);
+}
+/* GlobalAlloc */
+intptr_t __stdcall vb6_di_GlobalAlloc(intptr_t wFlags, intptr_t dwBytes) {
+    return ((intptr_t (WINAPI *)(intptr_t, intptr_t))GlobalAlloc)(wFlags, dwBytes);
+}
+/* GlobalFree */
+intptr_t __stdcall vb6_di_GlobalFree(intptr_t hMem) {
+    return ((intptr_t (WINAPI *)(intptr_t))GlobalFree)(hMem);
 }
 /* GlobalLock */
 intptr_t __stdcall vb6_di_GlobalLock(intptr_t hMem) {
@@ -410,6 +401,10 @@ intptr_t __stdcall vb6_di_ResetEvent(intptr_t hEvent) {
 void __stdcall vb6_di_RtlFillMemory(void* Destination, intptr_t Length, uint8_t Fill) {
     ((void (WINAPI *)(void*, intptr_t, uint8_t))RtlFillMemory)(Destination, Length, Fill);
 }
+/* RtlMoveMemory */
+void __stdcall vb6_di_RtlMoveMemory(void* Destination, void* Source, intptr_t Length) {
+    ((void (WINAPI *)(void*, void*, intptr_t))RtlMoveMemory)(Destination, Source, Length);
+}
 /* RtlZeroMemory */
 void __stdcall vb6_di_RtlZeroMemory(void* Destination, intptr_t Length) {
     ((void (WINAPI *)(void*, intptr_t))RtlZeroMemory)(Destination, Length);
@@ -513,6 +508,10 @@ intptr_t __stdcall vb6_di_VirtualAlloc(intptr_t lpAddress, intptr_t dwSize, intp
 /* VirtualFree */
 intptr_t __stdcall vb6_di_VirtualFree(intptr_t lpAddress, intptr_t dwSize, intptr_t dwFreeType) {
     return ((intptr_t (WINAPI *)(intptr_t, intptr_t, intptr_t))VirtualFree)(lpAddress, dwSize, dwFreeType);
+}
+/* VirtualProtect */
+intptr_t __stdcall vb6_di_VirtualProtect(void* lpAddress, intptr_t dwSize, intptr_t flNewProtect, int32_t* lpflOldProtect) {
+    return ((intptr_t (WINAPI *)(void*, intptr_t, intptr_t, int32_t*))VirtualProtect)(lpAddress, dwSize, flNewProtect, lpflOldProtect);
 }
 /* WaitCommEvent */
 intptr_t __stdcall vb6_di_WaitCommEvent(intptr_t hFile, int32_t* lpEventMask, void* lpOverlapped) {

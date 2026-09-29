@@ -157,7 +157,8 @@
                 bool argIsClassObj091o = !inferClassTypeOfExpr(*named.value).empty();
                 if (pi < calleeParams.size() && calleeParams[pi].isByVal
                     && calleeParams[pi].type == Vb6Type::Variant && !argIsClassObj091o) {
-                    argVal = "vb6_VariantFromValue(" + argVal + ")";
+                    // 同 arg_emit 那一处: 装箱只走 boxToVariant 这一权威 (见该处注释)
+                    argVal = boxToVariant(named.value.get(), argVal);
                 }
                 if (pi < orderedArgs.size()) {
                     orderedArgs[pi] = std::move(argVal);
