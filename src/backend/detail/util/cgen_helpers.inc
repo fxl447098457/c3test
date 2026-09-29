@@ -270,6 +270,16 @@
     std::string controlZeroArgMethod(FrmControlType ctrlType,
                                      const std::string& memberLower) const;
 
+    // C29-SL-n（账 #141）: 「这枚控件要不要子类化」的**唯一一份**判据。
+    // 这一趟原本被抄成三份：发 arm 的 `cgen_form_wndproc_subclass.inc`（按 info.hasXxx 汇总）、
+    // 装的 `cgen_form_frame_menu.inc`、拆的 `cgen_form_wndproc_dispatch.inc` —— 后两份各写一遍，
+    // 实测两份都**少了 `_DblClick` 与 `_Paint`**：只挂 `xxx_DblClick` 的控件，子类过程与
+    // `WM_LBUTTONDBLCLK` 那一条 arm 在产物里生成得好好的，却**一次都没被 install**
+    // ⇒ 处理器编得过、永不触发（`Slider` 首当其冲，本页 §3 就写着 DblClick）。
+    // ⚠ 内容与发 arm 那一趟的 info.hasXxx 逐条对应，**两边一起改**才有意义；
+    //   焦点与 Click 那两条必须带排除表，否则同一次操作会从两条路各发一次（C29-SL-g / SL-d）。
+    bool controlNeedsSubclass(const FrmControl& ctrl) const;
+
     // VB6 PictureBox/Image 的 STATIC 控件不显示 Caption (标题在创建时应清空)。
     bool controlTypeClearsCaption(const FrmControl& ctrl) const;
 

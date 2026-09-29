@@ -1313,6 +1313,33 @@ std::string CCodeGen::controlZeroArgMethod(FrmControlType ctrlType,
     return "";
 }
 
+// C29-SL-n（账 #141）: 「这枚控件要不要子类化」的唯一一份判据 —— 内容与
+// `cgen_form_wndproc_subclass.inc` 汇总 info.hasXxx 那一趟逐条对应（改一边就得改另一边，
+// 否则又回到"arm 发了、没人 install"那一形）。装的那趟在 `cgen_form_frame_menu.inc`、
+// 拆的那趟在 `cgen_form_wndproc_dispatch.inc`，两边各自抄了一份，实测**两份都漏了
+// `_DblClick` 与 `_Paint`** ⇒ 只挂这两条处理器之一的控件，子类过程与消息臂都生成得好好的，
+// 一次也没被 install（处理器编得过、永不触发）。
+bool CCodeGen::controlNeedsSubclass(const FrmControl& ctrl) const {
+    auto has = [&](const char* ev) {
+        return symTab_.lookup(ctrl.controlName + std::string(ev)) != nullptr;
+    };
+    // 焦点：只有一枚控件**没有**另一条原生来源（父窗 WM_COMMAND 那批码）时才由子类过程供，
+    // 否则同一次焦点变化会两边各发一次（C29-SL-g）。
+    if (!controlFocusFromNativeNotify(ctrl.controlType)
+        && (has("_GotFocus") || has("_LostFocus"))) return true;
+    if (has("_MouseEnter") || has("_MouseLeave") || has("_MouseHover")
+        || has("_MouseDown") || has("_MouseUp") || has("_MouseMove")
+        || has("_KeyPress") || has("_KeyDown") || has("_KeyUp")
+        || has("_Validate")) return true;
+    // C29-SL-n: 这两条以前只有发 arm 那份认，装/拆两份都漏。
+    if (has("_DblClick")) return true;
+    // VB6 里有绘制表面的控件才有 Paint 语义，本线只接 PictureBox（Fix 185 的口径，与 arm 那趟一致）。
+    if (ctrl.controlType == FrmControlType::PictureBox && has("_Paint")) return true;
+    // 同上：`_Click` 只在没有原生 Click 来源时才由子类过程补（C29-SL-d）。
+    if (!controlClickFromNativeNotify(ctrl.controlType) && has("_Click")) return true;
+    return false;
+}
+
 // 控件类型的 Win32 样式位。取值与 cgen_form_ctrl_style_apply.inc 保持一致。
 // 顶层控件与容器子控件共用，避免容器内子控件缺失类型样式。
 long CCodeGen::controlTypeStyleBits(const FrmControl& ctrl) const {

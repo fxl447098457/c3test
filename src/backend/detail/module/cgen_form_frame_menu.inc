@@ -166,27 +166,10 @@
     {
         // 收集需要子类化的控件名(去重)
         auto needsSubclass = [&](const FrmControl& ctrl) -> bool {
-            // C29-SL-g: 焦点档从"四类白名单"改成"按有没有另一条原生来源排除"，与
-            // cgen_form_wndproc_subclass.inc 发 arm 那一趟同一张表（不同步就会一边发一边不装）。
-            return (!controlFocusFromNativeNotify(ctrl.controlType) &&
-                    (symTab_.lookup(ctrl.controlName + "_GotFocus") ||
-                     symTab_.lookup(ctrl.controlName + "_LostFocus")))
-                || symTab_.lookup(ctrl.controlName + "_MouseEnter")
-                || symTab_.lookup(ctrl.controlName + "_MouseLeave")
-                || symTab_.lookup(ctrl.controlName + "_MouseDown")
-                || symTab_.lookup(ctrl.controlName + "_MouseUp")
-                || symTab_.lookup(ctrl.controlName + "_MouseMove")
-                || symTab_.lookup(ctrl.controlName + "_KeyPress")
-                || symTab_.lookup(ctrl.controlName + "_KeyDown")
-                || symTab_.lookup(ctrl.controlName + "_KeyUp")
-              || symTab_.lookup(ctrl.controlName + "_Validate")
-                || symTab_.lookup(ctrl.controlName + "_MouseHover")
-                // C29-SL-d: 这一趟**装不装**子类化的判据与上面发不发 arm 的判据是两份表,
-                // 原先少了 _Click ⇒ 处理器发了出来却永远没人给它送消息（实测：ctrlfiles 的
-                // fileList 子类过程在产物里定义得好好的, 一次都没被 install）。
-                // 排除表与非它不可的理由同 subclass 那一趟。
-                || (!controlClickFromNativeNotify(ctrl.controlType) &&
-                    symTab_.lookup(ctrl.controlName + "_Click"));
+            // C29-SL-n（账 #141）: 这一趟以前自己抄了一份判据，且比发 arm 那一趟少了
+            // `_DblClick` 与 `_Paint` ⇒ 只挂这两条之一的控件生成了子类过程却从不被 install。
+            // 现在三份（发 arm / 装 / 拆）共用 controlNeedsSubclass 这一处。
+            return controlNeedsSubclass(ctrl);
         };
         std::unordered_set<std::string> subEmitted;
         // 顶层控件

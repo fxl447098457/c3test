@@ -8,6 +8,15 @@ Begin VB.Form SlidForm
    LinkTopic       =   "SlidForm"
    ScaleHeight     =   3200
    ScaleWidth      =   4200
+   Begin MSComctlLib.Slider sld8 
+      Height          =   400
+      Left            =   2400
+      TabIndex        =   7
+      Top             =   1680
+      Width           =   1600
+      _ExtentX        =   2822
+      _ExtentY        =   706
+   End
    Begin VB.Timer tGo 
       Enabled         =   -1   'True
       Interval        =   60
@@ -455,6 +464,11 @@ Private Sub tGo_Timer()
     End With
     Debug.Print "SN6-with-clearsel=" & CStr(sld4.SelLength) & "/" & CStr(sld4.SelStart)
 
+    ' ---- C29-SL-n（账 #141）: 只挂 `_DblClick` 的那枚也该被装 ----
+    ' 驱动走已发货的那条形（SimStdEvent kind=1 = 一条真 WM_LBUTTONDBLCLK 进控件自己的过程），
+    ' 本批零新增方法接线 ⇒ 红点只可能在“装不装”那一趟。
+    sld8.SimStdEvent(1, 0)
+    Debug.Print "SN7-dblone=" & CStr(gDbl8) & "/" & CStr(gDblCancel)
     Debug.Print "SLIDER-DONE"
     Unload Me
 End Sub
@@ -521,6 +535,17 @@ End Sub
 
 ' SD7 的那枚证人：sld2 除 Change（走父窗那条通道）之外只有 sld2_Click 这一条 ⇒ 它是否被
 ' 子类化，完全由「装不装那一趟」认不认 _Click 决定（计数器在上面的 SL-d 那块里）。
+Private gDbl8 As Long
+Private gDblCancel As Long
+
+' C29-SL-n（账 #141）: 这枚滑杆**只挂 `_DblClick` 一条**处理器 —— 装的判据以前少这一形，
+' 于是子类过程与 WM_LBUTTONDBLCLK 那条 arm 都生成了却没人 install，处理器编得过、永不触发。
+' （sld6 也挂 DblClick，但它同时挂着 Click/KeyDown ⇒ 被顺带装上，看不出这一形死了。）
+Private Sub sld8_DblClick(Cancel As Integer)
+    gDbl8 = gDbl8 + 1
+    gDblCancel = Cancel
+End Sub
+
 Private Sub sld2_Click()
     gClk2 = gClk2 + 1
 End Sub
