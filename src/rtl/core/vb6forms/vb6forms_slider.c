@@ -5,7 +5,8 @@
 //
 // 本文件按格长厚：**SL-a** = 窗口 + 创建样式 + 标量属性面，**SL-b** = 值面
 // (Min/Max/Value/Small·LargeChange/Sel*)，**SL-c** = Change / Scroll 两条事件（文末那一节），
-// **SL-h** = TickStyle 四档 + GetNumTicks（最末那一节）。
+// **SL-h** = TickStyle 四档 + GetNumTicks，**SL-i** = SelLength / ClearSel（类型库读出来的
+// VB6 那一面，见文末两段）。
 //
 // 实测口径 (.build/slprobe/slmeasure*.c, x64 真跑; 全文抄在 ai/029 §九 C29-SL-0 那一格):
 //   1) **方向的正解**: TBM_GETCHANNELRECT 的 rect 永远把行程长度放在 **x 分量** ——
@@ -541,5 +542,52 @@ int vb6_Slider_ChannelTop(void* hwnd) {
 
 // 设计期那一档**只走创建样式位**这一条路（cgen 里两条创建路共用 sliderStyleBits 那一处折算），
 // 所以这里刻意不再发一次 setter —— 同一件事不留第二份表。
+
+/* ======================= C29-SL-i: SelLength + ClearSel ======================= *
+ * 类型库读数（探针 .build/slprobe/sltlb.cpp）：ISlider 的选区那一对是 **SelStart(0x0007) +
+ * SelLength(0x0008)**，两条都是 VT_I4，另有一条方法 **ClearSel(0x000e)**，文档原话
+ * "Sets the SelLength to 0"。VB6 那一面**没有 SelEnd 这个名字** —— SelEnd 是 SL-b 按原生
+ * TBM_SETSELEND 自己加的口，留着不撤（存量夹具在用），本格把 VB6 真的那一对照着补上。
+ *
+ * 原生读数（.build/slprobe/slmeasure13.c，x64 真跑，量程 10..100）：
+ *   · **什么都没设过**：GETSELSTART=10（就是量程下限！）、GETSELEND=0 ⇒ 终点比起点还小，
+ *     拿 `end - start` 会算出负数 ⇒ 长度一律折成 0（"空选区"）。
+ *   · SETSEL(20,60) → (20,60)，长度 40。
+ *   · SETSEL(20,400) → (20,100)：**远端由量程上限夹住**，不报错、不拒绝。
+ *   · SETSEL(80,30)（起点大于终点）→ (80,80)：终点跟上来 ⇒ 长度 0。
+ *   · SETSEL(-50,200) → (10,100)：两端都夹进量程。
+ *   · CLEARSEL → 两端都答 -1 ⇒ 两个 getter 各折成 0，于是 SelLength 也就是 0
+ *     —— 与 VB6 文档那句"把 SelLength 置 0"同形（原生清完之后连起点都问不出来）。
+ *   · **没挂 TBS_ENABLESELRANGE 时 SETSEL 整条不生效**（照旧 (10,0)），与 SL-b 那条一致
+ *     ⇒ 这一格的 setter 也不伪造：写不进去就是写不进去，读回来还是 0。
+ */
+
+// VB6: Slider.SelLength（读写）。起点保持不变，终点 = 起点 + 长度，越界由控件夹进量程。
+int vb6_Slider_GetSelLength(void* hwnd) {
+    LONG a, b;
+    if (!hwnd) return 0;
+    a = vb6_Slider_GetSelStart(hwnd);
+    b = vb6_Slider_GetSelEnd(hwnd);
+    return (b > a) ? (int)(b - a) : 0;   // 默认态 (下限, 0) 与 CLEARSEL 之后都是空选区 ⇒ 0
+}
+
+void vb6_Slider_SetSelLength(void* hwnd, int len) {
+    LONG a, b;
+    if (!hwnd) return;
+    // 起点用**裸读数**判："没有选区"时原生答 -1（CLEARSEL 之后就是这一态），而控件自己从没被
+    // 碰过的那一态答的是量程下限（实测 10..100 的杆答 GETSELSTART=10）⇒ 两种空态都锚下限。
+    // 不这么处理的话，ClearSel 之后写 SelLength 会以折叠出来的 0 为起点、被量程夹成 (10,10)
+    // —— 那是一条"看着写进去了、什么都不发生"的静默 no-op，本项目的头号忌讳。
+    a = (LONG)SendMessageW((HWND)hwnd, TBM_GETSELSTART, 0, 0);
+    if (a == -1) a = (LONG)SendMessageW((HWND)hwnd, TBM_GETRANGEMIN, 0, 0);
+    b = a + (len > 0 ? (LONG)len : 0);   // 负长度按 0 处理（原生压根收不到"反向区段"，实测会被顶平）
+    SendMessageW((HWND)hwnd, TBM_SETSEL, TRUE, MAKELONG((WORD)(SHORT)a, (WORD)(SHORT)b));
+}
+
+// VB6: Slider.ClearSel（方法，0x000e）。运行期调用形：`sld1.ClearSel()`。
+void vb6_Slider_ClearSel(void* hwnd) {
+    if (!hwnd) return;
+    SendMessageW((HWND)hwnd, TBM_CLEARSEL, TRUE, 0);
+}
 
 #endif /* _WIN32 */

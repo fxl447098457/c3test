@@ -588,11 +588,26 @@
                 if (it == ctrl.properties.end()) return "-999";
                 return std::to_string((long long)(int)it->second.intValue) + "L";
             };
+            // C29-SL-i: VB6 那一面的选区是 **SelStart + SelLength**（类型库 dispid 0x0007/0x0008），
+            // SelEnd 是我们 SL-b 按原生 TBM_SETSELEND 自己加的名字。所以 .frm 里只写了前两条时
+            // 这里折一次：终点 = 起点 + 长度 —— 否则真 VB6 工程的 SelLength 在设计期就被整条丢掉
+            // （运行期那条写口是好的，缺口只在创建那一趟，与账 #142 同一形状）。
+            // 只在**两条都写了**的时候折：起点没写就不知道拿什么当锚（原生"空态"的起点是量程下限，
+            // 而上限也可能是默认档），宁可不折也不猜一个起点出来下发。
+            std::string slEndArg = slProp("SelEnd");
+            if (slEndArg == "-999") {
+                auto ssIt = ctrl.properties.find("SelStart");
+                auto slIt = ctrl.properties.find("SelLength");
+                if (ssIt != ctrl.properties.end() && slIt != ctrl.properties.end()) {
+                    slEndArg = std::to_string((long long)(int)ssIt->second.intValue
+                                              + (int)slIt->second.intValue) + "L";
+                }
+            }
             c_.emitLine("vb6_Slider_Init((void*)" + slHwnd + ", "
                         + slProp("Min") + ", " + slProp("Max") + ", " + slProp("Value") + ", "
                         + slProp("SmallChange") + ", " + slProp("LargeChange") + ", "
                         + slProp("TickFrequency") + ", " + slProp("SelStart") + ", "
-                        + slProp("SelEnd") + ", " + slProp("SelectRange") + ");");
+                        + slEndArg + ", " + slProp("SelectRange") + ");");
         }
 
         // C29-MV-a: MonthView 设计期的多月平铺。原生没有"行/列"这条消息 —— 平铺几个月完全

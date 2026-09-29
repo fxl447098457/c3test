@@ -873,6 +873,14 @@ int32_t vb6_Slider_GetTickStyle(void* hwnd);
 void    vb6_Slider_SetTickStyle(void* hwnd, int32_t tickStyle);
 int32_t vb6_Slider_GetNumTicks(void* hwnd);
 int32_t vb6_Slider_ChannelTop(void* hwnd);
+// C29-SL-i：类型库读出来的 VB6 选区面 —— **SelStart + SelLength**（dispid 0x0007/0x0008，两条 VT_I4）
+// 与方法 ClearSel（0x000e，文档原话"Sets the SelLength to 0"）。VB6 那一面**没有 SelEnd 这个名字**，
+// 上面那条 SelEnd 是 SL-b 按原生 TBM_SETSELEND 自己加的口，留着是因为存量夹具在用。
+// 实测（.build/slprobe/slmeasure13.c）：默认态 GETSELSTART 答的是**量程下限**而 GETSELEND 答 0
+// ⇒ 终点比起点小，所以 SelLength 一律折成 0；远端超量程由控件夹住；CLEARSEL 之后两端都答 -1。
+int32_t vb6_Slider_GetSelLength(void* hwnd);
+void    vb6_Slider_SetSelLength(void* hwnd, int32_t len);
+void    vb6_Slider_ClearSel(void* hwnd);
 // C29-SL-c：事件面。Slider 与 ScrollBar 共用同一条通道 —— 控件给**父窗**发 WM_HSCROLL（横杆）
 // / WM_VSCROLL（竖杆），wParam 低字是 TB_* 码、高字带当前值，lParam 就是控件句柄
 // （实测 .build/slprobe/slmeasure7/8.c：真拖一次收到 5×N → 4 → 8；方向键收到 0 → 8；

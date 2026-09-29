@@ -1880,7 +1880,16 @@ if ($Category -in @("all", "run", "vbp")) {
                      # SH9 是**第二条创建路**（容器子控件）的证人：sld7 挂在 Frame 里，
                      # 那条路以前对 Slider 一格样式都不挂（BASE 实测创建参数 1342177280 =
                      # 只有 WS_CHILD|WS_VISIBLE，连 TBS_AUTOTICKS 都没有）。
-                     "SH9-child=1/Y")
+                     "SH9-child=1/Y",
+                     # C29-SL-i 选区面（类型库：SelStart 0x0007 + SelLength 0x0008 + 方法
+                     # ClearSel 0x000e；VB6 那一面没有 SelEnd 这个名字）。SI2 钉「写长度时起点
+                     # 不动」，SI3 钉「远端由控件夹进量程」，SI4+SI4b 钉「清空之后两端是 0，
+                     # 而紧接着写长度不该静默什么都不发生」（空态锚量程下限，与控件自己那一态一致），
+                     # SI5/SI6 钉「没挂 SelectRange 就是写不进去，我们不伪造」，SI9 钉设计期那一对
+                     # （.frm 只写 SelStart+SelLength 时由 cgen 折成 (起, 止) 下发）。
+                     "SI1-len=40", "SI2-set=20/30/10", "SI3-clamp=20/100/80",
+                     "SI4-clear=0/0/0", "SI4b-reafter=10/5", "SI5-nobit=0/False",
+                     "SI6-nobit2=0", "SI7-neg=0", "SI8-type=Long/3", "SI9-dt=25/40/15")
     Test-Vbp "ctrlslider" "$Tests\ctrlslider\SlidApp.vbp" $slidNeedles
     Test-Vbp "ctrlslider_x86" "$Tests\ctrlslider\SlidApp.vbp" $slidNeedles -Arch "x86"
     Test-EmitcShape "sl_emitc_native" @("$Tests\ctrlslider\SlidApp.vbp") @(
@@ -1912,7 +1921,13 @@ if ($Category -in @("all", "run", "vbp")) {
         'vb6_Slider_GetNumTicks(vb6_hwnd_sld3',
         'vb6_Slider_ChannelTop(vb6_hwnd_sld3',
         # 容器里那枚滑杆的创建参数: 1342177280(BASE, 一位不挂) + 0x5 = TBS_AUTOTICKS|TBS_TOP
-        '1342177285L, 0L,'
+        '1342177285L, 0L,',
+        # C29-SL-i: 三条 Sel 面各钉一枚形状，外加设计期那一对折出来的 Init 参数
+        # （BASE 上那一条第 9 参是 -999 —— SelLength 整条被丢，读回来是空区段）。
+        'vb6_Slider_ClearSel((void*)vb6_hwnd_sld4)',
+        'vb6_Slider_SetSelLength(vb6_hwnd_sld4, 10)',
+        'vb6_CStrLong(vb6_Slider_GetSelLength(vb6_hwnd_sld4',
+        'vb6_Slider_Init((void*)vb6_hwnd_sld6, -999, -999, -999, 1L, -999, -999, 25L, 40L, -1L);'
     )
     # C29-SL-c: 事件派发那一段的形状。钉的是"认来源的那枚句柄 + 分流那一档"这一整对 ——
     # Slider 与 ScrollBar 共用一扇 case WM_HSCROLL/WM_VSCROLL 的门，写错句柄比对比就是静默不派发。
@@ -1962,6 +1977,12 @@ if ($Category -in @("all", "run", "vbp")) {
         'vb6_ComSetProp(vb6_hwnd_sld3, L"TickStyle"',
         'vb6_ComGetIntProp(vb6_hwnd_sld3, L"GetNumTicks")',
         'vb6_ComGetIntProp(vb6_hwnd_sld3, L"ChannelTop")',
+        # C29-SL-i: 没登记之前 SelLength 走属性兜底、ClearSel 走方法兜底 —— 三条在 BASE 上
+        # 逐条命中，在 NEW 上归零。（第四条候选 vb6_ComGetObjectProp(..., L"ClearSel") 在
+        # BASE 上本来就不出现，方法那一形落的是 vb6_ComCall，所以不拿来当针。）
+        'vb6_ComGetProp(vb6_hwnd_sld4, L"SelLength")',
+        'vb6_ComSetProp(vb6_hwnd_sld4, L"SelLength"',
+        'vb6_ComCall(vb6_hwnd_sld4, L"ClearSel"',
         'vb6_ComGetProp(vb6_hwnd_sld7, L"TickStyle")',
         'CoCreateInstance'
     )

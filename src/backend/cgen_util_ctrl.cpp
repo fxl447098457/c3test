@@ -146,7 +146,9 @@ Vb6Type CCodeGen::controlPropType(FrmControlType ctrlType, const std::string& pr
             || p == "selstart" || p == "selend"
             // C29-SL-h: 三条都是数值（TickStyle 在类型库里是 VT_USERDEFINED 的那张枚举，
             // VB6 侧读回来就是 0..3 这一个数，与 Orientation 同档）。
-            || p == "tickstyle" || p == "getnumticks" || p == "channeltop") {
+            || p == "tickstyle" || p == "getnumticks" || p == "channeltop"
+            // C29-SL-i: VB6 选区那一对的第二条（SelStart + SelLength，两条 VT_I4）。
+            || p == "sellength") {
             return Vb6Type::Long;
         }
         // SelectRange 在 VB6 是 Boolean ⇒ 按 #124 那条口径登记（getter 给的就是 -1/0），
@@ -575,6 +577,8 @@ std::string CCodeGen::getControlPropReadFn(FrmControlType ctrlType, const std::s
         if (propLower == "tickstyle") return "vb6_Slider_GetTickStyle";
         if (propLower == "getnumticks") return "vb6_Slider_GetNumTicks";
         if (propLower == "channeltop") return "vb6_Slider_ChannelTop";
+        // C29-SL-i: VB6 选区那一对的第二条（SelStart + SelLength，类型库 dispid 0x0007/0x0008）。
+        if (propLower == "sellength") return "vb6_Slider_GetSelLength";
         if (propLower == "visible") return "vb6_GetControlVisible";
         if (propLower == "enabled") return "vb6_GetControlEnabled";
         break;
@@ -957,6 +961,8 @@ std::string CCodeGen::getControlPropWriteFn(FrmControlType ctrlType, const std::
         // C29-SL-h: TickStyle 运行期写有效（实测写位 + 换帧之后的每一条形与创建时带那一位逐字
         // 相同）。GetNumTicks / ChannelTop 两条刻意不给写口 —— 前者 VB6 就是只读。
         if (propLower == "tickstyle") return "vb6_Slider_SetTickStyle";
+        // C29-SL-i: SelLength 写侧 = 起点不动、终点 = 起点 + 长度（远端超量程由控件夹住，实测）。
+        if (propLower == "sellength") return "vb6_Slider_SetSelLength";
         if (propLower == "visible") return "vb6_SetControlVisible";
         if (propLower == "enabled") return "vb6_SetControlEnabled";
         break;

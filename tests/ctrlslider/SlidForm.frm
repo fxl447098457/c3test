@@ -77,6 +77,9 @@ Begin VB.Form SlidForm
    Begin MSComctlLib.Slider sld6 
       Height          =   400
       Left            =   2280
+      SelLength       =   15
+      SelStart        =   25
+      SelectRange     =   -1   'True
       SmallChange     =   1
       TabIndex        =   5
       Top             =   1680
@@ -328,6 +331,42 @@ Private Sub tGo_Timer()
     ' 它与 sld3 同尺寸（2000x400），所以直接拿 chan.top 与 ct0（sld3 在 ts=0 那档的基线）比高低：
     ' 读回 1 只证到样式位，`chan.top > ct0` 才证到控件真按那一档重排了。
     Debug.Print "SH9-child=" & CStr(sld7.TickStyle) & "/" & TF(sld7.ChannelTop > ct0)
+    ' ---- C29-SL-i: SelLength / ClearSel（类型库读出来的 VB6 那一面）----
+    ' 类型库给的是 SelStart(0x0007) + **SelLength**(0x0008) 这一对，另有一条方法 ClearSel(0x000e)。
+    ' VB6 那一面**没有 SelEnd 这个名字**（上面 SB 段用的那条是 SL-b 按原生 TBM_SETSELEND 自己加的）。
+    ' 三条实测口径（探针 slmeasure13.c，量程 10..100）写进了 RTL 的注释，这里各钉一条：
+    '   · **没碰过的控件 GETSELSTART 答的是量程下限、GETSELEND 答 0** ⇒ 终点比起点小，
+    '     拿减法会得出负长度 ⇒ SI1 钉「空选区就是 0」；
+    '   · 远端超量程由**控件夹住**（SI3 写 900 只到上限 100），我们不再钳第二遍；
+    '   · CLEARSEL 之后两端都答 -1 ⇒ 读数折成 0，而**紧接着写 SelLength 不该静默什么都不发生**
+    '     （SI4b 就是钉这一条：空态下锚量程下限，与控件自己那一态一致）。
+    ' sld4 在上面 SB 段被改过 Max 与 SelectRange，这里先摆回一个明确的起点（判据自带前提）。
+    sld4.SelectRange = True
+    sld4.Min = 10
+    sld4.Max = 100
+    sld4.SelStart = 20
+    sld4.SelEnd = 60
+    Debug.Print "SI1-len=" & CStr(sld4.SelLength)
+    sld4.SelLength = 10
+    Debug.Print "SI2-set=" & CStr(sld4.SelStart) & "/" & CStr(sld4.SelEnd) & "/" & CStr(sld4.SelLength)
+    sld4.SelLength = 900
+    Debug.Print "SI3-clamp=" & CStr(sld4.SelStart) & "/" & CStr(sld4.SelEnd) & "/" & CStr(sld4.SelLength)
+    sld4.ClearSel()
+    Debug.Print "SI4-clear=" & CStr(sld4.SelLength) & "/" & CStr(sld4.SelStart) & "/" & CStr(sld4.SelEnd)
+    sld4.SelLength = 5
+    Debug.Print "SI4b-reafter=" & CStr(sld4.SelStart) & "/" & CStr(sld4.SelLength)
+    ' SI5/SI6 是「不伪造」那一条：sld3 没挂 SelectRange，原生整条 SETSEL 不生效（实测），
+    ' 所以写进去读回来还是 0 —— 与 SelStart/SelEnd 在 SL-b 里同一口径。
+    Debug.Print "SI5-nobit=" & CStr(sld3.SelLength) & "/" & CStr(sld3.SelectRange)
+    sld3.SelLength = 7
+    Debug.Print "SI6-nobit2=" & CStr(sld3.SelLength)
+    sld4.SelLength = -3
+    Debug.Print "SI7-neg=" & CStr(sld4.SelLength)
+    Debug.Print "SI8-type=" & TypeName(sld4.SelLength) & "/" & CStr(VarType(sld4.SelLength))
+    ' SI9 是**设计期那一条到没到窗口**的证人：sld6 的 .frm 写的是一对 VB6 名字（SelStart 25 +
+    ' SelLength 15），而原生只有 (起, 止) 那一条消息 ⇒ cgen 在设计期那一趟折成 (25, 40)。
+    ' 改之前 SelLength 整条被丢（创建参数里只有 -999），读回来是空区段 —— 与账 #142 同一形状。
+    Debug.Print "SI9-dt=" & CStr(sld6.SelStart) & "/" & CStr(sld6.SelEnd) & "/" & CStr(sld6.SelLength)
     Debug.Print "SLIDER-DONE"
     Unload Me
 End Sub
