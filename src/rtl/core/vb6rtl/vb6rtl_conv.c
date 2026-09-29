@@ -548,10 +548,15 @@ float vb6_CSng(double v) {
 }
 
 double vb6_CDate(vb6_VARIANT v) {
-    // 简化: 仅支持从字符串解析日期, 或从数值转换
-    if (v.vt == vb6_vtDouble || v.vt == vb6_vtSingle || v.vt == vb6_vtLong || v.vt == vb6_vtInteger)
-        return vb6_VariantToDouble(v);
-    return 0.0;
+    // <vbeclipse>: 这一档的判据以前只列 Double/Single/Long/Integer —— 于是
+    // CDate(一个 VT_DATE 的 Variant) 返回 0 (哨兵 VB-date-cdate 实测)。装箱表现在会产
+    // VT_DATE (VB6 的 Date 在 Variant 里就是 VT_DATE=7), 消费端必须认它。
+    // 数值面统一走 vb6_VariantToDouble (它已含 vtDate/vtCurrency/vtByte 各档),
+    // 这里只排除"非数值"的几档, 免得又写一份平行表。
+    if (v.vt == vb6_vtEmpty || v.vt == vb6_vtNull
+        || v.vt == vb6_vtDispatch || v.vt == vb6_vtError) return 0.0;
+    if (v.vt == vb6_vtBSTR) return vb6_Val(v.bstrVal);   /* 字符串按日期解析 */
+    return vb6_VariantToDouble(v);
 }
 
 BSTR vb6_Hex(int32_t n) {

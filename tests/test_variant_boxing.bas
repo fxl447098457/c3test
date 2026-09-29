@@ -7,7 +7,8 @@
 '   (2) Variant 赋值装箱   v = m_b             —— wrapVariantValue 那条
 '   (3) 过程形参装箱       ReportV ..., m_b    —— packLetValueArg 那条
 ' 以及模块级/局部/函数返回三种来源 (账 #123 的原始形态就是"模块级 Byte 错、局部对")。
-' Date/Currency 两档也打出来但不进 needle: 见本批汇报 (C3 现在装箱走 VT_R8, VB6 是 7/6)。
+' Date/Single 两档本批已修进权威表也进了 needle (修前两者都读成 5); Currency 仍只打印
+' 不钉 —— 它与 VB6 的 VT_CY=6 的差距没有真 VB6 读数可依据, 已在汇报里记成待办。
 Option Explicit
 
 Private m_b As Boolean
@@ -39,7 +40,9 @@ Public Sub Main()
     m_s = "x"
     m_sin = 1.5
     m_dbl = 2.5
-    m_d = CDate("2026-01-01")
+    ' Date 用序列号给值: CDate("2026-01-01") 在本仓现在是 0 (日期串解析是另一格问题,
+    ' 已单独记), 那会让本夹具的 clng/cdbl 两行读成 0, 分不清是装箱还是解析。
+    m_d = 46023
 
     Debug.Print "VB-mod-bool="; VarType(m_b); "/"; TypeName(m_b)
     Debug.Print "VB-mod-byte="; VarType(m_by); "/"; TypeName(m_by)
@@ -70,5 +73,18 @@ Public Sub Main()
     ReportV "VB-call-byte=", m_by
     ReportV "VB-call-long=", m_l
     ReportV "VB-call-date=", m_d
+
+    ' 新档位的**反向**也要钉: 装成 VT_DATE / VT_R4 之后, 数值提取端与 IsDate 还得答对
+    ' (RTL 里 vb6_vtDate 早有 TypeName/Format 档, 缺的是 VariantToLong/ToDouble 那一侧)。
+    Dim vd As Variant
+    vd = m_d
+    Dim vs As Variant
+    vs = m_sin
+    Debug.Print "VB-date-clng="; CLng(vd)
+    Debug.Print "VB-date-cdbl="; CDbl(vd)
+    Debug.Print "VB-date-isdate="; IsDate(vd)
+    Debug.Print "VB-date-cdate="; (CDate(vd) = m_d)
+    Debug.Print "VB-sin-cdbl="; CDbl(vs)
+    Debug.Print "VB-sin-clng="; CLng(vs)
     Debug.Print "VB-DONE"
 End Sub

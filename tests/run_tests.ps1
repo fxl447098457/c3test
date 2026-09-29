@@ -252,18 +252,22 @@ function Test-Compile {
     }
 }
 
-# 判据匹配器 —— 唯一一处, 按字面子串比。
+# 判据匹配器 —— 进程内路径的单一出口, 按**字面**子串比 (忽略大小写, 与 -like 原本的
+# 大小写行为一致, 只去掉通配语义)。
 # 旧代码在 4 个点各自写 -like 通配匹配, 而 [ ] * ? 在 needle 里会被当成通配符:
 # 输出本来带方括号的读数 (例如 Join(Array("a","b"), "|") 打出的 [a|b]) 永远匹配不上,
 # 因为 [ab] 被解释成"取一个字符的字符集"。上一批 Fix 161b-decl-out 撞上同一件事后
 # 改的是夹具 (另打一行无括号标记) 并留了一条警告注释 —— 那是让测试迁就工具,
 # 下一个带方括号的读数还会再红一次。这里把语义钉死: needle 是字面子串。
+# ⚠ 本函数**不能**在 -Parallel 的 runspace 里调用 (runspace 看不到脚本函数, 表现为
+#   每条 needle 都判不中 => 整批 output mismatch)。那一段的比较必须内联, 见
+#   Invoke-BasParallel 里的内联判定。
 # 注: 脚本里另有一批 .Contains 比较点, 语义与本函数一致 (同为字面), 不动。
 function Test-NeedleHit {
     param($Lines, [string]$Needle)
     foreach ($l in @($Lines)) {
         if ($null -eq $l) { continue }
-        if (([string]$l).Contains($Needle)) { return $true }
+        if (([string]$l).IndexOf($Needle, [StringComparison]::OrdinalIgnoreCase) -ge 0) { return $true }
     }
     return $false
 }
@@ -630,7 +634,12 @@ function Invoke-BasSetParallel {
                 $runOut = @(Get-Content $stdoutFile -ErrorAction SilentlyContinue)
                 $allMatch = $true
                 foreach ($exp in $it.Expected) {
-                    $found = Test-NeedleHit -Lines $runOut -Needle $exp
+                    # ⚠ 这段跑在 -Parallel 的 runspace 里, 调不到脚本函数 (见上面
+                    # Invoke-BasParallel 里那条同规则注释) ⇒ 字面判定必须内联写在这里。
+                    $found = $false
+                    foreach ($l in @($runOut)) {
+                        if ($null -ne $l -and ([string]$l).IndexOf($exp, [StringComparison]::OrdinalIgnoreCase) -ge 0) { $found = $true; break }
+                    }
                     if (-not $found) { $allMatch = $false; break }
                 }
                 if ($allMatch) { $p++ } else { $f++; $details += "$($it.Name): output mismatch" }
@@ -1305,6 +1314,16 @@ if ($Category -in @("all", "run", "bas")) {
     # 编译面护栏 —— 价值在"整条用例能编过", needle 只取 locale 无关读数
     # (AR-fmt2 走小数点, 随区域设置变, 故不入 needle)。
     Add-BasTest "test_builtin_arity" "$Tests\test_builtin_arity.bas" @("AR-fmt=4", "AR-attr=True", "AR-join1=[abc xyz  ]", "AR-filter=[abc]", "AR-DONE")
+    # <vbeclipse>: Variant **装箱表本身**的哨兵 (Boolean=11 / Byte=17 / Single=4 / Date=7,
+    # 加 CLng/CDbl/CDate/IsDate 的反向档)。装箱以前有两份并行表 + 9 个裸点, 某一档对不对
+    # 取决于表达式走哪条路 (DT43 的布尔就是这么漏的) —— 表再漏一档必须红在表上。
+    $boxNeedles = @("VB-mod-bool=11/Boolean", "VB-mod-byte=17/Byte", "VB-loc-bool=11/Boolean",
+        "VB-loc-byte=17/Byte", "VB-func-bool=11/Boolean", "VB-expr-bool=11", "VB-mod-long=3",
+        "VB-mod-int=2", "VB-mod-str=8", "VB-mod-sin=4", "VB-mod-dbl=5", "VB-mod-date=7",
+        "VB-asg-bool=11/Boolean", "VB-asg-byte=17/Byte", "VB-asg-date=7", "VB-call-date=7/Date",
+        "VB-date-clng=46023", "VB-date-cdbl=46023", "VB-date-isdate=True", "VB-date-cdate=True",
+        "VB-sin-cdbl=1.5", "VB-sin-clng=2", "VB-DONE")
+    Add-BasTest "test_variant_boxing" "$Tests	est_variant_boxing.bas" $boxNeedles
     # <vbeclipse>: vbTextCompare 六个入口对表 (InStr 两形/InStrRev/Replace/Split/Filter/
     # StrComp)。修复前 RTL 5 处 (void)compare + InStr 第 4 参被截、三参"字符串优先"形
     # 错接槽位 (实测段错误)；另修 Debug.Print StrComp(...) 被 "vb6_Str" 前缀误判成 BSTR
@@ -1357,7 +1376,7 @@ if ($Category -in @("all", "run", "bas")) {
     # VB 名恰是 SDK A/W 宏名 (GetUserName→#define GetUserName GetUserNameW) 时,
     # 必须有显式 Alias 才走 vb6_di_ 桩绕开宏; CreateWindowExA 类名不得乱码。
     # 期望挂在本批自己的夹具上 (避免"期望挂错夹具"的假红)。
-    # 判据匹配现在由 Test-NeedleHit 做字面比 (方框号不再是通配符), 故此不必再用无括号的替代标记行。
+    # 判据匹配现在由 Test-NeedleHit 做字面比 (方括号不再是通配符), 故此不必再用无括号的替代标记行。
     #   不得出现方括号 (夹具因此额外打印无括号的稳定标记行)。
     Add-BasTest "test_declare_byval_string_out" "$Tests\declare_out\declare_byval_string_out.bas" @("byval-name-ok=Y")
     Add-BasTest "test_declare_gmn_path_out" "$Tests\declare_out\declare_gmn_path_out.bas" @("gmn-path-ok=Y", "gmn-fixed-ok=Y")

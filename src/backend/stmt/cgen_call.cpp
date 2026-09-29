@@ -182,8 +182,15 @@ void CCodeGen::visit(CallStmt& node) {
                                     // 登记在 knownDoubleVars_, isDoubleExpr 会抢先命中并
                                     // 打成序列号 46023; 按 VB6 应是短日期串。
                                     c_.emitLine("vb6_DebugWriteBSTR(vb6_CStrDate((double)(" + val + ")));");
-                                } else if (isDoubleExpr(val)) {
+                                } else if (isDoubleExpr(val)
+                                    || inferExprType(*call.positional[j]) == Vb6Type::Double
+                                    || inferExprType(*call.positional[j]) == Vb6Type::Single) {
                                     // 浮点数, 用DebugWriteDouble输出
+                                    // <vbeclipse>: isDoubleExpr 是一张**函数名前缀清单**, 清单外的
+                                    // 浮点表达式以前一律落到 DebugWriteLong((int32_t)(x)) ——
+                                    // 实测 `Debug.Print CDbl(v)` (发的是 vb6_CDblV) 把 1.5 打成 1,
+                                    // VB6 打 1.5。判定改按 AST 类型走 (同上面 BSTR/Date/Boolean
+                                    // 三档已有的口径), 名字清单只当补充。
                                     c_.emitLine("vb6_DebugWriteDouble((double)(" + val + "));");
                                 } else if (isVariantVal091r(val)) {
                                     // Fix 090x: Debug.Print x (x As Variant 变量 /

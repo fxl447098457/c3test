@@ -388,6 +388,12 @@
     // 否则 C2440 (载体指针 → vb6_VARIANT)。见 cgen_util_type.cpp 的定义。
     bool cExprIsSafeArrayCarrier(const std::string& cExpr) const;
 
+    // <vbeclipse>: 装箱权威用它判断"这个 C 表达式顶层已经是 vb6_VARIANT 了"。
+    // 必须结构化判 (顶层 vb6_Variant* 且不是 vb6_VariantTo*), 不能靠 ctor 名字清单 ——
+    // 清单漏一枚 (vb6_VariantByte / 新增的 VariantSingle / VariantDate) 就会把
+    // 已是 VARIANT 的表达式再按 VB 类型装一层, 换来 C2440 + C2198。
+    bool cExprIsVariantCarrier(const std::string& cExpr) const;
+
     // Fix 038b: 运行时函数参数 C 类型查找表 — 当 calleeParams 为空 (运行时/内置函数)
     // 时, 通过函数名和参数索引查找期望的 C 类型. 返回空字符串表示未知.
     // 用于在函数调用参数生成时插入类型转换 (VARIANT→具体, 具体→VARIANT).

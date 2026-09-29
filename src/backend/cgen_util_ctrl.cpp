@@ -1800,23 +1800,15 @@ std::string CCodeGen::wrapVariantValue(ASTNode* valueNode, const std::string& cE
         valueNode->kind == ASTNodeKind::IndexOrCallExpr ||
         valueNode->kind == ASTNodeKind::MemberAccessExpr) {
         Vb6Type vtype = inferExprType(static_cast<Expr&>(*valueNode));
+        // <vbeclipse>: 这张表只留"与 _Generic 结果一致"的四档 (String/Long/Integer/Double)。
+        // Boolean/Byte/Single/Date/Currency 交给末尾的 boxToVariant —— 以前两份表各写一份
+        // 档位 (账 #123 改了这份的 Byte、Fix 198 改了那份的 Boolean), 于是同一类型的装箱
+        // 结果取决于表达式走哪条路, DT43 的布尔就是这么漏的。
         switch (vtype) {
             case Vb6Type::String:    return "vb6_VariantString(" + cExpr + ")";
             case Vb6Type::Long:
             case Vb6Type::Integer:   return "vb6_VariantLong(" + cExpr + ")";
-            case Vb6Type::Double:
-            case Vb6Type::Single:    return "vb6_VariantDouble(" + cExpr + ")";
-            // 同 boxToVariant 的 Boolean 档写法 (显式收窄), 两份表不再各成一形
-            case Vb6Type::Boolean:   return "vb6_VariantBool((int16_t)(" + cExpr + "))";
-            // 账 #123: Byte 的装箱档位以前是 vb6_VariantLong ⇒ VT_I4=3, 而 VB6 要 **VT_UI1=17**
-            // (RTL 里 vb6_VariantByte 就是 17 那一档: v.vt = vb6_vtByte)。实测修复前
-            // `v = 模块级Byte` 与 `v = CByte(67)` 都读回 3; 局部 Byte 反而是 17 —— 因为它在
-            // inferExprType 里不可见、掉到下面的 _Generic (`unsigned char: vb6_VariantByte`)。
-            // 所以这条不是为新登记的 Byte 补功能, 而是把这条**预存的错**一并改对, 三形同值。
-            // 显式收窄同 boxToVariant 那条布尔的写法 (C 侧 Byte 载体可能是 uint8_t 或 int32_t)。
-            case Vb6Type::Byte:      return "vb6_VariantByte((uint8_t)(" + cExpr + "))";
-            case Vb6Type::Date:      return "vb6_VariantDouble(" + cExpr + ")";
-            case Vb6Type::Currency:  return "vb6_VariantDouble(" + cExpr + ")";
+            case Vb6Type::Double:    return "vb6_VariantDouble(" + cExpr + ")";
             default: break;
         }
     }
@@ -1847,14 +1839,51 @@ std::string CCodeGen::wrapVariantValue(ASTNode* valueNode, const std::string& cE
     return boxToVariant(static_cast<Expr*>(valueNode), cExpr);
 }
 
-// Fix 198: 见 cgen_helpers.inc 声明处注释 —— 装箱点的布尔口径修正.
+// <vbeclipse>: "这个 C 表达式已经是 vb6_VARIANT 了吗" —— 结构化判定, 不再靠 ctor 名字清单。
+// 名字清单是这里的第三个坑: vb6_VariantByte( 不在 cExprIsVariant 的清单里, 于是
+// `VarType(VarType(by))` 第二层把已经是 VARIANT 的表达式按 Byte 档又装一遍 →
+// vb6_VariantByte((uint8_t)(vb6_VariantByte(...))) → C2440 + C2198 (实测 test_bool_display B25)。
+// 规则: 顶层是 vb6_Variant*/vb6_VariantFrom* 即已是 VARIANT; vb6_VariantToXxx 是**提取**,
+// 返回具体类型, 不算。
+static bool cExprIsVariantCarrierStr(const std::string& cExpr) {
+    size_t s = cExpr.find_first_not_of(" \t\r\n(*&");
+    if (s == std::string::npos) return false;
+    if (cExpr.compare(s, 11, "vb6_VariantTo") == 0) return false;
+    return cExpr.compare(s, 11, "vb6_Variant") == 0 ||
+           cExpr.compare(s, 12, "vb6_VARIANT{") == 0;
+}
+
+bool CCodeGen::cExprIsVariantCarrier(const std::string& cExpr) const {
+    return cExprIsVariant(cExpr) || cExprIsVariantCarrierStr(cExpr);
+}
+
+// Fix 198 + <vbeclipse>: **装箱的唯一权威**。按 VB 声明类型选档, 只在类型确实与
+// C 表示不一致时才改写; 其余一律逐字节退回 vb6_VariantFromValue (_Generic 按 C 类型
+// 选 ctor) —— 早退式的"已是 VARIANT 就不包"看着更干净, 但它会把存量码也一起改了
+// (护栏实测 VbEclipse 的 VB6_SA_AT 实参少了那层恒等包装)。
+// 需要显式档案的四种 (C 表示区分不出来或就是错的):
+//   Boolean → VT_BOOL(11)   C 侧是 int16_t/int32_t, _Generic 会装成 VT_I4
+//   Byte    → VT_UI1(17)    C 侧 uint8_t 走得到对档, 但模块级 Byte 曾被推断成 Long
+//   Single  → VT_R4(4)      _Generic 的 float 档以前也升到 VT_R8 (哨兵实测 5)
+//   Date    → VT_DATE(7)    C 侧就是 double, 只有 VB 类型能说话 (哨兵实测 5)
+// 不显式改写的 (Integer/Long/Double/String/Object) 在 _Generic 下与 VB6 同档, 保持
+// 原样以免动到存量发码。
 std::string CCodeGen::boxToVariant(Expr* expr, const std::string& cExpr) const {
-    // 非布尔表达式必须逐字节退回原样 (vb6_VariantFromValue): 早退式的
-    // "已是 VARIANT 就不包" 看着更干净, 但它会把存量码也一起改了 (护栏实测
-    // VbQRCodegen 的 VB6_SA_AT 实参少了那层恒等包装) —— 本批只许动布尔。
-    if (expr && inferExprType(*expr) == Vb6Type::Boolean && !cExprIsVariant(cExpr)) {
+    if (!expr) return "vb6_VariantFromValue(" + cExpr + ")";
+    // 已经是 VARIANT 的表达式交给 _Generic 的 vb6_VariantIdentity 档恒等直传,
+    // 绝不再按 VB 类型强装 (否则就是上面那条双装)。
+    if (cExprIsVariantCarrier(cExpr)) return "vb6_VariantFromValue(" + cExpr + ")";
+    switch (inferExprType(*expr)) {
+    case Vb6Type::Boolean:
         // 形参是 int16_t: 显式收窄, 兼容 _Bool/int 两种 C 侧布尔表示.
         return "vb6_VariantBool((int16_t)(" + cExpr + "))";
+    case Vb6Type::Byte:
+        return "vb6_VariantByte((uint8_t)(" + cExpr + "))";
+    case Vb6Type::Single:
+        return "vb6_VariantSingle((float)(" + cExpr + "))";
+    case Vb6Type::Date:
+        return "vb6_VariantDate(" + cExpr + ")";
+    default: break;
     }
     return "vb6_VariantFromValue(" + cExpr + ")";
 }
