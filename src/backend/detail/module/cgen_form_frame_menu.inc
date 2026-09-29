@@ -92,6 +92,7 @@
                 }
                 long childStyle = 0x40000000L | 0x10000000L;  // WS_CHILD | WS_VISIBLE
                 childStyle |= controlTypeStyleBits(child);  // 类型样式与顶层控件一致 (SS_NOTIFY/BS_GROUPBOX 等)
+                childStyle |= controlTabStopStyleBit(child);  // 账 #83(a): TabStop 默认位与顶层同一处判断
                 std::string childCaption = child.controlName;
                 auto ccIt = child.properties.find("Caption");
                 if (ccIt != child.properties.end() && ccIt->second.type == FrmValueType::String) {

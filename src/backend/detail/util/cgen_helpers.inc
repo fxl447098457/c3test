@@ -261,6 +261,12 @@
     // SS_NOTIFY/BS_GROUPBOX 等样式会导致外观/交互 (含 tooltip) 异常。
     long controlTypeStyleBits(const FrmControl& ctrl) const;
 
+    // 账 #83(a)（C29-SL-r，读数见 029 的 `C29-SL-r-0`）: 创建时要不要立 `WS_TABSTOP`。
+    // VB6 的 `TabStop` 默认是 True，而这个位在**两条创建路上以前都没立过**（backend 里这个常量
+    // 一次都没出现过）⇒ 所有控件读回 False、模态窗体里 Tab 不走。两处调用（顶层 + 容器子控件），
+    // 拿不到焦点的那几类不立，`.frm` 显式写了 `TabStop` 的按写的来。
+    long controlTabStopStyleBit(const FrmControl& ctrl) const;
+
     // C29-SL-h: Slider 的创建样式位（TBS_AUTOTICKS / TBS_VERT / TickStyle 那三位）。
     // 顶层与容器子控件两条创建路各自都要它，所以单独一处折算、两处调用（账 #83）。
     long sliderStyleBits(const FrmControl& ctrl) const;

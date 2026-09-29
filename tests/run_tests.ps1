@@ -1736,7 +1736,7 @@ if ($Category -in @("all", "run", "vbp")) {
     Test-EmitcShape "tv_emitc_shape" @("$Tests\ctrltreeview\TvfApp.vbp") @(
         'vb6_TreeView_Init((void*)vb6_hwnd_tv1, 1, 300, -1, -1, 0);',
         'vb6_TreeView_Init((void*)vb6_hwnd_tv2, -999, -999, -999, -999, -999);',
-        '1417674754L, 0L,',
+        '1417740290L, 0L,',
         # C29-8b: `tv1.Nodes` 必须立成**真 IDispatch 集合对象** (vb6forms_memberobj.c 的
         # NODES 族)。这三条钉的是发码形状里最容易退回的三处: 宿主槽 (真窗口 = vb6_hwnd_
         # 而非 vb6_com_)、Add 的 Missing 打包 (省略实参不能编成 0，否则 relationship 静默
@@ -1784,7 +1784,12 @@ if ($Category -in @("all", "run", "vbp")) {
     #   的 Value 在 VB6 也是 Boolean，今天还没登记（记在 029 §九，另格）。
     $cstNeedles = @("CTRLSTATE-DONE", "DS1=11", "DS2=FalseFalse", "DS3=FalseFalse",
                     "DS4=0TrueTrue", "DS5=FalseTrue", "DS6=YYY", "DS7=True",
-                    "DS8=Boolean11False", "DS9=11True", "DS10=11False", "DS11=False/Boolean/11", "DS12=Y")
+                    "DS8=Boolean11False", "DS9=11True", "DS10=11False", "DS11=False/Boolean/11", "DS12=Y",
+                    # 账 #83(a)（C29-SL-r）: VB6 的 TabStop 默认 True，而两条创建路以前都不立
+                    # WS_TABSTOP ⇒ BASE 上 ST1 整条是 `0/0/0/0`、ST2 是 `3/Long`（读数见 029 的
+                    # C29-SL-r-0）。四格分别是 顶层 / 容器里 / 容器里那枚 Label（拿不到焦点，不该立）/
+                    # 显式写了 `TabStop = 0` 的那枚。读的是窗口 GWL_STYLE，没有自存 ⇒ 不是自洽假绿。
+                    "ST1-tab=True/True/False/False", "ST2-bool=11/Boolean")
     Test-Vbp "ctrlstate" "$Tests\ctrlstate\CtrlState.vbp" $cstNeedles
     Test-Vbp "ctrlstate_x86" "$Tests\ctrlstate\CtrlState.vbp" $cstNeedles -Arch "x86"
     Test-EmitcShape "cs_emitc_state" @("$Tests\ctrlstate\CtrlState.vbp") @(
@@ -1804,6 +1809,16 @@ if ($Category -in @("all", "run", "vbp")) {
         'v = vb6_VariantBool(vb6_GetControlVisible(',
         'vb6_CStrBool(vb6_GetOptionValue('
     )
+    Test-EmitcShape "cs_emitc_tabstop" @("$Tests\ctrlstate\CtrlState.vbp") @(
+        # 账 #83(a): 立位是**进创建参数**的（不是建好再 SetWindowLong），所以两条创建路各钉一枚。
+        # BASE 上这两串一个都没有（那一趟所有控件都不立位）⇒ 能红。
+        '1409351683L, 0L,',        # 顶层 CheckBox：1409286147 + WS_TABSTOP
+        '1342242819L, 0L,',        # Frame 里的 CheckBox：1342177283 + 同一条 —— 第二条创建路
+        # 显式写了 `TabStop = 0` 的那枚**保持不立**。这一串在 BASE 上也在（那时谁都不立），
+        # 所以它是行为钉、红不了 —— 防的是以后有人把"默认立"写成"一律立"。
+        '1409286147L, 0L,',
+        'vb6_CStrBool(vb6_GetTabStop('      # 读侧归到 Boolean 档（#124 同族）
+    )
     Test-EmitcAbsent "cs_emitc_selectivity" @("$Tests\ctrlstate\CtrlState.vbp") @(
         'vb6_SetCheckValue((void*)vb6_hwnd_cbDef',      # 没写 Value 的复选框不许被设
         'vb6_SetControlVisible((void*)vb6_hwnd_lbOut',  # 没写 Visible 的标签不许被藏
@@ -1812,6 +1827,12 @@ if ($Category -in @("all", "run", "vbp")) {
         'vb6_CStrLong(vb6_GetControlEnabled(',
         'vb6_CStrLong(vb6_GetControlVisible(',
         'vb6_SetCheckValue((void*)vb6_hwnd_obOn'
+    )
+    Test-EmitcAbsent "cs_emitc_tabstop_off" @("$Tests\ctrlstate\CtrlState.vbp") @(
+        # 账 #83(a) 的反面：拿不到焦点的这两类**不许**被立上 WS_TABSTOP
+        # （Label = 1409286400、Frame = 1409286151，各自 +65536 那两串如果出现就说明排除表被改坏）。
+        '1409351936L, 0L,',        # Label 立了位 —— 不该出现
+        '1409351687L, 0L,'         # Frame 立了位 —— 不该出现
     )
 
     # ai/029 C29-SL-a: Slider (原生 msctls_trackbar32)。登记之前这枚控件**连窗口都没建**
@@ -1948,8 +1969,8 @@ if ($Category -in @("all", "run", "vbp")) {
     Test-Vbp "ctrlslider_x86" "$Tests\ctrlslider\SlidApp.vbp" $slidNeedles -Arch "x86"
     Test-EmitcShape "sl_emitc_native" @("$Tests\ctrlslider\SlidApp.vbp") @(
         '"msctls_trackbar32", "",',
-        '1409286145L, 0L,',                                        # 横杆: TBS_AUTOTICKS, 无 TBS_VERT
-        '1409286147L, 0L,',                                        # 竖杆: 多挂 TBS_VERT(0x2)
+        '1409351681L, 0L,',                                        # 横杆: TBS_AUTOTICKS, 无 TBS_VERT
+        '1409351683L, 0L,',                                        # 竖杆: 多挂 TBS_VERT(0x2)
         'vb6_Slider_Init((void*)vb6_hwnd_sld1, -999, -999, -999, -999, -999, 10L, -999, -999, -999);',
         'vb6_Slider_Init((void*)vb6_hwnd_sld4, 10L, 100L, 42L, 2L, 8L, 5L, 20L, 60L, -1L);',
         'vb6_Slider_Init((void*)vb6_hwnd_sld5, -999, -999, -999, -999, -999, -999, -999, -999, -999);',
@@ -1968,14 +1989,14 @@ if ($Category -in @("all", "run", "vbp")) {
         # C29-SL-h: 设计期那一条 TickStyle=2 必须出现在**创建参数**里（1409286145 那枚是
         # TBS_AUTOTICKS，多挂 TBS_BOTH=0x8 才是 1409286153）—— 只写自存不算下发到窗口。
         # 读侧走 CStrLong（登记成 Long 档 ⇒ CStr 不再被折成 Variant 那一趟）；写侧直接 setter。
-        '1409286153L, 0L,',
+        '1409351689L, 0L,',
         'vb6_Slider_SetTickStyle(vb6_hwnd_sld3, 2);',
         'vb6_Slider_SetTickStyle(vb6_hwnd_sld3, 9);',
         'vb6_CStrLong(vb6_Slider_GetTickStyle(vb6_hwnd_sld3',
         'vb6_Slider_GetNumTicks(vb6_hwnd_sld3',
         'vb6_Slider_ChannelTop(vb6_hwnd_sld3',
         # 容器里那枚滑杆的创建参数: 1342177280(BASE, 一位不挂) + 0x5 = TBS_AUTOTICKS|TBS_TOP
-        '1342177285L, 0L,',
+        '1342242821L, 0L,',
         # C29-SL-i: 三条 Sel 面各钉一枚形状，外加设计期那一对折出来的 Init 参数
         # （BASE 上那一条第 9 参是 -999 —— SelLength 整条被丢，读回来是空区段）。
         'vb6_Slider_ClearSel((void*)vb6_hwnd_sld4)',
@@ -2254,8 +2275,8 @@ if ($Category -in @("all", "run", "vbp")) {
     # 反面断这枚控件的属性不许再走 COM 兜底、工程里不许再出现 CoCreateInstance。
     Test-EmitcShape "dt_emitc_shape" @("$Tests\ctrldatetime\DtfApp.vbp") @(
         '"SysDateTimePick32", "",',
-        '1409286150L, 0L,',
-        '1409286153L, 0L,',
+        '1409351686L, 0L,',
+        '1409351689L, 0L,',
         'vb6_DTP_Init((void*)vb6_hwnd_dt4, L"yyyy-MM-dd HH:mm");',
         'vb6_DTP_SetCheckBox(vb6_hwnd_dt2, (-1));',
         'vb6_DTP_SetCustomFormat(vb6_hwnd_dt2, vb6_BSTR_FromStr(L"yyyy-MM-dd"));',
@@ -2332,9 +2353,9 @@ if ($Category -in @("all", "run", "vbp")) {
     # 才挂上去），设计期 Init 连多月与 MaxSelCount 一起钉；反面断这枚控件不许再走 COM 兜底。
     Test-EmitcShape "mv_emitc_shape" @("$Tests\ctrlmonthview\MvfApp.vbp") @(
         '"SysMonthCal32", "",',
-        '1409286146L, 0L,',
-        '1409286148L, 0L,',
-        '1409286160L, 0L,',
+        '1409351682L, 0L,',
+        '1409351684L, 0L,',
+        '1409351696L, 0L,',
         'vb6_MV_Init((void*)vb6_hwnd_mv1, 1, 2, 7);',
         'vb6_MV_Init((void*)vb6_hwnd_mv2, 1, 1, -999);',
         'vb6_MV_SetMaxSelCount(vb6_hwnd_mv1, 3);',
@@ -2407,10 +2428,10 @@ if ($Category -in @("all", "run", "vbp")) {
     # 初值文本钉"句柄赋值之后才发"那一条，选区/上限/量程读数钉走的是原生 getter 而不是 COM 兜底。
     Test-EmitcShape "rt_emitc_shape" @("$Tests\ctrlrichtextbox\RtfApp.vbp") @(
         '"RICHEDIT50W", "",',
-        '1412440068L, 0L,',
-        '1409286148L, 0L,',
-        '1411391492L, 0L,',
-        '1410342916L, 0L,',
+        '1412505604L, 0L,',
+        '1409351684L, 0L,',
+        '1411457028L, 0L,',
+        '1410408452L, 0L,',
         'vb6_RTB_Init((void*)vb6_hwnd_rt1, 0, -999);',
         'vb6_RTB_Init((void*)vb6_hwnd_rt2, -999, -999);',
         'vb6_RTB_Init((void*)vb6_hwnd_rt3, -999, 1);',
@@ -2541,7 +2562,7 @@ if ($Category -in @("all", "run", "vbp")) {
         'void* vb6_tbBtn5c = vb6_Toolbar_ButtonAt((void*)vb6_tbSrc5c, id);',
         'if (pNM42->code == -710 && (void*)pNM42->hwndFrom == vb6_hwnd_tb1) {',
         'vb6_Toolbar_SimButtonClick((void*)vb6_hwnd_tb1, 1);',
-        '1409288460L, 0L,'
+        '1409353996L, 0L,'
     )
     Test-EmitcAbsent "tb_emitc_no_ocx" @("$Tests\ctrltoolbar\TbApp.vbp") @(
         'vb6_com_tb1',

@@ -70,6 +70,12 @@ Vb6Type CCodeGen::controlPropType(FrmControlType ctrlType, const std::string& pr
     if (p == "fontname") {
         return Vb6Type::String;
     }
+    // 账 #83(a) 的读侧那半（与 #124 / #136 同一族）：`vb6_GetTabStop` 答的就是 VB6 的 -1/0，
+    // 但以前没登记 ⇒ `CStr(Check1.TabStop)` 打的是 `-1`/`0`、`If ... Then` 靠装箱碰巧对。
+    // 登记成 Boolean 之后打印面就是 True/False（探针 `.build/sltab` 里 VarType 读回 3 = Integer 就是没登记的证状）。
+    if (p == "tabstop") {
+        return Vb6Type::Boolean;
+    }
 
     if (ctrlType == FrmControlType::SSTab) {
         if (p == "tabs" || p == "tab" || p == "taborientation" || p == "tabstyle"
@@ -1434,6 +1440,39 @@ void CCodeGen::emitSliderDesignTimeInit(const FrmControl& ctrl, const std::strin
                 + slProp("SmallChange") + ", " + slProp("LargeChange") + ", "
                 + slProp("TickFrequency") + ", " + slProp("SelStart") + ", "
                 + slEndArg + ", " + slProp("SelectRange") + ");");
+}
+
+// 账 #83(a)（C29-SL-r）: VB6 的 `TabStop` 默认 True，而本项目**两条创建路以前都不立 WS_TABSTOP**
+// —— 探针 `.build/sltab` 实测：顶层按钮（`.frm` 没写 TabStop）读回 0、Frame 里的按钮与文本框也读回 0，
+// 只有"`.frm` 写了 `TabStop = 0`"那一枚碰巧对（因为它要的就是 0）。RTL 那边其实一直按"默认 True"写的
+// （`vb6_GetTabStop` 里 `!hwnd` 就回 -1），缺的只是创建时把这一位立上。
+// 读侧就是 `GetWindowLong(GWL_STYLE) & WS_TABSTOP` ⇒ 问的是窗口自己，我们没有另存一份。
+// 排除的是拿不到焦点的那几类；`Unknown`（uc 实例与没登记的 OCX）也不立 —— 那些可能压根没有窗口。
+long CCodeGen::controlTabStopStyleBit(const FrmControl& ctrl) const {
+    constexpr long kWsTabStop = 0x00010000L;
+    auto tsIt = ctrl.properties.find("TabStop");
+    if (tsIt != ctrl.properties.end() && tsIt->second.type == FrmValueType::Integer) {
+        return tsIt->second.intValue != 0 ? kWsTabStop : 0L;
+    }
+    switch (ctrl.controlType) {
+    case FrmControlType::Label:
+    case FrmControlType::Image:
+    case FrmControlType::Shape:
+    case FrmControlType::Line:
+    case FrmControlType::Frame:
+    case FrmControlType::Timer:
+    case FrmControlType::Menu:
+    case FrmControlType::Data:
+    case FrmControlType::OLE:
+    case FrmControlType::ImageList:
+    case FrmControlType::CommonDialog:
+    case FrmControlType::Form:
+    case FrmControlType::MDIForm:
+    case FrmControlType::Unknown:
+        return 0L;
+    default:
+        return kWsTabStop;
+    }
 }
 
 // 控件类型的 Win32 样式位。取值与 cgen_form_ctrl_style_apply.inc 保持一致。
