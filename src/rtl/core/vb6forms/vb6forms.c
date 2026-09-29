@@ -33,6 +33,14 @@
 // 全局变量
 HINSTANCE g_hInstance = NULL;
 static int g_nextControlId = 100;  // 控件ID从100开始 (1-99保留给菜单)
+// 账 #156: 计时器 id **不能**跟着控件 id 走。控件 id 每建一枚窗体就复位一次
+// (cgen_form_create_controls.inc 发 vb6_ResetControlId())，而 g_timerTable 是进程内
+// 一张表、派发只按 id 找 (`vb6_SlotById`)。两者共用一个计数器 ⇒ 第二枚窗体的 Timer
+// 一定拿到与第一枚相同的 id，于是：
+//   1) 第一枚 Timer 若已被 Enabled=False 停掉，winmm 回调查到的那一格 running=0 ⇒ 一次都不投;
+//   2) 若还活着，WM_TIMER 会投到**前一枚窗体**、跑前一枚窗体的事件过程。
+// ⇒ 计时器要自己一枚永不复位的计数器。id 只在 WM_TIMER 这一路用，与控件/菜单 id 不同命名空间。
+static int g_nextTimerId = 1000;
 
 // 模态窗体状态
 static HWND g_modalOwner = NULL;   // 被禁用的父窗口 (模态时)
@@ -532,7 +540,7 @@ void vb6_TimerAttach(void* owner, void* key, int period, void* callback, int ena
     if (period > 65535) period = 65535;
     struct vb6_TimerSlot* e = &g_timerTable[g_timerCount];
     g_timerCount++;
-    e->timerId = g_nextControlId++;
+    e->timerId = g_nextTimerId++;
     e->hwnd = (HWND)owner;
     e->key = (HWND)key;
     e->callback = (vb6_TimerCallback)callback;
@@ -571,7 +579,7 @@ void vb6_TimerSetPeriod(void* key, int period) {
 // 兼容旧入口：没有身份窗时派发窗自己当身份，建完即启。
 int vb6_SetTimer(void* hwnd, int interval, void* callback) {
     if (g_timerCount >= VB6_MAX_TIMERS) return -1;
-    int id = g_nextControlId++;
+    int id = g_nextTimerId++;
     struct vb6_TimerSlot* e = &g_timerTable[g_timerCount];
     g_timerCount++;
     e->timerId = id; e->hwnd = (HWND)hwnd; e->key = (HWND)hwnd;
