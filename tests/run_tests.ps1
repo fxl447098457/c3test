@@ -1710,6 +1710,9 @@ if ($Category -in @("all", "run", "vbp")) {
     #   WS_GROUP / 创建顺序 / 容器挂 comctl32 子类 / Common-Controls 6.0 清单四种候选都实测排除，
     #   差在哪没查到，记 **账 #165**。所以 `in2=N / deep=N / inpic=N` 是**缺陷读数**、不是判据胜利：
     #   #165 落地那天这三条必须翻成 Y —— 它们**红了就是那条账结了**。
+    # ⚠ 夹具自己的坑，先写在这条路上别踩第二次：`TabWalkApp.vbp` 的 `ExeName32` **必须等于 vbp 文件名**，
+    #   否则 `Test-Vbp` 按 vbp 名去找 exe ⇒ 本地怎么都过（我手动跑的是 TabWalk.exe）、CI 两条架构一起
+    #   `FAIL (no exe)`（门 #218 就是这么红的）。要么改名一致，要么显式传 `-ExeName`。
     $twNeedles = @("TABWALK-DONE", "TW-walked=Y", "TW-top=Y", "TW-shy=Y",
                     "TW-in1=Y/in2=N", "TW-deep=N/inpic=N", "TW-picstop=N")
     Test-Vbp "tabwalk" "$Tests\tabwalk\TabWalkApp.vbp" $twNeedles

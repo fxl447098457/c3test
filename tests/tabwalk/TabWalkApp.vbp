@@ -25,4 +25,4 @@ Unattended=0
 Retained=0
 ThreadPerObject=0
 MaxNumberOfThreads=1
-ExeName32="TabWalk"
+ExeName32="TabWalkApp"
