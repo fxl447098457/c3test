@@ -267,6 +267,14 @@
     // 拿不到焦点的那几类不立，`.frm` 显式写了 `TabStop` 的按写的来。
     long controlTabStopStyleBit(const FrmControl& ctrl) const;
 
+    // 账 #83(b2): 容器（Frame / PictureBox / SSTab）要不要挂 `WS_EX_CONTROLPARENT`。
+    // `IsDialogMessage`（账 #83(b1) 刚给主泵接上）默认只看**活动窗口的直接子窗口**，
+    // 不走进没挂这一位的容器 ⇒ 容器里的控件压根进不了 tab 序（实测站点序列
+    // `cmdIn1 → cmdTop2 → cmdTop1`，Frame 里的 cmdIn2/cmdDeep 一步都不到）。
+    // 容器清单与 `cgen_form_frame_menu.inc` 里那条递归清单同一族 —— **两条创建路都要挂**
+    // （容器自己也可以是子控件：嵌在 Frame 里的 Frame 走第二条路）。
+    long controlContainerExStyleBit(const FrmControl& ctrl) const;
+
     // 账 #157: VB6 把窗体显示出来时，焦点交给**这枚窗体里 TabIndex 最小的那枚拿得到焦点的控件**
     // （不是创建顺序 —— `.frm` 里控件的书写顺序与 TabIndex 常常相反，实测探针里 cmdB 先创建、
     //  cmdA 才是 TabIndex=0）。这一份**只能在发码期算**：设计期的 `TabIndex` 从来没下发到窗口

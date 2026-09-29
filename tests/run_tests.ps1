@@ -1702,6 +1702,27 @@ if ($Category -in @("all", "run", "vbp")) {
         'vb6_Form_SetInitialFocus((void*)hwnd, (void*)vb6_hwnd_t2',        # Timer 不配当焦点目标
         'vb6_Form_SetInitialFocus((void*)hwnd, (void*)vb6_hwnd_tMain'
     )
+    # 账 #83(b2): 容器的扩展样式位 `WS_EX_CONTROLPARENT`(262144) 两条创建路都接上 ——
+    # 正面三条 = 顶层 Frame / 顶层 PictureBox / **容器里的容器**（Frame2 在 Frame1 里，走的正是
+    # 第二条创建路）；反面两条 = 普通子控件与顶层按钮不许挂（这一位只属于容器）。
+    # ⚠ 运行期那一半**还没通**：样式确实落到窗口上了（`EX-fr / EX-f2 / EX-pic` 三条读数都是 262144），
+    #   而产物里 `IsDialogMessage` 照样不走进容器 —— 裸 Win32 探针同一棵树（`.build/cp2`）会走，
+    #   WS_GROUP / 创建顺序 / 容器挂 comctl32 子类 / Common-Controls 6.0 清单四种候选都实测排除，
+    #   差在哪没查到，记 **账 #165**。所以 `in2=N / deep=N / inpic=N` 是**缺陷读数**、不是判据胜利：
+    #   #165 落地那天这三条必须翻成 Y —— 它们**红了就是那条账结了**。
+    $twNeedles = @("TABWALK-DONE", "TW-walked=Y", "TW-top=Y", "TW-shy=Y",
+                    "TW-in1=Y/in2=N", "TW-deep=N/inpic=N", "TW-picstop=N")
+    Test-Vbp "tabwalk" "$Tests\tabwalk\TabWalkApp.vbp" $twNeedles
+    Test-Vbp "tabwalk_x86" "$Tests\tabwalk\TabWalkApp.vbp" $twNeedles -Arch "x86"
+    Test-EmitcShape "tw_emitc_cparent" @("$Tests\tabwalk\TabWalkApp.vbp") @(
+        '1409286151L, 262144L,',          # 顶层 Frame（Frame1 与 optFrame 两处）
+        '1417740814L, 262144L,',          # 顶层 PictureBox
+        '1342177287L, 262144L,'           # 容器里的容器 —— 第二条创建路也给了这一位
+    )
+    Test-EmitcAbsent "tw_emitc_notplain" @("$Tests\tabwalk\TabWalkApp.vbp") @(
+        '1342242816L, 262144L,',          # 容器里的普通按钮不该挂这一位
+        '1409351680L, 262144L,'           # 顶层按钮同样不该挂
+    )
     # ai/030 T30-A: 内容寻址 obj store —— 命中/解耦/不改产物三条一起断 (用例自带隔离 store)
     Test-ObjCache "objcache" "$Tests\hello.bas"
     Test-EmitcShape "cf_emitc_shape" @("$Tests\ctrlfiles\CfApp.vbp") @(

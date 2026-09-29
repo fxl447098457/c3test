@@ -107,9 +107,12 @@
                 if (controlTypeClearsCaption(child)) childCaption = "";
                 {
                     std::string childLower41 = Symbol::toLower(child.controlName);
+                    // 账 #83(b2): 扩展样式与顶层同出口 —— 容器嵌在容器里时，**这一条路**也得给它
+                    // WS_EX_CONTROLPARENT，否则嵌在 Frame 里的 Frame 仍然走不进 tab 序。
                     std::string createArgs =
                         "\"" + std::string(childClass) + "\", \"" + childCaption + "\","
-                        + std::to_string(childStyle) + "L, 0L,"
+                        + std::to_string(childStyle) + "L, "
+                        + std::to_string(controlContainerExStyleBit(child)) + "L,"
                         + std::to_string(cLeft) + ", " + std::to_string(cTop) + ", "
                         + std::to_string(cWidth) + ", " + std::to_string(cHeight) + ","
                         + std::to_string(childCtrlId) + ", " + containerHwnd + ", hInstance";

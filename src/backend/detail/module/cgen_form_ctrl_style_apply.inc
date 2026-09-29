@@ -307,6 +307,9 @@
         // 账 #83(a)（C29-SL-r）: VB6 默认 TabStop = True，而这一位以前两条创建路都没立
         // （读数见 029 的 C29-SL-r-0）。判断只在 controlTabStopStyleBit 一处，容器那趟共用。
         style |= controlTabStopStyleBit(ctrl);
+        // 账 #83(b2): 容器挂 WS_EX_CONTROLPARENT —— 没有这一位，`IsDialogMessage` 不会
+        // 走进 Frame/PictureBox/SSTab，里面的控件连 tab 序都进不了（顶层这一条路）。
+        exStyle |= controlContainerExStyleBit(ctrl);
 
         // Bug3-Fix: TextBox/ComboBox 延迟设置初始文本，避免 EN_CHANGE 在句柄赋值前触发
         // C29-RT-a: RichTextBox 同因加入 —— 它也是文本控件，.frm 里的初值走 Text 那一条。

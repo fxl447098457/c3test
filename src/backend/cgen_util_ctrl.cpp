@@ -1475,6 +1475,23 @@ long CCodeGen::controlTabStopStyleBit(const FrmControl& ctrl) const {
     }
 }
 
+// 账 #83(b2): 容器窗口挂 `WS_EX_CONTROLPARENT`，对话框管理器才肯走进它。
+// 清单与 `cgen_form_frame_menu.inc` 里那条递归（Frame/PictureBox/SSTab）一致 ——
+// 只有这三类在发子控件，给别的类型挂上只会让窗口多一个用不上的扩展位。
+// 两条创建路都要吃这个出口：顶层那条（容器直接摆在窗体上）与容器子控件那条
+// （容器嵌在另一枚容器里）—— "只接一头"是本线踩过多次的那一声不响。
+long CCodeGen::controlContainerExStyleBit(const FrmControl& ctrl) const {
+    constexpr long kWsExControlParent = 0x00040000L;  // WS_EX_CONTROLPARENT
+    switch (ctrl.controlType) {
+    case FrmControlType::Frame:
+    case FrmControlType::PictureBox:
+    case FrmControlType::SSTab:
+        return kWsExControlParent;
+    default:
+        return 0L;
+    }
+}
+
 // 账 #157: 声明处的注释讲了为什么必须在发码期算。这里只做**选择**，并把选中那枚的句柄
 // 变量名交给窗体的 WM_CREATE 发一句 `vb6_Form_SetInitialFocus`。
 // 选择口径 = VB6：`TabIndex` 最小、且拿得到焦点（`controlTabStopStyleBit` 那一族排除 +
