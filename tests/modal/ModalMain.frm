@@ -76,6 +76,8 @@ Private gSeen As String
 Private gNew As Long
 Private gRepeat As String
 Private gHops As Long
+Private gBusy As Boolean
+Private gStray As Long
 
 Private Declare PtrSafe Function PostMessage Lib "user32" Alias "PostMessageW" (ByVal hWnd As LongPtr, ByVal Msg As Long, ByVal wParam As LongPtr, ByVal lParam As LongPtr) As Long
 Private Declare PtrSafe Function GetFocus Lib "user32" () As LongPtr
@@ -140,12 +142,21 @@ End Function
 Private Sub tMain_Timer()
     Dim f As LongPtr
     Dim st As String
+    ' 第一道闸：`Enabled = False` 之后**还会来在途的 tick**（"最多一枚"那个界是看负载的，账 #162），
+    ' 而这些拍是在**模态循环里**被排空的 —— 不挡住，它们就会拿着"下一相"的身份往模态窗体
+    ' 里 post VK_TAB（x86 实测照出来：模态窗体的初始焦点被挪走，D1/D2 一起红）。
+    If gBusy Then
+        gStray = gStray + 1
+        Exit Sub
+    End If
     gState = gState + 1
     If gState = 1 Then
+        gBusy = True
         Log1 "M1-startup=" & HexEq(GetFocus(), txtMain.hwnd) & "/second=" & HexEq(GetFocus(), txtSecond.hwnd)
         tMain.Enabled = False
         ModalDlg.Show vbModal
-        Log1 "M2-returned=Y/ticks=" & CStr(gState)
+        gBusy = False
+        Log1 "M2-returned=Y/ticks=" & CStr(gState) & "/busy=" & CStr(gStray)
         txtMain.SetFocus
         gSeen = "txtMain,"
         tMain.Enabled = True
