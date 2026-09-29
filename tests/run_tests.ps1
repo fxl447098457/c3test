@@ -1911,7 +1911,10 @@ if ($Category -in @("all", "run", "vbp")) {
                      # 挪到没挂处理器的 sld1，再问增量：SetFocus 落在已有焦点的窗口上不重发）。
                      # SN3 钉不带括号的 ClearSel：以前那一形掉 vb6_ComCall(裸 HWND, L"ClearSel")，
                      # 编得过、跑起来一声不响，区段一点没动。
-                     "SN1-bare=Y/0", "SN2-paren=Y/Y", "SN3-clearsel=0/0")
+                     "SN1-bare=Y/0", "SN2-paren=Y/Y", "SN3-clearsel=0/0",
+                     # C29-SL-m（账 #150）: With 块里的控件方法三形。这一形在 BASE 上是**编译不过**
+                     # （不是读数差），所以三条都是整件工程级的红。
+                     "SN4-with-bare=Y", "SN5-with-paren=Y/Y", "SN6-with-clearsel=0/0")
     Test-Vbp "ctrlslider" "$Tests\ctrlslider\SlidApp.vbp" $slidNeedles
     Test-Vbp "ctrlslider_x86" "$Tests\ctrlslider\SlidApp.vbp" $slidNeedles -Arch "x86"
     Test-EmitcShape "sl_emitc_native" @("$Tests\ctrlslider\SlidApp.vbp") @(
@@ -1962,7 +1965,10 @@ if ($Category -in @("all", "run", "vbp")) {
         # C29-SL-l: 两条码头共用一张表 ⇒ 带括号与不带括号都发同一条专桩（裸形多一条注释）。
         'vb6_SetControlFocus((void*)vb6_hwnd_sld5);  /* setfocus */',
         'vb6_SetControlFocus((void*)vb6_hwnd_sld6);',
-        'vb6_Slider_ClearSel((void*)vb6_hwnd_sld4);  /* clearsel */'
+        'vb6_Slider_ClearSel((void*)vb6_hwnd_sld4);  /* clearsel */',
+        # C29-SL-m: With 那一帧的接收者就是入口那枚 HWND（两形都走 pendingChainObj_ 协议）。
+        'vb6_SetControlFocus((void*)_vb6_with_0);',
+        'vb6_Slider_ClearSel((void*)_vb6_with_2);'
     )
     # C29-SL-c: 事件派发那一段的形状。钉的是"认来源的那枚句柄 + 分流那一档"这一整对 ——
     # Slider 与 ScrollBar 共用一扇 case WM_HSCROLL/WM_VSCROLL 的门，写错句柄比对比就是静默不派发。

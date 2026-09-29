@@ -430,6 +430,31 @@ Private Sub tGo_Timer()
     sld4.ClearSel
     Debug.Print "SN3-clearsel=" & CStr(sld4.SelLength) & "/" & CStr(sld4.SelStart)
 
+    ' ---- C29-SL-m（账 #150）: With 块里的控件**方法** ----
+    ' 这一形以前不是"读数不对"，是**整件工程编译不过**：With 的成员访问只认属性，方法名落到
+    ' 那条"未知属性"兜底，发成 `_vb6_with_0.SetFocus()` —— HWND 是 struct 指针，`.成员` 非法
+    ' （BASE 实测：BUILD-RC=1 + 三条 VB4001 "Unknown control property '.X' in With block"）。
+    ' 焦点面还是问 sld6 那对计数器、只问增量；落点用**启用**的控件（sld5/sld4，理由见 SN1 那段）。
+    Dim gf2 As Long, gf3 As Long, gl2 As Long
+    sld5.SetFocus()                    ' 先把焦点挪开 —— 目标已有焦点时 SetFocus 不重发 WM_SETFOCUS
+    gf2 = gGot6
+    With sld6
+        .SetFocus                      ' With 里**不带括号**那一形
+    End With
+    Debug.Print "SN4-with-bare=" & TF(gGot6 > gf2)
+    gf3 = gGot6
+    gl2 = gLost6
+    With sld5
+        .SetFocus()                    ' With 里**带括号**那一形：焦点走掉才发 LostFocus
+    End With
+    Debug.Print "SN5-with-paren=" & TF(gLost6 > gl2) & "/" & TF(gGot6 = gf3)
+    With sld4
+        .SelStart = 20
+        .SelLength = 10
+        .ClearSel()                    ' 方法与属性赋值混在同一个 With 块里
+    End With
+    Debug.Print "SN6-with-clearsel=" & CStr(sld4.SelLength) & "/" & CStr(sld4.SelStart)
+
     Debug.Print "SLIDER-DONE"
     Unload Me
 End Sub
