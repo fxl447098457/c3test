@@ -252,6 +252,22 @@ Private Sub tGo_Timer()
     sld5.Tag = "dtag"
     Debug.Print "SE14-emptytag=" & CStr(sld1.Tag) & "/end"
     Debug.Print "SE11-cat=" & "v=" & sld3.Tag
+    ' ---- C29-SL-g: 焦点事件面（GotFocus / LostFocus）----
+    ' SimStdEvent 的 kind=4 **不是发消息**，是真 SetFocus —— 焦点那两条的原生来源就是窗口
+    ' 管理器自己发的 WM_SETFOCUS / WM_KILLFOCUS（探针 slmeasure9.c 的 Q5a、10.c 的 R3 都量到
+    ' 它们会到被子类化的轨道条上；伪造那两条消息反而验不到真链路）。
+    ' SG2/SG4 是"一次移动两边各发一次"与认来源；改之前这三条处理器全是死的（四类白名单不含 Slider）。
+    Dim f0 As Long, f1 As Long, f2 As Long
+    f0 = gGot6: f1 = gLost6: f2 = gGot3
+    Debug.Print "SG0=" & f0 & "/" & f1 & "/" & f2
+    sld6.SimStdEvent(4, 0)          ' 焦点给 sld6 ⇒ 只该点它的 GotFocus
+    Debug.Print "SG1-got=" & TF(gGot6 - f0 = 1 And gLost6 - f1 = 0 And gGot3 - f2 = 0)
+    sld3.SimStdEvent(4, 0)          ' 移走 ⇒ sld6 失焦、sld3 得焦，两条都该发
+    Debug.Print "SG2-move=" & TF(gLost6 - f1 = 1 And gGot3 - f2 = 1 And gGot6 - f0 = 1)
+    sld6.SimStdEvent(4, 0)          ' 再回来
+    Debug.Print "SG3-back=" & TF(gGot6 - f0 = 2 And gGot3 - f2 = 1)
+    sld3.SimStdEvent(4, 0)          ' 认来源：sld6 的 LostFocus 只跟着它自己失焦涨
+    Debug.Print "SG4-isolate=" & TF(gLost6 - f1 = 2 And gGot3 - f2 = 2 And gGot6 - f0 = 2)
     Debug.Print "SLIDER-DONE"
     Unload Me
 End Sub
@@ -297,6 +313,23 @@ End Sub
 
 Private Sub sld6_Change()
     gChg6 = gChg6 + 1
+End Sub
+
+' C29-SL-g: 焦点那两条的计数器。sld3 只挂 GotFocus —— 它是"只靠焦点处理器也该被装"的证人。
+Private gGot6 As Long
+Private gLost6 As Long
+Private gGot3 As Long
+
+Private Sub sld6_GotFocus()
+    gGot6 = gGot6 + 1
+End Sub
+
+Private Sub sld6_LostFocus()
+    gLost6 = gLost6 + 1
+End Sub
+
+Private Sub sld3_GotFocus()
+    gGot3 = gGot3 + 1
 End Sub
 
 ' SD7 的那枚证人：sld2 除 Change（走父窗那条通道）之外只有 sld2_Click 这一条 ⇒ 它是否被

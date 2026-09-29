@@ -1864,7 +1864,10 @@ if ($Category -in @("all", "run", "vbp")) {
                      # 全是空（BASE 实测 `SE13-over=/`），SE14 是"显式写了空串 = 与默认同、
                      # 且不发 setter"那一面的运行时半边（它在 BASE 上也是 /end，只当证人）。
                      "SE10-dt=dtip", "SE12-dttag=dtag", "SE13-over=rt/",
-                     "SE14-emptytag=/end")
+                     "SE14-emptytag=/end",
+                     # C29-SL-g 焦点面。改之前 SG1/SG2/SG3/SG4 四条在 BASE 上逐条是 N
+                     # （四类白名单不含 Slider，处理器编得出来没人送消息）。SG0 是原始证人行。
+                     "SG1-got=Y", "SG2-move=Y", "SG3-back=Y", "SG4-isolate=Y")
     Test-Vbp "ctrlslider" "$Tests\ctrlslider\SlidApp.vbp" $slidNeedles
     Test-Vbp "ctrlslider_x86" "$Tests\ctrlslider\SlidApp.vbp" $slidNeedles -Arch "x86"
     Test-EmitcShape "sl_emitc_native" @("$Tests\ctrlslider\SlidApp.vbp") @(
@@ -1904,6 +1907,13 @@ if ($Category -in @("all", "run", "vbp")) {
         'if (msg == WM_KEYDOWN) {',
         'vb6_InstallControlSubclass((void*)vb6_hwnd_sld6, (void*)vb6_ctrl_subproc_sld6);',
         'vb6_Slider_SimStdEvent((void*)vb6_hwnd_sld6, 2, 37)',
+        'if (msg == WM_SETFOCUS) { extern void vb6_sld6_GotFocus(); vb6_sld6_GotFocus(); }',
+        'if (msg == WM_KILLFOCUS) { extern void vb6_sld6_LostFocus(); vb6_sld6_LostFocus(); }',
+        # sld3 只挂着 GotFocus 一条处理器 —— 装与拆那两份表也得认它（同一句判据有三份）
+        'if (msg == WM_SETFOCUS) { extern void vb6_sld3_GotFocus(); vb6_sld3_GotFocus(); }',
+        'vb6_InstallControlSubclass((void*)vb6_hwnd_sld3, (void*)vb6_ctrl_subproc_sld3);',
+        'vb6_RemoveControlSubclass((void*)vb6_hwnd_sld3);',
+        'vb6_Slider_SimStdEvent((void*)vb6_hwnd_sld6, 4, 0)',
         'if (msg == WM_LBUTTONUP) { extern void vb6_sld2_Click(); vb6_sld2_Click(); }',
         'vb6_InstallControlSubclass((void*)vb6_hwnd_sld2, (void*)vb6_ctrl_subproc_sld2);'
     )

@@ -1138,6 +1138,33 @@ void CCodeGen::emitDesignerStringProps(const FrmControl& ctrl, const std::string
     emitOne("Tag", "vb6_SetControlTag");
 }
 
+// C29-SL-g: 这个控件的 **焦点事件**（`GotFocus` / `LostFocus`）是不是已经由原生通知送进来了。
+// 与上一条同型的问题在焦点这一档更隐蔽：仓里同一句判据被抄成了**三份表**（发 arm 的
+// `cgen_form_wndproc_subclass.inc`、装子类的 `cgen_form_frame_menu.inc`、拆子类的
+// `cgen_form_wndproc_dispatch.inc`），三份里都写着同一份四类白名单
+// （PictureBox/Frame/Label/Image），而 TextBox/ComboBox/ListBox/命令按钮那批走的是另一条路：
+// 父窗的 `WM_COMMAND` 通知码（见 dispatch 那一趟开头：EN_SETFOCUS=256 / EN_KILLFOCUS=512、
+// CBN_=1024/2048、LBN_=4/5、BN_=6/7）。于是剩下的所有窗口态控件 —— **Slider 首当其冲**，
+// 还有 ListView / TreeView / DTPicker / MonthView / RichTextBox / 两个滚动条 / 文件系统三件套 ——
+// 的 `_GotFocus` / `_LostFocus` 是编得过、永不触发的死处理器（轨道条那两条实测过：原生只往父窗发
+// `WM_HSCROLL`，焦点变化一律以 `WM_SETFOCUS` / `WM_KILLFOCUS` 到**控件自己**的过程中，
+// 见 029 §C29-SL-d-0 第 1 条与 `.build/slprobe/slmeasure9.c`）。
+// 这张排除表就是"已经有 WM_COMMAND 那一条来源"的那六类 —— 剩下的都交给子类化那一档，
+// 同一次焦点变化不会有两处发。
+bool CCodeGen::controlFocusFromNativeNotify(FrmControlType ctrlType) {
+    switch (ctrlType) {
+    case FrmControlType::TextBox:
+    case FrmControlType::ComboBox:
+    case FrmControlType::ListBox:
+    case FrmControlType::CommandButton:
+    case FrmControlType::CheckBox:
+    case FrmControlType::OptionButton:
+        return true;
+    default:
+        return false;
+    }
+}
+
 // 控件类型的 Win32 样式位。取值与 cgen_form_ctrl_style_apply.inc 保持一致。
 // 顶层控件与容器子控件共用，避免容器内子控件缺失类型样式。
 long CCodeGen::controlTypeStyleBits(const FrmControl& ctrl) const {

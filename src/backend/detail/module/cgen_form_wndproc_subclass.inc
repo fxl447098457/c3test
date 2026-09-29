@@ -68,12 +68,14 @@
                 info.hwndVar = "vb6_hwnd_" + cIdent(ctrl.controlName);
             }
 
-            // PictureBox/Frame/Label 的 GotFocus/LostFocus 需要子类化
-            // (STATIC/BUTTON类控件不通过WM_COMMAND发送焦点通知)
-            if (ctrl.controlType == FrmControlType::PictureBox ||
-                ctrl.controlType == FrmControlType::Frame ||
-                ctrl.controlType == FrmControlType::Label ||
-                ctrl.controlType == FrmControlType::Image) {
+            // C29-SL-g: 这一档以前是**四类白名单**（PictureBox/Frame/Label/Image），与
+            // "装不装"、"拆不拆"那两份一起把剩下的所有窗口态控件 —— Slider 首当其冲，还有
+            // ListView / TreeView / DTPicker / MonthView / RichTextBox / 两个滚动条 /
+            // 文件系统三件套 —— 的 `_GotFocus` / `_LostFocus` 留在"编得过、永不触发"那一侧。
+            // 改成按"有没有另一条原生来源"排除：那六类的焦点通知由父窗的 `WM_COMMAND` 码供
+            // （EN_/CBN_/LBN_/BN_，见 controlFocusFromNativeNotify 的定义处），其余一律走
+            // 控件自己的 `WM_SETFOCUS` / `WM_KILLFOCUS` —— 同一次焦点变化只会有一处发。
+            if (!controlFocusFromNativeNotify(ctrl.controlType)) {
                 info.hasGotFocus = symTab_.lookup(ctrl.controlName + "_GotFocus") != nullptr;
                 info.hasLostFocus = symTab_.lookup(ctrl.controlName + "_LostFocus") != nullptr;
             }
@@ -135,10 +137,8 @@
                 info.ctrlName = child.controlName;
                 info.ctrlType = child.controlType;
                 info.hwndVar = "vb6_hwnd_" + cIdent(child.controlName);
-                if (child.controlType == FrmControlType::PictureBox ||
-                    child.controlType == FrmControlType::Frame ||
-                    child.controlType == FrmControlType::Label ||
-                    child.controlType == FrmControlType::Image) {
+                // C29-SL-g: 与顶层那一趟同一口径（按"有没有另一条原生来源"排除）
+                if (!controlFocusFromNativeNotify(child.controlType)) {
                     info.hasGotFocus = symTab_.lookup(child.controlName + "_GotFocus") != nullptr;
                     info.hasLostFocus = symTab_.lookup(child.controlName + "_LostFocus") != nullptr;
                 }

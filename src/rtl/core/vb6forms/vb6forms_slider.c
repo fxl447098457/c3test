@@ -443,6 +443,12 @@ void vb6_Slider_SimNotify(void* hwnd, int32_t code, int32_t pos) {
 void vb6_Slider_SimStdEvent(void* hwnd, int32_t kind, int32_t wParam) {
     UINT m;
     if (!hwnd) return;
+    /* C29-SL-g: kind=4 不是"发一条消息"，而是**真把焦点给这枚控件**（`SetFocus`）——
+     * 焦点事件的原生来源就是窗口管理器自己发的 `WM_SETFOCUS` / `WM_KILLFOCUS`，我们伪造
+     * 那两条消息反而验不到真链路（尤其验不到"焦点从 sld6 移到 sld3 时两边各发一次"）。
+     * 探针实测这条路是通的：slmeasure9.c 的 Q5a（SetFocus 之后子类过程收到 SETFOCUS）、
+     * slmeasure10.c 的 R3（真按下时轨道条自己就抢焦点，紧跟一条 SETFOCUS）。 */
+    if (kind == 4) { SetFocus((HWND)hwnd); return; }
     switch (kind) {
     case 0:  m = WM_LBUTTONUP;     break;
     case 1:  m = WM_LBUTTONDBLCLK; break;

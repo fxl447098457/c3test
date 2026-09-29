@@ -166,12 +166,11 @@
     {
         // 收集需要子类化的控件名(去重)
         auto needsSubclass = [&](const FrmControl& ctrl) -> bool {
-            return (ctrl.controlType == FrmControlType::PictureBox ||
-                    ctrl.controlType == FrmControlType::Frame ||
-                    ctrl.controlType == FrmControlType::Label ||
-                    ctrl.controlType == FrmControlType::Image)
-                   && (symTab_.lookup(ctrl.controlName + "_GotFocus") ||
-                       symTab_.lookup(ctrl.controlName + "_LostFocus"))
+            // C29-SL-g: 焦点档从"四类白名单"改成"按有没有另一条原生来源排除"，与
+            // cgen_form_wndproc_subclass.inc 发 arm 那一趟同一张表（不同步就会一边发一边不装）。
+            return (!controlFocusFromNativeNotify(ctrl.controlType) &&
+                    (symTab_.lookup(ctrl.controlName + "_GotFocus") ||
+                     symTab_.lookup(ctrl.controlName + "_LostFocus")))
                 || symTab_.lookup(ctrl.controlName + "_MouseEnter")
                 || symTab_.lookup(ctrl.controlName + "_MouseLeave")
                 || symTab_.lookup(ctrl.controlName + "_MouseDown")

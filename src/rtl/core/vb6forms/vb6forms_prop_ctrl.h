@@ -877,6 +877,8 @@ void    vb6_Slider_SimNotify(void* hwnd, int32_t code, int32_t pos);
 // （kind 0=WM_LBUTTONUP 1=WM_LBUTTONDBLCLK 2=WM_KEYDOWN 3=WM_KEYUP，wParam 只对按键两档
 //  有意义）。实测 slmeasure10/11.c：真手势的下/抬都会过控件的子类过程，而裸的一条
 // LBUTTONUP / DBLCLK 不会惊动父窗那条通道（不牵连 Change/Scroll），按键那条会真的动值。
+// C29-SL-g 加一档 kind=4：**不是发消息**，是真 `SetFocus(控件)` —— 焦点事件的原生来源就是
+// 窗口管理器自己发的 `WM_SETFOCUS` / `WM_KILLFOCUS`，伪造那两条反而验不到真链路。
 void    vb6_Slider_SimStdEvent(void* hwnd, int32_t kind, int32_t wParam);
 
 

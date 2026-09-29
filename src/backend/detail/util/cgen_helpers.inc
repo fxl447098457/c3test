@@ -278,6 +278,11 @@
     // cgen_form_wndproc_subclass.inc（发不发这条 arm）与 cgen_form_frame_menu.inc
     // （要不要装子类化）。
     static bool controlClickFromNativeNotify(FrmControlType ctrlType);
+    // C29-SL-g: 同理，但排除的是**焦点**通知（TextBox/ComboBox/ListBox/命令按钮那六类的
+    // GotFocus/LostFocus 由父窗的 WM_COMMAND 码供，见 cgen_form_wndproc_dispatch.inc 开头）。
+    // 三处使用点：发 arm（subclass）、装子类化（frame_menu）、拆子类化（dispatch）——
+    // 这一句判据在仓里本来就被抄成三份，任何一处不同步都会留下"装了不拆"或"发了不装"。
+    static bool controlFocusFromNativeNotify(FrmControlType ctrlType);
 
     // P11.7: 返回控件类型的默认属性名 (如 TextBox->"Text", Label->"Caption")
     // 空字符串表示该控件类型无默认属性
