@@ -347,6 +347,12 @@
     // 仅检查顶层表达式 (去除前导括号后), 避免对子表达式误判.
     bool cExprIsVariant(const std::string& cExpr) const;
 
+    // <vbeclipse>: 与 cExprIsVariant 相对的一侧 —— C 表达式是否**已经是
+    // vb6_SafeArray1D\* 载体** (Split/Filter/Array 等内置函数的 C 返回, 以及 _arr_N
+    // 匿名临时量)。数组槽实参的 vb6_VariantToSafeArray1D 提取对这类表达式必须跳过,
+    // 否则 C2440 (载体指针 → vb6_VARIANT)。见 cgen_util_type.cpp 的定义。
+    bool cExprIsSafeArrayCarrier(const std::string& cExpr) const;
+
     // Fix 038b: 运行时函数参数 C 类型查找表 — 当 calleeParams 为空 (运行时/内置函数)
     // 时, 通过函数名和参数索引查找期望的 C 类型. 返回空字符串表示未知.
     // 用于在函数调用参数生成时插入类型转换 (VARIANT→具体, 具体→VARIANT).

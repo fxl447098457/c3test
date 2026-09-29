@@ -563,6 +563,48 @@ bool CCodeGen::cExprIsVariant(const std::string& cExpr) const {
     return false;
 }
 
+// ============================================================
+// <vbeclipse>: C 表达式是否**已经是 SafeArray1D\* 载体**
+// ============================================================
+// Split/Filter/Array 这些内置函数在 VB6 侧的类型是 Variant, 但 codegen 发的是
+// 直接返回 vb6_SafeArray1D\* 的 RTL 调用。数组槽实参 (Join 首参 / UBound/LBound
+// 首参) 的按 Variant 提取 (vb6_VariantToSafeArray1D) 若套在它们外面就是
+// C2440 (vb6_SafeArray1D\* → vb6_VARIANT) —— 实测这三条形全中:
+//   Join(Split(s, ","), "|") / UBound(Split(s, ",")) / Join(Filter(a, "x"), "|")
+// 与 Fix 092g 的 _arr_N 特例同源、同解法, 区别只是这里包的是内置函数调用。
+bool CCodeGen::cExprIsSafeArrayCarrier(const std::string& cExpr) const {
+    size_t start = 0;
+    while (start < cExpr.size()) {
+        char c = cExpr[start];
+        if (c == '(' || c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '*') {
+            start++;
+        } else {
+            break;
+        }
+    }
+    // 匿名数组临时量 (`Array(...)` → _arr_N, Fix 092g) 本身就是载体。
+    if (cExpr.compare(start, 5, "_arr_") == 0) return true;
+
+    static const std::vector<std::string> carrierPrefixes = {
+        "vb6_Split(",                  // vb6_SafeArray1D* vb6_Split(...)
+        "vb6_Filter(",
+        "vb6_ArrayCreate(",
+        "vb6_ArrayAssign1D(",          // 整体数组赋值的深拷贝 (Fix 170)
+        "vb6_SafeArrayCreate1D(",
+        "vb6_SafeArrayReDim1D(",
+        "vb6_SafeArrayReDimPreserve1D(",
+        "vb6_VariantToSafeArray1D(",   // 已提取过, 再包一层就是双重解引用
+        "vb6_VariantToByteArray(",
+        "vb6_StringToByteArray(",
+        "vb6_StrConvToByteArray(",
+        "vb6_ComCallByteArray(",
+    };
+    for (const auto& prefix : carrierPrefixes) {
+        if (cExpr.compare(start, prefix.size(), prefix) == 0) return true;
+    }
+    return false;
+}
+
 
 // ============================================================
 // Fix 038b-5: 运行时函数参数 C 类型查找表

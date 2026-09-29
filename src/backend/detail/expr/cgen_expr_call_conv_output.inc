@@ -87,6 +87,10 @@
             if (i > 0) argList += ", ";
             argList += args[i];
         }
+        // <vbeclipse>: Format(expression[, format]) — RTL 签名 vb6_Format(vb6_VARIANT, BSTR),
+        // 省略 format 时此前发的是 1 参 → cl C2198 参数太少 (实测 s = Format(Now))。缺省 NULL
+        // 即"无格式串"那一形, RTL 内部各处也传 NULL (vb6rtl_conv.c:181+)。补在上面重建之后。
+        if (args.size() == 1) argList += ", NULL";
     }
     // Fix 036: CStr fallback — 当特殊分支未匹配 (Boolean/Byte/Date/Currency/常量/
     // 未注册函数返回值/Const BSTR 等), callee 仍为 vb6_CStr (接 vb6_VARIANT). 用

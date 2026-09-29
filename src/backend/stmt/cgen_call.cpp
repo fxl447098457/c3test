@@ -66,9 +66,21 @@ void CCodeGen::visit(CallStmt& node) {
                                 "vb6_ComCallBSTR",  // Fix 160-com-byref: 早期绑定COM方法返回BSTR (StringOf/StringAt 等) — 按BSTR打印
                                 "vb6_Console_ReadLine", "vb6_Console_ReadKey"  // Fix 161: Console 输入返回 BSTR
                             };
+                            // <vbeclipse>: 名字前缀匹配必须紧跟 `(` 才算命中。
+                            // 旧写法 expr.compare(0, size, prefix)==0 让短名字吞掉长名字:
+                            //   "vb6_Str" 命中 "vb6_StrComp(" ⇒ Debug.Print StrComp(a,b)
+                            //   被发成 vb6_DebugWriteBSTR(返回 1) → 把 1 当 BSTR 指针
+                            //   → 段错误 (实测, 改动前后两版都崩; Len/InStr/Asc 因无短前缀
+                            //   而正常, 所以整族只崩 StrComp 这一条)。
+                            // 同一形状也保护 doubleFuncs ("vb6_Int" vs "vb6_Integer…")。
+                            auto callNameHit = [](const std::string& expr,
+                                                  const std::string& name) -> bool {
+                                if (expr.compare(0, name.size(), name) != 0) return false;
+                                return expr.size() > name.size() && expr[name.size()] == '(';
+                            };
                             auto isBstrExpr = [&](const std::string& expr) -> bool {
                                 for (auto& prefix : bstrFuncs) {
-                                    if (expr.compare(0, prefix.size(), prefix) == 0) return true;
+                                    if (callNameHit(expr, prefix)) return true;
                                 }
                                 // vb6_BSTR_ 开头的都是 BSTR
                                 if (expr.compare(0, 8, "vb6_BSTR") == 0) return true;
@@ -91,7 +103,7 @@ void CCodeGen::visit(CallStmt& node) {
                             };
                             auto isDoubleExpr = [&](const std::string& expr) -> bool {
                                 for (auto& prefix : doubleFuncs) {
-                                    if (expr.compare(0, prefix.size(), prefix) == 0) return true;
+                                    if (callNameHit(expr, prefix)) return true;
                                 }
                                 // 已知double变量名 (小写匹配)
                                 std::string lower = expr;

@@ -28,6 +28,11 @@
 
     // 状态
     Module* currentModule_ = nullptr;
+    // <vbeclipse>: 当前模块的 `Option Compare Text` (VB6 是**按模块**的编译期属性)。
+    // 由 generate 序言从 module.options 读出; 决定字符串比较发 vb6_StrCmp 还是
+    // vb6_StrCmpT、Like 发 vb6_Like 还是 vb6_LikeC, 以及 InStr/StrComp/Replace/
+    // Split/Filter/InStrRev 省略 compare 时的缺省值。
+    bool optionCompareText_ = false;
     Symbol* currentProc_ = nullptr;  // 当前过程符号
     std::string currentReturnVar_;   // Function返回值变量名 (如 "vb6_ret_CalculateSum")
     std::string currentReturnCType_; // Fix 054: 当前函数返回值的C类型名 (如 "vb6_type_QRCodegenSegment")

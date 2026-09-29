@@ -129,8 +129,11 @@
                 // 不能再按 Variant 数组提取 (提取函数形参是 vb6_VARIANT) → C2440:
                 //   cPLI 56: Cmd = Join(Array(a, b, c), " ")
                 //     → vb6_Join(vb6_VariantToSafeArray1D(_arr_0), ...).
-                bool argIsLiteralArr092g = (argVal.compare(0, 5, "_arr_") == 0);
-                if (paramIsArray && !argIsPA091k && !argIsLiteralArr092g
+                // <vbeclipse>: 同一条边界扩到"内置函数调用已经返回载体"那一形
+                // (Split/Filter/ArrayCreate...), 判定收进 cExprIsSafeArrayCarrier:
+                //   Join(Split(s, ","), "|") → C2440 (实测三条全中, 含 UBound(Split(...)))
+                bool argIsCarrier092g = cExprIsSafeArrayCarrier(argVal);
+                if (paramIsArray && !argIsPA091k && !argIsCarrier092g
                     && (paramBase == Vb6Type::Variant || paramBase == Vb6Type::Byte
                     || paramBase == Vb6Type::String || paramBase == Vb6Type::Long)) {
                     // 数组参数: 从 Variant 提取 SafeArray1D*

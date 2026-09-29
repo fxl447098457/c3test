@@ -190,8 +190,17 @@ int vb6_StrCmp(const wchar_t* a, const wchar_t* b) {
     // (GetTextDisplay 里 Format 从未赋值的列 → .Format==NULL)。
     if (!a) a = L"";
     if (!b) b = L"";
-    if (g_vb6_optionCompareText) return _wcsicmp(a, b);
+    if (g_vb6_optionCompareText) return vb6_TextCmp(a, b);
     return wcscmp(a, b);
+}
+
+// <vbeclipse>: 文本模式的**显式**比较入口。VB6 的 Option Compare 是**按模块**的编译期
+// 属性, 而 g_vb6_optionCompareText 是进程唯一的全局 —— 一个 Text 模块会把同进程里
+// Binary 模块的 `=`/`<>`/Select Case 语义一起带跑。因此 codegen 按"当前模块的
+// Option Compare"直接选函数名 (Text 模块发 vb6_StrCmpT), 这个全局保留给
+// 旧的运行期路径, 不再是判定入口。
+int vb6_StrCmpT(const wchar_t* a, const wchar_t* b) {
+    return vb6_TextCmp(a, b);
 }
 
 // ============================================================

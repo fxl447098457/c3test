@@ -1279,6 +1279,21 @@ if ($Category -in @("all", "run", "bas")) {
     Add-BasTest "test_m5" "$Tests\test_m5.bas"
     Add-BasTest "test_rtl" "$Tests\test_rtl.bas"
     Add-BasTest "test_array" "$Tests\test_array.bas" @("wa-clone=22", "wa-ub=3", "wa-str=65", "wa-rt=65", "=== Array Tests PASSED ===")
+    # <vbeclipse>: Array() 空数组那一形 (UBound=-1/LBound=0/For Each 零次) 与"未分配 →
+    # 运行时错误 9"两形; 读数全取自真实输出。常量实参那形见 arr_n01_ubound_vbnull。
+    Add-BasTest "test_arr_empty" "$Tests\test_arr_empty.bas" @("EA-ub=-1", "EA-lb=0", "EA-n=0", "EA-isarr=True", "EA-join=[", "EA-fe=0", "EA-vub=-1", "EA-3ub=2", "EA-e2=9", "EA-rb-lb=1", "EA-rb-ub=3", "EA-err=9", "EA-DONE")
+    # <vbeclipse>: Join/Filter 的数组槽 (Variant 数组曾按 BSTR* 读 → 段错误; Filter 的
+    # VB6 可选参曾不补 → C2198/C2440 编不过)。含 1-based 源数组、零命中空数组、非字符串元素 → 13。
+    Add-BasTest "test_joinfilter" "$Tests\test_joinfilter.bas" @("JF-var=[abc|xyz|abd]", "JF-var-def=[abc xyz abd]", "JF-str=[abc|xyz|abd]", "JF-f-lb=0 ub=1", "JF-f=[abc|abd]", "JF-none-ub=-1", "JF-excl-ub=0", "JF-excl=[xyz]", "JF-err=13", "JF-DONE")
+    # <vbeclipse>: 内置函数 VB6 合法最小实参形 (Format(x)/Filter(a,x)/GetAttr/SetAttr) 的
+    # 编译面护栏 —— 价值在"整条用例能编过", needle 只取 locale 无关读数
+    # (AR-fmt2 走小数点, 随区域设置变, 故不入 needle)。
+    Add-BasTest "test_builtin_arity" "$Tests\test_builtin_arity.bas" @("AR-fmt=4", "AR-attr=True", "AR-join1=[abc xyz  ]", "AR-filter=[abc]", "AR-DONE")
+    # <vbeclipse>: vbTextCompare 六个入口对表 (InStr 两形/InStrRev/Replace/Split/Filter/
+    # StrComp)。修复前 RTL 5 处 (void)compare + InStr 第 4 参被截、三参"字符串优先"形
+    # 错接槽位 (实测段错误)；另修 Debug.Print StrComp(...) 被 "vb6_Str" 前缀误判成 BSTR
+    # (把返回值 1 当指针 → 段错误)。读数全 ASCII, 两架构应一致。
+    Add-BasTest "test_text_compare" "$Tests\test_text_compare.bas" @("TC-instr-b=0", "TC-instr-t=7", "TC-instr4-t=20", "TC-instr4-b=0", "TC-rep-b=[-A-A]", "TC-rep-t=[----]", "TC-split-b-ub=0", "TC-split-t-ub=2 [a|b|c]", "TC-filter-b-ub=0", "TC-filter-t-ub=1 [abc|ABD]", "TC-sc-b=1", "TC-sc-t=-1", "TC-sc-eq=0", "TC-DONE")
     Add-BasTest "test_fileio" "$Tests\test_fileio.bas"
     # --- Fix 197: RTL 文件 I/O 在非 ASCII 路径下必须工作 ---
     # 源码纯 ASCII, 中文文件名在运行时用 ChrW 拼出, 检查 9 项 MkDir/Print#/Line Input/
@@ -2774,6 +2789,15 @@ if ($Category -in @("all", "run", "vbp")) {
         "TOF7:OK", "TOF8:OK", "TOF9:OK", "TOF10:OK", "TOF11:OK", "TOF12:OK", "TOF-DONE")
     Test-Vbp "typeof_class" "$Tests\typeof\Tof.vbp" $tofExpected
     Test-Vbp "typeof_class_x86" "$Tests\typeof\Tof.vbp" $tofExpected -Arch "x86"
+    # <vbeclipse>: `Option Compare Text` 按模块生效 (修复前 module.options 从没进代码生成层,
+    # 整模块仍按二进制比)。同工程里再放一个**没有** Option Compare 的 Binary 模块
+    # (OCBINARY: 读数是 BINARY) —— 模式若靠进程唯一的全局切, 这条就会变 TEXT。
+    if (Test-Path "$Tests\optcmp\oc_ok.vbp") {
+        $optCmpExpected = @("OC-eq=True", "OC-lt=False", "OC-instr=1", "OC-instr-exp-b=0",
+            "OC-instr3=1", "OC-sc=0", "OC-rep=[----]", "OC-split-ub=2", "OC-filter-ub=1",
+            "OC-like=True", "OC-case=hit", "OC-binary-mod=BINARY", "OC-DONE")
+        Test-Vbp "optcmp_text_module" "$Tests\optcmp\oc_ok.vbp" $optCmpExpected
+    }
 
     Test-Vbp "cc_act_pair" "$Tests\cc_act\Act.vbp" $ccActExpected
     Test-Vbp "cc_act_x86" "$Tests\cc_act\Act.vbp" $ccActExpected -Arch "x86"
@@ -3195,6 +3219,9 @@ if ($Category -in @("all", "syntax")) {
     # ai/022 B11/C03b: inheriting a CoClass block name was already refused, but the sentence
     # blamed a name that does exist in the project; the new wording names the real mistake.
     Test-SyntaxFailMulti "itf_n39_inherits_coclass" @("$Tests\itf_neg\n39_coclass_as_base.bas", "$Tests\itf_neg\n39_coclass_as_base_der.cls") "which is a CoClass block"
+    # <vbeclipse>: `UBound(vbNull)` 首参是 VarType 常量 —— 真 VB6 编译期就拒 (提示缺少数组)。
+    if (Test-Path "$Tests\arr_neg\n01_ubound_vbnull.bas") { Test-SyntaxFail "arr_n01_ubound_vbnull" "$Tests\arr_neg\n01_ubound_vbnull.bas" "VB3043" }
+    if (Test-Path "$Tests\arr_neg\n02_join_vbnull.bas") { Test-SyntaxFail "arr_n02_join_vbnull" "$Tests\arr_neg\n02_join_vbnull.bas" "VB3043" }
     # Positive guard (ai/022 B02): a class satisfying a new-style contract (
     # Extends-inherited slot + property tri-slot keys) must stay silent.
     if (Test-Path "$Tests\itf_pos\p01_contract_ok.cls") { Test-Syntax "itf_p01_contract_ok" "$Tests\itf_pos\p01_contract_ok.cls" }

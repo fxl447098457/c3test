@@ -318,6 +318,38 @@ void SemanticAnalyzer::visit(DictionaryAccessExpr& node) {
 }
 
 void SemanticAnalyzer::visit(IndexOrCallExpr& node) {
+    // VB3043 (<vbeclipse>, 用户在真 VB6 里实测确认): 数组槽实参必须是**数组表达式**。
+    // `UBound(vbNull)` 在 VB6 是编译期错误 (提示缺少数组), 不是某个返回值。C3 此前把常量
+    // 折成整数塞进 vb6_UBound/vb6_Join 的 SafeArray1D* 形参 —— 编译绿、运行期解引用地址 1
+    // → 0xC0000005 (实测 UBound(vbNull) 与 Join(vbNull, ",") 两条)。
+    // 只拦"字面量 / 常量"这一形 (VB6 里数组不可能是常量), 变量与属性实参一律放过,
+    // 避免误伤既有工程。数组槽 = 注册为 Variant|Array 的那三个首参 (builtin_funcs.inc)。
+    if (pass_ == 2 && node.callee && node.callee->kind == ASTNodeKind::IdentifierExpr &&
+        !node.positional.empty()) {
+        std::string fnName = static_cast<IdentifierExpr&>(*node.callee).name;
+        std::string fnLower = Symbol::toLower(fnName);
+        if (fnLower == "ubound" || fnLower == "lbound" || fnLower == "join") {
+            Expr* a0 = node.positional[0].get();
+            bool constNotArray = (a0->kind == ASTNodeKind::LiteralExpr);
+            std::string a0Name;
+            if (!constNotArray && a0->kind == ASTNodeKind::IdentifierExpr) {
+                auto& id = static_cast<IdentifierExpr&>(*a0);
+                Symbol* s = symTab_.lookup(id.name);
+                if (s && !s->isArray &&
+                    (s->kind == SymbolKind::Constant || s->kind == SymbolKind::EnumMember)) {
+                    constNotArray = true;
+                    a0Name = id.name;
+                }
+            }
+            if (constNotArray) {
+                diag_.error(DiagnosticID::SemArrayArgExpected, node.loc,
+                    fnName + " needs an array expression; got " +
+                    (a0Name.empty() ? std::string("a literal") : "constant '" + a0Name + "'") +
+                    " (VB6 rejects this at compile time)");
+            }
+        }
+    }
+
     // 分析被调用者
     Vb6Type calleeType = Vb6Type::Unknown;
     bool argsAnalyzed = false;

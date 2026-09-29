@@ -235,7 +235,9 @@ void CCodeGen::visit(BinaryExpr& node) {
 
     // Like运算: VB6 Like → vb6_Like
     if (node.op == BinaryOp::Like) {
-        lastExpr_ = "vb6_Like(" + left + ", " + right + ")";
+        // <vbeclipse>: Option Compare Text 模块里 Like 的大小写与字符区间都按文本形
+        lastExpr_ = std::string("vb6_Like") + (optionCompareText_ ? "C" : "")
+                    + "(" + left + ", " + right + (optionCompareText_ ? ", 1" : "") + ")";
         return;
     }
 
@@ -259,7 +261,10 @@ void CCodeGen::visit(BinaryExpr& node) {
                 case BinaryOp::Ge:cmpOp = ">= 0"; break;
                 default: cmpOp = "== 0"; break;
             }
-            lastExpr_ = "(-(vb6_StrCmp(" + left + ", " + right + ") " + cmpOp + "))";
+            // <vbeclipse>: 本模块 Option Compare Text ⇒ 走恒文本入口 vb6_StrCmpT
+            // (VB6 的比较模式是按模块的编译期属性, 不能靠进程唯一的全局)
+            lastExpr_ = "(-(vb6_StrCmp" + std::string(optionCompareText_ ? "T" : "")
+                        + "(" + left + ", " + right + ") " + cmpOp + "))";
             return;
         }
     }
