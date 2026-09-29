@@ -77,10 +77,10 @@
 
 四条实测口径值得记：
 
-1. **不需要 `WS_TABSTOP` 也能收到按键**：原生轨道条在 `WM_LBUTTONDOWN` 里自己就把焦点抢过去了（实测：按下之后跟着一条 `WM_SETFOCUS`，"focus after click = 控件"）。所以"按一下方向键调音量"这种写法在本项目里是真的会跑。但 **Tab 键导航本身仍然不通** —— 主消息循环没有 `IsDialogMessage`，而且所有控件的创建样式都没挂 `WS_TABSTOP`（`Slider1.TabStop` 因此答 `False`）；那一整片缺口记在账 #83，不在本格。
+1. **不需要 `WS_TABSTOP` 也能收到按键**：原生轨道条在 `WM_LBUTTONDOWN` 里自己就把焦点抢过去了（实测：按下之后跟着一条 `WM_SETFOCUS`，"focus after click = 控件"）。所以"按一下方向键调音量"这种写法在本项目里是真的会跑。**Tab 键导航**这一半后来补齐了一半：创建样式现在立 `WS_TABSTOP`（账 #83(a)）、窗体显示时焦点自己落在第一枚 tabstop（账 #157），**模态窗体里按 Tab 实测已经真跳格**；普通（非模态）窗体那条泵仍没调 `IsDialogMessage`，还差这一刀（账 #83(b)）。
 2. **`Click` 这一档是通用的、不是 Slider 专属**：以前"控件级 `_Click` 处理器"只有那种会往父窗发原生通知的控件（命令按钮 / 复选 / 单选 / 列表 / 组合框 / 文件系统三件套 / SSTab / 工具栏）才会被接上，其余控件（Label / Image / PictureBox / Frame / TextBox / 滚动条 / Slider）的 `xxx_Click` 是**编得过、永远不被调用**的死代码。本格把这些补上了，同时按上表把那批"已有原生 Click 来源"的控件排除掉 —— 否则一次点击会从两条路各发一次。
 3. **`Slider1.SimStdEvent(kind, wParam)` 是判据专用助手，不是 VB6 方法**（与 `SimNotify` / `DTPicker.SimChange` / `RichTextBox.SimNotify` 同先例）：`kind` 0=Click 1=DblClick 2=KeyDown 3=KeyUp，把对应的那条原生消息**同步**送进控件自己的过程。无头环境点不了鼠标，而直接调处理器会绕开整条派发链。
-4. **焦点不靠 `WS_TABSTOP` 也到得了，但 Tab 导航仍然不通**：原生轨道条在 `WM_LBUTTONDOWN` 里自己就把焦点抢过去（实测按下之后紧跟一条 `WM_SETFOCUS`），所以"点一下再用方向键调"这种写法真会跑；而 Tab 键切换要主消息循环里有 `IsDialogMessage`，本项目的循环没有那一句、控件创建时也不挂 `WS_TABSTOP` ⇒ 那一整片记在账 #83。
+4. **焦点不靠 `WS_TABSTOP` 也到得了，但 Tab 导航仍然不通**：原生轨道条在 `WM_LBUTTONDOWN` 里自己就把焦点抢过去（实测按下之后紧跟一条 `WM_SETFOCUS`），所以"点一下再用方向键调"这种写法真会跑；而 Tab 键切换要消息泵里有 `IsDialogMessage`：模态循环本来就带（现在实测真跳格），普通窗体那条主泵没有 ⇒ 只剩这一刀，记在账 #83(b)。
 
 ## 本项目的实现口径（ai/029 C29-SL-e：`ToolTipText` 与 `Tag`）
 
