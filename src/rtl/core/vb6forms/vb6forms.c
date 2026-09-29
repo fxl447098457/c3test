@@ -674,10 +674,22 @@ int vb6_MessageLoop(void) {
                 }
             }
         } else {
+            // 账 #83(b)：主泵也要走对话框式键盘导航，否则**普通（非模态）窗体按 Tab 不动**。
+            // 模态那条循环本来就走了（`vb6_ShowForm` 里 `IsDialogMessageW`），实测在那儿
+            // VK_TAB 真跳格（029 的「C29-FS-a 之后一测」），差的只有这一条泵。
+            // 落点是 `GetActiveWindow()` —— Tab 是给"用户正在打字的那枚窗体"用的，
+            // 拿 msg.hwnd 当对话框会把子控件句柄当容器传进去，找不着下一站。
+            // 与模态那条同一个开关 `C3_OCX_NO_DLGMSG=1` 关掉：`IsDialogMessage` 会
+            // **吞掉**它处理的那条按键消息，所以 `_KeyDown`/`_KeyPress` 里想看见 VK_TAB 的
+            // 用法会被这一刀改变行为（存量实测：语料里 0 处这么写）。
+            int useDlgMsgMain = (GetEnvironmentVariableW(L"C3_OCX_NO_DLGMSG", NULL, 0) <= 0);
             while (GetMessage(&msg, NULL, 0, 0)) {
                 // P24-Timer: WM_TIMER现在由WndProc分发, 消息循环不再拦截
-                TranslateMessage(&msg);
-                DispatchMessage(&msg);
+                HWND act = useDlgMsgMain ? GetActiveWindow() : NULL;
+                if (!act || !IsDialogMessageW(act, &msg)) {
+                    TranslateMessage(&msg);
+                    DispatchMessage(&msg);
+                }
             }
         }
     }

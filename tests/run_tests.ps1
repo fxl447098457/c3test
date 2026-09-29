@@ -1674,9 +1674,18 @@ if ($Category -in @("all", "run", "vbp")) {
     # 而且 cmdA 是 .frm 里**最后声明**的那枚 ⇒ "照创建顺序挑"给出的是 cmdB，与正确答案不同。
     # 读数全走 LongPtr 形参（HexEq/NotEq 两个助手）：控件 `.hwnd` 的装箱那条路是坏的（账 #159），
     # 直接写 GetFocus() = ctl.hwnd 会恒假 —— 又一次判据自伤，绕开它才叫测到东西。
+    # 账 #83(b) 的第一半（主泵走 IsDialogMessage）用同一个夹具的 MW* 那一相来断：
+    # 每拍读一次焦点、再往它 post 一对 VK_TAB。判据**故意不问跳的顺序** —— `IsDialogMessage`
+    # 按 z-order（≈创建顺序）走，不是 VB6 的 TabIndex 顺序（实测站点序列
+    # txtMain → cmdY → cmdX → txtSecond → 回头），顺序那一刀另记账 #163。这里钉三件事：
+    # 四枚可聚焦的**都走到**（MW-new=4）、**回头落在起点**（MW-repeat=txtMain）、
+    # 回到起点前走过 3 枚新站（MW-hops=3）。改之前焦点压根不动 ⇒ MW-new=1。
+    # 同一份产物还带一条开关侧负控：`C3_OCX_NO_DLGMSG=1` 把泵里这一句关掉 ⇒ MW-new 回到 1
+    # （本地实测；开关与模态那条循环共用，先例 Fix 144b）。
     $mdNeedles = @("MODAL-DONE", "M1-startup=Y", "M2-returned=Y", "D1-first=Y",
                     "D2-notB=Y", "D3-notLbl=Y", "D4-notOff=Y", "D5-notDis=Y",
-                    "D6-notHidden=Y", "D7-ticks=Y")
+                    "D6-notHidden=Y", "D7-ticks=Y",
+                    "MW-new=4/repeat=txtMain/hops=3")
     Test-Vbp "modal" "$Tests\modal\ModalApp.vbp" $mdNeedles
     Test-Vbp "modal_x86" "$Tests\modal\ModalApp.vbp" $mdNeedles -Arch "x86"
     Test-EmitcShape "md_emitc_focus" @("$Tests\modal\ModalApp.vbp") @(
