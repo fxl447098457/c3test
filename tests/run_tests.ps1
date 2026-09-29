@@ -1992,11 +1992,11 @@ if ($Category -in @("all", "run", "vbp")) {
     Test-EmitcShape "cs_emitc_tabstop" @("$Tests\ctrlstate\CtrlState.vbp") @(
         # 账 #83(a): 立位是**进创建参数**的（不是建好再 SetWindowLong），所以两条创建路各钉一枚。
         # BASE 上这两串一个都没有（那一趟所有控件都不立位）⇒ 能红。
-        '1409351683L, 0L,',        # 顶层 CheckBox：1409286147 + WS_TABSTOP
-        '1342242819L, 0L,',        # Frame 里的 CheckBox：1342177283 + 同一条 —— 第二条创建路
-        # 显式写了 `TabStop = 0` 的那枚**保持不立**。这一串在 BASE 上也在（那时谁都不立），
-        # 所以它是行为钉、红不了 —— 防的是以后有人把"默认立"写成"一律立"。
-        '1409286147L, 0L,',
+        '1409368067L, 0L,',        # 顶层 CheckBox：1409286147 + WS_TABSTOP(65536) + BS_NOTIFY(16384)
+        '1342259203L, 0L,',        # Frame 里的 CheckBox：同两条 —— 第二条创建路
+        # 显式写了 `TabStop = 0` 的那枚**保持不立**（1409286144+3+16384，只挂 BS_NOTIFY、不挂 WS_TABSTOP）。
+        # 账 #158 之后这一格的数字也跟着挪了一格 ⇒ 它现在**能红**；防的还是同一件事："默认立"被写成"一律立"。
+        '1409302531L, 0L,',
         'vb6_CStrBool(vb6_GetTabStop('      # 读侧归到 Boolean 档（#124 同族）
     )
     Test-EmitcAbsent "cs_emitc_selectivity" @("$Tests\ctrlstate\CtrlState.vbp") @(
@@ -2013,6 +2013,10 @@ if ($Category -in @("all", "run", "vbp")) {
         # （Label = 1409286400、Frame = 1409286151，各自 +65536 那两串如果出现就说明排除表被改坏）。
         '1409351936L, 0L,',        # Label 立了位 —— 不该出现
         '1409351687L, 0L,'         # Frame 立了位 —— 不该出现
+        # 账 #158: `BS_NOTIFY` 只给 BUTTON 族那三型 —— 拿不到焦点的这两类**不许**被带上那一位
+        # （Frame = 1409286151+16384、Label = 1409286400+16384；这两串是排除表的红线）
+        '1409302535L, 0L,',        # Frame 挂了 BS_NOTIFY —— 不该出现
+        '1409302784L, 0L,'         # Label 挂了 BS_NOTIFY —— 不该出现
     )
 
     # ai/029 C29-SL-a: Slider (原生 msctls_trackbar32)。登记之前这枚控件**连窗口都没建**
