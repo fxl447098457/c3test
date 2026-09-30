@@ -183,19 +183,14 @@
                 }
                 childCtrlId++;
                 // 递归处理多层容器(Frame/PictureBox 内再嵌容器)
-                if (!child.children.empty() &&
-                    (child.controlType == FrmControlType::Frame ||
-                     child.controlType == FrmControlType::PictureBox ||
-                     child.controlType == FrmControlType::SSTab)) {
-                    self(self, child, childHwndRead(child));
+                if (!child.children.empty() && controlIsContainerType(child)) {
+                    self(self, child, childHwndRead(child));   // 账 #167：容器清单收成一处
                 }
             }
         };
         for (const auto& ctrl : frmDesc.formControl.children) {
             if (ctrl.children.empty()) continue;
-            if (ctrl.controlType != FrmControlType::Frame &&
-                ctrl.controlType != FrmControlType::PictureBox &&
-                ctrl.controlType != FrmControlType::SSTab) continue;
+            if (!controlIsContainerType(ctrl)) continue;   // 账 #167
             emitChildControls(emitChildControls, ctrl, childHwndRead(ctrl));
         }
     }
@@ -241,19 +236,13 @@
                             c_.emitLine("vb6_InstallControlSubclass((void*)" + childHwndRead(child) + ", (void*)" + subProcName + ");");
                         }
                     }
-                    if (!child.children.empty() &&
-                        (child.controlType == FrmControlType::Frame ||
-                         child.controlType == FrmControlType::PictureBox ||
-                         child.controlType == FrmControlType::SSTab)) {
+                    if (!child.children.empty() && controlIsContainerType(child)) {   // 账 #167
                         self(self, child);
                     }
                 }
             };
             for (const auto& ctrl : frmDesc.formControl.children) {
-                if (!ctrl.children.empty() &&
-                    (ctrl.controlType == FrmControlType::Frame ||
-                     ctrl.controlType == FrmControlType::PictureBox ||
-                     ctrl.controlType == FrmControlType::SSTab)) {
+                if (!ctrl.children.empty() && controlIsContainerType(ctrl)) {   // 账 #167
                     subclassContainerChildren(subclassContainerChildren, ctrl);
                 }
             }
@@ -264,9 +253,7 @@
     // 顶层与嵌套 Frame/PictureBox 均安装 (含仅作为容器的控件).
     {
         auto emitForward142 = [&](auto&& self, const FrmControl& ctrl) -> void {
-            if ((ctrl.controlType == FrmControlType::Frame ||
-                 ctrl.controlType == FrmControlType::PictureBox ||
-                 ctrl.controlType == FrmControlType::SSTab) && !ctrl.children.empty()) {
+            if (controlIsContainerType(ctrl) && !ctrl.children.empty()) {   // 账 #167
                 std::string nmLower = ctrl.controlName;
                 std::transform(nmLower.begin(), nmLower.end(), nmLower.begin(), ::tolower);
                 if (!knownControlArrays_.count(nmLower)) {

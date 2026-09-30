@@ -242,7 +242,14 @@
                 std::string clickFn = cProcName(ctrl.controlName + "_Click", AccessLevel::Private);
                 // 账 #158：**只认 BN_CLICKED=0** —— 按钮族现在挂了 `BS_NOTIFY`，同一个 id 还会
                 // 携着 `code=6/7`（焦点变化）进来，不过滤就把一次焦点移动算成一次点击。
-                c_.emitLine("if (id == " + std::to_string(ctrlId) + " && code == 0) {");
+                // 账 #171（C29-FS-h）：**单选钮这一型光按 code 筛不掉** —— 实测焦点进入组内另一枚时，
+                // 它替父窗发的就是 `BN_CLICKED`（号 0），而那一刻它自己并没被勾上（两头证人：`Value`
+                // 与 OS 的 `BM_GETCHECK` 都答「没勾」）。VB6 的 `Click` 只在用户真选了这枚时发生
+                // ⇒ 只在 OptionButton 的 arm 上多问一句来路勾没勾；口径写在 RTL 的
+                // `vb6_RadioClickCounts`（唯一一处），别的型一律放行、条件也不多发（爆炸半径只管单选钮）。
+                std::string guard171 = (ctrl.controlType == FrmControlType::OptionButton)
+                    ? " && vb6_RadioClickCounts((void*)lParam)" : std::string();
+                c_.emitLine("if (id == " + std::to_string(ctrlId) + " && code == 0" + guard171 + ") {");
                 c_.indent();
                 if (isArrayCtrl) {
                     // 控件数组: 事件处理带Index参数
@@ -431,17 +438,13 @@
                 if (!childClass142) continue;
                 emitCommandDispatch142(child, childCmdId142);
                 childCmdId142++;
-                if (!child.children.empty() &&
-                    (child.controlType == FrmControlType::Frame ||
-                     child.controlType == FrmControlType::PictureBox)) {
+                if (!child.children.empty() && controlIsContainerType(child)) {   // 账 #167: 原来少认 SSTab
                     self(self, child);
                 }
             }
         };
         for (const auto& ctrl : frmDesc.formControl.children) {
-            if (!ctrl.children.empty() &&
-                (ctrl.controlType == FrmControlType::Frame ||
-                 ctrl.controlType == FrmControlType::PictureBox)) {
+            if (!ctrl.children.empty() && controlIsContainerType(ctrl)) {   // 账 #167: 原来少认 SSTab
                 walkCmdChildren142(walkCmdChildren142, ctrl);
             }
         }

@@ -55,17 +55,13 @@
                 if (!FrmParser::controlTypeToWin32Class(child.controlType)) continue;
                 emitFocusArms158(child, childFocusId158);
                 childFocusId158++;
-                if (!child.children.empty() &&
-                    (child.controlType == FrmControlType::Frame ||
-                     child.controlType == FrmControlType::PictureBox)) {
+                if (!child.children.empty() && controlIsContainerType(child)) {   // 账 #167: 原来少认 SSTab
                     self(self, child);
                 }
             }
         };
         for (const auto& ctrl : frmDesc.formControl.children) {
-            if (!ctrl.children.empty() &&
-                (ctrl.controlType == FrmControlType::Frame ||
-                 ctrl.controlType == FrmControlType::PictureBox)) {
+            if (!ctrl.children.empty() && controlIsContainerType(ctrl)) {   // 账 #167: 原来少认 SSTab
                 walkFocusChildren158(walkFocusChildren158, ctrl);
             }
         }
@@ -497,9 +493,11 @@
                 c_.emitLine("vb6_RemoveControlSubclass((void*)vb6_hwnd_" + cIdent(ctrl.controlName) + ");");
             }
         }
-        // P0-5修复: Frame容器内子控件
+        // P0-5修复: 容器内子控件（账 #167: 这一份「谁是容器」抄得比"装"那一趟还少 ——
+        // 只有 Frame ⇒ PictureBox / SSTab 的孩子在 install 那一趟发了子类化、这里不拆。
+        // 三份合到 controlIsContainerType 这一个出口。）
         for (const auto& ctrl : frmDesc.formControl.children) {
-            if (ctrl.controlType != FrmControlType::Frame) continue;
+            if (!controlIsContainerType(ctrl)) continue;
             for (const auto& child : ctrl.children) {
                 std::string childNameLower = child.controlName;
                 std::transform(childNameLower.begin(), childNameLower.end(), childNameLower.begin(), ::tolower);

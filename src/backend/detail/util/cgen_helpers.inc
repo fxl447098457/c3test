@@ -296,6 +296,10 @@
     // `cmdIn1 → cmdTop2 → cmdTop1`，Frame 里的 cmdIn2/cmdDeep 一步都不到）。
     // 容器清单与 `cgen_form_frame_menu.inc` 里那条递归清单同一族 —— **两条创建路都要挂**
     // （容器自己也可以是子控件：嵌在 Frame 里的 Frame 走第二条路）。
+    // 账 #167：这类型算不算**容器**（会发子控件、要挂 CONTROLPARENT、子控件要吃派发）。
+    // 创建侧与两趟派发侧共用这一处 —— 派发侧以前少认 SSTab ⇒ 子控件 id 整体错位。
+    bool controlIsContainerType(const FrmControl& ctrl) const;
+
     long controlContainerExStyleBit(const FrmControl& ctrl) const;
 
     // 账 #158（按钮那一半）: BUTTON 类的焦点通知（`BN_SETFOCUS=6` / `BN_KILLFOCUS=7`）只有创建时

@@ -26,6 +26,7 @@ Frame（以及 `PictureBox` / `SSTab`）里的控件走的是**第二条创建�
 | `Text` / `Caption`、`Enabled` / `Visible` / `Value`、`ToolTipText` / `Tag` | 早已对齐（账 #125 / #142） |
 | Slider 的 `Min` / `Max` / `Value` / `TickFrequency` / `Sel*` | 对齐（C29-SL-o，两条路共用同一处出口） |
 | `FontName` / `FontSize` | 对齐（账 #154；设计期写的字体现在会打到窗口上） |
+| 框架里控件的**事件**（`_GotFocus` / `_LostFocus` / 子类化那几条） | 三型容器（`Frame` / `PictureBox` / `SSTab`）**一视同仁**（账 #167）。以前"谁是容器"这张表在发码侧抄了 10 处、每处集合还不齐：事件派发那两路只认 `Frame` + `PictureBox`，拆子类那一趟**只认 `Frame`** ⇒ `SSTab` 里的控件在两侧数到**不同的 id**，通知真发出来了却查不到自己的处理器（`Frame` 里的控件则是"装了不拆"）。现在收成一处权威 `controlIsContainerType`，判据 = `ctrlsstab` 夹具里 `SSTab` 的孩子与 `Frame` 的孩子各自报一次 `_GotFocus` 增量（修前两步全 0） |
 | `TabIndex` / `TabStop` | `TabStop` 默认 `True`（VB6 一致），且**框架里的控件与外面一样**立这一位（账 #83(a)）；`Label` / `Image` / `Shape` / `Line` / `Frame` 自己拿不到焦点，不立。`TabIndex` 现在**设计期那个数会下发到窗口**（账 #160）：`.frm` 写了就照发的，没写用**同一父窗内的声明序号**兜底；框架里的控件**自己从 0 编号**（不占窗体那一串的号），所以运行期 `Ctl.TabIndex` 读回的就是 `.frm` 里那个数 —— 以前每一枚都读 0 |
 | 窗体显示时的初始焦点 | 焦点交给**这枚窗体里 TabIndex 最小的那枚拿得到焦点的控件**（账 #157）。容器里的控件也算在内 —— 选目标时递归整棵控件树；设计期 `Enabled=False` / `Visible=False` 或写了 `TabStop=False` 的会被跳过。只应用**一次**（应用一次是本批选的口径）：之后再 Show 这枚窗体，不会把焦点从用户停下的地方抢回来；"再 Show 之后焦点回到上次那枚"这一形**没实测** |
 
@@ -42,7 +43,8 @@ Frame（以及 `PictureBox` / `SSTab`）里的控件走的是**第二条创建�
 > 改成对数之后 `EX-fr=65536`：站点序列从当年的 `A → B → A → B` 变成走完一整圈、
 > **框架里的兄弟各站一次**（x64 与 x86 逐行相同）；框架本身照旧不停站 —— VB6 就是这个行为。
 > 账 #163 之后这一趟**次序改由自研导航器按父窗 `TabIndex` 排**（不再是 z-order），「谁算一站」也改读创建时那份 `WS_TABSTOP`（系统会把它挪到单选组里勾选那枚上）。
-> 还没接上的一条：**框架里 OptionButton 的组内方向键**（账 #168 剩下的那一半，实测 `VK_DOWN` 从链尾那枚会跳到框架外的下一枚）。
+> 框架里 OptionButton 的组内方向键（`VK_UP`/`VK_DOWN`）也已由同一个导航器接走：
+> 同容器同型按 `TabIndex` 走、到尾回绕（账 #168 已出；一声动发两条 `_Click` 那条另记 **账 #171**）。
 > ⇒ **现状：框架里的控件正常参与键盘跳格**（框架里那两枚按钮各占一站）。运行期直接给焦点也是通的：
 > `CmdOk.SetFocus` 实测落地，框架里的子控件这一形现在夹具里也重测过了（`TW-in1 / TW-in2`）。
 > 按钮族的焦点通知 `_GotFocus` / `_LostFocus` 在创建时补上 `BS_NOTIFY` 之后就通了（账 #158 = C29-BN-a 已出）：

@@ -46,6 +46,15 @@ void vb6_SetControlEnabled(void* hwnd, int enabled);
 // 实测会发 WM_SETFOCUS）。拿不到焦点时原生就是回 NULL 什么都不做，本项目不伪造、不重试。
 void vb6_SetControlFocus(void* hwnd);
 
+// 账 #171（C29-FS-h）：单选钮那一条 `BN_CLICKED` 该不该升成 VB6 的 `Click` —— 口径只留这一处。
+// 实测（探针 `.build/ck171c`，两头证人：VB 侧 `Value` 与 OS 侧 `BM_GETCHECK`）：`BS_AUTORADIOBUTTON`
+// 在**焦点进入**时也会替父窗发一条 `BN_CLICKED`，而那一刻它自己**并没有被勾上**；真点击（含 `BM_CLICK`）
+// 那条到达时它已经是勾上的。VB6 里 `Click` 只在「用户选了这一枚」时发生 ⇒ 判据 = 通知的来路自己勾上没有。
+// 与 `btnfocus` 夹具的 `BF-noclick` 同一条口径（那一格早已钉「焦点移动不许算成点击」，只是单选钮这一型
+// 连通知号都是 `BN_CLICKED`，光按 `code` 筛不掉）。只管 `BS_TYPEMASK == BS_AUTORADIOBUTTON`：
+// 复选框取消勾选是一次正经 `Click`，不能跟着筛。返回 0 = 这条通知不许升成 `Click`。
+int vb6_RadioClickCounts(void* hwndFrom);
+
 // P11.8: Position/Size attributes (all visible controls, in pixels)
 // VB6 uses twips internally, but Win32 uses pixels; RTL handles conversion
 int vb6_GetControlLeft(void* hwnd);

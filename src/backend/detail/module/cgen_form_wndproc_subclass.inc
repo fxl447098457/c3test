@@ -117,10 +117,10 @@
             }
         }
 
-        // P0-5修复: 扫描Frame容器内的子控件
+        // P0-5修复: 扫描容器内的子控件（账 #167: 这份「谁是容器」原本在这里手抄，
+        // 抄的是 Frame + PictureBox 两型 ⇒ SSTab 的孩子没人发子类化定义；换成唯一出口）
         for (const auto& ctrl : frmDesc.formControl.children) {
-            if (ctrl.controlType != FrmControlType::Frame &&
-                ctrl.controlType != FrmControlType::PictureBox) continue;
+            if (!controlIsContainerType(ctrl)) continue;
             // Fix 160w: PictureBox 也可作为容器 (MainForm.frm Picture2 容器内
             // 有设置了 GotFocus/MouseDown 的子控件; 原来只扫 Frame → 子控件已
             // 在 cgen_form_frame_menu.inc 注册 install 但这里未生成子类化定义/

@@ -1541,27 +1541,34 @@ long CCodeGen::controlTabStopStyleBit(const FrmControl& ctrl) const {
     }
 }
 
-// 账 #83(b2): 容器窗口挂 `WS_EX_CONTROLPARENT`，对话框管理器才肯走进它。
-// 清单与 `cgen_form_frame_menu.inc` 里那条递归（Frame/PictureBox/SSTab）一致 ——
-// 只有这三类在发子控件，给别的类型挂上只会让窗口多一个用不上的扩展位。
-// 两条创建路都要吃这个出口：顶层那条（容器直接摆在窗体上）与容器子控件那条
-// （容器嵌在另一枚容器里）—— "只接一头"是本线踩过多次的那一声不响。
-long CCodeGen::controlContainerExStyleBit(const FrmControl& ctrl) const {
-    // ⚠ 账 #165 的根因就在这一行以前那个数：`WS_EX_CONTROLPARENT` 在 SDK 头里是
-    //   **0x00010000**（winuser.h:2855），而 0x00040000 是 `WS_EX_APPWINDOW`（同一行往下 2857）。
-    //   写错之后 #83(b2) 那批的一切读数都只证明"我们想发的那个数确实落到窗口上了"，
-    //   证不了"那是对话框管理器认的那一位" —— 于是"样式发了出去、行为却没修好"整整两轮没人发现。
-    //   通用式：**手抄常量一律去 SDK 头对一遍值**（或干脆 `#include` 后引用符号），
-    //   夹具里那条"证人行"要打印符号名的值，不要打印手抄的十进制。
-    constexpr long kWsExControlParent = 0x00010000L;  // WS_EX_CONTROLPARENT（winuser.h 实测值）
+// 账 #167：容器清单的**唯一出口**。这一份以前在 backend 里有七处抄本 ——
+//   创建侧三条（发子控件的递归、顶层那趟入口、装 `vb6_ForwardChildCommands` 那一趟）都含 SSTab，
+//   而派发侧四条（`walkCmdChildren142` 两处、`walkFocusChildren158` 两处）只认 Frame/PictureBox。
+//   ⇒ 任何把控件放进 SSTab 页里的工程，派发侧的 DFS 编号整体错位：实测（`.build/ss167`，
+//   SSTab 排在 Frame 前面）给 `cmdInTab` 焦点，跑的是 `cmdInFrame` 的 `_GotFocus`
+//   （`SS167-tabGot=0/frameGot=1`）—— 不是「没人发」，是「发给别人」。
+//   通用式：判据抄第二遍就会漂，漂的方向还不唯一（这边漏 SSTab、那边漏 `_DblClick`/#141、
+//   那边漏 `_Paint`）⇒ 收成一处、census 一遍、再留一条能红的针。
+// 账 #83(b2): 容器窗口挂 `WS_EX_CONTROLPARENT`，对话框管理器才肯走进它；
+// 两条创建路都要吃这个出口（容器嵌容器走第二条路）—— "只接一头"是本线踩过多次的那一声不响。
+bool CCodeGen::controlIsContainerType(const FrmControl& ctrl) const {
     switch (ctrl.controlType) {
     case FrmControlType::Frame:
     case FrmControlType::PictureBox:
     case FrmControlType::SSTab:
-        return kWsExControlParent;
+        return true;
     default:
-        return 0L;
+        return false;
     }
+}
+
+long CCodeGen::controlContainerExStyleBit(const FrmControl& ctrl) const {
+    // ⚠ 账 #165 的根因就在这个数上：`WS_EX_CONTROLPARENT` 在 SDK 头里是 **0x00010000**
+    //   （winuser.h:2855），而 0x00040000 是 `WS_EX_APPWINDOW`（同表往下 2857 行）。以前这里
+    //   手抄成了后者 ⇒ 那两轮的读数只证明"想发的数落到窗口上了"，证不了"那是管理器认的那一位"。
+    //   通用式：**手抄常量一律去 SDK 头对值**（或直接引符号），证人行打印符号对应的值。
+    constexpr long kWsExControlParent = 0x00010000L;  // WS_EX_CONTROLPARENT（winuser.h 实测值）
+    return controlIsContainerType(ctrl) ? kWsExControlParent : 0L;
 }
 
 // 账 #157: 为什么这一份留在发码期算，声明处的注释有交代。这里只做**选择**，并把选中那枚的句柄
