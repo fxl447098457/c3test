@@ -1509,6 +1509,10 @@ void CCodeGen::emitSliderDesignTimeInit(const FrmControl& ctrl, const std::strin
 // （`vb6_GetTabStop` 里 `!hwnd` 就回 -1），缺的只是创建时把这一位立上。
 // 读侧就是 `GetWindowLong(GWL_STYLE) & WS_TABSTOP` ⇒ 问的是窗口自己，我们没有另存一份。
 // 排除的是拿不到焦点的那几类；`Unknown`（uc 实例与没登记的 OCX）也不立 —— 那些可能压根没有窗口。
+// 账 #164：`PictureBox` 也进排除表。裸码实测 `.build/picstop/picstop.c`：同一棵里
+// `STATIC` 挂上 `WS_TABSTOP` 就会被对话框管理器当成一站（`B1 → Static'PIC' → B2`），
+// 摘掉这一位就变成 `B1 → B2` —— 机制全在这一位上，不用碰派发。
+// 上面那个"写了照发"的分支仍优先：`.frm` 真写了 `TabStop` 就按写的来。
 long CCodeGen::controlTabStopStyleBit(const FrmControl& ctrl) const {
     constexpr long kWsTabStop = 0x00010000L;
     auto tsIt = ctrl.properties.find("TabStop");
@@ -1520,6 +1524,7 @@ long CCodeGen::controlTabStopStyleBit(const FrmControl& ctrl) const {
     case FrmControlType::Image:
     case FrmControlType::Shape:
     case FrmControlType::Line:
+    case FrmControlType::PictureBox:  // 账 #164: VB6 的 PictureBox 拿不到焦点，不该进 tab 序
     case FrmControlType::Frame:
     case FrmControlType::Timer:
     case FrmControlType::Menu:
@@ -1542,7 +1547,13 @@ long CCodeGen::controlTabStopStyleBit(const FrmControl& ctrl) const {
 // 两条创建路都要吃这个出口：顶层那条（容器直接摆在窗体上）与容器子控件那条
 // （容器嵌在另一枚容器里）—— "只接一头"是本线踩过多次的那一声不响。
 long CCodeGen::controlContainerExStyleBit(const FrmControl& ctrl) const {
-    constexpr long kWsExControlParent = 0x00040000L;  // WS_EX_CONTROLPARENT
+    // ⚠ 账 #165 的根因就在这一行以前那个数：`WS_EX_CONTROLPARENT` 在 SDK 头里是
+    //   **0x00010000**（winuser.h:2855），而 0x00040000 是 `WS_EX_APPWINDOW`（同一行往下 2857）。
+    //   写错之后 #83(b2) 那批的一切读数都只证明"我们想发的那个数确实落到窗口上了"，
+    //   证不了"那是对话框管理器认的那一位" —— 于是"样式发了出去、行为却没修好"整整两轮没人发现。
+    //   通用式：**手抄常量一律去 SDK 头对一遍值**（或干脆 `#include` 后引用符号），
+    //   夹具里那条"证人行"要打印符号名的值，不要打印手抄的十进制。
+    constexpr long kWsExControlParent = 0x00010000L;  // WS_EX_CONTROLPARENT（winuser.h 实测值）
     switch (ctrl.controlType) {
     case FrmControlType::Frame:
     case FrmControlType::PictureBox:
