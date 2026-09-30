@@ -302,35 +302,6 @@ std::string CCodeGen::mapTypeRef(ASTNode* typeRef) {
                 const std::string ivType = ivrefCType(lookupName);
                 if (!ivType.empty()) return ivType;
             }
-            // Fix <vbeclipse> rev7: **工程类名表必须在符号表之前问**, 不能只挂在下面的
-            // ComClass/ComInterface 分支里。
-            //
-            // 原来那条 projectClassNameOf 判据嵌在 `clsSym && (ComClass||ComInterface)`
-            // 分支体内 ⇒ 前提是"本模块符号表里能查到同名 COM 符号"。但跨模块的工程类
-            // (View.cls / Folder.cls / PopupMenu.cls / SplitBar.cls) 在**别的**模块上下文里
-            // 常常一个符号都查不到 (driver 只把工程类名注入 projClassNames_ 这张表),
-            // 于是永远问不到表, 一路掉到末尾兜底 `return "void*"`。
-            //
-            // 后果: 同一个 `As <工程类>` 形参, 在**定义侧**该模块(查到自己的 Class 符号)
-            // 发 `vb6_cls_View*`; 在**调用侧**别的模块(查不到) 发 `void*` → ByRef 变
-            // `void**`。实参于是被装进 `(&(vb6_VARIANT){.vt=VT_BSTR, .bstrVal=...})`
-            // 送进 `void**` 槽 —— 被调方把 vb6_VARIANT* 当对象指针解引用 → 堆损坏。
-            // (实测 vbeclipse ucPerspective.CreateFolder → ucFolder.AddView:
-            //   `void vb6_ucFolder_AddView(vb6_cls_ucFolder*, void** View, ...)` 收到
-            //   `&(vb6_VARIANT){.vt=VT_BSTR, ...}` → vb6_heapCorruptVEH。)
-            //
-            // 判据 = projClassNames_ (driver 注入的"本工程类模块名"表, 纯名字表, 不含
-            // .frm/外部库), 所以查不中就是真外部类型, 不会把 stdole.Font 之类拉成原生 ——
-            // 与 isProjectClassName 同一口径, 不新增第二套判断。
-            // 排在 ivrefCType 之后: 同一个名字既是 tB 接口又是 .cls 时, 接口薄指针优先
-            // (那里有 "Attribute VB_Exposed 但无实现体" 的既定处理)。
-            {
-                const std::string projCls = projectClassNameOf(typeName);
-                if (!projCls.empty()) {
-                    usedClassTypes_.insert(cIdent(projCls));
-                    return "vb6_cls_" + cIdent(projCls) + "*";
-                }
-            }
             auto* clsSym = lookupTypeSymbol(lookupName);
             if (clsSym && clsSym->kind == SymbolKind::Class) {
                 // P6.4: 接口类 → vb6_iface_<Name> 包装类型 (非指针)
@@ -342,6 +313,27 @@ std::string CCodeGen::mapTypeRef(ASTNode* typeRef) {
                 usedClassTypes_.insert(cIdent(clsSym->name));
                 return "vb6_cls_" + cIdent(clsSym->name) + "*";
             }
+            // Fix <vbeclipse> rev7 (回归修复后回位): 工程类名表兜底 —— 只在**符号真值查不到**
+            // 时才走。rev7 首版把这条短路放在 lookupTypeSymbol 之前, 出发点是"跨模块工程类
+            // (View/Folder/PopupMenu/SplitBar) 在消费模块里常常查不到符号, 掉到末尾兜底
+            // `return "void*"` ⇒ ByRef 变 void** 实参装箱错位 → 堆损坏" —— 那个洞是真的,
+            // 但位置错了: 短路抢在 Class 分支前面, 连"符号查得到且带 isInterface 标记"
+            // (driver 阶段 3.6 对 Implements 宿主逐模块打标) 的名字也一并劫走, 发成裸类指针。
+            // 实测 BalloonTooltips: `Dim Subclass As ISubclass` (ISubclass 是 VB_Creatable=True
+            // 的接口宿主, 进不了 ivref 表) 被劫成 `vb6_cls_ISubclass*`, 而 Set 侧仍发
+            // `vb6_iface_ISubclass_wrap(...)` ⇒ C2440, 整个工程编不过 (GA vbp#2)。
+            // 现在的次序: ivrefCType(tB 接口) → Class 符号分支(按 isInterface 真值分流:
+            // 宿主发 vb6_iface_<Name> 包装 / 普通类发 vb6_cls_<Name>*) → 本兜底(只救
+            // "符号真查不到"的名字, 免得掉 void*) → ComClass 分支。rev17 之后工程类符号
+            // 已铺进消费模块, 兜底平时不触发; 判据仍是 projClassNames_ 纯名字表, 查不中
+            // 就是真外部类型, 不会把 stdole.Font 之类拉成原生。
+            {
+                const std::string projCls = projectClassNameOf(typeName);
+                if (!projCls.empty()) {
+                    usedClassTypes_.insert(cIdent(projCls));
+                    return "vb6_cls_" + cIdent(projCls) + "*";
+                }
+            }
             // P6.3: 检查是否是COM coclass/接口 → 映射为接口指针类型 (前期绑定)
             if (clsSym && (clsSym->kind == SymbolKind::ComClass || clsSym->kind == SymbolKind::ComInterface)) {
                 // Fix <vbeclipse>-2 (原) / rev7 (现): 判据是"本工程有没有同名类模块", 不是
@@ -352,10 +344,10 @@ std::string CCodeGen::mapTypeRef(ASTNode* typeRef) {
                 // `lookupTypeSymbol("Folder")` 会命中**内建 ComClass**, 工程自己的 Class 符号
                 // 并不在这一张表里. VB6 规则是"工程内定义优先于引用库"。
                 //
-                // ⚠ rev7: 这条判据已**上移**到 ivrefCType 之后、lookupTypeSymbol 之前 (见上
-                // "工程类名表必须在符号表之前问") —— 因为符号表**查不到**时 (跨模块工程类的
-                // 常态) 根本进不了这个 if 体。原来的位置只在"恰好命中内建 ComClass"时生效,
-                // 覆盖不全。现在下面直接生成接口指针, 不再重复问那张表。
+                // ⚠ rev7/回归修复: 这条判据现在位于 Class 符号分支**之后** (见上) ——
+                // 符号真值优先 (isInterface 宿主发 vb6_iface_ 包装, 普通工程类发 vb6_cls_),
+                // 落到本分支的名字只剩"符号查不到而工程名表兜住"和 TLB 内建两类;
+                // 工程类名兜底已在上一段抢走, 这里只处理 TLB 符号, 不再重复问那张表。
                 // 限定名 (Scripting.Folder) 保留点号 → projectClassNameOf 查不中 → 走 COM,
                 // 不会把真·外部同名 coclass 拉成原生。
                 //

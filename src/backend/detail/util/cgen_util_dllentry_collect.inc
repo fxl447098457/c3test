@@ -46,9 +46,33 @@
                 std::string lowerName = Symbol::toLower(sym->name);
                 if (seenCoClassNames.count(lowerName)) continue;  // 已处理, 跳过
                 seenCoClassNames.insert(lowerName);
+                // Fix <vbeclipse> rev17c: rev17 让本收集锚定 allSymTabs 的**首个**命中 ——
+                // 对被消费的类, 首个命中可能是别的模块里的**注入副本** (isExternal)。
+                // 成员面 (memberNames/instancing/implementsNames) 注入时逐字段拷贝过,
+                // 副本读来无碍; 但 driver 的回写三样 (P6.6.6 typelib 的 comDefaultIfaceIid/
+                // comSourceIfaceIid、P6.8 的 comClsidStr) 只落**宿主表**的本地符号
+                // (typelib 扫描跳过 isExternal), dll_sync 又只灌最后一张表 —— 副本上
+                // 永远是空。实测 CoDll: IProbe.cls 排在 CImpl.cls 之前, collect 在
+                // IProbe 的表里先撞见 CImpl 的注入副本 ⇒ defaultIfaceIid=NULL ⇒
+                // dll_entry.c 不发 IID_vb6def_<类> ⇒ cc_dll_identity_single_source 的
+                // 0x7CA8CD81 针与 cc_dll_tlb_matches_table 同时红 (GA vbp#3/#4)。
+                // 口径与上面 rev17 注释一致 ("类在自己模块的表里一定是权威副本"):
+                // 回写类字段一律锚定宿主符号 authCls, 副本只供成员面; 查不到宿主时
+                // 原样回落 sym (单模块工程两者本就是同一只)。
+                SymbolTable* ownTab = nullptr;
+                {
+                    auto itOwnH = classOwningSymTab.find(lowerName);
+                    if (itOwnH != classOwningSymTab.end()) ownTab = itOwnH->second;
+                }
+                Symbol* hostClsSym = nullptr;
+                if (ownTab) {
+                    Symbol* hs = ownTab->lookupModule(sym->name);
+                    if (hs && hs->kind == SymbolKind::Class && !hs->isExternal) hostClsSym = hs;
+                }
+                Symbol& authCls = hostClsSym ? *hostClsSym : *sym;
                 CoClassInfo info;
                 info.moduleName = sym->name;
-                info.clsidStr = sym->comClsidStr.empty() ? generateClsid(progId + "." + sym->name) : sym->comClsidStr;  // P6.8: 优先使用VBP指定的CLSID
+                info.clsidStr = authCls.comClsidStr.empty() ? generateClsid(progId + "." + sym->name) : authCls.comClsidStr;  // P6.8: 优先使用VBP指定的CLSID
                 info.progId = progId + "." + sym->name;
 
                 // ai/022 B13b: 身份从唯一出口 coclassIds_ 取（026 三节"不可让步" + D47"不许
@@ -84,10 +108,8 @@
                 // 使用类的memberNames查找Public方法符号
                 // (不能按前缀"ClassName_"搜索, 因为单模块工程中方法名是"SetValue"而非"Calc_SetValue")
                 // Fix 016b: 优先搜索该类自身的符号表 (classOwningSymTab), 避免跨类同名碰撞.
-                std::string classNameLower = Symbol::toLower(sym->name);
-                SymbolTable* ownTab = nullptr;
-                auto itOwn = classOwningSymTab.find(classNameLower);
-                if (itOwn != classOwningSymTab.end()) ownTab = itOwn->second;
+                // rev17c: ownTab/hostClsSym 已在上面随 authCls 一起锚定, 这里直接复用.
+                std::string classNameLower = lowerName;
 
                 // Fix 053: 去重 memberNames — Event 和 Sub/Function 可能同名,
                 // memberNames 中会有重复条目, 导致 dispatch 函数被生成两次 (C2084)
@@ -97,8 +119,8 @@
                 // lookupModule 命中内置符号) 会生成 vb6_disp_<cls>_<ev>_invoke 并
                 // extern 引用不存在的 vb6_<cls>_<ev> → LNK2019. 事件不进方法表.
                 std::set<std::string> eventNamesLower;
-                for (const auto& en : sym->eventNames) eventNamesLower.insert(Symbol::toLower(en));
-                for (auto& memberName : sym->memberNames) {
+                for (const auto& en : authCls.eventNames) eventNamesLower.insert(Symbol::toLower(en));
+                for (auto& memberName : authCls.memberNames) {
                     if (!seenMemberNames.insert(Symbol::toLower(memberName)).second) continue;
                     if (eventNamesLower.count(Symbol::toLower(memberName))) continue;
                     // Try Sub/Function: 优先在类自身符号表搜索 (本类方法, 无碰撞)
@@ -155,7 +177,7 @@
                     }
                 }
                 // P12.1: 收集 Implements 接口列表
-                info.implementsNames = sym->implementsNames;
+                info.implementsNames = authCls.implementsNames;
                 // ai/022 B16: 本类是否实现**新式接口** —— 判据与 cgen_iface_vtbl 发码
                 // 时用的那条逐字相同（ivLookupIface 命中：登记表里有、链没断、有槽），
                 // 因为这一位决定 dll_entry.c 要不要引用 vb6_iv_thin_<类> /
@@ -175,25 +197,26 @@
                 // 那份副本的 memberFieldDispids 永远是空的 (实测 cHttpServer 等落到
                 // 防御段 9000+), 而 TypeLib 里是真的连续 dispid, 两边错位会让早绑定
                 // 客户端按 TypeLib 的 dispid 调 Invoke 命中错误表项.
-                Symbol* hostClsSym = ownTab ? ownTab->lookupModule(sym->name) : nullptr;
+                // rev17c: hostClsSym 已随 authCls 在上面锚定 (同一判据: 宿主表 + 本地
+                // Class 符号), dispid 与 IID/CLSID 同源同锚.
                 const Symbol* dispidSym = (hostClsSym && hostClsSym->kind == SymbolKind::Class)
                     ? hostClsSym : sym.get();
-                for (auto& fname : sym->publicFieldNames) {
+                for (auto& fname : authCls.publicFieldNames) {
                     info.publicFields.push_back(fname);
                     auto itFd = dispidSym->memberFieldDispids.find(Symbol::toLower(fname));
                     info.publicFieldDispids.push_back(
                         (itFd != dispidSym->memberFieldDispids.end()) ? itFd->second : 0);
                 }
                 // P6.6.4: 收集事件信息
-                if (!sym->eventNames.empty()) {
-                    info.eventNames = sym->eventNames;
+                if (!authCls.eventNames.empty()) {
+                    info.eventNames = authCls.eventNames;
                     // P6.6.6: 优先使用TypeLib builder回写的IID, 保证与TypeLib中一致
-                    info.sourceIfaceIid = sym->comSourceIfaceIid.empty()
+                    info.sourceIfaceIid = authCls.comSourceIfaceIid.empty()
                         ? generateIid("source:" + progId + "." + sym->name + "Events")
-                        : sym->comSourceIfaceIid;
+                        : authCls.comSourceIfaceIid;
                 }
                 // P6.6.6: 默认接口IID (由driver TypeLib builder回写)
-                if (info.defaultIfaceIid.empty()) info.defaultIfaceIid = sym->comDefaultIfaceIid;
+                if (info.defaultIfaceIid.empty()) info.defaultIfaceIid = authCls.comDefaultIfaceIid;
                 coClasses.push_back(std::move(info));
             }
         }

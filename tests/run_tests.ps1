@@ -3404,6 +3404,17 @@ if ($Category -in @("all", "run", "vbp")) {
     Test-Vbp "ve_list" "$Tests\ve_list\VeList.vbp" $veListExpected
     Test-Vbp "ve_list_x86" "$Tests\ve_list\VeList.vbp" $veListExpected -Arch "x86"
 
+    # <vbeclipse> 回归夹子 (iface_wrap): 接口宿主**类型映射**的最小夹子, GA run 36732948503
+    # (BalloonTooltips 红) 的直接切片。IFoo 显式 `Attribute VB_Creatable = True` ⇒ 进不了
+    # ivref 登记表 (Pass A2 判据), `Dim f As IFoo` 必须经 Class/isInterface 分支发
+    # `vb6_iface_IFoo` 包装类型 (阶段 3.6 对 Implements 宿主逐模块打标)。rev7 首版把
+    # projectClassNameOf 短路放在符号真值之前, 把这路劫成裸 `vb6_cls_IFoo*` ⇒ 与 Set 侧
+    # `vb6_iface_IFoo_wrap(...)` 对不上 → C2440 整工程编译红。`Set f = v` (Variant 往返)
+    # 是 BalloonTooltips mdlSubclass.SubclassWnd 的原形态, Bar() 走接口 vtable 钉住运行期。
+    $ifaceWrapExpected = @("IFACE-CALL-OK", "IFACE-DONE")
+    Test-Vbp "iface_wrap" "$Tests\iface_wrap\IfaceWrap.vbp" $ifaceWrapExpected
+    Test-Vbp "iface_wrap_x86" "$Tests\iface_wrap\IfaceWrap.vbp" $ifaceWrapExpected -Arch "x86"
+
     # test_vbman 用于验证外部 COM 组件 VBMANLIB (x86 DLL, 供 32 位程序调用)
     # ai/022 B07b: INH2..INH11 cover the merged member face + prefix-copied fields +
     # forwarding stubs (private Long/UDT/BSTR fields, Optional params, Property Get/Let,
