@@ -1735,32 +1735,38 @@ if ($Category -in @("all", "run", "vbp")) {
         'vb6_Form_SetInitialFocus((void*)hwnd, (void*)vb6_hwnd_t2',        # Timer 不配当焦点目标
         'vb6_Form_SetInitialFocus((void*)hwnd, (void*)vb6_hwnd_tMain'
     )
-    # 账 #83(b2): 容器的扩展样式位 `WS_EX_CONTROLPARENT`(262144) 两条创建路都接上 ——
-    # 正面三条 = 顶层 Frame / 顶层 PictureBox / **容器里的容器**（Frame2 在 Frame1 里，走的正是
-    # 第二条创建路）；反面两条 = 普通子控件与顶层按钮不许挂（这一位只属于容器）。
-    # ⚠ 运行期那一半**还没通**：样式确实落到窗口上了（`EX-fr / EX-f2 / EX-pic` 三条读数都是 262144），
-    #   而产物里 `IsDialogMessage` 照样不走进容器 —— 裸 Win32 探针同一棵树（`.build/cp2`）会走，
-    #   WS_GROUP / 创建顺序 / 容器挂 comctl32 子类 / Common-Controls 6.0 清单四种候选都实测排除，
-    #   差在哪没查到，记 **账 #165**。所以 `in2=N / deep=N / inpic=N` 是**缺陷读数**、不是判据胜利：
-    #   #165 落地那天这三条必须翻成 Y —— 它们**红了就是那条账结了**。
+    # 账 #83(b2) + 账 #165: 容器的扩展样式位 `WS_EX_CONTROLPARENT`(**65536**) 两条创建路都接上 ——
+    # 正面四条 = 顶层 Frame（两处）/ 顶层 PictureBox / **容器里的容器**（Frame2 在 Frame1 里，走的
+    # 正是第二条创建路）/ 容器里的 PictureBox。反面四条 = 容器里的按钮、顶层按钮、以及账 #164 那两枚
+    # 「又立回 WS_TABSTOP 的 PictureBox」——都不许挂这一位（它只属于容器）。
+    # ⚠ 这一位**以前抄错了数**：`controlContainerExStyleBit` 里手写的是 0x00040000，那是
+    #   `WS_EX_APPWINDOW`；CONTROLPARENT 在 SDK 头（winuser.h:2855）里是 0x00010000=65536。
+    #   抄错的那两轮里，运行期读数 `EX-fr / EX-f2 / EX-pic` 打印的是**发码想发的数落到窗口上了**，
+    #   证不了「那是对话框管理器认的那一位」⇒ 样式绿、行为坏，没人看出根因 = **账 #165 的根因**。
+    #   现在两头都通：`in2 / deep / inpic` 三条**已从缺陷读数翻成判据**（容器里的兄弟真被走到了）。
+    # ⚠ 另一课（为什么这三条以前恒 N）：相 2 原来只给 9 拍，而这一圈要 7 站 ⇒ 走不完就被裁掉，
+    #   「走不到」其实是「没走到」。现在相 2 的出口改成「七站齐了就收」，拍号只当保险丝（40 拍）。
+    # ⚠ 还没修的两条**只打不钉**：`TW-seq` 的次序是 z-order 不是 TabIndex（**账 #163**）；
+    #   `TW-orenter=Y` = `TabStop = 0` 的容器内单选组仍被当一站（落在勾选那枚上）、
+    #   且组内方向键不走（`AK-down=cmdTop1`，**账 #168**）—— 钉成 Y 是把缺陷固化，钉成 N 是当场红。
     # ⚠ 夹具自己的坑，先写在这条路上别踩第二次：`TabWalkApp.vbp` 的 `ExeName32` **必须等于 vbp 文件名**，
     #   否则 `Test-Vbp` 按 vbp 名去找 exe ⇒ 本地怎么都过（我手动跑的是 TabWalk.exe）、CI 两条架构一起
     #   `FAIL (no exe)`（门 #218 就是这么红的）。要么改名一致，要么显式传 `-ExeName`。
     $twNeedles = @("TABWALK-DONE", "TW-walked=Y", "TW-top=Y", "TW-shy=Y",
-                    "TW-in1=Y/in2=N", "TW-deep=N/inpic=N", "TW-picstop=Y")
+                    "TW-in1=Y/in2=Y", "TW-deep=Y/inpic=Y", "TW-picstop=Y")
     Test-Vbp "tabwalk" "$Tests\tabwalk\TabWalkApp.vbp" $twNeedles
     Test-Vbp "tabwalk_x86" "$Tests\tabwalk\TabWalkApp.vbp" $twNeedles -Arch "x86"
     Test-EmitcShape "tw_emitc_cparent" @("$Tests\tabwalk\TabWalkApp.vbp") @(
-        '1409286151L, 262144L,',          # 顶层 Frame（Frame1 与 optFrame 两处）
-        '1417675278L, 262144L,',          # 顶层 PictureBox（账 #164：这一串已不含 WS_TABSTOP）
-        '1350566414L, 262144L,',          # 容器里的 PictureBox（picDeep）—— 第二条创建路同口径
-        '1342177287L, 262144L,'           # 容器里的容器 —— 第二条创建路也给了这一位
+        '1409286151L, 65536L,',           # 顶层 Frame（Frame1 与 optFrame 两处）
+        '1417675278L, 65536L,',           # 顶层 PictureBox（账 #164：这一串已不含 WS_TABSTOP）
+        '1350566414L, 65536L,',           # 容器里的 PictureBox（picDeep）—— 第二条创建路同口径
+        '1342177287L, 65536L,'            # 容器里的容器 —— 第二条创建路也给了这一位
     )
     Test-EmitcAbsent "tw_emitc_notplain" @("$Tests\tabwalk\TabWalkApp.vbp") @(
-        '1342242816L, 262144L,',          # 容器里的普通按钮不该挂这一位
-        '1409351680L, 262144L,',          # 顶层按钮同样不该挂
-        '1417740814L, 262144L,',          # 账 #164: 顶层 PictureBox 又立回 WS_TABSTOP
-        '1350631950L, 262144L,'           # 容器里那枚又立回来（第二条创建路）
+        '1342259200L, 65536L,',           # 容器里的普通按钮不该挂这一位
+        '1409368064L, 65536L,',           # 顶层按钮同样不该挂
+        '1417740814L, 65536L,',           # 账 #164: 顶层 PictureBox 又立回 WS_TABSTOP
+        '1350631950L, 65536L,'            # 容器里那枚又立回来（第二条创建路）
     )
     # 账 #166: 这条用例**本身就是那条红的固化** —— 工程文件叫 `NameProbe.vbp`，而产物叫
     # `RenamedProbe.exe`（`.vbp` 里 `ExeName32="RenamedProbe.exe"`，故意与文件名不同、还带后缀）。

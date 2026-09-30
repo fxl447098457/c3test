@@ -147,41 +147,39 @@ Attribute VB_Creatable = False
 Attribute VB_PredeclaredId = True
 Attribute VB_Exposed = False
 Option Explicit
-
-' 账 #83(b2) 的夹具。**先把结论摆正**（这一格的前提被实测翻过一次）：
+' 账 #83(b2) / #165 的夹具。**先把结论摆正**（这一格的前提被实测翻过两次）：
 '   ① 容器（Frame / PictureBox / SSTab）要进对话框管理器的 tab 序，窗口必须挂
-'      `WS_EX_CONTROLPARENT` —— 这条由裸 Win32 探针定死（`.build/cp2`：挂上就走进容器，
-'      摘掉就走不进；`WS_GROUP`、创建顺序、容器挂 comctl32 子类、Common-Controls 6.0 清单
-'      四种候选全都实测过，都不影响）。发码面这一位现在**两条创建路都接上了**
-'      （`controlContainerExStyleBit`），`EX-fr / EX-f2 / EX-pic` 三条运行期读数证它真落到窗口上。
-'   ② 但**产物里跳格仍然走进不了容器** —— 样式在、父链在、子控件 visible/enabled/tabstop 都在，
-'      `IsDialogMessage` 也认这条消息（探针里同一种树会跳），唯独不换到容器里的兄弟。
-'      根因没找到，另开 **账 #165**；所以本夹具的 `TW-in2 / TW-deep / TW-inpic` 现在读的是 **N**，
-'      那是**缺陷读数**，不是判据胜利 —— #165 落地时这三条必须翻成 Y（它们红了就是那条账结了）。
-'      2026-09-30 又排掉一批（`BS_NOTIFY`、`WS_CLIPSIBLINGS`（容器/孩子/两边）、"树在 ShowWindow 之后才建"），
-'      并把**两边的窗口链逐条对形**（探针 `Z-grpkids / Z-formkids` vs 产品侧最简拓扑夹具
-'      `.build/twmin` 的 `MIN-fr1kids / MIN-formkids`）—— 拓扑同形、样式位对上了，产品照样一跳就跳到窗体级。
-'      读法与剩下的候选写在 029 的「账 #165 在测」那一格。
-' 夹具还顺手读两件别的事：
+'      `WS_EX_CONTROLPARENT` —— 裸 Win32 探针（`.build/cp2`）早就定死这一条。
+'      ⚠ 但发码那一位**以前抄错了数**：`controlContainerExStyleBit` 里手写的常量是
+'      0x00040000 = `WS_EX_APPWINDOW`，而 SDK 头（winuser.h:2855）里 CONTROLPARENT 是
+'      **0x00010000**。改成对数之后，运行期读数 `EX-fr / EX-f2 / EX-pic` 全是 65536，
+'      而且**跳格真的能走进容器了** —— 账 #165 就在这一刀结掉。
+'   ② #165 之所以被当成「OS 本人不认容器里的兄弟」，是夹具自己的读数窗口太窄：
+'      相 2 原来只给 9 拍，而这一圈（7 站）从起点算起要 12 拍以上才走得完，
+'      于是 `TW-in2 / TW-deep / TW-inpic` 三条永远读 N。通用式：**「走不到」要先证明
+'      走的拍数够绕一圈** —— 现在相 2 的出口改成「七站齐了就收」，拍号只当保险丝（40 拍）。
+'      那三条曾被当成「缺陷读数」钉在针面里 ⇒ 修好了测试反而红，这一课也记在 029。
+'   ③ 剩下的两条**本批没修**，读数照旧打出来：
+'      `TW-seq` 的次序 = z-order（≈创建顺序），不是 VB6 的 TabIndex ⇒ **账 #163**；
+'      `AK-*`：optFrame 里两枚 `TabStop = 0` 的 OptionButton，程序化给 optA 焦点后
+'      post VK_DOWN ⇒ `down=cmdTop1`、optB 依旧 N ⇒ 组内方向键压根不走 = **账 #168**。
+'      同一族的第三条新读数 `TW-orenter`：七站里居然有 optA（`TabStop = 0` 本不该占站）——
+'      对话框管理器把容器里的单选组当一站、落在勾选那枚上。这条**只打不钉**：
+'      钉成 Y 是把缺陷固化进针面，钉成 N 是现在就会红。
+' 夹具还顺手读一件别的事：
 '   `TW-picstop` —— VB6 的 PictureBox 拿不到焦点、本该不在 tab 序里，而 `controlTabStopStyleBit`
-'      排除表里**以前没有它** ⇒ 它自己在 tab 序里占一站（账 #164，本批修掉）。
-'      账 #164 落地之后这一条翻绿（`TW-picstop=Y`，`TW-seq` 里也没了 pic1 这一站）。
+'      排除表里**以前没有它** ⇒ 它自己在 tab 序里占一站（账 #164，已修，这一条翻绿）。
 '      Frame2 里那枚 `picDeep` 是为第二条创建路补的证人：容器里的 PictureBox 同样不能立 `WS_TABSTOP`。
-'      它在容器里，而 #165 还没结（对话框管理器不下钻）⇒ 跳格根本走不到它，所以这一格只能在发码面证
-'      （针见 run_tests.ps1 的 `tw_emitc_cparent` / `tw_emitc_notplain`）。
-'   `AK-*` —— optFrame 里两枚 `TabStop = 0` 的 OptionButton：按 VB6 的口径它们不进 tab 序，
-'      但方向键该在组内走。实测 `pre=optA`（焦点确实给了）而 `down=cmdTop1`、optB 依旧 False ⇒
-'      **组内方向键压根不走**（这条从账 #164 里分出来单记 = **账 #168**，本批没碰、门 #230 工件里
-'      那一行与 #227 逐字节相同）。挂 CONTROLPARENT 前后这条一字不变。
-' ⚠ 顺序**不钉**：`IsDialogMessage` 走 z-order 不是 VB6 的 TabIndex（账 #163），
-' ⚠ `TW-new`（走到的**新站数**）也**不是判据**：同一个 exe 连跑三次读过 3、3、4，换架构也会变（与 WS17 那条"条数是时序不是不变量"同一类）。
-'   这里只钉"走得到"，把整串序列另打一条当读数。
+' ⚠ `TW-new`（走到的**新站数**）与 `TW-seq` 的**次序**都不是判据：同一个 exe 连跑三次读过 3、3、4，
+'   换架构也会变（与 WS17 那条「条数是时序不是不变量」同一类）。这里只钉「走得到」。
 Private gTick As Long
 Private gSeen As String
 Private gNew As Long
 Private gWalked As Boolean
 Private gAkPre As String
 Private gAkPost As String
+Private gAkDue As Boolean
+Private gAkPosted As Boolean
 
 Private Declare PtrSafe Function PostMessage Lib "user32" Alias "PostMessageW" (ByVal hWnd As LongPtr, ByVal Msg As Long, ByVal wParam As LongPtr, ByVal lParam As LongPtr) As Long
 Private Declare PtrSafe Function GetFocus Lib "user32" () As LongPtr
@@ -261,72 +259,82 @@ Private Sub MarkStation(ByVal st As String)
     End If
 End Sub
 
+' 相 2 的出口：窗体级两枚 + 三型容器里的四枚都各站过一次 = 绕完一圈。
+' 用它收尾而不是数拍子 —— 缺陷（走不进容器）时它不会满足，就走到保险丝那一步照出 N。
+Private Function AllStations() As Boolean
+    AllStations = SeenIt("cmdIn1") And SeenIt("cmdIn2") And SeenIt("cmdDeep") And _
+                  SeenIt("cmdInPic") And SeenIt("cmdTop1") And SeenIt("cmdTop2")
+End Function
+
 Private Sub tWalk_Timer()
     Dim f As LongPtr
     Dim st As String
     gTick = gTick + 1
 
     ' 相 1：先把焦点交给**容器里**那枚 cmdIn1 —— 起点选在容器内部，这样第一跳就必须
-    ' "走进来又走出去"，不靠 CONTROLPARENT 的那条路会当场卡住。
+    ' 「走进来又走出去」，不靠 CONTROLPARENT 的那条路会当场卡住。
     If gTick = 1 Then
         cmdIn1.SetFocus
         DoEvents
         gSeen = ""
+        gNew = 0      ' 上面那句 DoEvents 会重入本 Timer ⇒ 相 2 可能先记下一站又被这里抹掉，
+                     '  计数不清就会和 TW-seq 的条数对不上（TW-new 本来就不是判据，但别让它自相矛盾）
+        gNew = 0
         MarkStation(WhereIs(GetFocus()))
         gWalked = True
         Exit Sub
     End If
 
-    ' 相 2：逐拍读落点、再往焦点窗口 post 一对 VK_TAB。
-    If gTick >= 2 And gTick <= 10 Then
+    ' 相 2：逐拍读落点、再往焦点窗口 post 一对 VK_TAB，直到七站齐或撞上保险丝。
+    If Not gAkDue Then
+        If gTick > 40 Then gAkDue = True
+        If gTick > 40 Then Exit Sub
         f = GetFocus()
         st = WhereIs(f)
         MarkStation st
         If gTick = 2 Then
             ' 运行期问一句：那一位到底挂上了没有、子控件的父窗到底是不是容器 ——
-            ' 探针（`.build/cp2`）证明 CONTROLPARENT 单独就够，产物里却照旧走不进去，
-            ' 那就先把"样式在不在窗口上"这一步钉死，别拿推断当读数。GWL_EXSTYLE = -20。
-            ' 父窗比对口径走 `HexEq`（LongPtr 形参）—— 账 #159 那条 `.hwnd` 直接装箱是坏的，
-            ' 拿 `GetParent(x.hwnd) = y.hwnd` 这种裸表达式比会假红。
+            ' 这一行打印的是**窗口上的实际值**，不是发码想发的数：抄错常量时它照样绿。
+            ' GWL_EXSTYLE = -20。父窗比对走 `HexEq`（LongPtr 形参）—— 账 #159 那条
+            ' `.hwnd` 直接装箱是坏的，拿 `GetParent(x.hwnd) = y.hwnd` 这种裸表达式比会假红。
             Log1 "EX-fr=" & CStr(GetWindowLong(Frame1.hwnd, -20)) & "/f2=" & CStr(GetWindowLong(Frame2.hwnd, -20)) & "/pic=" & CStr(GetWindowLong(Pic1.hwnd, -20)) & "/form=" & CStr(GetWindowLong(Me.hwnd, -20))
             Log1 "EX-fr1=" & N(Frame1.hwnd) & "/in1=" & N(cmdIn1.hwnd) & "/parIn1=" & N(GetParent(cmdIn1.hwnd)) & "/eq=" & HexEq(GetParent(cmdIn1.hwnd), Frame1.hwnd)
             Log1 "EX-f2=" & N(Frame2.hwnd) & "/parDeep=" & N(GetParent(cmdDeep.hwnd)) & "/eqDeep=" & HexEq(GetParent(cmdDeep.hwnd), Frame2.hwnd)
             Log1 "EX-actIsMe=" & HexEq(GetActiveWindow(), Me.hwnd) & "/parFr1IsMe=" & HexEq(GetParent(Frame1.hwnd), Me.hwnd)
-            ' 容器里的兄弟到底能不能被走到：先问"它是不是根本就没显示/没启用"（对话框管理器
-            ' 会跳过禁用与隐藏窗口 —— 若如此，本格的罪就不在 CONTROLPARENT 那一位上），
-            ' 再直接问 USER32 自己的那一趟 `GetNextDlgTabItem`（以窗体为对话框 / 以框架为对话框 各一次）。
             Log1 "EX-in2vis=" & TF(IsWindowVisible(cmdIn2.hwnd)) & "/in2en=" & TF(IsWindowEnabled(cmdIn2.hwnd)) & "/in2tabstop=" & TF((GetWindowLong(cmdIn2.hwnd, -16) And 65536) <> 0)
         End If
         Call PostMessage(f, WM_KEYDOWN, VK_TAB, 0)
         Call PostMessage(f, WM_KEYUP, VK_TAB, 0)
+        If AllStations() Then gAkDue = True
         Exit Sub
     End If
 
     ' 相 3：组内方向键 —— 程序化给 optA 焦点，post VK_DOWN，读跑到哪一枚。
-    ' `AK-pre` 必须先读出来：如果 SetFocus 根本没落地，`down=` 那条读数就什么也不证明
-    ' （本地实测：pre=cmdTop1 时 optA 依旧 =Y，光看 optA/optB 会误判成"方向键没走组"）。
-    If gTick = 11 Then
+    ' `AK-pre` 必须先读出来：如果 SetFocus 根本没落地，`down=` 那条读数就什么也不证明。
+    If Not gAkPosted Then
         optA.SetFocus
         DoEvents
         gAkPre = WhereIs(GetFocus())
         Call PostMessage(GetFocus(), WM_KEYDOWN, VK_DOWN, 0)
         Call PostMessage(GetFocus(), WM_KEYUP, VK_DOWN, 0)
+        gAkPosted = True
         Exit Sub
     End If
 
-    If gTick = 12 Then
-        gAkPost = WhereIs(GetFocus())
-        Log1 "AK-pre=" & gAkPre & "/down=" & gAkPost & "/optA=" & TF(optA.Value) & "/optB=" & TF(optB.Value)
-        Log1 "TW-seq=" & gSeen
-        Log1 "TW-new=" & CStr(gNew)
-        Log1 "TW-in1=" & TF(SeenIt("cmdIn1")) & "/in2=" & TF(SeenIt("cmdIn2"))
-        Log1 "TW-deep=" & TF(SeenIt("cmdDeep")) & "/inpic=" & TF(SeenIt("cmdInPic"))
-        Log1 "TW-picstop=" & TF(Not SeenIt("pic1"))
-        Log1 "TW-top=" & TF(SeenIt("cmdTop1") And SeenIt("cmdTop2"))
-        Log1 "TW-shy=" & TF(Not SeenIt("cmdShy"))
-        Log1 "TW-walked=" & TF(gWalked)
-        Log1 "TABWALK-DONE"
-        tWalk.Enabled = False
-        Unload Me
-    End If
+    ' 相 4：收尾读数。
+    gAkPost = WhereIs(GetFocus())
+    Log1 "AK-pre=" & gAkPre & "/down=" & gAkPost & "/optA=" & TF(optA.Value) & "/optB=" & TF(optB.Value)
+    Log1 "TW-seq=" & gSeen
+    Log1 "TW-new=" & CStr(gNew)
+    Log1 "TW-ticks=" & CStr(gTick)
+    Log1 "TW-orenter=" & TF(SeenIt("optA"))
+    Log1 "TW-in1=" & TF(SeenIt("cmdIn1")) & "/in2=" & TF(SeenIt("cmdIn2"))
+    Log1 "TW-deep=" & TF(SeenIt("cmdDeep")) & "/inpic=" & TF(SeenIt("cmdInPic"))
+    Log1 "TW-picstop=" & TF(Not SeenIt("pic1"))
+    Log1 "TW-top=" & TF(SeenIt("cmdTop1") And SeenIt("cmdTop2"))
+    Log1 "TW-shy=" & TF(Not SeenIt("cmdShy"))
+    Log1 "TW-walked=" & TF(gWalked)
+    Log1 "TABWALK-DONE"
+    tWalk.Enabled = False
+    Unload Me
 End Sub

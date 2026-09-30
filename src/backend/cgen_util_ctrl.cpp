@@ -1538,7 +1538,13 @@ long CCodeGen::controlTabStopStyleBit(const FrmControl& ctrl) const {
 // 两条创建路都要吃这个出口：顶层那条（容器直接摆在窗体上）与容器子控件那条
 // （容器嵌在另一枚容器里）—— "只接一头"是本线踩过多次的那一声不响。
 long CCodeGen::controlContainerExStyleBit(const FrmControl& ctrl) const {
-    constexpr long kWsExControlParent = 0x00040000L;  // WS_EX_CONTROLPARENT
+    // ⚠ 账 #165 的根因就在这一行以前那个数：`WS_EX_CONTROLPARENT` 在 SDK 头里是
+    //   **0x00010000**（winuser.h:2855），而 0x00040000 是 `WS_EX_APPWINDOW`（同一行往下 2857）。
+    //   写错之后 #83(b2) 那批的一切读数都只证明"我们想发的那个数确实落到窗口上了"，
+    //   证不了"那是对话框管理器认的那一位" —— 于是"样式发了出去、行为却没修好"整整两轮没人发现。
+    //   通用式：**手抄常量一律去 SDK 头对一遍值**（或干脆 `#include` 后引用符号），
+    //   夹具里那条"证人行"要打印符号名的值，不要打印手抄的十进制。
+    constexpr long kWsExControlParent = 0x00010000L;  // WS_EX_CONTROLPARENT（winuser.h 实测值）
     switch (ctrl.controlType) {
     case FrmControlType::Frame:
     case FrmControlType::PictureBox:
