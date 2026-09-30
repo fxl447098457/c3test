@@ -156,12 +156,16 @@
     //   与 Fix 153 (SelectedControls) / Fix 085 (void* UDT 字段) 走同一 marker 通道.
     if (obj == "vb6_UserControl_ParentControls" || obj == "vb6_UserControl_Controls") {
         // Fix <vbeclipse>: UserControl.Controls 同 Fix 158d 通道 (裸 `Controls.Item(k)`
-        // / `Controls.Add(progid, name)` — VbEclipse ucPerspective 28 处)。运行期
-        // RTL 侧暂无真 Controls 集合 (全局为 NULL), 后期绑定 no-op, 编译先行。
-        comObjExpr_ = "(void*)" + obj;
+        // / `Controls.Add(progid, name)` — VbEclipse ucPerspective 28 处)。
+        // rev14: `vb6_UserControl_Controls` 是恒 NULL 的"编译先行"空桩, 改用 RTL 真实
+        // 集合单例 vb6_UC_Controls() (按当前 UC 实例回落 formHwnd); 否则 Controls.Item/Add
+        // 恒返回 NULL → ucFolder_AddView(NULL) 崩溃。
+        std::string ctlObjExpr = (obj == "vb6_UserControl_Controls")
+                                     ? "vb6_UC_Controls()" : obj;
+        comObjExpr_ = "(void*)" + ctlObjExpr;
         comMemberName_ = node.memberName;
         isComMarker_ = true;
-        lastExpr_ = "(void*)" + obj;
+        lastExpr_ = "(void*)" + ctlObjExpr;
         return;
     }
 

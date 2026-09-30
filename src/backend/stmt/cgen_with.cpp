@@ -346,8 +346,35 @@ void CCodeGen::visit(WithStmt& node) {
                 }
             }
 
+            // Fix <vbeclipse> rev8: 宿主类已知时, 成员归属**由宿主类决定**, 不得再让
+            // 全局同名变量 (knownClassVars_ 等) 认领。三个条件缺一不可:
+            //   ① hostCls90s 推得出宿主类 ② resolveClassMemberCall 命中该成员
+            //   —— 两者合起来才说明 "这个 .X 是宿主类的 X", 而不是别处的同名变量。
+            //
+            // 为什么必须加: ucFolder.AddView 的形参就叫 `View` (ByRef View As View),
+            // 工程类兜底把 knownClassVars_["view"] 登记成 View 类; 而方法体里
+            // `With View.View` 的**成员名**也是 "view" → 下面 line 350 的全局名字
+            // 匹配撞车 → kind=ClassInstance(View) → tempType=vb6_cls_View*,
+            // 而 vb6_View_prop_get_View() 实际返回 void* (View.cls:66 `As Object`)
+            // → 块内 .hWnd/.Caption/.Icon 按类字段发 → C2039 "hWnd 不是
+            // vb6_cls_View 的成员" ×12 (ucFolder.c 240/241/262)。
+            //
+            // 处置: 清空判定让下面 needHostCls113 段接手, 由 getClassMethodReturnType
+            // 按属性**真实返回类型**分流 (工程类 → ClassInstance; As Object → 空,
+            // 由本段末尾的 rev8 补成 COMObject 晚绑定)。
+            const bool hostOwnsMemberV8 =
+                !hostCls90s.empty()
+                && !resolveClassMemberCall(hostCls90s, memExpr.memberName).empty();
+            if (hostOwnsMemberV8) {
+                withInfo.kind = WithObjKind::Unknown;
+                withInfo.className.clear();
+                withInfo.ctrlOrigName.clear();
+                tempType = "void*";
+            }
+
             // 检查成员是否为类实例变量 (me.member As SomeClass)
-            if (knownClassVars_.find(memberLower) != knownClassVars_.end()) {
+            if (!hostOwnsMemberV8
+                && knownClassVars_.find(memberLower) != knownClassVars_.end()) {
                 withInfo.kind = WithObjKind::ClassInstance;
                 // Fix 011r-1: 获取成员的类名, 设置tempType
                 auto itClassVar = knownClassVars_.find(memberLower);
@@ -355,9 +382,9 @@ void CCodeGen::visit(WithStmt& node) {
                     withInfo.className = cIdent(itClassVar->second);
                     tempType = "vb6_cls_" + withInfo.className + "*";
                 }
-            } else if (knownObjectVars_.count(memberLower)) {
+            } else if (!hostOwnsMemberV8 && knownObjectVars_.count(memberLower)) {
                 withInfo.kind = WithObjKind::COMObject;
-            } else if (knownUdtVars_.count(memberLower)) {
+            } else if (!hostOwnsMemberV8 && knownUdtVars_.count(memberLower)) {
                 // UDT成员: 使用struct类型 (如 With ofn → vb6_type_OPENFILENAME)
                 auto itUdt = knownUdtVars_.find(memberLower);
                 if (itUdt != knownUdtVars_.end()) {
@@ -458,6 +485,18 @@ void CCodeGen::visit(WithStmt& node) {
                     withInfo.className = cIdent(retClsProp);
                     tempType = "vb6_cls_" + withInfo.className + "*";
                     withInfo.ctrlOrigName = withInfo.className;
+                } else if (hostOwnsMemberV8) {
+                    // Fix <vbeclipse> rev8: 成员确属宿主类, 但返回类型**不是工程类**
+                    // —— 最典型就是 `Property Get View() As Object` (View.cls:66)。
+                    // getClassMethodReturnType 对 As Object 返回空 (rev7 收紧后的
+                    // 正确行为), 若放任 kind 留 Unknown, 下面的 `tempType=="void*"`
+                    // 兜底会把它按 ClassInstance + 空 className 处理, 块内 .hWnd
+                    // 走 `tempVar->hWnd` (void* 取成员) → C2223。
+                    // As Object 的语义就是 IDispatch → 必须转 COMObject 晚绑定,
+                    // 块内 .hWnd/.Caption 由 vb6_ComGetProp 运行时问窗体。
+                    withInfo.kind = WithObjKind::COMObject;
+                    withInfo.className.clear();
+                    tempType = "void*";
                 }
             }
         }

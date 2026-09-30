@@ -33,9 +33,18 @@
     //   字段访问器引用 vb6_ComObject_FromInstance / vb6_FindCoClassDesc /
     //   vb6_ComObject_GetInstance (声明在此头), 缺头会 C4013 隐式声明截断指针
     //   (Fix 099 同款教训). 纯头文件无导出修饰, EXE .c include 无副作用.
-    if (isClassModule_) {
-        c_.emitLine("#include \"vb6comserver.h\"");
-    }
+    //
+    // Fix <vbeclipse> rev18: 改为**无条件** include。
+    // 上面那条"类模块一律 include"漏了**非类模块 (.bas/.frm)** —— 而它们同样会发出
+    // 引用此头里声明的函数的代码: 把工程类实例装箱成 Variant
+    // (`vb6_ComObject_FromInstance` / `vb6_FindCoClassDesc`) 与从 Variant 剥回实例
+    // (`vb6_ComObject_GetInstance`)。缺头 = 该 TU 里没有原型 = C 的隐式声明按 int 截断
+    // 返回的**指针** —— x86 侥幸(指针 4 字节), **x64 必崩**。
+    // 实证 tests/ve_list (x86 全绿 / x64 0xC0000005): 崩在
+    // `vb6_ComObject_GetInstance+0x2E` 读 `obj->vtable`, av read target=0x661751e0
+    // —— 正是被砍成 32 位的包装器地址; 调用链来自 `.bas` 里的 `Set back = L.Item("Props")`。
+    // 头是纯声明 (无导出修饰), EXE/DLL 的 .c include 均无副作用。
+    c_.emitLine("#include \"vb6comserver.h\"");
     // P8.7 + Fix 010r-12: 标准模块之间的#include放在.c文件，避免.h循环依赖
     // 类模块引用标准模块 → .h (见上方); 标准模块引用标准模块 → .c
     // opt4: --trim-includes 时按符号表实际引用裁剪, 未引用模块仅补 init 前向声明

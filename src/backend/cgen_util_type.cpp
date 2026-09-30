@@ -593,6 +593,9 @@ bool CCodeGen::cExprIsSafeArrayCarrier(const std::string& cExpr) const {
         "vb6_SafeArrayCreate1D(",
         "vb6_SafeArrayReDim1D(",
         "vb6_SafeArrayReDimPreserve1D(",
+        // Fix <vbeclipse> rev3: 带 elemType 的新入口。注意**不能**指望上一行前缀
+        // 命中 —— `vb6_SafeArrayReDimPreserve1D(` 与 `...1D_T(` 在第 25 个字符处分叉。
+        "vb6_SafeArrayReDimPreserve1D_T(",
         "vb6_VariantToSafeArray1D(",   // 已提取过, 再包一层就是双重解引用
         "vb6_VariantToByteArray(",
         "vb6_StringToByteArray(",

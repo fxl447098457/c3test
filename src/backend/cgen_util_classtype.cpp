@@ -59,6 +59,35 @@ std::string CCodeGen::inferClassTypeOfExpr(const ASTNode& expr) const {
             // 放在最后: 局部变量/参数/属性各自的判定优先, 不会把与类同名的**局部
             // 变量**误当类 (已知局部走 knownClassVars_ 与 Variable/Parameter 分支)。
             // 表里没有的名字行为完全不变。
+            //
+            // ⚠ Fix <vbeclipse> rev7: 但**必须先排除"同名成员访问"**。
+            // View.cls 里 `Property Get View() As Object` (返回窗体对象) 与类名 `View`
+            // 同名 ⇒ 消费点 `l_View.View` 的 `.View` 段名字撞工程类表 ⇒ 整条链被推成
+            // "vb6_cls_View 实例" ⇒ `With View.View` 把 tempType 定成 vb6_cls_View*,
+            // 于是 `_vb6_with_2->hWnd` 按类字段发, 而 vb6_View_prop_get_View() 实际
+            // 返回 void* (As Object) ⇒ 编译期 C2039 "hWnd 不是 vb6_cls_View 的成员"
+            // ×216 (ucFolder.c/SubClass.c/modSubClass.bas 全线)。
+            // 判据: 该标识符在**本模块**是个成员 (PropertyGet/PropertyLet/PropertySet/
+            // 变量/参数) 时, 它的类型由**声明**决定, 与同名工程类无关 —— 名字撞车
+            // 不是类型依据。已知局部在上面几条分支已处理, 到这里的是"跨模块成员 +
+            // 名字撞类"这一种。
+            {
+                const Symbol* s2 = symTab_.lookup(id.name);
+                if (s2 && (s2->kind == SymbolKind::PropertyGet
+                           || s2->kind == SymbolKind::PropertyLet
+                           || s2->kind == SymbolKind::PropertySet
+                           || s2->kind == SymbolKind::Variable
+                           || s2->kind == SymbolKind::Parameter)) {
+                    // 有声明就看声明: 声明类型确实解析为项目类才返回类名, 否则返回空
+                    // (交下游走 COM 晚绑定 —— As Object 的成员就该那样走)。
+                    if (!s2->variableTypeName.empty()) {
+                        const std::string projHit =
+                            projectClassNameOf(s2->variableTypeName);
+                        if (!projHit.empty()) return projHit;
+                    }
+                    return "";
+                }
+            }
             const std::string projClsVbe = projectClassNameOf(id.name);
             if (!projClsVbe.empty()) return projClsVbe;
             return "";

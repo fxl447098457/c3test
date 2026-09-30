@@ -454,6 +454,11 @@
     // 是不分支的一句，不必每个站点各写一遍"是类槽就跳过装箱"。
     std::string deliverToClassSlot(const std::string& clsPtr, const std::string& argVal) const;
 
+    // <vbeclipse> rev7: 配套 deliverToClassSlot 的**落临时**侧名生成器。ByRef 类形参
+    // 收到右值实参时必须先落局部再取址 (&(右值) = C2102)。名里只保留标识符字符
+    // (`vb6_ivref_IScheme*` 截断会带 '*'), 详见 cgen_base_type.cpp 定义处。
+    std::string classSlotTempName(const std::string& clsPtr, int idx) const;
+
     // Fix 038b: 运行时函数参数 C 类型查找表 — 当 calleeParams 为空 (运行时/内置函数)
     // 时, 通过函数名和参数索引查找期望的 C 类型. 返回空字符串表示未知.
     // 用于在函数调用参数生成时插入类型转换 (VARIANT→具体, 具体→VARIANT).
@@ -658,6 +663,18 @@
     //  - 其他: 返回空串 (不可推断为类实例)
     // 用于链式调用 db.Sql(s).Exec(...) 中 .Exec 的对象表达式 (db.Sql(s)) 类型推断
     std::string inferClassTypeOfExpr(const ASTNode& expr) const;
+
+    // Fix <vbeclipse> rev8: 该类成员的返回类型是不是 `As Object` (即 C 侧 void*)。
+    // `Property Get View() As Object` (View.cls:66) 就是这一类。
+    // 用途: 链式成员访问的**接收者是这种成员**时, 后面那一段必须走 COM 晚绑定
+    // (`vb6_ComGetProp(obj, L"Member")`), 不能拼 `obj.Member` / `obj->Member` ——
+    // obj 实际是 void*, 拼出来必是 C2223 "左侧必须具有结构/联合类型" (实测
+    // ucPerspective.c 36 处 .hWnd / ucFolder.c 11 处 .Caption / modSubClass.c 6 处)。
+    // 判据 = 类符号的 memberReturnTypes[member] 归一化后是 Object/Variant/Empty,
+    // 或该成员的 PropertyGet/Function 符号 type==Object 且 variableTypeName 不是
+    // 某个 Class 符号 (与 getClassMethodReturnType 的收紧口径同源)。
+    bool classMemberReturnsAsObject(const std::string& className,
+                                    const std::string& memberName) const;
 
     // ---- Fix 037: UDT 类型推断辅助 ----
     // 给定一个表达式 AST 节点, 递归推断其 UDT C 类型标识符 (如 "vb6_type_UcsBuffer").

@@ -486,6 +486,20 @@ std::string CCodeGen::canonicalClassMemberName(const std::string& className,
 
 
 std::string CCodeGen::comPackExpr(Expr& expr) {
+    // Fix <vbeclipse>: **UDT (Type ... End Type) 实参**必须走字节数组编组。
+    // `m_Rect As RECT` 传给 COM 方法时, inferExprType 推不出标量类型 → 落
+    // default 分支 → vb6_ComPackInt(me->m_Rect) → C2440 "无法从 vb6_type_RECT
+    // 转换为 int32_t" (ucSplitBar.ctl:149 `.SplitterMouseDown UserControl.hWnd,
+    // m_Rect, x, y`)。
+    //
+    // 判据用 inferUdtTypeOfExpr (而非 inferExprType): 它查 knownUdtVars_ 与 UDT
+    // 成员表, 能认出 "这是一个 UDT 结构体值"。
+    //
+    // ⚠ 这里只返回**函数名** (本函数的契约), 实参由各调用点自己拼 —— 所以走
+    // 宏: vb6_ComPackUdt(x) 内部自己做 &x 与 sizeof(x)。先前试图在返回串里嵌
+    // 实参 (lastExprOrSelf_) 是错的方向: 那样 10+ 个调用点会各拼一次实参。
+    if (inferUdtTypeOfExpr(expr).rfind("vb6_type_", 0) == 0) return "vb6_ComPackUdt";
+
     // Fix 110p: 标识符的 C 层跟踪集合优先于 inferExprType. 声明为 Collection/Object
     // 的变量 (C 类型 void*) 会被 inferExprType 误判为 Double → 生成
     // vb6_ComPackDouble(void*) → C2440. 实测 Charts 2020 Form2.frm 524:

@@ -115,9 +115,14 @@
             {
                 std::string lowCode = Symbol::toLower(ucSpecEvt->codeSection);
                 static const char* kTypeMapPre[][2] = {
+                    // Fix <vbeclipse> rev17: 补 `object` —— 缺它时命中 default "int32_t",
+                    // 于是 `Public Event X(ByRef Editor As Object)` 的前向声明/thunk 写成
+                    // `int32_t arg0`, 而回调 typedef (emitEventSink 走 mapTypeRef) 与
+                    // RaiseEvent 发送侧都是 `void*`。x86 上同宽侥幸能跑, x64 直接截断指针。
                     {"boolean", "int16_t"}, {"string", "BSTR"},
                     {"integer", "int32_t"}, {"long", "int32_t"},
-                    {"single", "float"}, {"double", "double"}, {nullptr, nullptr} };
+                    {"single", "float"}, {"double", "double"},
+                    {"object", "void*"}, {nullptr, nullptr} };
                 size_t pos = 0;
                 while (true) {
                     size_t e = lowCode.find("public event ", pos);
@@ -175,6 +180,10 @@
                 if (frmLowCode.find("sub " + handlerLower + "(") == std::string::npos
                     && frmLowCode.find("sub " + handlerLower + " (") == std::string::npos) continue;
                 anyHandler = true;
+                // Fix <vbeclipse> rev17: 登记"这条过程是事件处理器" —— visit(SubDecl&)
+                // 据此把形参按事件 ABI (ByVal) 发, 与下面 thunk 的 arg 类型、
+                // emitEventSink 的 typedef、RaiseEvent 发送侧三处对齐 (见状态区注释)。
+                ucEventHandlers_.insert(handlerLower);
                 std::string fnOrig = cIdent(child.controlName) + "_" + cIdent(ev.name);
                 std::string frmPrefix = "vb6_" + cIdent(formName) + "_";
                 std::string thunkName = frmPrefix + "evtThunk_" + fnOrig;

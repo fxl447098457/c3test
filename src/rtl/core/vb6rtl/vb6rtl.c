@@ -312,6 +312,10 @@ struct vb6_SafeArray1D* vb6_VariantToSafeArray1D(vb6_VARIANT v) {
 // vb6_VariantToObject 接受 vb6_VARIANT* (要求实参左值), 而调用点包装的实参
 // 经常是函数返回值 (vb6_VariantArrayGet(...) 等) 无法取址. 这里提供按值版本.
 void* vb6_VariantToObjectVal(vb6_VARIANT v) {
+    if (getenv("C3_IV_TRACE")) {
+        fprintf(stderr, "[V2O] vt=%d pdisp=%p\n", (int)v.vt, v.pdispVal);
+        fflush(stderr);
+    }
     if (v.vt == vb6_vtDispatch) return v.pdispVal;
     return NULL;
 }
@@ -329,6 +333,13 @@ void vb6_VariantClear(vb6_VARIANT* v) {
         vb6_ReleaseObject(&v->pdispVal);
         v->pdispVal = NULL;
     }
+#ifndef _WIN64
+    // Fix <vbeclipse> rev11: x86 的 DECIMAL 由 pdecVal 指向外部缓冲, 需释放
+    if (v->vt == vb6_vtDecimal && v->pdecVal) {
+        CoTaskMemFree(v->pdecVal);
+        v->pdecVal = NULL;
+    }
+#endif
     v->vt = vb6_vtEmpty;
 }
 
@@ -349,6 +360,36 @@ void vb6_VariantCopy(vb6_VARIANT* dst, const vb6_VARIANT* src) {
         dst->pdispVal = src->pdispVal;
         vb6_ComAddRefDispatch(dst->pdispVal);
     }
+}
+
+// Fix <vbeclipse> rev16: Variant **槽位赋值**("接管"语义) —— 先释放 dst 旧内容, 再把
+// src 的值深拷贝进去。与 vb6_VariantCopy 的唯一区别就是那句 Clear; BSTR 另分配 /
+// Dispatch AddRef / x86 DECIMAL 另分配全部复用同一口径, 保证"每个槽各自持有一份
+// 所有权"成立。
+//
+// 为什么必须深拷贝: 原先 Variant 数组元素赋值发的是
+//   `slot = vb6_VariantFromValue((*Item))`
+// 而 vb6_VariantFromValue 对 vb6_VARIANT 走 _Generic 的 vb6_VariantIdentity ——
+// 纯结构体浅拷贝, 槽与调用方实参**共用同一只 BSTR / 同一个 Dispatch**。调用方
+// (ByRef Variant 形参的宿主) 下一次 vb6_VariantClear(&v) 就把它 free 掉, 随后
+// 同尺寸分配又复用那个地址 ⇒ 每个槽都读出"最后一次写入的值"。
+// 实测 tests/ve_list (工程内 List.cls 形态): idx=0/1/2 全答 "Gamma", 按 key 也全答
+// "Gamma"; 真工程 play78: Folder.Views.Item(0) 取回 1 字符垃圾 →
+// m_Views.Item(<垃圾>) 落空 → NULL 解引用 (av read 0x4 @ vb6_View_prop_get_ViewId)。
+// 对照: 同一份代码里的 m_Keys (String 数组) 走 vb6_BSTR_Assign 深拷贝, 所以它一直是对的。
+void vb6_VariantAssign(vb6_VARIANT* dst, vb6_VARIANT src) {
+    if (!dst) return;
+    vb6_VariantClear(dst);        /* 释放旧值 (BSTR / Dispatch / x86 DECIMAL) */
+    vb6_VariantCopy(dst, &src);   /* *dst = src + BSTR 另分配 / Dispatch AddRef */
+#ifndef _WIN64
+    /* x86 的 DECIMAL 由 pdecVal 指向外部缓冲: 上面 Copy 只搬了指针, 这里必须另分配
+       一只, 否则 src 的宿主释放时会把 dst 手里的同一块 free 掉 (二次 free)。 */
+    if (src.vt == vb6_vtDecimal && src.pdecVal) {
+        DECIMAL* p = (DECIMAL*)CoTaskMemAlloc(sizeof(DECIMAL));
+        if (p) { *p = *src.pdecVal; dst->pdecVal = p; }
+        else   { dst->vt = vb6_vtEmpty; dst->pdecVal = NULL; }
+    }
+#endif
 }
 
 // ============================================================

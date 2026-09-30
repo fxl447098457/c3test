@@ -562,6 +562,13 @@ int vb6_TextCmp(const wchar_t* a, const wchar_t* b) {
 int32_t vb6_StrComp(BSTR s1, BSTR s2, int32_t compare) {
     // Fix 173: NULL BSTR (vbNullString / 未赋值的 String) 与 L"" 等价 —— 原来对
     // 单边 NULL 直接返回 ±1, 于是 `StrComp("", vbNullString)` 报"不等"。
+    if (getenv("C3_STRCMP_TRACE")) {
+        int32_t tl1 = s1 ? vb6_BSTR_Len(s1) : -1;
+        int32_t tl2 = s2 ? vb6_BSTR_Len(s2) : -1;
+        fprintf(stderr, "[SC] s1=%p len=%d <%ls> | s2=%p len=%d <%ls> cmp=%d\n",
+                (void*)s1, tl1, s1 ? s1 : L"(null)",
+                (void*)s2, tl2, s2 ? s2 : L"(null)", (int)compare);
+    }
     if (!s1) s1 = L"";
     if (!s2) s2 = L"";
     int32_t len1 = vb6_BSTR_Len(s1);

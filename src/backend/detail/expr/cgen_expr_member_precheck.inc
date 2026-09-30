@@ -6,15 +6,17 @@
     // / For Each 形态的 `.Count`) —— 必须在一切类感知解析之前拦截, 否则工程里
     // 恰好有同名方法的类 (List.Item / List.Remove / List.Add) 会把成员抢挂过去,
     // 接收者被首参顶掉 (ucPerspective 实测: Controls.Item(p) → vb6_List_Item((*p)))。
-    // RTL 侧 vb6_UserControl_Controls 暂为 NULL 全局, 后期绑定 no-op (编译先行)。
+    // rev14: RTL 侧 vb6_UC_Controls() 已返回真实的控件集合单例 (按当前 UC 实例回落),
+    // 不再用恒 NULL 的 vb6_UserControl_Controls —— 后者使 `Set x = Controls.Item(...)`
+    // 恒为 NULL, ucFolder_AddView(NULL) 解引用即 0xC0000005。
     if (isDesignerModule_ && node.object && node.object->kind == ASTNodeKind::IdentifierExpr
         && Symbol::toLower(static_cast<IdentifierExpr&>(*node.object).name) == "controls") {
-        comObjExpr_ = "(void*)vb6_UserControl_Controls";
+        comObjExpr_ = "(void*)vb6_UC_Controls()";
         comMemberName_ = node.memberName;
         isComMarker_ = true;
         isEarlyBoundCom_ = false;
         earlyBoundSym_ = nullptr;
-        lastExpr_ = "(void*)vb6_UserControl_Controls";
+        lastExpr_ = "(void*)vb6_UC_Controls()";
         return;
     }
     // Fix 086: AddressOf 模块限定函数 (AddressOf ToolsTlsThunks.pvCallCollectionItem)

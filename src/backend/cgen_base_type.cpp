@@ -168,9 +168,41 @@ std::string CCodeGen::cTypeForDeclaredTypeName(const std::string& name) {
 // 本条与定义侧不可能各说一套（这正是它要修的毛病）。
 // 见 cgen_helpers.inc 声明处的注释：只认 vb6_cls_ / vb6_ivref_，其余一律空串。
 std::string CCodeGen::cParamClassPtrType(const ParameterInfo& p) {
-    if (p.type != Vb6Type::Variant || p.typeRefName.empty()) return {};
+    // ⚠ Fix <vbeclipse> rev13: 这里**不能**再拿 `p.type` 当资格。判据只有一条，
+    // 就是下面 cTypeForDeclaredTypeName(typeRefName)（= 定义侧那份 mapTypeRef）。
+    //
+    // 原守卫 `p.type != Vb6Type::Variant → return {}` 看似在挡"真 Variant 槽"，
+    // 实际上是把**同一个类型名被折成什么 Vb6Type**当成了第二套判据 —— 而这两者
+    // 会分叉：semantic_analyzer_typeref.cpp 的 resolveTypeRef 里，
+    //   · 名字命中符号表里的 Class/ComClass（工程 .cls，或 --emit-c 类型库**自动加载**
+    //     注进每个模块的 Shell32 `Folder` / ScrRun `Dictionary`）⇒ 返回 Object；
+    //   · 名字什么都查不到（跨模块的 .ctl，如 ucView）⇒ 落到末尾兜底 Variant。
+    // 于是**同名撞车**时（vbeclipse 的 Folder.cls vs 自动加载的 Shell32 Folder coclass）
+    // 形参被折成 Object，本函数认不出类槽 ⇒ 表达式实参走 090d 的 `void*` 档，把
+    // `vb6_VariantToObjectVal(...)`（即 vb6_ComObject**包装器**）直接当实例交付：
+    //   vb6_ucPerspective_CreateFolder((void*)me,
+    //       (&(void*){vb6_VariantToObjectVal(vb6_List_Item(...))}), -1, 0);
+    // 而被调方声明是 vb6_cls_Folder** —— `(*Folder)->m_FolderId` 于是取到
+    // vb6_ComObject.vb6Instance 这个**指针值**当 BSTR，SysAllocString(乱指针) →
+    // av read target=0x1308000 / 0xffffffff，崩点漂移（实测 ucPerspective.CreateFolder
+    // → vb6_Folder_prop_get_FolderId → vb6_BSTR_Assign → vb6_BSTR_FromBSTR）。
+    // 一个形参槽"收不收类实例指针"只该有一个回答处，就是类型名的映射结果；
+    // `p.type` 只是那份映射的一个**可能被符号表污染**的旁证，不能拿来定罪。
+    //
+    // 安全性：`As Variant` → typeRefName "Variant" → mapTypeRef 给 "vb6_VARIANT"；
+    // `As Object`/`As Collection`/`As IPictureDisp`/`As Shell32.Folder` → "void*" /
+    // "vb6_ComIface_IFolder*" —— 都不以 vb6_cls_ / vb6_ivref_ 开头，仍然返回空串，
+    // 行为与改动前逐字节一致。只有"类型名确实映射成类指针"的槽才会多认出来。
+    if (p.typeRefName.empty()) return {};
     const std::string t = cTypeForDeclaredTypeName(p.typeRefName);
-    if (t.compare(0, 8, "vb6_cls_") == 0 || t.compare(0, 11, "vb6_ivref_") == 0) {
+    // ⚠ Fix <vbeclipse> rev7: 第二个前缀是 "vb6_ivref_" —— **10** 个字符, 原写 11。
+    // std::string::compare(pos, len, str) 会拿 t 的**前 len 个字符**去和 str 比, len=11
+    // 时是 11 vs 10 ⇒ 恒不相等 ⇒ **所有接口槽都被判成"非类槽"**。实测
+    // `Property Set Scheme(New_Scheme As IScheme)` 打出 cls=0, 于是调用点把它装箱成
+    // vb6_VARIANT* 送进本该收 vb6_ivref_IScheme* 的槽。
+    // 教训(同 Fix 164z 的"别按默认最通用解锁"一族): **长度字面量必须数**,
+    // 写错不报错、静默恒假, 比写错判据更难发现。
+    if (t.compare(0, 8, "vb6_cls_") == 0 || t.compare(0, 10, "vb6_ivref_") == 0) {
         return t;
     }
     return {};
@@ -208,6 +240,19 @@ std::string CCodeGen::deliverToClassSlot(const std::string& clsPtr,
                "vb6_VariantToObjectVal(" + argVal + "))";
     }
     return argVal;
+}
+
+// <vbeclipse> rev7: 配套 cParamClassPtrType 的**落临时**侧 —— ByRef 类形参收到
+// 右值实参 (函数调用/属性读) 时, `&(vb6_ComObject_GetInstance(...))` 是 C2102
+// (& 右值), 必须先落一个类型正确的局部再取址。
+// 临时名从 C 类型名里**只取标识符字符**并去掉尾随 '*' —— `vb6_ivref_IScheme*`
+// 直接截断会得到带 '*' 的变量名 (C2065), 所以逐字符过滤而不是 substr。
+std::string CCodeGen::classSlotTempName(const std::string& clsPtr, int idx) const {
+    std::string ident;
+    for (char ch : clsPtr) {
+        if (std::isalnum(static_cast<unsigned char>(ch)) || ch == '_') ident += ch;
+    }
+    return "vb6_argtmp_" + ident + "_" + std::to_string(idx);
 }
 
 std::string CCodeGen::mapTypeRef(ASTNode* typeRef) {
@@ -257,6 +302,35 @@ std::string CCodeGen::mapTypeRef(ASTNode* typeRef) {
                 const std::string ivType = ivrefCType(lookupName);
                 if (!ivType.empty()) return ivType;
             }
+            // Fix <vbeclipse> rev7: **工程类名表必须在符号表之前问**, 不能只挂在下面的
+            // ComClass/ComInterface 分支里。
+            //
+            // 原来那条 projectClassNameOf 判据嵌在 `clsSym && (ComClass||ComInterface)`
+            // 分支体内 ⇒ 前提是"本模块符号表里能查到同名 COM 符号"。但跨模块的工程类
+            // (View.cls / Folder.cls / PopupMenu.cls / SplitBar.cls) 在**别的**模块上下文里
+            // 常常一个符号都查不到 (driver 只把工程类名注入 projClassNames_ 这张表),
+            // 于是永远问不到表, 一路掉到末尾兜底 `return "void*"`。
+            //
+            // 后果: 同一个 `As <工程类>` 形参, 在**定义侧**该模块(查到自己的 Class 符号)
+            // 发 `vb6_cls_View*`; 在**调用侧**别的模块(查不到) 发 `void*` → ByRef 变
+            // `void**`。实参于是被装进 `(&(vb6_VARIANT){.vt=VT_BSTR, .bstrVal=...})`
+            // 送进 `void**` 槽 —— 被调方把 vb6_VARIANT* 当对象指针解引用 → 堆损坏。
+            // (实测 vbeclipse ucPerspective.CreateFolder → ucFolder.AddView:
+            //   `void vb6_ucFolder_AddView(vb6_cls_ucFolder*, void** View, ...)` 收到
+            //   `&(vb6_VARIANT){.vt=VT_BSTR, ...}` → vb6_heapCorruptVEH。)
+            //
+            // 判据 = projClassNames_ (driver 注入的"本工程类模块名"表, 纯名字表, 不含
+            // .frm/外部库), 所以查不中就是真外部类型, 不会把 stdole.Font 之类拉成原生 ——
+            // 与 isProjectClassName 同一口径, 不新增第二套判断。
+            // 排在 ivrefCType 之后: 同一个名字既是 tB 接口又是 .cls 时, 接口薄指针优先
+            // (那里有 "Attribute VB_Exposed 但无实现体" 的既定处理)。
+            {
+                const std::string projCls = projectClassNameOf(typeName);
+                if (!projCls.empty()) {
+                    usedClassTypes_.insert(cIdent(projCls));
+                    return "vb6_cls_" + cIdent(projCls) + "*";
+                }
+            }
             auto* clsSym = lookupTypeSymbol(lookupName);
             if (clsSym && clsSym->kind == SymbolKind::Class) {
                 // P6.4: 接口类 → vb6_iface_<Name> 包装类型 (非指针)
@@ -270,29 +344,25 @@ std::string CCodeGen::mapTypeRef(ASTNode* typeRef) {
             }
             // P6.3: 检查是否是COM coclass/接口 → 映射为接口指针类型 (前期绑定)
             if (clsSym && (clsSym->kind == SymbolKind::ComClass || clsSym->kind == SymbolKind::ComInterface)) {
-                // Fix <vbeclipse>-2: 判据是"本工程有没有同名类模块", 不是 isExternal.
-                //
-                // --emit-c 的类型库**自动加载**会把 Shell32 的 coclass `Folder`(默认接口
-                // `IFolder`)、ScrRun 的 `Dictionary`/`FileSystemObject` 等注进**每一个**
+                // Fix <vbeclipse>-2 (原) / rev7 (现): 判据是"本工程有没有同名类模块", 不是
+                // isExternal. --emit-c 的类型库**自动加载**会把 Shell32 的 coclass `Folder`
+                // (默认接口 `IFolder`)、ScrRun 的 `Dictionary`/`FileSystemObject` 等注进**每一个**
                 // 模块的符号表, 且这些内建符号 `isExternal == false`(只置了 isBuiltin).
-                // vbeclipse 的 Folder.cls 与它同名 —— 于是在 ucPerspective.ctl 的模块表里
-                // `lookupTypeSymbol("Folder")` 命中**内建 ComClass**, 工程自己的 Class 符号
-                // 并不在这一张表里. VB6 规则是"工程内定义优先于引用库", 所以此处必须按
-                // projectClassNameOf 判: 有同名工程类 ⇒ 该名字在本模块就是原生
-                // vb6_cls_<Name> 实例.
+                // vbeclipse 的 Folder.cls 与它同名 —— 在 ucPerspective.ctl 的模块表里
+                // `lookupTypeSymbol("Folder")` 会命中**内建 ComClass**, 工程自己的 Class 符号
+                // 并不在这一张表里. VB6 规则是"工程内定义优先于引用库"。
+                //
+                // ⚠ rev7: 这条判据已**上移**到 ivrefCType 之后、lookupTypeSymbol 之前 (见上
+                // "工程类名表必须在符号表之前问") —— 因为符号表**查不到**时 (跨模块工程类的
+                // 常态) 根本进不了这个 if 体。原来的位置只在"恰好命中内建 ComClass"时生效,
+                // 覆盖不全。现在下面直接生成接口指针, 不再重复问那张表。
+                // 限定名 (Scripting.Folder) 保留点号 → projectClassNameOf 查不中 → 走 COM,
+                // 不会把真·外部同名 coclass 拉成原生。
+                //
                 // 若误判成 vb6_ComIface_IFolder* 走 COM, 生成的就是
                 //   `vb6_cls_List* w = (vb6_cls_List*)(*Folder);`  (ucPerspective.c)
                 // —— 把原生 vb6_cls_Folder* 当 IDispatch/List 解引用, 运行期 0xC0000005
                 // (vb6_List_Item 读 NULL+0xc).
-                // 限定名 (Scripting.Folder) 保留点号 → projectClassNameOf 查不中 → 走 COM,
-                // 不会把真·外部同名 coclass 也拉成原生.
-                {
-                    const std::string projCls = projectClassNameOf(typeName);
-                    if (!projCls.empty()) {
-                        usedClassTypes_.insert(cIdent(projCls));
-                        return "vb6_cls_" + cIdent(projCls) + "*";
-                    }
-                }
                 // 生成类型化接口指针: vb6_ComIface_<InterfaceName>*
                 // 运行时通过vb6_ComQI获取, vtable直接调用
                 std::string ifaceName = clsSym->name;

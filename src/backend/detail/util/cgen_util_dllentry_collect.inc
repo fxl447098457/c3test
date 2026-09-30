@@ -20,9 +20,25 @@
         }
     }
 
-    // Fix 053: 去重 — 同一类可能因符号表合并而在 moduleScope 中出现多次
+    // Fix <vbeclipse> rev17: coclass 收集必须遍历**全部模块**的符号表, 不能只看
+    // `symTab_` (= 最后一个模块) 的那一张。原先只看单表的理由是"类符号会经跨模块
+    // 注入把副本铺进每个模块" —— 但那条路有两处会漏 (实测 tests/ve_list, 4 个类只
+    // 收进 2 个):
+    //   ① 类名与成员同名时 (View.cls `Property Get View` / PopupMenu.cls
+    //      `Sub PopupMenu`), 成员的 storageKey 与类符号的裸键相同或经名字级回落被
+    //      命中 → driver_crossmod 的注入守卫判"本地已定义"直接 SKIP;
+    //   ② 注入是"先到先得"的单键存放, 一个名字只能活一个符号。
+    // 而**类在自己模块的表里一定是权威副本** (semantic_analyzer 预先 define, 且那里
+    // 带完整 memberNames/publicFieldNames/comClsidStr…)。改成遍历 allSymTabs 后,
+    // 收集与注入彻底解耦, 上面两条漏路都不再影响 coclass 表。
+    // 实测 play78: 修前表里 14 项, 缺 View/PopupMenu (恰是全工程唯一两个有同名成员的
+    // 类) → 运行期 vb6_FindCoClassDesc("View")=NULL → 装箱出 vt=9/pdisp=NULL 空壳
+    // Variant → `Is Nothing` 恒真 → ucFolder.AddView 收到 NULL → av read 0x4。
+    // Fix 053: 去重 — 同一类会在多个模块的表里各出现一次 (自身副本 + 注入副本)
     std::set<std::string> seenCoClassNames;
-    for (auto& [key, sym] : symTab_.moduleScope()->symbols()) {
+    for (auto* st : allSymTabs) {
+    if (!st->moduleScope()) continue;
+    for (auto& [key, sym] : st->moduleScope()->symbols()) {
         if (sym->kind == SymbolKind::Class && !sym->isInterface) {
             // BUG-4 fix: PublicNotCreatable(2) is visible but NOT externally creatable
             // Only MultiUse(5)/SingleUse(3) should have ClassFactory entries
@@ -181,6 +197,7 @@
                 coClasses.push_back(std::move(info));
             }
         }
+    }
     }
 
     if (coClasses.empty()) {

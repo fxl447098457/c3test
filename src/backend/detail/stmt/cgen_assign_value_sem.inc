@@ -38,6 +38,30 @@
         // 里 148/148 行读到同一个 "149"/列头, 写 "ZZZ" 后读回是指针数值。
         // 交给下方 targetIsBstr 分支 → vb6_BSTR_Assign (释放旧值 + 深拷贝)。
         if (!targetIsBstr && udtFieldIsBstrInCTarget(target)) targetIsBstr = true;
+        // Fix <vbeclipse> rev11: **String 数组元素赋值** (`m_Keys(Position) = Key`,
+        // `arr(i) = s`) 的目标 C 串是 `VB6_SA_AT(BSTR, me->m_Keys, Position)` ——
+        // 一个**表达式**, 上面四道按名字/符号表的判据全都捡不到它, 于是落到最底下的
+        // 裸赋值 `VB6_SA_AT(BSTR, ...) = Key;`。
+        // 裸赋值对 BSTR 就是**指针别名**, 而 VB6 语义是**字符串值拷贝**。实测真工程
+        // (VbEclipse 的 List.cls, `Dim m_Keys() As String` + `m_Keys(Position) = Key`):
+        //   Add "Editor"(6 字符) 存进去, 紧接着同一 List 的 Contains 读 m_Keys(0)
+        //   读出 **长度 1**; 后面几个 key 读出 5/12/12/23 —— 全是别人用过的堆块。
+        // 机制: `Key` 来自 `Public Const PERSPECTIVE_EDITOR As String = "Editor"`
+        // 生成的 `#define PERSPECTIVE_EDITOR (vb6_BSTR_FromStr(L"Editor"))`, 是**每次
+        // 求值新分配、从不释放**的临时块; `List_Add` 里的 ReDim Preserve 又只 memcpy
+        // 指针。真正致命的一环是 List.cls 自己在 Add 结尾 `Set m_Items(Position) = Item`
+        // 走 Variant 容器 → vb6_VariantClear 会 free 掉与 BSTR 元素共享的堆块。
+        // 判据落在**宏的第一个实参(元素 C 类型) == BSTR**, 与 Fix 177 同源同口径:
+        // 元素是 BSTR ⇒ 该槽必须走 vb6_BSTR_Assign (释放旧值 + 深拷贝)。
+        // 排除 UDT/数值族 —— 它们的元素类型不是 BSTR, 本就不该深拷贝。
+        // 用 sizeof()-1 而不是手数字面量长度 (这串前面就栽过: "VB6_SA_AT(" 写成 11)。
+        static const std::string kSaBstrAt   = "VB6_SA_AT(BSTR,";
+        static const std::string kSaNdBstrAt = "VB6_SA_ND_AT2(BSTR,";
+        if (!targetIsBstr
+            && (target.compare(0, kSaBstrAt.size(), kSaBstrAt) == 0
+                || target.compare(0, kSaNdBstrAt.size(), kSaNdBstrAt) == 0)) {
+            targetIsBstr = true;
+        }
         // 账 #113: 模块级 String 变量不进 knownBstrVars_ —— 那张表在每过程入口 clear
         // (cgen_decl_func.cpp:43 / cgen_decl_proc.cpp:51), 只有局部声明与形参进表。
         // 于是 `gS = s`(String 形参) 一路落到最底下的裸赋值 `gS = s;` —— 存下来的是
@@ -204,8 +228,24 @@
     } else if (targetIsVariant) {
         // P8.4: 包装值为vb6_VARIANT, 先释放旧BSTR
         std::string wrappedValue = wrapVariantValue(node.value.get(), value);
-        c_.emitLine("vb6_VariantClear(&" + target + ");");
-        c_.emitLine(target + " = " + wrappedValue + ";");
+        // Fix <vbeclipse> rev16: Variant **数组元素**槽位走"接管"语义。
+        // `Clear + 浅拷贝` 对"从别处借来的值"不足: RHS 是 ByRef Variant 实参或相邻
+        // 元素时, wrapVariantValue 给出的是 vb6_VariantFromValue(...) —— 对 vb6_VARIANT
+        // 是 identity **浅拷贝**, 槽与借用方共用同一只 BSTR / 同一个 Dispatch, 借用方
+        // 一 Clear 槽即悬垂 (地址被后续同尺寸分配复用 ⇒ 每槽都读"最后一次写入的值")。
+        // 实测 tests/ve_list (工程内 List.cls 的 m_Items) idx=0/1/2 全答 "Gamma";
+        // 真工程 play78: Folder.Views.Item(0) 取回 1 字符垃圾 → 后续 NULL 解引用。
+        // vb6_VariantAssign = Clear(dst) + 深拷贝(BSTR 另分配 / Dispatch AddRef),
+        // 与同一个类的 m_Keys (String 数组, 走 vb6_BSTR_Assign) 同一口径。
+        bool targetIsVariantArraySlot =
+            (target.compare(0, 7, "VB6_SA_") == 0
+             && target.find("(vb6_VARIANT,") != std::string::npos);
+        if (targetIsVariantArraySlot) {
+            c_.emitLine("vb6_VariantAssign(&" + target + ", " + wrappedValue + ");");
+        } else {
+            c_.emitLine("vb6_VariantClear(&" + target + ");");
+            c_.emitLine(target + " = " + wrappedValue + ";");
+        }
     } else if (target.compare(0, 10, "vb6_PA_Get") == 0) {
         // Fix 091c: ParamArray 元素赋值 OutVars(i) = value — vb6_PA_GetXxx 是取值
         // 函数 (右值), 直接赋值 → C2106 "左操作数必须为左值" (cToolsArray.c 130);
@@ -462,9 +502,24 @@
                     // 会清空 m_Caption → 右侧卡片空白).
                     convertedValue = "vb6_VariantToByteArray(" + value + ")";
                 } else if (knownClassVars_.count(lower)) {
-                    // Fix 086: 类类型目标 (vb6_cls_X*) + Variant值 → 提取对象指针
+                    // Fix 086 + Fix <vbeclipse> rev5: 类类型目标 (vb6_cls_X*) + Variant值
+                    // → 提取对象指针。
+                    // ⚠ rev5: 原式是 `(*)vb6_VariantToObjectVal(v)`, **漏了剥壳**。
+                    // 工程类的 Variant 里装的是 `vb6_ComObject` 包装器 (AddPerspective
+                    // 里 `vb6_ComObject_FromInstance(...)` 造的), `pdispVal` 指向包装器
+                    // 而**不是** vb6_cls_Perspective 本体。直接当类指针用 = 把包装器
+                    // 的第一个字段 (vtable 槽) 当成 m_Fields 之类去解引用。
+                    // 实测 play78.exe: `Set l_Perspective = m_Perspectives.Item(id)`
+                    // 之后 `l_Perspective.Folders.Contains(...)` 崩在
+                    // vb6_List_Contains+0xB6, 而 vb6_UBound 打印出
+                    // `sig=0x640045 et=7602281` —— 那是 BSTR "Ed..." 的字节,
+                    // 因为 m_Folders 槽被前一个成员 (m_PerspectiveId 的 BSTR) 盖住。
+                    // 正确口径与 cgen_base_type.cpp 的 deliverToClassSlot 同一口径:
+                    // 先取 pdispVal, 再 vb6_ComObject_GetInstance 剥出裸实例。
+                    // (GetInstance 对外部 COM 对象返回 NULL = 等效 Nothing, 与 VB6 一致。)
                     convertedValue = "(vb6_cls_" + cIdent(knownClassVars_[lower])
-                                   + "*)vb6_VariantToObjectVal(" + value + ")";
+                                   + "*)vb6_ComObject_GetInstance("
+                                     "vb6_VariantToObjectVal(" + value + "))";
                 } else if (knownArrays_.count(lower)) {
                     // Fix 086: 数组目标 (vb6_SafeArray1D*) + Variant值 → 提取数组
                     convertedValue = "vb6_VariantToSafeArray1D(" + value + ")";
@@ -485,9 +540,12 @@
                         // Fix 140: 同前 — 字符串 Variant 需转字节数组.
                         convertedValue = "vb6_VariantToByteArray(" + value + ")";
                     } else if (knownClassVars_.count(idLower)) {
-                        // Fix 086: 类类型目标 (vb6_cls_X*) + Variant值
+                        // Fix 086 + Fix <vbeclipse> rev5: 同上方 knownClassVars_ 分支
+                        // —— 类槽必须经 vb6_ComObject_GetInstance 剥出裸实例, 不能把
+                        // ComObject 包装器当类指针 (实测 play78.exe 的 l_Perspective)。
                         convertedValue = "(vb6_cls_" + cIdent(knownClassVars_[idLower])
-                                       + "*)vb6_VariantToObjectVal(" + value + ")";
+                                       + "*)vb6_ComObject_GetInstance("
+                                         "vb6_VariantToObjectVal(" + value + "))";
                     } else if (knownArrays_.count(idLower)) {
                         // Fix 086: 数组目标 (vb6_SafeArray1D*) + Variant值
                         convertedValue = "vb6_VariantToSafeArray1D(" + value + ")";

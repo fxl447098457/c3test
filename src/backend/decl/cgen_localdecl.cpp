@@ -264,7 +264,24 @@ void CCodeGen::emitLocalDeclCode(LocalDeclStmt& node) {
             if (var.asType && var.asType->kind == ASTNodeKind::SimpleTypeRef) {
                 auto& simple = static_cast<SimpleTypeRef&>(*var.asType);
                 auto* clsSym = lookupModuleDotted(simple.name);
-                if (clsSym && clsSym->kind == SymbolKind::Class) {
+                // Fix <vbeclipse> rev7: **工程类名表兜底** —— 与 mapTypeRef 上移同一根因。
+                // `Dim l_View As View` (modSubClass.bas:93) / `Dim l_Folder As Folder`
+                // (ucPerspective.ctl 20+ 处) 里, 跨模块工程类在当前模块符号表**查不到
+                // Class 符号** (driver 只把工程类名注入 projClassNames_), 于是
+                // isLocalClassType 假 → 不进 knownClassVars_ → 该变量在成员访问时被
+                // 当"模块限定符" → `l_View.View.hWnd` 发成 `vb6_View_prop_get_View.hWnd`
+                // (丢了实参) → C2224 ".hWnd 左侧必须具有结构/联合类型" ×44。
+                // 判据共用 projectClassNameOf (与 mapTypeRef / cParamClassPtrType 同源),
+                // 不新增第二套"算不算工程类"的判断。
+                std::string localProjCls;
+                if (!clsSym || clsSym->kind != SymbolKind::Class) {
+                    localProjCls = projectClassNameOf(simple.name);
+                }
+                if ((clsSym && clsSym->kind == SymbolKind::Class) || !localProjCls.empty()) {
+                    const std::string localClsName =
+                        localProjCls.empty() ? clsSym->name : localProjCls;
+                    const bool localIsInterface =
+                        clsSym && clsSym->kind == SymbolKind::Class && clsSym->isInterface;
                     std::string lower = var.name;
                     std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
                     // tB Interface 契约 (B04): 新式接口变量 -> knownIvrefVars_ + NULL 初值
@@ -273,17 +290,17 @@ void CCodeGen::emitLocalDeclCode(LocalDeclStmt& node) {
                         isLocalIvrefType = true;
                         // B05: 过程级接口变量在正常出口处 Release 自己那一份引用
                         trackIvrefLocalForRelease(cIdent(var.name));
-                    } else if (clsSym->isInterface) {
+                    } else if (localIsInterface) {
                         // P6.4: 接口类 → knownIfaceVars_ (而非 knownClassVars_)
-                        knownIfaceVars_[lower] = clsSym->name;
+                        knownIfaceVars_[lower] = localClsName;
                         isLocalVb6IfaceType = true;
                     } else {
                         // Fix 010r-10: map赋值, 存储类名以便方法分发时查找
-                        knownClassVars_[lower] = clsSym->name;
+                        knownClassVars_[lower] = localClsName;
                         isLocalClassType = true;
                         // P14.3.1: Dim As New自动实例化
                         if (var.isNew) {
-                            knownNewVars_[lower] = cIdent(clsSym->name);
+                            knownNewVars_[lower] = cIdent(localClsName);
                         }
                     }
                 }

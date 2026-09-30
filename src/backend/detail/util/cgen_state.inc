@@ -911,6 +911,23 @@
     // Fix 112: in-project UserControl (.ctl) designer spec table (lowercase module -> FrmFile)
     // czUI fix: UC 事件 attach 行 (文件作用域 thunk/sink 在 prelude 生成)
     std::map<std::string, std::vector<std::string>> ucEventAttach_;
+
+    // Fix <vbeclipse> rev17: 本窗体里**充当 WithEvents 事件处理器**的过程名 (小写)。
+    // 由 cgen_form_prelude 在扫 <ctrl>_<Event> 命中时登记。用途: 事件处理器是"跨对象
+    // 边界"的回调, 形参一律按**事件 ABI = ByVal** 发 (与 emitEventSink 的
+    // `pi.isByVal = true` 同一条规矩), 否则处理器声明出 `void**` 而回调 typedef /
+    // RaiseEvent 发送侧给的是 `void*` —— 处理器多解一层引用 → 拿到 NULL。
+    // 实证 play78: `Private Sub ucPerspective1_OpenEditor(Editor As Object)` 发成
+    // `void** Editor` 且体里 `(*Editor)`, 而 typedef 是 `void* Editor`、
+    // 发送侧是 `onOpenEditor(handler, (*Editor))` ⇒ Editor.Caption 取到 NULL
+    // ⇒ av read 0x0 (_vb6_frmMain_ucPerspective1_OpenEditor+0x19)。
+    std::set<std::string> ucEventHandlers_;
+
+    // Fix <vbeclipse> rev18: 本模块发出去的 UserControl 自有属性桥条数。
+    // emitFormFramework 末尾 (cgen_form_uc_props.inc) 算表时写入, emitDesignerControlDecls
+    // 填 vb6_UserControlDesc.props/propCount 时读 (同一次 decl-pass 内, 前者先跑 ——
+    // 见 cgen_base_generate_decl_pass.inc:40 与 :46)。
+    int32_t ucHostPropCount_ = 0;
     const std::map<std::string, FrmFile>* designerFiles_ = nullptr;
 
     // Fix 143: vbp Object= 的 OCX 文件表 (CLSID 小写去花括号 → ocx 绝对路径)

@@ -3274,7 +3274,7 @@ if ($Category -in @("all", "run", "vbp")) {
     # Both architectures: the rewritten variable's C type is a class struct pointer, so a layout
     # slip would show up on x86 only (022 D40 rule).
     $ccActExpected = @("CC1:OK", "CC2:OK", "CC3:OK", "CC4:OK", "CC5:OK", "CC6:OK", "CC7:OK",
-        "CC8:OK", "CC9:OK", "CC-DONE")
+        "CC8:OK", "CC9:OK", "CC10:OK", "CC-DONE")
     # Fix 192: 元素类型为项目类的数组 (arr(i).Method)。此前接收者推断不出类 →
     # `VB6_SA_AT(void*, arr, i).Move(...)` → MSVC C2224。AC1/AC2 是静态数组 ——
     # 缺口不是 ReDim 专属; AC3 是 ReDim As <类名>; AC5 是 ReDim Preserve。
@@ -3305,8 +3305,39 @@ if ($Category -in @("all", "run", "vbp")) {
         Test-Vbp "optcmp_text_module" "$Tests\optcmp\oc_ok.vbp" $optCmpExpected
     }
 
+    # <vbeclipse>: CC2 走 **ByRef 组名形参** (`Sub UseCircle(c As Circle)`), CC10 走
+    # **真 ByRef Variant 形参** —— 同一个类实参、两种槽。这一对是"别过度修复"的夹子:
+    # CC2 曾被装箱成 vb6_VARIANT* (与 `vb6_cls_ShapeAct**` 形参 ABI 不符 → 段错误),
+    # 而把 CC10 也一起改直传则会把裸类指针交给按 vb6_VARIANT 解析的被调方。
     Test-Vbp "cc_act_pair" "$Tests\cc_act\Act.vbp" $ccActExpected
     Test-Vbp "cc_act_x86" "$Tests\cc_act\Act.vbp" $ccActExpected -Arch "x86"
+
+    # <vbeclipse> 回归夹子 (ve_list): 真工程 VbEclipse 的 Classes/List.cls 全文 + 它的两类
+    # "类名/变体槽"坑。每一条都对应一个已修的根因, 且都曾**编得过 (MSVC 只给警告/rc=0)
+    # 而运行期错** —— 只靠生成码逐处对照才发现, 所以必须有运行期夹子盯着:
+    #   · idx/lit/bykey = Alpha/Beta/Gamma  → rev16: 类成员 **Variant 数组元素**赋值曾是
+    #     identity 浅拷贝, 槽与 ByRef 实参共用同一只 BSTR ⇒ 每槽读出"最后写入的值"
+    #     (修前这里三条全是 Gamma)。
+    #   · objidB/takeid                     → rev17b: `As <工程类>` 的 ByRef 实参曾**不装箱**,
+    #     `vb6_cls_X**` 被当 `vb6_VARIANT*` 直接传 (C4133 警告而已) ⇒ 取回 NULL + av read 0x4。
+    #   · selfnil=False / pophits=1         → rev17: 成员与**类同名**的类符号被语义层 erase 掉,
+    #     进不了 coclass 表 ⇒ 装箱出 vt=9/pdisp=NULL 的空壳 Variant (修前 selfnil=True 后崩)。
+    #   · fwdnil=False/fwdid                → rev17b 的取用侧 (`Set x = L.Item(...)` 再读属性)。
+    # x86 + x64 双跑: 这一族问题在 x86 多数"侥幸能过" (指针同宽/隐式声明截断), x64 才露。
+    $veListExpected = @(
+        "LOCAL a0=[A] a1=[B]", "LOCAL k0=[K0] k1=[K1]",
+        "count=2",
+        "idx=0 len=5 s=[Alpha]", "idx=1 len=4 s=[Beta]", "idx=2 len=5 s=[Gamma]",
+        "lit0=[Alpha] lit1=[Beta] lit2=[Gamma]",
+        "bykeyAlpha=[Alpha]", "bykeyGamma=[Gamma]",
+        "vt0=8 vt2=8",
+        "indexOfGamma=2",
+        "objnil=False", "objidB=[Props]", "takeid=[Props]",
+        "selfnil=False", "selfid=[SelfId]", "popnil=False", "pophits=1",
+        "selfid2=[SelfId] pophits2=1",
+        "fwdvt=9", "fwdnil=False", "fwdid=[FwdId]")
+    Test-Vbp "ve_list" "$Tests\ve_list\VeList.vbp" $veListExpected
+    Test-Vbp "ve_list_x86" "$Tests\ve_list\VeList.vbp" $veListExpected -Arch "x86"
 
     # test_vbman 用于验证外部 COM 组件 VBMANLIB (x86 DLL, 供 32 位程序调用)
     # ai/022 B07b: INH2..INH11 cover the merged member face + prefix-copied fields +

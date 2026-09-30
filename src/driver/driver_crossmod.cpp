@@ -18,6 +18,40 @@ namespace vb6c3 {
 // 遍历每个模块的符号表，查找未定义的标识符，在其他模块的Public符号中查找匹配
 // 为匹配到的符号注入 isExternal=true + sourceModule 的外部符号
 
+namespace {
+
+// Fix <vbeclipse> rev17: 在模块作用域里找**本模块自有**的同名符号, 跳过跨模块注入
+// 进来的外部副本 (`isExternal`)。键优先级照抄 Scope::lookupLocal:
+// 裸键 → $pg → $pl → $ps → $ty (逐个试, 因为裸键可能被外部副本占着而本地成员在 $pg)。
+//
+// 用途: driver_crossmod 的**类符号**注入守卫。"本地已有定义"只应指本模块自己的定义:
+//   · ucSplitBar.ctl 的 `Public Property Get Folder()` 是本地成员 → 必须挡住
+//     `Class Folder` 注入。BASE 之所以正确纯属巧合: SymbolTable::define 在注册该成员时
+//     会把内建同名 ComClass 从裸键上删掉 (symbol_table.cpp 的 "用户符号覆盖内置符号"),
+//     裸键因此空出来, 名字级 lookupModule 便落到了 $pg 上的本地属性 → 判"已有定义"。
+//     裸名 `Folder` 在 ucSplitBar 里必须解析成**本类的同名属性**
+//     (`vb6_ucSplitBar_prop_get_Folder((void*)me)`), 一旦让 `Class Folder` 占了裸键,
+//     生成的就是静态调用 + Empty 接收者 → C2440 (无法从 vb6_VARIANT 转换为
+//     vb6_cls_Folder*)。
+//   · 而 View.cls 的 `Property Get View` 经注入铺到**消费**模块的是外部副本,
+//     它不能把 `Class View` 挡在门外 —— 否则这个类在任何模块里都不存在
+//     (--dump-symbols: `Class View` 0 次, 其它 14 个工程类各 1 次)。
+const Symbol* lookupOwnModuleSymbol(const SymbolTable& symTab, const std::string& name) {
+    if (!symTab.moduleScope()) return nullptr;
+    const std::string lower = Symbol::toLower(name);
+    static const char* const kSuffixes[] = { "", "$pg", "$pl", "$ps", "$ty" };
+    for (const char* suf : kSuffixes) {
+        auto it = symTab.moduleScope()->symbols().find(lower + suf);
+        if (it != symTab.moduleScope()->symbols().end() && it->second
+            && !it->second->isExternal) {
+            return it->second.get();
+        }
+    }
+    return nullptr;
+}
+
+}  // namespace
+
 
 bool Driver::runCrossModuleResolution() {
     if (modules_.size() != analyzers_.size()) return false;
@@ -131,6 +165,15 @@ bool Driver::runCrossModuleResolution() {
                 srcSym->kind == SymbolKind::PropertyLet ||
                 srcSym->kind == SymbolKind::PropertySet) {
                 localSym = symTab.lookupModuleByKind(srcSym->name, srcSym->kind);
+            } else if (srcSym->kind == SymbolKind::Class) {
+                // Fix <vbeclipse> rev17: 类符号的"本地已定义"判据只认**本模块自有的**
+                // 同名符号 (见 lookupOwnModuleSymbol 注释)。沿用 lookupModule 的名字级
+                // 查找会把**刚注入进来的外部成员副本**也当成"本地定义": View.cls 的
+                // `Property Get View` 一旦铺到某模块, 该模块的 `Class View` 就被判
+                // "已有定义"而 SKIP; 而铺又是全工程性的, 结果这个类在任何模块里都不存在。
+                // 同时保留内建 ComClass/ComInterface 占裸键这一档 —— ScrRun 的 coclass
+                // Folder 要被工程类 Folder 顶掉 (下面 replaceBuiltinComSym 分支)。
+                localSym = const_cast<Symbol*>(lookupOwnModuleSymbol(symTab, srcSym->name));
             } else {
                 localSym = symTab.lookupModule(srcSym->name);
             }

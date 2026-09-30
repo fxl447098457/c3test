@@ -783,6 +783,33 @@
                         argVal = "(&(" + ct092l + "){0})";
                     } else if (i < calleeParams.size()
                                && !calleeParams[i].isByVal && !calleeParams[i].isParamArray
+                               && calleeParams[i].type == Vb6Type::Variant
+                               && !cParamClassPtrType(calleeParams[i]).empty()) {                        // Fix <vbeclipse> (回归修复): `p.type == Variant` 有**两种**槽 ——
+                        // 真 Variant 槽, 和**工程类槽** (`Sub UseCircle(c As Circle)`:
+                        // resolveTypeOrDefault 把类名折成 Variant, 类名只留在 typeRefName,
+                        // 而类模块发的是 `vb6_cls_ShapeAct** c`)。后者不是 Variant 槽:
+                        // 落进下面的 092y default 分支会被装箱成 vb6_VARIANT*, 与形参
+                        // 声明的 vb6_cls_ShapeAct** ABI 不符 → 被调方 `c.Move 1` 拿
+                        // Variant 当类指针解引用 → 段错误 (实测 cc_act: 打印完 CC1:OK
+                        // 即 rc=139, 门 #112/#116 两条红)。
+                        // 判据用 cParamClassPtrType —— 它是"这个槽收不收类实例指针"的
+                        // **唯一**口径 (走 cTypeForDeclaredTypeName → mapTypeRef, 与类模块
+                        // 发定义那一份同一映射), ByVal 侧 Fix 091t 已在用; 这里补齐 ByRef 侧。
+                        //
+                        // Fix <vbeclipse> rev7: 交付方式与下游复合字面量路径的同名守卫**统一**
+                        // —— 都先落临时再取址。原来这里直接 `"&" + deliverToClassSlot(...)`,
+                        // 而 deliverToClassSlot 在实参是 Variant 值时会返回
+                        // `(vb6_cls_X*)vb6_ComObject_GetInstance(vb6_VariantToObjectVal(v))`
+                        // —— 那是**右值**, &(右值) = C2102。走落临时后两侧生成码同形。
+                        {
+                            const std::string clsSlot092r = cParamClassPtrType(calleeParams[i]);
+                            const std::string tmpCls092r = classSlotTempName(clsSlot092r, tempCounter_++);
+                            c_.addPending(clsSlot092r + " " + tmpCls092r + " = "
+                                          + deliverToClassSlot(clsSlot092r, argVal) + ";");
+                            argVal = "&" + tmpCls092r;
+                        }
+                    } else if (i < calleeParams.size()
+                               && !calleeParams[i].isByVal && !calleeParams[i].isParamArray
                                && calleeParams[i].type == Vb6Type::Variant) {
                         // Fix 092y: ByRef Variant 形参 + 简单标识符实参.
                         // C 签名为 vb6_VARIANT*, 直接 &(BSTR) 会把字符串当 Variant
@@ -1014,6 +1041,9 @@
                     // 字面量或复杂表达式: 使用C11复合字面量
                     // &(int32_t){10} 或 &(double){3.14}
                     std::string cType = "int32_t";
+                    // Fix <vbeclipse> rev7: 命中 ByRef 工程类槽 = 本实参已按"类指针的地址"
+                    // 交付完毕 (下面已落临时并 &temp), 后续所有装箱/复合字面量加工都必须跳过。
+                    bool isClassSlot092r = false;
                     if (i < calleeParams.size()) {
                         cType = mapType(calleeParams[i].type);
                         // Fix 092e: ByRef 数组形参 (如 cToolsUtf8.Decode(ByRef
@@ -1027,6 +1057,48 @@
                         if (isArrP092e && !calleeParams[i].isByVal
                             && !calleeParams[i].isParamArray) {
                             cType = "vb6_SafeArray1D**";
+                        }
+                        // Fix <vbeclipse> rev7: **ByRef 工程类形参 + 非左值实参** ——
+                        // 092e 数组守卫的对称 counterpart, 判据同一个口径
+                        // (cParamClassPtrType = "这个槽收不收类实例指针")。
+                        //
+                        // 为什么必须在这里再判一次: 上游 787 那个类槽分支只在
+                        // **isSimpleIdent**(实参是裸标识符) 时才有机会命中; 实参一旦是
+                        // 函数调用/属性读, 就落到本复合字面量路径, 而 mapType(Variant)
+                        // 给出的 "vb6_VARIANT" 会把它装成
+                        //   (&(vb6_VARIANT){.vt=VT_BSTR, .bstrVal=vb6_VariantToString(...)})
+                        // 送进本该收 vb6_cls_View** 的槽 → 被调方把 vb6_VARIANT* 当
+                        // 类指针解引用 → 堆损坏 (实测 vbeclipse ucPerspective.CreateFolder
+                        // → ucFolder.AddView: 触发 vb6_heapCorruptVEH, 崩点漂到
+                        // vb6_List_Item+0x23A, av read target=0x3c4000)。
+                        //
+                        // 口径对称性就是本条的判据纪律: 一个"ByRef + 类槽"的形参,
+                        // 无论实参是标识符还是表达式, 都不该走进 M22 装箱 switch。
+                        const std::string clsSlotP092r =
+                            (i < calleeParams.size() && !calleeParams[i].isByVal
+                             && !calleeParams[i].isParamArray)
+                                ? cParamClassPtrType(calleeParams[i]) : std::string();
+                        if (!clsSlotP092r.empty()) {
+                            // ByRef 类形参 = 传**类指针的地址**。实参是右值(函数调用等),
+                            // 不能直接 & —— 必须先落一个临时再取址, 否则 &(右值) C2102。
+                            // 落临时这一层与 Fix 161d 的 ByRef(As Any/UDT) 复杂右值同源。
+                            const std::string tmpCls092r = classSlotTempName(clsSlotP092r, tempCounter_++);
+                            c_.addPending(clsSlotP092r + " " + tmpCls092r + " = "
+                                          + deliverToClassSlot(clsSlotP092r, argVal) + ";");
+                            argVal = "&" + tmpCls092r;
+                            // ⚠ argVal 就位后必须让**下面整段** (Fix 120 → M22/090d → 收尾
+                            // `&(cType){argVal}`) 全部跳过, 否则它们会再包一层:
+                            //   (&(vb6_VARIANT){.vt=VT_BSTR, .bstrVal=&vb6_argtmp_...})
+                            // 或 (&(vb6_cls_View*){&vb6_argtmp_...}) —— 类指针的地址被当
+                            // BSTR 塞进 Variant, 或者把"地址"再取址一次。实测第一版只改
+                            // argVal 时就是 (&(vb6_VARIANT){...bstrVal=&vb6_argtmp_...})。
+                            //
+                            // 做法 = 把这一整段包进 if (!isClassSlot092r) —— 与数组槽 092e
+                            // 的处理方式同构 (它靠 cType 改成 vb6_SafeArray1D** 让所有
+                            // 分支自然落空; 这里类槽类型不含 "**" 后缀, 与任何既有
+                            // cType 都不重合, 所以只能显式短路)。
+                            isClassSlot092r = true;
+                            cType = clsSlotP092r;   // 供下方 090d 的 void* 判定等留个一致的读数
                         }
                     }
                     // Fix 120: ByRef 具体数值形参 ← 裸 COM 结果 (void* 承载 COM VARIANT*)
@@ -1052,7 +1124,11 @@
                         }
                     }
                     // M22: VARIANT类型需要指定字段初始化 (.vt=VT_xxx, .field=value)
-                    if (cType == "vb6_VARIANT") {
+                    // Fix <vbeclipse> rev7: `!isClassSlot092r` 是显式护栏 —— 理论上命中类槽时
+                    // cType 已被改成 vb6_cls_X*, 本 if 自然不成立; 但这里是"绝不能装箱"的
+                    // 语义关口, 不该只依赖 cType 的取值巧合 (类槽类型与任何既有 cType 都不
+                    // 重合, 可一旦将来新增某档 cType 恰好撞上, 就会静默回归成装 Variant)。
+                    if (cType == "vb6_VARIANT" && !isClassSlot092r) {
                         // 推断实参的VB6类型来决定VARIANT字段
                         Vb6Type argVbType = inferExprType(*node.positional[i]);
                         switch (argVbType) {
@@ -1124,7 +1200,10 @@
                         //     ...) (COM 属性 → vb6_VariantFromComResult(...) vb6_VARIANT).
                         bool argIsVariant090d = isDefinitelyVariantExpr(*node.positional[i]);
                         if (!argIsVariant090d) argIsVariant090d = cExprIsVariant(argVal);
-                        if (argIsVariant090d) {
+                        // Fix <vbeclipse> rev7: 类槽已交付 (&temp) —— 整段 Variant 提取
+                        // 跳过。cType 此时是 vb6_cls_X* / vb6_ivref_X*, 上面的 case 都不
+                        // 匹配, 但留显式护栏: 将来若给类指针加 case 也不会静默吃掉它。
+                        if (argIsVariant090d && !isClassSlot092r) {
                             if (cType == "double" || cType == "float") {
                                 argVal = "vb6_VariantToDouble(" + argVal + ")";
                             } else if (cType == "BSTR") {
@@ -1141,7 +1220,11 @@
                             }
                         }
                         // Fix 027b: 同样加外层括号防止预处理器把复合字面量 `{a, b}` 内的逗号算成宏实参分隔符.
-                        argVal = "(&(" + cType + "){" + argVal + "})";
+                        // Fix <vbeclipse> rev7: 类槽已交付 (&temp, 见上) —— 绝不能再包一层
+                        // (&(vb6_cls_View*){&temp}) : 那是"把地址的地址"当类指针传。
+                        if (!isClassSlot092r) {
+                            argVal = "(&(" + cType + "){" + argVal + "})";
+                        }
                     }
                     }
                 }

@@ -19,6 +19,34 @@ void CCodeGen::visit(SubDecl& node) {
     // ai/vb-asm-extension-spec: Asm 块过程 → x64 独立 MASM 过程 / x86 内联 __asm 块
     if (tryEmitAsmProc(node.name, node.access, node.params, nullptr, node.body, node.loc,
                        node.isNaked)) return;
+
+    // Fix <vbeclipse> rev17: WithEvents 事件处理器 (<控件>_<事件名>) 的形参一律按**事件
+    // ABI = ByVal** 发。事件是"跨对象边界"的回调, emitEventSink 早就立了这条规矩
+    // (`pi.isByVal = true` + typedef 用 mapTypeRef 的单指针), RaiseEvent 发送侧也照它发
+    // (`onXxx(handler, (*Editor))`) —— 唯独处理器的**定义**是从它自己的 VB 签名来的:
+    // `Sub ucPerspective1_OpenEditor(Editor As Object)` 里没写 ByVal ⇒ VB6 默认 ByRef
+    // ⇒ C 侧 `void** Editor`, 体里 `(*Editor)`。于是处理器把"对象指针"再解一层引用:
+    //   实证 play78: Editor.Caption 取到 NULL (av read 0x0)
+    //   @ _vb6_frmMain_ucPerspective1_OpenEditor+0x19。
+    // 这里直接把 AST 形参的 isByVal 置真, 签名与函数体**一起**跟着变 (两处都读它),
+    // 不改符号表也不动事件侧, 与 prelude 只发一次前向声明互相自洽。
+    if (ucEventHandlers_.count(Symbol::toLower(node.name)) > 0) {
+        for (auto& prm : node.params) {
+            if (prm && !prm->isParamArray) prm->isByVal = true;
+        }
+        // 体里的 `(*x)` 不是 AST 说了算: cgen_expr_ident_dispatch.inc 是读
+        // `currentProc_->params[i].isByVal` 来决定要不要解一层引用的。只翻 AST 会
+        // 得到"签名 void* Editor + 体里 (*Editor)" ⇒ C2100 非法的间接寻址
+        // (实测 frmMain.c:938/943/948 三条)。所以 proc 符号的形参表同翻。
+        // 该符号是模块作用域的; 事件处理器恒为 Private ⇒ 不进 getPublicSymbols /
+        // 不被跨模块注入, 改动只影响本模块。
+        if (auto* evtSym = symTab_.lookupModuleOverloadByLoc(node.name, node.loc)) {
+            for (auto& pi : evtSym->params) {
+                if (!pi.isParamArray) pi.isByVal = true;
+            }
+        }
+    }
+
     std::string sig = makeProcSignature(node);
 
     // Fix 055: Form事件处理函数不能为static, 因为wndproc用extern引用它们
@@ -122,6 +150,17 @@ void CCodeGen::visit(SubDecl& node) {
                 size_t pDot161f = simpleP.name.find('.');
                 if (pDot161f != std::string::npos)
                     pSym = lookupTypeSymbol(simpleP.name.substr(pDot161f + 1));
+            }
+            // Fix <vbeclipse> rev7: **工程类名表兜底** —— 与 mapTypeRef 的上移同根因。
+            // `ByRef View As View` (ucFolder.AddView) / `ByRef Folder As Folder`
+            // 这类**跨模块** .cls 形参在过程作用域查不到 (lookupTypeSymbol 只按本
+            // 模块+类型库), 下面的 if 链全落空 ⇒ 形参不进 knownClassVars_ ⇒
+            // 过程体内 `View.View` / `l_View.hWnd` 被当"模块限定符"或裸标识符
+            // ⇒ 生成 `vb6_View_prop_get_View.hWnd` (丢实参, C2224)。
+            // 三分支自带 pSym 守卫, 这里置的 knownClassVars_ 不会被后面覆盖。
+            if (!pSym || pSym->kind != SymbolKind::Class) {
+                const std::string projClsP092r = projectClassNameOf(simpleP.name);
+                if (!projClsP092r.empty()) knownClassVars_[pLower] = projClsP092r;
             }
             if (pSym && pSym->kind == SymbolKind::UserDefinedType) {
                 knownUdtVars_[pLower] = "vb6_type_" + cIdent(simpleP.name);

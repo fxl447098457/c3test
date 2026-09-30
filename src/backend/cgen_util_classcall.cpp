@@ -432,12 +432,33 @@ std::string CCodeGen::getClassMethodReturnType(const std::string& className,
                 bool retIsClass = false;
                 for (const auto& [rk, rs] : symTab_.moduleScope()->symbols()) {
                     if (rs->kind != SymbolKind::Class) continue;
-                    if (Symbol::toLower(rs->name) == Symbol::toLower(sym->variableTypeName)) {
+                    if (Symbol::toLower(rs->name) == Symbol::toLower(sym->variableTypeName)
+                        || (rs->isExternal
+                            && Symbol::toLower(rs->sourceModule)
+                                   == Symbol::toLower(sym->variableTypeName))) {
                         retIsClass = true;
                         break;
                     }
                 }
-                if (sym->type == Vb6Type::Object || retIsClass) {
+                // Fix <vbeclipse> rev7: 判据**收紧为 retIsClass**, 不再接受
+                // `type == Vb6Type::Object` 单独成立。
+                //
+                // 原因: `Property Get View() As Object` (View.cls:66) 的
+                // variableTypeName 就是 "Object" 且 type==Object ⇒ 旧条件成立 ⇒
+                // canonicalClassName("Object") 在作用域里查不到 Class 符号, 按源码
+                // 大小写**返回伪类名 "Object"**。下游 (inferClassTypeOfExpr
+                // MemberAccessExpr 分支) 拿到非空串就当类实例继续链式推 ⇒
+                // ucFolder.c 生成
+                //     vb6_ComPackBSTR(vb6_View_prop_get_View((*View))->Caption)
+                // 而 vb6_View_prop_get_View() 实际返回 void* (As Object) ⇒
+                // C2223/C2039 ×62 (ucFolder / ucSplitBar / modSubClass 全线)。
+                //
+                // 口径与下方 Phase B 的校验**完全一致**: 返回名必须在作用域内真的
+                // 解析为 Class 符号。`As Object` 是后期绑定, 链必须终止 → 交回 COM
+                // 路径 (下游 vb6_ComGetProp 拿 IDispatch 问 Caption/hWnd), 那才是
+                // VB6 的真实语义。type==Object 但 vtn 为空的注入残缺情形本来就
+                // 落到 Phase B, 行为不变。
+                if (retIsClass) {
                     // Fix 015 semantic_analyzer 已在该 Function 的 variableTypeName 记录返回类名
                     return canonicalClassName(sym->variableTypeName);
                 }
@@ -495,5 +516,61 @@ std::string CCodeGen::getClassMethodReturnType(const std::string& className,
         }
     }
     return "";
+}
+
+
+// Fix <vbeclipse> rev8: classMemberReturnsAsObject —— className 的 memberName 成员
+// 返回类型是不是 `As Object` (C 侧 void*, 语义 = IDispatch)。
+//
+// 判据两层, 与 getClassMethodReturnType 的收紧口径 (rev7) 同源:
+//  ① 类符号的 memberReturnTypes 里有该成员, 且归一化后是 Object/Variant/Empty/Null
+//  ② 该成员的 PropertyGet/Function 符号 type==Object 且 variableTypeName 解析不出
+//     Class 符号 (As Object 的 variableTypeName 就是 "Object")
+// 两层都要求"**不是**工程类" —— 真的返回工程类时走 vb6_cls_X* 原生路径。
+bool CCodeGen::classMemberReturnsAsObject(const std::string& className,
+                                          const std::string& memberName) const {
+    if (className.empty() || memberName.empty()) return false;
+    if (!symTab_.moduleScope()) return false;
+    const std::string memberLower = Symbol::toLower(memberName);
+    const std::string classLower  = Symbol::toLower(className);
+    auto isClassName = [this](const std::string& n) {
+        for (const auto& [k, s] : symTab_.moduleScope()->symbols()) {
+            if (s->kind != SymbolKind::Class) continue;
+            if (Symbol::toLower(s->name) == Symbol::toLower(n)
+                || (s->isExternal && Symbol::toLower(s->sourceModule) == Symbol::toLower(n)))
+                return true;
+        }
+        return false;
+    };
+    auto isObjectish = [](const std::string& n) {
+        const std::string l = Symbol::toLower(n);
+        return l == "object" || l == "variant" || l == "empty" || l == "null";
+    };
+    // ① 类符号的 memberReturnTypes
+    for (const auto& [ck, cs] : symTab_.moduleScope()->symbols()) {
+        if (cs->kind != SymbolKind::Class) continue;
+        const bool clsHit = cs->isExternal
+            ? (Symbol::toLower(cs->sourceModule) == classLower)
+            : (Symbol::toLower(cs->name) == classLower);
+        if (!clsHit) continue;
+        auto it = cs->memberReturnTypes.find(memberLower);
+        if (it != cs->memberReturnTypes.end() && isObjectish(it->second)) return true;
+        break;
+    }
+    // ② 成员符号本体
+    for (const auto& [k, s] : symTab_.moduleScope()->symbols()) {
+        if (s->lowerName != memberLower) continue;
+        const bool clsHit = s->isExternal
+            ? (Symbol::toLower(s->sourceModule) == classLower)
+            : (isClassModule_ && Symbol::toLower(moduleName_) == classLower);
+        if (!clsHit) continue;
+        if (s->kind != SymbolKind::PropertyGet && s->kind != SymbolKind::Function) continue;
+        if (s->type != Vb6Type::Object) continue;
+        if (!s->variableTypeName.empty() && !isObjectish(s->variableTypeName)
+            && isClassName(s->variableTypeName))
+            return false;               // 真的返回工程类 → 走原生路径
+        return true;
+    }
+    return false;
 }
 } // namespace vb6c3

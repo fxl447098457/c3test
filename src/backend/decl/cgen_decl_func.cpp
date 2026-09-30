@@ -118,6 +118,14 @@ void CCodeGen::visit(FunctionDecl& node) {
             if (pDot161f != std::string::npos) pLookup161f = pLookup161f.substr(pDot161f + 1);
             auto* pSym = lookupTypeSymbol(simpleP.name);
             if (!pSym && pLookup161f != simpleP.name) pSym = lookupTypeSymbol(pLookup161f);
+            // Fix <vbeclipse> rev7: 工程类名表兜底 —— 同 cgen_decl_proc.cpp 同款。
+            // `ByRef View As View` / `ByRef Folder As Folder` 是跨模块 .cls 形参,
+            // 本过程作用域查不到 ⇒ 形参不进 knownClassVars_ ⇒ 过程体内成员访问
+            // 走"模块限定"路径丢实参 (C2224)。
+            if (!pSym || pSym->kind != SymbolKind::Class) {
+                const std::string projClsP092r = projectClassNameOf(simpleP.name);
+                if (!projClsP092r.empty()) knownClassVars_[pLower] = projClsP092r;
+            }
             if (pSym && pSym->kind == SymbolKind::UserDefinedType) {
                 knownUdtVars_[pLower] = "vb6_type_" + cIdent(simpleP.name);
             } else if (pSym && pSym->kind == SymbolKind::Class) {

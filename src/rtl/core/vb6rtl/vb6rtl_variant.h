@@ -33,7 +33,10 @@ typedef enum vb6_vartype {
 
 
 typedef struct vb6_VARIANT {
-    vb6_vartype vt;
+    uint16_t vt;          /* VARTYPE — 必须与 Windows VARIANT 同宽 (2字节) */
+    uint16_t wReserved1;
+    uint16_t wReserved2;
+    uint16_t wReserved3;
     union {
         int16_t iVal;
         int32_t lVal;
@@ -46,11 +49,35 @@ typedef struct vb6_VARIANT {
         int64_t cyVal;
         int64_t llVal;  /* Fix 133x: VT_I8 (LongPtr 64位指针/句柄) 存回用 */
         struct vb6_SafeArray1D* parray;  /* P20-37: array pointer for GetAllSettings etc */
+        /* Fix <vbeclipse> rev11: **与 Windows VARIANT 完全同布局**。
+         * VB6/OLE 的 VARIANT 在 x86 = 16 字节 (2B vt + 6B 保留 + 8B union),
+         * x64 = 24 字节 (8B 头 + 16B union, DECIMAL 在 union 内内联)。
+         * 原先这里无条件放 16 字节的内联 decVal ⇒ x86 的 vb6_VARIANT 膨胀到
+         * 24 字节, 与 SDK VARIANT(x86=16) 差 8 字节。任何把 vb6_VARIANT* 当
+         * OLE VARIANT* 与 COM 互传 (IDispatch::Invoke 的 pVarResult /
+         * DISPPARAMS.rgvarg) 的路径即**越界写堆** → 堆损坏 → 崩溃点漂移、
+         * av target 随机 (实测 19MB/7.6MB 级)。
+         * MS 的做法: 仅 x64 在 union 内联 DECIMAL(16B), x86 用 DECIMAL*
+         * pdecVal(4B) —— 此处照抄同一条件编译, 令 sizeof 逐平台对齐。 */
+        DECIMAL* pdecVal;   /* x86: DECIMAL 以指针形式参与 */
+#ifdef _WIN64
         struct { uint16_t wReserved1; uint8_t scale; uint8_t sign; uint32_t Hi32; uint32_t Lo32; uint32_t Mid32; } decVal;
+#endif
     };
 } vb6_VARIANT;
 
 #undef vb6_VARIANT  /* 取消Windows vb6_VARIANT, 使用VB6简化版 */
+
+/* Fix <vbeclipse> rev11 配套: DECIMAL 访问统一宏。
+ * x64: decVal 内联在 union 里, 直接成员访问。
+ * x86: union 保持 8 字节 (对齐 OLE VARIANT), decVal 只能以 DECIMAL* pdecVal
+ *      指针形式存在 —— 使用前必须已分配 (见 vb6_CDec / vb6_VariantFromComResult),
+ *      vb6_VariantClear 负责释放。 */
+#ifdef _WIN64
+  #define vb6_VARIANT_DECVAL(v) ((v).decVal)
+#else
+  #define vb6_VARIANT_DECVAL(v) (*(v).pdecVal)
+#endif
 
 // Variant构造
 static inline vb6_VARIANT vb6_VariantEmpty(void) {
@@ -256,6 +283,15 @@ void* vb6_VariantToObjectVal(vb6_VARIANT v);
 void vb6_VariantClear(vb6_VARIANT* v);
 // P8.4: Variant深拷贝(复制BSTR)
 void vb6_VariantCopy(vb6_VARIANT* dst, const vb6_VARIANT* src);
+// Fix <vbeclipse> rev16: Variant **槽位赋值**(接管语义) —— 先释放 dst 旧内容, 再把
+// src 的值**深拷贝**进去 (BSTR 另分配一只 / Dispatch AddRef / x86 DECIMAL 另分配)。
+// 动机: Variant 数组元素赋值原先发的是 `slot = vb6_VariantFromValue((*Item))`, 而
+// vb6_VariantFromValue 对 vb6_VARIANT 是 identity **浅拷贝** ⇒ 槽与调用方实参共用
+// 同一只 BSTR。调用方 (ByRef Variant 形参的宿主) 下一次 vb6_VariantClear(&v) 就把它
+// free 掉, 后续同尺寸分配复用该地址 ⇒ 每个槽都读出"最后一次写入的值"。
+// 实测 tests/ve_list (工程内 List.cls 形态): idx=0/1/2 全答 "Gamma";
+// 真工程 play78: Folder.Views.Item(0) 取回 1 字符垃圾 → m_Views.Item(<垃圾>) 落空。
+void vb6_VariantAssign(vb6_VARIANT* dst, vb6_VARIANT src);
 
 #ifdef __cplusplus
 }

@@ -1,4 +1,65 @@
 // c3rtl.rc - RTL runtime library embedded as resources
+// Fix <vbeclipse> rev18: 宿主模型认 **UserControl 实例指针** + 自有属性按名桥 + 真 Move。
+//   ① 三处分派入口 (uc_hostmodel_{call,getprop,setprop}.inc) 加
+//      `void* h=vb6_UC_HwndOf(obj); if(h) obj=h;` 归一 —— 晚绑定调用点
+//      (`Dim x As Variant: Set x = Controls.Item(id)`) 传的是原生 vb6_cls_X*,
+//      而整条内建成员链与"三条都不匹配就 return 0"的闸门只认 HWND ⇒ 以前对 UC 实例的
+//      **每一个** 晚绑定成员调用/属性读写都被静默丢弃。
+//   ② vb6_UserControlDesc 追加 props/propCount; cgen 为每个 .ctl 发一张
+//      {名字, get, set} 表 (vb6_UcPropDesc) 覆盖可安全装箱的标量属性, 宿主模型在
+//      内建成员未命中时查它 (ucFolder.LeftPos/TopPos/RightPos/BottomPos 这一档)。
+//   ③ `Move` 原先与 ZOrder/Print/Line 一起被当空实现丢掉 —— 而停靠布局完全靠它:
+//      ucPerspective.Refresh 的 `l_ucFolder.Move .LeftPos, .TopPos, …`。现走
+//      vb6_ControlMove (缇→像素 + 子窗坐标), 并补 Show/Hide。
+//   修前 play78: 7 个 ucFolder 宿主全停在设计期 569x441、重叠在左上角。
+// Fix <vbeclipse> rev16: Variant **槽位赋值**改"接管"语义 —— 新增
+// vb6_VariantAssign(dst, src) = vb6_VariantClear(dst) + vb6_VariantCopy(dst,&src)
+// (BSTR 另分配 / Dispatch AddRef / x86 DECIMAL 另分配)。
+// 修前: Variant 数组元素赋值发的是 `slot = vb6_VariantFromValue((*Item))`,
+// 而 vb6_VariantFromValue 对 vb6_VARIANT 走 _Generic 的 vb6_VariantIdentity
+// —— 纯结构体**浅拷贝** ⇒ 槽与调用方实参共用同一只 BSTR。调用方下次
+// vb6_VariantClear(&v) 就把它 free 掉, 同尺寸分配再复用该地址 ⇒ 每个槽都读出
+// "最后一次写入的值"。后端三处改发 vb6_VariantAssign:
+//   cgen_assign_value_sem.inc  (targetIsVariant 且目标是 VB6_SA_*(vb6_VARIANT,…))
+//   cgen_setlet_set_rhs.inc    (Set <Variant 数组元素> = x, 原先连 Clear 都没有)
+//   RTL vb6_VariantArraySet    (vb6_VariantArrayGet(&arr,i) = x 路径)
+// 实测 tests/ve_list: 修前 idx=0/1/2 全答 "Gamma"; 修后 Alpha/Beta/Gamma。
+// 真工程 play78: 修前 Folder.Views.Item(0) 取回 1 字符垃圾 → NULL 解引用,
+// 崩在 _vb6_ucFolder_AddView+0x46 (me=NULL, av read 0x4)。
+// Fix <vbeclipse> rev14: 实现 UserControl.Controls 集合 —— 新增进程级单例
+// vb6_UC_Controls() (uc_controls.c) 并让 ucForm 回落到当前 UC 实例宿主窗口;
+// Host_Call 补 Add/Item(BSTR|序号)/Remove/Count; Host_ToWinVariant 补 vtDispatch
+// 分支 (缺它则 Item 取回的对象变体落 VT_EMPTY); vb6_ComObject_GetInstance 对
+// UC 宿主 HWND 回落 vb6_UC_InstanceOf。后端把手写死的 vb6_UserControl_Controls
+// (恒 NULL 空桩) 改发 vb6_UC_Controls(); 并在各 .ctl 模块 init 里自注册宿主描述
+// (否则运行期 Controls.Add 的动态类型从未注册 → 建不出实例 → NULL 解引用)。
+// 修前 play78 崩在 _vb6_ucFolder_AddView+0x46 (me=NULL, av read 0x4)。
+// Fix <vbeclipse> rev12: vb6_VariantToObjectVal / vb6_ComObject_GetInstance 加
+// C3_IV_TRACE=1 门控追踪 —— 定位 List.Item 返回的包装器指针真伪。
+// Fix <vbeclipse> rev11: vb6_VARIANT 与 Windows VARIANT 逐平台对齐 —— vt 改 2 字节
+// (VARTYPE) + wReserved1/2/3, decVal 仅 x64 内联 (x86 改用 DECIMAL* pdecVal),
+// 使 sizeof 在 x86=16 / x64=24, 与 OLE VARIANT 一致 (原先 x86 膨胀到 24, 与 COM
+// 互传 VARIANT* 即越界写堆 → 堆损坏)。(vb6rtl_variant.h)
+// Fix <vbeclipse> rev10: uc_host_window.c 的 WM_DESTROY 加 C3_UC_TRACE 门控的
+// hwnd/me 打印 —— 定位 UserControl_Terminate 是否提前跑 (它会清 m_Perspectives)。
+// vb6_StrComp 加 C3_STRCMP_TRACE=1 门控的双串内容/长度打印 (vb6rtl_string.c)。
+// Fix <vbeclipse> rev8: 新增 vb6_VariantFromUdtBytes(src, nBytes) (vb6rtl_array.h
+// inline) + vb6_ComPackUdt(x) 宏 (vb6rtl_class_com.h) —— UDT 结构体实参传给晚绑定
+// COM 方法的编组: SAFEARRAY(VT_UI1) 字节**深拷贝**快照 (VB6 的 ByVal UDT 值语义)。
+// 缺它时 comPackExpr 落 vb6_ComPackInt(<struct>) → C2440 "无法从 vb6_type_RECT 转换
+// 为 int32_t" (ucSplitBar.ctl:149 `.SplitterMouseDown hWnd, m_Rect, x, y`)。
+// 函数刻意放 array.h 而非 variant.h: 伞头里 array.h 排在 variant.h 之后, 只有那里
+// 才看得见 vb6_SafeArrayCreate1D / vb6_SafeArray1D。
+// Fix <vbeclipse> rev4: vb6_UBound 加 C3_SA_TRACE=1 门控的数组状态打印 (sig/elemType/
+// elemSize/lBound/uBound/count/data) —— 定位"arr 非 NULL 但 data==NULL"这类坏状态。
+// Fix <vbeclipse> rev3: 新增 vb6_SafeArrayReDimPreserve1D_T(elemType, arr, lo, hi) ——
+// 元素**步长**与 elemType 由 codegen 权威给出 (mapSaElemType), 运行时不再猜。
+// 旧三参入口在 arr==NULL 时只能按 vb6_sa_variant 兜底 ⇒ `Dim m_Keys() As String`
+// 首次 ReDim 按 16/24 字节步长分配, 而 codegen 发的 VB6_SA_AT(BSTR,…) 按 4 字节
+// 步进, 槽里压着别的 BSTR; 销毁时 vb6_SafeArrayDestroy1D 又按 elemType==variant
+// 走 Variant 分支二次 free → 堆损坏、崩点漂移。实测 play78.exe 崩在
+// List.Contains 的 `For i = 0 To UBound(m_Keys)` (vb6rtl_array.c/.h,
+// cgen_redim.cpp 全部 1D ReDim Preserve 发点)。
 // Fix <vbeclipse>: vb6_SafeArrayReDimPreserve1D 的 arr==NULL 分支不再回落
 // vb6_sa_empty(=elemType 0 → 4 字节), 改用 vb6_sa_variant (元素最大) —— 否则
 // "首次 ReDim 一个 Variant 数组" 会按 4 字节/元素分配, 存 16 字节 Variant 时

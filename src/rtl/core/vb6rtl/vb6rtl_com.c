@@ -208,7 +208,17 @@ vb6_VARIANT vb6_VariantFromComResult(void* variant_ptr) {
         case VT_UI1:    result.bVal = pv->bVal; break;
         case VT_ERROR:  result.lVal = pv->scode; break;
         case VT_DECIMAL:
+#ifdef _WIN64
             memcpy(&result.decVal, &pv->decVal, sizeof(result.decVal));
+#else
+            /* Fix <vbeclipse> rev11: x86 的 OLE VARIANT union 只 8 字节, DECIMAL 在
+             * 外部由 pdecVal 指向 (vb6_VARIANT 现同布局); 深拷贝到自持缓冲,
+             * 由 vb6_VariantClear 释放。 */
+            if (pv->pdecVal) {
+                result.pdecVal = (DECIMAL*)CoTaskMemAlloc(sizeof(DECIMAL));
+                if (result.pdecVal) memcpy(result.pdecVal, pv->pdecVal, sizeof(DECIMAL));
+            }
+#endif
             break;
         default:
             // P24-02: VT_ARRAY - 将Windows SAFEARRAY转换为vb6_SafeArray1D
@@ -324,7 +334,17 @@ vb6_VARIANT vb6_VariantFromStackVARIANT(VARIANT* pv) {
         case VT_UI1:    result.bVal = pv->bVal; break;
         case VT_ERROR:  result.lVal = pv->scode; break;
         case VT_DECIMAL:
+#ifdef _WIN64
             memcpy(&result.decVal, &pv->decVal, sizeof(result.decVal));
+#else
+            /* Fix <vbeclipse> rev11: x86 的 OLE VARIANT union 只 8 字节, DECIMAL 在
+             * 外部由 pdecVal 指向 (vb6_VARIANT 现同布局); 深拷贝到自持缓冲,
+             * 由 vb6_VariantClear 释放。 */
+            if (pv->pdecVal) {
+                result.pdecVal = (DECIMAL*)CoTaskMemAlloc(sizeof(DECIMAL));
+                if (result.pdecVal) memcpy(result.pdecVal, pv->pdecVal, sizeof(DECIMAL));
+            }
+#endif
             break;
         case VT_ARRAY|VT_BSTR:
         case VT_ARRAY|VT_VARIANT:
@@ -509,8 +529,10 @@ void vb6_VariantArraySet(vb6_VARIANT* v, int32_t index, vb6_VARIANT val) {
     int32_t off = index - arr->lBound;
     if (arr->elemType == vb6_sa_variant) {
         vb6_VARIANT* slot = &((vb6_VARIANT*)arr->data)[off];
-        vb6_VariantClear(slot);
-        *slot = val;
+        /* Fix <vbeclipse> rev16: 原先 `vb6_VariantClear(slot); *slot = val;` 是
+           Clear + **浅拷贝** —— val 若是从别处借来的 Variant (ByRef 实参/数组元素),
+           槽就与它共用同一只 BSTR, 宿主一 Clear 槽即悬垂。改走"接管"语义。 */
+        vb6_VariantAssign(slot, val);
     }
     /* 对于非Variant数组, 赋值时需要按目标类型转换(简化: 仅Variant数组支持赋值) */
 }

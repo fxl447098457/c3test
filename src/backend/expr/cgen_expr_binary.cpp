@@ -279,6 +279,23 @@ void CCodeGen::visit(BinaryExpr& node) {
     // 普通对象/指针 Is (void* <=> NULL) 不满足 varLike, 保持原样, 不受影响.
     if (node.op == BinaryOp::Is) {
         auto varLike158n = [&](const std::string& c, Expr* ast) -> bool {
+            // Fix <vbeclipse> rev6: `Property Get Foo() As <工程类>` 的返回变量
+            // (**vb6_cls_X\* 类型**) 不是 Variant, 尽管 cExprIsVariant /
+            // isDefinitelyVariantExpr 都会说它是 —— 因为 resolveTypeOrDefault 把
+            // `As <类名>` 折成了 Variant (类名只留在 typeRefName, 见 MEMORY)。
+            // 后果: `If ActivePerspective Is Nothing` 生成
+            //   vb6_IsNothing(vb6_VariantToObject(&vb6_ret_ActivePerspective))
+            // 把裸类指针当 vb6_VARIANT* 读 → vt 字段是指针低 2 字节 (非 0) →
+            // 返回 NULL → IsNothing 判**真** → 抛 "No active perspective!"
+            // (实测 play78.exe: ucPerspective.ctl 的 Property Get ActivePerspective)。
+            // currentReturnCType_ 是权威 (发定义那侧用它)。
+            std::string ct158n = c;
+            while (ct158n.size() >= 2 && ct158n.front() == '(' && ct158n.back() == ')')
+                ct158n = ct158n.substr(1, ct158n.size() - 2);
+            if (!currentReturnVar_.empty() && ct158n == currentReturnVar_
+                && currentReturnCType_.compare(0, 8, "vb6_cls_") == 0) {
+                return false;
+            }
             if (cExprIsVariant(c)) return true;
             if (!ast) return false;
             if (ast->kind == ASTNodeKind::IdentifierExpr) {

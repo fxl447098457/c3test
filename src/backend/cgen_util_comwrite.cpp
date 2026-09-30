@@ -280,6 +280,69 @@ bool CCodeGen::tryRewriteCOMLvalue(const std::string& target, const std::string&
                                                     parens.second - parens.first - 1);
                 std::string newVerbs = (matchedVerb != "prop_get_") ? matchedVerb
                                       : (isSet ? "prop_set_" : "prop_let_");
+                // Fix <vbeclipse> rev9: **Property Set 的值槽是 ByRef 对象/类形参**
+                // (C 侧 `void**` / `vb6_cls_X**`) 时, 值实参必须交付**槽地址**,
+                // 不能交付对象指针本身。
+                //
+                // 根因: 定义侧 (makeParamCType) 对 `!isByVal` 一律加 `*`, 于是
+                //   View.cls:77  Public Property Set View(ByRef NewView As Object)
+                //     → void vb6_View_prop_set_View(vb6_cls_View* me, void** NewView)
+                //     → 函数体 `Set m_View = NewView` 落成 me->m_View = (*NewView)
+                //   ucPerspective.ctl:1398  Public Sub AddView(ByVal ViewId As String,
+                //                                        ByRef View As Object)
+                //     → void vb6_ucPerspective_AddView(..., void** View)
+                // 而 Pattern C/D2 是**字符串级**改写: 它把 RHS 的 C 文本原样拼上去。
+                // RHS 标识符 `View` 在 AddView 体内 emitExpr 出的是右值 `(*View)`
+                // (读那个 ByRef 槽里的对象指针), 于是拼成
+                //     vb6_View_prop_set_View(_vb6_with_32, (*View));
+                // 被调方再解一层 → 拿**对象指针**当槽地址去读 → av read target=0x0
+                // (x86 实测: `mov edx,[ecx]` / ecx=0), 崩在 Form_Load 里,
+                // 整个 IDE 起不来。x64 上同一处更早地变成栈溢出/跳飞 (Long 存指针
+                // + 手搓机器码的 MagneticWnd 把它放大成 24 帧重复的垃圾栈)。
+                //
+                // 为什么不能像 Let 那样"看着像右值就包": 判据必须落在**被调方槽的
+                // C 类型**上 (makeParamCType 的 `!isByVal → +*`), 与改写目标是不是
+                // prop_let_ 无关 —— `Property Set Icon(ByVal NewIcon As Picture)`
+                // (cgen_setlet_set_prop.inc Fix 166 同款) 的槽是单指针, 包了就是
+                // 传"指针的指针", 反而坏。
+                //
+                // 与 cgen_setlet_set_prop.inc:301-342 (Set Property 路径) 同款包装:
+                // 那条路径早就包了 `&(void*){...}`, 只有本条 (With 块内 ClassInstance
+                // 成员经 prop_get_ 改写) 漏了, 于是同一工程两种写法产出两种码。
+                bool wrapSetSlotAddr9 = false;
+                if (isSet && prefix.rfind("vb6_", 0) == 0 && !afterPg.empty()
+                    && afterPg.find('(') == std::string::npos) {
+                    std::string clsRev9 = prefix.substr(4);   // 去 "vb6_" → "cXx_"
+                    if (!clsRev9.empty() && clsRev9.back() == '_') clsRev9.pop_back();
+                    std::vector<ParameterInfo> setSigRev9;
+                    if (!clsRev9.empty()
+                        && findClassMemberWriteParams(clsRev9, afterPg, /*isSet=*/true,
+                                                       setSigRev9)
+                        && !setSigRev9.empty()) {
+                        const ParameterInfo& valP9 = setSigRev9.back();
+                        // 槽的 C 类型 = mapTypeRef(asType) (+'*' 当 !isByVal, 见
+                        // makeParamCType)。只有"对象/类指针的指针"才要槽地址; 标量
+                        // ByRef (int32_t* / BSTR*) 与 ByVal 对象 (单指针) 都不在此列。
+                        // 走 mapTypeRef 而不是手列类型名 —— 定义侧也是它, 两边不会
+                        // 各说一套 (同 cParamClassPtrType 的设计理由)。
+                        const std::string vt9 =
+                            cTypeForDeclaredTypeName(valP9.typeRefName);
+                        const bool isObjPtrSlot9 =
+                            !valP9.isByVal
+                            && (vt9 == "void*" || vt9.compare(0, 8, "vb6_cls_") == 0
+                                || vt9.compare(0, 10, "vb6_ivref_") == 0
+                                || vt9.compare(0, 13, "vb6_ComIface_") == 0);
+                        if (isObjPtrSlot9) {
+                            // RHS 已是槽地址 (&x) / 复合字面量 (&(T){..}) / ComPack
+                            // 结果 / NULL ⇒ 原样交付, 别套第二层。
+                            const bool alreadyAddr9 =
+                                value.empty() || value == "NULL" || value == "0"
+                                || (value[0] == '&')
+                                || value.find("vb6_ComPack") != std::string::npos;
+                            if (!alreadyAddr9) wrapSetSlotAddr9 = true;
+                        }
+                    }
+                }
                 // Fix 090w: Property Let 末参 As Variant (cJson.Item Dat As Variant
                 // ByRef / cCsv.Value ByVal Dat As Variant / cHttpServerCookieAttr.Expires
                 // Let(v As Variant) — Get 无参) — 值实参 (vb6_Now() double / 666 int /
@@ -289,7 +352,8 @@ bool CCodeGen::tryRewriteCOMLvalue(const std::string& target, const std::string&
                 // findClassMemberCallParams 按 Get > Function > Sub > Let > Set 优先,
                 // 对 Get 有参/无参而 Let 末参才是 value 的属性 (Item(key),
                 // Expires) 会取错方向, 故直接查 PropertyLet/PropertySet 符号.
-                std::string valArg = value;
+                std::string valArg = wrapSetSlotAddr9 ? ("&(void*){" + value + "}")
+                                                      : value;
                 // Fix 159-A: 保存 Property Let 的**写方向**形参表, 供拼接值实参时
                 // 定位 Value 的真实槽位 (见本函数尾部 newCall 构造).
                 std::vector<ParameterInfo> letSig159;

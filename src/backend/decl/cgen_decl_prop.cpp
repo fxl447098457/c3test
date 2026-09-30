@@ -118,6 +118,11 @@ void CCodeGen::visit(PropertyDecl& node) {
                 if (pDot161f != std::string::npos)
                     pSym = lookupTypeSymbol(simpleP.name.substr(pDot161f + 1));
             }
+            // Fix <vbeclipse> rev7: 工程类名表兜底 —— 同 cgen_decl_proc.cpp 同款。
+            if (!pSym || pSym->kind != SymbolKind::Class) {
+                const std::string projClsP092r = projectClassNameOf(simpleP.name);
+                if (!projClsP092r.empty()) knownClassVars_[pLower] = projClsP092r;
+            }
             if (pSym && pSym->kind == SymbolKind::UserDefinedType) {
                 knownUdtVars_[pLower] = "vb6_type_" + cIdent(simpleP.name);
             } else if (pSym && pSym->kind == SymbolKind::Class) {
