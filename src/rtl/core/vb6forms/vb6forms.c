@@ -988,8 +988,9 @@ static void vb6_installCrashTrace(void) {
 //      这条口径与账 #157 同族。
 //   C. 容器（带 `WS_EX_CONTROLPARENT` 的那几型）自己不进站，但走到它那一格就**就地**展开它的孩子，
 //      容器嵌容器同一条规则。
-// VK_TAB 之外的（方向键、Alt 助记、Enter 默认按钮）这一格**还**留给 `IsDialogMessage` ——
-// 组内方向键按 TabIndex 走是账 #168 剩下的那一半（实测 `AK-pre=optA / down=cmdTop1`），下一步单独接。
+// 接管三种键：VK_TAB / Shift+VK_TAB 走上面那三条口径；单选组里的 VK_UP / VK_DOWN 走
+// `vb6_TabNavRadioRun`（账 #168：按 `TabIndex` 走 + 到尾回绕）。其余键 —— 非单选控件的方向键、
+// Alt 助记、Enter 默认按钮 —— 照旧留给 `IsDialogMessage`，爆炸半径只管这些。
 // 开关：`C3_OCX_NO_TABNAV=1` 退回"完全交给 IsDialogMessage"的旧行为，做 A/B 用（与
 // `C3_OCX_NO_DLGMSG` 同一个路子，否则红的时候分不出是导航器坏还是泵坏）。
 // ============================================================
@@ -1026,29 +1027,74 @@ static int vb6_tabIndexOf(HWND hwnd) {
     return p ? (int)(INT_PTR)p : 0;
 }
 
+/* 同一父窗里按 `TabIndex` 稳定排序（同值保持 z-order）—— 采集器与单选组共用这一处。 */
+static void vb6_tabSortByIndex(HWND *arr, int n) {
+    /* ⚠ 基准值必须**存进局部变量**：第一版留的是下标（`moved = i`），而 j = i-1 那一步
+       `arr[i] = arr[i-1]` 正好把基准值本身覆盖掉 ⇒ 排出来的表又乱又短，跳格走两站就停。
+       插入排序的这一步是它的经典陷阱，别用下标代替值。 */
+    int i, j;
+    HWND tmp;
+    for (i = 1; i < n; i++) {
+        tmp = arr[i];
+        j = i - 1;
+        while (j >= 0 && vb6_tabIndexOf(arr[j]) > vb6_tabIndexOf(tmp)) {
+            arr[j + 1] = arr[j];
+            j--;
+        }
+        arr[j + 1] = tmp;
+    }
+}
+
+/* 账 #168：单选组内的方向键（VK_UP / VK_DOWN）。
+   OS 自己**会**在组内走，但两张表都不是 VB6 那一张 ——
+     ① 它按 z-order 走（探针 `checkHEAD+ARROW`：链首 A 发 VK_DOWN 到 B）；
+     ② 走到链尾就**跳出容器**（探针 `checkTAIL+ARROW` 读 `SEQ=B,T1,T2,A,B,...`，
+        与产品 `AK-pre=optA / down=cmdTop1` 逐字对上 —— 产品里 optB 先创建、optA 是链尾）。
+   VB6 的口径 = 同容器、同型单选钮按 `TabIndex` 走，到尾回绕。
+   改勾选不自己动手：给目标发 `BM_CLICK`（winuser.h:11348）—— 一发同时拿到
+   「单选组自动取消别人」与 `BN_CLICKED`（= VB6 里用户改选项时那声 `_Click`）。
+   判据把 optA / optB 两个 Value 一起读，钉的就是这一条：两边都 Y = 没人被自动取消。
+   常量只用 SDK 符号名（BS_TYPEMASK=0x0F、BS_AUTORADIOBUTTON=0x09，winuser.h:11303/11300），
+   不手抄数字 —— 上一格把 WS_EX_CONTROLPARENT 抄成 WS_EX_APPWINDOW 就是这一课。 */
+static int vb6_tabIsRadio(HWND hwnd) {
+    return (GetWindowLongW(hwnd, GWL_STYLE) & BS_TYPEMASK) == BS_AUTORADIOBUTTON;
+}
+
+static int vb6_TabNavRadioRun(HWND cur, int down) {
+    HWND parent, h, grp[VB6_TAB_MAX];
+    int n = 0, i, at = -1, nxt;
+    if (!cur || !vb6_tabIsRadio(cur)) return 0;
+    parent = GetParent(cur);
+    if (!parent) return 0;
+    for (h = GetWindow(parent, GW_CHILD); h != NULL; h = GetWindow(h, GW_HWNDNEXT)) {
+        if (n >= VB6_TAB_MAX) break;
+        if (!vb6_tabIsRadio(h)) continue;
+        if (!IsWindowVisible(h) || !IsWindowEnabled(h)) continue;
+        grp[n++] = h;
+    }
+    vb6_tabSortByIndex(grp, n);
+    for (i = 0; i < n; i++) { if (grp[i] == cur) { at = i; break; } }
+    if (at < 0) return 0;
+    if (n == 1) return 1;   /* 组里只有这一枚：VB6 也是原地不动，但这声不能漏给 OS（它会跳出组走下一站） */
+    nxt = (at + (down ? 1 : -1) + n) % n;
+    SetFocus(grp[nxt]);
+    SendMessageW(grp[nxt], BM_CLICK, 0, 0);
+    return 1;
+}
+
 /* 把 parent 这一层（含容器里的孩子）按上面那三条口径依次收集进 out。 */
 static void vb6_tabCollect(HWND parent, HWND *out, int *n, int depth) {
     HWND kid[VB6_TAB_MAX];
-    int order[VB6_TAB_MAX];
-    int nk = 0, i, j, moved;
+    int nk = 0, i;
     HWND h;
     if (*n >= VB6_TAB_MAX || depth > 8) return;
     for (h = GetWindow(parent, GW_CHILD); h != NULL; h = GetWindow(h, GW_HWNDNEXT)) {
         if (nk >= VB6_TAB_MAX) break;
         kid[nk++] = h;
     }
-    for (i = 0; i < nk; i++) order[i] = i;
-    for (i = 1; i < nk; i++) {          /* 稳定插入排序 */
-        moved = order[i];
-        j = i - 1;
-        while (j >= 0 && vb6_tabIndexOf(kid[order[j]]) > vb6_tabIndexOf(kid[moved])) {
-            order[j + 1] = order[j];
-            j--;
-        }
-        order[j + 1] = moved;
-    }
+    vb6_tabSortByIndex(kid, nk);   /* 同值保持 z-order */
     for (i = 0; i < nk; i++) {
-        h = kid[order[i]];
+        h = kid[i];
         if (GetEnvironmentVariableW(L"C3_TABNAV_TRACE", NULL, 0) > 0) {
             fprintf(stderr, "  [collect d=%d] hwnd=%p style=%lx ex=%lx focus=%d cont=%d\n", depth, (void*)h,
                     (unsigned long)GetWindowLongW(h, GWL_STYLE),
@@ -1093,13 +1139,18 @@ int vb6_Form_MoveTabFocus(void* hwndForm, int forward) {
 /* 返回 1 = 这条按键已被接管，调用方不要再把它交给 IsDialogMessage / 不要再派发。 */
 static int vb6_TabNavKey(const MSG *msg) {
     HWND focus, root;
-    int fwd;
-    if (msg->message != WM_KEYDOWN || (int)msg->wParam != VK_TAB) return 0;
+    int vk;
+    if (msg->message != WM_KEYDOWN) return 0;
+    vk = (int)msg->wParam;
+    if (vk != VK_TAB && vk != VK_UP && vk != VK_DOWN) return 0;
     focus = GetFocus();
     root = GetAncestor(focus ? focus : msg->hwnd, GA_ROOT);
     if (!vb6_tabIsFormWindow(root)) return 0;
-    fwd = (GetKeyState(VK_SHIFT) & 0x8000) == 0;
-    return vb6_Form_MoveTabFocus(root, fwd);
+    if (vk == VK_UP || vk == VK_DOWN) {
+        /* 只管单选组；列表框、滚动条那一族的方向键照旧交给 IsDialogMessage。 */
+        return focus ? vb6_TabNavRadioRun(focus, vk == VK_DOWN) : 0;
+    }
+    return vb6_Form_MoveTabFocus(root, (GetKeyState(VK_SHIFT) & 0x8000) == 0);
 }
 
 // ============================================================

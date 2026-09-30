@@ -1757,15 +1757,20 @@ if ($Category -in @("all", "run", "vbp")) {
     #   自己挪到勾选那枚上造成的（探针 `.build/cp2` 八份读数），导航器改读创建时存的 `VB6_TabStop`。
     #   两条负控各红各的针（本地实测）：`C3_OCX_NO_TABNAV=1` ⇒ `TW-order` 退回
     #   `cmdIn1,cmdTop2,optA,cmdTop1,cmdInPic,cmdDeep,cmdIn2` 且 `TW-orenter=Y`；`C3_OCX_NO_DLGMSG=1`
-    #   把泵里那一句关掉 ⇒ 一跳都不走。**还没修的一条**：组内方向键 `AK-down=cmdTop1`
-    #   （账 #168 剩下那一半：下一步在导航器里接 VK_UP / VK_DOWN）。
+    #   把泵里那一句关掉 ⇒ 一跳都不走。
+    # 账 #168 的方向键那一半也在这条夹具上：`AK-pre / down / wrap / up` 四证人 = 同容器同型单选钮
+    #   按 `TabIndex` 走（optA→optB）、到尾回绕（optB 再 VK_DOWN 回 optA）、VK_UP 反向回绕；
+    #   `optA=N/optB=Y` 钉的是勾选真的交接过去了（走 `BM_CLICK`，组里别人被自动取消）。
+    #   `clicks=` **只钉字段存在、不钉数值** —— 实测一声方向键发两条 `_Click`（容器子类重发 +
+    #   窗体自己派发，账 #161 同族）；把 6 钉进针面就是替那条缺陷再固化一份读数。
     # ⚠ 夹具自己的坑，先写在这条路上别踩第二次：`TabWalkApp.vbp` 的 `ExeName32` **必须等于 vbp 文件名**，
     #   否则 `Test-Vbp` 按 vbp 名去找 exe ⇒ 本地怎么都过（我手动跑的是 TabWalk.exe）、CI 两条架构一起
     #   `FAIL (no exe)`（门 #218 就是这么红的）。要么改名一致，要么显式传 `-ExeName`。
     $twNeedles = @("TABWALK-DONE", "TW-walked=Y", "TW-top=Y", "TW-shy=Y",
                     "TW-in1=Y/in2=Y", "TW-deep=Y/inpic=Y", "TW-picstop=Y",
                     "TW-orenter=N",
-                    "TW-order=cmdIn1,cmdIn2,cmdDeep,cmdTop2,cmdInPic,cmdTop1,")
+                    "TW-order=cmdIn1,cmdIn2,cmdDeep,cmdTop2,cmdInPic,cmdTop1,",
+                    "AK-pre=optA/down=optB/wrap=optA/up=optB/optA=N/optB=Y/clicks=")
     Test-Vbp "tabwalk" "$Tests\tabwalk\TabWalkApp.vbp" $twNeedles
     Test-Vbp "tabwalk_x86" "$Tests\tabwalk\TabWalkApp.vbp" $twNeedles -Arch "x86"
     Test-EmitcShape "tw_emitc_cparent" @("$Tests\tabwalk\TabWalkApp.vbp") @(

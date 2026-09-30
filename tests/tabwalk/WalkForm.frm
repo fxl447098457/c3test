@@ -168,8 +168,8 @@ Option Explicit
 '      ⇒ `TW-order` 钉的是**整串次序**（这一格第一次有了可钉的次序判据）；
 '      `TW-orenter` 从「只打不钉」升成钉 **N**（`TabStop = 0` 的单选组不再占站）。
 '      关掉导航器（`C3_OCX_NO_TABNAV=1`）这两条立刻退回 z-order 那份读数 ⇒ 针能红。
-'   ④ **本批没修的一条**：`AK-*` 组内方向键 —— 程序化给 optA 焦点后 post VK_DOWN ⇒ 
-'      `down=cmdTop1`、optB 依旧 N。原因实测清楚了（探针八份读数是**方向键本来就会走组**，
+'   ④ 组内方向键（账 #168）也归导航器管了：`AK-pre / down / wrap / up` 四证人读的是
+'      同容器同型单选钮按 `TabIndex` 走 + 到尾回绕（OS 自己那趟按 z-order、且到链尾会跳出容器）。
 '      `WS_GROUP` 加与不加一字不差）：产品的 optB 先于 optA 创建 ⇒ z-order 里 optA 是链尾，
 '      而 OS 的方向键按 z-order 走 ⇒ 一跳就跳出容器。这条 = 账 #168 剩下的那一半，
 '      下一步在导航器里接 `VK_UP`/`VK_DOWN`。
@@ -184,9 +184,12 @@ Private gSeen As String
 Private gNew As Long
 Private gWalked As Boolean
 Private gAkPre As String
-Private gAkPost As String
+Private gAkDown As String
+Private gAkWrap As String
+Private gAkUp As String
+Private gAkStep As Long
+Private gAkClick As Long
 Private gAkDue As Boolean
-Private gAkPosted As Boolean
 
 Private Declare PtrSafe Function PostMessage Lib "user32" Alias "PostMessageW" (ByVal hWnd As LongPtr, ByVal Msg As Long, ByVal wParam As LongPtr, ByVal lParam As LongPtr) As Long
 Private Declare PtrSafe Function GetFocus Lib "user32" () As LongPtr
@@ -276,9 +279,18 @@ Private Function AllStations() As Boolean
                   SeenIt("cmdInPic") And SeenIt("cmdTop1") And SeenIt("cmdTop2")
 End Function
 
+Private Sub optA_Click()
+    gAkClick = gAkClick + 1
+End Sub
+
+Private Sub optB_Click()
+    gAkClick = gAkClick + 1
+End Sub
+
 Private Sub tWalk_Timer()
     Dim f As LongPtr
     Dim st As String
+    Dim vk As Long
     gTick = gTick + 1
 
     ' 相 1：先把焦点交给**容器里**那枚 cmdIn1 —— 起点选在容器内部，这样第一跳就必须
@@ -321,19 +333,27 @@ Private Sub tWalk_Timer()
 
     ' 相 3：组内方向键 —— 程序化给 optA 焦点，post VK_DOWN，读跑到哪一枚。
     ' `AK-pre` 必须先读出来：如果 SetFocus 根本没落地，`down=` 那条读数就什么也不证明。
-    If Not gAkPosted Then
-        optA.SetFocus
-        DoEvents
-        gAkPre = WhereIs(GetFocus())
-        Call PostMessage(GetFocus(), WM_KEYDOWN, VK_DOWN, 0)
-        Call PostMessage(GetFocus(), WM_KEYUP, VK_DOWN, 0)
-        gAkPosted = True
+    If gAkStep < 3 Then
+        If gAkStep = 0 Then
+            optA.SetFocus
+            gAkPre = WhereIs(GetFocus())
+        Else
+            If gAkStep = 1 Then gAkDown = WhereIs(GetFocus())
+            If gAkStep = 2 Then gAkWrap = WhereIs(GetFocus())
+        End If
+        ' 每拍都往**当前焦点**再发一声：step0/1 用 VK_DOWN（第二声该回绕），step2 用 VK_UP
+        vk = IIf(gAkStep = 2, VK_UP, VK_DOWN)
+        Call PostMessage(GetFocus(), WM_KEYDOWN, vk, 0)
+        Call PostMessage(GetFocus(), WM_KEYUP, vk, 0)
+        gAkStep = gAkStep + 1
         Exit Sub
     End If
 
     ' 相 4：收尾读数。
-    gAkPost = WhereIs(GetFocus())
-    Log1 "AK-pre=" & gAkPre & "/down=" & gAkPost & "/optA=" & TF(optA.Value) & "/optB=" & TF(optB.Value)
+    gAkUp = WhereIs(GetFocus())
+    Log1 "AK-pre=" & gAkPre & "/down=" & gAkDown & "/wrap=" & gAkWrap & "/up=" & gAkUp _
+                    & "/optA=" & TF(optA.Value) & "/optB=" & TF(optB.Value) _
+                    & "/clicks=" & CStr(gAkClick)
     Log1 "TW-seq=" & gSeen
     Log1 "TW-order=" & gSeen
     Log1 "TW-new=" & CStr(gNew)
