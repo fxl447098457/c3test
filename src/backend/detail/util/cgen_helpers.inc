@@ -444,6 +444,11 @@
     // vb6_ComIface_X* 一律返回空串 = 维持本改动之前的行为，不在这里顺手扩大。
     std::string cParamClassPtrType(const ParameterInfo& p);
 
+    // <vbeclipse>: 该名字是否为本工程的某个类/窗体模块 (它的 prop_let_/成员函数真会被发出)。
+    // 与 cParamClassPtrType 同一口径, 见 cgen_base_type.cpp 定义处注释。凡是要"按类实例
+    // 发码"的地方都该先过这一道 —— RTL/typelib 里同名的"类"没有那份定义。
+    bool isProjectClassName(const std::string& name);
+
     // <vbeclipse>: 配套 cParamClassPtrType 的**交付**侧：实参要放进那个类槽时该怎么发。
     // clsPtr 为空 (= 不是类槽) 时原样返回，所以调用点写成 argVal = deliverToClassSlot(...)
     // 是不分支的一句，不必每个站点各写一遍"是类槽就跳过装箱"。

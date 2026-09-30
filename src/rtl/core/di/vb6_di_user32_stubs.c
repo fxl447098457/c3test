@@ -936,3 +936,14 @@ intptr_t __stdcall vb6_di_WindowFromPoint(intptr_t xPoint, intptr_t yPoint) {
 intptr_t __stdcall vb6_di_WinHelpW(intptr_t hWnd, intptr_t lpHelpFile, intptr_t wCommand, intptr_t dwData) {
     return ((intptr_t (WINAPI *)(intptr_t, intptr_t, intptr_t, intptr_t))WinHelpW)(hWnd, lpHelpFile, wCommand, dwData);
 }
+
+
+/* === 恢复 dev@69845a9 有、本批重生成 di 桩时丢掉的定义 ===
+ * 生成器是按"那次跑它时的引用面"发桩的, 换一个会话重生成就会**静默丢掉**上一个会话
+ * 引用过的桩 (实测丢 9 个: comdlg32/winspool 那一族 + ChooseColorA/GetUserNameW/WinHelpA,
+ * Charts 2020 的 vb6_di_ChooseColorA 因此 LNK2019)。这里按 dev 原文补回; 生成器侧要
+ * 改成"全语料并集"才不会再丢 —— 在那之前这张清单就是这次的证据。 */
+/* WinHelpA — Task #44 SSTabEx cDlg.cls:36 */
+intptr_t __stdcall vb6_di_WinHelpA(intptr_t hWnd, intptr_t lpHelpFile, intptr_t wCommand, intptr_t dwData) {
+    return ((intptr_t (WINAPI *)(intptr_t, intptr_t, intptr_t, intptr_t))WinHelpA)(hWnd, lpHelpFile, wCommand, dwData);
+}

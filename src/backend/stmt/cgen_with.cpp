@@ -322,7 +322,15 @@ void CCodeGen::visit(WithStmt& node) {
                     } else if (memSym->type == Vb6Type::Object) {
                         withInfo.kind = WithObjKind::ClassInstance;
                         // Fix 011r-1: 若Symbol有variableTypeName, 用之; 否则className未知
-                        if (!memSym->variableTypeName.empty()) {
+                        // <vbeclipse>: 但 variableTypeName 里记的**可能是 COM/RTL 建模的类型**
+                        // (stdole.StdFont 最典型) —— 那种没有类模块去发 prop_let_/成员定义,
+                        // 按类实例发码就是"调一个不存在的函数" ⇒ LNK2019 (实测 Charts 2020
+                        // `Property Set Font`: vb6_StdFont_prop_let_* 8 个全无定义, 每个
+                        // .ctl 各 9 个未解析符号)。只有**工程类**才配当这个类名; 否则
+                        // className 留空、tempType 保持 void*, 下游按"类名未知"走
+                        // vb6_ComSetProp 晚绑定 (与 dev 同一形态)。
+                        if (!memSym->variableTypeName.empty()
+                            && isProjectClassName(memSym->variableTypeName)) {
                             withInfo.className = cIdent(memSym->variableTypeName);
                             tempType = "vb6_cls_" + withInfo.className + "*";
                         }
@@ -378,7 +386,14 @@ void CCodeGen::visit(WithStmt& node) {
                 std::string retClsProp = hostCls90s.empty()
                     ? std::string()
                     : getClassMethodReturnType(hostCls90s, memberLower);
-                if (!retClsProp.empty()) {
+                // <vbeclipse>: 但**只有工程类**才配当 ClassInstance —— 它的 prop_let_/
+                // prop_set_ 由类模块自己发定义。COM/RTL 建模的类型 (stdole.StdFont 最典型:
+                // RTL 里只有 `typedef vb6_ComIface_Font vb6_cls_StdFont;`) 没有那份定义,
+                // 按类实例发码就是"调一个不存在的函数" ⇒ LNK2019 (实测 Charts 2020 的
+                // ucChartArea/ucChartBar/ucPieChart/ucTreeMaps 的 `Property Set Font`:
+                // 8 个 vb6_StdFont_prop_let_* 全无定义, 每个 .ctl 各 9 个未解析符号)。
+                // 不满足就维持原来的 kind (COMObject 那条路发 vb6_ComSetProp, 与 dev 相同)。
+                if (!retClsProp.empty() && isProjectClassName(retClsProp)) {
                     withInfo.kind = WithObjKind::ClassInstance;
                     withInfo.className = cIdent(retClsProp);
                     tempType = "vb6_cls_" + withInfo.className + "*";

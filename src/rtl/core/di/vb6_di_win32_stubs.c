@@ -50,6 +50,10 @@ void WINAPI RtlZeroMemory(void*, size_t);
 #pragma comment(lib, "kernel32.lib")
 #pragma comment(lib, "winmm.lib")
 #pragma comment(lib, "comdlg32.lib")
+// winspool.lib: DeviceCapabilitiesA (winspool.drv) 那一档要用。本批重生成 di 桩时连同
+// 该桩一起被丢掉 (生成器按"那次跑它的引用面"发桩/发 lib), 补回 —— Charts 2020 的
+// vb6_di_DeviceCapabilitiesA 曾因此 LNK2019 (__imp_DeviceCapabilitiesA 未解析)。
+#pragma comment(lib, "winspool.lib")
 
 /* GetModuleHandleA */
 intptr_t __stdcall vb6_di_GetModuleHandleA(BSTR lpModuleName) {
@@ -524,4 +528,24 @@ intptr_t __stdcall vb6_di_WaitForSingleObject(intptr_t hHandle, intptr_t dwMilli
 /* WriteFile */
 intptr_t __stdcall vb6_di_WriteFile(intptr_t hFile, void* lpBuffer, intptr_t nNumberOfBytesToWrite, int32_t* lpNumberOfBytesWritten, intptr_t lpOverlapped) {
     return ((intptr_t (WINAPI *)(intptr_t, void*, intptr_t, int32_t*, intptr_t))WriteFile)(hFile, lpBuffer, nNumberOfBytesToWrite, lpNumberOfBytesWritten, lpOverlapped);
+}
+
+
+/* === 恢复 dev@69845a9 有、本批重生成 di 桩时丢掉的定义 ===
+ * 生成器是按"那次跑它时的引用面"发桩的, 换一个会话重生成就会**静默丢掉**上一个会话
+ * 引用过的桩 (实测丢 9 个: comdlg32/winspool 那一族 + ChooseColorA/GetUserNameW/WinHelpA,
+ * Charts 2020 的 vb6_di_ChooseColorA 因此 LNK2019)。这里按 dev 原文补回; 生成器侧要
+ * 改成"全语料并集"才不会再丢 —— 在那之前这张清单就是这次的证据。 */
+intptr_t __stdcall vb6_di_GetUserNameW(intptr_t lpBuffer, intptr_t pnSize) {
+    return ((intptr_t (WINAPI *)(intptr_t, intptr_t))GetUserNameW)(lpBuffer, pnSize);
+}
+
+/* GetLocaleInfoA — Task #44 SSTabEx cDlg.cls:51 */
+intptr_t __stdcall vb6_di_GetLocaleInfoA(intptr_t Locale, intptr_t LCType, intptr_t lpLCData, intptr_t cchData) {
+    return ((intptr_t (WINAPI *)(intptr_t, intptr_t, intptr_t, intptr_t))GetLocaleInfoA)(Locale, LCType, lpLCData, cchData);
+}
+
+/* DeviceCapabilitiesA (winspool.drv) — Task #44 SSTabEx cDlg.cls:24 */
+intptr_t __stdcall vb6_di_DeviceCapabilitiesA(intptr_t lpDeviceName, intptr_t lpPort, intptr_t iIndex, void* lpOutput, void* pDevMode) {
+    return ((intptr_t (WINAPI *)(intptr_t, intptr_t, intptr_t, void*, void*))DeviceCapabilitiesA)(lpDeviceName, lpPort, iIndex, lpOutput, pDevMode);
 }

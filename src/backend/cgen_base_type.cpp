@@ -176,6 +176,26 @@ std::string CCodeGen::cParamClassPtrType(const ParameterInfo& p) {
     return {};
 }
 
+// <vbeclipse>: 这个名字是不是**本工程的一个类/窗体模块** —— 它的 prop_let_/prop_set_/
+// 成员函数真的会被发出来。判法 = 名字命中"本模块 ∪ 驱动下发的其它模块", 且
+// mapTypeRef 把它映射成 vb6_cls_* (与 cParamClassPtrType 同一口径)。
+// 为什么不能只查符号表: stdole.StdFont / Font / IPicture 这些在 RTL/typelib 里也有
+// "类"的痕迹 (RTL 侧就有 `typedef vb6_ComIface_Font vb6_cls_StdFont;`), 但它们**没有**
+// 类模块去发 prop_let_ 定义, 按类实例发码等于调一个不存在的函数 ⇒ LNK2019
+// (实测 Charts 2020 四个 UserControl 的 `Property Set Font`: vb6_StdFont_prop_let_* 全无定义)。
+bool CCodeGen::isProjectClassName(const std::string& name) {
+    if (name.empty()) return false;
+    const std::string lk = Symbol::toLower(name);
+    bool isModule = Symbol::toLower(moduleName_) == lk;
+    if (!isModule) {
+        for (const auto& m : externalModules_) {
+            if (Symbol::toLower(m) == lk) { isModule = true; break; }
+        }
+    }
+    if (!isModule) return false;
+    return cTypeForDeclaredTypeName(name).compare(0, 8, "vb6_cls_") == 0;
+}
+
 // <vbeclipse>: 把一个实参**交付**给 cParamClassPtrType 认出来的类槽。规则只有一条：
 // 实参在 C 侧已经是 vb6_VARIANT 值 (晚绑定取回来的对象、属性读结果…) 就先剥出
 // IDispatch 再换实例指针；其余一律原样直传 —— 类变量的 C 值本来就是 vb6_cls_X*，
