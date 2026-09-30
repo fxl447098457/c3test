@@ -159,13 +159,20 @@ Option Explicit
 '      于是 `TW-in2 / TW-deep / TW-inpic` 三条永远读 N。通用式：**「走不到」要先证明
 '      走的拍数够绕一圈** —— 现在相 2 的出口改成「七站齐了就收」，拍号只当保险丝（40 拍）。
 '      那三条曾被当成「缺陷读数」钉在针面里 ⇒ 修好了测试反而红，这一课也记在 029。
-'   ③ 剩下的两条**本批没修**，读数照旧打出来：
-'      `TW-seq` 的次序 = z-order（≈创建顺序），不是 VB6 的 TabIndex ⇒ **账 #163**；
-'      `AK-*`：optFrame 里两枚 `TabStop = 0` 的 OptionButton，程序化给 optA 焦点后
-'      post VK_DOWN ⇒ `down=cmdTop1`、optB 依旧 N ⇒ 组内方向键压根不走 = **账 #168**。
-'      同一族的第三条新读数 `TW-orenter`：七站里居然有 optA（`TabStop = 0` 本不该占站）——
-'      对话框管理器把容器里的单选组当一站、落在勾选那枚上。这条**只打不钉**：
-'      钉成 Y 是把缺陷固化进针面，钉成 N 是现在就会红。
+'   ③ 现在这一格走的是**自研导航器**（账 #163 + #168 的那一半，RTL 里的 `vb6_Form_MoveTabFocus`）：
+'      `IsDialogMessage` 那一张表有两处和 VB6 不同 —— 次序按 **z-order**（≈创建顺序），
+'      以及「谁是站」看**实时**样式位（系统会把 `WS_TABSTOP` 自己挪到单选组里勾选那枚身上，
+'      裸码探针 `.build/cp2` 实测：创建时两枚都不带，勾选那枚后来带着走）。所以：次序改按
+'      **父窗内的 `TabIndex`**（账 #160 发到窗口属性 `VB6_TabIndex` 的那份），
+'      进站改读**创建时**那份 `WS_TABSTOP`（`vb6_CreateControl` 存的 `VB6_TabStop`）。
+'      ⇒ `TW-order` 钉的是**整串次序**（这一格第一次有了可钉的次序判据）；
+'      `TW-orenter` 从「只打不钉」升成钉 **N**（`TabStop = 0` 的单选组不再占站）。
+'      关掉导航器（`C3_OCX_NO_TABNAV=1`）这两条立刻退回 z-order 那份读数 ⇒ 针能红。
+'   ④ **本批没修的一条**：`AK-*` 组内方向键 —— 程序化给 optA 焦点后 post VK_DOWN ⇒ 
+'      `down=cmdTop1`、optB 依旧 N。原因实测清楚了（探针八份读数是**方向键本来就会走组**，
+'      `WS_GROUP` 加与不加一字不差）：产品的 optB 先于 optA 创建 ⇒ z-order 里 optA 是链尾，
+'      而 OS 的方向键按 z-order 走 ⇒ 一跳就跳出容器。这条 = 账 #168 剩下的那一半，
+'      下一步在导航器里接 `VK_UP`/`VK_DOWN`。
 ' 夹具还顺手读一件别的事：
 '   `TW-picstop` —— VB6 的 PictureBox 拿不到焦点、本该不在 tab 序里，而 `controlTabStopStyleBit`
 '      排除表里**以前没有它** ⇒ 它自己在 tab 序里占一站（账 #164，已修，这一条翻绿）。
@@ -259,7 +266,10 @@ Private Sub MarkStation(ByVal st As String)
     End If
 End Sub
 
-' 相 2 的出口：窗体级两枚 + 三型容器里的四枚都各站过一次 = 绕完一圈。
+' 相 2 的出口：六站各站过一次 = 绕完一圈。
+' 这六枚就是导航器口径下**全部该站的**控件（`TabStop = 0` 的两枚单选钮、拿不到焦点的
+' PictureBox、禁用那枚、以及容器本身都不在站表里）—— 少一站就是「走不到」，多一站
+' （比如 optA）也会被 `TW-order` 当场钉住。
 ' 用它收尾而不是数拍子 —— 缺陷（走不进容器）时它不会满足，就走到保险丝那一步照出 N。
 Private Function AllStations() As Boolean
     AllStations = SeenIt("cmdIn1") And SeenIt("cmdIn2") And SeenIt("cmdDeep") And _
@@ -325,6 +335,7 @@ Private Sub tWalk_Timer()
     gAkPost = WhereIs(GetFocus())
     Log1 "AK-pre=" & gAkPre & "/down=" & gAkPost & "/optA=" & TF(optA.Value) & "/optB=" & TF(optB.Value)
     Log1 "TW-seq=" & gSeen
+    Log1 "TW-order=" & gSeen
     Log1 "TW-new=" & CStr(gNew)
     Log1 "TW-ticks=" & CStr(gTick)
     Log1 "TW-orenter=" & TF(SeenIt("optA"))

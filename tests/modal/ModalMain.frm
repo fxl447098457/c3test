@@ -133,12 +133,13 @@ End Function
 
 ' 两相：tick 1 = 启动窗体的初始焦点 + 开模态（账 #157 / #156 那两格）；
 ' 之后各拍 = **主泵**的 Tab 导航（账 #83(b)）：读当前落点、再往它 post 一对 VK_TAB。
-' ⚠ 判据**故意不问跳的顺序**：`IsDialogMessage` 按 z-order（≈创建顺序）走，不是 VB6 的
-' `TabIndex` 顺序 —— 实测站点序列 `txtMain → cmdY → cmdX → txtSecond → txtMain`，而 TabIndex
-' 是 txtMain(1) → txtSecond(2) → cmdX(3) → cmdY(4)。顺序那一刀另记 **账 #163**；这里只钉
-' "Tab 真的在跳、四枚可聚焦的都走到、最后绕回起点"。改之前焦点压根不动 ⇒ `MW-new` 会是 1。
-' 同一份产物还有一条开关侧的负控：`C3_OCX_NO_DLGMSG=1` 关掉泵里的 `IsDialogMessage` ⇒
-' `MW-new` 回到 1（本地实测过，见 029 的 C29-FS-b 那一格）。
+' ⚠ 顺序**现在钉了**（账 #163 由自研导航器接走之后）：`MW-seq` 钉的是**首次访问的次序**，
+' 不是逐拍读数 —— 某一拍没动不会假红（与 WS17 / 账 #162 那一族「条数是时序不是不变量」分开）。
+' VB6 的次序 = 父窗内 `TabIndex`：txtMain(1) → txtSecond(2) → cmdX(3) → cmdY(4) → 回 txtMain；
+' 交给 `IsDialogMessage` 时走的是 z-order（`txtMain → cmdY → cmdX → txtSecond`）。
+' ⇒ 负控有两条开关，各红各的：`C3_OCX_NO_TABNAV=1` 退回 z-order（红 `MW-seq`），
+' `C3_OCX_NO_DLGMSG=1` 关掉泵里的 `IsDialogMessage`（红 `MW-new` ⇒ 回到 1）。
+
 Private Sub tMain_Timer()
     Dim f As LongPtr
     Dim st As String
@@ -162,7 +163,7 @@ Private Sub tMain_Timer()
         tMain.Enabled = True
         Exit Sub
     End If
-    If gState >= 2 And gState <= 6 Then
+    If gState >= 2 And gState <= 9 Then
         f = GetFocus()
         st = WhereIs(f)
         ' tick 2 那一拍读到的就是起点（刚 SetFocus 过），不算"回头"，所以从 tick 3 起才记账
@@ -181,9 +182,10 @@ Private Sub tMain_Timer()
         Call PostMessage(f, WM_KEYDOWN, VK_TAB, 0)
         Call PostMessage(f, WM_KEYUP, VK_TAB, 0)
     End If
-    If gState = 7 Then
+    If gState = 10 Then
         ' 走到底：起点 + 新访的枚数 + 第一次回头落在谁身上 + 回头前走过几格
         Log1 "MW-new=" & CStr(gNew + 1) & "/repeat=" & gRepeat & "/hops=" & CStr(gHops)
+        Log1 "MW-seq=" & gSeen
         Log1 "MODAL-DONE"
         Unload Me
     End If

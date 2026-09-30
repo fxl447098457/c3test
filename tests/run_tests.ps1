@@ -1718,7 +1718,8 @@ if ($Category -in @("all", "run", "vbp")) {
     $mdNeedles = @("MODAL-DONE", "M1-startup=Y", "M2-returned=Y", "D1-first=Y",
                     "D2-notB=Y", "D3-notLbl=Y", "D4-notOff=Y", "D5-notDis=Y",
                     "D6-notHidden=Y", "D7-ticks=Y",
-                    "MW-new=4/repeat=txtMain/hops=3")
+"MW-new=4/repeat=txtMain/hops=3",
+                    "MW-seq=txtMain,txtSecond,cmdX,cmdY,")
     Test-Vbp "modal" "$Tests\modal\ModalApp.vbp" $mdNeedles
     Test-Vbp "modal_x86" "$Tests\modal\ModalApp.vbp" $mdNeedles -Arch "x86"
     Test-EmitcShape "md_emitc_focus" @("$Tests\modal\ModalApp.vbp") @(
@@ -1746,14 +1747,25 @@ if ($Category -in @("all", "run", "vbp")) {
     #   现在两头都通：`in2 / deep / inpic` 三条**已从缺陷读数翻成判据**（容器里的兄弟真被走到了）。
     # ⚠ 另一课（为什么这三条以前恒 N）：相 2 原来只给 9 拍，而这一圈要 7 站 ⇒ 走不完就被裁掉，
     #   「走不到」其实是「没走到」。现在相 2 的出口改成「七站齐了就收」，拍号只当保险丝（40 拍）。
-    # ⚠ 还没修的两条**只打不钉**：`TW-seq` 的次序是 z-order 不是 TabIndex（**账 #163**）；
-    #   `TW-orenter=Y` = `TabStop = 0` 的容器内单选组仍被当一站（落在勾选那枚上）、
-    #   且组内方向键不走（`AK-down=cmdTop1`，**账 #168**）—— 钉成 Y 是把缺陷固化，钉成 N 是当场红。
+    # 账 #163 落地之后这一格开始**钉次序**：`TW-order` 钉的是首次访问的次序（不是逐拍读数，
+    #   所以某一拍没动不会假红 —— 与「条数是时序不是不变量」那一族分开）。导航器口径下的六站 =
+    #   父窗内 `TabIndex` 深度优先：cmdTop1(1) → Frame1(2){cmdIn1(0) cmdIn2(1) Frame2(2){cmdShy 禁用、
+    #   cmdDeep(1)、picDeep 不进站}} → optFrame(4){两枚 TabStop=0 ⇒ 一站都不出} → cmdTop2(5) →
+    #   Pic1(6){cmdInPic(0)}。起点是夹具自己 SetFocus 到 cmdIn1 ⇒ 读到的圈 =
+    #   `cmdIn1,cmdIn2,cmdDeep,cmdTop2,cmdInPic,cmdTop1`。
+    # `TW-orenter=N` 钉的是「`TabStop = 0` 的单选组不再占站」—— 那一站本是 OS 把 `WS_TABSTOP`
+    #   自己挪到勾选那枚上造成的（探针 `.build/cp2` 八份读数），导航器改读创建时存的 `VB6_TabStop`。
+    #   两条负控各红各的针（本地实测）：`C3_OCX_NO_TABNAV=1` ⇒ `TW-order` 退回
+    #   `cmdIn1,cmdTop2,optA,cmdTop1,cmdInPic,cmdDeep,cmdIn2` 且 `TW-orenter=Y`；`C3_OCX_NO_DLGMSG=1`
+    #   把泵里那一句关掉 ⇒ 一跳都不走。**还没修的一条**：组内方向键 `AK-down=cmdTop1`
+    #   （账 #168 剩下那一半：下一步在导航器里接 VK_UP / VK_DOWN）。
     # ⚠ 夹具自己的坑，先写在这条路上别踩第二次：`TabWalkApp.vbp` 的 `ExeName32` **必须等于 vbp 文件名**，
     #   否则 `Test-Vbp` 按 vbp 名去找 exe ⇒ 本地怎么都过（我手动跑的是 TabWalk.exe）、CI 两条架构一起
     #   `FAIL (no exe)`（门 #218 就是这么红的）。要么改名一致，要么显式传 `-ExeName`。
     $twNeedles = @("TABWALK-DONE", "TW-walked=Y", "TW-top=Y", "TW-shy=Y",
-                    "TW-in1=Y/in2=Y", "TW-deep=Y/inpic=Y", "TW-picstop=Y")
+                    "TW-in1=Y/in2=Y", "TW-deep=Y/inpic=Y", "TW-picstop=Y",
+                    "TW-orenter=N",
+                    "TW-order=cmdIn1,cmdIn2,cmdDeep,cmdTop2,cmdInPic,cmdTop1,")
     Test-Vbp "tabwalk" "$Tests\tabwalk\TabWalkApp.vbp" $twNeedles
     Test-Vbp "tabwalk_x86" "$Tests\tabwalk\TabWalkApp.vbp" $twNeedles -Arch "x86"
     Test-EmitcShape "tw_emitc_cparent" @("$Tests\tabwalk\TabWalkApp.vbp") @(

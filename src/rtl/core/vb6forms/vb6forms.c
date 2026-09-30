@@ -29,6 +29,10 @@
 // vb6forms_internal.h —— 它们要跨 vb6forms 的多个拆分编译单元共用。
 // ============================================================
 
+/* 账 #163/#168 的自研跳格：实现写在 `vb6_Form_SetInitialFocus` 之前那一段，而两条泵在文件里
+   更靠前 ⇒ 先给个前向声明（C 的用法，不另开 .h —— 这条只给泵用，不进代码生成的接口面）。 */
+static int vb6_TabNavKey(const MSG *msg);
+
 
 // 全局变量
 HINSTANCE g_hInstance = NULL;
@@ -411,6 +415,13 @@ void* vb6_CreateControl(const char* win32Class, const char* controlName,
     );
     free(wname);
 
+    /* 账 #163/#168：把**创建时**的 WS_TABSTOP 决定记在窗口属性上。运行期不能只看样式位 —— 
+       BS_AUTORADIOBUTTON 那一族的 WS_TABSTOP 会被系统自己挪到「勾选那枚」身上（裸码探针
+       `.build/cp2`：创建时两枚都不带，勾选那枚后来带着走），而 VB6 的 TabStop 是设计期属性、
+       运行期不改 ⇒ 「谁是站」必须以创建时那一份为准。值写 1/2 而不是 1/0：
+       SetPropW(…, 0) 等于删属性（账 #107 那一课）。 */
+    if (hwnd) SetPropW(hwnd, L"VB6_TabStop", (HANDLE)(DWORD_PTR)((style & WS_TABSTOP) ? 1 : 2));
+
     // 设置默认字体 (VB6使用MS Sans Serif 8.25pt)
     if (hwnd) {
         // Fix 181: 原先直接用 GetStockObject(DEFAULT_GUI_FONT) —— 现代 Windows 上
@@ -683,8 +694,12 @@ int vb6_MessageLoop(void) {
             // **吞掉**它处理的那条按键消息，所以 `_KeyDown`/`_KeyPress` 里想看见 VK_TAB 的
             // 用法会被这一刀改变行为（存量实测：语料里 0 处这么写）。
             int useDlgMsgMain = (GetEnvironmentVariableW(L"C3_OCX_NO_DLGMSG", NULL, 0) <= 0);
+            /* 账 #163/#168：VK_TAB 由自研导航器接管（关掉 = C3_OCX_NO_TABNAV=1，退回旧行为做 A/B）。 */
+            int useTabNavMain = (GetEnvironmentVariableW(L"C3_OCX_NO_TABNAV", NULL, 0) <= 0);
             while (GetMessage(&msg, NULL, 0, 0)) {
                 // P24-Timer: WM_TIMER现在由WndProc分发, 消息循环不再拦截
+                if (useTabNavMain && vb6_TabNavKey(&msg)) continue;
+                // 账 #83(b)：主泵也接管对话框式键盘导航
                 HWND act = useDlgMsgMain ? GetActiveWindow() : NULL;
                 if (!act || !IsDialogMessageW(act, &msg)) {
                     TranslateMessage(&msg);
@@ -952,6 +967,142 @@ static void vb6_installCrashTrace(void) {
     }
 }
 
+// ============================================================
+// 账 #163 / #168（C29-FS-e）：自研的**按 TabIndex 跳格**。
+//
+// 为什么自己走：`IsDialogMessage` 只沿 **z-order**（≈创建顺序）找下一枚，而 VB6 的两张表
+// 都是**按父窗内的 `TabIndex`** —— 这条实测钉死：门 #234 前后同一份夹具，OS 走出来的 `TW-seq`
+// 就是发码里 `vb6_CreateControl` 的先后，与 `.frm` 写的 `TabIndex` 无关。
+// 容器那一半**不用自己管**：账 #165 的根因是发码把 `WS_EX_CONTROLPARENT` 抄成了
+// `WS_EX_APPWINDOW`，改对之后 OS 自己就下钻（门 #234 的 `TW-in2 / TW-deep / TW-inpic` 三条一起翻 Y）。
+// 但 OS 那一张表还有两处和 VB6 不一样，只能拿回自己手里：
+//   ① 次序 = z-order，不是 `TabIndex`（账 #163）；
+//   ② 「谁是站」看**实时**样式位，而系统会把 `WS_TABSTOP` 自己挪到单选组里勾选那枚身上
+//      （账 #168：`TabStop = 0` 的 OptionButton 照样占一站，实测 `TW-orenter=Y`）。
+// 口径（与建序时用的那两张表同族，不另立）：
+//   A. 同一父窗内按 (`TabIndex`, z-order) 稳定排序 —— `TabIndex` 是账 #160 发到窗口属性
+//      `VB6_TabIndex` 的那个数（没存过当 0）；
+//   B. 能不能进站 = **创建时**立没立 `WS_TABSTOP`（`vb6_CreateControl` 里存的 `VB6_TabStop`；
+//      判断本身仍是发码那一张 `controlTabStopStyleBit` 排除表，运行期只是照读，不第二处判
+//      「谁拿得到焦点」）；外加 visible / enabled —— 对话框管理器本来就跳过禁用与隐藏窗口，
+//      这条口径与账 #157 同族。
+//   C. 容器（带 `WS_EX_CONTROLPARENT` 的那几型）自己不进站，但走到它那一格就**就地**展开它的孩子，
+//      容器嵌容器同一条规则。
+// VK_TAB 之外的（方向键、Alt 助记、Enter 默认按钮）这一格**还**留给 `IsDialogMessage` ——
+// 组内方向键按 TabIndex 走是账 #168 剩下的那一半（实测 `AK-pre=optA / down=cmdTop1`），下一步单独接。
+// 开关：`C3_OCX_NO_TABNAV=1` 退回"完全交给 IsDialogMessage"的旧行为，做 A/B 用（与
+// `C3_OCX_NO_DLGMSG` 同一个路子，否则红的时候分不出是导航器坏还是泵坏）。
+// ============================================================
+
+#define VB6_TAB_MAX 256
+
+static int vb6_tabIsFormWindow(HWND hwnd) {
+    static const wchar_t kPrefix[] = L"VB6_Form_";   /* 见 cgen_form_prelude.inc 的注册名 */
+    wchar_t cls[64];
+    int i;
+    if (!hwnd || !GetClassNameW(hwnd, cls, 64)) return 0;
+    for (i = 0; i < 9; i++) if (cls[i] != kPrefix[i]) return 0;
+    return cls[9] != 0;
+}
+
+static int vb6_tabIsContainer(HWND hwnd) {
+    return (GetWindowLongW(hwnd, GWL_EXSTYLE) & WS_EX_CONTROLPARENT) != 0;
+}
+
+static int vb6_tabCanTakeFocus(HWND hwnd) {
+    LONG st = GetWindowLongW(hwnd, GWL_STYLE);
+    HANDLE ts;
+    if ((st & (WS_CHILD | WS_VISIBLE)) != (WS_CHILD | WS_VISIBLE)) return 0;
+    if (!IsWindowVisible(hwnd) || !IsWindowEnabled(hwnd)) return 0;
+    /* 进站与否以**创建时**那一份为准（上面 VB6_TabStop 的注释）；不是走 vb6_CreateControl
+       建起来的窗口没有这份属性，退回读实时样式位。 */
+    ts = GetPropW(hwnd, L"VB6_TabStop");
+    if (ts) return ((int)(INT_PTR)ts) == 1;
+    return (st & WS_TABSTOP) != 0;
+}
+
+static int vb6_tabIndexOf(HWND hwnd) {
+    HANDLE p = GetPropW(hwnd, L"VB6_TabIndex");
+    return p ? (int)(INT_PTR)p : 0;
+}
+
+/* 把 parent 这一层（含容器里的孩子）按上面那三条口径依次收集进 out。 */
+static void vb6_tabCollect(HWND parent, HWND *out, int *n, int depth) {
+    HWND kid[VB6_TAB_MAX];
+    int order[VB6_TAB_MAX];
+    int nk = 0, i, j, moved;
+    HWND h;
+    if (*n >= VB6_TAB_MAX || depth > 8) return;
+    for (h = GetWindow(parent, GW_CHILD); h != NULL; h = GetWindow(h, GW_HWNDNEXT)) {
+        if (nk >= VB6_TAB_MAX) break;
+        kid[nk++] = h;
+    }
+    for (i = 0; i < nk; i++) order[i] = i;
+    for (i = 1; i < nk; i++) {          /* 稳定插入排序 */
+        moved = order[i];
+        j = i - 1;
+        while (j >= 0 && vb6_tabIndexOf(kid[order[j]]) > vb6_tabIndexOf(kid[moved])) {
+            order[j + 1] = order[j];
+            j--;
+        }
+        order[j + 1] = moved;
+    }
+    for (i = 0; i < nk; i++) {
+        h = kid[order[i]];
+        if (GetEnvironmentVariableW(L"C3_TABNAV_TRACE", NULL, 0) > 0) {
+            fprintf(stderr, "  [collect d=%d] hwnd=%p style=%lx ex=%lx focus=%d cont=%d\n", depth, (void*)h,
+                    (unsigned long)GetWindowLongW(h, GWL_STYLE),
+                    (unsigned long)GetWindowLongW(h, GWL_EXSTYLE),
+                    vb6_tabCanTakeFocus(h), vb6_tabIsContainer(h));
+        }
+        if (vb6_tabCanTakeFocus(h)) {
+            out[(*n)++] = h;
+            if (*n >= VB6_TAB_MAX) return;
+        }
+        if (vb6_tabIsContainer(h)) vb6_tabCollect(h, out, n, depth + 1);
+    }
+}
+
+int vb6_Form_MoveTabFocus(void* hwndForm, int forward) {
+    HWND form = (HWND)hwndForm, cur, list[VB6_TAB_MAX];
+    int n = 0, i, at = -1, nxt;
+    if (!form || !IsWindow(form)) return 0;
+    vb6_tabCollect(form, list, &n, 0);
+    if (n <= 0) return 0;
+    if (GetEnvironmentVariableW(L"C3_TABNAV_TRACE", NULL, 0) > 0) {   /* 排障用，不参与判定 */
+        HWND dbgCur = GetFocus();
+        fprintf(stderr, "[C3_TABNAV] form=%p cur=%p fwd=%d n=%d\n", (void*)form, (void*)dbgCur, forward, n);
+        for (i = 0; i < n; i++)
+            fprintf(stderr, "  #%d hwnd=%p idx=%d style=%lx ex=%lx\n", i, (void*)list[i],
+                    vb6_tabIndexOf(list[i]),
+                    (unsigned long)GetWindowLongW(list[i], GWL_STYLE),
+                    (unsigned long)GetWindowLongW(list[i], GWL_EXSTYLE));
+    }
+    cur = GetFocus();
+    for (i = 0; i < n; i++) { if (list[i] == cur) { at = i; break; } }
+    if (at < 0) {                       /* 焦点在窗体身上/在没进站的容器里：VB6 也是从首末枚开始 */
+        SetFocus(forward ? list[0] : list[n - 1]);
+        return 1;
+    }
+    if (n == 1) return 1;               /* 只有这一枚可聚焦，原地不动 */
+    nxt = (at + (forward ? 1 : -1) + n) % n;
+    SetFocus(list[nxt]);
+    return 1;
+}
+
+/* 返回 1 = 这条按键已被接管，调用方不要再把它交给 IsDialogMessage / 不要再派发。 */
+static int vb6_TabNavKey(const MSG *msg) {
+    HWND focus, root;
+    int fwd;
+    if (msg->message != WM_KEYDOWN || (int)msg->wParam != VK_TAB) return 0;
+    focus = GetFocus();
+    root = GetAncestor(focus ? focus : msg->hwnd, GA_ROOT);
+    if (!vb6_tabIsFormWindow(root)) return 0;
+    fwd = (GetKeyState(VK_SHIFT) & 0x8000) == 0;
+    return vb6_Form_MoveTabFocus(root, fwd);
+}
+
+// ============================================================
 // 账 #157: 编译器算好的"这枚窗体显示时该把焦点交给谁"（VB6 = TabIndex 最小那枚拿得到焦点的
 // 控件，不是创建顺序 —— `.frm` 里控件的书写顺序与 TabIndex 常常相反）。存在窗体句柄上，
 // **应用一次就销掉**：之后再 Show 这枚窗体，焦点该回到用户停下的地方，而不是每次都被抢回首枚 tabstop。
@@ -1033,6 +1184,8 @@ void vb6_ShowForm(void* hwnd, int modal) {
         /* Fix 144b: IsDialogMessageA 会吞掉非对话框窗口的键盘/命令消息, 可用
          * C3_OCX_NO_DLGMSG=1 关闭 (对照实验/排障). */
         int useDlgMsg = (GetEnvironmentVariableW(L"C3_OCX_NO_DLGMSG", NULL, 0) <= 0);
+        /* 账 #163/#168：模态这条也一样接管 VK_TAB（与主泵同一个开关）。 */
+        int useTabNav = (GetEnvironmentVariableW(L"C3_OCX_NO_TABNAV", NULL, 0) <= 0);
         while (IsWindow((HWND)hwnd) && GetMessage(&msg, NULL, 0, 0)) {
             if (traceMsg && msgCount < 80) {
                 wchar_t cap[128] = {0};
@@ -1043,6 +1196,8 @@ void vb6_ShowForm(void* hwnd, int modal) {
                         IsWindow((HWND)hwnd) ? 1 : 0, cap);
             }
             msgCount++;
+            // 账 #163/#168：跳格自己按 TabIndex 走，别让对话框管理器按 z-order 认
+            if (useTabNav && vb6_TabNavKey(&msg)) continue;
             // P24-Timer: WM_TIMER现在由WndProc分发, 模态循环不再拦截
             // 模态Tab键导航 (IsDialogMessage处理对话框键盘导航)
             if (!useDlgMsg || !IsDialogMessageW((HWND)hwnd, &msg)) {
