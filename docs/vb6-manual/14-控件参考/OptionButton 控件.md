@@ -19,5 +19,12 @@
 - 原生窗口是 `BUTTON` + `BS_AUTORADIOBUTTON`。`GotFocus` / `LostFocus` 同样要 **`BS_NOTIFY`**
   才有 `BN_SETFOCUS=6` / `BN_KILLFOCUS=7`（账 #158，2026-09-30 起两条创建路都挂）。
   夹具 `tests/btnfocus` 的 `BF-opt=1/1` 钉这一格。
-- 组内方向键换选仍然只发 `BN_CLICKED=0`（选中的那一枚），焦点移动不发点击 —— 派发按 `code` 过滤。
+- 组内方向键（`VK_UP` / `VK_DOWN`）由本项目自己派发：同一容器里所有 `BS_AUTORADIOBUTTON`
+  按 **`TabIndex`** 走、到尾回绕，换选走 `BM_CLICK`（= 自动取消同组别人 + 发 `BN_CLICKED`，
+  所以 `_Click` 会跟着来）。这一步之前交给你的是对话框管理器：它按 z-order 走，
+  而且走到链尾会**跳出容器**（实测 `down=cmdTop1`）⇒ 那是账 #168 的由来。
+- ⚠ 已知未修（账 #171）：方向键一声动目前发**两条** `_Click`（容器子类重发 + 窗体自己派发，
+  与账 #161 那族同型）。夹具 `tests/tabwalk` 的 `clicks=` 只钉字段存在、不钉数值。
+- 焦点进出容器里的单选钮另有一处和 VB6 不同：系统会把 `WS_TABSTOP` 自己挪到**勾选那枚**身上，
+  所以「谁是站」读的是创建时存的那份 `VB6_TabStop`，不是实时样式位（账 #163/#168）。
 - 同一容器里多枚 OptionButton 的互斥由原生 BUTTON 类给；`Value` 的读写与 `Caption` 那几格本批没动。
