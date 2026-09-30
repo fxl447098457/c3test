@@ -197,6 +197,30 @@ void CCodeGen::visit(FunctionDecl& node) {
             // 仅当参数未被前面分支精确注册为 Class / ComClass / Interface / UDT 时
             // 才查 C 类型, 避免对 vb6_cls_* / vb6_ComIface_* 等 C 类型参数的错误
             // 注册. 与 visit(VariableDecl) line 651-656 行为一致 (局部 void* 同样注册).
+            // Fix <VBFlexGridDemo>: UDT 形参**优先**登记 (必须排在 knownClassVars_ 守卫
+            // 之前)。knownClassVars_ 全程不清空 (全后端无一处 .clear()/.erase()), 于是
+            // VBFlexGridBase.bas:332 `Dim This As VBFlexGrid` 把 "this" 留在里面, 跨模块
+            // 泄漏到 VTableHandle.bas 的 `ByRef This As VTableIPAODataStruct` —— 形参被当
+            // 工程类实例, `This.OriginalIOleIPAO` 走类成员分发找不到该成员 ⇒ 回落 COM
+            // 后期绑定 vb6_ComGetObjectProp((*This), …) —— 实参是结构体值不是指针 ⇒
+            // C2172×20 (VTableHandle.c)。UDT 与类互斥, 故这里直接擦掉残留的类条目。
+            {
+                std::string udtCTypeF = mapTypeRef(p->asType.get());
+                while (!udtCTypeF.empty() && (udtCTypeF.back() == '*' || udtCTypeF.back() == ' '))
+                    udtCTypeF.pop_back();
+                if (udtCTypeF.compare(0, 9, "vb6_type_") == 0) {
+                    knownUdtVars_[pLower] = udtCTypeF;
+                    // 与 UDT 互斥的那几张表全程不清空 (全后端无一处 .clear()), 同名形参
+                    // 会从别的模块/过程泄漏过来, 且它们的判定分支都排在 obj_dispatch 的
+                    // UDT 字段分支 (Fix 031) 之前 ⇒ 必须一并擦掉, 否则补登记无效。
+                    knownClassVars_.erase(pLower);
+                    knownTypedComVars_.erase(pLower);
+                    knownIfaceVars_.erase(pLower);
+                    knownIvrefVars_.erase(pLower);
+                    knownObjectVars_.erase(pLower);
+                    knownVariantVars_.erase(pLower);
+                }
+            }
             if (!knownClassVars_.count(pLower) && !knownTypedComVars_.count(pLower)
                 && !knownIfaceVars_.count(pLower) && !knownUdtVars_.count(pLower)) {
                 std::string paramCType = mapTypeRef(p->asType.get());

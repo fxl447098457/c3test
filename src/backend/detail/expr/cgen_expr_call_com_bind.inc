@@ -136,7 +136,16 @@
                           || !toolbarNameOfExpr(comObjExpr_).empty()
                           // C29-Data: Data1.Recordset 的透传形态 (Fields/Item 走 Step1+Item 路)。
                           || comObjExpr_.find("vb6_Data_Self(") == 0);
-        if (axSlotObj && !node.positional.empty()) {
+        // Fix <VBFlexGridDemo>: 窗体 (Me) 的 ScaleX/ScaleY(x, fromScale, toScale) 是
+        // **方法**, 不是"集合属性 + Item 下标"。axSlotObj 只按 vb6_hwnd_ 前缀认宿主槽,
+        // 窗体 hwnd 同样命中 ⇒ Me.ScaleX(8, 3, Me.ScaleMode) 被编成
+        //   vb6_ComCallObject(vb6_ComGetObjectProp(vb6_hwnd_MainForm, L"ScaleX"), L"Item", …)
+        // 返回 void* ⇒ 与 float 相减 ⇒ C2113×2 (MainForm.c 640/641)。
+        // 让它们落到下面的通用 COM 方法调用 (BASE 8c3e981 正是
+        // vb6_ComCall(vb6_hwnd_MainForm, L"ScaleX", …))。ScaleX/ScaleY 不可能是集合。
+        const std::string axMemLower = Symbol::toLower(comMemberName_);
+        const bool axIsScaleMethod = (axMemLower == "scalex" || axMemLower == "scaley");
+        if (axSlotObj && !node.positional.empty() && !axIsScaleMethod) {
             std::string axObjExpr = std::move(comObjExpr_);
             std::string axMember = std::move(comMemberName_);
             isComMarker_ = false;

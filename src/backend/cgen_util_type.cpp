@@ -6,6 +6,55 @@
 
 namespace vb6c3 {
 
+// Fix <VBFlexGridDemo/GA 36766856082>: 内置函数与"控件自己声明的同名 Property"撞名时的
+// 类型裁决。
+//
+// 背景: Task #40 (40960eb) 给 parseIdentifierOrCall 加了"使用点剥类型后缀",
+// `Left$(Value, 1)` 到 cgen 时名字已是 `Left`; VBFlexGrid.ctl 自己声明了
+// `Public Property Get Left() As Single`, 于是 inferExprType 的符号表支路命中这个
+// **属性**符号 ⇒ 答 Single ⇒ `float _vb6_select_81 = vb6_Left(Temp, 1)` 把 BSTR
+// 强转 float → C2440 (27 处)。剥后缀前名字是 `Left$`, 查不到该属性符号, 天然不撞。
+//
+// 口径 (刻意收窄): 只有"符号 kind 是 Property* **且** 该名字在内置函数表里"才启用,
+// 其余一切照旧 —— 用户 Function 同名、普通变量、真·属性访问都不受影响。
+// 返回类型按 VB6 内置函数语义给: 字符串类答 String, 整数类答 Long, 其余答 Variant
+// (Variant 是既有兜底, 不会引入新的硬错)。
+#include "backend/detail/expr/cgen_expr_ident_builtin_table.inc"
+
+static Vb6Type builtinFuncReturnTypeForShadowedProp(const std::string& nameLower) {
+    static const std::unordered_set<std::string> kStrFuncs = {
+        "left", "mid", "right", "trim", "ltrim", "rtrim", "lcase", "ucase",
+        "space", "string", "str", "chr", "hex", "oct", "format", "strconv",
+        "input", "command", "curdir", "environ", "dir", "date", "time", "monthname",
+        "weekdayname", "error"
+    };
+    if (kStrFuncs.count(nameLower)) return Vb6Type::String;
+    static const std::unordered_set<std::string> kLongFuncs = {
+        "len", "lenb", "instr", "instrb", "asc", "cint", "clng", "cbyte",
+        "freefile", "erl", "hour", "minute", "second", "weekday", "day",
+        "month", "year", "abs", "sgn", "int", "fix"
+    };
+    if (kLongFuncs.count(nameLower)) return Vb6Type::Long;
+    return Vb6Type::Variant;
+}
+
+// 判据: 符号是 Property* **且** 该名字在内置函数表里 ⇒ 这是"属性遮蔽了内置函数",
+// 类型要按内置函数答 (见上注释)。剥 $ 后缀后比, 与 ident_builtin 的 lookupName 同口径。
+static bool isPropShadowingBuiltinFunc(const Symbol* sym, const std::string& idName) {
+    if (!sym) return false;
+    if (sym->kind != SymbolKind::PropertyGet && sym->kind != SymbolKind::PropertyLet
+        && sym->kind != SymbolKind::PropertySet) return false;
+    std::string n = Symbol::toLower(idName);
+    if (!n.empty() && n.back() == '$') n.pop_back();
+    return kBuiltinFuncNames.count(n) != 0;
+}
+
+static Vb6Type cgenTypeForShadowedBuiltin(const std::string& idName) {
+    std::string n = Symbol::toLower(idName);
+    if (!n.empty() && n.back() == '$') n.pop_back();
+    return builtinFuncReturnTypeForShadowedProp(n);
+}
+
 // --- cgen_util_type.cpp: 表达式类型推断 + Variant 判定 + 运行时参数 C 类型 ---
 
 
@@ -55,6 +104,10 @@ Vb6Type CCodeGen::inferExprType(Expr& expr) const {
             // 检查符号表
             auto* sym = symTab_.lookup(id.name);
             if (!sym) sym = symTab_.lookupModule(id.name);
+            // Fix <VBFlexGridDemo>: 属性遮蔽内置函数时按内置函数的类型答 (见文件头注释)。
+            if (sym && isPropShadowingBuiltinFunc(sym, id.name)) {
+                return cgenTypeForShadowedBuiltin(id.name);
+            }
             if (sym) return sym->type;
             break;
         }
@@ -120,6 +173,11 @@ Vb6Type CCodeGen::inferExprType(Expr& expr) const {
                 auto& id = static_cast<IdentifierExpr&>(*call.callee);
                 auto* sym = symTab_.lookup(id.name);
                 if (!sym) sym = symTab_.lookupModule(id.name);
+                // Fix <VBFlexGridDemo>: 同上 —— 属性遮蔽内置函数时按内置函数的类型答,
+                // 否则 `float _vb6_select_81 = vb6_Left(Temp, 1)` 把 BSTR 强转 float (C2440)。
+                if (sym && isPropShadowingBuiltinFunc(sym, id.name)) {
+                    return cgenTypeForShadowedBuiltin(id.name);
+                }
                 if (sym) return sym->type;
             }
             // P26: 类实例方法调用 a.Method(args) → callee是MemberAccessExpr

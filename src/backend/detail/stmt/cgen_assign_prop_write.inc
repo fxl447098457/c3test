@@ -483,7 +483,56 @@
                         lastExpr_ = packLetValueArg(letPropSym->params.back(),
                                                     node.value.get(), lastExpr_);
                     }
-                    c_.emitLine(letFn + "(" + tempVar + ", " + lastExpr_ + ");  /* With class prop_let_ */");
+                    // Fix <VBFlexGridDemo>: With 块这条 prop_let_ 与上面 Fix 158h 那条
+                    // (非 With 的 MemberAccess 写) 同病 —— 属性带**前置入口参数**
+                    // (Optional ByRef After) 时只发 (obj, value):
+                    //   VBFlexGrid.ctl:9212 Property Let InsertMark(Optional ByRef After
+                    //   As Boolean, ByVal Value As Long) ⇒ C 声明
+                    //   (me, int16_t* After, int32_t Value, int _has_After)
+                    //   MainForm.frm:746/751 `.InsertMark = .FixedRows` / `.InsertMark = -1`
+                    //   ⇒ prop_let_InsertMark(_vb6_with_22, …) 只有 2 实参 ⇒ C2198×2。
+                    // 复用 Fix 158h 的 padding 模板 (默认值 + Optional 的 _has_ 0)。
+                    std::string padArgsWithLet;
+                    {
+                        std::vector<ParameterInfo> wpWith;
+                        if (!canonicalClassName.empty()
+                            && findClassMemberWriteParams(canonicalClassName, wmExpr.memberName,
+                                                          false, wpWith)
+                            && wpWith.size() > 1) {
+                            padArgsWithLet = tempVar;
+                            size_t npW = wpWith.size() - 1;
+                            for (size_t j = 0; j < npW; j++) {
+                                const ParameterInfo& ppW = wpWith[j];
+                                std::string defW =
+                                    (ppW.hasDefaultValue && !ppW.defaultValueExpr.empty())
+                                    ? ppW.defaultValueExpr : defaultValue(ppW.type);
+                                padArgsWithLet += ", ";
+                                if (ppW.isByVal) {
+                                    padArgsWithLet += defW;
+                                } else {
+                                    std::string ctW = mapType(ppW.type);
+                                    if (ppW.type == Vb6Type::Variant
+                                        || ppW.type == Vb6Type::Empty
+                                        || ppW.type == Vb6Type::Null
+                                        || ppW.type == Vb6Type::Object) {
+                                        padArgsWithLet += "&(" + ctW + "){0}";
+                                    } else {
+                                        padArgsWithLet += "&(" + ctW + "){" + defW + "}";
+                                    }
+                                }
+                            }
+                            padArgsWithLet += ", " + lastExpr_;
+                            for (size_t j = 0; j < npW; j++) {
+                                if (wpWith[j].isOptional) padArgsWithLet += ", 0";
+                            }
+                        }
+                    }
+                    if (!padArgsWithLet.empty()) {
+                        c_.emitLine(letFn + "(" + padArgsWithLet
+                                    + ");  /* With class prop_let_ (Fix <VBFlexGridDemo>) */");
+                    } else {
+                        c_.emitLine(letFn + "(" + tempVar + ", " + lastExpr_ + ");  /* With class prop_let_ */");
+                    }
                     return;
                 }
                 if (!setFn.empty()) {

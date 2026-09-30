@@ -101,6 +101,40 @@ function Test-ComRegistered {
     return $false
 }
 
+# === 超时读数 (与 tests\run_tests.ps1 同形, 两边改就一起改) ===
+# 只量"杀之前"拿得到的东西: CPU 时间 / 进程状态 / **顶层窗口标题**。
+# GUI 卡死最有用的一条是"它还带着哪个窗": 有窗 = 卡在消息循环里 (窗体没被 Unload),
+# 无窗 = 根本没起来、或者窗已销毁却没退干净。
+# ⚠ 这里**不**碰 $OutTask/$ErrTask: 进程活着 ⇒ 重定向管道不关 ⇒ ReadToEndAsync 不可能
+#   完成 ⇒ 任何 Wait 都必超时 ⇒ 输出恒空。要拿到"被杀前已写出的那部分输出", 必须排在
+#   Kill + WaitForExit **之后** (见 Read-KilledProcOutput)。
+function Get-RunTimeoutDiag {
+    param($Proc)
+    $cpu = -1; $st = '?'; $win = ''
+    try { $cpu = [int]$Proc.TotalProcessorTime.TotalMilliseconds } catch { }
+    try { if ($Proc.HasExited) { $st = "exited=$($Proc.ExitCode)" } else { $st = 'alive' } } catch { }
+    try { $Proc.Refresh(); $win = [string]$Proc.MainWindowTitle } catch { }
+    $parts = @("cpu=${cpu}ms", $st)
+    if ($win) { $parts += "win='$win'" }
+    return " (" + ($parts -join ', ') + ")"
+}
+
+# 超时被杀**之后**才读得到的东西: Kill 掉进程 ⇒ 管道关闭 ⇒ ReadToEndAsync 这时才完成,
+# 于是拿得到它在被杀前已经写出的那部分输出 (返回 @{ Out; Err; Last; Lines })。
+function Read-KilledProcOutput {
+    param($OutTask, $ErrTask)
+    $out = ''; $err = ''
+    try { if ($OutTask -and $OutTask.Wait(3000)) { $out = [string]$OutTask.Result } } catch { }
+    try { if ($ErrTask -and $ErrTask.Wait(3000)) { $err = [string]$ErrTask.Result } } catch { }
+    $last = ''
+    foreach ($txt in @($out, $err)) {
+        if ($txt) { $line = @($txt.TrimEnd() -split "`r?`n" | Where-Object { $_ }); if ($line.Count -gt 0) { $last = $line[-1] } }
+    }
+    $lines = 0
+    if ($out) { $lines += @($out -split "`r?`n" | Where-Object { $_ }).Count }
+    return @{ Out = $out; Err = $err; Last = $last; Lines = $lines }
+}
+
 # === 运行产物并捕获输出 (.NET Process + 5s 超时; 手法对齐 run_tests.ps1 Invoke-TestExe) ===
 function Invoke-TestExe {
     param(
@@ -110,7 +144,13 @@ function Invoke-TestExe {
     )
     $stdoutFile = Join-Path $WorkDir "$Name.out"
     $stderrFile = Join-Path $WorkDir "$Name.err"
-    Remove-Item $stdoutFile, $stderrFile -ErrorAction SilentlyContinue
+    # 逐条判存在再删, 不依赖 Remove-Item 对"路径不存在"的宽容度:
+    # 某些宿主 (带 safe-delete 钩子的沙箱) 把 Remove-Item 换成 fail-closed 版本, 目标不存在
+    # 时抛**终止**异常 ⇒ 客户进程一次都没跑, 表现为"零输出、针全缺"且看不出异常痕迹。
+    # (tests\run_tests.ps1 同款修法, 两边保持一致。)
+    foreach ($stale in @($stdoutFile, $stderrFile)) {
+        if (Test-Path $stale) { Remove-Item $stale -ErrorAction SilentlyContinue }
+    }
 
     $errors = @()
     # --- 方案 A: .NET Process + 重定向 ---
@@ -126,9 +166,17 @@ function Invoke-TestExe {
         $soTask = $proc.StandardOutput.ReadToEndAsync()
         $seTask = $proc.StandardError.ReadToEndAsync()
         if (-not $proc.WaitForExit($RunTimeoutSec * 1000)) {
+            # 两步读数: 杀之前只能量 CPU/存活/窗口 (管道还开着, 读不到输出); 杀掉、管道关闭
+            # 之后才拿得到"被杀前已经写出的那部分输出"。少了后半步就永远只能报一个裸超时。
+            $diag = Get-RunTimeoutDiag -Proc $proc
             try { $proc.Kill() } catch { }
             $proc.WaitForExit()
-            return @{ Ok = $false; ExitCode = $null; Output = @(); Detail = "run timeout: ${RunTimeoutSec}s" }
+            $partial = Read-KilledProcOutput -OutTask $soTask -ErrTask $seTask
+            # 落盘: 下次超时能直接翻现场, 不用再猜卡在第几行。
+            if ($partial.Out) { [System.IO.File]::WriteAllText($stdoutFile, [string]$partial.Out, [System.Text.Encoding]::Default) }
+            if ($partial.Err) { [System.IO.File]::WriteAllText($stderrFile, [string]$partial.Err, [System.Text.Encoding]::Default) }
+            $tail = " last='$($partial.Last)' lines=$($partial.Lines)"
+            return @{ Ok = $false; ExitCode = $null; Output = @(); Detail = "run timeout: ${RunTimeoutSec}s$diag$tail" }
         }
         [System.IO.File]::WriteAllText($stdoutFile, [string]$soTask.Result, [System.Text.Encoding]::Default)
         [System.IO.File]::WriteAllText($stderrFile, [string]$seTask.Result, [System.Text.Encoding]::Default)
@@ -334,9 +382,25 @@ function Invoke-VbpSetParallel {
                 $soTask = $proc.StandardOutput.ReadToEndAsync()
                 $seTask = $proc.StandardError.ReadToEndAsync()
                 if (-not $proc.WaitForExit($runTimeoutMs)) {
+                    # 读数: CPU 时间 + 进程状态 + 顶层窗口 + 最后一行输出 (内联 —— -Parallel 的
+                    # runspace 够不到脚本函数)。顺序不能倒: 必须 Kill + WaitForExit **之后**
+                    # 管道才关闭 ⇒ ReadToEndAsync 才完成 ⇒ 才拿得到被杀前已写出的输出。
+                    $cpu = -1; $st = '?'; $win = ''
+                    try { $cpu = [int]$proc.TotalProcessorTime.TotalMilliseconds } catch { }
+                    try { if ($proc.HasExited) { $st = "exited=$($proc.ExitCode)" } else { $st = 'alive' } } catch { }
+                    try { $proc.Refresh(); $win = [string]$proc.MainWindowTitle } catch { }
+                    if ($win) { $win = ", win='$win'" }
                     try { $proc.Kill() } catch { }
                     $proc.WaitForExit()
-                    $f++; $details += "$($it.Name): run timeout $($runTimeoutMs)ms"; continue
+                    $last = ''
+                    foreach ($t in @($soTask, $seTask)) {
+                        if ($t -and $t.Wait(3000)) {
+                            $txt = ''
+                            try { $txt = [string]$t.Result } catch { }
+                            if ($txt) { $line = @($txt.TrimEnd() -split "`r?`n" | Where-Object { $_ }); if ($line.Count -gt 0) { $last = $line[-1] } }
+                        }
+                    }
+                    $f++; $details += "$($it.Name): run timeout $($runTimeoutMs)ms (cpu=${cpu}ms, ${st}$win, last='$last')"; continue
                 }
                 [IO.File]::WriteAllText($stdoutFile, [string]$soTask.Result, [Text.Encoding]::Default)
                 [IO.File]::WriteAllText($stderrFile, [string]$seTask.Result, [Text.Encoding]::Default)

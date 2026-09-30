@@ -134,19 +134,37 @@ if (-not (Test-Path $OutDir)) { New-Item -ItemType Directory -Path $OutDir | Out
 # 判据: CPU≈0 且没有任何输出 = 进程根本没被调度 (机器被并行编译压满, 不是用例的错);
 #       CPU 不小却一直不退出 = 它自己在转/在等, 那是真问题。
 function Get-RunTimeoutDiag {
-    param($Proc, $OutTask, $ErrTask)
-    $cpu = -1; $st = '?'
+    param($Proc)
+    $cpu = -1; $st = '?'; $win = ''
     try { $cpu = [int]$Proc.TotalProcessorTime.TotalMilliseconds } catch { }
     try { if ($Proc.HasExited) { $st = "exited=$($Proc.ExitCode)" } else { $st = 'alive' } } catch { }
+    # GUI 用例最有用的那一条: 它还带着哪个顶层窗。有窗 = 卡在消息循环里 (窗体没被 Unload);
+    # 无窗 = 卡在创建/退出之外的什么地方 (或压根没起来)。
+    try { $Proc.Refresh(); $win = [string]$Proc.MainWindowTitle } catch { }
+    $parts = @("cpu=${cpu}ms", $st)
+    if ($win) { $parts += "win='$win'" }
+    return " (" + ($parts -join ', ') + ")"
+}
+
+# 超时被杀**之后**才读得到的东西: Kill 掉进程 ⇒ 管道关闭 ⇒ ReadToEndAsync 这时才完成,
+# 于是拿得到它在被杀前已经写出的那部分输出 (返回 @{ Out; Err; Last; Lines })。
+#
+# ⚠ 旧版把这段放在 Kill **之前**: 进程还活着 ⇒ 管道绝不关闭 ⇒ ReadToEndAsync 不可能完成,
+#   Wait(1500) 必然超时 ⇒ last 恒为 '' —— 每一次卡死都只能读到 `last=''`, 等于没有线索
+#   (GA 上 ctrlsstab / ctrldlg_probe 那两例GUI 超时就是这么"看不见"的)。
+#   顺序必须是: 量 CPU/存活/窗口 → Kill → WaitForExit → 才读输出。
+function Read-KilledProcOutput {
+    param($OutTask, $ErrTask)
+    $out = ''; $err = ''
+    try { if ($OutTask -and $OutTask.Wait(3000)) { $out = [string]$OutTask.Result } } catch { }
+    try { if ($ErrTask -and $ErrTask.Wait(3000)) { $err = [string]$ErrTask.Result } } catch { }
     $last = ''
-    foreach ($t in @($OutTask, $ErrTask)) {
-        if ($t -and $t.Wait(1500)) {
-            $txt = ''
-            try { $txt = [string]$t.Result } catch { }
-            if ($txt) { $line = @($txt.TrimEnd() -split "`r?`n" | Where-Object { $_ }); if ($line.Count -gt 0) { $last = $line[-1] } }
-        }
+    foreach ($txt in @($out, $err)) {
+        if ($txt) { $line = @($txt.TrimEnd() -split "`r?`n" | Where-Object { $_ }); if ($line.Count -gt 0) { $last = $line[-1] } }
     }
-    return " (cpu=${cpu}ms, ${st}, last='$last')"
+    $lines = 0
+    if ($out) { $lines += @($out -split "`r?`n" | Where-Object { $_ }).Count }
+    return @{ Out = $out; Err = $err; Last = $last; Lines = $lines }
 }
 $script:pass = 0
 $script:fail = 0
@@ -345,14 +363,22 @@ function Invoke-TestExe {
         $soTask = $proc.StandardOutput.ReadToEndAsync()
         $seTask = $proc.StandardError.ReadToEndAsync()
         if (-not $proc.WaitForExit($RunTimeoutSec * 1000)) {
-            $diag = Get-RunTimeoutDiag -Proc $proc -OutTask $soTask -ErrTask $seTask
+            # 两步读数: 杀之前只能量 CPU/存活/窗口 (管道还开着, 读不到输出); 杀掉、管道关闭
+            # 之后才拿得到"被杀前已经写出的那部分输出"。缺了后半步就只剩 last='' —— 看不出
+            # 卡在哪一步 (是 Form_Load 就没起来, 还是 Timer 没触发, 还是 Unload 没落地)。
+            $diag = Get-RunTimeoutDiag -Proc $proc
             try { $proc.Kill() } catch { }
             $proc.WaitForExit()
+            $partial = Read-KilledProcOutput -OutTask $soTask -ErrTask $seTask
+            # 落盘: CI 的 "Upload test logs" 收的就是这两个文件, 下次超时能直接翻到现场。
+            if ($partial.Out) { [System.IO.File]::WriteAllText($stdoutFile, [string]$partial.Out, [System.Text.Encoding]::Default) }
+            if ($partial.Err) { [System.IO.File]::WriteAllText($stderrFile, [string]$partial.Err, [System.Text.Encoding]::Default) }
+            $tail = " last='$($partial.Last)' lines=$($partial.Lines)"
             return @{
                 Ok       = $false
                 ExitCode = $null
                 Output   = @()
-                Detail   = "run timeout: ${RunTimeoutSec}s$diag"
+                Detail   = "run timeout: ${RunTimeoutSec}s$diag$tail"
             }
         }
         $stdout = $soTask.Result
@@ -668,10 +694,14 @@ function Invoke-BasSetParallel {
                 $soTask = $proc.StandardOutput.ReadToEndAsync()
                 $seTask = $proc.StandardError.ReadToEndAsync()
                 if (-not $proc.WaitForExit($runTimeoutMs)) {
-                    # 读数: CPU 时间 + 进程状态 + 最后一行输出 (CPU≈0 且无输出 = 没被调度, 不是挂)
-                    $cpu = -1; $st = '?'
+                    # 读数: CPU 时间 + 进程状态 + 顶层窗口 + 最后一行输出 (CPU≈0 且无输出 = 没被调度, 不是挂)
+                    $cpu = -1; $st = '?'; $win = ''
                     try { $cpu = [int]$proc.TotalProcessorTime.TotalMilliseconds } catch { }
                     try { if ($proc.HasExited) { $st = "exited=$($proc.ExitCode)" } else { $st = 'alive' } } catch { }
+                    try { $proc.Refresh(); $win = [string]$proc.MainWindowTitle } catch { }
+                    if ($win) { $win = ", win='$win'" }
+                    # ⚠ 顺序不能倒: 必须 Kill + WaitForExit **之后**管道才关闭, ReadToEndAsync
+                    #   才完成 ⇒ 这时才拿得到被杀前已写出的输出 (杀之前读只会拿到空串)。
                     try { $proc.Kill() } catch { }
                     $proc.WaitForExit()
                     $last = ''
@@ -682,7 +712,7 @@ function Invoke-BasSetParallel {
                             if ($txt) { $line = @($txt.TrimEnd() -split "`r?`n" | Where-Object { $_ }); if ($line.Count -gt 0) { $last = $line[-1] } }
                         }
                     }
-                    $f++; $details += "$($it.Name): run timeout (cpu=${cpu}ms, ${st}, last='$last')"; continue
+                    $f++; $details += "$($it.Name): run timeout (cpu=${cpu}ms, ${st}$win, last='$last')"; continue
                 }
                 [IO.File]::WriteAllText($stdoutFile, [string]$soTask.Result, [Text.Encoding]::Default)
                 [IO.File]::WriteAllText($stderrFile, [string]$seTask.Result, [Text.Encoding]::Default)

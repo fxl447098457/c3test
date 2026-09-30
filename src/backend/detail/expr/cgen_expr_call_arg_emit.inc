@@ -894,8 +894,18 @@
                                     argCls92y = currentReturnCType_.substr(8);
                                     if (!argCls92y.empty() && argCls92y.back() == '*') argCls92y.pop_back();
                                 }
+                                // Fix <VBFlexGridDemo>: 已知 **Variant 变量**不能走这两条
+                                // 装箱。cExprIsVariant 只认函数表达式 (vb6_VariantXxx( 前缀),
+                                // 裸变量名一律 false; 而 knownObjectVars_ 全程不清空, 别的
+                                // 模块 `Dim Value As Object` 会把 "value" 留在里面 ⇒
+                                // isObjVar92y 为真 ⇒ 把 vb6_VARIANT 强转 (void*) 装箱
+                                // ⇒ C2440 "无法从 vb6_VARIANT 转换为 void *"
+                                // (VBFlexGrid.c prop_set_CellTag / prop_let_CellText 等 6 处)。
+                                // BASE(8c3e981) 发的是 `&Value` (形参本身可寻址), 这里补上
+                                // knownVariantVars_ 判据后正好回到那条 else 分支。
                                 if ((isObjVar92y || !argCls92y.empty())
-                                    && !cExprIsVariant(argVal)) {
+                                    && !cExprIsVariant(argVal)
+                                    && !knownVariantVars_.count(argLs92y)) {
                                     // 落一个**具名** Variant 临时再传址 ——
                                     // 不能用复合字面量 `(vb6_VARIANT){vb6_VariantFromValue(x)}`:
                                     // 那是聚合初始化, 第一个初始化式会去初始化首成员 `vt`

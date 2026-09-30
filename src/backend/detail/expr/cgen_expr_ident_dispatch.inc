@@ -98,7 +98,24 @@
     // - 作为IndexOrCallExpr的callee(函数调用) → 返回函数过程名
     // - 作为普通表达式(返回值引用) → 返回返回值变量
     // P6.7: Property Get也使用返回值赋值语义
-    if (currentProc_ && lower == Symbol::toLower(currentProc_->name)
+    //
+    // Fix <VBFlexGridDemo/GA 36766856082>: 两边都剥类型后缀再比。
+    // Task #40 (40960eb) 给 parseIdentifierOrCall 加了"使用点剥类型后缀"
+    // (`Command$` → `Command`), 但过程**声明**侧走的是 parseProcedureDecl, 不在
+    // parseVariableDecl 的剥后缀范围内 ⇒ `Public Function Command$()` 的符号名仍带 $。
+    // 两侧不一致 ⇒ 本判定失配 (`command` vs `command$`) ⇒ 函数体内对自身函数名的
+    // 引用掉过本分支, 落到末尾内置函数表命中 VB6 内置的 Command$ ⇒ 生成 vb6_Command():
+    //   · `VarPtr(Command$)` → `&(void*){vb6_Command()}`          → C2102
+    //   · `Command$ = LTrim$(Command$)` → `vb6_BSTR_AssignMove(&vb6_Command(), ...)`
+    //   · vb6_ret_Command_ 声明了却从未被赋值 ⇒ Command$() 永远返回空 (静默语义错)
+    // 剥后缀后两边同为 `command`, 回到"引用函数名=引用返回值槽"的 VB6 语义。
+    auto stripSuffixForProcMatch = [](const std::string& s) -> std::string {
+        if (!s.empty() && std::string("$&%!#@").find(s.back()) != std::string::npos) {
+            return s.substr(0, s.size() - 1);
+        }
+        return s;
+    };
+    if (currentProc_ && stripSuffixForProcMatch(lower) == stripSuffixForProcMatch(Symbol::toLower(currentProc_->name))
         && (currentProc_->kind == SymbolKind::Function || currentProc_->kind == SymbolKind::PropertyGet)) {
         if (asCallCallee_) {
             // 在IndexOrCallExpr的callee上下文中, 返回函数名供调用

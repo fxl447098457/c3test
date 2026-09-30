@@ -233,9 +233,25 @@ function Invoke-BasSetParallel {
                 $soTask = $proc.StandardOutput.ReadToEndAsync()
                 $seTask = $proc.StandardError.ReadToEndAsync()
                 if (-not $proc.WaitForExit($runTimeoutMs)) {
+                    # 读数: CPU 时间 + 进程状态 + 顶层窗口 + 最后一行输出 (内联 —— -Parallel 的
+                    # runspace 够不到脚本函数)。顺序不能倒: 必须 Kill + WaitForExit **之后**
+                    # 管道才关闭 ⇒ ReadToEndAsync 才完成 ⇒ 才拿得到被杀前已写出的输出。
+                    $cpu = -1; $st = '?'; $win = ''
+                    try { $cpu = [int]$proc.TotalProcessorTime.TotalMilliseconds } catch { }
+                    try { if ($proc.HasExited) { $st = "exited=$($proc.ExitCode)" } else { $st = 'alive' } } catch { }
+                    try { $proc.Refresh(); $win = [string]$proc.MainWindowTitle } catch { }
+                    if ($win) { $win = ", win='$win'" }
                     try { $proc.Kill() } catch { }
                     $proc.WaitForExit()
-                    $f++; $details += "$($it.Name): run timeout $($runTimeoutMs)ms"; continue
+                    $last = ''
+                    foreach ($t in @($soTask, $seTask)) {
+                        if ($t -and $t.Wait(3000)) {
+                            $txt = ''
+                            try { $txt = [string]$t.Result } catch { }
+                            if ($txt) { $line = @($txt.TrimEnd() -split "`r?`n" | Where-Object { $_ }); if ($line.Count -gt 0) { $last = $line[-1] } }
+                        }
+                    }
+                    $f++; $details += "$($it.Name): run timeout $($runTimeoutMs)ms (cpu=${cpu}ms, ${st}$win, last='$last')"; continue
                 }
                 [IO.File]::WriteAllText($stdoutFile, [string]$soTask.Result, [Text.Encoding]::Default)
                 [IO.File]::WriteAllText($stderrFile, [string]$seTask.Result, [Text.Encoding]::Default)

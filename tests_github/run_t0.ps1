@@ -191,10 +191,25 @@ if (($ShardTotal -gt 1) -and ($Shard -ne 1)) {
                 $soTask = $proc.StandardOutput.ReadToEndAsync()
                 $seTask = $proc.StandardError.ReadToEndAsync()
                 if (-not $proc.WaitForExit(5000)) {
+                    # 读数 (与 tests\run_tests.ps1 同形): 杀之前量 CPU/存活/顶层窗口; 杀掉、
+                    # 管道关闭之后才读得到"被杀前已经写出的那部分输出" —— 顺序倒过来则恒空。
+                    $cpu = -1; $st = '?'; $win = ''
+                    try { $cpu = [int]$proc.TotalProcessorTime.TotalMilliseconds } catch { }
+                    try { if ($proc.HasExited) { $st = "exited=$($proc.ExitCode)" } else { $st = 'alive' } } catch { }
+                    try { $proc.Refresh(); $win = [string]$proc.MainWindowTitle } catch { }
+                    if ($win) { $win = ", win='$win'" }
                     try { $proc.Kill() } catch { }
                     $proc.WaitForExit()
+                    $last = ''
+                    foreach ($t in @($soTask, $seTask)) {
+                        if ($t -and $t.Wait(3000)) {
+                            $txt = ''
+                            try { $txt = [string]$t.Result } catch { }
+                            if ($txt) { $line = @($txt.TrimEnd() -split "`r?`n" | Where-Object { $_ }); if ($line.Count -gt 0) { $last = $line[-1] } }
+                        }
+                    }
                     $script:fail++
-                    Write-Host "  [SMOKE] run FAIL (timeout 5s)" -ForegroundColor Red
+                    Write-Host "  [SMOKE] run FAIL (timeout 5s) (cpu=${cpu}ms, ${st}$win, last='$last')" -ForegroundColor Red
                     $proc = $null
                 }
             } catch {

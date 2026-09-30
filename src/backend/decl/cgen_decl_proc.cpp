@@ -223,6 +223,26 @@ void CCodeGen::visit(SubDecl& node) {
             // 仅当参数未被前面分支精确注册为 Class / ComClass / Interface / UDT 时
             // 才查 C 类型, 避免对 vb6_cls_* / vb6_ComIface_* 等 C 类型参数的错误
             // 注册. 与 visit(VariableDecl) line 651-656 行为一致 (局部 void* 同样注册).
+            // Fix <VBFlexGridDemo>: UDT 形参**优先**登记 (口径同 cgen_decl_func.cpp 那处)。
+            // knownClassVars_ 全程不清空, 别的模块 `Dim This As <工程类>` 会把同名条目
+            // 泄漏过来 ⇒ UDT 形参被当类实例 ⇒ 成员访问回落 COM 后期绑定
+            // vb6_ComGetObjectProp((*This), …) C2172。UDT 与类互斥, 故擦掉残留类条目。
+            {
+                std::string udtCTypeF = mapTypeRef(p->asType.get());
+                while (!udtCTypeF.empty() && (udtCTypeF.back() == '*' || udtCTypeF.back() == ' '))
+                    udtCTypeF.pop_back();
+                if (udtCTypeF.compare(0, 9, "vb6_type_") == 0) {
+                    knownUdtVars_[pLower] = udtCTypeF;
+                    // 同 cgen_decl_func.cpp: 擦掉互斥表里的同名残留 (它们都全程不清空,
+                    // 且判定分支排在 obj_dispatch 的 UDT 字段分支之前)。
+                    knownClassVars_.erase(pLower);
+                    knownTypedComVars_.erase(pLower);
+                    knownIfaceVars_.erase(pLower);
+                    knownIvrefVars_.erase(pLower);
+                    knownObjectVars_.erase(pLower);
+                    knownVariantVars_.erase(pLower);
+                }
+            }
             if (!knownClassVars_.count(pLower) && !knownTypedComVars_.count(pLower)
                 && !knownIfaceVars_.count(pLower) && !knownUdtVars_.count(pLower)) {
                 std::string paramCType = mapTypeRef(p->asType.get());
