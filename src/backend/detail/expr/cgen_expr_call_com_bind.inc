@@ -97,13 +97,21 @@
         // HWND, 不是 vb6_hwnd_ 前缀形态, 必须单独认, 否则落
         // vb6_ComGetObjectProp(lv, L"ListItems") = 拿 HWND 当 IDispatch 用
         // (extlist RefillList 实测: 窗口起来但 0 行)。
-        bool axSlotObj = comObjExpr_.find("vb6_com_") == 0
-                      || comObjExpr_.find("vb6_hwnd_") == 0
-                      || isListViewHostExpr(comObjExpr_)
-                      || !treeViewNameOfExpr(comObjExpr_).empty()
-                      || !toolbarNameOfExpr(comObjExpr_).empty()
-                      // C29-Data: Data1.Recordset 的透传形态 (Fields/Item 走 Step1+Item 路)。
-                      || comObjExpr_.find("vb6_Data_Self(") == 0;
+        // <vbeclipse>: 上面那句"集合对象本身不能进"过去由 `vb6_hwnd_` 那个**前缀锚**兜住
+        // (dev 的写法是 `find("vb6_hwnd_")==0 && (listView||treeView||toolbar 命中)`)。
+        // 这一支持改成 isListViewHostExpr / *NameOfExpr 这些**子串**判据后，锚就失效了：
+        // vb6_TreeView_Nodes((void*)vb6_hwnd_tv1) 里嵌着 vb6_hwnd_tv1，子串一命中就被当成
+        // 宿主槽，`Nodes.Add(…)` 于是编成"取 Add 属性 + Item 下标"——节点根本没加进去，
+        // Index 全读空 (实测 12 条控件回读红: ctrltreeview / ctrltoolbar / c29listview /
+        // c29sbevt 各 x64+x86)。现在由 isControlCollectionExpr 显式挡 (一处有名字的话)。
+        bool axSlotObj = !isControlCollectionExpr(comObjExpr_)
+                      && (comObjExpr_.find("vb6_com_") == 0
+                          || comObjExpr_.find("vb6_hwnd_") == 0
+                          || isListViewHostExpr(comObjExpr_)
+                          || !treeViewNameOfExpr(comObjExpr_).empty()
+                          || !toolbarNameOfExpr(comObjExpr_).empty()
+                          // C29-Data: Data1.Recordset 的透传形态 (Fields/Item 走 Step1+Item 路)。
+                          || comObjExpr_.find("vb6_Data_Self(") == 0);
         if (axSlotObj && !node.positional.empty()) {
             std::string axObjExpr = std::move(comObjExpr_);
             std::string axMember = std::move(comMemberName_);
