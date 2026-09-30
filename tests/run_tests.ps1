@@ -233,6 +233,30 @@ function Test-ComRegistered {
     return $false
 }
 
+# === 静态对表: DI 桩 census ===
+# 判据与基线都在 scripts/check_di_stubs.ps1 + scripts/di_stubs_manifest.txt (只许增不许静默减)。
+# 子进程跑 (脚本以 exit 收尾, 直接 & 调用会把本 runner 一起 exit 掉)。没有 pwsh 时 SKIP ——
+# 本 runner 本来就可跑在 Windows PowerShell 5.1 下。
+function Test-DiStubCensus {
+    $script:total++
+    Write-Host -NoNewline "  [STATIC] di_stubs_census ... "
+    $ps7 = Get-Command pwsh -ErrorAction SilentlyContinue
+    if (-not $ps7) {
+        $script:skip++
+        Write-Host "SKIP (无 pwsh)" -ForegroundColor Yellow
+        return
+    }
+    $out = & $ps7.Source -NoProfile -File "$Root\scripts\check_di_stubs.ps1" 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        $script:pass++
+        Write-Host "PASS" -ForegroundColor Green
+    } else {
+        $script:fail++
+        Write-Host "FAIL" -ForegroundColor Red
+        $out | Select-Object -Last 14 | ForEach-Object { Write-Host "  $_" }
+    }
+}
+
 # === 冒烟测试 (编译+链接+运行) ===
 function Test-Compile {
     param([string]$Name, [string]$Source)
@@ -3556,6 +3580,15 @@ if ($VbpShardTotal -gt 1) {
 }
 
 if ($Category -in @("all", "compile")) {
+    # --- 静态对表: DI 桩 census (只许增, 不许静默减) ---
+    # 见 scripts/check_di_stubs.ps1 头注释: 重生成 di 桩是按"跑它那次会话的引用面"发桩的,
+    # 换个工程会话重跑就会**静默丢掉**上次的桩 (本批实测丢 9 个 + winspool.lib), 而只有
+    # 某个工程恰好 Declare 到它时才在链接期以 LNK2019 暴露 —— 那是门里"看运气"才发现的红。
+    # 这里改成每次 compile 段都静态对一遍基线 (不编译、不跑程序)。
+    Write-Host "--- Static Checks ---" -ForegroundColor Yellow
+    Test-DiStubCensus
+    Write-Host ""
+
     # --- 综合测试 (编译+运行, 以 Main 为程序入口) ---
     Write-Host "--- Compile Tests ---" -ForegroundColor Yellow
     
