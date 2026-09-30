@@ -42,6 +42,22 @@ void CCodeGen::visit(CallStmt& node) {
                     std::string memLower = member.memberName;
                     std::transform(memLower.begin(), memLower.end(), memLower.begin(), ::tolower);
 
+                    // Fix <vbeclipse>: 语句式 `Debug.Assert <expr>` —— VB6 **编译版**语义是
+                    // 整句被移除且**条件不求值** (只有 IDE 里才求值). 这正是"用一个带 ByRef
+                    // 出参的函数把函数自身返回值置 True"的经典写法所依赖的:
+                    //   Private Function Subclass_InIDE() As Boolean
+                    //       Debug.Assert zSetTrue(Subclass_InIDE)   ' zSetTrue 置 True, 返回 True
+                    //   End Function
+                    // 编译版必须返回 False (MagneticWnd 据此选择 SetWindowLongA 子类化路径);
+                    // 若照常求值 → 返回 True → 走 IDE 分支用 vba6!EbMode 的地址(NULL, 因为
+                    // 独立 EXE 没加载 vba6)去 patch 机器码桩 → 桩内 call 0 → 运行期
+                    // 0xC0000005(实测读 0x784000) + 堆损坏 (VbEclipse play78.exe).
+                    // 故此处只落一条注释, 实参一个都不 emit (求值即产生副作用).
+                    if (objLower == "debug" && memLower == "assert") {
+                        c_.emitLine("/* Debug.Assert <expr> removed (compiled-mode semantics) */");
+                        return;
+                    }
+
                     // Fix 161: Console.WriteLine/.Write 复用 Debug.Print 的"逐参转 BSTR
                     // 后输出"路径 (两者都是语句式输出调用, 参数需按 BSTR 转换; 区别仅在
                     // 换行/输出函数)。Console.Write 不换行, WriteLine 换行。

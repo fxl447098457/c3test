@@ -583,7 +583,18 @@ std::string CCodeGen::comPackExpr(Expr& expr) {
 // 生成的 vb6_ComPack_<类>(vb6_cls_<类>_New()) 返回 void* (堆上 VARIANT*,
 // VT_DISPATCH), 与 vb6_NewObject 的返回表示一致, 下游晚绑定路径零改动.
 std::string CCodeGen::comNewExprFor(const Symbol* comSym) {
-    if (!comSym || comSym->comProjectImplClass.empty()) return "";
+    if (!comSym) return "";
+    // Fix <vbeclipse>-2: 本工程有同名类模块 ⇒ New 出来的必须是**原生**
+    // vb6_cls_<工程类>_New(), 与 mapTypeRef 现在对该类型名返回的 vb6_cls_* 变量
+    // 类型一致. 判据与 mapTypeRef 同源 (projectClassNameOf, 不是 isExternal:
+    // 类型库自动加载注进来的内建 coclass isExternal=false).
+    // 例: 工程类 Folder 撞 Shell32 的 coclass Folder → `New Folder` 必须是原生
+    // 实例, 否则把原生指针当 VARIANT*/IDispatch 解 → vt=0 → 分发全 "not found".
+    const std::string projCls = projectClassNameOf(comSym->name);
+    if (!projCls.empty()) {
+        return "vb6_cls_" + cIdent(projCls) + "_New()";
+    }
+    if (comSym->comProjectImplClass.empty()) return "";
     std::string impl = cIdent(comSym->comProjectImplClass);
     return "vb6_ComPack_" + impl + "(vb6_cls_" + impl + "_New())";
 }

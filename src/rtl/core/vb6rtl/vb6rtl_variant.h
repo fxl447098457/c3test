@@ -113,10 +113,22 @@ static inline vb6_VARIANT vb6_VariantByte(uint8_t val) {
     v.vt = vb6_vtByte; v.bVal = val; return v;
 }
 
+// Fix <vbeclipse>: vb6_ReleaseObject 的反向操作, 定义在 vb6com/ (与 vb6_ReleaseObject
+// 共用 vb6_ComIsDispatchable 判据)。此处前向声明, 避免 vb6rtl_variant.h 反向依赖 vb6com.h。
+void vb6_ComAddRefDispatch(void* p);
+
 // Fix 024: Variant containing a COM object pointer (VT_DISPATCH)
+// Fix <vbeclipse>: **必须 AddRef** —— vb6_VariantClear() 对 vb6_vtDispatch 会调
+// vb6_ReleaseObject, 构造侧不取引用而析构侧释放 = 过度释放 → 0xC0000374 堆损坏
+// (实证 ucPerspective.AddView 的 `m_Views.Add ViewId, l_View` + 随后 `Set l_View = Nothing`:
+//  容器里留下指向已释放对象的 Variant)。VB6 里 `coll.Add key, obj` 也是 AddRef 的。
+// 防御: 只对真 COM 接收者 AddRef (vb6_ComAddRefDispatch 内含 vb6_ComIsDispatchable),
+// 裸结构体/UDT 地址照旧只存指针。
 static inline vb6_VARIANT vb6_VariantObject(void* val) {
     vb6_VARIANT v; memset(&v, 0, sizeof(v));
-    v.vt = vb6_vtDispatch; v.pdispVal = val; return v;
+    v.vt = vb6_vtDispatch; v.pdispVal = val;
+    vb6_ComAddRefDispatch(val);
+    return v;
 }
 
 // Fix 024: Variant identity passthrough — used by vb6_VariantFromValue

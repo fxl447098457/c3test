@@ -145,7 +145,23 @@ bool Driver::runCrossModuleResolution() {
                 && localSym->overloadFp != srcSym->overloadFp) {
                 ovlVariantAllowed = true;
             }
-            if (localSym && !ovlVariantAllowed) {
+            // Fix <vbeclipse>: 工程类与**类型库内建** coclass/接口同名时, 工程内定义优先.
+            // 不 continue, 落到下方注入路径, 由 defineExternal(replaceBuiltinCom=true) 用
+            // 工程 Class 符号替换内建符号。理由: 消费模块里这个名字原本被类型库符号占着
+            // (如 ScrRun 的 coclass Folder / IFolder), 它的成员表是外部库的 —— 工程类
+            // Folder.cls 的 AddView / ActiveViewId 等成员解析不到, 退回"数据字段"访问
+            // (ucPerspective.c: `l_Folder->AddView` C2039 / `vb6_Folder_prop_let_
+            // ActiveViewId((*Folder))` C2198). 替换后成员表/ memberProcKinds 齐备,
+            // 且 mapTypeRef 走 Class 分支得到原生 vb6_cls_Folder*。
+            // 注意: 仅替换内建 (isBuiltin) 占用者; 本地真实定义仍按老语义让位。
+            bool replaceBuiltinComSym = false;
+            if (localSym && srcSym->kind == SymbolKind::Class && !srcSym->isInterface
+                && localSym->isBuiltin
+                && (localSym->kind == SymbolKind::ComClass
+                    || localSym->kind == SymbolKind::ComInterface)) {
+                replaceBuiltinComSym = true;
+            }
+            if (localSym && !ovlVariantAllowed && !replaceBuiltinComSym) {
                 // Fix 177b: 引用类型库的同名 coclass 被本工程同名类模块遮蔽时,
                 // **不替换符号**, 只在 builtin ComClass 上记下工程实现类名.
                 // VB6 语义: 工程内定义优先于引用库 (VBMAN.vbp 定义 Class=Dictionary,
@@ -243,7 +259,7 @@ bool Driver::runCrossModuleResolution() {
                 extSym->dimCount = srcSym->dimCount;
             }
 
-            symTab.defineExternal(std::move(extSym));
+            symTab.defineExternal(std::move(extSym), replaceBuiltinComSym);
         }
     }
 

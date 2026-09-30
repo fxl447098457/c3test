@@ -338,8 +338,12 @@ void vb6_VariantCopy(vb6_VARIANT* dst, const vb6_VARIANT* src) {
     }
     // Dispatch需要AddRef
     if (src->vt == vb6_vtDispatch && src->pdispVal) {
-        // COM AddRef would go here; simplified: just copy pointer
+        // Fix <vbeclipse>: 原先注释自认 "COM AddRef would go here; just copy pointer" ——
+        // 但 vb6_VariantClear 会对 vb6_vtDispatch 调 vb6_ReleaseObject, 所以浅拷贝 + 双方各
+        // Clear 一次 = 过度释放 (0xC0000374)。与 vb6_VariantObject 同口径补 AddRef,
+        // 使「每个持有 Variant 的槽位各自持有一份引用」成立。
         dst->pdispVal = src->pdispVal;
+        vb6_ComAddRefDispatch(dst->pdispVal);
     }
 }
 

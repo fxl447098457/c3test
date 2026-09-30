@@ -128,7 +128,15 @@ void CCodeGen::visit(SubDecl& node) {
             } else if (pSym && pSym->kind == SymbolKind::Class) {
                 knownClassVars_[pLower] = pSym->name;
             } else if (pSym && (pSym->kind == SymbolKind::ComClass || pSym->kind == SymbolKind::ComInterface)) {
-                knownTypedComVars_[pLower] = pSym;
+                // Fix <vbeclipse>-2: 同 cgen_decl_func.cpp —— 本工程有同名类模块时走原生
+                // (判据 projectClassNameOf, 不是 isExternal; 类型库自动加载注进来的
+                // 内建 coclass isExternal=false).
+                const std::string projCls2 = projectClassNameOf(simpleP.name);
+                if (!projCls2.empty()) {
+                    knownClassVars_[pLower] = projCls2;
+                } else {
+                    knownTypedComVars_[pLower] = pSym;
+                }
             }
             // 接口类型的参数
             auto* pSym2 = symTab_.lookup(simpleP.name);
@@ -259,6 +267,7 @@ void CCodeGen::visit(SubDecl& node) {
     resumePointCounter_ = 0;
     dispatchPoints_.clear();
     currentErrorHandlerLabel_.clear();
+    procExitLabelUsed_ = false;
     if (hasOnError_) {
         c_.emitLine("jmp_buf vb6_local_err_jmp;");
         if (hasResume_) {
@@ -294,6 +303,13 @@ void CCodeGen::visit(SubDecl& node) {
         }
     }
     emitStmtList(node.body, hasResume_);
+
+    // Fix <vbeclipse>: 过程统一出口。Exit Sub 发的 `goto vb6_proc_exit;` 落在这里,
+    // 保证 vb6_RestoreErrState() 与 ivref Release 在所有退出路径上都会执行
+    // (VB6: 过程退出自动恢复错误处理状态)。见 cgen_state.inc procExitLabelUsed_ 注释。
+    if (procExitLabelUsed_) {
+        c_.emitLine("vb6_proc_exit:;");
+    }
 
         // P12.3: 恢复调用者的错误处理状态
     if (hasOnError_) {
@@ -339,6 +355,7 @@ void CCodeGen::visit(SubDecl& node) {
     inProtectedBlock_ = false;
     dispatchPoints_.clear();
     currentErrorHandlerLabel_.clear();
+    procExitLabelUsed_ = false;
     c_.dedent();
     c_.emitLine("}");
     c_.emitBlank();

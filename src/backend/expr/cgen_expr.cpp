@@ -359,8 +359,51 @@ void CCodeGen::visit(NewExpr& node) {
             lastExpr_ = "(void*)vb6_NewObject(L\"" + progId + "\")";
         }
     } else {
-        // 外部/COM对象: 回退到运行时
-        lastExpr_ = "vb6_NewObject(L\"" + node.className + "\")";
+        // Fix <vbeclipse>: 名字在本模块符号表里既不是 Class 也不是 ComClass —— 最常见的
+        // 是类型名被**同名形参/局部变量遮蔽**, 或跨模块注入没覆盖到: ucPerspective.ctl
+        //   Public Sub AddView(ByVal ViewId As String, ByRef View As Object)
+        //       Dim l_View As View           ' ← "View" 是类 (Fix <vbeclipse>-3 已按类处理)
+        //       Set l_View = New View        ' ← 这里的 "View" 命中的是形参符号
+        //   End Sub
+        // 工程级类名表不受遮蔽 → 有同名类模块就发它的类工厂.
+        //
+        // Fix <vbeclipse>-4: **发原生实例, 不再自己包 IDispatch**。
+        // 原先这里发 vb6_ComPackVB6InstanceRaw(<类>, <类>_New()) —— 那是 VARIANT*
+        // (只适合当 COM 实参), 理由写的是"落到本分支说明语境是 void*/Object/Variant"。
+        // 该前提不成立: 类型名查不到也可能只是遮蔽/未注入, 此时变量本身已被
+        // Fix <vbeclipse>-3 声明成 vb6_cls_<C>*, 于是
+        //   l_View = vb6_ComPackVB6InstanceRaw("View", vb6_cls_View_New());
+        // 把 VARIANT* 塞进 vb6_cls_View* → 之后按类结构体解引用 (%p=0 实测 l_View=NULL,
+        // 因为类未登记 coclass 时该包装返回 NULL) → vb6_List_Add 内 vb6_List_Contains(NULL)
+        // 读 0xc 崩。包装是**消费方**的职责, 各消费点已有专门机制:
+        //   - Set <void*/Object 目标>   → set_rhs.inc Fix 179a 包成 IDispatch
+        //   - Set <Variant 目标>       → vb6_VariantFromValue _Generic 包装
+        //   - Set <typed 工程类目标>    → 裸指针直赋
+        // 与上方 Class 分支同形 (原生实例) 即处处正确。
+        const std::string projClsNew = projectClassNameOf(node.className);
+        if (!projClsNew.empty()) {
+            std::string clsStructNew = "vb6_cls_" + cIdent(projClsNew);
+            std::string innerNew;
+            if (!node.args.empty()) {
+                std::vector<std::string> emittedNew;
+                for (auto& a : node.args) {
+                    emitExpr(*a);
+                    emittedNew.push_back(std::move(lastExpr_));
+                }
+                std::string joinedNew;
+                for (auto& e : emittedNew) {
+                    if (!joinedNew.empty()) joinedNew += ", ";
+                    joinedNew += e;
+                }
+                innerNew = clsStructNew + "_NewParams(" + joinedNew + ")";
+            } else {
+                innerNew = clsStructNew + "_New()";
+            }
+            lastExpr_ = "(" + innerNew + ")";
+        } else {
+            // 外部/COM对象: 回退到运行时
+            lastExpr_ = "vb6_NewObject(L\"" + node.className + "\")";
+        }
     }
 }
 

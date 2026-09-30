@@ -433,6 +433,14 @@
     std::vector<int> dispatchPoints_;   // 已生成的resume点索引列表
     std::string currentErrorHandlerLabel_; // 当前On Error GoTo的错误处理器标签名
 
+    // Fix <vbeclipse>: 过程统一出口 (vb6_proc_exit) 是否被引用。
+    // VB6 语义: 过程退出时错误处理状态**自动恢复**。原先 Exit Sub/Function/Property
+    // 发裸 `return;`, 直接越过过程尾部的 vb6_RestoreErrState() —— vb6_err_stack_top
+    // 不弹栈且 vb6_error_jmp_ptr 仍指向**已失效的栈帧**; 之后任何 VB 错误
+    // (vb6_ErrRaise) 都会 longjmp 进死帧 → 野读崩。
+    // 现在 Exit* 改为 `goto vb6_proc_exit;`, 尾部统一做 restore/release/return。
+    bool procExitLabelUsed_ = false;
+
     // P6.5: WithEvents变量 (小写变量名 → 源类名)
     // Dim WithEvents obj As ClassName → knownWithEventsVars_["obj"] = "ClassName"
     std::unordered_map<std::string, std::string> knownWithEventsVars_;

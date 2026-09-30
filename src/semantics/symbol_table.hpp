@@ -504,7 +504,9 @@ public:
 
     // 注入一个跨模块外部符号（由Driver在跨模块解析pass中调用）
     // 在模块级作用域定义一个isExternal=true的符号
-    void defineExternal(std::unique_ptr<Symbol> sym);
+    // replaceBuiltinCom: 仅当同名占用者是**类型库内建** coclass/接口、且待注入的是
+    // 工程 Class 时替换之 (VB6: 工程类遮蔽引用库同名 coclass; Fix <vbeclipse>)
+    void defineExternal(std::unique_ptr<Symbol> sym, bool replaceBuiltinCom = false);
 
     // 获取所有模块级Public符号（供其他模块链接用）
     // 返回 name → Symbol* 的映射（仅Sub/Function/Variable/Constant, Public访问级别）

@@ -1,4 +1,16 @@
 // c3rtl.rc - RTL runtime library embedded as resources
+// Fix <vbeclipse>: vb6_SafeArrayReDimPreserve1D 的 arr==NULL 分支不再回落
+// vb6_sa_empty(=elemType 0 → 4 字节), 改用 vb6_sa_variant (元素最大) —— 否则
+// "首次 ReDim 一个 Variant 数组" 会按 4 字节/元素分配, 存 16 字节 Variant 时
+// 越界 12 字节/元素 → 堆损坏 0xC0000374 (vb6rtl_array.c)。
+// Fix <vbeclipse>: Variant 对象引用计数补齐 —— 新增 vb6_ComAddRefDispatch (vb6com.c,
+// 与 vb6_ReleaseObject 共用 vb6_ComIsDispatchable 判据), 并在构造侧补 AddRef:
+// vb6rtl_variant.h 的 vb6_VariantObject + vb6rtl.c 的 vb6_VariantCopy。
+// 原先「构造不 AddRef、Clear 却 Release」= 过度释放 → 对象被原主 Set Nothing 释放后
+// 容器仍指向它 → 0xC0000374 堆损坏。
+// Fix <vbeclipse>: vb6rtl_array.c 的 vb6_UBound(NULL) 由 0 改 -1 —— 未初始化的
+// 动态数组 (List.cls 的 `Dim m_Keys() As String`) 上 `For i = 0 To UBound(x)` 必须
+// 零次迭代, 返回 0 会跑一次并解引用 NULL 数组 (VB6_SA_AT 读 NULL+0xc → AV)。
 // P10 (restored): RTL is embedded as .c/.h SOURCE and compiled by MSVC
 // at user-program build time. The P11.3 pre-compiled .lib scheme was
 // reverted: c3 is open source, no source protection needed.

@@ -264,6 +264,21 @@ void CCodeGen::visit(VariableDecl& node) {
         if (comSym && (comSym->kind == SymbolKind::ComClass || comSym->kind == SymbolKind::ComInterface)) {
             std::string lower = node.name;
             std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+            // Fix <vbeclipse>-2: 本工程有同名类模块 ⇒ 该类型名指工程类, 走**原生**
+            // (VB6: 工程内定义优先于引用库). 类型库自动加载把 Shell32 的 coclass
+            // Folder / ScrRun 的 Dictionary 注进每个模块, 且 isExternal=false ——
+            // 若登记进 knownTypedComVars_ 就会把原生 vb6_cls_<Name>* 当 IDispatch
+            // 解 vtable (ucPerspective CreateFolder 的 `With Folder.Views` → 0xC0000005).
+            const std::string projClsVar = projectClassNameOf(simple.name);
+            if (!projClsVar.empty()) {
+                knownClassVars_[lower] = projClsVar;
+                knownObjectVars_.erase(lower);
+                if (node.isNew) {
+                    knownNewVars_[lower] = cIdent(projClsVar);   // Dim As New 工程类
+                    moduleNewVars_[lower] = cIdent(projClsVar);
+                }
+                if (node.isWithEvents) knownWithEventsVars_[lower] = projClsVar;
+            } else {
             knownTypedComVars_[lower] = comSym;
             knownTypedComVarCType_[lower] = cType;  // Fix 090v-com: 供 As New 守卫转型
             knownObjectVars_.erase(lower);  // 优先前期绑定
@@ -275,6 +290,7 @@ void CCodeGen::visit(VariableDecl& node) {
             // P13.23: ComClass WithEvents -> knownWithEventsVars_
             if (node.isWithEvents && comSym->kind == SymbolKind::ComClass && comSym->comHasSourceIface) {
                 knownWithEventsVars_[lower] = comSym->name;
+            }
             }
         }
     }

@@ -123,7 +123,18 @@ void CCodeGen::visit(FunctionDecl& node) {
             } else if (pSym && pSym->kind == SymbolKind::Class) {
                 knownClassVars_[pLower] = pSym->name;
             } else if (pSym && (pSym->kind == SymbolKind::ComClass || pSym->kind == SymbolKind::ComInterface)) {
-                knownTypedComVars_[pLower] = pSym;
+                // Fix <vbeclipse>-2: 本工程有同名类模块 ⇒ 类型名指工程类, 走原生
+                // (VB6: 工程内定义优先于引用库). 类型库自动加载会把 Shell32 的
+                // coclass Folder / ScrRun 的 Dictionary 注进每个模块且 isExternal=false,
+                // 若登记进 knownTypedComVars_ 就会把原生 vb6_cls_<Name>* 当 IDispatch
+                // 解 vtable (ucPerspective CreateFolder 的 `With Folder.Views` →
+                // 0xC0000005). 判据与 mapTypeRef 同源: projectClassNameOf.
+                const std::string projCls2 = projectClassNameOf(simpleP.name);
+                if (!projCls2.empty()) {
+                    knownClassVars_[pLower] = projCls2;
+                } else {
+                    knownTypedComVars_[pLower] = pSym;
+                }
             }
             auto* pSym2 = symTab_.lookup(pLookup161f);
             if (pSym2 && pSym2->kind == SymbolKind::Class && pSym2->isInterface) {
@@ -334,6 +345,7 @@ void CCodeGen::visit(FunctionDecl& node) {
     resumePointCounter_ = 0;
     dispatchPoints_.clear();
     currentErrorHandlerLabel_.clear();
+    procExitLabelUsed_ = false;
     if (hasOnError_) {
         c_.emitLine("jmp_buf vb6_local_err_jmp;");
         if (hasResume_) {
@@ -364,6 +376,12 @@ void CCodeGen::visit(FunctionDecl& node) {
         }
     }
     emitStmtList(node.body, hasResume_);
+
+    // Fix <vbeclipse>: 统一出口 (Exit Function → goto vb6_proc_exit),
+    // 保证 vb6_RestoreErrState() 在提前返回路径上也执行。
+    if (procExitLabelUsed_) {
+        c_.emitLine("vb6_proc_exit:;");
+    }
 
         // P12.3: 恢复调用者的错误处理状态
     if (hasOnError_) {
@@ -412,6 +430,7 @@ void CCodeGen::visit(FunctionDecl& node) {
     inProtectedBlock_ = false;
     dispatchPoints_.clear();
     currentErrorHandlerLabel_.clear();
+    procExitLabelUsed_ = false;
     c_.dedent();
     c_.emitLine("}");
     c_.emitBlank();

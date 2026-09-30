@@ -123,7 +123,15 @@ void CCodeGen::visit(PropertyDecl& node) {
             } else if (pSym && pSym->kind == SymbolKind::Class) {
                 knownClassVars_[pLower] = pSym->name;
             } else if (pSym && (pSym->kind == SymbolKind::ComClass || pSym->kind == SymbolKind::ComInterface)) {
-                knownTypedComVars_[pLower] = pSym;
+                // Fix <vbeclipse>-2: 同 cgen_decl_func.cpp —— 本工程有同名类模块时走原生
+                // (判据 projectClassNameOf, 不是 isExternal; 类型库自动加载注进来的
+                // 内建 coclass isExternal=false).
+                const std::string projCls2 = projectClassNameOf(simpleP.name);
+                if (!projCls2.empty()) {
+                    knownClassVars_[pLower] = projCls2;
+                } else {
+                    knownTypedComVars_[pLower] = pSym;
+                }
             }
             auto* pSym2 = symTab_.lookup(simpleP.name);
             if (pSym2 && pSym2->kind == SymbolKind::Class && pSym2->isInterface) {
@@ -258,6 +266,7 @@ void CCodeGen::visit(PropertyDecl& node) {
     c_.indent();
     // P12.3: 检测On Error并声明局部错误处理
     hasOnError_ = hasOnErrorInStmts(node.body);
+    procExitLabelUsed_ = false;
     if (hasOnError_) {
         c_.emitLine("jmp_buf vb6_local_err_jmp;");
         c_.emitLine("vb6_SaveErrState();");
@@ -282,6 +291,18 @@ void CCodeGen::visit(PropertyDecl& node) {
     }
     emitStmtList(node.body);
 
+    // Fix <vbeclipse>: Property 的统一出口 + **缺失的错误状态恢复**。
+    // 原先 Property 只在中段发 vb6_SaveErrState() 而**从不** RestoreErrState,
+    // 于是每次调用都泄漏一层错误状态, 且 vb6_error_jmp_ptr 停留在本 Property
+    // 已失效的 vb6_local_err_jmp 上; 之后任何 vb6_ErrRaise 都会 longjmp 进死帧
+    // (野读崩)。Exit Property 现在发 `goto vb6_proc_exit;` 落到这里。
+    if (procExitLabelUsed_) {
+        c_.emitLine("vb6_proc_exit:;");
+    }
+    if (hasOnError_) {
+        c_.emitLine("vb6_RestoreErrState();");
+    }
+
     // M22: 释放ANSI临时变量
     for (auto& ansiVar : ansiTempsToFree_) {
         c_.emitLine("vb6_FreeANSI(" + ansiVar + ");");
@@ -289,12 +310,15 @@ void CCodeGen::visit(PropertyDecl& node) {
     ansiTempsToFree_.clear();
     ansiOutParams_.clear();
 
-    // tB Interface B05: 接口变量持有引用, 正常出口处经槽 Release (Exit Sub 例外, 同 ANSI 临时变量)
+    // tB Interface B05: 接口变量持有引用, 正常出口处经槽 Release
     emitIvrefScopeRelease();
 
     // Property Get: 隐式返回 vb6_ret_<propName>
     if (node.propKind == ProcKind::PropertyGet && node.returnType) {
         c_.emitLine("return " + currentReturnVar_ + ";");
+    } else if (procExitLabelUsed_) {
+        // Property Let/Set: 无返回值。给 vb6_proc_exit 一个后继语句 (标签后必须有语句)。
+        c_.emitLine("return;");
     }
     c_.dedent();
 
@@ -309,6 +333,7 @@ void CCodeGen::visit(PropertyDecl& node) {
     }
     currentProc_ = nullptr;
     hasOnError_ = false;
+    procExitLabelUsed_ = false;
 
     c_.emitLine("}");
     c_.emitBlank();

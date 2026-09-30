@@ -368,7 +368,7 @@ bool SymbolTable::inProcedure() const {
 
 // --- 跨模块符号操作 ---
 
-void SymbolTable::defineExternal(std::unique_ptr<Symbol> sym) {
+void SymbolTable::defineExternal(std::unique_ptr<Symbol> sym, bool replaceBuiltinCom) {
     // 在模块级作用域定义外部符号
     // 如果已存在同名符号（本地已有定义），跳过不覆盖
     if (!moduleScope_) return;
@@ -383,6 +383,19 @@ void SymbolTable::defineExternal(std::unique_ptr<Symbol> sym) {
     }
     auto it = moduleScope_->symbols_.find(key);
     if (it != moduleScope_->symbols_.end()) {
+        // Fix <vbeclipse>: 工程类与**类型库内建 coclass/接口**同名时, 工程内定义优先
+        // (VB6: 工程类遮蔽引用库同名 coclass). 消费模块里这个名字原本被类型库符号
+        // 占着 (如 ScrRun 的 Folder), 其成员表是外部库的 → 工程类的 AddView/
+        // ActiveViewId 等成员解析不到, 退回"数据字段"访问 (C2039/C2198).
+        // 只有调用方显式请求 (driver_crossmod 的同名冲突分支) 才替换, 其余保持
+        // "本地已有定义不注入" 的老语义.
+        if (replaceBuiltinCom && sym->kind == SymbolKind::Class
+            && !sym->isInterface && it->second && it->second->isBuiltin
+            && (it->second->kind == SymbolKind::ComClass
+                || it->second->kind == SymbolKind::ComInterface)) {
+            it->second = std::move(sym);
+            return;
+        }
         // 本地已有定义，不注入外部符号
         return;
     }

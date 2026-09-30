@@ -68,9 +68,22 @@ void CCodeGen::visit(WithStmt& node) {
                     outerInfo.kind == WithObjKind::COMObject) {
                     // 方法返回值通常是同类或另一个类实例
                     withInfo.kind = WithObjKind::ClassInstance;
-                    // Fix 011r-1: 继承外层className (对property chain如 .SubObj.SubMethod常见)
-                    // 注意: 如外层方法返回不同类实例, 此继承会错误 — 当前简化处理
-                    withInfo.className = outerInfo.className;
+                    // Fix <vbeclipse>: 不能无条件继承外层类名 —— 先问该成员的**声明返回类**。
+                    // ucPerspective.ctl `With l_Folder` 内的 `With .Position`
+                    // (Position As Rectangle) 若继承外层 "Folder", 内层 .Left/.Right/
+                    // .Top/.Bottom 会被解析到 Folder 上, 生成 vb6_Folder_prop_let_Left
+                    // → LNK2019; 且临时变量被强转成 vb6_cls_Folder* (实际是 Rectangle*).
+                    // 取不到返回类时再退回继承外层类名 (Fix 011r-1 原行为).
+                    if (!outerInfo.className.empty()
+                        && node.object->kind == ASTNodeKind::WithMemberExpr) {
+                        auto& wmRet = static_cast<WithMemberExpr&>(*node.object);
+                        if (!wmRet.memberName.empty()) {
+                            const std::string retClsWM =
+                                getClassMethodReturnType(outerInfo.className, wmRet.memberName);
+                            if (!retClsWM.empty()) withInfo.className = cIdent(retClsWM);
+                        }
+                    }
+                    if (withInfo.className.empty()) withInfo.className = outerInfo.className;
                     if (!withInfo.className.empty()) {
                         tempType = "vb6_cls_" + withInfo.className + "*";
                     }
@@ -128,6 +141,22 @@ void CCodeGen::visit(WithStmt& node) {
                         withInfo.ctrlOrigName = "vb6_hwnd_" + cIdent(objNameLower);
                     }
                     tempType = "HWND";
+                    // Fix <vbeclipse>: 工程内 UserControl 实例作 With 目标 (`With ucPerspective1`)
+                    // —— 该名字是 .ctl 类的**实例**, 体内成员是类成员 (Sub/Property), 不是
+                    // HWND 控件的 COM 属性. 此前一律 tempType=HWND → 体内 `WithEvents` 式
+                    // 调用走 `vb6_ComCall(vb6_hwnd_ucPerspective1, L"AddView", ...)`, 拿 HWND
+                    // 当 IDispatch 用 → RTL 报 "method AddView not found" (frmMain.Form_Load
+                    // 建 perspective 全失败 → ucPerspective.Perspectives 恒为空 →
+                    // InitializeAll 里 List.Item(0) 空表越界 → 0xC0000005 读 0xc).
+                    // 与 cgen_expr_member_form_builtin.inc Fix 112 同口径: 成员交给
+                    // resolveClassMemberCall 解析, this 取 vb6_UC_InstanceOf(hwnd).
+                    auto itUCw = knownUserControlCtrlVars_.find(objNameLower);
+                    if (itUCw != knownUserControlCtrlVars_.end()) {
+                        withInfo.kind = WithObjKind::ClassInstance;
+                        withInfo.className = cIdent(itUCw->second);
+                        withInfo.ctrlOrigName = withInfo.className;
+                        tempType = "vb6_cls_" + withInfo.className + "*";
+                    }
                 }
             }
 
@@ -152,6 +181,37 @@ void CCodeGen::visit(WithStmt& node) {
             if (withInfo.kind == WithObjKind::Unknown) {
                 if (knownTypedComVars_.count(objNameLower) && !knownUdtVars_.count(objNameLower)) {
                     withInfo.kind = WithObjKind::COMObject;
+                }
+            }
+
+            // Fix <vbeclipse>: `With <本函数返回值变量>` —— VB 允许直接 With 当前函数的
+            // 返回值变量 (名字 = 函数名)。实证 Perspective.cls:
+            //     Public Function AddFolder(...) As Folder
+            //        Set AddFolder = New Folder
+            //        With AddFolder
+            //           .FolderId = FolderId : .Ratio = ... : .RefId = ... : .Relationship = ...
+            //        End With
+            // 该变量在 C 侧叫 `vb6_ret_AddFolder`, 而"按名登记类型"的集合 (Fix 088c 等)
+            // 记的是**C 名**; 这里按**裸 VB 名**查 knownClassVars_ 必然落空 → 接收者被
+            // 降级成 COMObject → `.FolderId = …` 生成
+            // `vb6_ComSetProp((void*)vb6_cls_Folder*, L"FolderId", …)`, RTL 侧
+            // vb6_ComIsDispatchable 拒绝裸结构体 → "property not found" **静默丢弃**
+            // → perspective 里一个 folder 都没有 → 后面 Err.Raise 1
+            // ("No perspective found!") → 未处理 → ExitProcess(1)。
+            // 用 currentReturnCType_ (Fix 054 已为 With-UDT 保存的返回类型 C 名) 判类:
+            // 它有 "vb6_cls_" 前缀就说明返回值是**原生工程类实例**。天然只在本过程内有效
+            // —— 返回值变量本就是过程局部的, 不该去污染模块级集合 (那会让同名的
+            // 模块变量/别的过程被误判)。
+            if (withInfo.kind == WithObjKind::Unknown && currentProc_
+                && !currentProc_->name.empty()
+                && currentReturnCType_.rfind("vb6_cls_", 0) == 0
+                && Symbol::toLower(objNameLower) == Symbol::toLower(currentProc_->name)) {
+                std::string retClsVbe = currentReturnCType_.substr(8);
+                if (!retClsVbe.empty() && retClsVbe.back() == '*') retClsVbe.pop_back();
+                if (!retClsVbe.empty()) {
+                    withInfo.kind = WithObjKind::ClassInstance;
+                    withInfo.className = cIdent(retClsVbe);
+                    tempType = "vb6_cls_" + withInfo.className + "*";
                 }
             }
 
@@ -485,6 +545,22 @@ void CCodeGen::visit(WithStmt& node) {
     emitExpr(*node.object);
 
     suppressDefaultProp_ = prevSuppress;
+
+    // Fix <vbeclipse>: 工程内 UserControl 实例作 With 目标时, 目标表达式要取**宿主窗口
+    // 反查到的实例指针** (vb6_UC_InstanceOf(hwnd)), 而不是裸 HWND 槽 —— 否则 tempType
+    // vb6_cls_<UC>* 被灌入一个 HWND, 体内成员调用等于拿 HWND 当结构体解引用.
+    // (与 cgen_expr_member_form_builtin.inc:264 的 thisArg 同构.)
+    if (withInfo.kind == WithObjKind::ClassInstance
+        && node.object->kind == ASTNodeKind::IdentifierExpr) {
+        auto& idW = static_cast<IdentifierExpr&>(*node.object);
+        auto itUCw2 = knownUserControlCtrlVars_.find(Symbol::toLower(idW.name));
+        if (itUCw2 != knownUserControlCtrlVars_.end()) {
+            // emitExpr 对 FormControl 标识符不发 HWND 槽 (那由 FormControl 专用发射分支
+            // 用 ctrlOrigName 拼), 这里必须显式取 hwnd 实参再反查实例.
+            lastExpr_ = "(vb6_cls_" + cIdent(itUCw2->second) + "*)vb6_UC_InstanceOf("
+                      + makeCtrlHwndArg(Symbol::toLower(idW.name), withInfo.ctrlType) + ")";
+        }
+    }
 
     // Fix 110c: With <UDT 数组元素 / UDT 嵌套字段> — 形如 m_Serie(i).Rects(j)、
     // m_Item(i).LegendRect 等. 这类目标在 C 里是**结构体值**, 若 tempType 仍是

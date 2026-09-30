@@ -222,9 +222,20 @@ void CCodeGen::emitLocalDeclCode(LocalDeclStmt& node) {
                 if (comSym && (comSym->kind == SymbolKind::ComClass || comSym->kind == SymbolKind::ComInterface)) {
                     std::string lower = var.name;
                     std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+                    // Fix <vbeclipse>-2: 本工程有同名类模块 ⇒ 局部变量是**原生**工程类实例
+                    // (VB6: 工程内定义优先于引用库; 类型库自动加载注进来的内建 coclass
+                    // isExternal=false, 不能当外部 OCX 处理). 判据 = projectClassNameOf,
+                    // 与 mapTypeRef / cgen_decl_func.cpp 同源.
+                    const std::string projClsLoc = projectClassNameOf(simple.name);
+                    if (!projClsLoc.empty()) {
+                        knownClassVars_[lower] = projClsLoc;
+                        knownObjectVars_.erase(lower);
+                        if (var.isNew) knownNewVars_[lower] = cIdent(projClsLoc);
+                    } else {
                     knownTypedComVars_[lower] = comSym;
                     // 从后期绑定集合中移除 (优先前期绑定)
                     knownObjectVars_.erase(lower);
+                    }
                 }
             }
 

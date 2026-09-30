@@ -211,6 +211,29 @@ std::string CCodeGen::mapTypeRef(ASTNode* typeRef) {
             }
             // P6.3: 检查是否是COM coclass/接口 → 映射为接口指针类型 (前期绑定)
             if (clsSym && (clsSym->kind == SymbolKind::ComClass || clsSym->kind == SymbolKind::ComInterface)) {
+                // Fix <vbeclipse>-2: 判据是"本工程有没有同名类模块", 不是 isExternal.
+                //
+                // --emit-c 的类型库**自动加载**会把 Shell32 的 coclass `Folder`(默认接口
+                // `IFolder`)、ScrRun 的 `Dictionary`/`FileSystemObject` 等注进**每一个**
+                // 模块的符号表, 且这些内建符号 `isExternal == false`(只置了 isBuiltin).
+                // vbeclipse 的 Folder.cls 与它同名 —— 于是在 ucPerspective.ctl 的模块表里
+                // `lookupTypeSymbol("Folder")` 命中**内建 ComClass**, 工程自己的 Class 符号
+                // 并不在这一张表里. VB6 规则是"工程内定义优先于引用库", 所以此处必须按
+                // projectClassNameOf 判: 有同名工程类 ⇒ 该名字在本模块就是原生
+                // vb6_cls_<Name> 实例.
+                // 若误判成 vb6_ComIface_IFolder* 走 COM, 生成的就是
+                //   `vb6_cls_List* w = (vb6_cls_List*)(*Folder);`  (ucPerspective.c)
+                // —— 把原生 vb6_cls_Folder* 当 IDispatch/List 解引用, 运行期 0xC0000005
+                // (vb6_List_Item 读 NULL+0xc).
+                // 限定名 (Scripting.Folder) 保留点号 → projectClassNameOf 查不中 → 走 COM,
+                // 不会把真·外部同名 coclass 也拉成原生.
+                {
+                    const std::string projCls = projectClassNameOf(typeName);
+                    if (!projCls.empty()) {
+                        usedClassTypes_.insert(cIdent(projCls));
+                        return "vb6_cls_" + cIdent(projCls) + "*";
+                    }
+                }
                 // 生成类型化接口指针: vb6_ComIface_<InterfaceName>*
                 // 运行时通过vb6_ComQI获取, vtable直接调用
                 std::string ifaceName = clsSym->name;
